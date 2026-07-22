@@ -137,6 +137,67 @@ describe("TelegramOutbox", () => {
     });
   });
 
+  it("coalesces one turn's operation updates into one editable message", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.setTurnReplyTarget("thread-1", "turn-1", 42);
+    outbox.handle(operationUpdated("command-1", "running", "command", "TOKEN=[REDACTED] git status --short"));
+    await vi.advanceTimersByTimeAsync(750);
+    await settle();
+
+    expect(api.sent).toEqual(["操作过程\n\n• 运行命令\n  TOKEN=[已隐藏] git status --short"]);
+    expect(api.sendOptions[0]).toMatchObject({
+      reply_parameters: { message_id: 42 },
+    });
+
+    outbox.handle({
+      ...operationUpdated("command-1", "completed", "command", "TOKEN=[REDACTED] git status --short"),
+      operation: {
+        ...operationUpdated("command-1", "completed", "command", "TOKEN=[REDACTED] git status --short").operation,
+        durationMs: 125,
+        exitCode: 0,
+      },
+    });
+    await vi.advanceTimersByTimeAsync(750);
+    await settle();
+
+    expect(api.edits.at(-1)).toContain("✓ 运行命令 · 退出码 0 · 125 毫秒");
+
+    outbox.handle(operationUpdated("file-1", "completed", "fileChange", "README.md"));
+    outbox.handle(turnCompleted());
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toHaveLength(1);
+    expect(api.edits.at(-1)).toContain("✓ 修改文件\n  README.md");
+  });
+
+  it("bounds long operation histories and keeps the most recent records", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    for (let index = 0; index < 101; index += 1) {
+      outbox.handle(operationUpdated(
+        `command-${index}`,
+        index === 100 ? "failed" : "completed",
+        "command",
+        `命令 ${index}`,
+      ));
+    }
+    await vi.advanceTimersByTimeAsync(750);
+    await settle();
+
+    expect(api.sent).toHaveLength(1);
+    expect(api.sent[0]).toContain("已省略较早的 81 项操作");
+    expect(api.sent[0]).not.toContain("命令 0\n");
+    expect(api.sent[0]).toContain("✗ 运行命令\n  命令 100");
+
+    await outbox.close();
+  });
+
   it("replies to the Telegram message that started the turn", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();
@@ -256,6 +317,26 @@ function textCompleted(
     itemId,
     text,
     ...(phase ? { phase } : {}),
+  };
+}
+
+function operationUpdated(
+  itemId: string,
+  status: "running" | "completed" | "failed" | "declined",
+  kind: Extract<OutputEvent, { type: "operation.updated" }>["operation"]["kind"],
+  detail?: string,
+): Extract<OutputEvent, { type: "operation.updated" }> {
+  return {
+    type: "operation.updated",
+    target,
+    threadId: "thread-1",
+    turnId: "turn-1",
+    operation: {
+      itemId,
+      status,
+      kind,
+      ...(detail ? { detail } : {}),
+    },
   };
 }
 

@@ -168,6 +168,85 @@ describe("ConversationCore", () => {
       message: "连接已断开",
     });
   });
+
+  it("publishes sanitized operation snapshots for command and file items", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, conversationId: "100" };
+    const router = {
+      allBindings: () => [],
+      targetForThread: () => target,
+    } satisfies ConversationRoutingPort;
+    const core = new ConversationCore(router, output);
+    const startedCommand = {
+      type: "commandExecution",
+      id: "command-1",
+      command: "TELEGRAM_BOT_TOKEN=super-secret git status --short",
+      status: "inProgress",
+      durationMs: null,
+      exitCode: null,
+    };
+
+    core.handle({
+      method: "item/started",
+      params: { threadId: "thread-1", turnId: "turn-1", item: startedCommand },
+    });
+    core.handle({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: { ...startedCommand, status: "completed", durationMs: 125, exitCode: 0 },
+      },
+    });
+    core.handle({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "fileChange",
+          id: "file-1",
+          status: "completed",
+          changes: [
+            { path: "gateway/src/main.ts" },
+            { path: "README.md" },
+          ],
+        },
+      },
+    });
+    await output.close();
+
+    const operations = events.filter((event) => event.type === "operation.updated");
+    expect(operations).toEqual([
+      expect.objectContaining({
+        operation: expect.objectContaining({
+          itemId: "command-1",
+          status: "running",
+          detail: "TELEGRAM_BOT_TOKEN=[REDACTED] git status --short",
+        }),
+      }),
+      expect.objectContaining({
+        operation: expect.objectContaining({
+          itemId: "command-1",
+          status: "completed",
+          durationMs: 125,
+          exitCode: 0,
+        }),
+      }),
+      expect.objectContaining({
+        operation: expect.objectContaining({
+          itemId: "file-1",
+          kind: "fileChange",
+          detail: "gateway/src/main.ts、README.md",
+        }),
+      }),
+    ]);
+    expect(JSON.stringify(operations)).not.toContain("super-secret");
+  });
 });
 
 function breakdown(totalTokens: number) {

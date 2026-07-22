@@ -7,6 +7,7 @@ import {
   isCriticalOutputEvent,
 } from "./events.js";
 import type { ConversationRoutingPort } from "./routing-port.js";
+import { parseOperationUpdate } from "./operation.js";
 
 export interface CodexNotification {
   method: string;
@@ -150,6 +151,20 @@ export class ConversationCore {
         if (threadId && turnId && item?.type === "userMessage") {
           this.publishUserMessage(threadId, turnId, item);
           return;
+        }
+        if (threadId && turnId && item) {
+          const operation = parseOperationUpdate(
+            item,
+            notification.method === "item/started" ? "started" : "completed",
+          );
+          if (operation) {
+            this.publishForThread(threadId, {
+              type: "operation.updated",
+              threadId,
+              turnId,
+              operation,
+            });
+          }
         }
         return;
       }
