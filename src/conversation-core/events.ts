@@ -12,7 +12,7 @@ export interface ConversationTarget {
   conversationId: string;
 }
 
-export const gatewayUserMessageClientIdPrefix = "codex_tg_gateway:";
+export const gatewayUserMessageClientIdPrefix = "codex_connect_gateway:";
 
 export type OperationStatus = "running" | "completed" | "failed" | "declined";
 export type OperationKind =

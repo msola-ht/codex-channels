@@ -4,8 +4,10 @@ set -euo pipefail
 action="${1:-status}"
 user_domain="gui/$(id -u)"
 agents_dir="$HOME/Library/LaunchAgents"
-app_label="com.msola.codex-app-server"
-gateway_label="com.msola.codex-gateway"
+app_label="com.hegenai.codex-app-server"
+gateway_label="com.hegenai.codex-gateway"
+legacy_app_label="com.msola.codex-app-server"
+legacy_gateway_label="com.msola.codex-gateway"
 
 job_loaded() {
   launchctl print "$user_domain/$1" >/dev/null 2>&1
@@ -56,7 +58,23 @@ start_job() {
   launchctl kickstart -k "$user_domain/$label"
 }
 
+remove_legacy_jobs() {
+  stop_job "$legacy_gateway_label"
+  stop_job "$legacy_app_label"
+  /bin/rm -f \
+    "$agents_dir/$legacy_gateway_label.plist" \
+    "$agents_dir/$legacy_app_label.plist"
+}
+
 case "$action" in
+  install)
+    stop_job "$gateway_label"
+    stop_job "$app_label"
+    remove_legacy_jobs
+    start_job "$app_label" "$agents_dir/$app_label.plist"
+    start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
+    print "Codex App Server 与 Gateway 已安装并启动。"
+    ;;
   start)
     start_job "$app_label" "$agents_dir/$app_label.plist"
     start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
@@ -65,11 +83,14 @@ case "$action" in
   stop)
     stop_job "$gateway_label"
     stop_job "$app_label"
+    stop_job "$legacy_gateway_label"
+    stop_job "$legacy_app_label"
     print "Codex App Server 与 Gateway 已停止。"
     ;;
   uninstall)
     stop_job "$gateway_label"
     stop_job "$app_label"
+    remove_legacy_jobs
     /bin/rm -f "$agents_dir/$gateway_label.plist" "$agents_dir/$app_label.plist"
     print "Codex App Server 与 Gateway launchd 服务已卸载。"
     print "用户配置与运行数据保留在 ~/.codex-connect。"
@@ -82,9 +103,11 @@ case "$action" in
   status)
     launchctl print "$user_domain/$app_label" 2>/dev/null || true
     launchctl print "$user_domain/$gateway_label" 2>/dev/null || true
+    launchctl print "$user_domain/$legacy_app_label" 2>/dev/null || true
+    launchctl print "$user_domain/$legacy_gateway_label" 2>/dev/null || true
     ;;
   *)
-    print -u2 "用法：$0 {start|stop|restart|status|uninstall}"
+    print -u2 "用法：$0 {install|start|stop|restart|status|uninstall}"
     exit 2
     ;;
 esac

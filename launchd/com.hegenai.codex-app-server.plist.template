@@ -3,23 +3,18 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.msola.codex-gateway</string>
+  <string>com.hegenai.codex-app-server</string>
   <key>ProgramArguments</key>
   <array>
-    <string>__NODE_BINARY__</string>
-    <string>__CLI_ENTRY__</string>
-    <string>gateway</string>
+    <string>__CODEX_BINARY__</string>
+    <string>app-server</string>
+    <string>--listen</string>
+    <string>unix://__SOCKET_PATH__</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>__CONFIG_DIR__</string>
+  <string>__WORKDIR__</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>CODEX_CONNECT_HOME</key>
-    <string>__CONFIG_DIR__</string>
-    <key>CODEX_CONNECT_ENV_FILE</key>
-    <string>__ENV_PATH__</string>
-    <key>CODEX_BINARY</key>
-    <string>__CODEX_BINARY__</string>
     <key>PATH</key>
     <string>__LAUNCHD_PATH__</string>
     <key>HTTP_PROXY</key>
@@ -46,8 +41,8 @@
   <key>ThrottleInterval</key>
   <integer>5</integer>
   <key>StandardOutPath</key>
-  <string>__RUNTIME_DIR__/gateway.log</string>
+  <string>__RUNTIME_DIR__/codex-app-server.log</string>
   <key>StandardErrorPath</key>
-  <string>__RUNTIME_DIR__/gateway.error.log</string>
+  <string>__RUNTIME_DIR__/codex-app-server.error.log</string>
 </dict>
 </plist>

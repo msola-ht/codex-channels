@@ -119,7 +119,7 @@ export class CodexAppServerClient {
         cwd,
         sandbox: this.defaults.sandbox,
         approvalPolicy: "on-request",
-        serviceName: "codex_tg_gateway",
+        serviceName: "codex_connect_gateway",
         ...(this.defaults.model ? { model: this.defaults.model } : {}),
       },
       { retryOverload: false },

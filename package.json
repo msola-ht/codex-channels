@@ -1,7 +1,22 @@
 {
   "name": "@hegenai/codexc",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Telegram gateway for a shared Codex App Server",
+  "keywords": [
+    "codex",
+    "telegram",
+    "gateway",
+    "cli"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/msola-ht/codex-channels.git"
+  },
+  "homepage": "https://github.com/msola-ht/codex-channels#readme",
+  "bugs": {
+    "url": "https://github.com/msola-ht/codex-channels/issues"
+  },
   "type": "module",
   "publishConfig": {
     "access": "public"
@@ -17,6 +32,7 @@
     "launchd/",
     "scripts/",
     ".env.example",
+    "LICENSE",
     "README.md"
   ],
   "engines": {
@@ -26,18 +42,21 @@
     "prebuild": "node scripts/clean-dist.mjs",
     "build": "tsc -p tsconfig.build.json",
     "prepare": "node scripts/prepare-package.mjs",
+    "version": "node scripts/sync-gateway-version.mjs",
     "check": "tsc -p tsconfig.json --noEmit && node scripts/check-gateway-version.mjs",
     "dev": "tsx src/main.ts",
     "dev:all": "node scripts/dev-all.mjs",
     "start": "node dist/main.js",
     "test": "vitest run --config vitest.config.ts",
+    "test:package": "npm run build && node scripts/smoke-package.mjs",
     "test:watch": "vitest --config vitest.config.ts",
     "protocol:generate": "node scripts/generate-protocol.mjs",
     "protocol:check": "node scripts/check-protocol.mjs",
+    "release:check": "node scripts/check-release-tag.mjs",
     "launchd:install": "node scripts/install-launchd.mjs",
     "remote": "node scripts/codex-remote.mjs",
     "workspace:add": "node scripts/workspace-add.mjs",
-    "service:setup": "npm run build && npm run launchd:install && zsh scripts/launchd-control.sh start",
+    "service:setup": "npm run build && npm run launchd:install && zsh scripts/launchd-control.sh install",
     "service:start": "zsh scripts/launchd-control.sh start",
     "service:stop": "zsh scripts/launchd-control.sh stop",
     "service:uninstall": "zsh scripts/launchd-control.sh uninstall",

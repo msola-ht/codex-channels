@@ -38,7 +38,7 @@ describe("ConversationService model selection", () => {
     expect(startTurn).toHaveBeenCalledWith(
       "thread-1",
       [{ type: "text", text: "测试输入", text_elements: [] }],
-      expect.stringMatching(/^codex_tg_gateway:/),
+      expect.stringMatching(/^codex_connect_gateway:/),
       "/workspace/main",
       { model: "gpt-selected", effort: "high" },
     );
@@ -90,7 +90,7 @@ describe("ConversationService model selection", () => {
         { type: "text", text: "补充图片", text_elements: [] },
         { type: "localImage", path: "/private/uploads/extra.jpg" },
       ],
-      expect.stringMatching(/^codex_tg_gateway:/),
+      expect.stringMatching(/^codex_connect_gateway:/),
     );
     expect(submission.steered).toBe(true);
   });

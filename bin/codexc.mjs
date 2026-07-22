@@ -52,6 +52,9 @@ try {
     case "config":
       showConfig(args);
       break;
+    case "doctor":
+      runDoctor(args);
+      break;
     default:
       throw new Error(`未知命令：${command}\n运行 codexc --help 查看用法`);
   }
@@ -122,8 +125,7 @@ function service(args) {
   }
   if (action === "install") {
     runScript("scripts/install-launchd.mjs", []);
-    run("/bin/zsh", [join(packageDir, "scripts/launchd-control.sh"), "stop"], configuredEnvironment().environment);
-    run("/bin/zsh", [join(packageDir, "scripts/launchd-control.sh"), "start"], configuredEnvironment().environment);
+    run("/bin/zsh", [join(packageDir, "scripts/launchd-control.sh"), "install"], configuredEnvironment().environment);
     return;
   }
   run("/bin/zsh", [join(packageDir, "scripts/launchd-control.sh"), action], configuredEnvironment().environment);
@@ -137,6 +139,23 @@ function showConfig(args) {
     : { dataDir: userDataDir(), envPath: join(userDataDir(), ".env") };
   console.log(`用户目录：${runtime.dataDir}`);
   console.log(`配置文件：${runtime.envPath}`);
+}
+
+function runDoctor(args) {
+  requireNoArguments(args, "用法：codexc doctor");
+  const result = spawnSync(process.execPath, [join(packageDir, "scripts/doctor.mjs")], {
+    stdio: "inherit",
+    env: process.env,
+    cwd: process.cwd(),
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.signal) {
+    process.kill(process.pid, result.signal);
+    return;
+  }
+  process.exitCode = result.status ?? 1;
 }
 
 function runScript(relativePath, args, additionalEnvironment = {}, workingDirectory) {
@@ -229,6 +248,7 @@ function printHelp() {
   service restart              重启 Gateway，保持 App Server 运行
   service status               查看 launchd 服务状态
   config                       显示用户配置路径
+  doctor                       检查安装、配置、Codex 与服务连通性
   version                      显示版本
 `);
 }

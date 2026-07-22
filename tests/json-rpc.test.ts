@@ -159,6 +159,19 @@ describe("JsonRpcClient", () => {
 
     expect(initialized.platformOs).toBe("macos");
     expect(transport.sent.map((message) => message.method)).toEqual(["initialize", "initialized"]);
+    expect(transport.sent[0]).toMatchObject({
+      params: {
+        clientInfo: {
+          name: "codex_connect_gateway",
+          title: "Codex Connect Gateway",
+        },
+        capabilities: {
+          experimentalApi: false,
+          requestAttestation: false,
+          optOutNotificationMethods: null,
+        },
+      },
+    });
     expect(methods).toEqual(["warning"]);
   });
 
@@ -333,7 +346,7 @@ describe("JsonRpcClient", () => {
         { type: "text", text: "测试输入", text_elements: [] },
         { type: "localImage", path: "/tmp/screenshot.png" },
       ],
-      "codex_tg_gateway:request-1",
+      "codex_connect_gateway:request-1",
       "/tmp/project",
       { model: "gpt-selected", effort: "high" },
     );
@@ -341,12 +354,12 @@ describe("JsonRpcClient", () => {
       "thread-1",
       "turn-1",
       [{ type: "text", text: "补充输入", text_elements: [] }],
-      "codex_tg_gateway:request-2",
+      "codex_connect_gateway:request-2",
     );
 
     expect(transport.sent.find((message) => message.method === "turn/start")?.params)
       .toMatchObject({
-        clientUserMessageId: "codex_tg_gateway:request-1",
+        clientUserMessageId: "codex_connect_gateway:request-1",
         input: [
           { type: "text", text: "测试输入", text_elements: [] },
           { type: "localImage", path: "/tmp/screenshot.png" },
@@ -356,7 +369,7 @@ describe("JsonRpcClient", () => {
         effort: "high",
       });
     expect(transport.sent.find((message) => message.method === "turn/steer")?.params)
-      .toMatchObject({ clientUserMessageId: "codex_tg_gateway:request-2" });
+      .toMatchObject({ clientUserMessageId: "codex_connect_gateway:request-2" });
   });
 
   it("uses CODEX_MODEL only when starting a new thread", async () => {

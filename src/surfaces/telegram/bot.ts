@@ -108,7 +108,7 @@ export class TelegramSurface {
     this.bot.command(["start", "help"], (context) =>
       context.reply(
         [
-          "Codex Telegram Gateway",
+          "Codex Connect Gateway",
           "",
           "普通文本会发送到当前 Codex Thread。",
           "发送 PNG/JPEG 图片时，可在图片说明中写明需要 Codex 处理的任务。",

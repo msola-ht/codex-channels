@@ -82,8 +82,8 @@ macOS launchd
 App Server 和 Gateway 分别由 launchd 管理：
 
 ```text
-com.msola.codex-app-server
-com.msola.codex-gateway
+com.hegenai.codex-app-server
+com.hegenai.codex-gateway
 ```
 
 要求：

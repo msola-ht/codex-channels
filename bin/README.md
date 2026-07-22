@@ -4,7 +4,7 @@
 
 ## 文件
 
-- `codexc.mjs`：解析顶层命令，并把工作转交给 Gateway 入口或 `scripts/` 中的管理脚本。
+- `codexc.mjs`：解析顶层命令，并把工作转交给 Gateway 入口或 `scripts/` 中的管理脚本；`doctor` 会执行安装、配置和服务连通性诊断。
 
 ## 命令范围
 

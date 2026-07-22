@@ -85,9 +85,14 @@ export class JsonRpcClient {
         "initialize",
         {
           clientInfo: {
-            name: "codex_tg_gateway",
-            title: "Codex Telegram Gateway",
+            name: "codex_connect_gateway",
+            title: "Codex Connect Gateway",
             version: gatewayMetadata.version,
+          },
+          capabilities: {
+            experimentalApi: false,
+            requestAttestation: false,
+            optOutNotificationMethods: null,
           },
         },
         { retryOverload: false },

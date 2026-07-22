@@ -1,16 +1,20 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFile, execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { promisify } from "node:util";
 
 import { parse } from "dotenv";
 import { afterEach, describe, expect, it } from "vitest";
+import { WebSocketServer } from "ws";
 
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { readWorkspaceConfig } from "../scripts/workspace-config.mjs";
 
 const temporaryDirectories: string[] = [];
 const cli = resolve("bin/codexc.mjs");
+const execFileAsync = promisify(execFile);
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -186,5 +190,72 @@ describe("codexc CLI", () => {
 
     expect(output).toContain(`用户目录：${join(root, "profile")}`);
     expect(output).toContain(`配置文件：${envPath}`);
+  });
+
+  it("diagnoses configuration and a real Unix WebSocket without exposing the Telegram token", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    mkdirSync(workspace);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_ENV_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+
+    const fakeCodex = join(root, "codex");
+    writeFileSync(fakeCodex, "#!/bin/sh\nprintf 'codex-cli 0.145.0\\n'\n");
+    chmodSync(fakeCodex, 0o700);
+    const envPath = join(home, ".env");
+    const socketPath = join(root, "app.sock");
+    let initializedReceived = false;
+    const secret = "123456:test-secret-token";
+    writeFileSync(
+      envPath,
+      readFileSync(envPath, "utf8")
+        .replace("TELEGRAM_BOT_TOKEN=", `TELEGRAM_BOT_TOKEN=${secret}`)
+        .replace("TELEGRAM_ALLOWED_USER_IDS=", "TELEGRAM_ALLOWED_USER_IDS=123456")
+        .replace("CODEX_BINARY=codex", `CODEX_BINARY=${fakeCodex}`)
+        .replace(/^CODEX_SOCKET_PATH=.*$/m, `CODEX_SOCKET_PATH=${socketPath}`),
+    );
+
+    const server = createServer();
+    const webSocketServer = new WebSocketServer({ server });
+    webSocketServer.on("connection", (client) => {
+      client.on("message", (data) => {
+        const message = JSON.parse(data.toString());
+        if (message.method === "initialize") {
+          client.send(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { platformFamily: "unix", platformOs: "macos" } }));
+        }
+        if (message.method === "initialized") {
+          initializedReceived = true;
+        }
+      });
+    });
+    await new Promise<void>((resolveListen, rejectListen) => {
+      server.once("error", rejectListen);
+      server.listen(socketPath, resolveListen);
+    });
+
+    try {
+      const { stdout } = await execFileAsync(process.execPath, [cli, "doctor"], {
+        cwd: workspace,
+        env: environment,
+        encoding: "utf8",
+      });
+      expect(stdout).toContain("[通过] Codex CLI：codex-cli 0.145.0");
+      expect(stdout).toContain("[通过] Codex App Server：initialize 握手通过");
+      expect(stdout).toContain("诊断通过");
+      expect(stdout).not.toContain(secret);
+      expect(initializedReceived).toBe(true);
+    } finally {
+      for (const client of webSocketServer.clients) {
+        client.terminate();
+      }
+      await new Promise<void>((resolveClose) => webSocketServer.close(() => resolveClose()));
+      await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+    }
   });
 });
