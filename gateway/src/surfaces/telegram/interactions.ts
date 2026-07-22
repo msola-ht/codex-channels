@@ -18,6 +18,16 @@ interface PendingInteraction {
   messageText: string;
 }
 
+export interface TelegramInteractionQueue {
+  prepareInteraction(chatId: string): void;
+  runOrdered<T>(chatId: string, run: () => Promise<T>): Promise<T>;
+}
+
+const directInteractionQueue: TelegramInteractionQueue = {
+  prepareInteraction: () => undefined,
+  runOrdered: (_chatId, run) => run(),
+};
+
 export class TelegramInteractionPort implements InteractionPort {
   private readonly pendingByToken = new Map<string, PendingInteraction>();
   private readonly tokenByRequest = new Map<string, string>();
@@ -30,6 +40,7 @@ export class TelegramInteractionPort implements InteractionPort {
     private readonly bot: Bot,
     private readonly logger: Logger,
     private readonly executor = new TelegramApiExecutor(logger),
+    private readonly queue: TelegramInteractionQueue = directInteractionQueue,
   ) {
     bot.callbackQuery(/^ix:/, (context) => this.onCallback(context));
   }
@@ -44,17 +55,22 @@ export class TelegramInteractionPort implements InteractionPort {
     const chunks = splitTelegramText(formatted, 3_600);
     this.tokenByRequest.set(request.requestId, token);
     let message: Awaited<ReturnType<typeof this.bot.api.sendMessage>> | undefined;
+    this.queue.prepareInteraction(target.conversationId);
     try {
-      for (const [index, chunk] of chunks.entries()) {
-        const isLast = index === chunks.length - 1;
-        const options = isLast
-          ? interactionOptions(request, keyboard)
-          : {};
-        message = await this.executor.call(
-          { chatId: target.conversationId, operation: "sendMessage", critical: true },
-          () => this.bot.api.sendMessage(target.conversationId, chunk, options),
-        );
-      }
+      message = await this.queue.runOrdered(target.conversationId, async () => {
+        let sent: Awaited<ReturnType<typeof this.bot.api.sendMessage>> | undefined;
+        for (const [index, chunk] of chunks.entries()) {
+          const isLast = index === chunks.length - 1;
+          const options = isLast
+            ? interactionOptions(request, keyboard)
+            : {};
+          sent = await this.executor.call(
+            { chatId: target.conversationId, operation: "sendMessage", critical: true },
+            () => this.bot.api.sendMessage(target.conversationId, chunk, options),
+          );
+        }
+        return sent;
+      });
     } catch (error) {
       if (this.tokenByRequest.get(request.requestId) === token) {
         this.tokenByRequest.delete(request.requestId);
@@ -126,11 +142,14 @@ export class TelegramInteractionPort implements InteractionPort {
         const content = JSON.parse(text) as unknown;
         this.finish(token!, { type: "elicitation", action: "accept", content }, "已提交表单");
       } catch {
-        await this.executor.call(
-          { chatId: pending.target.conversationId, operation: "sendMessage", critical: true },
-          () => context.reply("表单必须回复为有效 JSON 对象；发送 /cancel 取消。", {
-            reply_parameters: { message_id: pending.messageId },
-          }),
+        await this.queue.runOrdered(
+          pending.target.conversationId,
+          () => this.executor.call(
+            { chatId: pending.target.conversationId, operation: "sendMessage", critical: true },
+            () => context.reply("表单必须回复为有效 JSON 对象；发送 /cancel 取消。", {
+              reply_parameters: { message_id: pending.messageId },
+            }),
+          ),
         );
       }
       return true;
@@ -229,14 +248,16 @@ export class TelegramInteractionPort implements InteractionPort {
       }
     }
     pending.resolve(decision);
-    const statusUpdate = this.executor.call(
-      { chatId: pending.target.conversationId, operation: "editMessageText", critical: true },
-      () => this.bot.api.editMessageText(
-        pending.target.conversationId,
-        pending.messageId,
-        `${pending.messageText}\n\n处理结果：${outcome}`,
-        { reply_markup: { inline_keyboard: [] } },
-      ),
+    const statusUpdate = this.queue.runOrdered(pending.target.conversationId, () =>
+      this.executor.call(
+        { chatId: pending.target.conversationId, operation: "editMessageText", critical: true },
+        () => this.bot.api.editMessageText(
+          pending.target.conversationId,
+          pending.messageId,
+          `${pending.messageText}\n\n处理结果：${outcome}`,
+          { reply_markup: { inline_keyboard: [] } },
+        ),
+      )
     ).then(() => undefined).catch((error) => {
       this.logger.warn(
         {

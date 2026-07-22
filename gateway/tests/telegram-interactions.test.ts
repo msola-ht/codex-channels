@@ -3,7 +3,10 @@ import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 
 import type { InteractionRequest } from "../src/approval/types.js";
-import { TelegramInteractionPort } from "../src/surfaces/telegram/interactions.js";
+import {
+  TelegramInteractionPort,
+  type TelegramInteractionQueue,
+} from "../src/surfaces/telegram/interactions.js";
 
 const target = { surface: "telegram" as const, conversationId: "100" };
 
@@ -32,6 +35,41 @@ describe("TelegramInteractionPort", () => {
       expect.stringContaining("处理结果：已在其他客户端处理"),
       { reply_markup: { inline_keyboard: [] } },
     );
+  });
+
+  it("orders interaction sends and status updates through the shared queue", async () => {
+    const sendMessage = vi.fn(async () => ({ message_id: 8 }));
+    const editMessageText = vi.fn(async () => true as const);
+    const prepareInteraction = vi.fn();
+    let orderedRuns = 0;
+    const queue: TelegramInteractionQueue = {
+      prepareInteraction,
+      async runOrdered<T>(_chatId: string, run: () => Promise<T>): Promise<T> {
+        orderedRuns += 1;
+        return run();
+      },
+    };
+    const bot = {
+      callbackQuery: vi.fn(),
+      api: { sendMessage, editMessageText },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(
+      bot,
+      pino({ level: "silent" }),
+      undefined,
+      queue,
+    );
+
+    const decision = interactions.request(target, approvalRequest());
+    await settle();
+    expect(prepareInteraction).toHaveBeenCalledWith("100");
+    expect(orderedRuns).toBe(1);
+
+    interactions.resolved("request-1");
+    await expect(decision).resolves.toEqual({ type: "approval", approved: false });
+    await settle();
+    expect(orderedRuns).toBe(2);
+    expect(editMessageText).toHaveBeenCalledOnce();
   });
 
   it("requires user-input answers to reply to the ForceReply message", async () => {

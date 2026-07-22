@@ -55,8 +55,8 @@ export class TelegramSurface {
     });
     this.bot.use((context, next) => this.authorize(context, next));
     const apiExecutor = new TelegramApiExecutor(logger);
-    this.interactions = new TelegramInteractionPort(this.bot, logger, apiExecutor);
     this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor);
+    this.interactions = new TelegramInteractionPort(this.bot, logger, apiExecutor, this.outbox);
     this.lifecycle = new TelegramLifecycle(this.bot, logger, {
       messages: () => [...startupRecipients].map((chatId) => {
         const status = this.service.status({

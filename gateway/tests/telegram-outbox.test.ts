@@ -12,6 +12,7 @@ class FakeTelegramApi {
   readonly sent: string[] = [];
   readonly sendOptions: unknown[] = [];
   readonly edits: string[] = [];
+  readonly editOptions: unknown[] = [];
   private nextMessageId = 1;
 
   async sendChatAction(_chatId: string, action: string): Promise<true> {
@@ -25,8 +26,14 @@ class FakeTelegramApi {
     return { message_id: this.nextMessageId++ };
   }
 
-  async editMessageText(_chatId: string, _messageId: number, text: string): Promise<true> {
+  async editMessageText(
+    _chatId: string,
+    _messageId: number,
+    text: string,
+    options?: unknown,
+  ): Promise<true> {
     this.edits.push(text);
+    this.editOptions.push(options);
     return true;
   }
 
@@ -147,8 +154,12 @@ describe("TelegramOutbox", () => {
     await vi.advanceTimersByTimeAsync(750);
     await settle();
 
-    expect(api.sent).toEqual(["操作过程\n\n• 运行命令\n  TOKEN=[已隐藏] git status --short"]);
+    expect(api.sent).toEqual([
+      "<b>操作过程</b>\n\n💻 ⏳ <b>运行命令</b>\n" +
+      "<pre><code class=\"language-shell\">TOKEN=[已隐藏] git status --short</code></pre>",
+    ]);
     expect(api.sendOptions[0]).toMatchObject({
+      parse_mode: "HTML",
       reply_parameters: { message_id: 42 },
     });
 
@@ -163,7 +174,9 @@ describe("TelegramOutbox", () => {
     await vi.advanceTimersByTimeAsync(750);
     await settle();
 
-    expect(api.edits.at(-1)).toContain("✓ 运行命令 · 退出码 0 · 125 毫秒");
+    expect(api.edits.at(-1)).toContain("💻 <b>运行命令</b>");
+    expect(api.edits.at(-1)).not.toMatch(/退出码|毫秒|秒/);
+    expect(api.editOptions.at(-1)).toEqual({ parse_mode: "HTML" });
 
     outbox.handle(operationUpdated("file-1", "completed", "fileChange", "README.md"));
     outbox.handle(turnCompleted());
@@ -171,7 +184,67 @@ describe("TelegramOutbox", () => {
     await outbox.close();
 
     expect(api.sent).toHaveLength(1);
-    expect(api.edits.at(-1)).toContain("✓ 修改文件\n  README.md");
+    expect(api.edits.at(-1)).toContain("🔧 <b>修改文件</b>\n<blockquote>README.md</blockquote>");
+  });
+
+  it("groups identical consecutive operations and escapes Telegram HTML", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle(operationUpdated("file-1", "completed", "fileChange", "src/a<b>.ts & README.md"));
+    outbox.handle(operationUpdated("file-2", "completed", "fileChange", "src/a<b>.ts & README.md"));
+    outbox.handle(operationUpdated("tool-1", "completed", "dynamicTool", "browser.open"));
+    await vi.advanceTimersByTimeAsync(750);
+    await settle();
+
+    expect(api.sent[0]).toContain(
+      "🔧 <b>修改文件 (×2)</b>\n<blockquote>src/a&lt;b&gt;.ts &amp; README.md</blockquote>",
+    );
+    expect(api.sent[0]).toContain(
+      "🧰 <b>调用工具</b>\n<blockquote>browser.open</blockquote>",
+    );
+
+    await outbox.close();
+  });
+
+  it("segments operations around agent replies in chronological order", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle(operationUpdated("command-1", "completed", "command", "git status --short"));
+    outbox.handle(textCompleted("commentary", "第一段回复", "commentary"));
+    outbox.handle(operationUpdated("file-1", "completed", "fileChange", "README.md"));
+    outbox.handle(textCompleted("final", "第二段回复", "final_answer"));
+    outbox.handle(turnCompleted());
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toHaveLength(4);
+    expect(api.sent[0]).toContain("💻 <b>运行命令</b>");
+    expect(api.sent[1]).toBe("第一段回复");
+    expect(api.sent[2]).toContain("🔧 <b>修改文件</b>");
+    expect(api.sent[3]).toBe("第二段回复");
+  });
+
+  it("flushes pending replies before an ordered interaction", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle(textDelta("commentary", "批准前说明", "commentary"));
+    outbox.prepareInteraction(target.conversationId);
+    const sent = outbox.runOrdered(target.conversationId, async () => {
+      api.sent.push("审批卡片");
+      return 7;
+    });
+    await settle();
+
+    await expect(sent).resolves.toBe(7);
+    expect(api.sent).toEqual(["批准前说明", "审批卡片"]);
+
+    await outbox.close();
   });
 
   it("bounds long operation histories and keeps the most recent records", async () => {
@@ -193,7 +266,9 @@ describe("TelegramOutbox", () => {
     expect(api.sent).toHaveLength(1);
     expect(api.sent[0]).toContain("已省略较早的 81 项操作");
     expect(api.sent[0]).not.toContain("命令 0\n");
-    expect(api.sent[0]).toContain("✗ 运行命令\n  命令 100");
+    expect(api.sent[0]).toContain(
+      "💻 ❌ <b>运行命令</b>\n<pre><code class=\"language-shell\">命令 100</code></pre>",
+    );
 
     await outbox.close();
   });
