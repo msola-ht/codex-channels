@@ -1,9 +1,11 @@
 {
-  "name": "codex-connect-gateway",
+  "name": "@hegenai/codexc",
   "version": "0.2.0",
-  "private": true,
   "description": "Telegram gateway for a shared Codex App Server",
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "codexc": "bin/codexc.mjs",
     "codex-connect": "bin/codexc.mjs"

@@ -56,6 +56,12 @@ Gateway 已连接 App Server 且 Telegram Bot 完成鉴权后，会向 `TELEGRAM
 项目以 Node.js npm 包提供两个等价命令：短命令 `codexc` 和完整命令 `codex-connect`。本机从仓库安装：
 
 ```bash
+npm install -g @hegenai/codexc
+```
+
+源码开发时也可以安装当前工作区：
+
+```bash
 npm install -g .
 ```
 
