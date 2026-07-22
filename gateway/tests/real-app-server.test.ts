@@ -21,13 +21,24 @@ suite("real Codex App Server over Unix WebSocket", () => {
   const socketPath = join(testRuntime, "app-server.sock");
   let processHandle: ChildProcess;
   let client: CodexAppServerClient;
+  let appServerStderr = "";
 
   beforeAll(async () => {
     processHandle = spawn("codex", ["app-server", "--listen", `unix://${socketPath}`], {
       cwd: workdir,
       stdio: ["ignore", "ignore", "pipe"],
     });
-    await waitFor(() => existsSync(socketPath), 10_000);
+    processHandle.stderr?.setEncoding("utf8");
+    processHandle.stderr?.on("data", (chunk: string) => {
+      appServerStderr = appendDiagnostic(appServerStderr, chunk);
+    });
+    await waitFor(
+      () => existsSync(socketPath),
+      10_000,
+      () => processHandle.exitCode === null
+        ? undefined
+        : new Error(appServerFailure("Codex App Server 在创建 Unix Socket 前退出", appServerStderr)),
+    );
     const transport = new UnixWebSocketTransport(socketPath);
     client = new CodexAppServerClient(new JsonRpcClient(transport), {
       sandbox: "read-only",
@@ -63,6 +74,18 @@ suite("real Codex App Server over Unix WebSocket", () => {
     expect(models.length).toBeGreaterThan(0);
     expect(models.every((model) => model.supportedReasoningEfforts.length > 0)).toBe(true);
   });
+
+  it("starts and unsubscribes a temporary thread without running a model turn", async () => {
+    const started = await client.startThread(workdir);
+    try {
+      const unsubscribed = await client.unsubscribeThread(started.thread.id);
+
+      expect(started.thread.id).toBeTruthy();
+      expect(unsubscribed.status).toBe("unsubscribed");
+    } finally {
+      await client.deleteThread(started.thread.id);
+    }
+  });
 });
 
 suite("real Codex App Server over stdio", () => {
@@ -74,25 +97,62 @@ suite("real Codex App Server over stdio", () => {
 
   it("uses the same client contract to initialize and list threads", async () => {
     const workdir = process.cwd();
+    let appServerStderr = "";
     client = new CodexAppServerClient(
-      new JsonRpcClient(new StdioTransport({ codexBinary: "codex", cwd: workdir })),
+      new JsonRpcClient(new StdioTransport({
+        codexBinary: "codex",
+        cwd: workdir,
+        onStderr: (chunk) => {
+          appServerStderr = appendDiagnostic(appServerStderr, chunk);
+        },
+      })),
       { sandbox: "read-only" },
     );
 
-    const initialized = await client.connect();
-    const threads = await client.listThreads(workdir);
+    let initialized;
+    let threads;
+    try {
+      initialized = await client.connect();
+      threads = await client.listThreads(workdir);
+    } catch (error) {
+      throw new Error(
+        appServerFailure(
+          error instanceof Error ? error.message : String(error),
+          appServerStderr,
+        ),
+      );
+    }
 
     expect(initialized.platformOs).toBe("macos");
     expect(Array.isArray(threads)).toBe(true);
   }, 15_000);
 });
 
-async function waitFor(predicate: () => boolean, timeoutMs: number): Promise<void> {
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs: number,
+  failure?: () => Error | undefined,
+): Promise<void> {
   const started = Date.now();
   while (!predicate()) {
+    const currentFailure = failure?.();
+    if (currentFailure) {
+      throw currentFailure;
+    }
     if (Date.now() - started > timeoutMs) {
-      throw new Error("等待 Codex App Server Unix Socket 超时");
+      throw new Error("等待 Codex App Server Unix Socket 超时；请检查 App Server stderr");
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
+}
+
+function appendDiagnostic(current: string, chunk: string): string {
+  return `${current}${chunk}`.slice(-4_000);
+}
+
+function appServerFailure(message: string, stderr: string): string {
+  const sanitized = stderr
+    .replace(/(authorization|token|password|cookie)(\s*[:=]\s*)\S+/gi, "$1$2[REDACTED]")
+    .trim();
+  return sanitized ? `${message}\nApp Server stderr:\n${sanitized}` : message;
 }

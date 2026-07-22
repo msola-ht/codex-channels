@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { CodexAppServerClient } from "../src/codex-client/client.js";
+import { JsonRpcError } from "../src/codex-client/json-rpc.js";
 import type { Thread } from "../src/codex-protocol/index.js";
 import { MemoryBindingStore } from "../src/storage/memory-binding-store.js";
 import { SessionRouter } from "../src/session-routing/router.js";
@@ -105,6 +106,24 @@ describe("SessionRouter", () => {
 
     expect(failures).toEqual([]);
     expect(resumed).toEqual(["bound"]);
+    expect(router.current(target)?.threadId).toBe("bound");
+  });
+
+  it("keeps a binding when subscription restore fails transiently", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "bound", sessionId: "bound" });
+    const client = {
+      resumeThread: async () => {
+        throw new JsonRpcError(-32001, "Server overloaded; retry later.");
+      },
+    } as unknown as CodexAppServerClient;
+    const router = new SessionRouter(client, store, registry);
+
+    const failures = await router.restoreSubscriptions();
+
+    expect(failures).toEqual([
+      expect.objectContaining({ bindingRemoved: false }),
+    ]);
     expect(router.current(target)?.threadId).toBe("bound");
   });
 

@@ -240,7 +240,7 @@ npm run service:uninstall
 
 普通文本会发送给当前 Thread；若当前 Turn 正在执行，则通过 `turn/steer` 追加。首次消息会在当前 Workspace 的 `cli`、`vscode`（当前版本 Remote TUI 的来源标记）和 `appServer` 来源中选择最近的空闲且未绑定 Thread；不会自动接入活动 Thread。切换 Workspace 前必须等待当前 Turn 结束或先 `/stop`。
 
-当前 Workspace 选择与 Thread 绑定会写入本机 StateStore。Gateway 重启后会恢复有效绑定；如果对应 Thread 已删除或无法恢复，Thread 绑定会自动清理，但仍保留有效的 Workspace 选择。配置中已删除的 Workspace 会回退到默认 Workspace。
+当前 Workspace 选择与 Thread 绑定会写入本机 StateStore。Gateway 重启后会恢复有效绑定；过载、超时或连接中断等瞬时失败会保留绑定等待后续重连，只有对应 Thread 已删除、关闭或发生其他永久错误时才自动清理绑定，同时保留有效的 Workspace 选择。配置中已删除的 Workspace 会回退到默认 Workspace。
 
 ## 审批和安全
 

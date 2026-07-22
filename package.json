@@ -24,7 +24,7 @@
     "prebuild": "node scripts/clean-dist.mjs",
     "build": "tsc -p tsconfig.build.json",
     "prepare": "node scripts/prepare-package.mjs",
-    "check": "tsc -p tsconfig.json --noEmit",
+    "check": "tsc -p tsconfig.json --noEmit && node scripts/check-gateway-version.mjs",
     "dev": "tsx gateway/src/main.ts",
     "dev:all": "node scripts/dev-all.mjs",
     "start": "node dist/gateway/src/main.js",

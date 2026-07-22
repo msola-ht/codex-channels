@@ -4,12 +4,25 @@ import WebSocket, { type ClientOptions, type RawData } from "ws";
 
 import { BaseTransport } from "./transport.js";
 
+export interface UnixWebSocketTransportOptions {
+  connectTimeoutMs?: number;
+  maxPayloadBytes?: number;
+}
+
 export class UnixWebSocketTransport extends BaseTransport {
   readonly kind = "unix-websocket" as const;
   private socket: WebSocket | undefined;
 
-  constructor(private readonly socketPath: string) {
+  private readonly connectTimeoutMs: number;
+  private readonly maxPayloadBytes: number;
+
+  constructor(
+    private readonly socketPath: string,
+    options: UnixWebSocketTransportOptions = {},
+  ) {
     super();
+    this.connectTimeoutMs = options.connectTimeoutMs ?? 10_000;
+    this.maxPayloadBytes = options.maxPayloadBytes ?? 8 * 1024 * 1024;
   }
 
   async connect(): Promise<void> {
@@ -19,35 +32,50 @@ export class UnixWebSocketTransport extends BaseTransport {
 
     const options: ClientOptions = {
       perMessageDeflate: false,
+      handshakeTimeout: this.connectTimeoutMs,
+      maxPayload: this.maxPayloadBytes,
       createConnection: () => createConnection(this.socketPath),
     };
     const socket = new WebSocket("ws://localhost/", options);
     this.socket = socket;
 
     await new Promise<void>((resolve, reject) => {
+      let opened = false;
+      const timeout = setTimeout(() => {
+        socket.terminate();
+        reject(new Error(`连接 Codex Unix WebSocket 超时：${this.connectTimeoutMs}ms`));
+      }, this.connectTimeoutMs);
+      timeout.unref();
       const onOpen = (): void => {
-        cleanup();
+        opened = true;
+        clearTimeout(timeout);
         resolve();
       };
       const onError = (error: Error): void => {
-        cleanup();
-        reject(error);
+        if (opened) {
+          this.emitClose(error);
+        } else {
+          clearTimeout(timeout);
+          reject(error);
+        }
       };
-      const cleanup = (): void => {
-        socket.off("open", onOpen);
-        socket.off("error", onError);
+      const onClose = (): void => {
+        clearTimeout(timeout);
+        if (opened) {
+          this.emitClose();
+        } else {
+          reject(new Error("Codex Unix WebSocket 在握手完成前关闭"));
+        }
       };
       socket.once("open", onOpen);
-      socket.once("error", onError);
+      socket.on("error", onError);
+      socket.on("close", onClose);
+      socket.on("message", (data: RawData, isBinary: boolean) => {
+        if (!isBinary) {
+          this.emitMessage(data.toString("utf8"));
+        }
+      });
     });
-
-    socket.on("message", (data: RawData, isBinary: boolean) => {
-      if (!isBinary) {
-        this.emitMessage(data.toString("utf8"));
-      }
-    });
-    socket.on("error", (error) => this.emitClose(error));
-    socket.on("close", () => this.emitClose());
   }
 
   async send(message: string): Promise<void> {

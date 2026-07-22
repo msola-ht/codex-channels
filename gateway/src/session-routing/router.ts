@@ -1,4 +1,5 @@
 import type { CodexAppServerClient } from "../codex-client/client.js";
+import { JsonRpcError } from "../codex-client/json-rpc.js";
 import type { Thread } from "../codex-protocol/index.js";
 import type { ConversationTarget } from "../conversation-core/events.js";
 import type { Workspace, WorkspaceRegistry } from "../policy/workspace-registry.js";
@@ -7,6 +8,12 @@ import type { BindingStore, ConversationBinding } from "../storage/binding-store
 export interface ThreadModelSettings {
   model: string;
   effort: string | null;
+}
+
+export interface SubscriptionRestoreFailure {
+  binding: ConversationBinding;
+  error: Error;
+  bindingRemoved: boolean;
 }
 
 export class SessionRouter {
@@ -59,8 +66,8 @@ export class SessionRouter {
     }
   }
 
-  async restoreSubscriptions(): Promise<Array<{ binding: ConversationBinding; error: Error }>> {
-    const failures: Array<{ binding: ConversationBinding; error: Error }> = [];
+  async restoreSubscriptions(): Promise<SubscriptionRestoreFailure[]> {
+    const failures: SubscriptionRestoreFailure[] = [];
     for (const binding of this.bindings.list()) {
       try {
         const workspace = this.workspaces.require(binding.workspaceId);
@@ -73,12 +80,17 @@ export class SessionRouter {
           sessionId: resumed.thread.sessionId,
         });
       } catch (error) {
-        this.bindings.unbind(binding.target);
-        const workspace = this.workspaces.get(binding.workspaceId) ?? this.workspaces.default();
-        this.bindings.selectWorkspace(binding.target, workspace.id);
+        const normalized = error instanceof Error ? error : new Error(String(error));
+        const bindingRemoved = !isTransientRestoreError(normalized);
+        if (bindingRemoved) {
+          this.bindings.unbind(binding.target);
+          const workspace = this.workspaces.get(binding.workspaceId) ?? this.workspaces.default();
+          this.bindings.selectWorkspace(binding.target, workspace.id);
+        }
         failures.push({
           binding,
-          error: error instanceof Error ? error : new Error(String(error)),
+          error: normalized,
+          bindingRemoved,
         });
       }
     }
@@ -198,4 +210,15 @@ export class SessionRouter {
   private captureModelSettings(threadId: string, model: string, effort: string | null): void {
     this.modelSettingsByThread.set(threadId, { model, effort });
   }
+}
+
+function isTransientRestoreError(error: Error): boolean {
+  if (error instanceof JsonRpcError && error.code === -32001) {
+    return true;
+  }
+  const message = error.message.toLowerCase();
+  if (/thread.*(not found|deleted|archived|closed)|线程.*(不存在|删除|归档|关闭)/i.test(message)) {
+    return false;
+  }
+  return /(timeout|timed out|connection|socket|econn|epipe|reset|overload|超时|连接|断开|过载)/i.test(message);
 }

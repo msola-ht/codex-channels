@@ -10,6 +10,7 @@ import type {
   ReviewTarget,
   SkillsListResponse,
   Thread,
+  ThreadDeleteResponse,
   ThreadForkResponse,
   ThreadGoal,
   ThreadGoalGetResponse,
@@ -138,6 +139,14 @@ export class CodexAppServerClient {
     );
   }
 
+  async deleteThread(threadId: string): Promise<ThreadDeleteResponse> {
+    return this.rpc.request<ThreadDeleteResponse>(
+      "thread/delete",
+      { threadId },
+      { retryOverload: false },
+    );
+  }
+
   async startTurn(
     threadId: string,
     text: string,
@@ -191,6 +200,7 @@ export class CodexAppServerClient {
 
   async listModels(): Promise<ModelListResponse["data"]> {
     const models: ModelListResponse["data"] = [];
+    const cursors = new Set<string>();
     let cursor: string | null = null;
     do {
       const result: ModelListResponse = await this.rpc.request<ModelListResponse>(
@@ -200,6 +210,7 @@ export class CodexAppServerClient {
       );
       models.push(...result.data);
       cursor = result.nextCursor;
+      rememberCursor("model/list", cursor, cursors);
     } while (cursor);
     return models;
   }
@@ -236,6 +247,7 @@ export class CodexAppServerClient {
 
   async listMcpServers(threadId?: string): Promise<ListMcpServerStatusResponse["data"]> {
     const servers: ListMcpServerStatusResponse["data"] = [];
+    const cursors = new Set<string>();
     let cursor: string | null = null;
     do {
       const response: ListMcpServerStatusResponse =
@@ -251,6 +263,7 @@ export class CodexAppServerClient {
         );
       servers.push(...response.data);
       cursor = response.nextCursor;
+      rememberCursor("mcpServerStatus/list", cursor, cursors);
     } while (cursor);
     return servers;
   }
@@ -281,6 +294,7 @@ export class CodexAppServerClient {
 
   async listPermissionProfiles(cwd: string): Promise<PermissionProfileListResponse["data"]> {
     const profiles: PermissionProfileListResponse["data"] = [];
+    const cursors = new Set<string>();
     let cursor: string | null = null;
     do {
       const response: PermissionProfileListResponse =
@@ -291,6 +305,7 @@ export class CodexAppServerClient {
         );
       profiles.push(...response.data);
       cursor = response.nextCursor;
+      rememberCursor("permissionProfile/list", cursor, cursors);
     } while (cursor);
     return profiles;
   }
@@ -316,4 +331,14 @@ export class CodexAppServerClient {
   async clearGoal(threadId: string): Promise<void> {
     await this.rpc.request("thread/goal/clear", { threadId }, { retryOverload: false });
   }
+}
+
+function rememberCursor(method: string, cursor: string | null, cursors: Set<string>): void {
+  if (!cursor) {
+    return;
+  }
+  if (cursors.has(cursor)) {
+    throw new Error(`Codex ${method} 返回了循环分页游标`);
+  }
+  cursors.add(cursor);
 }

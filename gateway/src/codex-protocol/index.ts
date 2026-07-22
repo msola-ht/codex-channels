@@ -7,6 +7,7 @@ export type { RequestId } from "./generated/RequestId.js";
 export type { ServerNotification } from "./generated/ServerNotification.js";
 export type { ServerRequest } from "./generated/ServerRequest.js";
 export type { Thread } from "./generated/v2/Thread.js";
+export type { ThreadDeleteResponse } from "./generated/v2/ThreadDeleteResponse.js";
 export type { ThreadListParams } from "./generated/v2/ThreadListParams.js";
 export type { ThreadListResponse } from "./generated/v2/ThreadListResponse.js";
 export type { ThreadReadResponse } from "./generated/v2/ThreadReadResponse.js";

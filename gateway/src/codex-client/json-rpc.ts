@@ -3,6 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 
 import type { InitializeResponse, RequestId } from "../codex-protocol/index.js";
+import gatewayMetadata from "../version.json" with { type: "json" };
 import type { CodexTransport } from "./transport.js";
 
 const envelopeSchema = z.object({
@@ -38,6 +39,10 @@ export interface RpcServerRequest {
 
 export type ServerRequestHandler = (request: RpcServerRequest) => Promise<unknown>;
 
+export interface ProtocolLogger {
+  warn(fields: Record<string, unknown>, message: string): void;
+}
+
 export class JsonRpcError extends Error {
   constructor(
     readonly code: number,
@@ -53,14 +58,18 @@ export class JsonRpcClient {
   private readonly pending = new Map<RequestId, PendingRequest>();
   private readonly notificationHandlers = new Set<(notification: RpcNotification) => void>();
   private readonly disconnectHandlers = new Set<(error: Error) => void>();
+  private readonly serverRequestTasks = new Set<Promise<void>>();
   private serverRequestHandler?: ServerRequestHandler;
   private removeMessageHandler: (() => void) | undefined;
   private removeCloseHandler: (() => void) | undefined;
   private state: "idle" | "connecting" | "connected" | "closing" = "idle";
+  private connectionGeneration = 0;
 
   constructor(
     private readonly transport: CodexTransport,
     private readonly requestTimeoutMs = 60_000,
+    private readonly logger?: ProtocolLogger,
+    private readonly maximumServerRequests = 64,
   ) {}
 
   async connect(): Promise<InitializeResponse> {
@@ -68,6 +77,7 @@ export class JsonRpcClient {
       throw new Error(`Codex JSON-RPC Client 当前状态不允许连接：${this.state}`);
     }
     this.state = "connecting";
+    this.connectionGeneration += 1;
     this.installTransportHandlers();
     try {
       await this.transport.connect();
@@ -77,7 +87,7 @@ export class JsonRpcClient {
           clientInfo: {
             name: "codex_tg_gateway",
             title: "Codex Telegram Gateway",
-            version: "0.2.0",
+            version: gatewayMetadata.version,
           },
         },
         { retryOverload: false },
@@ -106,6 +116,8 @@ export class JsonRpcClient {
       return;
     }
     this.state = "closing";
+    this.connectionGeneration += 1;
+    this.serverRequestTasks.clear();
     this.removeMessageHandler?.();
     this.removeCloseHandler?.();
     this.removeMessageHandler = undefined;
@@ -182,10 +194,12 @@ export class JsonRpcClient {
     try {
       decoded = JSON.parse(raw);
     } catch {
+      this.logger?.warn({ reason: "invalid-json" }, "忽略无效 Codex JSON-RPC 消息");
       return;
     }
     const parsed = envelopeSchema.safeParse(decoded);
     if (!parsed.success) {
+      this.logger?.warn({ reason: "invalid-envelope" }, "忽略无效 Codex JSON-RPC 消息");
       return;
     }
     const message = parsed.data;
@@ -193,6 +207,7 @@ export class JsonRpcClient {
     if (message.id !== undefined && message.method === undefined) {
       const pending = this.pending.get(message.id);
       if (!pending) {
+        this.logger?.warn({ requestId: message.id }, "忽略没有对应请求的 Codex JSON-RPC 响应");
         return;
       }
       clearTimeout(pending.timer);
@@ -206,7 +221,7 @@ export class JsonRpcClient {
     }
 
     if (message.id !== undefined && message.method !== undefined) {
-      void this.handleServerRequest({
+      this.dispatchServerRequest({
         id: message.id,
         method: message.method,
         params: message.params ?? {},
@@ -222,23 +237,74 @@ export class JsonRpcClient {
     }
   }
 
-  private async handleServerRequest(request: RpcServerRequest): Promise<void> {
+  private dispatchServerRequest(request: RpcServerRequest): void {
+    const generation = this.connectionGeneration;
+    if (this.serverRequestTasks.size >= this.maximumServerRequests) {
+      const task = this.sendServerResponse(
+        request,
+        generation,
+        undefined,
+        new JsonRpcError(-32000, "Client overloaded; request rejected."),
+      );
+      this.trackServerRequest(task);
+      return;
+    }
+    this.trackServerRequest(this.handleServerRequest(request, generation));
+  }
+
+  private trackServerRequest(task: Promise<void>): void {
+    const guarded = task.catch((error) => {
+      this.logger?.warn(
+        { err: asError(error), reason: "server-request-task" },
+        "Codex Server Request 处理任务失败",
+      );
+    });
+    this.serverRequestTasks.add(guarded);
+    void guarded.finally(() => this.serverRequestTasks.delete(guarded));
+  }
+
+  private async handleServerRequest(request: RpcServerRequest, generation: number): Promise<void> {
+    let result: unknown;
+    let rpcError: JsonRpcError | undefined;
     try {
       if (!this.serverRequestHandler) {
         throw new JsonRpcError(-32601, `Unsupported server request: ${request.method}`);
       }
-      const result = await this.serverRequestHandler(request);
-      await this.transport.send(JSON.stringify({ id: request.id, result }));
+      result = await this.serverRequestHandler(request);
     } catch (error) {
-      const rpcError =
+      rpcError =
         error instanceof JsonRpcError
           ? error
           : new JsonRpcError(-32603, "Internal client error");
-      await this.transport.send(
-        JSON.stringify({
-          id: request.id,
-          error: { code: rpcError.code, message: rpcError.message, data: rpcError.data },
-        }),
+    }
+    await this.sendServerResponse(request, generation, result, rpcError);
+  }
+
+  private async sendServerResponse(
+    request: RpcServerRequest,
+    generation: number,
+    result: unknown,
+    error?: JsonRpcError,
+  ): Promise<void> {
+    if (
+      generation !== this.connectionGeneration ||
+      (this.state !== "connected" && this.state !== "connecting")
+    ) {
+      this.logger?.warn(
+        { method: request.method, requestId: request.id, reason: "stale-connection" },
+        "Codex Server Request 已失效，不向旧连接发送响应",
+      );
+      return;
+    }
+    const response = error
+      ? { id: request.id, error: { code: error.code, message: error.message, data: error.data } }
+      : { id: request.id, result };
+    try {
+      await this.transport.send(JSON.stringify(response));
+    } catch (sendError) {
+      this.logger?.warn(
+        { err: asError(sendError), method: request.method, requestId: request.id, reason: "response-send" },
+        "Codex Server Request 响应发送失败",
       );
     }
   }
@@ -254,6 +320,8 @@ export class JsonRpcClient {
         }
         const disconnectError = error ?? new Error("Codex App Server 连接已关闭");
         this.state = "idle";
+        this.connectionGeneration += 1;
+        this.serverRequestTasks.clear();
         this.failPending(disconnectError);
         for (const handler of this.disconnectHandlers) {
           handler(disconnectError);

@@ -8,12 +8,17 @@ class FakeTransport extends BaseTransport {
   readonly kind = "stdio" as const;
   readonly sent: Array<Record<string, unknown>> = [];
   overloadResponses = 0;
+  failServerResponse = false;
+  circularModelCursor = false;
 
   async connect(): Promise<void> {}
   async close(): Promise<void> {}
 
   async send(message: string): Promise<void> {
     const decoded = JSON.parse(message) as Record<string, unknown>;
+    if (this.failServerResponse && decoded.id === "server-1" && decoded.method === undefined) {
+      throw new Error("socket closed");
+    }
     this.sent.push(decoded);
     if (decoded.method === "initialize") {
       queueMicrotask(() =>
@@ -55,6 +60,18 @@ class FakeTransport extends BaseTransport {
           JSON.stringify({
             id: decoded.id,
             result: { thread: { id: "thread-1" }, model: "gpt-default", reasoningEffort: "medium" },
+          }),
+        ),
+      );
+    } else if (decoded.method === "model/list") {
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({
+            id: decoded.id,
+            result: {
+              data: [],
+              nextCursor: this.circularModelCursor ? "same-cursor" : null,
+            },
           }),
         ),
       );
@@ -144,6 +161,69 @@ describe("JsonRpcClient", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(transport.sent.at(-1)).toEqual({ id: "server-1", result: { accepted: true } });
+  });
+
+  it("does not respond to a server request after its connection disconnects", async () => {
+    const transport = new FakeTransport();
+    const warnings: Array<Record<string, unknown>> = [];
+    let resolveRequest: ((value: unknown) => void) | undefined;
+    const client = new JsonRpcClient(transport, 60_000, {
+      warn: (fields) => warnings.push(fields),
+    });
+    client.setServerRequestHandler(() => new Promise((resolve) => {
+      resolveRequest = resolve;
+    }));
+    await client.connect();
+
+    transport.receive({ id: "server-1", method: "test/request", params: {} });
+    transport.disconnect(new Error("socket lost"));
+    resolveRequest?.({ accepted: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(transport.sent.some((message) => message.id === "server-1")).toBe(false);
+    expect(warnings).toContainEqual(expect.objectContaining({ reason: "stale-connection" }));
+  });
+
+  it("reports a server response send failure without attempting a second response", async () => {
+    const transport = new FakeTransport();
+    const warnings: Array<Record<string, unknown>> = [];
+    const client = new JsonRpcClient(transport, 60_000, {
+      warn: (fields) => warnings.push(fields),
+    });
+    client.setServerRequestHandler(async () => ({ accepted: true }));
+    await client.connect();
+    transport.failServerResponse = true;
+
+    transport.receive({ id: "server-1", method: "test/request", params: {} });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(warnings).toContainEqual(expect.objectContaining({ reason: "response-send" }));
+    expect(transport.sent.filter((message) => message.id === "server-1")).toHaveLength(0);
+  });
+
+  it("rejects excess concurrent server requests with a bounded overload response", async () => {
+    const transport = new FakeTransport();
+    let resolveFirst: ((value: unknown) => void) | undefined;
+    const client = new JsonRpcClient(transport, 60_000, undefined, 1);
+    client.setServerRequestHandler((request) => request.id === "server-1"
+      ? new Promise((resolve) => {
+          resolveFirst = resolve;
+        })
+      : Promise.resolve({ accepted: true }));
+    await client.connect();
+
+    transport.receive({ id: "server-1", method: "test/request", params: {} });
+    transport.receive({ id: "server-2", method: "test/request", params: {} });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(transport.sent.find((message) => message.id === "server-2")).toEqual({
+      id: "server-2",
+      error: {
+        code: -32000,
+        message: "Client overloaded; request rejected.",
+      },
+    });
+    resolveFirst?.({ accepted: true });
   });
 
   it("reinitializes a replacement connection after disconnect", async () => {
@@ -249,9 +329,21 @@ describe("JsonRpcClient", () => {
     await client.startThread("/tmp/project");
     await client.startTurn("thread-1", "测试输入", "request-1", "/tmp/project");
 
-    expect(transport.sent.find((message) => message.method === "thread/start")?.params)
+    const starts = transport.sent.filter((message) => message.method === "thread/start");
+    expect(starts[0]?.params)
       .toMatchObject({ model: "gpt-configured" });
     expect(transport.sent.find((message) => message.method === "turn/start")?.params)
       .not.toHaveProperty("model");
+  });
+
+  it("rejects repeated pagination cursors", async () => {
+    const transport = new FakeTransport();
+    transport.circularModelCursor = true;
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listModels()).rejects.toThrow("model/list 返回了循环分页游标");
   });
 });

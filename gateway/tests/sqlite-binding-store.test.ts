@@ -62,6 +62,7 @@ describe("SqliteBindingStore", () => {
     const failures = await router.restoreSubscriptions();
 
     expect(failures).toHaveLength(1);
+    expect(failures[0]?.bindingRemoved).toBe(true);
     expect(second.list()).toEqual([]);
     second.close();
 

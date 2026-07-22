@@ -41,7 +41,7 @@ export class GatewayApplication {
   ) {
     verifyCodexVersion(config);
     this.transport = new UnixWebSocketTransport(config.codexSocketPath);
-    this.rpc = new JsonRpcClient(this.transport);
+    this.rpc = new JsonRpcClient(this.transport, 60_000, logger);
     this.codex = new CodexAppServerClient(this.rpc, {
       sandbox: config.codexSandbox,
       ...(config.codexModel ? { model: config.codexModel } : {}),
@@ -117,7 +117,10 @@ export class GatewayApplication {
       });
     });
     const initialized = await this.codex.connect();
-    await this.restoreBindings();
+    if (!(await this.restoreBindings())) {
+      await this.codex.close();
+      throw new Error("恢复 Codex Thread 订阅暂时失败，请由进程管理器重试启动");
+    }
     this.logger.info(
       {
         transport: this.transport.kind,
@@ -162,7 +165,10 @@ export class GatewayApplication {
       }
       try {
         const initialized = await this.codex.reconnect();
-        await this.restoreBindings();
+        if (!(await this.restoreBindings())) {
+          await this.codex.close();
+          throw new Error("仍有 Codex Thread 订阅暂时无法恢复");
+        }
         this.logger.info(
           { attempt, platformFamily: initialized.platformFamily, platformOs: initialized.platformOs },
           "Codex App Server 已重新连接",
@@ -180,12 +186,18 @@ export class GatewayApplication {
     }
   }
 
-  private async restoreBindings(): Promise<void> {
+  private async restoreBindings(): Promise<boolean> {
     const failures = await this.router.restoreSubscriptions();
     for (const failure of failures) {
       this.logger.warn(
-        { err: failure.error, threadId: failure.binding.threadId },
-        "恢复 Codex Thread 订阅失败，已移除持久化绑定",
+        {
+          err: failure.error,
+          threadId: failure.binding.threadId,
+          bindingRemoved: failure.bindingRemoved,
+        },
+        failure.bindingRemoved
+          ? "恢复 Codex Thread 订阅永久失败，已移除持久化绑定"
+          : "恢复 Codex Thread 订阅暂时失败，已保留持久化绑定",
       );
     }
     if (this.router.allBindings().length > 0) {
@@ -194,6 +206,7 @@ export class GatewayApplication {
         "已恢复 Telegram 与 Codex Thread 绑定",
       );
     }
+    return failures.every((failure) => failure.bindingRemoved);
   }
 }
 
