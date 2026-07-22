@@ -3,7 +3,7 @@ import { dirname, isAbsolute, relative, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const sourceRoot = resolve("gateway/src");
+const sourceRoot = resolve("src");
 
 describe("module boundaries", () => {
   it("keeps core independent from routing and infrastructure implementations", () => {

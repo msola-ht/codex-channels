@@ -79,7 +79,7 @@ function runGateway(args) {
     throw new Error("用法：codexc gateway");
   }
   const runtime = configuredEnvironment();
-  run(process.execPath, [join(packageDir, "dist/gateway/src/main.js")], runtime.environment, runtime.dataDir);
+  run(process.execPath, [join(packageDir, "dist/main.js")], runtime.environment, runtime.dataDir);
 }
 
 function workspace(args) {

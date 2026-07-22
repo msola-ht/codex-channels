@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { packageDir } from "./runtime-config.mjs";
 
 const sourceConfig = join(packageDir, "tsconfig.build.json");
-const builtEntry = join(packageDir, "dist", "gateway", "src", "main.js");
+const builtEntry = join(packageDir, "dist", "main.js");
 
 if (existsSync(sourceConfig)) {
   const result = spawnSync("npm", ["run", "build"], {

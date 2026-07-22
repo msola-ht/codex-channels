@@ -6,7 +6,7 @@ import { parse } from "dotenv";
 import { afterEach, describe, expect, it } from "vitest";
 
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
-import { addWorkspaceToEnv, readWorkspaceConfig } from "../../scripts/workspace-config.mjs";
+import { addWorkspaceToEnv, readWorkspaceConfig } from "../scripts/workspace-config.mjs";
 
 const temporaryDirectories: string[] = [];
 

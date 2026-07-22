@@ -156,33 +156,30 @@ Transport 只负责帧和连接，不包含 Thread、Turn 或 Telegram 逻辑。
 ## 5. 推荐代码结构
 
 ```text
-apps/
-└── gateway/
-    └── src/main.ts
-
-packages/
+src/
+├── main.ts                    # 进程入口
+├── application/               # 跨模块用例编排
+├── approval/                  # Server Request 与审批协调
+├── bootstrap/                 # 依赖装配和生命周期
 ├── codex-protocol/            # generate-ts 生成物和版本信息
 ├── codex-client/              # Unix WebSocket、JSON-RPC、初始化、重连
 ├── conversation-core/         # Thread/Turn/Item 状态机
-├── extension-sdk/             # 扩展接口
+├── event-bus/                 # 有界事件队列与消费者隔离
+├── observability/             # 日志和诊断
+├── policy/                    # 用户、Workspace 与权限边界
+├── session-routing/           # Workspace、Conversation 与 Thread 路由
 ├── storage/                   # 可替换状态存储
-├── observability/             # 日志、指标、追踪
-├── adapter-telegram/          # Telegram 输入与输出
-└── extensions/
-    ├── project-routing/
-    ├── default-policy/
-    ├── notifications/
-    └── audit-log/
+└── surfaces/
+    └── telegram/              # Telegram 输入、输出与交互
 
 launchd/
 ├── codex-app-server.plist
 └── codex-gateway.plist
 
-tests/
-├── contract/
-├── integration/
-└── unit/
+tests/                         # 单元、契约与条件式真实集成测试
 ```
+
+当前仓库只有一个 npm 包，因此采用根级 `src/` 和 `tests/`。只有未来出现真实的独立部署、版本或权限边界时，才迁移为 `apps/`、`packages/` 形式的多包仓库。
 
 依赖方向：
 

@@ -21,8 +21,8 @@ const socketPath = resolveConfiguredPath(
 const runtimeDir = dirname(socketPath);
 const codexBinary = resolveExecutable(env.CODEX_BINARY || "codex");
 const gatewayEntry = process.env.CODEX_CONNECT_GATEWAY_ENTRY === "dist"
-  ? [join(projectDir, "dist/gateway/src/main.js")]
-  : [join(projectDir, "node_modules", "tsx", "dist", "cli.mjs"), "gateway/src/main.ts"];
+  ? [join(projectDir, "dist/main.js")]
+  : [join(projectDir, "node_modules", "tsx", "dist", "cli.mjs"), "src/main.ts"];
 
 mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
 chmodSync(runtimeDir, 0o700);

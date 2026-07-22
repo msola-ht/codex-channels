@@ -1,5 +1,8 @@
 {
   "extends": "./tsconfig.json",
-  "include": ["gateway/src/**/*.ts"],
-  "exclude": ["node_modules", "dist", "gateway/tests"]
+  "compilerOptions": {
+    "rootDir": "src"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "tests"]
 }

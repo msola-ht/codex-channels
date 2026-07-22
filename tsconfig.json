@@ -19,9 +19,9 @@
     "sourceMap": true
   },
   "include": [
-    "gateway/src/**/*.ts",
-    "gateway/tests/**/*.ts",
-    "gateway/vitest.config.ts"
+    "src/**/*.ts",
+    "tests/**/*.ts",
+    "vitest.config.ts"
   ],
   "exclude": [
     "node_modules",

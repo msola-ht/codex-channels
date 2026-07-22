@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
-const output = resolve(root, "gateway/src/codex-protocol/generated");
+const output = resolve(root, "src/codex-protocol/generated");
 const codex = process.env.CODEX_BINARY || "codex";
 
 rmSync(output, { recursive: true, force: true });
@@ -19,6 +19,6 @@ const version = execFileSync(codex, ["--version"], {
 }).trim();
 
 writeFileSync(
-  resolve(root, "gateway/src/codex-protocol/version.json"),
+  resolve(root, "src/codex-protocol/version.json"),
   `${JSON.stringify({ codexCli: version, experimental: false }, null, 2)}\n`,
 );

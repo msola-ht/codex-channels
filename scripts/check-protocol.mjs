@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const expected = JSON.parse(
-  readFileSync(resolve(root, "gateway/src/codex-protocol/version.json"), "utf8"),
+  readFileSync(resolve(root, "src/codex-protocol/version.json"), "utf8"),
 );
 const codex = process.env.CODEX_BINARY || "codex";
 const actual = execFileSync(codex, ["--version"], {

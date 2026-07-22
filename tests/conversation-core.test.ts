@@ -212,7 +212,7 @@ describe("ConversationCore", () => {
           id: "file-1",
           status: "completed",
           changes: [
-            { path: "gateway/src/main.ts" },
+            { path: "src/main.ts" },
             { path: "README.md" },
           ],
         },
@@ -241,7 +241,7 @@ describe("ConversationCore", () => {
         operation: expect.objectContaining({
           itemId: "file-1",
           kind: "fileChange",
-          detail: "gateway/src/main.ts、README.md",
+          detail: "src/main.ts、README.md",
         }),
       }),
     ]);
