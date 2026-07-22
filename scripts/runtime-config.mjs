@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const packageDir = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), ".."));
@@ -35,15 +35,18 @@ export function initializeUserData({ environment = process.env, cwd = process.cw
 
   const runtimeDir = join(dataDir, "runtime");
   const stateDir = join(dataDir, "data");
+  const workspaceDir = join(dataDir, "workspace");
   mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  mkdirSync(workspaceDir, { recursive: true, mode: 0o700 });
   chmodSync(dataDir, 0o700);
   chmodSync(runtimeDir, 0o700);
   chmodSync(stateDir, 0o700);
+  chmodSync(workspaceDir, 0o700);
 
-  const name = basename(resolvedCwd) || "Workspace";
-  const id = workspaceId(name);
-  const workspaces = JSON.stringify([{ id, name, cwd: resolvedCwd }]).replaceAll("'", "\\u0027");
+  const defaultCwd = realpathSync(workspaceDir);
+  const defaultWorkspace = { id: "codex-connect", name: ".codex-connect/workspace", cwd: defaultCwd };
+  const serializedWorkspaces = JSON.stringify([defaultWorkspace]).replaceAll("'", "\\u0027");
   const content = [
     "# Codex Connect 用户配置。请填写 Telegram Token 和允许的用户 ID。",
     "TELEGRAM_BOT_TOKEN=",
@@ -54,8 +57,8 @@ export function initializeUserData({ environment = process.env, cwd = process.cw
     "NO_PROXY=localhost,127.0.0.1",
     "",
     "CODEX_BINARY=codex",
-    `CODEX_WORKSPACES_JSON='${workspaces}'`,
-    `CODEX_DEFAULT_WORKSPACE=${id}`,
+    `CODEX_WORKSPACES_JSON='${serializedWorkspaces}'`,
+    `CODEX_DEFAULT_WORKSPACE=${defaultWorkspace.id}`,
     `CODEX_SOCKET_PATH=${join(runtimeDir, "codex-app-server.sock")}`,
     "CODEX_MODEL=",
     "CODEX_BRIDGE_SANDBOX=workspace-write",
@@ -65,7 +68,7 @@ export function initializeUserData({ environment = process.env, cwd = process.cw
     "",
   ].join("\n");
   writeFileSync(envPath, content, { mode: 0o600, flag: "wx" });
-  return { created: true, dataDir, envPath, workspace: resolvedCwd };
+  return { created: true, dataDir, envPath, workspace: defaultCwd };
 }
 
 export function requireUserConfig(environment = process.env) {
@@ -84,13 +87,4 @@ export function requireUserConfig(environment = process.env) {
 export function resolveConfiguredPath(value, baseDirectory, fallback) {
   const candidate = value?.trim() || fallback;
   return isAbsolute(candidate) ? resolve(candidate) : resolve(baseDirectory, candidate);
-}
-
-function workspaceId(name) {
-  return String(name)
-    .normalize("NFKD")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 64) || "workspace";
 }

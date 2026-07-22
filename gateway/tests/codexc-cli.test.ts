@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -38,6 +38,11 @@ describe("codexc CLI", () => {
       env: environment,
       encoding: "utf8",
     });
+    const firstAdded = execFileSync(process.execPath, [cli, "ws", "add"], {
+      cwd: first,
+      env: environment,
+      encoding: "utf8",
+    });
     const added = execFileSync(process.execPath, [cli, "ws", "add"], {
       cwd: second,
       env: environment,
@@ -53,18 +58,78 @@ describe("codexc CLI", () => {
     const parsed = parse(readFileSync(envPath, "utf8"));
     const config = readWorkspaceConfig(parsed);
     expect(initialized).toContain("Codex Connect 已初始化");
+    expect(firstAdded).toContain("Workspace 已添加");
     expect(added).toContain("Workspace 已添加");
     expect(added).toContain("Gateway 正在运行，请重启");
-    expect(listed).toContain("First Project · first-project ← 默认");
+    expect(initialized).toContain(`默认 Workspace：${realpathSync(join(home, "workspace"))}`);
+    expect(listed).toContain(".codex-connect/workspace · codex-connect ← 默认");
+    expect(listed).toContain("First Project · first-project");
     expect(listed).toContain("Second Project · second-project");
     expect(config.workspaces.map((workspace: { cwd: string }) => workspace.cwd)).toEqual([
+      realpathSync(join(home, "workspace")),
       realpathSync(first),
       realpathSync(second),
     ]);
     expect(parsed.CODEX_SOCKET_PATH).toBe(join(home, "runtime", "codex-app-server.sock"));
     expect(parsed.STATE_DATABASE_PATH).toBe(join(home, "data", "gateway.sqlite3"));
     expect(statSync(home).mode & 0o777).toBe(0o700);
+    expect(statSync(join(home, "workspace")).mode & 0o777).toBe(0o700);
     expect(statSync(envPath).mode & 0o777).toBe(0o600);
+  });
+
+  it("runs remote in the invocation directory unless a workspace is explicit", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const first = join(root, "First Project");
+    const second = join(root, "Second Project");
+    mkdirSync(first);
+    mkdirSync(second);
+    const fakeCodex = join(root, "fake-codex.mjs");
+    writeFileSync(
+      fakeCodex,
+      "#!/usr/bin/env node\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify(process.argv.slice(2)));\n",
+    );
+    chmodSync(fakeCodex, 0o700);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_ENV_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: first, env: environment });
+    execFileSync(process.execPath, [cli, "ws", "add"], { cwd: first, env: environment });
+    const envPath = join(home, ".env");
+    writeFileSync(
+      envPath,
+      readFileSync(envPath, "utf8").replace("CODEX_BINARY=codex", `CODEX_BINARY=${fakeCodex}`),
+    );
+    execFileSync(process.execPath, [cli, "ws", "add"], { cwd: second, env: environment });
+
+    const currentCapture = join(root, "current.json");
+    execFileSync(process.execPath, [cli, "remote", "resume"], {
+      cwd: first,
+      env: { ...environment, CODEX_TEST_CAPTURE: currentCapture },
+    });
+    const explicitCapture = join(root, "explicit.json");
+    execFileSync(process.execPath, [cli, "remote", "--workspace", "second-project", "resume"], {
+      cwd: first,
+      env: { ...environment, CODEX_TEST_CAPTURE: explicitCapture },
+    });
+
+    expect(JSON.parse(readFileSync(currentCapture, "utf8"))).toEqual([
+      "--remote",
+      `unix://${join(home, "runtime", "codex-app-server.sock")}`,
+      "-C",
+      realpathSync(first),
+      "resume",
+    ]);
+    expect(JSON.parse(readFileSync(explicitCapture, "utf8"))).toEqual([
+      "--remote",
+      `unix://${join(home, "runtime", "codex-app-server.sock")}`,
+      "-C",
+      realpathSync(second),
+      "resume",
+    ]);
   });
 
   it("does not overwrite an existing user configuration", () => {

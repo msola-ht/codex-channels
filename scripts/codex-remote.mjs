@@ -8,19 +8,19 @@ import { readWorkspaceConfig } from "./workspace-config.mjs";
 
 const runtime = runtimeConfig();
 const env = parse(readFileSync(runtime.envPath));
-const { workspaces, defaultWorkspace } = readWorkspaceConfig(env);
+const { workspaces } = readWorkspaceConfig(env);
 const passthrough = process.argv.slice(2);
 const workspaceFlag = passthrough.indexOf("--workspace");
-let workspace = defaultWorkspace;
+let workdir = realpathSync(process.cwd());
 if (workspaceFlag !== -1) {
   const workspaceId = passthrough[workspaceFlag + 1];
-  workspace = workspaces.find((candidate) => candidate.id === workspaceId);
+  const workspace = workspaces.find((candidate) => candidate.id === workspaceId);
   if (!workspace) {
     throw new Error(`找不到 Workspace：${workspaceId || "<empty>"}`);
   }
+  workdir = workspace.cwd;
   passthrough.splice(workspaceFlag, 2);
 }
-const workdir = workspace.cwd;
 const socketPath = resolveConfiguredPath(
   env.CODEX_SOCKET_PATH,
   runtime.dataDir,

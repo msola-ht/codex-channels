@@ -7,6 +7,7 @@ import type { ConversationTarget, OutputEvent } from "../../conversation-core/ev
 import type { ReviewTarget } from "../../codex-protocol/index.js";
 import type { EventBus } from "../../event-bus/event-bus.js";
 import type { TelegramAccessPolicy } from "../../policy/telegram-access.js";
+import type { Workspace } from "../../policy/workspace-registry.js";
 import {
   formatMcpServers,
   formatLimits,
@@ -16,6 +17,7 @@ import {
   formatSessions,
   formatSkills,
   formatStatus,
+  formatStartupNotification,
   formatUsage,
   formatWorkspaces,
   splitTelegramText,
@@ -38,6 +40,8 @@ export class TelegramSurface {
     private readonly service: ConversationService,
     output: EventBus<OutputEvent>,
     private readonly access: TelegramAccessPolicy,
+    startupRecipients: ReadonlySet<number>,
+    workspaces: Workspace[],
     private readonly logger: Logger,
   ) {
     this.bot = new Bot(token, {
@@ -52,7 +56,15 @@ export class TelegramSurface {
     const apiExecutor = new TelegramApiExecutor(logger);
     this.interactions = new TelegramInteractionPort(this.bot, logger, apiExecutor);
     this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor);
-    this.lifecycle = new TelegramLifecycle(this.bot, logger);
+    this.lifecycle = new TelegramLifecycle(this.bot, logger, {
+      messages: [...startupRecipients].map((chatId) => ({
+        chatId,
+        text: formatStartupNotification(
+          workspaces,
+          this.service.status({ surface: "telegram", conversationId: String(chatId) }).workspaceId,
+        ),
+      })),
+    });
     this.unsubscribeOutput = output.subscribe("telegram", (event) => this.outbox.handle(event));
     this.registerHandlers();
   }

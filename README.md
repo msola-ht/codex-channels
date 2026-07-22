@@ -23,6 +23,8 @@ launchd
 
 App Server 与 Gateway 是两个独立进程。Gateway 停止不会终止 App Server；连接中断后 Gateway 会有限次数指数退避重连、重新 `initialize` 并恢复已绑定 Thread 的订阅。Telegram 网络发送通过独立有界队列处理，不阻塞 App Server Reader。任务运行超过短暂延迟后会持续显示 Telegram 原生“正在输入”状态；收到第一批流式 delta 后发送正式消息，后续 delta 限速编辑同一消息，`item/completed` 再用权威文本定稿。`commentary` 进度与 `final_answer` 最终答复分开渲染，第一条最终答复通过 Telegram 原生回复关联到发起该 Turn 的输入。CLI 等外部客户端在已绑定 Thread 中发起 Turn 时，Telegram 会把外部文本渲染为引用式 `CLI 输入` 消息；Gateway 自己发起的输入通过协议 client ID 去重，不会重复回显。连接断开会停止后续编辑和“正在输入”状态，已经发出的正式消息仍保留。
 
+Gateway 已连接 App Server 且 Telegram Bot 完成鉴权后，会向 `TELEGRAM_ALLOWED_USER_IDS` 中的每个用户发送一次启动联通通知，包含该用户当前选择的 Workspace（未选择时为默认 Workspace）、工作目录和完整 Workspace 列表。用户尚未与 Bot 建立私聊等原因导致通知发送失败时，只记录告警，不影响 Gateway 和 Long Polling 继续运行。
+
 详细设计和边界见 [ARCHITECTURE_REBUILD_PROPOSAL.md](ARCHITECTURE_REBUILD_PROPOSAL.md)，项目约束见 [AGENTS.md](AGENTS.md)。
 
 ## 环境要求
@@ -40,19 +42,21 @@ App Server 与 Gateway 是两个独立进程。Gateway 停止不会终止 App Se
 npm install -g .
 ```
 
-在第一个目标项目目录初始化：
+初始化用户配置，然后在需要通过 Telegram 使用的项目目录注册 Workspace：
 
 ```bash
-cd /absolute/path/to/first-project
 codexc init
+cd /absolute/path/to/first-project
+codexc ws add
 ```
 
-`codexc init` 使用 Node `os.homedir()` 在当前系统用户主目录创建 `.codex-connect`，不会把配置写进全局 npm 包：
+`codexc init` 使用 Node `os.homedir()` 在当前系统用户主目录创建 `.codex-connect`，只将不含凭据和状态文件的 `.codex-connect/workspace` 子目录注册为默认 Workspace；项目目录通过 `codexc ws add` 显式注册。配置不会写进全局 npm 包：
 
 ```text
 ~/.codex-connect/
 ├── .env                         # 0600，Token、Workspace 和运行配置
 ├── data/gateway.sqlite3         # Telegram Workspace/Thread 最小绑定
+├── workspace/                   # 默认 Workspace，不存放 Gateway 凭据
 └── runtime/
     ├── codex-app-server.sock
     └── *.log
@@ -71,8 +75,9 @@ codexc config                    # 显示用户配置路径
 codexc ws                        # 列出 Workspace
 codexc ws add                    # 将当前目录注册为 Workspace
 codexc ws add --id docs --name Docs
-codexc remote                    # 启动默认 Workspace 的原生 Codex TUI
-codexc remote --workspace docs
+codexc remote                    # 在当前目录启动原生 Codex TUI
+codexc remote resume             # 列出当前目录的原生 Codex 会话
+codexc remote --workspace docs   # 显式使用已注册 Workspace
 ```
 
 `CODEX_CONNECT_HOME` 可以覆盖默认用户目录，主要用于隔离测试或多 Profile；正常使用无需设置。
@@ -155,6 +160,8 @@ npm run dev
 ```bash
 npm run remote
 ```
+
+`codexc remote` 和 `npm run remote` 未指定 `--workspace` 时使用命令调用目录；`--workspace <ID>` 显式选择 Registry 中的目录并覆盖当前目录。
 
 连接指定 Workspace：
 

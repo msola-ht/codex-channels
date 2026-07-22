@@ -61,6 +61,8 @@ export class GatewayApplication {
       service,
       this.output,
       new TelegramAccessPolicy(config.telegramAllowedUserIds),
+      config.telegramAllowedUserIds,
+      config.workspaces,
       logger,
     );
     this.approval = new ApprovalCoordinator(this.router, this.telegram.interactions, config.approvalTimeoutMs);

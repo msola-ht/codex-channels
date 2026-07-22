@@ -199,6 +199,24 @@ export function formatWorkspaces(workspaces: Workspace[], currentWorkspaceId: st
   ].join("\n");
 }
 
+export function formatStartupNotification(
+  workspaces: Workspace[],
+  currentWorkspaceId: string,
+): string {
+  const currentWorkspace = workspaces.find((workspace) => workspace.id === currentWorkspaceId);
+  if (!currentWorkspace) {
+    throw new Error(`当前 Workspace 不存在：${currentWorkspaceId}`);
+  }
+  return [
+    "Codex Connect Gateway 已联通。",
+    "Codex App Server：已连接",
+    `当前 Workspace：${currentWorkspace.name} · ${currentWorkspace.id}`,
+    `工作目录：${currentWorkspace.cwd}`,
+    "",
+    formatWorkspaces(workspaces, currentWorkspaceId),
+  ].join("\n");
+}
+
 export function formatPermissions(
   profiles: PermissionProfileListResponse["data"],
 ): string {

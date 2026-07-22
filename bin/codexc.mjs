@@ -40,7 +40,7 @@ try {
       runGateway(args);
       break;
     case "remote":
-      runScript("scripts/codex-remote.mjs", args);
+      runScript("scripts/codex-remote.mjs", args, {}, process.cwd());
       break;
     case "ws":
     case "workspace":
@@ -69,7 +69,7 @@ function initialize(args) {
   console.log(`配置目录：${result.dataDir}`);
   console.log(`配置文件：${result.envPath}`);
   if (result.created) {
-    console.log(`初始 Workspace：${result.workspace}`);
+    console.log(`默认 Workspace：${result.workspace}`);
     console.log("请填写 TELEGRAM_BOT_TOKEN 和 TELEGRAM_ALLOWED_USER_IDS，然后运行 codexc start。");
   }
 }
@@ -139,13 +139,13 @@ function showConfig(args) {
   console.log(`配置文件：${runtime.envPath}`);
 }
 
-function runScript(relativePath, args, additionalEnvironment = {}) {
+function runScript(relativePath, args, additionalEnvironment = {}, workingDirectory) {
   const runtime = configuredEnvironment();
   run(
     process.execPath,
     [join(packageDir, relativePath), ...args],
     { ...runtime.environment, ...additionalEnvironment },
-    runtime.dataDir,
+    workingDirectory ?? runtime.dataDir,
   );
 }
 
@@ -218,7 +218,7 @@ function printHelp() {
 
   init                         初始化 ~/.codex-connect
   start                        前台启动 App Server 与 Gateway
-  remote [--workspace ID]      启动共享 App Server 的 Codex TUI
+  remote [--workspace ID]      在当前目录启动共享 App Server 的 Codex TUI
   ws                           列出 Workspace
   ws add [--id ID] [--name 名称]
                                将当前目录注册为 Workspace

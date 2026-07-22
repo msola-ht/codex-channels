@@ -1,6 +1,8 @@
 import type { Bot } from "grammy";
 import type { Logger } from "pino";
 
+import { splitTelegramText } from "./format.js";
+
 const commands = [
   { command: "start", description: "使用说明" },
   { command: "resume", description: "列出或恢复 Codex 会话" },
@@ -24,14 +26,20 @@ const commands = [
   { command: "whoami", description: "显示 Telegram 用户 ID" },
 ];
 
+export interface TelegramStartupNotification {
+  messages: ReadonlyArray<{ chatId: number; text: string }>;
+}
+
 export class TelegramLifecycle {
   private polling: Promise<void> | undefined;
+  private startupNotificationTask: Promise<void> | undefined;
   private lifecycleAbort: AbortController | undefined;
   private stopping = false;
 
   constructor(
     private readonly bot: Bot,
     private readonly logger: Logger,
+    private readonly startupNotification?: TelegramStartupNotification,
   ) {}
 
   start(): void {
@@ -53,6 +61,8 @@ export class TelegramLifecycle {
     this.lifecycleAbort = undefined;
     await this.polling?.catch(() => undefined);
     this.polling = undefined;
+    await this.startupNotificationTask?.catch(() => undefined);
+    this.startupNotificationTask = undefined;
   }
 
   private async run(signal: AbortSignal): Promise<void> {
@@ -62,7 +72,32 @@ export class TelegramLifecycle {
     }
     this.logger.info({ username: this.bot.botInfo.username }, "Telegram Gateway 已启动");
     void this.registerCommandMenu(signal);
+    this.startupNotificationTask = this.sendStartupNotification(signal);
     await this.pollUpdates(signal);
+  }
+
+  private async sendStartupNotification(signal: AbortSignal): Promise<void> {
+    if (!this.startupNotification) {
+      return;
+    }
+    for (const { chatId, text } of this.startupNotification.messages) {
+      try {
+        for (const chunk of splitTelegramText(text)) {
+          await this.bot.api.sendMessage(chatId, chunk, {}, signal as never);
+        }
+      } catch (error) {
+        if (this.stopping || signal.aborted) {
+          return;
+        }
+        this.logger.warn(
+          {
+            chatId,
+            message: error instanceof Error ? error.message : String(error),
+          },
+          "Telegram 启动联通通知发送失败，不影响 Long Polling",
+        );
+      }
+    }
   }
 
   private async registerCommandMenu(signal: AbortSignal): Promise<void> {

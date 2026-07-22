@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatLimits,
   formatStatus,
+  formatStartupNotification,
   formatUsage,
   formatWorkspaces,
   splitTelegramText,
@@ -32,6 +33,25 @@ describe("formatWorkspaces", () => {
 
     expect(text).toContain("2. Docs · docs ← 当前");
     expect(text).toContain("/workspace/main");
+    expect(text).toContain("/workspace/docs");
+  });
+});
+
+describe("formatStartupNotification", () => {
+  it("reports connectivity and includes the configured workspaces", () => {
+    const text = formatStartupNotification(
+      [
+        { id: "main", name: "Main", cwd: "/workspace/main" },
+        { id: "docs", name: "Docs", cwd: "/workspace/docs" },
+      ],
+      "main",
+    );
+
+    expect(text).toContain("Codex Connect Gateway 已联通");
+    expect(text).toContain("Codex App Server：已连接");
+    expect(text).toContain("当前 Workspace：Main · main");
+    expect(text).toContain("1. Main · main ← 当前");
+    expect(text).toContain("2. Docs · docs");
     expect(text).toContain("/workspace/docs");
   });
 });
