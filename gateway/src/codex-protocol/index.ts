@@ -16,6 +16,8 @@ export type { ThreadUnsubscribeResponse } from "./generated/v2/ThreadUnsubscribe
 export type { TurnStartResponse } from "./generated/v2/TurnStartResponse.js";
 export type { TurnSteerResponse } from "./generated/v2/TurnSteerResponse.js";
 export type { ModelListResponse } from "./generated/v2/ModelListResponse.js";
+export type { Model } from "./generated/v2/Model.js";
+export type { ReasoningEffort } from "./generated/ReasoningEffort.js";
 export type { GetAccountTokenUsageResponse } from "./generated/v2/GetAccountTokenUsageResponse.js";
 export type { GetAccountRateLimitsResponse } from "./generated/v2/GetAccountRateLimitsResponse.js";
 export type { ListMcpServerStatusResponse } from "./generated/v2/ListMcpServerStatusResponse.js";

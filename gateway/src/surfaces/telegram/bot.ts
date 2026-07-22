@@ -14,6 +14,7 @@ import {
   formatModels,
   formatPermissions,
   formatPlugins,
+  formatReasoningEfforts,
   formatSessions,
   formatSkills,
   formatStatus,
@@ -101,7 +102,8 @@ export class TelegramSurface {
           "/compact",
           "/fork",
           "/review [branch <分支>|commit <SHA>|custom <说明>]",
-          "/model",
+          "/model [序号|模型 ID|名称]",
+          "/effort [序号|档位]",
           "/skills · /mcp · /plugins · /usage · /limits · /permissions",
           "/goal [set <目标>|clear]",
           "/cancel",
@@ -152,7 +154,18 @@ export class TelegramSurface {
       await context.reply(`已启动 Codex Review：${submission.turnId}`);
     });
     this.bot.command("model", async (context) => {
-      await this.replyChunks(context, formatModels(await this.service.listModels()));
+      const selector = commandArguments(context);
+      const state = selector
+        ? await this.service.selectModel(target(context), selector)
+        : await this.service.modelState(target(context));
+      await this.replyChunks(context, formatModels(state));
+    });
+    this.bot.command("effort", async (context) => {
+      const selector = commandArguments(context);
+      const state = selector
+        ? await this.service.selectEffort(target(context), selector)
+        : await this.service.modelState(target(context));
+      await this.replyChunks(context, formatReasoningEfforts(state));
     });
     this.bot.command("skills", async (context) => {
       await this.replyChunks(context, formatSkills(await this.service.listSkills(target(context))));

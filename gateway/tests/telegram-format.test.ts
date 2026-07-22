@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  formatModels,
+  formatReasoningEfforts,
   formatLimits,
   formatStatus,
   formatStartupNotification,
@@ -8,6 +10,31 @@ import {
   formatWorkspaces,
   splitTelegramText,
 } from "../src/surfaces/telegram/format.js";
+import type { Model } from "../src/codex-protocol/index.js";
+
+function model(name: string, efforts: string[], defaultEffort: string, isDefault = false): Model {
+  return {
+    id: name,
+    model: name,
+    upgrade: null,
+    upgradeInfo: null,
+    availabilityNux: null,
+    displayName: name,
+    description: `${name} description`,
+    hidden: false,
+    supportedReasoningEfforts: efforts.map((reasoningEffort) => ({
+      reasoningEffort,
+      description: `${reasoningEffort} description`,
+    })),
+    defaultReasoningEffort: defaultEffort,
+    inputModalities: ["text"],
+    supportsPersonality: true,
+    additionalSpeedTiers: [],
+    serviceTiers: [],
+    defaultServiceTier: null,
+    isDefault,
+  };
+}
 
 describe("splitTelegramText", () => {
   it("splits by Unicode code points without corrupting emoji", () => {
@@ -18,6 +45,34 @@ describe("splitTelegramText", () => {
     expect(chunks.join("")).toBe(text);
     expect(chunks.every((chunk) => !/[\uD800-\uDBFF]$/.test(chunk))).toBe(true);
     expect(chunks.every((chunk) => !/^[\uDC00-\uDFFF]/.test(chunk))).toBe(true);
+  });
+});
+
+describe("model formatting", () => {
+  const models = [
+    model("gpt-main", ["low", "medium", "high"], "medium", true),
+    model("gpt-fast", ["low", "high"], "low"),
+  ];
+
+  it("marks the selected model and explains how to switch", () => {
+    const text = formatModels({ models, model: "gpt-fast", effort: "high", pending: true });
+
+    expect(text).toContain("当前模型：gpt-fast（下一次 Turn 生效）");
+    expect(text).toContain("2. gpt-fast · gpt-fast ← 当前");
+    expect(text).toContain("/model <序号、模型 ID 或名称>");
+  });
+
+  it("only lists reasoning efforts supported by the current model", () => {
+    const text = formatReasoningEfforts({
+      models,
+      model: "gpt-fast",
+      effort: "high",
+      pending: false,
+    });
+
+    expect(text).toContain("2. high ← 当前");
+    expect(text).not.toContain("medium description");
+    expect(text).toContain("/effort <序号或档位>");
   });
 });
 
@@ -138,6 +193,9 @@ describe("formatStatus", () => {
       threadId: "thread-1",
       turnId: "turn-1",
       cwd: "/tmp/project",
+      model: "gpt-main",
+      effort: "high",
+      modelPending: false,
       tokenUsage: {
         total: {
           totalTokens: 1_250_000,
@@ -163,6 +221,8 @@ describe("formatStatus", () => {
     expect(text).toContain("最近 Turn：12.5 K");
     expect(text).toContain("缓存输入：750 K");
     expect(text).toContain("模型上下文窗口容量：200 K");
+    expect(text).toContain("模型：gpt-main");
+    expect(text).toContain("思考强度：high");
   });
 
   it("explains when a bound thread has not emitted token statistics", () => {
@@ -171,6 +231,9 @@ describe("formatStatus", () => {
       workspaceName: "Main",
       threadId: "thread-1",
       cwd: "/tmp/project",
+      model: "gpt-main",
+      effort: null,
+      modelPending: false,
     }))
       .toContain("等待 App Server 推送统计");
   });

@@ -11,6 +11,7 @@ import type { GatewayConfig } from "../config/index.js";
 import { ConversationCore } from "../conversation-core/core.js";
 import type { OutputEvent } from "../conversation-core/events.js";
 import { ConversationService } from "../application/conversation-service.js";
+import { ModelSelectionService } from "../application/model-selection-service.js";
 import { EventBus } from "../event-bus/event-bus.js";
 import { TelegramAccessPolicy } from "../policy/telegram-access.js";
 import { WorkspaceRegistry } from "../policy/workspace-registry.js";
@@ -54,7 +55,8 @@ export class GatewayApplication {
       new WorkspaceRegistry(config.workspaces, config.defaultWorkspaceId),
     );
     this.core = new ConversationCore(this.router, this.output);
-    const service = new ConversationService(this.codex, this.router, this.core);
+    const models = new ModelSelectionService(this.codex, this.router, config.codexModel);
+    const service = new ConversationService(this.codex, this.router, this.core, models);
     this.telegram = new TelegramSurface(
       config.telegramBotToken,
       config.telegramProxyUrl,
@@ -68,6 +70,18 @@ export class GatewayApplication {
     this.approval = new ApprovalCoordinator(this.router, this.telegram.interactions, config.approvalTimeoutMs);
     this.inbound.subscribe("conversation-core", (notification) => {
       this.core.handle(notification);
+      if (notification.method === "thread/settings/updated") {
+        const params = asRecord(notification.params);
+        const settings = asRecord(params?.threadSettings);
+        const threadId = typeof params?.threadId === "string" ? params.threadId : undefined;
+        const model = typeof settings?.model === "string" ? settings.model : undefined;
+        const effort = typeof settings?.effort === "string" || settings?.effort === null
+          ? settings.effort
+          : undefined;
+        if (threadId && model && effort !== undefined) {
+          this.router.updateModelSettings(threadId, { model, effort });
+        }
+      }
       if (isThreadUnavailable(notification.method)) {
         const params = asRecord(notification.params);
         const threadId = typeof params?.threadId === "string" ? params.threadId : undefined;

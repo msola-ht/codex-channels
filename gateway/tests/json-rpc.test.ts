@@ -49,6 +49,15 @@ class FakeTransport extends BaseTransport {
           }),
         ),
       );
+    } else if (decoded.method === "thread/start") {
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({
+            id: decoded.id,
+            result: { thread: { id: "thread-1" }, model: "gpt-default", reasoningEffort: "medium" },
+          }),
+        ),
+      );
     } else if (decoded.method === "account/rateLimits/read") {
       queueMicrotask(() =>
         this.emitMessage(
@@ -208,15 +217,41 @@ describe("JsonRpcClient", () => {
     });
     await client.connect();
 
-    await client.startTurn("thread-1", "测试输入", "codex_tg_gateway:request-1", "/tmp/project");
+    await client.startTurn(
+      "thread-1",
+      "测试输入",
+      "codex_tg_gateway:request-1",
+      "/tmp/project",
+      { model: "gpt-selected", effort: "high" },
+    );
     await client.steerTurn("thread-1", "turn-1", "补充输入", "codex_tg_gateway:request-2");
 
     expect(transport.sent.find((message) => message.method === "turn/start")?.params)
       .toMatchObject({
         clientUserMessageId: "codex_tg_gateway:request-1",
         cwd: "/tmp/project",
+        model: "gpt-selected",
+        effort: "high",
       });
     expect(transport.sent.find((message) => message.method === "turn/steer")?.params)
       .toMatchObject({ clientUserMessageId: "codex_tg_gateway:request-2" });
+  });
+
+  it("uses CODEX_MODEL only when starting a new thread", async () => {
+    const transport = new FakeTransport();
+    const rpc = new JsonRpcClient(transport);
+    const client = new CodexAppServerClient(rpc, {
+      sandbox: "workspace-write",
+      model: "gpt-configured",
+    });
+    await client.connect();
+
+    await client.startThread("/tmp/project");
+    await client.startTurn("thread-1", "测试输入", "request-1", "/tmp/project");
+
+    expect(transport.sent.find((message) => message.method === "thread/start")?.params)
+      .toMatchObject({ model: "gpt-configured" });
+    expect(transport.sent.find((message) => message.method === "turn/start")?.params)
+      .not.toHaveProperty("model");
   });
 });

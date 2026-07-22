@@ -5,7 +5,6 @@ import type {
   GetAccountRateLimitsResponse,
   GetAccountTokenUsageResponse,
   ListMcpServerStatusResponse,
-  ModelListResponse,
   PermissionProfileListResponse,
   PluginListResponse,
   ReviewTarget,
@@ -21,6 +20,7 @@ import {
   gatewayUserMessageClientIdPrefix,
   type ConversationTarget,
 } from "../conversation-core/events.js";
+import type { ModelSelectionService, ModelSelectionState } from "./model-selection-service.js";
 
 export interface Submission {
   threadId: string;
@@ -34,6 +34,9 @@ export interface ConversationStatus {
   workspaceId: string;
   workspaceName: string;
   cwd: string;
+  model: string;
+  effort: string | null;
+  modelPending: boolean;
   tokenUsage?: ThreadTokenUsage;
 }
 
@@ -44,6 +47,7 @@ export class ConversationService {
     private readonly codex: CodexAppServerClient,
     private readonly router: SessionRouter,
     private readonly core: ConversationCore,
+    private readonly models: ModelSelectionService,
   ) {}
 
   submit(target: ConversationTarget, text: string): Promise<Submission> {
@@ -60,7 +64,15 @@ export class ConversationService {
       }
       const binding = await this.router.ensure(target);
       const workspace = this.router.workspace(target);
-      const result = await this.codex.startTurn(binding.threadId, input, clientUserMessageId, workspace.cwd);
+      const overrides = this.models.turnOverrides(target);
+      const result = await this.codex.startTurn(
+        binding.threadId,
+        input,
+        clientUserMessageId,
+        workspace.cwd,
+        overrides,
+      );
+      this.models.markApplied(target);
       this.core.markTurnStarted(target, binding.threadId, result.turn.id);
       return { threadId: binding.threadId, turnId: result.turn.id, steered: false };
     });
@@ -76,6 +88,7 @@ export class ConversationService {
       const sessions = await this.router.list(target);
       const selected = resolveThread(sessions, selector.trim());
       const binding = await this.router.resume(target, selected.id);
+      this.models.clear(target);
       return binding.threadId;
     });
   }
@@ -84,6 +97,7 @@ export class ConversationService {
     return this.locked(target, async () => {
       this.requireIdle(target);
       await this.router.newSession(target);
+      this.models.clear(target);
     });
   }
 
@@ -95,7 +109,12 @@ export class ConversationService {
     return this.locked(target, async () => {
       this.requireIdle(target);
       const selected = this.router.resolveWorkspace(selector);
-      return this.router.selectWorkspace(target, selected.id);
+      const currentWorkspaceId = this.router.workspace(target).id;
+      const workspace = await this.router.selectWorkspace(target, selected.id);
+      if (workspace.id !== currentWorkspaceId) {
+        this.models.clear(target);
+      }
+      return workspace;
     });
   }
 
@@ -138,6 +157,7 @@ export class ConversationService {
       this.requireIdle(target);
       await this.router.ensure(target);
       const binding = await this.router.fork(target);
+      this.models.clear(target);
       return binding.threadId;
     });
   }
@@ -152,8 +172,22 @@ export class ConversationService {
     });
   }
 
-  listModels(): Promise<ModelListResponse["data"]> {
-    return this.codex.listModels();
+  modelState(target: ConversationTarget): Promise<ModelSelectionState> {
+    return this.models.state(target);
+  }
+
+  selectModel(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
+    return this.locked(target, async () => {
+      this.requireIdle(target);
+      return this.models.selectModel(target, selector);
+    });
+  }
+
+  selectEffort(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
+    return this.locked(target, async () => {
+      this.requireIdle(target);
+      return this.models.selectEffort(target, selector);
+    });
   }
 
   listSkills(target: ConversationTarget): Promise<SkillsListResponse["data"]> {
@@ -210,6 +244,7 @@ export class ConversationService {
     const active = this.core.activeTurn(target);
     const workspace = this.router.workspace(target);
     const tokenUsage = binding ? this.core.tokenUsage(binding.threadId) : undefined;
+    const model = this.models.status(target);
     return {
       ...(binding ? { threadId: binding.threadId } : {}),
       ...(active ? { turnId: active.turnId } : {}),
@@ -217,6 +252,9 @@ export class ConversationService {
       workspaceId: workspace.id,
       workspaceName: workspace.name,
       cwd: workspace.cwd,
+      model: model.model,
+      effort: model.effort,
+      modelPending: model.pending,
     };
   }
 

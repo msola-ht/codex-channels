@@ -109,6 +109,8 @@ STATE_DATABASE_PATH=./data/gateway.sqlite3
 LOG_LEVEL=info
 ```
 
+可选的 `CODEX_MODEL` 只作为新建 Thread 的初始模型；恢复已有 Thread 或后续 Turn 时，以 App Server 当前 Thread 设置以及 Telegram `/model`、`/effort` 的显式选择为准，避免覆盖原生 TUI 中的切换。
+
 `CODEX_WORKSPACES_JSON` 必须是非空 JSON 数组；每项包含唯一的 `id`、展示名称 `name` 和已存在的绝对目录 `cwd`。`CODEX_DEFAULT_WORKSPACE` 必须引用其中一个 ID。Telegram 只能通过 `/workspace` 选择这些预配置目录，不能通过聊天提交任意工作目录。Socket 父目录由安装脚本创建并设为 `0700`。
 
 源码开发模式也可以从目标项目目录直接注册当前目录，无需手工编辑 JSON：
@@ -222,7 +224,9 @@ npm run service:uninstall
 - `/stop`：中断活动 Turn
 - `/rename <名称>`、`/compact`、`/fork`
 - `/review [branch <分支>|commit <SHA>|custom <说明>]`
-- `/model`、`/skills`、`/mcp`、`/plugins`
+- `/model [序号|模型 ID|名称]`：查看或切换当前 Thread 模型；切换在下一次 Turn 生效
+- `/effort [序号|档位]`：查看或切换当前模型支持的思考强度；切换在下一次 Turn 生效
+- `/skills`、`/mcp`、`/plugins`
 - `/usage`：显示账号级 Token 汇总（M）和最近 7 个有数据日期的每日用量
 - `/limits`：显示套餐、主/次额度窗口、重置时间、Credits 和限流状态
 - `/permissions`

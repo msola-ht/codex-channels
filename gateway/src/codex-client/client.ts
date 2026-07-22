@@ -29,6 +29,11 @@ export interface ThreadDefaults {
   sandbox: "read-only" | "workspace-write";
 }
 
+export interface TurnOverrides {
+  model?: string;
+  effort?: string;
+}
+
 export class CodexAppServerClient {
   constructor(
     private readonly rpc: JsonRpcClient,
@@ -120,7 +125,6 @@ export class CodexAppServerClient {
         cwd,
         sandbox: this.defaults.sandbox,
         approvalPolicy: "on-request",
-        ...(this.defaults.model ? { model: this.defaults.model } : {}),
       },
       { retryOverload: false },
     );
@@ -139,6 +143,7 @@ export class CodexAppServerClient {
     text: string,
     clientUserMessageId: string,
     cwd: string,
+    overrides: TurnOverrides = {},
   ): Promise<TurnStartResponse> {
     return this.rpc.request<TurnStartResponse>(
       "turn/start",
@@ -147,7 +152,8 @@ export class CodexAppServerClient {
         clientUserMessageId,
         input: [{ type: "text", text, text_elements: [] }],
         cwd,
-        ...(this.defaults.model ? { model: this.defaults.model } : {}),
+        ...(overrides.model ? { model: overrides.model } : {}),
+        ...(overrides.effort ? { effort: overrides.effort } : {}),
       },
       { retryOverload: false },
     );
@@ -206,7 +212,6 @@ export class CodexAppServerClient {
         cwd,
         sandbox: this.defaults.sandbox,
         approvalPolicy: "on-request",
-        ...(this.defaults.model ? { model: this.defaults.model } : {}),
       },
       { retryOverload: false },
     );

@@ -2,13 +2,13 @@ import type {
   GetAccountRateLimitsResponse,
   GetAccountTokenUsageResponse,
   ListMcpServerStatusResponse,
-  ModelListResponse,
   PermissionProfileListResponse,
   PluginListResponse,
   SkillsListResponse,
   Thread,
 } from "../../codex-protocol/index.js";
 import type { ConversationStatus } from "../../application/conversation-service.js";
+import type { ModelSelectionState } from "../../application/model-selection-service.js";
 import type { Workspace } from "../../policy/workspace-registry.js";
 
 export function splitTelegramText(text: string, limit = 4_000): string[] {
@@ -53,10 +53,37 @@ function preview(value: string, limit = 48): string {
   return normalized.length > limit ? `${normalized.slice(0, limit - 1)}…` : normalized;
 }
 
-export function formatModels(models: ModelListResponse["data"]): string {
+export function formatModels(state: ModelSelectionState): string {
   return [
-    `可用模型（${models.length}）：`,
-    ...models.map((model) => `${model.isDefault ? "*" : "-"} ${model.displayName} · ${model.model}`),
+    `当前模型：${state.model}${state.pending ? "（下一次 Turn 生效）" : ""}`,
+    `思考强度：${state.effort ?? "模型默认"}`,
+    "",
+    `可用模型（${state.models.length}）：`,
+    ...state.models.map(
+      (model, index) =>
+        `${index + 1}. ${model.displayName} · ${model.model}${model.model === state.model ? " ← 当前" : ""}`,
+    ),
+    "",
+    "切换：/model <序号、模型 ID 或名称>",
+  ].join("\n");
+}
+
+export function formatReasoningEfforts(state: ModelSelectionState): string {
+  const model = state.models.find((candidate) => candidate.model === state.model);
+  if (!model) {
+    throw new Error(`当前模型不在可用模型列表中：${state.model}`);
+  }
+  return [
+    `当前模型：${state.model}`,
+    `当前思考强度：${state.effort ?? model.defaultReasoningEffort}${state.pending ? "（下一次 Turn 生效）" : ""}`,
+    "",
+    "可用思考强度：",
+    ...model.supportedReasoningEfforts.map(
+      (option, index) =>
+        `${index + 1}. ${option.reasoningEffort}${option.reasoningEffort === state.effort ? " ← 当前" : ""} · ${option.description}`,
+    ),
+    "",
+    "切换：/effort <序号或档位>",
   ].join("\n");
 }
 
@@ -166,6 +193,8 @@ export function formatStatus(status: ConversationStatus): string {
     `Thread：${status.threadId ?? "尚未绑定"}`,
     `Turn：${status.turnId ?? "空闲"}`,
     `工作目录：${status.cwd}`,
+    `模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
+    `思考强度：${status.effort ?? "模型默认"}`,
   ];
   if (status.tokenUsage) {
     const { total, last, modelContextWindow } = status.tokenUsage;

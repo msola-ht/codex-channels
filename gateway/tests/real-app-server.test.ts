@@ -56,6 +56,13 @@ suite("real Codex App Server over Unix WebSocket", () => {
     expect(result.rateLimits).toBeDefined();
     expect(result.rateLimits.primary === null || typeof result.rateLimits.primary.usedPercent === "number").toBe(true);
   });
+
+  it("lists models with their supported reasoning efforts", async () => {
+    const models = await client.listModels();
+
+    expect(models.length).toBeGreaterThan(0);
+    expect(models.every((model) => model.supportedReasoningEfforts.length > 0)).toBe(true);
+  });
 });
 
 suite("real Codex App Server over stdio", () => {

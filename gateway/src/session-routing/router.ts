@@ -4,8 +4,14 @@ import type { ConversationTarget } from "../conversation-core/events.js";
 import type { Workspace, WorkspaceRegistry } from "../policy/workspace-registry.js";
 import type { BindingStore, ConversationBinding } from "../storage/binding-store.js";
 
+export interface ThreadModelSettings {
+  model: string;
+  effort: string | null;
+}
+
 export class SessionRouter {
   private readonly forceNew = new Set<string>();
+  private readonly modelSettingsByThread = new Map<string, ThreadModelSettings>();
 
   constructor(
     private readonly codex: CodexAppServerClient,
@@ -42,12 +48,24 @@ export class SessionRouter {
     return this.bindings.list();
   }
 
+  modelSettings(target: ConversationTarget): ThreadModelSettings | undefined {
+    const binding = this.current(target);
+    return binding ? this.modelSettingsByThread.get(binding.threadId) : undefined;
+  }
+
+  updateModelSettings(threadId: string, settings: ThreadModelSettings): void {
+    if (this.bindings.getByThread(threadId)) {
+      this.modelSettingsByThread.set(threadId, settings);
+    }
+  }
+
   async restoreSubscriptions(): Promise<Array<{ binding: ConversationBinding; error: Error }>> {
     const failures: Array<{ binding: ConversationBinding; error: Error }> = [];
     for (const binding of this.bindings.list()) {
       try {
         const workspace = this.workspaces.require(binding.workspaceId);
         const resumed = await this.codex.resumeThread(binding.threadId, workspace.cwd);
+        this.captureModelSettings(resumed.thread.id, resumed.model, resumed.reasoningEffort);
         this.bindings.bind({
           target: binding.target,
           workspaceId: workspace.id,
@@ -89,6 +107,7 @@ export class SessionRouter {
       );
       if (candidate) {
         const resumed = await this.codex.resumeThread(candidate.id, workspace.cwd);
+        this.captureModelSettings(resumed.thread.id, resumed.model, resumed.reasoningEffort);
         const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
         this.bindings.bind(binding);
         return binding;
@@ -96,6 +115,7 @@ export class SessionRouter {
     }
 
     const started = await this.codex.startThread(workspace.cwd);
+    this.captureModelSettings(started.thread.id, started.model, started.reasoningEffort);
     const binding = { target, workspaceId: workspace.id, threadId: started.thread.id, sessionId: started.thread.sessionId };
     this.bindings.bind(binding);
     this.forceNew.delete(targetKey);
@@ -110,6 +130,7 @@ export class SessionRouter {
     const workspace = this.workspace(target);
     await this.detach(target);
     const resumed = await this.codex.resumeThread(threadId, workspace.cwd);
+    this.captureModelSettings(resumed.thread.id, resumed.model, resumed.reasoningEffort);
     const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
     this.bindings.bind(binding);
     this.forceNew.delete(this.key(target));
@@ -139,6 +160,7 @@ export class SessionRouter {
     }
     const workspace = this.workspaces.require(current.workspaceId);
     const forked = await this.codex.forkThread(current.threadId, workspace.cwd);
+    this.captureModelSettings(forked.thread.id, forked.model, forked.reasoningEffort);
     await this.detach(target);
     const binding = {
       target,
@@ -153,6 +175,7 @@ export class SessionRouter {
   forgetThread(threadId: string): ConversationTarget | undefined {
     const binding = this.bindings.getByThread(threadId);
     if (binding) {
+      this.modelSettingsByThread.delete(threadId);
       this.bindings.unbind(binding.target);
       return binding.target;
     }
@@ -163,11 +186,16 @@ export class SessionRouter {
     const current = this.bindings.get(target);
     if (current) {
       await this.codex.unsubscribeThread(current.threadId);
+      this.modelSettingsByThread.delete(current.threadId);
       this.bindings.unbind(target);
     }
   }
 
   private key(target: ConversationTarget): string {
     return `${target.surface}:${target.conversationId}`;
+  }
+
+  private captureModelSettings(threadId: string, model: string, effort: string | null): void {
+    this.modelSettingsByThread.set(threadId, { model, effort });
   }
 }

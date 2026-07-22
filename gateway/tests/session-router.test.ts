@@ -51,7 +51,11 @@ describe("SessionRouter", () => {
       ],
       resumeThread: async (threadId: string) => {
         resumed.push(threadId);
-        return { thread: thread(threadId, { type: "idle" }) };
+        return {
+          thread: thread(threadId, { type: "idle" }),
+          model: "gpt-main",
+          reasoningEffort: "high",
+        };
       },
     } as unknown as CodexAppServerClient;
     const router = new SessionRouter(client, new MemoryBindingStore(), registry);
@@ -60,6 +64,10 @@ describe("SessionRouter", () => {
 
     expect(binding.threadId).toBe("idle");
     expect(resumed).toEqual(["idle"]);
+    expect(router.modelSettings(target)).toEqual({ model: "gpt-main", effort: "high" });
+
+    router.updateModelSettings("idle", { model: "gpt-updated", effort: "xhigh" });
+    expect(router.modelSettings(target)).toEqual({ model: "gpt-updated", effort: "xhigh" });
   });
 
   it("unsubscribes before forcing a new thread", async () => {
