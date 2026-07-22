@@ -311,8 +311,18 @@ export class TelegramSurface {
         return;
       }
       const submission = await this.service.submit(target(context), context.message.text);
+      this.outbox.setTurnReplyTarget(
+        submission.threadId,
+        submission.turnId,
+        context.message.message_id,
+      );
       if (submission.steered) {
-        await context.reply("已将补充要求追加到当前 Turn。");
+        await context.reply("已将补充要求追加到当前 Turn。", {
+          reply_parameters: {
+            message_id: context.message.message_id,
+            allow_sending_without_reply: true,
+          },
+        });
       }
     });
   }

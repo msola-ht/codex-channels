@@ -41,6 +41,13 @@ export class TelegramOutbox {
     private readonly logger: Logger,
   ) {}
 
+  setTurnReplyTarget(threadId: string, turnId: string, messageId: number): void {
+    if (this.closed) {
+      return;
+    }
+    this.replyToByTurn.set(this.turnKey(threadId, turnId), messageId);
+  }
+
   handle(event: OutputEvent): void {
     if (this.closed) {
       return;

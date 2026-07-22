@@ -27,7 +27,11 @@ describe("ccx CLI", () => {
     const second = join(root, "Second Project");
     mkdirSync(first);
     mkdirSync(second);
-    const environment = { ...process.env, CODEX_CONNECT_HOME: home };
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_ENV_FILE: "",
+    };
 
     const initialized = execFileSync(process.execPath, [cli, "init"], {
       cwd: first,
@@ -69,7 +73,11 @@ describe("ccx CLI", () => {
     const home = join(root, ".codex-connect");
     const workspace = join(root, "Workspace");
     mkdirSync(workspace);
-    const environment = { ...process.env, CODEX_CONNECT_HOME: home };
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_ENV_FILE: "",
+    };
 
     execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
     const before = readFileSync(join(home, ".env"), "utf8");

@@ -129,6 +129,26 @@ describe("TelegramOutbox", () => {
       },
     });
   });
+
+  it("replies to the Telegram message that started the turn", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.setTurnReplyTarget("thread-1", "turn-1", 42);
+    outbox.handle(textCompleted("final", "来自 Codex 的回复"));
+    outbox.handle(turnCompleted());
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual(["来自 Codex 的回复"]);
+    expect(api.sendOptions[0]).toMatchObject({
+      reply_parameters: {
+        message_id: 42,
+        allow_sending_without_reply: true,
+      },
+    });
+  });
 });
 
 function createOutbox(api: FakeTelegramApi): TelegramOutbox {
