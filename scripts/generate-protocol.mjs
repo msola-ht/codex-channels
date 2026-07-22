@@ -22,3 +22,5 @@ writeFileSync(
   resolve(root, "src/codex-protocol/version.json"),
   `${JSON.stringify({ codexCli: version, experimental: false }, null, 2)}\n`,
 );
+
+await import("./sync-gateway-version.mjs");

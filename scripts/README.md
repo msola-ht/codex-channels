@@ -13,9 +13,9 @@
 - `dev-all.mjs`：开发模式下复用或启动 App Server，再启动 Gateway。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Socket 和工作目录。
 - `codex-remote.sh`：兼容性的 Shell 转发入口。
-- `generate-protocol.mjs`：调用当前 Codex CLI 重新生成协议类型和版本记录。
+- `generate-protocol.mjs`：调用当前 Codex CLI 重新生成协议类型和版本记录，并同步 npm/Gateway 版本。
 - `check-protocol.mjs`：校验本机 Codex CLI 与锁定协议版本一致。
-- `check-gateway-version.mjs`：校验 npm 包版本与 Gateway 版本一致。
+- `check-gateway-version.mjs`：校验 npm 包和 Gateway 版本都与 Codex CLI 协议版本一致。
 
 ## 构建、打包与服务
 
@@ -23,7 +23,7 @@
 - `prepare-package.mjs`：npm 打包前构建源码，并验证已安装包包含运行入口。
 - `smoke-package.mjs`：生成实际 tarball，在隔离目录安装并执行两个公开 CLI 入口。
 - `check-release-tag.mjs`：要求 Git Tag 与 `package.json` 版本严格一致，防止发布错版。
-- `sync-gateway-version.mjs`：在 `npm version` 生命周期中同步 Gateway 运行时版本文件。
+- `sync-gateway-version.mjs`：以锁定的 Codex CLI 协议版本同步 `package.json`、锁文件和 Gateway 运行时版本；不维护独立版本号。
 - `doctor.mjs`：检查 npm 包、Node、Codex CLI、用户配置、Workspace、Unix WebSocket 与 launchd 状态，不输出敏感配置内容。
 - `install-launchd.mjs`：渲染并安装 launchd plist。
 - `launchd-control.sh`：安装、启停、查看和卸载两个 launchd 服务；安装时清理旧标签，日常重启只更新 Gateway，保持共享 App Server 和活动 Turn 运行。

@@ -1,6 +1,6 @@
 {
   "name": "@hegenai/codexc",
-  "version": "0.2.1",
+  "version": "0.145.0",
   "description": "Telegram gateway for a shared Codex App Server",
   "keywords": [
     "codex",
@@ -42,7 +42,7 @@
     "prebuild": "node scripts/clean-dist.mjs",
     "build": "tsc -p tsconfig.build.json",
     "prepare": "node scripts/prepare-package.mjs",
-    "version": "node scripts/sync-gateway-version.mjs",
+    "version:sync": "node scripts/sync-gateway-version.mjs",
     "check": "tsc -p tsconfig.json --noEmit && node scripts/check-gateway-version.mjs",
     "dev": "tsx src/main.ts",
     "dev:all": "node scripts/dev-all.mjs",
