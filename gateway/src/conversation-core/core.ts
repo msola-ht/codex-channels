@@ -1,13 +1,17 @@
-import type { RpcNotification } from "../codex-client/json-rpc.js";
 import type { MessagePhase, ThreadTokenUsage } from "../codex-protocol/index.js";
 import type { EventBus } from "../event-bus/event-bus.js";
-import type { SessionRouter } from "../session-routing/router.js";
 import {
   gatewayUserMessageClientIdPrefix,
   type ConversationTarget,
   type OutputEvent,
   isCriticalOutputEvent,
 } from "./events.js";
+import type { ConversationRoutingPort } from "./routing-port.js";
+
+export interface CodexNotification {
+  method: string;
+  params: unknown;
+}
 
 interface ActiveTurn {
   target: ConversationTarget;
@@ -42,7 +46,7 @@ export class ConversationCore {
   private readonly phaseByItem = new Map<string, MessagePhase | null>();
 
   constructor(
-    private readonly router: SessionRouter,
+    private readonly router: ConversationRoutingPort,
     private readonly output: EventBus<OutputEvent>,
   ) {}
 
@@ -79,7 +83,7 @@ export class ConversationCore {
     }
   }
 
-  handle(notification: RpcNotification): void {
+  handle(notification: CodexNotification): void {
     const params = asRecord(notification.params);
     const threadId = stringField(params, "threadId");
 
@@ -206,7 +210,7 @@ export class ConversationCore {
         if (!threadId) {
           return;
         }
-        const target = this.router.forgetThread(threadId);
+        const target = this.router.targetForThread(threadId);
         this.usageByThread.delete(threadId);
         this.clearSeenUserMessages(threadId);
         this.clearItemPhases(threadId);

@@ -1,12 +1,26 @@
 import { randomUUID } from "node:crypto";
 
 import type { CodexAppServerClient } from "../codex-client/client.js";
-import type { Thread, ThreadTokenUsage } from "../codex-protocol/index.js";
-import type { ReviewTarget } from "../codex-protocol/index.js";
+import type {
+  GetAccountRateLimitsResponse,
+  GetAccountTokenUsageResponse,
+  ListMcpServerStatusResponse,
+  ModelListResponse,
+  PermissionProfileListResponse,
+  PluginListResponse,
+  ReviewTarget,
+  SkillsListResponse,
+  Thread,
+  ThreadGoal,
+  ThreadTokenUsage,
+} from "../codex-protocol/index.js";
 import type { SessionRouter } from "../session-routing/router.js";
 import type { Workspace } from "../policy/workspace-registry.js";
-import { ConversationCore } from "./core.js";
-import { gatewayUserMessageClientIdPrefix, type ConversationTarget } from "./events.js";
+import { ConversationCore } from "../conversation-core/core.js";
+import {
+  gatewayUserMessageClientIdPrefix,
+  type ConversationTarget,
+} from "../conversation-core/events.js";
 
 export interface Submission {
   threadId: string;
@@ -138,42 +152,42 @@ export class ConversationService {
     });
   }
 
-  listModels(): ReturnType<CodexAppServerClient["listModels"]> {
+  listModels(): Promise<ModelListResponse["data"]> {
     return this.codex.listModels();
   }
 
-  listSkills(target: ConversationTarget): ReturnType<CodexAppServerClient["listSkills"]> {
+  listSkills(target: ConversationTarget): Promise<SkillsListResponse["data"]> {
     return this.codex.listSkills(this.router.workspace(target).cwd);
   }
 
-  listMcpServers(target: ConversationTarget): ReturnType<CodexAppServerClient["listMcpServers"]> {
+  listMcpServers(target: ConversationTarget): Promise<ListMcpServerStatusResponse["data"]> {
     return this.codex.listMcpServers(this.router.current(target)?.threadId);
   }
 
-  listPlugins(target: ConversationTarget): ReturnType<CodexAppServerClient["listPlugins"]> {
+  listPlugins(target: ConversationTarget): Promise<PluginListResponse> {
     return this.codex.listPlugins(this.router.workspace(target).cwd);
   }
 
-  accountUsage(): ReturnType<CodexAppServerClient["accountUsage"]> {
+  accountUsage(): Promise<GetAccountTokenUsageResponse> {
     return this.codex.accountUsage();
   }
 
-  accountRateLimits(): ReturnType<CodexAppServerClient["accountRateLimits"]> {
+  accountRateLimits(): Promise<GetAccountRateLimitsResponse> {
     return this.codex.accountRateLimits();
   }
 
-  listPermissionProfiles(target: ConversationTarget): ReturnType<CodexAppServerClient["listPermissionProfiles"]> {
+  listPermissionProfiles(target: ConversationTarget): Promise<PermissionProfileListResponse["data"]> {
     return this.codex.listPermissionProfiles(this.router.workspace(target).cwd);
   }
 
-  getGoal(target: ConversationTarget): Promise<Awaited<ReturnType<CodexAppServerClient["getGoal"]>>> {
+  getGoal(target: ConversationTarget): Promise<ThreadGoal | null> {
     return this.locked(target, async () => {
       const binding = await this.router.ensure(target);
       return this.codex.getGoal(binding.threadId);
     });
   }
 
-  setGoal(target: ConversationTarget, objective: string): Promise<Awaited<ReturnType<CodexAppServerClient["setGoal"]>>> {
+  setGoal(target: ConversationTarget, objective: string): Promise<ThreadGoal> {
     const normalized = objective.trim();
     if (!normalized) {
       return Promise.reject(new Error("目标不能为空"));

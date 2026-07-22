@@ -10,7 +10,7 @@ import { protocolVersion } from "../codex-protocol/index.js";
 import type { GatewayConfig } from "../config/index.js";
 import { ConversationCore } from "../conversation-core/core.js";
 import type { OutputEvent } from "../conversation-core/events.js";
-import { ConversationService } from "../conversation-core/service.js";
+import { ConversationService } from "../application/conversation-service.js";
 import { EventBus } from "../event-bus/event-bus.js";
 import { TelegramAccessPolicy } from "../policy/telegram-access.js";
 import { WorkspaceRegistry } from "../policy/workspace-registry.js";
@@ -64,7 +64,16 @@ export class GatewayApplication {
       logger,
     );
     this.approval = new ApprovalCoordinator(this.router, this.telegram.interactions, config.approvalTimeoutMs);
-    this.inbound.subscribe("conversation-core", (notification) => this.core.handle(notification));
+    this.inbound.subscribe("conversation-core", (notification) => {
+      this.core.handle(notification);
+      if (isThreadUnavailable(notification.method)) {
+        const params = asRecord(notification.params);
+        const threadId = typeof params?.threadId === "string" ? params.threadId : undefined;
+        if (threadId) {
+          this.router.forgetThread(threadId);
+        }
+      }
+    });
     this.inbound.subscribe("approval-resolution", (notification) => {
       if (notification.method === "serverRequest/resolved") {
         const params = notification.params as { requestId?: string | number };
@@ -184,4 +193,14 @@ function verifyCodexVersion(config: GatewayConfig): void {
 
 function isCriticalNotification(method: string): boolean {
   return !method.endsWith("/delta") && !method.endsWith("/outputDelta");
+}
+
+function isThreadUnavailable(method: string): boolean {
+  return method === "thread/closed" || method === "thread/archived" || method === "thread/deleted";
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null
+    ? value as Record<string, unknown>
+    : undefined;
 }

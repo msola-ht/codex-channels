@@ -7,7 +7,7 @@ import {
   type OutputEvent,
 } from "../src/conversation-core/events.js";
 import { EventBus } from "../src/event-bus/event-bus.js";
-import type { SessionRouter } from "../src/session-routing/router.js";
+import type { ConversationRoutingPort } from "../src/conversation-core/routing-port.js";
 
 describe("ConversationCore", () => {
   it("reduces thread token usage notifications for status rendering", async () => {
@@ -15,8 +15,7 @@ describe("ConversationCore", () => {
     const router = {
       allBindings: () => [],
       targetForThread: () => undefined,
-      forgetThread: () => undefined,
-    } as unknown as SessionRouter;
+    } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
 
     core.handle({
@@ -50,8 +49,7 @@ describe("ConversationCore", () => {
     const router = {
       allBindings: () => [],
       targetForThread: (threadId: string) => threadId === "thread-1" ? target : undefined,
-      forgetThread: () => undefined,
-    } as unknown as SessionRouter;
+    } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
 
     core.handle({
@@ -98,8 +96,7 @@ describe("ConversationCore", () => {
     const router = {
       allBindings: () => [],
       targetForThread: () => target,
-      forgetThread: () => undefined,
-    } as unknown as SessionRouter;
+    } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
 
     core.handle({
@@ -130,8 +127,7 @@ describe("ConversationCore", () => {
     const router = {
       allBindings: () => [{ target, threadId: "thread-1" }],
       targetForThread: () => target,
-      forgetThread: () => undefined,
-    } as unknown as SessionRouter;
+    } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
 
     core.handle({

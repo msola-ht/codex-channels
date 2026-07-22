@@ -1,6 +1,14 @@
-import type { Thread } from "../../codex-protocol/index.js";
-import type { CodexAppServerClient } from "../../codex-client/client.js";
-import type { ConversationStatus } from "../../conversation-core/service.js";
+import type {
+  GetAccountRateLimitsResponse,
+  GetAccountTokenUsageResponse,
+  ListMcpServerStatusResponse,
+  ModelListResponse,
+  PermissionProfileListResponse,
+  PluginListResponse,
+  SkillsListResponse,
+  Thread,
+} from "../../codex-protocol/index.js";
+import type { ConversationStatus } from "../../application/conversation-service.js";
 import type { Workspace } from "../../policy/workspace-registry.js";
 
 export function splitTelegramText(text: string, limit = 4_000): string[] {
@@ -45,14 +53,14 @@ function preview(value: string, limit = 48): string {
   return normalized.length > limit ? `${normalized.slice(0, limit - 1)}…` : normalized;
 }
 
-export function formatModels(models: Awaited<ReturnType<CodexAppServerClient["listModels"]>>): string {
+export function formatModels(models: ModelListResponse["data"]): string {
   return [
     `可用模型（${models.length}）：`,
     ...models.map((model) => `${model.isDefault ? "*" : "-"} ${model.displayName} · ${model.model}`),
   ].join("\n");
 }
 
-export function formatSkills(entries: Awaited<ReturnType<CodexAppServerClient["listSkills"]>>): string {
+export function formatSkills(entries: SkillsListResponse["data"]): string {
   const skills = entries.flatMap((entry) => entry.skills);
   return [
     `可用 Skills（${skills.length}）：`,
@@ -60,7 +68,7 @@ export function formatSkills(entries: Awaited<ReturnType<CodexAppServerClient["l
   ].join("\n");
 }
 
-export function formatMcpServers(servers: Awaited<ReturnType<CodexAppServerClient["listMcpServers"]>>): string {
+export function formatMcpServers(servers: ListMcpServerStatusResponse["data"]): string {
   return [
     `MCP Servers（${servers.length}）：`,
     ...servers.map(
@@ -70,7 +78,7 @@ export function formatMcpServers(servers: Awaited<ReturnType<CodexAppServerClien
   ].join("\n");
 }
 
-export function formatPlugins(result: Awaited<ReturnType<CodexAppServerClient["listPlugins"]>>): string {
+export function formatPlugins(result: PluginListResponse): string {
   const plugins = result.marketplaces.flatMap((marketplace) => marketplace.plugins);
   return [
     `Plugins（${plugins.length}，App Server 中该接口仍在开发中）：`,
@@ -80,7 +88,7 @@ export function formatPlugins(result: Awaited<ReturnType<CodexAppServerClient["l
   ].join("\n");
 }
 
-export function formatUsage(result: Awaited<ReturnType<CodexAppServerClient["accountUsage"]>>): string {
+export function formatUsage(result: GetAccountTokenUsageResponse): string {
   const summary = result.summary;
   const daily = [...(result.dailyUsageBuckets ?? [])]
     .sort((left, right) => right.startDate.localeCompare(left.startDate))
@@ -104,7 +112,7 @@ export function formatUsage(result: Awaited<ReturnType<CodexAppServerClient["acc
 }
 
 export function formatLimits(
-  result: Awaited<ReturnType<CodexAppServerClient["accountRateLimits"]>>,
+  result: GetAccountRateLimitsResponse,
 ): string {
   const configured = result.rateLimitsByLimitId
     ? Object.entries(result.rateLimitsByLimitId).filter((entry) => entry[1] !== undefined)
@@ -192,7 +200,7 @@ export function formatWorkspaces(workspaces: Workspace[], currentWorkspaceId: st
 }
 
 export function formatPermissions(
-  profiles: Awaited<ReturnType<CodexAppServerClient["listPermissionProfiles"]>>,
+  profiles: PermissionProfileListResponse["data"],
 ): string {
   return [
     "当前 Gateway 固定使用配置中的 read-only 或 workspace-write。",
@@ -227,7 +235,7 @@ function formatTokenCount(value: number): string {
 }
 
 function formatRateLimitWindow(
-  window: Awaited<ReturnType<CodexAppServerClient["accountRateLimits"]>>["rateLimits"]["primary"],
+  window: GetAccountRateLimitsResponse["rateLimits"]["primary"],
 ): string {
   if (!window) {
     return "暂无数据";
