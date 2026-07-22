@@ -33,7 +33,7 @@ try {
       initialize(args);
       break;
     case "start":
-      requireNoArguments(args, "用法：ccx start");
+      requireNoArguments(args, "用法：codexc start");
       runScript("scripts/dev-all.mjs", args, { CODEX_CONNECT_GATEWAY_ENTRY: "dist" });
       break;
     case "gateway":
@@ -53,7 +53,7 @@ try {
       showConfig(args);
       break;
     default:
-      throw new Error(`未知命令：${command}\n运行 ccx --help 查看用法`);
+      throw new Error(`未知命令：${command}\n运行 codexc --help 查看用法`);
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
@@ -62,7 +62,7 @@ try {
 
 function initialize(args) {
   if (args.length > 0) {
-    throw new Error("用法：ccx init");
+    throw new Error("用法：codexc init");
   }
   const result = initializeUserData({ cwd: process.cwd() });
   console.log(result.created ? "Codex Connect 已初始化。" : "Codex Connect 已经初始化。");
@@ -70,13 +70,13 @@ function initialize(args) {
   console.log(`配置文件：${result.envPath}`);
   if (result.created) {
     console.log(`初始 Workspace：${result.workspace}`);
-    console.log("请填写 TELEGRAM_BOT_TOKEN 和 TELEGRAM_ALLOWED_USER_IDS，然后运行 ccx start。");
+    console.log("请填写 TELEGRAM_BOT_TOKEN 和 TELEGRAM_ALLOWED_USER_IDS，然后运行 codexc start。");
   }
 }
 
 function runGateway(args) {
   if (args.length > 0) {
-    throw new Error("用法：ccx gateway");
+    throw new Error("用法：codexc gateway");
   }
   const runtime = configuredEnvironment();
   run(process.execPath, [join(packageDir, "dist/gateway/src/main.js")], runtime.environment, runtime.dataDir);
@@ -101,7 +101,7 @@ function workspace(args) {
     return;
   }
   if (args.length > 0) {
-    throw new Error("用法：ccx ws [add [--id ID] [--name 名称]]");
+    throw new Error("用法：codexc ws [add [--id ID] [--name 名称]]");
   }
   const env = parse(readFileSync(runtime.envPath, "utf8"));
   const { workspaces, defaultWorkspace } = readWorkspaceConfig(env);
@@ -114,11 +114,11 @@ function workspace(args) {
 
 function service(args) {
   if (process.platform !== "darwin") {
-    throw new Error("ccx service 当前仅支持 macOS launchd；Linux 可使用 ccx start，Windows Transport 尚未支持");
+    throw new Error("codexc service 当前仅支持 macOS launchd；Linux 可使用 codexc start，Windows Transport 尚未支持");
   }
   const [action, ...rest] = args;
   if (rest.length > 0 || !["install", "start", "stop", "restart", "status"].includes(action)) {
-    throw new Error("用法：ccx service <install|start|stop|restart|status>");
+    throw new Error("用法：codexc service <install|start|stop|restart|status>");
   }
   if (action === "install") {
     runScript("scripts/install-launchd.mjs", []);
@@ -130,7 +130,7 @@ function service(args) {
 }
 
 function showConfig(args) {
-  requireNoArguments(args, "用法：ccx config");
+  requireNoArguments(args, "用法：codexc config");
   const explicitEnvFile = process.env.CODEX_CONNECT_ENV_FILE?.trim();
   const runtime = explicitEnvFile
     ? runtimeConfig()
@@ -200,7 +200,7 @@ function parseWorkspaceAddOptions(args) {
 }
 
 function printVersion(args) {
-  requireNoArguments(args, "用法：ccx version");
+  requireNoArguments(args, "用法：codexc version");
   const metadata = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
   console.log(metadata.version);
 }
@@ -214,7 +214,7 @@ function requireNoArguments(args, usage) {
 function printHelp() {
   console.log(`Codex Connect CLI
 
-用法：ccx <命令>
+用法：codexc <命令>
 
   init                         初始化 ~/.codex-connect
   start                        前台启动 App Server 与 Gateway

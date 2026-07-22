@@ -71,7 +71,7 @@ export function requireUserConfig(environment = process.env) {
   const envPath = explicitEnvFile ? resolve(explicitEnvFile) : join(home, ".env");
   const dataDir = explicitEnvFile ? dirname(envPath) : home;
   if (!existsSync(envPath)) {
-    throw new Error(`尚未初始化，请先运行 ccx init\n配置目录：${dataDir}`);
+    throw new Error(`尚未初始化，请先运行 codexc init\n配置目录：${dataDir}`);
   }
   chmodSync(dataDir, 0o700);
   chmodSync(envPath, 0o600);

@@ -32,7 +32,7 @@ App Server 与 Gateway 是两个独立进程。Gateway 停止不会终止 App Se
 
 ## npm CLI 安装
 
-项目以 Node.js npm 包提供两个等价命令：短命令 `ccx` 和完整命令 `codex-connect`。本机从仓库安装：
+项目以 Node.js npm 包提供两个等价命令：短命令 `codexc` 和完整命令 `codex-connect`。本机从仓库安装：
 
 ```bash
 npm install -g .
@@ -42,10 +42,10 @@ npm install -g .
 
 ```bash
 cd /absolute/path/to/first-project
-ccx init
+codexc init
 ```
 
-`ccx init` 使用 Node `os.homedir()` 在当前系统用户主目录创建 `.codex-connect`，不会把配置写进全局 npm 包：
+`codexc init` 使用 Node `os.homedir()` 在当前系统用户主目录创建 `.codex-connect`，不会把配置写进全局 npm 包：
 
 ```text
 ~/.codex-connect/
@@ -59,18 +59,18 @@ ccx init
 编辑 `~/.codex-connect/.env`，填写 `TELEGRAM_BOT_TOKEN` 和 `TELEGRAM_ALLOWED_USER_IDS`，然后前台运行：
 
 ```bash
-ccx start
+codexc start
 ```
 
 常用命令：
 
 ```bash
-ccx config                       # 显示用户配置路径
-ccx ws                           # 列出 Workspace
-ccx ws add                       # 将当前目录注册为 Workspace
-ccx ws add --id docs --name Docs
-ccx remote                       # 启动默认 Workspace 的原生 Codex TUI
-ccx remote --workspace docs
+codexc config                    # 显示用户配置路径
+codexc ws                        # 列出 Workspace
+codexc ws add                    # 将当前目录注册为 Workspace
+codexc ws add --id docs --name Docs
+codexc remote                    # 启动默认 Workspace 的原生 Codex TUI
+codexc remote --workspace docs
 ```
 
 `CODEX_CONNECT_HOME` 可以覆盖默认用户目录，主要用于隔离测试或多 Profile；正常使用无需设置。
@@ -168,13 +168,13 @@ codex --remote unix:///absolute/path/codex-app-server.sock -C /absolute/workdir
 npm CLI 安装后使用：
 
 ```bash
-ccx service install
-ccx service status
-ccx service restart
-ccx service stop
+codexc service install
+codexc service status
+codexc service restart
+codexc service stop
 ```
 
-`service install` 生成并启动 App Server 与 Gateway 两个独立的用户级 launchd 服务；重复执行时会先卸载旧实例，再加载新 plist。Linux 当前没有系统服务安装器，可使用 `ccx start` 前台运行。用户配置目录解析本身不依赖 macOS，但 Windows 尚未适配当前 Unix WebSocket Transport，暂不属于可运行平台。
+`service install` 生成并启动 App Server 与 Gateway 两个独立的用户级 launchd 服务；重复执行时会先卸载旧实例，再加载新 plist。Linux 当前没有系统服务安装器，可使用 `codexc start` 前台运行。用户配置目录解析本身不依赖 macOS，但 Windows 尚未适配当前 Unix WebSocket Transport，暂不属于可运行平台。
 
 源码开发模式也保留原有 npm 命令：
 
@@ -221,6 +221,7 @@ npm run service:stop
 - 命令、文件修改、临时权限、用户输入和 MCP elicitation 由发起 Turn 的 Gateway 连接处理。
 - 无法映射、过期或未知的高权限请求默认拒绝或取消。
 - Telegram 回调令牌随机生成、一次性使用并有超时；临时权限默认只作用于当前 Turn。
+- CLI 等其他客户端处理审批后，`serverRequest/resolved` 会立即使 Telegram 按钮失效并标记为已在其他客户端处理。
 - 连接断开会取消悬挂交互，不把旧审批带到新连接。
 - 日志对 Token 和 Authorization 字段脱敏。
 - 本机只监听私有 Unix Socket，不开放无认证 TCP 地址。
@@ -262,4 +263,4 @@ RUN_CODEX_INTEGRATION=1 npm test -- --run gateway/tests/real-app-server.test.ts
 
 ## 当前状态
 
-仓库已经切换为单一 TypeScript Gateway；旧 Python Runtime、测试、smoke 脚本和打包入口已移除。CLI/Remote TUI 与 Telegram 双向恢复原生 Codex Thread 已完成真实验证。Gateway 支持从服务端预配置列表安全切换 Workspace，所有 Thread 查询和 Turn 均使用所选 Workspace 的 `cwd`。正式本机入口为 npm CLI `ccx`，运行数据位于 `~/.codex-connect`；源码开发仍可使用项目内 `.env` 和 `npm run dev:all`。macOS 支持 `ccx service install` 安装两个独立 launchd 服务。
+仓库已经切换为单一 TypeScript Gateway；旧 Python Runtime、测试、smoke 脚本和打包入口已移除。CLI/Remote TUI 与 Telegram 双向恢复原生 Codex Thread 已完成真实验证。Gateway 支持从服务端预配置列表安全切换 Workspace，所有 Thread 查询和 Turn 均使用所选 Workspace 的 `cwd`。正式本机入口为 npm CLI `codexc`，运行数据位于 `~/.codex-connect`；源码开发仍可使用项目内 `.env` 和 `npm run dev:all`。macOS 支持 `codexc service install` 安装两个独立 launchd 服务。

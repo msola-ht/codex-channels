@@ -5,8 +5,8 @@
   "description": "Telegram gateway for a shared Codex App Server",
   "type": "module",
   "bin": {
-    "ccx": "bin/ccx.mjs",
-    "codex-connect": "bin/ccx.mjs"
+    "codexc": "bin/codexc.mjs",
+    "codex-connect": "bin/codexc.mjs"
   },
   "files": [
     "bin/",

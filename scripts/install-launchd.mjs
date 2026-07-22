@@ -32,7 +32,7 @@ const values = {
   PROJECT_DIR: projectDir,
   CONFIG_DIR: runtime.dataDir,
   ENV_PATH: envPath,
-  CLI_ENTRY: join(projectDir, "bin", "ccx.mjs"),
+  CLI_ENTRY: join(projectDir, "bin", "codexc.mjs"),
   WORKDIR: workdir,
   RUNTIME_DIR: runtimeDir,
   SOCKET_PATH: socketPath,

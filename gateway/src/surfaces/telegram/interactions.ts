@@ -18,6 +18,7 @@ export class TelegramInteractionPort implements InteractionPort {
   private readonly pendingByToken = new Map<string, PendingInteraction>();
   private readonly tokenByRequest = new Map<string, string>();
   private readonly tokenByChat = new Map<string, string>();
+  private readonly resolvedBeforePending = new Set<string>();
 
   constructor(private readonly bot: Bot) {
     bot.callbackQuery(/^ix:/, (context) => this.onCallback(context));
@@ -29,11 +30,21 @@ export class TelegramInteractionPort implements InteractionPort {
   ): Promise<InteractionDecision> {
     const token = randomBytes(12).toString("base64url");
     const keyboard = this.keyboard(request, token);
-    const message = await this.bot.api.sendMessage(
-      target.conversationId,
-      formatInteraction(request),
-      keyboard ? { reply_markup: keyboard } : {},
-    );
+    this.tokenByRequest.set(request.requestId, token);
+    let message: Awaited<ReturnType<typeof this.bot.api.sendMessage>>;
+    try {
+      message = await this.bot.api.sendMessage(
+        target.conversationId,
+        formatInteraction(request),
+        keyboard ? { reply_markup: keyboard } : {},
+      );
+    } catch (error) {
+      if (this.tokenByRequest.get(request.requestId) === token) {
+        this.tokenByRequest.delete(request.requestId);
+      }
+      this.resolvedBeforePending.delete(token);
+      throw error;
+    }
 
     return new Promise<InteractionDecision>((resolve) => {
       const timer = setTimeout(() => {
@@ -48,9 +59,11 @@ export class TelegramInteractionPort implements InteractionPort {
         timer,
         messageId: message.message_id,
       });
-      this.tokenByRequest.set(request.requestId, token);
       if (request.type === "user-input" || (request.type === "elicitation" && request.mode === "form")) {
         this.tokenByChat.set(target.conversationId, token);
+      }
+      if (this.resolvedBeforePending.delete(token)) {
+        this.finish(token, timeoutDecision(request), "已在其他客户端处理");
       }
     });
   }
@@ -61,6 +74,8 @@ export class TelegramInteractionPort implements InteractionPort {
       const pending = this.pendingByToken.get(token);
       if (pending) {
         this.finish(token, timeoutDecision(pending.request), "已在其他客户端处理");
+      } else {
+        this.resolvedBeforePending.add(token);
       }
     }
   }
@@ -107,6 +122,7 @@ export class TelegramInteractionPort implements InteractionPort {
 
   close(): void {
     this.cancelAll("Gateway 已停止");
+    this.resolvedBeforePending.clear();
   }
 
   cancelAll(outcome = "连接已断开"): void {
@@ -167,7 +183,12 @@ export class TelegramInteractionPort implements InteractionPort {
     }
     pending.resolve(decision);
     void this.bot.api
-      .editMessageText(pending.target.conversationId, pending.messageId, `${formatInteraction(pending.request)}\n\n处理结果：${outcome}`)
+      .editMessageText(
+        pending.target.conversationId,
+        pending.messageId,
+        `${formatInteraction(pending.request)}\n\n处理结果：${outcome}`,
+        { reply_markup: { inline_keyboard: [] } },
+      )
       .catch(() => undefined);
   }
 }

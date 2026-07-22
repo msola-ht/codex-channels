@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { readWorkspaceConfig } from "../../scripts/workspace-config.mjs";
 
 const temporaryDirectories: string[] = [];
-const cli = resolve("bin/ccx.mjs");
+const cli = resolve("bin/codexc.mjs");
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -18,7 +18,7 @@ afterEach(() => {
   }
 });
 
-describe("ccx CLI", () => {
+describe("codexc CLI", () => {
   it("initializes an isolated user directory and registers another workspace", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-"));
     temporaryDirectories.push(root);
@@ -98,7 +98,7 @@ describe("ccx CLI", () => {
     });
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("用法：ccx config");
+    expect(result.stderr).toContain("用法：codexc config");
   });
 
   it("shows an explicitly configured environment file", () => {
