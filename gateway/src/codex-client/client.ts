@@ -135,11 +135,16 @@ export class CodexAppServerClient {
     );
   }
 
-  async startTurn(threadId: string, text: string): Promise<TurnStartResponse> {
+  async startTurn(
+    threadId: string,
+    text: string,
+    clientUserMessageId: string,
+  ): Promise<TurnStartResponse> {
     return this.rpc.request<TurnStartResponse>(
       "turn/start",
       {
         threadId,
+        clientUserMessageId,
         input: [{ type: "text", text, text_elements: [] }],
         cwd: this.defaults.cwd,
         ...(this.defaults.model ? { model: this.defaults.model } : {}),
@@ -148,12 +153,18 @@ export class CodexAppServerClient {
     );
   }
 
-  async steerTurn(threadId: string, turnId: string, text: string): Promise<TurnSteerResponse> {
+  async steerTurn(
+    threadId: string,
+    turnId: string,
+    text: string,
+    clientUserMessageId: string,
+  ): Promise<TurnSteerResponse> {
     return this.rpc.request<TurnSteerResponse>(
       "turn/steer",
       {
         threadId,
         expectedTurnId: turnId,
+        clientUserMessageId,
         input: [{ type: "text", text, text_elements: [] }],
       },
       { retryOverload: false },

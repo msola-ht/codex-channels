@@ -353,6 +353,7 @@ interface IncomingMessage {
 
 ```ts
 type OutputEvent =
+  | { type: "user.message"; text: string }
   | { type: "text.delta"; text: string }
   | { type: "text.completed"; text: string }
   | { type: "turn.status"; status: string }
@@ -362,6 +363,11 @@ type OutputEvent =
   | { type: "file.updated"; change: FileChange }
   | { type: "warning"; message: string };
 ```
+
+同一 Thread 被多个客户端订阅时，Gateway 归约外部 `turn/started` 和
+`userMessage` Item，将外部文本输入同步到已绑定 Surface。Gateway 自己发起的
+`turn/start` 和 `turn/steer` 必须设置 `clientUserMessageId`，Surface 根据该标记
+避免重复回显本地已经显示的输入。审批请求仍由发起 Turn 的连接负责，不跨连接抢答。
 
 ### 7.1 Telegram Outbox
 

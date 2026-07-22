@@ -6,8 +6,7 @@ import { BoundedAsyncQueue } from "../../event-bus/bounded-queue.js";
 import { splitTelegramText } from "./format.js";
 
 interface StreamState {
-  itemOrder: string[];
-  itemTexts: Map<string, string>;
+  text: string;
   messageId: number | undefined;
   timer: NodeJS.Timeout | undefined;
 }
@@ -49,11 +48,13 @@ export class TelegramOutbox {
       case "turn.started":
         this.startTyping(chatId, this.turnActivityKey(event.threadId, event.turnId));
         return;
+      case "user.message":
+        this.enqueue(chatId, () => this.send(chatId, `外部输入：\n${event.text}`), true);
+        return;
       case "text.delta": {
-        const key = this.turnKey(event.threadId, event.turnId);
+        const key = this.streamKey(event.threadId, event.turnId, event.itemId);
         const state = this.streams.get(key) ?? this.createStream();
-        this.ensureItem(state, event.itemId);
-        state.itemTexts.set(event.itemId, (state.itemTexts.get(event.itemId) ?? "") + event.text);
+        state.text += event.text;
         this.streams.set(key, state);
         if (!state.timer) {
           state.timer = setTimeout(() => {
@@ -65,10 +66,9 @@ export class TelegramOutbox {
         return;
       }
       case "text.completed": {
-        const key = this.turnKey(event.threadId, event.turnId);
+        const key = this.streamKey(event.threadId, event.turnId, event.itemId);
         const state = this.streams.get(key) ?? this.createStream();
-        this.ensureItem(state, event.itemId);
-        state.itemTexts.set(event.itemId, event.text);
+        state.text = event.text;
         if (state.timer) {
           clearTimeout(state.timer);
         }
@@ -81,15 +81,19 @@ export class TelegramOutbox {
         return;
       }
       case "turn.completed": {
-        const key = this.turnKey(event.threadId, event.turnId);
-        const stream = this.streams.get(key);
-        if (stream?.timer) {
-          clearTimeout(stream.timer);
-          stream.timer = undefined;
+        const keys = this.streamKeysForTurn(event.threadId, event.turnId);
+        for (const key of keys) {
+          const stream = this.streams.get(key);
+          if (stream?.timer) {
+            clearTimeout(stream.timer);
+            stream.timer = undefined;
+          }
         }
         this.stopTyping(chatId, this.turnActivityKey(event.threadId, event.turnId));
         this.enqueue(chatId, async () => {
-          await this.flush(chatId, key, true);
+          for (const key of keys) {
+            await this.flush(chatId, key, true);
+          }
           if (event.error) {
             await this.send(chatId, `Codex 任务失败：${event.error}`);
           } else if (!new Set(["completed", "success"]).has(event.status)) {
@@ -197,10 +201,7 @@ export class TelegramOutbox {
     if (!state) {
       return;
     }
-    const text = state.itemOrder
-      .map((itemId) => state.itemTexts.get(itemId)?.trim())
-      .filter((itemText): itemText is string => Boolean(itemText))
-      .join("\n\n");
+    const text = state.text.trim();
     if (!text) {
       if (final) {
         this.streams.delete(key);
@@ -233,18 +234,10 @@ export class TelegramOutbox {
 
   private createStream(): StreamState {
     return {
-      itemOrder: [],
-      itemTexts: new Map<string, string>(),
+      text: "",
       messageId: undefined,
       timer: undefined,
     };
-  }
-
-  private ensureItem(state: StreamState, itemId: string): void {
-    if (!state.itemTexts.has(itemId)) {
-      state.itemOrder.push(itemId);
-      state.itemTexts.set(itemId, "");
-    }
   }
 
   private startTyping(chatId: string, activityKey: string): void {
@@ -290,6 +283,15 @@ export class TelegramOutbox {
 
   private turnKey(threadId: string, turnId: string): string {
     return `${threadId}:${turnId}`;
+  }
+
+  private streamKey(threadId: string, turnId: string, itemId: string): string {
+    return `${this.turnKey(threadId, turnId)}:${itemId}`;
+  }
+
+  private streamKeysForTurn(threadId: string, turnId: string): string[] {
+    const prefix = `${this.turnKey(threadId, turnId)}:`;
+    return [...this.streams.keys()].filter((key) => key.startsWith(prefix));
   }
 
   private turnActivityKey(threadId: string, turnId: string): string {

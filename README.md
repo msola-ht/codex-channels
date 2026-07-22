@@ -19,7 +19,7 @@ launchd
     └── surfaces/telegram
 ```
 
-App Server 与 Gateway 是两个独立进程。Gateway 停止不会终止 App Server；连接中断后 Gateway 会有限次数指数退避重连、重新 `initialize` 并恢复已绑定 Thread 的订阅。Telegram 网络发送通过独立有界队列处理，不阻塞 App Server Reader。任务运行时会持续显示 Telegram 原生“正在输入”状态；同一 Turn 的 commentary 与 final 输出会流式编辑在同一个消息气泡中，Turn 完成后再定稿。
+App Server 与 Gateway 是两个独立进程。Gateway 停止不会终止 App Server；连接中断后 Gateway 会有限次数指数退避重连、重新 `initialize` 并恢复已绑定 Thread 的订阅。Telegram 网络发送通过独立有界队列处理，不阻塞 App Server Reader。任务运行时会持续显示 Telegram 原生“正在输入”状态；每个 agent message item 分别渲染为一个消息气泡，同一 item 的流式 delta 只编辑对应气泡，Turn 完成后再定稿。CLI 等外部客户端在已绑定 Thread 中发起 Turn 时，Telegram 会同步显示外部文本输入和回复；Gateway 自己发起的输入通过协议 client ID 去重，不会重复回显。
 
 详细设计和边界见 [ARCHITECTURE_REBUILD_PROPOSAL.md](ARCHITECTURE_REBUILD_PROPOSAL.md)，项目约束见 [AGENTS.md](AGENTS.md)。
 

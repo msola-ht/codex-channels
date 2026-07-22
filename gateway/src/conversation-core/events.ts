@@ -3,8 +3,11 @@ export interface ConversationTarget {
   conversationId: string;
 }
 
+export const gatewayUserMessageClientIdPrefix = "codex_tg_gateway:";
+
 export type OutputEvent =
   | { type: "turn.started"; target: ConversationTarget; threadId: string; turnId: string }
+  | { type: "user.message"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string }
   | { type: "text.delta"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string }
   | { type: "text.completed"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string }
   | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: string; error?: string }

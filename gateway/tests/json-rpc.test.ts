@@ -72,6 +72,32 @@ class FakeTransport extends BaseTransport {
           }),
         ),
       );
+    } else if (decoded.method === "turn/start") {
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({
+            id: decoded.id,
+            result: {
+              turn: {
+                id: "turn-1",
+                items: [],
+                itemsView: "full",
+                status: "inProgress",
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null,
+              },
+            },
+          }),
+        ),
+      );
+    } else if (decoded.method === "turn/steer") {
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({ id: decoded.id, result: { turnId: "turn-1" } }),
+        ),
+      );
     }
   }
 
@@ -174,5 +200,23 @@ describe("JsonRpcClient", () => {
 
     expect(result.rateLimits.planType).toBe("pro");
     expect(transport.sent.some((message) => message.method === "account/rateLimits/read")).toBe(true);
+  });
+
+  it("tags Gateway user input with a client message id", async () => {
+    const transport = new FakeTransport();
+    const rpc = new JsonRpcClient(transport);
+    const client = new CodexAppServerClient(rpc, {
+      cwd: "/tmp/project",
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await client.startTurn("thread-1", "测试输入", "codex_tg_gateway:request-1");
+    await client.steerTurn("thread-1", "turn-1", "补充输入", "codex_tg_gateway:request-2");
+
+    expect(transport.sent.find((message) => message.method === "turn/start")?.params)
+      .toMatchObject({ clientUserMessageId: "codex_tg_gateway:request-1" });
+    expect(transport.sent.find((message) => message.method === "turn/steer")?.params)
+      .toMatchObject({ clientUserMessageId: "codex_tg_gateway:request-2" });
   });
 });

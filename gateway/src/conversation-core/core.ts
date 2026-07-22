@@ -2,7 +2,12 @@ import type { RpcNotification } from "../codex-client/json-rpc.js";
 import type { ThreadTokenUsage } from "../codex-protocol/index.js";
 import type { EventBus } from "../event-bus/event-bus.js";
 import type { SessionRouter } from "../session-routing/router.js";
-import { type ConversationTarget, type OutputEvent, isCriticalOutputEvent } from "./events.js";
+import {
+  gatewayUserMessageClientIdPrefix,
+  type ConversationTarget,
+  type OutputEvent,
+  isCriticalOutputEvent,
+} from "./events.js";
 
 interface ActiveTurn {
   target: ConversationTarget;
@@ -33,6 +38,7 @@ export class ConversationCore {
   private readonly activeByConversation = new Map<string, ActiveTurn>();
   private readonly errorsByTurn = new Map<string, string>();
   private readonly usageByThread = new Map<string, ThreadTokenUsage>();
+  private readonly seenUserMessages = new Set<string>();
 
   constructor(
     private readonly router: SessionRouter,
@@ -40,6 +46,10 @@ export class ConversationCore {
   ) {}
 
   markTurnStarted(target: ConversationTarget, threadId: string, turnId: string): void {
+    const current = this.activeByConversation.get(this.key(target));
+    if (current?.threadId === threadId && current.turnId === turnId) {
+      return;
+    }
     this.activeByConversation.set(this.key(target), { target, threadId, turnId });
     this.publish({ type: "turn.started", target, threadId, turnId });
   }
@@ -56,6 +66,7 @@ export class ConversationCore {
     this.activeByConversation.clear();
     this.errorsByTurn.clear();
     this.usageByThread.clear();
+    this.seenUserMessages.clear();
     for (const binding of this.router.allBindings()) {
       this.publish({
         type: "warning",
@@ -71,6 +82,15 @@ export class ConversationCore {
     const threadId = stringField(params, "threadId");
 
     switch (notification.method) {
+      case "turn/started": {
+        const turn = asRecord(params?.turn);
+        const turnId = stringField(turn, "id");
+        const target = threadId ? this.router.targetForThread(threadId) : undefined;
+        if (threadId && turnId && target) {
+          this.markTurnStarted(target, threadId, turnId);
+        }
+        return;
+      }
       case "thread/tokenUsage/updated": {
         const tokenUsage = parseThreadTokenUsage(asRecord(params?.tokenUsage));
         if (threadId && tokenUsage) {
@@ -93,10 +113,16 @@ export class ConversationCore {
         }
         return;
       }
+      case "item/started":
       case "item/completed": {
         const turnId = stringField(params, "turnId");
         const item = asRecord(params?.item);
+        if (threadId && turnId && item?.type === "userMessage") {
+          this.publishUserMessage(threadId, turnId, item);
+          return;
+        }
         if (
+          notification.method === "item/completed" &&
           threadId &&
           turnId &&
           item?.type === "agentMessage" &&
@@ -129,6 +155,7 @@ export class ConversationCore {
         if (!threadId || !turnId) {
           return;
         }
+        this.clearSeenUserMessages(threadId, turnId);
         const target = this.router.targetForThread(threadId);
         if (!target) {
           return;
@@ -170,6 +197,7 @@ export class ConversationCore {
         }
         const target = this.router.forgetThread(threadId);
         this.usageByThread.delete(threadId);
+        this.clearSeenUserMessages(threadId);
         if (target) {
           this.activeByConversation.delete(this.key(target));
         }
@@ -194,6 +222,54 @@ export class ConversationCore {
     const target = this.router.targetForThread(threadId);
     if (target) {
       this.publish({ ...event, target } as OutputEvent);
+    }
+  }
+
+  private publishUserMessage(
+    threadId: string,
+    turnId: string,
+    item: Record<string, unknown>,
+  ): void {
+    const itemId = stringField(item, "id");
+    if (!itemId) {
+      return;
+    }
+    const messageKey = `${threadId}:${turnId}:${itemId}`;
+    if (this.seenUserMessages.has(messageKey)) {
+      return;
+    }
+    this.seenUserMessages.add(messageKey);
+    const clientId = stringField(item, "clientId");
+    if (clientId?.startsWith(gatewayUserMessageClientIdPrefix)) {
+      return;
+    }
+    const content = Array.isArray(item.content) ? item.content : [];
+    const text = content
+      .map((input) => {
+        const record = asRecord(input);
+        return record?.type === "text" && typeof record.text === "string"
+          ? record.text.trim()
+          : "";
+      })
+      .filter(Boolean)
+      .join("\n\n");
+    if (!text) {
+      return;
+    }
+    const target = this.router.targetForThread(threadId);
+    if (!target) {
+      return;
+    }
+    this.markTurnStarted(target, threadId, turnId);
+    this.publish({ type: "user.message", target, threadId, turnId, itemId, text });
+  }
+
+  private clearSeenUserMessages(threadId: string, turnId?: string): void {
+    const prefix = turnId ? `${threadId}:${turnId}:` : `${threadId}:`;
+    for (const key of this.seenUserMessages) {
+      if (key.startsWith(prefix)) {
+        this.seenUserMessages.delete(key);
+      }
     }
   }
 

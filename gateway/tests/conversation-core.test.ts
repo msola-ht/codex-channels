@@ -2,7 +2,10 @@ import pino from "pino";
 import { describe, expect, it } from "vitest";
 
 import { ConversationCore } from "../src/conversation-core/core.js";
-import type { OutputEvent } from "../src/conversation-core/events.js";
+import {
+  gatewayUserMessageClientIdPrefix,
+  type OutputEvent,
+} from "../src/conversation-core/events.js";
 import { EventBus } from "../src/event-bus/event-bus.js";
 import type { SessionRouter } from "../src/session-routing/router.js";
 
@@ -35,6 +38,86 @@ describe("ConversationCore", () => {
       modelContextWindow: 200_000,
     });
     await output.close();
+  });
+
+  it("publishes external turn input once and tracks the external active turn", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, conversationId: "100" };
+    const router = {
+      allBindings: () => [],
+      targetForThread: (threadId: string) => threadId === "thread-1" ? target : undefined,
+      forgetThread: () => undefined,
+    } as unknown as SessionRouter;
+    const core = new ConversationCore(router, output);
+
+    core.handle({
+      method: "turn/started",
+      params: { threadId: "thread-1", turn: { id: "turn-1" } },
+    });
+    const userMessage = {
+      type: "userMessage",
+      id: "item-1",
+      clientId: "codex_cli:1",
+      content: [{ type: "text", text: "从 CLI 发来的输入" }],
+    };
+    core.handle({
+      method: "item/started",
+      params: { threadId: "thread-1", turnId: "turn-1", item: userMessage },
+    });
+    core.handle({
+      method: "item/completed",
+      params: { threadId: "thread-1", turnId: "turn-1", item: userMessage },
+    });
+    await output.close();
+
+    expect(core.activeTurn(target)?.turnId).toBe("turn-1");
+    expect(events.filter((event) => event.type === "turn.started")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "user.message")).toEqual([
+      {
+        type: "user.message",
+        target,
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-1",
+        text: "从 CLI 发来的输入",
+      },
+    ]);
+  });
+
+  it("does not echo Gateway-originated Telegram input", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, conversationId: "100" };
+    const router = {
+      allBindings: () => [],
+      targetForThread: () => target,
+      forgetThread: () => undefined,
+    } as unknown as SessionRouter;
+    const core = new ConversationCore(router, output);
+
+    core.handle({
+      method: "item/started",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "userMessage",
+          id: "item-local",
+          clientId: `${gatewayUserMessageClientIdPrefix}request-1`,
+          content: [{ type: "text", text: "TG 已经显示的输入" }],
+        },
+      },
+    });
+    await output.close();
+
+    expect(events.some((event) => event.type === "user.message")).toBe(false);
   });
 });
 

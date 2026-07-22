@@ -79,7 +79,7 @@ describe("TelegramOutbox", () => {
     await outbox.close();
   });
 
-  it("renders multiple agent message items from one turn into one Telegram message", async () => {
+  it("renders each agent message item from one turn as a separate Telegram message", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);
@@ -94,11 +94,31 @@ describe("TelegramOutbox", () => {
     outbox.handle(textCompleted("final", "检查完成。"));
     outbox.handle(turnCompleted());
     await settle();
-
-    expect(api.sent).toEqual(["正在检查"]);
-    expect(api.edits.at(-1)).toBe("正在检查。\n\n检查完成。");
-
     await outbox.close();
+
+    expect(api.sent).toEqual(["正在检查", "检查完成。"]);
+    expect(api.edits.at(-1)).toBe("正在检查。");
+  });
+
+  it("renders external user input before the mirrored reply", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      type: "user.message",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "user-1",
+      text: "从 CLI 发来的输入",
+    });
+    outbox.handle(textCompleted("final", "同步回复"));
+    outbox.handle(turnCompleted());
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual(["外部输入：\n从 CLI 发来的输入", "同步回复"]);
   });
 });
 

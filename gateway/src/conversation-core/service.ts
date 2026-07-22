@@ -1,9 +1,11 @@
+import { randomUUID } from "node:crypto";
+
 import type { CodexAppServerClient } from "../codex-client/client.js";
 import type { Thread, ThreadTokenUsage } from "../codex-protocol/index.js";
 import type { ReviewTarget } from "../codex-protocol/index.js";
 import type { SessionRouter } from "../session-routing/router.js";
 import { ConversationCore } from "./core.js";
-import type { ConversationTarget } from "./events.js";
+import { gatewayUserMessageClientIdPrefix, type ConversationTarget } from "./events.js";
 
 export interface Submission {
   threadId: string;
@@ -35,12 +37,13 @@ export class ConversationService {
     }
     return this.locked(target, async () => {
       const active = this.core.activeTurn(target);
+      const clientUserMessageId = `${gatewayUserMessageClientIdPrefix}${randomUUID()}`;
       if (active) {
-        await this.codex.steerTurn(active.threadId, active.turnId, input);
+        await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId);
         return { threadId: active.threadId, turnId: active.turnId, steered: true };
       }
       const binding = await this.router.ensure(target);
-      const result = await this.codex.startTurn(binding.threadId, input);
+      const result = await this.codex.startTurn(binding.threadId, input, clientUserMessageId);
       this.core.markTurnStarted(target, binding.threadId, result.turn.id);
       return { threadId: binding.threadId, turnId: result.turn.id, steered: false };
     });
