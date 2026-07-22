@@ -39,6 +39,16 @@ const launchdPath = uniquePaths([
   "/usr/sbin",
   "/sbin",
 ]).join(delimiter);
+const proxyKeys = [
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+  "no_proxy",
+];
 const values = {
   PROJECT_DIR: projectDir,
   CONFIG_DIR: runtime.dataDir,
@@ -50,6 +60,7 @@ const values = {
   NODE_BINARY: nodeBinary,
   CODEX_BINARY: codexBinary,
   LAUNCHD_PATH: launchdPath,
+  ...Object.fromEntries(proxyKeys.map((key) => [key, env[key]?.trim() ?? ""])),
 };
 const agentsDir = join(homedir(), "Library", "LaunchAgents");
 mkdirSync(agentsDir, { recursive: true });

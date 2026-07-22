@@ -1,9 +1,12 @@
 import { randomBytes } from "node:crypto";
 
 import { Bot, InlineKeyboard, type Context } from "grammy";
+import type { Logger } from "pino";
 
 import type { InteractionDecision, InteractionPort, InteractionRequest } from "../../approval/types.js";
 import type { ConversationTarget } from "../../conversation-core/events.js";
+import { TelegramApiExecutor } from "./api-executor.js";
+import { splitTelegramText } from "./format.js";
 
 interface PendingInteraction {
   requestId: string;
@@ -12,15 +15,22 @@ interface PendingInteraction {
   resolve(decision: InteractionDecision): void;
   timer: NodeJS.Timeout;
   messageId: number;
+  messageText: string;
 }
 
 export class TelegramInteractionPort implements InteractionPort {
   private readonly pendingByToken = new Map<string, PendingInteraction>();
   private readonly tokenByRequest = new Map<string, string>();
-  private readonly tokenByChat = new Map<string, string>();
+  private readonly textTokenByChat = new Map<string, string>();
+  private readonly latestTokenByChat = new Map<string, string>();
   private readonly resolvedBeforePending = new Set<string>();
+  private readonly statusUpdates = new Set<Promise<void>>();
 
-  constructor(private readonly bot: Bot) {
+  constructor(
+    private readonly bot: Bot,
+    private readonly logger: Logger,
+    private readonly executor = new TelegramApiExecutor(logger),
+  ) {
     bot.callbackQuery(/^ix:/, (context) => this.onCallback(context));
   }
 
@@ -30,20 +40,30 @@ export class TelegramInteractionPort implements InteractionPort {
   ): Promise<InteractionDecision> {
     const token = randomBytes(12).toString("base64url");
     const keyboard = this.keyboard(request, token);
+    const formatted = formatInteraction(request);
+    const chunks = splitTelegramText(formatted, 3_600);
     this.tokenByRequest.set(request.requestId, token);
-    let message: Awaited<ReturnType<typeof this.bot.api.sendMessage>>;
+    let message: Awaited<ReturnType<typeof this.bot.api.sendMessage>> | undefined;
     try {
-      message = await this.bot.api.sendMessage(
-        target.conversationId,
-        formatInteraction(request),
-        keyboard ? { reply_markup: keyboard } : {},
-      );
+      for (const [index, chunk] of chunks.entries()) {
+        const isLast = index === chunks.length - 1;
+        const options = isLast
+          ? interactionOptions(request, keyboard)
+          : {};
+        message = await this.executor.call(
+          { chatId: target.conversationId, operation: "sendMessage", critical: true },
+          () => this.bot.api.sendMessage(target.conversationId, chunk, options),
+        );
+      }
     } catch (error) {
       if (this.tokenByRequest.get(request.requestId) === token) {
         this.tokenByRequest.delete(request.requestId);
       }
       this.resolvedBeforePending.delete(token);
       throw error;
+    }
+    if (!message) {
+      throw new Error("Telegram 交互消息为空");
     }
 
     return new Promise<InteractionDecision>((resolve) => {
@@ -58,9 +78,11 @@ export class TelegramInteractionPort implements InteractionPort {
         resolve,
         timer,
         messageId: message.message_id,
+        messageText: chunks.at(-1)!,
       });
+      this.latestTokenByChat.set(target.conversationId, token);
       if (request.type === "user-input" || (request.type === "elicitation" && request.mode === "form")) {
-        this.tokenByChat.set(target.conversationId, token);
+        this.textTokenByChat.set(target.conversationId, token);
       }
       if (this.resolvedBeforePending.delete(token)) {
         this.finish(token, timeoutDecision(request), "已在其他客户端处理");
@@ -86,9 +108,12 @@ export class TelegramInteractionPort implements InteractionPort {
     if (chatId === undefined || !text || text.startsWith("/")) {
       return false;
     }
-    const token = this.tokenByChat.get(String(chatId));
+    const token = this.textTokenByChat.get(String(chatId));
     const pending = token ? this.pendingByToken.get(token) : undefined;
     if (!pending) {
+      return false;
+    }
+    if (context.message?.reply_to_message?.message_id !== pending.messageId) {
       return false;
     }
     if (pending.request.type === "user-input") {
@@ -101,9 +126,12 @@ export class TelegramInteractionPort implements InteractionPort {
         const content = JSON.parse(text) as unknown;
         this.finish(token!, { type: "elicitation", action: "accept", content }, "已提交表单");
       } catch {
-        await context.reply("表单必须回复为有效 JSON 对象；发送 /cancel 取消。", {
-          reply_parameters: { message_id: pending.messageId },
-        });
+        await this.executor.call(
+          { chatId: pending.target.conversationId, operation: "sendMessage", critical: true },
+          () => context.reply("表单必须回复为有效 JSON 对象；发送 /cancel 取消。", {
+            reply_parameters: { message_id: pending.messageId },
+          }),
+        );
       }
       return true;
     }
@@ -111,7 +139,7 @@ export class TelegramInteractionPort implements InteractionPort {
   }
 
   cancelForChat(chatId: string): boolean {
-    const token = this.tokenByChat.get(chatId);
+    const token = this.latestTokenByChat.get(chatId);
     const pending = token ? this.pendingByToken.get(token) : undefined;
     if (!pending) {
       return false;
@@ -120,9 +148,11 @@ export class TelegramInteractionPort implements InteractionPort {
     return true;
   }
 
-  close(): void {
+  async close(): Promise<void> {
     this.cancelAll("Gateway 已停止");
     this.resolvedBeforePending.clear();
+    const updates = Promise.allSettled([...this.statusUpdates]);
+    await waitAtMost(updates, 5_000);
   }
 
   cancelAll(outcome = "连接已断开"): void {
@@ -178,18 +208,58 @@ export class TelegramInteractionPort implements InteractionPort {
     clearTimeout(pending.timer);
     this.pendingByToken.delete(token);
     this.tokenByRequest.delete(pending.requestId);
-    if (this.tokenByChat.get(pending.target.conversationId) === token) {
-      this.tokenByChat.delete(pending.target.conversationId);
+    if (this.textTokenByChat.get(pending.target.conversationId) === token) {
+      const previousText = this.previousPendingToken(
+        pending.target.conversationId,
+        (candidate) => candidate.request.type === "user-input" ||
+          (candidate.request.type === "elicitation" && candidate.request.mode === "form"),
+      );
+      if (previousText) {
+        this.textTokenByChat.set(pending.target.conversationId, previousText);
+      } else {
+        this.textTokenByChat.delete(pending.target.conversationId);
+      }
+    }
+    if (this.latestTokenByChat.get(pending.target.conversationId) === token) {
+      const previous = this.previousPendingToken(pending.target.conversationId);
+      if (previous) {
+        this.latestTokenByChat.set(pending.target.conversationId, previous);
+      } else {
+        this.latestTokenByChat.delete(pending.target.conversationId);
+      }
     }
     pending.resolve(decision);
-    void this.bot.api
-      .editMessageText(
+    const statusUpdate = this.executor.call(
+      { chatId: pending.target.conversationId, operation: "editMessageText", critical: true },
+      () => this.bot.api.editMessageText(
         pending.target.conversationId,
         pending.messageId,
-        `${formatInteraction(pending.request)}\n\n处理结果：${outcome}`,
+        `${pending.messageText}\n\n处理结果：${outcome}`,
         { reply_markup: { inline_keyboard: [] } },
-      )
-      .catch(() => undefined);
+      ),
+    ).then(() => undefined).catch((error) => {
+      this.logger.warn(
+        {
+          chatId: pending.target.conversationId,
+          requestId: pending.requestId,
+          message: error instanceof Error ? error.message : String(error),
+        },
+        "Telegram 交互消息状态更新失败",
+      );
+    });
+    this.statusUpdates.add(statusUpdate);
+    void statusUpdate.finally(() => this.statusUpdates.delete(statusUpdate));
+  }
+
+  private previousPendingToken(
+    conversationId: string,
+    predicate: (pending: PendingInteraction) => boolean = () => true,
+  ): string | undefined {
+    return [...this.pendingByToken.entries()]
+      .reverse()
+      .find(([, candidate]) =>
+        candidate.target.conversationId === conversationId && predicate(candidate),
+      )?.[0];
   }
 }
 
@@ -212,10 +282,32 @@ function formatInteraction(request: InteractionRequest): string {
       const options = question.options.length ? `\n选项：${question.options.join(" / ")}` : "";
       return `${question.id}: ${question.question}${options}`;
     });
-    return `${request.title}\n\n${questions.join("\n\n")}\n\n请回复本消息。多个问题使用“问题ID=回答”，每行一个。`;
+    const secretWarning = request.questions.some((question) => question.secret)
+      ? "\n\n安全提示：Telegram 回复会保留在聊天记录中，请勿发送密钥、Token 或其他敏感凭据。"
+      : "";
+    return `${request.title}\n\n${questions.join("\n\n")}\n\n请回复本消息。多个问题使用“问题ID=回答”，每行一个。${secretWarning}`;
   }
   const instruction = request.mode === "form" ? "请回复有效 JSON 对象，或发送 /cancel。" : "请打开链接完成操作，然后点击“完成”。";
   return `${request.title}\n\n${request.message}\n\n${instruction}`;
+}
+
+function interactionOptions(
+  request: InteractionRequest,
+  keyboard: InlineKeyboard | undefined,
+): Parameters<Bot["api"]["sendMessage"]>[2] {
+  if (keyboard) {
+    return { reply_markup: keyboard };
+  }
+  if (request.type === "user-input" || (request.type === "elicitation" && request.mode === "form")) {
+    return {
+      reply_markup: {
+        force_reply: true,
+        selective: true,
+        input_field_placeholder: "请回复此请求",
+      },
+    };
+  }
+  return {};
 }
 
 function parseAnswers(
@@ -239,4 +331,18 @@ function parseAnswers(
     }
   }
   return answers;
+}
+
+async function waitAtMost<T>(operation: Promise<T>, milliseconds: number): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, milliseconds);
+  });
+  try {
+    await Promise.race([operation, timeout]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }

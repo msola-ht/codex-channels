@@ -19,7 +19,7 @@ launchd
     └── surfaces/telegram
 ```
 
-App Server 与 Gateway 是两个独立进程。Gateway 停止不会终止 App Server；连接中断后 Gateway 会有限次数指数退避重连、重新 `initialize` 并恢复已绑定 Thread 的订阅。Telegram 网络发送通过独立有界队列处理，不阻塞 App Server Reader。任务运行时会持续显示 Telegram 原生“正在输入”状态；每个 agent message item 分别渲染为一个消息气泡，同一 item 的流式 delta 只编辑对应气泡，Turn 完成后再定稿。TG 普通消息发起或补充 Turn 时，下一条 Codex 输出通过 Telegram 原生回复关联到该消息。CLI 等外部客户端在已绑定 Thread 中发起 Turn 时，Telegram 会把外部文本渲染为引用式 `CLI 输入` 消息，下一条 Codex 输出通过 Telegram 原生回复关联到该输入；Gateway 自己发起的输入通过协议 client ID 去重，不会重复回显。
+App Server 与 Gateway 是两个独立进程。Gateway 停止不会终止 App Server；连接中断后 Gateway 会有限次数指数退避重连、重新 `initialize` 并恢复已绑定 Thread 的订阅。Telegram 网络发送通过独立有界队列处理，不阻塞 App Server Reader。任务运行超过短暂延迟后会持续显示 Telegram 原生“正在输入”状态；收到第一批流式 delta 后发送正式消息，后续 delta 限速编辑同一消息，`item/completed` 再用权威文本定稿。`commentary` 进度与 `final_answer` 最终答复分开渲染，第一条最终答复通过 Telegram 原生回复关联到发起该 Turn 的输入。CLI 等外部客户端在已绑定 Thread 中发起 Turn 时，Telegram 会把外部文本渲染为引用式 `CLI 输入` 消息；Gateway 自己发起的输入通过协议 client ID 去重，不会重复回显。连接断开会停止后续编辑和“正在输入”状态，已经发出的正式消息仍保留。
 
 详细设计和边界见 [ARCHITECTURE_REBUILD_PROPOSAL.md](ARCHITECTURE_REBUILD_PROPOSAL.md)，项目约束见 [AGENTS.md](AGENTS.md)。
 
@@ -89,6 +89,9 @@ chmod 600 .env
 TELEGRAM_BOT_TOKEN=从_BotFather_取得的_Token
 TELEGRAM_ALLOWED_USER_IDS=你的_Telegram_用户_ID
 TELEGRAM_PROXY_URL=http://127.0.0.1:7890
+HTTP_PROXY=http://127.0.0.1:7897
+HTTPS_PROXY=http://127.0.0.1:7897
+NO_PROXY=localhost,127.0.0.1
 CODEX_BINARY=codex
 CODEX_WORKSPACES_JSON=[{"id":"codex-connect","name":"Codex Connect","cwd":"/Users/you/Project-skill-Codex-Connect"},{"id":"another","name":"Another Project","cwd":"/Users/you/another-project"}]
 CODEX_DEFAULT_WORKSPACE=codex-connect
@@ -179,7 +182,7 @@ codexc service uninstall
 
 `service uninstall` 会停止并删除两个 launchd 服务配置，但保留 `~/.codex-connect` 下的配置、Workspace、SQLite 状态和日志；重新执行 `codexc service install` 即可恢复常驻服务。
 
-安装器会把 Node 与 Codex 的绝对路径及受控 `PATH` 写入 plist，不依赖 fnm、nvm 等交互式 Shell 初始化。安装完成后可直接运行 `codexc remote resume` 连接共享 App Server 并打开会话选择器。
+安装器会把 Node 与 Codex 的绝对路径、受控 `PATH`，以及 `.env` 中已配置的 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY`（含小写形式）写入两个 plist，不依赖 fnm、nvm 等交互式 Shell 初始化。修改这些代理变量后需要重新执行 `codexc service install`。安装完成后可直接运行 `codexc remote resume` 连接共享 App Server 并打开会话选择器。
 
 源码开发模式也保留原有 npm 命令：
 

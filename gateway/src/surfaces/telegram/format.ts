@@ -8,17 +8,20 @@ export function splitTelegramText(text: string, limit = 4_000): string[] {
     return [];
   }
   const chunks: string[] = [];
-  let remaining = text;
+  let remaining = Array.from(text);
   while (remaining.length > limit) {
     let boundary = remaining.lastIndexOf("\n", limit);
     if (boundary < limit / 2) {
       boundary = limit;
     }
-    chunks.push(remaining.slice(0, boundary));
-    remaining = remaining.slice(boundary).replace(/^\n/, "");
+    chunks.push(remaining.slice(0, boundary).join(""));
+    remaining = remaining.slice(boundary);
+    if (remaining[0] === "\n") {
+      remaining.shift();
+    }
   }
-  if (remaining) {
-    chunks.push(remaining);
+  if (remaining.length > 0) {
+    chunks.push(remaining.join(""));
   }
   return chunks;
 }

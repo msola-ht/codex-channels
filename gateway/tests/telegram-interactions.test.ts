@@ -1,4 +1,5 @@
-import type { Bot } from "grammy";
+import type { Bot, Context } from "grammy";
+import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 
 import type { InteractionRequest } from "../src/approval/types.js";
@@ -17,7 +18,7 @@ describe("TelegramInteractionPort", () => {
       callbackQuery: vi.fn(),
       api: { sendMessage, editMessageText },
     } as unknown as Bot;
-    const interactions = new TelegramInteractionPort(bot);
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
 
     const decision = interactions.request(target, approvalRequest());
     interactions.resolved("request-1");
@@ -32,9 +33,132 @@ describe("TelegramInteractionPort", () => {
       { reply_markup: { inline_keyboard: [] } },
     );
   });
+
+  it("requires user-input answers to reply to the ForceReply message", async () => {
+    const sendMessage = vi.fn(async () => ({ message_id: 9 }));
+    const editMessageText = vi.fn(async () => true as const);
+    const bot = {
+      callbackQuery: vi.fn(),
+      api: { sendMessage, editMessageText },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    const decision = interactions.request(target, userInputRequest());
+    await settle();
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("请回复本消息"),
+      expect.objectContaining({
+        reply_markup: expect.objectContaining({ force_reply: true }),
+      }),
+    );
+    expect(await interactions.handleText(textContext("普通消息"))).toBe(false);
+    expect(await interactions.handleText(textContext("回答", 9))).toBe(true);
+    await expect(decision).resolves.toEqual({
+      type: "user-input",
+      answers: { answer: ["回答"] },
+    });
+  });
+
+  it("splits long approval details and only places buttons on the last chunk", async () => {
+    let nextMessageId = 1;
+    const sendMessage = vi.fn(async (_chatId: string, _text: string, _options?: unknown) => ({
+      message_id: nextMessageId++,
+    }));
+    const editMessageText = vi.fn(async () => true as const);
+    const bot = {
+      callbackQuery: vi.fn(),
+      api: { sendMessage, editMessageText },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    const decision = interactions.request(target, {
+      ...approvalRequest(),
+      detail: "x".repeat(8_000),
+    });
+    await settle();
+
+    expect(sendMessage.mock.calls.length).toBeGreaterThan(1);
+    expect(sendMessage.mock.calls[0]?.[1].length).toBeLessThanOrEqual(3_600);
+    expect(sendMessage.mock.calls[0]?.[2]).toEqual({});
+    expect(sendMessage.mock.calls.at(-1)?.[2]).toHaveProperty("reply_markup");
+
+    await interactions.close();
+    await expect(decision).resolves.toEqual({ type: "approval", approved: false });
+  });
+
+  it("allows /cancel to cancel the latest approval request", async () => {
+    const bot = {
+      callbackQuery: vi.fn(),
+      api: {
+        sendMessage: vi.fn(async () => ({ message_id: 12 })),
+        editMessageText: vi.fn(async () => true as const),
+      },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    const decision = interactions.request(target, approvalRequest());
+    await settle();
+
+    expect(interactions.cancelForChat("100")).toBe(true);
+    await expect(decision).resolves.toEqual({ type: "approval", approved: false });
+  });
+
+  it("waits for pending approval buttons to be disabled during shutdown", async () => {
+    let completeEdit: (() => void) | undefined;
+    const editMessageText = vi.fn(() => new Promise<true>((resolve) => {
+      completeEdit = () => resolve(true);
+    }));
+    const bot = {
+      callbackQuery: vi.fn(),
+      api: {
+        sendMessage: vi.fn(async () => ({ message_id: 13 })),
+        editMessageText,
+      },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    const decision = interactions.request(target, approvalRequest());
+    await settle();
+
+    let closed = false;
+    const closing = interactions.close().then(() => {
+      closed = true;
+    });
+    await settle();
+    expect(closed).toBe(false);
+    expect(editMessageText).toHaveBeenCalledOnce();
+
+    completeEdit?.();
+    await closing;
+    await expect(decision).resolves.toEqual({ type: "approval", approved: false });
+  });
+
+  it("restores the previous ForceReply request after a newer one completes", async () => {
+    let nextMessageId = 20;
+    const bot = {
+      callbackQuery: vi.fn(),
+      api: {
+        sendMessage: vi.fn(async () => ({ message_id: nextMessageId++ })),
+        editMessageText: vi.fn(async () => true as const),
+      },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    const first = interactions.request(target, userInputRequest("request-first"));
+    const second = interactions.request(target, userInputRequest("request-second"));
+    await settle();
+
+    expect(await interactions.handleText(textContext("第二个回答", 21))).toBe(true);
+    await expect(second).resolves.toEqual({
+      type: "user-input",
+      answers: { answer: ["第二个回答"] },
+    });
+    expect(await interactions.handleText(textContext("第一个回答", 20))).toBe(true);
+    await expect(first).resolves.toEqual({
+      type: "user-input",
+      answers: { answer: ["第一个回答"] },
+    });
+  });
 });
 
-function approvalRequest(): InteractionRequest {
+function approvalRequest(): Extract<InteractionRequest, { type: "approval" }> {
   return {
     type: "approval",
     requestId: "request-1",
@@ -45,7 +169,35 @@ function approvalRequest(): InteractionRequest {
   };
 }
 
+function userInputRequest(requestId = "request-input"): InteractionRequest {
+  return {
+    type: "user-input",
+    requestId,
+    title: "Codex 需要输入",
+    questions: [{
+      id: "answer",
+      header: "Answer",
+      question: "请输入答案",
+      options: [],
+      allowOther: true,
+      secret: false,
+    }],
+    expiresInMs: 30_000,
+  };
+}
+
+function textContext(text: string, replyTo?: number): Context {
+  return {
+    chat: { id: 100 },
+    message: {
+      text,
+      ...(replyTo === undefined ? {} : { reply_to_message: { message_id: replyTo } }),
+    },
+  } as unknown as Context;
+}
+
 async function settle(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let index = 0; index < 10; index += 1) {
+    await Promise.resolve();
+  }
 }

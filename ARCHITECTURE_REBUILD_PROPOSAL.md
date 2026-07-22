@@ -354,13 +354,14 @@ interface IncomingMessage {
 ```ts
 type OutputEvent =
   | { type: "user.message"; text: string }
-  | { type: "text.delta"; text: string }
-  | { type: "text.completed"; text: string }
+  | { type: "text.delta"; text: string; phase?: "commentary" | "final_answer" | null }
+  | { type: "text.completed"; text: string; phase?: "commentary" | "final_answer" | null }
   | { type: "turn.status"; status: string }
   | { type: "approval.requested"; request: Approval }
   | { type: "input.requested"; request: UserInputRequest }
   | { type: "command.updated"; command: CommandState }
   | { type: "file.updated"; change: FileChange }
+  | { type: "connection.lost"; message: string }
   | { type: "warning"; message: string };
 ```
 
@@ -370,14 +371,15 @@ type OutputEvent =
 避免重复回显本地已经显示的输入。审批请求仍由发起 Turn 的连接负责，不跨连接抢答。
 
 Telegram 将外部输入渲染为独立的引用式 `CLI 输入` 气泡，并让该输入之后的第一条
-agent message 使用原生 reply 关系关联到它；后续 agent message item 继续按独立气泡
-输出，避免重复引用。
+`final_answer` agent message 使用原生 reply 关系关联到它；`commentary` 与后续 agent
+message item 继续按独立气泡输出，避免进度消息重复引用。
 
 ### 7.1 Telegram Outbox
 
 Outbox 独立负责：
 
 - 合并流式 delta。
+- 第一批有效 delta 发送正式消息，后续 delta 限速编辑同一消息，completed Item 权威定稿。
 - 限制消息编辑频率。
 - 对 429 使用 Telegram 指示的等待时间。
 - 对连接超时进行有限重试。
@@ -385,6 +387,9 @@ Outbox 独立负责：
 - 优先保证最终消息送达。
 - 避免相同内容重复编辑。
 - Gateway 停止时执行有时限的最终刷新。
+
+用户输入与表单请求使用 Telegram ForceReply，并且只接受对相应请求消息的引用回复；
+审批和交互文案超过单条消息上限时先安全分段，只在最后一段附加按钮或 ForceReply。
 
 ## 8. 会话策略
 

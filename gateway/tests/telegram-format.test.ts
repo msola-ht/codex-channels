@@ -1,6 +1,24 @@
 import { describe, expect, it } from "vitest";
 
-import { formatLimits, formatStatus, formatUsage, formatWorkspaces } from "../src/surfaces/telegram/format.js";
+import {
+  formatLimits,
+  formatStatus,
+  formatUsage,
+  formatWorkspaces,
+  splitTelegramText,
+} from "../src/surfaces/telegram/format.js";
+
+describe("splitTelegramText", () => {
+  it("splits by Unicode code points without corrupting emoji", () => {
+    const text = `${"a".repeat(3_999)}😀${"b".repeat(10)}`;
+    const chunks = splitTelegramText(text, 4_000);
+
+    expect(chunks.map((chunk) => Array.from(chunk).length)).toEqual([4_000, 10]);
+    expect(chunks.join("")).toBe(text);
+    expect(chunks.every((chunk) => !/[\uD800-\uDBFF]$/.test(chunk))).toBe(true);
+    expect(chunks.every((chunk) => !/^[\uDC00-\uDFFF]/.test(chunk))).toBe(true);
+  });
+});
 
 describe("formatWorkspaces", () => {
   it("marks the current workspace and only renders configured paths", () => {

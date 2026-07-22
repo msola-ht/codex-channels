@@ -2,13 +2,18 @@ import type { Api } from "grammy";
 import type { Logger } from "pino";
 
 import type { OutputEvent } from "../../conversation-core/events.js";
+import type { MessagePhase } from "../../codex-protocol/index.js";
 import { BoundedAsyncQueue } from "../../event-bus/bounded-queue.js";
+import { TelegramApiExecutor } from "./api-executor.js";
 import { splitTelegramText } from "./format.js";
 
 interface StreamState {
+  chatId: string;
   turnKey: string;
   text: string;
   messageId: number | undefined;
+  phase: MessagePhase | null | undefined;
+  completed: boolean;
   timer: NodeJS.Timeout | undefined;
 }
 
@@ -39,6 +44,7 @@ export class TelegramOutbox {
   constructor(
     private readonly api: Api,
     private readonly logger: Logger,
+    private readonly executor = new TelegramApiExecutor(logger),
   ) {}
 
   setTurnReplyTarget(threadId: string, turnId: string, messageId: number): void {
@@ -70,8 +76,11 @@ export class TelegramOutbox {
       case "text.delta": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
         const key = this.streamKey(turnKey, event.itemId);
-        const state = this.streams.get(key) ?? this.createStream(turnKey);
+        const state = this.streams.get(key) ?? this.createStream(chatId, turnKey);
         state.text += event.text;
+        if (event.phase !== undefined) {
+          state.phase = event.phase;
+        }
         this.streams.set(key, state);
         if (!state.timer) {
           state.timer = setTimeout(() => {
@@ -85,14 +94,18 @@ export class TelegramOutbox {
       case "text.completed": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
         const key = this.streamKey(turnKey, event.itemId);
-        const state = this.streams.get(key) ?? this.createStream(turnKey);
+        const state = this.streams.get(key) ?? this.createStream(chatId, turnKey);
         state.text = event.text;
+        state.completed = true;
+        if (event.phase !== undefined) {
+          state.phase = event.phase;
+        }
         if (state.timer) {
           clearTimeout(state.timer);
         }
         state.timer = setTimeout(() => {
           state.timer = undefined;
-          this.enqueue(chatId, () => this.flush(chatId, key, false), true);
+          this.enqueue(chatId, () => this.flush(chatId, key, true), true);
         }, 100);
         state.timer.unref();
         this.streams.set(key, state);
@@ -128,6 +141,12 @@ export class TelegramOutbox {
           await this.send(chatId, `Codex 警告：${event.message}`);
         }, true);
         return;
+      case "connection.lost":
+        this.clearThreadOutput(chatId, event.threadId);
+        this.enqueue(chatId, async () => {
+          await this.send(chatId, `Codex 警告：${event.message}`);
+        }, true);
+        return;
       case "thread.status":
         return;
     }
@@ -135,9 +154,13 @@ export class TelegramOutbox {
 
   async close(): Promise<void> {
     this.closed = true;
-    for (const state of this.streams.values()) {
+    for (const [key, state] of this.streams) {
       if (state.timer) {
         clearTimeout(state.timer);
+        state.timer = undefined;
+      }
+      if (state.completed) {
+        this.enqueue(state.chatId, () => this.flush(state.chatId, key, true), true);
       }
     }
     for (const state of this.typing.values()) {
@@ -146,7 +169,8 @@ export class TelegramOutbox {
     for (const worker of this.workers.values()) {
       worker.queue.close();
     }
-    await Promise.allSettled([...this.workers.values()].map((worker) => worker.done));
+    const workers = Promise.allSettled([...this.workers.values()].map((worker) => worker.done));
+    await waitAtMost(workers, 5_000);
     this.streams.clear();
     this.replyToByTurn.clear();
     this.typing.clear();
@@ -164,7 +188,10 @@ export class TelegramOutbox {
     }
     this.lastTypingAt.set(chatId, now);
     this.enqueue(chatId, async () => {
-      await this.api.sendChatAction(chatId, "typing");
+      await this.executor.call(
+        { chatId, operation: "sendChatAction", critical: false },
+        () => this.api.sendChatAction(chatId, "typing"),
+      );
     }, false);
   }
 
@@ -198,24 +225,13 @@ export class TelegramOutbox {
       if (!operation) {
         return;
       }
-      const attempts = operation.critical ? 3 : 1;
-      for (let attempt = 1; attempt <= attempts; attempt += 1) {
-        try {
-          await operation.run();
-          break;
-        } catch (error) {
-          if (attempt === attempts) {
-            this.logger.warn(
-              { error: safeErrorMessage(error), chatId, critical: operation.critical, attempts },
-              "Telegram 输出失败",
-            );
-            break;
-          }
-          await new Promise<void>((resolve) => {
-            const timer = setTimeout(resolve, 250 * 2 ** (attempt - 1) + Math.floor(Math.random() * 100));
-            timer.unref();
-          });
-        }
+      try {
+        await operation.run();
+      } catch (error) {
+        this.logger.warn(
+          { error: safeErrorMessage(error), chatId, critical: operation.critical },
+          "Telegram 输出失败",
+        );
       }
     }
   }
@@ -225,57 +241,51 @@ export class TelegramOutbox {
     if (!state) {
       return;
     }
-    const text = state.text.trim();
-    if (!text) {
+    if (!state.text.trim()) {
       if (final) {
         this.streams.delete(key);
       }
       return;
     }
+    const text = state.text.trimEnd();
     const [first, ...rest] = splitTelegramText(text);
     if (!first) {
       return;
     }
     if (state.messageId) {
       try {
-        await this.api.editMessageText(chatId, state.messageId, first);
+        await this.executor.call(
+          { chatId, operation: "editMessageText", critical: final },
+          () => this.api.editMessageText(chatId, state.messageId!, first),
+        );
       } catch (error) {
-        if (!String(error).toLowerCase().includes("message is not modified")) {
+        if (isMessageNotModified(error)) {
+          // The authoritative final text is already visible.
+        } else if (final) {
+          state.messageId = await this.sendFirstChunk(chatId, state, first);
+        } else {
           throw error;
         }
       }
     } else {
-      const replyTo = this.replyToByTurn.get(state.turnKey);
-      const message = await this.api.sendMessage(
-        chatId,
-        first,
-        replyTo === undefined
-          ? {}
-          : {
-              reply_parameters: {
-                message_id: replyTo,
-                allow_sending_without_reply: true,
-              },
-            },
-      );
-      state.messageId = message.message_id;
-      if (replyTo !== undefined) {
-        this.replyToByTurn.delete(state.turnKey);
-      }
+      state.messageId = await this.sendFirstChunk(chatId, state, first);
     }
     if (final) {
       for (const chunk of rest) {
-        await this.api.sendMessage(chatId, chunk);
+        await this.sendMessage(chatId, chunk);
       }
       this.streams.delete(key);
     }
   }
 
-  private createStream(turnKey: string): StreamState {
+  private createStream(chatId: string, turnKey: string): StreamState {
     return {
+      chatId,
       turnKey,
       text: "",
       messageId: undefined,
+      phase: undefined,
+      completed: false,
       timer: undefined,
     };
   }
@@ -286,8 +296,7 @@ export class TelegramOutbox {
       current.activityKeys.add(activityKey);
       return;
     }
-    this.showTyping(chatId);
-    const timer = setTimeout(() => this.refreshTyping(chatId), 4_000);
+    const timer = setTimeout(() => this.refreshTyping(chatId), 400);
     timer.unref();
     this.typing.set(chatId, { activityKeys: new Set([activityKey]), timer });
   }
@@ -318,19 +327,12 @@ export class TelegramOutbox {
   private async send(chatId: string, text: string, replyTo?: number): Promise<number | undefined> {
     let firstMessageId: number | undefined;
     for (const chunk of splitTelegramText(text)) {
-      const message = await this.api.sendMessage(
+      const messageId = await this.sendMessage(
         chatId,
         chunk,
-        firstMessageId === undefined && replyTo !== undefined
-          ? {
-              reply_parameters: {
-                message_id: replyTo,
-                allow_sending_without_reply: true,
-              },
-            }
-          : {},
+        firstMessageId === undefined ? replyTo : undefined,
       );
-      firstMessageId ??= message.message_id;
+      firstMessageId ??= messageId;
     }
     return firstMessageId;
   }
@@ -351,6 +353,50 @@ export class TelegramOutbox {
   private turnActivityKey(threadId: string, turnId: string): string {
     return `turn:${this.turnKey(threadId, turnId)}`;
   }
+
+  private async sendFirstChunk(chatId: string, state: StreamState, text: string): Promise<number> {
+    const replyTo = state.phase === "commentary"
+      ? undefined
+      : this.replyToByTurn.get(state.turnKey);
+    const message = await this.executor.call(
+      { chatId, operation: "sendMessage", critical: true },
+      () => this.api.sendMessage(chatId, text, replyOptions(replyTo)),
+    );
+    if (replyTo !== undefined) {
+      this.replyToByTurn.delete(state.turnKey);
+    }
+    return message.message_id;
+  }
+
+  private async sendMessage(chatId: string, text: string, replyTo?: number): Promise<number> {
+    const message = await this.executor.call(
+      { chatId, operation: "sendMessage", critical: true },
+      () => this.api.sendMessage(chatId, text, replyOptions(replyTo)),
+    );
+    return message.message_id;
+  }
+
+  private clearThreadOutput(chatId: string, threadId: string): void {
+    for (const [key, stream] of this.streams) {
+      if (stream.turnKey.startsWith(`${threadId}:`)) {
+        if (stream.timer) {
+          clearTimeout(stream.timer);
+        }
+        this.streams.delete(key);
+      }
+    }
+    for (const key of this.replyToByTurn.keys()) {
+      if (key.startsWith(`${threadId}:`)) {
+        this.replyToByTurn.delete(key);
+      }
+    }
+    const typing = this.typing.get(chatId);
+    if (typing) {
+      clearTimeout(typing.timer);
+      this.typing.delete(chatId);
+    }
+  }
+
 }
 
 function formatCliInput(text: string): string {
@@ -364,4 +410,33 @@ function formatCliInput(text: string): string {
 
 function safeErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function replyOptions(replyTo?: number): Parameters<Api["sendMessage"]>[2] {
+  return replyTo === undefined
+    ? {}
+    : {
+        reply_parameters: {
+          message_id: replyTo,
+          allow_sending_without_reply: true,
+        },
+      };
+}
+
+function isMessageNotModified(error: unknown): boolean {
+  return safeErrorMessage(error).toLowerCase().includes("message is not modified");
+}
+
+async function waitAtMost<T>(operation: Promise<T>, milliseconds: number): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, milliseconds);
+  });
+  try {
+    await Promise.race([operation, timeout]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }

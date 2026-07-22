@@ -1,5 +1,5 @@
 import type { RpcNotification } from "../codex-client/json-rpc.js";
-import type { ThreadTokenUsage } from "../codex-protocol/index.js";
+import type { MessagePhase, ThreadTokenUsage } from "../codex-protocol/index.js";
 import type { EventBus } from "../event-bus/event-bus.js";
 import type { SessionRouter } from "../session-routing/router.js";
 import {
@@ -39,6 +39,7 @@ export class ConversationCore {
   private readonly errorsByTurn = new Map<string, string>();
   private readonly usageByThread = new Map<string, ThreadTokenUsage>();
   private readonly seenUserMessages = new Set<string>();
+  private readonly phaseByItem = new Map<string, MessagePhase | null>();
 
   constructor(
     private readonly router: SessionRouter,
@@ -67,9 +68,10 @@ export class ConversationCore {
     this.errorsByTurn.clear();
     this.usageByThread.clear();
     this.seenUserMessages.clear();
+    this.phaseByItem.clear();
     for (const binding of this.router.allBindings()) {
       this.publish({
-        type: "warning",
+        type: "connection.lost",
         target: binding.target,
         threadId: binding.threadId,
         message,
@@ -103,12 +105,14 @@ export class ConversationCore {
         const itemId = stringField(params, "itemId");
         const text = stringField(params, "delta");
         if (threadId && turnId && itemId && text) {
+          const phase = this.phaseByItem.get(this.itemKey(threadId, turnId, itemId));
           this.publishForThread(threadId, {
             type: "text.delta",
             threadId,
             turnId,
             itemId,
             text,
+            ...(phase !== undefined ? { phase } : {}),
           });
         }
         return;
@@ -117,25 +121,31 @@ export class ConversationCore {
       case "item/completed": {
         const turnId = stringField(params, "turnId");
         const item = asRecord(params?.item);
+        const itemId = stringField(item, "id");
+        if (threadId && turnId && item?.type === "agentMessage" && itemId) {
+          const key = this.itemKey(threadId, turnId, itemId);
+          const phase = messagePhase(item.phase);
+          if (notification.method === "item/started") {
+            this.phaseByItem.set(key, phase);
+          } else {
+            const resolvedPhase = phase ?? this.phaseByItem.get(key) ?? null;
+            if (typeof item.text === "string") {
+              this.publishForThread(threadId, {
+                type: "text.completed",
+                threadId,
+                turnId,
+                itemId,
+                text: item.text,
+                phase: resolvedPhase,
+              });
+            }
+            this.phaseByItem.delete(key);
+          }
+          return;
+        }
         if (threadId && turnId && item?.type === "userMessage") {
           this.publishUserMessage(threadId, turnId, item);
           return;
-        }
-        if (
-          notification.method === "item/completed" &&
-          threadId &&
-          turnId &&
-          item?.type === "agentMessage" &&
-          typeof item.id === "string" &&
-          typeof item.text === "string"
-        ) {
-          this.publishForThread(threadId, {
-            type: "text.completed",
-            threadId,
-            turnId,
-            itemId: item.id,
-            text: item.text,
-          });
         }
         return;
       }
@@ -156,6 +166,7 @@ export class ConversationCore {
           return;
         }
         this.clearSeenUserMessages(threadId, turnId);
+        this.clearItemPhases(threadId, turnId);
         const target = this.router.targetForThread(threadId);
         if (!target) {
           return;
@@ -198,6 +209,7 @@ export class ConversationCore {
         const target = this.router.forgetThread(threadId);
         this.usageByThread.delete(threadId);
         this.clearSeenUserMessages(threadId);
+        this.clearItemPhases(threadId);
         if (target) {
           this.activeByConversation.delete(this.key(target));
         }
@@ -273,6 +285,19 @@ export class ConversationCore {
     }
   }
 
+  private clearItemPhases(threadId: string, turnId?: string): void {
+    const prefix = turnId ? `${threadId}:${turnId}:` : `${threadId}:`;
+    for (const key of this.phaseByItem.keys()) {
+      if (key.startsWith(prefix)) {
+        this.phaseByItem.delete(key);
+      }
+    }
+  }
+
+  private itemKey(threadId: string, turnId: string, itemId: string): string {
+    return `${threadId}:${turnId}:${itemId}`;
+  }
+
   private publish(event: OutputEvent): void {
     this.output.publish(event, isCriticalOutputEvent(event));
   }
@@ -280,6 +305,10 @@ export class ConversationCore {
   private key(target: ConversationTarget): string {
     return `${target.surface}:${target.conversationId}`;
   }
+}
+
+function messagePhase(value: unknown): MessagePhase | null {
+  return value === "commentary" || value === "final_answer" ? value : null;
 }
 
 function parseThreadTokenUsage(record: Record<string, unknown> | undefined): ThreadTokenUsage | undefined {

@@ -37,6 +37,9 @@ describe("launchd installer", () => {
         `CODEX_WORKSPACES_JSON='${JSON.stringify([{ id: "test", name: "Test", cwd: root }])}'`,
         "CODEX_DEFAULT_WORKSPACE=test",
         `CODEX_SOCKET_PATH=${join(runtimeDir, "codex-app-server.sock")}`,
+        "HTTP_PROXY=http://127.0.0.1:7897",
+        "HTTPS_PROXY=http://127.0.0.1:7897",
+        "NO_PROXY=localhost,127.0.0.1",
       ].join("\n"),
     );
 
@@ -63,6 +66,11 @@ describe("launchd installer", () => {
     expect(appServer).toContain(`<string>${dirname(nodeBinary)}:`);
     expect(gateway).toContain(`<key>CODEX_BINARY</key>\n    <string>${nodeBinary}</string>`);
     expect(gateway).toContain(`<key>PATH</key>`);
+    for (const plist of [appServer, gateway]) {
+      expect(plist).toContain("<key>HTTP_PROXY</key>\n    <string>http://127.0.0.1:7897</string>");
+      expect(plist).toContain("<key>HTTPS_PROXY</key>\n    <string>http://127.0.0.1:7897</string>");
+      expect(plist).toContain("<key>NO_PROXY</key>\n    <string>localhost,127.0.0.1</string>");
+    }
   });
 
   it.skipIf(process.platform !== "darwin")("uninstalls only launchd plists and preserves user data", () => {

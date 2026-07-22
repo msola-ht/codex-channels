@@ -2,6 +2,7 @@ import version from "./version.json" with { type: "json" };
 
 export type { InitializeParams } from "./generated/InitializeParams.js";
 export type { InitializeResponse } from "./generated/InitializeResponse.js";
+export type { MessagePhase } from "./generated/MessagePhase.js";
 export type { RequestId } from "./generated/RequestId.js";
 export type { ServerNotification } from "./generated/ServerNotification.js";
 export type { ServerRequest } from "./generated/ServerRequest.js";

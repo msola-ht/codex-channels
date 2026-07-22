@@ -17,6 +17,22 @@
   <dict>
     <key>PATH</key>
     <string>__LAUNCHD_PATH__</string>
+    <key>HTTP_PROXY</key>
+    <string>__HTTP_PROXY__</string>
+    <key>HTTPS_PROXY</key>
+    <string>__HTTPS_PROXY__</string>
+    <key>ALL_PROXY</key>
+    <string>__ALL_PROXY__</string>
+    <key>NO_PROXY</key>
+    <string>__NO_PROXY__</string>
+    <key>http_proxy</key>
+    <string>__http_proxy__</string>
+    <key>https_proxy</key>
+    <string>__https_proxy__</string>
+    <key>all_proxy</key>
+    <string>__all_proxy__</string>
+    <key>no_proxy</key>
+    <string>__no_proxy__</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>

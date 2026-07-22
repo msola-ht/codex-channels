@@ -21,6 +21,7 @@ import {
   splitTelegramText,
 } from "./format.js";
 import { TelegramInteractionPort } from "./interactions.js";
+import { TelegramApiExecutor } from "./api-executor.js";
 import { TelegramOutbox } from "./outbox.js";
 
 export class TelegramSurface {
@@ -49,8 +50,9 @@ export class TelegramSurface {
       },
     });
     this.bot.use((context, next) => this.authorize(context, next));
-    this.interactions = new TelegramInteractionPort(this.bot);
-    this.outbox = new TelegramOutbox(this.bot.api, logger);
+    const apiExecutor = new TelegramApiExecutor(logger);
+    this.interactions = new TelegramInteractionPort(this.bot, logger, apiExecutor);
+    this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor);
     this.unsubscribeOutput = output.subscribe("telegram", (event) => this.outbox.handle(event));
     this.registerHandlers();
   }
@@ -152,7 +154,7 @@ export class TelegramSurface {
     this.stopping = true;
     this.lifecycleAbort?.abort();
     this.lifecycleAbort = undefined;
-    this.interactions.close();
+    await this.interactions.close();
     this.unsubscribeOutput?.();
     this.unsubscribeOutput = undefined;
     await this.outbox.close();

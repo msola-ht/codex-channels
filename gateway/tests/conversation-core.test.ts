@@ -119,6 +119,59 @@ describe("ConversationCore", () => {
 
     expect(events.some((event) => event.type === "user.message")).toBe(false);
   });
+
+  it("propagates agent message phases and emits a disconnect event for cleanup", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, conversationId: "100" };
+    const router = {
+      allBindings: () => [{ target, threadId: "thread-1" }],
+      targetForThread: () => target,
+      forgetThread: () => undefined,
+    } as unknown as SessionRouter;
+    const core = new ConversationCore(router, output);
+
+    core.handle({
+      method: "item/started",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: { type: "agentMessage", id: "agent-1", text: "", phase: "commentary" },
+      },
+    });
+    core.handle({
+      method: "item/agentMessage/delta",
+      params: { threadId: "thread-1", turnId: "turn-1", itemId: "agent-1", delta: "检查中" },
+    });
+    core.handle({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: { type: "agentMessage", id: "agent-1", text: "检查完成", phase: "commentary" },
+      },
+    });
+    core.connectionLost("连接已断开");
+    await output.close();
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "text.delta",
+      phase: "commentary",
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "text.completed",
+      phase: "commentary",
+    }));
+    expect(events).toContainEqual({
+      type: "connection.lost",
+      target,
+      threadId: "thread-1",
+      message: "连接已断开",
+    });
+  });
 });
 
 function breakdown(totalTokens: number) {
