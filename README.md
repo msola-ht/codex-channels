@@ -279,6 +279,8 @@ RUN_CODEX_INTEGRATION=1 npm test -- --run tests/real-app-server.test.ts
 plutil -lint launchd/*.plist.template
 ```
 
+GitHub Actions 会在 push、Pull Request 和手动触发时，分别使用 macOS 与 Linux、Node.js 22.13.0 执行依赖锁定安装、类型和版本检查、单元测试、构建及 npm 包内容检查；macOS 任务还会检查 launchd 模板。依赖本机 `codex-cli 0.145.0` 的协议检查和真实 App Server 冒烟测试仍按上述命令手动执行。
+
 ## 协议升级
 
 先升级 Codex CLI，再重新生成协议：
