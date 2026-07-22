@@ -13,6 +13,7 @@ import type { OutputEvent } from "../conversation-core/events.js";
 import { ConversationService } from "../conversation-core/service.js";
 import { EventBus } from "../event-bus/event-bus.js";
 import { TelegramAccessPolicy } from "../policy/telegram-access.js";
+import { WorkspaceRegistry } from "../policy/workspace-registry.js";
 import { SessionRouter } from "../session-routing/router.js";
 import { SqliteBindingStore } from "../storage/sqlite-binding-store.js";
 import { TelegramSurface } from "../surfaces/telegram/bot.js";
@@ -41,16 +42,19 @@ export class GatewayApplication {
     this.transport = new UnixWebSocketTransport(config.codexSocketPath);
     this.rpc = new JsonRpcClient(this.transport);
     this.codex = new CodexAppServerClient(this.rpc, {
-      cwd: config.codexWorkdir,
       sandbox: config.codexSandbox,
       ...(config.codexModel ? { model: config.codexModel } : {}),
     });
     this.inbound = new EventBus<RpcNotification>(logger, 2_000);
     this.output = new EventBus<OutputEvent>(logger, 1_000);
     this.bindings = new SqliteBindingStore(config.stateDatabasePath);
-    this.router = new SessionRouter(this.codex, this.bindings);
+    this.router = new SessionRouter(
+      this.codex,
+      this.bindings,
+      new WorkspaceRegistry(config.workspaces, config.defaultWorkspaceId),
+    );
     this.core = new ConversationCore(this.router, this.output);
-    const service = new ConversationService(this.codex, this.router, this.core, config.codexWorkdir);
+    const service = new ConversationService(this.codex, this.router, this.core);
     this.telegram = new TelegramSurface(
       config.telegramBotToken,
       config.telegramProxyUrl,

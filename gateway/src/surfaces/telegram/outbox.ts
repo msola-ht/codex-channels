@@ -6,6 +6,7 @@ import { BoundedAsyncQueue } from "../../event-bus/bounded-queue.js";
 import { splitTelegramText } from "./format.js";
 
 interface StreamState {
+  turnKey: string;
   text: string;
   messageId: number | undefined;
   timer: NodeJS.Timeout | undefined;
@@ -28,6 +29,7 @@ interface ChatWorker {
 
 export class TelegramOutbox {
   private readonly streams = new Map<string, StreamState>();
+  private readonly replyToByTurn = new Map<string, number>();
   private readonly typing = new Map<string, TypingState>();
   private readonly lastTypingAt = new Map<string, number>();
   private readonly workers = new Map<string, ChatWorker>();
@@ -48,12 +50,20 @@ export class TelegramOutbox {
       case "turn.started":
         this.startTyping(chatId, this.turnActivityKey(event.threadId, event.turnId));
         return;
-      case "user.message":
-        this.enqueue(chatId, () => this.send(chatId, `外部输入：\n${event.text}`), true);
+      case "user.message": {
+        const turnKey = this.turnKey(event.threadId, event.turnId);
+        this.enqueue(chatId, async () => {
+          const messageId = await this.send(chatId, formatCliInput(event.text));
+          if (messageId !== undefined) {
+            this.replyToByTurn.set(turnKey, messageId);
+          }
+        }, true);
         return;
+      }
       case "text.delta": {
-        const key = this.streamKey(event.threadId, event.turnId, event.itemId);
-        const state = this.streams.get(key) ?? this.createStream();
+        const turnKey = this.turnKey(event.threadId, event.turnId);
+        const key = this.streamKey(turnKey, event.itemId);
+        const state = this.streams.get(key) ?? this.createStream(turnKey);
         state.text += event.text;
         this.streams.set(key, state);
         if (!state.timer) {
@@ -66,8 +76,9 @@ export class TelegramOutbox {
         return;
       }
       case "text.completed": {
-        const key = this.streamKey(event.threadId, event.turnId, event.itemId);
-        const state = this.streams.get(key) ?? this.createStream();
+        const turnKey = this.turnKey(event.threadId, event.turnId);
+        const key = this.streamKey(turnKey, event.itemId);
+        const state = this.streams.get(key) ?? this.createStream(turnKey);
         state.text = event.text;
         if (state.timer) {
           clearTimeout(state.timer);
@@ -81,6 +92,7 @@ export class TelegramOutbox {
         return;
       }
       case "turn.completed": {
+        const turnKey = this.turnKey(event.threadId, event.turnId);
         const keys = this.streamKeysForTurn(event.threadId, event.turnId);
         for (const key of keys) {
           const stream = this.streams.get(key);
@@ -94,16 +106,20 @@ export class TelegramOutbox {
           for (const key of keys) {
             await this.flush(chatId, key, true);
           }
+          const replyTo = this.replyToByTurn.get(turnKey);
           if (event.error) {
-            await this.send(chatId, `Codex 任务失败：${event.error}`);
+            await this.send(chatId, `Codex 任务失败：${event.error}`, replyTo);
           } else if (!new Set(["completed", "success"]).has(event.status)) {
-            await this.send(chatId, `Codex 任务状态：${event.status}`);
+            await this.send(chatId, `Codex 任务状态：${event.status}`, replyTo);
           }
+          this.replyToByTurn.delete(turnKey);
         }, true);
         return;
       }
       case "warning":
-        this.enqueue(chatId, () => this.send(chatId, `Codex 警告：${event.message}`), true);
+        this.enqueue(chatId, async () => {
+          await this.send(chatId, `Codex 警告：${event.message}`);
+        }, true);
         return;
       case "thread.status":
         return;
@@ -125,6 +141,7 @@ export class TelegramOutbox {
     }
     await Promise.allSettled([...this.workers.values()].map((worker) => worker.done));
     this.streams.clear();
+    this.replyToByTurn.clear();
     this.typing.clear();
     this.lastTypingAt.clear();
     this.workers.clear();
@@ -221,8 +238,23 @@ export class TelegramOutbox {
         }
       }
     } else {
-      const message = await this.api.sendMessage(chatId, first);
+      const replyTo = this.replyToByTurn.get(state.turnKey);
+      const message = await this.api.sendMessage(
+        chatId,
+        first,
+        replyTo === undefined
+          ? {}
+          : {
+              reply_parameters: {
+                message_id: replyTo,
+                allow_sending_without_reply: true,
+              },
+            },
+      );
       state.messageId = message.message_id;
+      if (replyTo !== undefined) {
+        this.replyToByTurn.delete(state.turnKey);
+      }
     }
     if (final) {
       for (const chunk of rest) {
@@ -232,8 +264,9 @@ export class TelegramOutbox {
     }
   }
 
-  private createStream(): StreamState {
+  private createStream(turnKey: string): StreamState {
     return {
+      turnKey,
       text: "",
       messageId: undefined,
       timer: undefined,
@@ -275,18 +308,32 @@ export class TelegramOutbox {
     }
   }
 
-  private async send(chatId: string, text: string): Promise<void> {
+  private async send(chatId: string, text: string, replyTo?: number): Promise<number | undefined> {
+    let firstMessageId: number | undefined;
     for (const chunk of splitTelegramText(text)) {
-      await this.api.sendMessage(chatId, chunk);
+      const message = await this.api.sendMessage(
+        chatId,
+        chunk,
+        firstMessageId === undefined && replyTo !== undefined
+          ? {
+              reply_parameters: {
+                message_id: replyTo,
+                allow_sending_without_reply: true,
+              },
+            }
+          : {},
+      );
+      firstMessageId ??= message.message_id;
     }
+    return firstMessageId;
   }
 
   private turnKey(threadId: string, turnId: string): string {
     return `${threadId}:${turnId}`;
   }
 
-  private streamKey(threadId: string, turnId: string, itemId: string): string {
-    return `${this.turnKey(threadId, turnId)}:${itemId}`;
+  private streamKey(turnKey: string, itemId: string): string {
+    return `${turnKey}:${itemId}`;
   }
 
   private streamKeysForTurn(threadId: string, turnId: string): string[] {
@@ -297,6 +344,15 @@ export class TelegramOutbox {
   private turnActivityKey(threadId: string, turnId: string): string {
     return `turn:${this.turnKey(threadId, turnId)}`;
   }
+}
+
+function formatCliInput(text: string): string {
+  const quote = text
+    .trim()
+    .split("\n")
+    .map((line) => `│ ${line}`)
+    .join("\n");
+  return `CLI 输入\n\n${quote}`;
 }
 
 function safeErrorMessage(error: unknown): string {

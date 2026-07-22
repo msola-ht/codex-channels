@@ -19,7 +19,7 @@ launchd
     └── surfaces/telegram
 ```
 
-App Server 与 Gateway 是两个独立进程。Gateway 停止不会终止 App Server；连接中断后 Gateway 会有限次数指数退避重连、重新 `initialize` 并恢复已绑定 Thread 的订阅。Telegram 网络发送通过独立有界队列处理，不阻塞 App Server Reader。任务运行时会持续显示 Telegram 原生“正在输入”状态；每个 agent message item 分别渲染为一个消息气泡，同一 item 的流式 delta 只编辑对应气泡，Turn 完成后再定稿。CLI 等外部客户端在已绑定 Thread 中发起 Turn 时，Telegram 会同步显示外部文本输入和回复；Gateway 自己发起的输入通过协议 client ID 去重，不会重复回显。
+App Server 与 Gateway 是两个独立进程。Gateway 停止不会终止 App Server；连接中断后 Gateway 会有限次数指数退避重连、重新 `initialize` 并恢复已绑定 Thread 的订阅。Telegram 网络发送通过独立有界队列处理，不阻塞 App Server Reader。任务运行时会持续显示 Telegram 原生“正在输入”状态；每个 agent message item 分别渲染为一个消息气泡，同一 item 的流式 delta 只编辑对应气泡，Turn 完成后再定稿。CLI 等外部客户端在已绑定 Thread 中发起 Turn 时，Telegram 会把外部文本渲染为引用式 `CLI 输入` 消息，下一条 Codex 输出通过 Telegram 原生回复关联到该输入；Gateway 自己发起的输入通过协议 client ID 去重，不会重复回显。
 
 详细设计和边界见 [ARCHITECTURE_REBUILD_PROPOSAL.md](ARCHITECTURE_REBUILD_PROPOSAL.md)，项目约束见 [AGENTS.md](AGENTS.md)。
 
@@ -35,6 +35,7 @@ App Server 与 Gateway 是两个独立进程。Gateway 停止不会终止 App Se
 ```bash
 npm ci
 cp .env.example .env
+chmod 600 .env
 ```
 
 编辑 `.env`：
@@ -44,17 +45,34 @@ TELEGRAM_BOT_TOKEN=从_BotFather_取得的_Token
 TELEGRAM_ALLOWED_USER_IDS=你的_Telegram_用户_ID
 TELEGRAM_PROXY_URL=http://127.0.0.1:7890
 CODEX_BINARY=codex
-CODEX_WORKDIR=/Users/you/project
-CODEX_SOCKET_PATH=/Users/you/project/.runtime/codex-app-server.sock
+CODEX_WORKSPACES_JSON=[{"id":"codex-connect","name":"Codex Connect","cwd":"/Users/you/Project-skill-Codex-Connect"},{"id":"another","name":"Another Project","cwd":"/Users/you/another-project"}]
+CODEX_DEFAULT_WORKSPACE=codex-connect
+CODEX_SOCKET_PATH=/Users/you/Project-skill-Codex-Connect/.runtime/codex-app-server.sock
 CODEX_BRIDGE_SANDBOX=workspace-write
 APPROVAL_TIMEOUT_SECONDS=300
 STATE_DATABASE_PATH=./data/gateway.sqlite3
 LOG_LEVEL=info
 ```
 
-`CODEX_WORKDIR` 必须是已存在的绝对目录。Telegram 只能操作该预配置目录，不能通过聊天提交任意工作目录。Socket 父目录由安装脚本创建并设为 `0700`。
+`CODEX_WORKSPACES_JSON` 必须是非空 JSON 数组；每项包含唯一的 `id`、展示名称 `name` 和已存在的绝对目录 `cwd`。`CODEX_DEFAULT_WORKSPACE` 必须引用其中一个 ID。Telegram 只能通过 `/workspace` 选择这些预配置目录，不能通过聊天提交任意工作目录。Socket 父目录由安装脚本创建并设为 `0700`。
 
-`STATE_DATABASE_PATH` 只保存 Telegram chat 与当前 Codex Thread 的绑定，不保存消息、Turn、Item 或会话历史。Gateway 启动后会通过 `thread/resume` 验证并恢复绑定，因此 `/resume` 可以继续标记 `← 当前`。数据库父目录权限固定为 `0700`，文件权限为 `0600`。需要清空界面绑定时，停止 Gateway 后删除该文件即可；Codex 原生 Thread 不受影响。
+也可以从目标项目目录直接注册当前目录，无需手工编辑 JSON：
+
+```bash
+cd /absolute/path/to/target-project
+npm --prefix /Users/you/Project-skill-Codex-Connect run workspace:add
+```
+
+命令通过 npm 的 `INIT_CWD` 读取执行时所在目录，默认使用目录名作为展示名称并生成 Workspace ID；同一路径重复执行不会重复添加。需要自定义时使用：
+
+```bash
+npm --prefix /Users/you/Project-skill-Codex-Connect run workspace:add -- \
+  --id target-project --name "Target Project"
+```
+
+注册会原子更新 Gateway 的 `.env`。重启 Gateway 后，在 Telegram 发送 `/workspace` 即可选择新目录。该命令是本机可信管理入口，Telegram 仍不能提交任意路径。
+
+`STATE_DATABASE_PATH` 只保存 Telegram chat 当前选择的 Workspace 及其 Codex Thread 绑定，不保存消息、Turn、Item 或会话历史。Gateway 启动后会通过 `thread/resume` 验证并恢复绑定，因此 `/resume` 可以继续标记 `← 当前`。数据库父目录权限固定为 `0700`，文件权限为 `0600`。当前开发版使用 SQLite Schema v2，不兼容旧 v1 状态库；升级后停止 Gateway 并删除旧数据库即可，Codex 原生 Thread 不受影响。
 
 ## 本地前台运行
 
@@ -88,6 +106,12 @@ npm run dev
 npm run remote
 ```
 
+连接指定 Workspace：
+
+```bash
+npm run remote -- --workspace another
+```
+
 也可以直接运行：
 
 ```bash
@@ -116,6 +140,7 @@ npm run service:stop
 ## Telegram 命令
 
 - `/resume [序号|名称|Thread ID]`：列出或恢复当前工作目录下的原生 Codex Thread
+- `/workspace [序号|ID|名称]`：列出或切换服务端预配置的 Workspace；切换时解除旧 Thread 绑定
 - `/new`：解除并删除当前持久化绑定，下一条普通消息创建新 Thread
 - `/status`：查看当前 Thread、Turn、工作目录及 App Server 已推送的 Thread Token 统计
 - `/stop`：中断活动 Turn
@@ -129,9 +154,9 @@ npm run service:stop
 - `/cancel`：取消当前审批、用户输入或 MCP 交互
 - `/whoami`：显示 Telegram 用户 ID
 
-普通文本会发送给当前 Thread；若当前 Turn 正在执行，则通过 `turn/steer` 追加。首次消息会在 `cli`、`vscode`（当前版本 Remote TUI 的来源标记）和 `appServer` 来源中选择当前目录最近的空闲且未绑定 Thread；不会自动接入活动 Thread。
+普通文本会发送给当前 Thread；若当前 Turn 正在执行，则通过 `turn/steer` 追加。首次消息会在当前 Workspace 的 `cli`、`vscode`（当前版本 Remote TUI 的来源标记）和 `appServer` 来源中选择最近的空闲且未绑定 Thread；不会自动接入活动 Thread。切换 Workspace 前必须等待当前 Turn 结束或先 `/stop`。
 
-当前 Thread 绑定会写入本机 StateStore。Gateway 重启后会恢复有效绑定；如果对应 Thread 已删除或无法恢复，绑定会自动清理并要求重新 `/resume`。
+当前 Workspace 选择与 Thread 绑定会写入本机 StateStore。Gateway 重启后会恢复有效绑定；如果对应 Thread 已删除或无法恢复，Thread 绑定会自动清理，但仍保留有效的 Workspace 选择。配置中已删除的 Workspace 会回退到默认 Workspace。
 
 ## 审批和安全
 
@@ -179,4 +204,4 @@ RUN_CODEX_INTEGRATION=1 npm test -- --run gateway/tests/real-app-server.test.ts
 
 ## 当前状态
 
-仓库已经切换为单一 TypeScript Gateway；旧 Python Runtime、测试、smoke 脚本和打包入口已移除。CLI/Remote TUI 与 Telegram 双向恢复原生 Codex Thread 已完成真实验证。前后台常驻服务暂未启用，当前使用 `npm run dev:all` 运行。
+仓库已经切换为单一 TypeScript Gateway；旧 Python Runtime、测试、smoke 脚本和打包入口已移除。CLI/Remote TUI 与 Telegram 双向恢复原生 Codex Thread 已完成真实验证。Gateway 支持从服务端预配置列表安全切换 Workspace，所有 Thread 查询和 Turn 均使用所选 Workspace 的 `cwd`。前后台常驻服务暂未启用，当前使用 `npm run dev:all` 运行。

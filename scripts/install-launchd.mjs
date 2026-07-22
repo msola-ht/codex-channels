@@ -5,12 +5,14 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { parse } from "dotenv";
+import { readWorkspaceConfig } from "./workspace-config.mjs";
 
 const projectDir = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), ".."));
 const envPath = join(projectDir, ".env");
 const env = parse(readFileSync(envPath));
-const workdir = realpathSync(required(env, "CODEX_WORKDIR"));
-const socketPath = resolve(env.CODEX_SOCKET_PATH || join(workdir, ".runtime/codex-app-server.sock"));
+const { defaultWorkspace } = readWorkspaceConfig(env);
+const workdir = defaultWorkspace.cwd;
+const socketPath = resolve(env.CODEX_SOCKET_PATH || join(projectDir, ".runtime/codex-app-server.sock"));
 if (!isAbsolute(socketPath)) {
   throw new Error("CODEX_SOCKET_PATH 必须是绝对路径");
 }
@@ -39,14 +41,6 @@ for (const name of ["com.msola.codex-app-server", "com.msola.codex-gateway"]) {
   console.log(`已生成 ${destination}`);
 }
 console.log("配置已生成。使用 scripts/launchd-control.sh start 启动服务。");
-
-function required(values, key) {
-  const value = values[key]?.trim();
-  if (!value) {
-    throw new Error(`.env 缺少 ${key}`);
-  }
-  return value;
-}
 
 function resolveExecutable(command) {
   if (isAbsolute(command)) {

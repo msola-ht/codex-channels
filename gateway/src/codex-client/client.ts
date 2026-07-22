@@ -25,7 +25,6 @@ import type {
 import { JsonRpcClient, type RpcNotification, type ServerRequestHandler } from "./json-rpc.js";
 
 export interface ThreadDefaults {
-  cwd: string;
   model?: string;
   sandbox: "read-only" | "workspace-write";
 }
@@ -60,7 +59,7 @@ export class CodexAppServerClient {
     this.rpc.setServerRequestHandler(handler);
   }
 
-  async listThreads(options: { fullScan?: boolean } = {}): Promise<Thread[]> {
+  async listThreads(cwd: string, options: { fullScan?: boolean } = {}): Promise<Thread[]> {
     const threads: Thread[] = [];
     const cursors = new Set<string>();
     let cursor: string | null = null;
@@ -68,7 +67,7 @@ export class CodexAppServerClient {
       const result: ThreadListResponse = await this.rpc.request<ThreadListResponse>(
         "thread/list",
         {
-          cwd: this.defaults.cwd,
+          cwd,
           sourceKinds: ["cli", "vscode", "appServer"],
           sortKey: "updated_at",
           sortDirection: "desc",
@@ -99,11 +98,11 @@ export class CodexAppServerClient {
     return result.thread;
   }
 
-  async startThread(): Promise<ThreadStartResponse> {
+  async startThread(cwd: string): Promise<ThreadStartResponse> {
     return this.rpc.request<ThreadStartResponse>(
       "thread/start",
       {
-        cwd: this.defaults.cwd,
+        cwd,
         sandbox: this.defaults.sandbox,
         approvalPolicy: "on-request",
         serviceName: "codex_tg_gateway",
@@ -113,12 +112,12 @@ export class CodexAppServerClient {
     );
   }
 
-  async resumeThread(threadId: string): Promise<ThreadResumeResponse> {
+  async resumeThread(threadId: string, cwd: string): Promise<ThreadResumeResponse> {
     return this.rpc.request<ThreadResumeResponse>(
       "thread/resume",
       {
         threadId,
-        cwd: this.defaults.cwd,
+        cwd,
         sandbox: this.defaults.sandbox,
         approvalPolicy: "on-request",
         ...(this.defaults.model ? { model: this.defaults.model } : {}),
@@ -139,6 +138,7 @@ export class CodexAppServerClient {
     threadId: string,
     text: string,
     clientUserMessageId: string,
+    cwd: string,
   ): Promise<TurnStartResponse> {
     return this.rpc.request<TurnStartResponse>(
       "turn/start",
@@ -146,7 +146,7 @@ export class CodexAppServerClient {
         threadId,
         clientUserMessageId,
         input: [{ type: "text", text, text_elements: [] }],
-        cwd: this.defaults.cwd,
+        cwd,
         ...(this.defaults.model ? { model: this.defaults.model } : {}),
       },
       { retryOverload: false },
@@ -198,12 +198,12 @@ export class CodexAppServerClient {
     return models;
   }
 
-  async forkThread(threadId: string): Promise<ThreadForkResponse> {
+  async forkThread(threadId: string, cwd: string): Promise<ThreadForkResponse> {
     return this.rpc.request<ThreadForkResponse>(
       "thread/fork",
       {
         threadId,
-        cwd: this.defaults.cwd,
+        cwd,
         sandbox: this.defaults.sandbox,
         approvalPolicy: "on-request",
         ...(this.defaults.model ? { model: this.defaults.model } : {}),
@@ -220,10 +220,10 @@ export class CodexAppServerClient {
     );
   }
 
-  async listSkills(): Promise<SkillsListResponse["data"]> {
+  async listSkills(cwd: string): Promise<SkillsListResponse["data"]> {
     const response = await this.rpc.request<SkillsListResponse>(
       "skills/list",
-      { cwds: [this.defaults.cwd], forceReload: false },
+      { cwds: [cwd], forceReload: false },
       { retryOverload: true },
     );
     return response.data;
@@ -250,10 +250,10 @@ export class CodexAppServerClient {
     return servers;
   }
 
-  async listPlugins(): Promise<PluginListResponse> {
+  async listPlugins(cwd: string): Promise<PluginListResponse> {
     return this.rpc.request<PluginListResponse>(
       "plugin/list",
-      { cwds: [this.defaults.cwd] },
+      { cwds: [cwd] },
       { retryOverload: true },
     );
   }
@@ -274,14 +274,14 @@ export class CodexAppServerClient {
     );
   }
 
-  async listPermissionProfiles(): Promise<PermissionProfileListResponse["data"]> {
+  async listPermissionProfiles(cwd: string): Promise<PermissionProfileListResponse["data"]> {
     const profiles: PermissionProfileListResponse["data"] = [];
     let cursor: string | null = null;
     do {
       const response: PermissionProfileListResponse =
         await this.rpc.request<PermissionProfileListResponse>(
           "permissionProfile/list",
-          { cwd: this.defaults.cwd, limit: 100, ...(cursor ? { cursor } : {}) },
+          { cwd, limit: 100, ...(cursor ? { cursor } : {}) },
           { retryOverload: true },
         );
       profiles.push(...response.data);

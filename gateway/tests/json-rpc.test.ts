@@ -172,12 +172,11 @@ describe("JsonRpcClient", () => {
     const transport = new FakeTransport();
     const rpc = new JsonRpcClient(transport);
     const client = new CodexAppServerClient(rpc, {
-      cwd: "/tmp/project",
       sandbox: "workspace-write",
     });
     await client.connect();
 
-    await client.listThreads();
+    await client.listThreads("/tmp/project");
 
     const request = transport.sent.find((message) => message.method === "thread/list");
     expect(request?.params).toMatchObject({
@@ -191,7 +190,6 @@ describe("JsonRpcClient", () => {
     const transport = new FakeTransport();
     const rpc = new JsonRpcClient(transport);
     const client = new CodexAppServerClient(rpc, {
-      cwd: "/tmp/project",
       sandbox: "workspace-write",
     });
     await client.connect();
@@ -206,16 +204,18 @@ describe("JsonRpcClient", () => {
     const transport = new FakeTransport();
     const rpc = new JsonRpcClient(transport);
     const client = new CodexAppServerClient(rpc, {
-      cwd: "/tmp/project",
       sandbox: "workspace-write",
     });
     await client.connect();
 
-    await client.startTurn("thread-1", "测试输入", "codex_tg_gateway:request-1");
+    await client.startTurn("thread-1", "测试输入", "codex_tg_gateway:request-1", "/tmp/project");
     await client.steerTurn("thread-1", "turn-1", "补充输入", "codex_tg_gateway:request-2");
 
     expect(transport.sent.find((message) => message.method === "turn/start")?.params)
-      .toMatchObject({ clientUserMessageId: "codex_tg_gateway:request-1" });
+      .toMatchObject({
+        clientUserMessageId: "codex_tg_gateway:request-1",
+        cwd: "/tmp/project",
+      });
     expect(transport.sent.find((message) => message.method === "turn/steer")?.params)
       .toMatchObject({ clientUserMessageId: "codex_tg_gateway:request-2" });
   });

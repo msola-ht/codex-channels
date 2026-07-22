@@ -30,7 +30,6 @@ suite("real Codex App Server over Unix WebSocket", () => {
     await waitFor(() => existsSync(socketPath), 10_000);
     const transport = new UnixWebSocketTransport(socketPath);
     client = new CodexAppServerClient(new JsonRpcClient(transport), {
-      cwd: workdir,
       sandbox: "read-only",
     });
     await client.connect();
@@ -46,7 +45,7 @@ suite("real Codex App Server over Unix WebSocket", () => {
   });
 
   it("lists native threads without starting a turn", async () => {
-    const threads = await client.listThreads();
+    const threads = await client.listThreads(workdir);
     expect(Array.isArray(threads)).toBe(true);
     pino({ enabled: false }).info({ count: threads.length });
   });
@@ -70,11 +69,11 @@ suite("real Codex App Server over stdio", () => {
     const workdir = process.cwd();
     client = new CodexAppServerClient(
       new JsonRpcClient(new StdioTransport({ codexBinary: "codex", cwd: workdir })),
-      { cwd: workdir, sandbox: "read-only" },
+      { sandbox: "read-only" },
     );
 
     const initialized = await client.connect();
-    const threads = await client.listThreads();
+    const threads = await client.listThreads(workdir);
 
     expect(initialized.platformOs).toBe("macos");
     expect(Array.isArray(threads)).toBe(true);

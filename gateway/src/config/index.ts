@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 
 import "dotenv/config";
@@ -13,7 +13,8 @@ const environmentSchema = z.object({
   HTTP_PROXY: z.string().optional(),
   http_proxy: z.string().optional(),
   CODEX_BINARY: z.string().min(1).default("codex"),
-  CODEX_WORKDIR: z.string().min(1),
+  CODEX_WORKSPACES_JSON: z.string().min(1),
+  CODEX_DEFAULT_WORKSPACE: z.string().min(1),
   CODEX_SOCKET_PATH: z.string().min(1).optional(),
   CODEX_MODEL: z.string().optional(),
   CODEX_BRIDGE_SANDBOX: z.enum(["read-only", "workspace-write"]).default("workspace-write"),
@@ -25,12 +26,19 @@ const environmentSchema = z.object({
   ),
 });
 
+const workspaceSchema = z.object({
+  id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
+  name: z.string().trim().min(1).max(64),
+  cwd: z.string().trim().min(1),
+});
+
 export interface GatewayConfig {
   telegramBotToken: string;
   telegramAllowedUserIds: ReadonlySet<number>;
   telegramProxyUrl?: string;
   codexBinary: string;
-  codexWorkdir: string;
+  workspaces: Array<z.infer<typeof workspaceSchema>>;
+  defaultWorkspaceId: string;
   codexSocketPath: string;
   codexModel?: string;
   codexSandbox: "read-only" | "workspace-write";
@@ -48,11 +56,36 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Gatewa
   }
 
   const raw = parsed.data;
-  if (!isAbsolute(raw.CODEX_WORKDIR)) {
-    throw new ConfigurationError("CODEX_WORKDIR 必须是绝对路径");
+  let workspaceInput: unknown;
+  try {
+    workspaceInput = JSON.parse(raw.CODEX_WORKSPACES_JSON);
+  } catch {
+    throw new ConfigurationError("CODEX_WORKSPACES_JSON 必须是有效 JSON");
   }
-  if (!existsSync(raw.CODEX_WORKDIR)) {
-    throw new ConfigurationError("CODEX_WORKDIR 必须是已存在的目录");
+  const parsedWorkspaces = z.array(workspaceSchema).min(1).safeParse(workspaceInput);
+  if (!parsedWorkspaces.success) {
+    throw new ConfigurationError(`CODEX_WORKSPACES_JSON 无效：${z.prettifyError(parsedWorkspaces.error)}`);
+  }
+  const workspaceIds = new Set<string>();
+  const workspaces = parsedWorkspaces.data.map((workspace) => {
+    if (workspaceIds.has(workspace.id)) {
+      throw new ConfigurationError(`Workspace ID 重复：${workspace.id}`);
+    }
+    workspaceIds.add(workspace.id);
+    if (!isAbsolute(workspace.cwd)) {
+      throw new ConfigurationError(`Workspace ${workspace.id} 的 cwd 必须是绝对路径`);
+    }
+    if (!existsSync(workspace.cwd)) {
+      throw new ConfigurationError(`Workspace ${workspace.id} 的 cwd 必须是已存在的目录`);
+    }
+    const cwd = realpathSync(workspace.cwd);
+    if (!statSync(cwd).isDirectory()) {
+      throw new ConfigurationError(`Workspace ${workspace.id} 的 cwd 必须是目录`);
+    }
+    return { ...workspace, cwd };
+  });
+  if (!workspaceIds.has(raw.CODEX_DEFAULT_WORKSPACE)) {
+    throw new ConfigurationError(`CODEX_DEFAULT_WORKSPACE 不存在：${raw.CODEX_DEFAULT_WORKSPACE}`);
   }
 
   const allowedIds = new Set<number>();
@@ -64,9 +97,8 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Gatewa
     allowedIds.add(id);
   }
 
-  const workdir = realpathSync(raw.CODEX_WORKDIR);
   const socketPath = resolve(
-    raw.CODEX_SOCKET_PATH ?? resolve(workdir, ".runtime/codex-app-server.sock"),
+    raw.CODEX_SOCKET_PATH ?? resolve(".runtime/codex-app-server.sock"),
   );
   if (!isAbsolute(socketPath)) {
     throw new ConfigurationError("CODEX_SOCKET_PATH 必须解析为绝对路径");
@@ -80,7 +112,8 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Gatewa
     telegramAllowedUserIds: allowedIds,
     ...(proxyUrl ? { telegramProxyUrl: proxyUrl } : {}),
     codexBinary: raw.CODEX_BINARY,
-    codexWorkdir: workdir,
+    workspaces,
+    defaultWorkspaceId: raw.CODEX_DEFAULT_WORKSPACE,
     codexSocketPath: socketPath,
     ...(raw.CODEX_MODEL ? { codexModel: raw.CODEX_MODEL } : {}),
     codexSandbox: raw.CODEX_BRIDGE_SANDBOX,

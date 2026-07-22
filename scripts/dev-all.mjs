@@ -6,11 +6,13 @@ import { fileURLToPath } from "node:url";
 
 import { parse } from "dotenv";
 import WebSocket from "ws";
+import { readWorkspaceConfig } from "./workspace-config.mjs";
 
 const projectDir = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), ".."));
 const env = parse(readFileSync(join(projectDir, ".env")));
-const workdir = realpathSync(required(env, "CODEX_WORKDIR"));
-const socketPath = resolve(env.CODEX_SOCKET_PATH || join(workdir, ".runtime/codex-app-server.sock"));
+const { defaultWorkspace } = readWorkspaceConfig(env);
+const workdir = defaultWorkspace.cwd;
+const socketPath = resolve(env.CODEX_SOCKET_PATH || join(projectDir, ".runtime/codex-app-server.sock"));
 const runtimeDir = dirname(socketPath);
 const codexBinary = resolveExecutable(env.CODEX_BINARY || "codex");
 const tsxEntry = join(projectDir, "node_modules", "tsx", "dist", "cli.mjs");
@@ -74,14 +76,6 @@ if (appServer) {
 }
 
 await new Promise((resolveExit) => gateway.once("exit", resolveExit));
-
-function required(values, key) {
-  const value = values[key]?.trim();
-  if (!value) {
-    throw new Error(`.env 缺少 ${key}`);
-  }
-  return value;
-}
 
 function resolveExecutable(command) {
   if (isAbsolute(command)) {

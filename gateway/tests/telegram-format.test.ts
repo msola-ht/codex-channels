@@ -1,6 +1,22 @@
 import { describe, expect, it } from "vitest";
 
-import { formatLimits, formatStatus, formatUsage } from "../src/surfaces/telegram/format.js";
+import { formatLimits, formatStatus, formatUsage, formatWorkspaces } from "../src/surfaces/telegram/format.js";
+
+describe("formatWorkspaces", () => {
+  it("marks the current workspace and only renders configured paths", () => {
+    const text = formatWorkspaces(
+      [
+        { id: "main", name: "Main", cwd: "/workspace/main" },
+        { id: "docs", name: "Docs", cwd: "/workspace/docs" },
+      ],
+      "docs",
+    );
+
+    expect(text).toContain("2. Docs · docs ← 当前");
+    expect(text).toContain("/workspace/main");
+    expect(text).toContain("/workspace/docs");
+  });
+});
 
 describe("formatUsage", () => {
   it("formats token totals in millions and shows the latest seven daily buckets", () => {
@@ -79,6 +95,8 @@ describe("formatLimits", () => {
 describe("formatStatus", () => {
   it("shows the latest App Server thread token statistics", () => {
     const text = formatStatus({
+      workspaceId: "main",
+      workspaceName: "Main",
       threadId: "thread-1",
       turnId: "turn-1",
       cwd: "/tmp/project",
@@ -110,7 +128,12 @@ describe("formatStatus", () => {
   });
 
   it("explains when a bound thread has not emitted token statistics", () => {
-    expect(formatStatus({ threadId: "thread-1", cwd: "/tmp/project" }))
+    expect(formatStatus({
+      workspaceId: "main",
+      workspaceName: "Main",
+      threadId: "thread-1",
+      cwd: "/tmp/project",
+    }))
       .toContain("等待 App Server 推送统计");
   });
 });

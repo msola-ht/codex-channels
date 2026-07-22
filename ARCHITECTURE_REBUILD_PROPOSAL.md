@@ -267,7 +267,7 @@ interface ConversationBinding {
 }
 ```
 
-当前实现通过 SQLite `StateStore` 持久化最小绑定，以便 Gateway 重启后恢复 Telegram 的当前 Thread；不保存 Codex 会话内容。
+当前实现通过 SQLite `StateStore` 持久化 Workspace 选择和最小绑定，以便 Gateway 重启后恢复 Telegram 的当前 Workspace 与 Thread；不保存 Codex 会话内容。
 
 ### 6.4 Internal Event Bus
 
@@ -369,6 +369,10 @@ type OutputEvent =
 `turn/start` 和 `turn/steer` 必须设置 `clientUserMessageId`，Surface 根据该标记
 避免重复回显本地已经显示的输入。审批请求仍由发起 Turn 的连接负责，不跨连接抢答。
 
+Telegram 将外部输入渲染为独立的引用式 `CLI 输入` 气泡，并让该输入之后的第一条
+agent message 使用原生 reply 关系关联到它；后续 agent message item 继续按独立气泡
+输出，避免重复引用。
+
 ### 7.1 Telegram Outbox
 
 Outbox 独立负责：
@@ -447,10 +451,12 @@ interface Workspace {
   id: string;
   name: string;
   cwd: string;
-  appServerProfile: string;
-  allowedAccounts: string[];
 }
 ```
+
+当前单机实现使用一个共享 App Server 和服务端 `CODEX_WORKSPACES_JSON` Registry。Telegram 只能按序号、ID 或名称选择 Registry 中的 Workspace；所有 `thread/list`、`thread/start`、`thread/resume`、`turn/start`、Skills、Plugins 和权限查询都显式使用所选 Workspace 的 `cwd`。切换 Workspace 必须在 Turn 空闲时执行，并先取消旧 Thread 订阅。
+
+Workspace 通过本机可信管理入口注册：操作者在目标目录执行 `npm --prefix <Gateway 目录> run workspace:add`，脚本读取 npm 的 `INIT_CWD` 并原子更新 Gateway `.env` 中的 Registry；同一路径重复注册保持幂等。Gateway 重启后加载新配置。该入口不改变 Telegram 的安全边界，聊天消息仍不能指定任意绝对路径。
 
 一个 App Server 可以服务多个 `cwd`。只有认证、配置或安全边界确实不同，才创建多个 App Server Profile：
 
@@ -475,7 +481,7 @@ interface StateStore {
 
 当前选择：
 
-- 单机 Gateway：SQLite，只保存绑定；后续 Workspace 切换落地时可增加 Workspace ID。
+- 单机 Gateway：SQLite，只保存 Workspace 选择与 Thread 绑定。
 - 多实例部署：PostgreSQL。
 - 只有出现分布式队列或锁需求时才引入 Redis。
 
@@ -645,7 +651,7 @@ Codex Skill 适合描述模型工作流，不适合实现 Gateway 的实时 Tran
 
 ### 阶段 D：扩展能力
 
-- Workspace Registry。
+- [x] Workspace Registry 与 Telegram 安全切换。
 - Extension SDK。
 - 可替换 StateStore。
 - 可观测性和协议升级检查。
@@ -669,7 +675,7 @@ Codex Skill 适合描述模型工作流，不适合实现 Gateway 的实时 Tran
 - [ ] `/new` 和 `/resume` 会正确 unsubscribe 旧 Thread。
 - [ ] Telegram 发起 Turn 的审批、用户输入和 MCP elicitation 有完整处理逻辑。
 - [ ] CLI 发起 Turn 的交互请求不会被 Gateway 错误接管。
-- [ ] 所有 Thread 查询显式指定 Workspace 与 `sourceKinds`。
+- [x] 所有 Thread 查询显式指定 Workspace 与 `sourceKinds`。
 - [x] SQLite StateStore 只持久化绑定，不复制 Codex 会话历史。
 - [ ] 真实 App Server 集成测试通过。
 - [ ] 旧命令和必要产品行为完成对照验收。

@@ -8,8 +8,10 @@ import type { CodexAppServerClient } from "../src/codex-client/client.js";
 import { SessionRouter } from "../src/session-routing/router.js";
 import { MemoryBindingStore } from "../src/storage/memory-binding-store.js";
 import { SqliteBindingStore } from "../src/storage/sqlite-binding-store.js";
+import { WorkspaceRegistry } from "../src/policy/workspace-registry.js";
 
 const target = { surface: "telegram" as const, conversationId: "100" };
+const registry = new WorkspaceRegistry([{ id: "main", name: "Main", cwd: "/workspace" }], "main");
 const temporaryDirectories: string[] = [];
 
 afterEach(() => {
@@ -22,7 +24,7 @@ describe("SqliteBindingStore", () => {
   it("persists only the current conversation binding with private permissions", () => {
     const { path } = databasePath();
     const first = new SqliteBindingStore(path);
-    first.bind({ target, threadId: "thread-1", sessionId: "session-1" });
+    first.bind({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" });
 
     expect(statSync(dirname(path)).mode & 0o777).toBe(0o700);
     expect(statSync(path).mode & 0o777).toBe(0o600);
@@ -31,6 +33,7 @@ describe("SqliteBindingStore", () => {
     const second = new SqliteBindingStore(path);
     expect(second.get(target)).toEqual({
       target,
+      workspaceId: "main",
       threadId: "thread-1",
       sessionId: "session-1",
     });
@@ -45,7 +48,7 @@ describe("SqliteBindingStore", () => {
   it("removes a persisted binding when its Codex Thread can no longer be resumed", async () => {
     const { path } = databasePath();
     const first = new SqliteBindingStore(path);
-    first.bind({ target, threadId: "missing-thread", sessionId: "missing-thread" });
+    first.bind({ target, workspaceId: "main", threadId: "missing-thread", sessionId: "missing-thread" });
     first.close();
 
     const second = new SqliteBindingStore(path);
@@ -54,7 +57,7 @@ describe("SqliteBindingStore", () => {
         throw new Error("thread not found");
       },
     } as unknown as CodexAppServerClient;
-    const router = new SessionRouter(client, second);
+    const router = new SessionRouter(client, second, registry);
 
     const failures = await router.restoreSubscriptions();
 
@@ -66,14 +69,26 @@ describe("SqliteBindingStore", () => {
     expect(third.list()).toEqual([]);
     third.close();
   });
+
+  it("persists the selected workspace even when no thread is bound", () => {
+    const { path } = databasePath();
+    const first = new SqliteBindingStore(path);
+    first.selectWorkspace(target, "other");
+    first.close();
+
+    const second = new SqliteBindingStore(path);
+    expect(second.getWorkspace(target)).toBe("other");
+    expect(second.get(target)).toBeUndefined();
+    second.close();
+  });
 });
 
 describe("MemoryBindingStore", () => {
   it("preserves the previous indexes when another conversation owns the requested thread", () => {
     const store = new MemoryBindingStore();
     const otherTarget = { surface: "telegram" as const, conversationId: "200" };
-    const previous = { target, threadId: "thread-1", sessionId: "session-1" };
-    const other = { target: otherTarget, threadId: "thread-2", sessionId: "session-2" };
+    const previous = { target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" };
+    const other = { target: otherTarget, workspaceId: "main", threadId: "thread-2", sessionId: "session-2" };
     store.bind(previous);
     store.bind(other);
 

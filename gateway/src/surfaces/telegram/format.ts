@@ -1,6 +1,7 @@
 import type { Thread } from "../../codex-protocol/index.js";
 import type { CodexAppServerClient } from "../../codex-client/client.js";
 import type { ConversationStatus } from "../../conversation-core/service.js";
+import type { Workspace } from "../../policy/workspace-registry.js";
 
 export function splitTelegramText(text: string, limit = 4_000): string[] {
   if (!text) {
@@ -24,7 +25,7 @@ export function splitTelegramText(text: string, limit = 4_000): string[] {
 
 export function formatSessions(threads: Thread[], currentThreadId?: string): string {
   if (threads.length === 0) {
-    return "当前项目没有可恢复的 Codex 会话。";
+    return "当前 Workspace 没有可恢复的 Codex 会话。";
   }
   const lines = [`历史会话（${threads.length}）：`];
   threads.forEach((thread, index) => {
@@ -150,6 +151,7 @@ export function formatLimits(
 export function formatStatus(status: ConversationStatus): string {
   const lines = [
     "Codex 状态",
+    `Workspace：${status.workspaceName} (${status.workspaceId})`,
     `Thread：${status.threadId ?? "尚未绑定"}`,
     `Turn：${status.turnId ?? "空闲"}`,
     `工作目录：${status.cwd}`,
@@ -172,6 +174,18 @@ export function formatStatus(status: ConversationStatus): string {
     lines.push("", "当前 Thread 用量：等待 App Server 推送统计");
   }
   return lines.join("\n");
+}
+
+export function formatWorkspaces(workspaces: Workspace[], currentWorkspaceId: string): string {
+  return [
+    `可用 Workspace（${workspaces.length}）：`,
+    ...workspaces.map(
+      (workspace, index) =>
+        `${index + 1}. ${workspace.name} · ${workspace.id}${workspace.id === currentWorkspaceId ? " ← 当前" : ""}\n   ${workspace.cwd}`,
+    ),
+    "",
+    "切换：/workspace <序号、ID 或名称>",
+  ].join("\n");
 }
 
 export function formatPermissions(

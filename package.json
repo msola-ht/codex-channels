@@ -19,6 +19,7 @@
     "protocol:check": "node scripts/check-protocol.mjs",
     "launchd:install": "node scripts/install-launchd.mjs",
     "remote": "node scripts/codex-remote.mjs",
+    "workspace:add": "node scripts/workspace-add.mjs",
     "service:setup": "npm run build && npm run launchd:install && zsh scripts/launchd-control.sh start",
     "service:start": "zsh scripts/launchd-control.sh start",
     "service:stop": "zsh scripts/launchd-control.sh stop",

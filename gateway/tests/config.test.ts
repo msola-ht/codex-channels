@@ -1,4 +1,4 @@
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -22,13 +22,16 @@ describe("loadConfig", () => {
     const config = loadConfig({
       TELEGRAM_BOT_TOKEN: "secret",
       TELEGRAM_ALLOWED_USER_IDS: "123,456",
-      CODEX_WORKDIR: workdir,
+      ...workspaceEnvironment(workdir),
       LOG_LEVEL: "INFO",
     });
 
     expect(config.logLevel).toBe("info");
-    expect(config.codexWorkdir).toBe(realpathSync(workdir));
-    expect(config.codexSocketPath).toBe(join(realpathSync(workdir), ".runtime/codex-app-server.sock"));
+    expect(config.workspaces).toEqual([
+      { id: "main", name: "Main", cwd: realpathSync(workdir) },
+    ]);
+    expect(config.defaultWorkspaceId).toBe("main");
+    expect(config.codexSocketPath).toBe(join(process.cwd(), ".runtime/codex-app-server.sock"));
     expect(config.stateDatabasePath).toBe(join(process.cwd(), "data/gateway.sqlite3"));
     expect(config.telegramAllowedUserIds).toEqual(new Set([123, 456]));
   });
@@ -41,21 +44,48 @@ describe("loadConfig", () => {
     const config = loadConfig({
       TELEGRAM_BOT_TOKEN: "secret",
       TELEGRAM_ALLOWED_USER_IDS: "123",
-      CODEX_WORKDIR: workdir,
+      ...workspaceEnvironment(workdir),
       STATE_DATABASE_PATH: join(stateDirectory, "bindings.sqlite3"),
     });
 
     expect(config.stateDatabasePath).toBe(join(stateDirectory, "bindings.sqlite3"));
   });
 
-  it("rejects a missing workdir without widening permissions", () => {
+  it("rejects a missing workspace cwd without widening permissions", () => {
     expect(() =>
       loadConfig({
         TELEGRAM_BOT_TOKEN: "secret",
         TELEGRAM_ALLOWED_USER_IDS: "123",
-        CODEX_WORKDIR: "/definitely/missing/codex-workdir",
+        ...workspaceEnvironment("/definitely/missing/codex-workdir"),
       }),
     ).toThrow(ConfigurationError);
+  });
+
+  it("rejects an existing file as a workspace cwd", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
+    temporaryDirectories.push(root);
+    const file = join(root, "not-a-directory");
+    writeFileSync(file, "test");
+
+    expect(() =>
+      loadConfig({
+        TELEGRAM_BOT_TOKEN: "secret",
+        TELEGRAM_ALLOWED_USER_IDS: "123",
+        ...workspaceEnvironment(file),
+      }),
+    ).toThrow("cwd 必须是目录");
+  });
+
+  it("rejects an unknown default workspace", () => {
+    const workdir = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
+    temporaryDirectories.push(workdir);
+
+    expect(() => loadConfig({
+      TELEGRAM_BOT_TOKEN: "secret",
+      TELEGRAM_ALLOWED_USER_IDS: "123",
+      CODEX_WORKSPACES_JSON: JSON.stringify([{ id: "main", name: "Main", cwd: workdir }]),
+      CODEX_DEFAULT_WORKSPACE: "missing",
+    })).toThrow("CODEX_DEFAULT_WORKSPACE 不存在");
   });
 
   it("prefers an explicit Telegram proxy and normalizes its URL", () => {
@@ -67,7 +97,7 @@ describe("loadConfig", () => {
       TELEGRAM_ALLOWED_USER_IDS: "123",
       TELEGRAM_PROXY_URL: " http://127.0.0.1:7897 ",
       HTTPS_PROXY: "http://127.0.0.1:7890",
-      CODEX_WORKDIR: workdir,
+      ...workspaceEnvironment(workdir),
     });
 
     expect(config.telegramProxyUrl).toBe("http://127.0.0.1:7897/");
@@ -81,7 +111,7 @@ describe("loadConfig", () => {
       TELEGRAM_BOT_TOKEN: "secret",
       TELEGRAM_ALLOWED_USER_IDS: "123",
       HTTPS_PROXY: "http://127.0.0.1:7890",
-      CODEX_WORKDIR: workdir,
+      ...workspaceEnvironment(workdir),
     });
 
     expect(config.telegramProxyUrl).toBe("http://127.0.0.1:7890/");
@@ -96,8 +126,15 @@ describe("loadConfig", () => {
         TELEGRAM_BOT_TOKEN: "secret",
         TELEGRAM_ALLOWED_USER_IDS: "123",
         TELEGRAM_PROXY_URL: "socks5://127.0.0.1:7890",
-        CODEX_WORKDIR: workdir,
+        ...workspaceEnvironment(workdir),
       }),
     ).toThrow("Telegram 代理目前只支持 http:// 或 https://");
   });
 });
+
+function workspaceEnvironment(cwd: string): Record<string, string> {
+  return {
+    CODEX_WORKSPACES_JSON: JSON.stringify([{ id: "main", name: "Main", cwd }]),
+    CODEX_DEFAULT_WORKSPACE: "main",
+  };
+}

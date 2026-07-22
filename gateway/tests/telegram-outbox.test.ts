@@ -10,16 +10,19 @@ const target = { surface: "telegram" as const, conversationId: "100" };
 class FakeTelegramApi {
   readonly actions: string[] = [];
   readonly sent: string[] = [];
+  readonly sendOptions: unknown[] = [];
   readonly edits: string[] = [];
+  private nextMessageId = 1;
 
   async sendChatAction(_chatId: string, action: string): Promise<true> {
     this.actions.push(action);
     return true;
   }
 
-  async sendMessage(_chatId: string, text: string): Promise<{ message_id: number }> {
+  async sendMessage(_chatId: string, text: string, options?: unknown): Promise<{ message_id: number }> {
     this.sent.push(text);
-    return { message_id: 1 };
+    this.sendOptions.push(options);
+    return { message_id: this.nextMessageId++ };
   }
 
   async editMessageText(_chatId: string, _messageId: number, text: string): Promise<true> {
@@ -111,14 +114,20 @@ describe("TelegramOutbox", () => {
       threadId: "thread-1",
       turnId: "turn-1",
       itemId: "user-1",
-      text: "从 CLI 发来的输入",
+      text: "从 CLI 发来的输入\n第二行",
     });
     outbox.handle(textCompleted("final", "同步回复"));
     outbox.handle(turnCompleted());
     await settle();
     await outbox.close();
 
-    expect(api.sent).toEqual(["外部输入：\n从 CLI 发来的输入", "同步回复"]);
+    expect(api.sent).toEqual(["CLI 输入\n\n│ 从 CLI 发来的输入\n│ 第二行", "同步回复"]);
+    expect(api.sendOptions[1]).toMatchObject({
+      reply_parameters: {
+        message_id: 1,
+        allow_sending_without_reply: true,
+      },
+    });
   });
 });
 

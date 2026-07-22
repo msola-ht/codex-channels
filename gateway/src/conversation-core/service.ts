@@ -4,6 +4,7 @@ import type { CodexAppServerClient } from "../codex-client/client.js";
 import type { Thread, ThreadTokenUsage } from "../codex-protocol/index.js";
 import type { ReviewTarget } from "../codex-protocol/index.js";
 import type { SessionRouter } from "../session-routing/router.js";
+import type { Workspace } from "../policy/workspace-registry.js";
 import { ConversationCore } from "./core.js";
 import { gatewayUserMessageClientIdPrefix, type ConversationTarget } from "./events.js";
 
@@ -16,6 +17,8 @@ export interface Submission {
 export interface ConversationStatus {
   threadId?: string;
   turnId?: string;
+  workspaceId: string;
+  workspaceName: string;
   cwd: string;
   tokenUsage?: ThreadTokenUsage;
 }
@@ -27,7 +30,6 @@ export class ConversationService {
     private readonly codex: CodexAppServerClient,
     private readonly router: SessionRouter,
     private readonly core: ConversationCore,
-    private readonly cwd: string,
   ) {}
 
   submit(target: ConversationTarget, text: string): Promise<Submission> {
@@ -43,20 +45,21 @@ export class ConversationService {
         return { threadId: active.threadId, turnId: active.turnId, steered: true };
       }
       const binding = await this.router.ensure(target);
-      const result = await this.codex.startTurn(binding.threadId, input, clientUserMessageId);
+      const workspace = this.router.workspace(target);
+      const result = await this.codex.startTurn(binding.threadId, input, clientUserMessageId, workspace.cwd);
       this.core.markTurnStarted(target, binding.threadId, result.turn.id);
       return { threadId: binding.threadId, turnId: result.turn.id, steered: false };
     });
   }
 
-  listSessions(): Promise<Thread[]> {
-    return this.router.list();
+  listSessions(target: ConversationTarget): Promise<Thread[]> {
+    return this.router.list(target);
   }
 
   resume(target: ConversationTarget, selector: string): Promise<string> {
     return this.locked(target, async () => {
       this.requireIdle(target);
-      const sessions = await this.router.list();
+      const sessions = await this.router.list(target);
       const selected = resolveThread(sessions, selector.trim());
       const binding = await this.router.resume(target, selected.id);
       return binding.threadId;
@@ -67,6 +70,18 @@ export class ConversationService {
     return this.locked(target, async () => {
       this.requireIdle(target);
       await this.router.newSession(target);
+    });
+  }
+
+  listWorkspaces(): Workspace[] {
+    return this.router.listWorkspaces();
+  }
+
+  selectWorkspace(target: ConversationTarget, selector: string): Promise<Workspace> {
+    return this.locked(target, async () => {
+      this.requireIdle(target);
+      const selected = this.router.resolveWorkspace(selector);
+      return this.router.selectWorkspace(target, selected.id);
     });
   }
 
@@ -127,16 +142,16 @@ export class ConversationService {
     return this.codex.listModels();
   }
 
-  listSkills(): ReturnType<CodexAppServerClient["listSkills"]> {
-    return this.codex.listSkills();
+  listSkills(target: ConversationTarget): ReturnType<CodexAppServerClient["listSkills"]> {
+    return this.codex.listSkills(this.router.workspace(target).cwd);
   }
 
   listMcpServers(target: ConversationTarget): ReturnType<CodexAppServerClient["listMcpServers"]> {
     return this.codex.listMcpServers(this.router.current(target)?.threadId);
   }
 
-  listPlugins(): ReturnType<CodexAppServerClient["listPlugins"]> {
-    return this.codex.listPlugins();
+  listPlugins(target: ConversationTarget): ReturnType<CodexAppServerClient["listPlugins"]> {
+    return this.codex.listPlugins(this.router.workspace(target).cwd);
   }
 
   accountUsage(): ReturnType<CodexAppServerClient["accountUsage"]> {
@@ -147,8 +162,8 @@ export class ConversationService {
     return this.codex.accountRateLimits();
   }
 
-  listPermissionProfiles(): ReturnType<CodexAppServerClient["listPermissionProfiles"]> {
-    return this.codex.listPermissionProfiles();
+  listPermissionProfiles(target: ConversationTarget): ReturnType<CodexAppServerClient["listPermissionProfiles"]> {
+    return this.codex.listPermissionProfiles(this.router.workspace(target).cwd);
   }
 
   getGoal(target: ConversationTarget): Promise<Awaited<ReturnType<CodexAppServerClient["getGoal"]>>> {
@@ -179,12 +194,15 @@ export class ConversationService {
   status(target: ConversationTarget): ConversationStatus {
     const binding = this.router.current(target);
     const active = this.core.activeTurn(target);
+    const workspace = this.router.workspace(target);
     const tokenUsage = binding ? this.core.tokenUsage(binding.threadId) : undefined;
     return {
       ...(binding ? { threadId: binding.threadId } : {}),
       ...(active ? { turnId: active.turnId } : {}),
       ...(tokenUsage ? { tokenUsage } : {}),
-      cwd: this.cwd,
+      workspaceId: workspace.id,
+      workspaceName: workspace.name,
+      cwd: workspace.cwd,
     };
   }
 

@@ -17,6 +17,7 @@ import {
   formatSkills,
   formatStatus,
   formatUsage,
+  formatWorkspaces,
   splitTelegramText,
 } from "./format.js";
 import { TelegramInteractionPort } from "./interactions.js";
@@ -84,6 +85,7 @@ export class TelegramSurface {
         { command: "resume", description: "列出或恢复 Codex 会话" },
         { command: "new", description: "下一条消息创建新会话" },
         { command: "status", description: "查看当前状态" },
+        { command: "workspace", description: "列出或切换 Workspace" },
         { command: "stop", description: "停止当前任务" },
         { command: "rename", description: "命名当前会话" },
         { command: "compact", description: "压缩当前上下文" },
@@ -217,11 +219,12 @@ export class TelegramSurface {
           "Codex Telegram Gateway",
           "",
           "普通文本会发送到当前 Codex Thread。",
-          "首次消息自动接续当前项目最近的空闲 CLI/App Server 会话。",
+          "首次消息自动接续当前 Workspace 最近的空闲 CLI/App Server 会话。",
           "",
           "/resume [序号|名称|Thread ID]",
           "/new",
           "/status",
+          "/workspace [序号|ID|名称]",
           "/stop",
           "/rename <名称>",
           "/compact",
@@ -241,6 +244,19 @@ export class TelegramSurface {
     });
     this.bot.command("status", async (context) => {
       await context.reply(formatStatus(this.service.status(target(context))));
+    });
+    this.bot.command("workspace", async (context) => {
+      const selector = commandArguments(context);
+      if (selector) {
+        const workspace = await this.service.selectWorkspace(target(context), selector);
+        await context.reply(`已切换 Workspace：${workspace.name}\n工作目录：${workspace.cwd}`);
+        return;
+      }
+      const current = this.service.status(target(context));
+      await this.replyChunks(
+        context,
+        formatWorkspaces(this.service.listWorkspaces(), current.workspaceId),
+      );
     });
     this.bot.command("stop", async (context) => {
       const stopped = await this.service.stop(target(context));
@@ -268,13 +284,13 @@ export class TelegramSurface {
       await this.replyChunks(context, formatModels(await this.service.listModels()));
     });
     this.bot.command("skills", async (context) => {
-      await this.replyChunks(context, formatSkills(await this.service.listSkills()));
+      await this.replyChunks(context, formatSkills(await this.service.listSkills(target(context))));
     });
     this.bot.command("mcp", async (context) => {
       await this.replyChunks(context, formatMcpServers(await this.service.listMcpServers(target(context))));
     });
     this.bot.command("plugins", async (context) => {
-      await this.replyChunks(context, formatPlugins(await this.service.listPlugins()));
+      await this.replyChunks(context, formatPlugins(await this.service.listPlugins(target(context))));
     });
     this.bot.command("usage", async (context) => {
       await this.replyChunks(context, formatUsage(await this.service.accountUsage()));
@@ -283,7 +299,7 @@ export class TelegramSurface {
       await this.replyChunks(context, formatLimits(await this.service.accountRateLimits()));
     });
     this.bot.command("permissions", async (context) => {
-      await this.replyChunks(context, formatPermissions(await this.service.listPermissionProfiles()));
+      await this.replyChunks(context, formatPermissions(await this.service.listPermissionProfiles(target(context))));
     });
     this.bot.command("goal", (context) => this.goal(context));
     this.bot.command("cancel", async (context) => {
@@ -308,7 +324,7 @@ export class TelegramSurface {
       await context.reply(`已恢复 Codex Thread：${threadId}`);
       return;
     }
-    const sessions = await this.service.listSessions();
+    const sessions = await this.service.listSessions(target(context));
     const text = formatSessions(sessions, this.service.status(target(context)).threadId);
     for (const chunk of splitTelegramText(text)) {
       await context.reply(chunk);
