@@ -1,0 +1,15 @@
+export interface ConversationTarget {
+  surface: "telegram";
+  conversationId: string;
+}
+
+export type OutputEvent =
+  | { type: "text.delta"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string }
+  | { type: "text.completed"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string }
+  | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: string; error?: string }
+  | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string }
+  | { type: "warning"; target: ConversationTarget; threadId?: string; message: string };
+
+export function isCriticalOutputEvent(event: OutputEvent): boolean {
+  return event.type !== "text.delta";
+}

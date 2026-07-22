@@ -1,0 +1,140 @@
+import { describe, expect, it } from "vitest";
+
+import { CodexAppServerClient } from "../src/codex-client/client.js";
+import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
+import { BaseTransport } from "../src/codex-client/transport.js";
+
+class FakeTransport extends BaseTransport {
+  readonly kind = "stdio" as const;
+  readonly sent: Array<Record<string, unknown>> = [];
+  overloadResponses = 0;
+
+  async connect(): Promise<void> {}
+  async close(): Promise<void> {}
+
+  async send(message: string): Promise<void> {
+    const decoded = JSON.parse(message) as Record<string, unknown>;
+    this.sent.push(decoded);
+    if (decoded.method === "initialize") {
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({
+            id: decoded.id,
+            result: {
+              userAgent: "test",
+              codexHome: "/tmp",
+              platformFamily: "unix",
+              platformOs: "macos",
+            },
+          }),
+        ),
+      );
+    } else if (decoded.method === "read/test") {
+      this.overloadResponses += 1;
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify(
+            this.overloadResponses === 1
+              ? { id: decoded.id, error: { code: -32001, message: "Server overloaded; retry later." } }
+              : { id: decoded.id, result: { ok: true } },
+          ),
+        ),
+      );
+    } else if (decoded.method === "thread/list") {
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({
+            id: decoded.id,
+            result: { data: [], nextCursor: null },
+          }),
+        ),
+      );
+    }
+  }
+
+  receive(message: Record<string, unknown>): void {
+    this.emitMessage(JSON.stringify(message));
+  }
+
+  disconnect(error?: Error): void {
+    this.emitClose(error);
+  }
+}
+
+describe("JsonRpcClient", () => {
+  it("initializes once and routes notifications", async () => {
+    const transport = new FakeTransport();
+    const client = new JsonRpcClient(transport);
+    const methods: string[] = [];
+    client.onNotification((notification) => methods.push(notification.method));
+
+    const initialized = await client.connect();
+    transport.receive({ method: "warning", params: { message: "test" } });
+
+    expect(initialized.platformOs).toBe("macos");
+    expect(transport.sent.map((message) => message.method)).toEqual(["initialize", "initialized"]);
+    expect(methods).toEqual(["warning"]);
+  });
+
+  it("responds to server requests without treating them as notifications", async () => {
+    const transport = new FakeTransport();
+    const client = new JsonRpcClient(transport);
+    client.setServerRequestHandler(async (request) => ({ accepted: request.method === "test/request" }));
+    await client.connect();
+
+    transport.receive({ id: "server-1", method: "test/request", params: {} });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(transport.sent.at(-1)).toEqual({ id: "server-1", result: { accepted: true } });
+  });
+
+  it("reinitializes a replacement connection after disconnect", async () => {
+    const transport = new FakeTransport();
+    const client = new JsonRpcClient(transport);
+    const disconnects: string[] = [];
+    client.onDisconnect((error) => disconnects.push(error.message));
+    await client.connect();
+
+    transport.disconnect(new Error("socket lost"));
+    const initialized = await client.reconnect();
+
+    expect(initialized.platformOs).toBe("macos");
+    expect(disconnects).toEqual(["socket lost"]);
+    expect(transport.sent.filter((message) => message.method === "initialize")).toHaveLength(2);
+    expect(transport.sent.filter((message) => message.method === "initialized")).toHaveLength(2);
+  });
+
+  it("retries overload only when the caller marks a request safe", async () => {
+    const transport = new FakeTransport();
+    const client = new JsonRpcClient(transport);
+    await client.connect();
+
+    const result = await client.request<{ ok: boolean }>(
+      "read/test",
+      {},
+      { retryOverload: true, attempts: 2 },
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(transport.overloadResponses).toBe(2);
+  });
+
+  it("lists CLI, Remote TUI, and App Server thread sources explicitly", async () => {
+    const transport = new FakeTransport();
+    const rpc = new JsonRpcClient(transport);
+    const client = new CodexAppServerClient(rpc, {
+      cwd: "/tmp/project",
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await client.listThreads();
+
+    const request = transport.sent.find((message) => message.method === "thread/list");
+    expect(request?.params).toMatchObject({
+      cwd: "/tmp/project",
+      sourceKinds: ["cli", "vscode", "appServer"],
+      useStateDbOnly: true,
+    });
+  });
+});

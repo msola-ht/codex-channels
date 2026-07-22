@@ -1,0 +1,78 @@
+import { describe, expect, it } from "vitest";
+
+import { ApprovalCoordinator } from "../src/approval/coordinator.js";
+import type {
+  InteractionDecision,
+  InteractionPort,
+  InteractionRequest,
+} from "../src/approval/types.js";
+import type { ConversationTarget } from "../src/conversation-core/events.js";
+import type { SessionRouter } from "../src/session-routing/router.js";
+
+const target: ConversationTarget = { surface: "telegram", conversationId: "100" };
+
+class FakeInteraction implements InteractionPort {
+  requests: InteractionRequest[] = [];
+  resolvedIds: string[] = [];
+
+  async request(
+    _target: ConversationTarget,
+    request: InteractionRequest,
+  ): Promise<InteractionDecision> {
+    this.requests.push(request);
+    return { type: "approval", approved: true };
+  }
+
+  resolved(requestId: string): void {
+    this.resolvedIds.push(requestId);
+  }
+}
+
+describe("ApprovalCoordinator", () => {
+  it("declines privileged requests that cannot be mapped to a conversation", async () => {
+    const coordinator = new ApprovalCoordinator(routerWithoutTarget(), new FakeInteraction(), 30_000);
+
+    const response = await coordinator.handle({
+      id: "request-1",
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: "unknown", command: "touch unsafe" },
+    });
+
+    expect(response).toEqual({ decision: "decline" });
+  });
+
+  it("grants only one command approval through the mapped Telegram conversation", async () => {
+    const interaction = new FakeInteraction();
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+
+    const response = await coordinator.handle({
+      id: "request-2",
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: "thread-1", command: "npm test" },
+    });
+
+    expect(response).toEqual({ decision: "accept" });
+    expect(interaction.requests[0]).toMatchObject({
+      type: "approval",
+      requestId: "request-2",
+      kind: "command",
+    });
+  });
+
+  it("invalidates an interaction resolved by another client event", () => {
+    const interaction = new FakeInteraction();
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+
+    coordinator.resolved("request-3");
+
+    expect(interaction.resolvedIds).toEqual(["request-3"]);
+  });
+});
+
+function routerWithTarget(): SessionRouter {
+  return { targetForThread: () => target } as unknown as SessionRouter;
+}
+
+function routerWithoutTarget(): SessionRouter {
+  return { targetForThread: () => undefined } as unknown as SessionRouter;
+}

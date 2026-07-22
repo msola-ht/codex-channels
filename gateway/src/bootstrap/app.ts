@@ -1,0 +1,170 @@
+import { execFileSync } from "node:child_process";
+
+import type { Logger } from "pino";
+
+import { ApprovalCoordinator } from "../approval/coordinator.js";
+import { JsonRpcClient, type RpcNotification } from "../codex-client/json-rpc.js";
+import { CodexAppServerClient } from "../codex-client/client.js";
+import { UnixWebSocketTransport } from "../codex-client/unix-websocket-transport.js";
+import { protocolVersion } from "../codex-protocol/index.js";
+import type { GatewayConfig } from "../config/index.js";
+import { ConversationCore } from "../conversation-core/core.js";
+import type { OutputEvent } from "../conversation-core/events.js";
+import { ConversationService } from "../conversation-core/service.js";
+import { EventBus } from "../event-bus/event-bus.js";
+import { TelegramAccessPolicy } from "../policy/telegram-access.js";
+import { MemoryBindingStore } from "../session-routing/memory-bindings.js";
+import { SessionRouter } from "../session-routing/router.js";
+import { TelegramSurface } from "../surfaces/telegram/bot.js";
+
+export class GatewayApplication {
+  private readonly transport: UnixWebSocketTransport;
+  private readonly rpc: JsonRpcClient;
+  private readonly codex: CodexAppServerClient;
+  private readonly inbound: EventBus<RpcNotification>;
+  private readonly output: EventBus<OutputEvent>;
+  private readonly telegram: TelegramSurface;
+  private readonly approval: ApprovalCoordinator;
+  private readonly router: SessionRouter;
+  private readonly core: ConversationCore;
+  private removeRpcNotification: (() => void) | undefined;
+  private removeRpcDisconnect: (() => void) | undefined;
+  private reconnecting: Promise<void> | undefined;
+  private stopping = false;
+
+  constructor(
+    private readonly config: GatewayConfig,
+    private readonly logger: Logger,
+  ) {
+    verifyCodexVersion(config);
+    this.transport = new UnixWebSocketTransport(config.codexSocketPath);
+    this.rpc = new JsonRpcClient(this.transport);
+    this.codex = new CodexAppServerClient(this.rpc, {
+      cwd: config.codexWorkdir,
+      sandbox: config.codexSandbox,
+      ...(config.codexModel ? { model: config.codexModel } : {}),
+    });
+    this.inbound = new EventBus<RpcNotification>(logger, 2_000);
+    this.output = new EventBus<OutputEvent>(logger, 1_000);
+    const bindings = new MemoryBindingStore();
+    this.router = new SessionRouter(this.codex, bindings);
+    this.core = new ConversationCore(this.router, this.output);
+    const service = new ConversationService(this.codex, this.router, this.core, config.codexWorkdir);
+    this.telegram = new TelegramSurface(
+      config.telegramBotToken,
+      config.telegramProxyUrl,
+      service,
+      this.output,
+      new TelegramAccessPolicy(config.telegramAllowedUserIds),
+      logger,
+    );
+    this.approval = new ApprovalCoordinator(this.router, this.telegram.interactions, config.approvalTimeoutMs);
+    this.inbound.subscribe("conversation-core", (notification) => this.core.handle(notification));
+    this.inbound.subscribe("approval-resolution", (notification) => {
+      if (notification.method === "serverRequest/resolved") {
+        const params = notification.params as { requestId?: string | number };
+        if (params.requestId !== undefined) {
+          this.approval.resolved(params.requestId);
+        }
+      }
+    });
+    this.codex.setServerRequestHandler((request) => this.approval.handle(request));
+  }
+
+  async start(): Promise<void> {
+    this.removeRpcNotification = this.codex.onNotification((notification) => {
+      this.inbound.publish(notification, isCriticalNotification(notification.method));
+    });
+    this.removeRpcDisconnect = this.codex.onDisconnect((error) => {
+      if (this.stopping || this.reconnecting) {
+        return;
+      }
+      this.logger.warn({ err: error }, "Codex App Server 连接已断开");
+      this.telegram.interactions.cancelAll("Codex App Server 连接已断开");
+      this.core.connectionLost("Codex App Server 连接已断开，正在恢复连接");
+      this.reconnecting = this.reconnect().finally(() => {
+        this.reconnecting = undefined;
+      });
+    });
+    const initialized = await this.codex.connect();
+    this.logger.info(
+      {
+        transport: this.transport.kind,
+        socketPath: this.config.codexSocketPath,
+        platformFamily: initialized.platformFamily,
+        platformOs: initialized.platformOs,
+      },
+      "Codex App Server 已连接",
+    );
+    await this.telegram.start();
+  }
+
+  async stop(): Promise<void> {
+    if (this.stopping) {
+      return;
+    }
+    this.stopping = true;
+    this.removeRpcNotification?.();
+    this.removeRpcNotification = undefined;
+    this.removeRpcDisconnect?.();
+    this.removeRpcDisconnect = undefined;
+    this.reconnecting = undefined;
+    await this.telegram.stop();
+    await this.inbound.close();
+    await this.output.close();
+    await this.codex.close();
+  }
+
+  private async reconnect(): Promise<void> {
+    const maximumAttempts = 12;
+    for (let attempt = 1; attempt <= maximumAttempts && !this.stopping; attempt += 1) {
+      if (attempt > 1) {
+        const ceiling = Math.min(30_000, 500 * 2 ** (attempt - 2));
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, Math.floor(ceiling / 2 + Math.random() * ceiling / 2));
+          timer.unref();
+        });
+      }
+      if (this.stopping) {
+        return;
+      }
+      try {
+        const initialized = await this.codex.reconnect();
+        const failures = await this.router.restoreSubscriptions();
+        for (const failure of failures) {
+          this.logger.warn(
+            { err: failure.error, threadId: failure.binding.threadId },
+            "恢复 Codex Thread 订阅失败，已移除本地绑定",
+          );
+        }
+        this.logger.info(
+          { attempt, platformFamily: initialized.platformFamily, platformOs: initialized.platformOs },
+          "Codex App Server 已重新连接",
+        );
+        return;
+      } catch (error) {
+        this.logger.warn({ err: error, attempt, maximumAttempts }, "Codex App Server 重连失败");
+      }
+    }
+    if (!this.stopping) {
+      this.logger.fatal("Codex App Server 重连次数耗尽，Gateway 将停止以交由进程管理器重启");
+      this.reconnecting = undefined;
+      await this.stop();
+      process.exitCode = 1;
+    }
+  }
+}
+
+function verifyCodexVersion(config: GatewayConfig): void {
+  const actual = execFileSync(config.codexBinary, ["--version"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+  if (actual !== protocolVersion.codexCli) {
+    throw new Error(`Codex 版本不受支持：当前 ${actual}，协议基线 ${protocolVersion.codexCli}`);
+  }
+}
+
+function isCriticalNotification(method: string): boolean {
+  return !method.endsWith("/delta") && !method.endsWith("/outputDelta");
+}

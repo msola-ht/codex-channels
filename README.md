@@ -1,33 +1,39 @@
-# Codex Telegram Bridge
+# Codex Connect Gateway
 
-一个本地常驻的 Python 服务，在 Telegram Bot 与 Codex App Server 之间转发消息。
+一个以 Codex App Server 为唯一会话事实来源的本机模块化网关。Telegram 与原生 Codex TUI 连接同一个独立 App Server，因此共享 Thread、活动状态和持久化历史；项目不读取 `~/.codex/sessions`，也不复制完整会话到 Telegram 数据库。
 
-## 当前能力
+当前协议基线为 `codex-cli 0.145.0`。Gateway 启动时会严格校验版本，版本不一致时拒绝运行，升级步骤见“协议升级”。
 
-- Telegram 用户白名单
-- `.env` 配置读取与启动时校验
-- Telegram Long Polling，无需公网 Webhook
-- Codex App Server stdio/JSONL 通讯
-- Telegram 会话与 Codex Thread 的 SQLite 持久化映射
-- 按 Telegram `chat_id` 保存、命名和切换 Codex 历史 Thread
-- Codex 流式回复；按 App Server Item 分隔阶段消息，Telegram 网络延迟时在后台缓冲
-- 任务结束后主动推送最终结果
-- 受限命令、额外写入和临时权限通过 Telegram 按钮审批
-- 本地 `codex-tg` CLI 与 Telegram 共用同一个 Codex Thread
-- CLI 与 Telegram 双向镜像任务输入、流式输出、完成状态和审批
-- Telegram 等效 Codex 命令、会话管理和 `/whoami`
-- 同一会话运行期间的新消息通过 `turn/steer` 追加
+## 架构
 
-服务使用 `approvalPolicy=on-request`。Codex 在沙箱内直接工作；需要越过当前权限边界时，Bot 会发送“批准一次 / 拒绝”按钮。审批超时或无法关联到原 Telegram 会话时自动拒绝。
+```text
+launchd
+├── Codex App Server
+│   └── Unix WebSocket: .runtime/codex-app-server.sock
+├── Codex 原生 TUI（按需）
+│   └── codex --remote unix://...
+└── TypeScript Gateway
+    ├── codex-protocol / codex-client
+    ├── conversation-core / session-routing
+    ├── approval / policy / event-bus
+    └── surfaces/telegram
+```
+
+App Server 与 Gateway 是两个独立进程。Gateway 停止不会终止 App Server；连接中断后 Gateway 会有限次数指数退避重连、重新 `initialize` 并恢复已绑定 Thread 的订阅。Telegram 网络发送通过独立有界队列处理，不阻塞 App Server Reader。
+
+详细设计和边界见 [ARCHITECTURE_REBUILD_PROPOSAL.md](ARCHITECTURE_REBUILD_PROPOSAL.md)，项目约束见 [AGENTS.md](AGENTS.md)。
+
+## 环境要求
+
+- macOS（launchd 配置目前仅支持 macOS）
+- Node.js 22+
+- 已安装并登录的 `codex-cli 0.145.0`
+- Telegram Bot Token 和允许使用的 Telegram 用户 ID
 
 ## 安装
 
-要求 Python 3.11+，并确保 `codex` 命令已经登录且可用。
-
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
+npm ci
 cp .env.example .env
 ```
 
@@ -36,104 +42,134 @@ cp .env.example .env
 ```dotenv
 TELEGRAM_BOT_TOKEN=从_BotFather_取得的_Token
 TELEGRAM_ALLOWED_USER_IDS=你的_Telegram_用户_ID
-CODEX_WORKDIR=/要交给_Codex_操作的绝对目录
+TELEGRAM_PROXY_URL=http://127.0.0.1:7890
+CODEX_BINARY=codex
+CODEX_WORKDIR=/Users/you/project
+CODEX_SOCKET_PATH=/Users/you/project/.runtime/codex-app-server.sock
+CODEX_BRIDGE_SANDBOX=workspace-write
 APPROVAL_TIMEOUT_SECONDS=300
-LOCAL_CLI_CHAT_ID=你的_Telegram_私聊_ID
-LOCAL_SOCKET_PATH=./data/bridge.sock
+LOG_LEVEL=info
 ```
 
-如果不知道 Telegram 用户 ID，可以先从可信的 ID 查询方式获取；服务启动后，Bot 的 `/whoami` 也只会返回消息发送者自己的 ID。
+`CODEX_WORKDIR` 必须是已存在的绝对目录。Telegram 只能操作该预配置目录，不能通过聊天提交任意工作目录。Socket 父目录由安装脚本创建并设为 `0700`。
 
-## 运行
+## 本地前台运行
+
+最简单的测试启动方式：
 
 ```bash
-codex-tg-bridge
+npm run dev:all
 ```
 
-也可以直接运行模块：
+它会复用已经存在的共享 Socket；如果 Socket 不存在，则启动一个开发用 App Server，再启动 Gateway。按 `Ctrl+C` 停止本次启动的两个进程。Gateway 的正式实现仍不负责 App Server 生命周期。
+
+需要分别观察进程时，也可以手工启动：
+
+先启动共享 App Server：
 
 ```bash
-python -m codex_tg_bridge.main
+mkdir -p .runtime
+chmod 700 .runtime
+codex app-server --listen unix://"$PWD/.runtime/codex-app-server.sock"
 ```
 
-保持 Bridge 运行，再打开另一个终端：
+另一个终端启动 Gateway：
 
 ```bash
-codex-tg
+npm run dev
 ```
 
-只有 `codex-tg-bridge` 是常驻服务。它在后台运行本机 `codex app-server --stdio`，因此实际执行任务的仍是已登录的 Codex；Telegram 和 `codex-tg` 都只是交互界面。
-
-`codex-tg` 是可选的终端客户端，通过权限为 `0600` 的 Unix Socket 连接 Bridge，不会另启 Codex 进程。只使用 Telegram 时无需启动它。直接输入任务即可与 Telegram 共用 Thread；输入 `/help` 查看本地命令，`/quit` 退出终端但不停止 Bridge。
-
-CLI 输入会以“本地 CLI 指令”同步到 Telegram；Telegram 的普通任务消息会显示在 CLI。Codex 的流式回复和结束状态同时发往两个界面。审批会同时出现在已连接的 CLI 和 Telegram，先处理的一端生效，另一端随即失效。
-
-共享会话以 `LOCAL_CLI_CHAT_ID` 对应的 Telegram `chat_id` 为边界。TG 和 `codex-tg` 对同一 `chat_id` 操作同一个“当前 Thread”；任一端执行 `/switch`、`/last`、`/new` 或 `/session_name` 后，另一端下一条任务也会使用更新后的会话。任务运行期间不允许切换，需等待完成或先 `/stop`。
-
-## Bot 命令
-
-- `/start`：显示使用说明
-- `/whoami`：返回当前 Telegram 用户 ID
-- `/new`：中断并退出当前 Thread；保留历史，下一条消息创建新 Thread
-- `/sessions`：列出当前 Telegram 会话可恢复的历史 Thread
-- `/switch <序号|名称|Thread ID>`：切换历史 Thread
-- `/last`：切换到上一个使用的 Thread
-- `/session_name <名称>`：命名当前 Thread
-- `/status`：显示 Thread、Turn、模型、安全模式和工作目录
-- `/stop`：中断当前 Codex Turn
-- `/model`：列出模型；`/model <模型ID>` 为当前 Telegram 会话切换模型
-- `/compact`：压缩当前 Thread 上下文
-- `/fork`：分叉当前 Thread，并切换到新 Thread
-- `/review`：审查未提交改动；也支持 `branch`、`commit`、`custom` 参数
-- `/skills`：列出当前工作目录可用的 Skills
-- `/mcp`：列出 MCP Server、鉴权状态和工具数量
-- `/plugins`：列出已发现的 Plugins
-- `/usage`：显示当前账号的用量摘要
-- `/permissions`：显示安全模式；可切换 `read-only` 或 `workspace-write`
-- `/goal`：查看 Goal；使用 `/goal set <目标>` 设置，`/goal clear` 清除
-- `/help`：显示 Telegram 支持的命令
-
-模型、安全模式和历史 Thread 都按 Telegram `chat_id` 持久化。`/new` 只退出当前 Thread，不删除历史记录；下一条普通文本会创建新 Thread，旧 Thread 可通过 `/sessions` 和 `/switch` 恢复。旧版本数据库会在 Bridge 启动时自动把当前映射迁移到历史记录。普通文本就是 Codex 任务指令；任务运行期间继续发文本会通过 `turn/steer` 追加要求，完成后结果会主动返回 Telegram。
-
-审批只允许任务所属的白名单 Telegram 会话操作。按钮只批准当前一次请求，不支持整场会话或永久放行，也不会自动切换到 `danger-full-access`。默认 5 分钟超时自动拒绝，可通过 `APPROVAL_TIMEOUT_SECONDS` 调整为 30–3600 秒。
-
-Codex CLI 中的纯终端界面命令（例如 `/theme`、`/vim`、`/copy`、`/exit`）没有 Telegram 等价行为，Bot 会明确提示“不适用”，不会把它们误发给模型。
-
-## 安全边界
-
-- `.env` 已加入 `.gitignore`，不要把 Bot Token 写入代码或日志。
-- 日志会脱敏 Bot Token，并关闭可能包含完整 Bot API URL 的 HTTP INFO 日志。
-- `TELEGRAM_ALLOWED_USER_IDS` 必须非空，未授权用户只能使用 `/whoami`。
-- `CODEX_WORKDIR` 必须是已存在的绝对目录。
-- 本地 CLI 只连接 Unix Socket，Socket 权限固定为当前系统用户可读写。
-- `LOCAL_CLI_CHAT_ID` 决定 CLI 共享哪个 Telegram 会话；只有一个白名单用户时可省略并自动使用该用户 ID。
-- `CODEX_BRIDGE_SANDBOX` 只接受 `read-only` 或 `workspace-write`。
-- 拒绝 `danger-full-access`，仅支持 `read-only` 与 `workspace-write`。
-- 未映射会话、过期按钮、非白名单用户和服务停止期间的审批都会拒绝。
-- App Server 仅通过子进程 stdio 使用，不监听公网端口。
-
-## 测试
+原生 Codex TUI 连接同一个 App Server：
 
 ```bash
-python -m unittest discover -s tests -v
+npm run remote
 ```
 
-只验证本机 App Server 初始化握手、不创建 Thread 或调用模型：
+也可以直接运行：
 
 ```bash
-python scripts/smoke_app_server.py
+codex --remote unix:///absolute/path/codex-app-server.sock -C /absolute/workdir
 ```
 
-使用 `.env` 中的配置执行一次真实模型调用和 Telegram Bot 鉴权：
+## launchd 常驻运行
+
+首次安装并启动只需要：
 
 ```bash
-python scripts/smoke_model.py
-python scripts/smoke_telegram.py
-python scripts/smoke_telegram.py --send-test
+npm run service:setup
 ```
 
-验证真实 App Server 会发出审批请求，并在拒绝后不落盘：
+以后使用：
 
 ```bash
-python scripts/smoke_approval.py
+npm run service:start
+npm run service:restart
+npm run service:status
+npm run service:stop
 ```
+
+安装脚本只把渲染后的 plist 写入 `~/Library/LaunchAgents`，Token 仍保留在项目中已忽略的 `.env`，不会写入 plist。日志位于 Socket 父目录。
+
+## Telegram 命令
+
+- `/resume [序号|名称|Thread ID]`：列出或恢复当前工作目录下的原生 Codex Thread
+- `/new`：解除当前绑定，下一条普通消息创建新 Thread
+- `/status`：查看当前 Thread、Turn 和工作目录
+- `/stop`：中断活动 Turn
+- `/rename <名称>`、`/compact`、`/fork`
+- `/review [branch <分支>|commit <SHA>|custom <说明>]`
+- `/model`、`/skills`、`/mcp`、`/plugins`
+- `/usage`、`/permissions`
+- `/goal [set <目标>|clear]`
+- `/cancel`：取消当前审批、用户输入或 MCP 交互
+- `/whoami`：显示 Telegram 用户 ID
+
+普通文本会发送给当前 Thread；若当前 Turn 正在执行，则通过 `turn/steer` 追加。首次消息会在 `cli`、`vscode`（当前版本 Remote TUI 的来源标记）和 `appServer` 来源中选择当前目录最近的空闲且未绑定 Thread；不会自动接入活动 Thread。
+
+## 审批和安全
+
+- 命令、文件修改、临时权限、用户输入和 MCP elicitation 由发起 Turn 的 Gateway 连接处理。
+- 无法映射、过期或未知的高权限请求默认拒绝或取消。
+- Telegram 回调令牌随机生成、一次性使用并有超时；临时权限默认只作用于当前 Turn。
+- 连接断开会取消悬挂交互，不把旧审批带到新连接。
+- 日志对 Token 和 Authorization 字段脱敏。
+- 本机只监听私有 Unix Socket，不开放无认证 TCP 地址。
+
+## 开发与验证
+
+```bash
+npm run check
+npm test
+npm run build
+npm run protocol:check
+```
+
+真实 Unix WebSocket/App Server 冒烟测试不会调用模型：
+
+```bash
+RUN_CODEX_INTEGRATION=1 npm test -- --run gateway/tests/real-app-server.test.ts
+```
+
+验证 launchd 模板语法：
+
+```bash
+plutil -lint launchd/*.plist.template
+```
+
+## 协议升级
+
+先升级 Codex CLI，再重新生成协议：
+
+```bash
+npm run protocol:generate
+npm run protocol:check
+npm run check
+npm test
+RUN_CODEX_INTEGRATION=1 npm test -- --run gateway/tests/real-app-server.test.ts
+```
+
+生成物位于 `gateway/src/codex-protocol/generated`，对应版本记录在 `gateway/src/codex-protocol/version.json`。生成文件不得手工修改。
+
+## 当前状态
+
+仓库已经切换为单一 TypeScript Gateway；旧 Python Runtime、测试、smoke 脚本和打包入口已移除。CLI/Remote TUI 与 Telegram 双向恢复原生 Codex Thread 已完成真实验证。前后台常驻服务暂未启用，当前使用 `npm run dev:all` 运行。

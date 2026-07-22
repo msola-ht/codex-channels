@@ -1,31 +1,30 @@
+# Secrets and machine-local configuration
 .env
 .env.*
 !.env.example
+
+# Local environments and dependencies
 .venv/
-.codex/
+node_modules/
 
-# Python
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.hypothesis/
-.coverage
-.coverage.*
-htmlcov/
-coverage.xml
-.tox/
-.nox/
+# Build, test and tool output
+dist/
+coverage/
+*.tsbuildinfo
+.vitest/
+.npm/
+.pnpm-store/
+.turbo/
 
-# Runtime data and logs
+# Runtime state, sockets and logs
+.runtime/
 data/
+*.sock
+*.pid
 *.log
 
-# Build artifacts
-dist/
-build/
-*.egg-info/
+# Local Codex state (repository rules live in AGENTS.md)
+.codex/
 
 # Editors and operating systems
 .idea/

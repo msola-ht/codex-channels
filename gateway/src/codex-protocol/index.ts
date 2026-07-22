@@ -1,0 +1,30 @@
+import version from "./version.json" with { type: "json" };
+
+export type { InitializeParams } from "./generated/InitializeParams.js";
+export type { InitializeResponse } from "./generated/InitializeResponse.js";
+export type { RequestId } from "./generated/RequestId.js";
+export type { ServerNotification } from "./generated/ServerNotification.js";
+export type { ServerRequest } from "./generated/ServerRequest.js";
+export type { Thread } from "./generated/v2/Thread.js";
+export type { ThreadListParams } from "./generated/v2/ThreadListParams.js";
+export type { ThreadListResponse } from "./generated/v2/ThreadListResponse.js";
+export type { ThreadReadResponse } from "./generated/v2/ThreadReadResponse.js";
+export type { ThreadResumeResponse } from "./generated/v2/ThreadResumeResponse.js";
+export type { ThreadStartResponse } from "./generated/v2/ThreadStartResponse.js";
+export type { ThreadUnsubscribeResponse } from "./generated/v2/ThreadUnsubscribeResponse.js";
+export type { TurnStartResponse } from "./generated/v2/TurnStartResponse.js";
+export type { TurnSteerResponse } from "./generated/v2/TurnSteerResponse.js";
+export type { ModelListResponse } from "./generated/v2/ModelListResponse.js";
+export type { GetAccountTokenUsageResponse } from "./generated/v2/GetAccountTokenUsageResponse.js";
+export type { ListMcpServerStatusResponse } from "./generated/v2/ListMcpServerStatusResponse.js";
+export type { PermissionProfileListResponse } from "./generated/v2/PermissionProfileListResponse.js";
+export type { PluginListResponse } from "./generated/v2/PluginListResponse.js";
+export type { ReviewStartResponse } from "./generated/v2/ReviewStartResponse.js";
+export type { ReviewTarget } from "./generated/v2/ReviewTarget.js";
+export type { SkillsListResponse } from "./generated/v2/SkillsListResponse.js";
+export type { ThreadForkResponse } from "./generated/v2/ThreadForkResponse.js";
+export type { ThreadGoal } from "./generated/v2/ThreadGoal.js";
+export type { ThreadGoalGetResponse } from "./generated/v2/ThreadGoalGetResponse.js";
+export type { ThreadGoalSetResponse } from "./generated/v2/ThreadGoalSetResponse.js";
+
+export const protocolVersion = version;

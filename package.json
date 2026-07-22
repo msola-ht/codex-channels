@@ -1,0 +1,43 @@
+{
+  "name": "codex-connect-gateway",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "prebuild": "node scripts/clean-dist.mjs",
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx gateway/src/main.ts",
+    "dev:all": "node scripts/dev-all.mjs",
+    "start": "node dist/gateway/src/main.js",
+    "test": "vitest run --config gateway/vitest.config.ts",
+    "test:watch": "vitest --config gateway/vitest.config.ts",
+    "protocol:generate": "node scripts/generate-protocol.mjs",
+    "protocol:check": "node scripts/check-protocol.mjs",
+    "launchd:install": "node scripts/install-launchd.mjs",
+    "remote": "node scripts/codex-remote.mjs",
+    "service:setup": "npm run build && npm run launchd:install && zsh scripts/launchd-control.sh start",
+    "service:start": "zsh scripts/launchd-control.sh start",
+    "service:stop": "zsh scripts/launchd-control.sh stop",
+    "service:restart": "zsh scripts/launchd-control.sh restart",
+    "service:status": "zsh scripts/launchd-control.sh status"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "grammy": "^1.38.3",
+    "https-proxy-agent": "^9.1.0",
+    "pino": "^10.3.1",
+    "ws": "^8.18.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.16"
+  }
+}

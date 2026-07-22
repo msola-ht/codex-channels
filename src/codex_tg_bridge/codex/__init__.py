@@ -1,2 +1,0 @@
-"""Codex App Server client."""
-
