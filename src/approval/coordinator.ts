@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 
-import type { RpcServerRequest } from "../codex-client/json-rpc.js";
-import { JsonRpcError } from "../codex-client/json-rpc.js";
-import type { SessionRouter } from "../session-routing/router.js";
+import { JsonRpcError, type RpcServerRequest } from "../codex-client/index.js";
+import type { SessionRouter } from "../session-routing/index.js";
 import type { InteractionDecision, InteractionPort } from "./types.js";
 
 function asRecord(value: unknown): Record<string, unknown> {

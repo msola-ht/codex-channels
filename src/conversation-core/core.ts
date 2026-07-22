@@ -1,5 +1,5 @@
 import type { MessagePhase, ThreadTokenUsage } from "../codex-protocol/index.js";
-import type { EventBus } from "../event-bus/event-bus.js";
+import type { EventBus } from "../event-bus/index.js";
 import {
   gatewayUserMessageClientIdPrefix,
   type ConversationTarget,

@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import type { ConversationTarget } from "../conversation-core/events.js";
+import type { ConversationTarget } from "../conversation-core/index.js";
 import type { BindingStore, ConversationBinding } from "./binding-store.js";
 import { MemoryBindingStore } from "./memory-binding-store.js";
 

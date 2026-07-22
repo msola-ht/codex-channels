@@ -1,12 +1,14 @@
 import type { Api } from "grammy";
 import type { Logger } from "pino";
 
-import type { InteractionDecision, InteractionRequest } from "../../approval/types.js";
-import type { OperationUpdate, OutputEvent } from "../../conversation-core/events.js";
+import type { InteractionDecision, InteractionRequest } from "../../approval/index.js";
+import type { OperationUpdate, OutputEvent } from "../../conversation-core/index.js";
 import type { MessagePhase } from "../../codex-protocol/index.js";
-import { BoundedAsyncQueue } from "../../event-bus/bounded-queue.js";
+import { BoundedAsyncQueue } from "../../event-bus/index.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import { splitTelegramText } from "./format.js";
+import { formatOperationLog } from "./operation-format.js";
+import { TelegramTypingIndicator } from "./typing-indicator.js";
 
 interface StreamState {
   chatId: string;
@@ -18,11 +20,6 @@ interface StreamState {
   timer: NodeJS.Timeout | undefined;
 }
 
-interface TypingState {
-  activityKeys: Set<string>;
-  timer: NodeJS.Timeout;
-}
-
 interface OperationLogState {
   chatId: string;
   turnKey: string;
@@ -31,11 +28,6 @@ interface OperationLogState {
   omittedCount: number;
   messageId: number | undefined;
   timer: NodeJS.Timeout | undefined;
-}
-
-interface OperationGroup {
-  record: OperationUpdate;
-  count: number;
 }
 
 interface OutboxOperation {
@@ -52,20 +44,20 @@ export class TelegramOutbox {
   private readonly streams = new Map<string, StreamState>();
   private readonly operationLogs = new Map<string, OperationLogState>();
   private readonly replyToByTurn = new Map<string, number>();
-  private readonly typing = new Map<string, TypingState>();
-  private readonly lastTypingAt = new Map<string, number>();
+  private readonly typing: TelegramTypingIndicator;
   private readonly workers = new Map<string, ChatWorker>();
   private readonly approvalRequestsByOperation = new Map<string, Set<string>>();
   private readonly operationByApprovalRequest = new Map<string, string>();
   private readonly suppressedOperations = new Set<string>();
-  private nextActivityId = 1;
   private closed = false;
 
   constructor(
     private readonly api: Api,
     private readonly logger: Logger,
     private readonly executor = new TelegramApiExecutor(logger),
-  ) {}
+  ) {
+    this.typing = new TelegramTypingIndicator((chatId) => this.enqueueTyping(chatId));
+  }
 
   setTurnReplyTarget(threadId: string, turnId: string, messageId: number): void {
     if (this.closed) {
@@ -81,7 +73,7 @@ export class TelegramOutbox {
     const chatId = event.target.conversationId;
     switch (event.type) {
       case "turn.started":
-        this.startTyping(chatId, this.turnActivityKey(event.threadId, event.turnId));
+        this.typing.start(chatId, this.turnActivityKey(event.threadId, event.turnId));
         return;
       case "user.message": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
@@ -177,7 +169,7 @@ export class TelegramOutbox {
             stream.timer = undefined;
           }
         }
-        this.stopTyping(chatId, this.turnActivityKey(event.threadId, event.turnId));
+        this.typing.stop(chatId, this.turnActivityKey(event.threadId, event.turnId));
         this.enqueue(chatId, async () => {
           for (const key of keys) {
             await this.flush(chatId, key, true);
@@ -230,9 +222,7 @@ export class TelegramOutbox {
         this.enqueue(state.chatId, () => this.flushOperationLog(state, true), true);
       }
     }
-    for (const state of this.typing.values()) {
-      clearTimeout(state.timer);
-    }
+    this.typing.close();
     for (const worker of this.workers.values()) {
       worker.queue.close();
     }
@@ -241,8 +231,6 @@ export class TelegramOutbox {
     this.streams.clear();
     this.operationLogs.clear();
     this.replyToByTurn.clear();
-    this.typing.clear();
-    this.lastTypingAt.clear();
     this.workers.clear();
     this.approvalRequestsByOperation.clear();
     this.operationByApprovalRequest.clear();
@@ -250,29 +238,11 @@ export class TelegramOutbox {
   }
 
   showTyping(chatId: string): void {
-    if (this.closed) {
-      return;
-    }
-    const now = Date.now();
-    if (now - (this.lastTypingAt.get(chatId) ?? 0) < 1_000) {
-      return;
-    }
-    this.lastTypingAt.set(chatId, now);
-    this.enqueue(chatId, async () => {
-      await this.executor.call(
-        { chatId, operation: "sendChatAction", critical: false },
-        () => this.api.sendChatAction(chatId, "typing"),
-      );
-    }, false);
+    this.typing.show(chatId);
   }
 
   beginTyping(chatId: string): () => void {
-    if (this.closed) {
-      return () => undefined;
-    }
-    const activityKey = `request:${this.nextActivityId++}`;
-    this.startTyping(chatId, activityKey);
-    return () => this.stopTyping(chatId, activityKey);
+    return this.typing.begin(chatId);
   }
 
   prepareInteraction(chatId: string, request: InteractionRequest): void {
@@ -590,40 +560,6 @@ export class TelegramOutbox {
     }
   }
 
-  private startTyping(chatId: string, activityKey: string): void {
-    const current = this.typing.get(chatId);
-    if (current) {
-      current.activityKeys.add(activityKey);
-      return;
-    }
-    const timer = setTimeout(() => this.refreshTyping(chatId), 400);
-    timer.unref();
-    this.typing.set(chatId, { activityKeys: new Set([activityKey]), timer });
-  }
-
-  private refreshTyping(chatId: string): void {
-    const state = this.typing.get(chatId);
-    if (!state || state.activityKeys.size === 0 || this.closed) {
-      return;
-    }
-    this.showTyping(chatId);
-    const timer = setTimeout(() => this.refreshTyping(chatId), 4_000);
-    timer.unref();
-    state.timer = timer;
-  }
-
-  private stopTyping(chatId: string, activityKey: string): void {
-    const state = this.typing.get(chatId);
-    if (!state) {
-      return;
-    }
-    state.activityKeys.delete(activityKey);
-    if (state.activityKeys.size === 0) {
-      clearTimeout(state.timer);
-      this.typing.delete(chatId);
-    }
-  }
-
   private async send(chatId: string, text: string, replyTo?: number): Promise<number | undefined> {
     let firstMessageId: number | undefined;
     for (const chunk of splitTelegramText(text)) {
@@ -711,6 +647,18 @@ export class TelegramOutbox {
     return message.message_id;
   }
 
+  private enqueueTyping(chatId: string): void {
+    if (this.closed) {
+      return;
+    }
+    this.enqueue(chatId, async () => {
+      await this.executor.call(
+        { chatId, operation: "sendChatAction", critical: false },
+        () => this.api.sendChatAction(chatId, "typing"),
+      );
+    }, false);
+  }
+
   private clearThreadOutput(chatId: string, threadId: string): void {
     for (const [key, stream] of this.streams) {
       if (stream.turnKey.startsWith(`${threadId}:`)) {
@@ -749,140 +697,9 @@ export class TelegramOutbox {
         this.suppressedOperations.delete(operationKey);
       }
     }
-    const typing = this.typing.get(chatId);
-    if (typing) {
-      clearTimeout(typing.timer);
-      this.typing.delete(chatId);
-    }
+    this.typing.clear(chatId);
   }
 
-}
-
-function formatOperationLog(state: OperationLogState): string {
-  const records = state.order
-    .map((itemId) => state.records.get(itemId))
-    .filter((record): record is OperationUpdate => record !== undefined);
-  let visible = records.slice(-20);
-  let omitted = state.omittedCount + records.length - visible.length;
-  let text = renderOperationRecords(visible, omitted);
-  while (Array.from(text).length > 3_900 && visible.length > 1) {
-    visible = visible.slice(1);
-    omitted += 1;
-    text = renderOperationRecords(visible, omitted);
-  }
-  return text;
-}
-
-function renderOperationRecords(records: OperationUpdate[], omitted: number): string {
-  const lines = ["<b>操作过程</b>"];
-  if (omitted > 0) {
-    lines.push("", `<i>已省略较早的 ${omitted} 项操作</i>`);
-  }
-  for (const { record, count } of groupOperations(records)) {
-    const countLabel = count > 1 ? ` (×${count})` : "";
-    lines.push("", `${operationIcon(record)} <b>${operationTitle(record)}${countLabel}</b>`);
-    if (record.detail) {
-      const detail = escapeTelegramHtml(
-        record.detail.replaceAll("[REDACTED]", "[已隐藏]"),
-      );
-      lines.push(record.kind === "command"
-        ? `<pre><code class="language-shell">${detail}</code></pre>`
-        : `<blockquote>${detail}</blockquote>`);
-    }
-  }
-  return lines.join("\n");
-}
-
-function groupOperations(records: OperationUpdate[]): OperationGroup[] {
-  const groups: OperationGroup[] = [];
-  for (const record of records) {
-    const previous = groups.at(-1);
-    if (previous && operationGroupKey(previous.record) === operationGroupKey(record)) {
-      previous.count += 1;
-      previous.record = record;
-    } else {
-      groups.push({ record, count: 1 });
-    }
-  }
-  return groups;
-}
-
-function operationGroupKey(record: OperationUpdate): string {
-  return JSON.stringify([
-    record.kind,
-    record.action ?? null,
-    record.detail ?? null,
-    record.status,
-  ]);
-}
-
-function operationIcon(record: OperationUpdate): string {
-  const icon = ({
-    command: "💻",
-    fileChange: "🔧",
-    mcpTool: "🔌",
-    dynamicTool: "🧰",
-    subagent: "🤖",
-    webSearch: "🌐",
-    imageView: "🖼️",
-    imageGeneration: "🎨",
-    sleep: "⏳",
-    plan: "📋",
-    contextCompaction: "🗜️",
-    reviewMode: "🔍",
-  } as const)[record.kind];
-  const statusIcon = ({
-    running: "⏳",
-    completed: "",
-    failed: "❌",
-    declined: "🚫",
-  } as const)[record.status];
-  return statusIcon ? `${icon} ${statusIcon}` : icon;
-}
-
-function operationTitle(record: OperationUpdate): string {
-  switch (record.kind) {
-    case "command":
-      return "运行命令";
-    case "fileChange":
-      return "修改文件";
-    case "mcpTool":
-      return "调用 MCP 工具";
-    case "dynamicTool":
-      return "调用工具";
-    case "subagent":
-      return ({
-        spawnAgent: "启动子代理",
-        sendInput: "向子代理发送任务",
-        resumeAgent: "恢复子代理",
-        wait: "等待子代理",
-        closeAgent: "关闭子代理",
-        started: "子代理已启动",
-        interacted: "子代理正在交互",
-        interrupted: "子代理已中断",
-      } as Record<string, string>)[record.action ?? ""] ?? "子代理活动";
-    case "webSearch":
-      return "搜索网页";
-    case "imageView":
-      return "查看图片";
-    case "imageGeneration":
-      return "生成图片";
-    case "sleep":
-      return "等待";
-    case "plan":
-      return "更新计划";
-    case "contextCompaction":
-      return "压缩上下文";
-    case "reviewMode":
-      return record.action === "exited" ? "退出审查模式" : "进入审查模式";
-  }
-}
-
-function escapeTelegramHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
 }
 
 function formatCliInput(text: string): string {

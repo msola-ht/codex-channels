@@ -1,4 +1,4 @@
-import type { ConversationTarget } from "../conversation-core/events.js";
+import type { ConversationTarget } from "../conversation-core/index.js";
 import type { BindingStore, ConversationBinding } from "./binding-store.js";
 
 export class MemoryBindingStore implements BindingStore {

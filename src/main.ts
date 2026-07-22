@@ -1,6 +1,6 @@
-import { GatewayApplication } from "./bootstrap/app.js";
+import { GatewayApplication } from "./bootstrap/index.js";
 import { ConfigurationError, loadConfig } from "./config/index.js";
-import { createLogger } from "./observability/logger.js";
+import { createLogger } from "./observability/index.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();

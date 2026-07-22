@@ -1,9 +1,8 @@
-import type { CodexAppServerClient } from "../codex-client/client.js";
-import { JsonRpcError } from "../codex-client/json-rpc.js";
+import { JsonRpcError, type CodexAppServerClient } from "../codex-client/index.js";
 import type { Thread } from "../codex-protocol/index.js";
-import type { ConversationTarget } from "../conversation-core/events.js";
-import type { Workspace, WorkspaceRegistry } from "../policy/workspace-registry.js";
-import type { BindingStore, ConversationBinding } from "../storage/binding-store.js";
+import type { ConversationTarget } from "../conversation-core/index.js";
+import type { Workspace, WorkspaceRegistry } from "../policy/index.js";
+import type { BindingStore, ConversationBinding } from "../storage/index.js";
 
 export interface ThreadModelSettings {
   model: string;

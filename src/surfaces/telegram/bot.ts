@@ -2,12 +2,11 @@ import { Bot, type Context } from "grammy";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
 
-import type { ConversationService } from "../../application/conversation-service.js";
-import type { ConversationTarget, OutputEvent } from "../../conversation-core/events.js";
+import type { ConversationService } from "../../application/index.js";
+import type { ConversationTarget, OutputEvent } from "../../conversation-core/index.js";
 import type { ReviewTarget } from "../../codex-protocol/index.js";
-import type { EventBus } from "../../event-bus/event-bus.js";
-import type { TelegramAccessPolicy } from "../../policy/telegram-access.js";
-import type { Workspace } from "../../policy/workspace-registry.js";
+import type { EventBus } from "../../event-bus/index.js";
+import type { TelegramAccessPolicy, Workspace } from "../../policy/index.js";
 import {
   formatMcpServers,
   formatLimits,

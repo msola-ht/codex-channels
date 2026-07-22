@@ -1,7 +1,7 @@
-import type { CodexAppServerClient, TurnOverrides } from "../codex-client/client.js";
+import type { CodexAppServerClient, TurnOverrides } from "../codex-client/index.js";
 import type { Model } from "../codex-protocol/index.js";
-import type { ConversationTarget } from "../conversation-core/events.js";
-import type { SessionRouter } from "../session-routing/router.js";
+import type { ConversationTarget } from "../conversation-core/index.js";
+import type { SessionRouter } from "../session-routing/index.js";
 
 export interface ModelSelectionState {
   models: Model[];

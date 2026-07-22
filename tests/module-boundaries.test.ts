@@ -33,7 +33,44 @@ describe("module boundaries", () => {
   it("prevents surfaces from bypassing the application boundary into the Codex client", () => {
     expect(violations("surfaces", ["codex-client"])).toEqual([]);
   });
+
+  it("requires cross-module imports to use public entry points", () => {
+    expect(publicEntryViolations()).toEqual([]);
+  });
 });
+
+function publicEntryViolations(): string[] {
+  const moduleNames = new Set(
+    readdirSync(sourceRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name),
+  );
+  const found: string[] = [];
+  for (const file of typescriptFiles(sourceRoot)) {
+    const sourceModule = topLevelModule(file, moduleNames);
+    const source = readFileSync(file, "utf8");
+    for (const specifier of importSpecifiers(source)) {
+      if (!specifier.startsWith(".")) {
+        continue;
+      }
+      const target = resolve(dirname(file), specifier);
+      const targetModule = topLevelModule(target, moduleNames);
+      if (!targetModule || targetModule === sourceModule) {
+        continue;
+      }
+      const publicEntry = resolve(sourceRoot, targetModule, "index.js");
+      if (target !== publicEntry) {
+        found.push(`${relative(sourceRoot, file)} -> ${relative(sourceRoot, target)}`);
+      }
+    }
+  }
+  return found;
+}
+
+function topLevelModule(path: string, moduleNames: Set<string>): string | undefined {
+  const [name] = relative(sourceRoot, path).split("/");
+  return name && moduleNames.has(name) ? name : undefined;
+}
 
 function violations(moduleName: string, forbiddenModules: string[]): string[] {
   const moduleRoot = resolve(sourceRoot, moduleName);

@@ -7,9 +7,8 @@ import type {
   SkillsListResponse,
   Thread,
 } from "../../codex-protocol/index.js";
-import type { ConversationStatus } from "../../application/conversation-service.js";
-import type { ModelSelectionState } from "../../application/model-selection-service.js";
-import type { Workspace } from "../../policy/workspace-registry.js";
+import type { ConversationStatus, ModelSelectionState } from "../../application/index.js";
+import type { Workspace } from "../../policy/index.js";
 
 export function splitTelegramText(text: string, limit = 4_000): string[] {
   if (!text) {

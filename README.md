@@ -33,6 +33,15 @@ Gateway 已连接 App Server 且 Telegram Bot 完成鉴权后，会向 `TELEGRAM
 
 详细设计和边界见 [ARCHITECTURE_REBUILD_PROPOSAL.md](ARCHITECTURE_REBUILD_PROPOSAL.md)，项目约束见 [AGENTS.md](AGENTS.md)。
 
+## 目录索引
+
+- [`src/`](src/README.md)：Gateway 业务源码与模块边界。
+- [`bin/`](bin/README.md)：npm CLI 入口与命令分发。
+- [`scripts/`](scripts/README.md)：开发、配置、协议、打包和服务管理脚本。
+- [`launchd/`](launchd/README.md)：macOS 双进程服务模板。
+- [`tests/`](tests/README.md)：单元、契约和条件式真实集成测试。
+- [`.github/workflows/`](.github/workflows/README.md)：GitHub Actions 自动验证。
+
 ## 环境要求
 
 - macOS 或 Linux（launchd 配置仅支持 macOS；Windows Transport 尚未适配）

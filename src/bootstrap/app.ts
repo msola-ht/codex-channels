@@ -3,22 +3,22 @@ import { dirname, join } from "node:path";
 
 import type { Logger } from "pino";
 
-import { ApprovalCoordinator } from "../approval/coordinator.js";
-import { JsonRpcClient, type RpcNotification } from "../codex-client/json-rpc.js";
-import { CodexAppServerClient } from "../codex-client/client.js";
-import { UnixWebSocketTransport } from "../codex-client/unix-websocket-transport.js";
+import { ApprovalCoordinator } from "../approval/index.js";
+import {
+  CodexAppServerClient,
+  JsonRpcClient,
+  UnixWebSocketTransport,
+  type RpcNotification,
+} from "../codex-client/index.js";
 import { protocolVersion } from "../codex-protocol/index.js";
 import type { GatewayConfig } from "../config/index.js";
-import { ConversationCore } from "../conversation-core/core.js";
-import type { OutputEvent } from "../conversation-core/events.js";
-import { ConversationService } from "../application/conversation-service.js";
-import { ModelSelectionService } from "../application/model-selection-service.js";
-import { EventBus } from "../event-bus/event-bus.js";
-import { TelegramAccessPolicy } from "../policy/telegram-access.js";
-import { WorkspaceRegistry } from "../policy/workspace-registry.js";
-import { SessionRouter } from "../session-routing/router.js";
-import { SqliteBindingStore } from "../storage/sqlite-binding-store.js";
-import { TelegramSurface } from "../surfaces/telegram/bot.js";
+import { ConversationService, ModelSelectionService } from "../application/index.js";
+import { ConversationCore, type OutputEvent } from "../conversation-core/index.js";
+import { EventBus } from "../event-bus/index.js";
+import { TelegramAccessPolicy, WorkspaceRegistry } from "../policy/index.js";
+import { SessionRouter } from "../session-routing/index.js";
+import { SqliteBindingStore } from "../storage/index.js";
+import { TelegramSurface } from "../surfaces/index.js";
 
 export class GatewayApplication {
   private readonly transport: UnixWebSocketTransport;

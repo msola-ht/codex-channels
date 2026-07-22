@@ -1,4 +1,4 @@
-import type { ConversationTarget } from "../conversation-core/events.js";
+import type { ConversationTarget } from "../conversation-core/index.js";
 
 export interface ConversationBinding {
   target: ConversationTarget;

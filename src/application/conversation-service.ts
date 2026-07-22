@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
 
-import type { CodexAppServerClient } from "../codex-client/client.js";
+import type { CodexAppServerClient } from "../codex-client/index.js";
 import type {
   GetAccountRateLimitsResponse,
   GetAccountTokenUsageResponse,
@@ -15,13 +15,13 @@ import type {
   ThreadTokenUsage,
   UserInput,
 } from "../codex-protocol/index.js";
-import type { SessionRouter } from "../session-routing/router.js";
-import type { Workspace } from "../policy/workspace-registry.js";
-import { ConversationCore } from "../conversation-core/core.js";
+import type { SessionRouter } from "../session-routing/index.js";
+import type { Workspace } from "../policy/index.js";
 import {
+  ConversationCore,
   gatewayUserMessageClientIdPrefix,
   type ConversationTarget,
-} from "../conversation-core/events.js";
+} from "../conversation-core/index.js";
 import type { ModelSelectionService, ModelSelectionState } from "./model-selection-service.js";
 
 export interface Submission {

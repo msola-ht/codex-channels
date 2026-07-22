@@ -3,8 +3,8 @@ import { randomBytes } from "node:crypto";
 import { Bot, InlineKeyboard, type Context } from "grammy";
 import type { Logger } from "pino";
 
-import type { InteractionDecision, InteractionPort, InteractionRequest } from "../../approval/types.js";
-import type { ConversationTarget } from "../../conversation-core/events.js";
+import type { InteractionDecision, InteractionPort, InteractionRequest } from "../../approval/index.js";
+import type { ConversationTarget } from "../../conversation-core/index.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import { splitTelegramText } from "./format.js";
 
