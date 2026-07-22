@@ -6,7 +6,13 @@ import type { OperationUpdate, OutputEvent } from "../../conversation-core/index
 import type { MessagePhase } from "../../codex-protocol/index.js";
 import { BoundedAsyncQueue } from "../../event-bus/index.js";
 import { TelegramApiExecutor } from "./api-executor.js";
-import { formatContextUsage, splitTelegramText } from "./format.js";
+import {
+  formatAccountUpdate,
+  formatContextUsage,
+  formatMcpStatusUpdate,
+  formatRateLimitUpdate,
+  splitTelegramText,
+} from "./format.js";
 import { formatOperationLog } from "./operation-format.js";
 import { TelegramTypingIndicator } from "./typing-indicator.js";
 
@@ -198,6 +204,21 @@ export class TelegramOutbox {
         this.enqueue(chatId, async () => {
           await this.send(chatId, `Codex 警告：${event.message}`);
         }, true);
+        return;
+      case "account.updated":
+        this.enqueue(chatId, async () => {
+          await this.sendMessage(chatId, formatAccountUpdate(event.authMode, event.planType));
+        }, true);
+        return;
+      case "account.rateLimits.updated":
+        this.enqueue(chatId, async () => {
+          await this.sendMessage(chatId, formatRateLimitUpdate(event.rateLimits));
+        }, true);
+        return;
+      case "mcp.status.updated":
+        this.enqueue(chatId, async () => {
+          await this.sendMessage(chatId, formatMcpStatusUpdate(event));
+        }, event.status === "failed");
         return;
       case "thread.status":
         return;

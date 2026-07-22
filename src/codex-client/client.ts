@@ -10,6 +10,7 @@ import type {
   ReviewTarget,
   SkillsListResponse,
   Thread,
+  ThreadArchiveResponse,
   ThreadDeleteResponse,
   ThreadForkResponse,
   ThreadGoal,
@@ -20,6 +21,7 @@ import type {
   ThreadResumeResponse,
   ThreadStartResponse,
   ThreadUnsubscribeResponse,
+  ThreadUnarchiveResponse,
   TurnStartResponse,
   TurnSteerResponse,
   UserInput,
@@ -66,7 +68,10 @@ export class CodexAppServerClient {
     this.rpc.setServerRequestHandler(handler);
   }
 
-  async listThreads(cwd: string, options: { fullScan?: boolean } = {}): Promise<Thread[]> {
+  async listThreads(
+    cwd: string,
+    options: { fullScan?: boolean; archived?: boolean; searchTerm?: string } = {},
+  ): Promise<Thread[]> {
     const threads: Thread[] = [];
     const cursors = new Set<string>();
     let cursor: string | null = null;
@@ -79,6 +84,8 @@ export class CodexAppServerClient {
           sortKey: "updated_at",
           sortDirection: "desc",
           useStateDbOnly: !options.fullScan,
+          archived: options.archived ?? false,
+          ...(options.searchTerm ? { searchTerm: options.searchTerm } : {}),
           limit: 100,
           ...(cursor ? { cursor } : {}),
         },
@@ -143,6 +150,22 @@ export class CodexAppServerClient {
   async deleteThread(threadId: string): Promise<ThreadDeleteResponse> {
     return this.rpc.request<ThreadDeleteResponse>(
       "thread/delete",
+      { threadId },
+      { retryOverload: false },
+    );
+  }
+
+  async archiveThread(threadId: string): Promise<ThreadArchiveResponse> {
+    return this.rpc.request<ThreadArchiveResponse>(
+      "thread/archive",
+      { threadId },
+      { retryOverload: false },
+    );
+  }
+
+  async unarchiveThread(threadId: string): Promise<ThreadUnarchiveResponse> {
+    return this.rpc.request<ThreadUnarchiveResponse>(
+      "thread/unarchive",
       { threadId },
       { retryOverload: false },
     );

@@ -1,13 +1,24 @@
-import type { MessagePhase, ThreadTokenUsage } from "../codex-protocol/index.js";
+import type {
+  AuthMode,
+  McpServerStartupFailureReason,
+  McpServerStartupState,
+  MessagePhase,
+  PlanType,
+  RateLimitReachedType,
+  RateLimitSnapshot,
+  ThreadTokenUsage,
+  TurnPlanStep,
+} from "../codex-protocol/index.js";
 import type { EventBus } from "../event-bus/index.js";
 import {
   gatewayUserMessageClientIdPrefix,
   type ConversationTarget,
   type OutputEvent,
+  type TurnArtifacts,
   isCriticalOutputEvent,
 } from "./events.js";
 import type { ConversationRoutingPort } from "./routing-port.js";
-import { parseOperationUpdate } from "./operation.js";
+import { parseOperationUpdate, sanitizeOperationText } from "./operation.js";
 
 export interface CodexNotification {
   method: string;
@@ -46,6 +57,11 @@ export class ConversationCore {
   private readonly usageTurnByThread = new Map<string, string>();
   private readonly seenUserMessages = new Set<string>();
   private readonly phaseByItem = new Map<string, MessagePhase | null>();
+  private readonly artifactsByThread = new Map<string, TurnArtifacts>();
+  private readonly mcpStatus = new Map<string, string>();
+  private accountStatus: string | undefined;
+  private readonly rateLimitNotices = new Map<string, string>();
+  private readonly rateLimitSnapshots = new Map<string, RateLimitSnapshot>();
 
   constructor(
     private readonly router: ConversationRoutingPort,
@@ -56,6 +72,10 @@ export class ConversationCore {
     const current = this.activeByConversation.get(this.key(target));
     if (current?.threadId === threadId && current.turnId === turnId) {
       return;
+    }
+    const artifacts = this.artifactsByThread.get(threadId);
+    if (artifacts?.turnId !== turnId) {
+      this.artifactsByThread.set(threadId, { threadId, turnId });
     }
     this.activeByConversation.set(this.key(target), { target, threadId, turnId });
     this.publish({ type: "turn.started", target, threadId, turnId });
@@ -69,6 +89,10 @@ export class ConversationCore {
     return this.usageByThread.get(threadId);
   }
 
+  artifacts(threadId: string): TurnArtifacts | undefined {
+    return this.artifactsByThread.get(threadId);
+  }
+
   connectionLost(message: string): void {
     this.activeByConversation.clear();
     this.errorsByTurn.clear();
@@ -76,6 +100,7 @@ export class ConversationCore {
     this.usageTurnByThread.clear();
     this.seenUserMessages.clear();
     this.phaseByItem.clear();
+    this.mcpStatus.clear();
     for (const binding of this.router.allBindings()) {
       this.publish({
         type: "connection.lost",
@@ -106,6 +131,35 @@ export class ConversationCore {
         if (threadId && turnId && tokenUsage) {
           this.usageByThread.set(threadId, tokenUsage);
           this.usageTurnByThread.set(threadId, turnId);
+        }
+        return;
+      }
+      case "turn/diff/updated": {
+        const turnId = stringField(params, "turnId");
+        const diff = stringField(params, "diff");
+        if (threadId && turnId && diff !== undefined) {
+          const current = this.artifactsByThread.get(threadId);
+          this.artifactsByThread.set(threadId, {
+            ...(current?.turnId === turnId ? current : { threadId, turnId }),
+            threadId,
+            turnId,
+            diff,
+          });
+        }
+        return;
+      }
+      case "turn/plan/updated": {
+        const turnId = stringField(params, "turnId");
+        const explanation = params?.explanation;
+        const plan = parsePlanSteps(params?.plan);
+        if (threadId && turnId && plan && (typeof explanation === "string" || explanation === null)) {
+          const current = this.artifactsByThread.get(threadId);
+          this.artifactsByThread.set(threadId, {
+            ...(current?.turnId === turnId ? current : { threadId, turnId }),
+            threadId,
+            turnId,
+            plan: { explanation, steps: plan },
+          });
         }
         return;
       }
@@ -238,8 +292,80 @@ export class ConversationCore {
         this.usageTurnByThread.delete(threadId);
         this.clearSeenUserMessages(threadId);
         this.clearItemPhases(threadId);
+        this.artifactsByThread.delete(threadId);
         if (target) {
           this.activeByConversation.delete(this.key(target));
+        }
+        return;
+      }
+      case "account/updated": {
+        const authMode = parseAuthMode(params?.authMode);
+        const planType = parsePlanType(params?.planType);
+        if (authMode === undefined || planType === undefined) {
+          return;
+        }
+        const fingerprint = `${authMode ?? ""}:${planType ?? ""}`;
+        if (fingerprint !== this.accountStatus) {
+          this.accountStatus = fingerprint;
+          this.broadcast({ type: "account.updated", authMode, planType });
+        }
+        return;
+      }
+      case "account/rateLimits/updated": {
+        const update = parseRateLimitSnapshot(params?.rateLimits);
+        if (!update) {
+          return;
+        }
+        const limitId = update.limitId ?? "codex";
+        const rateLimits = mergeRateLimitSnapshot(
+          this.rateLimitSnapshots.get(limitId),
+          update,
+          limitId,
+        );
+        this.rateLimitSnapshots.set(limitId, rateLimits);
+        const fingerprint = rateLimitNoticeFingerprint(rateLimits);
+        const previous = this.rateLimitNotices.get(limitId);
+        if (fingerprint) {
+          this.rateLimitNotices.set(limitId, fingerprint);
+        } else {
+          this.rateLimitNotices.delete(limitId);
+        }
+        if (fingerprint && fingerprint !== previous) {
+          this.broadcast({
+            type: "account.rateLimits.updated",
+            rateLimits,
+          });
+        }
+        return;
+      }
+      case "mcpServer/startupStatus/updated": {
+        const name = stringField(params, "name");
+        const status = stringField(params, "status");
+        const error = typeof params?.error === "string"
+          ? sanitizeOperationText(params.error)
+          : null;
+        const failureReason = typeof params?.failureReason === "string" ? params.failureReason : null;
+        if (!name || !isMcpStartupState(status) || !isMcpFailureReason(failureReason)) {
+          return;
+        }
+        const key = `${threadId ?? "global"}:${name}`;
+        const fingerprint = `${status}:${error ?? ""}:${failureReason ?? ""}`;
+        if (this.mcpStatus.get(key) === fingerprint) {
+          return;
+        }
+        this.mcpStatus.set(key, fingerprint);
+        const event = {
+          type: "mcp.status.updated" as const,
+          threadId: threadId ?? null,
+          name,
+          status,
+          error,
+          failureReason,
+        };
+        if (threadId) {
+          this.publishForThread(threadId, event);
+        } else {
+          this.broadcast(event);
         }
         return;
       }
@@ -330,9 +456,214 @@ export class ConversationCore {
     this.output.publish(event, isCriticalOutputEvent(event));
   }
 
+  private broadcast(event: UntargetedOutputEvent): void {
+    const seen = new Set<string>();
+    for (const binding of this.router.allBindings()) {
+      const key = this.key(binding.target);
+      if (!seen.has(key)) {
+        seen.add(key);
+        this.publish({ ...event, target: binding.target } as OutputEvent);
+      }
+    }
+  }
+
   private key(target: ConversationTarget): string {
     return `${target.surface}:${target.conversationId}`;
   }
+}
+
+function parsePlanSteps(value: unknown): TurnPlanStep[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const steps: TurnPlanStep[] = [];
+  for (const entry of value) {
+    const record = asRecord(entry);
+    const step = stringField(record, "step");
+    const status = stringField(record, "status");
+    if (!step || !status || !["pending", "inProgress", "completed"].includes(status)) {
+      return undefined;
+    }
+    steps.push({ step, status: status as TurnPlanStep["status"] });
+  }
+  return steps;
+}
+
+function parseAuthMode(value: unknown): AuthMode | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  return typeof value === "string" && [
+    "apikey", "chatgpt", "chatgptAuthTokens", "headers", "agentIdentity",
+    "personalAccessToken", "bedrockApiKey",
+  ].includes(value) ? value as AuthMode : undefined;
+}
+
+function parsePlanType(value: unknown): PlanType | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  return typeof value === "string" && [
+    "free", "go", "plus", "pro", "prolite", "team", "self_serve_business_usage_based",
+    "business", "enterprise_cbp_usage_based", "enterprise", "edu", "unknown",
+  ].includes(value) ? value as PlanType : undefined;
+}
+
+function isMcpStartupState(value: unknown): value is McpServerStartupState {
+  return typeof value === "string" && ["starting", "ready", "failed", "cancelled"].includes(value);
+}
+
+function isMcpFailureReason(value: unknown): value is McpServerStartupFailureReason | null {
+  return value === null || value === "reauthenticationRequired";
+}
+
+function rateLimitNoticeFingerprint(snapshot: RateLimitSnapshot): string | undefined {
+  const reached = snapshot.rateLimitReachedType;
+  const primaryThreshold = rateLimitThreshold(snapshot.primary?.usedPercent);
+  const secondaryThreshold = rateLimitThreshold(snapshot.secondary?.usedPercent);
+  if (!reached && primaryThreshold === 0 && secondaryThreshold === 0) {
+    return undefined;
+  }
+  return `${snapshot.limitId ?? "codex"}:${reached ?? ""}:${primaryThreshold}:${secondaryThreshold}`;
+}
+
+function rateLimitThreshold(used: number | undefined): number {
+  return used === undefined ? 0 : used >= 100 ? 100 : used >= 90 ? 90 : used >= 80 ? 80 : 0;
+}
+
+function mergeRateLimitSnapshot(
+  current: RateLimitSnapshot | undefined,
+  update: RateLimitSnapshot,
+  limitId: string,
+): RateLimitSnapshot {
+  return {
+    limitId: update.limitId ?? current?.limitId ?? limitId,
+    limitName: update.limitName ?? current?.limitName ?? null,
+    primary: mergeRateLimitWindow(current?.primary, update.primary),
+    secondary: mergeRateLimitWindow(current?.secondary, update.secondary),
+    credits: update.credits
+      ? {
+          ...update.credits,
+          balance: update.credits.balance ?? current?.credits?.balance ?? null,
+        }
+      : current?.credits ?? null,
+    individualLimit: update.individualLimit ?? current?.individualLimit ?? null,
+    spendControlReached: update.spendControlReached ?? current?.spendControlReached ?? null,
+    planType: update.planType ?? current?.planType ?? null,
+    rateLimitReachedType: update.rateLimitReachedType,
+  };
+}
+
+function mergeRateLimitWindow(
+  current: RateLimitSnapshot["primary"] | undefined,
+  update: RateLimitSnapshot["primary"],
+): RateLimitSnapshot["primary"] {
+  return update
+    ? {
+        usedPercent: update.usedPercent,
+        windowDurationMins: update.windowDurationMins ?? current?.windowDurationMins ?? null,
+        resetsAt: update.resetsAt ?? current?.resetsAt ?? null,
+      }
+    : current ?? null;
+}
+
+function parseRateLimitSnapshot(value: unknown): RateLimitSnapshot | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    return undefined;
+  }
+  const primary = parseRateLimitWindow(record.primary);
+  const secondary = parseRateLimitWindow(record.secondary);
+  const credits = parseCredits(record.credits);
+  const individualLimit = parseIndividualLimit(record.individualLimit);
+  const spendControlReached = nullableBoolean(record.spendControlReached);
+  const planType = parsePlanType(record.planType ?? null);
+  const rateLimitReachedType = parseRateLimitReachedType(record.rateLimitReachedType);
+  if (
+    primary === undefined || secondary === undefined || credits === undefined ||
+    individualLimit === undefined || spendControlReached === undefined ||
+    planType === undefined || rateLimitReachedType === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    limitId: nullableString(record.limitId),
+    limitName: nullableString(record.limitName),
+    primary,
+    secondary,
+    credits,
+    individualLimit,
+    spendControlReached,
+    planType,
+    rateLimitReachedType,
+  };
+}
+
+function parseRateLimitWindow(value: unknown): RateLimitSnapshot["primary"] | undefined {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const record = asRecord(value);
+  const usedPercent = numberField(record, "usedPercent");
+  const windowDurationMins = nullableNumber(record?.windowDurationMins);
+  const resetsAt = nullableNumber(record?.resetsAt);
+  return record && usedPercent !== undefined && windowDurationMins !== undefined && resetsAt !== undefined
+    ? { usedPercent, windowDurationMins, resetsAt }
+    : undefined;
+}
+
+function parseCredits(value: unknown): RateLimitSnapshot["credits"] | undefined {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const record = asRecord(value);
+  const hasCredits = record?.hasCredits;
+  const unlimited = record?.unlimited;
+  if (!record || typeof hasCredits !== "boolean" || typeof unlimited !== "boolean") {
+    return undefined;
+  }
+  return { hasCredits, unlimited, balance: nullableString(record.balance) };
+}
+
+function parseIndividualLimit(value: unknown): RateLimitSnapshot["individualLimit"] | undefined {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const record = asRecord(value);
+  const limit = stringField(record, "limit");
+  const used = stringField(record, "used");
+  const remainingPercent = numberField(record, "remainingPercent");
+  const resetsAt = numberField(record, "resetsAt");
+  return record && limit && used && remainingPercent !== undefined && resetsAt !== undefined
+    ? { limit, used, remainingPercent, resetsAt }
+    : undefined;
+}
+
+function parseRateLimitReachedType(value: unknown): RateLimitReachedType | null | undefined {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  return typeof value === "string" && [
+    "rate_limit_reached", "workspace_owner_credits_depleted",
+    "workspace_member_credits_depleted", "workspace_owner_usage_limit_reached",
+    "workspace_member_usage_limit_reached",
+  ].includes(value) ? value as RateLimitReachedType : undefined;
+}
+
+function nullableString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function nullableNumber(value: unknown): number | null | undefined {
+  return value === null || value === undefined
+    ? null
+    : typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function nullableBoolean(value: unknown): boolean | null | undefined {
+  return value === null || value === undefined
+    ? null
+    : typeof value === "boolean" ? value : undefined;
 }
 
 function messagePhase(value: unknown): MessagePhase | null {

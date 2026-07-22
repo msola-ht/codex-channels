@@ -1,4 +1,5 @@
 export { ConversationCore, type CodexNotification } from "./core.js";
+export type { TurnArtifacts } from "./events.js";
 export {
   gatewayUserMessageClientIdPrefix,
   isCriticalOutputEvent,

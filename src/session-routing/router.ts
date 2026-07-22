@@ -15,6 +15,11 @@ export interface SubscriptionRestoreFailure {
   bindingRemoved: boolean;
 }
 
+export interface ThreadListOptions {
+  archived?: boolean;
+  searchTerm?: string;
+}
+
 export class SessionRouter {
   private readonly forceNew = new Set<string>();
   private readonly modelSettingsByThread = new Map<string, ThreadModelSettings>();
@@ -96,10 +101,12 @@ export class SessionRouter {
     return failures;
   }
 
-  async list(target: ConversationTarget): Promise<Thread[]> {
+  async list(target: ConversationTarget, options: ThreadListOptions = {}): Promise<Thread[]> {
     const workspace = this.workspace(target);
-    const fast = await this.codex.listThreads(workspace.cwd);
-    return fast.length > 0 ? fast : this.codex.listThreads(workspace.cwd, { fullScan: true });
+    const fast = await this.codex.listThreads(workspace.cwd, options);
+    return fast.length > 0
+      ? fast
+      : this.codex.listThreads(workspace.cwd, { ...options, fullScan: true });
   }
 
   async ensure(target: ConversationTarget): Promise<ConversationBinding> {
@@ -181,6 +188,22 @@ export class SessionRouter {
     };
     this.bindings.bind(binding);
     return binding;
+  }
+
+  async archive(target: ConversationTarget): Promise<string> {
+    const current = this.bindings.get(target);
+    if (!current) {
+      throw new Error("当前还没有 Codex Thread");
+    }
+    await this.codex.archiveThread(current.threadId);
+    this.forgetThread(current.threadId);
+    this.forceNew.add(this.key(target));
+    return current.threadId;
+  }
+
+  async unarchive(target: ConversationTarget, threadId: string): Promise<ConversationBinding> {
+    await this.codex.unarchiveThread(threadId);
+    return this.resume(target, threadId);
   }
 
   forgetThread(threadId: string): ConversationTarget | undefined {

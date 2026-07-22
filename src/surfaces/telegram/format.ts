@@ -2,13 +2,16 @@ import type {
   GetAccountRateLimitsResponse,
   GetAccountTokenUsageResponse,
   ListMcpServerStatusResponse,
+  McpServerStatusUpdatedNotification,
   PermissionProfileListResponse,
   PluginListResponse,
+  RateLimitSnapshot,
   SkillsListResponse,
   Thread,
   ThreadTokenUsage,
 } from "../../codex-protocol/index.js";
 import type { ConversationStatus, ModelSelectionState } from "../../application/index.js";
+import type { TurnArtifacts } from "../../conversation-core/index.js";
 import type { Workspace } from "../../policy/index.js";
 
 export function splitTelegramText(text: string, limit = 4_000): string[] {
@@ -34,18 +37,69 @@ export function splitTelegramText(text: string, limit = 4_000): string[] {
   return chunks;
 }
 
-export function formatSessions(threads: Thread[], currentThreadId?: string): string {
+export function formatSessions(
+  threads: Thread[],
+  currentThreadId?: string,
+  options: { archived?: boolean; searchTerm?: string } = {},
+): string {
   if (threads.length === 0) {
-    return "当前 Workspace 没有可恢复的 Codex 会话。";
+    return options.archived
+      ? "当前 Workspace 没有匹配的已归档会话。"
+      : "当前 Workspace 没有匹配的可恢复会话。";
   }
-  const lines = [`历史会话（${threads.length}）：`];
+  const title = options.archived ? "已归档会话" : "历史会话";
+  const lines = [`${title}（${threads.length}）${options.searchTerm ? ` · 搜索：${options.searchTerm}` : ""}：`];
   threads.forEach((thread, index) => {
     const label = thread.name || preview(thread.preview) || "未命名";
     const marker = thread.id === currentThreadId ? " ← 当前" : "";
     lines.push(`${index + 1}. ${label} · ${thread.id.slice(0, 12)} · ${thread.status.type}${marker}`);
   });
-  lines.push("", "恢复：/resume <序号、名称或 Thread ID>");
+  lines.push("", options.archived
+    ? "恢复归档：/unarchive <序号、名称或 Thread ID>"
+    : "恢复：/resume <序号、名称或 Thread ID>");
   return lines.join("\n");
+}
+
+export function formatDiff(artifacts: TurnArtifacts | undefined): string {
+  const diff = artifacts?.diff;
+  if (!diff?.trim()) {
+    return "当前 Thread 暂无 Turn Diff。";
+  }
+  return [`Turn Diff · ${artifacts?.turnId ?? "未知 Turn"}`, "", diff].join("\n");
+}
+
+export function formatPlan(artifacts: TurnArtifacts | undefined): string {
+  if (!artifacts?.plan) {
+    return "当前 Thread 暂无计划。";
+  }
+  const symbols = { pending: "○", inProgress: "◐", completed: "●" } as const;
+  return [
+    `Turn 计划 · ${artifacts.turnId}`,
+    ...(artifacts.plan.explanation ? [artifacts.plan.explanation, ""] : [""]),
+    ...artifacts.plan.steps.map((entry) => `${symbols[entry.status]} ${entry.step}`),
+  ].join("\n");
+}
+
+export function formatAccountUpdate(authMode: string | null, planType: string | null): string {
+  return `Codex 账户状态已更新：认证=${authMode ?? "未登录"} · 套餐=${planType ? formatPlanType(planType) : "未知"}`;
+}
+
+export function formatRateLimitUpdate(snapshot: RateLimitSnapshot): string {
+  const label = snapshot.limitName ?? snapshot.limitId ?? "Codex";
+  return [
+    `${label} 额度提醒`,
+    `主窗口：${formatRateLimitWindow(snapshot.primary)}`,
+    ...(snapshot.secondary ? [`次窗口：${formatRateLimitWindow(snapshot.secondary)}`] : []),
+    `状态：${formatRateLimitState(snapshot.rateLimitReachedType)}`,
+  ].join("\n");
+}
+
+export function formatMcpStatusUpdate(update: McpServerStatusUpdatedNotification): string {
+  const labels = { starting: "启动中", ready: "已就绪", failed: "启动失败", cancelled: "已取消" } as const;
+  return [
+    `MCP Server：${update.name} · ${labels[update.status]}`,
+    ...(update.error ? [`原因：${update.error}`] : []),
+  ].join("\n");
 }
 
 function preview(value: string, limit = 48): string {

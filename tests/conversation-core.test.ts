@@ -299,6 +299,126 @@ describe("ConversationCore", () => {
     ]);
     expect(JSON.stringify(operations)).not.toContain("super-secret");
   });
+
+  it("keeps the latest turn diff and plan in ephemeral core state", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const core = new ConversationCore({
+      allBindings: () => [],
+      targetForThread: () => undefined,
+    }, output);
+
+    core.handle({
+      method: "turn/diff/updated",
+      params: { threadId: "thread-1", turnId: "turn-1", diff: "diff --git a/a b/a" },
+    });
+    core.handle({
+      method: "turn/plan/updated",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        explanation: "实施计划",
+        plan: [
+          { step: "检查", status: "completed" },
+          { step: "修改", status: "inProgress" },
+        ],
+      },
+    });
+
+    expect(core.artifacts("thread-1")).toEqual({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      diff: "diff --git a/a b/a",
+      plan: {
+        explanation: "实施计划",
+        steps: [
+          { step: "检查", status: "completed" },
+          { step: "修改", status: "inProgress" },
+        ],
+      },
+    });
+
+    core.markTurnStarted(
+      { surface: "telegram", conversationId: "100" },
+      "thread-1",
+      "turn-2",
+    );
+    expect(core.artifacts("thread-1")).toEqual({
+      threadId: "thread-1",
+      turnId: "turn-2",
+    });
+    await output.close();
+  });
+
+  it("merges sparse rate-limit updates and broadcasts threshold crossings once", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, conversationId: "100" };
+    const core = new ConversationCore({
+      allBindings: () => [{ target, threadId: "thread-1" }],
+      targetForThread: () => target,
+    }, output);
+
+    core.handle({
+      method: "account/rateLimits/updated",
+      params: {
+        rateLimits: {
+          limitId: "codex",
+          limitName: "Codex 5 小时",
+          planType: "pro",
+          primary: { usedPercent: 91, windowDurationMins: 300, resetsAt: 2_000_000_000 },
+        },
+      },
+    });
+    core.handle({
+      method: "account/rateLimits/updated",
+      params: {
+        rateLimits: {
+          limitId: "codex",
+          limitName: null,
+          planType: null,
+          primary: null,
+        },
+      },
+    });
+    core.handle({
+      method: "account/rateLimits/updated",
+      params: { rateLimits: { limitId: "codex", primary: { usedPercent: 50 } } },
+    });
+    core.handle({
+      method: "account/rateLimits/updated",
+      params: { rateLimits: { limitId: "codex", primary: { usedPercent: 91 } } },
+    });
+    core.handle({
+      method: "mcpServer/startupStatus/updated",
+      params: {
+        threadId: "thread-1",
+        name: "docs",
+        status: "ready",
+        error: null,
+        failureReason: null,
+      },
+    });
+    await output.close();
+
+    const limitEvents = events.filter((event) => event.type === "account.rateLimits.updated");
+    expect(limitEvents).toHaveLength(2);
+    expect(limitEvents.at(-1)).toMatchObject({
+      rateLimits: {
+        limitName: "Codex 5 小时",
+        planType: "pro",
+        primary: { windowDurationMins: 300, resetsAt: 2_000_000_000 },
+      },
+    });
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "mcp.status.updated",
+      target,
+      name: "docs",
+      status: "ready",
+    }));
+  });
 });
 
 function breakdown(totalTokens: number) {

@@ -29,6 +29,8 @@ App Server 与 Gateway 是两个独立进程。Gateway 停止不会终止 App Se
 
 Telegram 审批、用户输入和 MCP elicitation 与普通回复共用同一聊天输出队列。交互卡片发送前会先冲刷已经生成的回复与此前操作；当前等待审批的命令或文件操作会暂存，只有用户批准且审批卡先更新状态后才显示，拒绝或超时则不显示。因此同一聊天按“说明 → 审批 → 用户选择 → 后续操作与输出”的顺序展示。
 
+Gateway 还归约 App Server 的稳定 `turn/diff/updated` 与 `turn/plan/updated` 通知；Telegram 可用 `/diff` 和 `/plan` 查看当前 Thread 最近 Turn 的聚合 Diff 与计划状态。它们只保存在进程内用于界面展示，Gateway 重启后清空；不会写入 SQLite，也不会复制 App Server 历史。账户认证变化、额度达到 80%/90%/100% 阈值或进入限流状态，以及 MCP Server 启动状态变化，会通过同一有界输出队列发送简洁通知；重复状态会被合并。
+
 Gateway 已连接 App Server 且 Telegram Bot 完成鉴权后，会向 `TELEGRAM_ALLOWED_USER_IDS` 中的每个用户发送一次启动联通通知，包含该用户当前选择的 Workspace（未选择时为默认 Workspace）、工作目录、当前模型、思考强度和完整 Workspace 列表。用户尚未与 Bot 建立私聊等原因导致通知发送失败时，只记录告警，不影响 Gateway 和 Long Polling 继续运行。
 
 详细设计和边界见 [ARCHITECTURE_REBUILD_PROPOSAL.md](ARCHITECTURE_REBUILD_PROPOSAL.md)，项目约束见 [AGENTS.md](AGENTS.md)。
@@ -237,6 +239,8 @@ npm run service:uninstall
 ## Telegram 命令
 
 - `/resume [序号|名称|Thread ID]`：列出或恢复当前工作目录下的原生 Codex Thread
+- `/sessions [搜索词]`、`/archived [搜索词]`：按服务端 Thread 标题搜索当前或已归档会话
+- `/archive`、`/unarchive <序号|名称|Thread ID>`：归档当前 Thread，或取消归档并切换到目标 Thread
 - `/workspace [序号|ID|名称]`：列出或切换服务端预配置的 Workspace；切换时解除旧 Thread 绑定
 - `/new`：解除并删除当前持久化绑定，下一条普通消息创建新 Thread
 - `/status`：查看当前 Thread、Turn、工作目录及 App Server 已推送的 Thread Token 统计
@@ -246,6 +250,7 @@ npm run service:uninstall
 - `/model [序号|模型 ID|名称]`：查看或切换当前 Thread 模型；切换在下一次 Turn 生效
 - `/effort [序号|档位]`：查看或切换当前模型支持的思考强度；切换在下一次 Turn 生效
 - `/skills`、`/mcp`、`/plugins`
+- `/diff`、`/plan`：查看当前 Thread 最近 Turn 的聚合变更和计划状态
 - `/usage`：显示账号级 Token 汇总（M）和最近 7 个有数据日期的每日用量
 - `/limits`：显示套餐、主/次额度窗口、重置时间、Credits 和限流状态
 - `/permissions`
@@ -282,6 +287,12 @@ npm run protocol:check
 
 ```bash
 RUN_CODEX_INTEGRATION=1 npm test -- --run tests/real-app-server.test.ts
+```
+
+归档写操作需要已有 rollout，默认冒烟不会修改现有会话。若要验证 `thread/archive` 与 `thread/unarchive`，显式指定当前仓库中一个已完成、空闲且允许临时归档的 Thread；测试会在 `finally` 中恢复归档状态：
+
+```bash
+RUN_CODEX_INTEGRATION=1 CODEX_ARCHIVE_FIXTURE_THREAD_ID=<Thread ID> npm test -- --run tests/real-app-server.test.ts
 ```
 
 验证 launchd 模板语法：

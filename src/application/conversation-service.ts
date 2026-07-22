@@ -21,6 +21,7 @@ import {
   ConversationCore,
   gatewayUserMessageClientIdPrefix,
   type ConversationTarget,
+  type TurnArtifacts,
 } from "../conversation-core/index.js";
 import type { ModelSelectionService, ModelSelectionState } from "./model-selection-service.js";
 
@@ -90,8 +91,11 @@ export class ConversationService {
     });
   }
 
-  listSessions(target: ConversationTarget): Promise<Thread[]> {
-    return this.router.list(target);
+  listSessions(
+    target: ConversationTarget,
+    options: { archived?: boolean; searchTerm?: string } = {},
+  ): Promise<Thread[]> {
+    return this.router.list(target, options);
   }
 
   resume(target: ConversationTarget, selector: string): Promise<string> {
@@ -111,6 +115,31 @@ export class ConversationService {
       await this.router.newSession(target);
       this.models.clear(target);
     });
+  }
+
+  archive(target: ConversationTarget): Promise<string> {
+    return this.locked(target, async () => {
+      this.requireIdle(target);
+      const threadId = await this.router.archive(target);
+      this.models.clear(target);
+      return threadId;
+    });
+  }
+
+  unarchive(target: ConversationTarget, selector: string): Promise<string> {
+    return this.locked(target, async () => {
+      this.requireIdle(target);
+      const sessions = await this.router.list(target, { archived: true });
+      const selected = resolveThread(sessions, selector.trim(), "/unarchive");
+      const binding = await this.router.unarchive(target, selected.id);
+      this.models.clear(target);
+      return binding.threadId;
+    });
+  }
+
+  artifacts(target: ConversationTarget): TurnArtifacts | undefined {
+    const binding = this.router.current(target);
+    return binding ? this.core.artifacts(binding.threadId) : undefined;
   }
 
   listWorkspaces(): Workspace[] {
@@ -313,9 +342,9 @@ function normalizeInput(value: string | ConversationInput): UserInput[] {
   return input;
 }
 
-export function resolveThread(threads: Thread[], selector: string): Thread {
+export function resolveThread(threads: Thread[], selector: string, command = "/resume"): Thread {
   if (!selector) {
-    throw new Error("用法：/resume <序号、名称或 Thread ID>");
+    throw new Error(`用法：${command} <序号、名称或 Thread ID>`);
   }
   if (/^\d+$/.test(selector)) {
     const index = Number(selector) - 1;

@@ -63,6 +63,17 @@ class FakeTransport extends BaseTransport {
           }),
         ),
       );
+    } else if (decoded.method === "thread/archive") {
+      queueMicrotask(() =>
+        this.emitMessage(JSON.stringify({ id: decoded.id, result: {} })),
+      );
+    } else if (decoded.method === "thread/unarchive") {
+      queueMicrotask(() =>
+        this.emitMessage(JSON.stringify({
+          id: decoded.id,
+          result: { thread: { id: "thread-1" } },
+        })),
+      );
     } else if (decoded.method === "model/list") {
       queueMicrotask(() =>
         this.emitMessage(
@@ -272,7 +283,26 @@ describe("JsonRpcClient", () => {
       cwd: "/tmp/project",
       sourceKinds: ["cli", "vscode", "appServer"],
       useStateDbOnly: true,
+      archived: false,
     });
+  });
+
+  it("passes stable search/archive filters and uses explicit archive methods", async () => {
+    const transport = new FakeTransport();
+    const rpc = new JsonRpcClient(transport);
+    const client = new CodexAppServerClient(rpc, { sandbox: "workspace-write" });
+    await client.connect();
+
+    await client.listThreads("/tmp/project", { archived: true, searchTerm: "修复" });
+    await client.archiveThread("thread-1");
+    await client.unarchiveThread("thread-1");
+
+    expect(transport.sent.find((message) => message.method === "thread/list")?.params)
+      .toMatchObject({ archived: true, searchTerm: "修复" });
+    expect(transport.sent.find((message) => message.method === "thread/archive")?.params)
+      .toEqual({ threadId: "thread-1" });
+    expect(transport.sent.find((message) => message.method === "thread/unarchive")?.params)
+      .toEqual({ threadId: "thread-1" });
   });
 
   it("reads account rate limits through the stable App Server method", async () => {

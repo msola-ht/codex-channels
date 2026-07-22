@@ -9,10 +9,12 @@ import type { EventBus } from "../../event-bus/index.js";
 import type { TelegramAccessPolicy, Workspace } from "../../policy/index.js";
 import {
   formatMcpServers,
+  formatDiff,
   formatLimits,
   formatModels,
   formatPermissions,
   formatPlugins,
+  formatPlan,
   formatReasoningEfforts,
   formatSessions,
   formatSkills,
@@ -113,7 +115,9 @@ export class TelegramSurface {
           "首次消息自动接续当前 Workspace 最近的空闲 CLI/App Server 会话。",
           "",
           "/resume [序号|名称|Thread ID]",
+          "/sessions [搜索词] · /archived [搜索词]",
           "/new",
+          "/archive · /unarchive <序号|名称|Thread ID>",
           "/status",
           "/workspace [序号|ID|名称]",
           "/stop",
@@ -124,15 +128,47 @@ export class TelegramSurface {
           "/model [序号|模型 ID|名称]",
           "/effort [序号|档位]",
           "/skills · /mcp · /plugins · /usage · /limits · /permissions",
+          "/diff · /plan",
           "/goal [set <目标>|clear]",
           "/cancel",
         ].join("\n"),
       ),
     );
     this.bot.command("resume", (context) => this.resume(context));
+    this.bot.command("sessions", async (context) => {
+      const searchTerm = commandArguments(context);
+      const sessions = await this.service.listSessions(target(context), {
+        ...(searchTerm ? { searchTerm } : {}),
+      });
+      await this.replyChunks(
+        context,
+        formatSessions(sessions, this.service.status(target(context)).threadId, {
+          ...(searchTerm ? { searchTerm } : {}),
+        }),
+      );
+    });
+    this.bot.command("archived", async (context) => {
+      const searchTerm = commandArguments(context);
+      const sessions = await this.service.listSessions(target(context), {
+        archived: true,
+        ...(searchTerm ? { searchTerm } : {}),
+      });
+      await this.replyChunks(context, formatSessions(sessions, undefined, {
+        archived: true,
+        ...(searchTerm ? { searchTerm } : {}),
+      }));
+    });
     this.bot.command("new", async (context) => {
       await this.service.newSession(target(context));
       await context.reply("已退出当前会话，下一条普通消息将创建新的 Codex Thread。");
+    });
+    this.bot.command("archive", async (context) => {
+      const threadId = await this.service.archive(target(context));
+      await context.reply(`已归档 Codex Thread：${threadId}\n下一条普通消息将创建新会话。`);
+    });
+    this.bot.command("unarchive", async (context) => {
+      const threadId = await this.service.unarchive(target(context), commandArguments(context));
+      await context.reply(`已取消归档并切换到 Codex Thread：${threadId}`);
     });
     this.bot.command("status", async (context) => {
       await context.reply(formatStatus(this.service.status(target(context))));
@@ -203,6 +239,12 @@ export class TelegramSurface {
     });
     this.bot.command("permissions", async (context) => {
       await this.replyChunks(context, formatPermissions(await this.service.listPermissionProfiles(target(context))));
+    });
+    this.bot.command("diff", async (context) => {
+      await this.replyChunks(context, formatDiff(this.service.artifacts(target(context))));
+    });
+    this.bot.command("plan", async (context) => {
+      await this.replyChunks(context, formatPlan(this.service.artifacts(target(context))));
     });
     this.bot.command("goal", (context) => this.goal(context));
     this.bot.command("cancel", async (context) => {

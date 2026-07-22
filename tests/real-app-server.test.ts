@@ -12,6 +12,8 @@ import { StdioTransport } from "../src/codex-client/stdio-transport.js";
 
 const run = process.env.RUN_CODEX_INTEGRATION === "1";
 const suite = run ? describe : describe.skip;
+const archiveFixtureThreadId = process.env.CODEX_ARCHIVE_FIXTURE_THREAD_ID;
+const archiveTest = run && archiveFixtureThreadId ? it : it.skip;
 
 suite("real Codex App Server over Unix WebSocket", () => {
   const workdir = process.cwd();
@@ -57,7 +59,9 @@ suite("real Codex App Server over Unix WebSocket", () => {
 
   it("lists native threads without starting a turn", async () => {
     const threads = await client.listThreads(workdir);
+    const archived = await client.listThreads(workdir, { archived: true });
     expect(Array.isArray(threads)).toBe(true);
+    expect(Array.isArray(archived)).toBe(true);
     pino({ enabled: false }).info({ count: threads.length });
   });
 
@@ -84,6 +88,29 @@ suite("real Codex App Server over Unix WebSocket", () => {
       expect(unsubscribed.status).toBe("unsubscribed");
     } finally {
       await client.deleteThread(started.thread.id);
+    }
+  });
+
+  archiveTest("archives and restores an explicitly selected idle fixture thread", async () => {
+    const threadId = archiveFixtureThreadId!;
+    const fixture = await client.readThread(threadId);
+    expect(fixture.cwd).toBe(workdir);
+    expect(fixture.status.type).not.toBe("active");
+
+    let archived = false;
+    try {
+      await client.archiveThread(threadId);
+      archived = true;
+      const archivedThreads = await client.listThreads(workdir, { archived: true });
+      expect(archivedThreads.some((thread) => thread.id === threadId)).toBe(true);
+
+      const restored = await client.unarchiveThread(threadId);
+      archived = false;
+      expect(restored.thread.id).toBe(threadId);
+    } finally {
+      if (archived) {
+        await client.unarchiveThread(threadId);
+      }
     }
   });
 });

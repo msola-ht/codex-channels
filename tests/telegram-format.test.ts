@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatContextUsage,
+  formatDiff,
   formatModels,
+  formatPlan,
   formatReasoningEfforts,
   formatLimits,
   formatStatus,
@@ -46,6 +48,30 @@ describe("splitTelegramText", () => {
     expect(chunks.join("")).toBe(text);
     expect(chunks.every((chunk) => !/[\uD800-\uDBFF]$/.test(chunk))).toBe(true);
     expect(chunks.every((chunk) => !/^[\uDC00-\uDFFF]/.test(chunk))).toBe(true);
+  });
+});
+
+describe("turn artifact formatting", () => {
+  const artifacts = {
+    threadId: "thread-1",
+    turnId: "turn-1",
+    diff: "diff --git a/a.ts b/a.ts",
+    plan: {
+      explanation: "按顺序执行",
+      steps: [
+        { step: "检查", status: "completed" as const },
+        { step: "修改", status: "inProgress" as const },
+      ],
+    },
+  };
+
+  it("renders the latest diff", () => {
+    expect(formatDiff(artifacts)).toContain("diff --git a/a.ts b/a.ts");
+  });
+
+  it("renders plan state symbols", () => {
+    expect(formatPlan(artifacts)).toContain("● 检查");
+    expect(formatPlan(artifacts)).toContain("◐ 修改");
   });
 });
 

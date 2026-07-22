@@ -1,4 +1,11 @@
-import type { MessagePhase, ThreadTokenUsage } from "../codex-protocol/index.js";
+import type {
+  AccountUpdatedNotification,
+  McpServerStatusUpdatedNotification,
+  MessagePhase,
+  RateLimitSnapshot,
+  ThreadTokenUsage,
+  TurnPlanStep,
+} from "../codex-protocol/index.js";
 
 export interface ConversationTarget {
   surface: "telegram";
@@ -32,6 +39,16 @@ export interface OperationUpdate {
   exitCode?: number;
 }
 
+export interface TurnArtifacts {
+  threadId: string;
+  turnId: string;
+  diff?: string;
+  plan?: {
+    explanation: string | null;
+    steps: TurnPlanStep[];
+  };
+}
+
 export type OutputEvent =
   | { type: "turn.started"; target: ConversationTarget; threadId: string; turnId: string }
   | { type: "user.message"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string }
@@ -41,6 +58,9 @@ export type OutputEvent =
   | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: string; error?: string; tokenUsage?: ThreadTokenUsage }
   | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string }
   | { type: "connection.lost"; target: ConversationTarget; threadId: string; message: string }
+  | ({ type: "account.updated"; target: ConversationTarget } & AccountUpdatedNotification)
+  | { type: "account.rateLimits.updated"; target: ConversationTarget; rateLimits: RateLimitSnapshot }
+  | ({ type: "mcp.status.updated"; target: ConversationTarget } & McpServerStatusUpdatedNotification)
   | { type: "warning"; target: ConversationTarget; threadId?: string; message: string };
 
 export function isCriticalOutputEvent(event: OutputEvent): boolean {

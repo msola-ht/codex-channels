@@ -180,4 +180,44 @@ describe("SessionRouter", () => {
     expect(unsubscribed).toEqual([]);
     expect(router.current(target)?.threadId).toBe("current");
   });
+
+  it("passes search and archive filters to App Server thread discovery", async () => {
+    const calls: unknown[] = [];
+    const client = {
+      listThreads: async (_cwd: string, options: unknown) => {
+        calls.push(options);
+        return [thread("archived", { type: "idle" })];
+      },
+    } as unknown as CodexAppServerClient;
+    const router = new SessionRouter(client, new MemoryBindingStore(), registry);
+
+    await router.list(target, { archived: true, searchTerm: "修复" });
+
+    expect(calls).toEqual([{ archived: true, searchTerm: "修复" }]);
+  });
+
+  it("archives the current binding and resumes an unarchived thread", async () => {
+    const archived: string[] = [];
+    const unarchived: string[] = [];
+    const client = {
+      listThreads: async () => [],
+      startThread: async () => ({ thread: thread("current", { type: "idle" }) }),
+      archiveThread: async (threadId: string) => archived.push(threadId),
+      unarchiveThread: async (threadId: string) => {
+        unarchived.push(threadId);
+        return { thread: thread(threadId, { type: "idle" }) };
+      },
+      resumeThread: async (threadId: string) => ({ thread: thread(threadId, { type: "idle" }) }),
+    } as unknown as CodexAppServerClient;
+    const router = new SessionRouter(client, new MemoryBindingStore(), registry);
+    await router.ensure(target);
+
+    await expect(router.archive(target)).resolves.toBe("current");
+    expect(router.current(target)).toBeUndefined();
+    await router.unarchive(target, "archived");
+
+    expect(archived).toEqual(["current"]);
+    expect(unarchived).toEqual(["archived"]);
+    expect(router.current(target)?.threadId).toBe("archived");
+  });
 });
