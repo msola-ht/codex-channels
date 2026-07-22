@@ -172,9 +172,14 @@ codexc service install
 codexc service status
 codexc service restart
 codexc service stop
+codexc service uninstall
 ```
 
 `service install` 生成并启动 App Server 与 Gateway 两个独立的用户级 launchd 服务；重复执行时会先卸载旧实例，再加载新 plist。Linux 当前没有系统服务安装器，可使用 `codexc start` 前台运行。用户配置目录解析本身不依赖 macOS，但 Windows 尚未适配当前 Unix WebSocket Transport，暂不属于可运行平台。
+
+`service uninstall` 会停止并删除两个 launchd 服务配置，但保留 `~/.codex-connect` 下的配置、Workspace、SQLite 状态和日志；重新执行 `codexc service install` 即可恢复常驻服务。
+
+安装器会把 Node 与 Codex 的绝对路径及受控 `PATH` 写入 plist，不依赖 fnm、nvm 等交互式 Shell 初始化。安装完成后可直接运行 `codexc remote resume` 连接共享 App Server 并打开会话选择器。
 
 源码开发模式也保留原有 npm 命令：
 
@@ -191,6 +196,7 @@ npm run service:start
 npm run service:restart
 npm run service:status
 npm run service:stop
+npm run service:uninstall
 ```
 
 安装脚本只把渲染后的 plist 写入 `~/Library/LaunchAgents`，不会把 Token 写入 plist。npm CLI 模式读取 `~/.codex-connect/.env` 并把日志写入 `~/.codex-connect/runtime`；源码开发模式继续读取仓库 `.env`，日志位于其配置的 Socket 父目录。

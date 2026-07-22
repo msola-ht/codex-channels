@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join } from "node:path";
+import { delimiter, dirname, isAbsolute, join } from "node:path";
 
 import { parse } from "dotenv";
 import { packageDir, resolveConfiguredPath, runtimeConfig } from "./runtime-config.mjs";
@@ -28,6 +28,17 @@ const runtimeDir = dirname(socketPath);
 mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
 chmodSync(runtimeDir, 0o700);
 
+const codexBinary = resolveExecutable(env.CODEX_BINARY || "codex");
+const nodeBinary = realpathSync(process.execPath);
+const launchdPath = uniquePaths([
+  dirname(nodeBinary),
+  dirname(codexBinary),
+  "/usr/local/bin",
+  "/usr/bin",
+  "/bin",
+  "/usr/sbin",
+  "/sbin",
+]).join(delimiter);
 const values = {
   PROJECT_DIR: projectDir,
   CONFIG_DIR: runtime.dataDir,
@@ -36,8 +47,9 @@ const values = {
   WORKDIR: workdir,
   RUNTIME_DIR: runtimeDir,
   SOCKET_PATH: socketPath,
-  NODE_BINARY: process.execPath,
-  CODEX_BINARY: resolveExecutable(env.CODEX_BINARY || "codex"),
+  NODE_BINARY: nodeBinary,
+  CODEX_BINARY: codexBinary,
+  LAUNCHD_PATH: launchdPath,
 };
 const agentsDir = join(homedir(), "Library", "LaunchAgents");
 mkdirSync(agentsDir, { recursive: true });
@@ -51,13 +63,17 @@ for (const name of ["com.msola.codex-app-server", "com.msola.codex-gateway"]) {
   writeFileSync(destination, rendered, { mode: 0o600 });
   console.log(`已生成 ${destination}`);
 }
-console.log("配置已生成。使用 scripts/launchd-control.sh start 启动服务。");
+console.log("launchd 配置已生成。");
 
 function resolveExecutable(command) {
   if (isAbsolute(command)) {
     return realpathSync(command);
   }
-  return execFileSync("/usr/bin/which", [command], { encoding: "utf8" }).trim();
+  return realpathSync(execFileSync("/usr/bin/which", [command], { encoding: "utf8" }).trim());
+}
+
+function uniquePaths(paths) {
+  return [...new Set(paths)];
 }
 
 function xmlEscape(value) {

@@ -117,8 +117,8 @@ function service(args) {
     throw new Error("codexc service 当前仅支持 macOS launchd；Linux 可使用 codexc start，Windows Transport 尚未支持");
   }
   const [action, ...rest] = args;
-  if (rest.length > 0 || !["install", "start", "stop", "restart", "status"].includes(action)) {
-    throw new Error("用法：codexc service <install|start|stop|restart|status>");
+  if (rest.length > 0 || !["install", "uninstall", "start", "stop", "restart", "status"].includes(action)) {
+    throw new Error("用法：codexc service <install|uninstall|start|stop|restart|status>");
   }
   if (action === "install") {
     runScript("scripts/install-launchd.mjs", []);
@@ -223,7 +223,11 @@ function printHelp() {
   ws add [--id ID] [--name 名称]
                                将当前目录注册为 Workspace
   service install              安装并启动 macOS launchd 服务
-  service <start|stop|restart|status>
+  service uninstall            卸载 launchd 服务并保留用户数据
+  service start                启动 launchd 服务
+  service stop                 停止 launchd 服务
+  service restart              重启 launchd 服务
+  service status               查看 launchd 服务状态
   config                       显示用户配置路径
   version                      显示版本
 `);

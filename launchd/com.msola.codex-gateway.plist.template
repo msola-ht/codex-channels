@@ -18,6 +18,10 @@
     <string>__CONFIG_DIR__</string>
     <key>CODEX_CONNECT_ENV_FILE</key>
     <string>__ENV_PATH__</string>
+    <key>CODEX_BINARY</key>
+    <string>__CODEX_BINARY__</string>
+    <key>PATH</key>
+    <string>__LAUNCHD_PATH__</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>

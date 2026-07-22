@@ -101,6 +101,13 @@ describe("codexc CLI", () => {
     expect(result.stderr).toContain("用法：codexc config");
   });
 
+  it("documents the launchd uninstall command", () => {
+    const output = execFileSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
+
+    expect(output).toContain("service uninstall");
+    expect(output).toContain("保留用户数据");
+  });
+
   it("shows an explicitly configured environment file", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-"));
     temporaryDirectories.push(root);

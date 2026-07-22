@@ -38,6 +38,7 @@
     "service:setup": "npm run build && npm run launchd:install && zsh scripts/launchd-control.sh start",
     "service:start": "zsh scripts/launchd-control.sh start",
     "service:stop": "zsh scripts/launchd-control.sh stop",
+    "service:uninstall": "zsh scripts/launchd-control.sh uninstall",
     "service:restart": "zsh scripts/launchd-control.sh restart",
     "service:status": "zsh scripts/launchd-control.sh status"
   },
