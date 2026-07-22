@@ -34,14 +34,19 @@ describe("TelegramLifecycle", () => {
     const lifecycle = new TelegramLifecycle(
       bot as unknown as Bot,
       pino({ level: "silent" }),
-      { messages: [{ chatId: 123, text: "Gateway 已联通" }] },
+      {
+        messages: () => {
+          calls.push("messages");
+          return [{ chatId: 123, text: "Gateway 已联通" }];
+        },
+      },
     );
 
     lifecycle.start();
     await vi.waitFor(() => expect(calls).toContain("poll"));
     await lifecycle.stop();
 
-    expect(calls).toEqual(["init", "commands", "notify:123:Gateway 已联通", "poll"]);
+    expect(calls).toEqual(["init", "commands", "messages", "notify:123:Gateway 已联通", "poll"]);
   });
 
   it("keeps polling when a startup notification cannot be delivered", async () => {
@@ -67,7 +72,40 @@ describe("TelegramLifecycle", () => {
     const lifecycle = new TelegramLifecycle(
       bot as unknown as Bot,
       pino({ level: "silent" }),
-      { messages: [{ chatId: 123, text: "Gateway 已联通" }] },
+      { messages: () => [{ chatId: 123, text: "Gateway 已联通" }] },
+    );
+
+    lifecycle.start();
+    await vi.waitFor(() => expect(polling).toBe(true));
+    await lifecycle.stop();
+  });
+
+  it("keeps polling when startup notification generation fails", async () => {
+    let polling = false;
+    const bot = {
+      botInfo: { username: "test_bot" },
+      init: async () => undefined,
+      handleUpdate: async () => undefined,
+      api: {
+        setMyCommands: async () => true,
+        sendMessage: async () => ({ message_id: 1 }),
+        getUpdates: async (_options: unknown, signal: AbortSignal) => {
+          polling = true;
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return [];
+        },
+      },
+    };
+    const lifecycle = new TelegramLifecycle(
+      bot as unknown as Bot,
+      pino({ level: "silent" }),
+      {
+        messages: () => {
+          throw new Error("status unavailable");
+        },
+      },
     );
 
     lifecycle.start();

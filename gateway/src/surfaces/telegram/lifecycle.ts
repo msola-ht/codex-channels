@@ -28,7 +28,7 @@ const commands = [
 ];
 
 export interface TelegramStartupNotification {
-  messages: ReadonlyArray<{ chatId: number; text: string }>;
+  messages: () => ReadonlyArray<{ chatId: number; text: string }>;
 }
 
 export class TelegramLifecycle {
@@ -81,7 +81,19 @@ export class TelegramLifecycle {
     if (!this.startupNotification) {
       return;
     }
-    for (const { chatId, text } of this.startupNotification.messages) {
+    let messages: ReadonlyArray<{ chatId: number; text: string }>;
+    try {
+      messages = this.startupNotification.messages();
+    } catch (error) {
+      if (!this.stopping && !signal.aborted) {
+        this.logger.warn(
+          { message: error instanceof Error ? error.message : String(error) },
+          "Telegram 启动联通通知生成失败，不影响 Long Polling",
+        );
+      }
+      return;
+    }
+    for (const { chatId, text } of messages) {
       try {
         for (const chunk of splitTelegramText(text)) {
           await this.bot.api.sendMessage(chatId, chunk, {}, signal as never);

@@ -58,13 +58,16 @@ export class TelegramSurface {
     this.interactions = new TelegramInteractionPort(this.bot, logger, apiExecutor);
     this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor);
     this.lifecycle = new TelegramLifecycle(this.bot, logger, {
-      messages: [...startupRecipients].map((chatId) => ({
-        chatId,
-        text: formatStartupNotification(
-          workspaces,
-          this.service.status({ surface: "telegram", conversationId: String(chatId) }).workspaceId,
-        ),
-      })),
+      messages: () => [...startupRecipients].map((chatId) => {
+        const status = this.service.status({
+          surface: "telegram",
+          conversationId: String(chatId),
+        });
+        return {
+          chatId,
+          text: formatStartupNotification(workspaces, status),
+        };
+      }),
     });
     this.unsubscribeOutput = output.subscribe("telegram", (event) => this.outbox.handle(event));
     this.registerHandlers();

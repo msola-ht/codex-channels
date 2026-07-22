@@ -99,12 +99,19 @@ describe("formatStartupNotification", () => {
         { id: "main", name: "Main", cwd: "/workspace/main" },
         { id: "docs", name: "Docs", cwd: "/workspace/docs" },
       ],
-      "main",
+      {
+        workspaceId: "main",
+        model: "gpt-main",
+        effort: "high",
+        modelPending: false,
+      },
     );
 
     expect(text).toContain("Codex Connect Gateway 已联通");
     expect(text).toContain("Codex App Server：已连接");
     expect(text).toContain("当前 Workspace：Main · main");
+    expect(text).toContain("当前模型：gpt-main");
+    expect(text).toContain("思考强度：high");
     expect(text).toContain("1. Main · main ← 当前");
     expect(text).toContain("2. Docs · docs");
     expect(text).toContain("/workspace/docs");

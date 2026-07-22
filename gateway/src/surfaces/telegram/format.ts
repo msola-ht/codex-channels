@@ -230,19 +230,21 @@ export function formatWorkspaces(workspaces: Workspace[], currentWorkspaceId: st
 
 export function formatStartupNotification(
   workspaces: Workspace[],
-  currentWorkspaceId: string,
+  status: Pick<ConversationStatus, "workspaceId" | "model" | "effort" | "modelPending">,
 ): string {
-  const currentWorkspace = workspaces.find((workspace) => workspace.id === currentWorkspaceId);
+  const currentWorkspace = workspaces.find((workspace) => workspace.id === status.workspaceId);
   if (!currentWorkspace) {
-    throw new Error(`当前 Workspace 不存在：${currentWorkspaceId}`);
+    throw new Error(`当前 Workspace 不存在：${status.workspaceId}`);
   }
   return [
     "Codex Connect Gateway 已联通。",
     "Codex App Server：已连接",
     `当前 Workspace：${currentWorkspace.name} · ${currentWorkspace.id}`,
     `工作目录：${currentWorkspace.cwd}`,
+    `当前模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
+    `思考强度：${status.effort ?? "模型默认"}`,
     "",
-    formatWorkspaces(workspaces, currentWorkspaceId),
+    formatWorkspaces(workspaces, status.workspaceId),
   ].join("\n");
 }
 
