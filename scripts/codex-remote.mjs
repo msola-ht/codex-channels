@@ -1,13 +1,13 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { isAbsolute, join } from "node:path";
 
 import { parse } from "dotenv";
+import { resolveConfiguredPath, runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
-const projectDir = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), ".."));
-const env = parse(readFileSync(join(projectDir, ".env")));
+const runtime = runtimeConfig();
+const env = parse(readFileSync(runtime.envPath));
 const { workspaces, defaultWorkspace } = readWorkspaceConfig(env);
 const passthrough = process.argv.slice(2);
 const workspaceFlag = passthrough.indexOf("--workspace");
@@ -21,11 +21,15 @@ if (workspaceFlag !== -1) {
   passthrough.splice(workspaceFlag, 2);
 }
 const workdir = workspace.cwd;
-const socketPath = resolve(env.CODEX_SOCKET_PATH || join(projectDir, ".runtime/codex-app-server.sock"));
+const socketPath = resolveConfiguredPath(
+  env.CODEX_SOCKET_PATH,
+  runtime.dataDir,
+  join(runtime.dataDir, "runtime", "codex-app-server.sock"),
+);
 const configuredBinary = env.CODEX_BINARY || "codex";
 const codexBinary = isAbsolute(configuredBinary)
   ? realpathSync(configuredBinary)
-  : execFileSync("/usr/bin/which", [configuredBinary], { encoding: "utf8" }).trim();
+  : configuredBinary;
 const result = spawnSync(
   codexBinary,
   ["--remote", `unix://${socketPath}`, "-C", workdir, ...passthrough],

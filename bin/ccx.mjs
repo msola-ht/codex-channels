@@ -1,0 +1,230 @@
+#!/usr/bin/env node
+
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+import { parse } from "dotenv";
+
+import {
+  initializeUserData,
+  packageDir,
+  requireUserConfig,
+  runtimeConfig,
+  userDataDir,
+} from "../scripts/runtime-config.mjs";
+import { addWorkspaceToEnv, readWorkspaceConfig } from "../scripts/workspace-config.mjs";
+
+const [command = "help", ...args] = process.argv.slice(2);
+
+try {
+  switch (command) {
+    case "help":
+    case "--help":
+    case "-h":
+      printHelp();
+      break;
+    case "--version":
+    case "-v":
+    case "version":
+      printVersion(args);
+      break;
+    case "init":
+      initialize(args);
+      break;
+    case "start":
+      requireNoArguments(args, "用法：ccx start");
+      runScript("scripts/dev-all.mjs", args, { CODEX_CONNECT_GATEWAY_ENTRY: "dist" });
+      break;
+    case "gateway":
+      runGateway(args);
+      break;
+    case "remote":
+      runScript("scripts/codex-remote.mjs", args);
+      break;
+    case "ws":
+    case "workspace":
+      workspace(args);
+      break;
+    case "service":
+      service(args);
+      break;
+    case "config":
+      showConfig(args);
+      break;
+    default:
+      throw new Error(`未知命令：${command}\n运行 ccx --help 查看用法`);
+  }
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+}
+
+function initialize(args) {
+  if (args.length > 0) {
+    throw new Error("用法：ccx init");
+  }
+  const result = initializeUserData({ cwd: process.cwd() });
+  console.log(result.created ? "Codex Connect 已初始化。" : "Codex Connect 已经初始化。");
+  console.log(`配置目录：${result.dataDir}`);
+  console.log(`配置文件：${result.envPath}`);
+  if (result.created) {
+    console.log(`初始 Workspace：${result.workspace}`);
+    console.log("请填写 TELEGRAM_BOT_TOKEN 和 TELEGRAM_ALLOWED_USER_IDS，然后运行 ccx start。");
+  }
+}
+
+function runGateway(args) {
+  if (args.length > 0) {
+    throw new Error("用法：ccx gateway");
+  }
+  const runtime = configuredEnvironment();
+  run(process.execPath, [join(packageDir, "dist/gateway/src/main.js")], runtime.environment, runtime.dataDir);
+}
+
+function workspace(args) {
+  const runtime = requireUserConfig();
+  if (args[0] === "add") {
+    const options = parseWorkspaceAddOptions(args.slice(1));
+    const result = addWorkspaceToEnv({
+      envPath: runtime.envPath,
+      cwd: process.cwd(),
+      ...(options.id ? { id: options.id } : {}),
+      ...(options.name ? { name: options.name } : {}),
+    });
+    console.log(result.added ? "Workspace 已添加。" : "Workspace 已存在。");
+    console.log(`${result.workspace.name} (${result.workspace.id})`);
+    console.log(result.workspace.cwd);
+    if (result.added) {
+      console.log("如果 Gateway 正在运行，请重启后再从 Telegram 切换。");
+    }
+    return;
+  }
+  if (args.length > 0) {
+    throw new Error("用法：ccx ws [add [--id ID] [--name 名称]]");
+  }
+  const env = parse(readFileSync(runtime.envPath, "utf8"));
+  const { workspaces, defaultWorkspace } = readWorkspaceConfig(env);
+  console.log(`Workspace（${workspaces.length}）：`);
+  workspaces.forEach((item, index) => {
+    console.log(`${index + 1}. ${item.name} · ${item.id}${item.id === defaultWorkspace.id ? " ← 默认" : ""}`);
+    console.log(`   ${item.cwd}`);
+  });
+}
+
+function service(args) {
+  if (process.platform !== "darwin") {
+    throw new Error("ccx service 当前仅支持 macOS launchd；Linux 可使用 ccx start，Windows Transport 尚未支持");
+  }
+  const [action, ...rest] = args;
+  if (rest.length > 0 || !["install", "start", "stop", "restart", "status"].includes(action)) {
+    throw new Error("用法：ccx service <install|start|stop|restart|status>");
+  }
+  if (action === "install") {
+    runScript("scripts/install-launchd.mjs", []);
+    run("/bin/zsh", [join(packageDir, "scripts/launchd-control.sh"), "stop"], configuredEnvironment().environment);
+    run("/bin/zsh", [join(packageDir, "scripts/launchd-control.sh"), "start"], configuredEnvironment().environment);
+    return;
+  }
+  run("/bin/zsh", [join(packageDir, "scripts/launchd-control.sh"), action], configuredEnvironment().environment);
+}
+
+function showConfig(args) {
+  requireNoArguments(args, "用法：ccx config");
+  const explicitEnvFile = process.env.CODEX_CONNECT_ENV_FILE?.trim();
+  const runtime = explicitEnvFile
+    ? runtimeConfig()
+    : { dataDir: userDataDir(), envPath: join(userDataDir(), ".env") };
+  console.log(`用户目录：${runtime.dataDir}`);
+  console.log(`配置文件：${runtime.envPath}`);
+}
+
+function runScript(relativePath, args, additionalEnvironment = {}) {
+  const runtime = configuredEnvironment();
+  run(
+    process.execPath,
+    [join(packageDir, relativePath), ...args],
+    { ...runtime.environment, ...additionalEnvironment },
+    runtime.dataDir,
+  );
+}
+
+function configuredEnvironment() {
+  const { dataDir, envPath } = requireUserConfig();
+  const values = parse(readFileSync(envPath, "utf8"));
+  return {
+    dataDir,
+    environment: {
+      ...values,
+      ...process.env,
+      CODEX_CONNECT_HOME: dataDir,
+      CODEX_CONNECT_ENV_FILE: envPath,
+      DOTENV_CONFIG_PATH: envPath,
+    },
+  };
+}
+
+function run(executable, args, environment, cwd) {
+  const result = spawnSync(executable, args, {
+    stdio: "inherit",
+    env: environment,
+    ...(cwd ? { cwd } : {}),
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.signal) {
+    process.kill(process.pid, result.signal);
+    return;
+  }
+  if (result.status !== 0) {
+    throw new Error(`子命令执行失败：exit=${result.status ?? 1}`);
+  }
+}
+
+function parseWorkspaceAddOptions(args) {
+  const result = {};
+  for (let index = 0; index < args.length; index += 1) {
+    const option = args[index];
+    if (!new Set(["--id", "--name"]).has(option)) {
+      throw new Error(`未知参数：${option}`);
+    }
+    const value = args[index + 1];
+    if (!value) {
+      throw new Error(`${option} 缺少值`);
+    }
+    result[option.slice(2)] = value;
+    index += 1;
+  }
+  return result;
+}
+
+function printVersion(args) {
+  requireNoArguments(args, "用法：ccx version");
+  const metadata = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
+  console.log(metadata.version);
+}
+
+function requireNoArguments(args, usage) {
+  if (args.length > 0) {
+    throw new Error(usage);
+  }
+}
+
+function printHelp() {
+  console.log(`Codex Connect CLI
+
+用法：ccx <命令>
+
+  init                         初始化 ~/.codex-connect
+  start                        前台启动 App Server 与 Gateway
+  remote [--workspace ID]      启动共享 App Server 的 Codex TUI
+  ws                           列出 Workspace
+  ws add [--id ID] [--name 名称]
+                               将当前目录注册为 Workspace
+  service install              安装并启动 macOS launchd 服务
+  service <start|stop|restart|status>
+  config                       显示用户配置路径
+  version                      显示版本
+`);
+}

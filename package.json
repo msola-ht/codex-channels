@@ -2,13 +2,28 @@
   "name": "codex-connect-gateway",
   "version": "0.2.0",
   "private": true,
+  "description": "Telegram gateway for a shared Codex App Server",
   "type": "module",
+  "bin": {
+    "ccx": "bin/ccx.mjs",
+    "codex-connect": "bin/ccx.mjs"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "gateway/src/codex-protocol/version.json",
+    "launchd/",
+    "scripts/",
+    ".env.example",
+    "README.md"
+  ],
   "engines": {
     "node": ">=22.13.0"
   },
   "scripts": {
     "prebuild": "node scripts/clean-dist.mjs",
     "build": "tsc -p tsconfig.build.json",
+    "prepare": "node scripts/prepare-package.mjs",
     "check": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx gateway/src/main.ts",
     "dev:all": "node scripts/dev-all.mjs",

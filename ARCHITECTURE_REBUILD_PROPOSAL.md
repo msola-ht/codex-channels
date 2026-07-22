@@ -469,6 +469,12 @@ AppServerPool
 
 不为每个 Thread 单独启动 App Server。
 
+### 9.1.1 本机安装与运行目录
+
+正式本机入口通过 npm 安装为 `ccx`（同时提供 `codex-connect` 长别名）。代码位于 npm 包安装目录，用户配置与运行状态使用 Node `os.homedir()` 定位到 `~/.codex-connect`，避免 npm 升级覆盖 Token、Workspace Registry、SQLite、Socket 或日志。源码开发模式仍使用仓库内 `.env`，两种模式共用同一 Gateway 实现和 App Server 协议。
+
+`~/.codex-connect` 权限为 `0700`，`.env` 和 SQLite 为 `0600`。该目录只保存 Gateway 配置、最小业务绑定与进程运行文件，不保存或复制 Codex Thread/Turn/Item 历史。macOS 可通过 `ccx service install` 安装独立 launchd 服务；Linux 暂用 `ccx start`。Windows 可以复用用户目录约定，但当前 Unix WebSocket Transport 尚未适配，不能宣称运行支持。未来的平台 Transport 和系统服务适配不得改变配置目录与模块边界。
+
 ### 9.2 可替换存储
 
 ```ts

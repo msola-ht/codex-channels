@@ -25,12 +25,57 @@ App Server 与 Gateway 是两个独立进程。Gateway 停止不会终止 App Se
 
 ## 环境要求
 
-- macOS（launchd 配置目前仅支持 macOS）
+- macOS 或 Linux（launchd 配置仅支持 macOS；Windows Transport 尚未适配）
 - Node.js 22.13+
 - 已安装并登录的 `codex-cli 0.145.0`
 - Telegram Bot Token 和允许使用的 Telegram 用户 ID
 
-## 安装
+## npm CLI 安装
+
+项目以 Node.js npm 包提供两个等价命令：短命令 `ccx` 和完整命令 `codex-connect`。本机从仓库安装：
+
+```bash
+npm install -g .
+```
+
+在第一个目标项目目录初始化：
+
+```bash
+cd /absolute/path/to/first-project
+ccx init
+```
+
+`ccx init` 使用 Node `os.homedir()` 在当前系统用户主目录创建 `.codex-connect`，不会把配置写进全局 npm 包：
+
+```text
+~/.codex-connect/
+├── .env                         # 0600，Token、Workspace 和运行配置
+├── data/gateway.sqlite3         # Telegram Workspace/Thread 最小绑定
+└── runtime/
+    ├── codex-app-server.sock
+    └── *.log
+```
+
+编辑 `~/.codex-connect/.env`，填写 `TELEGRAM_BOT_TOKEN` 和 `TELEGRAM_ALLOWED_USER_IDS`，然后前台运行：
+
+```bash
+ccx start
+```
+
+常用命令：
+
+```bash
+ccx config                       # 显示用户配置路径
+ccx ws                           # 列出 Workspace
+ccx ws add                       # 将当前目录注册为 Workspace
+ccx ws add --id docs --name Docs
+ccx remote                       # 启动默认 Workspace 的原生 Codex TUI
+ccx remote --workspace docs
+```
+
+`CODEX_CONNECT_HOME` 可以覆盖默认用户目录，主要用于隔离测试或多 Profile；正常使用无需设置。
+
+## 源码开发安装
 
 ```bash
 npm ci
@@ -56,7 +101,7 @@ LOG_LEVEL=info
 
 `CODEX_WORKSPACES_JSON` 必须是非空 JSON 数组；每项包含唯一的 `id`、展示名称 `name` 和已存在的绝对目录 `cwd`。`CODEX_DEFAULT_WORKSPACE` 必须引用其中一个 ID。Telegram 只能通过 `/workspace` 选择这些预配置目录，不能通过聊天提交任意工作目录。Socket 父目录由安装脚本创建并设为 `0700`。
 
-也可以从目标项目目录直接注册当前目录，无需手工编辑 JSON：
+源码开发模式也可以从目标项目目录直接注册当前目录，无需手工编辑 JSON：
 
 ```bash
 cd /absolute/path/to/target-project
@@ -118,7 +163,20 @@ npm run remote -- --workspace another
 codex --remote unix:///absolute/path/codex-app-server.sock -C /absolute/workdir
 ```
 
-## launchd 常驻运行
+## launchd 常驻运行（macOS）
+
+npm CLI 安装后使用：
+
+```bash
+ccx service install
+ccx service status
+ccx service restart
+ccx service stop
+```
+
+`service install` 生成并启动 App Server 与 Gateway 两个独立的用户级 launchd 服务；重复执行时会先卸载旧实例，再加载新 plist。Linux 当前没有系统服务安装器，可使用 `ccx start` 前台运行。用户配置目录解析本身不依赖 macOS，但 Windows 尚未适配当前 Unix WebSocket Transport，暂不属于可运行平台。
+
+源码开发模式也保留原有 npm 命令：
 
 首次安装并启动只需要：
 
@@ -135,7 +193,7 @@ npm run service:status
 npm run service:stop
 ```
 
-安装脚本只把渲染后的 plist 写入 `~/Library/LaunchAgents`，Token 仍保留在项目中已忽略的 `.env`，不会写入 plist。日志位于 Socket 父目录。
+安装脚本只把渲染后的 plist 写入 `~/Library/LaunchAgents`，不会把 Token 写入 plist。npm CLI 模式读取 `~/.codex-connect/.env` 并把日志写入 `~/.codex-connect/runtime`；源码开发模式继续读取仓库 `.env`，日志位于其配置的 Socket 父目录。
 
 ## Telegram 命令
 
@@ -204,4 +262,4 @@ RUN_CODEX_INTEGRATION=1 npm test -- --run gateway/tests/real-app-server.test.ts
 
 ## 当前状态
 
-仓库已经切换为单一 TypeScript Gateway；旧 Python Runtime、测试、smoke 脚本和打包入口已移除。CLI/Remote TUI 与 Telegram 双向恢复原生 Codex Thread 已完成真实验证。Gateway 支持从服务端预配置列表安全切换 Workspace，所有 Thread 查询和 Turn 均使用所选 Workspace 的 `cwd`。前后台常驻服务暂未启用，当前使用 `npm run dev:all` 运行。
+仓库已经切换为单一 TypeScript Gateway；旧 Python Runtime、测试、smoke 脚本和打包入口已移除。CLI/Remote TUI 与 Telegram 双向恢复原生 Codex Thread 已完成真实验证。Gateway 支持从服务端预配置列表安全切换 Workspace，所有 Thread 查询和 Turn 均使用所选 Workspace 的 `cwd`。正式本机入口为 npm CLI `ccx`，运行数据位于 `~/.codex-connect`；源码开发仍可使用项目内 `.env` 和 `npm run dev:all`。macOS 支持 `ccx service install` 安装两个独立 launchd 服务。

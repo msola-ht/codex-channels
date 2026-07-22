@@ -1,18 +1,26 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, isAbsolute, join } from "node:path";
 
 import { parse } from "dotenv";
+import { packageDir, resolveConfiguredPath, runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
-const projectDir = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), ".."));
-const envPath = join(projectDir, ".env");
+if (process.platform !== "darwin") {
+  throw new Error("launchd 安装仅支持 macOS");
+}
+const projectDir = packageDir;
+const runtime = runtimeConfig();
+const envPath = runtime.envPath;
 const env = parse(readFileSync(envPath));
 const { defaultWorkspace } = readWorkspaceConfig(env);
 const workdir = defaultWorkspace.cwd;
-const socketPath = resolve(env.CODEX_SOCKET_PATH || join(projectDir, ".runtime/codex-app-server.sock"));
+const socketPath = resolveConfiguredPath(
+  env.CODEX_SOCKET_PATH,
+  runtime.dataDir,
+  join(runtime.dataDir, "runtime", "codex-app-server.sock"),
+);
 if (!isAbsolute(socketPath)) {
   throw new Error("CODEX_SOCKET_PATH 必须是绝对路径");
 }
@@ -22,6 +30,9 @@ chmodSync(runtimeDir, 0o700);
 
 const values = {
   PROJECT_DIR: projectDir,
+  CONFIG_DIR: runtime.dataDir,
+  ENV_PATH: envPath,
+  CLI_ENTRY: join(projectDir, "bin", "ccx.mjs"),
   WORKDIR: workdir,
   RUNTIME_DIR: runtimeDir,
   SOCKET_PATH: socketPath,

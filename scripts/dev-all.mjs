@@ -1,21 +1,28 @@
 import { execFileSync, spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync } from "node:fs";
 import { createConnection } from "node:net";
-import { dirname, isAbsolute, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, isAbsolute, join } from "node:path";
 
 import { parse } from "dotenv";
 import WebSocket from "ws";
+import { packageDir, resolveConfiguredPath, runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
-const projectDir = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), ".."));
-const env = parse(readFileSync(join(projectDir, ".env")));
+const projectDir = packageDir;
+const runtime = runtimeConfig();
+const env = parse(readFileSync(runtime.envPath));
 const { defaultWorkspace } = readWorkspaceConfig(env);
 const workdir = defaultWorkspace.cwd;
-const socketPath = resolve(env.CODEX_SOCKET_PATH || join(projectDir, ".runtime/codex-app-server.sock"));
+const socketPath = resolveConfiguredPath(
+  env.CODEX_SOCKET_PATH,
+  runtime.dataDir,
+  join(runtime.dataDir, "runtime", "codex-app-server.sock"),
+);
 const runtimeDir = dirname(socketPath);
 const codexBinary = resolveExecutable(env.CODEX_BINARY || "codex");
-const tsxEntry = join(projectDir, "node_modules", "tsx", "dist", "cli.mjs");
+const gatewayEntry = process.env.CODEX_CONNECT_GATEWAY_ENTRY === "dist"
+  ? [join(projectDir, "dist/gateway/src/main.js")]
+  : [join(projectDir, "node_modules", "tsx", "dist", "cli.mjs"), "gateway/src/main.ts"];
 
 mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
 chmodSync(runtimeDir, 0o700);
@@ -35,10 +42,10 @@ if (await socketAcceptsWebSocket(socketPath)) {
   console.log(`Codex App Server 已启动：${socketPath}`);
 }
 
-const gateway = spawn(process.execPath, [tsxEntry, "gateway/src/main.ts"], {
-  cwd: projectDir,
+const gateway = spawn(process.execPath, gatewayEntry, {
+  cwd: runtime.dataDir,
   stdio: "inherit",
-  env: process.env,
+  env: { ...process.env, DOTENV_CONFIG_PATH: runtime.envPath },
 });
 
 let stopping = false;

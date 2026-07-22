@@ -11,7 +11,8 @@
 
 - 当前仓库以 TypeScript 模块化 Gateway 为唯一实现。
 - 旧 Python Runtime、测试、smoke 脚本和打包入口已在用户确认后移除。
-- Codex App Server 与 Gateway 的前后台常驻方式尚未最终启用；当前可使用 `npm run dev:all` 验证和运行。
+- 正式本机入口为 npm CLI `ccx`，配置与运行状态位于用户主目录 `.codex-connect`；源码开发可继续使用仓库内 `.env` 和 `npm run dev:all`。
+- macOS 可用 `ccx service install` 安装 App Server 与 Gateway 两个独立 launchd 服务；Linux 当前使用 `ccx start` 前台运行，Windows Transport 尚未实现。
 - 不重新引入复制 Codex 会话内容的自定义会话数据库、Python Bridge 或替代 Codex Remote TUI 的本地 CLI。
 - 当前使用 SQLite StateStore 只保存 Telegram conversation 与 Codex Thread 的最小绑定，以便 Gateway 重启后恢复当前会话。
 
@@ -113,6 +114,7 @@ Surface Adapters -> Application/Core <- Codex Client
 ## 数据持久化规则
 
 - 当前单机 Gateway 使用 SQLite StateStore 保存 chat-to-thread 绑定；这是为重启恢复当前会话明确选择的项目行为。
+- npm 安装模式下 SQLite、配置、Socket 和日志位于 `~/.codex-connect`；不得把用户状态写入可被包升级替换的 npm 安装目录。
 - StateStore 必须保持可替换，只保存恢复绑定所需的最小字段。
 - 持久化内容仅限用户、Workspace、Thread ID、权限和必要偏好。
 - 不持久化 Codex 消息正文、Turn/Item 历史或 rollout 副本。

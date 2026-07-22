@@ -1,12 +1,10 @@
-import { realpathSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 
+import { runtimeConfig } from "./runtime-config.mjs";
 import { addWorkspaceToEnv } from "./workspace-config.mjs";
 
-const projectDir = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), ".."));
 const options = parseOptions(process.argv.slice(2));
-const envPath = resolve(options.envFile ?? join(projectDir, ".env"));
+const envPath = resolve(options.envFile ?? runtimeConfig().envPath);
 const cwd = resolve(options.cwd ?? process.env.INIT_CWD ?? process.cwd());
 
 const result = addWorkspaceToEnv({
