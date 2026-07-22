@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "codex-tg-bridge"
+version = "0.1.0"
+description = "Bidirectional bridge between Telegram and Codex App Server"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "python-dotenv>=1.2.2,<2",
+    "python-telegram-bot>=22.8,<23",
+]
+
+[project.scripts]
+codex-tg-bridge = "codex_tg_bridge.main:main"
+codex-tg = "codex_tg_bridge.local.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/codex_tg_bridge"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
