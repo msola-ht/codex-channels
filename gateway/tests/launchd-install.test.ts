@@ -89,7 +89,7 @@ describe("launchd installer", () => {
     writeFileSync(gatewayPlist, "gateway");
     writeFileSync(userConfig, "preserved=true\n");
     const fakeLaunchctl = join(binDir, "launchctl");
-    writeFileSync(fakeLaunchctl, "#!/bin/sh\nexit 0\n");
+    writeFileSync(fakeLaunchctl, "#!/bin/sh\n[ \"$1\" = print ] && exit 1\nexit 0\n");
     chmodSync(fakeLaunchctl, 0o755);
 
     const output = execFileSync("/bin/zsh", [resolve("scripts/launchd-control.sh"), "uninstall"], {
@@ -109,16 +109,43 @@ describe("launchd installer", () => {
     const agentsDir = join(root, "Library/LaunchAgents");
     const binDir = join(root, "bin");
     const launchctlLog = join(root, "launchctl.log");
+    const launchctlState = join(root, "launchctl-state");
     mkdirSync(agentsDir, { recursive: true });
     mkdirSync(binDir);
+    mkdirSync(launchctlState);
     const fakeLaunchctl = join(binDir, "launchctl");
-    writeFileSync(fakeLaunchctl, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$LAUNCHCTL_LOG\"\n");
+    writeFileSync(fakeLaunchctl, [
+      "#!/bin/sh",
+      "printf '%s\\n' \"$*\" >> \"$LAUNCHCTL_LOG\"",
+      "command=$1",
+      "shift",
+      "case \"$command\" in",
+      "  print)",
+      "    label=${1##*/}",
+      "    test -f \"$LAUNCHCTL_STATE/$label\"",
+      "    ;;",
+      "  bootstrap)",
+      "    label=${2##*/}",
+      "    label=${label%.plist}",
+      "    touch \"$LAUNCHCTL_STATE/$label\"",
+      "    ;;",
+      "  bootout)",
+      "    label=${1##*/}",
+      "    rm -f \"$LAUNCHCTL_STATE/$label\"",
+      "    ;;",
+      "  kickstart)",
+      "    label=${2##*/}",
+      "    test -f \"$LAUNCHCTL_STATE/$label\"",
+      "    ;;",
+      "esac",
+    ].join("\n"));
     chmodSync(fakeLaunchctl, 0o755);
     const environment = {
       ...process.env,
       HOME: root,
       PATH: `${binDir}:/usr/bin:/bin`,
       LAUNCHCTL_LOG: launchctlLog,
+      LAUNCHCTL_STATE: launchctlState,
     };
     const script = resolve("scripts/launchd-control.sh");
 
@@ -127,6 +154,7 @@ describe("launchd installer", () => {
     writeFileSync(launchctlLog, "");
     const stopped = execFileSync("/bin/zsh", [script, "stop"], { env: environment, encoding: "utf8" });
     const stopCalls = readFileSync(launchctlLog, "utf8");
+    execFileSync("/bin/zsh", [script, "start"], { env: environment, encoding: "utf8" });
     writeFileSync(launchctlLog, "");
     const restarted = execFileSync("/bin/zsh", [script, "restart"], { env: environment, encoding: "utf8" });
     const restartCalls = readFileSync(launchctlLog, "utf8");
@@ -137,8 +165,8 @@ describe("launchd installer", () => {
     expect(startCalls).toContain("bootstrap");
     expect(startCalls).toContain("kickstart -k");
     expect(stopCalls).toContain("bootout");
-    expect(restartCalls).toContain("bootout");
-    expect(restartCalls).toContain("bootstrap");
+    expect(restartCalls).not.toContain("bootout");
+    expect(restartCalls).not.toContain("bootstrap");
     expect(restartCalls).toContain("kickstart -k");
   });
 });

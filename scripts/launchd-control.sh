@@ -7,33 +7,76 @@ agents_dir="$HOME/Library/LaunchAgents"
 app_label="com.msola.codex-app-server"
 gateway_label="com.msola.codex-gateway"
 
+job_loaded() {
+  launchctl print "$user_domain/$1" >/dev/null 2>&1
+}
+
+wait_until_unloaded() {
+  local label="$1"
+  local attempt
+  for attempt in {1..50}; do
+    if ! job_loaded "$label"; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  print -u2 "等待 launchd Job 卸载超时：$label"
+  return 1
+}
+
+stop_job() {
+  local label="$1"
+  if ! job_loaded "$label"; then
+    return 0
+  fi
+  launchctl bootout "$user_domain/$label" 2>/dev/null || true
+  wait_until_unloaded "$label"
+}
+
+ensure_loaded() {
+  local label="$1"
+  local plist="$2"
+  local attempt
+  if job_loaded "$label"; then
+    return 0
+  fi
+  for attempt in {1..20}; do
+    if launchctl bootstrap "$user_domain" "$plist" 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  launchctl bootstrap "$user_domain" "$plist"
+}
+
+start_job() {
+  local label="$1"
+  local plist="$2"
+  ensure_loaded "$label" "$plist"
+  launchctl kickstart -k "$user_domain/$label"
+}
+
 case "$action" in
   start)
-    launchctl bootstrap "$user_domain" "$agents_dir/$app_label.plist" 2>/dev/null || true
-    launchctl bootstrap "$user_domain" "$agents_dir/$gateway_label.plist" 2>/dev/null || true
-    launchctl kickstart -k "$user_domain/$app_label"
-    launchctl kickstart -k "$user_domain/$gateway_label"
+    start_job "$app_label" "$agents_dir/$app_label.plist"
+    start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
     print "Codex App Server 与 Gateway 已启动。"
     ;;
   stop)
-    launchctl bootout "$user_domain/$gateway_label" 2>/dev/null || true
-    launchctl bootout "$user_domain/$app_label" 2>/dev/null || true
+    stop_job "$gateway_label"
+    stop_job "$app_label"
     print "Codex App Server 与 Gateway 已停止。"
     ;;
   uninstall)
-    launchctl bootout "$user_domain/$gateway_label" 2>/dev/null || true
-    launchctl bootout "$user_domain/$app_label" 2>/dev/null || true
+    stop_job "$gateway_label"
+    stop_job "$app_label"
     /bin/rm -f "$agents_dir/$gateway_label.plist" "$agents_dir/$app_label.plist"
     print "Codex App Server 与 Gateway launchd 服务已卸载。"
     print "用户配置与运行数据保留在 ~/.codex-connect。"
     ;;
   restart)
-    launchctl bootout "$user_domain/$gateway_label" 2>/dev/null || true
-    launchctl bootout "$user_domain/$app_label" 2>/dev/null || true
-    launchctl bootstrap "$user_domain" "$agents_dir/$app_label.plist"
-    launchctl bootstrap "$user_domain" "$agents_dir/$gateway_label.plist"
-    launchctl kickstart -k "$user_domain/$app_label"
-    launchctl kickstart -k "$user_domain/$gateway_label"
+    start_job "$app_label" "$agents_dir/$app_label.plist"
+    start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
     print "Codex App Server 与 Gateway 已重启。"
     ;;
   status)
