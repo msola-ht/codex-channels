@@ -234,7 +234,7 @@ describe("TelegramOutbox", () => {
     const outbox = createOutbox(api);
 
     outbox.handle(textDelta("commentary", "批准前说明", "commentary"));
-    outbox.prepareInteraction(target.conversationId);
+    outbox.prepareInteraction(target.conversationId, userInputInteraction());
     const sent = outbox.runOrdered(target.conversationId, async () => {
       api.sent.push("审批卡片");
       return 7;
@@ -243,6 +243,77 @@ describe("TelegramOutbox", () => {
 
     await expect(sent).resolves.toBe(7);
     expect(api.sent).toEqual(["批准前说明", "审批卡片"]);
+
+    await outbox.close();
+  });
+
+  it("shows an approval-gated command only after approval", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    const request = commandApprovalInteraction();
+
+    outbox.handle(operationUpdated("command-1", "running", "command", "npm install -g ."));
+    outbox.prepareInteraction(target.conversationId, request);
+    const card = outbox.runOrdered(target.conversationId, async () => {
+      api.sent.push("审批卡片");
+      return true;
+    });
+    await vi.advanceTimersByTimeAsync(750);
+    await settle();
+
+    await expect(card).resolves.toBe(true);
+    expect(api.sent).toEqual(["审批卡片"]);
+
+    outbox.finishInteraction(target.conversationId, request, {
+      type: "approval",
+      approved: true,
+    });
+    await settle();
+
+    expect(api.sent).toHaveLength(2);
+    expect(api.sent[1]).toContain("运行命令");
+    await outbox.close();
+  });
+
+  it("does not show an approval-gated command after rejection", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    const request = commandApprovalInteraction();
+
+    outbox.handle(operationUpdated("command-1", "running", "command", "npm install -g ."));
+    outbox.prepareInteraction(target.conversationId, request);
+    outbox.finishInteraction(target.conversationId, request, {
+      type: "approval",
+      approved: false,
+    });
+    outbox.handle(operationUpdated("command-1", "declined", "command", "npm install -g ."));
+    await vi.advanceTimersByTimeAsync(750);
+    await settle();
+
+    expect(api.sent).toEqual([]);
+    await outbox.close();
+  });
+
+  it("keeps a command hidden when its item starts after the approval card", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    const request = commandApprovalInteraction();
+
+    outbox.prepareInteraction(target.conversationId, request);
+    outbox.handle(operationUpdated("command-1", "running", "command", "npm install -g ."));
+    await vi.advanceTimersByTimeAsync(5_000);
+    await settle();
+
+    expect(api.sent).toEqual([]);
+    outbox.finishInteraction(target.conversationId, request, {
+      type: "approval",
+      approved: true,
+    });
+    await settle();
+    expect(api.sent[0]).toContain("运行命令");
 
     await outbox.close();
   });
@@ -412,6 +483,30 @@ function operationUpdated(
       kind,
       ...(detail ? { detail } : {}),
     },
+  };
+}
+
+function commandApprovalInteraction() {
+  return {
+    type: "approval" as const,
+    requestId: "request-1",
+    kind: "command" as const,
+    threadId: "thread-1",
+    turnId: "turn-1",
+    itemId: "command-1",
+    title: "Codex 请求执行命令",
+    detail: "npm install -g .",
+    expiresInMs: 30_000,
+  };
+}
+
+function userInputInteraction() {
+  return {
+    type: "user-input" as const,
+    requestId: "request-input",
+    title: "Codex 需要输入",
+    questions: [],
+    expiresInMs: 30_000,
   };
 }
 

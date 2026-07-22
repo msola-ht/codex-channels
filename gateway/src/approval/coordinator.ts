@@ -23,7 +23,12 @@ export class ApprovalCoordinator {
   async handle(request: RpcServerRequest): Promise<unknown> {
     const params = asRecord(request.params);
     const threadId = stringValue(params.threadId);
-    const target = threadId ? this.router.targetForThread(threadId) : undefined;
+    const turnId = stringValue(params.turnId);
+    const itemId = stringValue(params.itemId);
+    if (!threadId) {
+      return this.safeDecline(request.method, params);
+    }
+    const target = this.router.targetForThread(threadId);
     if (!target) {
       return this.safeDecline(request.method, params);
     }
@@ -31,12 +36,18 @@ export class ApprovalCoordinator {
     const interactionId = String(request.id ?? randomUUID());
     switch (request.method) {
       case "item/commandExecution/requestApproval": {
+        if (!turnId || !itemId) {
+          return this.safeDecline(request.method, params);
+        }
         const command = stringValue(params.command) ?? "未提供命令预览";
         const reason = stringValue(params.reason);
         const decision = await this.interaction.request(target, {
           type: "approval",
           requestId: interactionId,
           kind: "command",
+          threadId,
+          turnId,
+          itemId,
           title: "Codex 请求执行命令",
           detail: [reason, command].filter(Boolean).join("\n\n"),
           expiresInMs: this.timeoutMs,
@@ -44,11 +55,17 @@ export class ApprovalCoordinator {
         return { decision: isApproved(decision) ? "accept" : "decline" };
       }
       case "item/fileChange/requestApproval": {
+        if (!turnId || !itemId) {
+          return this.safeDecline(request.method, params);
+        }
         const detail = stringValue(params.reason) ?? "Codex 请求修改文件";
         const decision = await this.interaction.request(target, {
           type: "approval",
           requestId: interactionId,
           kind: "file",
+          threadId,
+          turnId,
+          itemId,
           title: "Codex 请求修改文件",
           detail,
           expiresInMs: this.timeoutMs,
@@ -56,11 +73,17 @@ export class ApprovalCoordinator {
         return { decision: isApproved(decision) ? "accept" : "decline" };
       }
       case "item/permissions/requestApproval": {
+        if (!turnId || !itemId) {
+          return this.safeDecline(request.method, params);
+        }
         const requested = asRecord(params.permissions);
         const decision = await this.interaction.request(target, {
           type: "approval",
           requestId: interactionId,
           kind: "permissions",
+          threadId,
+          turnId,
+          itemId,
           title: "Codex 请求临时权限",
           detail: stringValue(params.reason) ?? JSON.stringify(requested, null, 2),
           expiresInMs: this.timeoutMs,

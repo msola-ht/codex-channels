@@ -48,7 +48,12 @@ describe("ApprovalCoordinator", () => {
     const response = await coordinator.handle({
       id: "request-2",
       method: "item/commandExecution/requestApproval",
-      params: { threadId: "thread-1", command: "npm test" },
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "command-1",
+        command: "npm test",
+      },
     });
 
     expect(response).toEqual({ decision: "accept" });
@@ -56,7 +61,24 @@ describe("ApprovalCoordinator", () => {
       type: "approval",
       requestId: "request-2",
       kind: "command",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "command-1",
     });
+  });
+
+  it("declines a mapped approval that is missing its turn or item identity", async () => {
+    const interaction = new FakeInteraction();
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+
+    const response = await coordinator.handle({
+      id: "request-malformed",
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: "thread-1", command: "npm test" },
+    });
+
+    expect(response).toEqual({ decision: "decline" });
+    expect(interaction.requests).toEqual([]);
   });
 
   it("invalidates an interaction resolved by another client event", () => {

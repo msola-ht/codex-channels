@@ -22,6 +22,7 @@ import type {
   ThreadUnsubscribeResponse,
   TurnStartResponse,
   TurnSteerResponse,
+  UserInput,
 } from "../codex-protocol/index.js";
 import { JsonRpcClient, type RpcNotification, type ServerRequestHandler } from "./json-rpc.js";
 
@@ -149,7 +150,7 @@ export class CodexAppServerClient {
 
   async startTurn(
     threadId: string,
-    text: string,
+    input: UserInput[],
     clientUserMessageId: string,
     cwd: string,
     overrides: TurnOverrides = {},
@@ -159,7 +160,7 @@ export class CodexAppServerClient {
       {
         threadId,
         clientUserMessageId,
-        input: [{ type: "text", text, text_elements: [] }],
+        input,
         cwd,
         ...(overrides.model ? { model: overrides.model } : {}),
         ...(overrides.effort ? { effort: overrides.effort } : {}),
@@ -171,7 +172,7 @@ export class CodexAppServerClient {
   async steerTurn(
     threadId: string,
     turnId: string,
-    text: string,
+    input: UserInput[],
     clientUserMessageId: string,
   ): Promise<TurnSteerResponse> {
     return this.rpc.request<TurnSteerResponse>(
@@ -180,7 +181,7 @@ export class CodexAppServerClient {
         threadId,
         expectedTurnId: turnId,
         clientUserMessageId,
-        input: [{ type: "text", text, text_elements: [] }],
+        input,
       },
       { retryOverload: false },
     );

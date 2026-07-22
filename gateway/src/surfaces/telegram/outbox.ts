@@ -1,6 +1,7 @@
 import type { Api } from "grammy";
 import type { Logger } from "pino";
 
+import type { InteractionDecision, InteractionRequest } from "../../approval/types.js";
 import type { OperationUpdate, OutputEvent } from "../../conversation-core/events.js";
 import type { MessagePhase } from "../../codex-protocol/index.js";
 import { BoundedAsyncQueue } from "../../event-bus/bounded-queue.js";
@@ -54,6 +55,9 @@ export class TelegramOutbox {
   private readonly typing = new Map<string, TypingState>();
   private readonly lastTypingAt = new Map<string, number>();
   private readonly workers = new Map<string, ChatWorker>();
+  private readonly approvalRequestsByOperation = new Map<string, Set<string>>();
+  private readonly operationByApprovalRequest = new Map<string, string>();
+  private readonly suppressedOperations = new Set<string>();
   private nextActivityId = 1;
   private closed = false;
 
@@ -131,6 +135,11 @@ export class TelegramOutbox {
       }
       case "operation.updated": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
+        const operationKey = this.operationKey(turnKey, event.operation.itemId);
+        if (this.suppressedOperations.has(operationKey)) {
+          return;
+        }
+        const heldForApproval = this.approvalRequestsByOperation.has(operationKey);
         const state = this.operationLogs.get(turnKey) ?? this.createOperationLog(chatId, turnKey);
         if (!state.records.has(event.operation.itemId)) {
           state.order.push(event.operation.itemId);
@@ -143,7 +152,7 @@ export class TelegramOutbox {
           }
         }
         state.records.set(event.operation.itemId, event.operation);
-        if (!state.timer) {
+        if (!heldForApproval && !state.timer) {
           state.timer = setTimeout(() => {
             state.timer = undefined;
             this.enqueue(
@@ -180,6 +189,7 @@ export class TelegramOutbox {
             await this.send(chatId, `Codex 任务状态：${event.status}`, replyTo);
           }
           this.replyToByTurn.delete(turnKey);
+          this.clearApprovalOperationsForTurn(turnKey);
         }, true);
         return;
       }
@@ -234,6 +244,9 @@ export class TelegramOutbox {
     this.typing.clear();
     this.lastTypingAt.clear();
     this.workers.clear();
+    this.approvalRequestsByOperation.clear();
+    this.operationByApprovalRequest.clear();
+    this.suppressedOperations.clear();
   }
 
   showTyping(chatId: string): void {
@@ -262,13 +275,14 @@ export class TelegramOutbox {
     return () => this.stopTyping(chatId, activityKey);
   }
 
-  prepareInteraction(chatId: string): void {
+  prepareInteraction(chatId: string, request: InteractionRequest): void {
     if (this.closed) {
       return;
     }
+    this.holdApprovalOperation(chatId, request);
     for (const [turnKey, state] of this.operationLogs) {
       if (state.chatId === chatId) {
-        this.sealOperationLog(chatId, turnKey);
+        this.sealOperationLogBeforeInteraction(chatId, turnKey, state);
       }
     }
     for (const [key, state] of this.streams) {
@@ -280,6 +294,45 @@ export class TelegramOutbox {
         state.timer = undefined;
       }
       this.enqueue(chatId, () => this.flush(chatId, key, state.completed), true);
+    }
+  }
+
+  finishInteraction(
+    chatId: string,
+    request: InteractionRequest,
+    decision: InteractionDecision,
+  ): void {
+    if (this.closed || request.type !== "approval") {
+      return;
+    }
+    const operationKey = this.operationByApprovalRequest.get(request.requestId);
+    if (!operationKey) {
+      return;
+    }
+    this.operationByApprovalRequest.delete(request.requestId);
+    const requestIds = this.approvalRequestsByOperation.get(operationKey);
+    requestIds?.delete(request.requestId);
+    const rejected = decision.type !== "approval" || !decision.approved;
+    const turnKey = this.turnKey(request.threadId, request.turnId);
+    const state = this.operationLogs.get(turnKey);
+    if (rejected) {
+      this.suppressApprovalOperation(operationKey, turnKey, request.itemId, state);
+    }
+    if (requestIds && requestIds.size > 0) {
+      return;
+    }
+    this.approvalRequestsByOperation.delete(operationKey);
+
+    if (this.suppressedOperations.has(operationKey)) {
+      return;
+    }
+
+    if (state?.records.has(request.itemId)) {
+      if (state.timer) {
+        clearTimeout(state.timer);
+        state.timer = undefined;
+      }
+      this.enqueue(chatId, () => this.flushOperationLog(state, false), true);
     }
   }
 
@@ -401,6 +454,88 @@ export class TelegramOutbox {
     };
   }
 
+  private holdApprovalOperation(chatId: string, request: InteractionRequest): void {
+    if (request.type !== "approval") {
+      return;
+    }
+    const turnKey = this.turnKey(request.threadId, request.turnId);
+    const operationKey = this.operationKey(turnKey, request.itemId);
+    const requestIds = this.approvalRequestsByOperation.get(operationKey) ?? new Set<string>();
+    requestIds.add(request.requestId);
+    this.approvalRequestsByOperation.set(operationKey, requestIds);
+    this.operationByApprovalRequest.set(request.requestId, operationKey);
+
+    const state = this.operationLogs.get(turnKey);
+    if (state?.chatId === chatId && state.timer) {
+      clearTimeout(state.timer);
+      state.timer = undefined;
+    }
+  }
+
+  private sealOperationLogBeforeInteraction(
+    chatId: string,
+    turnKey: string,
+    state: OperationLogState,
+  ): void {
+    if (state.timer) {
+      clearTimeout(state.timer);
+      state.timer = undefined;
+    }
+    const heldIds = state.order.filter((itemId) => this.isOperationHeld(turnKey, itemId));
+    if (heldIds.length === 0) {
+      this.operationLogs.delete(turnKey);
+      this.enqueue(chatId, () => this.flushOperationLog(state, true), true);
+      return;
+    }
+
+    const visibleIds = state.order.filter((itemId) => !this.isOperationHeld(turnKey, itemId));
+    const heldState: OperationLogState = {
+      ...state,
+      order: heldIds,
+      records: new Map(heldIds.flatMap((itemId) => {
+        const record = state.records.get(itemId);
+        return record ? [[itemId, record] as const] : [];
+      })),
+      omittedCount: 0,
+      messageId: undefined,
+      timer: undefined,
+    };
+    this.operationLogs.set(turnKey, heldState);
+
+    if (visibleIds.length > 0) {
+      const visibleState: OperationLogState = {
+        ...state,
+        order: visibleIds,
+        records: new Map(visibleIds.flatMap((itemId) => {
+          const record = state.records.get(itemId);
+          return record ? [[itemId, record] as const] : [];
+        })),
+        timer: undefined,
+      };
+      this.enqueue(chatId, () => this.flushOperationLog(visibleState, true), true);
+    }
+  }
+
+  private suppressApprovalOperation(
+    operationKey: string,
+    turnKey: string,
+    itemId: string,
+    state: OperationLogState | undefined,
+  ): void {
+    this.suppressedOperations.add(operationKey);
+    if (!state) {
+      return;
+    }
+    state.records.delete(itemId);
+    state.order = state.order.filter((candidate) => candidate !== itemId);
+    if (state.records.size === 0 && state.messageId === undefined) {
+      if (state.timer) {
+        clearTimeout(state.timer);
+      }
+      this.operationLogs.delete(turnKey);
+    }
+  }
+
   private sealOperationLog(chatId: string, turnKey: string): void {
     const state = this.operationLogs.get(turnKey);
     if (!state) {
@@ -519,6 +654,33 @@ export class TelegramOutbox {
     return `turn:${this.turnKey(threadId, turnId)}`;
   }
 
+  private operationKey(turnKey: string, itemId: string): string {
+    return `${turnKey}:${itemId}`;
+  }
+
+  private isOperationHeld(turnKey: string, itemId: string): boolean {
+    return this.approvalRequestsByOperation.has(this.operationKey(turnKey, itemId));
+  }
+
+  private clearApprovalOperationsForTurn(turnKey: string): void {
+    const prefix = `${turnKey}:`;
+    for (const [requestId, operationKey] of this.operationByApprovalRequest) {
+      if (operationKey.startsWith(prefix)) {
+        this.operationByApprovalRequest.delete(requestId);
+      }
+    }
+    for (const operationKey of this.approvalRequestsByOperation.keys()) {
+      if (operationKey.startsWith(prefix)) {
+        this.approvalRequestsByOperation.delete(operationKey);
+      }
+    }
+    for (const operationKey of this.suppressedOperations) {
+      if (operationKey.startsWith(prefix)) {
+        this.suppressedOperations.delete(operationKey);
+      }
+    }
+  }
+
   private async sendFirstChunk(chatId: string, state: StreamState, text: string): Promise<number> {
     const replyTo = state.phase === "commentary"
       ? undefined
@@ -569,6 +731,22 @@ export class TelegramOutbox {
     for (const key of this.replyToByTurn.keys()) {
       if (key.startsWith(`${threadId}:`)) {
         this.replyToByTurn.delete(key);
+      }
+    }
+    const prefix = `${threadId}:`;
+    for (const [requestId, operationKey] of this.operationByApprovalRequest) {
+      if (operationKey.startsWith(prefix)) {
+        this.operationByApprovalRequest.delete(requestId);
+      }
+    }
+    for (const operationKey of this.approvalRequestsByOperation.keys()) {
+      if (operationKey.startsWith(prefix)) {
+        this.approvalRequestsByOperation.delete(operationKey);
+      }
+    }
+    for (const operationKey of this.suppressedOperations) {
+      if (operationKey.startsWith(prefix)) {
+        this.suppressedOperations.delete(operationKey);
       }
     }
     const typing = this.typing.get(chatId);

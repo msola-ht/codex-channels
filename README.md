@@ -25,7 +25,7 @@ App Server 与 Gateway 是两个独立进程。Gateway 停止不会终止 App Se
 
 命令执行、文件修改、MCP/App 工具、网页搜索、图片操作、子代理和 Plan 等 App Server Item 会在 Telegram 中按回复分段为“操作过程”消息，并限速更新运行、完成或失败状态；Codex 每开始一段回复就定稿前一段操作，后续新操作另发消息，因此时间线可以按“过程 → 回复 → 过程 → 回复”交替展示。消息使用图标标题、命令代码块和路径/工具引用块呈现，连续且内容相同的操作会合并显示次数。操作过程不展示完整 stdout 或工具参数；可见命令会清洗常见 Token、密码、Cookie、Authorization 和 URL 凭据，过长记录只保留最近操作。
 
-Telegram 审批、用户输入和 MCP elicitation 与普通回复共用同一聊天输出队列。交互卡片发送前会先冲刷已经生成的回复与操作过程，审批状态更新也保持在该队列内，因此同一聊天按“说明 → 审批 → 用户选择 → 后续输出”的顺序展示。
+Telegram 审批、用户输入和 MCP elicitation 与普通回复共用同一聊天输出队列。交互卡片发送前会先冲刷已经生成的回复与此前操作；当前等待审批的命令或文件操作会暂存，只有用户批准且审批卡先更新状态后才显示，拒绝或超时则不显示。因此同一聊天按“说明 → 审批 → 用户选择 → 后续操作与输出”的顺序展示。
 
 Gateway 已连接 App Server 且 Telegram Bot 完成鉴权后，会向 `TELEGRAM_ALLOWED_USER_IDS` 中的每个用户发送一次启动联通通知，包含该用户当前选择的 Workspace（未选择时为默认 Workspace）、工作目录、当前模型、思考强度和完整 Workspace 列表。用户尚未与 Bot 建立私聊等原因导致通知发送失败时，只记录告警，不影响 Gateway 和 Long Polling 继续运行。
 
@@ -59,7 +59,9 @@ codexc ws add
 ```text
 ~/.codex-connect/
 ├── .env                         # 0600，Token、Workspace 和运行配置
-├── data/gateway.sqlite3         # Telegram Workspace/Thread 最小绑定
+├── data/
+│   ├── gateway.sqlite3         # Telegram Workspace/Thread 最小绑定
+│   └── uploads/                # 私有 Telegram 图片暂存，24 小时过期
 ├── workspace/                   # 默认 Workspace，不存放 Gateway 凭据
 └── runtime/
     ├── codex-app-server.sock
@@ -239,6 +241,8 @@ npm run service:uninstall
 - `/whoami`：显示 Telegram 用户 ID
 
 普通文本会发送给当前 Thread；若当前 Turn 正在执行，则通过 `turn/steer` 追加。首次消息会在当前 Workspace 的 `cli`、`vscode`（当前版本 Remote TUI 的来源标记）和 `appServer` 来源中选择最近的空闲且未绑定 Thread；不会自动接入活动 Thread。切换 Workspace 前必须等待当前 Turn 结束或先 `/stop`。
+
+Telegram 可以直接发送单张照片，或以文件方式发送 PNG/JPEG 图片；图片说明会与图片一起作为 Codex 输入，没有说明时使用默认的图片检查提示。活动 Turn 中收到的图片通过 `turn/steer` 追加。Gateway 先把图片下载到状态数据库同级的私有 `uploads` 目录，目录权限为 `0700`、文件权限为 `0600`，单张限制 10 MiB，只根据文件头接受 PNG/JPEG。托管图片保留 24 小时并定时清理，不写入 SQLite。当前不聚合 Telegram 相册，多图请逐张发送并分别写明用途。
 
 当前 Workspace 选择与 Thread 绑定会写入本机 StateStore。Gateway 重启后会恢复有效绑定；过载、超时或连接中断等瞬时失败会保留绑定等待后续重连，只有对应 Thread 已删除、关闭或发生其他永久错误时才自动清理绑定，同时保留有效的 Workspace 选择。配置中已删除的 Workspace 会回退到默认 Workspace。
 

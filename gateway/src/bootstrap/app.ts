@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { dirname, join } from "node:path";
 
 import type { Logger } from "pino";
 
@@ -65,6 +66,7 @@ export class GatewayApplication {
       new TelegramAccessPolicy(config.telegramAllowedUserIds),
       config.telegramAllowedUserIds,
       config.workspaces,
+      join(dirname(config.stateDatabasePath), "uploads"),
       logger,
     );
     this.approval = new ApprovalCoordinator(this.router, this.telegram.interactions, config.approvalTimeoutMs);

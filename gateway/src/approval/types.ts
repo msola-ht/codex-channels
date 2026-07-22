@@ -5,6 +5,9 @@ export type InteractionRequest =
       type: "approval";
       requestId: string;
       kind: "command" | "file" | "permissions";
+      threadId: string;
+      turnId: string;
+      itemId: string;
       title: string;
       detail: string;
       expiresInMs: number;

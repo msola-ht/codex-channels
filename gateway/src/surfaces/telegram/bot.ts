@@ -27,12 +27,23 @@ import { TelegramInteractionPort } from "./interactions.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import { TelegramLifecycle } from "./lifecycle.js";
 import { TelegramOutbox } from "./outbox.js";
+import { maximumTelegramImageBytes, TelegramImageStore } from "./image-store.js";
+
+export interface TelegramImagePort {
+  start(): Promise<void>;
+  close(): void;
+  download(
+    api: Parameters<TelegramImageStore["download"]>[0],
+    fileId: string,
+  ): ReturnType<TelegramImageStore["download"]>;
+}
 
 export class TelegramSurface {
   readonly bot: Bot;
   readonly interactions: TelegramInteractionPort;
   private readonly outbox: TelegramOutbox;
   private readonly lifecycle: TelegramLifecycle;
+  private readonly imageStore: TelegramImagePort;
   private unsubscribeOutput: (() => void) | undefined;
 
   constructor(
@@ -43,7 +54,9 @@ export class TelegramSurface {
     private readonly access: TelegramAccessPolicy,
     startupRecipients: ReadonlySet<number>,
     workspaces: Workspace[],
+    uploadsDirectory: string,
     private readonly logger: Logger,
+    imageStore?: TelegramImagePort,
   ) {
     this.bot = new Bot(token, {
       client: {
@@ -57,6 +70,7 @@ export class TelegramSurface {
     const apiExecutor = new TelegramApiExecutor(logger);
     this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor);
     this.interactions = new TelegramInteractionPort(this.bot, logger, apiExecutor, this.outbox);
+    this.imageStore = imageStore ?? new TelegramImageStore(uploadsDirectory, token, proxyUrl, logger);
     this.lifecycle = new TelegramLifecycle(this.bot, logger, {
       messages: () => [...startupRecipients].map((chatId) => {
         const status = this.service.status({
@@ -74,10 +88,12 @@ export class TelegramSurface {
   }
 
   async start(): Promise<void> {
+    await this.imageStore.start();
     this.lifecycle.start();
   }
 
   async stop(): Promise<void> {
+    this.imageStore.close();
     const lifecycleStop = this.lifecycle.stop();
     await this.interactions.close();
     this.unsubscribeOutput?.();
@@ -94,6 +110,7 @@ export class TelegramSurface {
           "Codex Telegram Gateway",
           "",
           "普通文本会发送到当前 Codex Thread。",
+          "发送 PNG/JPEG 图片时，可在图片说明中写明需要 Codex 处理的任务。",
           "首次消息自动接续当前 Workspace 最近的空闲 CLI/App Server 会话。",
           "",
           "/resume [序号|名称|Thread ID]",
@@ -212,6 +229,63 @@ export class TelegramSurface {
         });
       }
     });
+    this.bot.on("message:photo", async (context) => {
+      const photo = context.message.photo.at(-1);
+      if (!photo) {
+        throw new Error("Telegram 图片消息缺少文件信息");
+      }
+      await this.submitImage(
+        context,
+        photo.file_id,
+        photo.file_size,
+        context.message.caption,
+      );
+    });
+    this.bot.on("message:document", async (context) => {
+      const document = context.message.document;
+      if (!isSupportedImageDocument(document.mime_type, document.file_name)) {
+        await context.reply("仅支持 PNG 和 JPEG 图片文件。");
+        return;
+      }
+      await this.submitImage(
+        context,
+        document.file_id,
+        document.file_size,
+        context.message.caption,
+      );
+    });
+  }
+
+  private async submitImage(
+    context: Context,
+    fileId: string,
+    fileSize: number | undefined,
+    caption: string | undefined,
+  ): Promise<void> {
+    if (fileSize !== undefined && fileSize > maximumTelegramImageBytes) {
+      throw new Error("图片超过 10 MiB 限制");
+    }
+    const image = await this.imageStore.download(this.bot.api, fileId);
+    if (!context.message) {
+      throw new Error("Telegram 图片更新缺少消息信息");
+    }
+    const submission = await this.service.submit(target(context), {
+      text: caption?.trim() || "请查看这张图片并根据图片内容协助我。",
+      localImages: [{ path: image.path }],
+    });
+    this.outbox.setTurnReplyTarget(
+      submission.threadId,
+      submission.turnId,
+      context.message.message_id,
+    );
+    if (submission.steered && context.message) {
+      await context.reply("已将图片和补充要求追加到当前 Turn。", {
+        reply_parameters: {
+          message_id: context.message.message_id,
+          allow_sending_without_reply: true,
+        },
+      });
+    }
   }
 
   private async resume(context: Context): Promise<void> {
@@ -267,7 +341,7 @@ export class TelegramSurface {
       }
       return;
     }
-    const stopTyping = context.message?.text && context.chat
+    const stopTyping = context.message && context.chat
       ? this.outbox.beginTyping(String(context.chat.id))
       : undefined;
     try {
@@ -281,6 +355,12 @@ export class TelegramSurface {
       stopTyping?.();
     }
   }
+}
+
+function isSupportedImageDocument(mimeType: string | undefined, fileName: string | undefined): boolean {
+  return mimeType === "image/png" ||
+    mimeType === "image/jpeg" ||
+    /\.(?:png|jpe?g)$/i.test(fileName ?? "");
 }
 
 function target(context: Context): ConversationTarget {

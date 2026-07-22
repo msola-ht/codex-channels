@@ -41,9 +41,11 @@ describe("TelegramInteractionPort", () => {
     const sendMessage = vi.fn(async () => ({ message_id: 8 }));
     const editMessageText = vi.fn(async () => true as const);
     const prepareInteraction = vi.fn();
+    const finishInteraction = vi.fn();
     let orderedRuns = 0;
     const queue: TelegramInteractionQueue = {
       prepareInteraction,
+      finishInteraction,
       async runOrdered<T>(_chatId: string, run: () => Promise<T>): Promise<T> {
         orderedRuns += 1;
         return run();
@@ -62,7 +64,7 @@ describe("TelegramInteractionPort", () => {
 
     const decision = interactions.request(target, approvalRequest());
     await settle();
-    expect(prepareInteraction).toHaveBeenCalledWith("100");
+    expect(prepareInteraction).toHaveBeenCalledWith("100", approvalRequest());
     expect(orderedRuns).toBe(1);
 
     interactions.resolved("request-1");
@@ -70,6 +72,11 @@ describe("TelegramInteractionPort", () => {
     await settle();
     expect(orderedRuns).toBe(2);
     expect(editMessageText).toHaveBeenCalledOnce();
+    expect(finishInteraction).toHaveBeenCalledWith(
+      "100",
+      approvalRequest(),
+      { type: "approval", approved: false },
+    );
   });
 
   it("requires user-input answers to reply to the ForceReply message", async () => {
@@ -201,6 +208,9 @@ function approvalRequest(): Extract<InteractionRequest, { type: "approval" }> {
     type: "approval",
     requestId: "request-1",
     kind: "command",
+    threadId: "thread-1",
+    turnId: "turn-1",
+    itemId: "command-1",
     title: "Codex 请求执行命令",
     detail: "npm test",
     expiresInMs: 30_000,

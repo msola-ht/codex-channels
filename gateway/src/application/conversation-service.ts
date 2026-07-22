@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isAbsolute } from "node:path";
 
 import type { CodexAppServerClient } from "../codex-client/client.js";
 import type {
@@ -12,6 +13,7 @@ import type {
   Thread,
   ThreadGoal,
   ThreadTokenUsage,
+  UserInput,
 } from "../codex-protocol/index.js";
 import type { SessionRouter } from "../session-routing/router.js";
 import type { Workspace } from "../policy/workspace-registry.js";
@@ -26,6 +28,11 @@ export interface Submission {
   threadId: string;
   turnId: string;
   steered: boolean;
+}
+
+export interface ConversationInput {
+  text?: string;
+  localImages?: ReadonlyArray<{ path: string }>;
 }
 
 export interface ConversationStatus {
@@ -50,9 +57,14 @@ export class ConversationService {
     private readonly models: ModelSelectionService,
   ) {}
 
-  submit(target: ConversationTarget, text: string): Promise<Submission> {
-    const input = text.trim();
-    if (!input) {
+  submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission> {
+    let input: UserInput[];
+    try {
+      input = normalizeInput(value);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    if (input.length === 0) {
       return Promise.reject(new Error("消息不能为空"));
     }
     return this.locked(target, async () => {
@@ -283,6 +295,22 @@ export class ConversationService {
       }
     }
   }
+}
+
+function normalizeInput(value: string | ConversationInput): UserInput[] {
+  const normalized = typeof value === "string" ? { text: value } : value;
+  const input: UserInput[] = [];
+  const text = normalized.text?.trim();
+  if (text) {
+    input.push({ type: "text", text, text_elements: [] });
+  }
+  for (const image of normalized.localImages ?? []) {
+    if (!isAbsolute(image.path)) {
+      throw new Error("本地图片路径必须是绝对路径");
+    }
+    input.push({ type: "localImage", path: image.path });
+  }
+  return input;
 }
 
 export function resolveThread(threads: Thread[], selector: string): Thread {

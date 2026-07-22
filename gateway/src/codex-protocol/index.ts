@@ -16,6 +16,7 @@ export type { ThreadStartResponse } from "./generated/v2/ThreadStartResponse.js"
 export type { ThreadUnsubscribeResponse } from "./generated/v2/ThreadUnsubscribeResponse.js";
 export type { TurnStartResponse } from "./generated/v2/TurnStartResponse.js";
 export type { TurnSteerResponse } from "./generated/v2/TurnSteerResponse.js";
+export type { UserInput } from "./generated/v2/UserInput.js";
 export type { ModelListResponse } from "./generated/v2/ModelListResponse.js";
 export type { Model } from "./generated/v2/Model.js";
 export type { ReasoningEffort } from "./generated/ReasoningEffort.js";

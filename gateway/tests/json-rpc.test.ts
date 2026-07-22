@@ -299,16 +299,28 @@ describe("JsonRpcClient", () => {
 
     await client.startTurn(
       "thread-1",
-      "测试输入",
+      [
+        { type: "text", text: "测试输入", text_elements: [] },
+        { type: "localImage", path: "/tmp/screenshot.png" },
+      ],
       "codex_tg_gateway:request-1",
       "/tmp/project",
       { model: "gpt-selected", effort: "high" },
     );
-    await client.steerTurn("thread-1", "turn-1", "补充输入", "codex_tg_gateway:request-2");
+    await client.steerTurn(
+      "thread-1",
+      "turn-1",
+      [{ type: "text", text: "补充输入", text_elements: [] }],
+      "codex_tg_gateway:request-2",
+    );
 
     expect(transport.sent.find((message) => message.method === "turn/start")?.params)
       .toMatchObject({
         clientUserMessageId: "codex_tg_gateway:request-1",
+        input: [
+          { type: "text", text: "测试输入", text_elements: [] },
+          { type: "localImage", path: "/tmp/screenshot.png" },
+        ],
         cwd: "/tmp/project",
         model: "gpt-selected",
         effort: "high",
@@ -327,7 +339,12 @@ describe("JsonRpcClient", () => {
     await client.connect();
 
     await client.startThread("/tmp/project");
-    await client.startTurn("thread-1", "测试输入", "request-1", "/tmp/project");
+    await client.startTurn(
+      "thread-1",
+      [{ type: "text", text: "测试输入", text_elements: [] }],
+      "request-1",
+      "/tmp/project",
+    );
 
     const starts = transport.sent.filter((message) => message.method === "thread/start");
     expect(starts[0]?.params)

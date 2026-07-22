@@ -19,12 +19,18 @@ interface PendingInteraction {
 }
 
 export interface TelegramInteractionQueue {
-  prepareInteraction(chatId: string): void;
+  prepareInteraction(chatId: string, request: InteractionRequest): void;
+  finishInteraction(
+    chatId: string,
+    request: InteractionRequest,
+    decision: InteractionDecision,
+  ): void;
   runOrdered<T>(chatId: string, run: () => Promise<T>): Promise<T>;
 }
 
 const directInteractionQueue: TelegramInteractionQueue = {
   prepareInteraction: () => undefined,
+  finishInteraction: () => undefined,
   runOrdered: (_chatId, run) => run(),
 };
 
@@ -55,7 +61,7 @@ export class TelegramInteractionPort implements InteractionPort {
     const chunks = splitTelegramText(formatted, 3_600);
     this.tokenByRequest.set(request.requestId, token);
     let message: Awaited<ReturnType<typeof this.bot.api.sendMessage>> | undefined;
-    this.queue.prepareInteraction(target.conversationId);
+    this.queue.prepareInteraction(target.conversationId, request);
     try {
       message = await this.queue.runOrdered(target.conversationId, async () => {
         let sent: Awaited<ReturnType<typeof this.bot.api.sendMessage>> | undefined;
@@ -247,7 +253,6 @@ export class TelegramInteractionPort implements InteractionPort {
         this.latestTokenByChat.delete(pending.target.conversationId);
       }
     }
-    pending.resolve(decision);
     const statusUpdate = this.queue.runOrdered(pending.target.conversationId, () =>
       this.executor.call(
         { chatId: pending.target.conversationId, operation: "editMessageText", critical: true },
@@ -267,6 +272,9 @@ export class TelegramInteractionPort implements InteractionPort {
         },
         "Telegram 交互消息状态更新失败",
       );
+    }).then(() => {
+      this.queue.finishInteraction(pending.target.conversationId, pending.request, decision);
+      pending.resolve(decision);
     });
     this.statusUpdates.add(statusUpdate);
     void statusUpdate.finally(() => this.statusUpdates.delete(statusUpdate));
