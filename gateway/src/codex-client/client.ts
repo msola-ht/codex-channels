@@ -1,5 +1,6 @@
 import type {
   GetAccountTokenUsageResponse,
+  GetAccountRateLimitsResponse,
   InitializeResponse,
   ListMcpServerStatusResponse,
   ModelListResponse,
@@ -249,6 +250,14 @@ export class CodexAppServerClient {
   accountUsage(): Promise<GetAccountTokenUsageResponse> {
     return this.rpc.request<GetAccountTokenUsageResponse>(
       "account/usage/read",
+      {},
+      { retryOverload: true },
+    );
+  }
+
+  accountRateLimits(): Promise<GetAccountRateLimitsResponse> {
+    return this.rpc.request<GetAccountRateLimitsResponse>(
+      "account/rateLimits/read",
       {},
       { retryOverload: true },
     );

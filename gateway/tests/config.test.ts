@@ -29,7 +29,23 @@ describe("loadConfig", () => {
     expect(config.logLevel).toBe("info");
     expect(config.codexWorkdir).toBe(realpathSync(workdir));
     expect(config.codexSocketPath).toBe(join(realpathSync(workdir), ".runtime/codex-app-server.sock"));
+    expect(config.stateDatabasePath).toBe(join(process.cwd(), "data/gateway.sqlite3"));
     expect(config.telegramAllowedUserIds).toEqual(new Set([123, 456]));
+  });
+
+  it("resolves an explicit state database path without treating it as Codex history", () => {
+    const workdir = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
+    const stateDirectory = mkdtempSync(join(tmpdir(), "codex-gateway-state-"));
+    temporaryDirectories.push(workdir, stateDirectory);
+
+    const config = loadConfig({
+      TELEGRAM_BOT_TOKEN: "secret",
+      TELEGRAM_ALLOWED_USER_IDS: "123",
+      CODEX_WORKDIR: workdir,
+      STATE_DATABASE_PATH: join(stateDirectory, "bindings.sqlite3"),
+    });
+
+    expect(config.stateDatabasePath).toBe(join(stateDirectory, "bindings.sqlite3"));
   });
 
   it("rejects a missing workdir without widening permissions", () => {

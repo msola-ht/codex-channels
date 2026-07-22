@@ -13,8 +13,8 @@ import type { OutputEvent } from "../conversation-core/events.js";
 import { ConversationService } from "../conversation-core/service.js";
 import { EventBus } from "../event-bus/event-bus.js";
 import { TelegramAccessPolicy } from "../policy/telegram-access.js";
-import { MemoryBindingStore } from "../session-routing/memory-bindings.js";
 import { SessionRouter } from "../session-routing/router.js";
+import { SqliteBindingStore } from "../storage/sqlite-binding-store.js";
 import { TelegramSurface } from "../surfaces/telegram/bot.js";
 
 export class GatewayApplication {
@@ -27,6 +27,7 @@ export class GatewayApplication {
   private readonly approval: ApprovalCoordinator;
   private readonly router: SessionRouter;
   private readonly core: ConversationCore;
+  private readonly bindings: SqliteBindingStore;
   private removeRpcNotification: (() => void) | undefined;
   private removeRpcDisconnect: (() => void) | undefined;
   private reconnecting: Promise<void> | undefined;
@@ -46,8 +47,8 @@ export class GatewayApplication {
     });
     this.inbound = new EventBus<RpcNotification>(logger, 2_000);
     this.output = new EventBus<OutputEvent>(logger, 1_000);
-    const bindings = new MemoryBindingStore();
-    this.router = new SessionRouter(this.codex, bindings);
+    this.bindings = new SqliteBindingStore(config.stateDatabasePath);
+    this.router = new SessionRouter(this.codex, this.bindings);
     this.core = new ConversationCore(this.router, this.output);
     const service = new ConversationService(this.codex, this.router, this.core, config.codexWorkdir);
     this.telegram = new TelegramSurface(
@@ -87,6 +88,7 @@ export class GatewayApplication {
       });
     });
     const initialized = await this.codex.connect();
+    await this.restoreBindings();
     this.logger.info(
       {
         transport: this.transport.kind,
@@ -113,6 +115,7 @@ export class GatewayApplication {
     await this.inbound.close();
     await this.output.close();
     await this.codex.close();
+    this.bindings.close();
   }
 
   private async reconnect(): Promise<void> {
@@ -130,13 +133,7 @@ export class GatewayApplication {
       }
       try {
         const initialized = await this.codex.reconnect();
-        const failures = await this.router.restoreSubscriptions();
-        for (const failure of failures) {
-          this.logger.warn(
-            { err: failure.error, threadId: failure.binding.threadId },
-            "恢复 Codex Thread 订阅失败，已移除本地绑定",
-          );
-        }
+        await this.restoreBindings();
         this.logger.info(
           { attempt, platformFamily: initialized.platformFamily, platformOs: initialized.platformOs },
           "Codex App Server 已重新连接",
@@ -151,6 +148,22 @@ export class GatewayApplication {
       this.reconnecting = undefined;
       await this.stop();
       process.exitCode = 1;
+    }
+  }
+
+  private async restoreBindings(): Promise<void> {
+    const failures = await this.router.restoreSubscriptions();
+    for (const failure of failures) {
+      this.logger.warn(
+        { err: failure.error, threadId: failure.binding.threadId },
+        "恢复 Codex Thread 订阅失败，已移除持久化绑定",
+      );
+    }
+    if (this.router.allBindings().length > 0) {
+      this.logger.info(
+        { bindings: this.router.allBindings().length },
+        "已恢复 Telegram 与 Codex Thread 绑定",
+      );
     }
   }
 }

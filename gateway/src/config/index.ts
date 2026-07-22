@@ -17,6 +17,7 @@ const environmentSchema = z.object({
   CODEX_SOCKET_PATH: z.string().min(1).optional(),
   CODEX_MODEL: z.string().optional(),
   CODEX_BRIDGE_SANDBOX: z.enum(["read-only", "workspace-write"]).default("workspace-write"),
+  STATE_DATABASE_PATH: z.string().min(1).optional(),
   APPROVAL_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
   LOG_LEVEL: z.preprocess(
     (value) => (typeof value === "string" ? value.toLowerCase() : value),
@@ -33,6 +34,7 @@ export interface GatewayConfig {
   codexSocketPath: string;
   codexModel?: string;
   codexSandbox: "read-only" | "workspace-write";
+  stateDatabasePath: string;
   approvalTimeoutMs: number;
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace";
 }
@@ -82,6 +84,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Gatewa
     codexSocketPath: socketPath,
     ...(raw.CODEX_MODEL ? { codexModel: raw.CODEX_MODEL } : {}),
     codexSandbox: raw.CODEX_BRIDGE_SANDBOX,
+    stateDatabasePath: resolve(raw.STATE_DATABASE_PATH ?? "data/gateway.sqlite3"),
     approvalTimeoutMs: raw.APPROVAL_TIMEOUT_SECONDS * 1000,
     logLevel: raw.LOG_LEVEL,
   };

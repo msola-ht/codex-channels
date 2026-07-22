@@ -12,7 +12,8 @@
 - 当前仓库以 TypeScript 模块化 Gateway 为唯一实现。
 - 旧 Python Runtime、测试、smoke 脚本和打包入口已在用户确认后移除。
 - Codex App Server 与 Gateway 的前后台常驻方式尚未最终启用；当前可使用 `npm run dev:all` 验证和运行。
-- 不重新引入自定义会话数据库、Python Bridge 或替代 Codex Remote TUI 的本地 CLI。
+- 不重新引入复制 Codex 会话内容的自定义会话数据库、Python Bridge 或替代 Codex Remote TUI 的本地 CLI。
+- 当前使用 SQLite StateStore 只保存 Telegram conversation 与 Codex Thread 的最小绑定，以便 Gateway 重启后恢复当前会话。
 
 ## 目标架构
 
@@ -111,11 +112,11 @@ Surface Adapters -> Application/Core <- Codex Client
 
 ## 数据持久化规则
 
-- 单用户、单 Gateway 默认使用内存保存 chat-to-thread 绑定，不新增数据库。
-- 多用户或多实例需要重启后恢复绑定时，通过 `StateStore` 接口增加最小持久化。
+- 当前单机 Gateway 使用 SQLite StateStore 保存 chat-to-thread 绑定；这是为重启恢复当前会话明确选择的项目行为。
+- StateStore 必须保持可替换，只保存恢复绑定所需的最小字段。
 - 持久化内容仅限用户、Workspace、Thread ID、权限和必要偏好。
 - 不持久化 Codex 消息正文、Turn/Item 历史或 rollout 副本。
-- 单机多用户优先 SQLite；分布式多实例确有需要时才考虑 PostgreSQL。
+- 单机使用 SQLite；分布式多实例确有需要时才考虑 PostgreSQL。
 - 未出现分布式队列、缓存或锁需求前，不引入 Redis、Kafka、NATS 等基础设施。
 - 新增依赖或持久化格式前必须说明必要性、迁移方式和回滚方案，并取得用户确认。
 

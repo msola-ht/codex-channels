@@ -4,6 +4,7 @@ export interface ConversationTarget {
 }
 
 export type OutputEvent =
+  | { type: "turn.started"; target: ConversationTarget; threadId: string; turnId: string }
   | { type: "text.delta"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string }
   | { type: "text.completed"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string }
   | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: string; error?: string }
@@ -11,5 +12,5 @@ export type OutputEvent =
   | { type: "warning"; target: ConversationTarget; threadId?: string; message: string };
 
 export function isCriticalOutputEvent(event: OutputEvent): boolean {
-  return event.type !== "text.delta";
+  return event.type !== "text.delta" && event.type !== "turn.started";
 }

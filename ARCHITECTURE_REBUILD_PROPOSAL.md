@@ -267,7 +267,7 @@ interface ConversationBinding {
 }
 ```
 
-单用户版本可只保存在内存中。多用户版本通过 `StateStore` 持久化绑定，但不保存 Codex 会话内容。
+当前实现通过 SQLite `StateStore` 持久化最小绑定，以便 Gateway 重启后恢复 Telegram 的当前 Thread；不保存 Codex 会话内容。
 
 ### 6.4 Internal Event Bus
 
@@ -467,10 +467,9 @@ interface StateStore {
 }
 ```
 
-建议：
+当前选择：
 
-- 单用户、单 Gateway：MemoryStore，无数据库。
-- 多用户单机：SQLite，只保存绑定、Workspace 和权限。
+- 单机 Gateway：SQLite，只保存绑定；后续 Workspace 切换落地时可增加 Workspace ID。
 - 多实例部署：PostgreSQL。
 - 只有出现分布式队列或锁需求时才引入 Redis。
 
@@ -538,8 +537,7 @@ Codex Skill 适合描述模型工作流，不适合实现 Gateway 的实时 Tran
 ### Gateway 重启
 
 - App Server 与 CLI 继续运行。
-- 单用户模式通过 Workspace 最新 Thread 自动接续。
-- 多用户模式从 StateStore 恢复绑定。
+- 从 StateStore 恢复绑定，并通过 `thread/resume` 验证 Thread 仍然有效。
 - Pending Approval 不进行盲目恢复，以 App Server 当前请求状态为准。
 
 ## 12. 测试策略
@@ -595,7 +593,7 @@ Codex Skill 适合描述模型工作流，不适合实现 Gateway 的实时 Tran
 - Python Bridge Runtime。
 - `codex app-server --stdio` 子进程管理。
 - 自定义 LocalControlServer 和自定义 CLI 协议。
-- SQLite 会话历史或 Telegram 会话历史存储。
+- 复制 Codex 会话内容的 SQLite 会话历史或 Telegram 消息历史存储。
 - 直接依赖 Codex 内部会话文件的任何代码。
 
 ## 14. 分阶段实施建议
@@ -660,14 +658,13 @@ Codex Skill 适合描述模型工作流，不适合实现 Gateway 的实时 Tran
 - [ ] Unix WebSocket 与 stdio Transport 通过同一套协议契约测试。
 - [ ] CLI 创建的 Thread 能被 Telegram 接续。
 - [ ] Telegram 创建的 Thread 能被 CLI 接续。
-- [ ] Gateway 重启不会终止 App Server 或丢失 Thread。
+- [x] Gateway 重启不会终止 App Server，并从 StateStore 恢复有效 Thread 绑定。
 - [ ] Telegram API 超时不会阻塞 App Server Reader。
 - [ ] `/new` 和 `/resume` 会正确 unsubscribe 旧 Thread。
 - [ ] Telegram 发起 Turn 的审批、用户输入和 MCP elicitation 有完整处理逻辑。
 - [ ] CLI 发起 Turn 的交互请求不会被 Gateway 错误接管。
 - [ ] 所有 Thread 查询显式指定 Workspace 与 `sourceKinds`。
-- [ ] 单用户模式不依赖业务数据库。
-- [ ] 多用户模式只持久化绑定和权限，不复制 Codex 会话历史。
+- [x] SQLite StateStore 只持久化绑定，不复制 Codex 会话历史。
 - [ ] 真实 App Server 集成测试通过。
 - [ ] 旧命令和必要产品行为完成对照验收。
 

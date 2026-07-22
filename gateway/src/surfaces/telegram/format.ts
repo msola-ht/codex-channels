@@ -1,5 +1,6 @@
 import type { Thread } from "../../codex-protocol/index.js";
 import type { CodexAppServerClient } from "../../codex-client/client.js";
+import type { ConversationStatus } from "../../conversation-core/service.js";
 
 export function splitTelegramText(text: string, limit = 4_000): string[] {
   if (!text) {
@@ -77,14 +78,100 @@ export function formatPlugins(result: Awaited<ReturnType<CodexAppServerClient["l
 
 export function formatUsage(result: Awaited<ReturnType<CodexAppServerClient["accountUsage"]>>): string {
   const summary = result.summary;
-  return [
+  const daily = [...(result.dailyUsageBuckets ?? [])]
+    .sort((left, right) => right.startDate.localeCompare(left.startDate))
+    .slice(0, 7);
+  const lines = [
     "Codex 用量摘要：",
-    `累计 Tokens：${formatMetric(summary.lifetimeTokens)}`,
-    `单日峰值：${formatMetric(summary.peakDailyTokens)}`,
+    `累计 Tokens：${formatMillions(summary.lifetimeTokens)}`,
+    `单日峰值：${formatMillions(summary.peakDailyTokens)}`,
     `最长 Turn：${formatMetric(summary.longestRunningTurnSec)} 秒`,
     `当前连续天数：${formatMetric(summary.currentStreakDays)}`,
     `最长连续天数：${formatMetric(summary.longestStreakDays)}`,
-  ].join("\n");
+    "",
+    "最近每日用量：",
+  ];
+  if (daily.length === 0) {
+    lines.push("暂无每日数据");
+  } else {
+    lines.push(...daily.map((bucket) => `- ${bucket.startDate}：${formatMillions(bucket.tokens)}`));
+  }
+  return lines.join("\n");
+}
+
+export function formatLimits(
+  result: Awaited<ReturnType<CodexAppServerClient["accountRateLimits"]>>,
+): string {
+  const configured = result.rateLimitsByLimitId
+    ? Object.entries(result.rateLimitsByLimitId).filter((entry) => entry[1] !== undefined)
+    : [];
+  const snapshots = configured.length > 0
+    ? configured
+    : [[result.rateLimits.limitId ?? "codex", result.rateLimits] as const];
+  const lines = ["Codex 额度："];
+  const planType = snapshots.find((entry) => entry[1]?.planType)?.[1]?.planType;
+  lines.push(`套餐：${planType ? formatPlanType(planType) : "未知"}`);
+  for (const [fallbackId, snapshot] of snapshots) {
+    if (!snapshot) {
+      continue;
+    }
+    const label = snapshot.limitName ?? snapshot.limitId ?? fallbackId;
+    lines.push("", `${label}：`);
+    lines.push(`主窗口：${formatRateLimitWindow(snapshot.primary)}`);
+    if (snapshot.secondary) {
+      lines.push(`次窗口：${formatRateLimitWindow(snapshot.secondary)}`);
+    }
+    if (snapshot.credits) {
+      const credits = snapshot.credits.unlimited
+        ? "无限"
+        : snapshot.credits.hasCredits
+          ? `余额 ${snapshot.credits.balance ?? "未知"}`
+          : "无可用 Credits";
+      lines.push(`Credits：${credits}`);
+    }
+    if (snapshot.individualLimit) {
+      lines.push(
+        `个人限额：已用 ${snapshot.individualLimit.used} / ${snapshot.individualLimit.limit}`,
+        `个人限额剩余：${formatPercent(snapshot.individualLimit.remainingPercent)}`,
+        `个人限额重置：${formatResetTime(snapshot.individualLimit.resetsAt)}`,
+      );
+    }
+    if (snapshot.spendControlReached !== null) {
+      lines.push(`消费控制：${snapshot.spendControlReached ? "已达到上限" : "正常"}`);
+    }
+    lines.push(`限流状态：${formatRateLimitState(snapshot.rateLimitReachedType)}`);
+  }
+  if (result.rateLimitResetCredits) {
+    lines.push("", `可用额度重置券：${result.rateLimitResetCredits.availableCount}`);
+  }
+  return lines.join("\n");
+}
+
+export function formatStatus(status: ConversationStatus): string {
+  const lines = [
+    "Codex 状态",
+    `Thread：${status.threadId ?? "尚未绑定"}`,
+    `Turn：${status.turnId ?? "空闲"}`,
+    `工作目录：${status.cwd}`,
+  ];
+  if (status.tokenUsage) {
+    const { total, last, modelContextWindow } = status.tokenUsage;
+    lines.push(
+      "",
+      "当前 Thread 用量：",
+      `累计：${formatTokenCount(total.totalTokens)}`,
+      `最近 Turn：${formatTokenCount(last.totalTokens)}`,
+      `输入：${formatTokenCount(total.inputTokens)}`,
+      `缓存输入：${formatTokenCount(total.cachedInputTokens)}`,
+      `缓存写入：${formatTokenCount(total.cacheWriteInputTokens)}`,
+      `输出：${formatTokenCount(total.outputTokens)}`,
+      `推理输出：${formatTokenCount(total.reasoningOutputTokens)}`,
+      `模型上下文窗口容量：${modelContextWindow === null ? "未知" : formatTokenCount(modelContextWindow)}`,
+    );
+  } else if (status.threadId) {
+    lines.push("", "当前 Thread 用量：等待 App Server 推送统计");
+  }
+  return lines.join("\n");
 }
 
 export function formatPermissions(
@@ -99,4 +186,94 @@ export function formatPermissions(
 
 function formatMetric(value: bigint | number | null): string {
   return value === null ? "未知" : String(value);
+}
+
+function formatMillions(value: bigint | number | null): string {
+  if (value === null) {
+    return "未知";
+  }
+  const millions = Number(value) / 1_000_000;
+  return `${millions.toLocaleString("zh-CN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} M`;
+}
+
+function formatTokenCount(value: number): string {
+  if (Math.abs(value) >= 1_000_000) {
+    return `${(value / 1_000_000).toLocaleString("zh-CN", { maximumFractionDigits: 2 })} M`;
+  }
+  if (Math.abs(value) >= 1_000) {
+    return `${(value / 1_000).toLocaleString("zh-CN", { maximumFractionDigits: 2 })} K`;
+  }
+  return value.toLocaleString("zh-CN");
+}
+
+function formatRateLimitWindow(
+  window: Awaited<ReturnType<CodexAppServerClient["accountRateLimits"]>>["rateLimits"]["primary"],
+): string {
+  if (!window) {
+    return "暂无数据";
+  }
+  const details = [`已使用 ${formatPercent(window.usedPercent)}`];
+  if (window.windowDurationMins !== null) {
+    details.push(`周期 ${formatMinutes(window.windowDurationMins)}`);
+  }
+  if (window.resetsAt !== null) {
+    details.push(`重置 ${formatResetTime(window.resetsAt)}`);
+  }
+  return details.join(" · ");
+}
+
+function formatPercent(value: number): string {
+  return `${value.toLocaleString("zh-CN", { maximumFractionDigits: 1 })}%`;
+}
+
+function formatMinutes(value: number): string {
+  if (value % 1_440 === 0) {
+    return `${value / 1_440} 天`;
+  }
+  if (value % 60 === 0) {
+    return `${value / 60} 小时`;
+  }
+  return `${value} 分钟`;
+}
+
+function formatResetTime(timestamp: number): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(timestamp * 1_000));
+}
+
+function formatPlanType(value: string): string {
+  const names: Record<string, string> = {
+    free: "Free",
+    go: "Go",
+    plus: "Plus",
+    pro: "Pro",
+    prolite: "Pro Lite",
+    team: "Team",
+    self_serve_business_usage_based: "Business（按量）",
+    business: "Business",
+    enterprise_cbp_usage_based: "Enterprise（按量）",
+    enterprise: "Enterprise",
+    edu: "Edu",
+    unknown: "未知",
+  };
+  return names[value] ?? value;
+}
+
+function formatRateLimitState(value: string | null): string {
+  const states: Record<string, string> = {
+    rate_limit_reached: "已达到速率限制",
+    workspace_owner_credits_depleted: "Workspace Credits 已耗尽",
+    workspace_member_credits_depleted: "Workspace Credits 已耗尽",
+    workspace_owner_usage_limit_reached: "Workspace 用量上限已达到",
+    workspace_member_usage_limit_reached: "Workspace 用量上限已达到",
+  };
+  return value ? (states[value] ?? value) : "正常";
 }

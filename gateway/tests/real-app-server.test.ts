@@ -50,6 +50,13 @@ suite("real Codex App Server over Unix WebSocket", () => {
     expect(Array.isArray(threads)).toBe(true);
     pino({ enabled: false }).info({ count: threads.length });
   });
+
+  it("reads account rate-limit snapshots without starting a turn", async () => {
+    const result = await client.accountRateLimits();
+
+    expect(result.rateLimits).toBeDefined();
+    expect(result.rateLimits.primary === null || typeof result.rateLimits.primary.usedPercent === "number").toBe(true);
+  });
 });
 
 suite("real Codex App Server over stdio", () => {

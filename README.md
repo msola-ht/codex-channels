@@ -19,14 +19,14 @@ launchd
     └── surfaces/telegram
 ```
 
-App Server 与 Gateway 是两个独立进程。Gateway 停止不会终止 App Server；连接中断后 Gateway 会有限次数指数退避重连、重新 `initialize` 并恢复已绑定 Thread 的订阅。Telegram 网络发送通过独立有界队列处理，不阻塞 App Server Reader。
+App Server 与 Gateway 是两个独立进程。Gateway 停止不会终止 App Server；连接中断后 Gateway 会有限次数指数退避重连、重新 `initialize` 并恢复已绑定 Thread 的订阅。Telegram 网络发送通过独立有界队列处理，不阻塞 App Server Reader。任务运行时会持续显示 Telegram 原生“正在输入”状态；同一 Turn 的 commentary 与 final 输出会流式编辑在同一个消息气泡中，Turn 完成后再定稿。
 
 详细设计和边界见 [ARCHITECTURE_REBUILD_PROPOSAL.md](ARCHITECTURE_REBUILD_PROPOSAL.md)，项目约束见 [AGENTS.md](AGENTS.md)。
 
 ## 环境要求
 
 - macOS（launchd 配置目前仅支持 macOS）
-- Node.js 22+
+- Node.js 22.13+
 - 已安装并登录的 `codex-cli 0.145.0`
 - Telegram Bot Token 和允许使用的 Telegram 用户 ID
 
@@ -48,10 +48,13 @@ CODEX_WORKDIR=/Users/you/project
 CODEX_SOCKET_PATH=/Users/you/project/.runtime/codex-app-server.sock
 CODEX_BRIDGE_SANDBOX=workspace-write
 APPROVAL_TIMEOUT_SECONDS=300
+STATE_DATABASE_PATH=./data/gateway.sqlite3
 LOG_LEVEL=info
 ```
 
 `CODEX_WORKDIR` 必须是已存在的绝对目录。Telegram 只能操作该预配置目录，不能通过聊天提交任意工作目录。Socket 父目录由安装脚本创建并设为 `0700`。
+
+`STATE_DATABASE_PATH` 只保存 Telegram chat 与当前 Codex Thread 的绑定，不保存消息、Turn、Item 或会话历史。Gateway 启动后会通过 `thread/resume` 验证并恢复绑定，因此 `/resume` 可以继续标记 `← 当前`。数据库父目录权限固定为 `0700`，文件权限为 `0600`。需要清空界面绑定时，停止 Gateway 后删除该文件即可；Codex 原生 Thread 不受影响。
 
 ## 本地前台运行
 
@@ -113,18 +116,22 @@ npm run service:stop
 ## Telegram 命令
 
 - `/resume [序号|名称|Thread ID]`：列出或恢复当前工作目录下的原生 Codex Thread
-- `/new`：解除当前绑定，下一条普通消息创建新 Thread
-- `/status`：查看当前 Thread、Turn 和工作目录
+- `/new`：解除并删除当前持久化绑定，下一条普通消息创建新 Thread
+- `/status`：查看当前 Thread、Turn、工作目录及 App Server 已推送的 Thread Token 统计
 - `/stop`：中断活动 Turn
 - `/rename <名称>`、`/compact`、`/fork`
 - `/review [branch <分支>|commit <SHA>|custom <说明>]`
 - `/model`、`/skills`、`/mcp`、`/plugins`
-- `/usage`、`/permissions`
+- `/usage`：显示账号级 Token 汇总（M）和最近 7 个有数据日期的每日用量
+- `/limits`：显示套餐、主/次额度窗口、重置时间、Credits 和限流状态
+- `/permissions`
 - `/goal [set <目标>|clear]`
 - `/cancel`：取消当前审批、用户输入或 MCP 交互
 - `/whoami`：显示 Telegram 用户 ID
 
 普通文本会发送给当前 Thread；若当前 Turn 正在执行，则通过 `turn/steer` 追加。首次消息会在 `cli`、`vscode`（当前版本 Remote TUI 的来源标记）和 `appServer` 来源中选择当前目录最近的空闲且未绑定 Thread；不会自动接入活动 Thread。
+
+当前 Thread 绑定会写入本机 StateStore。Gateway 重启后会恢复有效绑定；如果对应 Thread 已删除或无法恢复，绑定会自动清理并要求重新 `/resume`。
 
 ## 审批和安全
 

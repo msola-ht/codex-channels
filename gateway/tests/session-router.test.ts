@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CodexAppServerClient } from "../src/codex-client/client.js";
 import type { Thread } from "../src/codex-protocol/index.js";
-import { MemoryBindingStore } from "../src/session-routing/memory-bindings.js";
+import { MemoryBindingStore } from "../src/storage/memory-binding-store.js";
 import { SessionRouter } from "../src/session-routing/router.js";
 
 const target = { surface: "telegram" as const, conversationId: "100" };

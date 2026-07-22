@@ -1,5 +1,5 @@
 import type { CodexAppServerClient } from "../codex-client/client.js";
-import type { Thread } from "../codex-protocol/index.js";
+import type { Thread, ThreadTokenUsage } from "../codex-protocol/index.js";
 import type { ReviewTarget } from "../codex-protocol/index.js";
 import type { SessionRouter } from "../session-routing/router.js";
 import { ConversationCore } from "./core.js";
@@ -15,6 +15,7 @@ export interface ConversationStatus {
   threadId?: string;
   turnId?: string;
   cwd: string;
+  tokenUsage?: ThreadTokenUsage;
 }
 
 export class ConversationService {
@@ -139,6 +140,10 @@ export class ConversationService {
     return this.codex.accountUsage();
   }
 
+  accountRateLimits(): ReturnType<CodexAppServerClient["accountRateLimits"]> {
+    return this.codex.accountRateLimits();
+  }
+
   listPermissionProfiles(): ReturnType<CodexAppServerClient["listPermissionProfiles"]> {
     return this.codex.listPermissionProfiles();
   }
@@ -171,9 +176,11 @@ export class ConversationService {
   status(target: ConversationTarget): ConversationStatus {
     const binding = this.router.current(target);
     const active = this.core.activeTurn(target);
+    const tokenUsage = binding ? this.core.tokenUsage(binding.threadId) : undefined;
     return {
       ...(binding ? { threadId: binding.threadId } : {}),
       ...(active ? { turnId: active.turnId } : {}),
+      ...(tokenUsage ? { tokenUsage } : {}),
       cwd: this.cwd,
     };
   }

@@ -1,14 +1,14 @@
 import type { CodexAppServerClient } from "../codex-client/client.js";
 import type { Thread } from "../codex-protocol/index.js";
 import type { ConversationTarget } from "../conversation-core/events.js";
-import { MemoryBindingStore, type ConversationBinding } from "./memory-bindings.js";
+import type { BindingStore, ConversationBinding } from "../storage/binding-store.js";
 
 export class SessionRouter {
   private readonly forceNew = new Set<string>();
 
   constructor(
     private readonly codex: CodexAppServerClient,
-    private readonly bindings: MemoryBindingStore,
+    private readonly bindings: BindingStore,
   ) {}
 
   current(target: ConversationTarget): ConversationBinding | undefined {

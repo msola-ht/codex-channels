@@ -9,11 +9,13 @@ import type { EventBus } from "../../event-bus/event-bus.js";
 import type { TelegramAccessPolicy } from "../../policy/telegram-access.js";
 import {
   formatMcpServers,
+  formatLimits,
   formatModels,
   formatPermissions,
   formatPlugins,
   formatSessions,
   formatSkills,
+  formatStatus,
   formatUsage,
   splitTelegramText,
 } from "./format.js";
@@ -92,6 +94,7 @@ export class TelegramSurface {
         { command: "mcp", description: "列出 MCP Servers" },
         { command: "plugins", description: "列出 Plugins" },
         { command: "usage", description: "查看账号用量" },
+        { command: "limits", description: "查看套餐与额度" },
         { command: "permissions", description: "查看权限配置" },
         { command: "goal", description: "查看或管理 Goal" },
         { command: "cancel", description: "取消当前交互请求" },
@@ -225,7 +228,7 @@ export class TelegramSurface {
           "/fork",
           "/review [branch <分支>|commit <SHA>|custom <说明>]",
           "/model",
-          "/skills · /mcp · /plugins · /usage · /permissions",
+          "/skills · /mcp · /plugins · /usage · /limits · /permissions",
           "/goal [set <目标>|clear]",
           "/cancel",
         ].join("\n"),
@@ -237,15 +240,7 @@ export class TelegramSurface {
       await context.reply("已退出当前会话，下一条普通消息将创建新的 Codex Thread。");
     });
     this.bot.command("status", async (context) => {
-      const status = this.service.status(target(context));
-      await context.reply(
-        [
-          "Codex 状态",
-          `Thread：${status.threadId ?? "尚未绑定"}`,
-          `Turn：${status.turnId ?? "空闲"}`,
-          `工作目录：${status.cwd}`,
-        ].join("\n"),
-      );
+      await context.reply(formatStatus(this.service.status(target(context))));
     });
     this.bot.command("stop", async (context) => {
       const stopped = await this.service.stop(target(context));
@@ -283,6 +278,9 @@ export class TelegramSurface {
     });
     this.bot.command("usage", async (context) => {
       await this.replyChunks(context, formatUsage(await this.service.accountUsage()));
+    });
+    this.bot.command("limits", async (context) => {
+      await this.replyChunks(context, formatLimits(await this.service.accountRateLimits()));
     });
     this.bot.command("permissions", async (context) => {
       await this.replyChunks(context, formatPermissions(await this.service.listPermissionProfiles()));
@@ -356,6 +354,9 @@ export class TelegramSurface {
       }
       return;
     }
+    const stopTyping = context.message?.text && context.chat
+      ? this.outbox.beginTyping(String(context.chat.id))
+      : undefined;
     try {
       await next();
     } catch (error) {
@@ -363,6 +364,8 @@ export class TelegramSurface {
       if (context.chat) {
         await context.reply(`操作失败：${error instanceof Error ? error.message : String(error)}`);
       }
+    } finally {
+      stopTyping?.();
     }
   }
 }

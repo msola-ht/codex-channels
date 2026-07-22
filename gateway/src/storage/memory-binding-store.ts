@@ -1,12 +1,7 @@
 import type { ConversationTarget } from "../conversation-core/events.js";
+import type { BindingStore, ConversationBinding } from "./binding-store.js";
 
-export interface ConversationBinding {
-  target: ConversationTarget;
-  threadId: string;
-  sessionId: string;
-}
-
-export class MemoryBindingStore {
+export class MemoryBindingStore implements BindingStore {
   private readonly byConversation = new Map<string, ConversationBinding>();
   private readonly byThread = new Map<string, ConversationBinding>();
 
@@ -24,13 +19,13 @@ export class MemoryBindingStore {
 
   bind(binding: ConversationBinding): void {
     const conversationKey = this.key(binding.target);
-    const previous = this.byConversation.get(conversationKey);
-    if (previous && previous.threadId !== binding.threadId) {
-      this.byThread.delete(previous.threadId);
-    }
     const owner = this.byThread.get(binding.threadId);
     if (owner && this.key(owner.target) !== conversationKey) {
       throw new Error("该 Codex Thread 已绑定到其他会话");
+    }
+    const previous = this.byConversation.get(conversationKey);
+    if (previous && previous.threadId !== binding.threadId) {
+      this.byThread.delete(previous.threadId);
     }
     this.byConversation.set(conversationKey, binding);
     this.byThread.set(binding.threadId, binding);
@@ -45,6 +40,8 @@ export class MemoryBindingStore {
     }
     return binding;
   }
+
+  close(): void {}
 
   private key(target: ConversationTarget): string {
     return `${target.surface}:${target.conversationId}`;

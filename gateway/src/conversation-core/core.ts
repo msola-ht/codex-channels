@@ -1,4 +1,5 @@
 import type { RpcNotification } from "../codex-client/json-rpc.js";
+import type { ThreadTokenUsage } from "../codex-protocol/index.js";
 import type { EventBus } from "../event-bus/event-bus.js";
 import type { SessionRouter } from "../session-routing/router.js";
 import { type ConversationTarget, type OutputEvent, isCriticalOutputEvent } from "./events.js";
@@ -23,9 +24,15 @@ function stringField(record: Record<string, unknown> | undefined, name: string):
   return typeof value === "string" ? value : undefined;
 }
 
+function numberField(record: Record<string, unknown> | undefined, name: string): number | undefined {
+  const value = record?.[name];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 export class ConversationCore {
   private readonly activeByConversation = new Map<string, ActiveTurn>();
   private readonly errorsByTurn = new Map<string, string>();
+  private readonly usageByThread = new Map<string, ThreadTokenUsage>();
 
   constructor(
     private readonly router: SessionRouter,
@@ -34,15 +41,21 @@ export class ConversationCore {
 
   markTurnStarted(target: ConversationTarget, threadId: string, turnId: string): void {
     this.activeByConversation.set(this.key(target), { target, threadId, turnId });
+    this.publish({ type: "turn.started", target, threadId, turnId });
   }
 
   activeTurn(target: ConversationTarget): ActiveTurn | undefined {
     return this.activeByConversation.get(this.key(target));
   }
 
+  tokenUsage(threadId: string): ThreadTokenUsage | undefined {
+    return this.usageByThread.get(threadId);
+  }
+
   connectionLost(message: string): void {
     this.activeByConversation.clear();
     this.errorsByTurn.clear();
+    this.usageByThread.clear();
     for (const binding of this.router.allBindings()) {
       this.publish({
         type: "warning",
@@ -58,6 +71,13 @@ export class ConversationCore {
     const threadId = stringField(params, "threadId");
 
     switch (notification.method) {
+      case "thread/tokenUsage/updated": {
+        const tokenUsage = parseThreadTokenUsage(asRecord(params?.tokenUsage));
+        if (threadId && tokenUsage) {
+          this.usageByThread.set(threadId, tokenUsage);
+        }
+        return;
+      }
       case "item/agentMessage/delta": {
         const turnId = stringField(params, "turnId");
         const itemId = stringField(params, "itemId");
@@ -149,6 +169,7 @@ export class ConversationCore {
           return;
         }
         const target = this.router.forgetThread(threadId);
+        this.usageByThread.delete(threadId);
         if (target) {
           this.activeByConversation.delete(this.key(target));
         }
@@ -183,4 +204,37 @@ export class ConversationCore {
   private key(target: ConversationTarget): string {
     return `${target.surface}:${target.conversationId}`;
   }
+}
+
+function parseThreadTokenUsage(record: Record<string, unknown> | undefined): ThreadTokenUsage | undefined {
+  const total = parseTokenUsageBreakdown(asRecord(record?.total));
+  const last = parseTokenUsageBreakdown(asRecord(record?.last));
+  const context = record?.modelContextWindow;
+  if (!total || !last || (context !== null && (typeof context !== "number" || !Number.isFinite(context)))) {
+    return undefined;
+  }
+  return { total, last, modelContextWindow: context };
+}
+
+function parseTokenUsageBreakdown(record: Record<string, unknown> | undefined): ThreadTokenUsage["total"] | undefined {
+  const totalTokens = numberField(record, "totalTokens");
+  const inputTokens = numberField(record, "inputTokens");
+  const cachedInputTokens = numberField(record, "cachedInputTokens");
+  const cacheWriteInputTokens = numberField(record, "cacheWriteInputTokens");
+  const outputTokens = numberField(record, "outputTokens");
+  const reasoningOutputTokens = numberField(record, "reasoningOutputTokens");
+  if (
+    totalTokens === undefined || inputTokens === undefined || cachedInputTokens === undefined ||
+    cacheWriteInputTokens === undefined || outputTokens === undefined || reasoningOutputTokens === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    totalTokens,
+    inputTokens,
+    cachedInputTokens,
+    cacheWriteInputTokens,
+    outputTokens,
+    reasoningOutputTokens,
+  };
 }

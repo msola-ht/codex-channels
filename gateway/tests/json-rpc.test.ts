@@ -49,6 +49,29 @@ class FakeTransport extends BaseTransport {
           }),
         ),
       );
+    } else if (decoded.method === "account/rateLimits/read") {
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({
+            id: decoded.id,
+            result: {
+              rateLimits: {
+                limitId: "codex",
+                limitName: null,
+                primary: null,
+                secondary: null,
+                credits: null,
+                individualLimit: null,
+                spendControlReached: null,
+                planType: "pro",
+                rateLimitReachedType: null,
+              },
+              rateLimitsByLimitId: null,
+              rateLimitResetCredits: null,
+            },
+          }),
+        ),
+      );
     }
   }
 
@@ -136,5 +159,20 @@ describe("JsonRpcClient", () => {
       sourceKinds: ["cli", "vscode", "appServer"],
       useStateDbOnly: true,
     });
+  });
+
+  it("reads account rate limits through the stable App Server method", async () => {
+    const transport = new FakeTransport();
+    const rpc = new JsonRpcClient(transport);
+    const client = new CodexAppServerClient(rpc, {
+      cwd: "/tmp/project",
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    const result = await client.accountRateLimits();
+
+    expect(result.rateLimits.planType).toBe("pro");
+    expect(transport.sent.some((message) => message.method === "account/rateLimits/read")).toBe(true);
   });
 });
