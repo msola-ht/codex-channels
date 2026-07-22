@@ -52,7 +52,7 @@ ensure_loaded() {
 start_job() {
   local label="$1"
   local plist="$2"
-  ensure_loaded "$label" "$plist"
+  ensure_loaded "$label" "$plist" || return $?
   launchctl kickstart -k "$user_domain/$label"
 }
 
@@ -75,9 +75,9 @@ case "$action" in
     print "用户配置与运行数据保留在 ~/.codex-connect。"
     ;;
   restart)
-    start_job "$app_label" "$agents_dir/$app_label.plist"
+    print "正在重启 Gateway..."
     start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
-    print "Codex App Server 与 Gateway 已重启。"
+    print "Gateway 已重启；Codex App Server 保持运行。"
     ;;
   status)
     launchctl print "$user_domain/$app_label" 2>/dev/null || true

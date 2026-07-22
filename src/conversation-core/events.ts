@@ -1,4 +1,4 @@
-import type { MessagePhase } from "../codex-protocol/index.js";
+import type { MessagePhase, ThreadTokenUsage } from "../codex-protocol/index.js";
 
 export interface ConversationTarget {
   surface: "telegram";
@@ -38,7 +38,7 @@ export type OutputEvent =
   | { type: "text.delta"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null }
   | { type: "text.completed"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null }
   | { type: "operation.updated"; target: ConversationTarget; threadId: string; turnId: string; operation: OperationUpdate }
-  | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: string; error?: string }
+  | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: string; error?: string; tokenUsage?: ThreadTokenUsage }
   | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string }
   | { type: "connection.lost"; target: ConversationTarget; threadId: string; message: string }
   | { type: "warning"; target: ConversationTarget; threadId?: string; message: string };

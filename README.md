@@ -23,7 +23,7 @@ launchd
 
 仓库是单一 npm 包：业务源码位于根目录 `src/`，测试位于 `tests/`，构建入口为 `dist/main.js`。模块边界通过目录和自动化测试约束，不使用额外的 `gateway/` 包装层。
 
-App Server 与 Gateway 是两个独立进程。Gateway 停止不会终止 App Server；连接中断后 Gateway 会有限次数指数退避重连、重新 `initialize` 并恢复已绑定 Thread 的订阅。Telegram 网络发送通过独立有界队列处理，不阻塞 App Server Reader。任务运行超过短暂延迟后会持续显示 Telegram 原生“正在输入”状态；收到第一批流式 delta 后发送正式消息，后续 delta 限速编辑同一消息，`item/completed` 再用权威文本定稿。`commentary` 进度与 `final_answer` 最终答复分开渲染，第一条最终答复通过 Telegram 原生回复关联到发起该 Turn 的输入。CLI 等外部客户端在已绑定 Thread 中发起 Turn 时，Telegram 会把外部文本渲染为引用式 `CLI 输入` 消息；Gateway 自己发起的输入通过协议 client ID 去重，不会重复回显。连接断开会停止后续编辑和“正在输入”状态，已经发出的正式消息仍保留。
+App Server 与 Gateway 是两个独立进程。Gateway 停止不会终止 App Server；连接中断后 Gateway 会有限次数指数退避重连、重新 `initialize` 并恢复已绑定 Thread 的订阅。Telegram 网络发送通过独立有界队列处理，不阻塞 App Server Reader。任务运行超过短暂延迟后会持续显示 Telegram 原生“正在输入”状态；收到第一批流式 delta 后发送正式消息，后续 delta 限速编辑同一消息，`item/completed` 再用权威文本定稿。`commentary` 进度与 `final_answer` 最终答复分开渲染，第一条最终答复通过 Telegram 原生回复关联到发起该 Turn 的输入；每轮结束后再显示 App Server 报告的当前上下文用量与模型窗口占比。CLI 等外部客户端在已绑定 Thread 中发起 Turn 时，Telegram 会把外部文本渲染为引用式 `CLI 输入` 消息；Gateway 自己发起的输入通过协议 client ID 去重，不会重复回显。连接断开会停止后续编辑和“正在输入”状态，已经发出的正式消息仍保留。
 
 命令执行、文件修改、MCP/App 工具、网页搜索、图片操作、子代理和 Plan 等 App Server Item 会在 Telegram 中按回复分段为“操作过程”消息，并限速更新运行、完成或失败状态；Codex 每开始一段回复就定稿前一段操作，后续新操作另发消息，因此时间线可以按“过程 → 回复 → 过程 → 回复”交替展示。消息使用图标标题、命令代码块和路径/工具引用块呈现，连续且内容相同的操作会合并显示次数。操作过程不展示完整 stdout 或工具参数；可见命令会清洗常见 Token、密码、Cookie、Authorization 和 URL 凭据，过长记录只保留最近操作。
 
@@ -207,6 +207,8 @@ codexc service uninstall
 ```
 
 `service install` 生成并启动 App Server 与 Gateway 两个独立的用户级 launchd 服务；重复执行时会先卸载旧实例，再加载新 plist。Linux 当前没有系统服务安装器，可使用 `codexc start` 前台运行。用户配置目录解析本身不依赖 macOS，但 Windows 尚未适配当前 Unix WebSocket Transport，暂不属于可运行平台。
+
+`service restart` 只重启承载项目代码的 Gateway，共享 App Server、当前 Thread 和正在执行的 Turn 保持运行，因此可以安全地从 Telegram 发起。升级 Codex CLI、修改 App Server 启动参数或重新生成 launchd 配置时，应在本机终端执行 `codexc service install`，由安装流程重新加载两个服务。
 
 `service uninstall` 会停止并删除两个 launchd 服务配置，但保留 `~/.codex-connect` 下的配置、Workspace、SQLite 状态和日志；重新执行 `codexc service install` 即可恢复常驻服务。
 

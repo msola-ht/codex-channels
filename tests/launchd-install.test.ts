@@ -161,12 +161,15 @@ describe("launchd installer", () => {
 
     expect(started).toContain("已启动");
     expect(stopped).toContain("已停止");
-    expect(restarted).toContain("已重启");
+    expect(restarted).toContain("Gateway 已重启");
+    expect(restarted).toContain("App Server 保持运行");
     expect(startCalls).toContain("bootstrap");
     expect(startCalls).toContain("kickstart -k");
     expect(stopCalls).toContain("bootout");
     expect(restartCalls).not.toContain("bootout");
     expect(restartCalls).not.toContain("bootstrap");
     expect(restartCalls).toContain("kickstart -k");
+    expect(restartCalls).toContain("com.msola.codex-gateway");
+    expect(restartCalls).not.toContain("com.msola.codex-app-server");
   });
 });

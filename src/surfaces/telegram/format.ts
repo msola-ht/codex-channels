@@ -6,6 +6,7 @@ import type {
   PluginListResponse,
   SkillsListResponse,
   Thread,
+  ThreadTokenUsage,
 } from "../../codex-protocol/index.js";
 import type { ConversationStatus, ModelSelectionState } from "../../application/index.js";
 import type { Workspace } from "../../policy/index.js";
@@ -213,6 +214,19 @@ export function formatStatus(status: ConversationStatus): string {
     lines.push("", "当前 Thread 用量：等待 App Server 推送统计");
   }
   return lines.join("\n");
+}
+
+export function formatContextUsage(usage: ThreadTokenUsage): string {
+  const current = usage.last.totalTokens;
+  const capacity = usage.modelContextWindow;
+  if (capacity === null || capacity <= 0) {
+    return `上下文：${formatTokenCount(current)}`;
+  }
+  const percent = Math.max(0, current / capacity * 100);
+  return `上下文：${formatTokenCount(current)} / ${formatTokenCount(capacity)}（${percent.toLocaleString("zh-CN", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })}%）`;
 }
 
 export function formatWorkspaces(workspaces: Workspace[], currentWorkspaceId: string): string {

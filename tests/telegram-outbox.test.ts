@@ -366,6 +366,29 @@ describe("TelegramOutbox", () => {
     expect(api.sendOptions[1]).toEqual({});
   });
 
+  it("reports current context usage after the turn's final reply", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle(textCompleted("final", "处理完成", "final_answer"));
+    outbox.handle({
+      ...turnCompleted(),
+      tokenUsage: {
+        total: tokenBreakdown(80_000),
+        last: tokenBreakdown(24_600),
+        modelContextWindow: 258_000,
+      },
+    });
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual([
+      "处理完成",
+      "上下文：24.6 K / 258 K（9.5%）",
+    ]);
+  });
+
   it("finalizes completed stream content during graceful shutdown", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();
@@ -513,4 +536,15 @@ function userInputInteraction() {
 async function settle(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
+}
+
+function tokenBreakdown(totalTokens: number) {
+  return {
+    totalTokens,
+    inputTokens: totalTokens - 500,
+    cachedInputTokens: 500,
+    cacheWriteInputTokens: 0,
+    outputTokens: 500,
+    reasoningOutputTokens: 100,
+  };
 }

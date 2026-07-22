@@ -6,7 +6,7 @@ import type { OperationUpdate, OutputEvent } from "../../conversation-core/index
 import type { MessagePhase } from "../../codex-protocol/index.js";
 import { BoundedAsyncQueue } from "../../event-bus/index.js";
 import { TelegramApiExecutor } from "./api-executor.js";
-import { splitTelegramText } from "./format.js";
+import { formatContextUsage, splitTelegramText } from "./format.js";
 import { formatOperationLog } from "./operation-format.js";
 import { TelegramTypingIndicator } from "./typing-indicator.js";
 
@@ -179,6 +179,9 @@ export class TelegramOutbox {
             await this.send(chatId, `Codex 任务失败：${event.error}`, replyTo);
           } else if (!new Set(["completed", "success"]).has(event.status)) {
             await this.send(chatId, `Codex 任务状态：${event.status}`, replyTo);
+          }
+          if (event.tokenUsage) {
+            await this.send(chatId, formatContextUsage(event.tokenUsage));
           }
           this.replyToByTurn.delete(turnKey);
           this.clearApprovalOperationsForTurn(turnKey);

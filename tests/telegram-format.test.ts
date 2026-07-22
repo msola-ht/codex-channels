@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  formatContextUsage,
   formatModels,
   formatReasoningEfforts,
   formatLimits,
@@ -243,5 +244,29 @@ describe("formatStatus", () => {
       modelPending: false,
     }))
       .toContain("等待 App Server 推送统计");
+  });
+});
+
+describe("formatContextUsage", () => {
+  it("uses the latest context count rather than cumulative thread tokens", () => {
+    expect(formatContextUsage({
+      total: {
+        totalTokens: 1_250_000,
+        inputTokens: 1_000_000,
+        cachedInputTokens: 750_000,
+        cacheWriteInputTokens: 0,
+        outputTokens: 250_000,
+        reasoningOutputTokens: 50_000,
+      },
+      last: {
+        totalTokens: 12_500,
+        inputTokens: 10_000,
+        cachedInputTokens: 7_500,
+        cacheWriteInputTokens: 0,
+        outputTokens: 2_500,
+        reasoningOutputTokens: 500,
+      },
+      modelContextWindow: 200_000,
+    })).toBe("上下文：12.5 K / 200 K（6.3%）");
   });
 });

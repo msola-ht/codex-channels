@@ -43,6 +43,7 @@ export class ConversationCore {
   private readonly activeByConversation = new Map<string, ActiveTurn>();
   private readonly errorsByTurn = new Map<string, string>();
   private readonly usageByThread = new Map<string, ThreadTokenUsage>();
+  private readonly usageTurnByThread = new Map<string, string>();
   private readonly seenUserMessages = new Set<string>();
   private readonly phaseByItem = new Map<string, MessagePhase | null>();
 
@@ -72,6 +73,7 @@ export class ConversationCore {
     this.activeByConversation.clear();
     this.errorsByTurn.clear();
     this.usageByThread.clear();
+    this.usageTurnByThread.clear();
     this.seenUserMessages.clear();
     this.phaseByItem.clear();
     for (const binding of this.router.allBindings()) {
@@ -99,9 +101,11 @@ export class ConversationCore {
         return;
       }
       case "thread/tokenUsage/updated": {
+        const turnId = stringField(params, "turnId");
         const tokenUsage = parseThreadTokenUsage(asRecord(params?.tokenUsage));
-        if (threadId && tokenUsage) {
+        if (threadId && turnId && tokenUsage) {
           this.usageByThread.set(threadId, tokenUsage);
+          this.usageTurnByThread.set(threadId, turnId);
         }
         return;
       }
@@ -196,6 +200,9 @@ export class ConversationCore {
         }
         const turnError = asRecord(turn?.error);
         const error = stringField(turnError, "message") ?? this.errorsByTurn.get(turnId);
+        const tokenUsage = this.usageTurnByThread.get(threadId) === turnId
+          ? this.usageByThread.get(threadId)
+          : undefined;
         this.errorsByTurn.delete(turnId);
         this.publish({
           type: "turn.completed",
@@ -204,6 +211,7 @@ export class ConversationCore {
           turnId,
           status,
           ...(error ? { error } : {}),
+          ...(tokenUsage ? { tokenUsage } : {}),
         });
         return;
       }
@@ -227,6 +235,7 @@ export class ConversationCore {
         }
         const target = this.router.targetForThread(threadId);
         this.usageByThread.delete(threadId);
+        this.usageTurnByThread.delete(threadId);
         this.clearSeenUserMessages(threadId);
         this.clearItemPhases(threadId);
         if (target) {

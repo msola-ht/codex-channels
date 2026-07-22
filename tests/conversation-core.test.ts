@@ -39,6 +39,58 @@ describe("ConversationCore", () => {
     await output.close();
   });
 
+  it("attaches only the completed turn's context usage to its output event", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, conversationId: "100" };
+    const router = {
+      allBindings: () => [],
+      targetForThread: () => target,
+    } satisfies ConversationRoutingPort;
+    const core = new ConversationCore(router, output);
+
+    core.handle({
+      method: "thread/tokenUsage/updated",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        tokenUsage: {
+          total: breakdown(20_000),
+          last: breakdown(12_500),
+          modelContextWindow: 200_000,
+        },
+      },
+    });
+    core.handle({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed", error: null },
+      },
+    });
+    core.handle({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-2", status: "completed", error: null },
+      },
+    });
+    await output.close();
+
+    const completions = events.filter((event) => event.type === "turn.completed");
+    expect(completions[0]).toMatchObject({
+      turnId: "turn-1",
+      tokenUsage: {
+        last: { totalTokens: 12_500 },
+        modelContextWindow: 200_000,
+      },
+    });
+    expect(completions[1]).not.toHaveProperty("tokenUsage");
+  });
+
   it("publishes external turn input once and tracks the external active turn", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const events: OutputEvent[] = [];

@@ -226,7 +226,7 @@ function printHelp() {
   service uninstall            卸载 launchd 服务并保留用户数据
   service start                启动 launchd 服务
   service stop                 停止 launchd 服务
-  service restart              重启 launchd 服务
+  service restart              重启 Gateway，保持 App Server 运行
   service status               查看 launchd 服务状态
   config                       显示用户配置路径
   version                      显示版本

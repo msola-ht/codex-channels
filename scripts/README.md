@@ -22,6 +22,6 @@
 - `clean-dist.mjs`：构建前清理 `dist/`。
 - `prepare-package.mjs`：npm 打包前构建源码，并验证已安装包包含运行入口。
 - `install-launchd.mjs`：渲染并安装 launchd plist。
-- `launchd-control.sh`：启停、重启、查看和卸载两个 launchd 服务。
+- `launchd-control.sh`：启停、查看和卸载两个 launchd 服务；日常重启只更新 Gateway，保持共享 App Server 和活动 Turn 运行。
 
 脚本不得把凭据写入 npm 安装目录；用户配置、SQLite、Socket 和日志必须留在用户级 `.codex-connect`。
