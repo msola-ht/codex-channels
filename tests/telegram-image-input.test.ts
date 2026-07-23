@@ -169,7 +169,7 @@ function createSurface(
     [{ id: "main", name: "Main", cwd: "/workspace" }],
     directory,
     pino({ level: "silent" }),
-    imageStore,
+    { imageStore },
   );
   surface.bot.botInfo = {
     id: 999,

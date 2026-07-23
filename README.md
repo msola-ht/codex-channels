@@ -88,6 +88,8 @@ codexc service uninstall         # 卸载服务并保留用户数据
 
 macOS 从旧版本升级后执行一次 `codexc service install`，安装器会将旧 `com.msola.*` launchd Job 迁移到 `com.hegenai.*`，并保留用户数据。Linux 使用 `systemctl --user` 管理两个独立服务，`service restart` 只重启 Gateway。
 
+Telegram 与 App Server 均采用有界退避重连；连续失败耗尽后 Gateway 会退出，由 launchd 或 systemd 自动拉起，避免进程存活但不再接收消息。
+
 ## Telegram 命令
 
 - 会话：`/new`、`/resume`、`/sessions`、`/archived`、`/archive`、`/unarchive`

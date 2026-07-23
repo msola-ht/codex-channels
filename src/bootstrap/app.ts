@@ -68,6 +68,7 @@ export class GatewayApplication {
       config.workspaces,
       join(dirname(config.stateDatabasePath), "uploads"),
       logger,
+      { onFatal: (error) => this.handleTelegramFatal(error) },
     );
     this.approval = new ApprovalCoordinator(this.router, this.telegram.interactions, config.approvalTimeoutMs);
     this.inbound.subscribe("conversation-core", (notification) => {
@@ -186,6 +187,18 @@ export class GatewayApplication {
       await this.stop();
       process.exitCode = 1;
     }
+  }
+
+  private handleTelegramFatal(error: Error): void {
+    if (this.stopping) {
+      return;
+    }
+    this.logger.fatal({ err: error }, "Telegram 连接重试耗尽，Gateway 将停止以交由进程管理器重启");
+    process.exitCode = 1;
+    void this.stop().catch((stopError) => {
+      this.logger.error({ err: stopError }, "Telegram 故障后停止 Gateway 失败");
+      process.exitCode = 1;
+    });
   }
 
   private async restoreBindings(): Promise<boolean> {

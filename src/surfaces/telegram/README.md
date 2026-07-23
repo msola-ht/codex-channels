@@ -10,7 +10,7 @@
 - `operation-format.ts`：把操作记录分组、截断、脱敏并渲染为 Telegram HTML。
 - `typing-indicator.ts`：维护活动请求和 Turn 的 Typing 状态、刷新与限速。
 - `interactions.ts`：发送一次性审批或用户输入卡片，处理超时、回调和跨客户端失效。
-- `lifecycle.ts`：Bot 命令注册、Long Polling、启动联通通知和可取消关闭。
+- `lifecycle.ts`：Bot 命令注册、Long Polling、启动联通通知和可取消关闭；有界重试耗尽后上报致命故障，由进程管理器恢复 Gateway。
 - `api-executor.ts`：统一执行 Telegram API 调用，处理超时、限流和有限重试。
 - `format.ts`：格式化会话、Diff/Plan、模型、Workspace、权限、用量和状态文本。
 - `image-store.ts`：安全下载、校验、暂存和过期清理 Telegram 图片。

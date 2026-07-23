@@ -39,6 +39,11 @@ export interface TelegramImagePort {
   ): ReturnType<TelegramImageStore["download"]>;
 }
 
+export interface TelegramSurfaceOptions {
+  onFatal?: (error: Error) => void;
+  imageStore?: TelegramImagePort;
+}
+
 export class TelegramSurface {
   readonly bot: Bot;
   readonly interactions: TelegramInteractionPort;
@@ -57,7 +62,7 @@ export class TelegramSurface {
     workspaces: Workspace[],
     uploadsDirectory: string,
     private readonly logger: Logger,
-    imageStore?: TelegramImagePort,
+    options: TelegramSurfaceOptions = {},
   ) {
     this.bot = new Bot(token, {
       client: {
@@ -71,19 +76,24 @@ export class TelegramSurface {
     const apiExecutor = new TelegramApiExecutor(logger);
     this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor);
     this.interactions = new TelegramInteractionPort(this.bot, logger, apiExecutor, this.outbox);
-    this.imageStore = imageStore ?? new TelegramImageStore(uploadsDirectory, token, proxyUrl, logger);
-    this.lifecycle = new TelegramLifecycle(this.bot, logger, {
-      messages: () => [...startupRecipients].map((chatId) => {
-        const status = this.service.status({
-          surface: "telegram",
-          conversationId: String(chatId),
-        });
-        return {
-          chatId,
-          text: formatStartupNotification(workspaces, status),
-        };
-      }),
-    });
+    this.imageStore = options.imageStore ?? new TelegramImageStore(uploadsDirectory, token, proxyUrl, logger);
+    this.lifecycle = new TelegramLifecycle(
+      this.bot,
+      logger,
+      {
+        messages: () => [...startupRecipients].map((chatId) => {
+          const status = this.service.status({
+            surface: "telegram",
+            conversationId: String(chatId),
+          });
+          return {
+            chatId,
+            text: formatStartupNotification(workspaces, status),
+          };
+        }),
+      },
+      options.onFatal,
+    );
     this.unsubscribeOutput = output.subscribe("telegram", (event) => this.outbox.handle(event));
     this.registerHandlers();
   }

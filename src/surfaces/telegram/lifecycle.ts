@@ -41,6 +41,7 @@ export class TelegramLifecycle {
     private readonly bot: Bot,
     private readonly logger: Logger,
     private readonly startupNotification?: TelegramStartupNotification,
+    private readonly onFatal?: (error: Error) => void,
   ) {}
 
   start(): void {
@@ -48,12 +49,16 @@ export class TelegramLifecycle {
     this.lifecycleAbort = new AbortController();
     this.polling = this.run(this.lifecycleAbort.signal);
     this.logger.info("Telegram Gateway 正在连接");
-    void this.polling.catch((error) =>
+    void this.polling.catch((error) => {
+      const failure = asError(error);
       this.logger.error(
-        { message: error instanceof Error ? error.message : String(error) },
+        { message: failure.message },
         "Telegram Long Polling 已停止",
-      ),
-    );
+      );
+      if (!this.stopping) {
+        this.onFatal?.(failure);
+      }
+    });
   }
 
   async stop(): Promise<void> {
@@ -212,6 +217,10 @@ export class TelegramLifecycle {
       }
     }
   }
+}
+
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 function waitWithAbort(milliseconds: number, signal: AbortSignal): Promise<void> {
