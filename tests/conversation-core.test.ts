@@ -53,6 +53,17 @@ describe("ConversationCore", () => {
       modelSettingsForThread: () => ({ model: "gpt-main", effort: "high" }),
     } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
+    core.rememberRateLimits([{
+      limitId: "codex",
+      limitName: "Codex",
+      primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: null },
+      secondary: { usedPercent: 42, windowDurationMins: 10_080, resetsAt: null },
+      credits: null,
+      individualLimit: null,
+      spendControlReached: false,
+      planType: "pro",
+      rateLimitReachedType: null,
+    }]);
 
     core.handle({
       method: "thread/tokenUsage/updated",
@@ -87,6 +98,11 @@ describe("ConversationCore", () => {
       turnId: "turn-1",
       model: "gpt-main",
       effort: "high",
+      weeklyLimit: {
+        usedPercent: 42,
+        windowDurationMins: 10_080,
+        resetsAt: null,
+      },
       tokenUsage: {
         last: { totalTokens: 12_500 },
         modelContextWindow: 200_000,
@@ -428,6 +444,46 @@ describe("ConversationCore", () => {
       name: "docs",
       status: "ready",
     }));
+  });
+
+  it("uses only the main Codex seven-day window as the weekly limit", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const core = new ConversationCore({
+      allBindings: () => [],
+      targetForThread: () => undefined,
+      modelSettingsForThread: () => undefined,
+    }, output);
+
+    core.rememberRateLimits([{
+      limitId: "code_review",
+      limitName: "Code Review",
+      primary: null,
+      secondary: { usedPercent: 88, windowDurationMins: 10_080, resetsAt: null },
+      credits: null,
+      individualLimit: null,
+      spendControlReached: false,
+      planType: "pro",
+      rateLimitReachedType: null,
+    }]);
+    expect(core.weeklyRateLimit()).toBeUndefined();
+
+    core.rememberRateLimits([{
+      limitId: "codex",
+      limitName: "Codex",
+      primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: null },
+      secondary: { usedPercent: 42, windowDurationMins: 10_080, resetsAt: 2_000_000_000 },
+      credits: null,
+      individualLimit: null,
+      spendControlReached: false,
+      planType: "pro",
+      rateLimitReachedType: null,
+    }]);
+    expect(core.weeklyRateLimit()).toEqual({
+      usedPercent: 42,
+      windowDurationMins: 10_080,
+      resetsAt: 2_000_000_000,
+    });
+    await output.close();
   });
 });
 

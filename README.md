@@ -7,8 +7,8 @@
 ## 功能
 
 - 在 Telegram 中发送文本和 PNG/JPEG 图片。
-- 查看 Codex 流式回复、格式化最终回复、操作过程、计划、Diff、用量和额度；每轮结束显示上下文、当前模型和思考强度。
-- Gateway 启动时通知当前系统、版本、App Server 返回的上游 User-Agent、本地连接与安全握手摘要、Workspace、Thread、模型和思考强度。
+- 查看 Codex 流式回复、格式化最终回复、操作过程、计划、Diff、用量和额度；每轮结束显示上下文、当前模型、思考强度和周限。
+- Gateway 启动时通知当前系统、版本、App Server 返回的上游 User-Agent、本地连接方式、Workspace、Thread、模型、思考强度和周限。
 - 处理命令、文件修改、临时权限、用户输入及 MCP 审批。
 - 在预配置 Workspace 间切换，并与原生 TUI 双向恢复 Thread。
 - 使用私有 Unix WebSocket；Gateway 与 App Server 独立运行。

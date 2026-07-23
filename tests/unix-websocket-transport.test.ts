@@ -6,10 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 
-import {
-  UnixWebSocketTransport,
-  unixWebSocketHandshakeSummary,
-} from "../src/codex-client/unix-websocket-transport.js";
+import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -49,17 +46,6 @@ describe("UnixWebSocketTransport", () => {
       expect(headers).not.toHaveProperty("authorization");
       expect(headers).not.toHaveProperty("cookie");
       expect(headers?.["sec-websocket-key"]).toMatch(/^[A-Za-z0-9+/]+=*$/);
-      expect(unixWebSocketHandshakeSummary).toEqual({
-        userAgent: null,
-        requestHeaders: [
-          "Host=localhost",
-          "Connection=Upgrade",
-          "Upgrade=websocket",
-          "Sec-WebSocket-Version=13",
-          "Sec-WebSocket-Key=动态值（不展示）",
-        ],
-        omittedHeaders: ["User-Agent", "Origin", "Authorization", "Cookie"],
-      });
     } finally {
       await transport.close();
       for (const client of webSocketServer.clients) {

@@ -31,6 +31,32 @@ describe("Telegram HTML formatter", () => {
     ]);
   });
 
+  it("keeps breathing room inside sections and separates workspace cards", () => {
+    expect(formatTelegramPanelChunks([
+      "运行环境：",
+      "│ macOS · arm64",
+      "│ ",
+      "│ Node.js v24",
+      "",
+      "Workspace（2）：",
+      "│ 1. Home",
+      "│ /Users/example",
+      "",
+      "│ 2. Project ← 当前",
+      "│ /workspace/project",
+    ].join("\n"))).toEqual([
+      [
+        "<b>运行环境：</b>",
+        "<blockquote>macOS · arm64\n\nNode.js v24</blockquote>",
+        "",
+        "<b>Workspace（2）：</b>",
+        "<blockquote>1. Home\n/Users/example</blockquote>",
+        "",
+        "<blockquote>2. Project ← 当前\n/workspace/project</blockquote>",
+      ].join("\n"),
+    ]);
+  });
+
   it("preserves diff markers inside preformatted blocks", () => {
     expect(formatTelegramDiffChunks("Turn Diff · turn-1\n\n-old <value>\n+new & value")).toEqual([
       "<b>Turn Diff · turn-1</b>\n\n<pre>-old &lt;value&gt;\n+new &amp; value</pre>",

@@ -204,7 +204,11 @@ export class TelegramOutbox {
               formatContextUsage(
                 event.tokenUsage,
                 event.model
-                  ? { model: event.model, effort: event.effort ?? null }
+                  ? {
+                      model: event.model,
+                      effort: event.effort ?? null,
+                      ...(event.weeklyLimit ? { weeklyLimit: event.weeklyLimit } : {}),
+                    }
                   : undefined,
               ),
             );

@@ -8,7 +8,6 @@ import {
   CodexAppServerClient,
   JsonRpcClient,
   UnixWebSocketTransport,
-  unixWebSocketHandshakeSummary,
   type RpcNotification,
 } from "../codex-client/index.js";
 import { protocolVersion } from "../codex-protocol/index.js";
@@ -82,10 +81,6 @@ export class GatewayApplication {
         onFatal: (error) => this.handleTelegramFatal(error),
         finalMessageFormat: config.telegramMessageFormat,
         codexUpstreamUserAgent: () => this.codexUpstreamUserAgent,
-        startupTransport: {
-          name: "Unix WebSocket",
-          ...unixWebSocketHandshakeSummary,
-        },
       },
     );
     this.approval = new ApprovalCoordinator(this.router, this.telegram.interactions, config.approvalTimeoutMs);
@@ -139,6 +134,7 @@ export class GatewayApplication {
     });
     const initialized = await this.codex.connect();
     this.codexUpstreamUserAgent = initialized.userAgent;
+    await this.refreshRateLimits();
     if (!(await this.restoreBindings())) {
       await this.codex.close();
       throw new Error("恢复 Codex Thread 订阅暂时失败，请由进程管理器重试启动");
@@ -204,6 +200,7 @@ export class GatewayApplication {
       try {
         const initialized = await this.codex.reconnect();
         this.codexUpstreamUserAgent = initialized.userAgent;
+        await this.refreshRateLimits();
         if (!(await this.restoreBindings())) {
           await this.codex.close();
           throw new Error("仍有 Codex Thread 订阅暂时无法恢复");
@@ -235,6 +232,29 @@ export class GatewayApplication {
       this.logger.error({ err: stopError }, "Telegram 故障后停止 Gateway 失败");
       process.exitCode = 1;
     });
+  }
+
+  private async refreshRateLimits(): Promise<void> {
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      const result = await Promise.race([
+        this.codex.accountRateLimits(),
+        new Promise<never>((_resolve, reject) => {
+          timeout = setTimeout(() => reject(new Error("读取 Codex 周限超时")), 5_000);
+          timeout.unref();
+        }),
+      ]);
+      const configured = Object.values(result.rateLimitsByLimitId ?? {}).filter(
+        (snapshot): snapshot is NonNullable<typeof snapshot> => snapshot !== undefined,
+      );
+      this.core.rememberRateLimits([result.rateLimits, ...configured]);
+    } catch (error) {
+      this.logger.warn({ err: error }, "读取 Codex 周限失败，启动通知暂不显示周限");
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    }
   }
 
   private async restoreBindings(): Promise<boolean> {

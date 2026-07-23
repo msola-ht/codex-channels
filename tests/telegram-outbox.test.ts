@@ -511,6 +511,11 @@ describe("TelegramOutbox", () => {
       },
       model: "gpt-5.6-sol",
       effort: "medium",
+      weeklyLimit: {
+        usedPercent: 42,
+        windowDurationMins: 10_080,
+        resetsAt: null,
+      },
     });
     await settle();
     await outbox.close();
@@ -521,6 +526,7 @@ describe("TelegramOutbox", () => {
         "<b>上下文：24.6 K / 258 K（9.5%）</b>",
         "<b>当前模型：</b>gpt-5.6-sol",
         "<b>思考强度：</b>medium",
+        "<b>周限：</b>已使用 42%",
       ].join("\n"),
     ]);
     expect(api.sendOptions[1]).toEqual({ parse_mode: "HTML" });

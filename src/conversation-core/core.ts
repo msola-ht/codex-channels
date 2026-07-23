@@ -89,6 +89,29 @@ export class ConversationCore {
     return this.usageByThread.get(threadId);
   }
 
+  rememberRateLimits(snapshots: readonly RateLimitSnapshot[]): void {
+    for (const snapshot of snapshots) {
+      const limitId = snapshot.limitId ?? "codex";
+      this.rateLimitSnapshots.set(
+        limitId,
+        mergeRateLimitSnapshot(this.rateLimitSnapshots.get(limitId), snapshot, limitId),
+      );
+    }
+  }
+
+  weeklyRateLimit(): NonNullable<RateLimitSnapshot["secondary"]> | undefined {
+    const snapshot = this.rateLimitSnapshots.get("codex");
+    if (!snapshot) {
+      return undefined;
+    }
+    for (const window of [snapshot.secondary, snapshot.primary]) {
+      if (window?.windowDurationMins === 10_080) {
+        return window;
+      }
+    }
+    return undefined;
+  }
+
   artifacts(threadId: string): TurnArtifacts | undefined {
     return this.artifactsByThread.get(threadId);
   }
@@ -258,6 +281,7 @@ export class ConversationCore {
           ? this.usageByThread.get(threadId)
           : undefined;
         const modelSettings = this.router.modelSettingsForThread(threadId);
+        const weeklyLimit = this.weeklyRateLimit();
         this.errorsByTurn.delete(turnId);
         this.publish({
           type: "turn.completed",
@@ -270,6 +294,7 @@ export class ConversationCore {
           ...(modelSettings
             ? { model: modelSettings.model, effort: modelSettings.effort }
             : {}),
+          ...(weeklyLimit ? { weeklyLimit } : {}),
         });
         return;
       }

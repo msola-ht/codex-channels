@@ -132,6 +132,11 @@ describe("formatStartupNotification", () => {
         model: "gpt-main",
         effort: "high",
         modelPending: false,
+        weeklyLimit: {
+          usedPercent: 42,
+          windowDurationMins: 10_080,
+          resetsAt: null,
+        },
       },
       {
         platform: "darwin",
@@ -140,35 +145,30 @@ describe("formatStartupNotification", () => {
         nodeVersion: "v24.18.0",
         transport: "Unix WebSocket",
         codexUpstreamUserAgent: "codex_connect_gateway/0.145.0 (Mac OS 15.7.7; arm64) dumb (codex_connect_gateway; 0.145.0)",
-        transportUserAgent: null,
-        requestHeaders: [
-          "Host=localhost",
-          "Connection=Upgrade",
-          "Upgrade=websocket",
-          "Sec-WebSocket-Version=13",
-          "Sec-WebSocket-Key=动态值（不展示）",
-        ],
-        omittedHeaders: ["User-Agent", "Origin", "Authorization", "Cookie"],
       },
     );
 
-    expect(text).toContain("Codex Connect Gateway 已联通");
-    expect(text).toContain("Codex App Server：已连接");
-    expect(text).toContain("运行系统：macOS · arm64");
-    expect(text).toContain("运行版本：Codex Connect 0.145.0 · Node.js v24.18.0");
-    expect(text).toContain("Codex 上游 User-Agent：codex_connect_gateway/0.145.0");
-    expect(text).toContain("本地连接方式：Unix WebSocket");
-    expect(text).toContain("本地握手 User-Agent：未发送");
-    expect(text).toContain("本地握手请求头：Host=localhost · Connection=Upgrade · Upgrade=websocket");
-    expect(text).toContain("Sec-WebSocket-Key=动态值（不展示）");
-    expect(text).toContain("本地未发送请求头：User-Agent · Origin · Authorization · Cookie");
-    expect(text).toContain("当前 Workspace：Main · main");
-    expect(text).toContain("当前 Thread：019f8951-eb3");
-    expect(text).toContain("当前模型：gpt-main");
-    expect(text).toContain("思考强度：high");
-    expect(text).toContain("1. Main · main ← 当前");
-    expect(text).toContain("2. Docs · docs");
-    expect(text).toContain("/workspace/docs");
+    expect(text).toContain("Codex Connect 已联通");
+    expect(text).toContain("App Server 已连接");
+    expect(text).toContain("运行环境：");
+    expect(text).toContain("│ macOS · arm64");
+    expect(text).toContain("│ Codex Connect 0.145.0 · Node.js v24.18.0");
+    expect(text).toContain(
+      "│ UA · codex_connect_gateway/0.145.0 (Mac OS 15.7.7; arm64) (codex_connect_gateway; 0.145.0)",
+    );
+    expect(text).toContain("│ Unix WebSocket");
+    expect(text).toContain("当前会话：");
+    expect(text).toContain("│ Main · main");
+    expect(text).toContain("│ /workspace/main");
+    expect(text).toContain("│ Thread · 019f8951-eb3");
+    expect(text).toContain("│ gpt-main · high");
+    expect(text).toContain("│ 周限 · 已使用 42%");
+    expect(text).not.toContain("本地握手");
+    expect(text).not.toContain("本地未发送请求头");
+    expect(text).toContain("Workspace（2）：");
+    expect(text).toContain("│ 1. Main · main ← 当前");
+    expect(text).toContain("│ 2. Docs · docs");
+    expect(text).toContain("│ /workspace/docs");
   });
 
   it("reports an unbound thread and keeps unknown platform names", () => {
@@ -187,15 +187,12 @@ describe("formatStartupNotification", () => {
         nodeVersion: "v22.13.0",
         transport: "Unix WebSocket",
         codexUpstreamUserAgent: null,
-        transportUserAgent: null,
-        requestHeaders: [],
-        omittedHeaders: [],
       },
     );
 
-    expect(text).toContain("运行系统：freebsd · x64");
-    expect(text).toContain("Codex 上游 User-Agent：App Server 未返回");
-    expect(text).toContain("当前 Thread：尚未绑定");
+    expect(text).toContain("│ freebsd · x64");
+    expect(text).toContain("│ UA · App Server 未返回");
+    expect(text).toContain("│ Thread · 尚未绑定");
   });
 });
 
@@ -349,11 +346,20 @@ describe("formatContextUsage", () => {
         },
         modelContextWindow: 200_000,
       },
-      { model: "gpt-main", effort: "high" },
+      {
+        model: "gpt-main",
+        effort: "high",
+        weeklyLimit: {
+          usedPercent: 42,
+          windowDurationMins: 10_080,
+          resetsAt: null,
+        },
+      },
     )).toBe([
       "上下文：12.5 K / 200 K（6.3%）",
       "当前模型：gpt-main",
       "思考强度：high",
+      "周限：已使用 42%",
     ].join("\n"));
   });
 });

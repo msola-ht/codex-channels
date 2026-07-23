@@ -272,7 +272,11 @@ export function formatStatus(status: ConversationStatus): string {
 
 export function formatContextUsage(
   usage: ThreadTokenUsage,
-  settings?: { model: string; effort: string | null },
+  settings?: {
+    model: string;
+    effort: string | null;
+    weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>;
+  },
 ): string {
   const current = usage.last.totalTokens;
   const capacity = usage.modelContextWindow;
@@ -288,6 +292,9 @@ export function formatContextUsage(
       ? [
           `当前模型：${settings.model}`,
           `思考强度：${settings.effort ?? "模型默认"}`,
+          ...(settings.weeklyLimit
+            ? [`周限：${formatWeeklyLimit(settings.weeklyLimit)}`]
+            : []),
         ]
       : []),
   ].join("\n");
@@ -295,11 +302,12 @@ export function formatContextUsage(
 
 export function formatWorkspaces(workspaces: Workspace[], currentWorkspaceId: string): string {
   return [
-    `可用 Workspace（${workspaces.length}）：`,
-    ...workspaces.map(
-      (workspace, index) =>
-        `${index + 1}. ${workspace.name} · ${workspace.id}${workspace.id === currentWorkspaceId ? " ← 当前" : ""}\n   ${workspace.cwd}`,
-    ),
+    `Workspace（${workspaces.length}）：`,
+    ...workspaces.flatMap((workspace, index) => [
+      `│ ${index + 1}. ${workspace.name} · ${workspace.id}${workspace.id === currentWorkspaceId ? " ← 当前" : ""}`,
+      `│ ${workspace.cwd}`,
+      ...(index + 1 < workspaces.length ? [""] : []),
+    ]),
     "",
     "切换：/workspace <序号、ID 或名称>",
   ].join("\n");
@@ -307,7 +315,7 @@ export function formatWorkspaces(workspaces: Workspace[], currentWorkspaceId: st
 
 export function formatStartupNotification(
   workspaces: Workspace[],
-  status: Pick<ConversationStatus, "threadId" | "workspaceId" | "model" | "effort" | "modelPending">,
+  status: Pick<ConversationStatus, "threadId" | "workspaceId" | "model" | "effort" | "modelPending" | "weeklyLimit">,
   runtime: StartupRuntimeInfo,
 ): string {
   const currentWorkspace = workspaces.find((workspace) => workspace.id === status.workspaceId);
@@ -315,20 +323,29 @@ export function formatStartupNotification(
     throw new Error(`当前 Workspace 不存在：${status.workspaceId}`);
   }
   return [
-    "Codex Connect Gateway 已联通。",
-    "Codex App Server：已连接",
-    `运行系统：${formatPlatform(runtime.platform)} · ${runtime.architecture}`,
-    `运行版本：Codex Connect ${runtime.gatewayVersion} · Node.js ${runtime.nodeVersion}`,
-    `Codex 上游 User-Agent：${runtime.codexUpstreamUserAgent ?? "App Server 未返回"}`,
-    `本地连接方式：${runtime.transport}`,
-    `本地握手 User-Agent：${runtime.transportUserAgent ?? "未发送"}`,
-    `本地握手请求头：${runtime.requestHeaders.join(" · ")}`,
-    `本地未发送请求头：${runtime.omittedHeaders.join(" · ")}`,
-    `当前 Workspace：${currentWorkspace.name} · ${currentWorkspace.id}`,
-    `工作目录：${currentWorkspace.cwd}`,
-    `当前 Thread：${status.threadId ?? "尚未绑定"}`,
-    `当前模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
-    `思考强度：${status.effort ?? "模型默认"}`,
+    "Codex Connect 已联通",
+    "App Server 已连接",
+    "",
+    "运行环境：",
+    `│ ${formatPlatform(runtime.platform)} · ${runtime.architecture}`,
+    "│ ",
+    `│ Codex Connect ${runtime.gatewayVersion} · Node.js ${runtime.nodeVersion}`,
+    "│ ",
+    `│ ${runtime.transport}`,
+    "│ ",
+    `│ UA · ${formatCodexUpstreamUserAgent(runtime.codexUpstreamUserAgent)}`,
+    "",
+    "当前会话：",
+    `│ ${currentWorkspace.name} · ${currentWorkspace.id}`,
+    "│ ",
+    `│ ${currentWorkspace.cwd}`,
+    "│ ",
+    `│ Thread · ${status.threadId ?? "尚未绑定"}`,
+    "│ ",
+    `│ ${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""} · ${status.effort ?? "模型默认"}`,
+    ...(status.weeklyLimit
+      ? ["│ ", `│ 周限 · ${formatWeeklyLimit(status.weeklyLimit)}`]
+      : []),
     "",
     formatWorkspaces(workspaces, status.workspaceId),
   ].join("\n");
@@ -341,9 +358,6 @@ export interface StartupRuntimeInfo {
   nodeVersion: string;
   transport: string;
   codexUpstreamUserAgent: string | null;
-  transportUserAgent: string | null;
-  requestHeaders: readonly string[];
-  omittedHeaders: readonly string[];
 }
 
 function formatPlatform(platform: NodeJS.Platform): string {
@@ -353,6 +367,13 @@ function formatPlatform(platform: NodeJS.Platform): string {
     win32: "Windows",
   };
   return labels[platform] ?? platform;
+}
+
+function formatCodexUpstreamUserAgent(userAgent: string | null): string {
+  if (!userAgent) {
+    return "App Server 未返回";
+  }
+  return userAgent.replace(/(\([^)]*\))\s+\S+\s+(\([^)]*\))$/, "$1 $2");
 }
 
 export function formatPermissions(
@@ -404,6 +425,15 @@ function formatRateLimitWindow(
     details.push(`重置 ${formatResetTime(window.resetsAt)}`);
   }
   return details.join(" · ");
+}
+
+function formatWeeklyLimit(
+  window: NonNullable<RateLimitSnapshot["secondary"]>,
+): string {
+  return [
+    `已使用 ${formatPercent(window.usedPercent)}`,
+    ...(window.resetsAt !== null ? [`重置 ${formatResetTime(window.resetsAt)}`] : []),
+  ].join(" · ");
 }
 
 function formatPercent(value: number): string {

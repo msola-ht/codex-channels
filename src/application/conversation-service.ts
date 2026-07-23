@@ -8,6 +8,7 @@ import type {
   ListMcpServerStatusResponse,
   PermissionProfileListResponse,
   PluginListResponse,
+  RateLimitSnapshot,
   ReviewTarget,
   SkillsListResponse,
   Thread,
@@ -46,6 +47,7 @@ export interface ConversationStatus {
   effort: string | null;
   modelPending: boolean;
   tokenUsage?: ThreadTokenUsage;
+  weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>;
 }
 
 export class ConversationService {
@@ -285,11 +287,13 @@ export class ConversationService {
     const active = this.core.activeTurn(target);
     const workspace = this.router.workspace(target);
     const tokenUsage = binding ? this.core.tokenUsage(binding.threadId) : undefined;
+    const weeklyLimit = this.core.weeklyRateLimit();
     const model = this.models.status(target);
     return {
       ...(binding ? { threadId: binding.threadId } : {}),
       ...(active ? { turnId: active.turnId } : {}),
       ...(tokenUsage ? { tokenUsage } : {}),
+      ...(weeklyLimit ? { weeklyLimit } : {}),
       workspaceId: workspace.id,
       workspaceName: workspace.name,
       cwd: workspace.cwd,
