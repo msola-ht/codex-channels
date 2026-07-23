@@ -73,7 +73,7 @@ function initialize(args) {
   console.log(`配置文件：${result.envPath}`);
   if (result.created) {
     console.log(`默认 Workspace：${result.workspace}`);
-    console.log("请填写 TELEGRAM_BOT_TOKEN 和 TELEGRAM_ALLOWED_USER_IDS，然后运行 codexc start。");
+    console.log("请填写 TELEGRAM_BOT_TOKEN 和 TELEGRAM_ALLOWED_USER_IDS，然后运行 codexc service install。");
   }
 }
 
@@ -116,19 +116,25 @@ function workspace(args) {
 }
 
 function service(args) {
-  if (process.platform !== "darwin") {
-    throw new Error("codexc service 当前仅支持 macOS launchd；Linux 可使用 codexc start，Windows Transport 尚未支持");
-  }
   const [action, ...rest] = args;
   if (rest.length > 0 || !["install", "uninstall", "start", "stop", "restart", "status"].includes(action)) {
     throw new Error("用法：codexc service <install|uninstall|start|stop|restart|status>");
   }
-  if (action === "install") {
-    runScript("scripts/install-launchd.mjs", []);
-    run("/bin/zsh", [join(packageDir, "scripts/launchd-control.sh"), "install"], configuredEnvironment().environment);
+  if (process.platform === "darwin") {
+    if (action === "install") {
+      runScript("scripts/install-launchd.mjs", []);
+    }
+    run("/bin/zsh", [join(packageDir, "scripts/launchd-control.sh"), action], configuredEnvironment().environment);
     return;
   }
-  run("/bin/zsh", [join(packageDir, "scripts/launchd-control.sh"), action], configuredEnvironment().environment);
+  if (process.platform === "linux") {
+    if (action === "install") {
+      runScript("scripts/install-systemd.mjs", []);
+    }
+    run("/bin/sh", [join(packageDir, "scripts/systemd-control.sh"), action], configuredEnvironment().environment);
+    return;
+  }
+  throw new Error("codexc service 当前支持 macOS launchd 与 Linux systemd；Windows Transport 尚未支持");
 }
 
 function showConfig(args) {
@@ -241,12 +247,12 @@ function printHelp() {
   ws                           列出 Workspace
   ws add [--id ID] [--name 名称]
                                将当前目录注册为 Workspace
-  service install              安装并启动 macOS launchd 服务
-  service uninstall            卸载 launchd 服务并保留用户数据
-  service start                启动 launchd 服务
-  service stop                 停止 launchd 服务
+  service install              安装并启动系统用户服务
+  service uninstall            卸载系统服务并保留用户数据
+  service start                启动系统服务
+  service stop                 停止系统服务
   service restart              重启 Gateway，保持 App Server 运行
-  service status               查看 launchd 服务状态
+  service status               查看系统服务状态
   config                       显示用户配置路径
   doctor                       检查安装、配置、Codex 与服务连通性
   version                      显示版本

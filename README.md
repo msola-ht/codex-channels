@@ -48,18 +48,20 @@ cd /absolute/path/to/project
 codexc ws add
 ```
 
-macOS 安装常驻服务：
+macOS 或 Linux 安装常驻用户服务：
 
 ```bash
 codexc service install
 codexc service status
 ```
 
-Linux 当前使用前台模式：
+Linux 如需退出 SSH 后仍保持运行或开机启动，还需执行一次：
 
 ```bash
-codexc start
+sudo loginctl enable-linger "$USER"
 ```
+
+`codexc start` 仍可用于临时前台运行。
 
 安装或升级后运行诊断：
 
@@ -67,7 +69,7 @@ codexc start
 codexc doctor
 ```
 
-`doctor` 会检查 Node、Codex CLI、配置权限、Telegram 必填项、Workspace、App Server 握手和 launchd 状态，但不会显示 Token。
+`doctor` 会检查 Node、Codex CLI、配置权限、Telegram 必填项、Workspace、App Server 握手和系统服务状态，但不会显示 Token。
 
 ## 常用命令
 
@@ -84,7 +86,7 @@ codexc service uninstall         # 卸载服务并保留用户数据
 
 用户配置、Workspace Registry、SQLite、Socket、日志和上传图片均位于 `~/.codex-connect`，不会写入全局 npm 包目录。`CODEX_CONNECT_HOME` 可用于隔离测试或多 Profile。
 
-从旧版本升级后执行一次 `codexc service install`，安装器会将旧 `com.msola.*` launchd Job 迁移到 `com.hegenai.*`，并保留用户数据。
+macOS 从旧版本升级后执行一次 `codexc service install`，安装器会将旧 `com.msola.*` launchd Job 迁移到 `com.hegenai.*`，并保留用户数据。Linux 使用 `systemctl --user` 管理两个独立服务，`service restart` 只重启 Gateway。
 
 ## Telegram 命令
 
@@ -143,6 +145,7 @@ RUN_CODEX_INTEGRATION=1 npm test -- --run tests/real-app-server.test.ts
 - [`bin/`](bin/README.md)：npm CLI 入口。
 - [`scripts/`](scripts/README.md)：配置、协议、打包和服务脚本。
 - [`launchd/`](launchd/README.md)：macOS 服务模板与迁移。
+- [`systemd/`](systemd/README.md)：Linux 用户服务模板与运行说明。
 - [`tests/`](tests/README.md)：测试范围与真实集成测试。
 - [`.github/workflows/`](.github/workflows/README.md)：CI 与 npm Trusted Publishing。
 

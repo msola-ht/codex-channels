@@ -24,8 +24,10 @@
 - `smoke-package.mjs`：生成实际 tarball，在隔离目录安装并执行两个公开 CLI 入口。
 - `check-release-tag.mjs`：要求 Git Tag 与 `package.json` 版本严格一致，防止发布错版。
 - `sync-gateway-version.mjs`：以锁定的 Codex CLI 协议版本同步 `package.json`、锁文件和 Gateway 运行时版本；不维护独立版本号。
-- `doctor.mjs`：检查 npm 包、Node、Codex CLI、用户配置、Workspace、Unix WebSocket 与 launchd 状态，不输出敏感配置内容。
+- `doctor.mjs`：检查 npm 包、Node、Codex CLI、用户配置、Workspace、Unix WebSocket 与系统服务状态，不输出敏感配置内容。
 - `install-launchd.mjs`：渲染并安装 launchd plist。
 - `launchd-control.sh`：安装、启停、查看和卸载两个 launchd 服务；安装时清理旧标签，日常重启只更新 Gateway，保持共享 App Server 和活动 Turn 运行。
+- `install-systemd.mjs`：渲染并安装 Linux systemd 用户服务 unit。
+- `systemd-control.sh`：安装、启停、查看和卸载两个 systemd 用户服务；日常重启只更新 Gateway，用户数据始终保留。
 
 脚本不得把凭据写入 npm 安装目录；用户配置、SQLite、Socket 和日志必须留在用户级 `.codex-connect`。

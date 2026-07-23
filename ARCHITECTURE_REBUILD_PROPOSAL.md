@@ -58,7 +58,7 @@ codex app-server --stdio
 ## 3. 推荐运行拓扑
 
 ```text
-macOS launchd
+系统用户服务（macOS launchd / Linux systemd）
 │
 ├── Codex App Server
 │   └── codex app-server --listen unix:///absolute/path/codex.sock
@@ -79,11 +79,13 @@ macOS launchd
 
 ### 3.1 进程所有权
 
-App Server 和 Gateway 分别由 launchd 管理：
+App Server 和 Gateway 分别由系统用户服务管理：
 
 ```text
 com.hegenai.codex-app-server
 com.hegenai.codex-gateway
+codex-connect-app-server.service
+codex-connect-gateway.service
 ```
 
 要求：
@@ -107,7 +109,7 @@ WebSocket:     ws（支持通过 Unix Socket 建立 WebSocket）
 Validation:    zod（只用于外部协议边界）
 Logging:       pino
 Testing:       Vitest
-Process:       launchd
+Process:       launchd / systemd user service
 ```
 
 ### 4.2 选择 TypeScript 的原因
@@ -176,6 +178,10 @@ launchd/
 ├── codex-app-server.plist
 └── codex-gateway.plist
 
+systemd/
+├── codex-connect-app-server.service
+└── codex-connect-gateway.service
+
 tests/                         # 单元、契约与条件式真实集成测试
 ```
 
@@ -189,7 +195,7 @@ Surface Adapters ──> Conversation Core <── Codex Client
                         Extensions
 ```
 
-Conversation Core 不得依赖 Telegram、具体数据库或 launchd。
+Conversation Core 不得依赖 Telegram、具体数据库或系统服务管理器。
 
 ## 6. 核心模块
 
@@ -475,7 +481,7 @@ AppServerPool
 
 正式本机入口通过 npm 安装为 `codexc`（同时提供 `codex-connect` 长别名）。代码位于 npm 包安装目录，用户配置与运行状态使用 Node `os.homedir()` 定位到 `~/.codex-connect`，避免 npm 升级覆盖 Token、Workspace Registry、SQLite、Socket 或日志。源码开发模式仍使用仓库内 `.env`，两种模式共用同一 Gateway 实现和 App Server 协议。
 
-`~/.codex-connect` 权限为 `0700`，`.env` 和 SQLite 为 `0600`。其中 `workspace/` 是不包含凭据和运行状态的默认 Workspace；其余目录只保存 Gateway 配置、最小业务绑定与进程运行文件，不保存或复制 Codex Thread/Turn/Item 历史。macOS 可通过 `codexc service install` 安装独立 launchd 服务；Linux 暂用 `codexc start`。Windows 可以复用用户目录约定，但当前 Unix WebSocket Transport 尚未适配，不能宣称运行支持。未来的平台 Transport 和系统服务适配不得改变配置目录与模块边界。
+`~/.codex-connect` 权限为 `0700`，`.env` 和 SQLite 为 `0600`。其中 `workspace/` 是不包含凭据和运行状态的默认 Workspace；其余目录只保存 Gateway 配置、最小业务绑定与进程运行文件，不保存或复制 Codex Thread/Turn/Item 历史。macOS 与 Linux 均可通过 `codexc service install` 安装独立用户服务，分别由 launchd 与 systemd 管理。Windows 可以复用用户目录约定，但当前 Unix WebSocket Transport 尚未适配，不能宣称运行支持。未来的平台 Transport 和系统服务适配不得改变配置目录与模块边界。
 
 ### 9.2 可替换存储
 
@@ -630,7 +636,7 @@ Codex Skill 适合描述模型工作流，不适合实现 Gateway 的实时 Tran
 
 ### 阶段 A：最小贯通
 
-- launchd 启动 App Server Unix Socket。
+- 系统用户服务启动 App Server Unix Socket。
 - TypeScript Gateway 完成 initialize。
 - 完成 `thread/list`、`thread/start`、`thread/resume`、`turn/start`。
 - CLI 通过 `codex --remote` 连接同一 App Server。
@@ -670,7 +676,7 @@ Codex Skill 适合描述模型工作流，不适合实现 Gateway 的实时 Tran
 
 满足以下条件后，才适合删除旧实现：
 
-- [ ] App Server 独立运行并由 launchd 自动恢复。
+- [x] App Server 独立运行并由系统用户服务自动恢复。
 - [ ] 原生 Codex CLI 可通过 `codex --remote` 正常连接。
 - [ ] CLI 与 Telegram 使用同一个 App Server 实例。
 - [ ] 使用的 Codex CLI 精确版本已记录，生成 Schema 与该版本一致。
@@ -693,7 +699,7 @@ Codex Skill 适合描述模型工作流，不适合实现 Gateway 的实时 Tran
 1. 第一阶段是否只支持一个 Telegram 私聊用户。
 2. 是否从第一阶段就支持多个 Workspace。
 3. 是否确认切换到 TypeScript，还是保留 Python 并只重构架构。
-4. App Server 是否由 launchd 常驻，还是手工启动。
+4. App Server 是否由系统用户服务常驻，还是手工启动。
 5. 是否需要保留任何 Bridge 专属本地管理命令。
 6. 是否需要在 Telegram 展示命令执行、diff、计划和推理摘要等详细事件。
 7. 是否接受 App Server/Remote Transport 当前可能变化，并通过精确版本锁定后再实施重构。

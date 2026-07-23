@@ -109,8 +109,32 @@ if (process.platform === "darwin") {
         ? `检测到 ${loadedLegacy.length} 个旧版 Job；请运行 codexc service install 完成迁移`
       : `已加载 ${loaded.length}/${labels.length}；前台运行模式可忽略`,
   );
+} else if (process.platform === "linux") {
+  const units = ["codex-connect-app-server.service", "codex-connect-gateway.service"];
+  const active = units.filter((unit) =>
+    spawnSync("systemctl", ["--user", "is-active", "--quiet", unit], { stdio: "ignore", timeout: 3_000 }).status === 0,
+  );
+  note(
+    "systemd",
+    active.length === units.length
+      ? "App Server 与 Gateway 已运行"
+      : `已运行 ${active.length}/${units.length}；可运行 codexc service install 安装用户服务`,
+  );
+  const uid = process.getuid?.();
+  if (uid !== undefined) {
+    const linger = spawnSync("loginctl", ["show-user", String(uid), "--property=Linger", "--value"], {
+      encoding: "utf8",
+      timeout: 3_000,
+    });
+    note(
+      "systemd linger",
+      linger.status === 0 && linger.stdout.trim() === "yes"
+        ? "已启用，退出登录后服务可继续运行"
+        : "未启用或无法确认；如需退出 SSH 后继续运行，请执行 sudo loginctl enable-linger $USER",
+    );
+  }
 } else {
-  note("系统服务", "当前平台不使用 macOS launchd");
+  note("系统服务", "当前平台尚未提供系统服务适配");
 }
 
 for (const check of checks) {

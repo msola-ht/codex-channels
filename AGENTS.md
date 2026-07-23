@@ -12,7 +12,7 @@
 - 当前仓库以 TypeScript 模块化 Gateway 为唯一实现。
 - 旧 Python Runtime、测试、smoke 脚本和打包入口已在用户确认后移除。
 - 正式本机入口为 npm CLI `codexc`，配置与运行状态位于用户主目录 `.codex-connect`；源码开发可继续使用仓库内 `.env` 和 `npm run dev:all`。
-- macOS 可用 `codexc service install` 安装 App Server 与 Gateway 两个独立 launchd 服务，使用 `codexc service uninstall` 卸载服务但保留用户数据；Linux 当前使用 `codexc start` 前台运行，Windows Transport 尚未实现。
+- macOS 与 Linux 均可用 `codexc service install` 安装 App Server 与 Gateway 两个独立用户服务，使用 `codexc service uninstall` 卸载服务但保留用户数据；macOS 使用 launchd，Linux 使用 systemd user service，Windows Transport 尚未实现。
 - 不重新引入复制 Codex 会话内容的自定义会话数据库、Python Bridge 或替代 Codex Remote TUI 的本地 CLI。
 - 当前使用 SQLite StateStore 只保存 Telegram conversation 与 Codex Thread 的最小绑定，以便 Gateway 重启后恢复当前会话。
 
@@ -74,7 +74,7 @@ Surface Adapters -> Application/Core <- Codex Client
 
 禁止：
 
-- `conversation-core` 依赖 Telegram SDK、具体数据库或 launchd。
+- `conversation-core` 依赖 Telegram SDK、具体数据库或系统服务管理器。
 - Surface Adapter 直接操作底层 JSON-RPC Transport。
 - `codex-client` 直接调用 Telegram API 或生成平台文案。
 - 跨模块导入其他模块的内部实现文件。
