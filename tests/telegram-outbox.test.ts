@@ -982,6 +982,9 @@ function userInputInteraction() {
   return {
     type: "user-input" as const,
     requestId: "request-input",
+    threadId: "thread-1",
+    turnId: "turn-1",
+    itemId: "tool-1",
     title: "Codex 需要输入",
     questions: [],
     expiresInMs: 30_000,

@@ -15,6 +15,9 @@ export type InteractionRequest =
   | {
       type: "user-input";
       requestId: string;
+      threadId: string;
+      turnId: string;
+      itemId: string;
       title: string;
       questions: Array<{
         id: string;
@@ -29,6 +32,8 @@ export type InteractionRequest =
   | {
       type: "elicitation";
       requestId: string;
+      threadId: string;
+      turnId: string | null;
       title: string;
       message: string;
       mode: "form" | "url";

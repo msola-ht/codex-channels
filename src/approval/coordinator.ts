@@ -98,6 +98,9 @@ export class ApprovalCoordinator {
         };
       }
       case "item/tool/requestUserInput": {
+        if (!turnId || !itemId) {
+          return this.safeDecline(request.method, params);
+        }
         const questions = Array.isArray(params.questions) ? params.questions : [];
         const normalized = questions.map((question) => {
           const record = asRecord(question);
@@ -118,6 +121,9 @@ export class ApprovalCoordinator {
         const decision = await this.interaction.request(target, {
           type: "user-input",
           requestId: interactionId,
+          threadId,
+          turnId,
+          itemId,
           title: "Codex 需要补充信息",
           questions: normalized,
           expiresInMs:
@@ -131,6 +137,8 @@ export class ApprovalCoordinator {
         const decision = await this.interaction.request(target, {
           type: "elicitation",
           requestId: interactionId,
+          threadId,
+          turnId: turnId ?? null,
           title: `MCP ${stringValue(params.serverName) ?? "Server"} 请求输入`,
           message: stringValue(params.message) ?? "MCP Server 请求用户输入",
           mode,

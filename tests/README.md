@@ -7,7 +7,8 @@
 - JSON-RPC initialize、消息分流、超时、过载重试和断线清理。
 - Thread 新建、列表、恢复、切换、删除、订阅和 Workspace 路由。
 - Conversation Core 状态归约、操作过程与敏感文本清洗。
-- 审批超时、拒绝、一次性回调和跨客户端解决。
+- 命令、文件修改、临时权限、用户输入和 MCP 审批的归属信息、批准、拒绝、无法路由、
+  一次性回调、超时和跨客户端解决。
 - Telegram 格式、通知降噪、长回复折叠与文件回退、输出队列、生命周期、API 重试及图片输入。
 - Skill 用户与 Workspace 安装过滤、已安装 Plugin 查询及远端市场隔离。
 - SQLite 最小绑定恢复、配置热加载与自动重启分类、Telegram Setup、CLI、launchd、systemd、Unix WebSocket 请求头、模块依赖方向和公开入口边界。

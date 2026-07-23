@@ -231,6 +231,9 @@ function userInputRequest(requestId = "request-input"): InteractionRequest {
   return {
     type: "user-input",
     requestId,
+    threadId: "thread-1",
+    turnId: "turn-1",
+    itemId: "tool-1",
     title: "Codex 需要输入",
     questions: [{
       id: "answer",
