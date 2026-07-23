@@ -509,13 +509,19 @@ describe("TelegramOutbox", () => {
         last: tokenBreakdown(24_600),
         modelContextWindow: 258_000,
       },
+      model: "gpt-5.6-sol",
+      effort: "medium",
     });
     await settle();
     await outbox.close();
 
     expect(api.sent).toEqual([
       "处理完成",
-      "<b>上下文：24.6 K / 258 K（9.5%）</b>",
+      [
+        "<b>上下文：24.6 K / 258 K（9.5%）</b>",
+        "<b>当前模型：</b>gpt-5.6-sol",
+        "<b>思考强度：</b>medium",
+      ].join("\n"),
     ]);
     expect(api.sendOptions[1]).toEqual({ parse_mode: "HTML" });
   });

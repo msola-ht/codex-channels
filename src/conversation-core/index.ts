@@ -10,4 +10,8 @@ export {
   type OutputEvent,
 } from "./events.js";
 export { parseOperationUpdate, sanitizeOperationText } from "./operation.js";
-export type { ConversationRoutingPort, RoutedThread } from "./routing-port.js";
+export type {
+  ConversationRoutingPort,
+  RoutedThread,
+  RoutedThreadModelSettings,
+} from "./routing-port.js";

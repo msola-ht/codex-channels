@@ -15,5 +15,6 @@ export { StdioTransport, type StdioTransportOptions } from "./stdio-transport.js
 export { BaseTransport, type CodexTransport } from "./transport.js";
 export {
   UnixWebSocketTransport,
+  unixWebSocketHandshakeSummary,
   type UnixWebSocketTransportOptions,
 } from "./unix-websocket-transport.js";

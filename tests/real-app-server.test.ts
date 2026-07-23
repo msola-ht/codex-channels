@@ -23,6 +23,7 @@ suite("real Codex App Server over Unix WebSocket", () => {
   const socketPath = join(testRuntime, "app-server.sock");
   let processHandle: ChildProcess;
   let client: CodexAppServerClient;
+  let upstreamUserAgent = "";
   let appServerStderr = "";
 
   beforeAll(async () => {
@@ -45,7 +46,8 @@ suite("real Codex App Server over Unix WebSocket", () => {
     client = new CodexAppServerClient(new JsonRpcClient(transport), {
       sandbox: "read-only",
     });
-    await client.connect();
+    const initialized = await client.connect();
+    upstreamUserAgent = initialized.userAgent;
   }, 15_000);
 
   afterAll(async () => {
@@ -63,6 +65,10 @@ suite("real Codex App Server over Unix WebSocket", () => {
     expect(Array.isArray(threads)).toBe(true);
     expect(Array.isArray(archived)).toBe(true);
     pino({ enabled: false }).info({ count: threads.length });
+  });
+
+  it("reports the upstream user agent used by Codex", () => {
+    expect(upstreamUserAgent).toContain("codex_connect_gateway/");
   });
 
   it("reads account rate-limit snapshots without starting a turn", async () => {

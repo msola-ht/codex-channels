@@ -257,6 +257,7 @@ export class ConversationCore {
         const tokenUsage = this.usageTurnByThread.get(threadId) === turnId
           ? this.usageByThread.get(threadId)
           : undefined;
+        const modelSettings = this.router.modelSettingsForThread(threadId);
         this.errorsByTurn.delete(turnId);
         this.publish({
           type: "turn.completed",
@@ -266,6 +267,9 @@ export class ConversationCore {
           status,
           ...(error ? { error } : {}),
           ...(tokenUsage ? { tokenUsage } : {}),
+          ...(modelSettings
+            ? { model: modelSettings.model, effort: modelSettings.effort }
+            : {}),
         });
         return;
       }

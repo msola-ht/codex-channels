@@ -8,6 +8,7 @@ import {
   CodexAppServerClient,
   JsonRpcClient,
   UnixWebSocketTransport,
+  unixWebSocketHandshakeSummary,
   type RpcNotification,
 } from "../codex-client/index.js";
 import { protocolVersion } from "../codex-protocol/index.js";
@@ -36,6 +37,7 @@ export class GatewayApplication {
   private removeRpcNotification: (() => void) | undefined;
   private removeRpcDisconnect: (() => void) | undefined;
   private reconnecting: Promise<void> | undefined;
+  private codexUpstreamUserAgent: string | undefined;
   private stopping = false;
 
   constructor(
@@ -79,6 +81,11 @@ export class GatewayApplication {
       {
         onFatal: (error) => this.handleTelegramFatal(error),
         finalMessageFormat: config.telegramMessageFormat,
+        codexUpstreamUserAgent: () => this.codexUpstreamUserAgent,
+        startupTransport: {
+          name: "Unix WebSocket",
+          ...unixWebSocketHandshakeSummary,
+        },
       },
     );
     this.approval = new ApprovalCoordinator(this.router, this.telegram.interactions, config.approvalTimeoutMs);
@@ -131,6 +138,7 @@ export class GatewayApplication {
       });
     });
     const initialized = await this.codex.connect();
+    this.codexUpstreamUserAgent = initialized.userAgent;
     if (!(await this.restoreBindings())) {
       await this.codex.close();
       throw new Error("恢复 Codex Thread 订阅暂时失败，请由进程管理器重试启动");
@@ -195,6 +203,7 @@ export class GatewayApplication {
       }
       try {
         const initialized = await this.codex.reconnect();
+        this.codexUpstreamUserAgent = initialized.userAgent;
         if (!(await this.restoreBindings())) {
           await this.codex.close();
           throw new Error("仍有 Codex Thread 订阅暂时无法恢复");

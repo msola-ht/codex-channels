@@ -43,6 +43,13 @@ export interface TelegramSurfaceOptions {
   onFatal?: (error: Error) => void;
   imageStore?: TelegramImagePort;
   finalMessageFormat?: TelegramFinalMessageFormat;
+  codexUpstreamUserAgent?: () => string | undefined;
+  startupTransport?: {
+    name: string;
+    userAgent: string | null;
+    requestHeaders: readonly string[];
+    omittedHeaders: readonly string[];
+  };
 }
 
 export class TelegramSurface {
@@ -98,7 +105,11 @@ export class TelegramSurface {
               architecture: process.arch,
               gatewayVersion: protocolVersion.codexCli.replace(/^codex-cli\s+/, ""),
               nodeVersion: process.version,
-              transport: "Unix WebSocket",
+              transport: options.startupTransport?.name ?? "Unix WebSocket",
+              codexUpstreamUserAgent: options.codexUpstreamUserAgent?.() ?? null,
+              transportUserAgent: options.startupTransport?.userAgent ?? null,
+              requestHeaders: options.startupTransport?.requestHeaders ?? [],
+              omittedHeaders: options.startupTransport?.omittedHeaders ?? [],
             }),
           };
         }),

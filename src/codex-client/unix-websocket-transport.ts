@@ -9,6 +9,18 @@ export interface UnixWebSocketTransportOptions {
   maxPayloadBytes?: number;
 }
 
+export const unixWebSocketHandshakeSummary = {
+  userAgent: null,
+  requestHeaders: [
+    "Host=localhost",
+    "Connection=Upgrade",
+    "Upgrade=websocket",
+    "Sec-WebSocket-Version=13",
+    "Sec-WebSocket-Key=动态值（不展示）",
+  ],
+  omittedHeaders: ["User-Agent", "Origin", "Authorization", "Cookie"],
+} as const;
+
 export class UnixWebSocketTransport extends BaseTransport {
   readonly kind = "unix-websocket" as const;
   private socket: WebSocket | undefined;

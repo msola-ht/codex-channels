@@ -199,7 +199,15 @@ export class TelegramOutbox {
             await this.send(chatId, `Codex 任务状态：${event.status}`, replyTo);
           }
           if (event.tokenUsage) {
-            await this.sendPanel(chatId, formatContextUsage(event.tokenUsage));
+            await this.sendPanel(
+              chatId,
+              formatContextUsage(
+                event.tokenUsage,
+                event.model
+                  ? { model: event.model, effort: event.effort ?? null }
+                  : undefined,
+              ),
+            );
           }
           this.replyToByTurn.delete(turnKey);
           this.clearApprovalOperationsForTurn(turnKey);

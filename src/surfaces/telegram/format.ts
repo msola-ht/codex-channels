@@ -270,17 +270,27 @@ export function formatStatus(status: ConversationStatus): string {
   return lines.join("\n");
 }
 
-export function formatContextUsage(usage: ThreadTokenUsage): string {
+export function formatContextUsage(
+  usage: ThreadTokenUsage,
+  settings?: { model: string; effort: string | null },
+): string {
   const current = usage.last.totalTokens;
   const capacity = usage.modelContextWindow;
-  if (capacity === null || capacity <= 0) {
-    return `上下文：${formatTokenCount(current)}`;
-  }
-  const percent = Math.max(0, current / capacity * 100);
-  return `上下文：${formatTokenCount(current)} / ${formatTokenCount(capacity)}（${percent.toLocaleString("zh-CN", {
-    minimumFractionDigits: 1,
-    maximumFractionDigits: 1,
-  })}%）`;
+  const context = capacity === null || capacity <= 0
+    ? `上下文：${formatTokenCount(current)}`
+    : `上下文：${formatTokenCount(current)} / ${formatTokenCount(capacity)}（${Math.max(0, current / capacity * 100).toLocaleString("zh-CN", {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+      })}%）`;
+  return [
+    context,
+    ...(settings
+      ? [
+          `当前模型：${settings.model}`,
+          `思考强度：${settings.effort ?? "模型默认"}`,
+        ]
+      : []),
+  ].join("\n");
 }
 
 export function formatWorkspaces(workspaces: Workspace[], currentWorkspaceId: string): string {
@@ -309,7 +319,11 @@ export function formatStartupNotification(
     "Codex App Server：已连接",
     `运行系统：${formatPlatform(runtime.platform)} · ${runtime.architecture}`,
     `运行版本：Codex Connect ${runtime.gatewayVersion} · Node.js ${runtime.nodeVersion}`,
-    `连接方式：${runtime.transport}`,
+    `Codex 上游 User-Agent：${runtime.codexUpstreamUserAgent ?? "App Server 未返回"}`,
+    `本地连接方式：${runtime.transport}`,
+    `本地握手 User-Agent：${runtime.transportUserAgent ?? "未发送"}`,
+    `本地握手请求头：${runtime.requestHeaders.join(" · ")}`,
+    `本地未发送请求头：${runtime.omittedHeaders.join(" · ")}`,
     `当前 Workspace：${currentWorkspace.name} · ${currentWorkspace.id}`,
     `工作目录：${currentWorkspace.cwd}`,
     `当前 Thread：${status.threadId ?? "尚未绑定"}`,
@@ -326,6 +340,10 @@ export interface StartupRuntimeInfo {
   gatewayVersion: string;
   nodeVersion: string;
   transport: string;
+  codexUpstreamUserAgent: string | null;
+  transportUserAgent: string | null;
+  requestHeaders: readonly string[];
+  omittedHeaders: readonly string[];
 }
 
 function formatPlatform(platform: NodeJS.Platform): string {

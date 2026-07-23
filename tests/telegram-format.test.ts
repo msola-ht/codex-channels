@@ -139,6 +139,16 @@ describe("formatStartupNotification", () => {
         gatewayVersion: "0.145.0",
         nodeVersion: "v24.18.0",
         transport: "Unix WebSocket",
+        codexUpstreamUserAgent: "codex_connect_gateway/0.145.0 (Mac OS 15.7.7; arm64) dumb (codex_connect_gateway; 0.145.0)",
+        transportUserAgent: null,
+        requestHeaders: [
+          "Host=localhost",
+          "Connection=Upgrade",
+          "Upgrade=websocket",
+          "Sec-WebSocket-Version=13",
+          "Sec-WebSocket-Key=动态值（不展示）",
+        ],
+        omittedHeaders: ["User-Agent", "Origin", "Authorization", "Cookie"],
       },
     );
 
@@ -146,7 +156,12 @@ describe("formatStartupNotification", () => {
     expect(text).toContain("Codex App Server：已连接");
     expect(text).toContain("运行系统：macOS · arm64");
     expect(text).toContain("运行版本：Codex Connect 0.145.0 · Node.js v24.18.0");
-    expect(text).toContain("连接方式：Unix WebSocket");
+    expect(text).toContain("Codex 上游 User-Agent：codex_connect_gateway/0.145.0");
+    expect(text).toContain("本地连接方式：Unix WebSocket");
+    expect(text).toContain("本地握手 User-Agent：未发送");
+    expect(text).toContain("本地握手请求头：Host=localhost · Connection=Upgrade · Upgrade=websocket");
+    expect(text).toContain("Sec-WebSocket-Key=动态值（不展示）");
+    expect(text).toContain("本地未发送请求头：User-Agent · Origin · Authorization · Cookie");
     expect(text).toContain("当前 Workspace：Main · main");
     expect(text).toContain("当前 Thread：019f8951-eb3");
     expect(text).toContain("当前模型：gpt-main");
@@ -171,10 +186,15 @@ describe("formatStartupNotification", () => {
         gatewayVersion: "0.145.0",
         nodeVersion: "v22.13.0",
         transport: "Unix WebSocket",
+        codexUpstreamUserAgent: null,
+        transportUserAgent: null,
+        requestHeaders: [],
+        omittedHeaders: [],
       },
     );
 
     expect(text).toContain("运行系统：freebsd · x64");
+    expect(text).toContain("Codex 上游 User-Agent：App Server 未返回");
     expect(text).toContain("当前 Thread：尚未绑定");
   });
 });
@@ -309,24 +329,31 @@ describe("formatStatus", () => {
 
 describe("formatContextUsage", () => {
   it("uses the latest context count rather than cumulative thread tokens", () => {
-    expect(formatContextUsage({
-      total: {
-        totalTokens: 1_250_000,
-        inputTokens: 1_000_000,
-        cachedInputTokens: 750_000,
-        cacheWriteInputTokens: 0,
-        outputTokens: 250_000,
-        reasoningOutputTokens: 50_000,
+    expect(formatContextUsage(
+      {
+        total: {
+          totalTokens: 1_250_000,
+          inputTokens: 1_000_000,
+          cachedInputTokens: 750_000,
+          cacheWriteInputTokens: 0,
+          outputTokens: 250_000,
+          reasoningOutputTokens: 50_000,
+        },
+        last: {
+          totalTokens: 12_500,
+          inputTokens: 10_000,
+          cachedInputTokens: 7_500,
+          cacheWriteInputTokens: 0,
+          outputTokens: 2_500,
+          reasoningOutputTokens: 500,
+        },
+        modelContextWindow: 200_000,
       },
-      last: {
-        totalTokens: 12_500,
-        inputTokens: 10_000,
-        cachedInputTokens: 7_500,
-        cacheWriteInputTokens: 0,
-        outputTokens: 2_500,
-        reasoningOutputTokens: 500,
-      },
-      modelContextWindow: 200_000,
-    })).toBe("上下文：12.5 K / 200 K（6.3%）");
+      { model: "gpt-main", effort: "high" },
+    )).toBe([
+      "上下文：12.5 K / 200 K（6.3%）",
+      "当前模型：gpt-main",
+      "思考强度：high",
+    ].join("\n"));
   });
 });

@@ -64,6 +64,10 @@ export class SessionRouter {
     return binding ? this.modelSettingsByThread.get(binding.threadId) : undefined;
   }
 
+  modelSettingsForThread(threadId: string): ThreadModelSettings | undefined {
+    return this.modelSettingsByThread.get(threadId);
+  }
+
   updateModelSettings(threadId: string, settings: ThreadModelSettings): void {
     if (this.bindings.getByThread(threadId)) {
       this.modelSettingsByThread.set(threadId, settings);

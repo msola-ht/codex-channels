@@ -15,6 +15,7 @@ describe("ConversationCore", () => {
     const router = {
       allBindings: () => [],
       targetForThread: () => undefined,
+      modelSettingsForThread: () => undefined,
     } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
 
@@ -49,6 +50,7 @@ describe("ConversationCore", () => {
     const router = {
       allBindings: () => [],
       targetForThread: () => target,
+      modelSettingsForThread: () => ({ model: "gpt-main", effort: "high" }),
     } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
 
@@ -83,6 +85,8 @@ describe("ConversationCore", () => {
     const completions = events.filter((event) => event.type === "turn.completed");
     expect(completions[0]).toMatchObject({
       turnId: "turn-1",
+      model: "gpt-main",
+      effort: "high",
       tokenUsage: {
         last: { totalTokens: 12_500 },
         modelContextWindow: 200_000,
@@ -101,6 +105,7 @@ describe("ConversationCore", () => {
     const router = {
       allBindings: () => [],
       targetForThread: (threadId: string) => threadId === "thread-1" ? target : undefined,
+      modelSettingsForThread: () => undefined,
     } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
 
@@ -148,6 +153,7 @@ describe("ConversationCore", () => {
     const router = {
       allBindings: () => [],
       targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
     } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
 
@@ -179,6 +185,7 @@ describe("ConversationCore", () => {
     const router = {
       allBindings: () => [{ target, threadId: "thread-1" }],
       targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
     } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
 
@@ -231,6 +238,7 @@ describe("ConversationCore", () => {
     const router = {
       allBindings: () => [],
       targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
     } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
     const startedCommand = {
@@ -305,6 +313,7 @@ describe("ConversationCore", () => {
     const core = new ConversationCore({
       allBindings: () => [],
       targetForThread: () => undefined,
+      modelSettingsForThread: () => undefined,
     }, output);
 
     core.handle({
@@ -359,6 +368,7 @@ describe("ConversationCore", () => {
     const core = new ConversationCore({
       allBindings: () => [{ target, threadId: "thread-1" }],
       targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
     }, output);
 
     core.handle({
