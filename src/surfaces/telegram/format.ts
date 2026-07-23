@@ -166,10 +166,10 @@ export function formatSkills(entries: SkillsListResponse["data"]): string {
     .flatMap((entry) => entry.skills)
     .filter((skill) => skill.enabled);
   if (skills.length === 0) {
-    return "当前没有已启用的个人 Skills。";
+    return "当前没有已启用的 Skills。";
   }
   const lines = [
-    `个人 Skills（${skills.length}）：`,
+    `已安装 Skills（${skills.length}）：`,
     ...skills.map((skill) => `- ${skill.name}：${skill.description}`),
   ];
   lines.push("", "使用：在消息中写 $Skill名称 并说明任务。");

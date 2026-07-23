@@ -21,7 +21,7 @@
 - `api-executor.ts`：统一执行 Telegram API 调用，处理超时、限流和有限重试。
 - `error-metadata.ts`：只保留异常类型和受约束的机器错误码，不记录任意异常消息。
 - `user-error-renderer.ts`：把平台无关的结构化用户错误映射为 Telegram 专属提示与命令用法。
-- `format.ts`：格式化会话、Diff/Plan、模型、Workspace、权限、用量和状态文本；Skill 只展示直接安装的个人项，Plugin 只展示本机已安装项。
+- `format.ts`：格式化会话、Diff/Plan、模型、Workspace、权限、用量和状态文本；Skill 只展示当前用户或 Workspace 直接安装的项，Plugin 只展示本机已安装项。
 - `image-store.ts`：安全下载、校验、暂存和过期清理 Telegram 图片。
 
 Telegram 网络调用不得阻塞 App Server Reader。每个 Conversation 的最终输出保持顺序；审批卡状态更新必须先于批准后的操作展示。文件下载必须限制大小、路径、类型和保留时间。

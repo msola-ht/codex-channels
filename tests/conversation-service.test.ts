@@ -11,7 +11,7 @@ const main = { id: "main", name: "Main", cwd: "/workspace/main" };
 const other = { id: "other", name: "Other", cwd: "/workspace/other" };
 
 describe("ConversationService model selection", () => {
-  it("lists directly installed personal Skills without bundled or project Skills", async () => {
+  it("lists directly installed user and project Skills without bundled Skills", async () => {
     const listSkills = vi.fn(async () => [{
       cwd: main.cwd,
       errors: [],
@@ -35,6 +35,13 @@ describe("ConversationService model selection", () => {
           description: "插件",
           path: "/Users/test/.codex/plugins/cache/plugin/skills/example/SKILL.md",
           scope: "user" as const,
+          enabled: true,
+        },
+        {
+          name: "system-skill",
+          description: "系统",
+          path: "/Users/test/.codex/skills/.system/system-skill/SKILL.md",
+          scope: "system" as const,
           enabled: true,
         },
         {
@@ -63,7 +70,7 @@ describe("ConversationService model selection", () => {
     const entries = await service.listSkills(target);
 
     expect(entries.flatMap((entry) => entry.skills).map((skill) => skill.name))
-      .toEqual(["personal", "agents-personal"]);
+      .toEqual(["personal", "agents-personal", "repo-skill"]);
     expect(listSkills).toHaveBeenCalledWith(main.cwd);
   });
 

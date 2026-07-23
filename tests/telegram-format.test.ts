@@ -69,7 +69,7 @@ describe("splitTelegramText", () => {
 });
 
 describe("extension formatting", () => {
-  it("renders the filtered personal Skills with usage guidance", () => {
+  it("renders the filtered installed Skills with usage guidance", () => {
     const entries = [{
       cwd: "/workspace",
       errors: [],
@@ -86,7 +86,7 @@ describe("extension formatting", () => {
 
     const text = formatSkills(entries);
 
-    expect(text).toContain("个人 Skills（1）");
+    expect(text).toContain("已安装 Skills（1）");
     expect(text).toContain("personal-skill：个人说明");
     expect(text).toContain("$Skill名称");
   });

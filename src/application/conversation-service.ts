@@ -256,7 +256,7 @@ export class ConversationService {
     const entries = await this.codex.listSkills(this.router.workspace(target).cwd);
     return entries.map((entry) => ({
       ...entry,
-      skills: entry.skills.filter(isDirectlyInstalledPersonalSkill),
+      skills: entry.skills.filter(isDirectlyInstalledSkill),
     }));
   }
 
@@ -356,12 +356,12 @@ export class ConversationService {
   }
 }
 
-function isDirectlyInstalledPersonalSkill(
+function isDirectlyInstalledSkill(
   skill: SkillsListResponse["data"][number]["skills"][number],
 ): boolean {
   const normalizedPath = skill.path.replaceAll("\\", "/");
   return skill.enabled
-    && skill.scope === "user"
+    && (skill.scope === "user" || skill.scope === "repo")
     && !normalizedPath.includes("/.codex/plugins/");
 }
 
