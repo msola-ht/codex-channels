@@ -64,7 +64,7 @@ describe("codexc CLI", () => {
     expect(initialized).toContain("Codex Connect 已初始化");
     expect(firstAdded).toContain("Workspace 已添加");
     expect(added).toContain("Workspace 已添加");
-    expect(added).toContain("Gateway 正在运行，请重启");
+    expect(added).toContain("Gateway 会自动热加载");
     expect(initialized).toContain(`默认 Workspace：${realpathSync(join(home, "workspace"))}`);
     expect(listed).toContain(".codex-connect/workspace · codex-connect ← 默认");
     expect(listed).toContain("First Project · first-project");
@@ -174,6 +174,7 @@ describe("codexc CLI", () => {
     const output = execFileSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
 
     expect(output).toContain("service uninstall");
+    expect(output).toContain("service reload");
     expect(output).toContain("保留用户数据");
     expect(output).toContain("setup ");
   });

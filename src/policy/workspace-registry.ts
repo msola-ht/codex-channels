@@ -5,21 +5,34 @@ export interface Workspace {
 }
 
 export class WorkspaceRegistry {
-  private readonly byId = new Map<string, Workspace>();
+  private byId = new Map<string, Workspace>();
+  private currentDefaultWorkspaceId: string;
 
   constructor(
     workspaces: readonly Workspace[],
-    readonly defaultWorkspaceId: string,
+    defaultWorkspaceId: string,
   ) {
+    this.currentDefaultWorkspaceId = defaultWorkspaceId;
+    this.replace(workspaces, defaultWorkspaceId);
+  }
+
+  get defaultWorkspaceId(): string {
+    return this.currentDefaultWorkspaceId;
+  }
+
+  replace(workspaces: readonly Workspace[], defaultWorkspaceId: string): void {
+    const next = new Map<string, Workspace>();
     for (const workspace of workspaces) {
-      if (this.byId.has(workspace.id)) {
+      if (next.has(workspace.id)) {
         throw new Error(`Workspace ID 重复：${workspace.id}`);
       }
-      this.byId.set(workspace.id, workspace);
+      next.set(workspace.id, workspace);
     }
-    if (!this.byId.has(defaultWorkspaceId)) {
+    if (!next.has(defaultWorkspaceId)) {
       throw new Error(`默认 Workspace 不存在：${defaultWorkspaceId}`);
     }
+    this.byId = next;
+    this.currentDefaultWorkspaceId = defaultWorkspaceId;
   }
 
   list(): Workspace[] {

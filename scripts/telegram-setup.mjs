@@ -128,7 +128,7 @@ export async function runTelegramSetup({
     writeEnvironmentAtomically(envPath, updated);
     output.write(`\nTelegram 配置已保存：${envPath}\n`);
     output.write("下一步运行：codexc doctor\n");
-    output.write("如 Gateway 已安装并正在运行，再运行：codexc service restart\n");
+    output.write("运行中的 Gateway 会自动热加载；Token 或代理变化时会自动重启。\n");
     return { botUsername: bot.username, allowedUserIds, envPath };
   } finally {
     prompt.close();

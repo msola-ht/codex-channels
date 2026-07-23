@@ -1,1 +1,6 @@
-export { GatewayApplication } from "./app.js";
+export {
+  GatewayApplication,
+  classifyConfigReload,
+  removeUnauthorizedTelegramBindings,
+  type ConfigReloadResult,
+} from "./app.js";

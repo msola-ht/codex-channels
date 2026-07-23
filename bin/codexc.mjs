@@ -103,7 +103,7 @@ function workspace(args) {
     console.log(`${result.workspace.name} (${result.workspace.id})`);
     console.log(result.workspace.cwd);
     if (result.added) {
-      console.log("如果 Gateway 正在运行，请重启后再从 Telegram 切换。");
+      console.log("运行中的 Gateway 会自动热加载该 Workspace。");
     }
     return;
   }
@@ -121,8 +121,8 @@ function workspace(args) {
 
 function service(args) {
   const [action, ...rest] = args;
-  if (rest.length > 0 || !["install", "uninstall", "start", "stop", "restart", "status"].includes(action)) {
-    throw new Error("用法：codexc service <install|uninstall|start|stop|restart|status>");
+  if (rest.length > 0 || !["install", "uninstall", "start", "stop", "reload", "restart", "status"].includes(action)) {
+    throw new Error("用法：codexc service <install|uninstall|start|stop|reload|restart|status>");
   }
   if (process.platform === "darwin") {
     if (action === "install") {
@@ -261,6 +261,7 @@ function printHelp() {
   service uninstall            卸载系统服务并保留用户数据
   service start                启动系统服务
   service stop                 停止系统服务
+  service reload               立即重新读取配置，必要时自动重启 Gateway
   service restart              重启 Gateway，保持 App Server 运行
   service status               查看系统服务状态
   config                       显示用户配置路径

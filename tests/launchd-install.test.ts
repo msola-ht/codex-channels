@@ -166,6 +166,9 @@ describe("launchd installer", () => {
     writeFileSync(launchctlLog, "");
     const restarted = execFileSync("/bin/zsh", [script, "restart"], { env: environment, encoding: "utf8" });
     const restartCalls = readFileSync(launchctlLog, "utf8");
+    writeFileSync(launchctlLog, "");
+    const reloaded = execFileSync("/bin/zsh", [script, "reload"], { env: environment, encoding: "utf8" });
+    const reloadCalls = readFileSync(launchctlLog, "utf8");
 
     expect(started).toContain("已启动");
     expect(stopped).toContain("已停止");
@@ -181,6 +184,10 @@ describe("launchd installer", () => {
     expect(restartCalls).toContain("kickstart -k");
     expect(restartCalls).toContain("com.hegenai.codex-gateway");
     expect(restartCalls).not.toContain("com.hegenai.codex-app-server");
+    expect(reloaded).toContain("重新读取配置");
+    expect(reloadCalls).toContain("kill SIGHUP");
+    expect(reloadCalls).toContain("com.hegenai.codex-gateway");
+    expect(reloadCalls).not.toContain("com.hegenai.codex-app-server");
   });
 
   it.skipIf(process.platform !== "darwin")("migrates legacy launchd jobs during install", () => {

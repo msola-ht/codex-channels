@@ -38,7 +38,12 @@ try {
   if (version !== packageReport.version) {
     throw new Error(`CLI 版本不匹配：实际 ${version}，期望 ${packageReport.version}`);
   }
-  if (!help.includes("setup ") || !help.includes("doctor ") || !help.includes("service install")) {
+  if (
+    !help.includes("setup ")
+    || !help.includes("doctor ")
+    || !help.includes("service install")
+    || !help.includes("service reload")
+  ) {
     throw new Error("CLI 帮助缺少公开命令");
   }
   const installedPackage = join(temporaryDirectory, "node_modules", "@hegenai", "codexc");

@@ -1,7 +1,8 @@
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 
 import "dotenv/config";
+import { parse as parseDotenv } from "dotenv";
 import { z } from "zod";
 
 const environmentSchema = z.object({
@@ -48,6 +49,24 @@ export interface GatewayConfig {
 }
 
 export class ConfigurationError extends Error {}
+
+export interface RuntimeGatewayConfig {
+  config: GatewayConfig;
+  envPath?: string;
+}
+
+export function loadRuntimeConfig(environment: NodeJS.ProcessEnv = process.env): RuntimeGatewayConfig {
+  const configuredPath = environment.CODEX_CONNECT_ENV_FILE?.trim();
+  if (!configuredPath) {
+    return { config: loadConfig(environment) };
+  }
+  const envPath = resolve(configuredPath);
+  const fileEnvironment = parseDotenv(readFileSync(envPath, "utf8"));
+  return {
+    config: loadConfig(fileEnvironment),
+    envPath,
+  };
+}
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): GatewayConfig {
   const parsed = environmentSchema.safeParse(environment);

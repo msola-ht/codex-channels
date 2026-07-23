@@ -61,6 +61,7 @@
     "service:setup": "npm run build && node bin/codexc.mjs service install",
     "service:start": "node bin/codexc.mjs service start",
     "service:stop": "node bin/codexc.mjs service stop",
+    "service:reload": "node bin/codexc.mjs service reload",
     "service:uninstall": "node bin/codexc.mjs service uninstall",
     "service:restart": "node bin/codexc.mjs service restart",
     "service:status": "node bin/codexc.mjs service status"

@@ -82,6 +82,7 @@ codexc ws                        # 列出 Workspace
 codexc ws add                    # 注册当前目录
 codexc remote                    # 在当前目录启动原生 Codex TUI
 codexc remote resume             # 恢复当前目录的原生会话
+codexc service reload            # 立即热加载配置，必要时自动重启 Gateway
 codexc service restart           # 只重启 Gateway
 codexc service uninstall         # 卸载服务并保留用户数据
 ```
@@ -91,6 +92,8 @@ codexc service uninstall         # 卸载服务并保留用户数据
 macOS 从旧版本升级后执行一次 `codexc service install`，安装器会将旧 `com.msola.*` launchd Job 迁移到 `com.hegenai.*`，并保留用户数据。Linux 使用 `systemctl --user` 管理两个独立服务，`service restart` 只重启 Gateway。
 
 Telegram 与 App Server 均采用有界退避重连；连续失败耗尽后 Gateway 会退出，由 launchd 或 systemd 自动拉起，避免进程存活但不再接收消息。
+
+Gateway 会监测用户 `.env`：新增 Workspace 和 Telegram 允许用户会直接热加载；删除允许用户会先重启 Gateway 并清理其旧 Thread 绑定；Bot Token、代理、数据库、默认模型等 Gateway 配置变化时，Gateway 会优雅退出并由 launchd 或 systemd 自动拉起，Codex App Server 保持运行。`CODEX_BINARY` 或 `CODEX_SOCKET_PATH` 涉及 App Server 服务定义，需要重新执行 `codexc service install`。配置校验失败时继续使用当前有效配置。可执行 `codexc service reload` 立即触发检查，无需等待文件监测。
 
 ## Telegram 命令
 

@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ConfigurationError, loadConfig } from "../src/config/index.js";
+import { ConfigurationError, loadConfig, loadRuntimeConfig } from "../src/config/index.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -129,6 +129,31 @@ describe("loadConfig", () => {
         ...workspaceEnvironment(workdir),
       }),
     ).toThrow("Telegram 代理目前只支持 http:// 或 https://");
+  });
+
+  it("re-reads an explicit environment file instead of stale process values", () => {
+    const workdir = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
+    temporaryDirectories.push(workdir);
+    const envPath = join(workdir, ".env");
+    writeFileSync(envPath, [
+      "TELEGRAM_BOT_TOKEN=fresh-token",
+      "TELEGRAM_ALLOWED_USER_IDS=456",
+      `CODEX_WORKSPACES_JSON='${JSON.stringify([{ id: "main", name: "Main", cwd: workdir }])}'`,
+      "CODEX_DEFAULT_WORKSPACE=main",
+    ].join("\n"));
+
+    const runtime = loadRuntimeConfig({
+      CODEX_CONNECT_ENV_FILE: envPath,
+      TELEGRAM_BOT_TOKEN: "stale-token",
+      TELEGRAM_ALLOWED_USER_IDS: "123",
+      CODEX_MODEL: "stale-model",
+      ...workspaceEnvironment(workdir),
+    });
+
+    expect(runtime.envPath).toBe(envPath);
+    expect(runtime.config.telegramBotToken).toBe("fresh-token");
+    expect(runtime.config.telegramAllowedUserIds).toEqual(new Set([456]));
+    expect(runtime.config.codexModel).toBeUndefined();
   });
 });
 

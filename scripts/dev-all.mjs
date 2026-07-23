@@ -42,19 +42,14 @@ if (await socketAcceptsWebSocket(socketPath)) {
   console.log(`Codex App Server 已启动：${socketPath}`);
 }
 
-const gateway = spawn(process.execPath, gatewayEntry, {
-  cwd: runtime.dataDir,
-  stdio: "inherit",
-  env: { ...process.env, DOTENV_CONFIG_PATH: runtime.envPath },
-});
-
 let stopping = false;
+let gateway;
 const stop = () => {
   if (stopping) {
     return;
   }
   stopping = true;
-  if (gateway.exitCode === null) {
+  if (gateway?.exitCode === null) {
     gateway.kill("SIGTERM");
   }
   if (ownsAppServer && appServer?.exitCode === null) {
@@ -64,14 +59,6 @@ const stop = () => {
 process.once("SIGINT", stop);
 process.once("SIGTERM", stop);
 
-gateway.once("error", (error) => {
-  console.error(`Gateway 启动失败：${error.message}`);
-  stop();
-});
-gateway.once("exit", (code, signal) => {
-  stop();
-  process.exitCode = code ?? (signal ? 1 : 0);
-});
 if (appServer) {
   appServer.once("exit", (code, signal) => {
     if (!stopping) {
@@ -82,7 +69,42 @@ if (appServer) {
   });
 }
 
-await new Promise((resolveExit) => gateway.once("exit", resolveExit));
+while (!stopping) {
+  gateway = spawn(process.execPath, gatewayEntry, {
+    cwd: runtime.dataDir,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      CODEX_CONNECT_ENV_FILE: runtime.envPath,
+      CODEX_CONNECT_GATEWAY_SUPERVISED: "1",
+      DOTENV_CONFIG_PATH: runtime.envPath,
+    },
+  });
+  const result = await waitForGateway(gateway);
+  gateway = undefined;
+  if (stopping) {
+    break;
+  }
+  if (result.code === 75) {
+    console.log("Gateway 配置需要重建连接，正在保持 App Server 并重启 Gateway...");
+    continue;
+  }
+  if (result.error) {
+    console.error(`Gateway 启动失败：${result.error.message}`);
+  }
+  process.exitCode = result.code ?? (result.signal || result.error ? 1 : 0);
+  stop();
+}
+
+function waitForGateway(child) {
+  return new Promise((resolveExit) => {
+    let error;
+    child.once("error", (failure) => {
+      error = failure;
+    });
+    child.once("close", (code, signal) => resolveExit({ code, signal, error }));
+  });
+}
 
 function resolveExecutable(command) {
   if (isAbsolute(command)) {

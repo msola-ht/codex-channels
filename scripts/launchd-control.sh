@@ -100,6 +100,14 @@ case "$action" in
     start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
     print "Gateway 已重启；Codex App Server 保持运行。"
     ;;
+  reload)
+    if ! job_loaded "$gateway_label"; then
+      print -u2 "Gateway 尚未运行，请先执行 codexc service start。"
+      exit 1
+    fi
+    launchctl kill SIGHUP "$user_domain/$gateway_label"
+    print "已通知 Gateway 重新读取配置；Gateway 连接变化会自动重启，App Server 配置变化需重新安装服务。"
+    ;;
   status)
     launchctl print "$user_domain/$app_label" 2>/dev/null || true
     launchctl print "$user_domain/$gateway_label" 2>/dev/null || true
@@ -107,7 +115,7 @@ case "$action" in
     launchctl print "$user_domain/$legacy_gateway_label" 2>/dev/null || true
     ;;
   *)
-    print -u2 "用法：$0 {install|start|stop|restart|status|uninstall}"
+    print -u2 "用法：$0 {install|start|stop|reload|restart|status|uninstall}"
     exit 2
     ;;
 esac

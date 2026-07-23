@@ -17,7 +17,7 @@ import { ConversationCore, type OutputEvent } from "../conversation-core/index.j
 import { EventBus } from "../event-bus/index.js";
 import { TelegramAccessPolicy, WorkspaceRegistry } from "../policy/index.js";
 import { SessionRouter } from "../session-routing/index.js";
-import { SqliteBindingStore } from "../storage/index.js";
+import { SqliteBindingStore, type BindingStore } from "../storage/index.js";
 import { TelegramSurface } from "../surfaces/index.js";
 
 export class GatewayApplication {
@@ -31,13 +31,15 @@ export class GatewayApplication {
   private readonly router: SessionRouter;
   private readonly core: ConversationCore;
   private readonly bindings: SqliteBindingStore;
+  private readonly workspaces: WorkspaceRegistry;
+  private readonly access: TelegramAccessPolicy;
   private removeRpcNotification: (() => void) | undefined;
   private removeRpcDisconnect: (() => void) | undefined;
   private reconnecting: Promise<void> | undefined;
   private stopping = false;
 
   constructor(
-    private readonly config: GatewayConfig,
+    private config: GatewayConfig,
     private readonly logger: Logger,
   ) {
     verifyCodexVersion(config);
@@ -50,10 +52,16 @@ export class GatewayApplication {
     this.inbound = new EventBus<RpcNotification>(logger, 2_000);
     this.output = new EventBus<OutputEvent>(logger, 1_000);
     this.bindings = new SqliteBindingStore(config.stateDatabasePath);
+    const removedBindings = removeUnauthorizedTelegramBindings(this.bindings, config.telegramAllowedUserIds);
+    if (removedBindings > 0) {
+      logger.warn({ removedBindings }, "已清理不再授权的 Telegram 会话绑定");
+    }
+    this.workspaces = new WorkspaceRegistry(config.workspaces, config.defaultWorkspaceId);
+    this.access = new TelegramAccessPolicy(config.telegramAllowedUserIds);
     this.router = new SessionRouter(
       this.codex,
       this.bindings,
-      new WorkspaceRegistry(config.workspaces, config.defaultWorkspaceId),
+      this.workspaces,
     );
     this.core = new ConversationCore(this.router, this.output);
     const models = new ModelSelectionService(this.codex, this.router, config.codexModel);
@@ -63,7 +71,7 @@ export class GatewayApplication {
       config.telegramProxyUrl,
       service,
       this.output,
-      new TelegramAccessPolicy(config.telegramAllowedUserIds),
+      this.access,
       config.telegramAllowedUserIds,
       config.workspaces,
       join(dirname(config.stateDatabasePath), "uploads"),
@@ -153,6 +161,22 @@ export class GatewayApplication {
     this.bindings.close();
   }
 
+  reloadConfig(next: GatewayConfig): ConfigReloadResult {
+    const result = classifyConfigReload(this.config, next);
+    if (result.action !== "reload") {
+      return result;
+    }
+
+    if (result.changes.includes("Workspace")) {
+      this.workspaces.replace(next.workspaces, next.defaultWorkspaceId);
+    }
+    if (result.changes.includes("Telegram 允许用户")) {
+      this.access.replace(next.telegramAllowedUserIds);
+    }
+    this.config = next;
+    return result;
+  }
+
   private async reconnect(): Promise<void> {
     const maximumAttempts = 12;
     for (let attempt = 1; attempt <= maximumAttempts && !this.stopping; attempt += 1) {
@@ -223,6 +247,106 @@ export class GatewayApplication {
     }
     return failures.every((failure) => failure.bindingRemoved);
   }
+}
+
+export type ConfigReloadResult =
+  | { action: "reload"; changes: string[] }
+  | { action: "restart"; changes: string[] }
+  | { action: "reinstall"; changes: string[] };
+
+export function classifyConfigReload(current: GatewayConfig, next: GatewayConfig): ConfigReloadResult {
+  const reinstallReasons = serviceReinstallReasons(current, next);
+  if (reinstallReasons.length > 0) {
+    return { action: "reinstall", changes: reinstallReasons };
+  }
+  const restartReasons = restartRequiredReasons(current, next);
+  if (restartReasons.length > 0) {
+    return { action: "restart", changes: restartReasons };
+  }
+  const changes: string[] = [];
+  if (!sameWorkspaces(current.workspaces, next.workspaces)) {
+    changes.push("Workspace");
+  }
+  if (!sameNumberSet(current.telegramAllowedUserIds, next.telegramAllowedUserIds)) {
+    changes.push("Telegram 允许用户");
+  }
+  return { action: "reload", changes };
+}
+
+function serviceReinstallReasons(current: GatewayConfig, next: GatewayConfig): string[] {
+  const reasons: string[] = [];
+  if (current.codexBinary !== next.codexBinary) {
+    reasons.push("Codex Binary");
+  }
+  if (current.codexSocketPath !== next.codexSocketPath) {
+    reasons.push("Codex Socket");
+  }
+  return reasons;
+}
+
+function restartRequiredReasons(current: GatewayConfig, next: GatewayConfig): string[] {
+  const reasons: string[] = [];
+  const fields: Array<[string, unknown, unknown]> = [
+    ["Telegram Bot Token", current.telegramBotToken, next.telegramBotToken],
+    ["Telegram 代理", current.telegramProxyUrl, next.telegramProxyUrl],
+    ["默认模型", current.codexModel, next.codexModel],
+    ["Sandbox", current.codexSandbox, next.codexSandbox],
+    ["State Database", current.stateDatabasePath, next.stateDatabasePath],
+    ["审批超时", current.approvalTimeoutMs, next.approvalTimeoutMs],
+    ["日志级别", current.logLevel, next.logLevel],
+    ["默认 Workspace", current.defaultWorkspaceId, next.defaultWorkspaceId],
+  ];
+  for (const [label, before, after] of fields) {
+    if (before !== after) {
+      reasons.push(label);
+    }
+  }
+  if (!preservesExistingWorkspaces(current.workspaces, next.workspaces)) {
+    reasons.push("已有 Workspace");
+  }
+  if (![...current.telegramAllowedUserIds].every((userId) => next.telegramAllowedUserIds.has(userId))) {
+    reasons.push("Telegram 用户撤权");
+  }
+  return reasons;
+}
+
+export function removeUnauthorizedTelegramBindings(
+  bindings: BindingStore,
+  allowedUserIds: ReadonlySet<number>,
+): number {
+  let removed = 0;
+  for (const binding of bindings.list()) {
+    const userId = Number(binding.target.conversationId);
+    if (!Number.isSafeInteger(userId) || !allowedUserIds.has(userId)) {
+      bindings.unbind(binding.target);
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
+function preservesExistingWorkspaces(
+  current: GatewayConfig["workspaces"],
+  next: GatewayConfig["workspaces"],
+): boolean {
+  const byId = new Map(next.map((workspace) => [workspace.id, workspace]));
+  return current.every((workspace) => {
+    const candidate = byId.get(workspace.id);
+    return candidate?.name === workspace.name && candidate.cwd === workspace.cwd;
+  });
+}
+
+function sameWorkspaces(current: GatewayConfig["workspaces"], next: GatewayConfig["workspaces"]): boolean {
+  return current.length === next.length && current.every((workspace, index) => {
+    const candidate = next[index];
+    return candidate?.id === workspace.id
+      && candidate.name === workspace.name
+      && candidate.cwd === workspace.cwd;
+  });
+}
+
+function sameNumberSet(current: ReadonlySet<number>, next: ReadonlySet<number>): boolean {
+  return current.size === next.size && [...current].every((value) => next.has(value));
 }
 
 function verifyCodexVersion(config: GatewayConfig): void {

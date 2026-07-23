@@ -34,6 +34,14 @@ case "$action" in
     systemctl_user restart "$gateway_unit"
     printf '%s\n' "Gateway 已重启；Codex App Server 保持运行。"
     ;;
+  reload)
+    if ! systemctl_user is-active --quiet "$gateway_unit"; then
+      printf '%s\n' "Gateway 尚未运行，请先执行 codexc service start。" >&2
+      exit 1
+    fi
+    systemctl_user kill --signal=HUP "$gateway_unit"
+    printf '%s\n' "已通知 Gateway 重新读取配置；Gateway 连接变化会自动重启，App Server 配置变化需重新安装服务。"
+    ;;
   status)
     systemctl_user --no-pager status "$app_unit" "$gateway_unit" || true
     ;;
@@ -46,7 +54,7 @@ case "$action" in
     printf '%s\n' "用户配置与运行数据保留在 ~/.codex-connect。"
     ;;
   *)
-    printf '%s\n' "用法：$0 {install|start|stop|restart|status|uninstall}" >&2
+    printf '%s\n' "用法：$0 {install|start|stop|reload|restart|status|uninstall}" >&2
     exit 2
     ;;
 esac
