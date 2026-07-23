@@ -49,6 +49,12 @@ interface OperationLogState {
   timer: NodeJS.Timeout | undefined;
 }
 
+interface HeldApprovalOperation {
+  chatId: string;
+  turnKey: string;
+  operation: OperationUpdate;
+}
+
 interface OutboxOperation {
   critical: boolean;
   run(): Promise<void>;
@@ -76,6 +82,7 @@ export class TelegramOutbox {
   private readonly workers = new Map<string, ChatWorker>();
   private readonly approvalRequestsByOperation = new Map<string, Set<string>>();
   private readonly operationByApprovalRequest = new Map<string, string>();
+  private readonly heldApprovalOperations = new Map<string, HeldApprovalOperation>();
   private readonly suppressedOperations = new Set<string>();
   private readonly notifiedTurns = new Set<string>();
   private closed = false;
@@ -171,6 +178,14 @@ export class TelegramOutbox {
           return;
         }
         const heldForApproval = this.approvalRequestsByOperation.has(operationKey);
+        if (heldForApproval) {
+          this.heldApprovalOperations.set(operationKey, {
+            chatId,
+            turnKey,
+            operation: event.operation,
+          });
+          return;
+        }
         const state = this.operationLogs.get(turnKey) ?? this.createOperationLog(chatId, turnKey);
         if (!state.records.has(event.operation.itemId)) {
           state.order.push(event.operation.itemId);
@@ -183,7 +198,7 @@ export class TelegramOutbox {
           }
         }
         state.records.set(event.operation.itemId, event.operation);
-        if (!heldForApproval && !state.timer) {
+        if (!state.timer) {
           state.timer = setTimeout(() => {
             state.timer = undefined;
             this.enqueue(
@@ -331,6 +346,7 @@ export class TelegramOutbox {
     this.workers.clear();
     this.approvalRequestsByOperation.clear();
     this.operationByApprovalRequest.clear();
+    this.heldApprovalOperations.clear();
     this.suppressedOperations.clear();
     this.notifiedTurns.clear();
   }
@@ -382,7 +398,7 @@ export class TelegramOutbox {
     requestIds?.delete(request.requestId);
     const rejected = decision.type !== "approval" || !decision.approved;
     const turnKey = this.turnKey(request.threadId, request.turnId);
-    const state = this.operationLogs.get(turnKey);
+    let state = this.operationLogs.get(turnKey);
     if (rejected) {
       this.suppressApprovalOperation(operationKey, turnKey, request.itemId, state);
     }
@@ -392,9 +408,20 @@ export class TelegramOutbox {
     this.approvalRequestsByOperation.delete(operationKey);
 
     if (this.suppressedOperations.has(operationKey)) {
+      this.heldApprovalOperations.delete(operationKey);
       return;
     }
 
+    const held = this.heldApprovalOperations.get(operationKey);
+    this.heldApprovalOperations.delete(operationKey);
+    if (held) {
+      state = this.operationLogs.get(turnKey) ?? this.createOperationLog(held.chatId, turnKey);
+      if (!state.records.has(request.itemId)) {
+        state.order.push(request.itemId);
+      }
+      state.records.set(request.itemId, held.operation);
+      this.operationLogs.set(turnKey, state);
+    }
     if (state?.records.has(request.itemId)) {
       if (state.timer) {
         clearTimeout(state.timer);
@@ -607,9 +634,24 @@ export class TelegramOutbox {
     this.operationByApprovalRequest.set(request.requestId, operationKey);
 
     const state = this.operationLogs.get(turnKey);
-    if (state?.chatId === chatId && state.timer) {
-      clearTimeout(state.timer);
-      state.timer = undefined;
+    if (state?.chatId === chatId) {
+      const operation = state.records.get(request.itemId);
+      if (operation) {
+        this.heldApprovalOperations.set(operationKey, {
+          chatId,
+          turnKey,
+          operation,
+        });
+        state.records.delete(request.itemId);
+        state.order = state.order.filter((itemId) => itemId !== request.itemId);
+      }
+      if (state.timer) {
+        clearTimeout(state.timer);
+        state.timer = undefined;
+      }
+      if (state.records.size === 0 && state.messageId === undefined) {
+        this.operationLogs.delete(turnKey);
+      }
     }
   }
 
@@ -622,39 +664,8 @@ export class TelegramOutbox {
       clearTimeout(state.timer);
       state.timer = undefined;
     }
-    const heldIds = state.order.filter((itemId) => this.isOperationHeld(turnKey, itemId));
-    if (heldIds.length === 0) {
-      this.operationLogs.delete(turnKey);
-      this.enqueue(chatId, () => this.flushOperationLog(state, true), true);
-      return;
-    }
-
-    const visibleIds = state.order.filter((itemId) => !this.isOperationHeld(turnKey, itemId));
-    const heldState: OperationLogState = {
-      ...state,
-      order: heldIds,
-      records: new Map(heldIds.flatMap((itemId) => {
-        const record = state.records.get(itemId);
-        return record ? [[itemId, record] as const] : [];
-      })),
-      omittedCount: 0,
-      messageId: undefined,
-      timer: undefined,
-    };
-    this.operationLogs.set(turnKey, heldState);
-
-    if (visibleIds.length > 0) {
-      const visibleState: OperationLogState = {
-        ...state,
-        order: visibleIds,
-        records: new Map(visibleIds.flatMap((itemId) => {
-          const record = state.records.get(itemId);
-          return record ? [[itemId, record] as const] : [];
-        })),
-        timer: undefined,
-      };
-      this.enqueue(chatId, () => this.flushOperationLog(visibleState, true), true);
-    }
+    this.operationLogs.delete(turnKey);
+    this.enqueue(chatId, () => this.flushOperationLog(state, true), true);
   }
 
   private suppressApprovalOperation(
@@ -664,6 +675,7 @@ export class TelegramOutbox {
     state: OperationLogState | undefined,
   ): void {
     this.suppressedOperations.add(operationKey);
+    this.heldApprovalOperations.delete(operationKey);
     if (!state) {
       return;
     }
@@ -790,10 +802,6 @@ export class TelegramOutbox {
     return `${turnKey}:${itemId}`;
   }
 
-  private isOperationHeld(turnKey: string, itemId: string): boolean {
-    return this.approvalRequestsByOperation.has(this.operationKey(turnKey, itemId));
-  }
-
   private clearApprovalOperationsForTurn(turnKey: string): void {
     const prefix = `${turnKey}:`;
     for (const [requestId, operationKey] of this.operationByApprovalRequest) {
@@ -804,6 +812,11 @@ export class TelegramOutbox {
     for (const operationKey of this.approvalRequestsByOperation.keys()) {
       if (operationKey.startsWith(prefix)) {
         this.approvalRequestsByOperation.delete(operationKey);
+      }
+    }
+    for (const operationKey of this.heldApprovalOperations.keys()) {
+      if (operationKey.startsWith(prefix)) {
+        this.heldApprovalOperations.delete(operationKey);
       }
     }
     for (const operationKey of this.suppressedOperations) {
@@ -1055,6 +1068,11 @@ export class TelegramOutbox {
     for (const operationKey of this.approvalRequestsByOperation.keys()) {
       if (operationKey.startsWith(prefix)) {
         this.approvalRequestsByOperation.delete(operationKey);
+      }
+    }
+    for (const operationKey of this.heldApprovalOperations.keys()) {
+      if (operationKey.startsWith(prefix)) {
+        this.heldApprovalOperations.delete(operationKey);
       }
     }
     for (const operationKey of this.suppressedOperations) {

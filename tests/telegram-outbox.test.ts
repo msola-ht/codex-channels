@@ -645,6 +645,48 @@ describe("TelegramOutbox", () => {
     await outbox.close();
   });
 
+  it("does not mix a pending approval command into another command's progress", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    const request = commandApprovalInteraction();
+
+    outbox.handle(operationUpdated(
+      "command-1",
+      "running",
+      "command",
+      "npx vitest run tests/codexc-cli.test.ts",
+    ));
+    outbox.prepareInteraction(target.conversationId, request);
+    const card = outbox.runOrdered(target.conversationId, async () => {
+      api.sent.push("审批卡片");
+      return true;
+    });
+    outbox.handle(operationUpdated(
+      "command-2",
+      "completed",
+      "command",
+      "npm run check",
+    ));
+    await vi.advanceTimersByTimeAsync(750);
+    await settle();
+
+    await expect(card).resolves.toBe(true);
+    expect(api.sent).toHaveLength(2);
+    expect(api.sent[0]).toBe("审批卡片");
+    expect(api.sent[1]).toContain("npm run check");
+    expect(api.sent[1]).not.toContain("npx vitest");
+
+    outbox.finishInteraction(target.conversationId, request, {
+      type: "approval",
+      approved: false,
+    });
+    await settle();
+    expect(api.sent.join("\n")).not.toContain("npx vitest");
+
+    await outbox.close();
+  });
+
   it("bounds long operation histories and keeps the most recent records", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();
