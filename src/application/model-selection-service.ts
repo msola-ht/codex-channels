@@ -112,7 +112,20 @@ export class ModelSelectionService {
   }
 
   markApplied(target: ConversationTarget): void {
-    this.pendingByConversation.delete(this.key(target));
+    const key = this.key(target);
+    const pending = this.pendingByConversation.get(key);
+    const binding = this.router.current(target);
+    const current = this.router.modelSettings(target);
+    if (pending && binding && current) {
+      this.router.updateModelSettings(binding.threadId, {
+        model: pending.model ?? current.model,
+        effort: pending.effort ?? current.effort,
+        serviceTier: hasServiceTierOverride(pending)
+          ? pending.serviceTier ?? null
+          : current.serviceTier,
+      });
+    }
+    this.pendingByConversation.delete(key);
   }
 
   clear(target: ConversationTarget): void {

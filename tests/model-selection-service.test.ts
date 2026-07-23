@@ -51,7 +51,16 @@ function createService(settings?: {
   serviceTier: string | null;
 }): ModelSelectionService {
   const codex = { listModels: async () => models } as unknown as CodexAppServerClient;
-  const router = { modelSettings: () => settings } as unknown as SessionRouter;
+  let currentSettings = settings;
+  const router = {
+    current: () => currentSettings
+      ? { target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }
+      : undefined,
+    modelSettings: () => currentSettings,
+    updateModelSettings: (_threadId: string, next: typeof settings) => {
+      currentSettings = next;
+    },
+  } as unknown as SessionRouter;
   return new ModelSelectionService(codex, router);
 }
 
@@ -107,6 +116,28 @@ describe("ModelSelectionService", () => {
       serviceTierPending: true,
     });
     expect(service.turnOverrides(target)).toEqual({ serviceTier: null });
+  });
+
+  it("updates the local thread settings after Fast overrides are accepted", async () => {
+    const service = createService({ model: "gpt-main", effort: "medium", serviceTier: "default" });
+
+    await service.selectFastMode(target, "on");
+    service.markApplied(target);
+
+    expect(service.status(target)).toMatchObject({
+      serviceTier: "priority",
+      pending: false,
+      serviceTierPending: false,
+    });
+
+    await service.selectFastMode(target, "off");
+    service.markApplied(target);
+
+    expect(service.status(target)).toMatchObject({
+      serviceTier: null,
+      pending: false,
+      serviceTierPending: false,
+    });
   });
 
   it("rejects Fast mode for a model that does not expose the Fast tier", async () => {
