@@ -46,7 +46,7 @@ describe("ConversationCore", () => {
     output.subscribe("test", (event) => {
       events.push(event);
     });
-    const target = { surface: "telegram" as const, conversationId: "100" };
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
     const router = {
       allBindings: () => [],
       targetForThread: () => target,
@@ -122,7 +122,7 @@ describe("ConversationCore", () => {
     output.subscribe("test", (event) => {
       events.push(event);
     });
-    const target = { surface: "telegram" as const, conversationId: "100" };
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
     const router = {
       allBindings: () => [],
       targetForThread: (threadId: string) => threadId === "thread-1" ? target : undefined,
@@ -170,7 +170,7 @@ describe("ConversationCore", () => {
     output.subscribe("test", (event) => {
       events.push(event);
     });
-    const target = { surface: "telegram" as const, conversationId: "100" };
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
     const router = {
       allBindings: () => [],
       targetForThread: () => target,
@@ -202,7 +202,7 @@ describe("ConversationCore", () => {
     output.subscribe("test", (event) => {
       events.push(event);
     });
-    const target = { surface: "telegram" as const, conversationId: "100" };
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
     const router = {
       allBindings: () => [{ target, threadId: "thread-1" }],
       targetForThread: () => target,
@@ -255,7 +255,7 @@ describe("ConversationCore", () => {
     output.subscribe("test", (event) => {
       events.push(event);
     });
-    const target = { surface: "telegram" as const, conversationId: "100" };
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
     const router = {
       allBindings: () => [],
       targetForThread: () => target,
@@ -368,7 +368,7 @@ describe("ConversationCore", () => {
     });
 
     core.markTurnStarted(
-      { surface: "telegram", conversationId: "100" },
+      { surface: "telegram", accountId: "default", conversationId: "100" },
       "thread-1",
       "turn-2",
     );
@@ -385,7 +385,7 @@ describe("ConversationCore", () => {
     output.subscribe("test", (event) => {
       events.push(event);
     });
-    const target = { surface: "telegram" as const, conversationId: "100" };
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
     const core = new ConversationCore({
       allBindings: () => [{ target, threadId: "thread-1" }],
       targetForThread: () => target,

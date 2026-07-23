@@ -11,6 +11,7 @@ import type {
 } from "../codex-protocol/index.js";
 import type { EventBus } from "../event-bus/index.js";
 import {
+  conversationTargetKey,
   gatewayUserMessageClientIdPrefix,
   type ConversationTarget,
   type OutputEvent,
@@ -501,7 +502,7 @@ export class ConversationCore {
   }
 
   private key(target: ConversationTarget): string {
-    return `${target.surface}:${target.conversationId}`;
+    return conversationTargetKey(target);
   }
 }
 

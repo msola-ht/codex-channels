@@ -44,4 +44,5 @@ export type InteractionDecision =
 export interface InteractionPort {
   request(target: ConversationTarget, request: InteractionRequest): Promise<InteractionDecision>;
   resolved?(requestId: string): void;
+  cancelAll?(outcome?: string): void;
 }

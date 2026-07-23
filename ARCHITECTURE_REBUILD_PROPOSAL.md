@@ -505,9 +505,11 @@ interface StateStore {
 
 ```ts
 interface SurfaceAdapter {
+  readonly surface: string;
+  readonly accountId: string;
+  readonly interactions: InteractionPort;
   start(): Promise<void>;
   stop(): Promise<void>;
-  send(target: Target, event: OutputEvent): Promise<void>;
 }
 
 interface CommandExtension {

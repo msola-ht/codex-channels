@@ -6,7 +6,7 @@ import type { CodexAppServerClient } from "../src/codex-client/client.js";
 import type { ConversationCore } from "../src/conversation-core/core.js";
 import type { SessionRouter } from "../src/session-routing/router.js";
 
-const target = { surface: "telegram" as const, conversationId: "100" };
+const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
 const main = { id: "main", name: "Main", cwd: "/workspace/main" };
 const other = { id: "other", name: "Other", cwd: "/workspace/other" };
 

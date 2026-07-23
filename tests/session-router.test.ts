@@ -7,7 +7,7 @@ import { MemoryBindingStore } from "../src/storage/memory-binding-store.js";
 import { SessionRouter } from "../src/session-routing/router.js";
 import { WorkspaceRegistry } from "../src/policy/workspace-registry.js";
 
-const target = { surface: "telegram" as const, conversationId: "100" };
+const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
 const registry = new WorkspaceRegistry(
   [
     { id: "main", name: "Main", cwd: "/workspace" },
@@ -122,6 +122,43 @@ describe("SessionRouter", () => {
     expect(router.current(target)?.threadId).toBe("bound");
   });
 
+  it("preserves but does not subscribe bindings for disabled Surface accounts", async () => {
+    const store = new MemoryBindingStore();
+    const disabled = {
+      surface: "feishu" as const,
+      accountId: "tenant-a",
+      conversationId: "chat-1",
+    };
+    store.bind({
+      target,
+      workspaceId: "main",
+      threadId: "telegram-thread",
+      sessionId: "telegram-session",
+    });
+    store.bind({
+      target: disabled,
+      workspaceId: "main",
+      threadId: "feishu-thread",
+      sessionId: "feishu-session",
+    });
+    const resumed: string[] = [];
+    const client = {
+      resumeThread: async (threadId: string) => {
+        resumed.push(threadId);
+        return { thread: thread(threadId, { type: "idle" }) };
+      },
+    } as unknown as CodexAppServerClient;
+    const router = new SessionRouter(client, store, registry);
+
+    const failures = await router.restoreSubscriptions(
+      (candidate) => candidate.surface === "telegram",
+    );
+
+    expect(failures).toEqual([]);
+    expect(resumed).toEqual(["telegram-thread"]);
+    expect(store.get(disabled)?.threadId).toBe("feishu-thread");
+  });
+
   it("keeps a binding when subscription restore fails transiently", async () => {
     const store = new MemoryBindingStore();
     store.bind({ target, workspaceId: "main", threadId: "bound", sessionId: "bound" });
@@ -137,6 +174,24 @@ describe("SessionRouter", () => {
     expect(failures).toEqual([
       expect.objectContaining({ bindingRemoved: false }),
     ]);
+    expect(router.current(target)?.threadId).toBe("bound");
+  });
+
+  it("preserves bindings when subscription restore is cancelled during shutdown", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "bound", sessionId: "bound" });
+    let running = true;
+    const client = {
+      resumeThread: async () => {
+        running = false;
+        throw new Error("Codex JSON-RPC Client 已关闭");
+      },
+    } as unknown as CodexAppServerClient;
+    const router = new SessionRouter(client, store, registry);
+
+    const failures = await router.restoreSubscriptions(() => running);
+
+    expect(failures).toEqual([]);
     expect(router.current(target)?.threadId).toBe("bound");
   });
 

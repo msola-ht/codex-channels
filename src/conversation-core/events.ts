@@ -7,12 +7,23 @@ import type {
   TurnPlanStep,
 } from "../codex-protocol/index.js";
 
+export type SurfaceId = string;
+
 export interface ConversationTarget {
-  surface: "telegram";
+  surface: SurfaceId;
+  accountId: string;
   conversationId: string;
 }
 
 export const gatewayUserMessageClientIdPrefix = "codex_connect_gateway:";
+
+export function surfaceAccountKey(surface: SurfaceId, accountId: string): string {
+  return JSON.stringify([surface, accountId]);
+}
+
+export function conversationTargetKey(target: ConversationTarget): string {
+  return JSON.stringify([target.surface, target.accountId, target.conversationId]);
+}
 
 export type OperationStatus = "running" | "completed" | "failed" | "declined";
 export type OperationKind =

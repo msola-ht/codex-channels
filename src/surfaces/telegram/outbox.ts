@@ -7,6 +7,7 @@ import type { OperationUpdate, OutputEvent } from "../../conversation-core/index
 import type { MessagePhase } from "../../codex-protocol/index.js";
 import { BoundedAsyncQueue } from "../../event-bus/index.js";
 import { TelegramApiExecutor } from "./api-executor.js";
+import { telegramDefaultAccountId } from "./constants.js";
 import {
   formatAccountUpdate,
   formatContextUsage,
@@ -60,6 +61,7 @@ export type TelegramFinalMessageFormat = "html" | "rich";
 
 export interface TelegramOutboxOptions {
   finalMessageFormat?: TelegramFinalMessageFormat;
+  accountId?: string;
 }
 
 export class TelegramOutbox {
@@ -91,7 +93,11 @@ export class TelegramOutbox {
   }
 
   handle(event: OutputEvent): void {
-    if (this.closed) {
+    if (
+      this.closed
+      || event.target.surface !== "telegram"
+      || event.target.accountId !== (this.options.accountId ?? telegramDefaultAccountId)
+    ) {
       return;
     }
     const chatId = event.target.conversationId;

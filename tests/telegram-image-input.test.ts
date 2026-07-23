@@ -27,7 +27,7 @@ describe("Telegram image input", () => {
       mimeType: "image/jpeg",
       bytes: 100,
     });
-    const { surface, output } = createSurface(submit, download);
+    const { surface, output, rememberActor } = createSurface(submit, download);
 
     await surface.bot.handleUpdate({
       update_id: 1,
@@ -46,11 +46,15 @@ describe("Telegram image input", () => {
 
     expect(download).toHaveBeenCalledWith(surface.bot.api, "large");
     expect(submit).toHaveBeenCalledWith(
-      { surface: "telegram", conversationId: "100" },
+      { surface: "telegram", accountId: "default", conversationId: "100" },
       {
         text: "检查右上角的错误",
         localImages: [{ path: "/private/uploads/photo.jpg" }],
       },
+    );
+    expect(rememberActor).toHaveBeenCalledWith(
+      { surface: "telegram", accountId: "default", conversationId: "100" },
+      "123",
     );
     await surface.stop();
     await output.close();
@@ -149,7 +153,12 @@ describe("Telegram image input", () => {
 function createSurface(
   submit: ReturnType<typeof vi.fn>,
   download: ReturnType<typeof vi.fn>,
-): { surface: TelegramSurface; output: EventBus<OutputEvent>; apiCalls: string[] } {
+): {
+  surface: TelegramSurface;
+  output: EventBus<OutputEvent>;
+  apiCalls: string[];
+  rememberActor: ReturnType<typeof vi.fn>;
+} {
   const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
   const apiCalls: string[] = [];
   const imageStore: TelegramImagePort = {
@@ -158,6 +167,7 @@ function createSurface(
     download: download as unknown as TelegramImagePort["download"],
   };
   const directory = mkdtempSync(join(tmpdir(), "codex-telegram-surface-"));
+  const rememberActor = vi.fn();
   directories.push(directory);
   const surface = new TelegramSurface(
     "123:token",
@@ -169,7 +179,7 @@ function createSurface(
     [{ id: "main", name: "Main", cwd: "/workspace" }],
     directory,
     pino({ level: "silent" }),
-    { imageStore },
+    { imageStore, actorRegistry: { rememberActor } },
   );
   surface.bot.botInfo = {
     id: 999,
@@ -201,7 +211,7 @@ function createSurface(
     }
     return { ok: true, result: true } as never;
   });
-  return { surface, output, apiCalls };
+  return { surface, output, apiCalls, rememberActor };
 }
 
 function telegramUser() {

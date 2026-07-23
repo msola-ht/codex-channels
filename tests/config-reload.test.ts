@@ -89,22 +89,100 @@ describe("Gateway config reload", () => {
 
   it("removes persisted bindings for Telegram users that are no longer authorized", () => {
     const bindings = new MemoryBindingStore();
+    const allowedTarget = { surface: "telegram", accountId: "default", conversationId: "123" } as const;
+    const revokedTarget = { surface: "telegram", accountId: "default", conversationId: "456" } as const;
+    const groupTarget = { surface: "telegram", accountId: "default", conversationId: "-100" } as const;
     bindings.bind({
-      target: { surface: "telegram", conversationId: "123" },
+      target: allowedTarget,
       workspaceId: "main",
       threadId: "allowed-thread",
       sessionId: "allowed-session",
     });
     bindings.bind({
-      target: { surface: "telegram", conversationId: "456" },
+      target: revokedTarget,
       workspaceId: "main",
       threadId: "revoked-thread",
       sessionId: "revoked-session",
     });
+    bindings.bind({
+      target: groupTarget,
+      workspaceId: "main",
+      threadId: "group-thread",
+      sessionId: "group-session",
+    });
+    bindings.bind({
+      target: { surface: "feishu", accountId: "tenant-a", conversationId: "456" },
+      workspaceId: "main",
+      threadId: "feishu-thread",
+      sessionId: "feishu-session",
+    });
+    bindings.bind({
+      target: { surface: "telegram", accountId: "other", conversationId: "456" },
+      workspaceId: "main",
+      threadId: "other-bot-thread",
+      sessionId: "other-bot-session",
+    });
+    bindings.rememberActor(allowedTarget, "123");
+    bindings.rememberActor(revokedTarget, "456");
+    bindings.rememberActor(groupTarget, "123");
+    bindings.rememberActor(groupTarget, "456");
 
     expect(removeUnauthorizedTelegramBindings(bindings, new Set([123]))).toBe(1);
     expect(bindings.getByThread("allowed-thread")).toBeDefined();
     expect(bindings.getByThread("revoked-thread")).toBeUndefined();
+    expect(bindings.getByThread("group-thread")).toBeDefined();
+    expect(bindings.actors(groupTarget)).toEqual(["123"]);
+    expect(bindings.getByThread("feishu-thread")).toBeDefined();
+    expect(bindings.getByThread("other-bot-thread")).toBeDefined();
+  });
+
+  it("removes legacy Telegram group bindings whose authorized Actor is unknown", () => {
+    const bindings = new MemoryBindingStore();
+    const legacyTarget = {
+      surface: "telegram",
+      accountId: "default",
+      conversationId: "-200",
+    } as const;
+    bindings.bind({
+      target: legacyTarget,
+      workspaceId: "main",
+      threadId: "legacy-thread",
+      sessionId: "legacy-session",
+    });
+
+    expect(removeUnauthorizedTelegramBindings(bindings, new Set([123]))).toBe(1);
+    expect(bindings.getByThread("legacy-thread")).toBeUndefined();
+  });
+
+  it("adopts only an authorized legacy Telegram private-chat binding", () => {
+    const bindings = new MemoryBindingStore();
+    const allowed = {
+      surface: "telegram",
+      accountId: "default",
+      conversationId: "123",
+    } as const;
+    const revoked = {
+      surface: "telegram",
+      accountId: "default",
+      conversationId: "456",
+    } as const;
+    bindings.bind({
+      target: allowed,
+      workspaceId: "main",
+      threadId: "allowed-legacy-thread",
+      sessionId: "allowed-legacy-session",
+    });
+    bindings.bind({
+      target: revoked,
+      workspaceId: "main",
+      threadId: "revoked-legacy-thread",
+      sessionId: "revoked-legacy-session",
+    });
+
+    expect(removeUnauthorizedTelegramBindings(bindings, new Set([123]))).toBe(1);
+    expect(bindings.getByThread("allowed-legacy-thread")).toBeDefined();
+    expect(bindings.actors(allowed)).toEqual(["123"]);
+    expect(bindings.getByThread("revoked-legacy-thread")).toBeUndefined();
   });
 });
 

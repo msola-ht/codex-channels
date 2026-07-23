@@ -20,6 +20,7 @@ import type { SessionRouter } from "../session-routing/index.js";
 import type { Workspace } from "../policy/index.js";
 import {
   ConversationCore,
+  conversationTargetKey,
   gatewayUserMessageClientIdPrefix,
   type ConversationTarget,
   type TurnArtifacts,
@@ -326,7 +327,7 @@ export class ConversationService {
   }
 
   private async locked<T>(target: ConversationTarget, action: () => Promise<T>): Promise<T> {
-    const key = `${target.surface}:${target.conversationId}`;
+    const key = conversationTargetKey(target);
     const previous = this.locks.get(key) ?? Promise.resolve();
     let release: (() => void) | undefined;
     const current = new Promise<void>((resolve) => {

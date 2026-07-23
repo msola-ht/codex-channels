@@ -5,7 +5,7 @@ import type { CodexAppServerClient } from "../src/codex-client/client.js";
 import type { Model } from "../src/codex-protocol/index.js";
 import type { SessionRouter } from "../src/session-routing/router.js";
 
-const target = { surface: "telegram" as const, conversationId: "100" };
+const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
 
 function model(
   name: string,

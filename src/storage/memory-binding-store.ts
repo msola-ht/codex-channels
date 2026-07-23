@@ -1,10 +1,46 @@
-import type { ConversationTarget } from "../conversation-core/index.js";
+import { conversationTargetKey, type ConversationTarget } from "../conversation-core/index.js";
 import type { BindingStore, ConversationBinding } from "./binding-store.js";
 
 export class MemoryBindingStore implements BindingStore {
   private readonly workspaceByConversation = new Map<string, string>();
   private readonly byConversation = new Map<string, ConversationBinding>();
   private readonly byThread = new Map<string, ConversationBinding>();
+  private readonly actorsByConversation = new Map<string, Set<string>>();
+
+  actors(target: ConversationTarget): string[] {
+    return [...(this.actorsByConversation.get(this.key(target)) ?? [])];
+  }
+
+  rememberActor(target: ConversationTarget, actorId: string): void {
+    if (!actorId) {
+      throw new Error("Actor ID 不能为空");
+    }
+    const key = this.key(target);
+    const actors = this.actorsByConversation.get(key) ?? new Set<string>();
+    actors.add(actorId);
+    this.actorsByConversation.set(key, actors);
+  }
+
+  forgetActor(target: ConversationTarget, actorId: string): void {
+    const key = this.key(target);
+    const actors = this.actorsByConversation.get(key);
+    actors?.delete(actorId);
+    if (actors?.size === 0) {
+      this.actorsByConversation.delete(key);
+    }
+  }
+
+  retainActors(target: ConversationTarget, actorIds: ReadonlySet<string>): boolean {
+    for (const actorId of this.actors(target)) {
+      if (!actorIds.has(actorId)) {
+        this.forgetActor(target, actorId);
+      }
+    }
+    if (this.actors(target).length === 0) {
+      return this.unbind(target) !== undefined;
+    }
+    return false;
+  }
 
   getWorkspace(target: ConversationTarget): string | undefined {
     return this.workspaceByConversation.get(this.key(target));
@@ -59,6 +95,6 @@ export class MemoryBindingStore implements BindingStore {
   close(): void {}
 
   private key(target: ConversationTarget): string {
-    return `${target.surface}:${target.conversationId}`;
+    return conversationTargetKey(target);
   }
 }

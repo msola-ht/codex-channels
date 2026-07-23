@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 
 import type { Logger } from "pino";
 
-import { ApprovalCoordinator } from "../approval/index.js";
+import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
 import {
   CodexAppServerClient,
   JsonRpcClient,
@@ -13,12 +13,21 @@ import {
 import { protocolVersion } from "../codex-protocol/index.js";
 import type { GatewayConfig } from "../config/index.js";
 import { ConversationService, ModelSelectionService } from "../application/index.js";
-import { ConversationCore, type OutputEvent } from "../conversation-core/index.js";
+import {
+  ConversationCore,
+  surfaceAccountKey,
+  type OutputEvent,
+} from "../conversation-core/index.js";
 import { EventBus } from "../event-bus/index.js";
 import { TelegramAccessPolicy, WorkspaceRegistry } from "../policy/index.js";
 import { SessionRouter } from "../session-routing/index.js";
 import { SqliteBindingStore, type BindingStore } from "../storage/index.js";
-import { TelegramSurface } from "../surfaces/index.js";
+import {
+  TelegramSurface,
+  telegramDefaultAccountId,
+  type SurfaceAdapter,
+} from "../surfaces/index.js";
+import { SurfaceManager } from "./surface-manager.js";
 
 export class GatewayApplication {
   private readonly transport: UnixWebSocketTransport;
@@ -27,6 +36,9 @@ export class GatewayApplication {
   private readonly inbound: EventBus<RpcNotification>;
   private readonly output: EventBus<OutputEvent>;
   private readonly telegram: TelegramSurface;
+  private readonly surfaces: SurfaceAdapter[];
+  private readonly surfaceManager: SurfaceManager;
+  private readonly interactions: InteractionRouter;
   private readonly approval: ApprovalCoordinator;
   private readonly router: SessionRouter;
   private readonly core: ConversationCore;
@@ -35,7 +47,11 @@ export class GatewayApplication {
   private readonly access: TelegramAccessPolicy;
   private removeRpcNotification: (() => void) | undefined;
   private removeRpcDisconnect: (() => void) | undefined;
+  private startTask: Promise<void> | undefined;
+  private stopTask: Promise<void> | undefined;
+  private startupSettled = false;
   private reconnecting: Promise<void> | undefined;
+  private reconnectAbort: AbortController | undefined;
   private codexUpstreamUserAgent: string | undefined;
   private stopping = false;
 
@@ -78,12 +94,19 @@ export class GatewayApplication {
       join(dirname(config.stateDatabasePath), "uploads"),
       logger,
       {
+        actorRegistry: this.bindings,
         onFatal: (error) => this.handleTelegramFatal(error),
         finalMessageFormat: config.telegramMessageFormat,
         codexUpstreamUserAgent: () => this.codexUpstreamUserAgent,
       },
     );
-    this.approval = new ApprovalCoordinator(this.router, this.telegram.interactions, config.approvalTimeoutMs);
+    this.surfaces = [this.telegram];
+    this.surfaceManager = new SurfaceManager(this.surfaces, logger);
+    this.interactions = new InteractionRouter();
+    for (const surface of this.surfaces) {
+      this.interactions.register(surface.surface, surface.accountId, surface.interactions);
+    }
+    this.approval = new ApprovalCoordinator(this.router, this.interactions, config.approvalTimeoutMs);
     this.inbound.subscribe("conversation-core", (notification) => {
       this.core.handle(notification);
       if (notification.method === "thread/settings/updated") {
@@ -120,55 +143,121 @@ export class GatewayApplication {
     this.codex.setServerRequestHandler((request) => this.approval.handle(request));
   }
 
-  async start(): Promise<void> {
-    this.removeRpcNotification = this.codex.onNotification((notification) => {
-      this.inbound.publish(notification, isCriticalNotification(notification.method));
+  start(): Promise<void> {
+    this.startTask ??= this.startInternal().finally(() => {
+      this.startupSettled = true;
     });
-    this.removeRpcDisconnect = this.codex.onDisconnect((error) => {
-      if (this.stopping || this.reconnecting) {
-        return;
-      }
-      this.logger.warn({ err: error }, "Codex App Server 连接已断开");
-      this.telegram.interactions.cancelAll("Codex App Server 连接已断开");
-      this.core.connectionLost("Codex App Server 连接已断开，正在恢复连接");
-      this.reconnecting = this.reconnect().finally(() => {
-        this.reconnecting = undefined;
-      });
-    });
-    const initialized = await this.codex.connect();
-    this.codexUpstreamUserAgent = initialized.userAgent;
-    await this.refreshRateLimits();
-    if (!(await this.restoreBindings())) {
-      await this.codex.close();
-      throw new Error("恢复 Codex Thread 订阅暂时失败，请由进程管理器重试启动");
-    }
-    this.logger.info(
-      {
-        transport: this.transport.kind,
-        socketPath: this.config.codexSocketPath,
-        platformFamily: initialized.platformFamily,
-        platformOs: initialized.platformOs,
-      },
-      "Codex App Server 已连接",
-    );
-    await this.telegram.start();
+    return this.startTask;
   }
 
-  async stop(): Promise<void> {
-    if (this.stopping) {
-      return;
+  stop(): Promise<void> {
+    if (this.stopTask) {
+      return this.stopTask;
     }
     this.stopping = true;
+    this.reconnectAbort?.abort();
+    const startup = this.startTask;
+    const reconnecting = this.reconnecting;
+    this.stopTask = (async () => {
+      const failures: unknown[] = [];
+      if (startup && !this.startupSettled) {
+        this.removeRpcNotification?.();
+        this.removeRpcNotification = undefined;
+        this.removeRpcDisconnect?.();
+        this.removeRpcDisconnect = undefined;
+        try {
+          await this.codex.close();
+        } catch (error) {
+          failures.push(error);
+          this.logger.error({ err: error, component: "Codex Client" }, "Gateway 启动中断失败");
+        }
+      }
+      await startup?.catch(() => undefined);
+      try {
+        await this.shutdownComponents();
+      } catch (error) {
+        failures.push(error);
+      }
+      if (reconnecting && !(await waitAtMost(reconnecting, 5_000))) {
+        const error = new Error("等待 Codex App Server 重连任务停止超时");
+        failures.push(error);
+        this.logger.error({ err: error }, "Gateway 后台任务关闭失败");
+      }
+      if (failures.length > 0) {
+        throw new AggregateError(failures, "Gateway 资源未完全关闭");
+      }
+    })();
+    return this.stopTask;
+  }
+
+  private async startInternal(): Promise<void> {
+    try {
+      this.requireRunning();
+      this.removeRpcNotification = this.codex.onNotification((notification) => {
+        this.inbound.publish(notification, isCriticalNotification(notification.method));
+      });
+      this.removeRpcDisconnect = this.codex.onDisconnect((error) => {
+        if (this.stopping || this.reconnecting) {
+          return;
+        }
+        this.logger.warn({ err: error }, "Codex App Server 连接已断开");
+        this.interactions.cancelAll("Codex App Server 连接已断开");
+        this.core.connectionLost("Codex App Server 连接已断开，正在恢复连接");
+        this.beginReconnect();
+      });
+      const initialized = await this.codex.connect();
+      this.requireRunning();
+      this.codexUpstreamUserAgent = initialized.userAgent;
+      await this.refreshRateLimits();
+      this.requireRunning();
+      if (!(await this.restoreBindings())) {
+        throw new Error("恢复 Codex Thread 订阅暂时失败，请由进程管理器重试启动");
+      }
+      this.requireRunning();
+      this.logger.info(
+        {
+          transport: this.transport.kind,
+          socketPath: this.config.codexSocketPath,
+          platformFamily: initialized.platformFamily,
+          platformOs: initialized.platformOs,
+        },
+        "Codex App Server 已连接",
+      );
+      await this.surfaceManager.start();
+      this.requireRunning();
+    } catch (error) {
+      this.stopping = true;
+      this.reconnectAbort?.abort();
+      await this.shutdownComponents().catch((cleanupError) => {
+        this.logger.error({ err: cleanupError }, "Gateway 启动失败后的资源清理不完整");
+      });
+      throw error;
+    }
+  }
+
+  private async shutdownComponents(): Promise<void> {
     this.removeRpcNotification?.();
     this.removeRpcNotification = undefined;
     this.removeRpcDisconnect?.();
     this.removeRpcDisconnect = undefined;
-    this.reconnecting = undefined;
-    await this.telegram.stop();
-    await this.inbound.close();
-    await this.output.close();
-    await this.codex.close();
-    this.bindings.close();
+    const failures: unknown[] = [];
+    for (const [component, close] of [
+      ["Surface", () => this.surfaceManager.stop()],
+      ["Inbound Event Bus", () => this.inbound.close()],
+      ["Output Event Bus", () => this.output.close()],
+      ["Codex Client", () => this.codex.close()],
+      ["Binding Store", () => Promise.resolve(this.bindings.close())],
+    ] as const) {
+      try {
+        await close();
+      } catch (error) {
+        failures.push(error);
+        this.logger.error({ err: error, component }, "Gateway 组件关闭失败");
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "Gateway 资源未完全关闭");
+    }
   }
 
   reloadConfig(next: GatewayConfig): ConfigReloadResult {
@@ -187,26 +276,67 @@ export class GatewayApplication {
     return result;
   }
 
-  private async reconnect(): Promise<void> {
+  private beginReconnect(): void {
+    const controller = new AbortController();
+    this.reconnectAbort = controller;
+    const task = this.reconnect(controller.signal)
+      .catch((error) => {
+        if (this.stopping || controller.signal.aborted) {
+          return;
+        }
+        this.logger.fatal({ err: error }, "Codex App Server 重连次数耗尽，Gateway 将停止");
+        process.exitCode = 1;
+        void this.stop().catch((stopError) => {
+          this.logger.error({ err: stopError }, "Codex 重连失败后停止 Gateway 失败");
+        });
+      })
+      .finally(() => {
+        if (this.reconnecting === task) {
+          this.reconnecting = undefined;
+        }
+        if (this.reconnectAbort === controller) {
+          this.reconnectAbort = undefined;
+        }
+      });
+    this.reconnecting = task;
+  }
+
+  private async reconnect(signal: AbortSignal): Promise<void> {
     const maximumAttempts = 12;
-    for (let attempt = 1; attempt <= maximumAttempts && !this.stopping; attempt += 1) {
+    for (
+      let attempt = 1;
+      attempt <= maximumAttempts && !this.stopping && !signal.aborted;
+      attempt += 1
+    ) {
       if (attempt > 1) {
         const ceiling = Math.min(30_000, 500 * 2 ** (attempt - 2));
-        await new Promise<void>((resolve) => {
-          const timer = setTimeout(resolve, Math.floor(ceiling / 2 + Math.random() * ceiling / 2));
-          timer.unref();
-        });
+        await abortableDelay(
+          Math.floor(ceiling / 2 + Math.random() * ceiling / 2),
+          signal,
+        );
       }
-      if (this.stopping) {
+      if (this.stopping || signal.aborted) {
         return;
       }
       try {
         const initialized = await this.codex.reconnect();
+        if (this.stopping || signal.aborted) {
+          await this.codex.close();
+          return;
+        }
         this.codexUpstreamUserAgent = initialized.userAgent;
         await this.refreshRateLimits();
+        if (this.stopping || signal.aborted) {
+          await this.codex.close();
+          return;
+        }
         if (!(await this.restoreBindings())) {
           await this.codex.close();
           throw new Error("仍有 Codex Thread 订阅暂时无法恢复");
+        }
+        if (this.stopping || signal.aborted) {
+          await this.codex.close();
+          return;
         }
         this.logger.info(
           { attempt, platformFamily: initialized.platformFamily, platformOs: initialized.platformOs },
@@ -214,14 +344,20 @@ export class GatewayApplication {
         );
         return;
       } catch (error) {
+        if (this.stopping || signal.aborted) {
+          return;
+        }
         this.logger.warn({ err: error, attempt, maximumAttempts }, "Codex App Server 重连失败");
       }
     }
-    if (!this.stopping) {
-      this.logger.fatal("Codex App Server 重连次数耗尽，Gateway 将停止以交由进程管理器重启");
-      this.reconnecting = undefined;
-      await this.stop();
-      process.exitCode = 1;
+    if (!this.stopping && !signal.aborted) {
+      throw new Error(`Codex App Server 重连 ${maximumAttempts} 次后仍然失败`);
+    }
+  }
+
+  private requireRunning(): void {
+    if (this.stopping) {
+      throw new Error("Gateway 正在停止");
     }
   }
 
@@ -261,7 +397,13 @@ export class GatewayApplication {
   }
 
   private async restoreBindings(): Promise<boolean> {
-    const failures = await this.router.restoreSubscriptions();
+    const enabledSurfaces = new Set(
+      this.surfaces.map((surface) => surfaceAccountKey(surface.surface, surface.accountId)),
+    );
+    const failures = await this.router.restoreSubscriptions(
+      (target) => !this.stopping
+        && enabledSurfaces.has(surfaceAccountKey(target.surface, target.accountId)),
+    );
     for (const failure of failures) {
       this.logger.warn(
         {
@@ -277,7 +419,7 @@ export class GatewayApplication {
     if (this.router.allBindings().length > 0) {
       this.logger.info(
         { bindings: this.router.allBindings().length },
-        "已恢复 Telegram 与 Codex Thread 绑定",
+        "已恢复外部会话与 Codex Thread 绑定",
       );
     }
     return failures.every((failure) => failure.bindingRemoved);
@@ -349,16 +491,70 @@ function restartRequiredReasons(current: GatewayConfig, next: GatewayConfig): st
 export function removeUnauthorizedTelegramBindings(
   bindings: BindingStore,
   allowedUserIds: ReadonlySet<number>,
+  accountId = telegramDefaultAccountId,
 ): number {
   let removed = 0;
   for (const binding of bindings.list()) {
-    const userId = Number(binding.target.conversationId);
-    if (!Number.isSafeInteger(userId) || !allowedUserIds.has(userId)) {
-      bindings.unbind(binding.target);
+    if (binding.target.surface !== "telegram" || binding.target.accountId !== accountId) {
+      continue;
+    }
+    let knownActors = bindings.actors(binding.target);
+    if (knownActors.length === 0) {
+      const legacyActorId = legacyTelegramPrivateActorId(binding.target.conversationId);
+      if (legacyActorId !== undefined && allowedUserIds.has(legacyActorId)) {
+        bindings.rememberActor(binding.target, String(legacyActorId));
+        knownActors = [String(legacyActorId)];
+      }
+    }
+    const allowedActors = new Set(knownActors.filter((actorId) => {
+      const userId = Number(actorId);
+      return Number.isSafeInteger(userId) && allowedUserIds.has(userId);
+    }));
+    if (bindings.retainActors(binding.target, allowedActors)) {
       removed += 1;
     }
   }
   return removed;
+}
+
+function legacyTelegramPrivateActorId(conversationId: string): number | undefined {
+  const userId = Number(conversationId);
+  return Number.isSafeInteger(userId) && userId > 0 && String(userId) === conversationId
+    ? userId
+    : undefined;
+}
+
+async function waitAtMost(task: Promise<void>, timeoutMs: number): Promise<boolean> {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      task.then(() => true),
+      new Promise<false>((resolve) => {
+        timeout = setTimeout(() => resolve(false), timeoutMs);
+        timeout.unref();
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+async function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    const finish = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, milliseconds);
+    timer.unref();
+    signal.addEventListener("abort", finish, { once: true });
+  });
 }
 
 function preservesExistingWorkspaces(

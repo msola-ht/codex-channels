@@ -1,6 +1,6 @@
 import { JsonRpcError, type CodexAppServerClient } from "../codex-client/index.js";
 import type { Thread } from "../codex-protocol/index.js";
-import type { ConversationTarget } from "../conversation-core/index.js";
+import { conversationTargetKey, type ConversationTarget } from "../conversation-core/index.js";
 import type { Workspace, WorkspaceRegistry } from "../policy/index.js";
 import type { BindingStore, ConversationBinding } from "../storage/index.js";
 
@@ -75,9 +75,14 @@ export class SessionRouter {
     }
   }
 
-  async restoreSubscriptions(): Promise<SubscriptionRestoreFailure[]> {
+  async restoreSubscriptions(
+    shouldRestore: (target: ConversationTarget) => boolean = () => true,
+  ): Promise<SubscriptionRestoreFailure[]> {
     const failures: SubscriptionRestoreFailure[] = [];
     for (const binding of this.bindings.list()) {
+      if (!shouldRestore(binding.target)) {
+        continue;
+      }
       try {
         const workspace = this.workspaces.require(binding.workspaceId);
         const resumed = await this.codex.resumeThread(binding.threadId, workspace.cwd);
@@ -89,6 +94,9 @@ export class SessionRouter {
           sessionId: resumed.thread.sessionId,
         });
       } catch (error) {
+        if (!shouldRestore(binding.target)) {
+          return failures;
+        }
         const normalized = error instanceof Error ? error : new Error(String(error));
         const bindingRemoved = !isTransientRestoreError(normalized);
         if (bindingRemoved) {
@@ -231,7 +239,7 @@ export class SessionRouter {
   }
 
   private key(target: ConversationTarget): string {
-    return `${target.surface}:${target.conversationId}`;
+    return conversationTargetKey(target);
   }
 
   private captureModelSettings(

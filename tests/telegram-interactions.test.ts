@@ -8,7 +8,7 @@ import {
   type TelegramInteractionQueue,
 } from "../src/surfaces/telegram/interactions.js";
 
-const target = { surface: "telegram" as const, conversationId: "100" };
+const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
 
 describe("TelegramInteractionPort", () => {
   it("removes approval buttons when another client resolves the request", async () => {

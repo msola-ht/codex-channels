@@ -130,7 +130,9 @@ Codex App Server（独立进程，Unix WebSocket）
     └── Telegram Surface
 ```
 
-App Server 是 Thread、Turn 和 Item 的唯一事实来源。SQLite 只保存 Telegram conversation、Workspace 与 Thread 的最小绑定。
+App Server 是 Thread、Turn 和 Item 的唯一事实来源。SQLite 只保存外部 conversation、Surface
+账号、Workspace 与 Thread 的最小绑定。Surface 通过编译期显式注册接入；当前只启用 Telegram，
+后续平台适配器不需要修改 Conversation Core 或 Codex Client。
 
 详细设计见 [ARCHITECTURE_REBUILD_PROPOSAL.md](ARCHITECTURE_REBUILD_PROPOSAL.md)，项目约束见 [AGENTS.md](AGENTS.md)。
 

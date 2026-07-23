@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OutputEvent } from "../src/conversation-core/events.js";
 import { TelegramOutbox } from "../src/surfaces/telegram/outbox.js";
 
-const target = { surface: "telegram" as const, conversationId: "100" };
+const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
 
 class FakeTelegramApi {
   readonly actions: string[] = [];
@@ -91,6 +91,26 @@ afterEach(() => {
 });
 
 describe("TelegramOutbox", () => {
+  it("ignores output for another Surface or Telegram account", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      type: "warning",
+      target: { surface: "feishu", accountId: "tenant-a", conversationId: "100" },
+      message: "飞书事件",
+    });
+    outbox.handle({
+      type: "warning",
+      target: { surface: "telegram", accountId: "other", conversationId: "100" },
+      message: "其他 Bot 事件",
+    });
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual([]);
+  });
+
   it("keeps Telegram typing active while a turn is running and stops on completion", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();

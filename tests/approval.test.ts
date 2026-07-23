@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ApprovalCoordinator } from "../src/approval/coordinator.js";
+import { InteractionRouter } from "../src/approval/interaction-router.js";
 import type {
   InteractionDecision,
   InteractionPort,
@@ -9,11 +10,12 @@ import type {
 import type { ConversationTarget } from "../src/conversation-core/events.js";
 import type { SessionRouter } from "../src/session-routing/router.js";
 
-const target: ConversationTarget = { surface: "telegram", conversationId: "100" };
+const target: ConversationTarget = { surface: "telegram", accountId: "default", conversationId: "100" };
 
 class FakeInteraction implements InteractionPort {
   requests: InteractionRequest[] = [];
   resolvedIds: string[] = [];
+  cancelledOutcomes: Array<string | undefined> = [];
 
   async request(
     _target: ConversationTarget,
@@ -26,7 +28,67 @@ class FakeInteraction implements InteractionPort {
   resolved(requestId: string): void {
     this.resolvedIds.push(requestId);
   }
+
+  cancelAll(outcome?: string): void {
+    this.cancelledOutcomes.push(outcome);
+  }
 }
+
+describe("InteractionRouter", () => {
+  it("routes requests by Surface and account without cross-delivery", async () => {
+    const telegram = new FakeInteraction();
+    const feishu = new FakeInteraction();
+    const router = new InteractionRouter();
+    router.register("telegram", "default", telegram);
+    router.register("feishu", "tenant-a", feishu);
+    const request: InteractionRequest = {
+      type: "approval",
+      requestId: "request-route",
+      kind: "command",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      title: "审批",
+      detail: "npm test",
+      expiresInMs: 30_000,
+    };
+
+    await router.request(
+      { surface: "feishu", accountId: "tenant-a", conversationId: "chat-1" },
+      request,
+    );
+
+    expect(feishu.requests).toEqual([request]);
+    expect(telegram.requests).toEqual([]);
+  });
+
+  it("fails closed for an unregistered Surface account and broadcasts invalidation", async () => {
+    const telegram = new FakeInteraction();
+    const router = new InteractionRouter();
+    router.register("telegram", "default", telegram);
+    const request: InteractionRequest = {
+      type: "approval",
+      requestId: "request-missing",
+      kind: "file",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      title: "审批",
+      detail: "修改文件",
+      expiresInMs: 30_000,
+    };
+
+    await expect(router.request(
+      { surface: "wechat", accountId: "corp-a", conversationId: "chat-1" },
+      request,
+    )).resolves.toEqual({ type: "approval", approved: false });
+    router.resolved("request-resolved");
+    router.cancelAll("连接已断开");
+
+    expect(telegram.resolvedIds).toEqual(["request-resolved"]);
+    expect(telegram.cancelledOutcomes).toEqual(["连接已断开"]);
+  });
+});
 
 describe("ApprovalCoordinator", () => {
   it("declines privileged requests that cannot be mapped to a conversation", async () => {

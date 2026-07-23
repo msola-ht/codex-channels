@@ -6,7 +6,11 @@ import type { ConversationService } from "../../application/index.js";
 import type { ConversationTarget, OutputEvent } from "../../conversation-core/index.js";
 import { protocolVersion, type ReviewTarget } from "../../codex-protocol/index.js";
 import type { EventBus } from "../../event-bus/index.js";
-import type { TelegramAccessPolicy, Workspace } from "../../policy/index.js";
+import type {
+  ConversationActorRegistry,
+  TelegramAccessPolicy,
+  Workspace,
+} from "../../policy/index.js";
 import {
   formatMcpServers,
   formatDiff,
@@ -27,6 +31,7 @@ import {
 import { formatTelegramDiffChunks, formatTelegramPanelChunks } from "./html-format.js";
 import { TelegramInteractionPort } from "./interactions.js";
 import { TelegramApiExecutor } from "./api-executor.js";
+import { telegramDefaultAccountId } from "./constants.js";
 import { TelegramLifecycle } from "./lifecycle.js";
 import { TelegramOutbox, type TelegramFinalMessageFormat } from "./outbox.js";
 import { maximumTelegramImageBytes, TelegramImageStore } from "./image-store.js";
@@ -41,6 +46,7 @@ export interface TelegramImagePort {
 }
 
 export interface TelegramSurfaceOptions {
+  actorRegistry?: ConversationActorRegistry;
   onFatal?: (error: Error) => void;
   imageStore?: TelegramImagePort;
   finalMessageFormat?: TelegramFinalMessageFormat;
@@ -48,11 +54,14 @@ export interface TelegramSurfaceOptions {
 }
 
 export class TelegramSurface {
+  readonly surface = "telegram" as const;
+  readonly accountId = telegramDefaultAccountId;
   readonly bot: Bot;
   readonly interactions: TelegramInteractionPort;
   private readonly outbox: TelegramOutbox;
   private readonly lifecycle: TelegramLifecycle;
   private readonly imageStore: TelegramImagePort;
+  private readonly actorRegistry: ConversationActorRegistry | undefined;
   private unsubscribeOutput: (() => void) | undefined;
 
   constructor(
@@ -76,6 +85,7 @@ export class TelegramSurface {
       },
     });
     this.bot.use((context, next) => this.authorize(context, next));
+    this.actorRegistry = options.actorRegistry;
     const apiExecutor = new TelegramApiExecutor(logger);
     this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor, {
       ...(options.finalMessageFormat
@@ -91,6 +101,7 @@ export class TelegramSurface {
         messages: () => [...startupRecipients].map((chatId) => {
           const status = this.service.status({
             surface: "telegram",
+            accountId: telegramDefaultAccountId,
             conversationId: String(chatId),
           });
           return {
@@ -439,6 +450,9 @@ export class TelegramSurface {
       ? this.outbox.beginTyping(String(context.chat.id))
       : undefined;
     try {
+      if (context.chat && context.from) {
+        this.actorRegistry?.rememberActor(target(context), String(context.from.id));
+      }
       await next();
     } catch (error) {
       this.logger.error({ err: error, chatId: context.chat?.id }, "Telegram 命令执行失败");
@@ -461,7 +475,11 @@ function target(context: Context): ConversationTarget {
   if (!context.chat) {
     throw new Error("Telegram 更新缺少 Chat");
   }
-  return { surface: "telegram", conversationId: String(context.chat.id) };
+  return {
+    surface: "telegram",
+    accountId: telegramDefaultAccountId,
+    conversationId: String(context.chat.id),
+  };
 }
 
 function commandArguments(context: Context): string {

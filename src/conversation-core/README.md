@@ -11,4 +11,5 @@
 - `routing-port.ts`：Core 查询 Thread 路由所需的窄接口。
 
 本模块不得依赖 Telegram SDK、具体数据库、launchd 或底层 JSON-RPC Transport。完整历史和 Thread 权威状态始终由 App Server 持有。
+Conversation 目标由 `surface + accountId + conversationId` 唯一标识；Core 不解释平台账号或聊天 ID。
 最近 Diff/Plan 仅为进程内界面缓存，Thread 关闭、归档或删除时清理，不属于持久化事实来源。
