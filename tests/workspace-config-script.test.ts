@@ -69,4 +69,52 @@ describe("workspace:add script", () => {
 
     expect(() => addWorkspaceToEnv({ envPath, cwd: file })).toThrow("cwd 必须是目录");
   });
+
+  it("requires explicit pruning and recovers when the default Workspace is missing", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-workspace-add-"));
+    temporaryDirectories.push(root);
+    const missing = join(root, "Moved Project");
+    const current = join(root, "Current Project");
+    mkdirSync(current);
+    const envPath = join(root, ".env");
+    writeFileSync(
+      envPath,
+      [
+        `CODEX_WORKSPACES_JSON='${JSON.stringify([{
+          id: "moved-project",
+          name: "Moved Project",
+          cwd: missing,
+        }])}'`,
+        "CODEX_DEFAULT_WORKSPACE=moved-project",
+        "",
+      ].join("\n"),
+    );
+
+    expect(() => addWorkspaceToEnv({ envPath, cwd: current })).toThrow(
+      "codexc ws add --prune-missing",
+    );
+
+    const result = addWorkspaceToEnv({
+      envPath,
+      cwd: current,
+      pruneMissing: true,
+    });
+    const config = readWorkspaceConfig(parse(readFileSync(envPath, "utf8")));
+
+    expect(result).toMatchObject({
+      added: true,
+      defaultChanged: true,
+      workspace: { id: "current-project" },
+      defaultWorkspace: { id: "current-project" },
+      removedWorkspaces: [{ id: "moved-project" }],
+    });
+    expect(config.workspaces).toEqual([
+      {
+        id: "current-project",
+        name: "Current Project",
+        cwd: realpathSync(current),
+      },
+    ]);
+    expect(config.defaultWorkspace.id).toBe("current-project");
+  });
 });

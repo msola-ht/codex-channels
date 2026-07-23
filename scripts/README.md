@@ -6,8 +6,8 @@
 
 - `runtime-config.mjs`：解析包目录、用户数据目录和运行时路径，并初始化 `.codex-connect`。
 - `telegram-setup.mjs`：独立完成 Telegram Bot Token 验证、一次性私聊配对、用户 ID 获取和用户配置写入；新建 Bot 仅引导使用官方 BotFather。
-- `workspace-config.mjs`：读取和原子更新环境文件中的 Workspace 配置。
-- `workspace-add.mjs`：把指定目录或命令调用目录注册为 Workspace。
+- `workspace-config.mjs`：读取和原子更新环境文件中的 Workspace 配置；仅在显式请求时清理失效目录并修复默认 Workspace。
+- `workspace-add.mjs`：把指定目录或命令调用目录注册为 Workspace，支持 `--prune-missing` 恢复失效配置。
 
 ## 开发与协议
 

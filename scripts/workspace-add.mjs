@@ -12,21 +12,35 @@ const result = addWorkspaceToEnv({
   cwd,
   ...(options.id ? { id: options.id } : {}),
   ...(options.name ? { name: options.name } : {}),
+  ...(options.pruneMissing ? { pruneMissing: true } : {}),
 });
 
+for (const removed of result.removedWorkspaces) {
+  console.log(`已清理失效 Workspace：${removed.name} (${removed.id})`);
+  console.log(`原工作目录：${removed.cwd}`);
+}
 if (result.added) {
   console.log(`已添加 Workspace：${result.workspace.name} (${result.workspace.id})`);
   console.log(`工作目录：${result.workspace.cwd}`);
-  console.log("重启 Gateway 后可在 Telegram 使用 /workspace 切换。");
 } else {
   console.log(`Workspace 已存在：${result.workspace.name} (${result.workspace.id})`);
   console.log(`工作目录：${result.workspace.cwd}`);
+}
+if (result.defaultChanged) {
+  console.log(`默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
+}
+if (result.added || result.removedWorkspaces.length > 0) {
+  console.log("运行中的 Gateway 会自动热加载配置，必要时重启。");
 }
 
 function parseOptions(args) {
   const result = {};
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
+    if (argument === "--prune-missing") {
+      result.pruneMissing = true;
+      continue;
+    }
     if (!["--id", "--name", "--cwd", "--env-file"].includes(argument)) {
       throw new Error(`未知参数：${argument}`);
     }

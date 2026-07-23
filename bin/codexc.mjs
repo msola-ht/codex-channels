@@ -132,17 +132,25 @@ function workspace(args) {
       cwd: process.cwd(),
       ...(options.id ? { id: options.id } : {}),
       ...(options.name ? { name: options.name } : {}),
+      ...(options.pruneMissing ? { pruneMissing: true } : {}),
     });
     console.log(result.added ? "Workspace 已添加。" : "Workspace 已存在。");
     console.log(`${result.workspace.name} (${result.workspace.id})`);
     console.log(result.workspace.cwd);
-    if (result.added) {
-      console.log("运行中的 Gateway 会自动热加载该 Workspace。");
+    for (const removed of result.removedWorkspaces) {
+      console.log(`已清理失效 Workspace：${removed.name} (${removed.id})`);
+      console.log(removed.cwd);
+    }
+    if (result.defaultChanged) {
+      console.log(`默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
+    }
+    if (result.added || result.removedWorkspaces.length > 0) {
+      console.log("运行中的 Gateway 会自动热加载配置，必要时重启。");
     }
     return;
   }
   if (args.length > 0) {
-    throw new Error("用法：codexc ws [add [--id ID] [--name 名称]]");
+    throw new Error("用法：codexc ws [add [--id ID] [--name 名称] [--prune-missing]]");
   }
   const env = parse(readFileSync(runtime.envPath, "utf8"));
   const { workspaces, defaultWorkspace } = readWorkspaceConfig(env);
@@ -264,6 +272,10 @@ function parseWorkspaceAddOptions(args) {
   const result = {};
   for (let index = 0; index < args.length; index += 1) {
     const option = args[index];
+    if (option === "--prune-missing") {
+      result.pruneMissing = true;
+      continue;
+    }
     if (!new Set(["--id", "--name"]).has(option)) {
       throw new Error(`未知参数：${option}`);
     }
@@ -334,8 +346,8 @@ function printHelp() {
   start                        前台启动 App Server 与 Gateway
   remote [--workspace ID]      在当前目录启动共享 App Server 的 Codex TUI
   ws                           列出 Workspace
-  ws add [--id ID] [--name 名称]
-                               将当前目录注册为 Workspace
+  ws add [--id ID] [--name 名称] [--prune-missing]
+                               注册当前目录；可显式清理失效 Workspace
   service install              安装并启动系统用户服务
   service uninstall            卸载系统服务并保留用户数据
   service start                启动系统服务

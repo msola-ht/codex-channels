@@ -81,6 +81,52 @@ describe("codexc CLI", () => {
     expect(statSync(envPath).mode & 0o777).toBe(0o600);
   });
 
+  it("recovers from a missing default Workspace only with explicit pruning", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const current = join(root, "Current Project");
+    mkdirSync(current);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_ENV_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], {
+      cwd: current,
+      env: environment,
+    });
+    rmSync(join(home, "workspace"), { recursive: true });
+
+    const rejected = spawnSync(process.execPath, [cli, "ws", "add"], {
+      cwd: current,
+      env: environment,
+      encoding: "utf8",
+    });
+    expect(rejected.status).toBe(1);
+    expect(rejected.stderr).toContain("codexc ws add --prune-missing");
+    expect(rejected.stderr).not.toContain("ENOENT");
+
+    const repaired = execFileSync(
+      process.execPath,
+      [cli, "ws", "add", "--prune-missing"],
+      {
+        cwd: current,
+        env: environment,
+        encoding: "utf8",
+      },
+    );
+    const envPath = join(home, ".env");
+    const config = readWorkspaceConfig(parse(readFileSync(envPath, "utf8")));
+
+    expect(repaired).toContain("已清理失效 Workspace");
+    expect(repaired).toContain("默认 Workspace 已切换为");
+    expect(config.workspaces.map((workspace: { cwd: string }) => workspace.cwd)).toEqual([
+      realpathSync(current),
+    ]);
+    expect(config.defaultWorkspace.cwd).toBe(realpathSync(current));
+  });
+
   it("runs remote in the invocation directory unless a workspace is explicit", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-"));
     temporaryDirectories.push(root);
