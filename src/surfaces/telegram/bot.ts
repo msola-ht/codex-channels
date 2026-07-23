@@ -4,7 +4,7 @@ import type { Logger } from "pino";
 
 import type { ConversationService } from "../../application/index.js";
 import type { ConversationTarget, OutputEvent } from "../../conversation-core/index.js";
-import type { ReviewTarget } from "../../codex-protocol/index.js";
+import { protocolVersion, type ReviewTarget } from "../../codex-protocol/index.js";
 import type { EventBus } from "../../event-bus/index.js";
 import type { TelegramAccessPolicy, Workspace } from "../../policy/index.js";
 import {
@@ -88,7 +88,13 @@ export class TelegramSurface {
           });
           return {
             chatId,
-            text: formatStartupNotification(workspaces, status),
+            text: formatStartupNotification(workspaces, status, {
+              platform: process.platform,
+              architecture: process.arch,
+              gatewayVersion: protocolVersion.codexCli.replace(/^codex-cli\s+/, ""),
+              nodeVersion: process.version,
+              transport: "Unix WebSocket",
+            }),
           };
         }),
       },

@@ -127,21 +127,55 @@ describe("formatStartupNotification", () => {
         { id: "docs", name: "Docs", cwd: "/workspace/docs" },
       ],
       {
+        threadId: "019f8951-eb3",
         workspaceId: "main",
         model: "gpt-main",
         effort: "high",
         modelPending: false,
       },
+      {
+        platform: "darwin",
+        architecture: "arm64",
+        gatewayVersion: "0.145.0",
+        nodeVersion: "v24.18.0",
+        transport: "Unix WebSocket",
+      },
     );
 
     expect(text).toContain("Codex Connect Gateway 已联通");
     expect(text).toContain("Codex App Server：已连接");
+    expect(text).toContain("运行系统：macOS · arm64");
+    expect(text).toContain("运行版本：Codex Connect 0.145.0 · Node.js v24.18.0");
+    expect(text).toContain("连接方式：Unix WebSocket");
     expect(text).toContain("当前 Workspace：Main · main");
+    expect(text).toContain("当前 Thread：019f8951-eb3");
     expect(text).toContain("当前模型：gpt-main");
     expect(text).toContain("思考强度：high");
     expect(text).toContain("1. Main · main ← 当前");
     expect(text).toContain("2. Docs · docs");
     expect(text).toContain("/workspace/docs");
+  });
+
+  it("reports an unbound thread and keeps unknown platform names", () => {
+    const text = formatStartupNotification(
+      [{ id: "main", name: "Main", cwd: "/workspace/main" }],
+      {
+        workspaceId: "main",
+        model: "gpt-main",
+        effort: null,
+        modelPending: false,
+      },
+      {
+        platform: "freebsd",
+        architecture: "x64",
+        gatewayVersion: "0.145.0",
+        nodeVersion: "v22.13.0",
+        transport: "Unix WebSocket",
+      },
+    );
+
+    expect(text).toContain("运行系统：freebsd · x64");
+    expect(text).toContain("当前 Thread：尚未绑定");
   });
 });
 

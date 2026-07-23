@@ -297,7 +297,8 @@ export function formatWorkspaces(workspaces: Workspace[], currentWorkspaceId: st
 
 export function formatStartupNotification(
   workspaces: Workspace[],
-  status: Pick<ConversationStatus, "workspaceId" | "model" | "effort" | "modelPending">,
+  status: Pick<ConversationStatus, "threadId" | "workspaceId" | "model" | "effort" | "modelPending">,
+  runtime: StartupRuntimeInfo,
 ): string {
   const currentWorkspace = workspaces.find((workspace) => workspace.id === status.workspaceId);
   if (!currentWorkspace) {
@@ -306,13 +307,34 @@ export function formatStartupNotification(
   return [
     "Codex Connect Gateway 已联通。",
     "Codex App Server：已连接",
+    `运行系统：${formatPlatform(runtime.platform)} · ${runtime.architecture}`,
+    `运行版本：Codex Connect ${runtime.gatewayVersion} · Node.js ${runtime.nodeVersion}`,
+    `连接方式：${runtime.transport}`,
     `当前 Workspace：${currentWorkspace.name} · ${currentWorkspace.id}`,
     `工作目录：${currentWorkspace.cwd}`,
+    `当前 Thread：${status.threadId ?? "尚未绑定"}`,
     `当前模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
     `思考强度：${status.effort ?? "模型默认"}`,
     "",
     formatWorkspaces(workspaces, status.workspaceId),
   ].join("\n");
+}
+
+export interface StartupRuntimeInfo {
+  platform: NodeJS.Platform;
+  architecture: string;
+  gatewayVersion: string;
+  nodeVersion: string;
+  transport: string;
+}
+
+function formatPlatform(platform: NodeJS.Platform): string {
+  const labels: Partial<Record<NodeJS.Platform, string>> = {
+    darwin: "macOS",
+    linux: "Linux",
+    win32: "Windows",
+  };
+  return labels[platform] ?? platform;
 }
 
 export function formatPermissions(
