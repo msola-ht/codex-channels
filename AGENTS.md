@@ -1,223 +1,147 @@
 # codex-channels 项目约束
 
-## 适用范围
+## 适用范围与事实来源
 
-- 本文件适用于整个仓库。
-- 更具体目录中的 `AGENTS.override.md` 或 `AGENTS.md` 可以补充本文件；发生冲突时，更具体目录的规则优先。
-- 开始修改前先阅读根目录 `README.md`、本文件，以及与任务直接相关的模块 README 和实现。
-- 当前架构约束以本文件、根目录 `README.md`、各模块 README、公开接口和测试为准。
+- 本文件适用于整个仓库；更具体目录中的 `AGENTS.override.md` 或 `AGENTS.md` 优先。
+- 开始修改前读取根目录 `README.md`、本文件，以及与任务直接相关的模块 README、公开接口和测试。
+- 本文件定义稳定的开发边界；当前功能、命令和部署方式以根目录 `README.md` 为准，模块职责以 `src/README.md` 和各模块 README 为准。
+- 只支持当前文档、配置示例、协议基线和存储 Schema 明确定义的接口。不支持的输入必须明确报错，不增加隐式别名、迁移或回退。
 
-## 当前项目状态
+## 当前实现
 
-- 当前仓库以 TypeScript 模块化 Gateway 为唯一实现。
-- 正式本机入口为 npm CLI `codexc`，配置与运行状态位于用户主目录 `.codex-connect`；源码开发可继续使用仓库内 `.env` 和 `npm run dev:all`。
-- macOS 与 Linux 均可用 `codexc service install` 安装 App Server 与 Gateway 两个独立用户服务，使用 `codexc service uninstall` 卸载服务但保留用户数据；macOS 使用 launchd，Linux 使用 systemd user service，Windows Transport 尚未实现。
-- 不提供 Python Runtime/Bridge、复制 Codex 会话内容的自定义会话数据库或替代 Codex Remote TUI 的本地 CLI。
-- 当前使用 SQLite StateStore 只保存 Telegram conversation 与 Codex Thread 的最小绑定，以便 Gateway 重启后恢复当前会话。
-- 只支持当前 README、配置示例、协议版本和存储 Schema 明确定义的接口；不保留旧命令别名、旧服务标签、旧数据格式迁移或隐式兼容回退。不兼容输入必须给出明确错误。
-
-## 目标架构
-
-项目长期采用“模块化单体”架构，不提前拆分微服务。
-
-推荐运行拓扑：
-
-```text
-Codex App Server（独立守护进程，Unix Socket）
-├── 原生 Codex CLI：codex --remote unix:///...
-└── Gateway
-    ├── Codex Client
-    ├── Conversation Core
-    ├── Session Router
-    ├── Approval Coordinator
-    ├── Policy
-    ├── Internal Event Bus
-    └── Surface Adapters
-        └── Telegram
-```
-
-必须遵守：
-
-- Codex App Server 是 Thread、Turn、Item、Goal 和会话历史的唯一事实来源。
-- CLI 与 Gateway 应连接同一个 App Server 实例，共享实时状态，而不仅是共享落盘文件。
-- App Server 生命周期应独立于 Telegram Gateway；Gateway 停止不得主动终止共享 App Server。
-- 本机连接优先使用私有 Unix Socket。
-- Unix Socket Transport 使用 WebSocket HTTP Upgrade，不得按 JSONL Unix Stream 实现。
-- 原生终端交互优先使用 `codex --remote`，不重复实现 Codex TUI。
-- `codex remote-control` 不得替代自定义 Gateway 使用的 `codex app-server --listen`。
-- 不直接读取、解析或修改 `~/.codex/sessions`、rollout JSONL 或其他 Codex 内部存储文件。
-- 不将 Codex 完整会话历史复制到项目数据库。
+- 仓库只包含一个 TypeScript 模块化 Gateway；正式本机入口是 npm CLI `codexc`。
+- Codex App Server 独立运行，原生 Codex TUI 与 Gateway 连接同一个实例，共享 Thread 和实时状态。
+- App Server 是 Thread、Turn、Item、Goal 和会话历史的唯一事实来源。
+- Gateway 停止或重启不得主动终止共享 App Server。
+- 本机 App Server 连接使用私有 Unix WebSocket；Socket 生命周期和权限由运行时与服务安装脚本管理。
+- 原生终端交互由 `codex --remote` 提供，Gateway 不实现第二套终端会话界面。
+- Gateway 不读取、解析或修改 Codex 内部会话文件，也不复制完整会话历史。
 
 ## 模块边界
 
-目标模块及职责：
+当前一级模块及职责：
 
-- `codex-protocol`：保存由当前 Codex 版本生成的协议类型及版本信息。
-- `codex-client`：负责 Transport、JSON-RPC、initialize、请求关联、Server Request 和重连。
-- `conversation-core`：负责 Thread、Turn、Item 的状态归约，不依赖具体用户界面。
-- `session-routing`：负责 Workspace、外部会话与 Codex Thread 的选择及绑定。
-- `approval`：负责命令、文件、权限、用户输入和 MCP elicitation。
-- `event-bus`：负责有界队列、事件分发和消费者隔离。
-- `policy`：负责用户、Workspace、目录、模型和执行权限。
-- `storage`：提供可替换状态存储接口，只保存业务映射和配置。
-- `surfaces/*`：负责 Telegram、Web、Discord 等平台适配。
-- `observability`：负责结构化日志、指标和诊断。
-- `bootstrap`：负责配置加载、依赖装配和进程生命周期。
+- `application`：编排跨模块用例，返回平台无关的结构化结果。
+- `approval`：处理命令、文件、权限、用户输入和 MCP elicitation。
+- `bootstrap`：装配具体实现并管理进程、连接和 Surface 生命周期。
+- `codex-client`：负责 Transport、JSON-RPC、类型化 App Server API 和重连。
+- `codex-protocol`：保存生成的协议类型、受控导出和精确版本基线。
+- `config`：解析并验证外部配置，分类配置变更。
+- `conversation-core`：归约 Thread、Turn 和 Item 通知，产生平台无关事件。
+- `event-bus`：提供进程内有界队列和消费者隔离。
+- `observability`：提供结构化日志和敏感字段脱敏。
+- `policy`：执行 Surface Actor 与 Workspace 授权。
+- `session-routing`：维护 Conversation、Workspace、Thread 的绑定和订阅状态。
+- `storage`：持久化恢复绑定所需的最小业务状态。
+- `surfaces`：适配外部平台输入、输出和交互。
 
-依赖方向：
+依赖方向保持为：
 
 ```text
-Surface Adapters -> Application/Core <- Codex Client
-                            ^
-                    Policy / Storage
+Surface -> Application/Core <- Codex Client
+                     ^
+              Policy / Storage
 ```
 
-禁止：
+- `bootstrap` 是组合根，具体实现选择和生命周期协调集中在这里。
+- 每个一级模块通过自己的 `index.ts` 暴露公开能力；跨模块不得导入其他模块的内部实现文件。
+- Conversation Core 不得依赖平台 SDK、具体数据库、服务管理器或底层 JSON-RPC Transport。
+- Surface 不得直接操作底层 Transport，也不得把平台 SDK 类型带入核心模块。
+- Codex Client 不得调用平台 API、生成平台文案或保存业务绑定。
+- 不复制状态归约、协议解析、审批协调或授权逻辑来绕过模块接口。
 
-- `conversation-core` 依赖 Telegram SDK、具体数据库或系统服务管理器。
-- Surface Adapter 直接操作底层 JSON-RPC Transport。
-- `codex-client` 直接调用 Telegram API 或生成平台文案。
-- 跨模块导入其他模块的内部实现文件。
-- 为绕过模块接口复制状态或协议解析逻辑。
-- 为尚不存在的需求提前引入通用框架、服务发现或分布式组件。
+## App Server 协议
 
-模块间优先通过公开接口、显式命令和类型化事件通信。
+- 协议类型由受支持的 Codex CLI 生成；不得凭记忆手写协议字段。
+- 仓库必须记录并校验生成类型对应的精确 Codex CLI 版本。
+- 升级协议时先审查生成差异，再更新 `codex-protocol` 的受控导出、实现和测试。
+- 稳定业务代码不得依赖实验生成参数才会出现的字段。
+- 每个 Transport 连接只执行一次 `initialize`，成功后发送 `initialized`；初始化前不得发送其他请求。
+- JSON-RPC Response、Notification 和 Server Request 必须分别处理。
+- Request ID 必须唯一关联 Pending Response，并在超时、断线和关闭时完成清理。
+- 未知 Notification 可以记录后忽略；未知 Server Request 必须返回明确错误或安全拒绝，不能悬挂。
+- 只有可证明安全的只读或幂等请求可以在过载后自动重试；创建和写入操作不得盲目重试。
 
-## Codex App Server 协议约束
+## Thread 与会话
 
-- 以当前安装的 Codex CLI 生成 Schema 为协议依据，不凭历史记忆手写字段。
-- App Server 和 Remote Transport 可能随 Codex 版本变化；仓库必须记录并验证支持的精确 Codex CLI 版本。
-- TypeScript 实现应优先使用 `codex app-server generate-ts` 生成类型。
-- Schema 生成物必须记录对应 Codex 版本；升级 Codex 时检查协议差异。
-- 每个 Transport 连接只允许执行一次 `initialize`，成功后发送 `initialized`。
-- 不在 initialize 完成前发送其他请求。
-- 必须区分 JSON-RPC Response、Notification 和 Server Request。
-- Request ID 必须唯一关联 Pending Response，并在断线、超时或关闭时完成清理。
-- 服务器未知通知可以记录并安全忽略；需要响应的未知 Server Request 不得静默挂起。
-- 实验 API 只有在功能确实需要时才启用，并为不支持版本提供明确错误。
-- 稳定协议类型不得依赖使用 `--experimental` 生成的字段。
-- WebSocket 入口返回 `-32001` 过载错误时，只自动重试可证明安全的只读或幂等请求；不盲目重试创建或写入操作。
+- 使用 App Server 的 `thread/list` 查询会话，不维护平行的会话索引。
+- Thread 查询必须显式传入服务端允许的 `cwd` 和 `sourceKinds`。
+- 自动接续前检查 Thread 来源、Workspace、运行状态和现有绑定。
+- 一个 Thread 不能同时绑定多个外部 Conversation；活动 Thread 不得无条件追加新 Turn。
+- 切换、退出、新建、归档或解绑时按协议取消旧订阅，不能只删除本地映射。
+- `thread/resume`、`thread/read`、请求响应和状态通知是事实来源；本地缓存只用于路由和界面展示。
+- 不从单次请求调用推断 App Server 未明确返回的状态变化。
 
-## Thread 与会话规则
+## 状态与持久化
 
-- 使用 `thread/list` 获取原生 Codex 会话，不自行重建会话索引。
-- Thread 查询必须由服务端确定并显式传递允许的 `cwd`。
-- 默认会话列表应显式设置 `sourceKinds`，不得依赖隐式默认值。
-- CLI 与 Telegram 互通时，显式考虑 `cli`、`vscode` 和 `appServer` 来源；当前锁定版本的 Remote TUI 实测会产生 `vscode` 来源。
-- 自动接续前检查 Thread 的来源、Workspace、运行状态和当前绑定。
-- 不自动接续已由其他外部 conversation 独占的 Thread。
-- 对 `active` Thread 必须采用明确策略，不得无条件追加新 Turn。
-- 切换、退出或新建会话时，按协议需要调用 `thread/unsubscribe`，不能只删除本地映射。
-- `thread/resume`、`thread/read` 和状态通知的服务端返回值是事实来源，本地缓存只用于加速和界面展示。
-- 不因 `thread/resume` 本身推断会话更新时间已经改变。
+- SQLite StateStore 只保存 Conversation 身份、已授权 Actor、Workspace、Thread 和 Session 的最小绑定。
+- 一个 Conversation 由 `surface + accountId + conversationId` 唯一标识。
+- 不持久化消息正文、Turn/Item 历史、Diff、Plan、审批内容或 Codex 会话文件副本。
+- 数据库只接受当前 Schema；不支持的版本必须失败关闭，不执行隐式迁移。
+- StateStore 保持可替换，业务模块只能依赖其公开接口。
+- 用户配置、数据库、Socket、日志和临时上传不得写入会被 npm 升级替换的包目录。
+- 新增依赖或改变持久化格式前，必须说明必要性、当前数据的处理方式和回滚方案，并取得用户确认。
 
-## 数据持久化规则
+## Surface、审批与并发
 
-- 当前单机 Gateway 使用 SQLite StateStore 保存 chat-to-thread 绑定；这是为重启恢复当前会话明确选择的项目行为。
-- npm 安装模式下 SQLite、配置、Socket 和日志位于 `~/.codex-connect`；不得把用户状态写入可被包升级替换的 npm 安装目录。
-- StateStore 必须保持可替换，只保存恢复绑定所需的最小字段。
-- 持久化内容仅限用户、Workspace、Thread ID、权限和必要偏好。
-- 不持久化 Codex 消息正文、Turn/Item 历史或 rollout 副本。
-- 单机使用 SQLite；分布式多实例确有需要时才考虑 PostgreSQL。
-- 未出现分布式队列、缓存或锁需求前，不引入 Redis、Kafka、NATS 等基础设施。
-- 新增依赖或改变持久化格式前必须说明必要性、当前数据处理方式和回滚方案，并取得用户确认。
+- Surface 通过编译期显式注册接入，并通过统一的输入、输出、授权和审批接口调用 Application/Core。
+- 所有外部输入先完成 Surface Actor 与 Workspace 授权，再调用会话能力。
+- App Server Reader 只负责读取、解析、关联 Response 和投递事件，不等待平台网络请求。
+- 平台输出使用有界队列；同一 Conversation 保持顺序，不同 Conversation 可以并行。
+- 队列过载时可以合并或丢弃非关键中间事件，但不得静默丢弃审批、错误、Item 完成或 Turn 完成事件。
+- 平台 API 超时、限流或失败不得阻塞 App Server Reader。
+- 后台任务必须有明确所有者、取消路径、有限重试和关闭等待上限。
+- 审批状态必须绑定 Thread、Turn 和请求标识；交互令牌必须不可预测、一次性使用并设置过期时间。
+- 已被其他客户端解决的请求必须及时使当前交互失效。
+- 未识别、无法路由或缺少归属信息的高权限请求默认拒绝或取消。
+- 一次批准不得升级为会话持续授权。
 
-## 事件与并发规则
+## 安全
 
-- App Server Reader 只负责读取、解析、关联 Response 和投递事件。
-- App Server Reader 不得等待 Telegram、Discord、Web 或其他外部网络发送。
-- 每个外部 Surface 使用独立的有界输出队列。
-- 同一 conversation 的最终输出保持顺序，不同 conversation 可以并行。
-- 队列过载时可以合并或丢弃中间 delta，但不得静默丢弃审批、错误、`item/completed` 或 `turn/completed`。
-- Telegram 流式编辑必须限速、合并并避免发送相同内容。
-- Telegram API 的超时或限流不得阻塞 App Server 的协议读取。
-- 后台任务必须有明确所有者、取消路径和关闭等待上限。
-- 不允许无界队列、无界重试或没有抖动的集中重连。
+- 外部用户只能选择预配置 Workspace，不能提交任意绝对工作目录。
+- Thread、Turn、命令、文件和权限操作前必须执行 Actor 与 Workspace 授权检查。
+- Unix Socket 父目录权限必须限制为当前用户，Socket 不得向无关用户开放。
+- 无认证 App Server 不得监听非回环网络地址。
+- 默认不自动批准命令、文件写入、额外文件系统权限或网络权限。
+- 配置错误必须失败关闭，不得采用更宽松的权限、目录或网络默认值。
+- 日志、异常和平台消息不得包含 Token、Cookie、Authorization Header、敏感表单或未经约束的上游响应。
+- 外部用户消息只显示明确标记的结构化错误；未知内部异常不得原样发送。
 
-## 审批与交互规则
+## 实现与修改
 
-至少为以下 Server Request 提供明确处理策略：
+- 采用满足当前目标的最小完整修改，优先复用现有模块、公开接口和类型。
+- 不为未出现的需求增加抽象层、通用框架、配置项或扩展机制。
+- 外部输入在边界验证一次；内部模块不重复验证同一数据。
+- 协议核心使用明确类型和可辨识联合，避免不受约束的 `any`。
+- 错误保留可操作上下文但不泄露敏感信息；降级行为必须可观察。
+- 不把网络、协议、状态、渲染和存储职责集中到同一个大型模块。
+- 修改公开命令、配置键、协议基线、持久化格式或默认行为时，同步更新 README、示例和测试。
+- 删除或替换实现时同步删除孤儿入口、依赖、配置、脚本和测试。
 
-- 命令执行审批；
-- 文件修改审批；
-- 权限申请；
-- 用户输入请求；
-- MCP elicitation；
-- App 工具产生的确认流程。
+## 命令与提权
 
-审批要求：
+- 执行 Git、npm 以及测试、类型检查、Lint、构建、打包或集成验证命令时，首次调用就直接发起提权请求，不先在受限沙箱内试跑后再重试。
+- 提权请求必须说明命令目的并保持在当前仓库和当前任务范围内；不得借此扩大修改、提交或远端写入权限。
+- 提权只解决命令执行权限，不代替用户授权。提交、推送、依赖变更和其他外部写入仍须遵守本文件对应约束。
 
-- 审批状态绑定 `threadId`、`turnId` 和 `itemId/requestId`。
-- Telegram 回调令牌必须不可预测、一次性使用并设置过期时间。
-- 已由 CLI 或其他客户端处理的请求，应通过 `serverRequest/resolved` 使旧界面失效。
-- 发起 Turn 的 App Server 连接负责该 Turn 的 Server Request；不得假设 CLI 与 Gateway 可以跨连接抢答同一个审批。
-- 未识别或无法路由的高权限请求默认拒绝或取消，不得默认批准。
-- “批准一次”和“会话持续批准”必须明确区分，不能将一次批准升级为长期授权。
-- 不在日志中输出凭据、Token、Cookie、Authorization Header 或敏感表单内容。
+## 验证
 
-## 安全约束
+- 每次修改运行与改动最相关的最小验证，至少覆盖本次修改的主路径和失败路径。
+- 协议、Transport 或共享 App Server 行为变化必须增加真实 App Server 冒烟验证，不能只依赖 Mock。
+- 核心协议测试应覆盖初始化、消息分流、请求清理、Thread/Turn 主路径和订阅取消。
+- 会话测试应覆盖双向发现与接续、绑定独占、活动状态和 Gateway 重启恢复。
+- Surface 测试应覆盖授权、审批超时与失效、输出顺序、平台超时隔离和敏感信息清洗。
+- 无法执行必要验证时，交付中必须说明未验证项、原因和可执行的后续检查。
 
-- Telegram 用户只能选择预配置 Workspace，不允许通过消息提交任意绝对 `cwd`。
-- 所有 Thread、Turn、Shell 和文件操作前执行用户与 Workspace 授权检查。
-- App Server Unix Socket 父目录权限应为 `0700`，Socket 不得对无关用户开放。
-- 不将无认证 App Server 监听到非回环网络地址。
-- 非本机访问优先使用 SSH 端口转发；公开远程访问需要 TLS 和认证方案。
-- `thread/shellCommand` 在沙箱外执行，只能由明确用户动作触发。
-- 默认不自动批准命令执行、文件写入、额外文件系统权限或网络权限。
-- 配置错误必须失败关闭，不得静默扩大权限或切换到更宽松模式。
-- 日志清洗必须覆盖应用日志、异常、HTTP 客户端和第三方库日志。
+## Git 与交付
 
-## 扩展规则
-
-- 扩展采用编译期显式注册，不动态扫描并执行任意第三方代码。
-- 新增 Surface 时实现统一输入、输出和审批接口，不修改 Conversation Core 的平台无关逻辑。
-- 新增命令时优先映射 App Server 已有能力，避免建立重复状态。
-- Codex Skill 用于模型工作流和操作指导，不用于实现实时 Transport、Thread 路由、事件循环或审批状态机。
-- 只有出现真实的独立部署、权限隔离或扩容需求时，才从模块化单体拆分服务。
-- 拆分前先保持模块公开接口稳定，并提供进程内实现作为基准。
-
-## 实现要求
-
-- 采用解决当前目标所需的最小完整实现。
-- 优先使用明确类型和可辨识联合，避免协议核心使用不受约束的 `any`。
-- 外部输入在边界验证；内部模块不重复验证同一数据。
-- 错误必须保留可操作上下文，但不得泄露密钥和敏感内容。
-- 不捕获过宽异常后静默继续；降级行为必须可观察。
-- 不将网络、协议、状态、渲染和存储职责放入同一个大型类或文件。
-- 不新增与当前任务无关的抽象、配置选项或兼容层。
-- 修改公开命令、配置键、持久化格式或默认行为时，同步更新 README、示例配置和测试。
-
-## 测试与验证
-
-每次修改运行与改动最相关的最小验证。核心路径至少覆盖：
-
-- App Server initialize 握手。
-- JSON-RPC Response、Notification、Server Request 分流。
-- `thread/list`、`thread/start`、`thread/resume` 和 `turn/start`。
-- CLI 创建 Thread 后 Telegram 能发现并接续。
-- Telegram 创建 Thread 后 CLI 能发现并接续。
-- Thread 切换后旧订阅被取消。
-- Telegram 超时不会阻塞 App Server Reader。
-- Gateway 重启不会主动终止共享 App Server。
-- 审批超时、拒绝、跨客户端解决和过期回调。
-- 日志不包含 Telegram Token 和其他敏感凭据。
-
-协议或 Transport 修改应增加真实 App Server 冒烟测试；不能只使用 Mock 证明兼容性。
-
-## 维护与删除规则
-
-- 保留 Git 历史，不通过删除仓库或重新 `git init` 规避审查。
-- 不为已移除的实现恢复兼容入口；确需改变当前公开接口时直接更新实现、文档和测试。
-- 删除或替换现行 TypeScript 模块时同步删除孤儿入口、依赖、配置、脚本和测试，并更新文档。
-- 不覆盖或回退用户现有未提交改动；发现重叠修改时先检查差异并说明风险。
-- 不执行 `git commit`、`git push`、历史改写或远端操作，除非用户明确要求并完成必要审批。
-
-## 交付要求
-
-完成修改时说明：
-
-- 修改了哪些模块和行为；
-- 运行了哪些测试或冒烟验证；
-- 是否涉及协议、配置、持久化或安全边界；
-- 尚未覆盖的风险和下一步；
-- 是否影响当前单一 TypeScript 实现、macOS/Linux 服务部署方式或尚未支持的 Windows Transport。
+- 保留 Git 历史，不通过删除仓库或重新初始化规避审查。
+- 不覆盖、回退或混入用户已有的未提交改动；无法安全绕开时停止并说明。
+- 提交前重新读取并审查所有实际适用的规则文件，包括根目录 `AGENTS.md`、更具体目录中的 `AGENTS.override.md` 或 `AGENTS.md`，不依赖会话中的旧记忆。
+- 规则文件必须与当前源码、公开接口、测试和文档一致，不得保留已删除实现、旧名称、迁移阶段描述、未落地能力或相互冲突的要求；修改规则文件后必须再次执行这项自审。
+- 提交前重新读取根目录 `README.md` 和本次改动涉及的目录 README。
+- 提交前审查根目录文档索引、`src/README.md` 模块索引及相关目录 README 中的文件索引，确认文件、模块、公开入口、命令、配置和链接均与当前仓库及本次改动一致。
+- 发现索引缺项、孤儿链接、旧名称或行为描述不一致时，必须先更新文档并重新检查；文档索引未通过审查不得提交。
+- 提交前至少执行 `git diff --check`、文档链接与索引一致性检查，以及本次改动要求的验证命令。
+- 未经用户明确要求，不执行提交、推送、历史改写或其他远端写入。
+- 完成修改时说明改动的模块和行为、已运行的验证、涉及的公开接口或安全边界，以及仍存在的风险。
