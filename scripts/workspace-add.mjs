@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 
 import { runtimeConfig } from "./runtime-config.mjs";
 import { addWorkspaceToEnv } from "./workspace-config.mjs";
@@ -13,6 +13,12 @@ const result = addWorkspaceToEnv({
   ...(options.id ? { id: options.id } : {}),
   ...(options.name ? { name: options.name } : {}),
   ...(options.pruneMissing ? { pruneMissing: true } : {}),
+  ...(options.restoreDefault ? { restoreDefault: true } : {}),
+  fallbackDefaultWorkspace: {
+    cwd: resolve(dirname(envPath), "workspace"),
+    id: "codex-connect",
+    name: ".codex-connect/workspace",
+  },
 });
 
 for (const removed of result.removedWorkspaces) {
@@ -29,7 +35,7 @@ if (result.added) {
 if (result.defaultChanged) {
   console.log(`默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
 }
-if (result.added || result.removedWorkspaces.length > 0) {
+if (result.added || result.removedWorkspaces.length > 0 || result.defaultChanged) {
   console.log("运行中的 Gateway 会自动热加载配置，必要时重启。");
 }
 
@@ -39,6 +45,10 @@ function parseOptions(args) {
     const argument = args[index];
     if (argument === "--prune-missing") {
       result.pruneMissing = true;
+      continue;
+    }
+    if (argument === "--restore-default") {
+      result.restoreDefault = true;
       continue;
     }
     if (!["--id", "--name", "--cwd", "--env-file"].includes(argument)) {

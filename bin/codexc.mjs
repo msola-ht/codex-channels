@@ -13,7 +13,11 @@ import {
   runtimeConfig,
   userDataDir,
 } from "../scripts/runtime-config.mjs";
-import { addWorkspaceToEnv, readWorkspaceConfig } from "../scripts/workspace-config.mjs";
+import {
+  addWorkspaceToEnv,
+  inspectWorkspaceConfig,
+  removeWorkspaceFromEnv,
+} from "../scripts/workspace-config.mjs";
 
 const [command = "help", ...args] = process.argv.slice(2);
 
@@ -125,6 +129,11 @@ function runGateway(args) {
 
 function workspace(args) {
   const runtime = requireUserConfig();
+  const fallbackDefaultWorkspace = {
+    cwd: join(runtime.dataDir, "workspace"),
+    id: "codex-connect",
+    name: ".codex-connect/workspace",
+  };
   if (args[0] === "add") {
     const options = parseWorkspaceAddOptions(args.slice(1));
     const result = addWorkspaceToEnv({
@@ -133,6 +142,8 @@ function workspace(args) {
       ...(options.id ? { id: options.id } : {}),
       ...(options.name ? { name: options.name } : {}),
       ...(options.pruneMissing ? { pruneMissing: true } : {}),
+      ...(options.restoreDefault ? { restoreDefault: true } : {}),
+      fallbackDefaultWorkspace,
     });
     console.log(result.added ? "Workspace 已添加。" : "Workspace 已存在。");
     console.log(`${result.workspace.name} (${result.workspace.id})`);
@@ -144,19 +155,47 @@ function workspace(args) {
     if (result.defaultChanged) {
       console.log(`默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
     }
-    if (result.added || result.removedWorkspaces.length > 0) {
+    if (result.added || result.removedWorkspaces.length > 0 || result.defaultChanged) {
       console.log("运行中的 Gateway 会自动热加载配置，必要时重启。");
     }
     return;
   }
+  if (args[0] === "remove") {
+    if (args.length !== 2) {
+      throw new Error("用法：codexc ws remove <序号|ID|名称>");
+    }
+    const result = removeWorkspaceFromEnv({
+      envPath: runtime.envPath,
+      selector: args[1],
+      fallbackDefaultWorkspace,
+    });
+    console.log(`Workspace 注册已删除：${result.removedWorkspace.name} (${result.removedWorkspace.id})`);
+    console.log(result.removedWorkspace.cwd);
+    console.log("磁盘目录未删除。");
+    if (result.defaultChanged) {
+      console.log(`默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
+    }
+    console.log("运行中的 Gateway 会自动重新加载配置，必要时重启。");
+    return;
+  }
   if (args.length > 0) {
-    throw new Error("用法：codexc ws [add [--id ID] [--name 名称] [--prune-missing]]");
+    throw new Error([
+      "用法：",
+      "  codexc ws",
+      "  codexc ws add [--id ID] [--name 名称] [--prune-missing] [--restore-default]",
+      "  codexc ws remove <序号|ID|名称>",
+    ].join("\n"));
   }
   const env = parse(readFileSync(runtime.envPath, "utf8"));
-  const { workspaces, defaultWorkspace } = readWorkspaceConfig(env);
+  const { workspaces, defaultWorkspaceId } = inspectWorkspaceConfig(env);
   console.log(`Workspace（${workspaces.length}）：`);
   workspaces.forEach((item, index) => {
-    console.log(`${index + 1}. ${item.name} · ${item.id}${item.id === defaultWorkspace.id ? " ← 默认" : ""}`);
+    const status = item.status === "missing"
+      ? " · 目录不存在"
+      : item.status === "inaccessible"
+        ? " · 目录无法访问"
+        : "";
+    console.log(`${index + 1}. ${item.name} · ${item.id}${item.id === defaultWorkspaceId ? " ← 默认" : ""}${status}`);
     console.log(`   ${item.cwd}`);
   });
 }
@@ -276,6 +315,10 @@ function parseWorkspaceAddOptions(args) {
       result.pruneMissing = true;
       continue;
     }
+    if (option === "--restore-default") {
+      result.restoreDefault = true;
+      continue;
+    }
     if (!new Set(["--id", "--name"]).has(option)) {
       throw new Error(`未知参数：${option}`);
     }
@@ -346,8 +389,9 @@ function printHelp() {
   start                        前台启动 App Server 与 Gateway
   remote [--workspace ID]      在当前目录启动共享 App Server 的 Codex TUI
   ws                           列出 Workspace
-  ws add [--id ID] [--name 名称] [--prune-missing]
-                               注册当前目录；可显式清理失效 Workspace
+  ws add [--id ID] [--name 名称] [--prune-missing] [--restore-default]
+                               注册当前目录；可清理失效项或恢复固定默认
+  ws remove <序号|ID|名称>      删除 Workspace 注册，不删除磁盘目录
   service install              安装并启动系统用户服务
   service uninstall            卸载系统服务并保留用户数据
   service start                启动系统服务

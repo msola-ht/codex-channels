@@ -120,11 +120,89 @@ describe("codexc CLI", () => {
     const config = readWorkspaceConfig(parse(readFileSync(envPath, "utf8")));
 
     expect(repaired).toContain("已清理失效 Workspace");
-    expect(repaired).toContain("默认 Workspace 已切换为");
+    expect(repaired).not.toContain("默认 Workspace 已切换为：Current Project");
     expect(config.workspaces.map((workspace: { cwd: string }) => workspace.cwd)).toEqual([
+      realpathSync(join(home, "workspace")),
       realpathSync(current),
     ]);
-    expect(config.defaultWorkspace.cwd).toBe(realpathSync(current));
+    expect(config.defaultWorkspace).toMatchObject({
+      id: "codex-connect",
+      cwd: realpathSync(join(home, "workspace")),
+    });
+
+    const corruptedContent = readFileSync(envPath, "utf8")
+      .replace(
+        /^CODEX_WORKSPACES_JSON=.*$/m,
+        `CODEX_WORKSPACES_JSON='${JSON.stringify([{
+          id: "current-project",
+          name: "Current Project",
+          cwd: current,
+        }])}'`,
+      )
+      .replace(/^CODEX_DEFAULT_WORKSPACE=.*$/m, "CODEX_DEFAULT_WORKSPACE=current-project");
+    writeFileSync(envPath, corruptedContent);
+
+    const restored = execFileSync(
+      process.execPath,
+      [cli, "ws", "add", "--restore-default"],
+      {
+        cwd: current,
+        env: environment,
+        encoding: "utf8",
+      },
+    );
+    const restoredConfig = readWorkspaceConfig(parse(readFileSync(envPath, "utf8")));
+
+    expect(restored).toContain("默认 Workspace 已切换为：.codex-connect/workspace");
+    expect(restoredConfig.defaultWorkspace.id).toBe("codex-connect");
+    expect(restoredConfig.workspaces.map((workspace: { id: string }) => workspace.id)).toEqual([
+      "codex-connect",
+      "current-project",
+    ]);
+  });
+
+  it("lists and removes a missing Workspace registration", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const project = join(root, "Temporary Project");
+    mkdirSync(project);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_ENV_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: root, env: environment });
+    execFileSync(process.execPath, [cli, "ws", "add"], { cwd: project, env: environment });
+    rmSync(project, { recursive: true });
+
+    const listed = execFileSync(process.execPath, [cli, "ws"], {
+      cwd: root,
+      env: environment,
+      encoding: "utf8",
+    });
+    const removed = execFileSync(process.execPath, [cli, "ws", "remove", "temporary-project"], {
+      cwd: root,
+      env: environment,
+      encoding: "utf8",
+    });
+    const relisted = execFileSync(process.execPath, [cli, "ws"], {
+      cwd: root,
+      env: environment,
+      encoding: "utf8",
+    });
+    const rejected = spawnSync(process.execPath, [cli, "ws", "remove", "1"], {
+      cwd: root,
+      env: environment,
+      encoding: "utf8",
+    });
+
+    expect(listed).toContain("Temporary Project · temporary-project · 目录不存在");
+    expect(removed).toContain("Workspace 注册已删除：Temporary Project (temporary-project)");
+    expect(removed).toContain("磁盘目录未删除");
+    expect(relisted).not.toContain("temporary-project");
+    expect(rejected.status).toBe(1);
+    expect(rejected.stderr).toContain("固定默认 Workspace 不能删除");
   });
 
   it("runs remote in the invocation directory unless a workspace is explicit", () => {
