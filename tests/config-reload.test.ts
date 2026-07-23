@@ -4,8 +4,8 @@ import {
   GatewayApplication,
   classifyConfigReload,
   effectiveCodexBinary,
-  removeUnauthorizedTelegramBindings,
 } from "../src/bootstrap/index.js";
+import { removeUnauthorizedTelegramBindings } from "../src/bootstrap/surface-composition.js";
 import type { GatewayConfig } from "../src/config/index.js";
 import { TelegramAccessPolicy, WorkspaceRegistry } from "../src/policy/index.js";
 import { MemoryBindingStore } from "../src/storage/index.js";
@@ -243,54 +243,24 @@ describe("Gateway config reload", () => {
     expect(bindings.getByThread("other-bot-thread")).toBeDefined();
   });
 
-  it("removes legacy Telegram group bindings whose authorized Actor is unknown", () => {
+  it("removes Telegram bindings whose authorized Actor is unknown", () => {
     const bindings = new MemoryBindingStore();
-    const legacyTarget = {
+    const unknownActorTarget = {
       surface: "telegram",
       accountId: "default",
       conversationId: "-200",
     } as const;
     bindings.bind({
-      target: legacyTarget,
+      target: unknownActorTarget,
       workspaceId: "main",
-      threadId: "legacy-thread",
-      sessionId: "legacy-session",
+      threadId: "unknown-actor-thread",
+      sessionId: "unknown-actor-session",
     });
 
     expect(removeUnauthorizedTelegramBindings(bindings, new Set([123]))).toBe(1);
-    expect(bindings.getByThread("legacy-thread")).toBeUndefined();
+    expect(bindings.getByThread("unknown-actor-thread")).toBeUndefined();
   });
 
-  it("adopts only an authorized legacy Telegram private-chat binding", () => {
-    const bindings = new MemoryBindingStore();
-    const allowed = {
-      surface: "telegram",
-      accountId: "default",
-      conversationId: "123",
-    } as const;
-    const revoked = {
-      surface: "telegram",
-      accountId: "default",
-      conversationId: "456",
-    } as const;
-    bindings.bind({
-      target: allowed,
-      workspaceId: "main",
-      threadId: "allowed-legacy-thread",
-      sessionId: "allowed-legacy-session",
-    });
-    bindings.bind({
-      target: revoked,
-      workspaceId: "main",
-      threadId: "revoked-legacy-thread",
-      sessionId: "revoked-legacy-session",
-    });
-
-    expect(removeUnauthorizedTelegramBindings(bindings, new Set([123]))).toBe(1);
-    expect(bindings.getByThread("allowed-legacy-thread")).toBeDefined();
-    expect(bindings.actors(allowed)).toEqual(["123"]);
-    expect(bindings.getByThread("revoked-legacy-thread")).toBeUndefined();
-  });
 });
 
 function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {

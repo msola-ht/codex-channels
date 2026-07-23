@@ -7,7 +7,7 @@
 - `com.hegenai.codex-app-server.plist.template`：启动共享 Codex App Server，并监听私有 Unix Socket。
 - `com.hegenai.codex-gateway.plist.template`：启动连接该 Socket 的 Gateway。
 
-模板中的占位符由 `scripts/install-launchd.mjs` 写入实际路径、代理和运行环境。安装流程会停止并删除旧版 `com.msola.*` Job 和 plist，再加载 `com.hegenai.*` 服务，用户配置与运行数据不迁移也不删除。不要在模板中写入 Token、用户目录或机器相关绝对路径。Gateway 的停止和重启不得终止共享 App Server。
+模板中的占位符由 `scripts/install-launchd.mjs` 写入实际路径、代理和运行环境。安装流程加载 `com.hegenai.*` 服务；若检测到不支持的其他标签仍在运行则明确拒绝，避免多个 Gateway 同时轮询。卸载时保留用户配置与运行数据。不要在模板中写入 Token、用户目录或机器相关绝对路径。Gateway 的停止和重启不得终止共享 App Server。
 
 验证模板：
 

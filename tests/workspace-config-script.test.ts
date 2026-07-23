@@ -75,7 +75,7 @@ describe("workspace:add script", () => {
     expect(() => addWorkspaceToEnv({ envPath, cwd: file })).toThrow("cwd 必须是目录");
   });
 
-  it("requires explicit pruning and recovers when the default Workspace is missing", () => {
+  it("requires explicit pruning and enforces the fixed default Workspace", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-workspace-add-"));
     temporaryDirectories.push(root);
     const missing = join(root, "Moved Project");
@@ -133,7 +133,7 @@ describe("workspace:add script", () => {
     ]);
     expect(config.defaultWorkspace.id).toBe("codex-connect");
 
-    const corrupted = [
+    const alternateDefault = [
       `CODEX_WORKSPACES_JSON='${JSON.stringify([{
         id: "current-project",
         name: "Current Project",
@@ -142,30 +142,30 @@ describe("workspace:add script", () => {
       "CODEX_DEFAULT_WORKSPACE=current-project",
       "",
     ].join("\n");
-    writeFileSync(envPath, corrupted);
-    const restored = addWorkspaceToEnv({
+    writeFileSync(envPath, alternateDefault);
+    const normalized = addWorkspaceToEnv({
       envPath,
       cwd: current,
-      restoreDefault: true,
       fallbackDefaultWorkspace: {
         id: "codex-connect",
         name: ".codex-connect/workspace",
         cwd: fallback,
       },
     });
-    const restoredConfig = readWorkspaceConfig(parse(readFileSync(envPath, "utf8")));
+    const normalizedConfig = readWorkspaceConfig(parse(readFileSync(envPath, "utf8")));
 
-    expect(restored).toMatchObject({
+    expect(normalized).toMatchObject({
       added: false,
       defaultChanged: true,
       defaultWorkspace: { id: "codex-connect" },
       workspace: { id: "current-project" },
     });
-    expect(restoredConfig.defaultWorkspace.id).toBe("codex-connect");
-    expect(restoredConfig.workspaces.map((workspace: { id: string }) => workspace.id)).toEqual([
+    expect(normalizedConfig.defaultWorkspace.id).toBe("codex-connect");
+    expect(normalizedConfig.workspaces.map((workspace: { id: string }) => workspace.id)).toEqual([
       "codex-connect",
       "current-project",
     ]);
+
   });
 
   it("prunes a deleted project without changing the fixed default Workspace", () => {

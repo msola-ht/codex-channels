@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 describe("loadConfig", () => {
-  it("accepts legacy uppercase log levels and derives an absolute socket path", () => {
+  it("loads a valid log level and derives an absolute socket path", () => {
     const workdir = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
     temporaryDirectories.push(workdir);
 
@@ -23,7 +23,7 @@ describe("loadConfig", () => {
       TELEGRAM_BOT_TOKEN: "secret",
       TELEGRAM_ALLOWED_USER_IDS: "123,456",
       ...workspaceEnvironment(workdir),
-      LOG_LEVEL: "INFO",
+      LOG_LEVEL: "info",
     });
 
     expect(config.logLevel).toBe("info");
@@ -35,6 +35,30 @@ describe("loadConfig", () => {
     expect(config.stateDatabasePath).toBe(join(process.cwd(), "data/gateway.sqlite3"));
     expect(config.telegramAllowedUserIds).toEqual(new Set([123, 456]));
     expect(config.telegramMessageFormat).toBe("html");
+  });
+
+  it("rejects noncanonical uppercase log levels", () => {
+    const workdir = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
+    temporaryDirectories.push(workdir);
+
+    expect(() => loadConfig({
+      TELEGRAM_BOT_TOKEN: "secret",
+      TELEGRAM_ALLOWED_USER_IDS: "123",
+      ...workspaceEnvironment(workdir),
+      LOG_LEVEL: "INFO",
+    })).toThrow(ConfigurationError);
+  });
+
+  it("rejects the removed Bridge sandbox setting", () => {
+    const workdir = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
+    temporaryDirectories.push(workdir);
+
+    expect(() => loadConfig({
+      TELEGRAM_BOT_TOKEN: "secret",
+      TELEGRAM_ALLOWED_USER_IDS: "123",
+      ...workspaceEnvironment(workdir),
+      CODEX_BRIDGE_SANDBOX: "read-only",
+    })).toThrow("不支持配置项 CODEX_BRIDGE_SANDBOX；请改用 CODEX_SANDBOX");
   });
 
   it("accepts Rich Messages as an explicit Telegram output format", () => {

@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, lstatSync, mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -30,10 +30,6 @@ interface ActorRow {
 }
 
 const schemaVersion = 3;
-
-export function v2MigrationBackupPath(databasePath: string): string {
-  return `${databasePath}.v2-backup`;
-}
 
 export class SqliteBindingStore implements BindingStore {
   private readonly database: DatabaseSync;
@@ -255,52 +251,15 @@ export class SqliteBindingStore implements BindingStore {
       this.createActorSchema();
       return;
     }
-    if (row.user_version === 2) {
-      this.migrateV2();
-      return;
-    }
     if (row.user_version !== 0) {
       throw new Error(
-        `状态数据库版本不兼容：当前 ${row.user_version}，Gateway 需要 ${schemaVersion}。开发期间请删除旧状态数据库后重启`,
+        `状态数据库版本不兼容：当前 ${row.user_version}，Gateway 需要 ${schemaVersion}。请删除状态数据库后重启`,
       );
     }
     this.database.exec("BEGIN IMMEDIATE");
     try {
       this.createSchema();
       this.database.exec(`PRAGMA user_version = ${schemaVersion}; COMMIT;`);
-    } catch (error) {
-      this.database.exec("ROLLBACK");
-      throw error;
-    }
-  }
-
-  private migrateV2(): void {
-    this.ensureV2Backup();
-    this.database.exec("BEGIN IMMEDIATE");
-    try {
-      this.database.exec(`
-        ALTER TABLE conversation_workspaces RENAME TO conversation_workspaces_v2;
-        ALTER TABLE conversation_bindings RENAME TO conversation_bindings_v2;
-      `);
-      this.createSchema();
-      this.database.exec(`
-        INSERT INTO conversation_workspaces (
-          surface, account_id, conversation_id, workspace_id, updated_at
-        )
-        SELECT surface, 'default', conversation_id, workspace_id, updated_at
-        FROM conversation_workspaces_v2;
-
-        INSERT INTO conversation_bindings (
-          surface, account_id, conversation_id, workspace_id, thread_id, session_id, updated_at
-        )
-        SELECT surface, 'default', conversation_id, workspace_id, thread_id, session_id, updated_at
-        FROM conversation_bindings_v2;
-
-        DROP TABLE conversation_bindings_v2;
-        DROP TABLE conversation_workspaces_v2;
-        PRAGMA user_version = ${schemaVersion};
-        COMMIT;
-      `);
     } catch (error) {
       this.database.exec("ROLLBACK");
       throw error;
@@ -343,30 +302,6 @@ export class SqliteBindingStore implements BindingStore {
         PRIMARY KEY (surface, account_id, conversation_id, actor_id)
       ) STRICT;
     `);
-  }
-
-  private ensureV2Backup(): void {
-    const backupPath = v2MigrationBackupPath(this.path);
-    if (!existsSync(backupPath)) {
-      this.database.prepare("VACUUM INTO ?").run(backupPath);
-    }
-    const backupStat = lstatSync(backupPath);
-    if (!backupStat.isFile() || backupStat.isSymbolicLink()) {
-      throw new Error("SQLite v2 迁移备份路径必须是普通文件");
-    }
-    chmodSync(backupPath, 0o600);
-    const backup = new DatabaseSync(backupPath, { readOnly: true });
-    try {
-      const row = backup.prepare("PRAGMA user_version").get() as { user_version: number };
-      if (row.user_version !== 2) {
-        throw new Error(`SQLite v2 迁移备份版本无效：${row.user_version}`);
-      }
-      if (!sameV2Data(this.database, backup)) {
-        throw new Error("SQLite v2 迁移备份与当前数据库不一致");
-      }
-    } finally {
-      backup.close();
-    }
   }
 
   private load(): void {
@@ -437,20 +372,4 @@ function parseSurfaceId(value: string): SurfaceId {
     throw new Error("状态数据库包含空 Surface ID");
   }
   return value;
-}
-
-function sameV2Data(current: DatabaseSync, backup: DatabaseSync): boolean {
-  const queries = [
-    `SELECT surface, conversation_id, workspace_id, updated_at
-     FROM conversation_workspaces
-     ORDER BY surface, conversation_id`,
-    `SELECT surface, conversation_id, workspace_id, thread_id, session_id, updated_at
-     FROM conversation_bindings
-     ORDER BY surface, conversation_id`,
-  ];
-  return queries.every((query) => {
-    const currentRows = current.prepare(query).all();
-    const backupRows = backup.prepare(query).all();
-    return JSON.stringify(currentRows) === JSON.stringify(backupRows);
-  });
 }

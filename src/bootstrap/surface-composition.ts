@@ -122,14 +122,7 @@ export function removeUnauthorizedTelegramBindings(
     if (binding.target.surface !== "telegram" || binding.target.accountId !== accountId) {
       continue;
     }
-    let knownActors = bindings.actors(binding.target);
-    if (knownActors.length === 0) {
-      const legacyActorId = legacyTelegramPrivateActorId(binding.target.conversationId);
-      if (legacyActorId !== undefined && allowedUserIds.has(legacyActorId)) {
-        bindings.rememberActor(binding.target, String(legacyActorId));
-        knownActors = [String(legacyActorId)];
-      }
-    }
+    const knownActors = bindings.actors(binding.target);
     const allowedActors = new Set(knownActors.filter((actorId) => {
       const userId = Number(actorId);
       return Number.isSafeInteger(userId) && allowedUserIds.has(userId);
@@ -139,11 +132,4 @@ export function removeUnauthorizedTelegramBindings(
     }
   }
   return removed;
-}
-
-function legacyTelegramPrivateActorId(conversationId: string): number | undefined {
-  const userId = Number(conversationId);
-  return Number.isSafeInteger(userId) && userId > 0 && String(userId) === conversationId
-    ? userId
-    : undefined;
 }

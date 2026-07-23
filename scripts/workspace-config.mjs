@@ -59,7 +59,6 @@ export function addWorkspaceToEnv({
   id,
   name,
   pruneMissing = false,
-  restoreDefault = false,
   fallbackDefaultWorkspace,
   eventQueuePath,
 }) {
@@ -70,7 +69,6 @@ export function addWorkspaceToEnv({
   if (
     !parsed.workspaces.some((workspace) => workspace.id === parsed.defaultWorkspaceId)
     && !pruneMissing
-    && !restoreDefault
   ) {
     throw new Error([
       `CODEX_DEFAULT_WORKSPACE 不存在：${parsed.defaultWorkspaceId}`,
@@ -103,7 +101,7 @@ export function addWorkspaceToEnv({
     (candidate) => candidate.id === parsed.defaultWorkspaceId,
   );
   let defaultWorkspace = previousDefault;
-  if ((restoreDefault || !defaultWorkspace) && fallbackDefaultWorkspace) {
+  if (fallbackDefaultWorkspace) {
     const fallback = ensureFallbackWorkspace(fallbackDefaultWorkspace);
     defaultWorkspace = upsertFallbackWorkspace(workspaces, fallback);
   }

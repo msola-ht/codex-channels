@@ -22,8 +22,7 @@
     "access": "public"
   },
   "bin": {
-    "codexc": "bin/codexc.mjs",
-    "codex-connect": "bin/codexc.mjs"
+    "codexc": "bin/codexc.mjs"
   },
   "files": [
     "bin/",

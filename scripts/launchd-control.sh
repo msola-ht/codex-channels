@@ -6,8 +6,8 @@ user_domain="gui/$(id -u)"
 agents_dir="$HOME/Library/LaunchAgents"
 app_label="com.hegenai.codex-app-server"
 gateway_label="com.hegenai.codex-gateway"
-legacy_app_label="com.msola.codex-app-server"
-legacy_gateway_label="com.msola.codex-gateway"
+unsupported_app_label="com.msola.codex-app-server"
+unsupported_gateway_label="com.msola.codex-gateway"
 
 show_logs() {
   local follow=0
@@ -75,6 +75,21 @@ job_loaded() {
   launchctl print "$user_domain/$1" >/dev/null 2>&1
 }
 
+reject_unsupported_jobs() {
+  local -a loaded
+  local label
+  loaded=()
+  for label in "$unsupported_app_label" "$unsupported_gateway_label"; do
+    job_loaded "$label" && loaded+=("$label")
+  done
+  if (( ${#loaded[@]} == 0 )); then
+    return 0
+  fi
+  print -u2 "检测到不支持的 launchd Job：${(j:, :)loaded}"
+  print -u2 "请先手动卸载这些 Job 并删除对应 plist，再重新运行 codexc service install。"
+  return 1
+}
+
 wait_until_unloaded() {
   local label="$1"
   local attempt
@@ -120,24 +135,20 @@ start_job() {
   launchctl kickstart -k "$user_domain/$label"
 }
 
-remove_legacy_jobs() {
-  stop_job "$legacy_gateway_label"
-  stop_job "$legacy_app_label"
-  /bin/rm -f \
-    "$agents_dir/$legacy_gateway_label.plist" \
-    "$agents_dir/$legacy_app_label.plist"
-}
-
 case "$action" in
+  check-install)
+    reject_unsupported_jobs
+    ;;
   install)
+    reject_unsupported_jobs
     stop_job "$gateway_label"
     stop_job "$app_label"
-    remove_legacy_jobs
     start_job "$app_label" "$agents_dir/$app_label.plist"
     start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
     print "Codex App Server 与 Gateway 已安装并启动。"
     ;;
   start)
+    reject_unsupported_jobs
     start_job "$app_label" "$agents_dir/$app_label.plist"
     start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
     print "Codex App Server 与 Gateway 已启动。"
@@ -145,24 +156,23 @@ case "$action" in
   stop)
     stop_job "$gateway_label"
     stop_job "$app_label"
-    stop_job "$legacy_gateway_label"
-    stop_job "$legacy_app_label"
     print "Codex App Server 与 Gateway 已停止。"
     ;;
   uninstall)
     stop_job "$gateway_label"
     stop_job "$app_label"
-    remove_legacy_jobs
     /bin/rm -f "$agents_dir/$gateway_label.plist" "$agents_dir/$app_label.plist"
     print "Codex App Server 与 Gateway launchd 服务已卸载。"
     print "用户配置与运行数据保留在 ~/.codex-connect。"
     ;;
   restart)
+    reject_unsupported_jobs
     print "正在重启 Gateway..."
     start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
     print "Gateway 已重启；Codex App Server 保持运行。"
     ;;
   reload)
+    reject_unsupported_jobs
     if ! job_loaded "$gateway_label"; then
       print -u2 "Gateway 尚未运行，请先执行 codexc service start。"
       exit 1
@@ -178,8 +188,6 @@ case "$action" in
   status)
     launchctl print "$user_domain/$app_label" 2>/dev/null || true
     launchctl print "$user_domain/$gateway_label" 2>/dev/null || true
-    launchctl print "$user_domain/$legacy_app_label" 2>/dev/null || true
-    launchctl print "$user_domain/$legacy_gateway_label" 2>/dev/null || true
     ;;
   logs)
     shift

@@ -141,35 +141,6 @@ describe("codexc CLI", () => {
       cwd: realpathSync(join(home, "workspace")),
     });
 
-    const corruptedContent = readFileSync(envPath, "utf8")
-      .replace(
-        /^CODEX_WORKSPACES_JSON=.*$/m,
-        `CODEX_WORKSPACES_JSON='${JSON.stringify([{
-          id: "current-project",
-          name: "Current Project",
-          cwd: current,
-        }])}'`,
-      )
-      .replace(/^CODEX_DEFAULT_WORKSPACE=.*$/m, "CODEX_DEFAULT_WORKSPACE=current-project");
-    writeFileSync(envPath, corruptedContent);
-
-    const restored = execFileSync(
-      process.execPath,
-      [cli, "ws", "add", "--restore-default"],
-      {
-        cwd: current,
-        env: environment,
-        encoding: "utf8",
-      },
-    );
-    const restoredConfig = readWorkspaceConfig(parse(readFileSync(envPath, "utf8")));
-
-    expect(restored).toContain("默认 Workspace 已切换为：.codex-connect/workspace");
-    expect(restoredConfig.defaultWorkspace.id).toBe("codex-connect");
-    expect(restoredConfig.workspaces.map((workspace: { id: string }) => workspace.id)).toEqual([
-      "codex-connect",
-      "current-project",
-    ]);
   });
 
   it("lists and removes a missing Workspace registration", () => {

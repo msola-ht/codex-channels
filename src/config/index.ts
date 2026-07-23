@@ -27,13 +27,10 @@ const environmentSchema = z.object({
   CODEX_DEFAULT_WORKSPACE: z.string().min(1),
   CODEX_SOCKET_PATH: z.string().min(1).optional(),
   CODEX_MODEL: z.string().optional(),
-  CODEX_BRIDGE_SANDBOX: z.enum(["read-only", "workspace-write"]).default("workspace-write"),
+  CODEX_SANDBOX: z.enum(["read-only", "workspace-write"]).default("workspace-write"),
   STATE_DATABASE_PATH: z.string().min(1).optional(),
   APPROVAL_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
-  LOG_LEVEL: z.preprocess(
-    (value) => (typeof value === "string" ? value.toLowerCase() : value),
-    z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
-  ),
+  LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
 });
 
 const workspaceSchema = z.object({
@@ -79,6 +76,9 @@ export function loadRuntimeConfig(environment: NodeJS.ProcessEnv = process.env):
 }
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): GatewayConfig {
+  if (Object.hasOwn(environment, "CODEX_BRIDGE_SANDBOX")) {
+    throw new ConfigurationError("不支持配置项 CODEX_BRIDGE_SANDBOX；请改用 CODEX_SANDBOX");
+  }
   const parsed = environmentSchema.safeParse(environment);
   if (!parsed.success) {
     throw new ConfigurationError(z.prettifyError(parsed.error));
@@ -146,7 +146,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Gatewa
     defaultWorkspaceId: raw.CODEX_DEFAULT_WORKSPACE,
     codexSocketPath: socketPath,
     ...(raw.CODEX_MODEL ? { codexModel: raw.CODEX_MODEL } : {}),
-    codexSandbox: raw.CODEX_BRIDGE_SANDBOX,
+    codexSandbox: raw.CODEX_SANDBOX,
     stateDatabasePath: resolve(raw.STATE_DATABASE_PATH ?? "data/gateway.sqlite3"),
     approvalTimeoutMs: raw.APPROVAL_TIMEOUT_SECONDS * 1000,
     logLevel: raw.LOG_LEVEL,

@@ -94,19 +94,24 @@ if (process.platform === "darwin") {
   const uid = process.getuid?.();
   const domain = `gui/${uid}`;
   const labels = ["com.hegenai.codex-app-server", "com.hegenai.codex-gateway"];
-  const legacyLabels = ["com.msola.codex-app-server", "com.msola.codex-gateway"];
+  const unsupportedLabels = ["com.msola.codex-app-server", "com.msola.codex-gateway"];
   const loaded = labels.filter((label) =>
     spawnSync("launchctl", ["print", `${domain}/${label}`], { stdio: "ignore" }).status === 0,
   );
-  const loadedLegacy = legacyLabels.filter((label) =>
+  const loadedUnsupported = unsupportedLabels.filter((label) =>
     spawnSync("launchctl", ["print", `${domain}/${label}`], { stdio: "ignore" }).status === 0,
+  );
+  record(
+    "launchd 冲突",
+    loadedUnsupported.length === 0,
+    loadedUnsupported.length === 0
+      ? "未检测到不支持的 Job"
+      : `检测到不支持的 Job：${loadedUnsupported.join(", ")}；请先手动卸载`,
   );
   note(
     "launchd",
     loaded.length === labels.length
       ? "App Server 与 Gateway 已加载"
-      : loadedLegacy.length > 0
-        ? `检测到 ${loadedLegacy.length} 个旧版 Job；请运行 codexc service install 完成迁移`
       : `已加载 ${loaded.length}/${labels.length}；前台运行模式可忽略`,
   );
 } else if (process.platform === "linux") {

@@ -1,20 +1,20 @@
-# Project-skill-Codex-Connect 项目约束
+# codex-channels 项目约束
 
 ## 适用范围
 
 - 本文件适用于整个仓库。
 - 更具体目录中的 `AGENTS.override.md` 或 `AGENTS.md` 可以补充本文件；发生冲突时，更具体目录的规则优先。
-- 开始修改前先阅读根目录 `README.md`、本文件，以及与任务直接相关的设计文档和实现。
-- 架构实现以 `ARCHITECTURE_REBUILD_PROPOSAL.md` 为设计基线；其中迁移步骤和旧实现描述仅作为历史决策记录。
+- 开始修改前先阅读根目录 `README.md`、本文件，以及与任务直接相关的模块 README 和实现。
+- 当前架构约束以本文件、根目录 `README.md`、各模块 README、公开接口和测试为准。
 
 ## 当前项目状态
 
 - 当前仓库以 TypeScript 模块化 Gateway 为唯一实现。
-- 旧 Python Runtime、测试、smoke 脚本和打包入口已在用户确认后移除。
 - 正式本机入口为 npm CLI `codexc`，配置与运行状态位于用户主目录 `.codex-connect`；源码开发可继续使用仓库内 `.env` 和 `npm run dev:all`。
 - macOS 与 Linux 均可用 `codexc service install` 安装 App Server 与 Gateway 两个独立用户服务，使用 `codexc service uninstall` 卸载服务但保留用户数据；macOS 使用 launchd，Linux 使用 systemd user service，Windows Transport 尚未实现。
-- 不重新引入复制 Codex 会话内容的自定义会话数据库、Python Bridge 或替代 Codex Remote TUI 的本地 CLI。
+- 不提供 Python Runtime/Bridge、复制 Codex 会话内容的自定义会话数据库或替代 Codex Remote TUI 的本地 CLI。
 - 当前使用 SQLite StateStore 只保存 Telegram conversation 与 Codex Thread 的最小绑定，以便 Gateway 重启后恢复当前会话。
+- 只支持当前 README、配置示例、协议版本和存储 Schema 明确定义的接口；不保留旧命令别名、旧服务标签、旧数据格式迁移或隐式兼容回退。不兼容输入必须给出明确错误。
 
 ## 目标架构
 
@@ -95,7 +95,7 @@ Surface Adapters -> Application/Core <- Codex Client
 - Request ID 必须唯一关联 Pending Response，并在断线、超时或关闭时完成清理。
 - 服务器未知通知可以记录并安全忽略；需要响应的未知 Server Request 不得静默挂起。
 - 实验 API 只有在功能确实需要时才启用，并为不支持版本提供明确错误。
-- 第一阶段稳定协议类型不得依赖使用 `--experimental` 生成的字段。
+- 稳定协议类型不得依赖使用 `--experimental` 生成的字段。
 - WebSocket 入口返回 `-32001` 过载错误时，只自动重试可证明安全的只读或幂等请求；不盲目重试创建或写入操作。
 
 ## Thread 与会话规则
@@ -120,7 +120,7 @@ Surface Adapters -> Application/Core <- Codex Client
 - 不持久化 Codex 消息正文、Turn/Item 历史或 rollout 副本。
 - 单机使用 SQLite；分布式多实例确有需要时才考虑 PostgreSQL。
 - 未出现分布式队列、缓存或锁需求前，不引入 Redis、Kafka、NATS 等基础设施。
-- 新增依赖或持久化格式前必须说明必要性、迁移方式和回滚方案，并取得用户确认。
+- 新增依赖或改变持久化格式前必须说明必要性、当前数据处理方式和回滚方案，并取得用户确认。
 
 ## 事件与并发规则
 
@@ -169,7 +169,7 @@ Surface Adapters -> Application/Core <- Codex Client
 
 ## 扩展规则
 
-- 第一阶段扩展采用编译期显式注册，不动态扫描并执行任意第三方代码。
+- 扩展采用编译期显式注册，不动态扫描并执行任意第三方代码。
 - 新增 Surface 时实现统一输入、输出和审批接口，不修改 Conversation Core 的平台无关逻辑。
 - 新增命令时优先映射 App Server 已有能力，避免建立重复状态。
 - Codex Skill 用于模型工作流和操作指导，不用于实现实时 Transport、Thread 路由、事件循环或审批状态机。
@@ -204,10 +204,10 @@ Surface Adapters -> Application/Core <- Codex Client
 
 协议或 Transport 修改应增加真实 App Server 冒烟测试；不能只使用 Mock 证明兼容性。
 
-## 重构与删除规则
+## 维护与删除规则
 
-- 重构阶段保留 Git 历史，不通过删除仓库或重新 `git init` 规避迁移审查。
-- 已删除的 Python Bridge 不作为兼容入口恢复；需要兼容行为时在当前模块边界内实现。
+- 保留 Git 历史，不通过删除仓库或重新 `git init` 规避审查。
+- 不为已移除的实现恢复兼容入口；确需改变当前公开接口时直接更新实现、文档和测试。
 - 删除或替换现行 TypeScript 模块时同步删除孤儿入口、依赖、配置、脚本和测试，并更新文档。
 - 不覆盖或回退用户现有未提交改动；发现重叠修改时先检查差异并说明风险。
 - 不执行 `git commit`、`git push`、历史改写或远端操作，除非用户明确要求并完成必要审批。
@@ -220,4 +220,4 @@ Surface Adapters -> Application/Core <- Codex Client
 - 运行了哪些测试或冒烟验证；
 - 是否涉及协议、配置、持久化或安全边界；
 - 尚未覆盖的风险和下一步；
-- 是否影响当前单一 TypeScript 实现或尚未启用的服务部署方式。
+- 是否影响当前单一 TypeScript 实现、macOS/Linux 服务部署方式或尚未支持的 Windows Transport。

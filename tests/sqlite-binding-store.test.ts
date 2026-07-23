@@ -8,10 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { CodexAppServerClient } from "../src/codex-client/client.js";
 import { SessionRouter } from "../src/session-routing/router.js";
 import { MemoryBindingStore } from "../src/storage/memory-binding-store.js";
-import {
-  SqliteBindingStore,
-  v2MigrationBackupPath,
-} from "../src/storage/sqlite-binding-store.js";
+import { SqliteBindingStore } from "../src/storage/sqlite-binding-store.js";
 import { WorkspaceRegistry } from "../src/policy/workspace-registry.js";
 
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
@@ -129,79 +126,16 @@ describe("SqliteBindingStore", () => {
     store.close();
   });
 
-  it("migrates v2 Telegram bindings to the default account without data loss", () => {
+  it("rejects a database created with an unsupported schema version", () => {
     const { directory } = databasePath();
     const path = join(directory, "gateway-v2.sqlite3");
-    const legacy = new DatabaseSync(path);
-    legacy.exec(`
-      CREATE TABLE conversation_workspaces (
-        surface TEXT NOT NULL CHECK (surface = 'telegram'),
-        conversation_id TEXT NOT NULL,
-        workspace_id TEXT NOT NULL,
-        updated_at INTEGER NOT NULL,
-        PRIMARY KEY (surface, conversation_id)
-      ) STRICT;
-      CREATE TABLE conversation_bindings (
-        surface TEXT NOT NULL CHECK (surface = 'telegram'),
-        conversation_id TEXT NOT NULL,
-        workspace_id TEXT NOT NULL,
-        thread_id TEXT NOT NULL UNIQUE,
-        session_id TEXT NOT NULL,
-        updated_at INTEGER NOT NULL,
-        PRIMARY KEY (surface, conversation_id)
-      ) STRICT;
-      INSERT INTO conversation_workspaces VALUES ('telegram', '100', 'main', 1);
-      INSERT INTO conversation_bindings
-      VALUES ('telegram', '100', 'main', 'thread-v2', 'session-v2', 1);
-      PRAGMA user_version = 2;
-    `);
-    legacy.close();
-
-    const migrated = new SqliteBindingStore(path);
-
-    expect(migrated.get(target)).toEqual({
-      target,
-      workspaceId: "main",
-      threadId: "thread-v2",
-      sessionId: "session-v2",
-    });
-    expect(migrated.actors(target)).toEqual([]);
-    migrated.close();
-    const backupPath = v2MigrationBackupPath(path);
-    expect(statSync(backupPath).mode & 0o777).toBe(0o600);
-    const backup = new DatabaseSync(backupPath, { readOnly: true });
-    expect((backup.prepare("PRAGMA user_version").get() as { user_version: number }).user_version)
-      .toBe(2);
-    expect(
-      (backup.prepare("SELECT thread_id FROM conversation_bindings").get() as { thread_id: string })
-        .thread_id,
-    ).toBe("thread-v2");
-    backup.close();
-    const verified = new DatabaseSync(path);
-    expect((verified.prepare("PRAGMA user_version").get() as { user_version: number }).user_version)
-      .toBe(3);
-    verified.close();
-  });
-
-  it("refuses migration when an existing v2 backup belongs to different data", () => {
-    const { directory } = databasePath();
-    const path = join(directory, "gateway-v2.sqlite3");
-    createV2Database(path, "thread-current");
-    createV2Database(v2MigrationBackupPath(path), "thread-stale");
+    const database = new DatabaseSync(path);
+    database.exec("PRAGMA user_version = 2;");
+    database.close();
 
     expect(() => new SqliteBindingStore(path)).toThrow(
-      "SQLite v2 迁移备份与当前数据库不一致",
+      "状态数据库版本不兼容：当前 2，Gateway 需要 3",
     );
-
-    const current = new DatabaseSync(path);
-    expect((current.prepare("PRAGMA user_version").get() as { user_version: number }).user_version)
-      .toBe(2);
-    expect(
-      (current.prepare("SELECT thread_id FROM conversation_bindings").get() as {
-        thread_id: string;
-      }).thread_id,
-    ).toBe("thread-current");
-    current.close();
   });
 });
 
@@ -266,31 +200,4 @@ function databasePath(): { directory: string; path: string } {
   const directory = mkdtempSync(join(tmpdir(), "codex-gateway-state-"));
   temporaryDirectories.push(directory);
   return { directory, path: join(directory, "private", "gateway.sqlite3") };
-}
-
-function createV2Database(path: string, threadId: string): void {
-  const database = new DatabaseSync(path);
-  database.exec(`
-    CREATE TABLE conversation_workspaces (
-      surface TEXT NOT NULL CHECK (surface = 'telegram'),
-      conversation_id TEXT NOT NULL,
-      workspace_id TEXT NOT NULL,
-      updated_at INTEGER NOT NULL,
-      PRIMARY KEY (surface, conversation_id)
-    ) STRICT;
-    CREATE TABLE conversation_bindings (
-      surface TEXT NOT NULL CHECK (surface = 'telegram'),
-      conversation_id TEXT NOT NULL,
-      workspace_id TEXT NOT NULL,
-      thread_id TEXT NOT NULL UNIQUE,
-      session_id TEXT NOT NULL,
-      updated_at INTEGER NOT NULL,
-      PRIMARY KEY (surface, conversation_id)
-    ) STRICT;
-    INSERT INTO conversation_workspaces VALUES ('telegram', '100', 'main', 1);
-    INSERT INTO conversation_bindings
-    VALUES ('telegram', '100', 'main', '${threadId}', 'session-v2', 1);
-    PRAGMA user_version = 2;
-  `);
-  database.close();
 }

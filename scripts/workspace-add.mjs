@@ -14,7 +14,6 @@ const result = addWorkspaceToEnv({
   ...(options.id ? { id: options.id } : {}),
   ...(options.name ? { name: options.name } : {}),
   ...(options.pruneMissing ? { pruneMissing: true } : {}),
-  ...(options.restoreDefault ? { restoreDefault: true } : {}),
   fallbackDefaultWorkspace: {
     cwd: resolve(dirname(envPath), "workspace"),
     id: "codex-connect",
@@ -47,10 +46,6 @@ function parseOptions(args) {
     const argument = args[index];
     if (argument === "--prune-missing") {
       result.pruneMissing = true;
-      continue;
-    }
-    if (argument === "--restore-default") {
-      result.restoreDefault = true;
       continue;
     }
     if (!["--id", "--name", "--cwd", "--env-file"].includes(argument)) {

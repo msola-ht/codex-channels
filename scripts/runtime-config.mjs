@@ -62,7 +62,7 @@ export function initializeUserData({ environment = process.env, cwd = process.cw
     `CODEX_DEFAULT_WORKSPACE=${defaultWorkspace.id}`,
     `CODEX_SOCKET_PATH=${join(runtimeDir, "codex-app-server.sock")}`,
     "CODEX_MODEL=",
-    "CODEX_BRIDGE_SANDBOX=workspace-write",
+    "CODEX_SANDBOX=workspace-write",
     "APPROVAL_TIMEOUT_SECONDS=300",
     `STATE_DATABASE_PATH=${join(stateDir, "gateway.sqlite3")}`,
     "LOG_LEVEL=info",

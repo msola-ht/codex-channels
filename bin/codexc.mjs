@@ -144,7 +144,6 @@ function workspace(args) {
       ...(options.id ? { id: options.id } : {}),
       ...(options.name ? { name: options.name } : {}),
       ...(options.pruneMissing ? { pruneMissing: true } : {}),
-      ...(options.restoreDefault ? { restoreDefault: true } : {}),
       fallbackDefaultWorkspace,
       eventQueuePath,
     });
@@ -186,7 +185,7 @@ function workspace(args) {
     throw new Error([
       "用法：",
       "  codexc ws",
-      "  codexc ws add [--id ID] [--name 名称] [--prune-missing] [--restore-default]",
+      "  codexc ws add [--id ID] [--name 名称] [--prune-missing]",
       "  codexc ws remove <序号|ID|名称>",
     ].join("\n"));
   }
@@ -211,8 +210,16 @@ function service(args) {
     throw new Error("用法：codexc service <install|uninstall|start|stop|reload|restart|status|logs>");
   }
   const serviceArgs = action === "logs" ? parseServiceLogOptions(rest) : [];
+  if (action === "install") {
+    runScript("scripts/validate-config.mjs", []);
+  }
   if (process.platform === "darwin") {
     if (action === "install") {
+      run(
+        "/bin/zsh",
+        [join(packageDir, "scripts/launchd-control.sh"), "check-install"],
+        configuredEnvironment().environment,
+      );
       runScript("scripts/install-launchd.mjs", []);
     }
     run(
@@ -319,10 +326,6 @@ function parseWorkspaceAddOptions(args) {
       result.pruneMissing = true;
       continue;
     }
-    if (option === "--restore-default") {
-      result.restoreDefault = true;
-      continue;
-    }
     if (!new Set(["--id", "--name"]).has(option)) {
       throw new Error(`未知参数：${option}`);
     }
@@ -393,8 +396,8 @@ function printHelp() {
   start                        前台启动 App Server 与 Gateway
   remote [--workspace ID]      在当前目录启动共享 App Server 的 Codex TUI
   ws                           列出 Workspace
-  ws add [--id ID] [--name 名称] [--prune-missing] [--restore-default]
-                               注册当前目录；可清理失效项或恢复固定默认
+  ws add [--id ID] [--name 名称] [--prune-missing]
+                               注册当前目录；可清理失效项
   ws remove <序号|ID|名称>      删除 Workspace 注册，不删除磁盘目录
   service install              安装并启动系统用户服务
   service uninstall            卸载系统服务并保留用户数据

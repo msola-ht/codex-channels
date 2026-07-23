@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -28,13 +28,12 @@ try {
   );
 
   const binDirectory = join(temporaryDirectory, "node_modules", ".bin");
-  const shortCommand = join(binDirectory, "codexc");
-  const longCommand = join(binDirectory, "codex-connect");
-  if (!existsSync(shortCommand) || !existsSync(longCommand)) {
-    throw new Error("tarball 安装后缺少 codexc 或 codex-connect 命令");
+  const command = join(binDirectory, "codexc");
+  if (!existsSync(command)) {
+    throw new Error("tarball 安装后缺少 codexc 命令");
   }
-  const version = run(shortCommand, ["--version"], temporaryDirectory, environment, true).stdout.trim();
-  const help = run(longCommand, ["--help"], temporaryDirectory, environment, true).stdout;
+  const version = run(command, ["--version"], temporaryDirectory, environment, true).stdout.trim();
+  const help = run(command, ["--help"], temporaryDirectory, environment, true).stdout;
   if (version !== packageReport.version) {
     throw new Error(`CLI 版本不匹配：实际 ${version}，期望 ${packageReport.version}`);
   }
@@ -50,6 +49,7 @@ try {
   const installedPackage = join(temporaryDirectory, "node_modules", "@hegenai", "codexc");
   for (const requiredFile of [
     "scripts/telegram-setup.mjs",
+    "scripts/validate-config.mjs",
     "systemd/codex-connect-app-server.service.template",
     "systemd/codex-connect-gateway.service.template",
     "scripts/install-systemd.mjs",
@@ -58,6 +58,44 @@ try {
     if (!existsSync(join(installedPackage, requiredFile))) {
       throw new Error(`tarball 安装后缺少发布文件：${requiredFile}`);
     }
+  }
+  const envPath = join(temporaryDirectory, ".env");
+  const configLines = [
+    "TELEGRAM_BOT_TOKEN=smoke-token",
+    "TELEGRAM_ALLOWED_USER_IDS=123",
+    `CODEX_WORKSPACES_JSON='${JSON.stringify([{
+      id: "smoke",
+      name: "Smoke",
+      cwd: temporaryDirectory,
+    }])}'`,
+    "CODEX_DEFAULT_WORKSPACE=smoke",
+    "CODEX_SANDBOX=workspace-write",
+    "",
+  ];
+  writeFileSync(envPath, configLines.join("\n"), { mode: 0o600 });
+  const configEnvironment = {
+    ...environment,
+    CODEX_CONNECT_ENV_FILE: envPath,
+  };
+  const validator = join(installedPackage, "scripts", "validate-config.mjs");
+  run(process.execPath, [validator], temporaryDirectory, configEnvironment, true);
+  writeFileSync(
+    envPath,
+    configLines
+      .map((line) => line.replace("CODEX_SANDBOX=", "CODEX_BRIDGE_SANDBOX="))
+      .join("\n"),
+    { mode: 0o600 },
+  );
+  const rejected = spawnSync(process.execPath, [validator], {
+    cwd: temporaryDirectory,
+    env: configEnvironment,
+    encoding: "utf8",
+  });
+  if (
+    rejected.status === 0
+    || !rejected.stderr.includes("不支持配置项 CODEX_BRIDGE_SANDBOX")
+  ) {
+    throw new Error("配置预检未拒绝已经移除的配置项");
   }
   console.log(`tarball 安装冒烟通过：${packageReport.name}@${packageReport.version}`);
 } finally {
