@@ -93,6 +93,13 @@ suite("real Codex App Server over Unix WebSocket", () => {
     expect(models.every((model) => model.supportedReasoningEfforts.length > 0)).toBe(true);
   });
 
+  it("lists installed plugins without loading remote catalog entries", async () => {
+    const result = await client.listPlugins(workdir);
+    const plugins = result.marketplaces.flatMap((marketplace) => marketplace.plugins);
+
+    expect(plugins.every((plugin) => plugin.installed)).toBe(true);
+  });
+
   it("broadcasts and exposes a loaded temporary thread across two clients without running a model turn", async () => {
     let observedThreadId: string | undefined;
     const removePeerNotification = peerClient.onNotification((notification) => {

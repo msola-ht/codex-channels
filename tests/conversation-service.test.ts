@@ -11,6 +11,62 @@ const main = { id: "main", name: "Main", cwd: "/workspace/main" };
 const other = { id: "other", name: "Other", cwd: "/workspace/other" };
 
 describe("ConversationService model selection", () => {
+  it("lists directly installed personal Skills without bundled or project Skills", async () => {
+    const listSkills = vi.fn(async () => [{
+      cwd: main.cwd,
+      errors: [],
+      skills: [
+        {
+          name: "personal",
+          description: "个人",
+          path: "/Users/test/.codex/skills/personal/SKILL.md",
+          scope: "user" as const,
+          enabled: true,
+        },
+        {
+          name: "agents-personal",
+          description: "个人",
+          path: "/Users/test/.agents/skills/agents-personal/SKILL.md",
+          scope: "user" as const,
+          enabled: true,
+        },
+        {
+          name: "plugin:skill",
+          description: "插件",
+          path: "/Users/test/.codex/plugins/cache/plugin/skills/example/SKILL.md",
+          scope: "user" as const,
+          enabled: true,
+        },
+        {
+          name: "repo-skill",
+          description: "项目",
+          path: "/workspace/main/.codex/skills/repo-skill/SKILL.md",
+          scope: "repo" as const,
+          enabled: true,
+        },
+        {
+          name: "disabled",
+          description: "禁用",
+          path: "/Users/test/.codex/skills/disabled/SKILL.md",
+          scope: "user" as const,
+          enabled: false,
+        },
+      ],
+    }]);
+    const service = new ConversationService(
+      { listSkills } as unknown as CodexAppServerClient,
+      { workspace: () => main } as unknown as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+    );
+
+    const entries = await service.listSkills(target);
+
+    expect(entries.flatMap((entry) => entry.skills).map((skill) => skill.name))
+      .toEqual(["personal", "agents-personal"]);
+    expect(listSkills).toHaveBeenCalledWith(main.cwd);
+  });
+
   it("allows read-only Fast status during an active turn but blocks switching", async () => {
     const selectFastMode = vi.fn().mockResolvedValue({ serviceTier: "fast" });
     const service = new ConversationService(

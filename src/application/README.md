@@ -10,6 +10,7 @@
 - `model-selection-service.ts`：查询模型与思考强度，保存按 Conversation 生效的 Turn 覆盖设置；关闭 Fast 时发送 App Server 定义的显式 Standard 层级，避免重新继承全局 Fast 默认值。
 
 Surface 应通过这里的用例接口驱动会话，不应直接拼装 JSON-RPC。Thread 的权威状态仍来自 App Server，本模块只编排请求和必要的本地选择。
+扩展查询也保持平台无关：Skill 只返回用户直接安装且已启用的个人项，排除系统、项目和插件缓存内容；Plugin 只读取已安装项，不触发远端市场目录刷新。
 成功启动 Turn 后，模型、思考强度和服务层级以 App Server 的 Thread 设置为准；Gateway 重启时通过恢复 Thread 重新取得这些设置。
 命令成功文案、命令菜单说明和平台交互形式由各 Surface 维护，并通过类型穷尽检查保持完整。
 `/whoami`、交互取消、图片下载等平台能力不属于通用会话命令，继续由具体 Surface 实现。

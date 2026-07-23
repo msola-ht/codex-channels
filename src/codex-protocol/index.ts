@@ -35,7 +35,7 @@ export type { GetAccountTokenUsageResponse } from "./generated/v2/GetAccountToke
 export type { GetAccountRateLimitsResponse } from "./generated/v2/GetAccountRateLimitsResponse.js";
 export type { ListMcpServerStatusResponse } from "./generated/v2/ListMcpServerStatusResponse.js";
 export type { PermissionProfileListResponse } from "./generated/v2/PermissionProfileListResponse.js";
-export type { PluginListResponse } from "./generated/v2/PluginListResponse.js";
+export type { PluginInstalledResponse } from "./generated/v2/PluginInstalledResponse.js";
 export type { ReviewStartResponse } from "./generated/v2/ReviewStartResponse.js";
 export type { ReviewTarget } from "./generated/v2/ReviewTarget.js";
 export type { SkillsListResponse } from "./generated/v2/SkillsListResponse.js";

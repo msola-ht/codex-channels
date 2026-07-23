@@ -9,14 +9,20 @@ import {
   formatPlan,
   formatReasoningEfforts,
   formatLimits,
+  formatPlugins,
   formatStatus,
   formatStartupNotification,
+  formatSkills,
   formatUsage,
   formatWorkspaces,
   formatWorkspacesAdded,
   splitTelegramText,
 } from "../src/surfaces/telegram/format.js";
-import type { Model } from "../src/codex-protocol/index.js";
+import type {
+  Model,
+  PluginInstalledResponse,
+  SkillsListResponse,
+} from "../src/codex-protocol/index.js";
 
 function model(
   name: string,
@@ -59,6 +65,51 @@ describe("splitTelegramText", () => {
     expect(chunks.join("")).toBe(text);
     expect(chunks.every((chunk) => !/[\uD800-\uDBFF]$/.test(chunk))).toBe(true);
     expect(chunks.every((chunk) => !/^[\uDC00-\uDFFF]/.test(chunk))).toBe(true);
+  });
+});
+
+describe("extension formatting", () => {
+  it("renders the filtered personal Skills with usage guidance", () => {
+    const entries = [{
+      cwd: "/workspace",
+      errors: [],
+      skills: [
+        {
+          name: "personal-skill",
+          description: "个人说明",
+          path: "/Users/test/.codex/skills/personal-skill/SKILL.md",
+          scope: "user",
+          enabled: true,
+        },
+      ],
+    }] as SkillsListResponse["data"];
+
+    const text = formatSkills(entries);
+
+    expect(text).toContain("个人 Skills（1）");
+    expect(text).toContain("personal-skill：个人说明");
+    expect(text).toContain("$Skill名称");
+  });
+
+  it("shows installed Plugins only", () => {
+    const result = {
+      marketplaces: [{
+        name: "local",
+        path: null,
+        interface: null,
+        plugins: [
+          { name: "github", installed: true, enabled: true },
+          { name: "remote-only", installed: false, enabled: false },
+        ],
+      }],
+      marketplaceLoadErrors: [],
+    } as unknown as PluginInstalledResponse;
+
+    const text = formatPlugins(result);
+
+    expect(text).toContain("已安装 Plugins（1）");
+    expect(text).toContain("github · 已启用");
+    expect(text).not.toContain("remote-only");
   });
 });
 

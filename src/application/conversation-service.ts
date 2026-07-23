@@ -7,7 +7,7 @@ import type {
   GetAccountTokenUsageResponse,
   ListMcpServerStatusResponse,
   PermissionProfileListResponse,
-  PluginListResponse,
+  PluginInstalledResponse,
   RateLimitSnapshot,
   ReviewTarget,
   SkillsListResponse,
@@ -252,15 +252,19 @@ export class ConversationService {
     });
   }
 
-  listSkills(target: ConversationTarget): Promise<SkillsListResponse["data"]> {
-    return this.codex.listSkills(this.router.workspace(target).cwd);
+  async listSkills(target: ConversationTarget): Promise<SkillsListResponse["data"]> {
+    const entries = await this.codex.listSkills(this.router.workspace(target).cwd);
+    return entries.map((entry) => ({
+      ...entry,
+      skills: entry.skills.filter(isDirectlyInstalledPersonalSkill),
+    }));
   }
 
   listMcpServers(target: ConversationTarget): Promise<ListMcpServerStatusResponse["data"]> {
     return this.codex.listMcpServers(this.router.current(target)?.threadId);
   }
 
-  listPlugins(target: ConversationTarget): Promise<PluginListResponse> {
+  listPlugins(target: ConversationTarget): Promise<PluginInstalledResponse> {
     return this.codex.listPlugins(this.router.workspace(target).cwd);
   }
 
@@ -350,6 +354,15 @@ export class ConversationService {
       }
     }
   }
+}
+
+function isDirectlyInstalledPersonalSkill(
+  skill: SkillsListResponse["data"][number]["skills"][number],
+): boolean {
+  const normalizedPath = skill.path.replaceAll("\\", "/");
+  return skill.enabled
+    && skill.scope === "user"
+    && !normalizedPath.includes("/.codex/plugins/");
 }
 
 function normalizeInput(value: string | ConversationInput): UserInput[] {

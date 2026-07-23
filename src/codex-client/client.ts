@@ -5,7 +5,7 @@ import type {
   ListMcpServerStatusResponse,
   ModelListResponse,
   PermissionProfileListResponse,
-  PluginListResponse,
+  PluginInstalledResponse,
   ReviewStartResponse,
   ReviewTarget,
   SkillsListResponse,
@@ -296,9 +296,9 @@ export class CodexAppServerClient {
     return servers;
   }
 
-  async listPlugins(cwd: string): Promise<PluginListResponse> {
-    return this.rpc.request<PluginListResponse>(
-      "plugin/list",
+  async listPlugins(cwd: string): Promise<PluginInstalledResponse> {
+    return this.rpc.request<PluginInstalledResponse>(
+      "plugin/installed",
       { cwds: [cwd] },
       { retryOverload: true },
     );

@@ -4,7 +4,7 @@ import type {
   ListMcpServerStatusResponse,
   McpServerStatusUpdatedNotification,
   PermissionProfileListResponse,
-  PluginListResponse,
+  PluginInstalledResponse,
   RateLimitSnapshot,
   SkillsListResponse,
   Thread,
@@ -162,11 +162,18 @@ export function formatFastModeState(state: ModelSelectionState): string {
 }
 
 export function formatSkills(entries: SkillsListResponse["data"]): string {
-  const skills = entries.flatMap((entry) => entry.skills);
-  return [
-    `可用 Skills（${skills.length}）：`,
-    ...skills.map((skill) => `- ${skill.name}${skill.enabled ? "" : "（已禁用）"}：${skill.description}`),
-  ].join("\n");
+  const skills = entries
+    .flatMap((entry) => entry.skills)
+    .filter((skill) => skill.enabled);
+  if (skills.length === 0) {
+    return "当前没有已启用的个人 Skills。";
+  }
+  const lines = [
+    `个人 Skills（${skills.length}）：`,
+    ...skills.map((skill) => `- ${skill.name}：${skill.description}`),
+  ];
+  lines.push("", "使用：在消息中写 $Skill名称 并说明任务。");
+  return lines.join("\n");
 }
 
 export function formatMcpServers(servers: ListMcpServerStatusResponse["data"]): string {
@@ -179,12 +186,17 @@ export function formatMcpServers(servers: ListMcpServerStatusResponse["data"]): 
   ].join("\n");
 }
 
-export function formatPlugins(result: PluginListResponse): string {
-  const plugins = result.marketplaces.flatMap((marketplace) => marketplace.plugins);
+export function formatPlugins(result: PluginInstalledResponse): string {
+  const plugins = result.marketplaces
+    .flatMap((marketplace) => marketplace.plugins)
+    .filter((plugin) => plugin.installed);
+  if (plugins.length === 0) {
+    return "当前没有已安装 Plugins。";
+  }
   return [
-    `Plugins（${plugins.length}，App Server 中该接口仍在开发中）：`,
+    `已安装 Plugins（${plugins.length}）：`,
     ...plugins.map(
-      (plugin) => `- ${plugin.name} · ${plugin.installed ? "已安装" : "未安装"} · ${plugin.enabled ? "已启用" : "未启用"}`,
+      (plugin) => `- ${plugin.name} · ${plugin.enabled ? "已启用" : "未启用"}`,
     ),
   ].join("\n");
 }

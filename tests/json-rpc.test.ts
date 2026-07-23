@@ -109,6 +109,23 @@ class FakeTransport extends BaseTransport {
           }),
         ),
       );
+    } else if (decoded.method === "plugin/installed") {
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({
+            id: decoded.id,
+            result: {
+              marketplaces: [{
+                name: "installed",
+                path: null,
+                interface: null,
+                plugins: [],
+              }],
+              marketplaceLoadErrors: [],
+            },
+          }),
+        ),
+      );
     } else if (decoded.method === "turn/start") {
       queueMicrotask(() =>
         this.emitMessage(
@@ -330,6 +347,21 @@ describe("JsonRpcClient", () => {
 
     expect(result.rateLimits.planType).toBe("pro");
     expect(transport.sent.some((message) => message.method === "account/rateLimits/read")).toBe(true);
+  });
+
+  it("lists only installed plugins without loading the remote catalog", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    const result = await client.listPlugins("/tmp/project");
+
+    expect(result.marketplaces).toHaveLength(1);
+    expect(transport.sent.find((message) => message.method === "plugin/installed")?.params)
+      .toEqual({ cwds: ["/tmp/project"] });
+    expect(transport.sent.some((message) => message.method === "plugin/list")).toBe(false);
   });
 
   it("tags Gateway user input with a client message id", async () => {
