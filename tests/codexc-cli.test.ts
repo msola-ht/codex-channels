@@ -14,7 +14,7 @@ import {
   configEventQueuePath,
   matchingWorkspaceConfigEvents,
   readConfigEvents,
-} from "../scripts/config-event-queue.mjs";
+} from "../runtime/config-event-queue.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { readWorkspaceConfig } from "../scripts/workspace-config.mjs";
 

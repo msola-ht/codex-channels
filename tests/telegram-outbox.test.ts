@@ -16,6 +16,7 @@ class FakeTelegramApi {
   readonly editOptions: unknown[] = [];
   readonly richMessages: InputRichMessage[] = [];
   readonly richEdits: InputRichMessage[] = [];
+  readonly deleted: number[] = [];
   readonly documents: Array<{ filename: string | undefined; options: unknown }> = [];
   rejectRichMessages = false;
   rejectHtmlMessages = false;
@@ -69,6 +70,11 @@ class FakeTelegramApi {
       this.edits.push(text.markdown ?? text.html ?? "[rich blocks]");
     }
     this.editOptions.push(options);
+    return true;
+  }
+
+  async deleteMessage(_chatId: string, messageId: number): Promise<true> {
+    this.deleted.push(messageId);
     return true;
   }
 
@@ -600,6 +606,38 @@ describe("TelegramOutbox", () => {
 
     expect(api.sent).toHaveLength(2);
     expect(api.sent[1]).toContain("运行命令");
+    await outbox.close();
+  });
+
+  it("withdraws an operation message when its approval request arrives after the flush", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    const request = commandApprovalInteraction();
+
+    outbox.handle(operationUpdated("command-1", "running", "command", "npm install -g ."));
+    await vi.advanceTimersByTimeAsync(750);
+    await settle();
+    expect(api.sent[0]).toContain("npm install");
+
+    outbox.prepareInteraction(target.conversationId, request);
+    const card = outbox.runOrdered(target.conversationId, async () => {
+      api.sent.push("审批卡片");
+      return true;
+    });
+    await settle();
+
+    await expect(card).resolves.toBe(true);
+    expect(api.deleted).toEqual([1]);
+    expect(api.sent.at(-1)).toBe("审批卡片");
+
+    outbox.finishInteraction(target.conversationId, request, {
+      type: "approval",
+      approved: true,
+    });
+    await settle();
+    expect(api.sent.at(-1)).toContain("运行命令");
+
     await outbox.close();
   });
 

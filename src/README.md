@@ -1,6 +1,6 @@
 # Gateway 源码
 
-`src/` 是单一 TypeScript Gateway 的业务源码。`main.ts` 负责加载配置、创建日志并启动 `GatewayApplication`；`version.json` 保存运行时版本。
+`src/` 是单一 TypeScript Gateway 的业务源码。`main.ts` 只启动配置生命周期入口；`version.json` 保存运行时版本。
 
 ## 模块索引
 

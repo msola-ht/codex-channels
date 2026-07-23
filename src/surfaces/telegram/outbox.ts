@@ -10,6 +10,7 @@ import {
 import type { MessagePhase } from "../../codex-protocol/index.js";
 import { BoundedAsyncQueue } from "../../event-bus/index.js";
 import { TelegramApiExecutor } from "./api-executor.js";
+import { TelegramApprovalOperationCoordinator } from "./approval-operation-coordinator.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
 import { telegramDefaultAccountId } from "./constants.js";
 import {
@@ -49,12 +50,6 @@ interface OperationLogState {
   timer: NodeJS.Timeout | undefined;
 }
 
-interface HeldApprovalOperation {
-  chatId: string;
-  turnKey: string;
-  operation: OperationUpdate;
-}
-
 interface OutboxOperation {
   critical: boolean;
   run(): Promise<void>;
@@ -80,10 +75,7 @@ export class TelegramOutbox {
   private readonly replyToByTurn = new Map<string, number>();
   private readonly typing: TelegramTypingIndicator;
   private readonly workers = new Map<string, ChatWorker>();
-  private readonly approvalRequestsByOperation = new Map<string, Set<string>>();
-  private readonly operationByApprovalRequest = new Map<string, string>();
-  private readonly heldApprovalOperations = new Map<string, HeldApprovalOperation>();
-  private readonly suppressedOperations = new Set<string>();
+  private readonly approvalOperations = new TelegramApprovalOperationCoordinator();
   private readonly notifiedTurns = new Set<string>();
   private closed = false;
 
@@ -174,16 +166,15 @@ export class TelegramOutbox {
       case "operation.updated": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
         const operationKey = this.operationKey(turnKey, event.operation.itemId);
-        if (this.suppressedOperations.has(operationKey)) {
+        const disposition = this.approvalOperations.routeOperation(operationKey, {
+          chatId,
+          turnKey,
+          operation: event.operation,
+        });
+        if (disposition === "suppress") {
           return;
         }
-        const heldForApproval = this.approvalRequestsByOperation.has(operationKey);
-        if (heldForApproval) {
-          this.heldApprovalOperations.set(operationKey, {
-            chatId,
-            turnKey,
-            operation: event.operation,
-          });
+        if (disposition === "hold") {
           return;
         }
         const state = this.operationLogs.get(turnKey) ?? this.createOperationLog(chatId, turnKey);
@@ -344,10 +335,7 @@ export class TelegramOutbox {
     this.operationLogs.clear();
     this.replyToByTurn.clear();
     this.workers.clear();
-    this.approvalRequestsByOperation.clear();
-    this.operationByApprovalRequest.clear();
-    this.heldApprovalOperations.clear();
-    this.suppressedOperations.clear();
+    this.approvalOperations.clear();
     this.notifiedTurns.clear();
   }
 
@@ -389,31 +377,19 @@ export class TelegramOutbox {
     if (this.closed || request.type !== "approval") {
       return;
     }
-    const operationKey = this.operationByApprovalRequest.get(request.requestId);
-    if (!operationKey) {
+    const resolution = this.approvalOperations.finish(request, decision);
+    if (!resolution) {
       return;
     }
-    this.operationByApprovalRequest.delete(request.requestId);
-    const requestIds = this.approvalRequestsByOperation.get(operationKey);
-    requestIds?.delete(request.requestId);
-    const rejected = decision.type !== "approval" || !decision.approved;
     const turnKey = this.turnKey(request.threadId, request.turnId);
     let state = this.operationLogs.get(turnKey);
-    if (rejected) {
-      this.suppressApprovalOperation(operationKey, turnKey, request.itemId, state);
+    if (resolution.rejected) {
+      this.removeOperationFromLog(turnKey, request.itemId, state);
     }
-    if (requestIds && requestIds.size > 0) {
+    if (resolution.pending || resolution.suppressed) {
       return;
     }
-    this.approvalRequestsByOperation.delete(operationKey);
-
-    if (this.suppressedOperations.has(operationKey)) {
-      this.heldApprovalOperations.delete(operationKey);
-      return;
-    }
-
-    const held = this.heldApprovalOperations.get(operationKey);
-    this.heldApprovalOperations.delete(operationKey);
+    const held = resolution.held;
     if (held) {
       state = this.operationLogs.get(turnKey) ?? this.createOperationLog(held.chatId, turnKey);
       if (!state.records.has(request.itemId)) {
@@ -627,21 +603,16 @@ export class TelegramOutbox {
       return;
     }
     const turnKey = this.turnKey(request.threadId, request.turnId);
-    const operationKey = this.operationKey(turnKey, request.itemId);
-    const requestIds = this.approvalRequestsByOperation.get(operationKey) ?? new Set<string>();
-    requestIds.add(request.requestId);
-    this.approvalRequestsByOperation.set(operationKey, requestIds);
-    this.operationByApprovalRequest.set(request.requestId, operationKey);
-
     const state = this.operationLogs.get(turnKey);
+    const operation = state?.chatId === chatId
+      ? state.records.get(request.itemId)
+      : undefined;
+    this.approvalOperations.prepare(
+      request,
+      operation ? { chatId, turnKey, operation } : undefined,
+    );
     if (state?.chatId === chatId) {
-      const operation = state.records.get(request.itemId);
       if (operation) {
-        this.heldApprovalOperations.set(operationKey, {
-          chatId,
-          turnKey,
-          operation,
-        });
         state.records.delete(request.itemId);
         state.order = state.order.filter((itemId) => itemId !== request.itemId);
       }
@@ -668,14 +639,11 @@ export class TelegramOutbox {
     this.enqueue(chatId, () => this.flushOperationLog(state, true), true);
   }
 
-  private suppressApprovalOperation(
-    operationKey: string,
+  private removeOperationFromLog(
     turnKey: string,
     itemId: string,
     state: OperationLogState | undefined,
   ): void {
-    this.suppressedOperations.add(operationKey);
-    this.heldApprovalOperations.delete(operationKey);
     if (!state) {
       return;
     }
@@ -704,6 +672,13 @@ export class TelegramOutbox {
 
   private async flushOperationLog(state: OperationLogState, final: boolean): Promise<void> {
     if (state.records.size === 0) {
+      if (state.messageId !== undefined) {
+        await this.executor.call(
+          { chatId: state.chatId, operation: "deleteMessage", critical: true },
+          () => this.api.deleteMessage(state.chatId, state.messageId!),
+        );
+        state.messageId = undefined;
+      }
       return;
     }
     const { chatId, turnKey } = state;
@@ -803,27 +778,7 @@ export class TelegramOutbox {
   }
 
   private clearApprovalOperationsForTurn(turnKey: string): void {
-    const prefix = `${turnKey}:`;
-    for (const [requestId, operationKey] of this.operationByApprovalRequest) {
-      if (operationKey.startsWith(prefix)) {
-        this.operationByApprovalRequest.delete(requestId);
-      }
-    }
-    for (const operationKey of this.approvalRequestsByOperation.keys()) {
-      if (operationKey.startsWith(prefix)) {
-        this.approvalRequestsByOperation.delete(operationKey);
-      }
-    }
-    for (const operationKey of this.heldApprovalOperations.keys()) {
-      if (operationKey.startsWith(prefix)) {
-        this.heldApprovalOperations.delete(operationKey);
-      }
-    }
-    for (const operationKey of this.suppressedOperations) {
-      if (operationKey.startsWith(prefix)) {
-        this.suppressedOperations.delete(operationKey);
-      }
-    }
+    this.approvalOperations.clearTurn(turnKey);
   }
 
   private async sendFirstChunk(chatId: string, state: StreamState, text: string): Promise<number> {
@@ -1060,26 +1015,7 @@ export class TelegramOutbox {
       }
     }
     const prefix = `${threadId}:`;
-    for (const [requestId, operationKey] of this.operationByApprovalRequest) {
-      if (operationKey.startsWith(prefix)) {
-        this.operationByApprovalRequest.delete(requestId);
-      }
-    }
-    for (const operationKey of this.approvalRequestsByOperation.keys()) {
-      if (operationKey.startsWith(prefix)) {
-        this.approvalRequestsByOperation.delete(operationKey);
-      }
-    }
-    for (const operationKey of this.heldApprovalOperations.keys()) {
-      if (operationKey.startsWith(prefix)) {
-        this.heldApprovalOperations.delete(operationKey);
-      }
-    }
-    for (const operationKey of this.suppressedOperations) {
-      if (operationKey.startsWith(prefix)) {
-        this.suppressedOperations.delete(operationKey);
-      }
-    }
+    this.approvalOperations.clearThread(threadId);
     for (const turnKey of this.notifiedTurns) {
       if (turnKey.startsWith(prefix)) {
         this.notifiedTurns.delete(turnKey);

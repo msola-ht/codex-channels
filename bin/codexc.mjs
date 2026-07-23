@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 import { parse } from "dotenv";
 
-import { configEventQueuePath } from "../scripts/config-event-queue.mjs";
+import { configEventQueuePath } from "../runtime/config-event-queue.mjs";
 import {
   initializeUserData,
   packageDir,

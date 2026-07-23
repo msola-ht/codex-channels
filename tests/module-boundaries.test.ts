@@ -31,13 +31,40 @@ describe("module boundaries", () => {
   });
 
   it("prevents surfaces from bypassing the application boundary into the Codex client", () => {
-    expect(violations("surfaces", ["codex-client"])).toEqual([]);
+    expect(violations("surfaces", ["codex-client", "storage", "bootstrap"])).toEqual([]);
+  });
+
+  it("keeps application use cases independent from surfaces and bootstrap", () => {
+    expect(violations("application", ["surfaces", "bootstrap"])).toEqual([]);
+  });
+
+  it("prevents production source from depending on CLI and project scripts", () => {
+    expect(externalDirectoryViolations(["bin", "scripts", "tests"])).toEqual([]);
   });
 
   it("requires cross-module imports to use public entry points", () => {
     expect(publicEntryViolations()).toEqual([]);
   });
 });
+
+function externalDirectoryViolations(forbiddenDirectories: string[]): string[] {
+  const forbiddenRoots = forbiddenDirectories.map((name) => resolve(name));
+  const found: string[] = [];
+  for (const file of typescriptFiles(sourceRoot)) {
+    const source = readFileSync(file, "utf8");
+    for (const specifier of importSpecifiers(source)) {
+      if (!specifier.startsWith(".")) {
+        continue;
+      }
+      const target = resolve(dirname(file), specifier);
+      const forbidden = forbiddenRoots.find((root) => isInside(root, target));
+      if (forbidden) {
+        found.push(`${relative(sourceRoot, file)} -> ${relative(sourceRoot, target)}`);
+      }
+    }
+  }
+  return found;
+}
 
 function publicEntryViolations(): string[] {
   const moduleNames = new Set(

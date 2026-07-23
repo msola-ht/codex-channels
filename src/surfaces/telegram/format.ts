@@ -16,6 +16,7 @@ import {
   type ConversationStatus,
   type ModelSelectionState,
 } from "../../application/index.js";
+import type { ConfigChange, ConfigChangeCode } from "../../config/index.js";
 import type { TurnArtifacts } from "../../conversation-core/index.js";
 import type { Workspace } from "../../policy/index.js";
 import type { SurfaceConfigurationChange } from "../types.js";
@@ -352,32 +353,31 @@ export function formatWorkspacesAdded(workspaces: readonly Workspace[]): string 
 export function formatConfigurationChange(
   change: SurfaceConfigurationChange,
 ): string {
+  const changes = formatConfigChanges(change.changes);
   switch (change.action) {
     case "reloaded":
       if (change.addedWorkspaces.length > 0) {
         return [
           formatWorkspacesAdded(change.addedWorkspaces),
           "",
-          `已生效：${change.changes.join("、")}`,
+          `已生效：${changes}`,
         ].join("\n");
       }
       return [
         "Gateway 配置已热加载",
         "",
-        `已生效：${change.changes.join("、")}`,
+        `已生效：${changes}`,
       ].join("\n");
     case "restarting":
       return [
         "Gateway 配置需要重启",
-        "",
-        `变更：${change.changes.join("、")}`,
+        ...(changes ? ["", `变更：${changes}`] : []),
         "当前 Gateway 将退出；若由系统服务托管，将自动重新启动。",
       ].join("\n");
     case "reinstall-required":
       return [
         "Gateway 配置尚未应用",
-        "",
-        `需要重装服务：${change.changes.join("、")}`,
+        ...(changes ? ["", `需要重装服务：${changes}`] : []),
         "请在本机执行：",
         "  codexc service install",
       ].join("\n");
@@ -387,6 +387,41 @@ export function formatConfigurationChange(
         "",
         "当前有效配置继续运行。请检查配置后再次保存。",
       ].join("\n");
+  }
+}
+
+function formatConfigChanges(changes: readonly ConfigChange[]): string {
+  return changes.map((change) => configChangeLabel(change.code)).join("、");
+}
+
+function configChangeLabel(code: ConfigChangeCode): string {
+  switch (code) {
+    case "codex.binary":
+      return "Codex Binary";
+    case "codex.socket":
+      return "Codex Socket";
+    case "codex.default-model":
+      return "默认模型";
+    case "codex.sandbox":
+      return "Sandbox";
+    case "storage.database":
+      return "State Database";
+    case "approval.timeout":
+      return "审批超时";
+    case "observability.log-level":
+      return "日志级别";
+    case "workspace.default":
+      return "默认 Workspace";
+    case "workspace.registry":
+      return "Workspace";
+    case "surface.telegram.token":
+      return "Telegram Bot Token";
+    case "surface.telegram.proxy":
+      return "Telegram 代理";
+    case "surface.telegram.message-format":
+      return "Telegram 消息格式";
+    case "surface.telegram.allowed-users":
+      return "Telegram 允许用户";
   }
 }
 

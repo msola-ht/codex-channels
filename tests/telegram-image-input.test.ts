@@ -270,7 +270,7 @@ describe("Telegram image input", () => {
 
     await surface.deliverConfigurationChange({
       action: "reloaded",
-      changes: ["Workspace"],
+      changes: [{ code: "workspace.registry", scope: "global" }],
       addedWorkspaces: [{
         id: "codex-channels",
         name: "codex-channels",
@@ -279,7 +279,7 @@ describe("Telegram image input", () => {
     });
     surface.configurationChanged({
       action: "restarting",
-      changes: ["Telegram Bot Token"],
+      changes: [{ code: "surface.telegram.token", scope: "telegram" }],
       addedWorkspaces: [],
     });
 

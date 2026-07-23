@@ -1,10 +1,11 @@
 import type { InteractionPort } from "../approval/index.js";
+import type { ConfigChange } from "../config/index.js";
 import type { SurfaceId } from "../conversation-core/index.js";
 import type { Workspace } from "../policy/index.js";
 
 export interface SurfaceConfigurationChange {
   action: "reloaded" | "restarting" | "reinstall-required" | "reload-failed";
-  changes: readonly string[];
+  changes: readonly ConfigChange[];
   addedWorkspaces: readonly Workspace[];
 }
 

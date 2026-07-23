@@ -1,6 +1,6 @@
 import { dirname, resolve } from "node:path";
 
-import { configEventQueuePath } from "./config-event-queue.mjs";
+import { configEventQueuePath } from "../runtime/config-event-queue.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
 import { addWorkspaceToEnv } from "./workspace-config.mjs";
 

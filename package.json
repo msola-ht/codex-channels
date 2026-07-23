@@ -30,6 +30,7 @@
     "dist/",
     "src/codex-protocol/version.json",
     "launchd/",
+    "runtime/",
     "systemd/",
     "scripts/",
     ".env.example",

@@ -55,8 +55,12 @@ export class SurfaceManager {
 
   configurationChanged(change: SurfaceConfigurationChange): void {
     for (const surface of this.started) {
+      const scopedChange = configurationChangeForSurface(surface, change);
+      if (!scopedChange) {
+        continue;
+      }
       try {
-        surface.configurationChanged?.(change);
+        surface.configurationChanged?.(scopedChange);
       } catch (error) {
         this.logger.warn(
           {
@@ -77,7 +81,10 @@ export class SurfaceManager {
     const surfaces = [...this.started];
     const results = await Promise.allSettled(
       surfaces.map(async (surface) => {
-        await surface.deliverConfigurationChange(change);
+        const scopedChange = configurationChangeForSurface(surface, change);
+        if (scopedChange) {
+          await surface.deliverConfigurationChange(scopedChange);
+        }
         return surface;
       }),
     );
@@ -100,4 +107,24 @@ export class SurfaceManager {
       throw new AggregateError(failures, "部分 Surface 未收到配置事件");
     }
   }
+}
+
+function configurationChangeForSurface(
+  surface: SurfaceAdapter,
+  change: SurfaceConfigurationChange,
+): SurfaceConfigurationChange | undefined {
+  const changes = change.changes.filter(
+    (item) => item.scope === "global" || item.scope === surface.surface,
+  );
+  if (
+    changes.length === 0
+    && change.addedWorkspaces.length === 0
+    && change.action === "reloaded"
+  ) {
+    return undefined;
+  }
+  return {
+    ...change,
+    changes,
+  };
 }

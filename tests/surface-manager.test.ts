@@ -95,13 +95,13 @@ describe("SurfaceManager", () => {
 
     manager.configurationChanged({
       action: "reloaded",
-      changes: ["Workspace"],
+      changes: [{ code: "workspace.registry", scope: "global" }],
       addedWorkspaces: [{ id: "ignored", name: "Ignored", cwd: "/ignored" }],
     });
     await manager.start();
     manager.configurationChanged({
       action: "reloaded",
-      changes: ["Workspace"],
+      changes: [{ code: "workspace.registry", scope: "global" }],
       addedWorkspaces: [{ id: "docs", name: "Docs", cwd: "/docs" }],
     });
     await manager.stop();
@@ -111,6 +111,65 @@ describe("SurfaceManager", () => {
       "workspace:docs",
       "stop:telegram",
     ]);
+  });
+
+  it("filters Surface-scoped changes while preserving process restart notices", async () => {
+    const calls: string[] = [];
+    const telegram = surface("telegram", "default", calls);
+    const feishu = surface("feishu", "tenant-a", calls);
+    telegram.configurationChanged = (change) => {
+      calls.push(`telegram:${change.action}:${change.changes.map((item) => item.code).join(",")}`);
+    };
+    feishu.configurationChanged = (change) => {
+      calls.push(`feishu:${change.action}:${change.changes.map((item) => item.code).join(",")}`);
+    };
+    const manager = new SurfaceManager([telegram, feishu], pino({ level: "silent" }));
+    await manager.start();
+    calls.length = 0;
+
+    manager.configurationChanged({
+      action: "reloaded",
+      changes: [{ code: "surface.telegram.allowed-users", scope: "telegram" }],
+      addedWorkspaces: [],
+    });
+    manager.configurationChanged({
+      action: "restarting",
+      changes: [{ code: "surface.telegram.token", scope: "telegram" }],
+      addedWorkspaces: [],
+    });
+
+    expect(calls).toEqual([
+      "telegram:reloaded:surface.telegram.allowed-users",
+      "telegram:restarting:surface.telegram.token",
+      "feishu:restarting:",
+    ]);
+    await manager.stop();
+  });
+
+  it("delivers global persistent changes to every Surface", async () => {
+    const deliveries: string[] = [];
+    const telegram = surface("telegram", "default", []);
+    const feishu = surface("feishu", "tenant-a", []);
+    telegram.deliverConfigurationChange = async (change) => {
+      deliveries.push(`telegram:${change.changes[0]?.code}`);
+    };
+    feishu.deliverConfigurationChange = async (change) => {
+      deliveries.push(`feishu:${change.changes[0]?.code}`);
+    };
+    const manager = new SurfaceManager([telegram, feishu], pino({ level: "silent" }));
+    await manager.start();
+
+    await manager.deliverConfigurationChange({
+      action: "reloaded",
+      changes: [{ code: "workspace.registry", scope: "global" }],
+      addedWorkspaces: [{ id: "docs", name: "Docs", cwd: "/docs" }],
+    });
+
+    expect(deliveries.sort()).toEqual([
+      "feishu:workspace.registry",
+      "telegram:workspace.registry",
+    ]);
+    await manager.stop();
   });
 
   it("reports when a Surface fails to deliver a persistent configuration notification", async () => {
@@ -125,7 +184,7 @@ describe("SurfaceManager", () => {
 
     await expect(manager.deliverConfigurationChange({
       action: "reloaded",
-      changes: ["Workspace"],
+      changes: [{ code: "workspace.registry", scope: "global" }],
       addedWorkspaces: [{ id: "docs", name: "Docs", cwd: "/docs" }],
     })).rejects.toThrow("部分 Surface 未收到配置事件");
 
@@ -139,7 +198,7 @@ describe("SurfaceManager", () => {
 
     await expect(manager.deliverConfigurationChange({
       action: "reloaded",
-      changes: ["Workspace"],
+      changes: [{ code: "workspace.registry", scope: "global" }],
       addedWorkspaces: [{ id: "docs", name: "Docs", cwd: "/docs" }],
     })).rejects.toThrow("Surface 尚未全部启动");
   });

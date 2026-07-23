@@ -179,19 +179,19 @@ describe("formatWorkspaces", () => {
   it.each([
     [
       "reloaded",
-      ["Telegram 允许用户"],
+      [{ code: "surface.telegram.allowed-users", scope: "telegram" }],
       "Gateway 配置已热加载",
       "已生效：Telegram 允许用户",
     ],
     [
       "restarting",
-      ["Telegram Bot Token"],
+      [{ code: "surface.telegram.token", scope: "telegram" }],
       "Gateway 配置需要重启",
       "变更：Telegram Bot Token",
     ],
     [
       "reinstall-required",
-      ["Codex Socket"],
+      [{ code: "codex.socket", scope: "global" }],
       "Gateway 配置尚未应用",
       "codexc service install",
     ],

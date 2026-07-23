@@ -5,6 +5,14 @@ import "dotenv/config";
 import { parse as parseDotenv } from "dotenv";
 import { z } from "zod";
 
+export {
+  configChange,
+  includesConfigChange,
+  type ConfigChange,
+  type ConfigChangeCode,
+  type ConfigChangeScope,
+} from "./config-change.js";
+
 const environmentSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(1),
   TELEGRAM_ALLOWED_USER_IDS: z.string().min(1),

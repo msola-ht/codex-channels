@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { parse } from "dotenv";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { configEventQueuePath, readConfigEvents } from "../scripts/config-event-queue.mjs";
+import { configEventQueuePath, readConfigEvents } from "../runtime/config-event-queue.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { addWorkspaceToEnv, inspectWorkspaceConfig, readWorkspaceConfig, removeWorkspaceFromEnv } from "../scripts/workspace-config.mjs";
 

@@ -11,7 +11,7 @@ import {
   enqueueWorkspaceAdded,
   matchingWorkspaceConfigEvents,
   readConfigEvents,
-} from "../scripts/config-event-queue.mjs";
+} from "../runtime/config-event-queue.mjs";
 
 const temporaryDirectories: string[] = [];
 

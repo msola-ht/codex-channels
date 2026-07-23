@@ -16,7 +16,7 @@ import {
   discardWorkspaceConfigEvents,
   enqueueWorkspaceAdded,
   readConfigEvents,
-} from "./config-event-queue.mjs";
+} from "../runtime/config-event-queue.mjs";
 
 export function readWorkspaceConfig(env) {
   const parsed = parseWorkspaceConfig(env);

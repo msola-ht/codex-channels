@@ -5,7 +5,7 @@
 ## 配置与 Workspace
 
 - `runtime-config.mjs`：解析包目录、用户数据目录和运行时路径，并初始化 `.codex-connect`。
-- `config-event-queue.mjs`：以有界、版本化、原子更新的队列保存待投递配置事件，保证 Gateway 重启窗口内的 Workspace 新增通知可恢复。
+- `workspace-config.mjs` 通过 `runtime/config-event-queue.mjs` 写入待投递配置事件，保证 Gateway 重启窗口内的 Workspace 新增通知可恢复。
 - `telegram-setup.mjs`：独立完成 Telegram Bot Token 验证、一次性私聊配对、用户 ID 获取和用户配置写入；新建 Bot 仅引导使用官方 BotFather。
 - `workspace-config.mjs`：读取、检查和原子更新环境文件中的 Workspace 配置；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。
 - `workspace-add.mjs`：把指定目录或命令调用目录注册为 Workspace，支持 `--prune-missing` 清理失效配置和 `--restore-default` 恢复默认目录。

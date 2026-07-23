@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { classifyConfigReload, effectiveCodexBinary, removeUnauthorizedTelegramBindings } from "../src/bootstrap/index.js";
+import {
+  GatewayApplication,
+  classifyConfigReload,
+  effectiveCodexBinary,
+  removeUnauthorizedTelegramBindings,
+} from "../src/bootstrap/index.js";
 import type { GatewayConfig } from "../src/config/index.js";
 import { TelegramAccessPolicy, WorkspaceRegistry } from "../src/policy/index.js";
 import { MemoryBindingStore } from "../src/storage/index.js";
@@ -8,6 +13,75 @@ import { MemoryBindingStore } from "../src/storage/index.js";
 const mainWorkspace = { id: "main", name: "Main", cwd: "/workspace" };
 
 describe("Gateway config reload", () => {
+  it("applies hot reloads through every composed Surface module", () => {
+    const current = config();
+    const next = config({
+      workspaces: [mainWorkspace, { id: "docs", name: "Docs", cwd: "/docs" }],
+      telegramAllowedUserIds: new Set([123, 456]),
+    });
+    const applyHotReload = vi.fn();
+    const replaceWorkspaces = vi.fn();
+    const configurationChanged = vi.fn();
+    const application = Object.create(
+      GatewayApplication.prototype,
+    ) as unknown as Record<string, unknown>;
+    Object.assign(application, {
+      config: current,
+      surfaceModules: [{ applyHotReload }],
+      workspaces: { replace: replaceWorkspaces },
+      surfaceManager: { configurationChanged },
+    });
+
+    const result = (application as unknown as GatewayApplication).reloadConfig(next);
+
+    expect(result.action).toBe("reload");
+    expect(applyHotReload).toHaveBeenCalledWith(next, result.changes);
+    expect(replaceWorkspaces).toHaveBeenCalledWith(next.workspaces, next.defaultWorkspaceId);
+    expect(configurationChanged).toHaveBeenCalledOnce();
+  });
+
+  it("restores Surface notification recipients after queuing a restart notice", () => {
+    const restore = vi.fn();
+    const prepareRestartNotification = vi.fn(() => restore);
+    const configurationChanged = vi.fn();
+    const application = Object.create(
+      GatewayApplication.prototype,
+    ) as unknown as Record<string, unknown>;
+    Object.assign(application, {
+      config: config(),
+      surfaceModules: [{ prepareRestartNotification }],
+      surfaceManager: { configurationChanged },
+    });
+    const next = config({ telegramBotToken: "next-token" });
+
+    const result = (application as unknown as GatewayApplication).reloadConfig(next);
+
+    expect(result.action).toBe("restart");
+    expect(prepareRestartNotification).toHaveBeenCalledWith(next);
+    expect(configurationChanged).toHaveBeenCalledOnce();
+    expect(restore).toHaveBeenCalledOnce();
+  });
+
+  it("restores prepared Surface recipients when a later restart hook fails", () => {
+    const restore = vi.fn();
+    const application = Object.create(
+      GatewayApplication.prototype,
+    ) as unknown as Record<string, unknown>;
+    Object.assign(application, {
+      config: config(),
+      surfaceModules: [
+        { prepareRestartNotification: () => restore },
+        { prepareRestartNotification: () => { throw new Error("prepare failed"); } },
+      ],
+      surfaceManager: { configurationChanged: vi.fn() },
+    });
+
+    expect(() => (application as unknown as GatewayApplication).reloadConfig(
+      config({ telegramBotToken: "next-token" }),
+    )).toThrow("prepare failed");
+    expect(restore).toHaveBeenCalledOnce();
+  });
+
   it("uses the service-installed Codex path for the default command", () => {
     expect(effectiveCodexBinary("codex", { CODEX_BINARY: "/opt/codex/bin/codex" }))
       .toBe("/opt/codex/bin/codex");
@@ -24,29 +98,32 @@ describe("Gateway config reload", () => {
 
     expect(classifyConfigReload(current, next)).toEqual({
       action: "reload",
-      changes: ["Workspace", "Telegram 允许用户"],
+      changes: [
+        { code: "workspace.registry", scope: "global" },
+        { code: "surface.telegram.allowed-users", scope: "telegram" },
+      ],
     });
   });
 
   it.each([
-    ["Telegram Bot Token", { telegramBotToken: "new-token" }],
-    ["Telegram 代理", { telegramProxyUrl: "http://127.0.0.1:7890/" }],
-    ["Telegram 消息格式", { telegramMessageFormat: "rich" }],
-    ["默认模型", { codexModel: "other-model" }],
-  ] as const)("restarts for %s changes", (reason, change) => {
+    ["surface.telegram.token", "telegram", { telegramBotToken: "new-token" }],
+    ["surface.telegram.proxy", "telegram", { telegramProxyUrl: "http://127.0.0.1:7890/" }],
+    ["surface.telegram.message-format", "telegram", { telegramMessageFormat: "rich" }],
+    ["codex.default-model", "global", { codexModel: "other-model" }],
+  ] as const)("restarts for %s changes", (code, scope, change) => {
     expect(classifyConfigReload(config(), config(change))).toEqual({
       action: "restart",
-      changes: [reason],
+      changes: [{ code, scope }],
     });
   });
 
   it.each([
-    ["Codex Binary", { codexBinary: "/opt/codex" }],
-    ["Codex Socket", { codexSocketPath: "/tmp/other.sock" }],
-  ] as const)("requires service reinstall for %s changes", (reason, change) => {
+    ["codex.binary", { codexBinary: "/opt/codex" }],
+    ["codex.socket", { codexSocketPath: "/tmp/other.sock" }],
+  ] as const)("requires service reinstall for %s changes", (code, change) => {
     expect(classifyConfigReload(config(), config(change))).toEqual({
       action: "reinstall",
-      changes: [reason],
+      changes: [{ code, scope: "global" }],
     });
   });
 
@@ -64,10 +141,10 @@ describe("Gateway config reload", () => {
     expect(classifyConfigReload(config(), next)).toEqual({
       action: "reinstall",
       changes: [
-        "Codex Socket",
-        "Telegram Bot Token",
-        "Workspace",
-        "Telegram 允许用户",
+        { code: "codex.socket", scope: "global" },
+        { code: "surface.telegram.token", scope: "telegram" },
+        { code: "workspace.registry", scope: "global" },
+        { code: "surface.telegram.allowed-users", scope: "telegram" },
       ],
     });
   });
@@ -78,7 +155,7 @@ describe("Gateway config reload", () => {
 
     expect(classifyConfigReload(current, next)).toEqual({
       action: "restart",
-      changes: ["Telegram 用户撤权"],
+      changes: [{ code: "surface.telegram.allowed-users", scope: "telegram" }],
     });
   });
 
@@ -90,7 +167,10 @@ describe("Gateway config reload", () => {
     expect(classifyConfigReload(current, config()).action).toBe("restart");
     expect(classifyConfigReload(current, config({
       workspaces: [{ ...mainWorkspace, cwd: "/moved" }, { id: "docs", name: "Docs", cwd: "/docs" }],
-    }))).toEqual({ action: "restart", changes: ["已有 Workspace"] });
+    }))).toEqual({
+      action: "restart",
+      changes: [{ code: "workspace.registry", scope: "global" }],
+    });
   });
 
   it("does nothing when the configuration is unchanged", () => {

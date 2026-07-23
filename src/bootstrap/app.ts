@@ -1,5 +1,4 @@
 import { execFileSync } from "node:child_process";
-import { dirname, join } from "node:path";
 
 import type { Logger } from "pino";
 
@@ -11,7 +10,12 @@ import {
   type RpcNotification,
 } from "../codex-client/index.js";
 import { protocolVersion } from "../codex-protocol/index.js";
-import type { GatewayConfig } from "../config/index.js";
+import {
+  configChange,
+  includesConfigChange,
+  type ConfigChange,
+  type GatewayConfig,
+} from "../config/index.js";
 import { ConversationService, ModelSelectionService } from "../application/index.js";
 import {
   ConversationCore,
@@ -19,14 +23,14 @@ import {
   type OutputEvent,
 } from "../conversation-core/index.js";
 import { EventBus } from "../event-bus/index.js";
-import { TelegramAccessPolicy, WorkspaceRegistry } from "../policy/index.js";
+import { WorkspaceRegistry } from "../policy/index.js";
 import { SessionRouter } from "../session-routing/index.js";
-import { SqliteBindingStore, type BindingStore } from "../storage/index.js";
+import { SqliteBindingStore } from "../storage/index.js";
+import type { SurfaceAdapter } from "../surfaces/index.js";
 import {
-  TelegramSurface,
-  telegramDefaultAccountId,
-  type SurfaceAdapter,
-} from "../surfaces/index.js";
+  createSurfaceModules,
+  type SurfaceRuntimeModule,
+} from "./surface-composition.js";
 import { SurfaceManager } from "./surface-manager.js";
 
 export class GatewayApplication {
@@ -35,7 +39,7 @@ export class GatewayApplication {
   private readonly codex: CodexAppServerClient;
   private readonly inbound: EventBus<RpcNotification>;
   private readonly output: EventBus<OutputEvent>;
-  private readonly telegram: TelegramSurface;
+  private readonly surfaceModules: SurfaceRuntimeModule[];
   private readonly surfaces: SurfaceAdapter[];
   private readonly surfaceManager: SurfaceManager;
   private readonly interactions: InteractionRouter;
@@ -44,7 +48,6 @@ export class GatewayApplication {
   private readonly core: ConversationCore;
   private readonly bindings: SqliteBindingStore;
   private readonly workspaces: WorkspaceRegistry;
-  private readonly access: TelegramAccessPolicy;
   private removeRpcNotification: (() => void) | undefined;
   private removeRpcDisconnect: (() => void) | undefined;
   private startTask: Promise<void> | undefined;
@@ -69,15 +72,7 @@ export class GatewayApplication {
     this.inbound = new EventBus<RpcNotification>(logger, 2_000);
     this.output = new EventBus<OutputEvent>(logger, 1_000);
     this.bindings = new SqliteBindingStore(config.stateDatabasePath);
-    const removedBindings = removeUnauthorizedTelegramBindings(this.bindings, config.telegramAllowedUserIds);
-    if (removedBindings > 0) {
-      logger.warn({ removedBindings }, "已清理不再授权的 Telegram 会话绑定");
-    }
     this.workspaces = new WorkspaceRegistry(config.workspaces, config.defaultWorkspaceId);
-    this.access = new TelegramAccessPolicy(
-      config.telegramAllowedUserIds,
-      telegramDefaultAccountId,
-    );
     this.router = new SessionRouter(
       this.codex,
       this.bindings,
@@ -86,24 +81,20 @@ export class GatewayApplication {
     this.core = new ConversationCore(this.router, this.output);
     const models = new ModelSelectionService(this.codex, this.router, config.codexModel);
     const service = new ConversationService(this.codex, this.router, this.core, models);
-    this.telegram = new TelegramSurface(
-      config.telegramBotToken,
-      config.telegramProxyUrl,
+    this.surfaceModules = createSurfaceModules({
+      config,
       service,
-      this.output,
-      this.access,
-      config.telegramAllowedUserIds,
-      config.workspaces,
-      join(dirname(config.stateDatabasePath), "uploads"),
+      output: this.output,
+      bindings: this.bindings,
       logger,
-      {
-        actorRegistry: this.bindings,
-        onFatal: (error) => this.handleTelegramFatal(error),
-        finalMessageFormat: config.telegramMessageFormat,
-        codexUpstreamUserAgent: () => this.codexUpstreamUserAgent,
-      },
-    );
-    this.surfaces = [this.telegram];
+      codexUpstreamUserAgent: () => this.codexUpstreamUserAgent,
+      onFatal: (surface, accountId, error) => this.handleSurfaceFatal(
+        surface,
+        accountId,
+        error,
+      ),
+    });
+    this.surfaces = this.surfaceModules.map((module) => module.adapter);
     this.surfaceManager = new SurfaceManager(this.surfaces, logger);
     this.interactions = new InteractionRouter();
     for (const surface of this.surfaces) {
@@ -277,19 +268,21 @@ export class GatewayApplication {
       return result;
     }
     if (result.action === "restart") {
-      const currentRecipients = this.config.telegramAllowedUserIds;
-      this.telegram.replaceNotificationRecipients(
-        intersectNumberSets(
-          currentRecipients,
-          next.telegramAllowedUserIds,
-        ),
-      );
-      this.surfaceManager.configurationChanged({
-        action: "restarting",
-        changes: result.changes,
-        addedWorkspaces: [],
-      });
-      this.telegram.replaceNotificationRecipients(currentRecipients);
+      const restoreRecipients: Array<() => void> = [];
+      try {
+        for (const module of this.surfaceModules) {
+          restoreRecipients.push(module.prepareRestartNotification(next));
+        }
+        this.surfaceManager.configurationChanged({
+          action: "restarting",
+          changes: result.changes,
+          addedWorkspaces: [],
+        });
+      } finally {
+        for (const restore of restoreRecipients.reverse()) {
+          restore();
+        }
+      }
       return result;
     }
 
@@ -299,15 +292,16 @@ export class GatewayApplication {
       result.changes,
       pendingAddedWorkspaces,
     );
-    if (result.changes.includes("Workspace")) {
+    if (includesConfigChange(result.changes, "workspace.registry")) {
       this.workspaces.replace(next.workspaces, next.defaultWorkspaceId);
     }
-    if (result.changes.includes("Telegram 允许用户")) {
-      this.access.replace(next.telegramAllowedUserIds);
-      this.telegram.replaceNotificationRecipients(next.telegramAllowedUserIds);
+    for (const module of this.surfaceModules) {
+      module.applyHotReload(next, result.changes);
     }
     this.config = next;
-    const nonWorkspaceChanges = result.changes.filter((change) => change !== "Workspace");
+    const nonWorkspaceChanges = result.changes.filter(
+      (change) => change.code !== "workspace.registry",
+    );
     if (nonWorkspaceChanges.length > 0 || addedWorkspaces.length > 0) {
       this.surfaceManager.configurationChanged({
         action: "reloaded",
@@ -323,7 +317,7 @@ export class GatewayApplication {
   ): Promise<void> {
     return this.surfaceManager.deliverConfigurationChange({
       action: "reloaded",
-      changes: ["Workspace"],
+      changes: [configChange("workspace.registry")],
       addedWorkspaces: workspaces,
     });
   }
@@ -421,14 +415,20 @@ export class GatewayApplication {
     }
   }
 
-  private handleTelegramFatal(error: Error): void {
+  private handleSurfaceFatal(surface: string, accountId: string, error: Error): void {
     if (this.stopping) {
       return;
     }
-    this.logger.fatal({ err: error }, "Telegram 连接重试耗尽，Gateway 将停止以交由进程管理器重启");
+    this.logger.fatal(
+      { err: error, surface, accountId },
+      "Surface 连接重试耗尽，Gateway 将停止以交由进程管理器重启",
+    );
     process.exitCode = 1;
     void this.stop().catch((stopError) => {
-      this.logger.error({ err: stopError }, "Telegram 故障后停止 Gateway 失败");
+      this.logger.error(
+        { err: stopError, surface, accountId },
+        "Surface 故障后停止 Gateway 失败",
+      );
       process.exitCode = 1;
     });
   }
@@ -487,9 +487,9 @@ export class GatewayApplication {
 }
 
 export type ConfigReloadResult =
-  | { action: "reload"; changes: string[] }
-  | { action: "restart"; changes: string[] }
-  | { action: "reinstall"; changes: string[] };
+  | { action: "reload"; changes: ConfigChange[] }
+  | { action: "restart"; changes: ConfigChange[] }
+  | { action: "reinstall"; changes: ConfigChange[] };
 
 export function classifyConfigReload(current: GatewayConfig, next: GatewayConfig): ConfigReloadResult {
   const reinstallReasons = serviceReinstallReasons(current, next);
@@ -521,113 +521,70 @@ function findAddedWorkspaces(
 function immediateAddedWorkspaceNotifications(
   current: ReadonlyArray<GatewayConfig["workspaces"][number]>,
   next: ReadonlyArray<GatewayConfig["workspaces"][number]>,
-  changes: readonly string[],
+  changes: readonly ConfigChange[],
   pending: ReadonlyArray<GatewayConfig["workspaces"][number]>,
 ): GatewayConfig["workspaces"] {
   const pendingIds = new Set(pending.map((workspace) => workspace.id));
   return (
-    changes.includes("Workspace") ? findAddedWorkspaces(current, next) : []
+    includesConfigChange(changes, "workspace.registry") ? findAddedWorkspaces(current, next) : []
   ).filter(
     (workspace) => !pendingIds.has(workspace.id),
   );
 }
 
-function intersectNumberSets(
-  left: ReadonlySet<number>,
-  right: ReadonlySet<number>,
-): ReadonlySet<number> {
-  return new Set([...left].filter((value) => right.has(value)));
-}
-
-function serviceReinstallReasons(current: GatewayConfig, next: GatewayConfig): string[] {
-  const reasons: string[] = [];
+function serviceReinstallReasons(current: GatewayConfig, next: GatewayConfig): ConfigChange[] {
+  const reasons: ConfigChange[] = [];
   if (current.codexBinary !== next.codexBinary) {
-    reasons.push("Codex Binary");
+    reasons.push(configChange("codex.binary"));
   }
   if (current.codexSocketPath !== next.codexSocketPath) {
-    reasons.push("Codex Socket");
+    reasons.push(configChange("codex.socket"));
   }
   return reasons;
 }
 
-function restartRequiredReasons(current: GatewayConfig, next: GatewayConfig): string[] {
-  const reasons: string[] = [];
-  const fields: Array<[string, unknown, unknown]> = [
-    ["Telegram Bot Token", current.telegramBotToken, next.telegramBotToken],
-    ["Telegram 代理", current.telegramProxyUrl, next.telegramProxyUrl],
-    ["Telegram 消息格式", current.telegramMessageFormat, next.telegramMessageFormat],
-    ["默认模型", current.codexModel, next.codexModel],
-    ["Sandbox", current.codexSandbox, next.codexSandbox],
-    ["State Database", current.stateDatabasePath, next.stateDatabasePath],
-    ["审批超时", current.approvalTimeoutMs, next.approvalTimeoutMs],
-    ["日志级别", current.logLevel, next.logLevel],
-    ["默认 Workspace", current.defaultWorkspaceId, next.defaultWorkspaceId],
+function restartRequiredReasons(current: GatewayConfig, next: GatewayConfig): ConfigChange[] {
+  const reasons: ConfigChange[] = [];
+  const fields: Array<[ConfigChange, unknown, unknown]> = [
+    [configChange("surface.telegram.token", "telegram"), current.telegramBotToken, next.telegramBotToken],
+    [configChange("surface.telegram.proxy", "telegram"), current.telegramProxyUrl, next.telegramProxyUrl],
+    [configChange("surface.telegram.message-format", "telegram"), current.telegramMessageFormat, next.telegramMessageFormat],
+    [configChange("codex.default-model"), current.codexModel, next.codexModel],
+    [configChange("codex.sandbox"), current.codexSandbox, next.codexSandbox],
+    [configChange("storage.database"), current.stateDatabasePath, next.stateDatabasePath],
+    [configChange("approval.timeout"), current.approvalTimeoutMs, next.approvalTimeoutMs],
+    [configChange("observability.log-level"), current.logLevel, next.logLevel],
+    [configChange("workspace.default"), current.defaultWorkspaceId, next.defaultWorkspaceId],
   ];
-  for (const [label, before, after] of fields) {
+  for (const [change, before, after] of fields) {
     if (before !== after) {
-      reasons.push(label);
+      reasons.push(change);
     }
   }
   if (!preservesExistingWorkspaces(current.workspaces, next.workspaces)) {
-    reasons.push("已有 Workspace");
+    reasons.push(configChange("workspace.registry"));
   }
   if (![...current.telegramAllowedUserIds].every((userId) => next.telegramAllowedUserIds.has(userId))) {
-    reasons.push("Telegram 用户撤权");
+    reasons.push(configChange("surface.telegram.allowed-users", "telegram"));
   }
   return reasons;
 }
 
-function hotReloadReasons(current: GatewayConfig, next: GatewayConfig): string[] {
-  const reasons: string[] = [];
+function hotReloadReasons(current: GatewayConfig, next: GatewayConfig): ConfigChange[] {
+  const reasons: ConfigChange[] = [];
   if (
     preservesExistingWorkspaces(current.workspaces, next.workspaces)
     && !sameWorkspaces(current.workspaces, next.workspaces)
   ) {
-    reasons.push("Workspace");
+    reasons.push(configChange("workspace.registry"));
   }
   if (
     [...current.telegramAllowedUserIds].every((userId) => next.telegramAllowedUserIds.has(userId))
     && !sameNumberSet(current.telegramAllowedUserIds, next.telegramAllowedUserIds)
   ) {
-    reasons.push("Telegram 允许用户");
+    reasons.push(configChange("surface.telegram.allowed-users", "telegram"));
   }
   return reasons;
-}
-
-export function removeUnauthorizedTelegramBindings(
-  bindings: BindingStore,
-  allowedUserIds: ReadonlySet<number>,
-  accountId = telegramDefaultAccountId,
-): number {
-  let removed = 0;
-  for (const binding of bindings.list()) {
-    if (binding.target.surface !== "telegram" || binding.target.accountId !== accountId) {
-      continue;
-    }
-    let knownActors = bindings.actors(binding.target);
-    if (knownActors.length === 0) {
-      const legacyActorId = legacyTelegramPrivateActorId(binding.target.conversationId);
-      if (legacyActorId !== undefined && allowedUserIds.has(legacyActorId)) {
-        bindings.rememberActor(binding.target, String(legacyActorId));
-        knownActors = [String(legacyActorId)];
-      }
-    }
-    const allowedActors = new Set(knownActors.filter((actorId) => {
-      const userId = Number(actorId);
-      return Number.isSafeInteger(userId) && allowedUserIds.has(userId);
-    }));
-    if (bindings.retainActors(binding.target, allowedActors)) {
-      removed += 1;
-    }
-  }
-  return removed;
-}
-
-function legacyTelegramPrivateActorId(conversationId: string): number | undefined {
-  const userId = Number(conversationId);
-  return Number.isSafeInteger(userId) && userId > 0 && String(userId) === conversationId
-    ? userId
-    : undefined;
 }
 
 async function waitAtMost(task: Promise<void>, timeoutMs: number): Promise<boolean> {
