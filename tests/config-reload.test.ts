@@ -31,6 +31,7 @@ describe("Gateway config reload", () => {
   it.each([
     ["Telegram Bot Token", { telegramBotToken: "new-token" }],
     ["Telegram 代理", { telegramProxyUrl: "http://127.0.0.1:7890/" }],
+    ["Telegram 消息格式", { telegramMessageFormat: "rich" }],
     ["默认模型", { codexModel: "other-model" }],
   ] as const)("restarts for %s changes", (reason, change) => {
     expect(classifyConfigReload(config(), config(change))).toEqual({
@@ -111,6 +112,7 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
   return {
     telegramBotToken: "token",
     telegramAllowedUserIds: new Set([123]),
+    telegramMessageFormat: "html",
     codexBinary: "codex",
     workspaces: [mainWorkspace],
     defaultWorkspaceId: "main",

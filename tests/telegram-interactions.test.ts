@@ -33,7 +33,10 @@ describe("TelegramInteractionPort", () => {
       "100",
       7,
       expect.stringContaining("处理结果：已在其他客户端处理"),
-      { reply_markup: { inline_keyboard: [] } },
+      {
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: [] },
+      },
     );
   });
 
@@ -124,7 +127,7 @@ describe("TelegramInteractionPort", () => {
 
     expect(sendMessage.mock.calls.length).toBeGreaterThan(1);
     expect(sendMessage.mock.calls[0]?.[1].length).toBeLessThanOrEqual(3_600);
-    expect(sendMessage.mock.calls[0]?.[2]).toEqual({});
+    expect(sendMessage.mock.calls[0]?.[2]).toEqual({ parse_mode: "HTML" });
     expect(sendMessage.mock.calls.at(-1)?.[2]).toHaveProperty("reply_markup");
 
     await interactions.close();

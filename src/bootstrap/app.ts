@@ -76,7 +76,10 @@ export class GatewayApplication {
       config.workspaces,
       join(dirname(config.stateDatabasePath), "uploads"),
       logger,
-      { onFatal: (error) => this.handleTelegramFatal(error) },
+      {
+        onFatal: (error) => this.handleTelegramFatal(error),
+        finalMessageFormat: config.telegramMessageFormat,
+      },
     );
     this.approval = new ApprovalCoordinator(this.router, this.telegram.interactions, config.approvalTimeoutMs);
     this.inbound.subscribe("conversation-core", (notification) => {
@@ -289,6 +292,7 @@ function restartRequiredReasons(current: GatewayConfig, next: GatewayConfig): st
   const fields: Array<[string, unknown, unknown]> = [
     ["Telegram Bot Token", current.telegramBotToken, next.telegramBotToken],
     ["Telegram 代理", current.telegramProxyUrl, next.telegramProxyUrl],
+    ["Telegram 消息格式", current.telegramMessageFormat, next.telegramMessageFormat],
     ["默认模型", current.codexModel, next.codexModel],
     ["Sandbox", current.codexSandbox, next.codexSandbox],
     ["State Database", current.stateDatabasePath, next.stateDatabasePath],

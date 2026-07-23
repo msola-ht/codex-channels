@@ -6,7 +6,7 @@ import type { Logger } from "pino";
 import type { InteractionDecision, InteractionPort, InteractionRequest } from "../../approval/index.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
 import { TelegramApiExecutor } from "./api-executor.js";
-import { splitTelegramText } from "./format.js";
+import { formatTelegramPanelChunks } from "./html-format.js";
 
 interface PendingInteraction {
   requestId: string;
@@ -58,7 +58,7 @@ export class TelegramInteractionPort implements InteractionPort {
     const token = randomBytes(12).toString("base64url");
     const keyboard = this.keyboard(request, token);
     const formatted = formatInteraction(request);
-    const chunks = splitTelegramText(formatted, 3_600);
+    const chunks = formatTelegramPanelChunks(formatted, 3_600);
     this.tokenByRequest.set(request.requestId, token);
     let message: Awaited<ReturnType<typeof this.bot.api.sendMessage>> | undefined;
     this.queue.prepareInteraction(target.conversationId, request);
@@ -69,7 +69,7 @@ export class TelegramInteractionPort implements InteractionPort {
           const isLast = index === chunks.length - 1;
           const options = isLast
             ? interactionOptions(request, keyboard)
-            : {};
+            : { parse_mode: "HTML" as const };
           sent = await this.executor.call(
             { chatId: target.conversationId, operation: "sendMessage", critical: true },
             () => this.bot.api.sendMessage(target.conversationId, chunk, options),
@@ -260,7 +260,10 @@ export class TelegramInteractionPort implements InteractionPort {
           pending.target.conversationId,
           pending.messageId,
           `${pending.messageText}\n\n处理结果：${outcome}`,
-          { reply_markup: { inline_keyboard: [] } },
+          {
+            parse_mode: "HTML",
+            reply_markup: { inline_keyboard: [] },
+          },
         ),
       )
     ).then(() => undefined).catch((error) => {
@@ -304,7 +307,11 @@ function timeoutDecision(request: InteractionRequest): InteractionDecision {
 
 function formatInteraction(request: InteractionRequest): string {
   if (request.type === "approval") {
-    return `${request.title}\n\n${request.detail}`;
+    const detail = request.detail
+      .split("\n")
+      .map((line) => `│ ${line}`)
+      .join("\n");
+    return `${request.title}\n\n${detail}`;
   }
   if (request.type === "user-input") {
     const questions = request.questions.map((question) => {
@@ -325,10 +332,11 @@ function interactionOptions(
   keyboard: InlineKeyboard | undefined,
 ): Parameters<Bot["api"]["sendMessage"]>[2] {
   if (keyboard) {
-    return { reply_markup: keyboard };
+    return { parse_mode: "HTML", reply_markup: keyboard };
   }
   if (request.type === "user-input" || (request.type === "elicitation" && request.mode === "form")) {
     return {
+      parse_mode: "HTML",
       reply_markup: {
         force_reply: true,
         selective: true,
@@ -336,7 +344,7 @@ function interactionOptions(
       },
     };
   }
-  return {};
+  return { parse_mode: "HTML" };
 }
 
 function parseAnswers(

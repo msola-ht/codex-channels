@@ -1,4 +1,5 @@
 import type { Api } from "grammy";
+import type { InputRichMessage } from "grammy/types";
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -13,6 +14,10 @@ class FakeTelegramApi {
   readonly sendOptions: unknown[] = [];
   readonly edits: string[] = [];
   readonly editOptions: unknown[] = [];
+  readonly richMessages: InputRichMessage[] = [];
+  readonly richEdits: InputRichMessage[] = [];
+  rejectRichMessages = false;
+  rejectHtmlMessages = false;
   private nextMessageId = 1;
 
   async sendChatAction(_chatId: string, action: string): Promise<true> {
@@ -21,7 +26,24 @@ class FakeTelegramApi {
   }
 
   async sendMessage(_chatId: string, text: string, options?: unknown): Promise<{ message_id: number }> {
+    if (this.rejectHtmlMessages && hasHtmlParseMode(options)) {
+      throw new Error("Bad Request: can't parse entities");
+    }
     this.sent.push(text);
+    this.sendOptions.push(options);
+    return { message_id: this.nextMessageId++ };
+  }
+
+  async sendRichMessage(
+    _chatId: string,
+    richMessage: InputRichMessage,
+    options?: unknown,
+  ): Promise<{ message_id: number }> {
+    this.richMessages.push(richMessage);
+    if (this.rejectRichMessages) {
+      throw new Error("Bad Request: can't parse rich message");
+    }
+    this.sent.push(richMessage.markdown ?? richMessage.html ?? "[rich blocks]");
     this.sendOptions.push(options);
     return { message_id: this.nextMessageId++ };
   }
@@ -29,10 +51,21 @@ class FakeTelegramApi {
   async editMessageText(
     _chatId: string,
     _messageId: number,
-    text: string,
+    text: string | InputRichMessage,
     options?: unknown,
   ): Promise<true> {
-    this.edits.push(text);
+    if (typeof text === "string") {
+      if (this.rejectHtmlMessages && hasHtmlParseMode(options)) {
+        throw new Error("Bad Request: can't parse entities");
+      }
+      this.edits.push(text);
+    } else {
+      this.richEdits.push(text);
+      if (this.rejectRichMessages) {
+        throw new Error("Bad Request: can't parse rich message");
+      }
+      this.edits.push(text.markdown ?? text.html ?? "[rich blocks]");
+    }
     this.editOptions.push(options);
     return true;
   }
@@ -115,6 +148,99 @@ describe("TelegramOutbox", () => {
     expect(api.sendOptions[1]).toMatchObject({
       reply_parameters: { message_id: 42 },
     });
+    expect(api.richMessages).toEqual([]);
+    expect(api.sendOptions[1]).toMatchObject({ parse_mode: "HTML" });
+  });
+
+  it("renders final answers as compatible Telegram HTML by default", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    const markdown = [
+      "# 服务职责",
+      "",
+      "- App Server",
+      "- Gateway",
+      "",
+      "```text",
+      "App Server -> Gateway -> Telegram",
+      "```",
+    ].join("\n");
+
+    outbox.handle(textCompleted("final", markdown, "final_answer"));
+    outbox.handle(turnCompleted());
+    await settle();
+    await outbox.close();
+
+    expect(api.richMessages).toEqual([]);
+    expect(api.sent).toEqual([
+      "<b>服务职责</b>\n\n• App Server\n• Gateway\n\n" +
+      "<pre><code class=\"language-text\">App Server -&gt; Gateway -&gt; Telegram</code></pre>",
+    ]);
+    expect(api.sendOptions).toEqual([{ parse_mode: "HTML" }]);
+  });
+
+  it("keeps native Telegram Rich Markdown as an opt-in format", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api, "rich");
+    const markdown = "# 标题\n\n- Rich Message";
+
+    outbox.handle(textCompleted("final", markdown, "final_answer"));
+    outbox.handle(turnCompleted());
+    await settle();
+    await outbox.close();
+
+    expect(api.richMessages).toEqual([{ markdown }]);
+    expect(api.sent).toEqual([markdown]);
+  });
+
+  it("upgrades a streamed final answer to Rich Markdown when completed", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api, "rich");
+
+    outbox.handle(textDelta("final", "# 标题", "final_answer"));
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    outbox.handle(textCompleted("final", "# 标题\n\n最终内容", "final_answer"));
+    outbox.handle(turnCompleted());
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual(["# 标题"]);
+    expect(api.richEdits).toEqual([{ markdown: "# 标题\n\n最终内容" }]);
+    expect(api.edits).toContain("# 标题\n\n最终内容");
+  });
+
+  it("falls back to plain text when Telegram rejects a Rich Message", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    api.rejectRichMessages = true;
+    const outbox = createOutbox(api, "rich");
+
+    outbox.handle(textCompleted("final", "# 无法解析的内容", "final_answer"));
+    outbox.handle(turnCompleted());
+    await settle();
+    await outbox.close();
+
+    expect(api.richMessages).toEqual([{ markdown: "# 无法解析的内容" }]);
+    expect(api.sent).toEqual(["# 无法解析的内容"]);
+  });
+
+  it("falls back to plain text when Telegram rejects compatible HTML", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    api.rejectHtmlMessages = true;
+    const outbox = createOutbox(api);
+
+    outbox.handle(textCompleted("final", "# 无法解析的内容", "final_answer"));
+    outbox.handle(turnCompleted());
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual(["# 无法解析的内容"]);
+    expect(api.sendOptions).toEqual([{}]);
   });
 
   it("renders external user input before the mirrored reply", async () => {
@@ -135,7 +261,11 @@ describe("TelegramOutbox", () => {
     await settle();
     await outbox.close();
 
-    expect(api.sent).toEqual(["CLI 输入\n\n│ 从 CLI 发来的输入\n│ 第二行", "同步回复"]);
+    expect(api.sent).toEqual([
+      "<b>CLI 输入</b>\n\n<blockquote>从 CLI 发来的输入\n第二行</blockquote>",
+      "同步回复",
+    ]);
+    expect(api.sendOptions[0]).toEqual({ parse_mode: "HTML" });
     expect(api.sendOptions[1]).toMatchObject({
       reply_parameters: {
         message_id: 1,
@@ -363,7 +493,7 @@ describe("TelegramOutbox", () => {
         allow_sending_without_reply: true,
       },
     });
-    expect(api.sendOptions[1]).toEqual({});
+    expect(api.sendOptions[1]).toEqual({ parse_mode: "HTML" });
   });
 
   it("reports current context usage after the turn's final reply", async () => {
@@ -385,8 +515,9 @@ describe("TelegramOutbox", () => {
 
     expect(api.sent).toEqual([
       "处理完成",
-      "上下文：24.6 K / 258 K（9.5%）",
+      "<b>上下文：24.6 K / 258 K（9.5%）</b>",
     ]);
+    expect(api.sendOptions[1]).toEqual({ parse_mode: "HTML" });
   });
 
   it("finalizes completed stream content during graceful shutdown", async () => {
@@ -439,8 +570,16 @@ describe("TelegramOutbox", () => {
   });
 });
 
-function createOutbox(api: FakeTelegramApi): TelegramOutbox {
-  return new TelegramOutbox(api as unknown as Api, pino({ level: "silent" }));
+function createOutbox(
+  api: FakeTelegramApi,
+  finalMessageFormat: "html" | "rich" = "html",
+): TelegramOutbox {
+  return new TelegramOutbox(
+    api as unknown as Api,
+    pino({ level: "silent" }),
+    undefined,
+    { finalMessageFormat },
+  );
 }
 
 function turnStarted(): Extract<OutputEvent, { type: "turn.started" }> {
@@ -547,4 +686,11 @@ function tokenBreakdown(totalTokens: number) {
     outputTokens: 500,
     reasoningOutputTokens: 100,
   };
+}
+
+function hasHtmlParseMode(value: unknown): boolean {
+  return typeof value === "object" &&
+    value !== null &&
+    "parse_mode" in value &&
+    value.parse_mode === "HTML";
 }

@@ -1,4 +1,5 @@
 import type { Api } from "grammy";
+import type { InputRichMessage } from "grammy/types";
 import type { Logger } from "pino";
 
 import type { InteractionDecision, InteractionRequest } from "../../approval/index.js";
@@ -13,6 +14,8 @@ import {
   formatRateLimitUpdate,
   splitTelegramText,
 } from "./format.js";
+import { formatMarkdownAsTelegramHtml } from "./markdown-format.js";
+import { formatTelegramPanelChunks } from "./html-format.js";
 import { formatOperationLog } from "./operation-format.js";
 import { TelegramTypingIndicator } from "./typing-indicator.js";
 
@@ -46,6 +49,14 @@ interface ChatWorker {
   done: Promise<void>;
 }
 
+const maximumRichMarkdownCharacters = 32_000;
+
+export type TelegramFinalMessageFormat = "html" | "rich";
+
+export interface TelegramOutboxOptions {
+  finalMessageFormat?: TelegramFinalMessageFormat;
+}
+
 export class TelegramOutbox {
   private readonly streams = new Map<string, StreamState>();
   private readonly operationLogs = new Map<string, OperationLogState>();
@@ -61,6 +72,7 @@ export class TelegramOutbox {
     private readonly api: Api,
     private readonly logger: Logger,
     private readonly executor = new TelegramApiExecutor(logger),
+    private readonly options: TelegramOutboxOptions = {},
   ) {
     this.typing = new TelegramTypingIndicator((chatId) => this.enqueueTyping(chatId));
   }
@@ -84,7 +96,7 @@ export class TelegramOutbox {
       case "user.message": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
         this.enqueue(chatId, async () => {
-          const messageId = await this.send(chatId, formatCliInput(event.text));
+          const messageId = await this.sendPanel(chatId, formatCliInput(event.text));
           if (messageId !== undefined) {
             this.replyToByTurn.set(turnKey, messageId);
           }
@@ -187,7 +199,7 @@ export class TelegramOutbox {
             await this.send(chatId, `Codex 任务状态：${event.status}`, replyTo);
           }
           if (event.tokenUsage) {
-            await this.send(chatId, formatContextUsage(event.tokenUsage));
+            await this.sendPanel(chatId, formatContextUsage(event.tokenUsage));
           }
           this.replyToByTurn.delete(turnKey);
           this.clearApprovalOperationsForTurn(turnKey);
@@ -207,17 +219,17 @@ export class TelegramOutbox {
         return;
       case "account.updated":
         this.enqueue(chatId, async () => {
-          await this.sendMessage(chatId, formatAccountUpdate(event.authMode, event.planType));
+          await this.sendPanel(chatId, formatAccountUpdate(event.authMode, event.planType));
         }, true);
         return;
       case "account.rateLimits.updated":
         this.enqueue(chatId, async () => {
-          await this.sendMessage(chatId, formatRateLimitUpdate(event.rateLimits));
+          await this.sendPanel(chatId, formatRateLimitUpdate(event.rateLimits));
         }, true);
         return;
       case "mcp.status.updated":
         this.enqueue(chatId, async () => {
-          await this.sendMessage(chatId, formatMcpStatusUpdate(event));
+          await this.sendPanel(chatId, formatMcpStatusUpdate(event));
         }, event.status === "failed");
         return;
       case "thread.status":
@@ -394,6 +406,30 @@ export class TelegramOutbox {
       return;
     }
     const text = state.text.trimEnd();
+    if (final && state.phase === "final_answer") {
+      const format = this.options.finalMessageFormat ?? "html";
+      const formatted = format === "rich"
+        ? canSendRichMarkdown(text) ? text : undefined
+        : formatMarkdownAsTelegramHtml(text);
+      if (formatted !== undefined) {
+        try {
+          state.messageId = format === "rich"
+            ? await this.sendRichFinal(chatId, state, formatted)
+            : await this.sendHtmlFinal(chatId, state, formatted);
+          this.streams.delete(key);
+          return;
+        } catch (error) {
+          this.logger.warn(
+            {
+              chatId,
+              format,
+              error: safeErrorMessage(error),
+            },
+            "Telegram 格式化消息渲染失败，回退纯文本",
+          );
+        }
+      }
+    }
     const [first, ...rest] = splitTelegramText(text);
     if (!first) {
       return;
@@ -597,6 +633,23 @@ export class TelegramOutbox {
     return firstMessageId;
   }
 
+  private async sendPanel(
+    chatId: string,
+    text: string,
+    replyTo?: number,
+  ): Promise<number | undefined> {
+    let firstMessageId: number | undefined;
+    for (const chunk of formatTelegramPanelChunks(text)) {
+      const messageId = await this.sendHtmlMessage(
+        chatId,
+        chunk,
+        firstMessageId === undefined ? replyTo : undefined,
+      );
+      firstMessageId ??= messageId;
+    }
+    return firstMessageId;
+  }
+
   private turnKey(threadId: string, turnId: string): string {
     return `${threadId}:${turnId}`;
   }
@@ -655,10 +708,67 @@ export class TelegramOutbox {
     return message.message_id;
   }
 
+  private async sendRichFinal(
+    chatId: string,
+    state: StreamState,
+    markdown: string,
+  ): Promise<number> {
+    const richMessage: InputRichMessage = { markdown };
+    if (state.messageId !== undefined) {
+      await this.executor.call(
+        { chatId, operation: "editMessageText", critical: true },
+        () => this.api.editMessageText(chatId, state.messageId!, richMessage),
+      );
+      return state.messageId;
+    }
+
+    const replyTo = this.replyToByTurn.get(state.turnKey);
+    const message = await this.executor.call(
+      { chatId, operation: "sendRichMessage", critical: true },
+      () => this.api.sendRichMessage(chatId, richMessage, richReplyOptions(replyTo)),
+    );
+    if (replyTo !== undefined) {
+      this.replyToByTurn.delete(state.turnKey);
+    }
+    return message.message_id;
+  }
+
+  private async sendHtmlFinal(
+    chatId: string,
+    state: StreamState,
+    html: string,
+  ): Promise<number> {
+    if (state.messageId !== undefined) {
+      await this.executor.call(
+        { chatId, operation: "editMessageText", critical: true },
+        () => this.api.editMessageText(chatId, state.messageId!, html, operationEditOptions()),
+      );
+      return state.messageId;
+    }
+
+    const replyTo = this.replyToByTurn.get(state.turnKey);
+    const message = await this.executor.call(
+      { chatId, operation: "sendMessage", critical: true },
+      () => this.api.sendMessage(chatId, html, operationSendOptions(replyTo)),
+    );
+    if (replyTo !== undefined) {
+      this.replyToByTurn.delete(state.turnKey);
+    }
+    return message.message_id;
+  }
+
   private async sendMessage(chatId: string, text: string, replyTo?: number): Promise<number> {
     const message = await this.executor.call(
       { chatId, operation: "sendMessage", critical: true },
       () => this.api.sendMessage(chatId, text, replyOptions(replyTo)),
+    );
+    return message.message_id;
+  }
+
+  private async sendHtmlMessage(chatId: string, text: string, replyTo?: number): Promise<number> {
+    const message = await this.executor.call(
+      { chatId, operation: "sendMessage", critical: true },
+      () => this.api.sendMessage(chatId, text, operationSendOptions(replyTo)),
     );
     return message.message_id;
   }
@@ -748,6 +858,14 @@ function replyOptions(replyTo?: number): Parameters<Api["sendMessage"]>[2] {
           allow_sending_without_reply: true,
         },
       };
+}
+
+function richReplyOptions(replyTo?: number): Parameters<Api["sendRichMessage"]>[2] {
+  return replyOptions(replyTo);
+}
+
+function canSendRichMarkdown(text: string): boolean {
+  return Array.from(text).length <= maximumRichMarkdownCharacters;
 }
 
 function operationSendOptions(replyTo?: number): Parameters<Api["sendMessage"]>[2] {

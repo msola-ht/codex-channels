@@ -1,7 +1,7 @@
 import type { Bot } from "grammy";
 import type { Logger } from "pino";
 
-import { splitTelegramText } from "./format.js";
+import { formatTelegramPanelChunks } from "./html-format.js";
 
 const commands = [
   { command: "start", description: "使用说明" },
@@ -100,8 +100,8 @@ export class TelegramLifecycle {
     }
     for (const { chatId, text } of messages) {
       try {
-        for (const chunk of splitTelegramText(text)) {
-          await this.bot.api.sendMessage(chatId, chunk, {}, signal as never);
+        for (const chunk of formatTelegramPanelChunks(text)) {
+          await this.bot.api.sendMessage(chatId, chunk, { parse_mode: "HTML" }, signal as never);
         }
       } catch (error) {
         if (this.stopping || signal.aborted) {

@@ -22,12 +22,12 @@ import {
   formatStartupNotification,
   formatUsage,
   formatWorkspaces,
-  splitTelegramText,
 } from "./format.js";
+import { formatTelegramDiffChunks, formatTelegramPanelChunks } from "./html-format.js";
 import { TelegramInteractionPort } from "./interactions.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import { TelegramLifecycle } from "./lifecycle.js";
-import { TelegramOutbox } from "./outbox.js";
+import { TelegramOutbox, type TelegramFinalMessageFormat } from "./outbox.js";
 import { maximumTelegramImageBytes, TelegramImageStore } from "./image-store.js";
 
 export interface TelegramImagePort {
@@ -42,6 +42,7 @@ export interface TelegramImagePort {
 export interface TelegramSurfaceOptions {
   onFatal?: (error: Error) => void;
   imageStore?: TelegramImagePort;
+  finalMessageFormat?: TelegramFinalMessageFormat;
 }
 
 export class TelegramSurface {
@@ -74,7 +75,11 @@ export class TelegramSurface {
     });
     this.bot.use((context, next) => this.authorize(context, next));
     const apiExecutor = new TelegramApiExecutor(logger);
-    this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor);
+    this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor, {
+      ...(options.finalMessageFormat
+        ? { finalMessageFormat: options.finalMessageFormat }
+        : {}),
+    });
     this.interactions = new TelegramInteractionPort(this.bot, logger, apiExecutor, this.outbox);
     this.imageStore = options.imageStore ?? new TelegramImageStore(uploadsDirectory, token, proxyUrl, logger);
     this.lifecycle = new TelegramLifecycle(
@@ -122,7 +127,8 @@ export class TelegramSurface {
   private registerHandlers(): void {
     this.bot.command("whoami", (context) => context.reply(`你的 Telegram 用户 ID：${context.from?.id ?? "未知"}`));
     this.bot.command(["start", "help"], (context) =>
-      context.reply(
+      this.replyPanelChunks(
+        context,
         [
           "Codex Connect Gateway",
           "",
@@ -180,20 +186,26 @@ export class TelegramSurface {
     });
     this.bot.command("archive", async (context) => {
       const threadId = await this.service.archive(target(context));
-      await context.reply(`已归档 Codex Thread：${threadId}\n下一条普通消息将创建新会话。`);
+      await this.replyPanelChunks(
+        context,
+        `已归档 Codex Thread\nThread：${threadId}\n下一条普通消息将创建新会话。`,
+      );
     });
     this.bot.command("unarchive", async (context) => {
       const threadId = await this.service.unarchive(target(context), commandArguments(context));
-      await context.reply(`已取消归档并切换到 Codex Thread：${threadId}`);
+      await this.replyPanelChunks(context, `已取消归档并切换会话\nThread：${threadId}`);
     });
     this.bot.command("status", async (context) => {
-      await context.reply(formatStatus(this.service.status(target(context))));
+      await this.replyPanelChunks(context, formatStatus(this.service.status(target(context))));
     });
     this.bot.command("workspace", async (context) => {
       const selector = commandArguments(context);
       if (selector) {
         const workspace = await this.service.selectWorkspace(target(context), selector);
-        await context.reply(`已切换 Workspace：${workspace.name}\n工作目录：${workspace.cwd}`);
+        await this.replyPanelChunks(
+          context,
+          `已切换 Workspace\nWorkspace：${workspace.name}\n工作目录：${workspace.cwd}`,
+        );
         return;
       }
       const current = this.service.status(target(context));
@@ -209,7 +221,7 @@ export class TelegramSurface {
     this.bot.command("rename", async (context) => {
       const name = commandArguments(context);
       await this.service.rename(target(context), name);
-      await context.reply(`当前会话已命名为：${name}`);
+      await this.replyPanelChunks(context, `会话已重命名\n名称：${name}`);
     });
     this.bot.command("compact", async (context) => {
       await this.service.compact(target(context));
@@ -217,12 +229,12 @@ export class TelegramSurface {
     });
     this.bot.command("fork", async (context) => {
       const threadId = await this.service.fork(target(context));
-      await context.reply(`已分叉并切换到新 Codex Thread：${threadId}`);
+      await this.replyPanelChunks(context, `已分叉并切换到新会话\nThread：${threadId}`);
     });
     this.bot.command("review", async (context) => {
       const reviewTarget = parseReviewTarget(commandArguments(context));
       const submission = await this.service.review(target(context), reviewTarget);
-      await context.reply(`已启动 Codex Review：${submission.turnId}`);
+      await this.replyPanelChunks(context, `已启动 Codex Review\nTurn：${submission.turnId}`);
     });
     this.bot.command("model", async (context) => {
       const selector = commandArguments(context);
@@ -257,7 +269,9 @@ export class TelegramSurface {
       await this.replyChunks(context, formatPermissions(await this.service.listPermissionProfiles(target(context))));
     });
     this.bot.command("diff", async (context) => {
-      await this.replyChunks(context, formatDiff(this.service.artifacts(target(context))));
+      for (const chunk of formatTelegramDiffChunks(formatDiff(this.service.artifacts(target(context))))) {
+        await context.reply(chunk, { parse_mode: "HTML" });
+      }
     });
     this.bot.command("plan", async (context) => {
       await this.replyChunks(context, formatPlan(this.service.artifacts(target(context))));
@@ -349,14 +363,12 @@ export class TelegramSurface {
     const selector = commandArguments(context);
     if (selector) {
       const threadId = await this.service.resume(target(context), selector);
-      await context.reply(`已恢复 Codex Thread：${threadId}`);
+      await this.replyPanelChunks(context, `已恢复 Codex Thread\nThread：${threadId}`);
       return;
     }
     const sessions = await this.service.listSessions(target(context));
     const text = formatSessions(sessions, this.service.status(target(context)).threadId);
-    for (const chunk of splitTelegramText(text)) {
-      await context.reply(chunk);
-    }
+    await this.replyPanelChunks(context, text);
   }
 
   private async goal(context: Context): Promise<void> {
@@ -368,11 +380,12 @@ export class TelegramSurface {
     }
     if (input.startsWith("set ")) {
       const goal = await this.service.setGoal(target(context), input.slice(4));
-      await context.reply(`Goal 已设置：${goal.objective}`);
+      await this.replyPanelChunks(context, `Goal 已设置\n目标：${goal.objective}`);
       return;
     }
     const goal = await this.service.getGoal(target(context));
-    await context.reply(
+    await this.replyPanelChunks(
+      context,
       goal
         ? `当前 Goal：${goal.objective}\n状态：${goal.status}\nTokens：${goal.tokensUsed}${goal.tokenBudget === null ? "" : ` / ${goal.tokenBudget}`}`
         : "当前 Thread 没有 Goal。使用 /goal set <目标> 设置。",
@@ -380,8 +393,12 @@ export class TelegramSurface {
   }
 
   private async replyChunks(context: Context, text: string): Promise<void> {
-    for (const chunk of splitTelegramText(text)) {
-      await context.reply(chunk);
+    await this.replyPanelChunks(context, text);
+  }
+
+  private async replyPanelChunks(context: Context, text: string): Promise<void> {
+    for (const chunk of formatTelegramPanelChunks(text)) {
+      await context.reply(chunk, { parse_mode: "HTML" });
     }
   }
 

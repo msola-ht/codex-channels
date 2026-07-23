@@ -9,6 +9,7 @@ const environmentSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(1),
   TELEGRAM_ALLOWED_USER_IDS: z.string().min(1),
   TELEGRAM_PROXY_URL: z.string().optional(),
+  TELEGRAM_MESSAGE_FORMAT: z.enum(["html", "rich"]).default("html"),
   HTTPS_PROXY: z.string().optional(),
   https_proxy: z.string().optional(),
   HTTP_PROXY: z.string().optional(),
@@ -37,6 +38,7 @@ export interface GatewayConfig {
   telegramBotToken: string;
   telegramAllowedUserIds: ReadonlySet<number>;
   telegramProxyUrl?: string;
+  telegramMessageFormat: "html" | "rich";
   codexBinary: string;
   workspaces: Array<z.infer<typeof workspaceSchema>>;
   defaultWorkspaceId: string;
@@ -130,6 +132,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Gatewa
     telegramBotToken: raw.TELEGRAM_BOT_TOKEN,
     telegramAllowedUserIds: allowedIds,
     ...(proxyUrl ? { telegramProxyUrl: proxyUrl } : {}),
+    telegramMessageFormat: raw.TELEGRAM_MESSAGE_FORMAT,
     codexBinary: raw.CODEX_BINARY,
     workspaces,
     defaultWorkspaceId: raw.CODEX_DEFAULT_WORKSPACE,

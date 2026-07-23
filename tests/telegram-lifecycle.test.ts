@@ -48,7 +48,7 @@ describe("TelegramLifecycle", () => {
     await vi.waitFor(() => expect(calls).toContain("poll"));
     await lifecycle.stop();
 
-    expect(calls).toEqual(["init", "commands", "messages", "notify:123:Gateway 已联通", "poll"]);
+    expect(calls).toEqual(["init", "commands", "messages", "notify:123:<b>Gateway 已联通</b>", "poll"]);
     expect(failures).toEqual([]);
   });
 

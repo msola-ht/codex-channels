@@ -34,6 +34,21 @@ describe("loadConfig", () => {
     expect(config.codexSocketPath).toBe(join(process.cwd(), ".runtime/codex-app-server.sock"));
     expect(config.stateDatabasePath).toBe(join(process.cwd(), "data/gateway.sqlite3"));
     expect(config.telegramAllowedUserIds).toEqual(new Set([123, 456]));
+    expect(config.telegramMessageFormat).toBe("html");
+  });
+
+  it("accepts Rich Messages as an explicit Telegram output format", () => {
+    const workdir = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
+    temporaryDirectories.push(workdir);
+
+    const config = loadConfig({
+      TELEGRAM_BOT_TOKEN: "secret",
+      TELEGRAM_ALLOWED_USER_IDS: "123",
+      TELEGRAM_MESSAGE_FORMAT: "rich",
+      ...workspaceEnvironment(workdir),
+    });
+
+    expect(config.telegramMessageFormat).toBe("rich");
   });
 
   it("resolves an explicit state database path without treating it as Codex history", () => {

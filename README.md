@@ -7,7 +7,7 @@
 ## 功能
 
 - 在 Telegram 中发送文本和 PNG/JPEG 图片。
-- 查看 Codex 流式回复、操作过程、计划、Diff、用量和额度。
+- 查看 Codex 流式回复、格式化最终回复、操作过程、计划、Diff、用量和额度。
 - Gateway 启动时通知当前系统、版本、连接方式、Workspace、Thread、模型和思考强度。
 - 处理命令、文件修改、临时权限、用户输入及 MCP 审批。
 - 在预配置 Workspace 间切换，并与原生 TUI 双向恢复 Thread。
@@ -41,7 +41,12 @@ codexc setup
 ```dotenv
 TELEGRAM_BOT_TOKEN=你的_Bot_Token
 TELEGRAM_ALLOWED_USER_IDS=你的_Telegram_用户_ID
+TELEGRAM_MESSAGE_FORMAT=html
 ```
+
+最终回复默认把常用 Markdown 安全转换为兼容性更好的 Telegram HTML。支持 Rich Messages
+的客户端可设置 `TELEGRAM_MESSAGE_FORMAT=rich`；修改后执行 `codexc service reload`，
+Gateway 会自动重启。
 
 注册需要通过 Telegram 使用的项目目录：
 
