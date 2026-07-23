@@ -51,6 +51,7 @@ describe("Telegram HTML formatter", () => {
         "",
         "<blockquote>第 1 行\n第 2 行\n第 3 行\n第 4 行\n第 5 行\n第 6 行</blockquote>",
         "",
+        "<i>其余内容（点击展开）</i>",
         "<blockquote expandable>第 7 行\n第 8 行</blockquote>",
       ].join("\n"),
     ]);
@@ -60,7 +61,9 @@ describe("Telegram HTML formatter", () => {
     const detail = "x".repeat(300);
     const [chunk] = formatTelegramExpandableQuotePanelChunks("审批", detail);
 
-    expect(chunk).toContain(`<blockquote>${"x".repeat(240)}</blockquote>\n\n`);
+    expect(chunk).toContain(
+      `<blockquote>${"x".repeat(240)}</blockquote>\n\n<i>其余内容（点击展开）</i>\n`,
+    );
     expect(chunk).toContain(`<blockquote expandable>${"x".repeat(60)}</blockquote>`);
   });
 

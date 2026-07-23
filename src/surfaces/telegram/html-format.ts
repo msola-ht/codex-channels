@@ -15,6 +15,7 @@ export function formatTelegramExpandableQuotePanelChunks(
   const titleHtml = `<b>${escapeTelegramHtml(title)}</b>`;
   const quotePrefix = "<blockquote expandable>";
   const quoteSuffix = "</blockquote>";
+  const remainingLabelHtml = "<i>其余内容（点击展开）</i>";
   const quoteOverhead = Array.from(`${quotePrefix}${quoteSuffix}`).length;
   const { preview, remaining } = splitExpandableQuotePreview(detail);
   if (!remaining) {
@@ -29,14 +30,15 @@ export function formatTelegramExpandableQuotePanelChunks(
     limit
       - Array.from(titleHtml).length
       - Array.from(previewHtml).length
-      - 4
+      - Array.from(remainingLabelHtml).length
+      - 5
       - quoteOverhead,
   );
   const remainingDetailLimit = Math.max(1, limit - quoteOverhead);
   const chunks = splitEscapedText(remaining, firstDetailLimit, remainingDetailLimit);
 
   return chunks.map((chunk, index) => [
-    ...(index === 0 ? [titleHtml, "", previewHtml, ""] : []),
+    ...(index === 0 ? [titleHtml, "", previewHtml, "", remainingLabelHtml] : []),
     `${quotePrefix}${escapeTelegramHtml(chunk)}${quoteSuffix}`,
   ].join("\n"));
 }
