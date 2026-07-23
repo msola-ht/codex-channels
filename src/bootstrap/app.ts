@@ -81,6 +81,34 @@ export class GatewayApplication {
     this.core = new ConversationCore(this.router, this.output);
     const models = new ModelSelectionService(this.codex, this.router, config.codexModel);
     const service = new ConversationService(this.codex, this.router, this.core, models);
+    this.output.subscribe("conversation-follow-up", async (event) => {
+      if (event.type !== "turn.completed") {
+        return;
+      }
+      try {
+        await service.handleTurnCompleted(
+          event.target,
+          event.threadId,
+        );
+      } catch (error) {
+        this.logger.warn(
+          {
+            errorType: error instanceof Error ? error.name : typeof error,
+            surface: event.target.surface,
+            accountId: event.target.accountId,
+            conversationId: event.target.conversationId,
+            threadId: event.threadId,
+          },
+          "下一 Turn 排队消息启动失败，队列已清空",
+        );
+        this.output.publish({
+          type: "warning",
+          target: event.target,
+          threadId: event.threadId,
+          message: "下一 Turn 排队消息未能启动，队列已清空。",
+        }, true);
+      }
+    });
     this.surfaceModules = createSurfaceModules({
       config,
       service,
@@ -462,6 +490,29 @@ export class GatewayApplication {
     const failures = await this.router.restoreSubscriptions(
       (target) => !this.stopping
         && enabledSurfaces.has(surfaceAccountKey(target.surface, target.accountId)),
+      (binding, thread) => {
+        if (thread.status.type !== "active") {
+          return;
+        }
+        const activeTurn = thread.turns.findLast((turn) => turn.status === "inProgress");
+        if (activeTurn) {
+          this.core.markTurnStarted(
+            binding.target,
+            binding.threadId,
+            activeTurn.id,
+          );
+          this.logger.info(
+            {
+              surface: binding.target.surface,
+              accountId: binding.target.accountId,
+              conversationId: binding.target.conversationId,
+              threadId: binding.threadId,
+              turnId: activeTurn.id,
+            },
+            "已恢复正在运行的 Codex Turn",
+          );
+        }
+      },
     );
     for (const failure of failures) {
       this.logger.warn(

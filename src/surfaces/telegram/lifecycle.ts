@@ -18,6 +18,7 @@ const commandDescriptions = {
   status: "查看当前状态",
   workspace: "列出或切换 Workspace",
   stop: "停止当前任务",
+  queue: "排到下一 Turn",
   rename: "命名当前会话",
   compact: "压缩当前上下文",
   fork: "分叉当前会话",

@@ -81,22 +81,27 @@ export class SessionRouter {
 
   async restoreSubscriptions(
     shouldRestore: (target: ConversationTarget) => boolean = () => true,
+    onRestored: (binding: ConversationBinding, thread: Thread) => void = () => undefined,
   ): Promise<SubscriptionRestoreFailure[]> {
     const failures: SubscriptionRestoreFailure[] = [];
     for (const binding of this.bindings.list()) {
       if (!shouldRestore(binding.target)) {
         continue;
       }
+      let restoredBinding: ConversationBinding;
+      let restoredThread: Thread;
       try {
         const workspace = this.workspaces.require(binding.workspaceId);
         const resumed = await this.codex.resumeThread(binding.threadId, workspace.cwd);
         this.captureModelSettings(resumed.thread.id, resumed.model, resumed.reasoningEffort, resumed.serviceTier);
-        this.bindings.bind({
+        restoredBinding = {
           target: binding.target,
           workspaceId: workspace.id,
           threadId: resumed.thread.id,
           sessionId: resumed.thread.sessionId,
-        });
+        };
+        restoredThread = resumed.thread;
+        this.bindings.bind(restoredBinding);
       } catch (error) {
         if (!shouldRestore(binding.target)) {
           return failures;
@@ -113,7 +118,9 @@ export class SessionRouter {
           error: normalized,
           bindingRemoved,
         });
+        continue;
       }
+      onRestored(restoredBinding, restoredThread);
     }
     return failures;
   }

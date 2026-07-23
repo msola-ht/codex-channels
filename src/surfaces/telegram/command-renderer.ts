@@ -141,6 +141,11 @@ function renderOutcome(
         text: outcome.stopped ? "已请求停止当前任务。" : "当前没有运行中的任务。",
         expanded: false,
       };
+    case "turn.follow-up-queued":
+      return {
+        text: `已排到下一 Turn，当前第 ${outcome.position} 条。队列仅保存在内存，Gateway 重启会清空。`,
+        expanded: false,
+      };
     case "thread.renamed":
       return {
         text: `会话已重命名\n名称：${outcome.name}`,

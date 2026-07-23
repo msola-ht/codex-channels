@@ -15,6 +15,7 @@ export const conversationCommandNames = [
   "status",
   "workspace",
   "stop",
+  "queue",
   "rename",
   "compact",
   "fork",
@@ -86,6 +87,7 @@ export type ConversationCommandOutcome =
       workspace: Awaited<ReturnType<ConversationService["selectWorkspace"]>>;
     }
   | { type: "turn.stop-requested"; stopped: boolean }
+  | { type: "turn.follow-up-queued"; position: number }
   | { type: "thread.renamed"; name: string }
   | { type: "thread.compaction-requested" }
   | { type: "thread.forked"; threadId: string }
@@ -189,6 +191,16 @@ export class ConversationCommandService {
         return {
           kind: "outcome",
           outcome: { type: "turn.stop-requested", stopped },
+        };
+      }
+      case "queue": {
+        if (!argumentsText) {
+          throw new UserFacingError("queue.usage", "Queue 参数无效");
+        }
+        const queued = await this.conversations.queueFollowUp(target, argumentsText);
+        return {
+          kind: "outcome",
+          outcome: { type: "turn.follow-up-queued", position: queued.position },
         };
       }
       case "rename":

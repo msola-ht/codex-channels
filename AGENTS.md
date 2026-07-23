@@ -91,6 +91,8 @@ Surface -> Application/Core <- Codex Client
 - 队列过载时可以合并或丢弃非关键中间事件，但不得静默丢弃审批、错误、Item 完成或 Turn 完成事件。
 - 平台 API 超时、限流或失败不得阻塞 App Server Reader。
 - 后台任务必须有明确所有者、取消路径、有限重试和关闭等待上限。
+- 下一 Turn 的补充输入使用按 Conversation 隔离的有界内存队列；消息正文不得持久化，
+  Gateway 重启时允许清空，但入队时必须明确提示用户。
 - 审批状态必须绑定 Thread、协议提供的 Turn 和请求标识；MCP elicitation 无法关联活动 Turn
   时允许 `turnId` 为 `null`，但仍必须保留 Thread 与 App Server 请求 ID。交互令牌必须不可预测、
   一次性使用并设置过期时间。

@@ -36,6 +36,22 @@ describe("Telegram command renderer", () => {
     expect(reply).toHaveBeenCalledWith("已请求停止当前任务。");
   });
 
+  it("confirms queued follow-ups and explains their in-memory lifetime", async () => {
+    const reply = vi.fn(async () => undefined);
+
+    await renderTelegramCommandResult(
+      { reply } as unknown as Context,
+      {
+        kind: "outcome",
+        outcome: { type: "turn.follow-up-queued", position: 2 },
+      },
+    );
+
+    expect(reply).toHaveBeenCalledWith(
+      "已排到下一 Turn，当前第 2 条。队列仅保存在内存，Gateway 重启会清空。",
+    );
+  });
+
   it("uses the dedicated diff renderer for artifact results", async () => {
     const reply = vi.fn(async () => undefined);
 

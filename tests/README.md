@@ -5,7 +5,8 @@
 ## 覆盖范围
 
 - JSON-RPC initialize、消息分流、超时、过载重试和断线清理。
-- Thread 新建、列表、恢复、切换、删除、订阅和 Workspace 路由。
+- Thread 新建、列表、恢复、切换、删除、订阅、活动 Turn 重启恢复和 Workspace 路由。
+- 活动 Turn 的即时 steer 与下一 Turn 有界内存队列、顺序启动、Thread 隔离和失败清理。
 - Conversation Core 状态归约、操作过程与敏感文本清洗。
 - 命令、文件修改、临时权限、用户输入和 MCP 审批的归属信息、批准、拒绝、无法路由、
   一次性回调、超时和跨客户端解决。

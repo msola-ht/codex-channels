@@ -132,6 +132,57 @@ describe("SessionRouter", () => {
     });
   });
 
+  it("reports an active Turn when restoring a bound Thread subscription", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({
+      target,
+      workspaceId: "main",
+      threadId: "active-thread",
+      sessionId: "active-thread",
+    });
+    const activeThread = {
+      ...thread("active-thread", { type: "active" as const, activeFlags: [] }),
+      turns: [{
+        id: "turn-running",
+        items: [],
+        itemsView: "full" as const,
+        status: "inProgress" as const,
+        error: null,
+        startedAt: 1,
+        completedAt: null,
+        durationMs: null,
+      }],
+    };
+    const restored: Array<{ threadId: string; turnId: string }> = [];
+    const router = new SessionRouter(
+      {
+        resumeThread: async () => ({
+          thread: activeThread,
+          model: "gpt-main",
+          reasoningEffort: "high",
+          serviceTier: "default",
+        }),
+      } as unknown as CodexAppServerClient,
+      store,
+      registry,
+    );
+
+    await router.restoreSubscriptions(
+      undefined,
+      (binding, restoredThread) => {
+        const activeTurn = restoredThread.turns.find((turn) => turn.status === "inProgress");
+        if (activeTurn) {
+          restored.push({ threadId: binding.threadId, turnId: activeTurn.id });
+        }
+      },
+    );
+
+    expect(restored).toEqual([{
+      threadId: "active-thread",
+      turnId: "turn-running",
+    }]);
+  });
+
   it("preserves but does not subscribe bindings for disabled Surface accounts", async () => {
     const store = new MemoryBindingStore();
     const disabled = {

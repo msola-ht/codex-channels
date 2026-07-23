@@ -39,6 +39,13 @@ export interface ConversationInput {
   localImages?: ReadonlyArray<{ path: string }>;
 }
 
+interface QueuedFollowUp {
+  threadId: string;
+  input: UserInput[];
+}
+
+const maximumQueuedFollowUpsPerConversation = 10;
+
 export interface ConversationStatus {
   threadId?: string;
   turnId?: string;
@@ -57,6 +64,7 @@ export interface ConversationStatus {
 
 export class ConversationService {
   private readonly locks = new Map<string, Promise<void>>();
+  private readonly queuedFollowUps = new Map<string, QueuedFollowUp[]>();
 
   constructor(
     private readonly codex: CodexAppServerClient,
@@ -97,6 +105,94 @@ export class ConversationService {
       this.models.markApplied(target);
       this.core.markTurnStarted(target, binding.threadId, result.turn.id);
       return { threadId: binding.threadId, turnId: result.turn.id, steered: false };
+    });
+  }
+
+  queueFollowUp(
+    target: ConversationTarget,
+    value: string,
+  ): Promise<{ position: number }> {
+    let input: UserInput[];
+    try {
+      input = normalizeInput(value);
+    } catch (error) {
+      return Promise.reject(
+        error instanceof Error ? error : new Error("排队输入规范化失败"),
+      );
+    }
+    if (input.length === 0) {
+      return Promise.reject(new UserFacingError("message.empty", "消息不能为空"));
+    }
+    return this.locked(target, () => {
+      const active = this.core.activeTurn(target);
+      if (!active) {
+        throw new UserFacingError("queue.inactive", "当前没有运行中的任务");
+      }
+      const key = conversationTargetKey(target);
+      const queued = this.queuedFollowUps.get(key) ?? [];
+      if (queued.length >= maximumQueuedFollowUpsPerConversation) {
+        throw new UserFacingError(
+          "queue.full",
+          `下一 Turn 队列已满，最多 ${maximumQueuedFollowUpsPerConversation} 条`,
+        );
+      }
+      queued.push({ threadId: active.threadId, input });
+      this.queuedFollowUps.set(key, queued);
+      return { position: queued.length };
+    });
+  }
+
+  handleTurnCompleted(
+    target: ConversationTarget,
+    threadId: string,
+  ): Promise<Submission | undefined> {
+    return this.locked(target, async () => {
+      if (this.core.activeTurn(target)) {
+        return undefined;
+      }
+      const key = conversationTargetKey(target);
+      const queued = this.queuedFollowUps.get(key);
+      const next = queued?.[0];
+      if (!next) {
+        return undefined;
+      }
+      if (next.threadId !== threadId) {
+        this.queuedFollowUps.delete(key);
+        throw new UserFacingError(
+          "queue.thread-changed",
+          "排队消息所属的 Codex Thread 已切换",
+        );
+      }
+      const binding = this.router.current(target);
+      if (!binding || binding.threadId !== threadId) {
+        this.queuedFollowUps.delete(key);
+        throw new UserFacingError(
+          "queue.thread-changed",
+          "排队消息所属的 Codex Thread 已切换",
+        );
+      }
+      const workspace = this.router.workspace(target);
+      const overrides = this.models.turnOverrides(target);
+      let result;
+      try {
+        result = await this.codex.startTurn(
+          threadId,
+          next.input,
+          `${gatewayUserMessageClientIdPrefix}${randomUUID()}`,
+          workspace.cwd,
+          overrides,
+        );
+      } catch (error) {
+        this.queuedFollowUps.delete(key);
+        throw error;
+      }
+      queued.shift();
+      if (queued.length === 0) {
+        this.queuedFollowUps.delete(key);
+      }
+      this.models.markApplied(target);
+      this.core.markTurnStarted(target, threadId, result.turn.id);
+      return { threadId, turnId: result.turn.id, steered: false };
     });
   }
 
@@ -335,7 +431,10 @@ export class ConversationService {
     }
   }
 
-  private async locked<T>(target: ConversationTarget, action: () => Promise<T>): Promise<T> {
+  private async locked<T>(
+    target: ConversationTarget,
+    action: () => Promise<T> | T,
+  ): Promise<T> {
     const key = conversationTargetKey(target);
     const previous = this.locks.get(key) ?? Promise.resolve();
     let release: (() => void) | undefined;

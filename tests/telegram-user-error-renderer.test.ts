@@ -25,4 +25,15 @@ describe("Telegram user error renderer", () => {
 
     expect(formatTelegramUserFacingError(error)).toContain("/unarchive");
   });
+
+  it.each([
+    ["queue.usage", "用法：/queue <描述>"],
+    ["queue.inactive", "当前没有运行中的任务，请直接发送普通消息"],
+    ["queue.full", "下一 Turn 队列已满，最多 10 条"],
+    ["queue.thread-changed", "排队消息所属会话已切换，队列已清空"],
+  ] as const)("renders %s follow-up queue errors", (code, expected) => {
+    expect(formatTelegramUserFacingError(
+      new UserFacingError(code, "opaque-internal-fallback"),
+    )).toBe(expected);
+  });
 });

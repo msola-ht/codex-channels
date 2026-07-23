@@ -28,6 +28,14 @@ export function formatTelegramUserFacingError(error: UserFacingError): string {
       return "目标不能为空";
     case "goal.usage":
       return "用法：/goal [set <目标>|clear]";
+    case "queue.usage":
+      return "用法：/queue <描述>";
+    case "queue.inactive":
+      return "当前没有运行中的任务，请直接发送普通消息";
+    case "queue.full":
+      return "下一 Turn 队列已满，最多 10 条";
+    case "queue.thread-changed":
+      return "排队消息所属会话已切换，队列已清空";
     case "workspace.missing":
       return `Workspace 不存在或未获授权：${detail(error, "workspaceId", "未知")}`;
     case "workspace.selector.required":

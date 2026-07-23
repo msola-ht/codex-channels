@@ -188,6 +188,7 @@ export class TelegramSurface {
           "/status",
           "/workspace [序号|ID|名称]",
           "/stop",
+          "/queue <描述>",
           "/rename <名称>",
           "/compact",
           "/fork",

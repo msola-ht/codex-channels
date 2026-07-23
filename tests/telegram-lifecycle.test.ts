@@ -59,6 +59,7 @@ describe("TelegramLifecycle", () => {
     }]);
     expect(failures).toEqual([]);
     expect(registeredCommands.some((command) => command.command === "fast")).toBe(true);
+    expect(registeredCommands.some((command) => command.command === "queue")).toBe(true);
     expect(registeredCommands.some((command) => command.command === "sessions")).toBe(true);
     expect(registeredCommands.some((command) => command.command === "diff")).toBe(true);
   });

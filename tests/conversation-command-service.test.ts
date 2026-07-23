@@ -104,6 +104,31 @@ describe("ConversationCommandService", () => {
     expect(setGoal).toHaveBeenCalledWith(target, "ship it");
   });
 
+  it("queues a follow-up through the shared command boundary", async () => {
+    const queueFollowUp = vi.fn(async () => ({ position: 2 }));
+    const commands = new ConversationCommandService({
+      queueFollowUp,
+    } as unknown as ConversationService);
+
+    await expect(commands.execute(target, "queue", " 下一轮检查测试 "))
+      .resolves.toEqual({
+        kind: "outcome",
+        outcome: { type: "turn.follow-up-queued", position: 2 },
+      });
+    expect(queueFollowUp).toHaveBeenCalledWith(target, "下一轮检查测试");
+  });
+
+  it("rejects /queue without a follow-up description", async () => {
+    const queueFollowUp = vi.fn();
+    const commands = new ConversationCommandService({
+      queueFollowUp,
+    } as unknown as ConversationService);
+
+    await expect(commands.execute(target, "queue", " "))
+      .rejects.toMatchObject({ code: "queue.usage" });
+    expect(queueFollowUp).not.toHaveBeenCalled();
+  });
+
   it("routes model and account queries without Surface-specific branching", async () => {
     const state = { model: "gpt-test" };
     const modelState = vi.fn(async () => state);
@@ -193,6 +218,7 @@ describe("ConversationCommandService", () => {
       selectWorkspace: vi.fn(async () => ({ id: "main", name: "Main", cwd: "/workspace" })),
       listWorkspaces: vi.fn(() => [{ id: "main", name: "Main", cwd: "/workspace" }]),
       stop: vi.fn(async () => true),
+      queueFollowUp: vi.fn(async () => ({ position: 1 })),
       rename: vi.fn(async () => undefined),
       compact: vi.fn(async () => undefined),
       fork: vi.fn(async () => "thread-forked"),
@@ -222,6 +248,7 @@ describe("ConversationCommandService", () => {
       ["status", "", "status"],
       ["workspace", "main", "selectWorkspace"],
       ["stop", "", "stop"],
+      ["queue", "follow up", "queueFollowUp"],
       ["rename", "name", "rename"],
       ["compact", "", "compact"],
       ["fork", "", "fork"],
