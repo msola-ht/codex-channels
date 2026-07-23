@@ -101,7 +101,12 @@ export class TelegramLifecycle {
     for (const { chatId, text } of messages) {
       try {
         for (const chunk of formatTelegramPanelChunks(text)) {
-          await this.bot.api.sendMessage(chatId, chunk, { parse_mode: "HTML" }, signal as never);
+          await this.bot.api.sendMessage(
+            chatId,
+            chunk,
+            { parse_mode: "HTML", disable_notification: true },
+            signal as never,
+          );
         }
       } catch (error) {
         if (this.stopping || signal.aborted) {

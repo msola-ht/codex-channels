@@ -71,6 +71,7 @@ export class TelegramOutbox {
   private readonly approvalRequestsByOperation = new Map<string, Set<string>>();
   private readonly operationByApprovalRequest = new Map<string, string>();
   private readonly suppressedOperations = new Set<string>();
+  private readonly notifiedTurns = new Set<string>();
   private closed = false;
 
   constructor(
@@ -101,7 +102,12 @@ export class TelegramOutbox {
       case "user.message": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
         this.enqueue(chatId, async () => {
-          const messageId = await this.sendPanel(chatId, formatCliInput(event.text));
+          const messageId = await this.sendPanel(
+            chatId,
+            formatCliInput(event.text),
+            undefined,
+            true,
+          );
           if (messageId !== undefined) {
             this.replyToByTurn.set(turnKey, messageId);
           }
@@ -216,16 +222,19 @@ export class TelegramOutbox {
                     }
                   : undefined,
               ),
+              undefined,
+              true,
             );
           }
           this.replyToByTurn.delete(turnKey);
+          this.notifiedTurns.delete(turnKey);
           this.clearApprovalOperationsForTurn(turnKey);
         }, true);
         return;
       }
       case "warning":
         this.enqueue(chatId, async () => {
-          await this.send(chatId, `Codex 警告：${event.message}`);
+          await this.send(chatId, `Codex 警告：${event.message}`, undefined, true);
         }, true);
         return;
       case "connection.lost":
@@ -236,17 +245,32 @@ export class TelegramOutbox {
         return;
       case "account.updated":
         this.enqueue(chatId, async () => {
-          await this.sendPanel(chatId, formatAccountUpdate(event.authMode, event.planType));
+          await this.sendPanel(
+            chatId,
+            formatAccountUpdate(event.authMode, event.planType),
+            undefined,
+            true,
+          );
         }, true);
         return;
       case "account.rateLimits.updated":
         this.enqueue(chatId, async () => {
-          await this.sendPanel(chatId, formatRateLimitUpdate(event.rateLimits));
+          await this.sendPanel(
+            chatId,
+            formatRateLimitUpdate(event.rateLimits),
+            undefined,
+            true,
+          );
         }, true);
         return;
       case "mcp.status.updated":
         this.enqueue(chatId, async () => {
-          await this.sendPanel(chatId, formatMcpStatusUpdate(event));
+          await this.sendPanel(
+            chatId,
+            formatMcpStatusUpdate(event),
+            undefined,
+            event.status !== "failed",
+          );
         }, event.status === "failed");
         return;
       case "thread.status":
@@ -288,6 +312,7 @@ export class TelegramOutbox {
     this.approvalRequestsByOperation.clear();
     this.operationByApprovalRequest.clear();
     this.suppressedOperations.clear();
+    this.notifiedTurns.clear();
   }
 
   showTyping(chatId: string): void {
@@ -486,7 +511,7 @@ export class TelegramOutbox {
     }
     if (final) {
       for (const chunk of rest) {
-        await this.sendMessage(chatId, chunk);
+        await this.sendMessage(chatId, chunk, undefined, true);
       }
       this.streams.delete(key);
     }
@@ -652,13 +677,19 @@ export class TelegramOutbox {
     }
   }
 
-  private async send(chatId: string, text: string, replyTo?: number): Promise<number | undefined> {
+  private async send(
+    chatId: string,
+    text: string,
+    replyTo?: number,
+    silent = false,
+  ): Promise<number | undefined> {
     let firstMessageId: number | undefined;
     for (const chunk of splitTelegramText(text)) {
       const messageId = await this.sendMessage(
         chatId,
         chunk,
         firstMessageId === undefined ? replyTo : undefined,
+        silent || firstMessageId !== undefined,
       );
       firstMessageId ??= messageId;
     }
@@ -669,6 +700,7 @@ export class TelegramOutbox {
     chatId: string,
     text: string,
     replyTo?: number,
+    silent = false,
   ): Promise<number | undefined> {
     let firstMessageId: number | undefined;
     for (const chunk of formatTelegramPanelChunks(text)) {
@@ -676,6 +708,7 @@ export class TelegramOutbox {
         chatId,
         chunk,
         firstMessageId === undefined ? replyTo : undefined,
+        silent || firstMessageId !== undefined,
       );
       firstMessageId ??= messageId;
     }
@@ -730,10 +763,14 @@ export class TelegramOutbox {
     const replyTo = state.phase === "commentary"
       ? undefined
       : this.replyToByTurn.get(state.turnKey);
+    const silent = state.phase === "commentary" || this.notifiedTurns.has(state.turnKey);
     const message = await this.executor.call(
       { chatId, operation: "sendMessage", critical: true },
-      () => this.api.sendMessage(chatId, text, replyOptions(replyTo)),
+      () => this.api.sendMessage(chatId, text, replyOptions(replyTo, silent)),
     );
+    if (!silent) {
+      this.notifiedTurns.add(state.turnKey);
+    }
     if (replyTo !== undefined) {
       this.replyToByTurn.delete(state.turnKey);
     }
@@ -755,10 +792,14 @@ export class TelegramOutbox {
     }
 
     const replyTo = this.replyToByTurn.get(state.turnKey);
+    const silent = this.notifiedTurns.has(state.turnKey);
     const message = await this.executor.call(
       { chatId, operation: "sendRichMessage", critical: true },
-      () => this.api.sendRichMessage(chatId, richMessage, richReplyOptions(replyTo)),
+      () => this.api.sendRichMessage(chatId, richMessage, richReplyOptions(replyTo, silent)),
     );
+    if (!silent) {
+      this.notifiedTurns.add(state.turnKey);
+    }
     if (replyTo !== undefined) {
       this.replyToByTurn.delete(state.turnKey);
     }
@@ -779,10 +820,14 @@ export class TelegramOutbox {
     }
 
     const replyTo = this.replyToByTurn.get(state.turnKey);
+    const silent = this.notifiedTurns.has(state.turnKey);
     const message = await this.executor.call(
       { chatId, operation: "sendMessage", critical: true },
-      () => this.api.sendMessage(chatId, html, operationSendOptions(replyTo)),
+      () => this.api.sendMessage(chatId, html, htmlSendOptions(replyTo, silent)),
     );
+    if (!silent) {
+      this.notifiedTurns.add(state.turnKey);
+    }
     if (replyTo !== undefined) {
       this.replyToByTurn.delete(state.turnKey);
     }
@@ -808,6 +853,7 @@ export class TelegramOutbox {
           new InputFile(plan.content, plan.filename),
           {
             caption: `完整回复 · ${plan.lineCount.toLocaleString("zh-CN")} 行`,
+            disable_notification: true,
             reply_parameters: {
               message_id: state.messageId!,
               allow_sending_without_reply: true,
@@ -847,15 +893,19 @@ export class TelegramOutbox {
       );
     } else {
       const replyTo = this.replyToByTurn.get(state.turnKey);
+      const silent = this.notifiedTurns.has(state.turnKey);
       const message = await this.executor.call(
         { chatId, operation: "sendMessage", critical: true },
         () => this.api.sendMessage(
           chatId,
           first,
-          expandableSendOptions(first, replyTo),
+          expandableSendOptions(first, replyTo, silent),
         ),
       );
       state.messageId = message.message_id;
+      if (!silent) {
+        this.notifiedTurns.add(state.turnKey);
+      }
       if (replyTo !== undefined) {
         this.replyToByTurn.delete(state.turnKey);
       }
@@ -864,24 +914,38 @@ export class TelegramOutbox {
     for (const chunk of chunks.slice(1)) {
       await this.executor.call(
         { chatId, operation: "sendMessage", critical: true },
-        () => this.api.sendMessage(chatId, chunk, expandableSendOptions(chunk)),
+        () => this.api.sendMessage(
+          chatId,
+          chunk,
+          expandableSendOptions(chunk, undefined, true),
+        ),
       );
     }
     return state.messageId!;
   }
 
-  private async sendMessage(chatId: string, text: string, replyTo?: number): Promise<number> {
+  private async sendMessage(
+    chatId: string,
+    text: string,
+    replyTo?: number,
+    silent = false,
+  ): Promise<number> {
     const message = await this.executor.call(
       { chatId, operation: "sendMessage", critical: true },
-      () => this.api.sendMessage(chatId, text, replyOptions(replyTo)),
+      () => this.api.sendMessage(chatId, text, replyOptions(replyTo, silent)),
     );
     return message.message_id;
   }
 
-  private async sendHtmlMessage(chatId: string, text: string, replyTo?: number): Promise<number> {
+  private async sendHtmlMessage(
+    chatId: string,
+    text: string,
+    replyTo?: number,
+    silent = false,
+  ): Promise<number> {
     const message = await this.executor.call(
       { chatId, operation: "sendMessage", critical: true },
-      () => this.api.sendMessage(chatId, text, operationSendOptions(replyTo)),
+      () => this.api.sendMessage(chatId, text, htmlSendOptions(replyTo, silent)),
     );
     return message.message_id;
   }
@@ -889,7 +953,7 @@ export class TelegramOutbox {
   private async sendOperationMessage(chatId: string, text: string, replyTo?: number): Promise<number> {
     const message = await this.executor.call(
       { chatId, operation: "sendMessage", critical: true },
-      () => this.api.sendMessage(chatId, text, operationSendOptions(replyTo)),
+      () => this.api.sendMessage(chatId, text, htmlSendOptions(replyTo, true)),
     );
     return message.message_id;
   }
@@ -944,6 +1008,11 @@ export class TelegramOutbox {
         this.suppressedOperations.delete(operationKey);
       }
     }
+    for (const turnKey of this.notifiedTurns) {
+      if (turnKey.startsWith(prefix)) {
+        this.notifiedTurns.delete(turnKey);
+      }
+    }
     this.typing.clear(chatId);
   }
 
@@ -962,28 +1031,40 @@ function safeErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function replyOptions(replyTo?: number): Parameters<Api["sendMessage"]>[2] {
-  return replyTo === undefined
-    ? {}
-    : {
-        reply_parameters: {
-          message_id: replyTo,
-          allow_sending_without_reply: true,
-        },
-      };
+function replyOptions(
+  replyTo?: number,
+  silent = false,
+): Parameters<Api["sendMessage"]>[2] {
+  return {
+    ...(silent ? { disable_notification: true } : {}),
+    ...(replyTo === undefined
+      ? {}
+      : {
+          reply_parameters: {
+            message_id: replyTo,
+            allow_sending_without_reply: true,
+          },
+        }),
+  };
 }
 
-function richReplyOptions(replyTo?: number): Parameters<Api["sendRichMessage"]>[2] {
-  return replyOptions(replyTo);
+function richReplyOptions(
+  replyTo?: number,
+  silent = false,
+): Parameters<Api["sendRichMessage"]>[2] {
+  return replyOptions(replyTo, silent);
 }
 
 function canSendRichMarkdown(text: string): boolean {
   return Array.from(text).length <= maximumRichMarkdownCharacters;
 }
 
-function operationSendOptions(replyTo?: number): Parameters<Api["sendMessage"]>[2] {
+function htmlSendOptions(
+  replyTo?: number,
+  silent = false,
+): Parameters<Api["sendMessage"]>[2] {
   return {
-    ...replyOptions(replyTo),
+    ...replyOptions(replyTo, silent),
     parse_mode: "HTML",
   };
 }
@@ -995,9 +1076,10 @@ function operationEditOptions(): Parameters<Api["editMessageText"]>[3] {
 function expandableSendOptions(
   text: string,
   replyTo?: number,
+  silent = false,
 ): Parameters<Api["sendMessage"]>[2] {
   return {
-    ...replyOptions(replyTo),
+    ...replyOptions(replyTo, silent),
     entities: [{
       type: "expandable_blockquote",
       offset: 0,

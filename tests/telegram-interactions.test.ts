@@ -127,8 +127,12 @@ describe("TelegramInteractionPort", () => {
 
     expect(sendMessage.mock.calls.length).toBeGreaterThan(1);
     expect(sendMessage.mock.calls[0]?.[1].length).toBeLessThanOrEqual(3_600);
-    expect(sendMessage.mock.calls[0]?.[2]).toEqual({ parse_mode: "HTML" });
+    expect(sendMessage.mock.calls[0]?.[2]).toEqual({
+      parse_mode: "HTML",
+      disable_notification: true,
+    });
     expect(sendMessage.mock.calls.at(-1)?.[2]).toHaveProperty("reply_markup");
+    expect(sendMessage.mock.calls.at(-1)?.[2]).not.toHaveProperty("disable_notification");
 
     await interactions.close();
     await expect(decision).resolves.toEqual({ type: "approval", approved: false });

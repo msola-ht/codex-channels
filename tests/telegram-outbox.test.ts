@@ -158,10 +158,11 @@ describe("TelegramOutbox", () => {
 
     expect(api.sent).toEqual(["正在检查", "检查完成。"]);
     expect(api.edits).toContain("正在检查。");
-    expect(api.sendOptions[0]).toEqual({});
+    expect(api.sendOptions[0]).toEqual({ disable_notification: true });
     expect(api.sendOptions[1]).toMatchObject({
       reply_parameters: { message_id: 42 },
     });
+    expect(api.sendOptions[1]).not.toHaveProperty("disable_notification");
     expect(api.richMessages).toEqual([]);
     expect(api.sendOptions[1]).toMatchObject({ parse_mode: "HTML" });
   });
@@ -214,10 +215,13 @@ describe("TelegramOutbox", () => {
     await outbox.close();
 
     expect(api.sent[0]).toContain("CLI 输入");
+    expect(api.sendOptions[0]).toMatchObject({ disable_notification: true });
     expect(api.sent.slice(1).length).toBeGreaterThan(1);
     expect(api.sendOptions.slice(1).every((options) =>
       hasEntityType(options, "expandable_blockquote")
     )).toBe(true);
+    expect(api.sendOptions[1]).not.toHaveProperty("disable_notification");
+    expect(api.sendOptions.slice(2).every(isSilent)).toBe(true);
     expect(api.documents).toEqual([]);
   });
 
@@ -244,6 +248,7 @@ describe("TelegramOutbox", () => {
     expect(api.documents[0]?.filename).toBe("codex-response.md");
     expect(api.documents[0]?.options).toMatchObject({
       caption: "完整回复 · 102 行",
+      disable_notification: true,
       reply_parameters: {
         message_id: 1,
         allow_sending_without_reply: true,
@@ -362,7 +367,10 @@ describe("TelegramOutbox", () => {
       "<b>CLI 输入</b>\n\n<blockquote>从 CLI 发来的输入\n第二行</blockquote>",
       "同步回复",
     ]);
-    expect(api.sendOptions[0]).toEqual({ parse_mode: "HTML" });
+    expect(api.sendOptions[0]).toEqual({
+      parse_mode: "HTML",
+      disable_notification: true,
+    });
     expect(api.sendOptions[1]).toMatchObject({
       reply_parameters: {
         message_id: 1,
@@ -387,6 +395,7 @@ describe("TelegramOutbox", () => {
     ]);
     expect(api.sendOptions[0]).toMatchObject({
       parse_mode: "HTML",
+      disable_notification: true,
       reply_parameters: { message_id: 42 },
     });
 
@@ -590,7 +599,10 @@ describe("TelegramOutbox", () => {
         allow_sending_without_reply: true,
       },
     });
-    expect(api.sendOptions[1]).toEqual({ parse_mode: "HTML" });
+    expect(api.sendOptions[1]).toEqual({
+      parse_mode: "HTML",
+      disable_notification: true,
+    });
   });
 
   it("reports current context usage after the turn's final reply", async () => {
@@ -626,7 +638,10 @@ describe("TelegramOutbox", () => {
         "<b>周限：</b>已使用 42%",
       ].join("\n"),
     ]);
-    expect(api.sendOptions[1]).toEqual({ parse_mode: "HTML" });
+    expect(api.sendOptions[1]).toEqual({
+      parse_mode: "HTML",
+      disable_notification: true,
+    });
   });
 
   it("finalizes completed stream content during graceful shutdown", async () => {
@@ -674,8 +689,26 @@ describe("TelegramOutbox", () => {
 
     expect(api.actions).toEqual(["typing"]);
     expect(api.sent).toEqual(["尚未完成", "Codex 警告：连接已断开"]);
+    expect(api.sendOptions.at(-1)).not.toHaveProperty("disable_notification");
 
     await outbox.close();
+  });
+
+  it("sends non-critical Codex warnings silently", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      type: "warning",
+      target,
+      message: "模型列表暂时不可用",
+    });
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual(["Codex 警告：模型列表暂时不可用"]);
+    expect(api.sendOptions).toEqual([{ disable_notification: true }]);
   });
 });
 
@@ -815,4 +848,11 @@ function hasEntityType(value: unknown, type: string): boolean {
     "type" in entity &&
     entity.type === type
   );
+}
+
+function isSilent(value: unknown): boolean {
+  return typeof value === "object" &&
+    value !== null &&
+    "disable_notification" in value &&
+    value.disable_notification === true;
 }

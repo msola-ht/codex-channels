@@ -7,6 +7,7 @@ import { TelegramLifecycle } from "../src/surfaces/telegram/lifecycle.js";
 describe("TelegramLifecycle", () => {
   it("initializes the bot, registers commands and stops long polling by aborting it", async () => {
     const calls: string[] = [];
+    const notificationOptions: unknown[] = [];
     const failures: Error[] = [];
     const bot = {
       botInfo: { username: "test_bot" },
@@ -19,8 +20,9 @@ describe("TelegramLifecycle", () => {
           calls.push("commands");
           return true;
         },
-        sendMessage: async (chatId: number, text: string) => {
+        sendMessage: async (chatId: number, text: string, options?: unknown) => {
           calls.push(`notify:${chatId}:${text}`);
+          notificationOptions.push(options);
           return { message_id: 1 };
         },
         getUpdates: async (_options: unknown, signal: AbortSignal) => {
@@ -49,6 +51,10 @@ describe("TelegramLifecycle", () => {
     await lifecycle.stop();
 
     expect(calls).toEqual(["init", "commands", "messages", "notify:123:<b>Gateway 已联通</b>", "poll"]);
+    expect(notificationOptions).toEqual([{
+      parse_mode: "HTML",
+      disable_notification: true,
+    }]);
     expect(failures).toEqual([]);
   });
 

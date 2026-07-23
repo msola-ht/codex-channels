@@ -271,8 +271,12 @@ export class TelegramSurface {
       await this.replyChunks(context, formatPermissions(await this.service.listPermissionProfiles(target(context))));
     });
     this.bot.command("diff", async (context) => {
-      for (const chunk of formatTelegramDiffChunks(formatDiff(this.service.artifacts(target(context))))) {
-        await context.reply(chunk, { parse_mode: "HTML" });
+      const chunks = formatTelegramDiffChunks(formatDiff(this.service.artifacts(target(context))));
+      for (const [index, chunk] of chunks.entries()) {
+        await context.reply(chunk, {
+          parse_mode: "HTML",
+          ...(index === 0 ? {} : { disable_notification: true }),
+        });
       }
     });
     this.bot.command("plan", async (context) => {
@@ -295,6 +299,7 @@ export class TelegramSurface {
       );
       if (submission.steered) {
         await context.reply("已将补充要求追加到当前 Turn。", {
+          disable_notification: true,
           reply_parameters: {
             message_id: context.message.message_id,
             allow_sending_without_reply: true,
@@ -353,6 +358,7 @@ export class TelegramSurface {
     );
     if (submission.steered && context.message) {
       await context.reply("已将图片和补充要求追加到当前 Turn。", {
+        disable_notification: true,
         reply_parameters: {
           message_id: context.message.message_id,
           allow_sending_without_reply: true,
@@ -399,8 +405,11 @@ export class TelegramSurface {
   }
 
   private async replyPanelChunks(context: Context, text: string): Promise<void> {
-    for (const chunk of formatTelegramPanelChunks(text)) {
-      await context.reply(chunk, { parse_mode: "HTML" });
+    for (const [index, chunk] of formatTelegramPanelChunks(text).entries()) {
+      await context.reply(chunk, {
+        parse_mode: "HTML",
+        ...(index === 0 ? {} : { disable_notification: true }),
+      });
     }
   }
 

@@ -69,7 +69,7 @@ export class TelegramInteractionPort implements InteractionPort {
           const isLast = index === chunks.length - 1;
           const options = isLast
             ? interactionOptions(request, keyboard)
-            : { parse_mode: "HTML" as const };
+            : { parse_mode: "HTML" as const, disable_notification: true };
           sent = await this.executor.call(
             { chatId: target.conversationId, operation: "sendMessage", critical: true },
             () => this.bot.api.sendMessage(target.conversationId, chunk, options),
