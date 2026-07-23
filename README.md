@@ -32,9 +32,10 @@ npm install -g @openai/codex@0.145.0
 ```bash
 npm install -g @hegenai/codexc
 codexc init
+codexc setup
 ```
 
-编辑 `~/.codex-connect/.env`，至少填写：
+`codexc setup` 会引导通过官方 `@BotFather` 新建 Bot 或填写已有 Bot Token，验证 Token，并通过一次性 `/start` 配对链接自动获取 Telegram 用户 ID。复用当前 Bot 时默认保留已有用户允许名单，避免与运行中的 Gateway 争抢 Telegram 长轮询。该流程不依赖第三方机器人创建服务。也可以直接编辑 `~/.codex-connect/.env`，至少填写：
 
 ```dotenv
 TELEGRAM_BOT_TOKEN=你的_Bot_Token
@@ -75,6 +76,7 @@ codexc doctor
 
 ```bash
 codexc config                    # 显示配置路径
+codexc setup                     # 配置 Telegram Bot 和允许的用户 ID
 codexc doctor                    # 运行安装与连通性诊断
 codexc ws                        # 列出 Workspace
 codexc ws add                    # 注册当前目录

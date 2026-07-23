@@ -38,18 +38,19 @@ try {
   if (version !== packageReport.version) {
     throw new Error(`CLI 版本不匹配：实际 ${version}，期望 ${packageReport.version}`);
   }
-  if (!help.includes("doctor ") || !help.includes("service install")) {
+  if (!help.includes("setup ") || !help.includes("doctor ") || !help.includes("service install")) {
     throw new Error("CLI 帮助缺少公开命令");
   }
   const installedPackage = join(temporaryDirectory, "node_modules", "@hegenai", "codexc");
   for (const requiredFile of [
+    "scripts/telegram-setup.mjs",
     "systemd/codex-connect-app-server.service.template",
     "systemd/codex-connect-gateway.service.template",
     "scripts/install-systemd.mjs",
     "scripts/systemd-control.sh",
   ]) {
     if (!existsSync(join(installedPackage, requiredFile))) {
-      throw new Error(`tarball 安装后缺少 Linux 服务文件：${requiredFile}`);
+      throw new Error(`tarball 安装后缺少发布文件：${requiredFile}`);
     }
   }
   console.log(`tarball 安装冒烟通过：${packageReport.name}@${packageReport.version}`);

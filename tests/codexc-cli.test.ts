@@ -175,6 +175,7 @@ describe("codexc CLI", () => {
 
     expect(output).toContain("service uninstall");
     expect(output).toContain("保留用户数据");
+    expect(output).toContain("setup ");
   });
 
   it("shows an explicitly configured environment file", () => {
@@ -190,6 +191,27 @@ describe("codexc CLI", () => {
 
     expect(output).toContain(`用户目录：${join(root, "profile")}`);
     expect(output).toContain(`配置文件：${envPath}`);
+  });
+
+  it("initializes an explicitly configured environment file", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-"));
+    temporaryDirectories.push(root);
+    const workspace = join(root, "Workspace");
+    const envPath = join(root, "profile", "gateway.env");
+    mkdirSync(workspace);
+
+    const output = execFileSync(process.execPath, [cli, "init"], {
+      cwd: workspace,
+      env: { ...process.env, CODEX_CONNECT_ENV_FILE: envPath },
+      encoding: "utf8",
+    });
+
+    const parsed = parse(readFileSync(envPath, "utf8"));
+    expect(output).toContain(`配置文件：${envPath}`);
+    expect(parsed.CODEX_SOCKET_PATH).toBe(join(root, "profile", "runtime", "codex-app-server.sock"));
+    expect(parsed.STATE_DATABASE_PATH).toBe(join(root, "profile", "data", "gateway.sqlite3"));
+    expect(statSync(join(root, "profile")).mode & 0o777).toBe(0o700);
+    expect(statSync(envPath).mode & 0o777).toBe(0o600);
   });
 
   it("diagnoses configuration and a real Unix WebSocket without exposing the Telegram token", async () => {

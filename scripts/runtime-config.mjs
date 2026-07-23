@@ -24,8 +24,9 @@ export function runtimeConfig(environment = process.env) {
 }
 
 export function initializeUserData({ environment = process.env, cwd = process.cwd() } = {}) {
-  const dataDir = userDataDir(environment);
-  const envPath = join(dataDir, ".env");
+  const explicitEnvFile = environment.CODEX_CONNECT_ENV_FILE?.trim();
+  const envPath = explicitEnvFile ? resolve(explicitEnvFile) : join(userDataDir(environment), ".env");
+  const dataDir = dirname(envPath);
   const resolvedCwd = realpathSync(resolve(cwd));
   if (existsSync(envPath)) {
     chmodSync(dataDir, 0o700);

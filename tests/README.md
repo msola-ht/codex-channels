@@ -9,7 +9,7 @@
 - Conversation Core 状态归约、操作过程与敏感文本清洗。
 - 审批超时、拒绝、一次性回调和跨客户端解决。
 - Telegram 格式、输出队列、生命周期、API 重试及图片输入。
-- SQLite 最小绑定恢复、配置、CLI、launchd、systemd、Unix WebSocket 请求头、模块依赖方向和公开入口边界。
+- SQLite 最小绑定恢复、配置、Telegram Setup、CLI、launchd、systemd、Unix WebSocket 请求头、模块依赖方向和公开入口边界。
 
 常规验证：
 

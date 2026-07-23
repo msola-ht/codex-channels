@@ -32,6 +32,10 @@ try {
     case "init":
       initialize(args);
       break;
+    case "setup":
+      requireNoArguments(args, "用法：codexc setup");
+      runSetup();
+      break;
     case "start":
       requireNoArguments(args, "用法：codexc start");
       runScript("scripts/dev-all.mjs", args, { CODEX_CONNECT_GATEWAY_ENTRY: "dist" });
@@ -164,6 +168,11 @@ function runDoctor(args) {
   process.exitCode = result.status ?? 1;
 }
 
+function runSetup() {
+  initializeUserData({ cwd: process.cwd() });
+  runScript("scripts/telegram-setup.mjs", []);
+}
+
 function runScript(relativePath, args, additionalEnvironment = {}, workingDirectory) {
   const runtime = configuredEnvironment();
   run(
@@ -242,6 +251,7 @@ function printHelp() {
 用法：codexc <命令>
 
   init                         初始化 ~/.codex-connect
+  setup                        配置 Telegram Bot 和允许的用户 ID
   start                        前台启动 App Server 与 Gateway
   remote [--workspace ID]      在当前目录启动共享 App Server 的 Codex TUI
   ws                           列出 Workspace
