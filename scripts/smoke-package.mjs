@@ -43,6 +43,7 @@ try {
     || !help.includes("doctor ")
     || !help.includes("service install")
     || !help.includes("service reload")
+    || !help.includes("service logs")
   ) {
     throw new Error("CLI 帮助缺少公开命令");
   }

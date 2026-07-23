@@ -175,8 +175,30 @@ describe("codexc CLI", () => {
 
     expect(output).toContain("service uninstall");
     expect(output).toContain("service reload");
+    expect(output).toContain("service logs");
     expect(output).toContain("保留用户数据");
     expect(output).toContain("setup ");
+  });
+
+  it("rejects invalid service log options before reading user configuration", () => {
+    const invalidLines = spawnSync(process.execPath, [cli, "service", "logs", "--lines", "0"], {
+      encoding: "utf8",
+    });
+    const unknown = spawnSync(process.execPath, [cli, "service", "logs", "--unknown"], {
+      encoding: "utf8",
+    });
+    const invalidService = spawnSync(
+      process.execPath,
+      [cli, "service", "logs", "--service", "unknown"],
+      { encoding: "utf8" },
+    );
+
+    expect(invalidLines.status).toBe(1);
+    expect(invalidLines.stderr).toContain("日志行数必须是 1 到 10000");
+    expect(unknown.status).toBe(1);
+    expect(unknown.stderr).toContain("未知日志参数");
+    expect(invalidService.status).toBe(1);
+    expect(invalidService.stderr).toContain("日志服务必须是");
   });
 
   it("shows an explicitly configured environment file", () => {

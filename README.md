@@ -84,12 +84,17 @@ codexc remote                    # 在当前目录启动原生 Codex TUI
 codexc remote resume             # 恢复当前目录的原生会话
 codexc service reload            # 立即热加载配置，必要时自动重启 Gateway
 codexc service restart           # 只重启 Gateway
+codexc service logs              # 查看 Gateway 最近 100 行日志
+codexc service logs -f           # 持续跟踪后台日志
+codexc service logs --service all # 同时查看 App Server 与 Gateway
 codexc service uninstall         # 卸载服务并保留用户数据
 ```
 
 用户配置、Workspace Registry、SQLite、Socket、日志和上传图片均位于 `~/.codex-connect`，不会写入全局 npm 包目录。`CODEX_CONNECT_HOME` 可用于隔离测试或多 Profile。
 
 macOS 从旧版本升级后执行一次 `codexc service install`，安装器会将旧 `com.msola.*` launchd Job 迁移到 `com.hegenai.*`，并保留用户数据。Linux 使用 `systemctl --user` 管理两个独立服务，`service restart` 只重启 Gateway。
+
+`codexc service logs` 默认显示 Gateway 日志；使用 `--service app-server` 查看 App Server，使用 `--service all` 查看两者。`-n 200` 可调整显示行数，`-f` 可持续跟踪。macOS 默认忽略早于正常日志的陈旧 stderr，日志文件位于 `.codex-connect/runtime`；Linux 日志来自 systemd user journal。
 
 Telegram 与 App Server 均采用有界退避重连；连续失败耗尽后 Gateway 会退出，由 launchd 或 systemd 自动拉起，避免进程存活但不再接收消息。
 

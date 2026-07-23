@@ -12,6 +12,6 @@
 - `start`：启动已构建的 Gateway。
 - `remote`：连接共享 App Server 并启动原生 Codex TUI。
 - `ws`：列出或注册 Workspace。
-- `service`：安装、启停、热加载、重启、查看或卸载 macOS/Linux 用户服务。
+- `service`：安装、启停、热加载、重启、查看状态和日志，或卸载 macOS/Linux 用户服务。
 
 CLI 只负责参数校验、环境装配和进程分发，不保存 Conversation、Thread 或审批状态。新增用户命令时应复用现有应用能力或脚本，并同步更新根目录 README 和 CLI 测试。

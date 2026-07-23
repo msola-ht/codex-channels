@@ -9,6 +9,68 @@ gateway_label="com.hegenai.codex-gateway"
 legacy_app_label="com.msola.codex-app-server"
 legacy_gateway_label="com.msola.codex-gateway"
 
+show_logs() {
+  local follow=0
+  local lines=100
+  local service="gateway"
+  local socket_path="${CODEX_SOCKET_PATH:-${CODEX_CONNECT_HOME:-$HOME/.codex-connect}/runtime/codex-app-server.sock}"
+  local runtime_dir
+  local -a log_files
+  local path
+  if [[ "$socket_path" != /* ]]; then
+    socket_path="${CODEX_CONNECT_HOME:-$HOME/.codex-connect}/$socket_path"
+  fi
+  runtime_dir="${socket_path:h}"
+
+  while (( $# > 0 )); do
+    case "$1" in
+      --follow)
+        follow=1
+        shift
+        ;;
+      --lines)
+        lines="$2"
+        shift 2
+        ;;
+      --service)
+        service="$2"
+        shift 2
+        ;;
+      *)
+        print -u2 "未知日志参数：$1"
+        return 2
+        ;;
+    esac
+  done
+
+  log_files=()
+  if [[ "$service" == "gateway" || "$service" == "all" ]]; then
+    [[ -f "$runtime_dir/gateway.log" ]] && log_files+=("$runtime_dir/gateway.log")
+    if [[ "$service" == "all"
+      || ! -f "$runtime_dir/gateway.log"
+      || "$runtime_dir/gateway.error.log" -nt "$runtime_dir/gateway.log" ]]; then
+      [[ -f "$runtime_dir/gateway.error.log" ]] && log_files+=("$runtime_dir/gateway.error.log")
+    fi
+  fi
+  if [[ "$service" == "app-server" || "$service" == "all" ]]; then
+    [[ -f "$runtime_dir/codex-app-server.log" ]] && log_files+=("$runtime_dir/codex-app-server.log")
+    if [[ "$service" == "all"
+      || ! -f "$runtime_dir/codex-app-server.log"
+      || "$runtime_dir/codex-app-server.error.log" -nt "$runtime_dir/codex-app-server.log" ]]; then
+      [[ -f "$runtime_dir/codex-app-server.error.log" ]] && log_files+=("$runtime_dir/codex-app-server.error.log")
+    fi
+  fi
+  if (( ${#log_files[@]} == 0 )); then
+    print -u2 "尚未找到后台日志：$runtime_dir"
+    print -u2 "请先执行 codexc service start，并检查 codexc service status。"
+    return 1
+  fi
+  if (( follow )); then
+    exec /usr/bin/tail -n "$lines" -F "${log_files[@]}"
+  fi
+  /usr/bin/tail -n "$lines" "${log_files[@]}"
+}
+
 job_loaded() {
   launchctl print "$user_domain/$1" >/dev/null 2>&1
 }
@@ -119,8 +181,12 @@ case "$action" in
     launchctl print "$user_domain/$legacy_app_label" 2>/dev/null || true
     launchctl print "$user_domain/$legacy_gateway_label" 2>/dev/null || true
     ;;
+  logs)
+    shift
+    show_logs "$@"
+    ;;
   *)
-    print -u2 "用法：$0 {install|start|stop|reload|restart|status|uninstall}"
+    print -u2 "用法：$0 {install|start|stop|reload|restart|status|logs|uninstall}"
     exit 2
     ;;
 esac

@@ -155,21 +155,31 @@ function workspace(args) {
 
 function service(args) {
   const [action, ...rest] = args;
-  if (rest.length > 0 || !["install", "uninstall", "start", "stop", "reload", "restart", "status"].includes(action)) {
-    throw new Error("用法：codexc service <install|uninstall|start|stop|reload|restart|status>");
+  const actions = ["install", "uninstall", "start", "stop", "reload", "restart", "status", "logs"];
+  if (!actions.includes(action) || (action !== "logs" && rest.length > 0)) {
+    throw new Error("用法：codexc service <install|uninstall|start|stop|reload|restart|status|logs>");
   }
+  const serviceArgs = action === "logs" ? parseServiceLogOptions(rest) : [];
   if (process.platform === "darwin") {
     if (action === "install") {
       runScript("scripts/install-launchd.mjs", []);
     }
-    run("/bin/zsh", [join(packageDir, "scripts/launchd-control.sh"), action], configuredEnvironment().environment);
+    run(
+      "/bin/zsh",
+      [join(packageDir, "scripts/launchd-control.sh"), action, ...serviceArgs],
+      configuredEnvironment().environment,
+    );
     return;
   }
   if (process.platform === "linux") {
     if (action === "install") {
       runScript("scripts/install-systemd.mjs", []);
     }
-    run("/bin/sh", [join(packageDir, "scripts/systemd-control.sh"), action], configuredEnvironment().environment);
+    run(
+      "/bin/sh",
+      [join(packageDir, "scripts/systemd-control.sh"), action, ...serviceArgs],
+      configuredEnvironment().environment,
+    );
     return;
   }
   throw new Error("codexc service 当前支持 macOS launchd 与 Linux systemd；Windows Transport 尚未支持");
@@ -267,6 +277,41 @@ function parseWorkspaceAddOptions(args) {
   return result;
 }
 
+function parseServiceLogOptions(args) {
+  const result = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const option = args[index];
+    if (option === "--follow" || option === "-f") {
+      result.push("--follow");
+      continue;
+    }
+    if (option === "--lines" || option === "-n") {
+      const value = args[index + 1];
+      const lines = Number(value);
+      if (!Number.isSafeInteger(lines) || lines <= 0 || lines > 10_000) {
+        throw new Error("日志行数必须是 1 到 10000 之间的整数");
+      }
+      result.push("--lines", String(lines));
+      index += 1;
+      continue;
+    }
+    if (option === "--service") {
+      const value = args[index + 1];
+      if (!["gateway", "app-server", "all"].includes(value)) {
+        throw new Error("日志服务必须是 gateway、app-server 或 all");
+      }
+      result.push("--service", value);
+      index += 1;
+      continue;
+    }
+    throw new Error(
+      `未知日志参数：${option}\n`
+      + "用法：codexc service logs [-f|--follow] [-n|--lines 行数] [--service gateway|app-server|all]",
+    );
+  }
+  return result;
+}
+
 function printVersion(args) {
   requireNoArguments(args, "用法：codexc version");
   const metadata = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
@@ -298,6 +343,8 @@ function printHelp() {
   service reload               立即重新读取配置，必要时自动重启 Gateway
   service restart              重启 Gateway，保持 App Server 运行
   service status               查看系统服务状态
+  service logs [-f] [-n 行数] [--service 名称]
+                               查看或持续跟踪后台服务日志
   config                       显示用户配置路径
   doctor                       检查安装、配置、Codex 与服务连通性
   version                      显示版本

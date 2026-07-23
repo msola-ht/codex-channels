@@ -8,6 +8,45 @@ units_dir="$config_home/systemd/user"
 app_unit="codex-connect-app-server.service"
 gateway_unit="codex-connect-gateway.service"
 
+show_logs() {
+  follow=0
+  lines=100
+  service=gateway
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --follow)
+        follow=1
+        shift
+        ;;
+      --lines)
+        lines=$2
+        shift 2
+        ;;
+      --service)
+        service=$2
+        shift 2
+        ;;
+      *)
+        printf '%s\n' "未知日志参数：$1" >&2
+        return 2
+        ;;
+    esac
+  done
+
+  set -- --user
+  if [ "$service" = "gateway" ] || [ "$service" = "all" ]; then
+    set -- "$@" --unit="$gateway_unit"
+  fi
+  if [ "$service" = "app-server" ] || [ "$service" = "all" ]; then
+    set -- "$@" --unit="$app_unit"
+  fi
+  set -- "$@" --lines="$lines" --no-pager
+  if [ "$follow" -eq 1 ]; then
+    set -- "$@" --follow
+  fi
+  exec "${JOURNALCTL_BINARY:-journalctl}" "$@"
+}
+
 systemctl_user() {
   "$systemctl_binary" --user "$@"
 }
@@ -45,6 +84,10 @@ case "$action" in
   status)
     systemctl_user --no-pager status "$app_unit" "$gateway_unit" || true
     ;;
+  logs)
+    shift
+    show_logs "$@"
+    ;;
   uninstall)
     systemctl_user disable --now "$gateway_unit" "$app_unit" 2>/dev/null || true
     rm -f "$units_dir/$gateway_unit" "$units_dir/$app_unit"
@@ -54,7 +97,7 @@ case "$action" in
     printf '%s\n' "用户配置与运行数据保留在 ~/.codex-connect。"
     ;;
   *)
-    printf '%s\n' "用法：$0 {install|start|stop|reload|restart|status|uninstall}" >&2
+    printf '%s\n' "用法：$0 {install|start|stop|reload|restart|status|logs|uninstall}" >&2
     exit 2
     ;;
 esac

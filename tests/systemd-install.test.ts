@@ -105,12 +105,21 @@ describe("systemd installer", () => {
     const fakeSystemctl = join(binDir, "systemctl");
     writeFileSync(fakeSystemctl, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SYSTEMCTL_LOG\"\n");
     chmodSync(fakeSystemctl, 0o755);
+    const journalctlLog = join(root, "journalctl.log");
+    const fakeJournalctl = join(binDir, "journalctl");
+    writeFileSync(
+      fakeJournalctl,
+      "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$JOURNALCTL_LOG\"\nprintf 'gateway journal line\\n'\n",
+    );
+    chmodSync(fakeJournalctl, 0o755);
     const environment = {
       ...process.env,
       HOME: root,
       XDG_CONFIG_HOME: configHome,
       SYSTEMCTL_BINARY: fakeSystemctl,
       SYSTEMCTL_LOG: systemctlLog,
+      JOURNALCTL_BINARY: fakeJournalctl,
+      JOURNALCTL_LOG: journalctlLog,
     };
     const script = resolve("scripts/systemd-control.sh");
 
@@ -128,6 +137,11 @@ describe("systemd installer", () => {
     writeFileSync(systemctlLog, "");
     const reloaded = execFileSync("/bin/sh", [script, "reload"], { env: environment, encoding: "utf8" });
     const reloadCalls = readFileSync(systemctlLog, "utf8");
+    const logs = execFileSync("/bin/sh", [script, "logs", "--follow", "--lines", "25"], {
+      env: environment,
+      encoding: "utf8",
+    });
+    const journalctlCalls = readFileSync(journalctlLog, "utf8");
     const uninstalled = execFileSync("/bin/sh", [script, "uninstall"], { env: environment, encoding: "utf8" });
 
     expect(installed).toContain("已安装并启动");
@@ -148,6 +162,13 @@ describe("systemd installer", () => {
     expect(reloadCalls).toContain("--user is-active --quiet codex-connect-gateway.service");
     expect(reloadCalls).toContain("--user kill --kill-whom=main --signal=HUP codex-connect-gateway.service");
     expect(reloadCalls).not.toContain("codex-connect-app-server.service");
+    expect(logs).toContain("gateway journal line");
+    expect(journalctlCalls).toContain("--user");
+    expect(journalctlCalls).toContain("--unit=codex-connect-gateway.service");
+    expect(journalctlCalls).not.toContain("--unit=codex-connect-app-server.service");
+    expect(journalctlCalls).toContain("--lines=25");
+    expect(journalctlCalls).toContain("--no-pager");
+    expect(journalctlCalls).toContain("--follow");
     expect(uninstalled).toContain("用户配置与运行数据保留");
     expect(existsSync(appUnit)).toBe(false);
     expect(existsSync(gatewayUnit)).toBe(false);

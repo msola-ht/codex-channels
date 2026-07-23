@@ -179,6 +179,19 @@ describe("launchd installer", () => {
       encoding: "utf8",
     });
     const recoveryCalls = readFileSync(launchctlLog, "utf8");
+    const runtimeDir = join(root, ".codex-connect", "runtime");
+    mkdirSync(runtimeDir, { recursive: true });
+    writeFileSync(join(runtimeDir, "codex-app-server.log"), "app-old\napp-latest\n");
+    writeFileSync(join(runtimeDir, "gateway.log"), "gateway-old\ngateway-latest\n");
+    const logs = execFileSync("/bin/zsh", [script, "logs", "--lines", "1"], {
+      env: environment,
+      encoding: "utf8",
+    });
+    const allLogs = execFileSync(
+      "/bin/zsh",
+      [script, "logs", "--service", "all", "--lines", "1"],
+      { env: environment, encoding: "utf8" },
+    );
 
     expect(started).toContain("已启动");
     expect(stopped).toContain("已停止");
@@ -202,6 +215,12 @@ describe("launchd installer", () => {
     expect(recoveryCalls).toContain("kill SIGHUP");
     expect(recoveryCalls).toContain("kickstart -k");
     expect(recoveryCalls).not.toContain("com.hegenai.codex-app-server");
+    expect(logs).toContain("gateway-latest");
+    expect(logs).not.toContain("gateway-old");
+    expect(logs).not.toContain("codex-app-server.log");
+    expect(allLogs).toContain("codex-app-server.log");
+    expect(allLogs).toContain("app-latest");
+    expect(allLogs).not.toContain("app-old");
   });
 
   it.skipIf(process.platform !== "darwin")("migrates legacy launchd jobs during install", () => {
