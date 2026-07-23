@@ -8,7 +8,7 @@
 - `app.ts`：校验 Codex 版本，装配 Transport、Client、Core、Router 和 Storage；处理启动、重连、订阅恢复与关闭。
 - `surface-composition.ts`：以编译期显式工厂组合 Surface、访问策略、热加载钩子和平台故障上报。
 - `config-lifecycle.ts`：管理配置监听、防抖重载、持久配置事件投递、信号与进程退出。
-- `surface-manager.ts`：按注册顺序启动 Surface，失败时反向回滚，并在关闭时隔离各 Surface 的异常。
+- `surface-manager.ts`：按 `surface + accountId` 集中路由 Core 输出；按注册顺序启动 Surface，失败时反向回滚，并在关闭时隔离各 Surface 的异常。
 
 业务状态和平台逻辑应留在对应模块，只有具体实现选择、交互端口注册与生命周期协调放在这里。
 新增 Surface 时只扩展组合工厂，不应向 `GatewayApplication` 添加平台专属字段。

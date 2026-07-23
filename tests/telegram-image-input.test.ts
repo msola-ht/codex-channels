@@ -363,7 +363,6 @@ function createSurface(
     "123:token",
     undefined,
     { submit, ...serviceOverrides } as unknown as ConversationService,
-    output,
     new TelegramAccessPolicy(new Set([123]), "default"),
     new Set(),
     [{ id: "main", name: "Main", cwd: "/workspace" }],
@@ -371,6 +370,9 @@ function createSurface(
     pino({ level: "silent" }),
     { imageStore, actorRegistry: { rememberActor } },
   );
+  output.subscribe("telegram-test-output", (event) => {
+    surface.output.handle(event);
+  });
   surface.bot.botInfo = {
     id: 999,
     is_bot: true,

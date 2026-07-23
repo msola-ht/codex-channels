@@ -1,6 +1,6 @@
 import type { InteractionPort } from "../approval/index.js";
 import type { ConfigChange } from "../config/index.js";
-import type { SurfaceId } from "../conversation-core/index.js";
+import type { OutputEvent, SurfaceId } from "../conversation-core/index.js";
 import type { Workspace } from "../policy/index.js";
 
 export interface SurfaceConfigurationChange {
@@ -9,10 +9,15 @@ export interface SurfaceConfigurationChange {
   addedWorkspaces: readonly Workspace[];
 }
 
+export interface SurfaceOutputPort {
+  handle(event: OutputEvent): void;
+}
+
 export interface SurfaceAdapter {
   readonly surface: SurfaceId;
   readonly accountId: string;
   readonly interactions: InteractionPort;
+  readonly output: SurfaceOutputPort;
   start(): Promise<void>;
   stop(): Promise<void>;
   configurationChanged?(change: SurfaceConfigurationChange): void;

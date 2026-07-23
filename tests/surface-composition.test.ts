@@ -78,6 +78,9 @@ function adapter(recipientSnapshots: number[][]): TelegramRuntimeAdapter {
     surface: "telegram",
     accountId: "default",
     interactions,
+    output: {
+      handle() {},
+    },
     async start() {},
     async stop() {},
     async deliverConfigurationChange() {},

@@ -13,10 +13,8 @@ import {
 import {
   UserFacingError,
   type ConversationTarget,
-  type OutputEvent,
 } from "../../conversation-core/index.js";
 import { protocolVersion } from "../../codex-protocol/index.js";
-import type { EventBus } from "../../event-bus/index.js";
 import type {
   ConversationActorRegistry,
   SurfaceAccessPolicy,
@@ -61,19 +59,18 @@ export class TelegramSurface {
   readonly accountId = telegramDefaultAccountId;
   readonly bot: Bot;
   readonly interactions: TelegramInteractionPort;
+  readonly output: TelegramOutbox;
   private readonly outbox: TelegramOutbox;
   private readonly lifecycle: TelegramLifecycle;
   private readonly imageStore: TelegramImagePort;
   private readonly actorRegistry: ConversationActorRegistry | undefined;
   private readonly commands: ConversationCommandService;
   private notificationRecipients: ReadonlySet<number>;
-  private unsubscribeOutput: (() => void) | undefined;
 
   constructor(
     token: string,
     proxyUrl: string | undefined,
     private readonly service: ConversationService,
-    output: EventBus<OutputEvent>,
     private readonly access: SurfaceAccessPolicy,
     startupRecipients: ReadonlySet<number>,
     workspaces: Workspace[],
@@ -99,6 +96,7 @@ export class TelegramSurface {
         ? { finalMessageFormat: options.finalMessageFormat }
         : {}),
     });
+    this.output = this.outbox;
     this.interactions = new TelegramInteractionPort(this.bot, logger, apiExecutor, this.outbox);
     this.imageStore = options.imageStore ?? new TelegramImageStore(uploadsDirectory, token, proxyUrl, logger);
     this.lifecycle = new TelegramLifecycle(
@@ -126,7 +124,6 @@ export class TelegramSurface {
       },
       options.onFatal,
     );
-    this.unsubscribeOutput = output.subscribe("telegram", (event) => this.outbox.handle(event));
     this.registerHandlers();
   }
 
@@ -139,8 +136,6 @@ export class TelegramSurface {
     this.imageStore.close();
     const lifecycleStop = this.lifecycle.stop();
     await this.interactions.close();
-    this.unsubscribeOutput?.();
-    this.unsubscribeOutput = undefined;
     await this.outbox.close();
     await lifecycleStop;
   }

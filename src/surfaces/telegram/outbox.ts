@@ -8,7 +8,7 @@ import {
   type OutputEvent,
 } from "../../conversation-core/index.js";
 import type { MessagePhase } from "../../codex-protocol/index.js";
-import { BoundedAsyncQueue } from "../../event-bus/index.js";
+import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import { TelegramApprovalOperationCoordinator } from "./approval-operation-coordinator.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
@@ -50,16 +50,6 @@ interface OperationLogState {
   timer: NodeJS.Timeout | undefined;
 }
 
-interface OutboxOperation {
-  critical: boolean;
-  run(): Promise<void>;
-}
-
-interface ChatWorker {
-  queue: BoundedAsyncQueue<OutboxOperation>;
-  done: Promise<void>;
-}
-
 const maximumRichMarkdownCharacters = 32_000;
 
 export type TelegramFinalMessageFormat = "html" | "rich";
@@ -74,7 +64,7 @@ export class TelegramOutbox {
   private readonly operationLogs = new Map<string, OperationLogState>();
   private readonly replyToByTurn = new Map<string, number>();
   private readonly typing: TelegramTypingIndicator;
-  private readonly workers = new Map<string, ChatWorker>();
+  private readonly delivery: ConversationDeliveryQueue;
   private readonly approvalOperations = new TelegramApprovalOperationCoordinator();
   private readonly notifiedTurns = new Set<string>();
   private closed = false;
@@ -85,6 +75,10 @@ export class TelegramOutbox {
     private readonly executor = new TelegramApiExecutor(logger),
     private readonly options: TelegramOutboxOptions = {},
   ) {
+    this.delivery = new ConversationDeliveryQueue(logger, {
+      component: "Telegram",
+      errorMetadata: (error) => ({ ...telegramErrorMetadata(error) }),
+    });
     this.typing = new TelegramTypingIndicator((chatId) => this.enqueueTyping(chatId));
   }
 
@@ -326,15 +320,10 @@ export class TelegramOutbox {
       }
     }
     this.typing.close();
-    for (const worker of this.workers.values()) {
-      worker.queue.close();
-    }
-    const workers = Promise.allSettled([...this.workers.values()].map((worker) => worker.done));
-    await waitAtMost(workers, 5_000);
+    await this.delivery.close();
     this.streams.clear();
     this.operationLogs.clear();
     this.replyToByTurn.clear();
-    this.workers.clear();
     this.approvalOperations.clear();
     this.notifiedTurns.clear();
   }
@@ -411,18 +400,7 @@ export class TelegramOutbox {
     if (this.closed) {
       return Promise.reject(new Error("Telegram Outbox 已关闭"));
     }
-    return new Promise<T>((resolve, reject) => {
-      const accepted = this.enqueue(chatId, async () => {
-        try {
-          resolve(await run());
-        } catch (error) {
-          reject(error);
-        }
-      }, true);
-      if (!accepted) {
-        reject(new Error("Telegram Outbox 已满，交互请求未入队"));
-      }
-    });
+    return this.delivery.runOrdered(chatId, run);
   }
 
   notifyPanel(
@@ -442,37 +420,7 @@ export class TelegramOutbox {
   }
 
   private enqueue(chatId: string, run: () => Promise<void>, critical: boolean): boolean {
-    let worker = this.workers.get(chatId);
-    if (!worker) {
-      const queue = new BoundedAsyncQueue<OutboxOperation>(200);
-      worker = { queue, done: this.runWorker(chatId, queue) };
-      this.workers.set(chatId, worker);
-    }
-    const accepted = worker.queue.push({ critical, run }, critical);
-    if (!accepted) {
-      this.logger.warn({ chatId, critical }, "Telegram Outbox 已满，输出未入队");
-    }
-    return accepted;
-  }
-
-  private async runWorker(
-    chatId: string,
-    queue: BoundedAsyncQueue<OutboxOperation>,
-  ): Promise<void> {
-    while (true) {
-      const operation = await queue.shift();
-      if (!operation) {
-        return;
-      }
-      try {
-        await operation.run();
-      } catch (error) {
-        this.logger.warn(
-          { ...telegramErrorMetadata(error), chatId, critical: operation.critical },
-          "Telegram 输出失败",
-        );
-      }
-    }
+    return this.delivery.enqueue(chatId, run, critical);
   }
 
   private async sendNotificationPanel(
@@ -1110,18 +1058,4 @@ function isMessageNotModified(error: unknown): boolean {
   return errorMessageForClassification(error)
     .toLowerCase()
     .includes("message is not modified");
-}
-
-async function waitAtMost<T>(operation: Promise<T>, milliseconds: number): Promise<void> {
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<void>((resolve) => {
-    timer = setTimeout(resolve, milliseconds);
-  });
-  try {
-    await Promise.race([operation, timeout]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
 }

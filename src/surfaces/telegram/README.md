@@ -7,7 +7,7 @@
 - `index.ts`：Telegram Surface 的公开导出入口。
 - `bot.ts`：注册 Telegram SDK 处理器，执行访问检查，把标准命令或普通输入提交给 Application，并发送热加载、自动重启、重装要求和失败等配置生命周期通知；Workspace 新增通知带直接切换按钮。
 - `command-renderer.ts`：把平台无关的类型化命令结果渲染为 Telegram 消息。
-- `outbox.ts`：协调每聊天有界输出队列、流式回复和审批显示顺序；最终回复默认使用兼容 HTML，也可选择 Telegram 原生 Rich Markdown，超长或渲染失败时回退纯文本。
+- `outbox.ts`：通过 Surface 共用的每 Conversation 有界顺序队列协调流式回复和审批显示顺序；最终回复默认使用兼容 HTML，也可选择 Telegram 原生 Rich Markdown，超长或渲染失败时回退纯文本。
 - `approval-operation-coordinator.ts`：隔离审批请求与操作日志之间的等待、拒绝抑制和 Turn 清理状态。
 - 通知策略按逻辑事件降噪：操作过程、状态、上下文和后续分片静默；每轮最终回复、审批、用户输入与严重错误保留一次提醒。
 - `html-format.ts`：安全转义并分块渲染命令面板、启动通知、审批卡与 Diff。

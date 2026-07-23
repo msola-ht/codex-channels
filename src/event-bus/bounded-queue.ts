@@ -18,6 +18,10 @@ export class BoundedAsyncQueue<T> {
     }
   }
 
+  get size(): number {
+    return this.entries.length;
+  }
+
   push(value: T, critical = false): boolean {
     if (this.closed) {
       return false;

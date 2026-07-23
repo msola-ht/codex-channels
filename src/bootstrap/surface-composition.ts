@@ -4,8 +4,6 @@ import type { Logger } from "pino";
 
 import type { ConversationService } from "../application/index.js";
 import type { ConfigChange, GatewayConfig } from "../config/index.js";
-import type { OutputEvent } from "../conversation-core/index.js";
-import type { EventBus } from "../event-bus/index.js";
 import { TelegramAccessPolicy } from "../policy/index.js";
 import type { BindingStore } from "../storage/index.js";
 import {
@@ -32,7 +30,6 @@ export interface ReloadableTelegramAccess {
 export interface SurfaceCompositionOptions {
   config: GatewayConfig;
   service: ConversationService;
-  output: EventBus<OutputEvent>;
   bindings: BindingStore;
   logger: Logger;
   codexUpstreamUserAgent(): string | undefined;
@@ -64,7 +61,6 @@ function createTelegramModule(
     config.telegramBotToken,
     config.telegramProxyUrl,
     options.service,
-    options.output,
     access,
     config.telegramAllowedUserIds,
     config.workspaces,

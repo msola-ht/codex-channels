@@ -84,7 +84,6 @@ export class GatewayApplication {
     this.surfaceModules = createSurfaceModules({
       config,
       service,
-      output: this.output,
       bindings: this.bindings,
       logger,
       codexUpstreamUserAgent: () => this.codexUpstreamUserAgent,
@@ -95,7 +94,7 @@ export class GatewayApplication {
       ),
     });
     this.surfaces = this.surfaceModules.map((module) => module.adapter);
-    this.surfaceManager = new SurfaceManager(this.surfaces, logger);
+    this.surfaceManager = new SurfaceManager(this.surfaces, this.output, logger);
     this.interactions = new InteractionRouter();
     for (const surface of this.surfaces) {
       this.interactions.register(surface.surface, surface.accountId, surface.interactions);

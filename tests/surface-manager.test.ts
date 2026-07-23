@@ -3,17 +3,20 @@ import { describe, expect, it } from "vitest";
 
 import type { InteractionPort } from "../src/approval/index.js";
 import { SurfaceManager } from "../src/bootstrap/surface-manager.js";
+import type { OutputEvent } from "../src/conversation-core/index.js";
+import { EventBus } from "../src/event-bus/index.js";
 import type { SurfaceAdapter } from "../src/surfaces/index.js";
 
 const interactions = {} as InteractionPort;
+const logger = pino({ level: "silent" });
 
 describe("SurfaceManager", () => {
   it("starts in registration order and stops in reverse order", async () => {
     const calls: string[] = [];
-    const manager = new SurfaceManager([
+    const manager = createManager([
       surface("telegram", "default", calls),
       surface("feishu", "tenant-a", calls),
-    ], pino({ level: "silent" }));
+    ]);
 
     await manager.start();
     await manager.stop();
@@ -28,10 +31,10 @@ describe("SurfaceManager", () => {
 
   it("rolls back started Surfaces when a later start fails", async () => {
     const calls: string[] = [];
-    const manager = new SurfaceManager([
+    const manager = createManager([
       surface("telegram", "default", calls),
       surface("feishu", "tenant-a", calls, { failStart: true }),
-    ], pino({ level: "silent" }));
+    ]);
 
     await expect(manager.start()).rejects.toThrow("start failed");
 
@@ -45,10 +48,10 @@ describe("SurfaceManager", () => {
 
   it("continues stopping remaining Surfaces after one stop fails", async () => {
     const calls: string[] = [];
-    const manager = new SurfaceManager([
+    const manager = createManager([
       surface("telegram", "default", calls),
       surface("feishu", "tenant-a", calls, { failStop: true }),
-    ], pino({ level: "silent" }));
+    ]);
     await manager.start();
 
     await expect(manager.stop()).rejects.toThrow("部分 Surface 未能停止");
@@ -72,7 +75,7 @@ describe("SurfaceManager", () => {
         throw new Error("stop failed");
       }
     };
-    const manager = new SurfaceManager([retrying], pino({ level: "silent" }));
+    const manager = createManager([retrying]);
     await manager.start();
 
     await expect(manager.stop()).rejects.toThrow("部分 Surface 未能停止");
@@ -91,7 +94,7 @@ describe("SurfaceManager", () => {
     adapter.configurationChanged = (change) => {
       calls.push(`workspace:${change.addedWorkspaces[0]?.id}`);
     };
-    const manager = new SurfaceManager([adapter], pino({ level: "silent" }));
+    const manager = createManager([adapter]);
 
     manager.configurationChanged({
       action: "reloaded",
@@ -123,7 +126,7 @@ describe("SurfaceManager", () => {
     feishu.configurationChanged = (change) => {
       calls.push(`feishu:${change.action}:${change.changes.map((item) => item.code).join(",")}`);
     };
-    const manager = new SurfaceManager([telegram, feishu], pino({ level: "silent" }));
+    const manager = createManager([telegram, feishu]);
     await manager.start();
     calls.length = 0;
 
@@ -156,7 +159,7 @@ describe("SurfaceManager", () => {
     feishu.deliverConfigurationChange = async (change) => {
       deliveries.push(`feishu:${change.changes[0]?.code}`);
     };
-    const manager = new SurfaceManager([telegram, feishu], pino({ level: "silent" }));
+    const manager = createManager([telegram, feishu]);
     await manager.start();
 
     await manager.deliverConfigurationChange({
@@ -179,7 +182,7 @@ describe("SurfaceManager", () => {
     rejected.deliverConfigurationChange = async () => {
       throw new Error("delivery failed");
     };
-    const manager = new SurfaceManager([accepted, rejected], pino({ level: "silent" }));
+    const manager = createManager([accepted, rejected]);
     await manager.start();
 
     await expect(manager.deliverConfigurationChange({
@@ -192,9 +195,9 @@ describe("SurfaceManager", () => {
   });
 
   it("does not confirm persistent notifications before all Surfaces start", async () => {
-    const manager = new SurfaceManager([
+    const manager = createManager([
       surface("telegram", "default", []),
-    ], pino({ level: "silent" }));
+    ]);
 
     await expect(manager.deliverConfigurationChange({
       action: "reloaded",
@@ -202,7 +205,81 @@ describe("SurfaceManager", () => {
       addedWorkspaces: [{ id: "docs", name: "Docs", cwd: "/docs" }],
     })).rejects.toThrow("Surface 尚未全部启动");
   });
+
+  it("routes output by exact Surface and account", async () => {
+    const telegram = surface("telegram", "default", []);
+    const feishu = surface("feishu", "tenant-a", []);
+    const received: string[] = [];
+    telegram.output.handle = (event) => {
+      received.push(`telegram:${event.type}`);
+    };
+    feishu.output.handle = (event) => {
+      received.push(`feishu:${event.type}`);
+    };
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager([telegram, feishu], output);
+
+    output.publish({
+      type: "thread.status",
+      target: {
+        surface: "feishu",
+        accountId: "tenant-a",
+        conversationId: "chat-1",
+      },
+      threadId: "thread-1",
+      status: "idle",
+    });
+    await settle();
+
+    expect(received).toEqual(["feishu:thread.status"]);
+    await manager.stop();
+    await output.close();
+  });
+
+  it("ignores output for an unregistered account", async () => {
+    const telegram = surface("telegram", "default", []);
+    const received: OutputEvent[] = [];
+    telegram.output.handle = (event) => {
+      received.push(event);
+    };
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager([telegram], output);
+
+    output.publish({
+      type: "thread.status",
+      target: {
+        surface: "telegram",
+        accountId: "other",
+        conversationId: "chat-1",
+      },
+      threadId: "thread-1",
+      status: "idle",
+    });
+    await settle();
+
+    expect(received).toEqual([]);
+    await manager.stop();
+    await output.close();
+  });
+
+  it("rejects duplicate Surface account registrations", async () => {
+    const output = new EventBus<OutputEvent>(logger);
+
+    expect(() => createManager([
+      surface("telegram", "default", []),
+      surface("telegram", "default", []),
+    ], output)).toThrow("Surface 重复注册");
+
+    await output.close();
+  });
 });
+
+function createManager(
+  surfaces: SurfaceAdapter[],
+  output = new EventBus<OutputEvent>(logger),
+): SurfaceManager {
+  return new SurfaceManager(surfaces, output, logger);
+}
 
 function surface(
   id: string,
@@ -214,6 +291,9 @@ function surface(
     surface: id,
     accountId,
     interactions,
+    output: {
+      handle() {},
+    },
     async start() {
       calls.push(`start:${id}`);
       if (failures.failStart) {
@@ -228,4 +308,9 @@ function surface(
     },
     async deliverConfigurationChange() {},
   };
+}
+
+async function settle(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
 }
