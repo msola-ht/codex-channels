@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { parse } from "dotenv";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { configEventQueuePath, readConfigEvents } from "../scripts/config-event-queue.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { addWorkspaceToEnv, inspectWorkspaceConfig, readWorkspaceConfig, removeWorkspaceFromEnv } from "../scripts/workspace-config.mjs";
 
@@ -25,6 +26,7 @@ describe("workspace:add script", () => {
     mkdirSync(main);
     mkdirSync(added);
     const envPath = join(root, ".env");
+    const eventQueuePath = configEventQueuePath(root);
     writeFileSync(
       envPath,
       [
@@ -36,8 +38,8 @@ describe("workspace:add script", () => {
       { mode: 0o644 },
     );
 
-    const first = addWorkspaceToEnv({ envPath, cwd: added });
-    const second = addWorkspaceToEnv({ envPath, cwd: added });
+    const first = addWorkspaceToEnv({ envPath, cwd: added, eventQueuePath });
+    const second = addWorkspaceToEnv({ envPath, cwd: added, eventQueuePath });
     const config = readWorkspaceConfig(parse(readFileSync(envPath, "utf8")));
 
     expect(first).toMatchObject({
@@ -47,6 +49,9 @@ describe("workspace:add script", () => {
     expect(second).toMatchObject({ added: false, workspace: { id: "new-project" } });
     expect(config.defaultWorkspace.id).toBe("main");
     expect(config.workspaces).toHaveLength(2);
+    expect(readConfigEvents(eventQueuePath)).toMatchObject([
+      { type: "workspace-added", workspace: { id: "new-project", cwd: realpathSync(added) } },
+    ]);
     expect(statSync(envPath).mode & 0o777).toBe(0o600);
   });
 
@@ -311,5 +316,42 @@ describe("workspace:add script", () => {
       cwd: realpathSync(fallback),
     });
     expect(config.workspaces).toHaveLength(1);
+  });
+
+  it("does not mutate Workspace config when the event queue cannot be validated", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-workspace-remove-"));
+    temporaryDirectories.push(root);
+    const fallback = join(root, ".codex-connect", "workspace");
+    const project = join(root, "Project");
+    mkdirSync(fallback, { recursive: true });
+    mkdirSync(project);
+    const envPath = join(root, ".env");
+    const eventQueuePath = configEventQueuePath(root);
+    writeFileSync(
+      envPath,
+      [
+        `CODEX_WORKSPACES_JSON='${JSON.stringify([
+          { id: "codex-connect", name: ".codex-connect/workspace", cwd: fallback },
+          { id: "project", name: "Project", cwd: project },
+        ])}'`,
+        "CODEX_DEFAULT_WORKSPACE=codex-connect",
+        "",
+      ].join("\n"),
+    );
+    mkdirSync(join(root, "data"));
+    writeFileSync(eventQueuePath, "{broken");
+
+    expect(() => removeWorkspaceFromEnv({
+      envPath,
+      selector: "project",
+      fallbackDefaultWorkspace: {
+        id: "codex-connect",
+        name: ".codex-connect/workspace",
+        cwd: fallback,
+      },
+      eventQueuePath,
+    })).toThrow("不是有效 JSON");
+
+    expect(readWorkspaceConfig(parse(readFileSync(envPath, "utf8"))).workspaces).toHaveLength(2);
   });
 });

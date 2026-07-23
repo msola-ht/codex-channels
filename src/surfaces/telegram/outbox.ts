@@ -427,19 +427,15 @@ export class TelegramOutbox {
     text: string,
     replyMarkup?: InlineKeyboardMarkup,
   ): boolean {
-    return this.enqueue(chatId, async () => {
-      const chunks = formatTelegramPanelChunks(text);
-      for (const [index, chunk] of chunks.entries()) {
-        const finalChunk = index === chunks.length - 1;
-        await this.executor.call(
-          { chatId, operation: "sendMessage", critical: true },
-          () => this.api.sendMessage(chatId, chunk, {
-            ...htmlSendOptions(undefined, index > 0),
-            ...(finalChunk && replyMarkup ? { reply_markup: replyMarkup } : {}),
-          }),
-        );
-      }
-    }, true);
+    return this.enqueue(chatId, () => this.sendNotificationPanel(chatId, text, replyMarkup), true);
+  }
+
+  deliverPanel(
+    chatId: string,
+    text: string,
+    replyMarkup?: InlineKeyboardMarkup,
+  ): Promise<void> {
+    return this.runOrdered(chatId, () => this.sendNotificationPanel(chatId, text, replyMarkup));
   }
 
   private enqueue(chatId: string, run: () => Promise<void>, critical: boolean): boolean {
@@ -473,6 +469,24 @@ export class TelegramOutbox {
           "Telegram 输出失败",
         );
       }
+    }
+  }
+
+  private async sendNotificationPanel(
+    chatId: string,
+    text: string,
+    replyMarkup?: InlineKeyboardMarkup,
+  ): Promise<void> {
+    const chunks = formatTelegramPanelChunks(text);
+    for (const [index, chunk] of chunks.entries()) {
+      const finalChunk = index === chunks.length - 1;
+      await this.executor.call(
+        { chatId, operation: "sendMessage", critical: true },
+        () => this.api.sendMessage(chatId, chunk, {
+          ...htmlSendOptions(undefined, index > 0),
+          ...(finalChunk && replyMarkup ? { reply_markup: replyMarkup } : {}),
+        }),
+      );
     }
   }
 

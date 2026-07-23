@@ -1,5 +1,13 @@
 import { watchFile, unwatchFile } from "node:fs";
+import { dirname } from "node:path";
 
+import {
+  acknowledgeConfigEvents,
+  configEventQueuePath,
+  matchingWorkspaceConfigEvents,
+  readConfigEvents,
+  type WorkspaceAddedConfigEvent,
+} from "../scripts/config-event-queue.mjs";
 import { GatewayApplication } from "./bootstrap/index.js";
 import { ConfigurationError, loadRuntimeConfig } from "./config/index.js";
 import { createLogger } from "./observability/index.js";
@@ -7,6 +15,12 @@ import { createLogger } from "./observability/index.js";
 async function main(): Promise<void> {
   const runtime = loadRuntimeConfig();
   const config = runtime.config;
+  const eventQueuePath = runtime.envPath
+    ? configEventQueuePath(dirname(runtime.envPath))
+    : undefined;
+  const watchedPaths = [runtime.envPath, eventQueuePath].filter(
+    (path): path is string => path !== undefined,
+  );
   const logger = createLogger(config);
   const application = new GatewayApplication(config, logger);
   let stopping = false;
@@ -19,8 +33,8 @@ async function main(): Promise<void> {
       clearTimeout(reloadTimer);
       reloadTimer = undefined;
     }
-    if (runtime.envPath) {
-      unwatchFile(runtime.envPath);
+    for (const path of watchedPaths) {
+      unwatchFile(path);
     }
     process.removeListener("SIGHUP", scheduleReload);
   };
@@ -43,7 +57,12 @@ async function main(): Promise<void> {
     reloading = true;
     try {
       const next = loadRuntimeConfig();
-      const result = application.reloadConfig(next.config);
+      const pendingEvents = readPendingConfigEvents(eventQueuePath, logger);
+      const applicableEvents = matchingWorkspaceConfigEvents(pendingEvents, next.config.workspaces);
+      const result = application.reloadConfig(
+        next.config,
+        applicableEvents.map((event) => event.workspace),
+      );
       if (result.action === "reinstall") {
         logger.error(
           { changes: result.changes },
@@ -66,6 +85,22 @@ async function main(): Promise<void> {
         { changes: result.changes },
         result.changes.length > 0 ? "Gateway 配置已热加载" : "Gateway 配置没有变化",
       );
+      if (eventQueuePath && applicableEvents.length > 0) {
+        try {
+          await application.deliverAddedWorkspaceNotifications(
+            applicableEvents.map((event) => event.workspace),
+          );
+          acknowledgeConfigEvents(
+            eventQueuePath,
+            applicableEvents.map((event) => event.id),
+          );
+        } catch (error) {
+          logger.warn(
+            { err: error, events: applicableEvents.length },
+            "配置事件投递或确认失败；事件已保留，等待下次配置加载",
+          );
+        }
+      }
     } catch (error) {
       application.notifyConfigReloadFailure();
       logger.error({ err: error }, "Gateway 配置热加载失败，继续使用现有配置");
@@ -100,14 +135,31 @@ async function main(): Promise<void> {
 
   await application.start();
   started = true;
-  if (runtime.envPath) {
-    watchFile(runtime.envPath, { interval: 500, persistent: false }, (current, previous) => {
-      if (current.mtimeMs !== previous.mtimeMs || current.size !== previous.size || current.ino !== previous.ino) {
-        scheduleReload();
-      }
-    });
+  if (watchedPaths.length > 0) {
+    for (const path of watchedPaths) {
+      watchFile(path, { interval: 500, persistent: false }, (current, previous) => {
+        if (current.mtimeMs !== previous.mtimeMs || current.size !== previous.size || current.ino !== previous.ino) {
+          scheduleReload();
+        }
+      });
+    }
     reloadPending = false;
     await reload();
+  }
+}
+
+function readPendingConfigEvents(
+  queuePath: string | undefined,
+  logger: ReturnType<typeof createLogger>,
+): WorkspaceAddedConfigEvent[] {
+  if (!queuePath) {
+    return [];
+  }
+  try {
+    return readConfigEvents(queuePath);
+  } catch (error) {
+    logger.error({ err: error }, "读取配置事件队列失败；事件将保留以便后续重试");
+    return [];
   }
 }
 

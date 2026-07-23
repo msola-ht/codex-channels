@@ -161,6 +161,19 @@ export class TelegramSurface {
     }
   }
 
+  async deliverConfigurationChange(change: SurfaceConfigurationChange): Promise<void> {
+    const replyMarkup = workspaceSwitchKeyboard(change.addedWorkspaces);
+    const text = formatConfigurationChange(change);
+    await Promise.all(
+      [...this.notificationRecipients].map((chatId) =>
+        this.outbox.deliverPanel(
+          String(chatId),
+          text,
+          replyMarkup.inline_keyboard.length > 0 ? replyMarkup : undefined,
+        )),
+    );
+  }
+
   private registerHandlers(): void {
     this.bot.command("whoami", (context) => context.reply(`你的 Telegram 用户 ID：${context.from?.id ?? "未知"}`));
     this.bot.command(["start", "help"], (context) =>

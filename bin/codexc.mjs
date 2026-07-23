@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import { parse } from "dotenv";
 
+import { configEventQueuePath } from "../scripts/config-event-queue.mjs";
 import {
   initializeUserData,
   packageDir,
@@ -129,6 +130,7 @@ function runGateway(args) {
 
 function workspace(args) {
   const runtime = requireUserConfig();
+  const eventQueuePath = configEventQueuePath(runtime.dataDir);
   const fallbackDefaultWorkspace = {
     cwd: join(runtime.dataDir, "workspace"),
     id: "codex-connect",
@@ -144,6 +146,7 @@ function workspace(args) {
       ...(options.pruneMissing ? { pruneMissing: true } : {}),
       ...(options.restoreDefault ? { restoreDefault: true } : {}),
       fallbackDefaultWorkspace,
+      eventQueuePath,
     });
     console.log(result.added ? "Workspace 已添加。" : "Workspace 已存在。");
     console.log(`${result.workspace.name} (${result.workspace.id})`);
@@ -168,6 +171,7 @@ function workspace(args) {
       envPath: runtime.envPath,
       selector: args[1],
       fallbackDefaultWorkspace,
+      eventQueuePath,
     });
     console.log(`Workspace 注册已删除：${result.removedWorkspace.name} (${result.removedWorkspace.id})`);
     console.log(result.removedWorkspace.cwd);

@@ -69,4 +69,35 @@ export class SurfaceManager {
       }
     }
   }
+
+  async deliverConfigurationChange(change: SurfaceConfigurationChange): Promise<void> {
+    if (this.started.length !== this.surfaces.length) {
+      throw new Error("Surface 尚未全部启动，不能确认持久化配置事件");
+    }
+    const surfaces = [...this.started];
+    const results = await Promise.allSettled(
+      surfaces.map(async (surface) => {
+        await surface.deliverConfigurationChange(change);
+        return surface;
+      }),
+    );
+    const failures = results.flatMap((result, index) => {
+      if (result.status === "fulfilled") {
+        return [];
+      }
+      const surface = surfaces[index]!;
+      this.logger.warn(
+        {
+          errorType: result.reason instanceof Error ? result.reason.name : typeof result.reason,
+          surface: surface.surface,
+          accountId: surface.accountId,
+        },
+        "Surface 持久化配置事件投递失败",
+      );
+      return [result.reason];
+    });
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "部分 Surface 未收到配置事件");
+    }
+  }
 }

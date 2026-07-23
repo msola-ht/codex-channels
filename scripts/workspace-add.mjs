@@ -1,5 +1,6 @@
 import { dirname, resolve } from "node:path";
 
+import { configEventQueuePath } from "./config-event-queue.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
 import { addWorkspaceToEnv } from "./workspace-config.mjs";
 
@@ -19,6 +20,7 @@ const result = addWorkspaceToEnv({
     id: "codex-connect",
     name: ".codex-connect/workspace",
   },
+  eventQueuePath: configEventQueuePath(dirname(envPath)),
 });
 
 for (const removed of result.removedWorkspaces) {

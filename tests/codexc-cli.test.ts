@@ -9,6 +9,12 @@ import { parse } from "dotenv";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 
+import {
+  acknowledgeConfigEvents,
+  configEventQueuePath,
+  matchingWorkspaceConfigEvents,
+  readConfigEvents,
+} from "../scripts/config-event-queue.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { readWorkspaceConfig } from "../scripts/workspace-config.mjs";
 
@@ -59,6 +65,7 @@ describe("codexc CLI", () => {
     });
 
     const envPath = join(home, ".env");
+    const eventQueuePath = configEventQueuePath(home);
     const parsed = parse(readFileSync(envPath, "utf8"));
     const config = readWorkspaceConfig(parsed);
     expect(initialized).toContain("Codex Connect 已初始化");
@@ -73,6 +80,10 @@ describe("codexc CLI", () => {
       realpathSync(join(home, "workspace")),
       realpathSync(first),
       realpathSync(second),
+    ]);
+    expect(readConfigEvents(eventQueuePath)).toMatchObject([
+      { workspace: { id: "first-project", cwd: realpathSync(first) } },
+      { workspace: { id: "second-project", cwd: realpathSync(second) } },
     ]);
     expect(parsed.CODEX_SOCKET_PATH).toBe(join(home, "runtime", "codex-app-server.sock"));
     expect(parsed.STATE_DATABASE_PATH).toBe(join(home, "data", "gateway.sqlite3"));
@@ -203,6 +214,46 @@ describe("codexc CLI", () => {
     expect(relisted).not.toContain("temporary-project");
     expect(rejected.status).toBe(1);
     expect(rejected.stderr).toContain("固定默认 Workspace 不能删除");
+    expect(readConfigEvents(configEventQueuePath(home))).toEqual([]);
+  });
+
+  it("preserves a re-added Workspace notification when config changes coalesce", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const project = join(root, "Project");
+    mkdirSync(project);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_ENV_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: root, env: environment });
+    execFileSync(process.execPath, [cli, "ws", "add"], { cwd: project, env: environment });
+    const queuePath = configEventQueuePath(home);
+    acknowledgeConfigEvents(
+      queuePath,
+      readConfigEvents(queuePath).map((event) => event.id),
+    );
+    const before = readFileSync(join(home, ".env"), "utf8");
+
+    execFileSync(process.execPath, [cli, "ws", "remove", "project"], {
+      cwd: root,
+      env: environment,
+    });
+    execFileSync(process.execPath, [cli, "ws", "add"], {
+      cwd: project,
+      env: environment,
+    });
+
+    const after = readFileSync(join(home, ".env"), "utf8");
+    const config = readWorkspaceConfig(parse(after));
+    const events = readConfigEvents(queuePath);
+    expect(after).toBe(before);
+    expect(events).toHaveLength(1);
+    expect(matchingWorkspaceConfigEvents(events, config.workspaces)).toMatchObject([
+      { type: "workspace-added", workspace: { id: "project", cwd: realpathSync(project) } },
+    ]);
   });
 
   it("runs remote in the invocation directory unless a workspace is explicit", () => {

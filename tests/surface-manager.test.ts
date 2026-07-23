@@ -112,6 +112,37 @@ describe("SurfaceManager", () => {
       "stop:telegram",
     ]);
   });
+
+  it("reports when a Surface fails to deliver a persistent configuration notification", async () => {
+    const calls: string[] = [];
+    const accepted = surface("telegram", "default", calls);
+    const rejected = surface("feishu", "tenant-a", calls);
+    rejected.deliverConfigurationChange = async () => {
+      throw new Error("delivery failed");
+    };
+    const manager = new SurfaceManager([accepted, rejected], pino({ level: "silent" }));
+    await manager.start();
+
+    await expect(manager.deliverConfigurationChange({
+      action: "reloaded",
+      changes: ["Workspace"],
+      addedWorkspaces: [{ id: "docs", name: "Docs", cwd: "/docs" }],
+    })).rejects.toThrow("部分 Surface 未收到配置事件");
+
+    await manager.stop();
+  });
+
+  it("does not confirm persistent notifications before all Surfaces start", async () => {
+    const manager = new SurfaceManager([
+      surface("telegram", "default", []),
+    ], pino({ level: "silent" }));
+
+    await expect(manager.deliverConfigurationChange({
+      action: "reloaded",
+      changes: ["Workspace"],
+      addedWorkspaces: [{ id: "docs", name: "Docs", cwd: "/docs" }],
+    })).rejects.toThrow("Surface 尚未全部启动");
+  });
 });
 
 function surface(
@@ -136,5 +167,6 @@ function surface(
         throw new Error("stop failed");
       }
     },
+    async deliverConfigurationChange() {},
   };
 }

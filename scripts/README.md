@@ -5,6 +5,7 @@
 ## 配置与 Workspace
 
 - `runtime-config.mjs`：解析包目录、用户数据目录和运行时路径，并初始化 `.codex-connect`。
+- `config-event-queue.mjs`：以有界、版本化、原子更新的队列保存待投递配置事件，保证 Gateway 重启窗口内的 Workspace 新增通知可恢复。
 - `telegram-setup.mjs`：独立完成 Telegram Bot Token 验证、一次性私聊配对、用户 ID 获取和用户配置写入；新建 Bot 仅引导使用官方 BotFather。
 - `workspace-config.mjs`：读取、检查和原子更新环境文件中的 Workspace 配置；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。
 - `workspace-add.mjs`：把指定目录或命令调用目录注册为 Workspace，支持 `--prune-missing` 清理失效配置和 `--restore-default` 恢复默认目录。
@@ -31,4 +32,4 @@
 - `install-systemd.mjs`：渲染并安装 Linux systemd 用户服务 unit。
 - `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载两个 systemd 用户服务；日常重启只更新 Gateway，用户数据始终保留。
 
-脚本不得把凭据写入 npm 安装目录；用户配置、SQLite、Socket 和日志必须留在用户级 `.codex-connect`。
+脚本不得把凭据写入 npm 安装目录；用户配置、SQLite、配置事件队列、Socket 和日志必须留在用户级 `.codex-connect`。

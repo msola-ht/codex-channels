@@ -15,4 +15,5 @@ export interface SurfaceAdapter {
   start(): Promise<void>;
   stop(): Promise<void>;
   configurationChanged?(change: SurfaceConfigurationChange): void;
+  deliverConfigurationChange(change: SurfaceConfigurationChange): Promise<void>;
 }

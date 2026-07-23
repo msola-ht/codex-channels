@@ -11,6 +11,13 @@ import { basename, isAbsolute, resolve } from "node:path";
 
 import { parse } from "dotenv";
 
+import {
+  acknowledgeConfigEvents,
+  discardWorkspaceConfigEvents,
+  enqueueWorkspaceAdded,
+  readConfigEvents,
+} from "./config-event-queue.mjs";
+
 export function readWorkspaceConfig(env) {
   const parsed = parseWorkspaceConfig(env);
   const workspaces = parsed.workspaces.map((workspace) => {
@@ -54,6 +61,7 @@ export function addWorkspaceToEnv({
   pruneMissing = false,
   restoreDefault = false,
   fallbackDefaultWorkspace,
+  eventQueuePath,
 }) {
   const content = readFileSync(envPath, "utf8");
   chmodSync(envPath, 0o600);
@@ -115,12 +123,30 @@ export function addWorkspaceToEnv({
     || previousDefault.name !== defaultWorkspace.name
     || previousDefault.cwd !== defaultWorkspace.cwd;
   if (added || removedWorkspaces.length > 0 || defaultChanged) {
-    const json = JSON.stringify(workspaces).replaceAll("'", "\\u0027");
-    let updated = setEnvValue(content, "CODEX_WORKSPACES_JSON", `'${json}'`);
-    updated = setEnvValue(updated, "CODEX_DEFAULT_WORKSPACE", defaultWorkspace.id);
-    const temporaryPath = `${envPath}.${process.pid}.tmp`;
-    writeFileSync(temporaryPath, updated, { mode: 0o600 });
-    renameSync(temporaryPath, envPath);
+    if (eventQueuePath && removedWorkspaces.length > 0 && !added) {
+      readConfigEvents(eventQueuePath);
+    }
+    const queuedEvent = added && eventQueuePath
+      ? enqueueWorkspaceAdded(eventQueuePath, workspace)
+      : undefined;
+    try {
+      writeWorkspaceConfig(envPath, content, workspaces, defaultWorkspace.id);
+    } catch (error) {
+      if (queuedEvent) {
+        try {
+          acknowledgeConfigEvents(eventQueuePath, [queuedEvent.id]);
+        } catch {
+          // 保留原始配置写入错误；无效事件不会在 Workspace 生效前被消费。
+        }
+      }
+      throw error;
+    }
+    if (eventQueuePath && removedWorkspaces.length > 0) {
+      discardWorkspaceConfigEvents(
+        eventQueuePath,
+        removedWorkspaces.map((removed) => removed.id),
+      );
+    }
   }
   return {
     added,
@@ -135,6 +161,7 @@ export function removeWorkspaceFromEnv({
   envPath,
   selector,
   fallbackDefaultWorkspace,
+  eventQueuePath,
 }) {
   const content = readFileSync(envPath, "utf8");
   chmodSync(envPath, 0o600);
@@ -157,7 +184,13 @@ export function removeWorkspaceFromEnv({
     const fallback = ensureFallbackWorkspace(fallbackDefaultWorkspace);
     defaultWorkspace = upsertFallbackWorkspace(workspaces, fallback);
   }
+  if (eventQueuePath) {
+    readConfigEvents(eventQueuePath);
+  }
   writeWorkspaceConfig(envPath, content, workspaces, defaultWorkspace.id);
+  if (eventQueuePath) {
+    discardWorkspaceConfigEvents(eventQueuePath, [selected.id]);
+  }
   return {
     removedWorkspace: selected,
     defaultWorkspace,

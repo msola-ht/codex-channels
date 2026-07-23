@@ -270,7 +270,7 @@ interface ConversationBinding {
 }
 ```
 
-当前实现通过 SQLite `StateStore` 持久化 Workspace 选择和最小绑定，以便 Gateway 重启后恢复 Telegram 的当前 Workspace 与 Thread；不保存 Codex 会话内容。
+当前实现通过 SQLite `StateStore` 持久化 Workspace 选择和最小绑定，以便 Gateway 重启后恢复 Telegram 的当前 Workspace 与 Thread；不保存 Codex 会话内容。本机 CLI 产生的待投递配置生命周期事件使用独立的有界、版本化 JSON 队列，Gateway 通过 Surface 平台 API 实际投递成功后按事件 ID 确认，避免重启窗口造成通知丢失。
 
 ### 6.4 Internal Event Bus
 
@@ -481,7 +481,7 @@ AppServerPool
 
 正式本机入口通过 npm 安装为 `codexc`（同时提供 `codex-connect` 长别名）。代码位于 npm 包安装目录，用户配置与运行状态使用 Node `os.homedir()` 定位到 `~/.codex-connect`，避免 npm 升级覆盖 Token、Workspace Registry、SQLite、Socket 或日志。源码开发模式仍使用仓库内 `.env`，两种模式共用同一 Gateway 实现和 App Server 协议。
 
-`~/.codex-connect` 权限为 `0700`，`.env` 和 SQLite 为 `0600`。其中 `workspace/` 是不包含凭据和运行状态的默认 Workspace；其余目录只保存 Gateway 配置、最小业务绑定与进程运行文件，不保存或复制 Codex Thread/Turn/Item 历史。macOS 与 Linux 均可通过 `codexc service install` 安装独立用户服务，分别由 launchd 与 systemd 管理。Windows 可以复用用户目录约定，但当前 Unix WebSocket Transport 尚未适配，不能宣称运行支持。未来的平台 Transport 和系统服务适配不得改变配置目录与模块边界。
+`~/.codex-connect` 权限为 `0700`，`.env`、SQLite 和 `data/config-events.json` 为 `0600`。其中 `workspace/` 是不包含凭据和运行状态的默认 Workspace；配置事件队列最多保存 100 条 Workspace 元数据事件，不保存消息正文、凭据或会话内容；其余目录只保存 Gateway 配置、最小业务绑定与进程运行文件，不保存或复制 Codex Thread/Turn/Item 历史。macOS 与 Linux 均可通过 `codexc service install` 安装独立用户服务，分别由 launchd 与 systemd 管理。Windows 可以复用用户目录约定，但当前 Unix WebSocket Transport 尚未适配，不能宣称运行支持。未来的平台 Transport 和系统服务适配不得改变配置目录与模块边界。
 
 ### 9.2 可替换存储
 

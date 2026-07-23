@@ -12,7 +12,9 @@
 `surface + accountId` 标识，分别提供启停、可选配置变更通知与 `InteractionPort`；Bootstrap 只做编译期显式注册。
 `stop()` 必须可在部分启动后安全调用，并保持幂等。
 配置变更通知使用结构化动作区分热加载、自动重启、需要重装和加载失败；Surface 只渲染结果，
-不得接收原始配置值或异常详情。
+不得接收原始配置值或异常详情。普通生命周期通知可通过可选的 `configurationChanged` 异步入队；
+`deliverConfigurationChange` 必须等待平台 API 实际发送成功，失败时抛出错误，以便 Bootstrap 保留
+尚未确认的持久化配置事件。
 
 新增 Surface 时应实现统一输入、输出和审批边界，通过 Application/Core 接入；输出消费者必须校验
 目标 Surface 与账号，避免跨平台串台。Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台

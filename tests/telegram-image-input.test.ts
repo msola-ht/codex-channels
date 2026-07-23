@@ -268,7 +268,7 @@ describe("Telegram image input", () => {
     const { surface, output, sentTexts } = createSurface(vi.fn(), vi.fn());
     surface.replaceNotificationRecipients(new Set([123]));
 
-    surface.configurationChanged({
+    await surface.deliverConfigurationChange({
       action: "reloaded",
       changes: ["Workspace"],
       addedWorkspaces: [{

@@ -120,6 +120,23 @@ describe("TelegramOutbox", () => {
     });
   });
 
+  it("waits for persistent panel delivery and propagates API failures", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    await expect(outbox.deliverPanel(
+      target.conversationId,
+      "Workspace 已添加",
+    )).resolves.toBeUndefined();
+    api.rejectHtmlMessages = true;
+    await expect(outbox.deliverPanel(
+      target.conversationId,
+      "Workspace 已添加",
+    )).rejects.toThrow("can't parse entities");
+
+    await outbox.close();
+  });
+
   it("ignores output for another Surface or Telegram account", async () => {
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);

@@ -263,7 +263,10 @@ export class GatewayApplication {
     }
   }
 
-  reloadConfig(next: GatewayConfig): ConfigReloadResult {
+  reloadConfig(
+    next: GatewayConfig,
+    pendingAddedWorkspaces: readonly GatewayConfig["workspaces"][number][] = [],
+  ): ConfigReloadResult {
     const result = classifyConfigReload(this.config, next);
     if (result.action === "reinstall") {
       this.surfaceManager.configurationChanged({
@@ -290,9 +293,12 @@ export class GatewayApplication {
       return result;
     }
 
-    const addedWorkspaces = result.changes.includes("Workspace")
-      ? findAddedWorkspaces(this.config.workspaces, next.workspaces)
-      : [];
+    const addedWorkspaces = immediateAddedWorkspaceNotifications(
+      this.config.workspaces,
+      next.workspaces,
+      result.changes,
+      pendingAddedWorkspaces,
+    );
     if (result.changes.includes("Workspace")) {
       this.workspaces.replace(next.workspaces, next.defaultWorkspaceId);
     }
@@ -301,7 +307,8 @@ export class GatewayApplication {
       this.telegram.replaceNotificationRecipients(next.telegramAllowedUserIds);
     }
     this.config = next;
-    if (result.changes.length > 0) {
+    const nonWorkspaceChanges = result.changes.filter((change) => change !== "Workspace");
+    if (nonWorkspaceChanges.length > 0 || addedWorkspaces.length > 0) {
       this.surfaceManager.configurationChanged({
         action: "reloaded",
         changes: result.changes,
@@ -309,6 +316,16 @@ export class GatewayApplication {
       });
     }
     return result;
+  }
+
+  deliverAddedWorkspaceNotifications(
+    workspaces: readonly GatewayConfig["workspaces"][number][],
+  ): Promise<void> {
+    return this.surfaceManager.deliverConfigurationChange({
+      action: "reloaded",
+      changes: ["Workspace"],
+      addedWorkspaces: workspaces,
+    });
   }
 
   notifyConfigReloadFailure(): void {
@@ -499,6 +516,20 @@ function findAddedWorkspaces(
 ): GatewayConfig["workspaces"] {
   const currentIds = new Set(current.map((workspace) => workspace.id));
   return next.filter((workspace) => !currentIds.has(workspace.id));
+}
+
+function immediateAddedWorkspaceNotifications(
+  current: ReadonlyArray<GatewayConfig["workspaces"][number]>,
+  next: ReadonlyArray<GatewayConfig["workspaces"][number]>,
+  changes: readonly string[],
+  pending: ReadonlyArray<GatewayConfig["workspaces"][number]>,
+): GatewayConfig["workspaces"] {
+  const pendingIds = new Set(pending.map((workspace) => workspace.id));
+  return (
+    changes.includes("Workspace") ? findAddedWorkspaces(current, next) : []
+  ).filter(
+    (workspace) => !pendingIds.has(workspace.id),
+  );
 }
 
 function intersectNumberSets(
