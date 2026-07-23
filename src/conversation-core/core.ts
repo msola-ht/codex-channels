@@ -292,7 +292,11 @@ export class ConversationCore {
           ...(error ? { error } : {}),
           ...(tokenUsage ? { tokenUsage } : {}),
           ...(modelSettings
-            ? { model: modelSettings.model, effort: modelSettings.effort }
+            ? {
+                model: modelSettings.model,
+                effort: modelSettings.effort,
+                serviceTier: modelSettings.serviceTier,
+              }
             : {}),
           ...(weeklyLimit ? { weeklyLimit } : {}),
         });

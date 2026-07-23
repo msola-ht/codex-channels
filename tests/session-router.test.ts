@@ -56,6 +56,7 @@ describe("SessionRouter", () => {
           thread: thread(threadId, { type: "idle" }),
           model: "gpt-main",
           reasoningEffort: "high",
+          serviceTier: "fast",
         };
       },
     } as unknown as CodexAppServerClient;
@@ -65,10 +66,22 @@ describe("SessionRouter", () => {
 
     expect(binding.threadId).toBe("idle");
     expect(resumed).toEqual(["idle"]);
-    expect(router.modelSettings(target)).toEqual({ model: "gpt-main", effort: "high" });
+    expect(router.modelSettings(target)).toEqual({
+      model: "gpt-main",
+      effort: "high",
+      serviceTier: "fast",
+    });
 
-    router.updateModelSettings("idle", { model: "gpt-updated", effort: "xhigh" });
-    expect(router.modelSettings(target)).toEqual({ model: "gpt-updated", effort: "xhigh" });
+    router.updateModelSettings("idle", {
+      model: "gpt-updated",
+      effort: "xhigh",
+      serviceTier: "default",
+    });
+    expect(router.modelSettings(target)).toEqual({
+      model: "gpt-updated",
+      effort: "xhigh",
+      serviceTier: "default",
+    });
   });
 
   it("unsubscribes before forcing a new thread", async () => {

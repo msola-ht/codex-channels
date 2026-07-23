@@ -620,6 +620,7 @@ describe("TelegramOutbox", () => {
       },
       model: "gpt-5.6-sol",
       effort: "medium",
+      serviceTier: "fast",
       weeklyLimit: {
         usedPercent: 42,
         windowDurationMins: 10_080,
@@ -635,6 +636,7 @@ describe("TelegramOutbox", () => {
         "<b>上下文：24.6 K / 258 K（9.5%）</b>",
         "<b>当前模型：</b>gpt-5.6-sol",
         "<b>思考强度：</b>medium",
+        "<b>Fast 模式：</b>开启",
         "<b>周限：</b>已使用 42%",
       ].join("\n"),
     ]);

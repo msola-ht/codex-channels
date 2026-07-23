@@ -94,8 +94,11 @@ export class GatewayApplication {
         const effort = typeof settings?.effort === "string" || settings?.effort === null
           ? settings.effort
           : undefined;
-        if (threadId && model && effort !== undefined) {
-          this.router.updateModelSettings(threadId, { model, effort });
+        const serviceTier = typeof settings?.serviceTier === "string" || settings?.serviceTier === null
+          ? settings.serviceTier
+          : undefined;
+        if (threadId && model && effort !== undefined && serviceTier !== undefined) {
+          this.router.updateModelSettings(threadId, { model, effort, serviceTier });
         }
       }
       if (isThreadUnavailable(notification.method)) {

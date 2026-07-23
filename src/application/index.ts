@@ -7,6 +7,8 @@ export {
 } from "./conversation-service.js";
 export {
   ModelSelectionService,
+  fastServiceTierId,
+  isFastServiceTier,
   resolveEffort,
   resolveModel,
   type ModelSelectionState,

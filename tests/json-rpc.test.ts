@@ -348,7 +348,14 @@ describe("JsonRpcClient", () => {
       ],
       "codex_connect_gateway:request-1",
       "/tmp/project",
-      { model: "gpt-selected", effort: "high" },
+      { model: "gpt-selected", effort: "high", serviceTier: null },
+    );
+    await client.startTurn(
+      "thread-1",
+      [{ type: "text", text: "开启 Fast", text_elements: [] }],
+      "codex_connect_gateway:request-fast",
+      "/tmp/project",
+      { serviceTier: "priority" },
     );
     await client.steerTurn(
       "thread-1",
@@ -367,6 +374,12 @@ describe("JsonRpcClient", () => {
         cwd: "/tmp/project",
         model: "gpt-selected",
         effort: "high",
+        serviceTier: null,
+      });
+    expect(transport.sent.filter((message) => message.method === "turn/start")[1]?.params)
+      .toMatchObject({
+        clientUserMessageId: "codex_connect_gateway:request-fast",
+        serviceTier: "priority",
       });
     expect(transport.sent.find((message) => message.method === "turn/steer")?.params)
       .toMatchObject({ clientUserMessageId: "codex_connect_gateway:request-2" });

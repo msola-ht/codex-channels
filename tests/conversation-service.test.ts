@@ -11,6 +11,24 @@ const main = { id: "main", name: "Main", cwd: "/workspace/main" };
 const other = { id: "other", name: "Other", cwd: "/workspace/other" };
 
 describe("ConversationService model selection", () => {
+  it("allows read-only Fast status during an active turn but blocks switching", async () => {
+    const selectFastMode = vi.fn().mockResolvedValue({ serviceTier: "fast" });
+    const service = new ConversationService(
+      {} as CodexAppServerClient,
+      {} as SessionRouter,
+      {
+        activeTurn: () => ({ threadId: "thread-1", turnId: "turn-1" }),
+      } as unknown as ConversationCore,
+      { selectFastMode } as unknown as ModelSelectionService,
+    );
+
+    await service.selectFastMode(target, "status");
+    await expect(service.selectFastMode(target, "off"))
+      .rejects.toThrow("当前任务运行中");
+    expect(selectFastMode).toHaveBeenCalledTimes(1);
+    expect(selectFastMode).toHaveBeenCalledWith(target, "status");
+  });
+
   it("passes pending model settings to the next turn and clears them after success", async () => {
     const startTurn = vi.fn().mockResolvedValue({ turn: { id: "turn-1" } });
     const markApplied = vi.fn();

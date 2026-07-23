@@ -10,6 +10,7 @@ import type { TelegramAccessPolicy, Workspace } from "../../policy/index.js";
 import {
   formatMcpServers,
   formatDiff,
+  formatFastModeState,
   formatLimits,
   formatModels,
   formatPermissions,
@@ -151,6 +152,7 @@ export class TelegramSurface {
           "/review [branch <分支>|commit <SHA>|custom <说明>]",
           "/model [序号|模型 ID|名称]",
           "/effort [序号|档位]",
+          "/fast [on|off|status]",
           "/skills · /mcp · /plugins · /usage · /limits · /permissions",
           "/diff · /plan",
           "/goal [set <目标>|clear]",
@@ -251,6 +253,13 @@ export class TelegramSurface {
         ? await this.service.selectEffort(target(context), selector)
         : await this.service.modelState(target(context));
       await this.replyChunks(context, formatReasoningEfforts(state));
+    });
+    this.bot.command("fast", async (context) => {
+      const state = await this.service.selectFastMode(
+        target(context),
+        commandArguments(context),
+      );
+      await this.replyChunks(context, formatFastModeState(state));
     });
     this.bot.command("skills", async (context) => {
       await this.replyChunks(context, formatSkills(await this.service.listSkills(target(context))));

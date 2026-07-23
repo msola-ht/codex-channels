@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatContextUsage,
   formatDiff,
+  formatFastModeState,
   formatModels,
   formatPlan,
   formatReasoningEfforts,
@@ -15,7 +16,13 @@ import {
 } from "../src/surfaces/telegram/format.js";
 import type { Model } from "../src/codex-protocol/index.js";
 
-function model(name: string, efforts: string[], defaultEffort: string, isDefault = false): Model {
+function model(
+  name: string,
+  efforts: string[],
+  defaultEffort: string,
+  isDefault = false,
+  supportsFast = false,
+): Model {
   return {
     id: name,
     model: name,
@@ -32,9 +39,11 @@ function model(name: string, efforts: string[], defaultEffort: string, isDefault
     defaultReasoningEffort: defaultEffort,
     inputModalities: ["text"],
     supportsPersonality: true,
-    additionalSpeedTiers: [],
-    serviceTiers: [],
-    defaultServiceTier: null,
+    additionalSpeedTiers: supportsFast ? ["fast"] : [],
+    serviceTiers: supportsFast
+      ? [{ id: "priority", name: "Fast", description: "1.5x speed" }]
+      : [],
+    defaultServiceTier: "default",
     isDefault,
   };
 }
@@ -78,14 +87,25 @@ describe("turn artifact formatting", () => {
 describe("model formatting", () => {
   const models = [
     model("gpt-main", ["low", "medium", "high"], "medium", true),
-    model("gpt-fast", ["low", "high"], "low"),
+    model("gpt-fast", ["low", "high"], "low", false, true),
   ];
 
   it("marks the selected model and explains how to switch", () => {
-    const text = formatModels({ models, model: "gpt-fast", effort: "high", pending: true });
+    const text = formatModels({
+      models,
+      model: "gpt-fast",
+      effort: "high",
+      serviceTier: "priority",
+      pending: true,
+      modelPending: false,
+      effortPending: false,
+      serviceTierPending: true,
+    });
 
-    expect(text).toContain("当前模型：gpt-fast（下一次 Turn 生效）");
-    expect(text).toContain("2. gpt-fast · gpt-fast ← 当前");
+    expect(text).toContain("当前模型：gpt-fast");
+    expect(text).not.toContain("当前模型：gpt-fast（下一次 Turn 生效）");
+    expect(text).toContain("2. gpt-fast · gpt-fast · 支持 Fast ← 当前");
+    expect(text).toContain("Fast 模式：开启（下一次 Turn 生效）");
     expect(text).toContain("/model <序号、模型 ID 或名称>");
   });
 
@@ -94,12 +114,33 @@ describe("model formatting", () => {
       models,
       model: "gpt-fast",
       effort: "high",
+      serviceTier: "default",
       pending: false,
+      modelPending: false,
+      effortPending: false,
+      serviceTierPending: false,
     });
 
     expect(text).toContain("2. high ← 当前");
     expect(text).not.toContain("medium description");
     expect(text).toContain("/effort <序号或档位>");
+  });
+
+  it("shows Fast mode status and switch syntax", () => {
+    const text = formatFastModeState({
+      models,
+      model: "gpt-fast",
+      effort: "high",
+      serviceTier: "priority",
+      pending: false,
+      modelPending: false,
+      effortPending: false,
+      serviceTierPending: false,
+    });
+
+    expect(text).toContain("Fast 模式：开启");
+    expect(text).toContain("模型支持：支持 Fast");
+    expect(text).toContain("/fast [on|off|status]");
   });
 });
 
@@ -131,7 +172,10 @@ describe("formatStartupNotification", () => {
         workspaceId: "main",
         model: "gpt-main",
         effort: "high",
+        serviceTier: "priority",
         modelPending: false,
+        effortPending: false,
+        fastModePending: false,
         weeklyLimit: {
           usedPercent: 42,
           windowDurationMins: 10_080,
@@ -178,7 +222,10 @@ describe("formatStartupNotification", () => {
         workspaceId: "main",
         model: "gpt-main",
         effort: null,
+        serviceTier: null,
         modelPending: false,
+        effortPending: false,
+        fastModePending: false,
       },
       {
         platform: "freebsd",
@@ -193,6 +240,7 @@ describe("formatStartupNotification", () => {
     expect(text).toContain("│ freebsd · x64");
     expect(text).toContain("│ UA · App Server 未返回");
     expect(text).toContain("│ Thread · 尚未绑定");
+    expect(text).toContain("│ Fast 模式 · 未知");
   });
 });
 
@@ -280,7 +328,10 @@ describe("formatStatus", () => {
       cwd: "/tmp/project",
       model: "gpt-main",
       effort: "high",
+      serviceTier: "priority",
       modelPending: false,
+      effortPending: false,
+      fastModePending: false,
       tokenUsage: {
         total: {
           totalTokens: 1_250_000,
@@ -308,6 +359,7 @@ describe("formatStatus", () => {
     expect(text).toContain("模型上下文窗口容量：200 K");
     expect(text).toContain("模型：gpt-main");
     expect(text).toContain("思考强度：high");
+    expect(text).toContain("Fast 模式：开启");
   });
 
   it("explains when a bound thread has not emitted token statistics", () => {
@@ -318,9 +370,24 @@ describe("formatStatus", () => {
       cwd: "/tmp/project",
       model: "gpt-main",
       effort: null,
+      serviceTier: "default",
       modelPending: false,
+      effortPending: false,
+      fastModePending: false,
     }))
       .toContain("等待 App Server 推送统计");
+    expect(formatStatus({
+      workspaceId: "main",
+      workspaceName: "Main",
+      threadId: "thread-1",
+      cwd: "/tmp/project",
+      model: "gpt-main",
+      effort: null,
+      serviceTier: null,
+      modelPending: false,
+      effortPending: false,
+      fastModePending: false,
+    })).toContain("Fast 模式：关闭");
   });
 });
 
@@ -349,6 +416,7 @@ describe("formatContextUsage", () => {
       {
         model: "gpt-main",
         effort: "high",
+        serviceTier: "priority",
         weeklyLimit: {
           usedPercent: 42,
           windowDurationMins: 10_080,
@@ -359,6 +427,7 @@ describe("formatContextUsage", () => {
       "上下文：12.5 K / 200 K（6.3%）",
       "当前模型：gpt-main",
       "思考强度：high",
+      "Fast 模式：开启",
       "周限：已使用 42%",
     ].join("\n"));
   });

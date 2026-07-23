@@ -16,6 +16,7 @@ const commands = [
   { command: "review", description: "启动代码审查" },
   { command: "model", description: "查看或切换模型" },
   { command: "effort", description: "查看或切换思考强度" },
+  { command: "fast", description: "查看或切换 Fast 模式" },
   { command: "skills", description: "列出 Skills" },
   { command: "mcp", description: "列出 MCP Servers" },
   { command: "plugins", description: "列出 Plugins" },

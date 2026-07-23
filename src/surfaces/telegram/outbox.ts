@@ -218,6 +218,7 @@ export class TelegramOutbox {
                   ? {
                       model: event.model,
                       effort: event.effort ?? null,
+                      serviceTier: event.serviceTier ?? null,
                       ...(event.weeklyLimit ? { weeklyLimit: event.weeklyLimit } : {}),
                     }
                   : undefined,

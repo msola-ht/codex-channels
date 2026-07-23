@@ -8,6 +8,7 @@ export interface RoutedThread {
 export interface RoutedThreadModelSettings {
   model: string;
   effort: string | null;
+  serviceTier: string | null;
 }
 
 export interface ConversationRoutingPort {

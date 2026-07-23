@@ -7,7 +7,14 @@ import type { SessionRouter } from "../src/session-routing/router.js";
 
 const target = { surface: "telegram" as const, conversationId: "100" };
 
-function model(name: string, efforts: string[], defaultEffort: string, isDefault = false): Model {
+function model(
+  name: string,
+  efforts: string[],
+  defaultEffort: string,
+  isDefault = false,
+  supportsFast = false,
+  fastTierId = "priority",
+): Model {
   return {
     id: name,
     model: name,
@@ -24,19 +31,25 @@ function model(name: string, efforts: string[], defaultEffort: string, isDefault
     defaultReasoningEffort: defaultEffort,
     inputModalities: ["text"],
     supportsPersonality: true,
-    additionalSpeedTiers: [],
-    serviceTiers: [],
-    defaultServiceTier: null,
+    additionalSpeedTiers: supportsFast ? ["fast"] : [],
+    serviceTiers: supportsFast
+      ? [{ id: fastTierId, name: "Fast", description: "1.5x speed" }]
+      : [],
+    defaultServiceTier: "default",
     isDefault,
   };
 }
 
 const models = [
-  model("gpt-main", ["low", "medium", "high"], "medium", true),
+  model("gpt-main", ["low", "medium", "high"], "medium", true, true),
   model("gpt-deep", ["high", "xhigh"], "high"),
 ];
 
-function createService(settings?: { model: string; effort: string | null }): ModelSelectionService {
+function createService(settings?: {
+  model: string;
+  effort: string | null;
+  serviceTier: string | null;
+}): ModelSelectionService {
   const codex = { listModels: async () => models } as unknown as CodexAppServerClient;
   const router = { modelSettings: () => settings } as unknown as SessionRouter;
   return new ModelSelectionService(codex, router);
@@ -44,17 +57,18 @@ function createService(settings?: { model: string; effort: string | null }): Mod
 
 describe("ModelSelectionService", () => {
   it("uses the App Server thread settings as the current selection", async () => {
-    const service = createService({ model: "gpt-main", effort: "high" });
+    const service = createService({ model: "gpt-main", effort: "high", serviceTier: "priority" });
 
     await expect(service.state(target)).resolves.toMatchObject({
       model: "gpt-main",
       effort: "high",
+      serviceTier: "priority",
       pending: false,
     });
   });
 
   it("selects a model and falls back to an effort supported by that model", async () => {
-    const service = createService({ model: "gpt-main", effort: "medium" });
+    const service = createService({ model: "gpt-main", effort: "medium", serviceTier: "default" });
 
     const selected = await service.selectModel(target, "gpt-deep");
 
@@ -63,7 +77,7 @@ describe("ModelSelectionService", () => {
   });
 
   it("accepts effort indexes and clears pending overrides after a successful turn", async () => {
-    const service = createService({ model: "gpt-main", effort: "low" });
+    const service = createService({ model: "gpt-main", effort: "low", serviceTier: "default" });
 
     await service.selectEffort(target, "3");
     expect(service.turnOverrides(target)).toEqual({ effort: "high" });
@@ -73,9 +87,68 @@ describe("ModelSelectionService", () => {
   });
 
   it("rejects an effort unsupported by the selected model", async () => {
-    const service = createService({ model: "gpt-deep", effort: "high" });
+    const service = createService({ model: "gpt-deep", effort: "high", serviceTier: "default" });
 
     await expect(service.selectEffort(target, "low"))
       .rejects.toThrow("当前模型不支持该思考强度");
+  });
+
+  it("toggles Fast mode and sends an explicit null when turning it off", async () => {
+    const service = createService({ model: "gpt-main", effort: "medium", serviceTier: "default" });
+
+    await expect(service.selectFastMode(target, "")).resolves.toMatchObject({
+      serviceTier: "priority",
+      serviceTierPending: true,
+    });
+    expect(service.turnOverrides(target)).toEqual({ serviceTier: "priority" });
+
+    await expect(service.selectFastMode(target, "off")).resolves.toMatchObject({
+      serviceTier: null,
+      serviceTierPending: true,
+    });
+    expect(service.turnOverrides(target)).toEqual({ serviceTier: null });
+  });
+
+  it("rejects Fast mode for a model that does not expose the Fast tier", async () => {
+    const service = createService({ model: "gpt-deep", effort: "high", serviceTier: "default" });
+
+    await expect(service.selectFastMode(target, "on"))
+      .rejects.toThrow("当前模型不支持 Fast 模式");
+  });
+
+  it("turns Fast mode off when switching to a model without that tier", async () => {
+    const service = createService({ model: "gpt-main", effort: "medium", serviceTier: "priority" });
+
+    await service.selectModel(target, "gpt-deep");
+
+    expect(service.turnOverrides(target)).toEqual({
+      model: "gpt-deep",
+      effort: "high",
+      serviceTier: null,
+    });
+  });
+
+  it("uses the selected model's catalog tier when switching with Fast enabled", async () => {
+    const tierModels = [
+      model("gpt-main", ["medium"], "medium", true, true),
+      model("gpt-other", ["medium"], "medium", false, true, "fast"),
+    ];
+    const codex = { listModels: async () => tierModels } as unknown as CodexAppServerClient;
+    const router = {
+      modelSettings: () => ({
+        model: "gpt-main",
+        effort: "medium",
+        serviceTier: "priority",
+      }),
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService(codex, router);
+
+    await service.selectModel(target, "gpt-other");
+
+    expect(service.turnOverrides(target)).toEqual({
+      model: "gpt-other",
+      effort: "medium",
+      serviceTier: "fast",
+    });
   });
 });

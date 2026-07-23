@@ -156,7 +156,17 @@ suite("real Codex App Server over stdio", () => {
       );
     }
 
-    expect(initialized.platformOs).toBe("macos");
+    const platformNames: Partial<Record<NodeJS.Platform, string>> = {
+      darwin: "macos",
+      linux: "linux",
+      win32: "windows",
+    };
+    const expectedPlatform = platformNames[process.platform];
+    if (expectedPlatform) {
+      expect(initialized.platformOs).toBe(expectedPlatform);
+    } else {
+      expect(initialized.platformOs).not.toBe("");
+    }
     expect(Array.isArray(threads)).toBe(true);
   }, 15_000);
 });

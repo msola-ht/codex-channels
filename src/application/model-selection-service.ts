@@ -7,7 +7,11 @@ export interface ModelSelectionState {
   models: Model[];
   model: string;
   effort: string | null;
+  serviceTier: string | null;
   pending: boolean;
+  modelPending: boolean;
+  effortPending: boolean;
+  serviceTierPending: boolean;
 }
 
 export class ModelSelectionService {
@@ -32,7 +36,18 @@ export class ModelSelectionService {
     const effort = current.effort && supported.includes(current.effort)
       ? current.effort
       : selected.defaultReasoningEffort;
-    this.pendingByConversation.set(this.key(target), { model: selected.model, effort });
+    const pending = this.pendingByConversation.get(this.key(target));
+    const currentModel = current.models.find((candidate) => candidate.model === current.model);
+    const currentFast = isFastServiceTier(current.serviceTier, currentModel);
+    const selectedFastTier = fastServiceTierId(selected);
+    this.pendingByConversation.set(this.key(target), {
+      ...pending,
+      model: selected.model,
+      effort,
+      ...(currentFast
+        ? { serviceTier: selectedFastTier ?? null }
+        : {}),
+    });
     return this.resolveState(target, models);
   }
 
@@ -46,9 +61,36 @@ export class ModelSelectionService {
     const options = model.supportedReasoningEfforts.map((option) => option.reasoningEffort);
     const effort = resolveEffort(options, selector);
     const pending = this.pendingByConversation.get(this.key(target));
+    this.pendingByConversation.set(this.key(target), { ...pending, effort });
+    return this.resolveState(target, models);
+  }
+
+  async selectFastMode(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
+    const normalized = selector.trim().toLowerCase();
+    if (normalized && !new Set(["on", "off", "status"]).has(normalized)) {
+      throw new Error("用法：/fast [on|off|status]");
+    }
+    const models = await this.codex.listModels();
+    const current = this.resolveState(target, models);
+    const model = models.find((candidate) => candidate.model === current.model);
+    const currentFast = isFastServiceTier(current.serviceTier, model);
+    if (normalized === "status") {
+      return current;
+    }
+    const enable = normalized ? normalized === "on" : !currentFast;
+    const tierId = model ? fastServiceTierId(model) : undefined;
+    if (enable) {
+      if (!tierId) {
+        throw new Error(`当前模型不支持 Fast 模式：${current.model}`);
+      }
+    }
+    if ((enable && currentFast) || (!enable && !currentFast)) {
+      return current;
+    }
+    const pending = this.pendingByConversation.get(this.key(target));
     this.pendingByConversation.set(this.key(target), {
-      ...(pending?.model ? { model: pending.model } : {}),
-      effort,
+      ...pending,
+      serviceTier: enable ? tierId! : null,
     });
     return this.resolveState(target, models);
   }
@@ -68,10 +110,15 @@ export class ModelSelectionService {
   status(target: ConversationTarget): Omit<ModelSelectionState, "models"> {
     const pending = this.pendingByConversation.get(this.key(target));
     const current = this.router.modelSettings(target);
+    const serviceTierPending = hasServiceTierOverride(pending);
     return {
       model: pending?.model ?? current?.model ?? this.configuredDefaultModel ?? "默认模型",
       effort: pending?.effort ?? current?.effort ?? null,
+      serviceTier: serviceTierPending ? pending?.serviceTier ?? null : current?.serviceTier ?? null,
       pending: pending !== undefined,
+      modelPending: hasOverride(pending, "model"),
+      effortPending: hasOverride(pending, "effort"),
+      serviceTierPending,
     };
   }
 
@@ -86,17 +133,58 @@ export class ModelSelectionService {
       ?? models[0]!;
     const model = pending?.model ?? current?.model ?? fallback.model;
     const catalogModel = models.find((candidate) => candidate.model === model);
+    const serviceTierPending = hasServiceTierOverride(pending);
     return {
       models,
       model,
       effort: pending?.effort ?? current?.effort ?? catalogModel?.defaultReasoningEffort ?? null,
+      serviceTier: serviceTierPending
+        ? pending?.serviceTier ?? null
+        : current
+          ? current.serviceTier
+          : catalogModel?.defaultServiceTier ?? null,
       pending: pending !== undefined,
+      modelPending: hasOverride(pending, "model"),
+      effortPending: hasOverride(pending, "effort"),
+      serviceTierPending,
     };
   }
 
   private key(target: ConversationTarget): string {
     return `${target.surface}:${target.conversationId}`;
   }
+}
+
+export function fastServiceTierId(model: Model): string | undefined {
+  const tier = model.serviceTiers.find(
+    (candidate) =>
+      candidate.id.toLowerCase() === "fast"
+      || candidate.name.trim().toLowerCase() === "fast",
+  );
+  if (tier) {
+    return tier.id;
+  }
+  return model.additionalSpeedTiers.some((candidate) => candidate.toLowerCase() === "fast")
+    ? "fast"
+    : undefined;
+}
+
+export function isFastServiceTier(serviceTier: string | null, model?: Model): boolean {
+  if (!serviceTier) {
+    return false;
+  }
+  const normalized = serviceTier.toLowerCase();
+  return normalized === "fast"
+    || normalized === "priority"
+    || (model !== undefined && fastServiceTierId(model) === serviceTier);
+}
+
+function hasServiceTierOverride(pending: TurnOverrides | undefined): boolean {
+  return hasOverride(pending, "serviceTier");
+}
+
+function hasOverride(pending: TurnOverrides | undefined, key: keyof TurnOverrides): boolean {
+  return pending !== undefined && Object.hasOwn(pending, key);
 }
 
 export function resolveModel(models: Model[], selector: string): Model {

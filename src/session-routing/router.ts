@@ -7,6 +7,7 @@ import type { BindingStore, ConversationBinding } from "../storage/index.js";
 export interface ThreadModelSettings {
   model: string;
   effort: string | null;
+  serviceTier: string | null;
 }
 
 export interface SubscriptionRestoreFailure {
@@ -80,7 +81,7 @@ export class SessionRouter {
       try {
         const workspace = this.workspaces.require(binding.workspaceId);
         const resumed = await this.codex.resumeThread(binding.threadId, workspace.cwd);
-        this.captureModelSettings(resumed.thread.id, resumed.model, resumed.reasoningEffort);
+        this.captureModelSettings(resumed.thread.id, resumed.model, resumed.reasoningEffort, resumed.serviceTier);
         this.bindings.bind({
           target: binding.target,
           workspaceId: workspace.id,
@@ -129,7 +130,7 @@ export class SessionRouter {
       );
       if (candidate) {
         const resumed = await this.codex.resumeThread(candidate.id, workspace.cwd);
-        this.captureModelSettings(resumed.thread.id, resumed.model, resumed.reasoningEffort);
+        this.captureModelSettings(resumed.thread.id, resumed.model, resumed.reasoningEffort, resumed.serviceTier);
         const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
         this.bindings.bind(binding);
         return binding;
@@ -137,7 +138,7 @@ export class SessionRouter {
     }
 
     const started = await this.codex.startThread(workspace.cwd);
-    this.captureModelSettings(started.thread.id, started.model, started.reasoningEffort);
+    this.captureModelSettings(started.thread.id, started.model, started.reasoningEffort, started.serviceTier);
     const binding = { target, workspaceId: workspace.id, threadId: started.thread.id, sessionId: started.thread.sessionId };
     this.bindings.bind(binding);
     this.forceNew.delete(targetKey);
@@ -152,7 +153,7 @@ export class SessionRouter {
     const workspace = this.workspace(target);
     await this.detach(target);
     const resumed = await this.codex.resumeThread(threadId, workspace.cwd);
-    this.captureModelSettings(resumed.thread.id, resumed.model, resumed.reasoningEffort);
+    this.captureModelSettings(resumed.thread.id, resumed.model, resumed.reasoningEffort, resumed.serviceTier);
     const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
     this.bindings.bind(binding);
     this.forceNew.delete(this.key(target));
@@ -182,7 +183,7 @@ export class SessionRouter {
     }
     const workspace = this.workspaces.require(current.workspaceId);
     const forked = await this.codex.forkThread(current.threadId, workspace.cwd);
-    this.captureModelSettings(forked.thread.id, forked.model, forked.reasoningEffort);
+    this.captureModelSettings(forked.thread.id, forked.model, forked.reasoningEffort, forked.serviceTier);
     await this.detach(target);
     const binding = {
       target,
@@ -233,8 +234,13 @@ export class SessionRouter {
     return `${target.surface}:${target.conversationId}`;
   }
 
-  private captureModelSettings(threadId: string, model: string, effort: string | null): void {
-    this.modelSettingsByThread.set(threadId, { model, effort });
+  private captureModelSettings(
+    threadId: string,
+    model: string,
+    effort: string | null,
+    serviceTier: string | null | undefined,
+  ): void {
+    this.modelSettingsByThread.set(threadId, { model, effort, serviceTier: serviceTier ?? null });
   }
 }
 

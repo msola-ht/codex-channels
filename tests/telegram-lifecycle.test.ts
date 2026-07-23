@@ -7,6 +7,7 @@ import { TelegramLifecycle } from "../src/surfaces/telegram/lifecycle.js";
 describe("TelegramLifecycle", () => {
   it("initializes the bot, registers commands and stops long polling by aborting it", async () => {
     const calls: string[] = [];
+    let registeredCommands: ReadonlyArray<{ command: string }> = [];
     const notificationOptions: unknown[] = [];
     const failures: Error[] = [];
     const bot = {
@@ -16,8 +17,9 @@ describe("TelegramLifecycle", () => {
       },
       handleUpdate: async () => undefined,
       api: {
-        setMyCommands: async () => {
+        setMyCommands: async (commands: ReadonlyArray<{ command: string }>) => {
           calls.push("commands");
+          registeredCommands = commands;
           return true;
         },
         sendMessage: async (chatId: number, text: string, options?: unknown) => {
@@ -56,6 +58,7 @@ describe("TelegramLifecycle", () => {
       disable_notification: true,
     }]);
     expect(failures).toEqual([]);
+    expect(registeredCommands.some((command) => command.command === "fast")).toBe(true);
   });
 
   it("keeps polling when a startup notification cannot be delivered", async () => {

@@ -50,7 +50,11 @@ describe("ConversationCore", () => {
     const router = {
       allBindings: () => [],
       targetForThread: () => target,
-      modelSettingsForThread: () => ({ model: "gpt-main", effort: "high" }),
+      modelSettingsForThread: () => ({
+        model: "gpt-main",
+        effort: "high",
+        serviceTier: "fast",
+      }),
     } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
     core.rememberRateLimits([{
@@ -98,6 +102,7 @@ describe("ConversationCore", () => {
       turnId: "turn-1",
       model: "gpt-main",
       effort: "high",
+      serviceTier: "fast",
       weeklyLimit: {
         usedPercent: 42,
         windowDurationMins: 10_080,

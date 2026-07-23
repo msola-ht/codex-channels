@@ -10,7 +10,12 @@ import type {
   Thread,
   ThreadTokenUsage,
 } from "../../codex-protocol/index.js";
-import type { ConversationStatus, ModelSelectionState } from "../../application/index.js";
+import {
+  fastServiceTierId,
+  isFastServiceTier,
+  type ConversationStatus,
+  type ModelSelectionState,
+} from "../../application/index.js";
 import type { TurnArtifacts } from "../../conversation-core/index.js";
 import type { Workspace } from "../../policy/index.js";
 
@@ -109,13 +114,14 @@ function preview(value: string, limit = 48): string {
 
 export function formatModels(state: ModelSelectionState): string {
   return [
-    `当前模型：${state.model}${state.pending ? "（下一次 Turn 生效）" : ""}`,
+    `当前模型：${state.model}${state.modelPending ? "（下一次 Turn 生效）" : ""}`,
     `思考强度：${state.effort ?? "模型默认"}`,
+    `Fast 模式：${formatFastMode(state.serviceTier)}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
     "",
     `可用模型（${state.models.length}）：`,
     ...state.models.map(
       (model, index) =>
-        `${index + 1}. ${model.displayName} · ${model.model}${model.model === state.model ? " ← 当前" : ""}`,
+        `${index + 1}. ${model.displayName} · ${model.model}${supportsFastMode(model) ? " · 支持 Fast" : ""}${model.model === state.model ? " ← 当前" : ""}`,
     ),
     "",
     "切换：/model <序号、模型 ID 或名称>",
@@ -129,7 +135,8 @@ export function formatReasoningEfforts(state: ModelSelectionState): string {
   }
   return [
     `当前模型：${state.model}`,
-    `当前思考强度：${state.effort ?? model.defaultReasoningEffort}${state.pending ? "（下一次 Turn 生效）" : ""}`,
+    `当前思考强度：${state.effort ?? model.defaultReasoningEffort}${state.effortPending ? "（下一次 Turn 生效）" : ""}`,
+    `Fast 模式：${formatFastMode(state.serviceTier)}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
     "",
     "可用思考强度：",
     ...model.supportedReasoningEfforts.map(
@@ -138,6 +145,17 @@ export function formatReasoningEfforts(state: ModelSelectionState): string {
     ),
     "",
     "切换：/effort <序号或档位>",
+  ].join("\n");
+}
+
+export function formatFastModeState(state: ModelSelectionState): string {
+  const model = state.models.find((candidate) => candidate.model === state.model);
+  return [
+    `当前模型：${state.model}${state.modelPending ? "（下一次 Turn 生效）" : ""}`,
+    `Fast 模式：${formatFastMode(state.serviceTier)}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
+    `模型支持：${model && supportsFastMode(model) ? "支持 Fast" : "不支持 Fast"}`,
+    "",
+    "切换：/fast [on|off|status]",
   ].join("\n");
 }
 
@@ -248,7 +266,8 @@ export function formatStatus(status: ConversationStatus): string {
     `Turn：${status.turnId ?? "空闲"}`,
     `工作目录：${status.cwd}`,
     `模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
-    `思考强度：${status.effort ?? "模型默认"}`,
+    `思考强度：${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
+    `Fast 模式：${status.threadId ? formatFastMode(status.serviceTier) : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`,
   ];
   if (status.tokenUsage) {
     const { total, last, modelContextWindow } = status.tokenUsage;
@@ -275,6 +294,7 @@ export function formatContextUsage(
   settings?: {
     model: string;
     effort: string | null;
+    serviceTier: string | null;
     weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>;
   },
 ): string {
@@ -292,6 +312,7 @@ export function formatContextUsage(
       ? [
           `当前模型：${settings.model}`,
           `思考强度：${settings.effort ?? "模型默认"}`,
+          `Fast 模式：${formatFastMode(settings.serviceTier)}`,
           ...(settings.weeklyLimit
             ? [`周限：${formatWeeklyLimit(settings.weeklyLimit)}`]
             : []),
@@ -315,7 +336,7 @@ export function formatWorkspaces(workspaces: Workspace[], currentWorkspaceId: st
 
 export function formatStartupNotification(
   workspaces: Workspace[],
-  status: Pick<ConversationStatus, "threadId" | "workspaceId" | "model" | "effort" | "modelPending" | "weeklyLimit">,
+  status: Pick<ConversationStatus, "threadId" | "workspaceId" | "model" | "effort" | "serviceTier" | "modelPending" | "effortPending" | "fastModePending" | "weeklyLimit">,
   runtime: StartupRuntimeInfo,
 ): string {
   const currentWorkspace = workspaces.find((workspace) => workspace.id === status.workspaceId);
@@ -342,7 +363,9 @@ export function formatStartupNotification(
     "│ ",
     `│ Thread · ${status.threadId ?? "尚未绑定"}`,
     "│ ",
-    `│ ${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""} · ${status.effort ?? "模型默认"}`,
+    `│ ${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""} · ${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
+    "│ ",
+    `│ Fast 模式 · ${status.threadId ? formatFastMode(status.serviceTier) : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`,
     ...(status.weeklyLimit
       ? ["│ ", `│ 周限 · ${formatWeeklyLimit(status.weeklyLimit)}`]
       : []),
@@ -374,6 +397,14 @@ function formatCodexUpstreamUserAgent(userAgent: string | null): string {
     return "App Server 未返回";
   }
   return userAgent.replace(/(\([^)]*\))\s+\S+\s+(\([^)]*\))$/, "$1 $2");
+}
+
+function supportsFastMode(model: ModelSelectionState["models"][number]): boolean {
+  return fastServiceTierId(model) !== undefined;
+}
+
+function formatFastMode(serviceTier: string | null): string {
+  return isFastServiceTier(serviceTier) ? "开启" : "关闭";
 }
 
 export function formatPermissions(

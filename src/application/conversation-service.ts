@@ -45,7 +45,10 @@ export interface ConversationStatus {
   cwd: string;
   model: string;
   effort: string | null;
+  serviceTier: string | null;
   modelPending: boolean;
+  effortPending: boolean;
+  fastModePending: boolean;
   tokenUsage?: ThreadTokenUsage;
   weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>;
 }
@@ -233,6 +236,16 @@ export class ConversationService {
     });
   }
 
+  selectFastMode(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
+    if (selector.trim().toLowerCase() === "status") {
+      return this.models.selectFastMode(target, selector);
+    }
+    return this.locked(target, async () => {
+      this.requireIdle(target);
+      return this.models.selectFastMode(target, selector);
+    });
+  }
+
   listSkills(target: ConversationTarget): Promise<SkillsListResponse["data"]> {
     return this.codex.listSkills(this.router.workspace(target).cwd);
   }
@@ -299,7 +312,10 @@ export class ConversationService {
       cwd: workspace.cwd,
       model: model.model,
       effort: model.effort,
-      modelPending: model.pending,
+      serviceTier: model.serviceTier,
+      modelPending: model.modelPending,
+      effortPending: model.effortPending,
+      fastModePending: model.serviceTierPending,
     };
   }
 

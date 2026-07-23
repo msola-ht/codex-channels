@@ -36,6 +36,7 @@ export interface ThreadDefaults {
 export interface TurnOverrides {
   model?: string;
   effort?: string;
+  serviceTier?: string | null;
 }
 
 export class CodexAppServerClient {
@@ -187,6 +188,9 @@ export class CodexAppServerClient {
         cwd,
         ...(overrides.model ? { model: overrides.model } : {}),
         ...(overrides.effort ? { effort: overrides.effort } : {}),
+        ...(Object.hasOwn(overrides, "serviceTier")
+          ? { serviceTier: overrides.serviceTier ?? null }
+          : {}),
       },
       { retryOverload: false },
     );
