@@ -11,7 +11,7 @@
 - `outbox.ts`：通过 Surface 共用的每 Conversation 有界顺序队列协调流式回复和审批显示顺序；最终回复默认使用兼容 HTML，也可选择 Telegram 原生 Rich Markdown，超长或渲染失败时回退纯文本。
 - `approval-operation-coordinator.ts`：隔离审批请求与操作日志之间的等待、拒绝抑制和 Turn 清理状态。
 - 通知策略按逻辑事件降噪：操作过程、状态、上下文和后续分片静默；每轮最终回复、审批、用户输入与严重错误保留一次提醒。
-- `html-format.ts`：安全转义并分块渲染命令面板、启动通知、审批卡与 Diff；审批详情保留全文并使用可展开引用，避免长命令默认占满聊天界面。
+- `html-format.ts`：安全转义并分块渲染命令面板、启动通知、审批卡与 Diff；长审批详情先显示约六行预览，其余全文使用可展开引用，避免长命令默认占满聊天界面。
 - `markdown-format.ts`：把常见 Markdown 块与行内样式安全转换为传统 Telegram HTML；仅包含 Bot 命令的文本代码块和行内命令会转为可点击纯文本，普通代码块保持不变。
 - `long-message-format.ts`：统一规划终端或 Telegram 发起 Turn 的长回复；普通长文本使用可展开引用块，超长代码与内容使用预览加内存文件。
 - `operation-format.ts`：把操作记录分组、截断、脱敏并渲染为 Telegram HTML。
