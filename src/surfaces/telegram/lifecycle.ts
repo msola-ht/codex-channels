@@ -1,29 +1,15 @@
 import type { Bot } from "grammy";
 import type { Logger } from "pino";
 
+import { conversationCommands } from "../../application/index.js";
 import { formatTelegramPanelChunks } from "./html-format.js";
 
 const commands = [
   { command: "start", description: "使用说明" },
-  { command: "resume", description: "列出或恢复 Codex 会话" },
-  { command: "new", description: "下一条消息创建新会话" },
-  { command: "status", description: "查看当前状态" },
-  { command: "workspace", description: "列出或切换 Workspace" },
-  { command: "stop", description: "停止当前任务" },
-  { command: "rename", description: "命名当前会话" },
-  { command: "compact", description: "压缩当前上下文" },
-  { command: "fork", description: "分叉当前会话" },
-  { command: "review", description: "启动代码审查" },
-  { command: "model", description: "查看或切换模型" },
-  { command: "effort", description: "查看或切换思考强度" },
-  { command: "fast", description: "查看或切换 Fast 模式" },
-  { command: "skills", description: "列出 Skills" },
-  { command: "mcp", description: "列出 MCP Servers" },
-  { command: "plugins", description: "列出 Plugins" },
-  { command: "usage", description: "查看账号用量" },
-  { command: "limits", description: "查看套餐与额度" },
-  { command: "permissions", description: "查看权限配置" },
-  { command: "goal", description: "查看或管理 Goal" },
+  ...conversationCommands.map(({ name, description }) => ({
+    command: name,
+    description,
+  })),
   { command: "cancel", description: "取消当前交互请求" },
   { command: "whoami", description: "显示 Telegram 用户 ID" },
 ];

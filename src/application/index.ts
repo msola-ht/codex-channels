@@ -1,4 +1,12 @@
 export {
+  ConversationCommandService,
+  conversationCommands,
+  conversationCommandNames,
+  isConversationCommandName,
+  type ConversationCommandName,
+  type ConversationCommandResult,
+} from "./conversation-command-service.js";
+export {
   ConversationService,
   resolveThread,
   type ConversationInput,

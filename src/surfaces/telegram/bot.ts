@@ -2,33 +2,25 @@ import { Bot, type Context } from "grammy";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
 
-import type { ConversationService } from "../../application/index.js";
+import {
+  ConversationCommandService,
+  conversationCommandNames,
+  type ConversationCommandName,
+  type ConversationService,
+} from "../../application/index.js";
 import type { ConversationTarget, OutputEvent } from "../../conversation-core/index.js";
-import { protocolVersion, type ReviewTarget } from "../../codex-protocol/index.js";
+import { protocolVersion } from "../../codex-protocol/index.js";
 import type { EventBus } from "../../event-bus/index.js";
 import type {
   ConversationActorRegistry,
-  TelegramAccessPolicy,
+  SurfaceAccessPolicy,
   Workspace,
 } from "../../policy/index.js";
+import { formatStartupNotification } from "./format.js";
 import {
-  formatMcpServers,
-  formatDiff,
-  formatFastModeState,
-  formatLimits,
-  formatModels,
-  formatPermissions,
-  formatPlugins,
-  formatPlan,
-  formatReasoningEfforts,
-  formatSessions,
-  formatSkills,
-  formatStatus,
-  formatStartupNotification,
-  formatUsage,
-  formatWorkspaces,
-} from "./format.js";
-import { formatTelegramDiffChunks, formatTelegramPanelChunks } from "./html-format.js";
+  renderTelegramCommandResult,
+  replyTelegramPanel,
+} from "./command-renderer.js";
 import { TelegramInteractionPort } from "./interactions.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import { telegramDefaultAccountId } from "./constants.js";
@@ -62,6 +54,7 @@ export class TelegramSurface {
   private readonly lifecycle: TelegramLifecycle;
   private readonly imageStore: TelegramImagePort;
   private readonly actorRegistry: ConversationActorRegistry | undefined;
+  private readonly commands: ConversationCommandService;
   private unsubscribeOutput: (() => void) | undefined;
 
   constructor(
@@ -69,7 +62,7 @@ export class TelegramSurface {
     proxyUrl: string | undefined,
     private readonly service: ConversationService,
     output: EventBus<OutputEvent>,
-    private readonly access: TelegramAccessPolicy,
+    private readonly access: SurfaceAccessPolicy,
     startupRecipients: ReadonlySet<number>,
     workspaces: Workspace[],
     uploadsDirectory: string,
@@ -86,6 +79,7 @@ export class TelegramSurface {
     });
     this.bot.use((context, next) => this.authorize(context, next));
     this.actorRegistry = options.actorRegistry;
+    this.commands = new ConversationCommandService(service);
     const apiExecutor = new TelegramApiExecutor(logger);
     this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor, {
       ...(options.finalMessageFormat
@@ -141,7 +135,7 @@ export class TelegramSurface {
   private registerHandlers(): void {
     this.bot.command("whoami", (context) => context.reply(`你的 Telegram 用户 ID：${context.from?.id ?? "未知"}`));
     this.bot.command(["start", "help"], (context) =>
-      this.replyPanelChunks(
+      replyTelegramPanel(
         context,
         [
           "Codex Connect Gateway",
@@ -171,138 +165,9 @@ export class TelegramSurface {
         ].join("\n"),
       ),
     );
-    this.bot.command("resume", (context) => this.resume(context));
-    this.bot.command("sessions", async (context) => {
-      const searchTerm = commandArguments(context);
-      const sessions = await this.service.listSessions(target(context), {
-        ...(searchTerm ? { searchTerm } : {}),
-      });
-      await this.replyChunks(
-        context,
-        formatSessions(sessions, this.service.status(target(context)).threadId, {
-          ...(searchTerm ? { searchTerm } : {}),
-        }),
-      );
-    });
-    this.bot.command("archived", async (context) => {
-      const searchTerm = commandArguments(context);
-      const sessions = await this.service.listSessions(target(context), {
-        archived: true,
-        ...(searchTerm ? { searchTerm } : {}),
-      });
-      await this.replyChunks(context, formatSessions(sessions, undefined, {
-        archived: true,
-        ...(searchTerm ? { searchTerm } : {}),
-      }));
-    });
-    this.bot.command("new", async (context) => {
-      await this.service.newSession(target(context));
-      await context.reply("已退出当前会话，下一条普通消息将创建新的 Codex Thread。");
-    });
-    this.bot.command("archive", async (context) => {
-      const threadId = await this.service.archive(target(context));
-      await this.replyPanelChunks(
-        context,
-        `已归档 Codex Thread\nThread：${threadId}\n下一条普通消息将创建新会话。`,
-      );
-    });
-    this.bot.command("unarchive", async (context) => {
-      const threadId = await this.service.unarchive(target(context), commandArguments(context));
-      await this.replyPanelChunks(context, `已取消归档并切换会话\nThread：${threadId}`);
-    });
-    this.bot.command("status", async (context) => {
-      await this.replyPanelChunks(context, formatStatus(this.service.status(target(context))));
-    });
-    this.bot.command("workspace", async (context) => {
-      const selector = commandArguments(context);
-      if (selector) {
-        const workspace = await this.service.selectWorkspace(target(context), selector);
-        await this.replyPanelChunks(
-          context,
-          `已切换 Workspace\nWorkspace：${workspace.name}\n工作目录：${workspace.cwd}`,
-        );
-        return;
-      }
-      const current = this.service.status(target(context));
-      await this.replyChunks(
-        context,
-        formatWorkspaces(this.service.listWorkspaces(), current.workspaceId),
-      );
-    });
-    this.bot.command("stop", async (context) => {
-      const stopped = await this.service.stop(target(context));
-      await context.reply(stopped ? "已请求停止当前任务。" : "当前没有运行中的任务。");
-    });
-    this.bot.command("rename", async (context) => {
-      const name = commandArguments(context);
-      await this.service.rename(target(context), name);
-      await this.replyPanelChunks(context, `会话已重命名\n名称：${name}`);
-    });
-    this.bot.command("compact", async (context) => {
-      await this.service.compact(target(context));
-      await context.reply("已请求压缩当前 Codex Thread。进度将通过标准事件返回。");
-    });
-    this.bot.command("fork", async (context) => {
-      const threadId = await this.service.fork(target(context));
-      await this.replyPanelChunks(context, `已分叉并切换到新会话\nThread：${threadId}`);
-    });
-    this.bot.command("review", async (context) => {
-      const reviewTarget = parseReviewTarget(commandArguments(context));
-      const submission = await this.service.review(target(context), reviewTarget);
-      await this.replyPanelChunks(context, `已启动 Codex Review\nTurn：${submission.turnId}`);
-    });
-    this.bot.command("model", async (context) => {
-      const selector = commandArguments(context);
-      const state = selector
-        ? await this.service.selectModel(target(context), selector)
-        : await this.service.modelState(target(context));
-      await this.replyChunks(context, formatModels(state));
-    });
-    this.bot.command("effort", async (context) => {
-      const selector = commandArguments(context);
-      const state = selector
-        ? await this.service.selectEffort(target(context), selector)
-        : await this.service.modelState(target(context));
-      await this.replyChunks(context, formatReasoningEfforts(state));
-    });
-    this.bot.command("fast", async (context) => {
-      const state = await this.service.selectFastMode(
-        target(context),
-        commandArguments(context),
-      );
-      await this.replyChunks(context, formatFastModeState(state));
-    });
-    this.bot.command("skills", async (context) => {
-      await this.replyChunks(context, formatSkills(await this.service.listSkills(target(context))));
-    });
-    this.bot.command("mcp", async (context) => {
-      await this.replyChunks(context, formatMcpServers(await this.service.listMcpServers(target(context))));
-    });
-    this.bot.command("plugins", async (context) => {
-      await this.replyChunks(context, formatPlugins(await this.service.listPlugins(target(context))));
-    });
-    this.bot.command("usage", async (context) => {
-      await this.replyChunks(context, formatUsage(await this.service.accountUsage()));
-    });
-    this.bot.command("limits", async (context) => {
-      await this.replyChunks(context, formatLimits(await this.service.accountRateLimits()));
-    });
-    this.bot.command("permissions", async (context) => {
-      await this.replyChunks(context, formatPermissions(await this.service.listPermissionProfiles(target(context))));
-    });
-    this.bot.command("diff", async (context) => {
-      const chunks = formatTelegramDiffChunks(formatDiff(this.service.artifacts(target(context))));
-      for (const [index, chunk] of chunks.entries()) {
-        await context.reply(chunk, {
-          parse_mode: "HTML",
-          ...(index === 0 ? {} : { disable_notification: true }),
-        });
-      }
-    });
-    this.bot.command("plan", async (context) => {
-      await this.replyChunks(context, formatPlan(this.service.artifacts(target(context))));
-    });
-    this.bot.command("goal", (context) => this.goal(context));
+    for (const command of conversationCommandNames) {
+      this.bot.command(command, (context) => this.executeCommand(context, command));
+    }
     this.bot.command("cancel", async (context) => {
       const cancelled = this.interactions.cancelForChat(String(context.chat.id));
       await context.reply(cancelled ? "已取消当前交互请求。" : "当前没有待处理的交互请求。");
@@ -387,58 +252,30 @@ export class TelegramSurface {
     }
   }
 
-  private async resume(context: Context): Promise<void> {
-    const selector = commandArguments(context);
-    if (selector) {
-      const threadId = await this.service.resume(target(context), selector);
-      await this.replyPanelChunks(context, `已恢复 Codex Thread\nThread：${threadId}`);
-      return;
-    }
-    const sessions = await this.service.listSessions(target(context));
-    const text = formatSessions(sessions, this.service.status(target(context)).threadId);
-    await this.replyPanelChunks(context, text);
-  }
-
-  private async goal(context: Context): Promise<void> {
-    const input = commandArguments(context);
-    if (input === "clear") {
-      await this.service.clearGoal(target(context));
-      await context.reply("已清除当前 Thread Goal。");
-      return;
-    }
-    if (input.startsWith("set ")) {
-      const goal = await this.service.setGoal(target(context), input.slice(4));
-      await this.replyPanelChunks(context, `Goal 已设置\n目标：${goal.objective}`);
-      return;
-    }
-    const goal = await this.service.getGoal(target(context));
-    await this.replyPanelChunks(
-      context,
-      goal
-        ? `当前 Goal：${goal.objective}\n状态：${goal.status}\nTokens：${goal.tokensUsed}${goal.tokenBudget === null ? "" : ` / ${goal.tokenBudget}`}`
-        : "当前 Thread 没有 Goal。使用 /goal set <目标> 设置。",
+  private async executeCommand(
+    context: Context,
+    command: ConversationCommandName,
+  ): Promise<void> {
+    const result = await this.commands.execute(
+      target(context),
+      command,
+      commandArguments(context),
     );
-  }
-
-  private async replyChunks(context: Context, text: string): Promise<void> {
-    await this.replyPanelChunks(context, text);
-  }
-
-  private async replyPanelChunks(context: Context, text: string): Promise<void> {
-    for (const [index, chunk] of formatTelegramPanelChunks(text).entries()) {
-      await context.reply(chunk, {
-        parse_mode: "HTML",
-        ...(index === 0 ? {} : { disable_notification: true }),
-      });
-    }
+    await renderTelegramCommandResult(context, result);
   }
 
   private async authorize(context: Context, next: () => Promise<void>): Promise<void> {
-    if (context.message?.text?.startsWith("/whoami")) {
+    if (isWhoAmICommand(context, this.bot.botInfo.username)) {
       await next();
       return;
     }
-    if (!this.access.isAllowed(context.from?.id)) {
+    const accessContext = context.chat && context.from
+      ? {
+          target: target(context),
+          actorId: String(context.from.id),
+        }
+      : undefined;
+    if (!accessContext || !this.access.isAllowed(accessContext)) {
       if (context.message) {
         await context.reply("无权使用此 Gateway。可用 /whoami 查看自己的 Telegram 用户 ID。");
       } else if (context.callbackQuery) {
@@ -450,9 +287,7 @@ export class TelegramSurface {
       ? this.outbox.beginTyping(String(context.chat.id))
       : undefined;
     try {
-      if (context.chat && context.from) {
-        this.actorRegistry?.rememberActor(target(context), String(context.from.id));
-      }
+      this.actorRegistry?.rememberActor(accessContext.target, accessContext.actorId);
       await next();
     } catch (error) {
       this.logger.error({ err: error, chatId: context.chat?.id }, "Telegram 命令执行失败");
@@ -487,20 +322,14 @@ function commandArguments(context: Context): string {
   return text.replace(/^\/\w+(?:@\w+)?\s*/, "").trim();
 }
 
-function parseReviewTarget(input: string): ReviewTarget {
-  if (!input) {
-    return { type: "uncommittedChanges" };
+function isWhoAmICommand(context: Context, botUsername: string): boolean {
+  const text = context.message?.text;
+  if (!text) {
+    return false;
   }
-  const [kind, ...rest] = input.split(/\s+/);
-  const value = rest.join(" ").trim();
-  if (kind === "branch" && value) {
-    return { type: "baseBranch", branch: value };
-  }
-  if (kind === "commit" && value) {
-    return { type: "commit", sha: value, title: null };
-  }
-  if (kind === "custom" && value) {
-    return { type: "custom", instructions: value };
-  }
-  throw new Error("用法：/review [branch <分支>|commit <SHA>|custom <说明>]");
+  const match = /^\/whoami(?:@([a-z0-9_]+))?(?:\s|$)/i.exec(text);
+  const addressedUsername = match?.[1];
+  return match !== null
+    && (addressedUsername === undefined
+      || addressedUsername.toLowerCase() === botUsername.toLowerCase());
 }

@@ -1,4 +1,6 @@
-export class TelegramAccessPolicy {
+import type { SurfaceAccessContext, SurfaceAccessPolicy } from "./surface-access.js";
+
+export class TelegramAccessPolicy implements SurfaceAccessPolicy {
   private allowedUserIds: ReadonlySet<number>;
 
   constructor(allowedUserIds: ReadonlySet<number>) {
@@ -9,7 +11,13 @@ export class TelegramAccessPolicy {
     this.allowedUserIds = new Set(allowedUserIds);
   }
 
-  isAllowed(userId: number | undefined): boolean {
-    return userId !== undefined && this.allowedUserIds.has(userId);
+  isAllowed(context: SurfaceAccessContext): boolean {
+    if (context.target.surface !== "telegram") {
+      return false;
+    }
+    const userId = Number(context.actorId);
+    return Number.isSafeInteger(userId)
+      && String(userId) === context.actorId
+      && this.allowedUserIds.has(userId);
   }
 }

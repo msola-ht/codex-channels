@@ -148,11 +148,77 @@ describe("Telegram image input", () => {
     await surface.stop();
     await output.close();
   });
+
+  it("maps Telegram commands through the shared application command service", async () => {
+    const submit = vi.fn();
+    const download = vi.fn();
+    const newSession = vi.fn().mockResolvedValue(undefined);
+    const { surface, output, apiCalls } = createSurface(submit, download, { newSession });
+
+    await surface.bot.handleUpdate({
+      update_id: 5,
+      message: {
+        message_id: 14,
+        date: 1,
+        from: telegramUser(),
+        chat: telegramChat(),
+        text: "/new",
+        entities: [{ offset: 0, length: 4, type: "bot_command" }],
+      },
+    });
+
+    expect(newSession).toHaveBeenCalledWith({
+      surface: "telegram",
+      accountId: "default",
+      conversationId: "100",
+    });
+    expect(apiCalls).toContain("sendMessage");
+    await surface.stop();
+    await output.close();
+  });
+
+  it("does not let lookalike or other-bot whoami commands bypass authorization", async () => {
+    const submit = vi.fn().mockResolvedValue({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    });
+    const { surface, output } = createSurface(submit, vi.fn());
+    const unauthorized = { ...telegramUser(), id: 456 };
+
+    await surface.bot.handleUpdate({
+      update_id: 6,
+      message: {
+        message_id: 15,
+        date: 1,
+        from: unauthorized,
+        chat: telegramChat(),
+        text: "/whoamix",
+        entities: [{ offset: 0, length: 8, type: "bot_command" }],
+      },
+    });
+    await surface.bot.handleUpdate({
+      update_id: 7,
+      message: {
+        message_id: 16,
+        date: 1,
+        from: unauthorized,
+        chat: telegramChat(),
+        text: "/whoami@other_bot",
+        entities: [{ offset: 0, length: 17, type: "bot_command" }],
+      },
+    });
+
+    expect(submit).not.toHaveBeenCalled();
+    await surface.stop();
+    await output.close();
+  });
 });
 
 function createSurface(
   submit: ReturnType<typeof vi.fn>,
   download: ReturnType<typeof vi.fn>,
+  serviceOverrides: Record<string, unknown> = {},
 ): {
   surface: TelegramSurface;
   output: EventBus<OutputEvent>;
@@ -172,7 +238,7 @@ function createSurface(
   const surface = new TelegramSurface(
     "123:token",
     undefined,
-    { submit } as unknown as ConversationService,
+    { submit, ...serviceOverrides } as unknown as ConversationService,
     output,
     new TelegramAccessPolicy(new Set([123])),
     new Set(),

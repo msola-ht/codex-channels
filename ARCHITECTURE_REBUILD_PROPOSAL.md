@@ -512,19 +512,22 @@ interface SurfaceAdapter {
   stop(): Promise<void>;
 }
 
-interface CommandExtension {
-  name: string;
-  description: string;
-  execute(context: CommandContext): Promise<CommandResult>;
+interface SurfaceAccessContext {
+  target: ConversationTarget;
+  actorId: string;
 }
 
-interface PolicyExtension {
-  selectThread(input: ThreadSelectionInput): Promise<string | null>;
-  authorize(action: ActionContext): Promise<PolicyDecision>;
+interface SurfaceAccessPolicy {
+  isAllowed(context: SurfaceAccessContext): boolean;
 }
 ```
 
-只有确实需要第三方安装扩展时，再增加 manifest、API 版本、权限声明、签名、进程隔离和资源限制。
+内置会话命令由 Application 的 `ConversationCommandService` 统一解析参数、调用用例并返回类型化
+结果；Surface 只负责把平台输入映射为标准命令和渲染结果。身份查询、平台帮助、附件下载和交互取消
+仍属于平台能力。每个 Surface 在调用 Application 前必须使用统一访问上下文完成授权。
+
+只有出现真实的第三方命令或 Policy 安装需求时，才增加 `CommandExtension`、`PolicyExtension`、
+manifest、API 版本、权限声明、签名、进程隔离和资源限制。
 
 Codex Skill 适合描述模型工作流，不适合实现 Gateway 的实时 Transport、Thread 路由、事件处理或审批状态机。
 

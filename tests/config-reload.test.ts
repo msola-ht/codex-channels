@@ -83,8 +83,13 @@ describe("Gateway config reload", () => {
     access.replace(new Set([456]));
 
     expect(registry.resolve("docs").cwd).toBe("/docs");
-    expect(access.isAllowed(123)).toBe(false);
-    expect(access.isAllowed(456)).toBe(true);
+    const target = {
+      surface: "telegram",
+      accountId: "default",
+      conversationId: "100",
+    };
+    expect(access.isAllowed({ target, actorId: "123" })).toBe(false);
+    expect(access.isAllowed({ target, actorId: "456" })).toBe(true);
   });
 
   it("removes persisted bindings for Telegram users that are no longer authorized", () => {

@@ -15,3 +15,7 @@
 新增 Surface 时应实现统一输入、输出和审批边界，通过 Application/Core 接入；输出消费者必须校验
 目标 Surface 与账号，避免跨平台串台。Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台
 SDK 类型引入 Conversation Core。
+
+会话命令统一映射到 Application 的 `ConversationCommandService`；Surface 负责提取命令名和参数，
+并渲染类型化结果。普通文本、图片下载、平台帮助、身份查询和交互取消保留在平台边界。所有输入在
+调用 Application 前必须构造 `SurfaceAccessContext` 并通过对应访问策略。
