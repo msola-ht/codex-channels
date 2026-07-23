@@ -164,7 +164,9 @@ npm run dev:all
 
 ```bash
 npm run check
+npm run lint
 npm test
+npm run test:coverage
 npm run test:package
 npm run protocol:check
 ```

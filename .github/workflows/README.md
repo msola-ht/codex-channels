@@ -4,8 +4,8 @@
 
 ## 文件
 
-- `ci.yml`：在 push、Pull Request 和手动触发时，分别使用 Ubuntu 与 macOS、Node.js 22.13.0 执行锁文件安装、类型和版本检查、单元测试，以及真实 tarball 隔离安装冒烟；Ubuntu 覆盖 systemd unit 渲染，macOS 额外校验 launchd 模板。
-- `publish.yml`：推送与 Codex CLI 协议版本一致的 `v*` Tag 后，使用 npm Trusted Publishing 验证、构建并发布公开包，不保存长期 npm Token。
+- `ci.yml`：在 push、Pull Request 和手动触发时，分别使用 Ubuntu 与 macOS、Node.js 22.13.0 执行锁文件安装、类型和版本检查、生产源码 Lint、单元测试，以及真实 tarball 隔离安装冒烟；Ubuntu 覆盖 systemd unit 渲染，macOS 额外校验 launchd 模板。
+- `publish.yml`：推送与 Codex CLI 协议版本一致的 `v*` Tag 后，执行类型、Lint、测试和打包验证，再使用 npm Trusted Publishing 发布公开包，不保存长期 npm Token。
 
 启用发布工作流前，需要在 npm 包的 Trusted Publisher 设置中绑定 GitHub 仓库 `msola-ht/codex-channels`、工作流文件 `publish.yml`，并允许 `npm publish`。工作流使用 GitHub OIDC 和 `id-token: write` 获取短期凭据。
 

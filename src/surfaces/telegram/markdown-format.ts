@@ -84,14 +84,14 @@ function formatInlineMarkdown(text: string): string {
       ? escapeHtml(content.trim())
       : `<code>${escapeHtml(content)}</code>`;
     const index = code.push(rendered) - 1;
-    return `\u0000CODE${index}\u0000`;
+    return `\uE000CODE${index}\uE001`;
   });
   const formatted = escapeHtml(withPlaceholders)
     .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
     .replace(/__([^_\n]+)__/g, "<b>$1</b>")
     .replace(/~~([^~\n]+)~~/g, "<s>$1</s>")
     .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, "<i>$1</i>");
-  return formatted.replace(/\u0000CODE(\d+)\u0000/g, (_match, index: string) => code[Number(index)] ?? "");
+  return formatted.replace(/\uE000CODE(\d+)\uE001/g, (_match, index: string) => code[Number(index)] ?? "");
 }
 
 function isBotCommandBlock(lines: readonly string[]): boolean {

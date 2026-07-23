@@ -84,7 +84,11 @@ export class ConversationDeliveryQueue {
         try {
           resolve(await run());
         } catch (error) {
-          reject(error);
+          reject(
+            error instanceof Error
+              ? error
+              : new Error(`${this.options.component} Conversation 输出操作失败`),
+          );
         }
       }, true);
       if (!accepted) {

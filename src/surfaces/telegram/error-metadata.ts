@@ -5,7 +5,7 @@ export interface TelegramErrorMetadata {
 
 export function telegramErrorMetadata(error: unknown): TelegramErrorMetadata {
   const constructorName = error instanceof Error
-    ? Object.getPrototypeOf(error)?.constructor?.name
+    ? error.constructor.name
     : undefined;
   const errorType = typeof constructorName === "string"
     && /^[A-Za-z][A-Za-z0-9]{0,40}$/.test(constructorName)

@@ -70,7 +70,9 @@ export class ConversationService {
     try {
       input = normalizeInput(value);
     } catch (error) {
-      return Promise.reject(error);
+      return Promise.reject(
+        error instanceof Error ? error : new Error("消息输入规范化失败"),
+      );
     }
     if (input.length === 0) {
       return Promise.reject(new UserFacingError("message.empty", "消息不能为空"));

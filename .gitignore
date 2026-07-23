@@ -24,7 +24,9 @@ data/
 *.log
 
 # Local Codex state (repository rules live in AGENTS.md)
-.codex/
+.codex/*
+!.codex/skills/
+!.codex/skills/**
 
 # Editors and operating systems
 .idea/

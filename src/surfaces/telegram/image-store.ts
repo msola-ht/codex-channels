@@ -132,6 +132,8 @@ export class TelegramImageStore {
               error.message,
             );
       }
+      // 原始下载异常可能包含 Bot Token、远端响应或本机路径，边界处必须脱敏。
+      // eslint-disable-next-line preserve-caught-error
       throw new Error("保存 Telegram 图片失败");
     }
   }

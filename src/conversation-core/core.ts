@@ -421,7 +421,7 @@ export class ConversationCore {
   ): void {
     const target = this.router.targetForThread(threadId);
     if (target) {
-      this.publish({ ...event, target } as OutputEvent);
+      this.publish({ ...event, target });
     }
   }
 
@@ -496,7 +496,7 @@ export class ConversationCore {
       const key = this.key(binding.target);
       if (!seen.has(key)) {
         seen.add(key);
-        this.publish({ ...event, target: binding.target } as OutputEvent);
+        this.publish({ ...event, target: binding.target });
       }
     }
   }

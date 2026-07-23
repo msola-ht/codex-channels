@@ -74,7 +74,7 @@ export class UnixWebSocketTransport extends BaseTransport {
       socket.on("close", onClose);
       socket.on("message", (data: RawData, isBinary: boolean) => {
         if (!isBinary) {
-          this.emitMessage(data.toString("utf8"));
+          this.emitMessage(decodeTextMessage(data));
         }
       });
     });
@@ -107,4 +107,14 @@ export class UnixWebSocketTransport extends BaseTransport {
       }, 2_000).unref();
     });
   }
+}
+
+export function decodeTextMessage(data: RawData): string {
+  if (Array.isArray(data)) {
+    return Buffer.concat(data).toString("utf8");
+  }
+  if (data instanceof ArrayBuffer) {
+    return Buffer.from(data).toString("utf8");
+  }
+  return data.toString("utf8");
 }

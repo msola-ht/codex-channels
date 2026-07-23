@@ -39,7 +39,7 @@ export type InteractionRequest =
 export type InteractionDecision =
   | { type: "approval"; approved: boolean }
   | { type: "user-input"; answers: Record<string, string[]> }
-  | { type: "elicitation"; action: "accept" | "decline" | "cancel"; content: unknown | null };
+  | { type: "elicitation"; action: "accept" | "decline" | "cancel"; content: unknown };
 
 export interface InteractionPort {
   request(target: ConversationTarget, request: InteractionRequest): Promise<InteractionDecision>;

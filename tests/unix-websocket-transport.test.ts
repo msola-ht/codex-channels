@@ -6,7 +6,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 
-import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
+import {
+  decodeTextMessage,
+  UnixWebSocketTransport,
+} from "../src/codex-client/unix-websocket-transport.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -17,6 +20,20 @@ afterEach(() => {
 });
 
 describe("UnixWebSocketTransport", () => {
+  it("decodes every WebSocket text payload representation", () => {
+    const text = "消息 text";
+    const bytes = Buffer.from(text);
+
+    expect(decodeTextMessage(bytes)).toBe(text);
+    expect(decodeTextMessage([
+      bytes.subarray(0, 1),
+      bytes.subarray(1),
+    ])).toBe(text);
+    expect(decodeTextMessage(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    )).toBe(text);
+  });
+
   it("matches the native remote handshake without custom identity or auth headers", async () => {
     const root = mkdtempSync(join(tmpdir(), "codexc-ws-"));
     temporaryDirectories.push(root);
@@ -24,8 +41,10 @@ describe("UnixWebSocketTransport", () => {
     const server = createServer();
     const webSocketServer = new WebSocketServer({ server });
     let headers: Record<string, string | string[] | undefined> | undefined;
-    webSocketServer.on("connection", (_socket, request) => {
+    let sendText: (() => void) | undefined;
+    webSocketServer.on("connection", (socket, request) => {
       headers = request.headers;
+      sendText = () => socket.send("server message");
     });
     await new Promise<void>((resolveListen, rejectListen) => {
       server.once("error", rejectListen);
@@ -34,7 +53,12 @@ describe("UnixWebSocketTransport", () => {
 
     const transport = new UnixWebSocketTransport(socketPath);
     try {
+      const received = new Promise<string>((resolve) => {
+        transport.onMessage(resolve);
+      });
       await transport.connect();
+      sendText?.();
+      await expect(received).resolves.toBe("server message");
       expect(headers).toMatchObject({
         host: "localhost",
         connection: "Upgrade",

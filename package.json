@@ -55,6 +55,8 @@
     "protocol:generate": "node scripts/generate-protocol.mjs",
     "protocol:check": "node scripts/check-protocol.mjs",
     "release:check": "node scripts/check-release-tag.mjs",
+    "lint": "eslint src",
+    "test:coverage": "vitest run --config vitest.config.ts --coverage",
     "launchd:install": "node scripts/install-launchd.mjs",
     "systemd:install": "node scripts/install-systemd.mjs",
     "remote": "node scripts/codex-remote.mjs",
@@ -76,10 +78,14 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^24.10.1",
     "@types/ws": "^8.18.1",
+    "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^10.7.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.65.0",
     "vitest": "^4.0.16"
   }
 }

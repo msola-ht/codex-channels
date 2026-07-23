@@ -891,7 +891,7 @@ export class TelegramOutbox {
         ),
       );
     }
-    return state.messageId!;
+    return state.messageId;
   }
 
   private async sendMessage(

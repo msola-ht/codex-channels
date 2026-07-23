@@ -125,7 +125,7 @@ export class SurfaceManager {
         },
         "Surface 持久化配置事件投递失败",
       );
-      return [result.reason];
+      return [result.reason as unknown];
     });
     if (failures.length > 0) {
       throw new AggregateError(failures, "部分 Surface 未收到配置事件");

@@ -54,7 +54,11 @@ export class SqliteBindingStore implements BindingStore {
       try {
         this.database.close();
       } catch (closeError) {
-        throw new AggregateError([error, closeError], "状态数据库初始化和清理均失败");
+        throw new AggregateError(
+          [error, closeError],
+          "状态数据库初始化和清理均失败",
+          { cause: closeError },
+        );
       }
       throw error;
     }

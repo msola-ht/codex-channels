@@ -17,6 +17,14 @@
 npm test
 ```
 
+生成包含未执行源码的 V8 Coverage 报告：
+
+```bash
+npm run test:coverage
+```
+
+HTML 报告写入被 Git 忽略的 `coverage/`；当前只记录基线，不设置缺乏依据的强制覆盖率阈值。
+
 真实 Unix WebSocket/App Server 冒烟测试要求安装受支持的 Codex CLI，但不会调用模型：
 
 ```bash
