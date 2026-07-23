@@ -350,13 +350,21 @@ function sameNumberSet(current: ReadonlySet<number>, next: ReadonlySet<number>):
 }
 
 function verifyCodexVersion(config: GatewayConfig): void {
-  const actual = execFileSync(config.codexBinary, ["--version"], {
+  const actual = execFileSync(effectiveCodexBinary(config.codexBinary), ["--version"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
   }).trim();
   if (actual !== protocolVersion.codexCli) {
     throw new Error(`Codex 版本不受支持：当前 ${actual}，协议基线 ${protocolVersion.codexCli}`);
   }
+}
+
+export function effectiveCodexBinary(
+  configuredBinary: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  const installedBinary = environment.CODEX_BINARY?.trim();
+  return configuredBinary === "codex" && installedBinary ? installedBinary : configuredBinary;
 }
 
 function isCriticalNotification(method: string): boolean {

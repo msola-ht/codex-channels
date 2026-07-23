@@ -105,8 +105,13 @@ case "$action" in
       print -u2 "Gateway 尚未运行，请先执行 codexc service start。"
       exit 1
     fi
-    launchctl kill SIGHUP "$user_domain/$gateway_label"
-    print "已通知 Gateway 重新读取配置；Gateway 连接变化会自动重启，App Server 配置变化需重新安装服务。"
+    if launchctl kill SIGHUP "$user_domain/$gateway_label" 2>/dev/null; then
+      print "已通知 Gateway 重新读取配置；Gateway 连接变化会自动重启，App Server 配置变化需重新安装服务。"
+    else
+      print "Gateway 当前没有可接收信号的进程，正在启动..."
+      start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
+      print "Gateway 已启动并将读取最新配置。"
+    fi
     ;;
   status)
     launchctl print "$user_domain/$app_label" 2>/dev/null || true

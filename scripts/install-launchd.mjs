@@ -33,6 +33,7 @@ const nodeBinary = realpathSync(process.execPath);
 const launchdPath = uniquePaths([
   dirname(nodeBinary),
   dirname(codexBinary),
+  "/opt/homebrew/bin",
   "/usr/local/bin",
   "/usr/bin",
   "/bin",

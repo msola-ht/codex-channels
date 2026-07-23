@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -86,7 +86,41 @@ function runGateway(args) {
     throw new Error("用法：codexc gateway");
   }
   const runtime = configuredEnvironment();
-  run(process.execPath, [join(packageDir, "dist/main.js")], runtime.environment, runtime.dataDir);
+  const child = spawn(process.execPath, [join(packageDir, "dist/main.js")], {
+    stdio: "inherit",
+    env: runtime.environment,
+    cwd: runtime.dataDir,
+  });
+  const forwardSignal = (signal) => {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill(signal);
+    }
+  };
+  const forwardReload = () => forwardSignal("SIGHUP");
+  const forwardTerminate = () => forwardSignal("SIGTERM");
+  const forwardInterrupt = () => forwardSignal("SIGINT");
+  const cleanup = () => {
+    process.off("SIGHUP", forwardReload);
+    process.off("SIGTERM", forwardTerminate);
+    process.off("SIGINT", forwardInterrupt);
+  };
+
+  process.on("SIGHUP", forwardReload);
+  process.on("SIGTERM", forwardTerminate);
+  process.on("SIGINT", forwardInterrupt);
+  child.once("error", (error) => {
+    cleanup();
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+  child.once("exit", (code, signal) => {
+    cleanup();
+    if (signal) {
+      process.kill(process.pid, signal);
+      return;
+    }
+    process.exitCode = code ?? 1;
+  });
 }
 
 function workspace(args) {

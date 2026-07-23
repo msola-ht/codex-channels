@@ -66,6 +66,7 @@ describe("launchd installer", () => {
     expect(appServer).toContain(`<string>${dirname(nodeBinary)}:`);
     expect(gateway).toContain(`<key>CODEX_BINARY</key>\n    <string>${nodeBinary}</string>`);
     expect(gateway).toContain(`<key>PATH</key>`);
+    expect(gateway).toContain("/opt/homebrew/bin");
     for (const plist of [appServer, gateway]) {
       expect(plist).toContain("<key>HTTP_PROXY</key>\n    <string>http://127.0.0.1:7897</string>");
       expect(plist).toContain("<key>HTTPS_PROXY</key>\n    <string>http://127.0.0.1:7897</string>");
@@ -143,6 +144,9 @@ describe("launchd installer", () => {
       "    label=${2##*/}",
       "    test -f \"$LAUNCHCTL_STATE/$label\"",
       "    ;;",
+      "  kill)",
+      "    test \"${LAUNCHCTL_KILL_FAIL:-0}\" != 1",
+      "    ;;",
       "esac",
     ].join("\n"));
     chmodSync(fakeLaunchctl, 0o755);
@@ -169,6 +173,12 @@ describe("launchd installer", () => {
     writeFileSync(launchctlLog, "");
     const reloaded = execFileSync("/bin/zsh", [script, "reload"], { env: environment, encoding: "utf8" });
     const reloadCalls = readFileSync(launchctlLog, "utf8");
+    writeFileSync(launchctlLog, "");
+    const recovered = execFileSync("/bin/zsh", [script, "reload"], {
+      env: { ...environment, LAUNCHCTL_KILL_FAIL: "1" },
+      encoding: "utf8",
+    });
+    const recoveryCalls = readFileSync(launchctlLog, "utf8");
 
     expect(started).toContain("已启动");
     expect(stopped).toContain("已停止");
@@ -188,6 +198,10 @@ describe("launchd installer", () => {
     expect(reloadCalls).toContain("kill SIGHUP");
     expect(reloadCalls).toContain("com.hegenai.codex-gateway");
     expect(reloadCalls).not.toContain("com.hegenai.codex-app-server");
+    expect(recovered).toContain("Gateway 已启动并将读取最新配置");
+    expect(recoveryCalls).toContain("kill SIGHUP");
+    expect(recoveryCalls).toContain("kickstart -k");
+    expect(recoveryCalls).not.toContain("com.hegenai.codex-app-server");
   });
 
   it.skipIf(process.platform !== "darwin")("migrates legacy launchd jobs during install", () => {

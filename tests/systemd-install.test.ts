@@ -146,7 +146,7 @@ describe("systemd installer", () => {
     expect(restartCalls).not.toContain("codex-connect-app-server.service");
     expect(reloaded).toContain("重新读取配置");
     expect(reloadCalls).toContain("--user is-active --quiet codex-connect-gateway.service");
-    expect(reloadCalls).toContain("--user kill --signal=HUP codex-connect-gateway.service");
+    expect(reloadCalls).toContain("--user kill --kill-whom=main --signal=HUP codex-connect-gateway.service");
     expect(reloadCalls).not.toContain("codex-connect-app-server.service");
     expect(uninstalled).toContain("用户配置与运行数据保留");
     expect(existsSync(appUnit)).toBe(false);

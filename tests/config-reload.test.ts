@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyConfigReload, removeUnauthorizedTelegramBindings } from "../src/bootstrap/index.js";
+import { classifyConfigReload, effectiveCodexBinary, removeUnauthorizedTelegramBindings } from "../src/bootstrap/index.js";
 import type { GatewayConfig } from "../src/config/index.js";
 import { TelegramAccessPolicy, WorkspaceRegistry } from "../src/policy/index.js";
 import { MemoryBindingStore } from "../src/storage/index.js";
@@ -8,6 +8,13 @@ import { MemoryBindingStore } from "../src/storage/index.js";
 const mainWorkspace = { id: "main", name: "Main", cwd: "/workspace" };
 
 describe("Gateway config reload", () => {
+  it("uses the service-installed Codex path for the default command", () => {
+    expect(effectiveCodexBinary("codex", { CODEX_BINARY: "/opt/codex/bin/codex" }))
+      .toBe("/opt/codex/bin/codex");
+    expect(effectiveCodexBinary("/custom/codex", { CODEX_BINARY: "/opt/codex/bin/codex" }))
+      .toBe("/custom/codex");
+  });
+
   it("hot reloads added workspaces and Telegram allowed users", () => {
     const current = config();
     const next = config({

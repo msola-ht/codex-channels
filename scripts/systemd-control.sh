@@ -39,7 +39,7 @@ case "$action" in
       printf '%s\n' "Gateway 尚未运行，请先执行 codexc service start。" >&2
       exit 1
     fi
-    systemctl_user kill --signal=HUP "$gateway_unit"
+    systemctl_user kill --kill-whom=main --signal=HUP "$gateway_unit"
     printf '%s\n' "已通知 Gateway 重新读取配置；Gateway 连接变化会自动重启，App Server 配置变化需重新安装服务。"
     ;;
   status)
