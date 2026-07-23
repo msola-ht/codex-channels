@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { chmodSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
+import { Writable } from "node:stream";
 import { pathToFileURL } from "node:url";
 
 import { parse } from "dotenv";
@@ -278,8 +279,20 @@ function createTelegramClient(token, proxyUrl) {
   };
 }
 
-function createPrompter(input, output) {
-  const readline = createInterface({ input, output });
+export function createPrompter(input, output) {
+  let hideInput = false;
+  const readlineOutput = new Writable({
+    write(chunk, encoding, callback) {
+      if (!hideInput) {
+        output.write(chunk, encoding);
+      }
+      callback();
+    },
+  });
+  readlineOutput.isTTY = output.isTTY;
+  readlineOutput.columns = output.columns;
+  readlineOutput.rows = output.rows;
+  const readline = createInterface({ input, output: readlineOutput, terminal: Boolean(input.isTTY && output.isTTY) });
   return {
     ask: async (label) => (await readline.question(`${label}：`)).trim(),
     secret: async (label) => {
@@ -287,12 +300,11 @@ function createPrompter(input, output) {
         return (await readline.question(`${label}：`)).trim();
       }
       output.write(`${label}：`);
-      const originalWrite = readline._writeToOutput;
-      readline._writeToOutput = () => {};
+      hideInput = true;
       try {
         return (await readline.question("")).trim();
       } finally {
-        readline._writeToOutput = originalWrite;
+        hideInput = false;
         output.write("\n");
       }
     },
@@ -319,6 +331,7 @@ async function askChoice(prompt, label, maximum) {
 
 async function askToken(prompt, output) {
   while (true) {
+    output.write("请输入 Telegram Bot Token（输入内容不会显示，粘贴后按回车）。\n");
     const token = await prompt.secret("Telegram Bot Token");
     if (tokenPattern.test(token)) {
       return token;

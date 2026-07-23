@@ -5,10 +5,10 @@ import { PassThrough } from "node:stream";
 import { pathToFileURL } from "node:url";
 
 import { parse } from "dotenv";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
-import { discardPendingMessageUpdates, isDirectExecution, normalizeUserIds, resolveTelegramProxy, runTelegramSetup, setEnvValues, waitForPrivateSender } from "../scripts/telegram-setup.mjs";
+import { createPrompter, discardPendingMessageUpdates, isDirectExecution, normalizeUserIds, resolveTelegramProxy, runTelegramSetup, setEnvValues, waitForPrivateSender } from "../scripts/telegram-setup.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 
@@ -21,6 +21,28 @@ afterEach(() => {
 });
 
 describe("Telegram setup", () => {
+  it("does not echo a bot token entered through a TTY", async () => {
+    const input = new PassThrough() as PassThrough & { isTTY: boolean; setRawMode: ReturnType<typeof vi.fn> };
+    input.isTTY = true;
+    input.setRawMode = vi.fn();
+    const output = new PassThrough() as PassThrough & { isTTY: boolean; columns: number; rows: number };
+    output.isTTY = true;
+    output.columns = 80;
+    output.rows = 24;
+    let renderedOutput = "";
+    output.on("data", (chunk) => { renderedOutput += chunk.toString(); });
+    const prompt = createPrompter(input, output);
+    const token = "123456:abcdefghijklmnopqrstuvwxyzABCDE";
+
+    const answer = prompt.secret("Telegram Bot Token");
+    input.write(`${token}\n`);
+
+    await expect(answer).resolves.toBe(token);
+    expect(renderedOutput).toContain("Telegram Bot Token：");
+    expect(renderedOutput).not.toContain(token);
+    prompt.close();
+  });
+
   it("collapses duplicate environment keys when saving", () => {
     const updated = setEnvValues([
       "TELEGRAM_BOT_TOKEN=old-first",
@@ -62,7 +84,10 @@ describe("Telegram setup", () => {
       output,
       prompter: {
         ask: async () => nextAnswer(),
-        secret: async () => nextAnswer(),
+        secret: async () => {
+          expect(renderedOutput).toContain("输入内容不会显示，粘贴后按回车");
+          return nextAnswer();
+        },
         confirm: async () => ["y", "yes"].includes(nextAnswer().toLowerCase()),
         close: () => undefined,
       },
