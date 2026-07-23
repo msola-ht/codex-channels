@@ -1,4 +1,4 @@
-import type { Api } from "grammy";
+import { InputFile, type Api } from "grammy";
 import type { InputRichMessage } from "grammy/types";
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,8 +16,10 @@ class FakeTelegramApi {
   readonly editOptions: unknown[] = [];
   readonly richMessages: InputRichMessage[] = [];
   readonly richEdits: InputRichMessage[] = [];
+  readonly documents: Array<{ filename: string | undefined; options: unknown }> = [];
   rejectRichMessages = false;
   rejectHtmlMessages = false;
+  rejectDocuments = false;
   private nextMessageId = 1;
 
   async sendChatAction(_chatId: string, action: string): Promise<true> {
@@ -68,6 +70,18 @@ class FakeTelegramApi {
     }
     this.editOptions.push(options);
     return true;
+  }
+
+  async sendDocument(
+    _chatId: string,
+    document: InputFile,
+    options?: unknown,
+  ): Promise<{ message_id: number }> {
+    if (this.rejectDocuments) {
+      throw new Error("Bad Request: document upload failed");
+    }
+    this.documents.push({ filename: document.filename, options });
+    return { message_id: this.nextMessageId++ };
   }
 
 }
@@ -178,6 +192,89 @@ describe("TelegramOutbox", () => {
       "<pre><code class=\"language-text\">App Server -&gt; Gateway -&gt; Telegram</code></pre>",
     ]);
     expect(api.sendOptions).toEqual([{ parse_mode: "HTML" }]);
+  });
+
+  it("collapses long final text regardless of where the turn started", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    const text = Array.from({ length: 500 }, (_, index) => `第 ${index + 1} 行说明`).join("\n");
+
+    outbox.handle({
+      type: "user.message",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "external-input",
+      text: "终端发起的请求",
+    });
+    outbox.handle(textCompleted("final", text));
+    outbox.handle(turnCompleted());
+    await settle();
+    await outbox.close();
+
+    expect(api.sent[0]).toContain("CLI 输入");
+    expect(api.sent.slice(1).length).toBeGreaterThan(1);
+    expect(api.sendOptions.slice(1).every((options) =>
+      hasEntityType(options, "expandable_blockquote")
+    )).toBe(true);
+    expect(api.documents).toEqual([]);
+  });
+
+  it("previews large code and sends the complete response as a Markdown document", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    const text = [
+      "```ts",
+      ...Array.from({ length: 100 }, (_, index) =>
+        `export const value${index} = \"${"x".repeat(40)}\";`
+      ),
+      "```",
+    ].join("\n");
+
+    outbox.handle(textCompleted("final", text, "final_answer"));
+    outbox.handle(turnCompleted());
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toHaveLength(1);
+    expect(api.sent[0]).toContain("完整内容已作为文件发送");
+    expect(api.documents).toHaveLength(1);
+    expect(api.documents[0]?.filename).toBe("codex-response.md");
+    expect(api.documents[0]?.options).toMatchObject({
+      caption: "完整回复 · 102 行",
+      reply_parameters: {
+        message_id: 1,
+        allow_sending_without_reply: true,
+      },
+    });
+  });
+
+  it("falls back to collapsed text when the complete response file cannot be sent", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    api.rejectDocuments = true;
+    const outbox = createOutbox(api);
+    const text = [
+      "```ts",
+      ...Array.from({ length: 100 }, (_, index) =>
+        `export const value${index} = \"${"x".repeat(40)}\";`
+      ),
+      "```",
+    ].join("\n");
+
+    outbox.handle(textCompleted("final", text, "final_answer"));
+    outbox.handle(turnCompleted());
+    await settle();
+    await outbox.close();
+
+    expect(api.documents).toEqual([]);
+    expect(api.edits.length).toBeGreaterThan(0);
+    expect(hasEntityType(api.editOptions[0], "expandable_blockquote")).toBe(true);
+    expect(api.sendOptions.slice(1).every((options) =>
+      hasEntityType(options, "expandable_blockquote")
+    )).toBe(true);
   });
 
   it("keeps native Telegram Rich Markdown as an opt-in format", async () => {
@@ -705,4 +802,17 @@ function hasHtmlParseMode(value: unknown): boolean {
     value !== null &&
     "parse_mode" in value &&
     value.parse_mode === "HTML";
+}
+
+function hasEntityType(value: unknown, type: string): boolean {
+  if (typeof value !== "object" || value === null || !("entities" in value)) {
+    return false;
+  }
+  const entities = value.entities;
+  return Array.isArray(entities) && entities.some((entity) =>
+    typeof entity === "object" &&
+    entity !== null &&
+    "type" in entity &&
+    entity.type === type
+  );
 }

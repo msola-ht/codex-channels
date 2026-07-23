@@ -1,4 +1,4 @@
-import type { Api } from "grammy";
+import { InputFile, type Api } from "grammy";
 import type { InputRichMessage } from "grammy/types";
 import type { Logger } from "pino";
 
@@ -16,6 +16,11 @@ import {
 } from "./format.js";
 import { formatMarkdownAsTelegramHtml } from "./markdown-format.js";
 import { formatTelegramPanelChunks } from "./html-format.js";
+import {
+  planLongFinalMessage,
+  splitExpandableMessage,
+  type LongFinalMessagePlan,
+} from "./long-message-format.js";
 import { formatOperationLog } from "./operation-format.js";
 import { TelegramTypingIndicator } from "./typing-indicator.js";
 
@@ -418,27 +423,42 @@ export class TelegramOutbox {
       return;
     }
     const text = state.text.trimEnd();
-    if (final && state.phase === "final_answer") {
-      const format = this.options.finalMessageFormat ?? "html";
-      const formatted = format === "rich"
-        ? canSendRichMarkdown(text) ? text : undefined
-        : formatMarkdownAsTelegramHtml(text);
-      if (formatted !== undefined) {
+    if (final && state.phase !== "commentary") {
+      const longMessage = planLongFinalMessage(text);
+      if (longMessage) {
         try {
-          state.messageId = format === "rich"
-            ? await this.sendRichFinal(chatId, state, formatted)
-            : await this.sendHtmlFinal(chatId, state, formatted);
+          state.messageId = await this.sendLongFinal(chatId, state, text, longMessage);
           this.streams.delete(key);
           return;
         } catch (error) {
           this.logger.warn(
-            {
-              chatId,
-              format,
-              error: safeErrorMessage(error),
-            },
-            "Telegram 格式化消息渲染失败，回退纯文本",
+            { chatId, error: safeErrorMessage(error) },
+            "Telegram 长回复优化发送失败，回退普通文本",
           );
+        }
+      }
+      if (state.phase === "final_answer") {
+        const format = this.options.finalMessageFormat ?? "html";
+        const formatted = format === "rich"
+          ? canSendRichMarkdown(text) ? text : undefined
+          : formatMarkdownAsTelegramHtml(text);
+        if (formatted !== undefined) {
+          try {
+            state.messageId = format === "rich"
+              ? await this.sendRichFinal(chatId, state, formatted)
+              : await this.sendHtmlFinal(chatId, state, formatted);
+            this.streams.delete(key);
+            return;
+          } catch (error) {
+            this.logger.warn(
+              {
+                chatId,
+                format,
+                error: safeErrorMessage(error),
+              },
+              "Telegram 格式化消息渲染失败，回退纯文本",
+            );
+          }
         }
       }
     }
@@ -769,6 +789,87 @@ export class TelegramOutbox {
     return message.message_id;
   }
 
+  private async sendLongFinal(
+    chatId: string,
+    state: StreamState,
+    text: string,
+    plan: LongFinalMessagePlan,
+  ): Promise<number> {
+    if (plan.kind === "expandable") {
+      return this.sendExpandableFinal(chatId, state, plan.chunks);
+    }
+
+    state.messageId = await this.sendHtmlFinal(chatId, state, plan.previewHtml);
+    try {
+      await this.executor.call(
+        { chatId, operation: "sendDocument", critical: true },
+        () => this.api.sendDocument(
+          chatId,
+          new InputFile(plan.content, plan.filename),
+          {
+            caption: `完整回复 · ${plan.lineCount.toLocaleString("zh-CN")} 行`,
+            reply_parameters: {
+              message_id: state.messageId!,
+              allow_sending_without_reply: true,
+            },
+          },
+        ),
+      );
+      return state.messageId;
+    } catch (error) {
+      this.logger.warn(
+        { chatId, error: safeErrorMessage(error) },
+        "Telegram 完整回复文件发送失败，回退折叠文本",
+      );
+      return this.sendExpandableFinal(chatId, state, splitExpandableMessage(text));
+    }
+  }
+
+  private async sendExpandableFinal(
+    chatId: string,
+    state: StreamState,
+    chunks: readonly string[],
+  ): Promise<number> {
+    const first = chunks[0];
+    if (!first) {
+      throw new Error("Telegram 折叠回复没有可发送内容");
+    }
+
+    if (state.messageId !== undefined) {
+      await this.executor.call(
+        { chatId, operation: "editMessageText", critical: true },
+        () => this.api.editMessageText(
+          chatId,
+          state.messageId!,
+          first,
+          expandableEditOptions(first),
+        ),
+      );
+    } else {
+      const replyTo = this.replyToByTurn.get(state.turnKey);
+      const message = await this.executor.call(
+        { chatId, operation: "sendMessage", critical: true },
+        () => this.api.sendMessage(
+          chatId,
+          first,
+          expandableSendOptions(first, replyTo),
+        ),
+      );
+      state.messageId = message.message_id;
+      if (replyTo !== undefined) {
+        this.replyToByTurn.delete(state.turnKey);
+      }
+    }
+
+    for (const chunk of chunks.slice(1)) {
+      await this.executor.call(
+        { chatId, operation: "sendMessage", critical: true },
+        () => this.api.sendMessage(chatId, chunk, expandableSendOptions(chunk)),
+      );
+    }
+    return state.messageId!;
+  }
+
   private async sendMessage(chatId: string, text: string, replyTo?: number): Promise<number> {
     const message = await this.executor.call(
       { chatId, operation: "sendMessage", critical: true },
@@ -889,6 +990,30 @@ function operationSendOptions(replyTo?: number): Parameters<Api["sendMessage"]>[
 
 function operationEditOptions(): Parameters<Api["editMessageText"]>[3] {
   return { parse_mode: "HTML" };
+}
+
+function expandableSendOptions(
+  text: string,
+  replyTo?: number,
+): Parameters<Api["sendMessage"]>[2] {
+  return {
+    ...replyOptions(replyTo),
+    entities: [{
+      type: "expandable_blockquote",
+      offset: 0,
+      length: text.length,
+    }],
+  };
+}
+
+function expandableEditOptions(text: string): Parameters<Api["editMessageText"]>[3] {
+  return {
+    entities: [{
+      type: "expandable_blockquote",
+      offset: 0,
+      length: text.length,
+    }],
+  };
 }
 
 function isMessageNotModified(error: unknown): boolean {

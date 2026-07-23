@@ -9,6 +9,7 @@
 - `outbox.ts`：协调每聊天有界输出队列、流式回复和审批显示顺序；最终回复默认使用兼容 HTML，也可选择 Telegram 原生 Rich Markdown，超长或渲染失败时回退纯文本。
 - `html-format.ts`：安全转义并分块渲染命令面板、启动通知、审批卡与 Diff。
 - `markdown-format.ts`：把常见 Markdown 块与行内样式安全转换为传统 Telegram HTML。
+- `long-message-format.ts`：统一规划终端或 Telegram 发起 Turn 的长回复；普通长文本使用可展开引用块，超长代码与内容使用预览加内存文件。
 - `operation-format.ts`：把操作记录分组、截断、脱敏并渲染为 Telegram HTML。
 - `typing-indicator.ts`：维护活动请求和 Turn 的 Typing 状态、刷新与限速。
 - `interactions.ts`：发送一次性审批或用户输入卡片，处理超时、回调和跨客户端失效。
