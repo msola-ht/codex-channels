@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { Bot, type Context } from "grammy";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
@@ -20,7 +22,11 @@ import type {
   SurfaceAccessPolicy,
   Workspace,
 } from "../../policy/index.js";
-import { formatStartupNotification } from "./format.js";
+import type { SurfaceConfigurationChange } from "../types.js";
+import {
+  formatConfigurationChange,
+  formatStartupNotification,
+} from "./format.js";
 import {
   renderTelegramCommandResult,
   replyTelegramPanel,
@@ -60,6 +66,7 @@ export class TelegramSurface {
   private readonly imageStore: TelegramImagePort;
   private readonly actorRegistry: ConversationActorRegistry | undefined;
   private readonly commands: ConversationCommandService;
+  private notificationRecipients: ReadonlySet<number>;
   private unsubscribeOutput: (() => void) | undefined;
 
   constructor(
@@ -84,6 +91,7 @@ export class TelegramSurface {
     });
     this.bot.use((context, next) => this.authorize(context, next));
     this.actorRegistry = options.actorRegistry;
+    this.notificationRecipients = new Set(startupRecipients);
     this.commands = new ConversationCommandService(service);
     const apiExecutor = new TelegramApiExecutor(logger);
     this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor, {
@@ -137,6 +145,22 @@ export class TelegramSurface {
     await lifecycleStop;
   }
 
+  replaceNotificationRecipients(recipients: ReadonlySet<number>): void {
+    this.notificationRecipients = new Set(recipients);
+  }
+
+  configurationChanged(change: SurfaceConfigurationChange): void {
+    const replyMarkup = workspaceSwitchKeyboard(change.addedWorkspaces);
+    const text = formatConfigurationChange(change);
+    for (const chatId of this.notificationRecipients) {
+      this.outbox.notifyPanel(
+        String(chatId),
+        text,
+        replyMarkup.inline_keyboard.length > 0 ? replyMarkup : undefined,
+      );
+    }
+  }
+
   private registerHandlers(): void {
     this.bot.command("whoami", (context) => context.reply(`你的 Telegram 用户 ID：${context.from?.id ?? "未知"}`));
     this.bot.command(["start", "help"], (context) =>
@@ -173,6 +197,24 @@ export class TelegramSurface {
     for (const command of conversationCommandNames) {
       this.bot.command(command, (context) => this.executeCommand(context, command));
     }
+    this.bot.callbackQuery(/^ws:([A-Za-z0-9_-]{43})$/, async (context) => {
+      const workspace = this.service.listWorkspaces().find(
+        (candidate) => workspaceSwitchToken(candidate.id) === context.match[1],
+      );
+      if (!workspace) {
+        throw new UserFacingError(
+          "workspace.selector.not-found",
+          "Workspace 切换按钮已失效",
+        );
+      }
+      const result = await this.commands.execute(
+        target(context),
+        "workspace",
+        workspace.id,
+      );
+      await context.answerCallbackQuery({ text: `已切换到 ${workspace.id}` });
+      await renderTelegramCommandResult(context, result);
+    });
     this.bot.command("cancel", async (context) => {
       const cancelled = this.interactions.cancelForChat(String(context.chat.id));
       await context.reply(cancelled ? "已取消当前交互请求。" : "当前没有待处理的交互请求。");
@@ -347,4 +389,19 @@ function isWhoAmICommand(context: Context, botUsername: string): boolean {
   return match !== null
     && (addressedUsername === undefined
       || addressedUsername.toLowerCase() === botUsername.toLowerCase());
+}
+
+function workspaceSwitchKeyboard(workspaces: readonly Workspace[]): {
+  inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
+} {
+  return {
+    inline_keyboard: workspaces.map((workspace) => [{
+      text: `切换到 ${workspace.name}`,
+      callback_data: `ws:${workspaceSwitchToken(workspace.id)}`,
+    }]),
+  };
+}
+
+function workspaceSwitchToken(workspaceId: string): string {
+  return createHash("sha256").update(workspaceId).digest("base64url");
 }

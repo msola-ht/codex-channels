@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -259,6 +260,78 @@ describe("Telegram image input", () => {
     });
 
     expect(sentTexts).toContain("操作失败：会话名称必须为 1–64 个字符");
+    await surface.stop();
+    await output.close();
+  });
+
+  it("notifies configured recipients about configuration lifecycle changes", async () => {
+    const { surface, output, sentTexts } = createSurface(vi.fn(), vi.fn());
+    surface.replaceNotificationRecipients(new Set([123]));
+
+    surface.configurationChanged({
+      action: "reloaded",
+      changes: ["Workspace"],
+      addedWorkspaces: [{
+        id: "codex-channels",
+        name: "codex-channels",
+        cwd: "/Users/msola/Documents/GitHub/codex-channels",
+      }],
+    });
+    surface.configurationChanged({
+      action: "restarting",
+      changes: ["Telegram Bot Token"],
+      addedWorkspaces: [],
+    });
+
+    await surface.stop();
+    expect(sentTexts.join("\n")).toContain("Workspace 已添加");
+    expect(sentTexts.join("\n")).toContain("codex-channels");
+    expect(sentTexts.join("\n")).toContain("Gateway 配置需要重启");
+    expect(sentTexts.join("\n")).toContain("Telegram Bot Token");
+    await output.close();
+  });
+
+  it("switches Workspace from a notification button through the shared command service", async () => {
+    const selectWorkspace = vi.fn().mockResolvedValue({
+      id: "docs",
+      name: "Docs",
+      cwd: "/workspace/docs",
+    });
+    const { surface, output, apiCalls, sentTexts } = createSurface(
+      vi.fn(),
+      vi.fn(),
+      {
+        listWorkspaces: () => [{
+          id: "docs",
+          name: "Docs",
+          cwd: "/workspace/docs",
+        }],
+        selectWorkspace,
+      },
+    );
+
+    await surface.bot.handleUpdate({
+      update_id: 10,
+      callback_query: {
+        id: "workspace-switch",
+        from: telegramUser(),
+        chat_instance: "chat-instance",
+        data: `ws:${createHash("sha256").update("docs").digest("base64url")}`,
+        message: {
+          message_id: 20,
+          date: 1,
+          chat: telegramChat(),
+          text: "Workspace 已添加",
+        },
+      },
+    });
+
+    expect(selectWorkspace).toHaveBeenCalledWith(
+      { surface: "telegram", accountId: "default", conversationId: "100" },
+      "docs",
+    );
+    expect(apiCalls).toContain("answerCallbackQuery");
+    expect(sentTexts.join("\n")).toContain("已切换 Workspace");
     await surface.stop();
     await output.close();
   });

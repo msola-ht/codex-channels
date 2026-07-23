@@ -9,8 +9,10 @@
 - [`telegram/`](telegram/README.md)：Telegram Bot 输入、输出、交互、图片和生命周期。
 
 `types.ts` 定义最小 `SurfaceAdapter` 生命周期契约。每个实例使用
-`surface + accountId` 标识，分别提供启停与 `InteractionPort`；Bootstrap 只做编译期显式注册。
+`surface + accountId` 标识，分别提供启停、可选配置变更通知与 `InteractionPort`；Bootstrap 只做编译期显式注册。
 `stop()` 必须可在部分启动后安全调用，并保持幂等。
+配置变更通知使用结构化动作区分热加载、自动重启、需要重装和加载失败；Surface 只渲染结果，
+不得接收原始配置值或异常详情。
 
 新增 Surface 时应实现统一输入、输出和审批边界，通过 Application/Core 接入；输出消费者必须校验
 目标 Surface 与账号，避免跨平台串台。Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台

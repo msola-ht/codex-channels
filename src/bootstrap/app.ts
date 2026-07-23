@@ -265,18 +265,58 @@ export class GatewayApplication {
 
   reloadConfig(next: GatewayConfig): ConfigReloadResult {
     const result = classifyConfigReload(this.config, next);
-    if (result.action !== "reload") {
+    if (result.action === "reinstall") {
+      this.surfaceManager.configurationChanged({
+        action: "reinstall-required",
+        changes: result.changes,
+        addedWorkspaces: [],
+      });
+      return result;
+    }
+    if (result.action === "restart") {
+      const currentRecipients = this.config.telegramAllowedUserIds;
+      this.telegram.replaceNotificationRecipients(
+        intersectNumberSets(
+          currentRecipients,
+          next.telegramAllowedUserIds,
+        ),
+      );
+      this.surfaceManager.configurationChanged({
+        action: "restarting",
+        changes: result.changes,
+        addedWorkspaces: [],
+      });
+      this.telegram.replaceNotificationRecipients(currentRecipients);
       return result;
     }
 
+    const addedWorkspaces = result.changes.includes("Workspace")
+      ? findAddedWorkspaces(this.config.workspaces, next.workspaces)
+      : [];
     if (result.changes.includes("Workspace")) {
       this.workspaces.replace(next.workspaces, next.defaultWorkspaceId);
     }
     if (result.changes.includes("Telegram 允许用户")) {
       this.access.replace(next.telegramAllowedUserIds);
+      this.telegram.replaceNotificationRecipients(next.telegramAllowedUserIds);
     }
     this.config = next;
+    if (result.changes.length > 0) {
+      this.surfaceManager.configurationChanged({
+        action: "reloaded",
+        changes: result.changes,
+        addedWorkspaces,
+      });
+    }
     return result;
+  }
+
+  notifyConfigReloadFailure(): void {
+    this.surfaceManager.configurationChanged({
+      action: "reload-failed",
+      changes: [],
+      addedWorkspaces: [],
+    });
   }
 
   private beginReconnect(): void {
@@ -436,21 +476,36 @@ export type ConfigReloadResult =
 
 export function classifyConfigReload(current: GatewayConfig, next: GatewayConfig): ConfigReloadResult {
   const reinstallReasons = serviceReinstallReasons(current, next);
-  if (reinstallReasons.length > 0) {
-    return { action: "reinstall", changes: reinstallReasons };
-  }
   const restartReasons = restartRequiredReasons(current, next);
+  const reloadReasons = hotReloadReasons(current, next);
+  if (reinstallReasons.length > 0) {
+    return {
+      action: "reinstall",
+      changes: [...reinstallReasons, ...restartReasons, ...reloadReasons],
+    };
+  }
   if (restartReasons.length > 0) {
-    return { action: "restart", changes: restartReasons };
+    return {
+      action: "restart",
+      changes: [...restartReasons, ...reloadReasons],
+    };
   }
-  const changes: string[] = [];
-  if (!sameWorkspaces(current.workspaces, next.workspaces)) {
-    changes.push("Workspace");
-  }
-  if (!sameNumberSet(current.telegramAllowedUserIds, next.telegramAllowedUserIds)) {
-    changes.push("Telegram 允许用户");
-  }
-  return { action: "reload", changes };
+  return { action: "reload", changes: reloadReasons };
+}
+
+function findAddedWorkspaces(
+  current: ReadonlyArray<GatewayConfig["workspaces"][number]>,
+  next: ReadonlyArray<GatewayConfig["workspaces"][number]>,
+): GatewayConfig["workspaces"] {
+  const currentIds = new Set(current.map((workspace) => workspace.id));
+  return next.filter((workspace) => !currentIds.has(workspace.id));
+}
+
+function intersectNumberSets(
+  left: ReadonlySet<number>,
+  right: ReadonlySet<number>,
+): ReadonlySet<number> {
+  return new Set([...left].filter((value) => right.has(value)));
 }
 
 function serviceReinstallReasons(current: GatewayConfig, next: GatewayConfig): string[] {
@@ -487,6 +542,23 @@ function restartRequiredReasons(current: GatewayConfig, next: GatewayConfig): st
   }
   if (![...current.telegramAllowedUserIds].every((userId) => next.telegramAllowedUserIds.has(userId))) {
     reasons.push("Telegram 用户撤权");
+  }
+  return reasons;
+}
+
+function hotReloadReasons(current: GatewayConfig, next: GatewayConfig): string[] {
+  const reasons: string[] = [];
+  if (
+    preservesExistingWorkspaces(current.workspaces, next.workspaces)
+    && !sameWorkspaces(current.workspaces, next.workspaces)
+  ) {
+    reasons.push("Workspace");
+  }
+  if (
+    [...current.telegramAllowedUserIds].every((userId) => next.telegramAllowedUserIds.has(userId))
+    && !sameNumberSet(current.telegramAllowedUserIds, next.telegramAllowedUserIds)
+  ) {
+    reasons.push("Telegram 允许用户");
   }
   return reasons;
 }

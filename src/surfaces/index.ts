@@ -3,4 +3,7 @@ export {
   telegramDefaultAccountId,
   type TelegramImagePort,
 } from "./telegram/index.js";
-export type { SurfaceAdapter } from "./types.js";
+export type {
+  SurfaceAdapter,
+  SurfaceConfigurationChange,
+} from "./types.js";

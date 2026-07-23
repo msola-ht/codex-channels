@@ -91,6 +91,35 @@ afterEach(() => {
 });
 
 describe("TelegramOutbox", () => {
+  it("queues a Workspace notification with direct switch buttons", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    expect(outbox.notifyPanel(
+      target.conversationId,
+      "Workspace 已添加\n\n│ codex-channels · codex-channels\n│ /workspace/codex-channels",
+      {
+        inline_keyboard: [[{
+          text: "切换到 codex-channels",
+          callback_data: "ws:codex-channels",
+        }]],
+      },
+    )).toBe(true);
+    await settle();
+    await outbox.close();
+
+    expect(api.sent[0]).toContain("<b>Workspace 已添加</b>");
+    expect(api.sendOptions[0]).toMatchObject({
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [[{
+          text: "切换到 codex-channels",
+          callback_data: "ws:codex-channels",
+        }]],
+      },
+    });
+  });
+
   it("ignores output for another Surface or Telegram account", async () => {
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);

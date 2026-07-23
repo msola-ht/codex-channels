@@ -18,6 +18,7 @@ import {
 } from "../../application/index.js";
 import type { TurnArtifacts } from "../../conversation-core/index.js";
 import type { Workspace } from "../../policy/index.js";
+import type { SurfaceConfigurationChange } from "../types.js";
 
 export function splitTelegramText(text: string, limit = 4_000): string[] {
   if (!text) {
@@ -332,6 +333,61 @@ export function formatWorkspaces(workspaces: Workspace[], currentWorkspaceId: st
     "",
     "切换：/workspace <序号、ID 或名称>",
   ].join("\n");
+}
+
+export function formatWorkspacesAdded(workspaces: readonly Workspace[]): string {
+  return [
+    workspaces.length === 1 ? "Workspace 已添加" : `Workspace 已添加（${workspaces.length}）`,
+    "",
+    ...workspaces.flatMap((workspace, index) => [
+      `│ ${workspace.name} · ${workspace.id}`,
+      `│ ${workspace.cwd}`,
+      ...(index + 1 < workspaces.length ? [""] : []),
+    ]),
+    "",
+    "点击下方按钮可直接切换；发送 /workspace 可查看全部 Workspace。",
+  ].join("\n");
+}
+
+export function formatConfigurationChange(
+  change: SurfaceConfigurationChange,
+): string {
+  switch (change.action) {
+    case "reloaded":
+      if (change.addedWorkspaces.length > 0) {
+        return [
+          formatWorkspacesAdded(change.addedWorkspaces),
+          "",
+          `已生效：${change.changes.join("、")}`,
+        ].join("\n");
+      }
+      return [
+        "Gateway 配置已热加载",
+        "",
+        `已生效：${change.changes.join("、")}`,
+      ].join("\n");
+    case "restarting":
+      return [
+        "Gateway 配置需要重启",
+        "",
+        `变更：${change.changes.join("、")}`,
+        "当前 Gateway 将退出；若由系统服务托管，将自动重新启动。",
+      ].join("\n");
+    case "reinstall-required":
+      return [
+        "Gateway 配置尚未应用",
+        "",
+        `需要重装服务：${change.changes.join("、")}`,
+        "请在本机执行：",
+        "  codexc service install",
+      ].join("\n");
+    case "reload-failed":
+      return [
+        "Gateway 配置热加载失败",
+        "",
+        "当前有效配置继续运行。请检查配置后再次保存。",
+      ].join("\n");
+  }
 }
 
 export function formatStartupNotification(

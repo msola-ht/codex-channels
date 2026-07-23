@@ -1,5 +1,5 @@
 import { InputFile, type Api } from "grammy";
-import type { InputRichMessage } from "grammy/types";
+import type { InlineKeyboardMarkup, InputRichMessage } from "grammy/types";
 import type { Logger } from "pino";
 
 import type { InteractionDecision, InteractionRequest } from "../../approval/index.js";
@@ -420,6 +420,26 @@ export class TelegramOutbox {
         reject(new Error("Telegram Outbox 已满，交互请求未入队"));
       }
     });
+  }
+
+  notifyPanel(
+    chatId: string,
+    text: string,
+    replyMarkup?: InlineKeyboardMarkup,
+  ): boolean {
+    return this.enqueue(chatId, async () => {
+      const chunks = formatTelegramPanelChunks(text);
+      for (const [index, chunk] of chunks.entries()) {
+        const finalChunk = index === chunks.length - 1;
+        await this.executor.call(
+          { chatId, operation: "sendMessage", critical: true },
+          () => this.api.sendMessage(chatId, chunk, {
+            ...htmlSendOptions(undefined, index > 0),
+            ...(finalChunk && replyMarkup ? { reply_markup: replyMarkup } : {}),
+          }),
+        );
+      }
+    }, true);
   }
 
   private enqueue(chatId: string, run: () => Promise<void>, critical: boolean): boolean {

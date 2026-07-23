@@ -1,6 +1,9 @@
 import type { Logger } from "pino";
 
-import type { SurfaceAdapter } from "../surfaces/index.js";
+import type {
+  SurfaceAdapter,
+  SurfaceConfigurationChange,
+} from "../surfaces/index.js";
 
 export class SurfaceManager {
   private readonly started: SurfaceAdapter[] = [];
@@ -47,6 +50,23 @@ export class SurfaceManager {
         failures.map(({ error }) => error),
         "部分 Surface 未能停止",
       );
+    }
+  }
+
+  configurationChanged(change: SurfaceConfigurationChange): void {
+    for (const surface of this.started) {
+      try {
+        surface.configurationChanged?.(change);
+      } catch (error) {
+        this.logger.warn(
+          {
+            errorType: error instanceof Error ? error.name : typeof error,
+            surface: surface.surface,
+            accountId: surface.accountId,
+          },
+          "Surface 配置变更通知失败",
+        );
+      }
     }
   }
 }

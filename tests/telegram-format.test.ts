@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatContextUsage,
+  formatConfigurationChange,
   formatDiff,
   formatFastModeState,
   formatModels,
@@ -12,6 +13,7 @@ import {
   formatStartupNotification,
   formatUsage,
   formatWorkspaces,
+  formatWorkspacesAdded,
   splitTelegramText,
 } from "../src/surfaces/telegram/format.js";
 import type { Model } from "../src/codex-protocol/index.js";
@@ -157,6 +159,62 @@ describe("formatWorkspaces", () => {
     expect(text).toContain("2. Docs · docs ← 当前");
     expect(text).toContain("/workspace/main");
     expect(text).toContain("/workspace/docs");
+  });
+
+  it("formats newly added workspaces as a switch notification", () => {
+    const text = formatWorkspacesAdded([
+      {
+        id: "codex-channels",
+        name: "codex-channels",
+        cwd: "/Users/msola/Documents/GitHub/codex-channels",
+      },
+    ]);
+
+    expect(text).toContain("Workspace 已添加");
+    expect(text).toContain("codex-channels · codex-channels");
+    expect(text).toContain("/Users/msola/Documents/GitHub/codex-channels");
+    expect(text).toContain("/workspace");
+  });
+
+  it.each([
+    [
+      "reloaded",
+      ["Telegram 允许用户"],
+      "Gateway 配置已热加载",
+      "已生效：Telegram 允许用户",
+    ],
+    [
+      "restarting",
+      ["Telegram Bot Token"],
+      "Gateway 配置需要重启",
+      "变更：Telegram Bot Token",
+    ],
+    [
+      "reinstall-required",
+      ["Codex Socket"],
+      "Gateway 配置尚未应用",
+      "codexc service install",
+    ],
+    [
+      "reload-failed",
+      [],
+      "Gateway 配置热加载失败",
+      "当前有效配置继续运行",
+    ],
+  ] as const)("formats the %s configuration lifecycle notice", (
+    action,
+    changes,
+    title,
+    detail,
+  ) => {
+    const text = formatConfigurationChange({
+      action,
+      changes,
+      addedWorkspaces: [],
+    });
+
+    expect(text).toContain(title);
+    expect(text).toContain(detail);
   });
 });
 

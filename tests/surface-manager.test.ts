@@ -84,6 +84,34 @@ describe("SurfaceManager", () => {
       "stop:telegram",
     ]);
   });
+
+  it("forwards configuration changes only to started Surfaces", async () => {
+    const calls: string[] = [];
+    const adapter = surface("telegram", "default", calls);
+    adapter.configurationChanged = (change) => {
+      calls.push(`workspace:${change.addedWorkspaces[0]?.id}`);
+    };
+    const manager = new SurfaceManager([adapter], pino({ level: "silent" }));
+
+    manager.configurationChanged({
+      action: "reloaded",
+      changes: ["Workspace"],
+      addedWorkspaces: [{ id: "ignored", name: "Ignored", cwd: "/ignored" }],
+    });
+    await manager.start();
+    manager.configurationChanged({
+      action: "reloaded",
+      changes: ["Workspace"],
+      addedWorkspaces: [{ id: "docs", name: "Docs", cwd: "/docs" }],
+    });
+    await manager.stop();
+
+    expect(calls).toEqual([
+      "start:telegram",
+      "workspace:docs",
+      "stop:telegram",
+    ]);
+  });
 });
 
 function surface(

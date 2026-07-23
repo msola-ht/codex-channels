@@ -50,6 +50,28 @@ describe("Gateway config reload", () => {
     });
   });
 
+  it("uses the highest required action while reporting every concurrent change", () => {
+    const next = config({
+      codexSocketPath: "/tmp/other.sock",
+      telegramBotToken: "new-token",
+      workspaces: [
+        mainWorkspace,
+        { id: "docs", name: "Docs", cwd: "/docs" },
+      ],
+      telegramAllowedUserIds: new Set([123, 456]),
+    });
+
+    expect(classifyConfigReload(config(), next)).toEqual({
+      action: "reinstall",
+      changes: [
+        "Codex Socket",
+        "Telegram Bot Token",
+        "Workspace",
+        "Telegram 允许用户",
+      ],
+    });
+  });
+
   it("restarts instead of hot reloading when a Telegram user is removed", () => {
     const current = config({ telegramAllowedUserIds: new Set([123, 456]) });
     const next = config({ telegramAllowedUserIds: new Set([123]) });

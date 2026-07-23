@@ -52,8 +52,14 @@ async function main(): Promise<void> {
         return;
       }
       if (result.action === "restart") {
-        logger.info({ changes: result.changes }, "配置需要重建连接，Gateway 将自动重启");
-        stop(process.env.CODEX_CONNECT_GATEWAY_SUPERVISED === "1" ? 75 : 0);
+        const supervised = process.env.CODEX_CONNECT_GATEWAY_SUPERVISED === "1";
+        logger.info(
+          { changes: result.changes, supervised },
+          supervised
+            ? "配置需要重建连接，Gateway 将由系统服务自动重启"
+            : "配置需要重建连接，Gateway 将退出，请手动重新启动",
+        );
+        stop(supervised ? 75 : 0);
         return;
       }
       logger.info(
@@ -61,6 +67,7 @@ async function main(): Promise<void> {
         result.changes.length > 0 ? "Gateway 配置已热加载" : "Gateway 配置没有变化",
       );
     } catch (error) {
+      application.notifyConfigReloadFailure();
       logger.error({ err: error }, "Gateway 配置热加载失败，继续使用现有配置");
     } finally {
       reloading = false;
