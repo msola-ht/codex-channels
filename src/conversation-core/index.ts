@@ -13,6 +13,11 @@ export {
   type SurfaceId,
 } from "./events.js";
 export { parseOperationUpdate, sanitizeOperationText } from "./operation.js";
+export {
+  UserFacingError,
+  type UserFacingErrorCode,
+  type UserFacingErrorDetails,
+} from "./user-facing-error.js";
 export type {
   ConversationRoutingPort,
   RoutedThread,

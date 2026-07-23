@@ -1,18 +1,57 @@
 import type { Bot } from "grammy";
 import type { Logger } from "pino";
 
-import { conversationCommands } from "../../application/index.js";
+import {
+  conversationCommandNames,
+  type ConversationCommandName,
+} from "../../application/index.js";
 import { formatTelegramPanelChunks } from "./html-format.js";
+import { telegramErrorMetadata } from "./error-metadata.js";
+
+const commandDescriptions = {
+  resume: "列出或恢复 Codex 会话",
+  sessions: "搜索可恢复会话",
+  archived: "搜索已归档会话",
+  new: "下一条消息创建新会话",
+  archive: "归档当前会话",
+  unarchive: "恢复已归档会话",
+  status: "查看当前状态",
+  workspace: "列出或切换 Workspace",
+  stop: "停止当前任务",
+  rename: "命名当前会话",
+  compact: "压缩当前上下文",
+  fork: "分叉当前会话",
+  review: "启动代码审查",
+  model: "查看或切换模型",
+  effort: "查看或切换思考强度",
+  fast: "查看或切换 Fast 模式",
+  skills: "列出 Skills",
+  mcp: "列出 MCP Servers",
+  plugins: "列出 Plugins",
+  usage: "查看账号用量",
+  limits: "查看套餐与额度",
+  permissions: "查看权限配置",
+  diff: "查看当前 Turn Diff",
+  plan: "查看当前 Turn 计划",
+  goal: "查看或管理 Goal",
+} satisfies Record<ConversationCommandName, string>;
 
 const commands = [
   { command: "start", description: "使用说明" },
-  ...conversationCommands.map(({ name, description }) => ({
+  ...conversationCommandNames.map((name) => ({
     command: name,
-    description,
+    description: commandDescriptions[name],
   })),
   { command: "cancel", description: "取消当前交互请求" },
   { command: "whoami", description: "显示 Telegram 用户 ID" },
 ];
+
+class TelegramLifecycleError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TelegramLifecycleError";
+  }
+}
 
 export interface TelegramStartupNotification {
   messages: () => ReadonlyArray<{ chatId: number; text: string }>;
@@ -37,13 +76,16 @@ export class TelegramLifecycle {
     this.polling = this.run(this.lifecycleAbort.signal);
     this.logger.info("Telegram Gateway 正在连接");
     void this.polling.catch((error) => {
-      const failure = asError(error);
       this.logger.error(
-        { message: failure.message },
+        telegramErrorMetadata(error),
         "Telegram Long Polling 已停止",
       );
       if (!this.stopping) {
-        this.onFatal?.(failure);
+        this.onFatal?.(
+          error instanceof TelegramLifecycleError
+            ? error
+            : new TelegramLifecycleError("Telegram Long Polling 已停止"),
+        );
       }
     });
   }
@@ -79,7 +121,7 @@ export class TelegramLifecycle {
     } catch (error) {
       if (!this.stopping && !signal.aborted) {
         this.logger.warn(
-          { message: error instanceof Error ? error.message : String(error) },
+          telegramErrorMetadata(error),
           "Telegram 启动联通通知生成失败，不影响 Long Polling",
         );
       }
@@ -102,7 +144,7 @@ export class TelegramLifecycle {
         this.logger.warn(
           {
             chatId,
-            message: error instanceof Error ? error.message : String(error),
+            ...telegramErrorMetadata(error),
           },
           "Telegram 启动联通通知发送失败，不影响 Long Polling",
         );
@@ -115,7 +157,7 @@ export class TelegramLifecycle {
       await this.bot.api.setMyCommands(commands, signal as never);
     } catch (error) {
       this.logger.warn(
-        { message: error instanceof Error ? error.message : String(error) },
+        telegramErrorMetadata(error),
         "Telegram 命令菜单注册失败，不影响 Long Polling",
       );
     }
@@ -141,7 +183,7 @@ export class TelegramLifecycle {
         }
         this.logger.warn(
           {
-            message: error instanceof Error ? error.message : String(error),
+            ...telegramErrorMetadata(error),
             attempt,
             maximumAttempts,
           },
@@ -177,7 +219,7 @@ export class TelegramLifecycle {
           } catch (error) {
             this.logger.error(
               {
-                message: error instanceof Error ? error.message : String(error),
+                ...telegramErrorMetadata(error),
                 updateId: update.update_id,
               },
               "Telegram 更新处理失败",
@@ -190,13 +232,13 @@ export class TelegramLifecycle {
         }
         consecutiveFailures += 1;
         if (consecutiveFailures >= maximumFailures) {
-          throw new Error(
-            `Telegram Long Polling 连续失败 ${maximumFailures} 次：${error instanceof Error ? error.message : String(error)}`,
+          throw new TelegramLifecycleError(
+            `Telegram Long Polling 连续失败 ${maximumFailures} 次`,
           );
         }
         this.logger.warn(
           {
-            message: error instanceof Error ? error.message : String(error),
+            ...telegramErrorMetadata(error),
             attempt: consecutiveFailures,
             maximumFailures,
           },
@@ -209,10 +251,6 @@ export class TelegramLifecycle {
       }
     }
   }
-}
-
-function asError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error));
 }
 
 function waitWithAbort(milliseconds: number, signal: AbortSignal): Promise<void> {

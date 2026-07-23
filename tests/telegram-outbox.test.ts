@@ -146,13 +146,17 @@ describe("TelegramOutbox", () => {
     outbox.handle({
       ...turnCompleted(),
       status: "failed",
-      error: "命令执行失败",
+      error: "命令执行失败，TOKEN=top-secret",
     });
     await settle();
     await vi.advanceTimersByTimeAsync(8_000);
     await settle();
 
-    expect(api.sent).toEqual(["执行到一半。", "Codex 任务失败：命令执行失败"]);
+    expect(api.sent).toEqual([
+      "执行到一半。",
+      "Codex 任务失败，Gateway 已隐藏上游错误详情以避免泄露敏感信息。",
+    ]);
+    expect(api.sent.join("\n")).not.toContain("top-secret");
     expect(api.actions).toEqual([]);
 
     await outbox.close();
@@ -212,6 +216,27 @@ describe("TelegramOutbox", () => {
       "<b>服务职责</b>\n\n• App Server\n• Gateway\n\n" +
       "<pre><code class=\"language-text\">App Server -&gt; Gateway -&gt; Telegram</code></pre>",
     ]);
+    expect(api.sendOptions).toEqual([{ parse_mode: "HTML" }]);
+  });
+
+  it("sends command-only text fences as clickable Telegram commands", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    const markdown = [
+      "```text",
+      "/status",
+      "/goal unknown",
+      "/fast status",
+      "```",
+    ].join("\n");
+
+    outbox.handle(textCompleted("final", markdown, "final_answer"));
+    outbox.handle(turnCompleted());
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual(["/status\n/goal unknown\n/fast status"]);
     expect(api.sendOptions).toEqual([{ parse_mode: "HTML" }]);
   });
 
@@ -724,12 +749,13 @@ describe("TelegramOutbox", () => {
     outbox.handle({
       type: "warning",
       target,
-      message: "模型列表暂时不可用",
+      message: "request failed at /bot123456789:opaque-secret/file",
     });
     await settle();
     await outbox.close();
 
-    expect(api.sent).toEqual(["Codex 警告：模型列表暂时不可用"]);
+    expect(api.sent).toEqual(["Codex 发出一条警告，Gateway 已隐藏上游详情。"]);
+    expect(api.sent.join("\n")).not.toContain("opaque-secret");
     expect(api.sendOptions).toEqual([{ disable_notification: true }]);
   });
 });

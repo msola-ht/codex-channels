@@ -6,7 +6,7 @@ import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ConversationService } from "../src/application/conversation-service.js";
-import type { OutputEvent } from "../src/conversation-core/events.js";
+import { UserFacingError, type OutputEvent } from "../src/conversation-core/index.js";
 import { EventBus } from "../src/event-bus/event-bus.js";
 import { TelegramAccessPolicy } from "../src/policy/telegram-access.js";
 import { TelegramSurface, type TelegramImagePort } from "../src/surfaces/telegram/bot.js";
@@ -213,6 +213,55 @@ describe("Telegram image input", () => {
     await surface.stop();
     await output.close();
   });
+
+  it("hides unexpected service errors from Telegram replies", async () => {
+    const submit = vi.fn().mockRejectedValue(
+      new Error("upstream failed with TOKEN=top-secret"),
+    );
+    const { surface, output, sentTexts } = createSurface(submit, vi.fn());
+
+    await surface.bot.handleUpdate({
+      update_id: 8,
+      message: {
+        message_id: 17,
+        date: 1,
+        from: telegramUser(),
+        chat: telegramChat(),
+        text: "执行任务",
+      },
+    });
+
+    expect(sentTexts).toContain("操作失败：Gateway 未能完成请求，请稍后重试。");
+    expect(sentTexts.join("\n")).not.toContain("top-secret");
+    await surface.stop();
+    await output.close();
+  });
+
+  it("keeps explicitly user-facing validation errors actionable", async () => {
+    const rename = vi.fn().mockRejectedValue(
+      new UserFacingError(
+        "conversation.name.invalid",
+        "this fallback must not be rendered",
+      ),
+    );
+    const { surface, output, sentTexts } = createSurface(vi.fn(), vi.fn(), { rename });
+
+    await surface.bot.handleUpdate({
+      update_id: 9,
+      message: {
+        message_id: 18,
+        date: 1,
+        from: telegramUser(),
+        chat: telegramChat(),
+        text: "/rename",
+        entities: [{ offset: 0, length: 7, type: "bot_command" }],
+      },
+    });
+
+    expect(sentTexts).toContain("操作失败：会话名称必须为 1–64 个字符");
+    await surface.stop();
+    await output.close();
+  });
 });
 
 function createSurface(
@@ -223,10 +272,12 @@ function createSurface(
   surface: TelegramSurface;
   output: EventBus<OutputEvent>;
   apiCalls: string[];
+  sentTexts: string[];
   rememberActor: ReturnType<typeof vi.fn>;
 } {
   const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
   const apiCalls: string[] = [];
+  const sentTexts: string[] = [];
   const imageStore: TelegramImagePort = {
     start: async () => undefined,
     close: () => undefined,
@@ -240,7 +291,7 @@ function createSurface(
     undefined,
     { submit, ...serviceOverrides } as unknown as ConversationService,
     output,
-    new TelegramAccessPolicy(new Set([123])),
+    new TelegramAccessPolicy(new Set([123]), "default"),
     new Set(),
     [{ id: "main", name: "Main", cwd: "/workspace" }],
     directory,
@@ -262,9 +313,13 @@ function createSurface(
     can_manage_bots: false,
     supports_join_request_queries: false,
   };
-  surface.bot.api.config.use(async (_previous, method) => {
+  surface.bot.api.config.use(async (_previous, method, payload) => {
     apiCalls.push(method);
     if (method === "sendMessage") {
+      const text = (payload as { text?: unknown }).text;
+      if (typeof text === "string") {
+        sentTexts.push(text);
+      }
       return {
         ok: true,
         result: {
@@ -277,7 +332,7 @@ function createSurface(
     }
     return { ok: true, result: true } as never;
   });
-  return { surface, output, apiCalls, rememberActor };
+  return { surface, output, apiCalls, sentTexts, rememberActor };
 }
 
 function telegramUser() {

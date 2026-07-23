@@ -1,9 +1,9 @@
 export {
   ConversationCommandService,
-  conversationCommands,
   conversationCommandNames,
   isConversationCommandName,
   type ConversationCommandName,
+  type ConversationCommandOutcome,
   type ConversationCommandResult,
 } from "./conversation-command-service.js";
 export {

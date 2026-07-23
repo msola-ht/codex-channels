@@ -1,6 +1,8 @@
 import { GrammyError, HttpError } from "grammy";
 import type { Logger } from "pino";
 
+import { telegramErrorMetadata } from "./error-metadata.js";
+
 interface TelegramApiCall {
   chatId: string;
   operation: string;
@@ -27,7 +29,7 @@ export class TelegramApiExecutor {
             attempt,
             maximumAttempts,
             retryInMs: delayMs,
-            error: safeErrorMessage(error),
+            ...telegramErrorMetadata(error),
           },
           "Telegram API 请求失败，稍后重试",
         );
@@ -63,8 +65,4 @@ function wait(milliseconds: number): Promise<void> {
     const timer = setTimeout(resolve, milliseconds);
     timer.unref();
   });
-}
-
-function safeErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

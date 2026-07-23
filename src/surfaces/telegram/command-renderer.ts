@@ -1,6 +1,9 @@
 import type { Context } from "grammy";
 
-import type { ConversationCommandResult } from "../../application/index.js";
+import type {
+  ConversationCommandOutcome,
+  ConversationCommandResult,
+} from "../../application/index.js";
 import {
   formatDiff,
   formatFastModeState,
@@ -24,13 +27,15 @@ export async function renderTelegramCommandResult(
   result: ConversationCommandResult,
 ): Promise<void> {
   switch (result.kind) {
-    case "notice":
-      if (result.detail === "expanded") {
-        await replyTelegramPanel(context, result.text);
+    case "outcome": {
+      const rendered = renderOutcome(result.outcome);
+      if (rendered.expanded) {
+        await replyTelegramPanel(context, rendered.text);
       } else {
-        await context.reply(result.text);
+        await context.reply(rendered.text);
       }
       return;
+    }
     case "sessions":
       await replyTelegramPanel(
         context,
@@ -91,6 +96,81 @@ export async function renderTelegramCommandResult(
         });
       }
       return;
+    case "goal":
+      await replyTelegramPanel(
+        context,
+        result.goal
+          ? `当前 Goal：${result.goal.objective}\n状态：${result.goal.status}\nTokens：${result.goal.tokensUsed}${result.goal.tokenBudget === null ? "" : ` / ${result.goal.tokenBudget}`}`
+          : "当前 Thread 没有 Goal。使用 /goal set <目标> 设置。",
+      );
+      return;
+  }
+}
+
+function renderOutcome(
+  outcome: ConversationCommandOutcome,
+): { text: string; expanded: boolean } {
+  switch (outcome.type) {
+    case "thread.resumed":
+      return {
+        text: `已恢复 Codex Thread\nThread：${outcome.threadId}`,
+        expanded: true,
+      };
+    case "session.new":
+      return {
+        text: "已退出当前会话，下一条普通消息将创建新的 Codex Thread。",
+        expanded: false,
+      };
+    case "thread.archived":
+      return {
+        text: `已归档 Codex Thread\nThread：${outcome.threadId}\n下一条普通消息将创建新会话。`,
+        expanded: true,
+      };
+    case "thread.unarchived":
+      return {
+        text: `已取消归档并切换会话\nThread：${outcome.threadId}`,
+        expanded: true,
+      };
+    case "workspace.selected":
+      return {
+        text: `已切换 Workspace\nWorkspace：${outcome.workspace.name}\n工作目录：${outcome.workspace.cwd}`,
+        expanded: true,
+      };
+    case "turn.stop-requested":
+      return {
+        text: outcome.stopped ? "已请求停止当前任务。" : "当前没有运行中的任务。",
+        expanded: false,
+      };
+    case "thread.renamed":
+      return {
+        text: `会话已重命名\n名称：${outcome.name}`,
+        expanded: true,
+      };
+    case "thread.compaction-requested":
+      return {
+        text: "已请求压缩当前 Codex Thread。进度将通过标准事件返回。",
+        expanded: false,
+      };
+    case "thread.forked":
+      return {
+        text: `已分叉并切换到新会话\nThread：${outcome.threadId}`,
+        expanded: true,
+      };
+    case "review.started":
+      return {
+        text: `已启动 Codex Review\nTurn：${outcome.turnId}`,
+        expanded: true,
+      };
+    case "goal.cleared":
+      return {
+        text: "已清除当前 Thread Goal。",
+        expanded: false,
+      };
+    case "goal.updated":
+      return {
+        text: `Goal 已设置\n目标：${outcome.goal.objective}`,
+        expanded: true,
+      };
   }
 }
 

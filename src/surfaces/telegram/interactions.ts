@@ -7,6 +7,7 @@ import type { InteractionDecision, InteractionPort, InteractionRequest } from ".
 import type { ConversationTarget } from "../../conversation-core/index.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import { formatTelegramPanelChunks } from "./html-format.js";
+import { telegramErrorMetadata } from "./error-metadata.js";
 
 interface PendingInteraction {
   requestId: string;
@@ -271,7 +272,7 @@ export class TelegramInteractionPort implements InteractionPort {
         {
           chatId: pending.target.conversationId,
           requestId: pending.requestId,
-          message: error instanceof Error ? error.message : String(error),
+          ...telegramErrorMetadata(error),
         },
         "Telegram 交互消息状态更新失败",
       );

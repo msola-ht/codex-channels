@@ -133,7 +133,8 @@ Codex App Server（独立进程，Unix WebSocket）
 App Server 是 Thread、Turn 和 Item 的唯一事实来源。SQLite 只保存外部 conversation、Surface
 账号、Workspace 与 Thread 的最小绑定。Surface 通过编译期显式注册接入；当前只启用 Telegram，
 后续平台适配器通过统一命令服务和 `target + actorId` 授权上下文接入，不需要修改 Conversation Core
-或 Codex Client；平台 SDK、消息格式和文件传输仍由各自适配器实现。
+或 Codex Client；授权同时按 Surface 账号隔离。Application 返回结构化命令结果，平台 SDK、成功
+文案、消息格式和文件传输由各自适配器实现；未知内部错误不会原样发送到外部聊天。
 
 详细设计见 [ARCHITECTURE_REBUILD_PROPOSAL.md](ARCHITECTURE_REBUILD_PROPOSAL.md)，项目约束见 [AGENTS.md](AGENTS.md)。
 

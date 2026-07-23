@@ -20,6 +20,7 @@ import type { SessionRouter } from "../session-routing/index.js";
 import type { Workspace } from "../policy/index.js";
 import {
   ConversationCore,
+  UserFacingError,
   conversationTargetKey,
   gatewayUserMessageClientIdPrefix,
   type ConversationTarget,
@@ -72,7 +73,7 @@ export class ConversationService {
       return Promise.reject(error);
     }
     if (input.length === 0) {
-      return Promise.reject(new Error("消息不能为空"));
+      return Promise.reject(new UserFacingError("message.empty", "消息不能为空"));
     }
     return this.locked(target, async () => {
       const active = this.core.activeTurn(target);
@@ -136,7 +137,7 @@ export class ConversationService {
     return this.locked(target, async () => {
       this.requireIdle(target);
       const sessions = await this.router.list(target, { archived: true });
-      const selected = resolveThread(sessions, selector.trim(), "/unarchive");
+      const selected = resolveThread(sessions, selector.trim(), "unarchive");
       const binding = await this.router.unarchive(target, selected.id);
       this.models.clear(target);
       return binding.threadId;
@@ -179,13 +180,15 @@ export class ConversationService {
   rename(target: ConversationTarget, name: string): Promise<void> {
     const normalized = name.trim();
     if (!normalized || normalized.length > 64) {
-      return Promise.reject(new Error("会话名称必须为 1–64 个字符"));
+      return Promise.reject(
+        new UserFacingError("conversation.name.invalid", "会话名称必须为 1–64 个字符"),
+      );
     }
     return this.locked(target, async () => {
       this.requireIdle(target);
       const binding = this.router.current(target);
       if (!binding) {
-        throw new Error("当前还没有 Codex Thread");
+        throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
       }
       await this.codex.setThreadName(binding.threadId, normalized);
     });
@@ -281,7 +284,7 @@ export class ConversationService {
   setGoal(target: ConversationTarget, objective: string): Promise<ThreadGoal> {
     const normalized = objective.trim();
     if (!normalized) {
-      return Promise.reject(new Error("目标不能为空"));
+      return Promise.reject(new UserFacingError("goal.empty", "目标不能为空"));
     }
     return this.locked(target, async () => {
       const binding = await this.router.ensure(target);
@@ -322,7 +325,7 @@ export class ConversationService {
 
   private requireIdle(target: ConversationTarget): void {
     if (this.core.activeTurn(target)) {
-      throw new Error("当前任务运行中，请先 /stop");
+      throw new UserFacingError("conversation.busy", "当前任务运行中，请先停止当前任务");
     }
   }
 
@@ -356,16 +359,24 @@ function normalizeInput(value: string | ConversationInput): UserInput[] {
   }
   for (const image of normalized.localImages ?? []) {
     if (!isAbsolute(image.path)) {
-      throw new Error("本地图片路径必须是绝对路径");
+      throw new UserFacingError("image.path.invalid", "本地图片路径必须是绝对路径");
     }
     input.push({ type: "localImage", path: image.path });
   }
   return input;
 }
 
-export function resolveThread(threads: Thread[], selector: string, command = "/resume"): Thread {
+export function resolveThread(
+  threads: Thread[],
+  selector: string,
+  command: "resume" | "unarchive" = "resume",
+): Thread {
   if (!selector) {
-    throw new Error(`用法：${command} <序号、名称或 Thread ID>`);
+    throw new UserFacingError(
+      "session.selector.required",
+      "需要提供会话序号、名称或 Thread ID",
+      { command },
+    );
   }
   if (/^\d+$/.test(selector)) {
     const index = Number(selector) - 1;
@@ -382,5 +393,9 @@ export function resolveThread(threads: Thread[], selector: string, command = "/r
   if (prefix.length === 1) {
     return prefix[0]!;
   }
-  throw new Error(prefix.length > 1 || exact.length > 1 ? "会话选择不唯一" : "找不到指定会话");
+  const ambiguous = prefix.length > 1 || exact.length > 1;
+  throw new UserFacingError(
+    ambiguous ? "session.selector.ambiguous" : "session.selector.not-found",
+    ambiguous ? "会话选择不唯一" : "找不到指定会话",
+  );
 }

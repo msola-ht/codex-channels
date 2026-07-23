@@ -1,6 +1,10 @@
 import { JsonRpcError, type CodexAppServerClient } from "../codex-client/index.js";
 import type { Thread } from "../codex-protocol/index.js";
-import { conversationTargetKey, type ConversationTarget } from "../conversation-core/index.js";
+import {
+  UserFacingError,
+  conversationTargetKey,
+  type ConversationTarget,
+} from "../conversation-core/index.js";
 import type { Workspace, WorkspaceRegistry } from "../policy/index.js";
 import type { BindingStore, ConversationBinding } from "../storage/index.js";
 
@@ -156,7 +160,7 @@ export class SessionRouter {
   async resume(target: ConversationTarget, threadId: string): Promise<ConversationBinding> {
     const owner = this.bindings.getByThread(threadId);
     if (owner && this.key(owner.target) !== this.key(target)) {
-      throw new Error("该 Codex Thread 已绑定到其他会话");
+      throw new UserFacingError("thread.bound", "该 Codex Thread 已绑定到其他会话");
     }
     const workspace = this.workspace(target);
     await this.detach(target);
@@ -187,7 +191,7 @@ export class SessionRouter {
   async fork(target: ConversationTarget): Promise<ConversationBinding> {
     const current = this.bindings.get(target);
     if (!current) {
-      throw new Error("当前还没有 Codex Thread");
+      throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
     }
     const workspace = this.workspaces.require(current.workspaceId);
     const forked = await this.codex.forkThread(current.threadId, workspace.cwd);
@@ -206,7 +210,7 @@ export class SessionRouter {
   async archive(target: ConversationTarget): Promise<string> {
     const current = this.bindings.get(target);
     if (!current) {
-      throw new Error("当前还没有 Codex Thread");
+      throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
     }
     await this.codex.archiveThread(current.threadId);
     this.forgetThread(current.threadId);

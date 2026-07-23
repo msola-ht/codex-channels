@@ -1,3 +1,5 @@
+import { UserFacingError } from "../conversation-core/index.js";
+
 export interface Workspace {
   id: string;
   name: string;
@@ -46,7 +48,11 @@ export class WorkspaceRegistry {
   require(workspaceId: string): Workspace {
     const workspace = this.get(workspaceId);
     if (!workspace) {
-      throw new Error(`Workspace 不存在或未获授权：${workspaceId}`);
+      throw new UserFacingError(
+        "workspace.missing",
+        `Workspace 不存在或未获授权：${workspaceId}`,
+        { workspaceId },
+      );
     }
     return workspace;
   }
@@ -58,7 +64,10 @@ export class WorkspaceRegistry {
   resolve(selector: string): Workspace {
     const normalized = selector.trim();
     if (!normalized) {
-      throw new Error("用法：/workspace <序号、ID 或名称>");
+      throw new UserFacingError(
+        "workspace.selector.required",
+        "需要提供 Workspace 序号、ID 或名称",
+      );
     }
     if (/^\d+$/.test(normalized)) {
       const workspace = this.list()[Number(normalized) - 1];
@@ -72,6 +81,10 @@ export class WorkspaceRegistry {
     if (matches.length === 1) {
       return matches[0]!;
     }
-    throw new Error(matches.length > 1 ? "Workspace 选择不唯一" : "找不到指定 Workspace");
+    const ambiguous = matches.length > 1;
+    throw new UserFacingError(
+      ambiguous ? "workspace.selector.ambiguous" : "workspace.selector.not-found",
+      ambiguous ? "Workspace 选择不唯一" : "找不到指定 Workspace",
+    );
   }
 }

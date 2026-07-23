@@ -77,7 +77,7 @@ describe("Gateway config reload", () => {
 
   it("atomically replaces the live Workspace registry and access policy", () => {
     const registry = new WorkspaceRegistry([mainWorkspace], "main");
-    const access = new TelegramAccessPolicy(new Set([123]));
+    const access = new TelegramAccessPolicy(new Set([123]), "default");
 
     registry.replace([mainWorkspace, { id: "docs", name: "Docs", cwd: "/docs" }], "main");
     access.replace(new Set([456]));

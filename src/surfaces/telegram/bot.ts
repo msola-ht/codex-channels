@@ -8,7 +8,11 @@ import {
   type ConversationCommandName,
   type ConversationService,
 } from "../../application/index.js";
-import type { ConversationTarget, OutputEvent } from "../../conversation-core/index.js";
+import {
+  UserFacingError,
+  type ConversationTarget,
+  type OutputEvent,
+} from "../../conversation-core/index.js";
 import { protocolVersion } from "../../codex-protocol/index.js";
 import type { EventBus } from "../../event-bus/index.js";
 import type {
@@ -27,6 +31,7 @@ import { telegramDefaultAccountId } from "./constants.js";
 import { TelegramLifecycle } from "./lifecycle.js";
 import { TelegramOutbox, type TelegramFinalMessageFormat } from "./outbox.js";
 import { maximumTelegramImageBytes, TelegramImageStore } from "./image-store.js";
+import { formatTelegramUserFacingError } from "./user-error-renderer.js";
 
 export interface TelegramImagePort {
   start(): Promise<void>;
@@ -226,7 +231,7 @@ export class TelegramSurface {
     caption: string | undefined,
   ): Promise<void> {
     if (fileSize !== undefined && fileSize > maximumTelegramImageBytes) {
-      throw new Error("图片超过 10 MiB 限制");
+      throw new UserFacingError("image.too-large", "图片超过 10 MiB 限制");
     }
     const image = await this.imageStore.download(this.bot.api, fileId);
     if (!context.message) {
@@ -290,9 +295,19 @@ export class TelegramSurface {
       this.actorRegistry?.rememberActor(accessContext.target, accessContext.actorId);
       await next();
     } catch (error) {
-      this.logger.error({ err: error, chatId: context.chat?.id }, "Telegram 命令执行失败");
+      this.logger.error(
+        {
+          errorType: error instanceof Error ? error.name : typeof error,
+          chatId: context.chat?.id,
+        },
+        "Telegram 命令执行失败",
+      );
       if (context.chat) {
-        await context.reply(`操作失败：${error instanceof Error ? error.message : String(error)}`);
+        await context.reply(
+          error instanceof UserFacingError
+            ? `操作失败：${formatTelegramUserFacingError(error)}`
+            : "操作失败：Gateway 未能完成请求，请稍后重试。",
+        );
       }
     } finally {
       stopTyping?.();

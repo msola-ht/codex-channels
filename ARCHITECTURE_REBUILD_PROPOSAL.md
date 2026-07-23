@@ -522,9 +522,10 @@ interface SurfaceAccessPolicy {
 }
 ```
 
-内置会话命令由 Application 的 `ConversationCommandService` 统一解析参数、调用用例并返回类型化
-结果；Surface 只负责把平台输入映射为标准命令和渲染结果。身份查询、平台帮助、附件下载和交互取消
-仍属于平台能力。每个 Surface 在调用 Application 前必须使用统一访问上下文完成授权。
+内置会话命令由 Application 的 `ConversationCommandService` 统一解析参数、调用用例并返回不含平台
+文案的结构化结果；Surface 负责把平台输入映射为标准命令，并独立维护菜单说明、成功文案和渲染。
+身份查询、平台帮助、附件下载和交互取消仍属于平台能力。每个 Surface 在调用 Application 前必须
+使用统一访问上下文完成授权，并同时校验 `surface`、`accountId` 和 `actorId`。
 
 只有出现真实的第三方命令或 Policy 安装需求时，才增加 `CommandExtension`、`PolicyExtension`、
 manifest、API 版本、权限声明、签名、进程隔离和资源限制。
@@ -539,6 +540,8 @@ Codex Skill 适合描述模型工作流，不适合实现 Gateway 的实时 Tran
 - 如果将来启用 WebSocket 认证，优先使用 `--ws-token-file`，不得把原始 Token 放在命令行；客户端通过 `Authorization: Bearer` 完成握手。
 - Telegram Token 只从环境变量或系统 Secret Store 读取。
 - 日志不得包含 Token、Cookie、Authorization Header 或完整敏感输入。
+- 预期用户错误使用稳定代码和最小参数传给 Surface，由 Surface 独立渲染；内部回退文案、未知异常
+  和 App Server warning、MCP 失败等原始详情不得发送到外部平台。
 - Telegram 用户只能选择预配置 Workspace，不能提交任意 `cwd`。
 - 默认不自动批准命令、写文件和网络权限。
 - 审批回调一次性使用并设置过期时间。

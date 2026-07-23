@@ -1,6 +1,10 @@
 import type { CodexAppServerClient, TurnOverrides } from "../codex-client/index.js";
 import type { Model } from "../codex-protocol/index.js";
-import { conversationTargetKey, type ConversationTarget } from "../conversation-core/index.js";
+import {
+  UserFacingError,
+  conversationTargetKey,
+  type ConversationTarget,
+} from "../conversation-core/index.js";
 import type { SessionRouter } from "../session-routing/index.js";
 
 export interface ModelSelectionState {
@@ -56,7 +60,11 @@ export class ModelSelectionService {
     const current = this.resolveState(target, models);
     const model = models.find((candidate) => candidate.model === current.model);
     if (!model) {
-      throw new Error(`当前模型不在可用模型列表中：${current.model}`);
+      throw new UserFacingError(
+        "model.current.missing",
+        `当前模型不在可用模型列表中：${current.model}`,
+        { model: current.model },
+      );
     }
     const options = model.supportedReasoningEfforts.map((option) => option.reasoningEffort);
     const effort = resolveEffort(options, selector);
@@ -68,7 +76,7 @@ export class ModelSelectionService {
   async selectFastMode(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
     const normalized = selector.trim().toLowerCase();
     if (normalized && !new Set(["on", "off", "status"]).has(normalized)) {
-      throw new Error("用法：/fast [on|off|status]");
+      throw new UserFacingError("fast.usage", "Fast 模式参数必须是 on、off 或 status");
     }
     const models = await this.codex.listModels();
     const current = this.resolveState(target, models);
@@ -81,7 +89,11 @@ export class ModelSelectionService {
     const tierId = model ? fastServiceTierId(model) : undefined;
     if (enable) {
       if (!tierId) {
-        throw new Error(`当前模型不支持 Fast 模式：${current.model}`);
+        throw new UserFacingError(
+          "fast.unsupported",
+          `当前模型不支持 Fast 模式：${current.model}`,
+          { model: current.model },
+        );
       }
     }
     if ((enable && currentFast) || (!enable && !currentFast)) {
@@ -190,7 +202,10 @@ function hasOverride(pending: TurnOverrides | undefined, key: keyof TurnOverride
 export function resolveModel(models: Model[], selector: string): Model {
   const normalized = selector.trim();
   if (!normalized) {
-    throw new Error("用法：/model <序号、模型 ID 或名称>");
+    throw new UserFacingError(
+      "model.selector.required",
+      "需要提供模型序号、模型 ID 或名称",
+    );
   }
   if (/^\d+$/.test(normalized)) {
     const model = models[Number(normalized) - 1];
@@ -204,7 +219,11 @@ export function resolveModel(models: Model[], selector: string): Model {
   if (exact.length === 1) {
     return exact[0]!;
   }
-  throw new Error(exact.length > 1 ? "模型选择不唯一" : "找不到指定模型");
+  const ambiguous = exact.length > 1;
+  throw new UserFacingError(
+    ambiguous ? "model.selector.ambiguous" : "model.selector.not-found",
+    ambiguous ? "模型选择不唯一" : "找不到指定模型",
+  );
 }
 
 export function resolveEffort(options: string[], selector: string): string {
@@ -219,5 +238,9 @@ export function resolveEffort(options: string[], selector: string): string {
   if (effort) {
     return effort;
   }
-  throw new Error(`当前模型不支持该思考强度，可选：${options.join("、")}`);
+  throw new UserFacingError(
+    "effort.unsupported",
+    `当前模型不支持该思考强度，可选：${options.join("、")}`,
+    { options },
+  );
 }

@@ -9,6 +9,8 @@ import { Readable, Transform } from "node:stream";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
 
+import { UserFacingError } from "../../conversation-core/index.js";
+import { telegramErrorMetadata } from "./error-metadata.js";
 export const maximumTelegramImageBytes = 10 * 1024 * 1024;
 
 const downloadTimeoutMs = 30_000;
@@ -87,7 +89,7 @@ export class TelegramImageStore {
     }
     if (response.contentLength !== undefined && response.contentLength > maximumTelegramImageBytes) {
       response.stream.destroy();
-      throw new Error("图片超过 10 MiB 限制");
+      throw new UserFacingError("image.too-large", "图片超过 10 MiB 限制");
     }
     return this.store(response.stream);
   }
@@ -100,7 +102,7 @@ export class TelegramImageStore {
       transform(chunk: Buffer, _encoding, callback) {
         bytes += chunk.length;
         if (bytes > maximumTelegramImageBytes) {
-          callback(new Error("图片超过 10 MiB 限制"));
+          callback(new UserFacingError("image.too-large", "图片超过 10 MiB 限制"));
           return;
         }
         callback(null, chunk);
@@ -115,7 +117,7 @@ export class TelegramImageStore {
       );
       const imageType = await detectImageType(temporaryPath);
       if (!imageType) {
-        throw new Error("仅支持 PNG 和 JPEG 图片");
+        throw new UserFacingError("image.unsupported", "仅支持 PNG 和 JPEG 图片");
       }
       const finalPath = join(this.directory, `${id}.${imageType.extension}`);
       await rename(temporaryPath, finalPath);
@@ -123,7 +125,12 @@ export class TelegramImageStore {
     } catch (error) {
       await unlink(temporaryPath).catch(() => undefined);
       if (error instanceof Error && /10 MiB|PNG 和 JPEG/.test(error.message)) {
-        throw error;
+        throw error instanceof UserFacingError
+          ? error
+          : new UserFacingError(
+              /10 MiB/.test(error.message) ? "image.too-large" : "image.unsupported",
+              error.message,
+            );
       }
       throw new Error("保存 Telegram 图片失败");
     }
@@ -146,7 +153,7 @@ export class TelegramImageStore {
 
   private logCleanupFailure(error: unknown): void {
     this.logger.warn(
-      { message: error instanceof Error ? error.message : String(error) },
+      telegramErrorMetadata(error),
       "清理过期 Telegram 图片失败",
     );
   }

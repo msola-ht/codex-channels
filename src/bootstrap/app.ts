@@ -74,7 +74,10 @@ export class GatewayApplication {
       logger.warn({ removedBindings }, "已清理不再授权的 Telegram 会话绑定");
     }
     this.workspaces = new WorkspaceRegistry(config.workspaces, config.defaultWorkspaceId);
-    this.access = new TelegramAccessPolicy(config.telegramAllowedUserIds);
+    this.access = new TelegramAccessPolicy(
+      config.telegramAllowedUserIds,
+      telegramDefaultAccountId,
+    );
     this.router = new SessionRouter(
       this.codex,
       this.bindings,

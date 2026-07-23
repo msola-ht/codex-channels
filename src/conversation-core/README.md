@@ -9,6 +9,7 @@
 - `events.ts`：定义 Conversation 目标、输出事件、Turn 产物、操作状态和关键事件判定。
 - `operation.ts`：把 App Server Item 转换为安全、简洁的操作过程，并清洗敏感命令文本。
 - `routing-port.ts`：Core 查询 Thread 路由所需的窄接口。
+- `user-facing-error.ts`：用稳定错误代码和最小参数描述预期输入与状态错误；Surface 按平台独立渲染，未标记异常默认隐藏详情。
 
 本模块不得依赖 Telegram SDK、具体数据库、launchd 或底层 JSON-RPC Transport。完整历史和 Thread 权威状态始终由 App Server 持有。
 Conversation 目标由 `surface + accountId + conversationId` 唯一标识；Core 不解释平台账号或聊天 ID。

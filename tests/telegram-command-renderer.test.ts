@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Context } from "grammy";
 
 import { renderTelegramCommandResult } from "../src/surfaces/telegram/command-renderer.js";
+import { formatMcpStatusUpdate } from "../src/surfaces/telegram/format.js";
 
 describe("Telegram command renderer", () => {
   it("renders expanded shared notices through the safe HTML panel path", async () => {
@@ -10,9 +11,8 @@ describe("Telegram command renderer", () => {
     await renderTelegramCommandResult(
       { reply } as unknown as Context,
       {
-        kind: "notice",
-        text: "Thread：<unsafe>",
-        detail: "expanded",
+        kind: "outcome",
+        outcome: { type: "thread.resumed", threadId: "<unsafe>" },
       },
     );
 
@@ -28,13 +28,12 @@ describe("Telegram command renderer", () => {
     await renderTelegramCommandResult(
       { reply } as unknown as Context,
       {
-        kind: "notice",
-        text: "已停止",
-        detail: "brief",
+        kind: "outcome",
+        outcome: { type: "turn.stop-requested", stopped: true },
       },
     );
 
-    expect(reply).toHaveBeenCalledWith("已停止");
+    expect(reply).toHaveBeenCalledWith("已请求停止当前任务。");
   });
 
   it("uses the dedicated diff renderer for artifact results", async () => {
@@ -57,5 +56,18 @@ describe("Telegram command renderer", () => {
       expect.stringContaining("diff"),
       expect.objectContaining({ parse_mode: "HTML" }),
     );
+  });
+
+  it("hides opaque MCP startup errors", () => {
+    const text = formatMcpStatusUpdate({
+      threadId: "thread-1",
+      name: "docs",
+      status: "failed",
+      error: "request failed at /bot123456789:opaque-secret/file",
+      failureReason: null,
+    });
+
+    expect(text).toContain("Gateway 已隐藏上游错误详情");
+    expect(text).not.toContain("opaque-secret");
   });
 });

@@ -3,7 +3,10 @@ import type { SurfaceAccessContext, SurfaceAccessPolicy } from "./surface-access
 export class TelegramAccessPolicy implements SurfaceAccessPolicy {
   private allowedUserIds: ReadonlySet<number>;
 
-  constructor(allowedUserIds: ReadonlySet<number>) {
+  constructor(
+    allowedUserIds: ReadonlySet<number>,
+    private readonly accountId: string,
+  ) {
     this.allowedUserIds = new Set(allowedUserIds);
   }
 
@@ -12,7 +15,10 @@ export class TelegramAccessPolicy implements SurfaceAccessPolicy {
   }
 
   isAllowed(context: SurfaceAccessContext): boolean {
-    if (context.target.surface !== "telegram") {
+    if (
+      context.target.surface !== "telegram"
+      || context.target.accountId !== this.accountId
+    ) {
       return false;
     }
     const userId = Number(context.actorId);

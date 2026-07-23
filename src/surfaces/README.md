@@ -19,3 +19,6 @@ SDK 类型引入 Conversation Core。
 会话命令统一映射到 Application 的 `ConversationCommandService`；Surface 负责提取命令名和参数，
 并渲染类型化结果。普通文本、图片下载、平台帮助、身份查询和交互取消保留在平台边界。所有输入在
 调用 Application 前必须构造 `SurfaceAccessContext` 并通过对应访问策略。
+
+Surface 只能渲染明确标记的结构化用户错误，不能直接复用其内部回退文案；未知异常和 App Server
+warning、MCP 失败等原始详情默认隐藏，避免把凭据、上游响应或本机信息带入聊天消息或日志。

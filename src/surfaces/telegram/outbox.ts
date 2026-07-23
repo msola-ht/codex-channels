@@ -3,10 +3,14 @@ import type { InputRichMessage } from "grammy/types";
 import type { Logger } from "pino";
 
 import type { InteractionDecision, InteractionRequest } from "../../approval/index.js";
-import type { OperationUpdate, OutputEvent } from "../../conversation-core/index.js";
+import {
+  type OperationUpdate,
+  type OutputEvent,
+} from "../../conversation-core/index.js";
 import type { MessagePhase } from "../../codex-protocol/index.js";
 import { BoundedAsyncQueue } from "../../event-bus/index.js";
 import { TelegramApiExecutor } from "./api-executor.js";
+import { telegramErrorMetadata } from "./error-metadata.js";
 import { telegramDefaultAccountId } from "./constants.js";
 import {
   formatAccountUpdate,
@@ -211,7 +215,11 @@ export class TelegramOutbox {
           }
           const replyTo = this.replyToByTurn.get(turnKey);
           if (event.error) {
-            await this.send(chatId, `Codex 任务失败：${event.error}`, replyTo);
+            await this.send(
+              chatId,
+              "Codex 任务失败，Gateway 已隐藏上游错误详情以避免泄露敏感信息。",
+              replyTo,
+            );
           } else if (!new Set(["completed", "success"]).has(event.status)) {
             await this.send(chatId, `Codex 任务状态：${event.status}`, replyTo);
           }
@@ -241,7 +249,12 @@ export class TelegramOutbox {
       }
       case "warning":
         this.enqueue(chatId, async () => {
-          await this.send(chatId, `Codex 警告：${event.message}`, undefined, true);
+          await this.send(
+            chatId,
+            "Codex 发出一条警告，Gateway 已隐藏上游详情。",
+            undefined,
+            true,
+          );
         }, true);
         return;
       case "connection.lost":
@@ -436,7 +449,7 @@ export class TelegramOutbox {
         await operation.run();
       } catch (error) {
         this.logger.warn(
-          { error: safeErrorMessage(error), chatId, critical: operation.critical },
+          { ...telegramErrorMetadata(error), chatId, critical: operation.critical },
           "Telegram 输出失败",
         );
       }
@@ -464,7 +477,7 @@ export class TelegramOutbox {
           return;
         } catch (error) {
           this.logger.warn(
-            { chatId, error: safeErrorMessage(error) },
+            { chatId, ...telegramErrorMetadata(error) },
             "Telegram 长回复优化发送失败，回退普通文本",
           );
         }
@@ -486,7 +499,7 @@ export class TelegramOutbox {
               {
                 chatId,
                 format,
-                error: safeErrorMessage(error),
+                ...telegramErrorMetadata(error),
               },
               "Telegram 格式化消息渲染失败，回退纯文本",
             );
@@ -871,7 +884,7 @@ export class TelegramOutbox {
       return state.messageId;
     } catch (error) {
       this.logger.warn(
-        { chatId, error: safeErrorMessage(error) },
+        { chatId, ...telegramErrorMetadata(error) },
         "Telegram 完整回复文件发送失败，回退折叠文本",
       );
       return this.sendExpandableFinal(chatId, state, splitExpandableMessage(text));
@@ -1034,7 +1047,7 @@ function formatCliInput(text: string): string {
   return `CLI 输入\n\n${quote}`;
 }
 
-function safeErrorMessage(error: unknown): string {
+function errorMessageForClassification(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -1106,7 +1119,9 @@ function expandableEditOptions(text: string): Parameters<Api["editMessageText"]>
 }
 
 function isMessageNotModified(error: unknown): boolean {
-  return safeErrorMessage(error).toLowerCase().includes("message is not modified");
+  return errorMessageForClassification(error)
+    .toLowerCase()
+    .includes("message is not modified");
 }
 
 async function waitAtMost<T>(operation: Promise<T>, milliseconds: number): Promise<void> {

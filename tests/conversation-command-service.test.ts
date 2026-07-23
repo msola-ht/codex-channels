@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   ConversationCommandService,
-  conversationCommands,
   conversationCommandNames,
   isConversationCommandName,
   type ConversationService,
@@ -19,7 +18,6 @@ const target: ConversationTarget = {
 describe("ConversationCommandService", () => {
   it("owns the platform-independent command catalog without duplicates", () => {
     expect(new Set(conversationCommandNames).size).toBe(conversationCommandNames.length);
-    expect(conversationCommands.every(({ description }) => description.length > 0)).toBe(true);
     expect(conversationCommandNames).toContain("resume");
     expect(conversationCommandNames).toContain("fast");
     expect(conversationCommandNames).toContain("goal");
@@ -57,9 +55,8 @@ describe("ConversationCommandService", () => {
     } as unknown as ConversationService);
 
     await expect(commands.execute(target, "review", "branch main")).resolves.toEqual({
-      kind: "notice",
-      text: "已启动 Codex Review\nTurn：review-turn",
-      detail: "expanded",
+      kind: "outcome",
+      outcome: { type: "review.started", turnId: "review-turn" },
     });
     expect(review).toHaveBeenCalledWith(target, {
       type: "baseBranch",
@@ -80,9 +77,10 @@ describe("ConversationCommandService", () => {
       type: "custom",
       instructions: "inspect auth",
     });
-    await expect(commands.execute(target, "review", "branch")).rejects.toThrow(
-      "用法：/review",
-    );
+    await expect(commands.execute(target, "review", "branch")).rejects.toMatchObject({
+      code: "review.usage",
+      message: "Review 参数无效",
+    });
   });
 
   it("normalizes goal commands before calling the application service", async () => {
@@ -100,9 +98,8 @@ describe("ConversationCommandService", () => {
     } as unknown as ConversationService);
 
     await expect(commands.execute(target, "goal", " set ship it ")).resolves.toEqual({
-      kind: "notice",
-      text: "Goal 已设置\n目标：ship it",
-      detail: "expanded",
+      kind: "outcome",
+      outcome: { type: "goal.updated", goal: expect.objectContaining({ objective: "ship it" }) },
     });
     expect(setGoal).toHaveBeenCalledWith(target, "ship it");
   });
@@ -175,16 +172,127 @@ describe("ConversationCommandService", () => {
     expect(selectEffort).toHaveBeenCalledWith(target, "high");
     expect(selectFastMode).toHaveBeenCalledWith(target, "on");
   });
+
+  it("covers every registered command through the shared dispatcher", async () => {
+    const goal = {
+      threadId: "thread-1",
+      objective: "ship",
+      status: "active" as const,
+      tokenBudget: null,
+      tokensUsed: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const service = {
+      resume: vi.fn(async () => "thread-resumed"),
+      listSessions: vi.fn(async () => []),
+      status: vi.fn(() => ({ workspaceId: "main" })),
+      newSession: vi.fn(async () => undefined),
+      archive: vi.fn(async () => "thread-archived"),
+      unarchive: vi.fn(async () => "thread-unarchived"),
+      selectWorkspace: vi.fn(async () => ({ id: "main", name: "Main", cwd: "/workspace" })),
+      listWorkspaces: vi.fn(() => [{ id: "main", name: "Main", cwd: "/workspace" }]),
+      stop: vi.fn(async () => true),
+      rename: vi.fn(async () => undefined),
+      compact: vi.fn(async () => undefined),
+      fork: vi.fn(async () => "thread-forked"),
+      review: vi.fn(async () => ({ threadId: "review-thread", turnId: "review-turn" })),
+      selectModel: vi.fn(async () => ({ model: "gpt-test" })),
+      selectEffort: vi.fn(async () => ({ model: "gpt-test" })),
+      selectFastMode: vi.fn(async () => ({ model: "gpt-test" })),
+      listSkills: vi.fn(async () => []),
+      listMcpServers: vi.fn(async () => []),
+      listPlugins: vi.fn(async () => ({})),
+      accountUsage: vi.fn(async () => ({})),
+      accountRateLimits: vi.fn(async () => ({})),
+      listPermissionProfiles: vi.fn(async () => []),
+      artifacts: vi.fn(() => undefined),
+      setGoal: vi.fn(async () => goal),
+    };
+    const commands = new ConversationCommandService(
+      service as unknown as ConversationService,
+    );
+    const cases = [
+      ["resume", "thread-1", "resume"],
+      ["sessions", "", "listSessions"],
+      ["archived", "", "listSessions"],
+      ["new", "", "newSession"],
+      ["archive", "", "archive"],
+      ["unarchive", "thread-1", "unarchive"],
+      ["status", "", "status"],
+      ["workspace", "main", "selectWorkspace"],
+      ["stop", "", "stop"],
+      ["rename", "name", "rename"],
+      ["compact", "", "compact"],
+      ["fork", "", "fork"],
+      ["review", "", "review"],
+      ["model", "gpt-test", "selectModel"],
+      ["effort", "high", "selectEffort"],
+      ["fast", "on", "selectFastMode"],
+      ["skills", "", "listSkills"],
+      ["mcp", "", "listMcpServers"],
+      ["plugins", "", "listPlugins"],
+      ["usage", "", "accountUsage"],
+      ["limits", "", "accountRateLimits"],
+      ["permissions", "", "listPermissionProfiles"],
+      ["diff", "", "artifacts"],
+      ["plan", "", "artifacts"],
+      ["goal", "set ship", "setGoal"],
+    ] as const;
+
+    expect(cases.map(([command]) => command)).toEqual(conversationCommandNames);
+    for (const [command, input, method] of cases) {
+      const before = service[method].mock.calls.length;
+      await expect(commands.execute(target, command, input)).resolves.toHaveProperty("kind");
+      expect(service[method].mock.calls.length).toBeGreaterThan(before);
+    }
+  });
+
+  it("returns structured goal query and clear results", async () => {
+    const getGoal = vi.fn(async () => null);
+    const clearGoal = vi.fn(async () => undefined);
+    const commands = new ConversationCommandService({
+      getGoal,
+      clearGoal,
+    } as unknown as ConversationService);
+
+    await expect(commands.execute(target, "goal")).resolves.toEqual({
+      kind: "goal",
+      goal: null,
+    });
+    await expect(commands.execute(target, "goal", "clear")).resolves.toEqual({
+      kind: "outcome",
+      outcome: { type: "goal.cleared" },
+    });
+  });
+
+  it("rejects incomplete or unknown goal subcommands instead of querying state", async () => {
+    const getGoal = vi.fn(async () => null);
+    const commands = new ConversationCommandService({
+      getGoal,
+    } as unknown as ConversationService);
+
+    for (const input of ["set", "clear extra", "unknown"]) {
+      await expect(commands.execute(target, "goal", input)).rejects.toMatchObject({
+        code: "goal.usage",
+      });
+    }
+    expect(getGoal).not.toHaveBeenCalled();
+  });
 });
 
 describe("shared Surface access boundary", () => {
   it("uses target and canonical Actor identity and fails closed across Surfaces", () => {
-    const access = new TelegramAccessPolicy(new Set([123]));
+    const access = new TelegramAccessPolicy(new Set([123]), "default");
 
     expect(access.isAllowed({ target, actorId: "123" })).toBe(true);
     expect(access.isAllowed({ target, actorId: "0123" })).toBe(false);
     expect(access.isAllowed({
       target: { surface: "feishu", accountId: "tenant-a", conversationId: "100" },
+      actorId: "123",
+    })).toBe(false);
+    expect(access.isAllowed({
+      target: { surface: "telegram", accountId: "other", conversationId: "100" },
       actorId: "123",
     })).toBe(false);
   });

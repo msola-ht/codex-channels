@@ -18,6 +18,17 @@ export function formatMarkdownAsTelegramHtml(markdown: string): string | undefin
         index += 1;
       }
       const language = fence[1];
+      if (
+        (!language || language.toLowerCase() === "text")
+        && isBotCommandBlock(code)
+      ) {
+        output.push(
+          code
+            .map((command) => escapeHtml(command.trim()))
+            .join("\n"),
+        );
+        continue;
+      }
       const className = language ? ` class="language-${escapeHtml(language)}"` : "";
       output.push(`<pre><code${className}>${escapeHtml(code.join("\n"))}</code></pre>`);
       continue;
@@ -69,7 +80,10 @@ export function formatMarkdownAsTelegramHtml(markdown: string): string | undefin
 function formatInlineMarkdown(text: string): string {
   const code: string[] = [];
   const withPlaceholders = text.replace(/`([^`\n]+)`/g, (_match, content: string) => {
-    const index = code.push(`<code>${escapeHtml(content)}</code>`) - 1;
+    const rendered = isBotCommand(content.trim())
+      ? escapeHtml(content.trim())
+      : `<code>${escapeHtml(content)}</code>`;
+    const index = code.push(rendered) - 1;
     return `\u0000CODE${index}\u0000`;
   });
   const formatted = escapeHtml(withPlaceholders)
@@ -78,6 +92,15 @@ function formatInlineMarkdown(text: string): string {
     .replace(/~~([^~\n]+)~~/g, "<s>$1</s>")
     .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, "<i>$1</i>");
   return formatted.replace(/\u0000CODE(\d+)\u0000/g, (_match, index: string) => code[Number(index)] ?? "");
+}
+
+function isBotCommandBlock(lines: readonly string[]): boolean {
+  const commands = lines.map((line) => line.trim()).filter(Boolean);
+  return commands.length > 0 && commands.every(isBotCommand);
+}
+
+function isBotCommand(value: string): boolean {
+  return /^\/[a-z][a-z0-9_]*(?:@[a-z0-9_]+)?(?:\s+.*)?$/i.test(value);
 }
 
 function escapeHtml(value: string): string {
