@@ -64,6 +64,10 @@ describe("systemd installer", () => {
     expect(appServer).toContain(
       `ExecStart="${nodeBinary}" app-server --listen "unix://${join(runtimeDir, "codex-app-server.sock")}"`,
     );
+    expect(appServer).toContain(`WorkingDirectory=${root}`);
+    expect(gateway).toContain(`WorkingDirectory=${configDir}`);
+    expect(appServer).not.toContain(`WorkingDirectory="${root}"`);
+    expect(gateway).not.toContain(`WorkingDirectory="${configDir}"`);
     expect(gateway).toContain(`ExecStart="${nodeBinary}"`);
     expect(gateway).toContain("codex-connect-app-server.service");
     for (const unit of [appServer, gateway]) {

@@ -52,11 +52,13 @@ const proxyKeys = [
   "no_proxy",
 ];
 const argumentValues = {
-  WORKDIR: defaultWorkspace.cwd,
   SOCKET_URI: `unix://${socketPath}`,
   NODE_BINARY: nodeBinary,
   CODEX_BINARY: codexBinary,
   CLI_ENTRY: join(packageDir, "bin", "codexc.mjs"),
+};
+const directiveValues = {
+  WORKDIR: defaultWorkspace.cwd,
   CONFIG_DIR: runtime.dataDir,
 };
 const environmentValues = {
@@ -78,6 +80,10 @@ for (const name of ["codex-connect-app-server", "codex-connect-gateway"]) {
   let rendered = Object.entries(argumentValues).reduce(
     (content, [key, value]) => content.replaceAll(`__${key}__`, systemdArgument(value)),
     template,
+  );
+  rendered = Object.entries(directiveValues).reduce(
+    (content, [key, value]) => content.replaceAll(`__${key}__`, systemdDirective(value)),
+    rendered,
   );
   rendered = Object.entries(environmentValues).reduce(
     (content, [key, value]) => content.replaceAll(`__${key}__`, systemdEnvironment(value)),
@@ -105,6 +111,10 @@ function systemdArgument(value) {
 }
 
 function systemdEnvironment(value) {
+  return systemdEscape(value);
+}
+
+function systemdDirective(value) {
   return systemdEscape(value);
 }
 
