@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -216,6 +216,39 @@ describe("workspace:add script", () => {
       "codex-connect",
       "current-project",
     ]);
+  });
+
+  it("does not report a default change when its configured path resolves through a symlink", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-workspace-add-"));
+    temporaryDirectories.push(root);
+    const fallback = join(root, "Default Workspace");
+    const fallbackAlias = join(root, "Default Alias");
+    const current = join(root, "Current Project");
+    mkdirSync(fallback);
+    symlinkSync(fallback, fallbackAlias, "dir");
+    mkdirSync(current);
+    const envPath = join(root, ".env");
+    writeFileSync(
+      envPath,
+      [
+        `CODEX_WORKSPACES_JSON='${JSON.stringify([{
+          id: "codex-connect",
+          name: ".codex-connect/workspace",
+          cwd: fallbackAlias,
+        }])}'`,
+        "CODEX_DEFAULT_WORKSPACE=codex-connect",
+        "",
+      ].join("\n"),
+    );
+
+    const result = addWorkspaceToEnv({ envPath, cwd: current });
+    const config = readWorkspaceConfig(parse(readFileSync(envPath, "utf8")));
+
+    expect(result.defaultChanged).toBe(false);
+    expect(config.defaultWorkspace).toMatchObject({
+      id: "codex-connect",
+      cwd: realpathSync(fallback),
+    });
   });
 
   it("lists missing directories and removes their registrations without touching disk", () => {

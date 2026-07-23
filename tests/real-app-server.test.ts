@@ -14,6 +14,8 @@ const run = process.env.RUN_CODEX_INTEGRATION === "1";
 const suite = run ? describe : describe.skip;
 const archiveFixtureThreadId = process.env.CODEX_ARCHIVE_FIXTURE_THREAD_ID;
 const archiveTest = run && archiveFixtureThreadId ? it : it.skip;
+const resumeFixtureThreadId = process.env.CODEX_RESUME_FIXTURE_THREAD_ID;
+const resumeTest = run && resumeFixtureThreadId ? it : it.skip;
 
 suite("real Codex App Server over Unix WebSocket", () => {
   const workdir = process.cwd();
@@ -23,6 +25,8 @@ suite("real Codex App Server over Unix WebSocket", () => {
   const socketPath = join(testRuntime, "app-server.sock");
   let processHandle: ChildProcess;
   let client: CodexAppServerClient;
+  let peerRpc: JsonRpcClient;
+  let peerClient: CodexAppServerClient;
   let upstreamUserAgent = "";
   let appServerStderr = "";
 
@@ -46,11 +50,15 @@ suite("real Codex App Server over Unix WebSocket", () => {
     client = new CodexAppServerClient(new JsonRpcClient(transport), {
       sandbox: "read-only",
     });
+    peerRpc = new JsonRpcClient(new UnixWebSocketTransport(socketPath));
+    peerClient = new CodexAppServerClient(peerRpc, { sandbox: "read-only" });
     const initialized = await client.connect();
+    await peerClient.connect();
     upstreamUserAgent = initialized.userAgent;
   }, 15_000);
 
   afterAll(async () => {
+    await peerClient?.close();
     await client?.close();
     if (processHandle?.exitCode === null) {
       processHandle.kill("SIGTERM");
@@ -85,15 +93,69 @@ suite("real Codex App Server over Unix WebSocket", () => {
     expect(models.every((model) => model.supportedReasoningEfforts.length > 0)).toBe(true);
   });
 
-  it("starts and unsubscribes a temporary thread without running a model turn", async () => {
+  it("broadcasts and exposes a loaded temporary thread across two clients without running a model turn", async () => {
+    let observedThreadId: string | undefined;
+    const removePeerNotification = peerClient.onNotification((notification) => {
+      if (notification.method !== "thread/started") {
+        return;
+      }
+      const params = typeof notification.params === "object" && notification.params !== null
+        ? notification.params as Record<string, unknown>
+        : {};
+      const thread = typeof params.thread === "object" && params.thread !== null
+        ? params.thread as Record<string, unknown>
+        : {};
+      if (typeof thread.id === "string") {
+        observedThreadId = thread.id;
+      }
+    });
     const started = await client.startThread(workdir);
     try {
-      const unsubscribed = await client.unsubscribeThread(started.thread.id);
+      await waitFor(() => observedThreadId === started.thread.id, 2_000);
+      const loaded = await peerRpc.request<{ data: string[] }>(
+        "thread/loaded/list",
+        { limit: 100 },
+        { retryOverload: true },
+      );
+      const ownerUnsubscribed = await client.unsubscribeThread(started.thread.id);
 
       expect(started.thread.id).toBeTruthy();
-      expect(unsubscribed.status).toBe("unsubscribed");
+      expect(observedThreadId).toBe(started.thread.id);
+      expect(loaded.data).toContain(started.thread.id);
+      expect(ownerUnsubscribed.status).toBe("unsubscribed");
     } finally {
+      removePeerNotification();
+      await client.unsubscribeThread(started.thread.id).catch(() => undefined);
       await client.deleteThread(started.thread.id);
+    }
+  });
+
+  resumeTest("reads and resumes an explicitly selected idle fixture thread from both clients", async () => {
+    const threadId = resumeFixtureThreadId!;
+    const fixture = await client.readThread(threadId);
+    expect(fixture.cwd).toBe(workdir);
+    expect(fixture.status.type).not.toBe("active");
+
+    let ownerSubscribed = false;
+    let peerSubscribed = false;
+    try {
+      const ownerResumed = await client.resumeThread(threadId, workdir);
+      ownerSubscribed = true;
+      const peerRead = await peerClient.readThread(threadId);
+      const peerResumed = await peerClient.resumeThread(threadId, workdir);
+      peerSubscribed = true;
+
+      expect(ownerResumed.thread.id).toBe(threadId);
+      expect(peerRead.id).toBe(threadId);
+      expect(peerRead.cwd).toBe(workdir);
+      expect(peerResumed.thread.id).toBe(threadId);
+    } finally {
+      if (peerSubscribed) {
+        await peerClient.unsubscribeThread(threadId).catch(() => undefined);
+      }
+      if (ownerSubscribed) {
+        await client.unsubscribeThread(threadId).catch(() => undefined);
+      }
     }
   });
 

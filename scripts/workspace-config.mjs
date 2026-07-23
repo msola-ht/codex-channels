@@ -99,9 +99,10 @@ export function addWorkspaceToEnv({
     removedWorkspaces.push(workspace);
   }
 
-  let defaultWorkspace = workspaces.find(
+  const previousDefault = workspaces.find(
     (candidate) => candidate.id === parsed.defaultWorkspaceId,
   );
+  let defaultWorkspace = previousDefault;
   if ((restoreDefault || !defaultWorkspace) && fallbackDefaultWorkspace) {
     const fallback = ensureFallbackWorkspace(fallbackDefaultWorkspace);
     defaultWorkspace = upsertFallbackWorkspace(workspaces, fallback);
@@ -115,9 +116,6 @@ export function addWorkspaceToEnv({
     ...(name ? { name } : {}),
   });
   defaultWorkspace ??= workspace;
-  const previousDefault = parsed.workspaces.find(
-    (candidate) => candidate.id === parsed.defaultWorkspaceId,
-  );
   const defaultChanged = previousDefault === undefined
     || previousDefault.id !== defaultWorkspace.id
     || previousDefault.name !== defaultWorkspace.name
