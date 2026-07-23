@@ -126,7 +126,10 @@ describe("TelegramInteractionPort", () => {
     await settle();
 
     expect(sendMessage.mock.calls.length).toBeGreaterThan(1);
-    expect(sendMessage.mock.calls[0]?.[1].length).toBeLessThanOrEqual(3_600);
+    expect(sendMessage.mock.calls.every((call) => call[1].length <= 3_600)).toBe(true);
+    expect(sendMessage.mock.calls.every((call) =>
+      call[1].includes("<blockquote expandable>"),
+    )).toBe(true);
     expect(sendMessage.mock.calls[0]?.[2]).toEqual({
       parse_mode: "HTML",
       disable_notification: true,

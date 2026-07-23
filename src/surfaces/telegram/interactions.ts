@@ -6,7 +6,10 @@ import type { Logger } from "pino";
 import type { InteractionDecision, InteractionPort, InteractionRequest } from "../../approval/index.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
 import { TelegramApiExecutor } from "./api-executor.js";
-import { formatTelegramPanelChunks } from "./html-format.js";
+import {
+  formatTelegramExpandableQuotePanelChunks,
+  formatTelegramPanelChunks,
+} from "./html-format.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
 
 interface PendingInteraction {
@@ -58,8 +61,9 @@ export class TelegramInteractionPort implements InteractionPort {
   ): Promise<InteractionDecision> {
     const token = randomBytes(12).toString("base64url");
     const keyboard = this.keyboard(request, token);
-    const formatted = formatInteraction(request);
-    const chunks = formatTelegramPanelChunks(formatted, 3_600);
+    const chunks = request.type === "approval"
+      ? formatTelegramExpandableQuotePanelChunks(request.title, request.detail, 3_600)
+      : formatTelegramPanelChunks(formatInteraction(request), 3_600);
     this.tokenByRequest.set(request.requestId, token);
     let message: Awaited<ReturnType<typeof this.bot.api.sendMessage>> | undefined;
     this.queue.prepareInteraction(target.conversationId, request);
@@ -306,14 +310,7 @@ function timeoutDecision(request: InteractionRequest): InteractionDecision {
   return { type: "elicitation", action: "cancel", content: null };
 }
 
-function formatInteraction(request: InteractionRequest): string {
-  if (request.type === "approval") {
-    const detail = request.detail
-      .split("\n")
-      .map((line) => `│ ${line}`)
-      .join("\n");
-    return `${request.title}\n\n${detail}`;
-  }
+function formatInteraction(request: Exclude<InteractionRequest, { type: "approval" }>): string {
   if (request.type === "user-input") {
     const questions = request.questions.map((question) => {
       const options = question.options.length ? `\n选项：${question.options.join(" / ")}` : "";

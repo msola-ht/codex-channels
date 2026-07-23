@@ -109,7 +109,12 @@ describe("SessionRouter", () => {
       startThread: async () => ({ thread: thread("bound", { type: "idle" }) }),
       resumeThread: async (threadId: string) => {
         resumed.push(threadId);
-        return { thread: thread(threadId, { type: "idle" }) };
+        return {
+          thread: thread(threadId, { type: "idle" }),
+          model: "gpt-main",
+          reasoningEffort: "high",
+          serviceTier: "default",
+        };
       },
     } as unknown as CodexAppServerClient;
     const router = new SessionRouter(client, new MemoryBindingStore(), registry);
@@ -120,6 +125,11 @@ describe("SessionRouter", () => {
     expect(failures).toEqual([]);
     expect(resumed).toEqual(["bound"]);
     expect(router.current(target)?.threadId).toBe("bound");
+    expect(router.modelSettings(target)).toEqual({
+      model: "gpt-main",
+      effort: "high",
+      serviceTier: "default",
+    });
   });
 
   it("preserves but does not subscribe bindings for disabled Surface accounts", async () => {

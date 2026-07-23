@@ -18,6 +18,8 @@ export interface ModelSelectionState {
   serviceTierPending: boolean;
 }
 
+const standardServiceTierRequestValue = "default";
+
 export class ModelSelectionService {
   private readonly pendingByConversation = new Map<string, TurnOverrides>();
 
@@ -49,7 +51,7 @@ export class ModelSelectionService {
       model: selected.model,
       effort,
       ...(currentFast
-        ? { serviceTier: selectedFastTier ?? null }
+        ? { serviceTier: selectedFastTier ?? standardServiceTierRequestValue }
         : {}),
     });
     return this.resolveState(target, models);
@@ -102,7 +104,7 @@ export class ModelSelectionService {
     const pending = this.pendingByConversation.get(this.key(target));
     this.pendingByConversation.set(this.key(target), {
       ...pending,
-      serviceTier: enable ? tierId! : null,
+      serviceTier: enable ? tierId! : standardServiceTierRequestValue,
     });
     return this.resolveState(target, models);
   }

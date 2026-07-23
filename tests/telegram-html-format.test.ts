@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   escapeTelegramHtml,
   formatTelegramDiffChunks,
+  formatTelegramExpandableQuotePanelChunks,
   formatTelegramPanelChunks,
 } from "../src/surfaces/telegram/html-format.js";
 
@@ -29,6 +30,23 @@ describe("Telegram HTML formatter", () => {
     expect(formatTelegramPanelChunks("CLI 输入\n\n│ echo <token>\n│ git status")).toEqual([
       "<b>CLI 输入</b>\n\n<blockquote>echo &lt;token&gt;\ngit status</blockquote>",
     ]);
+  });
+
+  it("renders approval details as escaped expandable blockquotes", () => {
+    expect(formatTelegramExpandableQuotePanelChunks(
+      "Codex 请求执行命令",
+      "npm test\necho <token>",
+    )).toEqual([
+      "<b>Codex 请求执行命令</b>\n\n<blockquote expandable>npm test\necho &lt;token&gt;</blockquote>",
+    ]);
+  });
+
+  it("keeps escaped expandable quote chunks within the Telegram limit", () => {
+    const chunks = formatTelegramExpandableQuotePanelChunks("审批", "<&\"".repeat(2_000));
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => Array.from(chunk).length <= 3_600)).toBe(true);
+    expect(chunks.every((chunk) => chunk.includes("<blockquote expandable>"))).toBe(true);
   });
 
   it("keeps breathing room inside sections and separates workspace cards", () => {

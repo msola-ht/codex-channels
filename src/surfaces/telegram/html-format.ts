@@ -7,6 +7,28 @@ export function formatTelegramPanelChunks(text: string, limit = 3_600): string[]
   );
 }
 
+export function formatTelegramExpandableQuotePanelChunks(
+  title: string,
+  detail: string,
+  limit = 3_600,
+): string[] {
+  const titleHtml = `<b>${escapeTelegramHtml(title)}</b>`;
+  const quotePrefix = "<blockquote expandable>";
+  const quoteSuffix = "</blockquote>";
+  const quoteOverhead = Array.from(`${quotePrefix}${quoteSuffix}`).length;
+  const firstDetailLimit = Math.max(
+    1,
+    limit - Array.from(titleHtml).length - 2 - quoteOverhead,
+  );
+  const remainingDetailLimit = Math.max(1, limit - quoteOverhead);
+  const chunks = splitEscapedText(detail, firstDetailLimit, remainingDetailLimit);
+
+  return chunks.map((chunk, index) => [
+    ...(index === 0 ? [titleHtml, ""] : []),
+    `${quotePrefix}${escapeTelegramHtml(chunk)}${quoteSuffix}`,
+  ].join("\n"));
+}
+
 export function formatTelegramDiffChunks(text: string, limit = 3_600): string[] {
   const separator = text.indexOf("\n\n");
   if (separator < 0 || !text.startsWith("Turn Diff · ")) {
@@ -97,4 +119,48 @@ export function escapeTelegramHtml(value: string): string {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll("\"", "&quot;");
+}
+
+function splitEscapedText(
+  text: string,
+  firstLimit: number,
+  remainingLimit: number,
+): string[] {
+  const remaining = Array.from(text);
+  if (remaining.length === 0) {
+    return [""];
+  }
+
+  const chunks: string[] = [];
+  while (remaining.length > 0) {
+    const limit = chunks.length === 0 ? firstLimit : remainingLimit;
+    let boundary = largestEscapedPrefix(remaining, limit);
+    if (boundary < remaining.length) {
+      const newline = remaining.lastIndexOf("\n", boundary - 1);
+      if (newline >= Math.floor(boundary / 2)) {
+        boundary = newline;
+      }
+    }
+    boundary = Math.max(1, boundary);
+    chunks.push(remaining.splice(0, boundary).join(""));
+    if (remaining[0] === "\n") {
+      remaining.shift();
+    }
+  }
+  return chunks;
+}
+
+function largestEscapedPrefix(characters: string[], limit: number): number {
+  let low = 0;
+  let high = Math.min(characters.length, limit);
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    const escapedLength = Array.from(escapeTelegramHtml(characters.slice(0, middle).join(""))).length;
+    if (escapedLength <= limit) {
+      low = middle;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return low;
 }

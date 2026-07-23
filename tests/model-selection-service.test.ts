@@ -102,7 +102,7 @@ describe("ModelSelectionService", () => {
       .rejects.toThrow("当前模型不支持该思考强度");
   });
 
-  it("toggles Fast mode and sends an explicit null when turning it off", async () => {
+  it("toggles Fast mode and sends the explicit Standard tier when turning it off", async () => {
     const service = createService({ model: "gpt-main", effort: "medium", serviceTier: "default" });
 
     await expect(service.selectFastMode(target, "")).resolves.toMatchObject({
@@ -112,10 +112,10 @@ describe("ModelSelectionService", () => {
     expect(service.turnOverrides(target)).toEqual({ serviceTier: "priority" });
 
     await expect(service.selectFastMode(target, "off")).resolves.toMatchObject({
-      serviceTier: null,
+      serviceTier: "default",
       serviceTierPending: true,
     });
-    expect(service.turnOverrides(target)).toEqual({ serviceTier: null });
+    expect(service.turnOverrides(target)).toEqual({ serviceTier: "default" });
   });
 
   it("updates the local thread settings after Fast overrides are accepted", async () => {
@@ -134,7 +134,7 @@ describe("ModelSelectionService", () => {
     service.markApplied(target);
 
     expect(service.status(target)).toMatchObject({
-      serviceTier: null,
+      serviceTier: "default",
       pending: false,
       serviceTierPending: false,
     });
@@ -155,7 +155,7 @@ describe("ModelSelectionService", () => {
     expect(service.turnOverrides(target)).toEqual({
       model: "gpt-deep",
       effort: "high",
-      serviceTier: null,
+      serviceTier: "default",
     });
   });
 
