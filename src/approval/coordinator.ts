@@ -12,6 +12,10 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+type AdditionalPermissionsResult =
+  | { valid: true; detail?: string }
+  | { valid: false };
+
 export class ApprovalCoordinator {
   constructor(
     private readonly router: SessionRouter,
@@ -38,8 +42,15 @@ export class ApprovalCoordinator {
         if (!turnId || !itemId) {
           return this.safeDecline(request.method, params);
         }
+        if (!offersOneTimeCommandApproval(params.availableDecisions)) {
+          return { decision: "decline" };
+        }
         const command = stringValue(params.command) ?? "未提供命令预览";
         const reason = stringValue(params.reason);
+        const additionalPermissions = formatAdditionalPermissions(params.additionalPermissions);
+        if (!additionalPermissions.valid) {
+          return { decision: "decline" };
+        }
         const decision = await this.interaction.request(target, {
           type: "approval",
           requestId: interactionId,
@@ -48,7 +59,7 @@ export class ApprovalCoordinator {
           turnId,
           itemId,
           title: "Codex 请求执行命令",
-          detail: [reason, command].filter(Boolean).join("\n\n"),
+          detail: [reason, command, additionalPermissions.detail].filter(Boolean).join("\n\n"),
           expiresInMs: this.timeoutMs,
         });
         return { decision: isApproved(decision) ? "accept" : "decline" };
@@ -184,4 +195,149 @@ function mapAnswers(answers: Record<string, string[]>): Record<string, { answers
   return Object.fromEntries(
     Object.entries(answers).map(([questionId, values]) => [questionId, { answers: values }]),
   );
+}
+
+function formatAdditionalPermissions(value: unknown): AdditionalPermissionsResult {
+  if (value === undefined || value === null) {
+    return { valid: true };
+  }
+  if (!isRecordWithOnly(value, ["network", "fileSystem"])) {
+    return { valid: false };
+  }
+
+  const lines: string[] = [];
+  if (value.network !== undefined && value.network !== null) {
+    if (
+      !isRecordWithOnly(value.network, ["enabled"])
+      || !("enabled" in value.network)
+      || (value.network.enabled !== null && typeof value.network.enabled !== "boolean")
+    ) {
+      return { valid: false };
+    }
+    lines.push(`网络：${value.network.enabled === true ? "开启" : value.network.enabled === false ? "关闭" : "不变"}`);
+  }
+
+  if (value.fileSystem !== undefined && value.fileSystem !== null) {
+    const fileSystem = value.fileSystem;
+    if (!isRecordWithOnly(fileSystem, ["read", "write", "globScanMaxDepth", "entries"])) {
+      return { valid: false };
+    }
+    const read = permissionPaths(fileSystem.read);
+    const write = permissionPaths(fileSystem.write);
+    if (read === null || write === null) {
+      return { valid: false };
+    }
+    if (read.length > 0) {
+      lines.push(`读取：${read.join("、")}`);
+    }
+    if (write.length > 0) {
+      lines.push(`写入：${write.join("、")}`);
+    }
+    if (
+      fileSystem.globScanMaxDepth !== undefined
+      && (
+        typeof fileSystem.globScanMaxDepth !== "number"
+        || !Number.isInteger(fileSystem.globScanMaxDepth)
+        || fileSystem.globScanMaxDepth < 0
+      )
+    ) {
+      return { valid: false };
+    }
+    if (fileSystem.globScanMaxDepth !== undefined) {
+      lines.push(`Glob 扫描深度：${fileSystem.globScanMaxDepth}`);
+    }
+    if (fileSystem.entries !== undefined) {
+      if (!Array.isArray(fileSystem.entries)) {
+        return { valid: false };
+      }
+      for (const entry of fileSystem.entries) {
+        if (
+          !isRecordWithOnly(entry, ["path", "access"])
+          || !["read", "write", "deny"].includes(String(entry.access))
+        ) {
+          return { valid: false };
+        }
+        const path = permissionEntryPath(entry.path);
+        if (!path) {
+          return { valid: false };
+        }
+        const access = entry.access === "read" ? "读取" : entry.access === "write" ? "写入" : "拒绝";
+        lines.push(`${access}规则：${path}`);
+      }
+    }
+  }
+
+  return lines.length > 0
+    ? { valid: true, detail: `额外权限：\n${lines.join("\n")}` }
+    : { valid: true, detail: "额外权限：未请求扩展" };
+}
+
+function offersOneTimeCommandApproval(value: unknown): boolean {
+  return value === undefined
+    || value === null
+    || (Array.isArray(value) && value.includes("accept"));
+}
+
+function permissionPaths(value: unknown): string[] | null {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string")
+    ? value
+    : null;
+}
+
+function permissionEntryPath(value: unknown): string | undefined {
+  if (!isRecord(value) || typeof value.type !== "string") {
+    return undefined;
+  }
+  if (value.type === "path" && isRecordWithOnly(value, ["type", "path"])) {
+    return stringValue(value.path);
+  }
+  if (value.type === "glob_pattern" && isRecordWithOnly(value, ["type", "pattern"])) {
+    return stringValue(value.pattern);
+  }
+  if (value.type !== "special" || !isRecordWithOnly(value, ["type", "value"])) {
+    return undefined;
+  }
+  return formatSpecialPath(value.value);
+}
+
+function formatSpecialPath(value: unknown): string | undefined {
+  if (!isRecord(value) || typeof value.kind !== "string") {
+    return undefined;
+  }
+  const labels: Record<string, string> = {
+    root: "根目录",
+    minimal: "最小系统路径",
+    project_roots: "项目目录",
+    tmpdir: "系统临时目录",
+    slash_tmp: "/tmp",
+  };
+  if (value.kind === "unknown") {
+    if (!isRecordWithOnly(value, ["kind", "path", "subpath"]) || typeof value.path !== "string") {
+      return undefined;
+    }
+    return typeof value.subpath === "string" ? `${value.path}/${value.subpath}` : value.path;
+  }
+  if (!(value.kind in labels) || !isRecordWithOnly(value, ["kind", "subpath"])) {
+    return undefined;
+  }
+  if (value.subpath !== undefined && value.subpath !== null && typeof value.subpath !== "string") {
+    return undefined;
+  }
+  return typeof value.subpath === "string"
+    ? `${labels[value.kind]}/${value.subpath}`
+    : labels[value.kind];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isRecordWithOnly(
+  value: unknown,
+  allowedKeys: readonly string[],
+): value is Record<string, unknown> {
+  return isRecord(value) && Object.keys(value).every((key) => allowedKeys.includes(key));
 }

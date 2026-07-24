@@ -56,6 +56,9 @@ Surface -> Application/Core <- Codex Client
 - 仓库必须记录并校验生成类型对应的精确 Codex CLI 版本。
 - 升级协议时先审查生成差异，再更新 `codex-protocol` 的受控导出、实现和测试。
 - 稳定业务代码不得依赖实验生成参数才会出现的字段。
+- 运行时只可协商当前精确版本、默认生成类型已覆盖且当前功能必需的实验能力；启用前必须审查
+  同时开放的 Notification、Server Request 和字段，新增高权限输入必须显式展示或失败关闭，并
+  增加真实 App Server 合同测试。
 - 每个 Transport 连接只执行一次 `initialize`，成功后发送 `initialized`；初始化前不得发送其他请求。
 - JSON-RPC Response、Notification 和 Server Request 必须分别处理。
 - Request ID 必须唯一关联 Pending Response，并在超时、断线和关闭时完成清理。

@@ -131,7 +131,8 @@ Turn 完成后逐条启动，Gateway 重启、Thread 切换或排队 Turn 启动
 `/fast on` 和 `/fast off` 与原生 Codex CLI 保持一致：既为下一次 Turn 显式选择服务层级，
 也通过 App Server 保存用户级默认值，因此之后重启 `codexc remote resume` 不会恢复成旧的
 Fast 默认状态。Turn 成功启动后，当前设置仍由 App Server Thread 保存，Gateway 重启或重建
-服务后会随 Thread 恢复。
+服务后会随 Thread 恢复。原生 CLI 修改共享 Thread 的 Fast、模型或思考强度时，App Server
+通过设置通知同步给 Gateway；Gateway 不读取或轮询 Codex 会话文件。
 
 如果已配置的 Workspace 目录被移动、删除或暂时不可访问，普通 `codexc ws add` 会停止并列出失效项，
 避免误删暂时未挂载的目录。确认目录不再使用后，可执行 `codexc ws add --prune-missing`：
@@ -192,7 +193,8 @@ npm run verify:commit
 类型与版本、全目录 Lint、文档链接和索引、全量测试、Shell 语法、npm tarball 安装冒烟，
 以及 macOS 上的 launchd 模板检查。不要使用 `git commit --no-verify` 绕过该门禁。
 
-CI 使用隔离 `CODEX_HOME` 运行 Fast 默认值合同测试；该测试不需要登录，也不会调用模型：
+CI 使用隔离 `CODEX_HOME` 运行 Fast 默认值和共享 Thread 设置通知合同测试；该测试不需要登录，
+也不会调用模型：
 
 ```bash
 RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts

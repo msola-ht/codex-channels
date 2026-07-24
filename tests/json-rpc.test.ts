@@ -210,7 +210,7 @@ describe("JsonRpcClient", () => {
           title: "Codex Connect Gateway",
         },
         capabilities: {
-          experimentalApi: false,
+          experimentalApi: true,
           requestAttestation: false,
           optOutNotificationMethods: null,
         },

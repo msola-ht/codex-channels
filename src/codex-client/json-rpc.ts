@@ -90,7 +90,7 @@ export class JsonRpcClient {
             version: gatewayMetadata.version,
           },
           capabilities: {
-            experimentalApi: false,
+            experimentalApi: true,
             requestAttestation: false,
             optOutNotificationMethods: null,
           },

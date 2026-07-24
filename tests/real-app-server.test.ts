@@ -255,6 +255,7 @@ contractSuite("isolated Codex App Server state contract", () => {
   let socketPath: string;
   let processHandle: ChildProcess;
   let ownerClient: CodexAppServerClient;
+  let peerRpc: JsonRpcClient;
   let peerClient: CodexAppServerClient;
   let appServerStderr = "";
 
@@ -288,10 +289,8 @@ contractSuite("isolated Codex App Server state contract", () => {
       new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
       { sandbox: "read-only" },
     );
-    peerClient = new CodexAppServerClient(
-      new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
-      { sandbox: "read-only" },
-    );
+    peerRpc = new JsonRpcClient(new UnixWebSocketTransport(socketPath));
+    peerClient = new CodexAppServerClient(peerRpc, { sandbox: "read-only" });
     await ownerClient.connect();
     await peerClient.connect();
   }, 15_000);
@@ -333,6 +332,41 @@ contractSuite("isolated Codex App Server state contract", () => {
         await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
         await ownerClient.deleteThread(threadId);
       }
+    }
+  }, 15_000);
+
+  it("broadcasts peer Fast setting changes to another subscribed client", async () => {
+    const observedTiers: unknown[] = [];
+    const removeNotification = ownerClient.onNotification((notification) => {
+      if (notification.method !== "thread/settings/updated") {
+        return;
+      }
+      const params = notification.params as {
+        threadId?: unknown;
+        threadSettings?: { serviceTier?: unknown };
+      };
+      if (params.threadId === threadId) {
+        observedTiers.push(params.threadSettings?.serviceTier);
+      }
+    });
+    const started = await ownerClient.startThread(workdir);
+    const threadId = started.thread.id;
+    try {
+      await peerRpc.request("thread/settings/update", {
+        threadId,
+        serviceTier: "priority",
+      });
+      await waitFor(() => observedTiers.includes("priority"), 2_000);
+
+      await peerRpc.request("thread/settings/update", {
+        threadId,
+        serviceTier: "default",
+      });
+      await waitFor(() => observedTiers.includes("default"), 2_000);
+    } finally {
+      removeNotification();
+      await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
+      await ownerClient.deleteThread(threadId);
     }
   }, 15_000);
 });

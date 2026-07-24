@@ -133,6 +133,90 @@ describe("ApprovalCoordinator", () => {
     });
   });
 
+  it("shows experimental additional permissions before approving a command", async () => {
+    const interaction = new FakeInteraction();
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+
+    const response = await coordinator.handle({
+      id: "request-additional-permissions",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "command-permissions-1",
+        command: "npm test",
+        additionalPermissions: {
+          network: { enabled: true },
+          fileSystem: {
+            read: ["/workspace/input"],
+            write: ["/workspace/output"],
+            entries: [
+              {
+                access: "read",
+                path: { type: "glob_pattern", pattern: "/workspace/**/*.json" },
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    expect(response).toEqual({ decision: "accept" });
+    expect(interaction.requests[0]).toMatchObject({
+      type: "approval",
+      kind: "command",
+      detail: expect.stringContaining("额外权限"),
+    });
+    const detail = (interaction.requests[0] as Extract<InteractionRequest, { type: "approval" }>)
+      .detail;
+    expect(detail).toContain("网络：开启");
+    expect(detail).toContain("读取：/workspace/input");
+    expect(detail).toContain("写入：/workspace/output");
+    expect(detail).toContain("读取规则：/workspace/**/*.json");
+  });
+
+  it("declines malformed experimental command permissions without prompting", async () => {
+    const interaction = new FakeInteraction();
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+
+    const response = await coordinator.handle({
+      id: "request-malformed-additional-permissions",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "command-permissions-malformed",
+        command: "npm test",
+        additionalPermissions: {
+          network: { enabled: "yes" },
+        },
+      },
+    });
+
+    expect(response).toEqual({ decision: "decline" });
+    expect(interaction.requests).toEqual([]);
+  });
+
+  it("declines command approval when one-time acceptance is not offered", async () => {
+    const interaction = new FakeInteraction();
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+
+    const response = await coordinator.handle({
+      id: "request-without-one-time-accept",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "command-decisions-1",
+        command: "npm test",
+        availableDecisions: ["decline", "cancel"],
+      },
+    });
+
+    expect(response).toEqual({ decision: "decline" });
+    expect(interaction.requests).toEqual([]);
+  });
+
   it("declines a mapped approval that is missing its turn or item identity", async () => {
     const interaction = new FakeInteraction();
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);

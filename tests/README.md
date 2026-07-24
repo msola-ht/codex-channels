@@ -12,7 +12,7 @@
   一次性回调、超时和跨客户端解决。
 - Telegram 格式、通知降噪、长回复折叠与文件回退、输出队列、生命周期、API 重试及图片输入。
 - Skill 用户与 Workspace 安装过滤、已安装 Plugin 查询及远端市场隔离。
-- Fast 模式的 Thread 覆盖、显式 Standard 层级及 Codex 用户级默认值持久化。
+- Fast 模式的 Thread 覆盖、显式 Standard 层级、Codex 用户级默认值持久化及共享客户端设置通知。
 - SQLite 最小绑定恢复、配置热加载与自动重启分类、Telegram Setup、CLI、launchd、systemd、Unix WebSocket 请求头、模块依赖方向和公开入口边界。
 - CLI Doctor 的严格 TOML Schema 校验、敏感错误清洗和只读诊断。
 - 仓库 Git hooks 自动安装与重复执行安全性。
@@ -38,7 +38,9 @@ RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
 ```
 
 该合同测试使用临时 `CODEX_HOME`，验证一个 Client 写入的 Fast 用户默认值能被另一个 Client
-读取，且之后新建 Thread 的运行时 `serviceTier` 按 `default → priority → default` 变化。
+读取，之后新建 Thread 的运行时 `serviceTier` 按 `default → priority → default` 变化，并验证
+第二个 Client 修改共享 Thread 的 Fast 设置时，订阅方收到 `thread/settings/updated`。测试不会
+启动模型 Turn。
 
 使用当前用户配置的完整 Unix WebSocket/App Server 冒烟测试同样不会调用模型：
 
