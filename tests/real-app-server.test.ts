@@ -125,11 +125,10 @@ suite("real Codex App Server over Unix WebSocket", () => {
     const started = await client.startThread(workdir);
     try {
       await waitFor(() => observedThreadId === started.thread.id, 2_000);
-      const loaded = await peerRpc.request<{ data: string[] }>(
-        "thread/loaded/list",
-        { limit: 100 },
-        { retryOverload: true },
-      );
+      const loaded = await peerRpc.request<{ data: string[] }>({
+        method: "thread/loaded/list",
+        params: { limit: 100 },
+      }, { retryOverload: true });
       const ownerUnsubscribed = await client.unsubscribeThread(started.thread.id);
 
       expect(started.thread.id).toBeTruthy();
@@ -364,12 +363,16 @@ contractSuite("isolated Codex App Server state contract", () => {
     const started = await ownerClient.startThread(workdir);
     const threadId = started.thread.id;
     try {
-      await peerRpc.request("thread/settings/update", {
-        threadId,
-        model: "gpt-5.6-sol",
-        effort: "high",
-        serviceTier: "priority",
-      });
+      await peerRpc.request({
+        method: "thread/settings/update",
+        params: {
+          threadId,
+          model: "gpt-5.6-sol",
+          effort: "high",
+          serviceTier: "priority",
+        },
+        // 该实验请求不在默认生成的稳定 ClientRequest 中，仅用于固定版本真实合同。
+      } as never);
       await waitFor(
         () => observedSettings.some((settings) =>
           settings.model === "gpt-5.6-sol"
@@ -383,12 +386,16 @@ contractSuite("isolated Codex App Server state contract", () => {
       peerClient = new CodexAppServerClient(peerRpc, { sandbox: "read-only" });
       await peerClient.connect();
 
-      await peerRpc.request("thread/settings/update", {
-        threadId,
-        model: "gpt-5.6-sol",
-        effort: "low",
-        serviceTier: "default",
-      });
+      await peerRpc.request({
+        method: "thread/settings/update",
+        params: {
+          threadId,
+          model: "gpt-5.6-sol",
+          effort: "low",
+          serviceTier: "default",
+        },
+        // 该实验请求不在默认生成的稳定 ClientRequest 中，仅用于固定版本真实合同。
+      } as never);
       await waitFor(
         () => observedSettings.some((settings) =>
           settings.model === "gpt-5.6-sol"

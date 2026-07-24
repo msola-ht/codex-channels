@@ -8,8 +8,10 @@ class FakeTransport extends BaseTransport {
   readonly kind = "stdio" as const;
   readonly sent: Array<Record<string, unknown>> = [];
   overloadResponses = 0;
+  simulateAccountUsageOverload = false;
   failServerResponse = false;
   circularModelCursor = false;
+  disconnectAfterInitialized = false;
 
   async connect(): Promise<void> {}
   async close(): Promise<void> {}
@@ -34,7 +36,9 @@ class FakeTransport extends BaseTransport {
           }),
         ),
       );
-    } else if (decoded.method === "read/test") {
+    } else if (decoded.method === "initialized" && this.disconnectAfterInitialized) {
+      this.emitClose(new Error("socket lost during initialization"));
+    } else if (decoded.method === "account/usage/read" && this.simulateAccountUsageOverload) {
       this.overloadResponses += 1;
       queueMicrotask(() =>
         this.emitMessage(
@@ -105,6 +109,24 @@ class FakeTransport extends BaseTransport {
               },
               rateLimitsByLimitId: null,
               rateLimitResetCredits: null,
+            },
+          }),
+        ),
+      );
+    } else if (decoded.method === "account/usage/read") {
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({
+            id: decoded.id,
+            result: {
+              summary: {
+                lifetimeTokens: null,
+                peakDailyTokens: null,
+                longestRunningTurnSec: null,
+                currentStreakDays: null,
+                longestStreakDays: null,
+              },
+              dailyUsageBuckets: null,
             },
           }),
         ),
@@ -203,6 +225,7 @@ describe("JsonRpcClient", () => {
 
     expect(initialized.platformOs).toBe("macos");
     expect(transport.sent.map((message) => message.method)).toEqual(["initialize", "initialized"]);
+    expect(transport.sent[1]).toEqual({ method: "initialized" });
     expect(transport.sent[0]).toMatchObject({
       params: {
         clientInfo: {
@@ -229,6 +252,14 @@ describe("JsonRpcClient", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(transport.sent.at(-1)).toEqual({ id: "server-1", result: { accepted: true } });
+  });
+
+  it("does not accept a connection that closes while initialization completes", async () => {
+    const transport = new FakeTransport();
+    transport.disconnectAfterInitialized = true;
+    const client = new JsonRpcClient(transport);
+
+    await expect(client.connect()).rejects.toThrow("初始化期间已断开");
   });
 
   it("does not respond to a server request after its connection disconnects", async () => {
@@ -312,12 +343,12 @@ describe("JsonRpcClient", () => {
 
   it("retries overload only when the caller marks a request safe", async () => {
     const transport = new FakeTransport();
+    transport.simulateAccountUsageOverload = true;
     const client = new JsonRpcClient(transport);
     await client.connect();
 
     const result = await client.request<{ ok: boolean }>(
-      "read/test",
-      {},
+      { method: "account/usage/read", params: undefined },
       { retryOverload: true, attempts: 2 },
     );
 
@@ -374,6 +405,25 @@ describe("JsonRpcClient", () => {
 
     expect(result.rateLimits.planType).toBe("pro");
     expect(transport.sent.some((message) => message.method === "account/rateLimits/read")).toBe(true);
+  });
+
+  it("omits params for App Server methods whose generated request has no params", async () => {
+    const transport = new FakeTransport();
+    const rpc = new JsonRpcClient(transport);
+    const client = new CodexAppServerClient(rpc, {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await client.accountUsage();
+    await client.accountRateLimits();
+
+    expect(transport.sent.find((message) => message.method === "account/usage/read"))
+      .toEqual(expect.objectContaining({ method: "account/usage/read" }));
+    expect(transport.sent.find((message) => message.method === "account/usage/read"))
+      .not.toHaveProperty("params");
+    expect(transport.sent.find((message) => message.method === "account/rateLimits/read"))
+      .not.toHaveProperty("params");
   });
 
   it("lists only installed plugins without loading the remote catalog", async () => {

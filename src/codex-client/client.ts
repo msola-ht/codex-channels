@@ -79,9 +79,9 @@ export class CodexAppServerClient {
     const cursors = new Set<string>();
     let cursor: string | null = null;
     do {
-      const result: ThreadListResponse = await this.rpc.request<ThreadListResponse>(
-        "thread/list",
-        {
+      const result: ThreadListResponse = await this.rpc.request<ThreadListResponse>({
+        method: "thread/list",
+        params: {
           cwd,
           sourceKinds: ["cli", "vscode", "appServer"],
           sortKey: "updated_at",
@@ -92,8 +92,7 @@ export class CodexAppServerClient {
           limit: 100,
           ...(cursor ? { cursor } : {}),
         },
-        { retryOverload: true },
-      );
+      }, { retryOverload: true });
       threads.push(...result.data);
       cursor = result.nextCursor;
       if (cursor) {
@@ -107,71 +106,64 @@ export class CodexAppServerClient {
   }
 
   async readThread(threadId: string): Promise<Thread> {
-    const result = await this.rpc.request<ThreadReadResponse>(
-      "thread/read",
-      { threadId, includeTurns: false },
-      { retryOverload: true },
-    );
+    const result = await this.rpc.request<ThreadReadResponse>({
+      method: "thread/read",
+      params: { threadId, includeTurns: false },
+    }, { retryOverload: true });
     return result.thread;
   }
 
   async startThread(cwd: string): Promise<ThreadStartResponse> {
-    return this.rpc.request<ThreadStartResponse>(
-      "thread/start",
-      {
+    return this.rpc.request<ThreadStartResponse>({
+      method: "thread/start",
+      params: {
         cwd,
         sandbox: this.defaults.sandbox,
         approvalPolicy: "on-request",
         serviceName: "codex_connect_gateway",
         ...(this.defaults.model ? { model: this.defaults.model } : {}),
       },
-      { retryOverload: false },
-    );
+    }, { retryOverload: false });
   }
 
   async resumeThread(threadId: string, cwd: string): Promise<ThreadResumeResponse> {
-    return this.rpc.request<ThreadResumeResponse>(
-      "thread/resume",
-      {
+    return this.rpc.request<ThreadResumeResponse>({
+      method: "thread/resume",
+      params: {
         threadId,
         cwd,
         sandbox: this.defaults.sandbox,
         approvalPolicy: "on-request",
       },
-      { retryOverload: false },
-    );
+    }, { retryOverload: false });
   }
 
   async unsubscribeThread(threadId: string): Promise<ThreadUnsubscribeResponse> {
-    return this.rpc.request<ThreadUnsubscribeResponse>(
-      "thread/unsubscribe",
-      { threadId },
-      { retryOverload: true },
-    );
+    return this.rpc.request<ThreadUnsubscribeResponse>({
+      method: "thread/unsubscribe",
+      params: { threadId },
+    }, { retryOverload: true });
   }
 
   async deleteThread(threadId: string): Promise<ThreadDeleteResponse> {
-    return this.rpc.request<ThreadDeleteResponse>(
-      "thread/delete",
-      { threadId },
-      { retryOverload: false },
-    );
+    return this.rpc.request<ThreadDeleteResponse>({
+      method: "thread/delete",
+      params: { threadId },
+    }, { retryOverload: false });
   }
 
   async archiveThread(threadId: string): Promise<ThreadArchiveResponse> {
-    return this.rpc.request<ThreadArchiveResponse>(
-      "thread/archive",
-      { threadId },
-      { retryOverload: false },
-    );
+    return this.rpc.request<ThreadArchiveResponse>({
+      method: "thread/archive",
+      params: { threadId },
+    }, { retryOverload: false });
   }
 
   async unarchiveThread(threadId: string): Promise<ThreadUnarchiveResponse> {
-    return this.rpc.request<ThreadUnarchiveResponse>(
-      "thread/unarchive",
-      { threadId },
-      { retryOverload: false },
-    );
+    return this.rpc.request<ThreadUnarchiveResponse>({
+      method: "thread/unarchive",
+      params: { threadId },
+    }, { retryOverload: false });
   }
 
   async startTurn(
@@ -181,9 +173,9 @@ export class CodexAppServerClient {
     cwd: string,
     overrides: TurnOverrides = {},
   ): Promise<TurnStartResponse> {
-    return this.rpc.request<TurnStartResponse>(
-      "turn/start",
-      {
+    return this.rpc.request<TurnStartResponse>({
+      method: "turn/start",
+      params: {
         threadId,
         clientUserMessageId,
         input,
@@ -194,8 +186,7 @@ export class CodexAppServerClient {
           ? { serviceTier: overrides.serviceTier ?? null }
           : {}),
       },
-      { retryOverload: false },
-    );
+    }, { retryOverload: false });
   }
 
   async steerTurn(
@@ -204,28 +195,36 @@ export class CodexAppServerClient {
     input: UserInput[],
     clientUserMessageId: string,
   ): Promise<TurnSteerResponse> {
-    return this.rpc.request<TurnSteerResponse>(
-      "turn/steer",
-      {
+    return this.rpc.request<TurnSteerResponse>({
+      method: "turn/steer",
+      params: {
         threadId,
         expectedTurnId: turnId,
         clientUserMessageId,
         input,
       },
-      { retryOverload: false },
-    );
+    }, { retryOverload: false });
   }
 
   async interruptTurn(threadId: string, turnId: string): Promise<void> {
-    await this.rpc.request("turn/interrupt", { threadId, turnId }, { retryOverload: false });
+    await this.rpc.request({
+      method: "turn/interrupt",
+      params: { threadId, turnId },
+    }, { retryOverload: false });
   }
 
   async setThreadName(threadId: string, name: string): Promise<void> {
-    await this.rpc.request("thread/name/set", { threadId, name }, { retryOverload: false });
+    await this.rpc.request({
+      method: "thread/name/set",
+      params: { threadId, name },
+    }, { retryOverload: false });
   }
 
   async compactThread(threadId: string): Promise<void> {
-    await this.rpc.request("thread/compact/start", { threadId }, { retryOverload: false });
+    await this.rpc.request({
+      method: "thread/compact/start",
+      params: { threadId },
+    }, { retryOverload: false });
   }
 
   async listModels(): Promise<ModelListResponse["data"]> {
@@ -233,11 +232,10 @@ export class CodexAppServerClient {
     const cursors = new Set<string>();
     let cursor: string | null = null;
     do {
-      const result: ModelListResponse = await this.rpc.request<ModelListResponse>(
-        "model/list",
-        { limit: 100, includeHidden: false, ...(cursor ? { cursor } : {}) },
-        { retryOverload: true },
-      );
+      const result: ModelListResponse = await this.rpc.request<ModelListResponse>({
+        method: "model/list",
+        params: { limit: 100, includeHidden: false, ...(cursor ? { cursor } : {}) },
+      }, { retryOverload: true });
       models.push(...result.data);
       cursor = result.nextCursor;
       rememberCursor("model/list", cursor, cursors);
@@ -246,9 +244,9 @@ export class CodexAppServerClient {
   }
 
   async writeDefaultFastMode(enabled: boolean): Promise<void> {
-    await this.rpc.request(
-      "config/batchWrite",
-      {
+    await this.rpc.request({
+      method: "config/batchWrite",
+      params: {
         edits: [{
           keyPath: "service_tier",
           value: enabled ? "fast" : "default",
@@ -256,46 +254,41 @@ export class CodexAppServerClient {
         }],
         reloadUserConfig: true,
       },
-      { retryOverload: false },
-    );
+    }, { retryOverload: false });
   }
 
   async readConfig(cwd: string): Promise<ConfigReadResponse> {
     const params: ConfigReadParams = { cwd, includeLayers: false };
-    return this.rpc.request<ConfigReadResponse>(
-      "config/read",
+    return this.rpc.request<ConfigReadResponse>({
+      method: "config/read",
       params,
-      { retryOverload: true },
-    );
+    }, { retryOverload: true });
   }
 
   async forkThread(threadId: string, cwd: string): Promise<ThreadForkResponse> {
-    return this.rpc.request<ThreadForkResponse>(
-      "thread/fork",
-      {
+    return this.rpc.request<ThreadForkResponse>({
+      method: "thread/fork",
+      params: {
         threadId,
         cwd,
         sandbox: this.defaults.sandbox,
         approvalPolicy: "on-request",
       },
-      { retryOverload: false },
-    );
+    }, { retryOverload: false });
   }
 
   async startReview(threadId: string, target: ReviewTarget): Promise<ReviewStartResponse> {
-    return this.rpc.request<ReviewStartResponse>(
-      "review/start",
-      { threadId, target, delivery: "inline" },
-      { retryOverload: false },
-    );
+    return this.rpc.request<ReviewStartResponse>({
+      method: "review/start",
+      params: { threadId, target, delivery: "inline" },
+    }, { retryOverload: false });
   }
 
   async listSkills(cwd: string): Promise<SkillsListResponse["data"]> {
-    const response = await this.rpc.request<SkillsListResponse>(
-      "skills/list",
-      { cwds: [cwd], forceReload: false },
-      { retryOverload: true },
-    );
+    const response = await this.rpc.request<SkillsListResponse>({
+      method: "skills/list",
+      params: { cwds: [cwd], forceReload: false },
+    }, { retryOverload: true });
     return response.data;
   }
 
@@ -305,16 +298,15 @@ export class CodexAppServerClient {
     let cursor: string | null = null;
     do {
       const response: ListMcpServerStatusResponse =
-        await this.rpc.request<ListMcpServerStatusResponse>(
-          "mcpServerStatus/list",
-          {
+        await this.rpc.request<ListMcpServerStatusResponse>({
+          method: "mcpServerStatus/list",
+          params: {
             limit: 100,
             detail: "toolsAndAuthOnly",
             ...(threadId ? { threadId } : {}),
             ...(cursor ? { cursor } : {}),
           },
-          { retryOverload: true },
-        );
+        }, { retryOverload: true });
       servers.push(...response.data);
       cursor = response.nextCursor;
       rememberCursor("mcpServerStatus/list", cursor, cursors);
@@ -323,27 +315,24 @@ export class CodexAppServerClient {
   }
 
   async listPlugins(cwd: string): Promise<PluginInstalledResponse> {
-    return this.rpc.request<PluginInstalledResponse>(
-      "plugin/installed",
-      { cwds: [cwd] },
-      { retryOverload: true },
-    );
+    return this.rpc.request<PluginInstalledResponse>({
+      method: "plugin/installed",
+      params: { cwds: [cwd] },
+    }, { retryOverload: true });
   }
 
   accountUsage(): Promise<GetAccountTokenUsageResponse> {
-    return this.rpc.request<GetAccountTokenUsageResponse>(
-      "account/usage/read",
-      {},
-      { retryOverload: true },
-    );
+    return this.rpc.request<GetAccountTokenUsageResponse>({
+      method: "account/usage/read",
+      params: undefined,
+    }, { retryOverload: true });
   }
 
   accountRateLimits(): Promise<GetAccountRateLimitsResponse> {
-    return this.rpc.request<GetAccountRateLimitsResponse>(
-      "account/rateLimits/read",
-      {},
-      { retryOverload: true },
-    );
+    return this.rpc.request<GetAccountRateLimitsResponse>({
+      method: "account/rateLimits/read",
+      params: undefined,
+    }, { retryOverload: true });
   }
 
   async listPermissionProfiles(cwd: string): Promise<PermissionProfileListResponse["data"]> {
@@ -352,11 +341,10 @@ export class CodexAppServerClient {
     let cursor: string | null = null;
     do {
       const response: PermissionProfileListResponse =
-        await this.rpc.request<PermissionProfileListResponse>(
-          "permissionProfile/list",
-          { cwd, limit: 100, ...(cursor ? { cursor } : {}) },
-          { retryOverload: true },
-        );
+        await this.rpc.request<PermissionProfileListResponse>({
+          method: "permissionProfile/list",
+          params: { cwd, limit: 100, ...(cursor ? { cursor } : {}) },
+        }, { retryOverload: true });
       profiles.push(...response.data);
       cursor = response.nextCursor;
       rememberCursor("permissionProfile/list", cursor, cursors);
@@ -365,25 +353,26 @@ export class CodexAppServerClient {
   }
 
   async getGoal(threadId: string): Promise<ThreadGoal | null> {
-    const response = await this.rpc.request<ThreadGoalGetResponse>(
-      "thread/goal/get",
-      { threadId },
-      { retryOverload: true },
-    );
+    const response = await this.rpc.request<ThreadGoalGetResponse>({
+      method: "thread/goal/get",
+      params: { threadId },
+    }, { retryOverload: true });
     return response.goal;
   }
 
   async setGoal(threadId: string, objective: string): Promise<ThreadGoal> {
-    const response = await this.rpc.request<ThreadGoalSetResponse>(
-      "thread/goal/set",
-      { threadId, objective, status: "active" },
-      { retryOverload: false },
-    );
+    const response = await this.rpc.request<ThreadGoalSetResponse>({
+      method: "thread/goal/set",
+      params: { threadId, objective, status: "active" },
+    }, { retryOverload: false });
     return response.goal;
   }
 
   async clearGoal(threadId: string): Promise<void> {
-    await this.rpc.request("thread/goal/clear", { threadId }, { retryOverload: false });
+    await this.rpc.request({
+      method: "thread/goal/clear",
+      params: { threadId },
+    }, { retryOverload: false });
   }
 }
 

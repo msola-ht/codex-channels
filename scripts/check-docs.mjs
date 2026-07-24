@@ -143,7 +143,9 @@ function checkProtocolIndexMetrics() {
     "utf8",
   );
   const directRequests = new Set(
-    [...clientRequests.matchAll(/this\.rpc\.request(?:<[\s\S]*?>)?\(\s*"([^"]+)"/gu)]
+    [...clientRequests.matchAll(
+      /this\.rpc\.request(?:<[\s\S]*?>)?\(\s*\{\s*method:\s*"([^"]+)"/gu,
+    )]
       .map((match) => match[1]),
   );
   const serverRequestMethods = new Set(

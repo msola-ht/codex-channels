@@ -18,7 +18,7 @@
 | 72 | App Server 发给客户端的 Notification 方法 | [`ServerNotification.ts`](../src/codex-protocol/generated/ServerNotification.ts) |
 | 10 | App Server 发给客户端、需要回应的 Request 方法 | [`ServerRequest.ts`](../src/codex-protocol/generated/ServerRequest.ts) |
 | 1 | 客户端发给 App Server 的 Notification，即 `initialized` | [`ClientNotification.ts`](../src/codex-protocol/generated/ClientNotification.ts) |
-| 50 | 本项目允许业务模块使用的协议类型导出 | [`src/codex-protocol/index.ts`](../src/codex-protocol/index.ts) |
+| 52 | 本项目允许业务模块使用的协议类型导出 | [`src/codex-protocol/index.ts`](../src/codex-protocol/index.ts) |
 | 27 | 本项目直接调用的业务 Request 方法，不含连接层的 `initialize` | [`client.ts`](../src/codex-client/client.ts) |
 | 5 | 本项目显式协调的 Server Request 类型 | [`coordinator.ts`](../src/approval/coordinator.ts) |
 | 13 | 本项目 TypeScript Gateway 的一级业务模块 | [`src/README.md`](../src/README.md) |
@@ -65,7 +65,7 @@
 
 | 能力 | 当前使用的官方方法或通知 | 本项目入口与验证 |
 | --- | --- | --- |
-| 初始化与连接 | `initialize`、`initialized` | [`codex-client/`](../src/codex-client/README.md)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
+| 初始化与连接 | `initialize`、`initialized` | [`codex-client/`](../src/codex-client/README.md)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)；发送消息受生成的 `ClientRequest` / `ClientNotification` 约束 |
 | Thread 生命周期 | `thread/list`、`thread/read`、`thread/start`、`thread/resume`、`thread/fork`、`thread/archive`、`thread/unarchive`、`thread/delete`、`thread/unsubscribe`、`thread/name/set`、`thread/compact/start` | [`session-routing/`](../src/session-routing/README.md)、[`session-router.test.ts`](../tests/session-router.test.ts) |
 | Thread 设置 | `thread/settings/updated`、`model/list`、`config/read`、`config/batchWrite` | [`thread-state-sync.ts`](../src/session-routing/thread-state-sync.ts)、[`model-selection-service.test.ts`](../tests/model-selection-service.test.ts) |
 | Turn 控制 | `turn/start`、`turn/steer`、`turn/interrupt`、`turn/started`、`turn/completed` | [`conversation-core/`](../src/conversation-core/README.md)、[`conversation-service.test.ts`](../tests/conversation-service.test.ts) |

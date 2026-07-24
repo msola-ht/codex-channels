@@ -2,6 +2,8 @@ import version from "./version.json" with { type: "json" };
 
 export type { InitializeParams } from "./generated/InitializeParams.js";
 export type { AuthMode } from "./generated/AuthMode.js";
+export type { ClientNotification } from "./generated/ClientNotification.js";
+export type { ClientRequest } from "./generated/ClientRequest.js";
 export type { PlanType } from "./generated/PlanType.js";
 export type { InitializeResponse } from "./generated/InitializeResponse.js";
 export type { MessagePhase } from "./generated/MessagePhase.js";

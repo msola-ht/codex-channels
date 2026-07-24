@@ -2,7 +2,12 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { z } from "zod";
 
-import type { InitializeResponse, RequestId } from "../codex-protocol/index.js";
+import type {
+  ClientNotification,
+  ClientRequest,
+  InitializeResponse,
+  RequestId,
+} from "../codex-protocol/index.js";
 import gatewayMetadata from "../version.json" with { type: "json" };
 import type { CodexTransport } from "./transport.js";
 
@@ -38,6 +43,9 @@ export interface RpcServerRequest {
 }
 
 export type ServerRequestHandler = (request: RpcServerRequest) => Promise<unknown>;
+
+type RequestWithoutId<T> = T extends ClientRequest ? Omit<T, "id"> : never;
+type RpcClientRequest = RequestWithoutId<ClientRequest>;
 
 export interface ProtocolLogger {
   warn(fields: Record<string, unknown>, message: string): void;
@@ -78,12 +86,13 @@ export class JsonRpcClient {
     }
     this.state = "connecting";
     this.connectionGeneration += 1;
+    const generation = this.connectionGeneration;
     this.installTransportHandlers();
     try {
       await this.transport.connect();
-      const response = await this.request<InitializeResponse>(
-        "initialize",
-        {
+      const response = await this.request<InitializeResponse>({
+        method: "initialize",
+        params: {
           clientInfo: {
             name: "codex_connect_gateway",
             title: "Codex Connect Gateway",
@@ -95,9 +104,11 @@ export class JsonRpcClient {
             optOutNotificationMethods: null,
           },
         },
-        { retryOverload: false },
-      );
-      await this.notify("initialized", {});
+      }, { retryOverload: false });
+      await this.notify({ method: "initialized" });
+      if (this.connectionGeneration !== generation) {
+        throw new Error("Codex App Server 连接在初始化期间已断开");
+      }
       this.state = "connected";
       return response;
     } catch (error) {
@@ -147,14 +158,13 @@ export class JsonRpcClient {
   }
 
   async request<T>(
-    method: string,
-    params: unknown,
+    request: RpcClientRequest,
     options: { retryOverload: boolean; attempts?: number } = { retryOverload: false },
   ): Promise<T> {
     const attempts = options.retryOverload ? (options.attempts ?? 4) : 1;
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       try {
-        return await this.requestOnce<T>(method, params);
+        return await this.requestOnce<T>(request);
       } catch (error) {
         if (!(error instanceof JsonRpcError) || error.code !== -32001 || attempt === attempts) {
           throw error;
@@ -166,11 +176,12 @@ export class JsonRpcClient {
     throw new Error("无法完成 JSON-RPC 请求");
   }
 
-  async notify(method: string, params: unknown): Promise<void> {
-    await this.transport.send(JSON.stringify({ method, params }));
+  async notify(notification: ClientNotification): Promise<void> {
+    await this.transport.send(JSON.stringify(notification));
   }
 
-  private async requestOnce<T>(method: string, params: unknown): Promise<T> {
+  private async requestOnce<T>(request: RpcClientRequest): Promise<T> {
+    const { method } = request;
     const id = this.nextId++;
     const response = new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -182,7 +193,7 @@ export class JsonRpcClient {
     });
 
     try {
-      await this.transport.send(JSON.stringify({ method, id, params }));
+      await this.transport.send(JSON.stringify({ ...request, id }));
     } catch (error) {
       const pending = this.pending.get(id);
       if (pending) {

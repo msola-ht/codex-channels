@@ -4,7 +4,8 @@
 
 ## 文件与目录
 
-- `index.ts`：向业务代码暴露经过审查的最小协议类型集合。
+- `index.ts`：向业务代码暴露经过审查的最小协议类型集合，包括供 `codex-client` 约束出站消息
+  的 `ClientRequest` 与 `ClientNotification`。
 - `version.json`：记录生成类型对应的 `codex-cli` 版本。
 - `generated/`：由 `codex app-server generate-ts` 生成的类型，禁止手工修改，也不在其内部维护手写索引文档。
 
