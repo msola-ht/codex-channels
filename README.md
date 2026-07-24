@@ -268,6 +268,7 @@ RUN_CODEX_INTEGRATION=1 npm test -- --run tests/real-app-server.test.ts
 
 - [`docs/index.md`](docs/index.md)：Codex 官方文档、固定版本源码、协议数量与本项目实现映射。
 - [`docs/codex-cli-upgrade.md`](docs/codex-cli-upgrade.md)：CLI 协议生成、Codex 审查和验证流程。
+- [`docs/architecture-convergence-plan.md`](docs/architecture-convergence-plan.md)：协议边界收敛、模块复核与分阶段实施计划。
 - [`config.example.toml`](config.example.toml)：统一 Gateway 配置示例。
 - [`src/`](src/README.md)：源码模块与边界。
 - [`bin/`](bin/README.md)：npm CLI 入口。

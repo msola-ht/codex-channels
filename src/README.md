@@ -18,4 +18,5 @@
 - [`storage/`](storage/README.md)：最小绑定状态的可替换存储。
 - [`surfaces/`](surfaces/README.md)：外部平台适配器。
 
-依赖方向保持为 `Surface -> Application/Core <- Codex Client`，由 `bootstrap` 负责组合具体实现。每个一级模块通过自己的 `index.ts` 暴露公开能力，跨模块不得导入内部实现文件。核心模块不得依赖 Telegram、SQLite 或 launchd。
+依赖方向保持为 `Surface -> Application/Core <- Codex Client`，由 `bootstrap` 负责组合具体实现。每个一级模块通过自己的 `index.ts` 暴露公开能力，跨模块不得导入内部实现文件。核心模块不得依赖 Telegram、SQLite 或 launchd。当前协议类型隔离和剩余模块复核按
+[`Codex CLI 协议边界收敛计划`](../docs/architecture-convergence-plan.md) 分阶段推进。

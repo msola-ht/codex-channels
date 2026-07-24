@@ -98,29 +98,22 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 | Telegram 如何适配核心事件 | [`surfaces/telegram/`](../src/surfaces/telegram/README.md) | [`tests/README.md`](../tests/README.md) |
 | 与真实 App Server 的合同是否一致 | [`real-app-server.test.ts`](../tests/real-app-server.test.ts) | `RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts` |
 
-## 模块复核进度
+## 架构收敛与模块复核进度
 
-本清单记录逐模块对照当前规则、生成协议和 `rust-v0.145.0` 官方实现的专项复核进度，不代表未列为
-完成的模块缺少常规测试。
+完整目标、现状证据、类型归属、阶段范围、验证方式和完成判定见
+[`Codex CLI 协议边界收敛计划`](architecture-convergence-plan.md)。计划把已经完成的语义复核与
+尚未完成的模块复核合并到纵向能力迁移中，避免按目录重写或同时保留两套接口。
 
-已完成：
+当前行为基线已经完成：
 
 - `codex-protocol`：协议生成、版本基线与受控导出，提交 `7be8e48`。
 - `codex-client`：Transport、JSON-RPC 与类型化 App Server API，提交 `27cd545`。
 - `conversation-core`：Turn、Item、错误与警告通知归约，提交 `994a3c7`。
 - `session-routing`：Thread 绑定、恢复、订阅和关闭语义，提交 `5410f40`。
 
-后续按以下顺序继续，每个模块单独审查、修改、验证和提交：
-
-1. `application`：先处理 `conversation-service.ts` 的 Turn、队列与 Thread 切换，再检查命令服务。
-2. `approval`：Server Request 归属、一次/会话批准、持久规则与失效处理。
-3. `storage`：最小绑定 Schema、内存/SQLite 一致性和失败回滚。
-4. `policy`：Surface Actor、账号与 Workspace 授权边界。
-5. `event-bus`：有界队列、关键事件保护和消费者隔离。
-6. `observability`：结构化日志、错误上下文与敏感字段脱敏。
-7. `config`：TOML 边界验证、热加载分类和代理优先级。
-8. `surfaces`：通用 Surface 接口及 Telegram 输入、输出和交互适配。
-9. `bootstrap`：最后复核组合根、连接恢复、后台任务和关闭顺序。
+后续不把上述模块推倒重做，而是依次完成 Thread、Turn、模型与查询、Notification、审批、边界
+收紧、项目内部模块和 Bootstrap 收尾。每个阶段只定向复核实际触及的已完成模块，并保持独立修改、
+验证、审查和提交。
 
 ## 查询顺序
 
