@@ -251,6 +251,7 @@ RUN_CODEX_INTEGRATION=1 npm test -- --run tests/real-app-server.test.ts
 
 ## 文档索引
 
+- [`docs/index.md`](docs/index.md)：Codex 官方文档、固定版本源码、协议数量与本项目实现映射。
 - [`config.example.toml`](config.example.toml)：统一 Gateway 配置示例。
 - [`src/`](src/README.md)：源码模块与边界。
 - [`bin/`](bin/README.md)：npm CLI 入口。

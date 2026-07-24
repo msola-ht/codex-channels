@@ -28,7 +28,10 @@ import {
 } from "../conversation-core/index.js";
 import { EventBus } from "../event-bus/index.js";
 import { WorkspaceRegistry } from "../policy/index.js";
-import { SessionRouter } from "../session-routing/index.js";
+import {
+  SessionRouter,
+  ThreadStateSynchronizer,
+} from "../session-routing/index.js";
 import { SqliteBindingStore } from "../storage/index.js";
 import type { SurfaceAdapter } from "../surfaces/index.js";
 import {
@@ -49,6 +52,7 @@ export class GatewayApplication {
   private readonly interactions: InteractionRouter;
   private readonly approval: ApprovalCoordinator;
   private readonly router: SessionRouter;
+  private readonly threadState: ThreadStateSynchronizer;
   private readonly core: ConversationCore;
   private readonly bindings: SqliteBindingStore;
   private readonly workspaces: WorkspaceRegistry;
@@ -82,6 +86,7 @@ export class GatewayApplication {
       this.bindings,
       this.workspaces,
     );
+    this.threadState = new ThreadStateSynchronizer(this.router);
     this.core = new ConversationCore(this.router, this.output);
     const models = new ModelSelectionService(this.codex, this.router, config.codexModel);
     const service = new ConversationService(
@@ -146,28 +151,7 @@ export class GatewayApplication {
     this.approval = new ApprovalCoordinator(this.router, this.interactions, config.approvalTimeoutMs);
     this.inbound.subscribe("conversation-core", (notification) => {
       this.core.handle(notification);
-      if (notification.method === "thread/settings/updated") {
-        const params = asRecord(notification.params);
-        const settings = asRecord(params?.threadSettings);
-        const threadId = typeof params?.threadId === "string" ? params.threadId : undefined;
-        const model = typeof settings?.model === "string" ? settings.model : undefined;
-        const effort = typeof settings?.effort === "string" || settings?.effort === null
-          ? settings.effort
-          : undefined;
-        const serviceTier = typeof settings?.serviceTier === "string" || settings?.serviceTier === null
-          ? settings.serviceTier
-          : undefined;
-        if (threadId && model && effort !== undefined && serviceTier !== undefined) {
-          this.router.updateModelSettings(threadId, { model, effort, serviceTier });
-        }
-      }
-      if (isThreadUnavailable(notification.method)) {
-        const params = asRecord(notification.params);
-        const threadId = typeof params?.threadId === "string" ? params.threadId : undefined;
-        if (threadId) {
-          this.router.forgetThread(threadId);
-        }
-      }
+      this.threadState.handle(notification);
     });
     this.inbound.subscribe("approval-resolution", (notification) => {
       if (notification.method === "serverRequest/resolved") {
@@ -743,14 +727,4 @@ export function effectiveCodexBinary(
 
 function isCriticalNotification(method: string): boolean {
   return !method.endsWith("/delta") && !method.endsWith("/outputDelta");
-}
-
-function isThreadUnavailable(method: string): boolean {
-  return method === "thread/closed" || method === "thread/archived" || method === "thread/deleted";
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null
-    ? value as Record<string, unknown>
-    : undefined;
 }

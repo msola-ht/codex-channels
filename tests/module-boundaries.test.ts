@@ -5,37 +5,63 @@ import { describe, expect, it } from "vitest";
 
 const sourceRoot = resolve("src");
 
+const allowedModuleDependencies: Record<string, readonly string[]> = {
+  application: [
+    "codex-client",
+    "codex-protocol",
+    "conversation-core",
+    "policy",
+    "session-routing",
+  ],
+  approval: [
+    "codex-client",
+    "codex-protocol",
+    "conversation-core",
+    "session-routing",
+  ],
+  bootstrap: [
+    "application",
+    "approval",
+    "codex-client",
+    "codex-protocol",
+    "config",
+    "conversation-core",
+    "event-bus",
+    "observability",
+    "policy",
+    "session-routing",
+    "storage",
+    "surfaces",
+  ],
+  "codex-client": ["codex-protocol"],
+  "codex-protocol": [],
+  config: [],
+  "conversation-core": ["codex-protocol", "event-bus"],
+  "event-bus": [],
+  observability: ["config"],
+  policy: ["conversation-core"],
+  "session-routing": [
+    "codex-client",
+    "codex-protocol",
+    "conversation-core",
+    "policy",
+    "storage",
+  ],
+  storage: ["conversation-core"],
+  surfaces: [
+    "application",
+    "approval",
+    "codex-protocol",
+    "config",
+    "conversation-core",
+    "event-bus",
+    "policy",
+  ],
+};
+
 describe("module boundaries", () => {
-  it("keeps core independent from routing and infrastructure implementations", () => {
-    expect(violations("conversation-core", [
-      "application",
-      "bootstrap",
-      "codex-client",
-      "session-routing",
-      "storage",
-      "surfaces",
-    ])).toEqual([]);
-  });
-
-  it("keeps the Codex client independent from application and surfaces", () => {
-    expect(violations("codex-client", [
-      "application",
-      "approval",
-      "bootstrap",
-      "conversation-core",
-      "policy",
-      "session-routing",
-      "storage",
-      "surfaces",
-    ])).toEqual([]);
-  });
-
-  it("prevents surfaces from bypassing the application boundary into the Codex client", () => {
-    expect(violations("surfaces", ["codex-client", "storage", "bootstrap"])).toEqual([]);
-  });
-
-  it("keeps application use cases independent from surfaces and bootstrap", () => {
-    expect(violations("application", ["surfaces", "bootstrap"])).toEqual([]);
+  it("enforces the complete top-level module dependency allowlist", () => {
+    expect(moduleDependencyViolations()).toEqual([]);
   });
 
   it("prevents production source from depending on CLI and project scripts", () => {
@@ -99,26 +125,53 @@ function topLevelModule(path: string, moduleNames: Set<string>): string | undefi
   return name && moduleNames.has(name) ? name : undefined;
 }
 
-function violations(moduleName: string, forbiddenModules: string[]): string[] {
-  const moduleRoot = resolve(sourceRoot, moduleName);
-  const forbiddenRoots = forbiddenModules.map((name) => resolve(sourceRoot, name));
-  const found: string[] = [];
-  for (const file of typescriptFiles(moduleRoot)) {
+function moduleDependencyViolations(): string[] {
+  const actualModules = readdirSync(sourceRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  const declaredModules = Object.keys(allowedModuleDependencies).sort();
+  const found = actualModules.flatMap((moduleName) =>
+    Object.hasOwn(allowedModuleDependencies, moduleName)
+      ? []
+      : [`${moduleName} -> 未声明模块`]);
+  for (const moduleName of declaredModules) {
+    if (!actualModules.includes(moduleName)) {
+      found.push(`${moduleName} -> 模块不存在`);
+    }
+    for (const dependency of allowedModuleDependencies[moduleName] ?? []) {
+      if (!actualModules.includes(dependency)) {
+        found.push(`${moduleName} -> 未知依赖 ${dependency}`);
+      }
+    }
+  }
+  const moduleNames = new Set(actualModules);
+  const allowedByModule = new Map(
+    Object.entries(allowedModuleDependencies)
+      .map(([moduleName, dependencies]) => [moduleName, new Set(dependencies)]),
+  );
+  for (const file of typescriptFiles(sourceRoot)) {
+    const sourceModule = topLevelModule(file, moduleNames);
+    if (!sourceModule) {
+      continue;
+    }
+    const allowed = allowedByModule.get(sourceModule);
+    if (!allowed) {
+      continue;
+    }
     const source = readFileSync(file, "utf8");
     for (const specifier of importSpecifiers(source)) {
       if (!specifier.startsWith(".")) {
         continue;
       }
       const target = resolve(dirname(file), specifier);
-      const forbidden = forbiddenRoots.find(
-        (root) => isInside(root, target),
-      );
-      if (forbidden) {
-        found.push(`${relative(sourceRoot, file)} -> ${relative(sourceRoot, target)}`);
+      const targetModule = topLevelModule(target, moduleNames);
+      if (targetModule && targetModule !== sourceModule && !allowed.has(targetModule)) {
+        found.push(`${relative(sourceRoot, file)} -> ${targetModule}`);
       }
     }
   }
-  return found;
+  return found.sort();
 }
 
 function isInside(root: string, target: string): boolean {
@@ -137,7 +190,11 @@ function typescriptFiles(directory: string): string[] {
 }
 
 function importSpecifiers(source: string): string[] {
-  return [...source.matchAll(/\bfrom\s+["']([^"']+)["']/g)]
+  return [
+    ...source.matchAll(/\bfrom\s+["']([^"']+)["']/g),
+    ...source.matchAll(/\bimport\s+["']([^"']+)["']/g),
+    ...source.matchAll(/\bimport\s*\(\s*["']([^"']+)["']/g),
+  ]
     .map((match) => match[1])
     .filter((specifier): specifier is string => specifier !== undefined);
 }

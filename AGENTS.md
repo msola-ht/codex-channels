@@ -7,6 +7,20 @@
 - 本文件定义稳定的开发边界；当前功能、命令和部署方式以根目录 `README.md` 为准，模块职责以 `src/README.md` 和各模块 README 为准。
 - 只支持当前文档、配置示例、协议基线和存储 Schema 明确定义的接口。不支持的输入必须明确报错，不增加隐式别名、迁移或回退。
 
+## 官方资料查阅
+
+- 新增、修改或删除任何 Codex App Server RPC 方法、`codex-protocol` 业务类型依赖，以及
+  Transport、初始化、Thread、Turn、Item、Notification、Server Request、审批、模型设置、
+  Fast、Goal、Review、账户用量、Skill、MCP、Plugin 或 Codex CLI 版本相关行为前，必须先查阅
+  `docs/index.md`，再读取与任务直接相关的官方文档、当前锁定版本官方源码与测试、本地生成类型、
+  模块公开接口和项目测试；不得凭记忆实现协议字段或行为。
+- 官方资料、当前锁定版本源码和本地实现含义不清或看似冲突时，先完成针对性查询并明确版本差异，
+  不以官方 `main` 分支替代项目锁定版本，不通过反复试改推断协议。
+- 协议升级或上述行为、官方源码定位、本项目实现入口发生变化时，必须同步更新
+  `docs/index.md` 中的版本、数量、固定版本链接、当前支持矩阵、实现映射和复核命令。新增协议
+  能力必须先在矩阵中标明官方方法、本地入口和验证方式；生成类型存在不代表项目已经支持，
+  生成类型仍是当前锁定 CLI 协议字段的最终事实来源。
+
 ## 当前实现
 
 - 仓库只包含一个 TypeScript 模块化 Gateway；正式本机入口是 npm CLI `codexc`。
@@ -45,6 +59,8 @@ Surface -> Application/Core <- Codex Client
 
 - `bootstrap` 是组合根，具体实现选择和生命周期协调集中在这里。
 - 每个一级模块通过自己的 `index.ts` 暴露公开能力；跨模块不得导入其他模块的内部实现文件。
+- 一级模块之间只允许 `tests/module-boundaries.test.ts` 明确列出的依赖方向；新增依赖必须先确认
+  职责归属并同步允许列表，不能只为通过测试扩大白名单。
 - Conversation Core 不得依赖平台 SDK、具体数据库、服务管理器或底层 JSON-RPC Transport。
 - Surface 不得直接操作底层 Transport，也不得把平台 SDK 类型带入核心模块。
 - Codex Client 不得调用平台 API、生成平台文案或保存业务绑定。

@@ -146,6 +146,8 @@ describe("launchd installer", () => {
     const environment = {
       ...process.env,
       HOME: root,
+      CODEX_CONNECT_HOME: join(root, ".codex-connect"),
+      CODEX_SOCKET_PATH: join(root, ".codex-connect/runtime/codex-app-server.sock"),
       PATH: `${binDir}:/usr/bin:/bin`,
       LAUNCHCTL_LOG: launchctlLog,
       LAUNCHCTL_STATE: launchctlState,

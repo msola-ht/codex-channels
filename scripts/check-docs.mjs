@@ -97,6 +97,7 @@ function localLinkTarget(raw) {
 function checkRootIndex() {
   const readme = readFileSync(join(root, "README.md"), "utf8");
   for (const target of [
+    "docs/index.md",
     "config.example.toml",
     "src/README.md",
     "bin/README.md",
