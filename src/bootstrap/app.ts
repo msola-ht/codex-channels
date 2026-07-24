@@ -2,6 +2,10 @@ import { execFileSync } from "node:child_process";
 
 import type { Logger } from "pino";
 
+import {
+  checkProjectRulesAtRoot,
+  initializeProjectRulesAtRoot,
+} from "../../runtime/project-rules.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
 import {
   CodexAppServerClient,
@@ -80,7 +84,19 @@ export class GatewayApplication {
     );
     this.core = new ConversationCore(this.router, this.output);
     const models = new ModelSelectionService(this.codex, this.router, config.codexModel);
-    const service = new ConversationService(this.codex, this.router, this.core, models);
+    const service = new ConversationService(
+      this.codex,
+      this.router,
+      this.core,
+      models,
+      {
+        initialize: (projectRoot) => initializeProjectRulesAtRoot({ projectRoot }),
+        check: (projectRoot) => checkProjectRulesAtRoot({
+          projectRoot,
+          codexBinary: effectiveCodexBinary(config.codexBinary),
+        }),
+      },
+    );
     this.output.subscribe("conversation-follow-up", async (event) => {
       if (event.type !== "turn.completed") {
         return;

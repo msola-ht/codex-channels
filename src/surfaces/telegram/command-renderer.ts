@@ -82,6 +82,21 @@ export async function renderTelegramCommandResult(
     case "permissions":
       await replyTelegramPanel(context, formatPermissions(result.profiles));
       return;
+    case "project-rules":
+      await replyTelegramPanel(
+        context,
+        [
+          result.action === "initialized"
+            ? "项目规则已生成并检查通过"
+            : "项目规则检查通过",
+          `Workspace：${result.projectRoot}`,
+          `规则文件：${result.rulesPath}`,
+          ...(result.action === "initialized"
+            ? ["重启 Codex/App Server 后生效；Gateway 无需重启。"]
+            : []),
+        ].join("\n"),
+      );
+      return;
     case "artifacts":
       if (result.view === "plan") {
         await replyTelegramPanel(context, formatPlan(result.artifacts));

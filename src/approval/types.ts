@@ -10,6 +10,7 @@ export type InteractionRequest =
       itemId: string;
       title: string;
       detail: string;
+      allowSession: boolean;
       expiresInMs: number;
     }
   | {
@@ -42,7 +43,8 @@ export type InteractionRequest =
     };
 
 export type InteractionDecision =
-  | { type: "approval"; approved: boolean }
+  | { type: "approval"; approved: true; scope: "once" | "session" }
+  | { type: "approval"; approved: false }
   | { type: "user-input"; answers: Record<string, string[]> }
   | { type: "elicitation"; action: "accept" | "decline" | "cancel"; content: unknown };
 

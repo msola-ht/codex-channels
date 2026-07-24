@@ -11,6 +11,96 @@ import {
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
 
 describe("TelegramInteractionPort", () => {
+  it("offers and resolves an explicit session approval", async () => {
+    const sendMessage = vi.fn(async (
+      _chatId: string,
+      _text: string,
+      _options?: unknown,
+    ) => {
+      void _chatId;
+      void _text;
+      void _options;
+      return { message_id: 6 };
+    });
+    const editMessageText = vi.fn(async () => true as const);
+    const callbackQuery = vi.fn();
+    const bot = {
+      callbackQuery,
+      api: { sendMessage, editMessageText },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+
+    const decision = interactions.request(target, approvalRequest());
+    await settle();
+
+    const options = sendMessage.mock.calls[0]?.[2] as {
+      reply_markup: { inline_keyboard: Array<Array<{ text: string; callback_data?: string }>> };
+    };
+    const sessionButton = options.reply_markup.inline_keyboard
+      .flat()
+      .find((button) => button.text === "本次会话始终同意");
+    expect(sessionButton?.callback_data).toMatch(/^ix:s:/);
+
+    const callback = callbackQuery.mock.calls[0]?.[1] as (context: Context) => Promise<void>;
+    const answerCallbackQuery = vi.fn(async () => true as const);
+    await callback({
+      callbackQuery: { data: sessionButton!.callback_data! },
+      chat: { id: 100 },
+      answerCallbackQuery,
+    } as unknown as Context);
+
+    await expect(decision).resolves.toEqual({
+      type: "approval",
+      approved: true,
+      scope: "session",
+    });
+    await settle();
+    expect(editMessageText).toHaveBeenCalledWith(
+      "100",
+      6,
+      expect.stringContaining("处理结果：已在本次会话中始终同意"),
+      expect.objectContaining({ reply_markup: { inline_keyboard: [] } }),
+    );
+  });
+
+  it("does not offer session approval when the protocol disallows it", async () => {
+    const sendMessage = vi.fn(async (
+      _chatId: string,
+      _text: string,
+      _options?: unknown,
+    ) => {
+      void _chatId;
+      void _text;
+      void _options;
+      return { message_id: 7 };
+    });
+    const bot = {
+      callbackQuery: vi.fn(),
+      api: {
+        sendMessage,
+        editMessageText: vi.fn(async () => true as const),
+      },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+
+    const decision = interactions.request(target, {
+      ...approvalRequest(),
+      allowSession: false,
+    });
+    await settle();
+
+    const options = sendMessage.mock.calls[0]?.[2] as {
+      reply_markup: { inline_keyboard: Array<Array<{ text: string }>> };
+    };
+    expect(options.reply_markup.inline_keyboard.flat().map((button) => button.text)).toEqual([
+      "批准一次",
+      "拒绝",
+    ]);
+
+    await interactions.close();
+    await expect(decision).resolves.toEqual({ type: "approval", approved: false });
+  });
+
   it("removes approval buttons when another client resolves the request", async () => {
     let completeSend: ((message: { message_id: number }) => void) | undefined;
     const sendMessage = vi.fn(() => new Promise<{ message_id: number }>((resolve) => {
@@ -230,6 +320,7 @@ function approvalRequest(): Extract<InteractionRequest, { type: "approval" }> {
     itemId: "command-1",
     title: "Codex 请求执行命令",
     detail: "npm test",
+    allowSession: true,
     expiresInMs: 30_000,
   };
 }

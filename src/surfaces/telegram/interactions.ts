@@ -193,9 +193,11 @@ export class TelegramInteractionPort implements InteractionPort {
 
   private keyboard(request: InteractionRequest, token: string): InlineKeyboard | undefined {
     if (request.type === "approval") {
-      return new InlineKeyboard()
-        .text("批准一次", `ix:a:${token}`)
-        .text("拒绝", `ix:d:${token}`);
+      const keyboard = new InlineKeyboard().text("批准一次", `ix:a:${token}`);
+      if (request.allowSession) {
+        keyboard.text("本次会话始终同意", `ix:s:${token}`).row();
+      }
+      return keyboard.text("拒绝", `ix:d:${token}`);
     }
     if (request.type === "elicitation" && request.mode === "url") {
       const keyboard = new InlineKeyboard();
@@ -219,7 +221,21 @@ export class TelegramInteractionPort implements InteractionPort {
       return;
     }
     if (pending.request.type === "approval") {
-      this.finish(token!, { type: "approval", approved: action === "a" }, action === "a" ? "已批准一次" : "已拒绝");
+      if (action === "s" && !pending.request.allowSession) {
+        await context.answerCallbackQuery({ text: "该请求不支持会话授权" });
+        return;
+      }
+      if (action === "a") {
+        this.finish(token!, { type: "approval", approved: true, scope: "once" }, "已批准一次");
+      } else if (action === "s") {
+        this.finish(
+          token!,
+          { type: "approval", approved: true, scope: "session" },
+          "已在本次会话中始终同意",
+        );
+      } else {
+        this.finish(token!, { type: "approval", approved: false }, "已拒绝");
+      }
     } else if (pending.request.type === "elicitation") {
       this.finish(
         token!,

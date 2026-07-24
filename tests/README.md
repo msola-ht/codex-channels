@@ -8,17 +8,18 @@
 - Thread 新建、列表、恢复、切换、删除、订阅、活动 Turn 重启恢复和 Workspace 路由。
 - 活动 Turn 的即时 steer 与下一 Turn 有界内存队列、顺序启动、Thread 隔离和失败清理。
 - Conversation Core 状态归约、操作过程与敏感文本清洗。
-- 命令、文件修改、临时权限、用户输入和 MCP 审批的归属信息、批准、拒绝、无法路由、
-  一次性回调、超时和跨客户端解决。
+- 命令、文件修改、临时权限、用户输入和 MCP 审批的归属信息、一次/会话批准、拒绝、无法路由、
+  协议能力约束、一次性回调、超时和跨客户端解决。
 - 通用 Surface 启停、按账号输出路由与失败隔离；Telegram 格式、通知降噪、长回复折叠与文件回退、
   输出队列、生命周期、API 重试及图片输入。
 - Skill 用户与 Workspace 安装过滤、已安装 Plugin 查询及远端市场隔离。
 - 模型、思考强度和 Fast 的 Thread 覆盖、Codex 用户级 Fast 默认值持久化、共享客户端设置通知
   及 Gateway/CLI 连接恢复。
-- SQLite 最小绑定恢复、配置热加载与自动重启分类、Setup 类别与通讯渠道菜单、Telegram Setup、CLI、
-  launchd、systemd、Unix WebSocket 请求头、模块依赖方向和公开入口边界。
+- SQLite 最小绑定恢复、配置热加载与自动重启分类、Setup 类别与通讯渠道菜单、Telegram Setup、
+  CLI 项目规则生成/检查、launchd、systemd、Unix WebSocket 请求头、模块依赖方向和公开入口边界。
 - TOML、标准环境变量、macOS 系统代理和 Linux GNOME 代理的优先级及服务启动时解析。
-- CLI Doctor 的严格 TOML Schema 校验、敏感错误清洗和只读诊断。
+- CLI Doctor 的严格 TOML Schema 校验、敏感错误清洗和只读诊断；项目规则限定当前 Workspace、
+  拒绝远程覆盖和符号链接路径逃逸。
 - 仓库 Git hooks 自动安装与重复执行安全性，以及无本地依赖时的源码安装准备。
 
 常规验证：

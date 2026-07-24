@@ -28,7 +28,13 @@ export type UserFacingErrorCode =
   | "fast.usage"
   | "fast.unsupported"
   | "command.unsupported"
-  | "review.usage";
+  | "review.usage"
+  | "rules.usage"
+  | "rules.exists"
+  | "rules.missing"
+  | "rules.unsafe-path"
+  | "rules.check-failed"
+  | "rules.unavailable";
 
 export type UserFacingErrorDetails = Readonly<
   Record<string, string | readonly string[]>

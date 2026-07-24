@@ -11,6 +11,8 @@ export {
   resolveThread,
   type ConversationInput,
   type ConversationStatus,
+  type ProjectRulesPort,
+  type ProjectRulesResult,
   type Submission,
 } from "./conversation-service.js";
 export {

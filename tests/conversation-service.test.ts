@@ -11,6 +11,49 @@ const main = { id: "main", name: "Main", cwd: "/workspace/main" };
 const other = { id: "other", name: "Other", cwd: "/workspace/other" };
 
 describe("ConversationService model selection", () => {
+  it("applies project rules only to the selected authorized Workspace", async () => {
+    const result = {
+      projectRoot: main.cwd,
+      rulesPath: `${main.cwd}/.codex/rules/default.rules`,
+    };
+    const initialize = vi.fn(async () => result);
+    const check = vi.fn(async () => result);
+    const service = new ConversationService(
+      {} as CodexAppServerClient,
+      { workspace: () => main } as unknown as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      { initialize, check },
+    );
+
+    await expect(service.initializeProjectRules(target)).resolves.toEqual(result);
+    await expect(service.checkProjectRules(target)).resolves.toEqual(result);
+    expect(initialize).toHaveBeenCalledWith(main.cwd);
+    expect(check).toHaveBeenCalledWith(main.cwd);
+  });
+
+  it("maps project rule runtime failures to stable user-facing errors", async () => {
+    const service = new ConversationService(
+      {} as CodexAppServerClient,
+      { workspace: () => main } as unknown as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      {
+        initialize: () => {
+          throw Object.assign(new Error("internal path"), { code: "exists" });
+        },
+        check: () => {
+          throw Object.assign(new Error("internal command"), { code: "check-failed" });
+        },
+      },
+    );
+
+    await expect(service.initializeProjectRules(target))
+      .rejects.toMatchObject({ code: "rules.exists" });
+    await expect(service.checkProjectRules(target))
+      .rejects.toMatchObject({ code: "rules.check-failed" });
+  });
+
   it("queues a follow-up for the active Turn without steering it immediately", async () => {
     const steerTurn = vi.fn();
     const service = new ConversationService(

@@ -60,9 +60,10 @@ export class ApprovalCoordinator {
           itemId,
           title: "Codex 请求执行命令",
           detail: [reason, command, additionalPermissions.detail].filter(Boolean).join("\n\n"),
+          allowSession: offersSessionCommandApproval(params.availableDecisions),
           expiresInMs: this.timeoutMs,
         });
-        return { decision: isApproved(decision) ? "accept" : "decline" };
+        return { decision: approvalProtocolDecision(decision) };
       }
       case "item/fileChange/requestApproval": {
         if (!turnId || !itemId) {
@@ -78,9 +79,10 @@ export class ApprovalCoordinator {
           itemId,
           title: "Codex 请求修改文件",
           detail,
+          allowSession: true,
           expiresInMs: this.timeoutMs,
         });
-        return { decision: isApproved(decision) ? "accept" : "decline" };
+        return { decision: approvalProtocolDecision(decision) };
       }
       case "item/permissions/requestApproval": {
         if (!turnId || !itemId) {
@@ -96,6 +98,7 @@ export class ApprovalCoordinator {
           itemId,
           title: "Codex 请求临时权限",
           detail: stringValue(params.reason) ?? JSON.stringify(requested, null, 2),
+          allowSession: false,
           expiresInMs: this.timeoutMs,
         });
         return {
@@ -191,6 +194,15 @@ function isApproved(decision: InteractionDecision): boolean {
   return decision.type === "approval" && decision.approved;
 }
 
+function approvalProtocolDecision(
+  decision: InteractionDecision,
+): "accept" | "acceptForSession" | "decline" {
+  if (decision.type !== "approval" || !decision.approved) {
+    return "decline";
+  }
+  return decision.scope === "session" ? "acceptForSession" : "accept";
+}
+
 function mapAnswers(answers: Record<string, string[]>): Record<string, { answers: string[] }> {
   return Object.fromEntries(
     Object.entries(answers).map(([questionId, values]) => [questionId, { answers: values }]),
@@ -276,6 +288,12 @@ function offersOneTimeCommandApproval(value: unknown): boolean {
   return value === undefined
     || value === null
     || (Array.isArray(value) && value.includes("accept"));
+}
+
+function offersSessionCommandApproval(value: unknown): boolean {
+  return value === undefined
+    || value === null
+    || (Array.isArray(value) && value.includes("acceptForSession"));
 }
 
 function permissionPaths(value: unknown): string[] | null {

@@ -601,6 +601,7 @@ describe("TelegramOutbox", () => {
     outbox.finishInteraction(target.conversationId, request, {
       type: "approval",
       approved: true,
+      scope: "once",
     });
     await settle();
 
@@ -634,6 +635,7 @@ describe("TelegramOutbox", () => {
     outbox.finishInteraction(target.conversationId, request, {
       type: "approval",
       approved: true,
+      scope: "once",
     });
     await settle();
     expect(api.sent.at(-1)).toContain("运行命令");
@@ -676,6 +678,7 @@ describe("TelegramOutbox", () => {
     outbox.finishInteraction(target.conversationId, request, {
       type: "approval",
       approved: true,
+      scope: "once",
     });
     await settle();
     expect(api.sent[0]).toContain("运行命令");
@@ -974,6 +977,7 @@ function commandApprovalInteraction() {
     itemId: "command-1",
     title: "Codex 请求执行命令",
     detail: "npm install -g .",
+    allowSession: true,
     expiresInMs: 30_000,
   };
 }

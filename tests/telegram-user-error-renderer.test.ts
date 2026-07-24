@@ -36,4 +36,15 @@ describe("Telegram user error renderer", () => {
       new UserFacingError(code, "opaque-internal-fallback"),
     )).toBe(expected);
   });
+
+  it.each([
+    ["rules.usage", "用法：/rules <init|check>"],
+    ["rules.exists", "当前 Workspace 已有项目规则；Telegram 不提供强制覆盖，请在终端中处理"],
+    ["rules.missing", "当前 Workspace 尚未生成项目规则，请先使用 /rules init"],
+    ["rules.unsafe-path", "项目规则路径包含符号链接，已拒绝写入"],
+  ] as const)("renders %s project rule errors", (code, expected) => {
+    expect(formatTelegramUserFacingError(
+      new UserFacingError(code, "opaque-internal-fallback"),
+    )).toBe(expected);
+  });
 });

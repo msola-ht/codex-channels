@@ -32,6 +32,7 @@ const commandDescriptions = {
   usage: "查看账号用量",
   limits: "查看套餐与额度",
   permissions: "查看权限配置",
+  rules: "生成或检查项目规则",
   diff: "查看当前 Turn Diff",
   plan: "查看当前 Turn 计划",
   goal: "查看或管理 Goal",

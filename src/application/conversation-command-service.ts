@@ -29,6 +29,7 @@ export const conversationCommandNames = [
   "usage",
   "limits",
   "permissions",
+  "rules",
   "diff",
   "plan",
   "goal",
@@ -69,6 +70,12 @@ export type ConversationCommandResult =
   | {
       kind: "permissions";
       profiles: Awaited<ReturnType<ConversationService["listPermissionProfiles"]>>;
+    }
+  | {
+      kind: "project-rules";
+      action: "initialized" | "checked";
+      projectRoot: string;
+      rulesPath: string;
     }
   | {
       kind: "artifacts";
@@ -284,6 +291,17 @@ export class ConversationCommandService {
           kind: "permissions",
           profiles: await this.conversations.listPermissionProfiles(target),
         };
+      case "rules": {
+        if (argumentsText === "init") {
+          const result = await this.conversations.initializeProjectRules(target);
+          return { kind: "project-rules", action: "initialized", ...result };
+        }
+        if (argumentsText === "check") {
+          const result = await this.conversations.checkProjectRules(target);
+          return { kind: "project-rules", action: "checked", ...result };
+        }
+        throw new UserFacingError("rules.usage", "Rules 参数无效");
+      }
       case "diff":
       case "plan":
         return {

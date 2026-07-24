@@ -23,10 +23,12 @@ data/
 *.pid
 *.log
 
-# Local Codex state (repository rules live in AGENTS.md)
+# Local Codex state; keep reviewed project skills and command rules
 .codex/*
 !.codex/skills/
 !.codex/skills/**
+!.codex/rules/
+!.codex/rules/**
 
 # Editors and operating systems
 .idea/

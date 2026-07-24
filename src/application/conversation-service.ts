@@ -39,6 +39,16 @@ export interface ConversationInput {
   localImages?: ReadonlyArray<{ path: string }>;
 }
 
+export interface ProjectRulesResult {
+  projectRoot: string;
+  rulesPath: string;
+}
+
+export interface ProjectRulesPort {
+  initialize(projectRoot: string): Promise<ProjectRulesResult> | ProjectRulesResult;
+  check(projectRoot: string): Promise<ProjectRulesResult> | ProjectRulesResult;
+}
+
 interface QueuedFollowUp {
   threadId: string;
   input: UserInput[];
@@ -71,6 +81,7 @@ export class ConversationService {
     private readonly router: SessionRouter,
     private readonly core: ConversationCore,
     private readonly models: ModelSelectionService,
+    private readonly projectRules?: ProjectRulesPort,
   ) {}
 
   submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission> {
@@ -376,6 +387,28 @@ export class ConversationService {
     return this.codex.listPermissionProfiles(this.router.workspace(target).cwd);
   }
 
+  async initializeProjectRules(target: ConversationTarget): Promise<ProjectRulesResult> {
+    if (!this.projectRules) {
+      throw new UserFacingError("rules.unavailable", "项目规则服务不可用");
+    }
+    try {
+      return await this.projectRules.initialize(this.router.workspace(target).cwd);
+    } catch (error) {
+      throw projectRulesUserError(error, "init");
+    }
+  }
+
+  async checkProjectRules(target: ConversationTarget): Promise<ProjectRulesResult> {
+    if (!this.projectRules) {
+      throw new UserFacingError("rules.unavailable", "项目规则服务不可用");
+    }
+    try {
+      return await this.projectRules.check(this.router.workspace(target).cwd);
+    } catch (error) {
+      throw projectRulesUserError(error, "check");
+    }
+  }
+
   getGoal(target: ConversationTarget): Promise<ThreadGoal | null> {
     return this.locked(target, async () => {
       const binding = await this.router.ensure(target);
@@ -462,6 +495,26 @@ function isDirectlyInstalledSkill(
   return skill.enabled
     && (skill.scope === "user" || skill.scope === "repo")
     && !normalizedPath.includes("/.codex/plugins/");
+}
+
+function projectRulesUserError(error: unknown, operation: "init" | "check"): Error {
+  const code = typeof error === "object" && error !== null && "code" in error
+    ? String(error.code)
+    : undefined;
+  switch (code) {
+    case "exists":
+      return new UserFacingError("rules.exists", "当前 Workspace 已有项目规则");
+    case "missing":
+      return new UserFacingError("rules.missing", "当前 Workspace 尚未生成项目规则");
+    case "unsafe-path":
+      return new UserFacingError("rules.unsafe-path", "项目规则路径不能使用符号链接");
+    case "check-failed":
+      return new UserFacingError("rules.check-failed", "项目规则检查失败");
+    default:
+      return error instanceof UserFacingError
+        ? error
+        : new Error(`项目规则${operation === "init" ? "生成" : "检查"}失败`);
+  }
 }
 
 function normalizeInput(value: string | ConversationInput): UserInput[] {

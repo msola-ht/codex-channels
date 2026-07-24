@@ -18,7 +18,11 @@ class FakeInteraction implements InteractionPort {
   cancelledOutcomes: Array<string | undefined> = [];
 
   constructor(
-    private readonly decision: InteractionDecision = { type: "approval", approved: true },
+    private readonly decision: InteractionDecision = {
+      type: "approval",
+      approved: true,
+      scope: "once",
+    },
   ) {}
 
   async request(
@@ -54,6 +58,7 @@ describe("InteractionRouter", () => {
       itemId: "item-1",
       title: "审批",
       detail: "npm test",
+      allowSession: true,
       expiresInMs: 30_000,
     };
 
@@ -79,6 +84,7 @@ describe("InteractionRouter", () => {
       itemId: "item-1",
       title: "审批",
       detail: "修改文件",
+      allowSession: true,
       expiresInMs: 30_000,
     };
 
@@ -127,9 +133,62 @@ describe("ApprovalCoordinator", () => {
       type: "approval",
       requestId: "request-2",
       kind: "command",
+      allowSession: true,
       threadId: "thread-1",
       turnId: "turn-1",
       itemId: "command-1",
+    });
+  });
+
+  it("maps an explicit session command approval to the protocol session decision", async () => {
+    const interaction = new FakeInteraction({
+      type: "approval",
+      approved: true,
+      scope: "session",
+    });
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+
+    const response = await coordinator.handle({
+      id: "request-command-session",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "command-session-1",
+        command: "npm test",
+        availableDecisions: ["accept", "acceptForSession", "decline"],
+      },
+    });
+
+    expect(response).toEqual({ decision: "acceptForSession" });
+    expect(interaction.requests[0]).toMatchObject({
+      type: "approval",
+      kind: "command",
+      allowSession: true,
+    });
+  });
+
+  it("hides session approval when the command request does not offer it", async () => {
+    const interaction = new FakeInteraction();
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+
+    const response = await coordinator.handle({
+      id: "request-command-once-only",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "command-once-1",
+        command: "npm test",
+        availableDecisions: ["accept", "decline"],
+      },
+    });
+
+    expect(response).toEqual({ decision: "accept" });
+    expect(interaction.requests[0]).toMatchObject({
+      type: "approval",
+      kind: "command",
+      allowSession: false,
     });
   });
 
@@ -255,6 +314,7 @@ describe("ApprovalCoordinator", () => {
       turnId: "turn-1",
       itemId: "file-1",
       detail: "更新测试",
+      allowSession: true,
     });
   });
 
@@ -292,6 +352,7 @@ describe("ApprovalCoordinator", () => {
       threadId: "thread-1",
       turnId: "turn-1",
       itemId: "permissions-1",
+      allowSession: false,
     });
   });
 

@@ -197,6 +197,7 @@ export class TelegramSurface {
           "/effort [序号|档位]",
           "/fast [on|off|status]",
           "/skills · /mcp · /plugins · /usage · /limits · /permissions",
+          "/rules <init|check>",
           "/diff · /plan",
           "/goal [set <目标>|clear]",
           "/cancel",

@@ -6,7 +6,7 @@
 
 - `index.ts`：本模块的公开导出入口。
 - `types.ts`：命令、文件修改、权限、用户输入和 MCP elicitation 的可辨识联合，以及 `InteractionPort`。
-- `coordinator.ts`：验证请求归属，分派交互，处理超时、拒绝、一次批准和跨客户端解决。
+- `coordinator.ts`：验证请求归属，分派交互，处理超时、拒绝、一次/会话批准和跨客户端解决。
 - `interaction-router.ts`：按 `surface + accountId` 将请求路由到对应 Surface；未注册目标默认拒绝或取消。
 
 审批必须绑定 Thread、协议提供的 Turn 与请求标识。MCP elicitation 无法关联活动 Turn 时允许
@@ -14,4 +14,5 @@
 无法路由的高权限请求默认拒绝或取消；Surface 只实现 `InteractionPort`，不复制审批状态机。
 命令审批携带实验性的额外网络或文件系统权限时，`coordinator.ts` 必须先按当前协议基线验证并
 将权限明细加入审批内容；实验决策清单未提供一次批准时必须拒绝，未知或畸形权限形状不得弹出
-可批准的降级审批。
+可批准的降级审批。会话批准只在协议提供 `acceptForSession` 时显示并按原值返回；文件审批按
+当前协议支持同一选项，临时权限始终保持 Turn 作用域。

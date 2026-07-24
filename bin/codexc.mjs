@@ -15,6 +15,7 @@ import {
   runtimeConfig,
   userDataDir,
 } from "../scripts/runtime-config.mjs";
+import { checkProjectRules, initializeProjectRules } from "../scripts/codex-rules.mjs";
 import {
   addWorkspaceToConfig,
   inspectWorkspaceConfig,
@@ -68,6 +69,9 @@ try {
       break;
     case "doctor":
       runDoctor(args);
+      break;
+    case "rules":
+      projectRules(args);
       break;
     default:
       throw new Error(`未知命令：${command}\n运行 codexc --help 查看用法`);
@@ -301,6 +305,29 @@ function runDoctor(args) {
   process.exitCode = result.status ?? 1;
 }
 
+function projectRules(args) {
+  if (args[0] === "check" && args.length === 1) {
+    const result = checkProjectRules({ cwd: process.cwd() });
+    console.log("项目 Codex 规则检查通过。");
+    console.log(`项目目录：${result.projectRoot}`);
+    console.log(`规则文件：${result.rulesPath}`);
+    return;
+  }
+  if (args[0] !== "init" || args.some((argument, index) =>
+    index > 0 && argument !== "--force"
+  )) {
+    throw new Error("用法：codexc rules <init [--force]|check>");
+  }
+  const force = args.includes("--force");
+  const result = initializeProjectRules({ cwd: process.cwd(), force });
+  console.log(force ? "项目 Codex 规则已重新生成。" : "项目 Codex 规则已生成。");
+  console.log(`项目目录：${result.projectRoot}`);
+  console.log(`规则文件：${result.rulesPath}`);
+  checkProjectRules({ cwd: result.projectRoot });
+  console.log("项目 Codex 规则检查通过。");
+  console.log("重启 Codex 后生效；项目必须处于受信任状态。");
+}
+
 function runSetup() {
   initializeUserData({ cwd: process.cwd() });
   runScript("scripts/setup.mjs", []);
@@ -483,6 +510,8 @@ function printHelp() {
                                查看或持续跟踪后台服务日志
   config                       显示用户配置路径
   doctor                       检查安装、配置、Codex 与服务连通性
+  rules init [--force]         为当前项目生成安全命令预设
+  rules check                  使用 Codex CLI 检查当前项目规则
   version                      显示版本
 `);
 }

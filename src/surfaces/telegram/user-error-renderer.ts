@@ -64,6 +64,18 @@ export function formatTelegramUserFacingError(error: UserFacingError): string {
       return `不支持的会话命令：${detail(error, "command", "未知")}`;
     case "review.usage":
       return "用法：/review [branch <分支>|commit <SHA>|custom <说明>]";
+    case "rules.usage":
+      return "用法：/rules <init|check>";
+    case "rules.exists":
+      return "当前 Workspace 已有项目规则；Telegram 不提供强制覆盖，请在终端中处理";
+    case "rules.missing":
+      return "当前 Workspace 尚未生成项目规则，请先使用 /rules init";
+    case "rules.unsafe-path":
+      return "项目规则路径包含符号链接，已拒绝写入";
+    case "rules.check-failed":
+      return "项目规则检查失败，请在终端运行 codexc rules check 查看详情";
+    case "rules.unavailable":
+      return "项目规则服务当前不可用";
   }
 }
 

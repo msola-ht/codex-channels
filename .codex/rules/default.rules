@@ -1,0 +1,66 @@
+# Project-local presets for read-only Git inspection and repository verification.
+# Codex loads this file only when this project's `.codex` layer is trusted.
+
+prefix_rule(
+    pattern = ["git", ["status", "diff", "log"]],
+    decision = "allow",
+    justification = "Read-only Git inspection is safe in this repository",
+    match = [
+        "git status -sb",
+        "git diff --check",
+        "git log -1 --oneline",
+    ],
+    not_match = [
+        "git add AGENTS.md",
+        "git commit -m test",
+        "git push",
+    ],
+)
+
+prefix_rule(
+    pattern = ["npm", "test"],
+    decision = "allow",
+    justification = "Run this repository's test suite",
+    match = [
+        "npm test",
+        "npm test -- --run tests/approval.test.ts",
+    ],
+    not_match = [
+        "npm install",
+        "npm publish",
+    ],
+)
+
+prefix_rule(
+    pattern = [
+        "npm",
+        "run",
+        [
+            "build",
+            "check",
+            "docs:check",
+            "lint",
+            "protocol:check",
+            "test:coverage",
+            "test:package",
+            "verify:commit",
+        ],
+    ],
+    decision = "allow",
+    justification = "Run a version-controlled repository verification script",
+    match = [
+        "npm run build",
+        "npm run check",
+        "npm run docs:check",
+        "npm run lint",
+        "npm run protocol:check",
+        "npm run test:coverage",
+        "npm run test:package",
+        "npm run verify:commit",
+    ],
+    not_match = [
+        "npm run dev",
+        "npm run hooks:install",
+        "npm run release",
+    ],
+)

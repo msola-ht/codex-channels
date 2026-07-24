@@ -21,8 +21,37 @@ describe("ConversationCommandService", () => {
     expect(conversationCommandNames).toContain("resume");
     expect(conversationCommandNames).toContain("fast");
     expect(conversationCommandNames).toContain("goal");
+    expect(conversationCommandNames).toContain("rules");
     expect(isConversationCommandName("status")).toBe(true);
     expect(isConversationCommandName("whoami")).toBe(false);
+  });
+
+  it("routes project rule generation and checks through the application boundary", async () => {
+    const result = {
+      projectRoot: "/workspace/project",
+      rulesPath: "/workspace/project/.codex/rules/default.rules",
+    };
+    const initializeProjectRules = vi.fn(async () => result);
+    const checkProjectRules = vi.fn(async () => result);
+    const commands = new ConversationCommandService({
+      initializeProjectRules,
+      checkProjectRules,
+    } as unknown as ConversationService);
+
+    await expect(commands.execute(target, "rules", "init")).resolves.toEqual({
+      kind: "project-rules",
+      action: "initialized",
+      ...result,
+    });
+    await expect(commands.execute(target, "rules", "check")).resolves.toEqual({
+      kind: "project-rules",
+      action: "checked",
+      ...result,
+    });
+    await expect(commands.execute(target, "rules", "--force"))
+      .rejects.toMatchObject({ code: "rules.usage" });
+    expect(initializeProjectRules).toHaveBeenCalledWith(target);
+    expect(checkProjectRules).toHaveBeenCalledWith(target);
   });
 
   it("routes session search and returns typed presentation data", async () => {
@@ -232,6 +261,10 @@ describe("ConversationCommandService", () => {
       accountUsage: vi.fn(async () => ({})),
       accountRateLimits: vi.fn(async () => ({})),
       listPermissionProfiles: vi.fn(async () => []),
+      initializeProjectRules: vi.fn(async () => ({
+        projectRoot: "/workspace",
+        rulesPath: "/workspace/.codex/rules/default.rules",
+      })),
       artifacts: vi.fn(() => undefined),
       setGoal: vi.fn(async () => goal),
     };
@@ -262,6 +295,7 @@ describe("ConversationCommandService", () => {
       ["usage", "", "accountUsage"],
       ["limits", "", "accountRateLimits"],
       ["permissions", "", "listPermissionProfiles"],
+      ["rules", "init", "initializeProjectRules"],
       ["diff", "", "artifacts"],
       ["plan", "", "artifacts"],
       ["goal", "set ship", "setGoal"],

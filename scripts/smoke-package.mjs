@@ -44,6 +44,7 @@ try {
     || !help.includes("service install")
     || !help.includes("service reload")
     || !help.includes("service logs")
+    || !help.includes("rules init")
   ) {
     throw new Error("CLI 帮助缺少公开命令");
   }
@@ -51,6 +52,7 @@ try {
   for (const requiredFile of [
     "runtime/network-proxy.mjs",
     "scripts/setup.mjs",
+    "scripts/codex-rules.mjs",
     "scripts/telegram-setup.mjs",
     "scripts/validate-config.mjs",
     "systemd/codex-connect-app-server.service.template",
