@@ -140,6 +140,24 @@ describe("ApprovalCoordinator", () => {
     });
   });
 
+  it("declines a command approval with neither a command nor network context", async () => {
+    const interaction = new FakeInteraction();
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+
+    const response = await coordinator.handle({
+      id: "request-command-missing-preview",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "command-missing-preview-1",
+      },
+    });
+
+    expect(response).toEqual({ decision: "decline" });
+    expect(interaction.requests).toEqual([]);
+  });
+
   it("maps an explicit session command approval to the protocol session decision", async () => {
     const interaction = new FakeInteraction({
       type: "approval",
@@ -252,6 +270,256 @@ describe("ApprovalCoordinator", () => {
 
     expect(response).toEqual({ decision: "decline" });
     expect(interaction.requests[0]).not.toHaveProperty("execPolicyAmendment");
+  });
+
+  it("maps an explicit persistent network approval to the proposed protocol amendment", async () => {
+    const amendment = { host: "api.example.com", action: "allow" as const };
+    const interaction = new FakeInteraction({
+      type: "approval",
+      approved: true,
+      scope: "networkpolicy",
+      networkPolicyAmendment: amendment,
+    });
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+
+    const response = await coordinator.handle({
+      id: "request-network-policy",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "network-policy-1",
+        command: "curl https://api.example.com",
+        networkApprovalContext: {
+          host: "api.example.com",
+          protocol: "https",
+        },
+        proposedNetworkPolicyAmendments: [amendment],
+        availableDecisions: [
+          "accept",
+          {
+            applyNetworkPolicyAmendment: {
+              network_policy_amendment: amendment,
+            },
+          },
+          "decline",
+        ],
+      },
+    });
+
+    expect(response).toEqual({
+      decision: {
+        applyNetworkPolicyAmendment: {
+          network_policy_amendment: amendment,
+        },
+      },
+    });
+    expect(interaction.requests[0]).toMatchObject({
+      type: "approval",
+      kind: "command",
+      networkPolicyAmendments: [amendment],
+    });
+    expect(
+      (interaction.requests[0] as Extract<InteractionRequest, { type: "approval" }>).detail,
+    ).toContain("持久网络规则：允许 api.example.com");
+  });
+
+  it("renders a network-only approval without inventing a command preview", async () => {
+    const interaction = new FakeInteraction();
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+    const amendments = [
+      { host: "api.example.com", action: "allow" as const },
+      { host: "api.example.com", action: "deny" as const },
+    ];
+
+    const response = await coordinator.handle({
+      id: "request-network-only",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "network-only-1",
+        networkApprovalContext: {
+          host: "api.example.com",
+          protocol: "https",
+        },
+        proposedNetworkPolicyAmendments: amendments,
+        availableDecisions: [
+          "accept",
+          "acceptForSession",
+          ...amendments.map((networkPolicyAmendment) => ({
+            applyNetworkPolicyAmendment: {
+              network_policy_amendment: networkPolicyAmendment,
+            },
+          })),
+          "decline",
+        ],
+      },
+    });
+
+    expect(response).toEqual({ decision: "accept" });
+    expect(interaction.requests[0]).toMatchObject({
+      type: "approval",
+      title: "Codex 请求访问网络",
+      networkApprovalContext: {
+        host: "api.example.com",
+        protocol: "https",
+      },
+      networkPolicyAmendments: amendments,
+    });
+    const detail = (
+      interaction.requests[0] as Extract<InteractionRequest, { type: "approval" }>
+    ).detail;
+    expect(detail).toContain("网络目标：api.example.com");
+    expect(detail).toContain("协议：https");
+    expect(detail).not.toContain("未提供命令预览");
+  });
+
+  it("fails closed when a persistent network amendment targets another host", async () => {
+    const interaction = new FakeInteraction({
+      type: "approval",
+      approved: true,
+      scope: "networkpolicy",
+      networkPolicyAmendment: { host: "other.example.com", action: "allow" },
+    });
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+
+    const response = await coordinator.handle({
+      id: "request-network-policy-mismatch",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "network-policy-mismatch-1",
+        networkApprovalContext: {
+          host: "api.example.com",
+          protocol: "https",
+        },
+        proposedNetworkPolicyAmendments: [{
+          host: "other.example.com",
+          action: "allow",
+        }],
+        availableDecisions: [
+          "accept",
+          {
+            applyNetworkPolicyAmendment: {
+              network_policy_amendment: {
+                host: "other.example.com",
+                action: "allow",
+              },
+            },
+          },
+          "decline",
+        ],
+      },
+    });
+
+    expect(response).toEqual({ decision: "decline" });
+    expect(interaction.requests).toEqual([]);
+  });
+
+  it("fails closed when persistent network proposals and decisions differ", async () => {
+    const interaction = new FakeInteraction();
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+
+    const response = await coordinator.handle({
+      id: "request-network-decision-mismatch",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "network-decision-mismatch-1",
+        networkApprovalContext: {
+          host: "api.example.com",
+          protocol: "https",
+        },
+        proposedNetworkPolicyAmendments: [{
+          host: "api.example.com",
+          action: "allow",
+        }],
+        availableDecisions: [
+          "accept",
+          {
+            applyNetworkPolicyAmendment: {
+              network_policy_amendment: {
+                host: "api.example.com",
+                action: "deny",
+              },
+            },
+          },
+          "decline",
+        ],
+      },
+    });
+
+    expect(response).toEqual({ decision: "decline" });
+    expect(interaction.requests).toEqual([]);
+  });
+
+  it("fails closed when a persistent network decision has no matching proposal", async () => {
+    const interaction = new FakeInteraction();
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+
+    const response = await coordinator.handle({
+      id: "request-network-missing-proposal",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "network-missing-proposal-1",
+        networkApprovalContext: {
+          host: "api.example.com",
+          protocol: "https",
+        },
+        availableDecisions: [
+          "accept",
+          {
+            applyNetworkPolicyAmendment: {
+              network_policy_amendment: {
+                host: "api.example.com",
+                action: "allow",
+              },
+            },
+          },
+          "decline",
+        ],
+      },
+    });
+
+    expect(response).toEqual({ decision: "decline" });
+    expect(interaction.requests).toEqual([]);
+  });
+
+  it("uses the official allow-only fallback when network decisions are absent", async () => {
+    const interaction = new FakeInteraction();
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+
+    const response = await coordinator.handle({
+      id: "request-network-legacy-fallback",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "network-legacy-fallback-1",
+        networkApprovalContext: {
+          host: "api.example.com",
+          protocol: "https",
+        },
+        proposedNetworkPolicyAmendments: [
+          { host: "api.example.com", action: "allow" },
+          { host: "api.example.com", action: "deny" },
+        ],
+      },
+    });
+
+    expect(response).toEqual({ decision: "accept" });
+    expect(interaction.requests[0]).toMatchObject({
+      type: "approval",
+      networkPolicyAmendments: [{
+        host: "api.example.com",
+        action: "allow",
+      }],
+    });
   });
 
   it("hides session approval when the command request does not offer it", async () => {

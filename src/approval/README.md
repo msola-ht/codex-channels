@@ -17,4 +17,9 @@
 可批准的降级审批。会话批准只在协议提供 `acceptForSession` 时显示并按原值返回；文件审批按
 当前协议支持同一选项。命令前缀持久批准只在 `proposedExecpolicyAmendment` 与协议提供的
 `acceptWithExecpolicyAmendment` 完全一致时显示，用户显式选择后原样返回提议，由 App Server
-负责更新内存和磁盘规则；它与 `acceptForSession` 是两个独立选项。临时权限始终保持 Turn 作用域。
+负责更新内存和磁盘规则。网络持久批准同样只接受
+`proposedNetworkPolicyAmendments` 与 `applyNetworkPolicyAmendment` 中完全一致的主机和动作，
+且每条规则必须与 `networkApprovalContext.host` 一致；网络专用请求可以不含命令，但必须显示
+目标主机和协议。畸形或不一致的网络上下文、提议和决策必须在进入 Surface 前失败关闭。网络会话
+批准只作用于该上下文主机，持久批准只返回用户明确选择的单条规则；两类持久规则都与
+`acceptForSession` 独立。临时权限始终保持 Turn 作用域。

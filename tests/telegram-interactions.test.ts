@@ -63,6 +63,63 @@ describe("TelegramInteractionPort", () => {
     );
   });
 
+  it("labels a network session approval with its exact host", async () => {
+    const sendMessage = vi.fn(async (
+      _chatId: string,
+      _text: string,
+      _options?: unknown,
+    ) => {
+      void _chatId;
+      void _text;
+      void _options;
+      return { message_id: 61 };
+    });
+    const editMessageText = vi.fn(async () => true as const);
+    const callbackQuery = vi.fn();
+    const bot = {
+      callbackQuery,
+      api: { sendMessage, editMessageText },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+
+    const decision = interactions.request(target, {
+      ...approvalRequest(),
+      networkApprovalContext: {
+        host: "api.example.com",
+        protocol: "https",
+      },
+    });
+    await settle();
+
+    const options = sendMessage.mock.calls[0]?.[2] as {
+      reply_markup: { inline_keyboard: Array<Array<{ text: string; callback_data?: string }>> };
+    };
+    const sessionButton = options.reply_markup.inline_keyboard
+      .flat()
+      .find((button) => button.text === "本会话允许 api.example.com");
+    expect(sessionButton?.callback_data).toMatch(/^ix:s:/);
+
+    const callback = callbackQuery.mock.calls[0]?.[1] as (context: Context) => Promise<void>;
+    await callback({
+      callbackQuery: { data: sessionButton!.callback_data! },
+      chat: { id: 100 },
+      answerCallbackQuery: vi.fn(async () => true as const),
+    } as unknown as Context);
+
+    await expect(decision).resolves.toEqual({
+      type: "approval",
+      approved: true,
+      scope: "session",
+    });
+    await settle();
+    expect(editMessageText).toHaveBeenCalledWith(
+      "100",
+      61,
+      expect.stringContaining("处理结果：本会话已允许 api.example.com"),
+      expect.objectContaining({ reply_markup: { inline_keyboard: [] } }),
+    );
+  });
+
   it("does not offer session approval when the protocol disallows it", async () => {
     const sendMessage = vi.fn(async (
       _chatId: string,
@@ -200,6 +257,115 @@ describe("TelegramInteractionPort", () => {
     } as unknown as Context);
 
     expect(answerCallbackQuery).toHaveBeenCalledWith({ text: "该请求不支持持久规则" });
+    await interactions.close();
+    await expect(decision).resolves.toEqual({ type: "approval", approved: false });
+  });
+
+  it("offers and resolves a persistent network approval", async () => {
+    const sendMessage = vi.fn(async (
+      _chatId: string,
+      _text: string,
+      _options?: unknown,
+    ) => {
+      void _chatId;
+      void _text;
+      void _options;
+      return { message_id: 10 };
+    });
+    const editMessageText = vi.fn(async () => true as const);
+    const callbackQuery = vi.fn();
+    const bot = {
+      callbackQuery,
+      api: { sendMessage, editMessageText },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    const amendments = [
+      { host: "api.example.com", action: "allow" as const },
+      { host: "api.example.com", action: "deny" as const },
+    ];
+
+    const decision = interactions.request(target, {
+      ...approvalRequest(),
+      allowSession: false,
+      networkPolicyAmendments: amendments,
+    });
+    await settle();
+
+    const options = sendMessage.mock.calls[0]?.[2] as {
+      reply_markup: { inline_keyboard: Array<Array<{ text: string; callback_data?: string }>> };
+    };
+    const networkButton = options.reply_markup.inline_keyboard
+      .flat()
+      .find((button) => button.text === "始终拒绝 api.example.com");
+    expect(networkButton?.callback_data).toMatch(/^ix:n1:/);
+
+    const callback = callbackQuery.mock.calls[0]?.[1] as (context: Context) => Promise<void>;
+    await callback({
+      callbackQuery: { data: networkButton!.callback_data! },
+      chat: { id: 100 },
+      answerCallbackQuery: vi.fn(async () => true as const),
+    } as unknown as Context);
+
+    await expect(decision).resolves.toEqual({
+      type: "approval",
+      approved: true,
+      scope: "networkpolicy",
+      networkPolicyAmendment: amendments[1],
+    });
+    await settle();
+    expect(editMessageText).toHaveBeenCalledWith(
+      "100",
+      10,
+      expect.stringContaining("处理结果：已保存网络拒绝规则"),
+      expect.objectContaining({ reply_markup: { inline_keyboard: [] } }),
+    );
+  });
+
+  it("rejects a forged persistent network callback", async () => {
+    const sendMessage = vi.fn(async (
+      _chatId: string,
+      _text: string,
+      _options?: unknown,
+    ) => {
+      void _chatId;
+      void _text;
+      void _options;
+      return { message_id: 11 };
+    });
+    const callbackQuery = vi.fn();
+    const bot = {
+      callbackQuery,
+      api: {
+        sendMessage,
+        editMessageText: vi.fn(async () => true as const),
+      },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+
+    const decision = interactions.request(target, {
+      ...approvalRequest(),
+      allowSession: false,
+    });
+    await settle();
+    const options = sendMessage.mock.calls[0]?.[2] as {
+      reply_markup: { inline_keyboard: Array<Array<{ callback_data?: string }>> };
+    };
+    const token = options.reply_markup.inline_keyboard
+      .flat()
+      .find((button) => button.callback_data?.startsWith("ix:a:"))
+      ?.callback_data?.split(":")[2];
+    const callback = callbackQuery.mock.calls[0]?.[1] as (context: Context) => Promise<void>;
+    const answerCallbackQuery = vi.fn(async () => true as const);
+
+    await callback({
+      callbackQuery: { data: `ix:n0:${token}` },
+      chat: { id: 100 },
+      answerCallbackQuery,
+    } as unknown as Context);
+
+    expect(answerCallbackQuery).toHaveBeenCalledWith({
+      text: "该请求不支持持久网络规则",
+    });
     await interactions.close();
     await expect(decision).resolves.toEqual({ type: "approval", approved: false });
   });

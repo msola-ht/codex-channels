@@ -197,8 +197,17 @@ export class TelegramInteractionPort implements InteractionPort {
       if (request.execPolicyAmendment) {
         keyboard.text("始终允许此前缀", `ix:p:${token}`).row();
       }
+      for (const [index, amendment] of (request.networkPolicyAmendments ?? []).entries()) {
+        const action = amendment.action === "allow" ? "允许" : "拒绝";
+        keyboard.text(`始终${action} ${amendment.host}`, `ix:n${index}:${token}`).row();
+      }
       if (request.allowSession) {
-        keyboard.text("本次会话始终同意", `ix:s:${token}`).row();
+        keyboard.text(
+          request.networkApprovalContext
+            ? `本会话允许 ${request.networkApprovalContext.host}`
+            : "本次会话始终同意",
+          `ix:s:${token}`,
+        ).row();
       }
       return keyboard.text("拒绝", `ix:d:${token}`);
     }
@@ -232,6 +241,14 @@ export class TelegramInteractionPort implements InteractionPort {
         await context.answerCallbackQuery({ text: "该请求不支持持久规则" });
         return;
       }
+      const networkMatch = /^n(\d+)$/.exec(action ?? "");
+      const networkPolicyAmendment = networkMatch
+        ? pending.request.networkPolicyAmendments?.[Number(networkMatch[1])]
+        : undefined;
+      if (networkMatch && !networkPolicyAmendment) {
+        await context.answerCallbackQuery({ text: "该请求不支持持久网络规则" });
+        return;
+      }
       if (action === "a") {
         this.finish(token!, { type: "approval", approved: true, scope: "once" }, "已批准一次");
       } else if (action === "p") {
@@ -240,11 +257,25 @@ export class TelegramInteractionPort implements InteractionPort {
           { type: "approval", approved: true, scope: "execpolicy" },
           "已保存命令前缀规则",
         );
+      } else if (networkPolicyAmendment) {
+        const action = networkPolicyAmendment.action === "allow" ? "允许" : "拒绝";
+        this.finish(
+          token!,
+          {
+            type: "approval",
+            approved: true,
+            scope: "networkpolicy",
+            networkPolicyAmendment,
+          },
+          `已保存网络${action}规则`,
+        );
       } else if (action === "s") {
         this.finish(
           token!,
           { type: "approval", approved: true, scope: "session" },
-          "已在本次会话中始终同意",
+          pending.request.networkApprovalContext
+            ? `本会话已允许 ${pending.request.networkApprovalContext.host}`
+            : "已在本次会话中始终同意",
         );
       } else {
         this.finish(token!, { type: "approval", approved: false }, "已拒绝");

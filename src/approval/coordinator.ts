@@ -4,6 +4,8 @@ import { JsonRpcError, type RpcServerRequest } from "../codex-client/index.js";
 import type {
   CommandExecutionApprovalDecision,
   ExecPolicyAmendment,
+  NetworkApprovalContext,
+  NetworkPolicyAmendment,
 } from "../codex-protocol/index.js";
 import type { SessionRouter } from "../session-routing/index.js";
 import type { InteractionDecision, InteractionPort } from "./types.js";
@@ -49,13 +51,35 @@ export class ApprovalCoordinator {
         if (!offersOneTimeCommandApproval(params.availableDecisions)) {
           return { decision: "decline" };
         }
-        const command = stringValue(params.command) ?? "未提供命令预览";
+        const command = stringValue(params.command);
+        const hasCommand = command !== undefined && command.trim().length > 0;
         const reason = stringValue(params.reason);
         const additionalPermissions = formatAdditionalPermissions(params.additionalPermissions);
         if (!additionalPermissions.valid) {
           return { decision: "decline" };
         }
+        const networkApprovalContext = parseNetworkApprovalContext(
+          params.networkApprovalContext,
+        );
+        if (
+          params.networkApprovalContext !== undefined
+          && params.networkApprovalContext !== null
+          && !networkApprovalContext
+        ) {
+          return { decision: "decline" };
+        }
+        if (!hasCommand && !networkApprovalContext) {
+          return { decision: "decline" };
+        }
         const execPolicyAmendment = offeredExecPolicyAmendment(params);
+        const networkPolicyAmendments = offeredNetworkPolicyAmendments(
+          params,
+          networkApprovalContext,
+        );
+        if (!networkPolicyAmendments.valid) {
+          return { decision: "decline" };
+        }
+        const isNetworkOnly = networkApprovalContext !== undefined && !hasCommand;
         const decision = await this.interaction.request(target, {
           type: "approval",
           requestId: interactionId,
@@ -63,20 +87,35 @@ export class ApprovalCoordinator {
           threadId,
           turnId,
           itemId,
-          title: "Codex 请求执行命令",
+          title: isNetworkOnly ? "Codex 请求访问网络" : "Codex 请求执行命令",
           detail: [
             reason,
-            command,
+            hasCommand ? command : undefined,
+            networkApprovalContext
+              ? formatNetworkApprovalContext(networkApprovalContext)
+              : undefined,
             additionalPermissions.detail,
             execPolicyAmendment
               ? `持久规则前缀：${JSON.stringify(execPolicyAmendment)}`
               : undefined,
+            ...networkPolicyAmendments.amendments.map((amendment) =>
+              `持久网络规则：${amendment.action === "allow" ? "允许" : "拒绝"} ${amendment.host}`),
           ].filter(Boolean).join("\n\n"),
           allowSession: offersSessionCommandApproval(params.availableDecisions),
           ...(execPolicyAmendment ? { execPolicyAmendment } : {}),
+          ...(networkApprovalContext ? { networkApprovalContext } : {}),
+          ...(networkPolicyAmendments.amendments.length > 0
+            ? { networkPolicyAmendments: networkPolicyAmendments.amendments }
+            : {}),
           expiresInMs: this.timeoutMs,
         });
-        return { decision: approvalProtocolDecision(decision, execPolicyAmendment) };
+        return {
+          decision: approvalProtocolDecision(
+            decision,
+            execPolicyAmendment,
+            networkPolicyAmendments.amendments,
+          ),
+        };
       }
       case "item/fileChange/requestApproval": {
         if (!turnId || !itemId) {
@@ -210,6 +249,7 @@ function isApproved(decision: InteractionDecision): boolean {
 function approvalProtocolDecision(
   decision: InteractionDecision,
   execPolicyAmendment?: ExecPolicyAmendment,
+  networkPolicyAmendments: NetworkPolicyAmendment[] = [],
 ): CommandExecutionApprovalDecision {
   if (decision.type !== "approval" || !decision.approved) {
     return "decline";
@@ -222,6 +262,17 @@ function approvalProtocolDecision(
       ? {
           acceptWithExecpolicyAmendment: {
             execpolicy_amendment: execPolicyAmendment,
+          },
+        }
+      : "decline";
+  }
+  if (decision.scope === "networkpolicy") {
+    const amendment = networkPolicyAmendments.find((offered) =>
+      sameNetworkPolicyAmendment(offered, decision.networkPolicyAmendment));
+    return amendment
+      ? {
+          applyNetworkPolicyAmendment: {
+            network_policy_amendment: amendment,
           },
         }
       : "decline";
@@ -349,6 +400,111 @@ function offeredExecPolicyAmendment(
       && amendment.every((entry, index) => entry === proposed[index]);
   });
   return offered ? [...proposed] : undefined;
+}
+
+function offeredNetworkPolicyAmendments(
+  params: Record<string, unknown>,
+  context: NetworkApprovalContext | undefined,
+): { valid: boolean; amendments: NetworkPolicyAmendment[] } {
+  const proposed = params.proposedNetworkPolicyAmendments;
+  if (proposed !== undefined && proposed !== null && !Array.isArray(proposed)) {
+    return { valid: false, amendments: [] };
+  }
+  const normalized = (Array.isArray(proposed) ? proposed : [])
+    .map(parseNetworkPolicyAmendment)
+    .filter((entry): entry is NetworkPolicyAmendment => entry !== undefined);
+  if (
+    Array.isArray(proposed) && normalized.length !== proposed.length
+    || normalized.length > 0 && (
+      !context || normalized.some((amendment) => amendment.host !== context.host)
+    )
+  ) {
+    return { valid: false, amendments: [] };
+  }
+
+  const available = params.availableDecisions;
+  if (available !== undefined && available !== null && !Array.isArray(available)) {
+    return { valid: false, amendments: [] };
+  }
+  if (!Array.isArray(available)) {
+    const legacyAllow = normalized.find((amendment) => amendment.action === "allow");
+    return {
+      valid: true,
+      amendments: legacyAllow ? [legacyAllow] : [],
+    };
+  }
+  const availableAmendments = (Array.isArray(available) ? available : []).flatMap((decision) => {
+    const record = asRecord(decision);
+    if (!("applyNetworkPolicyAmendment" in record)) {
+      return [];
+    }
+    const payload = asRecord(record.applyNetworkPolicyAmendment);
+    const amendment = parseNetworkPolicyAmendment(payload.network_policy_amendment);
+    return amendment ? [amendment] : [undefined];
+  });
+  if (
+    availableAmendments.some((amendment) => amendment === undefined)
+    || availableAmendments.length > 0 && (
+      !context
+      || availableAmendments.some((amendment) => amendment?.host !== context.host)
+      || availableAmendments.some((amendment) =>
+        amendment !== undefined && !normalized.some((proposedAmendment) =>
+          sameNetworkPolicyAmendment(proposedAmendment, amendment),
+        ),
+      )
+    )
+  ) {
+    return { valid: false, amendments: [] };
+  }
+  return {
+    valid: true,
+    amendments: availableAmendments.filter(
+      (amendment): amendment is NetworkPolicyAmendment => amendment !== undefined,
+    ),
+  };
+}
+
+function parseNetworkApprovalContext(value: unknown): NetworkApprovalContext | undefined {
+  if (
+    !isRecordWithOnly(value, ["host", "protocol"])
+    || typeof value.host !== "string"
+    || value.host.length === 0
+    || (
+      value.protocol !== "http"
+      && value.protocol !== "https"
+      && value.protocol !== "socks5Tcp"
+      && value.protocol !== "socks5Udp"
+    )
+  ) {
+    return undefined;
+  }
+  return {
+    host: value.host,
+    protocol: value.protocol,
+  };
+}
+
+function formatNetworkApprovalContext(context: NetworkApprovalContext): string {
+  return `网络目标：${context.host}\n协议：${context.protocol}`;
+}
+
+function parseNetworkPolicyAmendment(value: unknown): NetworkPolicyAmendment | undefined {
+  if (
+    !isRecordWithOnly(value, ["host", "action"])
+    || typeof value.host !== "string"
+    || value.host.length === 0
+    || (value.action !== "allow" && value.action !== "deny")
+  ) {
+    return undefined;
+  }
+  return { host: value.host, action: value.action };
+}
+
+function sameNetworkPolicyAmendment(
+  left: NetworkPolicyAmendment,
+  right: NetworkPolicyAmendment,
+): boolean {
+  return left.host === right.host && left.action === right.action;
 }
 
 function permissionPaths(value: unknown): string[] | null {

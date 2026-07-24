@@ -111,6 +111,10 @@ Surface -> Application/Core <- Codex Client
 - 命令前缀持久授权必须与会话授权分开显示；只有 App Server 提供完全一致的
   `proposedExecpolicyAmendment` 和 `acceptWithExecpolicyAmendment` 时才可选择，并且只能在用户
   明确选择后原样返回该提议。Gateway 不自行写入或扩大 Codex 执行规则。
+- 网络规则持久授权必须显示精确主机和允许或拒绝动作；只有
+  `proposedNetworkPolicyAmendments` 与 `applyNetworkPolicyAmendment` 完全一致时才可选择，
+  并且所有规则主机必须与 `networkApprovalContext.host` 一致；不一致时失败关闭。网络会话授权
+  必须显示其目标主机，每次只原样返回用户明确选择的一条规则。Gateway 不合并、推导或扩大网络规则。
 
 ## 安全
 

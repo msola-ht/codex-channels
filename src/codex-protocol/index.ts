@@ -14,6 +14,8 @@ export type { ConfigReadParams } from "./generated/v2/ConfigReadParams.js";
 export type { ConfigReadResponse } from "./generated/v2/ConfigReadResponse.js";
 export type { CommandExecutionApprovalDecision } from "./generated/v2/CommandExecutionApprovalDecision.js";
 export type { ExecPolicyAmendment } from "./generated/v2/ExecPolicyAmendment.js";
+export type { NetworkApprovalContext } from "./generated/v2/NetworkApprovalContext.js";
+export type { NetworkPolicyAmendment } from "./generated/v2/NetworkPolicyAmendment.js";
 export type { McpServerStatusUpdatedNotification } from "./generated/v2/McpServerStatusUpdatedNotification.js";
 export type { McpServerStartupFailureReason } from "./generated/v2/McpServerStartupFailureReason.js";
 export type { McpServerStartupState } from "./generated/v2/McpServerStartupState.js";

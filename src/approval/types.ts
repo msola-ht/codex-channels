@@ -1,4 +1,8 @@
 import type { ConversationTarget } from "../conversation-core/index.js";
+import type {
+  NetworkApprovalContext,
+  NetworkPolicyAmendment,
+} from "../codex-protocol/index.js";
 
 export type InteractionRequest =
   | {
@@ -12,6 +16,8 @@ export type InteractionRequest =
       detail: string;
       allowSession: boolean;
       execPolicyAmendment?: string[];
+      networkApprovalContext?: NetworkApprovalContext;
+      networkPolicyAmendments?: NetworkPolicyAmendment[];
       expiresInMs: number;
     }
   | {
@@ -45,6 +51,12 @@ export type InteractionRequest =
 
 export type InteractionDecision =
   | { type: "approval"; approved: true; scope: "once" | "session" | "execpolicy" }
+  | {
+      type: "approval";
+      approved: true;
+      scope: "networkpolicy";
+      networkPolicyAmendment: NetworkPolicyAmendment;
+    }
   | { type: "approval"; approved: false }
   | { type: "user-input"; answers: Record<string, string[]> }
   | { type: "elicitation"; action: "accept" | "decline" | "cancel"; content: unknown };
