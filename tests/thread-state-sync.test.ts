@@ -81,7 +81,6 @@ describe("ThreadStateSynchronizer", () => {
   });
 
   it.each([
-    "thread/closed",
     "thread/archived",
     "thread/deleted",
   ])("forgets a bound Thread after %s", (method) => {
@@ -94,6 +93,18 @@ describe("ThreadStateSynchronizer", () => {
     });
 
     expect(router.current(target)).toBeUndefined();
+  });
+
+  it("keeps a bound Thread after App Server unloads it from memory", () => {
+    const router = createBoundRouter();
+    const synchronizer = new ThreadStateSynchronizer(router);
+
+    synchronizer.handle({
+      method: "thread/closed",
+      params: { threadId: "thread-1" },
+    });
+
+    expect(router.current(target)?.threadId).toBe("thread-1");
   });
 
   it("ignores unrelated and malformed Thread notifications", () => {

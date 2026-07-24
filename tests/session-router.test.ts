@@ -238,6 +238,66 @@ describe("SessionRouter", () => {
     expect(router.current(target)?.threadId).toBe("bound");
   });
 
+  it("keeps a binding when subscription restore fails for an unknown reason", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "bound", sessionId: "bound" });
+    const client = {
+      resumeThread: async () => {
+        throw new Error("Unexpected App Server response");
+      },
+    } as unknown as CodexAppServerClient;
+    const router = new SessionRouter(client, store, registry);
+
+    const failures = await router.restoreSubscriptions();
+
+    expect(failures).toEqual([
+      expect.objectContaining({ bindingRemoved: false }),
+    ]);
+    expect(router.current(target)?.threadId).toBe("bound");
+  });
+
+  it("removes a binding when App Server reports that its session is archived", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "bound", sessionId: "bound" });
+    const client = {
+      resumeThread: async () => {
+        throw new JsonRpcError(
+          -32602,
+          "session bound is archived. Run `codex unarchive bound` to unarchive it first.",
+        );
+      },
+    } as unknown as CodexAppServerClient;
+    const router = new SessionRouter(client, store, registry);
+
+    const failures = await router.restoreSubscriptions();
+
+    expect(failures).toEqual([
+      expect.objectContaining({ bindingRemoved: true }),
+    ]);
+    expect(router.current(target)).toBeUndefined();
+  });
+
+  it("keeps a binding while App Server is temporarily closing its loaded Thread", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "bound", sessionId: "bound" });
+    const client = {
+      resumeThread: async () => {
+        throw new JsonRpcError(
+          -32602,
+          "thread bound is closing; retry after the thread is closed",
+        );
+      },
+    } as unknown as CodexAppServerClient;
+    const router = new SessionRouter(client, store, registry);
+
+    const failures = await router.restoreSubscriptions();
+
+    expect(failures).toEqual([
+      expect.objectContaining({ bindingRemoved: false }),
+    ]);
+    expect(router.current(target)?.threadId).toBe("bound");
+  });
+
   it("preserves bindings when subscription restore is cancelled during shutdown", async () => {
     const store = new MemoryBindingStore();
     store.bind({ target, workspaceId: "main", threadId: "bound", sessionId: "bound" });
@@ -254,6 +314,33 @@ describe("SessionRouter", () => {
 
     expect(failures).toEqual([]);
     expect(router.current(target)?.threadId).toBe("bound");
+  });
+
+  it("keeps the current binding when resuming another Thread fails", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({
+      target,
+      workspaceId: "main",
+      threadId: "current",
+      sessionId: "current",
+    });
+    const unsubscribed: string[] = [];
+    const client = {
+      resumeThread: async () => {
+        throw new JsonRpcError(-32602, "Thread not found");
+      },
+      unsubscribeThread: async (threadId: string) => {
+        unsubscribed.push(threadId);
+        return { status: "unsubscribed" };
+      },
+    } as unknown as CodexAppServerClient;
+    const router = new SessionRouter(client, store, registry);
+
+    await expect(router.resume(target, "missing"))
+      .rejects.toThrow("Thread not found");
+
+    expect(router.current(target)?.threadId).toBe("current");
+    expect(unsubscribed).toEqual([]);
   });
 
   it("switches only to a preconfigured workspace and scopes thread discovery by cwd", async () => {

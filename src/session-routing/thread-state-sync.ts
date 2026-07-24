@@ -2,7 +2,6 @@ import type { RpcNotification } from "../codex-client/index.js";
 import type { SessionRouter } from "./router.js";
 
 const unavailableThreadNotifications = new Set([
-  "thread/closed",
   "thread/archived",
   "thread/deleted",
 ]);

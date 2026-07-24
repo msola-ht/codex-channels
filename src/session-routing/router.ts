@@ -1,4 +1,4 @@
-import { JsonRpcError, type CodexAppServerClient } from "../codex-client/index.js";
+import type { CodexAppServerClient } from "../codex-client/index.js";
 import type { Thread } from "../codex-protocol/index.js";
 import {
   UserFacingError,
@@ -107,7 +107,7 @@ export class SessionRouter {
           return failures;
         }
         const normalized = error instanceof Error ? error : new Error(String(error));
-        const bindingRemoved = !isTransientRestoreError(normalized);
+        const bindingRemoved = isUnavailableRestoreError(normalized);
         if (bindingRemoved) {
           this.bindings.unbind(binding.target);
           const workspace = this.workspaces.get(binding.workspaceId) ?? this.workspaces.default();
@@ -170,8 +170,11 @@ export class SessionRouter {
       throw new UserFacingError("thread.bound", "该 Codex Thread 已绑定到其他会话");
     }
     const workspace = this.workspace(target);
-    await this.detach(target);
     const resumed = await this.codex.resumeThread(threadId, workspace.cwd);
+    const current = this.bindings.get(target);
+    if (current && current.threadId !== resumed.thread.id) {
+      await this.detach(target);
+    }
     this.captureModelSettings(resumed.thread.id, resumed.model, resumed.reasoningEffort, resumed.serviceTier);
     const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
     this.bindings.bind(binding);
@@ -263,13 +266,7 @@ export class SessionRouter {
   }
 }
 
-function isTransientRestoreError(error: Error): boolean {
-  if (error instanceof JsonRpcError && error.code === -32001) {
-    return true;
-  }
-  const message = error.message.toLowerCase();
-  if (/thread.*(not found|deleted|archived|closed)|线程.*(不存在|删除|归档|关闭)/i.test(message)) {
-    return false;
-  }
-  return /(timeout|timed out|connection|socket|econn|epipe|reset|overload|超时|连接|断开|过载)/i.test(message);
+function isUnavailableRestoreError(error: Error): boolean {
+  return /(?:thread|session).*(?:not found|deleted|(?:is )?archived)|线程.*(?:不存在|删除|归档)/i
+    .test(error.message);
 }

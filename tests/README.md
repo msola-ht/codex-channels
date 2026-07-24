@@ -6,7 +6,8 @@
 
 - JSON-RPC initialize、生成类型约束的精确出站消息、初始化断线竞态、消息分流、超时、过载
   重试和断线清理。
-- Thread 新建、列表、恢复、切换、删除、订阅、活动 Turn 重启恢复和 Workspace 路由。
+- Thread 新建、列表、恢复、切换、删除、订阅、恢复失败绑定保留、关闭/归档/删除通知语义、
+  活动 Turn 重启恢复和 Workspace 路由。
 - 活动 Turn 的即时 steer 与下一 Turn 有界内存队列、顺序启动、Thread 隔离和失败清理。
 - Conversation Core 状态归约、严格 Turn 完成状态、可重试错误隔离、Thread/全局警告路由、
   操作过程与敏感文本清洗。
