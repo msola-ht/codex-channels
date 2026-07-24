@@ -171,16 +171,26 @@ chmod 600 config.toml
 npm run dev:all
 ```
 
+`npm ci` 和 `npm install` 会为当前仓库启用受版本控制的 `.githooks/pre-commit`。
+每次 `git commit` 前会自动执行完整提交检查；如需手动恢复 hook，运行
+`npm run hooks:install`。
+
 常用验证：
 
 ```bash
 npm run check
 npm run lint
+npm run docs:check
 npm test
 npm run test:coverage
 npm run test:package
 npm run protocol:check
+npm run verify:commit
 ```
+
+`npm run verify:commit` 是本地 hook 与 GitHub CI 共用的提交门禁，覆盖暂存差异格式、
+类型与版本、全目录 Lint、文档链接和索引、全量测试、Shell 语法、npm tarball 安装冒烟，
+以及 macOS 上的 launchd 模板检查。不要使用 `git commit --no-verify` 绕过该门禁。
 
 CI 使用隔离 `CODEX_HOME` 运行 Fast 默认值合同测试；该测试不需要登录，也不会调用模型：
 
@@ -204,6 +214,7 @@ RUN_CODEX_INTEGRATION=1 npm test -- --run tests/real-app-server.test.ts
 - [`launchd/`](launchd/README.md)：macOS 服务模板与控制。
 - [`systemd/`](systemd/README.md)：Linux 用户服务模板与运行说明。
 - [`tests/`](tests/README.md)：测试范围与真实集成测试。
+- [`.githooks/`](.githooks/README.md)：提交前自动检查入口。
 - [`.github/workflows/`](.github/workflows/README.md)：CI 与 npm Trusted Publishing。
 
 ## License

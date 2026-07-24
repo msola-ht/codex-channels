@@ -59,6 +59,8 @@ export async function runTelegramSetup({
       client = createClient(token, proxyUrl);
       bot = await client.getMe();
     } catch (error) {
+      // 上游错误可能包含 Bot Token，必须只保留清洗后的错误文本。
+      // eslint-disable-next-line preserve-caught-error
       throw new Error(`Telegram Bot 验证请求失败：${safeErrorMessage(error, token)}`);
     }
     output.write(`已验证 Telegram Bot：@${bot.username}\n`);

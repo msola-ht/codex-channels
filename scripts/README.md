@@ -16,12 +16,15 @@
 - `generate-protocol.mjs`：调用当前 Codex CLI 重新生成协议类型和版本记录，并同步 npm/Gateway 版本。
 - `check-protocol.mjs`：校验本机 Codex CLI 与锁定协议版本一致。
 - `check-gateway-version.mjs`：校验 npm 包和 Gateway 版本都与 Codex CLI 协议版本一致。
+- `check-docs.mjs`：校验 Markdown 本地链接、根文档索引、源码模块索引和相关目录文件索引，并拒绝已移除的文档名称。
+- `install-git-hooks.mjs`：只为当前源码仓库设置 `.githooks`，不修改用户全局 Git 配置。
+- `verify-commit.mjs`：为 pre-commit hook 与 GitHub CI 串行执行统一的完整提交检查。
 - `validate-config.mjs`：在安装系统服务前使用已构建的 Gateway 配置模块执行完整校验。
 
 ## 构建、打包与服务
 
 - `clean-dist.mjs`：构建前清理 `dist/`。
-- `prepare-package.mjs`：npm 打包前构建源码，并验证已安装包包含运行入口。
+- `prepare-package.mjs`：源码仓库安装或 npm 打包前启用仓库 Git hooks、构建源码，并验证已安装包包含运行入口。
 - `smoke-package.mjs`：生成实际 tarball，在隔离目录安装并执行公开的 `codexc` 入口与配置预检。
 - `check-release-tag.mjs`：要求 Git Tag 与 `package.json` 版本严格一致，防止发布错版。
 - `sync-gateway-version.mjs`：以锁定的 Codex CLI 协议版本同步 `package.json`、锁文件和 Gateway 运行时版本；不维护独立版本号。

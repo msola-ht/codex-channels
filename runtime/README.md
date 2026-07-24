@@ -3,6 +3,7 @@
 本目录保存 npm CLI 与已编译 Gateway 必须直接共享的稳定 JavaScript 模块，不承载会话业务。
 
 - `config-event-queue.mjs`：以有界、版本化、原子更新的队列保存待投递配置事件。
+- `config-event-queue.d.mts`：声明配置事件队列共享模块的 TypeScript 接口。
 - `gateway-config.mjs`：安全解析、严格校验，并在保留已有注释的前提下以 `0600` 权限原子写入 CLI、脚本和 Gateway 共享的 TOML 配置。
 - `gateway-config.d.mts`：声明共享 TOML 配置模块的 TypeScript 接口。
 

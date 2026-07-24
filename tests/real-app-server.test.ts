@@ -228,6 +228,7 @@ suite("real Codex App Server over stdio", () => {
           error instanceof Error ? error.message : String(error),
           appServerStderr,
         ),
+        { cause: error },
       );
     }
 

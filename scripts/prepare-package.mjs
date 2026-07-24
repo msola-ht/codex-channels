@@ -3,11 +3,13 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { packageDir } from "./runtime-config.mjs";
+import { installGitHooks } from "./install-git-hooks.mjs";
 
 const sourceConfig = join(packageDir, "tsconfig.build.json");
 const builtEntry = join(packageDir, "dist", "main.js");
 
 if (existsSync(sourceConfig)) {
+  installGitHooks(packageDir);
   const result = spawnSync("npm", ["run", "build"], {
     cwd: packageDir,
     stdio: "inherit",

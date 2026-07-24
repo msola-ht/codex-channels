@@ -187,23 +187,45 @@ function withQueueLock(queuePath, operation) {
         }
       }
       if (Date.now() - startedAt >= lockTimeoutMs) {
-        throw new Error("配置事件队列正被其他进程使用，请稍后重试");
+        throw new Error("配置事件队列正被其他进程使用，请稍后重试", {
+          cause: error,
+        });
       }
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     }
   }
+  let result;
+  let operationFailed = false;
+  let operationError;
   try {
-    return operation();
-  } finally {
+    result = operation();
+  } catch (error) {
+    operationFailed = true;
+    operationError = error;
+  }
+  let releaseFailed = false;
+  let releaseError;
+  try {
     closeSync(descriptor);
-    try {
-      unlinkSync(lockPath);
-    } catch (error) {
-      if (error?.code !== "ENOENT") {
-        throw error;
-      }
+  } catch (error) {
+    releaseFailed = true;
+    releaseError = error;
+  }
+  try {
+    unlinkSync(lockPath);
+  } catch (error) {
+    if (error?.code !== "ENOENT" && !releaseFailed) {
+      releaseFailed = true;
+      releaseError = error;
     }
   }
+  if (operationFailed) {
+    throw operationError;
+  }
+  if (releaseFailed) {
+    throw releaseError;
+  }
+  return result;
 }
 
 function isStaleLock(lockPath) {

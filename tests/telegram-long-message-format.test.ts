@@ -27,7 +27,7 @@ describe("Telegram long final message planner", () => {
     const code = [
       "```ts",
       ...Array.from({ length: 100 }, (_, index) =>
-        `export const value${index} = \"${"x".repeat(40)}\";`
+        `export const value${index} = "${"x".repeat(40)}";`
       ),
       "```",
     ].join("\n");

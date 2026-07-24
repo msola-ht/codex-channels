@@ -59,6 +59,8 @@ export function parseGatewayConfig(content, source = "config.toml") {
     });
     return document;
   } catch (error) {
+    // TomlError 会包含原始配置行，不能通过 cause 暴露 Token 等敏感内容。
+    // eslint-disable-next-line preserve-caught-error
     throw new Error(
       `${source} 语法无效：${tomlErrorSummary(error)}`,
     );

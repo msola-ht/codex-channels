@@ -329,7 +329,7 @@ describe("TelegramOutbox", () => {
     const text = [
       "```ts",
       ...Array.from({ length: 100 }, (_, index) =>
-        `export const value${index} = \"${"x".repeat(40)}\";`
+        `export const value${index} = "${"x".repeat(40)}";`
       ),
       "```",
     ].join("\n");
@@ -361,7 +361,7 @@ describe("TelegramOutbox", () => {
     const text = [
       "```ts",
       ...Array.from({ length: 100 }, (_, index) =>
-        `export const value${index} = \"${"x".repeat(40)}\";`
+        `export const value${index} = "${"x".repeat(40)}";`
       ),
       "```",
     ].join("\n");

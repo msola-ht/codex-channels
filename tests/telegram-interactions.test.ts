@@ -110,9 +110,16 @@ describe("TelegramInteractionPort", () => {
 
   it("splits long approval details and only places buttons on the last chunk", async () => {
     let nextMessageId = 1;
-    const sendMessage = vi.fn(async (_chatId: string, _text: string, _options?: unknown) => ({
-      message_id: nextMessageId++,
-    }));
+    const sendMessage = vi.fn(async (
+      chatId: string,
+      text: string,
+      options?: unknown,
+    ) => {
+      void chatId;
+      void text;
+      void options;
+      return { message_id: nextMessageId++ };
+    });
     const editMessageText = vi.fn(async () => true as const);
     const bot = {
       callbackQuery: vi.fn(),

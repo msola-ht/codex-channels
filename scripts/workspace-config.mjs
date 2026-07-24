@@ -296,7 +296,7 @@ function inspectWorkspaceDirectory(cwd) {
     if (error?.code === "ENOENT" || error?.code === "ENOTDIR") {
       return { valid: false };
     }
-    throw new Error(`Workspace 目录无法访问：${cwd}`);
+    throw new Error(`Workspace 目录无法访问：${cwd}`, { cause: error });
   }
 }
 

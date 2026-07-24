@@ -23,6 +23,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
+          fetch-depth: 2
           persist-credentials: false
 
       - name: Setup Node.js
@@ -41,17 +42,8 @@ jobs:
       - name: Verify release tag
         run: node scripts/check-release-tag.mjs
 
-      - name: Check types and versions
-        run: npm run check
-
-      - name: Lint production source
-        run: npm run lint
-
-      - name: Run tests
-        run: npm test
-
-      - name: Test package tarball
-        run: npm run test:package
+      - name: Run commit verification
+        run: npm run verify:commit
 
       - name: Publish
         run: npm publish --access public

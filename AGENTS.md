@@ -134,6 +134,13 @@ Surface -> Application/Core <- Codex Client
 ## 验证
 
 - 每次修改运行与改动最相关的最小验证，至少覆盖本次修改的主路径和失败路径。
+- `npm run verify:commit` 是本地提交与 GitHub CI 共用的完整提交检查入口，必须依次覆盖
+  暂存差异格式、类型与版本、生产和测试 Lint、文档链接与索引、全量测试、Shell 语法、
+  npm tarball 安装冒烟，以及当前平台可执行的服务模板检查。
+- `npm ci`、`npm install` 或 `npm run hooks:install` 必须把仓库内 `.githooks/pre-commit`
+  设为当前仓库 hook；不得使用 `git commit --no-verify` 绕过检查。
+- 修改检查脚本、Git hook 或 CI 时，必须保持 `verify:commit`、`.githooks/pre-commit`、
+  GitHub Actions、根目录 README、脚本索引和工作流文档一致。
 - 协议、Transport 或共享 App Server 行为变化必须增加真实 App Server 冒烟验证，不能只依赖 Mock。
 - 核心协议测试应覆盖初始化、消息分流、请求清理、Thread/Turn 主路径和订阅取消。
 - 会话测试应覆盖双向发现与接续、绑定独占、活动状态和 Gateway 重启恢复。
@@ -150,5 +157,7 @@ Surface -> Application/Core <- Codex Client
 - 提交前审查根目录文档索引、`src/README.md` 模块索引及相关目录 README 中的文件索引，确认文件、模块、公开入口、命令、配置和链接均与当前仓库及本次改动一致。
 - 发现索引缺项、孤儿链接、旧名称或行为描述不一致时，必须先更新文档并重新检查；文档索引未通过审查不得提交。
 - 提交前至少执行 `git diff --check`、文档链接与索引一致性检查，以及本次改动要求的验证命令。
+- 正常提交由 pre-commit hook 自动执行 `npm run verify:commit`；hook 未安装或不可用时，
+  必须先运行 `npm run hooks:install` 并手动执行同一检查，不能用缩减命令替代。
 - 未经用户明确要求，不执行提交、推送、历史改写或其他远端写入。
 - 完成修改时说明改动的模块和行为、已运行的验证、涉及的公开接口或安全边界，以及仍存在的风险。
