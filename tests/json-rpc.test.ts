@@ -126,6 +126,20 @@ class FakeTransport extends BaseTransport {
           }),
         ),
       );
+    } else if (decoded.method === "config/batchWrite") {
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({
+            id: decoded.id,
+            result: {
+              status: "ok",
+              version: "1",
+              filePath: "/tmp/config.toml",
+              overriddenMetadata: null,
+            },
+          }),
+        ),
+      );
     } else if (decoded.method === "turn/start") {
       queueMicrotask(() =>
         this.emitMessage(
@@ -362,6 +376,26 @@ describe("JsonRpcClient", () => {
     expect(transport.sent.find((message) => message.method === "plugin/installed")?.params)
       .toEqual({ cwds: ["/tmp/project"] });
     expect(transport.sent.some((message) => message.method === "plugin/list")).toBe(false);
+  });
+
+  it("persists the default service tier through the App Server config API", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await client.writeDefaultServiceTier("default");
+
+    expect(transport.sent.find((message) => message.method === "config/batchWrite")?.params)
+      .toEqual({
+        edits: [{
+          keyPath: "service_tier",
+          value: "default",
+          mergeStrategy: "replace",
+        }],
+        reloadUserConfig: true,
+      });
   });
 
   it("tags Gateway user input with a client message id", async () => {

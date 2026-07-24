@@ -77,7 +77,9 @@ export function loadRuntimeConfig(environment: NodeJS.ProcessEnv = process.env):
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): GatewayConfig {
   if (Object.hasOwn(environment, "CODEX_BRIDGE_SANDBOX")) {
-    throw new ConfigurationError("不支持配置项 CODEX_BRIDGE_SANDBOX；请改用 CODEX_SANDBOX");
+    throw new ConfigurationError(
+      "不支持配置项 CODEX_BRIDGE_SANDBOX；请运行 codexc doctor --fix，或手动改用 CODEX_SANDBOX",
+    );
   }
   const parsed = environmentSchema.safeParse(environment);
   if (!parsed.success) {

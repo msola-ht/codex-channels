@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ModelSelectionService } from "../src/application/model-selection-service.js";
 import type { CodexAppServerClient } from "../src/codex-client/client.js";
@@ -50,7 +50,10 @@ function createService(settings?: {
   effort: string | null;
   serviceTier: string | null;
 }): ModelSelectionService {
-  const codex = { listModels: async () => models } as unknown as CodexAppServerClient;
+  const codex = {
+    listModels: async () => models,
+    writeDefaultServiceTier: async () => undefined,
+  } as unknown as CodexAppServerClient;
   let currentSettings = settings;
   const router = {
     current: () => currentSettings
@@ -116,6 +119,38 @@ describe("ModelSelectionService", () => {
       serviceTierPending: true,
     });
     expect(service.turnOverrides(target)).toEqual({ serviceTier: "default" });
+  });
+
+  it("persists an explicit Fast choice as the Codex CLI default", async () => {
+    const writeDefaultServiceTier = vi.fn().mockResolvedValue(undefined);
+    const codex = {
+      listModels: async () => models,
+      writeDefaultServiceTier,
+    } as unknown as CodexAppServerClient;
+    const router = {
+      current: () => ({
+        target,
+        workspaceId: "main",
+        threadId: "thread-1",
+        sessionId: "session-1",
+      }),
+      modelSettings: () => ({
+        model: "gpt-main",
+        effort: "medium",
+        serviceTier: "default",
+      }),
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService(codex, router);
+
+    await service.selectFastMode(target, "off");
+
+    expect(writeDefaultServiceTier).toHaveBeenCalledWith("default");
+    expect(service.turnOverrides(target)).toEqual({});
+
+    await service.selectFastMode(target, "on");
+
+    expect(writeDefaultServiceTier).toHaveBeenLastCalledWith("priority");
+    expect(service.turnOverrides(target)).toEqual({ serviceTier: "priority" });
   });
 
   it("updates the local thread settings after Fast overrides are accepted", async () => {

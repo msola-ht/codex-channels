@@ -449,4 +449,105 @@ describe("codexc CLI", () => {
       await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
     }
   });
+
+  it("explicitly repairs the deprecated sandbox configuration with doctor --fix", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-fix-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    mkdirSync(workspace);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_ENV_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    const envPath = join(home, ".env");
+    writeFileSync(
+      envPath,
+      readFileSync(envPath, "utf8").replace(
+        "CODEX_SANDBOX=workspace-write",
+        "CODEX_BRIDGE_SANDBOX=read-only",
+      ),
+    );
+
+    const repaired = spawnSync(process.execPath, [cli, "doctor", "--fix"], {
+      cwd: workspace,
+      env: environment,
+      encoding: "utf8",
+    });
+    const parsed = parse(readFileSync(envPath, "utf8"));
+
+    expect(repaired.stdout).toContain(
+      "[修复] 用户配置：已将 CODEX_BRIDGE_SANDBOX 改为 CODEX_SANDBOX",
+    );
+    expect(repaired.stdout).toContain("[通过] 配置兼容性");
+    expect(parsed.CODEX_SANDBOX).toBe("read-only");
+    expect(parsed.CODEX_BRIDGE_SANDBOX).toBeUndefined();
+    expect(statSync(envPath).mode & 0o777).toBe(0o600);
+  });
+
+  it("reports deprecated configuration without silently repairing it", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-legacy-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    mkdirSync(workspace);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_ENV_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    const envPath = join(home, ".env");
+    const legacyContent = readFileSync(envPath, "utf8").replace(
+      "CODEX_SANDBOX=workspace-write",
+      "CODEX_BRIDGE_SANDBOX=read-only",
+    );
+    writeFileSync(envPath, legacyContent);
+
+    const diagnosed = spawnSync(process.execPath, [cli, "doctor"], {
+      cwd: workspace,
+      env: environment,
+      encoding: "utf8",
+    });
+
+    expect(diagnosed.status).toBe(1);
+    expect(diagnosed.stdout).toContain(
+      "[失败] 配置兼容性：检测到 CODEX_BRIDGE_SANDBOX；请运行 codexc doctor --fix",
+    );
+    expect(readFileSync(envPath, "utf8")).toBe(legacyContent);
+  });
+
+  it("keeps the current sandbox value when doctor --fix removes a duplicate old key", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-fix-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    mkdirSync(workspace);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_ENV_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    const envPath = join(home, ".env");
+    writeFileSync(
+      envPath,
+      `${readFileSync(envPath, "utf8")}CODEX_BRIDGE_SANDBOX=read-only\n`,
+    );
+
+    const repaired = spawnSync(process.execPath, [cli, "doctor", "--fix"], {
+      cwd: workspace,
+      env: environment,
+      encoding: "utf8",
+    });
+    const parsed = parse(readFileSync(envPath, "utf8"));
+
+    expect(repaired.stdout).toContain(
+      "[修复] 用户配置：已保留 CODEX_SANDBOX 并删除旧的 CODEX_BRIDGE_SANDBOX",
+    );
+    expect(parsed.CODEX_SANDBOX).toBe("workspace-write");
+    expect(parsed.CODEX_BRIDGE_SANDBOX).toBeUndefined();
+  });
 });

@@ -1,5 +1,14 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { createConnection } from "node:net";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
@@ -10,6 +19,11 @@ import { packageDir, resolveConfiguredPath, userDataDir } from "./runtime-config
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
 const checks = [];
+const [option, ...extraOptions] = process.argv.slice(2);
+if (extraOptions.length > 0 || (option !== undefined && option !== "--fix")) {
+  throw new Error("用法：codexc doctor [--fix]");
+}
+const fixRequested = option === "--fix";
 const packageMetadata = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
 const protocolMetadata = JSON.parse(
   readFileSync(join(packageDir, "src", "codex-protocol", "version.json"), "utf8"),
@@ -33,7 +47,28 @@ if (!existsSync(envPath)) {
   record("用户配置", true, envPath);
   checkMode("配置目录权限", dataDir, 0o700);
   checkMode("配置文件权限", envPath, 0o600);
-  env = parse(readFileSync(envPath, "utf8"));
+  if (fixRequested) {
+    const repair = repairDeprecatedConfiguration(envPath);
+    repaired(
+      "用户配置",
+      repair.changed
+        ? repair.detail
+        : "未发现可自动修复的旧配置",
+    );
+  }
+  const content = readFileSync(envPath, "utf8");
+  const legacySandboxConfigured = hasEnvironmentKey(
+    content,
+    "CODEX_BRIDGE_SANDBOX",
+  );
+  record(
+    "配置兼容性",
+    !legacySandboxConfigured,
+    legacySandboxConfigured
+      ? "检测到 CODEX_BRIDGE_SANDBOX；请运行 codexc doctor --fix"
+      : "未检测到已知旧配置项",
+  );
+  env = parse(content);
 }
 
 if (env) {
@@ -155,6 +190,60 @@ function record(name, passed, detail) {
 
 function note(name, detail) {
   checks.push({ kind: "note", prefix: "[提示]", name, detail });
+}
+
+function repaired(name, detail) {
+  checks.push({ kind: "repair", prefix: "[修复]", name, detail });
+}
+
+function repairDeprecatedConfiguration(path) {
+  const content = readFileSync(path, "utf8");
+  const newline = content.includes("\r\n") ? "\r\n" : "\n";
+  const lines = content.split(/\r?\n/);
+  const currentPattern = /^[ \t]*(?:export[ \t]+)?CODEX_SANDBOX[ \t]*=/;
+  const legacyPattern = /^[ \t]*(?:export[ \t]+)?CODEX_BRIDGE_SANDBOX[ \t]*=/;
+  const currentConfigured = lines.some((line) => currentPattern.test(line));
+  let migrated = false;
+  let removed = 0;
+  const updatedLines = [];
+  for (const line of lines) {
+    if (!legacyPattern.test(line)) {
+      updatedLines.push(line);
+      continue;
+    }
+    if (!currentConfigured && !migrated) {
+      updatedLines.push(line.replace("CODEX_BRIDGE_SANDBOX", "CODEX_SANDBOX"));
+      migrated = true;
+      continue;
+    }
+    removed += 1;
+  }
+  if (!migrated && removed === 0) {
+    return { changed: false, detail: "" };
+  }
+  const temporaryPath = `${path}.${process.pid}.doctor.tmp`;
+  try {
+    writeFileSync(temporaryPath, updatedLines.join(newline), {
+      mode: 0o600,
+      flag: "wx",
+    });
+    renameSync(temporaryPath, path);
+    chmodSync(path, 0o600);
+  } finally {
+    rmSync(temporaryPath, { force: true });
+  }
+  return {
+    changed: true,
+    detail: migrated
+      ? "已将 CODEX_BRIDGE_SANDBOX 改为 CODEX_SANDBOX"
+      : "已保留 CODEX_SANDBOX 并删除旧的 CODEX_BRIDGE_SANDBOX",
+  };
+}
+
+function hasEnvironmentKey(content, key) {
+  return content
+    .split(/\r?\n/)
+    .some((line) => new RegExp(`^[ \\t]*(?:export[ \\t]+)?${key}[ \\t]*=`).test(line));
 }
 
 function checkMode(name, path, expected) {

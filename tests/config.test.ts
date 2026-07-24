@@ -58,7 +58,9 @@ describe("loadConfig", () => {
       TELEGRAM_ALLOWED_USER_IDS: "123",
       ...workspaceEnvironment(workdir),
       CODEX_BRIDGE_SANDBOX: "read-only",
-    })).toThrow("不支持配置项 CODEX_BRIDGE_SANDBOX；请改用 CODEX_SANDBOX");
+    })).toThrow(
+      "不支持配置项 CODEX_BRIDGE_SANDBOX；请运行 codexc doctor --fix，或手动改用 CODEX_SANDBOX",
+    );
   });
 
   it("accepts Rich Messages as an explicit Telegram output format", () => {

@@ -254,8 +254,10 @@ function showConfig(args) {
 }
 
 function runDoctor(args) {
-  requireNoArguments(args, "用法：codexc doctor");
-  const result = spawnSync(process.execPath, [join(packageDir, "scripts/doctor.mjs")], {
+  if (args.length > 1 || (args.length === 1 && args[0] !== "--fix")) {
+    throw new Error("用法：codexc doctor [--fix]");
+  }
+  const result = spawnSync(process.execPath, [join(packageDir, "scripts/doctor.mjs"), ...args], {
     stdio: "inherit",
     env: process.env,
     cwd: process.cwd(),
@@ -409,7 +411,7 @@ function printHelp() {
   service logs [-f] [-n 行数] [--service 名称]
                                查看或持续跟踪后台服务日志
   config                       显示用户配置路径
-  doctor                       检查安装、配置、Codex 与服务连通性
+  doctor [--fix]               检查安装、配置、Codex 与服务连通性；显式修复已知旧配置
   version                      显示版本
 `);
 }

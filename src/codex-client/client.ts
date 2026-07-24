@@ -243,6 +243,21 @@ export class CodexAppServerClient {
     return models;
   }
 
+  async writeDefaultServiceTier(serviceTier: string): Promise<void> {
+    await this.rpc.request(
+      "config/batchWrite",
+      {
+        edits: [{
+          keyPath: "service_tier",
+          value: serviceTier,
+          mergeStrategy: "replace",
+        }],
+        reloadUserConfig: true,
+      },
+      { retryOverload: false },
+    );
+  }
+
   async forkThread(threadId: string, cwd: string): Promise<ThreadForkResponse> {
     return this.rpc.request<ThreadForkResponse>(
       "thread/fork",

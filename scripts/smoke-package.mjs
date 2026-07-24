@@ -39,7 +39,7 @@ try {
   }
   if (
     !help.includes("setup ")
-    || !help.includes("doctor ")
+    || !help.includes("doctor [--fix]")
     || !help.includes("service install")
     || !help.includes("service reload")
     || !help.includes("service logs")

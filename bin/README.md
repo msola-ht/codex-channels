@@ -4,11 +4,13 @@
 
 ## 文件
 
-- `codexc.mjs`：解析顶层命令，并把工作转交给 Gateway 入口或 `scripts/` 中的管理脚本；`doctor` 会执行安装、配置和服务连通性诊断。
+- `codexc.mjs`：解析顶层命令，并把工作转交给 Gateway 入口或 `scripts/` 中的管理脚本；`doctor`
+  会执行安装、配置和服务连通性诊断，`doctor --fix` 只显式修复已知旧配置。
 
 ## 命令范围
 
 - `init`、`setup`、`config`：初始化、交互配置 Telegram，或显示用户级 `.codex-connect` 配置。
+- `doctor [--fix]`：诊断安装与连通性；可由用户主动修复明确支持的旧配置。
 - `start`：启动已构建的 Gateway。
 - `remote`：连接共享 App Server 并启动原生 Codex TUI。
 - `ws`：列出或注册 Workspace。

@@ -98,13 +98,15 @@ export class ModelSelectionService {
         );
       }
     }
+    const selectedTier = enable ? tierId! : standardServiceTierRequestValue;
+    await this.codex.writeDefaultServiceTier(selectedTier);
     if ((enable && currentFast) || (!enable && !currentFast)) {
       return current;
     }
     const pending = this.pendingByConversation.get(this.key(target));
     this.pendingByConversation.set(this.key(target), {
       ...pending,
-      serviceTier: enable ? tierId! : standardServiceTierRequestValue,
+      serviceTier: selectedTier,
     });
     return this.resolveState(target, models);
   }
