@@ -335,18 +335,30 @@ contractSuite("isolated Codex App Server state contract", () => {
     }
   }, 15_000);
 
-  it("broadcasts peer Fast setting changes to another subscribed client", async () => {
-    const observedTiers: unknown[] = [];
+  it("broadcasts peer model, effort and Fast changes across a peer reconnect", async () => {
+    const observedSettings: Array<{
+      model: unknown;
+      effort: unknown;
+      serviceTier: unknown;
+    }> = [];
     const removeNotification = ownerClient.onNotification((notification) => {
       if (notification.method !== "thread/settings/updated") {
         return;
       }
       const params = notification.params as {
         threadId?: unknown;
-        threadSettings?: { serviceTier?: unknown };
+        threadSettings?: {
+          model?: unknown;
+          effort?: unknown;
+          serviceTier?: unknown;
+        };
       };
       if (params.threadId === threadId) {
-        observedTiers.push(params.threadSettings?.serviceTier);
+        observedSettings.push({
+          model: params.threadSettings?.model,
+          effort: params.threadSettings?.effort,
+          serviceTier: params.threadSettings?.serviceTier,
+        });
       }
     });
     const started = await ownerClient.startThread(workdir);
@@ -354,15 +366,36 @@ contractSuite("isolated Codex App Server state contract", () => {
     try {
       await peerRpc.request("thread/settings/update", {
         threadId,
+        model: "gpt-5.6-sol",
+        effort: "high",
         serviceTier: "priority",
       });
-      await waitFor(() => observedTiers.includes("priority"), 2_000);
+      await waitFor(
+        () => observedSettings.some((settings) =>
+          settings.model === "gpt-5.6-sol"
+          && settings.effort === "high"
+          && settings.serviceTier === "priority"),
+        2_000,
+      );
+
+      await peerClient.close();
+      peerRpc = new JsonRpcClient(new UnixWebSocketTransport(socketPath));
+      peerClient = new CodexAppServerClient(peerRpc, { sandbox: "read-only" });
+      await peerClient.connect();
 
       await peerRpc.request("thread/settings/update", {
         threadId,
+        model: "gpt-5.6-sol",
+        effort: "low",
         serviceTier: "default",
       });
-      await waitFor(() => observedTiers.includes("default"), 2_000);
+      await waitFor(
+        () => observedSettings.some((settings) =>
+          settings.model === "gpt-5.6-sol"
+          && settings.effort === "low"
+          && settings.serviceTier === "default"),
+        2_000,
+      );
     } finally {
       removeNotification();
       await ownerClient.unsubscribeThread(threadId).catch(() => undefined);

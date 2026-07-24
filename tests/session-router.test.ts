@@ -102,7 +102,7 @@ describe("SessionRouter", () => {
     expect(unsubscribed).toEqual(["new"]);
   });
 
-  it("restores bound thread subscriptions after App Server reconnect", async () => {
+  it("restores bound thread model, effort and Fast state after Gateway reconnect", async () => {
     const resumed: string[] = [];
     const client = {
       listThreads: async () => [],
@@ -113,7 +113,7 @@ describe("SessionRouter", () => {
           thread: thread(threadId, { type: "idle" }),
           model: "gpt-main",
           reasoningEffort: "high",
-          serviceTier: "default",
+          serviceTier: "priority",
         };
       },
     } as unknown as CodexAppServerClient;
@@ -128,7 +128,7 @@ describe("SessionRouter", () => {
     expect(router.modelSettings(target)).toEqual({
       model: "gpt-main",
       effort: "high",
-      serviceTier: "default",
+      serviceTier: "priority",
     });
   });
 
