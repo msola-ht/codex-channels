@@ -6,16 +6,19 @@ import { join } from "node:path";
 
 import { configEventQueuePath } from "../runtime/config-event-queue.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import { resolveProxyEnvironment } from "../runtime/network-proxy.mjs";
 import {
   initializeUserData,
   packageDir,
   requireUserConfig,
+  resolveConfiguredPath,
   runtimeConfig,
   userDataDir,
 } from "../scripts/runtime-config.mjs";
 import {
   addWorkspaceToConfig,
   inspectWorkspaceConfig,
+  readWorkspaceConfig,
   removeWorkspaceFromConfig,
 } from "../scripts/workspace-config.mjs";
 
@@ -46,6 +49,9 @@ try {
       break;
     case "gateway":
       runGateway(args);
+      break;
+    case "service-app-server":
+      runServiceAppServer(args);
       break;
     case "remote":
       runScript("scripts/codex-remote.mjs", args, {}, process.cwd());
@@ -81,7 +87,7 @@ function initialize(args) {
   console.log(`配置文件：${result.configPath}`);
   if (result.created) {
     console.log(`默认 Workspace：${result.workspace}`);
-    console.log("请运行 codexc setup 配置 Telegram，然后运行 codexc service install。");
+    console.log("请运行 codexc setup 配置通讯渠道，然后运行 codexc service install。");
   }
 }
 
@@ -125,6 +131,30 @@ function runGateway(args) {
     }
     process.exitCode = code ?? 1;
   });
+}
+
+function runServiceAppServer(args) {
+  if (args.length > 0) {
+    throw new Error("内部服务入口不接受参数");
+  }
+  const runtime = configuredEnvironment();
+  const codex = table(runtime.document.codex);
+  const { defaultWorkspace } = readWorkspaceConfig(runtime.document);
+  const socketPath = resolveConfiguredPath(
+    stringValue(codex.socket_path),
+    runtime.dataDir,
+    join(runtime.dataDir, "runtime", "codex-app-server.sock"),
+  );
+  const child = spawn(runtime.environment.CODEX_BINARY, [
+    "app-server",
+    "--listen",
+    `unix://${socketPath}`,
+  ], {
+    stdio: "inherit",
+    env: runtime.environment,
+    cwd: defaultWorkspace.cwd,
+  });
+  forwardChildLifecycle(child);
 }
 
 function workspace(args) {
@@ -273,7 +303,7 @@ function runDoctor(args) {
 
 function runSetup() {
   initializeUserData({ cwd: process.cwd() });
-  runScript("scripts/telegram-setup.mjs", []);
+  runScript("scripts/setup.mjs", []);
 }
 
 function runScript(relativePath, args, additionalEnvironment = {}, workingDirectory) {
@@ -291,28 +321,48 @@ function configuredEnvironment() {
   const document = readGatewayConfig(configPath);
   const network = table(document.network);
   const codex = table(document.codex);
-  const httpProxy = stringValue(network.http_proxy);
-  const httpsProxy = stringValue(network.https_proxy);
-  const allProxy = stringValue(network.all_proxy);
-  const noProxy = stringValue(network.no_proxy);
+  const proxyEnvironment = resolveProxyEnvironment(network, process.env);
   return {
     configPath,
     dataDir,
+    document,
     environment: {
       ...process.env,
       CODEX_CONNECT_HOME: dataDir,
       CODEX_CONNECT_CONFIG_FILE: configPath,
       CODEX_BINARY: stringValue(codex.binary) || "codex",
-      HTTP_PROXY: httpProxy,
-      HTTPS_PROXY: httpsProxy,
-      ALL_PROXY: allProxy,
-      NO_PROXY: noProxy,
-      http_proxy: httpProxy,
-      https_proxy: httpsProxy,
-      all_proxy: allProxy,
-      no_proxy: noProxy,
+      ...proxyEnvironment,
     },
   };
+}
+
+function forwardChildLifecycle(child) {
+  const forward = (signal) => {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill(signal);
+    }
+  };
+  const terminate = () => forward("SIGTERM");
+  const interrupt = () => forward("SIGINT");
+  const cleanup = () => {
+    process.off("SIGTERM", terminate);
+    process.off("SIGINT", interrupt);
+  };
+  process.on("SIGTERM", terminate);
+  process.on("SIGINT", interrupt);
+  child.once("error", (error) => {
+    cleanup();
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+  child.once("exit", (code, signal) => {
+    cleanup();
+    if (signal) {
+      process.kill(process.pid, signal);
+      return;
+    }
+    process.exitCode = code ?? 1;
+  });
 }
 
 function table(value) {
@@ -415,7 +465,7 @@ function printHelp() {
 用法：codexc <命令>
 
   init                         初始化 ~/.codex-connect
-  setup                        配置 Telegram Bot 和允许的用户 ID
+  setup                        选择并配置 Gateway 模块
   start                        前台启动 App Server 与 Gateway
   remote [--workspace ID]      在当前目录启动共享 App Server 的 Codex TUI
   ws                           列出 Workspace

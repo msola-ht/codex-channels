@@ -22,7 +22,7 @@ afterEach(() => {
 });
 
 describe("Telegram setup", () => {
-  it("does not echo a bot token entered through a TTY", async () => {
+  it("echoes a bot token entered through a TTY", async () => {
     const input = new PassThrough() as PassThrough & { isTTY: boolean; setRawMode: ReturnType<typeof vi.fn> };
     input.isTTY = true;
     input.setRawMode = vi.fn();
@@ -40,7 +40,7 @@ describe("Telegram setup", () => {
 
     await expect(answer).resolves.toBe(token);
     expect(renderedOutput).toContain("Telegram Bot Token：");
-    expect(renderedOutput).not.toContain(token);
+    expect(renderedOutput).toContain(token);
     prompt.close();
   });
 
@@ -64,7 +64,7 @@ describe("Telegram setup", () => {
       prompter: {
         ask: async () => nextAnswer(),
         secret: async () => {
-          expect(renderedOutput).toContain("输入内容不会显示，粘贴后按回车");
+          expect(renderedOutput).toContain("输入内容会显示，粘贴后按回车");
           return nextAnswer();
         },
         confirm: async () => ["y", "yes"].includes(nextAnswer().toLowerCase()),

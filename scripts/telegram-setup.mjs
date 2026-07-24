@@ -1,6 +1,5 @@
 import { randomBytes } from "node:crypto";
 import { createInterface } from "node:readline/promises";
-import { Writable } from "node:stream";
 import { pathToFileURL } from "node:url";
 
 import { Bot } from "grammy";
@@ -265,34 +264,14 @@ function createTelegramClient(token, proxyUrl) {
 }
 
 export function createPrompter(input, output) {
-  let hideInput = false;
-  const readlineOutput = new Writable({
-    write(chunk, encoding, callback) {
-      if (!hideInput) {
-        output.write(chunk, encoding);
-      }
-      callback();
-    },
+  const readline = createInterface({
+    input,
+    output,
+    terminal: Boolean(input.isTTY && output.isTTY),
   });
-  readlineOutput.isTTY = output.isTTY;
-  readlineOutput.columns = output.columns;
-  readlineOutput.rows = output.rows;
-  const readline = createInterface({ input, output: readlineOutput, terminal: Boolean(input.isTTY && output.isTTY) });
   return {
     ask: async (label) => (await readline.question(`${label}：`)).trim(),
-    secret: async (label) => {
-      if (!input.isTTY || !output.isTTY) {
-        return (await readline.question(`${label}：`)).trim();
-      }
-      output.write(`${label}：`);
-      hideInput = true;
-      try {
-        return (await readline.question("")).trim();
-      } finally {
-        hideInput = false;
-        output.write("\n");
-      }
-    },
+    secret: async (label) => (await readline.question(`${label}：`)).trim(),
     confirm: async (label, defaultValue) => {
       const suffix = defaultValue ? "[Y/n]" : "[y/N]";
       const value = (await readline.question(`${label} ${suffix} `)).trim().toLowerCase();
@@ -316,7 +295,7 @@ async function askChoice(prompt, label, maximum) {
 
 async function askToken(prompt, output) {
   while (true) {
-    output.write("请输入 Telegram Bot Token（输入内容不会显示，粘贴后按回车）。\n");
+    output.write("请输入 Telegram Bot Token（输入内容会显示，粘贴后按回车）。\n");
     const token = await prompt.secret("Telegram Bot Token");
     if (tokenPattern.test(token)) {
       return token;

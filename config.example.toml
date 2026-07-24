@@ -7,6 +7,7 @@ allowed_user_ids = [123456789]
 message_format = "html"
 
 [network]
+# 留空时依次使用标准代理环境变量和当前系统代理；填写的字段优先。
 http_proxy = ""
 https_proxy = ""
 all_proxy = ""

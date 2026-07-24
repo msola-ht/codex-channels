@@ -9,7 +9,8 @@
 
 ## 命令范围
 
-- `init`、`setup`、`config`：初始化、交互配置 Telegram，或显示用户级 `.codex-connect` 配置。
+- `init`、`setup`、`config`：初始化、从统一菜单选择配置模块，或显示用户级
+  `.codex-connect` 配置。
 - `doctor`：诊断当前 TOML 配置、安装与连通性，不改写配置。
 - `start`：启动已构建的 Gateway。
 - `remote`：连接共享 App Server 并启动原生 Codex TUI。

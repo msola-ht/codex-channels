@@ -49,6 +49,8 @@ try {
   }
   const installedPackage = join(temporaryDirectory, "node_modules", "@hegenai", "codexc");
   for (const requiredFile of [
+    "runtime/network-proxy.mjs",
+    "scripts/setup.mjs",
     "scripts/telegram-setup.mjs",
     "scripts/validate-config.mjs",
     "systemd/codex-connect-app-server.service.template",

@@ -37,7 +37,13 @@ codexc init
 codexc setup
 ```
 
-`codexc setup` 会引导通过官方 `@BotFather` 新建 Bot 或填写已有 Bot Token，验证 Token，并通过一次性 `/start` 配对链接自动获取 Telegram 用户 ID。复用当前 Bot 时默认保留已有用户允许名单，避免与运行中的 Gateway 争抢 Telegram 长轮询。该流程不依赖第三方机器人创建服务。也可以直接编辑 `~/.codex-connect/config.toml`，至少填写：
+`codexc setup` 使用统一设置菜单进入具体配置流程；当前可从“通讯渠道”选择 Telegram。Telegram 模块会引导
+通过官方 `@BotFather` 新建 Bot 或填写已有 Bot Token，验证 Token，并通过一次性 `/start`
+配对链接自动获取 Telegram 用户 ID。复用当前 Bot 时默认保留已有用户允许名单，避免与运行中的
+Gateway 争抢 Telegram 长轮询。该流程不依赖第三方机器人创建服务。也可以直接编辑
+`~/.codex-connect/config.toml`，至少填写：
+
+交互式输入 Bot Token 时会在当前终端明文显示；屏幕共享或录屏期间请先停止共享。
 
 ```toml
 [telegram]
@@ -87,7 +93,7 @@ codexc doctor
 
 ```bash
 codexc config                    # 显示配置路径
-codexc setup                     # 配置 Telegram Bot 和允许的用户 ID
+codexc setup                     # 选择并配置 Gateway 模块
 codexc doctor                    # 诊断配置与服务连通性
 codexc ws                        # 列出 Workspace
 codexc ws add                    # 注册当前目录
@@ -107,11 +113,17 @@ codexc service uninstall         # 卸载服务并保留用户数据
 
 macOS 使用 `com.hegenai.codex-app-server` 与 `com.hegenai.codex-gateway` 两个 launchd Job。Linux 使用 `systemctl --user` 管理两个独立服务；两种平台上的 `service restart` 都只重启 Gateway。
 
+`[network]` 代理字段留空时不需要额外设置：运行入口依次采用 TOML 明确值、当前进程的
+`HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`，再尝试 macOS 系统 HTTP/HTTPS
+代理或 Linux GNOME 手动代理，最后直连。Linux 服务也会继承 systemd 用户管理器已有的标准
+代理环境变量。自动代理配置（PAC）和未定义统一接口的桌面私有格式不会被猜测；需要时仍可在
+TOML 中明确填写。Telegram 的 `telegram.proxy_url` 保持最高优先级。
+
 `codexc service logs` 默认显示 Gateway 日志；使用 `--service app-server` 查看 App Server，使用 `--service all` 查看两者。`-n 200` 可调整显示行数，`-f` 可持续跟踪。macOS 默认忽略早于正常日志的陈旧 stderr，日志文件位于 `.codex-connect/runtime`；Linux 日志来自 systemd user journal。
 
 Telegram 与 App Server 均采用有界退避重连；连续失败耗尽后 Gateway 会退出，由 launchd 或 systemd 自动拉起，避免进程存活但不再接收消息。
 
-Gateway 会监测用户 `config.toml`：新增 Workspace 和 Telegram 允许用户会直接热加载；Workspace 新增后，Telegram 会向授权用户发送通知，并提供直接切换按钮。Workspace 新增事件会先写入 `~/.codex-connect/data/config-events.json`，Gateway 热加载或重启并通过平台 API 实际发送成功后再确认删除，因此不会因配置监听合并或重启窗口静默丢失；平台 API 重试后仍失败时保留事件，等待下次启动或 `codexc service reload`，发送后、确认前崩溃可能导致重复通知。删除允许用户会先重启 Gateway 并清理其旧 Thread 绑定；Bot Token、Telegram 代理、数据库、默认模型等 Gateway 配置变化时，Gateway 会优雅退出并由 launchd 或 systemd 自动拉起，Codex App Server 保持运行。`codex.binary`、`codex.socket_path` 或 `network` 代理涉及 App Server 服务定义，需要重新执行 `codexc service install`。配置校验失败时继续使用当前有效配置。Telegram 会通知热加载成功项、自动重启原因、需要重装的服务配置或加载失败状态，但不会发送原始配置和异常详情。可执行 `codexc service reload` 立即触发检查，无需等待文件监测。
+Gateway 会监测用户 `config.toml`：新增 Workspace 和 Telegram 允许用户会直接热加载；Workspace 新增后，Telegram 会向授权用户发送通知，并提供直接切换按钮。Workspace 新增事件会先写入 `~/.codex-connect/data/config-events.json`，Gateway 热加载或重启并通过平台 API 实际发送成功后再确认删除，因此不会因配置监听合并或重启窗口静默丢失；平台 API 重试后仍失败时保留事件，等待下次启动或 `codexc service reload`，发送后、确认前崩溃可能导致重复通知。删除允许用户会先重启 Gateway 并清理其旧 Thread 绑定；Bot Token、Telegram 代理、数据库、默认模型等 Gateway 配置变化时，Gateway 会优雅退出并由 launchd 或 systemd 自动拉起，Codex App Server 保持运行。`codex.binary`、`codex.socket_path` 或有效 `network` 代理同时影响独立 App Server，需要重新执行 `codexc service install` 使两项服务采用新值。系统代理和标准环境变量会在每次服务启动时重新读取，不会复制进服务定义。配置校验失败时继续使用当前有效配置。Telegram 会通知热加载成功项、自动重启原因、需要重装的服务配置或加载失败状态，但不会发送原始配置和异常详情。可执行 `codexc service reload` 立即触发检查，无需等待文件监测。
 
 ## Telegram 命令
 

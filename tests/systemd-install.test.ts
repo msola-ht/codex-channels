@@ -60,7 +60,7 @@ describe("systemd installer", () => {
     const nodeBinary = realpathSync(process.execPath);
 
     expect(appServer).toContain(
-      `ExecStart="${nodeBinary}" app-server --listen "unix://${join(runtimeDir, "codex-app-server.sock")}"`,
+      `ExecStart="${nodeBinary}" "${resolve("bin/codexc.mjs")}" service-app-server`,
     );
     expect(appServer).toContain(`WorkingDirectory=${root}`);
     expect(gateway).toContain(`WorkingDirectory=${configDir}`);
@@ -71,7 +71,7 @@ describe("systemd installer", () => {
     for (const unit of [appServer, gateway]) {
       expect(unit).toContain("UMask=0077");
       expect(unit).toContain("Restart=always");
-      expect(unit).toContain('Environment="HTTP_PROXY=http://127.0.0.1:7897/path%%20value"');
+      expect(unit).not.toContain('Environment="HTTP_PROXY=');
       expect(unit).not.toMatch(/__[A-Z_]+__/);
     }
     expect(statSync(appServerPath).mode & 0o777).toBe(0o600);

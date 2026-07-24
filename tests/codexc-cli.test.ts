@@ -281,6 +281,55 @@ describe("codexc CLI", () => {
     ]);
   });
 
+  it("starts the App Server through the service entry with effective proxy settings", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-service-entry-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    const capturePath = join(root, "capture.json");
+    const fakeCodex = join(root, "fake-codex.mjs");
+    mkdirSync(workspace);
+    writeFileSync(fakeCodex, [
+      "#!/usr/bin/env node",
+      "import { writeFileSync } from 'node:fs';",
+      "writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify({",
+      "  args: process.argv.slice(2),",
+      "  cwd: process.cwd(),",
+      "  httpsProxy: process.env.HTTPS_PROXY,",
+      "  lowerHttpsProxy: process.env.https_proxy,",
+      "}));",
+    ].join("\n"));
+    chmodSync(fakeCodex, 0o700);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_TEST_CAPTURE: capturePath,
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    const configPath = join(home, "config.toml");
+    updateGatewayConfig(configPath, (document) => {
+      table(document.codex).binary = fakeCodex;
+      table(document.network).https_proxy = "http://127.0.0.1:8899";
+    });
+
+    execFileSync(process.execPath, [cli, "service-app-server"], {
+      cwd: root,
+      env: environment,
+    });
+
+    expect(JSON.parse(readFileSync(capturePath, "utf8"))).toEqual({
+      args: [
+        "app-server",
+        "--listen",
+        `unix://${join(home, "runtime", "codex-app-server.sock")}`,
+      ],
+      cwd: realpathSync(join(home, "workspace")),
+      httpsProxy: "http://127.0.0.1:8899",
+      lowerHttpsProxy: "http://127.0.0.1:8899",
+    });
+  });
+
   it("does not overwrite an existing user configuration", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-"));
     temporaryDirectories.push(root);

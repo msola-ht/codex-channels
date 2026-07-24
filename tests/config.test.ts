@@ -165,6 +165,21 @@ describe("Gateway config.toml", () => {
     }).config.telegramProxyUrl).toBe("http://127.0.0.1:7890/");
   });
 
+  it("uses inherited proxy variables when network config is empty", () => {
+    const fixture = createFixture();
+    const config = loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+      HTTPS_PROXY: "http://127.0.0.1:8899",
+      NO_PROXY: "localhost",
+    }).config;
+
+    expect(config.telegramProxyUrl).toBe("http://127.0.0.1:8899/");
+    expect(config.networkProxy).toMatchObject({
+      https: "http://127.0.0.1:8899",
+      no: "localhost",
+    });
+  });
+
   it("rejects unsupported proxy protocols", () => {
     const fixture = createFixture({
       telegram: {

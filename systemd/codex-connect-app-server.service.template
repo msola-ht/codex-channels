@@ -4,16 +4,10 @@ Description=Codex Connect App Server
 [Service]
 Type=simple
 WorkingDirectory=__WORKDIR__
-ExecStart=__CODEX_BINARY__ app-server --listen __SOCKET_URI__
+ExecStart=__NODE_BINARY__ __CLI_ENTRY__ service-app-server
+Environment="CODEX_CONNECT_HOME=__CONFIG_DIR__"
+Environment="CODEX_CONNECT_CONFIG_FILE=__CONFIG_PATH_ENV__"
 Environment="PATH=__SYSTEMD_PATH__"
-Environment="HTTP_PROXY=__HTTP_PROXY__"
-Environment="HTTPS_PROXY=__HTTPS_PROXY__"
-Environment="ALL_PROXY=__ALL_PROXY__"
-Environment="NO_PROXY=__NO_PROXY__"
-Environment="http_proxy=__http_proxy__"
-Environment="https_proxy=__https_proxy__"
-Environment="all_proxy=__all_proxy__"
-Environment="no_proxy=__no_proxy__"
 UMask=0077
 Restart=always
 RestartSec=5

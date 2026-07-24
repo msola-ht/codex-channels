@@ -5,7 +5,9 @@
 ## 配置与 Workspace
 
 - `runtime-config.mjs`：解析用户数据目录和运行时路径，并初始化 `.codex-connect`。
-- `telegram-setup.mjs`：独立完成 Telegram Bot Token 验证、一次性私聊配对、用户 ID 获取和用户配置写入；新建 Bot 仅引导使用官方 BotFather。
+- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并从“通讯渠道”把流程委派给具体适配器。
+- `telegram-setup.mjs`：独立完成 Telegram Bot Token 验证、一次性私聊配对、用户 ID 获取和用户配置写入；
+  交互输入的 Token 在当前终端明文显示，但验证错误继续脱敏；新建 Bot 仅引导使用官方 BotFather。
 - `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。
 - `workspace-add.mjs`：把指定目录或命令调用目录注册为 Workspace，支持 `--prune-missing` 清理失效配置。
 
@@ -32,9 +34,9 @@
 - `check-release-tag.mjs`：要求 Git Tag 与 `package.json` 版本严格一致，防止发布错版。
 - `sync-gateway-version.mjs`：以锁定的 Codex CLI 协议版本同步 `package.json`、锁文件和 Gateway 运行时版本；不维护独立版本号。
 - `doctor.mjs`：检查 npm 包、Node、Codex CLI、当前 TOML 配置、Workspace、Unix WebSocket 与系统服务状态，不输出敏感配置内容。
-- `install-launchd.mjs`：渲染并安装 launchd plist。
+- `install-launchd.mjs`：渲染并安装 launchd plist；代理由 CLI 服务入口在每次启动时解析。
 - `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载两个 launchd 服务；检测到不支持的旧标签时明确拒绝启动，日常重启只更新 Gateway，保持共享 App Server 和活动 Turn 运行。
-- `install-systemd.mjs`：渲染并安装 Linux systemd 用户服务 unit。
+- `install-systemd.mjs`：渲染并安装 Linux systemd 用户服务 unit；代理由 CLI 服务入口在每次启动时解析。
 - `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载两个 systemd 用户服务；日常重启只更新 Gateway，用户数据始终保留。
 
 脚本不得把凭据写入 npm 安装目录；用户配置、SQLite、配置事件队列、Socket 和日志必须留在用户级 `.codex-connect`。

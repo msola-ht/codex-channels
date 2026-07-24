@@ -6,5 +6,7 @@
 - `config-event-queue.d.mts`：声明配置事件队列共享模块的 TypeScript 接口。
 - `gateway-config.mjs`：安全解析、严格校验，并在保留已有注释的前提下以 `0600` 权限原子写入 CLI、脚本和 Gateway 共享的 TOML 配置。
 - `gateway-config.d.mts`：声明共享 TOML 配置模块的 TypeScript 接口。
+- `network-proxy.mjs`：按 TOML、标准环境变量和受支持系统代理的顺序解析统一代理环境。
+- `network-proxy.d.mts`：声明共享代理解析模块的 TypeScript 接口。
 
 这里的模块同时被 `bin/`、`scripts/`、`src/config` 和 `src/bootstrap` 使用，必须保持无平台 SDK 依赖，并随 npm 包发布。

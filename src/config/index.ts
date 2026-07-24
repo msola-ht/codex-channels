@@ -7,6 +7,7 @@ import {
   validateGatewayConfigDocument,
   type GatewayConfigDocument,
 } from "../../runtime/gateway-config.mjs";
+import { resolveProxyEnvironment } from "../../runtime/network-proxy.mjs";
 
 export {
   configChange,
@@ -52,12 +53,26 @@ export function loadRuntimeConfig(environment: NodeJS.ProcessEnv = process.env):
       || resolve(environment.CODEX_CONNECT_HOME?.trim() || resolve(homedir(), ".codex-connect"), "config.toml"),
   );
   return {
-    config: loadConfigDocument(readFileSync(configPath, "utf8"), dirname(configPath)),
+    config: loadConfigDocument(
+      readFileSync(configPath, "utf8"),
+      dirname(configPath),
+      { environment, detectSystemProxy: true },
+    ),
     configPath,
   };
 }
 
-export function loadConfigDocument(content: string, baseDirectory: string): GatewayConfig {
+export function loadConfigDocument(
+  content: string,
+  baseDirectory: string,
+  {
+    environment = {},
+    detectSystemProxy = false,
+  }: {
+    environment?: NodeJS.ProcessEnv;
+    detectSystemProxy?: boolean;
+  } = {},
+): GatewayConfig {
   let document: GatewayConfigDocument;
   try {
     document = validateGatewayConfigDocument(parseGatewayConfig(content));
@@ -71,8 +86,13 @@ export function loadConfigDocument(content: string, baseDirectory: string): Gate
   if (!workspaces.some((workspace) => workspace.id === raw.default_workspace)) {
     throw new ConfigurationError(`default_workspace 不存在：${raw.default_workspace}`);
   }
+  const proxyEnvironment = resolveProxyEnvironment(
+    raw.network,
+    environment,
+    detectSystemProxy ? {} : { readSystemProxy: () => ({}) },
+  );
   const proxyUrl = normalizeProxyUrl(
-    raw.telegram.proxy_url ?? raw.network?.https_proxy ?? raw.network?.http_proxy,
+    raw.telegram.proxy_url || proxyEnvironment.HTTPS_PROXY || proxyEnvironment.HTTP_PROXY,
   );
   return {
     telegramBotToken: raw.telegram.bot_token,
@@ -81,10 +101,10 @@ export function loadConfigDocument(content: string, baseDirectory: string): Gate
     telegramMessageFormat: raw.telegram.message_format,
     codexBinary: raw.codex.binary,
     networkProxy: {
-      ...(raw.network?.http_proxy ? { http: raw.network.http_proxy } : {}),
-      ...(raw.network?.https_proxy ? { https: raw.network.https_proxy } : {}),
-      ...(raw.network?.all_proxy ? { all: raw.network.all_proxy } : {}),
-      ...(raw.network?.no_proxy ? { no: raw.network.no_proxy } : {}),
+      ...(proxyEnvironment.HTTP_PROXY ? { http: proxyEnvironment.HTTP_PROXY } : {}),
+      ...(proxyEnvironment.HTTPS_PROXY ? { https: proxyEnvironment.HTTPS_PROXY } : {}),
+      ...(proxyEnvironment.ALL_PROXY ? { all: proxyEnvironment.ALL_PROXY } : {}),
+      ...(proxyEnvironment.NO_PROXY ? { no: proxyEnvironment.NO_PROXY } : {}),
     },
     workspaces,
     defaultWorkspaceId: raw.default_workspace,

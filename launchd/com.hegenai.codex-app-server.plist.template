@@ -6,33 +6,20 @@
   <string>com.hegenai.codex-app-server</string>
   <key>ProgramArguments</key>
   <array>
-    <string>__CODEX_BINARY__</string>
-    <string>app-server</string>
-    <string>--listen</string>
-    <string>unix://__SOCKET_PATH__</string>
+    <string>__NODE_BINARY__</string>
+    <string>__CLI_ENTRY__</string>
+    <string>service-app-server</string>
   </array>
   <key>WorkingDirectory</key>
   <string>__WORKDIR__</string>
   <key>EnvironmentVariables</key>
   <dict>
+    <key>CODEX_CONNECT_HOME</key>
+    <string>__CONFIG_DIR__</string>
+    <key>CODEX_CONNECT_CONFIG_FILE</key>
+    <string>__CONFIG_PATH__</string>
     <key>PATH</key>
     <string>__LAUNCHD_PATH__</string>
-    <key>HTTP_PROXY</key>
-    <string>__HTTP_PROXY__</string>
-    <key>HTTPS_PROXY</key>
-    <string>__HTTPS_PROXY__</string>
-    <key>ALL_PROXY</key>
-    <string>__ALL_PROXY__</string>
-    <key>NO_PROXY</key>
-    <string>__NO_PROXY__</string>
-    <key>http_proxy</key>
-    <string>__http_proxy__</string>
-    <key>https_proxy</key>
-    <string>__https_proxy__</string>
-    <key>all_proxy</key>
-    <string>__all_proxy__</string>
-    <key>no_proxy</key>
-    <string>__no_proxy__</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>

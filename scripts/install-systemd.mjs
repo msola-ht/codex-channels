@@ -14,7 +14,6 @@ if (process.platform !== "linux") {
 const runtime = runtimeConfig();
 const document = readGatewayConfig(runtime.configPath);
 const codex = table(document.codex);
-const network = table(document.network);
 const { defaultWorkspace } = readWorkspaceConfig(document);
 const socketPath = resolveConfiguredPath(
   stringValue(codex.socket_path),
@@ -56,7 +55,6 @@ const environmentValues = {
   CONFIG_PATH_ENV: runtime.configPath,
   CODEX_BINARY_ENV: codexBinary,
   SYSTEMD_PATH: systemdPath,
-  ...proxyEnvironment(network),
 };
 
 const configHome = process.env.XDG_CONFIG_HOME?.trim()
@@ -102,22 +100,6 @@ function table(value) {
 
 function stringValue(value) {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function proxyEnvironment(network) {
-  const values = {
-    HTTP_PROXY: stringValue(network.http_proxy),
-    HTTPS_PROXY: stringValue(network.https_proxy),
-    ALL_PROXY: stringValue(network.all_proxy),
-    NO_PROXY: stringValue(network.no_proxy),
-  };
-  return {
-    ...values,
-    http_proxy: values.HTTP_PROXY,
-    https_proxy: values.HTTPS_PROXY,
-    all_proxy: values.ALL_PROXY,
-    no_proxy: values.NO_PROXY,
-  };
 }
 
 function systemdArgument(value) {

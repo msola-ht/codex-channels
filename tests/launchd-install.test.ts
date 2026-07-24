@@ -65,10 +65,11 @@ describe("launchd installer", () => {
     expect(gateway).toContain(`<key>CODEX_BINARY</key>\n    <string>${nodeBinary}</string>`);
     expect(gateway).toContain(`<key>PATH</key>`);
     expect(gateway).toContain("/opt/homebrew/bin");
+    expect(appServer).toContain("<string>service-app-server</string>");
     for (const plist of [appServer, gateway]) {
-      expect(plist).toContain("<key>HTTP_PROXY</key>\n    <string>http://127.0.0.1:7897</string>");
-      expect(plist).toContain("<key>HTTPS_PROXY</key>\n    <string>http://127.0.0.1:7897</string>");
-      expect(plist).toContain("<key>NO_PROXY</key>\n    <string>localhost,127.0.0.1</string>");
+      expect(plist).not.toContain("<key>HTTP_PROXY</key>");
+      expect(plist).not.toContain("<key>HTTPS_PROXY</key>");
+      expect(plist).not.toContain("<key>NO_PROXY</key>");
     }
   });
 

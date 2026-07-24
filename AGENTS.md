@@ -85,6 +85,8 @@ Surface -> Application/Core <- Codex Client
 - 用户配置、数据库、Socket、日志和临时上传不得写入会被 npm 升级替换的包目录。
 - 用户级 Gateway 配置唯一来源是 `~/.codex-connect/config.toml` 或
   `CODEX_CONNECT_CONFIG_FILE` 显式指定的 TOML 文件；不得重新读取、迁移或兼容旧 `.env` 配置。
+- 代理字段未明确配置时可以读取标准代理环境变量及受支持的当前系统代理；TOML 明确值优先，
+  自动发现只形成进程环境，不得回写用户配置或服务定义。
 - `codexc doctor` 只诊断当前 TOML 配置，不改写配置，也不得输出敏感内容。
 - 新增依赖或改变持久化格式前，必须说明必要性、当前数据的处理方式和回滚方案，并取得用户确认。
 
