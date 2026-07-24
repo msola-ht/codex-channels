@@ -29,6 +29,42 @@ afterEach(() => {
 });
 
 describe("codexc CLI", () => {
+  it("shows scoped help for every public command without requiring configuration", () => {
+    const cases = [
+      [["init", "-h"], "用法：codexc init"],
+      [["setup", "--help"], "用法：codexc setup"],
+      [["start", "-h"], "用法：codexc start"],
+      [["remote", "-h"], "用法：codexc remote"],
+      [["ws", "-h"], "用法：codexc ws"],
+      [["ws", "add", "-h"], "用法：codexc ws add"],
+      [["ws", "remove", "--help"], "用法：codexc ws remove"],
+      [["service", "-h"], "用法：codexc service"],
+      [["service", "install", "-h"], "用法：codexc service install"],
+      [["service", "uninstall", "--help"], "用法：codexc service uninstall"],
+      [["service", "start", "-h"], "用法：codexc service start"],
+      [["service", "stop", "--help"], "用法：codexc service stop"],
+      [["service", "reload", "-h"], "用法：codexc service reload"],
+      [["service", "restart", "-h"], "用法：codexc service restart"],
+      [["service", "status", "--help"], "用法：codexc service status"],
+      [["service", "logs", "--help"], "用法：codexc service logs"],
+      [["config", "-h"], "用法：codexc config"],
+      [["doctor", "--help"], "用法：codexc doctor"],
+      [["rules", "-h"], "用法：codexc rules"],
+      [["rules", "init", "-h"], "用法：codexc rules init"],
+      [["rules", "check", "--help"], "用法：codexc rules check"],
+      [["version", "-h"], "用法：codexc version"],
+      [["gateway", "-h"], "用法：codexc gateway"],
+      [["service-app-server", "--help"], "用法：codexc service-app-server"],
+    ] as const;
+
+    for (const [args, expected] of cases) {
+      const result = spawnSync(process.execPath, [cli, ...args], { encoding: "utf8" });
+      expect(result.status, `${args.join(" ")}\n${result.stderr}`).toBe(0);
+      expect(result.stdout).toContain(expected);
+      expect(result.stderr).toBe("");
+    }
+  });
+
   it("generates conservative Codex rules for the current project", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-rules-"));
     temporaryDirectories.push(root);
@@ -521,9 +557,14 @@ describe("codexc CLI", () => {
     const unknown = spawnSync(process.execPath, [cli, "service", "logs", "--unknown"], {
       encoding: "utf8",
     });
-    const invalidService = spawnSync(
+    const removedServiceOption = spawnSync(
       process.execPath,
-      [cli, "service", "logs", "--service", "unknown"],
+      [cli, "service", "logs", "--service", "all"],
+      { encoding: "utf8" },
+    );
+    const invalidTarget = spawnSync(
+      process.execPath,
+      [cli, "service", "restart", "unknown"],
       { encoding: "utf8" },
     );
 
@@ -531,8 +572,17 @@ describe("codexc CLI", () => {
     expect(invalidLines.stderr).toContain("日志行数必须是 1 到 10000");
     expect(unknown.status).toBe(1);
     expect(unknown.stderr).toContain("未知日志参数");
-    expect(invalidService.status).toBe(1);
-    expect(invalidService.stderr).toContain("日志服务必须是");
+    expect(removedServiceOption.status).toBe(1);
+    expect(removedServiceOption.stderr).toContain("未知日志参数");
+    expect(invalidTarget.status).toBe(1);
+    expect(invalidTarget.stderr).toContain("服务目标必须是");
+  });
+
+  it("rejects the removed workspace command alias", () => {
+    const result = spawnSync(process.execPath, [cli, "workspace"], { encoding: "utf8" });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("未知命令：workspace");
   });
 
   it("shows an explicitly configured Gateway config file", () => {

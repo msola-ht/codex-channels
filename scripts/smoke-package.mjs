@@ -35,6 +35,15 @@ try {
   }
   const version = run(command, ["--version"], temporaryDirectory, environment, true).stdout.trim();
   const help = run(command, ["--help"], temporaryDirectory, environment, true).stdout;
+  const workspaceHelp = run(command, ["ws", "-h"], temporaryDirectory, environment, true).stdout;
+  const rulesHelp = run(command, ["rules", "init", "-h"], temporaryDirectory, environment, true).stdout;
+  const serviceHelp = run(
+    command,
+    ["service", "restart", "-h"],
+    temporaryDirectory,
+    environment,
+    true,
+  ).stdout;
   if (version !== packageReport.version) {
     throw new Error(`CLI 版本不匹配：实际 ${version}，期望 ${packageReport.version}`);
   }
@@ -47,6 +56,13 @@ try {
     || !help.includes("rules init")
   ) {
     throw new Error("CLI 帮助缺少公开命令");
+  }
+  if (
+    !workspaceHelp.includes("用法：codexc ws")
+    || !rulesHelp.includes("用法：codexc rules init")
+    || !serviceHelp.includes("gateway|app-server|all")
+  ) {
+    throw new Error("CLI 分级帮助不完整");
   }
   const installedPackage = join(temporaryDirectory, "node_modules", "@hegenai", "codexc");
   for (const requiredFile of [

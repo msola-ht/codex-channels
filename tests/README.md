@@ -19,7 +19,7 @@
   CLI 项目规则生成/检查、launchd、systemd、Unix WebSocket 请求头、模块依赖方向和公开入口边界。
 - TOML、标准环境变量、macOS 系统代理和 Linux GNOME 代理的优先级及服务启动时解析。
 - CLI Doctor 的严格 TOML Schema 校验、敏感错误清洗和只读诊断；项目规则限定当前 Workspace、
-  拒绝远程覆盖和符号链接路径逃逸。
+  拒绝远程覆盖和符号链接路径逃逸；CLI 分级帮助、规范命令名称及 macOS/Linux 服务目标选择。
 - 仓库 Git hooks 自动安装与重复执行安全性，以及无本地依赖时的源码安装准备。
 
 常规验证：

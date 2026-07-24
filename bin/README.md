@@ -12,10 +12,14 @@
 - `init`、`setup`、`config`：初始化、从统一菜单选择配置模块，或显示用户级
   `.codex-connect` 配置。
 - `doctor`：诊断当前 TOML 配置、安装与连通性，不改写配置。
-- `start`：启动已构建的 Gateway。
+- `start`：在前台启动已构建的 App Server 与 Gateway。
 - `remote`：连接共享 App Server 并启动原生 Codex TUI。
 - `ws`：列出或注册 Workspace。
 - `rules`：为当前 Git/Node 项目生成或检查 `.codex/rules/default.rules`，不修改 Workspace Registry。
-- `service`：完整校验配置后安装，或启停、热加载、重启、查看状态和日志，以及卸载 macOS/Linux 用户服务。
+- `service`：完整校验配置后安装整套后台服务；启停、重启、状态和日志命令使用
+  `gateway`、`app-server` 或 `all` 明确目标，日常 `restart` 默认只操作 Gateway。
 
-CLI 只负责参数校验、环境装配和进程分发，不保存 Conversation、Thread 或审批状态。新增用户命令时应复用现有应用能力或脚本，并同步更新根目录 README 和 CLI 测试。
+所有公开命令和子命令都支持 `-h` / `--help`；`gateway` 与 `service-app-server` 仅作为服务模板的
+内部进程入口，不出现在公开命令列表。CLI 只负责参数校验、环境装配和进程分发，不保存
+Conversation、Thread 或审批状态。新增用户命令时应复用现有应用能力或脚本，并同步更新根目录
+README 和 CLI 测试。

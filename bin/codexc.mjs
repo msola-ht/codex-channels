@@ -23,6 +23,109 @@ import {
   removeWorkspaceFromConfig,
 } from "../scripts/workspace-config.mjs";
 
+const helpText = {
+  main: `Codex Connect CLI
+
+用法：codexc <命令>
+
+初始化与诊断：
+  init                         初始化用户目录和配置
+  setup                        选择并配置 Gateway 模块
+  doctor                       检查安装、配置、Codex 与服务
+
+项目与会话：
+  remote [参数]                启动共享 App Server 的 Codex TUI
+  ws                           列出 Workspace
+  ws add                       注册当前目录
+  ws remove <目标>             删除 Workspace 注册
+  rules init                   生成项目 Codex 命令预设
+  rules check                  检查项目 Codex 命令预设
+
+后台服务：
+  start                        前台启动 App Server 与 Gateway
+  service install              安装并启动整套后台服务
+  service uninstall            卸载整套后台服务并保留用户数据
+  service start [目标]         启动后台服务
+  service stop [目标]          停止后台服务
+  service reload               重新读取 Gateway 配置
+  service restart [目标]       重启后台服务
+  service status [目标]        查看后台服务状态
+  service logs [目标]          查看后台服务日志
+
+信息：
+  config                       显示用户配置路径
+  version                      显示版本
+
+运行 codexc <命令> -h 查看命令用法。`,
+  init: `用法：codexc init
+
+初始化用户数据目录和 config.toml；已有配置不会被覆盖。`,
+  setup: `用法：codexc setup
+
+打开统一设置菜单。`,
+  start: `用法：codexc start
+
+在前台启动 Codex App Server 与 Gateway。`,
+  remote: `用法：codexc remote [--workspace ID] [Codex 参数...]
+
+连接共享 App Server，并把其余参数传给原生 Codex CLI。`,
+  ws: `用法：codexc ws
+
+其他用法：
+  codexc ws add [--id ID] [--name 名称] [--prune-missing]
+  codexc ws remove <序号|ID|名称>`,
+  "ws.add": `用法：codexc ws add [--id ID] [--name 名称] [--prune-missing]
+
+把当前目录注册为 Workspace。`,
+  "ws.remove": `用法：codexc ws remove <序号|ID|名称>
+
+删除 Workspace 注册，不删除磁盘目录。`,
+  service: `用法：codexc service <命令>
+
+  install                      安装并启动整套后台服务
+  uninstall                    卸载整套后台服务并保留用户数据
+  start [目标]                 启动 gateway、app-server 或 all
+  stop [目标]                  停止 gateway、app-server 或 all
+  reload                       通知 Gateway 重新读取配置
+  restart [目标]               重启 gateway、app-server 或 all
+  status [目标]                查看 gateway、app-server 或 all
+  logs [目标] [-f] [-n 行数]   查看后台日志
+
+目标默认值：start/stop/status 为 all，restart/logs 为 gateway。`,
+  "service.install": "用法：codexc service install",
+  "service.uninstall": "用法：codexc service uninstall",
+  "service.start": "用法：codexc service start [gateway|app-server|all]",
+  "service.stop": "用法：codexc service stop [gateway|app-server|all]",
+  "service.reload": "用法：codexc service reload",
+  "service.restart": "用法：codexc service restart [gateway|app-server|all]",
+  "service.status": "用法：codexc service status [gateway|app-server|all]",
+  "service.logs": `用法：codexc service logs [gateway|app-server|all] [-f|--follow] [-n|--lines 行数]`,
+  config: `用法：codexc config
+
+显示当前用户数据目录和配置文件路径。`,
+  doctor: `用法：codexc doctor
+
+只诊断当前安装、配置和服务状态，不修改配置。`,
+  rules: `用法：codexc rules <init|check>
+
+具体用法：
+  codexc rules init [--force]
+  codexc rules check`,
+  "rules.init": `用法：codexc rules init [--force]
+
+为当前项目生成安全命令预设；已有文件默认不覆盖。`,
+  "rules.check": `用法：codexc rules check
+
+使用当前 Codex CLI 检查项目规则。`,
+  version: "用法：codexc version",
+  gateway: `用法：codexc gateway
+
+内部 Gateway 服务入口。`,
+  "service-app-server": `用法：codexc service-app-server
+
+内部 Codex App Server 服务入口。`,
+};
+
 const [command = "help", ...args] = process.argv.slice(2);
 
 try {
@@ -35,39 +138,65 @@ try {
     case "--version":
     case "-v":
     case "version":
+      if (showRequestedHelp(args, "version")) {
+        break;
+      }
       printVersion(args);
       break;
     case "init":
+      if (showRequestedHelp(args, "init")) {
+        break;
+      }
       initialize(args);
       break;
     case "setup":
+      if (showRequestedHelp(args, "setup")) {
+        break;
+      }
       requireNoArguments(args, "用法：codexc setup");
       runSetup();
       break;
     case "start":
+      if (showRequestedHelp(args, "start")) {
+        break;
+      }
       requireNoArguments(args, "用法：codexc start");
       runScript("scripts/dev-all.mjs", args, { CODEX_CONNECT_GATEWAY_ENTRY: "dist" });
       break;
     case "gateway":
+      if (showRequestedHelp(args, "gateway")) {
+        break;
+      }
       runGateway(args);
       break;
     case "service-app-server":
+      if (showRequestedHelp(args, "service-app-server")) {
+        break;
+      }
       runServiceAppServer(args);
       break;
     case "remote":
+      if (showRequestedHelp(args, "remote")) {
+        break;
+      }
       runScript("scripts/codex-remote.mjs", args, {}, process.cwd());
       break;
     case "ws":
-    case "workspace":
       workspace(args);
       break;
     case "service":
       service(args);
       break;
     case "config":
+      if (showRequestedHelp(args, "config")) {
+        break;
+      }
       showConfig(args);
       break;
     case "doctor":
+      if (showRequestedHelp(args, "doctor")) {
+        break;
+      }
       runDoctor(args);
       break;
     case "rules":
@@ -162,6 +291,12 @@ function runServiceAppServer(args) {
 }
 
 function workspace(args) {
+  if (showRequestedHelp(args, "ws")) {
+    return;
+  }
+  if (showSubcommandHelp(args, "add", "ws.add") || showSubcommandHelp(args, "remove", "ws.remove")) {
+    return;
+  }
   const runtime = requireUserConfig();
   const eventQueuePath = configEventQueuePath(runtime.dataDir);
   const fallbackDefaultWorkspace = {
@@ -237,12 +372,18 @@ function workspace(args) {
 }
 
 function service(args) {
+  if (showRequestedHelp(args, "service")) {
+    return;
+  }
   const [action, ...rest] = args;
   const actions = ["install", "uninstall", "start", "stop", "reload", "restart", "status", "logs"];
-  if (!actions.includes(action) || (action !== "logs" && rest.length > 0)) {
+  if (actions.includes(action) && showRequestedHelp(rest, `service.${action}`)) {
+    return;
+  }
+  if (!actions.includes(action)) {
     throw new Error("用法：codexc service <install|uninstall|start|stop|reload|restart|status|logs>");
   }
-  const serviceArgs = action === "logs" ? parseServiceLogOptions(rest) : [];
+  const serviceArgs = parseServiceArguments(action, rest);
   if (action === "install") {
     runScript("scripts/validate-config.mjs", []);
   }
@@ -306,6 +447,13 @@ function runDoctor(args) {
 }
 
 function projectRules(args) {
+  if (showRequestedHelp(args, "rules")) {
+    return;
+  }
+  if (showSubcommandHelp(args, "init", "rules.init") ||
+    showSubcommandHelp(args, "check", "rules.check")) {
+    return;
+  }
   if (args[0] === "check" && args.length === 1) {
     const result = checkProjectRules({ cwd: process.cwd() });
     console.log("项目 Codex 规则检查通过。");
@@ -440,15 +588,21 @@ function parseWorkspaceAddOptions(args) {
 }
 
 function parseServiceLogOptions(args) {
+  const remaining = [...args];
   const result = [];
-  for (let index = 0; index < args.length; index += 1) {
-    const option = args[index];
+  if (remaining[0] && !remaining[0].startsWith("-")) {
+    result.push(parseServiceTarget(remaining.shift()));
+  } else {
+    result.push("gateway");
+  }
+  for (let index = 0; index < remaining.length; index += 1) {
+    const option = remaining[index];
     if (option === "--follow" || option === "-f") {
       result.push("--follow");
       continue;
     }
     if (option === "--lines" || option === "-n") {
-      const value = args[index + 1];
+      const value = remaining[index + 1];
       const lines = Number(value);
       if (!Number.isSafeInteger(lines) || lines <= 0 || lines > 10_000) {
         throw new Error("日志行数必须是 1 到 10000 之间的整数");
@@ -457,21 +611,36 @@ function parseServiceLogOptions(args) {
       index += 1;
       continue;
     }
-    if (option === "--service") {
-      const value = args[index + 1];
-      if (!["gateway", "app-server", "all"].includes(value)) {
-        throw new Error("日志服务必须是 gateway、app-server 或 all");
-      }
-      result.push("--service", value);
-      index += 1;
-      continue;
-    }
     throw new Error(
       `未知日志参数：${option}\n`
-      + "用法：codexc service logs [-f|--follow] [-n|--lines 行数] [--service gateway|app-server|all]",
+      + helpText["service.logs"],
     );
   }
   return result;
+}
+
+function parseServiceArguments(action, args) {
+  if (action === "logs") {
+    return parseServiceLogOptions(args);
+  }
+  if (action === "install" || action === "uninstall" || action === "reload") {
+    if (args.length > 0) {
+      throw new Error(helpText[`service.${action}`]);
+    }
+    return [];
+  }
+  if (args.length > 1) {
+    throw new Error(helpText[`service.${action}`]);
+  }
+  const defaultTarget = action === "restart" ? "gateway" : "all";
+  return [parseServiceTarget(args[0] ?? defaultTarget)];
+}
+
+function parseServiceTarget(value) {
+  if (!["gateway", "app-server", "all"].includes(value)) {
+    throw new Error(`服务目标必须是 gateway、app-server 或 all：${value}`);
+  }
+  return value;
 }
 
 function printVersion(args) {
@@ -486,32 +655,26 @@ function requireNoArguments(args, usage) {
   }
 }
 
+function isHelpArgument(value) {
+  return value === "-h" || value === "--help";
+}
+
+function showRequestedHelp(args, key) {
+  if (args.length !== 1 || !isHelpArgument(args[0])) {
+    return false;
+  }
+  console.log(helpText[key]);
+  return true;
+}
+
+function showSubcommandHelp(args, subcommand, key) {
+  if (args.length !== 2 || args[0] !== subcommand || !isHelpArgument(args[1])) {
+    return false;
+  }
+  console.log(helpText[key]);
+  return true;
+}
+
 function printHelp() {
-  console.log(`Codex Connect CLI
-
-用法：codexc <命令>
-
-  init                         初始化 ~/.codex-connect
-  setup                        选择并配置 Gateway 模块
-  start                        前台启动 App Server 与 Gateway
-  remote [--workspace ID]      在当前目录启动共享 App Server 的 Codex TUI
-  ws                           列出 Workspace
-  ws add [--id ID] [--name 名称] [--prune-missing]
-                               注册当前目录；可清理失效项
-  ws remove <序号|ID|名称>      删除 Workspace 注册，不删除磁盘目录
-  service install              安装并启动系统用户服务
-  service uninstall            卸载系统服务并保留用户数据
-  service start                启动系统服务
-  service stop                 停止系统服务
-  service reload               立即重新读取配置，必要时自动重启 Gateway
-  service restart              重启 Gateway，保持 App Server 运行
-  service status               查看系统服务状态
-  service logs [-f] [-n 行数] [--service 名称]
-                               查看或持续跟踪后台服务日志
-  config                       显示用户配置路径
-  doctor                       检查安装、配置、Codex 与服务连通性
-  rules init [--force]         为当前项目生成安全命令预设
-  rules check                  使用 Codex CLI 检查当前项目规则
-  version                      显示版本
-`);
+  console.log(helpText.main);
 }

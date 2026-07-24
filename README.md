@@ -105,15 +105,24 @@ codexc rules init                # 为当前项目生成安全命令预设
 codexc rules check               # 使用 Codex CLI 检查项目规则
 codexc service reload            # 立即热加载配置，必要时自动重启 Gateway
 codexc service restart           # 只重启 Gateway
+codexc service restart app-server # 只重启 Codex App Server
+codexc service restart all       # 重启 App Server 与 Gateway
 codexc service logs              # 查看 Gateway 最近 100 行日志
 codexc service logs -f           # 持续跟踪后台日志
-codexc service logs --service all # 同时查看 App Server 与 Gateway
+codexc service logs all          # 同时查看 App Server 与 Gateway
 codexc service uninstall         # 卸载服务并保留用户数据
+codexc service -h                # 查看服务命令及目标默认值
 ```
+
+`codexc -h` 显示全部公开命令；每个命令和子命令都支持 `-h` 或 `--help`，例如
+`codexc ws add -h`、`codexc rules init -h` 和 `codexc service restart -h`。
 
 用户配置、Workspace Registry、SQLite、配置事件队列、Socket、日志和上传图片均位于 `~/.codex-connect`，不会写入全局 npm 包目录。统一配置文件是 `config.toml`；`CODEX_CONNECT_CONFIG_FILE` 可显式选择其他配置文件，其相对路径和运行数据以该文件所在目录为基准，但不会修改已存在父目录的权限。`CODEX_CONNECT_HOME` 可用于隔离测试或多 Profile。
 
-macOS 使用 `com.hegenai.codex-app-server` 与 `com.hegenai.codex-gateway` 两个 launchd Job。Linux 使用 `systemctl --user` 管理两个独立服务；两种平台上的 `service restart` 都只重启 Gateway。
+macOS 使用 `com.hegenai.codex-app-server` 与 `com.hegenai.codex-gateway` 两个 launchd Job。Linux 使用
+`systemctl --user` 管理两个独立服务。`start`、`stop` 和 `status` 默认目标为 `all`；
+`restart` 默认目标为 `gateway`，保持共享 App Server 和活动 Turn 运行。需要操作单个进程时显式
+使用 `gateway` 或 `app-server`，需要同时操作时使用 `all`。
 
 `[network]` 代理字段留空时不需要额外设置：运行入口依次采用 TOML 明确值、当前进程的
 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`，再尝试 macOS 系统 HTTP/HTTPS
@@ -121,7 +130,10 @@ macOS 使用 `com.hegenai.codex-app-server` 与 `com.hegenai.codex-gateway` 两�
 代理环境变量。自动代理配置（PAC）和未定义统一接口的桌面私有格式不会被猜测；需要时仍可在
 TOML 中明确填写。Telegram 的 `telegram.proxy_url` 保持最高优先级。
 
-`codexc service logs` 默认显示 Gateway 日志；使用 `--service app-server` 查看 App Server，使用 `--service all` 查看两者。`-n 200` 可调整显示行数，`-f` 可持续跟踪。macOS 默认忽略早于正常日志的陈旧 stderr，日志文件位于 `.codex-connect/runtime`；Linux 日志来自 systemd user journal。
+`codexc service logs` 默认显示 Gateway 日志；使用 `codexc service logs app-server` 查看 App Server，
+使用 `codexc service logs all` 查看两者。目标必须放在日志选项之前；`-n 200` 可调整显示行数，
+`-f` 可持续跟踪。macOS 默认忽略早于正常日志的陈旧 stderr，日志文件位于
+`.codex-connect/runtime`；Linux 日志来自 systemd user journal。
 
 Telegram 与 App Server 均采用有界退避重连；连续失败耗尽后 Gateway 会退出，由 launchd 或 systemd 自动拉起，避免进程存活但不再接收消息。
 

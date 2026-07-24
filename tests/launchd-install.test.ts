@@ -162,6 +162,20 @@ describe("launchd installer", () => {
     const restarted = execFileSync("/bin/zsh", [script, "restart"], { env: environment, encoding: "utf8" });
     const restartCalls = readFileSync(launchctlLog, "utf8");
     writeFileSync(launchctlLog, "");
+    const appServerRestarted = execFileSync(
+      "/bin/zsh",
+      [script, "restart", "app-server"],
+      { env: environment, encoding: "utf8" },
+    );
+    const appServerRestartCalls = readFileSync(launchctlLog, "utf8");
+    writeFileSync(launchctlLog, "");
+    const allRestarted = execFileSync(
+      "/bin/zsh",
+      [script, "restart", "all"],
+      { env: environment, encoding: "utf8" },
+    );
+    const allRestartCalls = readFileSync(launchctlLog, "utf8");
+    writeFileSync(launchctlLog, "");
     const reloaded = execFileSync("/bin/zsh", [script, "reload"], { env: environment, encoding: "utf8" });
     const reloadCalls = readFileSync(launchctlLog, "utf8");
     writeFileSync(launchctlLog, "");
@@ -180,7 +194,7 @@ describe("launchd installer", () => {
     });
     const allLogs = execFileSync(
       "/bin/zsh",
-      [script, "logs", "--service", "all", "--lines", "1"],
+      [script, "logs", "all", "--lines", "1"],
       { env: environment, encoding: "utf8" },
     );
 
@@ -196,6 +210,12 @@ describe("launchd installer", () => {
     expect(restartCalls).toContain("kickstart -k");
     expect(restartCalls).toContain("com.hegenai.codex-gateway");
     expect(restartCalls).not.toContain("com.hegenai.codex-app-server");
+    expect(appServerRestarted).toContain("Codex App Server 已重启");
+    expect(appServerRestartCalls).toContain("com.hegenai.codex-app-server");
+    expect(appServerRestartCalls).not.toContain("com.hegenai.codex-gateway");
+    expect(allRestarted).toContain("Codex App Server 与 Gateway 已重启");
+    expect(allRestartCalls).toContain("com.hegenai.codex-app-server");
+    expect(allRestartCalls).toContain("com.hegenai.codex-gateway");
     expect(reloaded).toContain("重新读取配置");
     expect(reloadCalls).toContain("kill SIGHUP");
     expect(reloadCalls).toContain("com.hegenai.codex-gateway");

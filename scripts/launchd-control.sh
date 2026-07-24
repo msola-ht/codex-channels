@@ -22,6 +22,10 @@ show_logs() {
   fi
   runtime_dir="${socket_path:h}"
 
+  if (( $# > 0 )) && [[ "$1" == "gateway" || "$1" == "app-server" || "$1" == "all" ]]; then
+    service="$1"
+    shift
+  fi
   while (( $# > 0 )); do
     case "$1" in
       --follow)
@@ -30,10 +34,6 @@ show_logs() {
         ;;
       --lines)
         lines="$2"
-        shift 2
-        ;;
-      --service)
-        service="$2"
         shift 2
         ;;
       *)
@@ -135,6 +135,17 @@ start_job() {
   launchctl kickstart -k "$user_domain/$label"
 }
 
+require_target() {
+  case "$1" in
+    gateway|app-server|all)
+      ;;
+    *)
+      print -u2 "服务目标必须是 gateway、app-server 或 all：$1"
+      return 2
+      ;;
+  esac
+}
+
 case "$action" in
   check-install)
     reject_unsupported_jobs
@@ -149,14 +160,34 @@ case "$action" in
     ;;
   start)
     reject_unsupported_jobs
-    start_job "$app_label" "$agents_dir/$app_label.plist"
-    start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
-    print "Codex App Server 与 Gateway 已启动。"
+    target="${2:-all}"
+    require_target "$target"
+    if [[ "$target" == "app-server" || "$target" == "all" ]]; then
+      start_job "$app_label" "$agents_dir/$app_label.plist"
+    fi
+    if [[ "$target" == "gateway" || "$target" == "all" ]]; then
+      start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
+    fi
+    case "$target" in
+      gateway) print "Gateway 已启动。" ;;
+      app-server) print "Codex App Server 已启动。" ;;
+      all) print "Codex App Server 与 Gateway 已启动。" ;;
+    esac
     ;;
   stop)
-    stop_job "$gateway_label"
-    stop_job "$app_label"
-    print "Codex App Server 与 Gateway 已停止。"
+    target="${2:-all}"
+    require_target "$target"
+    if [[ "$target" == "gateway" || "$target" == "all" ]]; then
+      stop_job "$gateway_label"
+    fi
+    if [[ "$target" == "app-server" || "$target" == "all" ]]; then
+      stop_job "$app_label"
+    fi
+    case "$target" in
+      gateway) print "Gateway 已停止。" ;;
+      app-server) print "Codex App Server 已停止。" ;;
+      all) print "Codex App Server 与 Gateway 已停止。" ;;
+    esac
     ;;
   uninstall)
     stop_job "$gateway_label"
@@ -167,9 +198,19 @@ case "$action" in
     ;;
   restart)
     reject_unsupported_jobs
-    print "正在重启 Gateway..."
-    start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
-    print "Gateway 已重启；Codex App Server 保持运行。"
+    target="${2:-gateway}"
+    require_target "$target"
+    if [[ "$target" == "app-server" || "$target" == "all" ]]; then
+      start_job "$app_label" "$agents_dir/$app_label.plist"
+    fi
+    if [[ "$target" == "gateway" || "$target" == "all" ]]; then
+      start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
+    fi
+    case "$target" in
+      gateway) print "Gateway 已重启；Codex App Server 保持运行。" ;;
+      app-server) print "Codex App Server 已重启；Gateway 将自动重连。" ;;
+      all) print "Codex App Server 与 Gateway 已重启。" ;;
+    esac
     ;;
   reload)
     reject_unsupported_jobs
@@ -186,15 +227,21 @@ case "$action" in
     fi
     ;;
   status)
-    launchctl print "$user_domain/$app_label" 2>/dev/null || true
-    launchctl print "$user_domain/$gateway_label" 2>/dev/null || true
+    target="${2:-all}"
+    require_target "$target"
+    if [[ "$target" == "app-server" || "$target" == "all" ]]; then
+      launchctl print "$user_domain/$app_label" 2>/dev/null || true
+    fi
+    if [[ "$target" == "gateway" || "$target" == "all" ]]; then
+      launchctl print "$user_domain/$gateway_label" 2>/dev/null || true
+    fi
     ;;
   logs)
     shift
     show_logs "$@"
     ;;
   *)
-    print -u2 "用法：$0 {install|start|stop|reload|restart|status|logs|uninstall}"
+    print -u2 "用法：$0 {install|uninstall|reload|start|stop|restart|status|logs} [gateway|app-server|all]"
     exit 2
     ;;
 esac

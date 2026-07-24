@@ -136,6 +136,10 @@ Surface -> Application/Core <- Codex Client
 - 执行 Git、npm 以及测试、类型检查、Lint、构建、打包或集成验证命令时，首次调用就直接发起提权请求，不先在受限沙箱内试跑后再重试。
 - 提权请求必须说明命令目的并保持在当前仓库和当前任务范围内；不得借此扩大修改、提交或远端写入权限。
 - 提权只解决命令执行权限，不代替用户授权。提交、推送、依赖变更和其他外部写入仍须遵守本文件对应约束。
+- 公开 `codexc` 命令及子命令必须统一支持 `-h` / `--help`，只保留文档声明的规范名称，不增加
+  隐式别名。`gateway` 与 `service-app-server` 仅作为服务模板内部入口，不列入公开帮助。
+- 后台进程统一由 `codexc service` 管理；启停、重启、状态和日志使用 `gateway`、
+  `app-server`、`all` 目标。启停和状态默认 `all`，重启和日志默认 `gateway`。
 - 项目级 Codex 命令预设位于 `.codex/rules/default.rules`，只可免确认运行只读 Git 检查和仓库
   已有验证脚本；不得放行 Git 暂存、提交、推送、依赖安装、发布、服务管理、任意 Shell 或破坏性命令。
 - 使用 `codexc rules init` 从当前 Git/Node 项目根目录生成该文件，使用 `codexc rules check`

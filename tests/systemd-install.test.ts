@@ -127,11 +127,39 @@ describe("systemd installer", () => {
     const started = execFileSync("/bin/sh", [script, "start"], { env: environment, encoding: "utf8" });
     const startCalls = readFileSync(systemctlLog, "utf8");
     writeFileSync(systemctlLog, "");
+    const gatewayStarted = execFileSync(
+      "/bin/sh",
+      [script, "start", "gateway"],
+      { env: environment, encoding: "utf8" },
+    );
+    const gatewayStartCalls = readFileSync(systemctlLog, "utf8");
+    writeFileSync(systemctlLog, "");
     const stopped = execFileSync("/bin/sh", [script, "stop"], { env: environment, encoding: "utf8" });
     const stopCalls = readFileSync(systemctlLog, "utf8");
     writeFileSync(systemctlLog, "");
+    const appServerStopped = execFileSync(
+      "/bin/sh",
+      [script, "stop", "app-server"],
+      { env: environment, encoding: "utf8" },
+    );
+    const appServerStopCalls = readFileSync(systemctlLog, "utf8");
+    writeFileSync(systemctlLog, "");
     const restarted = execFileSync("/bin/sh", [script, "restart"], { env: environment, encoding: "utf8" });
     const restartCalls = readFileSync(systemctlLog, "utf8");
+    writeFileSync(systemctlLog, "");
+    const appServerRestarted = execFileSync(
+      "/bin/sh",
+      [script, "restart", "app-server"],
+      { env: environment, encoding: "utf8" },
+    );
+    const appServerRestartCalls = readFileSync(systemctlLog, "utf8");
+    writeFileSync(systemctlLog, "");
+    const allRestarted = execFileSync(
+      "/bin/sh",
+      [script, "restart", "all"],
+      { env: environment, encoding: "utf8" },
+    );
+    const allRestartCalls = readFileSync(systemctlLog, "utf8");
     writeFileSync(systemctlLog, "");
     const reloaded = execFileSync("/bin/sh", [script, "reload"], { env: environment, encoding: "utf8" });
     const reloadCalls = readFileSync(systemctlLog, "utf8");
@@ -140,6 +168,17 @@ describe("systemd installer", () => {
       encoding: "utf8",
     });
     const journalctlCalls = readFileSync(journalctlLog, "utf8");
+    execFileSync("/bin/sh", [script, "logs", "all", "--lines", "10"], {
+      env: environment,
+      encoding: "utf8",
+    });
+    const allJournalctlCalls = readFileSync(journalctlLog, "utf8");
+    writeFileSync(systemctlLog, "");
+    execFileSync("/bin/sh", [script, "status", "gateway"], {
+      env: environment,
+      encoding: "utf8",
+    });
+    const gatewayStatusCalls = readFileSync(systemctlLog, "utf8");
     const uninstalled = execFileSync("/bin/sh", [script, "uninstall"], { env: environment, encoding: "utf8" });
 
     expect(installed).toContain("已安装并启动");
@@ -150,12 +189,24 @@ describe("systemd installer", () => {
     expect(started).toContain("已启动");
     expect(startCalls).toContain("--user start codex-connect-app-server.service");
     expect(startCalls).toContain("--user start codex-connect-gateway.service");
+    expect(gatewayStarted).toContain("Gateway 已启动");
+    expect(gatewayStartCalls).toContain("codex-connect-gateway.service");
+    expect(gatewayStartCalls).not.toContain("codex-connect-app-server.service");
     expect(stopped).toContain("已停止");
     expect(stopCalls).toContain("--user stop codex-connect-gateway.service");
     expect(stopCalls).toContain("--user stop codex-connect-app-server.service");
+    expect(appServerStopped).toContain("Codex App Server 已停止");
+    expect(appServerStopCalls).toContain("codex-connect-app-server.service");
+    expect(appServerStopCalls).not.toContain("codex-connect-gateway.service");
     expect(restarted).toContain("Gateway 已重启");
     expect(restartCalls).toContain("codex-connect-gateway.service");
     expect(restartCalls).not.toContain("codex-connect-app-server.service");
+    expect(appServerRestarted).toContain("Codex App Server 已重启");
+    expect(appServerRestartCalls).toContain("codex-connect-app-server.service");
+    expect(appServerRestartCalls).not.toContain("codex-connect-gateway.service");
+    expect(allRestarted).toContain("Codex App Server 与 Gateway 已重启");
+    expect(allRestartCalls).toContain("codex-connect-app-server.service");
+    expect(allRestartCalls).toContain("codex-connect-gateway.service");
     expect(reloaded).toContain("重新读取配置");
     expect(reloadCalls).toContain("--user is-active --quiet codex-connect-gateway.service");
     expect(reloadCalls).toContain("--user kill --kill-whom=main --signal=HUP codex-connect-gateway.service");
@@ -167,6 +218,10 @@ describe("systemd installer", () => {
     expect(journalctlCalls).toContain("--lines=25");
     expect(journalctlCalls).toContain("--no-pager");
     expect(journalctlCalls).toContain("--follow");
+    expect(allJournalctlCalls).toContain("--unit=codex-connect-gateway.service");
+    expect(allJournalctlCalls).toContain("--unit=codex-connect-app-server.service");
+    expect(gatewayStatusCalls).toContain("codex-connect-gateway.service");
+    expect(gatewayStatusCalls).not.toContain("codex-connect-app-server.service");
     expect(uninstalled).toContain("用户配置与运行数据保留");
     expect(existsSync(appUnit)).toBe(false);
     expect(existsSync(gatewayUnit)).toBe(false);
