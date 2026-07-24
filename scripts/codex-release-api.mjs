@@ -13,14 +13,15 @@ export async function fetchCodexReleaseJson(
       response = await fetchImplementation(url, {
         headers: releaseHeaders(),
       });
+      if (response.ok) {
+        return await response.json();
+      }
     } catch (error) {
       lastError = error;
+      response = undefined;
       if (attempt === attempts) {
         break;
       }
-    }
-    if (response?.ok) {
-      return await response.json();
     }
     if (response) {
       lastError = new Error(`GitHub Release API 返回 HTTP ${response.status}`);

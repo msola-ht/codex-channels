@@ -138,7 +138,8 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 每日 Alpha Canary 只对官方 Pre-release 做隔离前向兼容测试，不改变本页记录的稳定版本、数量、
 固定版本链接或支持矩阵；它和正式升级预览会独立运行各项兼容检查，并保存逐阶段结果、日志、
 完整 Patch 和协议结构影响摘要。预览阶段不修改本页稳定基线，因此文档索引检查明确跳过；正式
-Release 发布并完成适配后必须重新运行正式升级流程和完整提交检查。
+Release 发布并完成适配后必须重新运行正式升级流程和完整提交检查。Release 解析在有限网络
+重试后仍失败时，工作流保留 `unresolved` 失败报告，不生成或猜测协议版本。
 
 ```bash
 find src/codex-protocol/generated -type f -name '*.ts' | wc -l

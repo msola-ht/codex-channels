@@ -14,10 +14,12 @@
   差异，独立运行协议、类型、Lint、全量测试、真实合同、构建和打包检查，把逐项结果写入 Job
   Summary，并上传结构化结果、逐阶段日志、协议结构影响、清单、统计、完整 Patch 和摘要
   Artifact。单项失败不阻止其他检查，最终仍把任务标为失败。该工作流拒绝 Draft、Pre-release
-  和降级，不提交或部署。
+  和降级，不提交或部署。官方 Release 解析失败时仍上传以 `unresolved-<run id>` 命名的失败
+  Artifact 和 `resolve.log`，不会因目标版本为空丢失现场。
 - `codex-alpha-canary.yml`：每天选择 `openai/codex` 最高版本号的官方 Alpha，在临时 Runner
   生成协议，并使用与正式预览相同的独立兼容检查和报告。成功或失败都会上传完整现场，失败后
-  任务标红；结果只作前向兼容预警，不进入正式版本基线。
+  任务标红；Release 解析失败同样保留 `unresolved` 报告；结果只作前向兼容预警，不进入正式
+  版本基线。
 - `publish.yml`：推送与 Codex CLI 协议版本一致的 `v*` Tag 后，执行同一完整提交检查，再使用 npm Trusted Publishing 发布公开包，不保存长期 npm Token。
 
 启用发布工作流前，需要在 npm 包的 Trusted Publisher 设置中绑定 GitHub 仓库 `msola-ht/codex-channels`、工作流文件 `publish.yml`，并允许 `npm publish`。工作流使用 GitHub OIDC 和 `id-token: write` 获取短期凭据。

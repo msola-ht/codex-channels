@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -113,6 +113,29 @@ describe("Codex release upgrade preview", () => {
     expect(attempts).toBe(1);
   });
 
+  it("retries when the GitHub response body is terminated", async () => {
+    let attempts = 0;
+    const result = await fetchCodexReleaseJson("https://api.github.test/releases", {
+      fetchImplementation: async () => {
+        attempts += 1;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => {
+            if (attempts < 3) {
+              throw new TypeError("terminated");
+            }
+            return [{ tag_name: "rust-v0.146.0-alpha.6" }];
+          },
+        };
+      },
+      sleep: async () => undefined,
+    });
+
+    expect(attempts).toBe(3);
+    expect(result).toEqual([{ tag_name: "rust-v0.146.0-alpha.6" }]);
+  });
+
   it("selects the highest official Alpha and rejects stable releases", () => {
     const alpha = (version: string) => ({
       tag_name: `rust-v${version}`,
@@ -203,6 +226,47 @@ describe("Codex release upgrade preview", () => {
     );
     expect(summary).toContain("| TypeScript 与版本 | 失败 |");
     expect(summary).toContain("| 全量测试 | 通过 |");
+  });
+
+  it("writes a failure report when the target release could not be resolved", () => {
+    const output = mkdtempSync(join(tmpdir(), "codexc-unresolved-report-"));
+    temporaryDirectories.push(output);
+    const script = join(process.cwd(), "scripts/write-upgrade-report.mjs");
+    const failure = spawnSync(
+      process.execPath,
+      [script, "unresolved", output, "alpha", "failure"],
+      {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          RESOLUTION_OUTCOME: "failure",
+        },
+      },
+    );
+
+    expect(failure.status).toBe(0);
+    expect(readFileSync(join(output, "target-version.txt"), "utf8"))
+      .toBe("unresolved\n");
+    expect(readFileSync(join(output, "summary.md"), "utf8"))
+      .toContain("目标版本尚未解析");
+    expect(JSON.parse(
+      readFileSync(join(output, "results.json"), "utf8"),
+    )).toMatchObject({
+      result: "failure",
+      stages: [{
+        id: "resolution",
+        status: "failed",
+        log: "logs/resolve.log",
+      }],
+    });
+
+    const invalidSuccess = spawnSync(
+      process.execPath,
+      [script, "unresolved", output, "alpha", "success"],
+      { cwd: process.cwd(), encoding: "utf8" },
+    );
+    expect(invalidSuccess.status).not.toBe(0);
   });
 
   it("continues validation after a failed stage and writes structured results", async () => {

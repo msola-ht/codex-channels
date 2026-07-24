@@ -30,17 +30,24 @@ jobs:
           node-version: 22.13.0
           cache: npm
 
-      - name: Resolve latest official Alpha
-        id: release
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/resolve-codex-alpha.mjs
-
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
+      - name: Resolve latest official Alpha
+        id: release
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPORT_DIRECTORY: ${{ runner.temp }}/codex-alpha-canary
+        run: |
+          mkdir -p "$REPORT_DIRECTORY/logs"
+          set -o pipefail
+          node scripts/resolve-codex-alpha.mjs 2>&1 \
+            | tee "$REPORT_DIRECTORY/logs/resolve.log"
+
       - name: Install Alpha Codex CLI
         id: install
+        if: steps.release.outcome == 'success'
         continue-on-error: true
         env:
           CODEX_VERSION: ${{ steps.release.outputs.version }}
@@ -76,9 +83,10 @@ jobs:
       - name: Write Alpha report
         if: always()
         env:
-          CODEX_VERSION: ${{ steps.release.outputs.version }}
-          CANARY_RESULT: ${{ steps.install.outcome == 'success' && steps.generate.outcome == 'success' && steps.validate.outcome == 'success' && 'success' || 'failure' }}
+          CODEX_VERSION: ${{ steps.release.outputs.version || 'unresolved' }}
+          CANARY_RESULT: ${{ steps.release.outcome == 'success' && steps.install.outcome == 'success' && steps.generate.outcome == 'success' && steps.validate.outcome == 'success' && 'success' || 'failure' }}
           REPORT_DIRECTORY: ${{ runner.temp }}/codex-alpha-canary
+          RESOLUTION_OUTCOME: ${{ steps.release.outcome }}
           INSTALL_OUTCOME: ${{ steps.install.outcome }}
           GENERATION_OUTCOME: ${{ steps.generate.outcome }}
         run: |
@@ -89,7 +97,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: codex-alpha-${{ steps.release.outputs.version }}
+          name: codex-alpha-${{ steps.release.outputs.version || format('unresolved-{0}', github.run_id) }}
           path: ${{ runner.temp }}/codex-alpha-canary/
           if-no-files-found: error
           retention-days: 14
@@ -98,6 +106,7 @@ jobs:
         if: >-
           always() &&
           (
+            steps.release.outcome != 'success' ||
             steps.install.outcome != 'success' ||
             steps.generate.outcome != 'success' ||
             steps.validate.outcome != 'success'

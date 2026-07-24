@@ -46,7 +46,7 @@ export function renderUpgradeSummary(
       ]
     : [];
   return [
-    `## Codex CLI ${version} ${title}`,
+    `## Codex CLI ${version === "unresolved" ? "目标版本尚未解析" : version} ${title}`,
     "",
     `- 变更文件：${entries.length}`,
     `- 协议目录文件：${protocolEntries.length}`,
@@ -112,7 +112,10 @@ function main() {
     result = "success",
   ] = process.argv.slice(2);
   if (
-    !/^\d+\.\d+\.\d+(?:-alpha(?:\.\d+)+)?$/u.test(version || "")
+    !(
+      /^\d+\.\d+\.\d+(?:-alpha(?:\.\d+)+)?$/u.test(version || "")
+      || (version === "unresolved" && result === "failure")
+    )
     || !outputDirectory
     || !["stable", "alpha"].includes(channel)
     || !["success", "failure"].includes(result)
@@ -127,9 +130,18 @@ function main() {
   mkdirSync(output, { recursive: true });
   const diff = collectGitDiff(root);
   const validation = readValidationResults(output);
+  const resolutionStatus = normalizeStageStatus(process.env.RESOLUTION_OUTCOME);
   const installStatus = normalizeStageStatus(process.env.INSTALL_OUTCOME);
   const generationStatus = normalizeStageStatus(process.env.GENERATION_OUTCOME);
   const stages = [
+    ...(resolutionStatus
+      ? [{
+          id: "resolution",
+          name: "解析官方 Codex Release",
+          status: resolutionStatus,
+          log: "logs/resolve.log",
+        }]
+      : []),
     ...(installStatus
       ? [{
           id: "install",

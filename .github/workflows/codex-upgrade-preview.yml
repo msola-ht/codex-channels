@@ -35,20 +35,27 @@ jobs:
           node-version: 22.13.0
           cache: npm
 
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
       - name: Resolve official stable release
         id: release
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
           TARGET_VERSION: ${{ inputs.version }}
-        run: node scripts/resolve-codex-release.mjs "$TARGET_VERSION"
-
-      - name: Install dependencies
-        if: steps.release.outputs.upgrade_available == 'true'
-        run: npm ci --ignore-scripts
+          REPORT_DIRECTORY: ${{ runner.temp }}/codex-upgrade-preview
+        run: |
+          mkdir -p "$REPORT_DIRECTORY/logs"
+          set -o pipefail
+          node scripts/resolve-codex-release.mjs "$TARGET_VERSION" 2>&1 \
+            | tee "$REPORT_DIRECTORY/logs/resolve.log"
 
       - name: Install released Codex CLI
         id: install
-        if: steps.release.outputs.upgrade_available == 'true'
+        if: >-
+          steps.release.outcome == 'success' &&
+          steps.release.outputs.upgrade_available == 'true'
         continue-on-error: true
         env:
           CODEX_VERSION: ${{ steps.release.outputs.version }}
@@ -83,11 +90,17 @@ jobs:
         run: npm run codex:upgrade:validate -- "$REPORT_DIRECTORY"
 
       - name: Write diff report
-        if: always() && steps.release.outputs.upgrade_available == 'true'
+        if: >-
+          always() &&
+          (
+            steps.release.outcome == 'failure' ||
+            steps.release.outputs.upgrade_available == 'true'
+          )
         env:
-          CODEX_VERSION: ${{ steps.release.outputs.version }}
-          PREVIEW_RESULT: ${{ steps.install.outcome == 'success' && steps.generate.outcome == 'success' && steps.validate.outcome == 'success' && 'success' || 'failure' }}
+          CODEX_VERSION: ${{ steps.release.outputs.version || 'unresolved' }}
+          PREVIEW_RESULT: ${{ steps.release.outcome == 'success' && steps.install.outcome == 'success' && steps.generate.outcome == 'success' && steps.validate.outcome == 'success' && 'success' || 'failure' }}
           REPORT_DIRECTORY: ${{ runner.temp }}/codex-upgrade-preview
+          RESOLUTION_OUTCOME: ${{ steps.release.outcome }}
           INSTALL_OUTCOME: ${{ steps.install.outcome }}
           GENERATION_OUTCOME: ${{ steps.generate.outcome }}
         run: |
@@ -95,10 +108,15 @@ jobs:
             "$CODEX_VERSION" "$REPORT_DIRECTORY" stable "$PREVIEW_RESULT"
 
       - name: Upload diff files
-        if: always() && steps.release.outputs.upgrade_available == 'true'
+        if: >-
+          always() &&
+          (
+            steps.release.outcome == 'failure' ||
+            steps.release.outputs.upgrade_available == 'true'
+          )
         uses: actions/upload-artifact@v7
         with:
-          name: codex-upgrade-${{ steps.release.outputs.version }}
+          name: codex-upgrade-${{ steps.release.outputs.version || format('unresolved-{0}', github.run_id) }}
           path: ${{ runner.temp }}/codex-upgrade-preview/
           if-no-files-found: error
           retention-days: 14
@@ -106,10 +124,15 @@ jobs:
       - name: Fail when preview generation or validation failed
         if: >-
           always() &&
-          steps.release.outputs.upgrade_available == 'true' &&
           (
-            steps.install.outcome != 'success' ||
-            steps.generate.outcome != 'success' ||
-            steps.validate.outcome != 'success'
+            steps.release.outcome != 'success' ||
+            (
+              steps.release.outputs.upgrade_available == 'true' &&
+              (
+                steps.install.outcome != 'success' ||
+                steps.generate.outcome != 'success' ||
+                steps.validate.outcome != 'success'
+              )
+            )
           )
         run: exit 1
