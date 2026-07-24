@@ -99,7 +99,7 @@ export class ModelSelectionService {
       }
     }
     const selectedTier = enable ? tierId! : standardServiceTierRequestValue;
-    await this.codex.writeDefaultServiceTier(selectedTier);
+    await this.codex.writeDefaultFastMode(enable);
     if ((enable && currentFast) || (!enable && !currentFast)) {
       return current;
     }

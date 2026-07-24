@@ -181,7 +181,13 @@ npm run test:package
 npm run protocol:check
 ```
 
-真实 App Server 冒烟测试不会调用模型：
+CI 使用隔离 `CODEX_HOME` 运行 Fast 默认值合同测试；该测试不需要登录，也不会调用模型：
+
+```bash
+RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
+```
+
+使用当前用户配置的完整真实 App Server 冒烟测试同样不会调用模型：
 
 ```bash
 RUN_CODEX_INTEGRATION=1 npm test -- --run tests/real-app-server.test.ts

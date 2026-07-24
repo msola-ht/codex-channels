@@ -1,4 +1,6 @@
 import type {
+  ConfigReadParams,
+  ConfigReadResponse,
   GetAccountTokenUsageResponse,
   GetAccountRateLimitsResponse,
   InitializeResponse,
@@ -243,18 +245,27 @@ export class CodexAppServerClient {
     return models;
   }
 
-  async writeDefaultServiceTier(serviceTier: string): Promise<void> {
+  async writeDefaultFastMode(enabled: boolean): Promise<void> {
     await this.rpc.request(
       "config/batchWrite",
       {
         edits: [{
           keyPath: "service_tier",
-          value: serviceTier,
+          value: enabled ? "fast" : "default",
           mergeStrategy: "replace",
         }],
         reloadUserConfig: true,
       },
       { retryOverload: false },
+    );
+  }
+
+  async readConfig(cwd: string): Promise<ConfigReadResponse> {
+    const params: ConfigReadParams = { cwd, includeLayers: false };
+    return this.rpc.request<ConfigReadResponse>(
+      "config/read",
+      params,
+      { retryOverload: true },
     );
   }
 

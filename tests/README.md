@@ -30,7 +30,16 @@ npm run test:coverage
 
 HTML 报告写入被 Git 忽略的 `coverage/`；当前只记录基线，不设置缺乏依据的强制覆盖率阈值。
 
-真实 Unix WebSocket/App Server 冒烟测试要求安装受支持的 Codex CLI，但不会调用模型：
+CI 中的隔离 App Server 合同测试要求安装受支持的 Codex CLI，但不需要登录，也不会调用模型：
+
+```bash
+RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
+```
+
+该合同测试使用临时 `CODEX_HOME`，验证一个 Client 写入的 Fast 用户默认值能被另一个 Client
+读取，且之后新建 Thread 的运行时 `serviceTier` 按 `default → priority → default` 变化。
+
+使用当前用户配置的完整 Unix WebSocket/App Server 冒烟测试同样不会调用模型：
 
 ```bash
 RUN_CODEX_INTEGRATION=1 npm test -- --run tests/real-app-server.test.ts

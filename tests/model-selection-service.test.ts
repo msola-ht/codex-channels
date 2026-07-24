@@ -52,7 +52,7 @@ function createService(settings?: {
 }): ModelSelectionService {
   const codex = {
     listModels: async () => models,
-    writeDefaultServiceTier: async () => undefined,
+    writeDefaultFastMode: async () => undefined,
   } as unknown as CodexAppServerClient;
   let currentSettings = settings;
   const router = {
@@ -122,10 +122,10 @@ describe("ModelSelectionService", () => {
   });
 
   it("persists an explicit Fast choice as the Codex CLI default", async () => {
-    const writeDefaultServiceTier = vi.fn().mockResolvedValue(undefined);
+    const writeDefaultFastMode = vi.fn().mockResolvedValue(undefined);
     const codex = {
       listModels: async () => models,
-      writeDefaultServiceTier,
+      writeDefaultFastMode,
     } as unknown as CodexAppServerClient;
     const router = {
       current: () => ({
@@ -144,12 +144,12 @@ describe("ModelSelectionService", () => {
 
     await service.selectFastMode(target, "off");
 
-    expect(writeDefaultServiceTier).toHaveBeenCalledWith("default");
+    expect(writeDefaultFastMode).toHaveBeenCalledWith(false);
     expect(service.turnOverrides(target)).toEqual({});
 
     await service.selectFastMode(target, "on");
 
-    expect(writeDefaultServiceTier).toHaveBeenLastCalledWith("priority");
+    expect(writeDefaultFastMode).toHaveBeenLastCalledWith(true);
     expect(service.turnOverrides(target)).toEqual({ serviceTier: "priority" });
   });
 

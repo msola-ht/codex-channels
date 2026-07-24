@@ -140,6 +140,19 @@ class FakeTransport extends BaseTransport {
           }),
         ),
       );
+    } else if (decoded.method === "config/read") {
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({
+            id: decoded.id,
+            result: {
+              config: { service_tier: "fast" },
+              origins: {},
+              layers: null,
+            },
+          }),
+        ),
+      );
     } else if (decoded.method === "turn/start") {
       queueMicrotask(() =>
         this.emitMessage(
@@ -378,24 +391,52 @@ describe("JsonRpcClient", () => {
     expect(transport.sent.some((message) => message.method === "plugin/list")).toBe(false);
   });
 
-  it("persists the default service tier through the App Server config API", async () => {
+  it("persists the Fast default through the App Server config API", async () => {
     const transport = new FakeTransport();
     const client = new CodexAppServerClient(new JsonRpcClient(transport), {
       sandbox: "workspace-write",
     });
     await client.connect();
 
-    await client.writeDefaultServiceTier("default");
+    await client.writeDefaultFastMode(false);
+    await client.writeDefaultFastMode(true);
 
-    expect(transport.sent.find((message) => message.method === "config/batchWrite")?.params)
-      .toEqual({
+    expect(
+      transport.sent
+        .filter((message) => message.method === "config/batchWrite")
+        .map((message) => message.params),
+    ).toEqual([
+      {
         edits: [{
           keyPath: "service_tier",
           value: "default",
           mergeStrategy: "replace",
         }],
         reloadUserConfig: true,
-      });
+      },
+      {
+        edits: [{
+          keyPath: "service_tier",
+          value: "fast",
+          mergeStrategy: "replace",
+        }],
+        reloadUserConfig: true,
+      },
+    ]);
+  });
+
+  it("reads effective config through the typed App Server client", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    const result = await client.readConfig("/tmp/project");
+
+    expect(result.config.service_tier).toBe("fast");
+    expect(transport.sent.find((message) => message.method === "config/read")?.params)
+      .toEqual({ cwd: "/tmp/project", includeLayers: false });
   });
 
   it("tags Gateway user input with a client message id", async () => {

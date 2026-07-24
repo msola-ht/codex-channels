@@ -12,6 +12,8 @@ import { StdioTransport } from "../src/codex-client/stdio-transport.js";
 
 const run = process.env.RUN_CODEX_INTEGRATION === "1";
 const suite = run ? describe : describe.skip;
+const runContract = process.env.RUN_CODEX_CONTRACT === "1";
+const contractSuite = runContract ? describe : describe.skip;
 const archiveFixtureThreadId = process.env.CODEX_ARCHIVE_FIXTURE_THREAD_ID;
 const archiveTest = run && archiveFixtureThreadId ? it : it.skip;
 const resumeFixtureThreadId = process.env.CODEX_RESUME_FIXTURE_THREAD_ID;
@@ -20,9 +22,8 @@ const resumeTest = run && resumeFixtureThreadId ? it : it.skip;
 suite("real Codex App Server over Unix WebSocket", () => {
   const workdir = process.cwd();
   const runtimeRoot = resolve(".runtime");
-  mkdirSync(runtimeRoot, { recursive: true });
-  const testRuntime = mkdtempSync(join(runtimeRoot, "integration-"));
-  const socketPath = join(testRuntime, "app-server.sock");
+  let testRuntime: string;
+  let socketPath: string;
   let processHandle: ChildProcess;
   let client: CodexAppServerClient;
   let peerRpc: JsonRpcClient;
@@ -31,6 +32,9 @@ suite("real Codex App Server over Unix WebSocket", () => {
   let appServerStderr = "";
 
   beforeAll(async () => {
+    mkdirSync(runtimeRoot, { recursive: true });
+    testRuntime = mkdtempSync(join(runtimeRoot, "integration-"));
+    socketPath = join(testRuntime, "app-server.sock");
     processHandle = spawn("codex", ["app-server", "--listen", `unix://${socketPath}`], {
       cwd: workdir,
       stdio: ["ignore", "ignore", "pipe"],
@@ -64,7 +68,9 @@ suite("real Codex App Server over Unix WebSocket", () => {
       processHandle.kill("SIGTERM");
       await new Promise((resolveExit) => processHandle.once("exit", resolveExit));
     }
-    rmSync(testRuntime, { recursive: true, force: true });
+    if (testRuntime) {
+      rmSync(testRuntime, { recursive: true, force: true });
+    }
   });
 
   it("lists native threads without starting a turn", async () => {
@@ -239,6 +245,105 @@ suite("real Codex App Server over stdio", () => {
     expect(Array.isArray(threads)).toBe(true);
   }, 15_000);
 });
+
+contractSuite("isolated Codex App Server state contract", () => {
+  const workdir = process.cwd();
+  const runtimeRoot = resolve(".runtime");
+  let testRuntime: string;
+  let codexHome: string;
+  let socketPath: string;
+  let processHandle: ChildProcess;
+  let ownerClient: CodexAppServerClient;
+  let peerClient: CodexAppServerClient;
+  let appServerStderr = "";
+
+  beforeAll(async () => {
+    mkdirSync(runtimeRoot, { recursive: true });
+    testRuntime = mkdtempSync(join(runtimeRoot, "contract-"));
+    codexHome = join(testRuntime, "codex-home");
+    socketPath = join(testRuntime, "app-server.sock");
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    processHandle = spawn(
+      process.env.CODEX_BINARY ?? "codex",
+      ["app-server", "--listen", `unix://${socketPath}`],
+      {
+        cwd: workdir,
+        env: { ...process.env, CODEX_HOME: codexHome },
+        stdio: ["ignore", "ignore", "pipe"],
+      },
+    );
+    processHandle.stderr?.setEncoding("utf8");
+    processHandle.stderr?.on("data", (chunk: string) => {
+      appServerStderr = appendDiagnostic(appServerStderr, chunk);
+    });
+    await waitFor(
+      () => existsSync(socketPath),
+      10_000,
+      () => processHandle.exitCode === null
+        ? undefined
+        : new Error(appServerFailure("隔离 Codex App Server 在创建 Unix Socket 前退出", appServerStderr)),
+    );
+    ownerClient = new CodexAppServerClient(
+      new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
+      { sandbox: "read-only" },
+    );
+    peerClient = new CodexAppServerClient(
+      new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
+      { sandbox: "read-only" },
+    );
+    await ownerClient.connect();
+    await peerClient.connect();
+  }, 15_000);
+
+  afterAll(async () => {
+    await peerClient?.close();
+    await ownerClient?.close();
+    if (processHandle?.exitCode === null) {
+      processHandle.kill("SIGTERM");
+      await new Promise((resolveExit) => processHandle.once("exit", resolveExit));
+    }
+    if (testRuntime) {
+      rmSync(testRuntime, { recursive: true, force: true });
+    }
+  });
+
+  it("persists Fast defaults for peer reads and subsequently started threads", async () => {
+    const startedThreadIds: string[] = [];
+    try {
+      await ownerClient.writeDefaultFastMode(false);
+      await expectConfiguredTier(peerClient, workdir, "default");
+      const standardThread = await ownerClient.startThread(workdir);
+      startedThreadIds.push(standardThread.thread.id);
+      expect(standardThread.serviceTier).toBe("default");
+
+      await ownerClient.writeDefaultFastMode(true);
+      await expectConfiguredTier(peerClient, workdir, "fast");
+      const fastThread = await ownerClient.startThread(workdir);
+      startedThreadIds.push(fastThread.thread.id);
+      expect(fastThread.serviceTier).toBe("priority");
+
+      await ownerClient.writeDefaultFastMode(false);
+      await expectConfiguredTier(peerClient, workdir, "default");
+      const restoredThread = await ownerClient.startThread(workdir);
+      startedThreadIds.push(restoredThread.thread.id);
+      expect(restoredThread.serviceTier).toBe("default");
+    } finally {
+      for (const threadId of startedThreadIds) {
+        await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
+        await ownerClient.deleteThread(threadId);
+      }
+    }
+  }, 15_000);
+});
+
+async function expectConfiguredTier(
+  client: CodexAppServerClient,
+  cwd: string,
+  expected: string,
+): Promise<void> {
+  const result = await client.readConfig(cwd);
+  expect(result.config.service_tier).toBe(expected);
+}
 
 async function waitFor(
   predicate: () => boolean,
