@@ -108,6 +108,9 @@ Surface -> Application/Core <- Codex Client
 - 未识别、无法路由或缺少归属信息的高权限请求默认拒绝或取消。
 - 命令或文件审批只有在协议明确支持且用户显式选择时才能映射为本次 App Server 会话持续授权；
   一次批准不得静默升级。临时权限审批始终限定当前 Turn。
+- 命令前缀持久授权必须与会话授权分开显示；只有 App Server 提供完全一致的
+  `proposedExecpolicyAmendment` 和 `acceptWithExecpolicyAmendment` 时才可选择，并且只能在用户
+  明确选择后原样返回该提议。Gateway 不自行写入或扩大 Codex 执行规则。
 
 ## 安全
 

@@ -12,6 +12,8 @@ export type { Thread } from "./generated/v2/Thread.js";
 export type { AccountUpdatedNotification } from "./generated/v2/AccountUpdatedNotification.js";
 export type { ConfigReadParams } from "./generated/v2/ConfigReadParams.js";
 export type { ConfigReadResponse } from "./generated/v2/ConfigReadResponse.js";
+export type { CommandExecutionApprovalDecision } from "./generated/v2/CommandExecutionApprovalDecision.js";
+export type { ExecPolicyAmendment } from "./generated/v2/ExecPolicyAmendment.js";
 export type { McpServerStatusUpdatedNotification } from "./generated/v2/McpServerStatusUpdatedNotification.js";
 export type { McpServerStartupFailureReason } from "./generated/v2/McpServerStartupFailureReason.js";
 export type { McpServerStartupState } from "./generated/v2/McpServerStartupState.js";

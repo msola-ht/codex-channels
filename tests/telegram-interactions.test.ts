@@ -101,6 +101,109 @@ describe("TelegramInteractionPort", () => {
     await expect(decision).resolves.toEqual({ type: "approval", approved: false });
   });
 
+  it("offers and resolves a persistent command prefix approval", async () => {
+    const sendMessage = vi.fn(async (
+      _chatId: string,
+      _text: string,
+      _options?: unknown,
+    ) => {
+      void _chatId;
+      void _text;
+      void _options;
+      return { message_id: 8 };
+    });
+    const editMessageText = vi.fn(async () => true as const);
+    const callbackQuery = vi.fn();
+    const bot = {
+      callbackQuery,
+      api: { sendMessage, editMessageText },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    const amendment = ["env", "-u", "CODEX_CONNECT_HOME", "git", "commit"];
+
+    const decision = interactions.request(target, {
+      ...approvalRequest(),
+      allowSession: false,
+      execPolicyAmendment: amendment,
+    });
+    await settle();
+
+    const options = sendMessage.mock.calls[0]?.[2] as {
+      reply_markup: { inline_keyboard: Array<Array<{ text: string; callback_data?: string }>> };
+    };
+    const prefixButton = options.reply_markup.inline_keyboard
+      .flat()
+      .find((button) => button.text === "始终允许此前缀");
+    expect(prefixButton?.callback_data).toMatch(/^ix:p:/);
+
+    const callback = callbackQuery.mock.calls[0]?.[1] as (context: Context) => Promise<void>;
+    await callback({
+      callbackQuery: { data: prefixButton!.callback_data! },
+      chat: { id: 100 },
+      answerCallbackQuery: vi.fn(async () => true as const),
+    } as unknown as Context);
+
+    await expect(decision).resolves.toEqual({
+      type: "approval",
+      approved: true,
+      scope: "execpolicy",
+    });
+    await settle();
+    expect(editMessageText).toHaveBeenCalledWith(
+      "100",
+      8,
+      expect.stringContaining("处理结果：已保存命令前缀规则"),
+      expect.objectContaining({ reply_markup: { inline_keyboard: [] } }),
+    );
+  });
+
+  it("rejects a forged persistent command prefix callback", async () => {
+    const sendMessage = vi.fn(async (
+      _chatId: string,
+      _text: string,
+      _options?: unknown,
+    ) => {
+      void _chatId;
+      void _text;
+      void _options;
+      return { message_id: 9 };
+    });
+    const callbackQuery = vi.fn();
+    const bot = {
+      callbackQuery,
+      api: {
+        sendMessage,
+        editMessageText: vi.fn(async () => true as const),
+      },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+
+    const decision = interactions.request(target, {
+      ...approvalRequest(),
+      allowSession: false,
+    });
+    await settle();
+    const options = sendMessage.mock.calls[0]?.[2] as {
+      reply_markup: { inline_keyboard: Array<Array<{ callback_data?: string }>> };
+    };
+    const token = options.reply_markup.inline_keyboard
+      .flat()
+      .find((button) => button.callback_data?.startsWith("ix:a:"))
+      ?.callback_data?.split(":")[2];
+    const callback = callbackQuery.mock.calls[0]?.[1] as (context: Context) => Promise<void>;
+    const answerCallbackQuery = vi.fn(async () => true as const);
+
+    await callback({
+      callbackQuery: { data: `ix:p:${token}` },
+      chat: { id: 100 },
+      answerCallbackQuery,
+    } as unknown as Context);
+
+    expect(answerCallbackQuery).toHaveBeenCalledWith({ text: "该请求不支持持久规则" });
+    await interactions.close();
+    await expect(decision).resolves.toEqual({ type: "approval", approved: false });
+  });
+
   it("removes approval buttons when another client resolves the request", async () => {
     let completeSend: ((message: { message_id: number }) => void) | undefined;
     const sendMessage = vi.fn(() => new Promise<{ message_id: number }>((resolve) => {

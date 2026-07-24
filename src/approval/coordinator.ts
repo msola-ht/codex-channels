@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 
 import { JsonRpcError, type RpcServerRequest } from "../codex-client/index.js";
+import type {
+  CommandExecutionApprovalDecision,
+  ExecPolicyAmendment,
+} from "../codex-protocol/index.js";
 import type { SessionRouter } from "../session-routing/index.js";
 import type { InteractionDecision, InteractionPort } from "./types.js";
 
@@ -51,6 +55,7 @@ export class ApprovalCoordinator {
         if (!additionalPermissions.valid) {
           return { decision: "decline" };
         }
+        const execPolicyAmendment = offeredExecPolicyAmendment(params);
         const decision = await this.interaction.request(target, {
           type: "approval",
           requestId: interactionId,
@@ -59,11 +64,19 @@ export class ApprovalCoordinator {
           turnId,
           itemId,
           title: "Codex 请求执行命令",
-          detail: [reason, command, additionalPermissions.detail].filter(Boolean).join("\n\n"),
+          detail: [
+            reason,
+            command,
+            additionalPermissions.detail,
+            execPolicyAmendment
+              ? `持久规则前缀：${JSON.stringify(execPolicyAmendment)}`
+              : undefined,
+          ].filter(Boolean).join("\n\n"),
           allowSession: offersSessionCommandApproval(params.availableDecisions),
+          ...(execPolicyAmendment ? { execPolicyAmendment } : {}),
           expiresInMs: this.timeoutMs,
         });
-        return { decision: approvalProtocolDecision(decision) };
+        return { decision: approvalProtocolDecision(decision, execPolicyAmendment) };
       }
       case "item/fileChange/requestApproval": {
         if (!turnId || !itemId) {
@@ -196,11 +209,24 @@ function isApproved(decision: InteractionDecision): boolean {
 
 function approvalProtocolDecision(
   decision: InteractionDecision,
-): "accept" | "acceptForSession" | "decline" {
+  execPolicyAmendment?: ExecPolicyAmendment,
+): CommandExecutionApprovalDecision {
   if (decision.type !== "approval" || !decision.approved) {
     return "decline";
   }
-  return decision.scope === "session" ? "acceptForSession" : "accept";
+  if (decision.scope === "session") {
+    return "acceptForSession";
+  }
+  if (decision.scope === "execpolicy") {
+    return execPolicyAmendment
+      ? {
+          acceptWithExecpolicyAmendment: {
+            execpolicy_amendment: execPolicyAmendment,
+          },
+        }
+      : "decline";
+  }
+  return "accept";
 }
 
 function mapAnswers(answers: Record<string, string[]>): Record<string, { answers: string[] }> {
@@ -294,6 +320,35 @@ function offersSessionCommandApproval(value: unknown): boolean {
   return value === undefined
     || value === null
     || (Array.isArray(value) && value.includes("acceptForSession"));
+}
+
+function offeredExecPolicyAmendment(
+  params: Record<string, unknown>,
+): ExecPolicyAmendment | undefined {
+  const proposed = params.proposedExecpolicyAmendment;
+  if (
+    !Array.isArray(proposed)
+    || proposed.length === 0
+    || !proposed.every((entry) => typeof entry === "string")
+  ) {
+    return undefined;
+  }
+
+  const available = params.availableDecisions;
+  if (available === undefined || available === null) {
+    return [...proposed];
+  }
+  if (!Array.isArray(available)) {
+    return undefined;
+  }
+  const offered = available.some((decision) => {
+    const payload = asRecord(decision).acceptWithExecpolicyAmendment;
+    const amendment = asRecord(payload).execpolicy_amendment;
+    return Array.isArray(amendment)
+      && amendment.length === proposed.length
+      && amendment.every((entry, index) => entry === proposed[index]);
+  });
+  return offered ? [...proposed] : undefined;
 }
 
 function permissionPaths(value: unknown): string[] | null {

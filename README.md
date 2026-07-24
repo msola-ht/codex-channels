@@ -150,8 +150,9 @@ Gateway 会监测用户 `config.toml`：新增 Workspace 和 Telegram 允许用�
 - 交互：`/cancel`、`/whoami`
 
 Telegram 只能选择预配置 Workspace，不能通过消息提交任意工作目录。命令和文件审批在 App Server
-支持时提供“批准一次”“本次会话始终同意”和“拒绝”；临时权限只允许当前 Turn。会话授权必须由
-用户显式选择，未知或过期的高权限请求会被拒绝或取消。
+支持时提供“批准一次”“本次会话始终同意”和“拒绝”；命令审批收到 App Server 的精确规则提议时，
+还会提供“始终允许此前缀”，由 App Server 保存该命令前缀规则。临时权限只允许当前 Turn。会话授权
+或持久规则必须由用户显式选择，未知、畸形或过期的高权限请求会被拒绝或取消。
 当前 Turn 运行时，普通消息会通过 `turn/steer` 立即追加；使用 `/queue <描述>` 可把纯文本
 排到下一 Turn。队列按 Conversation 隔离，每个会话最多 10 条，只保存在 Gateway 内存中；
 Turn 完成后逐条启动，Gateway 重启、Thread 切换或排队 Turn 启动失败时会清空，不写入 SQLite。

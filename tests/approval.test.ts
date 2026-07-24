@@ -168,6 +168,92 @@ describe("ApprovalCoordinator", () => {
     });
   });
 
+  it("maps an explicit persistent command prefix approval to the proposed protocol amendment", async () => {
+    const amendment = [
+      "env",
+      "-u",
+      "CODEX_CONNECT_HOME",
+      "-u",
+      "CODEX_CONNECT_CONFIG_FILE",
+      "git",
+      "commit",
+    ];
+    const interaction = new FakeInteraction({
+      type: "approval",
+      approved: true,
+      scope: "execpolicy",
+    });
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+
+    const response = await coordinator.handle({
+      id: "request-command-prefix",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "command-prefix-1",
+        command: "env -u CODEX_CONNECT_HOME -u CODEX_CONNECT_CONFIG_FILE git commit -m test",
+        proposedExecpolicyAmendment: amendment,
+        availableDecisions: [
+          "accept",
+          {
+            acceptWithExecpolicyAmendment: {
+              execpolicy_amendment: amendment,
+            },
+          },
+          "decline",
+        ],
+      },
+    });
+
+    expect(response).toEqual({
+      decision: {
+        acceptWithExecpolicyAmendment: {
+          execpolicy_amendment: amendment,
+        },
+      },
+    });
+    expect(interaction.requests[0]).toMatchObject({
+      type: "approval",
+      kind: "command",
+      allowSession: false,
+      execPolicyAmendment: amendment,
+    });
+  });
+
+  it("fails closed when a persistent command prefix decision was not offered", async () => {
+    const interaction = new FakeInteraction({
+      type: "approval",
+      approved: true,
+      scope: "execpolicy",
+    });
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+
+    const response = await coordinator.handle({
+      id: "request-command-prefix-mismatch",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "command-prefix-mismatch-1",
+        command: "git commit -m test",
+        proposedExecpolicyAmendment: ["git", "commit"],
+        availableDecisions: [
+          "accept",
+          {
+            acceptWithExecpolicyAmendment: {
+              execpolicy_amendment: ["git"],
+            },
+          },
+          "decline",
+        ],
+      },
+    });
+
+    expect(response).toEqual({ decision: "decline" });
+    expect(interaction.requests[0]).not.toHaveProperty("execPolicyAmendment");
+  });
+
   it("hides session approval when the command request does not offer it", async () => {
     const interaction = new FakeInteraction();
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);

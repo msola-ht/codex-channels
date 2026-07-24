@@ -194,6 +194,9 @@ export class TelegramInteractionPort implements InteractionPort {
   private keyboard(request: InteractionRequest, token: string): InlineKeyboard | undefined {
     if (request.type === "approval") {
       const keyboard = new InlineKeyboard().text("批准一次", `ix:a:${token}`);
+      if (request.execPolicyAmendment) {
+        keyboard.text("始终允许此前缀", `ix:p:${token}`).row();
+      }
       if (request.allowSession) {
         keyboard.text("本次会话始终同意", `ix:s:${token}`).row();
       }
@@ -225,8 +228,18 @@ export class TelegramInteractionPort implements InteractionPort {
         await context.answerCallbackQuery({ text: "该请求不支持会话授权" });
         return;
       }
+      if (action === "p" && !pending.request.execPolicyAmendment) {
+        await context.answerCallbackQuery({ text: "该请求不支持持久规则" });
+        return;
+      }
       if (action === "a") {
         this.finish(token!, { type: "approval", approved: true, scope: "once" }, "已批准一次");
+      } else if (action === "p") {
+        this.finish(
+          token!,
+          { type: "approval", approved: true, scope: "execpolicy" },
+          "已保存命令前缀规则",
+        );
       } else if (action === "s") {
         this.finish(
           token!,

@@ -19,7 +19,7 @@
 - `long-message-format.ts`：统一规划终端或 Telegram 发起 Turn 的长回复；普通长文本使用可展开引用块，超长代码与内容使用预览加内存文件。
 - `operation-format.ts`：把操作记录分组、截断、脱敏并渲染为 Telegram HTML。
 - `typing-indicator.ts`：维护活动请求和 Turn 的 Typing 状态、刷新与限速。
-- `interactions.ts`：发送一次/会话审批或用户输入卡片，按协议能力显示按钮，并处理超时、回调和跨客户端失效。
+- `interactions.ts`：发送一次/会话/命令前缀持久审批或用户输入卡片，按协议能力显示互不混淆的按钮，并处理超时、回调和跨客户端失效。
 - `lifecycle.ts`：Bot 命令注册、Long Polling、包含系统与会话摘要的启动联通通知，以及可取消关闭；有界重试耗尽后上报致命故障，由进程管理器恢复 Gateway。
 - `api-executor.ts`：统一执行 Telegram API 调用，处理超时、限流和有限重试。
 - `error-metadata.ts`：只保留异常类型和受约束的机器错误码，不记录任意异常消息。
