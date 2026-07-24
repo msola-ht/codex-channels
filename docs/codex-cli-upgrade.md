@@ -87,28 +87,57 @@ Alpha Canary 只提供正式版本发布前的兼容预警。不得把 Alpha 生
 通过可自动执行的兼容检查，但不代替 Codex 对官方固定版本源码、行为语义、安全边界和文档更新
 的审查。
 
-## 2. 让 Codex 审查并适配
+## 2. 本地让 Codex 审查并适配
 
-生成完成后，直接要求：
+正式升级预览发现新版本后，优先在本地干净工作区完成适配。确定性的版本校验、协议生成、差异
+提取和验证由仓库脚本负责；协议语义、业务影响、安全边界、源码修改和最终审查由 Codex 负责。
+不要再编写一个复制这些脚本的大型“自动修复”程序。
+
+### 直接在当前 Codex 会话中执行
+
+先安装目标正式版本的 Codex CLI，确认工作区干净，然后直接要求：
 
 > 按 `docs/codex-cli-upgrade.md` 审查当前 Codex CLI 升级差异，修复兼容问题并完成验证，不要提交。
+
+如果还没有生成升级工作树，应在请求中给出正式版本：
+
+> 按 `docs/codex-cli-upgrade.md` 将项目适配到 Codex CLI `<正式版本>`，完成协议生成、业务修改、
+> 文档更新和验证，不要提交。
 
 Codex 应按以下顺序处理，操作者不需要人工阅读协议文件：
 
 1. 先读取 `AGENTS.md`、`docs/index.md`、本页和相关模块 README。
-2. 比较生成的 `ClientRequest`、`ClientNotification`、`ServerNotification` 和
+2. 执行 `git status -sb`，拒绝在不明来源的未提交改动上生成协议；尚未生成时先运行
+   `npm run codex:upgrade -- <正式版本> --dry-run`，通过后再运行正式升级命令。
+3. 比较生成的 `ClientRequest`、`ClientNotification`、`ServerNotification` 和
    `ServerRequest`，识别新增、删除及参数变化。
-3. 对照目标版本的官方 App Server 文档、固定版本源码与测试；不能用官方 `main` 猜测锁定版本。
-4. 审查 `src/codex-protocol/index.ts` 的受控导出，再沿实际差异检查 `codex-client`、
+4. 对照目标版本的官方 App Server 文档、`rust-v<正式版本>` 固定版本源码与测试；不能采用
+   Alpha Patch，也不能用官方 `main` 猜测锁定版本。
+5. 审查 `src/codex-protocol/index.ts` 的受控导出，再沿实际差异检查 `codex-client`、
    `conversation-core`、`approval`、`session-routing` 和其他受影响模块。
-5. 新增的 Notification 可以在明确安全时记录并忽略；新增的 Server Request 必须明确处理或
+6. 先解决类型和现有测试的阻塞点，再验证运行时行为；每解决一层都重新运行最接近的定向测试，
+   不能只修复第一个编译错误就宣告完成。
+7. 新增的 Notification 可以在明确安全时记录并忽略；新增的 Server Request 必须明确处理或
    安全拒绝，不能悬挂。写请求不能因升级而获得盲目重试或更宽权限。
-6. 更新 `docs/index.md` 的版本、协议数字、固定版本链接、支持矩阵和实现映射，并更新所有受影响
+8. 不为旧 CLI 保留兼容层，不通过扩大模块依赖白名单、审批权限、网络权限或文件权限绕过失败。
+9. 更新 `docs/index.md` 的版本、协议数字、固定版本链接、支持矩阵和实现映射，并更新所有受影响
    README 与测试索引。
-7. 增加或调整单元测试；协议、Transport 或共享 App Server 行为变化时补充真实合同测试。
+10. 增加或调整单元测试；协议、Transport 或共享 App Server 行为变化时补充真实合同测试。
+11. 运行本页完整验证，重新审查规则文件、文档索引和最终 Git 差异；未经用户明确要求不提交、
+    推送、发布或重建服务。
 
 若类型生成没有业务差异，Codex 仍需确认版本、文档索引和真实合同，而不是仅凭 TypeScript
 编译通过判定升级完成。
+
+### 使用项目技能
+
+后续可以增加项目级 `codex-cli-upgrade-adapter` 技能，把上面的读取顺序、官方资料查询、逐层
+修复、验证和停止条件固化下来。技能必须以本页为流程事实来源，并直接复用
+`prepare-codex-upgrade.mjs`、`analyze-upgrade-protocol.mjs`、
+`run-upgrade-validation.mjs` 和 `write-upgrade-report.mjs`，不得复制一套版本生成或验证逻辑。
+
+技能只负责编排和需要判断的适配工作；精确版本校验、文件生成、报告与测试仍由仓库脚本执行。
+技能完成后仍默认停在未提交的本地工作区，等待用户要求审查、提交或推送。
 
 ## 3. 完成验证
 
