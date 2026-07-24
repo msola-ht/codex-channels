@@ -5,7 +5,9 @@
 ## 文件
 
 - `index.ts`：本模块的公开导出入口。
-- `core.ts`：维护活动 Turn、Token、最近 Diff/Plan 和通知去重状态，把协议通知归约为文本、操作、状态和完成事件。
+- `core.ts`：维护活动 Turn、Token、最近 Diff/Plan 和通知去重状态，把协议通知归约为文本、操作、
+  状态和完成事件；Turn 完成状态只接受当前生成协议定义的值，畸形通知不推断为成功；
+  可重试错误不污染最终完成状态，`warning` 按协议区分 Thread 目标与全局广播。
 - `events.ts`：定义 Conversation 目标、输出事件、Turn 产物、操作状态和关键事件判定。
 - `operation.ts`：把 App Server Item 转换为安全、简洁的操作过程，并清洗敏感命令文本。
 - `routing-port.ts`：Core 查询 Thread 路由所需的窄接口。

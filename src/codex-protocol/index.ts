@@ -24,6 +24,7 @@ export type { McpServerStartupState } from "./generated/v2/McpServerStartupState
 export type { RateLimitSnapshot } from "./generated/v2/RateLimitSnapshot.js";
 export type { RateLimitReachedType } from "./generated/v2/RateLimitReachedType.js";
 export type { TurnPlanStep } from "./generated/v2/TurnPlanStep.js";
+export type { TurnStatus } from "./generated/v2/TurnStatus.js";
 export type { ThreadDeleteResponse } from "./generated/v2/ThreadDeleteResponse.js";
 export type { ThreadListParams } from "./generated/v2/ThreadListParams.js";
 export type { ThreadListResponse } from "./generated/v2/ThreadListResponse.js";

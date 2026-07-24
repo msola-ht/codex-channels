@@ -5,6 +5,7 @@ import type {
   RateLimitSnapshot,
   ThreadTokenUsage,
   TurnPlanStep,
+  TurnStatus,
 } from "../codex-protocol/index.js";
 
 export type SurfaceId = string;
@@ -66,7 +67,7 @@ export type OutputEvent =
   | { type: "text.delta"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null }
   | { type: "text.completed"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null }
   | { type: "operation.updated"; target: ConversationTarget; threadId: string; turnId: string; operation: OperationUpdate }
-  | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: string; error?: string; tokenUsage?: ThreadTokenUsage; model?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]> }
+  | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: TurnStatus; error?: string; tokenUsage?: ThreadTokenUsage; model?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]> }
   | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string }
   | { type: "connection.lost"; target: ConversationTarget; threadId: string; message: string }
   | ({ type: "account.updated"; target: ConversationTarget } & AccountUpdatedNotification)

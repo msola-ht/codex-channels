@@ -8,6 +8,7 @@ import type {
   RateLimitSnapshot,
   ThreadTokenUsage,
   TurnPlanStep,
+  TurnStatus,
 } from "../codex-protocol/index.js";
 import type { EventBus } from "../event-bus/index.js";
 import {
@@ -254,7 +255,7 @@ export class ConversationCore {
         const turnId = stringField(params, "turnId");
         const error = asRecord(params?.error);
         const message = stringField(error, "message");
-        if (turnId && message) {
+        if (turnId && message && params?.willRetry === false) {
           this.errorsByTurn.set(turnId, message);
         }
         return;
@@ -262,8 +263,8 @@ export class ConversationCore {
       case "turn/completed": {
         const turn = asRecord(params?.turn);
         const turnId = stringField(turn, "id");
-        const status = stringField(turn, "status") ?? "completed";
-        if (!threadId || !turnId) {
+        const status = parseTurnStatus(turn?.status);
+        if (!threadId || !turnId || !status) {
           return;
         }
         this.clearSeenUserMessages(threadId, turnId);
@@ -405,8 +406,13 @@ export class ConversationCore {
       }
       case "warning": {
         const message = stringField(params, "message");
-        if (message && threadId) {
+        if (!message) {
+          return;
+        }
+        if (threadId) {
           this.publishForThread(threadId, { type: "warning", threadId, message });
+        } else if (params?.threadId === null) {
+          this.broadcast({ type: "warning", message });
         }
         return;
       }
@@ -521,6 +527,13 @@ function parsePlanSteps(value: unknown): TurnPlanStep[] | undefined {
     steps.push({ step, status: status as TurnPlanStep["status"] });
   }
   return steps;
+}
+
+function parseTurnStatus(value: unknown): TurnStatus | undefined {
+  return typeof value === "string" &&
+    ["completed", "interrupted", "failed", "inProgress"].includes(value)
+    ? value as TurnStatus
+    : undefined;
 }
 
 function parseAuthMode(value: unknown): AuthMode | null | undefined {

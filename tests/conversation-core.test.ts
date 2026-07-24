@@ -116,6 +116,66 @@ describe("ConversationCore", () => {
     expect(completions[1]).not.toHaveProperty("tokenUsage");
   });
 
+  it("does not invent a successful completion for a malformed turn status", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+    const core = new ConversationCore({
+      allBindings: () => [],
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+    }, output);
+
+    core.handle({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1", error: null },
+      },
+    });
+    await output.close();
+
+    expect(events.some((event) => event.type === "turn.completed")).toBe(false);
+  });
+
+  it("does not carry a transient retried error into a successful turn completion", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+    const core = new ConversationCore({
+      allBindings: () => [],
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+    }, output);
+
+    core.handle({
+      method: "error",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        willRetry: true,
+        error: { message: "暂时失败，稍后重试" },
+      },
+    });
+    core.handle({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed", error: null },
+      },
+    });
+    await output.close();
+
+    expect(events.find((event) => event.type === "turn.completed"))
+      .not.toHaveProperty("error");
+  });
+
   it("publishes external turn input once and tracks the external active turn", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const events: OutputEvent[] = [];
@@ -449,6 +509,35 @@ describe("ConversationCore", () => {
       name: "docs",
       status: "ready",
     }));
+  });
+
+  it("broadcasts global App Server warnings to bound conversations", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+    const core = new ConversationCore({
+      allBindings: () => [{ target, threadId: "thread-1" }],
+      targetForThread: () => undefined,
+      modelSettingsForThread: () => undefined,
+    }, output);
+
+    core.handle({
+      method: "warning",
+      params: {
+        threadId: null,
+        message: "全局配置警告",
+      },
+    });
+    await output.close();
+
+    expect(events).toContainEqual({
+      type: "warning",
+      target,
+      message: "全局配置警告",
+    });
   });
 
   it("uses only the main Codex seven-day window as the weekly limit", async () => {
