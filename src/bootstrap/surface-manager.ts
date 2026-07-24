@@ -12,6 +12,7 @@ import type {
 
 export class SurfaceManager {
   private readonly started: SurfaceAdapter[] = [];
+  private readonly active = new Set<SurfaceAdapter>();
   private readonly surfacesByAccount = new Map<string, SurfaceAdapter>();
   private removeOutputSubscription: (() => void) | undefined;
   private acceptingOutput = true;
@@ -39,6 +40,7 @@ export class SurfaceManager {
       for (const surface of this.surfaces) {
         this.started.push(surface);
         await surface.start();
+        this.active.add(surface);
       }
     } catch (error) {
       await this.stop().catch((cleanupError) => {
@@ -50,6 +52,7 @@ export class SurfaceManager {
 
   async stop(): Promise<void> {
     this.acceptingOutput = false;
+    this.active.clear();
     this.removeOutputSubscription?.();
     this.removeOutputSubscription = undefined;
     const failures: Array<{ surface: SurfaceAdapter; error: unknown }> = [];
@@ -148,6 +151,9 @@ export class SurfaceManager {
         },
         "输出事件没有已启用的 Surface",
       );
+      return;
+    }
+    if (!this.active.has(surface)) {
       return;
     }
     try {

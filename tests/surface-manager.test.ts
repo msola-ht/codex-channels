@@ -218,6 +218,7 @@ describe("SurfaceManager", () => {
     };
     const output = new EventBus<OutputEvent>(logger);
     const manager = createManager([telegram, feishu], output);
+    await manager.start();
 
     output.publish({
       type: "thread.status",
@@ -232,6 +233,77 @@ describe("SurfaceManager", () => {
     await settle();
 
     expect(received).toEqual(["feishu:thread.status"]);
+    await manager.stop();
+    await output.close();
+  });
+
+  it("routes output only while the target Surface is started", async () => {
+    const feishu = surface("feishu", "tenant-a", []);
+    const received: string[] = [];
+    feishu.output.handle = (event) => {
+      received.push(event.type);
+    };
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager([feishu], output);
+    const event: OutputEvent = {
+      type: "thread.status",
+      target: {
+        surface: "feishu",
+        accountId: "tenant-a",
+        conversationId: "chat-1",
+      },
+      threadId: "thread-1",
+      status: "idle",
+    };
+
+    output.publish(event);
+    await settle();
+    await manager.start();
+    output.publish(event);
+    await settle();
+    await manager.stop();
+    output.publish(event);
+    await settle();
+
+    expect(received).toEqual(["thread.status"]);
+    await output.close();
+  });
+
+  it("isolates a Surface output rejection from later events", async () => {
+    const feishu = surface("feishu", "tenant-a", []);
+    const received: string[] = [];
+    let attempts = 0;
+    let resolveSecond!: () => void;
+    const secondDelivered = new Promise<void>((resolve) => {
+      resolveSecond = resolve;
+    });
+    feishu.output.handle = (event) => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error("not ready");
+      }
+      received.push(event.type);
+      resolveSecond();
+    };
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager([feishu], output);
+    await manager.start();
+    const event: OutputEvent = {
+      type: "thread.status",
+      target: {
+        surface: "feishu",
+        accountId: "tenant-a",
+        conversationId: "chat-1",
+      },
+      threadId: "thread-1",
+      status: "idle",
+    };
+
+    output.publish(event);
+    output.publish(event);
+    await secondDelivered;
+
+    expect(received).toEqual(["thread.status"]);
     await manager.stop();
     await output.close();
   });
