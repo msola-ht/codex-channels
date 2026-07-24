@@ -1,11 +1,11 @@
 import { chmodSync, existsSync, mkdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
+import { packageDir } from "./package-path.mjs";
 
-export const packageDir = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), ".."));
+export { packageDir };
 
 export function userDataDir(environment = process.env) {
   const configured = environment.CODEX_CONNECT_HOME?.trim();

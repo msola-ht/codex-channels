@@ -175,6 +175,8 @@ npm run dev:all
 `npm ci` 和 `npm install` 会为当前仓库启用受版本控制的 `.githooks/pre-commit`。
 每次 `git commit` 前会自动执行完整提交检查；如需手动恢复 hook，运行
 `npm run hooks:install`。
+从干净源码仓库全局安装时可以直接运行 `npm install -g .`；安装脚本会按 lockfile
+补齐本地构建依赖、启用 Git hook 并生成 `dist/`，不需要先单独执行 `npm ci`。
 
 常用验证：
 
@@ -191,7 +193,8 @@ npm run verify:commit
 
 `npm run verify:commit` 是本地 hook 与 GitHub CI 共用的提交门禁，覆盖暂存差异格式、
 类型与版本、全目录 Lint、文档链接和索引、全量测试、Shell 语法、npm tarball 安装冒烟，
-以及 macOS 上的 launchd 模板检查。不要使用 `git commit --no-verify` 绕过该门禁。
+干净源码 prepare 冒烟，以及 macOS 上的 launchd 模板检查。不要使用
+`git commit --no-verify` 绕过该门禁。
 
 CI 使用隔离 `CODEX_HOME` 运行 Fast 默认值和共享 Thread 设置通知合同测试；该测试不需要登录，
 也不会调用模型：

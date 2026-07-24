@@ -17,7 +17,7 @@
   及 Gateway/CLI 连接恢复。
 - SQLite 最小绑定恢复、配置热加载与自动重启分类、Telegram Setup、CLI、launchd、systemd、Unix WebSocket 请求头、模块依赖方向和公开入口边界。
 - CLI Doctor 的严格 TOML Schema 校验、敏感错误清洗和只读诊断。
-- 仓库 Git hooks 自动安装与重复执行安全性。
+- 仓库 Git hooks 自动安装与重复执行安全性，以及无本地依赖时的源码安装准备。
 
 常规验证：
 

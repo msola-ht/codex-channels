@@ -3,7 +3,7 @@ import { existsSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { packageDir } from "./runtime-config.mjs";
+import { packageDir } from "./package-path.mjs";
 
 const hooksPath = ".githooks";
 

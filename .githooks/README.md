@@ -4,7 +4,7 @@
 会把本仓库的 `core.hooksPath` 设置为 `.githooks`，不会修改用户的全局 Git 配置。
 
 - `pre-commit`：执行 `npm run verify:commit`；任一类型、Lint、文档索引、测试、Shell、
-  打包或差异检查失败都会阻止提交。
+  npm tarball/干净源码安装或差异检查失败都会阻止提交。
 
 需要手动复查时直接运行：
 

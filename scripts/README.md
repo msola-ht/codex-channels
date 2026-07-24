@@ -4,7 +4,7 @@
 
 ## 配置与 Workspace
 
-- `runtime-config.mjs`：解析包目录、用户数据目录和运行时路径，并初始化 `.codex-connect`。
+- `runtime-config.mjs`：解析用户数据目录和运行时路径，并初始化 `.codex-connect`。
 - `telegram-setup.mjs`：独立完成 Telegram Bot Token 验证、一次性私聊配对、用户 ID 获取和用户配置写入；新建 Bot 仅引导使用官方 BotFather。
 - `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。
 - `workspace-add.mjs`：把指定目录或命令调用目录注册为 Workspace，支持 `--prune-missing` 清理失效配置。
@@ -24,7 +24,10 @@
 ## 构建、打包与服务
 
 - `clean-dist.mjs`：构建前清理 `dist/`。
-- `prepare-package.mjs`：源码仓库安装或 npm 打包前启用仓库 Git hooks、构建源码，并验证已安装包包含运行入口。
+- `package-path.mjs`：提供不依赖第三方包的 npm 包根目录解析。
+- `prepare-package.mjs`：源码仓库安装或 npm 打包前按 lockfile 补齐缺失的本地构建依赖、
+  启用仓库 Git hooks、构建源码，并验证已安装包包含运行入口。
+- `smoke-source-prepare.mjs`：在不含 `node_modules` 和 `dist` 的临时源码副本中验证 prepare。
 - `smoke-package.mjs`：生成实际 tarball，在隔离目录安装并执行公开的 `codexc` 入口与配置预检。
 - `check-release-tag.mjs`：要求 Git Tag 与 `package.json` 版本严格一致，防止发布错版。
 - `sync-gateway-version.mjs`：以锁定的 Codex CLI 协议版本同步 `package.json`、锁文件和 Gateway 运行时版本；不维护独立版本号。

@@ -139,7 +139,7 @@ Surface -> Application/Core <- Codex Client
 - 每次修改运行与改动最相关的最小验证，至少覆盖本次修改的主路径和失败路径。
 - `npm run verify:commit` 是本地提交与 GitHub CI 共用的完整提交检查入口，必须依次覆盖
   暂存差异格式、类型与版本、生产和测试 Lint、文档链接与索引、全量测试、Shell 语法、
-  npm tarball 安装冒烟，以及当前平台可执行的服务模板检查。
+  npm tarball 与干净源码安装冒烟，以及当前平台可执行的服务模板检查。
 - `npm ci`、`npm install` 或 `npm run hooks:install` 必须把仓库内 `.githooks/pre-commit`
   设为当前仓库 hook；不得使用 `git commit --no-verify` 绕过检查。
 - 修改检查脚本、Git hook 或 CI 时，必须保持 `verify:commit`、`.githooks/pre-commit`、

@@ -15,7 +15,7 @@ const checks = [
     "scripts/launchd-control.sh",
     "scripts/systemd-control.sh",
   ] },
-  { name: "npm tarball 冒烟", command: "npm", args: ["run", "test:package"] },
+  { name: "npm 安装冒烟", command: "npm", args: ["run", "test:package"] },
 ];
 
 if (process.platform === "darwin") {
