@@ -15,6 +15,16 @@
 
 - `dev-all.mjs`：开发模式下复用或启动 App Server，再启动 Gateway。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Socket 和工作目录。
+- `prepare-codex-upgrade.mjs`：在干净工作区校验精确目标 CLI，调用现有协议生成和版本同步，
+  完成基础一致性检查后把差异交给 Codex 审查。
+- `codex-release-api.mjs`：为稳定版和 Alpha 解析器调用 GitHub Release API；只对网络异常、
+  429 和 5xx 做三次有限重试，不在错误中输出凭据或上游正文。
+- `resolve-codex-release.mjs`：通过 GitHub Release API 解析或验证 `openai/codex` 正式发行版，
+  拒绝 Draft、Pre-release 和版本不匹配。
+- `resolve-codex-alpha.mjs`：从官方 GitHub Pre-release 列表选择最高版本号的 Alpha，只供隔离
+  Canary 使用，不改变正式版本基线。
+- `write-upgrade-report.mjs`：把 CI 中生成的升级工作树写成 Markdown 摘要、文件清单、统计和
+  二进制安全 Patch；生成或验证失败且没有差异时仍会输出报告。
 - `protocol-schema.mjs`：在同一文件系统临时生成、逐文件比较并安全替换协议类型目录。
 - `generate-protocol.mjs`：先在临时目录调用当前 Codex CLI 生成协议，成功后替换协议类型、
   记录版本并同步 npm/Gateway 版本。

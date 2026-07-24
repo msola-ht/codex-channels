@@ -20,6 +20,15 @@
   `docs/index.md` 中的版本、数量、固定版本链接、当前支持矩阵、实现映射和复核命令。新增协议
   能力必须先在矩阵中标明官方方法、本地入口和验证方式；生成类型存在不代表项目已经支持，
   生成类型仍是当前锁定 CLI 协议字段的最终事实来源。
+- 升级锁定的 Codex CLI 时，只采用 `openai/codex` GitHub Releases 中非 Draft、非 Pre-release
+  的正式发行版；先按 `docs/codex-cli-upgrade.md` 在干净工作区运行
+  `npm run codex:upgrade -- <正式版本>`，或运行 `Codex upgrade preview` GitHub Actions。
+  生成后由 Codex 审查协议差异、完成业务适配、文档更新和验证。不得要求操作者人工判断协议
+  差异，也不得为旧 CLI 保留兼容层。
+- 官方 Alpha 只允许在 `Codex alpha canary` 的临时 Runner 或明确隔离的本地分支/worktree 中
+  用于前向兼容测试；不得把 Alpha 生成类型、版本或专属适配提交到 `main`，不得据此更新稳定
+  协议基线、固定版本索引或公开支持矩阵。Canary 成功和失败都必须保留差异与日志，正式 Release
+  发布后重新走正式升级流程。
 
 ## 当前实现
 

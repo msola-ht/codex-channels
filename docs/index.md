@@ -98,6 +98,30 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 | Telegram 如何适配核心事件 | [`surfaces/telegram/`](../src/surfaces/telegram/README.md) | [`tests/README.md`](../tests/README.md) |
 | 与真实 App Server 的合同是否一致 | [`real-app-server.test.ts`](../tests/real-app-server.test.ts) | `RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts` |
 
+## 模块复核进度
+
+本清单记录逐模块对照当前规则、生成协议和 `rust-v0.145.0` 官方实现的专项复核进度，不代表未列为
+完成的模块缺少常规测试。
+
+已完成：
+
+- `codex-protocol`：协议生成、版本基线与受控导出，提交 `7be8e48`。
+- `codex-client`：Transport、JSON-RPC 与类型化 App Server API，提交 `27cd545`。
+- `conversation-core`：Turn、Item、错误与警告通知归约，提交 `994a3c7`。
+- `session-routing`：Thread 绑定、恢复、订阅和关闭语义，提交 `5410f40`。
+
+后续按以下顺序继续，每个模块单独审查、修改、验证和提交：
+
+1. `application`：先处理 `conversation-service.ts` 的 Turn、队列与 Thread 切换，再检查命令服务。
+2. `approval`：Server Request 归属、一次/会话批准、持久规则与失效处理。
+3. `storage`：最小绑定 Schema、内存/SQLite 一致性和失败回滚。
+4. `policy`：Surface Actor、账号与 Workspace 授权边界。
+5. `event-bus`：有界队列、关键事件保护和消费者隔离。
+6. `observability`：结构化日志、错误上下文与敏感字段脱敏。
+7. `config`：TOML 边界验证、热加载分类和代理优先级。
+8. `surfaces`：通用 Surface 接口及 Telegram 输入、输出和交互适配。
+9. `bootstrap`：最后复核组合根、连接恢复、后台任务和关闭顺序。
+
 ## 查询顺序
 
 1. 先从本页按问题找到官方概念和本项目模块。
@@ -106,8 +130,13 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 3. 查行为语义时阅读官方 App Server 文档，再查看 `rust-v0.145.0` 固定版本实现和测试。
 4. 查本项目行为时从模块 `index.ts` 和 README 进入，最后运行对应测试或真实合同测试。
 
-协议升级后运行 `npm run protocol:generate`，重新审查生成差异，并同步本页的版本、数量和固定版本
-源码链接。`npm run docs:check` 会自动核对上表的协议和模块数字；也可用以下命令手动复核：
+协议升级从 [`Codex CLI 升级流程`](codex-cli-upgrade.md) 开始，使用
+`npm run codex:upgrade -- <目标版本>` 生成差异，再由 Codex 审查适配，并同步本页的版本、数量、
+固定版本源码链接和支持矩阵。`npm run docs:check` 会自动核对上表的协议和模块数字；也可用以下
+命令手动复核：
+
+每日 Alpha Canary 只对官方 Pre-release 做隔离前向兼容测试，不改变本页记录的稳定版本、数量、
+固定版本链接或支持矩阵；正式 Release 发布后必须重新运行正式升级流程。
 
 ```bash
 find src/codex-protocol/generated -type f -name '*.ts' | wc -l

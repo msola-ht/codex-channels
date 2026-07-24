@@ -227,6 +227,17 @@ npm run verify:commit
 干净源码 prepare 冒烟，以及 macOS 上的 launchd 模板检查。不要使用
 `git commit --no-verify` 绕过该门禁。
 
+升级项目锁定的 Codex CLI 时，不要直接修改版本号。先安装精确目标 CLI，并在干净工作区运行：
+
+```bash
+npm run codex:upgrade -- <目标版本>
+```
+
+脚本会生成版本专属协议并同步 Gateway 版本，随后由 Codex 审查生成差异、修复业务适配并完成
+验证。GitHub Actions 还会每天检查正式 Release，并用最新官方 Alpha 做隔离兼容性 Canary；
+Canary 结果只作预警，不改变正式基线。完整流程见
+[`docs/codex-cli-upgrade.md`](docs/codex-cli-upgrade.md)。
+
 在项目目录或其子目录运行 `codexc rules init`，会定位最近的 Git/Node 项目根目录，读取存在的
 `package.json` 脚本，并生成 `.codex/rules/default.rules`。生成器只允许只读 Git 检查和已存在的
 `test`、`build`、`check`、`lint` 等验证脚本，不放行暂存、提交、推送、依赖安装、发布或服务管理。
@@ -252,6 +263,7 @@ RUN_CODEX_INTEGRATION=1 npm test -- --run tests/real-app-server.test.ts
 ## 文档索引
 
 - [`docs/index.md`](docs/index.md)：Codex 官方文档、固定版本源码、协议数量与本项目实现映射。
+- [`docs/codex-cli-upgrade.md`](docs/codex-cli-upgrade.md)：CLI 协议生成、Codex 审查和验证流程。
 - [`config.example.toml`](config.example.toml)：统一 Gateway 配置示例。
 - [`src/`](src/README.md)：源码模块与边界。
 - [`bin/`](bin/README.md)：npm CLI 入口。
