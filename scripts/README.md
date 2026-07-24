@@ -15,10 +15,13 @@
 
 - `dev-all.mjs`：开发模式下复用或启动 App Server，再启动 Gateway。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Socket 和工作目录。
-- `generate-protocol.mjs`：调用当前 Codex CLI 重新生成协议类型和版本记录，并同步 npm/Gateway 版本。
-- `check-protocol.mjs`：校验本机 Codex CLI 与锁定协议版本一致。
+- `protocol-schema.mjs`：在同一文件系统临时生成、逐文件比较并安全替换协议类型目录。
+- `generate-protocol.mjs`：先在临时目录调用当前 Codex CLI 生成协议，成功后替换协议类型、
+  记录版本并同步 npm/Gateway 版本。
+- `check-protocol.mjs`：校验本机 Codex CLI 版本，并重新生成到临时目录确认类型逐文件一致。
 - `check-gateway-version.mjs`：校验 npm 包和 Gateway 版本都与 Codex CLI 协议版本一致。
-- `check-docs.mjs`：校验 Markdown 本地链接、根文档索引、源码模块索引和相关目录文件索引，并拒绝已移除的文档名称。
+- `check-docs.mjs`：校验 Markdown 本地链接、根文档索引、源码模块索引、协议数字和相关目录文件
+  索引，并拒绝已移除的文档名称。
 - `codex-rules.mjs`：向 CLI 重新导出 `runtime/project-rules.mjs` 的项目定位、规则生成与检查能力。
 - `install-git-hooks.mjs`：只为当前源码仓库设置 `.githooks`，不修改用户全局 Git 配置。
 - `verify-commit.mjs`：为 pre-commit hook 与 GitHub CI 串行执行统一的完整提交检查。

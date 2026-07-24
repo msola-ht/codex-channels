@@ -105,7 +105,7 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 4. 查本项目行为时从模块 `index.ts` 和 README 进入，最后运行对应测试或真实合同测试。
 
 协议升级后运行 `npm run protocol:generate`，重新审查生成差异，并同步本页的版本、数量和固定版本
-源码链接。数量可用以下命令复核：
+源码链接。`npm run docs:check` 会自动核对上表的协议和模块数字；也可用以下命令手动复核：
 
 ```bash
 find src/codex-protocol/generated -type f -name '*.ts' | wc -l

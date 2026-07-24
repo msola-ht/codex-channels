@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import {
   existsSync,
   readFileSync,
+  readdirSync,
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
@@ -16,6 +17,7 @@ for (const file of markdownFiles) {
 
 checkRootIndex();
 checkSourceIndex();
+checkProtocolIndexMetrics();
 for (const directory of [
   "bin",
   "runtime",
@@ -124,6 +126,90 @@ function checkSourceIndex() {
   for (const moduleName of modules) {
     if (!readme.includes(`](${moduleName}/README.md)`)) {
       failures.push(`src/README.md 模块索引缺少 ${moduleName}/`);
+    }
+  }
+}
+
+function checkProtocolIndexMetrics() {
+  const index = readFileSync(join(root, "docs/index.md"), "utf8");
+  const generatedPrefix = "src/codex-protocol/generated/";
+  const generatedFiles = trackedFiles.filter(
+    (file) => file.startsWith(generatedPrefix) && file.endsWith(".ts"),
+  );
+  const methodCount = (file) =>
+    [...readFileSync(join(root, file), "utf8").matchAll(/"method": "[^"]+"/gu)].length;
+  const clientRequests = readFileSync(
+    join(root, "src/codex-client/client.ts"),
+    "utf8",
+  );
+  const directRequests = new Set(
+    [...clientRequests.matchAll(/this\.rpc\.request(?:<[\s\S]*?>)?\(\s*"([^"]+)"/gu)]
+      .map((match) => match[1]),
+  );
+  const serverRequestMethods = new Set(
+    [...readFileSync(
+      join(root, "src/codex-protocol/generated/ServerRequest.ts"),
+      "utf8",
+    ).matchAll(/"method": "([^"]+)"/gu)].map((match) => match[1]),
+  );
+  const approvalCases = new Set(
+    [...readFileSync(
+      join(root, "src/approval/coordinator.ts"),
+      "utf8",
+    ).matchAll(/case "([^"]+)":/gu)]
+      .map((match) => match[1])
+      .filter((method) => serverRequestMethods.has(method)),
+  );
+  const metrics = [
+    [generatedFiles.length, "当前 CLI 生成的 TypeScript 文件总数"],
+    [
+      generatedFiles.filter((file) =>
+        !file.slice(generatedPrefix.length).includes("/")).length,
+      "生成目录根层的公共、兼容和初始化类型",
+    ],
+    [
+      generatedFiles.filter((file) => file.startsWith(`${generatedPrefix}v2/`)).length,
+      "v2 请求、响应、通知和数据类型",
+    ],
+    [
+      generatedFiles.filter((file) =>
+        file.startsWith(`${generatedPrefix}serde_json/`)).length,
+      "`serde_json` 辅助类型",
+    ],
+    [
+      methodCount("src/codex-protocol/generated/ClientRequest.ts"),
+      "客户端发给 App Server 的 Request 方法",
+    ],
+    [
+      methodCount("src/codex-protocol/generated/ServerNotification.ts"),
+      "App Server 发给客户端的 Notification 方法",
+    ],
+    [
+      methodCount("src/codex-protocol/generated/ServerRequest.ts"),
+      "App Server 发给客户端、需要回应的 Request 方法",
+    ],
+    [
+      methodCount("src/codex-protocol/generated/ClientNotification.ts"),
+      "客户端发给 App Server 的 Notification",
+    ],
+    [
+      [...readFileSync(
+        join(root, "src/codex-protocol/index.ts"),
+        "utf8",
+      ).matchAll(/^export type /gmu)].length,
+      "本项目允许业务模块使用的协议类型导出",
+    ],
+    [directRequests.size, "本项目直接调用的业务 Request 方法"],
+    [approvalCases.size, "本项目显式协调的 Server Request 类型"],
+    [
+      readdirSync(join(root, "src"), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory()).length,
+      "本项目 TypeScript Gateway 的一级业务模块",
+    ],
+  ];
+  for (const [count, label] of metrics) {
+    if (!index.includes(`| ${count} | ${label}`)) {
+      failures.push(`docs/index.md 协议数字不一致：${label} 应为 ${count}`);
     }
   }
 }

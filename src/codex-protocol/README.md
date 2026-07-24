@@ -17,4 +17,7 @@ npm run check
 npm test
 ```
 
+`protocol:generate` 先生成到同一文件系统的临时目录，只有 CLI 生成和版本读取都成功后才替换当前
+类型；失败时保留现有生成目录。`protocol:check` 除版本号外还会重新生成并逐文件比较。
+
 新增业务依赖的协议类型时，应先审查生成差异，再从 `index.ts` 显式导出；不要跨模块直接导入 `generated/` 内部文件。

@@ -1,8 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+
+import {
+  assertProtocolTreesEqual,
+  generateProtocolTree,
+} from "./protocol-schema.mjs";
 
 const root = resolve(import.meta.dirname, "..");
+const generated = resolve(root, "src/codex-protocol/generated");
 const expected = JSON.parse(
   readFileSync(resolve(root, "src/codex-protocol/version.json"), "utf8"),
 );
@@ -17,4 +23,15 @@ if (actual !== expected.codexCli) {
   process.exit(1);
 }
 
-console.log(`Codex 协议版本匹配：${actual}`);
+const regenerated = generateProtocolTree(codex, root, dirname(generated), {
+  stdio: "ignore",
+});
+try {
+  assertProtocolTreesEqual(generated, regenerated);
+} finally {
+  if (existsSync(regenerated)) {
+    rmSync(regenerated, { recursive: true, force: true });
+  }
+}
+
+console.log(`Codex 协议版本与生成类型匹配：${actual}`);

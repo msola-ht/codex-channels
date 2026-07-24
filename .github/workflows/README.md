@@ -7,7 +7,7 @@
 - `ci.yml`：在 push、Pull Request 和手动触发时，分别使用 Ubuntu 与 macOS、Node.js 22.13.0
   执行与本地 pre-commit hook 相同的 `npm run verify:commit`，覆盖提交差异、类型和版本、生产与测试
   Lint、文档链接和索引、全量测试、Shell、真实 tarball 与干净源码安装冒烟及平台模板检查。
-  独立的 App Server 合同任务安装锁定的 Codex CLI 0.145.0，检查协议版本，并使用隔离
+  独立的 App Server 合同任务安装锁定的 Codex CLI 0.145.0，检查协议版本与生成类型，并使用隔离
   `CODEX_HOME` 验证 Fast 默认值的跨客户端读取和新 Thread 状态。
 - `publish.yml`：推送与 Codex CLI 协议版本一致的 `v*` Tag 后，执行同一完整提交检查，再使用 npm Trusted Publishing 发布公开包，不保存长期 npm Token。
 
