@@ -235,7 +235,9 @@ npm run codex:upgrade -- <目标版本>
 
 脚本会生成版本专属协议并同步 Gateway 版本，随后由 Codex 审查生成差异、修复业务适配并完成
 验证。GitHub Actions 还会每天检查正式 Release，并用最新官方 Alpha 做隔离兼容性 Canary；
-Canary 结果只作预警，不改变正式基线。完整流程见
+两者都会独立运行协议、类型、Lint、测试、真实合同、构建和打包检查，即使某项失败也继续收集
+其他结果，并上传逐阶段日志、结构化结果、完整 Patch 和协议字段/RPC 影响摘要。预览阶段不会
+修改稳定版文档，文档索引在正式适配完成后统一验证。Canary 结果只作预警，不改变正式基线。完整流程见
 [`docs/codex-cli-upgrade.md`](docs/codex-cli-upgrade.md)。
 
 在项目目录或其子目录运行 `codexc rules init`，会定位最近的 Git/Node 项目根目录，读取存在的

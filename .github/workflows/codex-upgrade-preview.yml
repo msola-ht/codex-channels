@@ -47,14 +47,21 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Install released Codex CLI
+        id: install
         if: steps.release.outputs.upgrade_available == 'true'
+        continue-on-error: true
         env:
           CODEX_VERSION: ${{ steps.release.outputs.version }}
-        run: npm install --global "@openai/codex@$CODEX_VERSION"
+          REPORT_DIRECTORY: ${{ runner.temp }}/codex-upgrade-preview
+        run: |
+          mkdir -p "$REPORT_DIRECTORY/logs"
+          set -o pipefail
+          npm install --global "@openai/codex@$CODEX_VERSION" 2>&1 \
+            | tee "$REPORT_DIRECTORY/logs/install.log"
 
       - name: Generate upgrade preview
         id: generate
-        if: steps.release.outputs.upgrade_available == 'true'
+        if: steps.install.outcome == 'success'
         continue-on-error: true
         env:
           CODEX_VERSION: ${{ steps.release.outputs.version }}
@@ -64,14 +71,25 @@ jobs:
           mkdir -p "$REPORT_DIRECTORY"
           set -o pipefail
           npm run codex:upgrade -- "$CODEX_VERSION" 2>&1 \
-            | tee "$REPORT_DIRECTORY/generation.log"
+            | tee "$REPORT_DIRECTORY/logs/generation.log"
+
+      - name: Run released CLI compatibility checks
+        id: validate
+        if: steps.generate.outcome == 'success'
+        continue-on-error: true
+        env:
+          CODEX_BINARY: codex
+          REPORT_DIRECTORY: ${{ runner.temp }}/codex-upgrade-preview
+        run: npm run codex:upgrade:validate -- "$REPORT_DIRECTORY"
 
       - name: Write diff report
         if: always() && steps.release.outputs.upgrade_available == 'true'
         env:
           CODEX_VERSION: ${{ steps.release.outputs.version }}
-          PREVIEW_RESULT: ${{ steps.generate.outcome == 'success' && 'success' || 'failure' }}
+          PREVIEW_RESULT: ${{ steps.install.outcome == 'success' && steps.generate.outcome == 'success' && steps.validate.outcome == 'success' && 'success' || 'failure' }}
           REPORT_DIRECTORY: ${{ runner.temp }}/codex-upgrade-preview
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          GENERATION_OUTCOME: ${{ steps.generate.outcome }}
         run: |
           node scripts/write-upgrade-report.mjs \
             "$CODEX_VERSION" "$REPORT_DIRECTORY" stable "$PREVIEW_RESULT"
@@ -85,6 +103,13 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Fail when preview generation failed
-        if: always() && steps.generate.outcome == 'failure'
+      - name: Fail when preview generation or validation failed
+        if: >-
+          always() &&
+          steps.release.outputs.upgrade_available == 'true' &&
+          (
+            steps.install.outcome != 'success' ||
+            steps.generate.outcome != 'success' ||
+            steps.validate.outcome != 'success'
+          )
         run: exit 1

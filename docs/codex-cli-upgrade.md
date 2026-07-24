@@ -43,12 +43,17 @@ GitHub Actions 每天自动运行 `Codex upgrade preview`，也支持手动触�
 结束，不安装 CLI 或生成 Artifact；发现新版本时生成：
 
 - `base-commit.txt`：生成差异所基于的项目提交。
+- `base-version.txt`、`target-version.txt`：稳定基线和本次目标 CLI 版本。
 - `result.txt`：自动生成或验证阶段的 `success` / `failure` 结果。
+- `results.json`：安装、生成和各验证阶段的机器可读结果。
+- `validation-results.json`：独立兼容检查的原始结构化结果。
 - `changed-files.txt`：新增、修改、删除和重命名文件清单。
 - `diff-stat.txt`：文件与行数统计。
 - `upgrade.patch`：供 Codex 在本地读取或应用的完整差异。
+- `protocol-impact.md`：相对基线的 RPC 名称、顶层类型字段和生成文件变化。
 - `summary.md`：版本、文件数量和协议目录数量摘要。
-- `generation.log`：协议生成过程；生成失败时仍随其他现场上传。
+- `logs/install.log`、`logs/generation.log`：目标 CLI 安装和协议生成过程。
+- `logs/*.log`：协议、类型、Lint、测试、真实合同、构建和打包的逐阶段日志。
 
 同一摘要会显示在 GitHub Actions Job Summary。该预览不会创建分支、提交、推送或部署。下载
 Artifact 后把目录交给 Codex；Codex 先确认本地提交与 `base-commit.txt` 一致，再审查并应用
@@ -61,15 +66,21 @@ Artifact 后把目录交给 Codex；Codex 先确认本地提交与 `base-commit.
 且符合 `rust-v<版本>-alpha.<序号>` 的 Alpha。它在临时 Runner 中：
 
 1. 安装对应 npm CLI 并生成该版本专属协议。
-2. 运行协议逐文件一致性、TypeScript 与版本检查、全量测试。
-3. 使用隔离 `CODEX_HOME` 运行真实 App Server 合同测试，不调用模型。
-4. 无论成功或失败，都上传基线、文件清单、Patch、摘要和已有的安装、生成、验证日志。
-5. 任一步失败时在 Artifact 上传后把 Canary 标红。
+2. 独立运行协议一致性、TypeScript 与版本、Lint、全量测试、真实 App Server 合同、构建和
+   打包验证；单项失败不阻止后续可独立阶段。
+3. 协议预览不修改稳定版文档，因此文档索引阶段明确记录为跳过；正式适配后必须补跑。
+4. 自动比较 RPC 方法名称、顶层类型字段和生成文件，并写入协议影响摘要。
+5. 无论成功或失败，都上传基线、结构化结果、逐阶段日志、Patch 和摘要。
+6. 任一必须阶段失败时在 Artifact 上传后把 Canary 标红。
 
 Alpha Canary 只提供正式版本发布前的兼容预警。不得把 Alpha 生成类型、项目版本或针对 Alpha 的
 业务适配直接提交到 `main`，也不得更新 `docs/index.md` 的当前稳定版本、固定源码链接或支持矩阵。
 需要提前分析时，应由 Codex 在临时分支或 Git worktree 中读取 Artifact；正式 Release 发布后，
 仍从正式升级预览重新生成并审查，不能直接复用 Alpha Patch。
+
+正式升级预览使用同一套分阶段验证和报告，不在首个失败处停止。预览通过表示生成后的项目已经
+通过可自动执行的兼容检查，但不代替 Codex 对官方固定版本源码、行为语义、安全边界和文档更新
+的审查。
 
 ## 2. 让 Codex 审查并适配
 

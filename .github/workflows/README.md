@@ -11,12 +11,13 @@
   `CODEX_HOME` 验证 Fast 默认值的跨客户端读取和新 Thread 状态。
 - `codex-upgrade-preview.yml`：每天自动检查，也可手动选择 `openai/codex` 正式发行版本；留空
   则使用最新正式 Release。项目已经同步时跳过，发现更新时安装对应 npm CLI、生成协议与版本
-  差异，把基线提交、文件清单和统计写入 Job Summary，并上传清单、统计、完整 Patch 和摘要
-  Artifact。生成失败时仍先上传日志和现场，再把任务标为失败。该工作流拒绝 Draft、Pre-release
+  差异，独立运行协议、类型、Lint、全量测试、真实合同、构建和打包检查，把逐项结果写入 Job
+  Summary，并上传结构化结果、逐阶段日志、协议结构影响、清单、统计、完整 Patch 和摘要
+  Artifact。单项失败不阻止其他检查，最终仍把任务标为失败。该工作流拒绝 Draft、Pre-release
   和降级，不提交或部署。
 - `codex-alpha-canary.yml`：每天选择 `openai/codex` 最高版本号的官方 Alpha，在临时 Runner
-  生成协议，运行协议一致性、类型、全量测试和隔离 App Server 合同测试。成功或失败都会上传
-  安装、生成、验证日志及完整差异，失败后任务标红；结果只作前向兼容预警，不进入正式版本基线。
+  生成协议，并使用与正式预览相同的独立兼容检查和报告。成功或失败都会上传完整现场，失败后
+  任务标红；结果只作前向兼容预警，不进入正式版本基线。
 - `publish.yml`：推送与 Codex CLI 协议版本一致的 `v*` Tag 后，执行同一完整提交检查，再使用 npm Trusted Publishing 发布公开包，不保存长期 npm Token。
 
 启用发布工作流前，需要在 npm 包的 Trusted Publisher 设置中绑定 GitHub 仓库 `msola-ht/codex-channels`、工作流文件 `publish.yml`，并允许 `npm publish`。工作流使用 GitHub OIDC 和 `id-token: write` 获取短期凭据。
@@ -31,4 +32,5 @@ GitHub Actions 使用 `npm ci --ignore-scripts`，不会修改 Runner 的 Git ho
 正式发行版本。升级预览只认 `openai/codex` GitHub Release 中非 Draft、非 Pre-release 的
 `rust-v<版本>`；生成后仍由 Codex 按 `docs/codex-cli-upgrade.md` 审查和适配。完成升级时必须
 同步更新 `ci.yml` 中 App Server 合同任务安装的 Codex CLI 精确版本。Alpha Canary 是隔离测试，
-不得据此修改 `main` 的协议基线、公开接口或固定版本文档。
+不得据此修改 `main` 的协议基线、公开接口或固定版本文档。预览阶段因此将文档索引检查记录为
+跳过；正式适配后必须由 `npm run verify:commit` 完成文档和全部提交门禁。

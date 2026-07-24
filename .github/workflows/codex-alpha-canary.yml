@@ -46,10 +46,10 @@ jobs:
           CODEX_VERSION: ${{ steps.release.outputs.version }}
           REPORT_DIRECTORY: ${{ runner.temp }}/codex-alpha-canary
         run: |
-          mkdir -p "$REPORT_DIRECTORY"
+          mkdir -p "$REPORT_DIRECTORY/logs"
           set -o pipefail
           npm install --global "@openai/codex@$CODEX_VERSION" 2>&1 \
-            | tee "$REPORT_DIRECTORY/install.log"
+            | tee "$REPORT_DIRECTORY/logs/install.log"
 
       - name: Generate Alpha protocol
         id: generate
@@ -61,7 +61,7 @@ jobs:
         run: |
           set -o pipefail
           npm run protocol:generate 2>&1 \
-            | tee "$REPORT_DIRECTORY/generation.log"
+            | tee "$REPORT_DIRECTORY/logs/generation.log"
 
       - name: Run Alpha compatibility checks
         id: validate
@@ -71,13 +71,7 @@ jobs:
           CODEX_BINARY: codex
           REPORT_DIRECTORY: ${{ runner.temp }}/codex-alpha-canary
         run: |
-          set -o pipefail
-          {
-            npm run protocol:check &&
-            npm run check &&
-            npm test &&
-            RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
-          } 2>&1 | tee "$REPORT_DIRECTORY/validation.log"
+          npm run codex:upgrade:validate -- "$REPORT_DIRECTORY"
 
       - name: Write Alpha report
         if: always()
@@ -85,6 +79,8 @@ jobs:
           CODEX_VERSION: ${{ steps.release.outputs.version }}
           CANARY_RESULT: ${{ steps.install.outcome == 'success' && steps.generate.outcome == 'success' && steps.validate.outcome == 'success' && 'success' || 'failure' }}
           REPORT_DIRECTORY: ${{ runner.temp }}/codex-alpha-canary
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          GENERATION_OUTCOME: ${{ steps.generate.outcome }}
         run: |
           node scripts/write-upgrade-report.mjs \
             "$CODEX_VERSION" "$REPORT_DIRECTORY" alpha "$CANARY_RESULT"

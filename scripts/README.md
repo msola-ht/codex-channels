@@ -23,8 +23,14 @@
   拒绝 Draft、Pre-release 和版本不匹配。
 - `resolve-codex-alpha.mjs`：从官方 GitHub Pre-release 列表选择最高版本号的 Alpha，只供隔离
   Canary 使用，不改变正式版本基线。
+- `analyze-upgrade-protocol.mjs`：比较 `HEAD` 与升级工作树中的生成协议，报告 RPC 名称、顶层
+  类型字段和生成文件变化；只陈述结构差异，不推断行为语义。
+- `run-upgrade-validation.mjs`：为正式升级预览和 Alpha Canary 独立运行协议、类型、Lint、测试、
+  真实合同、构建和打包检查；单项失败后继续其他阶段，并保存逐项日志和结构化结果。预览阶段不
+  改稳定版文档，因此明确跳过文档索引检查。
 - `write-upgrade-report.mjs`：把 CI 中生成的升级工作树写成 Markdown 摘要、文件清单、统计和
-  二进制安全 Patch；生成或验证失败且没有差异时仍会输出报告。
+  二进制安全 Patch，并比较 `HEAD` 生成协议的 RPC 名称和顶层字段结构，合并逐阶段结果；生成
+  或验证失败且没有差异时仍会输出报告。
 - `protocol-schema.mjs`：在同一文件系统临时生成、逐文件比较并安全替换协议类型目录。
 - `generate-protocol.mjs`：先在临时目录调用当前 Codex CLI 生成协议，成功后替换协议类型、
   记录版本并同步 npm/Gateway 版本。

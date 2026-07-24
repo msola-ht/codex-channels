@@ -1,6 +1,8 @@
 import { execFileSync } from "node:child_process";
 import {
+  mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -17,6 +19,10 @@ import * as releaseApiHelpers from "../scripts/codex-release-api.mjs";
 import * as alphaReleaseHelpers from "../scripts/resolve-codex-alpha.mjs";
 // @ts-expect-error JavaScript report helper intentionally has no declaration file.
 import * as reportHelpers from "../scripts/write-upgrade-report.mjs";
+// @ts-expect-error JavaScript protocol analyzer intentionally has no declaration file.
+import * as protocolAnalysisHelpers from "../scripts/analyze-upgrade-protocol.mjs";
+// @ts-expect-error JavaScript validation helper intentionally has no declaration file.
+import * as validationHelpers from "../scripts/run-upgrade-validation.mjs";
 
 const { compareStableVersions, validateOfficialRelease } = releaseHelpers;
 const { fetchCodexReleaseJson } = releaseApiHelpers;
@@ -25,7 +31,12 @@ const {
   selectLatestOfficialAlpha,
   validateOfficialAlphaRelease,
 } = alphaReleaseHelpers;
-const { collectGitDiff, renderUpgradeSummary } = reportHelpers;
+const {
+  collectGitDiff,
+  renderUpgradeSummary,
+} = reportHelpers;
+const { analyzeProtocolDiff } = protocolAnalysisHelpers;
+const { runUpgradeValidationStages } = validationHelpers;
 const temporaryDirectories: string[] = [];
 
 afterEach(() => {
@@ -165,6 +176,104 @@ describe("Codex release upgrade preview", () => {
     expect(summary).toContain("变更文件：0");
     expect(summary).toContain("(没有文件差异)");
     expect(summary).toContain("不可作为 main");
+  });
+
+  it("renders every independent validation stage in the summary", () => {
+    const summary = renderUpgradeSummary(
+      "0.146.0-alpha.6",
+      "0123456789abcdef",
+      "",
+      "",
+      "alpha",
+      "failure",
+      {
+        stages: [
+          {
+            name: "TypeScript 与版本",
+            status: "failed",
+            log: "logs/typecheck.log",
+          },
+          {
+            name: "全量测试",
+            status: "passed",
+            log: "logs/unit-tests.log",
+          },
+        ],
+      },
+    );
+    expect(summary).toContain("| TypeScript 与版本 | 失败 |");
+    expect(summary).toContain("| 全量测试 | 通过 |");
+  });
+
+  it("continues validation after a failed stage and writes structured results", async () => {
+    const output = mkdtempSync(join(tmpdir(), "codexc-upgrade-validation-"));
+    temporaryDirectories.push(output);
+    const result = await runUpgradeValidationStages([
+      {
+        id: "failure",
+        name: "预期失败",
+        command: process.execPath,
+        args: ["-e", "process.exit(2)"],
+      },
+      {
+        id: "success",
+        name: "后续成功",
+        command: process.execPath,
+        args: ["-e", "console.log('continued')"],
+      },
+    ], output);
+
+    expect(result.result).toBe("failure");
+    expect(result.stages.map((stage: { status: string }) => stage.status))
+      .toEqual(["failed", "passed"]);
+    expect(readFileSync(join(output, "logs/success.log"), "utf8"))
+      .toContain("continued");
+    expect(JSON.parse(
+      readFileSync(join(output, "validation-results.json"), "utf8"),
+    )).toMatchObject({ result: "failure" });
+  });
+
+  it("reports RPC and required-field protocol changes against HEAD", () => {
+    const repository = mkdtempSync(join(tmpdir(), "codexc-protocol-impact-"));
+    temporaryDirectories.push(repository);
+    git(repository, ["init", "--quiet"]);
+    git(repository, ["config", "user.name", "Codex Test"]);
+    git(repository, ["config", "user.email", "codex@example.invalid"]);
+    const generated = join(repository, "src/codex-protocol/generated/v2");
+    mkdirSync(generated, { recursive: true });
+    writeFileSync(
+      join(generated, "Thread.ts"),
+      "export type Thread = { id: string, ephemeral: boolean, };\n",
+    );
+    const requestPath = join(
+      repository,
+      "src/codex-protocol/generated/ClientRequest.ts",
+    );
+    writeFileSync(
+      requestPath,
+      "export type ClientRequest = { \"method\": \"thread/list\" };\n",
+    );
+    git(repository, ["add", "."]);
+    git(repository, ["commit", "--quiet", "-m", "initial"]);
+
+    writeFileSync(
+      join(generated, "Thread.ts"),
+      "export type Thread = { id: string, ephemeral: boolean, isPinned: boolean, };\n",
+    );
+    writeFileSync(
+      requestPath,
+      "export type ClientRequest = { \"method\": \"thread/list\" }"
+        + " | { \"method\": \"thread/pin\" };\n",
+    );
+    const changed = [
+      "M\tsrc/codex-protocol/generated/v2/Thread.ts",
+      "M\tsrc/codex-protocol/generated/ClientRequest.ts",
+    ].join("\n");
+    const impact = analyzeProtocolDiff(repository, changed);
+
+    expect(impact).toContain("新增：`thread/pin`");
+    expect(impact).toContain("新增必填");
+    expect(impact).toContain("`Thread.isPinned`");
   });
 
   it("captures tracked and new files without changing the repository index", () => {
