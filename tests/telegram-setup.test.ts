@@ -1,14 +1,15 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { pathToFileURL } from "node:url";
 
-import { parse } from "dotenv";
+import { parse as parseToml } from "smol-toml";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
-import { createPrompter, discardPendingMessageUpdates, isDirectExecution, normalizeUserIds, resolveTelegramProxy, runTelegramSetup, setEnvValues, waitForPrivateSender } from "../scripts/telegram-setup.mjs";
+import { createPrompter, discardPendingMessageUpdates, isDirectExecution, normalizeUserIds, resolveTelegramProxy, runTelegramSetup, waitForPrivateSender } from "../scripts/telegram-setup.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 
@@ -43,35 +44,13 @@ describe("Telegram setup", () => {
     prompt.close();
   });
 
-  it("collapses duplicate environment keys when saving", () => {
-    const updated = setEnvValues([
-      "TELEGRAM_BOT_TOKEN=old-first",
-      "OTHER=value",
-      "export TELEGRAM_BOT_TOKEN=old-last",
-      " TELEGRAM_ALLOWED_USER_IDS = 111",
-      "TELEGRAM_ALLOWED_USER_IDS=222",
-      "",
-    ].join("\n"), {
-      TELEGRAM_BOT_TOKEN: "new-token",
-      TELEGRAM_ALLOWED_USER_IDS: "333",
-    });
-
-    expect(parse(updated)).toMatchObject({
-      TELEGRAM_BOT_TOKEN: "new-token",
-      TELEGRAM_ALLOWED_USER_IDS: "333",
-      OTHER: "value",
-    });
-    expect(updated.match(/^TELEGRAM_BOT_TOKEN=/gm)).toHaveLength(1);
-    expect(updated.match(/^TELEGRAM_ALLOWED_USER_IDS=/gm)).toHaveLength(1);
-  });
-
   it("validates an existing bot, discovers a private sender and preserves other configuration", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-setup-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
     const workspace = join(root, "Workspace");
     mkdirSync(workspace);
-    const environment = { ...process.env, CODEX_CONNECT_HOME: home, CODEX_CONNECT_ENV_FILE: "" };
+    const environment = { ...process.env, CODEX_CONNECT_HOME: home, CODEX_CONNECT_CONFIG_FILE: "" };
     initializeUserData({ environment, cwd: workspace });
 
     let renderedOutput = "";
@@ -105,11 +84,13 @@ describe("Telegram setup", () => {
       waitSeconds: 1,
     });
 
-    const configured = parse(readFileSync(join(home, ".env"), "utf8"));
+    const configured = parseToml(readFileSync(join(home, "config.toml"), "utf8"));
     expect(result).toMatchObject({ botUsername: "codex_connect_test_bot", allowedUserIds: "222,987654" });
-    expect(configured.TELEGRAM_BOT_TOKEN).toBe("123456:abcdefghijklmnopqrstuvwxyzABCDE");
-    expect(configured.TELEGRAM_ALLOWED_USER_IDS).toBe("222,987654");
-    expect(configured.CODEX_DEFAULT_WORKSPACE).toBe("codex-connect");
+    expect(configured.telegram).toMatchObject({
+      bot_token: "123456:abcdefghijklmnopqrstuvwxyzABCDE",
+      allowed_user_ids: [222, 987654],
+    });
+    expect(configured.default_workspace).toBe("codex-connect");
     expect(renderedOutput).toContain("?start=setup-code");
   });
 
@@ -119,7 +100,7 @@ describe("Telegram setup", () => {
     const home = join(root, ".codex-connect");
     const workspace = join(root, "Workspace");
     mkdirSync(workspace);
-    const environment = { ...process.env, CODEX_CONNECT_HOME: home, CODEX_CONNECT_ENV_FILE: "" };
+    const environment = { ...process.env, CODEX_CONNECT_HOME: home, CODEX_CONNECT_CONFIG_FILE: "" };
     initializeUserData({ environment, cwd: workspace });
     const answers = ["2", "123456:abcdefghijklmnopqrstuvwxyzABCDE", "no", "333"];
     const defaults: boolean[] = [];
@@ -152,7 +133,7 @@ describe("Telegram setup", () => {
     const home = join(root, ".codex-connect");
     const workspace = join(root, "Workspace");
     mkdirSync(workspace);
-    const environment = { ...process.env, CODEX_CONNECT_HOME: home, CODEX_CONNECT_ENV_FILE: "" };
+    const environment = { ...process.env, CODEX_CONNECT_HOME: home, CODEX_CONNECT_CONFIG_FILE: "" };
     initializeUserData({ environment, cwd: workspace });
     const answers = ["1", "123456:abcdefghijklmnopqrstuvwxyzABCDE", "yes", "yes", "@invalid", ""];
     let updates = 0;
@@ -218,14 +199,17 @@ describe("Telegram setup", () => {
     const home = join(root, ".codex-connect");
     const workspace = join(root, "Workspace");
     mkdirSync(workspace);
-    const environment = { ...process.env, CODEX_CONNECT_HOME: home, CODEX_CONNECT_ENV_FILE: "" };
+    const environment = { ...process.env, CODEX_CONNECT_HOME: home, CODEX_CONNECT_CONFIG_FILE: "" };
     initializeUserData({ environment, cwd: workspace });
-    const envPath = join(home, ".env");
+    const configPath = join(home, "config.toml");
     const token = "123456:abcdefghijklmnopqrstuvwxyzABCDE";
-    const original = readFileSync(envPath, "utf8")
-      .replace("TELEGRAM_BOT_TOKEN=", `TELEGRAM_BOT_TOKEN=${token}`)
-      .replace("TELEGRAM_ALLOWED_USER_IDS=", "TELEGRAM_ALLOWED_USER_IDS=123,456");
-    writeFileSync(envPath, original);
+    const document = readGatewayConfig(configPath);
+    document.telegram = {
+      ...document.telegram as object,
+      bot_token: token,
+      allowed_user_ids: [123, 456],
+    };
+    writeGatewayConfig(configPath, document);
     const answers = ["3", "yes"];
 
     const result = await runTelegramSetup({
@@ -248,19 +232,21 @@ describe("Telegram setup", () => {
 
   it("uses the same proxy precedence as the Gateway", () => {
     expect(resolveTelegramProxy({
-      TELEGRAM_PROXY_URL: "",
-      HTTPS_PROXY: "https://secure-proxy.example",
-      HTTP_PROXY: "http://fallback.example",
+      telegram: { proxy_url: "" },
+      network: {
+        https_proxy: "https://secure-proxy.example",
+        http_proxy: "http://fallback.example",
+      },
     })).toBe("https://secure-proxy.example/");
     expect(resolveTelegramProxy({
-      TELEGRAM_PROXY_URL: "http://telegram-proxy.example",
-      HTTPS_PROXY: "https://secure-proxy.example",
+      telegram: { proxy_url: "http://telegram-proxy.example" },
+      network: { https_proxy: "https://secure-proxy.example" },
     })).toBe("http://telegram-proxy.example/");
     expect(() => resolveTelegramProxy({
-      TELEGRAM_PROXY_URL: "socks5://telegram-proxy.example",
+      telegram: { proxy_url: "socks5://telegram-proxy.example" },
     })).toThrow("只支持 http:// 或 https://");
     expect(() => resolveTelegramProxy({
-      HTTPS_PROXY: "not-a-url",
+      network: { https_proxy: "not-a-url" },
     })).toThrow("不是有效 URL");
   });
 
@@ -329,7 +315,7 @@ describe("Telegram setup", () => {
     const home = join(root, ".codex-connect");
     const workspace = join(root, "Workspace");
     mkdirSync(workspace);
-    const environment = { ...process.env, CODEX_CONNECT_HOME: home, CODEX_CONNECT_ENV_FILE: "" };
+    const environment = { ...process.env, CODEX_CONNECT_HOME: home, CODEX_CONNECT_CONFIG_FILE: "" };
     initializeUserData({ environment, cwd: workspace });
     const token = "123456:abcdefghijklmnopqrstuvwxyzABCDE";
     const answers = ["2", token];

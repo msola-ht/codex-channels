@@ -96,6 +96,7 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     telegramAllowedUserIds: new Set([123]),
     telegramMessageFormat: "html",
     codexBinary: "codex",
+    networkProxy: {},
     workspaces: [{ id: "main", name: "Main", cwd: "/workspace" }],
     defaultWorkspaceId: "main",
     codexSocketPath: "/tmp/codex.sock",

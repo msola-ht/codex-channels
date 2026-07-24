@@ -9,6 +9,7 @@ export function createLogger(config: GatewayConfig): Logger {
       paths: [
         "telegramBotToken",
         "telegramProxyUrl",
+        "networkProxy",
         "proxyUrl",
         "token",
         "authorization",

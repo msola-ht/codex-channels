@@ -1,13 +1,13 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { parse } from "dotenv";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { configEventQueuePath, readConfigEvents } from "../runtime/config-event-queue.mjs";
+import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
-import { addWorkspaceToEnv, inspectWorkspaceConfig, readWorkspaceConfig, removeWorkspaceFromEnv } from "../scripts/workspace-config.mjs";
+import { addWorkspaceToConfig, inspectWorkspaceConfig, readWorkspaceConfig, removeWorkspaceFromConfig } from "../scripts/workspace-config.mjs";
 
 const temporaryDirectories: string[] = [];
 
@@ -25,22 +25,18 @@ describe("workspace:add script", () => {
     const added = join(root, "New Project");
     mkdirSync(main);
     mkdirSync(added);
-    const envPath = join(root, ".env");
+    const configPath = join(root, "config.toml");
     const eventQueuePath = configEventQueuePath(root);
-    writeFileSync(
-      envPath,
-      [
-        `CODEX_WORKSPACES_JSON='${JSON.stringify([{ id: "main", name: "Main", cwd: main }])}'`,
-        "CODEX_DEFAULT_WORKSPACE=main",
-        "TELEGRAM_BOT_TOKEN=secret",
-        "",
-      ].join("\n"),
-      { mode: 0o644 },
+    writeWorkspaceFixture(
+      configPath,
+      [{ id: "main", name: "Main", cwd: main }],
+      "main",
     );
+    chmodSync(configPath, 0o644);
 
-    const first = addWorkspaceToEnv({ envPath, cwd: added, eventQueuePath });
-    const second = addWorkspaceToEnv({ envPath, cwd: added, eventQueuePath });
-    const config = readWorkspaceConfig(parse(readFileSync(envPath, "utf8")));
+    const first = addWorkspaceToConfig({ configPath, cwd: added, eventQueuePath });
+    const second = addWorkspaceToConfig({ configPath, cwd: added, eventQueuePath });
+    const config = readWorkspaceConfig(readGatewayConfig(configPath));
 
     expect(first).toMatchObject({
       added: true,
@@ -52,7 +48,7 @@ describe("workspace:add script", () => {
     expect(readConfigEvents(eventQueuePath)).toMatchObject([
       { type: "workspace-added", workspace: { id: "new-project", cwd: realpathSync(added) } },
     ]);
-    expect(statSync(envPath).mode & 0o777).toBe(0o600);
+    expect(statSync(configPath).mode & 0o777).toBe(0o600);
   });
 
   it("rejects an existing file as the directory being registered", () => {
@@ -62,17 +58,14 @@ describe("workspace:add script", () => {
     const file = join(root, "not-a-directory");
     mkdirSync(main);
     writeFileSync(file, "test");
-    const envPath = join(root, ".env");
-    writeFileSync(
-      envPath,
-      [
-        `CODEX_WORKSPACES_JSON='${JSON.stringify([{ id: "main", name: "Main", cwd: main }])}'`,
-        "CODEX_DEFAULT_WORKSPACE=main",
-        "",
-      ].join("\n"),
+    const configPath = join(root, "config.toml");
+    writeWorkspaceFixture(
+      configPath,
+      [{ id: "main", name: "Main", cwd: main }],
+      "main",
     );
 
-    expect(() => addWorkspaceToEnv({ envPath, cwd: file })).toThrow("cwd 必须是目录");
+    expect(() => addWorkspaceToConfig({ configPath, cwd: file })).toThrow("cwd 必须是目录");
   });
 
   it("requires explicit pruning and enforces the fixed default Workspace", () => {
@@ -82,26 +75,19 @@ describe("workspace:add script", () => {
     const fallback = join(root, ".codex-connect", "workspace");
     const current = join(root, "Current Project");
     mkdirSync(current);
-    const envPath = join(root, ".env");
-    writeFileSync(
-      envPath,
-      [
-        `CODEX_WORKSPACES_JSON='${JSON.stringify([{
-          id: "moved-project",
-          name: "Moved Project",
-          cwd: missing,
-        }])}'`,
-        "CODEX_DEFAULT_WORKSPACE=moved-project",
-        "",
-      ].join("\n"),
+    const configPath = join(root, "config.toml");
+    writeWorkspaceFixture(
+      configPath,
+      [{ id: "moved-project", name: "Moved Project", cwd: missing }],
+      "moved-project",
     );
 
-    expect(() => addWorkspaceToEnv({ envPath, cwd: current })).toThrow(
+    expect(() => addWorkspaceToConfig({ configPath, cwd: current })).toThrow(
       "codexc ws add --prune-missing",
     );
 
-    const result = addWorkspaceToEnv({
-      envPath,
+    const result = addWorkspaceToConfig({
+      configPath,
       cwd: current,
       pruneMissing: true,
       fallbackDefaultWorkspace: {
@@ -110,7 +96,7 @@ describe("workspace:add script", () => {
         cwd: fallback,
       },
     });
-    const config = readWorkspaceConfig(parse(readFileSync(envPath, "utf8")));
+    const config = readWorkspaceConfig(readGatewayConfig(configPath));
 
     expect(result).toMatchObject({
       added: true,
@@ -133,18 +119,13 @@ describe("workspace:add script", () => {
     ]);
     expect(config.defaultWorkspace.id).toBe("codex-connect");
 
-    const alternateDefault = [
-      `CODEX_WORKSPACES_JSON='${JSON.stringify([{
-        id: "current-project",
-        name: "Current Project",
-        cwd: current,
-      }])}'`,
-      "CODEX_DEFAULT_WORKSPACE=current-project",
-      "",
-    ].join("\n");
-    writeFileSync(envPath, alternateDefault);
-    const normalized = addWorkspaceToEnv({
-      envPath,
+    writeWorkspaceFixture(
+      configPath,
+      [{ id: "current-project", name: "Current Project", cwd: current }],
+      "current-project",
+    );
+    const normalized = addWorkspaceToConfig({
+      configPath,
       cwd: current,
       fallbackDefaultWorkspace: {
         id: "codex-connect",
@@ -152,7 +133,7 @@ describe("workspace:add script", () => {
         cwd: fallback,
       },
     });
-    const normalizedConfig = readWorkspaceConfig(parse(readFileSync(envPath, "utf8")));
+    const normalizedConfig = readWorkspaceConfig(readGatewayConfig(configPath));
 
     expect(normalized).toMatchObject({
       added: false,
@@ -176,29 +157,14 @@ describe("workspace:add script", () => {
     const current = join(root, "Current Project");
     mkdirSync(fallback, { recursive: true });
     mkdirSync(current);
-    const envPath = join(root, ".env");
-    writeFileSync(
-      envPath,
-      [
-        `CODEX_WORKSPACES_JSON='${JSON.stringify([
-          {
-            id: "codex-connect",
-            name: ".codex-connect/workspace",
-            cwd: fallback,
-          },
-          {
-            id: "deleted-project",
-            name: "Deleted Project",
-            cwd: missing,
-          },
-        ])}'`,
-        "CODEX_DEFAULT_WORKSPACE=codex-connect",
-        "",
-      ].join("\n"),
-    );
+    const configPath = join(root, "config.toml");
+    writeWorkspaceFixture(configPath, [
+      { id: "codex-connect", name: ".codex-connect/workspace", cwd: fallback },
+      { id: "deleted-project", name: "Deleted Project", cwd: missing },
+    ], "codex-connect");
 
-    const result = addWorkspaceToEnv({
-      envPath,
+    const result = addWorkspaceToConfig({
+      configPath,
       cwd: current,
       pruneMissing: true,
       fallbackDefaultWorkspace: {
@@ -207,7 +173,7 @@ describe("workspace:add script", () => {
         cwd: fallback,
       },
     });
-    const config = readWorkspaceConfig(parse(readFileSync(envPath, "utf8")));
+    const config = readWorkspaceConfig(readGatewayConfig(configPath));
 
     expect(result.defaultChanged).toBe(false);
     expect(result.removedWorkspaces).toMatchObject([{ id: "deleted-project" }]);
@@ -227,22 +193,15 @@ describe("workspace:add script", () => {
     mkdirSync(fallback);
     symlinkSync(fallback, fallbackAlias, "dir");
     mkdirSync(current);
-    const envPath = join(root, ".env");
-    writeFileSync(
-      envPath,
-      [
-        `CODEX_WORKSPACES_JSON='${JSON.stringify([{
-          id: "codex-connect",
-          name: ".codex-connect/workspace",
-          cwd: fallbackAlias,
-        }])}'`,
-        "CODEX_DEFAULT_WORKSPACE=codex-connect",
-        "",
-      ].join("\n"),
+    const configPath = join(root, "config.toml");
+    writeWorkspaceFixture(
+      configPath,
+      [{ id: "codex-connect", name: ".codex-connect/workspace", cwd: fallbackAlias }],
+      "codex-connect",
     );
 
-    const result = addWorkspaceToEnv({ envPath, cwd: current });
-    const config = readWorkspaceConfig(parse(readFileSync(envPath, "utf8")));
+    const result = addWorkspaceToConfig({ configPath, cwd: current });
+    const config = readWorkspaceConfig(readGatewayConfig(configPath));
 
     expect(result.defaultChanged).toBe(false);
     expect(config.defaultWorkspace).toMatchObject({
@@ -257,44 +216,29 @@ describe("workspace:add script", () => {
     const fallback = join(root, ".codex-connect", "workspace");
     const missing = join(root, "Deleted Project");
     mkdirSync(fallback, { recursive: true });
-    const envPath = join(root, ".env");
-    writeFileSync(
-      envPath,
-      [
-        `CODEX_WORKSPACES_JSON='${JSON.stringify([
-          {
-            id: "codex-connect",
-            name: ".codex-connect/workspace",
-            cwd: fallback,
-          },
-          {
-            id: "deleted-project",
-            name: "Deleted Project",
-            cwd: missing,
-          },
-        ])}'`,
-        "CODEX_DEFAULT_WORKSPACE=codex-connect",
-        "",
-      ].join("\n"),
-    );
+    const configPath = join(root, "config.toml");
+    writeWorkspaceFixture(configPath, [
+      { id: "codex-connect", name: ".codex-connect/workspace", cwd: fallback },
+      { id: "deleted-project", name: "Deleted Project", cwd: missing },
+    ], "codex-connect");
     const fallbackDefaultWorkspace = {
       id: "codex-connect",
       name: ".codex-connect/workspace",
       cwd: fallback,
     };
 
-    const inspected = inspectWorkspaceConfig(parse(readFileSync(envPath, "utf8")));
+    const inspected = inspectWorkspaceConfig(readGatewayConfig(configPath));
     expect(inspected.workspaces).toMatchObject([
       { id: "codex-connect", status: "available" },
       { id: "deleted-project", status: "missing" },
     ]);
 
-    const result = removeWorkspaceFromEnv({
-      envPath,
+    const result = removeWorkspaceFromConfig({
+      configPath,
       selector: "2",
       fallbackDefaultWorkspace,
     });
-    const config = readWorkspaceConfig(parse(readFileSync(envPath, "utf8")));
+    const config = readWorkspaceConfig(readGatewayConfig(configPath));
 
     expect(result).toMatchObject({
       removedWorkspace: { id: "deleted-project", cwd: missing },
@@ -305,8 +249,8 @@ describe("workspace:add script", () => {
       "codex-connect",
     ]);
     expect(() => statSync(missing)).toThrow();
-    expect(() => removeWorkspaceFromEnv({
-      envPath,
+    expect(() => removeWorkspaceFromConfig({
+      configPath,
       selector: "codex-connect",
       fallbackDefaultWorkspace,
     })).toThrow("固定默认 Workspace 不能删除");
@@ -318,22 +262,15 @@ describe("workspace:add script", () => {
     const fallback = join(root, ".codex-connect", "workspace");
     const project = join(root, "Project");
     mkdirSync(project);
-    const envPath = join(root, ".env");
-    writeFileSync(
-      envPath,
-      [
-        `CODEX_WORKSPACES_JSON='${JSON.stringify([{
-          id: "project",
-          name: "Project",
-          cwd: project,
-        }])}'`,
-        "CODEX_DEFAULT_WORKSPACE=project",
-        "",
-      ].join("\n"),
+    const configPath = join(root, "config.toml");
+    writeWorkspaceFixture(
+      configPath,
+      [{ id: "project", name: "Project", cwd: project }],
+      "project",
     );
 
-    const result = removeWorkspaceFromEnv({
-      envPath,
+    const result = removeWorkspaceFromConfig({
+      configPath,
       selector: "Project",
       fallbackDefaultWorkspace: {
         id: "codex-connect",
@@ -341,7 +278,7 @@ describe("workspace:add script", () => {
         cwd: fallback,
       },
     });
-    const config = readWorkspaceConfig(parse(readFileSync(envPath, "utf8")));
+    const config = readWorkspaceConfig(readGatewayConfig(configPath));
 
     expect(result.defaultChanged).toBe(true);
     expect(config.defaultWorkspace).toMatchObject({
@@ -358,24 +295,17 @@ describe("workspace:add script", () => {
     const project = join(root, "Project");
     mkdirSync(fallback, { recursive: true });
     mkdirSync(project);
-    const envPath = join(root, ".env");
+    const configPath = join(root, "config.toml");
     const eventQueuePath = configEventQueuePath(root);
-    writeFileSync(
-      envPath,
-      [
-        `CODEX_WORKSPACES_JSON='${JSON.stringify([
-          { id: "codex-connect", name: ".codex-connect/workspace", cwd: fallback },
-          { id: "project", name: "Project", cwd: project },
-        ])}'`,
-        "CODEX_DEFAULT_WORKSPACE=codex-connect",
-        "",
-      ].join("\n"),
-    );
+    writeWorkspaceFixture(configPath, [
+      { id: "codex-connect", name: ".codex-connect/workspace", cwd: fallback },
+      { id: "project", name: "Project", cwd: project },
+    ], "codex-connect");
     mkdirSync(join(root, "data"));
     writeFileSync(eventQueuePath, "{broken");
 
-    expect(() => removeWorkspaceFromEnv({
-      envPath,
+    expect(() => removeWorkspaceFromConfig({
+      configPath,
       selector: "project",
       fallbackDefaultWorkspace: {
         id: "codex-connect",
@@ -385,6 +315,18 @@ describe("workspace:add script", () => {
       eventQueuePath,
     })).toThrow("不是有效 JSON");
 
-    expect(readWorkspaceConfig(parse(readFileSync(envPath, "utf8"))).workspaces).toHaveLength(2);
+    expect(readWorkspaceConfig(readGatewayConfig(configPath)).workspaces).toHaveLength(2);
   });
 });
+
+function writeWorkspaceFixture(
+  configPath: string,
+  workspaces: Array<{ id: string; name: string; cwd: string }>,
+  defaultWorkspace: string,
+): void {
+  writeGatewayConfig(configPath, {
+    version: 1,
+    default_workspace: defaultWorkspace,
+    workspaces,
+  });
+}

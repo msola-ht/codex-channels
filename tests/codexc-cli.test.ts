@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
-import { parse } from "dotenv";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 
@@ -15,6 +14,7 @@ import {
   matchingWorkspaceConfigEvents,
   readConfigEvents,
 } from "../runtime/config-event-queue.mjs";
+import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { readWorkspaceConfig } from "../scripts/workspace-config.mjs";
 
@@ -40,7 +40,7 @@ describe("codexc CLI", () => {
     const environment = {
       ...process.env,
       CODEX_CONNECT_HOME: home,
-      CODEX_CONNECT_ENV_FILE: "",
+      CODEX_CONNECT_CONFIG_FILE: "",
     };
 
     const initialized = execFileSync(process.execPath, [cli, "init"], {
@@ -64,9 +64,9 @@ describe("codexc CLI", () => {
       encoding: "utf8",
     });
 
-    const envPath = join(home, ".env");
+    const configPath = join(home, "config.toml");
     const eventQueuePath = configEventQueuePath(home);
-    const parsed = parse(readFileSync(envPath, "utf8"));
+    const parsed = readGatewayConfig(configPath);
     const config = readWorkspaceConfig(parsed);
     expect(initialized).toContain("Codex Connect 已初始化");
     expect(firstAdded).toContain("Workspace 已添加");
@@ -85,11 +85,11 @@ describe("codexc CLI", () => {
       { workspace: { id: "first-project", cwd: realpathSync(first) } },
       { workspace: { id: "second-project", cwd: realpathSync(second) } },
     ]);
-    expect(parsed.CODEX_SOCKET_PATH).toBe(join(home, "runtime", "codex-app-server.sock"));
-    expect(parsed.STATE_DATABASE_PATH).toBe(join(home, "data", "gateway.sqlite3"));
+    expect(parsed.codex).toMatchObject({ socket_path: "runtime/codex-app-server.sock" });
+    expect(parsed.storage).toMatchObject({ database_path: "data/gateway.sqlite3" });
     expect(statSync(home).mode & 0o777).toBe(0o700);
     expect(statSync(join(home, "workspace")).mode & 0o777).toBe(0o700);
-    expect(statSync(envPath).mode & 0o777).toBe(0o600);
+    expect(statSync(configPath).mode & 0o777).toBe(0o600);
   });
 
   it("recovers from a missing default Workspace only with explicit pruning", () => {
@@ -101,7 +101,7 @@ describe("codexc CLI", () => {
     const environment = {
       ...process.env,
       CODEX_CONNECT_HOME: home,
-      CODEX_CONNECT_ENV_FILE: "",
+      CODEX_CONNECT_CONFIG_FILE: "",
     };
     execFileSync(process.execPath, [cli, "init"], {
       cwd: current,
@@ -127,8 +127,8 @@ describe("codexc CLI", () => {
         encoding: "utf8",
       },
     );
-    const envPath = join(home, ".env");
-    const config = readWorkspaceConfig(parse(readFileSync(envPath, "utf8")));
+    const configPath = join(home, "config.toml");
+    const config = readWorkspaceConfig(readGatewayConfig(configPath));
 
     expect(repaired).toContain("已清理失效 Workspace");
     expect(repaired).not.toContain("默认 Workspace 已切换为：Current Project");
@@ -152,7 +152,7 @@ describe("codexc CLI", () => {
     const environment = {
       ...process.env,
       CODEX_CONNECT_HOME: home,
-      CODEX_CONNECT_ENV_FILE: "",
+      CODEX_CONNECT_CONFIG_FILE: "",
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: root, env: environment });
     execFileSync(process.execPath, [cli, "ws", "add"], { cwd: project, env: environment });
@@ -197,7 +197,7 @@ describe("codexc CLI", () => {
     const environment = {
       ...process.env,
       CODEX_CONNECT_HOME: home,
-      CODEX_CONNECT_ENV_FILE: "",
+      CODEX_CONNECT_CONFIG_FILE: "",
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: root, env: environment });
     execFileSync(process.execPath, [cli, "ws", "add"], { cwd: project, env: environment });
@@ -206,7 +206,7 @@ describe("codexc CLI", () => {
       queuePath,
       readConfigEvents(queuePath).map((event) => event.id),
     );
-    const before = readFileSync(join(home, ".env"), "utf8");
+    const before = readFileSync(join(home, "config.toml"), "utf8");
 
     execFileSync(process.execPath, [cli, "ws", "remove", "project"], {
       cwd: root,
@@ -217,8 +217,8 @@ describe("codexc CLI", () => {
       env: environment,
     });
 
-    const after = readFileSync(join(home, ".env"), "utf8");
-    const config = readWorkspaceConfig(parse(after));
+    const after = readFileSync(join(home, "config.toml"), "utf8");
+    const config = readWorkspaceConfig(readGatewayConfig(join(home, "config.toml")));
     const events = readConfigEvents(queuePath);
     expect(after).toBe(before);
     expect(events).toHaveLength(1);
@@ -244,15 +244,14 @@ describe("codexc CLI", () => {
     const environment = {
       ...process.env,
       CODEX_CONNECT_HOME: home,
-      CODEX_CONNECT_ENV_FILE: "",
+      CODEX_CONNECT_CONFIG_FILE: "",
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: first, env: environment });
     execFileSync(process.execPath, [cli, "ws", "add"], { cwd: first, env: environment });
-    const envPath = join(home, ".env");
-    writeFileSync(
-      envPath,
-      readFileSync(envPath, "utf8").replace("CODEX_BINARY=codex", `CODEX_BINARY=${fakeCodex}`),
-    );
+    const configPath = join(home, "config.toml");
+    updateGatewayConfig(configPath, (document) => {
+      table(document.codex).binary = fakeCodex;
+    });
     execFileSync(process.execPath, [cli, "ws", "add"], { cwd: second, env: environment });
 
     const currentCapture = join(root, "current.json");
@@ -291,11 +290,11 @@ describe("codexc CLI", () => {
     const environment = {
       ...process.env,
       CODEX_CONNECT_HOME: home,
-      CODEX_CONNECT_ENV_FILE: "",
+      CODEX_CONNECT_CONFIG_FILE: "",
     };
 
     execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
-    const before = readFileSync(join(home, ".env"), "utf8");
+    const before = readFileSync(join(home, "config.toml"), "utf8");
     const output = execFileSync(process.execPath, [cli, "init"], {
       cwd: root,
       env: environment,
@@ -304,7 +303,7 @@ describe("codexc CLI", () => {
 
     expect(output).toContain("已经初始化");
     expect(output).not.toContain("初始 Workspace");
-    expect(readFileSync(join(home, ".env"), "utf8")).toBe(before);
+    expect(readFileSync(join(home, "config.toml"), "utf8")).toBe(before);
   });
 
   it("rejects ignored extra arguments", () => {
@@ -347,40 +346,54 @@ describe("codexc CLI", () => {
     expect(invalidService.stderr).toContain("日志服务必须是");
   });
 
-  it("shows an explicitly configured environment file", () => {
+  it("shows an explicitly configured Gateway config file", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-"));
     temporaryDirectories.push(root);
-    const envPath = join(root, "profile", "gateway.env");
+    const configPath = join(root, "profile", "gateway.toml");
     mkdirSync(join(root, "profile"));
 
     const output = execFileSync(process.execPath, [cli, "config"], {
-      env: { ...process.env, CODEX_CONNECT_ENV_FILE: envPath },
+      env: { ...process.env, CODEX_CONNECT_CONFIG_FILE: configPath },
       encoding: "utf8",
     });
 
     expect(output).toContain(`用户目录：${join(root, "profile")}`);
-    expect(output).toContain(`配置文件：${envPath}`);
+    expect(output).toContain(`配置文件：${configPath}`);
   });
 
-  it("initializes an explicitly configured environment file", () => {
+  it("initializes an explicitly configured Gateway config file", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-"));
     temporaryDirectories.push(root);
     const workspace = join(root, "Workspace");
-    const envPath = join(root, "profile", "gateway.env");
+    const profile = join(root, "profile");
+    const configPath = join(profile, "gateway.toml");
     mkdirSync(workspace);
+    mkdirSync(profile, { mode: 0o755 });
 
     const output = execFileSync(process.execPath, [cli, "init"], {
       cwd: workspace,
-      env: { ...process.env, CODEX_CONNECT_ENV_FILE: envPath },
+      env: { ...process.env, CODEX_CONNECT_CONFIG_FILE: configPath },
+      encoding: "utf8",
+    });
+    execFileSync(process.execPath, [cli, "ws"], {
+      cwd: workspace,
+      env: { ...process.env, CODEX_CONNECT_CONFIG_FILE: configPath },
+    });
+    const diagnosed = spawnSync(process.execPath, [cli, "doctor"], {
+      cwd: workspace,
+      env: { ...process.env, CODEX_CONNECT_CONFIG_FILE: configPath },
       encoding: "utf8",
     });
 
-    const parsed = parse(readFileSync(envPath, "utf8"));
-    expect(output).toContain(`配置文件：${envPath}`);
-    expect(parsed.CODEX_SOCKET_PATH).toBe(join(root, "profile", "runtime", "codex-app-server.sock"));
-    expect(parsed.STATE_DATABASE_PATH).toBe(join(root, "profile", "data", "gateway.sqlite3"));
-    expect(statSync(join(root, "profile")).mode & 0o777).toBe(0o700);
-    expect(statSync(envPath).mode & 0o777).toBe(0o600);
+    const parsed = readGatewayConfig(configPath);
+    expect(output).toContain(`配置文件：${configPath}`);
+    expect(table(parsed.codex).socket_path).toBe("runtime/codex-app-server.sock");
+    expect(table(parsed.storage).database_path).toBe("data/gateway.sqlite3");
+    expect(statSync(profile).mode & 0o777).toBe(0o755);
+    expect(statSync(join(profile, "runtime")).mode & 0o777).toBe(0o700);
+    expect(statSync(join(profile, "data")).mode & 0o777).toBe(0o700);
+    expect(statSync(configPath).mode & 0o777).toBe(0o600);
+    expect(diagnosed.stdout).not.toContain("[失败] 配置目录权限");
   });
 
   it("diagnoses configuration and a real Unix WebSocket without exposing the Telegram token", async () => {
@@ -392,25 +405,25 @@ describe("codexc CLI", () => {
     const environment = {
       ...process.env,
       CODEX_CONNECT_HOME: home,
-      CODEX_CONNECT_ENV_FILE: "",
+      CODEX_CONNECT_CONFIG_FILE: "",
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
 
     const fakeCodex = join(root, "codex");
     writeFileSync(fakeCodex, "#!/bin/sh\nprintf 'codex-cli 0.145.0\\n'\n");
     chmodSync(fakeCodex, 0o700);
-    const envPath = join(home, ".env");
+    const configPath = join(home, "config.toml");
     const socketPath = join(root, "app.sock");
     let initializedReceived = false;
     const secret = "123456:test-secret-token";
-    writeFileSync(
-      envPath,
-      readFileSync(envPath, "utf8")
-        .replace("TELEGRAM_BOT_TOKEN=", `TELEGRAM_BOT_TOKEN=${secret}`)
-        .replace("TELEGRAM_ALLOWED_USER_IDS=", "TELEGRAM_ALLOWED_USER_IDS=123456")
-        .replace("CODEX_BINARY=codex", `CODEX_BINARY=${fakeCodex}`)
-        .replace(/^CODEX_SOCKET_PATH=.*$/m, `CODEX_SOCKET_PATH=${socketPath}`),
-    );
+    updateGatewayConfig(configPath, (document) => {
+      const telegram = table(document.telegram);
+      telegram.bot_token = secret;
+      telegram.allowed_user_ids = [123456];
+      const codex = table(document.codex);
+      codex.binary = fakeCodex;
+      codex.socket_path = socketPath;
+    });
 
     const server = createServer();
     const webSocketServer = new WebSocketServer({ server });
@@ -450,7 +463,7 @@ describe("codexc CLI", () => {
     }
   });
 
-  it("explicitly repairs the deprecated sandbox configuration with doctor --fix", () => {
+  it("rejects the removed doctor --fix compatibility command", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-fix-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -459,35 +472,21 @@ describe("codexc CLI", () => {
     const environment = {
       ...process.env,
       CODEX_CONNECT_HOME: home,
-      CODEX_CONNECT_ENV_FILE: "",
+      CODEX_CONNECT_CONFIG_FILE: "",
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
-    const envPath = join(home, ".env");
-    writeFileSync(
-      envPath,
-      readFileSync(envPath, "utf8").replace(
-        "CODEX_SANDBOX=workspace-write",
-        "CODEX_BRIDGE_SANDBOX=read-only",
-      ),
-    );
 
-    const repaired = spawnSync(process.execPath, [cli, "doctor", "--fix"], {
+    const rejected = spawnSync(process.execPath, [cli, "doctor", "--fix"], {
       cwd: workspace,
       env: environment,
       encoding: "utf8",
     });
-    const parsed = parse(readFileSync(envPath, "utf8"));
 
-    expect(repaired.stdout).toContain(
-      "[修复] 用户配置：已将 CODEX_BRIDGE_SANDBOX 改为 CODEX_SANDBOX",
-    );
-    expect(repaired.stdout).toContain("[通过] 配置兼容性");
-    expect(parsed.CODEX_SANDBOX).toBe("read-only");
-    expect(parsed.CODEX_BRIDGE_SANDBOX).toBeUndefined();
-    expect(statSync(envPath).mode & 0o777).toBe(0o600);
+    expect(rejected.status).toBe(1);
+    expect(rejected.stderr).toContain("用法：codexc doctor");
   });
 
-  it("reports deprecated configuration without silently repairing it", () => {
+  it("reports invalid TOML without rewriting it", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-legacy-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -496,15 +495,12 @@ describe("codexc CLI", () => {
     const environment = {
       ...process.env,
       CODEX_CONNECT_HOME: home,
-      CODEX_CONNECT_ENV_FILE: "",
+      CODEX_CONNECT_CONFIG_FILE: "",
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
-    const envPath = join(home, ".env");
-    const legacyContent = readFileSync(envPath, "utf8").replace(
-      "CODEX_SANDBOX=workspace-write",
-      "CODEX_BRIDGE_SANDBOX=read-only",
-    );
-    writeFileSync(envPath, legacyContent);
+    const configPath = join(home, "config.toml");
+    const invalidContent = `${readFileSync(configPath, "utf8")}\ninvalid = [\n`;
+    writeFileSync(configPath, invalidContent);
 
     const diagnosed = spawnSync(process.execPath, [cli, "doctor"], {
       cwd: workspace,
@@ -513,14 +509,12 @@ describe("codexc CLI", () => {
     });
 
     expect(diagnosed.status).toBe(1);
-    expect(diagnosed.stdout).toContain(
-      "[失败] 配置兼容性：检测到 CODEX_BRIDGE_SANDBOX；请运行 codexc doctor --fix",
-    );
-    expect(readFileSync(envPath, "utf8")).toBe(legacyContent);
+    expect(diagnosed.stdout).toContain("[失败] 配置格式");
+    expect(readFileSync(configPath, "utf8")).toBe(invalidContent);
   });
 
-  it("keeps the current sandbox value when doctor --fix removes a duplicate old key", () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-fix-"));
+  it("rejects configuration that is valid TOML but violates the Gateway schema", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-schema-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
     const workspace = join(root, "Workspace");
@@ -528,26 +522,38 @@ describe("codexc CLI", () => {
     const environment = {
       ...process.env,
       CODEX_CONNECT_HOME: home,
-      CODEX_CONNECT_ENV_FILE: "",
+      CODEX_CONNECT_CONFIG_FILE: "",
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
-    const envPath = join(home, ".env");
-    writeFileSync(
-      envPath,
-      `${readFileSync(envPath, "utf8")}CODEX_BRIDGE_SANDBOX=read-only\n`,
-    );
+    const configPath = join(home, "config.toml");
+    updateGatewayConfig(configPath, (document) => {
+      document.legacy_setting = true;
+    });
 
-    const repaired = spawnSync(process.execPath, [cli, "doctor", "--fix"], {
+    const diagnosed = spawnSync(process.execPath, [cli, "doctor"], {
       cwd: workspace,
       env: environment,
       encoding: "utf8",
     });
-    const parsed = parse(readFileSync(envPath, "utf8"));
 
-    expect(repaired.stdout).toContain(
-      "[修复] 用户配置：已保留 CODEX_SANDBOX 并删除旧的 CODEX_BRIDGE_SANDBOX",
-    );
-    expect(parsed.CODEX_SANDBOX).toBe("workspace-write");
-    expect(parsed.CODEX_BRIDGE_SANDBOX).toBeUndefined();
+    expect(diagnosed.status).toBe(1);
+    expect(diagnosed.stdout).toContain("[失败] 配置格式");
+    expect(diagnosed.stdout).toContain("Unrecognized key");
   });
 });
+
+function updateGatewayConfig(
+  configPath: string,
+  update: (document: Record<string, unknown>) => void,
+): void {
+  const document = readGatewayConfig(configPath);
+  update(document);
+  writeGatewayConfig(configPath, document);
+}
+
+function table(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("测试配置表无效");
+  }
+  return value as Record<string, unknown>;
+}

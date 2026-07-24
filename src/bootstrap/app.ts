@@ -590,7 +590,20 @@ function serviceReinstallReasons(current: GatewayConfig, next: GatewayConfig): C
   if (current.codexSocketPath !== next.codexSocketPath) {
     reasons.push(configChange("codex.socket"));
   }
+  if (!sameNetworkProxy(current.networkProxy, next.networkProxy)) {
+    reasons.push(configChange("network.proxy"));
+  }
   return reasons;
+}
+
+function sameNetworkProxy(
+  current: GatewayConfig["networkProxy"],
+  next: GatewayConfig["networkProxy"],
+): boolean {
+  return current.http === next.http
+    && current.https === next.https
+    && current.all === next.all
+    && current.no === next.no;
 }
 
 function restartRequiredReasons(current: GatewayConfig, next: GatewayConfig): ConfigChange[] {

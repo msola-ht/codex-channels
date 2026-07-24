@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 
-import { parse } from "dotenv";
+import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { packageDir, resolveConfiguredPath, runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
@@ -12,12 +12,13 @@ if (process.platform !== "darwin") {
 }
 const projectDir = packageDir;
 const runtime = runtimeConfig();
-const envPath = runtime.envPath;
-const env = parse(readFileSync(envPath));
-const { defaultWorkspace } = readWorkspaceConfig(env);
+const document = readGatewayConfig(runtime.configPath);
+const codex = table(document.codex);
+const network = table(document.network);
+const { defaultWorkspace } = readWorkspaceConfig(document);
 const workdir = defaultWorkspace.cwd;
 const socketPath = resolveConfiguredPath(
-  env.CODEX_SOCKET_PATH,
+  stringValue(codex.socket_path),
   runtime.dataDir,
   join(runtime.dataDir, "runtime", "codex-app-server.sock"),
 );
@@ -28,7 +29,7 @@ const runtimeDir = dirname(socketPath);
 mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
 chmodSync(runtimeDir, 0o700);
 
-const codexBinary = resolveExecutable(env.CODEX_BINARY || "codex");
+const codexBinary = resolveExecutable(stringValue(codex.binary) || "codex");
 const nodeBinary = realpathSync(process.execPath);
 const launchdPath = uniquePaths([
   dirname(nodeBinary),
@@ -40,20 +41,10 @@ const launchdPath = uniquePaths([
   "/usr/sbin",
   "/sbin",
 ]).join(delimiter);
-const proxyKeys = [
-  "HTTP_PROXY",
-  "HTTPS_PROXY",
-  "ALL_PROXY",
-  "NO_PROXY",
-  "http_proxy",
-  "https_proxy",
-  "all_proxy",
-  "no_proxy",
-];
 const values = {
   PROJECT_DIR: projectDir,
   CONFIG_DIR: runtime.dataDir,
-  ENV_PATH: envPath,
+  CONFIG_PATH: runtime.configPath,
   CLI_ENTRY: join(projectDir, "bin", "codexc.mjs"),
   WORKDIR: workdir,
   RUNTIME_DIR: runtimeDir,
@@ -61,7 +52,7 @@ const values = {
   NODE_BINARY: nodeBinary,
   CODEX_BINARY: codexBinary,
   LAUNCHD_PATH: launchdPath,
-  ...Object.fromEntries(proxyKeys.map((key) => [key, env[key]?.trim() ?? ""])),
+  ...proxyEnvironment(network),
 };
 const agentsDir = join(homedir(), "Library", "LaunchAgents");
 mkdirSync(agentsDir, { recursive: true });
@@ -86,6 +77,30 @@ function resolveExecutable(command) {
 
 function uniquePaths(paths) {
   return [...new Set(paths)];
+}
+
+function table(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function stringValue(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function proxyEnvironment(network) {
+  const values = {
+    HTTP_PROXY: stringValue(network.http_proxy),
+    HTTPS_PROXY: stringValue(network.https_proxy),
+    ALL_PROXY: stringValue(network.all_proxy),
+    NO_PROXY: stringValue(network.no_proxy),
+  };
+  return {
+    ...values,
+    http_proxy: values.HTTP_PROXY,
+    https_proxy: values.HTTPS_PROXY,
+    all_proxy: values.ALL_PROXY,
+    no_proxy: values.NO_PROXY,
+  };
 }
 
 function xmlEscape(value) {

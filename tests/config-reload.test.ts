@@ -120,6 +120,7 @@ describe("Gateway config reload", () => {
   it.each([
     ["codex.binary", { codexBinary: "/opt/codex" }],
     ["codex.socket", { codexSocketPath: "/tmp/other.sock" }],
+    ["network.proxy", { networkProxy: { http: "http://127.0.0.1:7890" } }],
   ] as const)("requires service reinstall for %s changes", (code, change) => {
     expect(classifyConfigReload(config(), config(change))).toEqual({
       action: "reinstall",
@@ -269,6 +270,7 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     telegramAllowedUserIds: new Set([123]),
     telegramMessageFormat: "html",
     codexBinary: "codex",
+    networkProxy: {},
     workspaces: [mainWorkspace],
     defaultWorkspaceId: "main",
     codexSocketPath: "/tmp/codex.sock",

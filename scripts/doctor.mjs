@@ -1,29 +1,26 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import {
-  chmodSync,
   existsSync,
   readFileSync,
   realpathSync,
-  renameSync,
-  rmSync,
   statSync,
-  writeFileSync,
 } from "node:fs";
 import { createConnection } from "node:net";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join } from "node:path";
 
-import { parse } from "dotenv";
 import WebSocket from "ws";
 
-import { packageDir, resolveConfiguredPath, userDataDir } from "./runtime-config.mjs";
+import {
+  readGatewayConfig,
+  validateGatewayConfigDocument,
+} from "../runtime/gateway-config.mjs";
+import { packageDir, resolveConfiguredPath, runtimeConfig, userDataDir } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
 const checks = [];
-const [option, ...extraOptions] = process.argv.slice(2);
-if (extraOptions.length > 0 || (option !== undefined && option !== "--fix")) {
-  throw new Error("用法：codexc doctor [--fix]");
+if (process.argv.length > 2) {
+  throw new Error("用法：codexc doctor");
 }
-const fixRequested = option === "--fix";
 const packageMetadata = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
 const protocolMetadata = JSON.parse(
   readFileSync(join(packageDir, "src", "codex-protocol", "version.json"), "utf8"),
@@ -36,59 +33,52 @@ record(
   `${process.version}（要求 >=22.13.0）`,
 );
 
-const explicitEnvFile = process.env.CODEX_CONNECT_ENV_FILE?.trim();
-const dataDir = explicitEnvFile ? dirname(resolve(explicitEnvFile)) : userDataDir();
-const envPath = explicitEnvFile ? resolve(explicitEnvFile) : join(dataDir, ".env");
-let env;
+const explicitConfigFile = process.env.CODEX_CONNECT_CONFIG_FILE?.trim();
+const runtime = explicitConfigFile
+  ? runtimeConfig()
+  : { dataDir: userDataDir(), configPath: join(userDataDir(), "config.toml") };
+const { configPath, dataDir } = runtime;
+let document;
 
-if (!existsSync(envPath)) {
-  record("用户配置", false, `不存在：${envPath}；请先运行 codexc init`);
+if (!existsSync(configPath)) {
+  record("用户配置", false, `不存在：${configPath}；请先运行 codexc init`);
 } else {
-  record("用户配置", true, envPath);
-  checkMode("配置目录权限", dataDir, 0o700);
-  checkMode("配置文件权限", envPath, 0o600);
-  if (fixRequested) {
-    const repair = repairDeprecatedConfiguration(envPath);
-    repaired(
-      "用户配置",
-      repair.changed
-        ? repair.detail
-        : "未发现可自动修复的旧配置",
-    );
+  record("用户配置", true, configPath);
+  if (explicitConfigFile) {
+    note("配置目录权限", "显式配置文件保留父目录现有权限");
+  } else {
+    checkMode("配置目录权限", dataDir, 0o700);
   }
-  const content = readFileSync(envPath, "utf8");
-  const legacySandboxConfigured = hasEnvironmentKey(
-    content,
-    "CODEX_BRIDGE_SANDBOX",
-  );
-  record(
-    "配置兼容性",
-    !legacySandboxConfigured,
-    legacySandboxConfigured
-      ? "检测到 CODEX_BRIDGE_SANDBOX；请运行 codexc doctor --fix"
-      : "未检测到已知旧配置项",
-  );
-  env = parse(content);
+  checkMode("配置文件权限", configPath, 0o600);
+  try {
+    document = readGatewayConfig(configPath);
+    validateGatewayConfigDocument(document);
+    record("配置格式", true, "TOML 语法与 Gateway Schema 有效");
+  } catch (error) {
+    record("配置格式", false, errorMessage(error));
+  }
 }
 
-if (env) {
-  const tokenConfigured = Boolean(env.TELEGRAM_BOT_TOKEN?.trim());
-  const allowedUsers = validAllowedUsers(env.TELEGRAM_ALLOWED_USER_IDS);
+if (document) {
+  const telegram = table(document.telegram);
+  const codex = table(document.codex);
+  const tokenConfigured = Boolean(stringValue(telegram.bot_token));
+  const allowedUsers = validAllowedUsers(telegram.allowed_user_ids);
   record("Telegram Token", tokenConfigured, tokenConfigured ? "已配置（内容已隐藏）" : "未配置");
   record(
     "Telegram 用户",
     allowedUsers,
-    allowedUsers ? "允许列表有效" : "TELEGRAM_ALLOWED_USER_IDS 未配置或格式无效",
+    allowedUsers ? "允许列表有效" : "telegram.allowed_user_ids 未配置或格式无效",
   );
 
   try {
-    const { workspaces, defaultWorkspace } = readWorkspaceConfig(env);
+    const { workspaces, defaultWorkspace } = readWorkspaceConfig(document);
     record("Workspace", true, `${workspaces.length} 个，默认 ${defaultWorkspace.id}`);
   } catch (error) {
     record("Workspace", false, errorMessage(error));
   }
 
-  const codexCommand = env.CODEX_BINARY?.trim() || "codex";
+  const codexCommand = stringValue(codex.binary) || "codex";
   try {
     const codexBinary = resolveExecutable(codexCommand);
     const versionResult = spawnSync(codexBinary, ["--version"], {
@@ -109,7 +99,7 @@ if (env) {
   }
 
   const socketPath = resolveConfiguredPath(
-    env.CODEX_SOCKET_PATH,
+    stringValue(codex.socket_path),
     dataDir,
     join(dataDir, "runtime", "codex-app-server.sock"),
   );
@@ -192,60 +182,6 @@ function note(name, detail) {
   checks.push({ kind: "note", prefix: "[提示]", name, detail });
 }
 
-function repaired(name, detail) {
-  checks.push({ kind: "repair", prefix: "[修复]", name, detail });
-}
-
-function repairDeprecatedConfiguration(path) {
-  const content = readFileSync(path, "utf8");
-  const newline = content.includes("\r\n") ? "\r\n" : "\n";
-  const lines = content.split(/\r?\n/);
-  const currentPattern = /^[ \t]*(?:export[ \t]+)?CODEX_SANDBOX[ \t]*=/;
-  const legacyPattern = /^[ \t]*(?:export[ \t]+)?CODEX_BRIDGE_SANDBOX[ \t]*=/;
-  const currentConfigured = lines.some((line) => currentPattern.test(line));
-  let migrated = false;
-  let removed = 0;
-  const updatedLines = [];
-  for (const line of lines) {
-    if (!legacyPattern.test(line)) {
-      updatedLines.push(line);
-      continue;
-    }
-    if (!currentConfigured && !migrated) {
-      updatedLines.push(line.replace("CODEX_BRIDGE_SANDBOX", "CODEX_SANDBOX"));
-      migrated = true;
-      continue;
-    }
-    removed += 1;
-  }
-  if (!migrated && removed === 0) {
-    return { changed: false, detail: "" };
-  }
-  const temporaryPath = `${path}.${process.pid}.doctor.tmp`;
-  try {
-    writeFileSync(temporaryPath, updatedLines.join(newline), {
-      mode: 0o600,
-      flag: "wx",
-    });
-    renameSync(temporaryPath, path);
-    chmodSync(path, 0o600);
-  } finally {
-    rmSync(temporaryPath, { force: true });
-  }
-  return {
-    changed: true,
-    detail: migrated
-      ? "已将 CODEX_BRIDGE_SANDBOX 改为 CODEX_SANDBOX"
-      : "已保留 CODEX_SANDBOX 并删除旧的 CODEX_BRIDGE_SANDBOX",
-  };
-}
-
-function hasEnvironmentKey(content, key) {
-  return content
-    .split(/\r?\n/)
-    .some((line) => new RegExp(`^[ \\t]*(?:export[ \\t]+)?${key}[ \\t]*=`).test(line));
-}
-
 function checkMode(name, path, expected) {
   try {
     const actual = statSync(path).mode & 0o777;
@@ -256,8 +192,17 @@ function checkMode(name, path, expected) {
 }
 
 function validAllowedUsers(value) {
-  const items = value?.split(",").map((item) => item.trim()).filter(Boolean) ?? [];
-  return items.length > 0 && items.every((item) => Number.isSafeInteger(Number(item)) && Number(item) > 0);
+  return Array.isArray(value)
+    && value.length > 0
+    && value.every((item) => Number.isSafeInteger(item) && item > 0);
+}
+
+function table(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function stringValue(value) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function resolveExecutable(command) {

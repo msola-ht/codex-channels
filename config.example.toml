@@ -1,0 +1,33 @@
+version = 1
+default_workspace = "main"
+
+[telegram]
+bot_token = "你的_Bot_Token"
+allowed_user_ids = [123456789]
+message_format = "html"
+
+[network]
+http_proxy = ""
+https_proxy = ""
+all_proxy = ""
+no_proxy = "localhost,127.0.0.1"
+
+[codex]
+binary = "codex"
+socket_path = "runtime/codex-app-server.sock"
+default_model = ""
+sandbox = "workspace-write"
+
+[approval]
+timeout_seconds = 300
+
+[storage]
+database_path = "data/gateway.sqlite3"
+
+[logging]
+level = "info"
+
+[[workspaces]]
+id = "main"
+name = "Main Project"
+cwd = "/absolute/path/to/project"

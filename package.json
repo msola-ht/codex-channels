@@ -32,7 +32,7 @@
     "runtime/",
     "systemd/",
     "scripts/",
-    ".env.example",
+    "config.example.toml",
     "LICENSE",
     "README.md"
   ],
@@ -69,10 +69,10 @@
     "service:status": "node bin/codexc.mjs service status"
   },
   "dependencies": {
-    "dotenv": "^17.2.3",
     "grammy": "^1.45.1",
     "https-proxy-agent": "^9.1.0",
     "pino": "^10.3.1",
+    "smol-toml": "^1.7.0",
     "ws": "^8.18.3",
     "zod": "^4.3.6"
   },

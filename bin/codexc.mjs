@@ -4,9 +4,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { parse } from "dotenv";
-
 import { configEventQueuePath } from "../runtime/config-event-queue.mjs";
+import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import {
   initializeUserData,
   packageDir,
@@ -15,9 +14,9 @@ import {
   userDataDir,
 } from "../scripts/runtime-config.mjs";
 import {
-  addWorkspaceToEnv,
+  addWorkspaceToConfig,
   inspectWorkspaceConfig,
-  removeWorkspaceFromEnv,
+  removeWorkspaceFromConfig,
 } from "../scripts/workspace-config.mjs";
 
 const [command = "help", ...args] = process.argv.slice(2);
@@ -79,10 +78,10 @@ function initialize(args) {
   const result = initializeUserData({ cwd: process.cwd() });
   console.log(result.created ? "Codex Connect 已初始化。" : "Codex Connect 已经初始化。");
   console.log(`配置目录：${result.dataDir}`);
-  console.log(`配置文件：${result.envPath}`);
+  console.log(`配置文件：${result.configPath}`);
   if (result.created) {
     console.log(`默认 Workspace：${result.workspace}`);
-    console.log("请填写 TELEGRAM_BOT_TOKEN 和 TELEGRAM_ALLOWED_USER_IDS，然后运行 codexc service install。");
+    console.log("请运行 codexc setup 配置 Telegram，然后运行 codexc service install。");
   }
 }
 
@@ -138,8 +137,8 @@ function workspace(args) {
   };
   if (args[0] === "add") {
     const options = parseWorkspaceAddOptions(args.slice(1));
-    const result = addWorkspaceToEnv({
-      envPath: runtime.envPath,
+    const result = addWorkspaceToConfig({
+      configPath: runtime.configPath,
       cwd: process.cwd(),
       ...(options.id ? { id: options.id } : {}),
       ...(options.name ? { name: options.name } : {}),
@@ -166,8 +165,8 @@ function workspace(args) {
     if (args.length !== 2) {
       throw new Error("用法：codexc ws remove <序号|ID|名称>");
     }
-    const result = removeWorkspaceFromEnv({
-      envPath: runtime.envPath,
+    const result = removeWorkspaceFromConfig({
+      configPath: runtime.configPath,
       selector: args[1],
       fallbackDefaultWorkspace,
       eventQueuePath,
@@ -189,8 +188,8 @@ function workspace(args) {
       "  codexc ws remove <序号|ID|名称>",
     ].join("\n"));
   }
-  const env = parse(readFileSync(runtime.envPath, "utf8"));
-  const { workspaces, defaultWorkspaceId } = inspectWorkspaceConfig(env);
+  const document = readGatewayConfig(runtime.configPath);
+  const { workspaces, defaultWorkspaceId } = inspectWorkspaceConfig(document);
   console.log(`Workspace（${workspaces.length}）：`);
   workspaces.forEach((item, index) => {
     const status = item.status === "missing"
@@ -245,17 +244,17 @@ function service(args) {
 
 function showConfig(args) {
   requireNoArguments(args, "用法：codexc config");
-  const explicitEnvFile = process.env.CODEX_CONNECT_ENV_FILE?.trim();
-  const runtime = explicitEnvFile
+  const explicitConfigFile = process.env.CODEX_CONNECT_CONFIG_FILE?.trim();
+  const runtime = explicitConfigFile
     ? runtimeConfig()
-    : { dataDir: userDataDir(), envPath: join(userDataDir(), ".env") };
+    : { dataDir: userDataDir(), configPath: join(userDataDir(), "config.toml") };
   console.log(`用户目录：${runtime.dataDir}`);
-  console.log(`配置文件：${runtime.envPath}`);
+  console.log(`配置文件：${runtime.configPath}`);
 }
 
 function runDoctor(args) {
-  if (args.length > 1 || (args.length === 1 && args[0] !== "--fix")) {
-    throw new Error("用法：codexc doctor [--fix]");
+  if (args.length > 0) {
+    throw new Error("用法：codexc doctor");
   }
   const result = spawnSync(process.execPath, [join(packageDir, "scripts/doctor.mjs"), ...args], {
     stdio: "inherit",
@@ -288,18 +287,40 @@ function runScript(relativePath, args, additionalEnvironment = {}, workingDirect
 }
 
 function configuredEnvironment() {
-  const { dataDir, envPath } = requireUserConfig();
-  const values = parse(readFileSync(envPath, "utf8"));
+  const { configPath, dataDir } = requireUserConfig();
+  const document = readGatewayConfig(configPath);
+  const network = table(document.network);
+  const codex = table(document.codex);
+  const httpProxy = stringValue(network.http_proxy);
+  const httpsProxy = stringValue(network.https_proxy);
+  const allProxy = stringValue(network.all_proxy);
+  const noProxy = stringValue(network.no_proxy);
   return {
+    configPath,
     dataDir,
     environment: {
-      ...values,
       ...process.env,
       CODEX_CONNECT_HOME: dataDir,
-      CODEX_CONNECT_ENV_FILE: envPath,
-      DOTENV_CONFIG_PATH: envPath,
+      CODEX_CONNECT_CONFIG_FILE: configPath,
+      CODEX_BINARY: stringValue(codex.binary) || "codex",
+      HTTP_PROXY: httpProxy,
+      HTTPS_PROXY: httpsProxy,
+      ALL_PROXY: allProxy,
+      NO_PROXY: noProxy,
+      http_proxy: httpProxy,
+      https_proxy: httpsProxy,
+      all_proxy: allProxy,
+      no_proxy: noProxy,
     },
   };
+}
+
+function table(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function stringValue(value) {
+  return typeof value === "string" ? value : "";
 }
 
 function run(executable, args, environment, cwd) {
@@ -411,7 +432,7 @@ function printHelp() {
   service logs [-f] [-n 行数] [--service 名称]
                                查看或持续跟踪后台服务日志
   config                       显示用户配置路径
-  doctor [--fix]               检查安装、配置、Codex 与服务连通性；显式修复已知旧配置
+  doctor                       检查安装、配置、Codex 与服务连通性
   version                      显示版本
 `);
 }

@@ -1,10 +1,10 @@
 # Config
 
-本目录负责把进程环境转换为经过验证的 Gateway 配置。
+本目录负责把共享运行时已完成结构校验的 TOML 文档转换为 Gateway 运行配置。
 
 ## 文件
 
-- `index.ts`：从显式环境文件重新读取配置，使用 Zod 校验 Telegram、Codex、Workspace、Socket、数据库、代理、沙箱、超时和日志配置，并规范化路径与 URL。
+- `index.ts`：读取统一 TOML 配置，调用 `runtime/gateway-config.mjs` 的共享 Zod Schema 完成结构校验，再校验 Workspace 和 URL 等运行语义，并相对配置目录规范化路径。
 - `config-change.ts`：定义结构化配置变更、作用域与优先级。
 
-外部输入只在此边界验证一次。配置错误必须抛出 `ConfigurationError` 并阻止启动，不能静默采用更宽松的权限、目录或网络默认值。
+配置结构只在共享运行时边界验证一次，本目录只补充依赖文件系统和运行语义的校验。配置错误必须抛出 `ConfigurationError` 并阻止启动，不能静默采用更宽松的权限、目录或网络默认值。

@@ -17,12 +17,8 @@ import { GatewayApplication } from "./app.js";
 export async function runGatewayProcess(): Promise<void> {
   const runtime = loadRuntimeConfig();
   const config = runtime.config;
-  const eventQueuePath = runtime.envPath
-    ? configEventQueuePath(dirname(runtime.envPath))
-    : undefined;
-  const watchedPaths = [runtime.envPath, eventQueuePath].filter(
-    (path): path is string => path !== undefined,
-  );
+  const eventQueuePath = configEventQueuePath(dirname(runtime.configPath));
+  const watchedPaths = [runtime.configPath, eventQueuePath];
   const logger = createLogger(config);
   const application = new GatewayApplication(config, logger);
   let stopping = false;

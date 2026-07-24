@@ -2,24 +2,24 @@ import { dirname, resolve } from "node:path";
 
 import { configEventQueuePath } from "../runtime/config-event-queue.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
-import { addWorkspaceToEnv } from "./workspace-config.mjs";
+import { addWorkspaceToConfig } from "./workspace-config.mjs";
 
 const options = parseOptions(process.argv.slice(2));
-const envPath = resolve(options.envFile ?? runtimeConfig().envPath);
+const configPath = resolve(options.configFile ?? runtimeConfig().configPath);
 const cwd = resolve(options.cwd ?? process.env.INIT_CWD ?? process.cwd());
 
-const result = addWorkspaceToEnv({
-  envPath,
+const result = addWorkspaceToConfig({
+  configPath,
   cwd,
   ...(options.id ? { id: options.id } : {}),
   ...(options.name ? { name: options.name } : {}),
   ...(options.pruneMissing ? { pruneMissing: true } : {}),
   fallbackDefaultWorkspace: {
-    cwd: resolve(dirname(envPath), "workspace"),
+    cwd: resolve(dirname(configPath), "workspace"),
     id: "codex-connect",
     name: ".codex-connect/workspace",
   },
-  eventQueuePath: configEventQueuePath(dirname(envPath)),
+  eventQueuePath: configEventQueuePath(dirname(configPath)),
 });
 
 for (const removed of result.removedWorkspaces) {
@@ -48,14 +48,14 @@ function parseOptions(args) {
       result.pruneMissing = true;
       continue;
     }
-    if (!["--id", "--name", "--cwd", "--env-file"].includes(argument)) {
+    if (!["--id", "--name", "--cwd", "--config-file"].includes(argument)) {
       throw new Error(`未知参数：${argument}`);
     }
     const value = args[index + 1];
     if (!value) {
       throw new Error(`${argument} 缺少值`);
     }
-    const key = argument === "--env-file" ? "envFile" : argument.slice(2);
+    const key = argument === "--config-file" ? "configFile" : argument.slice(2);
     result[key] = value;
     index += 1;
   }

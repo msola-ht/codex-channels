@@ -1,8 +1,9 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
+import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { packageDir } from "./runtime-config.mjs";
 
 const temporaryDirectory = mkdtempSync(join(tmpdir(), "codexc-package-smoke-"));
@@ -39,7 +40,7 @@ try {
   }
   if (
     !help.includes("setup ")
-    || !help.includes("doctor [--fix]")
+    || !help.includes("doctor ")
     || !help.includes("service install")
     || !help.includes("service reload")
     || !help.includes("service logs")
@@ -59,31 +60,35 @@ try {
       throw new Error(`tarball 安装后缺少发布文件：${requiredFile}`);
     }
   }
-  const envPath = join(temporaryDirectory, ".env");
-  const configLines = [
-    "TELEGRAM_BOT_TOKEN=smoke-token",
-    "TELEGRAM_ALLOWED_USER_IDS=123",
-    `CODEX_WORKSPACES_JSON='${JSON.stringify([{
-      id: "smoke",
-      name: "Smoke",
-      cwd: temporaryDirectory,
-    }])}'`,
-    "CODEX_DEFAULT_WORKSPACE=smoke",
-    "CODEX_SANDBOX=workspace-write",
-    "",
-  ];
-  writeFileSync(envPath, configLines.join("\n"), { mode: 0o600 });
+  const configPath = join(temporaryDirectory, "config.toml");
+  writeGatewayConfig(configPath, {
+    version: 1,
+    default_workspace: "smoke",
+    telegram: {
+      bot_token: "smoke-token",
+      allowed_user_ids: [123],
+      message_format: "html",
+    },
+    network: {},
+    codex: {
+      binary: "codex",
+      socket_path: "runtime/codex-app-server.sock",
+      sandbox: "workspace-write",
+    },
+    approval: { timeout_seconds: 300 },
+    storage: { database_path: "data/gateway.sqlite3" },
+    logging: { level: "info" },
+    workspaces: [{ id: "smoke", name: "Smoke", cwd: temporaryDirectory }],
+  });
   const configEnvironment = {
     ...environment,
-    CODEX_CONNECT_ENV_FILE: envPath,
+    CODEX_CONNECT_CONFIG_FILE: configPath,
   };
   const validator = join(installedPackage, "scripts", "validate-config.mjs");
   run(process.execPath, [validator], temporaryDirectory, configEnvironment, true);
   writeFileSync(
-    envPath,
-    configLines
-      .map((line) => line.replace("CODEX_SANDBOX=", "CODEX_BRIDGE_SANDBOX="))
-      .join("\n"),
+    configPath,
+    `legacy_setting = true\n${readFileSync(configPath, "utf8")}`,
     { mode: 0o600 },
   );
   const rejected = spawnSync(process.execPath, [validator], {
@@ -93,7 +98,7 @@ try {
   });
   if (
     rejected.status === 0
-    || !rejected.stderr.includes("不支持配置项 CODEX_BRIDGE_SANDBOX")
+    || !rejected.stderr.includes("Unrecognized key")
   ) {
     throw new Error("配置预检未拒绝已经移除的配置项");
   }

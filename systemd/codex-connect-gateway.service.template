@@ -8,7 +8,7 @@ Type=simple
 WorkingDirectory=__CONFIG_DIR__
 ExecStart=__NODE_BINARY__ __CLI_ENTRY__ gateway
 Environment="CODEX_CONNECT_HOME=__CONFIG_DIR_ENV__"
-Environment="CODEX_CONNECT_ENV_FILE=__ENV_PATH_ENV__"
+Environment="CODEX_CONNECT_CONFIG_FILE=__CONFIG_PATH_ENV__"
 Environment="CODEX_BINARY=__CODEX_BINARY_ENV__"
 Environment="PATH=__SYSTEMD_PATH__"
 Environment="HTTP_PROXY=__HTTP_PROXY__"

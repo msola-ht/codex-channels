@@ -5,9 +5,8 @@
 ## 配置与 Workspace
 
 - `runtime-config.mjs`：解析包目录、用户数据目录和运行时路径，并初始化 `.codex-connect`。
-- `workspace-config.mjs` 通过 `runtime/config-event-queue.mjs` 写入待投递配置事件，保证 Gateway 重启窗口内的 Workspace 新增通知可恢复。
 - `telegram-setup.mjs`：独立完成 Telegram Bot Token 验证、一次性私聊配对、用户 ID 获取和用户配置写入；新建 Bot 仅引导使用官方 BotFather。
-- `workspace-config.mjs`：读取、检查和原子更新环境文件中的 Workspace 配置；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。
+- `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。
 - `workspace-add.mjs`：把指定目录或命令调用目录注册为 Workspace，支持 `--prune-missing` 清理失效配置。
 
 ## 开发与协议
@@ -26,8 +25,7 @@
 - `smoke-package.mjs`：生成实际 tarball，在隔离目录安装并执行公开的 `codexc` 入口与配置预检。
 - `check-release-tag.mjs`：要求 Git Tag 与 `package.json` 版本严格一致，防止发布错版。
 - `sync-gateway-version.mjs`：以锁定的 Codex CLI 协议版本同步 `package.json`、锁文件和 Gateway 运行时版本；不维护独立版本号。
-- `doctor.mjs`：检查 npm 包、Node、Codex CLI、用户配置、Workspace、Unix WebSocket 与系统服务状态；
-  `--fix` 会原子修复明确支持的旧配置，不输出敏感配置内容，也不覆盖当前配置值。
+- `doctor.mjs`：检查 npm 包、Node、Codex CLI、当前 TOML 配置、Workspace、Unix WebSocket 与系统服务状态，不输出敏感配置内容。
 - `install-launchd.mjs`：渲染并安装 launchd plist。
 - `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载两个 launchd 服务；检测到不支持的旧标签时明确拒绝启动，日常重启只更新 Gateway，保持共享 App Server 和活动 Turn 运行。
 - `install-systemd.mjs`：渲染并安装 Linux systemd 用户服务 unit。

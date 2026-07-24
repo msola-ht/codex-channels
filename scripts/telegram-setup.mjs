@@ -1,13 +1,15 @@
 import { randomBytes } from "node:crypto";
-import { chmodSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
 import { pathToFileURL } from "node:url";
 
-import { parse } from "dotenv";
 import { Bot } from "grammy";
 import { HttpsProxyAgent } from "https-proxy-agent";
 
+import {
+  readGatewayConfig,
+  writeGatewayConfig,
+} from "../runtime/gateway-config.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 
 const tokenPattern = /^\d+:[A-Za-z0-9_-]{30,}$/;
@@ -22,25 +24,26 @@ export async function runTelegramSetup({
   waitSeconds = 120,
   prompter,
 } = {}) {
-  const { envPath } = requireUserConfig(environment);
-  const original = readFileSync(envPath, "utf8");
-  const existing = parse(original);
+  const { configPath } = requireUserConfig(environment);
+  const document = readGatewayConfig(configPath);
+  const existing = table(document.telegram);
+  const existingToken = stringValue(existing.bot_token);
   const prompt = prompter ?? createPrompter(input, output);
 
   try {
     output.write("\nCodex Connect Telegram Setup\n\n");
     output.write("1. 新建 Telegram Bot（通过官方 @BotFather）\n");
     output.write("2. 使用已有 Telegram Bot\n");
-    if (existing.TELEGRAM_BOT_TOKEN?.trim()) {
+    if (existingToken) {
       output.write("3. 保留当前配置的 Telegram Bot\n");
     }
 
-    const maximumChoice = existing.TELEGRAM_BOT_TOKEN?.trim() ? 3 : 2;
+    const maximumChoice = existingToken ? 3 : 2;
     const choice = await askChoice(prompt, `请选择 [1-${maximumChoice}]`, maximumChoice);
     const botSource = choice === "1" ? "new" : choice === "2" ? "existing" : "configured";
     let token;
     if (choice === "3") {
-      token = existing.TELEGRAM_BOT_TOKEN.trim();
+      token = existingToken;
     } else {
       if (choice === "1") {
         output.write("\n请在 Telegram 打开 https://t.me/BotFather：\n");
@@ -49,7 +52,7 @@ export async function runTelegramSetup({
       token = await askToken(prompt, output);
     }
 
-    const proxyUrl = resolveTelegramProxy(environment);
+    const proxyUrl = resolveTelegramProxy(document);
     let client;
     let bot;
     try {
@@ -61,8 +64,8 @@ export async function runTelegramSetup({
     output.write(`已验证 Telegram Bot：@${bot.username}\n`);
 
     let allowedUserIds;
-    const reusingConfiguredBot = token === existing.TELEGRAM_BOT_TOKEN?.trim();
-    const configuredUserIds = validConfiguredUserIds(existing.TELEGRAM_ALLOWED_USER_IDS);
+    const reusingConfiguredBot = token === existingToken;
+    const configuredUserIds = validConfiguredUserIds(existing.allowed_user_ids);
     if (
       reusingConfiguredBot
       && configuredUserIds
@@ -121,15 +124,16 @@ export async function runTelegramSetup({
       }
     }
 
-    const updated = setEnvValues(original, {
-      TELEGRAM_BOT_TOKEN: token,
-      TELEGRAM_ALLOWED_USER_IDS: allowedUserIds,
-    });
-    writeEnvironmentAtomically(envPath, updated);
-    output.write(`\nTelegram 配置已保存：${envPath}\n`);
+    document.telegram = {
+      ...existing,
+      bot_token: token,
+      allowed_user_ids: allowedUserIds.split(",").map(Number),
+    };
+    writeGatewayConfig(configPath, document);
+    output.write(`\nTelegram 配置已保存：${configPath}\n`);
     output.write("下一步运行：codexc doctor\n");
     output.write("运行中的 Gateway 会自动热加载；Token 或代理变化时会自动重启。\n");
-    return { botUsername: bot.username, allowedUserIds, envPath };
+    return { botUsername: bot.username, allowedUserIds, configPath };
   } finally {
     prompt.close();
   }
@@ -217,35 +221,14 @@ export function normalizeUserIds(values) {
   return ids.join(",");
 }
 
-export function setEnvValues(content, values) {
-  let lines = content.split(/\r?\n/);
-  for (const [key, value] of Object.entries(values)) {
-    const next = `${key}=${value}`;
-    const pattern = new RegExp(`^\\s*(?:export\\s+)?${key}\\s*=`);
-    let replaced = false;
-    lines = lines.filter((line) => {
-      if (!pattern.test(line)) {
-        return true;
-      }
-      if (replaced) {
-        return false;
-      }
-      replaced = true;
-      return true;
-    }).map((line) => pattern.test(line) ? next : line);
-    if (!replaced) {
-      if (lines.at(-1) !== "") {
-        lines.push("");
-      }
-      lines.push(next);
-    }
-  }
-  return lines.join("\n");
-}
-
-export function resolveTelegramProxy(environment) {
-  for (const key of ["TELEGRAM_PROXY_URL", "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"]) {
-    const value = environment[key]?.trim();
+export function resolveTelegramProxy(document) {
+  const telegram = table(document.telegram);
+  const network = table(document.network);
+  for (const value of [
+    stringValue(telegram.proxy_url),
+    stringValue(network.https_proxy),
+    stringValue(network.http_proxy),
+  ]) {
     if (value) {
       let parsed;
       try {
@@ -349,21 +332,22 @@ function generatePairingCode() {
 }
 
 function validConfiguredUserIds(value) {
-  if (!value?.trim()) {
+  if (!Array.isArray(value) || value.length === 0) {
     return undefined;
   }
   try {
-    return normalizeUserIds(value.split(","));
+    return normalizeUserIds(value);
   } catch {
     return undefined;
   }
 }
 
-function writeEnvironmentAtomically(envPath, content) {
-  const temporaryPath = `${envPath}.${process.pid}.tmp`;
-  writeFileSync(temporaryPath, content, { mode: 0o600 });
-  renameSync(temporaryPath, envPath);
-  chmodSync(envPath, 0o600);
+function table(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function stringValue(value) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function errorMessage(error) {

@@ -1,7 +1,7 @@
 # Secrets and machine-local configuration
 .env
 .env.*
-!.env.example
+config.toml
 
 # Local environments and dependencies
 .venv/

@@ -9,7 +9,7 @@
 - [`bootstrap/`](bootstrap/README.md)：依赖装配和进程生命周期。
 - [`codex-client/`](codex-client/README.md)：Transport、JSON-RPC 和 App Server API。
 - [`codex-protocol/`](codex-protocol/README.md)：生成协议类型、受控导出和版本基线。
-- [`config/`](config/README.md)：环境配置解析和边界验证。
+- [`config/`](config/README.md)：统一 TOML 配置解析和边界验证。
 - [`conversation-core/`](conversation-core/README.md)：Thread、Turn、Item 状态归约和输出事件。
 - [`event-bus/`](event-bus/README.md)：有界异步队列和消费者隔离。
 - [`observability/`](observability/README.md)：结构化日志与脱敏。

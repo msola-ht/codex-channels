@@ -1,15 +1,10 @@
 import {
   chmodSync,
   mkdirSync,
-  readFileSync,
   realpathSync,
-  renameSync,
   statSync,
-  writeFileSync,
 } from "node:fs";
 import { basename, isAbsolute, resolve } from "node:path";
-
-import { parse } from "dotenv";
 
 import {
   acknowledgeConfigEvents,
@@ -17,9 +12,13 @@ import {
   enqueueWorkspaceAdded,
   readConfigEvents,
 } from "../runtime/config-event-queue.mjs";
+import {
+  readGatewayConfig,
+  writeGatewayConfig,
+} from "../runtime/gateway-config.mjs";
 
-export function readWorkspaceConfig(env) {
-  const parsed = parseWorkspaceConfig(env);
+export function readWorkspaceConfig(document) {
+  const parsed = parseWorkspaceConfig(document);
   const workspaces = parsed.workspaces.map((workspace) => {
     const directory = inspectWorkspaceDirectory(workspace.cwd);
     if (!directory.valid) {
@@ -31,13 +30,13 @@ export function readWorkspaceConfig(env) {
     (workspace) => workspace.id === parsed.defaultWorkspaceId,
   );
   if (!defaultWorkspace) {
-    throw new Error(`CODEX_DEFAULT_WORKSPACE 不存在：${parsed.defaultWorkspaceId}`);
+    throw new Error(`default_workspace 不存在：${parsed.defaultWorkspaceId}`);
   }
   return { workspaces, defaultWorkspace };
 }
 
-export function inspectWorkspaceConfig(env) {
-  const parsed = parseWorkspaceConfig(env);
+export function inspectWorkspaceConfig(document) {
+  const parsed = parseWorkspaceConfig(document);
   return {
     defaultWorkspaceId: parsed.defaultWorkspaceId,
     workspaces: parsed.workspaces.map((workspace) => {
@@ -53,8 +52,8 @@ export function inspectWorkspaceConfig(env) {
   };
 }
 
-export function addWorkspaceToEnv({
-  envPath,
+export function addWorkspaceToConfig({
+  configPath,
   cwd,
   id,
   name,
@@ -62,16 +61,15 @@ export function addWorkspaceToEnv({
   fallbackDefaultWorkspace,
   eventQueuePath,
 }) {
-  const content = readFileSync(envPath, "utf8");
-  chmodSync(envPath, 0o600);
-  const env = parse(content);
-  const parsed = parseWorkspaceConfig(env);
+  const document = readGatewayConfig(configPath);
+  chmodSync(configPath, 0o600);
+  const parsed = parseWorkspaceConfig(document);
   if (
     !parsed.workspaces.some((workspace) => workspace.id === parsed.defaultWorkspaceId)
     && !pruneMissing
   ) {
     throw new Error([
-      `CODEX_DEFAULT_WORKSPACE 不存在：${parsed.defaultWorkspaceId}`,
+      `default_workspace 不存在：${parsed.defaultWorkspaceId}`,
       "确认配置需要修复后，运行 codexc ws add --prune-missing。",
     ].join("\n"));
   }
@@ -126,7 +124,7 @@ export function addWorkspaceToEnv({
       ? enqueueWorkspaceAdded(eventQueuePath, workspace)
       : undefined;
     try {
-      writeWorkspaceConfig(envPath, content, workspaces, defaultWorkspace.id);
+      writeWorkspaceConfig(configPath, document, workspaces, defaultWorkspace.id);
     } catch (error) {
       if (queuedEvent) {
         try {
@@ -153,15 +151,15 @@ export function addWorkspaceToEnv({
   };
 }
 
-export function removeWorkspaceFromEnv({
-  envPath,
+export function removeWorkspaceFromConfig({
+  configPath,
   selector,
   fallbackDefaultWorkspace,
   eventQueuePath,
 }) {
-  const content = readFileSync(envPath, "utf8");
-  chmodSync(envPath, 0o600);
-  const parsed = parseWorkspaceConfig(parse(content));
+  const document = readGatewayConfig(configPath);
+  chmodSync(configPath, 0o600);
+  const parsed = parseWorkspaceConfig(document);
   const selected = resolveWorkspaceSelector(parsed.workspaces, selector);
   if (
     selected.id === fallbackDefaultWorkspace.id
@@ -183,7 +181,7 @@ export function removeWorkspaceFromEnv({
   if (eventQueuePath) {
     readConfigEvents(eventQueuePath);
   }
-  writeWorkspaceConfig(envPath, content, workspaces, defaultWorkspace.id);
+  writeWorkspaceConfig(configPath, document, workspaces, defaultWorkspace.id);
   if (eventQueuePath) {
     discardWorkspaceConfigEvents(eventQueuePath, [selected.id]);
   }
@@ -255,25 +253,16 @@ function resolveWorkspaceSelector(workspaces, selector) {
   throw new Error(matches.length > 1 ? "Workspace 选择不唯一" : "找不到指定 Workspace");
 }
 
-function writeWorkspaceConfig(envPath, content, workspaces, defaultWorkspaceId) {
-  const json = JSON.stringify(workspaces).replaceAll("'", "\\u0027");
-  let updated = setEnvValue(content, "CODEX_WORKSPACES_JSON", `'${json}'`);
-  updated = setEnvValue(updated, "CODEX_DEFAULT_WORKSPACE", defaultWorkspaceId);
-  const temporaryPath = `${envPath}.${process.pid}.tmp`;
-  writeFileSync(temporaryPath, updated, { mode: 0o600 });
-  renameSync(temporaryPath, envPath);
+function writeWorkspaceConfig(configPath, document, workspaces, defaultWorkspaceId) {
+  document.workspaces = workspaces;
+  document.default_workspace = defaultWorkspaceId;
+  writeGatewayConfig(configPath, document);
 }
 
-function parseWorkspaceConfig(env) {
-  const raw = required(env, "CODEX_WORKSPACES_JSON");
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error("CODEX_WORKSPACES_JSON 必须是有效 JSON");
-  }
+function parseWorkspaceConfig(document) {
+  const parsed = document.workspaces;
   if (!Array.isArray(parsed) || parsed.length === 0) {
-    throw new Error("CODEX_WORKSPACES_JSON 必须是非空数组");
+    throw new Error("workspaces 必须是非空数组");
   }
   const workspaces = parsed.map((workspace) => {
     if (!workspace || typeof workspace !== "object") {
@@ -293,7 +282,7 @@ function parseWorkspaceConfig(env) {
   }
   return {
     workspaces,
-    defaultWorkspaceId: required(env, "CODEX_DEFAULT_WORKSPACE"),
+    defaultWorkspaceId: required(document, "default_workspace"),
   };
 }
 
@@ -329,25 +318,10 @@ function normalizedId(value) {
   return normalized || "workspace";
 }
 
-function setEnvValue(content, key, value) {
-  const lines = content.split(/\r?\n/);
-  const index = lines.findIndex((line) => line.startsWith(`${key}=`));
-  const next = `${key}=${value}`;
-  if (index === -1) {
-    if (lines.at(-1) !== "") {
-      lines.push("");
-    }
-    lines.push(next);
-  } else {
-    lines[index] = next;
-  }
-  return lines.join("\n");
-}
-
 function required(values, key) {
-  const value = values[key]?.trim();
+  const value = typeof values[key] === "string" ? values[key].trim() : "";
   if (!value) {
-    throw new Error(`.env 缺少 ${key}`);
+    throw new Error(`config.toml 缺少 ${key}`);
   }
   return value;
 }

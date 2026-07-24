@@ -14,7 +14,7 @@
 - Skill 用户与 Workspace 安装过滤、已安装 Plugin 查询及远端市场隔离。
 - Fast 模式的 Thread 覆盖、显式 Standard 层级及 Codex 用户级默认值持久化。
 - SQLite 最小绑定恢复、配置热加载与自动重启分类、Telegram Setup、CLI、launchd、systemd、Unix WebSocket 请求头、模块依赖方向和公开入口边界。
-- CLI Doctor 的旧配置诊断、显式原子修复和当前配置值保留。
+- CLI Doctor 的严格 TOML Schema 校验、敏感错误清洗和只读诊断。
 
 常规验证：
 

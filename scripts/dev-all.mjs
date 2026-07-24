@@ -1,25 +1,26 @@
 import { execFileSync, spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, realpathSync, renameSync } from "node:fs";
 import { createConnection } from "node:net";
 import { dirname, isAbsolute, join } from "node:path";
 
-import { parse } from "dotenv";
 import WebSocket from "ws";
+import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { packageDir, resolveConfiguredPath, runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
 const projectDir = packageDir;
 const runtime = runtimeConfig();
-const env = parse(readFileSync(runtime.envPath));
-const { defaultWorkspace } = readWorkspaceConfig(env);
+const document = readGatewayConfig(runtime.configPath);
+const codex = table(document.codex);
+const { defaultWorkspace } = readWorkspaceConfig(document);
 const workdir = defaultWorkspace.cwd;
 const socketPath = resolveConfiguredPath(
-  env.CODEX_SOCKET_PATH,
+  stringValue(codex.socket_path),
   runtime.dataDir,
   join(runtime.dataDir, "runtime", "codex-app-server.sock"),
 );
 const runtimeDir = dirname(socketPath);
-const codexBinary = resolveExecutable(env.CODEX_BINARY || "codex");
+const codexBinary = resolveExecutable(stringValue(codex.binary) || "codex");
 const gatewayEntry = process.env.CODEX_CONNECT_GATEWAY_ENTRY === "dist"
   ? [join(projectDir, "dist/main.js")]
   : [join(projectDir, "node_modules", "tsx", "dist", "cli.mjs"), "src/main.ts"];
@@ -75,9 +76,8 @@ while (!stopping) {
     stdio: "inherit",
     env: {
       ...process.env,
-      CODEX_CONNECT_ENV_FILE: runtime.envPath,
+      CODEX_CONNECT_CONFIG_FILE: runtime.configPath,
       CODEX_CONNECT_GATEWAY_SUPERVISED: "1",
-      DOTENV_CONFIG_PATH: runtime.envPath,
     },
   });
   const result = await waitForGateway(gateway);
@@ -111,6 +111,14 @@ function resolveExecutable(command) {
     return realpathSync(command);
   }
   return execFileSync("/usr/bin/which", [command], { encoding: "utf8" }).trim();
+}
+
+function table(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function stringValue(value) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 async function waitForSocket(child, path, timeoutMs) {

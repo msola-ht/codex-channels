@@ -1,14 +1,15 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 
-import { parse } from "dotenv";
+import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { resolveConfiguredPath, runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
 const runtime = runtimeConfig();
-const env = parse(readFileSync(runtime.envPath));
-const { workspaces } = readWorkspaceConfig(env);
+const document = readGatewayConfig(runtime.configPath);
+const codex = table(document.codex);
+const { workspaces } = readWorkspaceConfig(document);
 const passthrough = process.argv.slice(2);
 const workspaceFlag = passthrough.indexOf("--workspace");
 let workdir = realpathSync(process.cwd());
@@ -22,11 +23,11 @@ if (workspaceFlag !== -1) {
   passthrough.splice(workspaceFlag, 2);
 }
 const socketPath = resolveConfiguredPath(
-  env.CODEX_SOCKET_PATH,
+  stringValue(codex.socket_path),
   runtime.dataDir,
   join(runtime.dataDir, "runtime", "codex-app-server.sock"),
 );
-const configuredBinary = env.CODEX_BINARY || "codex";
+const configuredBinary = stringValue(codex.binary) || "codex";
 const codexBinary = isAbsolute(configuredBinary)
   ? realpathSync(configuredBinary)
   : configuredBinary;
@@ -39,3 +40,11 @@ if (result.error) {
   throw result.error;
 }
 process.exitCode = result.status ?? 1;
+
+function table(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function stringValue(value) {
+  return typeof value === "string" ? value.trim() : "";
+}

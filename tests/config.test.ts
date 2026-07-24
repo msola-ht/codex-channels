@@ -1,10 +1,19 @@
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ConfigurationError, loadConfig, loadRuntimeConfig } from "../src/config/index.js";
+import {
+  parseGatewayConfig,
+  readGatewayConfig,
+  writeGatewayConfig,
+} from "../runtime/gateway-config.mjs";
+import {
+  ConfigurationError,
+  loadConfigDocument,
+  loadRuntimeConfig,
+} from "../src/config/index.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -14,92 +23,182 @@ afterEach(() => {
   }
 });
 
-describe("loadConfig", () => {
-  it("loads a valid log level and derives an absolute socket path", () => {
-    const workdir = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
-    temporaryDirectories.push(workdir);
+describe("Gateway config.toml", () => {
+  it("preserves comments when updating an existing configuration", () => {
+    const fixture = createFixture();
+    const commented = readFixture(fixture.configPath)
+      .replace("version = 1", "# Gateway settings\nversion = 1")
+      .replace(
+        'bot_token = "secret"',
+        '# Keep this token private\nbot_token = "secret" # managed by setup',
+      );
+    writeFileSync(fixture.configPath, commented);
 
-    const config = loadConfig({
-      TELEGRAM_BOT_TOKEN: "secret",
-      TELEGRAM_ALLOWED_USER_IDS: "123,456",
-      ...workspaceEnvironment(workdir),
-      LOG_LEVEL: "info",
+    const document = readGatewayConfig(fixture.configPath);
+    const telegram = document.telegram;
+    if (!telegram || typeof telegram !== "object" || Array.isArray(telegram)) {
+      throw new Error("测试配置缺少 telegram 表");
+    }
+    Object.assign(telegram, { bot_token: "updated" });
+    writeGatewayConfig(fixture.configPath, document);
+
+    const updated = readFixture(fixture.configPath);
+    expect(updated).toContain("# Gateway settings");
+    expect(updated).toContain("# Keep this token private");
+    expect(updated).toContain('bot_token = "updated" # managed by setup');
+  });
+
+  it("keeps Workspace comments with their Workspace when earlier entries are removed", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
+    const main = join(root, "main");
+    const secondary = join(root, "secondary");
+    mkdirSync(main, { recursive: true });
+    mkdirSync(secondary);
+    const fixture = createFixture({
+      root,
+      workspaces: [
+        { id: "main", name: "Main", cwd: main },
+        { id: "secondary", name: "Secondary", cwd: secondary },
+      ],
     });
+    const commented = readFixture(fixture.configPath)
+      .replace('id = "main"', '# Main workspace\nid = "main"')
+      .replace('id = "secondary"', '# Secondary workspace\nid = "secondary"');
+    writeFileSync(fixture.configPath, commented);
 
-    expect(config.logLevel).toBe("info");
-    expect(config.workspaces).toEqual([
-      { id: "main", name: "Main", cwd: realpathSync(workdir) },
-    ]);
-    expect(config.defaultWorkspaceId).toBe("main");
-    expect(config.codexSocketPath).toBe(join(process.cwd(), ".runtime/codex-app-server.sock"));
-    expect(config.stateDatabasePath).toBe(join(process.cwd(), "data/gateway.sqlite3"));
-    expect(config.telegramAllowedUserIds).toEqual(new Set([123, 456]));
-    expect(config.telegramMessageFormat).toBe("html");
-  });
+    const document = readGatewayConfig(fixture.configPath);
+    const workspaces = document.workspaces;
+    if (!Array.isArray(workspaces) || workspaces.length < 2) {
+      throw new Error("测试配置缺少第二个 Workspace");
+    }
+    document.workspaces = [workspaces[1]!];
+    writeGatewayConfig(fixture.configPath, document);
 
-  it("rejects noncanonical uppercase log levels", () => {
-    const workdir = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
-    temporaryDirectories.push(workdir);
-
-    expect(() => loadConfig({
-      TELEGRAM_BOT_TOKEN: "secret",
-      TELEGRAM_ALLOWED_USER_IDS: "123",
-      ...workspaceEnvironment(workdir),
-      LOG_LEVEL: "INFO",
-    })).toThrow(ConfigurationError);
-  });
-
-  it("rejects the removed Bridge sandbox setting", () => {
-    const workdir = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
-    temporaryDirectories.push(workdir);
-
-    expect(() => loadConfig({
-      TELEGRAM_BOT_TOKEN: "secret",
-      TELEGRAM_ALLOWED_USER_IDS: "123",
-      ...workspaceEnvironment(workdir),
-      CODEX_BRIDGE_SANDBOX: "read-only",
-    })).toThrow(
-      "不支持配置项 CODEX_BRIDGE_SANDBOX；请运行 codexc doctor --fix，或手动改用 CODEX_SANDBOX",
+    expect(readFixture(fixture.configPath)).toContain(
+      '# Secondary workspace\nid = "secondary"',
     );
   });
 
-  it("accepts Rich Messages as an explicit Telegram output format", () => {
-    const workdir = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
-    temporaryDirectories.push(workdir);
+  it("does not expose configuration contents in TOML syntax errors", () => {
+    const secret = "123456:secret-token-value";
+    const malformed = `[telegram]\nbot_token = "${secret}\n`;
 
-    const config = loadConfig({
-      TELEGRAM_BOT_TOKEN: "secret",
-      TELEGRAM_ALLOWED_USER_IDS: "123",
-      TELEGRAM_MESSAGE_FORMAT: "rich",
-      ...workspaceEnvironment(workdir),
-    });
-
-    expect(config.telegramMessageFormat).toBe("rich");
+    expect(() => parseGatewayConfig(malformed)).toThrow("config.toml 语法无效");
+    expect(capturedError(() => parseGatewayConfig(malformed))).not.toContain(secret);
+    expect(capturedError(() => loadConfigDocument(malformed, process.cwd()))).not.toContain(secret);
   });
 
-  it("resolves an explicit state database path without treating it as Codex history", () => {
-    const workdir = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
-    const stateDirectory = mkdtempSync(join(tmpdir(), "codex-gateway-state-"));
-    temporaryDirectories.push(workdir, stateDirectory);
-
-    const config = loadConfig({
-      TELEGRAM_BOT_TOKEN: "secret",
-      TELEGRAM_ALLOWED_USER_IDS: "123",
-      ...workspaceEnvironment(workdir),
-      STATE_DATABASE_PATH: join(stateDirectory, "bindings.sqlite3"),
+  it("loads config.toml and resolves relative paths from the config directory", () => {
+    const fixture = createFixture({
+      telegram: {
+        bot_token: "secret",
+        allowed_user_ids: [123, 456],
+        message_format: "rich",
+      },
     });
 
-    expect(config.stateDatabasePath).toBe(join(stateDirectory, "bindings.sqlite3"));
+    const runtime = loadRuntimeConfig({ CODEX_CONNECT_CONFIG_FILE: fixture.configPath });
+
+    expect(runtime.configPath).toBe(fixture.configPath);
+    expect(runtime.config.telegramBotToken).toBe("secret");
+    expect(runtime.config.telegramAllowedUserIds).toEqual(new Set([123, 456]));
+    expect(runtime.config.telegramMessageFormat).toBe("rich");
+    expect(runtime.config.codexSocketPath).toBe(join(fixture.root, "runtime/app-server.sock"));
+    expect(runtime.config.stateDatabasePath).toBe(join(fixture.root, "data/gateway.sqlite3"));
+    expect(runtime.config.workspaces).toEqual([
+      { id: "main", name: "Main", cwd: realpathSync(fixture.workspace) },
+    ]);
   });
 
-  it("rejects a missing workspace cwd without widening permissions", () => {
-    expect(() =>
-      loadConfig({
-        TELEGRAM_BOT_TOKEN: "secret",
-        TELEGRAM_ALLOWED_USER_IDS: "123",
-        ...workspaceEnvironment("/definitely/missing/codex-workdir"),
-      }),
-    ).toThrow(ConfigurationError);
+  it("uses CODEX_CONNECT_HOME when no explicit config file is set", () => {
+    const fixture = createFixture();
+
+    const runtime = loadRuntimeConfig({
+      CODEX_CONNECT_HOME: fixture.root,
+      TELEGRAM_BOT_TOKEN: "ignored-old-value",
+      CODEX_CONNECT_ENV_FILE: join(fixture.root, ".env"),
+    });
+
+    expect(runtime.configPath).toBe(fixture.configPath);
+    expect(runtime.config.telegramBotToken).toBe("secret");
+  });
+
+  it("accepts explicit model, sandbox, timeout and log settings", () => {
+    const fixture = createFixture({
+      codex: {
+        binary: "codex",
+        socket_path: "runtime/app-server.sock",
+        default_model: "gpt-test",
+        sandbox: "read-only",
+      },
+      approval: { timeout_seconds: 45 },
+      logging: { level: "debug" },
+    });
+
+    const config = loadRuntimeConfig({ CODEX_CONNECT_CONFIG_FILE: fixture.configPath }).config;
+
+    expect(config.codexModel).toBe("gpt-test");
+    expect(config.codexSandbox).toBe("read-only");
+    expect(config.approvalTimeoutMs).toBe(45_000);
+    expect(config.logLevel).toBe("debug");
+  });
+
+  it("prefers the Telegram proxy and otherwise uses the network proxy", () => {
+    const explicit = createFixture({
+      telegram: {
+        bot_token: "secret",
+        allowed_user_ids: [123],
+        proxy_url: "http://127.0.0.1:7897",
+        message_format: "html",
+      },
+      network: { https_proxy: "http://127.0.0.1:7890" },
+    });
+    const fallback = createFixture({
+      network: { https_proxy: "http://127.0.0.1:7890" },
+    });
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: explicit.configPath,
+    }).config.telegramProxyUrl).toBe("http://127.0.0.1:7897/");
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fallback.configPath,
+    }).config.telegramProxyUrl).toBe("http://127.0.0.1:7890/");
+  });
+
+  it("rejects unsupported proxy protocols", () => {
+    const fixture = createFixture({
+      telegram: {
+        bot_token: "secret",
+        allowed_user_ids: [123],
+        proxy_url: "socks5://127.0.0.1:7890",
+        message_format: "html",
+      },
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow("Telegram 代理目前只支持 http:// 或 https://");
+  });
+
+  it("rejects unknown keys instead of silently accepting old configuration", () => {
+    const fixture = createFixture();
+    const content = `${readFixture(fixture.configPath)}\nlegacy_setting = true\n`;
+
+    expect(() => loadConfigDocument(content, fixture.root)).toThrow(ConfigurationError);
+  });
+
+  it("rejects a missing workspace and an unknown default workspace", () => {
+    const missing = createFixture({
+      workspaces: [{ id: "main", name: "Main", cwd: "/definitely/missing/codex-workdir" }],
+    });
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: missing.configPath,
+    })).toThrow("cwd 必须是已存在的目录");
+
+    const unknownDefault = createFixture({ default_workspace: "missing" });
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: unknownDefault.configPath,
+    })).toThrow("default_workspace 不存在");
   });
 
   it("rejects an existing file as a workspace cwd", () => {
@@ -107,100 +206,62 @@ describe("loadConfig", () => {
     temporaryDirectories.push(root);
     const file = join(root, "not-a-directory");
     writeFileSync(file, "test");
-
-    expect(() =>
-      loadConfig({
-        TELEGRAM_BOT_TOKEN: "secret",
-        TELEGRAM_ALLOWED_USER_IDS: "123",
-        ...workspaceEnvironment(file),
-      }),
-    ).toThrow("cwd 必须是目录");
-  });
-
-  it("rejects an unknown default workspace", () => {
-    const workdir = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
-    temporaryDirectories.push(workdir);
-
-    expect(() => loadConfig({
-      TELEGRAM_BOT_TOKEN: "secret",
-      TELEGRAM_ALLOWED_USER_IDS: "123",
-      CODEX_WORKSPACES_JSON: JSON.stringify([{ id: "main", name: "Main", cwd: workdir }]),
-      CODEX_DEFAULT_WORKSPACE: "missing",
-    })).toThrow("CODEX_DEFAULT_WORKSPACE 不存在");
-  });
-
-  it("prefers an explicit Telegram proxy and normalizes its URL", () => {
-    const workdir = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
-    temporaryDirectories.push(workdir);
-
-    const config = loadConfig({
-      TELEGRAM_BOT_TOKEN: "secret",
-      TELEGRAM_ALLOWED_USER_IDS: "123",
-      TELEGRAM_PROXY_URL: " http://127.0.0.1:7897 ",
-      HTTPS_PROXY: "http://127.0.0.1:7890",
-      ...workspaceEnvironment(workdir),
+    const fixture = createFixture({
+      root,
+      workspaces: [{ id: "main", name: "Main", cwd: file }],
     });
 
-    expect(config.telegramProxyUrl).toBe("http://127.0.0.1:7897/");
-  });
-
-  it("falls back to HTTPS_PROXY when no Telegram-specific proxy is configured", () => {
-    const workdir = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
-    temporaryDirectories.push(workdir);
-
-    const config = loadConfig({
-      TELEGRAM_BOT_TOKEN: "secret",
-      TELEGRAM_ALLOWED_USER_IDS: "123",
-      HTTPS_PROXY: "http://127.0.0.1:7890",
-      ...workspaceEnvironment(workdir),
-    });
-
-    expect(config.telegramProxyUrl).toBe("http://127.0.0.1:7890/");
-  });
-
-  it("rejects proxy protocols unsupported by the Telegram HTTP client", () => {
-    const workdir = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
-    temporaryDirectories.push(workdir);
-
-    expect(() =>
-      loadConfig({
-        TELEGRAM_BOT_TOKEN: "secret",
-        TELEGRAM_ALLOWED_USER_IDS: "123",
-        TELEGRAM_PROXY_URL: "socks5://127.0.0.1:7890",
-        ...workspaceEnvironment(workdir),
-      }),
-    ).toThrow("Telegram 代理目前只支持 http:// 或 https://");
-  });
-
-  it("re-reads an explicit environment file instead of stale process values", () => {
-    const workdir = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
-    temporaryDirectories.push(workdir);
-    const envPath = join(workdir, ".env");
-    writeFileSync(envPath, [
-      "TELEGRAM_BOT_TOKEN=fresh-token",
-      "TELEGRAM_ALLOWED_USER_IDS=456",
-      `CODEX_WORKSPACES_JSON='${JSON.stringify([{ id: "main", name: "Main", cwd: workdir }])}'`,
-      "CODEX_DEFAULT_WORKSPACE=main",
-    ].join("\n"));
-
-    const runtime = loadRuntimeConfig({
-      CODEX_CONNECT_ENV_FILE: envPath,
-      TELEGRAM_BOT_TOKEN: "stale-token",
-      TELEGRAM_ALLOWED_USER_IDS: "123",
-      CODEX_MODEL: "stale-model",
-      ...workspaceEnvironment(workdir),
-    });
-
-    expect(runtime.envPath).toBe(envPath);
-    expect(runtime.config.telegramBotToken).toBe("fresh-token");
-    expect(runtime.config.telegramAllowedUserIds).toEqual(new Set([456]));
-    expect(runtime.config.codexModel).toBeUndefined();
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow("cwd 必须是目录");
   });
 });
 
-function workspaceEnvironment(cwd: string): Record<string, string> {
-  return {
-    CODEX_WORKSPACES_JSON: JSON.stringify([{ id: "main", name: "Main", cwd }]),
-    CODEX_DEFAULT_WORKSPACE: "main",
+function createFixture(overrides: Record<string, unknown> = {}) {
+  const root = typeof overrides.root === "string"
+    ? overrides.root
+    : mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
+  const documentOverrides = { ...overrides };
+  delete documentOverrides.root;
+  if (!temporaryDirectories.includes(root)) {
+    temporaryDirectories.push(root);
+  }
+  const workspace = join(root, "workspace");
+  mkdirSync(workspace, { recursive: true });
+  const configPath = join(root, "config.toml");
+  const document = {
+    version: 1,
+    default_workspace: "main",
+    telegram: {
+      bot_token: "secret",
+      allowed_user_ids: [123],
+      message_format: "html",
+    },
+    network: {},
+    codex: {
+      binary: "codex",
+      socket_path: "runtime/app-server.sock",
+      sandbox: "workspace-write",
+    },
+    approval: { timeout_seconds: 300 },
+    storage: { database_path: "data/gateway.sqlite3" },
+    logging: { level: "info" },
+    workspaces: [{ id: "main", name: "Main", cwd: workspace }],
+    ...documentOverrides,
   };
+  writeGatewayConfig(configPath, document);
+  return { root, workspace, configPath };
+}
+
+function readFixture(path: string): string {
+  return readFileSync(path, "utf8");
+}
+
+function capturedError(action: () => unknown): string {
+  try {
+    action();
+    return "";
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
 }

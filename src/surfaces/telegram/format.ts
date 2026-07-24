@@ -416,6 +416,8 @@ function configChangeLabel(code: ConfigChangeCode): string {
       return "默认模型";
     case "codex.sandbox":
       return "Sandbox";
+    case "network.proxy":
+      return "网络代理";
     case "storage.database":
       return "State Database";
     case "approval.timeout":

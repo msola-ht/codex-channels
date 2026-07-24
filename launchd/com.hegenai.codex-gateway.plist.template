@@ -16,8 +16,8 @@
   <dict>
     <key>CODEX_CONNECT_HOME</key>
     <string>__CONFIG_DIR__</string>
-    <key>CODEX_CONNECT_ENV_FILE</key>
-    <string>__ENV_PATH__</string>
+    <key>CODEX_CONNECT_CONFIG_FILE</key>
+    <string>__CONFIG_PATH__</string>
     <key>CODEX_BINARY</key>
     <string>__CODEX_BINARY__</string>
     <key>PATH</key>

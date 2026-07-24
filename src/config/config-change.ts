@@ -3,6 +3,7 @@ export type ConfigChangeCode =
   | "codex.socket"
   | "codex.default-model"
   | "codex.sandbox"
+  | "network.proxy"
   | "storage.database"
   | "approval.timeout"
   | "observability.log-level"

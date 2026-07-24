@@ -15,6 +15,8 @@ import { join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
+
 const temporaryDirectories: string[] = [];
 
 afterEach(() => {
@@ -29,20 +31,16 @@ describe("systemd installer", () => {
     temporaryDirectories.push(root);
     const configDir = join(root, ".codex-connect");
     const runtimeDir = join(configDir, "runtime");
-    const envPath = join(configDir, ".env");
+    const configPath = join(configDir, "config.toml");
     const configHome = join(root, ".config");
     mkdirSync(runtimeDir, { recursive: true });
-    writeFileSync(
-      envPath,
-      [
-        `CODEX_BINARY=${process.execPath}`,
-        `CODEX_WORKSPACES_JSON='${JSON.stringify([{ id: "test", name: "Test", cwd: root }])}'`,
-        "CODEX_DEFAULT_WORKSPACE=test",
-        `CODEX_SOCKET_PATH=${join(runtimeDir, "codex-app-server.sock")}`,
-        "HTTP_PROXY='http://127.0.0.1:7897/path%20value'",
-        "NO_PROXY=localhost,127.0.0.1",
-      ].join("\n"),
-    );
+    writeGatewayConfig(configPath, gatewayDocument(root, {
+      binary: process.execPath,
+      socket_path: join(runtimeDir, "codex-app-server.sock"),
+    }, {
+      http_proxy: "http://127.0.0.1:7897/path%20value",
+      no_proxy: "localhost,127.0.0.1",
+    }));
 
     execFileSync(process.execPath, [resolve("scripts/install-systemd.mjs")], {
       env: {
@@ -50,7 +48,7 @@ describe("systemd installer", () => {
         HOME: root,
         XDG_CONFIG_HOME: configHome,
         CODEX_CONNECT_HOME: configDir,
-        CODEX_CONNECT_ENV_FILE: envPath,
+        CODEX_CONNECT_CONFIG_FILE: configPath,
       },
     });
 
@@ -98,7 +96,7 @@ describe("systemd installer", () => {
     mkdirSync(binDir);
     const appUnit = join(unitsDir, "codex-connect-app-server.service");
     const gatewayUnit = join(unitsDir, "codex-connect-gateway.service");
-    const userConfig = join(dataDir, ".env");
+    const userConfig = join(dataDir, "config.toml");
     writeFileSync(appUnit, "app");
     writeFileSync(gatewayUnit, "gateway");
     writeFileSync(userConfig, "preserved=true\n");
@@ -175,3 +173,17 @@ describe("systemd installer", () => {
     expect(readFileSync(userConfig, "utf8")).toBe("preserved=true\n");
   });
 });
+
+function gatewayDocument(cwd: string, codex: Record<string, string>, network: Record<string, string>) {
+  return {
+    version: 1,
+    default_workspace: "test",
+    telegram: { bot_token: "test", allowed_user_ids: [1], message_format: "html" },
+    network,
+    codex: { sandbox: "workspace-write", ...codex },
+    approval: { timeout_seconds: 300 },
+    storage: { database_path: "data/gateway.sqlite3" },
+    logging: { level: "info" },
+    workspaces: [{ id: "test", name: "Test", cwd }],
+  };
+}
