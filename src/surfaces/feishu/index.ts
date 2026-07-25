@@ -30,3 +30,7 @@ export {
   type FeishuTextMessagePort,
 } from "./outbox.js";
 export { renderFeishuOutput } from "./renderer.js";
+export {
+  createFeishuSurface,
+  type FeishuSurfaceOptions,
+} from "./surface.js";

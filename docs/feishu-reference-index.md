@@ -122,9 +122,9 @@ EventDispatcher`。
 | Node SDK | npm 包、固定官方源码 | 已精确锁定 `1.71.1` | 阶段 0 |
 | WebSocket 握手和重连 | `WSClient` | 生命周期封装和离线合同已完成；真实应用实验待完成 | 阶段 0 |
 | 消息事件字段裁剪 | `im.message.receive_v1` | 稳定字段映射和畸形输入失败关闭已完成；真实事件待验证 | 阶段 0 |
-| 私聊文本事件 | `im.message.receive_v1` | 平台本地筛选、有界入队、Access Policy、Application 提交和安全错误已完成；生命周期组合待实现 | 阶段 1 |
+| 私聊文本事件 | `im.message.receive_v1` | 平台本地筛选、有界入队、Access Policy、Application 提交、安全错误和生命周期组合已完成；真实事件待验证 | 阶段 1 |
 | 文本发送 | `client.im.v1.message.create` | `chat_id` 文本 Payload、有限 HTTP 超时和脱敏错误已完成；真实应用待验证 | 阶段 1 |
-| 纯文本输出渲染 | `OutputEvent` | 关键事件回退、错误隐藏和有界 Outbox 已完成；Surface 生命周期组合待实现 | 阶段 1 |
+| 纯文本输出渲染 | `OutputEvent` | 关键事件回退、错误隐藏、有界 Outbox 和 Surface 生命周期组合已完成；配置通知收件人待组合 | 阶段 1 |
 | 事件去重与旧事件过滤 | 平台事件 ID、毫秒时间戳 | 已实现飞书模块内有界内存状态；真实重投待验证 | 阶段 1 |
 | 命令和群聊 | 消息事件、群身份与 @Bot | 暂不支持 | 阶段 2 |
 | 卡片审批 | `card.action.trigger` | 接收方式待验证，当前失败关闭 | 阶段 3 |
@@ -150,7 +150,8 @@ EventDispatcher`。
 | 输出渲染 | [`src/surfaces/feishu/renderer.ts`](../src/surfaces/feishu/renderer.ts) | [`tests/feishu-renderer.test.ts`](../tests/feishu-renderer.test.ts)：关键事件、非关键进度和错误详情隐藏 |
 | 卡片动作 | [`src/surfaces/feishu/interactions.ts`](../src/surfaces/feishu/interactions.ts) | [`tests/feishu-interactions.test.ts`](../tests/feishu-interactions.test.ts)：当前审批拒绝、用户输入为空、MCP elicitation 取消；卡片令牌、过期、Actor 绑定和跨客户端失效待实现 |
 | 配置与 Setup | `runtime/gateway-config.mjs`、`src/config/`、`scripts/` | 严格 Schema、脱敏、原子写入和只读 Doctor |
-| 生命周期组合 | `src/bootstrap/surface-composition.ts` | 单消费者、部分启动回滚和停止不影响 App Server |
+| Surface 生命周期 | [`src/surfaces/feishu/surface.ts`](../src/surfaces/feishu/surface.ts) | [`tests/feishu-surface.test.ts`](../tests/feishu-surface.test.ts)：长连接启停、输入与输出排空、过载提示和配置通知失败关闭 |
+| Bootstrap 组合 | `src/bootstrap/surface-composition.ts` | 单消费者、部分启动回滚和停止不影响 App Server；待实现 |
 
 新增能力必须同时更新支持矩阵和实现映射，不能只增加 SDK 调用。
 

@@ -9,8 +9,8 @@
 当前进度（2026-07-25）：已锁定官方 Node SDK `1.71.1`，并完成 Phase 0 的长连接生命周期窄封装、
 消息事件稳定字段裁剪和离线合同测试；阶段 1 已完成平台本地私聊文本 Inbox、访问策略和
 Application 输入 Adapter、安全错误、`OutputEvent` 纯文本渲染、有界 Outbox 及官方 SDK
-文本发送窄适配。该模块尚未注册到 Bootstrap，也没有飞书配置、完整 Surface 生命周期组合或
-可批准交互；测试应用的真实握手、
+文本发送窄适配，以及单账号 `SurfaceAdapter` 生命周期组合。该模块尚未注册到 Bootstrap，也没有
+飞书配置、安全的配置通知收件人组合或可批准交互；测试应用的真实握手、
 代理、事件投递和卡片动作实验仍待完成。
 
 目标是在现有 TypeScript 模块化单体中增加一个编译期显式注册的飞书 Surface，使飞书与
@@ -331,7 +331,7 @@ Secret、Access Token、完整 SDK 响应或原始事件。
 - 可选飞书配置与严格校验；
 - [x] `FeishuAccessPolicy`；
 - [x] Application 输入 Adapter；
-- 单账号 SurfaceAdapter 生命周期组合；
+- [x] 单账号 SurfaceAdapter 生命周期组合；
 - [x] 窄 SDK Client 和平台本地输入队列；
 - [x] 私聊/文本/账号筛选、同步有界入队、去重、旧事件和过载处理；
 - [x] 已授权私聊文本提交；

@@ -13,6 +13,8 @@
 - `interactions.ts`：在卡片交互尚未实现时拒绝审批、返回空用户输入并取消 MCP elicitation。
 - `renderer.ts`：把平台无关 `OutputEvent` 映射为受约束的飞书纯文本。
 - `outbox.ts`：精确账号路由并通过通用有界队列调用窄文本发送端口。
+- `surface.ts`：组合单账号连接、Inbox、Application Adapter、Outbox 和失败关闭交互端口，并由
+  模块入口只暴露 `createFeishuSurface()` 工厂与生产选项类型。
 
 ## 当前边界
 
@@ -35,8 +37,9 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 
 `inbox.ts` 只接受当前账号的已授权用户私聊文本。SDK 回调只做同步校验和入队；同一 Chat
 按顺序处理，不同 Chat 可以并行。永久无效、未授权、重复或过旧事件被明确忽略；全局输入容量
-耗尽时返回 `retry/overloaded`，由后续 Adapter 映射为 SDK 可重试失败。去重状态只存在于有界内存，
-关闭时等待已接受任务至有限超时，不持久化消息正文。
+耗尽时返回 `retry/overloaded`。由于当前没有经过真实合同验证的 SDK 重试响应通道，Surface
+通过同一有界 Outbox 提示用户稍后重试，不伪造平台自动重投。去重状态只存在于有界内存，关闭时
+等待已接受任务至有限超时，不持久化消息正文。
 
 `renderer.ts` 通过模块公开入口接收 `OutputEvent`。最终文本和所有关键事件都有纯文本回退；
 非关键流式增量和运行中操作暂不输出。上游 warning、连接错误和 MCP 错误正文不会进入平台消息，
@@ -57,6 +60,10 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 用户输入返回空答案，MCP elicitation 返回取消；`resolved()` 和 `cancelAll()` 保持无状态幂等。
 这不会伪装成飞书已经支持审批，卡片交互仍属于后续独立阶段。
 
-本模块尚未接入配置、Bootstrap 或完整生命周期组合，也不支持可批准交互，因此不构成可启用的飞书渠道。后续阶段按
+`surface.ts` 实现单账号 `SurfaceAdapter` 生命周期：启动等待长连接就绪；停止先切断新事件，再
+有限排空 Inbox 和 Outbox。配置通知在 Bootstrap 尚未提供已授权 Actor 对应的安全 Chat 收件人前
+明确失败，不向未知会话广播。
+
+本模块尚未接入配置或 Bootstrap，也不支持可批准交互，因此不构成可启用的飞书渠道。后续阶段按
 [`飞书 Surface 接入计划`](../../../docs/feishu-surface-plan.md)推进；不得把 SDK 类型导出到一级
 `surfaces` 入口，也不得在 Core 中引入飞书类型。
