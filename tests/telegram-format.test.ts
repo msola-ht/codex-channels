@@ -469,6 +469,7 @@ describe("formatStatus", () => {
     expect(text).toContain("累计：1.25 M");
     expect(text).toContain("最近 Turn：12.5 K");
     expect(text).toContain("缓存输入：750 K");
+    expect(text).toContain("缓存命中率：75%");
     expect(text).toContain("模型上下文窗口容量：200 K");
     expect(text).toContain("模型：gpt-main");
     expect(text).toContain("思考强度：high");
@@ -523,7 +524,7 @@ describe("formatContextUsage", () => {
         last: {
           totalTokens: 12_500,
           inputTokens: 10_000,
-          cachedInputTokens: 7_500,
+          cachedInputTokens: 6_000,
           cacheWriteInputTokens: 0,
           outputTokens: 2_500,
           reasoningOutputTokens: 500,
@@ -553,6 +554,7 @@ describe("formatContextUsage", () => {
       },
     )).toBe([
       "上下文：12.5 K / 200 K（6.3%）",
+      "缓存命中率：60%",
       "当前模型：gpt-main",
       "思考强度：high",
       "Fast 模式：开启",
@@ -560,5 +562,30 @@ describe("formatContextUsage", () => {
       "周限：已使用 42%",
       "Goal：进行中 · 12.5 K / 100 K · 1分30秒",
     ].join("\n"));
+  });
+
+  it("reports an unknown cache hit rate when the turn has no input tokens", () => {
+    expect(formatContextUsage(
+      {
+        total: {
+          totalTokens: 0,
+          inputTokens: 0,
+          cachedInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          outputTokens: 0,
+          reasoningOutputTokens: 0,
+        },
+        last: {
+          totalTokens: 0,
+          inputTokens: 0,
+          cachedInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          outputTokens: 0,
+          reasoningOutputTokens: 0,
+        },
+        modelContextWindow: null,
+      },
+      undefined,
+    )).toContain("缓存命中率：未知");
   });
 });

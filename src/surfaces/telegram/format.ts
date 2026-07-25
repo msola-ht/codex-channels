@@ -289,6 +289,7 @@ export function formatStatus(status: ConversationStatus): string {
       `最近 Turn：${formatTokenCount(last.totalTokens)}`,
       `输入：${formatTokenCount(total.inputTokens)}`,
       `缓存输入：${formatTokenCount(total.cachedInputTokens)}`,
+      `缓存命中率：${formatCacheHitRate(total.inputTokens, total.cachedInputTokens)}`,
       `缓存写入：${formatTokenCount(total.cacheWriteInputTokens)}`,
       `输出：${formatTokenCount(total.outputTokens)}`,
       `推理输出：${formatTokenCount(total.reasoningOutputTokens)}`,
@@ -321,6 +322,10 @@ export function formatContextUsage(
       })}%）`;
   return [
     context,
+    `缓存命中率：${formatCacheHitRate(
+      usage.last.inputTokens,
+      usage.last.cachedInputTokens,
+    )}`,
     ...(settings
       ? [
           `当前模型：${settings.model}`,
@@ -586,6 +591,12 @@ function formatTokenCount(value: number): string {
     return `${(value / 1_000).toLocaleString("zh-CN", { maximumFractionDigits: 2 })} K`;
   }
   return value.toLocaleString("zh-CN");
+}
+
+function formatCacheHitRate(inputTokens: number, cachedInputTokens: number): string {
+  return inputTokens > 0
+    ? formatPercent(Math.max(0, cachedInputTokens / inputTokens * 100))
+    : "未知";
 }
 
 function formatRateLimitWindow(
