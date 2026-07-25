@@ -8,6 +8,33 @@ import {
 import { FeishuSurface } from "../src/surfaces/feishu/surface.js";
 
 describe("Feishu Surface", () => {
+  it("records sanitized connection lifecycle transitions", async () => {
+    const fixture = createFixture();
+
+    const starting = fixture.surface.start();
+    fixture.ready();
+    await starting;
+    fixture.reconnecting();
+    fixture.reconnected();
+    await fixture.surface.stop();
+    await fixture.surface.stop();
+
+    expect(fixture.logs.map((entry) => entry.msg)).toEqual([
+      "飞书长连接正在连接",
+      "飞书长连接已就绪",
+      "飞书长连接正在重连",
+      "飞书长连接已恢复",
+      "飞书 Surface 已停止",
+    ]);
+    expect(fixture.logs).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        surface: "feishu",
+        accountId: "cli_0123456789abcdef",
+      }),
+    ]));
+    expect(JSON.stringify(fixture.logs)).not.toContain("secret");
+  });
+
   it("starts the event connection and closes it on stop", async () => {
     const fixture = createFixture();
 
@@ -133,10 +160,18 @@ function createFixture(
     }),
   };
   let readyCallback: (() => void) | undefined;
+  let reconnectingCallback: (() => void) | undefined;
+  let reconnectedCallback: (() => void) | undefined;
   let messageHandler: ((event: unknown) => void) | undefined;
   const sent: Array<{ chatId: string; text: string }> = [];
+  const logs: Array<Record<string, unknown>> = [];
   const sdkStart = vi.fn(async () => {});
   const sdkClose = vi.fn();
+  const logger = pino({ level: "info" }, {
+    write(message) {
+      logs.push(JSON.parse(message) as Record<string, unknown>);
+    },
+  });
   const surface = new FeishuSurface({
     appId: "cli_0123456789abcdef",
     appSecret: "secret",
@@ -144,7 +179,7 @@ function createFixture(
     access: {
       isAllowed: () => true,
     },
-    logger: pino({ level: "silent" }),
+    logger,
     onFatal: vi.fn(),
     ...(configurationRecipients ? { configurationRecipients } : {}),
   }, {
@@ -159,6 +194,8 @@ function createFixture(
         startupTimeoutMs: 1_000,
         createSdkConnection: (_credentials, callbacks) => {
           readyCallback = callbacks.onReady;
+          reconnectingCallback = callbacks.onReconnecting;
+          reconnectedCallback = callbacks.onReconnected;
           return {
             registerMessageHandler(handler) {
               messageHandler = handler;
@@ -173,6 +210,7 @@ function createFixture(
   return {
     surface,
     sent,
+    logs,
     sdkStart,
     sdkClose,
     ready() {
@@ -180,6 +218,18 @@ function createFixture(
         throw new Error("飞书 SDK 尚未注册 ready 回调");
       }
       readyCallback();
+    },
+    reconnecting() {
+      if (!reconnectingCallback) {
+        throw new Error("飞书 SDK 尚未注册 reconnecting 回调");
+      }
+      reconnectingCallback();
+    },
+    reconnected() {
+      if (!reconnectedCallback) {
+        throw new Error("飞书 SDK 尚未注册 reconnected 回调");
+      }
+      reconnectedCallback();
     },
     emitMessage(index = 0) {
       if (!messageHandler) {

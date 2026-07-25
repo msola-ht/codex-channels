@@ -22,6 +22,8 @@ function createFixture(startupTimeoutMs = 1_000) {
   const close = vi.fn();
   const onMessage = vi.fn();
   const onInvalidMessage = vi.fn();
+  const onReconnecting = vi.fn();
+  const onReconnected = vi.fn();
   const onFatal = vi.fn();
   const connection = new FeishuEventConnection(
     {
@@ -29,6 +31,8 @@ function createFixture(startupTimeoutMs = 1_000) {
       appSecret: "secret",
       onMessage,
       onInvalidMessage,
+      onReconnecting,
+      onReconnected,
       onFatal,
     },
     {
@@ -51,6 +55,8 @@ function createFixture(startupTimeoutMs = 1_000) {
     close,
     onMessage,
     onInvalidMessage,
+    onReconnecting,
+    onReconnected,
     onFatal,
     get callbacks() {
       if (callbacks === undefined) {
@@ -159,7 +165,27 @@ describe("FeishuEventConnection", () => {
     states.push(fixture.connection.state);
 
     expect(states).toEqual(["reconnecting", "running"]);
+    expect(fixture.onReconnecting).toHaveBeenCalledOnce();
+    expect(fixture.onReconnected).toHaveBeenCalledOnce();
     expect(fixture.start).toHaveBeenCalledOnce();
+  });
+
+  it("does not let lifecycle observers interrupt the SDK reader", async () => {
+    const fixture = createFixture();
+    fixture.onReconnecting.mockImplementation(() => {
+      throw new Error("logger failed");
+    });
+    fixture.onReconnected.mockImplementation(() => {
+      throw new Error("logger failed");
+    });
+    const startPromise = fixture.connection.start();
+    fixture.callbacks.onReady();
+    await startPromise;
+
+    expect(() => fixture.callbacks.onReconnecting()).not.toThrow();
+    expect(fixture.connection.state).toBe("reconnecting");
+    expect(() => fixture.callbacks.onReconnected()).not.toThrow();
+    expect(fixture.connection.state).toBe("running");
   });
 
   it("forwards messages only while active", async () => {

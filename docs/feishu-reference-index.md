@@ -7,8 +7,9 @@
 中的阶段 1 私聊文本路径。
 
 截至 2026-07-25，项目已精确锁定 `@larksuiteoapi/node-sdk@1.71.1`，并完成阶段 1 私聊文本
-模块、严格配置和 Bootstrap 显式组合。真实应用合同仍未完成，本文中的“已实现”只表示存在离线
-合同测试，不表示已经通过飞书生产环境验证；当前启用路径属于开发验证，不应视为生产就绪。
+模块、严格配置和 Bootstrap 显式组合。测试应用已完成扫码配置、Doctor 探测、生产 Gateway
+首次握手、一次已授权私聊 Turn 和精确 Chat 文本回复；断线恢复、未授权/重复真实事件、代理和
+卡片动作合同仍未完成，当前启用路径属于开发验证，不应视为生产就绪。
 
 ## 资料优先级
 
@@ -122,21 +123,33 @@ EventDispatcher`。
 | 能力 | 官方入口 | 项目状态 | 实施阶段 |
 | --- | --- | --- | --- |
 | Node SDK | npm 包、固定官方源码 | 已精确锁定 `1.71.1` | 阶段 0 |
-| WebSocket 握手和重连 | `WSClient` | 生命周期封装和离线合同已完成；真实应用实验待完成 | 阶段 0 |
-| 消息事件字段裁剪 | `im.message.receive_v1` | 稳定字段映射和畸形输入失败关闭已完成；真实事件待验证 | 阶段 0 |
-| 私聊文本事件 | `im.message.receive_v1` | 平台本地筛选、有界入队、Access Policy、Application 提交、安全错误和生命周期组合已完成；真实事件待验证 | 阶段 1 |
-| 文本发送 | `client.im.v1.message.create` | `chat_id` 文本 Payload、有限 HTTP 超时和脱敏错误已完成；真实应用待验证 | 阶段 1 |
+| WebSocket 握手和重连 | `WSClient` | 生命周期封装、离线合同和真实首次握手已完成；真实断线恢复待验证 | 阶段 0 |
+| 消息事件字段裁剪 | `im.message.receive_v1` | 稳定字段映射、畸形输入失败关闭和一条真实私聊文本事件已验证 | 阶段 0 |
+| 私聊文本事件 | `im.message.receive_v1` | 平台本地筛选、有界入队、Access Policy、Application 提交、安全错误和生命周期组合已完成；真实已授权主路径已通过，未授权/重复真实事件待验证 | 阶段 1 |
+| 文本发送 | `client.im.v1.message.create` | `chat_id` 文本 Payload、有限 HTTP 超时和脱敏错误已完成；真实精确 Chat 文本回复已通过 | 阶段 1 |
 | 纯文本输出渲染 | `OutputEvent` | 关键事件回退、错误隐藏、有界 Outbox、Surface 生命周期和安全配置通知收件人已完成 | 阶段 1 |
 | 事件去重与旧事件过滤 | 平台事件 ID、毫秒时间戳 | 已实现飞书模块内有界内存状态；真实重投待验证 | 阶段 1 |
 | 严格配置与重载分类 | 统一 `config.toml` | 私聊字段、失败关闭校验、变更码、公开示例和 Bootstrap 显式组合已完成 | 阶段 1 |
 | 命令和群聊 | 消息事件、群身份与 @Bot | 暂不支持 | 阶段 2 |
 | 卡片审批 | `card.action.trigger` | 接收方式待验证，当前失败关闭 | 阶段 3 |
 | 图片和文件 | IM 资源 API | 暂不支持 | 阶段 4 |
-| 飞书 Setup | SDK Device Authorization、`bot/v3/info` | 已实现手动输入与扫码、飞书页应用选择、最小权限、身份验证和原子配置；真实应用待验证 | 阶段 0 |
+| 飞书 Setup | SDK Device Authorization、`bot/v3/info` | 已实现手动输入与扫码、飞书页应用选择、最小权限、身份验证和原子配置；真实扫码与 Doctor 身份探测已通过 | 阶段 0 |
 | 飞书以外的 Lark | SDK Domain 配置 | 不在首版范围 | 未计划 |
 
 “计划中”不是公开支持。只有源码、配置、README、测试和真实测试应用冒烟均完成后，才能更新为
 “已支持”。
+
+## 真实验收记录
+
+2026-07-25 由操作者在本机开发环境使用测试应用完成以下最小验收：
+
+- 扫码授权完成应用选择并原子保存配置，随后 Doctor 凭据与 Bot 身份探测通过；
+- 生产 Gateway 等待 `WSClient.onReady` 后完成启动；
+- 一条已授权私聊文本事件成功提交并完成一个 Codex Turn；
+- 最终纯文本输出返回原精确 Chat。
+
+尚未验证真实断线恢复、代理、未授权/重复事件重投、Gateway 重启后的 Thread 绑定恢复和卡片动作。
+本记录不保存真实消息、应用标识、用户 Open ID、Chat ID、Token、Secret 或完整 SDK 响应。
 
 ## 本地实现映射
 
@@ -154,7 +167,7 @@ EventDispatcher`。
 | 卡片动作 | [`src/surfaces/feishu/interactions.ts`](../src/surfaces/feishu/interactions.ts) | [`tests/feishu-interactions.test.ts`](../tests/feishu-interactions.test.ts)：当前审批拒绝、用户输入为空、MCP elicitation 取消；卡片令牌、过期、Actor 绑定和跨客户端失效待实现 |
 | 配置 | [`runtime/gateway-config.mjs`](../runtime/gateway-config.mjs)、[`src/config/`](../src/config/README.md) | [`tests/config.test.ts`](../tests/config.test.ts)、[`tests/config-reload.test.ts`](../tests/config-reload.test.ts)：启用映射、禁用、畸形输入、未知字段、凭据/启用重启和允许名单热加载 |
 | Setup 与 Doctor | [`scripts/feishu-setup.mjs`](../scripts/feishu-setup.mjs)、[`scripts/feishu-application.mjs`](../scripts/feishu-application.mjs)、[`scripts/doctor.mjs`](../scripts/doctor.mjs) | [`tests/feishu-setup.test.ts`](../tests/feishu-setup.test.ts)、[`tests/feishu-application.test.ts`](../tests/feishu-application.test.ts)：手动输入、扫码授权、应用选择、最小权限、有限 HTTP 探测、凭据与 Bot 身份验证、授权域名约束、允许名单确认、原子写入和错误脱敏。Doctor 不建立第二条消息长连接；应用发布和完整权限仍由真实冒烟验证 |
-| Surface 生命周期 | [`src/surfaces/feishu/surface.ts`](../src/surfaces/feishu/surface.ts) | [`tests/feishu-surface.test.ts`](../tests/feishu-surface.test.ts)：长连接启停、输入与输出排空、过载提示、未组合收件人失败关闭和安全配置通知 |
+| Surface 生命周期 | [`src/surfaces/feishu/surface.ts`](../src/surfaces/feishu/surface.ts) | [`tests/feishu-surface.test.ts`](../tests/feishu-surface.test.ts)：长连接启停与脱敏状态日志、输入与输出排空、过载提示、未组合收件人失败关闭和安全配置通知 |
 | Bootstrap 组合 | [`src/bootstrap/surface-composition.ts`](../src/bootstrap/surface-composition.ts) | [`tests/surface-composition.test.ts`](../tests/surface-composition.test.ts)、[`tests/surface-manager.test.ts`](../tests/surface-manager.test.ts)：按配置注册、允许名单热加载、撤权绑定清理、配置通知路由、部分启动回滚和停止不影响 App Server |
 
 新增能力必须同时更新支持矩阵和实现映射，不能只增加 SDK 调用。

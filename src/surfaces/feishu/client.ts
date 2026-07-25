@@ -51,6 +51,8 @@ export interface FeishuEventConnectionOptions {
   webSocketAgent?: unknown;
   onMessage(event: FeishuMessageEvent): void;
   onInvalidMessage(error: FeishuMessageEventError): void;
+  onReconnecting?(): void;
+  onReconnected?(): void;
   onFatal(error: FeishuConnectionError): void;
 }
 
@@ -288,23 +290,19 @@ export class FeishuEventConnection {
         onReconnecting: () => {
           if (
             this.isCurrent(generation)
-            && (
-              this.stateValue === "running"
-              || this.stateValue === "reconnecting"
-            )
+            && this.stateValue === "running"
           ) {
             this.stateValue = "reconnecting";
+            this.notifyLifecycle("onReconnecting");
           }
         },
         onReconnected: () => {
           if (
             this.isCurrent(generation)
-            && (
-              this.stateValue === "running"
-              || this.stateValue === "reconnecting"
-            )
+            && this.stateValue === "reconnecting"
           ) {
             this.stateValue = "running";
+            this.notifyLifecycle("onReconnected");
           }
         },
       };
@@ -416,6 +414,16 @@ export class FeishuEventConnection {
     if (this.startupTimer !== undefined) {
       clearTimeout(this.startupTimer);
       this.startupTimer = undefined;
+    }
+  }
+
+  private notifyLifecycle(
+    callback: "onReconnecting" | "onReconnected",
+  ): void {
+    try {
+      this.options[callback]?.();
+    } catch {
+      // Observability callbacks must not interrupt the SDK reader.
     }
   }
 }

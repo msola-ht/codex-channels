@@ -66,6 +66,7 @@ export class FeishuSurface implements SurfaceAdapter {
     | (() => readonly string[])
     | undefined;
   private readonly logger: Logger;
+  private stopPromise: Promise<void> | undefined;
 
   constructor(
     options: FeishuSurfaceOptions,
@@ -138,19 +139,33 @@ export class FeishuSurface implements SurfaceAdapter {
       onInvalidMessage: (error) => {
         logInvalidMessage(options.logger, error);
       },
+      onReconnecting: () => {
+        this.logger.warn(this.lifecycleContext(), "飞书长连接正在重连");
+      },
+      onReconnected: () => {
+        this.logger.info(this.lifecycleContext(), "飞书长连接已恢复");
+      },
       onFatal: options.onFatal,
     });
   }
 
-  start(): Promise<void> {
-    return this.connection.start();
+  async start(): Promise<void> {
+    this.logger.info(this.lifecycleContext(), "飞书长连接正在连接");
+    await this.connection.start();
+    this.logger.info(this.lifecycleContext(), "飞书长连接已就绪");
   }
 
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    this.stopPromise ??= this.stopOnce();
+    return this.stopPromise;
+  }
+
+  private async stopOnce(): Promise<void> {
     await this.connection.stop();
     await this.inbox.close();
     this.interactions.cancelAll("Surface stopped");
     await this.output.close();
+    this.logger.info(this.lifecycleContext(), "飞书 Surface 已停止");
   }
 
   configurationChanged(change: SurfaceConfigurationChange): void {
@@ -192,6 +207,16 @@ export class FeishuSurface implements SurfaceAdapter {
       }
     }
     return recipients;
+  }
+
+  private lifecycleContext(): {
+    surface: "feishu";
+    accountId: string;
+  } {
+    return {
+      surface: this.surface,
+      accountId: this.accountId,
+    };
   }
 }
 
