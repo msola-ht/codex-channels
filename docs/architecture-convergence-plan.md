@@ -125,7 +125,7 @@ bootstrap ─────────→ 所有具体实现并完成装配
 | 4. Notification 与 Conversation Core | 已完成 | Routing 与 Core 均只消费稳定事件 |
 | 5. Server Request 与审批 | 已完成 | 五类请求的解码、授权协调与响应编码已隔离 |
 | 6. 边界收紧与测试替身 | 已完成 | 协议导入、具体 Client 依赖与白名单已自动收紧 |
-| 7. 项目内部模块复核 | 进行中 | Storage、Policy、Event Bus、Observability 已完成 |
+| 7. 项目内部模块复核 | 进行中 | 除 Surfaces 外的内部模块已完成 |
 | 8. Bootstrap 收尾 | 未开始 | 最后执行 |
 
 ## 阶段 1：Thread 生命周期
@@ -292,7 +292,7 @@ bootstrap ─────────→ 所有具体实现并完成装配
 2. `policy`（已完成）：Surface Actor、账号和 Workspace 授权边界。
 3. `event-bus`（已完成）：有界队列、关键事件保护、关闭和消费者隔离。
 4. `observability`（已完成）：结构化日志、错误上下文和敏感字段脱敏。
-5. `config`：TOML 边界、热加载分类、代理优先级和失败关闭。
+5. `config`（已完成）：TOML 边界、热加载分类、代理优先级和失败关闭。
 6. `surfaces`：通用接口、Telegram 输入输出、审批和平台超时隔离。
 
 这些模块不强行映射成官方 App Server 模块；只按项目职责、安全边界和生命周期复核。

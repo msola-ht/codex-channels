@@ -28,10 +28,14 @@ export function resolveProxyEnvironment(
     stringValue(configured[field]) || inherited[field] || stringValue(system[field]),
   ]));
 
-  return Object.fromEntries(PROXY_FIELDS.flatMap(([field, upper]) => [
-    [upper, resolved[field]],
-    [field, resolved[field]],
-  ]));
+  return Object.fromEntries(PROXY_FIELDS.flatMap(([field, upper]) => (
+    resolved[field]
+      ? [
+          [upper, resolved[field]],
+          [field, resolved[field]],
+        ]
+      : []
+  )));
 }
 
 export function readMacSystemProxy(output = run("/usr/sbin/scutil", ["--proxy"])) {

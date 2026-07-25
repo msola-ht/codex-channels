@@ -19,9 +19,11 @@ import {
   type RpcNotification,
 } from "../codex-client/index.js";
 import {
+  classifyConfigReload,
   configChange,
   includesConfigChange,
   type ConfigChange,
+  type ConfigReloadResult,
   type GatewayConfig,
 } from "../config/index.js";
 import { ConversationService, ModelSelectionService } from "../application/index.js";
@@ -555,30 +557,6 @@ export class GatewayApplication {
   }
 }
 
-export type ConfigReloadResult =
-  | { action: "reload"; changes: ConfigChange[] }
-  | { action: "restart"; changes: ConfigChange[] }
-  | { action: "reinstall"; changes: ConfigChange[] };
-
-export function classifyConfigReload(current: GatewayConfig, next: GatewayConfig): ConfigReloadResult {
-  const reinstallReasons = serviceReinstallReasons(current, next);
-  const restartReasons = restartRequiredReasons(current, next);
-  const reloadReasons = hotReloadReasons(current, next);
-  if (reinstallReasons.length > 0) {
-    return {
-      action: "reinstall",
-      changes: [...reinstallReasons, ...restartReasons, ...reloadReasons],
-    };
-  }
-  if (restartReasons.length > 0) {
-    return {
-      action: "restart",
-      changes: [...restartReasons, ...reloadReasons],
-    };
-  }
-  return { action: "reload", changes: reloadReasons };
-}
-
 function findAddedWorkspaces(
   current: ReadonlyArray<GatewayConfig["workspaces"][number]>,
   next: ReadonlyArray<GatewayConfig["workspaces"][number]>,
@@ -599,74 +577,6 @@ function immediateAddedWorkspaceNotifications(
   ).filter(
     (workspace) => !pendingIds.has(workspace.id),
   );
-}
-
-function serviceReinstallReasons(current: GatewayConfig, next: GatewayConfig): ConfigChange[] {
-  const reasons: ConfigChange[] = [];
-  if (current.codexBinary !== next.codexBinary) {
-    reasons.push(configChange("codex.binary"));
-  }
-  if (current.codexSocketPath !== next.codexSocketPath) {
-    reasons.push(configChange("codex.socket"));
-  }
-  if (!sameNetworkProxy(current.networkProxy, next.networkProxy)) {
-    reasons.push(configChange("network.proxy"));
-  }
-  return reasons;
-}
-
-function sameNetworkProxy(
-  current: GatewayConfig["networkProxy"],
-  next: GatewayConfig["networkProxy"],
-): boolean {
-  return current.http === next.http
-    && current.https === next.https
-    && current.all === next.all
-    && current.no === next.no;
-}
-
-function restartRequiredReasons(current: GatewayConfig, next: GatewayConfig): ConfigChange[] {
-  const reasons: ConfigChange[] = [];
-  const fields: Array<[ConfigChange, unknown, unknown]> = [
-    [configChange("surface.telegram.token", "telegram"), current.telegramBotToken, next.telegramBotToken],
-    [configChange("surface.telegram.proxy", "telegram"), current.telegramProxyUrl, next.telegramProxyUrl],
-    [configChange("surface.telegram.message-format", "telegram"), current.telegramMessageFormat, next.telegramMessageFormat],
-    [configChange("codex.default-model"), current.codexModel, next.codexModel],
-    [configChange("codex.sandbox"), current.codexSandbox, next.codexSandbox],
-    [configChange("storage.database"), current.stateDatabasePath, next.stateDatabasePath],
-    [configChange("approval.timeout"), current.approvalTimeoutMs, next.approvalTimeoutMs],
-    [configChange("observability.log-level"), current.logLevel, next.logLevel],
-    [configChange("workspace.default"), current.defaultWorkspaceId, next.defaultWorkspaceId],
-  ];
-  for (const [change, before, after] of fields) {
-    if (before !== after) {
-      reasons.push(change);
-    }
-  }
-  if (!preservesExistingWorkspaces(current.workspaces, next.workspaces)) {
-    reasons.push(configChange("workspace.registry"));
-  }
-  if (![...current.telegramAllowedUserIds].every((userId) => next.telegramAllowedUserIds.has(userId))) {
-    reasons.push(configChange("surface.telegram.allowed-users", "telegram"));
-  }
-  return reasons;
-}
-
-function hotReloadReasons(current: GatewayConfig, next: GatewayConfig): ConfigChange[] {
-  const reasons: ConfigChange[] = [];
-  if (
-    preservesExistingWorkspaces(current.workspaces, next.workspaces)
-    && !sameWorkspaces(current.workspaces, next.workspaces)
-  ) {
-    reasons.push(configChange("workspace.registry"));
-  }
-  if (
-    [...current.telegramAllowedUserIds].every((userId) => next.telegramAllowedUserIds.has(userId))
-    && !sameNumberSet(current.telegramAllowedUserIds, next.telegramAllowedUserIds)
-  ) {
-    reasons.push(configChange("surface.telegram.allowed-users", "telegram"));
-  }
-  return reasons;
 }
 
 async function waitAtMost(task: Promise<void>, timeoutMs: number): Promise<boolean> {
@@ -700,30 +610,6 @@ async function abortableDelay(milliseconds: number, signal: AbortSignal): Promis
     timer.unref();
     signal.addEventListener("abort", finish, { once: true });
   });
-}
-
-function preservesExistingWorkspaces(
-  current: GatewayConfig["workspaces"],
-  next: GatewayConfig["workspaces"],
-): boolean {
-  const byId = new Map(next.map((workspace) => [workspace.id, workspace]));
-  return current.every((workspace) => {
-    const candidate = byId.get(workspace.id);
-    return candidate?.name === workspace.name && candidate.cwd === workspace.cwd;
-  });
-}
-
-function sameWorkspaces(current: GatewayConfig["workspaces"], next: GatewayConfig["workspaces"]): boolean {
-  return current.length === next.length && current.every((workspace, index) => {
-    const candidate = next[index];
-    return candidate?.id === workspace.id
-      && candidate.name === workspace.name
-      && candidate.cwd === workspace.cwd;
-  });
-}
-
-function sameNumberSet(current: ReadonlySet<number>, next: ReadonlySet<number>): boolean {
-  return current.size === next.size && [...current].every((value) => next.has(value));
 }
 
 function verifyCodexVersion(config: GatewayConfig): void {

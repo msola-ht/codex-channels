@@ -16,6 +16,10 @@ export {
   type ConfigChangeCode,
   type ConfigChangeScope,
 } from "./config-change.js";
+export {
+  classifyConfigReload,
+  type ConfigReloadResult,
+} from "./reload-classifier.js";
 
 export interface GatewayConfig {
   telegramBotToken: string;

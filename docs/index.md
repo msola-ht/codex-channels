@@ -168,6 +168,8 @@ Surface、账号和规范 Actor ID 必须同时匹配。
 同一等待结果，慢消费者只等待有限时间。
 `observability` 已完成：统一 Logger 的异常只保留受约束类型和机器码，不记录 message、stack
 或附加响应正文；Token、Authorization、Password 和 Cookie 字段统一脱敏。
+`config` 已完成：严格 TOML 和运行语义继续失败关闭，热加载分类归 Config 所有；代理保持
+TOML、环境、系统的优先级，未解析字段不再写入空环境变量。
 
 ## 查询顺序
 

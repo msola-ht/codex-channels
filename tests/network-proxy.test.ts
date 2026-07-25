@@ -7,6 +7,14 @@ import {
 } from "../runtime/network-proxy.mjs";
 
 describe("network proxy discovery", () => {
+  it("does not add undefined proxy keys when no source defines a proxy", () => {
+    expect(resolveProxyEnvironment(
+      {},
+      {},
+      { platform: "linux", readSystemProxy: () => ({}) },
+    )).toEqual({});
+  });
+
   it("prefers explicit config, then inherited environment, then the system proxy", () => {
     const readSystemProxy = vi.fn(() => ({
       http_proxy: "http://system-http:8080",

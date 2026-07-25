@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   GatewayApplication,
-  classifyConfigReload,
   effectiveCodexBinary,
 } from "../src/bootstrap/index.js";
 import { removeUnauthorizedTelegramBindings } from "../src/bootstrap/surface-composition.js";
-import type { GatewayConfig } from "../src/config/index.js";
+import {
+  classifyConfigReload,
+  type GatewayConfig,
+} from "../src/config/index.js";
 import { TelegramAccessPolicy, WorkspaceRegistry } from "../src/policy/index.js";
 import { MemoryBindingStore } from "../src/storage/index.js";
 
