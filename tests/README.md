@@ -23,6 +23,10 @@
   通知、Thread 失效通知及 Gateway/CLI 连接恢复。
 - 账户 Token 用量与单桶/多桶额度到稳定 Application 摘要的映射、重置券数量、畸形指标与未知
   枚举失败关闭，以及启动时周限缓存继续使用同一映射结果。
+- Skill 查询按授权 Workspace 发送精确 CWD，Client 只映射启用的用户与项目直接安装项，排除
+  系统和插件缓存并在缺少显示字段时失败关闭。
+- MCP 查询按当前 Thread 读取项目级配置，使用精简清单分页并映射名称、认证状态和工具数量；
+  必需字段畸形或分页游标循环时失败关闭。
 - SQLite 最小绑定恢复、配置热加载与自动重启分类、Setup 类别与通讯渠道菜单、Telegram Setup、
   CLI 项目规则生成/检查、launchd、systemd、Unix WebSocket 请求头、模块依赖方向和公开入口边界。
 - TOML、标准环境变量、macOS 系统代理和 Linux GNOME 代理的优先级及服务启动时解析。
@@ -64,7 +68,8 @@ RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
 读取，之后新建 Thread 的运行时 `serviceTier` 按 `default → priority → default` 变化，并验证
 第二个 Client 修改共享 Thread 的模型、思考强度和 Fast 设置时，订阅方收到完整的
 `thread/settings/updated`；第二个 Client 重连后再次修改仍会广播。合同还会启动并立即清理一个
-不等待模型结果的 Turn，验证稳定 Turn ID，以及跨 Client 的 Goal 设置、读取和清除映射。
+不等待模型结果的 Turn，验证稳定 Turn ID、Skill 与 MCP 查询摘要，以及跨 Client 的 Goal 设置、
+读取和清除映射。
 
 使用当前用户配置的完整 Unix WebSocket/App Server 冒烟测试同样不会调用模型：
 

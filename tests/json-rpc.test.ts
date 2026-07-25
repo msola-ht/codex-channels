@@ -97,6 +97,20 @@ function appServerRateLimit(
   };
 }
 
+function appServerMcpStatus(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    name: "local-tools",
+    serverInfo: null,
+    tools: { search: {} },
+    resources: [],
+    resourceTemplates: [],
+    authStatus: "unsupported",
+    ...overrides,
+  };
+}
+
 class FakeTransport extends BaseTransport {
   readonly kind = "stdio" as const;
   readonly sent: Array<Record<string, unknown>> = [];
@@ -105,6 +119,8 @@ class FakeTransport extends BaseTransport {
   failServerResponse = false;
   circularModelCursor = false;
   modelListData: Array<Record<string, unknown>> = [];
+  mcpPages: Array<Record<string, unknown>> = [{ data: [], nextCursor: null }];
+  mcpPageIndex = 0;
   configServiceTier: unknown = "fast";
   accountUsageResult: Record<string, unknown> = {
     summary: {
@@ -121,6 +137,7 @@ class FakeTransport extends BaseTransport {
     rateLimitsByLimitId: null,
     rateLimitResetCredits: null,
   };
+  skillsResult: Record<string, unknown> = { data: [] };
   disconnectAfterInitialized = false;
   threadListData: Array<Record<string, unknown>> = [];
   goal = appServerGoal();
@@ -222,6 +239,28 @@ class FakeTransport extends BaseTransport {
           JSON.stringify({
             id: decoded.id,
             result: this.accountUsageResult,
+          }),
+        ),
+      );
+    } else if (decoded.method === "skills/list") {
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({
+            id: decoded.id,
+            result: this.skillsResult,
+          }),
+        ),
+      );
+    } else if (decoded.method === "mcpServerStatus/list") {
+      const page = this.mcpPages[
+        Math.min(this.mcpPageIndex, this.mcpPages.length - 1)
+      ];
+      this.mcpPageIndex += 1;
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({
+            id: decoded.id,
+            result: page,
           }),
         ),
       );
@@ -697,6 +736,166 @@ describe("JsonRpcClient", () => {
       .not.toHaveProperty("params");
     expect(transport.sent.find((message) => message.method === "account/rateLimits/read"))
       .not.toHaveProperty("params");
+  });
+
+  it("maps only directly installed user and repo Skills", async () => {
+    const transport = new FakeTransport();
+    transport.skillsResult = {
+      data: [{
+        cwd: "/tmp/project",
+        errors: [],
+        skills: [
+          {
+            name: "personal",
+            description: "Personal",
+            path: "/Users/test/.codex/skills/personal/SKILL.md",
+            scope: "user",
+            enabled: true,
+          },
+          {
+            name: "repo",
+            description: "Repository",
+            path: "/tmp/project/.codex/skills/repo/SKILL.md",
+            scope: "repo",
+            enabled: true,
+          },
+          {
+            name: "plugin:cached",
+            description: "Plugin",
+            path: "/Users/test/.codex/plugins/cache/plugin/skills/cached/SKILL.md",
+            scope: "user",
+            enabled: true,
+          },
+          {
+            name: "system",
+            description: "System",
+            path: "/Users/test/.codex/skills/.system/system/SKILL.md",
+            scope: "system",
+            enabled: true,
+          },
+          {
+            name: "disabled",
+            description: "Disabled",
+            path: "/Users/test/.codex/skills/disabled/SKILL.md",
+            scope: "user",
+            enabled: false,
+          },
+        ],
+      }],
+    };
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listSkills("/tmp/project")).resolves.toEqual([
+      { name: "personal", description: "Personal" },
+      { name: "repo", description: "Repository" },
+    ]);
+    expect(transport.sent.find((message) => message.method === "skills/list")?.params)
+      .toEqual({ cwds: ["/tmp/project"], forceReload: false });
+  });
+
+  it("fails closed when an installed Skill lacks a required display field", async () => {
+    const transport = new FakeTransport();
+    transport.skillsResult = {
+      data: [{
+        cwd: "/tmp/project",
+        errors: [],
+        skills: [{
+          name: "",
+          description: "Broken",
+          path: "/Users/test/.codex/skills/broken/SKILL.md",
+          scope: "user",
+          enabled: true,
+        }],
+      }],
+    };
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listSkills("/tmp/project"))
+      .rejects.toThrow("Codex 响应缺少有效 skill name");
+  });
+
+  it("maps and paginates MCP status into stable summaries", async () => {
+    const transport = new FakeTransport();
+    transport.mcpPages = [
+      {
+        data: [appServerMcpStatus({
+          name: "project-tools",
+          authStatus: "oAuth",
+          tools: { search: {}, fetch: {} },
+        })],
+        nextCursor: "1",
+      },
+      {
+        data: [appServerMcpStatus({
+          name: "user-tools",
+          authStatus: "bearerToken",
+          tools: {},
+        })],
+        nextCursor: null,
+      },
+    ];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listMcpServers("thread-1")).resolves.toEqual([
+      { name: "project-tools", authStatus: "oAuth", toolCount: 2 },
+      { name: "user-tools", authStatus: "bearerToken", toolCount: 0 },
+    ]);
+    expect(
+      transport.sent
+        .filter((message) => message.method === "mcpServerStatus/list")
+        .map((message) => message.params),
+    ).toEqual([
+      {
+        limit: 100,
+        detail: "toolsAndAuthOnly",
+        threadId: "thread-1",
+      },
+      {
+        limit: 100,
+        detail: "toolsAndAuthOnly",
+        threadId: "thread-1",
+        cursor: "1",
+      },
+    ]);
+  });
+
+  it("fails closed when MCP status lacks a required stable field", async () => {
+    const transport = new FakeTransport();
+    transport.mcpPages = [{
+      data: [appServerMcpStatus({ authStatus: "unknown" })],
+      nextCursor: null,
+    }];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listMcpServers())
+      .rejects.toThrow("Codex 响应缺少有效 MCP server authStatus");
+  });
+
+  it("rejects repeated MCP pagination cursors", async () => {
+    const transport = new FakeTransport();
+    transport.mcpPages = [{
+      data: [],
+      nextCursor: "same-cursor",
+    }];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listMcpServers())
+      .rejects.toThrow("mcpServerStatus/list 返回了循环分页游标");
   });
 
   it("lists only installed plugins without loading the remote catalog", async () => {

@@ -2,11 +2,9 @@ import { randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
 
 import type {
-  ListMcpServerStatusResponse,
   PermissionProfileListResponse,
   PluginInstalledResponse,
   RateLimitSnapshot,
-  SkillsListResponse,
   ThreadTokenUsage,
 } from "../codex-protocol/index.js";
 import type {
@@ -14,6 +12,8 @@ import type {
   AccountRateLimits,
   AccountUsage,
 } from "./account-port.js";
+import type { InstalledSkill, SkillQueryPort } from "./skill-port.js";
+import type { McpQueryPort, McpServerSummary } from "./mcp-port.js";
 import type { SessionRouter } from "../session-routing/index.js";
 import type { Workspace } from "../policy/index.js";
 import {
@@ -60,9 +60,7 @@ export interface ProjectRulesPort {
   check(projectRoot: string): Promise<ProjectRulesResult> | ProjectRulesResult;
 }
 
-export interface ConversationQueryPort extends AccountQueryPort {
-  listSkills(cwd: string): Promise<SkillsListResponse["data"]>;
-  listMcpServers(threadId?: string): Promise<ListMcpServerStatusResponse["data"]>;
+export interface ConversationQueryPort extends AccountQueryPort, SkillQueryPort, McpQueryPort {
   listPlugins(cwd: string): Promise<PluginInstalledResponse>;
   listPermissionProfiles(cwd: string): Promise<PermissionProfileListResponse["data"]>;
 }
@@ -384,15 +382,11 @@ export class ConversationService {
     });
   }
 
-  async listSkills(target: ConversationTarget): Promise<SkillsListResponse["data"]> {
-    const entries = await this.queries.listSkills(this.router.workspace(target).cwd);
-    return entries.map((entry) => ({
-      ...entry,
-      skills: entry.skills.filter(isDirectlyInstalledSkill),
-    }));
+  listSkills(target: ConversationTarget): Promise<InstalledSkill[]> {
+    return this.queries.listSkills(this.router.workspace(target).cwd);
   }
 
-  listMcpServers(target: ConversationTarget): Promise<ListMcpServerStatusResponse["data"]> {
+  listMcpServers(target: ConversationTarget): Promise<McpServerSummary[]> {
     return this.queries.listMcpServers(this.router.current(target)?.threadId);
   }
 
@@ -511,15 +505,6 @@ export class ConversationService {
       }
     }
   }
-}
-
-function isDirectlyInstalledSkill(
-  skill: SkillsListResponse["data"][number]["skills"][number],
-): boolean {
-  const normalizedPath = skill.path.replaceAll("\\", "/");
-  return skill.enabled
-    && (skill.scope === "user" || skill.scope === "repo")
-    && !normalizedPath.includes("/.codex/plugins/");
 }
 
 function projectRulesUserError(error: unknown, operation: "init" | "check"): Error {

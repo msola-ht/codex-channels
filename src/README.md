@@ -24,5 +24,6 @@ Client 或生成协议。Turn、Review 和 Goal 的执行端口与稳定结果�
 只在适配边界构造官方输入和解释响应。模型目录、思考强度和服务层级的稳定类型同样由
 `application` 拥有，Client 负责裁剪官方模型目录并封装 Fast 默认值配置。账户用量与额度查询
 同样由 Application 窄端口承接，Client 统一选择官方多桶或兼容单桶响应并
-输出稳定摘要。其余扩展查询、通知和审批协议隔离按
+输出稳定摘要。直接安装 Skill 查询也已在 Client 边界完成路径与 Scope 裁剪，MCP 状态查询
+已裁剪为按当前 Thread 获取的名称、认证状态和工具数量。其余 Plugin、权限、通知和审批协议隔离按
 [`Codex CLI 协议边界收敛计划`](../docs/architecture-convergence-plan.md) 分阶段推进。

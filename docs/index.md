@@ -62,6 +62,9 @@
 | 账户请求处理 | [`account_processor.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server/src/request_processors/account_processor.rs) | 账户 Token 用量与额度读取 |
 | 账户测试 | [`account.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server/tests/suite/v2/account.rs) | 用量读取、认证与错误合同 |
 | 额度测试 | [`rate_limits.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server/tests/suite/v2/rate_limits.rs) | 单桶、多桶、消费控制与重置券合同 |
+| Skill 列表测试 | [`skills_list.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server/tests/suite/v2/skills_list.rs) | CWD、Scope、缓存、Plugin Skill 与变更通知合同 |
+| MCP 请求处理 | [`mcp_processor.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server/src/request_processors/mcp_processor.rs) | Thread 配置上下文、精简清单、排序与分页 |
+| MCP 状态测试 | [`mcp_server_status.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server/tests/suite/v2/mcp_server_status.rs) | 工具原名、项目级配置、实时元数据与精简清单合同 |
 | Thread 设置测试 | [`thread_settings_update.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server/tests/suite/v2/thread_settings_update.rs) | 模型、思考强度和服务层级通知合同 |
 | Unix WebSocket 测试 | [`connection_handling_websocket_unix.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server/tests/suite/v2/connection_handling_websocket_unix.rs) | Unix Socket WebSocket 行为 |
 
@@ -80,9 +83,9 @@
 | Diff、Plan 与 Review | `turn/diff/updated`、`turn/plan/updated`、`review/start` | Review 目标与结果由 [`turn-port.ts`](../src/application/turn-port.ts) 定义，[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts) 映射；Diff/Plan 仍由 [`conversation-core/`](../src/conversation-core/README.md) 归约 |
 | Goal | `thread/goal/get`、`thread/goal/set`、`thread/goal/clear` | [`turn-port.ts`](../src/application/turn-port.ts)、[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts)、[`conversation-command-service.test.ts`](../tests/conversation-command-service.test.ts) |
 | 审批和用户输入 | 命令、文件、权限、用户输入、MCP elicitation 共 5 类 Server Request | [`approval/`](../src/approval/README.md)、[`approval.test.ts`](../tests/approval.test.ts) |
-| Skill、MCP 与 Plugin | `skills/list`、`mcpServerStatus/list`、`plugin/installed`、MCP 状态通知 | [`client.ts`](../src/codex-client/client.ts)、[`conversation-command-service.test.ts`](../tests/conversation-command-service.test.ts) |
+| Skill、MCP 与 Plugin | `skills/list`、`mcpServerStatus/list`、`plugin/installed`、MCP 状态通知 | Skill 由 [`skill-port.ts`](../src/application/skill-port.ts) 与 [`skill-adapter.ts`](../src/codex-client/skill-adapter.ts) 隔离；MCP 查询由 [`mcp-port.ts`](../src/application/mcp-port.ts) 与 [`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts) 隔离；Plugin 查询与 MCP 通知仍待收敛；[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`conversation-command-service.test.ts`](../tests/conversation-command-service.test.ts) |
 | 用量、额度与权限 | `account/usage/read`、`account/rateLimits/read`、账户通知、`permissionProfile/list` | 查询结果由 [`account-port.ts`](../src/application/account-port.ts) 与 [`account-adapter.ts`](../src/codex-client/account-adapter.ts) 隔离；通知仍由 [`core.ts`](../src/conversation-core/core.ts) 归约；[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts) |
-| 真实合同 | Fast 默认值、共享 Thread 设置通知、Turn 启动结果、跨客户端 Goal、双客户端连接恢复 | [`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+| 真实合同 | Fast 默认值、Skill/MCP 稳定查询、共享 Thread 设置通知、Turn 启动结果、跨客户端 Goal、双客户端连接恢复 | [`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 
 当前生成协议还包含文件系统 RPC、独立命令执行、登录、Marketplace、App、Realtime、
 Remote Control、动态工具、Attestation 和实验能力等类型；它们没有因此自动成为 Gateway
@@ -101,6 +104,8 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 | Workspace、Conversation、Thread 如何绑定 | [`session-routing/`](../src/session-routing/README.md) | [`session-router.test.ts`](../tests/session-router.test.ts)、[`module-boundaries.test.ts`](../tests/module-boundaries.test.ts) |
 | 模型、思考强度和 Fast 如何隔离并同步 | [`model-port.ts`](../src/application/model-port.ts)、[`model-adapter.ts`](../src/codex-client/model-adapter.ts)、[`thread-state-sync.ts`](../src/session-routing/thread-state-sync.ts) | [`model-selection-service.test.ts`](../tests/model-selection-service.test.ts)、[`thread-state-sync.test.ts`](../tests/thread-state-sync.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | 账户用量与额度查询如何隔离 | [`account-port.ts`](../src/application/account-port.ts)、[`account-adapter.ts`](../src/codex-client/account-adapter.ts) | [`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`telegram-format.test.ts`](../tests/telegram-format.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+| 直接安装 Skill 查询如何隔离 | [`skill-port.ts`](../src/application/skill-port.ts)、[`skill-adapter.ts`](../src/codex-client/skill-adapter.ts) | [`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+| MCP 状态查询如何隔离 | [`mcp-port.ts`](../src/application/mcp-port.ts)、[`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts) | [`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`telegram-format.test.ts`](../tests/telegram-format.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | 审批和用户输入如何协调 | [`approval/`](../src/approval/README.md) | [`approval.test.ts`](../tests/approval.test.ts) |
 | 各模块如何装配和管理生命周期 | [`bootstrap/`](../src/bootstrap/README.md) | [`gateway-startup-cleanup.test.ts`](../tests/gateway-startup-cleanup.test.ts) |
 | Telegram 如何适配核心事件 | [`surfaces/telegram/`](../src/surfaces/telegram/README.md) | [`tests/README.md`](../tests/README.md) |

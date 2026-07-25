@@ -1,10 +1,8 @@
 import type {
-  ListMcpServerStatusResponse,
   McpServerStatusUpdatedNotification,
   PermissionProfileListResponse,
   PluginInstalledResponse,
   RateLimitSnapshot,
-  SkillsListResponse,
   ThreadTokenUsage,
 } from "../../codex-protocol/index.js";
 import {
@@ -13,6 +11,8 @@ import {
   type AccountRateLimits,
   type AccountRateLimitWindow,
   type AccountUsage,
+  type InstalledSkill,
+  type McpServerSummary,
   type ConversationSession,
   type ConversationStatus,
   type ModelSelectionState,
@@ -162,10 +162,7 @@ export function formatFastModeState(state: ModelSelectionState): string {
   ].join("\n");
 }
 
-export function formatSkills(entries: SkillsListResponse["data"]): string {
-  const skills = entries
-    .flatMap((entry) => entry.skills)
-    .filter((skill) => skill.enabled);
+export function formatSkills(skills: InstalledSkill[]): string {
   if (skills.length === 0) {
     return "当前没有已启用的 Skills。";
   }
@@ -177,12 +174,12 @@ export function formatSkills(entries: SkillsListResponse["data"]): string {
   return lines.join("\n");
 }
 
-export function formatMcpServers(servers: ListMcpServerStatusResponse["data"]): string {
+export function formatMcpServers(servers: McpServerSummary[]): string {
   return [
     `MCP Servers（${servers.length}）：`,
     ...servers.map(
       (server) =>
-        `- ${server.name} · auth=${server.authStatus} · tools=${Object.keys(server.tools).length}`,
+        `- ${server.name} · auth=${server.authStatus} · tools=${server.toolCount}`,
     ),
   ].join("\n");
 }

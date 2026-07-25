@@ -41,6 +41,15 @@ export {
   type ReasoningEffortOption,
 } from "./model-port.js";
 export {
+  type InstalledSkill,
+  type SkillQueryPort,
+} from "./skill-port.js";
+export {
+  type McpAuthStatus,
+  type McpQueryPort,
+  type McpServerSummary,
+} from "./mcp-port.js";
+export {
   type GoalStatus,
   type ReviewStarted,
   type ReviewTarget,

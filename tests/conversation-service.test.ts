@@ -300,55 +300,12 @@ describe("ConversationService model selection", () => {
       .resolves.toEqual({ position: 1 });
   });
 
-  it("lists directly installed user and project Skills without bundled Skills", async () => {
-    const listSkills = vi.fn(async () => [{
-      cwd: main.cwd,
-      errors: [],
-      skills: [
-        {
-          name: "personal",
-          description: "个人",
-          path: "/Users/test/.codex/skills/personal/SKILL.md",
-          scope: "user" as const,
-          enabled: true,
-        },
-        {
-          name: "agents-personal",
-          description: "个人",
-          path: "/Users/test/.agents/skills/agents-personal/SKILL.md",
-          scope: "user" as const,
-          enabled: true,
-        },
-        {
-          name: "plugin:skill",
-          description: "插件",
-          path: "/Users/test/.codex/plugins/cache/plugin/skills/example/SKILL.md",
-          scope: "user" as const,
-          enabled: true,
-        },
-        {
-          name: "system-skill",
-          description: "系统",
-          path: "/Users/test/.codex/skills/.system/system-skill/SKILL.md",
-          scope: "system" as const,
-          enabled: true,
-        },
-        {
-          name: "repo-skill",
-          description: "项目",
-          path: "/workspace/main/.codex/skills/repo-skill/SKILL.md",
-          scope: "repo" as const,
-          enabled: true,
-        },
-        {
-          name: "disabled",
-          description: "禁用",
-          path: "/Users/test/.codex/skills/disabled/SKILL.md",
-          scope: "user" as const,
-          enabled: false,
-        },
-      ],
-    }]);
+  it("lists stable installed Skills for the authorized Workspace", async () => {
+    const listSkills = vi.fn(async () => [
+      { name: "personal", description: "个人" },
+      { name: "agents-personal", description: "个人" },
+      { name: "repo-skill", description: "项目" },
+    ]);
     const service = new ConversationService(
       turnPort(),
       { workspace: () => main } as unknown as SessionRouter,
@@ -359,9 +316,29 @@ describe("ConversationService model selection", () => {
 
     const entries = await service.listSkills(target);
 
-    expect(entries.flatMap((entry) => entry.skills).map((skill) => skill.name))
+    expect(entries.map((skill) => skill.name))
       .toEqual(["personal", "agents-personal", "repo-skill"]);
     expect(listSkills).toHaveBeenCalledWith(main.cwd);
+  });
+
+  it("lists MCP summaries for the current Thread", async () => {
+    const listMcpServers = vi.fn(async () => [
+      { name: "project-tools", authStatus: "oAuth" as const, toolCount: 2 },
+    ]);
+    const service = new ConversationService(
+      turnPort(),
+      {
+        current: () => ({ threadId: "thread-1" }),
+      } as unknown as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort({ listMcpServers }),
+    );
+
+    await expect(service.listMcpServers(target)).resolves.toEqual([
+      { name: "project-tools", authStatus: "oAuth", toolCount: 2 },
+    ]);
+    expect(listMcpServers).toHaveBeenCalledWith("thread-1");
   });
 
   it("allows read-only Fast status during an active turn but blocks switching", async () => {

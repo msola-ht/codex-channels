@@ -9,6 +9,7 @@ import {
   formatPlan,
   formatReasoningEfforts,
   formatLimits,
+  formatMcpServers,
   formatPlugins,
   formatStatus,
   formatStartupNotification,
@@ -20,7 +21,6 @@ import {
 } from "../src/surfaces/telegram/format.js";
 import type {
   PluginInstalledResponse,
-  SkillsListResponse,
 } from "../src/codex-protocol/index.js";
 import type { ModelOption } from "../src/application/index.js";
 
@@ -63,18 +63,9 @@ describe("splitTelegramText", () => {
 describe("extension formatting", () => {
   it("renders the filtered installed Skills with usage guidance", () => {
     const entries = [{
-      cwd: "/workspace",
-      errors: [],
-      skills: [
-        {
-          name: "personal-skill",
-          description: "个人说明",
-          path: "/Users/test/.codex/skills/personal-skill/SKILL.md",
-          scope: "user",
-          enabled: true,
-        },
-      ],
-    }] as SkillsListResponse["data"];
+      name: "personal-skill",
+      description: "个人说明",
+    }];
 
     const text = formatSkills(entries);
 
@@ -102,6 +93,17 @@ describe("extension formatting", () => {
     expect(text).toContain("已安装 Plugins（1）");
     expect(text).toContain("github · 已启用");
     expect(text).not.toContain("remote-only");
+  });
+
+  it("renders only stable MCP status fields", () => {
+    const text = formatMcpServers([{
+      name: "project-tools",
+      authStatus: "oAuth",
+      toolCount: 2,
+    }]);
+
+    expect(text).toContain("MCP Servers（1）");
+    expect(text).toContain("project-tools · auth=oAuth · tools=2");
   });
 });
 

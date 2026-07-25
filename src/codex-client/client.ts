@@ -11,6 +11,10 @@ import type {
   AccountQueryPort,
   AccountRateLimits,
   AccountUsage,
+  InstalledSkill,
+  SkillQueryPort,
+  McpQueryPort,
+  McpServerSummary,
 } from "../application/index.js";
 import type {
   ConfigReadParams,
@@ -55,6 +59,8 @@ import {
 } from "./turn-adapter.js";
 import { toModelOption } from "./model-adapter.js";
 import { toAccountRateLimits, toAccountUsage } from "./account-adapter.js";
+import { toInstalledSkills } from "./skill-adapter.js";
+import { toMcpServerSummaryPage } from "./mcp-adapter.js";
 
 export interface ThreadDefaults {
   model?: string;
@@ -65,7 +71,9 @@ export class CodexAppServerClient implements
   ThreadLifecyclePort,
   TurnExecutionPort,
   ModelSelectionPort,
-  AccountQueryPort
+  AccountQueryPort,
+  SkillQueryPort,
+  McpQueryPort
 {
   constructor(
     private readonly rpc: JsonRpcClient,
@@ -326,16 +334,16 @@ export class CodexAppServerClient implements
     return toReviewStarted(response);
   }
 
-  async listSkills(cwd: string): Promise<SkillsListResponse["data"]> {
+  async listSkills(cwd: string): Promise<InstalledSkill[]> {
     const response = await this.rpc.request<SkillsListResponse>({
       method: "skills/list",
       params: { cwds: [cwd], forceReload: false },
     }, { retryOverload: true });
-    return response.data;
+    return toInstalledSkills(response);
   }
 
-  async listMcpServers(threadId?: string): Promise<ListMcpServerStatusResponse["data"]> {
-    const servers: ListMcpServerStatusResponse["data"] = [];
+  async listMcpServers(threadId?: string): Promise<McpServerSummary[]> {
+    const servers: McpServerSummary[] = [];
     const cursors = new Set<string>();
     let cursor: string | null = null;
     do {
@@ -349,8 +357,9 @@ export class CodexAppServerClient implements
             ...(cursor ? { cursor } : {}),
           },
         }, { retryOverload: true });
-      servers.push(...response.data);
-      cursor = response.nextCursor;
+      const page = toMcpServerSummaryPage(response);
+      servers.push(...page.servers);
+      cursor = page.nextCursor;
       rememberCursor("mcpServerStatus/list", cursor, cursors);
     } while (cursor);
     return servers;

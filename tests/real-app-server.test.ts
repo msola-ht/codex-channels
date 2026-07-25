@@ -100,6 +100,14 @@ suite("real Codex App Server over Unix WebSocket", () => {
     expect(models.every((model) => model.supportedReasoningEfforts.length > 0)).toBe(true);
   });
 
+  it("lists directly installed Skills through the stable query result", async () => {
+    const skills = await client.listSkills(workdir);
+
+    expect(Array.isArray(skills)).toBe(true);
+    expect(skills.every((skill) =>
+      typeof skill.name === "string" && typeof skill.description === "string")).toBe(true);
+  });
+
   it("lists installed plugins without loading remote catalog entries", async () => {
     const result = await client.listPlugins(workdir);
     const plugins = result.marketplaces.flatMap((marketplace) => marketplace.plugins);
@@ -304,6 +312,24 @@ contractSuite("isolated Codex App Server state contract", () => {
     if (testRuntime) {
       rmSync(testRuntime, { recursive: true, force: true });
     }
+  });
+
+  it("maps the isolated App Server Skill list to stable installed entries", async () => {
+    const skills = await ownerClient.listSkills(workdir);
+
+    expect(Array.isArray(skills)).toBe(true);
+    expect(skills.every((skill) =>
+      typeof skill.name === "string" && typeof skill.description === "string")).toBe(true);
+  });
+
+  it("maps the isolated App Server MCP list to stable summaries", async () => {
+    const servers = await ownerClient.listMcpServers();
+
+    expect(Array.isArray(servers)).toBe(true);
+    expect(servers.every((server) =>
+      typeof server.name === "string"
+      && typeof server.authStatus === "string"
+      && Number.isInteger(server.toolCount))).toBe(true);
   });
 
   it("persists Fast defaults for peer reads and subsequently started threads", async () => {
