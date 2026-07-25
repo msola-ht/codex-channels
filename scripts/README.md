@@ -53,7 +53,9 @@
 - `smoke-package.mjs`：生成实际 tarball，在隔离目录安装并执行公开的 `codexc` 入口与配置预检。
 - `check-release-tag.mjs`：要求 Git Tag 与 `package.json` 版本严格一致，防止发布错版。
 - `sync-gateway-version.mjs`：以锁定的 Codex CLI 协议版本同步 `package.json`、锁文件和 Gateway 运行时版本；不维护独立版本号。
-- `doctor.mjs`：检查 npm 包、Node、Codex CLI、当前 TOML 配置、Workspace、Unix WebSocket 与系统服务状态，不输出敏感配置内容。
+- `doctor.mjs`：检查 npm 包、Node、Codex CLI、当前 TOML 配置、Workspace、Unix WebSocket、
+  `initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，不输出完整 User-Agent
+  或敏感配置内容。
 - `install-launchd.mjs`：渲染并安装 launchd plist；代理由 CLI 服务入口在每次启动时解析。
 - `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载两个 launchd 服务；启停、
   重启、状态和日志支持 `gateway`、`app-server`、`all` 目标，日常重启默认只更新 Gateway；

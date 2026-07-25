@@ -25,6 +25,7 @@ const packageMetadata = JSON.parse(readFileSync(join(packageDir, "package.json")
 const protocolMetadata = JSON.parse(
   readFileSync(join(packageDir, "src", "codex-protocol", "version.json"), "utf8"),
 );
+const requiredAppServerVersion = codexPackageVersion(protocolMetadata.codexCli);
 
 record("Codex Connect", true, `${packageMetadata.name}@${packageMetadata.version}`);
 record(
@@ -107,8 +108,14 @@ if (document) {
     record("Codex App Server", false, `Socket 不存在：${socketPath}`);
   } else {
     try {
-      await initializeUnixWebSocket(socketPath);
+      const appServerUserAgent = await initializeUnixWebSocket(socketPath);
       record("Codex App Server", true, `initialize 握手通过：${socketPath}`);
+      const actualVersion = appServerVersion(appServerUserAgent);
+      record(
+        "App Server 版本",
+        actualVersion === requiredAppServerVersion,
+        `${actualVersion ?? "无法识别"}（要求 ${requiredAppServerVersion}）`,
+      );
     } catch (error) {
       record("Codex App Server", false, `连接失败：${errorMessage(error)}`);
     }
@@ -225,7 +232,7 @@ function versionAtLeast(actual, minimum) {
 }
 
 async function initializeUnixWebSocket(socketPath) {
-  await new Promise((resolvePromise, rejectPromise) => {
+  return new Promise((resolvePromise, rejectPromise) => {
     const socket = new WebSocket("ws://localhost/", {
       perMessageDeflate: false,
       handshakeTimeout: 2_000,
@@ -234,7 +241,7 @@ async function initializeUnixWebSocket(socketPath) {
     let settled = false;
     const timeout = setTimeout(() => finish(new Error("initialize 握手超时")), 3_000);
     timeout.unref();
-    const finish = (error) => {
+    const finish = (error, response) => {
       if (settled) {
         return;
       }
@@ -244,7 +251,7 @@ async function initializeUnixWebSocket(socketPath) {
       if (error) {
         rejectPromise(error);
       } else {
-        resolvePromise();
+        resolvePromise(response);
       }
     };
     socket.once("open", () => {
@@ -288,12 +295,30 @@ async function initializeUnixWebSocket(socketPath) {
       }
       socket.send(
         JSON.stringify({ jsonrpc: "2.0", method: "initialized", params: {} }),
-        (error) => finish(error),
+        (error) => finish(
+          error,
+          typeof message.result?.userAgent === "string"
+            ? message.result.userAgent
+            : undefined,
+        ),
       );
     });
     socket.once("error", finish);
     socket.once("close", () => finish(new Error("WebSocket 在握手完成前关闭")));
   });
+}
+
+function codexPackageVersion(value) {
+  const match = /^codex-cli (\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/u.exec(value);
+  if (!match) {
+    throw new Error(`无法解析协议基线版本：${value}`);
+  }
+  return match[1];
+}
+
+function appServerVersion(userAgent) {
+  return /^[^/\s]+\/(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\s|\()/u
+    .exec(stringValue(userAgent))?.[1];
 }
 
 function errorMessage(error) {

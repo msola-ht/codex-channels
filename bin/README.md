@@ -11,7 +11,7 @@
 
 - `init`、`setup`、`config`：初始化、从统一菜单选择配置模块，或显示用户级
   `.codex-connect` 配置。
-- `doctor`：诊断当前 TOML 配置、安装与连通性，不改写配置。
+- `doctor`：诊断当前 TOML 配置、安装、共享 App Server 实际版本与连通性，不改写配置。
 - `start`：在前台启动已构建的 App Server 与 Gateway。
 - `remote`：连接共享 App Server 并启动原生 Codex TUI。
 - `ws`：列出或注册 Workspace。

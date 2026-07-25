@@ -83,7 +83,7 @@
 
 | 能力 | 当前使用的官方方法或通知 | 本项目入口与验证 |
 | --- | --- | --- |
-| 初始化与连接 | `initialize`、`initialized` | [`codex-client/`](../src/codex-client/README.md)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)；发送消息受生成的 `ClientRequest` / `ClientNotification` 约束 |
+| 初始化与连接 | `initialize`、`initialized` | [`codex-client/`](../src/codex-client/README.md)、[`doctor.mjs`](../scripts/doctor.mjs)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`codexc-cli.test.ts`](../tests/codexc-cli.test.ts)；发送消息受生成的 `ClientRequest` / `ClientNotification` 约束，Doctor 只从 `initialize.userAgent` 提取运行中 App Server 的实际版本并与锁定版本比较 |
 | Thread 生命周期 | `thread/list`、`thread/read`、`thread/start`、`thread/resume`、`thread/fork`、`thread/archive`、`thread/unarchive`、`thread/delete`、`thread/unsubscribe`、`thread/name/set`、`thread/compact/start`、`thread/closed`、`thread/archived`、`thread/deleted` | [`thread-adapter.ts`](../src/codex-client/thread-adapter.ts) 把官方响应映射为稳定快照，[`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 把生命周期通知映射为 [`session-routing/`](../src/session-routing/README.md) 的稳定事件；[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`session-router.test.ts`](../tests/session-router.test.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts)、[`thread-state-sync.test.ts`](../tests/thread-state-sync.test.ts) |
 | Thread 设置 | `thread/settings/updated`、`model/list`、`config/read`、`config/batchWrite` | [`model-port.ts`](../src/application/model-port.ts) 定义稳定模型边界，[`model-adapter.ts`](../src/codex-client/model-adapter.ts) 映射官方目录，[`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 隔离设置通知；[`thread-state-sync.ts`](../src/session-routing/thread-state-sync.ts)、[`model-selection-service.test.ts`](../tests/model-selection-service.test.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts) |
 | Turn 控制 | `turn/start`、`turn/steer`、`turn/interrupt`、`turn/started`、`error`、`turn/completed` | [`turn-port.ts`](../src/application/turn-port.ts) 定义稳定执行端口，[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts) 编码请求与响应，[`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 映射生命周期通知；[`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
@@ -105,7 +105,7 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 
 | 要查的问题 | 本项目入口 | 验证入口 |
 | --- | --- | --- |
-| CLI 版本和生成协议是否一致 | [`codex-protocol/`](../src/codex-protocol/README.md)、[`protocol-info.ts`](../src/codex-client/protocol-info.ts) | `npm run protocol:check` |
+| CLI、运行中 App Server 和生成协议是否一致 | [`codex-protocol/`](../src/codex-protocol/README.md)、[`protocol-info.ts`](../src/codex-client/protocol-info.ts)、[`doctor.mjs`](../scripts/doctor.mjs) | `npm run protocol:check`、`codexc doctor`、[`codexc-cli.test.ts`](../tests/codexc-cli.test.ts) |
 | Unix WebSocket 如何连接 | [`codex-client/`](../src/codex-client/README.md) | [`unix-websocket-transport.test.ts`](../tests/unix-websocket-transport.test.ts) |
 | JSON-RPC 如何分流和清理请求 | [`json-rpc.ts`](../src/codex-client/json-rpc.ts) | [`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
 | Turn、Review 和 Goal 如何隔离官方协议 | [`turn-port.ts`](../src/application/turn-port.ts)、[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts) | [`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts) |

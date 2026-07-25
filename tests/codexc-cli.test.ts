@@ -653,6 +653,7 @@ describe("codexc CLI", () => {
         readFileSync(resolve("src/codex-protocol/version.json"), "utf8"),
       ) as { codexCli: string }
     ).codexCli;
+    const expectedAppServerVersion = expectedCodexCliVersion.replace(/^codex-cli /u, "");
     const fakeCodex = join(root, "codex");
     writeFileSync(
       fakeCodex,
@@ -662,6 +663,7 @@ describe("codexc CLI", () => {
     const configPath = join(home, "config.toml");
     const socketPath = join(root, "app.sock");
     let initializedReceived = false;
+    let appServerVersion = expectedAppServerVersion;
     const secret = "123456:test-secret-token";
     updateGatewayConfig(configPath, (document) => {
       const telegram = table(document.telegram);
@@ -678,7 +680,16 @@ describe("codexc CLI", () => {
       client.on("message", (data) => {
         const message = JSON.parse(data.toString());
         if (message.method === "initialize") {
-          client.send(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { platformFamily: "unix", platformOs: "macos" } }));
+          client.send(JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              userAgent: `codex_cli_rs/${appServerVersion} (macOS 26.0; arm64)`,
+              codexHome: home,
+              platformFamily: "unix",
+              platformOs: "macos",
+            },
+          }));
         }
         if (message.method === "initialized") {
           initializedReceived = true;
@@ -691,16 +702,49 @@ describe("codexc CLI", () => {
     });
 
     try {
-      const { stdout } = await execFileAsync(process.execPath, [cli, "doctor"], {
-        cwd: workspace,
-        env: environment,
-        encoding: "utf8",
+      const { stdout } = await execFileAsync(
+        process.execPath,
+        [cli, "doctor"],
+        {
+          cwd: workspace,
+          env: environment,
+          encoding: "utf8",
+        },
+      ).catch((error: Error & { stdout?: string; stderr?: string }) => {
+        throw new Error(
+          `doctor 执行失败\n${error.stdout ?? ""}\n${error.stderr ?? ""}`,
+          { cause: error },
+        );
       });
       expect(stdout).toContain(`[通过] Codex CLI：${expectedCodexCliVersion}`);
       expect(stdout).toContain("[通过] Codex App Server：initialize 握手通过");
+      expect(stdout).toContain(
+        `[通过] App Server 版本：${expectedAppServerVersion}（要求 ${expectedAppServerVersion}）`,
+      );
       expect(stdout).toContain("诊断通过");
       expect(stdout).not.toContain(secret);
       expect(initializedReceived).toBe(true);
+
+      appServerVersion = "0.0.0";
+      const mismatched = await execFileAsync(
+        process.execPath,
+        [cli, "doctor"],
+        {
+          cwd: workspace,
+          env: environment,
+          encoding: "utf8",
+        },
+      ).then(
+        ({ stdout: mismatchStdout }) => ({ status: 0, stdout: mismatchStdout }),
+        (error: Error & { code?: number; stdout?: string }) => ({
+          status: error.code,
+          stdout: error.stdout ?? "",
+        }),
+      );
+      expect(mismatched.status).toBe(1);
+      expect(mismatched.stdout).toContain(
+        `[失败] App Server 版本：0.0.0（要求 ${expectedAppServerVersion}）`,
+      );
     } finally {
       for (const client of webSocketServer.clients) {
         client.terminate();

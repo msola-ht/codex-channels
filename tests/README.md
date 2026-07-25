@@ -45,7 +45,7 @@
 - 统一 Logger 异常元数据约束，以及 Token、Authorization、Password 和 Cookie 字段脱敏。
 - TOML、热加载分类、标准环境变量、macOS 系统代理和 Linux GNOME 代理的优先级；无代理时不
   注入空环境变量。
-- CLI Doctor 的严格 TOML Schema 校验、敏感错误清洗和只读诊断；项目规则限定当前 Workspace、
+- CLI Doctor 的严格 TOML Schema 校验、共享 App Server 握手与实际版本匹配、敏感错误清洗和只读诊断；项目规则限定当前 Workspace、
   拒绝远程覆盖和符号链接路径逃逸；CLI 分级帮助、规范命令名称及 macOS/Linux 服务目标选择；
   一级模块使用完整依赖允许列表并要求跨模块只导入公开入口；Session Routing 不得依赖具体
   Client 或生成协议，Conversation Turn 测试不得伪装成完整 Client；生产源码只有 Codex Client
