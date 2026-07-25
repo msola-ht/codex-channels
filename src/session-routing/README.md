@@ -6,9 +6,10 @@
 
 - `index.ts`：本模块的公开导出入口。
 - `thread-port.ts`：定义 Thread 查询与生命周期窄端口，以及只包含路由、恢复和会话列表所需字段的
-  稳定快照；运行中 Turn 以 `activeTurnId` 表示，不向业务层暴露完整官方 Turn。
-- `router.ts`：选择、搜索、绑定、恢复、归档和解绑 Thread，协调持久化映射、订阅恢复、模型设置及
-  `thread/unsubscribe`；切换目标恢复成功后才解除当前绑定，启动恢复只有在 Thread 明确不存在、
+  稳定快照；运行中 Turn 以 `activeTurnId` 表示，恢复会话另携带压缩 Item ID，不向业务层暴露
+  完整官方 Turn。
+- `router.ts`：选择、搜索、绑定、恢复、归档和解绑 Thread，协调持久化映射、订阅恢复、模型设置、
+  压缩 Item ID 及 `thread/unsubscribe`；切换目标恢复成功后才解除当前绑定，启动恢复只有在 Thread 明确不存在、
   已删除或已归档时才移除持久化绑定；订阅恢复时把稳定 Thread 快照交回组合根。
 - `thread-state-sync.ts`：定义并消费不含协议信封的稳定 Thread 路由事件，同步模型、思考强度和
   服务层级；归档或删除事件会清理对应绑定，关闭事件只表示无订阅者的空闲 Thread 已从

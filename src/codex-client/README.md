@@ -11,8 +11,8 @@
 - `json-rpc.ts`：使用生成的 `ClientRequest` / `ClientNotification` 约束出站消息，并处理
   initialize、请求关联、通知与 Server Request 分流、超时、断线清理及安全重试；初始化期间
   已失效的连接不得重新进入 connected 状态。
-- `thread-adapter.ts`：把当前版本生成的官方 Thread、状态、来源、运行 Turn 和模型设置响应映射为
-  `session-routing` 拥有的稳定快照；缺少路由必需字段时失败关闭。
+- `thread-adapter.ts`：把当前版本生成的官方 Thread、状态、来源、运行 Turn、上下文压缩 Item ID
+  和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；缺少必需字段时失败关闭。
 - `turn-adapter.ts`：把 Application 的文本与本地图片输入编码为官方 `UserInput`，并映射
   Turn、Review 和 Goal 响应；缺少稳定结果必需字段时失败关闭。
 - `model-adapter.ts`：把当前版本官方模型目录裁剪为 Application 拥有的模型选项，过滤不可见项，

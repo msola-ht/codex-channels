@@ -56,7 +56,22 @@ export function toThreadSession(response: ThreadSessionResponse): ThreadSession 
     model: response.model,
     reasoningEffort: response.reasoningEffort,
     serviceTier: response.serviceTier,
+    contextCompactionItemIds: contextCompactionItemIds(response.thread),
   };
+}
+
+function contextCompactionItemIds(thread: Thread): string[] {
+  const ids = new Set<string>();
+  for (const turn of thread.turns) {
+    for (const item of turn.items) {
+      if (item.type !== "contextCompaction") {
+        continue;
+      }
+      requireString(item.id, "context compaction item id");
+      ids.add(item.id);
+    }
+  }
+  return [...ids];
 }
 
 function toThreadStatus(status: Thread["status"]): ThreadStatus {

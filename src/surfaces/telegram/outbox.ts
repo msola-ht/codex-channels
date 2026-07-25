@@ -233,6 +233,9 @@ export class TelegramOutbox {
                       model: event.model,
                       effort: event.effort ?? null,
                       serviceTier: event.serviceTier ?? null,
+                      ...(event.contextCompactionCount !== undefined
+                        ? { contextCompactionCount: event.contextCompactionCount }
+                        : {}),
                       ...(event.weeklyLimit ? { weeklyLimit: event.weeklyLimit } : {}),
                       ...(event.goal ? { goal: event.goal } : {}),
                     }

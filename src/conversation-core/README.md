@@ -5,8 +5,9 @@
 ## 文件
 
 - `index.ts`：本模块的公开导出入口。
-- `core.ts`：维护活动 Turn、Token、当前 Goal、最近 Diff/Plan 和事件去重状态，把稳定输入事件归约为文本、
-  操作、状态和完成事件；可重试错误不污染最终完成状态，Thread 与全局 warning 分开路由。
+- `core.ts`：维护活动 Turn、Token、当前 Goal、上下文压缩 Item ID、最近 Diff/Plan 和事件去重状态，
+  把稳定输入事件归约为文本、操作、状态和完成事件；可重试错误不污染最终完成状态，Thread 与全局
+  warning 分开路由。
 - `input-events.ts`：定义 Client 可投递给 Core 的平台无关可辨识输入联合，不含 RPC method、
   未知 params 或生成协议类型。
 - `events.ts`：定义 Conversation 目标、稳定 Token、Plan、Goal、Turn、额度、账户和 MCP 类型，以及
@@ -18,5 +19,6 @@
 本模块不解析官方 Notification 或 Item；协议校验、Item 分类、操作摘要和敏感命令清洗均由
 `codex-client` 适配边界完成。
 Conversation 目标由 `surface + accountId + conversationId` 唯一标识；Core 不解释平台账号或聊天 ID。
-当前 Goal 和最近 Diff/Plan 仅为进程内界面缓存，Thread 关闭、归档、删除或连接断开时清理，
-不属于持久化事实来源。
+当前 Goal、上下文压缩实时增量和最近 Diff/Plan 仅为进程内界面缓存，Thread 关闭、归档、删除
+或连接断开时清理，不属于持久化事实来源。压缩总次数通过 Router 持有的 `thread/resume` 派生
+Item ID 与实时完成 Item 合并并去重。

@@ -68,6 +68,7 @@ describe("ConversationService model selection", () => {
       allBindings: () => [],
       targetForThread: () => target,
       modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
       current: () => ({
         target,
         workspaceId: "main",
@@ -141,6 +142,7 @@ describe("ConversationService model selection", () => {
         activeTurn: () => undefined,
         tokenUsage: () => undefined,
         goal: () => goal,
+        contextCompactionCount: () => 2,
         weeklyRateLimit: () => undefined,
       } as unknown as ConversationCore,
       {
@@ -156,7 +158,11 @@ describe("ConversationService model selection", () => {
       queryPort(),
     );
 
-    expect(service.status(target)).toMatchObject({ threadId: "thread-1", goal });
+    expect(service.status(target)).toMatchObject({
+      threadId: "thread-1",
+      goal,
+      contextCompactionCount: 2,
+    });
   });
 
   it("applies project rules only to the selected authorized Workspace", async () => {

@@ -20,6 +20,7 @@ describe("ConversationCore", () => {
       allBindings: () => [],
       targetForThread: () => undefined,
       modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
     } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
 
@@ -55,6 +56,7 @@ describe("ConversationCore", () => {
       allBindings: () => [],
       targetForThread: () => target,
       modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
     }, output);
 
     handleNotification(core, {
@@ -113,6 +115,7 @@ describe("ConversationCore", () => {
         effort: "high",
         serviceTier: "fast",
       }),
+      contextCompactionItemIdsForThread: () => undefined,
     } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
     core.rememberRateLimits([{
@@ -174,6 +177,44 @@ describe("ConversationCore", () => {
     expect(completions[1]).not.toHaveProperty("tokenUsage");
   });
 
+  it("restores and deduplicates completed context compactions for thread status", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+    const core = new ConversationCore({
+      allBindings: () => [],
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => ["compact-history"],
+    }, output);
+
+    const completedCompaction = {
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: { type: "contextCompaction", id: "compact-live" },
+      },
+    } satisfies RpcNotification;
+    handleNotification(core, completedCompaction);
+    handleNotification(core, completedCompaction);
+    handleNotification(core, {
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed", error: null },
+      },
+    });
+    await output.close();
+
+    expect(core.contextCompactionCount("thread-1")).toBe(2);
+    expect(events.find((event) => event.type === "turn.completed"))
+      .toHaveProperty("contextCompactionCount", 2);
+  });
+
   it("does not invent a successful completion for a malformed turn status", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const events: OutputEvent[] = [];
@@ -185,6 +226,7 @@ describe("ConversationCore", () => {
       allBindings: () => [],
       targetForThread: () => target,
       modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
     }, output);
 
     handleNotification(core, {
@@ -210,6 +252,7 @@ describe("ConversationCore", () => {
       allBindings: () => [],
       targetForThread: () => target,
       modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
     }, output);
 
     handleNotification(core, {
@@ -245,6 +288,7 @@ describe("ConversationCore", () => {
       allBindings: () => [],
       targetForThread: (threadId: string) => threadId === "thread-1" ? target : undefined,
       modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
     } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
 
@@ -293,6 +337,7 @@ describe("ConversationCore", () => {
       allBindings: () => [],
       targetForThread: () => target,
       modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
     } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
 
@@ -325,6 +370,7 @@ describe("ConversationCore", () => {
       allBindings: () => [{ target, threadId: "thread-1" }],
       targetForThread: () => target,
       modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
     } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
 
@@ -378,6 +424,7 @@ describe("ConversationCore", () => {
       allBindings: () => [],
       targetForThread: () => target,
       modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
     } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
     const startedCommand = {
@@ -453,6 +500,7 @@ describe("ConversationCore", () => {
       allBindings: () => [],
       targetForThread: () => undefined,
       modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
     }, output);
 
     handleNotification(core, {
@@ -508,6 +556,7 @@ describe("ConversationCore", () => {
       allBindings: () => [{ target, threadId: "thread-1" }],
       targetForThread: () => target,
       modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
     }, output);
 
     handleNotification(core, {
@@ -580,6 +629,7 @@ describe("ConversationCore", () => {
       allBindings: () => [{ target, threadId: "thread-1" }],
       targetForThread: () => undefined,
       modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
     }, output);
 
     handleNotification(core, {
@@ -604,6 +654,7 @@ describe("ConversationCore", () => {
       allBindings: () => [],
       targetForThread: () => undefined,
       modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
     }, output);
 
     core.rememberRateLimits([{

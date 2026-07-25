@@ -42,6 +42,7 @@ function session(
     model: "gpt-main",
     reasoningEffort: "medium",
     serviceTier: "default",
+    contextCompactionItemIds: [],
     ...overrides,
   };
 }
@@ -129,6 +130,7 @@ describe("SessionRouter", () => {
         return session(thread(threadId, { type: "idle" }), {
           reasoningEffort: "high",
           serviceTier: "priority",
+          contextCompactionItemIds: ["compact-1", "compact-2"],
         });
       },
     });
@@ -145,6 +147,8 @@ describe("SessionRouter", () => {
       effort: "high",
       serviceTier: "priority",
     });
+    expect(router.contextCompactionItemIdsForThread("bound"))
+      .toEqual(["compact-1", "compact-2"]);
   });
 
   it("reports an active Turn when restoring a bound Thread subscription", async () => {

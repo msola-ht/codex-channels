@@ -434,6 +434,7 @@ describe("formatStatus", () => {
       modelPending: false,
       effortPending: false,
       fastModePending: false,
+      contextCompactionCount: 2,
       goal: {
         threadId: "thread-1",
         objective: "完成 Gateway",
@@ -472,6 +473,7 @@ describe("formatStatus", () => {
     expect(text).toContain("模型：gpt-main");
     expect(text).toContain("思考强度：high");
     expect(text).toContain("Fast 模式：开启");
+    expect(text).toContain("上下文压缩：2 次");
     expect(text).toContain("Goal 状态：进行中");
     expect(text).toContain("Goal 目标：完成 Gateway");
     expect(text).toContain("Goal 用量：12.5 K / 100 K · 1分30秒");
@@ -532,6 +534,7 @@ describe("formatContextUsage", () => {
         model: "gpt-main",
         effort: "high",
         serviceTier: "priority",
+        contextCompactionCount: 2,
         weeklyLimit: {
           usedPercent: 42,
           windowDurationMins: 10_080,
@@ -553,6 +556,7 @@ describe("formatContextUsage", () => {
       "当前模型：gpt-main",
       "思考强度：high",
       "Fast 模式：开启",
+      "上下文压缩：2 次",
       "周限：已使用 42%",
       "Goal：进行中 · 12.5 K / 100 K · 1分30秒",
     ].join("\n"));

@@ -88,6 +88,7 @@ export interface ConversationStatus {
   effortPending: boolean;
   fastModePending: boolean;
   goal?: ThreadGoal;
+  contextCompactionCount?: number;
   tokenUsage?: ThreadTokenUsage;
   weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>;
 }
@@ -473,6 +474,9 @@ export class ConversationService {
     const workspace = this.router.workspace(target);
     const tokenUsage = binding ? this.core.tokenUsage(binding.threadId) : undefined;
     const goal = binding ? this.core.goal(binding.threadId) : undefined;
+    const contextCompactionCount = binding
+      ? this.core.contextCompactionCount(binding.threadId)
+      : undefined;
     const weeklyLimit = this.core.weeklyRateLimit();
     const model = this.models.status(target);
     return {
@@ -480,6 +484,7 @@ export class ConversationService {
       ...(active ? { turnId: active.turnId } : {}),
       ...(tokenUsage ? { tokenUsage } : {}),
       ...(goal ? { goal } : {}),
+      ...(contextCompactionCount !== undefined ? { contextCompactionCount } : {}),
       ...(weeklyLimit ? { weeklyLimit } : {}),
       workspaceId: workspace.id,
       workspaceName: workspace.name,

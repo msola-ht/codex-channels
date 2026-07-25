@@ -362,6 +362,7 @@ contractSuite("isolated Codex App Server state contract", () => {
       const standardThread = await ownerClient.startThread(workdir);
       startedThreadIds.push(standardThread.thread.id);
       expect(standardThread.serviceTier).toBe("default");
+      expect(standardThread.contextCompactionItemIds).toEqual([]);
 
       await ownerClient.writeDefaultFastMode(true);
       await expectConfiguredTier(peerClient, workdir, "fast");
@@ -433,8 +434,9 @@ contractSuite("isolated Codex App Server state contract", () => {
         }
       });
       try {
-        await peerClient.resumeThread(threadId, workdir);
+        const resumed = await peerClient.resumeThread(threadId, workdir);
         peerSubscribed = true;
+        expect(resumed.contextCompactionItemIds).toEqual([]);
         await waitFor(
           () => resumedGoalObjective === updated.objective,
           2_000,

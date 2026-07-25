@@ -146,6 +146,7 @@ class FakeTransport extends BaseTransport {
   skillsResult: Record<string, unknown> = { data: [] };
   disconnectAfterInitialized = false;
   threadListData: Array<Record<string, unknown>> = [];
+  resumeThreadData: Record<string, unknown> = appServerThread();
   goal = appServerGoal();
 
   async connect(): Promise<void> {}
@@ -200,6 +201,20 @@ class FakeTransport extends BaseTransport {
             id: decoded.id,
             result: {
               thread: appServerThread(),
+              model: "gpt-default",
+              reasoningEffort: "medium",
+              serviceTier: "default",
+            },
+          }),
+        ),
+      );
+    } else if (decoded.method === "thread/resume") {
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({
+            id: decoded.id,
+            result: {
+              thread: this.resumeThreadData,
               model: "gpt-default",
               reasoningEffort: "medium",
               serviceTier: "default",
@@ -599,6 +614,33 @@ describe("JsonRpcClient", () => {
       source: "other",
       activeTurnId: "turn-running",
     }]);
+  });
+
+  it("extracts context compaction item ids when resuming a thread", async () => {
+    const transport = new FakeTransport();
+    transport.resumeThreadData = appServerThread({
+      turns: [{
+        id: "turn-1",
+        items: [
+          { type: "contextCompaction", id: "compact-1" },
+          { type: "contextCompaction", id: "compact-2" },
+        ],
+        itemsView: "full",
+        status: "completed",
+        error: null,
+        startedAt: 1,
+        completedAt: 2,
+        durationMs: 1_000,
+      }],
+    });
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    const session = await client.resumeThread("thread-1", "/tmp/project");
+
+    expect(session.contextCompactionItemIds).toEqual(["compact-1", "compact-2"]);
   });
 
   it("fails closed when an official Thread response lacks a required routing field", async () => {

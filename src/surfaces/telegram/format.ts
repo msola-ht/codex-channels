@@ -270,6 +270,9 @@ export function formatStatus(status: ConversationStatus): string {
     `思考强度：${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
     `Fast 模式：${status.threadId ? formatFastMode(status.serviceTier) : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`,
   ];
+  if (status.contextCompactionCount !== undefined) {
+    lines.push(`上下文压缩：${status.contextCompactionCount} 次`);
+  }
   if (status.goal) {
     lines.push(
       `Goal 状态：${formatGoalStatus(status.goal.status)}`,
@@ -303,6 +306,7 @@ export function formatContextUsage(
     model: string;
     effort: string | null;
     serviceTier: string | null;
+    contextCompactionCount?: number;
     weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>;
     goal?: ThreadGoal;
   },
@@ -322,6 +326,9 @@ export function formatContextUsage(
           `当前模型：${settings.model}`,
           `思考强度：${settings.effort ?? "模型默认"}`,
           `Fast 模式：${formatFastMode(settings.serviceTier)}`,
+          ...(settings.contextCompactionCount !== undefined
+            ? [`上下文压缩：${settings.contextCompactionCount} 次`]
+            : []),
           ...(settings.weeklyLimit
             ? [`周限：${formatWeeklyLimit(settings.weeklyLimit)}`]
             : []),

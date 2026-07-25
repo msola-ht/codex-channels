@@ -27,6 +27,7 @@ export interface ThreadListOptions {
 export class SessionRouter {
   private readonly forceNew = new Set<string>();
   private readonly modelSettingsByThread = new Map<string, ThreadModelSettings>();
+  private readonly contextCompactionItemIdsByThread = new Map<string, readonly string[]>();
 
   constructor(
     private readonly codex: ThreadLifecyclePort,
@@ -72,6 +73,10 @@ export class SessionRouter {
     return this.modelSettingsByThread.get(threadId);
   }
 
+  contextCompactionItemIdsForThread(threadId: string): readonly string[] | undefined {
+    return this.contextCompactionItemIdsByThread.get(threadId);
+  }
+
   updateModelSettings(threadId: string, settings: ThreadModelSettings): void {
     if (this.bindings.getByThread(threadId)) {
       this.modelSettingsByThread.set(threadId, settings);
@@ -93,6 +98,10 @@ export class SessionRouter {
         const workspace = this.workspaces.require(binding.workspaceId);
         const resumed = await this.codex.resumeThread(binding.threadId, workspace.cwd);
         this.captureModelSettings(resumed.thread.id, resumed.model, resumed.reasoningEffort, resumed.serviceTier);
+        this.contextCompactionItemIdsByThread.set(
+          resumed.thread.id,
+          resumed.contextCompactionItemIds,
+        );
         restoredBinding = {
           target: binding.target,
           workspaceId: workspace.id,
@@ -149,6 +158,10 @@ export class SessionRouter {
       if (candidate) {
         const resumed = await this.codex.resumeThread(candidate.id, workspace.cwd);
         this.captureModelSettings(resumed.thread.id, resumed.model, resumed.reasoningEffort, resumed.serviceTier);
+        this.contextCompactionItemIdsByThread.set(
+          resumed.thread.id,
+          resumed.contextCompactionItemIds,
+        );
         const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
         this.bindings.bind(binding);
         return binding;
@@ -157,6 +170,10 @@ export class SessionRouter {
 
     const started = await this.codex.startThread(workspace.cwd);
     this.captureModelSettings(started.thread.id, started.model, started.reasoningEffort, started.serviceTier);
+    this.contextCompactionItemIdsByThread.set(
+      started.thread.id,
+      started.contextCompactionItemIds,
+    );
     const binding = { target, workspaceId: workspace.id, threadId: started.thread.id, sessionId: started.thread.sessionId };
     this.bindings.bind(binding);
     this.forceNew.delete(targetKey);
@@ -175,6 +192,10 @@ export class SessionRouter {
       await this.detach(target);
     }
     this.captureModelSettings(resumed.thread.id, resumed.model, resumed.reasoningEffort, resumed.serviceTier);
+    this.contextCompactionItemIdsByThread.set(
+      resumed.thread.id,
+      resumed.contextCompactionItemIds,
+    );
     const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
     this.bindings.bind(binding);
     this.forceNew.delete(this.key(target));
@@ -205,6 +226,10 @@ export class SessionRouter {
     const workspace = this.workspaces.require(current.workspaceId);
     const forked = await this.codex.forkThread(current.threadId, workspace.cwd);
     this.captureModelSettings(forked.thread.id, forked.model, forked.reasoningEffort, forked.serviceTier);
+    this.contextCompactionItemIdsByThread.set(
+      forked.thread.id,
+      forked.contextCompactionItemIds,
+    );
     await this.detach(target);
     const binding = {
       target,
@@ -236,6 +261,7 @@ export class SessionRouter {
     const binding = this.bindings.getByThread(threadId);
     if (binding) {
       this.modelSettingsByThread.delete(threadId);
+      this.contextCompactionItemIdsByThread.delete(threadId);
       this.bindings.unbind(binding.target);
       return binding.target;
     }
@@ -247,6 +273,7 @@ export class SessionRouter {
     if (current) {
       await this.codex.unsubscribeThread(current.threadId);
       this.modelSettingsByThread.delete(current.threadId);
+      this.contextCompactionItemIdsByThread.delete(current.threadId);
       this.bindings.unbind(target);
     }
   }

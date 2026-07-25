@@ -29,6 +29,7 @@ export class ConversationCore {
   private readonly usageByThread = new Map<string, ThreadTokenUsage>();
   private readonly usageTurnByThread = new Map<string, string>();
   private readonly goalsByThread = new Map<string, ThreadGoal>();
+  private readonly contextCompactionItemIdsByThread = new Map<string, Set<string>>();
   private readonly seenUserMessages = new Set<string>();
   private readonly phaseByItem = new Map<string, MessagePhase | null>();
   private readonly artifactsByThread = new Map<string, TurnArtifacts>();
@@ -67,6 +68,23 @@ export class ConversationCore {
     return this.goalsByThread.get(threadId);
   }
 
+  private rememberContextCompactions(threadId: string, itemIds: readonly string[]): void {
+    const known = this.contextCompactionItemIdsByThread.get(threadId) ?? new Set<string>();
+    for (const itemId of itemIds) {
+      known.add(itemId);
+    }
+    this.contextCompactionItemIdsByThread.set(threadId, known);
+  }
+
+  contextCompactionCount(threadId: string): number | undefined {
+    const restored = this.router.contextCompactionItemIdsForThread(threadId);
+    const live = this.contextCompactionItemIdsByThread.get(threadId);
+    if (restored === undefined && live === undefined) {
+      return undefined;
+    }
+    return new Set([...(restored ?? []), ...(live ?? [])]).size;
+  }
+
   rememberRateLimits(snapshots: readonly RateLimitSnapshot[]): void {
     for (const snapshot of snapshots) {
       const limitId = snapshot.limitId ?? "codex";
@@ -100,6 +118,7 @@ export class ConversationCore {
     this.usageByThread.clear();
     this.usageTurnByThread.clear();
     this.goalsByThread.clear();
+    this.contextCompactionItemIdsByThread.clear();
     this.seenUserMessages.clear();
     this.phaseByItem.clear();
     this.mcpStatus.clear();
@@ -194,6 +213,12 @@ export class ConversationCore {
         this.publishUserMessage(event);
         return;
       case "item.operation.updated":
+        if (
+          event.operation.kind === "contextCompaction"
+          && event.operation.status === "completed"
+        ) {
+          this.rememberContextCompactions(event.threadId, [event.operation.itemId]);
+        }
         this.publishForThread(event.threadId, {
           type: "operation.updated",
           threadId: event.threadId,
@@ -224,6 +249,7 @@ export class ConversationCore {
         const modelSettings = this.router.modelSettingsForThread(event.threadId);
         const weeklyLimit = this.weeklyRateLimit();
         const goal = this.goalsByThread.get(event.threadId);
+        const contextCompactionCount = this.contextCompactionCount(event.threadId);
         this.errorsByTurn.delete(event.turnId);
         this.publish({
           type: "turn.completed",
@@ -242,6 +268,7 @@ export class ConversationCore {
             : {}),
           ...(weeklyLimit ? { weeklyLimit } : {}),
           ...(goal ? { goal } : {}),
+          ...(contextCompactionCount !== undefined ? { contextCompactionCount } : {}),
         });
         return;
       }
@@ -259,6 +286,7 @@ export class ConversationCore {
         this.usageByThread.delete(event.threadId);
         this.usageTurnByThread.delete(event.threadId);
         this.goalsByThread.delete(event.threadId);
+        this.contextCompactionItemIdsByThread.delete(event.threadId);
         this.clearSeenUserMessages(event.threadId);
         this.clearItemPhases(event.threadId);
         this.artifactsByThread.delete(event.threadId);

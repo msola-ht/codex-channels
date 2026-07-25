@@ -22,6 +22,7 @@ export interface ThreadSession {
   model: string;
   reasoningEffort: string | null;
   serviceTier: string | null;
+  contextCompactionItemIds: readonly string[];
 }
 
 export interface ThreadQueryOptions {

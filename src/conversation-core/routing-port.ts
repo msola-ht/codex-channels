@@ -15,4 +15,5 @@ export interface ConversationRoutingPort {
   allBindings(): RoutedThread[];
   targetForThread(threadId: string): ConversationTarget | undefined;
   modelSettingsForThread(threadId: string): RoutedThreadModelSettings | undefined;
+  contextCompactionItemIdsForThread(threadId: string): readonly string[] | undefined;
 }
