@@ -119,6 +119,13 @@ describe("GatewayApplication startup cleanup", () => {
     const rateLimits = new Promise<AccountRateLimits>((resolve) => {
       resolveRateLimits = resolve;
     });
+    const closes = {
+      bindings: 0,
+      codex: 0,
+      inbound: 0,
+      output: 0,
+      surface: 0,
+    };
     let surfaceStarts = 0;
     const application = Object.create(
       GatewayApplication.prototype,
@@ -137,14 +144,20 @@ describe("GatewayApplication startup cleanup", () => {
           platformOs: "linux",
         }),
         accountRateLimits: () => rateLimits,
-        close: async () => undefined,
+        close: async () => {
+          closes.codex += 1;
+        },
       },
       inbound: {
         publish: () => undefined,
-        close: async () => undefined,
+        close: async () => {
+          closes.inbound += 1;
+        },
       },
       output: {
-        close: async () => undefined,
+        close: async () => {
+          closes.output += 1;
+        },
       },
       interactions: {
         cancelAll: () => undefined,
@@ -162,10 +175,14 @@ describe("GatewayApplication startup cleanup", () => {
         start: async () => {
           surfaceStarts += 1;
         },
-        stop: async () => undefined,
+        stop: async () => {
+          closes.surface += 1;
+        },
       },
       bindings: {
-        close: () => undefined,
+        close: () => {
+          closes.bindings += 1;
+        },
       },
     });
     const gateway = application as unknown as GatewayApplication;
@@ -178,6 +195,13 @@ describe("GatewayApplication startup cleanup", () => {
     await expect(starting).rejects.toThrow("Gateway 正在停止");
     await expect(stopping).resolves.toBeUndefined();
     expect(surfaceStarts).toBe(0);
+    expect(closes).toEqual({
+      bindings: 1,
+      codex: 2,
+      inbound: 1,
+      output: 1,
+      surface: 1,
+    });
   });
 
   it("cancels and awaits the reconnect task during shutdown", async () => {

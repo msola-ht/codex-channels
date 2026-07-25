@@ -38,5 +38,6 @@ Server Request，`approval` 只拥有稳定请求、授权语义和用户决定�
 保持 Surface、账号和 Actor 三层匹配；`event-bus` 已收紧关闭终态、并发等待和慢消费者超时；
 `observability` 已限制异常元数据并补齐凭据字段脱敏；`config` 已集中热加载分类并清理空代理环境；
 `surfaces` 已确认授权、输出隔离、审批顺序、平台超时和并发关闭语义。
+阶段 8 也已完成：`bootstrap` 保持唯一组合根，并统一启动回滚、重连取消和单次组件关闭。
 整体范围见
 [`Codex CLI 协议边界收敛计划`](../docs/architecture-convergence-plan.md)。

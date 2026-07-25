@@ -66,6 +66,7 @@ export class GatewayApplication {
   private removeRpcDisconnect: (() => void) | undefined;
   private startTask: Promise<void> | undefined;
   private stopTask: Promise<void> | undefined;
+  private shutdownTask: Promise<void> | undefined;
   private startupSettled = false;
   private reconnecting: Promise<void> | undefined;
   private reconnectAbort: AbortController | undefined;
@@ -281,7 +282,12 @@ export class GatewayApplication {
     }
   }
 
-  private async shutdownComponents(): Promise<void> {
+  private shutdownComponents(): Promise<void> {
+    this.shutdownTask ??= this.shutdownComponentsOnce();
+    return this.shutdownTask;
+  }
+
+  private async shutdownComponentsOnce(): Promise<void> {
     this.removeRpcNotification?.();
     this.removeRpcNotification = undefined;
     this.removeRpcDisconnect?.();
