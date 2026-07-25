@@ -286,6 +286,8 @@ RUN_CODEX_INTEGRATION=1 npm test -- --run tests/real-app-server.test.ts
 - [`docs/codex-cli-upgrade.md`](docs/codex-cli-upgrade.md)：CLI 协议生成、Codex 审查和验证流程。
 - [`docs/architecture-convergence-plan.md`](docs/architecture-convergence-plan.md)：协议边界收敛、模块复核与分阶段实施计划。
 - [`docs/surface-integration-guide.md`](docs/surface-integration-guide.md)：新增通讯渠道的组合式模块、授权、配置、审批与验证边界。
+- [`docs/feishu-surface-plan.md`](docs/feishu-surface-plan.md)：飞书 Surface 的组合式模块设计、分阶段范围、风险和验收标准。
+- [`docs/feishu-reference-index.md`](docs/feishu-reference-index.md)：飞书官方资料、SDK 版本基线、支持矩阵与本地实现映射。
 - [`config.example.toml`](config.example.toml)：统一 Gateway 配置示例。
 - [`src/`](src/README.md)：源码模块与边界。
 - [`bin/`](bin/README.md)：npm CLI 入口。
