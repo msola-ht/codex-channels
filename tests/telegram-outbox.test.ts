@@ -800,6 +800,16 @@ describe("TelegramOutbox", () => {
         windowDurationMins: 10_080,
         resetsAt: null,
       },
+      goal: {
+        threadId: "thread-1",
+        objective: "完成 Gateway",
+        status: "active",
+        tokenBudget: 100_000,
+        tokensUsed: 12_500,
+        timeUsedSeconds: 90,
+        createdAt: 1_000,
+        updatedAt: 2_000,
+      },
     });
     await settle();
     await outbox.close();
@@ -812,6 +822,7 @@ describe("TelegramOutbox", () => {
         "<b>思考强度：</b>medium",
         "<b>Fast 模式：</b>开启",
         "<b>周限：</b>已使用 42%",
+        "<b>Goal：</b>进行中 · 12.5 K / 100 K · 1分30秒",
       ].join("\n"),
     ]);
     expect(api.sendOptions[1]).toEqual({

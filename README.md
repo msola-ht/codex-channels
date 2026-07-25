@@ -7,7 +7,7 @@
 ## 功能
 
 - 在 Telegram 中发送文本和 PNG/JPEG 图片。
-- 查看 Codex 流式回复、格式化最终回复、操作过程、计划、Diff、用量和额度；长文本自动折叠，超长代码以预览加完整文件发送；每轮结束显示上下文、当前模型、思考强度、Fast 模式和周限。
+- 查看 Codex 流式回复、格式化最终回复、操作过程、计划、Diff、Goal、用量和额度；长文本自动折叠，超长代码以预览加完整文件发送；`/status` 和每轮结束状态卡显示当前 Goal 状态。
 - Telegram 通知按逻辑事件降噪：过程、状态、上下文和后续分片静默发送；最终回复、审批、用户输入与严重错误保留提醒。
 - Gateway 启动时通知当前系统、版本、App Server 返回的上游 User-Agent、本地连接方式、Workspace、Thread、模型、思考强度、Fast 模式和周限。
 - 处理命令、文件修改、临时权限、用户输入及 MCP 审批。
@@ -163,7 +163,9 @@ Turn 完成后逐条启动，Gateway 重启、Thread 切换或排队 Turn 启动
 也通过 App Server 保存用户级默认值，因此之后重启 `codexc remote resume` 不会恢复成旧的
 Fast 默认状态。Turn 成功启动后，当前设置仍由 App Server Thread 保存，Gateway 重启或重建
 服务后会随 Thread 恢复。原生 CLI 修改共享 Thread 的 Fast、模型或思考强度时，App Server
-通过设置通知同步给 Gateway；Gateway 不读取或轮询 Codex 会话文件。
+通过设置通知同步给 Gateway；Goal set/clear 请求成功后会立即同步本地显示，外部更新、清除和
+Thread 恢复继续通过 App Server 通知校正。Gateway 只缓存当前 Goal 用于 `/status` 与回合结束
+状态卡，不读取或轮询 Codex 会话文件。
 
 如果已配置的 Workspace 目录被移动、删除或暂时不可访问，普通 `codexc ws add` 会停止并列出失效项，
 避免误删暂时未挂载的目录。确认目录不再使用后，可执行 `codexc ws add --prune-missing`：

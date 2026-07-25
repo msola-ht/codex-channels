@@ -1,3 +1,4 @@
+import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -6,7 +7,12 @@ import {
 } from "../src/application/conversation-service.js";
 import type { ModelSelectionService } from "../src/application/model-selection-service.js";
 import type { TurnExecutionPort } from "../src/application/turn-port.js";
-import type { ConversationCore } from "../src/conversation-core/core.js";
+import {
+  ConversationCore,
+  type ConversationRoutingPort,
+  type OutputEvent,
+} from "../src/conversation-core/index.js";
+import { EventBus } from "../src/event-bus/index.js";
 import type { SessionRouter } from "../src/session-routing/router.js";
 
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
@@ -47,6 +53,112 @@ function queryPort(overrides: Partial<ConversationQueryPort> = {}): Conversation
 }
 
 describe("ConversationService model selection", () => {
+  it("reflects confirmed Goal set and clear results in status immediately", async () => {
+    const goal = {
+      threadId: "thread-1",
+      objective: "完成 Gateway",
+      status: "active" as const,
+      tokenBudget: 100_000,
+      tokensUsed: 12_500,
+      timeUsedSeconds: 90,
+      createdAt: 1_000,
+      updatedAt: 2_000,
+    };
+    const router = {
+      allBindings: () => [],
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+      current: () => ({
+        target,
+        workspaceId: "main",
+        threadId: "thread-1",
+        sessionId: "session-1",
+      }),
+      ensure: async () => ({
+        target,
+        workspaceId: "main",
+        threadId: "thread-1",
+        sessionId: "session-1",
+      }),
+      workspace: () => main,
+    } satisfies ConversationRoutingPort & Pick<
+      SessionRouter,
+      "current" | "ensure" | "workspace"
+    >;
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const core = new ConversationCore(router, output);
+    const service = new ConversationService(
+      turnPort({
+        setGoal: async () => goal,
+        clearGoal: async () => undefined,
+      }),
+      router as unknown as SessionRouter,
+      core,
+      {
+        status: () => ({
+          model: "gpt-main",
+          effort: "medium",
+          serviceTier: "default",
+          modelPending: false,
+          effortPending: false,
+          serviceTierPending: false,
+        }),
+      } as unknown as ModelSelectionService,
+      queryPort(),
+    );
+
+    await expect(service.setGoal(target, goal.objective)).resolves.toEqual(goal);
+    expect(service.status(target).goal).toEqual(goal);
+
+    await service.clearGoal(target);
+    expect(service.status(target).goal).toBeUndefined();
+    await output.close();
+  });
+
+  it("includes the current Core Goal in Conversation status", () => {
+    const goal = {
+      threadId: "thread-1",
+      objective: "完成 Gateway",
+      status: "active" as const,
+      tokenBudget: 100_000,
+      tokensUsed: 12_500,
+      timeUsedSeconds: 90,
+      createdAt: 1_000,
+      updatedAt: 2_000,
+    };
+    const service = new ConversationService(
+      turnPort(),
+      {
+        current: () => ({
+          target,
+          workspaceId: "main",
+          threadId: "thread-1",
+          sessionId: "session-1",
+        }),
+        workspace: () => main,
+      } as unknown as SessionRouter,
+      {
+        activeTurn: () => undefined,
+        tokenUsage: () => undefined,
+        goal: () => goal,
+        weeklyRateLimit: () => undefined,
+      } as unknown as ConversationCore,
+      {
+        status: () => ({
+          model: "gpt-main",
+          effort: "medium",
+          serviceTier: "default",
+          modelPending: false,
+          effortPending: false,
+          serviceTierPending: false,
+        }),
+      } as unknown as ModelSelectionService,
+      queryPort(),
+    );
+
+    expect(service.status(target)).toMatchObject({ threadId: "thread-1", goal });
+  });
+
   it("applies project rules only to the selected authorized Workspace", async () => {
     const result = {
       projectRoot: main.cwd,
@@ -553,6 +665,7 @@ describe("ConversationService model selection", () => {
       {
         activeTurn: () => active,
         markTurnStarted,
+        handle: vi.fn(),
       } as unknown as ConversationCore,
       {} as ModelSelectionService,
       queryPort(),

@@ -22,13 +22,13 @@ import {
   gatewayUserMessageClientIdPrefix,
   type ConversationTarget,
   type RateLimitSnapshot,
+  type ThreadGoal,
   type ThreadTokenUsage,
   type TurnArtifacts,
 } from "../conversation-core/index.js";
 import type { ModelSelectionService, ModelSelectionState } from "./model-selection-service.js";
 import type {
   ReviewTarget,
-  ThreadGoal,
   TurnExecutionPort,
   TurnInput,
 } from "./turn-port.js";
@@ -87,6 +87,7 @@ export interface ConversationStatus {
   modelPending: boolean;
   effortPending: boolean;
   fastModePending: boolean;
+  goal?: ThreadGoal;
   tokenUsage?: ThreadTokenUsage;
   weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>;
 }
@@ -445,7 +446,13 @@ export class ConversationService {
     }
     return this.locked(target, async () => {
       const binding = await this.router.ensure(target);
-      return this.codex.setGoal(binding.threadId, normalized);
+      const goal = await this.codex.setGoal(binding.threadId, normalized);
+      this.core.handle({
+        type: "thread.goal.updated",
+        threadId: binding.threadId,
+        goal,
+      });
+      return goal;
     });
   }
 
@@ -453,6 +460,10 @@ export class ConversationService {
     return this.locked(target, async () => {
       const binding = await this.router.ensure(target);
       await this.codex.clearGoal(binding.threadId);
+      this.core.handle({
+        type: "thread.goal.cleared",
+        threadId: binding.threadId,
+      });
     });
   }
 
@@ -461,12 +472,14 @@ export class ConversationService {
     const active = this.core.activeTurn(target);
     const workspace = this.router.workspace(target);
     const tokenUsage = binding ? this.core.tokenUsage(binding.threadId) : undefined;
+    const goal = binding ? this.core.goal(binding.threadId) : undefined;
     const weeklyLimit = this.core.weeklyRateLimit();
     const model = this.models.status(target);
     return {
       ...(binding ? { threadId: binding.threadId } : {}),
       ...(active ? { turnId: active.turnId } : {}),
       ...(tokenUsage ? { tokenUsage } : {}),
+      ...(goal ? { goal } : {}),
       ...(weeklyLimit ? { weeklyLimit } : {}),
       workspaceId: workspace.id,
       workspaceName: workspace.name,

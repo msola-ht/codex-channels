@@ -434,6 +434,16 @@ describe("formatStatus", () => {
       modelPending: false,
       effortPending: false,
       fastModePending: false,
+      goal: {
+        threadId: "thread-1",
+        objective: "完成 Gateway",
+        status: "active",
+        tokenBudget: 100_000,
+        tokensUsed: 12_500,
+        timeUsedSeconds: 90,
+        createdAt: 1_000,
+        updatedAt: 2_000,
+      },
       tokenUsage: {
         total: {
           totalTokens: 1_250_000,
@@ -462,6 +472,9 @@ describe("formatStatus", () => {
     expect(text).toContain("模型：gpt-main");
     expect(text).toContain("思考强度：high");
     expect(text).toContain("Fast 模式：开启");
+    expect(text).toContain("Goal 状态：进行中");
+    expect(text).toContain("Goal 目标：完成 Gateway");
+    expect(text).toContain("Goal 用量：12.5 K / 100 K · 1分30秒");
   });
 
   it("explains when a bound thread has not emitted token statistics", () => {
@@ -524,6 +537,16 @@ describe("formatContextUsage", () => {
           windowDurationMins: 10_080,
           resetsAt: null,
         },
+        goal: {
+          threadId: "thread-1",
+          objective: "完成 Gateway",
+          status: "active",
+          tokenBudget: 100_000,
+          tokensUsed: 12_500,
+          timeUsedSeconds: 90,
+          createdAt: 1_000,
+          updatedAt: 2_000,
+        },
       },
     )).toBe([
       "上下文：12.5 K / 200 K（6.3%）",
@@ -531,6 +554,7 @@ describe("formatContextUsage", () => {
       "思考强度：high",
       "Fast 模式：开启",
       "周限：已使用 42%",
+      "Goal：进行中 · 12.5 K / 100 K · 1分30秒",
     ].join("\n"));
   });
 });

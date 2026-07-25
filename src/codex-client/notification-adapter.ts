@@ -11,13 +11,17 @@ import type {
   TurnPlanStep,
   TurnStatus,
 } from "../conversation-core/index.js";
-import type { ServerNotification } from "../codex-protocol/index.js";
+import type {
+  ServerNotification,
+  ThreadGoal as ProtocolThreadGoal,
+} from "../codex-protocol/index.js";
 import type { ThreadStateEvent } from "../session-routing/index.js";
 import type { RpcNotification } from "./json-rpc.js";
 import {
   sanitizeOperationText,
   toOperationUpdate,
 } from "./operation-adapter.js";
+import { toThreadGoal } from "./turn-adapter.js";
 
 type RoutingNotification = Extract<
   ServerNotification,
@@ -35,6 +39,8 @@ type CoreNotification = Extract<
   {
     method:
       | "turn/started"
+      | "thread/goal/updated"
+      | "thread/goal/cleared"
       | "thread/tokenUsage/updated"
       | "turn/diff/updated"
       | "turn/plan/updated"
@@ -63,6 +69,8 @@ const routingMethods = {
 
 const coreMethods = {
   turnStarted: "turn/started",
+  goalUpdated: "thread/goal/updated",
+  goalCleared: "thread/goal/cleared",
   tokenUsageUpdated: "thread/tokenUsage/updated",
   turnDiffUpdated: "turn/diff/updated",
   turnPlanUpdated: "turn/plan/updated",
@@ -104,6 +112,10 @@ export function toConversationInputEvent(
   switch (notification.method) {
     case coreMethods.turnStarted:
       return toTurnStartedEvent(notification.params);
+    case coreMethods.goalUpdated:
+      return toGoalUpdatedEvent(notification.params);
+    case coreMethods.goalCleared:
+      return toGoalClearedEvent(notification.params);
     case coreMethods.tokenUsageUpdated:
       return toTokenUsageEvent(notification.params);
     case coreMethods.turnDiffUpdated:
@@ -139,6 +151,29 @@ export function toConversationInputEvent(
     default:
       return undefined;
   }
+}
+
+function toGoalUpdatedEvent(value: unknown): ConversationInputEvent | undefined {
+  const params = asRecord(value);
+  const threadId = nonEmptyString(params?.threadId);
+  const goal = asRecord(params?.goal);
+  if (!threadId || !goal || goal.threadId !== threadId) {
+    return undefined;
+  }
+  try {
+    return {
+      type: "thread.goal.updated",
+      threadId,
+      goal: toThreadGoal(goal as ProtocolThreadGoal),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function toGoalClearedEvent(value: unknown): ConversationInputEvent | undefined {
+  const threadId = nonEmptyString(asRecord(value)?.threadId);
+  return threadId ? { type: "thread.goal.cleared", threadId } : undefined;
 }
 
 function toThreadSettingsUpdatedEvent(

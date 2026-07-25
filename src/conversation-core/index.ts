@@ -3,6 +3,7 @@ export type { ConversationInputEvent } from "./input-events.js";
 export type {
   AccountStatus,
   AuthMode,
+  GoalStatus,
   McpServerStartupFailureReason,
   McpServerStartupState,
   McpServerStatus,
@@ -11,6 +12,7 @@ export type {
   RateLimitReachedType,
   RateLimitSnapshot,
   RateLimitWindow,
+  ThreadGoal,
   ThreadTokenUsage,
   TokenUsageBreakdown,
   TurnArtifacts,

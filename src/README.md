@@ -20,14 +20,15 @@
 
 依赖方向保持为 `Surface -> Application/Core <- Codex Client`，由 `bootstrap` 负责组合具体实现。每个一级模块通过自己的 `index.ts` 暴露公开能力，跨模块不得导入内部实现文件。核心模块不得依赖 Telegram、SQLite 或 launchd。Thread 生命周期端口和稳定快照由
 `session-routing` 拥有，`codex-client` 负责把固定版本官方响应映射到该边界；Routing 不反向依赖
-Client 或生成协议。Turn、Review 和 Goal 的执行端口与稳定结果由 `application` 拥有，Client
-只在适配边界构造官方输入和解释响应。模型目录、思考强度和服务层级的稳定类型同样由
+Client 或生成协议。Turn、Review 和 Goal 的执行端口由 `application` 拥有；Goal 的稳定状态类型
+由 `conversation-core` 统一定义，供请求结果和通知归约共同使用，Client 只在适配边界构造官方输入
+和解释响应。模型目录、思考强度和服务层级的稳定类型同样由
 `application` 拥有，Client 负责裁剪官方模型目录并封装 Fast 默认值配置。账户用量与额度查询
 同样由 Application 窄端口承接，Client 统一选择官方多桶或兼容单桶响应并
 输出稳定摘要。直接安装 Skill 查询也已在 Client 边界完成路径与 Scope 裁剪，MCP 状态查询
 已裁剪为按当前 Thread 获取的名称、认证状态和工具数量，Plugin 查询只输出已安装项的名称与
 启用状态，Permission Profile 查询只输出稳定的目录选项。阶段 3 查询边界已完成。
-阶段 4 已完成：Client 把 Thread 路由通知与 Turn、Item、Token、账户、
+阶段 4 已完成：Client 把 Thread 路由通知与 Turn、Item、Goal、Token、账户、
 额度、MCP、warning 等 Core 通知分别转换为稳定事件；`conversation-core` 不再依赖生成协议，
 目标依赖明确为 `codex-client -> conversation-core`。阶段 5 也已完成：Client 解码和编码五类
 Server Request，`approval` 只拥有稳定请求、授权语义和用户决定，不再依赖 Client 或生成协议。

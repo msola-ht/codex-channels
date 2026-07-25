@@ -28,7 +28,7 @@
 - `permission-adapter.ts`：把官方 Permission Profile 分页响应裁剪为 ID、说明和策略可选状态，
   并对必需字段与分页游标失败关闭。
 - `notification-adapter.ts`：把当前支持的官方 Notification 转换为 Routing 或 Conversation Core
-  拥有的稳定事件；校验 Turn、Item、Diff、Plan、Token、账户、额度、MCP、warning 与 Thread
+  拥有的稳定事件；校验 Turn、Item、Diff、Plan、Goal、Token、账户、额度、MCP、warning 与 Thread
   生命周期字段，残缺或无关通知不进入业务模块。
 - `operation-adapter.ts`：把官方 Item 转换为安全、简洁的操作摘要，并在离开 Client 边界前
   清洗命令、查询和 MCP 错误中的敏感文本。

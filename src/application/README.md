@@ -8,7 +8,8 @@
 - `conversation-command-service.ts`：定义平台无关的会话命令名称，解析参数并返回结构化结果；不包含平台文案或消息布局。
 - `conversation-service.ts`：新建、恢复、切换、归档和查询 Thread，提交、steer 或将纯文本
   排到下一 Turn，公开 Conversation 状态与最近 Turn 产物，并通过注入端口把项目规则操作限制
-  到当前授权 Workspace；扩展查询通过 `ConversationQueryPort` 组合窄端口，Skill、MCP 与
+  到当前授权 Workspace；Conversation 状态使用 Core 从 App Server 通知归约的当前 Goal；
+  扩展查询通过 `ConversationQueryPort` 组合窄端口，Skill、MCP 与
   Plugin 和 Permission Profile 均使用稳定结果。
 - `model-selection-service.ts`：查询模型与思考强度，保存按 Conversation 生效的 Turn 覆盖设置；
   Fast 切换同时通过模型窄端口保存用户级默认层级，与原生 CLI 的重启行为一致。
@@ -24,7 +25,8 @@
   本机路径、版本、安装策略或完整官方响应。
 - `permission-port.ts`：定义 Permission Profile 的稳定 ID、说明和策略可选状态查询；只表示
   当前 Workspace 可见目录，不授予权限，也不承载审批决定。
-- `turn-port.ts`：定义项目拥有的 Turn 输入、设置覆盖、Review 目标、Goal 结果与执行窄端口；
+- `turn-port.ts`：定义项目拥有的 Turn 输入、设置覆盖、Review 目标与执行窄端口，并复用 Core
+  统一的 Goal 稳定状态类型；
   Application 不构造官方 `UserInput`，也不接收完整官方 Turn 响应。
 
 Surface 应通过这里的用例接口驱动会话，不应直接拼装 JSON-RPC。Thread 的权威状态仍来自 App Server，本模块只编排请求和必要的本地选择。
@@ -33,7 +35,8 @@ Surface 应通过这里的用例接口驱动会话，不应直接拼装 JSON-RPC
 扩展查询也保持平台无关：Skill 只返回当前用户或 Workspace 直接安装且已启用的项，排除系统和插件缓存内容；MCP 只返回展示所需的稳定摘要，并按当前 Thread 读取项目级配置；Plugin 只返回已安装项的稳定摘要，不触发 `plugin/list` 市场目录查询。
 成功启动 Turn 后，模型、思考强度和服务层级以 App Server 的 Thread 设置为准；Gateway 重启时通过恢复 Thread 重新取得这些设置。
 Turn、steer、停止、重命名、压缩、Review 和 Goal 只依赖 `TurnExecutionPort`；当前版本官方字段由
-`codex-client` 负责映射。
+`codex-client` 负责映射。Goal set/clear 请求成功后，Application 使用已确认结果立即更新 Core；
+App Server 通知继续处理其他客户端修改与恢复后的状态校正。
 模型选择和 Fast 只依赖 `ModelSelectionPort`；不可见模型过滤、官方模型字段裁剪以及
 `config/read` / `config/batchWrite` 的版本差异由 `codex-client` 处理。
 账户用量和额度查询只依赖 `AccountQueryPort`；Application、Bootstrap 和 Surface 不解析

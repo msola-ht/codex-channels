@@ -12,7 +12,7 @@
   生命周期通知，Workspace 新增通知带直接切换按钮；启动消息只使用组合根注入的 Gateway
   版本字符串，不读取生成协议。
 - `command-renderer.ts`：把平台无关的类型化命令结果渲染为 Telegram 消息。
-- `outbox.ts`：通过 Surface 共用的每 Conversation 有界顺序队列协调流式回复和审批显示顺序；最终回复默认使用兼容 HTML，也可选择 Telegram 原生 Rich Markdown，超长或渲染失败时回退纯文本。
+- `outbox.ts`：通过 Surface 共用的每 Conversation 有界顺序队列协调流式回复和审批显示顺序；每轮状态卡显示当前 Goal 状态、用量和耗时；最终回复默认使用兼容 HTML，也可选择 Telegram 原生 Rich Markdown，超长或渲染失败时回退纯文本。
 - `approval-operation-coordinator.ts`：隔离审批请求与操作日志之间的等待、拒绝抑制和 Turn 清理状态。
 - 通知策略按逻辑事件降噪：操作过程、状态、上下文和后续分片静默；每轮最终回复、审批、用户输入与严重错误保留一次提醒。
 - `html-format.ts`：安全转义并分块渲染命令面板、启动通知、审批卡与 Diff；长审批详情先显示约六行普通引用预览，再以文字分隔可展开的剩余全文，避免 Telegram 合并相邻引用或让长命令默认占满聊天界面。
@@ -27,7 +27,7 @@
 - `api-executor.ts`：统一执行 Telegram API 调用，处理超时、限流和有限重试。
 - `error-metadata.ts`：只保留异常类型和受约束的机器错误码，不记录任意异常消息。
 - `user-error-renderer.ts`：把平台无关的结构化用户错误映射为 Telegram 专属提示与命令用法。
-- `format.ts`：格式化会话、Diff/Plan、模型、Workspace、权限、用量和状态文本；Skill 只展示
+- `format.ts`：格式化会话、Diff/Plan、Goal、模型、Workspace、权限、用量和状态文本；Skill 只展示
   当前用户或 Workspace 直接安装的项，MCP 只展示稳定的名称、认证状态和工具数量，Plugin
   只展示本机已安装项，Permission Profile 只展示稳定目录选项。
 - `image-store.ts`：安全下载、校验、暂存和过期清理 Telegram 图片。

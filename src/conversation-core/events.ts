@@ -2,6 +2,13 @@ export type SurfaceId = string;
 export type MessagePhase = "commentary" | "final_answer";
 export type TurnStatus = "completed" | "interrupted" | "failed" | "inProgress";
 export type TurnPlanStepStatus = "pending" | "inProgress" | "completed";
+export type GoalStatus =
+  | "active"
+  | "paused"
+  | "blocked"
+  | "usageLimited"
+  | "budgetLimited"
+  | "complete";
 export type AuthMode =
   | "apikey"
   | "chatgpt"
@@ -50,6 +57,17 @@ export interface ThreadTokenUsage {
   total: TokenUsageBreakdown;
   last: TokenUsageBreakdown;
   modelContextWindow: number | null;
+}
+
+export interface ThreadGoal {
+  threadId: string;
+  objective: string;
+  status: GoalStatus;
+  tokenBudget: number | null;
+  tokensUsed: number;
+  timeUsedSeconds: number;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface RateLimitWindow {
@@ -149,7 +167,7 @@ export type OutputEvent =
   | { type: "text.delta"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null }
   | { type: "text.completed"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null }
   | { type: "operation.updated"; target: ConversationTarget; threadId: string; turnId: string; operation: OperationUpdate }
-  | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: TurnStatus; error?: string; tokenUsage?: ThreadTokenUsage; model?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]> }
+  | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: TurnStatus; error?: string; tokenUsage?: ThreadTokenUsage; model?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; goal?: ThreadGoal }
   | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string }
   | { type: "connection.lost"; target: ConversationTarget; threadId: string; message: string }
   | ({ type: "account.updated"; target: ConversationTarget } & AccountStatus)

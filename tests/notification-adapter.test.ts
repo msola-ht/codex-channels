@@ -135,6 +135,46 @@ describe("Notification adapter", () => {
     })).toEqual({ type: "thread.closed", threadId: "thread-1" });
   });
 
+  it("maps Goal updates and clears to stable Core events", () => {
+    expect(toConversationInputEvent({
+      method: "thread/goal/updated",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        goal: {
+          threadId: "thread-1",
+          objective: "完成 Gateway",
+          status: "active",
+          tokenBudget: 100_000,
+          tokensUsed: 12_500,
+          timeUsedSeconds: 90,
+          createdAt: 1_000,
+          updatedAt: 2_000,
+        },
+      },
+    })).toEqual({
+      type: "thread.goal.updated",
+      threadId: "thread-1",
+      goal: {
+        threadId: "thread-1",
+        objective: "完成 Gateway",
+        status: "active",
+        tokenBudget: 100_000,
+        tokensUsed: 12_500,
+        timeUsedSeconds: 90,
+        createdAt: 1_000,
+        updatedAt: 2_000,
+      },
+    });
+    expect(toConversationInputEvent({
+      method: "thread/goal/cleared",
+      params: { threadId: "thread-1" },
+    })).toEqual({
+      type: "thread.goal.cleared",
+      threadId: "thread-1",
+    });
+  });
+
   it("maps account, MCP and warning notifications without generated response types", () => {
     expect(toConversationInputEvent({
       method: "account/updated",
@@ -172,6 +212,23 @@ describe("Notification adapter", () => {
   });
 
   it("rejects malformed supported Core notifications and ignores unknown methods", () => {
+    expect(toConversationInputEvent({
+      method: "thread/goal/updated",
+      params: {
+        threadId: "thread-1",
+        turnId: null,
+        goal: {
+          threadId: "thread-other",
+          objective: "错误绑定",
+          status: "active",
+          tokenBudget: null,
+          tokensUsed: 0,
+          timeUsedSeconds: 0,
+          createdAt: 1_000,
+          updatedAt: 1_000,
+        },
+      },
+    })).toBeUndefined();
     expect(toConversationInputEvent({
       method: "turn/completed",
       params: {

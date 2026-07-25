@@ -44,6 +44,60 @@ describe("ConversationCore", () => {
     await output.close();
   });
 
+  it("reduces Goal notifications and attaches the current Goal to turn completion", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+    const core = new ConversationCore({
+      allBindings: () => [],
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+    }, output);
+
+    handleNotification(core, {
+      method: "thread/goal/updated",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        goal: {
+          threadId: "thread-1",
+          objective: "完成 Gateway",
+          status: "active",
+          tokenBudget: 100_000,
+          tokensUsed: 12_500,
+          timeUsedSeconds: 90,
+          createdAt: 1_000,
+          updatedAt: 2_000,
+        },
+      },
+    });
+    expect(core.goal("thread-1")).toMatchObject({
+      objective: "完成 Gateway",
+      status: "active",
+      tokensUsed: 12_500,
+    });
+
+    handleNotification(core, {
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed", error: null },
+      },
+    });
+    await output.close();
+    expect(events.find((event) => event.type === "turn.completed"))
+      .toHaveProperty("goal.status", "active");
+
+    handleNotification(core, {
+      method: "thread/goal/cleared",
+      params: { threadId: "thread-1" },
+    });
+    expect(core.goal("thread-1")).toBeUndefined();
+  });
+
   it("attaches only the completed turn's context usage to its output event", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const events: OutputEvent[] = [];

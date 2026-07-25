@@ -1,3 +1,8 @@
+import type {
+  GoalStatus,
+  ThreadGoal,
+} from "../conversation-core/index.js";
+
 export type TurnInput =
   | { type: "text"; text: string }
   | { type: "localImage"; path: string };
@@ -22,24 +27,7 @@ export interface ReviewStarted extends TurnStarted {
   threadId: string;
 }
 
-export type GoalStatus =
-  | "active"
-  | "paused"
-  | "blocked"
-  | "usageLimited"
-  | "budgetLimited"
-  | "complete";
-
-export interface ThreadGoal {
-  threadId: string;
-  objective: string;
-  status: GoalStatus;
-  tokenBudget: number | null;
-  tokensUsed: number;
-  timeUsedSeconds: number;
-  createdAt: number;
-  updatedAt: number;
-}
+export type { GoalStatus, ThreadGoal };
 
 export interface TurnExecutionPort {
   startTurn(

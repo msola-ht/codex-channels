@@ -12,7 +12,7 @@
   以及 Routing 不再解析原始协议信封。
 - 活动 Turn 的即时 steer 与下一 Turn 有界内存队列、顺序启动、Thread 隔离和失败清理；项目输入
   到官方 `UserInput` 的映射，以及 Review、Goal 和控制响应到稳定 Application 结果的映射。
-- 官方 Turn、Item、Diff、Plan、Token、账户、额度、MCP 和 warning Notification 到稳定 Core
+- 官方 Turn、Item、Diff、Plan、Goal、Token、账户、额度、MCP 和 warning Notification 到稳定 Core
   输入事件的映射，畸形与未知通知隔离；Conversation Core 状态归约、严格 Turn 完成状态、
   可重试错误隔离、Thread/全局警告路由，以及 Client 边界的操作摘要与敏感文本清洗。
 - 命令、文件修改、临时权限、用户输入和 MCP 审批的归属信息、一次/会话批准、命令前缀及网络
@@ -85,7 +85,8 @@ RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
 第二个 Client 修改共享 Thread 的模型、思考强度和 Fast 设置时，订阅方收到完整的
 `thread/settings/updated`；第二个 Client 重连后再次修改仍会广播。合同还会启动并立即清理一个
 不等待模型结果的 Turn，验证稳定 Turn ID、Skill、MCP、Plugin 与 Permission Profile 查询摘要，
-以及跨 Client 的 Goal 设置、读取和清除映射。
+以及跨 Client 的 Goal 设置、读取和清除映射；第二个 Client 重新连接并 resume 当前 Thread 后，
+还必须重新收到已有 Goal 状态。
 
 使用当前用户配置的完整 Unix WebSocket/App Server 冒烟测试同样不会调用模型：
 

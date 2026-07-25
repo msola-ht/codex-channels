@@ -386,13 +386,21 @@ contractSuite("isolated Codex App Server state contract", () => {
     const started = await ownerClient.startThread(workdir);
     const threadId = started.thread.id;
     const observedTurnIds: string[] = [];
+    const observedGoalEvents: string[] = [];
     const removeNotification = ownerClient.onNotification((notification) => {
       const event = toConversationInputEvent(notification);
       if (event?.type === "turn.started" && event.threadId === threadId) {
         observedTurnIds.push(event.turnId);
       }
+      if (
+        (event?.type === "thread.goal.updated" || event?.type === "thread.goal.cleared")
+        && event.threadId === threadId
+      ) {
+        observedGoalEvents.push(event.type);
+      }
     });
     let turnId: string | undefined;
+    let peerSubscribed = false;
     try {
       const turn = await ownerClient.startTurn(
         threadId,
@@ -408,13 +416,46 @@ contractSuite("isolated Codex App Server state contract", () => {
       const read = await peerClient.getGoal(threadId);
       expect(updated.objective).toBe("验证稳定 Goal 映射");
       expect(read).toEqual(updated);
+      await waitFor(
+        () => observedGoalEvents.includes("thread.goal.updated"),
+        2_000,
+      );
+
+      await peerClient.close();
+      peerRpc = new JsonRpcClient(new UnixWebSocketTransport(socketPath));
+      peerClient = new CodexAppServerClient(peerRpc, { sandbox: "read-only" });
+      await peerClient.connect();
+      let resumedGoalObjective: string | undefined;
+      const removePeerNotification = peerClient.onNotification((notification) => {
+        const event = toConversationInputEvent(notification);
+        if (event?.type === "thread.goal.updated" && event.threadId === threadId) {
+          resumedGoalObjective = event.goal.objective;
+        }
+      });
+      try {
+        await peerClient.resumeThread(threadId, workdir);
+        peerSubscribed = true;
+        await waitFor(
+          () => resumedGoalObjective === updated.objective,
+          2_000,
+        );
+      } finally {
+        removePeerNotification();
+      }
 
       await ownerClient.clearGoal(threadId);
       await expect(peerClient.getGoal(threadId)).resolves.toBeNull();
+      await waitFor(
+        () => observedGoalEvents.includes("thread.goal.cleared"),
+        2_000,
+      );
     } finally {
       removeNotification();
       if (turnId) {
         await ownerClient.interruptTurn(threadId, turnId).catch(() => undefined);
+      }
+      if (peerSubscribed) {
+        await peerClient.unsubscribeThread(threadId).catch(() => undefined);
       }
       await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
       await ownerClient.deleteThread(threadId).catch(() => undefined);

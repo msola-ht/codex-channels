@@ -5,11 +5,11 @@
 ## 文件
 
 - `index.ts`：本模块的公开导出入口。
-- `core.ts`：维护活动 Turn、Token、最近 Diff/Plan 和事件去重状态，把稳定输入事件归约为文本、
+- `core.ts`：维护活动 Turn、Token、当前 Goal、最近 Diff/Plan 和事件去重状态，把稳定输入事件归约为文本、
   操作、状态和完成事件；可重试错误不污染最终完成状态，Thread 与全局 warning 分开路由。
 - `input-events.ts`：定义 Client 可投递给 Core 的平台无关可辨识输入联合，不含 RPC method、
   未知 params 或生成协议类型。
-- `events.ts`：定义 Conversation 目标、稳定 Token、Plan、Turn、额度、账户和 MCP 类型，以及
+- `events.ts`：定义 Conversation 目标、稳定 Token、Plan、Goal、Turn、额度、账户和 MCP 类型，以及
   输出事件、Turn 产物、操作状态和关键事件判定。
 - `routing-port.ts`：Core 查询 Thread 路由所需的窄接口。
 - `user-facing-error.ts`：用稳定错误代码和最小参数描述预期输入与状态错误；Surface 按平台独立渲染，未标记异常默认隐藏详情。
@@ -18,4 +18,5 @@
 本模块不解析官方 Notification 或 Item；协议校验、Item 分类、操作摘要和敏感命令清洗均由
 `codex-client` 适配边界完成。
 Conversation 目标由 `surface + accountId + conversationId` 唯一标识；Core 不解释平台账号或聊天 ID。
-最近 Diff/Plan 仅为进程内界面缓存，Thread 关闭、归档或删除时清理，不属于持久化事实来源。
+当前 Goal 和最近 Diff/Plan 仅为进程内界面缓存，Thread 关闭、归档、删除或连接断开时清理，
+不属于持久化事实来源。

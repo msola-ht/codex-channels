@@ -16,6 +16,7 @@ import type { ConfigChange, ConfigChangeCode } from "../../config/index.js";
 import type {
   McpServerStatus,
   RateLimitSnapshot,
+  ThreadGoal,
   ThreadTokenUsage,
   TurnArtifacts,
 } from "../../conversation-core/index.js";
@@ -269,6 +270,13 @@ export function formatStatus(status: ConversationStatus): string {
     `思考强度：${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
     `Fast 模式：${status.threadId ? formatFastMode(status.serviceTier) : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`,
   ];
+  if (status.goal) {
+    lines.push(
+      `Goal 状态：${formatGoalStatus(status.goal.status)}`,
+      `Goal 目标：${status.goal.objective}`,
+      `Goal 用量：${formatGoalUsage(status.goal)}`,
+    );
+  }
   if (status.tokenUsage) {
     const { total, last, modelContextWindow } = status.tokenUsage;
     lines.push(
@@ -296,6 +304,7 @@ export function formatContextUsage(
     effort: string | null;
     serviceTier: string | null;
     weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>;
+    goal?: ThreadGoal;
   },
 ): string {
   const current = usage.last.totalTokens;
@@ -316,9 +325,48 @@ export function formatContextUsage(
           ...(settings.weeklyLimit
             ? [`周限：${formatWeeklyLimit(settings.weeklyLimit)}`]
             : []),
+          ...(settings.goal
+            ? [`Goal：${formatGoalStatus(settings.goal.status)} · ${formatGoalUsage(settings.goal)}`]
+            : []),
         ]
       : []),
   ].join("\n");
+}
+
+function formatGoalStatus(status: ThreadGoal["status"]): string {
+  switch (status) {
+    case "active":
+      return "进行中";
+    case "paused":
+      return "已暂停";
+    case "blocked":
+      return "已阻塞";
+    case "usageLimited":
+      return "用量受限";
+    case "budgetLimited":
+      return "预算已用尽";
+    case "complete":
+      return "已完成";
+  }
+}
+
+function formatGoalUsage(goal: ThreadGoal): string {
+  const tokens = goal.tokenBudget === null
+    ? formatTokenCount(goal.tokensUsed)
+    : `${formatTokenCount(goal.tokensUsed)} / ${formatTokenCount(goal.tokenBudget)}`;
+  return `${tokens} · ${formatDuration(goal.timeUsedSeconds)}`;
+}
+
+function formatDuration(seconds: number): string {
+  const wholeSeconds = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(wholeSeconds / 3_600);
+  const minutes = Math.floor(wholeSeconds % 3_600 / 60);
+  const remainder = wholeSeconds % 60;
+  return [
+    ...(hours > 0 ? [`${hours}小时`] : []),
+    ...(minutes > 0 ? [`${minutes}分`] : []),
+    ...(remainder > 0 || (hours === 0 && minutes === 0) ? [`${remainder}秒`] : []),
+  ].join("");
 }
 
 export function formatWorkspaces(workspaces: Workspace[], currentWorkspaceId: string): string {

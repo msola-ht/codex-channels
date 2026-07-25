@@ -6,6 +6,7 @@ import {
   type MessagePhase,
   type OutputEvent,
   type RateLimitSnapshot,
+  type ThreadGoal,
   type ThreadTokenUsage,
   type TurnArtifacts,
   isCriticalOutputEvent,
@@ -27,6 +28,7 @@ export class ConversationCore {
   private readonly errorsByTurn = new Map<string, string>();
   private readonly usageByThread = new Map<string, ThreadTokenUsage>();
   private readonly usageTurnByThread = new Map<string, string>();
+  private readonly goalsByThread = new Map<string, ThreadGoal>();
   private readonly seenUserMessages = new Set<string>();
   private readonly phaseByItem = new Map<string, MessagePhase | null>();
   private readonly artifactsByThread = new Map<string, TurnArtifacts>();
@@ -61,6 +63,10 @@ export class ConversationCore {
     return this.usageByThread.get(threadId);
   }
 
+  goal(threadId: string): ThreadGoal | undefined {
+    return this.goalsByThread.get(threadId);
+  }
+
   rememberRateLimits(snapshots: readonly RateLimitSnapshot[]): void {
     for (const snapshot of snapshots) {
       const limitId = snapshot.limitId ?? "codex";
@@ -93,6 +99,7 @@ export class ConversationCore {
     this.errorsByTurn.clear();
     this.usageByThread.clear();
     this.usageTurnByThread.clear();
+    this.goalsByThread.clear();
     this.seenUserMessages.clear();
     this.phaseByItem.clear();
     this.mcpStatus.clear();
@@ -118,6 +125,12 @@ export class ConversationCore {
       case "thread.tokenUsage.updated":
         this.usageByThread.set(event.threadId, event.tokenUsage);
         this.usageTurnByThread.set(event.threadId, event.turnId);
+        return;
+      case "thread.goal.updated":
+        this.goalsByThread.set(event.threadId, event.goal);
+        return;
+      case "thread.goal.cleared":
+        this.goalsByThread.delete(event.threadId);
         return;
       case "turn.diff.updated": {
         const current = this.artifactsByThread.get(event.threadId);
@@ -210,6 +223,7 @@ export class ConversationCore {
           : undefined;
         const modelSettings = this.router.modelSettingsForThread(event.threadId);
         const weeklyLimit = this.weeklyRateLimit();
+        const goal = this.goalsByThread.get(event.threadId);
         this.errorsByTurn.delete(event.turnId);
         this.publish({
           type: "turn.completed",
@@ -227,6 +241,7 @@ export class ConversationCore {
               }
             : {}),
           ...(weeklyLimit ? { weeklyLimit } : {}),
+          ...(goal ? { goal } : {}),
         });
         return;
       }
@@ -243,6 +258,7 @@ export class ConversationCore {
         const target = this.router.targetForThread(event.threadId);
         this.usageByThread.delete(event.threadId);
         this.usageTurnByThread.delete(event.threadId);
+        this.goalsByThread.delete(event.threadId);
         this.clearSeenUserMessages(event.threadId);
         this.clearItemPhases(event.threadId);
         this.artifactsByThread.delete(event.threadId);

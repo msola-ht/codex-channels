@@ -4,6 +4,7 @@ import type {
   MessagePhase,
   OperationUpdate,
   RateLimitSnapshot,
+  ThreadGoal,
   ThreadTokenUsage,
   TurnPlanStep,
   TurnStatus,
@@ -17,6 +18,8 @@ export type ConversationInputEvent =
       turnId: string;
       tokenUsage: ThreadTokenUsage;
     }
+  | { type: "thread.goal.updated"; threadId: string; goal: ThreadGoal }
+  | { type: "thread.goal.cleared"; threadId: string }
   | { type: "turn.diff.updated"; threadId: string; turnId: string; diff: string }
   | {
       type: "turn.plan.updated";
