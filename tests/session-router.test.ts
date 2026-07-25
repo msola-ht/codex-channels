@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import type { CodexAppServerClient } from "../src/codex-client/client.js";
 import { JsonRpcError } from "../src/codex-client/json-rpc.js";
-import type { Thread } from "../src/codex-protocol/index.js";
 import { MemoryBindingStore } from "../src/storage/memory-binding-store.js";
-import { SessionRouter } from "../src/session-routing/router.js";
+import {
+  SessionRouter,
+  type ThreadLifecyclePort,
+  type ThreadSession,
+  type ThreadSnapshot,
+  type ThreadStatus,
+} from "../src/session-routing/index.js";
 import { WorkspaceRegistry } from "../src/policy/workspace-registry.js";
 
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
@@ -16,50 +20,64 @@ const registry = new WorkspaceRegistry(
   "main",
 );
 
-function thread(id: string, status: Thread["status"]): Thread {
+function thread(id: string, status: ThreadStatus): ThreadSnapshot {
   return {
     id,
     sessionId: id,
-    forkedFromId: null,
-    parentThreadId: null,
     preview: "test",
-    ephemeral: false,
-    modelProvider: "openai",
-    createdAt: 1,
-    updatedAt: 1,
-    recencyAt: 1,
     status,
-    path: null,
     cwd: "/workspace",
-    cliVersion: "0.145.0",
     source: "cli",
-    threadSource: null,
-    agentNickname: null,
-    agentRole: null,
-    gitInfo: null,
     name: null,
-    turns: [],
+    activeTurnId: null,
+  };
+}
+
+function session(
+  value: ThreadSnapshot,
+  overrides: Partial<Omit<ThreadSession, "thread">> = {},
+): ThreadSession {
+  return {
+    thread: value,
+    model: "gpt-main",
+    reasoningEffort: "medium",
+    serviceTier: "default",
+    ...overrides,
+  };
+}
+
+function threadPort(overrides: Partial<ThreadLifecyclePort> = {}): ThreadLifecyclePort {
+  const unsupported = async (): Promise<never> => {
+    throw new Error("测试未配置 ThreadLifecyclePort 方法");
+  };
+  return {
+    listThreads: unsupported,
+    startThread: unsupported,
+    resumeThread: unsupported,
+    forkThread: unsupported,
+    archiveThread: unsupported,
+    unarchiveThread: unsupported,
+    unsubscribeThread: unsupported,
+    ...overrides,
   };
 }
 
 describe("SessionRouter", () => {
   it("skips active threads and resumes the latest idle thread", async () => {
     const resumed: string[] = [];
-    const client = {
+    const client = threadPort({
       listThreads: async () => [
-        thread("active", { type: "active", activeFlags: [] }),
+        thread("active", { type: "active" }),
         thread("idle", { type: "idle" }),
       ],
       resumeThread: async (threadId: string) => {
         resumed.push(threadId);
-        return {
-          thread: thread(threadId, { type: "idle" }),
-          model: "gpt-main",
+        return session(thread(threadId, { type: "idle" }), {
           reasoningEffort: "high",
           serviceTier: "fast",
-        };
+        });
       },
-    } as unknown as CodexAppServerClient;
+    });
     const router = new SessionRouter(client, new MemoryBindingStore(), registry);
 
     const binding = await router.ensure(target);
@@ -86,14 +104,13 @@ describe("SessionRouter", () => {
 
   it("unsubscribes before forcing a new thread", async () => {
     const unsubscribed: string[] = [];
-    const client = {
+    const client = threadPort({
       listThreads: async () => [],
-      startThread: async () => ({ thread: thread("new", { type: "idle" }) }),
+      startThread: async () => session(thread("new", { type: "idle" })),
       unsubscribeThread: async (threadId: string) => {
         unsubscribed.push(threadId);
-        return { status: "unsubscribed" };
       },
-    } as unknown as CodexAppServerClient;
+    });
     const router = new SessionRouter(client, new MemoryBindingStore(), registry);
     await router.ensure(target);
     await router.newSession(target);
@@ -104,19 +121,17 @@ describe("SessionRouter", () => {
 
   it("restores bound thread model, effort and Fast state after Gateway reconnect", async () => {
     const resumed: string[] = [];
-    const client = {
+    const client = threadPort({
       listThreads: async () => [],
-      startThread: async () => ({ thread: thread("bound", { type: "idle" }) }),
+      startThread: async () => session(thread("bound", { type: "idle" })),
       resumeThread: async (threadId: string) => {
         resumed.push(threadId);
-        return {
-          thread: thread(threadId, { type: "idle" }),
-          model: "gpt-main",
+        return session(thread(threadId, { type: "idle" }), {
           reasoningEffort: "high",
           serviceTier: "priority",
-        };
+        });
       },
-    } as unknown as CodexAppServerClient;
+    });
     const router = new SessionRouter(client, new MemoryBindingStore(), registry);
     await router.ensure(target);
 
@@ -141,28 +156,17 @@ describe("SessionRouter", () => {
       sessionId: "active-thread",
     });
     const activeThread = {
-      ...thread("active-thread", { type: "active" as const, activeFlags: [] }),
-      turns: [{
-        id: "turn-running",
-        items: [],
-        itemsView: "full" as const,
-        status: "inProgress" as const,
-        error: null,
-        startedAt: 1,
-        completedAt: null,
-        durationMs: null,
-      }],
+      ...thread("active-thread", { type: "active" }),
+      activeTurnId: "turn-running",
     };
     const restored: Array<{ threadId: string; turnId: string }> = [];
     const router = new SessionRouter(
-      {
-        resumeThread: async () => ({
-          thread: activeThread,
-          model: "gpt-main",
+      threadPort({
+        resumeThread: async () => session(activeThread, {
           reasoningEffort: "high",
           serviceTier: "default",
         }),
-      } as unknown as CodexAppServerClient,
+      }),
       store,
       registry,
     );
@@ -170,9 +174,8 @@ describe("SessionRouter", () => {
     await router.restoreSubscriptions(
       undefined,
       (binding, restoredThread) => {
-        const activeTurn = restoredThread.turns.find((turn) => turn.status === "inProgress");
-        if (activeTurn) {
-          restored.push({ threadId: binding.threadId, turnId: activeTurn.id });
+        if (restoredThread.activeTurnId) {
+          restored.push({ threadId: binding.threadId, turnId: restoredThread.activeTurnId });
         }
       },
     );
@@ -203,12 +206,12 @@ describe("SessionRouter", () => {
       sessionId: "feishu-session",
     });
     const resumed: string[] = [];
-    const client = {
+    const client = threadPort({
       resumeThread: async (threadId: string) => {
         resumed.push(threadId);
-        return { thread: thread(threadId, { type: "idle" }) };
+        return session(thread(threadId, { type: "idle" }));
       },
-    } as unknown as CodexAppServerClient;
+    });
     const router = new SessionRouter(client, store, registry);
 
     const failures = await router.restoreSubscriptions(
@@ -223,11 +226,11 @@ describe("SessionRouter", () => {
   it("keeps a binding when subscription restore fails transiently", async () => {
     const store = new MemoryBindingStore();
     store.bind({ target, workspaceId: "main", threadId: "bound", sessionId: "bound" });
-    const client = {
+    const client = threadPort({
       resumeThread: async () => {
         throw new JsonRpcError(-32001, "Server overloaded; retry later.");
       },
-    } as unknown as CodexAppServerClient;
+    });
     const router = new SessionRouter(client, store, registry);
 
     const failures = await router.restoreSubscriptions();
@@ -241,11 +244,11 @@ describe("SessionRouter", () => {
   it("keeps a binding when subscription restore fails for an unknown reason", async () => {
     const store = new MemoryBindingStore();
     store.bind({ target, workspaceId: "main", threadId: "bound", sessionId: "bound" });
-    const client = {
+    const client = threadPort({
       resumeThread: async () => {
         throw new Error("Unexpected App Server response");
       },
-    } as unknown as CodexAppServerClient;
+    });
     const router = new SessionRouter(client, store, registry);
 
     const failures = await router.restoreSubscriptions();
@@ -259,14 +262,14 @@ describe("SessionRouter", () => {
   it("removes a binding when App Server reports that its session is archived", async () => {
     const store = new MemoryBindingStore();
     store.bind({ target, workspaceId: "main", threadId: "bound", sessionId: "bound" });
-    const client = {
+    const client = threadPort({
       resumeThread: async () => {
         throw new JsonRpcError(
           -32602,
           "session bound is archived. Run `codex unarchive bound` to unarchive it first.",
         );
       },
-    } as unknown as CodexAppServerClient;
+    });
     const router = new SessionRouter(client, store, registry);
 
     const failures = await router.restoreSubscriptions();
@@ -280,14 +283,14 @@ describe("SessionRouter", () => {
   it("keeps a binding while App Server is temporarily closing its loaded Thread", async () => {
     const store = new MemoryBindingStore();
     store.bind({ target, workspaceId: "main", threadId: "bound", sessionId: "bound" });
-    const client = {
+    const client = threadPort({
       resumeThread: async () => {
         throw new JsonRpcError(
           -32602,
           "thread bound is closing; retry after the thread is closed",
         );
       },
-    } as unknown as CodexAppServerClient;
+    });
     const router = new SessionRouter(client, store, registry);
 
     const failures = await router.restoreSubscriptions();
@@ -302,12 +305,12 @@ describe("SessionRouter", () => {
     const store = new MemoryBindingStore();
     store.bind({ target, workspaceId: "main", threadId: "bound", sessionId: "bound" });
     let running = true;
-    const client = {
+    const client = threadPort({
       resumeThread: async () => {
         running = false;
         throw new Error("Codex JSON-RPC Client 已关闭");
       },
-    } as unknown as CodexAppServerClient;
+    });
     const router = new SessionRouter(client, store, registry);
 
     const failures = await router.restoreSubscriptions(() => running);
@@ -325,15 +328,14 @@ describe("SessionRouter", () => {
       sessionId: "current",
     });
     const unsubscribed: string[] = [];
-    const client = {
+    const client = threadPort({
       resumeThread: async () => {
         throw new JsonRpcError(-32602, "Thread not found");
       },
       unsubscribeThread: async (threadId: string) => {
         unsubscribed.push(threadId);
-        return { status: "unsubscribed" };
       },
-    } as unknown as CodexAppServerClient;
+    });
     const router = new SessionRouter(client, store, registry);
 
     await expect(router.resume(target, "missing"))
@@ -346,17 +348,16 @@ describe("SessionRouter", () => {
   it("switches only to a preconfigured workspace and scopes thread discovery by cwd", async () => {
     const listedCwds: string[] = [];
     const unsubscribed: string[] = [];
-    const client = {
+    const client = threadPort({
       listThreads: async (cwd: string) => {
         listedCwds.push(cwd);
         return [];
       },
-      startThread: async (cwd: string) => ({ thread: { ...thread("created", { type: "idle" }), cwd } }),
+      startThread: async (cwd: string) => session({ ...thread("created", { type: "idle" }), cwd }),
       unsubscribeThread: async (threadId: string) => {
         unsubscribed.push(threadId);
-        return { status: "unsubscribed" };
       },
-    } as unknown as CodexAppServerClient;
+    });
     const store = new MemoryBindingStore();
     const router = new SessionRouter(client, store, registry);
     await router.ensure(target);
@@ -372,7 +373,7 @@ describe("SessionRouter", () => {
   });
 
   it("rejects workspace paths or ids that are not in the server registry", async () => {
-    const router = new SessionRouter({} as CodexAppServerClient, new MemoryBindingStore(), registry);
+    const router = new SessionRouter(threadPort(), new MemoryBindingStore(), registry);
 
     await expect(router.selectWorkspace(target, "/arbitrary/path"))
       .rejects.toThrow("Workspace 不存在或未获授权");
@@ -380,14 +381,13 @@ describe("SessionRouter", () => {
 
   it("keeps the current thread bound when selecting the same workspace", async () => {
     const unsubscribed: string[] = [];
-    const client = {
+    const client = threadPort({
       listThreads: async () => [],
-      startThread: async () => ({ thread: thread("current", { type: "idle" }) }),
+      startThread: async () => session(thread("current", { type: "idle" })),
       unsubscribeThread: async (threadId: string) => {
         unsubscribed.push(threadId);
-        return { status: "unsubscribed" };
       },
-    } as unknown as CodexAppServerClient;
+    });
     const router = new SessionRouter(client, new MemoryBindingStore(), registry);
     await router.ensure(target);
 
@@ -399,12 +399,12 @@ describe("SessionRouter", () => {
 
   it("passes search and archive filters to App Server thread discovery", async () => {
     const calls: unknown[] = [];
-    const client = {
+    const client = threadPort({
       listThreads: async (_cwd: string, options: unknown) => {
         calls.push(options);
         return [thread("archived", { type: "idle" })];
       },
-    } as unknown as CodexAppServerClient;
+    });
     const router = new SessionRouter(client, new MemoryBindingStore(), registry);
 
     await router.list(target, { archived: true, searchTerm: "修复" });
@@ -415,16 +415,18 @@ describe("SessionRouter", () => {
   it("archives the current binding and resumes an unarchived thread", async () => {
     const archived: string[] = [];
     const unarchived: string[] = [];
-    const client = {
+    const client = threadPort({
       listThreads: async () => [],
-      startThread: async () => ({ thread: thread("current", { type: "idle" }) }),
-      archiveThread: async (threadId: string) => archived.push(threadId),
+      startThread: async () => session(thread("current", { type: "idle" })),
+      archiveThread: async (threadId: string) => {
+        archived.push(threadId);
+      },
       unarchiveThread: async (threadId: string) => {
         unarchived.push(threadId);
-        return { thread: thread(threadId, { type: "idle" }) };
+        return thread(threadId, { type: "idle" });
       },
-      resumeThread: async (threadId: string) => ({ thread: thread(threadId, { type: "idle" }) }),
-    } as unknown as CodexAppServerClient;
+      resumeThread: async (threadId: string) => session(thread(threadId, { type: "idle" })),
+    });
     const router = new SessionRouter(client, new MemoryBindingStore(), registry);
     await router.ensure(target);
 

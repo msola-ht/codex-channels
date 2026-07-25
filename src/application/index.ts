@@ -10,6 +10,7 @@ export {
   ConversationService,
   resolveThread,
   type ConversationInput,
+  type ConversationSession,
   type ConversationStatus,
   type ProjectRulesPort,
   type ProjectRulesResult,

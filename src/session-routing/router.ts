@@ -1,5 +1,3 @@
-import type { CodexAppServerClient } from "../codex-client/index.js";
-import type { Thread } from "../codex-protocol/index.js";
 import {
   UserFacingError,
   conversationTargetKey,
@@ -7,6 +5,7 @@ import {
 } from "../conversation-core/index.js";
 import type { Workspace, WorkspaceRegistry } from "../policy/index.js";
 import type { BindingStore, ConversationBinding } from "../storage/index.js";
+import type { ThreadLifecyclePort, ThreadSnapshot } from "./thread-port.js";
 
 export interface ThreadModelSettings {
   model: string;
@@ -30,7 +29,7 @@ export class SessionRouter {
   private readonly modelSettingsByThread = new Map<string, ThreadModelSettings>();
 
   constructor(
-    private readonly codex: CodexAppServerClient,
+    private readonly codex: ThreadLifecyclePort,
     private readonly bindings: BindingStore,
     private readonly workspaces: WorkspaceRegistry,
   ) {}
@@ -81,7 +80,7 @@ export class SessionRouter {
 
   async restoreSubscriptions(
     shouldRestore: (target: ConversationTarget) => boolean = () => true,
-    onRestored: (binding: ConversationBinding, thread: Thread) => void = () => undefined,
+    onRestored: (binding: ConversationBinding, thread: ThreadSnapshot) => void = () => undefined,
   ): Promise<SubscriptionRestoreFailure[]> {
     const failures: SubscriptionRestoreFailure[] = [];
     for (const binding of this.bindings.list()) {
@@ -89,7 +88,7 @@ export class SessionRouter {
         continue;
       }
       let restoredBinding: ConversationBinding;
-      let restoredThread: Thread;
+      let restoredThread: ThreadSnapshot;
       try {
         const workspace = this.workspaces.require(binding.workspaceId);
         const resumed = await this.codex.resumeThread(binding.threadId, workspace.cwd);
@@ -125,7 +124,7 @@ export class SessionRouter {
     return failures;
   }
 
-  async list(target: ConversationTarget, options: ThreadListOptions = {}): Promise<Thread[]> {
+  async list(target: ConversationTarget, options: ThreadListOptions = {}): Promise<ThreadSnapshot[]> {
     const workspace = this.workspace(target);
     const fast = await this.codex.listThreads(workspace.cwd, options);
     return fast.length > 0

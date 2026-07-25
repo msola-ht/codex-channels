@@ -4,4 +4,15 @@ export {
   type ThreadModelSettings,
   type ThreadListOptions,
 } from "./router.js";
-export { ThreadStateSynchronizer } from "./thread-state-sync.js";
+export {
+  type ThreadLifecyclePort,
+  type ThreadQueryOptions,
+  type ThreadSession,
+  type ThreadSnapshot,
+  type ThreadSource,
+  type ThreadStatus,
+} from "./thread-port.js";
+export {
+  ThreadStateSynchronizer,
+  type ThreadStateNotification,
+} from "./thread-state-sync.js";

@@ -7,12 +7,12 @@ import type {
   PluginInstalledResponse,
   RateLimitSnapshot,
   SkillsListResponse,
-  Thread,
   ThreadTokenUsage,
 } from "../../codex-protocol/index.js";
 import {
   fastServiceTierId,
   isFastServiceTier,
+  type ConversationSession,
   type ConversationStatus,
   type ModelSelectionState,
 } from "../../application/index.js";
@@ -45,7 +45,7 @@ export function splitTelegramText(text: string, limit = 4_000): string[] {
 }
 
 export function formatSessions(
-  threads: Thread[],
+  threads: ConversationSession[],
   currentThreadId?: string,
   options: { archived?: boolean; searchTerm?: string } = {},
 ): string {

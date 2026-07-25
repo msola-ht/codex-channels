@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import type { CodexAppServerClient } from "../src/codex-client/index.js";
 import { WorkspaceRegistry } from "../src/policy/index.js";
 import {
   SessionRouter,
   ThreadStateSynchronizer,
+  type ThreadLifecyclePort,
 } from "../src/session-routing/index.js";
 import { MemoryBindingStore } from "../src/storage/index.js";
 
@@ -13,6 +13,21 @@ const target = {
   accountId: "default",
   conversationId: "100",
 };
+
+function unusedThreadPort(): ThreadLifecyclePort {
+  const unsupported = async (): Promise<never> => {
+    throw new Error("该测试不应调用 ThreadLifecyclePort");
+  };
+  return {
+    listThreads: unsupported,
+    startThread: unsupported,
+    resumeThread: unsupported,
+    forkThread: unsupported,
+    archiveThread: unsupported,
+    unarchiveThread: unsupported,
+    unsubscribeThread: unsupported,
+  };
+}
 
 function createBoundRouter(): SessionRouter {
   const bindings = new MemoryBindingStore();
@@ -23,7 +38,7 @@ function createBoundRouter(): SessionRouter {
     sessionId: "session-1",
   });
   return new SessionRouter(
-    {} as CodexAppServerClient,
+    unusedThreadPort(),
     bindings,
     new WorkspaceRegistry([{ id: "main", name: "Main", cwd: "/workspace" }], "main"),
   );

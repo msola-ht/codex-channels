@@ -129,12 +129,11 @@ suite("real Codex App Server over Unix WebSocket", () => {
         method: "thread/loaded/list",
         params: { limit: 100 },
       }, { retryOverload: true });
-      const ownerUnsubscribed = await client.unsubscribeThread(started.thread.id);
+      await client.unsubscribeThread(started.thread.id);
 
       expect(started.thread.id).toBeTruthy();
       expect(observedThreadId).toBe(started.thread.id);
       expect(loaded.data).toContain(started.thread.id);
-      expect(ownerUnsubscribed.status).toBe("unsubscribed");
     } finally {
       removePeerNotification();
       await client.unsubscribeThread(started.thread.id).catch(() => undefined);
@@ -186,7 +185,7 @@ suite("real Codex App Server over Unix WebSocket", () => {
 
       const restored = await client.unarchiveThread(threadId);
       archived = false;
-      expect(restored.thread.id).toBe(threadId);
+      expect(restored.id).toBe(threadId);
     } finally {
       if (archived) {
         await client.unarchiveThread(threadId);

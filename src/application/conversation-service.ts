@@ -11,7 +11,6 @@ import type {
   RateLimitSnapshot,
   ReviewTarget,
   SkillsListResponse,
-  Thread,
   ThreadGoal,
   ThreadTokenUsage,
   UserInput,
@@ -37,6 +36,13 @@ export interface Submission {
 export interface ConversationInput {
   text?: string;
   localImages?: ReadonlyArray<{ path: string }>;
+}
+
+export interface ConversationSession {
+  id: string;
+  preview: string;
+  name: string | null;
+  status: { type: "notLoaded" | "idle" | "systemError" | "active" };
 }
 
 export interface ProjectRulesResult {
@@ -207,11 +213,17 @@ export class ConversationService {
     });
   }
 
-  listSessions(
+  async listSessions(
     target: ConversationTarget,
     options: { archived?: boolean; searchTerm?: string } = {},
-  ): Promise<Thread[]> {
-    return this.router.list(target, options);
+  ): Promise<ConversationSession[]> {
+    const sessions = await this.router.list(target, options);
+    return sessions.map(({ id, preview, name, status }) => ({
+      id,
+      preview,
+      name,
+      status,
+    }));
   }
 
   resume(target: ConversationTarget, selector: string): Promise<string> {
@@ -534,10 +546,10 @@ function normalizeInput(value: string | ConversationInput): UserInput[] {
 }
 
 export function resolveThread(
-  threads: Thread[],
+  threads: ConversationSession[],
   selector: string,
   command: "resume" | "unarchive" = "resume",
-): Thread {
+): ConversationSession {
   if (!selector) {
     throw new UserFacingError(
       "session.selector.required",

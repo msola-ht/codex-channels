@@ -11,7 +11,6 @@ import type {
   ReviewStartResponse,
   ReviewTarget,
   SkillsListResponse,
-  Thread,
   ThreadArchiveResponse,
   ThreadDeleteResponse,
   ThreadForkResponse,
@@ -28,7 +27,14 @@ import type {
   TurnSteerResponse,
   UserInput,
 } from "../codex-protocol/index.js";
+import type {
+  ThreadLifecyclePort,
+  ThreadQueryOptions,
+  ThreadSession,
+  ThreadSnapshot,
+} from "../session-routing/index.js";
 import { JsonRpcClient, type RpcNotification, type ServerRequestHandler } from "./json-rpc.js";
+import { toThreadSession, toThreadSnapshot } from "./thread-adapter.js";
 
 export interface ThreadDefaults {
   model?: string;
@@ -41,7 +47,7 @@ export interface TurnOverrides {
   serviceTier?: string | null;
 }
 
-export class CodexAppServerClient {
+export class CodexAppServerClient implements ThreadLifecyclePort {
   constructor(
     private readonly rpc: JsonRpcClient,
     private readonly defaults: ThreadDefaults,
@@ -73,9 +79,9 @@ export class CodexAppServerClient {
 
   async listThreads(
     cwd: string,
-    options: { fullScan?: boolean; archived?: boolean; searchTerm?: string } = {},
-  ): Promise<Thread[]> {
-    const threads: Thread[] = [];
+    options: ThreadQueryOptions = {},
+  ): Promise<ThreadSnapshot[]> {
+    const threads: ThreadSnapshot[] = [];
     const cursors = new Set<string>();
     let cursor: string | null = null;
     do {
@@ -93,7 +99,7 @@ export class CodexAppServerClient {
           ...(cursor ? { cursor } : {}),
         },
       }, { retryOverload: true });
-      threads.push(...result.data);
+      threads.push(...result.data.map(toThreadSnapshot));
       cursor = result.nextCursor;
       if (cursor) {
         if (cursors.has(cursor)) {
@@ -105,16 +111,16 @@ export class CodexAppServerClient {
     return threads;
   }
 
-  async readThread(threadId: string): Promise<Thread> {
+  async readThread(threadId: string): Promise<ThreadSnapshot> {
     const result = await this.rpc.request<ThreadReadResponse>({
       method: "thread/read",
       params: { threadId, includeTurns: false },
     }, { retryOverload: true });
-    return result.thread;
+    return toThreadSnapshot(result.thread);
   }
 
-  async startThread(cwd: string): Promise<ThreadStartResponse> {
-    return this.rpc.request<ThreadStartResponse>({
+  async startThread(cwd: string): Promise<ThreadSession> {
+    const response = await this.rpc.request<ThreadStartResponse>({
       method: "thread/start",
       params: {
         cwd,
@@ -124,10 +130,11 @@ export class CodexAppServerClient {
         ...(this.defaults.model ? { model: this.defaults.model } : {}),
       },
     }, { retryOverload: false });
+    return toThreadSession(response);
   }
 
-  async resumeThread(threadId: string, cwd: string): Promise<ThreadResumeResponse> {
-    return this.rpc.request<ThreadResumeResponse>({
+  async resumeThread(threadId: string, cwd: string): Promise<ThreadSession> {
+    const response = await this.rpc.request<ThreadResumeResponse>({
       method: "thread/resume",
       params: {
         threadId,
@@ -136,34 +143,36 @@ export class CodexAppServerClient {
         approvalPolicy: "on-request",
       },
     }, { retryOverload: false });
+    return toThreadSession(response);
   }
 
-  async unsubscribeThread(threadId: string): Promise<ThreadUnsubscribeResponse> {
-    return this.rpc.request<ThreadUnsubscribeResponse>({
+  async unsubscribeThread(threadId: string): Promise<void> {
+    await this.rpc.request<ThreadUnsubscribeResponse>({
       method: "thread/unsubscribe",
       params: { threadId },
     }, { retryOverload: true });
   }
 
-  async deleteThread(threadId: string): Promise<ThreadDeleteResponse> {
-    return this.rpc.request<ThreadDeleteResponse>({
+  async deleteThread(threadId: string): Promise<void> {
+    await this.rpc.request<ThreadDeleteResponse>({
       method: "thread/delete",
       params: { threadId },
     }, { retryOverload: false });
   }
 
-  async archiveThread(threadId: string): Promise<ThreadArchiveResponse> {
-    return this.rpc.request<ThreadArchiveResponse>({
+  async archiveThread(threadId: string): Promise<void> {
+    await this.rpc.request<ThreadArchiveResponse>({
       method: "thread/archive",
       params: { threadId },
     }, { retryOverload: false });
   }
 
-  async unarchiveThread(threadId: string): Promise<ThreadUnarchiveResponse> {
-    return this.rpc.request<ThreadUnarchiveResponse>({
+  async unarchiveThread(threadId: string): Promise<ThreadSnapshot> {
+    const response = await this.rpc.request<ThreadUnarchiveResponse>({
       method: "thread/unarchive",
       params: { threadId },
     }, { retryOverload: false });
+    return toThreadSnapshot(response.thread);
   }
 
   async startTurn(
@@ -265,8 +274,8 @@ export class CodexAppServerClient {
     }, { retryOverload: true });
   }
 
-  async forkThread(threadId: string, cwd: string): Promise<ThreadForkResponse> {
-    return this.rpc.request<ThreadForkResponse>({
+  async forkThread(threadId: string, cwd: string): Promise<ThreadSession> {
+    const response = await this.rpc.request<ThreadForkResponse>({
       method: "thread/fork",
       params: {
         threadId,
@@ -275,6 +284,7 @@ export class CodexAppServerClient {
         approvalPolicy: "on-request",
       },
     }, { retryOverload: false });
+    return toThreadSession(response);
   }
 
   async startReview(threadId: string, target: ReviewTarget): Promise<ReviewStartResponse> {

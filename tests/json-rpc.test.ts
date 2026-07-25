@@ -4,6 +4,35 @@ import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { BaseTransport } from "../src/codex-client/transport.js";
 
+function appServerThread(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: "thread-1",
+    sessionId: "session-1",
+    forkedFromId: null,
+    parentThreadId: null,
+    preview: "测试 Thread",
+    ephemeral: false,
+    modelProvider: "openai",
+    createdAt: 1,
+    updatedAt: 1,
+    recencyAt: 1,
+    status: { type: "idle" },
+    path: null,
+    cwd: "/tmp/project",
+    cliVersion: "0.145.0",
+    source: "cli",
+    threadSource: null,
+    agentNickname: null,
+    agentRole: null,
+    gitInfo: null,
+    name: null,
+    turns: [],
+    ...overrides,
+  };
+}
+
 class FakeTransport extends BaseTransport {
   readonly kind = "stdio" as const;
   readonly sent: Array<Record<string, unknown>> = [];
@@ -12,6 +41,7 @@ class FakeTransport extends BaseTransport {
   failServerResponse = false;
   circularModelCursor = false;
   disconnectAfterInitialized = false;
+  threadListData: Array<Record<string, unknown>> = [];
 
   async connect(): Promise<void> {}
   async close(): Promise<void> {}
@@ -54,7 +84,7 @@ class FakeTransport extends BaseTransport {
         this.emitMessage(
           JSON.stringify({
             id: decoded.id,
-            result: { data: [], nextCursor: null },
+            result: { data: this.threadListData, nextCursor: null },
           }),
         ),
       );
@@ -63,7 +93,12 @@ class FakeTransport extends BaseTransport {
         this.emitMessage(
           JSON.stringify({
             id: decoded.id,
-            result: { thread: { id: "thread-1" }, model: "gpt-default", reasoningEffort: "medium" },
+            result: {
+              thread: appServerThread(),
+              model: "gpt-default",
+              reasoningEffort: "medium",
+              serviceTier: "default",
+            },
           }),
         ),
       );
@@ -75,7 +110,7 @@ class FakeTransport extends BaseTransport {
       queueMicrotask(() =>
         this.emitMessage(JSON.stringify({
           id: decoded.id,
-          result: { thread: { id: "thread-1" } },
+          result: { thread: appServerThread() },
         })),
       );
     } else if (decoded.method === "model/list") {
@@ -373,6 +408,53 @@ describe("JsonRpcClient", () => {
       useStateDbOnly: true,
       archived: false,
     });
+  });
+
+  it("maps official Thread responses to the stable routing snapshot", async () => {
+    const transport = new FakeTransport();
+    transport.threadListData = [appServerThread({
+      status: { type: "active", activeFlags: ["waitingOnApproval"] },
+      source: { custom: "future-client" },
+      turns: [{
+        id: "turn-running",
+        items: [],
+        itemsView: "full",
+        status: "inProgress",
+        error: null,
+        startedAt: 1,
+        completedAt: null,
+        durationMs: null,
+      }],
+    })];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    const threads = await client.listThreads("/tmp/project");
+
+    expect(threads).toEqual([{
+      id: "thread-1",
+      sessionId: "session-1",
+      preview: "测试 Thread",
+      name: null,
+      status: { type: "active" },
+      cwd: "/tmp/project",
+      source: "other",
+      activeTurnId: "turn-running",
+    }]);
+  });
+
+  it("fails closed when an official Thread response lacks a required routing field", async () => {
+    const transport = new FakeTransport();
+    transport.threadListData = [appServerThread({ sessionId: undefined })];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listThreads("/tmp/project"))
+      .rejects.toThrow("Codex Thread 响应缺少有效 sessionId");
   });
 
   it("passes stable search/archive filters and uses explicit archive methods", async () => {

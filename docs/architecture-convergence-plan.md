@@ -33,14 +33,14 @@ Surface
 - 不为尚未使用的官方能力复制类型；只为当前业务实际消费的字段建立稳定结构。
 - 不改变 SQLite Schema、用户配置格式、公开命令或 Surface 行为，除非某一阶段另行说明并获批准。
 
-## 当前事实
+## 计划建立时的事实基线
 
 当前架构已经具备两个正确基础：
 
 1. `codex-protocol` 保存版本专属生成类型和精确版本基线。
 2. `codex-client` 集中发送 App Server 请求并管理 Transport、JSON-RPC 和重连。
 
-但协议隔离尚未完成：
+计划建立时协议隔离尚未完成：
 
 - `src/codex-protocol/index.ts` 当前受控导出 53 个生成类型。
 - 生产源码有 14 个文件直接导入 `codex-protocol`，其中 12 个位于 `codex-client` 之外。
@@ -119,8 +119,8 @@ bootstrap ─────────→ 所有具体实现并完成装配
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
 | 计划与现状盘点 | 已完成 | 仅新增计划和索引，不改变运行时 |
-| 1. Thread 生命周期 | 未开始 | 下一阶段 |
-| 2. Turn 与 Application 命令 | 未开始 | 等待阶段 1 稳定端口 |
+| 1. Thread 生命周期 | 已完成 | 稳定端口、响应映射、调用方与测试已迁移 |
+| 2. Turn 与 Application 命令 | 未开始 | 下一阶段 |
 | 3. 模型、Fast、用量与扩展查询 | 未开始 | 等待 Application 端口 |
 | 4. Notification 与 Conversation Core | 未开始 | 等待 Thread 与状态类型稳定 |
 | 5. Server Request 与审批 | 未开始 | 独立高权限边界 |

@@ -5,8 +5,10 @@ import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { CodexAppServerClient } from "../src/codex-client/client.js";
-import { SessionRouter } from "../src/session-routing/router.js";
+import {
+  SessionRouter,
+  type ThreadLifecyclePort,
+} from "../src/session-routing/index.js";
 import { MemoryBindingStore } from "../src/storage/memory-binding-store.js";
 import { SqliteBindingStore } from "../src/storage/sqlite-binding-store.js";
 import { WorkspaceRegistry } from "../src/policy/workspace-registry.js";
@@ -14,6 +16,22 @@ import { WorkspaceRegistry } from "../src/policy/workspace-registry.js";
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
 const registry = new WorkspaceRegistry([{ id: "main", name: "Main", cwd: "/workspace" }], "main");
 const temporaryDirectories: string[] = [];
+
+function threadPort(overrides: Partial<ThreadLifecyclePort> = {}): ThreadLifecyclePort {
+  const unsupported = async (): Promise<never> => {
+    throw new Error("测试未配置 ThreadLifecyclePort 方法");
+  };
+  return {
+    listThreads: unsupported,
+    startThread: unsupported,
+    resumeThread: unsupported,
+    forkThread: unsupported,
+    archiveThread: unsupported,
+    unarchiveThread: unsupported,
+    unsubscribeThread: unsupported,
+    ...overrides,
+  };
+}
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -57,11 +75,11 @@ describe("SqliteBindingStore", () => {
     first.close();
 
     const second = new SqliteBindingStore(path);
-    const client = {
+    const client = threadPort({
       resumeThread: async () => {
         throw new Error("thread not found");
       },
-    } as unknown as CodexAppServerClient;
+    });
     const router = new SessionRouter(client, second, registry);
 
     const failures = await router.restoreSubscriptions();

@@ -33,7 +33,7 @@ const allowedModuleDependencies: Record<string, readonly string[]> = {
     "storage",
     "surfaces",
   ],
-  "codex-client": ["codex-protocol"],
+  "codex-client": ["codex-protocol", "session-routing"],
   "codex-protocol": [],
   config: [],
   "conversation-core": ["codex-protocol", "event-bus"],
@@ -41,8 +41,6 @@ const allowedModuleDependencies: Record<string, readonly string[]> = {
   observability: ["config"],
   policy: ["conversation-core"],
   "session-routing": [
-    "codex-client",
-    "codex-protocol",
     "conversation-core",
     "policy",
     "storage",

@@ -494,12 +494,11 @@ export class GatewayApplication {
         if (thread.status.type !== "active") {
           return;
         }
-        const activeTurn = thread.turns.findLast((turn) => turn.status === "inProgress");
-        if (activeTurn) {
+        if (thread.activeTurnId) {
           this.core.markTurnStarted(
             binding.target,
             binding.threadId,
-            activeTurn.id,
+            thread.activeTurnId,
           );
           this.logger.info(
             {
@@ -507,7 +506,7 @@ export class GatewayApplication {
               accountId: binding.target.accountId,
               conversationId: binding.target.conversationId,
               threadId: binding.threadId,
-              turnId: activeTurn.id,
+              turnId: thread.activeTurnId,
             },
             "已恢复正在运行的 Codex Turn",
           );

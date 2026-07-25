@@ -67,7 +67,7 @@
 | 能力 | 当前使用的官方方法或通知 | 本项目入口与验证 |
 | --- | --- | --- |
 | 初始化与连接 | `initialize`、`initialized` | [`codex-client/`](../src/codex-client/README.md)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)；发送消息受生成的 `ClientRequest` / `ClientNotification` 约束 |
-| Thread 生命周期 | `thread/list`、`thread/read`、`thread/start`、`thread/resume`、`thread/fork`、`thread/archive`、`thread/unarchive`、`thread/delete`、`thread/unsubscribe`、`thread/name/set`、`thread/compact/start`、`thread/closed`、`thread/archived`、`thread/deleted` | [`session-routing/`](../src/session-routing/README.md)、[`session-router.test.ts`](../tests/session-router.test.ts)、[`thread-state-sync.test.ts`](../tests/thread-state-sync.test.ts) |
+| Thread 生命周期 | `thread/list`、`thread/read`、`thread/start`、`thread/resume`、`thread/fork`、`thread/archive`、`thread/unarchive`、`thread/delete`、`thread/unsubscribe`、`thread/name/set`、`thread/compact/start`、`thread/closed`、`thread/archived`、`thread/deleted` | [`thread-adapter.ts`](../src/codex-client/thread-adapter.ts) 把官方响应映射为 [`session-routing/`](../src/session-routing/README.md) 的稳定快照；[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`session-router.test.ts`](../tests/session-router.test.ts)、[`thread-state-sync.test.ts`](../tests/thread-state-sync.test.ts) 验证边界与行为 |
 | Thread 设置 | `thread/settings/updated`、`model/list`、`config/read`、`config/batchWrite` | [`thread-state-sync.ts`](../src/session-routing/thread-state-sync.ts)、[`model-selection-service.test.ts`](../tests/model-selection-service.test.ts) |
 | Turn 控制 | `turn/start`、`turn/steer`、`turn/interrupt`、`turn/started`、`error`、`turn/completed` | [`conversation-core/`](../src/conversation-core/README.md)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts)、[`conversation-service.test.ts`](../tests/conversation-service.test.ts) |
 | Item 与流式输出 | `item/started`、`item/completed`、`item/agentMessage/delta` | [`core.ts`](../src/conversation-core/core.ts)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts) |
@@ -91,7 +91,8 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 | Unix WebSocket 如何连接 | [`codex-client/`](../src/codex-client/README.md) | [`unix-websocket-transport.test.ts`](../tests/unix-websocket-transport.test.ts) |
 | JSON-RPC 如何分流和清理请求 | [`json-rpc.ts`](../src/codex-client/json-rpc.ts) | [`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
 | Thread/Turn/Item 如何归约 | [`conversation-core/`](../src/conversation-core/README.md) | [`conversation-core.test.ts`](../tests/conversation-core.test.ts) |
-| Workspace、Conversation、Thread 如何绑定 | [`session-routing/`](../src/session-routing/README.md) | [`session-router.test.ts`](../tests/session-router.test.ts) |
+| 官方 Thread 如何进入稳定业务边界 | [`thread-adapter.ts`](../src/codex-client/thread-adapter.ts)、[`thread-port.ts`](../src/session-routing/thread-port.ts) | [`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
+| Workspace、Conversation、Thread 如何绑定 | [`session-routing/`](../src/session-routing/README.md) | [`session-router.test.ts`](../tests/session-router.test.ts)、[`module-boundaries.test.ts`](../tests/module-boundaries.test.ts) |
 | 模型、思考强度和 Fast 如何同步 | [`thread-state-sync.ts`](../src/session-routing/thread-state-sync.ts) | [`thread-state-sync.test.ts`](../tests/thread-state-sync.test.ts) |
 | 审批和用户输入如何协调 | [`approval/`](../src/approval/README.md) | [`approval.test.ts`](../tests/approval.test.ts) |
 | 各模块如何装配和管理生命周期 | [`bootstrap/`](../src/bootstrap/README.md) | [`gateway-startup-cleanup.test.ts`](../tests/gateway-startup-cleanup.test.ts) |
@@ -111,7 +112,11 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 - `conversation-core`：Turn、Item、错误与警告通知归约，提交 `994a3c7`。
 - `session-routing`：Thread 绑定、恢复、订阅和关闭语义，提交 `5410f40`。
 
-后续不把上述模块推倒重做，而是依次完成 Thread、Turn、模型与查询、Notification、审批、边界
+协议边界收敛阶段 1 已完成：Thread 生命周期使用 `session-routing` 自有窄端口和快照，
+`codex-client` 集中映射固定版本官方响应，Application 与 Telegram 只消费项目会话摘要，
+`session-routing` 不再依赖具体 Client 或生成协议。
+
+后续不把上述模块推倒重做，而是依次完成 Turn、模型与查询、Notification、审批、边界
 收紧、项目内部模块和 Bootstrap 收尾。每个阶段只定向复核实际触及的已完成模块，并保持独立修改、
 验证、审查和提交。
 

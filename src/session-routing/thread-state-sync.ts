@@ -1,5 +1,9 @@
-import type { RpcNotification } from "../codex-client/index.js";
 import type { SessionRouter } from "./router.js";
+
+export interface ThreadStateNotification {
+  method: string;
+  params?: unknown;
+}
 
 const unavailableThreadNotifications = new Set([
   "thread/archived",
@@ -9,7 +13,7 @@ const unavailableThreadNotifications = new Set([
 export class ThreadStateSynchronizer {
   constructor(private readonly router: SessionRouter) {}
 
-  handle(notification: RpcNotification): void {
+  handle(notification: ThreadStateNotification): void {
     if (notification.method === "thread/settings/updated") {
       const params = asRecord(notification.params);
       const settings = asRecord(params?.threadSettings);
