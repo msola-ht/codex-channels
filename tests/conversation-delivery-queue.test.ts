@@ -101,6 +101,30 @@ describe("ConversationDeliveryQueue", () => {
     );
   });
 
+  it("makes concurrent close callers wait for the same in-flight delivery", async () => {
+    const delivery = new ConversationDeliveryQueue(logger, {
+      component: "Test",
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    delivery.enqueue("a", () => gate, true);
+    await settle();
+
+    const firstClose = delivery.close();
+    const secondClose = delivery.close();
+    let secondSettled = false;
+    void secondClose.then(() => {
+      secondSettled = true;
+    });
+    await settle();
+
+    expect(secondSettled).toBe(false);
+    release();
+    await Promise.all([firstClose, secondClose]);
+  });
+
   it("releases an idle Conversation worker and accepts later work", async () => {
     const delivery = new ConversationDeliveryQueue(logger, {
       component: "Test",

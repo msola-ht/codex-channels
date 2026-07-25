@@ -24,6 +24,7 @@ export class ConversationDeliveryQueue {
   private readonly capacity: number;
   private readonly closeTimeoutMs: number;
   private closed = false;
+  private closePromise: Promise<void> | undefined;
 
   constructor(
     private readonly logger: Logger,
@@ -99,14 +100,20 @@ export class ConversationDeliveryQueue {
     });
   }
 
-  async close(): Promise<void> {
-    if (this.closed) {
-      return;
+  close(): Promise<void> {
+    if (this.closePromise) {
+      return this.closePromise;
     }
     this.closed = true;
     for (const worker of this.workers.values()) {
       worker.queue.close();
     }
+    const conversationCount = this.workers.size;
+    this.closePromise = this.finishClose(conversationCount);
+    return this.closePromise;
+  }
+
+  private async finishClose(conversationCount: number): Promise<void> {
     const completed = await waitAtMost(
       Promise.allSettled([...this.workers.values()].map((worker) => worker.done)),
       this.closeTimeoutMs,
@@ -115,7 +122,7 @@ export class ConversationDeliveryQueue {
       this.logger.warn(
         {
           component: this.options.component,
-          conversations: this.workers.size,
+          conversations: conversationCount,
           closeTimeoutMs: this.closeTimeoutMs,
         },
         "Surface Conversation 输出队列关闭等待超时",
