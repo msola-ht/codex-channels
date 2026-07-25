@@ -1,4 +1,4 @@
-export type ConfigChangeCode =
+export type GlobalConfigChangeCode =
   | "codex.binary"
   | "codex.socket"
   | "codex.default-model"
@@ -8,24 +8,53 @@ export type ConfigChangeCode =
   | "approval.timeout"
   | "observability.log-level"
   | "workspace.default"
-  | "workspace.registry"
+  | "workspace.registry";
+
+export type TelegramConfigChangeCode =
   | "surface.telegram.token"
   | "surface.telegram.proxy"
   | "surface.telegram.message-format"
   | "surface.telegram.allowed-users";
 
-export type ConfigChangeScope = "global" | "telegram";
+export type FeishuConfigChangeCode =
+  | "surface.feishu.enabled"
+  | "surface.feishu.credentials"
+  | "surface.feishu.allowed-users";
 
-export interface ConfigChange {
-  code: ConfigChangeCode;
-  scope: ConfigChangeScope;
-}
+export type ConfigChangeCode =
+  | GlobalConfigChangeCode
+  | TelegramConfigChangeCode
+  | FeishuConfigChangeCode;
 
+export type ConfigChangeScope = "global" | "telegram" | "feishu";
+
+export type ConfigChange =
+  | { code: GlobalConfigChangeCode; scope: "global" }
+  | { code: TelegramConfigChangeCode; scope: "telegram" }
+  | { code: FeishuConfigChangeCode; scope: "feishu" };
+
+export function configChange(code: GlobalConfigChangeCode): ConfigChange;
+export function configChange(
+  code: TelegramConfigChangeCode,
+  scope: "telegram",
+): ConfigChange;
+export function configChange(
+  code: FeishuConfigChangeCode,
+  scope: "feishu",
+): ConfigChange;
 export function configChange(
   code: ConfigChangeCode,
   scope: ConfigChangeScope = "global",
 ): ConfigChange {
-  return { code, scope };
+  const expectedScope = code.startsWith("surface.telegram.")
+    ? "telegram"
+    : code.startsWith("surface.feishu.")
+      ? "feishu"
+      : "global";
+  if (scope !== expectedScope) {
+    throw new Error(`配置变更 ${code} 的 scope 必须为 ${expectedScope}`);
+  }
+  return { code, scope } as ConfigChange;
 }
 
 export function includesConfigChange(

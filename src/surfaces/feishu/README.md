@@ -1,11 +1,12 @@
 # 飞书 Surface
 
 本目录是飞书 Surface 的平台边界。当前已完成 Phase 0 的官方 SDK、事件长连接和消息字段裁剪基础，
-并进入 Phase 1 的私聊文本 Inbox 与纯文本输出渲染；模块仍未注册为可启用 Surface。
+以及 Phase 1 的私聊文本 Inbox、纯文本输出渲染和 Bootstrap 显式组合；当前可通过严格 TOML
+手工启用开发验证路径。
 
 ## 文件索引
 
-- `index.ts`：飞书模块受控出口；尚未从一级 `surfaces/index.ts` 导出。
+- `index.ts`：飞书模块受控出口；一级 `surfaces/index.ts` 只转出 Bootstrap 所需工厂和选项类型。
 - `adapter.ts`：把已授权私聊文本提交到 Application，并通过 Outbox 返回追加提示或安全错误。
 - `client.ts`：官方 SDK、事件长连接及生命周期隔离。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪。
@@ -61,9 +62,10 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 这不会伪装成飞书已经支持审批，卡片交互仍属于后续独立阶段。
 
 `surface.ts` 实现单账号 `SurfaceAdapter` 生命周期：启动等待长连接就绪；停止先切断新事件，再
-有限排空 Inbox 和 Outbox。配置通知在 Bootstrap 尚未提供已授权 Actor 对应的安全 Chat 收件人前
-明确失败，不向未知会话广播。
+有限排空 Inbox 和 Outbox。Bootstrap 从现有绑定中选择仍有授权 Actor 的 Chat 作为配置通知
+收件人；持久通知等待平台实际发送完成，没有已知安全会话时不广播。
 
-本模块尚未接入配置或 Bootstrap，也不支持可批准交互，因此不构成可启用的飞书渠道。后续阶段按
-[`飞书 Surface 接入计划`](../../../docs/feishu-surface-plan.md)推进；不得把 SDK 类型导出到一级
-`surfaces` 入口，也不得在 Core 中引入飞书类型。
+本模块已有严格 TOML/运行配置、变更分类和 Bootstrap 显式组合，可启用阶段 1 私聊文本路径；
+Setup、Doctor 的飞书专属诊断、真实应用冒烟和可批准交互仍未完成。后续阶段按
+[`飞书 Surface 接入计划`](../../../docs/feishu-surface-plan.md)推进；一级 `surfaces` 入口只转出
+窄工厂，不得导出 SDK 类型，也不得在 Core 中引入飞书类型。

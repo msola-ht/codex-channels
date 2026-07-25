@@ -32,6 +32,12 @@ describe("createLogger", () => {
       logger.info({
         token: secret,
         password: secret,
+        appSecret: secret,
+        app_secret: secret,
+        feishu: {
+          appSecret: secret,
+          app_secret: secret,
+        },
         cookie: secret,
         authorization: secret,
         headers: {

@@ -119,6 +119,68 @@ describe("Gateway config reload", () => {
     });
   });
 
+  it("restarts when Feishu is enabled", () => {
+    expect(classifyConfigReload(
+      config(),
+      config({
+        feishu: {
+          appId: "cli_0123456789abcdef",
+          appSecret: "secret",
+          allowedOpenIds: new Set(["ou_actor"]),
+        },
+      }),
+    )).toEqual({
+      action: "restart",
+      changes: [{ code: "surface.feishu.enabled", scope: "feishu" }],
+    });
+  });
+
+  it("restarts when Feishu credentials change", () => {
+    const feishu = {
+      appId: "cli_0123456789abcdef",
+      appSecret: "secret",
+      allowedOpenIds: new Set(["ou_actor"]),
+    };
+    const current = config({ feishu });
+
+    expect(classifyConfigReload(
+      current,
+      config({
+        feishu: {
+          ...feishu,
+          appSecret: "next-secret",
+        },
+      }),
+    )).toEqual({
+      action: "restart",
+      changes: [{ code: "surface.feishu.credentials", scope: "feishu" }],
+    });
+  });
+
+  it("hot reloads Feishu allowed Open IDs", () => {
+    const current = config({
+      feishu: {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+        allowedOpenIds: new Set(["ou_actor", "ou_reviewer"]),
+      },
+    });
+
+    expect(classifyConfigReload(
+      current,
+      config({
+        feishu: {
+          appId: "cli_0123456789abcdef",
+          appSecret: "secret",
+          allowedOpenIds: new Set(["ou_actor"]),
+        },
+      }),
+    )).toEqual({
+      action: "reload",
+      changes: [{ code: "surface.feishu.allowed-users", scope: "feishu" }],
+    });
+  });
+
   it.each([
     ["codex.binary", { codexBinary: "/opt/codex" }],
     ["codex.socket", { codexSocketPath: "/tmp/other.sock" }],

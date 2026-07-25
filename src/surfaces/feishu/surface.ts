@@ -22,6 +22,7 @@ import {
   FeishuOutbox,
   type FeishuTextMessagePort,
 } from "./outbox.js";
+import { renderFeishuConfigurationChange } from "./renderer.js";
 
 interface FeishuEventConnectionPort {
   start(): Promise<void>;
@@ -44,11 +45,12 @@ export interface FeishuSurfaceOptions {
   onFatal: (error: Error) => void;
   actorRegistry?: ConversationActorRegistry;
   webSocketAgent?: unknown;
+  configurationRecipients?: () => readonly string[];
 }
 
 export function createFeishuSurface(
   options: FeishuSurfaceOptions,
-): SurfaceAdapter {
+): FeishuSurface {
   return new FeishuSurface(options);
 }
 
@@ -60,12 +62,18 @@ export class FeishuSurface implements SurfaceAdapter {
 
   private readonly inbox: FeishuInbox;
   private readonly connection: FeishuEventConnectionPort;
+  private readonly configurationRecipients:
+    | (() => readonly string[])
+    | undefined;
+  private readonly logger: Logger;
 
   constructor(
     options: FeishuSurfaceOptions,
     dependencies: FeishuSurfaceDependencies = defaultDependencies,
   ) {
     this.accountId = options.appId;
+    this.configurationRecipients = options.configurationRecipients;
+    this.logger = options.logger;
     const messagePort = dependencies.messagePort ?? new FeishuTextMessageClient({
       appId: options.appId,
       appSecret: options.appSecret,
@@ -145,13 +153,45 @@ export class FeishuSurface implements SurfaceAdapter {
     await this.output.close();
   }
 
+  configurationChanged(change: SurfaceConfigurationChange): void {
+    if (!this.configurationRecipients) {
+      return;
+    }
+    const text = renderFeishuConfigurationChange(change);
+    for (const chatId of this.safeConfigurationRecipients()) {
+      if (!this.output.notifyText(chatId, text)) {
+        this.logger.warn(
+          { accountId: this.accountId, conversationId: chatId },
+          "飞书配置通知未进入输出队列",
+        );
+      }
+    }
+  }
+
   deliverConfigurationChange(
     change: SurfaceConfigurationChange,
   ): Promise<void> {
-    void change;
-    return Promise.reject(
-      new Error("飞书 Surface 尚未配置安全的配置通知收件人"),
-    );
+    if (!this.configurationRecipients) {
+      return Promise.reject(
+        new Error("飞书 Surface 尚未配置安全的配置通知收件人"),
+      );
+    }
+    const text = renderFeishuConfigurationChange(change);
+    return Promise.all(
+      this.safeConfigurationRecipients().map(
+        (chatId) => this.output.deliverText(chatId, text),
+      ),
+    ).then(() => undefined);
+  }
+
+  private safeConfigurationRecipients(): string[] {
+    const recipients = [...new Set(this.configurationRecipients?.() ?? [])];
+    for (const chatId of recipients) {
+      if (!/^oc_.+$/u.test(chatId)) {
+        throw new Error("飞书配置通知包含无效 Chat ID");
+      }
+    }
+    return recipients;
   }
 }
 

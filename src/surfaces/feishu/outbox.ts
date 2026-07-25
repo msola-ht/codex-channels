@@ -56,6 +56,13 @@ export class FeishuOutbox implements SurfaceOutputPort {
     );
   }
 
+  deliverText(chatId: string, text: string): Promise<void> {
+    return this.delivery.runOrdered(
+      chatId,
+      () => this.messagePort.sendText(chatId, text),
+    );
+  }
+
   close(): Promise<void> {
     this.closed = true;
     return this.delivery.close();

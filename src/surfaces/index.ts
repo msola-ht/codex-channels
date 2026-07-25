@@ -1,4 +1,8 @@
 export {
+  createFeishuSurface,
+  type FeishuSurfaceOptions,
+} from "./feishu/index.js";
+export {
   TelegramSurface,
   telegramDefaultAccountId,
   type TelegramImagePort,

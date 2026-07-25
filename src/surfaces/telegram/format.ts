@@ -12,7 +12,11 @@ import {
   type ModelSelectionState,
   type PermissionProfileOption,
 } from "../../application/index.js";
-import type { ConfigChange, ConfigChangeCode } from "../../config/index.js";
+import type {
+  ConfigChange,
+  GlobalConfigChangeCode,
+  TelegramConfigChangeCode,
+} from "../../config/index.js";
 import type {
   McpServerStatus,
   RateLimitSnapshot,
@@ -449,10 +453,20 @@ export function formatConfigurationChange(
 }
 
 function formatConfigChanges(changes: readonly ConfigChange[]): string {
-  return changes.map((change) => configChangeLabel(change.code)).join("、");
+  return changes.map((change) => {
+    switch (change.scope) {
+      case "global":
+      case "telegram":
+        return configChangeLabel(change.code);
+      default:
+        throw new Error("Telegram 收到了其他 Surface 的配置变更");
+    }
+  }).join("、");
 }
 
-function configChangeLabel(code: ConfigChangeCode): string {
+function configChangeLabel(
+  code: GlobalConfigChangeCode | TelegramConfigChangeCode,
+): string {
   switch (code) {
     case "codex.binary":
       return "Codex Binary";

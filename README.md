@@ -1,12 +1,15 @@
 # Codex Connect Gateway
 
-通过 Telegram 连接本机 Codex App Server。Telegram 与原生 Codex TUI 使用同一个 App Server，共享 Thread、运行状态和历史；项目不读取 `~/.codex/sessions`，也不复制完整会话。
+通过 Telegram 和可选的飞书私聊连接本机 Codex App Server。各通讯渠道与原生 Codex TUI 使用
+同一个 App Server，共享 Thread、运行状态和历史；项目不读取 `~/.codex/sessions`，也不复制完整会话。
 
 当前版本要求 `codex-cli 0.145.0`，npm 包与 Gateway 直接使用同一版本号 `0.145.0`，不维护独立版本；版本不匹配时 Gateway 会拒绝启动。
 
 ## 功能
 
 - 在 Telegram 中发送文本和 PNG/JPEG 图片。
+- 可选启用飞书企业自建应用，通过已授权用户的私聊文本提交 Turn 并接收纯文本结果；当前不支持
+  飞书命令、群聊、媒体或可批准交互。
 - 查看 Codex 流式回复、格式化最终回复、操作过程、计划、Diff、Goal、用量和额度；长文本自动折叠，超长代码以预览加完整文件发送；`/status` 显示 Thread 累计缓存命中率，每轮结束状态卡显示最近 Turn 缓存命中率，并同时显示当前 Goal 状态及 Thread 上下文压缩总次数。
 - Telegram 通知按逻辑事件降噪：过程、状态、上下文和后续分片静默发送；最终回复、审批、用户输入与严重错误保留提醒。
 - Gateway 启动时通知当前系统、版本、App Server 返回的上游 User-Agent、本地连接方式、Workspace、Thread、模型、思考强度、Fast 模式和周限。
@@ -20,6 +23,7 @@
 - Node.js 22.13 或更高版本。
 - 已安装并登录 `codex-cli 0.145.0`。
 - Telegram Bot Token 和允许使用的 Telegram 用户 ID。
+- 如需启用飞书，还需要企业自建应用的 App ID、App Secret 和允许使用的用户 Open ID。
 
 Codex CLI 需要单独安装：
 
@@ -51,6 +55,20 @@ bot_token = "你的_Bot_Token"
 allowed_user_ids = [你的_Telegram_用户_ID]
 message_format = "html"
 ```
+
+飞书当前尚未进入 Setup 菜单，需要手工在同一配置文件中加入：
+
+```toml
+[feishu]
+enabled = true
+app_id = "cli_0123456789abcdef"
+app_secret = "你的_飞书_App_Secret"
+allowed_open_ids = ["ou_xxx"]
+```
+
+启用前需在飞书开放平台创建企业自建应用、启用机器人、订阅
+`im.message.receive_v1` 并发布应用。当前只接收允许名单用户的私聊文本；审批请求会明确拒绝，
+不会通过飞书静默批准高权限操作。
 
 最终回复默认把常用 Markdown 安全转换为兼容性更好的 Telegram HTML。支持 Rich Messages
 的客户端可设置 `telegram.message_format = "rich"`；修改后执行 `codexc service reload`，
@@ -136,9 +154,14 @@ TOML 中明确填写。Telegram 的 `telegram.proxy_url` 保持最高优先级�
 `-f` 可持续跟踪。macOS 默认忽略早于正常日志的陈旧 stderr，日志文件位于
 `.codex-connect/runtime`；Linux 日志来自 systemd user journal。
 
-Telegram 与 App Server 均采用有界退避重连；连续失败耗尽后 Gateway 会退出，由 launchd 或 systemd 自动拉起，避免进程存活但不再接收消息。
+Telegram、飞书长连接与 App Server 均采用受约束的连接恢复；连续失败耗尽后 Gateway 会退出，
+由 launchd 或 systemd 自动拉起，避免进程存活但不再接收消息。
 
 Gateway 会监测用户 `config.toml`：新增 Workspace 和 Telegram 允许用户会直接热加载；Workspace 新增后，Telegram 会向授权用户发送通知，并提供直接切换按钮。Workspace 新增事件会先写入 `~/.codex-connect/data/config-events.json`，Gateway 热加载或重启并通过平台 API 实际发送成功后再确认删除，因此不会因配置监听合并或重启窗口静默丢失；平台 API 重试后仍失败时保留事件，等待下次启动或 `codexc service reload`，发送后、确认前崩溃可能导致重复通知。删除允许用户会先重启 Gateway 并清理其旧 Thread 绑定；Bot Token、Telegram 代理、数据库、默认模型等 Gateway 配置变化时，Gateway 会优雅退出并由 launchd 或 systemd 自动拉起，Codex App Server 保持运行。`codex.binary`、`codex.socket_path` 或有效 `network` 代理同时影响独立 App Server，需要重新执行 `codexc service install` 使两项服务采用新值。系统代理和标准环境变量会在每次服务启动时重新读取，不会复制进服务定义。配置校验失败时继续使用当前有效配置。Telegram 会通知热加载成功项、自动重启原因、需要重装的服务配置或加载失败状态，但不会发送原始配置和异常详情。可执行 `codexc service reload` 立即触发检查，无需等待文件监测。
+
+飞书 `allowed_open_ids` 可热加载，并会清理已撤权 Actor 的旧绑定；启用状态、App ID 或 App Secret
+变化会重启 Gateway。飞书配置通知只发送给已有绑定且仍有授权 Actor 的私聊，不会广播凭据或
+允许名单；尚未建立安全会话时没有飞书通知收件人。
 
 ## Telegram 命令
 
@@ -185,14 +208,16 @@ Codex App Server（独立进程，Unix WebSocket）
 └── Codex Connect Gateway
     ├── Codex Client / Conversation Core / Session Router
     ├── Application Commands / Approval / Policy / Storage / Event Bus
-    └── Telegram Surface
+    └── Surfaces
+        ├── Telegram
+        └── 飞书（配置启用时）
 ```
 
 App Server 是 Thread、Turn 和 Item 的唯一事实来源。SQLite 只保存外部 conversation、Surface
-账号、Workspace 与 Thread 的最小绑定。Surface 通过编译期显式注册接入；当前只启用 Telegram，
-后续平台适配器通过统一命令服务和 `target + actorId` 授权上下文接入，不需要修改 Conversation Core
-或 Codex Client；授权同时按 Surface 账号隔离。Application 返回结构化命令结果，平台 SDK、成功
-文案、消息格式和文件传输由各自适配器实现；未知内部错误不会原样发送到外部聊天。
+账号、Workspace 与 Thread 的最小绑定。Surface 通过编译期显式注册接入；Telegram 始终启用，
+飞书只在有效配置明确启用时创建。各平台通过统一服务和 `target + actorId` 授权上下文接入，
+不修改 Conversation Core 或 Codex Client；授权同时按 Surface 账号隔离。Application 返回结构化
+结果，平台 SDK、文案、消息格式和文件传输由各自适配器实现；未知内部错误不会原样发送到外部聊天。
 
 模块设计见 [`src/README.md`](src/README.md) 及各目录文档，项目约束见 [AGENTS.md](AGENTS.md)。
 

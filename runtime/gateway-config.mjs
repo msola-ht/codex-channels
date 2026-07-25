@@ -17,6 +17,34 @@ const workspaceSchema = z.strictObject({
   cwd: z.string().trim().min(1),
 });
 
+const feishuSchema = z.strictObject({
+  enabled: z.boolean(),
+  app_id: z.string().regex(/^cli_[0-9a-fA-F]{16}$/u).optional(),
+  app_secret: z.string().min(1).refine(
+    (value) => value.trim().length > 0,
+    "app_secret 不能为空",
+  ).optional(),
+  allowed_open_ids: z.array(
+    z.string().trim().regex(/^ou_.+$/u),
+  ).min(1).refine(
+    (values) => new Set(values).size === values.length,
+    "allowed_open_ids 不能包含重复项",
+  ).optional(),
+}).superRefine((value, context) => {
+  if (!value.enabled) {
+    return;
+  }
+  for (const field of ["app_id", "app_secret", "allowed_open_ids"]) {
+    if (value[field] === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: [field],
+        message: `飞书启用时必须配置 ${field}`,
+      });
+    }
+  }
+});
+
 const gatewayDocumentSchema = z.strictObject({
   version: z.literal(1),
   default_workspace: z.string().trim().min(1),
@@ -26,6 +54,7 @@ const gatewayDocumentSchema = z.strictObject({
     proxy_url: z.string().optional(),
     message_format: z.enum(["html", "rich"]).default("html"),
   }),
+  feishu: feishuSchema.optional(),
   network: z.strictObject({
     http_proxy: z.string().optional(),
     https_proxy: z.string().optional(),

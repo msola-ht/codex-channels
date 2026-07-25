@@ -2,15 +2,17 @@
 
 ## 状态与目标
 
-本文是飞书通讯渠道的实施计划，不表示仓库当前已经支持飞书。实施必须继续遵守
+本文记录飞书通讯渠道的分阶段实施状态。阶段 1 私聊文本路径已可通过手工配置启用，但不表示
+后续命令、群聊、审批或媒体能力已经支持。实施必须继续遵守
 [`通讯渠道 Surface 接入指南`](surface-integration-guide.md)；如果本文与通用指南冲突，以通用
 架构和安全边界为准，并先单独评审需要调整的公开合同。
 
 当前进度（2026-07-25）：已锁定官方 Node SDK `1.71.1`，并完成 Phase 0 的长连接生命周期窄封装、
 消息事件稳定字段裁剪和离线合同测试；阶段 1 已完成平台本地私聊文本 Inbox、访问策略和
 Application 输入 Adapter、安全错误、`OutputEvent` 纯文本渲染、有界 Outbox 及官方 SDK
-文本发送窄适配，以及单账号 `SurfaceAdapter` 生命周期组合。该模块尚未注册到 Bootstrap，也没有
-飞书配置、安全的配置通知收件人组合或可批准交互；测试应用的真实握手、
+文本发送窄适配、单账号 `SurfaceAdapter` 生命周期组合、严格 TOML/运行配置与变更分类，以及
+Bootstrap 显式注册、允许名单热加载和安全配置通知收件人组合。Setup、Doctor 的飞书专属诊断
+和可批准交互尚未完成；测试应用的真实握手、
 代理、事件投递和卡片动作实验仍待完成。
 
 目标是在现有 TypeScript 模块化单体中增加一个编译期显式注册的飞书 Surface，使飞书与
@@ -249,23 +251,23 @@ enabled = true
 app_id = "cli_xxx"
 app_secret = "..."
 allowed_open_ids = ["ou_xxx"]
-allowed_chat_ids = []
-require_mention = true
 ```
 
-这是计划中的目标结构，不是当前已支持配置。实施时需逐项完成：
+这是阶段 1 私聊的当前严格结构；群 Chat 允许名单和 `@Bot` 要求属于阶段 2，不提前进入 Schema。
+当前配置与 Bootstrap 已形成手工启用路径。实施状态：
 
-1. `runtime/gateway-config.mjs` 的严格结构、默认值和未知键拒绝。
-2. `src/config/index.ts` 的运行时映射和语义校验。
-3. `config-change.ts` 的飞书 Surface scope 变更码。
-4. `reload-classifier.ts` 的热加载、Gateway 重启分类。
-5. `config.example.toml`、README、Setup、Doctor 和测试同步。
+1. [x] `runtime/gateway-config.mjs` 的严格结构和未知键拒绝。
+2. [x] `src/config/index.ts` 的运行时映射和语义校验。
+3. [x] `config-change.ts` 的飞书 Surface scope 变更码。
+4. [x] `reload-classifier.ts` 的热加载、Gateway 重启分类。
+5. [x] `config.example.toml`、README 和启用路径测试同步。
+6. Setup 与 Doctor 的飞书专属流程待实现。
 
 建议分类：
 
 | 变更 | 行为 |
 | --- | --- |
-| `allowed_open_ids`、`allowed_chat_ids`、`require_mention` | 原子热加载 |
+| `allowed_open_ids` | 原子热加载 |
 | `app_id`、`app_secret` | Gateway 重启 |
 | `enabled` | Gateway 重启并创建或停止 Surface |
 | Workspace | 沿用现有全局热加载 |
@@ -328,7 +330,7 @@ Secret、Access Token、完整 SDK 响应或原始事件。
 
 范围：
 
-- 可选飞书配置与严格校验；
+- [x] 可选飞书配置与严格校验；
 - [x] `FeishuAccessPolicy`；
 - [x] Application 输入 Adapter；
 - [x] 单账号 SurfaceAdapter 生命周期组合；
@@ -340,7 +342,8 @@ Secret、Access Token、完整 SDK 响应或原始事件。
 - [x] 精确账号路由和按 Chat 隔离的有界 Outbox；
 - [x] `chat_id` 文本发送、有限 HTTP 超时和稳定脱敏错误；
 - [x] 结构化用户错误；
-- Bootstrap 显式组合、Setup 基础流程和 Doctor 检查。
+- [x] Bootstrap 显式组合；
+- Setup 基础流程和 Doctor 的飞书专属检查。
 
 明确不做群聊、媒体、流式卡片和可批准交互。
 

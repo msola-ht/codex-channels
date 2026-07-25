@@ -140,11 +140,17 @@ describe("SurfaceManager", () => {
       changes: [{ code: "surface.telegram.token", scope: "telegram" }],
       addedWorkspaces: [],
     });
+    manager.configurationChanged({
+      action: "reloaded",
+      changes: [{ code: "surface.feishu.allowed-users", scope: "feishu" }],
+      addedWorkspaces: [],
+    });
 
     expect(calls).toEqual([
       "telegram:reloaded:surface.telegram.allowed-users",
       "telegram:restarting:surface.telegram.token",
       "feishu:restarting:",
+      "feishu:reloaded:surface.feishu.allowed-users",
     ]);
     await manager.stop();
   });

@@ -143,6 +143,100 @@ describe("Gateway config.toml", () => {
     expect(config.logLevel).toBe("debug");
   });
 
+  it("loads an explicitly enabled Feishu account", () => {
+    const fixture = createFixture({
+      feishu: {
+        enabled: true,
+        app_id: "cli_0123456789abcdef",
+        app_secret: "secret",
+        allowed_open_ids: ["ou_actor", "ou_reviewer"],
+      },
+    });
+
+    const config = loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config;
+
+    expect(config.feishu).toEqual({
+      appId: "cli_0123456789abcdef",
+      appSecret: "secret",
+      allowedOpenIds: new Set(["ou_actor", "ou_reviewer"]),
+    });
+  });
+
+  it("keeps Feishu disabled when its table is absent or explicitly disabled", () => {
+    const absent = createFixture();
+    const disabled = createFixture({
+      feishu: {
+        enabled: false,
+        app_id: "cli_0123456789abcdef",
+        app_secret: "stored-secret",
+        allowed_open_ids: ["ou_actor"],
+      },
+    });
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: absent.configPath,
+    }).config.feishu).toBeUndefined();
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: disabled.configPath,
+    }).config.feishu).toBeUndefined();
+  });
+
+  it.each([
+    [
+      "missing credentials",
+      {
+        enabled: true,
+        app_id: "cli_0123456789abcdef",
+        allowed_open_ids: ["ou_actor"],
+      },
+    ],
+    [
+      "invalid App ID",
+      {
+        enabled: true,
+        app_id: "invalid",
+        app_secret: "secret",
+        allowed_open_ids: ["ou_actor"],
+      },
+    ],
+    [
+      "blank App Secret",
+      {
+        enabled: true,
+        app_id: "cli_0123456789abcdef",
+        app_secret: "   ",
+        allowed_open_ids: ["ou_actor"],
+      },
+    ],
+    [
+      "duplicate Open IDs",
+      {
+        enabled: true,
+        app_id: "cli_0123456789abcdef",
+        app_secret: "secret",
+        allowed_open_ids: ["ou_actor", "ou_actor"],
+      },
+    ],
+    [
+      "unsupported group settings",
+      {
+        enabled: true,
+        app_id: "cli_0123456789abcdef",
+        app_secret: "secret",
+        allowed_open_ids: ["ou_actor"],
+        allowed_chat_ids: ["oc_group"],
+      },
+    ],
+  ])("rejects Feishu %s", (_name, feishu) => {
+    const fixture = createFixture({ feishu });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow(ConfigurationError);
+  });
+
   it("prefers the Telegram proxy and otherwise uses the network proxy", () => {
     const explicit = createFixture({
       telegram: {

@@ -1,10 +1,11 @@
 {
   "name": "@hegenai/codexc",
   "version": "0.145.0",
-  "description": "Telegram gateway for a shared Codex App Server",
+  "description": "Chat surface gateway for a shared Codex App Server",
   "keywords": [
     "codex",
     "telegram",
+    "feishu",
     "gateway",
     "cli"
   ],

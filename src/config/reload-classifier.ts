@@ -67,6 +67,7 @@ function restartRequiredReasons(
     [configChange("surface.telegram.token", "telegram"), current.telegramBotToken, next.telegramBotToken],
     [configChange("surface.telegram.proxy", "telegram"), current.telegramProxyUrl, next.telegramProxyUrl],
     [configChange("surface.telegram.message-format", "telegram"), current.telegramMessageFormat, next.telegramMessageFormat],
+    [configChange("surface.feishu.enabled", "feishu"), current.feishu !== undefined, next.feishu !== undefined],
     [configChange("codex.default-model"), current.codexModel, next.codexModel],
     [configChange("codex.sandbox"), current.codexSandbox, next.codexSandbox],
     [configChange("storage.database"), current.stateDatabasePath, next.stateDatabasePath],
@@ -78,6 +79,16 @@ function restartRequiredReasons(
     if (before !== after) {
       reasons.push(change);
     }
+  }
+  if (
+    current.feishu !== undefined
+    && next.feishu !== undefined
+    && (
+      current.feishu.appId !== next.feishu.appId
+      || current.feishu.appSecret !== next.feishu.appSecret
+    )
+  ) {
+    reasons.push(configChange("surface.feishu.credentials", "feishu"));
   }
   if (!preservesExistingWorkspaces(current.workspaces, next.workspaces)) {
     reasons.push(configChange("workspace.registry"));
@@ -105,9 +116,19 @@ function hotReloadReasons(
     [...current.telegramAllowedUserIds].every(
       (userId) => next.telegramAllowedUserIds.has(userId),
     )
-    && !sameNumberSet(current.telegramAllowedUserIds, next.telegramAllowedUserIds)
+    && !sameSet(current.telegramAllowedUserIds, next.telegramAllowedUserIds)
   ) {
     reasons.push(configChange("surface.telegram.allowed-users", "telegram"));
+  }
+  if (
+    current.feishu !== undefined
+    && next.feishu !== undefined
+    && !sameSet(
+      current.feishu.allowedOpenIds,
+      next.feishu.allowedOpenIds,
+    )
+  ) {
+    reasons.push(configChange("surface.feishu.allowed-users", "feishu"));
   }
   return reasons;
 }
@@ -135,9 +156,9 @@ function sameWorkspaces(
   });
 }
 
-function sameNumberSet(
-  current: ReadonlySet<number>,
-  next: ReadonlySet<number>,
+function sameSet<T>(
+  current: ReadonlySet<T>,
+  next: ReadonlySet<T>,
 ): boolean {
   return current.size === next.size
     && [...current].every((value) => next.has(value));

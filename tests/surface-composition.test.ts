@@ -1,11 +1,17 @@
+import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 
+import type { ConversationService } from "../src/application/index.js";
 import type { InteractionPort } from "../src/approval/index.js";
 import {
+  createFeishuRuntimeModule,
+  createSurfaceModules,
   createTelegramRuntimeModule,
+  type FeishuRuntimeAdapter,
   type TelegramRuntimeAdapter,
 } from "../src/bootstrap/surface-composition.js";
 import type { GatewayConfig } from "../src/config/index.js";
+import { MemoryBindingStore } from "../src/storage/index.js";
 
 const interactions = {} as InteractionPort;
 
@@ -73,6 +79,78 @@ describe("Telegram Surface runtime composition", () => {
   });
 });
 
+describe("configured Surface composition", () => {
+  it("registers Feishu only when its runtime config is enabled", () => {
+    const disabled = createSurfaceModules(options(config()));
+    const enabled = createSurfaceModules(options(config({
+      feishu: {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+        allowedOpenIds: new Set(["ou_actor"]),
+      },
+    })));
+
+    expect(disabled.map((module) => module.adapter.surface)).toEqual([
+      "telegram",
+    ]);
+    expect(enabled.map((module) => module.adapter.surface)).toEqual([
+      "telegram",
+      "feishu",
+    ]);
+  });
+});
+
+describe("Feishu Surface runtime composition", () => {
+  it("hot reloads authorization and removes bindings for revoked actors", () => {
+    const bindings = new MemoryBindingStore();
+    const allowed = {
+      surface: "feishu",
+      accountId: "cli_0123456789abcdef",
+      conversationId: "oc_allowed",
+    } as const;
+    const revoked = {
+      surface: "feishu",
+      accountId: "cli_0123456789abcdef",
+      conversationId: "oc_revoked",
+    } as const;
+    for (const [target, actorId, threadId] of [
+      [allowed, "ou_actor", "thread-allowed"],
+      [revoked, "ou_revoked", "thread-revoked"],
+    ] as const) {
+      bindings.bind({
+        target,
+        workspaceId: "main",
+        threadId,
+        sessionId: `session-${threadId}`,
+      });
+      bindings.rememberActor(target, actorId);
+    }
+    const replaceAccess = vi.fn();
+    const module = createFeishuRuntimeModule(
+      feishuAdapter(),
+      { replace: replaceAccess },
+      bindings,
+      pino({ level: "silent" }),
+    );
+    const next = config({
+      feishu: {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+        allowedOpenIds: new Set(["ou_actor"]),
+      },
+    });
+
+    module.applyHotReload(next, [{
+      code: "surface.feishu.allowed-users",
+      scope: "feishu",
+    }]);
+
+    expect(replaceAccess).toHaveBeenCalledWith(next.feishu?.allowedOpenIds);
+    expect(bindings.getByThread("thread-allowed")).toBeDefined();
+    expect(bindings.getByThread("thread-revoked")).toBeUndefined();
+  });
+});
+
 function adapter(recipientSnapshots: number[][]): TelegramRuntimeAdapter {
   return {
     surface: "telegram",
@@ -87,6 +165,20 @@ function adapter(recipientSnapshots: number[][]): TelegramRuntimeAdapter {
     replaceNotificationRecipients(recipients) {
       recipientSnapshots.push([...recipients]);
     },
+  };
+}
+
+function feishuAdapter(): FeishuRuntimeAdapter {
+  return {
+    surface: "feishu",
+    accountId: "cli_0123456789abcdef",
+    interactions,
+    output: {
+      handle() {},
+    },
+    async start() {},
+    async stop() {},
+    async deliverConfigurationChange() {},
   };
 }
 
@@ -105,5 +197,17 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     approvalTimeoutMs: 300_000,
     logLevel: "info",
     ...overrides,
+  };
+}
+
+function options(runtimeConfig: GatewayConfig) {
+  return {
+    config: runtimeConfig,
+    service: {} as ConversationService,
+    bindings: new MemoryBindingStore(),
+    logger: pino({ level: "silent" }),
+    gatewayVersion: "0.145.0",
+    codexUpstreamUserAgent: () => undefined,
+    onFatal: vi.fn(),
   };
 }

@@ -9,6 +9,17 @@ export interface GatewayConfigDocument {
     proxy_url?: string;
     message_format: "html" | "rich";
   };
+  feishu?: {
+    enabled: false;
+    app_id?: string;
+    app_secret?: string;
+    allowed_open_ids?: string[];
+  } | {
+    enabled: true;
+    app_id: string;
+    app_secret: string;
+    allowed_open_ids: string[];
+  };
   network?: {
     http_proxy?: string;
     https_proxy?: string;

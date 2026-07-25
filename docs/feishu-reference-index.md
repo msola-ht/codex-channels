@@ -2,14 +2,13 @@
 
 ## 用途与状态
 
-本页用于定位飞书开放平台、官方 Node SDK、计划中的本地实现和验证入口。它是飞书 Surface 的
-事实查询入口，不替代 [`飞书 Surface 接入计划`](feishu-surface-plan.md)，也不表示项目当前已经
-支持飞书。
+本页用于定位飞书开放平台、官方 Node SDK、本地实现和验证入口。它是飞书 Surface 的事实查询
+入口，不替代 [`飞书 Surface 接入计划`](feishu-surface-plan.md)；当前只支持手工启用的阶段 1
+私聊文本路径。
 
-截至 2026-07-25，项目已精确锁定 `@larksuiteoapi/node-sdk@1.71.1`，并建立未注册到 Bootstrap
-的 Phase 0 长连接生命周期封装、离线合同测试及 Phase 1 私聊输入、访问策略、纯文本渲染和
-有界 Outbox、官方 SDK 文本发送基础。
-飞书仍不是可启用渠道；测试应用握手、代理、事件投递和卡片动作实验完成前，不能进入生产启动路径。
+截至 2026-07-25，项目已精确锁定 `@larksuiteoapi/node-sdk@1.71.1`，并完成阶段 1 私聊文本
+模块、严格配置和 Bootstrap 显式组合。真实应用合同仍未完成，本文中的“已实现”只表示存在离线
+合同测试，不表示已经通过飞书生产环境验证；当前启用路径属于开发验证，不应视为生产就绪。
 
 ## 资料优先级
 
@@ -124,8 +123,9 @@ EventDispatcher`。
 | 消息事件字段裁剪 | `im.message.receive_v1` | 稳定字段映射和畸形输入失败关闭已完成；真实事件待验证 | 阶段 0 |
 | 私聊文本事件 | `im.message.receive_v1` | 平台本地筛选、有界入队、Access Policy、Application 提交、安全错误和生命周期组合已完成；真实事件待验证 | 阶段 1 |
 | 文本发送 | `client.im.v1.message.create` | `chat_id` 文本 Payload、有限 HTTP 超时和脱敏错误已完成；真实应用待验证 | 阶段 1 |
-| 纯文本输出渲染 | `OutputEvent` | 关键事件回退、错误隐藏、有界 Outbox 和 Surface 生命周期组合已完成；配置通知收件人待组合 | 阶段 1 |
+| 纯文本输出渲染 | `OutputEvent` | 关键事件回退、错误隐藏、有界 Outbox、Surface 生命周期和安全配置通知收件人已完成 | 阶段 1 |
 | 事件去重与旧事件过滤 | 平台事件 ID、毫秒时间戳 | 已实现飞书模块内有界内存状态；真实重投待验证 | 阶段 1 |
+| 严格配置与重载分类 | 统一 `config.toml` | 私聊字段、失败关闭校验、变更码、公开示例和 Bootstrap 显式组合已完成 | 阶段 1 |
 | 命令和群聊 | 消息事件、群身份与 @Bot | 暂不支持 | 阶段 2 |
 | 卡片审批 | `card.action.trigger` | 接收方式待验证，当前失败关闭 | 阶段 3 |
 | 图片和文件 | IM 资源 API | 暂不支持 | 阶段 4 |
@@ -149,9 +149,10 @@ EventDispatcher`。
 | 文本发送 | [`src/surfaces/feishu/outbox.ts`](../src/surfaces/feishu/outbox.ts)、[`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts) | [`tests/feishu-outbox.test.ts`](../tests/feishu-outbox.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：精确账号路由、顺序、并行、关闭、SDK Payload、超时和错误；真实限流行为待验证 |
 | 输出渲染 | [`src/surfaces/feishu/renderer.ts`](../src/surfaces/feishu/renderer.ts) | [`tests/feishu-renderer.test.ts`](../tests/feishu-renderer.test.ts)：关键事件、非关键进度和错误详情隐藏 |
 | 卡片动作 | [`src/surfaces/feishu/interactions.ts`](../src/surfaces/feishu/interactions.ts) | [`tests/feishu-interactions.test.ts`](../tests/feishu-interactions.test.ts)：当前审批拒绝、用户输入为空、MCP elicitation 取消；卡片令牌、过期、Actor 绑定和跨客户端失效待实现 |
-| 配置与 Setup | `runtime/gateway-config.mjs`、`src/config/`、`scripts/` | 严格 Schema、脱敏、原子写入和只读 Doctor |
-| Surface 生命周期 | [`src/surfaces/feishu/surface.ts`](../src/surfaces/feishu/surface.ts) | [`tests/feishu-surface.test.ts`](../tests/feishu-surface.test.ts)：长连接启停、输入与输出排空、过载提示和配置通知失败关闭 |
-| Bootstrap 组合 | `src/bootstrap/surface-composition.ts` | 单消费者、部分启动回滚和停止不影响 App Server；待实现 |
+| 配置 | [`runtime/gateway-config.mjs`](../runtime/gateway-config.mjs)、[`src/config/`](../src/config/README.md) | [`tests/config.test.ts`](../tests/config.test.ts)、[`tests/config-reload.test.ts`](../tests/config-reload.test.ts)：启用映射、禁用、畸形输入、未知字段、凭据/启用重启和允许名单热加载 |
+| Setup 与 Doctor | `scripts/` | 原子写入、凭据脱敏和只读诊断；待实现 |
+| Surface 生命周期 | [`src/surfaces/feishu/surface.ts`](../src/surfaces/feishu/surface.ts) | [`tests/feishu-surface.test.ts`](../tests/feishu-surface.test.ts)：长连接启停、输入与输出排空、过载提示、未组合收件人失败关闭和安全配置通知 |
+| Bootstrap 组合 | [`src/bootstrap/surface-composition.ts`](../src/bootstrap/surface-composition.ts) | [`tests/surface-composition.test.ts`](../tests/surface-composition.test.ts)、[`tests/surface-manager.test.ts`](../tests/surface-manager.test.ts)：按配置注册、允许名单热加载、撤权绑定清理、配置通知路由、部分启动回滚和停止不影响 App Server |
 
 新增能力必须同时更新支持矩阵和实现映射，不能只增加 SDK 调用。
 

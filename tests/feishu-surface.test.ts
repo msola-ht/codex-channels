@@ -67,6 +67,26 @@ describe("Feishu Surface", () => {
     await fixture.surface.stop();
   });
 
+  it("delivers configuration notifications to composed safe chats", async () => {
+    const fixture = createFixture(undefined, () => ["oc_chat"]);
+
+    await fixture.surface.deliverConfigurationChange({
+      action: "reloaded",
+      changes: [{ code: "workspace.registry", scope: "global" }],
+      addedWorkspaces: [{
+        id: "docs",
+        name: "Docs",
+        cwd: "/workspace/docs",
+      }],
+    });
+
+    expect(fixture.sent).toEqual([{
+      chatId: "oc_chat",
+      text: "Gateway 配置已热加载\n新增 Workspace：Docs",
+    }]);
+    await fixture.surface.stop();
+  });
+
   it("notifies the chat when the input queue is overloaded", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -102,14 +122,16 @@ describe("Feishu Surface", () => {
 });
 
 function createFixture(
-  service: Pick<ConversationService, "submit"> = {
+  service: Pick<ConversationService, "submit"> | undefined = undefined,
+  configurationRecipients?: () => readonly string[],
+) {
+  const conversationService = service ?? {
     submit: async () => ({
       threadId: "thread-1",
       turnId: "turn-1",
       steered: false,
     }),
-  },
-) {
+  };
   let readyCallback: (() => void) | undefined;
   let messageHandler: ((event: unknown) => void) | undefined;
   const sent: Array<{ chatId: string; text: string }> = [];
@@ -118,12 +140,13 @@ function createFixture(
   const surface = new FeishuSurface({
     appId: "cli_0123456789abcdef",
     appSecret: "secret",
-    service,
+    service: conversationService,
     access: {
       isAllowed: () => true,
     },
     logger: pino({ level: "silent" }),
     onFatal: vi.fn(),
+    ...(configurationRecipients ? { configurationRecipients } : {}),
   }, {
     messagePort: {
       sendText: async (chatId, text) => {

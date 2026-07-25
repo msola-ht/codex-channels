@@ -15,6 +15,9 @@ export {
   type ConfigChange,
   type ConfigChangeCode,
   type ConfigChangeScope,
+  type FeishuConfigChangeCode,
+  type GlobalConfigChangeCode,
+  type TelegramConfigChangeCode,
 } from "./config-change.js";
 export {
   classifyConfigReload,
@@ -26,6 +29,11 @@ export interface GatewayConfig {
   telegramAllowedUserIds: ReadonlySet<number>;
   telegramProxyUrl?: string;
   telegramMessageFormat: "html" | "rich";
+  feishu?: {
+    appId: string;
+    appSecret: string;
+    allowedOpenIds: ReadonlySet<string>;
+  };
   codexBinary: string;
   networkProxy: {
     http?: string;
@@ -103,6 +111,15 @@ export function loadConfigDocument(
     telegramAllowedUserIds: new Set(raw.telegram.allowed_user_ids),
     ...(proxyUrl ? { telegramProxyUrl: proxyUrl } : {}),
     telegramMessageFormat: raw.telegram.message_format,
+    ...(raw.feishu?.enabled
+      ? {
+          feishu: {
+            appId: raw.feishu.app_id,
+            appSecret: raw.feishu.app_secret,
+            allowedOpenIds: new Set(raw.feishu.allowed_open_ids),
+          },
+        }
+      : {}),
     codexBinary: raw.codex.binary,
     networkProxy: {
       ...(proxyEnvironment.HTTP_PROXY ? { http: proxyEnvironment.HTTP_PROXY } : {}),

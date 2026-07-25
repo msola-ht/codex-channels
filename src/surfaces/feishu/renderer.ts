@@ -2,6 +2,27 @@ import type {
   OutputEvent,
   UserFacingError,
 } from "../../conversation-core/index.js";
+import type { SurfaceConfigurationChange } from "../types.js";
+
+export function renderFeishuConfigurationChange(
+  change: SurfaceConfigurationChange,
+): string {
+  switch (change.action) {
+    case "reloaded":
+      return [
+        "Gateway 配置已热加载",
+        ...(change.addedWorkspaces.length > 0
+          ? [`新增 Workspace：${change.addedWorkspaces.map((workspace) => workspace.name).join("、")}`]
+          : []),
+      ].join("\n");
+    case "restarting":
+      return "Gateway 配置需要重启";
+    case "reinstall-required":
+      return "Gateway 配置尚未应用，请在本机重新安装服务";
+    case "reload-failed":
+      return "Gateway 配置热加载失败，当前有效配置继续运行";
+  }
+}
 
 export function renderFeishuUserFacingError(
   error: UserFacingError,
