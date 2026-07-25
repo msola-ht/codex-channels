@@ -35,14 +35,14 @@ Surface
 
 ## 计划建立时的事实基线
 
-当前架构已经具备两个正确基础：
+计划建立时的架构已经具备两个正确基础：
 
 1. `codex-protocol` 保存版本专属生成类型和精确版本基线。
 2. `codex-client` 集中发送 App Server 请求并管理 Transport、JSON-RPC 和重连。
 
 计划建立时协议隔离尚未完成：
 
-- `src/codex-protocol/index.ts` 当前受控导出 53 个生成类型。
+- `src/codex-protocol/index.ts` 当时受控导出 53 个生成类型。
 - 生产源码有 14 个文件直接导入 `codex-protocol`，其中 12 个位于 `codex-client` 之外。
 - 直接依赖生成类型的业务模块包括 `application`、`approval`、`bootstrap`、
   `conversation-core`、`session-routing` 和 `surfaces`。
@@ -286,7 +286,7 @@ bootstrap ─────────→ 所有具体实现并完成装配
 
 ## 阶段 7：项目内部模块复核
 
-协议边界稳定后，继续完成尚未结束的模块复核，每个模块独立处理和提交：
+协议边界稳定后，阶段 7 按模块独立完成复核和提交：
 
 1. `storage`（已完成）：最小绑定 Schema、内存/SQLite 一致性、原子清理和失败回滚。
 2. `policy`（已完成）：Surface Actor、账号和 Workspace 授权边界。

@@ -26,8 +26,8 @@ Client 或生成协议。Turn、Review 和 Goal 的执行端口与稳定结果�
 同样由 Application 窄端口承接，Client 统一选择官方多桶或兼容单桶响应并
 输出稳定摘要。直接安装 Skill 查询也已在 Client 边界完成路径与 Scope 裁剪，MCP 状态查询
 已裁剪为按当前 Thread 获取的名称、认证状态和工具数量，Plugin 查询只输出已安装项的名称与
-启用状态，Permission Profile 查询只输出稳定的目录选项。阶段 3 查询边界已完成；其余通知和
-审批协议隔离按计划推进。阶段 4 已完成：Client 把 Thread 路由通知与 Turn、Item、Token、账户、
+启用状态，Permission Profile 查询只输出稳定的目录选项。阶段 3 查询边界已完成。
+阶段 4 已完成：Client 把 Thread 路由通知与 Turn、Item、Token、账户、
 额度、MCP、warning 等 Core 通知分别转换为稳定事件；`conversation-core` 不再依赖生成协议，
 目标依赖明确为 `codex-client -> conversation-core`。阶段 5 也已完成：Client 解码和编码五类
 Server Request，`approval` 只拥有稳定请求、授权语义和用户决定，不再依赖 Client 或生成协议。
