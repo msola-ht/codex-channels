@@ -19,4 +19,8 @@ export {
   type FeishuMessageEvent,
   type FeishuMessageEventField,
 } from "./message-event.js";
+export {
+  FeishuOutbox,
+  type FeishuTextMessagePort,
+} from "./outbox.js";
 export { renderFeishuOutput } from "./renderer.js";

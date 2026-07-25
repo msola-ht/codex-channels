@@ -10,6 +10,7 @@
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪。
 - `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理。
 - `renderer.ts`：把平台无关 `OutputEvent` 映射为受约束的飞书纯文本。
+- `outbox.ts`：精确账号路由并通过通用有界队列调用窄文本发送端口。
 
 ## 当前边界
 
@@ -34,6 +35,11 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 非关键流式增量和运行中操作暂不输出。上游 warning、连接错误和 MCP 错误正文不会进入平台消息，
 未知 Thread 状态不会原样显示。
 
-本模块尚未接入配置、Bootstrap、Application、发送 API、输出队列或审批，因此不构成可启用的飞书渠道。后续阶段按
+`outbox.ts` 只同步接收匹配 `feishu + accountId` 的输出，并按 Chat ID 进入
+`ConversationDeliveryQueue`。同一 Chat 串行、不同 Chat 可并行；关闭后拒绝新输出并有限等待
+已接收发送。飞书 SDK 发送对象被隔离在后续实现的 `FeishuTextMessagePort` 具体实现之后，
+Outbox 不持有完整 SDK Client。
+
+本模块尚未接入配置、Bootstrap、Application、飞书 SDK 发送适配或审批，因此不构成可启用的飞书渠道。后续阶段按
 [`飞书 Surface 接入计划`](../../../docs/feishu-surface-plan.md)推进；不得把 SDK 类型导出到一级
 `surfaces` 入口，也不得在 Core 中引入飞书类型。

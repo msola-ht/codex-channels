@@ -8,8 +8,8 @@
 
 当前进度（2026-07-25）：已锁定官方 Node SDK `1.71.1`，并完成 Phase 0 的长连接生命周期窄封装、
 消息事件稳定字段裁剪和离线合同测试；阶段 1 已完成平台本地私聊文本 Inbox、访问策略和
-`OutputEvent` 纯文本渲染。该模块尚未注册到 Bootstrap，也没有飞书配置、发送 API、输出队列或
-审批能力；测试应用的真实握手、
+`OutputEvent` 纯文本渲染及有界 Outbox。该模块尚未注册到 Bootstrap，也没有飞书配置、SDK
+发送适配或审批能力；测试应用的真实握手、
 代理、事件投递和卡片动作实验仍待完成。
 
 目标是在现有 TypeScript 模块化单体中增加一个编译期显式注册的飞书 Surface，使飞书与
@@ -334,6 +334,7 @@ Secret、Access Token、完整 SDK 响应或原始事件。
 - 已授权私聊文本提交；
 - 失败关闭 InteractionPort；
 - [x] 所有关键 `OutputEvent` 的纯文本回退与上游错误详情隐藏；
+- [x] 精确账号路由和按 Chat 隔离的有界 Outbox；
 - 结构化用户错误；
 - Bootstrap 显式组合、Setup 基础流程和 Doctor 检查。
 

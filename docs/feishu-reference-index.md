@@ -7,7 +7,8 @@
 支持飞书。
 
 截至 2026-07-25，项目已精确锁定 `@larksuiteoapi/node-sdk@1.71.1`，并建立未注册到 Bootstrap
-的 Phase 0 长连接生命周期封装、离线合同测试及 Phase 1 私聊输入、访问策略和纯文本渲染基础。
+的 Phase 0 长连接生命周期封装、离线合同测试及 Phase 1 私聊输入、访问策略、纯文本渲染和
+有界 Outbox 基础。
 飞书仍不是可启用渠道；测试应用握手、代理、事件投递和卡片动作实验完成前，不能进入生产启动路径。
 
 ## 资料优先级
@@ -52,6 +53,7 @@
 | 高层 Channel | [固定版本 Channel 说明](https://github.com/larksuite/node-sdk/blob/8b3e0df3af9401c263dc96026e1c7f17460a21cc/docs/channel.zh.md) | 识别其策略、去重、串行、重试、媒体和卡片职责 |
 | 消息事件字段格式 | [官方 CLI 固定事件 Schema 指南](https://github.com/larksuite/cli/blob/a7865cd0a7416655535517a2a630848fde318761/skills/lark-event/SKILL.md) | 核对 `create_time` 为毫秒时间戳字符串 |
 | 长连接规则 | [使用长连接接收事件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/event-subscription-guide/long-connection-mode) | 处理时限、集群投递和订阅类型 |
+| 文本消息发送 | [发送消息](https://open.feishu.cn/document/server-docs/im-v1/message/create) | 核对 `chat_id` 接收目标、文本消息体和机器人可用性 |
 | 事件接收安全 | [接收事件](https://open.feishu.cn/document/ukTMukTMukTM/uYDNxYjL2QTM24iN0EjN/event-subscription-configure-/encrypt-key-encryption-configuration-case) | Webhook 阶段的验签和加密入口 |
 | 消息卡片 | [消息卡片介绍](https://open.feishu.cn/document/ukTMukTMukTM/uczM3QjL3MzN04yNzcDN) | 后续卡片呈现和交互边界 |
 | 开放平台总入口 | [飞书开放平台](https://open.feishu.cn/) | 定位事件、API、权限和应用发布文档 |
@@ -115,7 +117,7 @@ EventDispatcher`。
 | 消息事件字段裁剪 | `im.message.receive_v1` | 稳定字段映射和畸形输入失败关闭已完成；真实事件待验证 | 阶段 0 |
 | 私聊文本事件 | `im.message.receive_v1` | 平台本地筛选、有界入队和 Access Policy 已完成；Adapter 待实现 | 阶段 1 |
 | 文本发送 | `client.im.v1.message.create` | 计划中 | 阶段 1 |
-| 纯文本输出渲染 | `OutputEvent` | 关键事件回退和上游错误详情隐藏已完成；发送队列待实现 | 阶段 1 |
+| 纯文本输出渲染 | `OutputEvent` | 关键事件回退、错误隐藏和有界 Outbox 已完成；SDK 发送适配待实现 | 阶段 1 |
 | 事件去重与旧事件过滤 | 平台事件 ID、毫秒时间戳 | 已实现飞书模块内有界内存状态；真实重投待验证 | 阶段 1 |
 | 命令和群聊 | 消息事件、群身份与 @Bot | 暂不支持 | 阶段 2 |
 | 卡片审批 | `card.action.trigger` | 接收方式待验证，当前失败关闭 | 阶段 3 |
@@ -136,7 +138,7 @@ EventDispatcher`。
 | 消息事件信封 | [`src/surfaces/feishu/message-event.ts`](../src/surfaces/feishu/message-event.ts) | [`tests/feishu-message-event.test.ts`](../tests/feishu-message-event.test.ts)：稳定字段裁剪和畸形输入失败关闭 |
 | 输入接收与去重 | [`src/surfaces/feishu/inbox.ts`](../src/surfaces/feishu/inbox.ts) | [`tests/feishu-inbox.test.ts`](../tests/feishu-inbox.test.ts)：同步入队、授权、重复、旧事件、顺序、并行、过载和关闭 |
 | 身份与授权 | [`src/policy/feishu-access.ts`](../src/policy/feishu-access.ts)、`ConversationActorRegistry` | [`tests/policy.test.ts`](../tests/policy.test.ts)：Surface、App ID、Open ID 和原子替换 |
-| 文本发送 | `src/surfaces/feishu/outbox.ts` | 精确账号路由、同 Chat 顺序、超时和限流 |
+| 文本发送 | [`src/surfaces/feishu/outbox.ts`](../src/surfaces/feishu/outbox.ts) | [`tests/feishu-outbox.test.ts`](../tests/feishu-outbox.test.ts)：精确账号路由、同 Chat 顺序、跨 Chat 并行和关闭等待；SDK Payload、超时和限流待实现 |
 | 输出渲染 | [`src/surfaces/feishu/renderer.ts`](../src/surfaces/feishu/renderer.ts) | [`tests/feishu-renderer.test.ts`](../tests/feishu-renderer.test.ts)：关键事件、非关键进度和错误详情隐藏 |
 | 卡片动作 | `src/surfaces/feishu/interactions.ts` | 失败关闭、令牌、过期、Actor 绑定和跨客户端失效 |
 | 配置与 Setup | `runtime/gateway-config.mjs`、`src/config/`、`scripts/` | 严格 Schema、脱敏、原子写入和只读 Doctor |
