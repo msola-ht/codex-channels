@@ -332,7 +332,7 @@ Secret、Access Token、完整 SDK 响应或原始事件。
 - [x] 窄 SDK Client 和平台本地输入队列；
 - [x] 私聊/文本/账号筛选、同步有界入队、去重、旧事件和过载处理；
 - 已授权私聊文本提交；
-- 失败关闭 InteractionPort；
+- [x] 失败关闭 InteractionPort；
 - [x] 所有关键 `OutputEvent` 的纯文本回退与上游错误详情隐藏；
 - [x] 精确账号路由和按 Chat 隔离的有界 Outbox；
 - [x] `chat_id` 文本发送、有限 HTTP 超时和稳定脱敏错误；

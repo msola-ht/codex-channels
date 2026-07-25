@@ -9,6 +9,7 @@
 - `client.ts`：官方 SDK、事件长连接及生命周期隔离。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪。
 - `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理。
+- `interactions.ts`：在卡片交互尚未实现时拒绝审批、返回空用户输入并取消 MCP elicitation。
 - `renderer.ts`：把平台无关 `OutputEvent` 映射为受约束的飞书纯文本。
 - `outbox.ts`：精确账号路由并通过通用有界队列调用窄文本发送端口。
 
@@ -45,6 +46,10 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 已接收发送。飞书 SDK 发送对象由 `FeishuTextMessageClient` 通过 `FeishuTextMessagePort`
 注入，Outbox 不持有完整 SDK Client。
 
-本模块尚未接入配置、Bootstrap、Application、Adapter 组合或审批，因此不构成可启用的飞书渠道。后续阶段按
+`interactions.ts` 当前只提供失败关闭语义，不创建待处理状态：命令、文件和权限审批一律拒绝，
+用户输入返回空答案，MCP elicitation 返回取消；`resolved()` 和 `cancelAll()` 保持无状态幂等。
+这不会伪装成飞书已经支持审批，卡片交互仍属于后续独立阶段。
+
+本模块尚未接入配置、Bootstrap、Application 或 Adapter 组合，也不支持可批准交互，因此不构成可启用的飞书渠道。后续阶段按
 [`飞书 Surface 接入计划`](../../../docs/feishu-surface-plan.md)推进；不得把 SDK 类型导出到一级
 `surfaces` 入口，也不得在 Core 中引入飞书类型。

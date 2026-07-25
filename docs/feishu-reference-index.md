@@ -147,7 +147,7 @@ EventDispatcher`。
 | 身份与授权 | [`src/policy/feishu-access.ts`](../src/policy/feishu-access.ts)、`ConversationActorRegistry` | [`tests/policy.test.ts`](../tests/policy.test.ts)：Surface、App ID、Open ID 和原子替换 |
 | 文本发送 | [`src/surfaces/feishu/outbox.ts`](../src/surfaces/feishu/outbox.ts)、[`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts) | [`tests/feishu-outbox.test.ts`](../tests/feishu-outbox.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：精确账号路由、顺序、并行、关闭、SDK Payload、超时和错误；真实限流行为待验证 |
 | 输出渲染 | [`src/surfaces/feishu/renderer.ts`](../src/surfaces/feishu/renderer.ts) | [`tests/feishu-renderer.test.ts`](../tests/feishu-renderer.test.ts)：关键事件、非关键进度和错误详情隐藏 |
-| 卡片动作 | `src/surfaces/feishu/interactions.ts` | 失败关闭、令牌、过期、Actor 绑定和跨客户端失效 |
+| 卡片动作 | [`src/surfaces/feishu/interactions.ts`](../src/surfaces/feishu/interactions.ts) | [`tests/feishu-interactions.test.ts`](../tests/feishu-interactions.test.ts)：当前审批拒绝、用户输入为空、MCP elicitation 取消；卡片令牌、过期、Actor 绑定和跨客户端失效待实现 |
 | 配置与 Setup | `runtime/gateway-config.mjs`、`src/config/`、`scripts/` | 严格 Schema、脱敏、原子写入和只读 Doctor |
 | 生命周期组合 | `src/bootstrap/surface-composition.ts` | 单消费者、部分启动回滚和停止不影响 App Server |
 

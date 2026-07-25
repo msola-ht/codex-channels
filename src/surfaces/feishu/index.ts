@@ -17,6 +17,7 @@ export {
   type FeishuInboxProcessingError,
   type FeishuInboxReceiveResult,
 } from "./inbox.js";
+export { FeishuInteractionPort } from "./interactions.js";
 export {
   FeishuMessageEventError,
   decodeFeishuMessageEvent,
