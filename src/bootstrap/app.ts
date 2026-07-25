@@ -9,14 +9,15 @@ import {
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
 import {
   CodexAppServerClient,
+  gatewayVersion,
   handleApprovalServerRequest,
   JsonRpcClient,
+  supportedCodexCliVersion,
   toConversationInputEvent,
   toThreadStateEvent,
   UnixWebSocketTransport,
   type RpcNotification,
 } from "../codex-client/index.js";
-import { protocolVersion } from "../codex-protocol/index.js";
 import {
   configChange,
   includesConfigChange,
@@ -139,6 +140,7 @@ export class GatewayApplication {
       service,
       bindings: this.bindings,
       logger,
+      gatewayVersion,
       codexUpstreamUserAgent: () => this.codexUpstreamUserAgent,
       onFatal: (surface, accountId, error) => this.handleSurfaceFatal(
         surface,
@@ -729,8 +731,10 @@ function verifyCodexVersion(config: GatewayConfig): void {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
   }).trim();
-  if (actual !== protocolVersion.codexCli) {
-    throw new Error(`Codex 版本不受支持：当前 ${actual}，协议基线 ${protocolVersion.codexCli}`);
+  if (actual !== supportedCodexCliVersion) {
+    throw new Error(
+      `Codex 版本不受支持：当前 ${actual}，协议基线 ${supportedCodexCliVersion}`,
+    );
   }
 }
 

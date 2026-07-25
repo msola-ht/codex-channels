@@ -19,6 +19,10 @@ export {
   toOperationUpdate,
 } from "./operation-adapter.js";
 export {
+  gatewayVersion,
+  supportedCodexCliVersion,
+} from "./protocol-info.js";
+export {
   decodeApprovalServerRequest,
   handleApprovalServerRequest,
 } from "./server-request-adapter.js";

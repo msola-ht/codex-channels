@@ -31,5 +31,7 @@ Client 或生成协议。Turn、Review 和 Goal 的执行端口与稳定结果�
 额度、MCP、warning 等 Core 通知分别转换为稳定事件；`conversation-core` 不再依赖生成协议，
 目标依赖明确为 `codex-client -> conversation-core`。阶段 5 也已完成：Client 解码和编码五类
 Server Request，`approval` 只拥有稳定请求、授权语义和用户决定，不再依赖 Client 或生成协议。
+阶段 6 已完成：生产源码只有 Client 导入生成协议，Bootstrap 通过 Client 读取版本并向 Surface
+注入纯字符串，受控协议导出和模块依赖白名单已收紧，新增协议或具体 Client 泄漏会由边界测试阻止。
 整体范围见
 [`Codex CLI 协议边界收敛计划`](../docs/architecture-convergence-plan.md)。

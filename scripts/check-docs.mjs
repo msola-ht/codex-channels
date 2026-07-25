@@ -199,7 +199,7 @@ function checkProtocolIndexMetrics() {
         join(root, "src/codex-protocol/index.ts"),
         "utf8",
       ).matchAll(/^export type /gmu)].length,
-      "本项目允许业务模块使用的协议类型导出",
+      "Codex Client 适配边界使用的受控协议类型导出",
     ],
     [directRequests.size, "本项目直接调用的业务 Request 方法"],
     [approvalCases.size, "本项目显式协调的 Server Request 类型"],

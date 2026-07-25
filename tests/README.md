@@ -41,7 +41,8 @@
 - CLI Doctor 的严格 TOML Schema 校验、敏感错误清洗和只读诊断；项目规则限定当前 Workspace、
   拒绝远程覆盖和符号链接路径逃逸；CLI 分级帮助、规范命令名称及 macOS/Linux 服务目标选择；
   一级模块使用完整依赖允许列表并要求跨模块只导入公开入口；Session Routing 不得依赖具体
-  Client 或生成协议，Conversation Turn 测试不得伪装成完整 Client。
+  Client 或生成协议，Conversation Turn 测试不得伪装成完整 Client；生产源码只有 Codex Client
+  可以导入生成协议，业务模块不得依赖具体 Client。
 - 仓库 Git hooks 自动安装与重复执行安全性，以及无本地依赖时的源码安装准备。
 - 协议临时生成失败时保留现有类型目录、生成树逐文件比较和安全替换。
 - Codex CLI 升级准备脚本的精确版本参数、CLI 输出、干净工作区保护和 Codex 审查交接。

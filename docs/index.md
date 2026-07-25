@@ -18,14 +18,14 @@
 | 72 | App Server 发给客户端的 Notification 方法 | [`ServerNotification.ts`](../src/codex-protocol/generated/ServerNotification.ts) |
 | 10 | App Server 发给客户端、需要回应的 Request 方法 | [`ServerRequest.ts`](../src/codex-protocol/generated/ServerRequest.ts) |
 | 1 | 客户端发给 App Server 的 Notification，即 `initialized` | [`ClientNotification.ts`](../src/codex-protocol/generated/ClientNotification.ts) |
-| 51 | 本项目允许业务模块使用的协议类型导出 | [`src/codex-protocol/index.ts`](../src/codex-protocol/index.ts) |
+| 34 | Codex Client 适配边界使用的受控协议类型导出 | [`src/codex-protocol/index.ts`](../src/codex-protocol/index.ts) |
 | 27 | 本项目直接调用的业务 Request 方法，不含连接层的 `initialize` | [`client.ts`](../src/codex-client/client.ts) |
-| 5 | 本项目显式协调的 Server Request 类型 | [`coordinator.ts`](../src/approval/coordinator.ts) |
+| 5 | 本项目显式协调的 Server Request 类型 | [`server-request-adapter.ts`](../src/codex-client/server-request-adapter.ts) |
 | 13 | 本项目 TypeScript Gateway 的一级业务模块 | [`src/README.md`](../src/README.md) |
 
-这里的数量描述协议结构，不等于本项目已实现的功能数。业务代码只能使用
+这里的数量描述协议结构，不等于本项目已实现的功能数。只有 `codex-client` 可以使用
 `src/codex-protocol/index.ts` 的受控导出；生成目录可能包含尚未采用、实验中或仅供其他客户端
-使用的类型。
+使用的类型，其他业务模块不得导入。
 
 ## 官方文档
 
@@ -103,7 +103,7 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 
 | 要查的问题 | 本项目入口 | 验证入口 |
 | --- | --- | --- |
-| CLI 版本和生成协议是否一致 | [`codex-protocol/`](../src/codex-protocol/README.md) | `npm run protocol:check` |
+| CLI 版本和生成协议是否一致 | [`codex-protocol/`](../src/codex-protocol/README.md)、[`protocol-info.ts`](../src/codex-client/protocol-info.ts) | `npm run protocol:check` |
 | Unix WebSocket 如何连接 | [`codex-client/`](../src/codex-client/README.md) | [`unix-websocket-transport.test.ts`](../tests/unix-websocket-transport.test.ts) |
 | JSON-RPC 如何分流和清理请求 | [`json-rpc.ts`](../src/codex-client/json-rpc.ts) | [`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
 | Turn、Review 和 Goal 如何隔离官方协议 | [`turn-port.ts`](../src/application/turn-port.ts)、[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts) | [`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
@@ -153,7 +153,11 @@ MCP 和 warning 通知均由 Client 转换为稳定事件；Core 与 Routing 不
 Request 均由 Client 解码为稳定请求，Approval 只协调授权语义，Client 再把稳定决定编码为当前
 协议响应；未知或畸形高权限请求不会进入 Surface。
 
-后续不把上述模块推倒重做，而是依次完成边界收紧、项目内部模块和
+协议边界收敛阶段 6 已完成：非测试生产源码只有 Client 导入 `codex-protocol`，Bootstrap 通过
+Client 运行时信息校验版本并向 Surface 注入显示字符串；受控导出、依赖白名单和独立边界断言
+会阻止协议或具体 Client 再次泄漏到业务模块。
+
+后续不把上述模块推倒重做，而是依次完成项目内部模块和
 Bootstrap 收尾。每个阶段只定向复核实际触及的已完成模块，并保持独立修改、验证、审查和提交。
 
 ## 查询顺序

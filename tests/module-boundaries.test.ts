@@ -7,15 +7,11 @@ const sourceRoot = resolve("src");
 
 const allowedModuleDependencies: Record<string, readonly string[]> = {
   application: [
-    "codex-client",
-    "codex-protocol",
     "conversation-core",
     "policy",
     "session-routing",
   ],
   approval: [
-    "codex-client",
-    "codex-protocol",
     "conversation-core",
     "session-routing",
   ],
@@ -23,7 +19,6 @@ const allowedModuleDependencies: Record<string, readonly string[]> = {
     "application",
     "approval",
     "codex-client",
-    "codex-protocol",
     "config",
     "conversation-core",
     "event-bus",
@@ -55,7 +50,6 @@ const allowedModuleDependencies: Record<string, readonly string[]> = {
   surfaces: [
     "application",
     "approval",
-    "codex-protocol",
     "config",
     "conversation-core",
     "event-bus",
@@ -75,7 +69,78 @@ describe("module boundaries", () => {
   it("requires cross-module imports to use public entry points", () => {
     expect(publicEntryViolations()).toEqual([]);
   });
+
+  it("keeps generated protocol imports inside Codex Client", () => {
+    expect(moduleImportersOutside("codex-protocol", [
+      "codex-client",
+      "codex-protocol",
+    ])).toEqual([]);
+  });
+
+  it("keeps concrete Codex Client imports out of business modules", () => {
+    expect(moduleImportersOutside("codex-client", [
+      "bootstrap",
+      "codex-client",
+    ])).toEqual([]);
+  });
+
+  it("keeps controlled protocol exports limited to Client imports in use", () => {
+    const protocolEntry = readFileSync(
+      resolve(sourceRoot, "codex-protocol/index.ts"),
+      "utf8",
+    );
+    const exported = new Set([
+      ...[...protocolEntry.matchAll(/^export type \{ ([^ }]+)/gmu)]
+        .map((match) => match[1]!),
+      ...[...protocolEntry.matchAll(/^export const ([^ =]+)/gmu)]
+        .map((match) => match[1]!),
+    ]);
+    const imported = new Set(
+      typescriptFiles(resolve(sourceRoot, "codex-client")).flatMap((file) => {
+        const source = readFileSync(file, "utf8");
+        return [...source.matchAll(
+          /import(?: type)?\s*\{([^}]*)\}\s*from "\.\.\/codex-protocol\/index\.js";/gsu,
+        )].flatMap((match) =>
+          match[1]!.split(",")
+            .map((name) => name.trim().split(/\s+as\s+/u, 1)[0])
+            .filter((name): name is string => Boolean(name)));
+      }),
+    );
+    expect([...exported].filter((name) => !imported.has(name))).toEqual([]);
+  });
 });
+
+function moduleImportersOutside(
+  targetModule: string,
+  allowedSources: readonly string[],
+): string[] {
+  const moduleNames = new Set(
+    readdirSync(sourceRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name),
+  );
+  const found: string[] = [];
+  for (const file of typescriptFiles(sourceRoot)) {
+    const sourceModule = topLevelModule(file, moduleNames);
+    if (!sourceModule || allowedSources.includes(sourceModule)) {
+      continue;
+    }
+    const source = readFileSync(file, "utf8");
+    for (const specifier of importSpecifiers(source)) {
+      if (!specifier.startsWith(".")) {
+        continue;
+      }
+      const importedModule = topLevelModule(
+        resolve(dirname(file), specifier),
+        moduleNames,
+      );
+      if (importedModule === targetModule) {
+        found.push(`${relative(sourceRoot, file)} -> ${targetModule}`);
+      }
+    }
+  }
+  return found;
+}
 
 function externalDirectoryViolations(forbiddenDirectories: string[]): string[] {
   const forbiddenRoots = forbiddenDirectories.map((name) => resolve(name));

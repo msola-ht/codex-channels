@@ -14,7 +14,6 @@ import {
   UserFacingError,
   type ConversationTarget,
 } from "../../conversation-core/index.js";
-import { protocolVersion } from "../../codex-protocol/index.js";
 import type {
   ConversationActorRegistry,
   SurfaceAccessPolicy,
@@ -47,6 +46,7 @@ export interface TelegramImagePort {
 }
 
 export interface TelegramSurfaceOptions {
+  gatewayVersion: string;
   actorRegistry?: ConversationActorRegistry;
   onFatal?: (error: Error) => void;
   imageStore?: TelegramImagePort;
@@ -76,7 +76,7 @@ export class TelegramSurface {
     workspaces: Workspace[],
     uploadsDirectory: string,
     private readonly logger: Logger,
-    options: TelegramSurfaceOptions = {},
+    options: TelegramSurfaceOptions,
   ) {
     this.bot = new Bot(token, {
       client: {
@@ -114,7 +114,7 @@ export class TelegramSurface {
             text: formatStartupNotification(workspaces, status, {
               platform: process.platform,
               architecture: process.arch,
-              gatewayVersion: protocolVersion.codexCli.replace(/^codex-cli\s+/, ""),
+              gatewayVersion: options.gatewayVersion,
               nodeVersion: process.version,
               transport: "Unix WebSocket",
               codexUpstreamUserAgent: options.codexUpstreamUserAgent?.() ?? null,

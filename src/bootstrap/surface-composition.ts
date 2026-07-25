@@ -32,6 +32,7 @@ export interface SurfaceCompositionOptions {
   service: ConversationService;
   bindings: BindingStore;
   logger: Logger;
+  gatewayVersion: string;
   codexUpstreamUserAgent: () => string | undefined;
   onFatal(surface: string, accountId: string, error: Error): void;
 }
@@ -70,6 +71,7 @@ function createTelegramModule(
       actorRegistry: bindings,
       onFatal: (error) => options.onFatal("telegram", telegramDefaultAccountId, error),
       finalMessageFormat: config.telegramMessageFormat,
+      gatewayVersion: options.gatewayVersion,
       codexUpstreamUserAgent: options.codexUpstreamUserAgent,
     },
   );

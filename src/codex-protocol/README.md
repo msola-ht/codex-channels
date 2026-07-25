@@ -4,8 +4,8 @@
 
 ## 文件与目录
 
-- `index.ts`：向业务代码暴露经过审查的最小协议类型集合，包括供 `codex-client` 约束出站消息
-  的 `ClientRequest` 与 `ClientNotification`。
+- `index.ts`：只向 `codex-client` 暴露经过审查的最小协议类型集合，包括约束出站消息的
+  `ClientRequest` 与 `ClientNotification`；其他业务模块不得导入。
 - `version.json`：记录生成类型对应的 `codex-cli` 版本。
 - `generated/`：由 `codex app-server generate-ts` 生成的类型，禁止手工修改，也不在其内部维护手写索引文档。
 
@@ -21,4 +21,5 @@ CLI 生成和版本读取都成功后才替换当前类型；失败时保留现�
 `protocol:check` 相同的检查重新生成并逐文件比较。脚本只准备版本专属差异，业务适配、文档更新
 和完整验证由 Codex 按升级流程审查完成。
 
-新增业务依赖的协议类型时，应先审查生成差异，再从 `index.ts` 显式导出；不要跨模块直接导入 `generated/` 内部文件。
+Client 新增协议依赖时，应先审查生成差异，再从 `index.ts` 显式导出；不要从任何模块直接导入
+`generated/` 内部文件。

@@ -368,7 +368,11 @@ function createSurface(
     [{ id: "main", name: "Main", cwd: "/workspace" }],
     directory,
     pino({ level: "silent" }),
-    { imageStore, actorRegistry: { rememberActor } },
+    {
+      gatewayVersion: "0.145.0",
+      imageStore,
+      actorRegistry: { rememberActor },
+    },
   );
   output.subscribe("telegram-test-output", (event) => {
     surface.output.handle(event);
