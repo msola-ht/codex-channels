@@ -1,8 +1,13 @@
 import {
+  AppType,
+  Client,
   Domain,
   EventDispatcher,
   LoggerLevel,
   WSClient,
+  defaultHttpInstance,
+  type HttpInstance,
+  type HttpRequestOptions,
   type Logger,
 } from "@larksuiteoapi/node-sdk";
 
@@ -11,6 +16,7 @@ import {
   FeishuMessageEventError,
   type FeishuMessageEvent,
 } from "./message-event.js";
+import type { FeishuTextMessagePort } from "./outbox.js";
 
 const FEISHU_APP_ID_PATTERN = /^cli_[0-9a-fA-F]{16}$/u;
 const DEFAULT_STARTUP_TIMEOUT_MS = 60_000;
@@ -70,6 +76,134 @@ interface FeishuEventConnectionDependencies {
     >,
     callbacks: FeishuSdkCallbacks,
   ): FeishuSdkConnection;
+}
+
+export interface FeishuTextMessageClientOptions {
+  appId: string;
+  appSecret: string;
+}
+
+export type FeishuTextMessageErrorCode =
+  | "client-create-failed"
+  | "invalid-credentials"
+  | "invalid-response"
+  | "send-failed"
+  | "send-timeout";
+
+export class FeishuTextMessageError extends Error {
+  readonly code: FeishuTextMessageErrorCode;
+
+  constructor(code: FeishuTextMessageErrorCode, message: string) {
+    super(message);
+    this.name = "FeishuTextMessageError";
+    this.code = code;
+  }
+}
+
+interface FeishuSdkTextMessagePayload {
+  params: {
+    receive_id_type: "chat_id";
+  };
+  data: {
+    receive_id: string;
+    msg_type: "text";
+    content: string;
+  };
+}
+
+interface FeishuSdkTextMessageClient {
+  createMessage(payload: FeishuSdkTextMessagePayload): Promise<{
+    data?: {
+      message_id?: string | undefined;
+    } | undefined;
+  }>;
+}
+
+interface FeishuTextMessageClientDependencies {
+  sendTimeoutMs: number;
+  createSdkClient(
+    options: FeishuTextMessageClientOptions,
+    sendTimeoutMs: number,
+  ): FeishuSdkTextMessageClient;
+}
+
+export class FeishuTextMessageClient implements FeishuTextMessagePort {
+  private readonly sdkClient: FeishuSdkTextMessageClient;
+  private readonly sendTimeoutMs: number;
+
+  constructor(
+    options: FeishuTextMessageClientOptions,
+    dependencies: FeishuTextMessageClientDependencies =
+      defaultTextMessageDependencies,
+  ) {
+    if (!hasValidCredentials(options)) {
+      throw new FeishuTextMessageError(
+        "invalid-credentials",
+        "飞书应用凭据格式无效",
+      );
+    }
+    this.sendTimeoutMs = dependencies.sendTimeoutMs;
+    try {
+      this.sdkClient = dependencies.createSdkClient(
+        options,
+        dependencies.sendTimeoutMs,
+      );
+    } catch {
+      throw new FeishuTextMessageError(
+        "client-create-failed",
+        "飞书文本发送客户端创建失败",
+      );
+    }
+  }
+
+  async sendText(chatId: string, text: string): Promise<void> {
+    try {
+      const response = await withSendTimeout(
+        this.sdkClient.createMessage({
+          params: {
+            receive_id_type: "chat_id",
+          },
+          data: {
+            receive_id: chatId,
+            msg_type: "text",
+            content: JSON.stringify({ text }),
+          },
+        }),
+        this.sendTimeoutMs,
+      );
+      if (
+        typeof response?.data?.message_id !== "string"
+        || response.data.message_id.trim().length === 0
+      ) {
+        throw new FeishuTextMessageError(
+          "invalid-response",
+          "飞书文本消息响应无效",
+        );
+      }
+    } catch (error) {
+      if (error instanceof FeishuTextMessageError) {
+        throw error;
+      }
+      if (isSdkTimeout(error)) {
+        throw new FeishuTextMessageError(
+          "send-timeout",
+          "飞书文本消息发送超时",
+        );
+      }
+      throw new FeishuTextMessageError(
+        "send-failed",
+        "飞书文本消息发送失败",
+      );
+    }
+  }
+}
+
+function isSdkTimeout(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  const code = (error as { code?: unknown }).code;
+  return code === "ECONNABORTED" || code === "ETIMEDOUT";
 }
 
 export class FeishuEventConnection {
@@ -294,6 +428,47 @@ const redactedSdkLogger: Logger = {
   trace: () => {},
 };
 
+const defaultTextMessageDependencies: FeishuTextMessageClientDependencies = {
+  sendTimeoutMs: 15_000,
+  createSdkClient: (options, sendTimeoutMs) => {
+    const client = new Client({
+      appId: options.appId,
+      appSecret: options.appSecret,
+      appType: AppType.SelfBuild,
+      domain: Domain.Feishu,
+      logger: redactedSdkLogger,
+      loggerLevel: LoggerLevel.error,
+      source: "codexc",
+      httpInstance: withHttpTimeout(defaultHttpInstance, sendTimeoutMs),
+    });
+    return {
+      createMessage: (payload) => client.im.v1.message.create(payload),
+    };
+  },
+};
+
+function withHttpTimeout(
+  base: HttpInstance,
+  timeoutMs: number,
+): HttpInstance {
+  const options = <D>(
+    value?: HttpRequestOptions<D>,
+  ): HttpRequestOptions<D> => ({
+    ...value,
+    timeout: timeoutMs,
+  });
+  return {
+    request: (value) => base.request(options(value)),
+    get: (url, value) => base.get(url, options(value)),
+    delete: (url, value) => base.delete(url, options(value)),
+    head: (url, value) => base.head(url, options(value)),
+    options: (url, value) => base.options(url, options(value)),
+    post: (url, data, value) => base.post(url, data, options(value)),
+    put: (url, data, value) => base.put(url, data, options(value)),
+    patch: (url, data, value) => base.patch(url, data, options(value)),
+  };
+}
+
 const defaultDependencies: FeishuEventConnectionDependencies = {
   startupTimeoutMs: DEFAULT_STARTUP_TIMEOUT_MS,
   createSdkConnection: (options, callbacks) => {
@@ -330,14 +505,41 @@ const defaultDependencies: FeishuEventConnectionDependencies = {
 function validateCredentials(
   options: Pick<FeishuEventConnectionOptions, "appId" | "appSecret">,
 ): FeishuConnectionError | undefined {
-  if (
-    !FEISHU_APP_ID_PATTERN.test(options.appId)
-    || options.appSecret.trim().length === 0
-  ) {
+  if (!hasValidCredentials(options)) {
     return new FeishuConnectionError(
       "invalid-credentials",
       "飞书应用凭据格式无效",
     );
   }
   return undefined;
+}
+
+function hasValidCredentials(
+  options: Pick<FeishuEventConnectionOptions, "appId" | "appSecret">,
+): boolean {
+  return FEISHU_APP_ID_PATTERN.test(options.appId)
+    && options.appSecret.trim().length > 0;
+}
+
+async function withSendTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new FeishuTextMessageError(
+        "send-timeout",
+        "飞书文本消息发送超时",
+      ));
+    }, timeoutMs);
+    timer.unref();
+  });
+  try {
+    return await Promise.race([operation, timeout]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }

@@ -1,9 +1,13 @@
 export {
   FeishuConnectionError,
   FeishuEventConnection,
+  FeishuTextMessageClient,
+  FeishuTextMessageError,
   type FeishuConnectionErrorCode,
   type FeishuConnectionState,
   type FeishuEventConnectionOptions,
+  type FeishuTextMessageClientOptions,
+  type FeishuTextMessageErrorCode,
 } from "./client.js";
 export {
   FeishuInbox,

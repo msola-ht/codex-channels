@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   FeishuConnectionError,
   FeishuEventConnection,
+  FeishuTextMessageError,
+  FeishuTextMessageClient,
   type FeishuConnectionState,
 } from "../src/surfaces/feishu/client.js";
 
@@ -263,5 +265,173 @@ describe("FeishuEventConnection", () => {
     await rejection;
     expect(fixture.connection.state).toBe("failed");
     expect(fixture.close).toHaveBeenCalledWith(true);
+  });
+});
+
+describe("FeishuTextMessageClient", () => {
+  it("rejects invalid credentials before creating the SDK client", () => {
+    const createSdkClient = vi.fn();
+
+    expect(() => new FeishuTextMessageClient(
+      {
+        appId: "invalid",
+        appSecret: "",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient,
+      },
+    )).toThrow(new FeishuTextMessageError(
+      "invalid-credentials",
+      "飞书应用凭据格式无效",
+    ));
+    expect(createSdkClient).not.toHaveBeenCalled();
+  });
+
+  it("hides SDK client creation error details", () => {
+    expect(() => new FeishuTextMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => {
+          throw new Error("appSecret=secret");
+        },
+      },
+    )).toThrow(new FeishuTextMessageError(
+      "client-create-failed",
+      "飞书文本发送客户端创建失败",
+    ));
+  });
+
+  it("sends a text message to an exact chat ID", async () => {
+    const createMessage = vi.fn(async () => ({
+      data: { message_id: "om_message" },
+    }));
+    const client = new FeishuTextMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({ createMessage }),
+      },
+    );
+
+    await expect(client.sendText("oc_chat", "飞书回复")).resolves.toBeUndefined();
+
+    expect(createMessage).toHaveBeenCalledWith({
+      params: {
+        receive_id_type: "chat_id",
+      },
+      data: {
+        receive_id: "oc_chat",
+        msg_type: "text",
+        content: "{\"text\":\"飞书回复\"}",
+      },
+    });
+  });
+
+  it("fails with a sanitized timeout when sending takes too long", async () => {
+    vi.useFakeTimers();
+    const client = new FeishuTextMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 250,
+        createSdkClient: () => ({
+          createMessage: () => new Promise(() => {}),
+        }),
+      },
+    );
+
+    const sending = client.sendText("oc_chat", "飞书回复");
+    const rejection = expect(sending).rejects.toEqual(
+      new FeishuTextMessageError(
+        "send-timeout",
+        "飞书文本消息发送超时",
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(250);
+
+    await rejection;
+  });
+
+  it("hides SDK error details", async () => {
+    const createMessage = vi.fn(async () => {
+      throw new Error("Authorization: secret");
+    });
+    const client = new FeishuTextMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({ createMessage }),
+      },
+    );
+
+    await expect(client.sendText("oc_chat", "飞书回复")).rejects.toEqual(
+      new FeishuTextMessageError(
+        "send-failed",
+        "飞书文本消息发送失败",
+      ),
+    );
+    expect(createMessage).toHaveBeenCalledOnce();
+  });
+
+  it("maps an SDK HTTP timeout to the stable timeout error", async () => {
+    const timeout = Object.assign(new Error("request secret"), {
+      code: "ECONNABORTED",
+    });
+    const client = new FeishuTextMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage: async () => {
+            throw timeout;
+          },
+        }),
+      },
+    );
+
+    await expect(client.sendText("oc_chat", "飞书回复")).rejects.toEqual(
+      new FeishuTextMessageError(
+        "send-timeout",
+        "飞书文本消息发送超时",
+      ),
+    );
+  });
+
+  it("fails closed when the SDK response has no message ID", async () => {
+    const client = new FeishuTextMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage: async () => ({ data: {} }),
+        }),
+      },
+    );
+
+    await expect(client.sendText("oc_chat", "飞书回复")).rejects.toEqual(
+      new FeishuTextMessageError(
+        "invalid-response",
+        "飞书文本消息响应无效",
+      ),
+    );
   });
 });

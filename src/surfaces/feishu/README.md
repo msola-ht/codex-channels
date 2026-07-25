@@ -21,6 +21,11 @@
 - 重连状态留在平台边界；停止操作幂等，并能终止尚未完成的启动。
 - SDK 原始日志不进入项目 Logger，避免平台凭据、URL 或响应正文泄漏。
 - 当前只注册 `im.message.receive_v1`，回调必须同步完成最小入队，不能在 SDK Reader 中等待业务或平台网络请求。
+- 文本发送只使用 `im.v1.message.create` 的 `chat_id + text` 窄能力，设置 15 秒 HTTP 超时，
+  并要求响应包含 `message_id`。
+- 发送超时、SDK 失败和残缺响应只暴露稳定错误码，不回传 SDK message、响应正文或凭据。
+- 消息创建不自动重试；锁定 SDK 虽提供可选 `uuid` 字段，但当前官方资料未明确其幂等窗口和
+  可重试错误语义。
 
 `message-event.ts` 在平台边界把 SDK 原始事件裁剪为稳定的 `FeishuMessageEvent`，只保留账号、
 Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、消息标识或 Chat 标识时失败关闭；
@@ -37,9 +42,9 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 
 `outbox.ts` 只同步接收匹配 `feishu + accountId` 的输出，并按 Chat ID 进入
 `ConversationDeliveryQueue`。同一 Chat 串行、不同 Chat 可并行；关闭后拒绝新输出并有限等待
-已接收发送。飞书 SDK 发送对象被隔离在后续实现的 `FeishuTextMessagePort` 具体实现之后，
-Outbox 不持有完整 SDK Client。
+已接收发送。飞书 SDK 发送对象由 `FeishuTextMessageClient` 通过 `FeishuTextMessagePort`
+注入，Outbox 不持有完整 SDK Client。
 
-本模块尚未接入配置、Bootstrap、Application、飞书 SDK 发送适配或审批，因此不构成可启用的飞书渠道。后续阶段按
+本模块尚未接入配置、Bootstrap、Application、Adapter 组合或审批，因此不构成可启用的飞书渠道。后续阶段按
 [`飞书 Surface 接入计划`](../../../docs/feishu-surface-plan.md)推进；不得把 SDK 类型导出到一级
 `surfaces` 入口，也不得在 Core 中引入飞书类型。
