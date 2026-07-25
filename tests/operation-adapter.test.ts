@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { parseOperationUpdate, sanitizeOperationText } from "../src/conversation-core/operation.js";
+import {
+  sanitizeOperationText,
+  toOperationUpdate,
+} from "../src/codex-client/index.js";
 
 describe("operation normalization", () => {
   it.each([
@@ -11,7 +14,7 @@ describe("operation normalization", () => {
     [{ type: "collabAgentToolCall", id: "5", tool: "spawnAgent", status: "completed" }, "subagent", undefined, "spawnAgent"],
     [{ type: "contextCompaction", id: "6" }, "contextCompaction", undefined, undefined],
   ])("normalizes supported item %s", (item, kind, detail, action) => {
-    expect(parseOperationUpdate(item, "completed")).toMatchObject({
+    expect(toOperationUpdate(item, "completed")).toMatchObject({
       itemId: item.id,
       kind,
       status: "completed",
@@ -21,11 +24,11 @@ describe("operation normalization", () => {
   });
 
   it("maps failed and declined item states", () => {
-    expect(parseOperationUpdate(
+    expect(toOperationUpdate(
       { type: "commandExecution", id: "1", command: "false", status: "failed" },
       "completed",
     )?.status).toBe("failed");
-    expect(parseOperationUpdate(
+    expect(toOperationUpdate(
       { type: "fileChange", id: "2", changes: [], status: "declined" },
       "completed",
     )?.status).toBe("declined");

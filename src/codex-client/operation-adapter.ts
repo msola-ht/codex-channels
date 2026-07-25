@@ -1,8 +1,11 @@
-import type { OperationStatus, OperationUpdate } from "./events.js";
+import type {
+  OperationStatus,
+  OperationUpdate,
+} from "../conversation-core/index.js";
 
 type ItemPhase = "started" | "completed";
 
-export function parseOperationUpdate(
+export function toOperationUpdate(
   item: Record<string, unknown>,
   phase: ItemPhase,
 ): OperationUpdate | undefined {
@@ -94,9 +97,8 @@ export function parseOperationUpdate(
     }
     case "imageGeneration":
       return { ...common, kind: "imageGeneration" };
-    case "sleep": {
+    case "sleep":
       return { ...common, kind: "sleep" };
-    }
     case "plan":
       return { ...common, kind: "plan" };
     case "contextCompaction":

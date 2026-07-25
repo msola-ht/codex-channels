@@ -10,6 +10,7 @@ import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
 import {
   CodexAppServerClient,
   JsonRpcClient,
+  toConversationInputEvent,
   toThreadStateEvent,
   UnixWebSocketTransport,
   type RpcNotification,
@@ -152,10 +153,23 @@ export class GatewayApplication {
     }
     this.approval = new ApprovalCoordinator(this.router, this.interactions, config.approvalTimeoutMs);
     this.inbound.subscribe("conversation-core", (notification) => {
-      this.core.handle(notification);
+      const coreEvent = toConversationInputEvent(notification);
+      if (coreEvent) {
+        this.core.handle(coreEvent);
+      }
       const threadStateEvent = toThreadStateEvent(notification);
       if (threadStateEvent) {
         this.threadState.handle(threadStateEvent);
+      }
+      if (
+        !coreEvent
+        && !threadStateEvent
+        && notification.method !== "serverRequest/resolved"
+      ) {
+        this.logger.debug(
+          { method: notification.method },
+          "忽略未支持或无效的 Codex Notification",
+        );
       }
     });
     this.inbound.subscribe("approval-resolution", (notification) => {

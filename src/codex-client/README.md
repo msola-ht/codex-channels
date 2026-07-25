@@ -27,8 +27,11 @@
   Marketplace、路径、版本、策略和加载错误。
 - `permission-adapter.ts`：把官方 Permission Profile 分页响应裁剪为 ID、说明和策略可选状态，
   并对必需字段与分页游标失败关闭。
-- `notification-adapter.ts`：把当前支持的官方 Notification 转换为项目拥有的稳定事件；当前先
-  隔离 Thread 设置、归档、删除和关闭路由事件，残缺或无关通知不进入 Routing。
+- `notification-adapter.ts`：把当前支持的官方 Notification 转换为 Routing 或 Conversation Core
+  拥有的稳定事件；校验 Turn、Item、Diff、Plan、Token、账户、额度、MCP、warning 与 Thread
+  生命周期字段，残缺或无关通知不进入业务模块。
+- `operation-adapter.ts`：把官方 Item 转换为安全、简洁的操作摘要，并在离开 Client 边界前
+  清洗命令、查询和 MCP 错误中的敏感文本。
 - `client.ts`：Thread 搜索/归档、Turn、模型、权限、已安装插件、Skill、用量及用户级配置
   读取与服务层级写入等 App Server 方法的类型化封装；MCP 查询按 Thread 使用
   `toolsAndAuthOnly` 分页，配置读取只公开稳定服务层级值，Plugin 查询只调用
@@ -38,6 +41,8 @@
 本模块不得调用 Telegram API、生成平台文案或保存业务绑定。协议字段必须来自
 `codex-protocol`；无参数请求和通知不得自行补空对象，写操作不得在过载或断线后盲目重试。
 业务模块拥有窄端口和稳定结果类型；本模块可以实现这些端口，但不得让生成响应越过对应适配边界。
+Notification 适配只返回当前支持的稳定事件；未知或畸形通知由组合根记录 method 后忽略，不记录
+原始 params，也不阻塞 App Server Reader。
 当前精确协议基线要求 initialize 协商实验 API，App Server 才会发送已生成并受控导出的
 `thread/settings/updated`；该通知用于同步共享 Thread 的模型、思考强度和服务层级。启用该能力
 同时出现的实验审批字段必须在 `approval` 边界显式展示或默认拒绝，不能静默扩大授权。

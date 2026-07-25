@@ -1,14 +1,96 @@
-import type {
-  AccountUpdatedNotification,
-  McpServerStatusUpdatedNotification,
-  MessagePhase,
-  RateLimitSnapshot,
-  ThreadTokenUsage,
-  TurnPlanStep,
-  TurnStatus,
-} from "../codex-protocol/index.js";
-
 export type SurfaceId = string;
+export type MessagePhase = "commentary" | "final_answer";
+export type TurnStatus = "completed" | "interrupted" | "failed" | "inProgress";
+export type TurnPlanStepStatus = "pending" | "inProgress" | "completed";
+export type AuthMode =
+  | "apikey"
+  | "chatgpt"
+  | "chatgptAuthTokens"
+  | "headers"
+  | "agentIdentity"
+  | "personalAccessToken"
+  | "bedrockApiKey";
+export type PlanType =
+  | "free"
+  | "go"
+  | "plus"
+  | "pro"
+  | "prolite"
+  | "team"
+  | "self_serve_business_usage_based"
+  | "business"
+  | "enterprise_cbp_usage_based"
+  | "enterprise"
+  | "edu"
+  | "unknown";
+export type RateLimitReachedType =
+  | "rate_limit_reached"
+  | "workspace_owner_credits_depleted"
+  | "workspace_member_credits_depleted"
+  | "workspace_owner_usage_limit_reached"
+  | "workspace_member_usage_limit_reached";
+export type McpServerStartupState = "starting" | "ready" | "failed" | "cancelled";
+export type McpServerStartupFailureReason = "reauthenticationRequired";
+
+export interface TurnPlanStep {
+  step: string;
+  status: TurnPlanStepStatus;
+}
+
+export interface TokenUsageBreakdown {
+  totalTokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+}
+
+export interface ThreadTokenUsage {
+  total: TokenUsageBreakdown;
+  last: TokenUsageBreakdown;
+  modelContextWindow: number | null;
+}
+
+export interface RateLimitWindow {
+  usedPercent: number;
+  windowDurationMins: number | null;
+  resetsAt: number | null;
+}
+
+export interface RateLimitSnapshot {
+  limitId: string | null;
+  limitName: string | null;
+  primary: RateLimitWindow | null;
+  secondary: RateLimitWindow | null;
+  credits: {
+    hasCredits: boolean;
+    unlimited: boolean;
+    balance: string | null;
+  } | null;
+  individualLimit: {
+    limit: string;
+    used: string;
+    remainingPercent: number;
+    resetsAt: number;
+  } | null;
+  spendControlReached: boolean | null;
+  planType: PlanType | null;
+  rateLimitReachedType: RateLimitReachedType | null;
+}
+
+export interface AccountStatus {
+  authMode: AuthMode | null;
+  planType: PlanType | null;
+}
+
+export interface McpServerStatus {
+  threadId: string | null;
+  name: string;
+  status: McpServerStartupState;
+  error: string | null;
+  failureReason: McpServerStartupFailureReason | null;
+}
 
 export interface ConversationTarget {
   surface: SurfaceId;
@@ -70,9 +152,9 @@ export type OutputEvent =
   | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: TurnStatus; error?: string; tokenUsage?: ThreadTokenUsage; model?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]> }
   | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string }
   | { type: "connection.lost"; target: ConversationTarget; threadId: string; message: string }
-  | ({ type: "account.updated"; target: ConversationTarget } & AccountUpdatedNotification)
+  | ({ type: "account.updated"; target: ConversationTarget } & AccountStatus)
   | { type: "account.rateLimits.updated"; target: ConversationTarget; rateLimits: RateLimitSnapshot }
-  | ({ type: "mcp.status.updated"; target: ConversationTarget } & McpServerStatusUpdatedNotification)
+  | ({ type: "mcp.status.updated"; target: ConversationTarget } & McpServerStatus)
   | { type: "warning"; target: ConversationTarget; threadId?: string; message: string };
 
 export function isCriticalOutputEvent(event: OutputEvent): boolean {

@@ -4,10 +4,10 @@ import type { Logger } from "pino";
 
 import type { InteractionDecision, InteractionRequest } from "../../approval/index.js";
 import {
+  type MessagePhase,
   type OperationUpdate,
   type OutputEvent,
 } from "../../conversation-core/index.js";
-import type { MessagePhase } from "../../codex-protocol/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import { TelegramApprovalOperationCoordinator } from "./approval-operation-coordinator.js";

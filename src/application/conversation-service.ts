@@ -2,10 +2,6 @@ import { randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
 
 import type {
-  RateLimitSnapshot,
-  ThreadTokenUsage,
-} from "../codex-protocol/index.js";
-import type {
   AccountQueryPort,
   AccountRateLimits,
   AccountUsage,
@@ -25,6 +21,8 @@ import {
   conversationTargetKey,
   gatewayUserMessageClientIdPrefix,
   type ConversationTarget,
+  type RateLimitSnapshot,
+  type ThreadTokenUsage,
   type TurnArtifacts,
 } from "../conversation-core/index.js";
 import type { ModelSelectionService, ModelSelectionState } from "./model-selection-service.js";

@@ -1,6 +1,10 @@
 import pino from "pino";
 import { describe, expect, it } from "vitest";
 
+import {
+  toConversationInputEvent,
+  type RpcNotification,
+} from "../src/codex-client/index.js";
 import { ConversationCore } from "../src/conversation-core/core.js";
 import {
   gatewayUserMessageClientIdPrefix,
@@ -19,7 +23,7 @@ describe("ConversationCore", () => {
     } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
 
-    core.handle({
+    handleNotification(core, {
       method: "thread/tokenUsage/updated",
       params: {
         threadId: "thread-1",
@@ -69,7 +73,7 @@ describe("ConversationCore", () => {
       rateLimitReachedType: null,
     }]);
 
-    core.handle({
+    handleNotification(core, {
       method: "thread/tokenUsage/updated",
       params: {
         threadId: "thread-1",
@@ -81,14 +85,14 @@ describe("ConversationCore", () => {
         },
       },
     });
-    core.handle({
+    handleNotification(core, {
       method: "turn/completed",
       params: {
         threadId: "thread-1",
         turn: { id: "turn-1", status: "completed", error: null },
       },
     });
-    core.handle({
+    handleNotification(core, {
       method: "turn/completed",
       params: {
         threadId: "thread-1",
@@ -129,7 +133,7 @@ describe("ConversationCore", () => {
       modelSettingsForThread: () => undefined,
     }, output);
 
-    core.handle({
+    handleNotification(core, {
       method: "turn/completed",
       params: {
         threadId: "thread-1",
@@ -154,7 +158,7 @@ describe("ConversationCore", () => {
       modelSettingsForThread: () => undefined,
     }, output);
 
-    core.handle({
+    handleNotification(core, {
       method: "error",
       params: {
         threadId: "thread-1",
@@ -163,7 +167,7 @@ describe("ConversationCore", () => {
         error: { message: "暂时失败，稍后重试" },
       },
     });
-    core.handle({
+    handleNotification(core, {
       method: "turn/completed",
       params: {
         threadId: "thread-1",
@@ -190,7 +194,7 @@ describe("ConversationCore", () => {
     } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
 
-    core.handle({
+    handleNotification(core, {
       method: "turn/started",
       params: { threadId: "thread-1", turn: { id: "turn-1" } },
     });
@@ -200,11 +204,11 @@ describe("ConversationCore", () => {
       clientId: "codex_cli:1",
       content: [{ type: "text", text: "从 CLI 发来的输入" }],
     };
-    core.handle({
+    handleNotification(core, {
       method: "item/started",
       params: { threadId: "thread-1", turnId: "turn-1", item: userMessage },
     });
-    core.handle({
+    handleNotification(core, {
       method: "item/completed",
       params: { threadId: "thread-1", turnId: "turn-1", item: userMessage },
     });
@@ -238,7 +242,7 @@ describe("ConversationCore", () => {
     } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
 
-    core.handle({
+    handleNotification(core, {
       method: "item/started",
       params: {
         threadId: "thread-1",
@@ -270,7 +274,7 @@ describe("ConversationCore", () => {
     } satisfies ConversationRoutingPort;
     const core = new ConversationCore(router, output);
 
-    core.handle({
+    handleNotification(core, {
       method: "item/started",
       params: {
         threadId: "thread-1",
@@ -278,11 +282,11 @@ describe("ConversationCore", () => {
         item: { type: "agentMessage", id: "agent-1", text: "", phase: "commentary" },
       },
     });
-    core.handle({
+    handleNotification(core, {
       method: "item/agentMessage/delta",
       params: { threadId: "thread-1", turnId: "turn-1", itemId: "agent-1", delta: "检查中" },
     });
-    core.handle({
+    handleNotification(core, {
       method: "item/completed",
       params: {
         threadId: "thread-1",
@@ -331,11 +335,11 @@ describe("ConversationCore", () => {
       exitCode: null,
     };
 
-    core.handle({
+    handleNotification(core, {
       method: "item/started",
       params: { threadId: "thread-1", turnId: "turn-1", item: startedCommand },
     });
-    core.handle({
+    handleNotification(core, {
       method: "item/completed",
       params: {
         threadId: "thread-1",
@@ -343,7 +347,7 @@ describe("ConversationCore", () => {
         item: { ...startedCommand, status: "completed", durationMs: 125, exitCode: 0 },
       },
     });
-    core.handle({
+    handleNotification(core, {
       method: "item/completed",
       params: {
         threadId: "thread-1",
@@ -397,11 +401,11 @@ describe("ConversationCore", () => {
       modelSettingsForThread: () => undefined,
     }, output);
 
-    core.handle({
+    handleNotification(core, {
       method: "turn/diff/updated",
       params: { threadId: "thread-1", turnId: "turn-1", diff: "diff --git a/a b/a" },
     });
-    core.handle({
+    handleNotification(core, {
       method: "turn/plan/updated",
       params: {
         threadId: "thread-1",
@@ -452,7 +456,7 @@ describe("ConversationCore", () => {
       modelSettingsForThread: () => undefined,
     }, output);
 
-    core.handle({
+    handleNotification(core, {
       method: "account/rateLimits/updated",
       params: {
         rateLimits: {
@@ -463,7 +467,7 @@ describe("ConversationCore", () => {
         },
       },
     });
-    core.handle({
+    handleNotification(core, {
       method: "account/rateLimits/updated",
       params: {
         rateLimits: {
@@ -474,15 +478,15 @@ describe("ConversationCore", () => {
         },
       },
     });
-    core.handle({
+    handleNotification(core, {
       method: "account/rateLimits/updated",
       params: { rateLimits: { limitId: "codex", primary: { usedPercent: 50 } } },
     });
-    core.handle({
+    handleNotification(core, {
       method: "account/rateLimits/updated",
       params: { rateLimits: { limitId: "codex", primary: { usedPercent: 91 } } },
     });
-    core.handle({
+    handleNotification(core, {
       method: "mcpServer/startupStatus/updated",
       params: {
         threadId: "thread-1",
@@ -524,7 +528,7 @@ describe("ConversationCore", () => {
       modelSettingsForThread: () => undefined,
     }, output);
 
-    core.handle({
+    handleNotification(core, {
       method: "warning",
       params: {
         threadId: null,
@@ -580,6 +584,16 @@ describe("ConversationCore", () => {
     await output.close();
   });
 });
+
+function handleNotification(
+  core: ConversationCore,
+  notification: RpcNotification,
+): void {
+  const event = toConversationInputEvent(notification);
+  if (event) {
+    core.handle(event);
+  }
+}
 
 function breakdown(totalTokens: number) {
   return {

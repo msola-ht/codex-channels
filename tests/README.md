@@ -12,8 +12,9 @@
   以及 Routing 不再解析原始协议信封。
 - 活动 Turn 的即时 steer 与下一 Turn 有界内存队列、顺序启动、Thread 隔离和失败清理；项目输入
   到官方 `UserInput` 的映射，以及 Review、Goal 和控制响应到稳定 Application 结果的映射。
-- Conversation Core 状态归约、严格 Turn 完成状态、可重试错误隔离、Thread/全局警告路由、
-  操作过程与敏感文本清洗。
+- 官方 Turn、Item、Diff、Plan、Token、账户、额度、MCP 和 warning Notification 到稳定 Core
+  输入事件的映射，畸形与未知通知隔离；Conversation Core 状态归约、严格 Turn 完成状态、
+  可重试错误隔离、Thread/全局警告路由，以及 Client 边界的操作摘要与敏感文本清洗。
 - 命令、文件修改、临时权限、用户输入和 MCP 审批的归属信息、一次/会话批准、命令前缀及网络
   规则持久授权、网络专用请求、目标主机一致性、拒绝、无法路由、协议能力约束、一次性回调、
   超时和跨客户端解决。

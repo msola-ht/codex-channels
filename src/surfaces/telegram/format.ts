@@ -1,8 +1,3 @@
-import type {
-  McpServerStatusUpdatedNotification,
-  RateLimitSnapshot,
-  ThreadTokenUsage,
-} from "../../codex-protocol/index.js";
 import {
   fastServiceTierId,
   isFastServiceTier,
@@ -18,7 +13,12 @@ import {
   type PermissionProfileOption,
 } from "../../application/index.js";
 import type { ConfigChange, ConfigChangeCode } from "../../config/index.js";
-import type { TurnArtifacts } from "../../conversation-core/index.js";
+import type {
+  McpServerStatus,
+  RateLimitSnapshot,
+  ThreadTokenUsage,
+  TurnArtifacts,
+} from "../../conversation-core/index.js";
 import type { Workspace } from "../../policy/index.js";
 import type { SurfaceConfigurationChange } from "../types.js";
 
@@ -102,7 +102,7 @@ export function formatRateLimitUpdate(snapshot: RateLimitSnapshot): string {
   ].join("\n");
 }
 
-export function formatMcpStatusUpdate(update: McpServerStatusUpdatedNotification): string {
+export function formatMcpStatusUpdate(update: McpServerStatus): string {
   const labels = { starting: "启动中", ready: "已就绪", failed: "启动失败", cancelled: "已取消" } as const;
   return [
     `MCP Server：${update.name} · ${labels[update.status]}`,

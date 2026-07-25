@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { toThreadStateEvent } from "../src/codex-client/index.js";
+import {
+  toConversationInputEvent,
+  toThreadStateEvent,
+} from "../src/codex-client/index.js";
 
 describe("Notification adapter", () => {
   it("maps complete Thread settings to a stable routing event", () => {
@@ -80,6 +83,113 @@ describe("Notification adapter", () => {
     expect(toThreadStateEvent({
       method: "turn/started",
       params: { threadId: "thread-1" },
+    })).toBeUndefined();
+  });
+
+  it("maps Turn, Item and Thread lifecycle notifications to stable Core events", () => {
+    expect(toConversationInputEvent({
+      method: "turn/started",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1" },
+      },
+    })).toEqual({
+      type: "turn.started",
+      threadId: "thread-1",
+      turnId: "turn-1",
+    });
+    expect(toConversationInputEvent({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "agentMessage",
+          id: "item-1",
+          text: "完成",
+          phase: "final_answer",
+        },
+      },
+    })).toEqual({
+      type: "item.agentMessage.completed",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      text: "完成",
+      phase: "final_answer",
+    });
+    expect(toConversationInputEvent({
+      method: "thread/status/changed",
+      params: {
+        threadId: "thread-1",
+        status: { type: "active", activeFlags: [] },
+      },
+    })).toEqual({
+      type: "thread.status.changed",
+      threadId: "thread-1",
+      status: "active",
+    });
+    expect(toConversationInputEvent({
+      method: "thread/closed",
+      params: { threadId: "thread-1" },
+    })).toEqual({ type: "thread.closed", threadId: "thread-1" });
+  });
+
+  it("maps account, MCP and warning notifications without generated response types", () => {
+    expect(toConversationInputEvent({
+      method: "account/updated",
+      params: { authMode: "chatgpt", planType: "pro" },
+    })).toEqual({
+      type: "account.updated",
+      authMode: "chatgpt",
+      planType: "pro",
+    });
+    expect(toConversationInputEvent({
+      method: "mcpServer/startupStatus/updated",
+      params: {
+        threadId: null,
+        name: "docs",
+        status: "failed",
+        error: "TOKEN=secret",
+        failureReason: "reauthenticationRequired",
+      },
+    })).toEqual({
+      type: "mcp.status.updated",
+      threadId: null,
+      name: "docs",
+      status: "failed",
+      error: "TOKEN=[REDACTED]",
+      failureReason: "reauthenticationRequired",
+    });
+    expect(toConversationInputEvent({
+      method: "warning",
+      params: { threadId: null, message: "全局警告" },
+    })).toEqual({
+      type: "warning",
+      threadId: null,
+      message: "全局警告",
+    });
+  });
+
+  it("rejects malformed supported Core notifications and ignores unknown methods", () => {
+    expect(toConversationInputEvent({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "unknown", error: null },
+      },
+    })).toBeUndefined();
+    expect(toConversationInputEvent({
+      method: "account/updated",
+      params: { authMode: "unknown-auth", planType: "pro" },
+    })).toBeUndefined();
+    expect(toConversationInputEvent({
+      method: "account/updated",
+      params: { authMode: "chatgpt" },
+    })).toBeUndefined();
+    expect(toConversationInputEvent({
+      method: "future/notification",
+      params: {},
     })).toBeUndefined();
   });
 });

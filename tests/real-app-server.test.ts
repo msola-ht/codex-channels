@@ -6,7 +6,10 @@ import pino from "pino";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { CodexAppServerClient } from "../src/codex-client/client.js";
-import { toThreadStateEvent } from "../src/codex-client/index.js";
+import {
+  toConversationInputEvent,
+  toThreadStateEvent,
+} from "../src/codex-client/index.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
 import { StdioTransport } from "../src/codex-client/stdio-transport.js";
@@ -382,6 +385,13 @@ contractSuite("isolated Codex App Server state contract", () => {
   it("maps Turn and Goal results through the stable Application contract", async () => {
     const started = await ownerClient.startThread(workdir);
     const threadId = started.thread.id;
+    const observedTurnIds: string[] = [];
+    const removeNotification = ownerClient.onNotification((notification) => {
+      const event = toConversationInputEvent(notification);
+      if (event?.type === "turn.started" && event.threadId === threadId) {
+        observedTurnIds.push(event.turnId);
+      }
+    });
     let turnId: string | undefined;
     try {
       const turn = await ownerClient.startTurn(
@@ -392,6 +402,7 @@ contractSuite("isolated Codex App Server state contract", () => {
       );
       turnId = turn.turnId;
       expect(turnId).not.toBe("");
+      await waitFor(() => observedTurnIds.includes(turn.turnId), 2_000);
 
       const updated = await ownerClient.setGoal(threadId, "验证稳定 Goal 映射");
       const read = await peerClient.getGoal(threadId);
@@ -401,6 +412,7 @@ contractSuite("isolated Codex App Server state contract", () => {
       await ownerClient.clearGoal(threadId);
       await expect(peerClient.getGoal(threadId)).resolves.toBeNull();
     } finally {
+      removeNotification();
       if (turnId) {
         await ownerClient.interruptTurn(threadId, turnId).catch(() => undefined);
       }

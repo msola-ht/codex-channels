@@ -1,31 +1,17 @@
-import type {
-  AuthMode,
-  McpServerStartupFailureReason,
-  McpServerStartupState,
-  MessagePhase,
-  PlanType,
-  RateLimitReachedType,
-  RateLimitSnapshot,
-  ThreadTokenUsage,
-  TurnPlanStep,
-  TurnStatus,
-} from "../codex-protocol/index.js";
 import type { EventBus } from "../event-bus/index.js";
 import {
   conversationTargetKey,
   gatewayUserMessageClientIdPrefix,
   type ConversationTarget,
+  type MessagePhase,
   type OutputEvent,
+  type RateLimitSnapshot,
+  type ThreadTokenUsage,
   type TurnArtifacts,
   isCriticalOutputEvent,
 } from "./events.js";
+import type { ConversationInputEvent } from "./input-events.js";
 import type { ConversationRoutingPort } from "./routing-port.js";
-import { parseOperationUpdate, sanitizeOperationText } from "./operation.js";
-
-export interface CodexNotification {
-  method: string;
-  params: unknown;
-}
 
 interface ActiveTurn {
   target: ConversationTarget;
@@ -35,22 +21,6 @@ interface ActiveTurn {
 
 type WithoutTarget<T> = T extends unknown ? Omit<T, "target"> : never;
 type UntargetedOutputEvent = WithoutTarget<OutputEvent>;
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-function stringField(record: Record<string, unknown> | undefined, name: string): string | undefined {
-  const value = record?.[name];
-  return typeof value === "string" ? value : undefined;
-}
-
-function numberField(record: Record<string, unknown> | undefined, name: string): number | undefined {
-  const value = record?.[name];
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
 
 export class ConversationCore {
   private readonly activeByConversation = new Map<string, ActiveTurn>();
@@ -136,161 +106,117 @@ export class ConversationCore {
     }
   }
 
-  handle(notification: CodexNotification): void {
-    const params = asRecord(notification.params);
-    const threadId = stringField(params, "threadId");
-
-    switch (notification.method) {
-      case "turn/started": {
-        const turn = asRecord(params?.turn);
-        const turnId = stringField(turn, "id");
-        const target = threadId ? this.router.targetForThread(threadId) : undefined;
-        if (threadId && turnId && target) {
-          this.markTurnStarted(target, threadId, turnId);
+  handle(event: ConversationInputEvent): void {
+    switch (event.type) {
+      case "turn.started": {
+        const target = this.router.targetForThread(event.threadId);
+        if (target) {
+          this.markTurnStarted(target, event.threadId, event.turnId);
         }
         return;
       }
-      case "thread/tokenUsage/updated": {
-        const turnId = stringField(params, "turnId");
-        const tokenUsage = parseThreadTokenUsage(asRecord(params?.tokenUsage));
-        if (threadId && turnId && tokenUsage) {
-          this.usageByThread.set(threadId, tokenUsage);
-          this.usageTurnByThread.set(threadId, turnId);
-        }
+      case "thread.tokenUsage.updated":
+        this.usageByThread.set(event.threadId, event.tokenUsage);
+        this.usageTurnByThread.set(event.threadId, event.turnId);
+        return;
+      case "turn.diff.updated": {
+        const current = this.artifactsByThread.get(event.threadId);
+        this.artifactsByThread.set(event.threadId, {
+          ...(current?.turnId === event.turnId
+            ? current
+            : { threadId: event.threadId, turnId: event.turnId }),
+          threadId: event.threadId,
+          turnId: event.turnId,
+          diff: event.diff,
+        });
         return;
       }
-      case "turn/diff/updated": {
-        const turnId = stringField(params, "turnId");
-        const diff = stringField(params, "diff");
-        if (threadId && turnId && diff !== undefined) {
-          const current = this.artifactsByThread.get(threadId);
-          this.artifactsByThread.set(threadId, {
-            ...(current?.turnId === turnId ? current : { threadId, turnId }),
-            threadId,
-            turnId,
-            diff,
-          });
-        }
+      case "turn.plan.updated": {
+        const current = this.artifactsByThread.get(event.threadId);
+        this.artifactsByThread.set(event.threadId, {
+          ...(current?.turnId === event.turnId
+            ? current
+            : { threadId: event.threadId, turnId: event.turnId }),
+          threadId: event.threadId,
+          turnId: event.turnId,
+          plan: { explanation: event.explanation, steps: event.plan },
+        });
         return;
       }
-      case "turn/plan/updated": {
-        const turnId = stringField(params, "turnId");
-        const explanation = params?.explanation;
-        const plan = parsePlanSteps(params?.plan);
-        if (threadId && turnId && plan && (typeof explanation === "string" || explanation === null)) {
-          const current = this.artifactsByThread.get(threadId);
-          this.artifactsByThread.set(threadId, {
-            ...(current?.turnId === turnId ? current : { threadId, turnId }),
-            threadId,
-            turnId,
-            plan: { explanation, steps: plan },
-          });
-        }
+      case "item.agentMessage.started":
+        this.phaseByItem.set(
+          this.itemKey(event.threadId, event.turnId, event.itemId),
+          event.phase,
+        );
+        return;
+      case "item.agentMessage.delta": {
+        const phase = this.phaseByItem.get(
+          this.itemKey(event.threadId, event.turnId, event.itemId),
+        );
+        this.publishForThread(event.threadId, {
+          type: "text.delta",
+          threadId: event.threadId,
+          turnId: event.turnId,
+          itemId: event.itemId,
+          text: event.text,
+          ...(phase !== undefined ? { phase } : {}),
+        });
         return;
       }
-      case "item/agentMessage/delta": {
-        const turnId = stringField(params, "turnId");
-        const itemId = stringField(params, "itemId");
-        const text = stringField(params, "delta");
-        if (threadId && turnId && itemId && text) {
-          const phase = this.phaseByItem.get(this.itemKey(threadId, turnId, itemId));
-          this.publishForThread(threadId, {
-            type: "text.delta",
-            threadId,
-            turnId,
-            itemId,
-            text,
-            ...(phase !== undefined ? { phase } : {}),
-          });
-        }
+      case "item.agentMessage.completed": {
+        const key = this.itemKey(event.threadId, event.turnId, event.itemId);
+        const phase = event.phase ?? this.phaseByItem.get(key) ?? null;
+        this.publishForThread(event.threadId, {
+          type: "text.completed",
+          threadId: event.threadId,
+          turnId: event.turnId,
+          itemId: event.itemId,
+          text: event.text,
+          phase,
+        });
+        this.phaseByItem.delete(key);
         return;
       }
-      case "item/started":
-      case "item/completed": {
-        const turnId = stringField(params, "turnId");
-        const item = asRecord(params?.item);
-        const itemId = stringField(item, "id");
-        if (threadId && turnId && item?.type === "agentMessage" && itemId) {
-          const key = this.itemKey(threadId, turnId, itemId);
-          const phase = messagePhase(item.phase);
-          if (notification.method === "item/started") {
-            this.phaseByItem.set(key, phase);
-          } else {
-            const resolvedPhase = phase ?? this.phaseByItem.get(key) ?? null;
-            if (typeof item.text === "string") {
-              this.publishForThread(threadId, {
-                type: "text.completed",
-                threadId,
-                turnId,
-                itemId,
-                text: item.text,
-                phase: resolvedPhase,
-              });
-            }
-            this.phaseByItem.delete(key);
-          }
-          return;
-        }
-        if (threadId && turnId && item?.type === "userMessage") {
-          this.publishUserMessage(threadId, turnId, item);
-          return;
-        }
-        if (threadId && turnId && item) {
-          const operation = parseOperationUpdate(
-            item,
-            notification.method === "item/started" ? "started" : "completed",
-          );
-          if (operation) {
-            this.publishForThread(threadId, {
-              type: "operation.updated",
-              threadId,
-              turnId,
-              operation,
-            });
-          }
+      case "item.userMessage":
+        this.publishUserMessage(event);
+        return;
+      case "item.operation.updated":
+        this.publishForThread(event.threadId, {
+          type: "operation.updated",
+          threadId: event.threadId,
+          turnId: event.turnId,
+          operation: event.operation,
+        });
+        return;
+      case "turn.error":
+        if (!event.willRetry) {
+          this.errorsByTurn.set(event.turnId, event.message);
         }
         return;
-      }
-      case "error": {
-        const turnId = stringField(params, "turnId");
-        const error = asRecord(params?.error);
-        const message = stringField(error, "message");
-        if (turnId && message && params?.willRetry === false) {
-          this.errorsByTurn.set(turnId, message);
-        }
-        return;
-      }
-      case "turn/completed": {
-        const turn = asRecord(params?.turn);
-        const turnId = stringField(turn, "id");
-        const status = parseTurnStatus(turn?.status);
-        if (!threadId || !turnId || !status) {
-          return;
-        }
-        this.clearSeenUserMessages(threadId, turnId);
-        this.clearItemPhases(threadId, turnId);
-        const target = this.router.targetForThread(threadId);
+      case "turn.completed": {
+        this.clearSeenUserMessages(event.threadId, event.turnId);
+        this.clearItemPhases(event.threadId, event.turnId);
+        const target = this.router.targetForThread(event.threadId);
         if (!target) {
           return;
         }
         const active = this.activeByConversation.get(this.key(target));
-        if (active?.turnId === turnId) {
+        if (active?.turnId === event.turnId) {
           this.activeByConversation.delete(this.key(target));
         }
-        const turnError = asRecord(turn?.error);
-        const error = stringField(turnError, "message") ?? this.errorsByTurn.get(turnId);
-        const tokenUsage = this.usageTurnByThread.get(threadId) === turnId
-          ? this.usageByThread.get(threadId)
+        const error = event.error ?? this.errorsByTurn.get(event.turnId);
+        const tokenUsage = this.usageTurnByThread.get(event.threadId) === event.turnId
+          ? this.usageByThread.get(event.threadId)
           : undefined;
-        const modelSettings = this.router.modelSettingsForThread(threadId);
+        const modelSettings = this.router.modelSettingsForThread(event.threadId);
         const weeklyLimit = this.weeklyRateLimit();
-        this.errorsByTurn.delete(turnId);
+        this.errorsByTurn.delete(event.turnId);
         this.publish({
           type: "turn.completed",
           target,
-          threadId,
-          turnId,
-          status,
+          threadId: event.threadId,
+          turnId: event.turnId,
+          status: event.status,
           ...(error ? { error } : {}),
           ...(tokenUsage ? { tokenUsage } : {}),
           ...(modelSettings
@@ -304,57 +230,44 @@ export class ConversationCore {
         });
         return;
       }
-      case "thread/status/changed": {
-        const status = asRecord(params?.status);
-        const statusType = stringField(status, "type");
-        if (threadId && statusType) {
-          this.publishForThread(threadId, {
-            type: "thread.status",
-            threadId,
-            status: statusType,
-          });
-        }
+      case "thread.status.changed":
+        this.publishForThread(event.threadId, {
+          type: "thread.status",
+          threadId: event.threadId,
+          status: event.status,
+        });
         return;
-      }
-      case "thread/closed":
-      case "thread/archived":
-      case "thread/deleted": {
-        if (!threadId) {
-          return;
-        }
-        const target = this.router.targetForThread(threadId);
-        this.usageByThread.delete(threadId);
-        this.usageTurnByThread.delete(threadId);
-        this.clearSeenUserMessages(threadId);
-        this.clearItemPhases(threadId);
-        this.artifactsByThread.delete(threadId);
+      case "thread.closed":
+      case "thread.archived":
+      case "thread.deleted": {
+        const target = this.router.targetForThread(event.threadId);
+        this.usageByThread.delete(event.threadId);
+        this.usageTurnByThread.delete(event.threadId);
+        this.clearSeenUserMessages(event.threadId);
+        this.clearItemPhases(event.threadId);
+        this.artifactsByThread.delete(event.threadId);
         if (target) {
           this.activeByConversation.delete(this.key(target));
         }
         return;
       }
-      case "account/updated": {
-        const authMode = parseAuthMode(params?.authMode);
-        const planType = parsePlanType(params?.planType);
-        if (authMode === undefined || planType === undefined) {
-          return;
-        }
-        const fingerprint = `${authMode ?? ""}:${planType ?? ""}`;
+      case "account.updated": {
+        const fingerprint = `${event.authMode ?? ""}:${event.planType ?? ""}`;
         if (fingerprint !== this.accountStatus) {
           this.accountStatus = fingerprint;
-          this.broadcast({ type: "account.updated", authMode, planType });
+          this.broadcast({
+            type: "account.updated",
+            authMode: event.authMode,
+            planType: event.planType,
+          });
         }
         return;
       }
-      case "account/rateLimits/updated": {
-        const update = parseRateLimitSnapshot(params?.rateLimits);
-        if (!update) {
-          return;
-        }
-        const limitId = update.limitId ?? "codex";
+      case "account.rateLimits.updated": {
+        const limitId = event.rateLimits.limitId ?? "codex";
         const rateLimits = mergeRateLimitSnapshot(
           this.rateLimitSnapshots.get(limitId),
-          update,
+          event.rateLimits,
           limitId,
         );
         this.rateLimitSnapshots.set(limitId, rateLimits);
@@ -373,50 +286,39 @@ export class ConversationCore {
         }
         return;
       }
-      case "mcpServer/startupStatus/updated": {
-        const name = stringField(params, "name");
-        const status = stringField(params, "status");
-        const error = typeof params?.error === "string"
-          ? sanitizeOperationText(params.error)
-          : null;
-        const failureReason = typeof params?.failureReason === "string" ? params.failureReason : null;
-        if (!name || !isMcpStartupState(status) || !isMcpFailureReason(failureReason)) {
-          return;
-        }
-        const key = `${threadId ?? "global"}:${name}`;
-        const fingerprint = `${status}:${error ?? ""}:${failureReason ?? ""}`;
+      case "mcp.status.updated": {
+        const key = `${event.threadId ?? "global"}:${event.name}`;
+        const fingerprint =
+          `${event.status}:${event.error ?? ""}:${event.failureReason ?? ""}`;
         if (this.mcpStatus.get(key) === fingerprint) {
           return;
         }
         this.mcpStatus.set(key, fingerprint);
-        const event = {
+        const outputEvent = {
           type: "mcp.status.updated" as const,
-          threadId: threadId ?? null,
-          name,
-          status,
-          error,
-          failureReason,
+          threadId: event.threadId,
+          name: event.name,
+          status: event.status,
+          error: event.error,
+          failureReason: event.failureReason,
         };
-        if (threadId) {
-          this.publishForThread(threadId, event);
+        if (event.threadId) {
+          this.publishForThread(event.threadId, outputEvent);
         } else {
-          this.broadcast(event);
+          this.broadcast(outputEvent);
         }
         return;
       }
-      case "warning": {
-        const message = stringField(params, "message");
-        if (!message) {
-          return;
+      case "warning":
+        if (event.threadId) {
+          this.publishForThread(event.threadId, {
+            type: "warning",
+            threadId: event.threadId,
+            message: event.message,
+          });
+        } else {
+          this.broadcast({ type: "warning", message: event.message });
         }
-        if (threadId) {
-          this.publishForThread(threadId, { type: "warning", threadId, message });
-        } else if (params?.threadId === null) {
-          this.broadcast({ type: "warning", message });
-        }
-        return;
-      }
-      default:
         return;
     }
   }
@@ -432,42 +334,29 @@ export class ConversationCore {
   }
 
   private publishUserMessage(
-    threadId: string,
-    turnId: string,
-    item: Record<string, unknown>,
+    event: Extract<ConversationInputEvent, { type: "item.userMessage" }>,
   ): void {
-    const itemId = stringField(item, "id");
-    if (!itemId) {
-      return;
-    }
-    const messageKey = `${threadId}:${turnId}:${itemId}`;
+    const messageKey = `${event.threadId}:${event.turnId}:${event.itemId}`;
     if (this.seenUserMessages.has(messageKey)) {
       return;
     }
     this.seenUserMessages.add(messageKey);
-    const clientId = stringField(item, "clientId");
-    if (clientId?.startsWith(gatewayUserMessageClientIdPrefix)) {
+    if (event.clientId?.startsWith(gatewayUserMessageClientIdPrefix)) {
       return;
     }
-    const content = Array.isArray(item.content) ? item.content : [];
-    const text = content
-      .map((input) => {
-        const record = asRecord(input);
-        return record?.type === "text" && typeof record.text === "string"
-          ? record.text.trim()
-          : "";
-      })
-      .filter(Boolean)
-      .join("\n\n");
-    if (!text) {
-      return;
-    }
-    const target = this.router.targetForThread(threadId);
+    const target = this.router.targetForThread(event.threadId);
     if (!target) {
       return;
     }
-    this.markTurnStarted(target, threadId, turnId);
-    this.publish({ type: "user.message", target, threadId, turnId, itemId, text });
+    this.markTurnStarted(target, event.threadId, event.turnId);
+    this.publish({
+      type: "user.message",
+      target,
+      threadId: event.threadId,
+      turnId: event.turnId,
+      itemId: event.itemId,
+      text: event.text,
+    });
   }
 
   private clearSeenUserMessages(threadId: string, turnId?: string): void {
@@ -510,58 +399,6 @@ export class ConversationCore {
   private key(target: ConversationTarget): string {
     return conversationTargetKey(target);
   }
-}
-
-function parsePlanSteps(value: unknown): TurnPlanStep[] | undefined {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-  const steps: TurnPlanStep[] = [];
-  for (const entry of value) {
-    const record = asRecord(entry);
-    const step = stringField(record, "step");
-    const status = stringField(record, "status");
-    if (!step || !status || !["pending", "inProgress", "completed"].includes(status)) {
-      return undefined;
-    }
-    steps.push({ step, status: status as TurnPlanStep["status"] });
-  }
-  return steps;
-}
-
-function parseTurnStatus(value: unknown): TurnStatus | undefined {
-  return typeof value === "string" &&
-    ["completed", "interrupted", "failed", "inProgress"].includes(value)
-    ? value as TurnStatus
-    : undefined;
-}
-
-function parseAuthMode(value: unknown): AuthMode | null | undefined {
-  if (value === null) {
-    return null;
-  }
-  return typeof value === "string" && [
-    "apikey", "chatgpt", "chatgptAuthTokens", "headers", "agentIdentity",
-    "personalAccessToken", "bedrockApiKey",
-  ].includes(value) ? value as AuthMode : undefined;
-}
-
-function parsePlanType(value: unknown): PlanType | null | undefined {
-  if (value === null) {
-    return null;
-  }
-  return typeof value === "string" && [
-    "free", "go", "plus", "pro", "prolite", "team", "self_serve_business_usage_based",
-    "business", "enterprise_cbp_usage_based", "enterprise", "edu", "unknown",
-  ].includes(value) ? value as PlanType : undefined;
-}
-
-function isMcpStartupState(value: unknown): value is McpServerStartupState {
-  return typeof value === "string" && ["starting", "ready", "failed", "cancelled"].includes(value);
-}
-
-function isMcpFailureReason(value: unknown): value is McpServerStartupFailureReason | null {
-  return value === null || value === "reauthenticationRequired";
 }
 
 function rateLimitNoticeFingerprint(snapshot: RateLimitSnapshot): string | undefined {
@@ -612,140 +449,4 @@ function mergeRateLimitWindow(
         resetsAt: update.resetsAt ?? current?.resetsAt ?? null,
       }
     : current ?? null;
-}
-
-function parseRateLimitSnapshot(value: unknown): RateLimitSnapshot | undefined {
-  const record = asRecord(value);
-  if (!record) {
-    return undefined;
-  }
-  const primary = parseRateLimitWindow(record.primary);
-  const secondary = parseRateLimitWindow(record.secondary);
-  const credits = parseCredits(record.credits);
-  const individualLimit = parseIndividualLimit(record.individualLimit);
-  const spendControlReached = nullableBoolean(record.spendControlReached);
-  const planType = parsePlanType(record.planType ?? null);
-  const rateLimitReachedType = parseRateLimitReachedType(record.rateLimitReachedType);
-  if (
-    primary === undefined || secondary === undefined || credits === undefined ||
-    individualLimit === undefined || spendControlReached === undefined ||
-    planType === undefined || rateLimitReachedType === undefined
-  ) {
-    return undefined;
-  }
-  return {
-    limitId: nullableString(record.limitId),
-    limitName: nullableString(record.limitName),
-    primary,
-    secondary,
-    credits,
-    individualLimit,
-    spendControlReached,
-    planType,
-    rateLimitReachedType,
-  };
-}
-
-function parseRateLimitWindow(value: unknown): RateLimitSnapshot["primary"] | undefined {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  const record = asRecord(value);
-  const usedPercent = numberField(record, "usedPercent");
-  const windowDurationMins = nullableNumber(record?.windowDurationMins);
-  const resetsAt = nullableNumber(record?.resetsAt);
-  return record && usedPercent !== undefined && windowDurationMins !== undefined && resetsAt !== undefined
-    ? { usedPercent, windowDurationMins, resetsAt }
-    : undefined;
-}
-
-function parseCredits(value: unknown): RateLimitSnapshot["credits"] | undefined {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  const record = asRecord(value);
-  const hasCredits = record?.hasCredits;
-  const unlimited = record?.unlimited;
-  if (!record || typeof hasCredits !== "boolean" || typeof unlimited !== "boolean") {
-    return undefined;
-  }
-  return { hasCredits, unlimited, balance: nullableString(record.balance) };
-}
-
-function parseIndividualLimit(value: unknown): RateLimitSnapshot["individualLimit"] | undefined {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  const record = asRecord(value);
-  const limit = stringField(record, "limit");
-  const used = stringField(record, "used");
-  const remainingPercent = numberField(record, "remainingPercent");
-  const resetsAt = numberField(record, "resetsAt");
-  return record && limit && used && remainingPercent !== undefined && resetsAt !== undefined
-    ? { limit, used, remainingPercent, resetsAt }
-    : undefined;
-}
-
-function parseRateLimitReachedType(value: unknown): RateLimitReachedType | null | undefined {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  return typeof value === "string" && [
-    "rate_limit_reached", "workspace_owner_credits_depleted",
-    "workspace_member_credits_depleted", "workspace_owner_usage_limit_reached",
-    "workspace_member_usage_limit_reached",
-  ].includes(value) ? value as RateLimitReachedType : undefined;
-}
-
-function nullableString(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
-}
-
-function nullableNumber(value: unknown): number | null | undefined {
-  return value === null || value === undefined
-    ? null
-    : typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function nullableBoolean(value: unknown): boolean | null | undefined {
-  return value === null || value === undefined
-    ? null
-    : typeof value === "boolean" ? value : undefined;
-}
-
-function messagePhase(value: unknown): MessagePhase | null {
-  return value === "commentary" || value === "final_answer" ? value : null;
-}
-
-function parseThreadTokenUsage(record: Record<string, unknown> | undefined): ThreadTokenUsage | undefined {
-  const total = parseTokenUsageBreakdown(asRecord(record?.total));
-  const last = parseTokenUsageBreakdown(asRecord(record?.last));
-  const context = record?.modelContextWindow;
-  if (!total || !last || (context !== null && (typeof context !== "number" || !Number.isFinite(context)))) {
-    return undefined;
-  }
-  return { total, last, modelContextWindow: context };
-}
-
-function parseTokenUsageBreakdown(record: Record<string, unknown> | undefined): ThreadTokenUsage["total"] | undefined {
-  const totalTokens = numberField(record, "totalTokens");
-  const inputTokens = numberField(record, "inputTokens");
-  const cachedInputTokens = numberField(record, "cachedInputTokens");
-  const cacheWriteInputTokens = numberField(record, "cacheWriteInputTokens");
-  const outputTokens = numberField(record, "outputTokens");
-  const reasoningOutputTokens = numberField(record, "reasoningOutputTokens");
-  if (
-    totalTokens === undefined || inputTokens === undefined || cachedInputTokens === undefined ||
-    cacheWriteInputTokens === undefined || outputTokens === undefined || reasoningOutputTokens === undefined
-  ) {
-    return undefined;
-  }
-  return {
-    totalTokens,
-    inputTokens,
-    cachedInputTokens,
-    cacheWriteInputTokens,
-    outputTokens,
-    reasoningOutputTokens,
-  };
 }

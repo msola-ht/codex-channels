@@ -1,5 +1,23 @@
-export { ConversationCore, type CodexNotification } from "./core.js";
-export type { TurnArtifacts } from "./events.js";
+export { ConversationCore } from "./core.js";
+export type { ConversationInputEvent } from "./input-events.js";
+export type {
+  AccountStatus,
+  AuthMode,
+  McpServerStartupFailureReason,
+  McpServerStartupState,
+  McpServerStatus,
+  MessagePhase,
+  PlanType,
+  RateLimitReachedType,
+  RateLimitSnapshot,
+  RateLimitWindow,
+  ThreadTokenUsage,
+  TokenUsageBreakdown,
+  TurnArtifacts,
+  TurnPlanStep,
+  TurnPlanStepStatus,
+  TurnStatus,
+} from "./events.js";
 export {
   conversationTargetKey,
   gatewayUserMessageClientIdPrefix,
@@ -12,7 +30,6 @@ export {
   type OutputEvent,
   type SurfaceId,
 } from "./events.js";
-export { parseOperationUpdate, sanitizeOperationText } from "./operation.js";
 export {
   UserFacingError,
   type UserFacingErrorCode,
