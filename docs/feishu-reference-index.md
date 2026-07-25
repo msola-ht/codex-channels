@@ -7,8 +7,8 @@
 支持飞书。
 
 截至 2026-07-25，项目已精确锁定 `@larksuiteoapi/node-sdk@1.71.1`，并建立未注册到 Bootstrap
-的 Phase 0 长连接生命周期封装和离线合同测试。飞书仍不是可启用渠道；测试应用握手、代理、
-事件投递和卡片动作实验完成前，不能进入生产启动路径。
+的 Phase 0 长连接生命周期封装、离线合同测试及 Phase 1 私聊输入、访问策略和纯文本渲染基础。
+飞书仍不是可启用渠道；测试应用握手、代理、事件投递和卡片动作实验完成前，不能进入生产启动路径。
 
 ## 资料优先级
 
@@ -115,6 +115,7 @@ EventDispatcher`。
 | 消息事件字段裁剪 | `im.message.receive_v1` | 稳定字段映射和畸形输入失败关闭已完成；真实事件待验证 | 阶段 0 |
 | 私聊文本事件 | `im.message.receive_v1` | 平台本地筛选、有界入队和 Access Policy 已完成；Adapter 待实现 | 阶段 1 |
 | 文本发送 | `client.im.v1.message.create` | 计划中 | 阶段 1 |
+| 纯文本输出渲染 | `OutputEvent` | 关键事件回退和上游错误详情隐藏已完成；发送队列待实现 | 阶段 1 |
 | 事件去重与旧事件过滤 | 平台事件 ID、毫秒时间戳 | 已实现飞书模块内有界内存状态；真实重投待验证 | 阶段 1 |
 | 命令和群聊 | 消息事件、群身份与 @Bot | 暂不支持 | 阶段 2 |
 | 卡片审批 | `card.action.trigger` | 接收方式待验证，当前失败关闭 | 阶段 3 |
@@ -136,7 +137,7 @@ EventDispatcher`。
 | 输入接收与去重 | [`src/surfaces/feishu/inbox.ts`](../src/surfaces/feishu/inbox.ts) | [`tests/feishu-inbox.test.ts`](../tests/feishu-inbox.test.ts)：同步入队、授权、重复、旧事件、顺序、并行、过载和关闭 |
 | 身份与授权 | [`src/policy/feishu-access.ts`](../src/policy/feishu-access.ts)、`ConversationActorRegistry` | [`tests/policy.test.ts`](../tests/policy.test.ts)：Surface、App ID、Open ID 和原子替换 |
 | 文本发送 | `src/surfaces/feishu/outbox.ts` | 精确账号路由、同 Chat 顺序、超时和限流 |
-| 输出渲染 | `src/surfaces/feishu/renderer.ts` | 所有关键 `OutputEvent` 的纯文本回退 |
+| 输出渲染 | [`src/surfaces/feishu/renderer.ts`](../src/surfaces/feishu/renderer.ts) | [`tests/feishu-renderer.test.ts`](../tests/feishu-renderer.test.ts)：关键事件、非关键进度和错误详情隐藏 |
 | 卡片动作 | `src/surfaces/feishu/interactions.ts` | 失败关闭、令牌、过期、Actor 绑定和跨客户端失效 |
 | 配置与 Setup | `runtime/gateway-config.mjs`、`src/config/`、`scripts/` | 严格 Schema、脱敏、原子写入和只读 Doctor |
 | 生命周期组合 | `src/bootstrap/surface-composition.ts` | 单消费者、部分启动回滚和停止不影响 App Server |

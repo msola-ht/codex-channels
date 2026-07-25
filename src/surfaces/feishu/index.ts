@@ -19,3 +19,4 @@ export {
   type FeishuMessageEvent,
   type FeishuMessageEventField,
 } from "./message-event.js";
+export { renderFeishuOutput } from "./renderer.js";

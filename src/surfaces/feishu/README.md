@@ -1,7 +1,7 @@
 # 飞书 Surface
 
 本目录是飞书 Surface 的平台边界。当前已完成 Phase 0 的官方 SDK、事件长连接和消息字段裁剪基础，
-并进入 Phase 1 的私聊文本 Inbox；模块仍未注册为可启用 Surface。
+并进入 Phase 1 的私聊文本 Inbox 与纯文本输出渲染；模块仍未注册为可启用 Surface。
 
 ## 文件索引
 
@@ -9,6 +9,7 @@
 - `client.ts`：官方 SDK、事件长连接及生命周期隔离。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪。
 - `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理。
+- `renderer.ts`：把平台无关 `OutputEvent` 映射为受约束的飞书纯文本。
 
 ## 当前边界
 
@@ -29,6 +30,10 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 耗尽时返回 `retry/overloaded`，由后续 Adapter 映射为 SDK 可重试失败。去重状态只存在于有界内存，
 关闭时等待已接受任务至有限超时，不持久化消息正文。
 
-本模块尚未接入配置、Bootstrap、Application、出站消息或审批，因此不构成可启用的飞书渠道。后续阶段按
+`renderer.ts` 通过模块公开入口接收 `OutputEvent`。最终文本和所有关键事件都有纯文本回退；
+非关键流式增量和运行中操作暂不输出。上游 warning、连接错误和 MCP 错误正文不会进入平台消息，
+未知 Thread 状态不会原样显示。
+
+本模块尚未接入配置、Bootstrap、Application、发送 API、输出队列或审批，因此不构成可启用的飞书渠道。后续阶段按
 [`飞书 Surface 接入计划`](../../../docs/feishu-surface-plan.md)推进；不得把 SDK 类型导出到一级
 `surfaces` 入口，也不得在 Core 中引入飞书类型。
