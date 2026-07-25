@@ -11,6 +11,7 @@
 
 Conversation 使用 `surface + accountId + conversationId` 作为复合身份；一个 Codex Thread
 只能绑定一个外部 Conversation。数据库必须使用当前 Schema v3；其他版本会失败关闭，不执行自动迁移。
+标记为当前版本但缺少必需表或字段的数据库同样会失败关闭，不执行自动补表或修补。
 
 授权操作者通过独立的 Conversation→Actor 关联保存，不从群聊或私聊的 Conversation ID
 推断用户身份。无法确认操作者或已撤权的会话会解除绑定，避免恢复订阅后继续向未授权会话输出。

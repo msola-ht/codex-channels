@@ -44,7 +44,7 @@ export class SqliteBindingStore implements BindingStore {
     try {
       chmodSync(path, 0o600);
       this.database.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = DELETE;");
-      this.migrate();
+      this.initializeSchema();
       this.load();
     } catch (error) {
       try {
@@ -245,10 +245,9 @@ export class SqliteBindingStore implements BindingStore {
     this.memory.close();
   }
 
-  private migrate(): void {
+  private initializeSchema(): void {
     const row = this.database.prepare("PRAGMA user_version").get() as { user_version: number };
     if (row.user_version === schemaVersion) {
-      this.createActorSchema();
       return;
     }
     if (row.user_version !== 0) {
@@ -293,7 +292,7 @@ export class SqliteBindingStore implements BindingStore {
 
   private createActorSchema(): void {
     this.database.exec(`
-      CREATE TABLE IF NOT EXISTS conversation_actors (
+      CREATE TABLE conversation_actors (
         surface TEXT NOT NULL CHECK (length(surface) > 0),
         account_id TEXT NOT NULL CHECK (length(account_id) > 0),
         conversation_id TEXT NOT NULL,

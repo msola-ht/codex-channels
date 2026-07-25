@@ -35,7 +35,8 @@
   和 Marketplace 加载详情不进入 Application，必需字段畸形时失败关闭。
 - Permission Profile 查询按授权 Workspace 发送精确 CWD，分页映射 ID、说明和策略可选状态；
   必需字段畸形或分页游标循环时失败关闭，并与高权限审批决定保持分离。
-- SQLite 最小绑定恢复、配置热加载与自动重启分类、Setup 类别与通讯渠道菜单、Telegram Setup、
+- SQLite 最小绑定恢复、当前版本 Schema 缺失失败关闭、配置热加载与自动重启分类、Setup
+  类别与通讯渠道菜单、Telegram Setup、
   CLI 项目规则生成/检查、launchd、systemd、Unix WebSocket 请求头、模块依赖方向和公开入口边界。
 - TOML、标准环境变量、macOS 系统代理和 Linux GNOME 代理的优先级及服务启动时解析。
 - CLI Doctor 的严格 TOML Schema 校验、敏感错误清洗和只读诊断；项目规则限定当前 Workspace、

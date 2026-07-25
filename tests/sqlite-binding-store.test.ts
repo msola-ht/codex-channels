@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -9,9 +9,11 @@ import {
   SessionRouter,
   type ThreadLifecyclePort,
 } from "../src/session-routing/index.js";
-import { MemoryBindingStore } from "../src/storage/memory-binding-store.js";
-import { SqliteBindingStore } from "../src/storage/sqlite-binding-store.js";
 import { WorkspaceRegistry } from "../src/policy/workspace-registry.js";
+import {
+  MemoryBindingStore,
+  SqliteBindingStore,
+} from "../src/storage/index.js";
 
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
 const registry = new WorkspaceRegistry([{ id: "main", name: "Main", cwd: "/workspace" }], "main");
@@ -154,6 +156,88 @@ describe("SqliteBindingStore", () => {
     expect(() => new SqliteBindingStore(path)).toThrow(
       "状态数据库版本不兼容：当前 2，Gateway 需要 3",
     );
+  });
+
+  it("rejects a current-version database with an incomplete schema", () => {
+    const { path } = databasePath();
+    mkdirSync(dirname(path), { recursive: true });
+    const database = new DatabaseSync(path);
+    database.exec(`
+      CREATE TABLE conversation_workspaces (
+        surface TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (surface, account_id, conversation_id)
+      ) STRICT;
+
+      CREATE TABLE conversation_bindings (
+        surface TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        thread_id TEXT NOT NULL UNIQUE,
+        session_id TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (surface, account_id, conversation_id)
+      ) STRICT;
+
+      PRAGMA user_version = 3;
+    `);
+    database.close();
+
+    const openAndClose = (): void => {
+      const store = new SqliteBindingStore(path);
+      store.close();
+    };
+    expect(openAndClose).toThrow();
+
+    const inspection = new DatabaseSync(path);
+    expect(
+      inspection
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get("conversation_actors"),
+    ).toBeUndefined();
+    inspection.close();
+  });
+
+  it("restores memory and persisted indexes when a binding transaction fails", () => {
+    const { path } = databasePath();
+    const store = new SqliteBindingStore(path);
+    const previous = {
+      target,
+      workspaceId: "main",
+      threadId: "thread-1",
+      sessionId: "session-1",
+    };
+    store.bind(previous);
+
+    const external = new DatabaseSync(path);
+    external
+      .prepare(`
+        INSERT INTO conversation_bindings (
+          surface, account_id, conversation_id, workspace_id, thread_id, session_id, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run("telegram", "default", "200", "main", "thread-2", "session-2", Date.now());
+    external.close();
+
+    expect(() => store.bind({
+      ...previous,
+      threadId: "thread-2",
+      sessionId: "replacement-session",
+    })).toThrow();
+    expect(store.get(target)).toEqual(previous);
+    expect(store.getByThread("thread-1")).toEqual(previous);
+    expect(store.getByThread("thread-2")).toBeUndefined();
+    store.close();
+
+    const reopened = new SqliteBindingStore(path);
+    expect(reopened.get(target)).toEqual(previous);
+    expect(reopened.getByThread("thread-1")).toEqual(previous);
+    expect(reopened.getByThread("thread-2")?.target.conversationId).toBe("200");
+    reopened.close();
   });
 });
 

@@ -33,5 +33,7 @@ Client 或生成协议。Turn、Review 和 Goal 的执行端口与稳定结果�
 Server Request，`approval` 只拥有稳定请求、授权语义和用户决定，不再依赖 Client 或生成协议。
 阶段 6 已完成：生产源码只有 Client 导入生成协议，Bootstrap 通过 Client 读取版本并向 Surface
 注入纯字符串，受控协议导出和模块依赖白名单已收紧，新增协议或具体 Client 泄漏会由边界测试阻止。
+阶段 7 正在逐个复核内部模块；`storage` 已确认最小 Schema、原子清理和失败回滚，当前版本数据库
+缺少必需结构时失败关闭，不执行隐式修补。
 整体范围见
 [`Codex CLI 协议边界收敛计划`](../docs/architecture-convergence-plan.md)。
