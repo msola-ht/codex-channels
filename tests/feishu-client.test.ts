@@ -19,12 +19,14 @@ function createFixture(startupTimeoutMs = 1_000) {
   const start = vi.fn(async () => {});
   const close = vi.fn();
   const onMessage = vi.fn();
+  const onInvalidMessage = vi.fn();
   const onFatal = vi.fn();
   const connection = new FeishuEventConnection(
     {
       appId: "cli_0123456789abcdef",
       appSecret: "secret",
       onMessage,
+      onInvalidMessage,
       onFatal,
     },
     {
@@ -46,6 +48,7 @@ function createFixture(startupTimeoutMs = 1_000) {
     start,
     close,
     onMessage,
+    onInvalidMessage,
     onFatal,
     get callbacks() {
       if (callbacks === undefined) {
@@ -74,6 +77,7 @@ describe("FeishuEventConnection", () => {
         appId: "invalid",
         appSecret: "",
         onMessage: vi.fn(),
+        onInvalidMessage: vi.fn(),
         onFatal: vi.fn(),
       },
       {
@@ -200,7 +204,7 @@ describe("FeishuEventConnection", () => {
     expect(fixture.onMessage).toHaveBeenCalledOnce();
   });
 
-  it("rejects malformed SDK events before calling the consumer", async () => {
+  it("acknowledges malformed SDK events through a stable diagnostic callback", async () => {
     const fixture = createFixture();
     const startPromise = fixture.connection.start();
     fixture.callbacks.onReady();
@@ -208,7 +212,28 @@ describe("FeishuEventConnection", () => {
 
     expect(() => {
       fixture.emitMessage({ event_id: "event-1" });
-    }).toThrow("飞书消息事件字段无效：sender");
+    }).not.toThrow();
+    expect(fixture.onMessage).not.toHaveBeenCalled();
+    expect(fixture.onInvalidMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: "invalid-message-event",
+        field: "sender",
+      }),
+    );
+  });
+
+  it("does not retry malformed events when diagnostics fail", async () => {
+    const fixture = createFixture();
+    fixture.onInvalidMessage.mockImplementation(() => {
+      throw new Error("logger failed");
+    });
+    const startPromise = fixture.connection.start();
+    fixture.callbacks.onReady();
+    await startPromise;
+
+    expect(() => {
+      fixture.emitMessage({ event_id: "event-1" });
+    }).not.toThrow();
     expect(fixture.onMessage).not.toHaveBeenCalled();
   });
 

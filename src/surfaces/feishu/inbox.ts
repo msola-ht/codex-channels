@@ -1,0 +1,337 @@
+import type { ConversationTarget } from "../../conversation-core/index.js";
+import type {
+  ConversationActorRegistry,
+  SurfaceAccessPolicy,
+} from "../../policy/index.js";
+
+import type { FeishuMessageEvent } from "./message-event.js";
+
+const DEFAULT_CAPACITY = 100;
+const DEFAULT_CLOSE_TIMEOUT_MS = 5_000;
+const DEFAULT_DEDUPLICATION_CAPACITY = 1_000;
+const DEFAULT_DEDUPLICATION_TTL_MS = 10 * 60_000;
+const DEFAULT_MAXIMUM_EVENT_AGE_MS = 5 * 60_000;
+
+export interface FeishuInboxMessage {
+  target: ConversationTarget;
+  actorId: string;
+  eventId: string | undefined;
+  messageId: string;
+  createdAtMs: number;
+  text: string;
+}
+
+export interface FeishuInboxProcessingError {
+  target: ConversationTarget;
+  messageId: string;
+  errorType: string;
+}
+
+export type FeishuInboxIgnoredReason =
+  | "account-mismatch"
+  | "non-user"
+  | "unsupported-chat"
+  | "unsupported-message"
+  | "invalid-timestamp"
+  | "invalid-content"
+  | "empty-text"
+  | "stale"
+  | "duplicate"
+  | "unauthorized"
+  | "closed";
+
+export type FeishuInboxReceiveResult =
+  | { status: "accepted" }
+  | { status: "ignored"; reason: FeishuInboxIgnoredReason }
+  | { status: "retry"; reason: "overloaded" };
+
+export interface FeishuInboxOptions {
+  accountId: string;
+  access: SurfaceAccessPolicy;
+  actorRegistry?: ConversationActorRegistry;
+  handle(message: FeishuInboxMessage): Promise<void>;
+  handleError(error: FeishuInboxProcessingError): void;
+  handleCloseTimeout(pendingCount: number): void;
+  capacity?: number;
+  closeTimeoutMs?: number;
+  deduplicationCapacity?: number;
+  deduplicationTtlMs?: number;
+  maximumEventAgeMs?: number;
+  now?: () => number;
+}
+
+interface ConversationWorker {
+  queue: FeishuInboxMessage[];
+  done: Promise<void>;
+}
+
+export class FeishuInbox {
+  private readonly capacity: number;
+  private readonly closeTimeoutMs: number;
+  private readonly deduplicationCapacity: number;
+  private readonly deduplicationTtlMs: number;
+  private readonly maximumEventAgeMs: number;
+  private readonly now: () => number;
+  private readonly seen = new Map<string, number>();
+  private readonly workers = new Map<string, ConversationWorker>();
+  private pendingCount = 0;
+  private closed = false;
+  private closePromise: Promise<void> | undefined;
+
+  constructor(private readonly options: FeishuInboxOptions) {
+    this.capacity = positiveInteger(options.capacity ?? DEFAULT_CAPACITY, "容量");
+    this.closeTimeoutMs = positiveInteger(
+      options.closeTimeoutMs ?? DEFAULT_CLOSE_TIMEOUT_MS,
+      "关闭超时",
+    );
+    this.deduplicationCapacity = positiveInteger(
+      options.deduplicationCapacity ?? DEFAULT_DEDUPLICATION_CAPACITY,
+      "去重容量",
+    );
+    this.deduplicationTtlMs = positiveInteger(
+      options.deduplicationTtlMs ?? DEFAULT_DEDUPLICATION_TTL_MS,
+      "去重有效期",
+    );
+    this.maximumEventAgeMs = positiveInteger(
+      options.maximumEventAgeMs ?? DEFAULT_MAXIMUM_EVENT_AGE_MS,
+      "事件最大年龄",
+    );
+    this.now = options.now ?? Date.now;
+  }
+
+  receive(event: FeishuMessageEvent): FeishuInboxReceiveResult {
+    if (this.closed) {
+      return { status: "ignored", reason: "closed" };
+    }
+    if (event.appId !== undefined && event.appId !== this.options.accountId) {
+      return { status: "ignored", reason: "account-mismatch" };
+    }
+    if (event.senderType !== "user") {
+      return { status: "ignored", reason: "non-user" };
+    }
+    if (event.chatType !== "p2p") {
+      return { status: "ignored", reason: "unsupported-chat" };
+    }
+    if (event.messageType !== "text") {
+      return { status: "ignored", reason: "unsupported-message" };
+    }
+
+    const createdAtMs = parseTimestamp(event.createTime);
+    if (createdAtMs === undefined) {
+      return { status: "ignored", reason: "invalid-timestamp" };
+    }
+    const now = this.now();
+    if (now - createdAtMs > this.maximumEventAgeMs) {
+      return { status: "ignored", reason: "stale" };
+    }
+
+    const text = parseTextContent(event.content);
+    if (text === undefined) {
+      return { status: "ignored", reason: "invalid-content" };
+    }
+    if (text.trim().length === 0) {
+      return { status: "ignored", reason: "empty-text" };
+    }
+
+    const target: ConversationTarget = {
+      surface: "feishu",
+      accountId: this.options.accountId,
+      conversationId: event.chatId,
+    };
+    const accessContext = {
+      target,
+      actorId: event.actorOpenId,
+    };
+    if (!this.options.access.isAllowed(accessContext)) {
+      return { status: "ignored", reason: "unauthorized" };
+    }
+
+    const deduplicationKey = event.eventId ?? event.messageId;
+    this.pruneSeen(now);
+    if (this.seen.has(deduplicationKey)) {
+      return { status: "ignored", reason: "duplicate" };
+    }
+    if (this.pendingCount >= this.capacity) {
+      return { status: "retry", reason: "overloaded" };
+    }
+
+    const message: FeishuInboxMessage = {
+      target,
+      actorId: event.actorOpenId,
+      eventId: event.eventId,
+      messageId: event.messageId,
+      createdAtMs,
+      text,
+    };
+    this.rememberSeen(deduplicationKey, now);
+    this.pendingCount += 1;
+    this.enqueue(message);
+    return { status: "accepted" };
+  }
+
+  close(): Promise<void> {
+    if (this.closePromise !== undefined) {
+      return this.closePromise;
+    }
+    this.closed = true;
+    this.closePromise = this.finishClose();
+    return this.closePromise;
+  }
+
+  private enqueue(message: FeishuInboxMessage): void {
+    const conversationId = message.target.conversationId;
+    const existing = this.workers.get(conversationId);
+    if (existing !== undefined) {
+      existing.queue.push(message);
+      return;
+    }
+    const queue = [message];
+    const worker: ConversationWorker = {
+      queue,
+      done: Promise.resolve(),
+    };
+    this.workers.set(conversationId, worker);
+    worker.done = Promise.resolve().then(
+      () => this.runWorker(conversationId, worker),
+    );
+  }
+
+  private async runWorker(
+    conversationId: string,
+    worker: ConversationWorker,
+  ): Promise<void> {
+    while (worker.queue.length > 0) {
+      const message = worker.queue.shift();
+      if (message === undefined) {
+        break;
+      }
+      try {
+        this.options.actorRegistry?.rememberActor(
+          message.target,
+          message.actorId,
+        );
+        await this.options.handle(message);
+      } catch (error) {
+        try {
+          this.options.handleError({
+            target: message.target,
+            messageId: message.messageId,
+            errorType: safeErrorType(error),
+          });
+        } catch {
+          // Error reporting must not stop later messages for this Conversation.
+        }
+      } finally {
+        this.pendingCount -= 1;
+      }
+    }
+    const current = this.workers.get(conversationId);
+    if (current === worker) {
+      this.workers.delete(conversationId);
+    }
+  }
+
+  private async finishClose(): Promise<void> {
+    const completed = await waitAtMost(
+      Promise.allSettled([...this.workers.values()].map((worker) => worker.done)),
+      this.closeTimeoutMs,
+    );
+    if (completed) {
+      this.workers.clear();
+      this.seen.clear();
+      return;
+    }
+    try {
+      this.options.handleCloseTimeout(this.pendingCount);
+    } catch {
+      // Timeout reporting must not make concurrent close callers diverge.
+    }
+  }
+
+  private pruneSeen(now: number): void {
+    for (const [key, expiresAt] of this.seen) {
+      if (expiresAt > now) {
+        break;
+      }
+      this.seen.delete(key);
+    }
+  }
+
+  private rememberSeen(key: string, now: number): void {
+    while (this.seen.size >= this.deduplicationCapacity) {
+      const oldest = this.seen.keys().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      this.seen.delete(oldest);
+    }
+    this.seen.set(key, now + this.deduplicationTtlMs);
+  }
+}
+
+function parseTimestamp(value: string): number | undefined {
+  if (!/^\d+$/u.test(value)) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+function parseTextContent(value: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+  if (
+    typeof parsed !== "object"
+    || parsed === null
+    || Array.isArray(parsed)
+  ) {
+    return undefined;
+  }
+  const text = (parsed as Record<string, unknown>).text;
+  return typeof text === "string" ? text : undefined;
+}
+
+function positiveInteger(value: number, name: string): number {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`飞书 Inbox ${name}必须是正整数`);
+  }
+  return value;
+}
+
+function safeErrorType(error: unknown): string {
+  const constructorName = error instanceof Error
+    ? error.constructor.name
+    : undefined;
+  if (
+    typeof constructorName === "string"
+    && /^[A-Za-z][A-Za-z0-9]{0,40}$/u.test(constructorName)
+  ) {
+    return constructorName;
+  }
+  return error instanceof Error ? "Error" : typeof error;
+}
+
+async function waitAtMost<T>(
+  operation: Promise<T>,
+  milliseconds: number,
+): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), milliseconds);
+    timer.unref();
+  });
+  try {
+    return await Promise.race([
+      operation.then(() => true),
+      timeout,
+    ]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
+}

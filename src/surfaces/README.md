@@ -7,7 +7,7 @@
 当前实现：
 
 - [`telegram/`](telegram/README.md)：Telegram Bot 输入、输出、交互、图片和生命周期。
-- [`feishu/`](feishu/README.md)：飞书官方 SDK 长连接生命周期基础；尚未注册为可启用 Surface。
+- [`feishu/`](feishu/README.md)：飞书官方 SDK 长连接和私聊输入基础；尚未注册为可启用 Surface。
 
 `types.ts` 定义最小 `SurfaceAdapter` 契约。每个实例使用
 `surface + accountId` 标识，分别提供启停、输出、可选配置变更通知与 `InteractionPort`；Bootstrap 只做编译期显式注册。

@@ -8,6 +8,7 @@ import {
 
 import {
   decodeFeishuMessageEvent,
+  FeishuMessageEventError,
   type FeishuMessageEvent,
 } from "./message-event.js";
 
@@ -43,6 +44,7 @@ export interface FeishuEventConnectionOptions {
   appSecret: string;
   webSocketAgent?: unknown;
   onMessage(event: FeishuMessageEvent): void;
+  onInvalidMessage(error: FeishuMessageEventError): void;
   onFatal(error: FeishuConnectionError): void;
 }
 
@@ -187,7 +189,19 @@ export class FeishuEventConnection {
               || this.stateValue === "reconnecting"
             )
           ) {
-            this.options.onMessage(decodeFeishuMessageEvent(event));
+            try {
+              this.options.onMessage(decodeFeishuMessageEvent(event));
+            } catch (error) {
+              if (error instanceof FeishuMessageEventError) {
+                try {
+                  this.options.onInvalidMessage(error);
+                } catch {
+                  // Permanent invalid events must not enter a retry loop.
+                }
+                return;
+              }
+              throw error;
+            }
           }
         });
         this.startupTimer = setTimeout(() => {

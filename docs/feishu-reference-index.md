@@ -50,6 +50,7 @@
 | Client、事件和长连接示例 | [固定版本中文说明](https://github.com/larksuite/node-sdk/blob/8b3e0df3af9401c263dc96026e1c7f17460a21cc/README.zh.md) | 核对 `Client`、`WSClient`、`EventDispatcher` 和 `registerApp()` |
 | WebSocket 生命周期 | [固定版本 `ws-client`](https://github.com/larksuite/node-sdk/tree/8b3e0df3af9401c263dc96026e1c7f17460a21cc/ws-client) | 核对 `onReady`、错误、重连、关闭和状态语义 |
 | 高层 Channel | [固定版本 Channel 说明](https://github.com/larksuite/node-sdk/blob/8b3e0df3af9401c263dc96026e1c7f17460a21cc/docs/channel.zh.md) | 识别其策略、去重、串行、重试、媒体和卡片职责 |
+| 消息事件字段格式 | [官方 CLI 固定事件 Schema 指南](https://github.com/larksuite/cli/blob/a7865cd0a7416655535517a2a630848fde318761/skills/lark-event/SKILL.md) | 核对 `create_time` 为毫秒时间戳字符串 |
 | 长连接规则 | [使用长连接接收事件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/event-subscription-guide/long-connection-mode) | 处理时限、集群投递和订阅类型 |
 | 事件接收安全 | [接收事件](https://open.feishu.cn/document/ukTMukTMukTM/uYDNxYjL2QTM24iN0EjN/event-subscription-configure-/encrypt-key-encryption-configuration-case) | Webhook 阶段的验签和加密入口 |
 | 消息卡片 | [消息卡片介绍](https://open.feishu.cn/document/ukTMukTMukTM/uczM3QjL3MzN04yNzcDN) | 后续卡片呈现和交互边界 |
@@ -112,9 +113,9 @@ EventDispatcher`。
 | Node SDK | npm 包、固定官方源码 | 已精确锁定 `1.71.1` | 阶段 0 |
 | WebSocket 握手和重连 | `WSClient` | 生命周期封装和离线合同已完成；真实应用实验待完成 | 阶段 0 |
 | 消息事件字段裁剪 | `im.message.receive_v1` | 稳定字段映射和畸形输入失败关闭已完成；真实事件待验证 | 阶段 0 |
-| 私聊文本事件 | `im.message.receive_v1` | 计划中 | 阶段 1 |
+| 私聊文本事件 | `im.message.receive_v1` | 平台本地筛选和有界入队已完成；Access Policy 与 Adapter 待实现 | 阶段 1 |
 | 文本发送 | `client.im.v1.message.create` | 计划中 | 阶段 1 |
-| 事件去重与旧事件过滤 | 平台事件 ID、时间字段 | 计划使用飞书模块内有界内存状态 | 阶段 1 |
+| 事件去重与旧事件过滤 | 平台事件 ID、毫秒时间戳 | 已实现飞书模块内有界内存状态；真实重投待验证 | 阶段 1 |
 | 命令和群聊 | 消息事件、群身份与 @Bot | 暂不支持 | 阶段 2 |
 | 卡片审批 | `card.action.trigger` | 接收方式待验证，当前失败关闭 | 阶段 3 |
 | 图片和文件 | IM 资源 API | 暂不支持 | 阶段 4 |
@@ -132,7 +133,7 @@ EventDispatcher`。
 | --- | --- | --- |
 | WebSocket 和 Client | [`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts) | [`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：凭据、就绪、超时、重连、停止和错误脱敏 |
 | 消息事件信封 | [`src/surfaces/feishu/message-event.ts`](../src/surfaces/feishu/message-event.ts) | [`tests/feishu-message-event.test.ts`](../tests/feishu-message-event.test.ts)：稳定字段裁剪和畸形输入失败关闭 |
-| 输入接收与去重 | `src/surfaces/feishu/inbox.ts` | 3 秒内入队、重复、旧事件和过载 |
+| 输入接收与去重 | [`src/surfaces/feishu/inbox.ts`](../src/surfaces/feishu/inbox.ts) | [`tests/feishu-inbox.test.ts`](../tests/feishu-inbox.test.ts)：同步入队、授权、重复、旧事件、顺序、并行、过载和关闭 |
 | 身份与授权 | `FeishuAccessPolicy`、`ConversationActorRegistry` | App ID、Chat ID、Open ID 和 Workspace |
 | 文本发送 | `src/surfaces/feishu/outbox.ts` | 精确账号路由、同 Chat 顺序、超时和限流 |
 | 输出渲染 | `src/surfaces/feishu/renderer.ts` | 所有关键 `OutputEvent` 的纯文本回退 |
