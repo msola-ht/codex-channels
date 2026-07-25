@@ -3,7 +3,6 @@ import { isAbsolute } from "node:path";
 
 import type {
   PermissionProfileListResponse,
-  PluginInstalledResponse,
   RateLimitSnapshot,
   ThreadTokenUsage,
 } from "../codex-protocol/index.js";
@@ -14,6 +13,7 @@ import type {
 } from "./account-port.js";
 import type { InstalledSkill, SkillQueryPort } from "./skill-port.js";
 import type { McpQueryPort, McpServerSummary } from "./mcp-port.js";
+import type { InstalledPlugin, PluginQueryPort } from "./plugin-port.js";
 import type { SessionRouter } from "../session-routing/index.js";
 import type { Workspace } from "../policy/index.js";
 import {
@@ -60,8 +60,12 @@ export interface ProjectRulesPort {
   check(projectRoot: string): Promise<ProjectRulesResult> | ProjectRulesResult;
 }
 
-export interface ConversationQueryPort extends AccountQueryPort, SkillQueryPort, McpQueryPort {
-  listPlugins(cwd: string): Promise<PluginInstalledResponse>;
+export interface ConversationQueryPort extends
+  AccountQueryPort,
+  SkillQueryPort,
+  McpQueryPort,
+  PluginQueryPort
+{
   listPermissionProfiles(cwd: string): Promise<PermissionProfileListResponse["data"]>;
 }
 
@@ -390,7 +394,7 @@ export class ConversationService {
     return this.queries.listMcpServers(this.router.current(target)?.threadId);
   }
 
-  listPlugins(target: ConversationTarget): Promise<PluginInstalledResponse> {
+  listPlugins(target: ConversationTarget): Promise<InstalledPlugin[]> {
     return this.queries.listPlugins(this.router.workspace(target).cwd);
   }
 

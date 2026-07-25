@@ -19,9 +19,6 @@ import {
   formatWorkspacesAdded,
   splitTelegramText,
 } from "../src/surfaces/telegram/format.js";
-import type {
-  PluginInstalledResponse,
-} from "../src/codex-protocol/index.js";
 import type { ModelOption } from "../src/application/index.js";
 
 function model(
@@ -75,24 +72,16 @@ describe("extension formatting", () => {
   });
 
   it("shows installed Plugins only", () => {
-    const result = {
-      marketplaces: [{
-        name: "local",
-        path: null,
-        interface: null,
-        plugins: [
-          { name: "github", installed: true, enabled: true },
-          { name: "remote-only", installed: false, enabled: false },
-        ],
-      }],
-      marketplaceLoadErrors: [],
-    } as unknown as PluginInstalledResponse;
+    const result = [
+      { name: "github", enabled: true },
+      { name: "local-tools", enabled: false },
+    ];
 
     const text = formatPlugins(result);
 
-    expect(text).toContain("已安装 Plugins（1）");
+    expect(text).toContain("已安装 Plugins（2）");
     expect(text).toContain("github · 已启用");
-    expect(text).not.toContain("remote-only");
+    expect(text).toContain("local-tools · 未启用");
   });
 
   it("renders only stable MCP status fields", () => {

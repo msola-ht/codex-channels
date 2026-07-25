@@ -109,10 +109,10 @@ suite("real Codex App Server over Unix WebSocket", () => {
   });
 
   it("lists installed plugins without loading remote catalog entries", async () => {
-    const result = await client.listPlugins(workdir);
-    const plugins = result.marketplaces.flatMap((marketplace) => marketplace.plugins);
+    const plugins = await client.listPlugins(workdir);
 
-    expect(plugins.every((plugin) => plugin.installed)).toBe(true);
+    expect(plugins.every((plugin) =>
+      typeof plugin.name === "string" && typeof plugin.enabled === "boolean")).toBe(true);
   });
 
   it("broadcasts and exposes a loaded temporary thread across two clients without running a model turn", async () => {
@@ -330,6 +330,14 @@ contractSuite("isolated Codex App Server state contract", () => {
       typeof server.name === "string"
       && typeof server.authStatus === "string"
       && Number.isInteger(server.toolCount))).toBe(true);
+  });
+
+  it("maps the isolated App Server Plugin list to stable installed entries", async () => {
+    const plugins = await ownerClient.listPlugins(workdir);
+
+    expect(Array.isArray(plugins)).toBe(true);
+    expect(plugins.every((plugin) =>
+      typeof plugin.name === "string" && typeof plugin.enabled === "boolean")).toBe(true);
   });
 
   it("persists Fast defaults for peer reads and subsequently started threads", async () => {

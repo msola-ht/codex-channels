@@ -17,7 +17,7 @@
   超时和跨客户端解决。
 - 通用 Surface 启停、按账号输出路由与失败隔离；Telegram 格式、通知降噪、长回复折叠与文件回退、
   输出队列、生命周期、API 重试及图片输入。
-- Skill 用户与 Workspace 安装过滤、已安装 Plugin 查询及远端市场隔离。
+- Skill 用户与 Workspace 安装过滤、已安装 Plugin 稳定摘要及远端市场隔离。
 - 官方模型目录到稳定 Application 模型选项的映射、不可见项过滤、必需字段失败关闭，模型、
   思考强度和 Fast 的 Thread 覆盖、Codex 用户级 Fast 默认值持久化、共享客户端完整或残缺设置
   通知、Thread 失效通知及 Gateway/CLI 连接恢复。
@@ -27,6 +27,8 @@
   系统和插件缓存并在缺少显示字段时失败关闭。
 - MCP 查询按当前 Thread 读取项目级配置，使用精简清单分页并映射名称、认证状态和工具数量；
   必需字段畸形或分页游标循环时失败关闭。
+- Plugin 查询按授权 Workspace 发送精确 CWD，只调用已安装接口并映射名称与启用状态；安装建议
+  和 Marketplace 加载详情不进入 Application，必需字段畸形时失败关闭。
 - SQLite 最小绑定恢复、配置热加载与自动重启分类、Setup 类别与通讯渠道菜单、Telegram Setup、
   CLI 项目规则生成/检查、launchd、systemd、Unix WebSocket 请求头、模块依赖方向和公开入口边界。
 - TOML、标准环境变量、macOS 系统代理和 Linux GNOME 代理的优先级及服务启动时解析。
@@ -68,8 +70,8 @@ RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
 读取，之后新建 Thread 的运行时 `serviceTier` 按 `default → priority → default` 变化，并验证
 第二个 Client 修改共享 Thread 的模型、思考强度和 Fast 设置时，订阅方收到完整的
 `thread/settings/updated`；第二个 Client 重连后再次修改仍会广播。合同还会启动并立即清理一个
-不等待模型结果的 Turn，验证稳定 Turn ID、Skill 与 MCP 查询摘要，以及跨 Client 的 Goal 设置、
-读取和清除映射。
+不等待模型结果的 Turn，验证稳定 Turn ID、Skill、MCP 与 Plugin 查询摘要，以及跨 Client 的
+Goal 设置、读取和清除映射。
 
 使用当前用户配置的完整 Unix WebSocket/App Server 冒烟测试同样不会调用模型：
 

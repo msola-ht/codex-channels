@@ -121,6 +121,10 @@ class FakeTransport extends BaseTransport {
   modelListData: Array<Record<string, unknown>> = [];
   mcpPages: Array<Record<string, unknown>> = [{ data: [], nextCursor: null }];
   mcpPageIndex = 0;
+  pluginInstalledResult: Record<string, unknown> = {
+    marketplaces: [],
+    marketplaceLoadErrors: [],
+  };
   configServiceTier: unknown = "fast";
   accountUsageResult: Record<string, unknown> = {
     summary: {
@@ -269,15 +273,7 @@ class FakeTransport extends BaseTransport {
         this.emitMessage(
           JSON.stringify({
             id: decoded.id,
-            result: {
-              marketplaces: [{
-                name: "installed",
-                path: null,
-                interface: null,
-                plugins: [],
-              }],
-              marketplaceLoadErrors: [],
-            },
+            result: this.pluginInstalledResult,
           }),
         ),
       );
@@ -900,17 +896,51 @@ describe("JsonRpcClient", () => {
 
   it("lists only installed plugins without loading the remote catalog", async () => {
     const transport = new FakeTransport();
+    transport.pluginInstalledResult = {
+      marketplaces: [{
+        name: "local",
+        path: "/tmp/plugins",
+        interface: null,
+        plugins: [
+          { name: "enabled-plugin", installed: true, enabled: true },
+          { name: "disabled-plugin", installed: true, enabled: false },
+          { name: "suggestion", installed: false, enabled: false },
+        ],
+      }],
+      marketplaceLoadErrors: [{
+        marketplacePath: "/tmp/broken",
+        message: "sensitive local parse detail",
+      }],
+    };
     const client = new CodexAppServerClient(new JsonRpcClient(transport), {
       sandbox: "workspace-write",
     });
     await client.connect();
 
-    const result = await client.listPlugins("/tmp/project");
-
-    expect(result.marketplaces).toHaveLength(1);
+    await expect(client.listPlugins("/tmp/project")).resolves.toEqual([
+      { name: "enabled-plugin", enabled: true },
+      { name: "disabled-plugin", enabled: false },
+    ]);
     expect(transport.sent.find((message) => message.method === "plugin/installed")?.params)
       .toEqual({ cwds: ["/tmp/project"] });
     expect(transport.sent.some((message) => message.method === "plugin/list")).toBe(false);
+  });
+
+  it("fails closed when an installed Plugin lacks a required stable field", async () => {
+    const transport = new FakeTransport();
+    transport.pluginInstalledResult = {
+      marketplaces: [{
+        plugins: [{ name: "", installed: true, enabled: true }],
+      }],
+      marketplaceLoadErrors: [],
+    };
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listPlugins("/tmp/project"))
+      .rejects.toThrow("Codex 响应缺少有效 plugin name");
   });
 
   it("persists the Fast default through the App Server config API", async () => {

@@ -1,7 +1,6 @@
 import type {
   McpServerStatusUpdatedNotification,
   PermissionProfileListResponse,
-  PluginInstalledResponse,
   RateLimitSnapshot,
   ThreadTokenUsage,
 } from "../../codex-protocol/index.js";
@@ -12,6 +11,7 @@ import {
   type AccountRateLimitWindow,
   type AccountUsage,
   type InstalledSkill,
+  type InstalledPlugin,
   type McpServerSummary,
   type ConversationSession,
   type ConversationStatus,
@@ -184,10 +184,7 @@ export function formatMcpServers(servers: McpServerSummary[]): string {
   ].join("\n");
 }
 
-export function formatPlugins(result: PluginInstalledResponse): string {
-  const plugins = result.marketplaces
-    .flatMap((marketplace) => marketplace.plugins)
-    .filter((plugin) => plugin.installed);
+export function formatPlugins(plugins: InstalledPlugin[]): string {
   if (plugins.length === 0) {
     return "当前没有已安装 Plugins。";
   }

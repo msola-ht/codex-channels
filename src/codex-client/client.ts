@@ -15,6 +15,8 @@ import type {
   SkillQueryPort,
   McpQueryPort,
   McpServerSummary,
+  InstalledPlugin,
+  PluginQueryPort,
 } from "../application/index.js";
 import type {
   ConfigReadParams,
@@ -61,6 +63,7 @@ import { toModelOption } from "./model-adapter.js";
 import { toAccountRateLimits, toAccountUsage } from "./account-adapter.js";
 import { toInstalledSkills } from "./skill-adapter.js";
 import { toMcpServerSummaryPage } from "./mcp-adapter.js";
+import { toInstalledPlugins } from "./plugin-adapter.js";
 
 export interface ThreadDefaults {
   model?: string;
@@ -73,7 +76,8 @@ export class CodexAppServerClient implements
   ModelSelectionPort,
   AccountQueryPort,
   SkillQueryPort,
-  McpQueryPort
+  McpQueryPort,
+  PluginQueryPort
 {
   constructor(
     private readonly rpc: JsonRpcClient,
@@ -365,11 +369,12 @@ export class CodexAppServerClient implements
     return servers;
   }
 
-  async listPlugins(cwd: string): Promise<PluginInstalledResponse> {
-    return this.rpc.request<PluginInstalledResponse>({
+  async listPlugins(cwd: string): Promise<InstalledPlugin[]> {
+    const response = await this.rpc.request<PluginInstalledResponse>({
       method: "plugin/installed",
       params: { cwds: [cwd] },
     }, { retryOverload: true });
+    return toInstalledPlugins(response);
   }
 
   async accountUsage(): Promise<AccountUsage> {

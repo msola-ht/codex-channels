@@ -50,6 +50,10 @@ export {
   type McpServerSummary,
 } from "./mcp-port.js";
 export {
+  type InstalledPlugin,
+  type PluginQueryPort,
+} from "./plugin-port.js";
+export {
   type GoalStatus,
   type ReviewStarted,
   type ReviewTarget,

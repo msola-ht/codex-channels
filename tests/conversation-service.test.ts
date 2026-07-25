@@ -341,6 +341,26 @@ describe("ConversationService model selection", () => {
     expect(listMcpServers).toHaveBeenCalledWith("thread-1");
   });
 
+  it("lists stable installed Plugins for the authorized Workspace", async () => {
+    const listPlugins = vi.fn(async () => [
+      { name: "github", enabled: true },
+      { name: "local-tools", enabled: false },
+    ]);
+    const service = new ConversationService(
+      turnPort(),
+      { workspace: () => main } as unknown as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort({ listPlugins }),
+    );
+
+    await expect(service.listPlugins(target)).resolves.toEqual([
+      { name: "github", enabled: true },
+      { name: "local-tools", enabled: false },
+    ]);
+    expect(listPlugins).toHaveBeenCalledWith(main.cwd);
+  });
+
   it("allows read-only Fast status during an active turn but blocks switching", async () => {
     const selectFastMode = vi.fn().mockResolvedValue({ serviceTier: "fast" });
     const service = new ConversationService(
