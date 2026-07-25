@@ -35,6 +35,6 @@ Server Request，`approval` 只拥有稳定请求、授权语义和用户决定�
 注入纯字符串，受控协议导出和模块依赖白名单已收紧，新增协议或具体 Client 泄漏会由边界测试阻止。
 阶段 7 正在逐个复核内部模块；`storage` 已确认最小 Schema、原子清理和失败回滚，当前版本数据库
 缺少必需结构时失败关闭，不执行隐式修补；`policy` 已把 Workspace 固定为不可变授权快照，并
-保持 Surface、账号和 Actor 三层匹配。
+保持 Surface、账号和 Actor 三层匹配；`event-bus` 已收紧关闭终态、并发等待和慢消费者超时。
 整体范围见
 [`Codex CLI 协议边界收敛计划`](../docs/architecture-convergence-plan.md)。
