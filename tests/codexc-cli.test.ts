@@ -648,8 +648,16 @@ describe("codexc CLI", () => {
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
 
+    const expectedCodexCliVersion = (
+      JSON.parse(
+        readFileSync(resolve("src/codex-protocol/version.json"), "utf8"),
+      ) as { codexCli: string }
+    ).codexCli;
     const fakeCodex = join(root, "codex");
-    writeFileSync(fakeCodex, "#!/bin/sh\nprintf 'codex-cli 0.145.0\\n'\n");
+    writeFileSync(
+      fakeCodex,
+      `#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(`${expectedCodexCliVersion}\n`)});\n`,
+    );
     chmodSync(fakeCodex, 0o700);
     const configPath = join(home, "config.toml");
     const socketPath = join(root, "app.sock");
@@ -688,7 +696,7 @@ describe("codexc CLI", () => {
         env: environment,
         encoding: "utf8",
       });
-      expect(stdout).toContain("[通过] Codex CLI：codex-cli 0.145.0");
+      expect(stdout).toContain(`[通过] Codex CLI：${expectedCodexCliVersion}`);
       expect(stdout).toContain("[通过] Codex App Server：initialize 握手通过");
       expect(stdout).toContain("诊断通过");
       expect(stdout).not.toContain(secret);
