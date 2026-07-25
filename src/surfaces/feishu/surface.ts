@@ -12,7 +12,7 @@ import type {
 import { FeishuConversationAdapter } from "./adapter.js";
 import {
   FeishuEventConnection,
-  FeishuTextMessageClient,
+  FeishuMessageClient,
   type FeishuEventConnectionOptions,
 } from "./client.js";
 import { FeishuInbox } from "./inbox.js";
@@ -20,7 +20,7 @@ import { FeishuInteractionPort } from "./interactions.js";
 import type { FeishuMessageEventError } from "./message-event.js";
 import {
   FeishuOutbox,
-  type FeishuTextMessagePort,
+  type FeishuMessagePort,
 } from "./outbox.js";
 import { renderFeishuConfigurationChange } from "./renderer.js";
 
@@ -30,7 +30,7 @@ interface FeishuEventConnectionPort {
 }
 
 interface FeishuSurfaceDependencies {
-  messagePort?: FeishuTextMessagePort;
+  messagePort?: FeishuMessagePort;
   createEventConnection: (
     options: FeishuEventConnectionOptions,
   ) => FeishuEventConnectionPort;
@@ -75,7 +75,7 @@ export class FeishuSurface implements SurfaceAdapter {
     this.accountId = options.appId;
     this.configurationRecipients = options.configurationRecipients;
     this.logger = options.logger;
-    const messagePort = dependencies.messagePort ?? new FeishuTextMessageClient({
+    const messagePort = dependencies.messagePort ?? new FeishuMessageClient({
       appId: options.appId,
       appSecret: options.appSecret,
     });

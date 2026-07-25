@@ -19,7 +19,10 @@ export class FeishuConversationAdapter {
 
   constructor(
     private readonly conversations: ConversationService,
-    private readonly outbox: Pick<FeishuOutbox, "notifyText">,
+    private readonly outbox: Pick<
+      FeishuOutbox,
+      "notifyPost" | "notifyText"
+    >,
   ) {
     this.commands = new ConversationCommandService(conversations);
   }
@@ -29,21 +32,21 @@ export class FeishuConversationAdapter {
       const command = parseFeishuCommand(message.text);
       if (command !== null) {
         if (command.name === "start" || command.name === "help") {
-          this.notify(
+          this.notifyPost(
             message.target.conversationId,
             renderFeishuHelp(),
           );
           return;
         }
         if (command.name === "whoami") {
-          this.notify(
+          this.notifyPost(
             message.target.conversationId,
             renderFeishuIdentity(message),
           );
           return;
         }
         if (command.name === "cancel") {
-          this.notify(
+          this.notifyText(
             message.target.conversationId,
             "当前没有待处理的交互请求。",
           );
@@ -60,7 +63,7 @@ export class FeishuConversationAdapter {
           command.name,
           command.argumentsText,
         );
-        this.notify(
+        this.notifyPost(
           message.target.conversationId,
           renderFeishuCommandResult(result),
         );
@@ -73,7 +76,7 @@ export class FeishuConversationAdapter {
       if (!submission.steered) {
         return;
       }
-      this.notify(
+      this.notifyText(
         message.target.conversationId,
         "已将补充要求追加到当前 Turn。",
       );
@@ -84,7 +87,7 @@ export class FeishuConversationAdapter {
       const detail = error instanceof UserFacingError
         ? renderFeishuUserFacingError(error)
         : "Gateway 未能完成请求，请稍后重试";
-      this.notify(
+      this.notifyText(
         message.target.conversationId,
         `操作失败：${detail}。`,
       );
@@ -92,8 +95,14 @@ export class FeishuConversationAdapter {
     }
   }
 
-  private notify(chatId: string, text: string): void {
+  private notifyText(chatId: string, text: string): void {
     if (!this.outbox.notifyText(chatId, text)) {
+      throw new FeishuOutputQueueError();
+    }
+  }
+
+  private notifyPost(chatId: string, markdown: string): void {
+    if (!this.outbox.notifyPost(chatId, markdown)) {
       throw new FeishuOutputQueueError();
     }
   }

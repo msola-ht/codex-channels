@@ -6,15 +6,17 @@ import {
 } from "../../conversation-core/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import type { SurfaceOutputPort } from "../types.js";
+import { encodeFeishuPostContent } from "./message-content.js";
 import { renderFeishuOutput } from "./renderer.js";
 
-const maximumFeishuTextMessageBytes = 20_000;
-const maximumFeishuTextChunks = 5;
+const maximumFeishuMessageContentBytes = 20_000;
+const maximumFeishuMessageChunks = 5;
 const feishuChunkHeaderReserveBytes = 64;
 const feishuTruncationNotice = "\n\n[内容过长，已截断]";
 
-export interface FeishuTextMessagePort {
+export interface FeishuMessagePort {
   sendText(chatId: string, text: string): Promise<void>;
+  sendPost(chatId: string, markdown: string): Promise<void>;
 }
 
 export class FeishuOutbox implements SurfaceOutputPort {
@@ -23,7 +25,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
 
   constructor(
     private readonly accountId: string,
-    private readonly messagePort: FeishuTextMessagePort,
+    private readonly messagePort: FeishuMessagePort,
     logger: Logger,
   ) {
     this.delivery = new ConversationDeliveryQueue(logger, {
@@ -45,7 +47,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     this.delivery.enqueue(
       event.target.conversationId,
-      () => this.sendText(event.target.conversationId, text),
+      () => event.type === "text.completed"
+        ? this.sendPost(event.target.conversationId, text)
+        : this.sendText(event.target.conversationId, text),
       isCriticalOutputEvent(event),
     );
   }
@@ -57,6 +61,17 @@ export class FeishuOutbox implements SurfaceOutputPort {
     return this.delivery.enqueue(
       chatId,
       () => this.sendText(chatId, text),
+      true,
+    );
+  }
+
+  notifyPost(chatId: string, markdown: string): boolean {
+    if (this.closed) {
+      return false;
+    }
+    return this.delivery.enqueue(
+      chatId,
+      () => this.sendPost(chatId, markdown),
       true,
     );
   }
@@ -78,42 +93,63 @@ export class FeishuOutbox implements SurfaceOutputPort {
       await this.messagePort.sendText(chatId, chunk);
     }
   }
+
+  private async sendPost(chatId: string, markdown: string): Promise<void> {
+    for (const chunk of splitFeishuPost(markdown)) {
+      await this.messagePort.sendPost(chatId, chunk);
+    }
+  }
 }
 
 function splitFeishuText(text: string): string[] {
-  if (Buffer.byteLength(text, "utf8") <= maximumFeishuTextMessageBytes) {
+  return splitFeishuContent(
+    text,
+    (value) => Buffer.byteLength(value, "utf8"),
+  );
+}
+
+function splitFeishuPost(markdown: string): string[] {
+  return splitFeishuContent(
+    markdown,
+    (value) => Buffer.byteLength(encodeFeishuPostContent(value), "utf8"),
+  );
+}
+
+function splitFeishuContent(
+  text: string,
+  measureBytes: (value: string) => number,
+): string[] {
+  if (measureBytes(text) <= maximumFeishuMessageContentBytes) {
     return [text];
   }
   const payloadLimit =
-    maximumFeishuTextMessageBytes - feishuChunkHeaderReserveBytes;
+    maximumFeishuMessageContentBytes - feishuChunkHeaderReserveBytes;
   const payloads: string[] = [];
-  let characters: string[] = [];
-  let bytes = 0;
-  let truncated = false;
-  for (const character of text) {
-    const characterBytes = Buffer.byteLength(character, "utf8");
-    if (bytes + characterBytes > payloadLimit && characters.length > 0) {
-      payloads.push(characters.join(""));
-      if (payloads.length === maximumFeishuTextChunks) {
-        truncated = true;
-        characters = [];
-        break;
-      }
-      characters = [];
-      bytes = 0;
+  const characters = [...text];
+  let offset = 0;
+  while (
+    offset < characters.length
+    && payloads.length < maximumFeishuMessageChunks
+  ) {
+    const end = findLargestFittingEnd(
+      characters,
+      offset,
+      payloadLimit,
+      measureBytes,
+    );
+    if (end === offset) {
+      throw new Error("飞书消息分片上限不足以容纳单个字符");
     }
-    characters.push(character);
-    bytes += characterBytes;
+    payloads.push(characters.slice(offset, end).join(""));
+    offset = end;
   }
-  if (characters.length > 0) {
-    payloads.push(characters.join(""));
-  }
-  if (truncated) {
+  if (offset < characters.length) {
     const lastIndex = payloads.length - 1;
     payloads[lastIndex] = appendWithinByteLimit(
       payloads[lastIndex]!,
       feishuTruncationNotice,
       payloadLimit,
+      measureBytes,
     );
   }
   return payloads.map(
@@ -121,21 +157,47 @@ function splitFeishuText(text: string): string[] {
   );
 }
 
+function findLargestFittingEnd(
+  characters: readonly string[],
+  offset: number,
+  byteLimit: number,
+  measureBytes: (value: string) => number,
+): number {
+  let low = offset + 1;
+  let high = characters.length;
+  let best = offset;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const candidate = characters.slice(offset, middle).join("");
+    if (measureBytes(candidate) <= byteLimit) {
+      best = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return best;
+}
+
 function appendWithinByteLimit(
   text: string,
   suffix: string,
   byteLimit: number,
+  measureBytes: (value: string) => number,
 ): string {
-  const suffixBytes = Buffer.byteLength(suffix, "utf8");
-  const kept: string[] = [];
-  let bytes = 0;
-  for (const character of text) {
-    const characterBytes = Buffer.byteLength(character, "utf8");
-    if (bytes + characterBytes + suffixBytes > byteLimit) {
-      break;
+  const characters = [...text];
+  let low = 0;
+  let high = characters.length;
+  let best = 0;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const candidate = `${characters.slice(0, middle).join("")}${suffix}`;
+    if (measureBytes(candidate) <= byteLimit) {
+      best = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
     }
-    kept.push(character);
-    bytes += characterBytes;
   }
-  return `${kept.join("")}${suffix}`;
+  return `${characters.slice(0, best).join("")}${suffix}`;
 }

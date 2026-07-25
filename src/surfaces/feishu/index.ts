@@ -2,13 +2,13 @@ export { FeishuConversationAdapter } from "./adapter.js";
 export {
   FeishuConnectionError,
   FeishuEventConnection,
-  FeishuTextMessageClient,
-  FeishuTextMessageError,
+  FeishuMessageClient,
+  FeishuMessageError,
   type FeishuConnectionErrorCode,
   type FeishuConnectionState,
   type FeishuEventConnectionOptions,
-  type FeishuTextMessageClientOptions,
-  type FeishuTextMessageErrorCode,
+  type FeishuMessageClientOptions,
+  type FeishuMessageErrorCode,
 } from "./client.js";
 export {
   FeishuInbox,
@@ -27,7 +27,7 @@ export {
 } from "./message-event.js";
 export {
   FeishuOutbox,
-  type FeishuTextMessagePort,
+  type FeishuMessagePort,
 } from "./outbox.js";
 export {
   renderFeishuCommandResult,

@@ -16,7 +16,8 @@ import {
   FeishuMessageEventError,
   type FeishuMessageEvent,
 } from "./message-event.js";
-import type { FeishuTextMessagePort } from "./outbox.js";
+import { encodeFeishuPostContent } from "./message-content.js";
+import type { FeishuMessagePort } from "./outbox.js";
 
 const FEISHU_APP_ID_PATTERN = /^cli_[0-9a-fA-F]{16}$/u;
 const DEFAULT_STARTUP_TIMEOUT_MS = 60_000;
@@ -80,66 +81,66 @@ interface FeishuEventConnectionDependencies {
   ): FeishuSdkConnection;
 }
 
-export interface FeishuTextMessageClientOptions {
+export interface FeishuMessageClientOptions {
   appId: string;
   appSecret: string;
 }
 
-export type FeishuTextMessageErrorCode =
+export type FeishuMessageErrorCode =
   | "client-create-failed"
   | "invalid-credentials"
   | "invalid-response"
   | "send-failed"
   | "send-timeout";
 
-export class FeishuTextMessageError extends Error {
-  readonly code: FeishuTextMessageErrorCode;
+export class FeishuMessageError extends Error {
+  readonly code: FeishuMessageErrorCode;
 
-  constructor(code: FeishuTextMessageErrorCode, message: string) {
+  constructor(code: FeishuMessageErrorCode, message: string) {
     super(message);
-    this.name = "FeishuTextMessageError";
+    this.name = "FeishuMessageError";
     this.code = code;
   }
 }
 
-interface FeishuSdkTextMessagePayload {
+interface FeishuSdkMessagePayload {
   params: {
     receive_id_type: "chat_id";
   };
   data: {
     receive_id: string;
-    msg_type: "text";
+    msg_type: "text" | "post";
     content: string;
   };
 }
 
-interface FeishuSdkTextMessageClient {
-  createMessage(payload: FeishuSdkTextMessagePayload): Promise<{
+interface FeishuSdkMessageClient {
+  createMessage(payload: FeishuSdkMessagePayload): Promise<{
     data?: {
       message_id?: string | undefined;
     } | undefined;
   }>;
 }
 
-interface FeishuTextMessageClientDependencies {
+interface FeishuMessageClientDependencies {
   sendTimeoutMs: number;
   createSdkClient(
-    options: FeishuTextMessageClientOptions,
+    options: FeishuMessageClientOptions,
     sendTimeoutMs: number,
-  ): FeishuSdkTextMessageClient;
+  ): FeishuSdkMessageClient;
 }
 
-export class FeishuTextMessageClient implements FeishuTextMessagePort {
-  private readonly sdkClient: FeishuSdkTextMessageClient;
+export class FeishuMessageClient implements FeishuMessagePort {
+  private readonly sdkClient: FeishuSdkMessageClient;
   private readonly sendTimeoutMs: number;
 
   constructor(
-    options: FeishuTextMessageClientOptions,
-    dependencies: FeishuTextMessageClientDependencies =
-      defaultTextMessageDependencies,
+    options: FeishuMessageClientOptions,
+    dependencies: FeishuMessageClientDependencies =
+      defaultMessageDependencies,
   ) {
     if (!hasValidCredentials(options)) {
-      throw new FeishuTextMessageError(
+      throw new FeishuMessageError(
         "invalid-credentials",
         "飞书应用凭据格式无效",
       );
@@ -151,14 +152,30 @@ export class FeishuTextMessageClient implements FeishuTextMessagePort {
         dependencies.sendTimeoutMs,
       );
     } catch {
-      throw new FeishuTextMessageError(
+      throw new FeishuMessageError(
         "client-create-failed",
-        "飞书文本发送客户端创建失败",
+        "飞书消息客户端创建失败",
       );
     }
   }
 
   async sendText(chatId: string, text: string): Promise<void> {
+    await this.sendMessage(chatId, "text", JSON.stringify({ text }));
+  }
+
+  async sendPost(chatId: string, markdown: string): Promise<void> {
+    await this.sendMessage(
+      chatId,
+      "post",
+      encodeFeishuPostContent(markdown),
+    );
+  }
+
+  private async sendMessage(
+    chatId: string,
+    messageType: "text" | "post",
+    content: string,
+  ): Promise<void> {
     try {
       const response = await withSendTimeout(
         this.sdkClient.createMessage({
@@ -167,8 +184,8 @@ export class FeishuTextMessageClient implements FeishuTextMessagePort {
           },
           data: {
             receive_id: chatId,
-            msg_type: "text",
-            content: JSON.stringify({ text }),
+            msg_type: messageType,
+            content,
           },
         }),
         this.sendTimeoutMs,
@@ -177,24 +194,24 @@ export class FeishuTextMessageClient implements FeishuTextMessagePort {
         typeof response?.data?.message_id !== "string"
         || response.data.message_id.trim().length === 0
       ) {
-        throw new FeishuTextMessageError(
+        throw new FeishuMessageError(
           "invalid-response",
-          "飞书文本消息响应无效",
+          "飞书消息响应无效",
         );
       }
     } catch (error) {
-      if (error instanceof FeishuTextMessageError) {
+      if (error instanceof FeishuMessageError) {
         throw error;
       }
       if (isSdkTimeout(error)) {
-        throw new FeishuTextMessageError(
+        throw new FeishuMessageError(
           "send-timeout",
-          "飞书文本消息发送超时",
+          "飞书消息发送超时",
         );
       }
-      throw new FeishuTextMessageError(
+      throw new FeishuMessageError(
         "send-failed",
-        "飞书文本消息发送失败",
+        "飞书消息发送失败",
       );
     }
   }
@@ -436,7 +453,7 @@ const redactedSdkLogger: Logger = {
   trace: () => {},
 };
 
-const defaultTextMessageDependencies: FeishuTextMessageClientDependencies = {
+const defaultMessageDependencies: FeishuMessageClientDependencies = {
   sendTimeoutMs: 15_000,
   createSdkClient: (options, sendTimeoutMs) => {
     const client = new Client({
@@ -536,9 +553,9 @@ async function withSendTimeout<T>(
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
-      reject(new FeishuTextMessageError(
+      reject(new FeishuMessageError(
         "send-timeout",
-        "飞书文本消息发送超时",
+        "飞书消息发送超时",
       ));
     }, timeoutMs);
     timer.unref();

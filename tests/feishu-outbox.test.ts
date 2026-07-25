@@ -7,7 +7,7 @@ import type {
 } from "../src/conversation-core/index.js";
 import {
   FeishuOutbox,
-  type FeishuTextMessagePort,
+  type FeishuMessagePort,
 } from "../src/surfaces/feishu/index.js";
 
 const target = {
@@ -18,10 +18,13 @@ const target = {
 
 describe("Feishu outbox", () => {
   it("routes a rendered event to the exact account and chat", async () => {
-    const sent: Array<{ chatId: string; text: string }> = [];
-    const messagePort: FeishuTextMessagePort = {
+    const sent: Array<{ chatId: string; format: string; text: string }> = [];
+    const messagePort: FeishuMessagePort = {
       sendText: async (chatId, text) => {
-        sent.push({ chatId, text });
+        sent.push({ chatId, format: "text", text });
+      },
+      sendPost: async (chatId, text) => {
+        sent.push({ chatId, format: "post", text });
       },
     };
     const outbox = new FeishuOutbox(
@@ -41,7 +44,11 @@ describe("Feishu outbox", () => {
     outbox.handle(event);
     await outbox.close();
 
-    expect(sent).toEqual([{ chatId: "oc_chat", text: "飞书回复" }]);
+    expect(sent).toEqual([{
+      chatId: "oc_chat",
+      format: "post",
+      text: "飞书回复",
+    }]);
   });
 
   it("ignores another surface, account, and non-critical progress", async () => {
@@ -50,6 +57,9 @@ describe("Feishu outbox", () => {
       "cli_app",
       {
         sendText: async (_chatId, text) => {
+          sent.push(text);
+        },
+        sendPost: async (_chatId, text) => {
           sent.push(text);
         },
       },
@@ -79,6 +89,13 @@ describe("Feishu outbox", () => {
       "cli_app",
       {
         sendText: async (chatId, text) => {
+          started.push(`${chatId}:${text}`);
+          if (text === "第一条") {
+            await first.promise;
+          }
+          finished.push(`${chatId}:${text}`);
+        },
+        sendPost: async (chatId, text) => {
           started.push(`${chatId}:${text}`);
           if (text === "第一条") {
             await first.promise;
@@ -123,6 +140,9 @@ describe("Feishu outbox", () => {
         sendText: async (_chatId, text) => {
           sent.push(text);
         },
+        sendPost: async (_chatId, text) => {
+          sent.push(text);
+        },
       },
       pino({ level: "silent" }),
     );
@@ -153,6 +173,9 @@ describe("Feishu outbox", () => {
         sendText: async (_chatId, text) => {
           sent.push(text);
         },
+        sendPost: async (_chatId, text) => {
+          sent.push(text);
+        },
       },
       pino({ level: "silent" }),
     );
@@ -169,6 +192,32 @@ describe("Feishu outbox", () => {
     expect(sent[5]).toBe("截断之后");
   });
 
+  it("bounds serialized rich-post content when Markdown needs JSON escaping", async () => {
+    const sent: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        sendText: async () => {},
+        sendPost: async (_chatId, markdown) => {
+          sent.push(markdown);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+    const markdown = "\\\n\"".repeat(8_000);
+
+    outbox.handle(completed({}, markdown));
+    await outbox.close();
+
+    expect(sent.length).toBeGreaterThan(1);
+    expect(sent.every((chunk) => Buffer.byteLength(JSON.stringify({
+      zh_cn: {
+        title: "",
+        content: [[{ tag: "md", text: chunk }]],
+      },
+    }), "utf8") <= 20_000)).toBe(true);
+  });
+
   it("waits for accepted output during close and rejects later events", async () => {
     const pending = deferred();
     const sent: string[] = [];
@@ -176,6 +225,10 @@ describe("Feishu outbox", () => {
       "cli_app",
       {
         sendText: async (_chatId, text) => {
+          await pending.promise;
+          sent.push(text);
+        },
+        sendPost: async (_chatId, text) => {
           await pending.promise;
           sent.push(text);
         },

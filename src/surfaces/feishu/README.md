@@ -1,20 +1,22 @@
 # 飞书 Surface
 
 本目录是飞书 Surface 的平台边界。当前已完成 Phase 0 的官方 SDK、事件长连接和消息字段裁剪基础，
-以及 Phase 1 的私聊文本 Inbox、纯文本输出渲染和 Bootstrap 显式组合；Phase 2 的预备实现已
+以及 Phase 1 的私聊文本 Inbox、输出渲染和 Bootstrap 显式组合；Phase 2 的预备实现已
 接入全部平台无关私聊命令，但 Phase 1 真实验收尚未整体关闭，群聊不得开始。当前可通过严格
-TOML 或统一 Setup 启用开发验证路径。
+TOML 或统一 Setup 启用开发验证路径。Phase 4 已开始第一个独立体验切片：最终回复与命令结果
+使用 `post + md` 富文本，群聊、审批卡片、媒体和消息更新仍未开始。
 
 ## 文件索引
 
 - `index.ts`：飞书模块受控出口；一级 `surfaces/index.ts` 只转出 Bootstrap 所需工厂和选项类型。
 - `adapter.ts`：区分普通文本、平台本地命令和 Application 命令，并通过 Outbox 返回结果或安全错误。
 - `client.ts`：官方 SDK、事件长连接及生命周期隔离。
+- `message-content.ts`：生成飞书 `post + md` 内容，供发送和实际序列化大小计量共用。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪。
 - `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理。
 - `interactions.ts`：在卡片交互尚未实现时拒绝审批、返回空用户输入并取消 MCP elicitation。
-- `renderer.ts`：把平台无关 `ConversationCommandResult`、`OutputEvent` 和结构化错误映射为飞书纯文本。
-- `outbox.ts`：精确账号路由并通过通用有界队列调用窄文本发送端口。
+- `renderer.ts`：把平台无关 `ConversationCommandResult`、`OutputEvent` 和结构化错误映射为稳定文本内容。
+- `outbox.ts`：精确账号路由并通过通用有界队列调用窄消息发送端口。
 - `surface.ts`：组合单账号连接、Inbox、Application Adapter、Outbox 和失败关闭交互端口，并由
   模块入口只暴露 `createFeishuSurface()` 工厂与生产选项类型。
 
@@ -28,8 +30,9 @@ TOML 或统一 Setup 启用开发验证路径。
 - SDK 原始日志不进入项目 Logger，避免平台凭据、URL 或响应正文泄漏。
 - Surface 只向项目 Logger 记录连接中、就绪、重连、恢复和停止等稳定状态，不附带 SDK 错误正文。
 - 当前只注册 `im.message.receive_v1`，回调必须同步完成最小入队，不能在 SDK Reader 中等待业务或平台网络请求。
-- 文本发送只使用 `im.v1.message.create` 的 `chat_id + text` 窄能力，设置 15 秒 HTTP 超时，
-  并要求响应包含 `message_id`。
+- 消息发送只使用 `im.v1.message.create` 的 `chat_id + text/post` 窄能力；富文本只生成单个
+  `md` 元素，不暴露 SDK Client。模型或上游文本中的飞书原生 `<at>` 标签会在平台边界被中和，
+  避免非预期提醒。调用设置 15 秒 HTTP 超时并要求响应包含 `message_id`。
 - 发送超时、SDK 失败和残缺响应只暴露稳定错误码，不回传 SDK message、响应正文或凭据。
 - 消息创建不自动重试；锁定 SDK 虽提供可选 `uuid` 字段，但当前官方资料未明确其幂等窗口和
   可重试错误语义。
@@ -44,17 +47,19 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 通过同一有界 Outbox 提示用户稍后重试，不伪造平台自动重投。去重状态只存在于有界内存，关闭时
 等待已接受任务至有限超时，不持久化消息正文。
 
-`renderer.ts` 通过模块公开入口接收 `OutputEvent`。最终文本和所有关键事件都有纯文本回退；
+`renderer.ts` 通过模块公开入口接收 `OutputEvent`。最终文本由 Outbox 作为富文本发送，其他
+关键事件和安全提示使用纯文本；
 非关键流式增量和运行中操作暂不输出。上游 warning、连接错误和 MCP 错误正文不会进入平台消息，
 未知 Thread 状态不会原样显示。
 
 `outbox.ts` 只同步接收匹配 `feishu + accountId` 的输出，并按 Chat ID 进入
 `ConversationDeliveryQueue`。同一 Chat 串行、不同 Chat 可并行；关闭后拒绝新输出并有限等待
-已接收发送。飞书 SDK 发送对象由 `FeishuTextMessageClient` 通过 `FeishuTextMessagePort`
+已接收发送。飞书 SDK 发送对象由 `FeishuMessageClient` 通过 `FeishuMessagePort`
 注入，Outbox 不持有完整 SDK Client。Adapter 的追加确认和错误提示也进入同一有界队列，不绕过
-平台输出顺序和关闭边界。纯文本超过项目内部 20,000 UTF-8 字节上限时，在同一个队列任务内按
-Unicode 字符安全分片并顺序发送；每个逻辑结果最多发送 5 条，超出时明确标记截断，避免单个结果
-无限占用同一 Chat 的发送任务。这只提供基础传输可靠性，不包含富文本、文件回退或消息更新。
+平台输出顺序和关闭边界。纯文本按 UTF-8 字节、富文本按序列化后的 `post` 内容计量；超过项目
+内部 20,000 字节上限时，在同一个队列任务内按 Unicode 字符安全分片并顺序发送。每个逻辑结果
+最多发送 5 条，超出时明确标记截断，避免单个结果无限占用同一 Chat 的发送任务。消息创建失败
+不自动改发另一种格式，避免非幂等重发产生重复消息；文件回退和消息更新尚未实现。
 
 `adapter.ts` 对普通文本调用 `ConversationService.submit()`，对已知平台无关命令调用
 `ConversationCommandService.execute()`；`/start`、`/help`、`/whoami` 和 `/cancel` 留在飞书
@@ -75,7 +80,11 @@ Adapter 不会重试已经执行的状态修改，而是把稳定的队列错误
 
 本模块已有严格 TOML/运行配置、变更分类和 Bootstrap 显式组合，可启用阶段 1 私聊文本路径；
 Setup 与只读 Doctor 凭据/Bot 身份探测已完成，真实应用的首次握手、已授权私聊 Turn 和文本回复
-已通过；断线恢复、未授权/重复事件、重启绑定恢复和可批准交互仍未完成。后续阶段按
+已通过；2026-07-26 操作者在 Gateway 重启后确认私聊命令能够返回纯文本结果；随后本地实现已
+切换最终回复和命令结果为富文本，并已用状态命令与普通 Turn 短回复验证标题、列表、加粗、
+行内代码和链接的真实显示。该测试不表示长回复分片、卡片或群聊已经支持，也尚未核对重启前后
+的精确 Thread ID。断线恢复、未授权/重复事件、
+重启绑定恢复和可批准交互仍未完成。后续阶段按
 [`飞书 Surface 接入计划`](../../../docs/feishu-surface-plan.md)推进；一级 `surfaces` 入口只转出
 窄工厂，不得导出 SDK 类型，也不得在 Core 中引入飞书类型。Phase 1 真实验收关闭前，Phase 2
-命令只视为预备实现，不开始群聊，也不更新为公开支持。
+命令只视为预备实现。群聊已记录为后续需求但当前不开发，也不更新为公开支持。

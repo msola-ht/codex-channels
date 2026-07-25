@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   FeishuConnectionError,
   FeishuEventConnection,
-  FeishuTextMessageError,
-  FeishuTextMessageClient,
+  FeishuMessageError,
+  FeishuMessageClient,
   type FeishuConnectionState,
 } from "../src/surfaces/feishu/client.js";
 
@@ -294,11 +294,11 @@ describe("FeishuEventConnection", () => {
   });
 });
 
-describe("FeishuTextMessageClient", () => {
+describe("FeishuMessageClient", () => {
   it("rejects invalid credentials before creating the SDK client", () => {
     const createSdkClient = vi.fn();
 
-    expect(() => new FeishuTextMessageClient(
+    expect(() => new FeishuMessageClient(
       {
         appId: "invalid",
         appSecret: "",
@@ -307,7 +307,7 @@ describe("FeishuTextMessageClient", () => {
         sendTimeoutMs: 1_000,
         createSdkClient,
       },
-    )).toThrow(new FeishuTextMessageError(
+    )).toThrow(new FeishuMessageError(
       "invalid-credentials",
       "飞书应用凭据格式无效",
     ));
@@ -315,7 +315,7 @@ describe("FeishuTextMessageClient", () => {
   });
 
   it("hides SDK client creation error details", () => {
-    expect(() => new FeishuTextMessageClient(
+    expect(() => new FeishuMessageClient(
       {
         appId: "cli_0123456789abcdef",
         appSecret: "secret",
@@ -326,9 +326,9 @@ describe("FeishuTextMessageClient", () => {
           throw new Error("appSecret=secret");
         },
       },
-    )).toThrow(new FeishuTextMessageError(
+    )).toThrow(new FeishuMessageError(
       "client-create-failed",
-      "飞书文本发送客户端创建失败",
+      "飞书消息客户端创建失败",
     ));
   });
 
@@ -336,7 +336,7 @@ describe("FeishuTextMessageClient", () => {
     const createMessage = vi.fn(async () => ({
       data: { message_id: "om_message" },
     }));
-    const client = new FeishuTextMessageClient(
+    const client = new FeishuMessageClient(
       {
         appId: "cli_0123456789abcdef",
         appSecret: "secret",
@@ -361,9 +361,88 @@ describe("FeishuTextMessageClient", () => {
     });
   });
 
+  it("sends Markdown as a Feishu rich-text post to an exact chat ID", async () => {
+    const createMessage = vi.fn(async () => ({
+      data: { message_id: "om_message" },
+    }));
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({ createMessage }),
+      },
+    );
+
+    await expect(
+      client.sendPost("oc_chat", "**状态**\n\n- 正常"),
+    ).resolves.toBeUndefined();
+
+    expect(createMessage).toHaveBeenCalledWith({
+      params: {
+        receive_id_type: "chat_id",
+      },
+      data: {
+        receive_id: "oc_chat",
+        msg_type: "post",
+        content: JSON.stringify({
+          zh_cn: {
+            title: "",
+            content: [[{
+              tag: "md",
+              text: "**状态**\n\n- 正常",
+            }]],
+          },
+        }),
+      },
+    });
+  });
+
+  it("neutralizes platform-native mention tags in rich Markdown", async () => {
+    const createMessage = vi.fn(async () => ({
+      data: { message_id: "om_message" },
+    }));
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({ createMessage }),
+      },
+    );
+
+    await client.sendPost(
+      "oc_chat",
+      "<at user_id=\"all\">所有人</at>",
+    );
+
+    expect(createMessage).toHaveBeenCalledWith({
+      params: {
+        receive_id_type: "chat_id",
+      },
+      data: {
+        receive_id: "oc_chat",
+        msg_type: "post",
+        content: JSON.stringify({
+          zh_cn: {
+            title: "",
+            content: [[{
+              tag: "md",
+              text: "&lt;at user_id=\"all\">所有人&lt;/at>",
+            }]],
+          },
+        }),
+      },
+    });
+  });
+
   it("fails with a sanitized timeout when sending takes too long", async () => {
     vi.useFakeTimers();
-    const client = new FeishuTextMessageClient(
+    const client = new FeishuMessageClient(
       {
         appId: "cli_0123456789abcdef",
         appSecret: "secret",
@@ -378,9 +457,9 @@ describe("FeishuTextMessageClient", () => {
 
     const sending = client.sendText("oc_chat", "飞书回复");
     const rejection = expect(sending).rejects.toEqual(
-      new FeishuTextMessageError(
+      new FeishuMessageError(
         "send-timeout",
-        "飞书文本消息发送超时",
+        "飞书消息发送超时",
       ),
     );
     await vi.advanceTimersByTimeAsync(250);
@@ -392,7 +471,7 @@ describe("FeishuTextMessageClient", () => {
     const createMessage = vi.fn(async () => {
       throw new Error("Authorization: secret");
     });
-    const client = new FeishuTextMessageClient(
+    const client = new FeishuMessageClient(
       {
         appId: "cli_0123456789abcdef",
         appSecret: "secret",
@@ -404,9 +483,9 @@ describe("FeishuTextMessageClient", () => {
     );
 
     await expect(client.sendText("oc_chat", "飞书回复")).rejects.toEqual(
-      new FeishuTextMessageError(
+      new FeishuMessageError(
         "send-failed",
-        "飞书文本消息发送失败",
+        "飞书消息发送失败",
       ),
     );
     expect(createMessage).toHaveBeenCalledOnce();
@@ -416,7 +495,7 @@ describe("FeishuTextMessageClient", () => {
     const timeout = Object.assign(new Error("request secret"), {
       code: "ECONNABORTED",
     });
-    const client = new FeishuTextMessageClient(
+    const client = new FeishuMessageClient(
       {
         appId: "cli_0123456789abcdef",
         appSecret: "secret",
@@ -432,15 +511,15 @@ describe("FeishuTextMessageClient", () => {
     );
 
     await expect(client.sendText("oc_chat", "飞书回复")).rejects.toEqual(
-      new FeishuTextMessageError(
+      new FeishuMessageError(
         "send-timeout",
-        "飞书文本消息发送超时",
+        "飞书消息发送超时",
       ),
     );
   });
 
   it("fails closed when the SDK response has no message ID", async () => {
-    const client = new FeishuTextMessageClient(
+    const client = new FeishuMessageClient(
       {
         appId: "cli_0123456789abcdef",
         appSecret: "secret",
@@ -454,9 +533,9 @@ describe("FeishuTextMessageClient", () => {
     );
 
     await expect(client.sendText("oc_chat", "飞书回复")).rejects.toEqual(
-      new FeishuTextMessageError(
+      new FeishuMessageError(
         "invalid-response",
-        "飞书文本消息响应无效",
+        "飞书消息响应无效",
       ),
     );
   });

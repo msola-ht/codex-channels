@@ -26,6 +26,44 @@ const message: FeishuInboxMessage = {
 };
 
 describe("Feishu conversation adapter", () => {
+  it("uses rich posts for command results but keeps failures as plain text", async () => {
+    const notifyPost = vi.fn(() => true);
+    const notifyText = vi.fn(() => true);
+    const status = vi.fn(() => ({
+      workspaceId: "main",
+      workspaceName: "Main",
+      cwd: "/workspace",
+      threadId: null,
+      turnId: null,
+      model: "gpt-test",
+      effort: "medium",
+      serviceTier: null,
+      modelPending: false,
+      effortPending: false,
+      fastModePending: false,
+    }));
+    const adapter = new FeishuConversationAdapter(
+      { status } as unknown as ConversationService,
+      { notifyPost, notifyText } as unknown as FeishuOutbox,
+    );
+
+    await adapter.handle({ ...message, text: "/status" });
+    await expect(
+      adapter.handle({ ...message, text: "/unknown" }),
+    ).rejects.toMatchObject({ code: "command.unsupported" });
+
+    expect(notifyPost).toHaveBeenCalledOnce();
+    expect(notifyPost).toHaveBeenCalledWith(
+      "oc_chat",
+      expect.stringContaining("Codex 状态"),
+    );
+    expect(notifyText).toHaveBeenCalledOnce();
+    expect(notifyText).toHaveBeenCalledWith(
+      "oc_chat",
+      "操作失败：不支持该飞书命令，请发送 /help 查看可用命令。",
+    );
+  });
+
   it("handles Feishu-local help, identity, and cancellation commands without starting a Turn", async () => {
     const fixture = createOutbox();
     const submit = vi.fn();
@@ -267,6 +305,9 @@ function createOutbox(): {
       message.target.accountId,
       {
         sendText: async (chatId, text) => {
+          sent.push({ chatId, text });
+        },
+        sendPost: async (chatId, text) => {
           sent.push({ chatId, text });
         },
       },

@@ -126,12 +126,12 @@ EventDispatcher`。
 | WebSocket 握手和重连 | `WSClient` | 生命周期封装、离线合同和真实首次握手已完成；真实断线恢复待验证 | 阶段 0 |
 | 消息事件字段裁剪 | `im.message.receive_v1` | 稳定字段映射、畸形输入失败关闭和一条真实私聊文本事件已验证 | 阶段 0 |
 | 私聊文本事件 | `im.message.receive_v1` | 平台本地筛选、有界入队、Access Policy、Application 提交、安全错误和生命周期组合已完成；真实已授权主路径已通过，未授权/重复真实事件待验证 | 阶段 1 |
-| 文本发送 | `client.im.v1.message.create` | `chat_id` 文本 Payload、有限 HTTP 超时和脱敏错误已完成；真实精确 Chat 文本回复已通过 | 阶段 1 |
-| 纯文本输出渲染 | `OutputEvent` | 关键事件回退、错误隐藏、有界 Outbox、Surface 生命周期和安全配置通知收件人已完成 | 阶段 1 |
+| 文本与富文本发送 | `client.im.v1.message.create` | `chat_id` 的 `text` 与 `post + md` Payload、平台原生提及标签中和、有限 HTTP 超时和脱敏错误已完成；富文本短回复真实显示已通过，长回复分片待验收 | 阶段 1 / 阶段 4 切片 |
+| 输出渲染 | `OutputEvent` | 最终回复使用富文本；其他关键事件、安全错误和操作性提示使用纯文本；有界 Outbox、Surface 生命周期和安全配置通知收件人已完成 | 阶段 1 / 阶段 4 切片 |
 | 事件去重与旧事件过滤 | 平台事件 ID、毫秒时间戳 | 已实现飞书模块内有界内存状态；真实重投待验证 | 阶段 1 |
 | 严格配置与重载分类 | 统一 `config.toml` | 私聊字段、失败关闭校验、变更码、公开示例和 Bootstrap 显式组合已完成 | 阶段 1 |
-| 私聊命令 | `ConversationCommandService`、私聊文本事件 | 全部平台无关命令结果、帮助、身份、取消、未知命令失败关闭、会话列表收敛和 20,000 UTF-8 字节有界安全分片已完成离线验证；阶段 1 关闭后再做真实应用验收 | 阶段 2 预备实现 |
-| 群聊 | 群消息事件、群身份与 @Bot | 暂不支持 | 阶段 2 |
+| 私聊命令 | `ConversationCommandService`、私聊文本事件 | 全部平台无关命令结果、帮助、身份、取消、未知命令失败关闭、会话列表收敛和有界安全分片已完成离线验证；状态命令富文本真实显示已通过，完整命令矩阵仍待验收 | 阶段 2 预备实现 |
+| 群聊 | 群消息事件、群身份与 @Bot | 已记录为后续需求，当前开发批次不实施 | 阶段 2 |
 | 卡片审批 | `card.action.trigger` | 接收方式待验证，当前失败关闭 | 阶段 3 |
 | 图片和文件 | IM 资源 API | 暂不支持 | 阶段 4 |
 | 飞书 Setup | SDK Device Authorization、`bot/v3/info` | 已实现手动输入与扫码、飞书页应用选择、最小权限、身份验证和原子配置；真实扫码与 Doctor 身份探测已通过 | 阶段 0 |
@@ -149,8 +149,14 @@ EventDispatcher`。
 - 一条已授权私聊文本事件成功提交并完成一个 Codex Turn；
 - 最终纯文本输出返回原精确 Chat。
 
+2026-07-26 由操作者在 Gateway 重启后继续使用测试应用，确认飞书私聊命令可以返回结果，且命令
+与状态当时均为纯文本格式。随后实现切换最终回复和命令结果为 `post + md`，并在 Gateway 重启
+后用状态命令和普通 Turn 短回复验证标题、列表、加粗、行内代码和链接能够正确显示。长回复分片、
+卡片和消息更新仍未验证，不据此把群聊标记为已开始。
+
 尚未验证真实断线恢复、代理、未授权/重复事件重投、Gateway 重启后的 Thread 绑定恢复和卡片动作。
-本记录不保存真实消息、应用标识、用户 Open ID、Chat ID、Token、Secret 或完整 SDK 响应。
+本记录不保存真实消息、应用标识、用户 Open ID、Chat ID、Token、Secret、临时跳转链接或完整
+SDK 响应。
 
 ## 本地实现映射
 
@@ -158,12 +164,12 @@ EventDispatcher`。
 
 | 官方概念 | 计划中的本地入口 | 计划验证 |
 | --- | --- | --- |
-| WebSocket 和 Client | [`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts) | [`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：凭据、就绪、重连、停止、文本 Payload、HTTP 超时、响应校验和错误脱敏 |
+| WebSocket 和 Client | [`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts)、[`src/surfaces/feishu/message-content.ts`](../src/surfaces/feishu/message-content.ts) | [`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：凭据、就绪、重连、停止、文本与富文本 Payload、HTTP 超时、响应校验和错误脱敏 |
 | 消息事件信封 | [`src/surfaces/feishu/message-event.ts`](../src/surfaces/feishu/message-event.ts) | [`tests/feishu-message-event.test.ts`](../tests/feishu-message-event.test.ts)：稳定字段裁剪和畸形输入失败关闭 |
 | 输入接收与去重 | [`src/surfaces/feishu/inbox.ts`](../src/surfaces/feishu/inbox.ts) | [`tests/feishu-inbox.test.ts`](../tests/feishu-inbox.test.ts)：同步入队、授权、重复、旧事件、顺序、并行、过载和关闭 |
 | Application 输入适配 | [`src/surfaces/feishu/adapter.ts`](../src/surfaces/feishu/adapter.ts) | [`tests/feishu-adapter.test.ts`](../tests/feishu-adapter.test.ts)：新 Turn 提交、活动 Turn 追加提示、Application 命令与参数透传、本地帮助/身份/取消、未知斜杠命令失败关闭、结构化错误、未知异常脱敏和输出队列拒绝不重试状态修改 |
 | 身份与授权 | [`src/policy/feishu-access.ts`](../src/policy/feishu-access.ts)、`ConversationActorRegistry` | [`tests/policy.test.ts`](../tests/policy.test.ts)：Surface、App ID、Open ID 和原子替换 |
-| 文本发送 | [`src/surfaces/feishu/outbox.ts`](../src/surfaces/feishu/outbox.ts)、[`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts) | [`tests/feishu-outbox.test.ts`](../tests/feishu-outbox.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：精确账号路由、顺序、并行、每条 20,000 UTF-8 字节且每个逻辑结果最多 5 条的安全分片、明确截断、关闭、SDK Payload、超时和错误；真实限流行为待验证 |
+| 消息发送 | [`src/surfaces/feishu/outbox.ts`](../src/surfaces/feishu/outbox.ts)、[`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts)、[`src/surfaces/feishu/message-content.ts`](../src/surfaces/feishu/message-content.ts) | [`tests/feishu-outbox.test.ts`](../tests/feishu-outbox.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：精确账号路由、顺序、并行、纯文本 UTF-8 与富文本序列化内容的 20,000 字节上限、每个逻辑结果最多 5 条、明确截断、关闭、SDK Payload、超时和错误；真实限流行为待验证 |
 | 输出渲染 | [`src/surfaces/feishu/renderer.ts`](../src/surfaces/feishu/renderer.ts) | [`tests/feishu-renderer.test.ts`](../tests/feishu-renderer.test.ts)：全部 `ConversationCommandResult` 顶层种类、全部命令 Outcome、模型视图、非空集合、会话列表最多 20 条及 48 字符规范预览、Diff、Plan、Goal、关键事件、非关键进度和错误详情隐藏 |
 | 卡片动作 | [`src/surfaces/feishu/interactions.ts`](../src/surfaces/feishu/interactions.ts) | [`tests/feishu-interactions.test.ts`](../tests/feishu-interactions.test.ts)：当前审批拒绝、用户输入为空、MCP elicitation 取消；卡片令牌、过期、Actor 绑定和跨客户端失效待实现 |
 | 配置 | [`runtime/gateway-config.mjs`](../runtime/gateway-config.mjs)、[`src/config/`](../src/config/README.md) | [`tests/config.test.ts`](../tests/config.test.ts)、[`tests/config-reload.test.ts`](../tests/config-reload.test.ts)：启用映射、禁用、畸形输入、未知字段、凭据/启用重启和允许名单热加载 |

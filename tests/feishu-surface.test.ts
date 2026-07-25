@@ -187,6 +187,9 @@ function createFixture(
       sendText: async (chatId, text) => {
         sent.push({ chatId, text });
       },
+      sendPost: async (chatId, text) => {
+        sent.push({ chatId, text });
+      },
     },
     createEventConnection: (options) => new FeishuEventConnection(
       options,
