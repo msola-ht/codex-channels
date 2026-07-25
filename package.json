@@ -43,6 +43,7 @@
     "prebuild": "node scripts/clean-dist.mjs",
     "build": "tsc -p tsconfig.build.json",
     "prepare": "node scripts/prepare-package.mjs",
+    "install:global": "node scripts/install-global-source.mjs",
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "verify:commit": "node scripts/verify-commit.mjs",
     "docs:check": "node scripts/check-docs.mjs",

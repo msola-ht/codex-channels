@@ -2,8 +2,8 @@ import { spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
-  mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,41 +13,45 @@ import { packageDir } from "./package-path.mjs";
 
 const temporaryDirectory = mkdtempSync(join(tmpdir(), "codexc-source-prepare-"));
 const sourceDirectory = join(temporaryDirectory, "source");
+const sourceEntries = new Set([
+  "bin",
+  "launchd",
+  "package-lock.json",
+  "package.json",
+  "runtime",
+  "scripts",
+  "src",
+  "systemd",
+  "tsconfig.build.json",
+  "tsconfig.json",
+]);
 
 try {
-  mkdirSync(join(sourceDirectory, "scripts"), { recursive: true });
+  cpSync(packageDir, sourceDirectory, {
+    recursive: true,
+    filter: (source) => {
+      const relative = source.slice(packageDir.length + 1);
+      const [topLevel] = relative.split("/");
+      return relative === "" || sourceEntries.has(topLevel);
+    },
+  });
   for (const path of [
-    "package.json",
-    "package-lock.json",
-    "tsconfig.json",
-    "tsconfig.build.json",
+    "dist",
+    "node_modules",
   ]) {
-    cpSync(join(packageDir, path), join(sourceDirectory, path));
-  }
-  for (const path of ["src", "runtime"]) {
-    cpSync(join(packageDir, path), join(sourceDirectory, path), {
-      recursive: true,
-    });
-  }
-  for (const path of [
-    "clean-dist.mjs",
-    "install-git-hooks.mjs",
-    "package-path.mjs",
-    "prepare-package.mjs",
-  ]) {
-    cpSync(
-      join(packageDir, "scripts", path),
-      join(sourceDirectory, "scripts", path),
-    );
+    if (existsSync(join(sourceDirectory, path))) {
+      throw new Error(`干净源码副本不应包含 ${path}`);
+    }
   }
   const result = spawnSync(
-    process.execPath,
-    [join(sourceDirectory, "scripts", "prepare-package.mjs")],
+    "npm",
+    ["run", "install:global"],
     {
       cwd: sourceDirectory,
       env: {
         ...process.env,
         npm_config_cache: join(temporaryDirectory, "npm-cache"),
+        npm_config_prefix: join(temporaryDirectory, "global"),
       },
       encoding: "utf8",
     },
@@ -57,13 +61,32 @@ try {
   }
   if (result.status !== 0) {
     throw new Error(
-      `干净源码 prepare 失败：exit=${result.status ?? 1}\n${result.stderr || result.stdout}`,
+      `干净源码全局安装失败：exit=${result.status ?? 1}\n${result.stderr || result.stdout}`,
     );
   }
   if (!existsSync(join(sourceDirectory, "dist", "main.js"))) {
-    throw new Error("干净源码 prepare 后缺少 dist/main.js");
+    throw new Error("干净源码全局安装后缺少 dist/main.js");
   }
-  console.log("干净源码 prepare 冒烟通过");
+  const command = join(temporaryDirectory, "global", "bin", "codexc");
+  if (!existsSync(command)) {
+    throw new Error("干净源码全局安装后缺少 codexc 命令");
+  }
+  const invoked = spawnSync(command, ["--version"], {
+    cwd: sourceDirectory,
+    encoding: "utf8",
+  });
+  if (invoked.error) {
+    throw invoked.error;
+  }
+  const expectedVersion = JSON.parse(
+    readFileSync(join(sourceDirectory, "package.json"), "utf8"),
+  ).version;
+  if (invoked.status !== 0 || invoked.stdout.trim() !== expectedVersion) {
+    throw new Error(
+      `干净源码全局命令不可用：exit=${invoked.status ?? 1}\n${invoked.stderr || invoked.stdout}`,
+    );
+  }
+  console.log("干净源码全局安装冒烟通过");
 } finally {
   rmSync(temporaryDirectory, { recursive: true, force: true });
 }

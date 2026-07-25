@@ -209,8 +209,21 @@ npm run dev:all
 `npm ci` 和 `npm install` 会为当前仓库启用受版本控制的 `.githooks/pre-commit`。
 每次 `git commit` 前会自动执行完整提交检查；如需手动恢复 hook，运行
 `npm run hooks:install`。
-从干净源码仓库全局安装时可以直接运行 `npm install -g .`；安装脚本会按 lockfile
-补齐本地构建依赖、启用 Git hook 并生成 `dist/`，不需要先单独执行 `npm ci`。
+从干净源码仓库进行开发安装时运行 `npm run install:global`；该命令会按 lockfile
+补齐本地构建依赖、启用 Git hook、生成 `dist/`，再把当前仓库链接为全局 `codexc`。
+它不依赖 npm 自动放行本地包的生命周期脚本，因此兼容 npm 12 的脚本策略。
+
+以后更新源码时，先确认没有运行中的 Turn，再执行：
+
+```bash
+git pull --ff-only
+npm run install:global
+codexc service install
+codexc doctor
+```
+
+`service install` 会刷新服务定义并重启 App Server 与 Gateway。若更新后的 README 要求新的
+Codex CLI 版本，先安装其中声明的精确 `@openai/codex` 版本，再安装服务。
 
 常用验证：
 
@@ -227,7 +240,7 @@ npm run verify:commit
 
 `npm run verify:commit` 是本地 hook 与 GitHub CI 共用的提交门禁，覆盖暂存差异格式、
 类型与版本、全目录 Lint、文档链接和索引、全量测试、Shell 语法、npm tarball 安装冒烟，
-干净源码 prepare 冒烟，以及 macOS 上的 launchd 模板检查。不要使用
+干净源码全局安装冒烟，以及 macOS 上的 launchd 模板检查。不要使用
 `git commit --no-verify` 绕过该门禁。
 
 升级项目锁定的 Codex CLI 时，不要直接修改版本号。先安装精确目标 CLI，并在干净工作区运行：
