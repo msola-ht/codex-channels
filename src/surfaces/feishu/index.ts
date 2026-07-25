@@ -1,3 +1,4 @@
+export { FeishuConversationAdapter } from "./adapter.js";
 export {
   FeishuConnectionError,
   FeishuEventConnection,

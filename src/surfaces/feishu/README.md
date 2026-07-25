@@ -6,6 +6,7 @@
 ## 文件索引
 
 - `index.ts`：飞书模块受控出口；尚未从一级 `surfaces/index.ts` 导出。
+- `adapter.ts`：把已授权私聊文本提交到 Application，并通过 Outbox 返回追加提示或安全错误。
 - `client.ts`：官方 SDK、事件长连接及生命周期隔离。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪。
 - `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理。
@@ -44,12 +45,18 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 `outbox.ts` 只同步接收匹配 `feishu + accountId` 的输出，并按 Chat ID 进入
 `ConversationDeliveryQueue`。同一 Chat 串行、不同 Chat 可并行；关闭后拒绝新输出并有限等待
 已接收发送。飞书 SDK 发送对象由 `FeishuTextMessageClient` 通过 `FeishuTextMessagePort`
-注入，Outbox 不持有完整 SDK Client。
+注入，Outbox 不持有完整 SDK Client。Adapter 的追加确认和错误提示也进入同一有界队列，不绕过
+平台输出顺序和关闭边界。
+
+`adapter.ts` 只依赖 Application 的 `ConversationService.submit()` 窄能力。新 Turn 不额外发送
+确认，后续回复由 Core 输出驱动；追加到活动 Turn 时发送明确提示。结构化 `UserFacingError`
+按错误码渲染，不使用其内部 fallback message；未知异常只发送通用提示，然后把原异常交回 Inbox，
+由 Inbox 现有诊断路径仅记录受约束的错误类型。
 
 `interactions.ts` 当前只提供失败关闭语义，不创建待处理状态：命令、文件和权限审批一律拒绝，
 用户输入返回空答案，MCP elicitation 返回取消；`resolved()` 和 `cancelAll()` 保持无状态幂等。
 这不会伪装成飞书已经支持审批，卡片交互仍属于后续独立阶段。
 
-本模块尚未接入配置、Bootstrap、Application 或 Adapter 组合，也不支持可批准交互，因此不构成可启用的飞书渠道。后续阶段按
+本模块尚未接入配置、Bootstrap 或完整生命周期组合，也不支持可批准交互，因此不构成可启用的飞书渠道。后续阶段按
 [`飞书 Surface 接入计划`](../../../docs/feishu-surface-plan.md)推进；不得把 SDK 类型导出到一级
 `surfaces` 入口，也不得在 Core 中引入飞书类型。

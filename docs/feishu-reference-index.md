@@ -122,9 +122,9 @@ EventDispatcher`。
 | Node SDK | npm 包、固定官方源码 | 已精确锁定 `1.71.1` | 阶段 0 |
 | WebSocket 握手和重连 | `WSClient` | 生命周期封装和离线合同已完成；真实应用实验待完成 | 阶段 0 |
 | 消息事件字段裁剪 | `im.message.receive_v1` | 稳定字段映射和畸形输入失败关闭已完成；真实事件待验证 | 阶段 0 |
-| 私聊文本事件 | `im.message.receive_v1` | 平台本地筛选、有界入队和 Access Policy 已完成；Adapter 待实现 | 阶段 1 |
+| 私聊文本事件 | `im.message.receive_v1` | 平台本地筛选、有界入队、Access Policy、Application 提交和安全错误已完成；生命周期组合待实现 | 阶段 1 |
 | 文本发送 | `client.im.v1.message.create` | `chat_id` 文本 Payload、有限 HTTP 超时和脱敏错误已完成；真实应用待验证 | 阶段 1 |
-| 纯文本输出渲染 | `OutputEvent` | 关键事件回退、错误隐藏和有界 Outbox 已完成；Adapter 组合待实现 | 阶段 1 |
+| 纯文本输出渲染 | `OutputEvent` | 关键事件回退、错误隐藏和有界 Outbox 已完成；Surface 生命周期组合待实现 | 阶段 1 |
 | 事件去重与旧事件过滤 | 平台事件 ID、毫秒时间戳 | 已实现飞书模块内有界内存状态；真实重投待验证 | 阶段 1 |
 | 命令和群聊 | 消息事件、群身份与 @Bot | 暂不支持 | 阶段 2 |
 | 卡片审批 | `card.action.trigger` | 接收方式待验证，当前失败关闭 | 阶段 3 |
@@ -144,6 +144,7 @@ EventDispatcher`。
 | WebSocket 和 Client | [`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts) | [`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：凭据、就绪、重连、停止、文本 Payload、HTTP 超时、响应校验和错误脱敏 |
 | 消息事件信封 | [`src/surfaces/feishu/message-event.ts`](../src/surfaces/feishu/message-event.ts) | [`tests/feishu-message-event.test.ts`](../tests/feishu-message-event.test.ts)：稳定字段裁剪和畸形输入失败关闭 |
 | 输入接收与去重 | [`src/surfaces/feishu/inbox.ts`](../src/surfaces/feishu/inbox.ts) | [`tests/feishu-inbox.test.ts`](../tests/feishu-inbox.test.ts)：同步入队、授权、重复、旧事件、顺序、并行、过载和关闭 |
+| Application 输入适配 | [`src/surfaces/feishu/adapter.ts`](../src/surfaces/feishu/adapter.ts) | [`tests/feishu-adapter.test.ts`](../tests/feishu-adapter.test.ts)：新 Turn 提交、活动 Turn 追加提示、结构化错误和未知异常脱敏 |
 | 身份与授权 | [`src/policy/feishu-access.ts`](../src/policy/feishu-access.ts)、`ConversationActorRegistry` | [`tests/policy.test.ts`](../tests/policy.test.ts)：Surface、App ID、Open ID 和原子替换 |
 | 文本发送 | [`src/surfaces/feishu/outbox.ts`](../src/surfaces/feishu/outbox.ts)、[`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts) | [`tests/feishu-outbox.test.ts`](../tests/feishu-outbox.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：精确账号路由、顺序、并行、关闭、SDK Payload、超时和错误；真实限流行为待验证 |
 | 输出渲染 | [`src/surfaces/feishu/renderer.ts`](../src/surfaces/feishu/renderer.ts) | [`tests/feishu-renderer.test.ts`](../tests/feishu-renderer.test.ts)：关键事件、非关键进度和错误详情隐藏 |

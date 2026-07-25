@@ -8,8 +8,9 @@
 
 当前进度（2026-07-25）：已锁定官方 Node SDK `1.71.1`，并完成 Phase 0 的长连接生命周期窄封装、
 消息事件稳定字段裁剪和离线合同测试；阶段 1 已完成平台本地私聊文本 Inbox、访问策略和
-`OutputEvent` 纯文本渲染、有界 Outbox 及官方 SDK 文本发送窄适配。该模块尚未注册到
-Bootstrap，也没有飞书配置、Adapter 组合或审批能力；测试应用的真实握手、
+Application 输入 Adapter、安全错误、`OutputEvent` 纯文本渲染、有界 Outbox 及官方 SDK
+文本发送窄适配。该模块尚未注册到 Bootstrap，也没有飞书配置、完整 Surface 生命周期组合或
+可批准交互；测试应用的真实握手、
 代理、事件投递和卡片动作实验仍待完成。
 
 目标是在现有 TypeScript 模块化单体中增加一个编译期显式注册的飞书 Surface，使飞书与
@@ -103,7 +104,8 @@ Feishu Surface 有界输出队列
 src/surfaces/feishu/
 ├── README.md         # 模块职责、文件索引、官方基线和验证入口
 ├── index.ts          # 飞书模块受控出口
-├── adapter.ts        # SurfaceAdapter、输入编排和生命周期
+├── adapter.ts        # Application 输入编排和安全错误
+├── surface.ts        # SurfaceAdapter 与平台生命周期
 ├── client.ts         # 官方 SDK 的窄封装与可测试端口
 ├── inbox.ts          # 平台本地的有界输入接收和事件去重
 ├── renderer.ts       # 命令结果、OutputEvent 和用户错误渲染
@@ -328,15 +330,16 @@ Secret、Access Token、完整 SDK 响应或原始事件。
 
 - 可选飞书配置与严格校验；
 - [x] `FeishuAccessPolicy`；
-- 单账号 Adapter；
+- [x] Application 输入 Adapter；
+- 单账号 SurfaceAdapter 生命周期组合；
 - [x] 窄 SDK Client 和平台本地输入队列；
 - [x] 私聊/文本/账号筛选、同步有界入队、去重、旧事件和过载处理；
-- 已授权私聊文本提交；
+- [x] 已授权私聊文本提交；
 - [x] 失败关闭 InteractionPort；
 - [x] 所有关键 `OutputEvent` 的纯文本回退与上游错误详情隐藏；
 - [x] 精确账号路由和按 Chat 隔离的有界 Outbox；
 - [x] `chat_id` 文本发送、有限 HTTP 超时和稳定脱敏错误；
-- 结构化用户错误；
+- [x] 结构化用户错误；
 - Bootstrap 显式组合、Setup 基础流程和 Doctor 检查。
 
 明确不做群聊、媒体、流式卡片和可批准交互。

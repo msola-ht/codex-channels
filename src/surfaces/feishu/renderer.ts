@@ -1,4 +1,24 @@
-import type { OutputEvent } from "../../conversation-core/index.js";
+import type {
+  OutputEvent,
+  UserFacingError,
+} from "../../conversation-core/index.js";
+
+export function renderFeishuUserFacingError(
+  error: UserFacingError,
+): string {
+  switch (error.code) {
+    case "message.empty":
+      return "消息不能为空";
+    case "conversation.missing":
+      return "当前还没有 Codex Thread";
+    case "thread.bound":
+      return "该 Codex Thread 已绑定到其他会话";
+    case "workspace.missing":
+      return "当前 Workspace 不存在或未获授权";
+    default:
+      return "Gateway 无法完成请求，请稍后重试";
+  }
+}
 
 export function renderFeishuOutput(event: OutputEvent): string | null {
   switch (event.type) {
