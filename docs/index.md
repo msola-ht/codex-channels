@@ -166,6 +166,8 @@ Bootstrap 收尾。每个阶段只定向复核实际触及的已完成模块，�
 Surface、账号和规范 Actor ID 必须同时匹配。
 `event-bus` 已完成：独立有界队列保护关键事件并隔离消费者；关闭是不可逆终态，并发关闭共享
 同一等待结果，慢消费者只等待有限时间。
+`observability` 已完成：统一 Logger 的异常只保留受约束类型和机器码，不记录 message、stack
+或附加响应正文；Token、Authorization、Password 和 Cookie 字段统一脱敏。
 
 ## 查询顺序
 
