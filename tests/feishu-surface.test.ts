@@ -152,13 +152,13 @@ function createFixture(
   service: Pick<ConversationService, "submit"> | undefined = undefined,
   configurationRecipients?: () => readonly string[],
 ) {
-  const conversationService = service ?? {
+  const conversationService = (service ?? {
     submit: async () => ({
       threadId: "thread-1",
       turnId: "turn-1",
       steered: false,
     }),
-  };
+  }) as ConversationService;
   let readyCallback: (() => void) | undefined;
   let reconnectingCallback: (() => void) | undefined;
   let reconnectedCallback: (() => void) | undefined;

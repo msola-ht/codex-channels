@@ -115,6 +115,60 @@ describe("Feishu outbox", () => {
     ]);
   });
 
+  it("splits a long plain-text result into ordered UTF-8-safe messages", async () => {
+    const sent: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        sendText: async (_chatId, text) => {
+          sent.push(text);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+    const original = `${"中".repeat(7_000)}\n${"x".repeat(25_000)}😀`;
+
+    expect(outbox.notifyText("oc_chat", original)).toBe(true);
+    expect(outbox.notifyText("oc_chat", "分片之后")).toBe(true);
+    await outbox.close();
+
+    const chunks = sent.slice(0, -1);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((text) => Buffer.byteLength(text, "utf8") <= 20_000))
+      .toBe(true);
+    expect(chunks.map((text, index) => {
+      expect(text).toMatch(
+        new RegExp(`^（${index + 1}/${chunks.length}）\\n`, "u"),
+      );
+      return text.replace(/^（\d+\/\d+）\n/u, "");
+    }).join("")).toBe(original);
+    expect(sent.at(-1)).toBe("分片之后");
+  });
+
+  it("bounds one logical output and marks oversized text as truncated", async () => {
+    const sent: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        sendText: async (_chatId, text) => {
+          sent.push(text);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    expect(outbox.notifyText("oc_chat", "中".repeat(100_000))).toBe(true);
+    expect(outbox.notifyText("oc_chat", "截断之后")).toBe(true);
+    await outbox.close();
+
+    expect(sent).toHaveLength(6);
+    expect(sent.slice(0, 5).every(
+      (text) => Buffer.byteLength(text, "utf8") <= 20_000,
+    )).toBe(true);
+    expect(sent[4]).toContain("内容过长，已截断");
+    expect(sent[5]).toBe("截断之后");
+  });
+
   it("waits for accepted output during close and rejects later events", async () => {
     const pending = deferred();
     const sent: string[] = [];

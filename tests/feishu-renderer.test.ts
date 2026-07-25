@@ -1,10 +1,18 @@
 import { describe, expect, it } from "vitest";
 
+import type {
+  ConversationCommandOutcome,
+  ConversationCommandResult,
+  ModelSelectionState,
+} from "../src/application/index.js";
 import {
   isCriticalOutputEvent,
   type OutputEvent,
 } from "../src/conversation-core/index.js";
-import { renderFeishuOutput } from "../src/surfaces/feishu/index.js";
+import {
+  renderFeishuCommandResult,
+  renderFeishuOutput,
+} from "../src/surfaces/feishu/index.js";
 
 const target = {
   surface: "feishu",
@@ -13,6 +21,430 @@ const target = {
 } as const;
 
 describe("Feishu output renderer", () => {
+  it("renders every platform-independent command result kind as plain text", () => {
+    const results: ConversationCommandResult[] = [
+      {
+        kind: "outcome",
+        outcome: { type: "turn.stop-requested", stopped: false },
+      },
+      {
+        kind: "sessions",
+        sessions: [],
+        archived: false,
+      },
+      {
+        kind: "status",
+        status: {
+          workspaceId: "main",
+          workspaceName: "Main",
+          cwd: "/workspace",
+          model: "gpt-test",
+          effort: null,
+          serviceTier: null,
+          modelPending: false,
+          effortPending: false,
+          fastModePending: false,
+        },
+      },
+      {
+        kind: "workspaces",
+        workspaces: [{ id: "main", name: "Main", cwd: "/workspace" }],
+        currentWorkspaceId: "main",
+      },
+      {
+        kind: "models",
+        view: "fast",
+        state: {
+          models: [{
+            id: "gpt-test",
+            model: "gpt-test",
+            displayName: "GPT Test",
+            supportedReasoningEfforts: [{
+              effort: "medium",
+              description: "平衡",
+            }],
+            defaultReasoningEffort: "medium",
+            serviceTiers: [{ id: "priority", name: "Fast" }],
+            defaultServiceTier: "default",
+            isDefault: true,
+          }],
+          model: "gpt-test",
+          effort: "medium",
+          serviceTier: "priority",
+          pending: false,
+          modelPending: false,
+          effortPending: false,
+          serviceTierPending: false,
+        },
+      },
+      { kind: "skills", entries: [] },
+      { kind: "mcp", servers: [] },
+      { kind: "plugins", result: [] },
+      {
+        kind: "usage",
+        result: {
+          summary: {
+            lifetimeTokens: null,
+            peakDailyTokens: null,
+            longestRunningTurnSec: null,
+            currentStreakDays: null,
+            longestStreakDays: null,
+          },
+          daily: [],
+        },
+      },
+      {
+        kind: "limits",
+        result: {
+          limits: [],
+          resetCreditsAvailable: null,
+        },
+      },
+      { kind: "permissions", profiles: [] },
+      {
+        kind: "project-rules",
+        action: "checked",
+        projectRoot: "/workspace",
+        rulesPath: "/workspace/.codex/rules/default.rules",
+      },
+      {
+        kind: "artifacts",
+        view: "diff",
+        artifacts: undefined,
+      },
+      { kind: "goal", goal: null },
+    ];
+
+    expect(results.map((result) => result.kind)).toEqual([
+      "outcome",
+      "sessions",
+      "status",
+      "workspaces",
+      "models",
+      "skills",
+      "mcp",
+      "plugins",
+      "usage",
+      "limits",
+      "permissions",
+      "project-rules",
+      "artifacts",
+      "goal",
+    ]);
+    expect(results.map(renderFeishuCommandResult)).toEqual([
+      "当前没有运行中的任务。",
+      "当前 Workspace 没有匹配的可恢复会话。",
+      expect.stringContaining("Thread：尚未绑定"),
+      expect.stringContaining("Main · main ← 当前"),
+      expect.stringContaining("Fast 模式：开启"),
+      "当前没有已启用的 Skills。",
+      "MCP Servers（0）：",
+      "当前没有已安装 Plugins。",
+      expect.stringContaining("Codex 用量摘要"),
+      expect.stringContaining("Codex 额度"),
+      expect.stringContaining("可用 Permission Profiles"),
+      expect.stringContaining("项目规则检查通过"),
+      "当前 Thread 暂无 Turn Diff。",
+      "当前 Thread 没有 Goal。使用 /goal set <目标> 设置。",
+    ]);
+  });
+
+  it("preserves detailed status and account limit fields", () => {
+    const status = renderFeishuCommandResult({
+      kind: "status",
+      status: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        workspaceId: "main",
+        workspaceName: "Main",
+        cwd: "/workspace",
+        model: "gpt-test",
+        effort: "medium",
+        serviceTier: "priority",
+        modelPending: false,
+        effortPending: false,
+        fastModePending: false,
+        tokenUsage: {
+          total: {
+            totalTokens: 1_000,
+            inputTokens: 800,
+            cachedInputTokens: 600,
+            cacheWriteInputTokens: 50,
+            outputTokens: 200,
+            reasoningOutputTokens: 100,
+          },
+          last: {
+            totalTokens: 100,
+            inputTokens: 80,
+            cachedInputTokens: 40,
+            cacheWriteInputTokens: 5,
+            outputTokens: 20,
+            reasoningOutputTokens: 10,
+          },
+          modelContextWindow: 258_400,
+        },
+        weeklyLimit: {
+          usedPercent: 37,
+          windowDurationMins: 10_080,
+          resetsAt: 1_800_000_000,
+        },
+      },
+    });
+    expect(status).toContain("缓存命中率：75%");
+    expect(status).toContain("缓存写入：50");
+    expect(status).toContain("周限：已使用 37%");
+
+    const limits = renderFeishuCommandResult({
+      kind: "limits",
+      result: {
+        limits: [{
+          limitId: "codex",
+          limitName: "Codex",
+          primary: null,
+          secondary: null,
+          credits: null,
+          individualLimit: {
+            limit: "100",
+            used: "25",
+            remainingPercent: 75,
+            resetsAt: 1_800_000_000,
+          },
+          spendControlReached: false,
+          planType: "pro",
+          rateLimitReachedType: "workspace_member_usage_limit_reached",
+        }],
+        resetCreditsAvailable: null,
+      },
+    });
+    expect(limits).toContain("套餐：Pro");
+    expect(limits).toContain("个人限额：已用 25 / 100");
+    expect(limits).toContain("个人限额剩余：75%");
+    expect(limits).toContain("消费控制：正常");
+    expect(limits).toContain("限流状态：Workspace 用量上限已达到");
+  });
+
+  it("renders every command outcome with its distinguishing data", () => {
+    const cases: Array<{
+      outcome: ConversationCommandOutcome;
+      expected: string;
+    }> = [
+      {
+        outcome: { type: "thread.resumed", threadId: "thread-resumed" },
+        expected: "Thread：thread-resumed",
+      },
+      {
+        outcome: { type: "session.new" },
+        expected: "下一条普通消息将创建新的 Codex Thread",
+      },
+      {
+        outcome: { type: "thread.archived", threadId: "thread-archived" },
+        expected: "Thread：thread-archived",
+      },
+      {
+        outcome: {
+          type: "thread.unarchived",
+          threadId: "thread-unarchived",
+        },
+        expected: "Thread：thread-unarchived",
+      },
+      {
+        outcome: {
+          type: "workspace.selected",
+          workspace: { id: "main", name: "Main", cwd: "/workspace" },
+        },
+        expected: "工作目录：/workspace",
+      },
+      {
+        outcome: { type: "turn.stop-requested", stopped: true },
+        expected: "已请求停止当前任务",
+      },
+      {
+        outcome: { type: "turn.follow-up-queued", position: 3 },
+        expected: "当前第 3 条",
+      },
+      {
+        outcome: { type: "thread.renamed", name: "新名称" },
+        expected: "名称：新名称",
+      },
+      {
+        outcome: { type: "thread.compaction-requested" },
+        expected: "已请求压缩当前 Codex Thread",
+      },
+      {
+        outcome: { type: "thread.forked", threadId: "thread-forked" },
+        expected: "Thread：thread-forked",
+      },
+      {
+        outcome: { type: "review.started", turnId: "turn-review" },
+        expected: "Turn：turn-review",
+      },
+      {
+        outcome: { type: "goal.cleared" },
+        expected: "已清除当前 Thread Goal",
+      },
+      {
+        outcome: {
+          type: "goal.updated",
+          goal: {
+            threadId: "thread-1",
+            objective: "完成飞书接入",
+            status: "active",
+            tokenBudget: 10_000,
+            tokensUsed: 100,
+            timeUsedSeconds: 5,
+            createdAt: 1,
+            updatedAt: 2,
+          },
+        },
+        expected: "目标：完成飞书接入",
+      },
+    ];
+
+    for (const entry of cases) {
+      expect(renderFeishuCommandResult({
+        kind: "outcome",
+        outcome: entry.outcome,
+      })).toContain(entry.expected);
+    }
+  });
+
+  it("renders populated command collections, model views, artifacts, and goal", () => {
+    const sessions = renderFeishuCommandResult({
+      kind: "sessions",
+      sessions: [{
+        id: "thread-1234567890",
+        name: "会话名称",
+        preview: "预览",
+        status: { type: "idle" },
+      }],
+      currentThreadId: "thread-1234567890",
+      archived: false,
+      searchTerm: "会话",
+    });
+    expect(sessions).toContain("会话名称 · thread-12345 · idle ← 当前");
+
+    expect(renderFeishuCommandResult({
+      kind: "skills",
+      entries: [{ name: "tdd", description: "测试驱动开发" }],
+    })).toContain("- tdd：测试驱动开发");
+    expect(renderFeishuCommandResult({
+      kind: "mcp",
+      servers: [{ name: "docs", authStatus: "oAuth", toolCount: 2 }],
+    })).toContain("- docs · auth=oAuth · tools=2");
+    expect(renderFeishuCommandResult({
+      kind: "plugins",
+      result: [{ name: "github", enabled: true }],
+    })).toContain("- github · 已启用");
+    expect(renderFeishuCommandResult({
+      kind: "permissions",
+      profiles: [{
+        id: "workspace-write",
+        allowed: true,
+        description: "允许工作区写入",
+      }],
+    })).toContain("- workspace-write · 允许 · 允许工作区写入");
+    expect(renderFeishuCommandResult({
+      kind: "project-rules",
+      action: "initialized",
+      projectRoot: "/workspace",
+      rulesPath: "/workspace/.codex/rules/default.rules",
+    })).toContain("重启 Codex/App Server 后生效");
+
+    const state: ModelSelectionState = {
+      models: [{
+        id: "gpt-test",
+        model: "gpt-test",
+        displayName: "GPT Test",
+        supportedReasoningEfforts: [{
+          effort: "medium",
+          description: "平衡",
+        }],
+        defaultReasoningEffort: "medium",
+        serviceTiers: [{ id: "priority", name: "Fast" }],
+        defaultServiceTier: "default",
+        isDefault: true,
+      }],
+      model: "gpt-test",
+      effort: "medium",
+      serviceTier: "priority",
+      pending: false,
+      modelPending: false,
+      effortPending: false,
+      serviceTierPending: false,
+    };
+    for (const [view, expected] of [
+      ["model", "可用模型（1）"],
+      ["effort", "可用思考强度"],
+      ["fast", "模型支持：支持 Fast"],
+    ] as const) {
+      expect(renderFeishuCommandResult({
+        kind: "models",
+        view,
+        state,
+      })).toContain(expected);
+    }
+
+    expect(renderFeishuCommandResult({
+      kind: "artifacts",
+      view: "diff",
+      artifacts: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        diff: "+新增",
+      },
+    })).toContain("+新增");
+    expect(renderFeishuCommandResult({
+      kind: "artifacts",
+      view: "plan",
+      artifacts: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        diff: "",
+        plan: {
+          explanation: "按步骤执行",
+          steps: [{ step: "完成测试", status: "completed" }],
+        },
+      },
+    })).toContain("● 完成测试");
+    expect(renderFeishuCommandResult({
+      kind: "goal",
+      goal: {
+        threadId: "thread-1",
+        objective: "完成飞书接入",
+        status: "active",
+        tokenBudget: 10_000,
+        tokensUsed: 100,
+        timeUsedSeconds: 5,
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    })).toContain("Tokens：100 / 10 K");
+  });
+
+  it("bounds session rows and normalizes long multi-line previews", () => {
+    const sessions = renderFeishuCommandResult({
+      kind: "sessions",
+      sessions: Array.from({ length: 21 }, (_, index) => ({
+        id: `thread-${String(index + 1).padStart(12, "0")}`,
+        name: null,
+        preview: index === 0
+          ? `第一行\n第二行 ${"长".repeat(60)}`
+          : `会话 ${index + 1}`,
+        status: { type: "idle" as const },
+      })),
+      archived: false,
+    });
+
+    expect(sessions).toContain(
+      `1. 第一行 第二行 ${"长".repeat(39)}… · thread-00000 · idle`,
+    );
+    expect(sessions).not.toContain("第一行\n第二行");
+    expect(sessions).toContain(
+      "另有 1 条未显示，请使用 /sessions <搜索词> 缩小范围。",
+    );
+    expect(sessions).not.toContain("21. 会话 21");
+  });
+
   it("renders a completed assistant message as plain text", () => {
     const event: OutputEvent = {
       type: "text.completed",

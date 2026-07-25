@@ -1,18 +1,19 @@
 # 飞书 Surface
 
 本目录是飞书 Surface 的平台边界。当前已完成 Phase 0 的官方 SDK、事件长连接和消息字段裁剪基础，
-以及 Phase 1 的私聊文本 Inbox、纯文本输出渲染和 Bootstrap 显式组合；当前可通过严格 TOML
-或统一 Setup 启用开发验证路径。
+以及 Phase 1 的私聊文本 Inbox、纯文本输出渲染和 Bootstrap 显式组合；Phase 2 的预备实现已
+接入全部平台无关私聊命令，但 Phase 1 真实验收尚未整体关闭，群聊不得开始。当前可通过严格
+TOML 或统一 Setup 启用开发验证路径。
 
 ## 文件索引
 
 - `index.ts`：飞书模块受控出口；一级 `surfaces/index.ts` 只转出 Bootstrap 所需工厂和选项类型。
-- `adapter.ts`：把已授权私聊文本提交到 Application，并通过 Outbox 返回追加提示或安全错误。
+- `adapter.ts`：区分普通文本、平台本地命令和 Application 命令，并通过 Outbox 返回结果或安全错误。
 - `client.ts`：官方 SDK、事件长连接及生命周期隔离。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪。
 - `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理。
 - `interactions.ts`：在卡片交互尚未实现时拒绝审批、返回空用户输入并取消 MCP elicitation。
-- `renderer.ts`：把平台无关 `OutputEvent` 映射为受约束的飞书纯文本。
+- `renderer.ts`：把平台无关 `ConversationCommandResult`、`OutputEvent` 和结构化错误映射为飞书纯文本。
 - `outbox.ts`：精确账号路由并通过通用有界队列调用窄文本发送端口。
 - `surface.ts`：组合单账号连接、Inbox、Application Adapter、Outbox 和失败关闭交互端口，并由
   模块入口只暴露 `createFeishuSurface()` 工厂与生产选项类型。
@@ -51,12 +52,18 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 `ConversationDeliveryQueue`。同一 Chat 串行、不同 Chat 可并行；关闭后拒绝新输出并有限等待
 已接收发送。飞书 SDK 发送对象由 `FeishuTextMessageClient` 通过 `FeishuTextMessagePort`
 注入，Outbox 不持有完整 SDK Client。Adapter 的追加确认和错误提示也进入同一有界队列，不绕过
-平台输出顺序和关闭边界。
+平台输出顺序和关闭边界。纯文本超过项目内部 20,000 UTF-8 字节上限时，在同一个队列任务内按
+Unicode 字符安全分片并顺序发送；每个逻辑结果最多发送 5 条，超出时明确标记截断，避免单个结果
+无限占用同一 Chat 的发送任务。这只提供基础传输可靠性，不包含富文本、文件回退或消息更新。
 
-`adapter.ts` 只依赖 Application 的 `ConversationService.submit()` 窄能力。新 Turn 不额外发送
-确认，后续回复由 Core 输出驱动；追加到活动 Turn 时发送明确提示。结构化 `UserFacingError`
-按错误码渲染，不使用其内部 fallback message；未知异常只发送通用提示，然后把原异常交回 Inbox，
-由 Inbox 现有诊断路径仅记录受约束的错误类型。
+`adapter.ts` 对普通文本调用 `ConversationService.submit()`，对已知平台无关命令调用
+`ConversationCommandService.execute()`；`/start`、`/help`、`/whoami` 和 `/cancel` 留在飞书
+边界。未知或畸形斜杠命令失败关闭，不能作为普通消息提交给 Codex。新 Turn 不额外发送确认，
+后续回复由 Core 输出驱动；追加到活动 Turn 时发送明确提示。结构化 `UserFacingError` 按错误码
+渲染，不使用其内部 fallback message；未知异常只发送通用提示，然后把原异常交回 Inbox，由
+Inbox 现有诊断路径仅记录受约束的错误类型。命令结果、追加确认和错误提示被输出队列拒绝时，
+Adapter 不会重试已经执行的状态修改，而是把稳定的队列错误交回同一诊断路径。会话列表最多展示
+20 条，名称或预览会规范空白并限制为 48 个字符，剩余项通过搜索提示收敛。
 
 `interactions.ts` 当前只提供失败关闭语义，不创建待处理状态：命令、文件和权限审批一律拒绝，
 用户输入返回空答案，MCP elicitation 返回取消；`resolved()` 和 `cancelAll()` 保持无状态幂等。
@@ -70,4 +77,5 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 Setup 与只读 Doctor 凭据/Bot 身份探测已完成，真实应用的首次握手、已授权私聊 Turn 和文本回复
 已通过；断线恢复、未授权/重复事件、重启绑定恢复和可批准交互仍未完成。后续阶段按
 [`飞书 Surface 接入计划`](../../../docs/feishu-surface-plan.md)推进；一级 `surfaces` 入口只转出
-窄工厂，不得导出 SDK 类型，也不得在 Core 中引入飞书类型。
+窄工厂，不得导出 SDK 类型，也不得在 Core 中引入飞书类型。Phase 1 真实验收关闭前，Phase 2
+命令只视为预备实现，不开始群聊，也不更新为公开支持。

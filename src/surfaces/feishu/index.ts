@@ -29,7 +29,10 @@ export {
   FeishuOutbox,
   type FeishuTextMessagePort,
 } from "./outbox.js";
-export { renderFeishuOutput } from "./renderer.js";
+export {
+  renderFeishuCommandResult,
+  renderFeishuOutput,
+} from "./renderer.js";
 export {
   createFeishuSurface,
   type FeishuSurfaceOptions,

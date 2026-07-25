@@ -39,7 +39,7 @@ interface FeishuSurfaceDependencies {
 export interface FeishuSurfaceOptions {
   appId: string;
   appSecret: string;
-  service: Pick<ConversationService, "submit">;
+  service: ConversationService;
   access: SurfaceAccessPolicy;
   logger: Logger;
   onFatal: (error: Error) => void;
