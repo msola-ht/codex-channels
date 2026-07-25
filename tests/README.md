@@ -43,7 +43,7 @@
   类别与通讯渠道菜单、Telegram Setup、
   CLI 项目规则生成/检查、launchd、systemd、Unix WebSocket 请求头、模块依赖方向和公开入口边界。
 - Workspace 不可变授权快照、热加载失败回滚、选择歧义，以及 Telegram Surface、账号和规范
-  Actor ID 的联合授权。
+  Actor ID 的联合授权；飞书 Surface、App 账号和 `open_id` 精确允许名单及原子替换。
 - Event Bus 容量、关键事件保护、关闭后拒绝订阅、并发关闭等待、慢消费者超时和消费者失败隔离。
 - 统一 Logger 异常元数据约束，以及 Token、Authorization、Password 和 Cookie 字段脱敏。
 - TOML、热加载分类、标准环境变量、macOS 系统代理和 Linux GNOME 代理的优先级；无代理时不

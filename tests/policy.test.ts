@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  FeishuAccessPolicy,
   TelegramAccessPolicy,
   WorkspaceRegistry,
 } from "../src/policy/index.js";
@@ -72,5 +73,48 @@ describe("TelegramAccessPolicy", () => {
       target: { ...target, surface: "feishu" },
       actorId: "123",
     })).toBe(false);
+  });
+});
+
+describe("FeishuAccessPolicy", () => {
+  it("requires the exact Surface account and open_id", () => {
+    const configured = new Set(["ou_allowed"]);
+    const policy = new FeishuAccessPolicy(configured, "cli_app");
+    configured.add("ou_late");
+    const target = {
+      surface: "feishu" as const,
+      accountId: "cli_app",
+      conversationId: "oc_chat",
+    };
+
+    expect(policy.isAllowed({ target, actorId: "ou_allowed" })).toBe(true);
+    expect(policy.isAllowed({ target, actorId: "OU_ALLOWED" })).toBe(false);
+    expect(policy.isAllowed({ target, actorId: " ou_allowed" })).toBe(false);
+    expect(policy.isAllowed({ target, actorId: "ou_late" })).toBe(false);
+    expect(policy.isAllowed({
+      target: { ...target, accountId: "cli_other" },
+      actorId: "ou_allowed",
+    })).toBe(false);
+    expect(policy.isAllowed({
+      target: { ...target, surface: "telegram" },
+      actorId: "ou_allowed",
+    })).toBe(false);
+  });
+
+  it("atomically replaces the allowed open_id snapshot", () => {
+    const policy = new FeishuAccessPolicy(new Set(["ou_first"]), "cli_app");
+    const replacement = new Set(["ou_second"]);
+    const target = {
+      surface: "feishu" as const,
+      accountId: "cli_app",
+      conversationId: "oc_chat",
+    };
+
+    policy.replace(replacement);
+    replacement.add("ou_late");
+
+    expect(policy.isAllowed({ target, actorId: "ou_first" })).toBe(false);
+    expect(policy.isAllowed({ target, actorId: "ou_second" })).toBe(true);
+    expect(policy.isAllowed({ target, actorId: "ou_late" })).toBe(false);
   });
 });

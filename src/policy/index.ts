@@ -1,4 +1,5 @@
 export type { ConversationActorRegistry } from "./conversation-actor.js";
+export { FeishuAccessPolicy } from "./feishu-access.js";
 export { TelegramAccessPolicy } from "./telegram-access.js";
 export {
   type SurfaceAccessContext,

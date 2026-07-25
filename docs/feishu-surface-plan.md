@@ -8,7 +8,7 @@
 
 当前进度（2026-07-25）：已锁定官方 Node SDK `1.71.1`，并完成 Phase 0 的长连接生命周期窄封装、
 消息事件稳定字段裁剪和离线合同测试；阶段 1 已完成平台本地私聊文本 Inbox。该模块尚未注册到
-Bootstrap，也没有飞书配置、具体 Access Policy、出站消息或审批能力；测试应用的真实握手、
+Bootstrap，也没有飞书配置、出站消息或审批能力；测试应用的真实握手、
 代理、事件投递和卡片动作实验仍待完成。
 
 目标是在现有 TypeScript 模块化单体中增加一个编译期显式注册的飞书 Surface，使飞书与
@@ -326,7 +326,7 @@ Secret、Access Token、完整 SDK 响应或原始事件。
 范围：
 
 - 可选飞书配置与严格校验；
-- `FeishuAccessPolicy`；
+- [x] `FeishuAccessPolicy`；
 - 单账号 Adapter；
 - [x] 窄 SDK Client 和平台本地输入队列；
 - [x] 私聊/文本/账号筛选、同步有界入队、去重、旧事件和过载处理；
