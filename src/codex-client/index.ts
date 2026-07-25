@@ -18,6 +18,10 @@ export {
   sanitizeOperationText,
   toOperationUpdate,
 } from "./operation-adapter.js";
+export {
+  decodeApprovalServerRequest,
+  handleApprovalServerRequest,
+} from "./server-request-adapter.js";
 export { StdioTransport, type StdioTransportOptions } from "./stdio-transport.js";
 export { BaseTransport, type CodexTransport } from "./transport.js";
 export {

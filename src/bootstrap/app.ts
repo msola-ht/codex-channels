@@ -9,6 +9,7 @@ import {
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
 import {
   CodexAppServerClient,
+  handleApprovalServerRequest,
   JsonRpcClient,
   toConversationInputEvent,
   toThreadStateEvent,
@@ -180,7 +181,8 @@ export class GatewayApplication {
         }
       }
     });
-    this.codex.setServerRequestHandler((request) => this.approval.handle(request));
+    this.codex.setServerRequestHandler((request) =>
+      handleApprovalServerRequest(request, this.approval));
   }
 
   start(): Promise<void> {

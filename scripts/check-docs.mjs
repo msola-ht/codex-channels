@@ -156,9 +156,9 @@ function checkProtocolIndexMetrics() {
   );
   const approvalCases = new Set(
     [...readFileSync(
-      join(root, "src/approval/coordinator.ts"),
+      join(root, "src/codex-client/server-request-adapter.ts"),
       "utf8",
-    ).matchAll(/case "([^"]+)":/gu)]
+    ).matchAll(/"([^"]+)"/gu)]
       .map((match) => match[1])
       .filter((method) => serverRequestMethods.has(method)),
   );

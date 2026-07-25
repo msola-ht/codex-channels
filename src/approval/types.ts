@@ -2,7 +2,7 @@ import type { ConversationTarget } from "../conversation-core/index.js";
 import type {
   NetworkApprovalContext,
   NetworkPolicyAmendment,
-} from "../codex-protocol/index.js";
+} from "./requests.js";
 
 export type InteractionRequest =
   | {

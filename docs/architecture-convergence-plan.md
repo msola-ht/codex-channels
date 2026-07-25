@@ -123,7 +123,7 @@ bootstrap ─────────→ 所有具体实现并完成装配
 | 2. Turn 与 Application 命令 | 已完成 | Turn、Review、Goal 端口与响应映射已迁移 |
 | 3. 模型、Fast、用量与扩展查询 | 已完成 | 模型、Fast、账户、Skill、MCP、Plugin 与 Permission Profile 查询均已收敛 |
 | 4. Notification 与 Conversation Core | 已完成 | Routing 与 Core 均只消费稳定事件 |
-| 5. Server Request 与审批 | 未开始 | 独立高权限边界 |
+| 5. Server Request 与审批 | 已完成 | 五类请求的解码、授权协调与响应编码已隔离 |
 | 6. 边界收紧与测试替身 | 未开始 | 等待协议泄漏迁移完成 |
 | 7. 项目内部模块复核 | 未开始 | 每个模块独立处理 |
 | 8. Bootstrap 收尾 | 未开始 | 最后执行 |

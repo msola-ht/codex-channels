@@ -1,256 +1,223 @@
-import { randomUUID } from "node:crypto";
-
-import { JsonRpcError, type RpcServerRequest } from "../codex-client/index.js";
+import type { SessionRouter } from "../session-routing/index.js";
 import type {
-  CommandExecutionApprovalDecision,
+  AdditionalPermissionProfile,
+  ApprovalRequest,
+  ApprovalRequestHandler,
+  ApprovalResponse,
+  CommandApprovalOption,
+  CommandApprovalResult,
   ExecPolicyAmendment,
+  FileSystemPath,
+  JsonValue,
   NetworkApprovalContext,
   NetworkPolicyAmendment,
-} from "../codex-protocol/index.js";
-import type { SessionRouter } from "../session-routing/index.js";
+} from "./requests.js";
 import type { InteractionDecision, InteractionPort } from "./types.js";
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-type AdditionalPermissionsResult =
-  | { valid: true; detail?: string }
-  | { valid: false };
-
-export class ApprovalCoordinator {
+export class ApprovalCoordinator implements ApprovalRequestHandler {
   constructor(
     private readonly router: SessionRouter,
     private readonly interaction: InteractionPort,
     private readonly timeoutMs: number,
   ) {}
 
-  async handle(request: RpcServerRequest): Promise<unknown> {
-    const params = asRecord(request.params);
-    const threadId = stringValue(params.threadId);
-    const turnId = stringValue(params.turnId);
-    const itemId = stringValue(params.itemId);
-    if (!threadId) {
-      return this.safeDecline(request.method, params);
-    }
-    const target = this.router.targetForThread(threadId);
+  async handle(request: ApprovalRequest): Promise<ApprovalResponse> {
+    const target = this.router.targetForThread(request.threadId);
     if (!target) {
-      return this.safeDecline(request.method, params);
+      return safeDecline(request);
     }
 
-    const interactionId = String(request.id ?? randomUUID());
-    switch (request.method) {
-      case "item/commandExecution/requestApproval": {
-        if (!turnId || !itemId) {
-          return this.safeDecline(request.method, params);
+    const requestId = String(request.requestId);
+    switch (request.type) {
+      case "command": {
+        if (!offersCommandDecision(request.availableDecisions, "accept")) {
+          return { type: "command", decision: "decline" };
         }
-        if (!offersOneTimeCommandApproval(params.availableDecisions)) {
-          return { decision: "decline" };
+        const hasCommand = request.command !== null && request.command.trim().length > 0;
+        if (!hasCommand && !request.networkApprovalContext) {
+          return { type: "command", decision: "decline" };
         }
-        const command = stringValue(params.command);
-        const hasCommand = command !== undefined && command.trim().length > 0;
-        const reason = stringValue(params.reason);
-        const additionalPermissions = formatAdditionalPermissions(params.additionalPermissions);
-        if (!additionalPermissions.valid) {
-          return { decision: "decline" };
-        }
-        const networkApprovalContext = parseNetworkApprovalContext(
-          params.networkApprovalContext,
-        );
-        if (
-          params.networkApprovalContext !== undefined
-          && params.networkApprovalContext !== null
-          && !networkApprovalContext
-        ) {
-          return { decision: "decline" };
-        }
-        if (!hasCommand && !networkApprovalContext) {
-          return { decision: "decline" };
-        }
-        const execPolicyAmendment = offeredExecPolicyAmendment(params);
-        const networkPolicyAmendments = offeredNetworkPolicyAmendments(
-          params,
-          networkApprovalContext,
-        );
+        const execPolicyAmendment = offeredExecPolicyAmendment(request);
+        const networkPolicyAmendments = offeredNetworkPolicyAmendments(request);
         if (!networkPolicyAmendments.valid) {
-          return { decision: "decline" };
+          return { type: "command", decision: "decline" };
         }
-        const isNetworkOnly = networkApprovalContext !== undefined && !hasCommand;
+        const isNetworkOnly = request.networkApprovalContext !== null && !hasCommand;
         const decision = await this.interaction.request(target, {
           type: "approval",
-          requestId: interactionId,
+          requestId,
           kind: "command",
-          threadId,
-          turnId,
-          itemId,
+          threadId: request.threadId,
+          turnId: request.turnId,
+          itemId: request.itemId,
           title: isNetworkOnly ? "Codex 请求访问网络" : "Codex 请求执行命令",
           detail: [
-            reason,
-            hasCommand ? command : undefined,
-            networkApprovalContext
-              ? formatNetworkApprovalContext(networkApprovalContext)
+            request.reason ?? undefined,
+            hasCommand ? request.command ?? undefined : undefined,
+            request.networkApprovalContext
+              ? formatNetworkApprovalContext(request.networkApprovalContext)
               : undefined,
-            additionalPermissions.detail,
+            formatAdditionalPermissions(request.additionalPermissions),
             execPolicyAmendment
               ? `持久规则前缀：${JSON.stringify(execPolicyAmendment)}`
               : undefined,
             ...networkPolicyAmendments.amendments.map((amendment) =>
               `持久网络规则：${amendment.action === "allow" ? "允许" : "拒绝"} ${amendment.host}`),
           ].filter(Boolean).join("\n\n"),
-          allowSession: offersSessionCommandApproval(params.availableDecisions),
+          allowSession: offersCommandDecision(
+            request.availableDecisions,
+            "acceptForSession",
+          ),
           ...(execPolicyAmendment ? { execPolicyAmendment } : {}),
-          ...(networkApprovalContext ? { networkApprovalContext } : {}),
+          ...(request.networkApprovalContext
+            ? { networkApprovalContext: request.networkApprovalContext }
+            : {}),
           ...(networkPolicyAmendments.amendments.length > 0
             ? { networkPolicyAmendments: networkPolicyAmendments.amendments }
             : {}),
           expiresInMs: this.timeoutMs,
         });
         return {
-          decision: approvalProtocolDecision(
+          type: "command",
+          decision: commandApprovalDecision(
             decision,
             execPolicyAmendment,
             networkPolicyAmendments.amendments,
           ),
         };
       }
-      case "item/fileChange/requestApproval": {
-        if (!turnId || !itemId) {
-          return this.safeDecline(request.method, params);
-        }
-        const detail = stringValue(params.reason) ?? "Codex 请求修改文件";
+      case "file": {
         const decision = await this.interaction.request(target, {
           type: "approval",
-          requestId: interactionId,
+          requestId,
           kind: "file",
-          threadId,
-          turnId,
-          itemId,
+          threadId: request.threadId,
+          turnId: request.turnId,
+          itemId: request.itemId,
           title: "Codex 请求修改文件",
-          detail,
+          detail: request.reason ?? "Codex 请求修改文件",
           allowSession: true,
           expiresInMs: this.timeoutMs,
         });
-        return { decision: approvalProtocolDecision(decision) };
+        return {
+          type: "file",
+          decision: basicApprovalDecision(decision),
+        };
       }
-      case "item/permissions/requestApproval": {
-        if (!turnId || !itemId) {
-          return this.safeDecline(request.method, params);
-        }
-        const requested = asRecord(params.permissions);
+      case "permissions": {
         const decision = await this.interaction.request(target, {
           type: "approval",
-          requestId: interactionId,
+          requestId,
           kind: "permissions",
-          threadId,
-          turnId,
-          itemId,
+          threadId: request.threadId,
+          turnId: request.turnId,
+          itemId: request.itemId,
           title: "Codex 请求临时权限",
-          detail: stringValue(params.reason) ?? JSON.stringify(requested, null, 2),
+          detail: request.reason ?? JSON.stringify(request.permissions, null, 2),
           allowSession: false,
           expiresInMs: this.timeoutMs,
         });
         return {
+          type: "permissions",
           permissions: isApproved(decision)
-            ? {
-                ...(requested.network ? { network: requested.network } : {}),
-                ...(requested.fileSystem ? { fileSystem: requested.fileSystem } : {}),
-              }
-            : {},
+            ? request.permissions
+            : emptyPermissionProfile(),
           scope: "turn",
         };
       }
-      case "item/tool/requestUserInput": {
-        if (!turnId || !itemId) {
-          return this.safeDecline(request.method, params);
-        }
-        const questions = Array.isArray(params.questions) ? params.questions : [];
-        const normalized = questions.map((question) => {
-          const record = asRecord(question);
-          const options = Array.isArray(record.options)
-            ? record.options
-                .map((option) => stringValue(asRecord(option).label))
-                .filter((option): option is string => Boolean(option))
-            : [];
-          return {
-            id: stringValue(record.id) ?? randomUUID(),
-            header: stringValue(record.header) ?? "问题",
-            question: stringValue(record.question) ?? "请输入回答",
-            options,
-            allowOther: record.isOther === true,
-            secret: record.isSecret === true,
-          };
-        });
+      case "user-input": {
         const decision = await this.interaction.request(target, {
           type: "user-input",
-          requestId: interactionId,
-          threadId,
-          turnId,
-          itemId,
+          requestId,
+          threadId: request.threadId,
+          turnId: request.turnId,
+          itemId: request.itemId,
           title: "Codex 需要补充信息",
-          questions: normalized,
-          expiresInMs:
-            typeof params.autoResolutionMs === "number" ? params.autoResolutionMs : this.timeoutMs,
+          questions: request.questions.map((question) => ({
+            id: question.id,
+            header: question.header,
+            question: question.question,
+            options: question.options?.map((option) => option.label) ?? [],
+            allowOther: question.allowOther,
+            secret: question.secret,
+          })),
+          expiresInMs: request.autoResolutionMs ?? this.timeoutMs,
         });
-        return { answers: decision.type === "user-input" ? mapAnswers(decision.answers) : {} };
+        return {
+          type: "user-input",
+          answers: decision.type === "user-input" ? decision.answers : {},
+        };
       }
-      case "mcpServer/elicitation/request": {
-        const mode = params.mode === "url" ? "url" : "form";
-        const url = stringValue(params.url);
+      case "elicitation": {
         const decision = await this.interaction.request(target, {
           type: "elicitation",
-          requestId: interactionId,
-          threadId,
-          turnId: turnId ?? null,
-          title: `MCP ${stringValue(params.serverName) ?? "Server"} 请求输入`,
-          message: stringValue(params.message) ?? "MCP Server 请求用户输入",
-          mode,
-          ...(mode === "url" && url ? { url } : {}),
+          requestId,
+          threadId: request.threadId,
+          turnId: request.turnId,
+          title: `MCP ${request.serverName} 请求输入`,
+          message: request.message,
+          mode: request.mode === "url" ? "url" : "form",
+          ...(request.mode === "url" ? { url: request.url } : {}),
           expiresInMs: this.timeoutMs,
         });
-        if (decision.type !== "elicitation") {
-          return { action: "cancel", content: null, _meta: null };
+        if (decision.type !== "elicitation" || !isJsonValue(decision.content)) {
+          return { type: "elicitation", action: "cancel", content: null };
         }
-        return { action: decision.action, content: decision.content, _meta: null };
+        return {
+          type: "elicitation",
+          action: decision.action,
+          content: decision.action === "accept" ? decision.content : null,
+        };
       }
-      default:
-        throw new JsonRpcError(-32601, `不支持的 App Server 请求：${request.method}`);
     }
   }
 
   resolved(requestId: string | number): void {
     this.interaction.resolved?.(String(requestId));
   }
+}
 
-  private safeDecline(method: string, params: Record<string, unknown>): unknown {
-    switch (method) {
-      case "item/commandExecution/requestApproval":
-      case "item/fileChange/requestApproval":
-        return { decision: "decline" };
-      case "item/permissions/requestApproval":
-        return { permissions: {}, scope: "turn" };
-      case "item/tool/requestUserInput":
-        return { answers: {} };
-      case "mcpServer/elicitation/request":
-        return { action: "cancel", content: null, _meta: null };
-      default:
-        throw new JsonRpcError(-32601, `不支持的 App Server 请求：${method}`, params);
-    }
+function safeDecline(request: ApprovalRequest): ApprovalResponse {
+  switch (request.type) {
+    case "command":
+      return { type: "command", decision: "decline" };
+    case "file":
+      return { type: "file", decision: "decline" };
+    case "permissions":
+      return {
+        type: "permissions",
+        permissions: emptyPermissionProfile(),
+        scope: "turn",
+      };
+    case "user-input":
+      return { type: "user-input", answers: {} };
+    case "elicitation":
+      return { type: "elicitation", action: "cancel", content: null };
   }
+}
+
+function emptyPermissionProfile(): AdditionalPermissionProfile {
+  return { network: null, fileSystem: null };
 }
 
 function isApproved(decision: InteractionDecision): boolean {
   return decision.type === "approval" && decision.approved;
 }
 
-function approvalProtocolDecision(
+function basicApprovalDecision(
+  decision: InteractionDecision,
+): "accept" | "acceptForSession" | "decline" {
+  if (decision.type !== "approval" || !decision.approved) {
+    return "decline";
+  }
+  return decision.scope === "session" ? "acceptForSession" : "accept";
+}
+
+function commandApprovalDecision(
   decision: InteractionDecision,
   execPolicyAmendment?: ExecPolicyAmendment,
-  networkPolicyAmendments: NetworkPolicyAmendment[] = [],
-): CommandExecutionApprovalDecision {
+  networkPolicyAmendments: readonly NetworkPolicyAmendment[] = [],
+): CommandApprovalResult {
   if (decision.type !== "approval" || !decision.approved) {
     return "decline";
   }
@@ -259,245 +226,125 @@ function approvalProtocolDecision(
   }
   if (decision.scope === "execpolicy") {
     return execPolicyAmendment
-      ? {
-          acceptWithExecpolicyAmendment: {
-            execpolicy_amendment: execPolicyAmendment,
-          },
-        }
+      ? { type: "execpolicy", amendment: execPolicyAmendment }
       : "decline";
   }
   if (decision.scope === "networkpolicy") {
     const amendment = networkPolicyAmendments.find((offered) =>
       sameNetworkPolicyAmendment(offered, decision.networkPolicyAmendment));
     return amendment
-      ? {
-          applyNetworkPolicyAmendment: {
-            network_policy_amendment: amendment,
-          },
-        }
+      ? { type: "networkpolicy", amendment }
       : "decline";
   }
   return "accept";
 }
 
-function mapAnswers(answers: Record<string, string[]>): Record<string, { answers: string[] }> {
-  return Object.fromEntries(
-    Object.entries(answers).map(([questionId, values]) => [questionId, { answers: values }]),
-  );
-}
-
-function formatAdditionalPermissions(value: unknown): AdditionalPermissionsResult {
-  if (value === undefined || value === null) {
-    return { valid: true };
+function formatAdditionalPermissions(
+  permissions: AdditionalPermissionProfile | null,
+): string | undefined {
+  if (!permissions) {
+    return undefined;
   }
-  if (!isRecordWithOnly(value, ["network", "fileSystem"])) {
-    return { valid: false };
-  }
-
   const lines: string[] = [];
-  if (value.network !== undefined && value.network !== null) {
-    if (
-      !isRecordWithOnly(value.network, ["enabled"])
-      || !("enabled" in value.network)
-      || (value.network.enabled !== null && typeof value.network.enabled !== "boolean")
-    ) {
-      return { valid: false };
-    }
-    lines.push(`网络：${value.network.enabled === true ? "开启" : value.network.enabled === false ? "关闭" : "不变"}`);
+  if (permissions.network) {
+    lines.push(
+      `网络：${
+        permissions.network.enabled === true
+          ? "开启"
+          : permissions.network.enabled === false ? "关闭" : "不变"
+      }`,
+    );
   }
-
-  if (value.fileSystem !== undefined && value.fileSystem !== null) {
-    const fileSystem = value.fileSystem;
-    if (!isRecordWithOnly(fileSystem, ["read", "write", "globScanMaxDepth", "entries"])) {
-      return { valid: false };
+  const fileSystem = permissions.fileSystem;
+  if (fileSystem) {
+    if (fileSystem.read?.length) {
+      lines.push(`读取：${fileSystem.read.join("、")}`);
     }
-    const read = permissionPaths(fileSystem.read);
-    const write = permissionPaths(fileSystem.write);
-    if (read === null || write === null) {
-      return { valid: false };
-    }
-    if (read.length > 0) {
-      lines.push(`读取：${read.join("、")}`);
-    }
-    if (write.length > 0) {
-      lines.push(`写入：${write.join("、")}`);
-    }
-    if (
-      fileSystem.globScanMaxDepth !== undefined
-      && (
-        typeof fileSystem.globScanMaxDepth !== "number"
-        || !Number.isInteger(fileSystem.globScanMaxDepth)
-        || fileSystem.globScanMaxDepth < 0
-      )
-    ) {
-      return { valid: false };
+    if (fileSystem.write?.length) {
+      lines.push(`写入：${fileSystem.write.join("、")}`);
     }
     if (fileSystem.globScanMaxDepth !== undefined) {
       lines.push(`Glob 扫描深度：${fileSystem.globScanMaxDepth}`);
     }
-    if (fileSystem.entries !== undefined) {
-      if (!Array.isArray(fileSystem.entries)) {
-        return { valid: false };
-      }
-      for (const entry of fileSystem.entries) {
-        if (
-          !isRecordWithOnly(entry, ["path", "access"])
-          || !["read", "write", "deny"].includes(String(entry.access))
-        ) {
-          return { valid: false };
-        }
-        const path = permissionEntryPath(entry.path);
-        if (!path) {
-          return { valid: false };
-        }
-        const access = entry.access === "read" ? "读取" : entry.access === "write" ? "写入" : "拒绝";
-        lines.push(`${access}规则：${path}`);
-      }
+    for (const entry of fileSystem.entries ?? []) {
+      const access = entry.access === "read"
+        ? "读取"
+        : entry.access === "write" ? "写入" : "拒绝";
+      lines.push(`${access}规则：${formatPermissionPath(entry.path)}`);
     }
   }
-
   return lines.length > 0
-    ? { valid: true, detail: `额外权限：\n${lines.join("\n")}` }
-    : { valid: true, detail: "额外权限：未请求扩展" };
+    ? `额外权限：\n${lines.join("\n")}`
+    : "额外权限：未请求扩展";
 }
 
-function offersOneTimeCommandApproval(value: unknown): boolean {
-  return value === undefined
-    || value === null
-    || (Array.isArray(value) && value.includes("accept"));
-}
-
-function offersSessionCommandApproval(value: unknown): boolean {
-  return value === undefined
-    || value === null
-    || (Array.isArray(value) && value.includes("acceptForSession"));
+function offersCommandDecision(
+  decisions: readonly CommandApprovalOption[] | null,
+  expected: "accept" | "acceptForSession",
+): boolean {
+  return decisions === null || decisions.includes(expected);
 }
 
 function offeredExecPolicyAmendment(
-  params: Record<string, unknown>,
+  request: Extract<ApprovalRequest, { type: "command" }>,
 ): ExecPolicyAmendment | undefined {
-  const proposed = params.proposedExecpolicyAmendment;
-  if (
-    !Array.isArray(proposed)
-    || proposed.length === 0
-    || !proposed.every((entry) => typeof entry === "string")
-  ) {
+  const proposed = request.proposedExecPolicyAmendment;
+  if (!proposed?.length) {
     return undefined;
   }
-
-  const available = params.availableDecisions;
-  if (available === undefined || available === null) {
+  if (request.availableDecisions === null) {
     return [...proposed];
   }
-  if (!Array.isArray(available)) {
-    return undefined;
-  }
-  const offered = available.some((decision) => {
-    const payload = asRecord(decision).acceptWithExecpolicyAmendment;
-    const amendment = asRecord(payload).execpolicy_amendment;
-    return Array.isArray(amendment)
-      && amendment.length === proposed.length
-      && amendment.every((entry, index) => entry === proposed[index]);
-  });
-  return offered ? [...proposed] : undefined;
+  return request.availableDecisions.some((decision) =>
+    typeof decision === "object"
+    && decision.type === "execpolicy"
+    && sameStringArray(decision.amendment, proposed))
+    ? [...proposed]
+    : undefined;
 }
 
 function offeredNetworkPolicyAmendments(
-  params: Record<string, unknown>,
-  context: NetworkApprovalContext | undefined,
+  request: Extract<ApprovalRequest, { type: "command" }>,
 ): { valid: boolean; amendments: NetworkPolicyAmendment[] } {
-  const proposed = params.proposedNetworkPolicyAmendments;
-  if (proposed !== undefined && proposed !== null && !Array.isArray(proposed)) {
-    return { valid: false, amendments: [] };
-  }
-  const normalized = (Array.isArray(proposed) ? proposed : [])
-    .map(parseNetworkPolicyAmendment)
-    .filter((entry): entry is NetworkPolicyAmendment => entry !== undefined);
+  const proposed = request.proposedNetworkPolicyAmendments ?? [];
+  const context = request.networkApprovalContext;
   if (
-    Array.isArray(proposed) && normalized.length !== proposed.length
-    || normalized.length > 0 && (
-      !context || normalized.some((amendment) => amendment.host !== context.host)
-    )
+    proposed.length > 0
+    && (!context || proposed.some((amendment) => amendment.host !== context.host))
   ) {
     return { valid: false, amendments: [] };
   }
-
-  const available = params.availableDecisions;
-  if (available !== undefined && available !== null && !Array.isArray(available)) {
-    return { valid: false, amendments: [] };
-  }
-  if (!Array.isArray(available)) {
-    const legacyAllow = normalized.find((amendment) => amendment.action === "allow");
+  if (request.availableDecisions === null) {
+    const legacyAllow = proposed.find((amendment) => amendment.action === "allow");
     return {
       valid: true,
       amendments: legacyAllow ? [legacyAllow] : [],
     };
   }
-  const availableAmendments = (Array.isArray(available) ? available : []).flatMap((decision) => {
-    const record = asRecord(decision);
-    if (!("applyNetworkPolicyAmendment" in record)) {
-      return [];
-    }
-    const payload = asRecord(record.applyNetworkPolicyAmendment);
-    const amendment = parseNetworkPolicyAmendment(payload.network_policy_amendment);
-    return amendment ? [amendment] : [undefined];
-  });
+  const offered = request.availableDecisions.filter(
+    (decision): decision is Extract<CommandApprovalOption, { type: "networkpolicy" }> =>
+      typeof decision === "object" && decision.type === "networkpolicy",
+  ).map((decision) => decision.amendment);
   if (
-    availableAmendments.some((amendment) => amendment === undefined)
-    || availableAmendments.length > 0 && (
+    offered.some((amendment) =>
       !context
-      || availableAmendments.some((amendment) => amendment?.host !== context.host)
-      || availableAmendments.some((amendment) =>
-        amendment !== undefined && !normalized.some((proposedAmendment) =>
-          sameNetworkPolicyAmendment(proposedAmendment, amendment),
-        ),
-      )
+      || amendment.host !== context.host
+      || !proposed.some((candidate) =>
+        sameNetworkPolicyAmendment(candidate, amendment))
     )
   ) {
     return { valid: false, amendments: [] };
   }
   return {
     valid: true,
-    amendments: availableAmendments.filter(
-      (amendment): amendment is NetworkPolicyAmendment => amendment !== undefined,
-    ),
-  };
-}
-
-function parseNetworkApprovalContext(value: unknown): NetworkApprovalContext | undefined {
-  if (
-    !isRecordWithOnly(value, ["host", "protocol"])
-    || typeof value.host !== "string"
-    || value.host.length === 0
-    || (
-      value.protocol !== "http"
-      && value.protocol !== "https"
-      && value.protocol !== "socks5Tcp"
-      && value.protocol !== "socks5Udp"
-    )
-  ) {
-    return undefined;
-  }
-  return {
-    host: value.host,
-    protocol: value.protocol,
+    amendments: offered.map((amendment) =>
+      proposed.find((candidate) =>
+        sameNetworkPolicyAmendment(candidate, amendment))!),
   };
 }
 
 function formatNetworkApprovalContext(context: NetworkApprovalContext): string {
   return `网络目标：${context.host}\n协议：${context.protocol}`;
-}
-
-function parseNetworkPolicyAmendment(value: unknown): NetworkPolicyAmendment | undefined {
-  if (
-    !isRecordWithOnly(value, ["host", "action"])
-    || typeof value.host !== "string"
-    || value.host.length === 0
-    || (value.action !== "allow" && value.action !== "deny")
-  ) {
-    return undefined;
-  }
-  return { host: value.host, action: value.action };
 }
 
 function sameNetworkPolicyAmendment(
@@ -507,66 +354,50 @@ function sameNetworkPolicyAmendment(
   return left.host === right.host && left.action === right.action;
 }
 
-function permissionPaths(value: unknown): string[] | null {
-  if (value === undefined || value === null) {
-    return [];
-  }
-  return Array.isArray(value) && value.every((entry) => typeof entry === "string")
-    ? value
-    : null;
+function sameStringArray(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length
+    && left.every((entry, index) => entry === right[index]);
 }
 
-function permissionEntryPath(value: unknown): string | undefined {
-  if (!isRecord(value) || typeof value.type !== "string") {
-    return undefined;
-  }
-  if (value.type === "path" && isRecordWithOnly(value, ["type", "path"])) {
-    return stringValue(value.path);
-  }
-  if (value.type === "glob_pattern" && isRecordWithOnly(value, ["type", "pattern"])) {
-    return stringValue(value.pattern);
-  }
-  if (value.type !== "special" || !isRecordWithOnly(value, ["type", "value"])) {
-    return undefined;
-  }
-  return formatSpecialPath(value.value);
-}
-
-function formatSpecialPath(value: unknown): string | undefined {
-  if (!isRecord(value) || typeof value.kind !== "string") {
-    return undefined;
-  }
-  const labels: Record<string, string> = {
-    root: "根目录",
-    minimal: "最小系统路径",
-    project_roots: "项目目录",
-    tmpdir: "系统临时目录",
-    slash_tmp: "/tmp",
-  };
-  if (value.kind === "unknown") {
-    if (!isRecordWithOnly(value, ["kind", "path", "subpath"]) || typeof value.path !== "string") {
-      return undefined;
+function formatPermissionPath(path: FileSystemPath): string {
+  switch (path.type) {
+    case "path":
+      return path.path;
+    case "glob_pattern":
+      return path.pattern;
+    case "special": {
+      const labels = {
+        root: "根目录",
+        minimal: "最小系统路径",
+        project_roots: "项目目录",
+        tmpdir: "系统临时目录",
+        slash_tmp: "/tmp",
+      } as const;
+      if (path.value.kind === "unknown") {
+        return path.value.subpath
+          ? `${path.value.path}/${path.value.subpath}`
+          : path.value.path;
+      }
+      const label = labels[path.value.kind];
+      return path.value.kind === "project_roots" && path.value.subpath
+        ? `${label}/${path.value.subpath}`
+        : label;
     }
-    return typeof value.subpath === "string" ? `${value.path}/${value.subpath}` : value.path;
   }
-  if (!(value.kind in labels) || !isRecordWithOnly(value, ["kind", "subpath"])) {
-    return undefined;
-  }
-  if (value.subpath !== undefined && value.subpath !== null && typeof value.subpath !== "string") {
-    return undefined;
-  }
-  return typeof value.subpath === "string"
-    ? `${labels[value.kind]}/${value.subpath}`
-    : labels[value.kind];
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isRecordWithOnly(
-  value: unknown,
-  allowedKeys: readonly string[],
-): value is Record<string, unknown> {
-  return isRecord(value) && Object.keys(value).every((key) => allowedKeys.includes(key));
+function isJsonValue(value: unknown): value is JsonValue {
+  if (
+    value === null
+    || typeof value === "string"
+    || typeof value === "boolean"
+    || (typeof value === "number" && Number.isFinite(value))
+  ) {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.every(isJsonValue);
+  }
+  return typeof value === "object"
+    && Object.values(value as Record<string, unknown>).every(isJsonValue);
 }

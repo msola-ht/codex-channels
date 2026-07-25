@@ -34,6 +34,7 @@ const allowedModuleDependencies: Record<string, readonly string[]> = {
     "surfaces",
   ],
   "codex-client": [
+    "approval",
     "application",
     "codex-protocol",
     "conversation-core",

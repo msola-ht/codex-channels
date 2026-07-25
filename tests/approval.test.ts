@@ -2,15 +2,25 @@ import { describe, expect, it } from "vitest";
 
 import { ApprovalCoordinator } from "../src/approval/coordinator.js";
 import { InteractionRouter } from "../src/approval/interaction-router.js";
+import type { ApprovalRequestHandler } from "../src/approval/requests.js";
 import type {
   InteractionDecision,
   InteractionPort,
   InteractionRequest,
 } from "../src/approval/types.js";
 import type { ConversationTarget } from "../src/conversation-core/events.js";
+import { handleApprovalServerRequest } from "../src/codex-client/server-request-adapter.js";
+import { JsonRpcError, type RpcServerRequest } from "../src/codex-client/json-rpc.js";
 import type { SessionRouter } from "../src/session-routing/router.js";
 
 const target: ConversationTarget = { surface: "telegram", accountId: "default", conversationId: "100" };
+
+function handleRaw(
+  handler: ApprovalRequestHandler,
+  request: RpcServerRequest,
+): Promise<unknown> {
+  return handleApprovalServerRequest(request, handler);
+}
 
 class FakeInteraction implements InteractionPort {
   requests: InteractionRequest[] = [];
@@ -101,10 +111,27 @@ describe("InteractionRouter", () => {
 });
 
 describe("ApprovalCoordinator", () => {
+  it("rejects unsupported Server Requests without forwarding raw params", async () => {
+    const coordinator = new ApprovalCoordinator(
+      routerWithTarget(),
+      new FakeInteraction(),
+      30_000,
+    );
+
+    await expect(handleRaw(coordinator, {
+      id: "unsupported-request",
+      method: "item/tool/call",
+      params: { secret: "must-not-be-forwarded" },
+    })).rejects.toMatchObject({
+      code: -32601,
+      message: "不支持的 App Server 请求：item/tool/call",
+    } satisfies Partial<JsonRpcError>);
+  });
+
   it("declines privileged requests that cannot be mapped to a conversation", async () => {
     const coordinator = new ApprovalCoordinator(routerWithoutTarget(), new FakeInteraction(), 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-1",
       method: "item/commandExecution/requestApproval",
       params: { threadId: "unknown", command: "touch unsafe" },
@@ -117,7 +144,7 @@ describe("ApprovalCoordinator", () => {
     const interaction = new FakeInteraction();
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-2",
       method: "item/commandExecution/requestApproval",
       params: {
@@ -144,7 +171,7 @@ describe("ApprovalCoordinator", () => {
     const interaction = new FakeInteraction();
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-command-missing-preview",
       method: "item/commandExecution/requestApproval",
       params: {
@@ -166,7 +193,7 @@ describe("ApprovalCoordinator", () => {
     });
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-command-session",
       method: "item/commandExecution/requestApproval",
       params: {
@@ -203,7 +230,7 @@ describe("ApprovalCoordinator", () => {
     });
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-command-prefix",
       method: "item/commandExecution/requestApproval",
       params: {
@@ -247,7 +274,7 @@ describe("ApprovalCoordinator", () => {
     });
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-command-prefix-mismatch",
       method: "item/commandExecution/requestApproval",
       params: {
@@ -282,7 +309,7 @@ describe("ApprovalCoordinator", () => {
     });
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-network-policy",
       method: "item/commandExecution/requestApproval",
       params: {
@@ -332,7 +359,7 @@ describe("ApprovalCoordinator", () => {
       { host: "api.example.com", action: "deny" as const },
     ];
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-network-only",
       method: "item/commandExecution/requestApproval",
       params: {
@@ -384,7 +411,7 @@ describe("ApprovalCoordinator", () => {
     });
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-network-policy-mismatch",
       method: "item/commandExecution/requestApproval",
       params: {
@@ -422,7 +449,7 @@ describe("ApprovalCoordinator", () => {
     const interaction = new FakeInteraction();
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-network-decision-mismatch",
       method: "item/commandExecution/requestApproval",
       params: {
@@ -460,7 +487,7 @@ describe("ApprovalCoordinator", () => {
     const interaction = new FakeInteraction();
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-network-missing-proposal",
       method: "item/commandExecution/requestApproval",
       params: {
@@ -494,7 +521,7 @@ describe("ApprovalCoordinator", () => {
     const interaction = new FakeInteraction();
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-network-legacy-fallback",
       method: "item/commandExecution/requestApproval",
       params: {
@@ -526,7 +553,7 @@ describe("ApprovalCoordinator", () => {
     const interaction = new FakeInteraction();
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-command-once-only",
       method: "item/commandExecution/requestApproval",
       params: {
@@ -550,7 +577,7 @@ describe("ApprovalCoordinator", () => {
     const interaction = new FakeInteraction();
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-additional-permissions",
       method: "item/commandExecution/requestApproval",
       params: {
@@ -592,7 +619,7 @@ describe("ApprovalCoordinator", () => {
     const interaction = new FakeInteraction();
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-malformed-additional-permissions",
       method: "item/commandExecution/requestApproval",
       params: {
@@ -614,7 +641,7 @@ describe("ApprovalCoordinator", () => {
     const interaction = new FakeInteraction();
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-without-one-time-accept",
       method: "item/commandExecution/requestApproval",
       params: {
@@ -634,7 +661,7 @@ describe("ApprovalCoordinator", () => {
     const interaction = new FakeInteraction();
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-malformed",
       method: "item/commandExecution/requestApproval",
       params: { threadId: "thread-1", command: "npm test" },
@@ -648,7 +675,7 @@ describe("ApprovalCoordinator", () => {
     const interaction = new FakeInteraction();
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-file",
       method: "item/fileChange/requestApproval",
       params: {
@@ -678,10 +705,9 @@ describe("ApprovalCoordinator", () => {
     const permissions = {
       network: { enabled: true },
       fileSystem: { read: ["/workspace"], write: ["/workspace"] },
-      ignored: "must-not-be-returned",
     };
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-permissions",
       method: "item/permissions/requestApproval",
       params: {
@@ -717,7 +743,7 @@ describe("ApprovalCoordinator", () => {
     });
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-input",
       method: "item/tool/requestUserInput",
       params: {
@@ -764,7 +790,7 @@ describe("ApprovalCoordinator", () => {
     });
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-input-malformed",
       method: "item/tool/requestUserInput",
       params: {
@@ -785,7 +811,7 @@ describe("ApprovalCoordinator", () => {
     });
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: "request-mcp",
       method: "mcpServer/elicitation/request",
       params: {
@@ -823,7 +849,7 @@ describe("ApprovalCoordinator", () => {
     const interaction = new FakeInteraction();
     const coordinator = new ApprovalCoordinator(routerWithoutTarget(), interaction, 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: `unmapped:${method}`,
       method,
       params: {
@@ -846,7 +872,7 @@ describe("ApprovalCoordinator", () => {
     const interaction = new FakeInteraction({ type: "approval", approved: false });
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
 
-    const response = await coordinator.handle({
+    const response = await handleRaw(coordinator, {
       id: `rejected:${method}`,
       method,
       params: {

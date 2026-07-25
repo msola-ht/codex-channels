@@ -6,8 +6,9 @@
 
 - `index.ts`：向进程入口公开 `GatewayApplication`。
 - `app.ts`：校验 Codex 版本，装配 Transport、Client、Core、Router 和 Storage；处理启动、重连、
-  订阅恢复与关闭，并通过 Client 适配器把稳定事件分别转交 Core 与 `session-routing`；未知或
-  畸形 Notification 只记录 method 后忽略。
+  订阅恢复与关闭，并通过 Client 适配器把稳定事件分别转交 Core 与 `session-routing`、把
+  Server Request 转交 Approval；未知或畸形 Notification 只记录 method 后忽略，未知或畸形
+  高权限请求明确拒绝。
 - `surface-composition.ts`：以编译期显式工厂组合 Surface、访问策略、热加载钩子和平台故障上报。
 - `config-lifecycle.ts`：管理配置监听、防抖重载、持久配置事件投递、信号与进程退出。
 - `surface-manager.ts`：按 `surface + accountId` 向已启动 Surface 集中路由 Core 输出；按注册顺序启动

@@ -29,5 +29,7 @@ Client 或生成协议。Turn、Review 和 Goal 的执行端口与稳定结果�
 启用状态，Permission Profile 查询只输出稳定的目录选项。阶段 3 查询边界已完成；其余通知和
 审批协议隔离按计划推进。阶段 4 已完成：Client 把 Thread 路由通知与 Turn、Item、Token、账户、
 额度、MCP、warning 等 Core 通知分别转换为稳定事件；`conversation-core` 不再依赖生成协议，
-目标依赖明确为 `codex-client -> conversation-core`。整体范围见
+目标依赖明确为 `codex-client -> conversation-core`。阶段 5 也已完成：Client 解码和编码五类
+Server Request，`approval` 只拥有稳定请求、授权语义和用户决定，不再依赖 Client 或生成协议。
+整体范围见
 [`Codex CLI 协议边界收敛计划`](../docs/architecture-convergence-plan.md)。
