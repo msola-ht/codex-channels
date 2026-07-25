@@ -1,59 +1,29 @@
-import type { SessionRouter } from "./router.js";
+import type { SessionRouter, ThreadModelSettings } from "./router.js";
 
-export interface ThreadStateNotification {
-  method: string;
-  params?: unknown;
-}
-
-const unavailableThreadNotifications = new Set([
-  "thread/archived",
-  "thread/deleted",
-]);
+export type ThreadStateEvent =
+  | {
+      type: "thread.settings.updated";
+      threadId: string;
+      settings: ThreadModelSettings;
+    }
+  | { type: "thread.archived"; threadId: string }
+  | { type: "thread.deleted"; threadId: string }
+  | { type: "thread.closed"; threadId: string };
 
 export class ThreadStateSynchronizer {
   constructor(private readonly router: SessionRouter) {}
 
-  handle(notification: ThreadStateNotification): void {
-    if (notification.method === "thread/settings/updated") {
-      const params = asRecord(notification.params);
-      const settings = asRecord(params?.threadSettings);
-      const threadId = stringValue(params?.threadId);
-      const model = stringValue(settings?.model);
-      const effort = nullableString(settings?.effort);
-      const serviceTier = nullableString(settings?.serviceTier);
-      if (threadId && model && effort.valid && serviceTier.valid) {
-        this.router.updateModelSettings(threadId, {
-          model,
-          effort: effort.value,
-          serviceTier: serviceTier.value,
-        });
-      }
-      return;
-    }
-
-    if (unavailableThreadNotifications.has(notification.method)) {
-      const threadId = stringValue(asRecord(notification.params)?.threadId);
-      if (threadId) {
-        this.router.forgetThread(threadId);
-      }
+  handle(event: ThreadStateEvent): void {
+    switch (event.type) {
+      case "thread.settings.updated":
+        this.router.updateModelSettings(event.threadId, event.settings);
+        return;
+      case "thread.archived":
+      case "thread.deleted":
+        this.router.forgetThread(event.threadId);
+        return;
+      case "thread.closed":
+        return;
     }
   }
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function nullableString(
-  value: unknown,
-): { valid: true; value: string | null } | { valid: false } {
-  return typeof value === "string" || value === null
-    ? { valid: true, value }
-    : { valid: false };
 }

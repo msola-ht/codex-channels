@@ -27,5 +27,6 @@ Client 或生成协议。Turn、Review 和 Goal 的执行端口与稳定结果�
 输出稳定摘要。直接安装 Skill 查询也已在 Client 边界完成路径与 Scope 裁剪，MCP 状态查询
 已裁剪为按当前 Thread 获取的名称、认证状态和工具数量，Plugin 查询只输出已安装项的名称与
 启用状态，Permission Profile 查询只输出稳定的目录选项。阶段 3 查询边界已完成；其余通知和
-审批协议隔离按
-[`Codex CLI 协议边界收敛计划`](../docs/architecture-convergence-plan.md) 分阶段推进。
+审批协议隔离按计划推进。阶段 4 已先把 Thread 设置、归档、删除和关闭通知转换为 Routing
+拥有的稳定事件，Conversation Core 的 Turn、Item 和状态通知仍待后续切片处理；整体范围见
+[`Codex CLI 协议边界收敛计划`](../docs/architecture-convergence-plan.md)。

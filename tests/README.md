@@ -8,6 +8,8 @@
   重试和断线清理。
 - Thread 新建、列表、恢复、切换、删除、订阅、恢复失败绑定保留、关闭/归档/删除通知语义、
   官方响应到稳定路由快照的映射与必需字段失败关闭、活动 Turn 重启恢复和 Workspace 路由。
+- Thread 设置、归档、删除和关闭 Notification 到稳定 Routing 事件的映射，残缺或无关通知隔离，
+  以及 Routing 不再解析原始协议信封。
 - 活动 Turn 的即时 steer 与下一 Turn 有界内存队列、顺序启动、Thread 隔离和失败清理；项目输入
   到官方 `UserInput` 的映射，以及 Review、Goal 和控制响应到稳定 Application 结果的映射。
 - Conversation Core 状态归约、严格 Turn 完成状态、可重试错误隔离、Thread/全局警告路由、

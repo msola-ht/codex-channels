@@ -79,8 +79,8 @@
 | 能力 | 当前使用的官方方法或通知 | 本项目入口与验证 |
 | --- | --- | --- |
 | 初始化与连接 | `initialize`、`initialized` | [`codex-client/`](../src/codex-client/README.md)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)；发送消息受生成的 `ClientRequest` / `ClientNotification` 约束 |
-| Thread 生命周期 | `thread/list`、`thread/read`、`thread/start`、`thread/resume`、`thread/fork`、`thread/archive`、`thread/unarchive`、`thread/delete`、`thread/unsubscribe`、`thread/name/set`、`thread/compact/start`、`thread/closed`、`thread/archived`、`thread/deleted` | [`thread-adapter.ts`](../src/codex-client/thread-adapter.ts) 把官方响应映射为 [`session-routing/`](../src/session-routing/README.md) 的稳定快照；[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`session-router.test.ts`](../tests/session-router.test.ts)、[`thread-state-sync.test.ts`](../tests/thread-state-sync.test.ts) 验证边界与行为 |
-| Thread 设置 | `thread/settings/updated`、`model/list`、`config/read`、`config/batchWrite` | [`model-port.ts`](../src/application/model-port.ts) 定义稳定模型边界，[`model-adapter.ts`](../src/codex-client/model-adapter.ts) 映射官方目录；[`thread-state-sync.ts`](../src/session-routing/thread-state-sync.ts)、[`model-selection-service.test.ts`](../tests/model-selection-service.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
+| Thread 生命周期 | `thread/list`、`thread/read`、`thread/start`、`thread/resume`、`thread/fork`、`thread/archive`、`thread/unarchive`、`thread/delete`、`thread/unsubscribe`、`thread/name/set`、`thread/compact/start`、`thread/closed`、`thread/archived`、`thread/deleted` | [`thread-adapter.ts`](../src/codex-client/thread-adapter.ts) 把官方响应映射为稳定快照，[`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 把生命周期通知映射为 [`session-routing/`](../src/session-routing/README.md) 的稳定事件；[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`session-router.test.ts`](../tests/session-router.test.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts)、[`thread-state-sync.test.ts`](../tests/thread-state-sync.test.ts) |
+| Thread 设置 | `thread/settings/updated`、`model/list`、`config/read`、`config/batchWrite` | [`model-port.ts`](../src/application/model-port.ts) 定义稳定模型边界，[`model-adapter.ts`](../src/codex-client/model-adapter.ts) 映射官方目录，[`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 隔离设置通知；[`thread-state-sync.ts`](../src/session-routing/thread-state-sync.ts)、[`model-selection-service.test.ts`](../tests/model-selection-service.test.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts) |
 | Turn 控制 | `turn/start`、`turn/steer`、`turn/interrupt`、`turn/started`、`error`、`turn/completed` | [`turn-port.ts`](../src/application/turn-port.ts) 定义稳定执行端口，[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts) 编码官方输入并映射响应；[`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts) 验证请求和业务行为 |
 | Item 与流式输出 | `item/started`、`item/completed`、`item/agentMessage/delta` | [`core.ts`](../src/conversation-core/core.ts)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts) |
 | 警告 | `warning`（Thread 目标或全局） | [`core.ts`](../src/conversation-core/core.ts)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts) |
@@ -105,6 +105,7 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 | Turn、Review 和 Goal 如何隔离官方协议 | [`turn-port.ts`](../src/application/turn-port.ts)、[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts) | [`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
 | Thread/Turn/Item 如何归约 | [`conversation-core/`](../src/conversation-core/README.md) | [`conversation-core.test.ts`](../tests/conversation-core.test.ts) |
 | 官方 Thread 如何进入稳定业务边界 | [`thread-adapter.ts`](../src/codex-client/thread-adapter.ts)、[`thread-port.ts`](../src/session-routing/thread-port.ts) | [`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
+| Thread 路由通知如何隔离 | [`notification-adapter.ts`](../src/codex-client/notification-adapter.ts)、[`thread-state-sync.ts`](../src/session-routing/thread-state-sync.ts) | [`notification-adapter.test.ts`](../tests/notification-adapter.test.ts)、[`thread-state-sync.test.ts`](../tests/thread-state-sync.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | Workspace、Conversation、Thread 如何绑定 | [`session-routing/`](../src/session-routing/README.md) | [`session-router.test.ts`](../tests/session-router.test.ts)、[`module-boundaries.test.ts`](../tests/module-boundaries.test.ts) |
 | 模型、思考强度和 Fast 如何隔离并同步 | [`model-port.ts`](../src/application/model-port.ts)、[`model-adapter.ts`](../src/codex-client/model-adapter.ts)、[`thread-state-sync.ts`](../src/session-routing/thread-state-sync.ts) | [`model-selection-service.test.ts`](../tests/model-selection-service.test.ts)、[`thread-state-sync.test.ts`](../tests/thread-state-sync.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | 账户用量与额度查询如何隔离 | [`account-port.ts`](../src/application/account-port.ts)、[`account-adapter.ts`](../src/codex-client/account-adapter.ts) | [`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`telegram-format.test.ts`](../tests/telegram-format.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
@@ -140,7 +141,10 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 协议边界收敛阶段 3 已完成：模型、Fast、账户、Skill、MCP、Plugin 与 Permission Profile 查询
 均通过 Application 窄端口返回稳定结果，官方查询响应只在 Client 适配边界出现。
 
-后续不把上述模块推倒重做，而是依次完成 Notification、审批、边界收紧、项目内部模块和
+协议边界收敛阶段 4 正在进行：Thread 设置、归档、删除和关闭通知已由 Client 转换为 Routing
+稳定事件；Turn、Item、状态和全局通知仍按后续独立切片迁移。
+
+后续不把上述模块推倒重做，而是依次完成其余 Notification、审批、边界收紧、项目内部模块和
 Bootstrap 收尾。每个阶段只定向复核实际触及的已完成模块，并保持独立修改、验证、审查和提交。
 
 ## 查询顺序

@@ -50,14 +50,12 @@ describe("ThreadStateSynchronizer", () => {
     const synchronizer = new ThreadStateSynchronizer(router);
 
     synchronizer.handle({
-      method: "thread/settings/updated",
-      params: {
-        threadId: "thread-1",
-        threadSettings: {
-          model: "gpt-5.6-sol",
-          effort: "high",
-          serviceTier: "priority",
-        },
+      type: "thread.settings.updated",
+      threadId: "thread-1",
+      settings: {
+        model: "gpt-5.6-sol",
+        effort: "high",
+        serviceTier: "priority",
       },
     });
 
@@ -68,43 +66,16 @@ describe("ThreadStateSynchronizer", () => {
     });
   });
 
-  it("ignores incomplete settings notifications instead of inventing local state", () => {
-    const router = createBoundRouter();
-    router.updateModelSettings("thread-1", {
-      model: "gpt-original",
-      effort: "medium",
-      serviceTier: "default",
-    });
-    const synchronizer = new ThreadStateSynchronizer(router);
-
-    synchronizer.handle({
-      method: "thread/settings/updated",
-      params: {
-        threadId: "thread-1",
-        threadSettings: {
-          model: "gpt-changed",
-          effort: "high",
-        },
-      },
-    });
-
-    expect(router.modelSettings(target)).toEqual({
-      model: "gpt-original",
-      effort: "medium",
-      serviceTier: "default",
-    });
-  });
-
   it.each([
-    "thread/archived",
-    "thread/deleted",
-  ])("forgets a bound Thread after %s", (method) => {
+    "thread.archived",
+    "thread.deleted",
+  ] as const)("forgets a bound Thread after %s", (type) => {
     const router = createBoundRouter();
     const synchronizer = new ThreadStateSynchronizer(router);
 
     synchronizer.handle({
-      method,
-      params: { threadId: "thread-1" },
+      type,
+      threadId: "thread-1",
     });
 
     expect(router.current(target)).toBeUndefined();
@@ -115,19 +86,9 @@ describe("ThreadStateSynchronizer", () => {
     const synchronizer = new ThreadStateSynchronizer(router);
 
     synchronizer.handle({
-      method: "thread/closed",
-      params: { threadId: "thread-1" },
+      type: "thread.closed",
+      threadId: "thread-1",
     });
-
-    expect(router.current(target)?.threadId).toBe("thread-1");
-  });
-
-  it("ignores unrelated and malformed Thread notifications", () => {
-    const router = createBoundRouter();
-    const synchronizer = new ThreadStateSynchronizer(router);
-
-    synchronizer.handle({ method: "turn/started", params: { threadId: "thread-1" } });
-    synchronizer.handle({ method: "thread/deleted", params: { threadId: 1 } });
 
     expect(router.current(target)?.threadId).toBe("thread-1");
   });

@@ -27,6 +27,8 @@
   Marketplace、路径、版本、策略和加载错误。
 - `permission-adapter.ts`：把官方 Permission Profile 分页响应裁剪为 ID、说明和策略可选状态，
   并对必需字段与分页游标失败关闭。
+- `notification-adapter.ts`：把当前支持的官方 Notification 转换为项目拥有的稳定事件；当前先
+  隔离 Thread 设置、归档、删除和关闭路由事件，残缺或无关通知不进入 Routing。
 - `client.ts`：Thread 搜索/归档、Turn、模型、权限、已安装插件、Skill、用量及用户级配置
   读取与服务层级写入等 App Server 方法的类型化封装；MCP 查询按 Thread 使用
   `toolsAndAuthOnly` 分页，配置读取只公开稳定服务层级值，Plugin 查询只调用

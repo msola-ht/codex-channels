@@ -10,6 +10,7 @@ import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
 import {
   CodexAppServerClient,
   JsonRpcClient,
+  toThreadStateEvent,
   UnixWebSocketTransport,
   type RpcNotification,
 } from "../codex-client/index.js";
@@ -152,7 +153,10 @@ export class GatewayApplication {
     this.approval = new ApprovalCoordinator(this.router, this.interactions, config.approvalTimeoutMs);
     this.inbound.subscribe("conversation-core", (notification) => {
       this.core.handle(notification);
-      this.threadState.handle(notification);
+      const threadStateEvent = toThreadStateEvent(notification);
+      if (threadStateEvent) {
+        this.threadState.handle(threadStateEvent);
+      }
     });
     this.inbound.subscribe("approval-resolution", (notification) => {
       if (notification.method === "serverRequest/resolved") {

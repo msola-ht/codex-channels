@@ -6,6 +6,7 @@ import pino from "pino";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { CodexAppServerClient } from "../src/codex-client/client.js";
+import { toThreadStateEvent } from "../src/codex-client/index.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
 import { StdioTransport } from "../src/codex-client/stdio-transport.js";
@@ -409,33 +410,20 @@ contractSuite("isolated Codex App Server state contract", () => {
   }, 15_000);
 
   it("broadcasts peer model, effort and Fast changes across a peer reconnect", async () => {
-    const observedSettings: Array<{
-      model: unknown;
-      effort: unknown;
-      serviceTier: unknown;
-    }> = [];
-    const removeNotification = ownerClient.onNotification((notification) => {
-      if (notification.method !== "thread/settings/updated") {
-        return;
-      }
-      const params = notification.params as {
-        threadId?: unknown;
-        threadSettings?: {
-          model?: unknown;
-          effort?: unknown;
-          serviceTier?: unknown;
-        };
-      };
-      if (params.threadId === threadId) {
-        observedSettings.push({
-          model: params.threadSettings?.model,
-          effort: params.threadSettings?.effort,
-          serviceTier: params.threadSettings?.serviceTier,
-        });
-      }
-    });
     const started = await ownerClient.startThread(workdir);
     const threadId = started.thread.id;
+    const observedSettings: Array<{
+      model: string;
+      effort: string | null;
+      serviceTier: string | null;
+    }> = [];
+    const removeNotification = ownerClient.onNotification((notification) => {
+      const event = toThreadStateEvent(notification);
+      if (event?.type !== "thread.settings.updated" || event.threadId !== threadId) {
+        return;
+      }
+      observedSettings.push(event.settings);
+    });
     try {
       await peerRpc.request({
         method: "thread/settings/update",

@@ -122,7 +122,7 @@ bootstrap ─────────→ 所有具体实现并完成装配
 | 1. Thread 生命周期 | 已完成 | 稳定端口、响应映射、调用方与测试已迁移 |
 | 2. Turn 与 Application 命令 | 已完成 | Turn、Review、Goal 端口与响应映射已迁移 |
 | 3. 模型、Fast、用量与扩展查询 | 已完成 | 模型、Fast、账户、Skill、MCP、Plugin 与 Permission Profile 查询均已收敛 |
-| 4. Notification 与 Conversation Core | 未开始 | 等待 Thread 与状态类型稳定 |
+| 4. Notification 与 Conversation Core | 进行中 | Thread 路由通知已隔离；Core 通知待处理 |
 | 5. Server Request 与审批 | 未开始 | 独立高权限边界 |
 | 6. 边界收紧与测试替身 | 未开始 | 等待协议泄漏迁移完成 |
 | 7. 项目内部模块复核 | 未开始 | 每个模块独立处理 |

@@ -14,5 +14,5 @@ export {
 } from "./thread-port.js";
 export {
   ThreadStateSynchronizer,
-  type ThreadStateNotification,
+  type ThreadStateEvent,
 } from "./thread-state-sync.js";
