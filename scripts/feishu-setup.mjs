@@ -1,12 +1,13 @@
 import { pathToFileURL } from "node:url";
 
-import { Client, registerApp } from "@larksuiteoapi/node-sdk";
+import { registerApp } from "@larksuiteoapi/node-sdk";
 import qrcode from "qrcode-terminal";
 
 import {
   readGatewayConfig,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
+import { validateFeishuApplication } from "./feishu-application.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 import { createPrompter } from "./terminal-prompter.mjs";
 
@@ -224,18 +225,6 @@ async function validateRegisteredApplication(validateApplication, result) {
   } catch {
     throw new Error("飞书应用凭据或机器人身份验证失败");
   }
-}
-
-async function validateFeishuApplication({ appId, appSecret }) {
-  const client = new Client({ appId, appSecret });
-  const response = await client.request({
-    method: "GET",
-    url: "/open-apis/bot/v3/info",
-  });
-  return {
-    openId: response?.bot?.open_id,
-    name: response?.bot?.app_name,
-  };
 }
 
 function validateAuthorizationUrl(value) {

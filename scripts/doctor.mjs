@@ -14,6 +14,7 @@ import {
   readGatewayConfig,
   validateGatewayConfigDocument,
 } from "../runtime/gateway-config.mjs";
+import { validateFeishuApplication } from "./feishu-application.mjs";
 import { packageDir, resolveConfiguredPath, runtimeConfig, userDataDir } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
@@ -52,8 +53,9 @@ if (!existsSync(configPath)) {
   }
   checkMode("配置文件权限", configPath, 0o600);
   try {
-    document = readGatewayConfig(configPath);
-    validateGatewayConfigDocument(document);
+    const candidate = readGatewayConfig(configPath);
+    validateGatewayConfigDocument(candidate);
+    document = candidate;
     record("配置格式", true, "TOML 语法与 Gateway Schema 有效");
   } catch (error) {
     record("配置格式", false, errorMessage(error));
@@ -62,6 +64,7 @@ if (!existsSync(configPath)) {
 
 if (document) {
   const telegram = table(document.telegram);
+  const feishu = table(document.feishu);
   const codex = table(document.codex);
   const tokenConfigured = Boolean(stringValue(telegram.bot_token));
   const allowedUsers = validAllowedUsers(telegram.allowed_user_ids);
@@ -71,6 +74,26 @@ if (document) {
     allowedUsers,
     allowedUsers ? "允许列表有效" : "telegram.allowed_user_ids 未配置或格式无效",
   );
+  if (feishu.enabled === true) {
+    const appId = stringValue(feishu.app_id);
+    const appSecret = stringValue(feishu.app_secret);
+    const allowedOpenIds = validAllowedOpenIds(feishu.allowed_open_ids);
+    record(
+      "飞书配置",
+      allowedOpenIds,
+      allowedOpenIds
+        ? `已启用，允许 ${feishu.allowed_open_ids.length} 个用户`
+        : "feishu.allowed_open_ids 未配置或格式无效",
+    );
+    try {
+      await validateFeishuApplication({ appId, appSecret });
+      record("飞书应用", true, "凭据与 Bot 身份验证通过（敏感内容已隐藏）");
+    } catch {
+      record("飞书应用", false, "凭据、网络或 Bot 身份验证失败");
+    }
+  } else {
+    note("飞书", "未启用");
+  }
 
   try {
     const { workspaces, defaultWorkspace } = readWorkspaceConfig(document);
@@ -202,6 +225,12 @@ function validAllowedUsers(value) {
   return Array.isArray(value)
     && value.length > 0
     && value.every((item) => Number.isSafeInteger(item) && item > 0);
+}
+
+function validAllowedOpenIds(value) {
+  return Array.isArray(value)
+    && value.length > 0
+    && value.every((item) => typeof item === "string" && /^ou_.+$/u.test(item));
 }
 
 function table(value) {

@@ -67,6 +67,7 @@ try {
   const installedPackage = join(temporaryDirectory, "node_modules", "@hegenai", "codexc");
   for (const requiredFile of [
     "runtime/network-proxy.mjs",
+    "scripts/feishu-application.mjs",
     "scripts/feishu-setup.mjs",
     "scripts/setup.mjs",
     "scripts/codex-rules.mjs",

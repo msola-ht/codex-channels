@@ -2,7 +2,7 @@
 
 本目录是飞书 Surface 的平台边界。当前已完成 Phase 0 的官方 SDK、事件长连接和消息字段裁剪基础，
 以及 Phase 1 的私聊文本 Inbox、纯文本输出渲染和 Bootstrap 显式组合；当前可通过严格 TOML
-手工启用开发验证路径。
+或统一 Setup 启用开发验证路径。
 
 ## 文件索引
 
@@ -66,6 +66,6 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 收件人；持久通知等待平台实际发送完成，没有已知安全会话时不广播。
 
 本模块已有严格 TOML/运行配置、变更分类和 Bootstrap 显式组合，可启用阶段 1 私聊文本路径；
-Setup、Doctor 的飞书专属诊断、真实应用冒烟和可批准交互仍未完成。后续阶段按
+Setup 与只读 Doctor 凭据/Bot 身份探测已完成，真实应用冒烟和可批准交互仍未完成。后续阶段按
 [`飞书 Surface 接入计划`](../../../docs/feishu-surface-plan.md)推进；一级 `surfaces` 入口只转出
 窄工厂，不得导出 SDK 类型，也不得在 Core 中引入飞书类型。

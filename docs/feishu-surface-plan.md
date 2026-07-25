@@ -11,8 +11,8 @@
 消息事件稳定字段裁剪和离线合同测试；阶段 1 已完成平台本地私聊文本 Inbox、访问策略和
 Application 输入 Adapter、安全错误、`OutputEvent` 纯文本渲染、有界 Outbox 及官方 SDK
 文本发送窄适配、单账号 `SurfaceAdapter` 生命周期组合、严格 TOML/运行配置与变更分类，以及
-Bootstrap 显式注册、允许名单热加载、安全配置通知收件人组合和手动/扫码 Setup。Doctor 的
-飞书专属诊断和可批准交互尚未完成；测试应用的真实握手、
+Bootstrap 显式注册、允许名单热加载、安全配置通知收件人组合、手动/扫码 Setup 和只读
+Doctor 凭据/Bot 身份探测。可批准交互尚未完成；测试应用的真实握手、
 代理、事件投递和卡片动作实验仍待完成。
 
 目标是在现有 TypeScript 模块化单体中增加一个编译期显式注册的飞书 Surface，使飞书与
@@ -261,7 +261,7 @@ allowed_open_ids = ["ou_xxx"]
 3. [x] `config-change.ts` 的飞书 Surface scope 变更码。
 4. [x] `reload-classifier.ts` 的热加载、Gateway 重启分类。
 5. [x] `config.example.toml`、README 和启用路径测试同步。
-6. [x] 手动/扫码 Setup；Doctor 的飞书专属流程待实现。
+6. [x] 手动/扫码 Setup 与只读 Doctor 凭据/Bot 身份探测。
 
 建议分类：
 
@@ -286,8 +286,10 @@ App Secret 只保存在权限受限的统一 TOML 中。SDK 换取的短期 Toke
 4. 明确展示准备写入的非敏感配置，成功后原子更新 TOML。
 5. 不自动扩大允许用户或群聊范围。
 
-Doctor 只读检查配置、凭据状态、SDK 握手所需网络、应用发布和必要权限，不修改配置，不输出
-Secret、Access Token、完整 SDK 响应或原始事件。
+Doctor 只读检查配置、允许名单，以及通过有限 HTTP 请求验证应用凭据和 Bot 身份；不修改配置，
+不建立第二条消息长连接，也不输出 Secret、Access Token、完整 SDK 响应或原始事件。
+`bot/v3/info` 不能证明应用已经发布、长连接可握手或消息权限完整，这些仍由操作者明确触发的
+真实冒烟验证。
 
 ## 生命周期、重连和故障
 
@@ -345,7 +347,7 @@ Secret、Access Token、完整 SDK 响应或原始事件。
 - [x] 结构化用户错误；
 - [x] Bootstrap 显式组合；
 - [x] Setup 基础流程；
-- Doctor 的飞书专属检查。
+- [x] Doctor 的飞书专属配置与凭据/Bot 身份检查。
 
 明确不做群聊、媒体、流式卡片和可批准交互。
 
