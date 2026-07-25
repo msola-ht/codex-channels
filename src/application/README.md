@@ -10,7 +10,11 @@
   排到下一 Turn，公开 Conversation 状态与最近 Turn 产物，并通过注入端口把项目规则操作限制
   到当前授权 Workspace；扩展查询暂由独立 `ConversationQueryPort` 注入，等待查询边界阶段收敛。
 - `model-selection-service.ts`：查询模型与思考强度，保存按 Conversation 生效的 Turn 覆盖设置；
-  Fast 切换同时通过 Codex Client 保存用户级默认层级，与原生 CLI 的重启行为一致。
+  Fast 切换同时通过模型窄端口保存用户级默认层级，与原生 CLI 的重启行为一致。
+- `model-port.ts`：定义项目拥有的模型目录、思考强度、服务层级与 Fast 默认值写入窄端口；
+  Application 和 Surface 不接收完整官方模型对象。
+- `account-port.ts`：定义账户 Token 用量、额度窗口、Credits 与消费控制的稳定查询结果；
+  多额度桶和官方重置券响应由 Client 在边界裁剪。
 - `turn-port.ts`：定义项目拥有的 Turn 输入、设置覆盖、Review 目标、Goal 结果与执行窄端口；
   Application 不构造官方 `UserInput`，也不接收完整官方 Turn 响应。
 
@@ -21,6 +25,10 @@ Surface 应通过这里的用例接口驱动会话，不应直接拼装 JSON-RPC
 成功启动 Turn 后，模型、思考强度和服务层级以 App Server 的 Thread 设置为准；Gateway 重启时通过恢复 Thread 重新取得这些设置。
 Turn、steer、停止、重命名、压缩、Review 和 Goal 只依赖 `TurnExecutionPort`；当前版本官方字段由
 `codex-client` 负责映射。
+模型选择和 Fast 只依赖 `ModelSelectionPort`；不可见模型过滤、官方模型字段裁剪以及
+`config/read` / `config/batchWrite` 的版本差异由 `codex-client` 处理。
+账户用量和额度查询只依赖 `AccountQueryPort`；Application、Bootstrap 和 Surface 不解析
+`account/usage/read` 或 `account/rateLimits/read` 的完整官方响应。
 命令成功文案、命令菜单说明和平台交互形式由各 Surface 维护，并通过类型穷尽检查保持完整。
 项目规则命令只接受 `init` 或 `check`；Application 负责选择 Workspace，具体文件与进程操作由
 Bootstrap 注入的运行时实现完成。远程入口不得提供强制覆盖。

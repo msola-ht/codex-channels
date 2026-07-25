@@ -1,7 +1,25 @@
 import pino from "pino";
 import { describe, expect, it } from "vitest";
 
+import type { AccountRateLimits } from "../src/application/index.js";
 import { GatewayApplication } from "../src/bootstrap/app.js";
+
+function emptyRateLimits(): AccountRateLimits {
+  return {
+    limits: [{
+      limitId: "codex",
+      limitName: null,
+      primary: null,
+      secondary: null,
+      credits: null,
+      individualLimit: null,
+      spendControlReached: null,
+      planType: null,
+      rateLimitReachedType: null,
+    }],
+    resetCreditsAvailable: null,
+  };
+}
 
 describe("GatewayApplication startup cleanup", () => {
   it("closes every initialized component and preserves the startup error", async () => {
@@ -32,10 +50,7 @@ describe("GatewayApplication startup cleanup", () => {
               platformOs: "linux",
             };
           },
-          accountRateLimits: async () => ({
-            rateLimits: { limitId: "codex", primary: null, secondary: null },
-            rateLimitsByLimitId: {},
-          }),
+          accountRateLimits: async () => emptyRateLimits(),
           close: async () => {
             calls.push("close:codex");
             throw new Error("codex close failed");
@@ -100,14 +115,8 @@ describe("GatewayApplication startup cleanup", () => {
   });
 
   it("does not start a Surface when stop is requested during startup", async () => {
-    let resolveRateLimits!: (value: {
-      rateLimits: { limitId: string; primary: null; secondary: null };
-      rateLimitsByLimitId: Record<string, never>;
-    }) => void;
-    const rateLimits = new Promise<{
-      rateLimits: { limitId: string; primary: null; secondary: null };
-      rateLimitsByLimitId: Record<string, never>;
-    }>((resolve) => {
+    let resolveRateLimits!: (value: AccountRateLimits) => void;
+    const rateLimits = new Promise<AccountRateLimits>((resolve) => {
       resolveRateLimits = resolve;
     });
     let surfaceStarts = 0;
@@ -164,10 +173,7 @@ describe("GatewayApplication startup cleanup", () => {
     const starting = gateway.start();
     await Promise.resolve();
     const stopping = gateway.stop();
-    resolveRateLimits({
-      rateLimits: { limitId: "codex", primary: null, secondary: null },
-      rateLimitsByLimitId: {},
-    });
+    resolveRateLimits(emptyRateLimits());
 
     await expect(starting).rejects.toThrow("Gateway 正在停止");
     await expect(stopping).resolves.toBeUndefined();
@@ -200,10 +206,7 @@ describe("GatewayApplication startup cleanup", () => {
           reconnectAttempts += 1;
           throw new Error("offline");
         },
-        accountRateLimits: async () => ({
-          rateLimits: { limitId: "codex", primary: null, secondary: null },
-          rateLimitsByLimitId: {},
-        }),
+        accountRateLimits: async () => emptyRateLimits(),
         close: async () => undefined,
       },
       inbound: {

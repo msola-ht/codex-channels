@@ -49,6 +49,54 @@ function appServerGoal(
   };
 }
 
+function appServerModel(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: "gpt-test",
+    model: "gpt-test",
+    upgrade: null,
+    upgradeInfo: null,
+    availabilityNux: null,
+    displayName: "GPT Test",
+    description: "Test model",
+    hidden: false,
+    supportedReasoningEfforts: [{
+      reasoningEffort: "medium",
+      description: "Medium",
+    }],
+    defaultReasoningEffort: "medium",
+    inputModalities: ["text"],
+    supportsPersonality: false,
+    additionalSpeedTiers: ["fast"],
+    serviceTiers: [{
+      id: "priority",
+      name: "Fast",
+      description: "Faster responses",
+    }],
+    defaultServiceTier: "default",
+    isDefault: true,
+    ...overrides,
+  };
+}
+
+function appServerRateLimit(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    limitId: "codex",
+    limitName: null,
+    primary: null,
+    secondary: null,
+    credits: null,
+    individualLimit: null,
+    spendControlReached: null,
+    planType: "pro",
+    rateLimitReachedType: null,
+    ...overrides,
+  };
+}
+
 class FakeTransport extends BaseTransport {
   readonly kind = "stdio" as const;
   readonly sent: Array<Record<string, unknown>> = [];
@@ -56,6 +104,23 @@ class FakeTransport extends BaseTransport {
   simulateAccountUsageOverload = false;
   failServerResponse = false;
   circularModelCursor = false;
+  modelListData: Array<Record<string, unknown>> = [];
+  configServiceTier: unknown = "fast";
+  accountUsageResult: Record<string, unknown> = {
+    summary: {
+      lifetimeTokens: null,
+      peakDailyTokens: null,
+      longestRunningTurnSec: null,
+      currentStreakDays: null,
+      longestStreakDays: null,
+    },
+    dailyUsageBuckets: null,
+  };
+  accountRateLimitsResult: Record<string, unknown> = {
+    rateLimits: appServerRateLimit(),
+    rateLimitsByLimitId: null,
+    rateLimitResetCredits: null,
+  };
   disconnectAfterInitialized = false;
   threadListData: Array<Record<string, unknown>> = [];
   goal = appServerGoal();
@@ -136,7 +201,7 @@ class FakeTransport extends BaseTransport {
           JSON.stringify({
             id: decoded.id,
             result: {
-              data: [],
+              data: this.modelListData,
               nextCursor: this.circularModelCursor ? "same-cursor" : null,
             },
           }),
@@ -147,21 +212,7 @@ class FakeTransport extends BaseTransport {
         this.emitMessage(
           JSON.stringify({
             id: decoded.id,
-            result: {
-              rateLimits: {
-                limitId: "codex",
-                limitName: null,
-                primary: null,
-                secondary: null,
-                credits: null,
-                individualLimit: null,
-                spendControlReached: null,
-                planType: "pro",
-                rateLimitReachedType: null,
-              },
-              rateLimitsByLimitId: null,
-              rateLimitResetCredits: null,
-            },
+            result: this.accountRateLimitsResult,
           }),
         ),
       );
@@ -170,16 +221,7 @@ class FakeTransport extends BaseTransport {
         this.emitMessage(
           JSON.stringify({
             id: decoded.id,
-            result: {
-              summary: {
-                lifetimeTokens: null,
-                peakDailyTokens: null,
-                longestRunningTurnSec: null,
-                currentStreakDays: null,
-                longestStreakDays: null,
-              },
-              dailyUsageBuckets: null,
-            },
+            result: this.accountUsageResult,
           }),
         ),
       );
@@ -220,7 +262,7 @@ class FakeTransport extends BaseTransport {
           JSON.stringify({
             id: decoded.id,
             result: {
-              config: { service_tier: "fast" },
+              config: { service_tier: this.configServiceTier },
               origins: {},
               layers: null,
             },
@@ -549,8 +591,93 @@ describe("JsonRpcClient", () => {
 
     const result = await client.accountRateLimits();
 
-    expect(result.rateLimits.planType).toBe("pro");
+    expect(result.limits[0]?.planType).toBe("pro");
     expect(transport.sent.some((message) => message.method === "account/rateLimits/read")).toBe(true);
+  });
+
+  it("maps account usage and multi-bucket limits to stable Application summaries", async () => {
+    const transport = new FakeTransport();
+    transport.accountUsageResult = {
+      summary: {
+        lifetimeTokens: 123,
+        peakDailyTokens: 45,
+        longestRunningTurnSec: 6,
+        currentStreakDays: 7,
+        longestStreakDays: 8,
+      },
+      dailyUsageBuckets: [{ startDate: "2026-07-25", tokens: 9 }],
+    };
+    transport.accountRateLimitsResult = {
+      rateLimits: appServerRateLimit(),
+      rateLimitsByLimitId: {
+        codex: appServerRateLimit({
+          primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: 100 },
+        }),
+        other: appServerRateLimit({ limitId: "other", limitName: "Other", planType: null }),
+      },
+      rateLimitResetCredits: { availableCount: 2, credits: null },
+    };
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.accountUsage()).resolves.toEqual({
+      summary: {
+        lifetimeTokens: 123,
+        peakDailyTokens: 45,
+        longestRunningTurnSec: 6,
+        currentStreakDays: 7,
+        longestStreakDays: 8,
+      },
+      daily: [{ startDate: "2026-07-25", tokens: 9 }],
+    });
+    await expect(client.accountRateLimits()).resolves.toMatchObject({
+      limits: [
+        {
+          limitId: "codex",
+          primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: 100 },
+        },
+        {
+          limitId: "other",
+          limitName: "Other",
+        },
+      ],
+      resetCreditsAvailable: 2,
+    });
+  });
+
+  it("fails closed when account query responses contain invalid metrics", async () => {
+    const usageTransport = new FakeTransport();
+    usageTransport.accountUsageResult = {
+      ...usageTransport.accountUsageResult,
+      summary: {
+        lifetimeTokens: "secret upstream body",
+        peakDailyTokens: null,
+        longestRunningTurnSec: null,
+        currentStreakDays: null,
+        longestStreakDays: null,
+      },
+    };
+    const usageClient = new CodexAppServerClient(new JsonRpcClient(usageTransport), {
+      sandbox: "workspace-write",
+    });
+    await usageClient.connect();
+    await expect(usageClient.accountUsage())
+      .rejects.toThrow("Codex 响应缺少有效 lifetimeTokens");
+
+    const limitsTransport = new FakeTransport();
+    limitsTransport.accountRateLimitsResult = {
+      rateLimits: appServerRateLimit({ planType: "future-plan" }),
+      rateLimitsByLimitId: null,
+      rateLimitResetCredits: null,
+    };
+    const limitsClient = new CodexAppServerClient(new JsonRpcClient(limitsTransport), {
+      sandbox: "workspace-write",
+    });
+    await limitsClient.connect();
+    await expect(limitsClient.accountRateLimits())
+      .rejects.toThrow("Codex 响应缺少有效 planType");
   });
 
   it("omits params for App Server methods whose generated request has no params", async () => {
@@ -621,18 +748,30 @@ describe("JsonRpcClient", () => {
     ]);
   });
 
-  it("reads effective config through the typed App Server client", async () => {
+  it("maps the effective Fast config to a stable service-tier value", async () => {
     const transport = new FakeTransport();
     const client = new CodexAppServerClient(new JsonRpcClient(transport), {
       sandbox: "workspace-write",
     });
     await client.connect();
 
-    const result = await client.readConfig("/tmp/project");
+    const result = await client.readDefaultServiceTier("/tmp/project");
 
-    expect(result.config.service_tier).toBe("fast");
+    expect(result).toBe("fast");
     expect(transport.sent.find((message) => message.method === "config/read")?.params)
       .toEqual({ cwd: "/tmp/project", includeLayers: false });
+  });
+
+  it("fails closed when the effective Fast config has an invalid service tier", async () => {
+    const transport = new FakeTransport();
+    transport.configServiceTier = 1;
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.readDefaultServiceTier("/tmp/project"))
+      .rejects.toThrow("Codex 响应缺少有效 config service_tier");
   });
 
   it("tags Gateway user input with a client message id", async () => {
@@ -780,5 +919,46 @@ describe("JsonRpcClient", () => {
     await client.connect();
 
     await expect(client.listModels()).rejects.toThrow("model/list 返回了循环分页游标");
+  });
+
+  it("maps the official model catalog to the stable Application model shape", async () => {
+    const transport = new FakeTransport();
+    transport.modelListData = [
+      appServerModel(),
+      appServerModel({ id: "hidden", model: "hidden", hidden: true }),
+    ];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listModels()).resolves.toEqual([{
+      id: "gpt-test",
+      model: "gpt-test",
+      displayName: "GPT Test",
+      supportedReasoningEfforts: [{
+        effort: "medium",
+        description: "Medium",
+      }],
+      defaultReasoningEffort: "medium",
+      serviceTiers: [{
+        id: "priority",
+        name: "Fast",
+      }],
+      defaultServiceTier: "default",
+      isDefault: true,
+    }]);
+  });
+
+  it("fails closed when a model response lacks a required stable field", async () => {
+    const transport = new FakeTransport();
+    transport.modelListData = [appServerModel({ displayName: undefined })];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listModels())
+      .rejects.toThrow("Codex 响应缺少有效 model displayName");
   });
 });

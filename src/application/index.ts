@@ -1,4 +1,14 @@
 export {
+  type AccountMetric,
+  type AccountPlanType,
+  type AccountQueryPort,
+  type AccountRateLimit,
+  type AccountRateLimitReachedType,
+  type AccountRateLimits,
+  type AccountRateLimitWindow,
+  type AccountUsage,
+} from "./account-port.js";
+export {
   ConversationCommandService,
   conversationCommandNames,
   isConversationCommandName,
@@ -25,6 +35,11 @@ export {
   resolveModel,
   type ModelSelectionState,
 } from "./model-selection-service.js";
+export {
+  type ModelOption,
+  type ModelSelectionPort,
+  type ReasoningEffortOption,
+} from "./model-port.js";
 export {
   type GoalStatus,
   type ReviewStarted,

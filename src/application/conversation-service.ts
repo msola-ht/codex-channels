@@ -2,8 +2,6 @@ import { randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
 
 import type {
-  GetAccountRateLimitsResponse,
-  GetAccountTokenUsageResponse,
   ListMcpServerStatusResponse,
   PermissionProfileListResponse,
   PluginInstalledResponse,
@@ -11,6 +9,11 @@ import type {
   SkillsListResponse,
   ThreadTokenUsage,
 } from "../codex-protocol/index.js";
+import type {
+  AccountQueryPort,
+  AccountRateLimits,
+  AccountUsage,
+} from "./account-port.js";
 import type { SessionRouter } from "../session-routing/index.js";
 import type { Workspace } from "../policy/index.js";
 import {
@@ -57,12 +60,10 @@ export interface ProjectRulesPort {
   check(projectRoot: string): Promise<ProjectRulesResult> | ProjectRulesResult;
 }
 
-export interface ConversationQueryPort {
+export interface ConversationQueryPort extends AccountQueryPort {
   listSkills(cwd: string): Promise<SkillsListResponse["data"]>;
   listMcpServers(threadId?: string): Promise<ListMcpServerStatusResponse["data"]>;
   listPlugins(cwd: string): Promise<PluginInstalledResponse>;
-  accountUsage(): Promise<GetAccountTokenUsageResponse>;
-  accountRateLimits(): Promise<GetAccountRateLimitsResponse>;
   listPermissionProfiles(cwd: string): Promise<PermissionProfileListResponse["data"]>;
 }
 
@@ -399,11 +400,11 @@ export class ConversationService {
     return this.queries.listPlugins(this.router.workspace(target).cwd);
   }
 
-  accountUsage(): Promise<GetAccountTokenUsageResponse> {
+  accountUsage(): Promise<AccountUsage> {
     return this.queries.accountUsage();
   }
 
-  accountRateLimits(): Promise<GetAccountRateLimitsResponse> {
+  accountRateLimits(): Promise<AccountRateLimits> {
     return this.queries.accountRateLimits();
   }
 

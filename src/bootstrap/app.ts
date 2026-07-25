@@ -471,10 +471,7 @@ export class GatewayApplication {
           timeout.unref();
         }),
       ]);
-      const configured = Object.values(result.rateLimitsByLimitId ?? {}).filter(
-        (snapshot): snapshot is NonNullable<typeof snapshot> => snapshot !== undefined,
-      );
-      this.core.rememberRateLimits([result.rateLimits, ...configured]);
+      this.core.rememberRateLimits(result.limits);
     } catch (error) {
       this.logger.warn({ err: error }, "读取 Codex 周限失败，启动通知暂不显示周限");
     } finally {

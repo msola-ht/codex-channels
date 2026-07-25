@@ -19,10 +19,10 @@ import {
   splitTelegramText,
 } from "../src/surfaces/telegram/format.js";
 import type {
-  Model,
   PluginInstalledResponse,
   SkillsListResponse,
 } from "../src/codex-protocol/index.js";
+import type { ModelOption } from "../src/application/index.js";
 
 function model(
   name: string,
@@ -30,26 +30,18 @@ function model(
   defaultEffort: string,
   isDefault = false,
   supportsFast = false,
-): Model {
+): ModelOption {
   return {
     id: name,
     model: name,
-    upgrade: null,
-    upgradeInfo: null,
-    availabilityNux: null,
     displayName: name,
-    description: `${name} description`,
-    hidden: false,
-    supportedReasoningEfforts: efforts.map((reasoningEffort) => ({
-      reasoningEffort,
-      description: `${reasoningEffort} description`,
+    supportedReasoningEfforts: efforts.map((effort) => ({
+      effort,
+      description: `${effort} description`,
     })),
     defaultReasoningEffort: defaultEffort,
-    inputModalities: ["text"],
-    supportsPersonality: true,
-    additionalSpeedTiers: supportsFast ? ["fast"] : [],
     serviceTiers: supportsFast
-      ? [{ id: "priority", name: "Fast", description: "1.5x speed" }]
+      ? [{ id: "priority", name: "Fast" }]
       : [],
     defaultServiceTier: "default",
     isDefault,
@@ -363,7 +355,7 @@ describe("formatUsage", () => {
         currentStreakDays: 40n,
         longestStreakDays: 40n,
       },
-      dailyUsageBuckets: [
+      daily: [
         { startDate: "2026-07-15", tokens: 1_000_000n },
         { startDate: "2026-07-19", tokens: 9_000_000n },
         { startDate: "2026-07-22", tokens: 12_345_678n },
@@ -391,7 +383,7 @@ describe("formatUsage", () => {
         currentStreakDays: null,
         longestStreakDays: null,
       },
-      dailyUsageBuckets: null,
+      daily: [],
     });
 
     expect(text).toContain("累计 Tokens：未知");
@@ -402,7 +394,7 @@ describe("formatUsage", () => {
 describe("formatLimits", () => {
   it("shows plan, quota windows, credits, and reset credits", () => {
     const text = formatLimits({
-      rateLimits: {
+      limits: [{
         limitId: "codex",
         limitName: "Codex",
         primary: { usedPercent: 31, windowDurationMins: 300, resetsAt: 1_784_700_000 },
@@ -412,9 +404,8 @@ describe("formatLimits", () => {
         spendControlReached: false,
         planType: "pro",
         rateLimitReachedType: null,
-      },
-      rateLimitsByLimitId: null,
-      rateLimitResetCredits: { availableCount: 2n, credits: null },
+      }],
+      resetCreditsAvailable: 2n,
     });
 
     expect(text).toContain("套餐：Pro");

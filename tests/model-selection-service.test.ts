@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ModelSelectionService } from "../src/application/model-selection-service.js";
-import type { CodexAppServerClient } from "../src/codex-client/client.js";
-import type { Model } from "../src/codex-protocol/index.js";
+import {
+  ModelSelectionService,
+  type ModelOption,
+  type ModelSelectionPort,
+} from "../src/application/index.js";
 import type { SessionRouter } from "../src/session-routing/router.js";
 
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
@@ -14,26 +16,18 @@ function model(
   isDefault = false,
   supportsFast = false,
   fastTierId = "priority",
-): Model {
+): ModelOption {
   return {
     id: name,
     model: name,
-    upgrade: null,
-    upgradeInfo: null,
-    availabilityNux: null,
     displayName: name,
-    description: name,
-    hidden: false,
-    supportedReasoningEfforts: efforts.map((reasoningEffort) => ({
-      reasoningEffort,
-      description: reasoningEffort,
+    supportedReasoningEfforts: efforts.map((effort) => ({
+      effort,
+      description: effort,
     })),
     defaultReasoningEffort: defaultEffort,
-    inputModalities: ["text"],
-    supportsPersonality: true,
-    additionalSpeedTiers: supportsFast ? ["fast"] : [],
     serviceTiers: supportsFast
-      ? [{ id: fastTierId, name: "Fast", description: "1.5x speed" }]
+      ? [{ id: fastTierId, name: "Fast" }]
       : [],
     defaultServiceTier: "default",
     isDefault,
@@ -53,7 +47,7 @@ function createService(settings?: {
   const codex = {
     listModels: async () => models,
     writeDefaultFastMode: async () => undefined,
-  } as unknown as CodexAppServerClient;
+  } satisfies ModelSelectionPort;
   let currentSettings = settings;
   const router = {
     current: () => currentSettings
@@ -126,7 +120,7 @@ describe("ModelSelectionService", () => {
     const codex = {
       listModels: async () => models,
       writeDefaultFastMode,
-    } as unknown as CodexAppServerClient;
+    } satisfies ModelSelectionPort;
     const router = {
       current: () => ({
         target,
@@ -199,7 +193,10 @@ describe("ModelSelectionService", () => {
       model("gpt-main", ["medium"], "medium", true, true),
       model("gpt-other", ["medium"], "medium", false, true, "fast"),
     ];
-    const codex = { listModels: async () => tierModels } as unknown as CodexAppServerClient;
+    const codex = {
+      listModels: async () => tierModels,
+      writeDefaultFastMode: async () => undefined,
+    } satisfies ModelSelectionPort;
     const router = {
       modelSettings: () => ({
         model: "gpt-main",

@@ -1,6 +1,4 @@
 import type {
-  GetAccountRateLimitsResponse,
-  GetAccountTokenUsageResponse,
   ListMcpServerStatusResponse,
   McpServerStatusUpdatedNotification,
   PermissionProfileListResponse,
@@ -12,6 +10,9 @@ import type {
 import {
   fastServiceTierId,
   isFastServiceTier,
+  type AccountRateLimits,
+  type AccountRateLimitWindow,
+  type AccountUsage,
   type ConversationSession,
   type ConversationStatus,
   type ModelSelectionState,
@@ -143,7 +144,7 @@ export function formatReasoningEfforts(state: ModelSelectionState): string {
     "可用思考强度：",
     ...model.supportedReasoningEfforts.map(
       (option, index) =>
-        `${index + 1}. ${option.reasoningEffort}${option.reasoningEffort === state.effort ? " ← 当前" : ""} · ${option.description}`,
+        `${index + 1}. ${option.effort}${option.effort === state.effort ? " ← 当前" : ""} · ${option.description}`,
     ),
     "",
     "切换：/effort <序号或档位>",
@@ -201,9 +202,9 @@ export function formatPlugins(result: PluginInstalledResponse): string {
   ].join("\n");
 }
 
-export function formatUsage(result: GetAccountTokenUsageResponse): string {
+export function formatUsage(result: AccountUsage): string {
   const summary = result.summary;
-  const daily = [...(result.dailyUsageBuckets ?? [])]
+  const daily = [...result.daily]
     .sort((left, right) => right.startDate.localeCompare(left.startDate))
     .slice(0, 7);
   const lines = [
@@ -225,22 +226,13 @@ export function formatUsage(result: GetAccountTokenUsageResponse): string {
 }
 
 export function formatLimits(
-  result: GetAccountRateLimitsResponse,
+  result: AccountRateLimits,
 ): string {
-  const configured = result.rateLimitsByLimitId
-    ? Object.entries(result.rateLimitsByLimitId).filter((entry) => entry[1] !== undefined)
-    : [];
-  const snapshots = configured.length > 0
-    ? configured
-    : [[result.rateLimits.limitId ?? "codex", result.rateLimits] as const];
   const lines = ["Codex 额度："];
-  const planType = snapshots.find((entry) => entry[1]?.planType)?.[1]?.planType;
+  const planType = result.limits.find((snapshot) => snapshot.planType)?.planType;
   lines.push(`套餐：${planType ? formatPlanType(planType) : "未知"}`);
-  for (const [fallbackId, snapshot] of snapshots) {
-    if (!snapshot) {
-      continue;
-    }
-    const label = snapshot.limitName ?? snapshot.limitId ?? fallbackId;
+  for (const snapshot of result.limits) {
+    const label = snapshot.limitName ?? snapshot.limitId;
     lines.push("", `${label}：`);
     lines.push(`主窗口：${formatRateLimitWindow(snapshot.primary)}`);
     if (snapshot.secondary) {
@@ -266,8 +258,8 @@ export function formatLimits(
     }
     lines.push(`限流状态：${formatRateLimitState(snapshot.rateLimitReachedType)}`);
   }
-  if (result.rateLimitResetCredits) {
-    lines.push("", `可用额度重置券：${result.rateLimitResetCredits.availableCount}`);
+  if (result.resetCreditsAvailable !== null) {
+    lines.push("", `可用额度重置券：${result.resetCreditsAvailable}`);
   }
   return lines.join("\n");
 }
@@ -548,7 +540,7 @@ function formatTokenCount(value: number): string {
 }
 
 function formatRateLimitWindow(
-  window: GetAccountRateLimitsResponse["rateLimits"]["primary"],
+  window: AccountRateLimitWindow | null,
 ): string {
   if (!window) {
     return "暂无数据";

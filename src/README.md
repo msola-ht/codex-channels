@@ -21,5 +21,8 @@
 依赖方向保持为 `Surface -> Application/Core <- Codex Client`，由 `bootstrap` 负责组合具体实现。每个一级模块通过自己的 `index.ts` 暴露公开能力，跨模块不得导入内部实现文件。核心模块不得依赖 Telegram、SQLite 或 launchd。Thread 生命周期端口和稳定快照由
 `session-routing` 拥有，`codex-client` 负责把固定版本官方响应映射到该边界；Routing 不反向依赖
 Client 或生成协议。Turn、Review 和 Goal 的执行端口与稳定结果由 `application` 拥有，Client
-只在适配边界构造官方输入和解释响应。其余协议类型隔离和剩余模块复核按
+只在适配边界构造官方输入和解释响应。模型目录、思考强度和服务层级的稳定类型同样由
+`application` 拥有，Client 负责裁剪官方模型目录并封装 Fast 默认值配置。账户用量与额度查询
+同样由 Application 窄端口承接，Client 统一选择官方多桶或兼容单桶响应并
+输出稳定摘要。其余扩展查询、通知和审批协议隔离按
 [`Codex CLI 协议边界收敛计划`](../docs/architecture-convergence-plan.md) 分阶段推进。

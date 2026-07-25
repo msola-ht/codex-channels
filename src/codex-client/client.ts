@@ -6,6 +6,11 @@ import type {
   TurnOverrides,
   TurnStarted,
   ReviewStarted,
+  ModelSelectionPort,
+  ModelOption,
+  AccountQueryPort,
+  AccountRateLimits,
+  AccountUsage,
 } from "../application/index.js";
 import type {
   ConfigReadParams,
@@ -48,13 +53,20 @@ import {
   toThreadGoal,
   toTurnStarted,
 } from "./turn-adapter.js";
+import { toModelOption } from "./model-adapter.js";
+import { toAccountRateLimits, toAccountUsage } from "./account-adapter.js";
 
 export interface ThreadDefaults {
   model?: string;
   sandbox: "read-only" | "workspace-write";
 }
 
-export class CodexAppServerClient implements ThreadLifecyclePort, TurnExecutionPort {
+export class CodexAppServerClient implements
+  ThreadLifecyclePort,
+  TurnExecutionPort,
+  ModelSelectionPort,
+  AccountQueryPort
+{
   constructor(
     private readonly rpc: JsonRpcClient,
     private readonly defaults: ThreadDefaults,
@@ -245,8 +257,8 @@ export class CodexAppServerClient implements ThreadLifecyclePort, TurnExecutionP
     }, { retryOverload: false });
   }
 
-  async listModels(): Promise<ModelListResponse["data"]> {
-    const models: ModelListResponse["data"] = [];
+  async listModels(): Promise<ModelOption[]> {
+    const models: ModelOption[] = [];
     const cursors = new Set<string>();
     let cursor: string | null = null;
     do {
@@ -254,7 +266,12 @@ export class CodexAppServerClient implements ThreadLifecyclePort, TurnExecutionP
         method: "model/list",
         params: { limit: 100, includeHidden: false, ...(cursor ? { cursor } : {}) },
       }, { retryOverload: true });
-      models.push(...result.data);
+      for (const model of result.data) {
+        const mapped = toModelOption(model);
+        if (mapped) {
+          models.push(mapped);
+        }
+      }
       cursor = result.nextCursor;
       rememberCursor("model/list", cursor, cursors);
     } while (cursor);
@@ -275,12 +292,17 @@ export class CodexAppServerClient implements ThreadLifecyclePort, TurnExecutionP
     }, { retryOverload: false });
   }
 
-  async readConfig(cwd: string): Promise<ConfigReadResponse> {
+  async readDefaultServiceTier(cwd: string): Promise<string | null> {
     const params: ConfigReadParams = { cwd, includeLayers: false };
-    return this.rpc.request<ConfigReadResponse>({
+    const response = await this.rpc.request<ConfigReadResponse>({
       method: "config/read",
       params,
     }, { retryOverload: true });
+    const serviceTier = response.config.service_tier;
+    if (serviceTier !== null && typeof serviceTier !== "string") {
+      throw new Error("Codex 响应缺少有效 config service_tier");
+    }
+    return serviceTier;
   }
 
   async forkThread(threadId: string, cwd: string): Promise<ThreadSession> {
@@ -341,18 +363,20 @@ export class CodexAppServerClient implements ThreadLifecyclePort, TurnExecutionP
     }, { retryOverload: true });
   }
 
-  accountUsage(): Promise<GetAccountTokenUsageResponse> {
-    return this.rpc.request<GetAccountTokenUsageResponse>({
+  async accountUsage(): Promise<AccountUsage> {
+    const response = await this.rpc.request<GetAccountTokenUsageResponse>({
       method: "account/usage/read",
       params: undefined,
     }, { retryOverload: true });
+    return toAccountUsage(response);
   }
 
-  accountRateLimits(): Promise<GetAccountRateLimitsResponse> {
-    return this.rpc.request<GetAccountRateLimitsResponse>({
+  async accountRateLimits(): Promise<AccountRateLimits> {
+    const response = await this.rpc.request<GetAccountRateLimitsResponse>({
       method: "account/rateLimits/read",
       params: undefined,
     }, { retryOverload: true });
+    return toAccountRateLimits(response);
   }
 
   async listPermissionProfiles(cwd: string): Promise<PermissionProfileListResponse["data"]> {

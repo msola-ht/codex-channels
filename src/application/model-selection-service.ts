@@ -1,15 +1,14 @@
-import type { CodexAppServerClient } from "../codex-client/index.js";
-import type { Model } from "../codex-protocol/index.js";
 import {
   UserFacingError,
   conversationTargetKey,
   type ConversationTarget,
 } from "../conversation-core/index.js";
+import type { ModelOption, ModelSelectionPort } from "./model-port.js";
 import type { TurnOverrides } from "./turn-port.js";
 import type { SessionRouter } from "../session-routing/index.js";
 
 export interface ModelSelectionState {
-  models: Model[];
+  models: ModelOption[];
   model: string;
   effort: string | null;
   serviceTier: string | null;
@@ -25,7 +24,7 @@ export class ModelSelectionService {
   private readonly pendingByConversation = new Map<string, TurnOverrides>();
 
   constructor(
-    private readonly codex: CodexAppServerClient,
+    private readonly codex: ModelSelectionPort,
     private readonly router: SessionRouter,
     private readonly configuredDefaultModel?: string,
   ) {}
@@ -39,7 +38,7 @@ export class ModelSelectionService {
     const models = await this.codex.listModels();
     const selected = resolveModel(models, selector);
     const current = this.resolveState(target, models);
-    const supported = selected.supportedReasoningEfforts.map((option) => option.reasoningEffort);
+    const supported = selected.supportedReasoningEfforts.map((option) => option.effort);
     const effort = current.effort && supported.includes(current.effort)
       ? current.effort
       : selected.defaultReasoningEffort;
@@ -69,7 +68,7 @@ export class ModelSelectionService {
         { model: current.model },
       );
     }
-    const options = model.supportedReasoningEfforts.map((option) => option.reasoningEffort);
+    const options = model.supportedReasoningEfforts.map((option) => option.effort);
     const effort = resolveEffort(options, selector);
     const pending = this.pendingByConversation.get(this.key(target));
     this.pendingByConversation.set(this.key(target), { ...pending, effort });
@@ -152,7 +151,7 @@ export class ModelSelectionService {
     };
   }
 
-  private resolveState(target: ConversationTarget, models: Model[]): ModelSelectionState {
+  private resolveState(target: ConversationTarget, models: ModelOption[]): ModelSelectionState {
     if (models.length === 0) {
       throw new Error("App Server 没有返回可用模型");
     }
@@ -185,7 +184,7 @@ export class ModelSelectionService {
   }
 }
 
-export function fastServiceTierId(model: Model): string | undefined {
+export function fastServiceTierId(model: ModelOption): string | undefined {
   const tier = model.serviceTiers.find(
     (candidate) =>
       candidate.id.toLowerCase() === "fast"
@@ -194,12 +193,10 @@ export function fastServiceTierId(model: Model): string | undefined {
   if (tier) {
     return tier.id;
   }
-  return model.additionalSpeedTiers.some((candidate) => candidate.toLowerCase() === "fast")
-    ? "fast"
-    : undefined;
+  return undefined;
 }
 
-export function isFastServiceTier(serviceTier: string | null, model?: Model): boolean {
+export function isFastServiceTier(serviceTier: string | null, model?: ModelOption): boolean {
   if (!serviceTier) {
     return false;
   }
@@ -217,7 +214,7 @@ function hasOverride(pending: TurnOverrides | undefined, key: keyof TurnOverride
   return pending !== undefined && Object.hasOwn(pending, key);
 }
 
-export function resolveModel(models: Model[], selector: string): Model {
+export function resolveModel(models: ModelOption[], selector: string): ModelOption {
   const normalized = selector.trim();
   if (!normalized) {
     throw new UserFacingError(

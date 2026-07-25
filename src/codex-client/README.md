@@ -15,8 +15,13 @@
   `session-routing` 拥有的稳定快照；缺少路由必需字段时失败关闭。
 - `turn-adapter.ts`：把 Application 的文本与本地图片输入编码为官方 `UserInput`，并映射
   Turn、Review 和 Goal 响应；缺少稳定结果必需字段时失败关闭。
+- `model-adapter.ts`：把当前版本官方模型目录裁剪为 Application 拥有的模型选项，过滤不可见项，
+  并在缺少模型选择必需字段时失败关闭。
+- `account-adapter.ts`：把账户 Token 用量、单桶或多桶额度与重置券数量映射为 Application
+  稳定摘要；未知枚举或畸形数值失败关闭，不把上游响应正文交给 Surface。
 - `client.ts`：Thread 搜索/归档、Turn、模型、权限、已安装插件、Skill、用量及用户级配置
-  读取与服务层级写入等 App Server 方法的类型化封装；插件状态查询不得加载远端市场目录。
+  读取与服务层级写入等 App Server 方法的类型化封装；配置读取只公开稳定服务层级值，插件状态
+  查询不得加载远端市场目录。
 
 本模块不得调用 Telegram API、生成平台文案或保存业务绑定。协议字段必须来自
 `codex-protocol`；无参数请求和通知不得自行补空对象，写操作不得在过载或断线后盲目重试。
