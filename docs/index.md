@@ -69,15 +69,15 @@
 | 初始化与连接 | `initialize`、`initialized` | [`codex-client/`](../src/codex-client/README.md)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)；发送消息受生成的 `ClientRequest` / `ClientNotification` 约束 |
 | Thread 生命周期 | `thread/list`、`thread/read`、`thread/start`、`thread/resume`、`thread/fork`、`thread/archive`、`thread/unarchive`、`thread/delete`、`thread/unsubscribe`、`thread/name/set`、`thread/compact/start`、`thread/closed`、`thread/archived`、`thread/deleted` | [`thread-adapter.ts`](../src/codex-client/thread-adapter.ts) 把官方响应映射为 [`session-routing/`](../src/session-routing/README.md) 的稳定快照；[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`session-router.test.ts`](../tests/session-router.test.ts)、[`thread-state-sync.test.ts`](../tests/thread-state-sync.test.ts) 验证边界与行为 |
 | Thread 设置 | `thread/settings/updated`、`model/list`、`config/read`、`config/batchWrite` | [`thread-state-sync.ts`](../src/session-routing/thread-state-sync.ts)、[`model-selection-service.test.ts`](../tests/model-selection-service.test.ts) |
-| Turn 控制 | `turn/start`、`turn/steer`、`turn/interrupt`、`turn/started`、`error`、`turn/completed` | [`conversation-core/`](../src/conversation-core/README.md)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts)、[`conversation-service.test.ts`](../tests/conversation-service.test.ts) |
+| Turn 控制 | `turn/start`、`turn/steer`、`turn/interrupt`、`turn/started`、`error`、`turn/completed` | [`turn-port.ts`](../src/application/turn-port.ts) 定义稳定执行端口，[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts) 编码官方输入并映射响应；[`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts) 验证请求和业务行为 |
 | Item 与流式输出 | `item/started`、`item/completed`、`item/agentMessage/delta` | [`core.ts`](../src/conversation-core/core.ts)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts) |
 | 警告 | `warning`（Thread 目标或全局） | [`core.ts`](../src/conversation-core/core.ts)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts) |
-| Diff、Plan 与 Review | `turn/diff/updated`、`turn/plan/updated`、`review/start` | [`conversation-command-service.ts`](../src/application/conversation-command-service.ts)、[`conversation-command-service.test.ts`](../tests/conversation-command-service.test.ts) |
-| Goal | `thread/goal/get`、`thread/goal/set`、`thread/goal/clear` | [`client.ts`](../src/codex-client/client.ts)、[`conversation-command-service.test.ts`](../tests/conversation-command-service.test.ts) |
+| Diff、Plan 与 Review | `turn/diff/updated`、`turn/plan/updated`、`review/start` | Review 目标与结果由 [`turn-port.ts`](../src/application/turn-port.ts) 定义，[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts) 映射；Diff/Plan 仍由 [`conversation-core/`](../src/conversation-core/README.md) 归约 |
+| Goal | `thread/goal/get`、`thread/goal/set`、`thread/goal/clear` | [`turn-port.ts`](../src/application/turn-port.ts)、[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts)、[`conversation-command-service.test.ts`](../tests/conversation-command-service.test.ts) |
 | 审批和用户输入 | 命令、文件、权限、用户输入、MCP elicitation 共 5 类 Server Request | [`approval/`](../src/approval/README.md)、[`approval.test.ts`](../tests/approval.test.ts) |
 | Skill、MCP 与 Plugin | `skills/list`、`mcpServerStatus/list`、`plugin/installed`、MCP 状态通知 | [`client.ts`](../src/codex-client/client.ts)、[`conversation-command-service.test.ts`](../tests/conversation-command-service.test.ts) |
 | 用量、额度与权限 | `account/usage/read`、`account/rateLimits/read`、账户通知、`permissionProfile/list` | [`core.ts`](../src/conversation-core/core.ts)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts) |
-| 真实合同 | Fast 默认值、共享 Thread 设置通知、双客户端连接恢复 | [`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+| 真实合同 | Fast 默认值、共享 Thread 设置通知、Turn 启动结果、跨客户端 Goal、双客户端连接恢复 | [`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 
 当前生成协议还包含文件系统 RPC、独立命令执行、登录、Marketplace、App、Realtime、
 Remote Control、动态工具、Attestation 和实验能力等类型；它们没有因此自动成为 Gateway
@@ -90,6 +90,7 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 | CLI 版本和生成协议是否一致 | [`codex-protocol/`](../src/codex-protocol/README.md) | `npm run protocol:check` |
 | Unix WebSocket 如何连接 | [`codex-client/`](../src/codex-client/README.md) | [`unix-websocket-transport.test.ts`](../tests/unix-websocket-transport.test.ts) |
 | JSON-RPC 如何分流和清理请求 | [`json-rpc.ts`](../src/codex-client/json-rpc.ts) | [`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
+| Turn、Review 和 Goal 如何隔离官方协议 | [`turn-port.ts`](../src/application/turn-port.ts)、[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts) | [`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
 | Thread/Turn/Item 如何归约 | [`conversation-core/`](../src/conversation-core/README.md) | [`conversation-core.test.ts`](../tests/conversation-core.test.ts) |
 | 官方 Thread 如何进入稳定业务边界 | [`thread-adapter.ts`](../src/codex-client/thread-adapter.ts)、[`thread-port.ts`](../src/session-routing/thread-port.ts) | [`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
 | Workspace、Conversation、Thread 如何绑定 | [`session-routing/`](../src/session-routing/README.md) | [`session-router.test.ts`](../tests/session-router.test.ts)、[`module-boundaries.test.ts`](../tests/module-boundaries.test.ts) |
@@ -116,7 +117,11 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 `codex-client` 集中映射固定版本官方响应，Application 与 Telegram 只消费项目会话摘要，
 `session-routing` 不再依赖具体 Client 或生成协议。
 
-后续不把上述模块推倒重做，而是依次完成 Turn、模型与查询、Notification、审批、边界
+协议边界收敛阶段 2 已完成：Turn、Review 和 Goal 使用 Application 自有输入、结果和执行端口，
+官方 `UserInput`、Review 目标与完整响应只在 Client 适配边界出现；模型与扩展查询仍按阶段 3
+单独处理。
+
+后续不把上述模块推倒重做，而是依次完成模型与查询、Notification、审批、边界
 收紧、项目内部模块和 Bootstrap 收尾。每个阶段只定向复核实际触及的已完成模块，并保持独立修改、
 验证、审查和提交。
 

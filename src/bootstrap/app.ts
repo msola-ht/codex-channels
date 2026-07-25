@@ -94,6 +94,7 @@ export class GatewayApplication {
       this.router,
       this.core,
       models,
+      this.codex,
       {
         initialize: (projectRoot) => initializeProjectRulesAtRoot({ projectRoot }),
         check: (projectRoot) => checkProjectRulesAtRoot({

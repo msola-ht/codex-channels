@@ -8,7 +8,8 @@
   重试和断线清理。
 - Thread 新建、列表、恢复、切换、删除、订阅、恢复失败绑定保留、关闭/归档/删除通知语义、
   官方响应到稳定路由快照的映射与必需字段失败关闭、活动 Turn 重启恢复和 Workspace 路由。
-- 活动 Turn 的即时 steer 与下一 Turn 有界内存队列、顺序启动、Thread 隔离和失败清理。
+- 活动 Turn 的即时 steer 与下一 Turn 有界内存队列、顺序启动、Thread 隔离和失败清理；项目输入
+  到官方 `UserInput` 的映射，以及 Review、Goal 和控制响应到稳定 Application 结果的映射。
 - Conversation Core 状态归约、严格 Turn 完成状态、可重试错误隔离、Thread/全局警告路由、
   操作过程与敏感文本清洗。
 - 命令、文件修改、临时权限、用户输入和 MCP 审批的归属信息、一次/会话批准、命令前缀及网络
@@ -25,7 +26,7 @@
 - CLI Doctor 的严格 TOML Schema 校验、敏感错误清洗和只读诊断；项目规则限定当前 Workspace、
   拒绝远程覆盖和符号链接路径逃逸；CLI 分级帮助、规范命令名称及 macOS/Linux 服务目标选择；
   一级模块使用完整依赖允许列表并要求跨模块只导入公开入口；Session Routing 不得依赖具体
-  Client 或生成协议。
+  Client 或生成协议，Conversation Turn 测试不得伪装成完整 Client。
 - 仓库 Git hooks 自动安装与重复执行安全性，以及无本地依赖时的源码安装准备。
 - 协议临时生成失败时保留现有类型目录、生成树逐文件比较和安全替换。
 - Codex CLI 升级准备脚本的精确版本参数、CLI 输出、干净工作区保护和 Codex 审查交接。
@@ -59,7 +60,8 @@ RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
 该合同测试使用临时 `CODEX_HOME`，验证一个 Client 写入的 Fast 用户默认值能被另一个 Client
 读取，之后新建 Thread 的运行时 `serviceTier` 按 `default → priority → default` 变化，并验证
 第二个 Client 修改共享 Thread 的模型、思考强度和 Fast 设置时，订阅方收到完整的
-`thread/settings/updated`；第二个 Client 重连后再次修改仍会广播。测试不会启动模型 Turn。
+`thread/settings/updated`；第二个 Client 重连后再次修改仍会广播。合同还会启动并立即清理一个
+不等待模型结果的 Turn，验证稳定 Turn ID，以及跨 Client 的 Goal 设置、读取和清除映射。
 
 使用当前用户配置的完整 Unix WebSocket/App Server 冒烟测试同样不会调用模型：
 

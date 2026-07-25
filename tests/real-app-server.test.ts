@@ -333,6 +333,36 @@ contractSuite("isolated Codex App Server state contract", () => {
     }
   }, 15_000);
 
+  it("maps Turn and Goal results through the stable Application contract", async () => {
+    const started = await ownerClient.startThread(workdir);
+    const threadId = started.thread.id;
+    let turnId: string | undefined;
+    try {
+      const turn = await ownerClient.startTurn(
+        threadId,
+        [{ type: "text", text: "contract-only" }],
+        "codex_connect_gateway:contract",
+        workdir,
+      );
+      turnId = turn.turnId;
+      expect(turnId).not.toBe("");
+
+      const updated = await ownerClient.setGoal(threadId, "验证稳定 Goal 映射");
+      const read = await peerClient.getGoal(threadId);
+      expect(updated.objective).toBe("验证稳定 Goal 映射");
+      expect(read).toEqual(updated);
+
+      await ownerClient.clearGoal(threadId);
+      await expect(peerClient.getGoal(threadId)).resolves.toBeNull();
+    } finally {
+      if (turnId) {
+        await ownerClient.interruptTurn(threadId, turnId).catch(() => undefined);
+      }
+      await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
+      await ownerClient.deleteThread(threadId).catch(() => undefined);
+    }
+  }, 15_000);
+
   it("broadcasts peer model, effort and Fast changes across a peer reconnect", async () => {
     const observedSettings: Array<{
       model: unknown;

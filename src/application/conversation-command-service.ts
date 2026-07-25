@@ -1,9 +1,9 @@
-import type { ReviewTarget } from "../codex-protocol/index.js";
 import {
   UserFacingError,
   type ConversationTarget,
 } from "../conversation-core/index.js";
 import type { ConversationService } from "./conversation-service.js";
+import type { ReviewTarget, ThreadGoal } from "./turn-port.js";
 
 export const conversationCommandNames = [
   "resume",
@@ -82,7 +82,7 @@ export type ConversationCommandResult =
       view: "diff" | "plan";
       artifacts: ReturnType<ConversationService["artifacts"]>;
     }
-  | { kind: "goal"; goal: Awaited<ReturnType<ConversationService["getGoal"]>> };
+  | { kind: "goal"; goal: ThreadGoal | null };
 
 export type ConversationCommandOutcome =
   | { type: "thread.resumed"; threadId: string }
@@ -102,7 +102,7 @@ export type ConversationCommandOutcome =
   | { type: "goal.cleared" }
   | {
       type: "goal.updated";
-      goal: Awaited<ReturnType<ConversationService["setGoal"]>>;
+      goal: ThreadGoal;
     };
 
 export class ConversationCommandService {

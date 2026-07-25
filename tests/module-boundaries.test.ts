@@ -33,7 +33,7 @@ const allowedModuleDependencies: Record<string, readonly string[]> = {
     "storage",
     "surfaces",
   ],
-  "codex-client": ["codex-protocol", "session-routing"],
+  "codex-client": ["application", "codex-protocol", "session-routing"],
   "codex-protocol": [],
   config: [],
   "conversation-core": ["codex-protocol", "event-bus"],

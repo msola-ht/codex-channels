@@ -13,6 +13,8 @@
   已失效的连接不得重新进入 connected 状态。
 - `thread-adapter.ts`：把当前版本生成的官方 Thread、状态、来源、运行 Turn 和模型设置响应映射为
   `session-routing` 拥有的稳定快照；缺少路由必需字段时失败关闭。
+- `turn-adapter.ts`：把 Application 的文本与本地图片输入编码为官方 `UserInput`，并映射
+  Turn、Review 和 Goal 响应；缺少稳定结果必需字段时失败关闭。
 - `client.ts`：Thread 搜索/归档、Turn、模型、权限、已安装插件、Skill、用量及用户级配置
   读取与服务层级写入等 App Server 方法的类型化封装；插件状态查询不得加载远端市场目录。
 

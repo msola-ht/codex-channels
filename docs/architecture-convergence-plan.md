@@ -120,8 +120,8 @@ bootstrap ─────────→ 所有具体实现并完成装配
 | --- | --- | --- |
 | 计划与现状盘点 | 已完成 | 仅新增计划和索引，不改变运行时 |
 | 1. Thread 生命周期 | 已完成 | 稳定端口、响应映射、调用方与测试已迁移 |
-| 2. Turn 与 Application 命令 | 未开始 | 下一阶段 |
-| 3. 模型、Fast、用量与扩展查询 | 未开始 | 等待 Application 端口 |
+| 2. Turn 与 Application 命令 | 已完成 | Turn、Review、Goal 端口与响应映射已迁移 |
+| 3. 模型、Fast、用量与扩展查询 | 未开始 | 下一阶段 |
 | 4. Notification 与 Conversation Core | 未开始 | 等待 Thread 与状态类型稳定 |
 | 5. Server Request 与审批 | 未开始 | 独立高权限边界 |
 | 6. 边界收紧与测试替身 | 未开始 | 等待协议泄漏迁移完成 |
@@ -165,8 +165,8 @@ bootstrap ─────────→ 所有具体实现并完成装配
 - 把文本与本地图片转换成官方 `UserInput` 的职责移到 `codex-client`。
 - 把 `turn/start`、`turn/steer`、`turn/interrupt`、重命名、压缩、Review 和 Goal 方法映射到
   稳定结果。
-- 用显式 `ConversationCommandResult` 数据结构替代会继续传递上游返回类型的
-  `Awaited<ReturnType<...>>` 链。
+- Goal 与 Review 命令使用显式稳定结果；模型和扩展查询的
+  `Awaited<ReturnType<...>>` 链在阶段 3 随查询类型一起替换。
 - 保持下一 Turn 队列、活动 Turn 判断、失败清理和用户错误代码不变。
 
 重点验证：
@@ -177,8 +177,8 @@ bootstrap ─────────→ 所有具体实现并完成装配
 
 完成标准：
 
-- `application` 不再导入 `codex-client` 或 `codex-protocol`。
-- Application 测试只依赖窄端口。
+- Conversation Turn、Review、Goal 路径不再导入具体 Client 或对应生成协议类型。
+- Conversation Turn 测试只依赖窄端口；模型与扩展查询的具体 Client 依赖留待阶段 3 清理。
 
 ## 阶段 3：模型、Fast、用量与扩展查询
 

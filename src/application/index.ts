@@ -10,6 +10,7 @@ export {
   ConversationService,
   resolveThread,
   type ConversationInput,
+  type ConversationQueryPort,
   type ConversationSession,
   type ConversationStatus,
   type ProjectRulesPort,
@@ -24,3 +25,13 @@ export {
   resolveModel,
   type ModelSelectionState,
 } from "./model-selection-service.js";
+export {
+  type GoalStatus,
+  type ReviewStarted,
+  type ReviewTarget,
+  type ThreadGoal,
+  type TurnExecutionPort,
+  type TurnInput,
+  type TurnOverrides,
+  type TurnStarted,
+} from "./turn-port.js";

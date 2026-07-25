@@ -1,14 +1,50 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ConversationService } from "../src/application/conversation-service.js";
+import {
+  ConversationService,
+  type ConversationQueryPort,
+} from "../src/application/conversation-service.js";
 import type { ModelSelectionService } from "../src/application/model-selection-service.js";
-import type { CodexAppServerClient } from "../src/codex-client/client.js";
+import type { TurnExecutionPort } from "../src/application/turn-port.js";
 import type { ConversationCore } from "../src/conversation-core/core.js";
 import type { SessionRouter } from "../src/session-routing/router.js";
 
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
 const main = { id: "main", name: "Main", cwd: "/workspace/main" };
 const other = { id: "other", name: "Other", cwd: "/workspace/other" };
+
+function turnPort(overrides: Partial<TurnExecutionPort> = {}): TurnExecutionPort {
+  const unsupported = async (): Promise<never> => {
+    throw new Error("测试未配置 TurnExecutionPort 方法");
+  };
+  return {
+    startTurn: unsupported,
+    steerTurn: unsupported,
+    interruptTurn: unsupported,
+    setThreadName: unsupported,
+    compactThread: unsupported,
+    startReview: unsupported,
+    getGoal: unsupported,
+    setGoal: unsupported,
+    clearGoal: unsupported,
+    ...overrides,
+  };
+}
+
+function queryPort(overrides: Partial<ConversationQueryPort> = {}): ConversationQueryPort {
+  const unsupported = async (): Promise<never> => {
+    throw new Error("测试未配置 ConversationQueryPort 方法");
+  };
+  return {
+    listSkills: unsupported,
+    listMcpServers: unsupported,
+    listPlugins: unsupported,
+    accountUsage: unsupported,
+    accountRateLimits: unsupported,
+    listPermissionProfiles: unsupported,
+    ...overrides,
+  };
+}
 
 describe("ConversationService model selection", () => {
   it("applies project rules only to the selected authorized Workspace", async () => {
@@ -19,10 +55,11 @@ describe("ConversationService model selection", () => {
     const initialize = vi.fn(async () => result);
     const check = vi.fn(async () => result);
     const service = new ConversationService(
-      {} as CodexAppServerClient,
+      turnPort(),
       { workspace: () => main } as unknown as SessionRouter,
       {} as ConversationCore,
       {} as ModelSelectionService,
+      queryPort(),
       { initialize, check },
     );
 
@@ -34,10 +71,11 @@ describe("ConversationService model selection", () => {
 
   it("maps project rule runtime failures to stable user-facing errors", async () => {
     const service = new ConversationService(
-      {} as CodexAppServerClient,
+      turnPort(),
       { workspace: () => main } as unknown as SessionRouter,
       {} as ConversationCore,
       {} as ModelSelectionService,
+      queryPort(),
       {
         initialize: () => {
           throw Object.assign(new Error("internal path"), { code: "exists" });
@@ -57,12 +95,13 @@ describe("ConversationService model selection", () => {
   it("queues a follow-up for the active Turn without steering it immediately", async () => {
     const steerTurn = vi.fn();
     const service = new ConversationService(
-      { steerTurn } as unknown as CodexAppServerClient,
+      turnPort({ steerTurn }),
       {} as SessionRouter,
       {
         activeTurn: () => ({ threadId: "thread-1", turnId: "turn-1" }),
       } as unknown as ConversationCore,
       {} as ModelSelectionService,
+      queryPort(),
     );
 
     await expect(service.queueFollowUp(target, "下一轮再检查测试"))
@@ -74,12 +113,12 @@ describe("ConversationService model selection", () => {
     let active = { threadId: "thread-1", turnId: "turn-1" } as
       | { threadId: string; turnId: string }
       | undefined;
-    const startTurn = vi.fn().mockResolvedValue({ turn: { id: "turn-2" } });
+    const startTurn = vi.fn().mockResolvedValue({ turnId: "turn-2" });
     const markTurnStarted = vi.fn(() => {
       active = { threadId: "thread-1", turnId: "turn-2" };
     });
     const service = new ConversationService(
-      { startTurn } as unknown as CodexAppServerClient,
+      turnPort({ startTurn }),
       {
         current: () => ({
           target,
@@ -97,6 +136,7 @@ describe("ConversationService model selection", () => {
         turnOverrides: () => ({}),
         markApplied: vi.fn(),
       } as unknown as ModelSelectionService,
+      queryPort(),
     );
     await service.queueFollowUp(target, "下一轮再检查测试");
     active = undefined;
@@ -109,7 +149,7 @@ describe("ConversationService model selection", () => {
       });
     expect(startTurn).toHaveBeenCalledWith(
       "thread-1",
-      [{ type: "text", text: "下一轮再检查测试", text_elements: [] }],
+      [{ type: "text", text: "下一轮再检查测试" }],
       expect.stringMatching(/^codex_connect_gateway:/),
       "/workspace/main",
       {},
@@ -121,10 +161,10 @@ describe("ConversationService model selection", () => {
       | { threadId: string; turnId: string }
       | undefined;
     const startTurn = vi.fn()
-      .mockResolvedValueOnce({ turn: { id: "turn-2" } })
-      .mockResolvedValueOnce({ turn: { id: "turn-3" } });
+      .mockResolvedValueOnce({ turnId: "turn-2" })
+      .mockResolvedValueOnce({ turnId: "turn-3" });
     const service = new ConversationService(
-      { startTurn } as unknown as CodexAppServerClient,
+      turnPort({ startTurn }),
       {
         current: () => ({
           target,
@@ -148,6 +188,7 @@ describe("ConversationService model selection", () => {
         turnOverrides: () => ({}),
         markApplied: vi.fn(),
       } as unknown as ModelSelectionService,
+      queryPort(),
     );
     await service.queueFollowUp(target, "第一条");
     await service.queueFollowUp(target, "第二条");
@@ -158,17 +199,18 @@ describe("ConversationService model selection", () => {
     await service.handleTurnCompleted(target, "thread-1");
 
     expect(startTurn.mock.calls.map((call) => call[1])).toEqual([
-      [{ type: "text", text: "第一条", text_elements: [] }],
-      [{ type: "text", text: "第二条", text_elements: [] }],
+      [{ type: "text", text: "第一条" }],
+      [{ type: "text", text: "第二条" }],
     ]);
   });
 
   it("rejects follow-up queuing when no Turn is running", async () => {
     const service = new ConversationService(
-      {} as CodexAppServerClient,
+      turnPort(),
       {} as SessionRouter,
       { activeTurn: () => undefined } as unknown as ConversationCore,
       {} as ModelSelectionService,
+      queryPort(),
     );
 
     await expect(service.queueFollowUp(target, "稍后执行"))
@@ -177,12 +219,13 @@ describe("ConversationService model selection", () => {
 
   it("rejects follow-ups beyond the per-Conversation queue limit", async () => {
     const service = new ConversationService(
-      {} as CodexAppServerClient,
+      turnPort(),
       {} as SessionRouter,
       {
         activeTurn: () => ({ threadId: "thread-1", turnId: "turn-1" }),
       } as unknown as ConversationCore,
       {} as ModelSelectionService,
+      queryPort(),
     );
 
     for (let index = 1; index <= 10; index += 1) {
@@ -198,9 +241,9 @@ describe("ConversationService model selection", () => {
       | { threadId: string; turnId: string }
       | undefined;
     const service = new ConversationService(
-      {
+      turnPort({
         startTurn: vi.fn().mockRejectedValue(new Error("start failed")),
-      } as unknown as CodexAppServerClient,
+      }),
       {
         current: () => ({
           target,
@@ -214,6 +257,7 @@ describe("ConversationService model selection", () => {
       {
         turnOverrides: () => ({}),
       } as unknown as ModelSelectionService,
+      queryPort(),
     );
     await service.queueFollowUp(target, "第一条");
     await service.queueFollowUp(target, "第二条");
@@ -232,7 +276,7 @@ describe("ConversationService model selection", () => {
       | undefined;
     let currentThreadId = "thread-1";
     const service = new ConversationService(
-      {} as CodexAppServerClient,
+      turnPort(),
       {
         current: () => ({
           target,
@@ -243,6 +287,7 @@ describe("ConversationService model selection", () => {
       } as unknown as SessionRouter,
       { activeTurn: () => active } as unknown as ConversationCore,
       {} as ModelSelectionService,
+      queryPort(),
     );
     await service.queueFollowUp(target, "只属于旧会话");
     active = undefined;
@@ -305,10 +350,11 @@ describe("ConversationService model selection", () => {
       ],
     }]);
     const service = new ConversationService(
-      { listSkills } as unknown as CodexAppServerClient,
+      turnPort(),
       { workspace: () => main } as unknown as SessionRouter,
       {} as ConversationCore,
       {} as ModelSelectionService,
+      queryPort({ listSkills }),
     );
 
     const entries = await service.listSkills(target);
@@ -321,12 +367,13 @@ describe("ConversationService model selection", () => {
   it("allows read-only Fast status during an active turn but blocks switching", async () => {
     const selectFastMode = vi.fn().mockResolvedValue({ serviceTier: "fast" });
     const service = new ConversationService(
-      {} as CodexAppServerClient,
+      turnPort(),
       {} as SessionRouter,
       {
         activeTurn: () => ({ threadId: "thread-1", turnId: "turn-1" }),
       } as unknown as ConversationCore,
       { selectFastMode } as unknown as ModelSelectionService,
+      queryPort(),
     );
 
     await service.selectFastMode(target, "status");
@@ -337,11 +384,11 @@ describe("ConversationService model selection", () => {
   });
 
   it("passes pending model settings to the next turn and clears them after success", async () => {
-    const startTurn = vi.fn().mockResolvedValue({ turn: { id: "turn-1" } });
+    const startTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
     const markApplied = vi.fn();
     const markTurnStarted = vi.fn();
     const service = new ConversationService(
-      { startTurn } as unknown as CodexAppServerClient,
+      turnPort({ startTurn }),
       {
         ensure: async () => ({
           target,
@@ -356,13 +403,14 @@ describe("ConversationService model selection", () => {
         turnOverrides: () => ({ model: "gpt-selected", effort: "high" }),
         markApplied,
       } as unknown as ModelSelectionService,
+      queryPort(),
     );
 
     await service.submit(target, "测试输入");
 
     expect(startTurn).toHaveBeenCalledWith(
       "thread-1",
-      [{ type: "text", text: "测试输入", text_elements: [] }],
+      [{ type: "text", text: "测试输入" }],
       expect.stringMatching(/^codex_connect_gateway:/),
       "/workspace/main",
       { model: "gpt-selected", effort: "high" },
@@ -372,15 +420,16 @@ describe("ConversationService model selection", () => {
   });
 
   it("passes text and local images to a new turn", async () => {
-    const startTurn = vi.fn().mockResolvedValue({ turn: { id: "turn-1" } });
+    const startTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
     const service = new ConversationService(
-      { startTurn } as unknown as CodexAppServerClient,
+      turnPort({ startTurn }),
       {
         ensure: async () => ({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }),
         workspace: () => main,
       } as unknown as SessionRouter,
       { activeTurn: () => undefined, markTurnStarted: vi.fn() } as unknown as ConversationCore,
       { turnOverrides: () => ({}), markApplied: vi.fn() } as unknown as ModelSelectionService,
+      queryPort(),
     );
 
     await service.submit(target, {
@@ -389,7 +438,7 @@ describe("ConversationService model selection", () => {
     });
 
     expect(startTurn.mock.calls[0]?.[1]).toEqual([
-      { type: "text", text: "检查截图", text_elements: [] },
+      { type: "text", text: "检查截图" },
       { type: "localImage", path: "/private/uploads/screenshot.png" },
     ]);
   });
@@ -397,10 +446,11 @@ describe("ConversationService model selection", () => {
   it("steers local images into the active turn", async () => {
     const steerTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
     const service = new ConversationService(
-      { steerTurn } as unknown as CodexAppServerClient,
+      turnPort({ steerTurn }),
       {} as SessionRouter,
       { activeTurn: () => ({ threadId: "thread-1", turnId: "turn-1" }) } as unknown as ConversationCore,
       {} as ModelSelectionService,
+      queryPort(),
     );
 
     const submission = await service.submit(target, {
@@ -412,7 +462,7 @@ describe("ConversationService model selection", () => {
       "thread-1",
       "turn-1",
       [
-        { type: "text", text: "补充图片", text_elements: [] },
+        { type: "text", text: "补充图片" },
         { type: "localImage", path: "/private/uploads/extra.jpg" },
       ],
       expect.stringMatching(/^codex_connect_gateway:/),
@@ -422,15 +472,96 @@ describe("ConversationService model selection", () => {
 
   it("rejects relative image paths at the application boundary", async () => {
     const service = new ConversationService(
-      {} as CodexAppServerClient,
+      turnPort(),
       {} as SessionRouter,
       {} as ConversationCore,
       {} as ModelSelectionService,
+      queryPort(),
     );
 
     await expect(service.submit(target, {
       localImages: [{ path: "relative/image.png" }],
     })).rejects.toThrow("本地图片路径必须是绝对路径");
+  });
+
+  it("uses the stable Turn port for control, Review and Goal operations", async () => {
+    let active = { threadId: "thread-1", turnId: "turn-1" } as
+      | { threadId: string; turnId: string }
+      | undefined;
+    const interruptTurn = vi.fn(async () => undefined);
+    const setThreadName = vi.fn(async () => undefined);
+    const compactThread = vi.fn(async () => undefined);
+    const startReview = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "review-turn-1",
+    }));
+    const goal = {
+      threadId: "thread-1",
+      objective: "完成阶段 2",
+      status: "active" as const,
+      tokenBudget: null,
+      tokensUsed: 0,
+      timeUsedSeconds: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const getGoal = vi.fn(async () => goal);
+    const setGoal = vi.fn(async () => goal);
+    const clearGoal = vi.fn(async () => undefined);
+    const markTurnStarted = vi.fn();
+    const service = new ConversationService(
+      turnPort({
+        interruptTurn,
+        setThreadName,
+        compactThread,
+        startReview,
+        getGoal,
+        setGoal,
+        clearGoal,
+      }),
+      {
+        current: () => ({
+          target,
+          workspaceId: "main",
+          threadId: "thread-1",
+          sessionId: "session-1",
+        }),
+        ensure: async () => ({
+          target,
+          workspaceId: "main",
+          threadId: "thread-1",
+          sessionId: "session-1",
+        }),
+      } as unknown as SessionRouter,
+      {
+        activeTurn: () => active,
+        markTurnStarted,
+      } as unknown as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort(),
+    );
+
+    await expect(service.stop(target)).resolves.toBe(true);
+    active = undefined;
+    await service.rename(target, "新名称");
+    await service.compact(target);
+    await expect(service.review(target, { type: "uncommittedChanges" }))
+      .resolves.toEqual({
+        threadId: "thread-1",
+        turnId: "review-turn-1",
+        steered: false,
+      });
+    await expect(service.getGoal(target)).resolves.toEqual(goal);
+    await expect(service.setGoal(target, "完成阶段 2")).resolves.toEqual(goal);
+    await service.clearGoal(target);
+
+    expect(interruptTurn).toHaveBeenCalledWith("thread-1", "turn-1");
+    expect(setThreadName).toHaveBeenCalledWith("thread-1", "新名称");
+    expect(compactThread).toHaveBeenCalledWith("thread-1");
+    expect(startReview).toHaveBeenCalledWith("thread-1", { type: "uncommittedChanges" });
+    expect(markTurnStarted).toHaveBeenCalledWith(target, "thread-1", "review-turn-1");
+    expect(setGoal).toHaveBeenCalledWith("thread-1", "完成阶段 2");
+    expect(clearGoal).toHaveBeenCalledWith("thread-1");
   });
 
   it("keeps pending settings when selecting the same workspace", async () => {
@@ -464,7 +595,7 @@ function workspaceService(
   clear: ReturnType<typeof vi.fn>,
 ): ConversationService {
   return new ConversationService(
-    {} as CodexAppServerClient,
+    turnPort(),
     {
       workspace: () => current,
       resolveWorkspace: (selector: string) => selector === "other" ? other : main,
@@ -472,5 +603,6 @@ function workspaceService(
     } as unknown as SessionRouter,
     { activeTurn: () => undefined } as unknown as ConversationCore,
     { clear } as unknown as ModelSelectionService,
+    queryPort(),
   );
 }

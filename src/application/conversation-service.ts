@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
 
-import type { CodexAppServerClient } from "../codex-client/index.js";
 import type {
   GetAccountRateLimitsResponse,
   GetAccountTokenUsageResponse,
@@ -9,11 +8,8 @@ import type {
   PermissionProfileListResponse,
   PluginInstalledResponse,
   RateLimitSnapshot,
-  ReviewTarget,
   SkillsListResponse,
-  ThreadGoal,
   ThreadTokenUsage,
-  UserInput,
 } from "../codex-protocol/index.js";
 import type { SessionRouter } from "../session-routing/index.js";
 import type { Workspace } from "../policy/index.js";
@@ -26,6 +22,12 @@ import {
   type TurnArtifacts,
 } from "../conversation-core/index.js";
 import type { ModelSelectionService, ModelSelectionState } from "./model-selection-service.js";
+import type {
+  ReviewTarget,
+  ThreadGoal,
+  TurnExecutionPort,
+  TurnInput,
+} from "./turn-port.js";
 
 export interface Submission {
   threadId: string;
@@ -55,9 +57,18 @@ export interface ProjectRulesPort {
   check(projectRoot: string): Promise<ProjectRulesResult> | ProjectRulesResult;
 }
 
+export interface ConversationQueryPort {
+  listSkills(cwd: string): Promise<SkillsListResponse["data"]>;
+  listMcpServers(threadId?: string): Promise<ListMcpServerStatusResponse["data"]>;
+  listPlugins(cwd: string): Promise<PluginInstalledResponse>;
+  accountUsage(): Promise<GetAccountTokenUsageResponse>;
+  accountRateLimits(): Promise<GetAccountRateLimitsResponse>;
+  listPermissionProfiles(cwd: string): Promise<PermissionProfileListResponse["data"]>;
+}
+
 interface QueuedFollowUp {
   threadId: string;
-  input: UserInput[];
+  input: TurnInput[];
 }
 
 const maximumQueuedFollowUpsPerConversation = 10;
@@ -83,15 +94,16 @@ export class ConversationService {
   private readonly queuedFollowUps = new Map<string, QueuedFollowUp[]>();
 
   constructor(
-    private readonly codex: CodexAppServerClient,
+    private readonly codex: TurnExecutionPort,
     private readonly router: SessionRouter,
     private readonly core: ConversationCore,
     private readonly models: ModelSelectionService,
+    private readonly queries: ConversationQueryPort,
     private readonly projectRules?: ProjectRulesPort,
   ) {}
 
   submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission> {
-    let input: UserInput[];
+    let input: TurnInput[];
     try {
       input = normalizeInput(value);
     } catch (error) {
@@ -120,8 +132,8 @@ export class ConversationService {
         overrides,
       );
       this.models.markApplied(target);
-      this.core.markTurnStarted(target, binding.threadId, result.turn.id);
-      return { threadId: binding.threadId, turnId: result.turn.id, steered: false };
+      this.core.markTurnStarted(target, binding.threadId, result.turnId);
+      return { threadId: binding.threadId, turnId: result.turnId, steered: false };
     });
   }
 
@@ -129,7 +141,7 @@ export class ConversationService {
     target: ConversationTarget,
     value: string,
   ): Promise<{ position: number }> {
-    let input: UserInput[];
+    let input: TurnInput[];
     try {
       input = normalizeInput(value);
     } catch (error) {
@@ -208,8 +220,8 @@ export class ConversationService {
         this.queuedFollowUps.delete(key);
       }
       this.models.markApplied(target);
-      this.core.markTurnStarted(target, threadId, result.turn.id);
-      return { threadId, turnId: result.turn.id, steered: false };
+      this.core.markTurnStarted(target, threadId, result.turnId);
+      return { threadId, turnId: result.turnId, steered: false };
     });
   }
 
@@ -338,8 +350,8 @@ export class ConversationService {
       this.requireIdle(target);
       const binding = await this.router.ensure(target);
       const result = await this.codex.startReview(binding.threadId, reviewTarget);
-      this.core.markTurnStarted(target, result.reviewThreadId, result.turn.id);
-      return { threadId: result.reviewThreadId, turnId: result.turn.id, steered: false };
+      this.core.markTurnStarted(target, result.threadId, result.turnId);
+      return { threadId: result.threadId, turnId: result.turnId, steered: false };
     });
   }
 
@@ -372,7 +384,7 @@ export class ConversationService {
   }
 
   async listSkills(target: ConversationTarget): Promise<SkillsListResponse["data"]> {
-    const entries = await this.codex.listSkills(this.router.workspace(target).cwd);
+    const entries = await this.queries.listSkills(this.router.workspace(target).cwd);
     return entries.map((entry) => ({
       ...entry,
       skills: entry.skills.filter(isDirectlyInstalledSkill),
@@ -380,23 +392,23 @@ export class ConversationService {
   }
 
   listMcpServers(target: ConversationTarget): Promise<ListMcpServerStatusResponse["data"]> {
-    return this.codex.listMcpServers(this.router.current(target)?.threadId);
+    return this.queries.listMcpServers(this.router.current(target)?.threadId);
   }
 
   listPlugins(target: ConversationTarget): Promise<PluginInstalledResponse> {
-    return this.codex.listPlugins(this.router.workspace(target).cwd);
+    return this.queries.listPlugins(this.router.workspace(target).cwd);
   }
 
   accountUsage(): Promise<GetAccountTokenUsageResponse> {
-    return this.codex.accountUsage();
+    return this.queries.accountUsage();
   }
 
   accountRateLimits(): Promise<GetAccountRateLimitsResponse> {
-    return this.codex.accountRateLimits();
+    return this.queries.accountRateLimits();
   }
 
   listPermissionProfiles(target: ConversationTarget): Promise<PermissionProfileListResponse["data"]> {
-    return this.codex.listPermissionProfiles(this.router.workspace(target).cwd);
+    return this.queries.listPermissionProfiles(this.router.workspace(target).cwd);
   }
 
   async initializeProjectRules(target: ConversationTarget): Promise<ProjectRulesResult> {
@@ -529,12 +541,12 @@ function projectRulesUserError(error: unknown, operation: "init" | "check"): Err
   }
 }
 
-function normalizeInput(value: string | ConversationInput): UserInput[] {
+function normalizeInput(value: string | ConversationInput): TurnInput[] {
   const normalized = typeof value === "string" ? { text: value } : value;
-  const input: UserInput[] = [];
+  const input: TurnInput[] = [];
   const text = normalized.text?.trim();
   if (text) {
-    input.push({ type: "text", text, text_elements: [] });
+    input.push({ type: "text", text });
   }
   for (const image of normalized.localImages ?? []) {
     if (!isAbsolute(image.path)) {

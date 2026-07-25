@@ -33,6 +33,22 @@ function appServerThread(
   };
 }
 
+function appServerGoal(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    threadId: "thread-1",
+    objective: "完成协议边界",
+    status: "active",
+    tokenBudget: null,
+    tokensUsed: 100,
+    timeUsedSeconds: 10,
+    createdAt: 1,
+    updatedAt: 2,
+    ...overrides,
+  };
+}
+
 class FakeTransport extends BaseTransport {
   readonly kind = "stdio" as const;
   readonly sent: Array<Record<string, unknown>> = [];
@@ -42,6 +58,7 @@ class FakeTransport extends BaseTransport {
   circularModelCursor = false;
   disconnectAfterInitialized = false;
   threadListData: Array<Record<string, unknown>> = [];
+  goal = appServerGoal();
 
   async connect(): Promise<void> {}
   async close(): Promise<void> {}
@@ -235,6 +252,53 @@ class FakeTransport extends BaseTransport {
         this.emitMessage(
           JSON.stringify({ id: decoded.id, result: { turnId: "turn-1" } }),
         ),
+      );
+    } else if (decoded.method === "review/start") {
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({
+            id: decoded.id,
+            result: {
+              reviewThreadId: "thread-1",
+              turn: {
+                id: "review-turn-1",
+                items: [],
+                itemsView: "full",
+                status: "inProgress",
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null,
+              },
+            },
+          }),
+        ),
+      );
+    } else if (decoded.method === "thread/goal/get") {
+      queueMicrotask(() =>
+        this.emitMessage(JSON.stringify({
+          id: decoded.id,
+          result: { goal: this.goal },
+        })),
+      );
+    } else if (decoded.method === "thread/goal/set") {
+      queueMicrotask(() =>
+        this.emitMessage(JSON.stringify({
+          id: decoded.id,
+          result: { goal: this.goal },
+        })),
+      );
+    } else if (
+      decoded.method === "turn/interrupt"
+      || decoded.method === "thread/name/set"
+      || decoded.method === "thread/compact/start"
+    ) {
+      queueMicrotask(() =>
+        this.emitMessage(JSON.stringify({ id: decoded.id, result: {} })),
+      );
+    } else if (decoded.method === "thread/goal/clear") {
+      queueMicrotask(() =>
+        this.emitMessage(JSON.stringify({ id: decoded.id, result: { cleared: true } })),
       );
     }
   }
@@ -582,7 +646,7 @@ describe("JsonRpcClient", () => {
     await client.startTurn(
       "thread-1",
       [
-        { type: "text", text: "测试输入", text_elements: [] },
+        { type: "text", text: "测试输入" },
         { type: "localImage", path: "/tmp/screenshot.png" },
       ],
       "codex_connect_gateway:request-1",
@@ -591,7 +655,7 @@ describe("JsonRpcClient", () => {
     );
     await client.startTurn(
       "thread-1",
-      [{ type: "text", text: "开启 Fast", text_elements: [] }],
+      [{ type: "text", text: "开启 Fast" }],
       "codex_connect_gateway:request-fast",
       "/tmp/project",
       { serviceTier: "priority" },
@@ -599,7 +663,7 @@ describe("JsonRpcClient", () => {
     await client.steerTurn(
       "thread-1",
       "turn-1",
-      [{ type: "text", text: "补充输入", text_elements: [] }],
+      [{ type: "text", text: "补充输入" }],
       "codex_connect_gateway:request-2",
     );
 
@@ -624,6 +688,65 @@ describe("JsonRpcClient", () => {
       .toMatchObject({ clientUserMessageId: "codex_connect_gateway:request-2" });
   });
 
+  it("maps Review and Goal responses to stable Application results", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    const review = await client.startReview("thread-1", {
+      type: "commit",
+      sha: "abc123",
+      title: null,
+    });
+    const goal = await client.getGoal("thread-1");
+    const updated = await client.setGoal("thread-1", "完成协议边界");
+    await client.clearGoal("thread-1");
+    await client.interruptTurn("thread-1", "turn-1");
+    await client.setThreadName("thread-1", "新名称");
+    await client.compactThread("thread-1");
+
+    expect(review).toEqual({ threadId: "thread-1", turnId: "review-turn-1" });
+    expect(goal).toEqual({
+      threadId: "thread-1",
+      objective: "完成协议边界",
+      status: "active",
+      tokenBudget: null,
+      tokensUsed: 100,
+      timeUsedSeconds: 10,
+      createdAt: 1,
+      updatedAt: 2,
+    });
+    expect(updated).toEqual(goal);
+    expect(transport.sent.find((message) => message.method === "review/start")?.params)
+      .toEqual({
+        threadId: "thread-1",
+        target: { type: "commit", sha: "abc123", title: null },
+        delivery: "inline",
+      });
+    expect(transport.sent.find((message) => message.method === "thread/goal/set")?.params)
+      .toEqual({
+        threadId: "thread-1",
+        objective: "完成协议边界",
+        status: "active",
+      });
+    expect(transport.sent.find((message) => message.method === "turn/interrupt")?.params)
+      .toEqual({ threadId: "thread-1", turnId: "turn-1" });
+  });
+
+  it("fails closed when a Goal response lacks a required stable field", async () => {
+    const transport = new FakeTransport();
+    transport.goal = appServerGoal({ objective: undefined });
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.getGoal("thread-1"))
+      .rejects.toThrow("Codex 响应缺少有效 goal objective");
+  });
+
   it("uses CODEX_MODEL only when starting a new thread", async () => {
     const transport = new FakeTransport();
     const rpc = new JsonRpcClient(transport);
@@ -636,7 +759,7 @@ describe("JsonRpcClient", () => {
     await client.startThread("/tmp/project");
     await client.startTurn(
       "thread-1",
-      [{ type: "text", text: "测试输入", text_elements: [] }],
+      [{ type: "text", text: "测试输入" }],
       "request-1",
       "/tmp/project",
     );

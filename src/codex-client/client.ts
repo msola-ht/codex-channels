@@ -1,4 +1,13 @@
 import type {
+  ReviewTarget,
+  ThreadGoal,
+  TurnExecutionPort,
+  TurnInput,
+  TurnOverrides,
+  TurnStarted,
+  ReviewStarted,
+} from "../application/index.js";
+import type {
   ConfigReadParams,
   ConfigReadResponse,
   GetAccountTokenUsageResponse,
@@ -9,12 +18,10 @@ import type {
   PermissionProfileListResponse,
   PluginInstalledResponse,
   ReviewStartResponse,
-  ReviewTarget,
   SkillsListResponse,
   ThreadArchiveResponse,
   ThreadDeleteResponse,
   ThreadForkResponse,
-  ThreadGoal,
   ThreadGoalGetResponse,
   ThreadGoalSetResponse,
   ThreadListResponse,
@@ -25,7 +32,6 @@ import type {
   ThreadUnarchiveResponse,
   TurnStartResponse,
   TurnSteerResponse,
-  UserInput,
 } from "../codex-protocol/index.js";
 import type {
   ThreadLifecyclePort,
@@ -35,19 +41,20 @@ import type {
 } from "../session-routing/index.js";
 import { JsonRpcClient, type RpcNotification, type ServerRequestHandler } from "./json-rpc.js";
 import { toThreadSession, toThreadSnapshot } from "./thread-adapter.js";
+import {
+  toProtocolReviewTarget,
+  toProtocolTurnInput,
+  toReviewStarted,
+  toThreadGoal,
+  toTurnStarted,
+} from "./turn-adapter.js";
 
 export interface ThreadDefaults {
   model?: string;
   sandbox: "read-only" | "workspace-write";
 }
 
-export interface TurnOverrides {
-  model?: string;
-  effort?: string;
-  serviceTier?: string | null;
-}
-
-export class CodexAppServerClient implements ThreadLifecyclePort {
+export class CodexAppServerClient implements ThreadLifecyclePort, TurnExecutionPort {
   constructor(
     private readonly rpc: JsonRpcClient,
     private readonly defaults: ThreadDefaults,
@@ -177,17 +184,17 @@ export class CodexAppServerClient implements ThreadLifecyclePort {
 
   async startTurn(
     threadId: string,
-    input: UserInput[],
+    input: TurnInput[],
     clientUserMessageId: string,
     cwd: string,
     overrides: TurnOverrides = {},
-  ): Promise<TurnStartResponse> {
-    return this.rpc.request<TurnStartResponse>({
+  ): Promise<TurnStarted> {
+    const response = await this.rpc.request<TurnStartResponse>({
       method: "turn/start",
       params: {
         threadId,
         clientUserMessageId,
-        input,
+        input: toProtocolTurnInput(input),
         cwd,
         ...(overrides.model ? { model: overrides.model } : {}),
         ...(overrides.effort ? { effort: overrides.effort } : {}),
@@ -196,23 +203,25 @@ export class CodexAppServerClient implements ThreadLifecyclePort {
           : {}),
       },
     }, { retryOverload: false });
+    return toTurnStarted(response);
   }
 
   async steerTurn(
     threadId: string,
     turnId: string,
-    input: UserInput[],
+    input: TurnInput[],
     clientUserMessageId: string,
-  ): Promise<TurnSteerResponse> {
-    return this.rpc.request<TurnSteerResponse>({
+  ): Promise<TurnStarted> {
+    const response = await this.rpc.request<TurnSteerResponse>({
       method: "turn/steer",
       params: {
         threadId,
         expectedTurnId: turnId,
         clientUserMessageId,
-        input,
+        input: toProtocolTurnInput(input),
       },
     }, { retryOverload: false });
+    return toTurnStarted(response);
   }
 
   async interruptTurn(threadId: string, turnId: string): Promise<void> {
@@ -287,11 +296,12 @@ export class CodexAppServerClient implements ThreadLifecyclePort {
     return toThreadSession(response);
   }
 
-  async startReview(threadId: string, target: ReviewTarget): Promise<ReviewStartResponse> {
-    return this.rpc.request<ReviewStartResponse>({
+  async startReview(threadId: string, target: ReviewTarget): Promise<ReviewStarted> {
+    const response = await this.rpc.request<ReviewStartResponse>({
       method: "review/start",
-      params: { threadId, target, delivery: "inline" },
+      params: { threadId, target: toProtocolReviewTarget(target), delivery: "inline" },
     }, { retryOverload: false });
+    return toReviewStarted(response);
   }
 
   async listSkills(cwd: string): Promise<SkillsListResponse["data"]> {
@@ -367,7 +377,7 @@ export class CodexAppServerClient implements ThreadLifecyclePort {
       method: "thread/goal/get",
       params: { threadId },
     }, { retryOverload: true });
-    return response.goal;
+    return response.goal ? toThreadGoal(response.goal) : null;
   }
 
   async setGoal(threadId: string, objective: string): Promise<ThreadGoal> {
@@ -375,7 +385,7 @@ export class CodexAppServerClient implements ThreadLifecyclePort {
       method: "thread/goal/set",
       params: { threadId, objective, status: "active" },
     }, { retryOverload: false });
-    return response.goal;
+    return toThreadGoal(response.goal);
   }
 
   async clearGoal(threadId: string): Promise<void> {

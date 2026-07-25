@@ -1,7 +1,6 @@
 export {
   CodexAppServerClient,
   type ThreadDefaults,
-  type TurnOverrides,
 } from "./client.js";
 export {
   JsonRpcClient,
