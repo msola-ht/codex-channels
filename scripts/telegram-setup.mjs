@@ -1,5 +1,4 @@
 import { randomBytes } from "node:crypto";
-import { createInterface } from "node:readline/promises";
 import { pathToFileURL } from "node:url";
 
 import { Bot } from "grammy";
@@ -10,6 +9,7 @@ import {
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
+import { createPrompter } from "./terminal-prompter.mjs";
 
 const tokenPattern = /^\d+:[A-Za-z0-9_-]{30,}$/;
 const userIdPattern = /^\d+$/;
@@ -260,27 +260,6 @@ function createTelegramClient(token, proxyUrl) {
   return {
     getMe: () => bot.api.getMe(),
     getUpdates: (parameters) => bot.api.getUpdates(parameters),
-  };
-}
-
-export function createPrompter(input, output) {
-  const readline = createInterface({
-    input,
-    output,
-    terminal: Boolean(input.isTTY && output.isTTY),
-  });
-  return {
-    ask: async (label) => (await readline.question(`${label}：`)).trim(),
-    secret: async (label) => (await readline.question(`${label}：`)).trim(),
-    confirm: async (label, defaultValue) => {
-      const suffix = defaultValue ? "[Y/n]" : "[y/N]";
-      const value = (await readline.question(`${label} ${suffix} `)).trim().toLowerCase();
-      if (!value) {
-        return defaultValue;
-      }
-      return value === "y" || value === "yes";
-    },
-    close: () => readline.close(),
   };
 }
 

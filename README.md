@@ -41,7 +41,7 @@ codexc init
 codexc setup
 ```
 
-`codexc setup` 使用统一设置菜单进入具体配置流程；当前可从“通讯渠道”选择 Telegram。Telegram 模块会引导
+`codexc setup` 使用统一设置菜单进入具体配置流程；当前可从“通讯渠道”选择 Telegram 或飞书。Telegram 模块会引导
 通过官方 `@BotFather` 新建 Bot 或填写已有 Bot Token，验证 Token，并通过一次性 `/start`
 配对链接自动获取 Telegram 用户 ID。复用当前 Bot 时默认保留已有用户允许名单，避免与运行中的
 Gateway 争抢 Telegram 长轮询。该流程不依赖第三方机器人创建服务。也可以直接编辑
@@ -56,7 +56,11 @@ allowed_user_ids = [你的_Telegram_用户_ID]
 message_format = "html"
 ```
 
-飞书当前尚未进入 Setup 菜单，需要手工在同一配置文件中加入：
+飞书模块提供“手动输入应用凭据”和“扫码授权”两种方式。扫码后在飞书授权页选择新建应用或
+已有企业自建应用；流程只申请机器人发送消息和 `im.message.receive_v1` 事件所需的最小配置。
+两种方式都会验证应用凭据和 Bot 身份，再把 App ID、App Secret 与允许的用户 Open ID 原子写入
+统一配置。二维码、设备码和短期授权状态不会保存；已有允许名单只会在终端再次确认后保留。
+也可以手工在同一配置文件中加入：
 
 ```toml
 [feishu]
@@ -66,8 +70,8 @@ app_secret = "你的_飞书_App_Secret"
 allowed_open_ids = ["ou_xxx"]
 ```
 
-启用前需在飞书开放平台创建企业自建应用、启用机器人、订阅
-`im.message.receive_v1` 并发布应用。当前只接收允许名单用户的私聊文本；审批请求会明确拒绝，
+扫码或手工配置后，仍需在飞书开放平台确认事件订阅方式为长连接并发布应用；SDK 扫码参数不能
+修改事件订阅方式等敏感开发配置。当前只接收允许名单用户的私聊文本；审批请求会明确拒绝，
 不会通过飞书静默批准高权限操作。
 
 最终回复默认把常用 Markdown 安全转换为兼容性更好的 Telegram HTML。支持 Rich Messages

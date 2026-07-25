@@ -3,8 +3,8 @@
 ## 用途与状态
 
 本页用于定位飞书开放平台、官方 Node SDK、本地实现和验证入口。它是飞书 Surface 的事实查询
-入口，不替代 [`飞书 Surface 接入计划`](feishu-surface-plan.md)；当前只支持手工启用的阶段 1
-私聊文本路径。
+入口，不替代 [`飞书 Surface 接入计划`](feishu-surface-plan.md)；当前支持扫码 Setup 与开发验证
+中的阶段 1 私聊文本路径。
 
 截至 2026-07-25，项目已精确锁定 `@larksuiteoapi/node-sdk@1.71.1`，并完成阶段 1 私聊文本
 模块、严格配置和 Bootstrap 显式组合。真实应用合同仍未完成，本文中的“已实现”只表示存在离线
@@ -48,6 +48,7 @@
 | SDK 包与版本 | [npm 包版本](https://www.npmjs.com/package/@larksuiteoapi/node-sdk?activeTab=versions) | 发现正式版本，不作为锁定证据 |
 | SDK 源码 | [固定 `1.71.1` 提交](https://github.com/larksuite/node-sdk/tree/8b3e0df3af9401c263dc96026e1c7f17460a21cc) | 当前实现和测试的源码基线 |
 | Client、事件和长连接示例 | [固定版本中文说明](https://github.com/larksuite/node-sdk/blob/8b3e0df3af9401c263dc96026e1c7f17460a21cc/README.zh.md) | 核对 `Client`、`WSClient`、`EventDispatcher` 和 `registerApp()` |
+| 官方 OpenClaw 飞书插件 | [固定提交 `dde0be3`](https://github.com/larksuite/openclaw-lark/tree/dde0be3680d6fd5443cab426c8f4b3216266346a) | 参考手动凭据输入、保留已有配置、Bot 身份探测和允许名单交互；不引入其 OpenClaw 运行时或宽权限工具 |
 | WebSocket 生命周期 | [固定版本 `ws-client`](https://github.com/larksuite/node-sdk/tree/8b3e0df3af9401c263dc96026e1c7f17460a21cc/ws-client) | 核对 `onReady`、错误、重连、关闭和状态语义 |
 | 高层 Channel | [固定版本 Channel 说明](https://github.com/larksuite/node-sdk/blob/8b3e0df3af9401c263dc96026e1c7f17460a21cc/docs/channel.zh.md) | 识别其策略、去重、串行、重试、媒体和卡片职责 |
 | 消息事件字段格式 | [官方 CLI 固定事件 Schema 指南](https://github.com/larksuite/cli/blob/a7865cd0a7416655535517a2a630848fde318761/skills/lark-event/SKILL.md) | 核对 `create_time` 为毫秒时间戳字符串 |
@@ -109,10 +110,12 @@ EventDispatcher`。
 当前 SDK `main` 的 Channel 会在缺少 `open_id` 时向 `user_id` 或 `union_id` 回退；本项目首版不
 采用该回退，只接受明确的 `sender.open_id`。
 
-当前 SDK 资料还显示 `registerApp()` 可能返回扫码用户的 `open_id`。这可能避免 Setup 为发现身份
-临时启动第二条长连接，但它是否已进入准备锁定的正式版本、申请了哪些默认权限、能否使用最小
-权限基座，以及是否适合更新已有应用，都必须在阶段 0 单独验证。未验证前，Setup 继续以手动创建
-企业自建应用和显式配置为基线。
+锁定 SDK `1.71.1` 的 `registerApp()` 已确认返回应用凭据和可选的扫码用户 `open_id`，并支持
+`addons.preset = false` 的最小机器人基座。Setup 提供手动输入和扫码授权两种方式；扫码时不传
+`createOnly` 或 `appId`，由飞书授权页让用户选择新建或已有企业自建应用，只增量声明
+`im:message:send_as_bot` 和
+`im.message.receive_v1`。注册完成后使用 `/open-apis/bot/v3/info` 验证凭据和 Bot 身份，不启动
+第二条消息长连接。事件订阅方式等敏感开发配置无法通过 `addons` 设置，仍需在开放平台确认。
 
 ## 项目支持矩阵
 
@@ -129,7 +132,7 @@ EventDispatcher`。
 | 命令和群聊 | 消息事件、群身份与 @Bot | 暂不支持 | 阶段 2 |
 | 卡片审批 | `card.action.trigger` | 接收方式待验证，当前失败关闭 | 阶段 3 |
 | 图片和文件 | IM 资源 API | 暂不支持 | 阶段 4 |
-| `registerApp()` Setup | SDK Device Authorization | 候选方案，未采用 | 阶段 0 后决定 |
+| 飞书 Setup | SDK Device Authorization、`bot/v3/info` | 已实现手动输入与扫码、飞书页应用选择、最小权限、身份验证和原子配置；真实应用待验证 | 阶段 0 |
 | 飞书以外的 Lark | SDK Domain 配置 | 不在首版范围 | 未计划 |
 
 “计划中”不是公开支持。只有源码、配置、README、测试和真实测试应用冒烟均完成后，才能更新为
@@ -150,7 +153,7 @@ EventDispatcher`。
 | 输出渲染 | [`src/surfaces/feishu/renderer.ts`](../src/surfaces/feishu/renderer.ts) | [`tests/feishu-renderer.test.ts`](../tests/feishu-renderer.test.ts)：关键事件、非关键进度和错误详情隐藏 |
 | 卡片动作 | [`src/surfaces/feishu/interactions.ts`](../src/surfaces/feishu/interactions.ts) | [`tests/feishu-interactions.test.ts`](../tests/feishu-interactions.test.ts)：当前审批拒绝、用户输入为空、MCP elicitation 取消；卡片令牌、过期、Actor 绑定和跨客户端失效待实现 |
 | 配置 | [`runtime/gateway-config.mjs`](../runtime/gateway-config.mjs)、[`src/config/`](../src/config/README.md) | [`tests/config.test.ts`](../tests/config.test.ts)、[`tests/config-reload.test.ts`](../tests/config-reload.test.ts)：启用映射、禁用、畸形输入、未知字段、凭据/启用重启和允许名单热加载 |
-| Setup 与 Doctor | `scripts/` | 原子写入、凭据脱敏和只读诊断；待实现 |
+| Setup 与 Doctor | [`scripts/feishu-setup.mjs`](../scripts/feishu-setup.mjs)、`scripts/doctor.mjs` | [`tests/feishu-setup.test.ts`](../tests/feishu-setup.test.ts)：手动输入、扫码授权、应用选择、最小权限、凭据与 Bot 身份验证、授权域名约束、允许名单确认、原子写入和错误脱敏；Doctor 飞书专项网络诊断待实现 |
 | Surface 生命周期 | [`src/surfaces/feishu/surface.ts`](../src/surfaces/feishu/surface.ts) | [`tests/feishu-surface.test.ts`](../tests/feishu-surface.test.ts)：长连接启停、输入与输出排空、过载提示、未组合收件人失败关闭和安全配置通知 |
 | Bootstrap 组合 | [`src/bootstrap/surface-composition.ts`](../src/bootstrap/surface-composition.ts) | [`tests/surface-composition.test.ts`](../tests/surface-composition.test.ts)、[`tests/surface-manager.test.ts`](../tests/surface-manager.test.ts)：按配置注册、允许名单热加载、撤权绑定清理、配置通知路由、部分启动回滚和停止不影响 App Server |
 

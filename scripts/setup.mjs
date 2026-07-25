@@ -2,12 +2,14 @@ import { pathToFileURL } from "node:url";
 
 import * as clackPrompts from "@clack/prompts";
 
+import { runFeishuSetup } from "./feishu-setup.mjs";
 import { runTelegramSetup } from "./telegram-setup.mjs";
 
 export async function runSetup({
   input = process.stdin,
   output = process.stdout,
   prompts = clackPrompts,
+  feishuSetup = runFeishuSetup,
   telegramSetup = runTelegramSetup,
 } = {}) {
   prompts.intro("Codex Connect Setup");
@@ -26,21 +28,40 @@ export async function runSetup({
   }
   switch (section) {
     case "channels":
-      return runChannelSetup({ input, output, prompts, telegramSetup });
+      return runChannelSetup({
+        input,
+        output,
+        prompts,
+        feishuSetup,
+        telegramSetup,
+      });
     default:
       throw new Error(`未知 Setup 类别：${String(section)}`);
   }
 }
 
-async function runChannelSetup({ input, output, prompts, telegramSetup }) {
+async function runChannelSetup({
+  input,
+  output,
+  prompts,
+  feishuSetup,
+  telegramSetup,
+}) {
   const channel = await prompts.select({
     message: "选择通讯渠道",
     showInstructions: false,
-    options: [{
-      value: "telegram",
-      label: "Telegram",
-      hint: "Bot、用户授权与消息格式",
-    }],
+    options: [
+      {
+        value: "telegram",
+        label: "Telegram",
+        hint: "Bot、用户授权与消息格式",
+      },
+      {
+        value: "feishu",
+        label: "飞书",
+        hint: "企业自建应用与用户授权",
+      },
+    ],
   });
   if (prompts.isCancel(channel)) {
     prompts.cancel("Setup 已取消");
@@ -49,6 +70,8 @@ async function runChannelSetup({ input, output, prompts, telegramSetup }) {
   switch (channel) {
     case "telegram":
       return telegramSetup({ input, output });
+    case "feishu":
+      return feishuSetup({ input, output });
     default:
       throw new Error(`未知通讯渠道：${String(channel)}`);
   }

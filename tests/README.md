@@ -47,7 +47,8 @@
 - Permission Profile 查询按授权 Workspace 发送精确 CWD，分页映射 ID、说明和策略可选状态；
   必需字段畸形或分页游标循环时失败关闭，并与高权限审批决定保持分离。
 - SQLite 最小绑定恢复、当前版本 Schema 缺失失败关闭、配置热加载与自动重启分类、Setup
-  类别与通讯渠道菜单、Telegram Setup、
+  类别与通讯渠道菜单、Telegram Setup、飞书手动输入与扫码注册的最小权限、应用选择、Bot
+  身份验证、授权域名约束、允许名单确认、原子保存和错误脱敏、
   CLI 项目规则生成/检查、launchd、systemd、Unix WebSocket 请求头、模块依赖方向和公开入口边界。
 - Workspace 不可变授权快照、热加载失败回滚、选择歧义，以及 Telegram Surface、账号和规范
   Actor ID 的联合授权；飞书 Surface、App 账号和 `open_id` 精确允许名单及原子替换。

@@ -2,7 +2,7 @@
 
 ## 状态与目标
 
-本文记录飞书通讯渠道的分阶段实施状态。阶段 1 私聊文本路径已可通过手工配置启用，但不表示
+本文记录飞书通讯渠道的分阶段实施状态。阶段 1 私聊文本路径已可通过 Setup 或手工配置启用，但不表示
 后续命令、群聊、审批或媒体能力已经支持。实施必须继续遵守
 [`通讯渠道 Surface 接入指南`](surface-integration-guide.md)；如果本文与通用指南冲突，以通用
 架构和安全边界为准，并先单独评审需要调整的公开合同。
@@ -11,8 +11,8 @@
 消息事件稳定字段裁剪和离线合同测试；阶段 1 已完成平台本地私聊文本 Inbox、访问策略和
 Application 输入 Adapter、安全错误、`OutputEvent` 纯文本渲染、有界 Outbox 及官方 SDK
 文本发送窄适配、单账号 `SurfaceAdapter` 生命周期组合、严格 TOML/运行配置与变更分类，以及
-Bootstrap 显式注册、允许名单热加载和安全配置通知收件人组合。Setup、Doctor 的飞书专属诊断
-和可批准交互尚未完成；测试应用的真实握手、
+Bootstrap 显式注册、允许名单热加载、安全配置通知收件人组合和手动/扫码 Setup。Doctor 的
+飞书专属诊断和可批准交互尚未完成；测试应用的真实握手、
 代理、事件投递和卡片动作实验仍待完成。
 
 目标是在现有 TypeScript 模块化单体中增加一个编译期显式注册的飞书 Surface，使飞书与
@@ -254,14 +254,14 @@ allowed_open_ids = ["ou_xxx"]
 ```
 
 这是阶段 1 私聊的当前严格结构；群 Chat 允许名单和 `@Bot` 要求属于阶段 2，不提前进入 Schema。
-当前配置与 Bootstrap 已形成手工启用路径。实施状态：
+当前配置、Setup 与 Bootstrap 已形成显式启用路径。实施状态：
 
 1. [x] `runtime/gateway-config.mjs` 的严格结构和未知键拒绝。
 2. [x] `src/config/index.ts` 的运行时映射和语义校验。
 3. [x] `config-change.ts` 的飞书 Surface scope 变更码。
 4. [x] `reload-classifier.ts` 的热加载、Gateway 重启分类。
 5. [x] `config.example.toml`、README 和启用路径测试同步。
-6. Setup 与 Doctor 的飞书专属流程待实现。
+6. [x] 手动/扫码 Setup；Doctor 的飞书专属流程待实现。
 
 建议分类：
 
@@ -280,9 +280,9 @@ App Secret 只保存在权限受限的统一 TOML 中。SDK 换取的短期 Toke
 `scripts/feishu-setup.mjs`，但它只能作为设置菜单的组合模块。Setup 至少需要：
 
 1. 说明如何创建企业自建应用、启用 Bot、授予最小权限、订阅消息事件并发布应用。
-2. 读取 App ID 和 App Secret，并在写入前验证凭据和 Bot 身份。
-3. 引导获取可信 `open_id`。阶段 0 应验证锁定 SDK 的 `registerApp()` 是否能以最小权限安全返回
-   扫码用户身份；如果仍需临时接收事件，必须避免与运行中的同一应用长连接争抢事件。
+2. 提供手动输入 App ID/App Secret 与锁定 SDK Device Authorization 扫码两种方式；扫码时由
+   飞书授权页选择新建或已有应用，两种方式都在写入前验证凭据和 Bot 身份。
+3. 扫码使用返回的可信 `open_id`，手动方式要求显式输入允许名单；不为身份发现临时启动第二条长连接。
 4. 明确展示准备写入的非敏感配置，成功后原子更新 TOML。
 5. 不自动扩大允许用户或群聊范围。
 
@@ -314,7 +314,8 @@ Secret、Access Token、完整 SDK 响应或原始事件。
 - [x] 把 `im.message.receive_v1` 裁剪为不泄漏 SDK 类型的稳定平台事件。
 - [x] 为上述生命周期建立不访问飞书网络的离线合同测试。
 - 用最小隔离脚本验证握手、消息事件、取消、重连、代理和卡片动作。
-- 比较手动应用配置与锁定版本 `registerApp()` 的权限、身份和安全边界。
+- [x] 比较手动应用配置与锁定版本 `registerApp()` 的权限、身份和安全边界，并采用手动输入与
+  扫码并列、飞书页选择应用、最小权限和 Bot 身份验证方案。
 - 记录应用权限、事件订阅、SDK 版本及真实限制。
 
 该实验不得进入生产启动路径，不修改 Core、Storage 或公开命令。
@@ -343,7 +344,8 @@ Secret、Access Token、完整 SDK 响应或原始事件。
 - [x] `chat_id` 文本发送、有限 HTTP 超时和稳定脱敏错误；
 - [x] 结构化用户错误；
 - [x] Bootstrap 显式组合；
-- Setup 基础流程和 Doctor 的飞书专属检查。
+- [x] Setup 基础流程；
+- Doctor 的飞书专属检查。
 
 明确不做群聊、媒体、流式卡片和可批准交互。
 
@@ -451,9 +453,9 @@ npm run verify:commit
 1. 锁定 SDK 版本中卡片动作能否通过 WebSocket 接收，还是必须配置 HTTPS 回调。
 2. 官方事件回调失败时触发重投的精确响应语义，以及输入队列满时应如何返回。
 3. SDK HTTP 层如何使用当前 `[network]` 代理，并保持 macOS/Linux 一致。
-4. Setup 如何在不与运行中 Gateway 争抢同一应用事件的情况下发现 `open_id`。
-5. 长连接重启后重复消息是否需要超出内存 TTL 的最小幂等状态。
-6. 飞书应用需要的最小权限集合；阶段 1 不接受为后续媒体或 Drive 预授予宽泛权限。
+4. 长连接重启后重复消息是否需要超出内存 TTL 的最小幂等状态。
+5. 真实应用是否接受 Setup 当前声明的 `im:message:send_as_bot` 和
+   `im.message.receive_v1` 最小集合；阶段 1 不接受为后续媒体或 Drive 预授予宽泛权限。
 
 出现以下任一情况时停止当前阶段并单独评审：
 

@@ -8,6 +8,7 @@ describe("Codex Connect setup", () => {
     const input = {};
     const output = {};
     const telegramSetup = vi.fn(async () => "telegram-configured");
+    const feishuSetup = vi.fn();
     const intro = vi.fn();
     const select = vi.fn()
       .mockResolvedValueOnce("channels")
@@ -23,6 +24,7 @@ describe("Codex Connect setup", () => {
         cancel: vi.fn(),
       },
       telegramSetup,
+      feishuSetup,
     });
 
     expect(result).toBe("telegram-configured");
@@ -43,13 +45,45 @@ describe("Codex Connect setup", () => {
         value: "telegram",
         label: "Telegram",
         hint: "Bot、用户授权与消息格式",
+      }, {
+        value: "feishu",
+        label: "飞书",
+        hint: "企业自建应用与用户授权",
       }],
     });
     expect(telegramSetup).toHaveBeenCalledWith({ input, output });
+    expect(feishuSetup).not.toHaveBeenCalled();
+  });
+
+  it("selects Feishu under the communication channels category", async () => {
+    const input = {};
+    const output = {};
+    const telegramSetup = vi.fn();
+    const feishuSetup = vi.fn(async () => "feishu-configured");
+
+    const result = await runSetup({
+      input,
+      output,
+      prompts: {
+        intro: vi.fn(),
+        select: vi.fn()
+          .mockResolvedValueOnce("channels")
+          .mockResolvedValueOnce("feishu"),
+        isCancel: () => false,
+        cancel: vi.fn(),
+      },
+      telegramSetup,
+      feishuSetup,
+    });
+
+    expect(result).toBe("feishu-configured");
+    expect(feishuSetup).toHaveBeenCalledWith({ input, output });
+    expect(telegramSetup).not.toHaveBeenCalled();
   });
 
   it("cancels without starting a module setup", async () => {
     const telegramSetup = vi.fn();
+    const feishuSetup = vi.fn();
     const cancel = vi.fn();
 
     const result = await runSetup({
@@ -60,15 +94,18 @@ describe("Codex Connect setup", () => {
         cancel,
       },
       telegramSetup,
+      feishuSetup,
     });
 
     expect(result).toBeUndefined();
     expect(cancel).toHaveBeenCalledWith("Setup 已取消");
     expect(telegramSetup).not.toHaveBeenCalled();
+    expect(feishuSetup).not.toHaveBeenCalled();
   });
 
   it("cancels from the channel menu without starting Telegram setup", async () => {
     const telegramSetup = vi.fn();
+    const feishuSetup = vi.fn();
     const cancel = vi.fn();
     const select = vi.fn()
       .mockResolvedValueOnce("channels")
@@ -82,10 +119,12 @@ describe("Codex Connect setup", () => {
         cancel,
       },
       telegramSetup,
+      feishuSetup,
     });
 
     expect(result).toBeUndefined();
     expect(cancel).toHaveBeenCalledWith("Setup 已取消");
     expect(telegramSetup).not.toHaveBeenCalled();
+    expect(feishuSetup).not.toHaveBeenCalled();
   });
 });
