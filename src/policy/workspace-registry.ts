@@ -1,9 +1,9 @@
 import { UserFacingError } from "../conversation-core/index.js";
 
 export interface Workspace {
-  id: string;
-  name: string;
-  cwd: string;
+  readonly id: string;
+  readonly name: string;
+  readonly cwd: string;
 }
 
 export class WorkspaceRegistry {
@@ -28,7 +28,12 @@ export class WorkspaceRegistry {
       if (next.has(workspace.id)) {
         throw new Error(`Workspace ID 重复：${workspace.id}`);
       }
-      next.set(workspace.id, workspace);
+      const snapshot = Object.freeze({
+        id: workspace.id,
+        name: workspace.name,
+        cwd: workspace.cwd,
+      });
+      next.set(snapshot.id, snapshot);
     }
     if (!next.has(defaultWorkspaceId)) {
       throw new Error(`默认 Workspace 不存在：${defaultWorkspaceId}`);

@@ -162,6 +162,8 @@ Bootstrap 收尾。每个阶段只定向复核实际触及的已完成模块，�
 
 项目内部模块复核已完成 `storage`：当前 Schema 只在全新数据库创建，版本不匹配或标记为当前
 版本但缺少必需结构时失败关闭；SQLite 写入失败后恢复内存索引和磁盘绑定，不增加迁移路径。
+`policy` 也已完成：Workspace Registry 保存不可变授权快照，热加载失败保留上一份有效 Registry；
+Surface、账号和规范 Actor ID 必须同时匹配。
 
 ## 查询顺序
 

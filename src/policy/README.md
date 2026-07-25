@@ -12,3 +12,5 @@
 
 Telegram 输入不能提交任意绝对工作目录；所有 Thread、Turn、Shell 和文件相关操作都必须使用 Registry 中已经授权的 Workspace。
 具体 Surface 必须先通过自身的 `SurfaceAccessPolicy`，再记录 Actor 并调用 Application 命令或提交消息。
+Registry 会复制并冻结已经通过配置边界验证的 Workspace；构造参数、列表结果或单项查询都不能
+在注册后改写授权路径。热加载替换必须整体有效，失败时保留上一份 Registry。
