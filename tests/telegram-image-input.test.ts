@@ -371,7 +371,10 @@ function createSurface(
     {
       gatewayVersion: "0.145.0",
       imageStore,
-      actorRegistry: { rememberActor },
+      actorRegistry: {
+        actors: () => [],
+        rememberActor,
+      },
     },
   );
   output.subscribe("telegram-test-output", (event) => {

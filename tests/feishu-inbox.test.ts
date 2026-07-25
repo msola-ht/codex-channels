@@ -45,6 +45,7 @@ function createFixture(
     accountId: "cli_0123456789abcdef",
     access,
     actorRegistry: {
+      actors: () => [],
       rememberActor: (target, actorId) => {
         remembered.push({ target, actorId });
       },

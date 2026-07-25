@@ -7,6 +7,9 @@ import {
   FeishuMessageClient,
   type FeishuConnectionState,
 } from "../src/surfaces/feishu/client.js";
+import type {
+  FeishuCardDocument,
+} from "../src/surfaces/feishu/approval-card.js";
 
 interface FakeCallbacks {
   onReady(): void;
@@ -18,10 +21,13 @@ interface FakeCallbacks {
 function createFixture(startupTimeoutMs = 1_000) {
   let callbacks: FakeCallbacks | undefined;
   let messageHandler: ((event: unknown) => void) | undefined;
+  let cardActionHandler: ((event: unknown) => void) | undefined;
   const start = vi.fn(async () => {});
   const close = vi.fn();
   const onMessage = vi.fn();
   const onInvalidMessage = vi.fn();
+  const onCardAction = vi.fn();
+  const onInvalidCardAction = vi.fn();
   const onReconnecting = vi.fn();
   const onReconnected = vi.fn();
   const onFatal = vi.fn();
@@ -31,6 +37,8 @@ function createFixture(startupTimeoutMs = 1_000) {
       appSecret: "secret",
       onMessage,
       onInvalidMessage,
+      onCardAction,
+      onInvalidCardAction,
       onReconnecting,
       onReconnected,
       onFatal,
@@ -42,6 +50,9 @@ function createFixture(startupTimeoutMs = 1_000) {
         return {
           registerMessageHandler: (handler) => {
             messageHandler = handler;
+          },
+          registerCardActionHandler: (handler) => {
+            cardActionHandler = handler;
           },
           start,
           close,
@@ -55,6 +66,8 @@ function createFixture(startupTimeoutMs = 1_000) {
     close,
     onMessage,
     onInvalidMessage,
+    onCardAction,
+    onInvalidCardAction,
     onReconnecting,
     onReconnected,
     onFatal,
@@ -69,6 +82,12 @@ function createFixture(startupTimeoutMs = 1_000) {
         throw new Error("message handler is not registered");
       }
       messageHandler(event);
+    },
+    emitCardAction(event: unknown) {
+      if (cardActionHandler === undefined) {
+        throw new Error("card action handler is not registered");
+      }
+      cardActionHandler(event);
     },
   };
 }
@@ -250,6 +269,64 @@ describe("FeishuEventConnection", () => {
     );
   });
 
+  it("routes valid card actions only while active", async () => {
+    const fixture = createFixture();
+    const action = {
+      context: {
+        open_message_id: "om_message",
+        open_chat_id: "oc_chat",
+      },
+      operator: {
+        open_id: "ou_actor",
+      },
+      action: {
+        tag: "button",
+        value: {
+          interaction_token: "opaque-token",
+          decision: "approve-once",
+        },
+      },
+    };
+    const startPromise = fixture.connection.start();
+
+    fixture.emitCardAction(action);
+    expect(fixture.onCardAction).not.toHaveBeenCalled();
+
+    fixture.callbacks.onReady();
+    await startPromise;
+    fixture.emitCardAction(action);
+    expect(fixture.onCardAction).toHaveBeenCalledWith({
+      messageId: "om_message",
+      chatId: "oc_chat",
+      actorOpenId: "ou_actor",
+      tag: "button",
+      value: {
+        interaction_token: "opaque-token",
+        decision: "approve-once",
+      },
+    });
+
+    await fixture.connection.stop();
+    fixture.emitCardAction(action);
+    expect(fixture.onCardAction).toHaveBeenCalledOnce();
+  });
+
+  it("reports malformed card actions without throwing into the SDK reader", async () => {
+    const fixture = createFixture();
+    const startPromise = fixture.connection.start();
+    fixture.callbacks.onReady();
+    await startPromise;
+
+    expect(() => fixture.emitCardAction({})).not.toThrow();
+    expect(fixture.onCardAction).not.toHaveBeenCalled();
+    expect(fixture.onInvalidCardAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: "invalid-card-action",
+        field: "context",
+      }),
+    );
+  });
+
   it("does not retry malformed events when diagnostics fail", async () => {
     const fixture = createFixture();
     fixture.onInvalidMessage.mockImplementation(() => {
@@ -343,7 +420,10 @@ describe("FeishuMessageClient", () => {
       },
       {
         sendTimeoutMs: 1_000,
-        createSdkClient: () => ({ createMessage }),
+        createSdkClient: () => ({
+          createMessage,
+          patchMessage: successfulPatch,
+        }),
       },
     );
 
@@ -372,7 +452,10 @@ describe("FeishuMessageClient", () => {
       },
       {
         sendTimeoutMs: 1_000,
-        createSdkClient: () => ({ createMessage }),
+        createSdkClient: () => ({
+          createMessage,
+          patchMessage: successfulPatch,
+        }),
       },
     );
 
@@ -400,6 +483,51 @@ describe("FeishuMessageClient", () => {
     });
   });
 
+  it("creates and updates an interactive card without retrying", async () => {
+    const createMessage = vi.fn(async () => ({
+      data: { message_id: "om_card" },
+    }));
+    const patchMessage = vi.fn(async () => ({ code: 0 }));
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage,
+          patchMessage,
+        }),
+      },
+    );
+    const card = approvalCard();
+
+    await expect(client.sendCard("oc_chat", card)).resolves.toBe("om_card");
+    await expect(client.updateCard("om_card", card)).resolves.toBeUndefined();
+
+    expect(createMessage).toHaveBeenCalledOnce();
+    expect(createMessage).toHaveBeenCalledWith({
+      params: {
+        receive_id_type: "chat_id",
+      },
+      data: {
+        receive_id: "oc_chat",
+        msg_type: "interactive",
+        content: JSON.stringify(card),
+      },
+    });
+    expect(patchMessage).toHaveBeenCalledOnce();
+    expect(patchMessage).toHaveBeenCalledWith({
+      path: {
+        message_id: "om_card",
+      },
+      data: {
+        content: JSON.stringify(card),
+      },
+    });
+  });
+
   it("neutralizes platform-native mention tags in rich Markdown", async () => {
     const createMessage = vi.fn(async () => ({
       data: { message_id: "om_message" },
@@ -411,7 +539,10 @@ describe("FeishuMessageClient", () => {
       },
       {
         sendTimeoutMs: 1_000,
-        createSdkClient: () => ({ createMessage }),
+        createSdkClient: () => ({
+          createMessage,
+          patchMessage: successfulPatch,
+        }),
       },
     );
 
@@ -451,6 +582,7 @@ describe("FeishuMessageClient", () => {
         sendTimeoutMs: 250,
         createSdkClient: () => ({
           createMessage: () => new Promise(() => {}),
+          patchMessage: successfulPatch,
         }),
       },
     );
@@ -478,7 +610,10 @@ describe("FeishuMessageClient", () => {
       },
       {
         sendTimeoutMs: 1_000,
-        createSdkClient: () => ({ createMessage }),
+        createSdkClient: () => ({
+          createMessage,
+          patchMessage: successfulPatch,
+        }),
       },
     );
 
@@ -506,6 +641,7 @@ describe("FeishuMessageClient", () => {
           createMessage: async () => {
             throw timeout;
           },
+          patchMessage: successfulPatch,
         }),
       },
     );
@@ -528,6 +664,7 @@ describe("FeishuMessageClient", () => {
         sendTimeoutMs: 1_000,
         createSdkClient: () => ({
           createMessage: async () => ({ data: {} }),
+          patchMessage: successfulPatch,
         }),
       },
     );
@@ -540,3 +677,24 @@ describe("FeishuMessageClient", () => {
     );
   });
 });
+
+async function successfulPatch(): Promise<Record<string, never>> {
+  return {};
+}
+
+function approvalCard(): FeishuCardDocument {
+  return {
+    config: {
+      update_multi: true,
+      wide_screen_mode: true,
+    },
+    header: {
+      template: "blue",
+      title: {
+        tag: "plain_text",
+        content: "Codex 请求批准",
+      },
+    },
+    elements: [],
+  };
+}

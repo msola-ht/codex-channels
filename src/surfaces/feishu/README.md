@@ -4,17 +4,21 @@
 以及 Phase 1 的私聊文本 Inbox、输出渲染和 Bootstrap 显式组合；Phase 2 的预备实现已
 接入全部平台无关私聊命令，但 Phase 1 真实验收尚未整体关闭，群聊不得开始。当前可通过严格
 TOML 或统一 Setup 启用开发验证路径。Phase 4 已开始第一个独立体验切片：最终回复与命令结果
-使用 `post + md` 富文本，群聊、审批卡片、媒体和消息更新仍未开始。
+使用 `post + md` 富文本。Phase 3 已完成私聊审批卡片的离线主路径，真实动作投递仍待重新扫码
+授权后验证；群聊和媒体仍未开始。
 
 ## 文件索引
 
 - `index.ts`：飞书模块受控出口；一级 `surfaces/index.ts` 只转出 Bootstrap 所需工厂和选项类型。
 - `adapter.ts`：区分普通文本、平台本地命令和 Application 命令，并通过 Outbox 返回结果或安全错误。
+- `approval-card.ts`：生成有界审批卡片和移除动作后的处理结果卡片。
+- `card-action.ts`：严格裁剪 `card.action.trigger` 的路由字段和受限字符串动作值。
 - `client.ts`：官方 SDK、事件长连接及生命周期隔离。
 - `message-content.ts`：生成飞书 `post + md` 内容，供发送和实际序列化大小计量共用。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪。
 - `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理。
-- `interactions.ts`：在卡片交互尚未实现时拒绝审批、返回空用户输入并取消 MCP elicitation。
+- `interactions.ts`：维护私聊审批的一次性令牌、Actor 绑定、过期和跨客户端失效；用户输入与
+  MCP elicitation 继续失败关闭。
 - `renderer.ts`：把平台无关 `ConversationCommandResult`、`OutputEvent` 和结构化错误映射为稳定文本内容。
 - `outbox.ts`：精确账号路由并通过通用有界队列调用窄消息发送端口。
 - `surface.ts`：组合单账号连接、Inbox、Application Adapter、Outbox 和失败关闭交互端口，并由
@@ -29,10 +33,14 @@ TOML 或统一 Setup 启用开发验证路径。Phase 4 已开始第一个独立
 - 重连状态留在平台边界；停止操作幂等，并能终止尚未完成的启动。
 - SDK 原始日志不进入项目 Logger，避免平台凭据、URL 或响应正文泄漏。
 - Surface 只向项目 Logger 记录连接中、就绪、重连、恢复和停止等稳定状态，不附带 SDK 错误正文。
-- 当前只注册 `im.message.receive_v1`，回调必须同步完成最小入队，不能在 SDK Reader 中等待业务或平台网络请求。
-- 消息发送只使用 `im.v1.message.create` 的 `chat_id + text/post` 窄能力；富文本只生成单个
+- 消息路径只注册 `im.message.receive_v1`，回调必须同步完成最小入队，不能在 SDK Reader 中等待业务或平台网络请求。
+- 已离线注册 `card.action.trigger` 的独立分流并严格裁剪动作；测试应用尚未重新授权回调，真实
+  WebSocket 投递未验证。动作必须匹配一次性令牌、Chat、消息、授权 Actor 和当前请求提供的
+  精确选项，否则拒绝处理。
+- 消息发送只使用 `im.v1.message.create` 的 `chat_id + text/post/interactive` 窄能力；富文本只生成单个
   `md` 元素，不暴露 SDK Client。模型或上游文本中的飞书原生 `<at>` 标签会在平台边界被中和，
-  避免非预期提醒。调用设置 15 秒 HTTP 超时并要求响应包含 `message_id`。
+  避免非预期提醒。审批结束使用 `im.v1.message.patch` 移除动作；调用设置 15 秒 HTTP 超时，
+  创建响应必须包含 `message_id`。
 - 发送超时、SDK 失败和残缺响应只暴露稳定错误码，不回传 SDK message、响应正文或凭据。
 - 消息创建不自动重试；锁定 SDK 虽提供可选 `uuid` 字段，但当前官方资料未明确其幂等窗口和
   可重试错误语义。
@@ -59,7 +67,8 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 平台输出顺序和关闭边界。纯文本按 UTF-8 字节、富文本按序列化后的 `post` 内容计量；超过项目
 内部 20,000 字节上限时，在同一个队列任务内按 Unicode 字符安全分片并顺序发送。每个逻辑结果
 最多发送 5 条，超出时明确标记截断，避免单个结果无限占用同一 Chat 的发送任务。消息创建失败
-不自动改发另一种格式，避免非幂等重发产生重复消息；文件回退和消息更新尚未实现。
+不自动改发另一种格式，避免非幂等重发产生重复消息；卡片创建和更新进入相同 Chat 顺序边界，
+均不自动重试。通用消息更新和文件回退尚未实现。
 
 `adapter.ts` 对普通文本调用 `ConversationService.submit()`，对已知平台无关命令调用
 `ConversationCommandService.execute()`；`/start`、`/help`、`/whoami` 和 `/cancel` 留在飞书
@@ -70,9 +79,11 @@ Inbox 现有诊断路径仅记录受约束的错误类型。命令结果、追�
 Adapter 不会重试已经执行的状态修改，而是把稳定的队列错误交回同一诊断路径。会话列表最多展示
 20 条，名称或预览会规范空白并限制为 48 个字符，剩余项通过搜索提示收敛。
 
-`interactions.ts` 当前只提供失败关闭语义，不创建待处理状态：命令、文件和权限审批一律拒绝，
-用户输入返回空答案，MCP elicitation 返回取消；`resolved()` 和 `cancelAll()` 保持无状态幂等。
-这不会伪装成飞书已经支持审批，卡片交互仍属于后续独立阶段。
+`interactions.ts` 只为当前 Conversation 已恢复且恰有一个仍获授权 Actor 的命令、文件和权限
+请求创建卡片。不可预测令牌只存于内存并绑定请求、Chat、消息和 Actor；点击只能映射请求原本
+提供的一次、会话、命令前缀或精确网络规则，重复、畸形、越权、过期和关闭后的动作均不会升级
+权限。其他客户端解决、超时和 Surface 停止会拒绝请求并移除卡片动作。用户输入返回空答案，
+MCP elicitation 返回取消，二者尚未实现。
 
 `surface.ts` 实现单账号 `SurfaceAdapter` 生命周期：启动等待长连接就绪；停止先切断新事件，再
 有限排空 Inbox 和 Outbox。Bootstrap 从现有绑定中选择仍有授权 Actor 的 Chat 作为配置通知
@@ -84,7 +95,7 @@ Setup 与只读 Doctor 凭据/Bot 身份探测已完成，真实应用的首次�
 切换最终回复和命令结果为富文本，并已用状态命令与普通 Turn 短回复验证标题、列表、加粗、
 行内代码和链接的真实显示。该测试不表示长回复分片、卡片或群聊已经支持，也尚未核对重启前后
 的精确 Thread ID。断线恢复、未授权/重复事件、
-重启绑定恢复和可批准交互仍未完成。后续阶段按
+重启绑定恢复和可批准交互的真实投递仍未完成。后续阶段按
 [`飞书 Surface 接入计划`](../../../docs/feishu-surface-plan.md)推进；一级 `surfaces` 入口只转出
 窄工厂，不得导出 SDK 类型，也不得在 Core 中引入飞书类型。Phase 1 真实验收关闭前，Phase 2
 命令只视为预备实现。群聊已记录为后续需求但当前不开发，也不更新为公开支持。

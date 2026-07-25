@@ -304,6 +304,8 @@ function createOutbox(): {
     outbox: new FeishuOutbox(
       message.target.accountId,
       {
+        sendCard: async () => "om_card",
+        updateCard: async () => {},
         sendText: async (chatId, text) => {
           sent.push({ chatId, text });
         },

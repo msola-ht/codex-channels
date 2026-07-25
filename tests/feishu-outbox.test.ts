@@ -16,10 +16,16 @@ const target = {
   conversationId: "oc_chat",
 } as const;
 
+const cardMethods = {
+  sendCard: async () => "om_card",
+  updateCard: async () => {},
+};
+
 describe("Feishu outbox", () => {
   it("routes a rendered event to the exact account and chat", async () => {
     const sent: Array<{ chatId: string; format: string; text: string }> = [];
     const messagePort: FeishuMessagePort = {
+      ...cardMethods,
       sendText: async (chatId, text) => {
         sent.push({ chatId, format: "text", text });
       },
@@ -56,6 +62,7 @@ describe("Feishu outbox", () => {
     const outbox = new FeishuOutbox(
       "cli_app",
       {
+        ...cardMethods,
         sendText: async (_chatId, text) => {
           sent.push(text);
         },
@@ -88,6 +95,7 @@ describe("Feishu outbox", () => {
     const outbox = new FeishuOutbox(
       "cli_app",
       {
+        ...cardMethods,
         sendText: async (chatId, text) => {
           started.push(`${chatId}:${text}`);
           if (text === "第一条") {
@@ -137,6 +145,7 @@ describe("Feishu outbox", () => {
     const outbox = new FeishuOutbox(
       "cli_app",
       {
+        ...cardMethods,
         sendText: async (_chatId, text) => {
           sent.push(text);
         },
@@ -170,6 +179,7 @@ describe("Feishu outbox", () => {
     const outbox = new FeishuOutbox(
       "cli_app",
       {
+        ...cardMethods,
         sendText: async (_chatId, text) => {
           sent.push(text);
         },
@@ -197,6 +207,7 @@ describe("Feishu outbox", () => {
     const outbox = new FeishuOutbox(
       "cli_app",
       {
+        ...cardMethods,
         sendText: async () => {},
         sendPost: async (_chatId, markdown) => {
           sent.push(markdown);
@@ -224,6 +235,7 @@ describe("Feishu outbox", () => {
     const outbox = new FeishuOutbox(
       "cli_app",
       {
+        ...cardMethods,
         sendText: async (_chatId, text) => {
           await pending.promise;
           sent.push(text);

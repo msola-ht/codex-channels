@@ -5,7 +5,7 @@
 ## 文件
 
 - `index.ts`：本模块的公开导出入口。
-- `conversation-actor.ts`：定义 Surface 记录已授权 Conversation Actor 的窄接口。
+- `conversation-actor.ts`：定义 Surface 查询和记录已授权 Conversation Actor 的窄接口。
 - `surface-access.ts`：定义统一的 `target + actorId` 访问上下文和失败关闭的 Surface 授权接口。
 - `feishu-access.ts`：校验飞书 Surface、App 账号和 `open_id` 精确允许名单，并支持原子替换。
 - `telegram-access.ts`：实现统一授权接口，同时校验 Telegram Surface、Bot 账号和 Actor 允许名单，并支持原子替换热加载后的名单。

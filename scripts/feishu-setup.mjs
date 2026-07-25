@@ -58,6 +58,9 @@ export async function runFeishuSetup({
                 tenant: ["im.message.receive_v1"],
               },
             },
+            callbacks: {
+              items: ["card.action.trigger"],
+            },
           },
           onQRCodeReady: ({ url, expireIn }) => {
             const authorizationUrl = validateAuthorizationUrl(url);

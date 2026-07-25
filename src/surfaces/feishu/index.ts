@@ -1,5 +1,17 @@
 export { FeishuConversationAdapter } from "./adapter.js";
 export {
+  FeishuCardActionError,
+  decodeFeishuCardAction,
+  type FeishuCardAction,
+  type FeishuCardActionField,
+} from "./card-action.js";
+export {
+  renderFeishuApprovalCard,
+  renderFeishuApprovalOutcomeCard,
+  type FeishuApprovalAction,
+  type FeishuCardDocument,
+} from "./approval-card.js";
+export {
   FeishuConnectionError,
   FeishuEventConnection,
   FeishuMessageClient,
@@ -18,7 +30,10 @@ export {
   type FeishuInboxProcessingError,
   type FeishuInboxReceiveResult,
 } from "./inbox.js";
-export { FeishuInteractionPort } from "./interactions.js";
+export {
+  FeishuInteractionPort,
+  type FeishuCardActionResult,
+} from "./interactions.js";
 export {
   FeishuMessageEventError,
   decodeFeishuMessageEvent,

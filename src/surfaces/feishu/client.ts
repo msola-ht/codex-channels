@@ -16,6 +16,12 @@ import {
   FeishuMessageEventError,
   type FeishuMessageEvent,
 } from "./message-event.js";
+import {
+  decodeFeishuCardAction,
+  FeishuCardActionError,
+  type FeishuCardAction,
+} from "./card-action.js";
+import type { FeishuCardDocument } from "./approval-card.js";
 import { encodeFeishuPostContent } from "./message-content.js";
 import type { FeishuMessagePort } from "./outbox.js";
 
@@ -52,6 +58,8 @@ export interface FeishuEventConnectionOptions {
   webSocketAgent?: unknown;
   onMessage(event: FeishuMessageEvent): void;
   onInvalidMessage(error: FeishuMessageEventError): void;
+  onCardAction?(event: FeishuCardAction): void;
+  onInvalidCardAction?(error: FeishuCardActionError): void;
   onReconnecting?(): void;
   onReconnected?(): void;
   onFatal(error: FeishuConnectionError): void;
@@ -66,6 +74,7 @@ interface FeishuSdkCallbacks {
 
 interface FeishuSdkConnection {
   registerMessageHandler(handler: (event: unknown) => void): void;
+  registerCardActionHandler(handler: (event: unknown) => void): void;
   start(): Promise<void>;
   close(force: boolean): void;
 }
@@ -109,7 +118,7 @@ interface FeishuSdkMessagePayload {
   };
   data: {
     receive_id: string;
-    msg_type: "text" | "post";
+    msg_type: "text" | "post" | "interactive";
     content: string;
   };
 }
@@ -119,6 +128,16 @@ interface FeishuSdkMessageClient {
     data?: {
       message_id?: string | undefined;
     } | undefined;
+  }>;
+  patchMessage(payload: {
+    path: {
+      message_id: string;
+    };
+    data: {
+      content: string;
+    };
+  }): Promise<{
+    code?: number | undefined;
   }>;
 }
 
@@ -171,11 +190,61 @@ export class FeishuMessageClient implements FeishuMessagePort {
     );
   }
 
+  async sendCard(
+    chatId: string,
+    card: FeishuCardDocument,
+  ): Promise<string> {
+    return this.sendMessage(
+      chatId,
+      "interactive",
+      JSON.stringify(card),
+    );
+  }
+
+  async updateCard(
+    messageId: string,
+    card: FeishuCardDocument,
+  ): Promise<void> {
+    try {
+      const response = await withSendTimeout(
+        this.sdkClient.patchMessage({
+          path: {
+            message_id: messageId,
+          },
+          data: {
+            content: JSON.stringify(card),
+          },
+        }),
+        this.sendTimeoutMs,
+      );
+      if (response.code !== undefined && response.code !== 0) {
+        throw new FeishuMessageError(
+          "invalid-response",
+          "飞书消息更新响应无效",
+        );
+      }
+    } catch (error) {
+      if (error instanceof FeishuMessageError) {
+        throw error;
+      }
+      if (isSdkTimeout(error)) {
+        throw new FeishuMessageError(
+          "send-timeout",
+          "飞书消息更新超时",
+        );
+      }
+      throw new FeishuMessageError(
+        "send-failed",
+        "飞书消息更新失败",
+      );
+    }
+  }
+
   private async sendMessage(
     chatId: string,
-    messageType: "text" | "post",
+    messageType: "text" | "post" | "interactive",
     content: string,
-  ): Promise<void> {
+  ): Promise<string> {
     try {
       const response = await withSendTimeout(
         this.sdkClient.createMessage({
@@ -199,6 +268,7 @@ export class FeishuMessageClient implements FeishuMessagePort {
           "飞书消息响应无效",
         );
       }
+      return response.data.message_id;
     } catch (error) {
       if (error instanceof FeishuMessageError) {
         throw error;
@@ -353,6 +423,29 @@ export class FeishuEventConnection {
             }
           }
         });
+        sdkConnection.registerCardActionHandler((event) => {
+          if (
+            this.isCurrent(generation)
+            && (
+              this.stateValue === "running"
+              || this.stateValue === "reconnecting"
+            )
+          ) {
+            try {
+              this.options.onCardAction?.(decodeFeishuCardAction(event));
+            } catch (error) {
+              if (error instanceof FeishuCardActionError) {
+                try {
+                  this.options.onInvalidCardAction?.(error);
+                } catch {
+                  // Permanent invalid actions must not enter a retry loop.
+                }
+                return;
+              }
+              throw error;
+            }
+          }
+        });
         this.startupTimer = setTimeout(() => {
           this.failStart(
             generation,
@@ -468,6 +561,7 @@ const defaultMessageDependencies: FeishuMessageClientDependencies = {
     });
     return {
       createMessage: (payload) => client.im.v1.message.create(payload),
+      patchMessage: (payload) => client.im.v1.message.patch(payload),
     };
   },
 };
@@ -517,6 +611,11 @@ const defaultDependencies: FeishuEventConnectionDependencies = {
       registerMessageHandler: (handler) => {
         eventDispatcher.register({
           "im.message.receive_v1": handler,
+        });
+      },
+      registerCardActionHandler: (handler) => {
+        eventDispatcher.register({
+          "card.action.trigger": handler,
         });
       },
       start: () => wsClient.start({ eventDispatcher }),

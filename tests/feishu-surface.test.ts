@@ -184,6 +184,8 @@ function createFixture(
     ...(configurationRecipients ? { configurationRecipients } : {}),
   }, {
     messagePort: {
+      sendCard: async () => "om_card",
+      updateCard: async () => {},
       sendText: async (chatId, text) => {
         sent.push({ chatId, text });
       },
@@ -203,6 +205,7 @@ function createFixture(
             registerMessageHandler(handler) {
               messageHandler = handler;
             },
+            registerCardActionHandler() {},
             start: sdkStart,
             close: sdkClose,
           };

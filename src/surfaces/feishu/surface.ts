@@ -57,7 +57,7 @@ export function createFeishuSurface(
 export class FeishuSurface implements SurfaceAdapter {
   readonly surface = "feishu" as const;
   readonly accountId: string;
-  readonly interactions = new FeishuInteractionPort();
+  readonly interactions: FeishuInteractionPort;
   readonly output: FeishuOutbox;
 
   private readonly inbox: FeishuInbox;
@@ -82,6 +82,12 @@ export class FeishuSurface implements SurfaceAdapter {
     this.output = new FeishuOutbox(
       options.appId,
       messagePort,
+      options.logger,
+    );
+    this.interactions = new FeishuInteractionPort(
+      this.output,
+      options.actorRegistry,
+      options.access,
       options.logger,
     );
     const adapter = new FeishuConversationAdapter(
@@ -139,6 +145,27 @@ export class FeishuSurface implements SurfaceAdapter {
       onInvalidMessage: (error) => {
         logInvalidMessage(options.logger, error);
       },
+      onCardAction: (action) => {
+        const result = this.interactions.handleCardAction(action);
+        if (result !== "accepted") {
+          options.logger.warn(
+            {
+              ...this.lifecycleContext(),
+              result,
+            },
+            "飞书卡片动作未处理",
+          );
+        }
+      },
+      onInvalidCardAction: (error) => {
+        options.logger.warn(
+          {
+            errorCode: error.code,
+            field: error.field,
+          },
+          "飞书卡片动作格式无效",
+        );
+      },
       onReconnecting: () => {
         this.logger.warn(this.lifecycleContext(), "飞书长连接正在重连");
       },
@@ -163,7 +190,7 @@ export class FeishuSurface implements SurfaceAdapter {
   private async stopOnce(): Promise<void> {
     await this.connection.stop();
     await this.inbox.close();
-    this.interactions.cancelAll("Surface stopped");
+    await this.interactions.close();
     await this.output.close();
     this.logger.info(this.lifecycleContext(), "飞书 Surface 已停止");
   }

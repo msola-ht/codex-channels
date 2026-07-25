@@ -160,6 +160,9 @@ describe("Feishu setup", () => {
             tenant: ["im.message.receive_v1"],
           },
         },
+        callbacks: {
+          items: ["card.action.trigger"],
+        },
       },
       onQRCodeReady: expect.any(Function),
     });

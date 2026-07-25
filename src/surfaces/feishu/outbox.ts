@@ -6,6 +6,7 @@ import {
 } from "../../conversation-core/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import type { SurfaceOutputPort } from "../types.js";
+import type { FeishuCardDocument } from "./approval-card.js";
 import { encodeFeishuPostContent } from "./message-content.js";
 import { renderFeishuOutput } from "./renderer.js";
 
@@ -17,6 +18,8 @@ const feishuTruncationNotice = "\n\n[内容过长，已截断]";
 export interface FeishuMessagePort {
   sendText(chatId: string, text: string): Promise<void>;
   sendPost(chatId: string, markdown: string): Promise<void>;
+  sendCard(chatId: string, card: FeishuCardDocument): Promise<string>;
+  updateCard(messageId: string, card: FeishuCardDocument): Promise<void>;
 }
 
 export class FeishuOutbox implements SurfaceOutputPort {
@@ -80,6 +83,33 @@ export class FeishuOutbox implements SurfaceOutputPort {
     return this.delivery.runOrdered(
       chatId,
       () => this.sendText(chatId, text),
+    );
+  }
+
+  deliverCard(
+    chatId: string,
+    card: FeishuCardDocument,
+  ): Promise<string> {
+    if (this.closed) {
+      return Promise.reject(new Error("飞书输出队列已经关闭"));
+    }
+    return this.delivery.runOrdered(
+      chatId,
+      () => this.messagePort.sendCard(chatId, card),
+    );
+  }
+
+  updateCard(
+    chatId: string,
+    messageId: string,
+    card: FeishuCardDocument,
+  ): Promise<void> {
+    if (this.closed) {
+      return Promise.reject(new Error("飞书输出队列已经关闭"));
+    }
+    return this.delivery.runOrdered(
+      chatId,
+      () => this.messagePort.updateCard(messageId, card),
     );
   }
 

@@ -2,8 +2,8 @@
 
 ## 状态与目标
 
-本文记录飞书通讯渠道的分阶段实施状态。阶段 1 私聊文本路径已可通过 Setup 或手工配置启用，但不表示
-后续命令、群聊、审批或媒体能力已经支持。实施必须继续遵守
+本文记录飞书通讯渠道的分阶段实施状态。阶段 1 私聊文本路径已可通过 Setup 或手工配置启用，但
+后续能力仍须分别完成离线实现和真实验收后才能公开支持。实施必须继续遵守
 [`通讯渠道 Surface 接入指南`](surface-integration-guide.md)；如果本文与通用指南冲突，以通用
 架构和安全边界为准，并先单独评审需要调整的公开合同。
 
@@ -13,16 +13,17 @@ Application 输入 Adapter、安全错误、`OutputEvent` 纯文本渲染、有�
 文本发送窄适配、单账号 `SurfaceAdapter` 生命周期组合、严格 TOML/运行配置与变更分类，以及
 Bootstrap 显式注册、允许名单热加载、安全配置通知收件人组合、手动/扫码 Setup 和只读
 Doctor 凭据/Bot 身份探测。2026-07-25 已由操作者使用测试应用完成扫码配置、Doctor 探测、
-生产 Gateway 长连接就绪，以及一次已授权私聊文本 Turn 和精确 Chat 文本回复。可批准交互尚未
-完成；阶段 2 的私聊命令预备切片已接入全部平台无关命令及 `/start`、`/help`、`/whoami`、
+生产 Gateway 长连接就绪，以及一次已授权私聊文本 Turn 和精确 Chat 文本回复。阶段 2 的私聊
+命令预备切片已接入全部平台无关命令及 `/start`、`/help`、`/whoami`、
 `/cancel`，但阶段 1 尚未整体关闭，因此尚未进入阶段 2 验收，也不得继续群聊切片。断线恢复、
-代理、未授权/重复真实事件和卡片动作实验仍待完成。
+代理和未授权/重复真实事件仍待完成。
 
 2026-07-26 操作者在 Gateway 重启后完成飞书私聊命令试用，确认当时回复均为纯文本。随后按独立
 切片实现最终回复和命令结果的 `post + md` 富文本；错误、过载和操作性提示继续使用纯文本，
 同日已在 Gateway 重启后通过真实飞书验证状态命令与普通 Turn 的短回复，标题、列表、加粗、
 行内代码和链接均正确显示。群聊需求已记录为阶段 2 后续项且当前开发批次明确暂停；审批卡片、
-媒体、长回复分片和消息更新仍按后续独立切片实施。
+一次性令牌、精确 Actor/Chat/消息/请求绑定、原值决定和失效更新已完成离线实现，待重新扫码后
+验证真实动作投递；媒体和长回复分片仍按后续独立切片实施。
 
 目标是在现有 TypeScript 模块化单体中增加一个编译期显式注册的飞书 Surface，使飞书与
 Telegram、原生 Codex CLI 连接同一个 Codex App Server，共享 Thread、Turn、模型、Fast、Goal、
@@ -118,6 +119,7 @@ src/surfaces/feishu/
 ├── adapter.ts        # Application 输入编排和安全错误
 ├── surface.ts        # SurfaceAdapter 与平台生命周期
 ├── client.ts         # 官方 SDK 的窄封装与可测试端口
+├── card-action.ts    # 卡片动作严格裁剪与稳定字段
 ├── message-content.ts # 飞书消息内容编码与平台专属标签中和
 ├── inbox.ts          # 平台本地的有界输入接收和事件去重
 ├── renderer.ts       # 命令结果、OutputEvent 和用户错误渲染
@@ -405,10 +407,14 @@ Codex 输入。Outbox 对纯文本按 UTF-8 字节、对富文本按序列化后
 
 范围：
 
-- 经验证的卡片动作接收方式；
-- 一次性 Interaction Token；
-- 命令、文件、临时权限、用户输入和 MCP elicitation；
-- 跨客户端解决、超时和卡片失效更新。
+- [x] 锁定 SDK 的 `card.action.trigger` 离线注册、严格字段裁剪和独立分流；
+- [x] 扫码 Setup 增量声明 `card.action.trigger` 回调；
+- [x] 私聊审批卡片、一次性 Interaction Token、精确 Actor/Chat/消息/请求绑定；
+- [x] 命令、文件和临时权限的原值决定映射；
+- [x] 跨客户端解决、超时、停止和卡片失效更新的离线测试；
+- [ ] 测试应用重新授权后的真实 WebSocket 动作投递验证；
+- [ ] 经验证的卡片动作接收方式；
+- [ ] 用户输入和 MCP elicitation；
 
 完成标准：
 
@@ -493,8 +499,9 @@ npm run verify:commit
 2. 官方事件回调失败时触发重投的精确响应语义，以及输入队列满时应如何返回。
 3. SDK HTTP 层如何使用当前 `[network]` 代理，并保持 macOS/Linux 一致。
 4. 长连接重启后重复消息是否需要超出内存 TTL 的最小幂等状态。
-5. 真实应用是否接受 Setup 当前声明的 `im:message:send_as_bot` 和
-   `im.message.receive_v1` 最小集合；阶段 1 不接受为后续媒体或 Drive 预授予宽泛权限。
+5. 真实应用是否接受 Setup 当前声明的 `im:message:send_as_bot`、
+   `im.message.receive_v1` 和 `card.action.trigger` 最小集合；阶段 1 不接受为后续媒体或
+   Drive 预授予宽泛权限。
 
 出现以下任一情况时停止当前阶段并单独评审：
 
