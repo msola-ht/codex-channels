@@ -6,9 +6,9 @@
 事实查询入口，不替代 [`飞书 Surface 接入计划`](feishu-surface-plan.md)，也不表示项目当前已经
 支持飞书。
 
-截至 2026-07-25，项目尚未安装或锁定 `@larksuiteoapi/node-sdk`。npm 页面当日显示的最新正式版
-为 `1.70.0`，这里只记录调研时的候选版本，不构成依赖选择、兼容承诺或实施基线。阶段 0 完成前，
-任何来自 SDK `main`、npm 最新版本或开放平台动态页面的字段都不能直接写入稳定业务代码。
+截至 2026-07-25，项目已精确锁定 `@larksuiteoapi/node-sdk@1.71.1`，并建立未注册到 Bootstrap
+的 Phase 0 长连接生命周期封装和离线合同测试。飞书仍不是可启用渠道；测试应用握手、代理、
+事件投递和卡片动作实验完成前，不能进入生产启动路径。
 
 ## 资料优先级
 
@@ -30,25 +30,26 @@
 | --- | --- |
 | 查阅日期 | 2026-07-25 |
 | npm 包 | `@larksuiteoapi/node-sdk` |
-| npm 当日候选正式版 | `1.70.0`，尚未选定 |
-| 项目锁定版本 | 未锁定 |
-| 项目依赖状态 | 未安装 |
+| npm 当日采用正式版 | `1.71.1` |
+| 项目锁定版本 | `1.71.1` |
+| 固定官方源码 | [`8b3e0df`](https://github.com/larksuite/node-sdk/tree/8b3e0df3af9401c263dc96026e1c7f17460a21cc) |
+| 项目依赖状态 | 已安装并由 `package-lock.json` 精确锁定 |
 | 目标应用类型 | 飞书企业自建应用 |
 | 首版目标传输 | WebSocket 长连接 |
 | 首版目标范围 | 单 Bot 账号、授权私聊文本 |
 | Lark 海外版 | 不在首版范围 |
 
-锁定版本后必须把“项目锁定版本”改为精确版本，并增加对应 Tag 或 Commit 固定链接。依赖升级时
-不得只修改版本数字；还要复核下方资料、已知约束、支持矩阵、实现映射和验证结果。
+依赖升级时不得只修改版本数字；还要复核下方资料、已知约束、支持矩阵、实现映射和验证结果。
 
 ## 官方资料
 
 | 查询目标 | 官方资料 | 当前用途 |
 | --- | --- | --- |
 | SDK 包与版本 | [npm 包版本](https://www.npmjs.com/package/@larksuiteoapi/node-sdk?activeTab=versions) | 发现正式版本，不作为锁定证据 |
-| SDK 源码 | [官方 Node SDK 仓库](https://github.com/larksuite/node-sdk) | 阶段 0 选择版本后固定 Tag 或 Commit |
-| Client、事件和长连接示例 | [Node SDK 中文说明](https://github.com/larksuite/node-sdk/blob/main/README.zh.md) | 发现 `Client`、`WSClient`、`EventDispatcher` 和 `registerApp()` |
-| 高层 Channel | [Channel 模块说明](https://github.com/larksuite/node-sdk/blob/main/docs/channel.md) | 识别其策略、去重、串行、重试、媒体和卡片职责 |
+| SDK 源码 | [固定 `1.71.1` 提交](https://github.com/larksuite/node-sdk/tree/8b3e0df3af9401c263dc96026e1c7f17460a21cc) | 当前实现和测试的源码基线 |
+| Client、事件和长连接示例 | [固定版本中文说明](https://github.com/larksuite/node-sdk/blob/8b3e0df3af9401c263dc96026e1c7f17460a21cc/README.zh.md) | 核对 `Client`、`WSClient`、`EventDispatcher` 和 `registerApp()` |
+| WebSocket 生命周期 | [固定版本 `ws-client`](https://github.com/larksuite/node-sdk/tree/8b3e0df3af9401c263dc96026e1c7f17460a21cc/ws-client) | 核对 `onReady`、错误、重连、关闭和状态语义 |
+| 高层 Channel | [固定版本 Channel 说明](https://github.com/larksuite/node-sdk/blob/8b3e0df3af9401c263dc96026e1c7f17460a21cc/docs/channel.zh.md) | 识别其策略、去重、串行、重试、媒体和卡片职责 |
 | 长连接规则 | [使用长连接接收事件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/event-subscription-guide/long-connection-mode) | 处理时限、集群投递和订阅类型 |
 | 事件接收安全 | [接收事件](https://open.feishu.cn/document/ukTMukTMukTM/uYDNxYjL2QTM24iN0EjN/event-subscription-configure-/encrypt-key-encryption-configuration-case) | Webhook 阶段的验签和加密入口 |
 | 消息卡片 | [消息卡片介绍](https://open.feishu.cn/document/ukTMukTMukTM/uczM3QjL3MzN04yNzcDN) | 后续卡片呈现和交互边界 |
@@ -108,8 +109,9 @@ EventDispatcher`。
 
 | 能力 | 官方入口 | 项目状态 | 实施阶段 |
 | --- | --- | --- | --- |
-| Node SDK | npm 包、官方仓库 | 未安装、未锁定 | 阶段 0 |
-| WebSocket 握手和重连 | `WSClient` | 计划中 | 阶段 0 |
+| Node SDK | npm 包、固定官方源码 | 已精确锁定 `1.71.1` | 阶段 0 |
+| WebSocket 握手和重连 | `WSClient` | 生命周期封装和离线合同已完成；真实应用实验待完成 | 阶段 0 |
+| 消息事件字段裁剪 | `im.message.receive_v1` | 稳定字段映射和畸形输入失败关闭已完成；真实事件待验证 | 阶段 0 |
 | 私聊文本事件 | `im.message.receive_v1` | 计划中 | 阶段 1 |
 | 文本发送 | `client.im.v1.message.create` | 计划中 | 阶段 1 |
 | 事件去重与旧事件过滤 | 平台事件 ID、时间字段 | 计划使用飞书模块内有界内存状态 | 阶段 1 |
@@ -124,12 +126,13 @@ EventDispatcher`。
 
 ## 本地实现映射
 
-下列路径是计划入口；尚未创建的文件使用代码文本表示，不建立失效链接。
+已创建的入口使用仓库链接；尚未创建的文件使用代码文本表示，不建立失效链接。
 
 | 官方概念 | 计划中的本地入口 | 计划验证 |
 | --- | --- | --- |
-| WebSocket 和 Client | `src/surfaces/feishu/client.ts` | 握手、代理、取消、重连和错误分类 |
-| 消息事件 | `src/surfaces/feishu/inbox.ts` | 字段校验、3 秒内入队、重复、旧事件和过载 |
+| WebSocket 和 Client | [`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts) | [`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：凭据、就绪、超时、重连、停止和错误脱敏 |
+| 消息事件信封 | [`src/surfaces/feishu/message-event.ts`](../src/surfaces/feishu/message-event.ts) | [`tests/feishu-message-event.test.ts`](../tests/feishu-message-event.test.ts)：稳定字段裁剪和畸形输入失败关闭 |
+| 输入接收与去重 | `src/surfaces/feishu/inbox.ts` | 3 秒内入队、重复、旧事件和过载 |
 | 身份与授权 | `FeishuAccessPolicy`、`ConversationActorRegistry` | App ID、Chat ID、Open ID 和 Workspace |
 | 文本发送 | `src/surfaces/feishu/outbox.ts` | 精确账号路由、同 Chat 顺序、超时和限流 |
 | 输出渲染 | `src/surfaces/feishu/renderer.ts` | 所有关键 `OutputEvent` 的纯文本回退 |
@@ -137,8 +140,7 @@ EventDispatcher`。
 | 配置与 Setup | `runtime/gateway-config.mjs`、`src/config/`、`scripts/` | 严格 Schema、脱敏、原子写入和只读 Doctor |
 | 生命周期组合 | `src/bootstrap/surface-composition.ts` | 单消费者、部分启动回滚和停止不影响 App Server |
 
-飞书实现出现后，应把表中代码文本替换为实际文件链接，并加入精确测试文件。新增能力必须同时更新
-支持矩阵和实现映射，不能只增加 SDK 调用。
+新增能力必须同时更新支持矩阵和实现映射，不能只增加 SDK 调用。
 
 ## 本地资料保存规则
 

@@ -13,7 +13,7 @@
 - [`conversation-core/`](conversation-core/README.md)：Thread、Turn、Item 状态归约和输出事件。
 - [`event-bus/`](event-bus/README.md)：有界异步队列和消费者隔离。
 - [`observability/`](observability/README.md)：结构化日志与脱敏。
-- [`policy/`](policy/README.md)：Telegram 用户与 Workspace 授权边界。
+- [`policy/`](policy/README.md)：Surface Actor 与 Workspace 授权边界。
 - [`session-routing/`](session-routing/README.md)：外部 Conversation、Workspace 与 Codex Thread 路由。
 - [`storage/`](storage/README.md)：最小绑定状态的可替换存储。
 - [`surfaces/`](surfaces/README.md)：外部平台适配器。
