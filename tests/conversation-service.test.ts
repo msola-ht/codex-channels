@@ -361,6 +361,26 @@ describe("ConversationService model selection", () => {
     expect(listPlugins).toHaveBeenCalledWith(main.cwd);
   });
 
+  it("lists stable Permission Profiles for the authorized Workspace", async () => {
+    const listPermissionProfiles = vi.fn(async () => [
+      { id: ":read-only", description: null, allowed: true },
+      { id: "project", description: "项目策略", allowed: false },
+    ]);
+    const service = new ConversationService(
+      turnPort(),
+      { workspace: () => main } as unknown as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort({ listPermissionProfiles }),
+    );
+
+    await expect(service.listPermissionProfiles(target)).resolves.toEqual([
+      { id: ":read-only", description: null, allowed: true },
+      { id: "project", description: "项目策略", allowed: false },
+    ]);
+    expect(listPermissionProfiles).toHaveBeenCalledWith(main.cwd);
+  });
+
   it("allows read-only Fast status during an active turn but blocks switching", async () => {
     const selectFastMode = vi.fn().mockResolvedValue({ serviceTier: "fast" });
     const service = new ConversationService(

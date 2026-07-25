@@ -121,7 +121,7 @@ bootstrap ─────────→ 所有具体实现并完成装配
 | 计划与现状盘点 | 已完成 | 仅新增计划和索引，不改变运行时 |
 | 1. Thread 生命周期 | 已完成 | 稳定端口、响应映射、调用方与测试已迁移 |
 | 2. Turn 与 Application 命令 | 已完成 | Turn、Review、Goal 端口与响应映射已迁移 |
-| 3. 模型、Fast、用量与扩展查询 | 进行中 | 模型、Fast、账户、Skill、MCP 与 Plugin 查询已收敛；权限待处理 |
+| 3. 模型、Fast、用量与扩展查询 | 已完成 | 模型、Fast、账户、Skill、MCP、Plugin 与 Permission Profile 查询均已收敛 |
 | 4. Notification 与 Conversation Core | 未开始 | 等待 Thread 与状态类型稳定 |
 | 5. Server Request 与审批 | 未开始 | 独立高权限边界 |
 | 6. 边界收紧与测试替身 | 未开始 | 等待协议泄漏迁移完成 |
@@ -166,7 +166,7 @@ bootstrap ─────────→ 所有具体实现并完成装配
 - 把 `turn/start`、`turn/steer`、`turn/interrupt`、重命名、压缩、Review 和 Goal 方法映射到
   稳定结果。
 - Goal 与 Review 命令使用显式稳定结果；模型和扩展查询的
-  `Awaited<ReturnType<...>>` 链在阶段 3 随查询类型一起替换。
+  `Awaited<ReturnType<...>>` 链已在阶段 3 随查询类型一起替换。
 - 保持下一 Turn 队列、活动 Turn 判断、失败清理和用户错误代码不变。
 
 重点验证：
@@ -178,7 +178,7 @@ bootstrap ─────────→ 所有具体实现并完成装配
 完成标准：
 
 - Conversation Turn、Review、Goal 路径不再导入具体 Client 或对应生成协议类型。
-- Conversation Turn 测试只依赖窄端口；模型与扩展查询的具体 Client 依赖留待阶段 3 清理。
+- Conversation Turn 测试只依赖窄端口；模型与扩展查询的具体 Client 依赖已在阶段 3 清理。
 
 ## 阶段 3：模型、Fast、用量与扩展查询
 
@@ -203,7 +203,8 @@ bootstrap ─────────→ 所有具体实现并完成装配
 
 完成标准：
 
-- `model-selection-service` 和 Telegram 查询格式器不再导入生成协议。
+- `model-selection-service` 和 Telegram 的模型、用量与扩展查询格式化输入不再使用生成响应；
+  同文件中的通知输入由阶段 4 继续隔离。
 - 查询结果的协议字段变化只需修改 Client 映射和对应合同测试。
 
 ## 阶段 4：Notification 与 Conversation Core

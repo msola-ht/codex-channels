@@ -125,6 +125,8 @@ class FakeTransport extends BaseTransport {
     marketplaces: [],
     marketplaceLoadErrors: [],
   };
+  permissionPages: Array<Record<string, unknown>> = [{ data: [], nextCursor: null }];
+  permissionPageIndex = 0;
   configServiceTier: unknown = "fast";
   accountUsageResult: Record<string, unknown> = {
     summary: {
@@ -274,6 +276,19 @@ class FakeTransport extends BaseTransport {
           JSON.stringify({
             id: decoded.id,
             result: this.pluginInstalledResult,
+          }),
+        ),
+      );
+    } else if (decoded.method === "permissionProfile/list") {
+      const page = this.permissionPages[
+        Math.min(this.permissionPageIndex, this.permissionPages.length - 1)
+      ];
+      this.permissionPageIndex += 1;
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({
+            id: decoded.id,
+            result: page,
           }),
         ),
       );
@@ -941,6 +956,72 @@ describe("JsonRpcClient", () => {
 
     await expect(client.listPlugins("/tmp/project"))
       .rejects.toThrow("Codex 响应缺少有效 plugin name");
+  });
+
+  it("maps and paginates Permission Profiles into stable options", async () => {
+    const transport = new FakeTransport();
+    transport.permissionPages = [
+      {
+        data: [{
+          id: ":read-only",
+          description: null,
+          allowed: true,
+        }],
+        nextCursor: "1",
+      },
+      {
+        data: [{
+          id: "project",
+          description: "Project policy",
+          allowed: false,
+        }],
+        nextCursor: null,
+      },
+    ];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listPermissionProfiles("/tmp/project")).resolves.toEqual([
+      { id: ":read-only", description: null, allowed: true },
+      { id: "project", description: "Project policy", allowed: false },
+    ]);
+    expect(
+      transport.sent
+        .filter((message) => message.method === "permissionProfile/list")
+        .map((message) => message.params),
+    ).toEqual([
+      { cwd: "/tmp/project", limit: 100 },
+      { cwd: "/tmp/project", limit: 100, cursor: "1" },
+    ]);
+  });
+
+  it("fails closed when a Permission Profile lacks a required stable field", async () => {
+    const transport = new FakeTransport();
+    transport.permissionPages = [{
+      data: [{ id: "", description: null, allowed: true }],
+      nextCursor: null,
+    }];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listPermissionProfiles("/tmp/project"))
+      .rejects.toThrow("Codex 响应缺少有效 permission profile id");
+  });
+
+  it("rejects repeated Permission Profile pagination cursors", async () => {
+    const transport = new FakeTransport();
+    transport.permissionPages = [{ data: [], nextCursor: "same-cursor" }];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listPermissionProfiles("/tmp/project"))
+      .rejects.toThrow("permissionProfile/list 返回了循环分页游标");
   });
 
   it("persists the Fast default through the App Server config API", async () => {

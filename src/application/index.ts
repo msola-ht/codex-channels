@@ -54,6 +54,10 @@ export {
   type PluginQueryPort,
 } from "./plugin-port.js";
 export {
+  type PermissionProfileOption,
+  type PermissionQueryPort,
+} from "./permission-port.js";
+export {
   type GoalStatus,
   type ReviewStarted,
   type ReviewTarget,

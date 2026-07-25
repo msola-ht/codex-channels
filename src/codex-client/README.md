@@ -25,10 +25,13 @@
   展示必需字段；不向 Application 传播工具 Schema、资源或 Server Info。
 - `plugin-adapter.ts`：从官方已安装 Plugin 响应中只保留名称和启用状态，排除安装建议与
   Marketplace、路径、版本、策略和加载错误。
+- `permission-adapter.ts`：把官方 Permission Profile 分页响应裁剪为 ID、说明和策略可选状态，
+  并对必需字段与分页游标失败关闭。
 - `client.ts`：Thread 搜索/归档、Turn、模型、权限、已安装插件、Skill、用量及用户级配置
   读取与服务层级写入等 App Server 方法的类型化封装；MCP 查询按 Thread 使用
   `toolsAndAuthOnly` 分页，配置读取只公开稳定服务层级值，Plugin 查询只调用
-  `plugin/installed`，不得改用 `plugin/list` 加载市场目录。
+  `plugin/installed`，不得改用 `plugin/list` 加载市场目录；Permission Profile 按 CWD 分页，
+  仅用于只读目录展示。
 
 本模块不得调用 Telegram API、生成平台文案或保存业务绑定。协议字段必须来自
 `codex-protocol`；无参数请求和通知不得自行补空对象，写操作不得在过载或断线后盲目重试。

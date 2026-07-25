@@ -17,6 +17,8 @@ import type {
   McpServerSummary,
   InstalledPlugin,
   PluginQueryPort,
+  PermissionProfileOption,
+  PermissionQueryPort,
 } from "../application/index.js";
 import type {
   ConfigReadParams,
@@ -64,6 +66,7 @@ import { toAccountRateLimits, toAccountUsage } from "./account-adapter.js";
 import { toInstalledSkills } from "./skill-adapter.js";
 import { toMcpServerSummaryPage } from "./mcp-adapter.js";
 import { toInstalledPlugins } from "./plugin-adapter.js";
+import { toPermissionProfilePage } from "./permission-adapter.js";
 
 export interface ThreadDefaults {
   model?: string;
@@ -77,7 +80,8 @@ export class CodexAppServerClient implements
   AccountQueryPort,
   SkillQueryPort,
   McpQueryPort,
-  PluginQueryPort
+  PluginQueryPort,
+  PermissionQueryPort
 {
   constructor(
     private readonly rpc: JsonRpcClient,
@@ -393,8 +397,8 @@ export class CodexAppServerClient implements
     return toAccountRateLimits(response);
   }
 
-  async listPermissionProfiles(cwd: string): Promise<PermissionProfileListResponse["data"]> {
-    const profiles: PermissionProfileListResponse["data"] = [];
+  async listPermissionProfiles(cwd: string): Promise<PermissionProfileOption[]> {
+    const profiles: PermissionProfileOption[] = [];
     const cursors = new Set<string>();
     let cursor: string | null = null;
     do {
@@ -403,8 +407,9 @@ export class CodexAppServerClient implements
           method: "permissionProfile/list",
           params: { cwd, limit: 100, ...(cursor ? { cursor } : {}) },
         }, { retryOverload: true });
-      profiles.push(...response.data);
-      cursor = response.nextCursor;
+      const page = toPermissionProfilePage(response);
+      profiles.push(...page.profiles);
+      cursor = page.nextCursor;
       rememberCursor("permissionProfile/list", cursor, cursors);
     } while (cursor);
     return profiles;

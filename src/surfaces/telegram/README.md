@@ -28,7 +28,7 @@
 - `user-error-renderer.ts`：把平台无关的结构化用户错误映射为 Telegram 专属提示与命令用法。
 - `format.ts`：格式化会话、Diff/Plan、模型、Workspace、权限、用量和状态文本；Skill 只展示
   当前用户或 Workspace 直接安装的项，MCP 只展示稳定的名称、认证状态和工具数量，Plugin
-  只展示本机已安装项。
+  只展示本机已安装项，Permission Profile 只展示稳定目录选项。
 - `image-store.ts`：安全下载、校验、暂存和过期清理 Telegram 图片。
 
 Telegram 网络调用不得阻塞 App Server Reader。每个 Conversation 的最终输出保持顺序；审批卡状态更新必须先于批准后的操作展示。文件下载必须限制大小、路径、类型和保留时间。

@@ -67,6 +67,8 @@
 | MCP 状态测试 | [`mcp_server_status.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server/tests/suite/v2/mcp_server_status.rs) | 工具原名、项目级配置、实时元数据与精简清单合同 |
 | Plugin 请求处理 | [`plugins.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server/src/request_processors/plugins.rs) | 已安装查询、本地与远端来源、CWD 和安装建议 |
 | Plugin 列表测试 | [`plugin_list.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server/tests/suite/v2/plugin_list.rs) | 已安装过滤、安装建议、Marketplace 与功能开关合同 |
+| Catalog 请求处理 | [`catalog_processor.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server/src/request_processors/catalog_processor.rs) | Permission Profile 的 CWD 配置归并、allowed 状态和分页 |
+| Permission Profile 测试 | [`permission_profile_list.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server/tests/suite/v2/permission_profile_list.rs) | 内置、自定义、项目级 Profile 与分页合同 |
 | Thread 设置测试 | [`thread_settings_update.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server/tests/suite/v2/thread_settings_update.rs) | 模型、思考强度和服务层级通知合同 |
 | Unix WebSocket 测试 | [`connection_handling_websocket_unix.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server/tests/suite/v2/connection_handling_websocket_unix.rs) | Unix Socket WebSocket 行为 |
 
@@ -86,8 +88,8 @@
 | Goal | `thread/goal/get`、`thread/goal/set`、`thread/goal/clear` | [`turn-port.ts`](../src/application/turn-port.ts)、[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts)、[`conversation-command-service.test.ts`](../tests/conversation-command-service.test.ts) |
 | 审批和用户输入 | 命令、文件、权限、用户输入、MCP elicitation 共 5 类 Server Request | [`approval/`](../src/approval/README.md)、[`approval.test.ts`](../tests/approval.test.ts) |
 | Skill、MCP 与 Plugin | `skills/list`、`mcpServerStatus/list`、`plugin/installed`、MCP 状态通知 | Skill、MCP 和 Plugin 查询分别由 [`skill-port.ts`](../src/application/skill-port.ts)、[`mcp-port.ts`](../src/application/mcp-port.ts)、[`plugin-port.ts`](../src/application/plugin-port.ts) 及对应 Client 适配器隔离；MCP 通知仍待阶段 4 收敛；[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`conversation-command-service.test.ts`](../tests/conversation-command-service.test.ts) |
-| 用量、额度与权限 | `account/usage/read`、`account/rateLimits/read`、账户通知、`permissionProfile/list` | 查询结果由 [`account-port.ts`](../src/application/account-port.ts) 与 [`account-adapter.ts`](../src/codex-client/account-adapter.ts) 隔离；通知仍由 [`core.ts`](../src/conversation-core/core.ts) 归约；[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts) |
-| 真实合同 | Fast 默认值、Skill/MCP/Plugin 稳定查询、共享 Thread 设置通知、Turn 启动结果、跨客户端 Goal、双客户端连接恢复 | [`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+| 用量、额度与权限 | `account/usage/read`、`account/rateLimits/read`、账户通知、`permissionProfile/list` | 账户查询由 [`account-port.ts`](../src/application/account-port.ts) 与 [`account-adapter.ts`](../src/codex-client/account-adapter.ts) 隔离；Permission Profile 目录由 [`permission-port.ts`](../src/application/permission-port.ts) 与 [`permission-adapter.ts`](../src/codex-client/permission-adapter.ts) 隔离；账户通知仍由 [`core.ts`](../src/conversation-core/core.ts) 归约；[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts) |
+| 真实合同 | Fast 默认值、Skill/MCP/Plugin/Permission 稳定查询、共享 Thread 设置通知、Turn 启动结果、跨客户端 Goal、双客户端连接恢复 | [`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 
 当前生成协议还包含文件系统 RPC、独立命令执行、登录、Marketplace、App、Realtime、
 Remote Control、动态工具、Attestation 和实验能力等类型；它们没有因此自动成为 Gateway
@@ -109,6 +111,7 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 | 直接安装 Skill 查询如何隔离 | [`skill-port.ts`](../src/application/skill-port.ts)、[`skill-adapter.ts`](../src/codex-client/skill-adapter.ts) | [`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | MCP 状态查询如何隔离 | [`mcp-port.ts`](../src/application/mcp-port.ts)、[`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts) | [`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`telegram-format.test.ts`](../tests/telegram-format.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | 已安装 Plugin 查询如何隔离 | [`plugin-port.ts`](../src/application/plugin-port.ts)、[`plugin-adapter.ts`](../src/codex-client/plugin-adapter.ts) | [`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`telegram-format.test.ts`](../tests/telegram-format.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+| Permission Profile 查询如何隔离 | [`permission-port.ts`](../src/application/permission-port.ts)、[`permission-adapter.ts`](../src/codex-client/permission-adapter.ts) | [`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`telegram-format.test.ts`](../tests/telegram-format.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | 审批和用户输入如何协调 | [`approval/`](../src/approval/README.md) | [`approval.test.ts`](../tests/approval.test.ts) |
 | 各模块如何装配和管理生命周期 | [`bootstrap/`](../src/bootstrap/README.md) | [`gateway-startup-cleanup.test.ts`](../tests/gateway-startup-cleanup.test.ts) |
 | Telegram 如何适配核心事件 | [`surfaces/telegram/`](../src/surfaces/telegram/README.md) | [`tests/README.md`](../tests/README.md) |
@@ -132,12 +135,13 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 `session-routing` 不再依赖具体 Client 或生成协议。
 
 协议边界收敛阶段 2 已完成：Turn、Review 和 Goal 使用 Application 自有输入、结果和执行端口，
-官方 `UserInput`、Review 目标与完整响应只在 Client 适配边界出现；模型与扩展查询仍按阶段 3
-单独处理。
+官方 `UserInput`、Review 目标与完整响应只在 Client 适配边界出现。
 
-后续不把上述模块推倒重做，而是依次完成模型与查询、Notification、审批、边界
-收紧、项目内部模块和 Bootstrap 收尾。每个阶段只定向复核实际触及的已完成模块，并保持独立修改、
-验证、审查和提交。
+协议边界收敛阶段 3 已完成：模型、Fast、账户、Skill、MCP、Plugin 与 Permission Profile 查询
+均通过 Application 窄端口返回稳定结果，官方查询响应只在 Client 适配边界出现。
+
+后续不把上述模块推倒重做，而是依次完成 Notification、审批、边界收紧、项目内部模块和
+Bootstrap 收尾。每个阶段只定向复核实际触及的已完成模块，并保持独立修改、验证、审查和提交。
 
 ## 查询顺序
 

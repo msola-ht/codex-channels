@@ -7,6 +7,7 @@ import {
   formatFastModeState,
   formatModels,
   formatPlan,
+  formatPermissions,
   formatReasoningEfforts,
   formatLimits,
   formatMcpServers,
@@ -93,6 +94,16 @@ describe("extension formatting", () => {
 
     expect(text).toContain("MCP Servers（1）");
     expect(text).toContain("project-tools · auth=oAuth · tools=2");
+  });
+
+  it("renders stable Permission Profile options", () => {
+    const text = formatPermissions([
+      { id: ":read-only", description: null, allowed: true },
+      { id: "project", description: "项目策略", allowed: false },
+    ]);
+
+    expect(text).toContain(":read-only · 允许");
+    expect(text).toContain("project · 受策略禁止 · 项目策略");
   });
 });
 

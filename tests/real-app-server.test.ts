@@ -340,6 +340,16 @@ contractSuite("isolated Codex App Server state contract", () => {
       typeof plugin.name === "string" && typeof plugin.enabled === "boolean")).toBe(true);
   });
 
+  it("maps the isolated App Server Permission Profile list to stable options", async () => {
+    const profiles = await ownerClient.listPermissionProfiles(workdir);
+
+    expect(profiles.length).toBeGreaterThan(0);
+    expect(profiles.every((profile) =>
+      typeof profile.id === "string"
+      && (profile.description === null || typeof profile.description === "string")
+      && typeof profile.allowed === "boolean")).toBe(true);
+  });
+
   it("persists Fast defaults for peer reads and subsequently started threads", async () => {
     const startedThreadIds: string[] = [];
     try {

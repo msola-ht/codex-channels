@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
 
 import type {
-  PermissionProfileListResponse,
   RateLimitSnapshot,
   ThreadTokenUsage,
 } from "../codex-protocol/index.js";
@@ -14,6 +13,10 @@ import type {
 import type { InstalledSkill, SkillQueryPort } from "./skill-port.js";
 import type { McpQueryPort, McpServerSummary } from "./mcp-port.js";
 import type { InstalledPlugin, PluginQueryPort } from "./plugin-port.js";
+import type {
+  PermissionProfileOption,
+  PermissionQueryPort,
+} from "./permission-port.js";
 import type { SessionRouter } from "../session-routing/index.js";
 import type { Workspace } from "../policy/index.js";
 import {
@@ -60,14 +63,12 @@ export interface ProjectRulesPort {
   check(projectRoot: string): Promise<ProjectRulesResult> | ProjectRulesResult;
 }
 
-export interface ConversationQueryPort extends
-  AccountQueryPort,
-  SkillQueryPort,
-  McpQueryPort,
-  PluginQueryPort
-{
-  listPermissionProfiles(cwd: string): Promise<PermissionProfileListResponse["data"]>;
-}
+export type ConversationQueryPort =
+  & AccountQueryPort
+  & SkillQueryPort
+  & McpQueryPort
+  & PluginQueryPort
+  & PermissionQueryPort;
 
 interface QueuedFollowUp {
   threadId: string;
@@ -406,7 +407,7 @@ export class ConversationService {
     return this.queries.accountRateLimits();
   }
 
-  listPermissionProfiles(target: ConversationTarget): Promise<PermissionProfileListResponse["data"]> {
+  listPermissionProfiles(target: ConversationTarget): Promise<PermissionProfileOption[]> {
     return this.queries.listPermissionProfiles(this.router.workspace(target).cwd);
   }
 

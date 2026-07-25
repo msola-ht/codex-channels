@@ -9,7 +9,7 @@
 - `conversation-service.ts`：新建、恢复、切换、归档和查询 Thread，提交、steer 或将纯文本
   排到下一 Turn，公开 Conversation 状态与最近 Turn 产物，并通过注入端口把项目规则操作限制
   到当前授权 Workspace；扩展查询通过 `ConversationQueryPort` 组合窄端口，Skill、MCP 与
-  Plugin 已使用稳定结果，权限仍按收敛计划迁移。
+  Plugin 和 Permission Profile 均使用稳定结果。
 - `model-selection-service.ts`：查询模型与思考强度，保存按 Conversation 生效的 Turn 覆盖设置；
   Fast 切换同时通过模型窄端口保存用户级默认层级，与原生 CLI 的重启行为一致。
 - `model-port.ts`：定义项目拥有的模型目录、思考强度、服务层级与 Fast 默认值写入窄端口；
@@ -22,6 +22,8 @@
   Server Info、工具 Schema、资源清单或完整官方响应。
 - `plugin-port.ts`：定义已安装 Plugin 的稳定名称与启用状态查询，不向 Surface 暴露 Marketplace、
   本机路径、版本、安装策略或完整官方响应。
+- `permission-port.ts`：定义 Permission Profile 的稳定 ID、说明和策略可选状态查询；只表示
+  当前 Workspace 可见目录，不授予权限，也不承载审批决定。
 - `turn-port.ts`：定义项目拥有的 Turn 输入、设置覆盖、Review 目标、Goal 结果与执行窄端口；
   Application 不构造官方 `UserInput`，也不接收完整官方 Turn 响应。
 
@@ -39,6 +41,7 @@ Turn、steer、停止、重命名、压缩、Review 和 Goal 只依赖 `TurnExec
 Skill 查询只依赖 `SkillQueryPort`；用户和项目直接安装项的筛选由 Client 适配器在协议边界完成。
 MCP 查询只依赖 `McpQueryPort`；分页、Thread 配置上下文与官方清单裁剪由 Client 适配器处理。
 Plugin 查询只依赖 `PluginQueryPort`；已安装过滤与 Marketplace 响应裁剪由 Client 适配器处理。
+Permission Profile 查询只依赖 `PermissionQueryPort`；CWD、分页和官方响应裁剪由 Client 处理。
 命令成功文案、命令菜单说明和平台交互形式由各 Surface 维护，并通过类型穷尽检查保持完整。
 项目规则命令只接受 `init` 或 `check`；Application 负责选择 Workspace，具体文件与进程操作由
 Bootstrap 注入的运行时实现完成。远程入口不得提供强制覆盖。

@@ -1,6 +1,5 @@
 import type {
   McpServerStatusUpdatedNotification,
-  PermissionProfileListResponse,
   RateLimitSnapshot,
   ThreadTokenUsage,
 } from "../../codex-protocol/index.js";
@@ -16,6 +15,7 @@ import {
   type ConversationSession,
   type ConversationStatus,
   type ModelSelectionState,
+  type PermissionProfileOption,
 } from "../../application/index.js";
 import type { ConfigChange, ConfigChangeCode } from "../../config/index.js";
 import type { TurnArtifacts } from "../../conversation-core/index.js";
@@ -499,7 +499,7 @@ function formatFastMode(serviceTier: string | null): string {
 }
 
 export function formatPermissions(
-  profiles: PermissionProfileListResponse["data"],
+  profiles: PermissionProfileOption[],
 ): string {
   return [
     "当前 Gateway 固定使用配置中的 read-only 或 workspace-write。",

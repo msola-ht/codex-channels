@@ -29,6 +29,8 @@
   必需字段畸形或分页游标循环时失败关闭。
 - Plugin 查询按授权 Workspace 发送精确 CWD，只调用已安装接口并映射名称与启用状态；安装建议
   和 Marketplace 加载详情不进入 Application，必需字段畸形时失败关闭。
+- Permission Profile 查询按授权 Workspace 发送精确 CWD，分页映射 ID、说明和策略可选状态；
+  必需字段畸形或分页游标循环时失败关闭，并与高权限审批决定保持分离。
 - SQLite 最小绑定恢复、配置热加载与自动重启分类、Setup 类别与通讯渠道菜单、Telegram Setup、
   CLI 项目规则生成/检查、launchd、systemd、Unix WebSocket 请求头、模块依赖方向和公开入口边界。
 - TOML、标准环境变量、macOS 系统代理和 Linux GNOME 代理的优先级及服务启动时解析。
@@ -70,8 +72,8 @@ RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
 读取，之后新建 Thread 的运行时 `serviceTier` 按 `default → priority → default` 变化，并验证
 第二个 Client 修改共享 Thread 的模型、思考强度和 Fast 设置时，订阅方收到完整的
 `thread/settings/updated`；第二个 Client 重连后再次修改仍会广播。合同还会启动并立即清理一个
-不等待模型结果的 Turn，验证稳定 Turn ID、Skill、MCP 与 Plugin 查询摘要，以及跨 Client 的
-Goal 设置、读取和清除映射。
+不等待模型结果的 Turn，验证稳定 Turn ID、Skill、MCP、Plugin 与 Permission Profile 查询摘要，
+以及跨 Client 的 Goal 设置、读取和清除映射。
 
 使用当前用户配置的完整 Unix WebSocket/App Server 冒烟测试同样不会调用模型：
 
