@@ -98,7 +98,7 @@ export function renderFeishuHelp(): string {
     "/diff · /plan",
     "/goal [set <目标>|clear]",
     "/whoami",
-    "/feishu <status|doctor|authorize|revoke>",
+    "/feishu <status|doctor|revoke>",
     "/cancel",
   ].join("\n");
 }

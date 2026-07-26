@@ -7,18 +7,16 @@ import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import type { FeishuCardDocument } from "./approval-card.js";
 import {
   FeishuApplicationSetupError,
+  requiredFeishuApplicationTenantScopes,
   type FeishuApplicationApi,
   type FeishuApplicationSnapshot,
+  type FeishuApplicationTenantScope,
 } from "./application-api.js";
 import type { FeishuCardAction } from "./card-action.js";
 import { feishuCommandMenuEventKey } from "./command-center.js";
 import { toFeishuInAppUrl } from "./oauth-card.js";
 import type { FeishuOutbox } from "./outbox.js";
-import {
-  renderFeishuDoctor,
-  type FeishuPermissionRuntimeStatus,
-  type FeishuUserAuthorizationStatus,
-} from "./permissions.js";
+import type { FeishuPermissionRuntimeStatus } from "./permissions.js";
 
 const defaultTokenTtlMs = 10 * 60_000;
 const defaultCloseTimeoutMs = 5_000;
@@ -33,6 +31,8 @@ interface PendingSetup {
   target: ConversationTarget;
   actorId: string;
   messageId: string;
+  missingTenantScopes: readonly FeishuApplicationTenantScope[];
+  runtime: FeishuPermissionRuntimeStatus;
   expiresAt: number;
 }
 
@@ -72,7 +72,6 @@ export class FeishuApplicationSetupController {
     target: ConversationTarget,
     actorId: string,
     runtime: FeishuPermissionRuntimeStatus,
-    userAuthorization: FeishuUserAuthorizationStatus,
   ): Promise<void> {
     if (
       this.closed
@@ -86,20 +85,20 @@ export class FeishuApplicationSetupController {
     } catch (error) {
       this.logFailure(target, "inspect", error);
     }
+    const missingTenantScopes = missingRequiredTenantScopes(snapshot);
     const token = randomBytes(18).toString("base64url");
     const messageId = await this.outbox.deliverCard(
       target.conversationId,
       renderDoctorCard(
         this.appId,
         runtime,
-        userAuthorization,
         snapshot,
-        isComplete(snapshot) ? undefined : token,
+        missingTenantScopes.length > 0 ? token : undefined,
       ),
     );
     if (
       this.closed
-      || isComplete(snapshot)
+      || missingTenantScopes.length === 0
     ) {
       return;
     }
@@ -108,6 +107,8 @@ export class FeishuApplicationSetupController {
       target,
       actorId,
       messageId,
+      missingTenantScopes,
+      runtime,
       expiresAt: this.now() + this.tokenTtlMs,
     });
     while (this.pending.size > maximumPendingCards) {
@@ -211,13 +212,14 @@ export class FeishuApplicationSetupController {
             controller.abort();
           });
         },
+        pending.missingTenantScopes,
       );
       authorizationMessageId = await delivery;
       if (!authorizationMessageId) {
         throw new Error("飞书应用授权卡片未发送");
       }
       const snapshot = await this.api.inspect(controller.signal);
-      if (isComplete(snapshot)) {
+      if (applicationConfigurationComplete(snapshot, pending.runtime)) {
         await this.outbox.updateCard(
           pending.target.conversationId,
           pending.messageId,
@@ -324,35 +326,19 @@ export class FeishuApplicationSetupController {
 export function renderDoctorCard(
   appId: string,
   runtime: FeishuPermissionRuntimeStatus,
-  userAuthorization: FeishuUserAuthorizationStatus,
   snapshot?: FeishuApplicationSnapshot,
   setupToken?: string,
 ): FeishuCardDocument {
-  const details = renderFeishuDoctor(
-    appId,
-    runtime,
-    userAuthorization,
-  );
+  const missingScopes = missingRequiredTenantScopes(snapshot);
   const elements: Array<Record<string, unknown>> = [{
     tag: "markdown",
-    content: details,
+    content: renderDoctorSummary(runtime, snapshot),
   }];
-  if (snapshot) {
+  const actions = renderDoctorActions(appId, runtime, snapshot, missingScopes);
+  if (actions) {
     elements.push({
       tag: "markdown",
-      content: [
-        "**应用配置检测**",
-        `- 消息事件：${snapshot.messageEventConfigured ? "已配置" : "待配置"}`,
-        `- 菜单事件：${snapshot.menuEventConfigured ? "已配置" : "待配置"}`,
-        `- 卡片回调：${snapshot.cardCallbackConfigured ? "已配置" : "待配置"}`,
-        `- Codex 菜单：${menuStatus(snapshot)}`,
-        `- 待处理版本：${snapshot.hasPendingVersion ? "存在" : "无"}`,
-      ].join("\n"),
-    });
-  } else {
-    elements.push({
-      tag: "markdown",
-      content: "暂时无法读取应用配置。请先通过飞书官方流程授权；授权后 Gateway 只会重新检测，并给出人工配置指引。",
+      content: actions,
     });
   }
   if (setupToken) {
@@ -362,7 +348,7 @@ export function renderDoctorCard(
         tag: "button",
         text: {
           tag: "plain_text",
-          content: "授权并查看配置指引",
+          content: snapshot ? "授权缺少权限" : "授权并重新检测",
         },
         type: "primary",
         value: {
@@ -378,7 +364,9 @@ export function renderDoctorCard(
       wide_screen_mode: true,
     },
     header: {
-      template: isComplete(snapshot) ? "green" : "blue",
+      template: doctorNeedsAttention(runtime, snapshot, missingScopes)
+        ? "blue"
+        : "green",
       title: {
         tag: "plain_text",
         content: "飞书 Doctor",
@@ -501,28 +489,132 @@ function manualConfigurationText(appId: string): string {
   ].join("\n");
 }
 
-function isComplete(
+function renderDoctorSummary(
+  runtime: FeishuPermissionRuntimeStatus,
   snapshot: FeishuApplicationSnapshot | undefined,
-): boolean {
-  return snapshot !== undefined
-    && snapshot.messageEventConfigured
-    && snapshot.menuEventConfigured
-    && snapshot.cardCallbackConfigured
-    && snapshot.menuConfigured
-    && !snapshot.hasPendingVersion;
+): string {
+  return [
+    runtime.connectionReady ? "✅ 长连接" : "❌ 长连接：未就绪",
+    "✅ 消息接收",
+    renderCardActionStatus(runtime, snapshot),
+    renderMenuStatus(runtime, snapshot),
+  ].join("\n");
 }
 
-function menuStatus(snapshot: FeishuApplicationSnapshot): string {
-  if (snapshot.menuConfigured) {
-    return "已启用";
+function renderCardActionStatus(
+  runtime: FeishuPermissionRuntimeStatus,
+  snapshot: FeishuApplicationSnapshot | undefined,
+): string {
+  if (runtime.cardActionObserved) {
+    return "✅ 卡片交互";
   }
+  return snapshot?.cardCallbackConfigured
+    ? "◯ 卡片交互：已配置，待使用验证"
+    : "⚠️ 卡片交互：回调待确认";
+}
+
+function renderMenuStatus(
+  runtime: FeishuPermissionRuntimeStatus,
+  snapshot: FeishuApplicationSnapshot | undefined,
+): string {
+  if (runtime.menuEventObserved) {
+    return "✅ 自定义菜单";
+  }
+  if (snapshot?.menuConfigured && snapshot.menuEventConfigured) {
+    return "◯ 自定义菜单：已配置，待点击验证";
+  }
+  if (snapshot?.menuConfigured) {
+    return "⚠️ 自定义菜单：已启用，事件待确认";
+  }
+  if (snapshot && hasCodexcMenu(snapshot)) {
+    return "⚠️ 自定义菜单：已添加，尚未启用";
+  }
+  return snapshot
+    ? "⚠️ 自定义菜单：尚未添加"
+    : "◯ 自定义菜单：配置状态暂不可读";
+}
+
+function hasCodexcMenu(snapshot: FeishuApplicationSnapshot): boolean {
   return snapshot.botMenus.some(
     (menu) =>
       menu.event_key === feishuCommandMenuEventKey
       && menu.menu_content_type === 2,
-  )
-    ? "已定义但未启用"
-    : "待配置";
+  );
+}
+
+function missingRequiredTenantScopes(
+  snapshot: FeishuApplicationSnapshot | undefined,
+): FeishuApplicationTenantScope[] {
+  if (!snapshot) {
+    return [...requiredFeishuApplicationTenantScopes];
+  }
+  const granted = new Set(snapshot.grantedTenantScopes);
+  return requiredFeishuApplicationTenantScopes.filter(
+    (scope) => !granted.has(scope),
+  );
+}
+
+function applicationConfigurationComplete(
+  snapshot: FeishuApplicationSnapshot,
+  runtime: FeishuPermissionRuntimeStatus,
+): boolean {
+  return missingRequiredTenantScopes(snapshot).length === 0
+    && (runtime.cardActionObserved || snapshot.cardCallbackConfigured)
+    && (
+      runtime.menuEventObserved
+      || (snapshot.menuEventConfigured && snapshot.menuConfigured)
+    )
+    && !snapshot.hasPendingVersion;
+}
+
+function renderDoctorActions(
+  appId: string,
+  runtime: FeishuPermissionRuntimeStatus,
+  snapshot: FeishuApplicationSnapshot | undefined,
+  missingScopes: readonly string[],
+): string | undefined {
+  const lines: string[] = [];
+  if (missingScopes.length > 0) {
+    lines.push(`需要开通 ${missingScopes.length} 项应用权限。`);
+  }
+  if (!runtime.connectionReady) {
+    lines.push("请先检查 Gateway 日志和飞书长连接配置。");
+  }
+  if (
+    snapshot
+    && (
+      (!runtime.cardActionObserved && !snapshot.cardCallbackConfigured)
+      || (
+        !runtime.menuEventObserved
+        && (!snapshot.menuEventConfigured || !snapshot.menuConfigured)
+      )
+      || snapshot.hasPendingVersion
+    )
+  ) {
+    if (snapshot.hasPendingVersion) {
+      lines.push("开放平台存在待发布版本。");
+    }
+    lines.push(
+      `请[打开当前飞书应用](https://open.feishu.cn/app/${appId})完成标记项并发布版本。`,
+    );
+  }
+  return lines.length > 0 ? lines.join("\n\n") : undefined;
+}
+
+function doctorNeedsAttention(
+  runtime: FeishuPermissionRuntimeStatus,
+  snapshot: FeishuApplicationSnapshot | undefined,
+  missingScopes: readonly string[],
+): boolean {
+  return !runtime.connectionReady
+    || snapshot === undefined
+    || missingScopes.length > 0
+    || (!runtime.cardActionObserved && !snapshot.cardCallbackConfigured)
+    || (
+      !runtime.menuEventObserved
+      && (!snapshot.menuEventConfigured || !snapshot.menuConfigured)
+    )
+    || snapshot.hasPendingVersion;
 }
 
 function setupFailureText(error: unknown): string {

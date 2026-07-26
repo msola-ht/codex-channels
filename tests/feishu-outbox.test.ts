@@ -6,6 +6,7 @@ import type {
   OutputEvent,
 } from "../src/conversation-core/index.js";
 import {
+  FeishuMessageError,
   FeishuOutbox,
   type FeishuCardDocument,
   type FeishuMessagePort,
@@ -172,6 +173,59 @@ describe("Feishu outbox", () => {
       "部分",
     );
     expect(posts).toEqual(["部分正文"]);
+  });
+
+  it("skips a rate-limited intermediate frame and continues the stream", async () => {
+    vi.useFakeTimers();
+    const posts: string[] = [];
+    const updates: Array<{ content: string; sequence: number }> = [];
+    const finishStreamingCard = vi.fn(async () => {});
+    let updateCount = 0;
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async (_chatId, markdown) => {
+          posts.push(markdown);
+        },
+        updateStreamingCard: async (_cardId, content, sequence) => {
+          updates.push({ content, sequence });
+          updateCount += 1;
+          if (updateCount === 1) {
+            throw new FeishuMessageError(
+              "rate-limited",
+              "飞书流式卡片更新请求受限",
+            );
+          }
+        },
+        finishStreamingCard,
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(delta("部分"));
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+    outbox.handle(delta("正文"));
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+    outbox.handle(delta("继续"));
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+    outbox.handle(completed({}, "部分正文继续", "item-1"));
+    await outbox.close();
+
+    expect(updates).toEqual([
+      { content: "部分正文", sequence: 1 },
+      { content: "部分正文继续", sequence: 2 },
+    ]);
+    expect(finishStreamingCard).toHaveBeenCalledWith(
+      "7355372766134157313",
+      3,
+      "部分正文继续",
+    );
+    expect(posts).toEqual([]);
   });
 
   it("rolls a long fenced reply into bounded native streaming cards", async () => {

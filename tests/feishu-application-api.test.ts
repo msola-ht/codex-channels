@@ -19,7 +19,24 @@ describe("Feishu application management API", () => {
           app: {
             app_id: options.appId,
             online_version_id: "oav_online",
-            scopes: [],
+            scopes: [
+              {
+                scope: "application:application:self_manage",
+                token_types: ["tenant"],
+              },
+              {
+                scope: "im:message:send_as_bot",
+                token_types: ["tenant"],
+              },
+              {
+                scope: "contact:user.base:readonly",
+                token_types: ["user"],
+              },
+              {
+                scope: "im:message:readonly",
+                token_types: [],
+              },
+            ],
             event: {
               subscribed_events: [
                 "im.message.receive_v1",
@@ -58,6 +75,10 @@ describe("Feishu application management API", () => {
     const api = createApi(client);
 
     await expect(api.inspect()).resolves.toEqual({
+      grantedTenantScopes: [
+        "application:application:self_manage",
+        "im:message:send_as_bot",
+      ],
       hasPendingVersion: false,
       messageEventConfigured: true,
       menuEventConfigured: true,

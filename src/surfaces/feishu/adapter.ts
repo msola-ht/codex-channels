@@ -193,9 +193,6 @@ export class FeishuConversationAdapter {
       return;
     }
     if (action === "doctor") {
-      const userAuthorization = this.oauth
-        ? await this.oauth.status(actorId)
-        : "unavailable";
       if (this.applicationSetup) {
         await this.applicationSetup.openDoctor(
           {
@@ -205,25 +202,13 @@ export class FeishuConversationAdapter {
           },
           actorId,
           status,
-          userAuthorization,
         );
         return;
       }
       this.notifyPost(
         chatId,
-        renderFeishuDoctor(appId, status, userAuthorization),
+        renderFeishuDoctor(status),
       );
-      return;
-    }
-    if (action === "authorize") {
-      if (!this.oauth) {
-        this.notifyText(chatId, "飞书用户授权模块尚未启用。");
-        return;
-      }
-      const result = this.oauth.beginAuthorization(chatId, actorId);
-      if (result === "running") {
-        this.notifyText(chatId, "当前账号已有进行中的飞书授权请求。");
-      }
       return;
     }
     if (action === "revoke") {
@@ -242,7 +227,7 @@ export class FeishuConversationAdapter {
     }
     this.notifyText(
       chatId,
-      "用法：/feishu <status|doctor|authorize|revoke>",
+      "用法：/feishu <status|doctor|revoke>",
     );
   }
 

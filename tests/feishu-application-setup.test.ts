@@ -21,7 +21,6 @@ describe("Feishu application setup controller", () => {
       target,
       "ou_actor",
       runtimeStatus(),
-      "valid",
     );
     const card = fixture.cards[0]!;
     const value = setupAction(card.card);
@@ -64,7 +63,12 @@ describe("Feishu application setup controller", () => {
   });
 
   it("opens official authorization before showing manual instructions", async () => {
-    const fixture = createFixture(incompleteSnapshot());
+    const fixture = createFixture({
+      ...incompleteSnapshot(),
+      grantedTenantScopes: [
+        "application:application:self_manage",
+      ],
+    });
     fixture.api.authorizeApplication.mockImplementation(
       async (_signal, ready) => {
         ready(
@@ -77,7 +81,6 @@ describe("Feishu application setup controller", () => {
       target,
       "ou_actor",
       runtimeStatus(),
-      "missing",
     );
     const card = fixture.cards[0]!;
 
@@ -93,6 +96,10 @@ describe("Feishu application setup controller", () => {
     expect(fixture.api.authorizeApplication).toHaveBeenCalledWith(
       expect.any(AbortSignal),
       expect.any(Function),
+      [
+        "im:message:send_as_bot",
+        "cardkit:card:write",
+      ],
     );
     expect(fixture.cards[1]?.card.header.title.content)
       .toBe("授权飞书应用");
@@ -123,7 +130,6 @@ describe("Feishu application setup controller", () => {
       target,
       "ou_actor",
       runtimeStatus(),
-      "valid",
     );
 
     expect(JSON.stringify(fixture.cards[0]?.card))
@@ -147,12 +153,81 @@ describe("Feishu application setup controller", () => {
       target,
       "ou_actor",
       runtimeStatus(),
-      "valid",
     );
 
     const rendered = JSON.stringify(fixture.cards[0]?.card);
-    expect(rendered).toContain("已定义但未启用");
+    expect(rendered).toContain("已添加，尚未启用");
     expect(rendered).not.toContain("Codex 菜单：已发布");
+    await fixture.controller.close();
+  });
+
+  it("prefers observed runtime evidence and avoids redundant authorization", async () => {
+    const fixture = createFixture({
+      ...incompleteSnapshot(),
+      grantedTenantScopes: [
+        "application:application:self_manage",
+        "im:message:send_as_bot",
+        "cardkit:card:write",
+      ],
+      cardCallbackConfigured: true,
+      botMenuEnabled: true,
+      menuConfigured: true,
+    });
+
+    await fixture.controller.openDoctor(
+      target,
+      "ou_actor",
+      {
+        connectionReady: true,
+        cardActionObserved: true,
+        menuEventObserved: false,
+      },
+    );
+
+    const rendered = JSON.stringify(fixture.cards[0]?.card);
+    expect(rendered).toContain("✅ 长连接");
+    expect(rendered).toContain("✅ 消息接收");
+    expect(rendered).toContain("✅ 卡片交互");
+    expect(rendered).toContain("自定义菜单：已启用，事件待确认");
+    expect(rendered).not.toContain("消息事件：待配置");
+    expect(rendered).not.toContain("当前 Surface 对话必需能力");
+    expect(rendered).not.toContain("当前用户 OAuth");
+    expect(rendered).not.toContain("codexc_feishu_setup_token");
+    expect(rendered).toContain("打开当前飞书应用");
+    await fixture.controller.close();
+  });
+
+  it("does not suggest platform configuration already proven at runtime", async () => {
+    const fixture = createFixture({
+      ...incompleteSnapshot(),
+      grantedTenantScopes: [
+        "application:application:self_manage",
+        "im:message:send_as_bot",
+        "cardkit:card:write",
+      ],
+      messageEventConfigured: false,
+      menuEventConfigured: false,
+      cardCallbackConfigured: false,
+      botMenuEnabled: false,
+      menuConfigured: false,
+    });
+
+    await fixture.controller.openDoctor(
+      target,
+      "ou_actor",
+      {
+        connectionReady: true,
+        cardActionObserved: true,
+        menuEventObserved: true,
+      },
+    );
+
+    const card = fixture.cards[0]?.card;
+    expect(card?.header.template).toBe("green");
+    expect(JSON.stringify(card)).toContain("✅ 卡片交互");
+    expect(JSON.stringify(card)).toContain("✅ 自定义菜单");
+    expect(JSON.stringify(card)).not.toContain("打开当前飞书应用");
+    expect(JSON.stringify(card)).not.toContain("codexc_feishu_setup_token");
     await fixture.controller.close();
   });
 
@@ -165,7 +240,6 @@ describe("Feishu application setup controller", () => {
       target,
       "ou_actor",
       runtimeStatus(),
-      "missing",
     );
     const card = fixture.cards[0]!;
 
@@ -193,6 +267,11 @@ describe("Feishu application setup controller", () => {
       .mockResolvedValueOnce(incompleteSnapshot())
       .mockResolvedValueOnce({
         ...incompleteSnapshot(),
+        grantedTenantScopes: [
+          "application:application:self_manage",
+          "im:message:send_as_bot",
+          "cardkit:card:write",
+        ],
         messageEventConfigured: true,
         menuEventConfigured: true,
         cardCallbackConfigured: true,
@@ -202,7 +281,6 @@ describe("Feishu application setup controller", () => {
       target,
       "ou_actor",
       runtimeStatus(),
-      "valid",
     );
     const card = fixture.cards[0]!;
 
@@ -219,6 +297,45 @@ describe("Feishu application setup controller", () => {
       .toBe("飞书授权完成");
     expect(JSON.stringify(fixture.updates.at(-2)?.card))
       .toContain("当前应用配置检测也已通过");
+    await fixture.controller.close();
+  });
+
+  it("keeps runtime evidence authoritative after authorization", async () => {
+    const fixture = createFixture(incompleteSnapshot());
+    fixture.api.inspect
+      .mockResolvedValueOnce(incompleteSnapshot())
+      .mockResolvedValueOnce({
+        ...incompleteSnapshot(),
+        grantedTenantScopes: [
+          "application:application:self_manage",
+          "im:message:send_as_bot",
+          "cardkit:card:write",
+        ],
+      });
+    await fixture.controller.openDoctor(
+      target,
+      "ou_actor",
+      {
+        connectionReady: true,
+        cardActionObserved: true,
+        menuEventObserved: true,
+      },
+    );
+    const card = fixture.cards[0]!;
+
+    fixture.controller.handleCardAction({
+      messageId: card.messageId,
+      chatId: card.chatId,
+      actorOpenId: "ou_actor",
+      tag: "button",
+      value: setupAction(card.card),
+    });
+    await settle();
+
+    expect(JSON.stringify(fixture.updates.at(-2)?.card))
+      .toContain("当前应用配置检测也已通过");
+    expect(JSON.stringify(fixture.updates.at(-2)?.card))
+      .not.toContain("打开当前飞书应用");
     await fixture.controller.close();
   });
 
@@ -273,7 +390,6 @@ describe("Feishu application setup controller", () => {
       target,
       "ou_actor",
       runtimeStatus(),
-      "valid",
     );
     const card = cards[0]!;
 
@@ -342,6 +458,7 @@ function createFixture(snapshot: FeishuApplicationSnapshot) {
 
 function incompleteSnapshot(): FeishuApplicationSnapshot {
   return {
+    grantedTenantScopes: [],
     hasPendingVersion: false,
     messageEventConfigured: false,
     menuEventConfigured: false,

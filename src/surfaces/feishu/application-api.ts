@@ -17,7 +17,17 @@ const requiredMessageEvent = "im.message.receive_v1";
 const requiredMenuEvent = "application.bot.menu_v6";
 const requiredCardCallback = "card.action.trigger";
 const maximumMenus = 100;
+const maximumScopes = 1_000;
 const maximumFieldLength = 2_048;
+
+export const requiredFeishuApplicationTenantScopes = [
+  applicationInspectionScope,
+  requiredMessageScope,
+  requiredStreamingScope,
+] as const;
+
+export type FeishuApplicationTenantScope =
+  typeof requiredFeishuApplicationTenantScopes[number];
 
 export interface FeishuBotMenu {
   menu_id?: string;
@@ -39,6 +49,7 @@ export interface FeishuBotMenu {
 }
 
 export interface FeishuApplicationSnapshot {
+  grantedTenantScopes: readonly string[];
   hasPendingVersion: boolean;
   messageEventConfigured: boolean;
   menuEventConfigured: boolean;
@@ -57,6 +68,7 @@ export interface FeishuApplicationApi {
       url: string,
       expiresInSeconds: number,
     ) => void,
+    tenantScopes?: readonly FeishuApplicationTenantScope[],
   ): Promise<void>;
 }
 
@@ -202,7 +214,10 @@ export class FeishuApplicationHttpApi implements FeishuApplicationApi {
       url: string,
       expiresInSeconds: number,
     ) => void,
+    tenantScopes: readonly FeishuApplicationTenantScope[] =
+      requiredFeishuApplicationTenantScopes,
   ): Promise<void> {
+    const requestedScopes = validateRequestedTenantScopes(tenantScopes);
     let result: Awaited<ReturnType<typeof registerApp>>;
     try {
       result = await this.dependencies.register({
@@ -213,9 +228,7 @@ export class FeishuApplicationHttpApi implements FeishuApplicationApi {
           preset: false,
           scopes: {
             tenant: [
-              applicationInspectionScope,
-              requiredMessageScope,
-              requiredStreamingScope,
+              ...requestedScopes,
             ],
           },
           events: {
@@ -261,6 +274,22 @@ export class FeishuApplicationHttpApi implements FeishuApplicationApi {
     }
   }
 
+}
+
+function validateRequestedTenantScopes(
+  scopes: readonly FeishuApplicationTenantScope[],
+): FeishuApplicationTenantScope[] {
+  const allowed = new Set<string>(requiredFeishuApplicationTenantScopes);
+  if (
+    scopes.length === 0
+    || scopes.some((scope) => !allowed.has(scope))
+  ) {
+    throw new FeishuApplicationSetupError(
+      "authorization-invalid",
+      "飞书应用授权权限范围无效",
+    );
+  }
+  return [...new Set(scopes)];
 }
 
 const safeDiagnosticValue = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u;
@@ -385,14 +414,34 @@ function parseApplicationResponse(
     ?? optionalRecord(app.callback);
   const events = stringArray(event?.subscribed_events);
   const callbacks = stringArray(callback?.subscribed_callbacks);
+  const grantedTenantScopes = parseGrantedTenantScopes(app.scopes);
   const onlineVersionId = optionalIdentifier(app.online_version_id);
   return {
+    grantedTenantScopes,
     hasPendingVersion: optionalIdentifier(app.unaudit_version_id) !== undefined,
     messageEventConfigured: events.includes(requiredMessageEvent),
     menuEventConfigured: events.includes(requiredMenuEvent),
     cardCallbackConfigured: callbacks.includes(requiredCardCallback),
     ...(onlineVersionId ? { onlineVersionId } : {}),
   };
+}
+
+function parseGrantedTenantScopes(value: unknown): string[] {
+  const scopes = array(value);
+  if (scopes.length > maximumScopes) {
+    invalidResponse();
+  }
+  return scopes.flatMap((entry) => {
+    const scope = record(entry);
+    const name = optionalString(scope.scope);
+    if (!name) {
+      invalidResponse();
+    }
+    const tokenTypes = stringArray(scope.token_types);
+    return tokenTypes.includes("tenant")
+      ? [name]
+      : [];
+  });
 }
 
 function parseVersionBot(

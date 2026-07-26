@@ -161,6 +161,7 @@ export type FeishuMessageErrorCode =
   | "invalid-response"
   | "download-failed"
   | "download-timeout"
+  | "rate-limited"
   | "send-failed"
   | "send-timeout";
 
@@ -525,6 +526,12 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
         ),
       );
       if (response.code !== undefined && response.code !== 0) {
+        if (isFeishuRateLimitCode(response.code)) {
+          throw new FeishuMessageError(
+            "rate-limited",
+            `${label}请求受限`,
+          );
+        }
         throw new FeishuMessageError(
           "invalid-response",
           `${label}响应无效`,
@@ -533,6 +540,12 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
     } catch (error) {
       if (error instanceof FeishuMessageError) {
         throw error;
+      }
+      if (isFeishuRateLimitError(error)) {
+        throw new FeishuMessageError(
+          "rate-limited",
+          `${label}请求受限`,
+        );
       }
       if (isSdkTimeout(error)) {
         throw new FeishuMessageError(
@@ -652,6 +665,33 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
       );
     }
   }
+}
+
+function isFeishuRateLimitCode(code: number): boolean {
+  return code === 99991400;
+}
+
+function isFeishuRateLimitError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  const value = error as {
+    status?: unknown;
+    code?: unknown;
+    data?: { code?: unknown } | undefined;
+    response?: {
+      status?: unknown;
+      data?: { code?: unknown } | undefined;
+    } | undefined;
+  };
+  if (value.status === 429 || value.response?.status === 429) {
+    return true;
+  }
+  const code =
+    value.response?.data?.code
+    ?? value.data?.code
+    ?? value.code;
+  return typeof code === "number" && isFeishuRateLimitCode(code);
 }
 
 function isSdkTimeout(error: unknown): boolean {

@@ -396,6 +396,7 @@ describe("Feishu Surface", () => {
       undefined,
       undefined,
       {
+        grantedTenantScopes: [],
         hasPendingVersion: false,
         messageEventConfigured: false,
         menuEventConfigured: false,
@@ -421,6 +422,11 @@ describe("Feishu Surface", () => {
       .toHaveBeenCalledWith(
         expect.any(AbortSignal),
         expect.any(Function),
+        [
+          "application:application:self_manage",
+          "im:message:send_as_bot",
+          "cardkit:card:write",
+        ],
       );
     expect(JSON.stringify(fixture.updatedCards.at(-1)?.card))
       .toContain("飞书官方授权已完成");
@@ -434,6 +440,11 @@ function createFixture(
     messages(): ReadonlyArray<{ chatId: string; text: string }>;
   },
   applicationSnapshot: FeishuApplicationSnapshot = {
+    grantedTenantScopes: [
+      "application:application:self_manage",
+      "im:message:send_as_bot",
+      "cardkit:card:write",
+    ],
     hasPendingVersion: false,
     messageEventConfigured: true,
     menuEventConfigured: true,

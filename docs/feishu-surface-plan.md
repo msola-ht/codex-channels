@@ -420,17 +420,19 @@ Codex 输入。Outbox 对纯文本按 UTF-8 字节、对富文本按序列化后
 仍须完成阶段 1 的未授权/重复真实事件和真实应用命令矩阵。群聊的严格配置、身份校验和真实事件
 Fixture 继续暂停，当前阶段 2 尚未整体关闭。
 
-`/feishu <status|doctor|authorize|revoke>` 属于平台本地权限中心，不占用 Application 的
-`/permissions`。`status` 记录当前进程是否实际收到消息事件或卡片动作；`doctor` 汇总必要能力、
-应用配置入口和当前 OAuth 状态。Doctor 始终只读；当前授权 Actor 点击绑定 App、Chat、消息和
-Actor 的一次性卡片后，只通过 SDK 官方流程完成应用授权并重新检测，随后提示 Owner 打开开放平台，
-人工启用自定义菜单、添加 `codexc_home`、确认消息/菜单事件与卡片回调并发布版本。Gateway 不调用
-应用能力、开发配置或发布写接口。授权结果必须匹配当前 App 和飞书租户。
+`/feishu <status|doctor|revoke>` 属于平台本地权限中心，不占用 Application 的
+`/permissions`。`status` 记录当前进程事件观测和当前 Actor OAuth；`doctor` 只显示长连接、
+消息接收、卡片交互和自定义菜单四项摘要。Doctor 读取已有租户 Scope 与已发布配置，并以当前
+进程真实收到的事件为优先证据；只有必需权限缺失时才通过绑定 App、Chat、消息和 Actor 的一次性
+卡片申请精确差集。菜单、事件、回调或待发布版本有缺项时只给出当前应用入口，提示 Owner 人工
+配置并发布版本。Gateway 不调用应用能力、开发配置或发布写接口。授权结果必须匹配当前 App 和
+飞书租户。
 注册端返回的 Open ID 属于其应用作用域且字段可选，不用于和消息 Actor 比较。已有未完成版本只
-展示状态，不触发自动发布。`authorize` 使用
-`application:application:self_manage` 读取应用已开通的用户 Scope，先检查有效 Token 的 Scope
-覆盖，全部覆盖时停止，部分缺失时只把差集列入卡片，再由当前 Actor 通过飞书内 Device Flow
-明确授权。完成后必须校验 Token 对应 `open_id`
+展示状态，不触发自动发布。用户级能力使用
+`application:application:self_manage` 读取应用已开通的用户 Scope，并把自身需要的 Scope 传给
+OAuth 控制器；控制器先检查有效 Token 覆盖，只把当前能力缺失且应用已开通的差集列入卡片，再由
+当前 Actor 通过飞书内 Device Flow 明确授权。没有能力需求时不授权，也不提供全量预授权命令。
+完成后必须校验 Token 对应 `open_id`
 与发起 Actor 一致。macOS 凭据进入系统 Keychain，Linux 凭据以独立主密钥和 AES-256-GCM 密文
 保存在 Gateway 数据目录，不进入配置、StateStore、Application/Core、日志或消息。`revoke`
 先取消进行中轮询再删除当前 Actor 本地凭据，Surface 停止取消授权任务并最多等待 5 秒；停止或
@@ -512,8 +514,9 @@ Application 图片输入。一般文件、图片说明文字、群聊媒体和�
 持续回复按 `card.create → message.create → cardElement.content → card.settings` 更新，单卡
 保守限制 5,000 个 Unicode 字符，代码围栏跨卡时闭合并重开。流式卡片与失败回退富文本共享
 最多 5 条的单结果预算，达到预算时在最后一张卡片明确标记截断；创建或内容更新失败时先尽力
-结束已显示卡片，再在最终文本到达后用剩余预算回退完整富文本。非幂等请求不盲目重试，卡片与
-消息正文不持久化。
+结束已显示卡片，再在最终文本到达后用剩余预算回退完整富文本。官方频控响应在非终态元素更新
+中只跳过当前帧，保留累计正文与递增序列供后续自然增量继续；终态频控仍回退完整富文本。
+非幂等请求不盲目重试，卡片与消息正文不持久化。
 该切片额外需要应用权限 `cardkit:card:write`，已有应用可增量开通并发布，无需重新扫码；真实
 持续回复的可见流式主路径已通过测试应用验收；真实限流、超时、失败回退和超长内容滚动仍待
 测试应用验收。
@@ -580,7 +583,7 @@ npm run verify:commit
    仅 SOCKS `ALL_PROXY` 暂不支持。
 4. 长连接重启后重复消息是否需要超出内存 TTL 的最小幂等状态。
 5. 真实测试应用已接受 Setup 当前声明的权限与授权流程，但已发布的 `codexc_home` 节点仍为
-   `bot_menu_enable=false`。Doctor 必须准确显示“已定义但未启用”并提供人工配置入口；Gateway
+   `bot_menu_enable=false`。Doctor 必须准确显示“已添加，尚未启用”并提供人工配置入口；Gateway
    不通过猜测参数、重复授权或应用写接口尝试修改或发布。菜单手动启用、发布、点击和命令中心显示仍需完成真实验收；阶段 1 不接受为
    后续媒体或 Drive 预授予宽泛权限。
 

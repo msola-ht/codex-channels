@@ -793,6 +793,74 @@ describe("FeishuMessageClient", () => {
     ));
   });
 
+  it("classifies CardKit rate limits without exposing the SDK response", async () => {
+    const updateStreamingCard = vi.fn(async () => ({
+      code: 99991400,
+      message: "app_secret=secret",
+    }));
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage: async () => ({
+            data: { message_id: "om_message" },
+          }),
+          updateStreamingCard,
+          patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
+        }),
+      },
+    );
+
+    await expect(
+      client.updateStreamingCard("7355372766134157313", "正文", 1),
+    ).rejects.toEqual(new FeishuMessageError(
+      "rate-limited",
+      "飞书流式卡片更新请求受限",
+    ));
+  });
+
+  it("classifies HTTP 429 CardKit failures without exposing the response", async () => {
+    const updateStreamingCard = vi.fn(async () => {
+      throw {
+        response: {
+          status: 429,
+          data: {
+            message: "app_secret=secret",
+          },
+        },
+      };
+    });
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage: async () => ({
+            data: { message_id: "om_message" },
+          }),
+          updateStreamingCard,
+          patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
+        }),
+      },
+    );
+
+    await expect(
+      client.updateStreamingCard("7355372766134157313", "正文", 1),
+    ).rejects.toEqual(new FeishuMessageError(
+      "rate-limited",
+      "飞书流式卡片更新请求受限",
+    ));
+  });
+
   it("keeps a streaming summary within fifty UTF-16 code units", async () => {
     const finishStreamingCard = vi.fn(async (payload: {
       path: { card_id: string };

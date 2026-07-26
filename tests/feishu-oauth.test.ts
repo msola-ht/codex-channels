@@ -41,12 +41,77 @@ afterEach(() => {
 });
 
 describe("Feishu OAuth controller", () => {
+  it("does not pre-authorize app scopes without a capability request", async () => {
+    const fixture = createController({
+      listScopes: async () => [
+        "drive:file:download",
+        "task:task:read",
+      ],
+    });
+
+    fixture.controller.beginAuthorization("oc_chat", "ou_actor", []);
+    await vi.waitFor(() => {
+      expect(fixture.deliverText).toHaveBeenCalledWith(
+        "oc_chat",
+        "当前没有需要用户授权的飞书能力；使用相关功能时会按需申请。",
+      );
+    });
+
+    expect(fixture.api.listGrantedUserScopes).not.toHaveBeenCalled();
+    expect(fixture.api.requestDeviceAuthorization).not.toHaveBeenCalled();
+    expect(fixture.deliverCard).not.toHaveBeenCalled();
+  });
+
+  it("requests only the scopes required by the current capability", async () => {
+    const fixture = createController({
+      listScopes: async () => [
+        "drive:file:download",
+        "task:task:read",
+        "calendar:calendar.event:read",
+      ],
+    });
+
+    fixture.controller.beginAuthorization(
+      "oc_chat",
+      "ou_actor",
+      ["task:task:read"],
+    );
+    await fixture.finished();
+
+    expect(fixture.api.requestDeviceAuthorization).toHaveBeenCalledWith(
+      ["task:task:read"],
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("does not start OAuth before the app has the required user scope", async () => {
+    const fixture = createController({
+      listScopes: async () => ["drive:file:download"],
+    });
+
+    fixture.controller.beginAuthorization(
+      "oc_chat",
+      "ou_actor",
+      ["task:task:read"],
+    );
+    await vi.waitFor(() => {
+      expect(fixture.deliverText).toHaveBeenCalledWith(
+        "oc_chat",
+        expect.stringContaining("task:task:read"),
+      );
+    });
+
+    expect(fixture.api.requestDeviceAuthorization).not.toHaveBeenCalled();
+    expect(fixture.deliverCard).not.toHaveBeenCalled();
+  });
+
   it("sends an in-app authorization card, verifies identity, and stores the token", async () => {
     const fixture = createController();
 
     expect(fixture.controller.beginAuthorization(
       "oc_chat",
       "ou_actor",
+      ["drive:file:download"],
     )).toBe("started");
     await fixture.finished();
 
@@ -78,7 +143,11 @@ describe("Feishu OAuth controller", () => {
       authorizedUser: "ou_other",
     });
 
-    fixture.controller.beginAuthorization("oc_chat", "ou_actor");
+    fixture.controller.beginAuthorization(
+      "oc_chat",
+      "ou_actor",
+      ["drive:file:download"],
+    );
     await fixture.finished();
 
     expect(fixture.tokens.value).toBeNull();
@@ -91,7 +160,11 @@ describe("Feishu OAuth controller", () => {
     const fixture = createController();
     fixture.updateCard.mockRejectedValueOnce(new Error("platform failed"));
 
-    fixture.controller.beginAuthorization("oc_chat", "ou_actor");
+    fixture.controller.beginAuthorization(
+      "oc_chat",
+      "ou_actor",
+      ["drive:file:download"],
+    );
     await vi.waitFor(() => {
       expect(fixture.deliverText).toHaveBeenCalledWith(
         "oc_chat",
@@ -120,7 +193,11 @@ describe("Feishu OAuth controller", () => {
     });
     const fixture = createController({ tokens });
 
-    fixture.controller.beginAuthorization("oc_chat", "ou_actor");
+    fixture.controller.beginAuthorization(
+      "oc_chat",
+      "ou_actor",
+      ["drive:file:download"],
+    );
     await vi.waitFor(() => {
       expect(fixture.deliverText).toHaveBeenCalledWith(
         "oc_chat",
@@ -146,10 +223,12 @@ describe("Feishu OAuth controller", () => {
     expect(fixture.controller.beginAuthorization(
       "oc_chat",
       "ou_actor",
+      ["drive:file:download"],
     )).toBe("started");
     expect(fixture.controller.beginAuthorization(
       "oc_chat",
       "ou_actor",
+      ["drive:file:download"],
     )).toBe("running");
     resolvePoll?.({ status: "denied" });
     await fixture.finished();
@@ -170,11 +249,12 @@ describe("Feishu OAuth controller", () => {
     expect(fixture.controller.beginAuthorization(
       "oc_chat",
       "ou_actor",
+      ["drive:file:download"],
     )).toBe("started");
     await vi.waitFor(() => {
       expect(fixture.deliverText).toHaveBeenCalledWith(
         "oc_chat",
-        "当前飞书账号已授权，现有权限已覆盖应用当前开放的用户权限，无需重复授权。",
+        "当前飞书账号已具备此能力需要的权限，无需重复授权。",
       );
     });
 
@@ -196,7 +276,11 @@ describe("Feishu OAuth controller", () => {
       ],
     });
 
-    fixture.controller.beginAuthorization("oc_chat", "ou_actor");
+    fixture.controller.beginAuthorization(
+      "oc_chat",
+      "ou_actor",
+      ["drive:file:download", "task:task:read"],
+    );
     await fixture.finished();
 
     expect(fixture.api.requestDeviceAuthorization).toHaveBeenCalledWith(
@@ -214,7 +298,11 @@ describe("Feishu OAuth controller", () => {
       }),
     });
 
-    fixture.controller.beginAuthorization("oc_chat", "ou_actor");
+    fixture.controller.beginAuthorization(
+      "oc_chat",
+      "ou_actor",
+      ["drive:file:download"],
+    );
 
     await expect(fixture.controller.status("ou_actor"))
       .resolves.toBe("pending");
@@ -234,7 +322,11 @@ describe("Feishu OAuth controller", () => {
       },
     });
 
-    fixture.controller.beginAuthorization("oc_chat", "ou_actor");
+    fixture.controller.beginAuthorization(
+      "oc_chat",
+      "ou_actor",
+      ["drive:file:download"],
+    );
     await vi.waitFor(() => {
       expect(observedSignal).toBeDefined();
     });
@@ -257,7 +349,11 @@ describe("Feishu OAuth controller", () => {
       },
     });
 
-    fixture.controller.beginAuthorization("oc_chat", "ou_actor");
+    fixture.controller.beginAuthorization(
+      "oc_chat",
+      "ou_actor",
+      ["drive:file:download"],
+    );
     await vi.waitFor(() => {
       expect(observedSignal).toBeDefined();
     });
@@ -274,7 +370,11 @@ describe("Feishu OAuth controller", () => {
       closeTimeoutMs: 10,
     });
 
-    fixture.controller.beginAuthorization("oc_chat", "ou_actor");
+    fixture.controller.beginAuthorization(
+      "oc_chat",
+      "ou_actor",
+      ["drive:file:download"],
+    );
     await vi.waitFor(() => {
       expect(fixture.api.listGrantedUserScopes).toHaveBeenCalledOnce();
     });
@@ -301,7 +401,11 @@ describe("Feishu OAuth controller", () => {
     });
     const fixture = createController({ tokens });
 
-    fixture.controller.beginAuthorization("oc_chat", "ou_actor");
+    fixture.controller.beginAuthorization(
+      "oc_chat",
+      "ou_actor",
+      ["drive:file:download"],
+    );
     await setStarted;
     const closing = fixture.controller.close();
     allowSetToFinish?.();
@@ -328,7 +432,11 @@ describe("Feishu OAuth controller", () => {
         resolvePoll = resolve;
       }),
     });
-    fixture.controller.beginAuthorization("oc_chat", "ou_actor");
+    fixture.controller.beginAuthorization(
+      "oc_chat",
+      "ou_actor",
+      ["drive:file:download"],
+    );
     await vi.waitFor(() => {
       expect(resolvePoll).toBeDefined();
     });

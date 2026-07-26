@@ -21,10 +21,10 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
 - `card-action.ts`：严格裁剪 `card.action.trigger` 的路由字段和受限字符串动作值。
 - `command-center.ts`：生成只读命令中心卡片，维护有界短期令牌与菜单事件去重，并复用
   Application 命令入口。
-- `application-api.ts`：隔离应用配置读取、SDK 增量授权、机器人菜单/订阅更新和版本提交 API，
-  严格裁剪远端应用及版本响应。
-- `application-setup.ts`：生成 Doctor 与应用配置确认卡片，绑定 App、Chat、Actor 和一次性令牌，
-  管理有限任务、取消和安全结果。
+- `application-api.ts`：隔离应用权限与已发布配置读取及 SDK 增量授权，严格裁剪远端应用及
+  版本响应。
+- `application-setup.ts`：生成精简 Doctor 和缺失权限授权卡片，绑定 App、Chat、Actor 和
+  一次性令牌，管理有限任务、取消和安全结果。
 - `client.ts`：官方 SDK、事件长连接、消息与 CardKit 窄客户端及生命周期隔离。
 - `message-content.ts`：生成飞书 `post + md` 内容，供发送和实际序列化大小计量共用。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪。
@@ -35,7 +35,7 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
   请求去重、过期、取消和跨客户端失效。
 - `media.ts`：通过官方消息资源 API 下载私聊图片，并调用 Surface 共用暂存器完成大小、签名、
   权限和过期清理。
-- `permissions.ts`：渲染当前进程权限观测、Gateway 已用能力清单及已有应用的精确申请入口。
+- `permissions.ts`：渲染当前进程权限观测和 Doctor 无配置快照时的精简回退摘要。
 - `oauth-device-flow.ts`：严格裁剪应用用户 Scope、Device Authorization、有限轮询和授权身份查询。
 - `oauth-card.ts`：把 Device Flow 映射为飞书内嵌授权卡片及稳定结果卡片。
 - `oauth-token-store.ts`：macOS Keychain 与 Linux AES-256-GCM 私有凭据后端。
@@ -71,7 +71,7 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
 - 消息创建不自动重试；锁定 SDK 虽提供可选 `uuid` 字段，但当前官方资料未明确其幂等窗口和
   可重试错误语义。
 - 原生流式额外需要应用权限 `cardkit:card:write`。新扫码应用会声明该权限；已有应用由 Owner
-  通过 `/feishu doctor` 的精确入口增量开通并发布，无需重新扫码或申请用户 OAuth。
+  通过 `/feishu doctor` 只增量开通缺失权限，再由 Owner 发布，无需重新扫码或申请用户 OAuth。
 - Doctor 保留 `application:application:self_manage` 用于只读检测。当前授权 Actor 点击一次性
   卡片后只完成 SDK 官方应用授权并重新检测；Gateway 不调用应用能力、开发配置或发布写接口。
   注册端返回的 Open ID 属于
@@ -82,7 +82,7 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
   Doctor 提示 Owner 打开当前应用，人工开启自定义菜单、添加 Event Key 为 `codexc_home` 的
   事件类型菜单项、确认消息/菜单事件与卡片回调使用长连接并发布版本。授权卡片发送失败会立即取消 SDK 轮询并更新 Doctor
   结果，不能留下无人处理的后台拒绝。已发布版本的菜单节点和 `bot_menu_enable` 分开归约；
-  节点存在但开关关闭时显示“已定义但未启用”，不得误报为已完成。`unaudit_version_id` 只作为
+  节点存在但开关关闭时显示“已添加，尚未启用”，不得误报为已完成。`unaudit_version_id` 只作为
   只读观测展示，不触发自动发布或修改。
 - 图片下载只使用 `im.v1.messageResource.get` 的 `message_id + image_key + type=image` 窄能力；
   SDK 响应被裁剪为下载流和可选长度，不向其他模块暴露 Client、Header 或上游错误。
@@ -129,8 +129,10 @@ Actor 和访问策略，限时保存在有界内存中；事件 ID 同样有限�
 持续回复使用 CardKit 2.0 `card.create → message.create → cardElement.content → card.settings`
 链路。每张卡片最多保留 5,000 个 Unicode 字符，跨卡代码围栏会闭合并重开；流式卡片与失败
 回退富文本共享单个结果最多 5 条的总预算，达到预算时在最后一张卡片明确标记截断。创建或内容
-更新失败会尽力结束已显示的卡片，再在最终文本到达后用剩余预算回退完整富文本；结束设置失败
-不重复正文；状态、正文和
+更新失败会尽力结束已显示的卡片，再在最终文本到达后用剩余预算回退完整富文本；CardKit 的
+HTTP 429 和开放平台通用频控码 `99991400` 在非终态元素更新中只跳过当前帧，保留累计正文和
+已递增序列供后续自然增量继续，不主动重试；终态受限仍回退完整富文本。结束设置失败不重复正文；
+状态、正文和
 卡片更新继续共用一个 Chat 队列，不引入第二套 Channel、队列或持久化。同一 Thread 的
 `active` 轻量状态卡片的消息 ID 只保存在 Outbox 内存，并在 `idle` 到达时
 按同一 Chat 顺序把蓝色“运行中”更新为绿色“空闲”；重复 `active` 被忽略，更新失败会清理旧绑定
@@ -145,11 +147,12 @@ StateStore 中已有绑定且仍有授权 Actor 的精确 Chat 生成消息；Su
 绝对路径，再调用同一 `submit()` 的 `localImages` 输入；对已知平台无关命令调用
 `ConversationCommandService.execute()`；`/start`、`/help` 打开同一命令中心卡片，
 `/whoami`、`/cancel` 和
-`/feishu <status|doctor|authorize|revoke>` 留在飞书边界。`status` 展示当前进程实际观测到的
-连接、消息事件、卡片回调和当前 Actor OAuth 状态，`doctor` 合并必要能力诊断和应用配置入口。
-`authorize` 读取应用已开通的用户级 Scope，并先比较安全凭据后端中的有效 Token：全部覆盖时
-不重复授权，部分缺失时只用缺失 Scope 发起 Device Flow；没有有效 Token 时申请应用当前开放的
-用户级 Scope。卡片明确加入并展示 `offline_access`；授权地址只接受
+`/feishu <status|doctor|revoke>` 留在飞书边界。`status` 展示当前进程实际观测到的
+连接、消息事件、卡片回调和当前 Actor OAuth 状态；`doctor` 只显示长连接、消息接收、卡片交互
+和自定义菜单四项摘要，用户 OAuth 状态与撤销分别留在 `status` 和 `revoke`。用户级能力必须把
+自身需要的 Scope 显式传给 OAuth 控制器；控制器先比较应用已开通权限与安全凭据后端中的有效
+Token，只用当前能力缺失的差集发起 Device Flow，不提供预授权全部应用 Scope 的公开命令。卡片
+明确加入并展示 `offline_access`；授权地址只接受
 `https://accounts.feishu.cn` 精确 Origin 的完整 URL，外部响应的 Scope、时间和长度均有界。
 原始应用权限条目先按独立安全上限裁剪，再筛选并限制为最多 100 项用户 Scope；授权与凭据载荷
 为其保留额外一项 `offline_access`。完成后校验返回 Token 所属 `open_id` 必须与消息 Actor
@@ -162,12 +165,13 @@ Adapter 不会重试已经执行的状态修改，而是把稳定的队列错误
 20 条，名称或预览会规范空白并限制为 48 个字符，剩余项通过搜索提示收敛。
 
 `/feishu doctor` 在 Surface 内调用 `application-setup.ts`，不经过 Conversation Core，也不把
-应用 SDK 类型带入 Application。Doctor 先读取已发布版本、事件和回调形成快照；只有快照缺项、
-当前 Actor 仍获授权且没有未完成版本时才生成写操作按钮。卡片动作经过同一严格动作裁剪后优先
-路由到应用授权控制器；首次读取失败时仍可在同一卡片进入官方应用授权。令牌一次使用并绑定
-原消息、Chat 和 Actor；官方授权结果必须匹配当前 App 和飞书租户，完成后重新读取最新快照再
-决定是否提交，避免使用点击前的陈旧状态。Surface 停止会取消进行中的 SDK 授权或 HTTP 请求并
-有限等待。
+应用 SDK 类型带入 Application。Doctor 先读取租户已开通权限、已发布版本、事件和回调形成快照，
+再以当前进程真实收到的消息、卡片动作和菜单事件为优先证据。只有必需租户权限仍有缺项且当前
+Actor 仍获授权时才生成授权按钮，并把精确差集传给 SDK；菜单、事件、回调或待发布版本缺项只
+生成一个当前应用入口，不重复展开权限清单、OAuth 状态和配置教程。卡片动作经过同一严格动作
+裁剪后优先路由到应用授权控制器；首次读取失败时仍可在同一卡片进入官方应用授权。令牌一次使用
+并绑定原消息、Chat 和 Actor；官方授权结果必须匹配当前 App 和飞书租户，完成后重新读取最新
+快照，避免使用点击前的陈旧状态。Surface 停止会取消进行中的 SDK 授权或 HTTP 请求并有限等待。
 
 用户 OAuth Token 不进入 Application、Core、配置或会话 SQLite。macOS 使用系统 Keychain；
 Linux 在 Bootstrap 从状态数据库父目录注入的 `credentials/feishu` 下保存独立主密钥和
@@ -178,7 +182,8 @@ AES-256-GCM 密文，目录为 `0700`、文件为 `0600`。`revoke` 先取消当
 API、OAuth 与 WebSocket 由 Bootstrap 注入统一 HTTP/HTTPS 代理并按目标域名遵循 `NO_PROXY`；
 HTTP 直连会显式关闭 SDK 底层的环境代理再解析，避免覆盖 Bootstrap 决策。仅 SOCKS
 `ALL_PROXY` 尚不支持；目标未命中 `NO_PROXY` 时，无效或不支持的代理会失败关闭而非直连。
-当前仅完成授权基础设施，飞书 CLI API 调用与 Token 自动刷新尚未实现。
+当前仅完成按需授权基础设施，飞书 CLI API 调用与 Token 自动刷新尚未实现；没有用户级能力调用
+授权器，因此不会主动申请用户权限。
 
 `interactions.ts` 只为当前 Conversation 已恢复且恰有一个仍获授权 Actor 的交互请求创建卡片。
 不可预测令牌只存于内存并绑定请求、Chat、消息和 Actor；审批点击只能映射请求原本提供的一次、

@@ -24,7 +24,11 @@ export type FeishuUserAuthorizationStatus =
   | "expired";
 
 export interface FeishuOAuthControllerPort {
-  beginAuthorization(chatId: string, userOpenId: string): "started" | "running";
+  beginAuthorization(
+    chatId: string,
+    userOpenId: string,
+    requiredScopes: readonly string[],
+  ): "started" | "running";
   status(userOpenId: string): Promise<FeishuUserAuthorizationStatus>;
   revoke(userOpenId: string): Promise<boolean>;
 }
@@ -51,6 +55,7 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
   beginAuthorization(
     chatId: string,
     userOpenId: string,
+    requiredScopes: readonly string[],
   ): "started" | "running" {
     const key = this.key(userOpenId);
     if (this.pending.has(key)) {
@@ -63,6 +68,7 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
     const task = this.runAuthorization(
       chatId,
       userOpenId,
+      requiredScopes,
       controller.signal,
     ).catch(async (error) => {
       if (controller.signal.aborted) {
@@ -134,23 +140,40 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
   private async runAuthorization(
     chatId: string,
     userOpenId: string,
+    requiredScopes: readonly string[],
     signal: AbortSignal,
   ): Promise<void> {
+    const requestedScopes = [...new Set(requiredScopes)];
+    if (requestedScopes.length === 0) {
+      await this.outbox.deliverText(
+        chatId,
+        "当前没有需要用户授权的飞书能力；使用相关功能时会按需申请。",
+      );
+      return;
+    }
+    if (requestedScopes.length > maximumScopesPerAuthorization) {
+      await this.outbox.deliverText(
+        chatId,
+        `当前能力需要 ${requestedScopes.length} 项用户权限，超过单次授权上限；暂未发起授权。`,
+      );
+      return;
+    }
     const appScopes = await this.api.listGrantedUserScopes(signal);
     if (signal.aborted) {
       return;
     }
-    if (appScopes.length === 0) {
+    const grantedByApp = new Set(appScopes);
+    const unavailableScopes = requestedScopes.filter(
+      (scope) => !grantedByApp.has(scope),
+    );
+    if (unavailableScopes.length > 0) {
       await this.outbox.deliverText(
         chatId,
-        "当前飞书应用没有可授权的用户级权限，请先配置应用 Scope。",
-      );
-      return;
-    }
-    if (appScopes.length > maximumScopesPerAuthorization) {
-      await this.outbox.deliverText(
-        chatId,
-        `当前应用包含 ${appScopes.length} 项用户权限，超过单次授权上限；暂未发起授权。`,
+        [
+          "当前飞书应用尚未开通此能力需要的用户权限：",
+          ...unavailableScopes.map((scope) => `- ${scope}`),
+          "请由应用管理员开通后重试。",
+        ].join("\n"),
       );
       return;
     }
@@ -159,12 +182,14 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
       return;
     }
     const scopes = feishuTokenStatus(existingToken) === "valid"
-      ? appScopes.filter((scope) => !existingToken!.scopes.includes(scope))
-      : appScopes;
+      ? requestedScopes.filter(
+        (scope) => !existingToken!.scopes.includes(scope),
+      )
+      : requestedScopes;
     if (scopes.length === 0) {
       await this.outbox.deliverText(
         chatId,
-        "当前飞书账号已授权，现有权限已覆盖应用当前开放的用户权限，无需重复授权。",
+        "当前飞书账号已具备此能力需要的权限，无需重复授权。",
       );
       return;
     }

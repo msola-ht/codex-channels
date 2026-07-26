@@ -7,6 +7,7 @@ import {
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import type { SurfaceOutputPort } from "../types.js";
 import type { FeishuCardDocument } from "./approval-card.js";
+import { FeishuMessageError } from "./client.js";
 import { encodeFeishuPostContent } from "./message-content.js";
 import { renderFeishuOutput } from "./renderer.js";
 import { renderFeishuThreadStatusCard } from "./status-card.js";
@@ -350,11 +351,22 @@ export class FeishuOutbox implements SurfaceOutputPort {
       await this.rollStreamingCards(state);
       if (state.lastSentText !== state.cardText) {
         state.sequence += 1;
-        await this.messagePort.updateStreamingCard(
-          state.cardId!,
-          state.cardText,
-          state.sequence,
-        );
+        try {
+          await this.messagePort.updateStreamingCard(
+            state.cardId!,
+            state.cardText,
+            state.sequence,
+          );
+        } catch (error) {
+          if (
+            !terminal
+            && error instanceof FeishuMessageError
+            && error.code === "rate-limited"
+          ) {
+            return;
+          }
+          throw error;
+        }
         state.lastSentText = state.cardText;
       }
     } catch (error) {

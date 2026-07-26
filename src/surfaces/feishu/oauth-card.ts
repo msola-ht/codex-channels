@@ -63,7 +63,7 @@ export function renderFeishuOAuthOutcomeCard(
   const descriptions = {
     success: "授权成功，凭据已安全保存。",
     denied: "你拒绝了本次授权。",
-    expired: "授权请求已过期，请重新发送 /feishu authorize。",
+    expired: "授权请求已过期，请重新使用需要该权限的飞书功能。",
     "identity-mismatch": "完成授权的账号与发起人不一致，凭据未保存。",
     failed: "授权处理失败，请稍后重试。",
   } as const;
