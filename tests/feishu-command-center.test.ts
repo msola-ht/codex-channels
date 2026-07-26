@@ -5,6 +5,7 @@ import type { ConversationTarget } from "../src/conversation-core/index.js";
 import {
   FeishuCommandCenter,
   feishuCommandCenterActions,
+  feishuCommandMenuEventKey,
   renderFeishuCommandCenterCard,
   type FeishuCardAction,
   type FeishuCardDocument,
@@ -17,7 +18,11 @@ const target: ConversationTarget = {
 };
 
 describe("Feishu command center", () => {
-  it("renders the bounded read-only command set", () => {
+  it("uses one bot menu event to open the categorized command center", () => {
+    expect(feishuCommandMenuEventKey).toBe("codexc_home");
+  });
+
+  it("renders common actions first and groups the remaining actions", () => {
     const card = renderFeishuCommandCenterCard("opaque-token");
     const values = card.elements.flatMap((element) =>
       Array.isArray(element.actions)
@@ -39,9 +44,164 @@ describe("Feishu command center", () => {
     expect(values.map((value) => value.codexc_command)).toEqual(
       feishuCommandCenterActions,
     );
+    expect(feishuCommandCenterActions).toEqual([
+      "new",
+      "resume",
+      "status",
+      "fast",
+      "usage",
+      "limits",
+      "model",
+      "effort",
+      "workspace",
+      "goal",
+      "help",
+    ]);
+    expect(JSON.stringify(card)).toContain("常用");
+    expect(JSON.stringify(card)).toContain("模型与工作区");
+    expect(JSON.stringify(card)).toContain("更多");
     expect(values.every(
       (value) => value.codexc_command_token === "opaque-token",
     )).toBe(true);
+  });
+
+  it("opens a categorized command card instead of sending the full text help", async () => {
+    const fixture = createFixture();
+    await fixture.center.open(target, "ou_actor");
+
+    expect(fixture.center.handleCardAction(
+      cardAction(fixture.cards[0]!, "help"),
+    )).toBe("accepted");
+    await settle();
+
+    expect(fixture.execute).not.toHaveBeenCalled();
+    expect(fixture.cards).toHaveLength(2);
+    const categorized = fixture.cards[1]!;
+    expect(JSON.stringify(categorized.card)).toContain("会话查询");
+    expect(JSON.stringify(categorized.card)).toContain("能力与集成");
+    expect(JSON.stringify(categorized.card)).toContain("当前内容");
+
+    expect(fixture.center.handleCardAction(
+      cardAction(categorized, "skills"),
+    )).toBe("accepted");
+    await settle();
+    expect(fixture.execute).toHaveBeenCalledWith(
+      target,
+      "skills",
+      "ou_actor",
+      "",
+    );
+    expect(fixture.center.handleCardAction(
+      cardAction(categorized, "whoami"),
+    )).toBe("accepted");
+    await settle();
+    expect(fixture.execute).toHaveBeenCalledWith(
+      target,
+      "whoami",
+      "ou_actor",
+      "",
+    );
+  });
+
+  it("opens bounded choices and executes the selected value", async () => {
+    const cards: Array<{
+      chatId: string;
+      messageId: string;
+      card: FeishuCardDocument;
+    }> = [];
+    const execute = vi.fn(async (
+      _target,
+      action,
+      _actorId,
+      input,
+    ) => input
+      ? undefined
+      : {
+          title: "选择模型",
+          description: "当前：gpt-a",
+          choices: [{
+            label: "GPT B",
+            action,
+            input: "gpt-b",
+          }],
+        });
+    const center = new FeishuCommandCenter(
+      {
+        deliverCard: async (chatId, card) => {
+          const messageId = `om_card_${cards.length + 1}`;
+          cards.push({ chatId, messageId, card });
+          return messageId;
+        },
+      },
+      { isAllowed: () => true },
+      execute,
+      pino({ level: "silent" }),
+    );
+    await center.open(target, "ou_actor");
+
+    expect(center.handleCardAction(
+      cardAction(cards[0]!, "model"),
+    )).toBe("accepted");
+    await settle();
+    expect(cards).toHaveLength(2);
+    expect(JSON.stringify(cards[1]?.card)).toContain("选择模型");
+
+    expect(center.handleCardAction(
+      cardAction(cards[1]!, "model"),
+    )).toBe("accepted");
+    await settle();
+    expect(execute).toHaveBeenLastCalledWith(
+      target,
+      "model",
+      "ou_actor",
+      "gpt-b",
+    );
+  });
+
+  it("rejects a value that was not rendered on the selection card", async () => {
+    const cards: Array<{
+      chatId: string;
+      messageId: string;
+      card: FeishuCardDocument;
+    }> = [];
+    const execute = vi.fn(async (
+      _target,
+      action,
+      _actorId,
+      input,
+    ) => input
+      ? undefined
+      : {
+          title: "选择模型",
+          choices: [{ label: "GPT B", action, input: "gpt-b" }],
+        });
+    const center = new FeishuCommandCenter(
+      {
+        deliverCard: async (chatId, card) => {
+          const messageId = `om_card_${cards.length + 1}`;
+          cards.push({ chatId, messageId, card });
+          return messageId;
+        },
+      },
+      { isAllowed: () => true },
+      execute,
+      pino({ level: "silent" }),
+    );
+    await center.open(target, "ou_actor");
+    expect(center.handleCardAction(
+      cardAction(cards[0]!, "model"),
+    )).toBe("accepted");
+    await settle();
+
+    const valid = cardAction(cards[1]!, "model");
+    expect(center.handleCardAction({
+      ...valid,
+      value: {
+        ...valid.value,
+        codexc_command_input: "gpt-unauthorized",
+      },
+    })).toBe("invalid");
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it("binds reusable read-only actions to the exact card, chat, actor, and access policy", async () => {
@@ -59,8 +219,20 @@ describe("Feishu command center", () => {
     })).toBe("accepted");
     await settle();
 
-    expect(fixture.execute).toHaveBeenNthCalledWith(1, target, "status");
-    expect(fixture.execute).toHaveBeenNthCalledWith(2, target, "usage");
+    expect(fixture.execute).toHaveBeenNthCalledWith(
+      1,
+      target,
+      "status",
+      "ou_actor",
+      "",
+    );
+    expect(fixture.execute).toHaveBeenNthCalledWith(
+      2,
+      target,
+      "usage",
+      "ou_actor",
+      "",
+    );
     expect(fixture.center.handleCardAction({
       ...action,
       actorOpenId: "ou_other",
@@ -225,18 +397,33 @@ function createFixture(
 
 function cardAction(
   sent: { chatId: string; messageId: string; card: FeishuCardDocument },
+  command = "status",
 ): FeishuCardAction {
-  const firstAction = sent.card.elements.flatMap((element) =>
+  const selectedAction = sent.card.elements.flatMap((element) =>
     Array.isArray(element.actions) ? element.actions : [],
-  )[0] as {
+  ).find((action) => {
+    if (
+      typeof action !== "object"
+      || action === null
+      || !("value" in action)
+    ) {
+      return false;
+    }
+    return (action as {
+      value: Record<string, string>;
+    }).value.codexc_command === command;
+  }) as {
     value: Readonly<Record<string, string>>;
-  };
+  } | undefined;
+  if (!selectedAction) {
+    throw new Error(`飞书命令中心动作不存在：${command}`);
+  }
   return {
     messageId: sent.messageId,
     chatId: sent.chatId,
     actorOpenId: "ou_actor",
     tag: "button",
-    value: firstAction.value,
+    value: selectedAction.value,
   };
 }
 

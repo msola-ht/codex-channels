@@ -320,22 +320,19 @@ describe("Feishu Surface", () => {
     );
   });
 
-  it("opens the command center from a bot menu only for the unique authorized private chat", async () => {
-    const fixture = createFixture(
-      undefined,
-      () => ["oc_chat"],
-    );
+  it("opens one categorized command center from the bot menu", async () => {
+    const fixture = createFixture({}, () => ["oc_chat"]);
     const starting = fixture.surface.start();
     fixture.ready();
     await starting;
 
-    fixture.emitMenuEvent();
-    fixture.emitMenuEvent();
+    fixture.emitMenuEvent("codexc_home");
+    fixture.emitMenuEvent("codexc_home");
     await settle();
     await fixture.surface.stop();
 
     expect(fixture.cards).toHaveLength(1);
-    expect(fixture.cards[0]).toEqual(expect.objectContaining({
+    expect(fixture.cards[0]).toMatchObject({
       chatId: "oc_chat",
       card: expect.objectContaining({
         header: expect.objectContaining({
@@ -344,7 +341,8 @@ describe("Feishu Surface", () => {
           }),
         }),
       }),
-    }));
+    });
+    expect(fixture.sent).toHaveLength(0);
   });
 
   it("routes command center buttons through the shared Application command service", async () => {
@@ -658,19 +656,22 @@ function createFixture(
         },
       });
     },
-    emitMenuEvent() {
+    emitMenuEvent(
+      eventKey = "codexc_home",
+      eventId = "event-menu-1",
+    ) {
       if (!menuEventHandler) {
         throw new Error("飞书 SDK 尚未注册机器人菜单处理器");
       }
       menuEventHandler({
-        event_id: "event-menu-1",
+        event_id: eventId,
         app_id: "cli_0123456789abcdef",
         operator: {
           operator_id: {
             open_id: "ou_actor",
           },
         },
-        event_key: "codexc_home",
+        event_key: eventKey,
       });
     },
     emitCommandAction(command: string) {

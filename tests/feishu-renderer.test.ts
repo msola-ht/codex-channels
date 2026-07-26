@@ -274,6 +274,30 @@ describe("Feishu output renderer", () => {
     expect(limits).toContain("限流状态：Workspace 用量上限已达到");
   });
 
+  it("formats usage token totals in millions", () => {
+    const rendered = renderFeishuCommandResult({
+      kind: "usage",
+      result: {
+        summary: {
+          lifetimeTokens: 6_439_124_350,
+          peakDailyTokens: 389_153_809,
+          longestRunningTurnSec: 1_138,
+          currentStreakDays: 45,
+          longestStreakDays: 45,
+        },
+        daily: [{
+          startDate: "2026-07-26",
+          tokens: 128_021_979,
+        }],
+      },
+    });
+
+    expect(rendered).toContain("累计 Tokens：6,439.12 M");
+    expect(rendered).toContain("单日峰值：389.15 M");
+    expect(rendered).toContain("2026-07-26：128.02 M");
+    expect(rendered).toContain("最长 Turn：1138 秒");
+  });
+
   it("renders detailed context after a completed Turn", () => {
     const rendered = renderFeishuOutput({
       type: "turn.completed",

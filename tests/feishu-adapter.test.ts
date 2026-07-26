@@ -178,6 +178,172 @@ describe("Feishu conversation adapter", () => {
     );
   });
 
+  it("reuses Feishu-local identity, status, and doctor from command cards", async () => {
+    const fixture = createOutbox();
+    const openDoctor = vi.fn(async () => {});
+    const adapter = new FeishuConversationAdapter(
+      {} as ConversationService,
+      fixture.outbox,
+      imagePort,
+      () => ({
+        connectionReady: true,
+        cardActionObserved: true,
+        menuEventObserved: true,
+      }),
+      {
+        beginAuthorization: () => "started",
+        status: async () => "valid",
+        revoke: async () => false,
+      },
+      undefined,
+      { openDoctor },
+    );
+
+    await adapter.handleCommandCenterAction(
+      message.target,
+      "whoami",
+      message.actorId,
+    );
+    await adapter.handleCommandCenterAction(
+      message.target,
+      "feishu-status",
+      message.actorId,
+    );
+    await adapter.handleCommandCenterAction(
+      message.target,
+      "feishu-doctor",
+      message.actorId,
+    );
+    await fixture.outbox.close();
+
+    expect(fixture.sent[0]?.text).toContain("用户 Open ID：ou_actor");
+    expect(fixture.sent[1]?.text).toContain("长连接：已就绪");
+    expect(openDoctor).toHaveBeenCalledWith(
+      message.target,
+      message.actorId,
+      expect.objectContaining({ connectionReady: true }),
+    );
+  });
+
+  it("returns clickable choices for selectable command-card actions", async () => {
+    const fixture = createOutbox();
+    const modelState = vi.fn(async () => ({
+      models: [{
+        id: "gpt-a",
+        model: "gpt-a",
+        displayName: "GPT A",
+        supportedReasoningEfforts: [
+          { effort: "medium", description: "平衡" },
+          { effort: "high", description: "深入" },
+        ],
+        defaultReasoningEffort: "medium",
+        serviceTiers: [{ id: "priority", name: "Fast" }],
+        defaultServiceTier: "default",
+        isDefault: true,
+      }],
+      model: "gpt-a",
+      effort: "medium",
+      serviceTier: "default",
+      pending: false,
+      modelPending: false,
+      effortPending: false,
+      serviceTierPending: false,
+    }));
+    const selectEffort = vi.fn(async () => ({
+      ...(await modelState()),
+      effort: "high",
+    }));
+    const adapter = new FeishuConversationAdapter(
+      {
+        modelState,
+        selectEffort,
+      } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+    );
+
+    const choices = await adapter.handleCommandCenterAction(
+      message.target,
+      "effort",
+      message.actorId,
+      "",
+    );
+    expect(choices).toMatchObject({
+      title: "选择思考强度",
+      choices: [
+        expect.objectContaining({ input: "medium" }),
+        expect.objectContaining({ input: "high" }),
+      ],
+    });
+    expect(fixture.sent).toEqual([]);
+
+    await adapter.handleCommandCenterAction(
+      message.target,
+      "effort",
+      message.actorId,
+      "high",
+    );
+    await fixture.outbox.close();
+    expect(selectEffort).toHaveBeenCalledWith(message.target, "high");
+    expect(fixture.sent[0]?.text).toContain("当前思考强度：high");
+  });
+
+  it("turns active and archived session results into exact card choices", async () => {
+    const fixture = createOutbox();
+    const sessions = [{
+      id: "thread-active",
+      name: "当前会话",
+      preview: "",
+      cwd: "/workspace",
+      updatedAt: 1,
+    }];
+    const archived = [{
+      id: "thread-archived",
+      name: "旧会话",
+      preview: "",
+      cwd: "/workspace",
+      updatedAt: 1,
+    }];
+    const adapter = new FeishuConversationAdapter(
+      {
+        listSessions: vi.fn(async (
+          _target: typeof message.target,
+          options?: { archived?: boolean },
+        ) => options?.archived ? archived : sessions),
+        status: vi.fn(() => ({
+          threadId: "thread-active",
+          workspaceId: "workspace",
+        })),
+      } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+    );
+
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "sessions",
+      message.actorId,
+    )).resolves.toMatchObject({
+      title: "选择会话",
+      choices: [{
+        action: "resume",
+        input: "thread-active",
+      }],
+    });
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "archived",
+      message.actorId,
+    )).resolves.toMatchObject({
+      title: "恢复已归档会话",
+      choices: [{
+        action: "unarchive",
+        input: "thread-archived",
+      }],
+    });
+    await fixture.outbox.close();
+  });
+
   it("binds user authorization status and revoke to the current message actor", async () => {
     const fixture = createOutbox();
     const beginAuthorization = vi.fn(() => "started" as const);

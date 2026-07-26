@@ -103,7 +103,9 @@ export function renderFeishuHelp(): string {
   ].join("\n");
 }
 
-export function renderFeishuIdentity(message: FeishuInboxMessage): string {
+export function renderFeishuIdentity(
+  message: Pick<FeishuInboxMessage, "actorId" | "target">,
+): string {
   return [
     "飞书身份",
     `用户 Open ID：${message.actorId}`,
@@ -601,8 +603,8 @@ function renderFeishuUsage(result: AccountUsage): string {
     .slice(0, 7);
   return [
     "Codex 用量摘要：",
-    `累计 Tokens：${formatMetric(result.summary.lifetimeTokens)}`,
-    `单日峰值：${formatMetric(result.summary.peakDailyTokens)}`,
+    `累计 Tokens：${formatMillions(result.summary.lifetimeTokens)}`,
+    `单日峰值：${formatMillions(result.summary.peakDailyTokens)}`,
     `最长 Turn：${formatMetric(result.summary.longestRunningTurnSec)} 秒`,
     `当前连续天数：${formatMetric(result.summary.currentStreakDays)}`,
     `最长连续天数：${formatMetric(result.summary.longestStreakDays)}`,
@@ -610,7 +612,7 @@ function renderFeishuUsage(result: AccountUsage): string {
     "最近每日用量：",
     ...(daily.length === 0
       ? ["暂无每日数据"]
-      : daily.map((entry) => `- ${entry.startDate}：${formatMetric(entry.tokens)}`)),
+      : daily.map((entry) => `- ${entry.startDate}：${formatMillions(entry.tokens)}`)),
   ].join("\n");
 }
 
@@ -739,6 +741,16 @@ function formatRateLimitState(value: string | null): string {
 
 function formatMetric(value: bigint | number | null): string {
   return value === null ? "未知" : String(value);
+}
+
+function formatMillions(value: bigint | number | null): string {
+  if (value === null) {
+    return "未知";
+  }
+  return `${(Number(value) / 1_000_000).toLocaleString("zh-CN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} M`;
 }
 
 function formatTokenCount(value: number): string {

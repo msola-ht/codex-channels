@@ -481,7 +481,7 @@ function manualConfigurationText(appId: string): string {
     "",
     `请[打开当前飞书应用](https://open.feishu.cn/app/${appId})并完成：`,
     "1. 在机器人能力中开启自定义菜单。",
-    `2. 添加事件类型菜单项，Event Key 设为 ${feishuCommandMenuEventKey}。`,
+    `2. 添加一个事件类型菜单“Codex”，Event Key 设为 ${feishuCommandMenuEventKey}。`,
     "3. 确认消息事件、机器人菜单事件和卡片回调使用长连接。",
     "4. 创建并发布应用版本。",
     "",

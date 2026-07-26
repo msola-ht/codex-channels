@@ -208,8 +208,13 @@ export class FeishuSurface implements SurfaceAdapter {
     this.commandCenter = new FeishuCommandCenter(
       this.output,
       options.access,
-      (target, action) =>
-        adapter.handleCommandCenterAction(target, action),
+      (target, action, actorId, input) =>
+        adapter.handleCommandCenterAction(
+          target,
+          action,
+          actorId,
+          input,
+        ),
       options.logger,
     );
     this.inbox = new FeishuInbox({

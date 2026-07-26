@@ -1,6 +1,9 @@
 import {
   ConversationCommandService,
+  fastServiceTierId,
   isConversationCommandName,
+  isFastServiceTier,
+  type ConversationCommandResult,
   type ConversationService,
 } from "../../application/index.js";
 import {
@@ -11,6 +14,7 @@ import {
 import type {
   FeishuCommandCenter,
   FeishuCommandCenterAction,
+  FeishuCommandCenterChoices,
 } from "./command-center.js";
 import type { FeishuApplicationSetupController } from "./application-setup.js";
 import type { FeishuInboxMessage } from "./inbox.js";
@@ -144,13 +148,54 @@ export class FeishuConversationAdapter {
   async handleCommandCenterAction(
     target: ConversationTarget,
     action: FeishuCommandCenterAction,
-  ): Promise<void> {
+    actorId: string,
+    input = "",
+  ): Promise<FeishuCommandCenterChoices | void> {
     try {
       if (action === "help") {
         this.notifyMarkdown(target.conversationId, renderFeishuHelp());
         return;
       }
-      const result = await this.commands.execute(target, action);
+      if (action === "whoami") {
+        this.notifyMarkdown(
+          target.conversationId,
+          renderFeishuIdentity({ target, actorId }),
+        );
+        return;
+      }
+      if (action === "feishu-status") {
+        await this.handleFeishuCommand(
+          actorId,
+          target.accountId,
+          target.conversationId,
+          "status",
+        );
+        return;
+      }
+      if (action === "feishu-doctor") {
+        await this.handleFeishuCommand(
+          actorId,
+          target.accountId,
+          target.conversationId,
+          "doctor",
+        );
+        return;
+      }
+      if (!isConversationCommandName(action)) {
+        throw new UserFacingError(
+          "command.unsupported",
+          "飞书命令不受支持",
+        );
+      }
+      const result = action === "fast" && input === ""
+        ? await this.commands.execute(target, "model")
+        : await this.commands.execute(target, action, input);
+      const choices = input === ""
+        ? renderCommandCenterChoices(action, result)
+        : undefined;
+      if (choices) {
+        return choices;
+      }
       this.notifyMarkdown(
         target.conversationId,
         renderFeishuCommandResult(result),
@@ -264,6 +309,117 @@ export class FeishuConversationAdapter {
       throw new FeishuOutputQueueError();
     }
   }
+}
+
+function renderCommandCenterChoices(
+  action: FeishuCommandCenterAction,
+  result: ConversationCommandResult,
+): FeishuCommandCenterChoices | undefined {
+  if (
+    (action === "resume" || action === "sessions")
+    && result.kind === "sessions"
+    && !result.archived
+  ) {
+    if (result.sessions.length === 0) {
+      return undefined;
+    }
+    return {
+      title: "选择会话",
+      description: "点击后切换到对应 Codex Thread。",
+      choices: result.sessions.map((session) => ({
+        label: `${session.id === result.currentThreadId ? "✓ " : ""}${(session.name ?? session.preview) || "未命名"}`,
+        action: "resume",
+        input: session.id,
+      })),
+    };
+  }
+  if (action === "archived" && result.kind === "sessions" && result.archived) {
+    if (result.sessions.length === 0) {
+      return undefined;
+    }
+    return {
+      title: "恢复已归档会话",
+      description: "点击后取消归档并切换到对应 Codex Thread。",
+      choices: result.sessions.map((session) => ({
+        label: (session.name ?? session.preview) || "未命名",
+        action: "unarchive",
+        input: session.id,
+      })),
+    };
+  }
+  if (action === "workspace" && result.kind === "workspaces") {
+    if (result.workspaces.length === 0) {
+      return undefined;
+    }
+    return {
+      title: "选择工作区",
+      choices: result.workspaces.map((workspace) => ({
+        label: `${workspace.id === result.currentWorkspaceId ? "✓ " : ""}${workspace.name}`,
+        action: "workspace",
+        input: workspace.id,
+      })),
+    };
+  }
+  if (result.kind !== "models") {
+    return undefined;
+  }
+  const currentModel = result.state.models.find(
+    (model) => model.model === result.state.model,
+  );
+  if (action === "model") {
+    if (result.state.models.length === 0) {
+      return undefined;
+    }
+    return {
+      title: "选择模型",
+      description: `当前：${result.state.model}`,
+      choices: result.state.models.map((model) => ({
+        label: `${model.model === result.state.model ? "✓ " : ""}${model.displayName}`,
+        action: "model",
+        input: model.model,
+      })),
+    };
+  }
+  if (action === "effort") {
+    const efforts = currentModel?.supportedReasoningEfforts ?? [];
+    if (efforts.length === 0) {
+      return undefined;
+    }
+    return {
+      title: "选择思考强度",
+      description: `当前：${result.state.effort ?? currentModel?.defaultReasoningEffort ?? "模型默认"}`,
+      choices: efforts.map(
+        (option) => ({
+          label: `${option.effort === result.state.effort ? "✓ " : ""}${option.effort}`,
+          action: "effort",
+          input: option.effort,
+        }),
+      ),
+    };
+  }
+  if (action === "fast") {
+    const enabled = isFastServiceTier(
+      result.state.serviceTier,
+      currentModel,
+    );
+    return {
+      title: "切换 Fast 模式",
+      description: `当前：${enabled ? "开启" : "关闭"} · ${currentModel && fastServiceTierId(currentModel) ? "当前模型支持 Fast" : "当前模型不支持 Fast"}`,
+      choices: [
+        {
+          label: `${enabled ? "✓ " : ""}开启`,
+          action: "fast",
+          input: "on",
+        },
+        {
+          label: `${enabled ? "" : "✓ "}关闭`,
+          action: "fast",
+          input: "off",
+        },
+      ],
+    };
+  }
+  return undefined;
 }
 
 class FeishuOutputQueueError extends Error {

@@ -20,7 +20,7 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
 - `adapter.ts`：区分普通文本、平台本地命令和 Application 命令，并通过 Outbox 返回结果或安全错误。
 - `approval-card.ts`：生成有界审批卡片和移除动作后的处理结果卡片。
 - `card-action.ts`：严格裁剪 `card.action.trigger` 的路由字段和受限字符串动作值。
-- `command-center.ts`：生成只读命令中心卡片，维护有界短期令牌与菜单事件去重，并复用
+- `command-center.ts`：生成分类命令中心卡片，维护有界短期令牌与菜单事件去重，并复用
   Application 命令入口。
 - `application-api.ts`：隔离应用权限与已发布配置读取及 SDK 增量授权，严格裁剪远端应用及
   版本响应。
@@ -82,7 +82,7 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
   `applink.feishu.cn` 精确 HTTPS Origin；`accounts.feishu.cn` 和 `open.feishu.cn` 会包装为
   飞书 AppLink，在客户端侧边栏完成确认。应用凭据或短期授权状态不写入业务存储。授权完成后
   Doctor 提示 Owner 打开当前应用，人工开启自定义菜单、添加 Event Key 为 `codexc_home` 的
-  事件类型菜单项、确认消息/菜单事件与卡片回调使用长连接并发布版本。授权卡片发送失败会立即取消 SDK 轮询并更新 Doctor
+  单个事件类型菜单项、确认消息/菜单事件与卡片回调使用长连接并发布版本。授权卡片发送失败会立即取消 SDK 轮询并更新 Doctor
   结果，不能留下无人处理的后台拒绝。已发布版本的菜单节点和 `bot_menu_enable` 分开归约；
   节点存在但开关关闭时显示“已添加，尚未启用”，不得误报为已完成。`unaudit_version_id` 只作为
   只读观测展示，不触发自动发布或修改。
@@ -95,8 +95,15 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 
 `menu-event.ts` 只保留菜单事件 ID、App ID、Actor Open ID 和事件 Key。官方菜单事件不提供
 Chat ID；`surface.ts` 只在 Actor 与当前 App 的一个已授权私聊绑定精确匹配时打开命令中心，
-零个或多个候选都失败关闭。`command-center.ts` 只暴露六个只读动作，卡片令牌绑定消息、Chat、
-Actor 和访问策略，限时保存在有界内存中；事件 ID 同样有限去重。动作直接调用 Adapter 对
+零个或多个候选都失败关闭。`command-center.ts` 的主卡按“常用”“模型与工作区”“更多”展示
+十个动作和一个分类入口；Fast、Goal 和用户明确要求的一键新建会话均复用现有共享命令。
+分类入口打开第二张卡片，按“会话查询”“能力与集成”“当前内容”“飞书”展示十一个动作，
+不复用完整文本帮助。会话切换、会话列表、已归档、模型、思考强度、Fast 和工作区会打开
+最多 18 项的选择卡；活动会话选择复用 `resume`，归档会话选择复用 `unarchive`，Fast 首次点击
+只读取模型状态，明确选择开关后才执行修改。自由文本参数型操作不生成快捷按钮。每张卡片的
+令牌除绑定消息、Chat、Actor 和访问策略外，还绑定该卡实际渲染的精确动作与参数；未展示值
+失败关闭。令牌限时保存在有界内存中；事件 ID 同样
+有限去重。动作直接调用 Adapter 对
 `ConversationCommandService` 的复用入口，不伪造文本消息，也不复用审批令牌；已接受的卡片
 发送和命令任务由命令中心持有，Surface 停止时在关闭 Outbox 前有限等待。
 
@@ -213,6 +220,8 @@ Setup 与只读 Doctor 凭据/Bot 身份探测已完成，真实应用的首次�
 CardKit 原生流式卡片可见更新的主路径同样已通过验收；轻量 Thread 状态卡片的
 `active → idle` 原地更新也已通过真实验收。真实限流、失败回退和超长内容滚动仍待验证。
 静态展示和按会话顺序发送的操作终态卡片已统一为 CardKit 2.0 并通过离线测试，仍待真实应用验收。
+单个机器人菜单入口、分类命令中心、更多分类卡和模型、思考强度、Fast、工作区及会话选择卡
+已完成真实应用验收。
 断线恢复、代理、未授权/重复事件、用户输入与 MCP 卡片动作仍未完成真实验收。后续阶段按
 [`飞书 Surface 接入计划`](../../../docs/feishu-surface-plan.md)推进；一级 `surfaces` 入口只转出
 窄工厂，不得导出 SDK 类型，也不得在 Core 中引入飞书类型。Phase 1 真实验收关闭前，Phase 2
