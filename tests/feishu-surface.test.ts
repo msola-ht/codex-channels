@@ -539,6 +539,9 @@ function createFixture(
       sendPost: async (chatId, text) => {
         sent.push({ chatId, text });
       },
+      sendMarkdownCard: async (chatId, text) => {
+        sent.push({ chatId, text });
+      },
       createStreamingCard: async () => ({
         cardId: "735537276613415731",
         messageId: "om_stream",

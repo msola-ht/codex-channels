@@ -450,7 +450,7 @@ export class FeishuSurface implements SurfaceAdapter {
         continue;
       }
       delivered.add(chatId);
-      if (!this.output.notifyPost(chatId, text)) {
+      if (!this.output.notifyMarkdown(chatId, text)) {
         this.logger.warn(
           {
             ...this.lifecycleContext(),

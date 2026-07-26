@@ -312,14 +312,13 @@ describe("Feishu output renderer", () => {
     });
 
     expect(rendered).toBe([
-      "Codex 任务状态：已完成",
-      "上下文：100 / 200（50%）",
-      "缓存命中率：50%",
-      "当前模型：gpt-test",
-      "思考强度：medium",
-      "Fast 模式：开启",
-      "上下文压缩：2 次",
-      "周限：已使用 37%",
+      "**本次运行 · 已完成**",
+      "",
+      "- **上下文：** 100 / 200（50%）",
+      "- **缓存命中：** 50%",
+      "- **模型：** gpt-test · medium · Fast 开启",
+      "- **上下文压缩：** 2 次",
+      "- **周限：** 已使用 37%",
     ].join("\n"));
   });
 
@@ -545,7 +544,7 @@ describe("Feishu output renderer", () => {
     expect(sessions).not.toContain("21. 会话 21");
   });
 
-  it("renders a completed assistant message as plain text", () => {
+  it("renders completed assistant content for the CardKit boundary", () => {
     const event: OutputEvent = {
       type: "text.completed",
       target,
@@ -685,7 +684,11 @@ describe("Feishu output renderer", () => {
     ];
 
     expect(criticalEvents.every(isCriticalOutputEvent)).toBe(true);
-    expect(criticalEvents.map(renderFeishuOutput).every((text) => Boolean(text?.trim()))).toBe(true);
+    expect(criticalEvents
+      .filter((event) => event.type !== "operation.updated")
+      .map(renderFeishuOutput)
+      .every((text) => Boolean(text?.trim()))).toBe(true);
+    expect(renderFeishuOutput(criticalEvents[2]!)).toBeNull();
     expect(progressEvents.some(isCriticalOutputEvent)).toBe(false);
     expect(progressEvents.map(renderFeishuOutput)).toEqual([null, null, null]);
   });

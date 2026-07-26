@@ -697,6 +697,136 @@ describe("FeishuMessageClient", () => {
     });
   });
 
+  it("creates and sends a static CardKit Markdown card", async () => {
+    const createMessage = vi.fn(async () => ({
+      data: { message_id: "om_static" },
+    }));
+    const createStreamingCard = vi.fn(async () => ({
+      code: 0,
+      data: { card_id: "7355372766134157313" },
+    }));
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage,
+          createStreamingCard,
+          patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
+        }),
+      },
+    );
+
+    await expect(
+      client.sendMarkdownCard("oc_chat", "**状态**\n\n- 正常"),
+    ).resolves.toBeUndefined();
+
+    expect(createStreamingCard).toHaveBeenCalledWith({
+      data: {
+        type: "card_json",
+        data: JSON.stringify({
+          schema: "2.0",
+          config: {
+            summary: {
+              content: "**状态** - 正常",
+            },
+          },
+          body: {
+            elements: [{
+              tag: "markdown",
+              content: "**状态**\n\n- 正常",
+            }],
+          },
+        }),
+      },
+    });
+    expect(createMessage).toHaveBeenCalledWith({
+      params: {
+        receive_id_type: "chat_id",
+      },
+      data: {
+        receive_id: "oc_chat",
+        msg_type: "interactive",
+        content: JSON.stringify({
+          type: "card",
+          data: {
+            card_id: "7355372766134157313",
+          },
+        }),
+      },
+    });
+  });
+
+  it("reports a stable error before message send when static CardKit creation fails", async () => {
+    const createMessage = vi.fn(async () => ({
+      data: { message_id: "om_fallback" },
+    }));
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage,
+          createStreamingCard: async () => {
+            throw new Error("card create failed");
+          },
+          patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
+        }),
+      },
+    );
+
+    await expect(
+      client.sendMarkdownCard("oc_chat", "**状态**\n\n- 正常"),
+    ).rejects.toMatchObject({
+      code: "card-create-failed",
+      message: "飞书静态卡片创建失败",
+    });
+
+    expect(createMessage).not.toHaveBeenCalled();
+  });
+
+  it("neutralizes platform-native mentions in every static CardKit field", async () => {
+    const createStreamingCard = vi.fn(async () => ({
+      code: 0,
+      data: { card_id: "7355372766134157313" },
+    }));
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage: async () => ({
+            data: { message_id: "om_static" },
+          }),
+          createStreamingCard,
+          patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
+        }),
+      },
+    );
+
+    await client.sendMarkdownCard(
+      "oc_chat",
+      "<at user_id=\"all\">所有人</at>",
+    );
+
+    expect(JSON.stringify(createStreamingCard.mock.calls))
+      .not.toContain("<at");
+    expect(JSON.stringify(createStreamingCard.mock.calls))
+      .toContain("&lt;at");
+  });
+
   it("updates and finishes a native streaming CardKit card in sequence", async () => {
     const updateStreamingCard = vi.fn(async () => ({ code: 0 }));
     const finishStreamingCard = vi.fn(async (payload: {

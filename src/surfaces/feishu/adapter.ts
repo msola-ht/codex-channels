@@ -37,7 +37,7 @@ export class FeishuConversationAdapter {
     private readonly conversations: ConversationService,
     private readonly outbox: Pick<
       FeishuOutbox,
-      "notifyPost" | "notifyText"
+      "notifyMarkdown" | "notifyText"
     >,
     private readonly images: Pick<FeishuImagePort, "download">,
     private readonly permissionStatus: () => FeishuPermissionRuntimeStatus =
@@ -68,7 +68,7 @@ export class FeishuConversationAdapter {
           if (this.commandCenter) {
             await this.commandCenter.open(message.target, message.actorId);
           } else {
-            this.notifyPost(
+            this.notifyMarkdown(
               message.target.conversationId,
               renderFeishuHelp(),
             );
@@ -76,7 +76,7 @@ export class FeishuConversationAdapter {
           return;
         }
         if (command.name === "whoami") {
-          this.notifyPost(
+          this.notifyMarkdown(
             message.target.conversationId,
             renderFeishuIdentity(message),
           );
@@ -109,7 +109,7 @@ export class FeishuConversationAdapter {
           command.name,
           command.argumentsText,
         );
-        this.notifyPost(
+        this.notifyMarkdown(
           message.target.conversationId,
           renderFeishuCommandResult(result),
         );
@@ -147,11 +147,11 @@ export class FeishuConversationAdapter {
   ): Promise<void> {
     try {
       if (action === "help") {
-        this.notifyPost(target.conversationId, renderFeishuHelp());
+        this.notifyMarkdown(target.conversationId, renderFeishuHelp());
         return;
       }
       const result = await this.commands.execute(target, action);
-      this.notifyPost(
+      this.notifyMarkdown(
         target.conversationId,
         renderFeishuCommandResult(result),
       );
@@ -179,14 +179,14 @@ export class FeishuConversationAdapter {
     const action = argumentsText.trim();
     const status = this.permissionStatus();
     if (action === "") {
-      this.notifyPost(chatId, renderFeishuPermissionHelp());
+      this.notifyMarkdown(chatId, renderFeishuPermissionHelp());
       return;
     }
     if (action === "status") {
       const userAuthorization = this.oauth
         ? await this.oauth.status(actorId)
         : "unavailable";
-      this.notifyPost(
+      this.notifyMarkdown(
         chatId,
         renderFeishuPermissionStatus(appId, status, userAuthorization),
       );
@@ -205,7 +205,7 @@ export class FeishuConversationAdapter {
         );
         return;
       }
-      this.notifyPost(
+      this.notifyMarkdown(
         chatId,
         renderFeishuDoctor(status),
       );
@@ -259,8 +259,8 @@ export class FeishuConversationAdapter {
     }
   }
 
-  private notifyPost(chatId: string, markdown: string): void {
-    if (!this.outbox.notifyPost(chatId, markdown)) {
+  private notifyMarkdown(chatId: string, markdown: string): void {
+    if (!this.outbox.notifyMarkdown(chatId, markdown)) {
       throw new FeishuOutputQueueError();
     }
   }

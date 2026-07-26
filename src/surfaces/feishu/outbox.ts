@@ -2,6 +2,7 @@ import type { Logger } from "pino";
 
 import {
   isCriticalOutputEvent,
+  type OperationUpdate,
   type OutputEvent,
 } from "../../conversation-core/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
@@ -9,6 +10,7 @@ import type { SurfaceOutputPort } from "../types.js";
 import type { FeishuCardDocument } from "./approval-card.js";
 import { FeishuMessageError } from "./client.js";
 import { encodeFeishuPostContent } from "./message-content.js";
+import { formatFeishuOperationLog } from "./operation-format.js";
 import { renderFeishuOutput } from "./renderer.js";
 import { renderFeishuThreadStatusCard } from "./status-card.js";
 
@@ -19,6 +21,8 @@ const feishuTruncationNotice = "\n\n[内容过长，已截断]";
 const feishuStreamFlushDelayMs = 300;
 const maximumFeishuStreamingElementCharacters = 5_000;
 const maximumFeishuStreamingCards = 5;
+const feishuOperationFlushDelayMs = 750;
+const maximumFeishuOperationsPerTurn = 100;
 
 interface FeishuStreamState {
   chatId: string;
@@ -35,9 +39,22 @@ interface FeishuStreamState {
   failed: boolean;
 }
 
+interface FeishuOperationLogState {
+  chatId: string;
+  order: string[];
+  records: Map<string, OperationUpdate>;
+  omittedCount: number;
+  sequence: number;
+  cardId?: string;
+  lastText?: string;
+  timer?: NodeJS.Timeout;
+  failed: boolean;
+}
+
 export interface FeishuMessagePort {
   sendText(chatId: string, text: string): Promise<void>;
   sendPost(chatId: string, markdown: string): Promise<void>;
+  sendMarkdownCard(chatId: string, markdown: string): Promise<void>;
   sendCard(chatId: string, card: FeishuCardDocument): Promise<string>;
   updateCard(messageId: string, card: FeishuCardDocument): Promise<void>;
   createStreamingCard(
@@ -63,13 +80,14 @@ export class FeishuOutbox implements SurfaceOutputPort {
     { chatId: string; messageId: string; status: string }
   >();
   private readonly streams = new Map<string, FeishuStreamState>();
+  private readonly operationLogs = new Map<string, FeishuOperationLogState>();
   private closed = false;
   private closeFinished = false;
 
   constructor(
     private readonly accountId: string,
     private readonly messagePort: FeishuMessagePort,
-    logger: Logger,
+    private readonly logger: Logger,
   ) {
     this.delivery = new ConversationDeliveryQueue(logger, {
       component: "Feishu",
@@ -91,7 +109,12 @@ export class FeishuOutbox implements SurfaceOutputPort {
     if (event.type === "text.completed" && this.completeStream(event)) {
       return;
     }
+    if (event.type === "operation.updated") {
+      this.acceptOperationUpdate(event);
+      return;
+    }
     if (event.type === "turn.completed") {
+      this.finishOperationLog(event.threadId, event.turnId);
       this.finishStreamsForTurn(event.threadId, event.turnId);
     }
     if (event.type === "thread.status") {
@@ -108,8 +131,8 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     this.delivery.enqueue(
       event.target.conversationId,
-      () => event.type === "text.completed"
-        ? this.sendPost(event.target.conversationId, text)
+      () => event.type === "text.completed" || event.type === "turn.completed"
+        ? this.sendMarkdown(event.target.conversationId, text)
         : this.sendText(event.target.conversationId, text),
       isCriticalOutputEvent(event),
     );
@@ -126,13 +149,13 @@ export class FeishuOutbox implements SurfaceOutputPort {
     );
   }
 
-  notifyPost(chatId: string, markdown: string): boolean {
+  notifyMarkdown(chatId: string, markdown: string): boolean {
     if (this.closed) {
       return false;
     }
     return this.delivery.enqueue(
       chatId,
-      () => this.sendPost(chatId, markdown),
+      () => this.sendMarkdown(chatId, markdown),
       true,
     );
   }
@@ -184,10 +207,22 @@ export class FeishuOutbox implements SurfaceOutputPort {
         true,
       );
     }
+    for (const [key, state] of this.operationLogs) {
+      if (state.timer) {
+        clearTimeout(state.timer);
+        delete state.timer;
+      }
+      this.delivery.enqueue(
+        state.chatId,
+        () => this.flushOperationLog(key, true),
+        true,
+      );
+    }
     await this.delivery.close();
     this.closeFinished = true;
     this.threadStatusMessages.clear();
     this.streams.clear();
+    this.operationLogs.clear();
   }
 
   private async sendText(chatId: string, text: string): Promise<void> {
@@ -203,6 +238,32 @@ export class FeishuOutbox implements SurfaceOutputPort {
   ): Promise<void> {
     for (const chunk of splitFeishuPost(markdown, maximumChunks)) {
       await this.messagePort.sendPost(chatId, chunk);
+    }
+  }
+
+  private async sendMarkdown(
+    chatId: string,
+    markdown: string,
+  ): Promise<void> {
+    for (const chunk of splitFeishuMarkdownCards(markdown)) {
+      try {
+        await this.messagePort.sendMarkdownCard(chatId, chunk);
+      } catch (error) {
+        if (
+          !(error instanceof FeishuMessageError)
+          || error.code !== "card-create-failed"
+        ) {
+          throw error;
+        }
+        this.logger.warn(
+          {
+            component: "Feishu",
+            fallback: "post",
+          },
+          "飞书静态 CardKit 创建失败，已降级为富文本",
+        );
+        await this.sendPost(chatId, chunk, 1);
+      }
     }
   }
 
@@ -280,6 +341,112 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
   }
 
+  private acceptOperationUpdate(
+    event: Extract<OutputEvent, { type: "operation.updated" }>,
+  ): void {
+    const key = operationLogKey(event.threadId, event.turnId);
+    const state: FeishuOperationLogState = this.operationLogs.get(key) ?? {
+      chatId: event.target.conversationId,
+      order: [],
+      records: new Map<string, OperationUpdate>(),
+      omittedCount: 0,
+      sequence: 0,
+      failed: false,
+    };
+    if (!state.records.has(event.operation.itemId)) {
+      state.order.push(event.operation.itemId);
+      if (state.order.length > maximumFeishuOperationsPerTurn) {
+        const removed = state.order.shift();
+        if (removed) {
+          state.records.delete(removed);
+          state.omittedCount += 1;
+        }
+      }
+    }
+    state.records.set(event.operation.itemId, event.operation);
+    this.operationLogs.set(key, state);
+    if (!state.timer) {
+      state.timer = setTimeout(() => {
+        delete state.timer;
+        this.delivery.enqueue(
+          state.chatId,
+          () => this.flushOperationLog(key, false),
+          event.operation.status !== "running",
+        );
+      }, feishuOperationFlushDelayMs);
+      state.timer.unref();
+    }
+  }
+
+  private finishOperationLog(threadId: string, turnId: string): void {
+    const key = operationLogKey(threadId, turnId);
+    const state = this.operationLogs.get(key);
+    if (!state) {
+      return;
+    }
+    if (state.timer) {
+      clearTimeout(state.timer);
+      delete state.timer;
+    }
+    this.delivery.enqueue(
+      state.chatId,
+      () => this.flushOperationLog(key, true),
+      true,
+    );
+  }
+
+  private async flushOperationLog(
+    key: string,
+    terminal: boolean,
+  ): Promise<void> {
+    const state = this.operationLogs.get(key);
+    if (!state) {
+      return;
+    }
+    const markdown = formatFeishuOperationLog(state);
+    if (state.failed) {
+      if (terminal) {
+        this.operationLogs.delete(key);
+        await this.sendMarkdown(state.chatId, markdown);
+      }
+      return;
+    }
+    try {
+      if (!state.cardId) {
+        const created = await this.messagePort.createStreamingCard(
+          state.chatId,
+          markdown,
+        );
+        state.cardId = created.cardId;
+        state.lastText = markdown;
+      } else if (state.lastText !== markdown) {
+        state.sequence += 1;
+        await this.messagePort.updateStreamingCard(
+          state.cardId,
+          markdown,
+          state.sequence,
+        );
+        state.lastText = markdown;
+      }
+      if (terminal) {
+        state.sequence += 1;
+        await this.messagePort.finishStreamingCard(
+          state.cardId,
+          state.sequence,
+          markdown,
+        );
+        this.operationLogs.delete(key);
+      }
+    } catch (error) {
+      state.failed = true;
+      if (terminal) {
+        this.operationLogs.delete(key);
+        await this.sendMarkdown(state.chatId, markdown);
+      }
+      throw error;
+    }
+  }
+
   private completeStream(
     event: Extract<OutputEvent, { type: "text.completed" }>,
   ): boolean {
@@ -343,7 +510,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     if (!state.cardId && terminal) {
       this.streams.delete(key);
       if (fallbackPost) {
-        await this.sendPost(state.chatId, state.text);
+        await this.sendMarkdown(state.chatId, state.text);
       }
       return;
     }
@@ -483,6 +650,10 @@ function streamKey(threadId: string, turnId: string, itemId: string): string {
   return JSON.stringify([threadId, turnId, itemId]);
 }
 
+function operationLogKey(threadId: string, turnId: string): string {
+  return JSON.stringify([threadId, turnId]);
+}
+
 function splitFeishuStreamingContent(text: string): [string, string] {
   const characters = [...text];
   const reservedEnd = maximumFeishuStreamingElementCharacters - 4;
@@ -507,6 +678,26 @@ function splitFeishuStreamingContent(text: string): [string, string] {
     `${rawHead.endsWith("\n") ? rawHead : `${rawHead}\n`}\`\`\``,
     `\`\`\`${fenceLanguage}\n${rawTail}`,
   ];
+}
+
+function splitFeishuMarkdownCards(markdown: string): string[] {
+  const chunks: string[] = [];
+  let remaining = markdown;
+  while (
+    [...remaining].length > maximumFeishuStreamingElementCharacters
+    && chunks.length < maximumFeishuMessageChunks - 1
+  ) {
+    const [head, tail] = splitFeishuStreamingContent(remaining);
+    chunks.push(head);
+    remaining = tail;
+  }
+  if ([...remaining].length > maximumFeishuStreamingElementCharacters) {
+    const [head] = splitFeishuStreamingContent(remaining);
+    chunks.push(appendFeishuStreamingTruncation(head));
+  } else {
+    chunks.push(remaining);
+  }
+  return chunks;
 }
 
 function openFenceLanguage(text: string): string | null {

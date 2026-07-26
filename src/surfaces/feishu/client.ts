@@ -31,7 +31,10 @@ import {
   FeishuMenuEventError,
   type FeishuMenuEvent,
 } from "./menu-event.js";
-import { encodeFeishuPostContent } from "./message-content.js";
+import {
+  encodeFeishuPostContent,
+  sanitizeFeishuMarkdown,
+} from "./message-content.js";
 import type { FeishuMessagePort } from "./outbox.js";
 import {
   abortableSleep,
@@ -156,6 +159,7 @@ export function createFeishuOAuthApi(
 }
 
 export type FeishuMessageErrorCode =
+  | "card-create-failed"
   | "client-create-failed"
   | "invalid-credentials"
   | "invalid-response"
@@ -301,6 +305,73 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
     );
   }
 
+  async sendMarkdownCard(chatId: string, markdown: string): Promise<void> {
+    if (!this.sdkClient.createStreamingCard) {
+      throw new FeishuMessageError(
+        "card-create-failed",
+        "飞书静态卡片创建失败",
+      );
+    }
+    const safeMarkdown = sanitizeFeishuMarkdown(markdown);
+    let cardId: string;
+    try {
+      const response = await withTimeout(
+        this.sdkClient.createStreamingCard({
+          data: {
+            type: "card_json",
+            data: JSON.stringify({
+              schema: "2.0",
+              config: {
+                summary: {
+                  content: streamingSummary(safeMarkdown),
+                },
+              },
+              body: {
+                elements: [{
+                  tag: "markdown",
+                  content: safeMarkdown,
+                }],
+              },
+            }),
+          },
+        }),
+        this.sendTimeoutMs,
+        new FeishuMessageError(
+          "send-timeout",
+          "飞书静态卡片创建超时",
+        ),
+      );
+      const candidate = response.data?.card_id;
+      if (
+        (response.code !== undefined && response.code !== 0)
+        || typeof candidate !== "string"
+        || candidate.length === 0
+        || candidate.length > 20
+      ) {
+        throw new FeishuMessageError(
+          "invalid-response",
+          "飞书静态卡片创建响应无效",
+        );
+      }
+      cardId = candidate;
+    } catch {
+      throw new FeishuMessageError(
+        "card-create-failed",
+        "飞书静态卡片创建失败",
+      );
+    }
+    await this.sendMessage(
+      chatId,
+      "interactive",
+      JSON.stringify({
+        type: "card",
+        data: {
+          card_id: cardId,
+        },
+      }),
+    );
+  }
+
   async createStreamingCard(
     chatId: string,
     initialText: string,
@@ -338,7 +409,7 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
                 elements: [{
                   tag: "markdown",
                   element_id: "codexc_stream",
-                  content: initialText || "...",
+                  content: sanitizeFeishuMarkdown(initialText || "..."),
                 }],
               },
             }),
@@ -409,7 +480,7 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
           element_id: "codexc_stream",
         },
         data: {
-          content: content || "...",
+          content: sanitizeFeishuMarkdown(content || "..."),
           sequence,
           uuid: `c_${cardId}_${sequence}`,
         },
@@ -439,7 +510,7 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
             config: {
               streaming_mode: false,
               summary: {
-                content: streamingSummary(summary),
+                content: streamingSummary(sanitizeFeishuMarkdown(summary)),
               },
             },
           }),

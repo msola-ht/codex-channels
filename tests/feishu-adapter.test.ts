@@ -32,7 +32,7 @@ const imagePort = {
 
 describe("Feishu conversation adapter", () => {
   it("uses rich posts for command results but keeps failures as plain text", async () => {
-    const notifyPost = vi.fn(() => true);
+    const notifyMarkdown = vi.fn(() => true);
     const notifyText = vi.fn(() => true);
     const status = vi.fn(() => ({
       workspaceId: "main",
@@ -49,7 +49,7 @@ describe("Feishu conversation adapter", () => {
     }));
     const adapter = new FeishuConversationAdapter(
       { status } as unknown as ConversationService,
-      { notifyPost, notifyText } as unknown as FeishuOutbox,
+      { notifyMarkdown, notifyText } as unknown as FeishuOutbox,
       imagePort,
     );
 
@@ -58,8 +58,8 @@ describe("Feishu conversation adapter", () => {
       adapter.handle({ ...message, text: "/unknown" }),
     ).rejects.toMatchObject({ code: "command.unsupported" });
 
-    expect(notifyPost).toHaveBeenCalledOnce();
-    expect(notifyPost).toHaveBeenCalledWith(
+    expect(notifyMarkdown).toHaveBeenCalledOnce();
+    expect(notifyMarkdown).toHaveBeenCalledWith(
       "oc_chat",
       expect.stringContaining("Codex 状态"),
     );
@@ -555,6 +555,9 @@ function createOutbox(): {
           sent.push({ chatId, text });
         },
         sendPost: async (chatId, text) => {
+          sent.push({ chatId, text });
+        },
+        sendMarkdownCard: async (chatId, text) => {
           sent.push({ chatId, text });
         },
         createStreamingCard: async () => ({

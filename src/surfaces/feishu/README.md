@@ -3,8 +3,9 @@
 本目录是飞书 Surface 的平台边界。当前已完成 Phase 0 的官方 SDK、事件长连接和消息字段裁剪基础，
 以及 Phase 1 的私聊文本 Inbox、输出渲染和 Bootstrap 显式组合；Phase 2 的预备实现已
 接入全部平台无关私聊命令，但 Phase 1 真实验收尚未整体关闭，群聊不得开始。当前可通过严格
-TOML 或统一 Setup 启用开发验证路径。Phase 4 已完成五个独立体验切片：最终回复与命令结果
-使用 `post + md` 富文本，私聊 PNG/JPEG 图片复用 Application 的本地图片输入，同一 Thread 的
+TOML 或统一 Setup 启用开发验证路径。Phase 4 已完成独立体验切片：启动通知、最终回复、命令
+结果、操作过程与每轮结束统计统一使用 CardKit 2.0 Markdown，私聊 PNG/JPEG 图片复用
+Application 的本地图片输入，同一 Thread 的
 运行中与空闲状态已实现合并到一条可更新消息，启动通知与每轮上下文状态复用既有状态数据，
 持续模型增量使用 CardKit 2.0 原生流式卡片；
 这些路径均已通过离线测试，原生流式主路径另已通过真实应用显示验收。Phase 3 已完成
@@ -26,7 +27,8 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
 - `application-setup.ts`：生成精简 Doctor 和缺失权限授权卡片，绑定 App、Chat、Actor 和
   一次性令牌，管理有限任务、取消和安全结果。
 - `client.ts`：官方 SDK、事件长连接、消息与 CardKit 窄客户端及生命周期隔离。
-- `message-content.ts`：生成飞书 `post + md` 内容，供发送和实际序列化大小计量共用。
+- `message-content.ts`：中和平台原生提及标签并生成飞书 `post + md` 降级内容。
+- `operation-format.ts`：把同一 Turn 的有界操作记录渲染为包含脱敏详情的 CardKit Markdown。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪。
 - `menu-event.ts`：严格裁剪 `application.bot.menu_v6` 的 App、Actor、事件和菜单 Key。
 - `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理。
@@ -110,23 +112,25 @@ Actor 和访问策略，限时保存在有界内存中；事件 ID 同样有限�
 下载流经 Surface 共用 `ManagedImageStore` 限制为 10 MiB，并按内容签名只接受 PNG/JPEG；
 目录权限为 `0700`、文件权限为 `0600`，过期文件定期清理。下载或文件异常只返回稳定脱敏错误。
 
-`renderer.ts` 通过模块公开入口接收 `OutputEvent`。没有进入原生流式路径的最终文本由 Outbox
-作为富文本发送，其他
-关键事件和安全提示使用纯文本；
-运行中操作暂不输出。上游 warning、连接错误和 MCP 错误正文不会进入平台消息，
-未知 Thread 状态不会原样显示。`turn.completed` 只展开事件已经提供的最近 Turn 上下文、
-缓存命中率、模型设置、压缩次数、周限和 Goal，不查询第二状态源。
+`renderer.ts` 通过模块公开入口接收 `OutputEvent`。没有进入原生流式路径的最终文本和
+`turn.completed` 结束统计由 Outbox 作为静态 CardKit Markdown 发送，其他关键事件和安全提示
+使用纯文本；`operation.updated` 由 Outbox 按 Turn 合并，不再逐条渲染普通文本。上游 warning、
+连接错误和 MCP 错误正文不会进入平台消息，
+未知 Thread 状态不会原样显示。`turn.completed` 使用标题、列表和合并后的模型设置行，只展开
+事件已经提供的最近 Turn 上下文、缓存命中率、模型设置、压缩次数、周限和 Goal，不查询第二状态源。
 
 `outbox.ts` 只同步接收匹配 `feishu + accountId` 的输出，并按 Chat ID 进入
 `ConversationDeliveryQueue`。同一 Chat 串行、不同 Chat 可并行；关闭后拒绝新输出并有限等待
 已接收发送。飞书 SDK 发送对象由 `FeishuMessageClient` 通过 `FeishuMessagePort`
 注入，Outbox 不持有完整 SDK Client。Adapter 的追加确认和错误提示也进入同一有界队列，不绕过
-平台输出顺序和关闭边界。纯文本按 UTF-8 字节、富文本按序列化后的 `post` 内容计量；超过项目
-内部 20,000 字节上限时，在同一个队列任务内按 Unicode 字符安全分片并顺序发送。每个逻辑结果
+平台输出顺序和关闭边界。静态 CardKit Markdown 按单元素 5,000 个 Unicode 字符、最多 5 张卡片
+分片；纯文本和 `post + md` 降级按 UTF-8 序列化后的 20,000 字节计量。每个逻辑结果
 最多发送 5 条，超出时明确标记截断，避免单个结果无限占用同一 Chat 的发送任务。消息创建失败
 不自动改发另一种格式，避免非幂等重发产生重复消息；卡片创建和更新进入相同 Chat 顺序边界，
 均不自动重试。模型 `text.delta` 只在 Outbox 内存中合并 300 ms；短回复完成前不创建卡片，
-持续回复使用 CardKit 2.0 `card.create → message.create → cardElement.content → card.settings`
+静态展示使用 CardKit 2.0 `card.create → message.create`；只有卡片实体创建失败且尚未向 Chat
+发送时才记录受约束告警并降级为 `post + md`，消息创建失败不重发。持续回复使用
+`card.create → message.create → cardElement.content → card.settings`
 链路。每张卡片最多保留 5,000 个 Unicode 字符，跨卡代码围栏会闭合并重开；流式卡片与失败
 回退富文本共享单个结果最多 5 条的总预算，达到预算时在最后一张卡片明确标记截断。创建或内容
 更新失败会尽力结束已显示的卡片，再在最终文本到达后用剩余预算回退完整富文本；CardKit 的
@@ -141,7 +145,7 @@ HTTP 429 和开放平台通用频控码 `99991400` 在非终态元素更新中�
 
 `surface.ts` 在长连接就绪后，从 Bootstrap 注入的 provider 读取启动通知。Bootstrap 只为
 StateStore 中已有绑定且仍有授权 Actor 的精确 Chat 生成消息；Surface 再次校验 Chat ID、去重
-并通过同一富文本 Outbox 入队。生成失败或输出队列关闭只记录受约束诊断，不阻塞长连接。
+并通过同一 CardKit Markdown Outbox 入队。生成失败或输出队列关闭只记录受约束诊断，不阻塞长连接。
 
 `adapter.ts` 对普通文本调用 `ConversationService.submit()`，图片则先通过 `media.ts` 取得受管
 绝对路径，再调用同一 `submit()` 的 `localImages` 输入；对已知平台无关命令调用
@@ -208,6 +212,7 @@ Setup 与只读 Doctor 凭据/Bot 身份探测已完成，真实应用的首次�
 命令审批一次批准，以及长回复在客户端折叠显示且顺序正确也已完成真实验收。持续回复以
 CardKit 原生流式卡片可见更新的主路径同样已通过验收；轻量 Thread 状态卡片的
 `active → idle` 原地更新也已通过真实验收。真实限流、失败回退和超长内容滚动仍待验证。
+静态展示和同一 Turn 操作进度已统一为 CardKit 2.0 并通过离线测试，仍待真实应用验收。
 断线恢复、代理、未授权/重复事件、用户输入与 MCP 卡片动作仍未完成真实验收。后续阶段按
 [`飞书 Surface 接入计划`](../../../docs/feishu-surface-plan.md)推进；一级 `surfaces` 入口只转出
 窄工厂，不得导出 SDK 类型，也不得在 Core 中引入飞书类型。Phase 1 真实验收关闭前，Phase 2

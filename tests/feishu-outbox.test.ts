@@ -20,6 +20,7 @@ const target = {
 
 const cardMethods = {
   sendCard: async () => "om_card",
+  sendMarkdownCard: async () => {},
   updateCard: async () => {},
   createStreamingCard: async () => ({
     cardId: "7355372766134157313",
@@ -87,10 +88,10 @@ describe("Feishu outbox", () => {
     expect(posts).toEqual([]);
   });
 
-  it("keeps a reply as one rich post when it completes before streaming starts", async () => {
+  it("keeps a reply as one static CardKit card when it completes before streaming starts", async () => {
     vi.useFakeTimers();
     const createStreamingCard = vi.fn(cardMethods.createStreamingCard);
-    const posts: string[] = [];
+    const markdownCards: string[] = [];
     const outbox = new FeishuOutbox(
       "cli_app",
       {
@@ -98,7 +99,10 @@ describe("Feishu outbox", () => {
         createStreamingCard,
         sendText: async () => {},
         sendPost: async (_chatId, markdown) => {
-          posts.push(markdown);
+          throw new Error(`unexpected post fallback: ${markdown}`);
+        },
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
         },
       },
       pino({ level: "silent" }),
@@ -109,7 +113,65 @@ describe("Feishu outbox", () => {
     await outbox.close();
 
     expect(createStreamingCard).not.toHaveBeenCalled();
-    expect(posts).toEqual(["短回复"]);
+    expect(markdownCards).toEqual(["短回复"]);
+  });
+
+  it("logs and safely falls back to rich post when static CardKit creation fails", async () => {
+    const posts: string[] = [];
+    const logger = pino({ level: "silent" });
+    const warn = vi.spyOn(logger, "warn");
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async (_chatId, markdown) => {
+          posts.push(markdown);
+        },
+        sendMarkdownCard: async () => {
+          throw new FeishuMessageError(
+            "card-create-failed",
+            "飞书静态卡片创建失败",
+          );
+        },
+      },
+      logger,
+    );
+
+    outbox.handle(completed({}, "飞书回复"));
+    await outbox.close();
+
+    expect(posts).toEqual(["飞书回复"]);
+    expect(warn).toHaveBeenCalledWith(
+      {
+        component: "Feishu",
+        fallback: "post",
+      },
+      "飞书静态 CardKit 创建失败，已降级为富文本",
+    );
+  });
+
+  it("does not duplicate a message after an ambiguous static CardKit send failure", async () => {
+    const posts: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async (_chatId, markdown) => {
+          posts.push(markdown);
+        },
+        sendMarkdownCard: async () => {
+          throw new FeishuMessageError("send-failed", "飞书消息发送失败");
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(completed({}, "飞书回复"));
+    await outbox.close();
+
+    expect(posts).toEqual([]);
   });
 
   it("falls back to the complete rich post after streaming creation fails", async () => {
@@ -316,7 +378,12 @@ describe("Feishu outbox", () => {
         sendText: async (_chatId, text) => {
           operations.push(`text:${text}`);
         },
-        sendPost: async () => {},
+        sendPost: async (_chatId, text) => {
+          operations.push(`post:${text}`);
+        },
+        sendMarkdownCard: async (_chatId, text) => {
+          operations.push(`static:${text}`);
+        },
         createStreamingCard: async (_chatId, initialText) => {
           operations.push(`create:${initialText}`);
           return {
@@ -340,7 +407,7 @@ describe("Feishu outbox", () => {
     expect(operations).toEqual([
       "create:部分正文",
       "finish",
-      "text:Codex 任务状态：已完成",
+      "static:**本次运行 · 已完成**",
     ]);
   });
 
@@ -357,6 +424,9 @@ describe("Feishu outbox", () => {
         sendPost: async (_chatId, text) => {
           operations.push(`post:${text}`);
         },
+        sendMarkdownCard: async (_chatId, text) => {
+          operations.push(`static:${text}`);
+        },
       },
       pino({ level: "silent" }),
     );
@@ -366,9 +436,92 @@ describe("Feishu outbox", () => {
     await outbox.close();
 
     expect(operations).toEqual([
-      "post:部分正文",
-      "text:Codex 任务状态：已完成",
+      "static:部分正文",
+      "static:**本次运行 · 已完成**",
     ]);
+  });
+
+  it("merges concrete command status into one CardKit progress card per Turn", async () => {
+    vi.useFakeTimers();
+    const operations: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async (_chatId, text) => {
+          operations.push(`text:${text}`);
+        },
+        sendPost: async (_chatId, text) => {
+          operations.push(`post:${text}`);
+        },
+        sendMarkdownCard: async (_chatId, text) => {
+          operations.push(`static:${text}`);
+        },
+        createStreamingCard: async (_chatId, initialText) => {
+          operations.push(`create:${initialText}`);
+          return {
+            cardId: "7355372766134157313",
+            messageId: "om_operations",
+          };
+        },
+        updateStreamingCard: async (_cardId, content, sequence) => {
+          operations.push(`update:${sequence}:${content}`);
+        },
+        finishStreamingCard: async (_cardId, sequence, summary) => {
+          operations.push(`finish:${sequence}:${summary}`);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(operationUpdated("running"));
+    await vi.advanceTimersByTimeAsync(750);
+    await Promise.resolve();
+    outbox.handle(operationUpdated("completed"));
+    outbox.handle(turnCompleted());
+    await outbox.close();
+
+    expect(operations).toHaveLength(4);
+    expect(operations[0]).toContain("create:**执行进度**");
+    expect(operations[0]).toContain("git status --short");
+    expect(operations[0]).toContain("运行中");
+    expect(operations[1]).toContain("update:1:**执行进度**");
+    expect(operations[1]).toContain("已完成");
+    expect(operations[2]).toContain("finish:2:**执行进度**");
+    expect(operations[3]).toBe("static:**本次运行 · 已完成**");
+  });
+
+  it("preserves the final command log when the progress card cannot be created", async () => {
+    vi.useFakeTimers();
+    const markdownCards: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+        createStreamingCard: async () => {
+          throw new Error("card create failed");
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(operationUpdated("running"));
+    await vi.advanceTimersByTimeAsync(750);
+    await Promise.resolve();
+    outbox.handle(operationUpdated("completed"));
+    outbox.handle(turnCompleted());
+    await outbox.close();
+
+    expect(markdownCards).toHaveLength(2);
+    expect(markdownCards[0]).toContain("**执行进度**");
+    expect(markdownCards[0]).toContain("git status --short");
+    expect(markdownCards[0]).toContain("已完成");
+    expect(markdownCards[1]).toBe("**本次运行 · 已完成**");
   });
 
   it("updates one thread status card from active to idle", async () => {
@@ -523,6 +676,9 @@ describe("Feishu outbox", () => {
       sendPost: async (chatId, text) => {
         sent.push({ chatId, format: "post", text });
       },
+      sendMarkdownCard: async (chatId, text) => {
+        sent.push({ chatId, format: "cardkit", text });
+      },
     };
     const outbox = new FeishuOutbox(
       "cli_app",
@@ -543,7 +699,7 @@ describe("Feishu outbox", () => {
 
     expect(sent).toEqual([{
       chatId: "oc_chat",
-      format: "post",
+      format: "cardkit",
       text: "飞书回复",
     }]);
   });
@@ -595,6 +751,13 @@ describe("Feishu outbox", () => {
           finished.push(`${chatId}:${text}`);
         },
         sendPost: async (chatId, text) => {
+          started.push(`${chatId}:${text}`);
+          if (text === "第一条") {
+            await first.promise;
+          }
+          finished.push(`${chatId}:${text}`);
+        },
+        sendMarkdownCard: async (chatId, text) => {
           started.push(`${chatId}:${text}`);
           if (text === "第一条") {
             await first.promise;
@@ -693,7 +856,7 @@ describe("Feishu outbox", () => {
     expect(sent[5]).toBe("截断之后");
   });
 
-  it("bounds serialized rich-post content when Markdown needs JSON escaping", async () => {
+  it("bounds static CardKit Markdown by element characters", async () => {
     const sent: string[] = [];
     const outbox = new FeishuOutbox(
       "cli_app",
@@ -701,6 +864,9 @@ describe("Feishu outbox", () => {
         ...cardMethods,
         sendText: async () => {},
         sendPost: async (_chatId, markdown) => {
+          throw new Error(`unexpected post fallback: ${markdown}`);
+        },
+        sendMarkdownCard: async (_chatId, markdown) => {
           sent.push(markdown);
         },
       },
@@ -712,12 +878,8 @@ describe("Feishu outbox", () => {
     await outbox.close();
 
     expect(sent.length).toBeGreaterThan(1);
-    expect(sent.every((chunk) => Buffer.byteLength(JSON.stringify({
-      zh_cn: {
-        title: "",
-        content: [[{ tag: "md", text: chunk }]],
-      },
-    }), "utf8") <= 20_000)).toBe(true);
+    expect(sent.length).toBeLessThanOrEqual(5);
+    expect(sent.every((chunk) => [...chunk].length <= 5_000)).toBe(true);
   });
 
   it("waits for accepted output during close and rejects later events", async () => {
@@ -732,6 +894,10 @@ describe("Feishu outbox", () => {
           sent.push(text);
         },
         sendPost: async (_chatId, text) => {
+          await pending.promise;
+          sent.push(text);
+        },
+        sendMarkdownCard: async (_chatId, text) => {
           await pending.promise;
           sent.push(text);
         },
@@ -764,6 +930,26 @@ function completed(
     turnId: "turn-1",
     itemId,
     text,
+  };
+}
+
+function operationUpdated(
+  status: "running" | "completed",
+): OutputEvent {
+  return {
+    type: "operation.updated",
+    target,
+    threadId: "thread-1",
+    turnId: "turn-1",
+    operation: {
+      itemId: "command-1",
+      kind: "command",
+      detail: "git status --short",
+      status,
+      ...(status === "completed"
+        ? { durationMs: 125, exitCode: 0 }
+        : {}),
+    },
   };
 }
 

@@ -359,9 +359,7 @@ export function renderFeishuOutput(event: OutputEvent): string | null {
     case "text.completed":
       return event.text.trim() ? event.text : "Codex 返回了空消息。";
     case "operation.updated":
-      return event.operation.status === "running"
-        ? null
-        : `${operationKindLabel(event.operation.kind)}：${operationStatusLabel(event.operation.status)}`;
+      return null;
     case "turn.completed":
       return renderFeishuTurnCompleted(event);
     case "thread.status":
@@ -385,43 +383,43 @@ export function renderFeishuOutput(event: OutputEvent): string | null {
 function renderFeishuTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
 ): string {
-  const lines = [
-    event.error
-      ? "Codex 任务失败，Gateway 已隐藏上游错误详情。"
-      : `Codex 任务状态：${turnStatusLabel(event.status)}`,
-  ];
+  const details: string[] = [];
+  if (event.error) {
+    details.push("Gateway 已隐藏上游错误详情。");
+  }
   if (event.tokenUsage) {
     const current = event.tokenUsage.last.totalTokens;
     const capacity = event.tokenUsage.modelContextWindow;
-    lines.push(
+    details.push(
       capacity === null || capacity <= 0
-        ? `上下文：${formatTokenCount(current)}`
-        : `上下文：${formatTokenCount(current)} / ${formatTokenCount(capacity)}（${formatPercent(Math.max(0, current / capacity * 100))}）`,
-      `缓存命中率：${formatCacheHitRate(
+        ? `- **上下文：** ${formatTokenCount(current)}`
+        : `- **上下文：** ${formatTokenCount(current)} / ${formatTokenCount(capacity)}（${formatPercent(Math.max(0, current / capacity * 100))}）`,
+      `- **缓存命中：** ${formatCacheHitRate(
         event.tokenUsage.last.inputTokens,
         event.tokenUsage.last.cachedInputTokens,
       )}`,
     );
   }
   if (event.model) {
-    lines.push(
-      `当前模型：${event.model}`,
-      `思考强度：${event.effort ?? "模型默认"}`,
-      `Fast 模式：${isFastServiceTier(event.serviceTier ?? null) ? "开启" : "关闭"}`,
+    details.push(
+      `- **模型：** ${event.model} · ${event.effort ?? "模型默认"} · Fast ${isFastServiceTier(event.serviceTier ?? null) ? "开启" : "关闭"}`,
     );
   }
   if (event.contextCompactionCount !== undefined) {
-    lines.push(`上下文压缩：${event.contextCompactionCount} 次`);
+    details.push(`- **上下文压缩：** ${event.contextCompactionCount} 次`);
   }
   if (event.weeklyLimit) {
-    lines.push(`周限：${formatWeeklyLimit(event.weeklyLimit)}`);
+    details.push(`- **周限：** ${formatWeeklyLimit(event.weeklyLimit)}`);
   }
   if (event.goal) {
-    lines.push(
-      `Goal：${goalStatusLabel(event.goal.status)} · ${formatGoalTokens(event.goal)}`,
+    details.push(
+      `- **Goal：** ${goalStatusLabel(event.goal.status)} · ${formatGoalTokens(event.goal)}`,
     );
   }
-  return lines.join("\n");
+  return [
+    `**本次运行 · ${turnStatusLabel(event.status)}**`,
+    ...(details.length > 0 ? ["", ...details] : []),
+  ].join("\n");
 }
 
 function renderFeishuStatus(status: ConversationStatus): string {
@@ -784,36 +782,6 @@ function planStatusSymbol(
     completed: "●",
   } as const;
   return symbols[status];
-}
-
-function operationKindLabel(kind: Extract<OutputEvent, { type: "operation.updated" }>["operation"]["kind"]): string {
-  const labels = {
-    command: "运行命令",
-    fileChange: "修改文件",
-    mcpTool: "调用 MCP 工具",
-    dynamicTool: "调用工具",
-    subagent: "运行子代理",
-    webSearch: "搜索网络",
-    imageView: "查看图片",
-    imageGeneration: "生成图片",
-    sleep: "等待",
-    plan: "更新计划",
-    contextCompaction: "压缩上下文",
-    reviewMode: "执行审查",
-  } as const;
-  return labels[kind];
-}
-
-function operationStatusLabel(
-  status: Extract<OutputEvent, { type: "operation.updated" }>["operation"]["status"],
-): string {
-  const labels = {
-    running: "运行中",
-    completed: "已完成",
-    failed: "失败",
-    declined: "已拒绝",
-  } as const;
-  return labels[status];
 }
 
 function turnStatusLabel(

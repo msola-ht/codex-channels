@@ -1,8 +1,5 @@
 export function encodeFeishuPostContent(markdown: string): string {
-  const safeMarkdown = markdown.replace(
-    /<(?=\/?at(?:\s|>))/giu,
-    "&lt;",
-  );
+  const safeMarkdown = sanitizeFeishuMarkdown(markdown);
   return JSON.stringify({
     zh_cn: {
       title: "",
@@ -12,4 +9,11 @@ export function encodeFeishuPostContent(markdown: string): string {
       }]],
     },
   });
+}
+
+export function sanitizeFeishuMarkdown(markdown: string): string {
+  return markdown.replace(
+    /<(?=\/?at(?:\s|>))/giu,
+    "&lt;",
+  );
 }
