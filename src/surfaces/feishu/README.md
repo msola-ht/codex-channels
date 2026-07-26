@@ -132,6 +132,8 @@ Turn、warning 和 MCP 错误会显示 Client 边界已经统一脱敏并限长�
 生成的稳定状态文案，未知异常和原始响应正文不会进入平台消息，
 未知 Thread 状态不会原样显示。`turn.completed` 使用标题、列表和合并后的模型设置行，只展开
 事件已经提供的最近 Turn 上下文、缓存命中率、模型设置、压缩次数、周限和 Goal，不查询第二状态源。
+共享配置 `display.show_operation_updates = false` 时，Outbox 不发送命令、文件、工具或搜索
+操作终态卡片；审批、错误、最终回复和 Turn 完成统计保持原有行为。
 
 `outbox.ts` 只同步接收匹配 `feishu + accountId` 的输出，并按 Chat ID 进入
 `ConversationDeliveryQueue`。同一 Chat 串行、不同 Chat 可并行；关闭后拒绝新输出并有限等待

@@ -63,7 +63,14 @@ Gateway 争抢 Telegram 长轮询。该流程不依赖第三方机器人创建�
 bot_token = "你的_Bot_Token"
 allowed_user_ids = [你的_Telegram_用户_ID]
 message_format = "html"
+
+[display]
+show_operation_updates = true
 ```
+
+`display.show_operation_updates = false` 时，Telegram 和飞书不再发送命令、文件修改、MCP
+工具及搜索的操作过程；审批、最终回复、错误和回合结束统计仍会显示。该项默认开启，修改后执行
+`codexc service reload`，Gateway 会自动重启，共享 App Server 和活动 Thread 不受影响。
 
 飞书模块提供“手动输入应用凭据”和“扫码授权”两种方式。扫码后在飞书授权页选择新建应用或
 已有企业自建应用；流程只申请机器人发送消息、原生 CardKit 流式卡片、
@@ -320,8 +327,10 @@ Codex App Server（独立进程，Unix WebSocket）
 ```
 
 App Server 是 Thread、Turn 和 Item 的唯一事实来源。SQLite 只保存外部 conversation、Surface
-账号、Workspace 与 Thread 的最小绑定。Surface 通过编译期显式注册接入；Telegram 始终启用，
-飞书只在有效配置明确启用时创建。各平台通过统一服务和 `target + actorId` 授权上下文接入，
+账号、Workspace 与 Thread 的最小绑定。Surface 通过编译期内置插件注册表显式接入；Telegram
+插件始终创建一个默认账号实例，飞书插件只在有效配置明确启用时创建实例。插件 ID、实际 Surface
+ID 和 `surface + accountId` 会在启动装配时校验；当前不扫描目录或动态加载外部 npm 包。各平台
+通过统一服务和 `target + actorId` 授权上下文接入，
 不修改 Conversation Core 或 Codex Client；授权同时按 Surface 账号隔离。Application 返回结构化
 结果，平台 SDK、文案、消息格式和文件传输由各自适配器实现；未知内部错误不会原样发送到外部聊天。
 

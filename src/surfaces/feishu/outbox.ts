@@ -62,6 +62,10 @@ export interface FeishuMessagePort {
   ): Promise<void>;
 }
 
+export interface FeishuOutboxOptions {
+  showOperationUpdates?: boolean;
+}
+
 export class FeishuOutbox implements SurfaceOutputPort {
   private readonly delivery: ConversationDeliveryQueue;
   private readonly threadStatusMessages = new Map<
@@ -77,6 +81,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     private readonly accountId: string,
     private readonly messagePort: FeishuMessagePort,
     private readonly logger: Logger,
+    private readonly options: FeishuOutboxOptions = {},
   ) {
     this.delivery = new ConversationDeliveryQueue(logger, {
       component: "Feishu",
@@ -99,6 +104,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
       return;
     }
     if (event.type === "operation.updated") {
+      if (this.options.showOperationUpdates === false) {
+        return;
+      }
       if (event.operation.status !== "running") {
         this.delivery.enqueue(
           event.target.conversationId,

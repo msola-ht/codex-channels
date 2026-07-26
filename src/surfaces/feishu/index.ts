@@ -76,6 +76,7 @@ export {
 } from "./media.js";
 export {
   FeishuOutbox,
+  type FeishuOutboxOptions,
   type FeishuMessagePort,
 } from "./outbox.js";
 export {

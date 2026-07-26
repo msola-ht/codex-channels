@@ -70,6 +70,9 @@ const gatewayDocumentSchema = z.strictObject({
   approval: z.strictObject({
     timeout_seconds: z.number().int().min(30).max(3600).default(300),
   }).default({ timeout_seconds: 300 }),
+  display: z.strictObject({
+    show_operation_updates: z.boolean().default(true),
+  }).default({ show_operation_updates: true }),
   storage: z.strictObject({
     database_path: z.string().min(1).default("data/gateway.sqlite3"),
   }).default({ database_path: "data/gateway.sqlite3" }),

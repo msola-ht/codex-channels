@@ -103,6 +103,7 @@ describe("Gateway config.toml", () => {
     expect(runtime.config.telegramBotToken).toBe("secret");
     expect(runtime.config.telegramAllowedUserIds).toEqual(new Set([123, 456]));
     expect(runtime.config.telegramMessageFormat).toBe("rich");
+    expect(runtime.config.showOperationUpdates).toBe(true);
     expect(runtime.config.codexSocketPath).toBe(join(fixture.root, "runtime/app-server.sock"));
     expect(runtime.config.stateDatabasePath).toBe(join(fixture.root, "data/gateway.sqlite3"));
     expect(runtime.config.workspaces).toEqual([
@@ -141,6 +142,16 @@ describe("Gateway config.toml", () => {
     expect(config.codexSandbox).toBe("read-only");
     expect(config.approvalTimeoutMs).toBe(45_000);
     expect(config.logLevel).toBe("debug");
+  });
+
+  it("can disable operation update output", () => {
+    const fixture = createFixture({
+      display: { show_operation_updates: false },
+    });
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.showOperationUpdates).toBe(false);
   });
 
   it("loads an explicitly enabled Feishu account", () => {

@@ -632,6 +632,34 @@ describe("Feishu outbox", () => {
     expect(markdownCards[1]).toBe("**本次运行 · 已完成**");
   });
 
+  it("does not send operation updates when operation output is disabled", async () => {
+    const markdownCards: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+      },
+      pino({ level: "silent" }),
+      { showOperationUpdates: false },
+    );
+
+    outbox.handle(operationUpdated("running"));
+    outbox.handle(operationUpdated("completed"));
+    await settle();
+
+    expect(markdownCards).toEqual([]);
+
+    outbox.handle(turnCompleted());
+    await outbox.close();
+
+    expect(markdownCards).toEqual(["**本次运行 · 已完成**"]);
+  });
+
   it("updates one thread status card from active to idle", async () => {
     const sent: Array<{
       chatId: string;

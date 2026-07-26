@@ -11,6 +11,11 @@ import {
   type FeishuRuntimeAdapter,
   type TelegramRuntimeAdapter,
 } from "../src/bootstrap/surface-composition.js";
+import {
+  composeBuiltInSurfacePlugins,
+  type BuiltInSurfacePlugin,
+  type SurfaceRuntimeModule,
+} from "../src/bootstrap/surface-plugin.js";
 import type { GatewayConfig } from "../src/config/index.js";
 import { MemoryBindingStore } from "../src/storage/index.js";
 
@@ -135,6 +140,71 @@ describe("configured Surface composition", () => {
   });
 });
 
+describe("built-in Surface plugin host", () => {
+  it("keeps explicit plugin order and accepts zero or multiple account modules", () => {
+    const plugins: BuiltInSurfacePlugin[] = [
+      {
+        id: "telegram",
+        create: () => [runtimeModule("telegram", "default")],
+      },
+      {
+        id: "disabled",
+        create: () => [],
+      },
+      {
+        id: "wechat",
+        create: () => [
+          runtimeModule("wechat", "personal"),
+          runtimeModule("wechat", "work"),
+        ],
+      },
+    ];
+
+    expect(composeBuiltInSurfacePlugins(plugins, options(config()))
+      .map((module) => `${module.adapter.surface}/${module.adapter.accountId}`))
+      .toEqual([
+        "telegram/default",
+        "wechat/personal",
+        "wechat/work",
+      ]);
+  });
+
+  it("rejects duplicate plugin IDs", () => {
+    const plugins: BuiltInSurfacePlugin[] = [
+      { id: "telegram", create: () => [] },
+      { id: "telegram", create: () => [] },
+    ];
+
+    expect(() => composeBuiltInSurfacePlugins(plugins, options(config())))
+      .toThrow("内置 Surface 插件 ID 重复：telegram");
+  });
+
+  it("rejects modules returned for another Surface", () => {
+    const plugins: BuiltInSurfacePlugin[] = [{
+      id: "wechat",
+      create: () => [runtimeModule("telegram", "default")],
+    }];
+
+    expect(() => composeBuiltInSurfacePlugins(plugins, options(config())))
+      .toThrow("内置 Surface 插件 wechat 返回了其他 Surface：telegram");
+  });
+
+  it("rejects duplicate Surface accounts returned by one plugin", () => {
+    const duplicatedAccountPlugin: BuiltInSurfacePlugin = {
+      id: "wechat",
+      create: () => [
+        runtimeModule("wechat", "personal"),
+        runtimeModule("wechat", "personal"),
+      ],
+    };
+
+    expect(() => composeBuiltInSurfacePlugins(
+      [duplicatedAccountPlugin],
+      options(config()),
+    )).toThrow("Surface 账号重复：wechat/personal");
+  });
+});
+
 describe("Feishu Surface runtime composition", () => {
   it("hot reloads authorization and removes bindings for revoked actors", () => {
     const bindings = new MemoryBindingStore();
@@ -217,6 +287,27 @@ function feishuAdapter(): FeishuRuntimeAdapter {
   };
 }
 
+function runtimeModule(
+  surface: string,
+  accountId: string,
+): SurfaceRuntimeModule {
+  return {
+    adapter: {
+      surface,
+      accountId,
+      interactions,
+      output: { handle() {} },
+      async start() {},
+      async stop() {},
+      async deliverConfigurationChange() {},
+    },
+    applyHotReload() {},
+    prepareRestartNotification() {
+      return () => {};
+    },
+  };
+}
+
 function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
   return {
     telegramBotToken: "token",
@@ -228,6 +319,7 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     defaultWorkspaceId: "main",
     codexSocketPath: "/tmp/codex.sock",
     codexSandbox: "workspace-write",
+    showOperationUpdates: true,
     stateDatabasePath: "/tmp/gateway.sqlite3",
     approvalTimeoutMs: 300_000,
     logLevel: "info",

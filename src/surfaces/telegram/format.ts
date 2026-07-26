@@ -484,6 +484,8 @@ function configChangeLabel(
       return "State Database";
     case "approval.timeout":
       return "审批超时";
+    case "display.operation-updates":
+      return "操作过程显示";
     case "observability.log-level":
       return "日志级别";
     case "workspace.default":

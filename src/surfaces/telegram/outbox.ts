@@ -61,6 +61,7 @@ export type TelegramFinalMessageFormat = "html" | "rich";
 export interface TelegramOutboxOptions {
   finalMessageFormat?: TelegramFinalMessageFormat;
   accountId?: string;
+  showOperationUpdates?: boolean;
 }
 
 export class TelegramOutbox {
@@ -190,6 +191,9 @@ export class TelegramOutbox {
         return;
       }
       case "operation.updated": {
+        if (this.options.showOperationUpdates === false) {
+          return;
+        }
         const turnKey = this.turnKey(event.threadId, event.turnId);
         const operationKey = this.operationKey(turnKey, event.operation.itemId);
         const disposition = this.approvalOperations.routeOperation(operationKey, {

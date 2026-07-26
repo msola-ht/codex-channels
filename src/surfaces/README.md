@@ -14,7 +14,10 @@
   MCP 卡片仍待验收。
 
 `types.ts` 定义最小 `SurfaceAdapter` 契约。每个实例使用
-`surface + accountId` 标识，分别提供启停、输出、可选配置变更通知与 `InteractionPort`；Bootstrap 只做编译期显式注册。
+`surface + accountId` 标识，分别提供启停、输出、可选配置变更通知与 `InteractionPort`；Bootstrap
+只通过编译期内置插件注册表显式注册。
+Bootstrap 的内置插件注册表负责把一个渠道插件展开为零到多个账号实例并验证身份唯一性；
+Telegram、飞书目录仍只实现平台 Adapter，不导入插件宿主或组合根类型。
 `SurfaceOutputPort` 接收平台无关的 `OutputEvent`，只负责同步入队，不得等待平台网络请求。
 Bootstrap 按 `surface + accountId` 精确选择一个输出端口，Surface 不再各自订阅全局事件总线。
 只有成功启动且仍处于运行状态的 Surface 才会收到输出；单个输出端口拒绝事件不得中断后续路由。
@@ -44,3 +47,7 @@ Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类
 Surface 只能渲染明确标记的结构化用户错误，不能直接复用其内部回退文案；App Server 的 Turn、
 warning 和 MCP 错误只使用 Client 边界已经统一脱敏并限长的稳定字段。未知异常、凭据和未经约束
 的响应正文不得带入聊天消息或日志。
+
+Bootstrap 把共享的 `display.show_operation_updates` 显式注入各 Surface Outbox。关闭后 Outbox
+忽略 `operation.updated`，但 Core 仍正常归约操作，审批与其他关键输出不受影响；Surface 不各自
+定义第二套显示配置。

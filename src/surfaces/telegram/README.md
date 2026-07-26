@@ -45,3 +45,5 @@ Telegram 网络调用不得阻塞 App Server Reader。每个 Conversation 的最
 账户额度和 MCP 状态通知也必须进入每聊天有界输出队列；不得从 App Server Reader 直接等待 Telegram 网络发送。
 结构化用户错误由 `bot.ts` 转换为 Telegram 专属文案；App Server Turn、warning 和 MCP 错误会
 显示 Client 边界已经统一脱敏并限长的详情，未知异常和原始响应正文不写入 Telegram 日志或外部消息。
+共享配置 `display.show_operation_updates = false` 时，Outbox 不发送操作过程；审批、错误、
+最终回复和 Turn 完成统计保持原有行为。

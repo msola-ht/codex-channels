@@ -144,18 +144,21 @@ src/surfaces/<surface>/
 此时没有待处理交互，`resolved()` 和 `cancelAll()` 可以为空操作。不要仅为这个占位提前建立通用
 交互基类；第二个 Surface 真正需要复用时，再评估是否从现有失败关闭逻辑抽取最小帮助函数。
 
-### 组合工厂
+### 内置插件与组合工厂
 
-在 [`surface-composition.ts`](../src/bootstrap/surface-composition.ts) 中为渠道建立独立工厂：
+在 [`surface-plugin.ts`](../src/bootstrap/surface-plugin.ts) 定义的编译期内置插件契约上为渠道建立
+独立工厂，并在 [`surface-composition.ts`](../src/bootstrap/surface-composition.ts) 的固定注册表
+中显式加入：
 
 ```text
-createSurfaceModules
-├── 现有渠道工厂
-└── 新渠道工厂
+BuiltInSurfacePlugin
+├── Telegram -> 1 个默认账号实例
+├── 飞书 -> 0 或 1 个配置账号实例
+└── 新渠道 -> 0 到多个配置账号实例
 ```
 
-当前文件中的具体渠道工厂只是组合示例，不是 Surface 公开合同；新渠道工厂同样留在 Bootstrap
-内部。
+内置插件及具体渠道工厂都留在 Bootstrap 内部，不是 Surface 公开合同，也不是外部 npm 插件
+API。插件 ID 必须与返回模块的 Surface ID 一致，同一个 `surface + accountId` 只能注册一次。
 
 每个工厂负责：
 
@@ -167,8 +170,8 @@ createSurfaceModules
    Surface 不得导入 `storage`。
 5. 返回 Bootstrap 当前使用的运行时模块描述，封装热加载与重启通知行为。
 
-`createSurfaceModules` 只按编译期明确配置组合模块，不扫描目录、不动态加载包，也不建立平台插件
-注册中心。不得向 `GatewayApplication` 增加任何具体平台的专属字段。
+`createSurfaceModules` 只遍历编译期固定的内置插件注册表，不扫描目录、不动态加载包。不得向
+`GatewayApplication` 增加任何具体平台的专属字段。
 
 绑定处理必须区分两种状态：
 
@@ -358,7 +361,7 @@ npm run verify:commit
 - 在 Core、Application 或 Storage 中加入平台名称分支。
 - 用全局事件广播替代按 `surface + accountId` 的精确路由。
 - 为平台 SDK 类型建立跨模块“公共 DTO”镜像。
-- 为尚未接入的平台建立动态插件系统、自动发现、通用注册中心或兼容层。
+- 为尚未接入的平台建立动态插件系统、自动发现、外部插件 API 或兼容层。
 - 为通过测试扩大模块依赖白名单。
 - 因两个平台命名相似就提前抽取公共渲染器、Bot 基类或万能消息模型。
 - 让 Setup、Doctor、配置热加载或服务管理出现平台专属顶层入口。
@@ -368,7 +371,7 @@ npm run verify:commit
 一个新渠道只有同时满足以下条件才算接入完成：
 
 1. 通过统一配置和 Setup 明确启用，可被 Doctor 安全诊断。
-2. 实现公开的 `SurfaceAdapter`，并由组合根的独立工厂显式注册。
+2. 实现公开的 `SurfaceAdapter`，并由组合根的内置插件显式注册。
 3. 所有业务输入先授权，所有输出和交互按精确账号路由。
 4. 禁用时保留绑定并停止恢复订阅，撤权时只清理对应 Actor。
 5. 平台网络不会阻塞 App Server Reader，关闭与失败路径有界。

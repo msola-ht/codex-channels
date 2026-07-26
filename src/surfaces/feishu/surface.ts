@@ -83,6 +83,7 @@ export interface FeishuSurfaceOptions {
   accountsAgent?: unknown;
   webSocketAgent?: unknown;
   disableEnvironmentProxy?: boolean;
+  showOperationUpdates?: boolean;
   configurationRecipients?: () => readonly string[];
   startupNotification?: FeishuStartupNotification;
 }
@@ -150,6 +151,11 @@ export class FeishuSurface implements SurfaceAdapter {
       options.appId,
       messagePort,
       options.logger,
+      {
+        ...(options.showOperationUpdates !== undefined
+          ? { showOperationUpdates: options.showOperationUpdates }
+          : {}),
+      },
     );
     this.interactions = new FeishuInteractionPort(
       this.output,

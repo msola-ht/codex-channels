@@ -3,8 +3,7 @@ import { dirname, join } from "node:path";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
 
-import type { ConversationService } from "../application/index.js";
-import type { ConfigChange, GatewayConfig } from "../config/index.js";
+import type { GatewayConfig } from "../config/index.js";
 import {
   FeishuAccessPolicy,
   TelegramAccessPolicy,
@@ -17,12 +16,12 @@ import {
   telegramDefaultAccountId,
   type SurfaceAdapter,
 } from "../surfaces/index.js";
-
-export interface SurfaceRuntimeModule {
-  readonly adapter: SurfaceAdapter;
-  applyHotReload(next: GatewayConfig, changes: readonly ConfigChange[]): void;
-  prepareRestartNotification(next: GatewayConfig): () => void;
-}
+import {
+  composeBuiltInSurfacePlugins,
+  type BuiltInSurfacePlugin,
+  type SurfacePluginContext,
+  type SurfaceRuntimeModule,
+} from "./surface-plugin.js";
 
 export interface TelegramRuntimeAdapter extends SurfaceAdapter {
   readonly surface: "telegram";
@@ -41,27 +40,33 @@ export interface ReloadableFeishuAccess {
   replace(allowedOpenIds: ReadonlySet<string>): void;
 }
 
-export interface SurfaceCompositionOptions {
-  config: GatewayConfig;
-  service: ConversationService;
-  bindings: BindingStore;
-  logger: Logger;
-  gatewayVersion: string;
-  codexUpstreamUserAgent: () => string | undefined;
-  onFatal(surface: string, accountId: string, error: Error): void;
+export function createSurfaceModules(
+  options: SurfacePluginContext,
+  plugins: readonly BuiltInSurfacePlugin[] = builtInSurfacePlugins,
+): SurfaceRuntimeModule[] {
+  return composeBuiltInSurfacePlugins(plugins, options);
 }
 
-export function createSurfaceModules(
-  options: SurfaceCompositionOptions,
-): SurfaceRuntimeModule[] {
-  return [
-    createTelegramModule(options),
-    ...(options.config.feishu ? [createFeishuModule(options)] : []),
-  ];
-}
+export const telegramSurfacePlugin: BuiltInSurfacePlugin = {
+  id: "telegram",
+  create: (options) => [createTelegramModule(options)],
+};
+
+export const feishuSurfacePlugin: BuiltInSurfacePlugin = {
+  id: "feishu",
+  create: (options) => options.config.feishu
+    ? [createFeishuModule(options)]
+    : [],
+};
+
+export const builtInSurfacePlugins: readonly BuiltInSurfacePlugin[] =
+  Object.freeze([
+    telegramSurfacePlugin,
+    feishuSurfacePlugin,
+  ]);
 
 function createFeishuModule(
-  options: SurfaceCompositionOptions,
+  options: SurfacePluginContext,
 ): SurfaceRuntimeModule {
   const config = options.config.feishu;
   if (!config) {
@@ -101,6 +106,7 @@ function createFeishuModule(
       "feishu",
     ),
     disableEnvironmentProxy: true,
+    showOperationUpdates: options.config.showOperationUpdates,
     ...(openApiAgent
       ? {
           openApiAgent,
@@ -205,7 +211,7 @@ function matchesNoProxy(hostname: string, noProxy: string | undefined): boolean 
 }
 
 function createTelegramModule(
-  options: SurfaceCompositionOptions,
+  options: SurfacePluginContext,
 ): SurfaceRuntimeModule {
   const { config, bindings, logger } = options;
   const removedBindings = removeUnauthorizedTelegramBindings(
@@ -232,6 +238,7 @@ function createTelegramModule(
       actorRegistry: bindings,
       onFatal: (error) => options.onFatal("telegram", telegramDefaultAccountId, error),
       finalMessageFormat: config.telegramMessageFormat,
+      showOperationUpdates: config.showOperationUpdates,
       gatewayVersion: options.gatewayVersion,
       codexUpstreamUserAgent: options.codexUpstreamUserAgent,
     },

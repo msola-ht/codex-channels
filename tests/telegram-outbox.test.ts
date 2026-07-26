@@ -962,6 +962,34 @@ describe("TelegramOutbox", () => {
     expect(api.sent).toEqual(["Codex 警告：代理连接失败，TOKEN=[已隐藏]"]);
     expect(api.sendOptions).toEqual([{ disable_notification: true }]);
   });
+
+  it("does not send operation updates when operation output is disabled", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = new TelegramOutbox(
+      api as unknown as Api,
+      pino({ level: "silent" }),
+      undefined,
+      { showOperationUpdates: false },
+    );
+
+    outbox.handle(operationUpdated("command-1", "running", "command", "git status --short"));
+    outbox.handle(operationUpdated("command-1", "completed", "command", "git status --short"));
+    await settle();
+
+    expect(api.sent).toEqual([]);
+    expect(api.edits).toEqual([]);
+
+    outbox.handle({
+      type: "warning",
+      target,
+      message: "仍显示关键警告",
+    });
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual(["Codex 警告：仍显示关键警告"]);
+  });
 });
 
 function createOutbox(

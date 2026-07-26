@@ -45,7 +45,7 @@ Thread 绑定恢复也已通过验收。持续回复在飞书客户端可见 Car
 分类命令中心、更多分类卡和选择卡已完成真实验收。
 输入卡片与新增直接命令已完成离线测试，仍待真实飞书验收。
 
-目标是在现有 TypeScript 模块化单体中增加一个编译期显式注册的飞书 Surface，使飞书与
+目标是在现有 TypeScript 模块化单体中增加一个由编译期内置插件显式注册的飞书 Surface，使飞书与
 Telegram、原生 Codex CLI 连接同一个 Codex App Server，共享 Thread、Turn、模型、Fast、Goal、
 用量和审批事实来源。
 
@@ -166,12 +166,12 @@ src/surfaces/feishu/
 
 ### Bootstrap 组合
 
-在 `src/bootstrap/surface-composition.ts` 增加独立的 `createFeishuModule()`，并保持：
+在 `src/bootstrap/surface-composition.ts` 通过内置插件包装独立的 `createFeishuModule()`，并保持：
 
 ```text
-createSurfaceModules
-├── createTelegramModule
-└── createFeishuModule（仅在有效配置明确启用时）
+BuiltInSurfacePlugin
+├── Telegram -> createTelegramModule
+└── 飞书 -> createFeishuModule（仅在有效配置明确启用时）
 ```
 
 飞书工厂负责：
@@ -613,7 +613,7 @@ npm run verify:commit
 出现以下任一情况时停止当前阶段并单独评审：
 
 - 需要修改 Codex App Server 协议或 Core 才能适配飞书；
-- 需要新增全局 Surface 基类、插件注册中心或独立服务；
+- 需要新增全局 Surface 基类、动态外部插件加载或独立服务；
 - 需要改变 SQLite Schema 或持久化消息/事件原文；
 - 需要开放未经验证的公网监听；
 - 官方 SDK 高层策略无法关闭并与现有 Policy、队列或审批产生双重事实来源；

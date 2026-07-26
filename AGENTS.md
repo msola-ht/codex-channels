@@ -127,7 +127,9 @@ Surface -> Application/Core <- Codex Client
 
 ## Surface、审批与并发
 
-- Surface 通过编译期显式注册接入，并通过统一的输入、输出、授权和审批接口调用 Application/Core。
+- Surface 通过编译期内置插件注册表显式接入，并通过统一的输入、输出、授权和审批接口调用
+  Application/Core。每个插件 ID 必须与其返回的 Surface ID 一致，`surface + accountId` 不得重复；
+  不扫描目录、不动态加载 npm 包，也不允许插件绕过组合根直接注册。
 - 所有外部输入先完成 Surface Actor 与 Workspace 授权，再调用会话能力。
 - App Server Reader 只负责读取、解析、关联 Response 和投递事件，不等待平台网络请求。
 - 平台输出使用有界队列；同一 Conversation 保持顺序，不同 Conversation 可以并行。

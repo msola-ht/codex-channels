@@ -51,6 +51,7 @@ export interface TelegramSurfaceOptions {
   onFatal?: (error: Error) => void;
   imageStore?: TelegramImagePort;
   finalMessageFormat?: TelegramFinalMessageFormat;
+  showOperationUpdates?: boolean;
   codexUpstreamUserAgent?: () => string | undefined;
 }
 
@@ -94,6 +95,9 @@ export class TelegramSurface {
     this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor, {
       ...(options.finalMessageFormat
         ? { finalMessageFormat: options.finalMessageFormat }
+        : {}),
+      ...(options.showOperationUpdates !== undefined
+        ? { showOperationUpdates: options.showOperationUpdates }
         : {}),
     });
     this.output = this.outbox;

@@ -72,6 +72,7 @@ function restartRequiredReasons(
     [configChange("codex.sandbox"), current.codexSandbox, next.codexSandbox],
     [configChange("storage.database"), current.stateDatabasePath, next.stateDatabasePath],
     [configChange("approval.timeout"), current.approvalTimeoutMs, next.approvalTimeoutMs],
+    [configChange("display.operation-updates"), current.showOperationUpdates, next.showOperationUpdates],
     [configChange("observability.log-level"), current.logLevel, next.logLevel],
     [configChange("workspace.default"), current.defaultWorkspaceId, next.defaultWorkspaceId],
   ];

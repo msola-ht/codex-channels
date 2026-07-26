@@ -6,6 +6,7 @@ export type GlobalConfigChangeCode =
   | "network.proxy"
   | "storage.database"
   | "approval.timeout"
+  | "display.operation-updates"
   | "observability.log-level"
   | "workspace.default"
   | "workspace.registry";

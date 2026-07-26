@@ -42,8 +42,8 @@ import { SqliteBindingStore } from "../storage/index.js";
 import type { SurfaceAdapter } from "../surfaces/index.js";
 import {
   createSurfaceModules,
-  type SurfaceRuntimeModule,
 } from "./surface-composition.js";
+import type { SurfaceRuntimeModule } from "./surface-plugin.js";
 import { SurfaceManager } from "./surface-manager.js";
 
 export class GatewayApplication {
