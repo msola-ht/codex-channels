@@ -73,6 +73,8 @@ export class FeishuSurface implements SurfaceAdapter {
     | (() => readonly string[])
     | undefined;
   private readonly logger: Logger;
+  private connectionReady = false;
+  private cardActionObserved = false;
   private stopPromise: Promise<void> | undefined;
 
   constructor(
@@ -109,6 +111,10 @@ export class FeishuSurface implements SurfaceAdapter {
       options.service,
       this.output,
       this.images,
+      () => ({
+        connectionReady: this.connectionReady,
+        cardActionObserved: this.cardActionObserved,
+      }),
     );
     this.inbox = new FeishuInbox({
       accountId: options.appId,
@@ -162,6 +168,7 @@ export class FeishuSurface implements SurfaceAdapter {
         logInvalidMessage(options.logger, error);
       },
       onCardAction: (action) => {
+        this.cardActionObserved = true;
         const result = this.interactions.handleCardAction(action);
         if (result !== "accepted") {
           options.logger.warn(
@@ -183,9 +190,11 @@ export class FeishuSurface implements SurfaceAdapter {
         );
       },
       onReconnecting: () => {
+        this.connectionReady = false;
         this.logger.warn(this.lifecycleContext(), "飞书长连接正在重连");
       },
       onReconnected: () => {
+        this.connectionReady = true;
         this.logger.info(this.lifecycleContext(), "飞书长连接已恢复");
       },
       onFatal: options.onFatal,
@@ -203,6 +212,7 @@ export class FeishuSurface implements SurfaceAdapter {
       this.images.close();
       throw error;
     }
+    this.connectionReady = true;
     this.logger.info(this.lifecycleContext(), "飞书长连接已就绪");
   }
 
@@ -212,6 +222,7 @@ export class FeishuSurface implements SurfaceAdapter {
   }
 
   private async stopOnce(): Promise<void> {
+    this.connectionReady = false;
     await this.connection.stop();
     await this.inbox.close();
     this.images.close();

@@ -174,6 +174,27 @@ describe("Feishu Surface", () => {
       localImages: [{ path: "/private/uploads/feishu/image.png" }],
     });
   });
+
+  it("reports card callback verification only after observing a valid callback event", async () => {
+    const fixture = createFixture();
+    const starting = fixture.surface.start();
+    fixture.ready();
+    await starting;
+
+    fixture.emitMessage(0, "/feishu status");
+    await settle();
+    fixture.emitCardAction();
+    fixture.emitMessage(1, "/feishu status");
+    await fixture.surface.stop();
+
+    expect(fixture.sent).toHaveLength(2);
+    expect(fixture.sent[0]?.text).toContain(
+      "卡片动作回调：尚未验证",
+    );
+    expect(fixture.sent[1]?.text).toContain(
+      "卡片动作回调：已验证",
+    );
+  });
 });
 
 function createFixture(
@@ -191,6 +212,7 @@ function createFixture(
   let reconnectingCallback: (() => void) | undefined;
   let reconnectedCallback: (() => void) | undefined;
   let messageHandler: ((event: unknown) => void) | undefined;
+  let cardActionHandler: ((event: unknown) => void) | undefined;
   const sent: Array<{ chatId: string; text: string }> = [];
   const logs: Array<Record<string, unknown>> = [];
   const sdkStart = vi.fn(async () => {});
@@ -244,7 +266,9 @@ function createFixture(
             registerMessageHandler(handler) {
               messageHandler = handler;
             },
-            registerCardActionHandler() {},
+            registerCardActionHandler(handler) {
+              cardActionHandler = handler;
+            },
             start: sdkStart,
             close: sdkClose,
           };
@@ -277,7 +301,7 @@ function createFixture(
       }
       reconnectedCallback();
     },
-    emitMessage(index = 0) {
+    emitMessage(index = 0, text = "继续开发") {
       if (!messageHandler) {
         throw new Error("飞书 SDK 尚未注册消息处理器");
       }
@@ -295,7 +319,28 @@ function createFixture(
           chat_id: "oc_chat",
           chat_type: "p2p",
           message_type: "text",
-          content: "{\"text\":\"继续开发\"}",
+          content: JSON.stringify({ text }),
+        },
+      });
+    },
+    emitCardAction() {
+      if (!cardActionHandler) {
+        throw new Error("飞书 SDK 尚未注册卡片动作处理器");
+      }
+      cardActionHandler({
+        context: {
+          open_message_id: "om_unknown_card",
+          open_chat_id: "oc_chat",
+        },
+        operator: {
+          open_id: "ou_actor",
+        },
+        action: {
+          tag: "button",
+          value: {
+            interaction_token: "unknown-token",
+            decision: "reject",
+          },
         },
       });
     },

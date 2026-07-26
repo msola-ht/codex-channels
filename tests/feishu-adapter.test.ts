@@ -101,6 +101,70 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent[3]?.text).toBe("当前没有待处理的交互请求。");
   });
 
+  it("provides a Feishu-local permission center without starting a Turn", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn();
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+      () => ({
+        connectionReady: true,
+        cardActionObserved: false,
+      }),
+    );
+
+    for (const text of [
+      "/feishu",
+      "/feishu status",
+      "/feishu permissions",
+      "/feishu apply",
+      "/feishu unknown",
+    ]) {
+      await adapter.handle({ ...message, text });
+    }
+    await fixture.outbox.close();
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(fixture.sent).toHaveLength(5);
+    expect(fixture.sent[0]?.text).toContain("飞书权限中心");
+    expect(fixture.sent[1]?.text).toContain("长连接：已就绪");
+    expect(fixture.sent[1]?.text).toContain("卡片动作回调：尚未验证");
+    expect(fixture.sent[2]?.text).toContain("im:message:send_as_bot");
+    expect(fixture.sent[2]?.text).toContain("im.message.receive_v1");
+    expect(fixture.sent[2]?.text).toContain("card.action.trigger");
+    expect(fixture.sent[2]?.text).toContain("按具体命令声明 Scope");
+    expect(fixture.sent[3]?.text).toContain(
+      "https://open.feishu.cn/app/cli_0123456789abcdef/auth?q=im%3Amessage%3Asend_as_bot",
+    );
+    expect(fixture.sent[3]?.text).toContain(
+      "https://open.feishu.cn/app/cli_0123456789abcdef/permission",
+    );
+    expect(fixture.sent[3]?.text).toContain(
+      "需要 App Owner 或应用管理员完成",
+    );
+    expect(fixture.sent[3]?.text).not.toContain("secret");
+    expect(fixture.sent[4]?.text).toBe(
+      "用法：/feishu <status|permissions|apply>",
+    );
+  });
+
+  it("fails closed when permission runtime status is not composed", async () => {
+    const fixture = createOutbox();
+    const adapter = new FeishuConversationAdapter(
+      {} as ConversationService,
+      fixture.outbox,
+      imagePort,
+    );
+
+    await adapter.handle({ ...message, text: "/feishu status" });
+    await fixture.outbox.close();
+
+    expect(fixture.sent).toHaveLength(1);
+    expect(fixture.sent[0]?.chatId).toBe("oc_chat");
+    expect(fixture.sent[0]?.text).toContain("长连接：未就绪");
+  });
+
   it("rejects an unknown slash command instead of submitting it as model input", async () => {
     const fixture = createOutbox();
     const submit = vi.fn();

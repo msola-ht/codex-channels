@@ -47,6 +47,7 @@ export function renderFeishuHelp(): string {
     "/diff · /plan",
     "/goal [set <目标>|clear]",
     "/whoami",
+    "/feishu <status|permissions|apply>",
     "/cancel",
   ].join("\n");
 }

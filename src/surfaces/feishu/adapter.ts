@@ -9,6 +9,13 @@ import type { FeishuInboxMessage } from "./inbox.js";
 import type { FeishuImagePort } from "./media.js";
 import type { FeishuOutbox } from "./outbox.js";
 import {
+  renderFeishuPermissionApplication,
+  renderFeishuPermissionHelp,
+  renderFeishuPermissionList,
+  renderFeishuPermissionStatus,
+  type FeishuPermissionRuntimeStatus,
+} from "./permissions.js";
+import {
   renderFeishuCommandResult,
   renderFeishuHelp,
   renderFeishuIdentity,
@@ -25,6 +32,11 @@ export class FeishuConversationAdapter {
       "notifyPost" | "notifyText"
     >,
     private readonly images: Pick<FeishuImagePort, "download">,
+    private readonly permissionStatus: () => FeishuPermissionRuntimeStatus =
+      () => ({
+        connectionReady: false,
+        cardActionObserved: false,
+      }),
   ) {
     this.commands = new ConversationCommandService(conversations);
   }
@@ -55,6 +67,14 @@ export class FeishuConversationAdapter {
           this.notifyText(
             message.target.conversationId,
             "当前没有待处理的交互请求。",
+          );
+          return;
+        }
+        if (command.name === "feishu") {
+          this.handleFeishuCommand(
+            message.target.accountId,
+            message.target.conversationId,
+            command.argumentsText,
           );
           return;
         }
@@ -99,6 +119,41 @@ export class FeishuConversationAdapter {
       );
       throw error;
     }
+  }
+
+  private handleFeishuCommand(
+    appId: string,
+    chatId: string,
+    argumentsText: string,
+  ): void {
+    const action = argumentsText.trim();
+    const status = this.permissionStatus();
+    if (action === "") {
+      this.notifyPost(chatId, renderFeishuPermissionHelp());
+      return;
+    }
+    if (action === "status") {
+      this.notifyPost(
+        chatId,
+        renderFeishuPermissionStatus(appId, status),
+      );
+      return;
+    }
+    if (action === "permissions") {
+      this.notifyPost(chatId, renderFeishuPermissionList(status));
+      return;
+    }
+    if (action === "apply") {
+      this.notifyPost(
+        chatId,
+        renderFeishuPermissionApplication(appId),
+      );
+      return;
+    }
+    this.notifyText(
+      chatId,
+      "用法：/feishu <status|permissions|apply>",
+    );
   }
 
   private async handleImage(

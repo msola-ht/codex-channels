@@ -24,6 +24,7 @@ TOML 或统一 Setup 启用开发验证路径。Phase 4 已完成两个独立体
   过期、取消和跨客户端失效。
 - `media.ts`：通过官方消息资源 API 下载私聊图片，并调用 Surface 共用暂存器完成大小、签名、
   权限和过期清理。
+- `permissions.ts`：渲染当前进程权限观测、Gateway 已用能力清单及已有应用的精确申请入口。
 - `renderer.ts`：把平台无关 `ConversationCommandResult`、`OutputEvent` 和结构化错误映射为稳定文本内容。
 - `outbox.ts`：精确账号路由并通过通用有界队列调用窄消息发送端口。
 - `surface.ts`：组合单账号连接、Inbox、Application Adapter、Outbox 和失败关闭交互端口，并由
@@ -85,8 +86,10 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 
 `adapter.ts` 对普通文本调用 `ConversationService.submit()`，图片则先通过 `media.ts` 取得受管
 绝对路径，再调用同一 `submit()` 的 `localImages` 输入；对已知平台无关命令调用
-`ConversationCommandService.execute()`；`/start`、`/help`、`/whoami` 和 `/cancel` 留在飞书
-边界。未知或畸形斜杠命令失败关闭，不能作为普通消息提交给 Codex。新 Turn 不额外发送确认，
+`ConversationCommandService.execute()`；`/start`、`/help`、`/whoami`、`/cancel` 和
+`/feishu <status|permissions|apply>` 留在飞书边界。权限中心只展示当前进程实际观测到的连接、
+消息事件与卡片回调状态，并提供应用 Scope 申请和已有应用配置入口；它不申请自管理权限、不读取
+或保存 User Access Token。未知或畸形斜杠命令失败关闭，不能作为普通消息提交给 Codex。新 Turn 不额外发送确认，
 后续回复由 Core 输出驱动；追加到活动 Turn 时发送明确提示。结构化 `UserFacingError` 按错误码
 渲染，不使用其内部 fallback message；未知异常只发送通用提示，然后把原异常交回 Inbox，由
 Inbox 现有诊断路径仅记录受约束的错误类型。命令结果、追加确认和错误提示被输出队列拒绝时，

@@ -383,6 +383,7 @@ Doctor 只读检查配置、允许名单，以及通过有限 HTTP 请求验证�
 
 - [x] 离线渲染全部当前 `ConversationCommandResult`；
 - [x] 离线验证 `/whoami`、帮助和失败关闭状态下的交互取消；
+- [x] 飞书本地权限中心：运行观测、Gateway 已用能力清单与已有应用配置入口；
 - [ ] 群 Chat 允许名单、Actor 联合授权和 `@Bot` 要求；
 - [x] 离线验证状态、计划、Diff、Goal、用量和配置生命周期通知。
 
@@ -397,6 +398,11 @@ Codex 输入。Outbox 对纯文本按 UTF-8 字节、对富文本按序列化后
 当前代码属于可独立审查的预备实现，不代表阶段状态晋级。必须先完成阶段 1 的未授权/重复真实
 事件和 Gateway 重启绑定恢复验收；通过后再验证真实应用命令，并开始群聊的严格配置、身份校验
 和真实事件 Fixture。当前阶段 2 尚未整体关闭。
+
+`/feishu <status|permissions|apply>` 属于平台本地权限中心，不占用 Application 的
+`/permissions`。它只记录当前进程是否实际收到消息事件或卡片动作，并提供精确 App ID 的权限
+申请和应用配置入口；不为查询状态额外申请自管理 Scope，不保存 User Access Token。未来飞书
+CLI 必须由每个命令声明所需 Scope 并按需增量授权，不能在 Setup 阶段预授予全部平台权限。
 
 完成标准：
 
