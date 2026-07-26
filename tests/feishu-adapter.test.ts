@@ -101,6 +101,37 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent[3]?.text).toBe("当前没有待处理的交互请求。");
   });
 
+  it("opens the composed command center for start and help", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn();
+    const open = vi.fn(async () => {});
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      { open },
+    );
+
+    await adapter.handle({ ...message, text: "/start" });
+    await adapter.handle({ ...message, text: "/help" });
+    await fixture.outbox.close();
+
+    expect(open).toHaveBeenNthCalledWith(
+      1,
+      message.target,
+      message.actorId,
+    );
+    expect(open).toHaveBeenNthCalledWith(
+      2,
+      message.target,
+      message.actorId,
+    );
+    expect(submit).not.toHaveBeenCalled();
+    expect(fixture.sent).toEqual([]);
+  });
+
   it("provides concise Feishu status and doctor commands without starting a Turn", async () => {
     const fixture = createOutbox();
     const submit = vi.fn();
@@ -111,6 +142,7 @@ describe("Feishu conversation adapter", () => {
       () => ({
         connectionReady: true,
         cardActionObserved: false,
+        menuEventObserved: false,
       }),
     );
 
@@ -170,6 +202,7 @@ describe("Feishu conversation adapter", () => {
       () => ({
         connectionReady: true,
         cardActionObserved: true,
+        menuEventObserved: true,
       }),
       {
         beginAuthorization,
@@ -206,6 +239,7 @@ describe("Feishu conversation adapter", () => {
       () => ({
         connectionReady: true,
         cardActionObserved: false,
+        menuEventObserved: false,
       }),
       {
         beginAuthorization: () => "running",

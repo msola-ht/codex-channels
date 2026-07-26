@@ -154,13 +154,18 @@ describe("Feishu setup", () => {
         preset: false,
         scopes: {
           tenant: [
+            "application:application:self_manage",
+            "application:application:patch",
             "im:message:send_as_bot",
             "cardkit:card:write",
           ],
         },
         events: {
           items: {
-            tenant: ["im.message.receive_v1"],
+            tenant: [
+              "im.message.receive_v1",
+              "application.bot.menu_v6",
+            ],
           },
         },
         callbacks: {
@@ -188,6 +193,12 @@ describe("Feishu setup", () => {
     });
     expect(renderedOutput).toContain("选择新建应用或已有应用");
     expect(renderedOutput).toContain("cli_0123456789abcdef");
+    expect(renderedOutput).toContain(
+      "发送 /feishu doctor 完成机器人菜单和订阅配置",
+    );
+    expect(renderedOutput).not.toContain(
+      "请在开放平台添加事件类型菜单项",
+    );
     expect(renderedOutput).not.toContain("app-secret");
     expect(prompter.close).toHaveBeenCalledOnce();
   });

@@ -28,6 +28,9 @@ Doctor 凭据/Bot 身份探测。2026-07-25 已由操作者使用测试应用完
 在飞书客户端折叠显示且消息顺序正确；一般文件仍未实现。Gateway 重启后的 OAuth Token 与
 Thread 绑定恢复也已通过验收。持续回复在飞书客户端可见 CardKit 原生流式更新的主路径也已
 通过验收；真实限流、失败回退和超长内容滚动仍待验证。
+`/start`、`/help` 与 `application.bot.menu_v6` 已复用同一只读命令中心卡片；菜单事件仅在
+Actor 精确匹配唯一已授权私聊时路由，事件去重和卡片令牌均为有界内存状态。当前只开放六个
+只读动作，真实菜单配置、点击和结果显示仍待验收；选择器、表单与写操作确认不在本切片。
 
 目标是在现有 TypeScript 模块化单体中增加一个编译期显式注册的飞书 Surface，使飞书与
 Telegram、原生 Codex CLI 连接同一个 Codex App Server，共享 Thread、Turn、模型、Fast、Goal、
@@ -124,6 +127,8 @@ src/surfaces/feishu/
 ├── surface.ts        # SurfaceAdapter 与平台生命周期
 ├── client.ts         # 官方 SDK 的窄封装与可测试端口
 ├── card-action.ts    # 卡片动作严格裁剪与稳定字段
+├── command-center.ts # 只读命令中心卡片、短期令牌与菜单事件去重
+├── menu-event.ts     # 机器人自定义菜单事件严格裁剪
 ├── message-content.ts # 飞书消息内容编码与平台专属标签中和
 ├── inbox.ts          # 平台本地的有界输入接收和事件去重
 ├── renderer.ts       # 命令结果、OutputEvent 和用户错误渲染
@@ -414,7 +419,12 @@ Fixture 继续暂停，当前阶段 2 尚未整体关闭。
 
 `/feishu <status|doctor|authorize|revoke>` 属于平台本地权限中心，不占用 Application 的
 `/permissions`。`status` 记录当前进程是否实际收到消息事件或卡片动作；`doctor` 汇总必要能力、
-应用配置入口和当前 OAuth 状态，不静默修改权限。`authorize` 使用
+应用配置入口和当前 OAuth 状态。Doctor 的初始检查只读；只有当前授权 Actor 点击绑定
+App、Chat、消息和 Actor 的一次性卡片后，才使用 `application:application:patch` 增量添加
+机器人菜单、消息/菜单事件与卡片回调并提交版本。缺少应用管理权限时先通过 SDK 已有应用授权页
+确认；已有权限时仍通过同一授权页确认应用管理权，授权结果必须匹配当前 App 和飞书租户。
+注册端返回的 Open ID 属于其应用作用域且字段可选，不用于和消息 Actor 比较。已有未完成版本时
+失败关闭，避免发布其他开发改动。`authorize` 使用
 `application:application:self_manage` 读取应用已开通的用户 Scope，先检查有效 Token 的 Scope
 覆盖，全部覆盖时停止，部分缺失时只把差集列入卡片，再由当前 Actor 通过飞书内 Device Flow
 明确授权。完成后必须校验 Token 对应 `open_id`
@@ -567,8 +577,10 @@ npm run verify:commit
    仅 SOCKS `ALL_PROXY` 暂不支持。
 4. 长连接重启后重复消息是否需要超出内存 TTL 的最小幂等状态。
 5. 真实应用是否接受 Setup 当前声明的 `im:message:send_as_bot`、
-   `im.message.receive_v1` 和 `card.action.trigger` 最小集合；阶段 1 不接受为后续媒体或
-   Drive 预授予宽泛权限。
+   `im.message.receive_v1`、`application.bot.menu_v6`、`card.action.trigger`、
+   `application:application:self_manage` 和 `application:application:patch` 集合，以及 Doctor
+   增量创建 `codexc_home` 并提交版本的真实行为；阶段 1 不接受为后续媒体或 Drive 预授予
+   宽泛权限。
 
 出现以下任一情况时停止当前阶段并单独评审：
 

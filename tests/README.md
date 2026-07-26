@@ -47,7 +47,10 @@
   未知异常脱敏；单账号 Surface 的长连接启停、重连事件去重、关闭排空、连续输入过载提示收敛和配置通知
   失败关闭与安全发送；审批、最多三个问题的用户输入表单、秘密输入、MCP JSON/URL 卡片，
   `form_value` 边界、非法选项/JSON/URL 拒绝、取消和处理结果脱敏；按严格配置注册及允许名单
-  热加载；飞书 `status/doctor` 的运行观测、必要能力、申请入口和卡片回调观测状态；OAuth Device Flow
+  热加载；飞书 `status/doctor` 的运行观测、必要能力、申请入口、卡片回调观测状态，以及
+  Application v7 配置快照、已有菜单保留、未完成版本失败关闭、App/Chat/Actor 一次性确认、
+  SDK 应用配置授权、授权卡片发送失败取消、Lark 租户拒绝、事件/回调增量更新和版本提交；
+  只读命令中心动作的有限关闭等待；OAuth Device Flow
   请求/轮询、精确授权 Origin 与完整 URL、混合 Token 类型、原始条目与筛选后 100 项用户 Scope
   的分层边界、有效 Token 覆盖检测与缺失 Scope 增量申请、`offline_access` 飞书内授权卡片、统一 HTTP/HTTPS 代理、`NO_PROXY` 选择、显式
   直连和无效代理失败关闭、Actor 身份匹配、进行中状态、重复流、限时停止/撤销竞态、写入错误/

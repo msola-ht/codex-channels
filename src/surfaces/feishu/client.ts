@@ -26,6 +26,11 @@ import {
   isSafeFeishuResourceIdentifier,
   type FeishuImageResourcePort,
 } from "./media.js";
+import {
+  decodeFeishuMenuEvent,
+  FeishuMenuEventError,
+  type FeishuMenuEvent,
+} from "./menu-event.js";
 import { encodeFeishuPostContent } from "./message-content.js";
 import type { FeishuMessagePort } from "./outbox.js";
 import {
@@ -69,6 +74,8 @@ export interface FeishuEventConnectionOptions {
   onInvalidMessage(error: FeishuMessageEventError): void;
   onCardAction?(event: FeishuCardAction): void;
   onInvalidCardAction?(error: FeishuCardActionError): void;
+  onMenuEvent?(event: FeishuMenuEvent): void;
+  onInvalidMenuEvent?(error: FeishuMenuEventError): void;
   onReconnecting?(): void;
   onReconnected?(): void;
   onFatal(error: FeishuConnectionError): void;
@@ -84,6 +91,7 @@ interface FeishuSdkCallbacks {
 interface FeishuSdkConnection {
   registerMessageHandler(handler: (event: unknown) => void): void;
   registerCardActionHandler(handler: (event: unknown) => void): void;
+  registerMenuEventHandler(handler: (event: unknown) => void): void;
   start(): Promise<void>;
   close(force: boolean): void;
 }
@@ -822,6 +830,29 @@ export class FeishuEventConnection {
             }
           }
         });
+        sdkConnection.registerMenuEventHandler((event) => {
+          if (
+            this.isCurrent(generation)
+            && (
+              this.stateValue === "running"
+              || this.stateValue === "reconnecting"
+            )
+          ) {
+            try {
+              this.options.onMenuEvent?.(decodeFeishuMenuEvent(event));
+            } catch (error) {
+              if (error instanceof FeishuMenuEventError) {
+                try {
+                  this.options.onInvalidMenuEvent?.(error);
+                } catch {
+                  // Permanent invalid events must not enter a retry loop.
+                }
+                return;
+              }
+              throw error;
+            }
+          }
+        });
         this.startupTimer = setTimeout(() => {
           this.failStart(
             generation,
@@ -1101,6 +1132,11 @@ const defaultDependencies: FeishuEventConnectionDependencies = {
       registerCardActionHandler: (handler) => {
         eventDispatcher.register({
           "card.action.trigger": handler,
+        });
+      },
+      registerMenuEventHandler: (handler) => {
+        eventDispatcher.register({
+          "application.bot.menu_v6": handler,
         });
       },
       start: () => wsClient.start({ eventDispatcher }),

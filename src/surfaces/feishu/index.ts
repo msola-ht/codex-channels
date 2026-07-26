@@ -1,10 +1,31 @@
 export { FeishuConversationAdapter } from "./adapter.js";
 export {
+  FeishuApplicationHttpApi,
+  FeishuApplicationSetupError,
+  type FeishuApplicationApi,
+  type FeishuApplicationPublishResult,
+  type FeishuApplicationSnapshot,
+  type FeishuBotMenu,
+} from "./application-api.js";
+export {
+  FeishuApplicationSetupController,
+  renderDoctorCard,
+  type FeishuApplicationSetupActionResult,
+} from "./application-setup.js";
+export {
   FeishuCardActionError,
   decodeFeishuCardAction,
   type FeishuCardAction,
   type FeishuCardActionField,
 } from "./card-action.js";
+export {
+  FeishuCommandCenter,
+  feishuCommandCenterActions,
+  feishuCommandMenuEventKey,
+  renderFeishuCommandCenterCard,
+  type FeishuCommandCenterAction,
+  type FeishuCommandCenterActionResult,
+} from "./command-center.js";
 export {
   renderFeishuApprovalCard,
   renderFeishuApprovalOutcomeCard,
@@ -40,6 +61,12 @@ export {
   type FeishuMessageEvent,
   type FeishuMessageEventField,
 } from "./message-event.js";
+export {
+  FeishuMenuEventError,
+  decodeFeishuMenuEvent,
+  type FeishuMenuEvent,
+  type FeishuMenuEventField,
+} from "./menu-event.js";
 export {
   FeishuImageStore,
   maximumFeishuImageBytes,

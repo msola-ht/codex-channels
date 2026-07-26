@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { ConversationService } from "../src/application/index.js";
 import {
   FeishuEventConnection,
+  type FeishuApplicationSnapshot,
+  type FeishuCardDocument,
 } from "../src/surfaces/feishu/index.js";
 import { FeishuSurface } from "../src/surfaces/feishu/surface.js";
 
@@ -317,28 +319,147 @@ describe("Feishu Surface", () => {
       "卡片动作回调：已验证",
     );
   });
+
+  it("opens the command center from a bot menu only for the unique authorized private chat", async () => {
+    const fixture = createFixture(
+      undefined,
+      () => ["oc_chat"],
+    );
+    const starting = fixture.surface.start();
+    fixture.ready();
+    await starting;
+
+    fixture.emitMenuEvent();
+    fixture.emitMenuEvent();
+    await settle();
+    await fixture.surface.stop();
+
+    expect(fixture.cards).toHaveLength(1);
+    expect(fixture.cards[0]).toEqual(expect.objectContaining({
+      chatId: "oc_chat",
+      card: expect.objectContaining({
+        header: expect.objectContaining({
+          title: expect.objectContaining({
+            content: "Codex 命令中心",
+          }),
+        }),
+      }),
+    }));
+  });
+
+  it("routes command center buttons through the shared Application command service", async () => {
+    const status = vi.fn(() => ({
+      workspaceId: "main",
+      workspaceName: "Main",
+      cwd: "/workspace",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      model: "gpt-test",
+      effort: "medium",
+      serviceTier: null,
+      modelPending: false,
+      effortPending: false,
+      fastModePending: false,
+    }));
+    const fixture = createFixture({
+      submit: async () => ({
+        threadId: "thread-1",
+        turnId: "turn-1",
+        steered: false,
+      }),
+      status,
+    });
+    const starting = fixture.surface.start();
+    fixture.ready();
+    await starting;
+
+    fixture.emitMessage(0, "/start");
+    await settle();
+    fixture.emitCommandAction("status");
+    await settle();
+    await fixture.surface.stop();
+
+    expect(status).toHaveBeenCalledWith({
+      surface: "feishu",
+      accountId: "cli_0123456789abcdef",
+      conversationId: "oc_chat",
+    });
+    expect(fixture.sent).toEqual([{
+      chatId: "oc_chat",
+      text: expect.stringContaining("Codex 状态"),
+    }]);
+  });
+
+  it("routes a confirmed Doctor card through the application setup controller", async () => {
+    const fixture = createFixture(
+      undefined,
+      undefined,
+      undefined,
+      {
+        hasPatchScope: true,
+        hasPendingVersion: false,
+        messageEventConfigured: false,
+        menuEventConfigured: false,
+        cardCallbackConfigured: false,
+        menuConfigured: false,
+        botMenus: [],
+      },
+    );
+    const starting = fixture.surface.start();
+    fixture.ready();
+    await starting;
+
+    fixture.emitMessage(0, "/feishu doctor");
+    await settle();
+    fixture.emitSetupAction();
+    await settle();
+    await fixture.surface.stop();
+
+    expect(fixture.applicationApi.authorizeConfiguration)
+      .toHaveBeenCalledWith(
+        expect.any(AbortSignal),
+        expect.any(Function),
+      );
+    expect(fixture.applicationApi.configureAndPublish).toHaveBeenCalledOnce();
+  });
 });
 
 function createFixture(
-  service: Pick<ConversationService, "submit"> | undefined = undefined,
+  service: Partial<ConversationService> | undefined = undefined,
   configurationRecipients?: () => readonly string[],
   startupNotification?: {
     messages(): ReadonlyArray<{ chatId: string; text: string }>;
   },
+  applicationSnapshot: FeishuApplicationSnapshot = {
+    hasPatchScope: true,
+    hasPendingVersion: false,
+    messageEventConfigured: true,
+    menuEventConfigured: true,
+    cardCallbackConfigured: true,
+    menuConfigured: true,
+    botMenus: [],
+  },
 ) {
-  const conversationService = (service ?? {
+  const conversationService = ({
     submit: async () => ({
       threadId: "thread-1",
       turnId: "turn-1",
       steered: false,
     }),
+    ...service,
   }) as ConversationService;
   let readyCallback: (() => void) | undefined;
   let reconnectingCallback: (() => void) | undefined;
   let reconnectedCallback: (() => void) | undefined;
   let messageHandler: ((event: unknown) => void) | undefined;
   let cardActionHandler: ((event: unknown) => void) | undefined;
+  let menuEventHandler: ((event: unknown) => void) | undefined;
   const sent: Array<{ chatId: string; text: string }> = [];
+  const cards: Array<{
+    chatId: string;
+    messageId: string;
+    card: FeishuCardDocument;
+  }> = [];
   const logs: Array<Record<string, unknown>> = [];
   const sdkStart = vi.fn(async () => {});
   const sdkClose = vi.fn();
@@ -348,6 +469,24 @@ function createFixture(
     bytes: 8,
   }));
   const oauthClose = vi.fn(async () => {});
+  const applicationApi = {
+    inspect: vi.fn(async () => applicationSnapshot),
+    authorizeConfiguration: vi.fn(
+      async (
+        _signal: AbortSignal,
+        ready: (url: string, expiresInSeconds: number) => void,
+      ) => {
+        ready(
+          "https://applink.feishu.cn/client/mini_program/open?code=one",
+          600,
+        );
+      },
+    ),
+    configureAndPublish: vi.fn(async () => ({
+      versionId: "oav_new",
+      version: "1.2.3",
+    })),
+  };
   const logger = pino({ level: "info" }, {
     write(message) {
       logs.push(JSON.parse(message) as Record<string, unknown>);
@@ -360,6 +499,10 @@ function createFixture(
     access: {
       isAllowed: () => true,
     },
+    actorRegistry: {
+      actors: () => ["ou_actor"],
+      rememberActor: () => {},
+    },
     logger,
     uploadsDirectory: "/private/uploads/feishu",
     credentialsDirectory: "/private/credentials/feishu",
@@ -368,7 +511,11 @@ function createFixture(
     ...(startupNotification ? { startupNotification } : {}),
   }, {
     messagePort: {
-      sendCard: async () => "om_card",
+      sendCard: async (chatId, card) => {
+        const messageId = `om_card_${cards.length + 1}`;
+        cards.push({ chatId, messageId, card });
+        return messageId;
+      },
       updateCard: async () => {},
       sendText: async (chatId, text) => {
         sent.push({ chatId, text });
@@ -403,6 +550,9 @@ function createFixture(
             registerCardActionHandler(handler) {
               cardActionHandler = handler;
             },
+            registerMenuEventHandler(handler) {
+              menuEventHandler = handler;
+            },
             start: sdkStart,
             close: sdkClose,
           };
@@ -415,15 +565,18 @@ function createFixture(
       revoke: async () => false,
       close: oauthClose,
     },
+    applicationApi,
   });
   return {
     surface,
     sent,
+    cards,
     logs,
     sdkStart,
     sdkClose,
     imageDownload,
     oauthClose,
+    applicationApi,
     ready() {
       if (!readyCallback) {
         throw new Error("飞书 SDK 尚未注册 ready 回调");
@@ -482,6 +635,105 @@ function createFixture(
             interaction_token: "unknown-token",
             decision: "reject",
           },
+        },
+      });
+    },
+    emitMenuEvent() {
+      if (!menuEventHandler) {
+        throw new Error("飞书 SDK 尚未注册机器人菜单处理器");
+      }
+      menuEventHandler({
+        event_id: "event-menu-1",
+        app_id: "cli_0123456789abcdef",
+        operator: {
+          operator_id: {
+            open_id: "ou_actor",
+          },
+        },
+        event_key: "codexc_home",
+      });
+    },
+    emitCommandAction(command: string) {
+      if (!cardActionHandler) {
+        throw new Error("飞书 SDK 尚未注册卡片动作处理器");
+      }
+      const sentCard = cards.at(-1);
+      if (!sentCard) {
+        throw new Error("飞书命令中心卡片尚未发送");
+      }
+      const value = sentCard.card.elements.flatMap((element) =>
+        Array.isArray(element.actions) ? element.actions : [],
+      ).flatMap((action) => {
+        if (
+          typeof action !== "object"
+          || action === null
+          || !("value" in action)
+        ) {
+          return [];
+        }
+        const candidate = (action as {
+          value: Record<string, string>;
+        }).value;
+        return candidate.codexc_command === command ? [candidate] : [];
+      })[0];
+      if (!value) {
+        throw new Error("飞书命令中心动作不存在");
+      }
+      cardActionHandler({
+        context: {
+          open_message_id: sentCard.messageId,
+          open_chat_id: sentCard.chatId,
+        },
+        operator: {
+          open_id: "ou_actor",
+        },
+        action: {
+          tag: "button",
+          value,
+        },
+      });
+    },
+    emitSetupAction() {
+      if (!cardActionHandler) {
+        throw new Error("飞书 SDK 尚未注册卡片动作处理器");
+      }
+      const sentCard = cards.find((entry) =>
+        JSON.stringify(entry.card).includes("codexc_feishu_setup_token")
+      );
+      if (!sentCard) {
+        throw new Error("飞书 Doctor 配置卡片尚未发送");
+      }
+      const value = sentCard.card.elements.flatMap((element) =>
+        Array.isArray(element.actions) ? element.actions : [],
+      ).flatMap((action) => {
+        if (
+          typeof action !== "object"
+          || action === null
+          || !("value" in action)
+        ) {
+          return [];
+        }
+        const candidate = (action as {
+          value: Record<string, string>;
+        }).value;
+        return candidate.codexc_feishu_setup_action === "configure"
+          ? [candidate]
+          : [];
+      })[0];
+      if (!value) {
+        throw new Error("飞书 Doctor 配置动作不存在");
+      }
+      cardActionHandler({
+        context: {
+          open_message_id: sentCard.messageId,
+          open_chat_id: sentCard.chatId,
+        },
+        operator: {
+          open_id: "ou_actor",
+        },
+        action: {
+          tag: "button",
+          value,
         },
       });
     },

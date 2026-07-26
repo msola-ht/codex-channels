@@ -52,13 +52,18 @@ export async function runFeishuSetup({
             preset: false,
             scopes: {
               tenant: [
+                "application:application:self_manage",
+                "application:application:patch",
                 "im:message:send_as_bot",
                 "cardkit:card:write",
               ],
             },
             events: {
               items: {
-                tenant: ["im.message.receive_v1"],
+                tenant: [
+                  "im.message.receive_v1",
+                  "application.bot.menu_v6",
+                ],
               },
             },
             callbacks: {
@@ -128,6 +133,7 @@ export async function runFeishuSetup({
     writeGatewayConfig(configPath, document);
     output.write(`\n飞书配置已保存：${configPath}\n`);
     output.write("下一步运行：codexc doctor\n");
+    output.write("Gateway 启动后，在飞书私聊发送 /feishu doctor 完成机器人菜单和订阅配置。\n");
     output.write("运行中的 Gateway 会检测配置变化并重启飞书 Surface。\n");
     return {
       appId: result.appId,

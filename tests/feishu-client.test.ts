@@ -28,12 +28,15 @@ function createFixture(startupTimeoutMs = 1_000) {
   let callbacks: FakeCallbacks | undefined;
   let messageHandler: ((event: unknown) => void) | undefined;
   let cardActionHandler: ((event: unknown) => void) | undefined;
+  let menuEventHandler: ((event: unknown) => void) | undefined;
   const start = vi.fn(async () => {});
   const close = vi.fn();
   const onMessage = vi.fn();
   const onInvalidMessage = vi.fn();
   const onCardAction = vi.fn();
   const onInvalidCardAction = vi.fn();
+  const onMenuEvent = vi.fn();
+  const onInvalidMenuEvent = vi.fn();
   const onReconnecting = vi.fn();
   const onReconnected = vi.fn();
   const onFatal = vi.fn();
@@ -45,6 +48,8 @@ function createFixture(startupTimeoutMs = 1_000) {
       onInvalidMessage,
       onCardAction,
       onInvalidCardAction,
+      onMenuEvent,
+      onInvalidMenuEvent,
       onReconnecting,
       onReconnected,
       onFatal,
@@ -60,6 +65,9 @@ function createFixture(startupTimeoutMs = 1_000) {
           registerCardActionHandler: (handler) => {
             cardActionHandler = handler;
           },
+          registerMenuEventHandler: (handler) => {
+            menuEventHandler = handler;
+          },
           start,
           close,
         };
@@ -74,6 +82,8 @@ function createFixture(startupTimeoutMs = 1_000) {
     onInvalidMessage,
     onCardAction,
     onInvalidCardAction,
+    onMenuEvent,
+    onInvalidMenuEvent,
     onReconnecting,
     onReconnected,
     onFatal,
@@ -94,6 +104,12 @@ function createFixture(startupTimeoutMs = 1_000) {
         throw new Error("card action handler is not registered");
       }
       cardActionHandler(event);
+    },
+    emitMenuEvent(event: unknown) {
+      if (menuEventHandler === undefined) {
+        throw new Error("menu event handler is not registered");
+      }
+      menuEventHandler(event);
     },
   };
 }
@@ -388,6 +404,59 @@ describe("FeishuEventConnection", () => {
       expect.objectContaining({
         code: "invalid-card-action",
         field: "context",
+      }),
+    );
+  });
+
+  it("routes strict bot menu events only while active", async () => {
+    const fixture = createFixture();
+    const event = {
+      event_id: "event-menu-1",
+      app_id: "cli_0123456789abcdef",
+      operator: {
+        operator_id: {
+          open_id: "ou_actor",
+        },
+      },
+      event_key: "codexc_home",
+    };
+    const startPromise = fixture.connection.start();
+
+    fixture.emitMenuEvent(event);
+    expect(fixture.onMenuEvent).not.toHaveBeenCalled();
+
+    fixture.callbacks.onReady();
+    await startPromise;
+    fixture.emitMenuEvent(event);
+    expect(fixture.onMenuEvent).toHaveBeenCalledWith({
+      eventId: "event-menu-1",
+      appId: "cli_0123456789abcdef",
+      actorOpenId: "ou_actor",
+      eventKey: "codexc_home",
+    });
+
+    await fixture.connection.stop();
+    fixture.emitMenuEvent(event);
+    expect(fixture.onMenuEvent).toHaveBeenCalledOnce();
+  });
+
+  it("reports malformed bot menu events without throwing into the SDK reader", async () => {
+    const fixture = createFixture();
+    const startPromise = fixture.connection.start();
+    fixture.callbacks.onReady();
+    await startPromise;
+
+    expect(() => fixture.emitMenuEvent({
+      event_id: "event-menu-1",
+      app_id: "cli_0123456789abcdef",
+      operator: {},
+      event_key: "codexc_home",
+    })).not.toThrow();
+    expect(fixture.onMenuEvent).not.toHaveBeenCalled();
+    expect(fixture.onInvalidMenuEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: "invalid-menu-event",
+        field: "operator.operator_id",
       }),
     );
   });

@@ -68,6 +68,10 @@ OAuth Token 与 Thread 绑定恢复，以及长回复折叠显示和顺序均已
 | 卡片更新错误 | [错误码 230001：消息不是卡片](https://open.feishu.cn/document/faq/trouble-shooting/how-to-resolve-error-230001?lang=zh-CN) | 明确 `im.v1.message.patch` 只更新卡片；普通文本或富文本必须使用对应的编辑消息能力 |
 | 消息资源下载 | [获取消息中的资源文件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message-resource/get) | 核对用户消息资源使用 `message_id + file_key + type` 下载、机器人与消息同会话及 100 MiB 平台上限 |
 | 消息常见问题 | [消息常见问题](https://open.feishu.cn/document/server-docs/im-v1/faq) | 核对用户发送资源可由同会话机器人下载；项目另收紧为 PNG/JPEG 与 10 MiB |
+| 机器人自定义菜单事件 | [机器人自定义菜单](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/application-v6/bot/events/menu) | 核对 `application.bot.menu_v6` 只提供操作者与事件 Key、不提供 Chat ID；项目只路由唯一已授权私聊 |
+| 更新应用能力配置 | [应用能力 v7](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/application-v7/application-v7/application-ability/patch) | 核对 `application:application:patch`、机器人菜单启用、事件类型 `menu_content_type = 2` 和菜单展示策略 |
+| 更新应用开发配置 | [应用配置 v7](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/application-v7/application-v7/application-config/patch) | 核对 WebSocket 订阅类型及事件、回调的增量添加字段 |
+| 提交发布自建应用 | [应用发布 v7](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/application-v7/application-v7/application-publish/create) | 核对应用管理权限、发布理由/变更说明、版本响应及审核边界 |
 | 事件接收安全 | [接收事件](https://open.feishu.cn/document/ukTMukTMukTM/uYDNxYjL2QTM24iN0EjN/event-subscription-configure-/encrypt-key-encryption-configuration-case) | Webhook 阶段的验签和加密入口 |
 | 消息卡片 | [消息卡片介绍](https://open.feishu.cn/document/ukTMukTMukTM/uczM3QjL3MzN04yNzcDN) | 后续卡片呈现和交互边界 |
 | 创建卡片实体 | [新建卡片实体](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/cardkit-v1/card/create) | 核对 CardKit 2.0 流式卡片实体和 `cardkit:card:write` 应用权限 |
@@ -137,10 +141,13 @@ EventDispatcher`。
 锁定 SDK `1.71.1` 的 `registerApp()` 已确认返回应用凭据和可选的扫码用户 `open_id`，并支持
 `addons.preset = false` 的最小机器人基座。Setup 提供手动输入和扫码授权两种方式；扫码时不传
 `createOnly` 或 `appId`，由飞书授权页让用户选择新建或已有企业自建应用，只增量声明
-`im:message:send_as_bot`、`cardkit:card:write` 和
-`im.message.receive_v1`，卡片阶段另声明 `card.action.trigger` 回调。注册完成后使用
+`application:application:self_manage`、`application:application:patch`、
+`im:message:send_as_bot`、`cardkit:card:write`、`im.message.receive_v1` 和
+`application.bot.menu_v6`，卡片阶段另声明 `card.action.trigger` 回调。注册完成后使用
 `/open-apis/bot/v3/info` 验证凭据和 Bot 身份，不启动
-第二条消息长连接。事件订阅方式等敏感开发配置无法通过 `addons` 设置，仍需在开放平台确认。
+第二条消息长连接。`addons` 不能直接创建机器人菜单或设置订阅方式；运行中的 Gateway 通过
+`/feishu doctor` 一次性确认卡片调用 v7 应用能力、开发配置和发布 API 增量完成。已有未完成
+版本时失败关闭，企业审核不能由 Gateway 绕过。
 
 ## 项目支持矩阵
 
@@ -156,13 +163,13 @@ EventDispatcher`。
 | 输出渲染 | `OutputEvent`、`turn.completed` | 最终回复和启动通知使用富文本；其他关键事件、安全错误和操作性提示使用纯文本；每轮上下文状态、安全启动收件人、有界 Outbox 和 Surface 生命周期已离线验证，启动与每轮状态待真实验收 | 阶段 1 / 阶段 4 切片 |
 | 事件去重与旧事件过滤 | 平台事件 ID、毫秒时间戳 | 已实现飞书模块内有界内存状态；真实重投待验证 | 阶段 1 |
 | 严格配置与重载分类 | 统一 `config.toml` | 私聊字段、失败关闭校验、变更码、公开示例和 Bootstrap 显式组合已完成 | 阶段 1 |
-| 私聊命令 | `ConversationCommandService`、私聊文本事件 | 全部平台无关命令结果、帮助、身份、取消、`status/doctor/authorize/revoke` 权限中心、未知命令失败关闭、会话列表收敛和有界安全分片已完成离线验证；状态命令富文本真实显示已通过，完整命令矩阵仍待验收 | 阶段 2 预备实现 |
+| 私聊命令 | `ConversationCommandService`、私聊文本事件、`application.bot.menu_v6` | 全部平台无关命令结果、帮助、身份、取消、`status/doctor/authorize/revoke` 权限中心、未知命令失败关闭、会话列表收敛和有界安全分片已完成离线验证；`/start`、`/help` 与机器人菜单复用六项只读命令中心，菜单只路由唯一授权私聊且令牌/事件去重有界；状态命令富文本真实显示已通过，命令中心和完整命令矩阵仍待验收 | 阶段 2 预备实现 |
 | 用户 OAuth | OAuth Device Flow、应用用户 Scope、飞书 AppLink | 已完成精确授权 Origin 与完整 URL、原始条目和筛选后 100 项用户 Scope 的分层上限、有效 Token 覆盖检查与缺失 Scope 增量授权、`offline_access` 完整卡片、统一 HTTP/HTTPS 代理、显式直连与无效代理失败关闭、有限轮询、身份匹配、macOS Keychain/Linux 加密文件、进行中/持久状态、撤销、限时停止和写入错误/取消竞态回滚；真实 Device Flow、身份校验、安全写入和 Gateway 重启恢复已通过，代理待验收，尚无飞书 CLI API 消费 Token | 阶段 2 预备实现 |
 | 群聊 | 群消息事件、群身份与 @Bot | 已记录为后续需求，当前开发批次不实施 | 阶段 2 |
 | 卡片交互 | `im.v1.message.create/patch`、`card.action.trigger` | 私聊审批、用户输入、MCP form/URL 卡片、一次性令牌、Actor/Chat/消息/请求绑定、重复请求失败关闭、原值决定、超时、有限停止、结果更新失败隔离和跨客户端失效已离线验证；命令审批卡片的一次批准与当前 Gateway 长连接动作接收已通过真实验收，用户输入和 MCP 卡片仍待真实验收 | 阶段 3 |
 | 私聊 PNG/JPEG 图片 | `im.message.receive_v1`、`im.v1.messageResource.get` | 已完成授权后异步下载、10 MiB 限制、内容签名、私有暂存、过期清理和 Application 图片提交；真实消息主路径已通过验收 | 阶段 4 |
 | 一般文件 | IM 资源 API | 暂不支持 | 阶段 4 |
-| 飞书 Setup | SDK Device Authorization、`bot/v3/info` | 已实现手动输入与扫码、飞书页应用选择、消息及 `cardkit:card:write` 最小权限、卡片动作回调声明、身份验证和原子配置；已有应用可由 Doctor 增量开通流式权限且无需重新扫码；消息路径真实扫码、Doctor 身份探测和命令审批动作回调均已通过 | 阶段 0 / 阶段 3 / 阶段 4 |
+| 飞书 Setup 与应用配置 | SDK Device Authorization、`bot/v3/info`、Application v7 ability/config/publish | 已实现手动输入与扫码、飞书页应用选择、消息/CardKit/应用管理权限及消息/菜单事件与卡片动作回调声明、身份验证和原子配置；Doctor 通过 App/Chat/Actor 一次性令牌保留已有菜单、增量配置 `codexc_home`、事件及回调并提交版本，已有未完成版本时失败关闭；消息路径真实扫码、Doctor 身份探测和命令审批动作回调均已通过，一键配置与菜单待真实验收 | 阶段 0 / 阶段 2 / 阶段 3 / 阶段 4 |
 | 飞书以外的 Lark | SDK Domain 配置 | 不在首版范围 | 未计划 |
 
 “计划中”不是公开支持。只有源码、配置、README、测试和真实测试应用冒烟均完成后，才能更新为
@@ -212,6 +219,8 @@ SDK 响应。
 | --- | --- | --- |
 | WebSocket 和 Client | [`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts)、[`src/surfaces/feishu/message-content.ts`](../src/surfaces/feishu/message-content.ts) | [`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：凭据、就绪、重连、停止、文本与富文本 Payload、HTTP 超时、响应校验和错误脱敏 |
 | 消息事件信封 | [`src/surfaces/feishu/message-event.ts`](../src/surfaces/feishu/message-event.ts) | [`tests/feishu-message-event.test.ts`](../tests/feishu-message-event.test.ts)：稳定字段裁剪和畸形输入失败关闭 |
+| 机器人菜单与命令中心 | [`src/surfaces/feishu/menu-event.ts`](../src/surfaces/feishu/menu-event.ts)、[`src/surfaces/feishu/command-center.ts`](../src/surfaces/feishu/command-center.ts)、[`src/surfaces/feishu/surface.ts`](../src/surfaces/feishu/surface.ts) | [`tests/feishu-menu-event.test.ts`](../tests/feishu-menu-event.test.ts)、[`tests/feishu-command-center.test.ts`](../tests/feishu-command-center.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)、[`tests/feishu-surface.test.ts`](../tests/feishu-surface.test.ts)：严格事件裁剪、活动连接门控、唯一授权私聊路由、事件去重、卡片令牌绑定、只读动作白名单和审批动作隔离 |
+| 应用配置与发布 | [`src/surfaces/feishu/application-api.ts`](../src/surfaces/feishu/application-api.ts)、[`src/surfaces/feishu/application-setup.ts`](../src/surfaces/feishu/application-setup.ts) | [`tests/feishu-application-api.test.ts`](../tests/feishu-application-api.test.ts)、[`tests/feishu-application-setup.test.ts`](../tests/feishu-application-setup.test.ts)、[`tests/feishu-surface.test.ts`](../tests/feishu-surface.test.ts)：严格配置快照、已有菜单保留、官方应用管理授权的 App/租户校验、App/Chat/Actor/消息令牌、未完成版本失败关闭、事件/回调增量更新、版本提交、部分失败提示和生命周期取消 |
 | 输入接收与去重 | [`src/surfaces/feishu/inbox.ts`](../src/surfaces/feishu/inbox.ts) | [`tests/feishu-inbox.test.ts`](../tests/feishu-inbox.test.ts)：同步入队、授权拒绝不污染去重键、重复、旧事件、顺序、并行、过载和关闭 |
 | Application 输入适配 | [`src/surfaces/feishu/adapter.ts`](../src/surfaces/feishu/adapter.ts) | [`tests/feishu-adapter.test.ts`](../tests/feishu-adapter.test.ts)：新 Turn 提交、活动 Turn 追加提示、Application 命令与参数透传、本地帮助/身份/取消、未知斜杠命令失败关闭、结构化错误、未知异常脱敏和输出队列拒绝不重试状态修改 |
 | 身份与授权 | [`src/policy/feishu-access.ts`](../src/policy/feishu-access.ts)、`ConversationActorRegistry` | [`tests/policy.test.ts`](../tests/policy.test.ts)：Surface、App ID、Open ID 和原子替换 |
@@ -224,7 +233,7 @@ SDK 响应。
 | 卡片动作裁剪 | [`src/surfaces/feishu/card-action.ts`](../src/surfaces/feishu/card-action.ts)、[`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts) | [`tests/feishu-card-action.test.ts`](../tests/feishu-card-action.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：稳定路由字段、受限字符串动作值与 `form_value`、畸形输入失败关闭、活动连接门控和独立诊断 |
 | 卡片交互 | [`src/surfaces/feishu/approval-card.ts`](../src/surfaces/feishu/approval-card.ts)、[`src/surfaces/feishu/input-card.ts`](../src/surfaces/feishu/input-card.ts)、[`src/surfaces/feishu/interactions.ts`](../src/surfaces/feishu/interactions.ts) | [`tests/feishu-interactions.test.ts`](../tests/feishu-interactions.test.ts)：有界审批与表单卡片、秘密输入、MCP JSON/URL、不可预测一次性令牌、Actor/Chat/消息绑定、请求原值决定、越权与重复动作、重复请求失败关闭、过期、卡片创建悬挂时的有限停止、结果更新失败隔离和跨客户端失效；命令审批一次批准真实主路径已通过，用户输入与 MCP 卡片仍待真实验收 |
 | 配置 | [`runtime/gateway-config.mjs`](../runtime/gateway-config.mjs)、[`src/config/`](../src/config/README.md) | [`tests/config.test.ts`](../tests/config.test.ts)、[`tests/config-reload.test.ts`](../tests/config-reload.test.ts)：启用映射、禁用、畸形输入、未知字段、凭据/启用重启和允许名单热加载 |
-| Setup 与 Doctor | [`scripts/feishu-setup.mjs`](../scripts/feishu-setup.mjs)、[`scripts/feishu-application.mjs`](../scripts/feishu-application.mjs)、[`scripts/doctor.mjs`](../scripts/doctor.mjs) | [`tests/feishu-setup.test.ts`](../tests/feishu-setup.test.ts)、[`tests/feishu-application.test.ts`](../tests/feishu-application.test.ts)、[`tests/feishu-adapter.test.ts`](../tests/feishu-adapter.test.ts)：手动输入、扫码授权、应用选择、消息与 CardKit 最小权限、卡片动作回调声明、有限 HTTP 探测、凭据与 Bot 身份验证、精确增量权限入口、授权域名约束、允许名单确认、原子写入和错误脱敏。Doctor 不建立第二条消息长连接；命令审批回调已通过，用户输入/MCP 回调和完整权限仍由真实冒烟验证 |
+| Setup 与 Doctor | [`scripts/feishu-setup.mjs`](../scripts/feishu-setup.mjs)、[`scripts/feishu-application.mjs`](../scripts/feishu-application.mjs)、[`scripts/doctor.mjs`](../scripts/doctor.mjs)、[`src/surfaces/feishu/application-setup.ts`](../src/surfaces/feishu/application-setup.ts) | [`tests/feishu-setup.test.ts`](../tests/feishu-setup.test.ts)、[`tests/feishu-application.test.ts`](../tests/feishu-application.test.ts)、[`tests/feishu-adapter.test.ts`](../tests/feishu-adapter.test.ts)、[`tests/feishu-application-setup.test.ts`](../tests/feishu-application-setup.test.ts)：手动输入、扫码授权、应用选择、消息/CardKit/应用管理权限、消息/菜单事件与卡片动作回调声明、有限 HTTP 探测、凭据与 Bot 身份验证、精确增量权限入口、应用配置确认、允许名单确认、原子写入和错误脱敏。Doctor 不建立第二条消息长连接；命令审批回调已通过，一键应用配置、菜单、用户输入/MCP 回调仍由真实冒烟验证 |
 | Surface 生命周期 | [`src/surfaces/feishu/surface.ts`](../src/surfaces/feishu/surface.ts) | [`tests/feishu-surface.test.ts`](../tests/feishu-surface.test.ts)：长连接启停与脱敏状态日志、重连跨越时的事件去重、输入与输出排空、连续过载提示收敛、未组合收件人失败关闭和安全配置通知 |
 | Bootstrap 组合 | [`src/bootstrap/surface-composition.ts`](../src/bootstrap/surface-composition.ts) | [`tests/surface-composition.test.ts`](../tests/surface-composition.test.ts)、[`tests/surface-manager.test.ts`](../tests/surface-manager.test.ts)：按配置注册、允许名单热加载、撤权绑定清理、配置通知路由、部分启动回滚和停止不影响 App Server |
 

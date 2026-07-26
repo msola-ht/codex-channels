@@ -3,8 +3,16 @@ import {
   isConversationCommandName,
   type ConversationService,
 } from "../../application/index.js";
-import { UserFacingError } from "../../conversation-core/index.js";
+import {
+  UserFacingError,
+  type ConversationTarget,
+} from "../../conversation-core/index.js";
 
+import type {
+  FeishuCommandCenter,
+  FeishuCommandCenterAction,
+} from "./command-center.js";
+import type { FeishuApplicationSetupController } from "./application-setup.js";
 import type { FeishuInboxMessage } from "./inbox.js";
 import type { FeishuImagePort } from "./media.js";
 import type { FeishuOutbox } from "./outbox.js";
@@ -36,8 +44,14 @@ export class FeishuConversationAdapter {
       () => ({
         connectionReady: false,
         cardActionObserved: false,
+        menuEventObserved: false,
       }),
     private readonly oauth?: FeishuOAuthControllerPort,
+    private readonly commandCenter?: Pick<FeishuCommandCenter, "open">,
+    private readonly applicationSetup?: Pick<
+      FeishuApplicationSetupController,
+      "openDoctor"
+    >,
   ) {
     this.commands = new ConversationCommandService(conversations);
   }
@@ -51,10 +65,14 @@ export class FeishuConversationAdapter {
       const command = parseFeishuCommand(message.text);
       if (command !== null) {
         if (command.name === "start" || command.name === "help") {
-          this.notifyPost(
-            message.target.conversationId,
-            renderFeishuHelp(),
-          );
+          if (this.commandCenter) {
+            await this.commandCenter.open(message.target, message.actorId);
+          } else {
+            this.notifyPost(
+              message.target.conversationId,
+              renderFeishuHelp(),
+            );
+          }
           return;
         }
         if (command.name === "whoami") {
@@ -123,6 +141,35 @@ export class FeishuConversationAdapter {
     }
   }
 
+  async handleCommandCenterAction(
+    target: ConversationTarget,
+    action: FeishuCommandCenterAction,
+  ): Promise<void> {
+    try {
+      if (action === "help") {
+        this.notifyPost(target.conversationId, renderFeishuHelp());
+        return;
+      }
+      const result = await this.commands.execute(target, action);
+      this.notifyPost(
+        target.conversationId,
+        renderFeishuCommandResult(result),
+      );
+    } catch (error) {
+      if (error instanceof FeishuOutputQueueError) {
+        throw error;
+      }
+      const detail = error instanceof UserFacingError
+        ? renderFeishuUserFacingError(error)
+        : "Gateway 未能完成请求，请稍后重试";
+      this.notifyText(
+        target.conversationId,
+        `操作失败：${detail}。`,
+      );
+      throw error;
+    }
+  }
+
   private async handleFeishuCommand(
     actorId: string,
     appId: string,
@@ -149,6 +196,19 @@ export class FeishuConversationAdapter {
       const userAuthorization = this.oauth
         ? await this.oauth.status(actorId)
         : "unavailable";
+      if (this.applicationSetup) {
+        await this.applicationSetup.openDoctor(
+          {
+            surface: "feishu",
+            accountId: appId,
+            conversationId: chatId,
+          },
+          actorId,
+          status,
+          userAuthorization,
+        );
+        return;
+      }
       this.notifyPost(
         chatId,
         renderFeishuDoctor(appId, status, userAuthorization),

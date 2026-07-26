@@ -1,6 +1,7 @@
 import type { Logger } from "pino";
 
 import type { ConversationService } from "../../application/index.js";
+import type { ConversationTarget } from "../../conversation-core/index.js";
 import type {
   ConversationActorRegistry,
   SurfaceAccessPolicy,
@@ -11,11 +12,22 @@ import type {
 } from "../types.js";
 import { FeishuConversationAdapter } from "./adapter.js";
 import {
+  FeishuApplicationHttpApi,
+  type FeishuApplicationApi,
+} from "./application-api.js";
+import {
+  FeishuApplicationSetupController,
+} from "./application-setup.js";
+import {
   createFeishuOAuthApi,
   FeishuEventConnection,
   FeishuMessageClient,
   type FeishuEventConnectionOptions,
 } from "./client.js";
+import {
+  FeishuCommandCenter,
+  feishuCommandMenuEventKey,
+} from "./command-center.js";
 import { FeishuInbox } from "./inbox.js";
 import { FeishuInteractionPort } from "./interactions.js";
 import {
@@ -23,6 +35,10 @@ import {
   type FeishuImagePort,
 } from "./media.js";
 import type { FeishuMessageEventError } from "./message-event.js";
+import type {
+  FeishuMenuEvent,
+  FeishuMenuEventError,
+} from "./menu-event.js";
 import {
   FeishuOutbox,
   type FeishuMessagePort,
@@ -46,6 +62,7 @@ interface FeishuSurfaceDependencies {
     options: FeishuEventConnectionOptions,
   ) => FeishuEventConnectionPort;
   oauth?: FeishuOAuthControllerPort & { close(): Promise<void> };
+  applicationApi?: FeishuApplicationApi;
 }
 
 export interface FeishuStartupNotification {
@@ -83,6 +100,8 @@ export class FeishuSurface implements SurfaceAdapter {
   readonly output: FeishuOutbox;
 
   private readonly inbox: FeishuInbox;
+  private readonly commandCenter: FeishuCommandCenter;
+  private readonly applicationSetup: FeishuApplicationSetupController;
   private readonly images: FeishuImagePort;
   private readonly connection: FeishuEventConnectionPort;
   private readonly oauth: FeishuOAuthControllerPort & {
@@ -98,6 +117,7 @@ export class FeishuSurface implements SurfaceAdapter {
   private readonly overloadNotifiedChats = new Set<string>();
   private connectionReady = false;
   private cardActionObserved = false;
+  private menuEventObserved = false;
   private stopPromise: Promise<void> | undefined;
 
   constructor(
@@ -153,6 +173,22 @@ export class FeishuSurface implements SurfaceAdapter {
       this.output,
       options.logger,
     );
+    this.applicationSetup = new FeishuApplicationSetupController(
+      options.appId,
+      dependencies.applicationApi ?? new FeishuApplicationHttpApi({
+        appId: options.appId,
+        appSecret: options.appSecret,
+        ...(options.openApiAgent
+          ? { httpAgent: options.openApiAgent }
+          : {}),
+        ...(options.disableEnvironmentProxy
+          ? { disableEnvironmentProxy: true }
+          : {}),
+      }),
+      this.output,
+      options.access,
+      options.logger,
+    );
     const adapter = new FeishuConversationAdapter(
       options.service,
       this.output,
@@ -160,8 +196,21 @@ export class FeishuSurface implements SurfaceAdapter {
       () => ({
         connectionReady: this.connectionReady,
         cardActionObserved: this.cardActionObserved,
+        menuEventObserved: this.menuEventObserved,
       }),
       this.oauth,
+      {
+        open: (target, actorId) =>
+          this.commandCenter.open(target, actorId),
+      },
+      this.applicationSetup,
+    );
+    this.commandCenter = new FeishuCommandCenter(
+      this.output,
+      options.access,
+      (target, action) =>
+        adapter.handleCommandCenterAction(target, action),
+      options.logger,
     );
     this.inbox = new FeishuInbox({
       accountId: options.appId,
@@ -224,6 +273,28 @@ export class FeishuSurface implements SurfaceAdapter {
       },
       onCardAction: (action) => {
         this.cardActionObserved = true;
+        const setupResult = this.applicationSetup.handleCardAction(action);
+        if (setupResult === "accepted") {
+          return;
+        }
+        if (setupResult === "invalid") {
+          options.logger.warn(
+            this.lifecycleContext(),
+            "飞书应用配置动作未处理",
+          );
+          return;
+        }
+        const commandResult = this.commandCenter.handleCardAction(action);
+        if (commandResult === "accepted") {
+          return;
+        }
+        if (commandResult === "invalid") {
+          options.logger.warn(
+            this.lifecycleContext(),
+            "飞书命令中心动作未处理",
+          );
+          return;
+        }
         const result = this.interactions.handleCardAction(action);
         if (result !== "accepted") {
           options.logger.warn(
@@ -243,6 +314,24 @@ export class FeishuSurface implements SurfaceAdapter {
           },
           "飞书卡片动作格式无效",
         );
+      },
+      onMenuEvent: (event) => {
+        try {
+          this.handleMenuEvent(event, options);
+        } catch (error) {
+          options.logger.warn(
+            {
+              ...this.lifecycleContext(),
+              errorType: error instanceof Error
+                ? error.name
+                : typeof error,
+            },
+            "飞书机器人菜单路由失败",
+          );
+        }
+      },
+      onInvalidMenuEvent: (error) => {
+        logInvalidMenuEvent(options.logger, error);
       },
       onReconnecting: () => {
         this.connectionReady = false;
@@ -281,9 +370,11 @@ export class FeishuSurface implements SurfaceAdapter {
     this.connectionReady = false;
     await this.connection.stop();
     await this.inbox.close();
+    await this.applicationSetup.close();
     await this.oauth.close();
     this.images.close();
     await this.interactions.close();
+    await this.commandCenter.close();
     await this.output.close();
     this.logger.info(this.lifecycleContext(), "飞书 Surface 已停止");
   }
@@ -371,6 +462,79 @@ export class FeishuSurface implements SurfaceAdapter {
     }
   }
 
+  private handleMenuEvent(
+    event: FeishuMenuEvent,
+    options: Pick<
+      FeishuSurfaceOptions,
+      "access" | "actorRegistry"
+    >,
+  ): void {
+    if (
+      event.appId !== this.accountId
+      || event.eventKey !== feishuCommandMenuEventKey
+    ) {
+      this.logger.warn(
+        {
+          ...this.lifecycleContext(),
+          reason: event.appId !== this.accountId
+            ? "account-mismatch"
+            : "unsupported-event-key",
+        },
+        "飞书机器人菜单事件未处理",
+      );
+      return;
+    }
+    this.menuEventObserved = true;
+    const target = this.resolveMenuTarget(event.actorOpenId, options);
+    if (!target) {
+      this.logger.warn(
+        this.lifecycleContext(),
+        "飞书机器人菜单没有唯一已授权私聊",
+      );
+      return;
+    }
+    void this.commandCenter.openFromMenu(
+      target,
+      event.actorOpenId,
+      event.eventId,
+    ).catch((error: unknown) => {
+      this.logger.warn(
+        {
+          ...this.lifecycleContext(),
+          conversationId: target.conversationId,
+          errorType: error instanceof Error ? error.name : typeof error,
+        },
+        "飞书机器人菜单卡片发送失败",
+      );
+    });
+  }
+
+  private resolveMenuTarget(
+    actorId: string,
+    options: Pick<
+      FeishuSurfaceOptions,
+      "access" | "actorRegistry"
+    >,
+  ): ConversationTarget | undefined {
+    if (!options.actorRegistry || !this.configurationRecipients) {
+      return undefined;
+    }
+    const candidates = this.safeConfigurationRecipients().flatMap(
+      (conversationId): ConversationTarget[] => {
+        const target: ConversationTarget = {
+          surface: "feishu",
+          accountId: this.accountId,
+          conversationId,
+        };
+        return options.actorRegistry!.actors(target).includes(actorId)
+          && options.access.isAllowed({ target, actorId })
+          ? [target]
+          : [];
+      },
+    );
+    return candidates.length === 1 ? candidates[0] : undefined;
+  }
+
   private lifecycleContext(): {
     surface: "feishu";
     accountId: string;
@@ -392,6 +556,19 @@ function logInvalidMessage(
       field: error.field,
     },
     "飞书消息事件格式无效",
+  );
+}
+
+function logInvalidMenuEvent(
+  logger: Logger,
+  error: FeishuMenuEventError,
+): void {
+  logger.warn(
+    {
+      errorCode: error.code,
+      field: error.field,
+    },
+    "飞书机器人菜单事件格式无效",
   );
 }
 

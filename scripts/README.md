@@ -11,8 +11,10 @@
   复用统一 TOML、环境变量和系统代理解析；交互输入的 Token 在当前终端明文显示，但验证错误
   继续脱敏；新建 Bot 仅引导使用官方 BotFather。
 - `feishu-setup.mjs`：提供手动输入凭据和 Device Authorization 扫码两种方式；扫码时由飞书授权页
-  选择新建或已有企业自建应用，只申请私聊文本所需权限和事件。两种方式都验证凭据与 Bot 身份，
-  并原子保存 App ID、App Secret 和允许的用户 Open ID；二维码和短期授权状态不持久化。
+  选择新建或已有企业自建应用，只申请私聊、流式卡片、应用自管理/更新和命令中心所需权限与事件。
+  两种方式都验证凭据与 Bot 身份，并原子保存 App ID、App Secret 和允许的用户 Open ID；二维码和
+  短期授权状态不持久化。机器人菜单和订阅方式由 `/feishu doctor` 在 Actor 明确确认后增量配置
+  并提交版本。
 - `feishu-application.mjs`：为 Setup 与 Doctor 提供带有限超时的飞书凭据/Bot 身份只读探测，
   不建立消息长连接，并把 SDK 错误和残缺响应收敛为不含敏感详情的稳定错误。
 - `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。
