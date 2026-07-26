@@ -69,7 +69,8 @@
 - Workspace 不可变授权快照、热加载失败回滚、选择歧义，以及 Telegram Surface、账号和规范
   Actor ID 的联合授权；飞书 Surface、App 账号和 `open_id` 精确允许名单及原子替换。
 - 飞书卡片动作与表单字段裁剪、私聊审批/用户输入/MCP 卡片、一次性令牌、
-  Actor/Chat/消息/请求绑定、请求原值决定、越权与重复动作、超时、关闭竞态和跨客户端失效。
+  Actor/Chat/消息/请求绑定、请求原值决定、越权与重复动作、重复请求失败关闭、超时、
+  卡片创建悬挂时的有限关闭、结果卡更新失败隔离和跨客户端失效。
 - Event Bus 容量、关键事件保护、关闭后拒绝订阅、并发关闭等待、慢消费者超时和消费者失败隔离。
 - 统一 Logger 异常元数据约束，以及 Token、App Secret、Authorization、Password 和 Cookie
   字段脱敏。

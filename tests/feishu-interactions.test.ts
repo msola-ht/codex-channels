@@ -58,6 +58,48 @@ describe("Feishu interaction port", () => {
       .toContain("处理结果：已批准一次");
   });
 
+  it("completes the protocol decision when the outcome card update fails", async () => {
+    let sentCard: FeishuCardDocument | undefined;
+    const interactions = new FeishuInteractionPort(
+      {
+        deliverCard: async (_chatId, card) => {
+          sentCard = card;
+          return "om_card";
+        },
+        updateCard: async () => {
+          throw new Error("card update failed");
+        },
+      },
+      {
+        actors: () => ["ou_actor"],
+        rememberActor: () => {},
+      },
+      {
+        isAllowed: () => true,
+      },
+    );
+    const decision = interactions.request(target, approvalRequest());
+    await settle();
+    const token = interactionToken(sentCard!, "approve-once");
+
+    expect(interactions.handleCardAction({
+      messageId: "om_card",
+      chatId: target.conversationId,
+      actorOpenId: "ou_actor",
+      tag: "button",
+      value: {
+        interaction_token: token,
+        decision: "approve-once",
+      },
+    })).toBe("accepted");
+    await expect(decision).resolves.toEqual({
+      type: "approval",
+      approved: true,
+      scope: "once",
+    });
+    await expect(interactions.close()).resolves.toBeUndefined();
+  });
+
   it("only maps options that the current request explicitly offers", async () => {
     const fixture = createConfiguredFixture();
     const decision = fixture.interactions.request(target, {
@@ -191,6 +233,30 @@ describe("Feishu interaction port", () => {
     expect(multipleActors.sentCards).toEqual([]);
   });
 
+  it("fails a duplicate request id closed without sending another card", async () => {
+    const fixture = createConfiguredFixture();
+    const first = fixture.interactions.request(target, approvalRequest());
+    const duplicate = fixture.interactions.request(target, approvalRequest());
+    let duplicateSettled = false;
+    void duplicate.then(() => {
+      duplicateSettled = true;
+    });
+    await settle();
+
+    try {
+      expect(fixture.sentCards).toHaveLength(1);
+      expect(duplicateSettled).toBe(true);
+      await expect(duplicate).resolves.toEqual({
+        type: "approval",
+        approved: false,
+      });
+    } finally {
+      await fixture.interactions.close();
+      await first;
+      await duplicate;
+    }
+  });
+
   it("invalidates a pending card when another client resolves the request", async () => {
     const fixture = createConfiguredFixture();
     const decision = fixture.interactions.request(target, approvalRequest());
@@ -250,6 +316,44 @@ describe("Feishu interaction port", () => {
       },
     })).toBe("stale");
     expect(JSON.stringify(updatedCards[0])).toContain("Gateway 已停止");
+  });
+
+  it("cancels the request even when card delivery never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const interactions = new FeishuInteractionPort(
+        {
+          deliverCard: () => new Promise<string>(() => {}),
+          updateCard: async () => {},
+        },
+        {
+          actors: () => ["ou_actor"],
+          rememberActor: () => {},
+        },
+        {
+          isAllowed: () => true,
+        },
+      );
+      const decision = interactions.request(target, approvalRequest());
+      let settled = false;
+      void decision.then(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+
+      const closing = interactions.close();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await closing;
+      await Promise.resolve();
+
+      expect(settled).toBe(true);
+      await expect(decision).resolves.toEqual({
+        type: "approval",
+        approved: false,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("times out to a refusal and disables the card", async () => {

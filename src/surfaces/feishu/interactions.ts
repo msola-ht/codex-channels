@@ -56,6 +56,7 @@ export class FeishuInteractionPort implements InteractionPort {
   private readonly tokenByRequest = new Map<string, string>();
   private readonly resolvedBeforePending = new Set<string>();
   private readonly preparations = new Set<Promise<string | undefined>>();
+  private readonly preparationCancellations = new Set<() => void>();
   private readonly statusUpdates = new Set<Promise<void>>();
   private closed = false;
 
@@ -111,7 +112,13 @@ export class FeishuInteractionPort implements InteractionPort {
   }
 
   async close(): Promise<void> {
-    this.closed = true;
+    if (!this.closed) {
+      this.closed = true;
+      for (const cancel of this.preparationCancellations) {
+        cancel();
+      }
+      this.preparationCancellations.clear();
+    }
     this.cancelAll("Gateway 已停止");
     this.resolvedBeforePending.clear();
     await waitAtMost(Promise.allSettled([...this.preparations]), 5_000);
@@ -167,6 +174,9 @@ export class FeishuInteractionPort implements InteractionPort {
     ) {
       return timeoutDecision(request);
     }
+    if (this.tokenByRequest.has(request.requestId)) {
+      return timeoutDecision(request);
+    }
     const authorizedActors = this.actorRegistry.actors(target).filter(
       (actorId) => this.access!.isAllowed({ target, actorId }),
     );
@@ -182,18 +192,40 @@ export class FeishuInteractionPort implements InteractionPort {
       token,
     );
     this.preparations.add(preparation);
-    let messageId: string | undefined;
-    try {
-      messageId = await preparation;
-    } catch (error) {
+    void preparation.then(
+      () => this.preparations.delete(preparation),
+      () => this.preparations.delete(preparation),
+    );
+    let cancelPreparation!: () => void;
+    const cancelled = new Promise<{ type: "closed" }>((resolve) => {
+      cancelPreparation = () => resolve({ type: "closed" });
+    });
+    this.preparationCancellations.add(cancelPreparation);
+    const result = await Promise.race([
+      preparation.then(
+        (messageId) => ({
+          type: "prepared" as const,
+          messageId,
+        }),
+        (error: unknown) => ({
+          type: "failed" as const,
+          error,
+        }),
+      ),
+      cancelled,
+    ]);
+    this.preparationCancellations.delete(cancelPreparation);
+    if (result.type !== "prepared") {
       if (this.tokenByRequest.get(request.requestId) === token) {
         this.tokenByRequest.delete(request.requestId);
       }
       this.resolvedBeforePending.delete(token);
-      throw error;
-    } finally {
-      this.preparations.delete(preparation);
+      if (result.type === "failed") {
+        throw result.error;
+      }
+      return timeoutDecision(request);
     }
+    const messageId = result.messageId;
     if (!messageId) {
       return timeoutDecision(request);
     }
