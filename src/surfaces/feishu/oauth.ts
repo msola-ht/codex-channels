@@ -120,7 +120,21 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
     if (pending) {
       await pending.task;
     }
-    const existing = await this.tokens.get(this.appId, userOpenId);
+    let existing: Awaited<ReturnType<FeishuUserTokenStore["get"]>>;
+    try {
+      existing = await this.tokens.get(this.appId, userOpenId);
+    } catch (error) {
+      await this.tokens.remove(this.appId, userOpenId);
+      this.logger.warn(
+        {
+          surface: "feishu",
+          accountId: this.appId,
+          errorType: safeErrorType(error),
+        },
+        "飞书用户凭据读取失败，已按撤销请求清除本地凭据",
+      );
+      return true;
+    }
     await this.tokens.remove(this.appId, userOpenId);
     return existing !== null;
   }

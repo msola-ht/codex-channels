@@ -20,6 +20,9 @@ const feishuTruncationNotice = "\n\n[内容过长，已截断]";
 const feishuStreamFlushDelayMs = 300;
 const maximumFeishuStreamingElementCharacters = 5_000;
 const maximumFeishuStreamingCards = 5;
+const maximumFeishuActiveStreams = 100;
+const maximumFeishuBufferedStreamCharacters =
+  maximumFeishuStreamingElementCharacters * maximumFeishuStreamingCards + 1;
 
 interface FeishuStreamState {
   chatId: string;
@@ -28,6 +31,7 @@ interface FeishuStreamState {
   itemId: string;
   text: string;
   cardText: string;
+  truncated: boolean;
   sequence: number;
   cardCount: number;
   cardId?: string;
@@ -65,6 +69,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     { chatId: string; messageId: string; status: string }
   >();
   private readonly streams = new Map<string, FeishuStreamState>();
+  private streamCapacityWarningIssued = false;
   private closed = false;
   private closeFinished = false;
 
@@ -224,8 +229,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
   private async sendMarkdown(
     chatId: string,
     markdown: string,
+    maximumChunks = maximumFeishuMessageChunks,
   ): Promise<void> {
-    for (const chunk of splitFeishuMarkdownCards(markdown)) {
+    for (const chunk of splitFeishuMarkdownCards(markdown, maximumChunks)) {
       try {
         await this.messagePort.sendMarkdownCard(chatId, chunk);
       } catch (error) {
@@ -294,19 +300,43 @@ export class FeishuOutbox implements SurfaceOutputPort {
     event: Extract<OutputEvent, { type: "text.delta" }>,
   ): void {
     const key = streamKey(event.threadId, event.turnId, event.itemId);
-    const state = this.streams.get(key) ?? {
+    const existing = this.streams.get(key);
+    if (!existing && this.streams.size >= maximumFeishuActiveStreams) {
+      if (!this.streamCapacityWarningIssued) {
+        this.streamCapacityWarningIssued = true;
+        this.logger.warn(
+          {
+            component: "Feishu",
+            maximumActiveStreams: maximumFeishuActiveStreams,
+          },
+          "飞书活动流状态已满，当前非关键增量未接收",
+        );
+      }
+      return;
+    }
+    if (this.streams.size < maximumFeishuActiveStreams) {
+      this.streamCapacityWarningIssued = false;
+    }
+    const state = existing ?? {
       chatId: event.target.conversationId,
       threadId: event.threadId,
       turnId: event.turnId,
       itemId: event.itemId,
       text: "",
       cardText: "",
+      truncated: false,
       sequence: 0,
       cardCount: 0,
       failed: false,
     };
-    state.text += event.text;
-    state.cardText += event.text;
+    const previousText = state.text;
+    const appended = appendBoundedStreamText(state.text, event.text);
+    state.text = appended.text;
+    state.truncated ||= appended.truncated;
+    state.cardText = appendBoundedStreamText(
+      state.cardText,
+      state.text.slice(previousText.length),
+    ).text;
     this.streams.set(key, state);
     if (!state.timer) {
       state.timer = setTimeout(() => {
@@ -329,14 +359,20 @@ export class FeishuOutbox implements SurfaceOutputPort {
     if (!state) {
       return false;
     }
-    if (event.text.startsWith(state.text)) {
-      state.cardText += event.text.slice(state.text.length);
+    const bounded = boundedStreamText(event.text);
+    const completedText = bounded.text;
+    state.truncated = bounded.truncated;
+    if (completedText.startsWith(state.text)) {
+      state.cardText = appendBoundedStreamText(
+        state.cardText,
+        completedText.slice(state.text.length),
+      ).text;
     } else if (state.cardCount <= 1) {
-      state.cardText = event.text;
+      state.cardText = completedText;
     } else {
       state.failed = true;
     }
-    state.text = event.text;
+    state.text = completedText;
     if (state.timer) {
       clearTimeout(state.timer);
       delete state.timer;
@@ -383,13 +419,24 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     if (!state.cardId && terminal) {
       this.streams.delete(key);
-      if (fallbackPost) {
-        await this.sendMarkdown(state.chatId, state.text);
+      const remainingMessageBudget =
+        maximumFeishuMessageChunks - state.cardCount;
+      if (fallbackPost && remainingMessageBudget > 0) {
+        await this.sendMarkdown(
+          state.chatId,
+          state.truncated
+            ? `${state.cardText}${feishuTruncationNotice}`
+            : state.cardText,
+          remainingMessageBudget,
+        );
       }
       return;
     }
     try {
-      await this.rollStreamingCards(state);
+      const ready = await this.rollStreamingCards(state, terminal);
+      if (!ready) {
+        return;
+      }
       if (state.lastSentText !== state.cardText) {
         state.sequence += 1;
         try {
@@ -428,13 +475,26 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
   }
 
-  private async rollStreamingCards(state: FeishuStreamState): Promise<void> {
+  private async rollStreamingCards(
+    state: FeishuStreamState,
+    terminal: boolean,
+  ): Promise<boolean> {
     while (
       [...state.cardText].length > maximumFeishuStreamingElementCharacters
     ) {
+      if (
+        !terminal
+        && !state.cardId
+        && state.cardCount >= maximumFeishuStreamingCards - 1
+      ) {
+        return false;
+      }
       const [rawHead, tail] = splitFeishuStreamingContent(state.cardText);
+      const currentCardNumber = state.cardId
+        ? state.cardCount
+        : state.cardCount + 1;
       const reachesCardLimit =
-        state.cardCount === maximumFeishuStreamingCards - 1;
+        currentCardNumber >= maximumFeishuStreamingCards;
       const head = reachesCardLimit
         ? appendFeishuStreamingTruncation(rawHead)
         : rawHead;
@@ -462,7 +522,15 @@ export class FeishuOutbox implements SurfaceOutputPort {
         throw new Error("飞书流式卡片数量超过单个结果上限");
       }
     }
+    if (
+      !terminal
+      && !state.cardId
+      && state.cardCount >= maximumFeishuStreamingCards - 1
+    ) {
+      return false;
+    }
     await this.ensureStreamingCard(state, state.cardText);
+    return true;
   }
 
   private async ensureStreamingCard(
@@ -508,7 +576,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
     if (fallbackPost && remainingMessageBudget > 0) {
       await this.sendPost(
         state.chatId,
-        state.text,
+        state.truncated
+          ? `${state.text}${feishuTruncationNotice}`
+          : state.text,
         remainingMessageBudget,
       );
     }
@@ -518,6 +588,43 @@ export class FeishuOutbox implements SurfaceOutputPort {
         : new Error("飞书流式卡片结束失败");
     }
   }
+}
+
+interface BoundedStreamText {
+  text: string;
+  truncated: boolean;
+}
+
+function boundedStreamText(value: string): BoundedStreamText {
+  return appendBoundedStreamText("", value);
+}
+
+function appendBoundedStreamText(
+  current: string,
+  addition: string,
+): BoundedStreamText {
+  let remaining =
+    maximumFeishuBufferedStreamCharacters - [...current].length;
+  if (remaining <= 0 || addition.length === 0) {
+    return {
+      text: current,
+      truncated: addition.length > 0,
+    };
+  }
+  let suffix = "";
+  let truncated = false;
+  for (const character of addition) {
+    if (remaining === 0) {
+      truncated = true;
+      break;
+    }
+    suffix += character;
+    remaining -= 1;
+  }
+  return {
+    text: `${current}${suffix}`,
+    truncated,
+  };
 }
 
 function streamKey(threadId: string, turnId: string, itemId: string): string {
@@ -550,12 +657,15 @@ function splitFeishuStreamingContent(text: string): [string, string] {
   ];
 }
 
-function splitFeishuMarkdownCards(markdown: string): string[] {
+function splitFeishuMarkdownCards(
+  markdown: string,
+  maximumChunks = maximumFeishuMessageChunks,
+): string[] {
   const chunks: string[] = [];
   let remaining = markdown;
   while (
     [...remaining].length > maximumFeishuStreamingElementCharacters
-    && chunks.length < maximumFeishuMessageChunks - 1
+    && chunks.length < maximumChunks - 1
   ) {
     const [head, tail] = splitFeishuStreamingContent(remaining);
     chunks.push(head);

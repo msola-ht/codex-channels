@@ -36,6 +36,11 @@ export interface FeishuMessageEvent {
   content: string;
 }
 
+const maximumIdentifierBytes = 1_024;
+const maximumTimestampBytes = 32;
+const maximumTypeBytes = 64;
+const maximumContentBytes = 150 * 1_024;
+
 export function decodeFeishuMessageEvent(input: unknown): FeishuMessageEvent {
   const event = requireRecord(input, "event");
   const sender = requireRecord(event.sender, "sender");
@@ -50,14 +55,44 @@ export function decodeFeishuMessageEvent(input: unknown): FeishuMessageEvent {
     actorOpenId: requireString(
       senderId.open_id,
       "sender.sender_id.open_id",
+      maximumIdentifierBytes,
     ),
-    senderType: requireString(sender.sender_type, "sender.sender_type"),
-    messageId: requireString(message.message_id, "message.message_id"),
-    createTime: requireString(message.create_time, "message.create_time"),
-    chatId: requireString(message.chat_id, "message.chat_id"),
-    chatType: requireString(message.chat_type, "message.chat_type"),
-    messageType: requireString(message.message_type, "message.message_type"),
-    content: requireString(message.content, "message.content", true),
+    senderType: requireString(
+      sender.sender_type,
+      "sender.sender_type",
+      maximumTypeBytes,
+    ),
+    messageId: requireString(
+      message.message_id,
+      "message.message_id",
+      maximumIdentifierBytes,
+    ),
+    createTime: requireString(
+      message.create_time,
+      "message.create_time",
+      maximumTimestampBytes,
+    ),
+    chatId: requireString(
+      message.chat_id,
+      "message.chat_id",
+      maximumIdentifierBytes,
+    ),
+    chatType: requireString(
+      message.chat_type,
+      "message.chat_type",
+      maximumTypeBytes,
+    ),
+    messageType: requireString(
+      message.message_type,
+      "message.message_type",
+      maximumTypeBytes,
+    ),
+    content: requireString(
+      message.content,
+      "message.content",
+      maximumContentBytes,
+      true,
+    ),
   };
 }
 
@@ -78,11 +113,13 @@ function requireRecord(
 function requireString(
   value: unknown,
   field: FeishuMessageEventField,
+  maximumBytes: number,
   allowEmpty = false,
 ): string {
   if (
     typeof value !== "string"
     || (!allowEmpty && value.length === 0)
+    || Buffer.byteLength(value, "utf8") > maximumBytes
   ) {
     throw new FeishuMessageEventError(field);
   }
@@ -96,5 +133,5 @@ function optionalString(
   if (value === undefined) {
     return undefined;
   }
-  return requireString(value, field);
+  return requireString(value, field, maximumIdentifierBytes);
 }

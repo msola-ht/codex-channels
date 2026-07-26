@@ -88,6 +88,32 @@ describe("Feishu outbox", () => {
     expect(posts).toEqual([]);
   });
 
+  it("bounds concurrent native streaming states", async () => {
+    vi.useFakeTimers();
+    const createStreamingCard = vi.fn(async () => ({
+      cardId: "7355372766134157313",
+      messageId: "om_stream",
+    }));
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        createStreamingCard,
+        sendText: async () => {},
+        sendPost: async () => {},
+      },
+      pino({ level: "silent" }),
+    );
+
+    for (let index = 0; index < 101; index += 1) {
+      outbox.handle(delta("增量", `item-${index}`));
+    }
+    await vi.advanceTimersByTimeAsync(300);
+    await outbox.close();
+
+    expect(createStreamingCard).toHaveBeenCalledTimes(100);
+  });
+
   it("keeps a reply as one static CardKit card when it completes before streaming starts", async () => {
     vi.useFakeTimers();
     const createStreamingCard = vi.fn(cardMethods.createStreamingCard);
@@ -200,6 +226,62 @@ describe("Feishu outbox", () => {
     await outbox.close();
 
     expect(posts).toEqual(["部分正文"]);
+  });
+
+  it("marks a bounded rich-post fallback as truncated after streaming creation fails", async () => {
+    vi.useFakeTimers();
+    const posts: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async (_chatId, markdown) => {
+          posts.push(markdown);
+        },
+        createStreamingCard: async () => {
+          throw new Error("stream failed");
+        },
+      },
+      pino({ level: "silent" }),
+    );
+    const text = "长".repeat(30_000);
+
+    outbox.handle(delta(text));
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+    outbox.handle(completed({}, text, "item-1"));
+    await outbox.close();
+
+    expect(posts).toHaveLength(4);
+    expect(posts.at(-1)).toContain("[内容过长，已截断]");
+  });
+
+  it("uses the final short reply as the truncation source after streaming creation fails", async () => {
+    vi.useFakeTimers();
+    const posts: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async (_chatId, markdown) => {
+          posts.push(markdown);
+        },
+        createStreamingCard: async () => {
+          throw new Error("stream failed");
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(delta("长".repeat(30_000)));
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+    outbox.handle(completed({}, "最终短回复", "item-1"));
+    await outbox.close();
+
+    expect(posts).toEqual(["最终短回复"]);
   });
 
   it("falls back to the complete rich post after a streaming update fails", async () => {
@@ -335,6 +417,56 @@ describe("Feishu outbox", () => {
   it("keeps streaming cards and fallback posts within one five-message budget", async () => {
     vi.useFakeTimers();
     const created: string[] = [];
+    const markdownCards: string[] = [];
+    const posts: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+        sendText: async () => {},
+        sendPost: async (_chatId, markdown) => {
+          posts.push(markdown);
+        },
+        createStreamingCard: async (_chatId, initialText) => {
+          created.push(initialText);
+          return {
+            cardId: `73553727661341573${created.length}`,
+            messageId: `om_stream_${created.length}`,
+          };
+        },
+      },
+      pino({ level: "silent" }),
+    );
+    const text = ["甲", "乙", "丙", "丁", "戊", "己"]
+      .map((character) => character.repeat(5_000))
+      .join("");
+
+    outbox.handle(delta(text));
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+    outbox.handle(completed({}, text, "item-1"));
+    await outbox.close();
+
+    expect(created).toHaveLength(4);
+    expect(markdownCards).toHaveLength(1);
+    expect(posts).toEqual([]);
+    expect(markdownCards[0]).toMatch(/\[内容过长，已截断\]$/u);
+    const displayedText = [
+      ...created,
+      markdownCards[0]!.replace(/\n\n\[内容过长，已截断\]$/u, ""),
+    ].join("");
+    expect(text.startsWith(displayedText)).toBe(true);
+    expect(
+      created.length + markdownCards.length + posts.length,
+    ).toBeLessThanOrEqual(5);
+  });
+
+  it("reserves the fifth message for a corrected final reply", async () => {
+    vi.useFakeTimers();
+    const created: string[] = [];
     const posts: string[] = [];
     const outbox = new FeishuOutbox(
       "cli_app",
@@ -354,17 +486,15 @@ describe("Feishu outbox", () => {
       },
       pino({ level: "silent" }),
     );
-    const text = "长".repeat(30_000);
 
-    outbox.handle(delta(text));
+    outbox.handle(delta("长".repeat(30_000)));
     await vi.advanceTimersByTimeAsync(300);
     await Promise.resolve();
-    outbox.handle(completed({}, text, "item-1"));
+    outbox.handle(completed({}, "最终校正回复", "item-1"));
     await outbox.close();
 
-    expect(created).toHaveLength(5);
-    expect(posts).toEqual([]);
-    expect(created[4]).toMatch(/\[内容过长，已截断\]$/u);
+    expect(created).toHaveLength(4);
+    expect(posts).toEqual(["最终校正回复"]);
     expect(created.length + posts.length).toBeLessThanOrEqual(5);
   });
 
@@ -931,13 +1061,13 @@ function operationUpdated(
   };
 }
 
-function delta(text: string): OutputEvent {
+function delta(text: string, itemId = "item-1"): OutputEvent {
   return {
     type: "text.delta",
     target,
     threadId: "thread-1",
     turnId: "turn-1",
-    itemId: "item-1",
+    itemId,
     text,
   };
 }

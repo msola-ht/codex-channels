@@ -442,6 +442,44 @@ describe("FeishuInbox", () => {
     expect(fixture.closeTimeouts).toEqual([1]);
   });
 
+  it("does not start queued messages after close times out", async () => {
+    vi.useFakeTimers();
+    const calls: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fixture = createFixture({
+      closeTimeoutMs: 250,
+      handle: async (message) => {
+        const text = textOf(message);
+        calls.push(text);
+        if (text === "first") {
+          await gate;
+        }
+      },
+    });
+    fixture.inbox.receive(createEvent({
+      eventId: "event-1",
+      messageId: "message-1",
+      content: "{\"text\":\"first\"}",
+    }));
+    fixture.inbox.receive(createEvent({
+      eventId: "event-2",
+      messageId: "message-2",
+      content: "{\"text\":\"second\"}",
+    }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    const closing = fixture.inbox.close();
+    await vi.advanceTimersByTimeAsync(250);
+    await closing;
+    release();
+    await settle();
+
+    expect(calls).toEqual(["first"]);
+  });
+
   it("validates queue lifecycle limits", () => {
     expect(() => createFixture({ capacity: 0 })).toThrow(
       "飞书 Inbox 容量必须是正整数",

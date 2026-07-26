@@ -5,6 +5,7 @@ import {
   readdirSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -236,6 +237,14 @@ describe("Feishu OAuth controller", () => {
     fixture.tokens.value = storedToken();
     await expect(fixture.controller.revoke("ou_actor")).resolves.toBe(true);
     expect(fixture.tokens.value).toBeNull();
+  });
+
+  it("clears an unreadable local credential on explicit revoke", async () => {
+    const tokens = new UnreadableTokenStore();
+    const fixture = createController({ tokens });
+
+    await expect(fixture.controller.revoke("ou_actor")).resolves.toBe(true);
+    expect(tokens.removed).toBe(true);
   });
 
   it("does not repeat authorization when a valid token covers current app scopes", async () => {
@@ -536,6 +545,24 @@ describe("Feishu encrypted token store", () => {
       .resolves.toEqual(token);
   });
 
+  it("does not treat a corrupted encrypted credential as missing", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-feishu-token-"));
+    temporaryDirectories.push(directory);
+    const store = new EncryptedFileFeishuUserTokenStore(directory);
+    const token = storedToken();
+    await store.set(token);
+    const credential = readdirSync(directory).find((file) =>
+      file.endsWith(".enc")
+    );
+    if (!credential) {
+      throw new Error("expected encrypted credential");
+    }
+    writeFileSync(join(directory, credential), "corrupted", { mode: 0o600 });
+
+    await expect(store.get(token.appId, token.userOpenId))
+      .rejects.toThrow("读取飞书加密凭据失败");
+  });
+
   it("reports valid, refreshable, expired, and missing states without exposing tokens", () => {
     const now = 10_000_000;
     expect(feishuTokenStatus(null, now)).toBe("missing");
@@ -773,6 +800,18 @@ class MemoryTokenStore implements FeishuUserTokenStore {
 
   async remove(): Promise<void> {
     this.value = null;
+  }
+}
+
+class UnreadableTokenStore extends MemoryTokenStore {
+  removed = false;
+
+  override async get(): Promise<StoredFeishuUserToken | null> {
+    throw new Error("读取飞书加密凭据失败");
+  }
+
+  override async remove(): Promise<void> {
+    this.removed = true;
   }
 }
 

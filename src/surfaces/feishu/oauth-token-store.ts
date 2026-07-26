@@ -145,18 +145,28 @@ implements FeishuUserTokenStore {
     appId: string,
     userOpenId: string,
   ): Promise<StoredFeishuUserToken | null> {
+    let payload: Buffer;
     try {
-      const [key, payload] = await Promise.all([
-        this.readMasterKey(),
-        readFile(this.tokenPath(appId, userOpenId)),
-      ]);
-      return parseStoredToken(
+      payload = await readFile(this.tokenPath(appId, userOpenId));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return null;
+      }
+      throw new Error("读取飞书加密凭据失败", { cause: error });
+    }
+    try {
+      const key = await this.readMasterKey();
+      const token = parseStoredToken(
         decrypt(payload, key),
         appId,
         userOpenId,
       );
-    } catch {
-      return null;
+      if (!token) {
+        throw new Error("飞书加密凭据载荷无效");
+      }
+      return token;
+    } catch (error) {
+      throw new Error("读取飞书加密凭据失败", { cause: error });
     }
   }
 

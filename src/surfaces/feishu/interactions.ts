@@ -46,6 +46,8 @@ interface PendingInteraction {
   messageId: string;
 }
 
+const maximumConcurrentInteractions = 100;
+
 export type FeishuCardActionResult =
   | "accepted"
   | "invalid"
@@ -175,6 +177,9 @@ export class FeishuInteractionPort implements InteractionPort {
       return timeoutDecision(request);
     }
     if (this.tokenByRequest.has(request.requestId)) {
+      return timeoutDecision(request);
+    }
+    if (this.tokenByRequest.size >= maximumConcurrentInteractions) {
       return timeoutDecision(request);
     }
     const authorizedActors = this.actorRegistry.actors(target).filter(

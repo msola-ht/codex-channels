@@ -256,6 +256,10 @@ export class FeishuInbox {
     } catch {
       // Timeout reporting must not make concurrent close callers diverge.
     }
+    for (const worker of this.workers.values()) {
+      this.pendingCount -= worker.queue.length;
+      worker.queue.length = 0;
+    }
   }
 
   private pruneSeen(now: number): void {

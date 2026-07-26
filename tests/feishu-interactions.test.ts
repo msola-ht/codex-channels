@@ -257,6 +257,29 @@ describe("Feishu interaction port", () => {
     }
   });
 
+  it("fails excess concurrent interactions closed without sending more cards", async () => {
+    const fixture = createConfiguredFixture();
+    const decisions = Array.from(
+      { length: 101 },
+      (_, index) => fixture.interactions.request(target, {
+        ...approvalRequest(),
+        requestId: `approval-${index}`,
+      }),
+    );
+
+    try {
+      await settle();
+      expect(fixture.sentCards).toHaveLength(100);
+    } finally {
+      await fixture.interactions.close();
+      await Promise.all(decisions);
+    }
+    await expect(decisions[100]).resolves.toEqual({
+      type: "approval",
+      approved: false,
+    });
+  });
+
   it("invalidates a pending card when another client resolves the request", async () => {
     const fixture = createConfiguredFixture();
     const decision = fixture.interactions.request(target, approvalRequest());

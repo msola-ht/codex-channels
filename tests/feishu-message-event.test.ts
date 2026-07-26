@@ -56,6 +56,26 @@ describe("decodeFeishuMessageEvent", () => {
     expect(decoded.appId).toBeUndefined();
   });
 
+  it("rejects oversized routing identifiers and message content", () => {
+    const oversizedActor = createEvent();
+    oversizedActor.sender = {
+      sender_id: {
+        open_id: "x".repeat(1_025),
+      },
+      sender_type: "user",
+    };
+    expect(() => decodeFeishuMessageEvent(oversizedActor))
+      .toThrow("sender.sender_id.open_id");
+
+    const oversizedContent = createEvent();
+    oversizedContent.message = {
+      ...(oversizedContent.message as Record<string, unknown>),
+      content: "x".repeat(150 * 1_024 + 1),
+    };
+    expect(() => decodeFeishuMessageEvent(oversizedContent))
+      .toThrow("message.content");
+  });
+
   it.each<[unknown, FeishuMessageEventField]>([
     [null, "event"],
     [{}, "sender"],
