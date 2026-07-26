@@ -155,7 +155,6 @@ describe("Feishu setup", () => {
         scopes: {
           tenant: [
             "application:application:self_manage",
-            "application:application:patch",
             "im:message:send_as_bot",
             "cardkit:card:write",
           ],

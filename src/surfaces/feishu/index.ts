@@ -3,7 +3,8 @@ export {
   FeishuApplicationHttpApi,
   FeishuApplicationSetupError,
   type FeishuApplicationApi,
-  type FeishuApplicationPublishResult,
+  type FeishuApplicationAuthorizationDiagnostic,
+  type FeishuApplicationAuthorizationFailure,
   type FeishuApplicationSnapshot,
   type FeishuBotMenu,
 } from "./application-api.js";

@@ -72,16 +72,18 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
   可重试错误语义。
 - 原生流式额外需要应用权限 `cardkit:card:write`。新扫码应用会声明该权限；已有应用由 Owner
   通过 `/feishu doctor` 的精确入口增量开通并发布，无需重新扫码或申请用户 OAuth。
-- Doctor 一键配置使用应用权限 `application:application:patch`，并保留
-  `application:application:self_manage` 用于只读检测。写操作必须由当前授权 Actor 点击一次性
-  卡片明确确认，并通过 SDK 已有应用增量授权页再次确认管理权限；注册端返回的 Open ID 属于
+- Doctor 保留 `application:application:self_manage` 用于只读检测。当前授权 Actor 点击一次性
+  卡片后只完成 SDK 官方应用授权并重新检测；Gateway 不调用应用能力、开发配置或发布写接口。
+  注册端返回的 Open ID 属于
   其应用作用域且字段可选，不用于和消息 Actor 比较。授权结果必须匹配当前 App，Lark 租户结果
-  失败关闭。应用凭据或短期授权状态不写入业务存储。配置只添加消息/菜单事件、卡片回调及
-  `codexc_home` 菜单，不删除已有配置。授权卡片发送失败会立即取消 SDK 轮询并更新 Doctor
-  结果，不能留下无人处理的后台拒绝。
-- 自动发布前必须确认当前应用没有 `unaudit_version_id`；存在未完成版本时失败关闭，避免把其他
-  开发改动一并发布。能力和开发配置更新成功但版本提交失败时明确提示可能存在部分增量，不自动
-  回滚或盲目重试；提交版本后是否需要管理员审核仍由飞书控制。
+  失败关闭。SDK 生成的授权链接只接受 `accounts.feishu.cn`、`open.feishu.cn` 或
+  `applink.feishu.cn` 精确 HTTPS Origin；`accounts.feishu.cn` 和 `open.feishu.cn` 会包装为
+  飞书 AppLink，在客户端侧边栏完成确认。应用凭据或短期授权状态不写入业务存储。授权完成后
+  Doctor 提示 Owner 打开当前应用，人工开启自定义菜单、添加 Event Key 为 `codexc_home` 的
+  事件类型菜单项、确认消息/菜单事件与卡片回调使用长连接并发布版本。授权卡片发送失败会立即取消 SDK 轮询并更新 Doctor
+  结果，不能留下无人处理的后台拒绝。已发布版本的菜单节点和 `bot_menu_enable` 分开归约；
+  节点存在但开关关闭时显示“已定义但未启用”，不得误报为已完成。`unaudit_version_id` 只作为
+  只读观测展示，不触发自动发布或修改。
 - 图片下载只使用 `im.v1.messageResource.get` 的 `message_id + image_key + type=image` 窄能力；
   SDK 响应被裁剪为下载流和可选长度，不向其他模块暴露 Client、Header 或上游错误。
 
@@ -162,7 +164,7 @@ Adapter 不会重试已经执行的状态修改，而是把稳定的队列错误
 `/feishu doctor` 在 Surface 内调用 `application-setup.ts`，不经过 Conversation Core，也不把
 应用 SDK 类型带入 Application。Doctor 先读取已发布版本、事件和回调形成快照；只有快照缺项、
 当前 Actor 仍获授权且没有未完成版本时才生成写操作按钮。卡片动作经过同一严格动作裁剪后优先
-路由到应用配置控制器；首次读取失败时仍可在同一卡片进入官方应用配置授权。令牌一次使用并绑定
+路由到应用授权控制器；首次读取失败时仍可在同一卡片进入官方应用授权。令牌一次使用并绑定
 原消息、Chat 和 Actor；官方授权结果必须匹配当前 App 和飞书租户，完成后重新读取最新快照再
 决定是否提交，避免使用点击前的陈旧状态。Surface 停止会取消进行中的 SDK 授权或 HTTP 请求并
 有限等待。

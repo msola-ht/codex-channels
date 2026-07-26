@@ -15,7 +15,7 @@ const target = {
 };
 
 describe("Feishu application setup controller", () => {
-  it("requires the exact actor and applies a one-time confirmed setup", async () => {
+  it("requires the exact actor and stops after official authorization", async () => {
     const fixture = createFixture(incompleteSnapshot());
     await fixture.controller.openDoctor(
       target,
@@ -42,9 +42,17 @@ describe("Feishu application setup controller", () => {
     })).toBe("accepted");
     await settle();
 
-    expect(fixture.api.configureAndPublish).toHaveBeenCalledOnce();
-    expect(fixture.updates.at(-1)?.card.header.title.content)
-      .toBe("飞书应用配置完成");
+    expect(fixture.api.authorizeApplication).toHaveBeenCalledOnce();
+    const doctorOutcome = fixture.updates.filter(
+      (update) => update.messageId === card.messageId,
+    ).at(-1)?.card;
+    expect(doctorOutcome?.header.title.content)
+      .toBe("飞书授权完成");
+    const outcome = JSON.stringify(doctorOutcome);
+    expect(outcome).toContain("打开当前飞书应用");
+    expect(outcome).toContain(
+      `https://open.feishu.cn/app/${target.accountId}`,
+    );
     expect(fixture.controller.handleCardAction({
       messageId: card.messageId,
       chatId: card.chatId,
@@ -55,15 +63,12 @@ describe("Feishu application setup controller", () => {
     await fixture.controller.close();
   });
 
-  it("opens application authorization before configuring when patch scope is missing", async () => {
-    const fixture = createFixture({
-      ...incompleteSnapshot(),
-      hasPatchScope: false,
-    });
-    fixture.api.authorizeConfiguration.mockImplementation(
+  it("opens official authorization before showing manual instructions", async () => {
+    const fixture = createFixture(incompleteSnapshot());
+    fixture.api.authorizeApplication.mockImplementation(
       async (_signal, ready) => {
         ready(
-          "https://accounts.feishu.cn/open-apis/authen/v1/index?code=one",
+          "https://open.feishu.cn/oauth/v1/app/registration?code=one",
           600,
         );
       },
@@ -85,25 +90,31 @@ describe("Feishu application setup controller", () => {
     });
     await settle();
 
-    expect(fixture.api.authorizeConfiguration).toHaveBeenCalledWith(
+    expect(fixture.api.authorizeApplication).toHaveBeenCalledWith(
       expect.any(AbortSignal),
       expect.any(Function),
     );
     expect(fixture.cards[1]?.card.header.title.content)
-      .toBe("授权飞书应用配置");
+      .toBe("授权飞书应用");
     const authorizationCard = JSON.stringify(fixture.cards[1]?.card);
     expect(authorizationCard).toContain(
       "https://applink.feishu.cn/client/web_url/open",
     );
     expect(authorizationCard).toContain("\"multi_url\"");
     expect(authorizationCard).not.toContain(
-      "\"url\":\"https://accounts.feishu.cn/open-apis/",
+      "\"url\":\"https://open.feishu.cn/oauth/",
     );
-    expect(fixture.api.configureAndPublish).toHaveBeenCalledOnce();
+    const outcome = JSON.stringify(
+      fixture.updates.filter(
+        (update) => update.messageId === card.messageId,
+      ).at(-1)?.card,
+    );
+    expect(outcome).toContain("Gateway 不会自动修改或发布应用配置");
+    expect(outcome).toContain("Event Key 设为 codexc_home");
     await fixture.controller.close();
   });
 
-  it("does not offer automatic publication when another version is pending", async () => {
+  it("offers authorization and manual guidance when another version is pending", async () => {
     const fixture = createFixture({
       ...incompleteSnapshot(),
       hasPendingVersion: true,
@@ -115,12 +126,33 @@ describe("Feishu application setup controller", () => {
       "valid",
     );
 
-    expect(fixture.cards).toHaveLength(1);
     expect(JSON.stringify(fixture.cards[0]?.card))
-      .not.toContain("codexc_feishu_setup_token");
-    expect(JSON.stringify(fixture.cards[0]?.card))
-      .toContain("已有未完成版本");
-    expect(fixture.api.configureAndPublish).not.toHaveBeenCalled();
+      .toContain("codexc_feishu_setup_token");
+    await fixture.controller.close();
+  });
+
+  it("shows a published menu node as defined but disabled", async () => {
+    const fixture = createFixture({
+      ...incompleteSnapshot(),
+      botMenus: [{
+        menu_id: "7351234567890123456",
+        event_key: "codexc_home",
+        menu_content_type: 2,
+      }],
+      botMenuEnabled: false,
+      menuConfigured: false,
+    });
+
+    await fixture.controller.openDoctor(
+      target,
+      "ou_actor",
+      runtimeStatus(),
+      "valid",
+    );
+
+    const rendered = JSON.stringify(fixture.cards[0]?.card);
+    expect(rendered).toContain("已定义但未启用");
+    expect(rendered).not.toContain("Codex 菜单：已发布");
     await fixture.controller.close();
   });
 
@@ -150,17 +182,17 @@ describe("Feishu application setup controller", () => {
     await settle();
 
     expect(fixture.api.inspect).toHaveBeenCalledTimes(2);
-    expect(fixture.api.configureAndPublish).toHaveBeenCalledOnce();
+    expect(JSON.stringify(fixture.updates.at(-2)?.card))
+      .toContain("Gateway 不会自动修改或发布应用配置");
     await fixture.controller.close();
   });
 
-  it("does not publish when the post-authorization inspection is complete", async () => {
+  it("reports success when the post-authorization inspection is complete", async () => {
     const fixture = createFixture(incompleteSnapshot());
     fixture.api.inspect
       .mockResolvedValueOnce(incompleteSnapshot())
       .mockResolvedValueOnce({
         ...incompleteSnapshot(),
-        hasPatchScope: true,
         messageEventConfigured: true,
         menuEventConfigured: true,
         cardCallbackConfigured: true,
@@ -183,11 +215,10 @@ describe("Feishu application setup controller", () => {
     });
     await settle();
 
-    expect(fixture.api.configureAndPublish).not.toHaveBeenCalled();
     expect(fixture.updates.at(-2)?.card.header.title.content)
-      .toBe("飞书应用配置完成");
+      .toBe("飞书授权完成");
     expect(JSON.stringify(fixture.updates.at(-2)?.card))
-      .toContain("无需提交新版本");
+      .toContain("当前应用配置检测也已通过");
     await fixture.controller.close();
   });
 
@@ -203,7 +234,7 @@ describe("Feishu application setup controller", () => {
     let authorizationSignal: AbortSignal | undefined;
     const api: FeishuApplicationApi = {
       inspect: async () => incompleteSnapshot(),
-      authorizeConfiguration: async (signal, ready) => {
+      authorizeApplication: async (signal, ready) => {
         authorizationSignal = signal;
         ready(
           "https://applink.feishu.cn/client/mini_program/open?code=one",
@@ -217,9 +248,6 @@ describe("Feishu application setup controller", () => {
           );
         });
       },
-      configureAndPublish: async () => ({
-        versionId: "oav_new",
-      }),
     };
     const controller = new FeishuApplicationSetupController(
       target.accountId,
@@ -261,7 +289,7 @@ describe("Feishu application setup controller", () => {
         expect(authorizationSignal?.aborted).toBe(true);
       });
       expect(updates.at(-1)?.header.title.content)
-        .toBe("飞书应用配置未完成");
+        .toBe("飞书授权未完成");
     } finally {
       await controller.close();
     }
@@ -281,20 +309,14 @@ function createFixture(snapshot: FeishuApplicationSnapshot) {
   }> = [];
   const api = {
     inspect: vi.fn(async () => snapshot),
-    authorizeConfiguration: vi.fn<
-      FeishuApplicationApi["authorizeConfiguration"]
+    authorizeApplication: vi.fn<
+      FeishuApplicationApi["authorizeApplication"]
     >(async (_signal, ready) => {
       ready(
         "https://applink.feishu.cn/client/mini_program/open?code=one",
         600,
       );
     }),
-    configureAndPublish: vi.fn<
-      FeishuApplicationApi["configureAndPublish"]
-    >(async () => ({
-      versionId: "oav_new",
-      version: "1.2.3",
-    })),
   };
   const controller = new FeishuApplicationSetupController(
     target.accountId,
@@ -320,11 +342,11 @@ function createFixture(snapshot: FeishuApplicationSnapshot) {
 
 function incompleteSnapshot(): FeishuApplicationSnapshot {
   return {
-    hasPatchScope: true,
     hasPendingVersion: false,
     messageEventConfigured: false,
     menuEventConfigured: false,
     cardCallbackConfigured: false,
+    botMenuEnabled: false,
     menuConfigured: false,
     botMenus: [],
   };

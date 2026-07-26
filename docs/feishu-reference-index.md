@@ -68,10 +68,7 @@ OAuth Token 与 Thread 绑定恢复，以及长回复折叠显示和顺序均已
 | 卡片更新错误 | [错误码 230001：消息不是卡片](https://open.feishu.cn/document/faq/trouble-shooting/how-to-resolve-error-230001?lang=zh-CN) | 明确 `im.v1.message.patch` 只更新卡片；普通文本或富文本必须使用对应的编辑消息能力 |
 | 消息资源下载 | [获取消息中的资源文件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message-resource/get) | 核对用户消息资源使用 `message_id + file_key + type` 下载、机器人与消息同会话及 100 MiB 平台上限 |
 | 消息常见问题 | [消息常见问题](https://open.feishu.cn/document/server-docs/im-v1/faq) | 核对用户发送资源可由同会话机器人下载；项目另收紧为 PNG/JPEG 与 10 MiB |
-| 机器人自定义菜单事件 | [机器人自定义菜单](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/application-v6/bot/events/menu) | 核对 `application.bot.menu_v6` 只提供操作者与事件 Key、不提供 Chat ID；项目只路由唯一已授权私聊 |
-| 更新应用能力配置 | [应用能力 v7](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/application-v7/application-v7/application-ability/patch) | 核对 `application:application:patch`、机器人菜单启用、事件类型 `menu_content_type = 2` 和菜单展示策略 |
-| 更新应用开发配置 | [应用配置 v7](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/application-v7/application-v7/application-config/patch) | 核对 WebSocket 订阅类型及事件、回调的增量添加字段 |
-| 提交发布自建应用 | [应用发布 v7](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/application-v7/application-v7/application-publish/create) | 核对应用管理权限、发布理由/变更说明、版本响应及审核边界 |
+| 机器人自定义菜单事件 | [机器人菜单事件](https://open.feishu.cn/document/client-docs/bot-v3/events/menu) | 核对 `application.bot.menu_v6` 只负责事件类型菜单点击后的事件投递，不负责创建或启用菜单；事件只提供操作者与事件 Key、不提供 Chat ID，项目只路由唯一已授权私聊 |
 | 事件接收安全 | [接收事件](https://open.feishu.cn/document/ukTMukTMukTM/uYDNxYjL2QTM24iN0EjN/event-subscription-configure-/encrypt-key-encryption-configuration-case) | Webhook 阶段的验签和加密入口 |
 | 消息卡片 | [消息卡片介绍](https://open.feishu.cn/document/ukTMukTMukTM/uczM3QjL3MzN04yNzcDN) | 后续卡片呈现和交互边界 |
 | 创建卡片实体 | [新建卡片实体](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/cardkit-v1/card/create) | 核对 CardKit 2.0 流式卡片实体和 `cardkit:card:write` 应用权限 |
@@ -141,13 +138,13 @@ EventDispatcher`。
 锁定 SDK `1.71.1` 的 `registerApp()` 已确认返回应用凭据和可选的扫码用户 `open_id`，并支持
 `addons.preset = false` 的最小机器人基座。Setup 提供手动输入和扫码授权两种方式；扫码时不传
 `createOnly` 或 `appId`，由飞书授权页让用户选择新建或已有企业自建应用，只增量声明
-`application:application:self_manage`、`application:application:patch`、
+`application:application:self_manage`、
 `im:message:send_as_bot`、`cardkit:card:write`、`im.message.receive_v1` 和
 `application.bot.menu_v6`，卡片阶段另声明 `card.action.trigger` 回调。注册完成后使用
 `/open-apis/bot/v3/info` 验证凭据和 Bot 身份，不启动
 第二条消息长连接。`addons` 不能直接创建机器人菜单或设置订阅方式；运行中的 Gateway 通过
-`/feishu doctor` 一次性确认卡片调用 v7 应用能力、开发配置和发布 API 增量完成。已有未完成
-版本时失败关闭，企业审核不能由 Gateway 绕过。
+`/feishu doctor` 一次性确认卡片完成官方授权并重新执行只读检测，再提示 App Owner 在开放平台
+人工添加菜单、确认事件/回调并发布版本。Gateway 不调用应用能力、开发配置或发布写接口。
 
 ## 项目支持矩阵
 
@@ -169,7 +166,7 @@ EventDispatcher`。
 | 卡片交互 | `im.v1.message.create/patch`、`card.action.trigger` | 私聊审批、用户输入、MCP form/URL 卡片、一次性令牌、Actor/Chat/消息/请求绑定、重复请求失败关闭、原值决定、超时、有限停止、结果更新失败隔离和跨客户端失效已离线验证；命令审批卡片的一次批准与当前 Gateway 长连接动作接收已通过真实验收，用户输入和 MCP 卡片仍待真实验收 | 阶段 3 |
 | 私聊 PNG/JPEG 图片 | `im.message.receive_v1`、`im.v1.messageResource.get` | 已完成授权后异步下载、10 MiB 限制、内容签名、私有暂存、过期清理和 Application 图片提交；真实消息主路径已通过验收 | 阶段 4 |
 | 一般文件 | IM 资源 API | 暂不支持 | 阶段 4 |
-| 飞书 Setup 与应用配置 | SDK Device Authorization、`bot/v3/info`、Application v7 ability/config/publish | 已实现手动输入与扫码、飞书页应用选择、消息/CardKit/应用管理权限及消息/菜单事件与卡片动作回调声明、身份验证和原子配置；Doctor 通过 App/Chat/Actor 一次性令牌保留已有菜单、增量配置 `codexc_home`、事件及回调并提交版本，已有未完成版本时失败关闭；消息路径真实扫码、Doctor 身份探测和命令审批动作回调均已通过，一键配置与菜单待真实验收 | 阶段 0 / 阶段 2 / 阶段 3 / 阶段 4 |
+| 飞书 Setup 与应用配置 | SDK Device Authorization、`bot/v3/info`、Application v6 只读详情、机器人菜单事件文档 | 已实现手动输入与扫码、飞书页应用选择、消息/CardKit/只读检测权限及消息/菜单事件与卡片动作回调声明、身份验证和原子配置；Doctor 通过 App/Chat/Actor 一次性令牌完成官方授权后重新只读检测，并提示 Owner 人工添加 `codexc_home`、确认事件/回调和发布版本；Gateway 不自动修改或发布应用配置；菜单节点与启用开关独立检测，消息路径真实扫码、Doctor 身份探测和命令审批动作回调均已通过，完整菜单启用与点击仍待验收 | 阶段 0 / 阶段 2 / 阶段 3 / 阶段 4 |
 | 飞书以外的 Lark | SDK Domain 配置 | 不在首版范围 | 未计划 |
 
 “计划中”不是公开支持。只有源码、配置、README、测试和真实测试应用冒烟均完成后，才能更新为

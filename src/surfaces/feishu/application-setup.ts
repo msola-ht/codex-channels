@@ -5,12 +5,13 @@ import type { Logger } from "pino";
 import type { ConversationTarget } from "../../conversation-core/index.js";
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import type { FeishuCardDocument } from "./approval-card.js";
-import type {
-  FeishuApplicationApi,
-  FeishuApplicationSnapshot,
+import {
   FeishuApplicationSetupError,
+  type FeishuApplicationApi,
+  type FeishuApplicationSnapshot,
 } from "./application-api.js";
 import type { FeishuCardAction } from "./card-action.js";
+import { feishuCommandMenuEventKey } from "./command-center.js";
 import { toFeishuInAppUrl } from "./oauth-card.js";
 import type { FeishuOutbox } from "./outbox.js";
 import {
@@ -93,14 +94,11 @@ export class FeishuApplicationSetupController {
         runtime,
         userAuthorization,
         snapshot,
-        snapshot?.hasPendingVersion || isComplete(snapshot)
-          ? undefined
-          : token,
+        isComplete(snapshot) ? undefined : token,
       ),
     );
     if (
       this.closed
-      || snapshot?.hasPendingVersion
       || isComplete(snapshot)
     ) {
       return;
@@ -133,7 +131,7 @@ export class FeishuApplicationSetupController {
       this.closed
       || action.tag !== "button"
       || token === undefined
-      || command !== "configure"
+      || command !== "authorize"
     ) {
       return "invalid";
     }
@@ -155,12 +153,12 @@ export class FeishuApplicationSetupController {
     if (this.active) {
       void this.outbox.deliverText(
         pending.target.conversationId,
-        "当前已有进行中的飞书应用配置任务。",
+        "当前已有进行中的飞书应用授权任务。",
       ).catch(() => {});
       return "accepted";
     }
     this.active = true;
-    const task = this.configure(pending).finally(() => {
+    const task = this.authorize(pending).finally(() => {
       this.active = false;
       this.tasks.delete(task);
     });
@@ -186,7 +184,7 @@ export class FeishuApplicationSetupController {
     }
   }
 
-  private async configure(pending: PendingSetup): Promise<void> {
+  private async authorize(pending: PendingSetup): Promise<void> {
     const controller = new AbortController();
     this.activeController = controller;
     let authorizationMessageId: string | undefined;
@@ -195,10 +193,10 @@ export class FeishuApplicationSetupController {
       await this.outbox.updateCard(
         pending.target.conversationId,
         pending.messageId,
-        renderSetupProgressCard("正在检查并配置飞书应用…"),
+        renderSetupProgressCard("正在通过飞书官方流程授权当前应用…"),
       );
       let delivery: Promise<string> | undefined;
-      await this.api.authorizeConfiguration(
+      await this.api.authorizeApplication(
         controller.signal,
         (url, expiresInSeconds) => {
           delivery = this.outbox.deliverCard(
@@ -216,7 +214,7 @@ export class FeishuApplicationSetupController {
       );
       authorizationMessageId = await delivery;
       if (!authorizationMessageId) {
-        throw new Error("飞书应用配置授权卡片未发送");
+        throw new Error("飞书应用授权卡片未发送");
       }
       const snapshot = await this.api.inspect(controller.signal);
       if (isComplete(snapshot)) {
@@ -225,7 +223,7 @@ export class FeishuApplicationSetupController {
           pending.messageId,
           renderSetupOutcomeCard(
             true,
-            "应用配置已经完整，无需提交新版本。",
+            "官方授权已完成，当前应用配置检测也已通过。",
           ),
         );
         await this.updateAuthorizationOutcome(
@@ -234,18 +232,12 @@ export class FeishuApplicationSetupController {
         );
         return;
       }
-      const result = await this.api.configureAndPublish(
-        snapshot,
-        controller.signal,
-      );
       await this.outbox.updateCard(
         pending.target.conversationId,
         pending.messageId,
         renderSetupOutcomeCard(
           true,
-          result.version
-            ? `已提交版本 ${result.version}；如企业启用了应用审核，请由管理员通过后生效。`
-            : "已提交新版本；如企业启用了应用审核，请由管理员通过后生效。",
+          manualConfigurationText(this.appId),
         ),
       );
       await this.updateAuthorizationOutcome(
@@ -293,7 +285,7 @@ export class FeishuApplicationSetupController {
       await this.outbox.updateCard(
         pending.target.conversationId,
         messageId,
-        renderSetupOutcomeCard(true, "应用配置授权已完成。"),
+        renderSetupOutcomeCard(true, "飞书官方授权已完成。"),
       );
     } catch (error) {
       this.logFailure(pending.target, "authorization-outcome", error);
@@ -311,9 +303,20 @@ export class FeishuApplicationSetupController {
         accountId: target.accountId,
         conversationId: target.conversationId,
         phase,
+        errorCode: error instanceof FeishuApplicationSetupError
+          ? error.code
+          : undefined,
+        authorizationFailure:
+          error instanceof FeishuApplicationSetupError
+            ? error.authorizationFailure
+            : undefined,
+        authorizationDiagnostic:
+          error instanceof FeishuApplicationSetupError
+            ? error.authorizationDiagnostic
+            : undefined,
         errorType: error instanceof Error ? error.name : typeof error,
       },
-      "飞书应用一键配置失败",
+      "飞书应用授权失败",
     );
   }
 }
@@ -339,18 +342,17 @@ export function renderDoctorCard(
       tag: "markdown",
       content: [
         "**应用配置检测**",
-        `- 应用管理权限：${snapshot.hasPatchScope ? "已开通" : "待授权"}`,
         `- 消息事件：${snapshot.messageEventConfigured ? "已配置" : "待配置"}`,
         `- 菜单事件：${snapshot.menuEventConfigured ? "已配置" : "待配置"}`,
         `- 卡片回调：${snapshot.cardCallbackConfigured ? "已配置" : "待配置"}`,
-        `- Codex 菜单：${snapshot.menuConfigured ? "已发布" : "待配置"}`,
+        `- Codex 菜单：${menuStatus(snapshot)}`,
         `- 待处理版本：${snapshot.hasPendingVersion ? "存在" : "无"}`,
       ].join("\n"),
     });
   } else {
     elements.push({
       tag: "markdown",
-      content: "暂时无法读取应用配置。点击一键配置后，Gateway 会先通过飞书官方授权确认管理身份，再重新检测并只补齐缺项。",
+      content: "暂时无法读取应用配置。请先通过飞书官方流程授权；授权后 Gateway 只会重新检测，并给出人工配置指引。",
     });
   }
   if (setupToken) {
@@ -360,19 +362,14 @@ export function renderDoctorCard(
         tag: "button",
         text: {
           tag: "plain_text",
-          content: "确认并一键配置",
+          content: "授权并查看配置指引",
         },
         type: "primary",
         value: {
           codexc_feishu_setup_token: setupToken,
-          codexc_feishu_setup_action: "configure",
+          codexc_feishu_setup_action: "authorize",
         },
       }],
-    });
-  } else if (snapshot?.hasPendingVersion) {
-    elements.push({
-      tag: "markdown",
-      content: "检测到已有未完成版本。为避免发布无关改动，Gateway 不会自动继续；请先在开放平台处理该版本。",
     });
   }
   return {
@@ -405,16 +402,16 @@ function renderConfigurationAuthorizationCard(
       template: "blue",
       title: {
         tag: "plain_text",
-        content: "授权飞书应用配置",
+        content: "授权飞书应用",
       },
     },
     elements: [
       {
         tag: "markdown",
         content: [
-          "请确认允许 Gateway 增量配置当前应用。",
+          "请通过飞书官方流程确认当前应用授权。",
           "",
-          "仅添加缺少的应用管理权限、消息事件、机器人菜单事件和卡片回调；不会删除已有配置。",
+          "Gateway 不会自动修改能力、事件、回调、菜单或发布应用版本；授权完成后会提供人工配置指引。",
           `链接约 ${Math.max(1, Math.ceil(expiresInSeconds / 60))} 分钟后失效。`,
         ].join("\n"),
       },
@@ -442,6 +439,7 @@ function renderConfigurationAuthorizationCard(
 function toConfigurationInAppUrl(url: string): string {
   const parsed = new URL(url);
   return parsed.origin === "https://accounts.feishu.cn"
+      || parsed.origin === "https://open.feishu.cn"
     ? toFeishuInAppUrl(url)
     : parsed.toString();
 }
@@ -456,7 +454,7 @@ function renderSetupProgressCard(text: string): FeishuCardDocument {
       template: "blue",
       title: {
         tag: "plain_text",
-        content: "飞书应用配置",
+        content: "飞书应用授权",
       },
     },
     elements: [{
@@ -479,7 +477,7 @@ function renderSetupOutcomeCard(
       template: success ? "green" : "grey",
       title: {
         tag: "plain_text",
-        content: success ? "飞书应用配置完成" : "飞书应用配置未完成",
+        content: success ? "飞书授权完成" : "飞书授权未完成",
       },
     },
     elements: [{
@@ -489,11 +487,24 @@ function renderSetupOutcomeCard(
   };
 }
 
+function manualConfigurationText(appId: string): string {
+  return [
+    "飞书官方授权已完成，Gateway 不会自动修改或发布应用配置。",
+    "",
+    `请[打开当前飞书应用](https://open.feishu.cn/app/${appId})并完成：`,
+    "1. 在机器人能力中开启自定义菜单。",
+    `2. 添加事件类型菜单项，Event Key 设为 ${feishuCommandMenuEventKey}。`,
+    "3. 确认消息事件、机器人菜单事件和卡片回调使用长连接。",
+    "4. 创建并发布应用版本。",
+    "",
+    "完成后发送 /feishu doctor 复查。",
+  ].join("\n");
+}
+
 function isComplete(
   snapshot: FeishuApplicationSnapshot | undefined,
 ): boolean {
   return snapshot !== undefined
-    && snapshot.hasPatchScope
     && snapshot.messageEventConfigured
     && snapshot.menuEventConfigured
     && snapshot.cardCallbackConfigured
@@ -501,19 +512,37 @@ function isComplete(
     && !snapshot.hasPendingVersion;
 }
 
+function menuStatus(snapshot: FeishuApplicationSnapshot): string {
+  if (snapshot.menuConfigured) {
+    return "已启用";
+  }
+  return snapshot.botMenus.some(
+    (menu) =>
+      menu.event_key === feishuCommandMenuEventKey
+      && menu.menu_content_type === 2,
+  )
+    ? "已定义但未启用"
+    : "待配置";
+}
+
 function setupFailureText(error: unknown): string {
   const code = (error as Partial<FeishuApplicationSetupError>).code;
-  if (code === "pending-version") {
-    return "检测到已有未完成版本。为避免发布无关改动，请先在开放平台处理该版本后重试。";
-  }
   if (code === "authorization-invalid") {
-    return "应用配置授权未完成或已失效，请重新发送 /feishu doctor。";
+    const failure = (error as Partial<FeishuApplicationSetupError>)
+      .authorizationFailure;
+    if (failure === "access-denied") {
+      return "飞书授权页未完成确认或已拒绝，请重新发送 /feishu doctor。";
+    }
+    if (failure === "expired") {
+      return "飞书应用授权已过期，请重新发送 /feishu doctor。";
+    }
+    if (failure === "app-mismatch") {
+      return "飞书授权结果不是当前应用，已安全拒绝。请重新发送 /feishu doctor。";
+    }
+    if (failure === "unsupported-tenant") {
+      return "当前项目暂不支持 Lark 租户。";
+    }
+    return "应用授权未完成或已失效，请重新发送 /feishu doctor。";
   }
-  if (code === "publish-failed") {
-    return "菜单与订阅可能已写入，但版本提交失败。请发送 /feishu doctor 复查后再决定是否重试。";
-  }
-  if (code === "configure-failed") {
-    return "部分应用配置可能已写入，但配置未全部完成。请发送 /feishu doctor 复查后再决定是否重试。";
-  }
-  return "配置未完成。Gateway 已隐藏上游错误详情，请发送 /feishu doctor 复查。";
+  return "授权未完成。Gateway 已隐藏上游错误详情，请发送 /feishu doctor 复查。";
 }

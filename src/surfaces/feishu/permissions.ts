@@ -15,7 +15,6 @@ export type FeishuUserAuthorizationStatus =
 const requiredMessageTenantScope = "im:message:send_as_bot";
 const requiredStreamingTenantScope = "cardkit:card:write";
 const oauthInspectionScope = "application:application:self_manage";
-const applicationPatchScope = "application:application:patch";
 const requiredMessageEvent = "im.message.receive_v1";
 const requiredMenuEvent = "application.bot.menu_v6";
 const requiredCardCallback = "card.action.trigger";
@@ -69,9 +68,6 @@ export function renderFeishuDoctor(
   const oauthInspectionScopeUrl = `${applicationUrl}/auth?q=${
     encodeURIComponent(oauthInspectionScope)
   }&op_from=codexc&token_type=tenant`;
-  const applicationPatchScopeUrl = `${applicationUrl}/auth?q=${
-    encodeURIComponent(applicationPatchScope)
-  }&op_from=codexc&token_type=tenant`;
   return [
     "飞书 Doctor",
     "",
@@ -90,14 +86,12 @@ export function renderFeishuDoctor(
     "",
     "当前 Surface 对话不依赖用户 OAuth；用户授权只供后续用户级飞书 API 使用。",
     `授权检测需要额外应用权限：${oauthInspectionScope}`,
-    `一键配置需要应用管理权限：${applicationPatchScope}`,
     "/feishu authorize 会检测现有 Token，只增量申请尚未覆盖的应用用户权限。",
     "Token 只保存在 macOS Keychain 或 Linux 加密凭据文件，不进入会话数据库。",
     "",
     `[申请机器人发送消息权限](${messageScopeUrl})`,
     `[申请原生流式卡片权限](${streamingScopeUrl})`,
     `[申请用户授权检测权限](${oauthInspectionScopeUrl})`,
-    `[申请应用管理权限](${applicationPatchScopeUrl})`,
     `[打开完整权限管理](${applicationUrl}/permission)`,
     `[打开当前飞书应用](${applicationUrl})`,
     "",

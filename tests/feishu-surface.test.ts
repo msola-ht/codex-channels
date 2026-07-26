@@ -396,11 +396,11 @@ describe("Feishu Surface", () => {
       undefined,
       undefined,
       {
-        hasPatchScope: true,
         hasPendingVersion: false,
         messageEventConfigured: false,
         menuEventConfigured: false,
         cardCallbackConfigured: false,
+        botMenuEnabled: false,
         menuConfigured: false,
         botMenus: [],
       },
@@ -412,15 +412,18 @@ describe("Feishu Surface", () => {
     fixture.emitMessage(0, "/feishu doctor");
     await settle();
     fixture.emitSetupAction();
-    await settle();
+    await vi.waitFor(() => {
+      expect(fixture.updatedCards.length).toBeGreaterThanOrEqual(2);
+    });
     await fixture.surface.stop();
 
-    expect(fixture.applicationApi.authorizeConfiguration)
+    expect(fixture.applicationApi.authorizeApplication)
       .toHaveBeenCalledWith(
         expect.any(AbortSignal),
         expect.any(Function),
       );
-    expect(fixture.applicationApi.configureAndPublish).toHaveBeenCalledOnce();
+    expect(JSON.stringify(fixture.updatedCards.at(-1)?.card))
+      .toContain("飞书官方授权已完成");
   });
 });
 
@@ -431,11 +434,11 @@ function createFixture(
     messages(): ReadonlyArray<{ chatId: string; text: string }>;
   },
   applicationSnapshot: FeishuApplicationSnapshot = {
-    hasPatchScope: true,
     hasPendingVersion: false,
     messageEventConfigured: true,
     menuEventConfigured: true,
     cardCallbackConfigured: true,
+    botMenuEnabled: true,
     menuConfigured: true,
     botMenus: [],
   },
@@ -460,6 +463,10 @@ function createFixture(
     messageId: string;
     card: FeishuCardDocument;
   }> = [];
+  const updatedCards: Array<{
+    messageId: string;
+    card: FeishuCardDocument;
+  }> = [];
   const logs: Array<Record<string, unknown>> = [];
   const sdkStart = vi.fn(async () => {});
   const sdkClose = vi.fn();
@@ -471,7 +478,7 @@ function createFixture(
   const oauthClose = vi.fn(async () => {});
   const applicationApi = {
     inspect: vi.fn(async () => applicationSnapshot),
-    authorizeConfiguration: vi.fn(
+    authorizeApplication: vi.fn(
       async (
         _signal: AbortSignal,
         ready: (url: string, expiresInSeconds: number) => void,
@@ -482,10 +489,6 @@ function createFixture(
         );
       },
     ),
-    configureAndPublish: vi.fn(async () => ({
-      versionId: "oav_new",
-      version: "1.2.3",
-    })),
   };
   const logger = pino({ level: "info" }, {
     write(message) {
@@ -516,7 +519,9 @@ function createFixture(
         cards.push({ chatId, messageId, card });
         return messageId;
       },
-      updateCard: async () => {},
+      updateCard: async (messageId, card) => {
+        updatedCards.push({ messageId, card });
+      },
       sendText: async (chatId, text) => {
         sent.push({ chatId, text });
       },
@@ -571,6 +576,7 @@ function createFixture(
     surface,
     sent,
     cards,
+    updatedCards,
     logs,
     sdkStart,
     sdkClose,
@@ -716,12 +722,12 @@ function createFixture(
         const candidate = (action as {
           value: Record<string, string>;
         }).value;
-        return candidate.codexc_feishu_setup_action === "configure"
+        return candidate.codexc_feishu_setup_action === "authorize"
           ? [candidate]
           : [];
       })[0];
       if (!value) {
-        throw new Error("飞书 Doctor 配置动作不存在");
+        throw new Error("飞书 Doctor 授权动作不存在");
       }
       cardActionHandler({
         context: {

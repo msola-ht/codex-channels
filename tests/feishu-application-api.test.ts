@@ -19,9 +19,7 @@ describe("Feishu application management API", () => {
           app: {
             app_id: options.appId,
             online_version_id: "oav_online",
-            scopes: [
-              { scope: "application:application:patch" },
-            ],
+            scopes: [],
             event: {
               subscribed_events: [
                 "im.message.receive_v1",
@@ -31,8 +29,6 @@ describe("Feishu application management API", () => {
             callback_info: {
               subscribed_callbacks: ["card.action.trigger"],
             },
-            mobile_default_ability: "bot",
-            pc_default_ability: "bot",
           },
         },
       }),
@@ -43,6 +39,7 @@ describe("Feishu application management API", () => {
             app_id: options.appId,
             ability: {
               bot: {
+                bot_menu_enable: true,
                 bot_menu_display_strategy: 2,
                 bot_menus: [{
                   menu_id: "existing",
@@ -61,11 +58,11 @@ describe("Feishu application management API", () => {
     const api = createApi(client);
 
     await expect(api.inspect()).resolves.toEqual({
-      hasPatchScope: true,
       hasPendingVersion: false,
       messageEventConfigured: true,
       menuEventConfigured: true,
       cardCallbackConfigured: true,
+      botMenuEnabled: true,
       menuConfigured: true,
       botMenus: [{
         menu_id: "existing",
@@ -76,12 +73,53 @@ describe("Feishu application management API", () => {
         menu_content_type: 2,
       }],
       botMenuDisplayStrategy: 2,
-      mobileDefaultAbility: "bot",
-      pcDefaultAbility: "bot",
     });
   });
 
-  it("fails closed before reading or publishing an existing pending version", async () => {
+  it("does not report a published menu node as enabled when its switch is off", async () => {
+    const client = createClient({
+      getApplication: async () => ({
+        code: 0,
+        data: {
+          app: {
+            app_id: options.appId,
+            online_version_id: "oav_online",
+            scopes: [],
+          },
+        },
+      }),
+      getVersion: async () => ({
+        code: 0,
+        data: {
+          app_version: {
+            app_id: options.appId,
+            ability: {
+              bot: {
+                bot_menu_enable: false,
+                bot_menus: [{
+                  menu_id: "7351234567890123456",
+                  sort: 0,
+                  default_name: "Codex",
+                  event_key: "codexc_home",
+                  menu_content_type: 2,
+                }],
+              },
+            },
+          },
+        },
+      }),
+    });
+
+    await expect(createApi(client).inspect()).resolves.toMatchObject({
+      botMenuEnabled: false,
+      menuConfigured: false,
+      botMenus: [expect.objectContaining({
+        event_key: "codexc_home",
+      })],
+    });
+  });
+
+  it("reports an existing pending version without reading it", async () => {
     const client = createClient({
       getApplication: async () => ({
         code: 0,
@@ -99,77 +137,6 @@ describe("Feishu application management API", () => {
 
     expect(snapshot.hasPendingVersion).toBe(true);
     expect(client.getVersion).not.toHaveBeenCalled();
-    await expect(api.configureAndPublish(snapshot)).rejects.toMatchObject({
-      code: "pending-version",
-    });
-    expect(client.patchAbility).not.toHaveBeenCalled();
-    expect(client.publish).not.toHaveBeenCalled();
-  });
-
-  it("preserves other menus and submits additive config before publishing", async () => {
-    const client = createClient();
-    const api = createApi(client);
-
-    await expect(api.configureAndPublish({
-      hasPatchScope: true,
-      hasPendingVersion: false,
-      messageEventConfigured: false,
-      menuEventConfigured: false,
-      cardCallbackConfigured: false,
-      menuConfigured: false,
-      botMenus: [{
-        menu_id: "docs",
-        sort: 4,
-        default_name: "文档",
-        redirect_link: {
-          pc_url: "https://example.com/docs",
-        },
-        menu_content_type: 1,
-      }],
-      botMenuDisplayStrategy: 2,
-      mobileDefaultAbility: "bot",
-      pcDefaultAbility: "bot",
-    })).resolves.toEqual({
-      versionId: "oav_new",
-      version: "1.2.3",
-    });
-
-    expect(client.patchAbility).toHaveBeenCalledWith(
-      options.appId,
-      {
-        enable: true,
-        bot_menu_enable: true,
-        bot_menus: [
-          {
-            menu_id: "docs",
-            sort: 4,
-            default_name: "文档",
-            redirect_link: {
-              pc_url: "https://example.com/docs",
-            },
-            menu_content_type: 1,
-          },
-          {
-            menu_id: "codexc_home",
-            sort: 5,
-            default_name: "Codex",
-            event_key: "codexc_home",
-            menu_content_type: 2,
-          },
-        ],
-        bot_menu_display_strategy: 2,
-      },
-      undefined,
-    );
-    expect(client.patchConfig).toHaveBeenCalledBefore(client.publish);
-    expect(client.publish).toHaveBeenCalledWith(
-      options.appId,
-      expect.objectContaining({
-        mobile_default_ability: "bot",
-        pc_default_ability: "bot",
-      }),
-      undefined,
-    );
   });
 
   it("uses the SDK update authorization for the exact configured app", async () => {
@@ -178,7 +145,7 @@ describe("Feishu application management API", () => {
       onQRCodeReady(info: { url: string; expireIn: number }): void;
     }) => {
       input.onQRCodeReady({
-        url: "https://applink.feishu.cn/client/mini_program/open?code=one",
+        url: "https://open.feishu.cn/oauth/v1/app/registration?code=one",
         expireIn: 600,
       });
       return {
@@ -196,21 +163,48 @@ describe("Feishu application management API", () => {
     });
     const ready = vi.fn();
 
-    await api.authorizeConfiguration(
+    await api.authorizeApplication(
       new AbortController().signal,
       ready,
     );
 
     expect(ready).toHaveBeenCalledWith(
-      "https://applink.feishu.cn/client/mini_program/open?code=one",
+      "https://open.feishu.cn/oauth/v1/app/registration?code=one",
       600,
     );
     expect(register).toHaveBeenCalledWith(expect.objectContaining({
       appId: options.appId,
       addons: expect.objectContaining({
         preset: false,
+        scopes: {
+          tenant: expect.not.arrayContaining([
+            "application:application:patch",
+          ]),
+        },
       }),
     }));
+  });
+
+  it("rejects a lookalike application authorization Origin", async () => {
+    const api = new FeishuApplicationHttpApi(options, {
+      client: createClient(),
+      register: (async (input: {
+        onQRCodeReady(info: { url: string; expireIn: number }): void;
+      }) => {
+        input.onQRCodeReady({
+          url: "https://open.feishu.cn.example.com/oauth?code=secret",
+          expireIn: 600,
+        });
+        throw new Error("unreachable");
+      }) as never,
+    });
+
+    await expect(api.authorizeApplication(
+      new AbortController().signal,
+      vi.fn(),
+    )).rejects.toMatchObject({
+      code: "authorization-invalid",
+    });
   });
 
   it("rejects a configuration authorization for another app", async () => {
@@ -226,14 +220,72 @@ describe("Feishu application management API", () => {
       })) as never,
     });
 
-    await expect(api.authorizeConfiguration(
+    await expect(api.authorizeApplication(
       new AbortController().signal,
       vi.fn(),
     )).rejects.toEqual(expect.objectContaining<
       Partial<FeishuApplicationSetupError>
     >({
       code: "authorization-invalid",
+      authorizationFailure: "app-mismatch",
     }));
+  });
+
+  it("classifies a denied SDK registration without exposing its response", async () => {
+    const api = new FeishuApplicationHttpApi(options, {
+      client: createClient(),
+      register: (async () => {
+        throw Object.assign(new Error("sensitive response"), {
+          code: "access_denied",
+          description: "sensitive response",
+          response: {
+            status: 403,
+            data: "sensitive response",
+          },
+        });
+      }) as never,
+    });
+
+    await expect(api.authorizeApplication(
+      new AbortController().signal,
+      vi.fn(),
+    )).rejects.toMatchObject({
+      code: "authorization-invalid",
+      authorizationFailure: "access-denied",
+      authorizationDiagnostic: {
+        errorName: "Error",
+        errorCode: "access_denied",
+        httpStatus: 403,
+      },
+      message: "飞书应用授权失败",
+    });
+  });
+
+  it("drops unsafe registration diagnostic fields", async () => {
+    const api = new FeishuApplicationHttpApi(options, {
+      client: createClient(),
+      register: (async () => {
+        throw Object.assign(new Error("sensitive response"), {
+          name: "AxiosError",
+          code: "ERR_BAD_REQUEST\nsecret",
+          response: {
+            status: 400,
+            data: "sensitive response",
+          },
+        });
+      }) as never,
+    });
+
+    await expect(api.authorizeApplication(
+      new AbortController().signal,
+      vi.fn(),
+    )).rejects.toMatchObject({
+      authorizationFailure: "registration-failed",
+      authorizationDiagnostic: {
+        errorName: "AxiosError",
+        httpStatus: 400,
+      },
+    });
   });
 
   it("does not compare app-scoped registration Open ID with the card actor", async () => {
@@ -249,7 +301,7 @@ describe("Feishu application management API", () => {
       })) as never,
     });
 
-    await expect(api.authorizeConfiguration(
+    await expect(api.authorizeApplication(
       new AbortController().signal,
       vi.fn(),
     )).resolves.toBeUndefined();
@@ -268,11 +320,12 @@ describe("Feishu application management API", () => {
       })) as never,
     });
 
-    await expect(api.authorizeConfiguration(
+    await expect(api.authorizeApplication(
       new AbortController().signal,
       vi.fn(),
     )).rejects.toMatchObject({
       code: "authorization-invalid",
+      authorizationFailure: "unsupported-tenant",
     });
   });
 });
@@ -291,14 +344,5 @@ function createClient(overrides: Partial<{
   return {
     getApplication: vi.fn(overrides.getApplication ?? (async () => ({}))),
     getVersion: vi.fn(overrides.getVersion ?? (async () => ({}))),
-    patchAbility: vi.fn(async () => ({ code: 0 })),
-    patchConfig: vi.fn(async () => ({ code: 0 })),
-    publish: vi.fn(async () => ({
-      code: 0,
-      data: {
-        version_id: "oav_new",
-        version: "1.2.3",
-      },
-    })),
   };
 }

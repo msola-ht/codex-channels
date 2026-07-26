@@ -98,7 +98,10 @@ export function toFeishuInAppUrl(targetUrl: string): string {
   }
   if (
     targetUrl.length > 2_048
-    || trustedTarget.origin !== "https://accounts.feishu.cn"
+    || (
+      trustedTarget.origin !== "https://accounts.feishu.cn"
+      && trustedTarget.origin !== "https://open.feishu.cn"
+    )
     || trustedTarget.username
     || trustedTarget.password
   ) {
