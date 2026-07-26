@@ -134,6 +134,7 @@ src/surfaces/feishu/
 ├── oauth-token-store.ts # macOS Keychain / Linux 加密凭据
 ├── oauth.ts          # Actor 级授权生命周期
 ├── outbox.ts         # 飞书发送操作与 ConversationDeliveryQueue
+├── status-card.ts    # Thread 状态轻量交互卡片
 └── media.ts          # 后续阶段的资源下载和上传
 ```
 
@@ -464,6 +465,7 @@ Actor/Chat/消息绑定、超时、跨客户端失效和卡片更新，不新增
 - [x] 富文本真实应用短回复显示验收；
 - [x] 富文本长回复在客户端折叠显示且消息顺序正确；
 - [x] Thread `active → idle` 状态消息更新的离线实现；
+- [x] Thread `active → idle` 轻量状态卡片的真实应用更新验收；
 - [x] 已授权绑定的启动通知与每轮上下文状态离线实现；
 - [x] CardKit 2.0 原生流式卡片的离线实现；
 - [x] CardKit 2.0 原生流式卡片的真实应用主路径显示验收；
@@ -479,10 +481,12 @@ Actor/Chat/消息绑定、超时、跨客户端失效和卡片更新，不新增
 Application 图片输入。一般文件、图片说明文字、群聊媒体和下载重试不在本切片范围；真实飞书
 私聊 PNG/JPEG 图片消息主路径已经通过验收；大小超限、无效签名等失败路径仍由离线测试覆盖。
 
-第三个体验切片只更新同一 Thread 的纯文本状态消息。Outbox 在内存中保存 `active` 消息 ID，
-同一 Chat 队列收到 `idle` 后调用锁定 SDK 的 `im.v1.message.patch` 更新原消息并立即清除绑定；
+第三个体验切片只更新同一 Thread 的轻量交互卡片。Outbox 在内存中保存蓝色 `active` 卡片的
+消息 ID，同一 Chat 队列收到 `idle` 后调用锁定 SDK 的 `im.v1.message.patch` 把原卡片更新为
+绿色空闲状态并立即清除绑定；
 重复 `active` 不调用平台，更新失败清除旧绑定、记录现有稳定诊断且不自动重试。该切片不更新
-模型正文、不持久化消息 ID、不实现流式卡片，仍待真实飞书验收。
+模型正文、不持久化消息 ID，也不使用 CardKit 流式实体。2026-07-26 已通过真实飞书确认同一
+卡片能从蓝色“运行中”原地更新为绿色“空闲”，正文和 Turn 状态顺序保持不变。
 
 第四个体验切片复用现有状态来源。长连接就绪后，Bootstrap 只为已有绑定且仍有授权 Actor 的
 精确 Chat 生成启动通知，Surface 校验、去重后通过富文本 Outbox 入队；每轮结束直接渲染

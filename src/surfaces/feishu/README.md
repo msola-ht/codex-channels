@@ -36,6 +36,7 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
 - `renderer.ts`：把平台无关 `ConversationCommandResult`、`OutputEvent`、启动状态和结构化错误
   映射为稳定文本内容。
 - `outbox.ts`：精确账号路由并通过通用有界队列调用窄消息发送端口。
+- `status-card.ts`：把 Thread 状态映射为可原地更新的轻量交互卡片。
 - `surface.ts`：组合单账号连接、Inbox、Application Adapter、Outbox 和失败关闭交互端口，并由
   模块入口只暴露 `createFeishuSurface()` 工厂与生产选项类型。
 
@@ -55,8 +56,9 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
   每项最多 1,000 字符的字符串字段。
 - 消息发送只使用 `im.v1.message.create` 的 `chat_id + text/post/interactive` 窄能力；富文本只生成单个
   `md` 元素，不暴露 SDK Client。模型或上游文本中的飞书原生 `<at>` 标签会在平台边界被中和，
-  避免非预期提醒。审批结束和 Thread 状态更新使用 `im.v1.message.patch`；调用设置 15 秒 HTTP
-  超时，创建响应必须包含 `message_id`。
+  避免非预期提醒。审批结束和 Thread 状态都只更新 `interactive` 卡片，并使用
+  `im.v1.message.patch`；普通文本不会交给卡片更新接口。调用设置 15 秒 HTTP 超时，创建响应必须
+  包含 `message_id`。
 - 发送超时、SDK 失败和残缺响应只暴露稳定错误码，不回传 SDK message、响应正文或凭据。
 - 消息创建不自动重试；锁定 SDK 虽提供可选 `uuid` 字段，但当前官方资料未明确其幂等窗口和
   可重试错误语义。
@@ -103,10 +105,10 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 更新失败会尽力结束已显示的卡片，再在最终文本到达后用剩余预算回退完整富文本；结束设置失败
 不重复正文；状态、正文和
 卡片更新继续共用一个 Chat 队列，不引入第二套 Channel、队列或持久化。同一 Thread 的
-`active` 状态消息 ID 只保存在 Outbox 内存，并在 `idle` 到达时
-按同一 Chat 顺序更新；重复 `active` 被忽略，更新失败会清理旧绑定且不阻塞后续输出。真实长回复
-已确认由飞书客户端折叠显示且消息顺序正确；状态更新仍待真实验收，通用消息更新和文件回退
-尚未实现。
+`active` 轻量状态卡片的消息 ID 只保存在 Outbox 内存，并在 `idle` 到达时
+按同一 Chat 顺序把蓝色“运行中”更新为绿色“空闲”；重复 `active` 被忽略，更新失败会清理旧绑定
+且不阻塞后续输出。真实长回复已确认由飞书客户端折叠显示且消息顺序正确；蓝色运行中卡片
+原地更新为绿色空闲卡片的真实主路径也已通过验收，通用消息更新和文件回退尚未实现。
 
 `surface.ts` 在长连接就绪后，从 Bootstrap 注入的 provider 读取启动通知。Bootstrap 只为
 StateStore 中已有绑定且仍有授权 Actor 的精确 Chat 生成消息；Surface 再次校验 Chat ID、去重
@@ -163,8 +165,9 @@ Setup 与只读 Doctor 凭据/Bot 身份探测已完成，真实应用的首次�
 行内代码和链接的真实显示。用户 OAuth Device Flow、Actor 身份校验和安全凭据写入也已通过
 真实应用验证；Gateway 重启后的 Token 恢复和精确 Thread 绑定也已通过验收。私聊 PNG/JPEG、
 命令审批一次批准，以及长回复在客户端折叠显示且顺序正确也已完成真实验收。持续回复以
-CardKit 原生流式卡片可见更新的主路径同样已通过验收；真实限流、失败回退和超长内容滚动仍待
-验证。断线恢复、代理、未授权/重复事件、用户输入与 MCP 卡片动作仍未完成真实验收。后续阶段按
+CardKit 原生流式卡片可见更新的主路径同样已通过验收；轻量 Thread 状态卡片的
+`active → idle` 原地更新也已通过真实验收。真实限流、失败回退和超长内容滚动仍待验证。
+断线恢复、代理、未授权/重复事件、用户输入与 MCP 卡片动作仍未完成真实验收。后续阶段按
 [`飞书 Surface 接入计划`](../../../docs/feishu-surface-plan.md)推进；一级 `surfaces` 入口只转出
 窄工厂，不得导出 SDK 类型，也不得在 Core 中引入飞书类型。Phase 1 真实验收关闭前，Phase 2
 命令只视为预备实现。群聊已记录为后续需求但当前不开发，也不更新为公开支持。

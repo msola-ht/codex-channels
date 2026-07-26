@@ -7,6 +7,7 @@ import type {
 } from "../src/conversation-core/index.js";
 import {
   FeishuOutbox,
+  type FeishuCardDocument,
   type FeishuMessagePort,
 } from "../src/surfaces/feishu/index.js";
 
@@ -19,8 +20,6 @@ const target = {
 const cardMethods = {
   sendCard: async () => "om_card",
   updateCard: async () => {},
-  createText: async () => "om_text",
-  updateText: async () => {},
   createStreamingCard: async () => ({
     cardId: "7355372766134157313",
     messageId: "om_stream",
@@ -318,21 +317,27 @@ describe("Feishu outbox", () => {
     ]);
   });
 
-  it("updates one thread status message from active to idle", async () => {
-    const sent: Array<{ chatId: string; text: string }> = [];
-    const updated: Array<{ messageId: string; text: string }> = [];
+  it("updates one thread status card from active to idle", async () => {
+    const sent: Array<{
+      chatId: string;
+      card: FeishuCardDocument;
+    }> = [];
+    const updated: Array<{
+      messageId: string;
+      card: FeishuCardDocument;
+    }> = [];
     const outbox = new FeishuOutbox(
       "cli_app",
       {
         ...cardMethods,
         sendText: async () => {},
-        createText: async (chatId, text) => {
-          sent.push({ chatId, text });
+        sendCard: async (chatId, card) => {
+          sent.push({ chatId, card });
           return "om_status";
         },
         sendPost: async () => {},
-        updateText: async (messageId, text) => {
-          updated.push({ messageId, text });
+        updateCard: async (messageId, card) => {
+          updated.push({ messageId, card });
         },
       },
       pino({ level: "silent" }),
@@ -345,11 +350,49 @@ describe("Feishu outbox", () => {
 
     expect(sent).toEqual([{
       chatId: "oc_chat",
-      text: "Thread 状态：运行中",
+      card: {
+        config: {
+          update_multi: true,
+          wide_screen_mode: true,
+        },
+        header: {
+          template: "blue",
+          title: {
+            tag: "plain_text",
+            content: "Thread 状态",
+          },
+        },
+        elements: [{
+          tag: "div",
+          text: {
+            tag: "plain_text",
+            content: "运行中",
+          },
+        }],
+      },
     }]);
     expect(updated).toEqual([{
       messageId: "om_status",
-      text: "Thread 状态：空闲",
+      card: {
+        config: {
+          update_multi: true,
+          wide_screen_mode: true,
+        },
+        header: {
+          template: "green",
+          title: {
+            tag: "plain_text",
+            content: "Thread 状态",
+          },
+        },
+        elements: [{
+          tag: "div",
+          text: {
+            tag: "plain_text",
+            content: "空闲",
+          },
+        }],
+      },
     }]);
   });
 
@@ -362,11 +405,11 @@ describe("Feishu outbox", () => {
         ...cardMethods,
         sendText: async () => {},
         sendPost: async () => {},
-        createText: async (_chatId, text) => {
-          created.push(text);
+        sendCard: async (_chatId, card) => {
+          created.push(statusCardText(card));
           return `om_status_${created.length}`;
         },
-        updateText: async () => {
+        updateCard: async () => {
           updateAttempts += 1;
           throw new Error("update failed");
         },
@@ -380,8 +423,8 @@ describe("Feishu outbox", () => {
     await outbox.close();
 
     expect(created).toEqual([
-      "Thread 状态：运行中",
-      "Thread 状态：运行中",
+      "运行中",
+      "运行中",
     ]);
     expect(updateAttempts).toBe(1);
   });
@@ -389,21 +432,21 @@ describe("Feishu outbox", () => {
   it("does not restore a status binding after close times out", async () => {
     vi.useFakeTimers();
     const creation = deferredValue<string>();
-    const createText = vi.fn(() => creation.promise);
+    const sendCard = vi.fn(() => creation.promise);
     const outbox = new FeishuOutbox(
       "cli_app",
       {
         ...cardMethods,
         sendText: async () => {},
         sendPost: async () => {},
-        createText,
+        sendCard,
       },
       pino({ level: "silent" }),
     );
 
     outbox.handle(threadStatus("active"));
     await vi.advanceTimersByTimeAsync(0);
-    expect(createText).toHaveBeenCalledOnce();
+    expect(sendCard).toHaveBeenCalledOnce();
 
     const closing = outbox.close();
     await vi.advanceTimersByTimeAsync(5_000);
@@ -698,6 +741,17 @@ function turnCompleted(): OutputEvent {
     turnId: "turn-1",
     status: "completed",
   };
+}
+
+function statusCardText(card: FeishuCardDocument): string {
+  const element = card.elements[0] as {
+    text?: {
+      content?: unknown;
+    };
+  } | undefined;
+  return typeof element?.text?.content === "string"
+    ? element.text.content
+    : "";
 }
 
 function deferred(): {

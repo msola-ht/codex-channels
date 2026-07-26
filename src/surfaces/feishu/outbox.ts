@@ -9,6 +9,7 @@ import type { SurfaceOutputPort } from "../types.js";
 import type { FeishuCardDocument } from "./approval-card.js";
 import { encodeFeishuPostContent } from "./message-content.js";
 import { renderFeishuOutput } from "./renderer.js";
+import { renderFeishuThreadStatusCard } from "./status-card.js";
 
 const maximumFeishuMessageContentBytes = 20_000;
 const maximumFeishuMessageChunks = 5;
@@ -36,8 +37,6 @@ interface FeishuStreamState {
 export interface FeishuMessagePort {
   sendText(chatId: string, text: string): Promise<void>;
   sendPost(chatId: string, markdown: string): Promise<void>;
-  createText(chatId: string, text: string): Promise<string>;
-  updateText(messageId: string, text: string): Promise<void>;
   sendCard(chatId: string, card: FeishuCardDocument): Promise<string>;
   updateCard(messageId: string, card: FeishuCardDocument): Promise<void>;
   createStreamingCard(
@@ -94,16 +93,16 @@ export class FeishuOutbox implements SurfaceOutputPort {
     if (event.type === "turn.completed") {
       this.finishStreamsForTurn(event.threadId, event.turnId);
     }
-    const text = renderFeishuOutput(event);
-    if (text === null) {
-      return;
-    }
     if (event.type === "thread.status") {
       this.delivery.enqueue(
         event.target.conversationId,
-        () => this.deliverThreadStatus(event, text),
+        () => this.deliverThreadStatus(event),
         true,
       );
+      return;
+    }
+    const text = renderFeishuOutput(event);
+    if (text === null) {
       return;
     }
     this.delivery.enqueue(
@@ -208,8 +207,8 @@ export class FeishuOutbox implements SurfaceOutputPort {
 
   private async deliverThreadStatus(
     event: Extract<OutputEvent, { type: "thread.status" }>,
-    text: string,
   ): Promise<void> {
+    const card = renderFeishuThreadStatusCard(event.status);
     const current = this.threadStatusMessages.get(event.threadId);
     if (
       current
@@ -219,7 +218,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         return;
       }
       try {
-        await this.messagePort.updateText(current.messageId, text);
+        await this.messagePort.updateCard(current.messageId, card);
       } catch (error) {
         if (this.threadStatusMessages.get(event.threadId) === current) {
           this.threadStatusMessages.delete(event.threadId);
@@ -236,9 +235,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
       }
       return;
     }
-    const messageId = await this.messagePort.createText(
+    const messageId = await this.messagePort.sendCard(
       event.target.conversationId,
-      text,
+      card,
     );
     if (event.status === "active" && !this.closeFinished) {
       this.threadStatusMessages.set(event.threadId, {

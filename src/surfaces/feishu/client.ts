@@ -281,7 +281,7 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
   }
 
   async sendText(chatId: string, text: string): Promise<void> {
-    await this.createText(chatId, text);
+    await this.sendMessage(chatId, "text", JSON.stringify({ text }));
   }
 
   async sendPost(chatId: string, markdown: string): Promise<void> {
@@ -442,10 +442,6 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
     );
   }
 
-  async createText(chatId: string, text: string): Promise<string> {
-    return this.sendMessage(chatId, "text", JSON.stringify({ text }));
-  }
-
   async sendCard(
     chatId: string,
     card: FeishuCardDocument,
@@ -462,13 +458,6 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
     card: FeishuCardDocument,
   ): Promise<void> {
     await this.updateMessage(messageId, JSON.stringify(card));
-  }
-
-  async updateText(
-    messageId: string,
-    text: string,
-  ): Promise<void> {
-    await this.updateMessage(messageId, JSON.stringify({ text }));
   }
 
   private async updateMessage(

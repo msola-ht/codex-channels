@@ -507,40 +507,6 @@ describe("FeishuMessageClient", () => {
     });
   });
 
-  it("returns the message ID for a tracked text message", async () => {
-    const createMessage = vi.fn(async () => ({
-      data: { message_id: "om_status" },
-    }));
-    const client = new FeishuMessageClient(
-      {
-        appId: "cli_0123456789abcdef",
-        appSecret: "secret",
-      },
-      {
-        sendTimeoutMs: 1_000,
-        createSdkClient: () => ({
-          createMessage,
-          patchMessage: successfulPatch,
-          downloadResource: successfulDownload,
-        }),
-      },
-    );
-
-    await expect(
-      client.createText("oc_chat", "Thread 状态：运行中"),
-    ).resolves.toBe("om_status");
-    expect(createMessage).toHaveBeenCalledWith({
-      params: {
-        receive_id_type: "chat_id",
-      },
-      data: {
-        receive_id: "oc_chat",
-        msg_type: "text",
-        content: "{\"text\":\"Thread 状态：运行中\"}",
-      },
-    });
-  });
-
   it("sends Markdown as a Feishu rich-text post to an exact chat ID", async () => {
     const createMessage = vi.fn(async () => ({
       data: { message_id: "om_message" },
@@ -846,40 +812,6 @@ describe("FeishuMessageClient", () => {
     });
   });
 
-  it("updates a text message with the exact message ID and content", async () => {
-    const patchMessage = vi.fn(async () => ({ code: 0 }));
-    const client = new FeishuMessageClient(
-      {
-        appId: "cli_0123456789abcdef",
-        appSecret: "secret",
-      },
-      {
-        sendTimeoutMs: 1_000,
-        createSdkClient: () => ({
-          createMessage: async () => ({
-            data: { message_id: "om_message" },
-          }),
-          patchMessage,
-          downloadResource: successfulDownload,
-        }),
-      },
-    );
-
-    await expect(
-      client.updateText("om_status", "Thread 状态：空闲"),
-    ).resolves.toBeUndefined();
-
-    expect(patchMessage).toHaveBeenCalledOnce();
-    expect(patchMessage).toHaveBeenCalledWith({
-      path: {
-        message_id: "om_status",
-      },
-      data: {
-        content: "{\"text\":\"Thread 状态：空闲\"}",
-      },
-    });
-  });
-
   it("fails closed when a message update response reports an error", async () => {
     const patchMessage = vi.fn(async () => ({ code: 999 }));
     const client = new FeishuMessageClient(
@@ -900,7 +832,7 @@ describe("FeishuMessageClient", () => {
     );
 
     await expect(
-      client.updateText("om_status", "Thread 状态：空闲"),
+      client.updateCard("om_status", approvalCard()),
     ).rejects.toEqual(new FeishuMessageError(
       "invalid-response",
       "飞书消息更新响应无效",
@@ -930,7 +862,7 @@ describe("FeishuMessageClient", () => {
     );
 
     await expect(
-      client.updateText("om_status", "Thread 状态：空闲"),
+      client.updateCard("om_status", approvalCard()),
     ).rejects.toEqual(new FeishuMessageError(
       "send-failed",
       "飞书消息更新失败",
@@ -962,7 +894,7 @@ describe("FeishuMessageClient", () => {
     );
 
     await expect(
-      client.updateText("om_status", "Thread 状态：空闲"),
+      client.updateCard("om_status", approvalCard()),
     ).rejects.toEqual(new FeishuMessageError(
       "send-timeout",
       "飞书消息更新超时",
@@ -988,9 +920,9 @@ describe("FeishuMessageClient", () => {
       },
     );
 
-    const updating = client.updateText(
+    const updating = client.updateCard(
       "om_status",
-      "Thread 状态：空闲",
+      approvalCard(),
     );
     const rejection = expect(updating).rejects.toEqual(
       new FeishuMessageError(
