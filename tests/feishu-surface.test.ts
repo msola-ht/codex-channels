@@ -35,6 +35,27 @@ describe("Feishu Surface", () => {
     expect(JSON.stringify(fixture.logs)).not.toContain("secret");
   });
 
+  it("deduplicates a replayed event across a reconnect", async () => {
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const fixture = createFixture({ submit });
+    const starting = fixture.surface.start();
+    fixture.ready();
+    await starting;
+
+    fixture.emitMessage(0);
+    await settle();
+    fixture.reconnecting();
+    fixture.reconnected();
+    fixture.emitMessage(0);
+    await fixture.surface.stop();
+
+    expect(submit).toHaveBeenCalledOnce();
+  });
+
   it("starts the event connection and closes it on stop", async () => {
     const fixture = createFixture();
 
@@ -116,7 +137,7 @@ describe("Feishu Surface", () => {
 
   it("notifies the chat when the input queue is overloaded", async () => {
     let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
+    let gate = new Promise<void>((resolve) => {
       release = resolve;
     });
     const fixture = createFixture({
@@ -133,7 +154,7 @@ describe("Feishu Surface", () => {
     fixture.ready();
     await starting;
 
-    for (let index = 0; index <= 100; index += 1) {
+    for (let index = 0; index < 110; index += 1) {
       fixture.emitMessage(index);
     }
     await settle();
@@ -142,6 +163,27 @@ describe("Feishu Surface", () => {
       chatId: "oc_chat",
       text: "当前飞书输入队列繁忙，请稍后重试。",
     }]);
+
+    release();
+    await settle();
+    gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    for (let index = 110; index < 220; index += 1) {
+      fixture.emitMessage(index);
+    }
+    await settle();
+
+    expect(fixture.sent).toEqual([
+      {
+        chatId: "oc_chat",
+        text: "当前飞书输入队列繁忙，请稍后重试。",
+      },
+      {
+        chatId: "oc_chat",
+        text: "当前飞书输入队列繁忙，请稍后重试。",
+      },
+    ]);
 
     release();
     await fixture.surface.stop();

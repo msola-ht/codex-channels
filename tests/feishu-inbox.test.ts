@@ -196,6 +196,28 @@ describe("FeishuInbox", () => {
     await fixture.inbox.close();
   });
 
+  it("does not let an unauthorized delivery consume the deduplication key", async () => {
+    let allowed = false;
+    const fixture = createFixture({
+      access: {
+        isAllowed: () => allowed,
+      },
+    });
+
+    expect(fixture.inbox.receive(createEvent())).toEqual({
+      status: "ignored",
+      reason: "unauthorized",
+    });
+    allowed = true;
+    expect(fixture.inbox.receive(createEvent())).toEqual({
+      status: "accepted",
+    });
+
+    await fixture.inbox.close();
+    expect(fixture.handled).toHaveLength(1);
+    expect(fixture.remembered).toHaveLength(1);
+  });
+
   it("deduplicates an accepted event without blocking a full-queue retry", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {

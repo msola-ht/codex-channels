@@ -87,6 +87,7 @@ export class FeishuSurface implements SurfaceAdapter {
     | (() => readonly string[])
     | undefined;
   private readonly logger: Logger;
+  private readonly overloadNotifiedChats = new Set<string>();
   private connectionReady = false;
   private cardActionObserved = false;
   private stopPromise: Promise<void> | undefined;
@@ -187,11 +188,19 @@ export class FeishuSurface implements SurfaceAdapter {
         : {}),
       onMessage: (event) => {
         const result = this.inbox.receive(event);
-        if (result.status === "retry") {
+        if (result.status === "accepted") {
+          this.overloadNotifiedChats.delete(event.chatId);
+        } else if (
+          result.status === "retry"
+          && !this.overloadNotifiedChats.has(event.chatId)
+        ) {
           const notified = this.output.notifyText(
             event.chatId,
             "当前飞书输入队列繁忙，请稍后重试。",
           );
+          if (notified) {
+            this.overloadNotifiedChats.add(event.chatId);
+          }
           options.logger.warn(
             {
               reason: result.reason,
