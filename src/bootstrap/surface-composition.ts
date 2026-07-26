@@ -1,5 +1,6 @@
 import { dirname, join } from "node:path";
 
+import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
 
 import type { ConversationService } from "../application/index.js";
@@ -66,6 +67,14 @@ function createFeishuModule(
     throw new Error("飞书运行配置不存在");
   }
   const access = new FeishuAccessPolicy(config.allowedOpenIds, config.appId);
+  const openApiAgent = createFeishuProxyAgent(
+    options.config.networkProxy,
+    "open.feishu.cn",
+  );
+  const accountsAgent = createFeishuProxyAgent(
+    options.config.networkProxy,
+    "accounts.feishu.cn",
+  );
   const removedBindings = removeUnauthorizedFeishuBindings(
     options.bindings,
     config.allowedOpenIds,
@@ -85,6 +94,19 @@ function createFeishuModule(
       "uploads",
       "feishu",
     ),
+    credentialsDirectory: join(
+      dirname(options.config.stateDatabasePath),
+      "credentials",
+      "feishu",
+    ),
+    disableEnvironmentProxy: true,
+    ...(openApiAgent
+      ? {
+          openApiAgent,
+          webSocketAgent: openApiAgent,
+        }
+      : {}),
+    ...(accountsAgent ? { accountsAgent } : {}),
     actorRegistry: options.bindings,
     onFatal: (error) => options.onFatal("feishu", config.appId, error),
     configurationRecipients: () => authorizedFeishuConversations(
@@ -99,6 +121,57 @@ function createFeishuModule(
     options.bindings,
     options.logger,
   );
+}
+
+function createFeishuProxyAgent(
+  proxy: GatewayConfig["networkProxy"],
+  hostname: string,
+): HttpsProxyAgent<string> | undefined {
+  const url = selectFeishuProxyUrl(proxy, hostname);
+  return url ? new HttpsProxyAgent(url) : undefined;
+}
+
+export function selectFeishuProxyUrl(
+  proxy: GatewayConfig["networkProxy"],
+  hostname: string,
+): string | undefined {
+  if (matchesNoProxy(hostname, proxy.no)) {
+    return undefined;
+  }
+  const selected = proxy.https ?? proxy.http ?? proxy.all;
+  if (!selected) {
+    return undefined;
+  }
+  let protocol: string;
+  try {
+    protocol = new URL(selected).protocol;
+  } catch {
+    throw new Error("飞书代理配置无效");
+  }
+  if (protocol !== "http:" && protocol !== "https:") {
+    throw new Error("飞书代理只支持 http:// 或 https://");
+  }
+  return selected;
+}
+
+function matchesNoProxy(hostname: string, noProxy: string | undefined): boolean {
+  const target = hostname.toLowerCase();
+  return (noProxy ?? "").split(",").some((rawEntry) => {
+    let entry = rawEntry.trim().toLowerCase();
+    if (!entry) {
+      return false;
+    }
+    if (entry === "*") {
+      return true;
+    }
+    entry = entry.replace(/:\d+$/u, "");
+    if (entry.startsWith("*.")) {
+      entry = entry.slice(1);
+    }
+    return entry.startsWith(".")
+      ? target === entry.slice(1) || target.endsWith(entry)
+      : target === entry;
+  });
 }
 
 function createTelegramModule(

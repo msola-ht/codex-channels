@@ -42,7 +42,12 @@
   未知异常脱敏；单账号 Surface 的长连接启停、关闭排空、输入过载提示和配置通知
   失败关闭与安全发送；审批、最多三个问题的用户输入表单、秘密输入、MCP JSON/URL 卡片，
   `form_value` 边界、非法选项/JSON/URL 拒绝、取消和处理结果脱敏；按严格配置注册及允许名单
-  热加载；飞书权限中心的运行观测、能力清单、申请入口和卡片回调观测状态。
+  热加载；飞书 `status/doctor` 的运行观测、必要能力、申请入口和卡片回调观测状态；OAuth Device Flow
+  请求/轮询、精确授权 Origin 与完整 URL、混合 Token 类型、原始条目与筛选后 100 项用户 Scope
+  的分层边界、有效 Token 覆盖检测与缺失 Scope 增量申请、`offline_access` 飞书内授权卡片、统一 HTTP/HTTPS 代理、`NO_PROXY` 选择、显式
+  直连和无效代理失败关闭、Actor 身份匹配、进行中状态、重复流、限时停止/撤销竞态、写入错误/
+  取消回滚，以及 macOS Keychain 原地更新与命令超时、严格凭据载荷、macOS/Linux 分离的 Token
+  Store 契约和 Linux 原子密文替换与私有权限。
 - Skill 用户与 Workspace 安装过滤、已安装 Plugin 稳定摘要及远端市场隔离。
 - 官方模型目录到稳定 Application 模型选项的映射、不可见项过滤、必需字段失败关闭，模型、
   思考强度和 Fast 的 Thread 覆盖、Codex 用户级 Fast 默认值持久化、共享客户端完整或残缺设置

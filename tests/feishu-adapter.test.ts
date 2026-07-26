@@ -101,7 +101,7 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent[3]?.text).toBe("当前没有待处理的交互请求。");
   });
 
-  it("provides a Feishu-local permission center without starting a Turn", async () => {
+  it("provides concise Feishu status and doctor commands without starting a Turn", async () => {
     const fixture = createOutbox();
     const submit = vi.fn();
     const adapter = new FeishuConversationAdapter(
@@ -117,8 +117,7 @@ describe("Feishu conversation adapter", () => {
     for (const text of [
       "/feishu",
       "/feishu status",
-      "/feishu permissions",
-      "/feishu apply",
+      "/feishu doctor",
       "/feishu unknown",
     ]) {
       await adapter.handle({ ...message, text });
@@ -126,27 +125,95 @@ describe("Feishu conversation adapter", () => {
     await fixture.outbox.close();
 
     expect(submit).not.toHaveBeenCalled();
-    expect(fixture.sent).toHaveLength(5);
+    expect(fixture.sent).toHaveLength(4);
     expect(fixture.sent[0]?.text).toContain("飞书权限中心");
+    expect(fixture.sent[0]?.text).toContain("/feishu doctor");
     expect(fixture.sent[1]?.text).toContain("长连接：已就绪");
     expect(fixture.sent[1]?.text).toContain("卡片动作回调：尚未验证");
     expect(fixture.sent[2]?.text).toContain("im:message:send_as_bot");
+    expect(fixture.sent[2]?.text).toContain(
+      "application:application:self_manage",
+    );
     expect(fixture.sent[2]?.text).toContain("im.message.receive_v1");
     expect(fixture.sent[2]?.text).toContain("card.action.trigger");
-    expect(fixture.sent[2]?.text).toContain("按具体命令声明 Scope");
-    expect(fixture.sent[3]?.text).toContain(
+    expect(fixture.sent[2]?.text).toContain(
+      "当前 Surface 对话不依赖用户 OAuth",
+    );
+    expect(fixture.sent[2]?.text).toContain(
       "https://open.feishu.cn/app/cli_0123456789abcdef/auth?q=im%3Amessage%3Asend_as_bot",
     );
-    expect(fixture.sent[3]?.text).toContain(
+    expect(fixture.sent[2]?.text).toContain(
       "https://open.feishu.cn/app/cli_0123456789abcdef/permission",
     );
-    expect(fixture.sent[3]?.text).toContain(
+    expect(fixture.sent[2]?.text).toContain(
       "需要 App Owner 或应用管理员完成",
     );
-    expect(fixture.sent[3]?.text).not.toContain("secret");
-    expect(fixture.sent[4]?.text).toBe(
-      "用法：/feishu <status|permissions|apply>",
+    expect(fixture.sent[2]?.text).not.toContain("secret");
+    expect(fixture.sent[3]?.text).toBe(
+      "用法：/feishu <status|doctor|authorize|revoke>",
     );
+  });
+
+  it("binds user authorization commands to the current message actor", async () => {
+    const fixture = createOutbox();
+    const beginAuthorization = vi.fn(() => "started" as const);
+    const status = vi.fn(async () => "valid" as const);
+    const revoke = vi.fn(async () => true);
+    const adapter = new FeishuConversationAdapter(
+      {} as ConversationService,
+      fixture.outbox,
+      imagePort,
+      () => ({
+        connectionReady: true,
+        cardActionObserved: true,
+      }),
+      {
+        beginAuthorization,
+        status,
+        revoke,
+      },
+    );
+
+    await adapter.handle({ ...message, text: "/feishu authorize" });
+    await adapter.handle({ ...message, text: "/feishu status" });
+    await adapter.handle({ ...message, text: "/feishu revoke" });
+    await fixture.outbox.close();
+
+    expect(beginAuthorization).toHaveBeenCalledWith("oc_chat", "ou_actor");
+    expect(status).toHaveBeenCalledWith("ou_actor");
+    expect(revoke).toHaveBeenCalledWith("ou_actor");
+    expect(fixture.sent).toEqual([
+      expect.objectContaining({
+        text: expect.stringContaining("当前用户 OAuth：已授权"),
+      }),
+      {
+        chatId: "oc_chat",
+        text: "已清除当前飞书账号保存的本地授权凭据。",
+      },
+    ]);
+  });
+
+  it("renders an in-progress Feishu user authorization", async () => {
+    const fixture = createOutbox();
+    const adapter = new FeishuConversationAdapter(
+      {} as ConversationService,
+      fixture.outbox,
+      imagePort,
+      () => ({
+        connectionReady: true,
+        cardActionObserved: false,
+      }),
+      {
+        beginAuthorization: () => "running",
+        status: async () => "pending",
+        revoke: async () => false,
+      },
+    );
+
+    await adapter.handle({ ...message, text: "/feishu status" });
+    await fixture.outbox.close();
+
+    expect(fixture.sent[0]?.text).toContain("当前用户 OAuth：授权进行中");
   });
 
   it("fails closed when permission runtime status is not composed", async () => {

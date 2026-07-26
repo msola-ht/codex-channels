@@ -28,6 +28,11 @@ import {
 } from "./media.js";
 import { encodeFeishuPostContent } from "./message-content.js";
 import type { FeishuMessagePort } from "./outbox.js";
+import {
+  abortableSleep,
+  FeishuOAuthHttpClient,
+  type FeishuOAuthApi,
+} from "./oauth-device-flow.js";
 
 const FEISHU_APP_ID_PATTERN = /^cli_[0-9a-fA-F]{16}$/u;
 const DEFAULT_STARTUP_TIMEOUT_MS = 60_000;
@@ -97,6 +102,49 @@ interface FeishuEventConnectionDependencies {
 export interface FeishuMessageClientOptions {
   appId: string;
   appSecret: string;
+  httpAgent?: unknown;
+  disableEnvironmentProxy?: boolean;
+}
+
+export function createFeishuOAuthApi(
+  options: FeishuMessageClientOptions,
+  accountsHttpAgent?: unknown,
+): FeishuOAuthApi {
+  if (!hasValidCredentials(options)) {
+    throw new FeishuMessageError(
+      "invalid-credentials",
+      "飞书应用凭据格式无效",
+    );
+  }
+  const client = createSdkClient(options, 15_000);
+  const openApiHttp = applyFeishuHttpPolicy(
+    defaultHttpInstance,
+    15_000,
+    options.httpAgent,
+    options.disableEnvironmentProxy,
+  );
+  const accountsHttp = applyFeishuHttpPolicy(
+    defaultHttpInstance,
+    15_000,
+    accountsHttpAgent,
+    options.disableEnvironmentProxy,
+  );
+  return new FeishuOAuthHttpClient(
+    options.appId,
+    options.appSecret,
+    {
+      fetch: createFeishuOAuthFetch(openApiHttp, accountsHttp),
+      sleep: abortableSleep,
+      listGrantedUserScopes: (signal) => client.request({
+        method: "GET",
+        url: `/open-apis/application/v6/applications/${options.appId}`,
+        signal,
+        params: {
+          lang: "zh_cn",
+        },
+      }),
+    },
+  );
 }
 
 export type FeishuMessageErrorCode =
@@ -648,16 +696,7 @@ const redactedSdkLogger: Logger = {
 const defaultMessageDependencies: FeishuMessageClientDependencies = {
   sendTimeoutMs: 15_000,
   createSdkClient: (options, sendTimeoutMs) => {
-    const client = new Client({
-      appId: options.appId,
-      appSecret: options.appSecret,
-      appType: AppType.SelfBuild,
-      domain: Domain.Feishu,
-      logger: redactedSdkLogger,
-      loggerLevel: LoggerLevel.error,
-      source: "codexc",
-      httpInstance: withHttpTimeout(defaultHttpInstance, sendTimeoutMs),
-    });
+    const client = createSdkClient(options, sendTimeoutMs);
     return {
       createMessage: (payload) => client.im.v1.message.create(payload),
       patchMessage: (payload) => client.im.v1.message.patch(payload),
@@ -666,15 +705,47 @@ const defaultMessageDependencies: FeishuMessageClientDependencies = {
   },
 };
 
-function withHttpTimeout(
+function createSdkClient(
+  options: FeishuMessageClientOptions,
+  timeoutMs: number,
+): Client {
+  return new Client({
+    appId: options.appId,
+    appSecret: options.appSecret,
+    appType: AppType.SelfBuild,
+    domain: Domain.Feishu,
+    logger: redactedSdkLogger,
+    loggerLevel: LoggerLevel.error,
+    source: "codexc",
+    httpInstance: applyFeishuHttpPolicy(
+      defaultHttpInstance,
+      timeoutMs,
+      options.httpAgent,
+      options.disableEnvironmentProxy,
+    ),
+  });
+}
+
+export function applyFeishuHttpPolicy(
   base: HttpInstance,
   timeoutMs: number,
+  agent?: unknown,
+  disableEnvironmentProxy = false,
 ): HttpInstance {
   const options = <D>(
     value?: HttpRequestOptions<D>,
   ): HttpRequestOptions<D> => ({
     ...value,
     timeout: timeoutMs,
+    ...(agent
+      ? {
+          httpAgent: agent,
+          httpsAgent: agent,
+          proxy: false,
+        }
+      : disableEnvironmentProxy
+      ? { proxy: false }
+      : {}),
   });
   return {
     request: (value) => base.request(options(value)),
@@ -686,6 +757,67 @@ function withHttpTimeout(
     put: (url, data, value) => base.put(url, data, options(value)),
     patch: (url, data, value) => base.patch(url, data, options(value)),
   };
+}
+
+function createFeishuOAuthFetch(
+  openApiHttp: HttpInstance,
+  accountsHttp: HttpInstance,
+): typeof fetch {
+  return async (input, init) => {
+    const url = typeof input === "string"
+      ? input
+      : input instanceof URL
+      ? input.toString()
+      : input.url;
+    const http = new URL(url).hostname === "accounts.feishu.cn"
+      ? accountsHttp
+      : openApiHttp;
+    try {
+      const body: unknown = await http.request({
+        url,
+        method: init?.method,
+        headers: init?.headers
+          ? Object.fromEntries(new Headers(init.headers).entries())
+          : undefined,
+        data: init?.body,
+        signal: init?.signal,
+      } as HttpRequestOptions<BodyInit> & { signal?: AbortSignal | null });
+      return jsonFetchResponse(body, 200);
+    } catch (error) {
+      const response = optionalHttpErrorResponse(error);
+      if (response) {
+        return jsonFetchResponse(response.data, response.status);
+      }
+      throw error;
+    }
+  };
+}
+
+function jsonFetchResponse(value: unknown, status: number): Response {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+}
+
+function optionalHttpErrorResponse(error: unknown): {
+  status: number;
+  data: unknown;
+} | undefined {
+  if (typeof error !== "object" || error === null) {
+    return undefined;
+  }
+  const response = (error as {
+    response?: { status?: unknown; data?: unknown };
+  }).response;
+  return typeof response?.status === "number"
+    && Number.isInteger(response.status)
+    && response.status >= 400
+    && response.status <= 599
+    ? { status: response.status, data: response.data }
+    : undefined;
 }
 
 const defaultDependencies: FeishuEventConnectionDependencies = {

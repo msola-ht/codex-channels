@@ -115,6 +115,9 @@ Surface -> Application/Core <- Codex Client
 - 数据库只接受当前 Schema；不支持的版本必须失败关闭，不执行隐式迁移。
 - StateStore 保持可替换，业务模块只能依赖其公开接口。
 - 用户配置、数据库、Socket、日志和临时上传不得写入会被 npm 升级替换的包目录。
+- Surface 用户 OAuth Token 不得写入配置文件或 StateStore；macOS 使用系统 Keychain，Linux
+  使用 Gateway 数据目录下由独立随机主密钥保护的 AES-256-GCM 私有凭据文件。Token 不得进入
+  日志、平台消息或 Application/Core，必须提供按当前 Surface Actor 撤销和进程停止取消路径。
 - 用户级 Gateway 配置唯一来源是 `~/.codex-connect/config.toml` 或
   `CODEX_CONNECT_CONFIG_FILE` 显式指定的 TOML 文件；不得重新读取、迁移或兼容旧 `.env` 配置。
 - 代理字段未明确配置时可以读取标准代理环境变量及受支持的当前系统代理；TOML 明确值优先，

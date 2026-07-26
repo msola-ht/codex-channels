@@ -8,10 +8,10 @@ import { UserFacingError } from "../../conversation-core/index.js";
 import type { FeishuInboxMessage } from "./inbox.js";
 import type { FeishuImagePort } from "./media.js";
 import type { FeishuOutbox } from "./outbox.js";
+import type { FeishuOAuthControllerPort } from "./oauth.js";
 import {
-  renderFeishuPermissionApplication,
+  renderFeishuDoctor,
   renderFeishuPermissionHelp,
-  renderFeishuPermissionList,
   renderFeishuPermissionStatus,
   type FeishuPermissionRuntimeStatus,
 } from "./permissions.js";
@@ -37,6 +37,7 @@ export class FeishuConversationAdapter {
         connectionReady: false,
         cardActionObserved: false,
       }),
+    private readonly oauth?: FeishuOAuthControllerPort,
   ) {
     this.commands = new ConversationCommandService(conversations);
   }
@@ -71,7 +72,8 @@ export class FeishuConversationAdapter {
           return;
         }
         if (command.name === "feishu") {
-          this.handleFeishuCommand(
+          await this.handleFeishuCommand(
+            message.actorId,
             message.target.accountId,
             message.target.conversationId,
             command.argumentsText,
@@ -121,11 +123,12 @@ export class FeishuConversationAdapter {
     }
   }
 
-  private handleFeishuCommand(
+  private async handleFeishuCommand(
+    actorId: string,
     appId: string,
     chatId: string,
     argumentsText: string,
-  ): void {
+  ): Promise<void> {
     const action = argumentsText.trim();
     const status = this.permissionStatus();
     if (action === "") {
@@ -133,26 +136,53 @@ export class FeishuConversationAdapter {
       return;
     }
     if (action === "status") {
+      const userAuthorization = this.oauth
+        ? await this.oauth.status(actorId)
+        : "unavailable";
       this.notifyPost(
         chatId,
-        renderFeishuPermissionStatus(appId, status),
+        renderFeishuPermissionStatus(appId, status, userAuthorization),
       );
       return;
     }
-    if (action === "permissions") {
-      this.notifyPost(chatId, renderFeishuPermissionList(status));
-      return;
-    }
-    if (action === "apply") {
+    if (action === "doctor") {
+      const userAuthorization = this.oauth
+        ? await this.oauth.status(actorId)
+        : "unavailable";
       this.notifyPost(
         chatId,
-        renderFeishuPermissionApplication(appId),
+        renderFeishuDoctor(appId, status, userAuthorization),
+      );
+      return;
+    }
+    if (action === "authorize") {
+      if (!this.oauth) {
+        this.notifyText(chatId, "飞书用户授权模块尚未启用。");
+        return;
+      }
+      const result = this.oauth.beginAuthorization(chatId, actorId);
+      if (result === "running") {
+        this.notifyText(chatId, "当前账号已有进行中的飞书授权请求。");
+      }
+      return;
+    }
+    if (action === "revoke") {
+      if (!this.oauth) {
+        this.notifyText(chatId, "飞书用户授权模块尚未启用。");
+        return;
+      }
+      const removed = await this.oauth.revoke(actorId);
+      this.notifyText(
+        chatId,
+        removed
+          ? "已清除当前飞书账号保存的本地授权凭据。"
+          : "当前飞书账号没有已保存的授权凭据。",
       );
       return;
     }
     this.notifyText(
       chatId,
-      "用法：/feishu <status|permissions|apply>",
+      "用法：/feishu <status|doctor|authorize|revoke>",
     );
   }
 

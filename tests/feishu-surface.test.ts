@@ -222,6 +222,7 @@ function createFixture(
     mimeType: "image/png" as const,
     bytes: 8,
   }));
+  const oauthClose = vi.fn(async () => {});
   const logger = pino({ level: "info" }, {
     write(message) {
       logs.push(JSON.parse(message) as Record<string, unknown>);
@@ -236,6 +237,7 @@ function createFixture(
     },
     logger,
     uploadsDirectory: "/private/uploads/feishu",
+    credentialsDirectory: "/private/credentials/feishu",
     onFatal: vi.fn(),
     ...(configurationRecipients ? { configurationRecipients } : {}),
   }, {
@@ -275,6 +277,12 @@ function createFixture(
         },
       },
     ),
+    oauth: {
+      beginAuthorization: () => "started",
+      status: async () => "missing",
+      revoke: async () => false,
+      close: oauthClose,
+    },
   });
   return {
     surface,
@@ -283,6 +291,7 @@ function createFixture(
     sdkStart,
     sdkClose,
     imageDownload,
+    oauthClose,
     ready() {
       if (!readyCallback) {
         throw new Error("飞书 SDK 尚未注册 ready 回调");

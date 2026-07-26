@@ -11,6 +11,7 @@ import type {
 } from "../types.js";
 import { FeishuConversationAdapter } from "./adapter.js";
 import {
+  createFeishuOAuthApi,
   FeishuEventConnection,
   FeishuMessageClient,
   type FeishuEventConnectionOptions,
@@ -26,6 +27,11 @@ import {
   FeishuOutbox,
   type FeishuMessagePort,
 } from "./outbox.js";
+import {
+  FeishuOAuthController,
+  type FeishuOAuthControllerPort,
+} from "./oauth.js";
+import { createFeishuUserTokenStore } from "./oauth-token-store.js";
 import { renderFeishuConfigurationChange } from "./renderer.js";
 
 interface FeishuEventConnectionPort {
@@ -39,6 +45,7 @@ interface FeishuSurfaceDependencies {
   createEventConnection: (
     options: FeishuEventConnectionOptions,
   ) => FeishuEventConnectionPort;
+  oauth?: FeishuOAuthControllerPort & { close(): Promise<void> };
 }
 
 export interface FeishuSurfaceOptions {
@@ -48,9 +55,13 @@ export interface FeishuSurfaceOptions {
   access: SurfaceAccessPolicy;
   logger: Logger;
   uploadsDirectory: string;
+  credentialsDirectory: string;
   onFatal: (error: Error) => void;
   actorRegistry?: ConversationActorRegistry;
+  openApiAgent?: unknown;
+  accountsAgent?: unknown;
   webSocketAgent?: unknown;
+  disableEnvironmentProxy?: boolean;
   configurationRecipients?: () => readonly string[];
 }
 
@@ -69,6 +80,9 @@ export class FeishuSurface implements SurfaceAdapter {
   private readonly inbox: FeishuInbox;
   private readonly images: FeishuImagePort;
   private readonly connection: FeishuEventConnectionPort;
+  private readonly oauth: FeishuOAuthControllerPort & {
+    close(): Promise<void>;
+  };
   private readonly configurationRecipients:
     | (() => readonly string[])
     | undefined;
@@ -89,6 +103,12 @@ export class FeishuSurface implements SurfaceAdapter {
       : new FeishuMessageClient({
           appId: options.appId,
           appSecret: options.appSecret,
+          ...(options.openApiAgent
+            ? { httpAgent: options.openApiAgent }
+            : {}),
+          ...(options.disableEnvironmentProxy
+            ? { disableEnvironmentProxy: true }
+            : {}),
         });
     const messagePort = dependencies.messagePort ?? client!;
     this.images = dependencies.imagePort ?? new FeishuImageStore(
@@ -107,6 +127,22 @@ export class FeishuSurface implements SurfaceAdapter {
       options.access,
       options.logger,
     );
+    this.oauth = dependencies.oauth ?? new FeishuOAuthController(
+      options.appId,
+      createFeishuOAuthApi({
+        appId: options.appId,
+        appSecret: options.appSecret,
+        ...(options.openApiAgent
+          ? { httpAgent: options.openApiAgent }
+          : {}),
+        ...(options.disableEnvironmentProxy
+          ? { disableEnvironmentProxy: true }
+          : {}),
+      }, options.accountsAgent),
+      createFeishuUserTokenStore(options.credentialsDirectory),
+      this.output,
+      options.logger,
+    );
     const adapter = new FeishuConversationAdapter(
       options.service,
       this.output,
@@ -115,6 +151,7 @@ export class FeishuSurface implements SurfaceAdapter {
         connectionReady: this.connectionReady,
         cardActionObserved: this.cardActionObserved,
       }),
+      this.oauth,
     );
     this.inbox = new FeishuInbox({
       accountId: options.appId,
@@ -225,6 +262,7 @@ export class FeishuSurface implements SurfaceAdapter {
     this.connectionReady = false;
     await this.connection.stop();
     await this.inbox.close();
+    await this.oauth.close();
     this.images.close();
     await this.interactions.close();
     await this.output.close();

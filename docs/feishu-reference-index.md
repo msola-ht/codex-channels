@@ -52,7 +52,10 @@
 | Client、事件和长连接示例 | [固定版本中文说明](https://github.com/larksuite/node-sdk/blob/8b3e0df3af9401c263dc96026e1c7f17460a21cc/README.zh.md) | 核对 `Client`、`WSClient`、`EventDispatcher` 和 `registerApp()` |
 | 官方 OpenClaw 飞书插件 | [固定提交 `dde0be3`](https://github.com/larksuite/openclaw-lark/tree/dde0be3680d6fd5443cab426c8f4b3216266346a) | 参考手动凭据输入、保留已有配置、Bot 身份探测和允许名单交互；不引入其 OpenClaw 运行时或宽权限工具 |
 | OpenClaw 应用权限查询 | [`app-scope-checker.ts`](https://github.com/larksuite/openclaw-lark/blob/dde0be3680d6fd5443cab426c8f4b3216266346a/src/core/app-scope-checker.ts) | 区分应用 Scope 与用户 OAuth，并确认完整远端 Scope 查询需要额外自管理权限 |
-| OpenClaw 私聊增量授权 | [`auto-auth.ts`](https://github.com/larksuite/openclaw-lark/blob/dde0be3680d6fd5443cab426c8f4b3216266346a/src/tools/auto-auth.ts) | 参考缺少应用 Scope 时的精确申请链接、用户授权按需发起和完成后重试；不复制 Token Store 或宽权限工具 |
+| OpenClaw 私聊增量授权 | [`auto-auth.ts`](https://github.com/larksuite/openclaw-lark/blob/dde0be3680d6fd5443cab426c8f4b3216266346a/src/tools/auto-auth.ts) | 区分应用 Scope 引导卡与用户 OAuth Device Flow，不复制其 OpenClaw 工具运行时 |
+| OpenClaw Device Flow | [`device-flow.ts`](https://github.com/larksuite/openclaw-lark/blob/dde0be3680d6fd5443cab426c8f4b3216266346a/src/core/device-flow.ts)、[`oauth.ts`](https://github.com/larksuite/openclaw-lark/blob/dde0be3680d6fd5443cab426c8f4b3216266346a/src/tools/oauth.ts) | 核对现有 Token 与 Scope 覆盖检测、缺失 Scope 增量授权、飞书端点、`offline_access`、有限轮询、账号校验、取消和卡片结果更新 |
+| OpenClaw OAuth 卡片 | [`oauth-cards.ts`](https://github.com/larksuite/openclaw-lark/blob/dde0be3680d6fd5443cab426c8f4b3216266346a/src/tools/oauth-cards.ts) | 核对 Device Flow 地址通过飞书 AppLink 在客户端侧边栏打开，不把外部 URL 直接作为普通文本 |
+| OpenClaw Token Store | [`token-store.ts`](https://github.com/larksuite/openclaw-lark/blob/dde0be3680d6fd5443cab426c8f4b3216266346a/src/core/token-store.ts) | 参考 macOS Keychain 和 Linux AES-256-GCM 分离后端；项目使用自己的 Gateway 数据目录和严格载荷验证 |
 | WebSocket 生命周期 | [固定版本 `ws-client`](https://github.com/larksuite/node-sdk/tree/8b3e0df3af9401c263dc96026e1c7f17460a21cc/ws-client) | 核对 `onReady`、错误、重连、关闭和状态语义 |
 | 高层 Channel | [固定版本 Channel 说明](https://github.com/larksuite/node-sdk/blob/8b3e0df3af9401c263dc96026e1c7f17460a21cc/docs/channel.zh.md) | 识别其策略、去重、串行、重试、媒体和卡片职责 |
 | 消息事件字段格式 | [官方 CLI 固定事件 Schema 指南](https://github.com/larksuite/cli/blob/a7865cd0a7416655535517a2a630848fde318761/skills/lark-event/SKILL.md) | 核对 `create_time` 为毫秒时间戳字符串 |
@@ -132,14 +135,15 @@ EventDispatcher`。
 | 能力 | 官方入口 | 项目状态 | 实施阶段 |
 | --- | --- | --- | --- |
 | Node SDK | npm 包、固定官方源码 | 已精确锁定 `1.71.1` | 阶段 0 |
-| WebSocket 握手和重连 | `WSClient` | 生命周期封装、离线合同和真实首次握手已完成；真实断线恢复待验证 | 阶段 0 |
+| WebSocket 握手和重连 | `WSClient` | 生命周期封装、统一 HTTP/HTTPS 代理注入、离线合同和真实首次握手已完成；真实断线恢复与代理待验证 | 阶段 0 |
 | 消息事件字段裁剪 | `im.message.receive_v1` | 稳定字段映射、畸形输入失败关闭和一条真实私聊文本事件已验证 | 阶段 0 |
 | 私聊文本事件 | `im.message.receive_v1` | 平台本地筛选、有界入队、Access Policy、Application 提交、安全错误和生命周期组合已完成；真实已授权主路径已通过，未授权/重复真实事件待验证 | 阶段 1 |
 | 文本与富文本发送 | `client.im.v1.message.create` | `chat_id` 的 `text` 与 `post + md` Payload、平台原生提及标签中和、有限 HTTP 超时和脱敏错误已完成；富文本短回复真实显示已通过，长回复分片待验收 | 阶段 1 / 阶段 4 切片 |
 | 输出渲染 | `OutputEvent` | 最终回复使用富文本；其他关键事件、安全错误和操作性提示使用纯文本；有界 Outbox、Surface 生命周期和安全配置通知收件人已完成 | 阶段 1 / 阶段 4 切片 |
 | 事件去重与旧事件过滤 | 平台事件 ID、毫秒时间戳 | 已实现飞书模块内有界内存状态；真实重投待验证 | 阶段 1 |
 | 严格配置与重载分类 | 统一 `config.toml` | 私聊字段、失败关闭校验、变更码、公开示例和 Bootstrap 显式组合已完成 | 阶段 1 |
-| 私聊命令 | `ConversationCommandService`、私聊文本事件 | 全部平台无关命令结果、帮助、身份、取消、飞书权限中心、未知命令失败关闭、会话列表收敛和有界安全分片已完成离线验证；状态命令富文本真实显示已通过，完整命令矩阵仍待验收 | 阶段 2 预备实现 |
+| 私聊命令 | `ConversationCommandService`、私聊文本事件 | 全部平台无关命令结果、帮助、身份、取消、`status/doctor/authorize/revoke` 权限中心、未知命令失败关闭、会话列表收敛和有界安全分片已完成离线验证；状态命令富文本真实显示已通过，完整命令矩阵仍待验收 | 阶段 2 预备实现 |
+| 用户 OAuth | OAuth Device Flow、应用用户 Scope、飞书 AppLink | 已完成精确授权 Origin 与完整 URL、原始条目和筛选后 100 项用户 Scope 的分层上限、有效 Token 覆盖检查与缺失 Scope 增量授权、`offline_access` 完整卡片、统一 HTTP/HTTPS 代理、显式直连与无效代理失败关闭、有限轮询、身份匹配、macOS Keychain/Linux 加密文件、进行中/持久状态、撤销、限时停止和写入错误/取消竞态回滚；真实 Device Flow、身份校验与安全写入已通过，代理和 Gateway 重启恢复待验收，尚无飞书 CLI API 消费 Token | 阶段 2 预备实现 |
 | 群聊 | 群消息事件、群身份与 @Bot | 已记录为后续需求，当前开发批次不实施 | 阶段 2 |
 | 卡片交互 | `im.v1.message.create/patch`、`card.action.trigger` | 私聊审批、用户输入、MCP form/URL 卡片、一次性令牌、Actor/Chat/消息/请求绑定、原值决定、超时和跨客户端失效已离线验证；测试应用尚未重新授权，真实 WebSocket 投递待验证，未公开支持 | 阶段 3 |
 | 私聊 PNG/JPEG 图片 | `im.message.receive_v1`、`im.v1.messageResource.get` | 已完成授权后异步下载、10 MiB 限制、内容签名、私有暂存、过期清理和 Application 图片提交的离线验证；真实消息待验收 | 阶段 4 |
@@ -164,7 +168,13 @@ EventDispatcher`。
 后用状态命令和普通 Turn 短回复验证标题、列表、加粗、行内代码和链接能够正确显示。长回复分片、
 卡片和消息更新仍未验证，不据此把群聊标记为已开始。
 
-尚未验证真实断线恢复、代理、未授权/重复事件重投、Gateway 重启后的 Thread 绑定恢复和卡片动作。
+同日操作者通过飞书内授权卡片完成真实 OAuth Device Flow，Gateway 校验当前 Actor 后成功写入
+安全凭据后端；重复执行授权时暴露出缺少现有 Scope 覆盖检测，随后改为已覆盖时不重复授权、
+部分缺失时只申请差集。OAuth 按钮是打开 AppLink 的链接动作，不构成
+`card.action.trigger` 回调验收。
+
+尚未验证真实断线恢复、代理、未授权/重复事件重投、Gateway 重启后的 Thread 绑定恢复、卡片动作
+和用户 OAuth Token 重启恢复。
 本记录不保存真实消息、应用标识、用户 Open ID、Chat ID、Token、Secret、临时跳转链接或完整
 SDK 响应。
 
@@ -183,6 +193,7 @@ SDK 响应。
 | 私聊图片输入 | [`src/surfaces/feishu/media.ts`](../src/surfaces/feishu/media.ts)、[`src/surfaces/managed-image-store.ts`](../src/surfaces/managed-image-store.ts)、[`src/surfaces/feishu/inbox.ts`](../src/surfaces/feishu/inbox.ts)、[`src/surfaces/feishu/adapter.ts`](../src/surfaces/feishu/adapter.ts) | [`tests/feishu-media.test.ts`](../tests/feishu-media.test.ts)、[`tests/feishu-inbox.test.ts`](../tests/feishu-inbox.test.ts)、[`tests/feishu-adapter.test.ts`](../tests/feishu-adapter.test.ts)、[`tests/feishu-surface.test.ts`](../tests/feishu-surface.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：资源 Key 裁剪、授权后下载、精确资源 API Payload、10 MiB 限制、PNG/JPEG 签名、私有权限、错误脱敏、Application 提交和生命周期；真实消息待验收 |
 | 输出渲染 | [`src/surfaces/feishu/renderer.ts`](../src/surfaces/feishu/renderer.ts) | [`tests/feishu-renderer.test.ts`](../tests/feishu-renderer.test.ts)：全部 `ConversationCommandResult` 顶层种类、全部命令 Outcome、模型视图、非空集合、会话列表最多 20 条及 48 字符规范预览、Diff、Plan、Goal、关键事件、非关键进度和错误详情隐藏 |
 | 权限中心 | [`src/surfaces/feishu/permissions.ts`](../src/surfaces/feishu/permissions.ts)、[`src/surfaces/feishu/adapter.ts`](../src/surfaces/feishu/adapter.ts) | [`tests/feishu-adapter.test.ts`](../tests/feishu-adapter.test.ts)、[`tests/feishu-surface.test.ts`](../tests/feishu-surface.test.ts)：当前进程连接/事件/回调观测、Gateway 已用能力清单、精确 App ID 申请入口、未知参数失败关闭和不泄露凭据 |
+| 用户 OAuth | [`src/surfaces/feishu/oauth-device-flow.ts`](../src/surfaces/feishu/oauth-device-flow.ts)、[`src/surfaces/feishu/oauth-card.ts`](../src/surfaces/feishu/oauth-card.ts)、[`src/surfaces/feishu/oauth-token-store.ts`](../src/surfaces/feishu/oauth-token-store.ts)、[`src/surfaces/feishu/oauth.ts`](../src/surfaces/feishu/oauth.ts) | [`tests/feishu-oauth-device-flow.test.ts`](../tests/feishu-oauth-device-flow.test.ts)、[`tests/feishu-oauth.test.ts`](../tests/feishu-oauth.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：严格用户 Scope、混合 Token 类型与分层数量上限、精确授权 Origin 与完整 URL、有界 Device Flow 请求/轮询、飞书 AppLink、`offline_access` 展示、有效 Token 覆盖与缺失 Scope 增量授权、统一 HTTP 代理、显式直连与无效代理失败关闭、Actor 身份匹配、进行中状态、重复流、限时停止/撤销竞态、写入错误/取消回滚、Token 不进入消息、Keychain 原地更新与命令超时，以及 Linux 原子密文替换与私有权限；真实 Device Flow、身份校验与安全写入已通过，代理和 Token 重启恢复待验收 |
 | 卡片动作裁剪 | [`src/surfaces/feishu/card-action.ts`](../src/surfaces/feishu/card-action.ts)、[`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts) | [`tests/feishu-card-action.test.ts`](../tests/feishu-card-action.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：稳定路由字段、受限字符串动作值与 `form_value`、畸形输入失败关闭、活动连接门控和独立诊断 |
 | 卡片交互 | [`src/surfaces/feishu/approval-card.ts`](../src/surfaces/feishu/approval-card.ts)、[`src/surfaces/feishu/input-card.ts`](../src/surfaces/feishu/input-card.ts)、[`src/surfaces/feishu/interactions.ts`](../src/surfaces/feishu/interactions.ts) | [`tests/feishu-interactions.test.ts`](../tests/feishu-interactions.test.ts)：有界审批与表单卡片、秘密输入、MCP JSON/URL、不可预测一次性令牌、Actor/Chat/消息绑定、请求原值决定、越权与重复动作、过期、关闭竞态和跨客户端失效 |
 | 配置 | [`runtime/gateway-config.mjs`](../runtime/gateway-config.mjs)、[`src/config/`](../src/config/README.md) | [`tests/config.test.ts`](../tests/config.test.ts)、[`tests/config-reload.test.ts`](../tests/config-reload.test.ts)：启用映射、禁用、畸形输入、未知字段、凭据/启用重启和允许名单热加载 |

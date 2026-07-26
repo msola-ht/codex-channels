@@ -25,6 +25,10 @@ TOML 或统一 Setup 启用开发验证路径。Phase 4 已完成两个独立体
 - `media.ts`：通过官方消息资源 API 下载私聊图片，并调用 Surface 共用暂存器完成大小、签名、
   权限和过期清理。
 - `permissions.ts`：渲染当前进程权限观测、Gateway 已用能力清单及已有应用的精确申请入口。
+- `oauth-device-flow.ts`：严格裁剪应用用户 Scope、Device Authorization、有限轮询和授权身份查询。
+- `oauth-card.ts`：把 Device Flow 映射为飞书内嵌授权卡片及稳定结果卡片。
+- `oauth-token-store.ts`：macOS Keychain 与 Linux AES-256-GCM 私有凭据后端。
+- `oauth.ts`：按 App 与 Actor 协调单一进行中授权、身份匹配、凭据写入、撤销和停止取消。
 - `renderer.ts`：把平台无关 `ConversationCommandResult`、`OutputEvent` 和结构化错误映射为稳定文本内容。
 - `outbox.ts`：精确账号路由并通过通用有界队列调用窄消息发送端口。
 - `surface.ts`：组合单账号连接、Inbox、Application Adapter、Outbox 和失败关闭交互端口，并由
@@ -87,14 +91,32 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 `adapter.ts` 对普通文本调用 `ConversationService.submit()`，图片则先通过 `media.ts` 取得受管
 绝对路径，再调用同一 `submit()` 的 `localImages` 输入；对已知平台无关命令调用
 `ConversationCommandService.execute()`；`/start`、`/help`、`/whoami`、`/cancel` 和
-`/feishu <status|permissions|apply>` 留在飞书边界。权限中心只展示当前进程实际观测到的连接、
-消息事件与卡片回调状态，并提供应用 Scope 申请和已有应用配置入口；它不申请自管理权限、不读取
-或保存 User Access Token。未知或畸形斜杠命令失败关闭，不能作为普通消息提交给 Codex。新 Turn 不额外发送确认，
+`/feishu <status|doctor|authorize|revoke>` 留在飞书边界。`status` 展示当前进程实际观测到的
+连接、消息事件、卡片回调和当前 Actor OAuth 状态，`doctor` 合并必要能力诊断和应用配置入口。
+`authorize` 读取应用已开通的用户级 Scope，并先比较安全凭据后端中的有效 Token：全部覆盖时
+不重复授权，部分缺失时只用缺失 Scope 发起 Device Flow；没有有效 Token 时申请应用当前开放的
+用户级 Scope。卡片明确加入并展示 `offline_access`；授权地址只接受
+`https://accounts.feishu.cn` 精确 Origin 的完整 URL，外部响应的 Scope、时间和长度均有界。
+原始应用权限条目先按独立安全上限裁剪，再筛选并限制为最多 100 项用户 Scope；授权与凭据载荷
+为其保留额外一项 `offline_access`。完成后校验返回 Token 所属 `open_id` 必须与消息 Actor
+一致；`status` 会优先显示当前 Actor 正在进行的授权。未知或畸形斜杠命令失败关闭，
+不能作为普通消息提交给 Codex。新 Turn 不额外发送确认，
 后续回复由 Core 输出驱动；追加到活动 Turn 时发送明确提示。结构化 `UserFacingError` 按错误码
 渲染，不使用其内部 fallback message；未知异常只发送通用提示，然后把原异常交回 Inbox，由
 Inbox 现有诊断路径仅记录受约束的错误类型。命令结果、追加确认和错误提示被输出队列拒绝时，
 Adapter 不会重试已经执行的状态修改，而是把稳定的队列错误交回同一诊断路径。会话列表最多展示
 20 条，名称或预览会规范空白并限制为 48 个字符，剩余项通过搜索提示收敛。
+
+用户 OAuth Token 不进入 Application、Core、配置或会话 SQLite。macOS 使用系统 Keychain；
+Linux 在 Bootstrap 从状态数据库父目录注入的 `credentials/feishu` 下保存独立主密钥和
+AES-256-GCM 密文，目录为 `0700`、文件为 `0600`。`revoke` 先取消当前 Actor 的进行中轮询再删除
+本地凭据，Surface 停止会取消授权任务并最多等待 5 秒；停止或存储错误与 Token 写入竞态时尝试
+恢复原凭据，失败只记录脱敏警告。Linux 后端在原子替换前完成权限设置；Keychain 命令同样有
+5 秒上限并使用原地更新，读取两种后端时均严格校验凭据载荷。飞书 HTTP
+API、OAuth 与 WebSocket 由 Bootstrap 注入统一 HTTP/HTTPS 代理并按目标域名遵循 `NO_PROXY`；
+HTTP 直连会显式关闭 SDK 底层的环境代理再解析，避免覆盖 Bootstrap 决策。仅 SOCKS
+`ALL_PROXY` 尚不支持；目标未命中 `NO_PROXY` 时，无效或不支持的代理会失败关闭而非直连。
+当前仅完成授权基础设施，飞书 CLI API 调用与 Token 自动刷新尚未实现。
 
 `interactions.ts` 只为当前 Conversation 已恢复且恰有一个仍获授权 Actor 的交互请求创建卡片。
 不可预测令牌只存于内存并绑定请求、Chat、消息和 Actor；审批点击只能映射请求原本提供的一次、
@@ -112,7 +134,8 @@ HTTP(S) 链接。其他客户端解决、取消、超时和 Surface 停止会按
 Setup 与只读 Doctor 凭据/Bot 身份探测已完成，真实应用的首次握手、已授权私聊 Turn 和文本回复
 已通过；2026-07-26 操作者在 Gateway 重启后确认私聊命令能够返回纯文本结果；随后本地实现已
 切换最终回复和命令结果为富文本，并已用状态命令与普通 Turn 短回复验证标题、列表、加粗、
-行内代码和链接的真实显示。该测试不表示长回复分片、卡片或群聊已经支持，也尚未核对重启前后
+行内代码和链接的真实显示。用户 OAuth Device Flow、Actor 身份校验和安全凭据写入也已通过
+真实应用验证；Gateway 重启后的 Token 恢复尚未验收。该测试不表示长回复分片、卡片或群聊已经支持，也尚未核对重启前后
 的精确 Thread ID。断线恢复、未授权/重复事件、
 重启绑定恢复、图片输入和可批准交互的真实投递仍未完成。后续阶段按
 [`飞书 Surface 接入计划`](../../../docs/feishu-surface-plan.md)推进；一级 `surfaces` 入口只转出

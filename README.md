@@ -154,7 +154,10 @@ macOS 使用 `com.hegenai.codex-app-server` 与 `com.hegenai.codex-gateway` 两�
 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`，再尝试 macOS 系统 HTTP/HTTPS
 代理或 Linux GNOME 手动代理，最后直连。Linux 服务也会继承 systemd 用户管理器已有的标准
 代理环境变量。自动代理配置（PAC）和未定义统一接口的桌面私有格式不会被猜测；需要时仍可在
-TOML 中明确填写。Telegram 的 `telegram.proxy_url` 保持最高优先级。
+TOML 中明确填写。Telegram 的 `telegram.proxy_url` 保持最高优先级。飞书 HTTP API、用户 OAuth
+和 WebSocket 复用解析后的 HTTP/HTTPS 代理并遵循 `NO_PROXY`；飞书当前不支持只通过
+SOCKS `ALL_PROXY` 连接。目标未命中 `NO_PROXY` 时，无效或不支持的飞书代理会让 Gateway
+启动失败，不会静默改为直连。
 
 `codexc service logs` 默认显示 Gateway 日志；使用 `codexc service logs app-server` 查看 App Server，
 使用 `codexc service logs all` 查看两者。目标必须放在日志选项之前；`-n 200` 可调整显示行数，
@@ -201,9 +204,10 @@ Thread 恢复继续通过 App Server 通知校正。Gateway 只缓存当前 Goal
 ## 飞书私聊命令
 
 飞书私聊的开发实现已复用上述全部平台无关会话命令，并另外提供 `/start`、`/help`、
-`/whoami`、`/cancel` 和 `/feishu <status|permissions|apply>`。飞书权限中心显示当前进程
-实际观测到的长连接、消息事件与卡片回调状态，并提供应用权限申请和已有应用配置入口；应用
-Scope 不需要重新扫码，事件与回调仍需在开放平台配置并发布。命令在飞书授权和有界输入队列之后进入同一个
+`/whoami`、`/cancel` 和
+`/feishu <status|doctor|authorize|revoke>`。`status` 显示当前进程实际观测到的长连接、消息事件、
+卡片回调和当前 Actor OAuth 状态；`doctor` 合并必要应用能力、事件/回调配置与精确申请入口。
+应用 Scope 不需要重新扫码，事件与回调仍需在开放平台配置并发布。命令在飞书授权和有界输入队列之后进入同一个
 `ConversationCommandService`；未知或畸形斜杠命令会明确拒绝，不会作为普通消息提交给
 Codex。最终回复与命令结果使用飞书 `post + md` 富文本，错误、过载和操作性提示保留纯文本。
 两种格式均采用项目内部的 20,000 字节安全分片；富文本按序列化后的实际内容计量。每个逻辑结果
@@ -216,9 +220,21 @@ Codex。最终回复与命令结果使用飞书 `post + md` 富文本，错误�
 更新已有应用配置后才能进行真实验证；用户输入与 MCP form/URL elicitation 卡片也已完成离线实现，复用同一回调、
 一次性令牌和 Actor/Chat/消息绑定。上述交互在真实动作投递验收前均不视为公开支持。
 
-权限中心不会为了查询状态额外申请 `application:application:self_manage`，也不读取或保存飞书
-User Access Token。后续飞书 CLI 按具体命令声明所需 Scope，并从私聊增量申请；不会在安装时默认
-申请全部文档、日历、通讯录等权限。
+`/feishu authorize` 通过官方 OAuth Device Flow 读取应用当前已开通的用户级 Scope，并先检查
+安全凭据后端中的有效 Token：现有 Scope 已完整覆盖时不会重复授权，部分缺失时只申请差集；
+没有有效 Token 时申请应用当前开放的用户级 Scope。实际请求会在卡片中连同自动加入的
+`offline_access` 完整列出后由当前消息 Actor 显式授权；按钮只接受
+`https://accounts.feishu.cn` 精确 Origin 返回的完整授权地址，再使用飞书 AppLink 在客户端
+侧边栏内完成授权；从有界应用权限响应中筛选后，最多支持 100 项用户 Scope 加
+`offline_access`。Gateway
+后台有限轮询、校验实际授权账号并原地更新结果卡片。该流程需要应用权限
+`application:application:self_manage`。macOS Token 保存到系统 Keychain，Linux 保存到 Gateway
+数据目录下的 AES-256-GCM 私有凭据文件，不进入配置、会话 SQLite、日志或平台消息；
+`/feishu status` 会区分授权进行中与已保存凭据，`/feishu revoke` 会取消进行中的授权并清除当前
+Actor 本地凭据。Surface 停止会取消授权任务并最多等待 5 秒；若停止或存储错误与 Token 写入
+竞态，则尝试恢复停止前的凭据，恢复失败会记录不含 Token 的警告。真实 Device Flow、身份校验
+与安全写入已通过测试应用验收，Gateway 重启后的 Token 恢复仍待验收。当前 Surface 对话不依赖
+用户 OAuth，也没有飞书 CLI 工具消费该 Token；后续用户级 API 应按实际能力继续采用增量授权。
 
 这组命令仍属于开发验证能力；完成真实应用中的帮助、状态、选择器、状态修改、Diff、错误参数和
 Gateway 重启绑定恢复验收后，才能更新为公开支持。

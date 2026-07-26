@@ -8,8 +8,9 @@
 
 - [`telegram/`](telegram/README.md)：Telegram Bot 输入、输出、交互、图片和生命周期。
 - [`feishu/`](feishu/README.md)：飞书官方 SDK 长连接、私聊文本与 PNG/JPEG 到 Application 的
-  窄 Adapter、富文本最终回复、纯文本安全提示、有界输出队列、私聊交互卡片、平台权限中心和
-  单账号生命周期组合；有效配置启用时由 Bootstrap 显式注册，图片与交互真实投递仍待验收。
+  窄 Adapter、富文本最终回复、纯文本安全提示、有界输出队列、私聊交互卡片、平台权限中心、
+  用户 OAuth Device Flow 和单账号生命周期组合；有效配置启用时由 Bootstrap 显式注册，图片、
+  交互和 OAuth Token 重启恢复仍待验收；真实 Device Flow、身份校验与安全写入已通过。
 
 `types.ts` 定义最小 `SurfaceAdapter` 契约。每个实例使用
 `surface + accountId` 标识，分别提供启停、输出、可选配置变更通知与 `InteractionPort`；Bootstrap 只做编译期显式注册。

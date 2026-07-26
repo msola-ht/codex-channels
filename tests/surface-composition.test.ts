@@ -7,6 +7,7 @@ import {
   createFeishuRuntimeModule,
   createSurfaceModules,
   createTelegramRuntimeModule,
+  selectFeishuProxyUrl,
   type FeishuRuntimeAdapter,
   type TelegramRuntimeAdapter,
 } from "../src/bootstrap/surface-composition.js";
@@ -97,6 +98,40 @@ describe("configured Surface composition", () => {
       "telegram",
       "feishu",
     ]);
+  });
+
+  it("selects the shared HTTPS proxy unless NO_PROXY covers the Feishu host", () => {
+    const proxy = {
+      http: "http://127.0.0.1:7890",
+      https: "http://127.0.0.1:7891",
+      no: "localhost,.internal.example",
+    };
+
+    expect(selectFeishuProxyUrl(proxy, "open.feishu.cn")).toBe(
+      "http://127.0.0.1:7891",
+    );
+    expect(selectFeishuProxyUrl(
+      { ...proxy, no: "localhost,.feishu.cn" },
+      "open.feishu.cn",
+    )).toBeUndefined();
+  });
+
+  it("fails closed instead of bypassing an invalid or unsupported Feishu proxy", () => {
+    expect(() => selectFeishuProxyUrl(
+      { all: "socks5://127.0.0.1:7890" },
+      "open.feishu.cn",
+    )).toThrow("飞书代理只支持 http:// 或 https://");
+    expect(() => selectFeishuProxyUrl(
+      { https: "not a proxy URL" },
+      "open.feishu.cn",
+    )).toThrow("飞书代理配置无效");
+    expect(selectFeishuProxyUrl(
+      {
+        all: "socks5://127.0.0.1:7890",
+        no: ".feishu.cn",
+      },
+      "open.feishu.cn",
+    )).toBeUndefined();
   });
 });
 

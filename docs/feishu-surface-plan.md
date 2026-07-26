@@ -16,7 +16,7 @@ Doctor 凭据/Bot 身份探测。2026-07-25 已由操作者使用测试应用完
 生产 Gateway 长连接就绪，以及一次已授权私聊文本 Turn 和精确 Chat 文本回复。阶段 2 的私聊
 命令预备切片已接入全部平台无关命令及 `/start`、`/help`、`/whoami`、
 `/cancel`，但阶段 1 尚未整体关闭，因此尚未进入阶段 2 验收，也不得继续群聊切片。断线恢复、
-代理和未授权/重复真实事件仍待完成。
+代理真实验收和未授权/重复真实事件仍待完成。
 
 2026-07-26 操作者在 Gateway 重启后完成飞书私聊命令试用，确认当时回复均为纯文本。随后按独立
 切片实现最终回复和命令结果的 `post + md` 富文本；错误、过载和操作性提示继续使用纯文本，
@@ -104,8 +104,8 @@ Feishu Surface 有界输出队列
 | `approval` | 审批归属、授权语义、超时和跨客户端失效 | 展示交互并返回明确决定 |
 | `policy` | `target + actorId` 授权接口和 Actor Registry | 实现飞书账号、用户和会话限制 |
 | `session-routing` | Conversation 与 Workspace/Thread 绑定 | 提供规范 Conversation 身份 |
-| `storage` | 现有最小绑定恢复 | 不保存飞书消息或事件 |
-| `surfaces` | `SurfaceAdapter` 和有界顺序输出队列 | 平台生命周期、输入、输出和 SDK |
+| `storage` | 现有最小绑定恢复 | 不保存飞书消息、事件或用户 OAuth Token |
+| `surfaces` | `SurfaceAdapter` 和有界顺序输出队列 | 平台生命周期、输入、输出、SDK 与平台凭据后端 |
 | `bootstrap` | 显式工厂、启动回滚、输出路由和配置生命周期 | 创建飞书具体实现 |
 | `observability` | 结构化日志和敏感字段脱敏 | 提供受约束的平台错误码 |
 
@@ -125,6 +125,11 @@ src/surfaces/feishu/
 ├── inbox.ts          # 平台本地的有界输入接收和事件去重
 ├── renderer.ts       # 命令结果、OutputEvent 和用户错误渲染
 ├── interactions.ts   # InteractionPort、卡片动作和失效
+├── permissions.ts    # 平台权限与运行观测
+├── oauth-device-flow.ts # 用户 Scope、Device Flow 和身份查询
+├── oauth-card.ts     # 飞书内授权与结果卡片
+├── oauth-token-store.ts # macOS Keychain / Linux 加密凭据
+├── oauth.ts          # Actor 级授权生命周期
 ├── outbox.ts         # 飞书发送操作与 ConversationDeliveryQueue
 └── media.ts          # 后续阶段的资源下载和上传
 ```
@@ -384,6 +389,10 @@ Doctor 只读检查配置、允许名单，以及通过有限 HTTP 请求验证�
 - [x] 离线渲染全部当前 `ConversationCommandResult`；
 - [x] 离线验证 `/whoami`、帮助和失败关闭状态下的交互取消；
 - [x] 飞书本地权限中心：运行观测、Gateway 已用能力清单与已有应用配置入口；
+- [x] 用户 OAuth Device Flow：精确 Origin 的完整授权 URL、飞书内卡片、Actor 身份匹配、
+  分层 Scope 上限、安全持久化、撤销、限时停止和写入错误/取消竞态回滚；
+- [x] 飞书 HTTP API、OAuth 与 WebSocket 复用统一 HTTP/HTTPS 代理并遵循 `NO_PROXY`，无效或
+  不支持的代理失败关闭；
 - [ ] 群 Chat 允许名单、Actor 联合授权和 `@Bot` 要求；
 - [x] 离线验证状态、计划、Diff、Goal、用量和配置生命周期通知。
 
@@ -399,10 +408,17 @@ Codex 输入。Outbox 对纯文本按 UTF-8 字节、对富文本按序列化后
 事件和 Gateway 重启绑定恢复验收；通过后再验证真实应用命令，并开始群聊的严格配置、身份校验
 和真实事件 Fixture。当前阶段 2 尚未整体关闭。
 
-`/feishu <status|permissions|apply>` 属于平台本地权限中心，不占用 Application 的
-`/permissions`。它只记录当前进程是否实际收到消息事件或卡片动作，并提供精确 App ID 的权限
-申请和应用配置入口；不为查询状态额外申请自管理 Scope，不保存 User Access Token。未来飞书
-CLI 必须由每个命令声明所需 Scope 并按需增量授权，不能在 Setup 阶段预授予全部平台权限。
+`/feishu <status|doctor|authorize|revoke>` 属于平台本地权限中心，不占用 Application 的
+`/permissions`。`status` 记录当前进程是否实际收到消息事件或卡片动作；`doctor` 汇总必要能力、
+应用配置入口和当前 OAuth 状态，不静默修改权限。`authorize` 使用
+`application:application:self_manage` 读取应用已开通的用户 Scope，先检查有效 Token 的 Scope
+覆盖，全部覆盖时停止，部分缺失时只把差集列入卡片，再由当前 Actor 通过飞书内 Device Flow
+明确授权。完成后必须校验 Token 对应 `open_id`
+与发起 Actor 一致。macOS 凭据进入系统 Keychain，Linux 凭据以独立主密钥和 AES-256-GCM 密文
+保存在 Gateway 数据目录，不进入配置、StateStore、Application/Core、日志或消息。`revoke`
+先取消进行中轮询再删除当前 Actor 本地凭据，Surface 停止取消授权任务并最多等待 5 秒；停止或
+存储错误与 Token 写入竞态时尝试恢复原凭据，恢复失败必须脱敏记录。飞书 CLI 尚未实现，Token
+自动刷新和真实 API 消费留到具体命令需要时再增加。
 
 完成标准：
 
@@ -515,7 +531,8 @@ npm run verify:commit
 
 1. 锁定 SDK 版本中卡片动作能否通过 WebSocket 接收，还是必须配置 HTTPS 回调。
 2. 官方事件回调失败时触发重投的精确响应语义，以及输入队列满时应如何返回。
-3. SDK HTTP 层如何使用当前 `[network]` 代理，并保持 macOS/Linux 一致。
+3. 当前统一 HTTP/HTTPS 代理在 macOS/Linux 真实网络中的握手、断线和 `NO_PROXY` 行为是否一致；
+   仅 SOCKS `ALL_PROXY` 暂不支持。
 4. 长连接重启后重复消息是否需要超出内存 TTL 的最小幂等状态。
 5. 真实应用是否接受 Setup 当前声明的 `im:message:send_as_bot`、
    `im.message.receive_v1` 和 `card.action.trigger` 最小集合；阶段 1 不接受为后续媒体或
