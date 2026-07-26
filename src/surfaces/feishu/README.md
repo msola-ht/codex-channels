@@ -3,9 +3,10 @@
 本目录是飞书 Surface 的平台边界。当前已完成 Phase 0 的官方 SDK、事件长连接和消息字段裁剪基础，
 以及 Phase 1 的私聊文本 Inbox、输出渲染和 Bootstrap 显式组合；Phase 2 的预备实现已
 接入全部平台无关私聊命令，但 Phase 1 真实验收尚未整体关闭，群聊不得开始。当前可通过严格
-TOML 或统一 Setup 启用开发验证路径。Phase 4 已完成四个独立体验切片：最终回复与命令结果
+TOML 或统一 Setup 启用开发验证路径。Phase 4 已完成五个独立体验切片：最终回复与命令结果
 使用 `post + md` 富文本，私聊 PNG/JPEG 图片复用 Application 的本地图片输入，同一 Thread 的
-运行中与空闲状态已实现合并到一条可更新消息，启动通知与每轮上下文状态复用既有状态数据；
+运行中与空闲状态已实现合并到一条可更新消息，启动通知与每轮上下文状态复用既有状态数据，
+持续模型增量使用 CardKit 2.0 原生流式卡片；
 这些路径均已通过离线测试。Phase 3 已完成
 私聊审批卡片的离线主路径，命令审批的一次批准及当前 Gateway 长连接动作接收已通过真实验收；
 私聊 PNG/JPEG 真实消息也已通过。群聊和一般文件未实现。Phase 3 的用户输入与 MCP form/URL
@@ -18,7 +19,7 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
 - `adapter.ts`：区分普通文本、平台本地命令和 Application 命令，并通过 Outbox 返回结果或安全错误。
 - `approval-card.ts`：生成有界审批卡片和移除动作后的处理结果卡片。
 - `card-action.ts`：严格裁剪 `card.action.trigger` 的路由字段和受限字符串动作值。
-- `client.ts`：官方 SDK、事件长连接及生命周期隔离。
+- `client.ts`：官方 SDK、事件长连接、消息与 CardKit 窄客户端及生命周期隔离。
 - `message-content.ts`：生成飞书 `post + md` 内容，供发送和实际序列化大小计量共用。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪。
 - `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理。
@@ -59,6 +60,8 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
 - 发送超时、SDK 失败和残缺响应只暴露稳定错误码，不回传 SDK message、响应正文或凭据。
 - 消息创建不自动重试；锁定 SDK 虽提供可选 `uuid` 字段，但当前官方资料未明确其幂等窗口和
   可重试错误语义。
+- 原生流式额外需要应用权限 `cardkit:card:write`。新扫码应用会声明该权限；已有应用由 Owner
+  通过 `/feishu doctor` 的精确入口增量开通并发布，无需重新扫码或申请用户 OAuth。
 - 图片下载只使用 `im.v1.messageResource.get` 的 `message_id + image_key + type=image` 窄能力；
   SDK 响应被裁剪为下载流和可选长度，不向其他模块暴露 Client、Header 或上游错误。
 
@@ -78,9 +81,10 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 下载流经 Surface 共用 `ManagedImageStore` 限制为 10 MiB，并按内容签名只接受 PNG/JPEG；
 目录权限为 `0700`、文件权限为 `0600`，过期文件定期清理。下载或文件异常只返回稳定脱敏错误。
 
-`renderer.ts` 通过模块公开入口接收 `OutputEvent`。最终文本由 Outbox 作为富文本发送，其他
+`renderer.ts` 通过模块公开入口接收 `OutputEvent`。没有进入原生流式路径的最终文本由 Outbox
+作为富文本发送，其他
 关键事件和安全提示使用纯文本；
-非关键流式增量和运行中操作暂不输出。上游 warning、连接错误和 MCP 错误正文不会进入平台消息，
+运行中操作暂不输出。上游 warning、连接错误和 MCP 错误正文不会进入平台消息，
 未知 Thread 状态不会原样显示。`turn.completed` 只展开事件已经提供的最近 Turn 上下文、
 缓存命中率、模型设置、压缩次数、周限和 Goal，不查询第二状态源。
 
@@ -92,7 +96,14 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 内部 20,000 字节上限时，在同一个队列任务内按 Unicode 字符安全分片并顺序发送。每个逻辑结果
 最多发送 5 条，超出时明确标记截断，避免单个结果无限占用同一 Chat 的发送任务。消息创建失败
 不自动改发另一种格式，避免非幂等重发产生重复消息；卡片创建和更新进入相同 Chat 顺序边界，
-均不自动重试。同一 Thread 的 `active` 状态消息 ID 只保存在 Outbox 内存，并在 `idle` 到达时
+均不自动重试。模型 `text.delta` 只在 Outbox 内存中合并 300 ms；短回复完成前不创建卡片，
+持续回复使用 CardKit 2.0 `card.create → message.create → cardElement.content → card.settings`
+链路。每张卡片最多保留 5,000 个 Unicode 字符，跨卡代码围栏会闭合并重开；流式卡片与失败
+回退富文本共享单个结果最多 5 条的总预算，达到预算时在最后一张卡片明确标记截断。创建或内容
+更新失败会尽力结束已显示的卡片，再在最终文本到达后用剩余预算回退完整富文本；结束设置失败
+不重复正文；状态、正文和
+卡片更新继续共用一个 Chat 队列，不引入第二套 Channel、队列或持久化。同一 Thread 的
+`active` 状态消息 ID 只保存在 Outbox 内存，并在 `idle` 到达时
 按同一 Chat 顺序更新；重复 `active` 被忽略，更新失败会清理旧绑定且不阻塞后续输出。真实长回复
 已确认由飞书客户端折叠显示且消息顺序正确；状态更新仍待真实验收，通用消息更新和文件回退
 尚未实现。

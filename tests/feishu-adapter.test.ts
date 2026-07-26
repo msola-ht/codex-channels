@@ -131,6 +131,7 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent[1]?.text).toContain("长连接：已就绪");
     expect(fixture.sent[1]?.text).toContain("卡片动作回调：尚未验证");
     expect(fixture.sent[2]?.text).toContain("im:message:send_as_bot");
+    expect(fixture.sent[2]?.text).toContain("cardkit:card:write");
     expect(fixture.sent[2]?.text).toContain(
       "application:application:self_manage",
     );
@@ -141,6 +142,9 @@ describe("Feishu conversation adapter", () => {
     );
     expect(fixture.sent[2]?.text).toContain(
       "https://open.feishu.cn/app/cli_0123456789abcdef/auth?q=im%3Amessage%3Asend_as_bot",
+    );
+    expect(fixture.sent[2]?.text).toContain(
+      "https://open.feishu.cn/app/cli_0123456789abcdef/auth?q=cardkit%3Acard%3Awrite",
     );
     expect(fixture.sent[2]?.text).toContain(
       "https://open.feishu.cn/app/cli_0123456789abcdef/permission",
@@ -529,6 +533,12 @@ function createOutbox(): {
         sendPost: async (chatId, text) => {
           sent.push({ chatId, text });
         },
+        createStreamingCard: async () => ({
+          cardId: "735537276613415731",
+          messageId: "om_stream",
+        }),
+        updateStreamingCard: async () => {},
+        finishStreamingCard: async () => {},
       },
       pino({ level: "silent" }),
     ),

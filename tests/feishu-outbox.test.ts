@@ -21,6 +21,12 @@ const cardMethods = {
   updateCard: async () => {},
   createText: async () => "om_text",
   updateText: async () => {},
+  createStreamingCard: async () => ({
+    cardId: "7355372766134157313",
+    messageId: "om_stream",
+  }),
+  updateStreamingCard: async () => {},
+  finishStreamingCard: async () => {},
 };
 
 afterEach(() => {
@@ -28,6 +34,290 @@ afterEach(() => {
 });
 
 describe("Feishu outbox", () => {
+  it("streams coalesced deltas through one native CardKit card", async () => {
+    vi.useFakeTimers();
+    const created: string[] = [];
+    const updated: Array<{ content: string; sequence: number }> = [];
+    const finished: Array<{ summary: string; sequence: number }> = [];
+    const posts: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async (_chatId, markdown) => {
+          posts.push(markdown);
+        },
+        createStreamingCard: async (_chatId, initialText) => {
+          created.push(initialText);
+          return {
+            cardId: "7355372766134157313",
+            messageId: "om_stream",
+          };
+        },
+        updateStreamingCard: async (_cardId, content, sequence) => {
+          updated.push({ content, sequence });
+        },
+        finishStreamingCard: async (_cardId, sequence, summary) => {
+          finished.push({ summary, sequence });
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(delta("你好"));
+    outbox.handle(delta("，世界"));
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+    outbox.handle(delta("！"));
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+    outbox.handle(completed({}, "你好，世界！", "item-1"));
+    await outbox.close();
+
+    expect(created).toEqual(["你好，世界"]);
+    expect(updated).toEqual([{
+      content: "你好，世界！",
+      sequence: 1,
+    }]);
+    expect(finished).toEqual([{
+      summary: "你好，世界！",
+      sequence: 2,
+    }]);
+    expect(posts).toEqual([]);
+  });
+
+  it("keeps a reply as one rich post when it completes before streaming starts", async () => {
+    vi.useFakeTimers();
+    const createStreamingCard = vi.fn(cardMethods.createStreamingCard);
+    const posts: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        createStreamingCard,
+        sendText: async () => {},
+        sendPost: async (_chatId, markdown) => {
+          posts.push(markdown);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(delta("短回复"));
+    outbox.handle(completed({}, "短回复", "item-1"));
+    await outbox.close();
+
+    expect(createStreamingCard).not.toHaveBeenCalled();
+    expect(posts).toEqual(["短回复"]);
+  });
+
+  it("falls back to the complete rich post after streaming creation fails", async () => {
+    vi.useFakeTimers();
+    const posts: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async (_chatId, markdown) => {
+          posts.push(markdown);
+        },
+        createStreamingCard: async () => {
+          throw new Error("stream failed");
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(delta("部分"));
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+    outbox.handle(delta("正文"));
+    outbox.handle(completed({}, "部分正文", "item-1"));
+    await outbox.close();
+
+    expect(posts).toEqual(["部分正文"]);
+  });
+
+  it("falls back to the complete rich post after a streaming update fails", async () => {
+    vi.useFakeTimers();
+    const posts: string[] = [];
+    const finishStreamingCard = vi.fn(async () => {});
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async (_chatId, markdown) => {
+          posts.push(markdown);
+        },
+        updateStreamingCard: async () => {
+          throw new Error("stream update failed");
+        },
+        finishStreamingCard,
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(delta("部分"));
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+    outbox.handle(delta("正文"));
+    outbox.handle(completed({}, "部分正文", "item-1"));
+    await outbox.close();
+
+    expect(finishStreamingCard).toHaveBeenCalledWith(
+      "7355372766134157313",
+      2,
+      "部分",
+    );
+    expect(posts).toEqual(["部分正文"]);
+  });
+
+  it("rolls a long fenced reply into bounded native streaming cards", async () => {
+    vi.useFakeTimers();
+    const created: string[] = [];
+    const finished: string[] = [];
+    const posts: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async (_chatId, markdown) => {
+          posts.push(markdown);
+        },
+        createStreamingCard: async (_chatId, initialText) => {
+          created.push(initialText);
+          return {
+            cardId: `73553727661341573${created.length}`,
+            messageId: `om_stream_${created.length}`,
+          };
+        },
+        finishStreamingCard: async (_cardId, _sequence, summary) => {
+          finished.push(summary);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+    const text = `\`\`\`ts\n${"const value = 1;\n".repeat(400)}\`\`\``;
+
+    outbox.handle(delta(text));
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+    outbox.handle(completed({}, text, "item-1"));
+    await outbox.close();
+
+    expect(created).toHaveLength(2);
+    expect(created.every((part) => [...part].length <= 5_000)).toBe(true);
+    expect(created[0]).toMatch(/\n```$/u);
+    expect(created[1]).toMatch(/^```ts\n/u);
+    expect(finished).toHaveLength(2);
+    expect(posts).toEqual([]);
+  });
+
+  it("keeps streaming cards and fallback posts within one five-message budget", async () => {
+    vi.useFakeTimers();
+    const created: string[] = [];
+    const posts: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async (_chatId, markdown) => {
+          posts.push(markdown);
+        },
+        createStreamingCard: async (_chatId, initialText) => {
+          created.push(initialText);
+          return {
+            cardId: `73553727661341573${created.length}`,
+            messageId: `om_stream_${created.length}`,
+          };
+        },
+      },
+      pino({ level: "silent" }),
+    );
+    const text = "长".repeat(30_000);
+
+    outbox.handle(delta(text));
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+    outbox.handle(completed({}, text, "item-1"));
+    await outbox.close();
+
+    expect(created).toHaveLength(5);
+    expect(posts).toEqual([]);
+    expect(created[4]).toMatch(/\[内容过长，已截断\]$/u);
+    expect(created.length + posts.length).toBeLessThanOrEqual(5);
+  });
+
+  it("finishes an active native stream before a Turn completion status", async () => {
+    vi.useFakeTimers();
+    const operations: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async (_chatId, text) => {
+          operations.push(`text:${text}`);
+        },
+        sendPost: async () => {},
+        createStreamingCard: async (_chatId, initialText) => {
+          operations.push(`create:${initialText}`);
+          return {
+            cardId: "7355372766134157313",
+            messageId: "om_stream",
+          };
+        },
+        finishStreamingCard: async () => {
+          operations.push("finish");
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(delta("部分正文"));
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+    outbox.handle(turnCompleted());
+    await outbox.close();
+
+    expect(operations).toEqual([
+      "create:部分正文",
+      "finish",
+      "text:Codex 任务状态：已完成",
+    ]);
+  });
+
+  it("preserves a short partial reply when Turn completion arrives first", async () => {
+    vi.useFakeTimers();
+    const operations: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async (_chatId, text) => {
+          operations.push(`text:${text}`);
+        },
+        sendPost: async (_chatId, text) => {
+          operations.push(`post:${text}`);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(delta("部分正文"));
+    outbox.handle(turnCompleted());
+    await outbox.close();
+
+    expect(operations).toEqual([
+      "post:部分正文",
+      "text:Codex 任务状态：已完成",
+    ]);
+  });
+
   it("updates one thread status message from active to idle", async () => {
     const sent: Array<{ chatId: string; text: string }> = [];
     const updated: Array<{ messageId: string; text: string }> = [];
@@ -368,13 +658,25 @@ describe("Feishu outbox", () => {
 function completed(
   targetOverrides: Partial<ConversationTarget> = {},
   text = "飞书回复",
+  itemId = text,
 ): OutputEvent {
   return {
     type: "text.completed",
     target: { ...target, ...targetOverrides },
     threadId: "thread-1",
     turnId: "turn-1",
-    itemId: text,
+    itemId,
+    text,
+  };
+}
+
+function delta(text: string): OutputEvent {
+  return {
+    type: "text.delta",
+    target,
+    threadId: "thread-1",
+    turnId: "turn-1",
+    itemId: "item-1",
     text,
   };
 }
@@ -385,6 +687,16 @@ function threadStatus(status: string): OutputEvent {
     target,
     threadId: "thread-1",
     status,
+  };
+}
+
+function turnCompleted(): OutputEvent {
+  return {
+    type: "turn.completed",
+    target,
+    threadId: "thread-1",
+    turnId: "turn-1",
+    status: "completed",
   };
 }
 

@@ -51,7 +51,10 @@ export async function runFeishuSetup({
           addons: {
             preset: false,
             scopes: {
-              tenant: ["im:message:send_as_bot"],
+              tenant: [
+                "im:message:send_as_bot",
+                "cardkit:card:write",
+              ],
             },
             events: {
               items: {

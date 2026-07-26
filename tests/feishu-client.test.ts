@@ -584,6 +584,222 @@ describe("FeishuMessageClient", () => {
     });
   });
 
+  it("creates and sends a native streaming CardKit card", async () => {
+    const createMessage = vi.fn(async () => ({
+      data: { message_id: "om_stream" },
+    }));
+    const createStreamingCard = vi.fn(async () => ({
+      code: 0,
+      data: { card_id: "7355372766134157313" },
+    }));
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage,
+          createStreamingCard,
+          patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
+        }),
+      },
+    );
+
+    await expect(
+      client.createStreamingCard("oc_chat", "开始回答"),
+    ).resolves.toEqual({
+      cardId: "7355372766134157313",
+      messageId: "om_stream",
+    });
+
+    expect(createStreamingCard).toHaveBeenCalledWith({
+      data: {
+        type: "card_json",
+        data: JSON.stringify({
+          schema: "2.0",
+          config: {
+            streaming_mode: true,
+            summary: {
+              content: "生成中",
+            },
+            streaming_config: {
+              print_frequency_ms: {
+                default: 70,
+              },
+              print_step: {
+                default: 1,
+              },
+              print_strategy: "fast",
+            },
+          },
+          body: {
+            elements: [{
+              tag: "markdown",
+              element_id: "codexc_stream",
+              content: "开始回答",
+            }],
+          },
+        }),
+      },
+    });
+    expect(createMessage).toHaveBeenCalledWith({
+      params: {
+        receive_id_type: "chat_id",
+      },
+      data: {
+        receive_id: "oc_chat",
+        msg_type: "interactive",
+        content: JSON.stringify({
+          type: "card",
+          data: {
+            card_id: "7355372766134157313",
+          },
+        }),
+      },
+    });
+  });
+
+  it("updates and finishes a native streaming CardKit card in sequence", async () => {
+    const updateStreamingCard = vi.fn(async () => ({ code: 0 }));
+    const finishStreamingCard = vi.fn(async (payload: {
+      path: { card_id: string };
+      data: { settings: string; sequence: number; uuid: string };
+    }) => {
+      void payload;
+      return { code: 0 };
+    });
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage: async () => ({
+            data: { message_id: "om_message" },
+          }),
+          updateStreamingCard,
+          finishStreamingCard,
+          patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
+        }),
+      },
+    );
+
+    await expect(
+      client.updateStreamingCard("7355372766134157313", "完整正文", 1),
+    ).resolves.toBeUndefined();
+    await expect(
+      client.finishStreamingCard("7355372766134157313", 2, "完整正文"),
+    ).resolves.toBeUndefined();
+
+    expect(updateStreamingCard).toHaveBeenCalledWith({
+      path: {
+        card_id: "7355372766134157313",
+        element_id: "codexc_stream",
+      },
+      data: {
+        content: "完整正文",
+        sequence: 1,
+        uuid: "c_7355372766134157313_1",
+      },
+    });
+    expect(finishStreamingCard).toHaveBeenCalledWith({
+      path: {
+        card_id: "7355372766134157313",
+      },
+      data: {
+        settings: JSON.stringify({
+          config: {
+            streaming_mode: false,
+            summary: {
+              content: "完整正文",
+            },
+          },
+        }),
+        sequence: 2,
+        uuid: "s_7355372766134157313_2",
+      },
+    });
+  });
+
+  it("maps CardKit update failures to a stable response error", async () => {
+    const updateStreamingCard = vi.fn(async () => ({
+      code: 99_999,
+      message: "app_secret=secret",
+    }));
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage: async () => ({
+            data: { message_id: "om_message" },
+          }),
+          updateStreamingCard,
+          patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
+        }),
+      },
+    );
+
+    await expect(
+      client.updateStreamingCard("7355372766134157313", "正文", 1),
+    ).rejects.toEqual(new FeishuMessageError(
+      "invalid-response",
+      "飞书流式卡片更新响应无效",
+    ));
+  });
+
+  it("keeps a streaming summary within fifty UTF-16 code units", async () => {
+    const finishStreamingCard = vi.fn(async (payload: {
+      path: { card_id: string };
+      data: { settings: string; sequence: number; uuid: string };
+    }) => {
+      void payload;
+      return { code: 0 };
+    });
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage: async () => ({
+            data: { message_id: "om_message" },
+          }),
+          finishStreamingCard,
+          patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
+        }),
+      },
+    );
+
+    await client.finishStreamingCard(
+      "7355372766134157313",
+      1,
+      "😀".repeat(60),
+    );
+
+    const payload = finishStreamingCard.mock.calls[0]?.[0];
+    const settings = JSON.parse(payload?.data.settings ?? "{}") as {
+      config?: { summary?: { content?: string } };
+    };
+    expect(settings.config?.summary?.content).toBe(
+      `${"😀".repeat(24)}…`,
+    );
+    expect(settings.config?.summary?.content?.length).toBeLessThanOrEqual(50);
+  });
+
   it("creates and updates an interactive card without retrying", async () => {
     const createMessage = vi.fn(async () => ({
       data: { message_id: "om_card" },

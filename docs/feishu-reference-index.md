@@ -59,6 +59,7 @@ OAuth Token 与 Thread 绑定恢复，以及长回复折叠显示和顺序均已
 | OpenClaw Token Store | [`token-store.ts`](https://github.com/larksuite/openclaw-lark/blob/dde0be3680d6fd5443cab426c8f4b3216266346a/src/core/token-store.ts) | 参考 macOS Keychain 和 Linux AES-256-GCM 分离后端；项目使用自己的 Gateway 数据目录和严格载荷验证 |
 | WebSocket 生命周期 | [固定版本 `ws-client`](https://github.com/larksuite/node-sdk/tree/8b3e0df3af9401c263dc96026e1c7f17460a21cc/ws-client) | 核对 `onReady`、错误、重连、关闭和状态语义 |
 | 高层 Channel | [固定版本 Channel 说明](https://github.com/larksuite/node-sdk/blob/8b3e0df3af9401c263dc96026e1c7f17460a21cc/docs/channel.zh.md) | 识别其策略、去重、串行、重试、媒体和卡片职责 |
+| SDK 原生流式实现 | [`card-stream.ts`](https://github.com/larksuite/node-sdk/blob/8b3e0df3af9401c263dc96026e1c7f17460a21cc/channel/outbound/streaming/card-stream.ts)、[`markdown-stream.ts`](https://github.com/larksuite/node-sdk/blob/8b3e0df3af9401c263dc96026e1c7f17460a21cc/channel/outbound/streaming/markdown-stream.ts) | 核对 CardKit 2.0 实体创建、消息引用、元素增量、递增序列、UUID、结束设置和滚动语义；项目只复用低层协议，不采用整套 Channel |
 | 消息事件字段格式 | [官方 CLI 固定事件 Schema 指南](https://github.com/larksuite/cli/blob/a7865cd0a7416655535517a2a630848fde318761/skills/lark-event/SKILL.md) | 核对 `create_time` 为毫秒时间戳字符串 |
 | 长连接规则 | [使用长连接接收事件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/event-subscription-guide/long-connection-mode) | 处理时限、集群投递和订阅类型 |
 | 文本消息发送 | [发送消息](https://open.feishu.cn/document/server-docs/im-v1/message/create) | 核对 `chat_id` 接收目标、文本消息体和机器人可用性 |
@@ -67,6 +68,9 @@ OAuth Token 与 Thread 绑定恢复，以及长回复折叠显示和顺序均已
 | 消息常见问题 | [消息常见问题](https://open.feishu.cn/document/server-docs/im-v1/faq) | 核对用户发送资源可由同会话机器人下载；项目另收紧为 PNG/JPEG 与 10 MiB |
 | 事件接收安全 | [接收事件](https://open.feishu.cn/document/ukTMukTMukTM/uYDNxYjL2QTM24iN0EjN/event-subscription-configure-/encrypt-key-encryption-configuration-case) | Webhook 阶段的验签和加密入口 |
 | 消息卡片 | [消息卡片介绍](https://open.feishu.cn/document/ukTMukTMukTM/uczM3QjL3MzN04yNzcDN) | 后续卡片呈现和交互边界 |
+| 创建卡片实体 | [新建卡片实体](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/cardkit-v1/card/create) | 核对 CardKit 2.0 流式卡片实体和 `cardkit:card:write` 应用权限 |
+| 流式更新文本 | [流式更新文本](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/cardkit-v1/card-element/content) | 核对 `card_id + element_id`、递增 `sequence`、请求 UUID 与元素内容更新 |
+| 结束流式卡片 | [更新卡片配置](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/cardkit-v1/card/settings) | 核对关闭 `streaming_mode`、摘要、序列和 UUID |
 | 卡片输入框与表单 | [输入框组件](https://open.feishu.cn/document/feishu-cards/card-components/interactive-components/input) | 核对 JSON 1.0 `form` 容器、`form_submit`、`action.form_value`、1,000 字符上限和密码输入 |
 | 开放平台总入口 | [飞书开放平台](https://open.feishu.cn/) | 定位事件、API、权限和应用发布文档 |
 
@@ -109,6 +113,10 @@ OAuth Token 与 Thread 绑定恢复，以及长回复折叠显示和顺序均已
 `ConversationDeliveryQueue` 管理这些语义，因此当前计划默认采用低层 `Client + WSClient +
 EventDispatcher`。
 
+原生流式也只从锁定 SDK 的 Channel 提取 CardKit 调用顺序和平台约束；流式状态仍由
+`FeishuOutbox` 在内存中维护，并进入项目既有 Chat 队列。不得调用 `createLarkChannel()` 再建立
+第二套去重、串行、重试、发送回退、媒体或生命周期。
+
 阶段 0 可以比较 Channel，但只有能够关闭重复职责、不会形成第二事实来源且明显减少平台胶水时，
 才可重新提议采用；不能为了使用便利绕过项目授权、关键事件保护或队列边界。
 
@@ -141,6 +149,7 @@ EventDispatcher`。
 | 消息事件字段裁剪 | `im.message.receive_v1` | 稳定字段映射、畸形输入失败关闭和一条真实私聊文本事件已验证 | 阶段 0 |
 | 私聊文本事件 | `im.message.receive_v1` | 平台本地筛选、有界入队、Access Policy、Application 提交、安全错误和生命周期组合已完成；真实已授权主路径已通过，未授权/重复真实事件待验证 | 阶段 1 |
 | 文本与富文本发送 | `client.im.v1.message.create` | `chat_id` 的 `text` 与 `post + md` Payload、平台原生提及标签中和、有限 HTTP 超时和脱敏错误已完成；富文本短回复及长回复客户端折叠显示和顺序已通过真实验收 | 阶段 1 / 阶段 4 切片 |
+| 原生流式回复 | `cardkit.v1.card.create`、`cardElement.content`、`card.settings` | 已完成 300 ms 增量合并、同 Chat 顺序、递增序列与 UUID、短回复富文本保留、5,000 字符单卡、卡片与回退合计 5 条预算、代码围栏衔接、明确截断、Turn/关闭收尾、失败卡片尽力结束及创建/更新失败回退的离线验证；真实显示、限流和长内容待验收 | 阶段 4 切片 |
 | Thread 状态消息更新 | `client.im.v1.message.patch` | 同一 Thread 的 `active → idle` 纯文本消息创建、重复抑制、同 Chat 顺序更新、失败绑定清理和有限关闭已离线验证；不更新模型正文、不自动重试，真实更新待验收 | 阶段 4 切片 |
 | 输出渲染 | `OutputEvent`、`turn.completed` | 最终回复和启动通知使用富文本；其他关键事件、安全错误和操作性提示使用纯文本；每轮上下文状态、安全启动收件人、有界 Outbox 和 Surface 生命周期已离线验证，启动与每轮状态待真实验收 | 阶段 1 / 阶段 4 切片 |
 | 事件去重与旧事件过滤 | 平台事件 ID、毫秒时间戳 | 已实现飞书模块内有界内存状态；真实重投待验证 | 阶段 1 |
@@ -151,7 +160,7 @@ EventDispatcher`。
 | 卡片交互 | `im.v1.message.create/patch`、`card.action.trigger` | 私聊审批、用户输入、MCP form/URL 卡片、一次性令牌、Actor/Chat/消息/请求绑定、重复请求失败关闭、原值决定、超时、有限停止、结果更新失败隔离和跨客户端失效已离线验证；命令审批卡片的一次批准与当前 Gateway 长连接动作接收已通过真实验收，用户输入和 MCP 卡片仍待真实验收 | 阶段 3 |
 | 私聊 PNG/JPEG 图片 | `im.message.receive_v1`、`im.v1.messageResource.get` | 已完成授权后异步下载、10 MiB 限制、内容签名、私有暂存、过期清理和 Application 图片提交；真实消息主路径已通过验收 | 阶段 4 |
 | 一般文件 | IM 资源 API | 暂不支持 | 阶段 4 |
-| 飞书 Setup | SDK Device Authorization、`bot/v3/info` | 已实现手动输入与扫码、飞书页应用选择、消息最小权限、卡片动作回调声明、身份验证和原子配置；消息路径真实扫码、Doctor 身份探测和命令审批动作回调均已通过 | 阶段 0 / 阶段 3 |
+| 飞书 Setup | SDK Device Authorization、`bot/v3/info` | 已实现手动输入与扫码、飞书页应用选择、消息及 `cardkit:card:write` 最小权限、卡片动作回调声明、身份验证和原子配置；已有应用可由 Doctor 增量开通流式权限且无需重新扫码；消息路径真实扫码、Doctor 身份探测和命令审批动作回调均已通过 | 阶段 0 / 阶段 3 / 阶段 4 |
 | 飞书以外的 Lark | SDK Domain 配置 | 不在首版范围 | 未计划 |
 
 “计划中”不是公开支持。只有源码、配置、README、测试和真实测试应用冒烟均完成后，才能更新为
@@ -196,6 +205,7 @@ SDK 响应。
 | Application 输入适配 | [`src/surfaces/feishu/adapter.ts`](../src/surfaces/feishu/adapter.ts) | [`tests/feishu-adapter.test.ts`](../tests/feishu-adapter.test.ts)：新 Turn 提交、活动 Turn 追加提示、Application 命令与参数透传、本地帮助/身份/取消、未知斜杠命令失败关闭、结构化错误、未知异常脱敏和输出队列拒绝不重试状态修改 |
 | 身份与授权 | [`src/policy/feishu-access.ts`](../src/policy/feishu-access.ts)、`ConversationActorRegistry` | [`tests/policy.test.ts`](../tests/policy.test.ts)：Surface、App ID、Open ID 和原子替换 |
 | 消息发送与状态更新 | [`src/surfaces/feishu/outbox.ts`](../src/surfaces/feishu/outbox.ts)、[`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts)、[`src/surfaces/feishu/message-content.ts`](../src/surfaces/feishu/message-content.ts) | [`tests/feishu-outbox.test.ts`](../tests/feishu-outbox.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：精确账号路由、顺序、并行、纯文本 UTF-8 与富文本序列化内容的 20,000 字节上限、每个逻辑结果最多 5 条、明确截断、Thread active/idle 创建与更新、重复抑制、失败绑定清理、关闭、SDK Payload、超时和错误；真实消息更新与限流行为待验证 |
+| 原生流式输出 | [`src/surfaces/feishu/outbox.ts`](../src/surfaces/feishu/outbox.ts)、[`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts) | [`tests/feishu-outbox.test.ts`](../tests/feishu-outbox.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：CardKit 2.0 精确 Payload、消息引用、递增序列与 UUID、增量合并、短回复、滚动与代码围栏、卡片和回退共用 5 条预算、失败卡片尽力结束、UTF-16 摘要边界、Turn/关闭收尾、稳定脱敏错误及完整富文本回退；真实 CardKit 验收待完成 |
 | 私聊图片输入 | [`src/surfaces/feishu/media.ts`](../src/surfaces/feishu/media.ts)、[`src/surfaces/managed-image-store.ts`](../src/surfaces/managed-image-store.ts)、[`src/surfaces/feishu/inbox.ts`](../src/surfaces/feishu/inbox.ts)、[`src/surfaces/feishu/adapter.ts`](../src/surfaces/feishu/adapter.ts) | [`tests/feishu-media.test.ts`](../tests/feishu-media.test.ts)、[`tests/feishu-inbox.test.ts`](../tests/feishu-inbox.test.ts)、[`tests/feishu-adapter.test.ts`](../tests/feishu-adapter.test.ts)、[`tests/feishu-surface.test.ts`](../tests/feishu-surface.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：资源 Key 裁剪、授权后下载、精确资源 API Payload、10 MiB 限制、PNG/JPEG 签名、私有权限、错误脱敏、Application 提交和生命周期；真实消息主路径已通过 |
 | 输出渲染 | [`src/surfaces/feishu/renderer.ts`](../src/surfaces/feishu/renderer.ts) | [`tests/feishu-renderer.test.ts`](../tests/feishu-renderer.test.ts)：启动环境与脱敏 UA、每轮上下文和设置、全部 `ConversationCommandResult` 顶层种类、全部命令 Outcome、模型视图、非空集合、会话列表最多 20 条及 48 字符规范预览、Diff、Plan、Goal、关键事件、非关键进度和错误详情隐藏 |
 | 权限中心 | [`src/surfaces/feishu/permissions.ts`](../src/surfaces/feishu/permissions.ts)、[`src/surfaces/feishu/adapter.ts`](../src/surfaces/feishu/adapter.ts) | [`tests/feishu-adapter.test.ts`](../tests/feishu-adapter.test.ts)、[`tests/feishu-surface.test.ts`](../tests/feishu-surface.test.ts)：当前进程连接/事件/回调观测、Gateway 已用能力清单、精确 App ID 申请入口、未知参数失败关闭和不泄露凭据 |
@@ -203,7 +213,7 @@ SDK 响应。
 | 卡片动作裁剪 | [`src/surfaces/feishu/card-action.ts`](../src/surfaces/feishu/card-action.ts)、[`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts) | [`tests/feishu-card-action.test.ts`](../tests/feishu-card-action.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：稳定路由字段、受限字符串动作值与 `form_value`、畸形输入失败关闭、活动连接门控和独立诊断 |
 | 卡片交互 | [`src/surfaces/feishu/approval-card.ts`](../src/surfaces/feishu/approval-card.ts)、[`src/surfaces/feishu/input-card.ts`](../src/surfaces/feishu/input-card.ts)、[`src/surfaces/feishu/interactions.ts`](../src/surfaces/feishu/interactions.ts) | [`tests/feishu-interactions.test.ts`](../tests/feishu-interactions.test.ts)：有界审批与表单卡片、秘密输入、MCP JSON/URL、不可预测一次性令牌、Actor/Chat/消息绑定、请求原值决定、越权与重复动作、重复请求失败关闭、过期、卡片创建悬挂时的有限停止、结果更新失败隔离和跨客户端失效；命令审批一次批准真实主路径已通过，用户输入与 MCP 卡片仍待真实验收 |
 | 配置 | [`runtime/gateway-config.mjs`](../runtime/gateway-config.mjs)、[`src/config/`](../src/config/README.md) | [`tests/config.test.ts`](../tests/config.test.ts)、[`tests/config-reload.test.ts`](../tests/config-reload.test.ts)：启用映射、禁用、畸形输入、未知字段、凭据/启用重启和允许名单热加载 |
-| Setup 与 Doctor | [`scripts/feishu-setup.mjs`](../scripts/feishu-setup.mjs)、[`scripts/feishu-application.mjs`](../scripts/feishu-application.mjs)、[`scripts/doctor.mjs`](../scripts/doctor.mjs) | [`tests/feishu-setup.test.ts`](../tests/feishu-setup.test.ts)、[`tests/feishu-application.test.ts`](../tests/feishu-application.test.ts)：手动输入、扫码授权、应用选择、消息最小权限、卡片动作回调声明、有限 HTTP 探测、凭据与 Bot 身份验证、授权域名约束、允许名单确认、原子写入和错误脱敏。Doctor 不建立第二条消息长连接；命令审批回调已通过，用户输入/MCP 回调和完整权限仍由真实冒烟验证 |
+| Setup 与 Doctor | [`scripts/feishu-setup.mjs`](../scripts/feishu-setup.mjs)、[`scripts/feishu-application.mjs`](../scripts/feishu-application.mjs)、[`scripts/doctor.mjs`](../scripts/doctor.mjs) | [`tests/feishu-setup.test.ts`](../tests/feishu-setup.test.ts)、[`tests/feishu-application.test.ts`](../tests/feishu-application.test.ts)、[`tests/feishu-adapter.test.ts`](../tests/feishu-adapter.test.ts)：手动输入、扫码授权、应用选择、消息与 CardKit 最小权限、卡片动作回调声明、有限 HTTP 探测、凭据与 Bot 身份验证、精确增量权限入口、授权域名约束、允许名单确认、原子写入和错误脱敏。Doctor 不建立第二条消息长连接；命令审批回调已通过，用户输入/MCP 回调和完整权限仍由真实冒烟验证 |
 | Surface 生命周期 | [`src/surfaces/feishu/surface.ts`](../src/surfaces/feishu/surface.ts) | [`tests/feishu-surface.test.ts`](../tests/feishu-surface.test.ts)：长连接启停与脱敏状态日志、重连跨越时的事件去重、输入与输出排空、连续过载提示收敛、未组合收件人失败关闭和安全配置通知 |
 | Bootstrap 组合 | [`src/bootstrap/surface-composition.ts`](../src/bootstrap/surface-composition.ts) | [`tests/surface-composition.test.ts`](../tests/surface-composition.test.ts)、[`tests/surface-manager.test.ts`](../tests/surface-manager.test.ts)：按配置注册、允许名单热加载、撤权绑定清理、配置通知路由、部分启动回滚和停止不影响 App Server |
 

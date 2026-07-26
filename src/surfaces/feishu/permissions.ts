@@ -11,7 +11,8 @@ type FeishuUserAuthorizationStatus =
   | "expired"
   | "unavailable";
 
-const requiredTenantScope = "im:message:send_as_bot";
+const requiredMessageTenantScope = "im:message:send_as_bot";
+const requiredStreamingTenantScope = "cardkit:card:write";
 const oauthInspectionScope = "application:application:self_manage";
 const requiredMessageEvent = "im.message.receive_v1";
 const requiredCardCallback = "card.action.trigger";
@@ -52,7 +53,10 @@ export function renderFeishuDoctor(
 ): string {
   const applicationUrl = `https://open.feishu.cn/app/${appId}`;
   const messageScopeUrl = `${applicationUrl}/auth?q=${
-    encodeURIComponent(requiredTenantScope)
+    encodeURIComponent(requiredMessageTenantScope)
+  }&op_from=codexc&token_type=tenant`;
+  const streamingScopeUrl = `${applicationUrl}/auth?q=${
+    encodeURIComponent(requiredStreamingTenantScope)
   }&op_from=codexc&token_type=tenant`;
   const oauthInspectionScopeUrl = `${applicationUrl}/auth?q=${
     encodeURIComponent(oauthInspectionScope)
@@ -66,7 +70,8 @@ export function renderFeishuDoctor(
     `当前用户 OAuth：${userAuthorizationLabels[userAuthorization]}`,
     "",
     "当前 Surface 对话必需能力：",
-    `- 应用权限：${requiredTenantScope}`,
+    `- 应用权限：${requiredMessageTenantScope}`,
+    `- 原生流式卡片权限：${requiredStreamingTenantScope}`,
     `- 消息事件：${requiredMessageEvent}`,
     `- 卡片回调：${requiredCardCallback}`,
     "",
@@ -76,6 +81,7 @@ export function renderFeishuDoctor(
     "Token 只保存在 macOS Keychain 或 Linux 加密凭据文件，不进入会话数据库。",
     "",
     `[申请机器人发送消息权限](${messageScopeUrl})`,
+    `[申请原生流式卡片权限](${streamingScopeUrl})`,
     `[申请用户授权检测权限](${oauthInspectionScopeUrl})`,
     `[打开完整权限管理](${applicationUrl}/permission)`,
     `[打开当前飞书应用](${applicationUrl})`,
