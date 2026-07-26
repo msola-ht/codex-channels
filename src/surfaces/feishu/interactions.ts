@@ -18,6 +18,11 @@ import {
   type FeishuCardDocument,
 } from "./approval-card.js";
 import type { FeishuCardAction } from "./card-action.js";
+import {
+  renderFeishuInputCard,
+  renderFeishuInputOutcomeCard,
+  supportsFeishuInputRequest,
+} from "./input-card.js";
 
 interface FeishuInteractionDelivery {
   deliverCard(
@@ -31,11 +36,11 @@ interface FeishuInteractionDelivery {
   ): Promise<void>;
 }
 
-interface PendingApproval {
+interface PendingInteraction {
   requestId: string;
   target: ConversationTarget;
   actorId: string;
-  request: Extract<InteractionRequest, { type: "approval" }>;
+  request: InteractionRequest;
   resolve(decision: InteractionDecision): void;
   timer: NodeJS.Timeout;
   messageId: string;
@@ -47,7 +52,7 @@ export type FeishuCardActionResult =
   | "stale";
 
 export class FeishuInteractionPort implements InteractionPort {
-  private readonly pendingByToken = new Map<string, PendingApproval>();
+  private readonly pendingByToken = new Map<string, PendingInteraction>();
   private readonly tokenByRequest = new Map<string, string>();
   private readonly resolvedBeforePending = new Set<string>();
   private readonly preparations = new Set<Promise<string | undefined>>();
@@ -65,18 +70,13 @@ export class FeishuInteractionPort implements InteractionPort {
     target: ConversationTarget,
     request: InteractionRequest,
   ): Promise<InteractionDecision> {
-    switch (request.type) {
-      case "user-input":
-        return { type: "user-input", answers: {} };
-      case "elicitation":
-        return {
-          type: "elicitation",
-          action: "cancel",
-          content: null,
-        };
-      case "approval":
-        return this.requestApproval(target, request);
+    if (
+      request.type !== "approval"
+      && !supportsFeishuInputRequest(request)
+    ) {
+      return timeoutDecision(request);
     }
+    return this.requestInteraction(target, request);
   }
 
   resolved(requestId: string): void {
@@ -88,7 +88,7 @@ export class FeishuInteractionPort implements InteractionPort {
     if (pending) {
       this.finish(
         token,
-        { type: "approval", approved: false },
+        timeoutDecision(pending.request),
         "已在其他客户端处理",
       );
     } else {
@@ -98,9 +98,13 @@ export class FeishuInteractionPort implements InteractionPort {
 
   cancelAll(outcome = "连接已断开"): void {
     for (const token of this.pendingByToken.keys()) {
+      const pending = this.pendingByToken.get(token);
+      if (!pending) {
+        continue;
+      }
       this.finish(
         token,
-        { type: "approval", approved: false },
+        timeoutDecision(pending.request),
         outcome,
       );
     }
@@ -139,7 +143,11 @@ export class FeishuInteractionPort implements InteractionPort {
     ) {
       return "invalid";
     }
-    const mapped = mapApprovalDecision(pending.request, actionName);
+    const mapped = mapInteractionDecision(
+      pending.request,
+      actionName,
+      action.formValues,
+    );
     if (!mapped) {
       return "invalid";
     }
@@ -147,9 +155,9 @@ export class FeishuInteractionPort implements InteractionPort {
     return "accepted";
   }
 
-  private async requestApproval(
+  private async requestInteraction(
     target: ConversationTarget,
-    request: Extract<InteractionRequest, { type: "approval" }>,
+    request: InteractionRequest,
   ): Promise<InteractionDecision> {
     if (
       this.closed
@@ -157,18 +165,18 @@ export class FeishuInteractionPort implements InteractionPort {
       || !this.actorRegistry
       || !this.access
     ) {
-      return { type: "approval", approved: false };
+      return timeoutDecision(request);
     }
     const authorizedActors = this.actorRegistry.actors(target).filter(
       (actorId) => this.access!.isAllowed({ target, actorId }),
     );
     if (authorizedActors.length !== 1) {
-      return { type: "approval", approved: false };
+      return timeoutDecision(request);
     }
 
     const token = randomBytes(18).toString("base64url");
     this.tokenByRequest.set(request.requestId, token);
-    const preparation = this.prepareApprovalCard(
+    const preparation = this.prepareInteractionCard(
       target,
       request,
       token,
@@ -187,14 +195,14 @@ export class FeishuInteractionPort implements InteractionPort {
       this.preparations.delete(preparation);
     }
     if (!messageId) {
-      return { type: "approval", approved: false };
+      return timeoutDecision(request);
     }
 
     return new Promise<InteractionDecision>((resolve) => {
       const timer = setTimeout(() => {
         this.finish(
           token,
-          { type: "approval", approved: false },
+          timeoutDecision(request),
           "请求已超时",
         );
       }, request.expiresInMs);
@@ -211,21 +219,23 @@ export class FeishuInteractionPort implements InteractionPort {
       if (this.resolvedBeforePending.delete(token)) {
         this.finish(
           token,
-          { type: "approval", approved: false },
+          timeoutDecision(request),
           "已在其他客户端处理",
         );
       }
     });
   }
 
-  private async prepareApprovalCard(
+  private async prepareInteractionCard(
     target: ConversationTarget,
-    request: Extract<InteractionRequest, { type: "approval" }>,
+    request: InteractionRequest,
     token: string,
   ): Promise<string | undefined> {
     const messageId = await this.delivery!.deliverCard(
       target.conversationId,
-      renderFeishuApprovalCard(request, token),
+      request.type === "approval"
+        ? renderFeishuApprovalCard(request, token)
+        : renderFeishuInputCard(request, token),
     );
     if (!this.closed) {
       return messageId;
@@ -235,7 +245,7 @@ export class FeishuInteractionPort implements InteractionPort {
       target,
       messageId,
       request,
-      { type: "approval", approved: false },
+      timeoutDecision(request),
       "Gateway 已停止",
     );
     return undefined;
@@ -243,7 +253,7 @@ export class FeishuInteractionPort implements InteractionPort {
 
   private finish(
     token: string,
-    decision: Extract<InteractionDecision, { type: "approval" }>,
+    decision: InteractionDecision,
     outcome: string,
   ): void {
     const pending = this.pendingByToken.get(token);
@@ -269,18 +279,18 @@ export class FeishuInteractionPort implements InteractionPort {
   private updateCard(
     target: ConversationTarget,
     messageId: string,
-    request: Extract<InteractionRequest, { type: "approval" }>,
-    decision: Extract<InteractionDecision, { type: "approval" }>,
+    request: InteractionRequest,
+    decision: InteractionDecision,
     outcome: string,
   ): Promise<void> {
     return this.delivery!.updateCard(
       target.conversationId,
       messageId,
-      renderFeishuApprovalOutcomeCard(
-        request,
-        decision,
-        outcome,
-      ),
+      request.type === "approval" && decision.type === "approval"
+        ? renderFeishuApprovalOutcomeCard(request, decision, outcome)
+        : request.type !== "approval" && decision.type !== "approval"
+          ? renderFeishuInputOutcomeCard(request, decision, outcome)
+          : renderMismatchedOutcomeCard(request.title),
     ).catch(() => {
       this.logger?.warn(
         {
@@ -289,10 +299,144 @@ export class FeishuInteractionPort implements InteractionPort {
           conversationId: target.conversationId,
           requestId: request.requestId,
         },
-        "飞书审批卡片状态更新失败",
+        "飞书交互卡片状态更新失败",
       );
     });
   }
+}
+
+function mapInteractionDecision(
+  request: InteractionRequest,
+  action: string,
+  formValues: Readonly<Record<string, string>> | undefined,
+): {
+  decision: InteractionDecision;
+  outcome: string;
+} | undefined {
+  if (request.type === "approval") {
+    return mapApprovalDecision(request, action);
+  }
+  if (action === "cancel") {
+    return {
+      decision: timeoutDecision(request),
+      outcome: "已取消",
+    };
+  }
+  if (request.type === "user-input") {
+    return action === "submit"
+      ? mapUserInputDecision(request, formValues)
+      : undefined;
+  }
+  if (request.mode === "url") {
+    return action === "complete"
+      ? {
+          decision: {
+            type: "elicitation",
+            action: "accept",
+            content: null,
+          },
+          outcome: "已确认完成",
+        }
+      : undefined;
+  }
+  return action === "submit"
+    ? mapElicitationFormDecision(formValues)
+    : undefined;
+}
+
+function mapUserInputDecision(
+  request: Extract<InteractionRequest, { type: "user-input" }>,
+  formValues: Readonly<Record<string, string>> | undefined,
+): {
+  decision: Extract<InteractionDecision, { type: "user-input" }>;
+  outcome: string;
+} | undefined {
+  if (!formValues) {
+    return undefined;
+  }
+  const answers: Record<string, string[]> = {};
+  for (const [index, question] of request.questions.entries()) {
+    const answer = formValues[`q${index}`]?.trim();
+    if (
+      !answer
+      || (
+        question.options.length > 0
+        && !question.allowOther
+        && !question.options.includes(answer)
+      )
+    ) {
+      return undefined;
+    }
+    answers[question.id] = [answer];
+  }
+  if (Object.keys(formValues).length !== request.questions.length) {
+    return undefined;
+  }
+  return {
+    decision: { type: "user-input", answers },
+    outcome: "已提交回答",
+  };
+}
+
+function mapElicitationFormDecision(
+  formValues: Readonly<Record<string, string>> | undefined,
+): {
+  decision: Extract<InteractionDecision, { type: "elicitation" }>;
+  outcome: string;
+} | undefined {
+  if (
+    !formValues
+    || Object.keys(formValues).length !== 1
+    || typeof formValues.content !== "string"
+  ) {
+    return undefined;
+  }
+  try {
+    const content = JSON.parse(formValues.content) as unknown;
+    return {
+      decision: {
+        type: "elicitation",
+        action: "accept",
+        content,
+      },
+      outcome: "已提交表单",
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function timeoutDecision(request: InteractionRequest): InteractionDecision {
+  if (request.type === "approval") {
+    return { type: "approval", approved: false };
+  }
+  if (request.type === "user-input") {
+    return { type: "user-input", answers: {} };
+  }
+  return { type: "elicitation", action: "cancel", content: null };
+}
+
+function renderMismatchedOutcomeCard(title: string): FeishuCardDocument {
+  return {
+    config: {
+      update_multi: true,
+      wide_screen_mode: true,
+    },
+    header: {
+      template: "grey",
+      title: {
+        tag: "plain_text",
+        content: "Codex 交互已取消",
+      },
+    },
+    elements: [{
+      tag: "div",
+      text: {
+        tag: "plain_text",
+        content: title,
+      },
+    }],
+  };
 }
 
 function mapApprovalDecision(

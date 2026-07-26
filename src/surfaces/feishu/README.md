@@ -6,7 +6,8 @@
 TOML 或统一 Setup 启用开发验证路径。Phase 4 已完成两个独立体验切片：最终回复与命令结果
 使用 `post + md` 富文本，私聊 PNG/JPEG 图片复用 Application 的本地图片输入。Phase 3 已完成
 私聊审批卡片的离线主路径，真实动作投递仍待重新扫码授权后验证；群聊、一般文件和图片真实
-投递仍未验收。
+投递仍未验收。Phase 3 的用户输入与 MCP form/URL elicitation 也已完成离线实现，继续等待同一
+真实卡片动作通道验收。
 
 ## 文件索引
 
@@ -18,8 +19,9 @@ TOML 或统一 Setup 启用开发验证路径。Phase 4 已完成两个独立体
 - `message-content.ts`：生成飞书 `post + md` 内容，供发送和实际序列化大小计量共用。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪。
 - `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理。
-- `interactions.ts`：维护私聊审批的一次性令牌、Actor 绑定、过期和跨客户端失效；用户输入与
-  MCP elicitation 继续失败关闭。
+- `input-card.ts`：生成有界用户输入表单、MCP JSON 表单、HTTP(S) URL 确认和处理结果卡片。
+- `interactions.ts`：维护私聊审批、用户输入和 MCP elicitation 的一次性令牌、Actor 绑定、
+  过期、取消和跨客户端失效。
 - `media.ts`：通过官方消息资源 API 下载私聊图片，并调用 Surface 共用暂存器完成大小、签名、
   权限和过期清理。
 - `renderer.ts`：把平台无关 `ConversationCommandResult`、`OutputEvent` 和结构化错误映射为稳定文本内容。
@@ -39,7 +41,8 @@ TOML 或统一 Setup 启用开发验证路径。Phase 4 已完成两个独立体
 - 消息路径只注册 `im.message.receive_v1`，回调必须同步完成最小入队，不能在 SDK Reader 中等待业务或平台网络请求。
 - 已离线注册 `card.action.trigger` 的独立分流并严格裁剪动作；测试应用尚未重新授权回调，真实
   WebSocket 投递未验证。动作必须匹配一次性令牌、Chat、消息、授权 Actor 和当前请求提供的
-  精确选项，否则拒绝处理。
+  精确选项或表单字段，否则拒绝处理。表单回调只额外保留官方 `action.form_value` 中最多四个、
+  每项最多 1,000 字符的字符串字段。
 - 消息发送只使用 `im.v1.message.create` 的 `chat_id + text/post/interactive` 窄能力；富文本只生成单个
   `md` 元素，不暴露 SDK Client。模型或上游文本中的飞书原生 `<at>` 标签会在平台边界被中和，
   避免非预期提醒。审批结束使用 `im.v1.message.patch` 移除动作；调用设置 15 秒 HTTP 超时，
@@ -90,11 +93,13 @@ Inbox 现有诊断路径仅记录受约束的错误类型。命令结果、追�
 Adapter 不会重试已经执行的状态修改，而是把稳定的队列错误交回同一诊断路径。会话列表最多展示
 20 条，名称或预览会规范空白并限制为 48 个字符，剩余项通过搜索提示收敛。
 
-`interactions.ts` 只为当前 Conversation 已恢复且恰有一个仍获授权 Actor 的命令、文件和权限
-请求创建卡片。不可预测令牌只存于内存并绑定请求、Chat、消息和 Actor；点击只能映射请求原本
-提供的一次、会话、命令前缀或精确网络规则，重复、畸形、越权、过期和关闭后的动作均不会升级
-权限。其他客户端解决、超时和 Surface 停止会拒绝请求并移除卡片动作。用户输入返回空答案，
-MCP elicitation 返回取消，二者尚未实现。
+`interactions.ts` 只为当前 Conversation 已恢复且恰有一个仍获授权 Actor 的交互请求创建卡片。
+不可预测令牌只存于内存并绑定请求、Chat、消息和 Actor；审批点击只能映射请求原本提供的一次、
+会话、命令前缀或精确网络规则，重复、畸形、越权、过期和关闭后的动作均不会升级权限。用户输入
+最多接受三个问题，固定选项不接受列表外值，秘密问题使用飞书密码输入框；答案按原始问题 ID
+返回且不会显示在处理结果卡。MCP form 只接受单个最长 1,000 字符的有效 JSON，URL 模式只渲染
+HTTP(S) 链接。其他客户端解决、取消、超时和 Surface 停止会按请求类型返回空答案或取消，并移除
+卡片动作。所有表单值只存在于待处理内存和协议响应中，不写入数据库或日志。
 
 `surface.ts` 实现单账号 `SurfaceAdapter` 生命周期：启动等待长连接就绪；停止先切断新事件，再
 有限排空 Inbox 和 Outbox。Bootstrap 从现有绑定中选择仍有授权 Actor 的 Chat 作为配置通知

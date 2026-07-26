@@ -287,6 +287,9 @@ describe("FeishuEventConnection", () => {
           interaction_token: "opaque-token",
           decision: "approve-once",
         },
+        form_value: {
+          q0: "answer",
+        },
       },
     };
     const startPromise = fixture.connection.start();
@@ -305,6 +308,9 @@ describe("FeishuEventConnection", () => {
       value: {
         interaction_token: "opaque-token",
         decision: "approve-once",
+      },
+      formValues: {
+        q0: "answer",
       },
     });
 

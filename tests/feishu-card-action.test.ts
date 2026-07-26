@@ -22,6 +22,9 @@ function createAction(): Record<string, unknown> {
         interaction_token: "opaque-token",
         decision: "approve-once",
       },
+      form_value: {
+        q0: "answer",
+      },
       timezone: "Asia/Shanghai",
     },
     token: "platform-token-is-not-retained",
@@ -38,6 +41,9 @@ describe("decodeFeishuCardAction", () => {
       value: {
         interaction_token: "opaque-token",
         decision: "approve-once",
+      },
+      formValues: {
+        q0: "answer",
       },
     });
   });
@@ -57,6 +63,22 @@ describe("decodeFeishuCardAction", () => {
       ...createAction(),
       action: { tag: "button", value: { nested: {} } },
     }, "action.value"],
+    [{
+      ...createAction(),
+      action: {
+        tag: "button",
+        value: { interaction_token: "token", decision: "submit" },
+        form_value: { q0: { nested: true } },
+      },
+    }, "action.form_value"],
+    [{
+      ...createAction(),
+      action: {
+        tag: "button",
+        value: { interaction_token: "token", decision: "submit" },
+        form_value: { q0: "x".repeat(1_001) },
+      },
+    }, "action.form_value"],
   ])("rejects malformed input without retaining it", (input, field) => {
     let thrown: unknown;
     try {

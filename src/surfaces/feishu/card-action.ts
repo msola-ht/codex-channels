@@ -7,7 +7,8 @@ export type FeishuCardActionField =
   | "operator.open_id"
   | "action"
   | "action.tag"
-  | "action.value";
+  | "action.value"
+  | "action.form_value";
 
 export class FeishuCardActionError extends Error {
   readonly code = "invalid-card-action";
@@ -24,6 +25,7 @@ export interface FeishuCardAction {
   actorOpenId: string;
   tag: string;
   value: Readonly<Record<string, string>>;
+  formValues?: Readonly<Record<string, string>>;
 }
 
 export function decodeFeishuCardAction(input: unknown): FeishuCardAction {
@@ -32,6 +34,10 @@ export function decodeFeishuCardAction(input: unknown): FeishuCardAction {
   const operator = requireRecord(event.operator, "operator");
   const action = requireRecord(event.action, "action");
 
+  const formValues = optionalStringRecord(
+    action.form_value,
+    "action.form_value",
+  );
   return {
     messageId: requireString(
       context.open_message_id,
@@ -41,6 +47,7 @@ export function decodeFeishuCardAction(input: unknown): FeishuCardAction {
     actorOpenId: requireString(operator.open_id, "operator.open_id"),
     tag: requireString(action.tag, "action.tag"),
     value: requireStringRecord(action.value, "action.value"),
+    ...(formValues === undefined ? {} : { formValues }),
   };
 }
 
@@ -71,21 +78,33 @@ function requireString(
 function requireStringRecord(
   value: unknown,
   field: FeishuCardActionField,
+  maximumEntries = 8,
+  maximumValueLength = 256,
 ): Readonly<Record<string, string>> {
   const record = requireRecord(value, field);
   const entries = Object.entries(record);
   if (
     entries.length === 0
-    || entries.length > 8
+    || entries.length > maximumEntries
     || entries.some(
       ([key, entry]) =>
         key.length === 0
         || key.length > 64
         || typeof entry !== "string"
-        || entry.length > 256,
+        || entry.length > maximumValueLength,
     )
   ) {
     throw new FeishuCardActionError(field);
   }
   return Object.fromEntries(entries) as Record<string, string>;
+}
+
+function optionalStringRecord(
+  value: unknown,
+  field: FeishuCardActionField,
+): Readonly<Record<string, string>> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return requireStringRecord(value, field, 4, 1_000);
 }

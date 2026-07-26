@@ -268,25 +268,159 @@ describe("Feishu interaction port", () => {
     await fixture.interactions.close();
     expect(JSON.stringify(fixture.updatedCards[0]?.card))
       .toContain("请求已超时");
+    vi.useRealTimers();
   });
 
-  it.each([
-    [
-      userInputRequest(),
-      { type: "user-input", answers: {} },
-    ],
-    [
-      elicitationRequest(),
-      { type: "elicitation", action: "cancel", content: null },
-    ],
-  ] as const)("continues to fail closed for unsupported %s", async (
-    request,
-    expected,
-  ) => {
+  it("submits bounded user-input form values by original question id", async () => {
+    const fixture = createConfiguredFixture();
+    const decision = fixture.interactions.request(target, userInputRequest());
+    await settle();
+
+    expect(fixture.sentCards).toHaveLength(1);
+    const cardJson = JSON.stringify(fixture.sentCards[0]!.card);
+    expect(cardJson).toContain("\"tag\":\"form\"");
+    expect(cardJson).toContain("\"input_type\":\"password\"");
+    const token = interactionToken(fixture.sentCards[0]!.card, "submit");
+    const action = {
+      messageId: "om_card",
+      chatId: target.conversationId,
+      actorOpenId: "ou_actor",
+      tag: "button",
+      value: {
+        interaction_token: token,
+        decision: "submit",
+      },
+      formValues: {
+        q0: "其他",
+        q1: "secret-value",
+      },
+    };
+
+    expect(fixture.interactions.handleCardAction(action)).toBe("invalid");
+    expect(fixture.interactions.handleCardAction({
+      ...action,
+      formValues: {
+        q0: "选项一",
+        q1: "secret-value",
+      },
+    })).toBe("accepted");
+    await expect(decision).resolves.toEqual({
+      type: "user-input",
+      answers: {
+        choice: ["选项一"],
+        secret: ["secret-value"],
+      },
+    });
+    await fixture.interactions.close();
+    expect(JSON.stringify(fixture.updatedCards[0]?.card))
+      .toContain("处理结果：已提交回答");
+    expect(JSON.stringify(fixture.updatedCards[0]?.card))
+      .not.toContain("secret-value");
+  });
+
+  it("parses an MCP form as bounded JSON and keeps invalid submissions pending", async () => {
+    const fixture = createConfiguredFixture();
+    const decision = fixture.interactions.request(target, elicitationRequest());
+    await settle();
+    const token = interactionToken(fixture.sentCards[0]!.card, "submit");
+    const action = {
+      messageId: "om_card",
+      chatId: target.conversationId,
+      actorOpenId: "ou_actor",
+      tag: "button",
+      value: {
+        interaction_token: token,
+        decision: "submit",
+      },
+      formValues: {
+        content: "not-json",
+      },
+    };
+
+    expect(fixture.interactions.handleCardAction(action)).toBe("invalid");
+    expect(fixture.interactions.handleCardAction({
+      ...action,
+      formValues: {
+        content: "{\"project\":\"codex-channels\"}",
+      },
+    })).toBe("accepted");
+    await expect(decision).resolves.toEqual({
+      type: "elicitation",
+      action: "accept",
+      content: { project: "codex-channels" },
+    });
+    await fixture.interactions.close();
+  });
+
+  it("cancels pending user input when another client resolves it", async () => {
+    const fixture = createConfiguredFixture();
+    const decision = fixture.interactions.request(target, userInputRequest());
+    await settle();
+
+    fixture.interactions.resolved("input-1");
+
+    await expect(decision).resolves.toEqual({
+      type: "user-input",
+      answers: {},
+    });
+    await fixture.interactions.close();
+    expect(JSON.stringify(fixture.updatedCards[0]?.card))
+      .toContain("已在其他客户端处理");
+  });
+
+  it("supports URL elicitation completion without copying URL content", async () => {
+    const fixture = createConfiguredFixture();
+    const decision = fixture.interactions.request(target, {
+      ...elicitationRequest(),
+      mode: "url",
+      url: "https://example.com/authorize",
+    });
+    await settle();
+
+    expect(JSON.stringify(fixture.sentCards[0]?.card))
+      .toContain("https://example.com/authorize");
+    const token = interactionToken(fixture.sentCards[0]!.card, "complete");
+    expect(fixture.interactions.handleCardAction({
+      messageId: "om_card",
+      chatId: target.conversationId,
+      actorOpenId: "ou_actor",
+      tag: "button",
+      value: {
+        interaction_token: token,
+        decision: "complete",
+      },
+    })).toBe("accepted");
+    await expect(decision).resolves.toEqual({
+      type: "elicitation",
+      action: "accept",
+      content: null,
+    });
+    await fixture.interactions.close();
+  });
+
+  it("fails closed for unsupported question counts and unsafe URL schemes", async () => {
     const fixture = createConfiguredFixture();
 
-    await expect(fixture.interactions.request(target, request)).resolves
-      .toEqual(expected);
+    await expect(fixture.interactions.request(target, {
+      ...userInputRequest(),
+      questions: [],
+    })).resolves.toEqual({ type: "user-input", answers: {} });
+    await expect(fixture.interactions.request(target, {
+      ...userInputRequest(),
+      questions: [
+        ...userInputRequest().questions,
+        ...userInputRequest().questions,
+      ],
+    })).resolves.toEqual({ type: "user-input", answers: {} });
+    await expect(fixture.interactions.request(target, {
+      ...elicitationRequest(),
+      mode: "url",
+      url: "javascript:alert(1)",
+    })).resolves.toEqual({
+      type: "elicitation",
+      action: "cancel",
+      content: null,
+    });
     expect(fixture.sentCards).toEqual([]);
   });
 });
@@ -333,20 +467,39 @@ function interactionToken(
   card: FeishuCardDocument,
   decision: string,
 ): string {
-  const action = card.elements.find((element) => element.tag === "action");
-  const buttons = action?.actions as Array<{
-    value?: {
-      interaction_token?: string;
-      decision?: string;
-    };
-  }> | undefined;
-  const token = buttons?.find(
-    (button) => button.value?.decision === decision,
-  )?.value?.interaction_token;
+  const token = findInteractionToken(card, decision);
   if (!token) {
     throw new Error(`卡片缺少 ${decision} 动作`);
   }
   return token;
+}
+
+function findInteractionToken(
+  value: unknown,
+  decision: string,
+): string | undefined {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => findInteractionToken(entry, decision))
+      .find((entry) => entry !== undefined);
+  }
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const actionValue = record.value;
+  if (typeof actionValue === "object" && actionValue !== null) {
+    const action = actionValue as Record<string, unknown>;
+    if (
+      action.decision === decision
+      && typeof action.interaction_token === "string"
+    ) {
+      return action.interaction_token;
+    }
+  }
+  return Object.values(record)
+    .map((entry) => findInteractionToken(entry, decision))
+    .find((entry) => entry !== undefined);
 }
 
 function approvalRequest(): Extract<InteractionRequest, { type: "approval" }> {
@@ -364,7 +517,10 @@ function approvalRequest(): Extract<InteractionRequest, { type: "approval" }> {
   };
 }
 
-function userInputRequest(): InteractionRequest {
+function userInputRequest(): Extract<
+  InteractionRequest,
+  { type: "user-input" }
+> {
   return {
     type: "user-input",
     requestId: "input-1",
@@ -372,12 +528,32 @@ function userInputRequest(): InteractionRequest {
     turnId: "turn-1",
     itemId: "item-1",
     title: "需要输入",
-    questions: [],
+    questions: [
+      {
+        id: "choice",
+        header: "选择",
+        question: "请选择一个选项",
+        options: ["选项一", "选项二"],
+        allowOther: false,
+        secret: false,
+      },
+      {
+        id: "secret",
+        header: "密钥",
+        question: "请输入敏感值",
+        options: [],
+        allowOther: true,
+        secret: true,
+      },
+    ],
     expiresInMs: 300_000,
   };
 }
 
-function elicitationRequest(): InteractionRequest {
+function elicitationRequest(): Extract<
+  InteractionRequest,
+  { type: "elicitation" }
+> {
   return {
     type: "elicitation",
     requestId: "elicitation-1",
