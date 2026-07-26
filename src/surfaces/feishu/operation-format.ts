@@ -1,61 +1,17 @@
 import type { OperationUpdate } from "../../conversation-core/index.js";
 
-export interface FeishuOperationLogView {
-  order: readonly string[];
-  records: ReadonlyMap<string, OperationUpdate>;
-  omittedCount: number;
-}
-
-const maximumVisibleOperations = 20;
-const maximumOperationMarkdownCharacters = 4_800;
-
-export function formatFeishuOperationLog(
-  state: FeishuOperationLogView,
-): string {
-  const records = state.order
-    .map((itemId) => state.records.get(itemId))
-    .filter((record): record is OperationUpdate => record !== undefined);
-  let visible = records.slice(-maximumVisibleOperations);
-  let omitted = state.omittedCount + records.length - visible.length;
-  let markdown = renderOperations(visible, omitted);
-  while (
-    [...markdown].length > maximumOperationMarkdownCharacters
-    && visible.length > 1
-  ) {
-    visible = visible.slice(1);
-    omitted += 1;
-    markdown = renderOperations(visible, omitted);
-  }
-  return markdown;
-}
-
-function renderOperations(
-  records: readonly OperationUpdate[],
-  omittedCount: number,
-): string {
-  const lines = ["**执行进度**"];
-  if (omittedCount > 0) {
-    lines.push("", `已省略较早的 ${omittedCount} 项操作。`);
-  }
-  for (const record of records) {
-    const metadata = [
-      record.durationMs === undefined ? null : `${record.durationMs} ms`,
-      record.exitCode === undefined ? null : `exit ${record.exitCode}`,
-    ].filter((value): value is string => value !== null);
-    lines.push(
-      "",
-      `**${operationTitle(record)} · ${operationStatus(record.status)}**${metadata.length > 0 ? ` · ${metadata.join(" · ")}` : ""}`,
-    );
-    if (!record.detail) {
-      continue;
-    }
+export function formatFeishuOperation(record: OperationUpdate): string {
+  const metadata = [
+    record.durationMs === undefined ? null : `${record.durationMs} ms`,
+    record.exitCode === undefined ? null : `exit ${record.exitCode}`,
+  ].filter((value): value is string => value !== null);
+  const lines = [
+    `**${operationTitle(record)} · ${operationStatus(record.status)}**${metadata.length > 0 ? ` · ${metadata.join(" · ")}` : ""}`,
+  ];
+  if (record.detail) {
     const detail = safeOperationDetail(record.detail);
     if (record.kind === "command") {
-      lines.push(
-        "```shell",
-        detail,
-        "```",
-      );
+      lines.push("```shell", detail, "```");
     } else {
       lines.push(`具体内容：\`${inlineOperationDetail(detail)}\``);
     }

@@ -28,7 +28,7 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
   一次性令牌，管理有限任务、取消和安全结果。
 - `client.ts`：官方 SDK、事件长连接、消息与 CardKit 窄客户端及生命周期隔离。
 - `message-content.ts`：中和平台原生提及标签并生成飞书 `post + md` 降级内容。
-- `operation-format.ts`：把同一 Turn 的有界操作记录渲染为包含脱敏详情的 CardKit Markdown。
+- `operation-format.ts`：把单个操作终态渲染为包含脱敏详情的静态 CardKit Markdown。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪。
 - `menu-event.ts`：严格裁剪 `application.bot.menu_v6` 的 App、Actor、事件和菜单 Key。
 - `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理。
@@ -212,7 +212,7 @@ Setup 与只读 Doctor 凭据/Bot 身份探测已完成，真实应用的首次�
 命令审批一次批准，以及长回复在客户端折叠显示且顺序正确也已完成真实验收。持续回复以
 CardKit 原生流式卡片可见更新的主路径同样已通过验收；轻量 Thread 状态卡片的
 `active → idle` 原地更新也已通过真实验收。真实限流、失败回退和超长内容滚动仍待验证。
-静态展示和同一 Turn 操作进度已统一为 CardKit 2.0 并通过离线测试，仍待真实应用验收。
+静态展示和按会话顺序发送的操作终态卡片已统一为 CardKit 2.0 并通过离线测试，仍待真实应用验收。
 断线恢复、代理、未授权/重复事件、用户输入与 MCP 卡片动作仍未完成真实验收。后续阶段按
 [`飞书 Surface 接入计划`](../../../docs/feishu-surface-plan.md)推进；一级 `surfaces` 入口只转出
 窄工厂，不得导出 SDK 类型，也不得在 Core 中引入飞书类型。Phase 1 真实验收关闭前，Phase 2

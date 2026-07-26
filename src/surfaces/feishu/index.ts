@@ -79,8 +79,7 @@ export {
   type FeishuMessagePort,
 } from "./outbox.js";
 export {
-  formatFeishuOperationLog,
-  type FeishuOperationLogView,
+  formatFeishuOperation,
 } from "./operation-format.js";
 export {
   renderFeishuCommandResult,

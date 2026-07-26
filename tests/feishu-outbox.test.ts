@@ -441,8 +441,7 @@ describe("Feishu outbox", () => {
     ]);
   });
 
-  it("merges concrete command status into one CardKit progress card per Turn", async () => {
-    vi.useFakeTimers();
+  it("keeps completed tools as static CardKit cards in conversation order", async () => {
     const operations: string[] = [];
     const outbox = new FeishuOutbox(
       "cli_app",
@@ -457,42 +456,26 @@ describe("Feishu outbox", () => {
         sendMarkdownCard: async (_chatId, text) => {
           operations.push(`static:${text}`);
         },
-        createStreamingCard: async (_chatId, initialText) => {
-          operations.push(`create:${initialText}`);
-          return {
-            cardId: "7355372766134157313",
-            messageId: "om_operations",
-          };
-        },
-        updateStreamingCard: async (_cardId, content, sequence) => {
-          operations.push(`update:${sequence}:${content}`);
-        },
-        finishStreamingCard: async (_cardId, sequence, summary) => {
-          operations.push(`finish:${sequence}:${summary}`);
-        },
       },
       pino({ level: "silent" }),
     );
 
+    outbox.handle(completed({}, "工具前说明", "message-1"));
     outbox.handle(operationUpdated("running"));
-    await vi.advanceTimersByTimeAsync(750);
-    await Promise.resolve();
     outbox.handle(operationUpdated("completed"));
+    outbox.handle(completed({}, "工具执行结果", "message-2"));
     outbox.handle(turnCompleted());
     await outbox.close();
 
     expect(operations).toHaveLength(4);
-    expect(operations[0]).toContain("create:**执行进度**");
-    expect(operations[0]).toContain("git status --short");
-    expect(operations[0]).toContain("运行中");
-    expect(operations[1]).toContain("update:1:**执行进度**");
-    expect(operations[1]).toContain("已完成");
-    expect(operations[2]).toContain("finish:2:**执行进度**");
+    expect(operations[0]).toBe("static:工具前说明");
+    expect(operations[1]).toContain("static:**运行命令 · 已完成**");
+    expect(operations[1]).toContain("git status --short");
+    expect(operations[2]).toBe("static:工具执行结果");
     expect(operations[3]).toBe("static:**本次运行 · 已完成**");
   });
 
-  it("preserves the final command log when the progress card cannot be created", async () => {
-    vi.useFakeTimers();
+  it("ignores running operation frames and sends one static terminal card", async () => {
     const markdownCards: string[] = [];
     const outbox = new FeishuOutbox(
       "cli_app",
@@ -503,22 +486,17 @@ describe("Feishu outbox", () => {
         sendMarkdownCard: async (_chatId, markdown) => {
           markdownCards.push(markdown);
         },
-        createStreamingCard: async () => {
-          throw new Error("card create failed");
-        },
       },
       pino({ level: "silent" }),
     );
 
     outbox.handle(operationUpdated("running"));
-    await vi.advanceTimersByTimeAsync(750);
-    await Promise.resolve();
     outbox.handle(operationUpdated("completed"));
     outbox.handle(turnCompleted());
     await outbox.close();
 
     expect(markdownCards).toHaveLength(2);
-    expect(markdownCards[0]).toContain("**执行进度**");
+    expect(markdownCards[0]).not.toContain("**执行进度**");
     expect(markdownCards[0]).toContain("git status --short");
     expect(markdownCards[0]).toContain("已完成");
     expect(markdownCards[1]).toBe("**本次运行 · 已完成**");
