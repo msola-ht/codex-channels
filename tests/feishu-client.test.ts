@@ -664,6 +664,129 @@ describe("FeishuMessageClient", () => {
     });
   });
 
+  it("fails closed when a message update response reports an error", async () => {
+    const patchMessage = vi.fn(async () => ({ code: 999 }));
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage: async () => ({
+            data: { message_id: "om_message" },
+          }),
+          patchMessage,
+          downloadResource: successfulDownload,
+        }),
+      },
+    );
+
+    await expect(
+      client.updateText("om_status", "Thread 状态：空闲"),
+    ).rejects.toEqual(new FeishuMessageError(
+      "invalid-response",
+      "飞书消息更新响应无效",
+    ));
+    expect(patchMessage).toHaveBeenCalledOnce();
+  });
+
+  it("hides SDK error details from a message update", async () => {
+    const patchMessage = vi.fn(async () => {
+      throw new Error("Authorization: secret");
+    });
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage: async () => ({
+            data: { message_id: "om_message" },
+          }),
+          patchMessage,
+          downloadResource: successfulDownload,
+        }),
+      },
+    );
+
+    await expect(
+      client.updateText("om_status", "Thread 状态：空闲"),
+    ).rejects.toEqual(new FeishuMessageError(
+      "send-failed",
+      "飞书消息更新失败",
+    ));
+    expect(patchMessage).toHaveBeenCalledOnce();
+  });
+
+  it("maps an SDK HTTP update timeout to the stable timeout error", async () => {
+    const timeout = Object.assign(new Error("request secret"), {
+      code: "ECONNABORTED",
+    });
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage: async () => ({
+            data: { message_id: "om_message" },
+          }),
+          patchMessage: async () => {
+            throw timeout;
+          },
+          downloadResource: successfulDownload,
+        }),
+      },
+    );
+
+    await expect(
+      client.updateText("om_status", "Thread 状态：空闲"),
+    ).rejects.toEqual(new FeishuMessageError(
+      "send-timeout",
+      "飞书消息更新超时",
+    ));
+  });
+
+  it("fails with a sanitized timeout when a message update hangs", async () => {
+    vi.useFakeTimers();
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 250,
+        createSdkClient: () => ({
+          createMessage: async () => ({
+            data: { message_id: "om_message" },
+          }),
+          patchMessage: () => new Promise(() => {}),
+          downloadResource: successfulDownload,
+        }),
+      },
+    );
+
+    const updating = client.updateText(
+      "om_status",
+      "Thread 状态：空闲",
+    );
+    const rejection = expect(updating).rejects.toEqual(
+      new FeishuMessageError(
+        "send-timeout",
+        "飞书消息更新超时",
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(250);
+
+    await rejection;
+  });
+
   it("neutralizes platform-native mention tags in rich Markdown", async () => {
     const createMessage = vi.fn(async () => ({
       data: { message_id: "om_message" },

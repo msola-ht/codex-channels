@@ -1,5 +1,5 @@
 import pino from "pino";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   ConversationTarget,
@@ -22,6 +22,10 @@ const cardMethods = {
   createText: async () => "om_text",
   updateText: async () => {},
 };
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("Feishu outbox", () => {
   it("updates one thread status message from active to idle", async () => {
@@ -90,6 +94,36 @@ describe("Feishu outbox", () => {
       "Thread 状态：运行中",
     ]);
     expect(updateAttempts).toBe(1);
+  });
+
+  it("does not restore a status binding after close times out", async () => {
+    vi.useFakeTimers();
+    const creation = deferredValue<string>();
+    const createText = vi.fn(() => creation.promise);
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        createText,
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(threadStatus("active"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(createText).toHaveBeenCalledOnce();
+
+    const closing = outbox.close();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await closing;
+    expect(statusBindingCount(outbox)).toBe(0);
+
+    creation.resolve("om_late");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(statusBindingCount(outbox)).toBe(0);
   });
 
   it("routes a rendered event to the exact account and chat", async () => {
@@ -366,6 +400,28 @@ function deferred(): {
     promise,
     resolve: () => resolve?.(),
   };
+}
+
+function deferredValue<T>(): {
+  promise: Promise<T>;
+  resolve(value: T): void;
+} {
+  let resolve: ((value: T) => void) | undefined;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return {
+    promise,
+    resolve: (value) => resolve?.(value),
+  };
+}
+
+function statusBindingCount(outbox: FeishuOutbox): number {
+  return (
+    outbox as unknown as {
+      threadStatusMessages: ReadonlyMap<string, unknown>;
+    }
+  ).threadStatusMessages.size;
 }
 
 async function settle(): Promise<void> {
