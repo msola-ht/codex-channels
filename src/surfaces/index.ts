@@ -1,5 +1,6 @@
 export {
   createFeishuSurface,
+  renderFeishuStartupNotification,
   type FeishuSurfaceOptions,
 } from "./feishu/index.js";
 export {

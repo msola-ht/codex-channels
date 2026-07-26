@@ -12,6 +12,7 @@ import {
 import {
   renderFeishuCommandResult,
   renderFeishuOutput,
+  renderFeishuStartupNotification,
 } from "../src/surfaces/feishu/index.js";
 
 const target = {
@@ -21,6 +22,56 @@ const target = {
 } as const;
 
 describe("Feishu output renderer", () => {
+  it("renders a startup notification without the upstream build token", () => {
+    const rendered = renderFeishuStartupNotification(
+      [{ id: "main", name: "Main", cwd: "/workspace" }],
+      {
+        threadId: "thread-1",
+        workspaceId: "main",
+        model: "gpt-test",
+        effort: "medium",
+        serviceTier: "priority",
+        modelPending: false,
+        effortPending: false,
+        fastModePending: false,
+        weeklyLimit: {
+          usedPercent: 37,
+          windowDurationMins: 10_080,
+          resetsAt: null,
+        },
+      },
+      {
+        platform: "darwin",
+        architecture: "arm64",
+        gatewayVersion: "0.145.0",
+        nodeVersion: "v24.0.0",
+        transport: "Unix WebSocket",
+        codexUpstreamUserAgent:
+          "codex-cli/0.145.0 (macOS 15.0) build-secret (arm64)",
+      },
+    );
+
+    expect(rendered).toBe([
+      "Codex Connect 已联通",
+      "App Server：已连接",
+      "",
+      "运行环境：",
+      "- macOS · arm64",
+      "- Codex Connect 0.145.0 · Node.js v24.0.0",
+      "- Unix WebSocket",
+      "- UA：codex-cli/0.145.0 (macOS 15.0) (arm64)",
+      "",
+      "当前会话：",
+      "- Main · main",
+      "- /workspace",
+      "- Thread：thread-1",
+      "- gpt-test · medium",
+      "- Fast 模式：开启",
+      "- 周限：已使用 37%",
+    ].join("\n"));
+    expect(rendered).not.toContain("build-secret");
+  });
+
   it("renders every platform-independent command result kind as plain text", () => {
     const results: ConversationCommandResult[] = [
       {
@@ -221,6 +272,55 @@ describe("Feishu output renderer", () => {
     expect(limits).toContain("个人限额剩余：75%");
     expect(limits).toContain("消费控制：正常");
     expect(limits).toContain("限流状态：Workspace 用量上限已达到");
+  });
+
+  it("renders detailed context after a completed Turn", () => {
+    const rendered = renderFeishuOutput({
+      type: "turn.completed",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      status: "completed",
+      tokenUsage: {
+        total: {
+          totalTokens: 1_000,
+          inputTokens: 800,
+          cachedInputTokens: 600,
+          cacheWriteInputTokens: 50,
+          outputTokens: 200,
+          reasoningOutputTokens: 100,
+        },
+        last: {
+          totalTokens: 100,
+          inputTokens: 80,
+          cachedInputTokens: 40,
+          cacheWriteInputTokens: 5,
+          outputTokens: 20,
+          reasoningOutputTokens: 10,
+        },
+        modelContextWindow: 200,
+      },
+      model: "gpt-test",
+      effort: "medium",
+      serviceTier: "priority",
+      contextCompactionCount: 2,
+      weeklyLimit: {
+        usedPercent: 37,
+        windowDurationMins: 10_080,
+        resetsAt: null,
+      },
+    });
+
+    expect(rendered).toBe([
+      "Codex 任务状态：已完成",
+      "上下文：100 / 200（50%）",
+      "缓存命中率：50%",
+      "当前模型：gpt-test",
+      "思考强度：medium",
+      "Fast 模式：开启",
+      "上下文压缩：2 次",
+      "周限：已使用 37%",
+    ].join("\n"));
   });
 
   it("renders every command outcome with its distinguishing data", () => {

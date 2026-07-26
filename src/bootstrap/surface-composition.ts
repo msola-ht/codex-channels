@@ -12,6 +12,7 @@ import {
 import type { BindingStore } from "../storage/index.js";
 import {
   createFeishuSurface,
+  renderFeishuStartupNotification,
   TelegramSurface,
   telegramDefaultAccountId,
   type SurfaceAdapter,
@@ -114,6 +115,35 @@ function createFeishuModule(
       access,
       config.appId,
     ),
+    startupNotification: {
+      messages: () => authorizedFeishuConversations(
+        options.bindings,
+        access,
+        config.appId,
+      ).map((chatId) => {
+        const status = options.service.status({
+          surface: "feishu",
+          accountId: config.appId,
+          conversationId: chatId,
+        });
+        return {
+          chatId,
+          text: renderFeishuStartupNotification(
+            options.config.workspaces,
+            status,
+            {
+              platform: process.platform,
+              architecture: process.arch,
+              gatewayVersion: options.gatewayVersion,
+              nodeVersion: process.version,
+              transport: "Unix WebSocket",
+              codexUpstreamUserAgent:
+                options.codexUpstreamUserAgent() ?? null,
+            },
+          ),
+        };
+      }),
+    },
   });
   return createFeishuRuntimeModule(
     adapter,

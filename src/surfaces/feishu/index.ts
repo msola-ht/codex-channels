@@ -53,8 +53,11 @@ export {
 export {
   renderFeishuCommandResult,
   renderFeishuOutput,
+  renderFeishuStartupNotification,
+  type FeishuStartupRuntimeInfo,
 } from "./renderer.js";
 export {
   createFeishuSurface,
+  type FeishuStartupNotification,
   type FeishuSurfaceOptions,
 } from "./surface.js";

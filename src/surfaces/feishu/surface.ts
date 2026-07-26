@@ -48,6 +48,10 @@ interface FeishuSurfaceDependencies {
   oauth?: FeishuOAuthControllerPort & { close(): Promise<void> };
 }
 
+export interface FeishuStartupNotification {
+  messages(): ReadonlyArray<{ chatId: string; text: string }>;
+}
+
 export interface FeishuSurfaceOptions {
   appId: string;
   appSecret: string;
@@ -63,6 +67,7 @@ export interface FeishuSurfaceOptions {
   webSocketAgent?: unknown;
   disableEnvironmentProxy?: boolean;
   configurationRecipients?: () => readonly string[];
+  startupNotification?: FeishuStartupNotification;
 }
 
 export function createFeishuSurface(
@@ -86,6 +91,9 @@ export class FeishuSurface implements SurfaceAdapter {
   private readonly configurationRecipients:
     | (() => readonly string[])
     | undefined;
+  private readonly startupNotification:
+    | FeishuStartupNotification
+    | undefined;
   private readonly logger: Logger;
   private readonly overloadNotifiedChats = new Set<string>();
   private connectionReady = false;
@@ -98,6 +106,7 @@ export class FeishuSurface implements SurfaceAdapter {
   ) {
     this.accountId = options.appId;
     this.configurationRecipients = options.configurationRecipients;
+    this.startupNotification = options.startupNotification;
     this.logger = options.logger;
     const client = dependencies.messagePort && dependencies.imagePort
       ? undefined
@@ -260,6 +269,7 @@ export class FeishuSurface implements SurfaceAdapter {
     }
     this.connectionReady = true;
     this.logger.info(this.lifecycleContext(), "飞书长连接已就绪");
+    this.sendStartupNotifications();
   }
 
   stop(): Promise<void> {
@@ -317,6 +327,48 @@ export class FeishuSurface implements SurfaceAdapter {
       }
     }
     return recipients;
+  }
+
+  private sendStartupNotifications(): void {
+    if (!this.startupNotification) {
+      return;
+    }
+    let messages: ReadonlyArray<{ chatId: string; text: string }>;
+    try {
+      messages = this.startupNotification.messages();
+    } catch (error) {
+      this.logger.warn(
+        {
+          ...this.lifecycleContext(),
+          errorType: error instanceof Error ? error.name : typeof error,
+        },
+        "飞书启动联通通知生成失败",
+      );
+      return;
+    }
+    const delivered = new Set<string>();
+    for (const { chatId, text } of messages) {
+      if (!/^oc_.+$/u.test(chatId)) {
+        this.logger.warn(
+          this.lifecycleContext(),
+          "飞书启动联通通知收件人无效",
+        );
+        continue;
+      }
+      if (delivered.has(chatId)) {
+        continue;
+      }
+      delivered.add(chatId);
+      if (!this.output.notifyPost(chatId, text)) {
+        this.logger.warn(
+          {
+            ...this.lifecycleContext(),
+            conversationId: chatId,
+          },
+          "飞书启动联通通知未进入输出队列",
+        );
+      }
+    }
   }
 
   private lifecycleContext(): {

@@ -3,16 +3,18 @@
 本目录是飞书 Surface 的平台边界。当前已完成 Phase 0 的官方 SDK、事件长连接和消息字段裁剪基础，
 以及 Phase 1 的私聊文本 Inbox、输出渲染和 Bootstrap 显式组合；Phase 2 的预备实现已
 接入全部平台无关私聊命令，但 Phase 1 真实验收尚未整体关闭，群聊不得开始。当前可通过严格
-TOML 或统一 Setup 启用开发验证路径。Phase 4 已完成三个独立体验切片：最终回复与命令结果
+TOML 或统一 Setup 启用开发验证路径。Phase 4 已完成四个独立体验切片：最终回复与命令结果
 使用 `post + md` 富文本，私聊 PNG/JPEG 图片复用 Application 的本地图片输入，同一 Thread 的
-运行中与空闲状态已实现合并到一条可更新消息并通过离线测试。Phase 3 已完成
+运行中与空闲状态已实现合并到一条可更新消息，启动通知与每轮上下文状态复用既有状态数据；
+这些路径均已通过离线测试。Phase 3 已完成
 私聊审批卡片的离线主路径，命令审批的一次批准及当前 Gateway 长连接动作接收已通过真实验收；
 私聊 PNG/JPEG 真实消息也已通过。群聊和一般文件未实现。Phase 3 的用户输入与 MCP form/URL
 elicitation 已完成离线实现，继续等待真实卡片动作验收。
 
 ## 文件索引
 
-- `index.ts`：飞书模块受控出口；一级 `surfaces/index.ts` 只转出 Bootstrap 所需工厂和选项类型。
+- `index.ts`：飞书模块受控出口；一级 `surfaces/index.ts` 只转出 Bootstrap 所需工厂、选项类型
+  和启动文案渲染器。
 - `adapter.ts`：区分普通文本、平台本地命令和 Application 命令，并通过 Outbox 返回结果或安全错误。
 - `approval-card.ts`：生成有界审批卡片和移除动作后的处理结果卡片。
 - `card-action.ts`：严格裁剪 `card.action.trigger` 的路由字段和受限字符串动作值。
@@ -30,7 +32,8 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
 - `oauth-card.ts`：把 Device Flow 映射为飞书内嵌授权卡片及稳定结果卡片。
 - `oauth-token-store.ts`：macOS Keychain 与 Linux AES-256-GCM 私有凭据后端。
 - `oauth.ts`：按 App 与 Actor 协调单一进行中授权、身份匹配、凭据写入、撤销和停止取消。
-- `renderer.ts`：把平台无关 `ConversationCommandResult`、`OutputEvent` 和结构化错误映射为稳定文本内容。
+- `renderer.ts`：把平台无关 `ConversationCommandResult`、`OutputEvent`、启动状态和结构化错误
+  映射为稳定文本内容。
 - `outbox.ts`：精确账号路由并通过通用有界队列调用窄消息发送端口。
 - `surface.ts`：组合单账号连接、Inbox、Application Adapter、Outbox 和失败关闭交互端口，并由
   模块入口只暴露 `createFeishuSurface()` 工厂与生产选项类型。
@@ -78,7 +81,8 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 `renderer.ts` 通过模块公开入口接收 `OutputEvent`。最终文本由 Outbox 作为富文本发送，其他
 关键事件和安全提示使用纯文本；
 非关键流式增量和运行中操作暂不输出。上游 warning、连接错误和 MCP 错误正文不会进入平台消息，
-未知 Thread 状态不会原样显示。
+未知 Thread 状态不会原样显示。`turn.completed` 只展开事件已经提供的最近 Turn 上下文、
+缓存命中率、模型设置、压缩次数、周限和 Goal，不查询第二状态源。
 
 `outbox.ts` 只同步接收匹配 `feishu + accountId` 的输出，并按 Chat ID 进入
 `ConversationDeliveryQueue`。同一 Chat 串行、不同 Chat 可并行；关闭后拒绝新输出并有限等待
@@ -92,6 +96,10 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 按同一 Chat 顺序更新；重复 `active` 被忽略，更新失败会清理旧绑定且不阻塞后续输出。真实长回复
 已确认由飞书客户端折叠显示且消息顺序正确；状态更新仍待真实验收，通用消息更新和文件回退
 尚未实现。
+
+`surface.ts` 在长连接就绪后，从 Bootstrap 注入的 provider 读取启动通知。Bootstrap 只为
+StateStore 中已有绑定且仍有授权 Actor 的精确 Chat 生成消息；Surface 再次校验 Chat ID、去重
+并通过同一富文本 Outbox 入队。生成失败或输出队列关闭只记录受约束诊断，不阻塞长连接。
 
 `adapter.ts` 对普通文本调用 `ConversationService.submit()`，图片则先通过 `media.ts` 取得受管
 绝对路径，再调用同一 `submit()` 的 `localImages` 输入；对已知平台无关命令调用

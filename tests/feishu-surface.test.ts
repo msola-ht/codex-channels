@@ -71,6 +71,86 @@ describe("Feishu Surface", () => {
     expect(fixture.sdkClose).toHaveBeenCalledWith(false);
   });
 
+  it("sends startup notifications after the connection is ready", async () => {
+    const fixture = createFixture(
+      undefined,
+      undefined,
+      {
+        messages: () => [{
+          chatId: "oc_chat",
+          text: "Codex Connect 已联通",
+        }],
+      },
+    );
+
+    const starting = fixture.surface.start();
+    expect(fixture.sent).toEqual([]);
+    fixture.ready();
+    await starting;
+    await fixture.surface.stop();
+
+    expect(fixture.sent).toEqual([{
+      chatId: "oc_chat",
+      text: "Codex Connect 已联通",
+    }]);
+  });
+
+  it("keeps running when startup notification generation fails", async () => {
+    const fixture = createFixture(
+      undefined,
+      undefined,
+      {
+        messages() {
+          throw new Error("Authorization: secret");
+        },
+      },
+    );
+
+    const starting = fixture.surface.start();
+    fixture.ready();
+    await expect(starting).resolves.toBeUndefined();
+    await fixture.surface.stop();
+
+    expect(fixture.sent).toEqual([]);
+    expect(fixture.logs).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        msg: "飞书启动联通通知生成失败",
+        errorType: "Error",
+      }),
+    ]));
+    expect(JSON.stringify(fixture.logs)).not.toContain("secret");
+  });
+
+  it("rejects invalid and duplicate startup notification chats", async () => {
+    const fixture = createFixture(
+      undefined,
+      undefined,
+      {
+        messages: () => [
+          { chatId: "oc_chat", text: "第一条" },
+          { chatId: "oc_chat", text: "重复消息" },
+          { chatId: "invalid_chat", text: "非法消息" },
+        ],
+      },
+    );
+
+    const starting = fixture.surface.start();
+    fixture.ready();
+    await starting;
+    await fixture.surface.stop();
+
+    expect(fixture.sent).toEqual([{
+      chatId: "oc_chat",
+      text: "第一条",
+    }]);
+    expect(fixture.logs).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        msg: "飞书启动联通通知收件人无效",
+      }),
+    ]));
+    expect(JSON.stringify(fixture.logs)).not.toContain("invalid_chat");
+  });
+
   it("drains accepted input and its confirmation before stopping", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -242,6 +322,9 @@ describe("Feishu Surface", () => {
 function createFixture(
   service: Pick<ConversationService, "submit"> | undefined = undefined,
   configurationRecipients?: () => readonly string[],
+  startupNotification?: {
+    messages(): ReadonlyArray<{ chatId: string; text: string }>;
+  },
 ) {
   const conversationService = (service ?? {
     submit: async () => ({
@@ -282,6 +365,7 @@ function createFixture(
     credentialsDirectory: "/private/credentials/feishu",
     onFatal: vi.fn(),
     ...(configurationRecipients ? { configurationRecipients } : {}),
+    ...(startupNotification ? { startupNotification } : {}),
   }, {
     messagePort: {
       sendCard: async () => "om_card",

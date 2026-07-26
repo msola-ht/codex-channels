@@ -21,6 +21,57 @@ import type { FeishuInboxMessage } from "./inbox.js";
 const maximumFeishuSessionEntries = 20;
 const maximumFeishuSessionLabelCharacters = 48;
 
+export interface FeishuStartupRuntimeInfo {
+  platform: NodeJS.Platform;
+  architecture: string;
+  gatewayVersion: string;
+  nodeVersion: string;
+  transport: string;
+  codexUpstreamUserAgent: string | null;
+}
+
+export function renderFeishuStartupNotification(
+  workspaces: ReadonlyArray<{ id: string; name: string; cwd: string }>,
+  status: Pick<
+    ConversationStatus,
+    | "threadId"
+    | "workspaceId"
+    | "model"
+    | "effort"
+    | "serviceTier"
+    | "modelPending"
+    | "effortPending"
+    | "fastModePending"
+    | "weeklyLimit"
+  >,
+  runtime: FeishuStartupRuntimeInfo,
+): string {
+  const workspace = workspaces.find(({ id }) => id === status.workspaceId);
+  if (!workspace) {
+    throw new Error(`当前 Workspace 不存在：${status.workspaceId}`);
+  }
+  return [
+    "Codex Connect 已联通",
+    "App Server：已连接",
+    "",
+    "运行环境：",
+    `- ${feishuPlatformLabel(runtime.platform)} · ${runtime.architecture}`,
+    `- Codex Connect ${runtime.gatewayVersion} · Node.js ${runtime.nodeVersion}`,
+    `- ${runtime.transport}`,
+    `- UA：${formatFeishuUpstreamUserAgent(runtime.codexUpstreamUserAgent)}`,
+    "",
+    "当前会话：",
+    `- ${workspace.name} · ${workspace.id}`,
+    `- ${workspace.cwd}`,
+    `- Thread：${status.threadId ?? "尚未绑定"}`,
+    `- ${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""} · ${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
+    `- Fast 模式：${status.threadId ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭") : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`,
+    ...(status.weeklyLimit
+      ? [`- 周限：${formatWeeklyLimit(status.weeklyLimit)}`]
+      : []),
+  ].join("\n");
+}
+
 export function renderFeishuHelp(): string {
   return [
     "飞书 Codex 命令",
@@ -282,6 +333,22 @@ function errorDetail(
   return typeof value === "string" ? value : fallback;
 }
 
+function feishuPlatformLabel(platform: NodeJS.Platform): string {
+  const labels: Partial<Record<NodeJS.Platform, string>> = {
+    darwin: "macOS",
+    linux: "Linux",
+    win32: "Windows",
+  };
+  return labels[platform] ?? platform;
+}
+
+function formatFeishuUpstreamUserAgent(userAgent: string | null): string {
+  if (!userAgent) {
+    return "App Server 未返回";
+  }
+  return userAgent.replace(/(\([^)]*\))\s+\S+\s+(\([^)]*\))$/u, "$1 $2");
+}
+
 export function renderFeishuOutput(event: OutputEvent): string | null {
   switch (event.type) {
     case "turn.started":
@@ -296,10 +363,7 @@ export function renderFeishuOutput(event: OutputEvent): string | null {
         ? null
         : `${operationKindLabel(event.operation.kind)}：${operationStatusLabel(event.operation.status)}`;
     case "turn.completed":
-      if (event.error) {
-        return "Codex 任务失败，Gateway 已隐藏上游错误详情。";
-      }
-      return `Codex 任务状态：${turnStatusLabel(event.status)}`;
+      return renderFeishuTurnCompleted(event);
     case "thread.status":
       return `Thread 状态：${threadStatusLabel(event.status)}`;
     case "connection.lost":
@@ -316,6 +380,48 @@ export function renderFeishuOutput(event: OutputEvent): string | null {
     case "warning":
       return "Codex 发出一条警告，Gateway 已隐藏上游详情。";
   }
+}
+
+function renderFeishuTurnCompleted(
+  event: Extract<OutputEvent, { type: "turn.completed" }>,
+): string {
+  const lines = [
+    event.error
+      ? "Codex 任务失败，Gateway 已隐藏上游错误详情。"
+      : `Codex 任务状态：${turnStatusLabel(event.status)}`,
+  ];
+  if (event.tokenUsage) {
+    const current = event.tokenUsage.last.totalTokens;
+    const capacity = event.tokenUsage.modelContextWindow;
+    lines.push(
+      capacity === null || capacity <= 0
+        ? `上下文：${formatTokenCount(current)}`
+        : `上下文：${formatTokenCount(current)} / ${formatTokenCount(capacity)}（${formatPercent(Math.max(0, current / capacity * 100))}）`,
+      `缓存命中率：${formatCacheHitRate(
+        event.tokenUsage.last.inputTokens,
+        event.tokenUsage.last.cachedInputTokens,
+      )}`,
+    );
+  }
+  if (event.model) {
+    lines.push(
+      `当前模型：${event.model}`,
+      `思考强度：${event.effort ?? "模型默认"}`,
+      `Fast 模式：${isFastServiceTier(event.serviceTier ?? null) ? "开启" : "关闭"}`,
+    );
+  }
+  if (event.contextCompactionCount !== undefined) {
+    lines.push(`上下文压缩：${event.contextCompactionCount} 次`);
+  }
+  if (event.weeklyLimit) {
+    lines.push(`周限：${formatWeeklyLimit(event.weeklyLimit)}`);
+  }
+  if (event.goal) {
+    lines.push(
+      `Goal：${goalStatusLabel(event.goal.status)} · ${formatGoalTokens(event.goal)}`,
+    );
+  }
+  return lines.join("\n");
 }
 
 function renderFeishuStatus(status: ConversationStatus): string {

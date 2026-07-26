@@ -10,7 +10,8 @@
   Server Request 转交 Approval；未知或畸形 Notification 只记录 method 后忽略，未知或畸形
   高权限请求明确拒绝；受支持版本通过 Client 运行时信息读取，并把显示版本注入 Surface。
 - `surface-composition.ts`：以编译期显式工厂组合 Surface、访问策略、热加载钩子和平台故障上报。
-  Telegram 始终创建；飞书只在严格运行配置启用时创建，并从现有授权绑定推导安全配置通知会话。
+  Telegram 始终创建；飞书只在严格运行配置启用时创建，并从现有授权绑定推导安全配置与启动
+  通知会话，再注入平台专属启动文案。
 - `config-lifecycle.ts`：管理配置监听、防抖重载、持久配置事件投递、信号与进程退出。
 - `surface-manager.ts`：按 `surface + accountId` 向已启动 Surface 集中路由 Core 输出；按注册顺序启动
   Surface，失败时反向回滚，并隔离输出与关闭异常。
