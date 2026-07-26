@@ -116,15 +116,36 @@ describe("FeishuInbox", () => {
       eventId: "event-1",
       messageId: "om_message",
       createdAtMs: now,
+      kind: "text",
       text: "hello",
     });
+  });
+
+  it("accepts a private image key without downloading in the SDK callback", async () => {
+    const fixture = createFixture();
+
+    expect(fixture.inbox.receive(createEvent({
+      messageType: "image",
+      content: "{\"image_key\":\"img_v2_resource\"}",
+    }))).toEqual({
+      status: "accepted",
+    });
+    expect(fixture.handled).toHaveLength(0);
+
+    await fixture.inbox.close();
+    expect(fixture.handled).toEqual([
+      expect.objectContaining({
+        kind: "image",
+        imageKey: "img_v2_resource",
+      }),
+    ]);
   });
 
   it.each([
     [{ appId: "cli_ffffffffffffffff" }, "account-mismatch"],
     [{ senderType: "bot" }, "non-user"],
     [{ chatType: "group" }, "unsupported-chat"],
-    [{ messageType: "image" }, "unsupported-message"],
+    [{ messageType: "file" }, "unsupported-message"],
     [{ createTime: "not-a-timestamp" }, "invalid-timestamp"],
     [{ content: "not-json" }, "invalid-content"],
     [{ content: "{}" }, "invalid-content"],
@@ -138,6 +159,24 @@ describe("FeishuInbox", () => {
       reason,
     });
     expect(fixture.handled).toHaveLength(0);
+    await fixture.inbox.close();
+  });
+
+  it.each([
+    "",
+    "{}",
+    "{\"image_key\":\"\"}",
+    "{\"image_key\":\"../secret\"}",
+  ])("rejects invalid image content", async (content) => {
+    const fixture = createFixture();
+
+    expect(fixture.inbox.receive(createEvent({
+      messageType: "image",
+      content,
+    }))).toEqual({
+      status: "ignored",
+      reason: "invalid-content",
+    });
     await fixture.inbox.close();
   });
 
@@ -228,11 +267,12 @@ describe("FeishuInbox", () => {
     });
     const fixture = createFixture({
       handle: async (message) => {
-        calls.push(`${message.target.conversationId}:${message.text}:start`);
-        if (message.text === "first") {
+        const text = textOf(message);
+        calls.push(`${message.target.conversationId}:${text}:start`);
+        if (text === "first") {
           await firstGate;
         }
-        calls.push(`${message.target.conversationId}:${message.text}:end`);
+        calls.push(`${message.target.conversationId}:${text}:end`);
       },
     });
 
@@ -276,8 +316,9 @@ describe("FeishuInbox", () => {
     const calls: string[] = [];
     const fixture = createFixture({
       handle: async (message) => {
-        calls.push(message.text);
-        if (message.text === "first") {
+        const text = textOf(message);
+        calls.push(text);
+        if (text === "first") {
           throw new Error("sensitive upstream response");
         }
       },
@@ -313,8 +354,9 @@ describe("FeishuInbox", () => {
     const calls: string[] = [];
     const fixture = createFixture({
       handle: async (message) => {
-        calls.push(message.text);
-        if (message.text === "first") {
+        const text = textOf(message);
+        calls.push(text);
+        if (text === "first") {
           throw new Error("expected");
         }
       },
@@ -394,4 +436,11 @@ describe("FeishuInbox", () => {
 async function settle(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
+}
+
+function textOf(message: FeishuInboxMessage): string {
+  if (message.kind !== "text") {
+    throw new Error("expected text message");
+  }
+  return message.text;
 }

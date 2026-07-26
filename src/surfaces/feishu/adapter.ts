@@ -6,6 +6,7 @@ import {
 import { UserFacingError } from "../../conversation-core/index.js";
 
 import type { FeishuInboxMessage } from "./inbox.js";
+import type { FeishuImagePort } from "./media.js";
 import type { FeishuOutbox } from "./outbox.js";
 import {
   renderFeishuCommandResult,
@@ -23,12 +24,17 @@ export class FeishuConversationAdapter {
       FeishuOutbox,
       "notifyPost" | "notifyText"
     >,
+    private readonly images: Pick<FeishuImagePort, "download">,
   ) {
     this.commands = new ConversationCommandService(conversations);
   }
 
   async handle(message: FeishuInboxMessage): Promise<void> {
     try {
+      if (message.kind === "image") {
+        await this.handleImage(message);
+        return;
+      }
       const command = parseFeishuCommand(message.text);
       if (command !== null) {
         if (command.name === "start" || command.name === "help") {
@@ -92,6 +98,28 @@ export class FeishuConversationAdapter {
         `操作失败：${detail}。`,
       );
       throw error;
+    }
+  }
+
+  private async handleImage(
+    message: Extract<FeishuInboxMessage, { kind: "image" }>,
+  ): Promise<void> {
+    const image = await this.images.download(
+      message.messageId,
+      message.imageKey,
+    );
+    const submission = await this.conversations.submit(
+      message.target,
+      {
+        text: "请查看这张图片并根据图片内容协助我。",
+        localImages: [{ path: image.path }],
+      },
+    );
+    if (submission.steered) {
+      this.notifyText(
+        message.target.conversationId,
+        "已将图片追加到当前 Turn。",
+      );
     }
   }
 

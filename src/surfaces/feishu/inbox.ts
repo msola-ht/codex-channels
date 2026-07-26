@@ -5,6 +5,7 @@ import type {
 } from "../../policy/index.js";
 
 import type { FeishuMessageEvent } from "./message-event.js";
+import { isSafeFeishuResourceIdentifier } from "./media.js";
 
 const DEFAULT_CAPACITY = 100;
 const DEFAULT_CLOSE_TIMEOUT_MS = 5_000;
@@ -12,14 +13,18 @@ const DEFAULT_DEDUPLICATION_CAPACITY = 1_000;
 const DEFAULT_DEDUPLICATION_TTL_MS = 10 * 60_000;
 const DEFAULT_MAXIMUM_EVENT_AGE_MS = 5 * 60_000;
 
-export interface FeishuInboxMessage {
+interface FeishuInboxMessageBase {
   target: ConversationTarget;
   actorId: string;
   eventId: string | undefined;
   messageId: string;
   createdAtMs: number;
-  text: string;
 }
+
+export type FeishuInboxMessage = FeishuInboxMessageBase & (
+  | { kind: "text"; text: string }
+  | { kind: "image"; imageKey: string }
+);
 
 export interface FeishuInboxProcessingError {
   target: ConversationTarget;
@@ -112,7 +117,7 @@ export class FeishuInbox {
     if (event.chatType !== "p2p") {
       return { status: "ignored", reason: "unsupported-chat" };
     }
-    if (event.messageType !== "text") {
+    if (event.messageType !== "text" && event.messageType !== "image") {
       return { status: "ignored", reason: "unsupported-message" };
     }
 
@@ -125,11 +130,16 @@ export class FeishuInbox {
       return { status: "ignored", reason: "stale" };
     }
 
-    const text = parseTextContent(event.content);
-    if (text === undefined) {
+    const text = event.messageType === "text"
+      ? parseTextContent(event.content)
+      : undefined;
+    const content = event.messageType === "text"
+      ? (text === undefined ? undefined : { kind: "text" as const, text })
+      : parseImageContent(event.content);
+    if (content === undefined) {
       return { status: "ignored", reason: "invalid-content" };
     }
-    if (text.trim().length === 0) {
+    if (content.kind === "text" && content.text.trim().length === 0) {
       return { status: "ignored", reason: "empty-text" };
     }
 
@@ -161,7 +171,7 @@ export class FeishuInbox {
       eventId: event.eventId,
       messageId: event.messageId,
       createdAtMs,
-      text,
+      ...content,
     };
     this.rememberSeen(deduplicationKey, now);
     this.pendingCount += 1;
@@ -293,6 +303,32 @@ function parseTextContent(value: string): string | undefined {
   }
   const text = (parsed as Record<string, unknown>).text;
   return typeof text === "string" ? text : undefined;
+}
+
+function parseImageContent(
+  value: string,
+): { kind: "image"; imageKey: string } | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+  if (
+    typeof parsed !== "object"
+    || parsed === null
+    || Array.isArray(parsed)
+  ) {
+    return undefined;
+  }
+  const imageKey = (parsed as Record<string, unknown>).image_key;
+  if (
+    typeof imageKey !== "string"
+    || !isSafeFeishuResourceIdentifier(imageKey)
+  ) {
+    return undefined;
+  }
+  return { kind: "image", imageKey };
 }
 
 function positiveInteger(value: number, name: string): number {

@@ -7,9 +7,9 @@
 当前实现：
 
 - [`telegram/`](telegram/README.md)：Telegram Bot 输入、输出、交互、图片和生命周期。
-- [`feishu/`](feishu/README.md)：飞书官方 SDK 长连接、私聊文本到 Application 的窄 Adapter、
-  富文本最终回复、纯文本安全提示、有界输出队列和单账号生命周期组合；有效配置启用时由
-  Bootstrap 显式注册。
+- [`feishu/`](feishu/README.md)：飞书官方 SDK 长连接、私聊文本与 PNG/JPEG 到 Application 的
+  窄 Adapter、富文本最终回复、纯文本安全提示、有界输出队列和单账号生命周期组合；有效配置
+  启用时由 Bootstrap 显式注册，图片真实投递仍待验收。
 
 `types.ts` 定义最小 `SurfaceAdapter` 契约。每个实例使用
 `surface + accountId` 标识，分别提供启停、输出、可选配置变更通知与 `InteractionPort`；Bootstrap 只做编译期显式注册。
@@ -34,8 +34,10 @@ Surface，因此未匹配到具体变更的 Surface 仍会收到不包含平台�
 Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类型引入 Conversation Core。
 
 会话命令统一映射到 Application 的 `ConversationCommandService`；Surface 负责提取命令名和参数，
-并渲染类型化结果。普通文本、图片下载、平台帮助、身份查询和交互取消保留在平台边界。所有输入在
-调用 Application 前必须构造 `SurfaceAccessContext` 并通过对应访问策略。
+并渲染类型化结果。普通文本、图片下载、平台帮助、身份查询和交互取消保留在平台边界。PNG/JPEG
+的大小限制、内容签名校验、私有暂存和过期清理由 `managed-image-store.ts` 在 Surface 内复用；
+平台仍各自负责取得受信下载流。所有输入在调用 Application 前必须构造
+`SurfaceAccessContext` 并通过对应访问策略。
 
 Surface 只能渲染明确标记的结构化用户错误，不能直接复用其内部回退文案；未知异常和 App Server
 warning、MCP 失败等原始详情默认隐藏，避免把凭据、上游响应或本机信息带入聊天消息或日志。

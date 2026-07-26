@@ -17,6 +17,10 @@ import {
 } from "./client.js";
 import { FeishuInbox } from "./inbox.js";
 import { FeishuInteractionPort } from "./interactions.js";
+import {
+  FeishuImageStore,
+  type FeishuImagePort,
+} from "./media.js";
 import type { FeishuMessageEventError } from "./message-event.js";
 import {
   FeishuOutbox,
@@ -31,6 +35,7 @@ interface FeishuEventConnectionPort {
 
 interface FeishuSurfaceDependencies {
   messagePort?: FeishuMessagePort;
+  imagePort?: FeishuImagePort;
   createEventConnection: (
     options: FeishuEventConnectionOptions,
   ) => FeishuEventConnectionPort;
@@ -42,6 +47,7 @@ export interface FeishuSurfaceOptions {
   service: ConversationService;
   access: SurfaceAccessPolicy;
   logger: Logger;
+  uploadsDirectory: string;
   onFatal: (error: Error) => void;
   actorRegistry?: ConversationActorRegistry;
   webSocketAgent?: unknown;
@@ -61,6 +67,7 @@ export class FeishuSurface implements SurfaceAdapter {
   readonly output: FeishuOutbox;
 
   private readonly inbox: FeishuInbox;
+  private readonly images: FeishuImagePort;
   private readonly connection: FeishuEventConnectionPort;
   private readonly configurationRecipients:
     | (() => readonly string[])
@@ -75,10 +82,18 @@ export class FeishuSurface implements SurfaceAdapter {
     this.accountId = options.appId;
     this.configurationRecipients = options.configurationRecipients;
     this.logger = options.logger;
-    const messagePort = dependencies.messagePort ?? new FeishuMessageClient({
-      appId: options.appId,
-      appSecret: options.appSecret,
-    });
+    const client = dependencies.messagePort && dependencies.imagePort
+      ? undefined
+      : new FeishuMessageClient({
+          appId: options.appId,
+          appSecret: options.appSecret,
+        });
+    const messagePort = dependencies.messagePort ?? client!;
+    this.images = dependencies.imagePort ?? new FeishuImageStore(
+      options.uploadsDirectory,
+      client!,
+      options.logger,
+    );
     this.output = new FeishuOutbox(
       options.appId,
       messagePort,
@@ -93,6 +108,7 @@ export class FeishuSurface implements SurfaceAdapter {
     const adapter = new FeishuConversationAdapter(
       options.service,
       this.output,
+      this.images,
     );
     this.inbox = new FeishuInbox({
       accountId: options.appId,
@@ -177,8 +193,16 @@ export class FeishuSurface implements SurfaceAdapter {
   }
 
   async start(): Promise<void> {
+    const imagesStarting = this.images.start();
     this.logger.info(this.lifecycleContext(), "飞书长连接正在连接");
-    await this.connection.start();
+    const connectionStarting = this.connection.start();
+    try {
+      await Promise.all([imagesStarting, connectionStarting]);
+    } catch (error) {
+      await this.connection.stop();
+      this.images.close();
+      throw error;
+    }
     this.logger.info(this.lifecycleContext(), "飞书长连接已就绪");
   }
 
@@ -190,6 +214,7 @@ export class FeishuSurface implements SurfaceAdapter {
   private async stopOnce(): Promise<void> {
     await this.connection.stop();
     await this.inbox.close();
+    this.images.close();
     await this.interactions.close();
     await this.output.close();
     this.logger.info(this.lifecycleContext(), "飞书 Surface 已停止");

@@ -146,6 +146,34 @@ describe("Feishu Surface", () => {
     release();
     await fixture.surface.stop();
   });
+
+  it("routes an authorized private image through the media port", async () => {
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const fixture = createFixture({ submit });
+    const starting = fixture.surface.start();
+    fixture.ready();
+    await starting;
+
+    fixture.emitImage();
+    await fixture.surface.stop();
+
+    expect(fixture.imageDownload).toHaveBeenCalledWith(
+      "om_image",
+      "img_v2_resource",
+    );
+    expect(submit).toHaveBeenCalledWith({
+      surface: "feishu",
+      accountId: "cli_0123456789abcdef",
+      conversationId: "oc_chat",
+    }, {
+      text: "请查看这张图片并根据图片内容协助我。",
+      localImages: [{ path: "/private/uploads/feishu/image.png" }],
+    });
+  });
 });
 
 function createFixture(
@@ -167,6 +195,11 @@ function createFixture(
   const logs: Array<Record<string, unknown>> = [];
   const sdkStart = vi.fn(async () => {});
   const sdkClose = vi.fn();
+  const imageDownload = vi.fn(async () => ({
+    path: "/private/uploads/feishu/image.png",
+    mimeType: "image/png" as const,
+    bytes: 8,
+  }));
   const logger = pino({ level: "info" }, {
     write(message) {
       logs.push(JSON.parse(message) as Record<string, unknown>);
@@ -180,6 +213,7 @@ function createFixture(
       isAllowed: () => true,
     },
     logger,
+    uploadsDirectory: "/private/uploads/feishu",
     onFatal: vi.fn(),
     ...(configurationRecipients ? { configurationRecipients } : {}),
   }, {
@@ -192,6 +226,11 @@ function createFixture(
       sendPost: async (chatId, text) => {
         sent.push({ chatId, text });
       },
+    },
+    imagePort: {
+      start: async () => {},
+      close: () => {},
+      download: imageDownload,
     },
     createEventConnection: (options) => new FeishuEventConnection(
       options,
@@ -219,6 +258,7 @@ function createFixture(
     logs,
     sdkStart,
     sdkClose,
+    imageDownload,
     ready() {
       if (!readyCallback) {
         throw new Error("飞书 SDK 尚未注册 ready 回调");
@@ -256,6 +296,28 @@ function createFixture(
           chat_type: "p2p",
           message_type: "text",
           content: "{\"text\":\"继续开发\"}",
+        },
+      });
+    },
+    emitImage() {
+      if (!messageHandler) {
+        throw new Error("飞书 SDK 尚未注册消息处理器");
+      }
+      messageHandler({
+        event_id: "event-image",
+        sender: {
+          sender_id: {
+            open_id: "ou_actor",
+          },
+          sender_type: "user",
+        },
+        message: {
+          message_id: "om_image",
+          create_time: String(Date.now()),
+          chat_id: "oc_chat",
+          chat_type: "p2p",
+          message_type: "image",
+          content: "{\"image_key\":\"img_v2_resource\"}",
         },
       });
     },

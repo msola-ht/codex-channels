@@ -41,6 +41,12 @@ export {
   type FeishuMessageEventField,
 } from "./message-event.js";
 export {
+  FeishuImageStore,
+  maximumFeishuImageBytes,
+  type FeishuImagePort,
+  type FeishuImageResourcePort,
+} from "./media.js";
+export {
   FeishuOutbox,
   type FeishuMessagePort,
 } from "./outbox.js";

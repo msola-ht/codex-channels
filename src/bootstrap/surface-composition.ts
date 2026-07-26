@@ -80,6 +80,11 @@ function createFeishuModule(
     service: options.service,
     access,
     logger: options.logger,
+    uploadsDirectory: join(
+      dirname(options.config.stateDatabasePath),
+      "uploads",
+      "feishu",
+    ),
     actorRegistry: options.bindings,
     onFatal: (error) => options.onFatal("feishu", config.appId, error),
     configurationRecipients: () => authorizedFeishuConversations(

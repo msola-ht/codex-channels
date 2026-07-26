@@ -203,6 +203,12 @@ export function renderFeishuUserFacingError(
       return "当前还没有 Codex Thread";
     case "conversation.busy":
       return "当前任务运行中，请先使用 /stop 停止当前任务";
+    case "image.path.invalid":
+      return "本地图片路径必须是绝对路径";
+    case "image.too-large":
+      return "图片超过 10 MiB 限制";
+    case "image.unsupported":
+      return "仅支持 PNG 和 JPEG 图片";
     case "session.selector.required":
       return `用法：/${errorDetail(error, "command", "resume")} <序号、名称或 Thread ID>`;
     case "session.selector.ambiguous":

@@ -32,7 +32,8 @@
 - `format.ts`：格式化会话、Diff/Plan、Goal、模型、Workspace、权限、用量、缓存命中率、上下文压缩总次数和状态文本；Skill 只展示
   当前用户或 Workspace 直接安装的项，MCP 只展示稳定的名称、认证状态和工具数量，Plugin
   只展示本机已安装项，Permission Profile 只展示稳定目录选项。
-- `image-store.ts`：安全下载、校验、暂存和过期清理 Telegram 图片。
+- `image-store.ts`：安全获取 Telegram 下载地址和下载流；大小、内容签名、私有暂存与过期清理
+  复用上层 `managed-image-store.ts`。
 
 Telegram 网络调用不得阻塞 App Server Reader。每个 Conversation 的最终输出保持顺序；审批卡状态更新必须先于批准后的操作展示。文件下载必须限制大小、路径、类型和保留时间。
 下一 Turn 输入队列属于 Application，不得复用本目录的 Telegram 输出队列；Telegram 只负责

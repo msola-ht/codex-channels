@@ -1,3 +1,5 @@
+import { Readable } from "node:stream";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -423,6 +425,7 @@ describe("FeishuMessageClient", () => {
         createSdkClient: () => ({
           createMessage,
           patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
         }),
       },
     );
@@ -455,6 +458,7 @@ describe("FeishuMessageClient", () => {
         createSdkClient: () => ({
           createMessage,
           patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
         }),
       },
     );
@@ -498,6 +502,7 @@ describe("FeishuMessageClient", () => {
         createSdkClient: () => ({
           createMessage,
           patchMessage,
+          downloadResource: successfulDownload,
         }),
       },
     );
@@ -542,6 +547,7 @@ describe("FeishuMessageClient", () => {
         createSdkClient: () => ({
           createMessage,
           patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
         }),
       },
     );
@@ -583,6 +589,7 @@ describe("FeishuMessageClient", () => {
         createSdkClient: () => ({
           createMessage: () => new Promise(() => {}),
           patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
         }),
       },
     );
@@ -613,6 +620,7 @@ describe("FeishuMessageClient", () => {
         createSdkClient: () => ({
           createMessage,
           patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
         }),
       },
     );
@@ -642,6 +650,7 @@ describe("FeishuMessageClient", () => {
             throw timeout;
           },
           patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
         }),
       },
     );
@@ -665,6 +674,7 @@ describe("FeishuMessageClient", () => {
         createSdkClient: () => ({
           createMessage: async () => ({ data: {} }),
           patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
         }),
       },
     );
@@ -676,10 +686,83 @@ describe("FeishuMessageClient", () => {
       ),
     );
   });
+
+  it("downloads an image resource with the exact message and image keys", async () => {
+    const stream = Readable.from([Buffer.from("image")]);
+    const downloadResource = vi.fn(async () => ({
+      getReadableStream: () => stream,
+      headers: {
+        "content-length": "5",
+      },
+    }));
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage: async () => ({ data: { message_id: "om_message" } }),
+          patchMessage: successfulPatch,
+          downloadResource,
+        }),
+      },
+    );
+
+    await expect(
+      client.downloadImage("om_message", "img_v2_resource"),
+    ).resolves.toEqual({
+      stream,
+      contentLength: 5,
+    });
+    expect(downloadResource).toHaveBeenCalledWith({
+      params: {
+        type: "image",
+      },
+      path: {
+        message_id: "om_message",
+        file_key: "img_v2_resource",
+      },
+    });
+  });
+
+  it("rejects unsafe image resource identifiers before calling the SDK", async () => {
+    const downloadResource = vi.fn(successfulDownload);
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage: async () => ({ data: { message_id: "om_message" } }),
+          patchMessage: successfulPatch,
+          downloadResource,
+        }),
+      },
+    );
+
+    await expect(
+      client.downloadImage("om_message", "../secret"),
+    ).rejects.toEqual(new FeishuMessageError(
+      "invalid-response",
+      "飞书图片资源标识无效",
+    ));
+    expect(downloadResource).not.toHaveBeenCalled();
+  });
 });
 
 async function successfulPatch(): Promise<Record<string, never>> {
   return {};
+}
+
+async function successfulDownload() {
+  return {
+    getReadableStream: () => Readable.from([]),
+    headers: {},
+  };
 }
 
 function approvalCard(): FeishuCardDocument {

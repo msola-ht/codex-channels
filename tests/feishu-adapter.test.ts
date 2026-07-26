@@ -22,7 +22,12 @@ const message: FeishuInboxMessage = {
   eventId: "event-1",
   messageId: "om_message",
   createdAtMs: 1_784_900_000_000,
+  kind: "text",
   text: "继续开发",
+};
+
+const imagePort = {
+  download: vi.fn(),
 };
 
 describe("Feishu conversation adapter", () => {
@@ -45,6 +50,7 @@ describe("Feishu conversation adapter", () => {
     const adapter = new FeishuConversationAdapter(
       { status } as unknown as ConversationService,
       { notifyPost, notifyText } as unknown as FeishuOutbox,
+      imagePort,
     );
 
     await adapter.handle({ ...message, text: "/status" });
@@ -70,6 +76,7 @@ describe("Feishu conversation adapter", () => {
     const adapter = new FeishuConversationAdapter(
       { submit } as unknown as ConversationService,
       fixture.outbox,
+      imagePort,
     );
 
     for (const text of ["/start", "/help", "/whoami", "/cancel"]) {
@@ -100,6 +107,7 @@ describe("Feishu conversation adapter", () => {
     const adapter = new FeishuConversationAdapter(
       { submit } as unknown as ConversationService,
       fixture.outbox,
+      imagePort,
     );
 
     for (const text of ["/unknown", "/unknown-command", "/STATUS", "/"]) {
@@ -139,6 +147,7 @@ describe("Feishu conversation adapter", () => {
     const adapter = new FeishuConversationAdapter(
       { submit, status } as unknown as ConversationService,
       fixture.outbox,
+      imagePort,
     );
 
     await adapter.handle({ ...message, text: "/status" });
@@ -173,6 +182,7 @@ describe("Feishu conversation adapter", () => {
     const adapter = new FeishuConversationAdapter(
       { submit, queueFollowUp } as unknown as ConversationService,
       fixture.outbox,
+      imagePort,
     );
 
     await adapter.handle({ ...message, text: "/queue 继续检查参数" });
@@ -195,6 +205,7 @@ describe("Feishu conversation adapter", () => {
     const adapter = new FeishuConversationAdapter(
       { newSession } as unknown as ConversationService,
       { notifyText } as unknown as FeishuOutbox,
+      imagePort,
     );
 
     await expect(
@@ -215,6 +226,7 @@ describe("Feishu conversation adapter", () => {
     const adapter = new FeishuConversationAdapter(
       { submit } as unknown as ConversationService,
       fixture.outbox,
+      imagePort,
     );
 
     await expect(adapter.handle(message)).resolves.toBeUndefined();
@@ -222,6 +234,75 @@ describe("Feishu conversation adapter", () => {
 
     expect(submit).toHaveBeenCalledWith(message.target, "继续开发");
     expect(fixture.sent).toEqual([]);
+  });
+
+  it("downloads a private image and submits the managed local path", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const download = vi.fn(async () => ({
+      path: "/private/uploads/feishu/image.png",
+      mimeType: "image/png" as const,
+      bytes: 8,
+    }));
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationService,
+      fixture.outbox,
+      { download },
+    );
+
+    await adapter.handle({
+      ...message,
+      kind: "image",
+      imageKey: "img_v2_resource",
+    });
+    await fixture.outbox.close();
+
+    expect(download).toHaveBeenCalledWith(
+      "om_message",
+      "img_v2_resource",
+    );
+    expect(submit).toHaveBeenCalledWith(message.target, {
+      text: "请查看这张图片并根据图片内容协助我。",
+      localImages: [{ path: "/private/uploads/feishu/image.png" }],
+    });
+    expect(fixture.sent).toEqual([]);
+  });
+
+  it("uses a distinct confirmation when an image steers the active Turn", async () => {
+    const fixture = createOutbox();
+    const adapter = new FeishuConversationAdapter(
+      {
+        submit: async () => ({
+          threadId: "thread-1",
+          turnId: "turn-1",
+          steered: true,
+        }),
+      } as unknown as ConversationService,
+      fixture.outbox,
+      {
+        download: async () => ({
+          path: "/private/uploads/feishu/image.jpg",
+          mimeType: "image/jpeg",
+          bytes: 3,
+        }),
+      },
+    );
+
+    await adapter.handle({
+      ...message,
+      kind: "image",
+      imageKey: "img_resource",
+    });
+    await fixture.outbox.close();
+
+    expect(fixture.sent).toEqual([{
+      chatId: "oc_chat",
+      text: "已将图片追加到当前 Turn。",
+    }]);
   });
 
   it("confirms when the message was added to the active Turn", async () => {
@@ -235,6 +316,7 @@ describe("Feishu conversation adapter", () => {
         }),
       } as unknown as ConversationService,
       fixture.outbox,
+      imagePort,
     );
 
     await adapter.handle(message);
@@ -259,6 +341,7 @@ describe("Feishu conversation adapter", () => {
         },
       } as unknown as ConversationService,
       fixture.outbox,
+      imagePort,
     );
 
     await expect(adapter.handle(message)).rejects.toBe(failure);
@@ -281,6 +364,7 @@ describe("Feishu conversation adapter", () => {
         },
       } as unknown as ConversationService,
       fixture.outbox,
+      imagePort,
     );
 
     await expect(adapter.handle(message)).rejects.toBe(failure);

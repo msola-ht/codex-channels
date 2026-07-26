@@ -3,9 +3,10 @@
 本目录是飞书 Surface 的平台边界。当前已完成 Phase 0 的官方 SDK、事件长连接和消息字段裁剪基础，
 以及 Phase 1 的私聊文本 Inbox、输出渲染和 Bootstrap 显式组合；Phase 2 的预备实现已
 接入全部平台无关私聊命令，但 Phase 1 真实验收尚未整体关闭，群聊不得开始。当前可通过严格
-TOML 或统一 Setup 启用开发验证路径。Phase 4 已开始第一个独立体验切片：最终回复与命令结果
-使用 `post + md` 富文本。Phase 3 已完成私聊审批卡片的离线主路径，真实动作投递仍待重新扫码
-授权后验证；群聊和媒体仍未开始。
+TOML 或统一 Setup 启用开发验证路径。Phase 4 已完成两个独立体验切片：最终回复与命令结果
+使用 `post + md` 富文本，私聊 PNG/JPEG 图片复用 Application 的本地图片输入。Phase 3 已完成
+私聊审批卡片的离线主路径，真实动作投递仍待重新扫码授权后验证；群聊、一般文件和图片真实
+投递仍未验收。
 
 ## 文件索引
 
@@ -19,6 +20,8 @@ TOML 或统一 Setup 启用开发验证路径。Phase 4 已开始第一个独立
 - `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理。
 - `interactions.ts`：维护私聊审批的一次性令牌、Actor 绑定、过期和跨客户端失效；用户输入与
   MCP elicitation 继续失败关闭。
+- `media.ts`：通过官方消息资源 API 下载私聊图片，并调用 Surface 共用暂存器完成大小、签名、
+  权限和过期清理。
 - `renderer.ts`：把平台无关 `ConversationCommandResult`、`OutputEvent` 和结构化错误映射为稳定文本内容。
 - `outbox.ts`：精确账号路由并通过通用有界队列调用窄消息发送端口。
 - `surface.ts`：组合单账号连接、Inbox、Application Adapter、Outbox 和失败关闭交互端口，并由
@@ -44,16 +47,23 @@ TOML 或统一 Setup 启用开发验证路径。Phase 4 已开始第一个独立
 - 发送超时、SDK 失败和残缺响应只暴露稳定错误码，不回传 SDK message、响应正文或凭据。
 - 消息创建不自动重试；锁定 SDK 虽提供可选 `uuid` 字段，但当前官方资料未明确其幂等窗口和
   可重试错误语义。
+- 图片下载只使用 `im.v1.messageResource.get` 的 `message_id + image_key + type=image` 窄能力；
+  SDK 响应被裁剪为下载流和可选长度，不向其他模块暴露 Client、Header 或上游错误。
 
 `message-event.ts` 在平台边界把 SDK 原始事件裁剪为稳定的 `FeishuMessageEvent`，只保留账号、
 Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、消息标识或 Chat 标识时失败关闭；
 原始事件和无关 SDK 字段不会进入其他模块或错误对象。
 
-`inbox.ts` 只接受当前账号的已授权用户私聊文本。SDK 回调只做同步校验和入队；同一 Chat
+`inbox.ts` 只接受当前账号的已授权用户私聊文本和图片。SDK 回调只做同步校验、图片 Key 裁剪
+和入队，不执行资源下载；同一 Chat
 按顺序处理，不同 Chat 可以并行。永久无效、未授权、重复或过旧事件被明确忽略；全局输入容量
 耗尽时返回 `retry/overloaded`。由于当前没有经过真实合同验证的 SDK 重试响应通道，Surface
 通过同一有界 Outbox 提示用户稍后重试，不伪造平台自动重投。去重状态只存在于有界内存，关闭时
 等待已接受任务至有限超时，不持久化消息正文。
+
+`media.ts` 只在已授权消息进入 Conversation Worker 后下载图片。平台资源 Key 不作为本机路径，
+下载流经 Surface 共用 `ManagedImageStore` 限制为 10 MiB，并按内容签名只接受 PNG/JPEG；
+目录权限为 `0700`、文件权限为 `0600`，过期文件定期清理。下载或文件异常只返回稳定脱敏错误。
 
 `renderer.ts` 通过模块公开入口接收 `OutputEvent`。最终文本由 Outbox 作为富文本发送，其他
 关键事件和安全提示使用纯文本；
@@ -70,7 +80,8 @@ Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、
 不自动改发另一种格式，避免非幂等重发产生重复消息；卡片创建和更新进入相同 Chat 顺序边界，
 均不自动重试。通用消息更新和文件回退尚未实现。
 
-`adapter.ts` 对普通文本调用 `ConversationService.submit()`，对已知平台无关命令调用
+`adapter.ts` 对普通文本调用 `ConversationService.submit()`，图片则先通过 `media.ts` 取得受管
+绝对路径，再调用同一 `submit()` 的 `localImages` 输入；对已知平台无关命令调用
 `ConversationCommandService.execute()`；`/start`、`/help`、`/whoami` 和 `/cancel` 留在飞书
 边界。未知或畸形斜杠命令失败关闭，不能作为普通消息提交给 Codex。新 Turn 不额外发送确认，
 后续回复由 Core 输出驱动；追加到活动 Turn 时发送明确提示。结构化 `UserFacingError` 按错误码
@@ -95,7 +106,7 @@ Setup 与只读 Doctor 凭据/Bot 身份探测已完成，真实应用的首次�
 切换最终回复和命令结果为富文本，并已用状态命令与普通 Turn 短回复验证标题、列表、加粗、
 行内代码和链接的真实显示。该测试不表示长回复分片、卡片或群聊已经支持，也尚未核对重启前后
 的精确 Thread ID。断线恢复、未授权/重复事件、
-重启绑定恢复和可批准交互的真实投递仍未完成。后续阶段按
+重启绑定恢复、图片输入和可批准交互的真实投递仍未完成。后续阶段按
 [`飞书 Surface 接入计划`](../../../docs/feishu-surface-plan.md)推进；一级 `surfaces` 入口只转出
 窄工厂，不得导出 SDK 类型，也不得在 Core 中引入飞书类型。Phase 1 真实验收关闭前，Phase 2
 命令只视为预备实现。群聊已记录为后续需求但当前不开发，也不更新为公开支持。

@@ -22,6 +22,10 @@ import {
   type FeishuCardAction,
 } from "./card-action.js";
 import type { FeishuCardDocument } from "./approval-card.js";
+import {
+  isSafeFeishuResourceIdentifier,
+  type FeishuImageResourcePort,
+} from "./media.js";
 import { encodeFeishuPostContent } from "./message-content.js";
 import type { FeishuMessagePort } from "./outbox.js";
 
@@ -99,6 +103,8 @@ export type FeishuMessageErrorCode =
   | "client-create-failed"
   | "invalid-credentials"
   | "invalid-response"
+  | "download-failed"
+  | "download-timeout"
   | "send-failed"
   | "send-timeout";
 
@@ -139,6 +145,18 @@ interface FeishuSdkMessageClient {
   }): Promise<{
     code?: number | undefined;
   }>;
+  downloadResource(payload: {
+    params: {
+      type: "image";
+    };
+    path: {
+      message_id: string;
+      file_key: string;
+    };
+  }): Promise<{
+    getReadableStream(): import("node:stream").Readable;
+    headers: unknown;
+  }>;
 }
 
 interface FeishuMessageClientDependencies {
@@ -149,7 +167,7 @@ interface FeishuMessageClientDependencies {
   ): FeishuSdkMessageClient;
 }
 
-export class FeishuMessageClient implements FeishuMessagePort {
+export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResourcePort {
   private readonly sdkClient: FeishuSdkMessageClient;
   private readonly sendTimeoutMs: number;
 
@@ -206,7 +224,7 @@ export class FeishuMessageClient implements FeishuMessagePort {
     card: FeishuCardDocument,
   ): Promise<void> {
     try {
-      const response = await withSendTimeout(
+      const response = await withTimeout(
         this.sdkClient.patchMessage({
           path: {
             message_id: messageId,
@@ -216,6 +234,10 @@ export class FeishuMessageClient implements FeishuMessagePort {
           },
         }),
         this.sendTimeoutMs,
+        new FeishuMessageError(
+          "send-timeout",
+          "飞书消息更新超时",
+        ),
       );
       if (response.code !== undefined && response.code !== 0) {
         throw new FeishuMessageError(
@@ -240,13 +262,69 @@ export class FeishuMessageClient implements FeishuMessagePort {
     }
   }
 
+  async downloadImage(
+    messageId: string,
+    imageKey: string,
+  ): Promise<{
+    stream: import("node:stream").Readable;
+    contentLength?: number;
+  }> {
+    if (
+      !isSafeFeishuResourceIdentifier(messageId)
+      || !isSafeFeishuResourceIdentifier(imageKey)
+    ) {
+      throw new FeishuMessageError(
+        "invalid-response",
+        "飞书图片资源标识无效",
+      );
+    }
+    try {
+      const response = await withTimeout(
+        this.sdkClient.downloadResource({
+          params: {
+            type: "image",
+          },
+          path: {
+            message_id: messageId,
+            file_key: imageKey,
+          },
+        }),
+        this.sendTimeoutMs,
+        new FeishuMessageError(
+          "download-timeout",
+          "飞书图片下载超时",
+        ),
+      );
+      const stream = response.getReadableStream();
+      const contentLength = readContentLength(response.headers);
+      return {
+        stream,
+        ...(contentLength === undefined ? {} : { contentLength }),
+      };
+    } catch (error) {
+      if (error instanceof FeishuMessageError) {
+        throw error;
+      }
+      if (isSdkTimeout(error)) {
+        throw new FeishuMessageError(
+          "download-timeout",
+          "飞书图片下载超时",
+        );
+      }
+      throw new FeishuMessageError(
+        "download-failed",
+        "飞书图片下载失败",
+      );
+    }
+  }
+
   private async sendMessage(
     chatId: string,
     messageType: "text" | "post" | "interactive",
     content: string,
   ): Promise<string> {
     try {
-      const response = await withSendTimeout(
+      const response = await withTimeout(
         this.sdkClient.createMessage({
           params: {
             receive_id_type: "chat_id",
@@ -258,6 +336,10 @@ export class FeishuMessageClient implements FeishuMessagePort {
           },
         }),
         this.sendTimeoutMs,
+        new FeishuMessageError(
+          "send-timeout",
+          "飞书消息发送超时",
+        ),
       );
       if (
         typeof response?.data?.message_id !== "string"
@@ -293,6 +375,23 @@ function isSdkTimeout(error: unknown): boolean {
   }
   const code = (error as { code?: unknown }).code;
   return code === "ECONNABORTED" || code === "ETIMEDOUT";
+}
+
+function readContentLength(headers: unknown): number | undefined {
+  if (typeof headers !== "object" || headers === null || Array.isArray(headers)) {
+    return undefined;
+  }
+  const value = (headers as Record<string, unknown>)["content-length"];
+  const parsed = typeof value === "number"
+    ? value
+    : typeof value === "string"
+      ? Number(value)
+      : undefined;
+  return parsed !== undefined
+    && Number.isSafeInteger(parsed)
+    && parsed >= 0
+    ? parsed
+    : undefined;
 }
 
 export class FeishuEventConnection {
@@ -562,6 +661,7 @@ const defaultMessageDependencies: FeishuMessageClientDependencies = {
     return {
       createMessage: (payload) => client.im.v1.message.create(payload),
       patchMessage: (payload) => client.im.v1.message.patch(payload),
+      downloadResource: (payload) => client.im.v1.messageResource.get(payload),
     };
   },
 };
@@ -645,17 +745,15 @@ function hasValidCredentials(
     && options.appSecret.trim().length > 0;
 }
 
-async function withSendTimeout<T>(
+async function withTimeout<T>(
   operation: Promise<T>,
   timeoutMs: number,
+  timeoutError: Error,
 ): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
-      reject(new FeishuMessageError(
-        "send-timeout",
-        "飞书消息发送超时",
-      ));
+      reject(timeoutError);
     }, timeoutMs);
     timer.unref();
   });
