@@ -2,6 +2,10 @@ import { randomBytes } from "node:crypto";
 
 import type { Logger } from "pino";
 
+import {
+  isConversationCommandName,
+  type ConversationCommandName,
+} from "../../application/index.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import type { FeishuCardDocument } from "./approval-card.js";
@@ -9,6 +13,31 @@ import type { FeishuCardAction } from "./card-action.js";
 import type { FeishuOutbox } from "./outbox.js";
 
 export const feishuCommandMenuEventKey = "codexc_home";
+
+const feishuLocalCommandActions = [
+  "help",
+  "whoami",
+  "feishu-status",
+  "feishu-doctor",
+  "goal-set",
+  "review-branch",
+  "review-commit",
+  "review-custom",
+  "sessions-search",
+  "archived-search",
+] as const;
+
+export type FeishuCommandCenterAction =
+  | ConversationCommandName
+  | typeof feishuLocalCommandActions[number];
+
+const directStateChangingActions = new Set<FeishuCommandCenterAction>([
+  "new",
+  "stop",
+  "archive",
+  "compact",
+  "fork",
+]);
 
 export const feishuCommandCenterActions = [
   "new",
@@ -22,30 +51,7 @@ export const feishuCommandCenterActions = [
   "workspace",
   "goal",
   "help",
-] as const;
-
-const feishuCategorizedCommandActions = [
-  "sessions",
-  "archived",
-  "skills",
-  "mcp",
-  "plugins",
-  "permissions",
-  "diff",
-  "plan",
-  "whoami",
-  "feishu-status",
-  "feishu-doctor",
-] as const;
-
-const feishuSelectionCommandActions = [
-  "unarchive",
-] as const;
-
-export type FeishuCommandCenterAction =
-  | typeof feishuCommandCenterActions[number]
-  | typeof feishuCategorizedCommandActions[number]
-  | typeof feishuSelectionCommandActions[number];
+] as const satisfies ReadonlyArray<FeishuCommandCenterAction>;
 
 export type FeishuCommandCenterActionResult =
   | "accepted"
@@ -62,12 +68,29 @@ export interface FeishuCommandCenterChoices {
   }>;
 }
 
+export interface FeishuCommandCenterForm {
+  kind: "form";
+  title: string;
+  description?: string;
+  action: FeishuCommandCenterAction;
+  fieldLabel: string;
+  placeholder?: string;
+  inputPrefix?: string;
+  multiline?: boolean;
+}
+
+export type FeishuCommandCenterResponse =
+  | FeishuCommandCenterChoices
+  | FeishuCommandCenterForm;
+
 interface PendingCommandCenter {
   target: ConversationTarget;
   actorId: string;
   messageId: string;
   expiresAt: number;
   allowedSelections: ReadonlySet<string>;
+  form?: FeishuCommandCenterForm;
+  consumeOnUse: boolean;
 }
 
 interface FeishuCommandCenterOptions {
@@ -100,7 +123,7 @@ export class FeishuCommandCenter {
       action: FeishuCommandCenterAction,
       actorId: string,
       input: string,
-    ) => Promise<FeishuCommandCenterChoices | void>,
+    ) => Promise<FeishuCommandCenterResponse | void>,
     private readonly logger: Logger,
     options: FeishuCommandCenterOptions = {},
   ) {
@@ -129,6 +152,8 @@ export class FeishuCommandCenter {
     target: ConversationTarget,
     actorId: string,
     render: (token: string) => FeishuCardDocument,
+    form?: FeishuCommandCenterForm,
+    consumeOnUse = false,
   ): Promise<void> {
     if (
       this.closed
@@ -152,6 +177,8 @@ export class FeishuCommandCenter {
       messageId,
       expiresAt: this.now() + this.tokenTtlMs,
       allowedSelections: collectCommandSelections(card, token),
+      ...(form ? { form } : {}),
+      consumeOnUse,
     });
     this.trimOldest(this.pending, this.capacity);
   }
@@ -210,18 +237,31 @@ export class FeishuCommandCenter {
     }
     this.prune();
     const pending = this.pending.get(token);
+    const submittedInput = action.formValues === undefined
+      ? input
+      : resolveFormInput(pending?.form, command, action.formValues);
     if (
       !pending
       || pending.messageId !== action.messageId
       || pending.target.conversationId !== action.chatId
       || pending.actorId !== action.actorOpenId
-      || !pending.allowedSelections.has(selectionKey(command, input))
+      || (
+        action.formValues === undefined
+          ? !pending.allowedSelections.has(selectionKey(command, input))
+          : submittedInput === undefined
+      )
       || !this.access.isAllowed({
         target: pending.target,
         actorId: action.actorOpenId,
       })
     ) {
       return "invalid";
+    }
+    if (
+      pending.consumeOnUse
+      || directStateChangingActions.has(command)
+    ) {
+      this.pending.delete(token);
     }
     void this.track(
       (command === "help"
@@ -234,17 +274,17 @@ export class FeishuCommandCenter {
             pending.target,
             command,
             pending.actorId,
-            input,
-          ).then((choices) =>
-            choices
+            submittedInput!,
+          ).then((response) =>
+            response
               ? this.openCard(
                   pending.target,
                   pending.actorId,
-                  (nextToken) =>
-                    renderFeishuCommandChoicesCard(
-                      nextToken,
-                      choices,
-                    ),
+                  (nextToken) => "choices" in response
+                    ? renderFeishuCommandChoicesCard(nextToken, response)
+                    : renderFeishuCommandFormCard(nextToken, response),
+                  "choices" in response ? undefined : response,
+                  true,
                 )
               : undefined
           )
@@ -364,10 +404,85 @@ function renderFeishuCommandChoicesCard(
             tag: "div",
             text: {
               tag: "plain_text",
-              content: `仅显示前 ${choices.length} 项，请使用文本命令搜索更多选项。`,
+              content: `仅显示前 ${choices.length} 项，请使用卡片内搜索查看更多选项。`,
             },
           }]
         : []),
+    ],
+  };
+}
+
+function renderFeishuCommandFormCard(
+  token: string,
+  form: FeishuCommandCenterForm,
+): FeishuCardDocument {
+  return {
+    config: {
+      update_multi: true,
+      wide_screen_mode: true,
+    },
+    header: {
+      template: "blue",
+      title: {
+        tag: "plain_text",
+        content: form.title,
+      },
+    },
+    elements: [
+      ...(form.description
+        ? [{
+            tag: "div",
+            text: {
+              tag: "plain_text",
+              content: form.description,
+            },
+          }]
+        : []),
+      {
+        tag: "form",
+        name: "codexc_command_form",
+        elements: [
+          {
+            tag: "input",
+            name: "input",
+            required: true,
+            input_type: "multiline_text",
+            rows: form.multiline ? 3 : 1,
+            auto_resize: true,
+            max_rows: form.multiline ? 8 : 1,
+            max_length: 1_000,
+            width: "fill",
+            label: {
+              tag: "plain_text",
+              content: form.fieldLabel,
+            },
+            label_position: "top",
+            ...(form.placeholder
+              ? {
+                  placeholder: {
+                    tag: "plain_text",
+                    content: form.placeholder,
+                  },
+                }
+              : {}),
+          },
+          {
+            tag: "button",
+            type: "primary",
+            text: {
+              tag: "plain_text",
+              content: "确认",
+            },
+            name: "codexc_command_submit",
+            complex_interaction: true,
+            action_type: "form_submit",
+            value: {
+              codexc_command_token: token,
+              codexc_command: form.action,
+            },
+          },
+        ],
+      },
     ],
   };
 }
@@ -393,6 +508,17 @@ function renderFeishuCategorizedCommandsCard(
         ["会话列表", "sessions", "primary"],
         ["已归档", "archived", "default"],
       ]),
+      sectionTitle("会话操作"),
+      actionRow(token, [
+        ["停止任务", "stop", "default"],
+        ["归档当前", "archive", "default"],
+        ["压缩上下文", "compact", "default"],
+      ]),
+      actionRow(token, [
+        ["分叉会话", "fork", "default"],
+        ["重命名", "rename", "default"],
+        ["追加下一轮", "queue", "default"],
+      ]),
       sectionTitle("能力与集成"),
       actionRow(token, [
         ["Skills", "skills", "default"],
@@ -404,6 +530,8 @@ function renderFeishuCategorizedCommandsCard(
         ["权限", "permissions", "default"],
         ["Diff", "diff", "default"],
         ["Plan", "plan", "default"],
+        ["项目规则", "rules", "default"],
+        ["Review", "review", "default"],
       ]),
       sectionTitle("飞书"),
       actionRow(token, [
@@ -415,7 +543,7 @@ function renderFeishuCategorizedCommandsCard(
         tag: "div",
         text: {
           tag: "plain_text",
-          content: "需要参数或会修改状态的命令，请直接在对话中输入。",
+          content: "带文本参数的命令将在下一步打开输入卡片。",
         },
       },
     ],
@@ -533,11 +661,10 @@ function truncateChoiceLabel(value: string): string {
 function isCommandCenterAction(
   value: string,
 ): value is FeishuCommandCenterAction {
-  return [
-    ...feishuCommandCenterActions,
-    ...feishuCategorizedCommandActions,
-    ...feishuSelectionCommandActions,
-  ].includes(value as FeishuCommandCenterAction);
+  return isConversationCommandName(value)
+    || feishuLocalCommandActions.includes(
+      value as typeof feishuLocalCommandActions[number],
+    );
 }
 
 function collectCommandSelections(
@@ -585,4 +712,23 @@ function selectionKey(
   input: string,
 ): string {
   return `${action}\u0000${input}`;
+}
+
+function resolveFormInput(
+  form: FeishuCommandCenterForm | undefined,
+  action: FeishuCommandCenterAction,
+  values: Readonly<Record<string, string>>,
+): string | undefined {
+  if (
+    !form
+    || form.action !== action
+    || Object.keys(values).length !== 1
+  ) {
+    return undefined;
+  }
+  const value = values.input?.trim();
+  if (!value || value.length > 1_000) {
+    return undefined;
+  }
+  return `${form.inputPrefix ?? ""}${value}`;
 }

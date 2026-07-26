@@ -1,6 +1,10 @@
 import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 
+import {
+  conversationCommandNames,
+  isConversationCommandName,
+} from "../src/application/index.js";
 import type { ConversationTarget } from "../src/conversation-core/index.js";
 import {
   FeishuCommandCenter,
@@ -78,8 +82,40 @@ describe("Feishu command center", () => {
     expect(fixture.cards).toHaveLength(2);
     const categorized = fixture.cards[1]!;
     expect(JSON.stringify(categorized.card)).toContain("会话查询");
+    expect(JSON.stringify(categorized.card)).toContain("会话操作");
     expect(JSON.stringify(categorized.card)).toContain("能力与集成");
     expect(JSON.stringify(categorized.card)).toContain("当前内容");
+    const visibleSharedCommands = new Set(
+      [fixture.cards[0]!, categorized].flatMap(({ card }) =>
+        collectCardActions(card).flatMap((action) => {
+          if (
+            typeof action !== "object"
+            || action === null
+            || !("value" in action)
+          ) {
+            return [];
+          }
+          const command = (action as {
+            value: Record<string, string>;
+          }).value.codexc_command;
+          return command && isConversationCommandName(command)
+            ? [command]
+            : [];
+        })),
+    );
+    expect([...visibleSharedCommands].sort()).toEqual(
+      conversationCommandNames
+        .filter((command) => command !== "unarchive")
+        .toSorted(),
+    );
+    for (const command of [
+      "stop",
+      "archive",
+      "compact",
+      "fork",
+    ]) {
+      expect(() => cardAction(categorized, command)).not.toThrow();
+    }
 
     expect(fixture.center.handleCardAction(
       cardAction(categorized, "skills"),
@@ -155,6 +191,87 @@ describe("Feishu command center", () => {
       "model",
       "ou_actor",
       "gpt-b",
+    );
+  });
+
+  it("opens one reusable command form and submits its bounded text", async () => {
+    const cards: Array<{
+      chatId: string;
+      messageId: string;
+      card: FeishuCardDocument;
+    }> = [];
+    const execute = vi.fn(async (
+      _target,
+      action,
+      _actorId,
+      input,
+    ) => input
+      ? undefined
+      : {
+          kind: "form" as const,
+          title: "重命名会话",
+          description: "输入新的会话名称。",
+          action,
+          fieldLabel: "会话名称",
+          placeholder: "例如：飞书私聊收口",
+        });
+    const center = new FeishuCommandCenter(
+      {
+        deliverCard: async (chatId, card) => {
+          const messageId = `om_card_${cards.length + 1}`;
+          cards.push({ chatId, messageId, card });
+          return messageId;
+        },
+      },
+      { isAllowed: () => true },
+      execute,
+      pino({ level: "silent" }),
+    );
+    await center.open(target, "ou_actor");
+    expect(center.handleCardAction(
+      cardAction(cards[0]!, "help"),
+    )).toBe("accepted");
+    await settle();
+    expect(center.handleCardAction(
+      cardAction(cards[1]!, "rename"),
+    )).toBe("accepted");
+    await settle();
+
+    expect(JSON.stringify(cards[2]?.card)).toContain("重命名会话");
+    const submit = cardAction(cards[2]!, "rename");
+    expect(center.handleCardAction({
+      ...submit,
+      formValues: {
+        input: "飞书私聊收口",
+        unexpected: "不能透传",
+      },
+    })).toBe("invalid");
+    expect(center.handleCardAction({
+      ...submit,
+      formValues: { input: "x".repeat(1_001) },
+    })).toBe("invalid");
+    expect(center.handleCardAction({
+      ...submit,
+      value: {
+        ...submit.value,
+        codexc_command: "queue",
+      },
+      formValues: { input: "不能切换命令" },
+    })).toBe("invalid");
+    expect(center.handleCardAction({
+      ...submit,
+      formValues: { input: "飞书私聊收口" },
+    })).toBe("accepted");
+    expect(center.handleCardAction({
+      ...submit,
+      formValues: { input: "重复执行" },
+    })).toBe("invalid");
+    await settle();
+    expect(execute).toHaveBeenLastCalledWith(
+      target,
+      "rename",
+      "ou_actor",
+      "飞书私聊收口",
     );
   });
 
@@ -245,6 +362,27 @@ describe("Feishu command center", () => {
       ...action,
       messageId: "om_other",
     })).toBe("invalid");
+  });
+
+  it("consumes a reusable card after a direct state-changing action", async () => {
+    const fixture = createFixture();
+    await fixture.center.open(target, "ou_actor");
+
+    expect(fixture.center.handleCardAction(
+      cardAction(fixture.cards[0]!, "new"),
+    )).toBe("accepted");
+    expect(fixture.center.handleCardAction(
+      cardAction(fixture.cards[0]!, "new"),
+    )).toBe("invalid");
+    await settle();
+
+    expect(fixture.execute).toHaveBeenCalledOnce();
+    expect(fixture.execute).toHaveBeenCalledWith(
+      target,
+      "new",
+      "ou_actor",
+      "",
+    );
   });
 
   it("deduplicates menu events and expires command tokens", async () => {
@@ -399,9 +537,7 @@ function cardAction(
   sent: { chatId: string; messageId: string; card: FeishuCardDocument },
   command = "status",
 ): FeishuCardAction {
-  const selectedAction = sent.card.elements.flatMap((element) =>
-    Array.isArray(element.actions) ? element.actions : [],
-  ).find((action) => {
+  const selectedAction = collectCardActions(sent.card).find((action) => {
     if (
       typeof action !== "object"
       || action === null
@@ -425,6 +561,21 @@ function cardAction(
     tag: "button",
     value: selectedAction.value,
   };
+}
+
+function collectCardActions(value: unknown): unknown[] {
+  if (Array.isArray(value)) {
+    return value.flatMap(collectCardActions);
+  }
+  if (typeof value !== "object" || value === null) {
+    return [];
+  }
+  const record = value as Record<string, unknown>;
+  const own = "value" in record ? [record] : [];
+  return [
+    ...own,
+    ...Object.values(record).flatMap(collectCardActions),
+  ];
 }
 
 async function settle(): Promise<void> {

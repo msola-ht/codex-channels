@@ -54,7 +54,8 @@
   热加载；飞书 `status/doctor` 的运行观测、四项精简摘要、租户 Scope 差集、单一处理入口、
   卡片与菜单运行时实证优先，以及 Application v7 配置快照、已有菜单保留、待发布版本提示、
   App/Chat/Actor 一次性确认、SDK 应用授权、授权卡片发送失败取消和 Lark 租户拒绝；
-  分类命令中心、有界选择值绑定和命令任务的有限关闭等待；OAuth Device Flow
+  分类命令中心、统一 Application 命令目录、有界选择值绑定、一次性通用输入表单、会话与归档
+  搜索、表单动作/字段/长度失败关闭、直接写操作重复点击拒绝和命令任务的有限关闭等待；OAuth Device Flow
   请求/轮询、精确授权 Origin 与完整 URL、混合 Token 类型、能力所需 Scope 与应用已开通 Scope
   的交集、空需求不授权、有效 Token 覆盖检测与缺失差集申请、`offline_access` 飞书内授权卡片、统一 HTTP/HTTPS 代理、`NO_PROXY` 选择、显式
   直连和无效代理失败关闭、Actor 身份匹配、进行中状态、重复流、限时停止/撤销竞态、写入错误/

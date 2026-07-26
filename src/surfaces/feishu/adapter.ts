@@ -15,6 +15,8 @@ import type {
   FeishuCommandCenter,
   FeishuCommandCenterAction,
   FeishuCommandCenterChoices,
+  FeishuCommandCenterForm,
+  FeishuCommandCenterResponse,
 } from "./command-center.js";
 import type { FeishuApplicationSetupController } from "./application-setup.js";
 import type { FeishuInboxMessage } from "./inbox.js";
@@ -150,7 +152,7 @@ export class FeishuConversationAdapter {
     action: FeishuCommandCenterAction,
     actorId: string,
     input = "",
-  ): Promise<FeishuCommandCenterChoices | void> {
+  ): Promise<FeishuCommandCenterResponse | void> {
     try {
       if (action === "help") {
         this.notifyMarkdown(target.conversationId, renderFeishuHelp());
@@ -181,6 +183,16 @@ export class FeishuConversationAdapter {
         );
         return;
       }
+      const initialChoices = input === ""
+        ? renderCommandCenterInitialChoices(action)
+        : undefined;
+      if (initialChoices) {
+        return initialChoices;
+      }
+      const form = input === "" ? renderCommandCenterForm(action) : undefined;
+      if (form) {
+        return form;
+      }
       if (!isConversationCommandName(action)) {
         throw new UserFacingError(
           "command.unsupported",
@@ -190,7 +202,11 @@ export class FeishuConversationAdapter {
       const result = action === "fast" && input === ""
         ? await this.commands.execute(target, "model")
         : await this.commands.execute(target, action, input);
-      const choices = input === ""
+      const choices = (
+        input === ""
+        || action === "sessions"
+        || action === "archived"
+      )
         ? renderCommandCenterChoices(action, result)
         : undefined;
       if (choices) {
@@ -311,6 +327,133 @@ export class FeishuConversationAdapter {
   }
 }
 
+function renderCommandCenterInitialChoices(
+  action: FeishuCommandCenterAction,
+): FeishuCommandCenterChoices | undefined {
+  if (action === "rules") {
+    return {
+      title: "项目规则",
+      description: "仅操作当前已授权 Workspace 的项目规则。",
+      choices: [
+        { label: "生成并检查", action, input: "init" },
+        { label: "仅检查", action, input: "check" },
+      ],
+    };
+  }
+  if (action === "review") {
+    return {
+      title: "开始 Review",
+      description: "选择共享 Review 命令已有的目标类型。",
+      choices: [
+        { label: "未提交改动", action, input: " " },
+        { label: "对比分支", action: "review-branch", input: "" },
+        { label: "指定提交", action: "review-commit", input: "" },
+        { label: "自定义说明", action: "review-custom", input: "" },
+      ],
+    };
+  }
+  if (action === "goal") {
+    return {
+      title: "Thread Goal",
+      choices: [
+        { label: "查看当前", action, input: " " },
+        { label: "设置 Goal", action: "goal-set", input: "" },
+        { label: "清除 Goal", action, input: "clear" },
+      ],
+    };
+  }
+  return undefined;
+}
+
+function renderCommandCenterForm(
+  action: FeishuCommandCenterAction,
+): FeishuCommandCenterForm | undefined {
+  if (action === "sessions-search") {
+    return {
+      kind: "form",
+      title: "搜索会话",
+      description: "按会话名称、预览或 Thread ID 搜索。",
+      action: "sessions",
+      fieldLabel: "搜索词",
+      placeholder: "请输入搜索词",
+    };
+  }
+  if (action === "archived-search") {
+    return {
+      kind: "form",
+      title: "搜索已归档会话",
+      description: "按会话名称、预览或 Thread ID 搜索。",
+      action: "archived",
+      fieldLabel: "搜索词",
+      placeholder: "请输入搜索词",
+    };
+  }
+  if (action === "rename") {
+    return {
+      kind: "form",
+      title: "重命名会话",
+      description: "输入新的会话名称。",
+      action,
+      fieldLabel: "会话名称",
+      placeholder: "例如：飞书私聊收口",
+    };
+  }
+  if (action === "queue") {
+    return {
+      kind: "form",
+      title: "追加下一 Turn",
+      description: "内容会进入当前 Conversation 的有界内存队列。",
+      action,
+      fieldLabel: "补充要求",
+      placeholder: "请输入下一轮需要继续处理的内容",
+      multiline: true,
+    };
+  }
+  if (action === "review-branch") {
+    return {
+      kind: "form",
+      title: "Review 分支",
+      action: "review",
+      fieldLabel: "基准分支",
+      placeholder: "例如：main",
+      inputPrefix: "branch ",
+    };
+  }
+  if (action === "review-commit") {
+    return {
+      kind: "form",
+      title: "Review 提交",
+      action: "review",
+      fieldLabel: "Commit SHA",
+      placeholder: "请输入提交 SHA",
+      inputPrefix: "commit ",
+    };
+  }
+  if (action === "review-custom") {
+    return {
+      kind: "form",
+      title: "自定义 Review",
+      action: "review",
+      fieldLabel: "Review 说明",
+      placeholder: "请输入审查范围和要求",
+      inputPrefix: "custom ",
+      multiline: true,
+    };
+  }
+  if (action === "goal-set") {
+    return {
+      kind: "form",
+      title: "设置 Thread Goal",
+      action: "goal",
+      fieldLabel: "目标",
+      placeholder: "请输入当前 Thread 的目标",
+      inputPrefix: "set ",
+      multiline: true,
+    };
+  }
+  return undefined;
+}
+
 function renderCommandCenterChoices(
   action: FeishuCommandCenterAction,
   result: ConversationCommandResult,
@@ -326,11 +469,18 @@ function renderCommandCenterChoices(
     return {
       title: "选择会话",
       description: "点击后切换到对应 Codex Thread。",
-      choices: result.sessions.map((session) => ({
-        label: `${session.id === result.currentThreadId ? "✓ " : ""}${(session.name ?? session.preview) || "未命名"}`,
-        action: "resume",
-        input: session.id,
-      })),
+      choices: [
+        {
+          label: "搜索会话…",
+          action: "sessions-search",
+          input: "",
+        },
+        ...result.sessions.map((session) => ({
+          label: `${session.id === result.currentThreadId ? "✓ " : ""}${(session.name ?? session.preview) || "未命名"}`,
+          action: "resume" as const,
+          input: session.id,
+        })),
+      ],
     };
   }
   if (action === "archived" && result.kind === "sessions" && result.archived) {
@@ -340,11 +490,18 @@ function renderCommandCenterChoices(
     return {
       title: "恢复已归档会话",
       description: "点击后取消归档并切换到对应 Codex Thread。",
-      choices: result.sessions.map((session) => ({
-        label: (session.name ?? session.preview) || "未命名",
-        action: "unarchive",
-        input: session.id,
-      })),
+      choices: [
+        {
+          label: "搜索归档…",
+          action: "archived-search",
+          input: "",
+        },
+        ...result.sessions.map((session) => ({
+          label: (session.name ?? session.preview) || "未命名",
+          action: "unarchive" as const,
+          input: session.id,
+        })),
+      ],
     };
   }
   if (action === "workspace" && result.kind === "workspaces") {

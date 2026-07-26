@@ -325,10 +325,18 @@ describe("Feishu conversation adapter", () => {
       message.actorId,
     )).resolves.toMatchObject({
       title: "选择会话",
-      choices: [{
-        action: "resume",
-        input: "thread-active",
-      }],
+      choices: expect.arrayContaining([
+        {
+          label: "搜索会话…",
+          action: "sessions-search",
+          input: "",
+        },
+        {
+          label: "✓ 当前会话",
+          action: "resume",
+          input: "thread-active",
+        },
+      ]),
     });
     await expect(adapter.handleCommandCenterAction(
       message.target,
@@ -336,12 +344,285 @@ describe("Feishu conversation adapter", () => {
       message.actorId,
     )).resolves.toMatchObject({
       title: "恢复已归档会话",
-      choices: [{
-        action: "unarchive",
-        input: "thread-archived",
-      }],
+      choices: [
+        {
+          label: "搜索归档…",
+          action: "archived-search",
+          input: "",
+        },
+        {
+          label: "旧会话",
+          action: "unarchive",
+          input: "thread-archived",
+        },
+      ],
     });
     await fixture.outbox.close();
+  });
+
+  it("keeps session search inside cards and returns clickable results", async () => {
+    const fixture = createOutbox();
+    const listSessions = vi.fn(async () => [{
+      id: "thread-auth",
+      name: "认证修复",
+      preview: "",
+      cwd: "/workspace",
+      updatedAt: 1,
+    }]);
+    const adapter = new FeishuConversationAdapter(
+      {
+        listSessions,
+        status: vi.fn(() => ({
+          threadId: "thread-current",
+          workspaceId: "workspace",
+        })),
+      } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+    );
+
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "sessions-search",
+      message.actorId,
+    )).resolves.toMatchObject({
+      kind: "form",
+      action: "sessions",
+    });
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "sessions",
+      message.actorId,
+      "认证",
+    )).resolves.toMatchObject({
+      title: "选择会话",
+      choices: expect.arrayContaining([
+        { action: "resume", input: "thread-auth", label: "认证修复" },
+      ]),
+    });
+    expect(listSessions).toHaveBeenCalledWith(message.target, {
+      searchTerm: "认证",
+    });
+    await fixture.outbox.close();
+  });
+
+  it("keeps archived-session search inside cards", async () => {
+    const fixture = createOutbox();
+    const listSessions = vi.fn(async () => [{
+      id: "thread-archived",
+      name: "历史认证修复",
+      preview: "",
+      cwd: "/workspace",
+      updatedAt: 1,
+    }]);
+    const adapter = new FeishuConversationAdapter(
+      { listSessions } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+    );
+
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "archived-search",
+      message.actorId,
+    )).resolves.toMatchObject({
+      kind: "form",
+      action: "archived",
+    });
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "archived",
+      message.actorId,
+      "认证",
+    )).resolves.toMatchObject({
+      title: "恢复已归档会话",
+      choices: expect.arrayContaining([
+        {
+          action: "unarchive",
+          input: "thread-archived",
+          label: "历史认证修复",
+        },
+      ]),
+    });
+    expect(listSessions).toHaveBeenCalledWith(message.target, {
+      archived: true,
+      searchTerm: "认证",
+    });
+    await fixture.outbox.close();
+  });
+
+  it("reuses the command form for queued follow-up text", async () => {
+    const fixture = createOutbox();
+    const queueFollowUp = vi.fn(async () => ({ position: 1 }));
+    const adapter = new FeishuConversationAdapter(
+      { queueFollowUp } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+    );
+
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "queue",
+      message.actorId,
+    )).resolves.toMatchObject({
+      kind: "form",
+      action: "queue",
+      multiline: true,
+    });
+    await adapter.handleCommandCenterAction(
+      message.target,
+      "queue",
+      message.actorId,
+      "继续检查私聊失败路径",
+    );
+    await fixture.outbox.close();
+
+    expect(queueFollowUp).toHaveBeenCalledWith(
+      message.target,
+      "继续检查私聊失败路径",
+    );
+    expect(fixture.sent[0]?.text).toContain("已排到下一 Turn");
+  });
+
+  it("offers only the existing safe project-rule actions", async () => {
+    const fixture = createOutbox();
+    const checkProjectRules = vi.fn(async () => ({
+      projectRoot: "/workspace",
+      rulesPath: "/workspace/.codex/rules/default.rules",
+    }));
+    const adapter = new FeishuConversationAdapter(
+      { checkProjectRules } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+    );
+
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "rules",
+      message.actorId,
+    )).resolves.toMatchObject({
+      title: "项目规则",
+      choices: [
+        { action: "rules", input: "init" },
+        { action: "rules", input: "check" },
+      ],
+    });
+    await adapter.handleCommandCenterAction(
+      message.target,
+      "rules",
+      message.actorId,
+      "check",
+    );
+    await fixture.outbox.close();
+
+    expect(checkProjectRules).toHaveBeenCalledWith(message.target);
+    expect(fixture.sent[0]?.text).toContain("项目规则检查通过");
+  });
+
+  it("maps review cards back to the shared review command grammar", async () => {
+    const fixture = createOutbox();
+    const review = vi.fn(async () => ({
+      threadId: "review-thread",
+      turnId: "review-turn",
+      steered: false,
+    }));
+    const adapter = new FeishuConversationAdapter(
+      { review } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+    );
+
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "review",
+      message.actorId,
+    )).resolves.toMatchObject({
+      title: "开始 Review",
+      choices: [
+        { action: "review", input: " " },
+        { action: "review-branch", input: "" },
+        { action: "review-commit", input: "" },
+        { action: "review-custom", input: "" },
+      ],
+    });
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "review-branch",
+      message.actorId,
+    )).resolves.toMatchObject({
+      kind: "form",
+      action: "review",
+      inputPrefix: "branch ",
+    });
+    await adapter.handleCommandCenterAction(
+      message.target,
+      "review",
+      message.actorId,
+      "branch main",
+    );
+    await fixture.outbox.close();
+
+    expect(review).toHaveBeenCalledWith(message.target, {
+      type: "baseBranch",
+      branch: "main",
+    });
+    expect(fixture.sent[0]?.text).toContain("已启动 Codex Review");
+  });
+
+  it("maps Goal choices and forms to the shared Goal command", async () => {
+    const fixture = createOutbox();
+    const setGoal = vi.fn(async (
+      _target: typeof message.target,
+      objective: string,
+    ) => ({
+      threadId: "thread-1",
+      objective,
+      status: "active" as const,
+      tokenBudget: null,
+      tokensUsed: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    }));
+    const adapter = new FeishuConversationAdapter(
+      { setGoal } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+    );
+
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "goal",
+      message.actorId,
+    )).resolves.toMatchObject({
+      title: "Thread Goal",
+      choices: [
+        { action: "goal", input: " " },
+        { action: "goal-set", input: "" },
+        { action: "goal", input: "clear" },
+      ],
+    });
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "goal-set",
+      message.actorId,
+    )).resolves.toMatchObject({
+      kind: "form",
+      action: "goal",
+      inputPrefix: "set ",
+    });
+    await adapter.handleCommandCenterAction(
+      message.target,
+      "goal",
+      message.actorId,
+      "set 完成飞书私聊收口",
+    );
+    await fixture.outbox.close();
+
+    expect(setGoal).toHaveBeenCalledWith(
+      message.target,
+      "完成飞书私聊收口",
+    );
+    expect(fixture.sent[0]?.text).toContain("Goal 已设置");
   });
 
   it("binds user authorization status and revoke to the current message actor", async () => {
