@@ -19,9 +19,79 @@ const target = {
 const cardMethods = {
   sendCard: async () => "om_card",
   updateCard: async () => {},
+  createText: async () => "om_text",
+  updateText: async () => {},
 };
 
 describe("Feishu outbox", () => {
+  it("updates one thread status message from active to idle", async () => {
+    const sent: Array<{ chatId: string; text: string }> = [];
+    const updated: Array<{ messageId: string; text: string }> = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        createText: async (chatId, text) => {
+          sent.push({ chatId, text });
+          return "om_status";
+        },
+        sendPost: async () => {},
+        updateText: async (messageId, text) => {
+          updated.push({ messageId, text });
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(threadStatus("active"));
+    outbox.handle(threadStatus("active"));
+    outbox.handle(threadStatus("idle"));
+    await outbox.close();
+
+    expect(sent).toEqual([{
+      chatId: "oc_chat",
+      text: "Thread 状态：运行中",
+    }]);
+    expect(updated).toEqual([{
+      messageId: "om_status",
+      text: "Thread 状态：空闲",
+    }]);
+  });
+
+  it("drops a stale status binding after an update failure", async () => {
+    const created: string[] = [];
+    let updateAttempts = 0;
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        createText: async (_chatId, text) => {
+          created.push(text);
+          return `om_status_${created.length}`;
+        },
+        updateText: async () => {
+          updateAttempts += 1;
+          throw new Error("update failed");
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(threadStatus("active"));
+    outbox.handle(threadStatus("idle"));
+    outbox.handle(threadStatus("active"));
+    await outbox.close();
+
+    expect(created).toEqual([
+      "Thread 状态：运行中",
+      "Thread 状态：运行中",
+    ]);
+    expect(updateAttempts).toBe(1);
+  });
+
   it("routes a rendered event to the exact account and chat", async () => {
     const sent: Array<{ chatId: string; format: string; text: string }> = [];
     const messagePort: FeishuMessagePort = {
@@ -272,6 +342,15 @@ function completed(
     turnId: "turn-1",
     itemId: text,
     text,
+  };
+}
+
+function threadStatus(status: string): OutputEvent {
+  return {
+    type: "thread.status",
+    target,
+    threadId: "thread-1",
+    status,
   };
 }
 

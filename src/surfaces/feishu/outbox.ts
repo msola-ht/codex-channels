@@ -18,13 +18,20 @@ const feishuTruncationNotice = "\n\n[内容过长，已截断]";
 export interface FeishuMessagePort {
   sendText(chatId: string, text: string): Promise<void>;
   sendPost(chatId: string, markdown: string): Promise<void>;
+  createText(chatId: string, text: string): Promise<string>;
+  updateText(messageId: string, text: string): Promise<void>;
   sendCard(chatId: string, card: FeishuCardDocument): Promise<string>;
   updateCard(messageId: string, card: FeishuCardDocument): Promise<void>;
 }
 
 export class FeishuOutbox implements SurfaceOutputPort {
   private readonly delivery: ConversationDeliveryQueue;
+  private readonly threadStatusMessages = new Map<
+    string,
+    { chatId: string; messageId: string; status: string }
+  >();
   private closed = false;
+  private closeFinished = false;
 
   constructor(
     private readonly accountId: string,
@@ -46,6 +53,14 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     const text = renderFeishuOutput(event);
     if (text === null) {
+      return;
+    }
+    if (event.type === "thread.status") {
+      this.delivery.enqueue(
+        event.target.conversationId,
+        () => this.deliverThreadStatus(event, text),
+        true,
+      );
       return;
     }
     this.delivery.enqueue(
@@ -113,9 +128,11 @@ export class FeishuOutbox implements SurfaceOutputPort {
     );
   }
 
-  close(): Promise<void> {
+  async close(): Promise<void> {
     this.closed = true;
-    return this.delivery.close();
+    await this.delivery.close();
+    this.closeFinished = true;
+    this.threadStatusMessages.clear();
   }
 
   private async sendText(chatId: string, text: string): Promise<void> {
@@ -127,6 +144,49 @@ export class FeishuOutbox implements SurfaceOutputPort {
   private async sendPost(chatId: string, markdown: string): Promise<void> {
     for (const chunk of splitFeishuPost(markdown)) {
       await this.messagePort.sendPost(chatId, chunk);
+    }
+  }
+
+  private async deliverThreadStatus(
+    event: Extract<OutputEvent, { type: "thread.status" }>,
+    text: string,
+  ): Promise<void> {
+    const current = this.threadStatusMessages.get(event.threadId);
+    if (
+      current
+      && current.chatId === event.target.conversationId
+    ) {
+      if (current.status === event.status) {
+        return;
+      }
+      try {
+        await this.messagePort.updateText(current.messageId, text);
+      } catch (error) {
+        if (this.threadStatusMessages.get(event.threadId) === current) {
+          this.threadStatusMessages.delete(event.threadId);
+        }
+        throw error;
+      }
+      if (event.status === "active" && !this.closeFinished) {
+        this.threadStatusMessages.set(event.threadId, {
+          ...current,
+          status: event.status,
+        });
+      } else {
+        this.threadStatusMessages.delete(event.threadId);
+      }
+      return;
+    }
+    const messageId = await this.messagePort.createText(
+      event.target.conversationId,
+      text,
+    );
+    if (event.status === "active" && !this.closeFinished) {
+      this.threadStatusMessages.set(event.threadId, {
+        chatId: event.target.conversationId,
+        messageId,
+        status: event.status,
+      });
     }
   }
 }

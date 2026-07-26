@@ -521,6 +521,8 @@ function createOutbox(): {
       {
         sendCard: async () => "om_card",
         updateCard: async () => {},
+        createText: async () => "om_text",
+        updateText: async () => {},
         sendText: async (chatId, text) => {
           sent.push({ chatId, text });
         },

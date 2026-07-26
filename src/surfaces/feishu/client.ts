@@ -245,7 +245,7 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
   }
 
   async sendText(chatId: string, text: string): Promise<void> {
-    await this.sendMessage(chatId, "text", JSON.stringify({ text }));
+    await this.createText(chatId, text);
   }
 
   async sendPost(chatId: string, markdown: string): Promise<void> {
@@ -254,6 +254,10 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
       "post",
       encodeFeishuPostContent(markdown),
     );
+  }
+
+  async createText(chatId: string, text: string): Promise<string> {
+    return this.sendMessage(chatId, "text", JSON.stringify({ text }));
   }
 
   async sendCard(
@@ -271,6 +275,20 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
     messageId: string,
     card: FeishuCardDocument,
   ): Promise<void> {
+    await this.updateMessage(messageId, JSON.stringify(card));
+  }
+
+  async updateText(
+    messageId: string,
+    text: string,
+  ): Promise<void> {
+    await this.updateMessage(messageId, JSON.stringify({ text }));
+  }
+
+  private async updateMessage(
+    messageId: string,
+    content: string,
+  ): Promise<void> {
     try {
       const response = await withTimeout(
         this.sdkClient.patchMessage({
@@ -278,7 +296,7 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
             message_id: messageId,
           },
           data: {
-            content: JSON.stringify(card),
+            content,
           },
         }),
         this.sendTimeoutMs,
