@@ -113,6 +113,30 @@ export class FeishuInteractionPort implements InteractionPort {
     }
   }
 
+  stopForActor(target: ConversationTarget, actorId: string): boolean {
+    const token = [...this.pendingByToken.entries()]
+      .reverse()
+      .find(([, pending]) =>
+        pending.target.surface === target.surface
+        && pending.target.accountId === target.accountId
+        && pending.target.conversationId === target.conversationId
+        && pending.actorId === actorId
+      )?.[0];
+    if (!token) {
+      return false;
+    }
+    const pending = this.pendingByToken.get(token);
+    if (!pending) {
+      return false;
+    }
+    this.finish(
+      token,
+      timeoutDecision(pending.request),
+      "已停止",
+    );
+    return true;
+  }
+
   async close(): Promise<void> {
     if (!this.closed) {
       this.closed = true;

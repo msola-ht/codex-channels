@@ -100,6 +100,37 @@ describe("Feishu interaction port", () => {
     await expect(interactions.close()).resolves.toBeUndefined();
   });
 
+  it("stops only the latest pending interaction for the exact chat and actor", async () => {
+    const fixture = createConfiguredFixture();
+    const first = fixture.interactions.request(target, {
+      ...approvalRequest(),
+      requestId: "request-first",
+    });
+    const second = fixture.interactions.request(target, {
+      ...approvalRequest(),
+      requestId: "request-second",
+    });
+    await settle();
+
+    expect(fixture.interactions.stopForActor(target, "ou_other")).toBe(false);
+    expect(fixture.interactions.stopForActor({
+      ...target,
+      conversationId: "oc_other",
+    }, "ou_actor")).toBe(false);
+    expect(fixture.interactions.stopForActor(target, "ou_actor")).toBe(true);
+    await expect(second).resolves.toEqual({
+      type: "approval",
+      approved: false,
+    });
+    expect(fixture.interactions.stopForActor(target, "ou_actor")).toBe(true);
+    await expect(first).resolves.toEqual({
+      type: "approval",
+      approved: false,
+    });
+    expect(fixture.interactions.stopForActor(target, "ou_actor")).toBe(false);
+    await fixture.interactions.close();
+  });
+
   it("only maps options that the current request explicitly offers", async () => {
     const fixture = createConfiguredFixture();
     const decision = fixture.interactions.request(target, {

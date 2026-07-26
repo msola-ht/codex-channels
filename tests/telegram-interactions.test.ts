@@ -399,6 +399,57 @@ describe("TelegramInteractionPort", () => {
     );
   });
 
+  it("fails closed without sending a second interaction for a duplicate request ID", async () => {
+    const sendMessage = vi.fn(async () => ({ message_id: 7 }));
+    const bot = {
+      callbackQuery: vi.fn(),
+      api: {
+        sendMessage,
+        editMessageText: vi.fn(async () => true as const),
+      },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+
+    const first = interactions.request(target, approvalRequest());
+    await settle();
+    const duplicate = interactions.request(target, approvalRequest());
+
+    await expect(duplicate).resolves.toEqual({ type: "approval", approved: false });
+    expect(sendMessage).toHaveBeenCalledOnce();
+    await interactions.close();
+    await expect(first).resolves.toEqual({ type: "approval", approved: false });
+  });
+
+  it("fails closed when the pending interaction capacity is exhausted", async () => {
+    let nextMessageId = 1;
+    const sendMessage = vi.fn(async () => ({ message_id: nextMessageId++ }));
+    const bot = {
+      callbackQuery: vi.fn(),
+      api: {
+        sendMessage,
+        editMessageText: vi.fn(async () => true as const),
+      },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    const pending = Array.from({ length: 100 }, (_, index) =>
+      interactions.request(target, {
+        ...approvalRequest(),
+        requestId: `request-${index}`,
+      })
+    );
+    await settle();
+
+    const excess = interactions.request(target, {
+      ...approvalRequest(),
+      requestId: "request-excess",
+    });
+
+    await expect(excess).resolves.toEqual({ type: "approval", approved: false });
+    expect(sendMessage).toHaveBeenCalledTimes(100);
+    await interactions.close();
+    await expect(Promise.all(pending)).resolves.toHaveLength(100);
+  });
+
   it("orders interaction sends and status updates through the shared queue", async () => {
     const sendMessage = vi.fn(async () => ({ message_id: 8 }));
     const editMessageText = vi.fn(async () => true as const);
@@ -467,6 +518,106 @@ describe("TelegramInteractionPort", () => {
     });
   });
 
+  it("keeps a fixed-choice input pending until an offered option is submitted", async () => {
+    const bot = {
+      callbackQuery: vi.fn(),
+      api: {
+        sendMessage: vi.fn(async () => ({ message_id: 10 })),
+        editMessageText: vi.fn(async () => true as const),
+      },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    const decision = interactions.request(target, {
+      ...userInputRequest(),
+      questions: [{
+        id: "answer",
+        header: "Answer",
+        question: "请选择",
+        options: ["A", "B"],
+        allowOther: false,
+        secret: false,
+      }],
+    });
+    await settle();
+    let settled = false;
+    void decision.then(() => {
+      settled = true;
+    });
+    const reply = vi.fn(async () => ({ message_id: 11 }));
+
+    expect(await interactions.handleText({
+      ...textContext("C", 10),
+      reply,
+    } as unknown as Context)).toBe(true);
+    await settle();
+    expect(settled).toBe(false);
+    expect(reply).toHaveBeenCalledWith(
+      "回答不完整或不符合可选值，请按原请求重新回复；发送 /stop 可停止当前请求。",
+      { reply_parameters: { message_id: 10 } },
+    );
+
+    expect(await interactions.handleText(textContext("B", 10))).toBe(true);
+    await expect(decision).resolves.toEqual({
+      type: "user-input",
+      answers: { answer: ["B"] },
+    });
+  });
+
+  it("keeps a multi-question input pending until every question is answered", async () => {
+    const bot = {
+      callbackQuery: vi.fn(),
+      api: {
+        sendMessage: vi.fn(async () => ({ message_id: 11 })),
+        editMessageText: vi.fn(async () => true as const),
+      },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    const decision = interactions.request(target, {
+      ...userInputRequest(),
+      questions: [
+        {
+          id: "first",
+          header: "First",
+          question: "第一个问题",
+          options: [],
+          allowOther: true,
+          secret: false,
+        },
+        {
+          id: "second",
+          header: "Second",
+          question: "第二个问题",
+          options: [],
+          allowOther: true,
+          secret: false,
+        },
+      ],
+    });
+    await settle();
+    let settled = false;
+    void decision.then(() => {
+      settled = true;
+    });
+
+    expect(await interactions.handleText({
+      ...textContext("first=一", 11),
+      reply: vi.fn(async () => ({ message_id: 12 })),
+    } as unknown as Context)).toBe(true);
+    await settle();
+    expect(settled).toBe(false);
+
+    expect(await interactions.handleText(
+      textContext("first=一\nsecond=二", 11),
+    )).toBe(true);
+    await expect(decision).resolves.toEqual({
+      type: "user-input",
+      answers: {
+        first: ["一"],
+        second: ["二"],
+      },
+    });
+  });
+
   it("splits long approval details and only places buttons on the last chunk", async () => {
     let nextMessageId = 1;
     const sendMessage = vi.fn(async (
@@ -507,7 +658,7 @@ describe("TelegramInteractionPort", () => {
     await expect(decision).resolves.toEqual({ type: "approval", approved: false });
   });
 
-  it("allows /cancel to cancel the latest approval request", async () => {
+  it("allows /stop to stop the latest approval request", async () => {
     const bot = {
       callbackQuery: vi.fn(),
       api: {
@@ -519,7 +670,7 @@ describe("TelegramInteractionPort", () => {
     const decision = interactions.request(target, approvalRequest());
     await settle();
 
-    expect(interactions.cancelForChat("100")).toBe(true);
+    expect(interactions.stopForChat("100")).toBe(true);
     await expect(decision).resolves.toEqual({ type: "approval", approved: false });
   });
 
@@ -550,6 +701,41 @@ describe("TelegramInteractionPort", () => {
     completeEdit?.();
     await closing;
     await expect(decision).resolves.toEqual({ type: "approval", approved: false });
+  });
+
+  it("fails closed when shutdown starts before the interaction message is sent", async () => {
+    let completeSend: ((message: { message_id: number }) => void) | undefined;
+    const sendMessage = vi.fn(() => new Promise<{ message_id: number }>((resolve) => {
+      completeSend = resolve;
+    }));
+    const editMessageText = vi.fn(async () => true as const);
+    const bot = {
+      callbackQuery: vi.fn(),
+      api: { sendMessage, editMessageText },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    const decision = interactions.request(target, approvalRequest());
+    await settle();
+
+    const closing = interactions.close();
+    await expect(decision).resolves.toEqual({ type: "approval", approved: false });
+    completeSend?.({ message_id: 14 });
+    await closing;
+
+    expect(editMessageText).toHaveBeenCalledWith(
+      "100",
+      14,
+      expect.stringContaining("处理结果：Gateway 已停止"),
+      {
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: [] },
+      },
+    );
+    await expect(interactions.request(target, {
+      ...approvalRequest(),
+      requestId: "request-after-close",
+    })).resolves.toEqual({ type: "approval", approved: false });
+    expect(sendMessage).toHaveBeenCalledOnce();
   });
 
   it("restores the previous ForceReply request after a newer one completes", async () => {
@@ -594,7 +780,9 @@ function approvalRequest(): Extract<InteractionRequest, { type: "approval" }> {
   };
 }
 
-function userInputRequest(requestId = "request-input"): InteractionRequest {
+function userInputRequest(
+  requestId = "request-input",
+): Extract<InteractionRequest, { type: "user-input" }> {
   return {
     type: "user-input",
     requestId,

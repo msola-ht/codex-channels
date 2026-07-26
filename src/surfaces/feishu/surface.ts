@@ -204,6 +204,7 @@ export class FeishuSurface implements SurfaceAdapter {
           this.commandCenter.open(target, actorId),
       },
       this.applicationSetup,
+      this.interactions,
     );
     this.commandCenter = new FeishuCommandCenter(
       this.output,

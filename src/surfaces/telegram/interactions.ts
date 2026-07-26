@@ -38,13 +38,20 @@ const directInteractionQueue: TelegramInteractionQueue = {
   runOrdered: (_chatId, run) => run(),
 };
 
+const maximumConcurrentInteractions = 100;
+
 export class TelegramInteractionPort implements InteractionPort {
   private readonly pendingByToken = new Map<string, PendingInteraction>();
   private readonly tokenByRequest = new Map<string, string>();
   private readonly textTokenByChat = new Map<string, string>();
   private readonly latestTokenByChat = new Map<string, string>();
   private readonly resolvedBeforePending = new Set<string>();
+  private readonly preparations = new Set<Promise<
+    Awaited<ReturnType<Bot["api"]["sendMessage"]>> | undefined
+  >>();
+  private readonly preparationCancellations = new Set<() => void>();
   private readonly statusUpdates = new Set<Promise<void>>();
+  private closed = false;
 
   constructor(
     private readonly bot: Bot,
@@ -59,14 +66,103 @@ export class TelegramInteractionPort implements InteractionPort {
     target: ConversationTarget,
     request: InteractionRequest,
   ): Promise<InteractionDecision> {
+    if (
+      this.closed
+      ||
+      this.tokenByRequest.has(request.requestId)
+      || this.tokenByRequest.size >= maximumConcurrentInteractions
+    ) {
+      return timeoutDecision(request);
+    }
     const token = randomBytes(12).toString("base64url");
     const keyboard = this.keyboard(request, token);
     const chunks = request.type === "approval"
       ? formatTelegramExpandableQuotePanelChunks(request.title, request.detail, 3_600)
       : formatTelegramPanelChunks(formatInteraction(request), 3_600);
     this.tokenByRequest.set(request.requestId, token);
-    let message: Awaited<ReturnType<typeof this.bot.api.sendMessage>> | undefined;
     this.queue.prepareInteraction(target.conversationId, request);
+    const preparation = this.prepareInteraction(
+      target,
+      request,
+      token,
+      chunks,
+      keyboard,
+    );
+    this.preparations.add(preparation);
+    void preparation.then(
+      () => this.preparations.delete(preparation),
+      () => this.preparations.delete(preparation),
+    );
+    let cancelPreparation!: () => void;
+    const cancelled = new Promise<{ type: "closed" }>((resolve) => {
+      cancelPreparation = () => resolve({ type: "closed" });
+    });
+    this.preparationCancellations.add(cancelPreparation);
+    const result = await Promise.race([
+      preparation.then(
+        (message) => ({ type: "prepared" as const, message }),
+        (error: unknown) => ({ type: "failed" as const, error }),
+      ),
+      cancelled,
+    ]);
+    this.preparationCancellations.delete(cancelPreparation);
+    if (result.type !== "prepared") {
+      if (this.tokenByRequest.get(request.requestId) === token) {
+        this.tokenByRequest.delete(request.requestId);
+      }
+      this.resolvedBeforePending.delete(token);
+      if (result.type === "failed") {
+        throw result.error;
+      }
+      return timeoutDecision(request);
+    }
+    const message = result.message;
+    if (!message) {
+      return timeoutDecision(request);
+    }
+    if (this.closed) {
+      await this.finishPreparedAfterClose(
+        target,
+        request,
+        token,
+        message.message_id,
+        chunks.at(-1)!,
+      );
+      return timeoutDecision(request);
+    }
+
+    return new Promise<InteractionDecision>((resolve) => {
+      const timer = setTimeout(() => {
+        this.finish(token, timeoutDecision(request));
+      }, request.expiresInMs);
+      timer.unref();
+      this.pendingByToken.set(token, {
+        requestId: request.requestId,
+        target,
+        request,
+        resolve,
+        timer,
+        messageId: message.message_id,
+        messageText: chunks.at(-1)!,
+      });
+      this.latestTokenByChat.set(target.conversationId, token);
+      if (request.type === "user-input" || (request.type === "elicitation" && request.mode === "form")) {
+        this.textTokenByChat.set(target.conversationId, token);
+      }
+      if (this.resolvedBeforePending.delete(token)) {
+        this.finish(token, timeoutDecision(request), "已在其他客户端处理");
+      }
+    });
+  }
+
+  private async prepareInteraction(
+    target: ConversationTarget,
+    request: InteractionRequest,
+    token: string,
+    chunks: string[],
+    keyboard: InlineKeyboard | undefined,
+  ): Promise<Awaited<ReturnType<Bot["api"]["sendMessage"]>> | undefined> {
+    let message: Awaited<ReturnType<Bot["api"]["sendMessage"]>> | undefined;
     try {
       message = await this.queue.runOrdered(target.conversationId, async () => {
         let sent: Awaited<ReturnType<typeof this.bot.api.sendMessage>> | undefined;
@@ -92,29 +188,41 @@ export class TelegramInteractionPort implements InteractionPort {
     if (!message) {
       throw new Error("Telegram 交互消息为空");
     }
+    if (!this.closed) {
+      return message;
+    }
+    await this.finishPreparedAfterClose(
+      target,
+      request,
+      token,
+      message.message_id,
+      chunks.at(-1)!,
+    );
+    return undefined;
+  }
 
-    return new Promise<InteractionDecision>((resolve) => {
-      const timer = setTimeout(() => {
-        this.finish(token, timeoutDecision(request));
-      }, request.expiresInMs);
-      timer.unref();
-      this.pendingByToken.set(token, {
-        requestId: request.requestId,
-        target,
-        request,
-        resolve,
-        timer,
-        messageId: message.message_id,
-        messageText: chunks.at(-1)!,
-      });
-      this.latestTokenByChat.set(target.conversationId, token);
-      if (request.type === "user-input" || (request.type === "elicitation" && request.mode === "form")) {
-        this.textTokenByChat.set(target.conversationId, token);
-      }
-      if (this.resolvedBeforePending.delete(token)) {
-        this.finish(token, timeoutDecision(request), "已在其他客户端处理");
-      }
-    });
+  private async finishPreparedAfterClose(
+    target: ConversationTarget,
+    request: InteractionRequest,
+    token: string,
+    messageId: number,
+    messageText: string,
+  ): Promise<void> {
+    if (this.tokenByRequest.get(request.requestId) === token) {
+      this.tokenByRequest.delete(request.requestId);
+    }
+    await this.updateInteractionMessage(
+      target,
+      request.requestId,
+      messageId,
+      messageText,
+      "Gateway 已停止",
+    );
+    this.queue.finishInteraction(
+      target.conversationId,
+      request,
+      timeoutDecision(request),
+    );
   }
 
   resolved(requestId: string): void {
@@ -145,6 +253,19 @@ export class TelegramInteractionPort implements InteractionPort {
     }
     if (pending.request.type === "user-input") {
       const answers = parseAnswers(pending.request, text);
+      if (!answers) {
+        await this.queue.runOrdered(
+          pending.target.conversationId,
+          () => this.executor.call(
+            { chatId: pending.target.conversationId, operation: "sendMessage", critical: true },
+            () => context.reply(
+              "回答不完整或不符合可选值，请按原请求重新回复；发送 /stop 可停止当前请求。",
+              { reply_parameters: { message_id: pending.messageId } },
+            ),
+          ),
+        );
+        return true;
+      }
       this.finish(token!, { type: "user-input", answers }, "已提交回答");
       return true;
     }
@@ -157,7 +278,7 @@ export class TelegramInteractionPort implements InteractionPort {
           pending.target.conversationId,
           () => this.executor.call(
             { chatId: pending.target.conversationId, operation: "sendMessage", critical: true },
-            () => context.reply("表单必须回复为有效 JSON 对象；发送 /cancel 取消。", {
+            () => context.reply("表单必须回复为有效 JSON 对象；发送 /stop 停止当前请求。", {
               reply_parameters: { message_id: pending.messageId },
             }),
           ),
@@ -168,7 +289,7 @@ export class TelegramInteractionPort implements InteractionPort {
     return false;
   }
 
-  cancelForChat(chatId: string): boolean {
+  stopForChat(chatId: string): boolean {
     const token = this.latestTokenByChat.get(chatId);
     const pending = token ? this.pendingByToken.get(token) : undefined;
     if (!pending) {
@@ -179,8 +300,16 @@ export class TelegramInteractionPort implements InteractionPort {
   }
 
   async close(): Promise<void> {
+    if (!this.closed) {
+      this.closed = true;
+      for (const cancel of this.preparationCancellations) {
+        cancel();
+      }
+      this.preparationCancellations.clear();
+    }
     this.cancelAll("Gateway 已停止");
     this.resolvedBeforePending.clear();
+    await waitAtMost(Promise.allSettled([...this.preparations]), 5_000);
     const updates = Promise.allSettled([...this.statusUpdates]);
     await waitAtMost(updates, 5_000);
   }
@@ -224,6 +353,10 @@ export class TelegramInteractionPort implements InteractionPort {
   private async onCallback(context: Context): Promise<void> {
     const data = context.callbackQuery?.data;
     if (!data) {
+      return;
+    }
+    if (this.closed) {
+      await context.answerCallbackQuery({ text: "该请求已失效" });
       return;
     }
     const [, action, token] = data.split(":");
@@ -318,13 +451,34 @@ export class TelegramInteractionPort implements InteractionPort {
         this.latestTokenByChat.delete(pending.target.conversationId);
       }
     }
-    const statusUpdate = this.queue.runOrdered(pending.target.conversationId, () =>
+    const statusUpdate = this.updateInteractionMessage(
+      pending.target,
+      pending.requestId,
+      pending.messageId,
+      pending.messageText,
+      outcome,
+    ).then(() => {
+      this.queue.finishInteraction(pending.target.conversationId, pending.request, decision);
+      pending.resolve(decision);
+    });
+    this.statusUpdates.add(statusUpdate);
+    void statusUpdate.finally(() => this.statusUpdates.delete(statusUpdate));
+  }
+
+  private updateInteractionMessage(
+    target: ConversationTarget,
+    requestId: string,
+    messageId: number,
+    messageText: string,
+    outcome: string,
+  ): Promise<void> {
+    return this.queue.runOrdered(target.conversationId, () =>
       this.executor.call(
-        { chatId: pending.target.conversationId, operation: "editMessageText", critical: true },
+        { chatId: target.conversationId, operation: "editMessageText", critical: true },
         () => this.bot.api.editMessageText(
-          pending.target.conversationId,
-          pending.messageId,
-          `${pending.messageText}\n\n处理结果：${outcome}`,
+          target.conversationId,
+          messageId,
+          `${messageText}\n\n处理结果：${outcome}`,
           {
             parse_mode: "HTML",
             reply_markup: { inline_keyboard: [] },
@@ -334,18 +488,13 @@ export class TelegramInteractionPort implements InteractionPort {
     ).then(() => undefined).catch((error) => {
       this.logger.warn(
         {
-          chatId: pending.target.conversationId,
-          requestId: pending.requestId,
+          chatId: target.conversationId,
+          requestId,
           ...telegramErrorMetadata(error),
         },
         "Telegram 交互消息状态更新失败",
       );
-    }).then(() => {
-      this.queue.finishInteraction(pending.target.conversationId, pending.request, decision);
-      pending.resolve(decision);
     });
-    this.statusUpdates.add(statusUpdate);
-    void statusUpdate.finally(() => this.statusUpdates.delete(statusUpdate));
   }
 
   private previousPendingToken(
@@ -381,7 +530,7 @@ function formatInteraction(request: Exclude<InteractionRequest, { type: "approva
       : "";
     return `${request.title}\n\n${questions.join("\n\n")}\n\n请回复本消息。多个问题使用“问题ID=回答”，每行一个。${secretWarning}`;
   }
-  const instruction = request.mode === "form" ? "请回复有效 JSON 对象，或发送 /cancel。" : "请打开链接完成操作，然后点击“完成”。";
+  const instruction = request.mode === "form" ? "请回复有效 JSON 对象，或发送 /stop 停止当前请求。" : "请打开链接完成操作，然后点击“完成”。";
   return `${request.title}\n\n${request.message}\n\n${instruction}`;
 }
 
@@ -408,24 +557,43 @@ function interactionOptions(
 function parseAnswers(
   request: Extract<InteractionRequest, { type: "user-input" }>,
   text: string,
-): Record<string, string[]> {
+): Record<string, string[]> | undefined {
   if (request.questions.length === 1 && !text.includes("=")) {
     const question = request.questions[0]!;
-    return { [question.id]: [text.trim()] };
+    const answer = text.trim();
+    return isValidAnswer(question, answer)
+      ? { [question.id]: [answer] }
+      : undefined;
   }
   const answers: Record<string, string[]> = {};
-  for (const line of text.split("\n")) {
+  for (const line of text.split("\n").filter((candidate) => candidate.trim())) {
     const separator = line.indexOf("=");
     if (separator <= 0) {
-      continue;
+      return undefined;
     }
     const id = line.slice(0, separator).trim();
     const answer = line.slice(separator + 1).trim();
-    if (request.questions.some((question) => question.id === id) && answer) {
-      answers[id] = [answer];
+    const question = request.questions.find((candidate) => candidate.id === id);
+    if (!question || id in answers || !isValidAnswer(question, answer)) {
+      return undefined;
     }
+    answers[id] = [answer];
   }
-  return answers;
+  return Object.keys(answers).length === request.questions.length
+    ? answers
+    : undefined;
+}
+
+function isValidAnswer(
+  question: Extract<InteractionRequest, { type: "user-input" }>["questions"][number],
+  answer: string,
+): boolean {
+  return answer.length > 0
+    && (
+      question.options.length === 0
+      || question.allowOther
+      || question.options.includes(answer)
+    );
 }
 
 async function waitAtMost<T>(operation: Promise<T>, milliseconds: number): Promise<void> {

@@ -17,7 +17,11 @@ class FakeTelegramApi {
   readonly richMessages: InputRichMessage[] = [];
   readonly richEdits: InputRichMessage[] = [];
   readonly deleted: number[] = [];
-  readonly documents: Array<{ filename: string | undefined; options: unknown }> = [];
+  readonly documents: Array<{
+    filename: string | undefined;
+    options: unknown;
+    content: string;
+  }> = [];
   rejectRichMessages = false;
   rejectHtmlMessages = false;
   rejectDocuments = false;
@@ -86,7 +90,15 @@ class FakeTelegramApi {
     if (this.rejectDocuments) {
       throw new Error("Bad Request: document upload failed");
     }
-    this.documents.push({ filename: document.filename, options });
+    const raw = await document.toRaw();
+    if (!(raw instanceof Uint8Array)) {
+      throw new Error("Fake Telegram API only accepts in-memory documents");
+    }
+    this.documents.push({
+      filename: document.filename,
+      options,
+      content: Buffer.from(raw).toString("utf8"),
+    });
     return { message_id: this.nextMessageId++ };
   }
 
@@ -241,6 +253,57 @@ describe("TelegramOutbox", () => {
     expect(api.sendOptions[1]).not.toHaveProperty("disable_notification");
     expect(api.richMessages).toEqual([]);
     expect(api.sendOptions[1]).toMatchObject({ parse_mode: "HTML" });
+  });
+
+  it("bounds the number of active non-terminal Telegram streams", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    for (let index = 0; index < 101; index += 1) {
+      outbox.handle(textDelta(`item-${index}`, `增量 ${index}`, "commentary"));
+    }
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toHaveLength(100);
+  });
+
+  it("delivers an authoritative completion after its non-terminal delta was dropped", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    for (let index = 0; index < 101; index += 1) {
+      outbox.handle(textDelta(`item-${index}`, `增量 ${index}`, "commentary"));
+    }
+    outbox.handle(textCompleted(
+      "item-100",
+      "最终校正",
+      "final_answer",
+    ));
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual(["最终校正"]);
+  });
+
+  it("bounds buffered text for one Telegram stream and marks truncation", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle(textCompleted(
+      "oversized",
+      "x".repeat(1_000_100),
+      "final_answer",
+    ));
+    outbox.handle(turnCompleted());
+    await outbox.close();
+
+    expect(api.documents).toHaveLength(1);
+    expect(api.documents[0]?.content).toContain("内容过长，已截断");
+    expect(Array.from(api.documents[0]?.content ?? "")).toHaveLength(1_000_000);
   });
 
   it("renders final answers as compatible Telegram HTML by default", async () => {

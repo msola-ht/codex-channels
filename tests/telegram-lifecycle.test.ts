@@ -63,6 +63,8 @@ describe("TelegramLifecycle", () => {
     expect(registeredCommands.some((command) => command.command === "sessions")).toBe(true);
     expect(registeredCommands.some((command) => command.command === "diff")).toBe(true);
     expect(registeredCommands.some((command) => command.command === "rules")).toBe(true);
+    expect(registeredCommands.some((command) => command.command === "stop")).toBe(true);
+    expect(registeredCommands.some((command) => command.command === "cancel")).toBe(false);
   });
 
   it("keeps polling when a startup notification cannot be delivered", async () => {

@@ -70,7 +70,7 @@ describe("Feishu conversation adapter", () => {
     );
   });
 
-  it("handles Feishu-local help, identity, and cancellation commands without starting a Turn", async () => {
+  it("handles Feishu-local help and identity commands without starting a Turn", async () => {
     const fixture = createOutbox();
     const submit = vi.fn();
     const adapter = new FeishuConversationAdapter(
@@ -79,13 +79,13 @@ describe("Feishu conversation adapter", () => {
       imagePort,
     );
 
-    for (const text of ["/start", "/help", "/whoami", "/cancel"]) {
+    for (const text of ["/start", "/help", "/whoami"]) {
       await adapter.handle({ ...message, text });
     }
     await fixture.outbox.close();
 
     expect(submit).not.toHaveBeenCalled();
-    expect(fixture.sent).toHaveLength(4);
+    expect(fixture.sent).toHaveLength(3);
     expect(fixture.sent[0]?.text).toContain("飞书 Codex 命令");
     expect(fixture.sent[0]?.text).toContain("/status");
     expect(conversationCommandNames.every(
@@ -98,7 +98,53 @@ describe("Feishu conversation adapter", () => {
       "Chat ID：oc_chat",
       "App ID：cli_0123456789abcdef",
     ].join("\n"));
-    expect(fixture.sent[3]?.text).toBe("当前没有待处理的交互请求。");
+  });
+
+  it("uses /stop to stop a pending interaction before stopping the active Turn", async () => {
+    const fixture = createOutbox();
+    const stop = vi.fn(async () => true);
+    const stopForActor = vi.fn(() => true);
+    const adapter = new FeishuConversationAdapter(
+      { stop } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { stopForActor },
+    );
+
+    await adapter.handle({ ...message, text: "/stop" });
+    await fixture.outbox.close();
+
+    expect(stopForActor).toHaveBeenCalledWith(message.target, message.actorId);
+    expect(stop).not.toHaveBeenCalled();
+    expect(fixture.sent).toHaveLength(1);
+    expect(fixture.sent[0]?.text).toBe("已停止当前交互请求。");
+  });
+
+  it("uses /stop to stop the active Turn when no interaction is pending", async () => {
+    const fixture = createOutbox();
+    const stop = vi.fn(async () => true);
+    const stopForActor = vi.fn(() => false);
+    const adapter = new FeishuConversationAdapter(
+      { stop } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { stopForActor },
+    );
+
+    await adapter.handle({ ...message, text: "/stop" });
+    await fixture.outbox.close();
+
+    expect(stopForActor).toHaveBeenCalledWith(message.target, message.actorId);
+    expect(stop).toHaveBeenCalledWith(message.target);
+    expect(fixture.sent[0]?.text).toBe("已请求停止当前任务。");
   });
 
   it("opens the composed command center for start and help", async () => {

@@ -200,13 +200,21 @@ export class TelegramSurface {
           "/rules <init|check>",
           "/diff · /plan",
           "/goal [set <目标>|clear]",
-          "/cancel",
         ].join("\n"),
       ),
     );
-    for (const command of conversationCommandNames) {
+    for (const command of conversationCommandNames.filter(
+      (candidate) => candidate !== "stop",
+    )) {
       this.bot.command(command, (context) => this.executeCommand(context, command));
     }
+    this.bot.command("stop", async (context) => {
+      if (this.interactions.stopForChat(String(context.chat.id))) {
+        await context.reply("已停止当前交互请求。");
+        return;
+      }
+      await this.executeCommand(context, "stop");
+    });
     this.bot.callbackQuery(/^ws:([A-Za-z0-9_-]{43})$/, async (context) => {
       const workspace = this.service.listWorkspaces().find(
         (candidate) => workspaceSwitchToken(candidate.id) === context.match[1],
@@ -224,10 +232,6 @@ export class TelegramSurface {
       );
       await context.answerCallbackQuery({ text: `已切换到 ${workspace.id}` });
       await renderTelegramCommandResult(context, result);
-    });
-    this.bot.command("cancel", async (context) => {
-      const cancelled = this.interactions.cancelForChat(String(context.chat.id));
-      await context.reply(cancelled ? "已取消当前交互请求。" : "当前没有待处理的交互请求。");
     });
     this.bot.on("message:text", async (context) => {
       if (await this.interactions.handleText(context)) {

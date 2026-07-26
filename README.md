@@ -195,7 +195,7 @@ Gateway 会监测用户 `config.toml`：新增 Workspace 和 Telegram 允许用�
 - 模型：`/model`、`/effort`、`/fast [on|off|status]`
 - 状态：`/diff`、`/plan`、`/usage`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/skills`、`/mcp`、`/plugins`、`/rules <init|check>`
-- 交互：`/cancel`、`/whoami`
+- 交互：`/stop` 会优先停止当前待处理交互，没有待处理交互时停止当前 Turn；`/whoami`
 
 Telegram 只能选择预配置 Workspace，不能通过消息提交任意工作目录。命令和文件审批在 App Server
 支持时提供“批准一次”“本次会话始终同意”和“拒绝”；命令审批收到 App Server 的精确规则提议时，
@@ -218,7 +218,7 @@ Thread 恢复继续通过 App Server 通知校正。Gateway 只缓存当前 Goal
 ## 飞书私聊命令
 
 飞书私聊的开发实现已复用上述全部平台无关会话命令，并另外提供 `/start`、`/help`、
-`/whoami`、`/cancel` 和
+`/whoami` 和
 `/feishu <status|doctor|revoke>`。`status` 显示当前进程实际观测到的长连接、消息事件、
 卡片回调、机器人菜单事件和当前 Actor OAuth 状态；`doctor` 只显示长连接、消息接收、卡片交互
 和自定义菜单四项摘要。Doctor 会读取当前租户已开通权限和已发布配置，运行时已经收到的事件优先于

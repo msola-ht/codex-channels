@@ -166,7 +166,8 @@ StateStore 中已有绑定且仍有授权 Actor 的精确 Chat 生成消息；Su
 `adapter.ts` 对普通文本调用 `ConversationService.submit()`，图片则先通过 `media.ts` 取得受管
 绝对路径，再调用同一 `submit()` 的 `localImages` 输入；对已知平台无关命令调用
 `ConversationCommandService.execute()`；`/start`、`/help` 打开同一命令中心卡片，
-`/whoami`、`/cancel` 和
+`/stop` 优先停止当前 Actor 在本私聊中的最新待处理交互，没有待处理交互时调用共享 Turn
+停止命令；`/whoami` 和
 `/feishu <status|doctor|revoke>` 留在飞书边界。`status` 展示当前进程实际观测到的
 连接、消息事件、卡片回调和当前 Actor OAuth 状态；`doctor` 只显示长连接、消息接收、卡片交互
 和自定义菜单四项摘要，用户 OAuth 状态与撤销分别留在 `status` 和 `revoke`。用户级能力必须把
@@ -217,7 +218,7 @@ HTTP(S) 链接。其他客户端解决、取消、超时和 Surface 停止会按
 卡片动作。同一 App Server 请求 ID 的并发重复只保留首个交互；Surface 停止即使遇到未返回的
 卡片创建也会先结束协议请求，卡片结果更新失败不会改变已经作出的协议决定。所有表单值只存在于
 待处理内存和协议响应中，不写入数据库或日志。同时进行的交互最多保留 100 个，超过容量的请求
-按类型安全拒绝或取消，不再发送新卡片。
+按类型安全拒绝或取消，不再发送新卡片；`/stop` 只匹配精确 App、Chat 和 Actor。
 
 `surface.ts` 实现单账号 `SurfaceAdapter` 生命周期：启动等待长连接就绪；停止先切断新事件，再
 有限排空 Inbox 和 Outbox。Bootstrap 从现有绑定中选择仍有授权 Actor 的 Chat 作为配置通知

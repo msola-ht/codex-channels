@@ -99,7 +99,6 @@ export function renderFeishuHelp(): string {
     "/goal [set <目标>|clear]",
     "/whoami",
     "/feishu <status|doctor|revoke>",
-    "/cancel",
   ].join("\n");
 }
 

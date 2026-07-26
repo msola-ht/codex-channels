@@ -37,6 +37,7 @@ interface StreamState {
   messageId: number | undefined;
   phase: MessagePhase | null | undefined;
   completed: boolean;
+  truncated: boolean;
   timer: NodeJS.Timeout | undefined;
 }
 
@@ -51,6 +52,9 @@ interface OperationLogState {
 }
 
 const maximumRichMarkdownCharacters = 32_000;
+const maximumTelegramActiveStreams = 100;
+const maximumTelegramBufferedStreamCharacters = 1_000_000;
+const telegramStreamTruncationMarker = "\n\n（内容过长，已截断）";
 
 export type TelegramFinalMessageFormat = "html" | "rich";
 
@@ -67,6 +71,7 @@ export class TelegramOutbox {
   private readonly delivery: ConversationDeliveryQueue;
   private readonly approvalOperations = new TelegramApprovalOperationCoordinator();
   private readonly notifiedTurns = new Set<string>();
+  private streamCapacityWarningIssued = false;
   private closed = false;
 
   constructor(
@@ -121,11 +126,29 @@ export class TelegramOutbox {
         const turnKey = this.turnKey(event.threadId, event.turnId);
         const key = this.streamKey(turnKey, event.itemId);
         const existing = this.streams.get(key);
+        if (!existing && this.streams.size >= maximumTelegramActiveStreams) {
+          if (!this.streamCapacityWarningIssued) {
+            this.streamCapacityWarningIssued = true;
+            this.logger.warn(
+              {
+                component: "Telegram",
+                maximumActiveStreams: maximumTelegramActiveStreams,
+              },
+              "Telegram 活动流状态已满，当前非关键增量未接收",
+            );
+          }
+          return;
+        }
+        if (this.streams.size < maximumTelegramActiveStreams) {
+          this.streamCapacityWarningIssued = false;
+        }
         if (!existing) {
           this.sealOperationLog(chatId, turnKey);
         }
         const state = existing ?? this.createStream(chatId, turnKey);
-        state.text += event.text;
+        const bounded = boundedTelegramStreamText(`${state.text}${event.text}`);
+        state.text = bounded.text;
+        state.truncated ||= bounded.truncated;
         if (event.phase !== undefined) {
           state.phase = event.phase;
         }
@@ -143,8 +166,11 @@ export class TelegramOutbox {
         const turnKey = this.turnKey(event.threadId, event.turnId);
         this.sealOperationLog(chatId, turnKey);
         const key = this.streamKey(turnKey, event.itemId);
-        const state = this.streams.get(key) ?? this.createStream(chatId, turnKey);
-        state.text = event.text;
+        const existing = this.streams.get(key);
+        const state = existing ?? this.createStream(chatId, turnKey);
+        const bounded = boundedTelegramStreamText(event.text);
+        state.text = bounded.text;
+        state.truncated = bounded.truncated;
         state.completed = true;
         if (event.phase !== undefined) {
           state.phase = event.phase;
@@ -153,8 +179,14 @@ export class TelegramOutbox {
           clearTimeout(state.timer);
           state.timer = undefined;
         }
-        this.streams.set(key, state);
-        this.enqueue(chatId, () => this.flush(chatId, key, true), true);
+        if (existing) {
+          this.streams.set(key, state);
+        }
+        this.enqueue(
+          chatId,
+          () => this.flush(chatId, key, true, existing ? undefined : state),
+          true,
+        );
         return;
       }
       case "operation.updated": {
@@ -445,13 +477,18 @@ export class TelegramOutbox {
     }
   }
 
-  private async flush(chatId: string, key: string, final: boolean): Promise<void> {
-    const state = this.streams.get(key);
+  private async flush(
+    chatId: string,
+    key: string,
+    final: boolean,
+    standaloneState?: StreamState,
+  ): Promise<void> {
+    const state = standaloneState ?? this.streams.get(key);
     if (!state) {
       return;
     }
     if (!state.text.trim()) {
-      if (final) {
+      if (final && !standaloneState) {
         this.streams.delete(key);
       }
       return;
@@ -462,7 +499,9 @@ export class TelegramOutbox {
       if (longMessage) {
         try {
           state.messageId = await this.sendLongFinal(chatId, state, text, longMessage);
-          this.streams.delete(key);
+          if (!standaloneState) {
+            this.streams.delete(key);
+          }
           return;
         } catch (error) {
           this.logger.warn(
@@ -481,7 +520,9 @@ export class TelegramOutbox {
             state.messageId = format === "rich"
               ? await this.sendRichFinal(chatId, state, formatted)
               : await this.sendHtmlFinal(chatId, state, formatted);
-            this.streams.delete(key);
+            if (!standaloneState) {
+              this.streams.delete(key);
+            }
             return;
           } catch (error) {
             this.logger.warn(
@@ -522,7 +563,9 @@ export class TelegramOutbox {
       for (const chunk of rest) {
         await this.sendMessage(chatId, chunk, undefined, true);
       }
-      this.streams.delete(key);
+      if (!standaloneState) {
+        this.streams.delete(key);
+      }
     }
   }
 
@@ -534,6 +577,7 @@ export class TelegramOutbox {
       messageId: undefined,
       phase: undefined,
       completed: false,
+      truncated: false,
       timer: undefined,
     };
   }
@@ -1013,6 +1057,24 @@ function richReplyOptions(
   silent = false,
 ): Parameters<Api["sendRichMessage"]>[2] {
   return replyOptions(replyTo, silent);
+}
+
+function boundedTelegramStreamText(text: string): {
+  text: string;
+  truncated: boolean;
+} {
+  const characters = Array.from(text);
+  if (characters.length <= maximumTelegramBufferedStreamCharacters) {
+    return { text, truncated: false };
+  }
+  const marker = Array.from(telegramStreamTruncationMarker);
+  return {
+    text: characters
+      .slice(0, maximumTelegramBufferedStreamCharacters - marker.length)
+      .concat(marker)
+      .join(""),
+    truncated: true,
+  };
 }
 
 function canSendRichMarkdown(text: string): boolean {

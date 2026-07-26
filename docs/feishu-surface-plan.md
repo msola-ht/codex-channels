@@ -14,7 +14,8 @@ Application 输入 Adapter、安全错误、`OutputEvent` 纯文本渲染、有�
 Bootstrap 显式注册、允许名单热加载、安全配置通知收件人组合、手动/扫码 Setup 和只读
 Doctor 凭据/Bot 身份探测。2026-07-25 已由操作者使用测试应用完成扫码配置、Doctor 探测、
 生产 Gateway 长连接就绪，以及一次已授权私聊文本 Turn 和精确 Chat 文本回复。阶段 2 的全部
-平台无关私聊命令及 `/start`、`/help`、`/whoami`、`/cancel` 已完成实现，命令中心、分类卡、
+平台无关私聊命令及 `/start`、`/help`、`/whoami` 已完成实现；`/stop` 会优先停止当前待处理
+交互，没有待处理交互时停止当前 Turn。命令中心、分类卡、
 模型、思考强度、Fast、工作区和会话选择已完成真实验收。断线恢复、代理、未授权/重复真实事件、
 用户输入与 MCP 卡片动作仍待真实验收；群聊切片继续暂停。
 
@@ -234,7 +235,8 @@ SQLite。若真实测试证明 Gateway 重启后重复投递会造成重复 Turn
 
 普通文本调用 `ConversationService.submit()`；平台无关命令调用
 `ConversationCommandService.execute()`。飞书帮助、`/whoami`、平台配对和交互取消保留在飞书
-边界。未知命令不能绕过授权变成普通 Codex 输入。
+边界；公开入口统一为 `/stop`，先停止当前 Actor 的待处理交互，没有时再调用共享 Turn 停止。
+未知命令不能绕过授权变成普通 Codex 输入。
 
 ## 输出路径
 
@@ -409,7 +411,7 @@ Doctor 只读检查配置、允许名单，以及通过有限 HTTP 请求验证�
 范围：
 
 - [x] 离线渲染全部当前 `ConversationCommandResult`；
-- [x] 离线验证 `/whoami`、帮助和失败关闭状态下的交互取消；
+- [x] 离线验证 `/whoami`、帮助，以及 `/stop` 优先停止待处理交互并在没有交互时停止 Turn；
 - [x] 飞书本地权限中心：运行观测、Gateway 已用能力清单与已有应用配置入口；
 - [x] 用户 OAuth Device Flow：精确 Origin 的完整授权 URL、飞书内卡片、Actor 身份匹配、
   分层 Scope 上限、安全持久化、撤销、限时停止和写入错误/取消竞态回滚；

@@ -58,6 +58,9 @@ export class FeishuConversationAdapter {
       FeishuApplicationSetupController,
       "openDoctor"
     >,
+    private readonly interactions?: {
+      stopForActor(target: ConversationTarget, actorId: string): boolean;
+    },
   ) {
     this.commands = new ConversationCommandService(conversations);
   }
@@ -88,10 +91,13 @@ export class FeishuConversationAdapter {
           );
           return;
         }
-        if (command.name === "cancel") {
+        if (
+          command.name === "stop"
+          && this.interactions?.stopForActor(message.target, message.actorId)
+        ) {
           this.notifyText(
             message.target.conversationId,
-            "当前没有待处理的交互请求。",
+            "已停止当前交互请求。",
           );
           return;
         }
@@ -198,6 +204,16 @@ export class FeishuConversationAdapter {
           "command.unsupported",
           "飞书命令不受支持",
         );
+      }
+      if (
+        action === "stop"
+        && this.interactions?.stopForActor(target, actorId)
+      ) {
+        this.notifyText(
+          target.conversationId,
+          "已停止当前交互请求。",
+        );
+        return;
       }
       const result = action === "fast" && input === ""
         ? await this.commands.execute(target, "model")

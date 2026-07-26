@@ -44,7 +44,6 @@ const commands = [
     command: name,
     description: commandDescriptions[name],
   })),
-  { command: "cancel", description: "取消当前交互请求" },
   { command: "whoami", description: "显示 Telegram 用户 ID" },
 ];
 
