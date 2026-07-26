@@ -35,18 +35,38 @@ describe("operation normalization", () => {
   });
 
   it("redacts common credential forms without exposing their values", () => {
-    const sanitized = sanitizeOperationText([
-      "TELEGRAM_BOT_TOKEN=bot-secret",
-      "AWS_ACCESS_KEY_ID=access-secret",
-      "--password pass-secret",
-      "Authorization: Bearer bearer-secret",
-      "Cookie: cookie-secret",
-      "token positional-secret",
-      "curl -u user:basic-secret https://example.com",
-      "https://user:url-secret@example.com",
-    ].join(" "));
+    const cases = [
+      ["TELEGRAM_BOT_TOKEN=bot-secret", /bot-secret/],
+      ["AWS_ACCESS_KEY_ID=access-secret", /access-secret/],
+      ["--password pass-secret", /pass-secret/],
+      ["Authorization: Bearer bearer-secret", /bearer-secret/],
+      ["Authorization: Basic basic-header-secret", /basic-header-secret/],
+      ["Authorization: custom-header-secret", /custom-header-secret/],
+      [
+        "Cookie: session=cookie-secret; preference=cookie-preference-secret\n",
+        /cookie-secret|cookie-preference-secret/,
+      ],
+      ["Set-Cookie: session=set-cookie-secret; HttpOnly\n", /set-cookie-secret/],
+      ["token positional-secret", /positional-secret/],
+      ["curl -u user:basic-secret https://example.com", /basic-secret/],
+      ["https://user:url-secret@example.com", /url-secret/],
+      [
+        "request failed at /bot123456789:AAExampleTelegramBotToken123456789/file",
+        /AAExampleTelegramBotToken/,
+      ],
+    ] as const;
 
-    expect(sanitized).not.toMatch(/bot-secret|access-secret|pass-secret|bearer-secret|cookie-secret|positional-secret|basic-secret|url-secret/);
-    expect(sanitized.match(/\[REDACTED\]/g)?.length).toBeGreaterThanOrEqual(8);
+    for (const [value, secret] of cases) {
+      const sanitized = sanitizeOperationText(value);
+      expect(sanitized).toContain("[REDACTED]");
+      expect(sanitized).not.toMatch(secret);
+    }
+  });
+
+  it("limits sanitized upstream text to 320 Unicode characters", () => {
+    const sanitized = sanitizeOperationText("错".repeat(400));
+
+    expect(Array.from(sanitized)).toHaveLength(320);
+    expect(sanitized.endsWith("…")).toBe(true);
   });
 });

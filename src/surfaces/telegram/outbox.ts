@@ -249,7 +249,7 @@ export class TelegramOutbox {
           if (event.error) {
             await this.send(
               chatId,
-              "Codex 任务失败，Gateway 已隐藏上游错误详情以避免泄露敏感信息。",
+              `Codex 任务失败：${visibleUpstreamMessage(event.error)}`,
               replyTo,
             );
           } else if (!new Set(["completed", "success"]).has(event.status)) {
@@ -287,7 +287,7 @@ export class TelegramOutbox {
         this.enqueue(chatId, async () => {
           await this.send(
             chatId,
-            "Codex 发出一条警告，Gateway 已隐藏上游详情。",
+            `Codex 警告：${visibleUpstreamMessage(event.message)}`,
             undefined,
             true,
           );
@@ -1075,6 +1075,10 @@ function boundedTelegramStreamText(text: string): {
       .join(""),
     truncated: true,
   };
+}
+
+function visibleUpstreamMessage(message: string): string {
+  return message.replaceAll("[REDACTED]", "[已隐藏]");
 }
 
 function canSendRichMarkdown(text: string): boolean {

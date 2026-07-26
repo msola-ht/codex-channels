@@ -210,7 +210,7 @@ describe("TelegramOutbox", () => {
     outbox.handle({
       ...turnCompleted(),
       status: "failed",
-      error: "命令执行失败，TOKEN=top-secret",
+      error: "命令执行失败，TOKEN=[REDACTED]",
     });
     await settle();
     await vi.advanceTimersByTimeAsync(8_000);
@@ -218,9 +218,8 @@ describe("TelegramOutbox", () => {
 
     expect(api.sent).toEqual([
       "执行到一半。",
-      "Codex 任务失败，Gateway 已隐藏上游错误详情以避免泄露敏感信息。",
+      "Codex 任务失败：命令执行失败，TOKEN=[已隐藏]",
     ]);
-    expect(api.sent.join("\n")).not.toContain("top-secret");
     expect(api.actions).toEqual([]);
 
     await outbox.close();
@@ -955,13 +954,12 @@ describe("TelegramOutbox", () => {
     outbox.handle({
       type: "warning",
       target,
-      message: "request failed at /bot123456789:opaque-secret/file",
+      message: "代理连接失败，TOKEN=[REDACTED]",
     });
     await settle();
     await outbox.close();
 
-    expect(api.sent).toEqual(["Codex 发出一条警告，Gateway 已隐藏上游详情。"]);
-    expect(api.sent.join("\n")).not.toContain("opaque-secret");
+    expect(api.sent).toEqual(["Codex 警告：代理连接失败，TOKEN=[已隐藏]"]);
     expect(api.sendOptions).toEqual([{ disable_notification: true }]);
   });
 });

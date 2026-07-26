@@ -41,5 +41,6 @@ Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类
 平台仍各自负责取得受信下载流。所有输入在调用 Application 前必须构造
 `SurfaceAccessContext` 并通过对应访问策略。
 
-Surface 只能渲染明确标记的结构化用户错误，不能直接复用其内部回退文案；未知异常和 App Server
-warning、MCP 失败等原始详情默认隐藏，避免把凭据、上游响应或本机信息带入聊天消息或日志。
+Surface 只能渲染明确标记的结构化用户错误，不能直接复用其内部回退文案；App Server 的 Turn、
+warning 和 MCP 错误只使用 Client 边界已经统一脱敏并限长的稳定字段。未知异常、凭据和未经约束
+的响应正文不得带入聊天消息或日志。

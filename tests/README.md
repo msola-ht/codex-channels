@@ -14,7 +14,8 @@
   到官方 `UserInput` 的映射，以及 Review、Goal 和控制响应到稳定 Application 结果的映射。
 - 官方 Turn、Item、Diff、Plan、Goal、Token、账户、额度、MCP 和 warning Notification 到稳定 Core
   输入事件的映射，畸形与未知通知隔离；Conversation Core 状态归约、严格 Turn 完成状态、
-  可重试错误隔离、Thread/全局警告路由，以及 Client 边界的操作摘要与敏感文本清洗。
+  可重试错误隔离、Thread/全局警告路由，以及 Client 边界的操作摘要、Turn/warning/MCP 错误
+  脱敏限长与敏感文本清洗。
 - 命令、文件修改、临时权限、用户输入和 MCP 审批的归属信息、一次/会话批准、命令前缀及网络
   规则持久授权、网络专用请求、目标主机一致性、拒绝、无法路由、协议能力约束、一次性回调、
   超时和跨客户端解决；五类 Server Request 到稳定 Approval 请求及稳定决定到官方响应的双向
@@ -38,7 +39,7 @@
   稳定字段裁剪、受限字符串动作值、畸形输入失败关闭和 WebSocket 独立分流；所有关键
   `OutputEvent` 的 CardKit Markdown 最终回复、启动环境与脱敏 UA、每轮上下文和设置的紧凑
   CardKit Markdown、纯文本安全回退、
-  操作终态静态卡片与助手消息顺序和上游错误详情隐藏；Outbox
+  操作终态静态卡片与助手消息顺序，以及脱敏上游错误详情展示；Outbox
   的精确账号路由、同 Chat 顺序、跨 Chat 并行、静态 CardKit 单元素 5,000 字符与最多 5 张卡片、
   纯文本及降级富文本 20,000 字节上限、
   明确截断与关闭等待；同一 Thread 的 active/idle 轻量状态卡片创建、重复抑制、顺序更新、更新错误

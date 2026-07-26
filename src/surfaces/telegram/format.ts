@@ -111,7 +111,9 @@ export function formatMcpStatusUpdate(update: McpServerStatus): string {
   const labels = { starting: "启动中", ready: "已就绪", failed: "启动失败", cancelled: "已取消" } as const;
   return [
     `MCP Server：${update.name} · ${labels[update.status]}`,
-    ...(update.error ? ["原因：Gateway 已隐藏上游错误详情"] : []),
+    ...(update.error
+      ? [`原因：${update.error.replaceAll("[REDACTED]", "[已隐藏]")}`]
+      : []),
   ].join("\n");
 }
 

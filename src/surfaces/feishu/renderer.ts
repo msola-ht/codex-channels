@@ -366,7 +366,7 @@ export function renderFeishuOutput(event: OutputEvent): string | null {
     case "thread.status":
       return `Thread 状态：${threadStatusLabel(event.status)}`;
     case "connection.lost":
-      return "Codex 连接已中断，Gateway 已隐藏上游错误详情。";
+      return `Codex 连接已中断：${visibleUpstreamMessage(event.message)}`;
     case "account.updated":
       return `Codex 账户状态已更新：认证=${event.authMode ?? "未登录"} · 套餐=${event.planType ?? "未知"}`;
     case "account.rateLimits.updated":
@@ -374,10 +374,10 @@ export function renderFeishuOutput(event: OutputEvent): string | null {
     case "mcp.status.updated":
       return [
         `MCP Server：${event.name} · ${mcpStatusLabel(event.status)}`,
-        ...(event.error ? ["原因：Gateway 已隐藏上游错误详情。"] : []),
+        ...(event.error ? [`原因：${visibleUpstreamMessage(event.error)}`] : []),
       ].join("\n");
     case "warning":
-      return "Codex 发出一条警告，Gateway 已隐藏上游详情。";
+      return `Codex 警告：${visibleUpstreamMessage(event.message)}`;
   }
 }
 
@@ -386,7 +386,7 @@ function renderFeishuTurnCompleted(
 ): string {
   const details: string[] = [];
   if (event.error) {
-    details.push("Gateway 已隐藏上游错误详情。");
+    details.push(`- **错误：** ${visibleUpstreamMessage(event.error)}`);
   }
   if (event.tokenUsage) {
     const current = event.tokenUsage.last.totalTokens;
@@ -421,6 +421,10 @@ function renderFeishuTurnCompleted(
     `**本次运行 · ${turnStatusLabel(event.status)}**`,
     ...(details.length > 0 ? ["", ...details] : []),
   ].join("\n");
+}
+
+function visibleUpstreamMessage(message: string): string {
+  return message.replaceAll("[REDACTED]", "[已隐藏]");
 }
 
 function renderFeishuStatus(status: ConversationStatus): string {

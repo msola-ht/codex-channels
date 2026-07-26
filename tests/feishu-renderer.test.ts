@@ -717,7 +717,7 @@ describe("Feishu output renderer", () => {
     expect(progressEvents.map(renderFeishuOutput)).toEqual([null, null, null]);
   });
 
-  it("hides upstream error and warning details", () => {
+  it("shows sanitized upstream error and warning details", () => {
     const events: OutputEvent[] = [
       {
         type: "turn.completed",
@@ -725,13 +725,13 @@ describe("Feishu output renderer", () => {
         threadId: "thread-1",
         turnId: "turn-1",
         status: "failed",
-        error: "token=secret",
+        error: "模型请求失败，token=[REDACTED]",
       },
       {
         type: "connection.lost",
         target,
         threadId: "thread-1",
-        message: "Authorization: secret",
+        message: "Codex App Server 连接已断开，正在恢复连接",
       },
       {
         type: "mcp.status.updated",
@@ -739,18 +739,20 @@ describe("Feishu output renderer", () => {
         threadId: "thread-1",
         name: "example",
         status: "failed",
-        error: "cookie=secret",
+        error: "登录失败，cookie=[REDACTED]",
         failureReason: null,
       },
       {
         type: "warning",
         target,
-        message: "upstream body secret",
+        message: "配置无效，password=[REDACTED]",
       },
     ];
 
     const rendered = events.map(renderFeishuOutput).join("\n");
-    expect(rendered).not.toContain("secret");
-    expect(rendered).toContain("隐藏");
+    expect(rendered).toContain("模型请求失败，token=[已隐藏]");
+    expect(rendered).toContain("Codex App Server 连接已断开，正在恢复连接");
+    expect(rendered).toContain("登录失败，cookie=[已隐藏]");
+    expect(rendered).toContain("配置无效，password=[已隐藏]");
   });
 });

@@ -97,16 +97,15 @@ describe("Telegram command renderer", () => {
     );
   });
 
-  it("hides opaque MCP startup errors", () => {
+  it("shows MCP startup errors sanitized at the Client boundary", () => {
     const text = formatMcpStatusUpdate({
       threadId: "thread-1",
       name: "docs",
       status: "failed",
-      error: "request failed at /bot123456789:opaque-secret/file",
+      error: "认证失败，TOKEN=[REDACTED]",
       failureReason: null,
     });
 
-    expect(text).toContain("Gateway 已隐藏上游错误详情");
-    expect(text).not.toContain("opaque-secret");
+    expect(text).toContain("原因：认证失败，TOKEN=[已隐藏]");
   });
 });

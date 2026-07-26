@@ -115,7 +115,15 @@ export function toOperationUpdate(
 export function sanitizeOperationText(value: string): string {
   return truncate(
     value
-      .replace(/(authorization\s*:\s*bearer\s+)([^\s'";]+)/gi, "$1[REDACTED]")
+      .replace(
+        /(authorization\s*:\s*(?:bearer|basic)\s+)([^\s'";]+)/gi,
+        "$1[REDACTED]",
+      )
+      .replace(
+        /(authorization\s*:\s*)(?!(?:bearer|basic)\b)([^\s'";]+)/gi,
+        "$1[REDACTED]",
+      )
+      .replace(/((?:set-)?cookie\s*:\s*)([^\r\n]+)/gi, "$1[REDACTED]")
       .replace(
         /(\b[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|ACCESS_KEY|COOKIE)[A-Z0-9_]*\s*=\s*)("[^"]*"|'[^']*'|[^\s;]+)/gi,
         "$1[REDACTED]",
@@ -132,6 +140,7 @@ export function sanitizeOperationText(value: string): string {
         /(--(?:token|secret|password|passwd|api-key|cookie|authorization)(?:=|\s+))("[^"]*"|'[^']*'|[^\s;]+)/gi,
         "$1[REDACTED]",
       )
+      .replace(/(\/bot)\d{6,}:[A-Za-z0-9_-]{20,}/g, "$1[REDACTED]")
       .replace(/((?:^|\s)-u\s+)([^\s;]+)/gi, "$1[REDACTED]")
       .replace(/([a-z][a-z0-9+.-]*:\/\/[^\s:/]+:)([^\s@/]+)(@)/gi, "$1[REDACTED]$3"),
     320,

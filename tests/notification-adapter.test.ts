@@ -203,11 +203,56 @@ describe("Notification adapter", () => {
     });
     expect(toConversationInputEvent({
       method: "warning",
-      params: { threadId: null, message: "全局警告" },
+      params: {
+        threadId: null,
+        message: "代理连接失败，TOKEN=warning-secret",
+      },
     })).toEqual({
       type: "warning",
       threadId: null,
-      message: "全局警告",
+      message: "代理连接失败，TOKEN=[REDACTED]",
+    });
+  });
+
+  it("preserves user-relevant Turn errors while redacting credentials", () => {
+    expect(toConversationInputEvent({
+      method: "error",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        willRetry: false,
+        error: {
+          message: "命令执行失败，API_KEY=turn-secret",
+          codexErrorInfo: null,
+          additionalDetails: null,
+        },
+      },
+    })).toEqual({
+      type: "turn.error",
+      turnId: "turn-1",
+      message: "命令执行失败，API_KEY=[REDACTED]",
+      willRetry: false,
+    });
+    expect(toConversationInputEvent({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: {
+          id: "turn-1",
+          status: "failed",
+          error: {
+            message: "模型请求失败，Authorization: Bearer bearer-secret",
+            codexErrorInfo: null,
+            additionalDetails: "请检查代理配置",
+          },
+        },
+      },
+    })).toEqual({
+      type: "turn.completed",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      status: "failed",
+      error: "模型请求失败，Authorization: Bearer [REDACTED] 请检查代理配置",
     });
   });
 

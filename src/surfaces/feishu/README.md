@@ -127,8 +127,9 @@ Chat ID；`surface.ts` 只在 Actor 与当前 App 的一个已授权私聊绑定
 
 `renderer.ts` 通过模块公开入口接收 `OutputEvent`。没有进入原生流式路径的最终文本和
 `turn.completed` 结束统计由 Outbox 作为静态 CardKit Markdown 发送，其他关键事件和安全提示
-使用纯文本；`operation.updated` 由 Outbox 按 Turn 合并，不再逐条渲染普通文本。上游 warning、
-连接错误和 MCP 错误正文不会进入平台消息，
+使用纯文本；`operation.updated` 由 Outbox 按 Turn 合并，不再逐条渲染普通文本。App Server
+Turn、warning 和 MCP 错误会显示 Client 边界已经统一脱敏并限长的详情；连接错误只显示 Gateway
+生成的稳定状态文案，未知异常和原始响应正文不会进入平台消息，
 未知 Thread 状态不会原样显示。`turn.completed` 使用标题、列表和合并后的模型设置行，只展开
 事件已经提供的最近 Turn 上下文、缓存命中率、模型设置、压缩次数、周限和 Goal，不查询第二状态源。
 

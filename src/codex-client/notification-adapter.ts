@@ -322,10 +322,10 @@ function toItemEvent(
 function toTurnErrorEvent(value: unknown): ConversationInputEvent | undefined {
   const params = asRecord(value);
   const turnId = nonEmptyString(params?.turnId);
-  const message = nonEmptyString(asRecord(params?.error)?.message);
+  const error = parseTurnError(params?.error);
   const willRetry = params?.willRetry;
-  return turnId && message && typeof willRetry === "boolean"
-    ? { type: "turn.error", turnId, message, willRetry }
+  return turnId && error.valid && error.value && typeof willRetry === "boolean"
+    ? { type: "turn.error", turnId, message: error.value, willRetry }
     : undefined;
 }
 
@@ -417,7 +417,11 @@ function toWarningEvent(value: unknown): ConversationInputEvent | undefined {
   const threadId = strictNullableString(params?.threadId);
   const message = nonEmptyString(params?.message);
   return threadId.valid && message
-    ? { type: "warning", threadId: threadId.value, message }
+    ? {
+        type: "warning",
+        threadId: threadId.value,
+        message: sanitizeOperationText(message),
+      }
     : undefined;
 }
 
@@ -474,8 +478,20 @@ function parseTurnError(
   if (value === null) {
     return { valid: true, value: null };
   }
-  const message = nonEmptyString(asRecord(value)?.message);
-  return message ? { valid: true, value: message } : { valid: false };
+  const error = asRecord(value);
+  const message = nonEmptyString(error?.message);
+  if (!message) {
+    return { valid: false };
+  }
+  const additionalDetails = nonEmptyString(error?.additionalDetails);
+  return {
+    valid: true,
+    value: sanitizeOperationText(
+      additionalDetails && additionalDetails !== message
+        ? `${message}\n${additionalDetails}`
+        : message,
+    ),
+  };
 }
 
 function parseAuthMode(
