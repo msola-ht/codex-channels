@@ -38,6 +38,25 @@ export function resolveProxyEnvironment(
   )));
 }
 
+export function resolveHttpProxyUrl(explicitProxy, proxyEnvironment = {}) {
+  const normalized = stringValue(explicitProxy)
+    || stringValue(proxyEnvironment.HTTPS_PROXY)
+    || stringValue(proxyEnvironment.HTTP_PROXY);
+  if (!normalized) {
+    return undefined;
+  }
+  let parsed;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new Error("HTTP(S) 代理不是有效 URL");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("HTTP(S) 客户端代理只支持 http:// 或 https://");
+  }
+  return parsed.toString();
+}
+
 export function readMacSystemProxy(output = run("/usr/sbin/scutil", ["--proxy"])) {
   const values = parseKeyValueOutput(output);
   return {

@@ -286,7 +286,7 @@ describe("Gateway config.toml", () => {
 
     expect(() => loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    })).toThrow("Telegram 代理目前只支持 http:// 或 https://");
+    })).toThrow("HTTP(S) 客户端代理只支持 http:// 或 https://");
   });
 
   it("rejects unknown keys instead of silently accepting old configuration", () => {

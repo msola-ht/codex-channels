@@ -79,9 +79,9 @@
 - Event Bus 容量、关键事件保护、关闭后拒绝订阅、并发关闭等待、慢消费者超时和消费者失败隔离。
 - 统一 Logger 异常元数据约束，以及 Token、App Secret、Authorization、Password 和 Cookie
   字段脱敏。
-- TOML、热加载分类、标准环境变量、macOS 系统代理和 Linux GNOME 代理的优先级；无代理时不
-  注入空环境变量；飞书启用/禁用、凭据和允许 Open ID 的严格映射、畸形与未知字段拒绝，以及
-  启用/凭据重启和允许名单热加载分类。
+- TOML、热加载分类、标准环境变量、macOS 系统代理和 Linux GNOME 代理的优先级，以及 Telegram
+  Setup 对同一解析结果的复用；无代理时不注入空环境变量；飞书启用/禁用、凭据和允许 Open ID
+  的严格映射、畸形与未知字段拒绝，以及启用/凭据重启和允许名单热加载分类。
 - CLI Doctor 的严格 TOML Schema 校验、共享 App Server 握手与实际版本匹配、飞书凭据/Bot
   身份有限探测、敏感错误清洗和只读诊断；项目规则限定当前 Workspace、
   拒绝远程覆盖和符号链接路径逃逸；CLI 分级帮助、规范命令名称及 macOS/Linux 服务目标选择；

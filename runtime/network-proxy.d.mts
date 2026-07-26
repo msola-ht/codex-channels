@@ -25,6 +25,11 @@ export function resolveProxyEnvironment(
   },
 ): ProxyEnvironment;
 
+export function resolveHttpProxyUrl(
+  explicitProxy: string | undefined,
+  proxyEnvironment?: ProxyEnvironment,
+): string | undefined;
+
 export function readMacSystemProxy(output?: string): ProxySettings;
 
 export function readGnomeSystemProxy(

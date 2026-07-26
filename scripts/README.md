@@ -8,7 +8,8 @@
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并从“通讯渠道”把流程委派给具体适配器。
 - `terminal-prompter.mjs`：为各通讯渠道 Setup 提供最小的终端文本、确认和可见凭据输入接口。
 - `telegram-setup.mjs`：独立完成 Telegram Bot Token 验证、一次性私聊配对、用户 ID 获取和用户配置写入；
-  交互输入的 Token 在当前终端明文显示，但验证错误继续脱敏；新建 Bot 仅引导使用官方 BotFather。
+  复用统一 TOML、环境变量和系统代理解析；交互输入的 Token 在当前终端明文显示，但验证错误
+  继续脱敏；新建 Bot 仅引导使用官方 BotFather。
 - `feishu-setup.mjs`：提供手动输入凭据和 Device Authorization 扫码两种方式；扫码时由飞书授权页
   选择新建或已有企业自建应用，只申请私聊文本所需权限和事件。两种方式都验证凭据与 Bot 身份，
   并原子保存 App ID、App Secret 和允许的用户 Open ID；二维码和短期授权状态不持久化。

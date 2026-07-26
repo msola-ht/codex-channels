@@ -7,7 +7,10 @@ import {
   validateGatewayConfigDocument,
   type GatewayConfigDocument,
 } from "../../runtime/gateway-config.mjs";
-import { resolveProxyEnvironment } from "../../runtime/network-proxy.mjs";
+import {
+  resolveHttpProxyUrl,
+  resolveProxyEnvironment,
+} from "../../runtime/network-proxy.mjs";
 
 export {
   configChange,
@@ -103,9 +106,12 @@ export function loadConfigDocument(
     environment,
     detectSystemProxy ? {} : { readSystemProxy: () => ({}) },
   );
-  const proxyUrl = normalizeProxyUrl(
-    raw.telegram.proxy_url || proxyEnvironment.HTTPS_PROXY || proxyEnvironment.HTTP_PROXY,
-  );
+  let proxyUrl: string | undefined;
+  try {
+    proxyUrl = resolveHttpProxyUrl(raw.telegram.proxy_url, proxyEnvironment);
+  } catch (error) {
+    throw new ConfigurationError(error instanceof Error ? error.message : String(error));
+  }
   return {
     telegramBotToken: raw.telegram.bot_token,
     telegramAllowedUserIds: new Set(raw.telegram.allowed_user_ids),
@@ -163,21 +169,4 @@ function validateWorkspaces(
 
 function resolveConfiguredPath(value: string, baseDirectory: string): string {
   return isAbsolute(value) ? resolve(value) : resolve(baseDirectory, value);
-}
-
-function normalizeProxyUrl(value: string | undefined): string | undefined {
-  const normalized = value?.trim();
-  if (!normalized) {
-    return undefined;
-  }
-  let parsed: URL;
-  try {
-    parsed = new URL(normalized);
-  } catch {
-    throw new ConfigurationError("telegram.proxy_url/network 代理不是有效 URL");
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new ConfigurationError("Telegram 代理目前只支持 http:// 或 https://");
-  }
-  return parsed.toString();
 }

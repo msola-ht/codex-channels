@@ -252,6 +252,24 @@ describe("Telegram setup", () => {
     })).toThrow("不是有效 URL");
   });
 
+  it("uses inherited and system proxies through the shared resolver", () => {
+    expect(resolveTelegramProxy(
+      { telegram: {}, network: {} },
+      { HTTPS_PROXY: "http://environment-proxy.example:8443" },
+      { platform: "darwin", readSystemProxy: () => ({}) },
+    )).toBe("http://environment-proxy.example:8443/");
+
+    const readSystemProxy = vi.fn(() => ({
+      https_proxy: "http://127.0.0.1:7897",
+    }));
+    expect(resolveTelegramProxy(
+      { telegram: {}, network: {} },
+      {},
+      { platform: "darwin", readSystemProxy },
+    )).toBe("http://127.0.0.1:7897/");
+    expect(readSystemProxy).toHaveBeenCalledWith("darwin");
+  });
+
   it("drains every full page of pending updates before accepting a new sender", async () => {
     const calls: Array<{ offset?: number }> = [];
     const client = {

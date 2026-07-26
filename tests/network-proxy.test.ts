@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   readGnomeSystemProxy,
   readMacSystemProxy,
+  resolveHttpProxyUrl,
   resolveProxyEnvironment,
 } from "../runtime/network-proxy.mjs";
 
@@ -13,6 +14,28 @@ describe("network proxy discovery", () => {
       {},
       { platform: "linux", readSystemProxy: () => ({}) },
     )).toEqual({});
+  });
+
+  it("selects and validates an HTTP(S) client proxy from one resolved environment", () => {
+    expect(resolveHttpProxyUrl(
+      "http://explicit.example:8080",
+      {
+        HTTPS_PROXY: "http://environment-https.example:8443",
+        HTTP_PROXY: "http://environment-http.example:8080",
+      },
+    )).toBe("http://explicit.example:8080/");
+    expect(resolveHttpProxyUrl(undefined, {
+      HTTPS_PROXY: "http://environment-https.example:8443",
+      HTTP_PROXY: "http://environment-http.example:8080",
+    })).toBe("http://environment-https.example:8443/");
+    expect(resolveHttpProxyUrl(undefined, {
+      HTTP_PROXY: "http://environment-http.example:8080",
+    })).toBe("http://environment-http.example:8080/");
+    expect(resolveHttpProxyUrl(undefined, {})).toBeUndefined();
+    expect(() => resolveHttpProxyUrl("not-a-url")).toThrow("HTTP(S) 代理不是有效 URL");
+    expect(() => resolveHttpProxyUrl("socks5://proxy.example:1080")).toThrow(
+      "HTTP(S) 客户端代理只支持 http:// 或 https://",
+    );
   });
 
   it("prefers explicit config, then inherited environment, then the system proxy", () => {

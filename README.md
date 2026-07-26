@@ -158,7 +158,8 @@ macOS 使用 `com.hegenai.codex-app-server` 与 `com.hegenai.codex-gateway` 两�
 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`，再尝试 macOS 系统 HTTP/HTTPS
 代理或 Linux GNOME 手动代理，最后直连。Linux 服务也会继承 systemd 用户管理器已有的标准
 代理环境变量。自动代理配置（PAC）和未定义统一接口的桌面私有格式不会被猜测；需要时仍可在
-TOML 中明确填写。Telegram 的 `telegram.proxy_url` 保持最高优先级。飞书 HTTP API、用户 OAuth
+TOML 中明确填写。`codexc setup`、Gateway 和服务入口共用这一解析逻辑；Telegram 的
+`telegram.proxy_url` 保持最高优先级。飞书 HTTP API、用户 OAuth
 和 WebSocket 复用解析后的 HTTP/HTTPS 代理并遵循 `NO_PROXY`；飞书当前不支持只通过
 SOCKS `ALL_PROXY` 连接。目标未命中 `NO_PROXY` 时，无效或不支持的飞书代理会让 Gateway
 启动失败，不会静默改为直连。

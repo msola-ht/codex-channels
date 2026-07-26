@@ -8,6 +8,10 @@ import {
   readGatewayConfig,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
+import {
+  resolveHttpProxyUrl,
+  resolveProxyEnvironment,
+} from "../runtime/network-proxy.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 import { createPrompter } from "./terminal-prompter.mjs";
 
@@ -51,7 +55,7 @@ export async function runTelegramSetup({
       token = await askToken(prompt, output);
     }
 
-    const proxyUrl = resolveTelegramProxy(document);
+    const proxyUrl = resolveTelegramProxy(document, environment);
     let client;
     let bot;
     try {
@@ -222,28 +226,13 @@ export function normalizeUserIds(values) {
   return ids.join(",");
 }
 
-export function resolveTelegramProxy(document) {
+export function resolveTelegramProxy(document, environment = process.env, options = {}) {
   const telegram = table(document.telegram);
   const network = table(document.network);
-  for (const value of [
+  return resolveHttpProxyUrl(
     stringValue(telegram.proxy_url),
-    stringValue(network.https_proxy),
-    stringValue(network.http_proxy),
-  ]) {
-    if (value) {
-      let parsed;
-      try {
-        parsed = new URL(value);
-      } catch {
-        throw new Error("TELEGRAM_PROXY_URL/HTTPS_PROXY 不是有效 URL");
-      }
-      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-        throw new Error("Telegram 代理目前只支持 http:// 或 https://");
-      }
-      return parsed.toString();
-    }
-  }
-  return undefined;
+    resolveProxyEnvironment(network, environment, options),
+  );
 }
 
 export function isDirectExecution(moduleUrl, argvPath) {
