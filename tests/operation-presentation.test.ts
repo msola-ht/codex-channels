@@ -46,6 +46,11 @@ describe("shared operation presentation", () => {
       durationMs: 125,
       exitCode: 0,
     })).toEqual(["125 ms", "exit 0"]);
+    expect(operationMetadata({
+      ...operation("command"),
+      durationMs: 0,
+      exitCode: 0,
+    })).toEqual(["exit 0"]);
     expect(operationMetadata(operation("command"))).toEqual([]);
   });
 

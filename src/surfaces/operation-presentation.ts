@@ -2,7 +2,9 @@ import type { OperationUpdate } from "../conversation-core/index.js";
 
 export function operationMetadata(record: OperationUpdate): string[] {
   return [
-    record.durationMs === undefined ? null : `${record.durationMs} ms`,
+    record.durationMs === undefined || record.durationMs <= 0
+      ? null
+      : `${record.durationMs} ms`,
     record.exitCode === undefined ? null : `exit ${record.exitCode}`,
   ].filter((value): value is string => value !== null);
 }
