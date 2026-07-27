@@ -27,7 +27,7 @@ export interface WeixinSurfaceOptions {
   accountId: string;
   client: WeixinProtocolClient;
   cursorStore: WeixinUpdatesCursorStore;
-  service: Pick<ConversationService, "submit">;
+  service: ConversationService;
   access: SurfaceAccessPolicy;
   logger: Logger;
   onFatal: (error: WeixinInputFatalError) => void;
@@ -69,6 +69,7 @@ export class WeixinSurface implements SurfaceAdapter {
       client: options.client,
       cursorStore: options.cursorStore,
       service: options.service,
+      outbox: this.output,
       access: options.access,
       replyContexts,
       ...(options.actorRegistry === undefined

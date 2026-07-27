@@ -11,6 +11,8 @@ import {
   type WeixinProtocolClient,
   type WeixinProtocolErrorCode,
 } from "./protocol-client.js";
+import { WeixinConversationAdapter } from "./conversation-adapter.js";
+import type { WeixinOutbox } from "./outbox.js";
 import type { WeixinUpdatesCursorStore } from "./updates-cursor-store.js";
 import { createWeixinUpdatesMonitor } from "./updates-monitor.js";
 import { WeixinReplyContextStore } from "./reply-context-store.js";
@@ -36,7 +38,8 @@ export interface WeixinInputAdapterOptions {
   accountId: string;
   client: WeixinProtocolClient;
   cursorStore: WeixinUpdatesCursorStore;
-  service: Pick<ConversationService, "submit">;
+  service: ConversationService;
+  outbox: Pick<WeixinOutbox, "notifyText">;
   access: SurfaceAccessPolicy;
   replyContexts: WeixinReplyContextStore;
   actorRegistry?: ConversationActorRegistry;
@@ -50,6 +53,7 @@ export class WeixinInputAdapter {
 
   private readonly closeTimeoutMs: number;
   private readonly monitor;
+  private readonly conversations: WeixinConversationAdapter;
   private controller: AbortController | undefined;
   private runTask: Promise<void> | undefined;
   private stopPromise: Promise<void> | undefined;
@@ -60,6 +64,10 @@ export class WeixinInputAdapter {
     this.closeTimeoutMs = positiveInteger(
       options.closeTimeoutMs ?? 5_000,
       "微信输入关闭超时时间无效",
+    );
+    this.conversations = new WeixinConversationAdapter(
+      options.service,
+      options.outbox,
     );
     this.monitor = createWeixinUpdatesMonitor({
       accountId: options.accountId,
@@ -114,7 +122,11 @@ export class WeixinInputAdapter {
     );
     this.options.actorRegistry?.rememberActor(target, message.actorId);
     try {
-      await this.options.service.submit(target, message.text);
+      await this.conversations.handle({
+        target,
+        actorId: message.actorId,
+        text: message.text,
+      });
     } catch (error) {
       throw new WeixinMessageProcessingError({ cause: error });
     }

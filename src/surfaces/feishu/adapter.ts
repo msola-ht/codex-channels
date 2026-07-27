@@ -10,6 +10,7 @@ import {
   UserFacingError,
   type ConversationTarget,
 } from "../../conversation-core/index.js";
+import { parseSlashCommand } from "../slash-command.js";
 
 import type {
   FeishuCommandCenter,
@@ -71,7 +72,7 @@ export class FeishuConversationAdapter {
         await this.handleImage(message);
         return;
       }
-      const command = parseFeishuCommand(message.text);
+      const command = parseSlashCommand(message.text);
       if (command !== null) {
         if (command.name === "start" || command.name === "help") {
           if (this.commandCenter) {
@@ -602,28 +603,4 @@ class FeishuOutputQueueError extends Error {
     super("飞书输出队列拒绝消息");
     this.name = "FeishuOutputQueueError";
   }
-}
-
-interface ParsedFeishuCommand {
-  name: string;
-  argumentsText: string;
-}
-
-function parseFeishuCommand(text: string): ParsedFeishuCommand | null {
-  const normalized = text.trim();
-  if (!normalized.startsWith("/")) {
-    return null;
-  }
-  const match = /^\/([a-z]+)(?:\s+([\s\S]*))?$/u.exec(normalized);
-  if (match === null) {
-    throw new UserFacingError(
-      "command.unsupported",
-      "飞书命令不受支持",
-    );
-  }
-  const name = match[1]!;
-  return {
-    name,
-    argumentsText: match[2] ?? "",
-  };
 }

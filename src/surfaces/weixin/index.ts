@@ -33,6 +33,10 @@ export {
   type WeixinUpdatesRetryEvent,
 } from "./updates-monitor.js";
 export {
+  WeixinConversationAdapter,
+  type WeixinConversationMessage,
+} from "./conversation-adapter.js";
+export {
   WeixinInputAdapter,
   WeixinInputFatalError,
   type WeixinInputAdapterOptions,

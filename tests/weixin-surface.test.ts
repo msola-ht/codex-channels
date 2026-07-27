@@ -78,6 +78,52 @@ describe("WeixinSurface", () => {
     expect(onFatal).not.toHaveBeenCalled();
   });
 
+  it("routes an inbound basic command through the shared service and reply context", async () => {
+    const cursorStore = cursorStoreFixture();
+    const submit = vi.fn();
+    const stop = vi.fn(async () => true);
+    const service = {
+      submit,
+      stop,
+    } as unknown as ConversationService;
+    const sendText = vi.fn<WeixinProtocolClient["sendText"]>(async () => {});
+    let pollCount = 0;
+    const client: WeixinProtocolClient = {
+      getUpdates: vi.fn(async (_cursor, signal) => {
+        pollCount += 1;
+        if (pollCount === 1) {
+          return inboundBatch("/stop");
+        }
+        return await waitForAbort(signal);
+      }),
+      sendText,
+    };
+    const surface = new WeixinSurface({
+      accountId,
+      client,
+      cursorStore,
+      service,
+      access: accessFixture(true),
+      logger: pino({ level: "silent" }),
+      onFatal: vi.fn(),
+    });
+
+    await surface.start();
+    await vi.waitFor(() => {
+      expect(cursorStore.set).toHaveBeenCalledWith(accountId, "cursor-one");
+      expect(sendText).toHaveBeenCalledOnce();
+    });
+    await surface.stop();
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(stop).toHaveBeenCalledWith(target);
+    expect(sendText).toHaveBeenCalledWith({
+      actorId,
+      contextToken: "context-secret",
+      text: "已请求停止当前任务。",
+    });
+  });
+
   it("stops input before draining output and keeps repeated lifecycle calls safe", async () => {
     const events: string[] = [];
     const cursorStore = cursorStoreFixture();
@@ -227,7 +273,7 @@ describe("WeixinSurface", () => {
   });
 });
 
-function inboundBatch() {
+function inboundBatch(text = "hello") {
   return {
     cursor: "cursor-one",
     messages: [{
@@ -236,7 +282,7 @@ function inboundBatch() {
       actorId,
       conversationId: actorId,
       contextToken: "context-secret",
-      text: "hello",
+      text,
     }],
   };
 }
@@ -292,7 +338,7 @@ function cursorStoreFixture(): WeixinUpdatesCursorStore & {
   };
 }
 
-function serviceFixture(): Pick<ConversationService, "submit"> & {
+function serviceFixture(): ConversationService & {
   submit: ReturnType<typeof vi.fn>;
 } {
   return {
@@ -301,6 +347,8 @@ function serviceFixture(): Pick<ConversationService, "submit"> & {
       turnId: "turn",
       steered: false,
     })),
+  } as unknown as ConversationService & {
+    submit: ReturnType<typeof vi.fn>;
   };
 }
 

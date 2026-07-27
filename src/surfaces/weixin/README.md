@@ -1,7 +1,7 @@
 # 微信 Surface
 
 当前实现阶段 0/Setup 的独立安全凭据边界，以及运行时窄协议 Client、私有游标
-检查点、私聊文本输入 Adapter、纯文本 Outbox、失败关闭交互端口和目录内部完整
+检查点、私聊文本输入 Adapter、基础命令 Adapter、纯文本 Outbox、失败关闭交互端口和目录内部完整
 `SurfaceAdapter`；严格运行配置显式启用时由 Bootstrap 注册，未新增 SQLite Schema。
 
 - `credential-store.ts`：严格校验版本 1 微信 Bot 凭据；macOS 使用独立 Keychain Service，
@@ -17,8 +17,12 @@
 - `updates-monitor.ts`：组合协议 Client 与游标 Store，顺序处理单批消息、按原始消息 ID
   进程内去重，仅在整批处理成功后提交游标，并对网络、限流及服务端瞬时失败执行有限重试。
 - `input-adapter.ts`：拥有单账号监控器生命周期；按微信账号和私聊 Actor 构造目标，授权后记录
-  Actor、更新内存回复上下文并把普通文本提交给 Application。停止会取消长轮询并有限等待；
+  Actor、更新内存回复上下文并把文本交给目录内会话 Adapter。停止会取消长轮询并有限等待；
   处理失败不推进游标，只向生命周期所有者报告稳定错误码。
+- `conversation-adapter.ts`：复用 Application 的 `ConversationCommandService` 实现
+  `/status`、`/new`、`/stop`，并保留微信本地 `/start`、`/help`、`/whoami`；命令解析复用
+  Surface 公共模板，未知斜杠命令明确拒绝，不会提交为普通 Codex 输入。多行命令结果在微信
+  边界转换为双换行段落，避免客户端把单换行折叠为空格。
 - `reply-context-store.ts`：按账号隔离、最多保留 1000 个私聊的最新 `actorId + context_token`；
   只存在进程内存，返回副本，支持精确撤销和整体清空。
 - `outbox.ts`：只处理匹配账号的最终文本、必要结束状态、连接错误和警告；发送时重新检查 Actor

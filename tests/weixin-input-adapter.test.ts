@@ -43,6 +43,7 @@ describe("WeixinInputAdapter", () => {
       client: controller.client,
       cursorStore,
       service,
+      outbox: outboxFixture(),
       access,
       replyContexts,
       actorRegistry,
@@ -84,6 +85,7 @@ describe("WeixinInputAdapter", () => {
       client: controller.client,
       cursorStore,
       service,
+      outbox: outboxFixture(),
       access,
       replyContexts,
       actorRegistry,
@@ -115,6 +117,7 @@ describe("WeixinInputAdapter", () => {
       client: controller.client,
       cursorStore,
       service,
+      outbox: outboxFixture(),
       access: accessFixture(true),
       replyContexts: new WeixinReplyContextStore(accountId),
       onFatal,
@@ -150,6 +153,7 @@ describe("WeixinInputAdapter", () => {
       client,
       cursorStore: cursorStoreFixture(),
       service: serviceFixture(),
+      outbox: outboxFixture(),
       access: accessFixture(true),
       replyContexts: new WeixinReplyContextStore(accountId),
       onFatal,
@@ -176,6 +180,7 @@ describe("WeixinInputAdapter", () => {
       client,
       cursorStore: cursorStoreFixture(),
       service: serviceFixture(),
+      outbox: outboxFixture(),
       access: accessFixture(true),
       replyContexts: new WeixinReplyContextStore(accountId),
       onFatal,
@@ -207,6 +212,7 @@ describe("WeixinInputAdapter", () => {
       client,
       cursorStore: cursorStoreFixture(),
       service: serviceFixture(),
+      outbox: outboxFixture(),
       access: accessFixture(true),
       replyContexts: new WeixinReplyContextStore(accountId),
       onFatal: vi.fn(),
@@ -327,10 +333,18 @@ function serviceFixture(
     turnId: "turn",
     steered: false,
   }),
-): Pick<ConversationService, "submit"> & {
+): ConversationService & {
   submit: ReturnType<typeof vi.fn>;
 } {
   return {
     submit: vi.fn(implementation),
+  } as unknown as ConversationService & {
+    submit: ReturnType<typeof vi.fn>;
+  };
+}
+
+function outboxFixture() {
+  return {
+    notifyText: vi.fn(() => true),
   };
 }

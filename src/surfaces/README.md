@@ -13,7 +13,8 @@
   PNG/JPEG、命令审批动作、原生流式主路径及 OAuth Token 重启恢复已通过真实验收，用户输入与
   MCP 卡片仍待验收。
 - [`weixin/`](weixin/README.md)：微信阶段 0/Setup 的严格独立凭据边界、固定版窄协议 Client、
-  私有原子游标检查点、可取消接收监控器和授权后提交 Application 的私聊文本输入 Adapter；
+  私有原子游标检查点、可取消接收监控器、授权后提交 Application 的私聊文本输入 Adapter，
+  以及复用统一会话命令服务的基础命令；
   内存回复上下文、纯文本有界 Outbox、失败关闭交互端口和目录内部完整 `SurfaceAdapter`
   已实现；严格运行配置显式启用时由 Bootstrap 注册单账号私聊文本 Surface。
 
@@ -49,6 +50,8 @@ Telegram 和飞书在交互消息创建成功或失败时
 实现位于 `conversation-delivery-queue.ts`，并通过本目录 `index.ts` 公开。
 `elapsed-duration.ts` 只把 App Server 已提供的 Turn 毫秒耗时格式化为两个 Surface 共用的中文
 短文本，不负责计时、状态或持久化。
+`slash-command.ts` 统一飞书与微信的严格斜杠命令解析；`conversation-command-format.ts`
+统一 Telegram、飞书与微信共用的命令结果文案，并提供 Telegram 与微信共用的状态文本。
 `operation-presentation.ts` 统一操作标题、状态、耗时与退出码元数据、敏感占位符和单行摘要；
 Telegram HTML 与飞书 CardKit Markdown 的转义、布局、分组和发送仍由各自 Adapter 负责。
 Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类型引入 Conversation Core。

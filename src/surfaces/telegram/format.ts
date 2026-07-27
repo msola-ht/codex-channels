@@ -25,6 +25,7 @@ import type {
   TurnArtifacts,
 } from "../../conversation-core/index.js";
 import { formatElapsedDuration } from "../elapsed-duration.js";
+import { formatConversationStatus } from "../conversation-command-format.js";
 import type { Workspace } from "../../policy/index.js";
 import type { SurfaceConfigurationChange } from "../types.js";
 
@@ -267,46 +268,7 @@ export function formatLimits(
 }
 
 export function formatStatus(status: ConversationStatus): string {
-  const lines = [
-    "Codex 状态",
-    `Workspace：${status.workspaceName} (${status.workspaceId})`,
-    `Thread：${status.threadId ?? "尚未绑定"}`,
-    `Turn：${status.turnId ?? "空闲"}`,
-    `工作目录：${status.cwd}`,
-    `Git 分支：${status.gitBranch ?? "未检测到"}`,
-    `模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
-    `思考强度：${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
-    `Fast 模式：${status.threadId ? formatFastMode(status.serviceTier) : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`,
-  ];
-  if (status.contextCompactionCount !== undefined) {
-    lines.push(`上下文压缩：${status.contextCompactionCount} 次`);
-  }
-  if (status.goal) {
-    lines.push(
-      `Goal 状态：${formatGoalStatus(status.goal.status)}`,
-      `Goal 目标：${status.goal.objective}`,
-      `Goal 用量：${formatGoalUsage(status.goal)}`,
-    );
-  }
-  if (status.tokenUsage) {
-    const { total, last, modelContextWindow } = status.tokenUsage;
-    lines.push(
-      "",
-      "当前 Thread 用量：",
-      `累计：${formatTokenCount(total.totalTokens)}`,
-      `最近 Turn：${formatTokenCount(last.totalTokens)}`,
-      `输入：${formatTokenCount(total.inputTokens)}`,
-      `缓存输入：${formatTokenCount(total.cachedInputTokens)}`,
-      `缓存命中率：${formatCacheHitRate(total.inputTokens, total.cachedInputTokens)}`,
-      `缓存写入：${formatTokenCount(total.cacheWriteInputTokens)}`,
-      `输出：${formatTokenCount(total.outputTokens)}`,
-      `推理输出：${formatTokenCount(total.reasoningOutputTokens)}`,
-      `模型上下文窗口容量：${modelContextWindow === null ? "未知" : formatTokenCount(modelContextWindow)}`,
-    );
-  } else if (status.threadId) {
-    lines.push("", "当前 Thread 用量：等待 App Server 推送统计");
-  }
-  return lines.join("\n");
+  return formatConversationStatus(status);
 }
 
 export function formatContextUsage(

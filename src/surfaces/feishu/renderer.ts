@@ -1,7 +1,6 @@
 import type {
   AccountRateLimitWindow,
   AccountUsage,
-  ConversationCommandOutcome,
   ConversationCommandResult,
   ConversationStatus,
   ModelSelectionState,
@@ -16,6 +15,7 @@ import type {
   UserFacingError,
 } from "../../conversation-core/index.js";
 import { formatElapsedDuration } from "../elapsed-duration.js";
+import { formatConversationCommandOutcome } from "../conversation-command-format.js";
 import type { SurfaceConfigurationChange } from "../types.js";
 import type { FeishuInboxMessage } from "./inbox.js";
 
@@ -121,7 +121,7 @@ export function renderFeishuCommandResult(
 ): string {
   switch (result.kind) {
     case "outcome":
-      return renderFeishuCommandOutcome(result.outcome);
+      return formatConversationCommandOutcome(result.outcome);
     case "sessions":
       return renderFeishuSessions(result);
     case "status":
@@ -484,41 +484,6 @@ function renderFeishuStatus(status: ConversationStatus): string {
     lines.push(`周限：${formatWeeklyLimit(status.weeklyLimit)}`);
   }
   return lines.join("\n");
-}
-
-function renderFeishuCommandOutcome(
-  outcome: ConversationCommandOutcome,
-): string {
-  switch (outcome.type) {
-    case "thread.resumed":
-      return `已恢复 Codex Thread\nThread：${outcome.threadId}`;
-    case "session.new":
-      return "已退出当前会话，下一条普通消息将创建新的 Codex Thread。";
-    case "thread.archived":
-      return `已归档 Codex Thread\nThread：${outcome.threadId}\n下一条普通消息将创建新会话。`;
-    case "thread.unarchived":
-      return `已取消归档并切换会话\nThread：${outcome.threadId}`;
-    case "workspace.selected":
-      return `已切换 Workspace\nWorkspace：${outcome.workspace.name}\n工作目录：${outcome.workspace.cwd}`;
-    case "turn.stop-requested":
-      return outcome.stopped
-        ? "已请求停止当前任务。"
-        : "当前没有运行中的任务。";
-    case "turn.follow-up-queued":
-      return `已排到下一 Turn，当前第 ${outcome.position} 条。队列仅保存在内存，Gateway 重启会清空。`;
-    case "thread.renamed":
-      return `会话已重命名\n名称：${outcome.name}`;
-    case "thread.compaction-requested":
-      return "已请求压缩当前 Codex Thread。进度将通过标准事件返回。";
-    case "thread.forked":
-      return `已分叉并切换到新会话\nThread：${outcome.threadId}`;
-    case "review.started":
-      return `已启动 Codex Review\nTurn：${outcome.turnId}`;
-    case "goal.cleared":
-      return "已清除当前 Thread Goal。";
-    case "goal.updated":
-      return `Goal 已设置\n目标：${outcome.goal.objective}`;
-  }
 }
 
 function renderFeishuSessions(
