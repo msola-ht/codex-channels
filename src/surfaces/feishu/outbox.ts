@@ -20,6 +20,7 @@ const maximumFeishuMessageContentBytes = 20_000;
 const maximumFeishuMessageChunks = 5;
 const feishuChunkHeaderReserveBytes = 64;
 const feishuTruncationNotice = "\n\n[内容过长，已截断]";
+const feishuWorkingStatusFooter = "\n\n---\n**工作中** · `/stop` 可停止";
 const feishuStreamFlushDelayMs = 300;
 const maximumFeishuStreamingElementCharacters = 5_000;
 const maximumFeishuStreamingCards = 5;
@@ -41,6 +42,7 @@ interface FeishuStreamState {
   lastSentText?: string;
   timer?: NodeJS.Timeout;
   failed: boolean;
+  working: boolean;
 }
 
 export interface FeishuMessagePort {
@@ -76,6 +78,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     { chatId: string; messageId: string; status: string }
   >();
   private readonly streams = new Map<string, FeishuStreamState>();
+  private readonly activeThreads = new Set<string>();
   private streamCapacityWarningIssued = false;
   private closed = false;
   private closeFinished = false;
@@ -111,14 +114,18 @@ export class FeishuOutbox implements SurfaceOutputPort {
         return;
       }
       if (event.operation.status !== "running") {
+        const markdown = withFeishuWorkingStatus(
+          formatFeishuOperation(
+            event.operation,
+            this.options.operationUpdateDisplay === "compact" ? "compact" : "full",
+          ),
+          this.activeThreads.has(event.threadId),
+        );
         this.delivery.enqueue(
           event.target.conversationId,
           () => this.sendMarkdown(
             event.target.conversationId,
-            formatFeishuOperation(
-              event.operation,
-              this.options.operationUpdateDisplay === "compact" ? "compact" : "full",
-            ),
+            markdown,
           ),
           true,
         );
@@ -126,9 +133,15 @@ export class FeishuOutbox implements SurfaceOutputPort {
       return;
     }
     if (event.type === "turn.completed") {
+      this.activeThreads.delete(event.threadId);
       this.finishStreamsForTurn(event.threadId, event.turnId);
     }
     if (event.type === "thread.status") {
+      if (event.status === "active") {
+        this.activeThreads.add(event.threadId);
+      } else {
+        this.activeThreads.delete(event.threadId);
+      }
       this.delivery.enqueue(
         event.target.conversationId,
         () => this.deliverThreadStatus(event),
@@ -136,10 +149,16 @@ export class FeishuOutbox implements SurfaceOutputPort {
       );
       return;
     }
-    const text = renderFeishuOutput(event);
-    if (text === null) {
+    const rendered = renderFeishuOutput(event);
+    if (rendered === null) {
       return;
     }
+    const text = event.type === "text.completed"
+      ? withFeishuWorkingStatus(
+          rendered,
+          this.activeThreads.has(event.threadId),
+        )
+      : rendered;
     this.delivery.enqueue(
       event.target.conversationId,
       () => event.type === "text.completed" || event.type === "turn.completed"
@@ -221,6 +240,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     await this.delivery.close();
     this.closeFinished = true;
     this.threadStatusMessages.clear();
+    this.activeThreads.clear();
     this.streams.clear();
   }
 
@@ -342,6 +362,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       sequence: 0,
       cardCount: 0,
       failed: false,
+      working: this.activeThreads.has(event.threadId),
     };
     const previousText = state.text;
     const appended = appendBoundedStreamText(state.text, event.text);
@@ -387,6 +408,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       state.failed = true;
     }
     state.text = completedText;
+    state.working ||= this.activeThreads.has(event.threadId);
     if (state.timer) {
       clearTimeout(state.timer);
       delete state.timer;
@@ -436,11 +458,12 @@ export class FeishuOutbox implements SurfaceOutputPort {
       const remainingMessageBudget =
         maximumFeishuMessageChunks - state.cardCount;
       if (fallbackPost && remainingMessageBudget > 0) {
+        const markdown = state.truncated
+          ? `${state.cardText}${feishuTruncationNotice}`
+          : state.cardText;
         await this.sendMarkdown(
           state.chatId,
-          state.truncated
-            ? `${state.cardText}${feishuTruncationNotice}`
-            : state.cardText,
+          withFeishuWorkingStatus(markdown, state.working),
           remainingMessageBudget,
         );
       }
@@ -456,7 +479,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         try {
           await this.messagePort.updateStreamingCard(
             state.cardId!,
-            state.cardText,
+            withFeishuWorkingStatus(state.cardText, state.working),
             state.sequence,
           );
         } catch (error) {
@@ -494,7 +517,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
     terminal: boolean,
   ): Promise<boolean> {
     while (
-      [...state.cardText].length > maximumFeishuStreamingElementCharacters
+      [...state.cardText].length > maximumFeishuStreamingContentCharacters(
+        state.working,
+      )
     ) {
       if (
         !terminal
@@ -503,21 +528,27 @@ export class FeishuOutbox implements SurfaceOutputPort {
       ) {
         return false;
       }
-      const [rawHead, tail] = splitFeishuStreamingContent(state.cardText);
+      const maximumCharacters = maximumFeishuStreamingContentCharacters(
+        state.working,
+      );
+      const [rawHead, tail] = splitFeishuStreamingContent(
+        state.cardText,
+        maximumCharacters,
+      );
       const currentCardNumber = state.cardId
         ? state.cardCount
         : state.cardCount + 1;
       const reachesCardLimit =
         currentCardNumber >= maximumFeishuStreamingCards;
       const head = reachesCardLimit
-        ? appendFeishuStreamingTruncation(rawHead)
+        ? appendFeishuStreamingTruncation(rawHead, maximumCharacters)
         : rawHead;
       await this.ensureStreamingCard(state, head);
       if (state.lastSentText !== head) {
         state.sequence += 1;
         await this.messagePort.updateStreamingCard(
           state.cardId!,
-          head,
+          withFeishuWorkingStatus(head, state.working),
           state.sequence,
         );
         state.lastSentText = head;
@@ -559,7 +590,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     const created = await this.messagePort.createStreamingCard(
       state.chatId,
-      initialText,
+      withFeishuWorkingStatus(initialText, state.working),
     );
     state.cardId = created.cardId;
     state.lastSentText = initialText;
@@ -588,11 +619,12 @@ export class FeishuOutbox implements SurfaceOutputPort {
     const remainingMessageBudget =
       maximumFeishuMessageChunks - state.cardCount;
     if (fallbackPost && remainingMessageBudget > 0) {
+      const markdown = state.truncated
+        ? `${state.text}${feishuTruncationNotice}`
+        : state.text;
       await this.sendPost(
         state.chatId,
-        state.truncated
-          ? `${state.text}${feishuTruncationNotice}`
-          : state.text,
+        withFeishuWorkingStatus(markdown, state.working),
         remainingMessageBudget,
       );
     }
@@ -645,9 +677,23 @@ function streamKey(threadId: string, turnId: string, itemId: string): string {
   return JSON.stringify([threadId, turnId, itemId]);
 }
 
-function splitFeishuStreamingContent(text: string): [string, string] {
+function withFeishuWorkingStatus(text: string, working: boolean): string {
+  return working ? `${text}${feishuWorkingStatusFooter}` : text;
+}
+
+function maximumFeishuStreamingContentCharacters(working: boolean): number {
+  return working
+    ? maximumFeishuStreamingElementCharacters
+      - [...feishuWorkingStatusFooter].length
+    : maximumFeishuStreamingElementCharacters;
+}
+
+function splitFeishuStreamingContent(
+  text: string,
+  maximumCharacters = maximumFeishuStreamingElementCharacters,
+): [string, string] {
   const characters = [...text];
-  const reservedEnd = maximumFeishuStreamingElementCharacters - 4;
+  const reservedEnd = maximumCharacters - 4;
   let end = reservedEnd;
   for (
     let index = reservedEnd;
@@ -705,12 +751,15 @@ function openFenceLanguage(text: string): string | null {
   return language;
 }
 
-function appendFeishuStreamingTruncation(text: string): string {
+function appendFeishuStreamingTruncation(
+  text: string,
+  maximumCharacters = maximumFeishuStreamingElementCharacters,
+): string {
   const characters = [...text];
   const notice = [...feishuTruncationNotice];
   const closingFence = text.endsWith("\n```") ? [..."\n```"] : [];
   const contentLimit =
-    maximumFeishuStreamingElementCharacters
+    maximumCharacters
     - notice.length
     - closingFence.length;
   const content = closingFence.length > 0

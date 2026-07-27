@@ -88,6 +88,124 @@ describe("Feishu outbox", () => {
     expect(posts).toEqual([]);
   });
 
+  it("keeps a compact working status on the latest active Turn output", async () => {
+    vi.useFakeTimers();
+    const created: string[] = [];
+    const updated: string[] = [];
+    const finished: string[] = [];
+    const markdownCards: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+        createStreamingCard: async (_chatId, initialText) => {
+          created.push(initialText);
+          return {
+            cardId: "7355372766134157313",
+            messageId: "om_stream",
+          };
+        },
+        updateStreamingCard: async (_cardId, content) => {
+          updated.push(content);
+        },
+        finishStreamingCard: async (_cardId, _sequence, summary) => {
+          finished.push(summary);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(threadStatus("active"));
+    outbox.handle(delta("正在处理"));
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+    outbox.handle(delta("。"));
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+    outbox.handle(completed({}, "正在处理。", "item-1"));
+    outbox.handle(operationUpdated("completed"));
+    outbox.handle(turnCompleted());
+    await outbox.close();
+
+    expect(created).toEqual([
+      "正在处理\n\n---\n**工作中** · `/stop` 可停止",
+    ]);
+    expect(updated).toEqual([
+      "正在处理。\n\n---\n**工作中** · `/stop` 可停止",
+    ]);
+    expect(finished).toEqual(["正在处理。"]);
+    expect(markdownCards[0]).toContain("**工作中** · `/stop` 可停止");
+    expect(markdownCards.at(-1)).toBe("**本次运行 · 已完成**");
+  });
+
+  it("reserves streaming element space for the working status", async () => {
+    vi.useFakeTimers();
+    const created: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        createStreamingCard: async (_chatId, initialText) => {
+          created.push(initialText);
+          return {
+            cardId: `73553727661341573${created.length}`,
+            messageId: `om_stream_${created.length}`,
+          };
+        },
+      },
+      pino({ level: "silent" }),
+    );
+    const text = "长".repeat(5_000);
+
+    outbox.handle(threadStatus("active"));
+    outbox.handle(delta(text));
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+    outbox.handle(completed({}, text, "item-1"));
+    await outbox.close();
+
+    expect(created.length).toBeGreaterThan(1);
+    expect(
+      created.every((content) => [...content].length <= 5_000),
+    ).toBe(true);
+    expect(created.every((content) => content.endsWith(
+      "**工作中** · `/stop` 可停止",
+    ))).toBe(true);
+  });
+
+  it("adds the working status when a short reply completes before streaming", async () => {
+    vi.useFakeTimers();
+    const markdownCards: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(threadStatus("active"));
+    outbox.handle(delta("短回复"));
+    outbox.handle(completed({}, "短回复", "item-1"));
+    await outbox.close();
+
+    expect(markdownCards).toEqual([
+      "短回复\n\n---\n**工作中** · `/stop` 可停止",
+    ]);
+  });
+
   it("bounds concurrent native streaming states", async () => {
     vi.useFakeTimers();
     const createStreamingCard = vi.fn(async () => ({
