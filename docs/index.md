@@ -125,58 +125,17 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 | 新通讯渠道如何按模块接入 | [`通讯渠道 Surface 接入指南`](surface-integration-guide.md)、[`surfaces/`](../src/surfaces/README.md) | [`module-boundaries.test.ts`](../tests/module-boundaries.test.ts)、[`surface-manager.test.ts`](../tests/surface-manager.test.ts) |
 | 与真实 App Server 的合同是否一致 | [`real-app-server.test.ts`](../tests/real-app-server.test.ts) | `RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts` |
 
-## 架构收敛与模块复核进度
+## 当前架构边界
 
-完整目标、现状证据、类型归属、阶段范围、验证方式和完成判定见
-[`Codex CLI 协议边界收敛计划`](architecture-convergence-plan.md)。该计划把此前完成的语义复核与
-当时尚未完成的模块复核合并到纵向能力迁移中，避免按目录重写或同时保留两套接口。
+当前协议隔离已经完成：`codex-protocol` 保存精确版本生成类型，`codex-client` 负责 Transport、
+JSON-RPC、请求、通知和 Server Request 的协议适配；Application、Conversation Core、
+Session Routing、Approval 和 Surface 只使用各自拥有的稳定类型与窄端口。非测试生产源码只有
+Client 可以导入 `codex-protocol`，模块依赖测试会阻止生成协议或具体 Client 再次泄漏。
 
-当前行为基线已经完成：
-
-- `codex-protocol`：协议生成、版本基线与受控导出，提交 `7be8e48`。
-- `codex-client`：Transport、JSON-RPC 与类型化 App Server API，提交 `27cd545`。
-- `conversation-core`：Turn、Item、错误与警告通知归约，提交 `994a3c7`。
-- `session-routing`：Thread 绑定、恢复、订阅和关闭语义，提交 `5410f40`。
-
-协议边界收敛阶段 1 已完成：Thread 生命周期使用 `session-routing` 自有窄端口和快照，
-`codex-client` 集中映射固定版本官方响应，Application 与 Telegram 只消费项目会话摘要，
-`session-routing` 不再依赖具体 Client 或生成协议。
-
-协议边界收敛阶段 2 已完成：Turn、Review 和 Goal 使用 Application 自有输入、结果和执行端口，
-官方 `UserInput`、Review 目标与完整响应只在 Client 适配边界出现。
-
-协议边界收敛阶段 3 已完成：模型、Fast、账户、Skill、MCP、Plugin 与 Permission Profile 查询
-均通过 Application 窄端口返回稳定结果，官方查询响应只在 Client 适配边界出现。
-
-协议边界收敛阶段 4 已完成：Thread 路由通知与 Turn、Item、Diff、Plan、Token、账户、额度、
-MCP 和 warning 通知均由 Client 转换为稳定事件；Core 与 Routing 不再解析原始 method/params，
-未知或畸形通知只记录 method 后忽略。
-
-协议边界收敛阶段 5 已完成：命令、文件、临时权限、用户输入和 MCP elicitation 五类 Server
-Request 均由 Client 解码为稳定请求，Approval 只协调授权语义，Client 再把稳定决定编码为当前
-协议响应；未知或畸形高权限请求不会进入 Surface。
-
-协议边界收敛阶段 6 已完成：非测试生产源码只有 Client 导入 `codex-protocol`，Bootstrap 通过
-Client 运行时信息校验版本并向 Surface 注入显示字符串；受控导出、依赖白名单和独立边界断言
-会阻止协议或具体 Client 再次泄漏到业务模块。
-
-实施过程中没有把上述模块推倒重做；项目内部模块与 Bootstrap 均按独立阶段完成修改、验证、
-审查和提交，只定向复核了实际触及的既有模块。
-
-项目内部模块复核已完成 `storage`：当前 Schema 只在全新数据库创建，版本不匹配或标记为当前
-版本但缺少必需结构时失败关闭；SQLite 写入失败后恢复内存索引和磁盘绑定，不增加迁移路径。
-`policy` 也已完成：Workspace Registry 保存不可变授权快照，热加载失败保留上一份有效 Registry；
-Surface、账号和规范 Actor ID 必须同时匹配。
-`event-bus` 已完成：独立有界队列保护关键事件并隔离消费者；关闭是不可逆终态，并发关闭共享
-同一等待结果，慢消费者只等待有限时间。
-`observability` 已完成：统一 Logger 的异常只保留受约束类型和机器码，不记录 message、stack
-或附加响应正文；Token、Authorization、Password 和 Cookie 字段统一脱敏。
-`config` 已完成：严格 TOML 和运行语义继续失败关闭，热加载分类归 Config 所有；代理保持
-TOML、环境、系统的优先级，未解析字段不再写入空环境变量。
-`surfaces` 已完成：输入先授权、输出按账号和 Conversation 隔离，Telegram API 继续使用有界
-顺序队列与有限重试；并发关闭统一等待同一批在途平台输出，不会提前报告停止完成。
-`bootstrap` 已完成：组合根只依赖模块公开入口，启动失败、启动中停止和正常停止共享单次组件
-关闭任务；重连仍可取消并限时等待，Gateway 关闭只断开 Client，不终止共享 App Server。
+内部模块继续遵守各目录 README 和根 `AGENTS.md` 的现行边界：StateStore 只保存最小绑定，
+Policy 同时校验 Surface、账号、Actor 与 Workspace，Event Bus 和 Surface 输出使用有界队列，
+Observability 统一脱敏，Config 严格失败关闭，Bootstrap 是唯一组合根。Gateway 停止只断开
+Client 与 Surface，不终止共享 App Server。
 
 ## 查询顺序
 

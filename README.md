@@ -438,10 +438,10 @@ RUN_CODEX_INTEGRATION=1 npm test -- --run tests/real-app-server.test.ts
 
 - [`docs/index.md`](docs/index.md)：Codex 官方文档、固定版本源码、协议数量与本项目实现映射。
 - [`docs/codex-cli-upgrade.md`](docs/codex-cli-upgrade.md)：CLI 协议生成、Codex 审查和验证流程。
-- [`docs/architecture-convergence-plan.md`](docs/architecture-convergence-plan.md)：已完成的协议边界收敛与模块复核实施记录。
 - [`docs/surface-integration-guide.md`](docs/surface-integration-guide.md)：新增通讯渠道的组合式模块、授权、配置、审批与验证边界。
 - [`docs/feishu-surface-plan.md`](docs/feishu-surface-plan.md)：飞书 Surface 的组合式模块设计、分阶段范围、风险和验收标准。
 - [`docs/feishu-reference-index.md`](docs/feishu-reference-index.md)：飞书官方资料、SDK 版本基线、支持矩阵与本地实现映射。
+- [`docs/weixin-surface-plan.md`](docs/weixin-surface-plan.md)：微信 ClawBot 官方协议基线、凭据边界、分阶段接入路径与停止条件。
 - [`config.example.toml`](config.example.toml)：统一 Gateway 配置示例。
 - [`src/`](src/README.md)：源码模块与边界。
 - [`bin/`](bin/README.md)：npm CLI 入口。

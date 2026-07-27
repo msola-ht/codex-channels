@@ -27,18 +27,11 @@ Client 或生成协议。Turn、Review 和 Goal 的执行端口由 `application`
 同样由 Application 窄端口承接，Client 统一选择官方多桶或兼容单桶响应并
 输出稳定摘要。直接安装 Skill 查询也已在 Client 边界完成路径与 Scope 裁剪，MCP 状态查询
 已裁剪为按当前 Thread 获取的名称、认证状态和工具数量，Plugin 查询只输出已安装项的名称与
-启用状态，Permission Profile 查询只输出稳定的目录选项。阶段 3 查询边界已完成。
-阶段 4 已完成：Client 把 Thread 路由通知与 Turn、Item、Goal、Token、账户、
-额度、MCP、warning 等 Core 通知分别转换为稳定事件；`conversation-core` 不再依赖生成协议，
-目标依赖明确为 `codex-client -> conversation-core`。阶段 5 也已完成：Client 解码和编码五类
-Server Request，`approval` 只拥有稳定请求、授权语义和用户决定，不再依赖 Client 或生成协议。
-阶段 6 已完成：生产源码只有 Client 导入生成协议，Bootstrap 通过 Client 读取版本并向 Surface
-注入纯字符串，受控协议导出和模块依赖白名单已收紧，新增协议或具体 Client 泄漏会由边界测试阻止。
-阶段 7 已完成内部模块复核；`storage` 已确认最小 Schema、原子清理和失败回滚，当前版本数据库
-缺少必需结构时失败关闭，不执行隐式修补；`policy` 已把 Workspace 固定为不可变授权快照，并
-保持 Surface、账号和 Actor 三层匹配；`event-bus` 已收紧关闭终态、并发等待和慢消费者超时；
-`observability` 已限制异常元数据并补齐凭据字段脱敏；`config` 已集中热加载分类并清理空代理环境；
-`surfaces` 已确认授权、输出隔离、审批顺序、平台超时和并发关闭语义。
-阶段 8 也已完成：`bootstrap` 保持唯一组合根，并统一启动回滚、重连取消和单次组件关闭。
-整体范围见
-[`Codex CLI 协议边界收敛计划`](../docs/architecture-convergence-plan.md)。
+启用状态，Permission Profile 查询只输出稳定的目录选项。
+
+Client 把 Thread 路由通知与 Turn、Item、Goal、Token、账户、额度、MCP 和 warning 等通知转换为
+稳定事件；`conversation-core` 不解析原始协议。Client 同样解码和编码五类 Server Request，
+`approval` 只拥有稳定请求、授权语义和用户决定。生产源码只有 Client 导入生成协议，
+Bootstrap 通过 Client 读取版本并向 Surface 注入纯字符串；受控协议导出和模块依赖测试会阻止
+协议或具体 Client 再次泄漏。Storage、Policy、Event Bus、Observability、Config、Surface 和
+Bootstrap 的当前边界分别以本索引中的模块 README 为准。

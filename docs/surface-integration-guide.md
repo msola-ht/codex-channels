@@ -3,19 +3,20 @@
 ## 目的
 
 本指南规定如何在当前 TypeScript 模块化单体中新增通讯渠道。
-目标是通过第二个真实 Surface 验证现有边界，而不是复制已有渠道、建立插件框架或再次重构核心。
+目标是通过新增真实 Surface 持续验证现有边界，而不是复制已有渠道、建立插件框架或再次重构核心。
 
 新增渠道应形成一个可独立装配、测试和停止的平台模块，同时继续共享 Application、Conversation
 Core、Approval、Policy、Session Routing、Storage 和 Event Bus。App Server 仍是 Thread、
 Turn、Item、Goal 和历史的唯一事实来源。
 
 本文区分三类内容：固定架构、模块边界、安全要求和禁止模式是必须遵守的约束；带有具体类型或
-方法名的内容描述当前公开合同；目录拆分和分阶段顺序是实施建议，可以按真实渠道需求裁剪。若第二个
+方法名的内容描述当前公开合同；目录拆分和分阶段顺序是实施建议，可以按真实渠道需求裁剪。若新增
 Surface 证明当前公开合同不足，应先单独评审合同、依赖方向和测试变更，再同步更新本指南，不能让
 平台模块通过内部导入或复制核心逻辑绕过合同。
 
 具体平台计划必须继续服从本指南。当前飞书的分阶段范围、组合工厂、身份、输入队列、配置和验证
-设计见 [`飞书 Surface 接入计划`](feishu-surface-plan.md)。
+设计见 [`飞书 Surface 接入计划`](feishu-surface-plan.md)；微信 ClawBot 的官方协议研究、
+凭据边界、分阶段范围和停止条件见 [`微信 Surface 接入计划`](weixin-surface-plan.md)。
 
 ## 固定架构
 
@@ -142,7 +143,7 @@ src/surfaces/<surface>/
 | `elicitation` | `{ type: "elicitation", action: "cancel", content: null }` |
 
 此时没有待处理交互，`resolved()` 和 `cancelAll()` 可以为空操作。不要仅为这个占位提前建立通用
-交互基类；第二个 Surface 真正需要复用时，再评估是否从现有失败关闭逻辑抽取最小帮助函数。
+交互基类；至少两个实际 Surface 证明需要复用时，再评估是否从现有失败关闭逻辑抽取最小帮助函数。
 
 ### 内置插件与组合工厂
 
@@ -278,10 +279,15 @@ Surface 的 `InteractionPort` 只负责展示稳定 `InteractionRequest` 并返�
 ## 存储与安全
 
 - 不改变当前 SQLite Schema，除非新渠道确实需要恢复绑定之外的最小字段，并先单独评审迁移方案。
-- 长期 Bot Token、App Secret 等平台凭据只能保存在权限受限的统一 `config.toml`，不得复制到
-  SQLite、日志、服务定义或其他平台文件。SDK 使用应用凭据自动换取的短期租户 Access Token
-  只保留在进程内存中，不另行写入磁盘。用户明确授权且能力需要跨重启使用的 Surface OAuth
-  Token 必须使用项目规定的系统 Keychain 或加密凭据后端，不得写入配置或 StateStore。
+- 由操作者明确输入、属于静态应用配置的 Bot Token、App Secret 等平台凭据保存在权限受限的统一
+  `config.toml`，不得复制到 SQLite、日志、服务定义或其他平台文件。扫码登录、OAuth 或其他平台
+  授权流程签发的账号 Token 不属于静态应用配置；需要跨重启使用时必须保存到项目规定的 macOS
+  Keychain 或 Linux 加密凭据后端，不得写入配置或 StateStore。SDK 使用应用凭据自动换取且可以
+  重新获取的短期租户 Access Token 只保留在进程内存中，不另行写入磁盘。
+- 新增一种持久账号 Token 前，必须先评审其独立命名空间、严格载荷 Schema、版本、账号键、撤销、
+  原子替换、损坏处理和回滚方式，并说明是否改变现有凭据格式。可以复用平台无关的 Keychain、
+  加密与私有文件机制，但不得直接复用其他 Surface 的载荷类型、Keychain Service、文件名或账号
+  键，也不得为了统一存储迁移现有 Surface 凭据。
 - 不持久化消息正文、回调原文、卡片内容、Diff、Plan 或审批详情。
 - 临时下载必须限制大小、类型、路径和保留时间，保存到用户数据目录并定期清理。
 - 外部用户只能选择配置中已授权的 Workspace，不能提交任意绝对路径。
