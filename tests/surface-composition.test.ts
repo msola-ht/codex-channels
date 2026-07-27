@@ -1,5 +1,9 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import pino from "pino";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ConversationService } from "../src/application/index.js";
 import type { InteractionPort } from "../src/approval/index.js";
@@ -9,6 +13,7 @@ import {
   createTelegramRuntimeModule,
   createWeixinRuntimeModule,
   selectFeishuProxyUrl,
+  weixinSurfacePlugin,
   type FeishuRuntimeAdapter,
   type TelegramRuntimeAdapter,
   type WeixinRuntimeAdapter,
@@ -20,8 +25,17 @@ import {
 } from "../src/bootstrap/surface-plugin.js";
 import type { GatewayConfig } from "../src/config/index.js";
 import { MemoryBindingStore } from "../src/storage/index.js";
+import { EncryptedFileWeixinCredentialStore } from "../src/surfaces/weixin/index.js";
 
 const interactions = {} as InteractionPort;
+const temporaryDirectories: string[] = [];
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 describe("Telegram Surface runtime composition", () => {
   it("hot reloads authorization and notification recipients", () => {
@@ -110,6 +124,56 @@ describe("configured Surface composition", () => {
       "feishu",
       "weixin",
     ]);
+  });
+
+  it("loads Weixin credentials from the config directory independently of the database path", async () => {
+    const root = mkdtempSync(join(tmpdir(), "weixin-composition-"));
+    temporaryDirectories.push(root);
+    const credentialsDirectory = join(root, "credentials");
+    const accountId = "bot-fixture@im.bot";
+    await new EncryptedFileWeixinCredentialStore(
+      join(credentialsDirectory, "weixin"),
+    ).set({
+      version: 1,
+      accountId,
+      baseUrl: "https://ilinkai.weixin.qq.com",
+      botToken: "bot-secret",
+      grantedAt: 1,
+    });
+    const runtimeConfig = config({
+      credentialsDirectory,
+      stateDatabasePath: join(root, "separate-state", "gateway.sqlite3"),
+      weixin: {
+        accountId,
+        allowedUserIds: new Set(["actor-fixture@im.wechat"]),
+      },
+    });
+    const context = options(runtimeConfig);
+    const [module] = createSurfaceModules(context, [weixinSurfacePlugin]);
+    const fetchImpl = vi.fn<typeof fetch>((_input, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        const abort = () => {
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          reject(error);
+        };
+        if (init?.signal?.aborted) {
+          abort();
+          return;
+        }
+        init?.signal?.addEventListener("abort", abort, { once: true });
+      }));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    try {
+      await module?.adapter.start();
+      await vi.waitFor(() => {
+        expect(fetchImpl).toHaveBeenCalledOnce();
+      });
+      expect(context.onFatal).not.toHaveBeenCalled();
+    } finally {
+      await module?.adapter.stop();
+    }
   });
 
   it("selects the shared HTTPS proxy unless NO_PROXY covers the Feishu host", () => {
@@ -392,6 +456,7 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     codexSocketPath: "/tmp/codex.sock",
     codexSandbox: "workspace-write",
     operationUpdateDisplay: "full",
+    credentialsDirectory: "/tmp/credentials",
     stateDatabasePath: "/tmp/gateway.sqlite3",
     approvalTimeoutMs: 300_000,
     logLevel: "info",

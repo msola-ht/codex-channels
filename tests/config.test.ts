@@ -104,6 +104,7 @@ describe("Gateway config.toml", () => {
     expect(runtime.config.telegramAllowedUserIds).toEqual(new Set([123, 456]));
     expect(runtime.config.telegramMessageFormat).toBe("rich");
     expect(runtime.config.operationUpdateDisplay).toBe("full");
+    expect(runtime.config.credentialsDirectory).toBe(join(fixture.root, "credentials"));
     expect(runtime.config.codexSocketPath).toBe(join(fixture.root, "runtime/app-server.sock"));
     expect(runtime.config.stateDatabasePath).toBe(join(fixture.root, "data/gateway.sqlite3"));
     expect(runtime.config.workspaces).toEqual([

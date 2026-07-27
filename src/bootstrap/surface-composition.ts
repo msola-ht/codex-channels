@@ -93,7 +93,6 @@ function createWeixinModule(
   if (!config) {
     throw new Error("微信运行配置不存在");
   }
-  const dataDirectory = dirname(options.config.stateDatabasePath);
   const access = new WeixinAccessPolicy(
     config.allowedUserIds,
     config.accountId,
@@ -107,7 +106,7 @@ function createWeixinModule(
     options.logger.warn({ removedBindings }, "已清理不再授权的微信会话绑定");
   }
   const credentialStore = createWeixinCredentialStore(
-    join(dataDirectory, "credentials", "weixin"),
+    join(options.config.credentialsDirectory, "weixin"),
   );
   const adapter = new WeixinSurface({
     accountId: config.accountId,
@@ -116,7 +115,7 @@ function createWeixinModule(
       credentialStore,
     }),
     cursorStore: new FileWeixinUpdatesCursorStore(
-      join(dataDirectory, "weixin-updates"),
+      join(dirname(options.config.stateDatabasePath), "weixin-updates"),
     ),
     service: options.service,
     access,
