@@ -15,10 +15,13 @@ describe("Feishu operation log formatter", () => {
     };
 
     expect(formatFeishuOperation(record)).toBe([
-      "**运行命令 · 已完成** · 125 ms · exit 0",
+      "**运行命令 · 已完成** · exit 0",
       "```shell",
       "TOKEN=[已隐藏] git status --short",
       "```",
+      "",
+      "---",
+      "**耗时：** 125毫秒",
     ].join("\n"));
   });
 
@@ -30,8 +33,10 @@ describe("Feishu operation log formatter", () => {
       status: "completed",
       durationMs: 2_623,
     })).toContain(
-      "**调用 MCP 工具 · 已完成** · 2623 ms\n"
-      + "具体内容：`codex_apps.list_mcp_resources`",
+      "**调用 MCP 工具 · 已完成**\n"
+      + "具体内容：`codex_apps.list_mcp_resources`\n\n"
+      + "---\n"
+      + "**耗时：** 3秒",
     );
   });
 
@@ -44,7 +49,25 @@ describe("Feishu operation log formatter", () => {
       durationMs: 125,
       exitCode: 0,
     }, "compact")).toBe(
-      "**运行命令 · 已完成** · 125 ms · exit 0 · `git status --short second line`",
+      "**运行命令 · 已完成** · exit 0 · `git status --short second line`\n\n"
+      + "---\n"
+      + "**耗时：** 125毫秒",
     );
+  });
+
+  it("omits the duration footer when no positive duration is available", () => {
+    expect(formatFeishuOperation({
+      itemId: "command-1",
+      kind: "command",
+      detail: "git status --short",
+      status: "completed",
+      durationMs: 0,
+      exitCode: 0,
+    })).toBe([
+      "**运行命令 · 已完成** · exit 0",
+      "```shell",
+      "git status --short",
+      "```",
+    ].join("\n"));
   });
 });

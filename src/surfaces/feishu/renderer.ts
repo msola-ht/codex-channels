@@ -409,9 +409,6 @@ function renderFeishuTurnCompleted(
       `- **模型：** ${event.model} · ${event.effort ?? "模型默认"} · Fast ${isFastServiceTier(event.serviceTier ?? null) ? "开启" : "关闭"}`,
     );
   }
-  if (event.durationMs !== undefined) {
-    details.push(`- **对话耗时：** ${formatElapsedDuration(event.durationMs)}`);
-  }
   if (event.contextCompactionCount !== undefined) {
     details.push(`- **上下文压缩：** ${event.contextCompactionCount} 次`);
   }
@@ -429,6 +426,9 @@ function renderFeishuTurnCompleted(
   return [
     `**本次运行 · ${turnStatusLabel(event.status)}**`,
     ...(details.length > 0 ? ["", ...details] : []),
+    ...(event.durationMs === undefined
+      ? []
+      : ["", "---", `**耗时：** ${formatElapsedDuration(event.durationMs)}`]),
   ].join("\n");
 }
 

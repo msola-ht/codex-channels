@@ -1,7 +1,7 @@
 import type { OperationUpdate } from "../../conversation-core/index.js";
+import { formatElapsedDuration } from "../elapsed-duration.js";
 import {
   compactOperationDetail,
-  operationMetadata,
   operationStatus,
   operationTitle,
   redactOperationDetail,
@@ -12,13 +12,18 @@ export function formatFeishuOperation(
   record: OperationUpdate,
   display: Exclude<OperationUpdateDisplay, "hidden"> = "full",
 ): string {
-  const metadata = operationMetadata(record);
+  const exitCode = record.exitCode === undefined
+    ? ""
+    : ` · exit ${record.exitCode}`;
   const lines = [
-    `**${operationTitle(record)} · ${operationStatus(record.status)}**${metadata.length > 0 ? ` · ${metadata.join(" · ")}` : ""}`,
+    `**${operationTitle(record)} · ${operationStatus(record.status)}**${exitCode}`,
   ];
   if (record.detail) {
     if (display === "compact") {
-      return `${lines[0]} · \`${inlineOperationDetail(compactOperationDetail(record.detail))}\``;
+      return withOperationDurationFooter(
+        `${lines[0]} · \`${inlineOperationDetail(compactOperationDetail(record.detail))}\``,
+        record.durationMs,
+      );
     }
     const detail = safeOperationDetail(record.detail);
     if (record.kind === "command") {
@@ -27,7 +32,16 @@ export function formatFeishuOperation(
       lines.push(`具体内容：\`${inlineOperationDetail(detail)}\``);
     }
   }
-  return lines.join("\n");
+  return withOperationDurationFooter(lines.join("\n"), record.durationMs);
+}
+
+function withOperationDurationFooter(
+  markdown: string,
+  durationMs: number | undefined,
+): string {
+  return durationMs === undefined || durationMs <= 0
+    ? markdown
+    : `${markdown}\n\n---\n**耗时：** ${formatElapsedDuration(durationMs)}`;
 }
 
 function inlineOperationDetail(value: string): string {

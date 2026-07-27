@@ -14,7 +14,7 @@
   到官方 `UserInput` 的映射，以及 Review、Goal 和控制响应到稳定 Application 结果的映射。
 - 官方 Turn、Item、Diff、Plan、Goal、Token、账户、额度、MCP 和 warning Notification 到稳定 Core
   输入事件的映射，畸形与未知通知隔离；Conversation Core 状态归约、严格 Turn 完成状态、
-  官方 `Turn.durationMs` 校验与双 Surface 对话耗时展示、可重试错误隔离、Thread/全局警告路由，
+  官方 `Turn.durationMs` 校验、Telegram 对话耗时列表与飞书结束统计耗时底栏、可重试错误隔离、Thread/全局警告路由，
   以及 Client 边界的操作摘要、Turn/warning/MCP 错误
   脱敏限长与敏感文本清洗。
 - 命令、文件修改、临时权限、用户输入和 MCP 审批的归属信息、优先于等待中非关键输出的双
@@ -41,8 +41,8 @@
   入队、授权拒绝不污染去重键、事件去重、旧事件过滤、同 Chat 顺序、跨 Chat 并行、过载重试和有限关闭；卡片动作
   稳定字段裁剪、受限字符串动作值、畸形输入失败关闭和 WebSocket 独立分流；所有关键
   `OutputEvent` 的 CardKit Markdown 最终回复、启动环境与脱敏 UA、每轮上下文和设置的紧凑
-  CardKit Markdown、活动 Turn 最新输出的“工作中”尾栏及其流式字符预算、纯文本安全回退、
-  操作终态静态卡片与助手消息顺序，以及脱敏上游错误详情展示；共享操作标题、状态、耗时与
+  CardKit Markdown、活动 Turn 输出不追加状态尾栏、纯文本安全回退、
+  操作终态静态卡片与助手消息顺序，以及脱敏上游错误详情展示；共享操作标题、状态、飞书耗时底栏与
   退出码元数据、脱敏和 Unicode 单行摘要边界；Outbox
   的精确账号路由、同 Chat 顺序、跨 Chat 并行、静态 CardKit 单元素 5,000 字符与最多 5 张卡片、
   纯文本及降级富文本 20,000 字节上限、

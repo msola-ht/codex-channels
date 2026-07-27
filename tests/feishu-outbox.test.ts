@@ -88,7 +88,7 @@ describe("Feishu outbox", () => {
     expect(posts).toEqual([]);
   });
 
-  it("keeps a compact working status on the latest active Turn output", async () => {
+  it("does not append a working footer to active Turn output", async () => {
     vi.useFakeTimers();
     const created: string[] = [];
     const updated: string[] = [];
@@ -132,18 +132,14 @@ describe("Feishu outbox", () => {
     outbox.handle(turnCompleted());
     await outbox.close();
 
-    expect(created).toEqual([
-      "正在处理\n\n---\n**工作中** · `/stop` 可停止",
-    ]);
-    expect(updated).toEqual([
-      "正在处理。\n\n---\n**工作中** · `/stop` 可停止",
-    ]);
+    expect(created).toEqual(["正在处理"]);
+    expect(updated).toEqual(["正在处理。"]);
     expect(finished).toEqual(["正在处理。"]);
-    expect(markdownCards[0]).toContain("**工作中** · `/stop` 可停止");
+    expect(markdownCards[0]).not.toContain("工作中");
     expect(markdownCards.at(-1)).toBe("**本次运行 · 已完成**");
   });
 
-  it("reserves streaming element space for the working status", async () => {
+  it("uses the full streaming element budget without a footer", async () => {
     vi.useFakeTimers();
     const created: string[] = [];
     const outbox = new FeishuOutbox(
@@ -171,16 +167,10 @@ describe("Feishu outbox", () => {
     outbox.handle(completed({}, text, "item-1"));
     await outbox.close();
 
-    expect(created.length).toBeGreaterThan(1);
-    expect(
-      created.every((content) => [...content].length <= 5_000),
-    ).toBe(true);
-    expect(created.every((content) => content.endsWith(
-      "**工作中** · `/stop` 可停止",
-    ))).toBe(true);
+    expect(created).toEqual([text]);
   });
 
-  it("adds the working status when a short reply completes before streaming", async () => {
+  it("sends a short reply without a working footer", async () => {
     vi.useFakeTimers();
     const markdownCards: string[] = [];
     const outbox = new FeishuOutbox(
@@ -201,9 +191,7 @@ describe("Feishu outbox", () => {
     outbox.handle(completed({}, "短回复", "item-1"));
     await outbox.close();
 
-    expect(markdownCards).toEqual([
-      "短回复\n\n---\n**工作中** · `/stop` 可停止",
-    ]);
+    expect(markdownCards).toEqual(["短回复"]);
   });
 
   it("bounds concurrent native streaming states", async () => {
@@ -778,7 +766,7 @@ describe("Feishu outbox", () => {
     expect(markdownCards).toEqual(["**本次运行 · 已完成**"]);
   });
 
-  it("sends one-line operation updates in compact mode", async () => {
+  it("sends a compact operation body with a duration footer", async () => {
     const markdownCards: string[] = [];
     const outbox = new FeishuOutbox(
       "cli_app",
@@ -799,7 +787,9 @@ describe("Feishu outbox", () => {
     await outbox.close();
 
     expect(markdownCards).toEqual([
-      "**运行命令 · 已完成** · 125 ms · exit 0 · `git status --short`",
+      "**运行命令 · 已完成** · exit 0 · `git status --short`\n\n"
+      + "---\n"
+      + "**耗时：** 125毫秒",
     ]);
   });
 
