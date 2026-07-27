@@ -12,6 +12,7 @@ import * as updatesProbe from "../scripts/weixin-updates-contract-probe.mjs";
 const {
   createWeixinSendContractClient,
   runWeixinReplyContract,
+  runWeixinReplySequenceContract,
   summarizeSendResponse,
 } = sendProbe;
 const { createWeixinUpdatesContractClient } = updatesProbe;
@@ -31,6 +32,7 @@ describe("Weixin sendmessage contract probe", () => {
 
     expect(help.status).toBe(0);
     expect(help.stdout).toContain("reply --live");
+    expect(help.stdout).toContain("sequence --live");
     expect(help.stdout).toContain("不保存消息或回复上下文");
     expect(rejected.status).toBe(2);
     expect(rejected.stderr).toContain("参数无效");
@@ -203,6 +205,62 @@ describe("Weixin sendmessage contract probe", () => {
     })).rejects.toMatchObject({ code: "invalid-response" });
     expect(sendText).not.toHaveBeenCalled();
   });
+
+  it("reuses one authorized context for two fixed Unicode messages", async () => {
+    const updatesClient = createUpdatesClient(
+      inboundMessage("allowed-user@im.wechat", "reply-context", 1n),
+    );
+    const sendText = vi.fn()
+      .mockResolvedValueOnce({ kind: "success", hasReturnCode: false })
+      .mockResolvedValueOnce({ kind: "success", hasReturnCode: false });
+
+    const result = await runWeixinReplySequenceContract({
+      updatesClient,
+      sendClient: { sendText },
+      credential: {
+        baseUrl: "https://ilinkai.weixin.qq.com",
+        botToken: "bot-secret",
+      },
+      allowedUserIds: ["allowed-user@im.wechat"],
+    });
+
+    expect(sendText).toHaveBeenCalledTimes(2);
+    expect(sendText.mock.calls.map(([input]) => input.contextToken)).toEqual([
+      "reply-context",
+      "reply-context",
+    ]);
+    expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
+      "微信发送合同验证 1/2：同一上下文连续回复。",
+      "微信发送合同验证 2/2：Unicode 中文，emoji 🧪，Markdown **粗体** 与 `code`。",
+    ]);
+    expect(result).toMatchObject({
+      inbound: { kind: "success", messageCount: 1 },
+      outbound: [{ kind: "success" }, { kind: "success" }],
+    });
+    expect(JSON.stringify(result)).not.toContain("reply-context");
+    expect(JSON.stringify(result)).not.toContain("allowed-user");
+  });
+
+  it("stops a reply sequence after the first API error", async () => {
+    const updatesClient = createUpdatesClient(
+      inboundMessage("allowed-user@im.wechat", "reply-context", 1n),
+    );
+    const sendText = vi.fn()
+      .mockResolvedValueOnce({ kind: "api-error", ret: -14 });
+
+    const result = await runWeixinReplySequenceContract({
+      updatesClient,
+      sendClient: { sendText },
+      credential: {
+        baseUrl: "https://ilinkai.weixin.qq.com",
+        botToken: "bot-secret",
+      },
+      allowedUserIds: ["allowed-user@im.wechat"],
+    });
+
+    expect(sendText).toHaveBeenCalledOnce();
+    expect(result.outbound).toEqual([{ kind: "api-error", ret: -14 }]);
+  });
 });
 
 function validSendInput() {
@@ -243,6 +301,16 @@ function inboundMessage(userId: string, contextToken: string, id: bigint) {
       text_item: { text: "private inbound body" },
     }],
   };
+}
+
+function createUpdatesClient(message: ReturnType<typeof inboundMessage>) {
+  return createWeixinUpdatesContractClient({
+    fetchImpl: vi.fn(async () => new Response(exactUpdatesResponse({
+      ret: 0,
+      get_updates_buf: "private-cursor",
+      msgs: [message],
+    }), { status: 200 })),
+  });
 }
 
 function exactUpdatesResponse(value: unknown): string {
