@@ -17,8 +17,8 @@
 三种模式都不影响审批、错误、最终回复和 Turn 完成事件；变化需要重启 Gateway，不需要重装或
 重启共享 App Server。
 
-飞书配置表当前只定义阶段 1 私聊所需的 `enabled`、`app_id`、`app_secret` 和
+飞书配置表当前只定义私聊 Surface 所需的 `enabled`、`app_id`、`app_secret` 和
 `allowed_open_ids`。整表缺失或 `enabled = false` 时运行配置不包含飞书账号；启用时四项必须
-同时有效，Open ID 不得重复。群 Chat、`@Bot` 和其他阶段 2 字段仍由严格 Schema 拒绝。
+同时有效，Open ID 不得重复。群 Chat、`@Bot` 和其他未支持字段仍由严格 Schema 拒绝。
 启用状态或凭据变化需要重启 Gateway，允许 Open ID 集合可热加载；允许名单收窄时同时清理该飞书
 账号下已撤权 Actor 的绑定。

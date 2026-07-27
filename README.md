@@ -11,8 +11,9 @@
 - 可选启用飞书企业自建应用，通过已授权用户的私聊文本提交 Turn；启动通知、短回复、命令结果、
   操作过程和每轮结束统计统一使用 CardKit 2.0 Markdown，持续模型增量使用原生流式卡片，错误与操作性提示
   保留纯文本；同一 Turn 的运行中与空闲状态已实现合并到一条
-  可更新消息，启动通知和每轮上下文状态已完成离线实现，私聊 PNG/JPEG 图片、命令审批卡片和
-  原生流式主路径及状态卡片更新已通过真实应用验收，启动/每轮状态、用户输入与 MCP 卡片仍待验收，
+  可更新消息，启动通知和每轮上下文状态已完成离线实现，私聊 PNG/JPEG 图片、命令审批卡片、
+  静态展示、操作终态、每轮状态、原生流式主路径及状态卡片更新已通过真实应用验收，启动通知、
+  用户输入与 MCP 卡片仍待验收，
   `/start`、`/help` 与机器人自定义菜单可打开分类命令中心卡片；
   `/feishu doctor` 可在 Actor
   明确确认后只增量申请缺失的应用权限、重新执行只读检测并给出单一人工配置入口；Gateway 不自动
@@ -101,7 +102,7 @@ allowed_open_ids = ["ou_xxx"]
 也不会创建或发布应用版本。新扫码应用只声明对话、流式卡片、只读检测及所需事件/回调，不申请
 应用配置写权限。已有应用可增量开通缺少的权限并由 Owner 发布新版本，无需重新创建应用。
 当前接收允许名单用户的私聊文本；私聊 PNG/JPEG 独立图片已通过真实应用验收，单张图片附带
-说明文字的富文本消息已完成代码与离线测试，仍需部署后验收。审批请求不会通过飞书静默批准
+说明文字的富文本消息已完成代码、离线测试和部署，仍需真实应用验收。审批请求不会通过飞书静默批准
 高权限操作。
 
 最终回复默认把常用 Markdown 安全转换为兼容性更好的 Telegram HTML。支持 Rich Messages
@@ -432,7 +433,7 @@ RUN_CODEX_INTEGRATION=1 npm test -- --run tests/real-app-server.test.ts
 
 - [`docs/index.md`](docs/index.md)：Codex 官方文档、固定版本源码、协议数量与本项目实现映射。
 - [`docs/codex-cli-upgrade.md`](docs/codex-cli-upgrade.md)：CLI 协议生成、Codex 审查和验证流程。
-- [`docs/architecture-convergence-plan.md`](docs/architecture-convergence-plan.md)：协议边界收敛、模块复核与分阶段实施计划。
+- [`docs/architecture-convergence-plan.md`](docs/architecture-convergence-plan.md)：已完成的协议边界收敛与模块复核实施记录。
 - [`docs/surface-integration-guide.md`](docs/surface-integration-guide.md)：新增通讯渠道的组合式模块、授权、配置、审批与验证边界。
 - [`docs/feishu-surface-plan.md`](docs/feishu-surface-plan.md)：飞书 Surface 的组合式模块设计、分阶段范围、风险和验收标准。
 - [`docs/feishu-reference-index.md`](docs/feishu-reference-index.md)：飞书官方资料、SDK 版本基线、支持矩阵与本地实现映射。

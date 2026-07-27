@@ -279,8 +279,9 @@ Surface 的 `InteractionPort` 只负责展示稳定 `InteractionRequest` 并返�
 
 - 不改变当前 SQLite Schema，除非新渠道确实需要恢复绑定之外的最小字段，并先单独评审迁移方案。
 - 长期 Bot Token、App Secret 等平台凭据只能保存在权限受限的统一 `config.toml`，不得复制到
-  SQLite、日志、服务定义或其他平台文件。SDK 换取的短期 Access Token 只保留在进程内存中，
-  不另行写入磁盘。
+  SQLite、日志、服务定义或其他平台文件。SDK 使用应用凭据自动换取的短期租户 Access Token
+  只保留在进程内存中，不另行写入磁盘。用户明确授权且能力需要跨重启使用的 Surface OAuth
+  Token 必须使用项目规定的系统 Keychain 或加密凭据后端，不得写入配置或 StateStore。
 - 不持久化消息正文、回调原文、卡片内容、Diff、Plan 或审批详情。
 - 临时下载必须限制大小、类型、路径和保留时间，保存到用户数据目录并定期清理。
 - 外部用户只能选择配置中已授权的 Workspace，不能提交任意绝对路径。

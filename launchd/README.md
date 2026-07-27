@@ -1,6 +1,6 @@
 # launchd 服务模板
 
-本目录保存 macOS 用户级 launchd 模板，用于把 Codex App Server 与 Telegram Gateway 安装为两个独立进程。
+本目录保存 macOS 用户级 launchd 模板，用于把 Codex App Server 与多 Surface Gateway 安装为两个独立进程。
 
 ## 文件
 

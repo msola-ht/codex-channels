@@ -11,7 +11,8 @@
   复用统一 TOML、环境变量和系统代理解析；交互输入的 Token 在当前终端明文显示，但验证错误
   继续脱敏；新建 Bot 仅引导使用官方 BotFather。
 - `feishu-setup.mjs`：提供手动输入凭据和 Device Authorization 扫码两种方式；扫码时由飞书授权页
-  选择新建或已有企业自建应用，只申请私聊、流式卡片、应用自管理/更新和命令中心所需权限与事件。
+  选择新建或已有企业自建应用，只申请私聊发送、流式卡片、应用自管理只读检测和命令中心所需权限与事件，
+  不申请应用配置写入权限。
   两种方式都验证凭据与 Bot 身份，并原子保存 App ID、App Secret 和允许的用户 Open ID；二维码和
   短期授权状态不持久化。`/feishu doctor` 只增量申请缺失应用权限并只读检查机器人菜单和订阅；
   菜单、事件、回调和版本发布仍由 App Owner 在开放平台人工完成。
@@ -45,8 +46,8 @@
   记录版本并同步 npm/Gateway 版本。
 - `check-protocol.mjs`：校验本机 Codex CLI 版本，并重新生成到临时目录确认类型逐文件一致。
 - `check-gateway-version.mjs`：校验 npm 包和 Gateway 版本都与 Codex CLI 协议版本一致。
-- `check-docs.mjs`：校验 Markdown 本地链接、根文档索引、源码模块索引、协议数字和相关目录文件
-  索引，并拒绝已移除的文档名称。
+- `check-docs.mjs`：校验项目 Markdown 本地链接、根文档索引、源码模块索引、协议数字和相关目录
+  文件索引，并拒绝已移除的文档名称；常规项目文档检查排除 `.codex/skills/**` 附带的技能参考资料。
 - `codex-rules.mjs`：向 CLI 重新导出 `runtime/project-rules.mjs` 的项目定位、规则生成与检查能力。
 - `install-git-hooks.mjs`：只为当前源码仓库设置 `.githooks`，不修改用户全局 Git 配置。
 - `verify-commit.mjs`：为 pre-commit hook 与 GitHub CI 串行执行统一的完整提交检查。

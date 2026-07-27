@@ -40,7 +40,8 @@ console.log(`文档检查通过：${markdownFiles.length} 个 Markdown 文件，
 
 function repositoryMarkdownFiles() {
   return trackedFiles
-    .filter((file) => file.endsWith(".md"))
+    .filter((file) =>
+      file.endsWith(".md") && !file.startsWith(".codex/skills/"))
     .map((file) => resolve(root, file))
     .filter(existsSync);
 }

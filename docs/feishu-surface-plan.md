@@ -30,6 +30,7 @@ CardKit 2.0，`post + md` 只保留为卡片实体创建失败时的安全降级
 在飞书客户端折叠显示且消息顺序正确；一般文件仍未实现。Gateway 重启后的 OAuth Token 与
 Thread 绑定恢复也已通过验收。持续回复在飞书客户端可见 CardKit 原生流式更新的主路径也已
 通过验收；真实限流、失败回退和超长内容滚动仍待验证。
+静态展示、操作终态和每轮状态卡片的真实主路径也已完成验收。
 `/start`、`/help` 与单个 `codexc_home` 菜单复用同一张分类命令中心卡片；常用、模型与
 工作区、更多三个主卡分区承载十个动作和一个分类入口，Fast、Goal 与用户明确要求的新会话
 直接复用共享命令。分类入口再按会话查询、会话操作、能力与集成、当前内容、飞书展示十九个按钮，不发送
@@ -153,7 +154,7 @@ src/surfaces/feishu/
 ├── oauth.ts          # Actor 级授权生命周期
 ├── outbox.ts         # 飞书发送操作与 ConversationDeliveryQueue
 ├── status-card.ts    # Thread 状态轻量交互卡片
-└── media.ts          # 后续阶段的资源下载和上传
+└── media.ts          # 私聊图片下载；一般文件与上传尚未实现
 ```
 
 `src/surfaces/feishu/index.ts` 只导出 Bootstrap 装配所需的类型和工厂，再由
@@ -253,7 +254,8 @@ Core 输出仍由 `SurfaceManager` 按 `feishu + appId` 路由。飞书 Adapter 
 结构化用户错误。当前启动通知、最终回复、命令结果、操作过程和每轮结束统计统一使用 CardKit
 2.0 Markdown；错误和操作性提示继续使用受约束的纯文本，不能静默丢弃；非关键
 中间事件可以按现有队列规则合并或丢弃。不得直接复用 Telegram HTML、Rich Messages、折叠预览
-或按钮布局。飞书富文本、卡片和流式更新在后续阶段根据真实限制独立设计。
+或按钮布局。飞书富文本、静态卡片和原生流式更新已经按官方限制独立实现，不复用 Telegram
+渲染或交互组件。
 
 配置生命周期通知沿用 `SurfaceConfigurationChange`。只有已经建立安全收件人映射的 Actor 才能
 收到通知；不得把 App Secret、允许名单、原始配置或其他 Surface 的私有变更发送到飞书。
@@ -491,6 +493,7 @@ Actor/Chat/消息绑定、超时、跨客户端失效和卡片更新，不新增
 - [x] 最终回复和命令结果的 `post + md` 富文本；
 - [x] 展示型 Markdown 统一为静态 CardKit 2.0，`post + md` 只作为创建失败降级；
 - [x] 操作终态按会话时间线发送独立静态 CardKit 并显示受控详情；
+- [x] 静态 CardKit 展示、操作终态和每轮状态的真实应用验收；
 - [x] 富文本真实应用短回复显示验收；
 - [x] 富文本长回复在客户端折叠显示且消息顺序正确；
 - [x] Thread `active → idle` 状态消息更新的离线实现；
