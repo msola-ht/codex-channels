@@ -2,7 +2,9 @@
 
 ## 状态与目标
 
-状态：阶段 0 规划完成，尚未增加运行时代码、配置、依赖或公开能力。
+状态：阶段 0 第一步“固定官方基线与源码入口”已于 2026-07-27 完成；第二步二维码合同已完成
+离线探针、正常扫码和过期刷新实测，重定向、配对码及重复绑定状态仍只有离线合同覆盖。尚未增加
+运行时代码、配置、依赖或公开能力。
 
 本计划用于把腾讯微信 ClawBot 接入现有 TypeScript 模块化 Gateway。实现必须继续遵守
 [`通讯渠道 Surface 接入指南`](surface-integration-guide.md)，并与 Telegram、飞书共享
@@ -18,24 +20,47 @@ Application、Conversation Core、Approval、Policy、Session Routing、Storage�
 [`Tencent/openclaw-weixin`](https://github.com/Tencent/openclaw-weixin/tree/v2.4.6) 的
 `v2.4.6` 标签，对应提交
 [`cef0bfc`](https://github.com/Tencent/openclaw-weixin/commit/cef0bfc390393f716903e16d50408118047f87e0)。
-后续开始实现前必须重新确认标签、协议说明和微信侧可用性；不能直接以变化中的 `main` 分支作为
-稳定合同。
+2026-07-27 已通过官方远端完整标签列表复核，`v2.4.6` 仍是最新标签；官方 `main` 的包版本同为
+`2.4.6`，但实现和实验仍只使用上述固定标签与提交，不能把变化中的 `main` 当作稳定合同。
 
 | 查询目标 | 固定资料 | 当前事实 |
 | --- | --- | --- |
 | 安装、登录与后端协议 | [`README.zh_CN.md`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/README.zh_CN.md) | 扫码登录；HTTP JSON API；`getupdates` 长轮询；文本、图片、视频和文件发送 |
-| 包与宿主要求 | [`package.json`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/package.json) | Node.js 22+；包本身依赖 OpenClaw Plugin SDK |
+| 包与宿主要求 | [`package.json`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/package.json) | Node.js 22+；官方插件声明 OpenClaw `>=2026.5.12` Peer 依赖并依赖 Plugin SDK |
 | 渠道能力 | [`channel.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/channel.ts) | 当前声明只支持私聊、媒体和块式回复，不声明群聊或交互卡片 |
-| 扫码合同 | [`login-qr.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/auth/login-qr.ts) | 二维码会话、轮询、确认、过期、重定向和 Bot Token 返回 |
-| HTTP API | [`api.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/api/api.ts)、[`types.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/api/types.ts) | Bearer Token、长轮询、发送、输入状态和错误响应 |
-| 消息循环 | [`monitor.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/monitor/monitor.ts) | 按账号维护游标、有限重试、退避和可取消长轮询 |
-| 身份与回复上下文 | [`inbound.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/messaging/inbound.ts)、[`send.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/messaging/send.ts) | `from_user_id`、`message_id`、`context_token` 和受限文本发送 |
-| 账号与游标存储 | [`accounts.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/auth/accounts.ts)、[`sync-buf.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/storage/sync-buf.ts) | 官方插件自行保存账号 Token、账号索引和 `get_updates_buf` |
+| 扫码合同 | [`login-qr.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/auth/login-qr.ts) | 固定二维码主机、Bot Type `3`、5 分钟会话、35 秒状态长轮询、配对码、过期刷新、IDC 重定向、重复绑定、Bot Token、Bot ID、扫码者 ID 和业务 Base URL |
+| HTTP API | [`api.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/api/api.ts)、[`types.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/api/types.ts) | Bearer Token、随机 `X-WECHAT-UIN`、iLink App/版本 Header、`base_info`、长轮询、发送、输入状态、启动/停止通知和错误响应 |
+| 消息循环 | [`monitor.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/monitor/monitor.ts) | 按账号维护游标、有限重试、退避和可取消长轮询；官方实现先持久化响应游标，再逐条处理该批消息 |
+| 身份与回复上下文 | [`inbound.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/messaging/inbound.ts)、[`send.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/messaging/send.ts) | `from_user_id`、数值 `message_id`、`context_token` 和块式文本发送；官方实现缺少上下文令牌时仍尝试发送 |
+| 账号、回复上下文与游标存储 | [`accounts.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/auth/accounts.ts)、[`inbound.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/messaging/inbound.ts)、[`sync-buf.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/storage/sync-buf.ts) | 官方插件把账号 Token、账号索引、每用户 `context_token` 和 `get_updates_buf` 保存为本地 JSON；这是参考行为，不是本项目可复用的安全存储设计 |
 | 许可证 | [`LICENSE`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/LICENSE) | MIT |
 
 官方 README 对 OpenClaw 宿主兼容范围的概述比 `v2.4.6` 包元数据更宽；这只影响官方插件作为
 OpenClaw 扩展运行。Codex Connect 不采用该宿主合同，阶段 0 只把固定标签中的微信 HTTP 协议和
 行为作为待验证参考。
+
+### 2026-07-27 基线复核结论
+
+阶段 0 第一步只固定可审查事实，不代表已获得生产接入授权：
+
+- 官方中文 README 公开了 `getupdates`、`sendmessage`、`getuploadurl`、`getconfig` 和
+  `sendtyping` 的 HTTP JSON 结构，固定源码还实现了二维码、启动通知和停止通知端点。
+- 二维码端点、完整 Header、扫码状态枚举、重定向与配对码主要来自固定源码，而不是 README
+  的公开后端端点表；后续实验必须把“源码行为”和“公开协议承诺”分开记录。
+- MIT 许可证允许使用和修改仓库代码，但不单独证明第三方客户端可以使用腾讯线上微信后端。
+  在执行真实扫码或 API 实验前，仍须确认服务条款和独立客户端接入边界；无法确认时按停止条件
+  结束当前阶段。
+- 官方类型把 `message_id` 表示为 JavaScript `number`，但没有证明真实值始终处于安全整数范围；
+  合同 Fixture 必须保留原始 JSON 并验证精度，业务实现不能先按 `number` 固化。
+- 官方消息循环在处理批次前保存新 `get_updates_buf`。本项目不能直接照搬：阶段 0 必须验证服务端
+  重放和确认语义，再决定持久化时机，避免处理失败后静默丢消息或重启后大量重复。
+- 官方插件会把 Bot Token、`context_token` 和游标保存为普通 JSON，并在缺少
+  `context_token` 时继续尝试发送。本项目明确不复制这些行为：敏感凭据必须进入独立安全后端，
+  回复上下文默认只存在内存，缺少必需令牌时失败关闭。
+- 固定标签的最小协议审查入口为 `src/auth/login-qr.ts`、`src/api/api.ts`、
+  `src/api/types.ts`、`src/monitor/monitor.ts`、`src/messaging/inbound.ts`、
+  `src/messaging/send.ts`、`src/auth/accounts.ts` 与 `src/storage/sync-buf.ts`；OpenClaw 的
+  Channel、路由和会话实现不进入本项目协议 Adapter。
 
 ## 接入决策
 
@@ -144,8 +169,10 @@ Surface 的内部存储，也不得沿用其 Service、文件名或账号键。
 
 本阶段不接入生产 Gateway，不新增公开配置：
 
-1. 固定官方标签、提交和采用的源码入口。
-2. 验证二维码创建、扫描、确认、过期、重定向和重复登录。
+1. 已完成（2026-07-27）：固定官方标签、提交和采用的源码入口，并记录源码行为与公开协议承诺
+   的差异。
+2. 进行中：二维码创建、扫描、确认和过期刷新已完成真实验证；重定向、配对码和重复绑定状态
+   已完成离线合同验证，尚无可控的真实触发条件。
 3. 记录登录成功返回的账号 ID、Actor ID、Bot Token 与 Base URL 的稳定形状，但所有 Fixture
    必须脱敏。
 4. 验证 `getupdates` 的超时、游标推进、空轮询、批量消息、重放和 Token 失效语义。
@@ -158,6 +185,25 @@ Surface 的内部存储，也不得沿用其 Service、文件名或账号键。
 完成标准：形成脱敏合同 Fixture 和最小假客户端测试；明确游标提交时机、凭据撤销方式和阶段 1
 所需依赖，并取得新增微信凭据格式的明确批准。任一关键语义不明确时停在阶段 0，不通过反复试改
 生产代码推断协议。
+
+2026-07-27 已增加隔离的 `scripts/weixin-qr-contract-probe.mjs` 和
+`tests/weixin-qr-contract-probe.test.ts`：固定 `v2.4.6` 的二维码创建与状态请求、严格响应裁剪、
+请求超时与外部取消区分、8 分钟整体上限、配对码、有限刷新和仅允许 `weixin.qq.com` 官方域名的
+重定向。脚本默认只显示帮助，只有人工传入 `qr --live` 才访问固定端点；确认结果中的 Bot Token
+只保存在当前进程内存，不写配置、凭据文件、SQLite、日志或 Fixture。真实扫码只记录下述脱敏
+形状，不保留真实标识或凭据。
+
+2026-07-27 的真实扫码验证得到以下脱敏结果：
+
+- 正常二维码和过期后自动刷新的新二维码均可完成扫码确认并返回凭据。
+- 账号 ID 的稳定形状为不透明主体加 `@im.bot`，扫码者 ID 为不透明主体加 `@im.wechat`；
+  业务 Base URL 返回固定二维码主机。文档、日志和 Fixture 不记录真实主体或 Bot Token。
+- 使用刷新后的新二维码连接时，微信客户端明确提示新连接会删除旧连接。这证明重新扫码具有替换
+  既有连接的外部副作用，但尚不能据此断言所有账号始终只允许一个连接。
+- 阶段 0 探针因此在联网前再次要求人工输入“继续”，明确提醒可能替换旧连接；取消时不得请求
+  二维码。正式设置流程也必须二次确认，并在安全凭据写入成功后才原子替换本地旧凭据。
+- 真实验证产生的 Bot Token 未保存，当前不能用于消息长轮询；进入该实验前必须先完成并批准
+  独立安全凭据后端设计。
 
 ### 阶段 1：单账号私聊文本
 
