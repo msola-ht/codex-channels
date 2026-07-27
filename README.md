@@ -86,7 +86,7 @@ operation_updates = "compact"
 详情摘要；飞书在两种模式下都把耗时单独放在操作卡底栏，微信只发送完成、失败或拒绝的操作终态，
 不发送进行中帧。`"hidden"` 完全隐藏操作过程。审批、
 最终回复、错误和回合结束统计不受影响。默认值为
-`"full"`；旧的布尔字段不再接受。修改后执行 `codexc service reload`，Gateway 会自动重启，
+`"compact"`；旧的布尔字段不再接受。修改后执行 `codexc service reload`，Gateway 会自动重启，
 共享 App Server 和活动 Thread 不受影响。
 
 飞书模块提供“手动输入应用凭据”和“扫码授权”两种方式。扫码后在飞书授权页选择新建应用或

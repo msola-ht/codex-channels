@@ -14,7 +14,7 @@
 
 `display.operation_updates` 是 Telegram、飞书与微信共用的操作过程显示模式：`full` 显示完整详情、
 状态、耗时和退出码，`compact` 显示单行状态、耗时、退出码和最多 160 个字符的详情摘要，
-`hidden` 抑制 `operation.updated` 的平台输出。默认值为 `full`，旧布尔字段由严格 Schema 拒绝。
+`hidden` 抑制 `operation.updated` 的平台输出。默认值为 `compact`，旧布尔字段由严格 Schema 拒绝。
 三种模式都不影响审批、错误、最终回复和 Turn 完成事件；变化需要重启 Gateway，不需要重装或
 重启共享 App Server。微信只发送终态操作，不发送 `running` 更新。
 

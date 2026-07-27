@@ -92,6 +92,9 @@ describe("Telegram setup", () => {
       bot_token: "123456:abcdefghijklmnopqrstuvwxyzABCDE",
       allowed_user_ids: [222, 987654],
     });
+    expect(configured.display).toEqual({
+      operation_updates: "compact",
+    });
     expect(configured.default_workspace).toBe("codex-connect");
     expect(renderedOutput).toContain("?start=setup-code");
   });
