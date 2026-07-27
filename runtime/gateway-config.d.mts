@@ -21,7 +21,7 @@ export interface GatewayConfigDocument {
     allowed_open_ids: string[];
   };
   weixin?: {
-    enabled: false;
+    enabled: boolean;
     account_id: string;
     allowed_user_ids: string[];
   };

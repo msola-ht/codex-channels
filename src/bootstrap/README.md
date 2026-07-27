@@ -12,9 +12,9 @@
   对当前授权 Workspace 执行有时限的只读 Git 分支查询并注入 Application 状态。
 - `surface-plugin.ts`：定义编译期内置 Surface 插件、插件上下文和运行时模块契约，并校验插件 ID、
   实际 Surface ID 与账号实例唯一性。
-- `surface-composition.ts`：显式注册 Telegram、飞书内置插件，并保留各平台访问策略、热加载钩子
-  和故障上报装配。Telegram 插件始终创建一个实例；飞书插件只在严格运行配置启用时创建实例，
-  并从现有授权绑定推导安全配置与启动通知会话。
+- `surface-composition.ts`：显式注册 Telegram、飞书和微信内置插件，并保留各平台访问策略、
+  热加载钩子和故障上报装配。Telegram 插件始终创建一个实例；飞书和微信插件只在严格运行配置
+  启用时创建实例。微信协议 Client 在首次调用时从独立安全存储读取凭据，不把 Token 放入运行配置。
 - `config-lifecycle.ts`：管理配置监听、防抖重载、持久配置事件投递、信号与进程退出。
 - `surface-manager.ts`：按 `surface + accountId` 向已启动 Surface 集中路由 Core 输出，并为
   `turn.completed` 注入当前授权 Workspace 的 Git 分支；按注册顺序启动 Surface，失败时反向

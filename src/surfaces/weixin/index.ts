@@ -9,6 +9,10 @@ export {
   type WeixinCredentialStore,
 } from "./credential-store.js";
 export {
+  createCredentialBackedWeixinClient,
+  type CreateCredentialBackedWeixinClientOptions,
+} from "./credential-client.js";
+export {
   FileWeixinUpdatesCursorStore,
   type WeixinUpdatesCursorStore,
 } from "./updates-cursor-store.js";

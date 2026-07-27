@@ -9,6 +9,13 @@ export {
   type TelegramImagePort,
 } from "./telegram/index.js";
 export {
+  createCredentialBackedWeixinClient,
+  createWeixinCredentialStore,
+  FileWeixinUpdatesCursorStore,
+  WeixinSurface,
+  type WeixinProtocolClient,
+} from "./weixin/index.js";
+export {
   ConversationDeliveryQueue,
   type ConversationDeliveryQueueOptions,
 } from "./conversation-delivery-queue.js";

@@ -182,6 +182,54 @@ describe("Gateway config reload", () => {
     });
   });
 
+  it("restarts when Weixin is enabled or its account changes", () => {
+    const weixin = {
+      accountId: "bot-fixture@im.bot",
+      allowedUserIds: new Set(["actor-fixture@im.wechat"]),
+    };
+    expect(classifyConfigReload(config(), config({ weixin }))).toEqual({
+      action: "restart",
+      changes: [{ code: "surface.weixin.enabled", scope: "weixin" }],
+    });
+    expect(classifyConfigReload(
+      config({ weixin }),
+      config({
+        weixin: {
+          ...weixin,
+          accountId: "other-fixture@im.bot",
+        },
+      }),
+    )).toEqual({
+      action: "restart",
+      changes: [{ code: "surface.weixin.account", scope: "weixin" }],
+    });
+  });
+
+  it("hot reloads Weixin allowed user IDs", () => {
+    const current = config({
+      weixin: {
+        accountId: "bot-fixture@im.bot",
+        allowedUserIds: new Set([
+          "actor-fixture@im.wechat",
+          "reviewer-fixture@im.wechat",
+        ]),
+      },
+    });
+
+    expect(classifyConfigReload(
+      current,
+      config({
+        weixin: {
+          accountId: "bot-fixture@im.bot",
+          allowedUserIds: new Set(["actor-fixture@im.wechat"]),
+        },
+      }),
+    )).toEqual({
+      action: "reload",
+      changes: [{ code: "surface.weixin.allowed-users", scope: "weixin" }],
+    });
+  });
+
   it.each([
     ["codex.binary", { codexBinary: "/opt/codex" }],
     ["codex.socket", { codexSocketPath: "/tmp/other.sock" }],

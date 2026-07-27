@@ -19,8 +19,9 @@
   明确确认后只增量申请缺失的应用权限，并通过飞书客户端内的授权页自动补齐菜单、事件与回调后
   提交应用版本。Doctor 会分别检查菜单节点和启用开关；节点存在但
   未启用时显示“已添加，尚未启用”。当前不支持飞书群聊或一般文件。
-- 微信接入处于阶段 0：`codexc setup` 已可在明确确认连接替换风险后扫码，把 Bot Token 保存到
-  独立安全凭据后端，并记录脱敏账号与允许用户；当前配置保持禁用，尚不接收或发送微信消息。
+- 微信单账号私聊文本 Surface 已接入：`codexc setup` 会在明确确认连接替换风险后扫码，把
+  Bot Token 保存到独立安全凭据后端，并记录脱敏账号与允许用户；将保存配置中的
+  `weixin.enabled` 显式改为 `true` 并重载服务后开始接收和回复文本。
 - 查看 Codex 流式回复、格式化最终回复、操作过程、计划、Diff、Goal、用量和额度；长文本自动折叠，超长代码以预览加完整文件发送；Telegram 与飞书的 `/status`、启动联通通知和每轮结束状态卡均显示当前授权 Workspace 的 Git 分支；`/status` 还显示 Thread 累计缓存命中率，每轮结束状态卡显示最近 Turn 缓存命中率、当前 Goal 状态及 Thread 上下文压缩总次数，飞书把 App Server 返回的准确对话耗时单独放在卡片底栏。
 - App Server 明确返回的 Turn、warning 和 MCP 错误会在统一脱敏并限长后显示到对应通讯渠道；未知内部异常、凭据和未经约束的响应正文仍不会直接发送。
 - Telegram 通知按逻辑事件降噪：过程、状态、上下文和后续分片静默发送；最终回复、审批、用户输入与严重错误保留提醒。
@@ -120,13 +121,15 @@ TOML、SQLite 或日志。macOS 使用独立 Keychain Service，Linux 使用
 
 ```toml
 [weixin]
-enabled = false
+enabled = true
 account_id = "不透明账号@im.bot"
 allowed_user_ids = ["不透明用户@im.wechat"]
 ```
 
-当前版本只接受 `enabled = false`，表示连接已安全保存但消息 Surface 尚未实现；`codexc doctor`
-会只读检查对应安全凭据是否存在且载荷有效，不显示 Token。不要手工把它改为 `true`。
+Setup 默认保存 `enabled = false`，避免扫码完成后在操作者确认前启动长轮询。确认账号与允许名单
+后可将其改为 `true`，执行 `codexc service reload`；Gateway 会从安全凭据后端延迟读取 Token，
+接收允许用户的私聊文本并使用当前消息的内存回复上下文发送最终回复。`codexc doctor` 会只读
+检查对应安全凭据是否存在且载荷有效，不显示 Token。微信暂不支持媒体、群聊、主动推送或审批。
 
 最终回复默认把常用 Markdown 安全转换为兼容性更好的 Telegram HTML。支持 Rich Messages
 的客户端可设置 `telegram.message_format = "rich"`；修改后执行 `codexc service reload`，
@@ -354,14 +357,15 @@ Codex App Server（独立进程，Unix WebSocket）
     ├── Application Commands / Approval / Policy / Storage / Event Bus
     └── Surfaces
         ├── Telegram
-        └── 飞书（配置启用时）
+        ├── 飞书（配置启用时）
+        └── 微信（配置启用时）
 ```
 
 App Server 是 Thread、Turn 和 Item 的唯一事实来源。SQLite 只保存外部 conversation、Surface
 账号、Workspace 与 Thread 的最小绑定。Surface 通过编译期内置插件注册表显式接入；Telegram
-插件始终创建一个默认账号实例，飞书插件只在有效配置明确启用时创建实例。插件 ID、实际 Surface
-ID 和 `surface + accountId` 会在启动装配时校验；当前不扫描目录或动态加载外部 npm 包。微信
-目前只有 Setup 与安全凭据边界，不在上述运行时 Surface 树中。各平台通过统一服务和
+插件始终创建一个默认账号实例，飞书和微信插件只在有效配置明确启用时创建实例。插件 ID、实际
+Surface ID 和 `surface + accountId` 会在启动装配时校验；当前不扫描目录或动态加载外部 npm
+包。各平台通过统一服务和
 `target + actorId` 授权上下文接入，
 不修改 Conversation Core 或 Codex Client；授权同时按 Surface 账号隔离。Application 返回结构化
 结果，平台 SDK、文案、消息格式和文件传输由各自适配器实现；未知内部错误不会原样发送到外部聊天。

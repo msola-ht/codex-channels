@@ -46,7 +46,7 @@ const feishuSchema = z.strictObject({
 });
 
 const weixinSetupSchema = z.strictObject({
-  enabled: z.literal(false),
+  enabled: z.boolean(),
   account_id: z.string().regex(/^[^\s@]{1,1000}@im\.bot$/u),
   allowed_user_ids: z.array(
     z.string().regex(/^[^\s@]{1,1000}@im\.wechat$/u),

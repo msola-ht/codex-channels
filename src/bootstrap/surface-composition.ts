@@ -7,6 +7,7 @@ import type { GatewayConfig } from "../config/index.js";
 import {
   FeishuAccessPolicy,
   TelegramAccessPolicy,
+  WeixinAccessPolicy,
 } from "../policy/index.js";
 import type { BindingStore } from "../storage/index.js";
 import {
@@ -14,6 +15,10 @@ import {
   renderFeishuStartupNotification,
   TelegramSurface,
   telegramDefaultAccountId,
+  createCredentialBackedWeixinClient,
+  createWeixinCredentialStore,
+  FileWeixinUpdatesCursorStore,
+  WeixinSurface,
   type SurfaceAdapter,
 } from "../surfaces/index.js";
 import {
@@ -40,6 +45,14 @@ export interface ReloadableFeishuAccess {
   replace(allowedOpenIds: ReadonlySet<string>): void;
 }
 
+export interface WeixinRuntimeAdapter extends SurfaceAdapter {
+  readonly surface: "weixin";
+}
+
+export interface ReloadableWeixinAccess {
+  replace(allowedUserIds: ReadonlySet<string>): void;
+}
+
 export function createSurfaceModules(
   options: SurfacePluginContext,
   plugins: readonly BuiltInSurfacePlugin[] = builtInSurfacePlugins,
@@ -59,11 +72,65 @@ export const feishuSurfacePlugin: BuiltInSurfacePlugin = {
     : [],
 };
 
+export const weixinSurfacePlugin: BuiltInSurfacePlugin = {
+  id: "weixin",
+  create: (options) => options.config.weixin
+    ? [createWeixinModule(options)]
+    : [],
+};
+
 export const builtInSurfacePlugins: readonly BuiltInSurfacePlugin[] =
   Object.freeze([
     telegramSurfacePlugin,
     feishuSurfacePlugin,
+    weixinSurfacePlugin,
   ]);
+
+function createWeixinModule(
+  options: SurfacePluginContext,
+): SurfaceRuntimeModule {
+  const config = options.config.weixin;
+  if (!config) {
+    throw new Error("微信运行配置不存在");
+  }
+  const dataDirectory = dirname(options.config.stateDatabasePath);
+  const access = new WeixinAccessPolicy(
+    config.allowedUserIds,
+    config.accountId,
+  );
+  const removedBindings = removeUnauthorizedWeixinBindings(
+    options.bindings,
+    config.allowedUserIds,
+    config.accountId,
+  );
+  if (removedBindings > 0) {
+    options.logger.warn({ removedBindings }, "已清理不再授权的微信会话绑定");
+  }
+  const credentialStore = createWeixinCredentialStore(
+    join(dataDirectory, "credentials", "weixin"),
+  );
+  const adapter = new WeixinSurface({
+    accountId: config.accountId,
+    client: createCredentialBackedWeixinClient({
+      accountId: config.accountId,
+      credentialStore,
+    }),
+    cursorStore: new FileWeixinUpdatesCursorStore(
+      join(dataDirectory, "weixin-updates"),
+    ),
+    service: options.service,
+    access,
+    actorRegistry: options.bindings,
+    logger: options.logger,
+    onFatal: (error) => options.onFatal("weixin", config.accountId, error),
+  });
+  return createWeixinRuntimeModule(
+    adapter,
+    access,
+    options.bindings,
+    options.logger,
+  );
+}
 
 function createFeishuModule(
   options: SurfacePluginContext,
@@ -309,6 +376,37 @@ export function createFeishuRuntimeModule(
   };
 }
 
+export function createWeixinRuntimeModule(
+  adapter: WeixinRuntimeAdapter,
+  access: ReloadableWeixinAccess,
+  bindings: BindingStore,
+  logger: Logger,
+): SurfaceRuntimeModule {
+  return {
+    adapter,
+    applyHotReload(next, changes) {
+      if (!changes.some((change) => change.code === "surface.weixin.allowed-users")) {
+        return;
+      }
+      if (!next.weixin) {
+        throw new Error("微信允许名单热加载缺少运行配置");
+      }
+      access.replace(next.weixin.allowedUserIds);
+      const removedBindings = removeUnauthorizedWeixinBindings(
+        bindings,
+        next.weixin.allowedUserIds,
+        adapter.accountId,
+      );
+      if (removedBindings > 0) {
+        logger.warn({ removedBindings }, "已清理不再授权的微信会话绑定");
+      }
+    },
+    prepareRestartNotification() {
+      return () => {};
+    },
+  };
+}
+
 function intersectNumberSets(
   left: ReadonlySet<number>,
   right: ReadonlySet<number>,
@@ -353,6 +451,30 @@ export function removeUnauthorizedFeishuBindings(
     }
     const allowedActors = new Set(
       bindings.actors(binding.target).filter((actorId) => allowedOpenIds.has(actorId)),
+    );
+    if (bindings.retainActors(binding.target, allowedActors)) {
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
+export function removeUnauthorizedWeixinBindings(
+  bindings: BindingStore,
+  allowedUserIds: ReadonlySet<string>,
+  accountId: string,
+): number {
+  let removed = 0;
+  for (const binding of bindings.list()) {
+    if (
+      binding.target.surface !== "weixin"
+      || binding.target.accountId !== accountId
+    ) {
+      continue;
+    }
+    const allowedActors = new Set(
+      bindings.actors(binding.target).filter((actorId) =>
+        allowedUserIds.has(actorId)),
     );
     if (bindings.retainActors(binding.target, allowedActors)) {
       removed += 1;

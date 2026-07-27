@@ -3,10 +3,11 @@
 ## 状态与目标
 
 状态：阶段 0 第一步“固定官方基线与源码入口”已于 2026-07-27 完成；第二步二维码合同已完成
-离线探针、正常扫码和过期刷新实测，重定向、配对码及重复绑定状态仍只有离线合同覆盖。尚未注册
-微信消息 Surface 或新增依赖；独立安全凭据 Store、统一 Setup 的禁用态连接配置、窄协议 Client、
-版本 1 游标检查点、私聊文本输入 Adapter、内存回复上下文、纯文本 Outbox 与失败关闭交互端口
-已实现；目录内部完整 `SurfaceAdapter` 已完成，尚未从一级 Surface 入口公开或注册 Bootstrap。
+离线探针、正常扫码和过期刷新实测，重定向、配对码及重复绑定状态仍只有离线合同覆盖。微信
+单账号私聊文本 Surface 已加入显式内置注册表且未新增依赖；独立安全凭据 Store、统一 Setup 的
+默认禁用连接配置、窄协议 Client、版本 1 游标检查点、私聊文本输入 Adapter、内存回复上下文、
+纯文本 Outbox 与失败关闭交互端口已实现；完整 `SurfaceAdapter` 已从一级 Surface 入口受控公开，
+显式 `enabled = true` 时由 Bootstrap 注册。
 
 本计划用于把腾讯微信 ClawBot 接入现有 TypeScript 模块化 Gateway。实现必须继续遵守
 [`通讯渠道 Surface 接入指南`](surface-integration-guide.md)，并与 Telegram、飞书共享
@@ -215,8 +216,8 @@ Surface 的内部存储，也不得沿用其 Service、文件名或账号键。
 同日开始实现已批准的凭据格式与统一 Setup：共享机制仅抽取 Keychain 调用、AES-256-GCM、私有
 权限和原子文件替换；飞书既有 Service、目录、键和载荷保持不变。微信使用独立 Service 与
 `credentials/weixin`，版本 1 载荷只包含账号 ID、Bot Token、业务 Base URL 和授权时间。
-Setup 写入 `enabled = false` 的严格非敏感元数据并明确提示消息 Surface 尚未实现；正式运行时
-启用仍属于下一批。
+Setup 写入 `enabled = false` 的严格非敏感元数据；该批实现时消息 Surface 尚未接入。后续已
+完成显式启用配置与运行时组合，Setup 默认值仍保持关闭，需由操作者确认后改为 `true`。
 
 真实 Setup 已完成风险确认、扫码、凭据加密写入和非敏感配置保存；随后 `codexc doctor` 成功从
 独立后端读取并严格校验凭据，且全程未显示 Bot Token。实际账号与扫码者标识只保存在用户配置和
@@ -308,8 +309,9 @@ Conversation 队列投递；每个气泡最多 4000 个 UTF-16 码元、最多�
 报告稳定分类。由于当前不持久化回复上下文，也没有安全主动收件人，持久配置通知明确失败关闭，
 不尝试向未知用户推送。
 
-该类型仍只由微信目录入口导出。下一批必须先实现微信 Access Policy 和 Bootstrap 组合工厂，
-从安全凭据 Store 读取精确账号连接，再经一级 Surface 入口受控导出并加入内置插件注册表。
+该类型已通过一级 Surface 入口向 Bootstrap 导出。微信 Access Policy、延迟安全凭据 Client、
+Bootstrap 组合工厂、撤权绑定清理和显式启用配置已实现；Setup 仍默认保存禁用态，操作者确认后
+需显式设置 `enabled = true` 才启动真实长轮询。
 
 ### 阶段 1：单账号私聊文本
 

@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createCredentialBackedWeixinClient,
   createWeixinProtocolClient,
+  type StoredWeixinCredential,
+  type WeixinCredentialStore,
   type WeixinProtocolError,
 } from "../src/surfaces/weixin/index.js";
 
@@ -9,6 +12,68 @@ const accountId = "account-fixture@im.bot";
 const actorId = "actor-fixture@im.wechat";
 
 describe("WeixinProtocolClient", () => {
+  it("loads the secure credential once and keeps it out of runtime config", async () => {
+    const credential: StoredWeixinCredential = {
+      version: 1,
+      accountId,
+      baseUrl: "https://ilinkai.weixin.qq.com",
+      botToken: "bot-secret",
+      grantedAt: 1,
+    };
+    const store: WeixinCredentialStore = {
+      get: vi.fn(async () => credential),
+      set: vi.fn(async () => {}),
+      remove: vi.fn(async () => {}),
+    };
+    const getUpdates = vi.fn(async () => ({
+      cursor: "next",
+      messages: [],
+    }));
+    const sendText = vi.fn(async () => {});
+    const createClient = vi.fn(() => ({ getUpdates, sendText }));
+    const client = createCredentialBackedWeixinClient({
+      accountId,
+      credentialStore: store,
+      createClient,
+    });
+
+    await client.getUpdates("current");
+    await client.sendText({
+      actorId,
+      contextToken: "context",
+      text: "reply",
+    });
+
+    expect(store.get).toHaveBeenCalledOnce();
+    expect(store.get).toHaveBeenCalledWith(accountId);
+    expect(createClient).toHaveBeenCalledOnce();
+    expect(createClient).toHaveBeenCalledWith({
+      accountId,
+      baseUrl: credential.baseUrl,
+      botToken: credential.botToken,
+    });
+  });
+
+  it("fails closed when the configured account has no secure credential", async () => {
+    const store: WeixinCredentialStore = {
+      get: vi.fn(async () => null),
+      set: vi.fn(async () => {}),
+      remove: vi.fn(async () => {}),
+    };
+    const client = createCredentialBackedWeixinClient({
+      accountId,
+      credentialStore: store,
+    });
+
+    await expect(client.getUpdates("")).rejects.toThrow(
+      "微信加密凭据不存在",
+    );
+    await expect(client.getUpdates("")).rejects.toThrow(
+      "微信加密凭据不存在",
+    );
+    expect(store.get).toHaveBeenCalledOnce();
+  });
+
   it("parses exact message IDs and sends the fixed getupdates contract", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () =>
       new Response(exactMessageIds({

@@ -15,7 +15,7 @@
 - [`weixin/`](weixin/README.md)：微信阶段 0/Setup 的严格独立凭据边界、固定版窄协议 Client、
   私有原子游标检查点、可取消接收监控器和授权后提交 Application 的私聊文本输入 Adapter；
   内存回复上下文、纯文本有界 Outbox、失败关闭交互端口和目录内部完整 `SurfaceAdapter`
-  已实现，消息 Surface 尚未注册。
+  已实现；严格运行配置显式启用时由 Bootstrap 注册单账号私聊文本 Surface。
 
 `secure-credential-store.ts` 提供 Surface 内部复用的 macOS Keychain 和 Linux AES-256-GCM
 字符串记录机制；平台模块仍各自拥有 Service、目录、记录键、载荷校验和错误语义。

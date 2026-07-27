@@ -207,7 +207,7 @@ describe("Gateway config.toml", () => {
     }).config.feishu).toBeUndefined();
   });
 
-  it("accepts only the disabled Weixin setup metadata", () => {
+  it("keeps disabled Weixin setup metadata out of runtime config", () => {
     const fixture = createFixture({
       weixin: {
         enabled: false,
@@ -216,10 +216,12 @@ describe("Gateway config.toml", () => {
       },
     });
 
-    expect(() => loadRuntimeConfig({
+    expect(loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    })).not.toThrow();
+    }).config.weixin).toBeUndefined();
+  });
 
+  it("loads an explicitly enabled Weixin account without a plaintext token", () => {
     const enabled = createFixture({
       weixin: {
         enabled: true,
@@ -227,8 +229,47 @@ describe("Gateway config.toml", () => {
         allowed_user_ids: ["actor-fixture@im.wechat"],
       },
     });
-    expect(() => loadRuntimeConfig({
+    expect(loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: enabled.configPath,
+    }).config.weixin).toEqual({
+      accountId: "bot-fixture@im.bot",
+      allowedUserIds: new Set(["actor-fixture@im.wechat"]),
+    });
+  });
+
+  it.each([
+    [
+      "invalid account ID",
+      {
+        enabled: true,
+        account_id: "invalid",
+        allowed_user_ids: ["actor-fixture@im.wechat"],
+      },
+    ],
+    [
+      "invalid user ID",
+      {
+        enabled: true,
+        account_id: "bot-fixture@im.bot",
+        allowed_user_ids: ["invalid"],
+      },
+    ],
+    [
+      "duplicate user IDs",
+      {
+        enabled: true,
+        account_id: "bot-fixture@im.bot",
+        allowed_user_ids: [
+          "actor-fixture@im.wechat",
+          "actor-fixture@im.wechat",
+        ],
+      },
+    ],
+  ])("rejects Weixin %s", (_name, weixin) => {
+    const fixture = createFixture({ weixin });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
     })).toThrow(ConfigurationError);
   });
 

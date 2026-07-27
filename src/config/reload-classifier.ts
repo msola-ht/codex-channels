@@ -68,6 +68,7 @@ function restartRequiredReasons(
     [configChange("surface.telegram.proxy", "telegram"), current.telegramProxyUrl, next.telegramProxyUrl],
     [configChange("surface.telegram.message-format", "telegram"), current.telegramMessageFormat, next.telegramMessageFormat],
     [configChange("surface.feishu.enabled", "feishu"), current.feishu !== undefined, next.feishu !== undefined],
+    [configChange("surface.weixin.enabled", "weixin"), current.weixin !== undefined, next.weixin !== undefined],
     [configChange("codex.default-model"), current.codexModel, next.codexModel],
     [configChange("codex.sandbox"), current.codexSandbox, next.codexSandbox],
     [configChange("storage.database"), current.stateDatabasePath, next.stateDatabasePath],
@@ -94,6 +95,13 @@ function restartRequiredReasons(
     )
   ) {
     reasons.push(configChange("surface.feishu.credentials", "feishu"));
+  }
+  if (
+    current.weixin !== undefined
+    && next.weixin !== undefined
+    && current.weixin.accountId !== next.weixin.accountId
+  ) {
+    reasons.push(configChange("surface.weixin.account", "weixin"));
   }
   if (!preservesExistingWorkspaces(current.workspaces, next.workspaces)) {
     reasons.push(configChange("workspace.registry"));
@@ -134,6 +142,16 @@ function hotReloadReasons(
     )
   ) {
     reasons.push(configChange("surface.feishu.allowed-users", "feishu"));
+  }
+  if (
+    current.weixin !== undefined
+    && next.weixin !== undefined
+    && !sameSet(
+      current.weixin.allowedUserIds,
+      next.weixin.allowedUserIds,
+    )
+  ) {
+    reasons.push(configChange("surface.weixin.allowed-users", "weixin"));
   }
   return reasons;
 }

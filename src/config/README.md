@@ -23,6 +23,6 @@
 启用状态或凭据变化需要重启 Gateway，允许 Open ID 集合可热加载；允许名单收窄时同时清理该飞书
 账号下已撤权 Actor 的绑定。
 
-微信 Setup 当前写入严格的禁用态 `weixin` 表，只包含 `enabled = false`、账号 ID 和允许用户
-ID；Bot Token 位于独立安全凭据后端。当前版本拒绝把微信设置为启用，避免在消息 Surface 尚未
-实现时误报可用。
+微信 Setup 写入默认禁用的 `weixin` 表，只包含 `enabled`、账号 ID 和允许用户 ID；Bot Token
+位于独立安全凭据后端。整表缺失或 `enabled = false` 时运行配置不包含微信账号；显式启用后
+账号或启用状态变化需要重启 Gateway，允许用户集合可热加载，并同步清理被撤权 Actor 的绑定。

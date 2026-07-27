@@ -106,7 +106,9 @@ describe("Weixin setup", () => {
         allowed_user_ids: ["actor-fixture@im.wechat"],
       });
     expect(output).not.toContain("bot-secret");
-    expect(output).toContain("消息接收尚未启用");
+    expect(output).toContain("weixin.enabled");
+    expect(output).toContain("codexc service reload");
+    expect(output).not.toContain("下一步实现");
   });
 
   it("restores the previous credential when config persistence fails", async () => {

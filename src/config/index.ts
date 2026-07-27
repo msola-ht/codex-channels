@@ -21,6 +21,7 @@ export {
   type FeishuConfigChangeCode,
   type GlobalConfigChangeCode,
   type TelegramConfigChangeCode,
+  type WeixinConfigChangeCode,
 } from "./config-change.js";
 export {
   classifyConfigReload,
@@ -36,6 +37,10 @@ export interface GatewayConfig {
     appId: string;
     appSecret: string;
     allowedOpenIds: ReadonlySet<string>;
+  };
+  weixin?: {
+    accountId: string;
+    allowedUserIds: ReadonlySet<string>;
   };
   codexBinary: string;
   networkProxy: {
@@ -126,6 +131,14 @@ export function loadConfigDocument(
             appId: raw.feishu.app_id,
             appSecret: raw.feishu.app_secret,
             allowedOpenIds: new Set(raw.feishu.allowed_open_ids),
+          },
+        }
+      : {}),
+    ...(raw.weixin?.enabled
+      ? {
+          weixin: {
+            accountId: raw.weixin.account_id,
+            allowedUserIds: new Set(raw.weixin.allowed_user_ids),
           },
         }
       : {}),

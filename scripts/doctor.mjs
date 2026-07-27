@@ -114,7 +114,12 @@ if (document) {
     } catch {
       record("微信连接", false, "安全凭据读取或校验失败");
     }
-    note("微信运行时", "消息接收 Surface 尚未启用");
+    note(
+      "微信运行时",
+      weixin.enabled === true
+        ? "配置已启用"
+        : "配置未启用；将 weixin.enabled 设为 true 后运行 codexc service reload",
+    );
   } else {
     note("微信", "未配置");
   }

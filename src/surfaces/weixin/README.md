@@ -1,11 +1,13 @@
 # 微信 Surface
 
-当前实现阶段 0/Setup 的独立安全凭据边界，以及运行时接入前的窄协议 Client、私有游标
+当前实现阶段 0/Setup 的独立安全凭据边界，以及运行时窄协议 Client、私有游标
 检查点、私聊文本输入 Adapter、纯文本 Outbox、失败关闭交互端口和目录内部完整
-`SurfaceAdapter`；尚未注册微信消息 Surface，未修改 SQLite。
+`SurfaceAdapter`；严格运行配置显式启用时由 Bootstrap 注册，未新增 SQLite Schema。
 
 - `credential-store.ts`：严格校验版本 1 微信 Bot 凭据；macOS 使用独立 Keychain Service，
   Linux 使用独立 `credentials/weixin` AES-256-GCM 私有目录。
+- `credential-client.ts`：首次协议调用时从安全存储读取并缓存当前进程的凭据 Client；缺失或
+  损坏凭据失败关闭，不把 Token 提升到 Bootstrap 配置或日志。
 - `updates-cursor-store.ts`：在 `data/weixin-updates` 下按账号 SHA-256 文件名保存严格版本 1
   `get_updates_buf`；目录 `0700`、文件 `0600`，临时文件原子替换，损坏、未知版本和符号链接
   失败关闭。
@@ -30,5 +32,5 @@
 
 二维码、验证码、扫码者 ID、消息和回复上下文均不持久化；长轮询游标只进入独立检查点，不进入
 凭据、TOML 或 SQLite。未知版本、身份不匹配、密文或载荷损坏失败关闭，不能当作未配置后静默
-重新扫码。微信目录已经提供完整 `SurfaceAdapter`，但尚未从一级 `src/surfaces/index.ts`
-公开，也未加入 Bootstrap 内置插件注册表；配置、凭据装配和启用流程完成前不能启动。
+重新扫码。微信目录通过一级 `src/surfaces/index.ts` 公开运行时组合所需的窄接口，并由 Bootstrap
+内置插件装配安全凭据 Client、游标 Store、精确 Access Policy 和生命周期故障上报。

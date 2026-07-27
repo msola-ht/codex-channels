@@ -85,7 +85,7 @@
 - `check-release-tag.mjs`：要求 Git Tag 与 `package.json` 版本严格一致，防止发布错版。
 - `sync-gateway-version.mjs`：以锁定的 Codex CLI 协议版本同步 `package.json`、锁文件和 Gateway 运行时版本；不维护独立版本号。
 - `doctor.mjs`：检查 npm 包、Node、Codex CLI、当前 TOML 配置、Workspace、飞书凭据/Bot 身份、
-  微信安全凭据、
+  微信安全凭据与运行时启用状态、
   Unix WebSocket、`initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，不输出
   完整 User-Agent、飞书上游响应或敏感配置内容。
 - `install-launchd.mjs`：渲染并安装 launchd plist；代理由 CLI 服务入口在每次启动时解析。

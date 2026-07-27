@@ -636,6 +636,55 @@ describe("codexc CLI", () => {
     expect(diagnosed.stdout).not.toContain("[失败] 配置目录权限");
   });
 
+  it("reports the configured Weixin runtime enablement state", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-weixin-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    mkdirSync(workspace);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], {
+      cwd: workspace,
+      env: environment,
+    });
+    const configPath = join(home, "config.toml");
+    updateGatewayConfig(configPath, (document) => {
+      const telegram = table(document.telegram);
+      telegram.bot_token = "test-token";
+      telegram.allowed_user_ids = [123456];
+      document.weixin = {
+        enabled: true,
+        account_id: "bot-fixture@im.bot",
+        allowed_user_ids: ["actor-fixture@im.wechat"],
+      };
+    });
+
+    const enabled = spawnSync(process.execPath, [cli, "doctor"], {
+      cwd: workspace,
+      env: environment,
+      encoding: "utf8",
+    });
+    expect(enabled.stdout).toContain(
+      "[提示] 微信运行时：配置已启用",
+    );
+
+    updateGatewayConfig(configPath, (document) => {
+      table(document.weixin).enabled = false;
+    });
+    const disabled = spawnSync(process.execPath, [cli, "doctor"], {
+      cwd: workspace,
+      env: environment,
+      encoding: "utf8",
+    });
+    expect(disabled.stdout).toContain(
+      "[提示] 微信运行时：配置未启用",
+    );
+  });
+
   it("diagnoses configuration and a real Unix WebSocket without exposing the Telegram token", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-"));
     temporaryDirectories.push(root);

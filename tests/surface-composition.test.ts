@@ -7,9 +7,11 @@ import {
   createFeishuRuntimeModule,
   createSurfaceModules,
   createTelegramRuntimeModule,
+  createWeixinRuntimeModule,
   selectFeishuProxyUrl,
   type FeishuRuntimeAdapter,
   type TelegramRuntimeAdapter,
+  type WeixinRuntimeAdapter,
 } from "../src/bootstrap/surface-composition.js";
 import {
   composeBuiltInSurfacePlugins,
@@ -86,13 +88,17 @@ describe("Telegram Surface runtime composition", () => {
 });
 
 describe("configured Surface composition", () => {
-  it("registers Feishu only when its runtime config is enabled", () => {
+  it("registers optional Surfaces only when their runtime config is enabled", () => {
     const disabled = createSurfaceModules(options(config()));
     const enabled = createSurfaceModules(options(config({
       feishu: {
         appId: "cli_0123456789abcdef",
         appSecret: "secret",
         allowedOpenIds: new Set(["ou_actor"]),
+      },
+      weixin: {
+        accountId: "bot-fixture@im.bot",
+        allowedUserIds: new Set(["actor-fixture@im.wechat"]),
       },
     })));
 
@@ -102,6 +108,7 @@ describe("configured Surface composition", () => {
     expect(enabled.map((module) => module.adapter.surface)).toEqual([
       "telegram",
       "feishu",
+      "weixin",
     ]);
   });
 
@@ -256,6 +263,57 @@ describe("Feishu Surface runtime composition", () => {
   });
 });
 
+describe("Weixin Surface runtime composition", () => {
+  it("hot reloads authorization and removes bindings for revoked actors", () => {
+    const bindings = new MemoryBindingStore();
+    const accountId = "bot-fixture@im.bot";
+    const allowed = {
+      surface: "weixin",
+      accountId,
+      conversationId: "allowed@im.wechat",
+    } as const;
+    const revoked = {
+      surface: "weixin",
+      accountId,
+      conversationId: "revoked@im.wechat",
+    } as const;
+    for (const [target, actorId, threadId] of [
+      [allowed, "allowed@im.wechat", "thread-allowed"],
+      [revoked, "revoked@im.wechat", "thread-revoked"],
+    ] as const) {
+      bindings.bind({
+        target,
+        workspaceId: "main",
+        threadId,
+        sessionId: `session-${threadId}`,
+      });
+      bindings.rememberActor(target, actorId);
+    }
+    const replaceAccess = vi.fn();
+    const module = createWeixinRuntimeModule(
+      weixinAdapter(),
+      { replace: replaceAccess },
+      bindings,
+      pino({ level: "silent" }),
+    );
+    const next = config({
+      weixin: {
+        accountId,
+        allowedUserIds: new Set(["allowed@im.wechat"]),
+      },
+    });
+
+    module.applyHotReload(next, [{
+      code: "surface.weixin.allowed-users",
+      scope: "weixin",
+    }]);
+
+    expect(replaceAccess).toHaveBeenCalledWith(next.weixin?.allowedUserIds);
+    expect(bindings.getByThread("thread-allowed")).toBeDefined();
+    expect(bindings.getByThread("thread-revoked")).toBeUndefined();
+  });
+});
+
 function adapter(recipientSnapshots: number[][]): TelegramRuntimeAdapter {
   return {
     surface: "telegram",
@@ -277,6 +335,20 @@ function feishuAdapter(): FeishuRuntimeAdapter {
   return {
     surface: "feishu",
     accountId: "cli_0123456789abcdef",
+    interactions,
+    output: {
+      handle() {},
+    },
+    async start() {},
+    async stop() {},
+    async deliverConfigurationChange() {},
+  };
+}
+
+function weixinAdapter(): WeixinRuntimeAdapter {
+  return {
+    surface: "weixin",
+    accountId: "bot-fixture@im.bot",
     interactions,
     output: {
       handle() {},

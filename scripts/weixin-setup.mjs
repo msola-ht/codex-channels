@@ -35,7 +35,7 @@ export async function runWeixinSetup({
 
   try {
     output.write("\nCodex Connect 微信 Setup\n\n");
-    output.write("当前步骤只安全保存微信连接；消息接收 Surface 尚未启用。\n");
+    output.write("扫码成功后默认安全保存为未启用；确认配置后可启用微信消息接收。\n");
     output.write("警告：微信可能用新连接替换并删除该账号已有的机器人连接。\n");
     if (!await prompt.confirm("确认继续扫码连接微信？", false)) {
       output.write("已取消，未请求微信二维码。\n");
@@ -70,7 +70,7 @@ export async function runWeixinSetup({
     output.write(`- 账号 ID：${credential.accountId}\n`);
     output.write(`- 扫码用户：${scannerId}\n`);
     output.write("- Bot Token：已获取（不显示）\n");
-    output.write("- 运行状态：已配置，消息接收尚未启用\n");
+    output.write("- 运行状态：已配置，默认未启用\n");
     if (!await prompt.confirm("确认安全保存以上连接？", true)) {
       output.write("未保存微信连接；本次 Token 已丢弃。\n");
       return undefined;
@@ -106,7 +106,9 @@ export async function runWeixinSetup({
     }
 
     output.write(`\n微信连接已安全保存：${configPath}\n`);
-    output.write("当前不会启动微信消息接收；下一步实现 getupdates 合同与单账号私聊 Surface。\n");
+    output.write(
+      "如需启用消息接收，请将 weixin.enabled 改为 true，然后运行 codexc service reload。\n",
+    );
     return {
       accountId: credential.accountId,
       allowedUserIds,
