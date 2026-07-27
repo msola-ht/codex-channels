@@ -52,6 +52,11 @@
 - `weixin-qr-contract-probe.mjs`：阶段 0 隔离二维码合同探针；默认离线显示帮助，只有显式
   `qr --live` 并再次确认连接替换风险后才访问固定微信端点，严格裁剪状态、限制官方重定向域名
   并有限取消；不注册 Surface、不写配置或凭据，也不属于公开 `codexc` 命令。
+- `weixin-updates-contract-probe.mjs`：从已验证的微信安全凭据执行一次显式 `once --live`
+  `getupdates` 长轮询，只报告消息数量、字段形状、项目类型、上下文令牌存在性和
+  `message_id` 精度；`sequence --live` 只在内存把首轮游标传给第二轮并比较重放数量和游标推进；
+  `replay --live` 再次复用首轮游标，判断第二批消息是否重放及返回游标是否一致；
+  不输出或保存正文、完整身份、Token、上下文令牌和游标。
 - `check-gateway-version.mjs`：校验 npm 包和 Gateway 版本都与 Codex CLI 协议版本一致。
 - `check-docs.mjs`：校验项目 Markdown 本地链接、根文档索引、源码模块索引、协议数字和相关目录
   文件索引，并拒绝已移除的文档名称；常规项目文档检查排除 `.codex/skills/**` 附带的技能参考资料。
