@@ -25,6 +25,8 @@
   斜杠命令明确拒绝，不会提交为普通 Codex 输入。
 - `command-renderer.ts`：按微信纯文本边界覆盖全部结构化命令结果与用户错误；多行内容转换为双
   换行段落，避免客户端把单换行折叠为空格。
+- `final-text-format.ts`：仅在微信最终回复边界把单行 fenced code 转为行内代码，避免客户端
+  为单条命令生成高大的 `TEXT / 复制` 区域；多行和未闭合代码块保持原样。
 - `operation-format.ts`：复用共享操作标题、状态、脱敏和摘要；完整模式中和 Markdown 控制字符，
   紧凑模式保持单行并限制详情长度。
 - `reply-context-store.ts`：按账号隔离、最多保留 1000 个私聊的进程内
@@ -33,9 +35,9 @@
   macOS 使用独立 Keychain Service，Linux 使用独立
   `credentials/weixin-reply-context` AES-256-GCM 私有目录。载荷、密文或身份不匹配失败关闭。
 - `outbox.ts`：只处理匹配账号的 Turn 开始提示、最终文本、操作终态、带耗时/模型/上下文/缓存/
-  分支的完成或停止统计、失败通知、连接错误和警告；操作展示复用共享 `full`、`compact`、
-  `hidden` 三档配置，不发送 `running` 帧；操作终态和生命周期通知作为关键输出，不因已有最终
-  回复而省略；发送时重新检查 Actor
+  分支的完成或停止统计、失败通知、连接错误和警告；最终回复使用微信专用格式器，操作展示复用
+  共享 `full`、`compact`、`hidden` 三档配置，不发送 `running` 帧；操作终态和生命周期通知
+  作为关键输出，不因已有最终回复而省略；发送时重新检查 Actor
   授权，通过共享 Conversation 队列顺序发送，单条最多 4000 个 UTF-16 码元、最多五条并显示
   截断提示，避免拆开代理对。
 - `interactions.ts`：审批立即拒绝、用户输入返回空答案、MCP elicitation 立即取消，不用普通

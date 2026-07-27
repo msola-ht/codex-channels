@@ -22,6 +22,7 @@ import {
   formatWeixinCommandText,
   renderWeixinTurnCompleted,
 } from "./command-renderer.js";
+import { formatWeixinFinalText } from "./final-text-format.js";
 import { formatWeixinOperation } from "./operation-format.js";
 
 const maximumChunkCharacters = 4_000;
@@ -152,7 +153,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
         }
         return event.text.trim().length === 0
           ? "Codex 返回了空消息。"
-          : event.text;
+          : formatWeixinFinalText(event.text);
       case "turn.completed": {
         return formatWeixinCommandText(renderWeixinTurnCompleted(event));
       }

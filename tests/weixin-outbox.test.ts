@@ -60,6 +60,39 @@ describe("WeixinOutbox", () => {
     ]);
   });
 
+  it("compacts single-line fenced code in final answers", async () => {
+    const { outbox, sendText } = outboxFixture();
+
+    outbox.handle(completed("final_answer", [
+      "发送：",
+      "```text",
+      "/whoami",
+      "```",
+      "",
+      "保留多行：",
+      "```ts",
+      "const first = 1;",
+      "const second = 2;",
+      "```",
+    ].join("\n")));
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledWith({
+      actorId,
+      contextToken: "context-secret",
+      text: [
+        "发送：",
+        "`/whoami`",
+        "",
+        "保留多行：",
+        "```ts",
+        "const first = 1;",
+        "const second = 2;",
+        "```",
+      ].join("\n"),
+    });
+  });
+
   it("renders terminal status when no final text was produced", async () => {
     const { outbox, sendText } = outboxFixture();
 
