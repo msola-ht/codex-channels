@@ -9,6 +9,7 @@ import type {
   SurfaceAccessPolicy,
 } from "../../policy/index.js";
 import type {
+  OperationUpdateDisplay,
   SurfaceAdapter,
   SurfaceConfigurationChange,
 } from "../types.js";
@@ -42,6 +43,7 @@ export interface WeixinSurfaceOptions {
     targets(): readonly ConversationTarget[];
     text(target: ConversationTarget): string;
   };
+  operationUpdateDisplay?: OperationUpdateDisplay;
   inputCloseTimeoutMs?: number;
   outbox?: WeixinOutboxOptions;
 }
@@ -87,6 +89,11 @@ export class WeixinSurface implements SurfaceAdapter {
       options.logger,
       {
         ...options.outbox,
+        ...(options.operationUpdateDisplay === undefined
+          ? {}
+          : {
+              operationUpdateDisplay: options.operationUpdateDisplay,
+            }),
         ...(options.replyContextPersistence === undefined
           ? {}
           : {

@@ -81,9 +81,10 @@ message_format = "html"
 operation_updates = "compact"
 ```
 
-`display.operation_updates` 控制 Telegram 和飞书的命令、文件修改、MCP 工具及搜索过程：
+`display.operation_updates` 控制 Telegram、飞书和微信的命令、文件修改、MCP 工具及搜索过程：
 `"full"` 显示完整详情、状态和退出码，`"compact"` 只显示一行状态与最多 160 个字符的
-详情摘要；飞书在两种模式下都把耗时单独放在操作卡底栏。`"hidden"` 完全隐藏操作过程。审批、
+详情摘要；飞书在两种模式下都把耗时单独放在操作卡底栏，微信只发送完成、失败或拒绝的操作终态，
+不发送进行中帧。`"hidden"` 完全隐藏操作过程。审批、
 最终回复、错误和回合结束统计不受影响。默认值为
 `"full"`；旧的布尔字段不再接受。修改后执行 `codexc service reload`，Gateway 会自动重启，
 共享 App Server 和活动 Thread 不受影响。

@@ -147,6 +147,7 @@ function createWeixinModule(
         },
       ),
     },
+    operationUpdateDisplay: options.config.operationUpdateDisplay,
     logger: options.logger,
     onFatal: (error) => options.onFatal("weixin", config.accountId, error),
   });

@@ -46,6 +46,7 @@ export {
   renderWeixinUserFacingError,
   type WeixinStartupRuntimeInfo,
 } from "./command-renderer.js";
+export { formatWeixinOperation } from "./operation-format.js";
 export {
   WeixinInputAdapter,
   WeixinInputFatalError,

@@ -12,11 +12,11 @@
 配置结构只在共享运行时边界验证一次，本目录只补充依赖文件系统和运行语义的校验。配置错误必须抛出 `ConfigurationError` 并阻止启动，不能静默采用更宽松的权限、目录或网络默认值。
 运行配置中的安全凭据目录固定由配置文件父目录派生，与可自定义的 SQLite 数据库路径相互独立。
 
-`display.operation_updates` 是 Telegram 与飞书共用的操作过程显示模式：`full` 显示完整详情、
+`display.operation_updates` 是 Telegram、飞书与微信共用的操作过程显示模式：`full` 显示完整详情、
 状态、耗时和退出码，`compact` 显示单行状态、耗时、退出码和最多 160 个字符的详情摘要，
 `hidden` 抑制 `operation.updated` 的平台输出。默认值为 `full`，旧布尔字段由严格 Schema 拒绝。
 三种模式都不影响审批、错误、最终回复和 Turn 完成事件；变化需要重启 Gateway，不需要重装或
-重启共享 App Server。
+重启共享 App Server。微信只发送终态操作，不发送 `running` 更新。
 
 飞书配置表当前只定义私聊 Surface 所需的 `enabled`、`app_id`、`app_secret` 和
 `allowed_open_ids`。整表缺失或 `enabled = false` 时运行配置不包含飞书账号；启用时四项必须

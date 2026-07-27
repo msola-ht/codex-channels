@@ -7,7 +7,10 @@ import {
 } from "../../conversation-core/index.js";
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
-import type { SurfaceOutputPort } from "../types.js";
+import type {
+  OperationUpdateDisplay,
+  SurfaceOutputPort,
+} from "../types.js";
 
 import { validateWeixinAccountId } from "./credential-store.js";
 import {
@@ -19,6 +22,7 @@ import {
   formatWeixinCommandText,
   renderWeixinTurnCompleted,
 } from "./command-renderer.js";
+import { formatWeixinOperation } from "./operation-format.js";
 
 const maximumChunkCharacters = 4_000;
 const maximumChunks = 5;
@@ -38,6 +42,7 @@ export class WeixinOutboxError extends Error {
 export interface WeixinOutboxOptions {
   capacity?: number;
   closeTimeoutMs?: number;
+  operationUpdateDisplay?: OperationUpdateDisplay;
   onReplyContextInvalidated?: (target: ConversationTarget) => Promise<void>;
 }
 
@@ -73,6 +78,26 @@ export class WeixinOutbox implements SurfaceOutputPort {
       || event.target.surface !== "weixin"
       || event.target.accountId !== this.accountId
     ) {
+      return;
+    }
+    if (event.type === "operation.updated") {
+      if (
+        this.options.operationUpdateDisplay === "hidden"
+        || event.operation.status === "running"
+      ) {
+        return;
+      }
+      const rendered = formatWeixinOperation(
+        event.operation,
+        this.options.operationUpdateDisplay === "compact"
+          ? "compact"
+          : "full",
+      );
+      this.delivery.enqueue(
+        event.target.conversationId,
+        () => this.send(event.target, rendered),
+        true,
+      );
       return;
     }
     const rendered = this.render(event);

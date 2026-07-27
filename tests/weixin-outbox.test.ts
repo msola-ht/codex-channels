@@ -9,6 +9,7 @@ import {
   WeixinOutbox,
   WeixinProtocolError,
   WeixinReplyContextStore,
+  type WeixinOutboxOptions,
   type WeixinProtocolClient,
 } from "../src/surfaces/weixin/index.js";
 
@@ -86,6 +87,62 @@ describe("WeixinOutbox", () => {
       "本次运行 · 已停止",
       "本次运行 · 失败\n\n错误：受控错误",
     ]);
+  });
+
+  it("sends only terminal operation updates in Conversation order", async () => {
+    const { outbox, sendText } = outboxFixture();
+
+    outbox.handle(operationUpdated("running"));
+    outbox.handle(operationUpdated("completed"));
+    outbox.handle(turnCompleted("completed"));
+    await outbox.close();
+
+    expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
+      "运行命令 · 已完成 · exit 0\n\n"
+      + "具体内容：\n\n"
+      + "git status --short\n\n"
+      + "耗时：125毫秒",
+      "本次运行 · 已完成",
+    ]);
+  });
+
+  it("hides operation updates without suppressing Turn completion", async () => {
+    const { outbox, sendText } = outboxFixture(
+      { value: true },
+      { operationUpdateDisplay: "hidden" },
+    );
+
+    outbox.handle(operationUpdated("running"));
+    outbox.handle(operationUpdated("completed"));
+    outbox.handle(turnCompleted("completed"));
+    await outbox.close();
+
+    expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
+      "本次运行 · 已完成",
+    ]);
+  });
+
+  it("sends compact operation updates as one line", async () => {
+    const { outbox, sendText } = outboxFixture(
+      { value: true },
+      { operationUpdateDisplay: "compact" },
+    );
+
+    outbox.handle({
+      ...operationUpdated("failed"),
+      operation: {
+        ...operationUpdated("failed").operation,
+        detail: "first line\nsecond line",
+        exitCode: 1,
+      },
+    });
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledWith({
+      actorId,
+      contextToken: "context-secret",
+      text: "运行命令 · 失败 · exit 1 · first line second line · 耗时：125毫秒",
+    });
   });
 
   it("splits without breaking surrogate pairs and truncates after five chunks", async () => {
@@ -295,6 +352,7 @@ describe("WeixinOutbox", () => {
 
 function outboxFixture(
   allowed: { value: boolean } = { value: true },
+  options: WeixinOutboxOptions = {},
 ) {
   const contexts = new WeixinReplyContextStore(accountId);
   contexts.remember(target, actorId, "context-secret");
@@ -310,7 +368,10 @@ function outboxFixture(
       contexts,
       accessFixture(() => allowed.value),
       pino({ level: "silent" }),
-      { onReplyContextInvalidated },
+      {
+        ...options,
+        onReplyContextInvalidated,
+      },
     ),
   };
 }
@@ -346,6 +407,26 @@ function turnStarted(): Extract<OutputEvent, { type: "turn.started" }> {
     target,
     threadId: "thread",
     turnId: "turn",
+  };
+}
+
+function operationUpdated(
+  status: "running" | "completed" | "failed" | "declined",
+): Extract<OutputEvent, { type: "operation.updated" }> {
+  return {
+    type: "operation.updated",
+    target,
+    threadId: "thread",
+    turnId: "turn",
+    operation: {
+      itemId: "command",
+      kind: "command",
+      detail: "git status --short",
+      status,
+      ...(status === "running"
+        ? {}
+        : { durationMs: 125, exitCode: 0 }),
+    },
   };
 }
 

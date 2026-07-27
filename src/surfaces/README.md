@@ -53,7 +53,8 @@ Telegram 和飞书在交互消息创建成功或失败时
 `slash-command.ts` 统一飞书与微信的严格斜杠命令解析；`conversation-command-format.ts`
 统一 Telegram、飞书与微信共用的命令结果文案，并提供 Telegram 与微信共用的状态文本。
 `operation-presentation.ts` 统一操作标题、状态、耗时与退出码元数据、敏感占位符和单行摘要；
-Telegram HTML 与飞书 CardKit Markdown 的转义、布局、分组和发送仍由各自 Adapter 负责。
+Telegram HTML、飞书 CardKit Markdown 与微信安全文本的转义、布局、分组和发送仍由各自
+Adapter 负责。
 Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类型引入 Conversation Core。
 
 会话命令统一映射到 Application 的 `ConversationCommandService`；Surface 负责提取命令名和参数，
@@ -68,4 +69,5 @@ warning 和 MCP 错误只使用 Client 边界已经统一脱敏并限长的稳�
 
 Bootstrap 把共享的 `display.operation_updates` 三档模式显式注入各 Surface Outbox。`full`
 显示完整操作，`compact` 显示单行摘要，`hidden` 忽略 `operation.updated`；Core 始终正常归约
-操作，审批与其他关键输出不受影响。Surface 只实现平台格式，不各自定义第二套显示配置。
+操作，审批与其他关键输出不受影响。微信仅发送终态操作，避免用普通气泡模拟持续更新；Surface
+只实现平台格式，不各自定义第二套显示配置。
