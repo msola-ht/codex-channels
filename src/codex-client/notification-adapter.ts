@@ -336,13 +336,15 @@ function toTurnCompletedEvent(value: unknown): ConversationInputEvent | undefine
   const turnId = nonEmptyString(turn?.id);
   const status = parseTurnStatus(turn?.status);
   const error = parseTurnError(turn?.error);
-  return threadId && turnId && status && error.valid
+  const durationMs = optionalDurationMs(turn?.durationMs);
+  return threadId && turnId && status && error.valid && durationMs.valid
     ? {
         type: "turn.completed",
         threadId,
         turnId,
         status,
         error: error.value,
+        ...(durationMs.value === undefined ? {} : { durationMs: durationMs.value }),
       }
     : undefined;
 }
@@ -748,6 +750,19 @@ function nullableString(value: unknown): string | null {
 
 function finiteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function optionalDurationMs(
+  value: unknown,
+): { valid: true; value?: number } | { valid: false } {
+  if (value === null || value === undefined) {
+    return { valid: true };
+  }
+  return typeof value === "number"
+    && Number.isSafeInteger(value)
+    && value >= 0
+    ? { valid: true, value }
+    : { valid: false };
 }
 
 function nullableNumber(value: unknown): number | null | undefined {

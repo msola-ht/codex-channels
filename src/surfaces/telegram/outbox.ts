@@ -9,6 +9,8 @@ import {
   type OutputEvent,
 } from "../../conversation-core/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
+import { formatElapsedDuration } from "../elapsed-duration.js";
+import type { OperationUpdateDisplay } from "../types.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import { TelegramApprovalOperationCoordinator } from "./approval-operation-coordinator.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
@@ -61,7 +63,7 @@ export type TelegramFinalMessageFormat = "html" | "rich";
 export interface TelegramOutboxOptions {
   finalMessageFormat?: TelegramFinalMessageFormat;
   accountId?: string;
-  showOperationUpdates?: boolean;
+  operationUpdateDisplay?: OperationUpdateDisplay;
 }
 
 export class TelegramOutbox {
@@ -191,7 +193,7 @@ export class TelegramOutbox {
         return;
       }
       case "operation.updated": {
-        if (this.options.showOperationUpdates === false) {
+        if (this.options.operationUpdateDisplay === "hidden") {
           return;
         }
         const turnKey = this.turnKey(event.threadId, event.turnId);
@@ -264,19 +266,31 @@ export class TelegramOutbox {
               chatId,
               formatContextUsage(
                 event.tokenUsage,
-                event.model
-                  ? {
+                {
+                  ...(event.model
+                    ? {
                       model: event.model,
                       effort: event.effort ?? null,
                       serviceTier: event.serviceTier ?? null,
-                      ...(event.contextCompactionCount !== undefined
-                        ? { contextCompactionCount: event.contextCompactionCount }
-                        : {}),
-                      ...(event.weeklyLimit ? { weeklyLimit: event.weeklyLimit } : {}),
-                      ...(event.goal ? { goal: event.goal } : {}),
                     }
-                  : undefined,
+                    : {}),
+                  ...(event.durationMs === undefined
+                    ? {}
+                    : { durationMs: event.durationMs }),
+                  ...(event.contextCompactionCount !== undefined
+                    ? { contextCompactionCount: event.contextCompactionCount }
+                    : {}),
+                  ...(event.weeklyLimit ? { weeklyLimit: event.weeklyLimit } : {}),
+                  ...(event.goal ? { goal: event.goal } : {}),
+                },
               ),
+              undefined,
+              true,
+            );
+          } else if (event.durationMs !== undefined) {
+            await this.sendPanel(
+              chatId,
+              `对话耗时：${formatElapsedDuration(event.durationMs)}`,
               undefined,
               true,
             );
@@ -682,7 +696,10 @@ export class TelegramOutbox {
       return;
     }
     const { chatId, turnKey } = state;
-    const text = formatOperationLog(state);
+    const text = formatOperationLog(
+      state,
+      this.options.operationUpdateDisplay === "compact" ? "compact" : "full",
+    );
     if (state.messageId) {
       try {
         await this.executor.call(

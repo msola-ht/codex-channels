@@ -86,12 +86,19 @@ describe("ConversationCore", () => {
       method: "turn/completed",
       params: {
         threadId: "thread-1",
-        turn: { id: "turn-1", status: "completed", error: null },
+        turn: {
+          id: "turn-1",
+          status: "completed",
+          error: null,
+          durationMs: 65_432,
+        },
       },
     });
     await output.close();
     expect(events.find((event) => event.type === "turn.completed"))
       .toHaveProperty("goal.status", "active");
+    expect(events.find((event) => event.type === "turn.completed"))
+      .toHaveProperty("durationMs", 65_432);
 
     handleNotification(core, {
       method: "thread/goal/cleared",

@@ -24,6 +24,7 @@ import type {
   ThreadTokenUsage,
   TurnArtifacts,
 } from "../../conversation-core/index.js";
+import { formatElapsedDuration } from "../elapsed-duration.js";
 import type { Workspace } from "../../policy/index.js";
 import type { SurfaceConfigurationChange } from "../types.js";
 
@@ -310,9 +311,10 @@ export function formatStatus(status: ConversationStatus): string {
 export function formatContextUsage(
   usage: ThreadTokenUsage,
   settings?: {
-    model: string;
-    effort: string | null;
-    serviceTier: string | null;
+    model?: string;
+    effort?: string | null;
+    serviceTier?: string | null;
+    durationMs?: number;
     contextCompactionCount?: number;
     weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>;
     goal?: ThreadGoal;
@@ -332,21 +334,24 @@ export function formatContextUsage(
       usage.last.inputTokens,
       usage.last.cachedInputTokens,
     )}`,
-    ...(settings
+    ...(settings?.model
       ? [
           `当前模型：${settings.model}`,
           `思考强度：${settings.effort ?? "模型默认"}`,
-          `Fast 模式：${formatFastMode(settings.serviceTier)}`,
-          ...(settings.contextCompactionCount !== undefined
-            ? [`上下文压缩：${settings.contextCompactionCount} 次`]
-            : []),
-          ...(settings.weeklyLimit
-            ? [`周限：${formatWeeklyLimit(settings.weeklyLimit)}`]
-            : []),
-          ...(settings.goal
-            ? [`Goal：${formatGoalStatus(settings.goal.status)} · ${formatGoalUsage(settings.goal)}`]
-            : []),
+          `Fast 模式：${formatFastMode(settings.serviceTier ?? null)}`,
         ]
+      : []),
+    ...(settings?.durationMs === undefined
+      ? []
+      : [`对话耗时：${formatElapsedDuration(settings.durationMs)}`]),
+    ...(settings?.contextCompactionCount !== undefined
+      ? [`上下文压缩：${settings.contextCompactionCount} 次`]
+      : []),
+    ...(settings?.weeklyLimit
+      ? [`周限：${formatWeeklyLimit(settings.weeklyLimit)}`]
+      : []),
+    ...(settings?.goal
+      ? [`Goal：${formatGoalStatus(settings.goal.status)} · ${formatGoalUsage(settings.goal)}`]
       : []),
   ].join("\n");
 }

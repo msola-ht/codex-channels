@@ -49,11 +49,13 @@ export interface GatewayConfig {
   codexSocketPath: string;
   codexModel?: string;
   codexSandbox: "read-only" | "workspace-write";
-  showOperationUpdates: boolean;
+  operationUpdateDisplay: OperationUpdateDisplay;
   stateDatabasePath: string;
   approvalTimeoutMs: number;
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace";
 }
+
+export type OperationUpdateDisplay = "full" | "compact" | "hidden";
 
 export class ConfigurationError extends Error {}
 
@@ -139,7 +141,7 @@ export function loadConfigDocument(
     codexSocketPath: resolveConfiguredPath(raw.codex.socket_path, baseDirectory),
     ...(raw.codex.default_model ? { codexModel: raw.codex.default_model } : {}),
     codexSandbox: raw.codex.sandbox,
-    showOperationUpdates: raw.display.show_operation_updates,
+    operationUpdateDisplay: raw.display.operation_updates,
     stateDatabasePath: resolveConfiguredPath(raw.storage.database_path, baseDirectory),
     approvalTimeoutMs: raw.approval.timeout_seconds * 1000,
     logLevel: raw.logging.level,

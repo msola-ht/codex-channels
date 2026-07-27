@@ -19,7 +19,10 @@ import type {
   SurfaceAccessPolicy,
   Workspace,
 } from "../../policy/index.js";
-import type { SurfaceConfigurationChange } from "../types.js";
+import type {
+  OperationUpdateDisplay,
+  SurfaceConfigurationChange,
+} from "../types.js";
 import {
   formatConfigurationChange,
   formatStartupNotification,
@@ -51,7 +54,7 @@ export interface TelegramSurfaceOptions {
   onFatal?: (error: Error) => void;
   imageStore?: TelegramImagePort;
   finalMessageFormat?: TelegramFinalMessageFormat;
-  showOperationUpdates?: boolean;
+  operationUpdateDisplay?: OperationUpdateDisplay;
   codexUpstreamUserAgent?: () => string | undefined;
 }
 
@@ -96,8 +99,8 @@ export class TelegramSurface {
       ...(options.finalMessageFormat
         ? { finalMessageFormat: options.finalMessageFormat }
         : {}),
-      ...(options.showOperationUpdates !== undefined
-        ? { showOperationUpdates: options.showOperationUpdates }
+      ...(options.operationUpdateDisplay !== undefined
+        ? { operationUpdateDisplay: options.operationUpdateDisplay }
         : {}),
     });
     this.output = this.outbox;

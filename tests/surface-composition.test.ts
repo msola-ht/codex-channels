@@ -319,7 +319,7 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     defaultWorkspaceId: "main",
     codexSocketPath: "/tmp/codex.sock",
     codexSandbox: "workspace-write",
-    showOperationUpdates: true,
+    operationUpdateDisplay: "full",
     stateDatabasePath: "/tmp/gateway.sqlite3",
     approvalTimeoutMs: 300_000,
     logLevel: "info",

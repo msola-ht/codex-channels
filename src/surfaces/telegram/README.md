@@ -14,14 +14,15 @@
 - `command-renderer.ts`：把平台无关的类型化命令结果渲染为 Telegram 消息。
 - `outbox.ts`：通过 Surface 共用的每 Conversation 有界顺序队列协调流式回复和审批显示顺序；
   活动非终态流最多保留 100 个，单流正文最多保留 1,000,000 个 Unicode 字符并明确标记截断；
-  每轮状态卡显示最近 Turn 缓存命中率、当前 Goal、上下文压缩总次数、用量和耗时；最终回复默认使用兼容 HTML，也可选择
+  每轮状态卡显示官方 Turn 对话耗时、最近 Turn 缓存命中率、当前 Goal、上下文压缩总次数和用量；最终回复默认使用兼容 HTML，也可选择
   Telegram 原生 Rich Markdown，超长或渲染失败时回退纯文本。
 - `approval-operation-coordinator.ts`：隔离审批请求与操作日志之间的等待、拒绝抑制和 Turn 清理状态。
 - 通知策略按逻辑事件降噪：操作过程、状态、上下文和后续分片静默；每轮最终回复、审批、用户输入与严重错误保留一次提醒。
 - `html-format.ts`：安全转义并分块渲染命令面板、启动通知、审批卡与 Diff；长审批详情先显示约六行普通引用预览，再以文字分隔可展开的剩余全文，避免 Telegram 合并相邻引用或让长命令默认占满聊天界面。
 - `markdown-format.ts`：把常见 Markdown 块与行内样式安全转换为传统 Telegram HTML；仅包含 Bot 命令的文本代码块和行内命令会转为可点击纯文本，普通代码块保持不变。
 - `long-message-format.ts`：统一规划终端或 Telegram 发起 Turn 的长回复；普通长文本使用可展开引用块，超长代码与内容使用预览加内存文件。
-- `operation-format.ts`：把操作记录分组、截断、脱敏并渲染为 Telegram HTML。
+- `operation-format.ts`：把操作记录分组、截断、脱敏并按完整或单行摘要模式渲染为 Telegram
+  HTML；完整模式同时显示状态、耗时和退出码。
 - `typing-indicator.ts`：维护活动请求和 Turn 的 Typing 状态、刷新与限速。
 - `interactions.ts`：发送一次/会话/命令前缀或网络规则持久审批以及用户输入卡片，按协议能力显示
   互不混淆的按钮；网络会话按钮显示目标主机，持久按钮明确显示允许/拒绝动作和主机，并处理
@@ -45,5 +46,6 @@ Telegram 网络调用不得阻塞 App Server Reader。每个 Conversation 的最
 账户额度和 MCP 状态通知也必须进入每聊天有界输出队列；不得从 App Server Reader 直接等待 Telegram 网络发送。
 结构化用户错误由 `bot.ts` 转换为 Telegram 专属文案；App Server Turn、warning 和 MCP 错误会
 显示 Client 边界已经统一脱敏并限长的详情，未知异常和原始响应正文不写入 Telegram 日志或外部消息。
-共享配置 `display.show_operation_updates = false` 时，Outbox 不发送操作过程；审批、错误、
-最终回复和 Turn 完成统计保持原有行为。
+共享配置 `display.operation_updates` 为 `full` 时显示完整操作详情、状态、耗时和退出码，
+为 `compact` 时显示一行状态、元数据和最多 160 个字符的详情摘要，为 `hidden` 时不发送操作
+过程；审批、错误、最终回复和 Turn 完成统计保持原有行为。

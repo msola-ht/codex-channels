@@ -13,6 +13,7 @@ export {
   type ConversationDeliveryQueueOptions,
 } from "./conversation-delivery-queue.js";
 export type {
+  OperationUpdateDisplay,
   SurfaceAdapter,
   SurfaceConfigurationChange,
   SurfaceOutputPort,

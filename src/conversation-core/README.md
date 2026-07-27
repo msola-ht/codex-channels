@@ -6,8 +6,9 @@
 
 - `index.ts`：本模块的公开导出入口。
 - `core.ts`：维护活动 Turn、Token、当前 Goal、上下文压缩 Item ID、最近 Diff/Plan 和事件去重状态，
-  把稳定输入事件归约为文本、操作、状态和完成事件；可重试错误不污染最终完成状态，Thread 与全局
-  warning 分开路由。
+  把稳定输入事件归约为文本、操作、状态和完成事件；Turn 完成事件原样携带 Client 已校验的官方
+  `durationMs`，不在 Core 内建立第二套计时器；可重试错误不污染最终完成状态，Thread 与全局 warning
+  分开路由。
 - `input-events.ts`：定义 Client 可投递给 Core 的平台无关可辨识输入联合，不含 RPC method、
   未知 params 或生成协议类型。
 - `events.ts`：定义 Conversation 目标、稳定 Token、Plan、Goal、Turn、额度、账户和 MCP 类型，以及

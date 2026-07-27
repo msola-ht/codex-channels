@@ -1,5 +1,8 @@
 import type { InteractionPort } from "../approval/index.js";
-import type { ConfigChange } from "../config/index.js";
+import type {
+  ConfigChange,
+  OperationUpdateDisplay,
+} from "../config/index.js";
 import type { OutputEvent, SurfaceId } from "../conversation-core/index.js";
 import type { Workspace } from "../policy/index.js";
 
@@ -12,6 +15,8 @@ export interface SurfaceConfigurationChange {
 export interface SurfaceOutputPort {
   handle(event: OutputEvent): void;
 }
+
+export type { OperationUpdateDisplay };
 
 export interface SurfaceAdapter {
   readonly surface: SurfaceId;

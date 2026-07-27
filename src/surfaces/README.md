@@ -36,6 +36,8 @@ Surface，因此未匹配到具体变更的 Surface 仍会收到不包含平台�
 [`通讯渠道 Surface 接入指南`](../../docs/surface-integration-guide.md)。
 关闭队列时拒绝新输出、限时等待在途发送；并发关闭调用等待同一个关闭结果，不能提前报告完成。
 实现位于 `conversation-delivery-queue.ts`，并通过本目录 `index.ts` 公开。
+`elapsed-duration.ts` 只把 App Server 已提供的 Turn 毫秒耗时格式化为两个 Surface 共用的中文
+短文本，不负责计时、状态或持久化。
 Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类型引入 Conversation Core。
 
 会话命令统一映射到 Application 的 `ConversationCommandService`；Surface 负责提取命令名和参数，
@@ -48,6 +50,6 @@ Surface 只能渲染明确标记的结构化用户错误，不能直接复用其
 warning 和 MCP 错误只使用 Client 边界已经统一脱敏并限长的稳定字段。未知异常、凭据和未经约束
 的响应正文不得带入聊天消息或日志。
 
-Bootstrap 把共享的 `display.show_operation_updates` 显式注入各 Surface Outbox。关闭后 Outbox
-忽略 `operation.updated`，但 Core 仍正常归约操作，审批与其他关键输出不受影响；Surface 不各自
-定义第二套显示配置。
+Bootstrap 把共享的 `display.operation_updates` 三档模式显式注入各 Surface Outbox。`full`
+显示完整操作，`compact` 显示单行摘要，`hidden` 忽略 `operation.updated`；Core 始终正常归约
+操作，审批与其他关键输出不受影响。Surface 只实现平台格式，不各自定义第二套显示配置。

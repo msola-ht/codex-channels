@@ -387,11 +387,19 @@ contractSuite("isolated Codex App Server state contract", () => {
     const started = await ownerClient.startThread(workdir);
     const threadId = started.thread.id;
     const observedTurnIds: string[] = [];
+    let completedTurnDurationMs: number | undefined;
     const observedGoalEvents: string[] = [];
     const removeNotification = ownerClient.onNotification((notification) => {
       const event = toConversationInputEvent(notification);
       if (event?.type === "turn.started" && event.threadId === threadId) {
         observedTurnIds.push(event.turnId);
+      }
+      if (
+        event?.type === "turn.completed"
+        && event.threadId === threadId
+        && event.turnId === turnId
+      ) {
+        completedTurnDurationMs = event.durationMs;
       }
       if (
         (event?.type === "thread.goal.updated" || event?.type === "thread.goal.cleared")
@@ -451,6 +459,13 @@ contractSuite("isolated Codex App Server state contract", () => {
         () => observedGoalEvents.includes("thread.goal.cleared"),
         2_000,
       );
+      await ownerClient.interruptTurn(threadId, turnId);
+      await waitFor(
+        () => completedTurnDurationMs !== undefined,
+        2_000,
+      );
+      expect(completedTurnDurationMs).toBeGreaterThanOrEqual(0);
+      turnId = undefined;
     } finally {
       removeNotification();
       if (turnId) {

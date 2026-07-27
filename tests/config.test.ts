@@ -103,7 +103,7 @@ describe("Gateway config.toml", () => {
     expect(runtime.config.telegramBotToken).toBe("secret");
     expect(runtime.config.telegramAllowedUserIds).toEqual(new Set([123, 456]));
     expect(runtime.config.telegramMessageFormat).toBe("rich");
-    expect(runtime.config.showOperationUpdates).toBe(true);
+    expect(runtime.config.operationUpdateDisplay).toBe("full");
     expect(runtime.config.codexSocketPath).toBe(join(fixture.root, "runtime/app-server.sock"));
     expect(runtime.config.stateDatabasePath).toBe(join(fixture.root, "data/gateway.sqlite3"));
     expect(runtime.config.workspaces).toEqual([
@@ -144,14 +144,27 @@ describe("Gateway config.toml", () => {
     expect(config.logLevel).toBe("debug");
   });
 
-  it("can disable operation update output", () => {
+  it.each(["full", "compact", "hidden"] as const)(
+    "accepts the %s operation update display mode",
+    (operationUpdates) => {
+      const fixture = createFixture({
+        display: { operation_updates: operationUpdates },
+      });
+
+      expect(loadRuntimeConfig({
+        CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+      }).config.operationUpdateDisplay).toBe(operationUpdates);
+    },
+  );
+
+  it("rejects the removed boolean operation update setting", () => {
     const fixture = createFixture({
       display: { show_operation_updates: false },
     });
 
-    expect(loadRuntimeConfig({
+    expect(() => loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    }).config.showOperationUpdates).toBe(false);
+    })).toThrow(/show_operation_updates/u);
   });
 
   it("loads an explicitly enabled Feishu account", () => {

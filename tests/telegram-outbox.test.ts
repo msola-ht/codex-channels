@@ -549,7 +549,7 @@ describe("TelegramOutbox", () => {
     await settle();
 
     expect(api.sent).toEqual([
-      "<b>操作过程</b>\n\n💻 ⏳ <b>运行命令</b>\n" +
+      "<b>操作过程</b>\n\n💻 ⏳ <b>运行命令 · 运行中</b>\n" +
       "<pre><code class=\"language-shell\">TOKEN=[已隐藏] git status --short</code></pre>",
     ]);
     expect(api.sendOptions[0]).toMatchObject({
@@ -569,8 +569,9 @@ describe("TelegramOutbox", () => {
     await vi.advanceTimersByTimeAsync(750);
     await settle();
 
-    expect(api.edits.at(-1)).toContain("💻 <b>运行命令</b>");
-    expect(api.edits.at(-1)).not.toMatch(/退出码|毫秒|秒/);
+    expect(api.edits.at(-1)).toContain(
+      "💻 <b>运行命令 · 已完成</b> · 125 ms · exit 0",
+    );
     expect(api.editOptions.at(-1)).toEqual({ parse_mode: "HTML" });
 
     outbox.handle(operationUpdated("file-1", "completed", "fileChange", "README.md"));
@@ -579,7 +580,9 @@ describe("TelegramOutbox", () => {
     await outbox.close();
 
     expect(api.sent).toHaveLength(1);
-    expect(api.edits.at(-1)).toContain("🔧 <b>修改文件</b>\n<blockquote>README.md</blockquote>");
+    expect(api.edits.at(-1)).toContain(
+      "🔧 <b>修改文件 · 已完成</b>\n<blockquote>README.md</blockquote>",
+    );
   });
 
   it("groups identical consecutive operations and escapes Telegram HTML", async () => {
@@ -594,10 +597,11 @@ describe("TelegramOutbox", () => {
     await settle();
 
     expect(api.sent[0]).toContain(
-      "🔧 <b>修改文件 (×2)</b>\n<blockquote>src/a&lt;b&gt;.ts &amp; README.md</blockquote>",
+      "🔧 <b>修改文件 (×2) · 已完成</b>\n"
+      + "<blockquote>src/a&lt;b&gt;.ts &amp; README.md</blockquote>",
     );
     expect(api.sent[0]).toContain(
-      "🧰 <b>调用工具</b>\n<blockquote>browser.open</blockquote>",
+      "🧰 <b>调用工具 · 已完成</b>\n<blockquote>browser.open</blockquote>",
     );
 
     await outbox.close();
@@ -617,9 +621,9 @@ describe("TelegramOutbox", () => {
     await outbox.close();
 
     expect(api.sent).toHaveLength(4);
-    expect(api.sent[0]).toContain("💻 <b>运行命令</b>");
+    expect(api.sent[0]).toContain("💻 <b>运行命令 · 已完成</b>");
     expect(api.sent[1]).toBe("第一段回复");
-    expect(api.sent[2]).toContain("🔧 <b>修改文件</b>");
+    expect(api.sent[2]).toContain("🔧 <b>修改文件 · 已完成</b>");
     expect(api.sent[3]).toBe("第二段回复");
   });
 
@@ -810,7 +814,8 @@ describe("TelegramOutbox", () => {
     expect(api.sent[0]).toContain("已省略较早的 81 项操作");
     expect(api.sent[0]).not.toContain("命令 0\n");
     expect(api.sent[0]).toContain(
-      "💻 ❌ <b>运行命令</b>\n<pre><code class=\"language-shell\">命令 100</code></pre>",
+      "💻 ❌ <b>运行命令 · 失败</b>\n"
+      + "<pre><code class=\"language-shell\">命令 100</code></pre>",
     );
 
     await outbox.close();
@@ -963,14 +968,14 @@ describe("TelegramOutbox", () => {
     expect(api.sendOptions).toEqual([{ disable_notification: true }]);
   });
 
-  it("does not send operation updates when operation output is disabled", async () => {
+  it("does not send operation updates in hidden mode", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();
     const outbox = new TelegramOutbox(
       api as unknown as Api,
       pino({ level: "silent" }),
       undefined,
-      { showOperationUpdates: false },
+      { operationUpdateDisplay: "hidden" },
     );
 
     outbox.handle(operationUpdated("command-1", "running", "command", "git status --short"));
@@ -989,6 +994,40 @@ describe("TelegramOutbox", () => {
     await outbox.close();
 
     expect(api.sent).toEqual(["Codex 警告：仍显示关键警告"]);
+  });
+
+  it("renders operation updates as one-line summaries in compact mode", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = new TelegramOutbox(
+      api as unknown as Api,
+      pino({ level: "silent" }),
+      undefined,
+      { operationUpdateDisplay: "compact" },
+    );
+
+    outbox.handle({
+      ...operationUpdated("command-1", "completed", "command", "git status --short\nsecond line"),
+      operation: {
+        ...operationUpdated(
+          "command-1",
+          "completed",
+          "command",
+          "git status --short\nsecond line",
+        ).operation,
+        durationMs: 125,
+        exitCode: 0,
+      },
+    });
+    await vi.advanceTimersByTimeAsync(750);
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual([
+      "<b>操作过程</b>\n\n"
+      + "💻 <b>运行命令 · 已完成</b> · 125 ms · exit 0"
+      + " · <code>git status --short second line</code>",
+    ]);
   });
 });
 

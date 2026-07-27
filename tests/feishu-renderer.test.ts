@@ -305,6 +305,7 @@ describe("Feishu output renderer", () => {
       threadId: "thread-1",
       turnId: "turn-1",
       status: "completed",
+      durationMs: 65_432,
       tokenUsage: {
         total: {
           totalTokens: 1_000,
@@ -341,6 +342,7 @@ describe("Feishu output renderer", () => {
       "- **上下文：** 100 / 200（50%）",
       "- **缓存命中：** 50%",
       "- **模型：** gpt-test · medium · Fast 开启",
+      "- **对话耗时：** 1分5秒",
       "- **上下文压缩：** 2 次",
       "- **周限：** 已使用 37%",
     ].join("\n"));

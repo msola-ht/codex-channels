@@ -76,6 +76,7 @@ export type ConversationInputEvent =
       turnId: string;
       status: TurnStatus;
       error: string | null;
+      durationMs?: number;
     }
   | { type: "thread.status.changed"; threadId: string; status: string }
   | { type: "thread.closed"; threadId: string }

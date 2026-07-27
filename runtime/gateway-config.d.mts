@@ -33,7 +33,7 @@ export interface GatewayConfigDocument {
     sandbox: "read-only" | "workspace-write";
   };
   approval: { timeout_seconds: number };
-  display: { show_operation_updates: boolean };
+  display: { operation_updates: "full" | "compact" | "hidden" };
   storage: { database_path: string };
   logging: { level: "fatal" | "error" | "warn" | "info" | "debug" | "trace" };
   workspaces: Array<{ id: string; name: string; cwd: string }>;

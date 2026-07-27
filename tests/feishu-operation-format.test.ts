@@ -34,4 +34,17 @@ describe("Feishu operation log formatter", () => {
       + "具体内容：`codex_apps.list_mcp_resources`",
     );
   });
+
+  it("renders one-line details in compact mode", () => {
+    expect(formatFeishuOperation({
+      itemId: "command-1",
+      kind: "command",
+      detail: "git status --short\nsecond line",
+      status: "completed",
+      durationMs: 125,
+      exitCode: 0,
+    }, "compact")).toBe(
+      "**运行命令 · 已完成** · 125 ms · exit 0 · `git status --short second line`",
+    );
+  });
 });

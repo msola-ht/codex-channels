@@ -7,7 +7,7 @@ allowed_user_ids = [123456789]
 message_format = "html"
 
 [feishu]
-# 飞书当前需手工填写并改为 true；Setup 尚未提供飞书引导。
+# 飞书可通过 codexc setup 配置；手工填写时改为 true。
 enabled = false
 # app_id = "cli_0123456789abcdef"
 # app_secret = "你的_飞书_App_Secret"
@@ -28,6 +28,10 @@ sandbox = "workspace-write"
 
 [approval]
 timeout_seconds = 300
+
+[display]
+# full：完整详情；compact：单行摘要；hidden：隐藏操作过程。
+operation_updates = "full"
 
 [storage]
 database_path = "data/gateway.sqlite3"

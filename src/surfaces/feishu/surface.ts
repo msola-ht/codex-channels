@@ -7,6 +7,7 @@ import type {
   SurfaceAccessPolicy,
 } from "../../policy/index.js";
 import type {
+  OperationUpdateDisplay,
   SurfaceAdapter,
   SurfaceConfigurationChange,
 } from "../types.js";
@@ -83,7 +84,7 @@ export interface FeishuSurfaceOptions {
   accountsAgent?: unknown;
   webSocketAgent?: unknown;
   disableEnvironmentProxy?: boolean;
-  showOperationUpdates?: boolean;
+  operationUpdateDisplay?: OperationUpdateDisplay;
   configurationRecipients?: () => readonly string[];
   startupNotification?: FeishuStartupNotification;
 }
@@ -152,8 +153,8 @@ export class FeishuSurface implements SurfaceAdapter {
       messagePort,
       options.logger,
       {
-        ...(options.showOperationUpdates !== undefined
-          ? { showOperationUpdates: options.showOperationUpdates }
+        ...(options.operationUpdateDisplay !== undefined
+          ? { operationUpdateDisplay: options.operationUpdateDisplay }
           : {}),
       },
     );

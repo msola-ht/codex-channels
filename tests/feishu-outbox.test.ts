@@ -632,7 +632,7 @@ describe("Feishu outbox", () => {
     expect(markdownCards[1]).toBe("**本次运行 · 已完成**");
   });
 
-  it("does not send operation updates when operation output is disabled", async () => {
+  it("does not send operation updates in hidden mode", async () => {
     const markdownCards: string[] = [];
     const outbox = new FeishuOutbox(
       "cli_app",
@@ -645,7 +645,7 @@ describe("Feishu outbox", () => {
         },
       },
       pino({ level: "silent" }),
-      { showOperationUpdates: false },
+      { operationUpdateDisplay: "hidden" },
     );
 
     outbox.handle(operationUpdated("running"));
@@ -658,6 +658,31 @@ describe("Feishu outbox", () => {
     await outbox.close();
 
     expect(markdownCards).toEqual(["**本次运行 · 已完成**"]);
+  });
+
+  it("sends one-line operation updates in compact mode", async () => {
+    const markdownCards: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+      },
+      pino({ level: "silent" }),
+      { operationUpdateDisplay: "compact" },
+    );
+
+    outbox.handle(operationUpdated("completed"));
+    await settle();
+    await outbox.close();
+
+    expect(markdownCards).toEqual([
+      "**运行命令 · 已完成** · 125 ms · exit 0 · `git status --short`",
+    ]);
   });
 
   it("updates one thread status card from active to idle", async () => {

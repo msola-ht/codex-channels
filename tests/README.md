@@ -14,7 +14,8 @@
   到官方 `UserInput` 的映射，以及 Review、Goal 和控制响应到稳定 Application 结果的映射。
 - 官方 Turn、Item、Diff、Plan、Goal、Token、账户、额度、MCP 和 warning Notification 到稳定 Core
   输入事件的映射，畸形与未知通知隔离；Conversation Core 状态归约、严格 Turn 完成状态、
-  可重试错误隔离、Thread/全局警告路由，以及 Client 边界的操作摘要、Turn/warning/MCP 错误
+  官方 `Turn.durationMs` 校验与双 Surface 对话耗时展示、可重试错误隔离、Thread/全局警告路由，
+  以及 Client 边界的操作摘要、Turn/warning/MCP 错误
   脱敏限长与敏感文本清洗。
 - 命令、文件修改、临时权限、用户输入和 MCP 审批的归属信息、一次/会话批准、命令前缀及网络
   规则持久授权、网络专用请求、目标主机一致性、拒绝、无法路由、协议能力约束、一次性回调、
@@ -43,7 +44,7 @@
   操作终态静态卡片与助手消息顺序，以及脱敏上游错误详情展示；Outbox
   的精确账号路由、同 Chat 顺序、跨 Chat 并行、静态 CardKit 单元素 5,000 字符与最多 5 张卡片、
   纯文本及降级富文本 20,000 字节上限、
-  明确截断、关闭等待及关闭共享操作过程开关后的零操作输出；同一 Thread 的 active/idle 轻量状态卡片创建、重复抑制、顺序更新、更新错误
+  明确截断、关闭等待及完整、单行摘要、隐藏三档操作输出；同一 Thread 的 active/idle 轻量状态卡片创建、重复抑制、顺序更新、更新错误
   分类、失败绑定清理和关闭超时后的迟到结果隔离；操作详情、状态、耗时和退出码的
   运行帧忽略、终态静态 CardKit 发送及会话顺序；已授权文本和 PNG/JPEG 图片到 Application
   的提交、10 MiB 限制、内容签名校验、私有暂存、过期清理、活动 Turn 追加提示、命令参数透传、
@@ -134,7 +135,8 @@ RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
 读取，之后新建 Thread 的运行时 `serviceTier` 按 `default → priority → default` 变化，并验证
 第二个 Client 修改共享 Thread 的模型、思考强度和 Fast 设置时，订阅方收到完整的
 `thread/settings/updated`；第二个 Client 重连后再次修改仍会广播。合同还会启动并立即清理一个
-不等待模型结果的 Turn，验证稳定 Turn ID、Skill、MCP、Plugin 与 Permission Profile 查询摘要，
+不等待模型结果的 Turn，验证稳定 Turn ID、中断后的官方非负 `durationMs`、Skill、MCP、Plugin
+与 Permission Profile 查询摘要，
 以及跨 Client 的 Goal 设置、读取和清除映射；第二个 Client 重新连接并 resume 当前 Thread 后，
 还必须重新收到已有 Goal 状态。
 

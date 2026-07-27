@@ -29,7 +29,8 @@
   并对必需字段与分页游标失败关闭。
 - `notification-adapter.ts`：把当前支持的官方 Notification 转换为 Routing 或 Conversation Core
   拥有的稳定事件；校验 Turn、Item、Diff、Plan、Goal、Token、账户、额度、MCP、warning 与 Thread
-  生命周期字段，Turn、warning 和 MCP 错误在此统一脱敏并限长，残缺或无关通知不进入业务模块。
+  生命周期字段；`turn/completed` 只接受官方 `Turn.durationMs` 的非负安全整数并转为稳定耗时，
+  Turn、warning 和 MCP 错误在此统一脱敏并限长，残缺或无关通知不进入业务模块。
 - `operation-adapter.ts`：把官方 Item 转换为安全、简洁的操作摘要，并在离开 Client 边界前
   清洗命令、查询及上游错误中的敏感文本。
 - `server-request-adapter.ts`：把命令、文件、临时权限、用户输入和 MCP elicitation 五类

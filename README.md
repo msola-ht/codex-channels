@@ -18,7 +18,7 @@
   明确确认后只增量申请缺失的应用权限、重新执行只读检测并给出单一人工配置入口；Gateway 不自动
   修改菜单、事件或回调，也不发布应用版本。Doctor 会分别检查菜单节点和启用开关；节点存在但
   未启用时显示“已添加，尚未启用”。当前不支持飞书群聊或一般文件。
-- 查看 Codex 流式回复、格式化最终回复、操作过程、计划、Diff、Goal、用量和额度；长文本自动折叠，超长代码以预览加完整文件发送；`/status` 显示 Thread 累计缓存命中率，每轮结束状态卡显示最近 Turn 缓存命中率，并同时显示当前 Goal 状态及 Thread 上下文压缩总次数。
+- 查看 Codex 流式回复、格式化最终回复、操作过程、计划、Diff、Goal、用量和额度；长文本自动折叠，超长代码以预览加完整文件发送；`/status` 显示 Thread 累计缓存命中率，每轮结束状态卡显示 App Server 返回的对话耗时、最近 Turn 缓存命中率、当前 Goal 状态及 Thread 上下文压缩总次数。
 - App Server 明确返回的 Turn、warning 和 MCP 错误会在统一脱敏并限长后显示到对应通讯渠道；未知内部异常、凭据和未经约束的响应正文仍不会直接发送。
 - Telegram 通知按逻辑事件降噪：过程、状态、上下文和后续分片静默发送；最终回复、审批、用户输入与严重错误保留提醒。
 - Gateway 启动时通知当前系统、版本、App Server 返回的上游 User-Agent、本地连接方式、Workspace、Thread、模型、思考强度、Fast 模式和周限。
@@ -65,12 +65,14 @@ allowed_user_ids = [你的_Telegram_用户_ID]
 message_format = "html"
 
 [display]
-show_operation_updates = true
+operation_updates = "compact"
 ```
 
-`display.show_operation_updates = false` 时，Telegram 和飞书不再发送命令、文件修改、MCP
-工具及搜索的操作过程；审批、最终回复、错误和回合结束统计仍会显示。该项默认开启，修改后执行
-`codexc service reload`，Gateway 会自动重启，共享 App Server 和活动 Thread 不受影响。
+`display.operation_updates` 控制 Telegram 和飞书的命令、文件修改、MCP 工具及搜索过程：
+`"full"` 显示完整详情、状态、耗时和退出码，`"compact"` 只显示一行状态与最多 160 个字符的
+详情摘要，`"hidden"` 完全隐藏操作过程。审批、最终回复、错误和回合结束统计不受影响。默认值为
+`"full"`；旧的布尔字段不再接受。修改后执行 `codexc service reload`，Gateway 会自动重启，
+共享 App Server 和活动 Thread 不受影响。
 
 飞书模块提供“手动输入应用凭据”和“扫码授权”两种方式。扫码后在飞书授权页选择新建应用或
 已有企业自建应用；流程只申请机器人发送消息、原生 CardKit 流式卡片、

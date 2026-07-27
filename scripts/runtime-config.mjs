@@ -76,7 +76,7 @@ export function initializeUserData({ environment = process.env, cwd = process.cw
       sandbox: "workspace-write",
     },
     approval: { timeout_seconds: 300 },
-    display: { show_operation_updates: true },
+    display: { operation_updates: "full" },
     storage: { database_path: "data/gateway.sqlite3" },
     logging: { level: "info" },
     workspaces: [defaultWorkspace],

@@ -15,6 +15,7 @@ import type {
   ThreadGoal,
   UserFacingError,
 } from "../../conversation-core/index.js";
+import { formatElapsedDuration } from "../elapsed-duration.js";
 import type { SurfaceConfigurationChange } from "../types.js";
 import type { FeishuInboxMessage } from "./inbox.js";
 
@@ -405,6 +406,9 @@ function renderFeishuTurnCompleted(
     details.push(
       `- **模型：** ${event.model} · ${event.effort ?? "模型默认"} · Fast ${isFastServiceTier(event.serviceTier ?? null) ? "开启" : "关闭"}`,
     );
+  }
+  if (event.durationMs !== undefined) {
+    details.push(`- **对话耗时：** ${formatElapsedDuration(event.durationMs)}`);
   }
   if (event.contextCompactionCount !== undefined) {
     details.push(`- **上下文压缩：** ${event.contextCompactionCount} 次`);

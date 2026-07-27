@@ -258,6 +258,9 @@ export class ConversationCore {
           turnId: event.turnId,
           status: event.status,
           ...(error ? { error } : {}),
+          ...(event.durationMs === undefined
+            ? {}
+            : { durationMs: event.durationMs }),
           ...(tokenUsage ? { tokenUsage } : {}),
           ...(modelSettings
             ? {

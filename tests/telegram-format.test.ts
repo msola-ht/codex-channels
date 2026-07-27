@@ -535,6 +535,7 @@ describe("formatContextUsage", () => {
         model: "gpt-main",
         effort: "high",
         serviceTier: "priority",
+        durationMs: 65_432,
         contextCompactionCount: 2,
         weeklyLimit: {
           usedPercent: 42,
@@ -558,6 +559,7 @@ describe("formatContextUsage", () => {
       "当前模型：gpt-main",
       "思考强度：high",
       "Fast 模式：开启",
+      "对话耗时：1分5秒",
       "上下文压缩：2 次",
       "周限：已使用 42%",
       "Goal：进行中 · 12.5 K / 100 K · 1分30秒",

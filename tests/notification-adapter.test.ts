@@ -240,6 +240,7 @@ describe("Notification adapter", () => {
         turn: {
           id: "turn-1",
           status: "failed",
+          durationMs: 65_432,
           error: {
             message: "模型请求失败，Authorization: Bearer bearer-secret",
             codexErrorInfo: null,
@@ -252,6 +253,7 @@ describe("Notification adapter", () => {
       threadId: "thread-1",
       turnId: "turn-1",
       status: "failed",
+      durationMs: 65_432,
       error: "模型请求失败，Authorization: Bearer [REDACTED] 请检查代理配置",
     });
   });
@@ -279,6 +281,18 @@ describe("Notification adapter", () => {
       params: {
         threadId: "thread-1",
         turn: { id: "turn-1", status: "unknown", error: null },
+      },
+    })).toBeUndefined();
+    expect(toConversationInputEvent({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: {
+          id: "turn-1",
+          status: "completed",
+          error: null,
+          durationMs: -1,
+        },
       },
     })).toBeUndefined();
     expect(toConversationInputEvent({

@@ -106,7 +106,7 @@ function createFeishuModule(
       "feishu",
     ),
     disableEnvironmentProxy: true,
-    showOperationUpdates: options.config.showOperationUpdates,
+    operationUpdateDisplay: options.config.operationUpdateDisplay,
     ...(openApiAgent
       ? {
           openApiAgent,
@@ -238,7 +238,7 @@ function createTelegramModule(
       actorRegistry: bindings,
       onFatal: (error) => options.onFatal("telegram", telegramDefaultAccountId, error),
       finalMessageFormat: config.telegramMessageFormat,
-      showOperationUpdates: config.showOperationUpdates,
+      operationUpdateDisplay: config.operationUpdateDisplay,
       gatewayVersion: options.gatewayVersion,
       codexUpstreamUserAgent: options.codexUpstreamUserAgent,
     },

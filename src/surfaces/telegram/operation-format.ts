@@ -1,4 +1,5 @@
 import type { OperationUpdate } from "../../conversation-core/index.js";
+import type { OperationUpdateDisplay } from "../types.js";
 
 export interface OperationLogView {
   order: readonly string[];
@@ -11,29 +12,48 @@ interface OperationGroup {
   count: number;
 }
 
-export function formatOperationLog(state: OperationLogView): string {
+export function formatOperationLog(
+  state: OperationLogView,
+  display: Exclude<OperationUpdateDisplay, "hidden"> = "full",
+): string {
   const records = state.order
     .map((itemId) => state.records.get(itemId))
     .filter((record): record is OperationUpdate => record !== undefined);
   let visible = records.slice(-20);
   let omitted = state.omittedCount + records.length - visible.length;
-  let text = renderOperationRecords(visible, omitted);
+  let text = renderOperationRecords(visible, omitted, display);
   while (Array.from(text).length > 3_900 && visible.length > 1) {
     visible = visible.slice(1);
     omitted += 1;
-    text = renderOperationRecords(visible, omitted);
+    text = renderOperationRecords(visible, omitted, display);
   }
   return text;
 }
 
-function renderOperationRecords(records: OperationUpdate[], omitted: number): string {
+function renderOperationRecords(
+  records: OperationUpdate[],
+  omitted: number,
+  display: Exclude<OperationUpdateDisplay, "hidden">,
+): string {
   const lines = ["<b>操作过程</b>"];
   if (omitted > 0) {
     lines.push("", `<i>已省略较早的 ${omitted} 项操作</i>`);
   }
   for (const { record, count } of groupOperations(records)) {
     const countLabel = count > 1 ? ` (×${count})` : "";
-    lines.push("", `${operationIcon(record)} <b>${operationTitle(record)}${countLabel}</b>`);
+    const metadata = operationMetadata(record);
+    const heading =
+      `${operationIcon(record)} <b>${operationTitle(record)}${countLabel} · ${operationStatus(record.status)}</b>`
+      + (metadata.length > 0 ? ` · ${metadata.join(" · ")}` : "");
+    if (display === "compact") {
+      const detail = record.detail ? compactOperationDetail(record.detail) : null;
+      lines.push(
+        "",
+        heading + (detail ? ` · <code>${escapeTelegramHtml(detail)}</code>` : ""),
+      );
+      continue;
+    }
+    lines.push("", heading);
     if (record.detail) {
       const detail = escapeTelegramHtml(
         record.detail.replaceAll("[REDACTED]", "[已隐藏]"),
@@ -44,6 +64,33 @@ function renderOperationRecords(records: OperationUpdate[], omitted: number): st
     }
   }
   return lines.join("\n");
+}
+
+function operationMetadata(record: OperationUpdate): string[] {
+  return [
+    record.durationMs === undefined ? null : `${record.durationMs} ms`,
+    record.exitCode === undefined ? null : `exit ${record.exitCode}`,
+  ].filter((value): value is string => value !== null);
+}
+
+function compactOperationDetail(value: string): string {
+  const normalized = value
+    .replaceAll("[REDACTED]", "[已隐藏]")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const characters = Array.from(normalized);
+  return characters.length <= 160
+    ? normalized
+    : `${characters.slice(0, 159).join("")}…`;
+}
+
+function operationStatus(status: OperationUpdate["status"]): string {
+  return ({
+    running: "运行中",
+    completed: "已完成",
+    failed: "失败",
+    declined: "已拒绝",
+  } as const)[status];
 }
 
 function groupOperations(records: OperationUpdate[]): OperationGroup[] {

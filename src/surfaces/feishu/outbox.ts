@@ -5,7 +5,10 @@ import {
   type OutputEvent,
 } from "../../conversation-core/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
-import type { SurfaceOutputPort } from "../types.js";
+import type {
+  OperationUpdateDisplay,
+  SurfaceOutputPort,
+} from "../types.js";
 import type { FeishuCardDocument } from "./approval-card.js";
 import { FeishuMessageError } from "./client.js";
 import { encodeFeishuPostContent } from "./message-content.js";
@@ -63,7 +66,7 @@ export interface FeishuMessagePort {
 }
 
 export interface FeishuOutboxOptions {
-  showOperationUpdates?: boolean;
+  operationUpdateDisplay?: OperationUpdateDisplay;
 }
 
 export class FeishuOutbox implements SurfaceOutputPort {
@@ -104,7 +107,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       return;
     }
     if (event.type === "operation.updated") {
-      if (this.options.showOperationUpdates === false) {
+      if (this.options.operationUpdateDisplay === "hidden") {
         return;
       }
       if (event.operation.status !== "running") {
@@ -112,7 +115,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
           event.target.conversationId,
           () => this.sendMarkdown(
             event.target.conversationId,
-            formatFeishuOperation(event.operation),
+            formatFeishuOperation(
+              event.operation,
+              this.options.operationUpdateDisplay === "compact" ? "compact" : "full",
+            ),
           ),
           true,
         );

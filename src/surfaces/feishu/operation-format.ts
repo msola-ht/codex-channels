@@ -1,6 +1,10 @@
 import type { OperationUpdate } from "../../conversation-core/index.js";
+import type { OperationUpdateDisplay } from "../types.js";
 
-export function formatFeishuOperation(record: OperationUpdate): string {
+export function formatFeishuOperation(
+  record: OperationUpdate,
+  display: Exclude<OperationUpdateDisplay, "hidden"> = "full",
+): string {
   const metadata = [
     record.durationMs === undefined ? null : `${record.durationMs} ms`,
     record.exitCode === undefined ? null : `exit ${record.exitCode}`,
@@ -9,6 +13,9 @@ export function formatFeishuOperation(record: OperationUpdate): string {
     `**${operationTitle(record)} · ${operationStatus(record.status)}**${metadata.length > 0 ? ` · ${metadata.join(" · ")}` : ""}`,
   ];
   if (record.detail) {
+    if (display === "compact") {
+      return `${lines[0]} · \`${compactOperationDetail(record.detail)}\``;
+    }
     const detail = safeOperationDetail(record.detail);
     if (record.kind === "command") {
       lines.push("```shell", detail, "```");
@@ -17,6 +24,16 @@ export function formatFeishuOperation(record: OperationUpdate): string {
     }
   }
   return lines.join("\n");
+}
+
+function compactOperationDetail(value: string): string {
+  const normalized = inlineOperationDetail(
+    value.replaceAll("[REDACTED]", "[已隐藏]"),
+  ).replace(/\s+/gu, " ").trim();
+  const characters = Array.from(normalized);
+  return characters.length <= 160
+    ? normalized
+    : `${characters.slice(0, 159).join("")}…`;
 }
 
 function inlineOperationDetail(value: string): string {
