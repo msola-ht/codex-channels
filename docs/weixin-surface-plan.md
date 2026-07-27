@@ -5,17 +5,19 @@
 状态：阶段 0 第一步“固定官方基线与源码入口”已于 2026-07-27 完成；第二步二维码合同已完成
 离线探针、正常扫码和过期刷新实测，重定向、配对码及重复绑定状态仍只有离线合同覆盖。微信
 单账号私聊文本 Surface 已加入显式内置注册表且未新增依赖；独立安全凭据 Store、统一 Setup 的
-默认禁用连接配置、窄协议 Client、版本 1 游标检查点、私聊文本输入 Adapter、内存回复上下文、
-纯文本 Outbox 与失败关闭交互端口已实现；完整 `SurfaceAdapter` 已从一级 Surface 入口受控公开，
-显式 `enabled = true` 时由 Bootstrap 注册。
+默认禁用连接配置、窄协议 Client、版本 1 游标检查点、私聊文本输入 Adapter、完整共享命令、
+独立加密回复上下文、重启上线通知、Turn 生命周期统计、纯文本 Outbox 与失败关闭交互端口已实现；
+完整 `SurfaceAdapter` 已从一级 Surface 入口受控公开，显式 `enabled = true` 时由 Bootstrap
+注册。
 
 本计划用于把腾讯微信 ClawBot 接入现有 TypeScript 模块化 Gateway。实现必须继续遵守
 [`通讯渠道 Surface 接入指南`](surface-integration-guide.md)，并与 Telegram、飞书共享
 Application、Conversation Core、Approval、Policy、Session Routing、Storage、Event Bus 和
 同一个 Codex App Server。
 
-首个目标是单个微信 Bot 账号与已授权用户之间的私聊文本闭环。当前不承诺群聊、交互按钮、
-原生流式消息、主动推送、多账号或完整媒体能力。
+首个目标是单个微信 Bot 账号与已授权用户之间的私聊文本闭环。当前只支持使用已加密保存的最近
+回复上下文向已有授权绑定发送重启上线通知，不承诺群聊、交互按钮、原生流式消息、一般主动推送、
+多账号或完整媒体能力。
 
 ## 官方参考基线
 
@@ -132,15 +134,19 @@ Setup 必须显示识别到的微信 Actor，并由操作者在终端确认允�
 - Bot Token 属于敏感凭据。macOS 必须使用系统 Keychain，Linux 必须使用与项目现有凭据机制
   同等的 AES-256-GCM 私有文件；不得写入 `config.toml`、SQLite、日志或聊天消息。
 - 二维码内容、扫码会话和短期验证码只保存在内存中，成功、取消、过期或进程停止时清除。
-- `context_token` 是回复当前用户所需的敏感路由令牌。首个文本闭环只在内存保存，Gateway
-  重启后在用户再次发言前不进行主动微信推送。
+- `context_token` 是回复当前用户所需的敏感路由令牌。经单独批准后，当前实现按精确账号与私聊
+  Actor 写入独立严格版本 1 安全记录：macOS 使用独立 Keychain Service，Linux 使用独立
+  `credentials/weixin-reply-context` AES-256-GCM 私有目录。它不进入 Bot 凭据、TOML、SQLite
+  或日志，只用于重启后恢复关键输出和向仍在允许名单中的已有绑定发送上线通知。
 - `get_updates_buf` 是避免重启后漏取或大量重放的传输游标，不属于 Thread 或消息历史。阶段 0
   已确认服务端重放语义并取得明确批准：以严格版本 1 私有原子文件保存在 Gateway 数据目录，
   不进入 SQLite、TOML 或凭据 Store。
 - 不持久化微信消息正文、媒体内容、引用消息、Codex 回复或完整事件原文。
 
-若后续需要启动通知、配置通知或定时主动发送，必须先单独设计 `context_token` 的加密保存、撤销、
-过期和账号隔离；不能为了主动推送把 Token 放进 StateStore。
+当前加密回复上下文设计已覆盖账号隔离、严格身份校验、撤权后拒绝发送和独立回滚；删除
+`credentials/weixin-reply-context` 不影响 Bot 凭据、配置、游标、SQLite 或其他 Surface。
+若后续需要配置通知、定时发送或其他一般主动推送，仍须单独验证令牌有效期与撤销语义，不能把
+Token 放进 StateStore。
 
 ### Bot Token 存储决策
 
@@ -296,18 +302,19 @@ Application；其生命周期和消息处理由输入 Adapter 组合。
 `actorId + context_token` 更新到有界内存 Store 后再提交；接收或消息处理失败不推进游标，只向
 生命周期所有者报告稳定错误码；重复停止安全，取消后有限等待。
 
-`src/surfaces/weixin/reply-context-store.ts` 与 `outbox.ts` 实现首个安全输出边界：上下文按账号
-与私聊隔离且不持久化，真正发送时再次调用 `SurfaceAccessPolicy`，撤权后删除上下文并拒绝发送。
-Outbox 只接收匹配 `surface + accountId` 的最终文本、必要结束状态、连接错误和警告，通过共享
+`src/surfaces/weixin/reply-context-store.ts`、`reply-context-persistence.ts` 与 `outbox.ts`
+实现安全输出边界：运行时上下文按账号与私聊隔离，最近回复上下文进入独立安全后端；真正发送时
+再次调用 `SurfaceAccessPolicy`，撤权后删除上下文并拒绝发送。Outbox 接收匹配
+`surface + accountId` 的 Turn 开始、最终文本、完成/停止/失败统计、连接错误和警告，通过共享
 Conversation 队列投递；每个气泡最多 4000 个 UTF-16 码元、最多五个气泡，截断时显示提示且不
-拆开代理对。关闭队列后清空全部回复上下文。`interactions.ts` 直接复用统一安全决定，三类请求
+拆开代理对。关闭队列后只清空进程内副本。`interactions.ts` 直接复用统一安全决定，三类请求
 立即拒绝或取消，不显示文本审批。
 
 `src/surfaces/weixin/surface.ts` 已把上述组件组合为正式 `SurfaceAdapter`：Input 与 Outbox
-共享同一个回复上下文 Store；启动只开启输入监控，停止先取消输入，随后取消交互并排空输出，
-最后由 Outbox 清空全部上下文；重复停止等待同一个关闭任务。接收致命错误只向生命周期所有者
-报告稳定分类。由于当前不持久化回复上下文，也没有安全主动收件人，持久配置通知明确失败关闭，
-不尝试向未知用户推送。
+共享同一个进程内回复上下文 Store；启动时只为当前允许名单中的已有绑定恢复严格加密上下文，
+开启输入监控后发送上线通知，通知失败不停止长轮询；停止先取消输入，随后取消交互并排空输出，
+最后由 Outbox 清空进程内副本，重复停止等待同一个关闭任务。接收致命错误只向生命周期所有者
+报告稳定分类。一般持久配置通知仍明确失败关闭，不尝试向未知用户推送。
 
 该类型已通过一级 Surface 入口向 Bootstrap 导出。微信 Access Policy、延迟安全凭据 Client、
 Bootstrap 组合工厂、撤权绑定清理和显式启用配置已实现；Setup 仍默认保存禁用态，操作者确认后
@@ -326,16 +333,18 @@ Bootstrap 组合工厂、撤权绑定清理和显式启用配置已实现；Setu
 8. 提供立即失败关闭的 `InteractionPort`，审批、用户输入和 MCP elicitation 不得悬挂。
 9. Adapter 启动失败由 Bootstrap 回滚；重复停止安全，Gateway 停止不终止共享 App Server。
 
-阶段 1 不实现媒体、群聊、多账号、主动推送、交互按钮或微信专属会话状态。
+阶段 1 主路径已实现并完成真实私聊收发、重启恢复和长文本验收；媒体、群聊、多账号、交互按钮
+和一般主动推送仍不属于本阶段。
 
 ### 阶段 2：共享命令与运行观测
 
 - 接入共享命令目录、解析和 `ConversationCommandService`，不重新实现 Thread、模型、Fast、
   Workspace、Goal、用量或额度逻辑。
 - 微信没有斜杠命令提示时，提供简短文本帮助和常用命令列表；命令本身仍使用统一规范名称。
-- 增加账号、长轮询、最近收发和凭据可用性的 Doctor 观测，不显示 Token、游标或原始响应。
-- 只接入当前 Gateway 进程内、已有有效 `context_token` 的 Turn 状态通知，并且只向仍在允许名单
-  中的 Actor 发送。启动和配置主动通知延后到阶段 4，不在本阶段隐式持久化回复上下文。
+- 进行中：增加账号、运行条件、最近授权上下文、游标检查点和凭据可用性的 Doctor 观测，不显示
+  Token、`context_token`、游标或原始响应；独立 Doctor 不竞争消费 `getupdates`。
+- 已完成：接入 Turn 开始、最终文本和完成/停止/失败统计，并且只向仍在允许名单中的 Actor 发送。
+  经单独持久化评审后，重启上线通知使用独立加密回复上下文；一般配置主动通知仍不支持。
 - 未知或畸形命令明确拒绝，不作为普通文本提交给 Codex。
 
 ### 阶段 3：审批能力门槛
@@ -360,8 +369,8 @@ Bootstrap 组合工厂、撤权绑定清理和显式启用配置已实现；Setu
 3. 输入状态：只有官方 `getconfig` 与 `sendtyping` 合同稳定后启用。
 4. 多账号：每个 Bot 独立凭据、游标、允许名单、长轮询、输出队列和 `surface + accountId`
    生命周期；不能依靠收件人猜测发送账号。
-5. 主动推送：先完成加密 `context_token` 保存、过期、账号隔离与撤销评审，再接入启动或配置
-   通知。
+5. 主动推送：加密 `context_token` 保存、账号隔离、撤权校验和重启上线通知已完成；配置通知、
+   定时发送及令牌过期策略仍须单独评审。
 
 群聊只有在官方渠道明确声明支持、身份合同可验证且 Access Policy 能正确区分群与 Actor 后另立
 切片，不属于本计划当前完成标准。

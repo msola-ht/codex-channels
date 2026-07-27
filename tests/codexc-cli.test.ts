@@ -17,6 +17,11 @@ import {
 import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { readWorkspaceConfig } from "../scripts/workspace-config.mjs";
+import {
+  EncryptedFileWeixinCredentialStore,
+  EncryptedFileWeixinReplyContextPersistence,
+  FileWeixinUpdatesCursorStore,
+} from "../src/surfaces/weixin/index.js";
 
 const temporaryDirectories: string[] = [];
 const cli = resolve("bin/codexc.mjs");
@@ -636,7 +641,7 @@ describe("codexc CLI", () => {
     expect(diagnosed.stdout).not.toContain("[失败] 配置目录权限");
   });
 
-  it("reports the configured Weixin runtime enablement state", () => {
+  it("reports safe Weixin runtime readiness without exposing private values", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-weixin-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -662,6 +667,35 @@ describe("codexc CLI", () => {
         allowed_user_ids: ["actor-fixture@im.wechat"],
       };
     });
+    const accountId = "bot-fixture@im.bot";
+    const actorId = "actor-fixture@im.wechat";
+    const botToken = "private-bot-token";
+    const contextToken = "private-context-token";
+    const cursor = "private-updates-cursor";
+    await new EncryptedFileWeixinCredentialStore(
+      join(home, "credentials", "weixin"),
+    ).set({
+      version: 1,
+      accountId,
+      botToken,
+      baseUrl: "https://ilinkai.weixin.qq.com",
+      grantedAt: 1_000,
+    });
+    await new EncryptedFileWeixinReplyContextPersistence(
+      join(home, "credentials", "weixin-reply-context"),
+      () => 1_000,
+    ).set(
+      {
+        surface: "weixin",
+        accountId,
+        conversationId: actorId,
+      },
+      actorId,
+      contextToken,
+    );
+    await new FileWeixinUpdatesCursorStore(
+      join(home, "data", "weixin-updates"),
+    ).set(accountId, cursor);
 
     const enabled = spawnSync(process.execPath, [cli, "doctor"], {
       cwd: workspace,
@@ -671,6 +705,26 @@ describe("codexc CLI", () => {
     expect(enabled.stdout).toContain(
       "[提示] 微信运行时：配置已启用",
     );
+    expect(enabled.stdout).toContain(
+      "[通过] 微信配置：已启用，允许 1 个用户",
+    );
+    expect(enabled.stdout).toContain(
+      "[通过] 微信连接：安全凭据存在且载荷有效",
+    );
+    expect(enabled.stdout).toContain(
+      "[提示] 微信消息游标：检查点存在且载荷有效",
+    );
+    expect(enabled.stdout).toContain(
+      "[提示] 微信上线通知：1/1 个允许用户具备加密回复上下文",
+    );
+    expect(enabled.stdout).toContain(
+      "最近授权消息：1970-01-01T00:00:01.000Z",
+    );
+    expect(enabled.stdout).not.toContain(botToken);
+    expect(enabled.stdout).not.toContain(contextToken);
+    expect(enabled.stdout).not.toContain(cursor);
+    expect(enabled.stdout).not.toContain(accountId);
+    expect(enabled.stdout).not.toContain(actorId);
 
     updateGatewayConfig(configPath, (document) => {
       table(document.weixin).enabled = false;

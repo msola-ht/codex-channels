@@ -1,8 +1,9 @@
 # 微信 Surface
 
-当前实现阶段 0/Setup 的独立安全凭据边界，以及运行时窄协议 Client、私有游标
-检查点、私聊文本输入 Adapter、完整命令 Adapter、纯文本 Outbox、失败关闭交互端口和目录内部完整
-`SurfaceAdapter`；严格运行配置显式启用时由 Bootstrap 注册，未新增 SQLite Schema。
+当前实现单账号私聊文本 Surface：独立安全凭据边界、运行时窄协议 Client、私有游标检查点、
+私聊文本输入 Adapter、完整命令 Adapter、加密重启上线通知、Turn 生命周期统计、纯文本 Outbox、
+失败关闭交互端口和目录内部完整 `SurfaceAdapter`；严格运行配置显式启用时由 Bootstrap 注册，
+未新增 SQLite Schema。
 
 - `credential-store.ts`：严格校验版本 1 微信 Bot 凭据；macOS 使用独立 Keychain Service，
   Linux 使用独立 `credentials/weixin` AES-256-GCM 私有目录。

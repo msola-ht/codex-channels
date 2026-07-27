@@ -6,7 +6,7 @@ import {
   statSync,
 } from "node:fs";
 import { createConnection } from "node:net";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 
 import WebSocket from "ws";
 
@@ -67,6 +67,7 @@ if (document) {
   const feishu = table(document.feishu);
   const weixin = table(document.weixin);
   const codex = table(document.codex);
+  const storage = table(document.storage);
   const tokenConfigured = Boolean(stringValue(telegram.bot_token));
   const allowedUsers = validAllowedUsers(telegram.allowed_user_ids);
   record("Telegram Token", tokenConfigured, tokenConfigured ? "已配置（内容已隐藏）" : "未配置");
@@ -96,14 +97,29 @@ if (document) {
     note("飞书", "未启用");
   }
   if (stringValue(weixin.account_id)) {
+    const accountId = stringValue(weixin.account_id);
+    const allowedWeixinUsers = validAllowedWeixinUsers(
+      weixin.allowed_user_ids,
+    );
+    record(
+      "微信配置",
+      allowedWeixinUsers,
+      allowedWeixinUsers
+        ? `${weixin.enabled === true ? "已启用" : "未启用"}，允许 ${weixin.allowed_user_ids.length} 个用户`
+        : "weixin.allowed_user_ids 未配置或格式无效",
+    );
     try {
-      const { createWeixinCredentialStore } = await import(
+      const {
+        createWeixinCredentialStore,
+        createWeixinReplyContextPersistence,
+        FileWeixinUpdatesCursorStore,
+      } = await import(
         "../dist/surfaces/weixin/index.js"
       );
       const store = createWeixinCredentialStore(
         join(dataDir, "credentials", "weixin"),
       );
-      const credential = await store.get(stringValue(weixin.account_id));
+      const credential = await store.get(accountId);
       record(
         "微信连接",
         Boolean(credential),
@@ -111,6 +127,59 @@ if (document) {
           ? "安全凭据存在且载荷有效（内容已隐藏）"
           : "安全凭据不存在，请重新运行 codexc setup",
       );
+      const stateDatabasePath = resolveConfiguredPath(
+        stringValue(storage.database_path),
+        dataDir,
+        join(dataDir, "data", "gateway.sqlite3"),
+      );
+      const cursorStore = new FileWeixinUpdatesCursorStore(
+        join(dirname(stateDatabasePath), "weixin-updates"),
+      );
+      try {
+        const cursor = await cursorStore.get(accountId);
+        note(
+          "微信消息游标",
+          cursor === null
+            ? "尚未建立；首次成功轮询前正常"
+            : "检查点存在且载荷有效（内容已隐藏）",
+        );
+      } catch {
+        record("微信消息游标", false, "检查点读取或校验失败");
+      }
+      if (allowedWeixinUsers) {
+        const contexts = createWeixinReplyContextPersistence(
+          join(dataDir, "credentials", "weixin-reply-context"),
+        );
+        let available = 0;
+        let latestUpdatedAt = 0;
+        try {
+          for (const actorId of weixin.allowed_user_ids) {
+            const context = await contexts.get({
+              surface: "weixin",
+              accountId,
+              conversationId: actorId,
+            });
+            if (context !== null) {
+              available += 1;
+              latestUpdatedAt = Math.max(
+                latestUpdatedAt,
+                context.updatedAt,
+              );
+            }
+          }
+          note(
+            "微信上线通知",
+            [
+              `${available}/${weixin.allowed_user_ids.length} 个允许用户具备加密回复上下文`,
+              ...(latestUpdatedAt > 0
+                ? [`最近授权消息：${new Date(latestUpdatedAt).toISOString()}`]
+                : []),
+            ].join("；"),
+          );
+        } catch {
+          record("微信上线通知", false, "加密回复上下文读取或校验失败");
+        }
+      }
     } catch {
       record("微信连接", false, "安全凭据读取或校验失败");
     }
@@ -260,6 +329,14 @@ function validAllowedOpenIds(value) {
   return Array.isArray(value)
     && value.length > 0
     && value.every((item) => typeof item === "string" && /^ou_.+$/u.test(item));
+}
+
+function validAllowedWeixinUsers(value) {
+  return Array.isArray(value)
+    && value.length > 0
+    && value.every((item) =>
+      typeof item === "string"
+      && /^[^\s@]{1,1000}@im\.wechat$/u.test(item));
 }
 
 function table(value) {

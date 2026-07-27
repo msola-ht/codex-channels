@@ -172,9 +172,11 @@ codexc doctor
 ```
 
 `doctor` 会检查 Node、Codex CLI、TOML 语法、完整 Gateway Schema 与权限、Telegram 必填项、
-飞书启用状态、允许名单及凭据/Bot 身份、微信安全凭据、Workspace、App Server 握手、运行中 App Server 的
-实际版本和系统服务状态；磁盘 CLI 或共享 App Server 与项目锁定版本不一致时诊断失败，但不会
-显示 Token、App Secret、完整飞书响应或完整上游 User-Agent。项目不读取或迁移旧 `.env` 配置。
+飞书启用状态、允许名单及凭据/Bot 身份，以及微信配置、Bot 凭据、消息游标、加密上线通知上下文
+覆盖数和最近授权消息时间；同时检查 Workspace、App Server 握手、运行中 App Server 的实际版本
+和系统服务状态。磁盘 CLI 或共享 App Server 与项目锁定版本不一致时诊断失败，但不会显示 Token、
+`context_token`、游标、App Secret、完整飞书响应或完整上游 User-Agent。Doctor 不额外调用微信
+`getupdates`，不会与 Gateway 竞争消费消息。项目不读取或迁移旧 `.env` 配置。
 
 ## 常用命令
 
