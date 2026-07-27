@@ -14,6 +14,7 @@ const probeSequenceTexts = [
   "微信发送合同验证 1/2：同一上下文连续回复。",
   "微信发送合同验证 2/2：Unicode 中文，emoji 🧪，Markdown **粗体** 与 `code`。",
 ];
+const probeLengthText = createFixedLengthProbeText(4_000);
 
 export class WeixinSendContractError extends Error {
   constructor(code, message) {
@@ -181,6 +182,23 @@ export async function runWeixinReplySequenceContract({
   });
 }
 
+export async function runWeixinReplyLengthContract({
+  updatesClient,
+  sendClient,
+  credential,
+  allowedUserIds,
+  signal,
+}) {
+  return runWeixinReplyTextsContract({
+    updatesClient,
+    sendClient,
+    credential,
+    allowedUserIds,
+    replyTexts: [probeLengthText],
+    signal,
+  });
+}
+
 async function runWeixinReplyTextsContract({
   updatesClient,
   sendClient,
@@ -214,6 +232,19 @@ async function runWeixinReplyTextsContract({
     }
   }
   return { inbound, outbound };
+}
+
+function createFixedLengthProbeText(length) {
+  const prefix = "微信长度合同验证：4000 字符｜开始｜";
+  const suffix = "｜结束";
+  const fillerLength = length - prefix.length - suffix.length;
+  if (fillerLength < 0) {
+    throw new WeixinSendContractError(
+      "invalid-input",
+      "微信长度探针文本长度无效",
+    );
+  }
+  return `${prefix}${"测".repeat(fillerLength)}${suffix}`;
 }
 
 export function summarizeSendResponse(raw) {
@@ -353,9 +384,11 @@ async function main(argv) {
       "用法：",
       "  node scripts/weixin-send-contract-probe.mjs reply --live",
       "  node scripts/weixin-send-contract-probe.mjs sequence --live",
+      "  node scripts/weixin-send-contract-probe.mjs limit --live",
       "",
       "显式执行后会读取微信安全凭据，从一条已授权完成态文本中取得内存回复上下文，",
       "reply 发送一条固定短文本；sequence 使用同一上下文连续发送两条固定短文本。",
+      "limit 发送一条固定 4000 字符中文消息，只验证官方分片值，不探测最大上限。",
       "不会输出或保存正文、Token、context_token、游标、client_id 或完整用户标识。",
       "",
     ].join("\n"));
@@ -363,7 +396,7 @@ async function main(argv) {
   }
   if (
     argv.length !== 2
-    || !["reply", "sequence"].includes(argv[0])
+    || !["reply", "sequence", "limit"].includes(argv[0])
     || argv[1] !== "--live"
   ) {
     process.stderr.write("参数无效；请使用 --help 查看用法。\n");
@@ -388,12 +421,17 @@ async function main(argv) {
     };
     const result = argv[0] === "sequence"
       ? await runWeixinReplySequenceContract(contractOptions)
-      : await runWeixinReplyContract(contractOptions);
+      : argv[0] === "limit"
+        ? await runWeixinReplyLengthContract(contractOptions)
+        : await runWeixinReplyContract(contractOptions);
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    const replyDescription = argv[0] === "sequence"
+      ? "两条固定测试回复"
+      : argv[0] === "limit"
+        ? "一条 4000 字符测试回复"
+        : "一条固定测试回复";
     process.stdout.write(
-      `本次未保存消息、游标或回复上下文；请在微信中确认是否收到${
-        argv[0] === "sequence" ? "两条" : "一条"
-      }固定测试回复。\n`,
+      `本次未保存消息、游标或回复上下文；请在微信中确认是否收到${replyDescription}。\n`,
     );
     const outbound = Array.isArray(result.outbound)
       ? result.outbound

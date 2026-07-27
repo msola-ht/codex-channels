@@ -27,7 +27,7 @@ Application、Conversation Core、Approval、Policy、Session Routing、Storage�
 | --- | --- | --- |
 | 安装、登录与后端协议 | [`README.zh_CN.md`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/README.zh_CN.md) | 扫码登录；HTTP JSON API；`getupdates` 长轮询；文本、图片、视频和文件发送 |
 | 包与宿主要求 | [`package.json`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/package.json) | Node.js 22+；官方插件声明 OpenClaw `>=2026.5.12` Peer 依赖并依赖 Plugin SDK |
-| 渠道能力 | [`channel.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/channel.ts) | 当前声明只支持私聊、媒体和块式回复，不声明群聊或交互卡片 |
+| 渠道能力 | [`channel.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/channel.ts) | 当前声明只支持私聊、媒体和块式回复，不声明群聊或交互卡片；宿主侧文本分片值为 4000 |
 | 扫码合同 | [`login-qr.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/auth/login-qr.ts) | 固定二维码主机、Bot Type `3`、5 分钟会话、35 秒状态长轮询、配对码、过期刷新、IDC 重定向、重复绑定、Bot Token、Bot ID、扫码者 ID 和业务 Base URL |
 | HTTP API | [`api.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/api/api.ts)、[`types.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/api/types.ts) | Bearer Token、随机 `X-WECHAT-UIN`、iLink App/版本 Header、`base_info`、长轮询、发送、输入状态、启动/停止通知和错误响应 |
 | 消息循环 | [`monitor.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/monitor/monitor.ts) | 按账号维护游标、有限重试、退避和可取消长轮询；官方实现先持久化响应游标，再逐条处理该批消息 |
@@ -181,8 +181,9 @@ Surface 的内部存储，也不得沿用其 Service、文件名或账号键。
 6. 进行中：固定 `sendmessage` 请求和携带当前 `context_token` 的短文本回复已完成离线合同
    测试与真实验证；同一上下文双消息模式也已完成真实复用验证，缺失或过期上下文以及重启后
    Token 有效期仍待验证。
-7. 进行中：固定 Unicode、emoji 和 Markdown 符号文本已完成真实呈现验证；文本长度、引用消息、
-   错误码、限流、代理和 `NO_PROXY` 仍待验证。
+7. 进行中：固定 Unicode、emoji 和 Markdown 符号文本已完成真实呈现验证；官方宿主 4000 字符
+   分片值已完成单次中文消息真实送达验证，引用消息、错误码、限流、代理和 `NO_PROXY`
+   仍待验证。
 8. 确认停止长轮询时可以通过 `AbortSignal` 有限退出，不遗留后台任务。
 9. 完成 Bot Token 独立命名空间、严格载荷、原子写入、撤销和回滚设计，证明不需要迁移飞书凭据。
 
@@ -259,6 +260,15 @@ Token、用户 ID 或任意回复正文，不输出或保存消息、游标、�
 顺序到达微信客户端，且两次成功响应均为不含 `ret` 的空对象。中文和 emoji 正常显示；
 `**粗体**` 被渲染为粗体，反引号包裹的内容被渲染为行内代码，说明文本项会解释这两种 Markdown
 语法。阶段 1 输出必须中和非预期平台格式，不能把任意上游文本未经处理直接当作微信纯文本。
+
+固定版 `channel.ts` 把宿主侧 `textChunkLimit` 设置为 4000，但没有说明计量单位，也没有证明这是
+服务端最大值。发送探针新增 `limit --live`，只发送一条恰好 4000 个 JavaScript 字符的固定中文
+消息，UTF-8 字节数大于 4000，并用明确首尾标记验证完整送达。该实验只用于证明 4000 是多字节
+文本的安全分片值，不发送 4001 字符或批量超长消息，不尝试撞击未知服务端上限。
+
+真实长度测试确认：恰好 4000 个 JavaScript 字符的固定中文消息被服务端接受，并在微信客户端
+以一个气泡完整显示，末尾标记可见，没有发生截断。阶段 1 可以采用 4000 个 UTF-16 码元作为
+保守文本分片上限；该结论不证明 4001 字符会失败，也不声明服务端最大长度。
 
 ### 阶段 1：单账号私聊文本
 

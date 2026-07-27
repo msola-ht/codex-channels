@@ -12,6 +12,7 @@ import * as updatesProbe from "../scripts/weixin-updates-contract-probe.mjs";
 const {
   createWeixinSendContractClient,
   runWeixinReplyContract,
+  runWeixinReplyLengthContract,
   runWeixinReplySequenceContract,
   summarizeSendResponse,
 } = sendProbe;
@@ -33,6 +34,7 @@ describe("Weixin sendmessage contract probe", () => {
     expect(help.status).toBe(0);
     expect(help.stdout).toContain("reply --live");
     expect(help.stdout).toContain("sequence --live");
+    expect(help.stdout).toContain("limit --live");
     expect(help.stdout).toContain("不保存消息或回复上下文");
     expect(rejected.status).toBe(2);
     expect(rejected.stderr).toContain("参数无效");
@@ -260,6 +262,37 @@ describe("Weixin sendmessage contract probe", () => {
 
     expect(sendText).toHaveBeenCalledOnce();
     expect(result.outbound).toEqual([{ kind: "api-error", ret: -14 }]);
+  });
+
+  it("sends one fixed 4000-character CJK probe without exposing its body", async () => {
+    const updatesClient = createUpdatesClient(
+      inboundMessage("allowed-user@im.wechat", "reply-context", 1n),
+    );
+    const sendText = vi.fn()
+      .mockResolvedValueOnce({ kind: "success", hasReturnCode: false });
+
+    const result = await runWeixinReplyLengthContract({
+      updatesClient,
+      sendClient: { sendText },
+      credential: {
+        baseUrl: "https://ilinkai.weixin.qq.com",
+        botToken: "bot-secret",
+      },
+      allowedUserIds: ["allowed-user@im.wechat"],
+    });
+
+    expect(sendText).toHaveBeenCalledOnce();
+    const input = sendText.mock.calls[0]![0];
+    expect(input.text).toHaveLength(4_000);
+    expect(Buffer.byteLength(input.text, "utf8")).toBeGreaterThan(4_000);
+    expect(input.text).toMatch(/^微信长度合同验证：4000 字符｜开始｜/u);
+    expect(input.text).toMatch(/｜结束$/u);
+    expect(result).toMatchObject({
+      inbound: { kind: "success", messageCount: 1 },
+      outbound: [{ kind: "success" }],
+    });
+    expect(JSON.stringify(result)).not.toContain("微信长度合同验证");
+    expect(JSON.stringify(result)).not.toContain("reply-context");
   });
 });
 
