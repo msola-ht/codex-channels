@@ -12,6 +12,10 @@
   用户 OAuth Device Flow 和单账号生命周期组合；有效配置启用时由 Bootstrap 显式注册，私聊
   PNG/JPEG、命令审批动作、原生流式主路径及 OAuth Token 重启恢复已通过真实验收，用户输入与
   MCP 卡片仍待验收。
+- [`weixin/`](weixin/README.md)：微信阶段 0/Setup 的严格独立凭据边界；消息 Surface 尚未注册。
+
+`secure-credential-store.ts` 提供 Surface 内部复用的 macOS Keychain 和 Linux AES-256-GCM
+字符串记录机制；平台模块仍各自拥有 Service、目录、记录键、载荷校验和错误语义。
 
 `types.ts` 定义最小 `SurfaceAdapter` 契约。每个实例使用
 `surface + accountId` 标识，分别提供启停、输出、可选配置变更通知与 `InteractionPort`；Bootstrap

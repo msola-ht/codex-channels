@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   mkdtempSync,
@@ -514,6 +515,11 @@ describe("Feishu encrypted token store", () => {
 
     const files = readdirSync(directory);
     expect(files).toHaveLength(2);
+    expect(files).toContain(
+      `${createHash("sha256")
+        .update(`${token.appId}:${token.userOpenId}`)
+        .digest("hex")}.enc`,
+    );
     for (const file of files) {
       expect(statSync(join(directory, file)).mode & 0o777).toBe(0o600);
       expect(readFileSync(join(directory, file)).includes(

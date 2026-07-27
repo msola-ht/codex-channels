@@ -65,6 +65,7 @@ if (!existsSync(configPath)) {
 if (document) {
   const telegram = table(document.telegram);
   const feishu = table(document.feishu);
+  const weixin = table(document.weixin);
   const codex = table(document.codex);
   const tokenConfigured = Boolean(stringValue(telegram.bot_token));
   const allowedUsers = validAllowedUsers(telegram.allowed_user_ids);
@@ -93,6 +94,29 @@ if (document) {
     }
   } else {
     note("飞书", "未启用");
+  }
+  if (stringValue(weixin.account_id)) {
+    try {
+      const { createWeixinCredentialStore } = await import(
+        "../dist/surfaces/weixin/index.js"
+      );
+      const store = createWeixinCredentialStore(
+        join(dataDir, "credentials", "weixin"),
+      );
+      const credential = await store.get(stringValue(weixin.account_id));
+      record(
+        "微信连接",
+        Boolean(credential),
+        credential
+          ? "安全凭据存在且载荷有效（内容已隐藏）"
+          : "安全凭据不存在，请重新运行 codexc setup",
+      );
+    } catch {
+      record("微信连接", false, "安全凭据读取或校验失败");
+    }
+    note("微信运行时", "消息接收 Surface 尚未启用");
+  } else {
+    note("微信", "未配置");
   }
 
   try {

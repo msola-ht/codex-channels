@@ -45,6 +45,17 @@ const feishuSchema = z.strictObject({
   }
 });
 
+const weixinSetupSchema = z.strictObject({
+  enabled: z.literal(false),
+  account_id: z.string().regex(/^[^\s@]{1,1000}@im\.bot$/u),
+  allowed_user_ids: z.array(
+    z.string().regex(/^[^\s@]{1,1000}@im\.wechat$/u),
+  ).min(1).refine(
+    (values) => new Set(values).size === values.length,
+    "allowed_user_ids 不能包含重复项",
+  ),
+});
+
 const gatewayDocumentSchema = z.strictObject({
   version: z.literal(1),
   default_workspace: z.string().trim().min(1),
@@ -55,6 +66,7 @@ const gatewayDocumentSchema = z.strictObject({
     message_format: z.enum(["html", "rich"]).default("html"),
   }),
   feishu: feishuSchema.optional(),
+  weixin: weixinSetupSchema.optional(),
   network: z.strictObject({
     http_proxy: z.string().optional(),
     https_proxy: z.string().optional(),

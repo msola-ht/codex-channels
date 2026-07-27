@@ -20,6 +20,11 @@ export interface GatewayConfigDocument {
     app_secret: string;
     allowed_open_ids: string[];
   };
+  weixin?: {
+    enabled: false;
+    account_id: string;
+    allowed_user_ids: string[];
+  };
   network?: {
     http_proxy?: string;
     https_proxy?: string;

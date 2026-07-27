@@ -17,6 +17,9 @@
   短期授权状态不持久化。扫码保存后立即保留已有菜单并自动发布 `codexc_home` 悬浮菜单、长连接
   事件与卡片回调；失败时保留连接配置并提示通过 `/feishu doctor` 恢复。手动凭据流程仍由
   `/feishu doctor` 完成应用授权与发布。
+- `weixin-setup.mjs`：从统一 Setup 菜单执行连接替换风险确认、微信扫码和严格结果裁剪，把
+  Bot Token 原子写入微信独立安全凭据后端，并只向 TOML 写入禁用态账号与允许用户元数据；
+  当前不启动尚未实现的消息 Surface。
 - `feishu-application.mjs`：为 Setup 与 Doctor 提供带有限超时的飞书凭据/Bot 身份只读探测，
   不建立消息长连接，并把 SDK 错误和残缺响应收敛为不含敏感详情的稳定错误。
 - `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。
@@ -71,6 +74,7 @@
 - `check-release-tag.mjs`：要求 Git Tag 与 `package.json` 版本严格一致，防止发布错版。
 - `sync-gateway-version.mjs`：以锁定的 Codex CLI 协议版本同步 `package.json`、锁文件和 Gateway 运行时版本；不维护独立版本号。
 - `doctor.mjs`：检查 npm 包、Node、Codex CLI、当前 TOML 配置、Workspace、飞书凭据/Bot 身份、
+  微信安全凭据、
   Unix WebSocket、`initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，不输出
   完整 User-Agent、飞书上游响应或敏感配置内容。
 - `install-launchd.mjs`：渲染并安装 launchd plist；代理由 CLI 服务入口在每次启动时解析。

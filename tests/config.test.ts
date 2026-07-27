@@ -207,6 +207,31 @@ describe("Gateway config.toml", () => {
     }).config.feishu).toBeUndefined();
   });
 
+  it("accepts only the disabled Weixin setup metadata", () => {
+    const fixture = createFixture({
+      weixin: {
+        enabled: false,
+        account_id: "bot-fixture@im.bot",
+        allowed_user_ids: ["actor-fixture@im.wechat"],
+      },
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).not.toThrow();
+
+    const enabled = createFixture({
+      weixin: {
+        enabled: true,
+        account_id: "bot-fixture@im.bot",
+        allowed_user_ids: ["actor-fixture@im.wechat"],
+      },
+    });
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: enabled.configPath,
+    })).toThrow(ConfigurationError);
+  });
+
   it.each([
     [
       "missing credentials",

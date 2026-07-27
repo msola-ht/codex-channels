@@ -22,3 +22,7 @@
 同时有效，Open ID 不得重复。群 Chat、`@Bot` 和其他未支持字段仍由严格 Schema 拒绝。
 启用状态或凭据变化需要重启 Gateway，允许 Open ID 集合可热加载；允许名单收窄时同时清理该飞书
 账号下已撤权 Actor 的绑定。
+
+微信 Setup 当前写入严格的禁用态 `weixin` 表，只包含 `enabled = false`、账号 ID 和允许用户
+ID；Bot Token 位于独立安全凭据后端。当前版本拒绝把微信设置为启用，避免在消息 Surface 尚未
+实现时误报可用。

@@ -19,6 +19,8 @@
   明确确认后只增量申请缺失的应用权限，并通过飞书客户端内的授权页自动补齐菜单、事件与回调后
   提交应用版本。Doctor 会分别检查菜单节点和启用开关；节点存在但
   未启用时显示“已添加，尚未启用”。当前不支持飞书群聊或一般文件。
+- 微信接入处于阶段 0：`codexc setup` 已可在明确确认连接替换风险后扫码，把 Bot Token 保存到
+  独立安全凭据后端，并记录脱敏账号与允许用户；当前配置保持禁用，尚不接收或发送微信消息。
 - 查看 Codex 流式回复、格式化最终回复、操作过程、计划、Diff、Goal、用量和额度；长文本自动折叠，超长代码以预览加完整文件发送；Telegram 与飞书的 `/status`、启动联通通知和每轮结束状态卡均显示当前授权 Workspace 的 Git 分支；`/status` 还显示 Thread 累计缓存命中率，每轮结束状态卡显示最近 Turn 缓存命中率、当前 Goal 状态及 Thread 上下文压缩总次数，飞书把 App Server 返回的准确对话耗时单独放在卡片底栏。
 - App Server 明确返回的 Turn、warning 和 MCP 错误会在统一脱敏并限长后显示到对应通讯渠道；未知内部异常、凭据和未经约束的响应正文仍不会直接发送。
 - Telegram 通知按逻辑事件降噪：过程、状态、上下文和后续分片静默发送；最终回复、审批、用户输入与严重错误保留提醒。
@@ -55,7 +57,8 @@ codexc init
 codexc setup
 ```
 
-`codexc setup` 使用统一设置菜单进入具体配置流程；当前可从“通讯渠道”选择 Telegram 或飞书。Telegram 模块会引导
+`codexc setup` 使用统一设置菜单进入具体配置流程；当前可从“通讯渠道”选择 Telegram、飞书或
+微信。Telegram 模块会引导
 通过官方 `@BotFather` 新建 Bot 或填写已有 Bot Token，验证 Token，并通过一次性 `/start`
 配对链接自动获取 Telegram 用户 ID。复用当前 Bot 时默认保留已有用户允许名单，避免与运行中的
 Gateway 争抢 Telegram 长轮询。该流程不依赖第三方机器人创建服务。也可以直接编辑
@@ -111,6 +114,20 @@ allowed_open_ids = ["ou_xxx"]
 单张图片附带说明文字的富文本消息已完成代码、离线测试和部署，仍需真实应用验收。包含不支持
 元素的富文本失败关闭，不会丢弃部分内容后提交。审批请求不会通过飞书静默批准高权限操作。
 
+微信 Setup 会在联网前提示新连接可能删除旧连接，并要求再次确认；扫码成功后 Bot Token 不进入
+TOML、SQLite 或日志。macOS 使用独立 Keychain Service，Linux 使用
+`credentials/weixin` 下独立主密钥和 AES-256-GCM 密文。TOML 只记录：
+
+```toml
+[weixin]
+enabled = false
+account_id = "不透明账号@im.bot"
+allowed_user_ids = ["不透明用户@im.wechat"]
+```
+
+当前版本只接受 `enabled = false`，表示连接已安全保存但消息 Surface 尚未实现；`codexc doctor`
+会只读检查对应安全凭据是否存在且载荷有效，不显示 Token。不要手工把它改为 `true`。
+
 最终回复默认把常用 Markdown 安全转换为兼容性更好的 Telegram HTML。支持 Rich Messages
 的客户端可设置 `telegram.message_format = "rich"`；修改后执行 `codexc service reload`，
 Gateway 会自动重启。
@@ -146,7 +163,7 @@ codexc doctor
 ```
 
 `doctor` 会检查 Node、Codex CLI、TOML 语法、完整 Gateway Schema 与权限、Telegram 必填项、
-飞书启用状态、允许名单及凭据/Bot 身份、Workspace、App Server 握手、运行中 App Server 的
+飞书启用状态、允许名单及凭据/Bot 身份、微信安全凭据、Workspace、App Server 握手、运行中 App Server 的
 实际版本和系统服务状态；磁盘 CLI 或共享 App Server 与项目锁定版本不一致时诊断失败，但不会
 显示 Token、App Secret、完整飞书响应或完整上游 User-Agent。项目不读取或迁移旧 `.env` 配置。
 
@@ -343,8 +360,9 @@ Codex App Server（独立进程，Unix WebSocket）
 App Server 是 Thread、Turn 和 Item 的唯一事实来源。SQLite 只保存外部 conversation、Surface
 账号、Workspace 与 Thread 的最小绑定。Surface 通过编译期内置插件注册表显式接入；Telegram
 插件始终创建一个默认账号实例，飞书插件只在有效配置明确启用时创建实例。插件 ID、实际 Surface
-ID 和 `surface + accountId` 会在启动装配时校验；当前不扫描目录或动态加载外部 npm 包。各平台
-通过统一服务和 `target + actorId` 授权上下文接入，
+ID 和 `surface + accountId` 会在启动装配时校验；当前不扫描目录或动态加载外部 npm 包。微信
+目前只有 Setup 与安全凭据边界，不在上述运行时 Surface 树中。各平台通过统一服务和
+`target + actorId` 授权上下文接入，
 不修改 Conversation Core 或 Codex Client；授权同时按 Surface 账号隔离。Application 返回结构化
 结果，平台 SDK、文案、消息格式和文件传输由各自适配器实现；未知内部错误不会原样发送到外部聊天。
 

@@ -89,6 +89,8 @@
   声明、应用选择、Bot 身份验证、扫码后自动发布悬浮菜单、发布失败保留连接配置并安全提示 Doctor
   恢复、授权域名约束、允许名单确认、原子保存和错误脱敏、
   CLI 项目规则生成/检查、launchd、systemd、Unix WebSocket 请求头、模块依赖方向和公开入口边界。
+- 微信 Setup 的替换风险取消门槛、扫码结果到禁用态非敏感配置和独立安全凭据的原子提交、配置失败
+  凭据恢复，以及微信/飞书分离的 Keychain Service、Linux 密文私有权限、严格版本和损坏失败关闭。
 - Workspace 不可变授权快照、热加载失败回滚、选择歧义，以及 Telegram Surface、账号和规范
   Actor ID 的联合授权；飞书 Surface、App 账号和 `open_id` 精确允许名单及原子替换。
 - 微信阶段 0 二维码合同探针的固定请求 Header/路径/Body、严格响应裁剪、未知和残缺状态失败
@@ -106,7 +108,7 @@
   Setup 对同一解析结果的复用；无代理时不注入空环境变量；飞书启用/禁用、凭据和允许 Open ID
   的严格映射、畸形与未知字段拒绝，以及启用/凭据重启和允许名单热加载分类。
 - CLI Doctor 的严格 TOML Schema 校验、共享 App Server 握手与实际版本匹配、飞书凭据/Bot
-  身份有限探测、敏感错误清洗和只读诊断；项目规则限定当前 Workspace、
+  身份有限探测、微信安全凭据只读校验、敏感错误清洗和只读诊断；项目规则限定当前 Workspace、
   拒绝远程覆盖和符号链接路径逃逸；CLI 分级帮助、规范命令名称及 macOS/Linux 服务目标选择；
   一级模块使用完整依赖允许列表并要求跨模块只导入公开入口；Session Routing 不得依赖具体
   Client 或生成协议，Conversation Turn 测试不得伪装成完整 Client；生产源码只有 Codex Client
