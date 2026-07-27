@@ -4,7 +4,9 @@ import { Bot, InlineKeyboard, type Context } from "grammy";
 import type { Logger } from "pino";
 
 import {
+  resolveApprovalChoice,
   safeInteractionDecision,
+  type ApprovalChoice,
   type InteractionDecision,
   type InteractionPort,
   type InteractionRequest,
@@ -389,53 +391,17 @@ export class TelegramInteractionPort implements InteractionPort {
       return;
     }
     if (pending.request.type === "approval") {
-      if (action === "s" && !pending.request.allowSession) {
-        await context.answerCallbackQuery({ text: "该请求不支持会话授权" });
-        return;
-      }
-      if (action === "p" && !pending.request.execPolicyAmendment) {
-        await context.answerCallbackQuery({ text: "该请求不支持持久规则" });
-        return;
-      }
-      const networkMatch = /^n(\d+)$/.exec(action ?? "");
-      const networkPolicyAmendment = networkMatch
-        ? pending.request.networkPolicyAmendments?.[Number(networkMatch[1])]
+      const choice = telegramApprovalChoice(action);
+      const resolution = choice
+        ? resolveApprovalChoice(pending.request, choice)
         : undefined;
-      if (networkMatch && !networkPolicyAmendment) {
-        await context.answerCallbackQuery({ text: "该请求不支持持久网络规则" });
+      if (!resolution) {
+        await context.answerCallbackQuery({
+          text: unsupportedApprovalChoiceMessage(choice),
+        });
         return;
       }
-      if (action === "a") {
-        this.finish(token!, { type: "approval", approved: true, scope: "once" }, "已批准一次");
-      } else if (action === "p") {
-        this.finish(
-          token!,
-          { type: "approval", approved: true, scope: "execpolicy" },
-          "已保存命令前缀规则",
-        );
-      } else if (networkPolicyAmendment) {
-        const action = networkPolicyAmendment.action === "allow" ? "允许" : "拒绝";
-        this.finish(
-          token!,
-          {
-            type: "approval",
-            approved: true,
-            scope: "networkpolicy",
-            networkPolicyAmendment,
-          },
-          `已保存网络${action}规则`,
-        );
-      } else if (action === "s") {
-        this.finish(
-          token!,
-          { type: "approval", approved: true, scope: "session" },
-          pending.request.networkApprovalContext
-            ? `本会话已允许 ${pending.request.networkApprovalContext.host}`
-            : "已在本次会话中始终同意",
-        );
-      } else {
-        this.finish(token!, { type: "approval", approved: false }, "已拒绝");
-      }
+      this.finish(token!, resolution.decision, resolution.outcome);
     } else if (pending.request.type === "elicitation") {
       this.finish(
         token!,
@@ -529,6 +495,44 @@ export class TelegramInteractionPort implements InteractionPort {
       .find(([, candidate]) =>
         candidate.target.conversationId === conversationId && predicate(candidate),
       )?.[0];
+  }
+}
+
+function telegramApprovalChoice(
+  action: string | undefined,
+): ApprovalChoice | undefined {
+  switch (action) {
+    case "a":
+      return { type: "once" };
+    case "s":
+      return { type: "session" };
+    case "p":
+      return { type: "execpolicy" };
+    case "d":
+      return { type: "reject" };
+    default: {
+      const match = /^n(\d+)$/u.exec(action ?? "");
+      return match
+        ? { type: "networkpolicy", amendmentIndex: Number(match[1]) }
+        : undefined;
+    }
+  }
+}
+
+function unsupportedApprovalChoiceMessage(
+  choice: ApprovalChoice | undefined,
+): string {
+  switch (choice?.type) {
+    case "session":
+      return "该请求不支持会话授权";
+    case "execpolicy":
+      return "该请求不支持持久规则";
+    case "networkpolicy":
+      return "该请求不支持持久网络规则";
+    case "once":
+    case "reject":
+    case undefined:
+      return "该请求已失效";
   }
 }
 

@@ -1,5 +1,10 @@
 export { ApprovalCoordinator } from "./coordinator.js";
 export {
+  resolveApprovalChoice,
+  type ApprovalChoice,
+  type ApprovalChoiceResolution,
+} from "./interaction-decision.js";
+export {
   InteractionRouter,
   safeInteractionDecision,
 } from "./interaction-router.js";

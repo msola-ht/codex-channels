@@ -1,7 +1,9 @@
 import { randomBytes } from "node:crypto";
 
 import {
+  resolveApprovalChoice,
   safeInteractionDecision,
+  type ApprovalChoice,
   type InteractionDecision,
   type InteractionPort,
   type InteractionRequest,
@@ -532,68 +534,28 @@ function mapApprovalDecision(
   decision: Extract<InteractionDecision, { type: "approval" }>;
   outcome: string;
 } | undefined {
+  const choice = feishuApprovalChoice(action);
+  return choice ? resolveApprovalChoice(request, choice) : undefined;
+}
+
+function feishuApprovalChoice(
+  action: string,
+): ApprovalChoice | undefined {
   const typedAction = action as FeishuApprovalAction;
   switch (typedAction) {
     case "approve-once":
-      return {
-        decision: {
-          type: "approval",
-          approved: true,
-          scope: "once",
-        },
-        outcome: "已批准一次",
-      };
+      return { type: "once" };
     case "approve-session":
-      if (!request.allowSession) {
-        return undefined;
-      }
-      return {
-        decision: {
-          type: "approval",
-          approved: true,
-          scope: "session",
-        },
-        outcome: request.networkApprovalContext
-          ? `本会话已允许 ${request.networkApprovalContext.host}`
-          : "已在本次会话中始终同意",
-      };
+      return { type: "session" };
     case "approve-execpolicy":
-      if (!request.execPolicyAmendment) {
-        return undefined;
-      }
-      return {
-        decision: {
-          type: "approval",
-          approved: true,
-          scope: "execpolicy",
-        },
-        outcome: "已保存命令前缀规则",
-      };
+      return { type: "execpolicy" };
     case "reject":
-      return {
-        decision: {
-          type: "approval",
-          approved: false,
-        },
-        outcome: "已拒绝",
-      };
+      return { type: "reject" };
     default: {
       const match = /^approve-network-(\d+)$/u.exec(action);
-      const amendment = match
-        ? request.networkPolicyAmendments?.[Number(match[1])]
+      return match
+        ? { type: "networkpolicy", amendmentIndex: Number(match[1]) }
         : undefined;
-      if (!amendment) {
-        return undefined;
-      }
-      return {
-        decision: {
-          type: "approval",
-          approved: true,
-          scope: "networkpolicy",
-          networkPolicyAmendment: amendment,
-        },
-        outcome: `已保存网络${amendment.action === "allow" ? "允许" : "拒绝"}规则`,
-      };
     }
   }
 }
