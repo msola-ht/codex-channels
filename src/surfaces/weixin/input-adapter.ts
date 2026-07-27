@@ -13,6 +13,7 @@ import {
 } from "./protocol-client.js";
 import type { WeixinUpdatesCursorStore } from "./updates-cursor-store.js";
 import { createWeixinUpdatesMonitor } from "./updates-monitor.js";
+import { WeixinReplyContextStore } from "./reply-context-store.js";
 
 type WeixinTextMessage = Extract<
   WeixinInboundMessage,
@@ -37,6 +38,7 @@ export interface WeixinInputAdapterOptions {
   cursorStore: WeixinUpdatesCursorStore;
   service: Pick<ConversationService, "submit">;
   access: SurfaceAccessPolicy;
+  replyContexts: WeixinReplyContextStore;
   actorRegistry?: ConversationActorRegistry;
   onFatal(error: WeixinInputFatalError): void;
   onStopTimeout?(): void;
@@ -102,8 +104,14 @@ export class WeixinInputAdapter {
       actorId: message.actorId,
     };
     if (!this.options.access.isAllowed(accessContext)) {
+      this.options.replyContexts.remove(target);
       return;
     }
+    this.options.replyContexts.remember(
+      target,
+      message.actorId,
+      message.contextToken,
+    );
     this.options.actorRegistry?.rememberActor(target, message.actorId);
     try {
       await this.options.service.submit(target, message.text);

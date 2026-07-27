@@ -5,7 +5,8 @@
 状态：阶段 0 第一步“固定官方基线与源码入口”已于 2026-07-27 完成；第二步二维码合同已完成
 离线探针、正常扫码和过期刷新实测，重定向、配对码及重复绑定状态仍只有离线合同覆盖。尚未注册
 微信消息 Surface 或新增依赖；独立安全凭据 Store、统一 Setup 的禁用态连接配置、窄协议 Client、
-版本 1 游标检查点与私聊文本输入 Adapter 已实现。
+版本 1 游标检查点、私聊文本输入 Adapter、内存回复上下文、纯文本 Outbox 与失败关闭交互端口
+已实现。
 
 本计划用于把腾讯微信 ClawBot 接入现有 TypeScript 模块化 Gateway。实现必须继续遵守
 [`通讯渠道 Surface 接入指南`](surface-integration-guide.md)，并与 Telegram、飞书共享
@@ -290,10 +291,19 @@ Application；其生命周期和消息处理由输入 Adapter 组合。
 
 `src/surfaces/weixin/input-adapter.ts` 已实现上述输入侧所有权：按固定账号构造微信私聊目标，
 调用 `SurfaceAccessPolicy` 后记录 Actor 并提交普通文本给 `ConversationService`；未授权消息
-不进入 Application，但仍允许整批推进游标。接收或消息处理失败不推进游标，只向生命周期所有者
-报告稳定错误码；重复停止安全，取消后有限等待。该类型没有伪造输出或交互占位，因此还不是可注册
-的 `SurfaceAdapter`。下一批必须先实现真实纯文本 Outbox 和立即失败关闭的 `InteractionPort`，
-再组合完整 Surface 并由 Bootstrap 拥有生命周期。
+不进入 Application，并删除该私聊的旧回复上下文，但仍允许整批推进游标。授权消息把最新
+`actorId + context_token` 更新到有界内存 Store 后再提交；接收或消息处理失败不推进游标，只向
+生命周期所有者报告稳定错误码；重复停止安全，取消后有限等待。
+
+`src/surfaces/weixin/reply-context-store.ts` 与 `outbox.ts` 实现首个安全输出边界：上下文按账号
+与私聊隔离且不持久化，真正发送时再次调用 `SurfaceAccessPolicy`，撤权后删除上下文并拒绝发送。
+Outbox 只接收匹配 `surface + accountId` 的最终文本、必要结束状态、连接错误和警告，通过共享
+Conversation 队列投递；每个气泡最多 4000 个 UTF-16 码元、最多五个气泡，截断时显示提示且不
+拆开代理对。关闭队列后清空全部回复上下文。`interactions.ts` 直接复用统一安全决定，三类请求
+立即拒绝或取消，不显示文本审批。
+
+这些组件还没有组合成正式 `SurfaceAdapter`。下一批负责统一启停、配置通知失败语义和组件关闭
+顺序；通过后才能从一级 Surface 入口导出并交给 Bootstrap 注册。
 
 ### 阶段 1：单账号私聊文本
 

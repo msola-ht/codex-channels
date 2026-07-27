@@ -34,3 +34,14 @@ export {
   type WeixinInputAdapterOptions,
   type WeixinInputFatalCode,
 } from "./input-adapter.js";
+export {
+  WeixinReplyContextStore,
+  type WeixinReplyContext,
+} from "./reply-context-store.js";
+export {
+  WeixinOutbox,
+  WeixinOutboxError,
+  type WeixinOutboxErrorCode,
+  type WeixinOutboxOptions,
+} from "./outbox.js";
+export { WeixinInteractionPort } from "./interactions.js";

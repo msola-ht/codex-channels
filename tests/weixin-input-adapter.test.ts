@@ -10,6 +10,7 @@ import {
   WeixinInputAdapter,
   WeixinInputFatalError,
   WeixinProtocolError,
+  WeixinReplyContextStore,
   type WeixinProtocolClient,
   type WeixinUpdatesCursorStore,
 } from "../src/surfaces/weixin/index.js";
@@ -31,6 +32,7 @@ describe("WeixinInputAdapter", () => {
     });
     const access = accessFixture(true, events);
     const actorRegistry = actorRegistryFixture(events);
+    const replyContexts = new WeixinReplyContextStore(accountId);
     const service = serviceFixture(async () => {
       events.push("submit");
       return { threadId: "thread", turnId: "turn", steered: false };
@@ -42,6 +44,7 @@ describe("WeixinInputAdapter", () => {
       cursorStore,
       service,
       access,
+      replyContexts,
       actorRegistry,
       onFatal,
     });
@@ -61,6 +64,10 @@ describe("WeixinInputAdapter", () => {
     ]);
     expect(service.submit).toHaveBeenCalledWith(target, "hello");
     expect(actorRegistry.rememberActor).toHaveBeenCalledWith(target, actorId);
+    expect(replyContexts.get(target)).toEqual({
+      actorId,
+      contextToken: "context-secret",
+    });
     expect(onFatal).not.toHaveBeenCalled();
   });
 
@@ -70,12 +77,15 @@ describe("WeixinInputAdapter", () => {
     const access = accessFixture(false);
     const actorRegistry = actorRegistryFixture();
     const service = serviceFixture();
+    const replyContexts = new WeixinReplyContextStore(accountId);
+    replyContexts.remember(target, actorId, "previous-context");
     const adapter = new WeixinInputAdapter({
       accountId,
       client: controller.client,
       cursorStore,
       service,
       access,
+      replyContexts,
       actorRegistry,
       onFatal: vi.fn(),
     });
@@ -90,6 +100,7 @@ describe("WeixinInputAdapter", () => {
     expect(access.isAllowed).toHaveBeenCalledWith({ target, actorId });
     expect(actorRegistry.rememberActor).not.toHaveBeenCalled();
     expect(service.submit).not.toHaveBeenCalled();
+    expect(replyContexts.get(target)).toBeUndefined();
   });
 
   it("reports a constrained fatal error and preserves the cursor on submission failure", async () => {
@@ -105,6 +116,7 @@ describe("WeixinInputAdapter", () => {
       cursorStore,
       service,
       access: accessFixture(true),
+      replyContexts: new WeixinReplyContextStore(accountId),
       onFatal,
     });
 
@@ -139,6 +151,7 @@ describe("WeixinInputAdapter", () => {
       cursorStore: cursorStoreFixture(),
       service: serviceFixture(),
       access: accessFixture(true),
+      replyContexts: new WeixinReplyContextStore(accountId),
       onFatal,
     });
 
@@ -164,6 +177,7 @@ describe("WeixinInputAdapter", () => {
       cursorStore: cursorStoreFixture(),
       service: serviceFixture(),
       access: accessFixture(true),
+      replyContexts: new WeixinReplyContextStore(accountId),
       onFatal,
     });
 
@@ -194,6 +208,7 @@ describe("WeixinInputAdapter", () => {
       cursorStore: cursorStoreFixture(),
       service: serviceFixture(),
       access: accessFixture(true),
+      replyContexts: new WeixinReplyContextStore(accountId),
       onFatal: vi.fn(),
       onStopTimeout,
       closeTimeoutMs: 1,
