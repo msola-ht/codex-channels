@@ -6,6 +6,7 @@ import type { ConversationTarget } from "../../conversation-core/index.js";
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import type { FeishuCardDocument } from "./approval-card.js";
 import {
+  feishuFloatingMenuDisplayStrategy,
   FeishuApplicationSetupError,
   requiredFeishuApplicationTenantScopes,
   type FeishuApplicationApi,
@@ -86,6 +87,11 @@ export class FeishuApplicationSetupController {
       this.logFailure(target, "inspect", error);
     }
     const missingTenantScopes = missingRequiredTenantScopes(snapshot);
+    const configurationNeeded = snapshot !== undefined
+      && !snapshot.hasPendingVersion
+      && !applicationConfigurationComplete(snapshot, runtime);
+    const actionAvailable =
+      missingTenantScopes.length > 0 || configurationNeeded;
     const token = randomBytes(18).toString("base64url");
     const messageId = await this.outbox.deliverCard(
       target.conversationId,
@@ -93,12 +99,12 @@ export class FeishuApplicationSetupController {
         this.appId,
         runtime,
         snapshot,
-        missingTenantScopes.length > 0 ? token : undefined,
+        actionAvailable ? token : undefined,
       ),
     );
     if (
       this.closed
-      || missingTenantScopes.length === 0
+      || !actionAvailable
     ) {
       return;
     }
@@ -194,29 +200,35 @@ export class FeishuApplicationSetupController {
       await this.outbox.updateCard(
         pending.target.conversationId,
         pending.messageId,
-        renderSetupProgressCard("正在通过飞书官方流程授权当前应用…"),
+        renderSetupProgressCard(
+          pending.missingTenantScopes.length > 0
+            ? "正在通过飞书官方流程授权当前应用…"
+            : "正在自动配置当前飞书应用…",
+        ),
       );
-      let delivery: Promise<string> | undefined;
-      await this.api.authorizeApplication(
-        controller.signal,
-        (url, expiresInSeconds) => {
-          delivery = this.outbox.deliverCard(
-            pending.target.conversationId,
-            renderConfigurationAuthorizationCard(
-              url,
-              expiresInSeconds,
-            ),
-          );
-          void delivery.catch(() => {
-            authorizationDeliveryFailed = true;
-            controller.abort();
-          });
-        },
-        pending.missingTenantScopes,
-      );
-      authorizationMessageId = await delivery;
-      if (!authorizationMessageId) {
-        throw new Error("飞书应用授权卡片未发送");
+      if (pending.missingTenantScopes.length > 0) {
+        let delivery: Promise<string> | undefined;
+        await this.api.authorizeApplication(
+          controller.signal,
+          (url, expiresInSeconds) => {
+            delivery = this.outbox.deliverCard(
+              pending.target.conversationId,
+              renderConfigurationAuthorizationCard(
+                url,
+                expiresInSeconds,
+              ),
+            );
+            void delivery.catch(() => {
+              authorizationDeliveryFailed = true;
+              controller.abort();
+            });
+          },
+          pending.missingTenantScopes,
+        );
+        authorizationMessageId = await delivery;
+        if (!authorizationMessageId) {
+          throw new Error("飞书应用授权卡片未发送");
+        }
       }
       const snapshot = await this.api.inspect(controller.signal);
       if (applicationConfigurationComplete(snapshot, pending.runtime)) {
@@ -228,24 +240,35 @@ export class FeishuApplicationSetupController {
             "官方授权已完成，当前应用配置检测也已通过。",
           ),
         );
-        await this.updateAuthorizationOutcome(
-          pending,
-          authorizationMessageId,
-        );
+        if (authorizationMessageId) {
+          await this.updateAuthorizationOutcome(
+            pending,
+            authorizationMessageId,
+          );
+        }
         return;
       }
+      await this.api.configureApplication(controller.signal);
+      const configured = await this.api.inspect(controller.signal);
+      const outcome = configured.hasPendingVersion
+        ? "菜单、事件与回调已自动配置并提交发布，正在等待管理员审核。"
+        : applicationConfigurationComplete(configured, pending.runtime)
+          ? "菜单、事件与回调已自动配置并发布完成。"
+          : "菜单、事件与回调已自动配置并提交发布，请稍后发送 /feishu doctor 复查。";
       await this.outbox.updateCard(
         pending.target.conversationId,
         pending.messageId,
         renderSetupOutcomeCard(
           true,
-          manualConfigurationText(this.appId),
+          outcome,
         ),
       );
-      await this.updateAuthorizationOutcome(
-        pending,
-        authorizationMessageId,
-      );
+      if (authorizationMessageId) {
+        await this.updateAuthorizationOutcome(
+          pending,
+          authorizationMessageId,
+        );
+      }
     } catch (error) {
       if (controller.signal.aborted && !authorizationDeliveryFailed) {
         return;
@@ -346,9 +369,11 @@ export function renderDoctorCard(
       tag: "action",
       actions: [{
         tag: "button",
-        text: {
-          tag: "plain_text",
-          content: snapshot ? "授权缺少权限" : "授权并重新检测",
+          text: {
+            tag: "plain_text",
+            content: missingScopes.length > 0
+              ? snapshot ? "授权并自动配置" : "授权并重新检测"
+              : "自动配置",
         },
         type: "primary",
         value: {
@@ -399,7 +424,7 @@ function renderConfigurationAuthorizationCard(
         content: [
           "请通过飞书官方流程确认当前应用授权。",
           "",
-          "Gateway 不会自动修改能力、事件、回调、菜单或发布应用版本；授权完成后会提供人工配置指引。",
+          "授权完成后，Gateway 会启用 Codex 菜单、追加长连接菜单事件与卡片回调并提交应用版本。",
           `链接约 ${Math.max(1, Math.ceil(expiresInSeconds / 60))} 分钟后失效。`,
         ].join("\n"),
       },
@@ -465,7 +490,7 @@ function renderSetupOutcomeCard(
       template: success ? "green" : "grey",
       title: {
         tag: "plain_text",
-        content: success ? "飞书授权完成" : "飞书授权未完成",
+        content: success ? "飞书配置完成" : "飞书配置未完成",
       },
     },
     elements: [{
@@ -473,20 +498,6 @@ function renderSetupOutcomeCard(
       content: text,
     }],
   };
-}
-
-function manualConfigurationText(appId: string): string {
-  return [
-    "飞书官方授权已完成，Gateway 不会自动修改或发布应用配置。",
-    "",
-    `请[打开当前飞书应用](https://open.feishu.cn/app/${appId})并完成：`,
-    "1. 在机器人能力中开启自定义菜单。",
-    `2. 添加一个事件类型菜单“Codex”，Event Key 设为 ${feishuCommandMenuEventKey}。`,
-    "3. 确认消息事件、机器人菜单事件和卡片回调使用长连接。",
-    "4. 创建并发布应用版本。",
-    "",
-    "完成后发送 /feishu doctor 复查。",
-  ].join("\n");
 }
 
 function renderDoctorSummary(
@@ -564,6 +575,7 @@ function applicationConfigurationComplete(
       runtime.menuEventObserved
       || (snapshot.menuEventConfigured && snapshot.menuConfigured)
     )
+    && snapshot.botMenuDisplayStrategy === feishuFloatingMenuDisplayStrategy
     && !snapshot.hasPendingVersion;
 }
 
@@ -592,11 +604,15 @@ function renderDoctorActions(
     )
   ) {
     if (snapshot.hasPendingVersion) {
-      lines.push("开放平台存在待发布版本。");
+      const inAppUrl = toFeishuInAppUrl(
+        `https://open.feishu.cn/app/${appId}`,
+      );
+      lines.push(
+        `开放平台存在待发布版本，请[在飞书内处理当前应用](${inAppUrl})。`,
+      );
+    } else {
+      lines.push("可点击下方按钮自动补齐应用配置并提交版本。");
     }
-    lines.push(
-      `请[打开当前飞书应用](https://open.feishu.cn/app/${appId})完成标记项并发布版本。`,
-    );
   }
   return lines.length > 0 ? lines.join("\n\n") : undefined;
 }
@@ -619,6 +635,12 @@ function doctorNeedsAttention(
 
 function setupFailureText(error: unknown): string {
   const code = (error as Partial<FeishuApplicationSetupError>).code;
+  if (code === "configuration-conflict") {
+    return "当前应用已有待发布版本，未自动覆盖。请先在飞书开放平台处理该版本。";
+  }
+  if (code === "configuration-failed") {
+    return "飞书自动配置或发布失败，未继续重试。请发送 /feishu doctor 复查。";
+  }
   if (code === "authorization-invalid") {
     const failure = (error as Partial<FeishuApplicationSetupError>)
       .authorizationFailure;

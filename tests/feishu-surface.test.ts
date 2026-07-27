@@ -422,6 +422,7 @@ describe("Feishu Surface", () => {
         expect.any(Function),
         [
           "application:application:self_manage",
+          "application:application:patch",
           "im:message:send_as_bot",
           "cardkit:card:write",
         ],
@@ -440,6 +441,7 @@ function createFixture(
   applicationSnapshot: FeishuApplicationSnapshot = {
     grantedTenantScopes: [
       "application:application:self_manage",
+      "application:application:patch",
       "im:message:send_as_bot",
       "cardkit:card:write",
     ],
@@ -449,6 +451,7 @@ function createFixture(
     cardCallbackConfigured: true,
     botMenuEnabled: true,
     menuConfigured: true,
+    botMenuDisplayStrategy: 3,
     botMenus: [],
   },
 ) {
@@ -487,6 +490,10 @@ function createFixture(
   const oauthClose = vi.fn(async () => {});
   const applicationApi = {
     inspect: vi.fn(async () => applicationSnapshot),
+    configureApplication: vi.fn(async () => ({
+      changed: true,
+      versionId: "oav_new",
+    })),
     authorizeApplication: vi.fn(
       async (
         _signal: AbortSignal,

@@ -38,10 +38,7 @@ describe("Feishu application management API", () => {
               },
             ],
             event: {
-              subscribed_events: [
-                "im.message.receive_v1",
-                "application.bot.menu_v6",
-              ],
+              subscribed_events: [],
             },
             callback_info: {
               subscribed_callbacks: ["card.action.trigger"],
@@ -54,6 +51,10 @@ describe("Feishu application management API", () => {
         data: {
           app_version: {
             app_id: options.appId,
+            events: [
+              "接收消息",
+              "机器人自定义菜单事件",
+            ],
             ability: {
               bot: {
                 bot_menu_enable: true,
@@ -160,6 +161,162 @@ describe("Feishu application management API", () => {
     expect(client.getVersion).not.toHaveBeenCalled();
   });
 
+  it("preserves existing menus and submits the missing Codex menu", async () => {
+    const client = createClient({
+      getApplication: async () => ({
+        code: 0,
+        data: {
+          app: {
+            app_id: options.appId,
+            online_version_id: "oav_online",
+            scopes: [{
+              scope: "application:application:patch",
+              token_types: ["tenant"],
+            }],
+            event: { subscribed_events: [] },
+          },
+        },
+      }),
+      getVersion: async () => ({
+        code: 0,
+        data: {
+          app_version: {
+            app_id: options.appId,
+            ability: {
+              bot: {
+                bot_menu_enable: false,
+                bot_menus: [{
+                  menu_id: "existing",
+                  sort: 1,
+                  default_name: "Existing",
+                  event_key: "existing",
+                  menu_content_type: 2,
+                }],
+              },
+            },
+          },
+        },
+      }),
+    });
+
+    await expect(createApi(client).configureApplication()).resolves.toEqual({
+      changed: true,
+      versionId: "oav_new",
+    });
+    expect(client.patchAbility).toHaveBeenCalledWith(
+      options.appId,
+      [
+        expect.objectContaining({
+          menu_id: "existing",
+          event_key: "existing",
+        }),
+        expect.objectContaining({
+          default_name: "Codex",
+          event_key: "codexc_home",
+          menu_content_type: 2,
+        }),
+      ],
+      3,
+      undefined,
+    );
+    expect(client.patchConfig).toHaveBeenCalledWith(
+      options.appId,
+      true,
+      true,
+      true,
+      undefined,
+    );
+    expect(client.publish).toHaveBeenCalledWith(
+      options.appId,
+      {
+        mobileDefaultAbility: "bot",
+        pcDefaultAbility: "bot",
+      },
+      undefined,
+    );
+  });
+
+  it("refuses to overwrite an existing pending version", async () => {
+    const client = createClient({
+      getApplication: async () => ({
+        code: 0,
+        data: {
+          app: {
+            app_id: options.appId,
+            unaudit_version_id: "oav_pending",
+            scopes: [],
+          },
+        },
+      }),
+    });
+
+    await expect(createApi(client).configureApplication()).rejects.toMatchObject({
+      code: "configuration-conflict",
+    });
+    expect(client.patchAbility).not.toHaveBeenCalled();
+    expect(client.patchConfig).not.toHaveBeenCalled();
+    expect(client.publish).not.toHaveBeenCalled();
+  });
+
+  it("adds the message event when it is the only missing configuration", async () => {
+    const client = createClient({
+      getApplication: async () => ({
+        code: 0,
+        data: {
+          app: {
+            app_id: options.appId,
+            online_version_id: "oav_online",
+            scopes: [{
+              scope: "application:application:patch",
+              token_types: ["tenant"],
+            }],
+            event: {
+              subscribed_events: ["application.bot.menu_v6"],
+            },
+            callback_info: {
+              subscribed_callbacks: ["card.action.trigger"],
+            },
+          },
+        },
+      }),
+      getVersion: async () => ({
+        code: 0,
+        data: {
+          app_version: {
+            app_id: options.appId,
+            events: ["机器人自定义菜单事件"],
+            ability: {
+              bot: {
+                bot_menu_enable: true,
+                bot_menu_display_strategy: 3,
+                bot_menus: [{
+                  sort: 1,
+                  default_name: "Codex",
+                  event_key: "codexc_home",
+                  menu_content_type: 2,
+                }],
+              },
+            },
+          },
+        },
+      }),
+    });
+
+    await expect(createApi(client).configureApplication()).resolves.toEqual({
+      changed: true,
+      versionId: "oav_new",
+    });
+    expect(client.patchAbility).not.toHaveBeenCalled();
+    expect(client.patchConfig).toHaveBeenCalledWith(
+      options.appId,
+      true,
+      false,
+      false,
+      undefined,
+    );
+    expect(client.publish).toHaveBeenCalledOnce();
+  });
+
   it("uses the SDK update authorization for the exact configured app", async () => {
     const client = createClient();
     const register = vi.fn(async (input: {
@@ -198,7 +355,7 @@ describe("Feishu application management API", () => {
       addons: expect.objectContaining({
         preset: false,
         scopes: {
-          tenant: expect.not.arrayContaining([
+          tenant: expect.arrayContaining([
             "application:application:patch",
           ]),
         },
@@ -361,9 +518,18 @@ function createApi(client: ReturnType<typeof createClient>) {
 function createClient(overrides: Partial<{
   getApplication: () => Promise<unknown>;
   getVersion: () => Promise<unknown>;
+  patchAbility: () => Promise<unknown>;
+  patchConfig: () => Promise<unknown>;
+  publish: () => Promise<unknown>;
 }> = {}) {
   return {
     getApplication: vi.fn(overrides.getApplication ?? (async () => ({}))),
     getVersion: vi.fn(overrides.getVersion ?? (async () => ({}))),
+    patchAbility: vi.fn(overrides.patchAbility ?? (async () => ({ code: 0 }))),
+    patchConfig: vi.fn(overrides.patchConfig ?? (async () => ({ code: 0 }))),
+    publish: vi.fn(overrides.publish ?? (async () => ({
+      code: 0,
+      data: { version_id: "oav_new" },
+    }))),
   };
 }

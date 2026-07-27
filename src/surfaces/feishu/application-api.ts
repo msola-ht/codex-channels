@@ -11,17 +11,22 @@ import { applyFeishuHttpPolicy } from "./client.js";
 import { feishuCommandMenuEventKey } from "./command-center.js";
 
 const applicationInspectionScope = "application:application:self_manage";
+const applicationConfigurationScope = "application:application:patch";
 const requiredMessageScope = "im:message:send_as_bot";
 const requiredStreamingScope = "cardkit:card:write";
 const requiredMessageEvent = "im.message.receive_v1";
 const requiredMenuEvent = "application.bot.menu_v6";
 const requiredCardCallback = "card.action.trigger";
+const requiredMessageEventDisplayName = "接收消息";
+const requiredMenuEventDisplayName = "机器人自定义菜单事件";
+export const feishuFloatingMenuDisplayStrategy = 3;
 const maximumMenus = 100;
 const maximumScopes = 1_000;
 const maximumFieldLength = 2_048;
 
 export const requiredFeishuApplicationTenantScopes = [
   applicationInspectionScope,
+  applicationConfigurationScope,
   requiredMessageScope,
   requiredStreamingScope,
 ] as const;
@@ -62,6 +67,10 @@ export interface FeishuApplicationSnapshot {
 
 export interface FeishuApplicationApi {
   inspect(signal?: AbortSignal): Promise<FeishuApplicationSnapshot>;
+  configureApplication(signal?: AbortSignal): Promise<{
+    changed: boolean;
+    versionId?: string;
+  }>;
   authorizeApplication(
     signal: AbortSignal,
     onAuthorizationReady: (
@@ -74,6 +83,8 @@ export interface FeishuApplicationApi {
 
 export type FeishuApplicationSetupErrorCode =
   | "authorization-invalid"
+  | "configuration-conflict"
+  | "configuration-failed"
   | "inspect-failed"
   | "invalid-response";
 
@@ -125,6 +136,27 @@ interface ApplicationClientPort {
   getVersion(
     appId: string,
     versionId: string,
+    signal?: AbortSignal,
+  ): Promise<unknown>;
+  patchAbility(
+    appId: string,
+    menus: readonly FeishuBotMenu[],
+    displayStrategy: number,
+    signal?: AbortSignal,
+  ): Promise<unknown>;
+  patchConfig(
+    appId: string,
+    addMessageEvent: boolean,
+    addMenuEvent: boolean,
+    addCardCallback: boolean,
+    signal?: AbortSignal,
+  ): Promise<unknown>;
+  publish(
+    appId: string,
+    defaultAbilities: {
+      mobileDefaultAbility: "bot";
+      pcDefaultAbility: "bot";
+    },
     signal?: AbortSignal,
   ): Promise<unknown>;
 }
@@ -194,6 +226,10 @@ export class FeishuApplicationHttpApi implements FeishuApplicationApi {
     const bot = parseVersionBot(versionResponse, this.options.appId);
     return {
       ...snapshot,
+      messageEventConfigured: snapshot.messageEventConfigured
+        || bot.events.includes(requiredMessageEventDisplayName),
+      menuEventConfigured: snapshot.menuEventConfigured
+        || bot.events.includes(requiredMenuEventDisplayName),
       botMenus: bot.menus,
       botMenuEnabled: bot.menuEnabled,
       ...(bot.displayStrategy === undefined
@@ -270,6 +306,96 @@ export class FeishuApplicationHttpApi implements FeishuApplicationApi {
         "authorization-invalid",
         "当前项目暂不支持 Lark 租户",
         "unsupported-tenant",
+      );
+    }
+  }
+
+  async configureApplication(
+    signal?: AbortSignal,
+  ): Promise<{ changed: boolean; versionId?: string }> {
+    const snapshot = await this.inspect(signal);
+    if (snapshot.hasPendingVersion) {
+      throw new FeishuApplicationSetupError(
+        "configuration-conflict",
+        "飞书应用存在待发布版本",
+      );
+    }
+    const menus = snapshot.botMenus.map((menu) => ({ ...menu }));
+    const hasMenu = menus.some(
+      (menu) =>
+        menu.event_key === feishuCommandMenuEventKey
+        && menu.menu_content_type === 2,
+    );
+    if (!hasMenu) {
+      menus.push({
+        sort: menus.length + 1,
+        default_name: "Codex",
+        i18n_name: {
+          zh_cn: "Codex",
+          en_us: "Codex",
+        },
+        event_key: feishuCommandMenuEventKey,
+        menu_content_type: 2,
+      });
+    }
+    const abilityChanged = !hasMenu
+      || !snapshot.botMenuEnabled
+      || snapshot.botMenuDisplayStrategy !== feishuFloatingMenuDisplayStrategy;
+    const messageEventChanged = !snapshot.messageEventConfigured;
+    const menuEventChanged = !snapshot.menuEventConfigured;
+    const callbackChanged = !snapshot.cardCallbackConfigured;
+    if (
+      !abilityChanged
+      && !messageEventChanged
+      && !menuEventChanged
+      && !callbackChanged
+    ) {
+      return { changed: false };
+    }
+    try {
+      if (abilityChanged) {
+        ensureResponseSuccess(record(
+          await this.dependencies.client.patchAbility(
+            this.options.appId,
+            menus,
+            feishuFloatingMenuDisplayStrategy,
+            signal,
+          ),
+        ));
+      }
+      if (messageEventChanged || menuEventChanged || callbackChanged) {
+        ensureResponseSuccess(record(
+          await this.dependencies.client.patchConfig(
+            this.options.appId,
+            messageEventChanged,
+            menuEventChanged,
+            callbackChanged,
+            signal,
+          ),
+        ));
+      }
+      const published = record(
+        await this.dependencies.client.publish(
+          this.options.appId,
+          {
+            mobileDefaultAbility: "bot",
+            pcDefaultAbility: "bot",
+          },
+          signal,
+        ),
+      );
+      ensureResponseSuccess(published);
+      const versionId = optionalIdentifier(
+        optionalRecord(published.data)?.version_id,
+      );
+      return {
+        changed: true,
+        ...(versionId ? { versionId } : {}),
+      };
+    } catch {
+      throw new FeishuApplicationSetupError(
+        "configuration-failed",
+        "飞书应用自动配置失败",
       );
     }
   }
@@ -390,6 +516,60 @@ function createApplicationClient(
       params: { lang: "zh_cn" },
       ...(signal ? { signal } : {}),
     }),
+    patchAbility: (
+      appId,
+      menus,
+      displayStrategy,
+      signal,
+    ) => client.request({
+      method: "PATCH",
+      url: `/open-apis/application/v7/applications/${appId}/ability`,
+      data: {
+        bot: {
+          enable: true,
+          bot_menu_enable: true,
+          bot_menus: menus,
+          bot_menu_display_strategy: displayStrategy,
+        },
+      },
+      ...(signal ? { signal } : {}),
+    }),
+    patchConfig: (
+      appId,
+      addMessageEvent,
+      addMenuEvent,
+      addCardCallback,
+      signal,
+    ) => client.request({
+      method: "PATCH",
+      url: `/open-apis/application/v7/applications/${appId}/config`,
+      data: {
+        ...(addMessageEvent || addMenuEvent ? { event: {
+          subscription_type: "websocket",
+          add_events: [
+            ...(addMessageEvent ? [requiredMessageEvent] : []),
+            ...(addMenuEvent ? [requiredMenuEvent] : []),
+          ],
+        } } : {}),
+        ...(addCardCallback ? { callback: {
+          callback_type: "websocket",
+          add_callbacks: [requiredCardCallback],
+        } } : {}),
+      },
+      ...(signal ? { signal } : {}),
+    }),
+    publish: (appId, defaultAbilities, signal) => client.request({
+      method: "POST",
+      url: `/open-apis/application/v7/applications/${appId}/publish`,
+      data: {
+        remark: "Codex Connect 自动配置",
+        changelog: "启用 Codex 机器人菜单入口",
+        mobile_default_ability:
+          defaultAbilities.mobileDefaultAbility,
+        pc_default_ability: defaultAbilities.pcDefaultAbility,
+      },
+      ...(signal ? { signal } : {}),
+    }),
   };
 }
 
@@ -448,6 +628,7 @@ function parseVersionBot(
   input: unknown,
   appId: string,
 ): {
+  events: string[];
   menus: FeishuBotMenu[];
   menuEnabled: boolean;
   displayStrategy?: number;
@@ -458,9 +639,13 @@ function parseVersionBot(
   if (version.app_id !== appId) {
     invalidResponse();
   }
+  const events = stringArray(version.events);
+  if (events.length > maximumScopes) {
+    invalidResponse();
+  }
   const bot = optionalRecord(optionalRecord(version.ability)?.bot);
   if (!bot) {
-    return { menus: [], menuEnabled: false };
+    return { events, menus: [], menuEnabled: false };
   }
   const menus = array(bot.bot_menus);
   if (menus.length > maximumMenus) {
@@ -470,6 +655,7 @@ function parseVersionBot(
     bot.bot_menu_display_strategy,
   );
   return {
+    events,
     menus: menus.map(parseMenu),
     menuEnabled: bot.bot_menu_enable === true,
     ...(displayStrategy === undefined ? {} : { displayStrategy }),

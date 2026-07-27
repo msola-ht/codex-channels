@@ -75,18 +75,23 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
   可重试错误语义。
 - 原生流式额外需要应用权限 `cardkit:card:write`。新扫码应用会声明该权限；已有应用由 Owner
   通过 `/feishu doctor` 只增量开通缺失权限，再由 Owner 发布，无需重新扫码或申请用户 OAuth。
-- Doctor 保留 `application:application:self_manage` 用于只读检测。当前授权 Actor 点击一次性
-  卡片后只完成 SDK 官方应用授权并重新检测；Gateway 不调用应用能力、开发配置或发布写接口。
+- 扫码 Setup 在凭据与 Bot 身份验证并原子保存连接配置后，直接复用 Application v7 配置能力，
+  保留已有菜单并自动发布 `codexc_home` 悬浮菜单、长连接菜单事件与卡片回调。发布失败时保留
+  已验证连接配置，只输出稳定的 `/feishu doctor` 恢复入口；手动凭据 Setup 不直接修改远端应用。
+- Doctor 使用 `application:application:self_manage` 做只读检测，并默认申请
+  `application:application:patch` 完成受控配置写入。当前授权 Actor 点击一次性卡片后通过 SDK
+  官方流程只授权缺失差集；授权页包装为飞书 AppLink，在客户端侧边栏完成确认。
   注册端返回的 Open ID 属于
   其应用作用域且字段可选，不用于和消息 Actor 比较。授权结果必须匹配当前 App，Lark 租户结果
   失败关闭。SDK 生成的授权链接只接受 `accounts.feishu.cn`、`open.feishu.cn` 或
   `applink.feishu.cn` 精确 HTTPS Origin；`accounts.feishu.cn` 和 `open.feishu.cn` 会包装为
   飞书 AppLink，在客户端侧边栏完成确认。应用凭据或短期授权状态不写入业务存储。授权完成后
-  Doctor 提示 Owner 打开当前应用，人工开启自定义菜单、添加 Event Key 为 `codexc_home` 的
-  单个事件类型菜单项、确认消息/菜单事件与卡片回调使用长连接并发布版本。授权卡片发送失败会立即取消 SDK 轮询并更新 Doctor
+  Doctor 保留已有菜单，自动启用 Event Key 为 `codexc_home` 的单个悬浮事件类型菜单项、追加长连接
+  菜单事件并提交应用版本；已有待发布版本时拒绝覆盖，需审核时等待管理员批准。授权卡片发送失败会立即取消 SDK 轮询并更新 Doctor
   结果，不能留下无人处理的后台拒绝。已发布版本的菜单节点和 `bot_menu_enable` 分开归约；
-  节点存在但开关关闭时显示“已添加，尚未启用”，不得误报为已完成。`unaudit_version_id` 只作为
-  只读观测展示，不触发自动发布或修改。
+  节点存在但开关关闭时显示“已添加，尚未启用”，不得误报为已完成。`unaudit_version_id` 作为
+  冲突检测依据，不允许自动配置覆盖。Application v6 应用详情未返回事件 Key 时，Doctor 会从
+  固定使用 `zh_cn` 读取的已发布版本事件名称中识别“接收消息”和“机器人自定义菜单事件”。
 - 图片下载只使用 `im.v1.messageResource.get` 的 `message_id + image_key + type=image` 窄能力；
   SDK 响应被裁剪为下载流和可选长度，不向其他模块暴露 Client、Header 或上游错误。
 

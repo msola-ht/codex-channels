@@ -65,6 +65,7 @@ describe("Feishu setup", () => {
   it("accepts manually entered credentials and validates the selected bot", async () => {
     const fixture = createFixture();
     const registerApplication = vi.fn();
+    const configureApplication = vi.fn();
     const validateApplication = vi.fn(async () => ({
       openId: "ou_bot",
       name: "Manual Bot",
@@ -87,12 +88,14 @@ describe("Feishu setup", () => {
       },
       prompter,
       registerApplication,
+      configureApplication,
       validateApplication,
       renderQRCode: vi.fn(),
       createSignal: () => new AbortController().signal,
     });
 
     expect(registerApplication).not.toHaveBeenCalled();
+    expect(configureApplication).not.toHaveBeenCalled();
     expect(validateApplication).toHaveBeenCalledWith({
       appId: "cli_0123456789abcdef",
       appSecret: "manual-secret",
@@ -126,6 +129,10 @@ describe("Feishu setup", () => {
       };
     });
     const renderQRCode = vi.fn();
+    const configureApplication = vi.fn(async () => ({
+      changed: true,
+      versionId: "oav_new",
+    }));
     const prompter = createPrompter(["2", "ou_extra, ou_scanner"], [true]);
     let renderedOutput = "";
 
@@ -139,6 +146,7 @@ describe("Feishu setup", () => {
       },
       prompter,
       registerApplication,
+      configureApplication,
       validateApplication: async () => ({
         openId: "ou_bot",
         name: "Codex Bot",
@@ -155,6 +163,7 @@ describe("Feishu setup", () => {
         scopes: {
           tenant: [
             "application:application:self_manage",
+            "application:application:patch",
             "im:message:send_as_bot",
             "cardkit:card:write",
           ],
@@ -177,6 +186,10 @@ describe("Feishu setup", () => {
       "https://applink.feishu.cn/client/mini_program/open?device=short-lived",
       expect.any(Object),
     );
+    expect(configureApplication).toHaveBeenCalledWith({
+      appId: "cli_0123456789abcdef",
+      appSecret: "app-secret",
+    });
     const configured = parseToml(readFileSync(fixture.configPath, "utf8"));
     expect(configured.feishu).toEqual({
       enabled: true,
@@ -192,7 +205,8 @@ describe("Feishu setup", () => {
     });
     expect(renderedOutput).toContain("选择新建应用或已有应用");
     expect(renderedOutput).toContain("cli_0123456789abcdef");
-    expect(renderedOutput).toContain(
+    expect(renderedOutput).toContain("悬浮菜单已自动配置并发布");
+    expect(renderedOutput).not.toContain(
       "发送 /feishu doctor 完成机器人菜单和订阅配置",
     );
     expect(renderedOutput).not.toContain(
@@ -219,6 +233,7 @@ describe("Feishu setup", () => {
       output: { write: () => true },
       prompter,
       registerApplication,
+      configureApplication: async () => ({ changed: false }),
       validateApplication: async () => ({
         openId: "ou_bot",
         name: "Existing Bot",
@@ -236,6 +251,51 @@ describe("Feishu setup", () => {
       app_id: "cli_fedcba9876543210",
       allowed_open_ids: ["ou_owner"],
     });
+  });
+
+  it("keeps the scanned connection and gives a safe recovery path when menu configuration fails", async () => {
+    const fixture = createFixture();
+    let renderedOutput = "";
+
+    await runFeishuSetup({
+      environment: fixture.environment,
+      output: {
+        write: (value: string) => {
+          renderedOutput += value;
+          return true;
+        },
+      },
+      prompter: createPrompter(["2", ""], [true]),
+      registerApplication: async () => ({
+        client_id: "cli_0123456789abcdef",
+        client_secret: "app-secret",
+        user_info: {
+          open_id: "ou_scanner",
+          tenant_brand: "feishu",
+        },
+      }),
+      configureApplication: async () => {
+        throw new Error("upstream secret response");
+      },
+      validateApplication: async () => ({
+        openId: "ou_bot",
+        name: "Existing Bot",
+      }),
+      renderQRCode: vi.fn(),
+      createSignal: () => new AbortController().signal,
+    });
+
+    const configured = parseToml(readFileSync(fixture.configPath, "utf8"));
+    expect(configured.feishu).toMatchObject({
+      app_id: "cli_0123456789abcdef",
+      allowed_open_ids: ["ou_scanner"],
+    });
+    expect(renderedOutput).toContain(
+      "机器人菜单自动配置未完成",
+    );
+    expect(renderedOutput).toContain("/feishu doctor");
+    expect(renderedOutput).not.toContain("upstream secret response");
+    expect(renderedOutput).not.toContain("app-secret");
   });
 
   it("preserves an existing allowlist only after explicit confirmation", async () => {
@@ -257,6 +317,7 @@ describe("Feishu setup", () => {
           tenant_brand: "feishu",
         },
       }),
+      configureApplication: async () => ({ changed: false }),
       validateApplication: async () => ({
         openId: "ou_bot",
         name: "Existing Bot",

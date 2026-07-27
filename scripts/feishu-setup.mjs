@@ -22,6 +22,7 @@ export async function runFeishuSetup({
   prompter,
   registerApplication = registerApp,
   validateApplication = validateFeishuApplication,
+  configureApplication = configureFeishuApplication,
   renderQRCode = renderTerminalQRCode,
   createSignal = createTimeoutSignal,
   timeoutSeconds = defaultTimeoutSeconds,
@@ -36,6 +37,7 @@ export async function runFeishuSetup({
     output.write("1. 手动输入应用凭据\n");
     output.write("2. 扫码授权\n");
     const choice = await askChoice(prompt, "请选择 [1-2]", 2);
+    const scanRegistration = choice === "2";
 
     let result;
     if (choice === "1") {
@@ -53,6 +55,7 @@ export async function runFeishuSetup({
             scopes: {
               tenant: [
                 "application:application:self_manage",
+                "application:application:patch",
                 "im:message:send_as_bot",
                 "cardkit:card:write",
               ],
@@ -131,8 +134,32 @@ export async function runFeishuSetup({
     };
     writeGatewayConfig(configPath, document);
     output.write(`\n飞书配置已保存：${configPath}\n`);
+    if (scanRegistration) {
+      output.write("正在自动配置并发布飞书机器人悬浮菜单…\n");
+      try {
+        const configured = await configureApplication({
+          appId: result.appId,
+          appSecret: result.appSecret,
+        });
+        output.write(
+          configured?.changed
+            ? "飞书机器人悬浮菜单已自动配置并发布。\n"
+            : "飞书机器人悬浮菜单已经配置完成。\n",
+        );
+      } catch {
+        output.write(
+          "飞书连接配置已保存，但机器人菜单自动配置未完成；"
+          + "Gateway 启动后可发送 /feishu doctor 恢复。\n",
+        );
+      }
+    }
     output.write("下一步运行：codexc doctor\n");
-    output.write("Gateway 启动后，在飞书私聊发送 /feishu doctor 完成机器人菜单和订阅配置。\n");
+    if (!scanRegistration) {
+      output.write(
+        "Gateway 启动后，在飞书私聊发送 /feishu doctor "
+        + "完成机器人菜单和订阅配置。\n",
+      );
+    }
     output.write("运行中的 Gateway 会检测配置变化并重启飞书 Surface。\n");
     return {
       appId: result.appId,
@@ -327,6 +354,16 @@ function table(value) {
 
 function stringValue(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+async function configureFeishuApplication({ appId, appSecret }) {
+  const { FeishuApplicationHttpApi } = await import(
+    "../dist/surfaces/feishu/index.js"
+  );
+  return new FeishuApplicationHttpApi({
+    appId,
+    appSecret,
+  }).configureApplication();
 }
 
 function isDirectExecution(moduleUrl, argvPath) {

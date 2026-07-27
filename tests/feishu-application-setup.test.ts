@@ -46,12 +46,9 @@ describe("Feishu application setup controller", () => {
       (update) => update.messageId === card.messageId,
     ).at(-1)?.card;
     expect(doctorOutcome?.header.title.content)
-      .toBe("飞书授权完成");
+      .toBe("飞书配置完成");
     const outcome = JSON.stringify(doctorOutcome);
-    expect(outcome).toContain("打开当前飞书应用");
-    expect(outcome).toContain(
-      `https://open.feishu.cn/app/${target.accountId}`,
-    );
+    expect(outcome).toContain("菜单、事件与回调已自动配置并提交发布");
     expect(fixture.controller.handleCardAction({
       messageId: card.messageId,
       chatId: card.chatId,
@@ -62,7 +59,7 @@ describe("Feishu application setup controller", () => {
     await fixture.controller.close();
   });
 
-  it("opens official authorization before showing manual instructions", async () => {
+  it("opens official authorization in Feishu before automatic configuration", async () => {
     const fixture = createFixture({
       ...incompleteSnapshot(),
       grantedTenantScopes: [
@@ -97,6 +94,7 @@ describe("Feishu application setup controller", () => {
       expect.any(AbortSignal),
       expect.any(Function),
       [
+        "application:application:patch",
         "im:message:send_as_bot",
         "cardkit:card:write",
       ],
@@ -116,12 +114,11 @@ describe("Feishu application setup controller", () => {
         (update) => update.messageId === card.messageId,
       ).at(-1)?.card,
     );
-    expect(outcome).toContain("Gateway 不会自动修改或发布应用配置");
-    expect(outcome).toContain("Event Key 设为 codexc_home");
+    expect(outcome).toContain("菜单、事件与回调已自动配置并提交发布");
     await fixture.controller.close();
   });
 
-  it("offers authorization and manual guidance when another version is pending", async () => {
+  it("offers authorization when another version is pending", async () => {
     const fixture = createFixture({
       ...incompleteSnapshot(),
       hasPendingVersion: true,
@@ -161,11 +158,12 @@ describe("Feishu application setup controller", () => {
     await fixture.controller.close();
   });
 
-  it("prefers observed runtime evidence and avoids redundant authorization", async () => {
+  it("prefers observed runtime evidence and offers automatic configuration", async () => {
     const fixture = createFixture({
       ...incompleteSnapshot(),
       grantedTenantScopes: [
         "application:application:self_manage",
+        "application:application:patch",
         "im:message:send_as_bot",
         "cardkit:card:write",
       ],
@@ -192,8 +190,9 @@ describe("Feishu application setup controller", () => {
     expect(rendered).not.toContain("消息事件：待配置");
     expect(rendered).not.toContain("当前 Surface 对话必需能力");
     expect(rendered).not.toContain("当前用户 OAuth");
-    expect(rendered).not.toContain("codexc_feishu_setup_token");
-    expect(rendered).toContain("打开当前飞书应用");
+    expect(rendered).toContain("codexc_feishu_setup_token");
+    expect(rendered).toContain("可点击下方按钮自动补齐应用配置");
+    expect(rendered).not.toContain("https://open.feishu.cn/app/");
     await fixture.controller.close();
   });
 
@@ -202,6 +201,7 @@ describe("Feishu application setup controller", () => {
       ...incompleteSnapshot(),
       grantedTenantScopes: [
         "application:application:self_manage",
+        "application:application:patch",
         "im:message:send_as_bot",
         "cardkit:card:write",
       ],
@@ -210,6 +210,7 @@ describe("Feishu application setup controller", () => {
       cardCallbackConfigured: false,
       botMenuEnabled: false,
       menuConfigured: false,
+      botMenuDisplayStrategy: 3,
     });
 
     await fixture.controller.openDoctor(
@@ -255,9 +256,9 @@ describe("Feishu application setup controller", () => {
     });
     await settle();
 
-    expect(fixture.api.inspect).toHaveBeenCalledTimes(2);
+    expect(fixture.api.inspect).toHaveBeenCalledTimes(3);
     expect(JSON.stringify(fixture.updates.at(-2)?.card))
-      .toContain("Gateway 不会自动修改或发布应用配置");
+      .toContain("菜单、事件与回调已自动配置并提交发布");
     await fixture.controller.close();
   });
 
@@ -269,6 +270,7 @@ describe("Feishu application setup controller", () => {
         ...incompleteSnapshot(),
         grantedTenantScopes: [
           "application:application:self_manage",
+          "application:application:patch",
           "im:message:send_as_bot",
           "cardkit:card:write",
         ],
@@ -276,6 +278,7 @@ describe("Feishu application setup controller", () => {
         menuEventConfigured: true,
         cardCallbackConfigured: true,
         menuConfigured: true,
+        botMenuDisplayStrategy: 3,
       });
     await fixture.controller.openDoctor(
       target,
@@ -294,7 +297,7 @@ describe("Feishu application setup controller", () => {
     await settle();
 
     expect(fixture.updates.at(-2)?.card.header.title.content)
-      .toBe("飞书授权完成");
+      .toBe("飞书配置完成");
     expect(JSON.stringify(fixture.updates.at(-2)?.card))
       .toContain("当前应用配置检测也已通过");
     await fixture.controller.close();
@@ -308,9 +311,11 @@ describe("Feishu application setup controller", () => {
         ...incompleteSnapshot(),
         grantedTenantScopes: [
           "application:application:self_manage",
+          "application:application:patch",
           "im:message:send_as_bot",
           "cardkit:card:write",
         ],
+        botMenuDisplayStrategy: 3,
       });
     await fixture.controller.openDoctor(
       target,
@@ -351,6 +356,7 @@ describe("Feishu application setup controller", () => {
     let authorizationSignal: AbortSignal | undefined;
     const api: FeishuApplicationApi = {
       inspect: async () => incompleteSnapshot(),
+      configureApplication: async () => ({ changed: true }),
       authorizeApplication: async (signal, ready) => {
         authorizationSignal = signal;
         ready(
@@ -405,7 +411,7 @@ describe("Feishu application setup controller", () => {
         expect(authorizationSignal?.aborted).toBe(true);
       });
       expect(updates.at(-1)?.header.title.content)
-        .toBe("飞书授权未完成");
+        .toBe("飞书配置未完成");
     } finally {
       await controller.close();
     }
@@ -433,6 +439,10 @@ function createFixture(snapshot: FeishuApplicationSnapshot) {
         600,
       );
     }),
+    configureApplication: vi.fn(async () => ({
+      changed: true,
+      versionId: "oav_new",
+    })),
   };
   const controller = new FeishuApplicationSetupController(
     target.accountId,
