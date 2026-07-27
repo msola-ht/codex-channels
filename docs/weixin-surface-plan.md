@@ -6,7 +6,7 @@
 离线探针、正常扫码和过期刷新实测，重定向、配对码及重复绑定状态仍只有离线合同覆盖。尚未注册
 微信消息 Surface 或新增依赖；独立安全凭据 Store、统一 Setup 的禁用态连接配置、窄协议 Client、
 版本 1 游标检查点、私聊文本输入 Adapter、内存回复上下文、纯文本 Outbox 与失败关闭交互端口
-已实现。
+已实现；目录内部完整 `SurfaceAdapter` 已完成，尚未从一级 Surface 入口公开或注册 Bootstrap。
 
 本计划用于把腾讯微信 ClawBot 接入现有 TypeScript 模块化 Gateway。实现必须继续遵守
 [`通讯渠道 Surface 接入指南`](surface-integration-guide.md)，并与 Telegram、飞书共享
@@ -302,8 +302,14 @@ Conversation 队列投递；每个气泡最多 4000 个 UTF-16 码元、最多�
 拆开代理对。关闭队列后清空全部回复上下文。`interactions.ts` 直接复用统一安全决定，三类请求
 立即拒绝或取消，不显示文本审批。
 
-这些组件还没有组合成正式 `SurfaceAdapter`。下一批负责统一启停、配置通知失败语义和组件关闭
-顺序；通过后才能从一级 Surface 入口导出并交给 Bootstrap 注册。
+`src/surfaces/weixin/surface.ts` 已把上述组件组合为正式 `SurfaceAdapter`：Input 与 Outbox
+共享同一个回复上下文 Store；启动只开启输入监控，停止先取消输入，随后取消交互并排空输出，
+最后由 Outbox 清空全部上下文；重复停止等待同一个关闭任务。接收致命错误只向生命周期所有者
+报告稳定分类。由于当前不持久化回复上下文，也没有安全主动收件人，持久配置通知明确失败关闭，
+不尝试向未知用户推送。
+
+该类型仍只由微信目录入口导出。下一批必须先实现微信 Access Policy 和 Bootstrap 组合工厂，
+从安全凭据 Store 读取精确账号连接，再经一级 Surface 入口受控导出并加入内置插件注册表。
 
 ### 阶段 1：单账号私聊文本
 

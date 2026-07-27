@@ -1,8 +1,8 @@
 # 微信 Surface
 
 当前实现阶段 0/Setup 的独立安全凭据边界，以及运行时接入前的窄协议 Client、私有游标
-检查点、私聊文本输入 Adapter、纯文本 Outbox 和失败关闭交互端口；尚未注册微信消息 Surface，
-未修改 SQLite。
+检查点、私聊文本输入 Adapter、纯文本 Outbox、失败关闭交互端口和目录内部完整
+`SurfaceAdapter`；尚未注册微信消息 Surface，未修改 SQLite。
 
 - `credential-store.ts`：严格校验版本 1 微信 Bot 凭据；macOS 使用独立 Keychain Service，
   Linux 使用独立 `credentials/weixin` AES-256-GCM 私有目录。
@@ -24,9 +24,11 @@
   截断提示，避免拆开代理对。
 - `interactions.ts`：审批立即拒绝、用户输入返回空答案、MCP elicitation 立即取消，不用普通
   微信文本模拟高权限交互。
+- `surface.ts`：共享一个内存回复上下文组合 Input、Outbox 与 InteractionPort；停止时先取消输入，
+  再取消交互并排空输出，重复停止安全。主动配置通知因没有可持久化的安全收件人而明确失败关闭。
 - `index.ts`：微信模块公开入口。
 
 二维码、验证码、扫码者 ID、消息和回复上下文均不持久化；长轮询游标只进入独立检查点，不进入
 凭据、TOML 或 SQLite。未知版本、身份不匹配、密文或载荷损坏失败关闭，不能当作未配置后静默
-重新扫码。输入、输出和交互组件尚未组合为正式 `SurfaceAdapter`；只有完成统一启停、配置通知
-边界和测试后才可注册到 Bootstrap。
+重新扫码。微信目录已经提供完整 `SurfaceAdapter`，但尚未从一级 `src/surfaces/index.ts`
+公开，也未加入 Bootstrap 内置插件注册表；配置、凭据装配和启用流程完成前不能启动。

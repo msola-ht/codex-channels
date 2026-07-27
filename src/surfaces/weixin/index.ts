@@ -45,3 +45,8 @@ export {
   type WeixinOutboxOptions,
 } from "./outbox.js";
 export { WeixinInteractionPort } from "./interactions.js";
+export {
+  WeixinConfigurationDeliveryError,
+  WeixinSurface,
+  type WeixinSurfaceOptions,
+} from "./surface.js";
