@@ -61,6 +61,10 @@ export interface ProjectRulesPort {
   check(projectRoot: string): Promise<ProjectRulesResult> | ProjectRulesResult;
 }
 
+export interface WorkspaceStatusPort {
+  currentGitBranch(projectRoot: string): string | undefined;
+}
+
 export type ConversationQueryPort =
   & AccountQueryPort
   & SkillQueryPort
@@ -81,6 +85,7 @@ export interface ConversationStatus {
   workspaceId: string;
   workspaceName: string;
   cwd: string;
+  gitBranch?: string;
   model: string;
   effort: string | null;
   serviceTier: string | null;
@@ -104,6 +109,7 @@ export class ConversationService {
     private readonly models: ModelSelectionService,
     private readonly queries: ConversationQueryPort,
     private readonly projectRules?: ProjectRulesPort,
+    private readonly workspaceStatus?: WorkspaceStatusPort,
   ) {}
 
   submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission> {
@@ -468,7 +474,10 @@ export class ConversationService {
     });
   }
 
-  status(target: ConversationTarget): ConversationStatus {
+  status(
+    target: ConversationTarget,
+    options: { includeGitBranch?: boolean } = {},
+  ): ConversationStatus {
     const binding = this.router.current(target);
     const active = this.core.activeTurn(target);
     const workspace = this.router.workspace(target);
@@ -479,6 +488,9 @@ export class ConversationService {
       : undefined;
     const weeklyLimit = this.core.weeklyRateLimit();
     const model = this.models.status(target);
+    const gitBranch = options.includeGitBranch
+      ? this.workspaceStatus?.currentGitBranch(workspace.cwd)
+      : undefined;
     return {
       ...(binding ? { threadId: binding.threadId } : {}),
       ...(active ? { turnId: active.turnId } : {}),
@@ -489,6 +501,7 @@ export class ConversationService {
       workspaceId: workspace.id,
       workspaceName: workspace.name,
       cwd: workspace.cwd,
+      ...(gitBranch ? { gitBranch } : {}),
       model: model.model,
       effort: model.effort,
       serviceTier: model.serviceTier,

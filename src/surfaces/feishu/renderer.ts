@@ -44,6 +44,7 @@ export function renderFeishuStartupNotification(
     | "effortPending"
     | "fastModePending"
     | "weeklyLimit"
+    | "gitBranch"
   >,
   runtime: FeishuStartupRuntimeInfo,
 ): string {
@@ -65,6 +66,7 @@ export function renderFeishuStartupNotification(
     `- ${workspace.name} · ${workspace.id}`,
     `- ${workspace.cwd}`,
     `- Thread：${status.threadId ?? "尚未绑定"}`,
+    `- Git 分支：${status.gitBranch ?? "未检测到"}`,
     `- ${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""} · ${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
     `- Fast 模式：${status.threadId ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭") : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`,
     ...(status.weeklyLimit
@@ -421,6 +423,9 @@ function renderFeishuTurnCompleted(
       `- **Goal：** ${goalStatusLabel(event.goal.status)} · ${formatGoalTokens(event.goal)}`,
     );
   }
+  if (Object.hasOwn(event, "gitBranch")) {
+    details.push(`- **Git 分支：** ${event.gitBranch ?? "未检测到"}`);
+  }
   return [
     `**本次运行 · ${turnStatusLabel(event.status)}**`,
     ...(details.length > 0 ? ["", ...details] : []),
@@ -438,6 +443,7 @@ function renderFeishuStatus(status: ConversationStatus): string {
     `Thread：${status.threadId ?? "尚未绑定"}`,
     `Turn：${status.turnId ?? "空闲"}`,
     `工作目录：${status.cwd}`,
+    `Git 分支：${status.gitBranch ?? "未检测到"}`,
     `模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
     `思考强度：${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
     `Fast 模式：${status.threadId ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭") : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`,

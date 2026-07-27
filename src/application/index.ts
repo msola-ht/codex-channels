@@ -26,6 +26,7 @@ export {
   type ProjectRulesPort,
   type ProjectRulesResult,
   type Submission,
+  type WorkspaceStatusPort,
 } from "./conversation-service.js";
 export {
   ModelSelectionService,

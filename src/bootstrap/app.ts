@@ -109,6 +109,9 @@ export class GatewayApplication {
           codexBinary: effectiveCodexBinary(config.codexBinary),
         }),
       },
+      {
+        currentGitBranch,
+      },
     );
     this.output.subscribe("conversation-follow-up", async (event) => {
       if (event.type !== "turn.completed") {
@@ -152,7 +155,12 @@ export class GatewayApplication {
       ),
     });
     this.surfaces = this.surfaceModules.map((module) => module.adapter);
-    this.surfaceManager = new SurfaceManager(this.surfaces, this.output, logger);
+    this.surfaceManager = new SurfaceManager(
+      this.surfaces,
+      this.output,
+      logger,
+      (target) => service.status(target, { includeGitBranch: true }).gitBranch,
+    );
     this.interactions = new InteractionRouter(logger);
     for (const surface of this.surfaces) {
       this.interactions.register(surface.surface, surface.accountId, surface.interactions);
@@ -632,6 +640,26 @@ function verifyCodexVersion(config: GatewayConfig): void {
     throw new Error(
       `Codex 版本不受支持：当前 ${actual}，协议基线 ${supportedCodexCliVersion}`,
     );
+  }
+}
+
+export function currentGitBranch(projectRoot: string): string | undefined {
+  try {
+    const branch = execFileSync(
+      "git",
+      ["-C", projectRoot, "branch", "--show-current"],
+      {
+        encoding: "utf8",
+        maxBuffer: 4_096,
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 2_000,
+      },
+    ).trim();
+    return branch && Buffer.byteLength(branch, "utf8") <= 512
+      ? branch
+      : undefined;
+  } catch {
+    return undefined;
   }
 }
 

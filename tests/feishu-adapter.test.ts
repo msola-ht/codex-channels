@@ -823,7 +823,9 @@ describe("Feishu conversation adapter", () => {
     await fixture.outbox.close();
 
     expect(submit).not.toHaveBeenCalled();
-    expect(status).toHaveBeenCalledWith(message.target);
+    expect(status).toHaveBeenCalledWith(message.target, {
+      includeGitBranch: true,
+    });
     expect(fixture.sent).toEqual([{
       chatId: "oc_chat",
       text: [
@@ -832,6 +834,7 @@ describe("Feishu conversation adapter", () => {
         "Thread：thread-1",
         "Turn：turn-1",
         "工作目录：/workspace",
+        "Git 分支：未检测到",
         "模型：gpt-test",
         "思考强度：medium",
         "Fast 模式：开启",

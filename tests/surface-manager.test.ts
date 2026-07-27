@@ -275,6 +275,44 @@ describe("SurfaceManager", () => {
     await output.close();
   });
 
+  it("adds the current Git branch to completed Turns before routing", async () => {
+    const feishu = surface("feishu", "tenant-a", []);
+    const received: OutputEvent[] = [];
+    feishu.output.handle = (event) => {
+      received.push(event);
+    };
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = new SurfaceManager(
+      [feishu],
+      output,
+      logger,
+      () => "feature/weixin-surface",
+    );
+    await manager.start();
+
+    output.publish({
+      type: "turn.completed",
+      target: {
+        surface: "feishu",
+        accountId: "tenant-a",
+        conversationId: "chat-1",
+      },
+      threadId: "thread-1",
+      turnId: "turn-1",
+      status: "completed",
+    });
+    await settle();
+
+    expect(received).toEqual([
+      expect.objectContaining({
+        type: "turn.completed",
+        gitBranch: "feature/weixin-surface",
+      }),
+    ]);
+    await manager.stop();
+    await output.close();
+  });
+
   it("isolates a Surface output rejection from later events", async () => {
     const feishu = surface("feishu", "tenant-a", []);
     const received: string[] = [];

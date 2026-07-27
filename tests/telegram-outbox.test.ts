@@ -862,6 +862,7 @@ describe("TelegramOutbox", () => {
       model: "gpt-5.6-sol",
       effort: "medium",
       serviceTier: "fast",
+      gitBranch: "feature/weixin-surface",
       contextCompactionCount: 2,
       weeklyLimit: {
         usedPercent: 42,
@@ -893,12 +894,30 @@ describe("TelegramOutbox", () => {
         "<b>上下文压缩：</b>2 次",
         "<b>周限：</b>已使用 42%",
         "<b>Goal：</b>进行中 · 12.5 K / 100 K · 1分30秒",
+        "<b>Git 分支：</b>feature/weixin-surface",
       ].join("\n"),
     ]);
     expect(api.sendOptions[1]).toEqual({
       parse_mode: "HTML",
       disable_notification: true,
     });
+  });
+
+  it("reports the Git branch after a completed turn without token usage", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      ...turnCompleted(),
+      gitBranch: "feature/weixin-surface",
+    });
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual([
+      "<b>Git 分支：feature/weixin-surface</b>",
+    ]);
   });
 
   it("finalizes completed stream content during graceful shutdown", async () => {

@@ -279,6 +279,7 @@ describe("formatStartupNotification", () => {
         modelPending: false,
         effortPending: false,
         fastModePending: false,
+        gitBranch: "feature/weixin-surface",
         weeklyLimit: {
           usedPercent: 42,
           windowDurationMins: 10_080,
@@ -308,6 +309,7 @@ describe("formatStartupNotification", () => {
     expect(text).toContain("│ Main · main");
     expect(text).toContain("│ /workspace/main");
     expect(text).toContain("│ Thread · 019f8951-eb3");
+    expect(text).toContain("│ Git 分支 · feature/weixin-surface");
     expect(text).toContain("│ gpt-main · high");
     expect(text).toContain("│ 周限 · 已使用 42%");
     expect(text).not.toContain("本地握手");
@@ -343,6 +345,7 @@ describe("formatStartupNotification", () => {
     expect(text).toContain("│ freebsd · x64");
     expect(text).toContain("│ UA · App Server 未返回");
     expect(text).toContain("│ Thread · 尚未绑定");
+    expect(text).toContain("│ Git 分支 · 未检测到");
     expect(text).toContain("│ Fast 模式 · 未知");
   });
 });
@@ -428,6 +431,7 @@ describe("formatStatus", () => {
       threadId: "thread-1",
       turnId: "turn-1",
       cwd: "/tmp/project",
+      gitBranch: "feature/weixin-surface",
       model: "gpt-main",
       effort: "high",
       serviceTier: "priority",
@@ -474,6 +478,7 @@ describe("formatStatus", () => {
     expect(text).toContain("模型：gpt-main");
     expect(text).toContain("思考强度：high");
     expect(text).toContain("Fast 模式：开启");
+    expect(text).toContain("Git 分支：feature/weixin-surface");
     expect(text).toContain("上下文压缩：2 次");
     expect(text).toContain("Goal 状态：进行中");
     expect(text).toContain("Goal 目标：完成 Gateway");
@@ -494,7 +499,7 @@ describe("formatStatus", () => {
       fastModePending: false,
     }))
       .toContain("等待 App Server 推送统计");
-    expect(formatStatus({
+    const statusWithoutBranch = formatStatus({
       workspaceId: "main",
       workspaceName: "Main",
       threadId: "thread-1",
@@ -505,7 +510,9 @@ describe("formatStatus", () => {
       modelPending: false,
       effortPending: false,
       fastModePending: false,
-    })).toContain("Fast 模式：关闭");
+    });
+    expect(statusWithoutBranch).toContain("Fast 模式：关闭");
+    expect(statusWithoutBranch).toContain("Git 分支：未检测到");
   });
 });
 
@@ -552,6 +559,7 @@ describe("formatContextUsage", () => {
           createdAt: 1_000,
           updatedAt: 2_000,
         },
+        gitBranch: "feature/weixin-surface",
       },
     )).toBe([
       "上下文：12.5 K / 200 K（6.3%）",
@@ -563,6 +571,7 @@ describe("formatContextUsage", () => {
       "上下文压缩：2 次",
       "周限：已使用 42%",
       "Goal：进行中 · 12.5 K / 100 K · 1分30秒",
+      "Git 分支：feature/weixin-surface",
     ].join("\n"));
   });
 

@@ -608,6 +608,7 @@ describe("codexc CLI", () => {
     const configPath = join(profile, "gateway.toml");
     mkdirSync(workspace);
     mkdirSync(profile, { mode: 0o755 });
+    chmodSync(profile, 0o755);
 
     const output = execFileSync(process.execPath, [cli, "init"], {
       cwd: workspace,

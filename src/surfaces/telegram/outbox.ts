@@ -282,15 +282,24 @@ export class TelegramOutbox {
                     : {}),
                   ...(event.weeklyLimit ? { weeklyLimit: event.weeklyLimit } : {}),
                   ...(event.goal ? { goal: event.goal } : {}),
+                  gitBranch: event.gitBranch,
                 },
               ),
               undefined,
               true,
             );
-          } else if (event.durationMs !== undefined) {
+          } else if (
+            event.durationMs !== undefined
+            || Object.hasOwn(event, "gitBranch")
+          ) {
             await this.sendPanel(
               chatId,
-              `对话耗时：${formatElapsedDuration(event.durationMs)}`,
+              [
+                ...(event.durationMs === undefined
+                  ? []
+                  : [`对话耗时：${formatElapsedDuration(event.durationMs)}`]),
+                `Git 分支：${event.gitBranch ?? "未检测到"}`,
+              ].join("\n"),
               undefined,
               true,
             );

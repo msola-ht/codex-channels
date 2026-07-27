@@ -127,6 +127,7 @@ describe("ConversationService model selection", () => {
       createdAt: 1_000,
       updatedAt: 2_000,
     };
+    const currentGitBranch = vi.fn(() => "feature/weixin-surface");
     const service = new ConversationService(
       turnPort(),
       {
@@ -156,13 +157,17 @@ describe("ConversationService model selection", () => {
         }),
       } as unknown as ModelSelectionService,
       queryPort(),
+      undefined,
+      { currentGitBranch },
     );
 
-    expect(service.status(target)).toMatchObject({
+    expect(service.status(target, { includeGitBranch: true })).toMatchObject({
       threadId: "thread-1",
       goal,
       contextCompactionCount: 2,
+      gitBranch: "feature/weixin-surface",
     });
+    expect(currentGitBranch).toHaveBeenCalledWith(main.cwd);
   });
 
   it("applies project rules only to the selected authorized Workspace", async () => {

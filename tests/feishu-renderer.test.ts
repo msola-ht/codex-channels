@@ -34,6 +34,7 @@ describe("Feishu output renderer", () => {
         modelPending: false,
         effortPending: false,
         fastModePending: false,
+        gitBranch: "feature/weixin-surface",
         weeklyLimit: {
           usedPercent: 37,
           windowDurationMins: 10_080,
@@ -65,6 +66,7 @@ describe("Feishu output renderer", () => {
       "- Main · main",
       "- /workspace",
       "- Thread：thread-1",
+      "- Git 分支：feature/weixin-surface",
       "- gpt-test · medium",
       "- Fast 模式：开启",
       "- 周限：已使用 37%",
@@ -209,6 +211,7 @@ describe("Feishu output renderer", () => {
         workspaceId: "main",
         workspaceName: "Main",
         cwd: "/workspace",
+        gitBranch: "feature/weixin-surface",
         model: "gpt-test",
         effort: "medium",
         serviceTier: "priority",
@@ -243,6 +246,7 @@ describe("Feishu output renderer", () => {
     });
     expect(status).toContain("缓存命中率：75%");
     expect(status).toContain("缓存写入：50");
+    expect(status).toContain("Git 分支：feature/weixin-surface");
     expect(status).toContain("周限：已使用 37%");
 
     const limits = renderFeishuCommandResult({
@@ -328,6 +332,7 @@ describe("Feishu output renderer", () => {
       model: "gpt-test",
       effort: "medium",
       serviceTier: "priority",
+      gitBranch: "feature/weixin-surface",
       contextCompactionCount: 2,
       weeklyLimit: {
         usedPercent: 37,
@@ -345,6 +350,7 @@ describe("Feishu output renderer", () => {
       "- **对话耗时：** 1分5秒",
       "- **上下文压缩：** 2 次",
       "- **周限：** 已使用 37%",
+      "- **Git 分支：** feature/weixin-surface",
     ].join("\n"));
   });
 

@@ -111,11 +111,14 @@ export class TelegramSurface {
       logger,
       {
         messages: () => [...startupRecipients].map((chatId) => {
-          const status = this.service.status({
-            surface: "telegram",
-            accountId: telegramDefaultAccountId,
-            conversationId: String(chatId),
-          });
+          const status = this.service.status(
+            {
+              surface: "telegram",
+              accountId: telegramDefaultAccountId,
+              conversationId: String(chatId),
+            },
+            { includeGitBranch: true },
+          );
           return {
             chatId,
             text: formatStartupNotification(workspaces, status, {

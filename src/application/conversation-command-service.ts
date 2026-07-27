@@ -178,7 +178,12 @@ export class ConversationCommandService {
         };
       }
       case "status":
-        return { kind: "status", status: this.conversations.status(target) };
+        return {
+          kind: "status",
+          status: this.conversations.status(target, {
+            includeGitBranch: true,
+          }),
+        };
       case "workspace": {
         if (argumentsText) {
           const workspace = await this.conversations.selectWorkspace(target, argumentsText);

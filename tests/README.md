@@ -81,6 +81,9 @@
   和 Marketplace 加载详情不进入 Application，必需字段畸形时失败关闭。
 - Permission Profile 查询按授权 Workspace 发送精确 CWD，分页映射 ID、说明和策略可选状态；
   必需字段畸形或分页游标循环时失败关闭，并与高权限审批决定保持分离。
+- 当前授权 Workspace 的 Git 分支通过组合根有时限只读查询进入共享 Conversation 状态，并由
+  Telegram 与飞书的启动通知、`/status` 和 `turn.completed` 结束统计一致展示；非 Git 目录
+  安全回退。
 - SQLite 最小绑定恢复、当前版本 Schema 缺失失败关闭、配置热加载与自动重启分类、Setup
   类别与通讯渠道菜单、Telegram Setup、飞书手动输入与扫码注册的消息和 CardKit 最小权限、卡片动作回调
   声明、应用选择、Bot 身份验证、扫码后自动发布悬浮菜单、发布失败保留连接配置并安全提示 Doctor

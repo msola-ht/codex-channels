@@ -8,7 +8,8 @@
 - `conversation-command-service.ts`：定义平台无关的会话命令名称，解析参数并返回结构化结果；不包含平台文案或消息布局。
 - `conversation-service.ts`：新建、恢复、切换、归档和查询 Thread，提交、steer 或将纯文本
   排到下一 Turn，公开 Conversation 状态与最近 Turn 产物，并通过注入端口把项目规则操作限制
-  到当前授权 Workspace；Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数；
+  到当前授权 Workspace；Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，
+  并通过组合根注入的只读端口取得当前 Workspace Git 分支；
   扩展查询通过 `ConversationQueryPort` 组合窄端口，Skill、MCP 与
   Plugin 和 Permission Profile 均使用稳定结果。
 - `model-selection-service.ts`：查询模型与思考强度，保存按 Conversation 生效的 Turn 覆盖设置；

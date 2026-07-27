@@ -44,7 +44,8 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
 - `oauth-token-store.ts`：macOS Keychain 与 Linux AES-256-GCM 私有凭据后端。
 - `oauth.ts`：按 App 与 Actor 协调单一进行中授权、身份匹配、凭据写入、撤销和停止取消。
 - `renderer.ts`：把平台无关 `ConversationCommandResult`、`OutputEvent`、启动状态和结构化错误
-  映射为稳定文本内容。
+  映射为稳定文本内容；启动通知、`/status` 与 `turn.completed` 结束统计均包含当前 Workspace
+  Git 分支。
 - `outbox.ts`：精确账号路由并通过通用有界队列调用窄消息发送端口。
 - `status-card.ts`：把 Thread 状态映射为可原地更新的轻量交互卡片。
 - `surface.ts`：组合单账号连接、Inbox、Application Adapter、Outbox 和失败关闭交互端口，并由

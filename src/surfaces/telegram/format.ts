@@ -273,6 +273,7 @@ export function formatStatus(status: ConversationStatus): string {
     `Thread：${status.threadId ?? "尚未绑定"}`,
     `Turn：${status.turnId ?? "空闲"}`,
     `工作目录：${status.cwd}`,
+    `Git 分支：${status.gitBranch ?? "未检测到"}`,
     `模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
     `思考强度：${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
     `Fast 模式：${status.threadId ? formatFastMode(status.serviceTier) : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`,
@@ -318,6 +319,7 @@ export function formatContextUsage(
     contextCompactionCount?: number;
     weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>;
     goal?: ThreadGoal;
+    gitBranch?: string | undefined;
   },
 ): string {
   const current = usage.last.totalTokens;
@@ -352,6 +354,9 @@ export function formatContextUsage(
       : []),
     ...(settings?.goal
       ? [`Goal：${formatGoalStatus(settings.goal.status)} · ${formatGoalUsage(settings.goal)}`]
+      : []),
+    ...(settings && "gitBranch" in settings
+      ? [`Git 分支：${settings.gitBranch ?? "未检测到"}`]
       : []),
   ].join("\n");
 }
@@ -510,7 +515,7 @@ function configChangeLabel(
 
 export function formatStartupNotification(
   workspaces: Workspace[],
-  status: Pick<ConversationStatus, "threadId" | "workspaceId" | "model" | "effort" | "serviceTier" | "modelPending" | "effortPending" | "fastModePending" | "weeklyLimit">,
+  status: Pick<ConversationStatus, "threadId" | "workspaceId" | "model" | "effort" | "serviceTier" | "modelPending" | "effortPending" | "fastModePending" | "weeklyLimit" | "gitBranch">,
   runtime: StartupRuntimeInfo,
 ): string {
   const currentWorkspace = workspaces.find((workspace) => workspace.id === status.workspaceId);
@@ -536,6 +541,8 @@ export function formatStartupNotification(
     `│ ${currentWorkspace.cwd}`,
     "│ ",
     `│ Thread · ${status.threadId ?? "尚未绑定"}`,
+    "│ ",
+    `│ Git 分支 · ${status.gitBranch ?? "未检测到"}`,
     "│ ",
     `│ ${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""} · ${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
     "│ ",

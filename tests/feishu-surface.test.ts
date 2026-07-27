@@ -381,6 +381,8 @@ describe("Feishu Surface", () => {
       surface: "feishu",
       accountId: "cli_0123456789abcdef",
       conversationId: "oc_chat",
+    }, {
+      includeGitBranch: true,
     });
     expect(fixture.sent).toEqual([{
       chatId: "oc_chat",

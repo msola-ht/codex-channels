@@ -127,11 +127,14 @@ function createFeishuModule(
         access,
         config.appId,
       ).map((chatId) => {
-        const status = options.service.status({
-          surface: "feishu",
-          accountId: config.appId,
-          conversationId: chatId,
-        });
+        const status = options.service.status(
+          {
+            surface: "feishu",
+            accountId: config.appId,
+            conversationId: chatId,
+          },
+          { includeGitBranch: true },
+        );
         return {
           chatId,
           text: renderFeishuStartupNotification(

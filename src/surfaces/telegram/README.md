@@ -10,11 +10,11 @@
   `/queue <描述>` 把纯文本排到下一 Turn，`/rules <init|check>` 只操作当前 Workspace 且不提供
   强制覆盖；同时发送热加载、自动重启、重装要求和失败等配置
   生命周期通知，Workspace 新增通知带直接切换按钮；启动消息只使用组合根注入的 Gateway
-  版本字符串，不读取生成协议。
+  版本字符串和当前 Workspace Git 分支，不读取生成协议。
 - `command-renderer.ts`：把平台无关的类型化命令结果渲染为 Telegram 消息。
 - `outbox.ts`：通过 Surface 共用的每 Conversation 有界顺序队列协调流式回复和审批显示顺序；
   活动非终态流最多保留 100 个，单流正文最多保留 1,000,000 个 Unicode 字符并明确标记截断；
-  每轮状态卡显示官方 Turn 对话耗时、最近 Turn 缓存命中率、当前 Goal、上下文压缩总次数和用量；最终回复默认使用兼容 HTML，也可选择
+  每轮状态卡显示当前 Workspace Git 分支、官方 Turn 对话耗时、最近 Turn 缓存命中率、当前 Goal、上下文压缩总次数和用量；最终回复默认使用兼容 HTML，也可选择
   Telegram 原生 Rich Markdown，超长或渲染失败时回退纯文本。
 - `approval-operation-coordinator.ts`：隔离审批请求与操作日志之间的等待、拒绝抑制和 Turn 清理状态。
 - 通知策略按逻辑事件降噪。Gateway 启动、CLI 输入镜像、思考/过程增量、操作过程、Turn 结束统计、
@@ -35,11 +35,11 @@
   当前聊天最新交互，没有待处理交互时进入共享 Turn 停止命令。初始交互使用 Conversation
   优先有序通道，会排在等待中的非关键流式或状态输出之前；最终带按钮的审批消息保持通知开启，
   长内容的前置折叠分片静默。发送成功或失败只记录脱敏身份和平台错误分类。
-- `lifecycle.ts`：Bot 命令注册、Long Polling、包含系统与会话摘要的启动联通通知，以及可取消关闭；有界重试耗尽后上报致命故障，由进程管理器恢复 Gateway。
+- `lifecycle.ts`：Bot 命令注册、Long Polling、包含系统、会话与 Git 分支摘要的启动联通通知，以及可取消关闭；有界重试耗尽后上报致命故障，由进程管理器恢复 Gateway。
 - `api-executor.ts`：统一执行 Telegram API 调用，处理超时、限流和有限重试。
 - `error-metadata.ts`：只保留异常类型和受约束的机器错误码，不记录任意异常消息。
 - `user-error-renderer.ts`：把平台无关的结构化用户错误映射为 Telegram 专属提示与命令用法。
-- `format.ts`：格式化会话、Diff/Plan、Goal、模型、Workspace、权限、用量、缓存命中率、上下文压缩总次数和状态文本；Skill 只展示
+- `format.ts`：格式化会话、Diff/Plan、Goal、模型、Workspace、Git 分支、权限、用量、缓存命中率、上下文压缩总次数和状态文本；启动通知、`/status` 与 Turn 结束统计均显示当前 Workspace Git 分支；Skill 只展示
   当前用户或 Workspace 直接安装的项，MCP 只展示稳定的名称、认证状态和工具数量，Plugin
   只展示本机已安装项，Permission Profile 只展示稳定目录选项。
 - `image-store.ts`：安全获取 Telegram 下载地址和下载流；大小、内容签名、私有暂存与过期清理

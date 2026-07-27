@@ -21,6 +21,9 @@ export class SurfaceManager {
     private readonly surfaces: readonly SurfaceAdapter[],
     output: EventBus<OutputEvent>,
     private readonly logger: Logger,
+    private readonly currentGitBranch?: (
+      target: OutputEvent["target"],
+    ) => string | undefined,
   ) {
     for (const surface of surfaces) {
       const key = surfaceAccountKey(surface.surface, surface.accountId);
@@ -157,7 +160,14 @@ export class SurfaceManager {
       return;
     }
     try {
-      surface.output.handle(event);
+      surface.output.handle(
+        event.type === "turn.completed"
+          ? {
+              ...event,
+              gitBranch: this.currentGitBranch?.(event.target),
+            }
+          : event,
+      );
     } catch (error) {
       this.logger.warn(
         {

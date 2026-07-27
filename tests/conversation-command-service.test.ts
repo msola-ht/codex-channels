@@ -307,6 +307,9 @@ describe("ConversationCommandService", () => {
       await expect(commands.execute(target, command, input)).resolves.toHaveProperty("kind");
       expect(service[method].mock.calls.length).toBeGreaterThan(before);
     }
+    expect(service.status).toHaveBeenCalledWith(target, {
+      includeGitBranch: true,
+    });
   });
 
   it("returns structured goal query and clear results", async () => {
