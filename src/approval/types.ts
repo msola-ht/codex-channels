@@ -66,3 +66,8 @@ export interface InteractionPort {
   resolved?(requestId: string): void;
   cancelAll?(outcome?: string): void;
 }
+
+export interface InteractionAuditLogger {
+  info(metadata: Record<string, unknown>, message: string): void;
+  warn(metadata: Record<string, unknown>, message: string): void;
+}

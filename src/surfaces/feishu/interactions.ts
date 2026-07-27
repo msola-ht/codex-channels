@@ -292,11 +292,30 @@ export class FeishuInteractionPort implements InteractionPort {
     request: InteractionRequest,
     token: string,
   ): Promise<string | undefined> {
-    const messageId = await this.delivery!.deliverCard(
-      target.conversationId,
-      request.type === "approval"
-        ? renderFeishuApprovalCard(request, token)
-        : renderFeishuInputCard(request, token),
+    let messageId: string;
+    try {
+      messageId = await this.delivery!.deliverCard(
+        target.conversationId,
+        request.type === "approval"
+          ? renderFeishuApprovalCard(request, token)
+          : renderFeishuInputCard(request, token),
+      );
+    } catch (error) {
+      this.logger?.warn(
+        {
+          ...interactionLogMetadata(target, request),
+          errorType: error instanceof Error ? error.name : typeof error,
+        },
+        "飞书交互请求发送失败",
+      );
+      throw error;
+    }
+    this.logger?.info(
+      {
+        ...interactionLogMetadata(target, request),
+        messageId,
+      },
+      "飞书交互请求已送达",
     );
     if (!this.closed) {
       return messageId;
@@ -364,6 +383,21 @@ export class FeishuInteractionPort implements InteractionPort {
       );
     });
   }
+}
+
+function interactionLogMetadata(
+  target: ConversationTarget,
+  request: InteractionRequest,
+): Record<string, unknown> {
+  return {
+    surface: target.surface,
+    accountId: target.accountId,
+    conversationId: target.conversationId,
+    requestId: request.requestId,
+    requestType: request.type,
+    threadId: request.threadId,
+    turnId: request.turnId,
+  };
 }
 
 function mapInteractionDecision(

@@ -318,7 +318,9 @@ export class FeishuConversationAdapter {
     const submission = await this.conversations.submit(
       message.target,
       {
-        text: "请查看这张图片并根据图片内容协助我。",
+        text: message.text?.trim().length
+          ? message.text
+          : "请查看这张图片并根据图片内容协助我。",
         localImages: [{ path: image.path }],
       },
     );

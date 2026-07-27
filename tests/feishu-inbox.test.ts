@@ -141,6 +141,79 @@ describe("FeishuInbox", () => {
     ]);
   });
 
+  it("accepts one private rich-post image with its text caption", async () => {
+    const fixture = createFixture();
+
+    expect(fixture.inbox.receive(createEvent({
+      messageType: "post",
+      content: JSON.stringify({
+        title: "",
+        content: [[
+          { tag: "img", image_key: "img_v2_resource" },
+          { tag: "text", text: "收得到吗" },
+        ]],
+      }),
+    }))).toEqual({
+      status: "accepted",
+    });
+
+    await fixture.inbox.close();
+    expect(fixture.handled).toEqual([
+      expect.objectContaining({
+        kind: "image",
+        imageKey: "img_v2_resource",
+        text: "收得到吗",
+      }),
+    ]);
+  });
+
+  it("accepts the official locale wrapper for an image caption", async () => {
+    const fixture = createFixture();
+
+    expect(fixture.inbox.receive(createEvent({
+      messageType: "post",
+      content: JSON.stringify({
+        zh_cn: {
+          title: "",
+          content: [[
+            { tag: "text", text: "请看截图" },
+            { tag: "img", image_key: "img_v2_resource" },
+          ]],
+        },
+      }),
+    }))).toEqual({
+      status: "accepted",
+    });
+
+    await fixture.inbox.close();
+    expect(fixture.handled).toEqual([
+      expect.objectContaining({
+        kind: "image",
+        imageKey: "img_v2_resource",
+        text: "请看截图",
+      }),
+    ]);
+  });
+
+  it("rejects a rich post with multiple images", async () => {
+    const fixture = createFixture();
+
+    expect(fixture.inbox.receive(createEvent({
+      messageType: "post",
+      content: JSON.stringify({
+        content: [[
+          { tag: "img", image_key: "img_v2_first" },
+          { tag: "img", image_key: "img_v2_second" },
+        ]],
+      }),
+    }))).toEqual({
+      status: "ignored",
+      reason: "invalid-content",
+    });
+
+    await fixture.inbox.close();
+  });
+
   it.each([
     [{ appId: "cli_ffffffffffffffff" }, "account-mismatch"],
     [{ senderType: "bot" }, "non-user"],

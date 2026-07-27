@@ -12,18 +12,37 @@ import type {
   NetworkApprovalContext,
   NetworkPolicyAmendment,
 } from "./requests.js";
-import type { InteractionDecision, InteractionPort } from "./types.js";
+import type {
+  InteractionAuditLogger,
+  InteractionDecision,
+  InteractionPort,
+} from "./types.js";
 
 export class ApprovalCoordinator implements ApprovalRequestHandler {
   constructor(
     private readonly router: SessionRouter,
     private readonly interaction: InteractionPort,
     private readonly timeoutMs: number,
+    private readonly logger?: InteractionAuditLogger,
   ) {}
 
   async handle(request: ApprovalRequest): Promise<ApprovalResponse> {
+    const metadata = {
+      requestId: String(request.requestId),
+      requestType: request.type,
+      threadId: request.threadId,
+      turnId: request.turnId,
+    };
+    this.logger?.info(metadata, "Codex 交互请求已收到");
     const target = this.router.targetForThread(request.threadId);
     if (!target) {
+      this.logger?.warn(
+        {
+          ...metadata,
+          reason: "unmapped-thread",
+        },
+        "Codex 交互请求没有可投递的外部会话，已安全拒绝",
+      );
       return safeDecline(request);
     }
 

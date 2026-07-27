@@ -69,6 +69,70 @@ describe("ConversationDeliveryQueue", () => {
     expect(calls).toEqual(["first", "critical"]);
   });
 
+  it("prioritizes an ordered interaction ahead of queued non-critical output", async () => {
+    const delivery = new ConversationDeliveryQueue(logger, {
+      component: "Test",
+    });
+    const calls: string[] = [];
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    delivery.enqueue("a", async () => {
+      calls.push("first");
+      await firstGate;
+    }, true);
+    await settle();
+    delivery.enqueue("a", async () => {
+      calls.push("non-critical");
+    }, false);
+    const interaction = delivery.runOrdered("a", async () => {
+      calls.push("interaction");
+    });
+
+    releaseFirst();
+    await interaction;
+    await delivery.close();
+    expect(calls).toEqual(["first", "interaction", "non-critical"]);
+  });
+
+  it("keeps existing critical output ahead of a prioritized interaction", async () => {
+    const delivery = new ConversationDeliveryQueue(logger, {
+      component: "Test",
+    });
+    const calls: string[] = [];
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    delivery.enqueue("a", async () => {
+      calls.push("first");
+      await firstGate;
+    }, true);
+    await settle();
+    delivery.enqueue("a", async () => {
+      calls.push("non-critical");
+    }, false);
+    delivery.enqueue("a", async () => {
+      calls.push("critical");
+    }, true);
+    const interaction = delivery.runOrdered("a", async () => {
+      calls.push("interaction");
+    });
+
+    releaseFirst();
+    await interaction;
+    await delivery.close();
+    expect(calls).toEqual([
+      "first",
+      "critical",
+      "interaction",
+      "non-critical",
+    ]);
+  });
+
   it("isolates operation failures and continues the Conversation", async () => {
     const delivery = new ConversationDeliveryQueue(logger, {
       component: "Test",

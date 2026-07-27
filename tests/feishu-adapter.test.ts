@@ -30,6 +30,21 @@ const imagePort = {
   download: vi.fn(),
 };
 
+function createImageMessage(
+  overrides: Partial<Extract<FeishuInboxMessage, { kind: "image" }>> = {},
+): Extract<FeishuInboxMessage, { kind: "image" }> {
+  return {
+    target: message.target,
+    actorId: message.actorId,
+    eventId: message.eventId,
+    messageId: message.messageId,
+    createdAtMs: message.createdAtMs,
+    kind: "image",
+    imageKey: "img_v2_resource",
+    ...overrides,
+  };
+}
+
 describe("Feishu conversation adapter", () => {
   it("uses rich posts for command results but keeps failures as plain text", async () => {
     const notifyMarkdown = vi.fn(() => true);
@@ -908,11 +923,7 @@ describe("Feishu conversation adapter", () => {
       { download },
     );
 
-    await adapter.handle({
-      ...message,
-      kind: "image",
-      imageKey: "img_v2_resource",
-    });
+    await adapter.handle(createImageMessage());
     await fixture.outbox.close();
 
     expect(download).toHaveBeenCalledWith(
@@ -921,6 +932,40 @@ describe("Feishu conversation adapter", () => {
     );
     expect(submit).toHaveBeenCalledWith(message.target, {
       text: "请查看这张图片并根据图片内容协助我。",
+      localImages: [{ path: "/private/uploads/feishu/image.png" }],
+    });
+    expect(fixture.sent).toEqual([]);
+  });
+
+  it("submits a private image together with its rich-post caption", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const download = vi.fn(async () => ({
+      path: "/private/uploads/feishu/image.png",
+      mimeType: "image/png" as const,
+      bytes: 8,
+    }));
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationService,
+      fixture.outbox,
+      { download },
+    );
+
+    await adapter.handle(createImageMessage({
+      text: "收得到吗",
+    }));
+    await fixture.outbox.close();
+
+    expect(download).toHaveBeenCalledWith(
+      "om_message",
+      "img_v2_resource",
+    );
+    expect(submit).toHaveBeenCalledWith(message.target, {
+      text: "收得到吗",
       localImages: [{ path: "/private/uploads/feishu/image.png" }],
     });
     expect(fixture.sent).toEqual([]);
@@ -946,11 +991,9 @@ describe("Feishu conversation adapter", () => {
       },
     );
 
-    await adapter.handle({
-      ...message,
-      kind: "image",
+    await adapter.handle(createImageMessage({
       imageKey: "img_resource",
-    });
+    }));
     await fixture.outbox.close();
 
     expect(fixture.sent).toEqual([{

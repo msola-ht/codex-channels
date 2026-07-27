@@ -47,6 +47,34 @@ export class BoundedAsyncQueue<T> {
     return true;
   }
 
+  pushPriority(value: T): boolean {
+    if (this.closed) {
+      return false;
+    }
+    const waiter = this.waiters.shift();
+    if (waiter) {
+      waiter.resolve(value);
+      return true;
+    }
+    if (this.entries.length >= this.capacity) {
+      const firstNonCritical = this.entries.findIndex((entry) => !entry.critical);
+      if (firstNonCritical === -1) {
+        return false;
+      }
+      this.entries.splice(firstNonCritical, 1);
+    }
+    const criticalEntries = this.entries.filter((entry) => entry.critical);
+    const nonCriticalEntries = this.entries.filter((entry) => !entry.critical);
+    this.entries.splice(
+      0,
+      this.entries.length,
+      ...criticalEntries,
+      { value, critical: true },
+      ...nonCriticalEntries,
+    );
+    return true;
+  }
+
   async shift(): Promise<T | undefined> {
     const entry = this.entries.shift();
     if (entry) {

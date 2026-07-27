@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ApprovalCoordinator } from "../src/approval/coordinator.js";
 import { InteractionRouter } from "../src/approval/interaction-router.js";
@@ -83,7 +83,11 @@ describe("InteractionRouter", () => {
 
   it("fails closed for an unregistered Surface account and broadcasts invalidation", async () => {
     const telegram = new FakeInteraction();
-    const router = new InteractionRouter();
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+    };
+    const router = new InteractionRouter(logger);
     router.register("telegram", "default", telegram);
     const request: InteractionRequest = {
       type: "approval",
@@ -107,6 +111,20 @@ describe("InteractionRouter", () => {
 
     expect(telegram.resolvedIds).toEqual(["request-resolved"]);
     expect(telegram.cancelledOutcomes).toEqual(["连接已断开"]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      {
+        requestId: "request-missing",
+        requestType: "approval",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        surface: "wechat",
+        accountId: "corp-a",
+        conversationId: "chat-1",
+        reason: "unregistered-surface-account",
+      },
+      "Codex 交互请求没有已注册的 Surface 端口，已安全拒绝",
+    );
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("修改文件");
   });
 });
 
@@ -129,15 +147,50 @@ describe("ApprovalCoordinator", () => {
   });
 
   it("declines privileged requests that cannot be mapped to a conversation", async () => {
-    const coordinator = new ApprovalCoordinator(routerWithoutTarget(), new FakeInteraction(), 30_000);
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+    };
+    const coordinator = new ApprovalCoordinator(
+      routerWithoutTarget(),
+      new FakeInteraction(),
+      30_000,
+      logger,
+    );
 
     const response = await handleRaw(coordinator, {
       id: "request-1",
       method: "item/commandExecution/requestApproval",
-      params: { threadId: "unknown", command: "touch unsafe" },
+      params: {
+        threadId: "unknown",
+        turnId: "turn-1",
+        itemId: "item-1",
+        command: "touch unsafe",
+      },
     });
 
     expect(response).toEqual({ decision: "decline" });
+    expect(logger.info).toHaveBeenCalledWith(
+      {
+        requestId: "request-1",
+        requestType: "command",
+        threadId: "unknown",
+        turnId: "turn-1",
+      },
+      "Codex 交互请求已收到",
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      {
+        requestId: "request-1",
+        requestType: "command",
+        threadId: "unknown",
+        turnId: "turn-1",
+        reason: "unmapped-thread",
+      },
+      "Codex 交互请求没有可投递的外部会话，已安全拒绝",
+    );
+    expect(JSON.stringify(logger.info.mock.calls)).not.toContain("touch unsafe");
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("touch unsafe");
   });
 
   it("grants only one command approval through the mapped Telegram conversation", async () => {

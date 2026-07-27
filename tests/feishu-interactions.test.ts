@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { Logger } from "pino";
 
 import type {
   InteractionRequest,
@@ -16,11 +17,29 @@ const target = {
 
 describe("Feishu interaction port", () => {
   it("binds an approval to the exact chat, message, actor, and one-use token", async () => {
-    const fixture = createConfiguredFixture();
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+    } as unknown as Logger;
+    const fixture = createConfiguredFixture(["ou_actor"], logger);
     const decision = fixture.interactions.request(target, approvalRequest());
     await settle();
 
     expect(fixture.sentCards).toHaveLength(1);
+    expect(logger.info).toHaveBeenCalledWith(
+      {
+        surface: "feishu",
+        accountId: "cli_0123456789abcdef",
+        conversationId: "oc_chat",
+        requestId: "approval-1",
+        requestType: "approval",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        messageId: "om_card",
+      },
+      "飞书交互请求已送达",
+    );
+    expect(JSON.stringify(vi.mocked(logger.info).mock.calls)).not.toContain("npm test");
     const token = interactionToken(fixture.sentCards[0]!.card, "approve-once");
     const action = {
       messageId: "om_card",
@@ -56,6 +75,47 @@ describe("Feishu interaction port", () => {
     })]);
     expect(JSON.stringify(fixture.updatedCards[0]?.card))
       .toContain("处理结果：已批准一次");
+  });
+
+  it("logs a failed approval delivery without logging its content", async () => {
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+    } as unknown as Logger;
+    const interactions = new FeishuInteractionPort(
+      {
+        deliverCard: async () => {
+          throw new Error("upstream response contains npm test");
+        },
+        updateCard: async () => {},
+      },
+      {
+        actors: () => ["ou_actor"],
+        rememberActor: () => {},
+      },
+      {
+        isAllowed: ({ actorId }) => actorId === "ou_actor",
+      },
+      logger,
+    );
+
+    await expect(interactions.request(target, approvalRequest())).rejects.toThrow(
+      "upstream response contains npm test",
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      {
+        surface: "feishu",
+        accountId: "cli_0123456789abcdef",
+        conversationId: "oc_chat",
+        requestId: "approval-1",
+        requestType: "approval",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        errorType: "Error",
+      },
+      "飞书交互请求发送失败",
+    );
+    expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain("npm test");
   });
 
   it("completes the protocol decision when the outcome card update fails", async () => {
@@ -585,6 +645,7 @@ describe("Feishu interaction port", () => {
 
 function createConfiguredFixture(
   actors: readonly string[] = ["ou_actor"],
+  logger?: Logger,
 ) {
   const sentCards: Array<{
     chatId: string;
@@ -613,6 +674,7 @@ function createConfiguredFixture(
       isAllowed: ({ actorId }) => actorId === "ou_actor"
         || actorId === "ou_other",
     },
+    logger,
   );
   return {
     interactions,

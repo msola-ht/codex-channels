@@ -14,6 +14,10 @@
 审批必须绑定 Thread、协议提供的 Turn 与请求标识。MCP elicitation 无法关联活动 Turn 时允许
 `turnId` 为 `null`，此时 App Server 请求 ID 是该交互的协议身份。未知、缺少必需归属信息或
 无法路由的高权限请求默认拒绝或取消；Surface 只实现 `InteractionPort`，不复制审批状态机。
+协调器只记录请求 ID、类型、Thread、Turn 和路由结果等脱敏身份字段；没有 Thread 绑定或没有
+对应 Surface 端口时必须记录明确的安全拒绝原因，不得记录命令、审批理由、表单内容或 MCP
+输入正文。Surface 在平台创建交互消息后记录送达结果，便于区分上游未请求、路由失败和平台
+发送失败。
 本模块不导入 `codex-client` 或 `codex-protocol`，也不接收原始 RPC method/params；畸形与未知
 Server Request 在 Client 适配边界安全拒绝，原始 params 不进入业务模块或错误消息。
 命令审批携带实验性的额外网络或文件系统权限时，Client 适配器必须先按当前协议基线验证，

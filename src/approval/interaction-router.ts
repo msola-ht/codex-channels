@@ -4,6 +4,7 @@ import {
   type SurfaceId,
 } from "../conversation-core/index.js";
 import type {
+  InteractionAuditLogger,
   InteractionDecision,
   InteractionPort,
   InteractionRequest,
@@ -11,6 +12,8 @@ import type {
 
 export class InteractionRouter implements InteractionPort {
   private readonly ports = new Map<string, InteractionPort>();
+
+  constructor(private readonly logger?: InteractionAuditLogger) {}
 
   register(surface: SurfaceId, accountId: string, port: InteractionPort): () => void {
     const key = this.key(surface, accountId);
@@ -30,9 +33,23 @@ export class InteractionRouter implements InteractionPort {
     request: InteractionRequest,
   ): Promise<InteractionDecision> {
     const port = this.ports.get(this.key(target.surface, target.accountId));
-    return port
-      ? port.request(target, request)
-      : Promise.resolve(safeDecline(request));
+    if (port) {
+      return port.request(target, request);
+    }
+    this.logger?.warn(
+      {
+        requestId: request.requestId,
+        requestType: request.type,
+        threadId: request.threadId,
+        turnId: request.turnId,
+        surface: target.surface,
+        accountId: target.accountId,
+        conversationId: target.conversationId,
+        reason: "unregistered-surface-account",
+      },
+      "Codex 交互请求没有已注册的 Surface 端口，已安全拒绝",
+    );
+    return Promise.resolve(safeDecline(request));
   }
 
   resolved(requestId: string): void {

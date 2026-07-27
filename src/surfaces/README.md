@@ -32,6 +32,10 @@ Surface，因此未匹配到具体变更的 Surface 仍会收到不包含平台�
 `ConversationDeliveryQueue` 提供可复用的每 Conversation 有界顺序队列：同一 Conversation 串行，
 不同 Conversation 可并行；关键输出可以替换仍在等待的非关键输出。新增 Surface 时应实现统一输入、
 输出和审批边界，通过 Application/Core 接入，并把平台发送操作放入该队列或提供等价约束。
+审批卡片和其他需要等待结果的 `runOrdered` 操作排在所有既有关键消息之后，但会越过尚未执行的
+非关键过程输出；关键消息与非关键消息各自保持原顺序，已经开始的平台请求不会被中断。
+Telegram 和飞书在交互消息创建成功或失败时
+只记录脱敏身份与平台错误分类，不记录审批正文。
 完整接入顺序、组合工厂、身份、配置、存储和验证要求见
 [`通讯渠道 Surface 接入指南`](../../docs/surface-integration-guide.md)。
 关闭队列时拒绝新输出、限时等待在途发送；并发关闭调用等待同一个关闭结果，不能提前报告完成。

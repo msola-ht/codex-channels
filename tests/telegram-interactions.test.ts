@@ -1,5 +1,6 @@
 import type { Bot, Context } from "grammy";
 import pino from "pino";
+import type { Logger } from "pino";
 import { describe, expect, it, vi } from "vitest";
 
 import type { InteractionRequest } from "../src/approval/types.js";
@@ -12,6 +13,10 @@ const target = { surface: "telegram" as const, accountId: "default", conversatio
 
 describe("TelegramInteractionPort", () => {
   it("offers and resolves an explicit session approval", async () => {
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+    } as unknown as Logger;
     const sendMessage = vi.fn(async (
       _chatId: string,
       _text: string,
@@ -28,10 +33,24 @@ describe("TelegramInteractionPort", () => {
       callbackQuery,
       api: { sendMessage, editMessageText },
     } as unknown as Bot;
-    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    const interactions = new TelegramInteractionPort(bot, logger);
 
     const decision = interactions.request(target, approvalRequest());
     await settle();
+    expect(logger.info).toHaveBeenCalledWith(
+      {
+        surface: "telegram",
+        accountId: "default",
+        conversationId: "100",
+        requestId: "request-1",
+        requestType: "approval",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        messageId: 6,
+      },
+      "Telegram 交互请求已送达",
+    );
+    expect(JSON.stringify(vi.mocked(logger.info).mock.calls)).not.toContain("npm test");
 
     const options = sendMessage.mock.calls[0]?.[2] as {
       reply_markup: { inline_keyboard: Array<Array<{ text: string; callback_data?: string }>> };
@@ -61,6 +80,42 @@ describe("TelegramInteractionPort", () => {
       expect.stringContaining("处理结果：已在本次会话中始终同意"),
       expect.objectContaining({ reply_markup: { inline_keyboard: [] } }),
     );
+  });
+
+  it("logs a failed approval delivery without logging its content", async () => {
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+    } as unknown as Logger;
+    const sendMessage = vi.fn(async () => {
+      throw new Error("upstream response contains npm test");
+    });
+    const bot = {
+      callbackQuery: vi.fn(),
+      api: {
+        sendMessage,
+        editMessageText: vi.fn(async () => true as const),
+      },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, logger);
+
+    await expect(interactions.request(target, approvalRequest())).rejects.toThrow(
+      "upstream response contains npm test",
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      {
+        surface: "telegram",
+        accountId: "default",
+        conversationId: "100",
+        requestId: "request-1",
+        requestType: "approval",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        errorType: "Error",
+      },
+      "Telegram 交互请求发送失败",
+    );
+    expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain("npm test");
   });
 
   it("labels a network session approval with its exact host", async () => {

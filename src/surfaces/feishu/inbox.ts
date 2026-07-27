@@ -23,7 +23,7 @@ interface FeishuInboxMessageBase {
 
 export type FeishuInboxMessage = FeishuInboxMessageBase & (
   | { kind: "text"; text: string }
-  | { kind: "image"; imageKey: string }
+  | { kind: "image"; imageKey: string; text?: string }
 );
 
 export interface FeishuInboxProcessingError {
@@ -117,7 +117,11 @@ export class FeishuInbox {
     if (event.chatType !== "p2p") {
       return { status: "ignored", reason: "unsupported-chat" };
     }
-    if (event.messageType !== "text" && event.messageType !== "image") {
+    if (
+      event.messageType !== "text"
+      && event.messageType !== "image"
+      && event.messageType !== "post"
+    ) {
       return { status: "ignored", reason: "unsupported-message" };
     }
 
@@ -135,7 +139,9 @@ export class FeishuInbox {
       : undefined;
     const content = event.messageType === "text"
       ? (text === undefined ? undefined : { kind: "text" as const, text })
-      : parseImageContent(event.content);
+      : event.messageType === "image"
+        ? parseImageContent(event.content)
+        : parsePostImageContent(event.content);
     if (content === undefined) {
       return { status: "ignored", reason: "invalid-content" };
     }
@@ -333,6 +339,93 @@ function parseImageContent(
     return undefined;
   }
   return { kind: "image", imageKey };
+}
+
+function parsePostImageContent(
+  value: string,
+): { kind: "image"; imageKey: string; text?: string } | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+  const body = unwrapPostLocale(parsed);
+  if (body === undefined || !Array.isArray(body.content)) {
+    return undefined;
+  }
+
+  let imageKey: string | undefined;
+  const lines: string[] = [];
+  if (typeof body.title === "string" && body.title.length > 0) {
+    lines.push(body.title);
+  }
+  for (const paragraph of body.content) {
+    if (!Array.isArray(paragraph)) {
+      return undefined;
+    }
+    let line = "";
+    for (const element of paragraph) {
+      if (
+        typeof element !== "object"
+        || element === null
+        || Array.isArray(element)
+      ) {
+        return undefined;
+      }
+      const item = element as Record<string, unknown>;
+      if (item.tag === "text" && typeof item.text === "string") {
+        line += item.text;
+      }
+      if (item.tag === "img") {
+        if (
+          imageKey !== undefined
+          || typeof item.image_key !== "string"
+          || !isSafeFeishuResourceIdentifier(item.image_key)
+        ) {
+          return undefined;
+        }
+        imageKey = item.image_key;
+      }
+    }
+    lines.push(line);
+  }
+  if (imageKey === undefined) {
+    return undefined;
+  }
+  const text = lines.join("\n").trim();
+  return {
+    kind: "image",
+    imageKey,
+    ...(text.length === 0 ? {} : { text }),
+  };
+}
+
+function unwrapPostLocale(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  if (
+    typeof value !== "object"
+    || value === null
+    || Array.isArray(value)
+  ) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if ("title" in record || "content" in record) {
+    return record;
+  }
+  for (const locale of ["zh_cn", "en_us", "ja_jp"]) {
+    const body = record[locale];
+    if (
+      typeof body === "object"
+      && body !== null
+      && !Array.isArray(body)
+    ) {
+      return body as Record<string, unknown>;
+    }
+  }
+  return undefined;
 }
 
 function positiveInteger(value: number, name: string): number {

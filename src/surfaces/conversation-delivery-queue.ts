@@ -48,15 +48,7 @@ export class ConversationDeliveryQueue {
     if (this.closed) {
       return false;
     }
-    let worker = this.workers.get(conversationId);
-    if (!worker) {
-      const queue = new BoundedAsyncQueue<DeliveryOperation>(this.capacity);
-      worker = {
-        queue,
-        done: this.runWorker(conversationId, queue),
-      };
-      this.workers.set(conversationId, worker);
-    }
+    const worker = this.worker(conversationId);
     const accepted = worker.queue.push({ critical, run }, critical);
     if (!accepted) {
       this.logger.warn(
@@ -81,23 +73,48 @@ export class ConversationDeliveryQueue {
       );
     }
     return new Promise<T>((resolve, reject) => {
-      const accepted = this.enqueue(conversationId, async () => {
-        try {
-          resolve(await run());
-        } catch (error) {
-          reject(
-            error instanceof Error
-              ? error
-              : new Error(`${this.options.component} Conversation 输出操作失败`),
-          );
-        }
-      }, true);
+      const worker = this.worker(conversationId);
+      const accepted = worker.queue.pushPriority({
+        critical: true,
+        run: async () => {
+          try {
+            resolve(await run());
+          } catch (error) {
+            reject(
+              error instanceof Error
+                ? error
+                : new Error(`${this.options.component} Conversation 输出操作失败`),
+            );
+          }
+        },
+      });
       if (!accepted) {
+        this.logger.warn(
+          {
+            component: this.options.component,
+            conversationId,
+            critical: true,
+          },
+          "Surface Conversation 输出队列已满，优先操作未入队",
+        );
         reject(
           new Error(`${this.options.component} Conversation 输出队列已满，操作未入队`),
         );
       }
     });
+  }
+
+  private worker(conversationId: string): ConversationWorker {
+    let worker = this.workers.get(conversationId);
+    if (!worker) {
+      const queue = new BoundedAsyncQueue<DeliveryOperation>(this.capacity);
+      worker = {
+        queue,
+        done: this.runWorker(conversationId, queue),
+      };
+      this.workers.set(conversationId, worker);
+    }
+    return worker;
   }
 
   close(): Promise<void> {

@@ -37,6 +37,19 @@ describe("BoundedAsyncQueue", () => {
     expect(await queue.shift()).toBe(1);
   });
 
+  it("places priority after existing critical entries and before non-critical entries", async () => {
+    const queue = new BoundedAsyncQueue<string>(4);
+    queue.push("non-critical-1", false);
+    queue.push("critical-1", true);
+    queue.push("non-critical-2", false);
+
+    expect(queue.pushPriority("interaction")).toBe(true);
+    expect(await queue.shift()).toBe("critical-1");
+    expect(await queue.shift()).toBe("interaction");
+    expect(await queue.shift()).toBe("non-critical-1");
+    expect(await queue.shift()).toBe("non-critical-2");
+  });
+
   it("drains accepted entries before completing a closed queue", async () => {
     const queue = new BoundedAsyncQueue<number>(1);
     queue.push(1);

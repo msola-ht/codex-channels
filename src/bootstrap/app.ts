@@ -153,11 +153,16 @@ export class GatewayApplication {
     });
     this.surfaces = this.surfaceModules.map((module) => module.adapter);
     this.surfaceManager = new SurfaceManager(this.surfaces, this.output, logger);
-    this.interactions = new InteractionRouter();
+    this.interactions = new InteractionRouter(logger);
     for (const surface of this.surfaces) {
       this.interactions.register(surface.surface, surface.accountId, surface.interactions);
     }
-    this.approval = new ApprovalCoordinator(this.router, this.interactions, config.approvalTimeoutMs);
+    this.approval = new ApprovalCoordinator(
+      this.router,
+      this.interactions,
+      config.approvalTimeoutMs,
+      logger,
+    );
     this.inbound.subscribe("conversation-core", (notification) => {
       const coreEvent = toConversationInputEvent(notification);
       if (coreEvent) {

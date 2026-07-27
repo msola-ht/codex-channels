@@ -183,11 +183,25 @@ export class TelegramInteractionPort implements InteractionPort {
         this.tokenByRequest.delete(request.requestId);
       }
       this.resolvedBeforePending.delete(token);
+      this.logger.warn(
+        {
+          ...interactionLogMetadata(target, request),
+          ...telegramErrorMetadata(error),
+        },
+        "Telegram 交互请求发送失败",
+      );
       throw error;
     }
     if (!message) {
       throw new Error("Telegram 交互消息为空");
     }
+    this.logger.info(
+      {
+        ...interactionLogMetadata(target, request),
+        messageId: message.message_id,
+      },
+      "Telegram 交互请求已送达",
+    );
     if (!this.closed) {
       return message;
     }
@@ -552,6 +566,21 @@ function interactionOptions(
     };
   }
   return { parse_mode: "HTML" };
+}
+
+function interactionLogMetadata(
+  target: ConversationTarget,
+  request: InteractionRequest,
+): Record<string, unknown> {
+  return {
+    surface: target.surface,
+    accountId: target.accountId,
+    conversationId: target.conversationId,
+    requestId: request.requestId,
+    requestType: request.type,
+    threadId: request.threadId,
+    turnId: request.turnId,
+  };
 }
 
 function parseAnswers(
