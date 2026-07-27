@@ -11,7 +11,9 @@ export {
 export {
   createCredentialBackedWeixinClient,
   createWeixinCredentialStore,
+  createWeixinReplyContextPersistence,
   FileWeixinUpdatesCursorStore,
+  renderWeixinStartupNotification,
   WeixinSurface,
   type WeixinProtocolClient,
 } from "./weixin/index.js";

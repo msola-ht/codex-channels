@@ -15,6 +15,7 @@ import {
   WeixinProtocolError,
   WeixinSurface,
   type WeixinProtocolClient,
+  type WeixinReplyContextPersistence,
   type WeixinUpdatesCursorStore,
 } from "../src/surfaces/weixin/index.js";
 
@@ -44,6 +45,7 @@ describe("WeixinSurface", () => {
       sendText,
     };
     const onFatal = vi.fn();
+    const replyContextPersistence = replyContextPersistenceFixture();
     const surface = new WeixinSurface({
       accountId,
       client,
@@ -51,6 +53,7 @@ describe("WeixinSurface", () => {
       service,
       access: accessFixture(true),
       actorRegistry,
+      replyContextPersistence,
       logger: pino({ level: "silent" }),
       onFatal,
     });
@@ -69,13 +72,89 @@ describe("WeixinSurface", () => {
 
     expect(service.submit).toHaveBeenCalledWith(target, "hello");
     expect(actorRegistry.rememberActor).toHaveBeenCalledWith(target, actorId);
-    expect(sendText).toHaveBeenCalledOnce();
+    expect(replyContextPersistence.set).toHaveBeenCalledWith(
+      target,
+      actorId,
+      "context-secret",
+    );
+    expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
+      "final reply",
+      "本次运行 · 已完成",
+    ]);
+    expect(onFatal).not.toHaveBeenCalled();
+  });
+
+  it("restores an encrypted reply context and sends the startup notification", async () => {
+    const replyContextPersistence = replyContextPersistenceFixture({
+      version: 1,
+      accountId,
+      actorId,
+      contextToken: "restored-context",
+      updatedAt: 1_000,
+    });
+    const sendText = vi.fn<WeixinProtocolClient["sendText"]>(async () => {});
+    const client: WeixinProtocolClient = {
+      getUpdates: vi.fn((_cursor, signal) => waitForAbort(signal)),
+      sendText,
+    };
+    const surface = new WeixinSurface({
+      accountId,
+      client,
+      cursorStore: cursorStoreFixture(),
+      service: serviceFixture(),
+      access: accessFixture(true),
+      replyContextPersistence,
+      startupNotification: {
+        targets: () => [target],
+        text: () => "Codex Connect 已上线\nApp Server：已连接",
+      },
+      logger: pino({ level: "silent" }),
+      onFatal: vi.fn(),
+    });
+
+    await surface.start();
+    await surface.stop();
+
+    expect(replyContextPersistence.get).toHaveBeenCalledWith(target);
     expect(sendText).toHaveBeenCalledWith({
       actorId,
-      contextToken: "context-secret",
-      text: "final reply",
+      contextToken: "restored-context",
+      text: "Codex Connect 已上线\n\nApp Server：已连接",
     });
-    expect(onFatal).not.toHaveBeenCalled();
+  });
+
+  it("removes a restored context instead of notifying a revoked actor", async () => {
+    const replyContextPersistence = replyContextPersistenceFixture({
+      version: 1,
+      accountId,
+      actorId,
+      contextToken: "restored-context",
+      updatedAt: 1_000,
+    });
+    const sendText = vi.fn<WeixinProtocolClient["sendText"]>(async () => {});
+    const surface = new WeixinSurface({
+      accountId,
+      client: {
+        getUpdates: vi.fn((_cursor, signal) => waitForAbort(signal)),
+        sendText,
+      },
+      cursorStore: cursorStoreFixture(),
+      service: serviceFixture(),
+      access: accessFixture(false),
+      replyContextPersistence,
+      startupNotification: {
+        targets: () => [target],
+        text: () => "Codex Connect 已上线",
+      },
+      logger: pino({ level: "silent" }),
+      onFatal: vi.fn(),
+    });
+
+    await surface.start();
+    await surface.stop();
+
+    expect(replyContextPersistence.remove).toHaveBeenCalledWith(target);
+    expect(sendText).not.toHaveBeenCalled();
   });
 
   it("routes an inbound basic command through the shared service and reply context", async () => {
@@ -364,5 +443,21 @@ function actorRegistryFixture(): ConversationActorRegistry & {
 function accessFixture(allowed: boolean): SurfaceAccessPolicy {
   return {
     isAllowed: vi.fn(() => allowed),
+  };
+}
+
+function replyContextPersistenceFixture(
+  restored: Awaited<
+    ReturnType<WeixinReplyContextPersistence["get"]>
+  > = null,
+): WeixinReplyContextPersistence & {
+  get: ReturnType<typeof vi.fn>;
+  set: ReturnType<typeof vi.fn>;
+  remove: ReturnType<typeof vi.fn>;
+} {
+  return {
+    get: vi.fn(async () => restored),
+    set: vi.fn(async () => {}),
+    remove: vi.fn(async () => {}),
   };
 }

@@ -22,8 +22,10 @@
 - 微信单账号私聊文本 Surface 已接入：`codexc setup` 会在明确确认连接替换风险后扫码，把
   Bot Token 保存到独立安全凭据后端，并记录脱敏账号与允许用户；将保存配置中的
   `weixin.enabled` 显式改为 `true` 并重载服务后开始接收和回复文本。微信支持
-  `/start`、`/help`、`/whoami`，以及复用统一会话命令服务的 `/status`、`/new`、`/stop`；
-  其他斜杠命令会明确拒绝，不会作为普通消息提交给 Codex。
+  `/start`、`/help`、`/whoami`，以及统一会话命令服务的全部命令；未知斜杠命令会明确拒绝，
+  不会作为普通消息提交给 Codex。每个 Turn 开始时发送处理提示，最终回复后仍发送完成、停止
+  或失败统计；已授权且已有绑定的私聊在至少接收过一条消息后，会使用独立加密保存的最近回复
+  上下文接收 Gateway 重启上线通知。
 - 查看 Codex 流式回复、格式化最终回复、操作过程、计划、Diff、Goal、用量和额度；长文本自动折叠，超长代码以预览加完整文件发送；Telegram 与飞书的 `/status`、启动联通通知和每轮结束状态卡均显示当前授权 Workspace 的 Git 分支；`/status` 还显示 Thread 累计缓存命中率，每轮结束状态卡显示最近 Turn 缓存命中率、当前 Goal 状态及 Thread 上下文压缩总次数，飞书把 App Server 返回的准确对话耗时单独放在卡片底栏。
 - App Server 明确返回的 Turn、warning 和 MCP 错误会在统一脱敏并限长后显示到对应通讯渠道；未知内部异常、凭据和未经约束的响应正文仍不会直接发送。
 - Telegram 通知按逻辑事件降噪：过程、状态、上下文和后续分片静默发送；最终回复、审批、用户输入与严重错误保留提醒。
@@ -130,8 +132,10 @@ allowed_user_ids = ["不透明用户@im.wechat"]
 
 Setup 默认保存 `enabled = false`，避免扫码完成后在操作者确认前启动长轮询。确认账号与允许名单
 后可将其改为 `true`，执行 `codexc service reload`；Gateway 会从安全凭据后端延迟读取 Token，
-接收允许用户的私聊文本并使用当前消息的内存回复上下文发送最终回复。`codexc doctor` 会只读
-检查对应安全凭据是否存在且载荷有效，不显示 Token。微信暂不支持媒体、群聊、主动推送或审批。
+接收允许用户的私聊文本，并在独立 `credentials/weixin-reply-context` 安全后端加密保存每个
+已绑定私聊的最近回复上下文，用于重启上线通知和重启后恢复关键输出。回复上下文不进入 TOML、
+SQLite 或日志；撤权目标不会收到通知。`codexc doctor` 会只读检查连接凭据是否存在且载荷有效，
+不显示 Token。微信暂不支持媒体、群聊、一般主动推送或审批。
 
 最终回复默认把常用 Markdown 安全转换为兼容性更好的 Telegram HTML。支持 Rich Messages
 的客户端可设置 `telegram.message_format = "rich"`；修改后执行 `codexc service reload`，

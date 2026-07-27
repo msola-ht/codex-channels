@@ -14,8 +14,8 @@
   MCP 卡片仍待验收。
 - [`weixin/`](weixin/README.md)：微信阶段 0/Setup 的严格独立凭据边界、固定版窄协议 Client、
   私有原子游标检查点、可取消接收监控器、授权后提交 Application 的私聊文本输入 Adapter，
-  以及复用统一会话命令服务的基础命令；
-  内存回复上下文、纯文本有界 Outbox、失败关闭交互端口和目录内部完整 `SurfaceAdapter`
+  以及复用统一会话命令服务的完整命令目录、加密回复上下文、重启上线通知和 Turn 完成统计；
+  纯文本有界 Outbox、失败关闭交互端口和目录内部完整 `SurfaceAdapter`
   已实现；严格运行配置显式启用时由 Bootstrap 注册单账号私聊文本 Surface。
 
 `secure-credential-store.ts` 提供 Surface 内部复用的 macOS Keychain 和 Linux AES-256-GCM
@@ -48,7 +48,7 @@ Telegram 和飞书在交互消息创建成功或失败时
 [`通讯渠道 Surface 接入指南`](../../docs/surface-integration-guide.md)。
 关闭队列时拒绝新输出、限时等待在途发送；并发关闭调用等待同一个关闭结果，不能提前报告完成。
 实现位于 `conversation-delivery-queue.ts`，并通过本目录 `index.ts` 公开。
-`elapsed-duration.ts` 只把 App Server 已提供的 Turn 毫秒耗时格式化为两个 Surface 共用的中文
+`elapsed-duration.ts` 只把 App Server 已提供的 Turn 毫秒耗时格式化为三个 Surface 共用的中文
 短文本，不负责计时、状态或持久化。
 `slash-command.ts` 统一飞书与微信的严格斜杠命令解析；`conversation-command-format.ts`
 统一 Telegram、飞书与微信共用的命令结果文案，并提供 Telegram 与微信共用的状态文本。

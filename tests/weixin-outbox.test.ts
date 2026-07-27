@@ -39,9 +39,10 @@ describe("WeixinOutbox", () => {
     })).toThrow("微信回复目标无效");
   });
 
-  it("routes one final text through the matching in-memory reply context", async () => {
+  it("sends start, final text, and completion through the reply context", async () => {
     const { outbox, sendText } = outboxFixture();
 
+    outbox.handle(turnStarted());
     outbox.handle(completed("commentary", "working"));
     outbox.handle({
       ...completed("final_answer", "foreign"),
@@ -51,12 +52,11 @@ describe("WeixinOutbox", () => {
     outbox.handle(turnCompleted("completed"));
     await outbox.close();
 
-    expect(sendText).toHaveBeenCalledOnce();
-    expect(sendText).toHaveBeenCalledWith({
-      actorId,
-      contextToken: "context-secret",
-      text: "final reply",
-    });
+    expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
+      "已开始处理。",
+      "final reply",
+      "本次运行 · 已完成",
+    ]);
   });
 
   it("renders terminal status when no final text was produced", async () => {
@@ -68,8 +68,24 @@ describe("WeixinOutbox", () => {
     expect(sendText).toHaveBeenCalledWith({
       actorId,
       contextToken: "context-secret",
-      text: "本次运行已完成。",
+      text: "本次运行 · 已完成",
     });
+  });
+
+  it("renders stopped and failed Turn notifications", async () => {
+    const { outbox, sendText } = outboxFixture();
+
+    outbox.handle(turnCompleted("interrupted"));
+    outbox.handle({
+      ...turnCompleted("failed"),
+      error: "受控错误",
+    });
+    await outbox.close();
+
+    expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
+      "本次运行 · 已停止",
+      "本次运行 · 失败\n\n错误：受控错误",
+    ]);
   });
 
   it("splits without breaking surrogate pairs and truncates after five chunks", async () => {
@@ -186,12 +202,18 @@ describe("WeixinOutbox", () => {
 
   it("rechecks authorization and rejects missing or revoked reply contexts", async () => {
     const allowed = { value: true };
-    const { outbox, contexts, sendText } = outboxFixture(allowed);
+    const {
+      outbox,
+      contexts,
+      sendText,
+      onReplyContextInvalidated,
+    } = outboxFixture(allowed);
     allowed.value = false;
 
     await expect(outbox.deliverText(target, "blocked"))
       .rejects.toMatchObject({ code: "unauthorized-recipient" });
     expect(contexts.get(target)).toBeUndefined();
+    expect(onReplyContextInvalidated).toHaveBeenCalledWith(target);
     expect(sendText).not.toHaveBeenCalled();
 
     allowed.value = true;
@@ -277,15 +299,18 @@ function outboxFixture(
   const contexts = new WeixinReplyContextStore(accountId);
   contexts.remember(target, actorId, "context-secret");
   const sendText = vi.fn<WeixinProtocolClient["sendText"]>(async () => {});
+  const onReplyContextInvalidated = vi.fn(async () => {});
   return {
     contexts,
     sendText,
+    onReplyContextInvalidated,
     outbox: new WeixinOutbox(
       accountId,
       { sendText },
       contexts,
       accessFixture(() => allowed.value),
       pino({ level: "silent" }),
+      { onReplyContextInvalidated },
     ),
   };
 }
@@ -312,6 +337,15 @@ function completed(
     itemId: "item",
     phase,
     text,
+  };
+}
+
+function turnStarted(): Extract<OutputEvent, { type: "turn.started" }> {
+  return {
+    type: "turn.started",
+    target,
+    threadId: "thread",
+    turnId: "turn",
   };
 }
 

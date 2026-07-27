@@ -1,7 +1,7 @@
 # 微信 Surface
 
 当前实现阶段 0/Setup 的独立安全凭据边界，以及运行时窄协议 Client、私有游标
-检查点、私聊文本输入 Adapter、基础命令 Adapter、纯文本 Outbox、失败关闭交互端口和目录内部完整
+检查点、私聊文本输入 Adapter、完整命令 Adapter、纯文本 Outbox、失败关闭交互端口和目录内部完整
 `SurfaceAdapter`；严格运行配置显式启用时由 Bootstrap 注册，未新增 SQLite Schema。
 
 - `credential-store.ts`：严格校验版本 1 微信 Bot 凭据；macOS 使用独立 Keychain Service，
@@ -19,22 +19,30 @@
 - `input-adapter.ts`：拥有单账号监控器生命周期；按微信账号和私聊 Actor 构造目标，授权后记录
   Actor、更新内存回复上下文并把文本交给目录内会话 Adapter。停止会取消长轮询并有限等待；
   处理失败不推进游标，只向生命周期所有者报告稳定错误码。
-- `conversation-adapter.ts`：复用 Application 的 `ConversationCommandService` 实现
-  `/status`、`/new`、`/stop`，并保留微信本地 `/start`、`/help`、`/whoami`；命令解析复用
-  Surface 公共模板，未知斜杠命令明确拒绝，不会提交为普通 Codex 输入。多行命令结果在微信
-  边界转换为双换行段落，避免客户端把单换行折叠为空格。
-- `reply-context-store.ts`：按账号隔离、最多保留 1000 个私聊的最新 `actorId + context_token`；
-  只存在进程内存，返回副本，支持精确撤销和整体清空。
-- `outbox.ts`：只处理匹配账号的最终文本、必要结束状态、连接错误和警告；发送时重新检查 Actor
+- `conversation-adapter.ts`：复用 Application 的 `ConversationCommandService` 和完整共享命令
+  目录，并保留微信本地 `/start`、`/help`、`/whoami`；命令解析复用 Surface 公共模板，未知
+  斜杠命令明确拒绝，不会提交为普通 Codex 输入。
+- `command-renderer.ts`：按微信纯文本边界覆盖全部结构化命令结果与用户错误；多行内容转换为双
+  换行段落，避免客户端把单换行折叠为空格。
+- `reply-context-store.ts`：按账号隔离、最多保留 1000 个私聊的进程内
+  `actorId + context_token` 副本，支持精确撤销和整体清空。
+- `reply-context-persistence.ts`：按精确账号和私聊 Actor 保存严格版本 1 的最近回复上下文；
+  macOS 使用独立 Keychain Service，Linux 使用独立
+  `credentials/weixin-reply-context` AES-256-GCM 私有目录。载荷、密文或身份不匹配失败关闭。
+- `outbox.ts`：只处理匹配账号的 Turn 开始提示、最终文本、带耗时/模型/上下文/缓存/分支的
+  完成或停止统计、失败通知、连接错误和警告；生命周期通知作为关键输出，不因已有最终回复而
+  省略；发送时重新检查 Actor
   授权，通过共享 Conversation 队列顺序发送，单条最多 4000 个 UTF-16 码元、最多五条并显示
   截断提示，避免拆开代理对。
 - `interactions.ts`：审批立即拒绝、用户输入返回空答案、MCP elicitation 立即取消，不用普通
   微信文本模拟高权限交互。
-- `surface.ts`：共享一个内存回复上下文组合 Input、Outbox 与 InteractionPort；停止时先取消输入，
-  再取消交互并排空输出，重复停止安全。主动配置通知因没有可持久化的安全收件人而明确失败关闭。
+- `surface.ts`：共享一个内存回复上下文组合 Input、Outbox 与 InteractionPort；启动时只为当前
+  允许名单中已有绑定且存在加密回复上下文的私聊恢复收件人并发送上线通知，通知失败不停止长轮询；
+  停止时先取消输入，再取消交互并排空输出，重复停止安全。一般主动配置通知仍明确失败关闭。
 - `index.ts`：微信模块公开入口。
 
-二维码、验证码、扫码者 ID、消息和回复上下文均不持久化；长轮询游标只进入独立检查点，不进入
-凭据、TOML 或 SQLite。未知版本、身份不匹配、密文或载荷损坏失败关闭，不能当作未配置后静默
+二维码、验证码和消息正文不持久化；最近回复目标和 `context_token` 只进入独立加密回复上下文
+后端，长轮询游标只进入独立检查点，二者都不进入 Bot 凭据、TOML、SQLite 或日志。未知版本、
+身份不匹配、密文或载荷损坏失败关闭，不能当作未配置后静默
 重新扫码。微信目录通过一级 `src/surfaces/index.ts` 公开运行时组合所需的窄接口，并由 Bootstrap
 内置插件装配安全凭据 Client、游标 Store、精确 Access Policy 和生命周期故障上报。

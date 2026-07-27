@@ -2,6 +2,9 @@ import type { Logger } from "pino";
 
 import type { ConversationService } from "../../application/index.js";
 import type {
+  ConversationTarget,
+} from "../../conversation-core/index.js";
+import type {
   ConversationActorRegistry,
   SurfaceAccessPolicy,
 } from "../../policy/index.js";
@@ -21,6 +24,8 @@ import {
 } from "./outbox.js";
 import type { WeixinProtocolClient } from "./protocol-client.js";
 import { WeixinReplyContextStore } from "./reply-context-store.js";
+import type { WeixinReplyContextPersistence } from "./reply-context-persistence.js";
+import { formatWeixinCommandText } from "./command-renderer.js";
 import type { WeixinUpdatesCursorStore } from "./updates-cursor-store.js";
 
 export interface WeixinSurfaceOptions {
@@ -32,6 +37,11 @@ export interface WeixinSurfaceOptions {
   logger: Logger;
   onFatal: (error: WeixinInputFatalError) => void;
   actorRegistry?: ConversationActorRegistry;
+  replyContextPersistence?: WeixinReplyContextPersistence;
+  startupNotification?: {
+    targets(): readonly ConversationTarget[];
+    text(target: ConversationTarget): string;
+  };
   inputCloseTimeoutMs?: number;
   outbox?: WeixinOutboxOptions;
 }
@@ -50,10 +60,23 @@ export class WeixinSurface implements SurfaceAdapter {
   readonly output: WeixinOutbox;
 
   private readonly input: WeixinInputAdapter;
+  private readonly replyContexts: WeixinReplyContextStore;
+  private readonly replyContextPersistence:
+    | WeixinReplyContextPersistence
+    | undefined;
+  private readonly startupNotification: WeixinSurfaceOptions["startupNotification"];
+  private readonly access: SurfaceAccessPolicy;
+  private readonly logger: Logger;
+  private startPromise: Promise<void> | undefined;
   private stopPromise: Promise<void> | undefined;
 
   constructor(options: WeixinSurfaceOptions) {
     const replyContexts = new WeixinReplyContextStore(options.accountId);
+    this.replyContexts = replyContexts;
+    this.replyContextPersistence = options.replyContextPersistence;
+    this.startupNotification = options.startupNotification;
+    this.access = options.access;
+    this.logger = options.logger;
     this.accountId = options.accountId;
     this.interactions = new WeixinInteractionPort();
     this.output = new WeixinOutbox(
@@ -62,7 +85,15 @@ export class WeixinSurface implements SurfaceAdapter {
       replyContexts,
       options.access,
       options.logger,
-      options.outbox,
+      {
+        ...options.outbox,
+        ...(options.replyContextPersistence === undefined
+          ? {}
+          : {
+              onReplyContextInvalidated: (target) =>
+                options.replyContextPersistence!.remove(target),
+            }),
+      },
     );
     this.input = new WeixinInputAdapter({
       accountId: options.accountId,
@@ -72,6 +103,18 @@ export class WeixinSurface implements SurfaceAdapter {
       outbox: this.output,
       access: options.access,
       replyContexts,
+      ...(options.replyContextPersistence === undefined
+        ? {}
+        : {
+            persistReplyContext: (target, actorId, contextToken) =>
+              options.replyContextPersistence!.set(
+                target,
+                actorId,
+                contextToken,
+              ),
+            removePersistedReplyContext: (target) =>
+              options.replyContextPersistence!.remove(target),
+          }),
       ...(options.actorRegistry === undefined
         ? {}
         : { actorRegistry: options.actorRegistry }),
@@ -92,7 +135,8 @@ export class WeixinSurface implements SurfaceAdapter {
   }
 
   start(): Promise<void> {
-    return this.input.start();
+    this.startPromise ??= this.startOnce();
+    return this.startPromise;
   }
 
   stop(): Promise<void> {
@@ -113,6 +157,60 @@ export class WeixinSurface implements SurfaceAdapter {
     } finally {
       this.interactions.cancelAll("Gateway 已停止");
       await this.output.close();
+    }
+  }
+
+  private async startOnce(): Promise<void> {
+    const targets = this.startupNotification?.targets() ?? [];
+    const restored: ConversationTarget[] = [];
+    if (this.replyContextPersistence) {
+      const seen = new Set<string>();
+      for (const target of targets) {
+        if (
+          target.surface !== "weixin"
+          || target.accountId !== this.accountId
+          || seen.has(target.conversationId)
+        ) {
+          continue;
+        }
+        seen.add(target.conversationId);
+        const stored = await this.replyContextPersistence.get(target);
+        if (stored === null) {
+          continue;
+        }
+        if (!this.access.isAllowed({ target, actorId: stored.actorId })) {
+          await this.replyContextPersistence.remove(target);
+          continue;
+        }
+        this.replyContexts.remember(
+          target,
+          stored.actorId,
+          stored.contextToken,
+        );
+        restored.push(target);
+      }
+    }
+    await this.input.start();
+    for (const target of restored) {
+      try {
+        const text = this.startupNotification?.text(target);
+        if (text) {
+          await this.output.deliverText(
+            target,
+            formatWeixinCommandText(text),
+          );
+        }
+      } catch (error) {
+        this.logger.warn(
+          {
+            surface: "weixin",
+            accountId: this.accountId,
+            conversationId: target.conversationId,
+            errorType: error instanceof Error ? error.name : typeof error,
+          },
+          "微信启动联通通知发送失败，不影响长轮询",
+        );
+      }
     }
   }
 }

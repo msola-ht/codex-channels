@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { ConversationService } from "../src/application/index.js";
+import {
+  conversationCommandNames,
+  type ConversationService,
+} from "../src/application/index.js";
 import type { ConversationTarget } from "../src/conversation-core/index.js";
 import {
   WeixinConversationAdapter,
@@ -25,7 +28,9 @@ describe("WeixinConversationAdapter", () => {
       turnId: "turn",
       steered: false,
     }));
-    const notifyText = vi.fn(() => true);
+    const notifyText = vi.fn<
+      (target: ConversationTarget, text: string) => boolean
+    >(() => true);
     const adapter = new WeixinConversationAdapter(
       serviceFixture({ submit }),
       { notifyText },
@@ -39,7 +44,9 @@ describe("WeixinConversationAdapter", () => {
 
   it("handles local help and identity without starting a Turn", async () => {
     const submit = vi.fn();
-    const notifyText = vi.fn(() => true);
+    const notifyText = vi.fn<
+      (target: ConversationTarget, text: string) => boolean
+    >(() => true);
     const adapter = new WeixinConversationAdapter(
       serviceFixture({ submit }),
       { notifyText },
@@ -50,14 +57,11 @@ describe("WeixinConversationAdapter", () => {
     await adapter.handle({ ...message, text: "/whoami" });
 
     expect(submit).not.toHaveBeenCalled();
-    expect(notifyText).toHaveBeenNthCalledWith(1, target, [
-      "微信 Codex 基础命令",
-      "/status 查看当前 Workspace、Thread 与运行状态",
-      "/new 退出当前会话，下一条普通消息新建 Thread",
-      "/stop 停止当前任务",
-      "/whoami 查看当前微信连接身份",
-      "/start · /help 查看本说明",
-    ].join("\n\n"));
+    const help = notifyText.mock.calls[0]?.[1];
+    expect(help).toContain("微信 Codex 命令");
+    expect(conversationCommandNames.every(
+      (command) => help?.includes(`/${command}`),
+    )).toBe(true);
     expect(notifyText).toHaveBeenNthCalledWith(
       2,
       target,
@@ -118,6 +122,26 @@ describe("WeixinConversationAdapter", () => {
       3,
       target,
       "已请求停止当前任务。",
+    );
+  });
+
+  it("uses the shared service for commands beyond the initial basic set", async () => {
+    const listSessions = vi.fn(async () => []);
+    const status = vi.fn(() => ({ threadId: undefined }));
+    const notifyText = vi.fn(() => true);
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({ listSessions, status }),
+      { notifyText },
+    );
+
+    await adapter.handle({ ...message, text: "/sessions fix" });
+
+    expect(listSessions).toHaveBeenCalledWith(target, {
+      searchTerm: "fix",
+    });
+    expect(notifyText).toHaveBeenCalledWith(
+      target,
+      "当前 Workspace 没有匹配的可恢复会话。",
     );
   });
 

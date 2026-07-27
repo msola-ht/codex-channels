@@ -15,6 +15,10 @@ import {
   type WeixinProtocolClient,
 } from "./protocol-client.js";
 import { WeixinReplyContextStore } from "./reply-context-store.js";
+import {
+  formatWeixinCommandText,
+  renderWeixinTurnCompleted,
+} from "./command-renderer.js";
 
 const maximumChunkCharacters = 4_000;
 const maximumChunks = 5;
@@ -34,11 +38,11 @@ export class WeixinOutboxError extends Error {
 export interface WeixinOutboxOptions {
   capacity?: number;
   closeTimeoutMs?: number;
+  onReplyContextInvalidated?: (target: ConversationTarget) => Promise<void>;
 }
 
 export class WeixinOutbox implements SurfaceOutputPort {
   private readonly delivery: ConversationDeliveryQueue;
-  private readonly turnsWithFinalText = new Set<string>();
   private readonly accountId: string;
   private closed = false;
 
@@ -48,7 +52,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     private readonly contexts: WeixinReplyContextStore,
     private readonly access: SurfaceAccessPolicy,
     logger: Logger,
-    options: WeixinOutboxOptions = {},
+    private readonly options: WeixinOutboxOptions = {},
   ) {
     this.accountId = validateWeixinAccountId(accountId);
     this.delivery = new ConversationDeliveryQueue(logger, {
@@ -75,14 +79,11 @@ export class WeixinOutbox implements SurfaceOutputPort {
     if (rendered === null) {
       return;
     }
-    const accepted = this.delivery.enqueue(
+    this.delivery.enqueue(
       event.target.conversationId,
       () => this.send(event.target, rendered),
-      isCriticalOutputEvent(event),
+      isCriticalOutputEvent(event) || event.type === "turn.started",
     );
-    if (accepted && event.type === "text.completed") {
-      this.rememberFinalText(event.threadId, event.turnId);
-    }
   }
 
   notifyText(target: ConversationTarget, text: string): boolean {
@@ -113,12 +114,13 @@ export class WeixinOutbox implements SurfaceOutputPort {
     }
     this.closed = true;
     await this.delivery.close();
-    this.turnsWithFinalText.clear();
     this.contexts.clear();
   }
 
   private render(event: OutputEvent): string | null {
     switch (event.type) {
+      case "turn.started":
+        return "已开始处理。";
       case "text.completed":
         if (event.phase === "commentary") {
           return null;
@@ -127,25 +129,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
           ? "Codex 返回了空消息。"
           : event.text;
       case "turn.completed": {
-        const hadFinalText = this.forgetFinalText(
-          event.threadId,
-          event.turnId,
-        );
-        if (event.status === "completed" && hadFinalText) {
-          return null;
-        }
-        if (event.status === "completed") {
-          return "本次运行已完成。";
-        }
-        if (event.status === "interrupted") {
-          return "本次运行已停止。";
-        }
-        if (event.status === "failed") {
-          return event.error?.trim()
-            ? `本次运行失败：${visibleMessage(event.error)}`
-            : "本次运行失败。";
-        }
-        return "本次运行状态异常。";
+        return formatWeixinCommandText(renderWeixinTurnCompleted(event));
       }
       case "connection.lost":
         return `Codex 连接已中断：${visibleMessage(event.message)}`;
@@ -170,6 +154,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
         actorId: context.actorId,
       })) {
         this.contexts.remove(target);
+        await this.options.onReplyContextInvalidated?.(target);
         throw new WeixinOutboxError("unauthorized-recipient");
       }
       await this.client.sendText({
@@ -185,20 +170,6 @@ export class WeixinOutbox implements SurfaceOutputPort {
       && target.accountId === this.accountId;
   }
 
-  private rememberFinalText(threadId: string, turnId: string): void {
-    while (this.turnsWithFinalText.size >= 1_000) {
-      const oldest = this.turnsWithFinalText.values().next().value;
-      if (oldest === undefined) {
-        break;
-      }
-      this.turnsWithFinalText.delete(oldest);
-    }
-    this.turnsWithFinalText.add(turnKey(threadId, turnId));
-  }
-
-  private forgetFinalText(threadId: string, turnId: string): boolean {
-    return this.turnsWithFinalText.delete(turnKey(threadId, turnId));
-  }
 }
 
 function splitWeixinText(value: string): string[] {
@@ -237,10 +208,6 @@ function safePrefixLength(value: string, maximumLength: number): number {
 
 function isHighSurrogate(value: number): boolean {
   return value >= 0xd800 && value <= 0xdbff;
-}
-
-function turnKey(threadId: string, turnId: string): string {
-  return JSON.stringify([threadId, turnId]);
 }
 
 function visibleMessage(value: string): string {

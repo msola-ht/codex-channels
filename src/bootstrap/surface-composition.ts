@@ -4,6 +4,7 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
 
 import type { GatewayConfig } from "../config/index.js";
+import type { ConversationTarget } from "../conversation-core/index.js";
 import {
   FeishuAccessPolicy,
   TelegramAccessPolicy,
@@ -17,7 +18,9 @@ import {
   telegramDefaultAccountId,
   createCredentialBackedWeixinClient,
   createWeixinCredentialStore,
+  createWeixinReplyContextPersistence,
   FileWeixinUpdatesCursorStore,
+  renderWeixinStartupNotification,
   WeixinSurface,
   type SurfaceAdapter,
 } from "../surfaces/index.js";
@@ -108,6 +111,9 @@ function createWeixinModule(
   const credentialStore = createWeixinCredentialStore(
     join(options.config.credentialsDirectory, "weixin"),
   );
+  const replyContextPersistence = createWeixinReplyContextPersistence(
+    join(options.config.credentialsDirectory, "weixin-reply-context"),
+  );
   const adapter = new WeixinSurface({
     accountId: config.accountId,
     client: createCredentialBackedWeixinClient({
@@ -120,6 +126,27 @@ function createWeixinModule(
     service: options.service,
     access,
     actorRegistry: options.bindings,
+    replyContextPersistence,
+    startupNotification: {
+      targets: () => authorizedWeixinConversations(
+        options.bindings,
+        access,
+        config.accountId,
+      ),
+      text: (target) => renderWeixinStartupNotification(
+        options.config.workspaces,
+        options.service.status(target, { includeGitBranch: true }),
+        {
+          platform: process.platform,
+          architecture: process.arch,
+          gatewayVersion: options.gatewayVersion,
+          nodeVersion: process.version,
+          transport: "Unix WebSocket",
+          codexUpstreamUserAgent:
+            options.codexUpstreamUserAgent() ?? null,
+        },
+      ),
+    },
     logger: options.logger,
     onFatal: (error) => options.onFatal("weixin", config.accountId, error),
   });
@@ -499,5 +526,27 @@ function authorizedFeishuConversations(
       return [];
     }
     return [binding.target.conversationId];
+  });
+}
+
+function authorizedWeixinConversations(
+  bindings: BindingStore,
+  access: WeixinAccessPolicy,
+  accountId: string,
+): ConversationTarget[] {
+  return bindings.list().flatMap((binding) => {
+    if (
+      binding.target.surface !== "weixin"
+      || binding.target.accountId !== accountId
+      || !bindings.actors(binding.target).some((actorId) =>
+        actorId === binding.target.conversationId
+        && access.isAllowed({
+          target: binding.target,
+          actorId,
+        }))
+    ) {
+      return [];
+    }
+    return [binding.target];
   });
 }

@@ -37,6 +37,16 @@ export {
   type WeixinConversationMessage,
 } from "./conversation-adapter.js";
 export {
+  formatWeixinCommandText,
+  renderWeixinCommandResult,
+  renderWeixinHelp,
+  renderWeixinIdentity,
+  renderWeixinStartupNotification,
+  renderWeixinTurnCompleted,
+  renderWeixinUserFacingError,
+  type WeixinStartupRuntimeInfo,
+} from "./command-renderer.js";
+export {
   WeixinInputAdapter,
   WeixinInputFatalError,
   type WeixinInputAdapterOptions,
@@ -46,6 +56,13 @@ export {
   WeixinReplyContextStore,
   type WeixinReplyContext,
 } from "./reply-context-store.js";
+export {
+  EncryptedFileWeixinReplyContextPersistence,
+  MacKeychainWeixinReplyContextPersistence,
+  createWeixinReplyContextPersistence,
+  type StoredWeixinReplyContext,
+  type WeixinReplyContextPersistence,
+} from "./reply-context-persistence.js";
 export {
   WeixinOutbox,
   WeixinOutboxError,

@@ -42,6 +42,12 @@ export interface WeixinInputAdapterOptions {
   outbox: Pick<WeixinOutbox, "notifyText">;
   access: SurfaceAccessPolicy;
   replyContexts: WeixinReplyContextStore;
+  persistReplyContext?(
+    target: ConversationTarget,
+    actorId: string,
+    contextToken: string,
+  ): Promise<void>;
+  removePersistedReplyContext?(target: ConversationTarget): Promise<void>;
   actorRegistry?: ConversationActorRegistry;
   onFatal(error: WeixinInputFatalError): void;
   onStopTimeout?(): void;
@@ -113,9 +119,15 @@ export class WeixinInputAdapter {
     };
     if (!this.options.access.isAllowed(accessContext)) {
       this.options.replyContexts.remove(target);
+      await this.options.removePersistedReplyContext?.(target);
       return;
     }
     this.options.replyContexts.remember(
+      target,
+      message.actorId,
+      message.contextToken,
+    );
+    await this.options.persistReplyContext?.(
       target,
       message.actorId,
       message.contextToken,
