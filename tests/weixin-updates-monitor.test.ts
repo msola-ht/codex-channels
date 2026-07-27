@@ -206,6 +206,23 @@ describe("WeixinUpdatesMonitor", () => {
     await expect(monitor.run(controller.signal)).resolves.toBeUndefined();
     expect(onRetry).not.toHaveBeenCalled();
   });
+
+  it("fails closed on an unexpected client abort", async () => {
+    const onRetry = vi.fn();
+    const monitor = createWeixinUpdatesMonitor({
+      accountId,
+      client: clientFixture([() => {
+        throw new WeixinProtocolError("aborted", "unexpected abort");
+      }]),
+      cursorStore: cursorStoreFixture(null),
+      handleMessage: async () => {},
+      onRetry,
+    });
+
+    await expect(monitor.run(new AbortController().signal))
+      .rejects.toMatchObject({ code: "aborted" });
+    expect(onRetry).not.toHaveBeenCalled();
+  });
 });
 
 function textMessage(

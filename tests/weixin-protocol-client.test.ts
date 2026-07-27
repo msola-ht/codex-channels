@@ -87,6 +87,9 @@ describe("WeixinProtocolClient", () => {
           message("5", {
             item_list: [{ type: 2, image_item: { url: "private" } }],
           }),
+          message("6", {
+            item_list: [{ type: 1, text_item: { text: "   " } }],
+          }),
         ],
       }), { status: 200 })),
     });
@@ -99,6 +102,7 @@ describe("WeixinProtocolClient", () => {
       { kind: "ignored", messageId: "3", reason: "wrong-recipient" },
       { kind: "ignored", messageId: "4", reason: "missing-context" },
       { kind: "ignored", messageId: "5", reason: "unsupported-content" },
+      { kind: "ignored", messageId: "6", reason: "unsupported-content" },
     ]);
     expect(JSON.stringify(result)).not.toContain("private");
   });

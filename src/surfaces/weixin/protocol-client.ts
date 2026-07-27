@@ -291,7 +291,7 @@ function firstText(items: readonly unknown[]): string | null {
     );
     if (
       typeof textItem.text !== "string"
-      || textItem.text.length === 0
+      || textItem.text.trim().length === 0
       || textItem.text.length > 100_000
     ) {
       return null;

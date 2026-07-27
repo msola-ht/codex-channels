@@ -28,3 +28,9 @@ export {
   type WeixinUpdatesMonitor,
   type WeixinUpdatesRetryEvent,
 } from "./updates-monitor.js";
+export {
+  WeixinInputAdapter,
+  WeixinInputFatalError,
+  type WeixinInputAdapterOptions,
+  type WeixinInputFatalCode,
+} from "./input-adapter.js";

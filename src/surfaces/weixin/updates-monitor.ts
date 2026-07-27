@@ -60,7 +60,7 @@ export function createWeixinUpdatesMonitor(
         try {
           batch = await options.client.getUpdates(cursor, signal);
         } catch (error) {
-          if (signal.aborted || isAborted(error)) {
+          if (signal.aborted) {
             return;
           }
           if (isTimeout(error)) {
@@ -130,10 +130,6 @@ class RecentMessageIds {
       this.ids.delete(removed);
     }
   }
-}
-
-function isAborted(error: unknown): boolean {
-  return error instanceof WeixinProtocolError && error.code === "aborted";
 }
 
 function isTimeout(error: unknown): boolean {
