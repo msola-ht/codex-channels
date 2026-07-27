@@ -1,0 +1,269 @@
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  WeixinProtocolError,
+  createWeixinUpdatesMonitor,
+  type WeixinInboundMessage,
+  type WeixinProtocolClient,
+  type WeixinUpdatesCursorStore,
+} from "../src/surfaces/weixin/index.js";
+
+const accountId = "account-fixture@im.bot";
+
+describe("WeixinUpdatesMonitor", () => {
+  it("delivers a batch in order and commits its cursor afterward", async () => {
+    const controller = new AbortController();
+    const events: string[] = [];
+    const cursorStore = cursorStoreFixture(null, async (_account, cursor) => {
+      events.push(`cursor:${cursor}`);
+    });
+    const client = clientFixture([
+      {
+        cursor: "cursor-one",
+        messages: [
+          textMessage("1", "first"),
+          ignoredMessage("2"),
+          textMessage("3", "third"),
+        ],
+      },
+      () => {
+        controller.abort();
+        throw new WeixinProtocolError("aborted", "aborted");
+      },
+    ]);
+    const monitor = createWeixinUpdatesMonitor({
+      accountId,
+      client,
+      cursorStore,
+      handleMessage: async (message) => {
+        events.push(`message:${message.messageId}`);
+      },
+    });
+
+    await expect(monitor.run(controller.signal)).resolves.toBeUndefined();
+
+    expect(events).toEqual([
+      "message:1",
+      "message:3",
+      "cursor:cursor-one",
+    ]);
+    expect(cursorStore.set).toHaveBeenCalledWith(accountId, "cursor-one");
+  });
+
+  it("does not commit a cursor when message handling fails", async () => {
+    const cursorStore = cursorStoreFixture("old-cursor");
+    const client = clientFixture([{
+      cursor: "new-cursor",
+      messages: [textMessage("1", "text")],
+    }]);
+    const monitor = createWeixinUpdatesMonitor({
+      accountId,
+      client,
+      cursorStore,
+      handleMessage: async () => {
+        throw new Error("application unavailable");
+      },
+    });
+
+    await expect(monitor.run(new AbortController().signal)).rejects.toThrow(
+      "application unavailable",
+    );
+    expect(cursorStore.set).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates raw message IDs before committing the batch", async () => {
+    const controller = new AbortController();
+    const cursorStore = cursorStoreFixture("old-cursor");
+    const client = clientFixture([
+      {
+        cursor: "new-cursor",
+        messages: [
+          textMessage("9007199254740993", "first"),
+          textMessage("9007199254740993", "duplicate"),
+        ],
+      },
+      () => {
+        controller.abort();
+        throw new WeixinProtocolError("aborted", "aborted");
+      },
+    ]);
+    const handleMessage = vi.fn<
+      (
+        message: Extract<WeixinInboundMessage, { kind: "text" }>,
+      ) => Promise<void>
+    >(async () => {});
+    const monitor = createWeixinUpdatesMonitor({
+      accountId,
+      client,
+      cursorStore,
+      handleMessage,
+    });
+
+    await monitor.run(controller.signal);
+
+    expect(handleMessage).toHaveBeenCalledOnce();
+    expect(handleMessage.mock.calls[0]?.[0].text).toBe("first");
+    expect(cursorStore.set).toHaveBeenCalledWith(accountId, "new-cursor");
+  });
+
+  it("retries constrained transient failures and resets after success", async () => {
+    const controller = new AbortController();
+    const cursorStore = cursorStoreFixture("cursor");
+    const client = clientFixture([
+      () => {
+        throw new WeixinProtocolError("network-error", "network");
+      },
+      () => {
+        throw new WeixinProtocolError("http-error", "server", 503);
+      },
+      { cursor: "cursor", messages: [] },
+      () => {
+        controller.abort();
+        throw new WeixinProtocolError("aborted", "aborted");
+      },
+    ]);
+    const onRetry = vi.fn();
+    const monitor = createWeixinUpdatesMonitor({
+      accountId,
+      client,
+      cursorStore,
+      handleMessage: async () => {},
+      retryDelayMs: 0,
+      onRetry,
+    });
+
+    await monitor.run(controller.signal);
+
+    expect(onRetry).toHaveBeenNthCalledWith(1, {
+      attempt: 1,
+      code: "network-error",
+    });
+    expect(onRetry).toHaveBeenNthCalledWith(2, {
+      attempt: 2,
+      code: "http-error",
+      status: 503,
+    });
+    expect(cursorStore.set).not.toHaveBeenCalled();
+  });
+
+  it("does not retry API errors or batches without a commit cursor", async () => {
+    const apiClient = clientFixture([() => {
+      throw new WeixinProtocolError(
+        "api-error",
+        "expired",
+        undefined,
+        -14,
+      );
+    }]);
+    const apiRetry = vi.fn();
+    const apiMonitor = createWeixinUpdatesMonitor({
+      accountId,
+      client: apiClient,
+      cursorStore: cursorStoreFixture(null),
+      handleMessage: async () => {},
+      retryDelayMs: 0,
+      onRetry: apiRetry,
+    });
+    await expect(apiMonitor.run(new AbortController().signal))
+      .rejects.toMatchObject({ code: "api-error" });
+    expect(apiRetry).not.toHaveBeenCalled();
+
+    const handleMessage = vi.fn(async () => {});
+    const cursorMonitor = createWeixinUpdatesMonitor({
+      accountId,
+      client: clientFixture([{
+        cursor: "",
+        messages: [textMessage("1", "text")],
+      }]),
+      cursorStore: cursorStoreFixture(null),
+      handleMessage,
+    });
+    await expect(cursorMonitor.run(new AbortController().signal))
+      .rejects.toMatchObject({ code: "invalid-response" });
+    expect(handleMessage).not.toHaveBeenCalled();
+  });
+
+  it("treats long-poll timeouts as normal and exits on cancellation", async () => {
+    const controller = new AbortController();
+    const client = clientFixture([
+      () => {
+        throw new WeixinProtocolError("timeout", "timeout");
+      },
+      () => {
+        controller.abort();
+        throw new WeixinProtocolError("aborted", "aborted");
+      },
+    ]);
+    const onRetry = vi.fn();
+    const monitor = createWeixinUpdatesMonitor({
+      accountId,
+      client,
+      cursorStore: cursorStoreFixture(null),
+      handleMessage: async () => {},
+      onRetry,
+    });
+
+    await expect(monitor.run(controller.signal)).resolves.toBeUndefined();
+    expect(onRetry).not.toHaveBeenCalled();
+  });
+});
+
+function textMessage(
+  messageId: string,
+  text: string,
+): Extract<WeixinInboundMessage, { kind: "text" }> {
+  return {
+    kind: "text",
+    messageId,
+    actorId: "actor-fixture@im.wechat",
+    conversationId: "actor-fixture@im.wechat",
+    contextToken: "context-secret",
+    text,
+  };
+}
+
+function ignoredMessage(
+  messageId: string,
+): Extract<WeixinInboundMessage, { kind: "ignored" }> {
+  return {
+    kind: "ignored",
+    messageId,
+    reason: "unsupported-content",
+  };
+}
+
+function cursorStoreFixture(
+  initialCursor: string | null,
+  setImplementation?: (
+    accountId: string,
+    cursor: string,
+  ) => Promise<void>,
+): WeixinUpdatesCursorStore & {
+  get: ReturnType<typeof vi.fn>;
+  set: ReturnType<typeof vi.fn>;
+  remove: ReturnType<typeof vi.fn>;
+} {
+  return {
+    get: vi.fn(async () => initialCursor),
+    set: vi.fn(setImplementation ?? (async () => {})),
+    remove: vi.fn(async () => {}),
+  };
+}
+
+function clientFixture(
+  responses: Array<
+    | Awaited<ReturnType<WeixinProtocolClient["getUpdates"]>>
+    | (() => never)
+  >,
+): WeixinProtocolClient {
+  return {
+    getUpdates: vi.fn(async () => {
+      const next = responses.shift();
+      if (next === undefined) {
+        throw new Error("unexpected getUpdates call");
+      }
+      return typeof next === "function" ? next() : next;
+    }),
+    sendText: vi.fn(async () => {}),
+  };
+}
