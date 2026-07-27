@@ -195,6 +195,44 @@ describe("FeishuInbox", () => {
     ]);
   });
 
+  it("accepts a private rich-post text message with links", async () => {
+    const fixture = createFixture();
+
+    expect(fixture.inbox.receive(createEvent({
+      messageType: "post",
+      content: JSON.stringify({
+        zh_cn: {
+          title: "飞书菜单分析",
+          content: [
+            [
+              { tag: "text", text: "官方文档：" },
+              {
+                tag: "a",
+                href: "https://open.feishu.cn/document",
+                text: "飞书开放平台",
+              },
+            ],
+            [{ tag: "text", text: "请继续处理。" }],
+          ],
+        },
+      }),
+    }))).toEqual({
+      status: "accepted",
+    });
+
+    await fixture.inbox.close();
+    expect(fixture.handled).toEqual([
+      expect.objectContaining({
+        kind: "text",
+        text: [
+          "飞书菜单分析",
+          "官方文档：飞书开放平台 (https://open.feishu.cn/document)",
+          "请继续处理。",
+        ].join("\n"),
+      }),
+    ]);
+  });
+
   it("rejects a rich post with multiple images", async () => {
     const fixture = createFixture();
 

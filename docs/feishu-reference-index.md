@@ -4,7 +4,7 @@
 
 本页用于定位飞书开放平台、官方 Node SDK、本地实现和验证入口。它是飞书 Surface 的事实查询
 入口，不替代 [`飞书 Surface 接入计划`](feishu-surface-plan.md)；当前支持扫码 Setup 与开发验证
-中的私聊文本、独立图片、单张图片说明文字、命令、CardKit 输出和交互路径。
+中的私聊普通文本、纯文字富文本、独立图片、单张图片说明文字、命令、CardKit 输出和交互路径。
 
 截至 2026-07-26，项目已精确锁定 `@larksuiteoapi/node-sdk@1.71.1`，并完成私聊 Surface、
 严格配置和 Bootstrap 显式组合。测试应用已完成扫码配置、Doctor 探测、生产 Gateway
@@ -156,7 +156,7 @@ EventDispatcher`。
 | Node SDK | npm 包、固定官方源码 | 已精确锁定 `1.71.1` | 阶段 0 |
 | WebSocket 握手和重连 | `WSClient` | 生命周期封装、统一 HTTP/HTTPS 代理注入、离线合同和真实首次握手已完成；真实断线恢复与代理待验证 | 阶段 0 |
 | 消息事件字段裁剪 | `im.message.receive_v1` | 稳定字段映射、畸形输入失败关闭和一条真实私聊文本事件已验证 | 阶段 0 |
-| 私聊文本事件 | `im.message.receive_v1` | 平台本地筛选、有界入队、Access Policy、Application 提交、安全错误和生命周期组合已完成；真实已授权主路径已通过，未授权/重复真实事件待验证 | 阶段 1 |
+| 私聊文本事件 | `im.message.receive_v1` | 普通 `text` 与由官方 `text`、`a` 元素组成的纯文字 `post` 均经过平台本地筛选、有界入队、Access Policy 和 Application 提交；富文本链接保留可见文字与目标 URL，未知元素失败关闭。真实普通文本与纯文字富文本主路径已通过，未授权/重复真实事件待验证 | 阶段 1 |
 | 文本与富文本发送 | `client.im.v1.message.create` | `chat_id` 的 `text` 与 `post + md` Payload、平台原生提及标签中和、有限 HTTP 超时和脱敏错误已完成；`post + md` 当前只用于静态 CardKit 实体创建失败和流式失败降级 | 阶段 1 / 阶段 4 切片 |
 | CardKit Markdown | `cardkit.v1.card.create`、`cardElement.content`、`card.settings` | 启动通知、短回复、命令结果、操作终态与每轮统计使用静态 CardKit；持续回复使用 300 ms 增量合并、递增序列与 UUID，统一采用 5,000 字符单卡和最多 5 张卡片预算；操作终态按会话顺序显示 Core 已脱敏详情。持续回复、静态展示、操作终态和每轮状态的真实主路径已通过，真实限流、失败降级和超长滚动待验收 | 阶段 4 切片 |
 | Thread 状态消息更新 | `client.im.v1.message.create/patch` | 同一 Thread 的 `active → idle` 轻量交互卡片创建、重复抑制、同 Chat 顺序更新、失败绑定清理和有限关闭已离线验证；蓝色运行中原地更新为绿色空闲的真实主路径已通过，不更新模型正文且不自动重试 | 阶段 4 切片 |
@@ -226,7 +226,7 @@ SDK 响应。
 | 消息事件信封 | [`src/surfaces/feishu/message-event.ts`](../src/surfaces/feishu/message-event.ts) | [`tests/feishu-message-event.test.ts`](../tests/feishu-message-event.test.ts)：稳定字段裁剪和畸形输入失败关闭 |
 | 机器人菜单与命令中心 | [`src/surfaces/feishu/menu-event.ts`](../src/surfaces/feishu/menu-event.ts)、[`src/surfaces/feishu/command-center.ts`](../src/surfaces/feishu/command-center.ts)、[`src/surfaces/feishu/surface.ts`](../src/surfaces/feishu/surface.ts) | [`tests/feishu-menu-event.test.ts`](../tests/feishu-menu-event.test.ts)、[`tests/feishu-command-center.test.ts`](../tests/feishu-command-center.test.ts)、[`tests/feishu-adapter.test.ts`](../tests/feishu-adapter.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)、[`tests/feishu-surface.test.ts`](../tests/feishu-surface.test.ts)：严格事件裁剪、活动连接门控、唯一授权私聊路由、事件去重、共享命令目录覆盖、卡片令牌与精确动作参数绑定、有界选择卡、一次性通用输入表单、会话搜索、越权/重复/畸形表单失败关闭和审批动作隔离 |
 | 应用配置与授权 | [`src/surfaces/feishu/application-api.ts`](../src/surfaces/feishu/application-api.ts)、[`src/surfaces/feishu/application-setup.ts`](../src/surfaces/feishu/application-setup.ts) | [`tests/feishu-application-api.test.ts`](../tests/feishu-application-api.test.ts)、[`tests/feishu-application-setup.test.ts`](../tests/feishu-application-setup.test.ts)、[`tests/feishu-surface.test.ts`](../tests/feishu-surface.test.ts)：严格配置快照、租户 Scope 裁剪与缺失差集、运行时实证优先、已有菜单保留、官方应用授权的 App/租户校验、App/Chat/Actor/消息令牌、待发布版本提示、部分失败提示和生命周期取消 |
-| 输入接收与去重 | [`src/surfaces/feishu/inbox.ts`](../src/surfaces/feishu/inbox.ts) | [`tests/feishu-inbox.test.ts`](../tests/feishu-inbox.test.ts)：文本、独立图片和单张图片说明文字 `post` 的同步入队、授权拒绝不污染去重键、重复、旧事件、顺序、并行、过载和关闭 |
+| 输入接收与去重 | [`src/surfaces/feishu/inbox.ts`](../src/surfaces/feishu/inbox.ts) | [`tests/feishu-inbox.test.ts`](../tests/feishu-inbox.test.ts)：普通文本、纯文字富文本及链接、独立图片和单张图片说明文字 `post` 的同步入队、授权拒绝不污染去重键、重复、旧事件、顺序、并行、过载和关闭 |
 | Application 输入适配 | [`src/surfaces/feishu/adapter.ts`](../src/surfaces/feishu/adapter.ts) | [`tests/feishu-adapter.test.ts`](../tests/feishu-adapter.test.ts)：新 Turn 提交、独立图片默认提示、图片说明文字与本地图片同次提交、活动 Turn 追加提示、Application 命令与参数透传、本地帮助/身份、`/stop` 交互优先语义、未知斜杠命令失败关闭、结构化错误、未知异常脱敏和输出队列拒绝不重试状态修改 |
 | 身份与授权 | [`src/policy/feishu-access.ts`](../src/policy/feishu-access.ts)、`ConversationActorRegistry` | [`tests/policy.test.ts`](../tests/policy.test.ts)：Surface、App ID、Open ID 和原子替换 |
 | 消息发送与状态更新 | [`src/surfaces/feishu/outbox.ts`](../src/surfaces/feishu/outbox.ts)、[`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts)、[`src/surfaces/feishu/message-content.ts`](../src/surfaces/feishu/message-content.ts)、[`src/surfaces/feishu/status-card.ts`](../src/surfaces/feishu/status-card.ts) | [`tests/feishu-outbox.test.ts`](../tests/feishu-outbox.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：精确账号路由、顺序、并行、静态 CardKit 创建与消息引用、5,000 字符单元素与最多 5 张卡片、创建失败富文本降级、纯文本与降级富文本 20,000 字节边界、Thread active/idle 轻量卡片更新、关闭、SDK Payload、超时和脱敏错误；真实状态卡片与静态 CardKit 主路径已通过 |

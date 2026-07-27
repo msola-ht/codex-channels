@@ -141,7 +141,7 @@ export class FeishuInbox {
       ? (text === undefined ? undefined : { kind: "text" as const, text })
       : event.messageType === "image"
         ? parseImageContent(event.content)
-        : parsePostImageContent(event.content);
+        : parsePostContent(event.content);
     if (content === undefined) {
       return { status: "ignored", reason: "invalid-content" };
     }
@@ -341,9 +341,12 @@ function parseImageContent(
   return { kind: "image", imageKey };
 }
 
-function parsePostImageContent(
+function parsePostContent(
   value: string,
-): { kind: "image"; imageKey: string; text?: string } | undefined {
+): (
+  | { kind: "text"; text: string }
+  | { kind: "image"; imageKey: string; text?: string }
+) | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);
@@ -374,10 +377,23 @@ function parsePostImageContent(
         return undefined;
       }
       const item = element as Record<string, unknown>;
-      if (item.tag === "text" && typeof item.text === "string") {
+      if (item.tag === "text") {
+        if (typeof item.text !== "string") {
+          return undefined;
+        }
         line += item.text;
-      }
-      if (item.tag === "img") {
+      } else if (item.tag === "a") {
+        if (
+          typeof item.text !== "string"
+          || typeof item.href !== "string"
+        ) {
+          return undefined;
+        }
+        line += item.text;
+        if (item.href.length > 0 && item.href !== item.text) {
+          line += ` (${item.href})`;
+        }
+      } else if (item.tag === "img") {
         if (
           imageKey !== undefined
           || typeof item.image_key !== "string"
@@ -386,14 +402,18 @@ function parsePostImageContent(
           return undefined;
         }
         imageKey = item.image_key;
+      } else {
+        return undefined;
       }
     }
     lines.push(line);
   }
-  if (imageKey === undefined) {
-    return undefined;
-  }
   const text = lines.join("\n").trim();
+  if (imageKey === undefined) {
+    return text.length === 0
+      ? undefined
+      : { kind: "text", text };
+  }
   return {
     kind: "image",
     imageKey,
