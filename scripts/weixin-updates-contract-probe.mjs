@@ -12,6 +12,7 @@ const appClientVersion = (2 << 16) | (4 << 8) | 6;
 const maximumResponseBytes = 1_048_576;
 const responseCursor = Symbol("responseCursor");
 const responseMessageIds = Symbol("responseMessageIds");
+const responseReplyContexts = new WeakMap();
 
 export class WeixinUpdatesContractError extends Error {
   constructor(code, message) {
@@ -93,6 +94,7 @@ export function createWeixinUpdatesContractClient({
         Object.defineProperty(summary, responseMessageIds, {
           value: extractMessageIdLexemes(raw),
         });
+        responseReplyContexts.set(summary, extractReplyContexts(parsed));
         return summary;
       } catch (error) {
         if (error instanceof WeixinUpdatesContractError) {
@@ -118,6 +120,27 @@ export function createWeixinUpdatesContractClient({
       }
     },
   };
+}
+
+export function selectWeixinReplyContext(summary, allowedUserIds) {
+  if (!Array.isArray(allowedUserIds) || allowedUserIds.length === 0) {
+    throw new WeixinUpdatesContractError(
+      "invalid-input",
+      "微信允许用户列表无效",
+    );
+  }
+  const allowed = new Set(allowedUserIds);
+  const contexts = responseReplyContexts.get(summary) ?? [];
+  responseReplyContexts.delete(summary);
+  const selected = contexts.findLast((context) =>
+    allowed.has(context.toUserId));
+  if (!selected) {
+    throw new WeixinUpdatesContractError(
+      "invalid-response",
+      "本批消息中没有可用于回复的已授权完成态文本",
+    );
+  }
+  return selected;
 }
 
 export async function runWeixinUpdatesSequence({
@@ -296,6 +319,47 @@ function summarizeMessage(value, messageIdLexeme) {
     messageIdDigits: messageIdLexeme.replace(/^-?/u, "").length,
     messageIdSafeInteger: isSafeIntegerLexeme(messageIdLexeme),
   };
+}
+
+function extractReplyContexts(value) {
+  if (
+    typeof value !== "object"
+    || value === null
+    || !Array.isArray(value.msgs)
+  ) {
+    return [];
+  }
+  const contexts = [];
+  for (const message of value.msgs) {
+    if (
+      typeof message !== "object"
+      || message === null
+      || message.message_type !== 1
+      || message.message_state !== 2
+      || typeof message.from_user_id !== "string"
+      || message.from_user_id.length === 0
+      || message.from_user_id.length > 1_024
+      || typeof message.context_token !== "string"
+      || message.context_token.length === 0
+      || message.context_token.length > 65_536
+      || !Array.isArray(message.item_list)
+      || !message.item_list.some((item) =>
+        typeof item === "object"
+        && item !== null
+        && item.type === 1
+        && typeof item.text_item === "object"
+        && item.text_item !== null
+        && typeof item.text_item.text === "string"
+        && item.text_item.text.length > 0)
+    ) {
+      continue;
+    }
+    contexts.push({
+      toUserId: message.from_user_id,
+      contextToken: message.context_token,
+    });
+  }
+  return contexts;
 }
 
 function extractMessageIdLexemes(raw) {
@@ -510,7 +574,7 @@ async function readLimitedResponseText(response, maximumBytes) {
   }
 }
 
-async function loadConfiguredCredential(environment) {
+export async function loadConfiguredWeixinContractConnection(environment) {
   const { configPath, dataDir } = requireUserConfig(environment);
   const document = validateGatewayConfigDocument(readGatewayConfig(configPath));
   if (!document.weixin) {
@@ -530,7 +594,10 @@ async function loadConfiguredCredential(environment) {
       "微信安全凭据不存在，请重新运行 codexc setup",
     );
   }
-  return credential;
+  return {
+    credential,
+    allowedUserIds: [...document.weixin.allowed_user_ids],
+  };
 }
 
 async function main(argv) {
@@ -562,7 +629,9 @@ async function main(argv) {
   process.once("SIGINT", abort);
   process.once("SIGTERM", abort);
   try {
-    const credential = await loadConfiguredCredential(process.env);
+    const { credential } = await loadConfiguredWeixinContractConnection(
+      process.env,
+    );
     process.stdout.write(
       "开始一次微信长轮询；请现在从已允许的微信账号向机器人发送一条测试文本。\n",
     );

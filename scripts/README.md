@@ -57,6 +57,9 @@
   `message_id` 精度；`sequence --live` 只在内存把首轮游标传给第二轮并比较重放数量和游标推进；
   `replay --live` 再次复用首轮游标，判断第二批消息是否重放及返回游标是否一致；
   不输出或保存正文、完整身份、Token、上下文令牌和游标。
+- `weixin-send-contract-probe.mjs`：显式 `reply --live` 后从一条已授权完成态微信文本中仅在
+  内存取得回复目标和 `context_token`，按固定 `v2.4.6` 合同发送一条短文本；不接受命令行
+  Token、用户 ID 或正文，不输出或保存消息、游标、回复上下文、`client_id` 或完整身份。
 - `check-gateway-version.mjs`：校验 npm 包和 Gateway 版本都与 Codex CLI 协议版本一致。
 - `check-docs.mjs`：校验项目 Markdown 本地链接、根文档索引、源码模块索引、协议数字和相关目录
   文件索引，并拒绝已移除的文档名称；常规项目文档检查排除 `.codex/skills/**` 附带的技能参考资料。
