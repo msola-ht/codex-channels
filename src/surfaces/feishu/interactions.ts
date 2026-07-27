@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
 
-import type {
-  InteractionDecision,
-  InteractionPort,
-  InteractionRequest,
+import {
+  safeInteractionDecision,
+  type InteractionDecision,
+  type InteractionPort,
+  type InteractionRequest,
 } from "../../approval/index.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
 import type {
@@ -77,7 +78,7 @@ export class FeishuInteractionPort implements InteractionPort {
       request.type !== "approval"
       && !supportsFeishuInputRequest(request)
     ) {
-      return timeoutDecision(request);
+      return safeInteractionDecision(request);
     }
     return this.requestInteraction(target, request);
   }
@@ -91,7 +92,7 @@ export class FeishuInteractionPort implements InteractionPort {
     if (pending) {
       this.finish(
         token,
-        timeoutDecision(pending.request),
+        safeInteractionDecision(pending.request),
         "已在其他客户端处理",
       );
     } else {
@@ -107,7 +108,7 @@ export class FeishuInteractionPort implements InteractionPort {
       }
       this.finish(
         token,
-        timeoutDecision(pending.request),
+        safeInteractionDecision(pending.request),
         outcome,
       );
     }
@@ -131,7 +132,7 @@ export class FeishuInteractionPort implements InteractionPort {
     }
     this.finish(
       token,
-      timeoutDecision(pending.request),
+      safeInteractionDecision(pending.request),
       "已停止",
     );
     return true;
@@ -198,19 +199,19 @@ export class FeishuInteractionPort implements InteractionPort {
       || !this.actorRegistry
       || !this.access
     ) {
-      return timeoutDecision(request);
+      return safeInteractionDecision(request);
     }
     if (this.tokenByRequest.has(request.requestId)) {
-      return timeoutDecision(request);
+      return safeInteractionDecision(request);
     }
     if (this.tokenByRequest.size >= maximumConcurrentInteractions) {
-      return timeoutDecision(request);
+      return safeInteractionDecision(request);
     }
     const authorizedActors = this.actorRegistry.actors(target).filter(
       (actorId) => this.access!.isAllowed({ target, actorId }),
     );
     if (authorizedActors.length !== 1) {
-      return timeoutDecision(request);
+      return safeInteractionDecision(request);
     }
 
     const token = randomBytes(18).toString("base64url");
@@ -252,18 +253,18 @@ export class FeishuInteractionPort implements InteractionPort {
       if (result.type === "failed") {
         throw result.error;
       }
-      return timeoutDecision(request);
+      return safeInteractionDecision(request);
     }
     const messageId = result.messageId;
     if (!messageId) {
-      return timeoutDecision(request);
+      return safeInteractionDecision(request);
     }
 
     return new Promise<InteractionDecision>((resolve) => {
       const timer = setTimeout(() => {
         this.finish(
           token,
-          timeoutDecision(request),
+          safeInteractionDecision(request),
           "请求已超时",
         );
       }, request.expiresInMs);
@@ -280,7 +281,7 @@ export class FeishuInteractionPort implements InteractionPort {
       if (this.resolvedBeforePending.delete(token)) {
         this.finish(
           token,
-          timeoutDecision(request),
+          safeInteractionDecision(request),
           "已在其他客户端处理",
         );
       }
@@ -325,7 +326,7 @@ export class FeishuInteractionPort implements InteractionPort {
       target,
       messageId,
       request,
-      timeoutDecision(request),
+      safeInteractionDecision(request),
       "Gateway 已停止",
     );
     return undefined;
@@ -413,7 +414,7 @@ function mapInteractionDecision(
   }
   if (action === "cancel") {
     return {
-      decision: timeoutDecision(request),
+      decision: safeInteractionDecision(request),
       outcome: "已取消",
     };
   }
@@ -499,16 +500,6 @@ function mapElicitationFormDecision(
   } catch {
     return undefined;
   }
-}
-
-function timeoutDecision(request: InteractionRequest): InteractionDecision {
-  if (request.type === "approval") {
-    return { type: "approval", approved: false };
-  }
-  if (request.type === "user-input") {
-    return { type: "user-input", answers: {} };
-  }
-  return { type: "elicitation", action: "cancel", content: null };
 }
 
 function renderMismatchedOutcomeCard(title: string): FeishuCardDocument {

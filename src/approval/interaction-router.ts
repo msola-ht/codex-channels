@@ -49,7 +49,7 @@ export class InteractionRouter implements InteractionPort {
       },
       "Codex 交互请求没有已注册的 Surface 端口，已安全拒绝",
     );
-    return Promise.resolve(safeDecline(request));
+    return Promise.resolve(safeInteractionDecision(request));
   }
 
   resolved(requestId: string): void {
@@ -69,7 +69,9 @@ export class InteractionRouter implements InteractionPort {
   }
 }
 
-function safeDecline(request: InteractionRequest): InteractionDecision {
+export function safeInteractionDecision(
+  request: InteractionRequest,
+): InteractionDecision {
   switch (request.type) {
     case "approval":
       return { type: "approval", approved: false };

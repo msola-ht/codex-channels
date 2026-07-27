@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ApprovalCoordinator } from "../src/approval/coordinator.js";
-import { InteractionRouter } from "../src/approval/interaction-router.js";
+import {
+  InteractionRouter,
+  safeInteractionDecision,
+} from "../src/approval/interaction-router.js";
 import type { ApprovalRequestHandler } from "../src/approval/requests.js";
 import type {
   InteractionDecision,
@@ -53,6 +56,45 @@ class FakeInteraction implements InteractionPort {
 }
 
 describe("InteractionRouter", () => {
+  it("provides the shared fail-closed decision for every interaction type", () => {
+    expect(safeInteractionDecision({
+      type: "approval",
+      requestId: "request-approval",
+      kind: "command",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      title: "审批",
+      detail: "npm test",
+      allowSession: false,
+      expiresInMs: 30_000,
+    })).toEqual({ type: "approval", approved: false });
+    expect(safeInteractionDecision({
+      type: "user-input",
+      requestId: "request-input",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      title: "补充信息",
+      questions: [],
+      expiresInMs: 30_000,
+    })).toEqual({ type: "user-input", answers: {} });
+    expect(safeInteractionDecision({
+      type: "elicitation",
+      requestId: "request-elicitation",
+      threadId: "thread-1",
+      turnId: null,
+      title: "MCP 输入",
+      message: "确认",
+      mode: "form",
+      expiresInMs: 30_000,
+    })).toEqual({
+      type: "elicitation",
+      action: "cancel",
+      content: null,
+    });
+  });
+
   it("routes requests by Surface and account without cross-delivery", async () => {
     const telegram = new FakeInteraction();
     const feishu = new FakeInteraction();

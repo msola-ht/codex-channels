@@ -3,7 +3,12 @@ import { randomBytes } from "node:crypto";
 import { Bot, InlineKeyboard, type Context } from "grammy";
 import type { Logger } from "pino";
 
-import type { InteractionDecision, InteractionPort, InteractionRequest } from "../../approval/index.js";
+import {
+  safeInteractionDecision,
+  type InteractionDecision,
+  type InteractionPort,
+  type InteractionRequest,
+} from "../../approval/index.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import {
@@ -72,7 +77,7 @@ export class TelegramInteractionPort implements InteractionPort {
       this.tokenByRequest.has(request.requestId)
       || this.tokenByRequest.size >= maximumConcurrentInteractions
     ) {
-      return timeoutDecision(request);
+      return safeInteractionDecision(request);
     }
     const token = randomBytes(12).toString("base64url");
     const keyboard = this.keyboard(request, token);
@@ -114,11 +119,11 @@ export class TelegramInteractionPort implements InteractionPort {
       if (result.type === "failed") {
         throw result.error;
       }
-      return timeoutDecision(request);
+      return safeInteractionDecision(request);
     }
     const message = result.message;
     if (!message) {
-      return timeoutDecision(request);
+      return safeInteractionDecision(request);
     }
     if (this.closed) {
       await this.finishPreparedAfterClose(
@@ -128,12 +133,12 @@ export class TelegramInteractionPort implements InteractionPort {
         message.message_id,
         chunks.at(-1)!,
       );
-      return timeoutDecision(request);
+      return safeInteractionDecision(request);
     }
 
     return new Promise<InteractionDecision>((resolve) => {
       const timer = setTimeout(() => {
-        this.finish(token, timeoutDecision(request));
+        this.finish(token, safeInteractionDecision(request));
       }, request.expiresInMs);
       timer.unref();
       this.pendingByToken.set(token, {
@@ -150,7 +155,7 @@ export class TelegramInteractionPort implements InteractionPort {
         this.textTokenByChat.set(target.conversationId, token);
       }
       if (this.resolvedBeforePending.delete(token)) {
-        this.finish(token, timeoutDecision(request), "已在其他客户端处理");
+        this.finish(token, safeInteractionDecision(request), "已在其他客户端处理");
       }
     });
   }
@@ -235,7 +240,7 @@ export class TelegramInteractionPort implements InteractionPort {
     this.queue.finishInteraction(
       target.conversationId,
       request,
-      timeoutDecision(request),
+      safeInteractionDecision(request),
     );
   }
 
@@ -244,7 +249,11 @@ export class TelegramInteractionPort implements InteractionPort {
     if (token) {
       const pending = this.pendingByToken.get(token);
       if (pending) {
-        this.finish(token, timeoutDecision(pending.request), "已在其他客户端处理");
+        this.finish(
+          token,
+          safeInteractionDecision(pending.request),
+          "已在其他客户端处理",
+        );
       } else {
         this.resolvedBeforePending.add(token);
       }
@@ -309,7 +318,7 @@ export class TelegramInteractionPort implements InteractionPort {
     if (!pending) {
       return false;
     }
-    this.finish(token!, timeoutDecision(pending.request), "已取消");
+    this.finish(token!, safeInteractionDecision(pending.request), "已取消");
     return true;
   }
 
@@ -330,7 +339,7 @@ export class TelegramInteractionPort implements InteractionPort {
 
   cancelAll(outcome = "连接已断开"): void {
     for (const [token, pending] of this.pendingByToken) {
-      this.finish(token, timeoutDecision(pending.request), outcome);
+      this.finish(token, safeInteractionDecision(pending.request), outcome);
     }
   }
 
@@ -521,16 +530,6 @@ export class TelegramInteractionPort implements InteractionPort {
         candidate.target.conversationId === conversationId && predicate(candidate),
       )?.[0];
   }
-}
-
-function timeoutDecision(request: InteractionRequest): InteractionDecision {
-  if (request.type === "approval") {
-    return { type: "approval", approved: false };
-  }
-  if (request.type === "user-input") {
-    return { type: "user-input", answers: {} };
-  }
-  return { type: "elicitation", action: "cancel", content: null };
 }
 
 function formatInteraction(request: Exclude<InteractionRequest, { type: "approval" }>): string {

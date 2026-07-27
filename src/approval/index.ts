@@ -1,5 +1,8 @@
 export { ApprovalCoordinator } from "./coordinator.js";
-export { InteractionRouter } from "./interaction-router.js";
+export {
+  InteractionRouter,
+  safeInteractionDecision,
+} from "./interaction-router.js";
 export type {
   AdditionalFileSystemPermissions,
   AdditionalPermissionProfile,

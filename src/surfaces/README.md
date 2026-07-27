@@ -42,6 +42,8 @@ Telegram 和飞书在交互消息创建成功或失败时
 实现位于 `conversation-delivery-queue.ts`，并通过本目录 `index.ts` 公开。
 `elapsed-duration.ts` 只把 App Server 已提供的 Turn 毫秒耗时格式化为两个 Surface 共用的中文
 短文本，不负责计时、状态或持久化。
+`operation-presentation.ts` 统一操作标题、状态、耗时与退出码元数据、敏感占位符和单行摘要；
+Telegram HTML 与飞书 CardKit Markdown 的转义、布局、分组和发送仍由各自 Adapter 负责。
 Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类型引入 Conversation Core。
 
 会话命令统一映射到 Application 的 `ConversationCommandService`；Surface 负责提取命令名和参数，
