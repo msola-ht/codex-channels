@@ -257,7 +257,10 @@ interface FeishuSdkMessageClient {
       card_id: string;
     };
     data: {
-      settings: string;
+      card: {
+        type: "card_json";
+        data: string;
+      };
       sequence: number;
       uuid: string;
     };
@@ -526,22 +529,34 @@ export class FeishuMessageClient implements
         "飞书流式卡片客户端未初始化",
       );
     }
+    const safeMarkdown = sanitizeFeishuMarkdown(summary);
     await this.runStreamingOperation(
       () => this.sdkClient.finishStreamingCard!({
         path: {
           card_id: cardId,
         },
         data: {
-          settings: JSON.stringify({
-            config: {
-              streaming_mode: false,
-              summary: {
-                content: streamingSummary(sanitizeFeishuMarkdown(summary)),
+          card: {
+            type: "card_json",
+            data: JSON.stringify({
+              schema: "2.0",
+              config: {
+                streaming_mode: false,
+                summary: {
+                  content: streamingSummary(safeMarkdown),
+                },
               },
-            },
-          }),
+              body: {
+                elements: [{
+                  tag: "markdown",
+                  element_id: "codexc_stream",
+                  content: safeMarkdown || "...",
+                }],
+              },
+            }),
+          },
           sequence,
-          uuid: `s_${cardId}_${sequence}`,
+          uuid: `f_${cardId}_${sequence}`,
         },
       }),
       "飞书流式卡片结束",
@@ -1172,7 +1187,7 @@ const defaultMessageDependencies: FeishuMessageClientDependencies = {
       updateStreamingCard: (payload) =>
         client.cardkit.v1.cardElement.content(payload),
       finishStreamingCard: (payload) =>
-        client.cardkit.v1.card.settings(payload),
+        client.cardkit.v1.card.update(payload),
       downloadResource: (payload) => client.im.v1.messageResource.get(payload),
     };
   },

@@ -532,8 +532,9 @@ Application 提交中保留原始说明文字；多图、一般文件、群聊�
 第五个体验切片只消费 Core 已有的 `text.delta` 与 `text.completed`。Outbox 在内存中按 Item
 合并 300 ms 增量，并通过现有 `ConversationDeliveryQueue` 串行调用锁定 SDK 的低层 CardKit
 接口；不采用高层 Channel，不复制授权、去重、重试、媒体或生命周期。短回复走静态 CardKit；
-持续回复按 `card.create → message.create → cardElement.content → card.settings` 更新，单卡
-保守限制 5,000 个 Unicode 字符，代码围栏跨卡时闭合并重开。流式卡片与失败回退富文本共享
+持续回复按 `card.create → message.create → cardElement.content → card.update` 更新，终态用
+关闭流式模式且包含完整 Markdown 正文的静态卡片全量覆盖，避免客户端打字机动画未追平时丢失
+尾字。单卡保守限制 5,000 个 Unicode 字符，代码围栏跨卡时闭合并重开。流式卡片与失败回退富文本共享
 最多 5 条的单结果预算；非终态最多使用前 4 条，第 5 条保留给最终校正或失败回退，达到预算时
 在最后一张消息明确标记截断；创建或内容更新失败时先尽力
 结束已显示卡片，再在最终文本到达后用剩余预算回退完整富文本。官方频控响应在非终态元素更新

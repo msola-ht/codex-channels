@@ -831,7 +831,11 @@ describe("FeishuMessageClient", () => {
     const updateStreamingCard = vi.fn(async () => ({ code: 0 }));
     const finishStreamingCard = vi.fn(async (payload: {
       path: { card_id: string };
-      data: { settings: string; sequence: number; uuid: string };
+      data: {
+        card: { type: "card_json"; data: string };
+        sequence: number;
+        uuid: string;
+      };
     }) => {
       void payload;
       return { code: 0 };
@@ -878,16 +882,83 @@ describe("FeishuMessageClient", () => {
         card_id: "7355372766134157313",
       },
       data: {
-        settings: JSON.stringify({
-          config: {
-            streaming_mode: false,
-            summary: {
-              content: "完整正文",
+        card: {
+          type: "card_json",
+          data: JSON.stringify({
+            schema: "2.0",
+            config: {
+              streaming_mode: false,
+              summary: {
+                content: "完整正文",
+              },
             },
-          },
-        }),
+            body: {
+              elements: [{
+                tag: "markdown",
+                element_id: "codexc_stream",
+                content: "完整正文",
+              }],
+            },
+          }),
+        },
         sequence: 2,
-        uuid: "s_7355372766134157313_2",
+        uuid: "f_7355372766134157313_2",
+      },
+    });
+  });
+
+  it("finalizes a streaming card with the complete static markdown body", async () => {
+    const finishStreamingCard = vi.fn(async () => ({ code: 0 }));
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage: async () => ({
+            data: { message_id: "om_message" },
+          }),
+          finishStreamingCard,
+          patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
+        }),
+      },
+    );
+
+    await client.finishStreamingCard(
+      "7355372766134157313",
+      2,
+      "结尾不能少字：尚未推送。",
+    );
+
+    expect(finishStreamingCard).toHaveBeenCalledWith({
+      path: {
+        card_id: "7355372766134157313",
+      },
+      data: {
+        card: {
+          type: "card_json",
+          data: JSON.stringify({
+            schema: "2.0",
+            config: {
+              streaming_mode: false,
+              summary: {
+                content: "结尾不能少字：尚未推送。",
+              },
+            },
+            body: {
+              elements: [{
+                tag: "markdown",
+                element_id: "codexc_stream",
+                content: "结尾不能少字：尚未推送。",
+              }],
+            },
+          }),
+        },
+        sequence: 2,
+        uuid: "f_7355372766134157313_2",
       },
     });
   });
@@ -994,7 +1065,11 @@ describe("FeishuMessageClient", () => {
   it("keeps a streaming summary within fifty UTF-16 code units", async () => {
     const finishStreamingCard = vi.fn(async (payload: {
       path: { card_id: string };
-      data: { settings: string; sequence: number; uuid: string };
+      data: {
+        card: { type: "card_json"; data: string };
+        sequence: number;
+        uuid: string;
+      };
     }) => {
       void payload;
       return { code: 0 };
@@ -1024,13 +1099,13 @@ describe("FeishuMessageClient", () => {
     );
 
     const payload = finishStreamingCard.mock.calls[0]?.[0];
-    const settings = JSON.parse(payload?.data.settings ?? "{}") as {
+    const card = JSON.parse(payload?.data.card.data ?? "{}") as {
       config?: { summary?: { content?: string } };
     };
-    expect(settings.config?.summary?.content).toBe(
+    expect(card.config?.summary?.content).toBe(
       `${"😀".repeat(24)}…`,
     );
-    expect(settings.config?.summary?.content?.length).toBeLessThanOrEqual(50);
+    expect(card.config?.summary?.content?.length).toBeLessThanOrEqual(50);
   });
 
   it("creates and updates an interactive card without retrying", async () => {
