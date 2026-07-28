@@ -45,9 +45,10 @@
 - `api-executor.ts`：统一执行 Telegram API 调用，处理超时、限流和有限重试。
 - `error-metadata.ts`：只保留异常类型和受约束的机器错误码，不记录任意异常消息。
 - `user-error-renderer.ts`：把平台无关的结构化用户错误映射为 Telegram 专属提示与命令用法。
-- `format.ts`：格式化会话、Diff/Plan、Goal、模型、Workspace、Git 分支、权限、用量、缓存命中率、上下文压缩总次数和状态文本；上线通知复用 Surface 共享生命周期字段，`/status` 与 Turn 结束统计均显示当前 Workspace Git 分支；Skill 只展示
-  当前用户或 Workspace 直接安装的项，MCP 只展示稳定的名称、认证状态和工具数量，Plugin
-  只展示本机已安装项，Permission Profile 只展示稳定目录选项。
+- `format.ts`：格式化会话、Diff/Plan、Goal、模型、Workspace、Git 分支、权限、用量、缓存命中率、
+  上下文压缩总次数和状态文本；可复用语义委托给 Surface 共享格式器，账户、额度与 MCP 运行状态
+  由 `runtime-status-format.ts` 提供；上线通知复用 Surface 共享生命周期字段，`/status` 与 Turn
+  结束统计均显示当前 Workspace Git 分支。
 - `image-store.ts`：安全获取 Telegram 下载地址和下载流；大小、内容签名、私有暂存与过期清理
   复用上层 `managed-image-store.ts`。
 

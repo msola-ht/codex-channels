@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Context } from "grammy";
 
 import { renderTelegramCommandResult } from "../src/surfaces/telegram/command-renderer.js";
-import { formatMcpStatusUpdate } from "../src/surfaces/telegram/format.js";
+import { formatRuntimeMcpStatusUpdate } from "../src/surfaces/runtime-status-format.js";
 
 describe("Telegram command renderer", () => {
   it("renders expanded shared notices through the safe HTML panel path", async () => {
@@ -128,7 +128,7 @@ describe("Telegram command renderer", () => {
   });
 
   it("shows MCP startup errors sanitized at the Client boundary", () => {
-    const text = formatMcpStatusUpdate({
+    const text = formatRuntimeMcpStatusUpdate({
       threadId: "thread-1",
       name: "docs",
       status: "failed",

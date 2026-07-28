@@ -192,7 +192,7 @@ interface FeishuSdkMessagePayload {
   };
   data: {
     receive_id: string;
-    msg_type: "text" | "post" | "interactive";
+    msg_type: "text" | "post" | "interactive" | "file";
     content: string;
   };
 }
@@ -203,6 +203,18 @@ interface FeishuSdkMessageClient {
       message_id?: string | undefined;
     } | undefined;
   }>;
+  createFile?(payload: {
+    data: {
+      file_type: "stream";
+      file_name: string;
+      file: Buffer;
+    };
+  }): Promise<{
+    file_key?: string | undefined;
+    data?: {
+      file_key?: string | undefined;
+    } | undefined;
+  } | null>;
   replyMessage?(payload: {
     path: {
       message_id: string;
@@ -346,6 +358,72 @@ export class FeishuMessageClient implements
       "post",
       encodeFeishuPostContent(markdown),
     );
+  }
+
+  async sendFile(
+    chatId: string,
+    fileName: string,
+    file: Buffer,
+  ): Promise<void> {
+    if (
+      !this.sdkClient.createFile
+      || file.length === 0
+      || file.length > 30 * 1_024 * 1_024
+      || Buffer.byteLength(fileName, "utf8") > 255
+      || fileName.length === 0
+      || fileName.includes("/")
+      || fileName.includes("\\")
+    ) {
+      throw new FeishuMessageError(
+        "invalid-response",
+        "飞书文件发送参数无效",
+      );
+    }
+    try {
+      const response = await withTimeout(
+        this.sdkClient.createFile({
+          data: {
+            file_type: "stream",
+            file_name: fileName,
+            file,
+          },
+        }),
+        this.sendTimeoutMs,
+        new FeishuMessageError(
+          "send-timeout",
+          "飞书文件上传超时",
+        ),
+      );
+      const fileKey = response?.file_key ?? response?.data?.file_key;
+      if (
+        typeof fileKey !== "string"
+        || !isSafeFeishuResourceIdentifier(fileKey)
+      ) {
+        throw new FeishuMessageError(
+          "invalid-response",
+          "飞书文件上传响应无效",
+        );
+      }
+      await this.sendMessage(
+        chatId,
+        "file",
+        JSON.stringify({ file_key: fileKey }),
+      );
+    } catch (error) {
+      if (error instanceof FeishuMessageError) {
+        throw error;
+      }
+      if (isSdkTimeout(error)) {
+        throw new FeishuMessageError(
+          "send-timeout",
+          "飞书文件上传超时",
+        );
+      }
+      throw new FeishuMessageError(
+        "send-failed",
+        "飞书文件发送失败",
+      );
+    }
   }
 
   async replyPost(messageId: string, markdown: string): Promise<void> {
@@ -926,7 +1004,7 @@ export class FeishuMessageClient implements
 
   private async sendMessage(
     chatId: string,
-    messageType: "text" | "post" | "interactive",
+    messageType: "text" | "post" | "interactive" | "file",
     content: string,
   ): Promise<string> {
     try {
@@ -1307,6 +1385,7 @@ const defaultMessageDependencies: FeishuMessageClientDependencies = {
     const client = createSdkClient(options, sendTimeoutMs);
     return {
       createMessage: (payload) => client.im.v1.message.create(payload),
+      createFile: (payload) => client.im.v1.file.create(payload),
       replyMessage: (payload) => client.im.v1.message.reply(payload),
       patchMessage: (payload) => client.im.v1.message.patch(payload),
       getMessage: (payload) => client.im.v1.message.get(payload),

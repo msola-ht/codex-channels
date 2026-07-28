@@ -164,6 +164,59 @@ describe("WeixinOutbox", () => {
     ]);
   });
 
+  it("renders account, quota, and MCP status as ordered plain text", async () => {
+    const { outbox, sendText } = outboxFixture();
+
+    outbox.handle({
+      type: "account.updated",
+      target,
+      authMode: "chatgpt",
+      planType: "pro",
+    });
+    outbox.handle({
+      type: "account.rateLimits.updated",
+      target,
+      rateLimits: {
+        limitId: "codex",
+        limitName: "周限",
+        primary: {
+          usedPercent: 12,
+          windowDurationMins: 10_080,
+          resetsAt: null,
+        },
+        secondary: null,
+        credits: null,
+        individualLimit: null,
+        spendControlReached: false,
+        planType: "pro",
+        rateLimitReachedType: null,
+      },
+    });
+    outbox.handle({
+      type: "mcp.status.updated",
+      target,
+      threadId: "thread",
+      name: "docs",
+      status: "failed",
+      error: "认证失败，TOKEN=[REDACTED]",
+      failureReason: null,
+    });
+    await outbox.close();
+
+    expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
+      "Codex 账户状态已更新：认证=chatgpt · 套餐=Pro",
+      [
+        "周限 额度提醒",
+        "主窗口：已使用 12% · 周期 7 天",
+        "状态：正常",
+      ].join("\n\n"),
+      [
+        "MCP Server：docs · 启动失败",
+        "原因：认证失败，TOKEN=[已隐藏]",
+      ].join("\n\n"),
+    ]);
+  });
+
   it("sends only terminal operation updates in Conversation order", async () => {
     const { outbox, sendText } = outboxFixture();
 

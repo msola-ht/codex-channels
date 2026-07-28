@@ -165,6 +165,7 @@ describe("Feishu setup", () => {
             "application:application:self_manage",
             "application:application:patch",
             "im:message:send_as_bot",
+            "im:resource",
             "im:message:readonly",
             "cardkit:card:write",
           ],

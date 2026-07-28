@@ -24,17 +24,17 @@ import {
   formatCodexWarning,
   formatConnectionLost,
 } from "../output-copy.js";
+import {
+  formatRuntimeAccountUpdate,
+  formatRuntimeMcpStatusUpdate,
+  formatRuntimeRateLimitUpdate,
+} from "../runtime-status-format.js";
 import type { OperationUpdateDisplay } from "../types.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import { TelegramApprovalOperationCoordinator } from "./approval-operation-coordinator.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
 import { telegramDefaultAccountId } from "./constants.js";
-import {
-  formatAccountUpdate,
-  formatMcpStatusUpdate,
-  formatRateLimitUpdate,
-  splitTelegramText,
-} from "./format.js";
+import { splitTelegramText } from "./format.js";
 import { formatMarkdownAsTelegramHtml } from "./markdown-format.js";
 import { formatTelegramPanelChunks } from "./html-format.js";
 import {
@@ -351,7 +351,7 @@ export class TelegramOutbox {
         this.enqueue(chatId, async () => {
           await this.sendPanel(
             chatId,
-            formatAccountUpdate(event.authMode, event.planType),
+            formatRuntimeAccountUpdate(event.authMode, event.planType),
             undefined,
             true,
           );
@@ -361,7 +361,7 @@ export class TelegramOutbox {
         this.enqueue(chatId, async () => {
           await this.sendPanel(
             chatId,
-            formatRateLimitUpdate(event.rateLimits),
+            formatRuntimeRateLimitUpdate(event.rateLimits),
             undefined,
             true,
           );
@@ -371,7 +371,7 @@ export class TelegramOutbox {
         this.enqueue(chatId, async () => {
           await this.sendPanel(
             chatId,
-            formatMcpStatusUpdate(event),
+            formatRuntimeMcpStatusUpdate(event),
             undefined,
             event.status !== "failed",
           );

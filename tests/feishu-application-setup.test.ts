@@ -96,6 +96,7 @@ describe("Feishu application setup controller", () => {
       [
         "application:application:patch",
         "im:message:send_as_bot",
+        "im:resource",
         "im:message:readonly",
         "cardkit:card:write",
       ],
@@ -116,6 +117,41 @@ describe("Feishu application setup controller", () => {
       ).at(-1)?.card,
     );
     expect(outcome).toContain("菜单、事件与回调已自动配置并提交发布");
+    await fixture.controller.close();
+  });
+
+  it("requests only the missing message resource scope for an existing application", async () => {
+    const fixture = createFixture({
+      ...incompleteSnapshot(),
+      grantedTenantScopes: [
+        "application:application:self_manage",
+        "application:application:patch",
+        "im:message:send_as_bot",
+        "im:message:readonly",
+        "cardkit:card:write",
+      ],
+    });
+    await fixture.controller.openDoctor(
+      target,
+      "ou_actor",
+      runtimeStatus(),
+    );
+    const card = fixture.cards[0]!;
+
+    fixture.controller.handleCardAction({
+      messageId: card.messageId,
+      chatId: card.chatId,
+      actorOpenId: "ou_actor",
+      tag: "button",
+      value: setupAction(card.card),
+    });
+    await settle();
+
+    expect(fixture.api.authorizeApplication).toHaveBeenCalledWith(
+      expect.any(AbortSignal),
+      expect.any(Function),
+      ["im:resource"],
+    );
     await fixture.controller.close();
   });
 
@@ -166,6 +202,7 @@ describe("Feishu application setup controller", () => {
         "application:application:self_manage",
         "application:application:patch",
         "im:message:send_as_bot",
+        "im:resource",
         "im:message:readonly",
         "cardkit:card:write",
       ],
@@ -205,6 +242,7 @@ describe("Feishu application setup controller", () => {
         "application:application:self_manage",
         "application:application:patch",
         "im:message:send_as_bot",
+        "im:resource",
         "im:message:readonly",
         "cardkit:card:write",
       ],
@@ -275,6 +313,7 @@ describe("Feishu application setup controller", () => {
           "application:application:self_manage",
           "application:application:patch",
           "im:message:send_as_bot",
+          "im:resource",
           "im:message:readonly",
           "cardkit:card:write",
         ],
@@ -317,6 +356,7 @@ describe("Feishu application setup controller", () => {
           "application:application:self_manage",
           "application:application:patch",
           "im:message:send_as_bot",
+          "im:resource",
           "im:message:readonly",
           "cardkit:card:write",
         ],

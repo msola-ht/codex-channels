@@ -24,6 +24,11 @@ import {
   formatCodexWarning,
   formatConnectionLost,
 } from "../output-copy.js";
+import {
+  formatRuntimeAccountUpdate,
+  formatRuntimeMcpStatusUpdate,
+  formatRuntimeRateLimitUpdate,
+} from "../runtime-status-format.js";
 
 import { validateWeixinAccountId } from "./credential-store.js";
 import {
@@ -288,6 +293,18 @@ export class WeixinOutbox implements SurfaceOutputPort {
         return formatConnectionLost(visibleMessage(event.message));
       case "warning":
         return formatCodexWarning(visibleMessage(event.message));
+      case "account.updated":
+        return formatWeixinCommandText(
+          formatRuntimeAccountUpdate(event.authMode, event.planType),
+        );
+      case "account.rateLimits.updated":
+        return formatWeixinCommandText(
+          formatRuntimeRateLimitUpdate(event.rateLimits),
+        );
+      case "mcp.status.updated":
+        return formatWeixinCommandText(
+          formatRuntimeMcpStatusUpdate(event),
+        );
       default:
         return null;
     }

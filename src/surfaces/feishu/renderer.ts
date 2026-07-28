@@ -35,6 +35,11 @@ import {
   formatCodexWarning,
   formatConnectionLost,
 } from "../output-copy.js";
+import {
+  formatRuntimeAccountUpdate,
+  formatRuntimeMcpStatusUpdate,
+  formatRuntimeRateLimitUpdate,
+} from "../runtime-status-format.js";
 import type { SurfaceConfigurationChange } from "../types.js";
 import type { FeishuInboxMessage } from "./inbox.js";
 
@@ -157,14 +162,11 @@ export function renderFeishuOutput(event: OutputEvent): string | null {
     case "connection.lost":
       return formatConnectionLost(visibleUpstreamMessage(event.message));
     case "account.updated":
-      return `Codex 账户状态已更新：认证=${event.authMode ?? "未登录"} · 套餐=${event.planType ?? "未知"}`;
+      return formatRuntimeAccountUpdate(event.authMode, event.planType);
     case "account.rateLimits.updated":
-      return "Codex 额度状态已更新。";
+      return formatRuntimeRateLimitUpdate(event.rateLimits);
     case "mcp.status.updated":
-      return [
-        `MCP Server：${event.name} · ${mcpStatusLabel(event.status)}`,
-        ...(event.error ? [`原因：${visibleUpstreamMessage(event.error)}`] : []),
-      ].join("\n");
+      return formatRuntimeMcpStatusUpdate(event);
     case "warning":
       return formatCodexWarning(visibleUpstreamMessage(event.message));
   }
@@ -255,16 +257,4 @@ function threadStatusLabel(status: string): string {
     : status === "idle"
       ? "空闲"
       : "未知";
-}
-
-function mcpStatusLabel(
-  status: Extract<OutputEvent, { type: "mcp.status.updated" }>["status"],
-): string {
-  const labels = {
-    starting: "启动中",
-    ready: "已就绪",
-    failed: "启动失败",
-    cancelled: "已取消",
-  } as const;
-  return labels[status];
 }

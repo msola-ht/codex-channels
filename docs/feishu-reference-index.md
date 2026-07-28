@@ -68,6 +68,7 @@ OAuth Token 与 Thread 绑定恢复，以及长回复折叠显示和顺序均已
 | 消息事件字段格式 | [官方 CLI 固定事件 Schema 指南](https://github.com/larksuite/cli/blob/a7865cd0a7416655535517a2a630848fde318761/skills/lark-event/SKILL.md) | 核对 `create_time` 为毫秒时间戳字符串 |
 | 长连接规则 | [使用长连接接收事件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/event-subscription-guide/long-connection-mode) | 处理时限、集群投递和订阅类型 |
 | 文本消息发送 | [发送消息](https://open.feishu.cn/document/server-docs/im-v1/message/create) | 核对 `chat_id` 接收目标、文本消息体和机器人可用性 |
+| IM 文件上传 | [上传文件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/file/create) | 核对 `stream` 文件类型、文件名、Buffer/流、30 MiB 平台上限和返回 `file_key`；项目只用于不超过 1,000,000 字节的完整最终回复 |
 | 更新消息卡片 | [更新应用发送的消息卡片](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message/patch) | 核对应用发送的交互卡片原地更新、14 天窗口、单消息 5 QPS 和请求大小限制 |
 | 卡片更新错误 | [错误码 230001：消息不是卡片](https://open.feishu.cn/document/faq/trouble-shooting/how-to-resolve-error-230001?lang=zh-CN) | 明确 `im.v1.message.patch` 只更新卡片；普通文本或富文本必须使用对应的编辑消息能力 |
 | 消息资源下载 | [获取消息中的资源文件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message-resource/get) | 核对用户消息资源使用 `message_id + file_key + type` 下载、机器人与消息同会话及 100 MiB 平台上限 |
@@ -145,7 +146,7 @@ EventDispatcher`。
 `addons.preset = false` 的最小机器人基座。Setup 提供手动输入和扫码授权两种方式；扫码时不传
 `createOnly` 或 `appId`，由飞书授权页让用户选择新建或已有企业自建应用，只增量声明
 `application:application:self_manage`、`application:application:patch`、
-`im:message:send_as_bot`、`im:message:readonly`、`cardkit:card:write`、
+`im:message:send_as_bot`、`im:resource`、`im:message:readonly`、`cardkit:card:write`、
 `im.message.receive_v1` 和
 `application.bot.menu_v6`，卡片阶段另声明 `card.action.trigger` 回调。注册完成后使用
 `/open-apis/bot/v3/info` 验证凭据和 Bot 身份，不启动
@@ -164,6 +165,7 @@ EventDispatcher`。
 | 私聊文本事件 | `im.message.receive_v1` | 普通 `text` 与由官方 `text`、`a` 元素组成的纯文字 `post` 均经过平台本地筛选、有界入队、Access Policy 和 Application 提交；富文本链接保留可见文字与目标 URL，未知元素失败关闭。真实普通文本与纯文字富文本主路径已通过，未授权/重复真实事件待验证 | 阶段 1 |
 | 文本与富文本发送 | `client.im.v1.message.create` | `chat_id` 的 `text` 与 `post + md` Payload、平台原生提及标签中和、有限 HTTP 超时和脱敏错误已完成；`post + md` 当前只用于静态 CardKit 实体创建失败和流式失败降级 | 阶段 1 / 阶段 4 切片 |
 | CardKit Markdown | `cardkit.v1.card.create`、`cardElement.content`、`card.update` | 启动通知、短回复、命令结果、操作终态与每轮统计使用静态 CardKit；持续回复使用 300 ms 增量合并、递增序列与 UUID，并在终态全量更新含完整正文且关闭流式模式的静态卡片，统一采用 5,000 字符单卡和最多 5 张卡片预算；操作终态按会话顺序显示 Core 已脱敏详情。持续回复、静态展示、操作终态和每轮状态的真实主路径已通过，真实限流、失败降级和超长滚动待验收 | 阶段 4 切片 |
+| 超长最终回复文件兜底 | `im.v1.file.create`、`im.v1.message.create` 的 `msg_type=file` | 超过五张卡片可靠展示预算且不超过 1,000,000 字节时，静态路径发送一张预览卡和完整 `codex-final-answer.txt`，流式路径在已有卡片后追加完整文件；只接受当前最终正文的内存 Buffer，不读取本地路径，不自动重试；文件失败时静态路径继续发送剩余有界正文。离线 SDK Payload、顺序、边界和失败路径已验证，真实文件上传待验收 | 阶段 4 切片 |
 | Thread 状态消息更新 | `client.im.v1.message.create/patch` | 同一 Thread 的 `active → idle` 轻量交互卡片创建、重复抑制、同 Chat 顺序更新、失败绑定清理和有限关闭已离线验证；蓝色运行中原地更新为绿色空闲的真实主路径已通过，不更新模型正文且不自动重试 | 阶段 4 切片 |
 | 输出渲染 | `OutputEvent`、`operation.updated`、`turn.completed` | 展示型 Markdown 统一使用 CardKit；操作运行帧忽略，终态按事件顺序发送独立静态卡片并显示受控详情；安全错误和操作性提示使用纯文本；每轮上下文状态、安全启动收件人、有界 Outbox 和 Surface 生命周期已离线验证，静态 CardKit、操作终态与每轮状态的真实主路径已通过 | 阶段 1 / 阶段 4 切片 |
 | 事件去重与旧事件过滤 | 平台事件 ID、毫秒时间戳 | 已实现飞书模块内有界内存状态；真实重投待验证 | 阶段 1 |
@@ -173,7 +175,7 @@ EventDispatcher`。
 | 群聊 | 群消息事件、群身份与 @Bot | 已记录为后续需求，当前开发批次不实施 | 阶段 2 |
 | 卡片交互 | `im.v1.message.create/patch`、`card.action.trigger` | 私聊审批、用户输入、MCP form/URL 卡片、一次性令牌、Actor/Chat/消息/请求绑定、重复请求失败关闭、原值决定、超时、有限停止、结果更新失败隔离和跨客户端失效已离线验证；命令审批卡片的一次批准与当前 Gateway 长连接动作接收已通过真实验收，用户输入和 MCP 卡片仍待真实验收 | 阶段 3 |
 | 私聊 PNG/JPEG 图片 | `im.message.receive_v1`、`im.v1.messageResource.get` | 已完成独立 `image` 与单张图片附带说明文字的 `post` 事件裁剪、授权后异步下载、10 MiB 限制、内容签名、私有暂存、过期清理，以及图片与原始说明文字同次提交；独立图片真实主路径已通过，说明文字待真实验收 | 阶段 4 |
-| 一般文件 | IM 资源 API | 暂不支持 | 阶段 4 |
+| 一般文件输入 | IM 资源 API | 暂不支持；超长最终回复的受控文本文件输出不扩大该边界 | 阶段 4 |
 | 飞书 Setup 与应用配置 | SDK Device Authorization、`bot/v3/info`、Application v6 只读详情、Application v7 配置写入与发布、机器人菜单事件文档 | 已实现手动输入与扫码、飞书页应用选择、消息/CardKit/只读检测与配置写入权限及消息/菜单事件与卡片动作回调声明、身份验证和原子配置；扫码保存后直接保留已有菜单并自动补齐 `codexc_home` 悬浮菜单、长连接事件与回调并提交应用版本，失败时保留连接配置并提供 Doctor 恢复；Doctor 解析已有租户 Scope、只申请缺失差集，并以运行时已收到事件为优先证据显示四项摘要；单个菜单节点与启用开关独立检测，消息路径真实扫码、Doctor 身份探测、命令审批动作回调和菜单点击均已通过 | 阶段 0 / 阶段 2 / 阶段 3 / 阶段 4 |
 | 飞书以外的 Lark | SDK Domain 配置 | 不在首版范围 | 未计划 |
 
@@ -234,7 +236,7 @@ SDK 响应。
 | 输入接收与去重 | [`src/surfaces/feishu/inbox.ts`](../src/surfaces/feishu/inbox.ts) | [`tests/feishu-inbox.test.ts`](../tests/feishu-inbox.test.ts)：普通文本、纯文字富文本及链接、独立图片和单张图片说明文字 `post` 的同步入队、授权拒绝不污染去重键、重复、旧事件、顺序、并行、过载和关闭 |
 | Application 输入适配 | [`src/surfaces/feishu/adapter.ts`](../src/surfaces/feishu/adapter.ts) | [`tests/feishu-adapter.test.ts`](../tests/feishu-adapter.test.ts)：新 Turn 提交、独立图片默认提示、图片说明文字与本地图片同次提交、活动 Turn 追加提示、Application 命令与参数透传、本地帮助/身份、`/stop` 交互优先语义、未知斜杠命令失败关闭、结构化错误、未知异常脱敏和输出队列拒绝不重试状态修改 |
 | 身份与授权 | [`src/policy/feishu-access.ts`](../src/policy/feishu-access.ts)、`ConversationActorRegistry` | [`tests/policy.test.ts`](../tests/policy.test.ts)：Surface、App ID、Open ID 和原子替换 |
-| 消息发送与状态更新 | [`src/surfaces/feishu/outbox.ts`](../src/surfaces/feishu/outbox.ts)、[`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts)、[`src/surfaces/feishu/message-content.ts`](../src/surfaces/feishu/message-content.ts)、[`src/surfaces/feishu/status-card.ts`](../src/surfaces/feishu/status-card.ts) | [`tests/feishu-outbox.test.ts`](../tests/feishu-outbox.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：精确账号路由、顺序、并行、静态 CardKit 创建与消息引用、5,000 字符单元素与最多 5 张卡片、创建失败富文本降级、纯文本与降级富文本 20,000 字节边界、Thread active/idle 轻量卡片更新、关闭、SDK Payload、超时和脱敏错误；真实状态卡片与静态 CardKit 主路径已通过 |
+| 消息发送与状态更新 | [`src/surfaces/feishu/outbox.ts`](../src/surfaces/feishu/outbox.ts)、[`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts)、[`src/surfaces/feishu/message-content.ts`](../src/surfaces/feishu/message-content.ts)、[`src/surfaces/feishu/status-card.ts`](../src/surfaces/feishu/status-card.ts) | [`tests/feishu-outbox.test.ts`](../tests/feishu-outbox.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：精确账号路由、顺序、并行、静态 CardKit 创建与消息引用、5,000 字符单元素与最多 5 张卡片、创建失败富文本降级、纯文本与降级富文本 20,000 字节边界、超长最终回复预览加完整内存文本文件、文件上传与 `file_key` 消息 Payload、失败有界回退、Thread active/idle 轻量卡片更新、关闭、超时和脱敏错误；真实状态卡片与静态 CardKit 主路径已通过，真实文件上传待验收 |
 | 操作终态与原生流式输出 | [`src/surfaces/feishu/operation-format.ts`](../src/surfaces/feishu/operation-format.ts)、[`src/surfaces/feishu/outbox.ts`](../src/surfaces/feishu/outbox.ts)、[`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts) | [`tests/feishu-operation-format.test.ts`](../tests/feishu-operation-format.test.ts)、[`tests/feishu-outbox.test.ts`](../tests/feishu-outbox.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：具体脱敏操作详情、状态、独立耗时底栏和退出码、运行帧忽略、终态静态卡片与助手消息的会话顺序、CardKit 2.0 精确 Payload、递增序列与 UUID、增量合并、终态完整静态卡片全量更新、滚动与代码围栏、卡片和回退共用 5 条预算并为终态保留第 5 条、本地缓冲截断标记、Turn/关闭收尾、频控中间帧跳过与终态回退；真实持续回复与操作终态主路径已通过，真实限流、失败回退和超长滚动待验收 |
 | 私聊图片输入 | [`src/surfaces/feishu/media.ts`](../src/surfaces/feishu/media.ts)、[`src/surfaces/managed-image-store.ts`](../src/surfaces/managed-image-store.ts)、[`src/surfaces/feishu/inbox.ts`](../src/surfaces/feishu/inbox.ts)、[`src/surfaces/feishu/adapter.ts`](../src/surfaces/feishu/adapter.ts) | [`tests/feishu-media.test.ts`](../tests/feishu-media.test.ts)、[`tests/feishu-inbox.test.ts`](../tests/feishu-inbox.test.ts)、[`tests/feishu-adapter.test.ts`](../tests/feishu-adapter.test.ts)、[`tests/feishu-surface.test.ts`](../tests/feishu-surface.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：独立图片与单张图片说明文字事件、资源 Key 裁剪、授权后下载、精确资源 API Payload、10 MiB 限制、PNG/JPEG 签名、私有权限、错误脱敏、图片与说明文字同次 Application 提交和生命周期；独立图片真实主路径已通过，说明文字待真实验收 |
 | 输出渲染 | [`src/surfaces/feishu/renderer.ts`](../src/surfaces/feishu/renderer.ts)、[`src/surfaces/lifecycle-presentation.ts`](../src/surfaces/lifecycle-presentation.ts) | [`tests/feishu-renderer.test.ts`](../tests/feishu-renderer.test.ts)、[`tests/lifecycle-presentation.test.ts`](../tests/lifecycle-presentation.test.ts)：共享上线、Turn 开始和结束字段、启动环境与脱敏 UA、每轮上下文和设置、全部 `ConversationCommandResult` 顶层种类、全部命令 Outcome、模型视图、非空集合、用量 Token 百万 `M` 格式、会话列表最多 20 条及 48 字符规范预览、Diff、Plan、Goal、关键事件、非关键进度和脱敏错误详情展示 |

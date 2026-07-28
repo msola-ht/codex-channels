@@ -680,6 +680,50 @@ describe("Feishu outbox", () => {
     expect(posts).toEqual([]);
   });
 
+  it("appends a complete text file after an oversized streaming reply", async () => {
+    vi.useFakeTimers();
+    const operations: string[] = [];
+    const files: Buffer[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async (_chatId, text) => {
+          operations.push(`text:${text}`);
+        },
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          operations.push(`static:${markdown}`);
+        },
+        createStreamingCard: async (_chatId, initialText) => {
+          operations.push(`create:${initialText}`);
+          return {
+            cardId: `73553727661341573${operations.length}`,
+            messageId: `om_stream_${operations.length}`,
+          };
+        },
+        finishStreamingCard: async () => {
+          operations.push("finish");
+        },
+        sendFile: async (_chatId, fileName, file) => {
+          operations.push(`file:${fileName}`);
+          files.push(file);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+    const text = "流式长回复".repeat(6_000);
+
+    outbox.handle(delta(text));
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+    outbox.handle(completed({}, text, "item-1"));
+    await outbox.close();
+
+    expect(operations.at(-1)).toBe("file:codex-final-answer.txt");
+    expect(files).toEqual([Buffer.from(text, "utf8")]);
+  });
+
   it("keeps streaming cards and fallback posts within one five-message budget", async () => {
     vi.useFakeTimers();
     const created: string[] = [];
@@ -1339,6 +1383,141 @@ describe("Feishu outbox", () => {
     expect(sent.length).toBeGreaterThan(1);
     expect(sent.length).toBeLessThanOrEqual(5);
     expect(sent.every((chunk) => [...chunk].length <= 5_000)).toBe(true);
+  });
+
+  it("sends a static long final answer as one preview card and a text file", async () => {
+    const operations: string[] = [];
+    const files: Array<{
+      chatId: string;
+      fileName: string;
+      file: Buffer;
+    }> = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          operations.push(`card:${markdown}`);
+        },
+        sendFile: async (chatId, fileName, file) => {
+          operations.push(`file:${fileName}`);
+          files.push({ chatId, fileName, file });
+        },
+      },
+      pino({ level: "silent" }),
+    );
+    const text = "长回复".repeat(10_000);
+
+    outbox.handle(completed({}, text));
+    await outbox.close();
+
+    expect(operations).toHaveLength(2);
+    expect(operations[0]).toMatch(/^card:/u);
+    expect(operations[0]).toMatch(/\[内容预览，完整回复见附件\]$/u);
+    expect([...operations[0]!.slice("card:".length)].length)
+      .toBeLessThanOrEqual(5_000);
+    expect(operations[1]).toBe("file:codex-final-answer.txt");
+    expect(files).toEqual([{
+      chatId: "oc_chat",
+      fileName: "codex-final-answer.txt",
+      file: Buffer.from(text, "utf8"),
+    }]);
+  });
+
+  it("falls back to remaining bounded cards when a final-answer file fails", async () => {
+    const cards: string[] = [];
+    const text = "长回复".repeat(10_000);
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          cards.push(markdown);
+        },
+        sendFile: async () => {
+          throw new FeishuMessageError(
+            "send-failed",
+            "飞书文件发送失败",
+          );
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(completed({}, text));
+    await outbox.close();
+
+    expect(cards).toHaveLength(5);
+    expect(cards[0]).toMatch(/\[内容预览，完整回复见附件\]$/u);
+    expect(cards[1]).toMatch(
+      /^\[完整文件发送失败，已改为分段文本\]\n\n/u,
+    );
+    expect(cards.at(-1)).toMatch(/\[内容过长，已截断\]$/u);
+  });
+
+  it("consumes the native reply target after a preview even when its file fails", async () => {
+    const ordinaryCards: string[] = [];
+    const replies: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          ordinaryCards.push(markdown);
+        },
+        replyMarkdownCard: async (_messageId, markdown) => {
+          replies.push(markdown);
+        },
+        sendFile: async () => {
+          throw new FeishuMessageError(
+            "send-failed",
+            "飞书文件发送失败",
+          );
+        },
+      },
+      pino({ level: "silent" }),
+    );
+    outbox.prepareTurnReplyTarget("oc_chat", "om_origin");
+    outbox.bindPendingTurnReplyTarget("oc_chat", "thread-1", "turn-1");
+
+    outbox.handle(completed({}, "长回复".repeat(10_000)));
+    outbox.handle(turnCompleted());
+    await outbox.close();
+
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toMatch(/\[内容预览，完整回复见附件\]$/u);
+    expect(ordinaryCards.at(-1)).toBe("**本次运行 · 已完成**");
+  });
+
+  it("does not upload a final answer beyond the bounded file limit", async () => {
+    const cards: string[] = [];
+    const sendFile = vi.fn(async () => {});
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          cards.push(markdown);
+        },
+        sendFile,
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(completed({}, "中".repeat(400_000)));
+    await outbox.close();
+
+    expect(sendFile).not.toHaveBeenCalled();
+    expect(cards).toHaveLength(5);
+    expect(cards.at(-1)).toMatch(/\[内容过长，已截断\]$/u);
   });
 
   it("waits for accepted output during close and rejects later events", async () => {

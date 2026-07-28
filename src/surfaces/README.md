@@ -68,6 +68,8 @@ Diff、Plan、Goal、模型选择、用量与额度等平台无关命令结果�
 `user-facing-error-format.ts` 统一三个渠道的结构化用户错误文案，只保留渠道名称差异；
 `output-copy.ts` 统一断线、警告、操作失败、停止交互与内容截断等输出语义，各渠道继续自行决定
 HTML、CardKit Markdown、纯文本布局和发送方式。
+`runtime-status-format.ts` 统一账户、额度与 MCP Server 运行状态的稳定中文语义和脱敏；
+Telegram、飞书与微信分别通过 HTML 面板、CardKit Markdown 或按会话排序的纯文本气泡发送。
 `configuration-change-format.ts` 统一 Telegram 与飞书已有的配置热加载、重启、重装和失败通知；
 Workspace 操作提示只在 Telegram 实际提供切换按钮时声明可点击。
 `operation-presentation.ts` 统一操作标题、状态、耗时与退出码元数据、敏感占位符和单行摘要；

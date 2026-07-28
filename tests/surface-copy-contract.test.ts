@@ -13,7 +13,13 @@ import {
   renderFeishuConfigurationChange,
   renderFeishuCommandResult,
   renderFeishuHelp,
+  renderFeishuOutput,
 } from "../src/surfaces/feishu/renderer.js";
+import {
+  formatRuntimeAccountUpdate,
+  formatRuntimeMcpStatusUpdate,
+  formatRuntimeRateLimitUpdate,
+} from "../src/surfaces/runtime-status-format.js";
 import {
   renderWeixinCommandResult,
   renderWeixinHelp,
@@ -204,5 +210,57 @@ describe("shared surface copy contract", () => {
       expect(feishu).toContain(text);
     }
     expect(feishu).toContain("变更：飞书应用凭据");
+  });
+
+  it("keeps runtime account, quota, and MCP semantics platform-neutral", () => {
+    const target = {
+      surface: "feishu",
+      accountId: "cli_app",
+      conversationId: "oc_chat",
+    } as const;
+    const account = {
+      type: "account.updated",
+      target,
+      authMode: "chatgpt",
+      planType: "pro",
+    } as const;
+    const rateLimits = {
+      type: "account.rateLimits.updated",
+      target,
+      rateLimits: {
+        limitId: "codex",
+        limitName: "周限",
+        primary: {
+          usedPercent: 12,
+          windowDurationMins: 10_080,
+          resetsAt: null,
+        },
+        secondary: null,
+        credits: null,
+        individualLimit: null,
+        spendControlReached: false,
+        planType: "pro",
+        rateLimitReachedType: null,
+      },
+    } as const;
+    const mcp = {
+      type: "mcp.status.updated",
+      target,
+      threadId: "thread-1",
+      name: "docs",
+      status: "failed",
+      error: "TOKEN=[REDACTED]",
+      failureReason: null,
+    } as const;
+
+    expect(renderFeishuOutput(account)).toBe(
+      formatRuntimeAccountUpdate(account.authMode, account.planType),
+    );
+    expect(renderFeishuOutput(rateLimits)).toBe(
+      formatRuntimeRateLimitUpdate(rateLimits.rateLimits),
+    );
+    expect(renderFeishuOutput(mcp)).toBe(
+      formatRuntimeMcpStatusUpdate(mcp),
+    );
   });
 });

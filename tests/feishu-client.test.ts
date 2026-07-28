@@ -619,6 +619,87 @@ describe("FeishuMessageClient", () => {
     });
   });
 
+  it("uploads and sends a generated text file to an exact chat ID", async () => {
+    const createFile = vi.fn(async () => ({
+      file_key: "file_final_answer",
+    }));
+    const createMessage = vi.fn(async () => ({
+      data: { message_id: "om_file" },
+    }));
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage,
+          createFile,
+          patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
+        }),
+      },
+    );
+    const file = Buffer.from("完整回复", "utf8");
+
+    await expect(
+      client.sendFile("oc_chat", "codex-final-answer.txt", file),
+    ).resolves.toBeUndefined();
+
+    expect(createFile).toHaveBeenCalledWith({
+      data: {
+        file_type: "stream",
+        file_name: "codex-final-answer.txt",
+        file,
+      },
+    });
+    expect(createMessage).toHaveBeenCalledWith({
+      params: {
+        receive_id_type: "chat_id",
+      },
+      data: {
+        receive_id: "oc_chat",
+        msg_type: "file",
+        content: "{\"file_key\":\"file_final_answer\"}",
+      },
+    });
+  });
+
+  it("fails closed when a file upload omits its file key", async () => {
+    const createMessage = vi.fn(async () => ({
+      data: { message_id: "om_file" },
+    }));
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage,
+          createFile: async () => ({}),
+          patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
+        }),
+      },
+    );
+
+    await expect(
+      client.sendFile(
+        "oc_chat",
+        "codex-final-answer.txt",
+        Buffer.from("完整回复", "utf8"),
+      ),
+    ).rejects.toMatchObject({
+      name: "FeishuMessageError",
+      code: "invalid-response",
+      message: "飞书文件上传响应无效",
+    });
+    expect(createMessage).not.toHaveBeenCalled();
+  });
+
   it("replies to an exact Feishu message with a Markdown CardKit card", async () => {
     const replyMessage = vi.fn(async () => ({
       data: { message_id: "om_reply" },

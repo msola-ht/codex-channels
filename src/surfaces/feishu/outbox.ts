@@ -35,6 +35,10 @@ const maximumFeishuStreamingCards = 5;
 const maximumFeishuActiveStreams = 100;
 const maximumFeishuBufferedStreamCharacters =
   maximumFeishuStreamingElementCharacters * maximumFeishuStreamingCards + 1;
+const maximumFeishuFinalAnswerFileBytes = 1_000_000;
+const feishuFinalAnswerFileName = "codex-final-answer.txt";
+const feishuPreviewNotice = "\n\n[内容预览，完整回复见附件]";
+const feishuFileFailureNotice = "[完整文件发送失败，已改为分段文本]\n\n";
 
 interface FeishuStreamState {
   chatId: string;
@@ -57,6 +61,7 @@ export interface FeishuMessagePort {
   sendText(chatId: string, text: string): Promise<void>;
   sendPost(chatId: string, markdown: string): Promise<void>;
   sendMarkdownCard(chatId: string, markdown: string): Promise<void>;
+  sendFile?(chatId: string, fileName: string, file: Buffer): Promise<void>;
   replyPost?(messageId: string, markdown: string): Promise<void>;
   replyMarkdownCard?(messageId: string, markdown: string): Promise<void>;
   sendCard(chatId: string, card: FeishuCardDocument): Promise<string>;
@@ -135,6 +140,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         );
       }
       if (this.completeStream(event)) {
+        this.enqueueCompletedAnswerFile(event);
         return;
       }
     }
@@ -390,6 +396,24 @@ export class FeishuOutbox implements SurfaceOutputPort {
     const replyTo = event.type === "turn.started" || consumesReplyTarget
       ? this.replyTargets.get(key)
       : undefined;
+    if (
+      event.type === "text.completed"
+      && event.phase !== "commentary"
+      && this.canSendCompletedAnswerFile(event.text)
+    ) {
+      try {
+        await this.sendLongFinalAnswer(
+          event.target.conversationId,
+          event.text,
+          replyTo,
+        );
+      } finally {
+        if (consumesReplyTarget) {
+          this.replyTargets.delete(key);
+        }
+      }
+      return;
+    }
     await this.sendMarkdown(
       event.target.conversationId,
       markdown,
@@ -398,6 +422,84 @@ export class FeishuOutbox implements SurfaceOutputPort {
     );
     if (consumesReplyTarget) {
       this.replyTargets.delete(key);
+    }
+  }
+
+  private enqueueCompletedAnswerFile(
+    event: Extract<OutputEvent, { type: "text.completed" }>,
+  ): void {
+    if (
+      event.phase === "commentary"
+      || !this.canSendCompletedAnswerFile(event.text)
+    ) {
+      return;
+    }
+    const file = Buffer.from(event.text, "utf8");
+    this.delivery.enqueue(
+      event.target.conversationId,
+      async () => {
+        try {
+          await this.messagePort.sendFile!(
+            event.target.conversationId,
+            feishuFinalAnswerFileName,
+            file,
+          );
+        } catch (error) {
+          await this.sendText(
+            event.target.conversationId,
+            "[完整文件发送失败，当前卡片仅包含有界预览]",
+          );
+          throw error;
+        }
+      },
+      true,
+    );
+  }
+
+  private canSendCompletedAnswerFile(text: string): boolean {
+    if (
+      this.messagePort.sendFile === undefined
+      || [...text].length
+        <= maximumFeishuStreamingElementCharacters
+          * maximumFeishuStreamingCards
+    ) {
+      return false;
+    }
+    const bytes = Buffer.byteLength(text, "utf8");
+    return bytes > 0 && bytes <= maximumFeishuFinalAnswerFileBytes;
+  }
+
+  private async sendLongFinalAnswer(
+    chatId: string,
+    text: string,
+    replyTo?: string,
+  ): Promise<void> {
+    const maximumPreviewCharacters =
+      maximumFeishuStreamingElementCharacters
+      - [...feishuPreviewNotice].length;
+    const [head, tail] = splitFeishuStreamingContent(
+      text,
+      maximumPreviewCharacters,
+    );
+    await this.sendMarkdown(
+      chatId,
+      `${head}${feishuPreviewNotice}`,
+      1,
+      replyTo,
+    );
+    try {
+      await this.messagePort.sendFile!(
+        chatId,
+        feishuFinalAnswerFileName,
+        Buffer.from(text, "utf8"),
+      );
+    } catch (error) {
+      await this.sendMarkdown(
+        chatId,
+        `${feishuFileFailureNotice}${tail}`,
+        maximumFeishuMessageChunks - 1,
+      );
+      throw error;
     }
   }
 
