@@ -298,6 +298,22 @@ describe("WeixinOutbox", () => {
     });
   });
 
+  it("summarizes repeated query operations once before Turn completion", async () => {
+    const { outbox, sendText } = outboxFixture();
+
+    outbox.handle(operationUpdated("completed", "mcpTool", "mcp-1"));
+    outbox.handle(operationUpdated("completed", "dynamicTool", "tool-1"));
+    expect(sendText).not.toHaveBeenCalled();
+
+    outbox.handle(turnCompleted("completed"));
+    await outbox.close();
+
+    expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
+      "工具查询 · 已完成\n\nMCP 工具：1 次\n动态工具：1 次\n\n总耗时：250毫秒",
+      "本次运行 · 已完成",
+    ]);
+  });
+
   it("splits without breaking surrogate pairs and truncates after five chunks", async () => {
     const first = outboxFixture();
     const surrogateText = `${"a".repeat(3_999)}😀b`;
@@ -590,6 +606,11 @@ function turnStarted(): Extract<OutputEvent, { type: "turn.started" }> {
 
 function operationUpdated(
   status: "running" | "completed" | "failed" | "declined",
+  kind: Extract<
+    OutputEvent,
+    { type: "operation.updated" }
+  >["operation"]["kind"] = "command",
+  itemId = "command",
 ): Extract<OutputEvent, { type: "operation.updated" }> {
   return {
     type: "operation.updated",
@@ -597,8 +618,8 @@ function operationUpdated(
     threadId: "thread",
     turnId: "turn",
     operation: {
-      itemId: "command",
-      kind: "command",
+      itemId,
+      kind,
       detail: "git status --short",
       status,
       ...(status === "running"

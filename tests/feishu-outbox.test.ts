@@ -953,6 +953,36 @@ describe("Feishu outbox", () => {
     ]);
   });
 
+  it("summarizes repeated query operations once before Turn completion", async () => {
+    const markdownCards: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(operationUpdated("completed", "mcpTool", "mcp-1"));
+    outbox.handle(operationUpdated("completed", "mcpTool", "mcp-2"));
+    await settle();
+    expect(markdownCards).toEqual([]);
+
+    outbox.handle(turnCompleted());
+    await outbox.close();
+
+    expect(markdownCards).toEqual([
+      "**工具查询 · 已完成**\n- MCP 工具：2 次\n\n"
+      + "---\n**耗时：** 250毫秒",
+      "**本次运行 · 已完成**",
+    ]);
+  });
+
   it("updates one thread status card from active to idle", async () => {
     const sent: Array<{
       chatId: string;
@@ -1364,6 +1394,11 @@ function completed(
 
 function operationUpdated(
   status: "running" | "completed",
+  kind: Extract<
+    OutputEvent,
+    { type: "operation.updated" }
+  >["operation"]["kind"] = "command",
+  itemId = "command-1",
 ): OutputEvent {
   return {
     type: "operation.updated",
@@ -1371,8 +1406,8 @@ function operationUpdated(
     threadId: "thread-1",
     turnId: "turn-1",
     operation: {
-      itemId: "command-1",
-      kind: "command",
+      itemId,
+      kind,
       detail: "git status --short",
       status,
       ...(status === "completed"

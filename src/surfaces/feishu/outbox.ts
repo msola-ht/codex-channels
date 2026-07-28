@@ -5,6 +5,10 @@ import {
   type OutputEvent,
 } from "../../conversation-core/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
+import {
+  OperationUpdateBuffer,
+  type OperationUpdateSummary,
+} from "../operation-update-buffer.js";
 import { TurnReplyTargets } from "../turn-reply-targets.js";
 import type {
   OperationUpdateDisplay,
@@ -13,7 +17,10 @@ import type {
 import type { FeishuCardDocument } from "./approval-card.js";
 import { FeishuMessageError } from "./client.js";
 import { encodeFeishuPostContent } from "./message-content.js";
-import { formatFeishuOperation } from "./operation-format.js";
+import {
+  formatFeishuOperation,
+  formatFeishuOperationSummary,
+} from "./operation-format.js";
 import { renderFeishuOutput } from "./renderer.js";
 import { renderFeishuThreadStatusCard } from "./status-card.js";
 
@@ -84,6 +91,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     { chatId: string; messageId: string; status: string }
   >();
   private readonly streams = new Map<string, FeishuStreamState>();
+  private readonly operationUpdates = new OperationUpdateBuffer<string>();
   private readonly replyTargets = new TurnReplyTargets<string>();
   private streamCapacityWarningIssued = false;
   private closed = false;
@@ -118,11 +126,28 @@ export class FeishuOutbox implements SurfaceOutputPort {
         turnKey(event.threadId, event.turnId),
       );
     }
-    if (event.type === "text.completed" && this.completeStream(event)) {
-      return;
+    if (event.type === "text.completed") {
+      if (event.phase !== "commentary") {
+        this.flushOperationUpdates(
+          event.target.conversationId,
+          turnKey(event.threadId, event.turnId),
+        );
+      }
+      if (this.completeStream(event)) {
+        return;
+      }
     }
     if (event.type === "operation.updated") {
       if (this.options.operationUpdateDisplay === "hidden") {
+        return;
+      }
+      if (
+        this.operationUpdates.accept(
+          turnKey(event.threadId, event.turnId),
+          event.operation,
+          event.target.conversationId,
+        )
+      ) {
         return;
       }
       if (event.operation.status !== "running") {
@@ -143,6 +168,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     if (event.type === "turn.completed") {
       this.finishStreamsForTurn(event.threadId, event.turnId);
+      this.flushOperationUpdates(
+        event.target.conversationId,
+        turnKey(event.threadId, event.turnId),
+      );
     }
     if (event.type === "thread.status") {
       this.delivery.enqueue(
@@ -245,6 +274,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
 
   async close(): Promise<void> {
     this.closed = true;
+    for (const { target, summary } of this.operationUpdates.drain()) {
+      this.enqueueOperationSummary(target, summary);
+    }
     for (const [key, state] of this.streams) {
       if (state.timer) {
         clearTimeout(state.timer);
@@ -260,7 +292,31 @@ export class FeishuOutbox implements SurfaceOutputPort {
     this.closeFinished = true;
     this.threadStatusMessages.clear();
     this.streams.clear();
+    this.operationUpdates.clear();
     this.replyTargets.clear();
+  }
+
+  private flushOperationUpdates(chatId: string, key: string): void {
+    const buffered = this.operationUpdates.take(key);
+    if (buffered === null) {
+      return;
+    }
+    this.enqueueOperationSummary(chatId, buffered.summary);
+  }
+
+  private enqueueOperationSummary(
+    chatId: string,
+    summary: OperationUpdateSummary,
+  ): void {
+    const markdown = formatFeishuOperationSummary(
+      summary,
+      this.options.operationUpdateDisplay === "compact" ? "compact" : "full",
+    );
+    this.delivery.enqueue(
+      chatId,
+      () => this.sendMarkdown(chatId, markdown),
+      true,
+    );
   }
 
   private async sendText(chatId: string, text: string): Promise<void> {

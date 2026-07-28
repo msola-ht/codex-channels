@@ -9,6 +9,10 @@ import {
   type OutputEvent,
 } from "../../conversation-core/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
+import {
+  OperationUpdateBuffer,
+  type OperationUpdateSummary,
+} from "../operation-update-buffer.js";
 import { TurnReplyTargets } from "../turn-reply-targets.js";
 import {
   createTurnCompletedPresentation,
@@ -33,7 +37,10 @@ import {
   splitExpandableMessage,
   type LongFinalMessagePlan,
 } from "./long-message-format.js";
-import { formatOperationLog } from "./operation-format.js";
+import {
+  formatOperationLog,
+  formatTelegramOperationSummary,
+} from "./operation-format.js";
 import { TelegramTypingIndicator } from "./typing-indicator.js";
 
 interface StreamState {
@@ -73,6 +80,7 @@ export interface TelegramOutboxOptions {
 export class TelegramOutbox {
   private readonly streams = new Map<string, StreamState>();
   private readonly operationLogs = new Map<string, OperationLogState>();
+  private readonly operationUpdates = new OperationUpdateBuffer<string>();
   private readonly replyTargets = new TurnReplyTargets<number>();
   private readonly typing: TelegramTypingIndicator;
   private readonly delivery: ConversationDeliveryQueue;
@@ -212,6 +220,9 @@ export class TelegramOutbox {
       }
       case "text.completed": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
+        if (event.phase !== "commentary") {
+          this.flushOperationUpdates(chatId, turnKey);
+        }
         this.sealOperationLog(chatId, turnKey);
         const key = this.streamKey(turnKey, event.itemId);
         const existing = this.streams.get(key);
@@ -254,6 +265,9 @@ export class TelegramOutbox {
         if (disposition === "hold") {
           return;
         }
+        if (this.operationUpdates.accept(turnKey, event.operation, chatId)) {
+          return;
+        }
         const state = this.operationLogs.get(turnKey) ?? this.createOperationLog(chatId, turnKey);
         if (!state.records.has(event.operation.itemId)) {
           state.order.push(event.operation.itemId);
@@ -282,6 +296,7 @@ export class TelegramOutbox {
       }
       case "turn.completed": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
+        this.flushOperationUpdates(chatId, turnKey);
         this.sealOperationLog(chatId, turnKey);
         const keys = this.streamKeysForTurn(event.threadId, event.turnId);
         for (const key of keys) {
@@ -364,6 +379,9 @@ export class TelegramOutbox {
 
   async close(): Promise<void> {
     this.closed = true;
+    for (const { target, summary } of this.operationUpdates.drain()) {
+      this.enqueueOperationSummary(target, summary);
+    }
     for (const [key, state] of this.streams) {
       if (state.timer) {
         clearTimeout(state.timer);
@@ -387,6 +405,7 @@ export class TelegramOutbox {
     await this.delivery.close();
     this.streams.clear();
     this.operationLogs.clear();
+    this.operationUpdates.clear();
     this.replyTargets.clear();
     this.approvalOperations.clear();
     this.notifiedTurns.clear();
@@ -692,6 +711,36 @@ export class TelegramOutbox {
     }
     this.operationLogs.delete(turnKey);
     this.enqueue(chatId, () => this.flushOperationLog(state, true), true);
+  }
+
+  private flushOperationUpdates(chatId: string, turnKey: string): void {
+    const buffered = this.operationUpdates.take(turnKey);
+    if (buffered === null) {
+      return;
+    }
+    this.enqueueOperationSummary(chatId, buffered.summary, turnKey);
+  }
+
+  private enqueueOperationSummary(
+    chatId: string,
+    summary: OperationUpdateSummary,
+    turnKey?: string,
+  ): void {
+    const text = formatTelegramOperationSummary(
+      summary,
+      this.options.operationUpdateDisplay === "compact" ? "compact" : "full",
+    );
+    this.enqueue(
+      chatId,
+      async () => {
+        await this.sendOperationMessage(
+          chatId,
+          text,
+          turnKey === undefined ? undefined : this.replyTargets.get(turnKey),
+        );
+      },
+      true,
+    );
   }
 
   private async flushOperationLog(state: OperationLogState, final: boolean): Promise<void> {

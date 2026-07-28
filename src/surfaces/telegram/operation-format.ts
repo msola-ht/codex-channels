@@ -7,6 +7,10 @@ import {
   redactOperationDetail,
 } from "../operation-presentation.js";
 import type { OperationUpdateDisplay } from "../types.js";
+import {
+  operationSummaryRows,
+  type OperationUpdateSummary,
+} from "../operation-update-buffer.js";
 
 export interface OperationLogView {
   order: readonly string[];
@@ -35,6 +39,29 @@ export function formatOperationLog(
     text = renderOperationRecords(visible, omitted, display);
   }
   return text;
+}
+
+export function formatTelegramOperationSummary(
+  summary: OperationUpdateSummary,
+  display: Exclude<OperationUpdateDisplay, "hidden"> = "full",
+): string {
+  if (summary.records.length === 1) {
+    const record = summary.records[0]!;
+    return formatOperationLog({
+      order: [record.itemId],
+      records: new Map([[record.itemId, record]]),
+      omittedCount: 0,
+    }, display);
+  }
+  const duration = summary.totalDurationMs === undefined
+    ? ""
+    : ` · ${summary.totalDurationMs} ms`;
+  return [
+    "<b>操作过程</b>",
+    "",
+    `<b>工具查询 · 已完成</b>${duration}`,
+    ...operationSummaryRows(summary).map((row) => `• ${row}`),
+  ].join("\n");
 }
 
 function renderOperationRecords(

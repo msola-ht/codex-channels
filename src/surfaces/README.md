@@ -67,6 +67,8 @@ Turn、Thread 或 Surface 关闭时清理。
 `operation-presentation.ts` 统一操作标题、状态、耗时与退出码元数据、敏感占位符和单行摘要；
 Telegram HTML、飞书 CardKit Markdown 与微信安全文本的转义、布局、分组和发送仍由各自
 Adapter 负责。
+`operation-update-buffer.ts` 在 Surface 边界按 Turn 有界暂存成功的 MCP、动态工具和网页搜索；
+最终回复前单项保持原详情，多项生成一次分类计数汇总。失败、拒绝和其他操作不进入该缓冲。
 Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类型引入 Conversation Core。
 
 会话命令统一映射到 Application 的 `ConversationCommandService`；Surface 负责提取命令名和参数，
@@ -81,5 +83,6 @@ warning 和 MCP 错误只使用 Client 边界已经统一脱敏并限长的稳�
 
 Bootstrap 把共享的 `display.operation_updates` 三档模式显式注入各 Surface Outbox。`full`
 显示完整操作，`compact` 显示单行摘要，`hidden` 忽略 `operation.updated`；Core 始终正常归约
-操作，审批与其他关键输出不受影响。微信仅发送终态操作，避免用普通气泡模拟持续更新；Surface
-只实现平台格式，不各自定义第二套显示配置。
+操作，审批与其他关键输出不受影响。三个渠道统一把同一 Turn 的成功查询类操作延迟聚合，微信
+对其余操作仍仅发送终态，避免用普通气泡模拟持续更新；Surface 只实现平台格式，不各自定义
+第二套显示配置。

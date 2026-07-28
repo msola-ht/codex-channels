@@ -7,6 +7,10 @@ import {
   redactOperationDetail,
 } from "../operation-presentation.js";
 import type { OperationUpdateDisplay } from "../types.js";
+import {
+  operationSummaryRows,
+  type OperationUpdateSummary,
+} from "../operation-update-buffer.js";
 
 export function formatWeixinOperation(
   record: OperationUpdate,
@@ -38,6 +42,22 @@ export function formatWeixinOperation(
         ]
       : []),
     ...(duration ? [duration] : []),
+  ].join("\n\n");
+}
+
+export function formatWeixinOperationSummary(
+  summary: OperationUpdateSummary,
+  display: Exclude<OperationUpdateDisplay, "hidden"> = "full",
+): string {
+  if (summary.records.length === 1) {
+    return formatWeixinOperation(summary.records[0]!, display);
+  }
+  return [
+    "工具查询 · 已完成",
+    operationSummaryRows(summary).join("\n"),
+    ...(summary.totalDurationMs === undefined
+      ? []
+      : [`总耗时：${formatElapsedDuration(summary.totalDurationMs)}`]),
   ].join("\n\n");
 }
 

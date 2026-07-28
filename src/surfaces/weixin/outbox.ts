@@ -7,6 +7,10 @@ import {
 } from "../../conversation-core/index.js";
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
+import {
+  OperationUpdateBuffer,
+  type OperationUpdateSummary,
+} from "../operation-update-buffer.js";
 import type {
   OperationUpdateDisplay,
   SurfaceOutputPort,
@@ -32,7 +36,10 @@ import {
   renderWeixinTurnCompleted,
 } from "./command-renderer.js";
 import { formatWeixinFinalText } from "./final-text-format.js";
-import { formatWeixinOperation } from "./operation-format.js";
+import {
+  formatWeixinOperation,
+  formatWeixinOperationSummary,
+} from "./operation-format.js";
 import type { WeixinTypingController } from "./typing-controller.js";
 
 const maximumChunkCharacters = 4_000;
@@ -63,6 +70,8 @@ export interface WeixinOutboxOptions {
 
 export class WeixinOutbox implements SurfaceOutputPort {
   private readonly delivery: ConversationDeliveryQueue;
+  private readonly operationUpdates =
+    new OperationUpdateBuffer<ConversationTarget>();
   private readonly accountId: string;
   private closed = false;
 
@@ -128,6 +137,15 @@ export class WeixinOutbox implements SurfaceOutputPort {
       ) {
         return;
       }
+      if (
+        this.operationUpdates.accept(
+          turnKey(event.threadId, event.turnId),
+          event.operation,
+          event.target,
+        )
+      ) {
+        return;
+      }
       const rendered = formatWeixinOperation(
         event.operation,
         this.options.operationUpdateDisplay === "compact"
@@ -140,6 +158,18 @@ export class WeixinOutbox implements SurfaceOutputPort {
         true,
       );
       return;
+    }
+    if (
+      (
+        event.type === "text.completed"
+        && event.phase !== "commentary"
+      )
+      || event.type === "turn.completed"
+    ) {
+      this.flushOperationUpdates(
+        event.target,
+        turnKey(event.threadId, event.turnId),
+      );
     }
     const rendered = this.render(event);
     if (rendered === null) {
@@ -196,9 +226,39 @@ export class WeixinOutbox implements SurfaceOutputPort {
       return;
     }
     this.closed = true;
+    for (const { target, summary } of this.operationUpdates.drain()) {
+      this.enqueueOperationSummary(target, summary);
+    }
     await this.options.typing?.close();
     await this.delivery.close();
+    this.operationUpdates.clear();
     this.contexts.clear();
+  }
+
+  private flushOperationUpdates(
+    target: ConversationTarget,
+    key: string,
+  ): void {
+    const buffered = this.operationUpdates.take(key);
+    if (buffered === null) {
+      return;
+    }
+    this.enqueueOperationSummary(target, buffered.summary);
+  }
+
+  private enqueueOperationSummary(
+    target: ConversationTarget,
+    summary: OperationUpdateSummary,
+  ): void {
+    const text = formatWeixinOperationSummary(
+      summary,
+      this.options.operationUpdateDisplay === "compact" ? "compact" : "full",
+    );
+    this.delivery.enqueue(
+      target.conversationId,
+      () => this.send(target, text),
+      true,
+    );
   }
 
   private render(event: OutputEvent): string | null {
@@ -308,6 +368,10 @@ export class WeixinOutbox implements SurfaceOutputPort {
       && target.accountId === this.accountId;
   }
 
+}
+
+function turnKey(threadId: string, turnId: string): string {
+  return `${threadId}:${turnId}`;
 }
 
 function splitWeixinText(value: string): string[] {

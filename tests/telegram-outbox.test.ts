@@ -636,14 +636,13 @@ describe("TelegramOutbox", () => {
     expect(api.sent.at(-1)).toBe(turnCompletedPanel);
   });
 
-  it("groups identical consecutive operations and escapes Telegram HTML", async () => {
+  it("groups identical consecutive file operations and escapes Telegram HTML", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);
 
     outbox.handle(operationUpdated("file-1", "completed", "fileChange", "src/a<b>.ts & README.md"));
     outbox.handle(operationUpdated("file-2", "completed", "fileChange", "src/a<b>.ts & README.md"));
-    outbox.handle(operationUpdated("tool-1", "completed", "dynamicTool", "browser.open"));
     await vi.advanceTimersByTimeAsync(750);
     await settle();
 
@@ -651,11 +650,33 @@ describe("TelegramOutbox", () => {
       "🔧 <b>修改文件 (×2) · 已完成</b>\n"
       + "<blockquote>src/a&lt;b&gt;.ts &amp; README.md</blockquote>",
     );
-    expect(api.sent[0]).toContain(
-      "🧰 <b>调用工具 · 已完成</b>\n<blockquote>browser.open</blockquote>",
-    );
-
     await outbox.close();
+  });
+
+  it("summarizes repeated query operations once before the final reply", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle(operationUpdated("mcp-1", "completed", "mcpTool", "docs.read"));
+    outbox.handle(operationUpdated("mcp-2", "completed", "mcpTool", "docs.read"));
+    outbox.handle(operationUpdated("tool-1", "completed", "dynamicTool", "docs.search"));
+    await vi.advanceTimersByTimeAsync(750);
+    await settle();
+    expect(api.sent).toEqual([]);
+
+    outbox.handle(textCompleted("final", "查询完成", "final_answer"));
+    outbox.handle(turnCompleted());
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual([
+      "<b>操作过程</b>\n\n<b>工具查询 · 已完成</b>\n"
+      + "• MCP 工具：2 次\n"
+      + "• 动态工具：1 次",
+      "查询完成",
+      turnCompletedPanel,
+    ]);
   });
 
   it("segments operations around agent replies in chronological order", async () => {
