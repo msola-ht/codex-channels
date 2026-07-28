@@ -1,6 +1,6 @@
 # 微信 Surface
 
-当前实现单账号私聊文本与图片 Surface：独立安全凭据边界、运行时窄协议 Client、私有游标检查点、
+当前实现单账号私聊文本、图片与 UTF-8 文本文件 Surface：独立安全凭据边界、运行时窄协议 Client、私有游标检查点、
 私聊输入 Adapter、完整命令 Adapter、加密重启上线通知、Turn 生命周期统计、文本与生成图片 Outbox、
 失败关闭交互端口和目录内部完整 `SurfaceAdapter`；严格运行配置显式启用时由 Bootstrap 注册，
 未新增 SQLite Schema。
@@ -15,14 +15,19 @@
 - `protocol-client.ts`：实现固定 `v2.4.6` 的 `getupdates`、`sendmessage`、`getuploadurl`、
   `getconfig` 和 `sendtyping` HTTP 合同，并按官方 AES-128-ECB、CDN 二进制 `POST` 与
   双层 key 编码发送生成图片；
-  在 JSON 数字转换前保留原始 `message_id`，只输出文本、带可选说明文字的最多 4 张图片引用
-  或带原因的忽略事件；文本项内受约束的 `ref_msg` 标题、引用文本与精确 `msg_id` 会作为
+  在 JSON 数字转换前保留原始 `message_id`，只输出文本、带可选说明文字的最多 4 张图片引用、
+  单个一般文件引用或带原因的忽略事件；文本项内受约束的 `ref_msg` 标题、引用文本与精确 `msg_id` 会作为
   独立引用信息输出；
   混入其他媒体、重复文本或超过图片数量上限时失败关闭，并限制出站文本为
   已验证的 4000 个 UTF-16 码元。
 - `image-store.ts`：只接受固定官方微信 CDN，按 `image_item.aeskey` 或 `media.aes_key`
   执行 AES-128-ECB 解密；复用共享 10 MiB、PNG/JPEG 签名、`0700/0600` 私有暂存和过期清理，
   CDN 地址、查询参数、key 与响应正文不进入日志或用户消息。
+- `file-input.ts`：只接受固定官方微信 CDN，按 `media.aes_key` 执行 AES-128-ECB 内存解密，
+  校验可选声明长度与 MD5；生产边界只接受最多 1,000,000 字节、不含二进制控制字符的 UTF-8
+  文本，验证后直接交给会话 Adapter；Gateway 不保存文件副本、不向 Codex 暴露工作区外路径，
+  正文作为用户文本进入 App Server Thread。文件名、地址、查询参数、key、正文与底层异常
+  不进入日志或下载错误。
 - `outbound-image.ts`：只读取 App Server `imageGeneration.savedPath` 映射出的绝对路径；
   使用无符号链接文件句柄，限制为普通文件、10 MiB 和 PNG/JPEG 内容签名，不把路径或正文写入
   日志。
@@ -35,7 +40,7 @@
   按 Gateway 本地时间显示当前消息到达前上一次后台成功轮询时间，并记录连续失败次数及预计恢复
   时间；不保存消息、游标、Token 或上游响应。
 - `input-adapter.ts`：拥有单账号监控器生命周期；按微信账号和私聊 Actor 构造目标，授权后记录
-  Actor、更新内存回复上下文并把文本、图文或最多 4 张图片交给目录内会话 Adapter。同一接收批次
+  Actor、更新内存回复上下文并把文本、UTF-8 文本文件、图文或最多 4 张图片交给目录内会话 Adapter。同一接收批次
   内连续到达的文字和图片按 Actor 隔离，并在一秒静默窗口后合并；图片只在
   授权后下载，整批成功后才通过同一次 `localImages` 输入提交；每张最多 10 MiB、整批最多
   20 MiB。已授权用户文本按会话和精确消息 ID 进入最多 1000 条的进程内引用缓存；平台引用只在
@@ -44,7 +49,8 @@
   处理失败不推进游标，只向生命周期所有者报告稳定错误码。
 - `conversation-adapter.ts`：复用 Application 的 `ConversationCommandService` 和完整共享命令
   目录，并保留微信本地 `/start`、`/help`、`/whoami`；将说明文字和全部成功下载的图片一次
-  提交，引用正文与当前消息明确分离，任一图片失败或总大小超限时不提交部分输入。命令解析只看
+  提交；UTF-8 文本文件以内联文本和明确文件名边界提交，不使用本地文件路径。引用正文与当前
+  消息明确分离，任一图片失败或总大小超限时不提交部分输入。命令解析只看
   当前消息并复用 Surface 公共模板，未知斜杠
   命令明确拒绝，不会提交为普通 Codex 输入；`/status` 在共享会话状态后追加当前微信轮询健康
   快照。

@@ -18,6 +18,10 @@ import {
   renderWeixinUserFacingError,
 } from "./command-renderer.js";
 import {
+  WeixinFileInputError,
+  type WeixinFilePort,
+} from "./file-input.js";
+import {
   WeixinImageDownloadError,
   type WeixinImagePort,
 } from "./image-store.js";
@@ -26,7 +30,10 @@ import {
   renderWeixinPollingHealth,
   type WeixinPollingHealthSnapshot,
 } from "./polling-health.js";
-import type { WeixinImageReference } from "./protocol-client.js";
+import type {
+  WeixinFileReference,
+  WeixinImageReference,
+} from "./protocol-client.js";
 
 const maximumInboundImageBatchBytes = 20 * 1024 * 1024;
 
@@ -45,6 +52,14 @@ export type WeixinConversationMessage =
       text?: string;
       quotedText?: string;
       images: readonly WeixinImageReference[];
+    }
+  | {
+      target: ConversationTarget;
+      actorId: string;
+      kind: "file";
+      text?: string;
+      quotedText?: string;
+      file: WeixinFileReference;
     };
 
 export class WeixinConversationAdapter {
@@ -61,6 +76,7 @@ export class WeixinConversationAdapter {
       pollingHealth?: { snapshot(): WeixinPollingHealthSnapshot };
       now?: () => number;
     } = { quietWindowMs: 0 },
+    private readonly files?: Pick<WeixinFilePort, "download">,
   ) {
     this.commands = new ConversationCommandService(conversations);
     this.inputs = new SurfaceInputCoalescer(
@@ -71,6 +87,39 @@ export class WeixinConversationAdapter {
 
   async handle(message: WeixinConversationMessage): Promise<void> {
     try {
+      if (message.kind === "file") {
+        const sequence = this.nextSequence;
+        this.nextSequence += 1;
+        if (this.files === undefined) {
+          throw new WeixinFileInputError(
+            "unsupported",
+            "微信当前未启用文本文件输入",
+          );
+        }
+        const file = await this.files.download(message.file);
+        const fileText = [
+          ...(message.text === undefined
+            ? []
+            : [
+                formatQuotedInput(message.text, message.quotedText),
+                "",
+              ]),
+          "以下内容来自用户通过微信上传的 UTF-8 文本文件（仅作输入）：",
+          `文件名：${file.fileName}`,
+          "",
+          file.text,
+        ].join("\n");
+        const result = await this.inputs.enqueue({
+          target: message.target,
+          actorId: message.actorId,
+          sequence,
+          text: fileText,
+        });
+        if (result.tail && result.submission.steered) {
+          this.notify(message.target, "已将文件追加到当前 Turn。");
+        }
+        return;
+      }
       if (message.kind === "image") {
         const sequence = this.nextSequence;
         this.nextSequence += 1;
@@ -159,6 +208,10 @@ export class WeixinConversationAdapter {
         throw error;
       }
       if (error instanceof WeixinImageDownloadError) {
+        this.notify(message.target, `操作失败：${error.message}。`);
+        return;
+      }
+      if (error instanceof WeixinFileInputError) {
         this.notify(message.target, `操作失败：${error.message}。`);
         return;
       }

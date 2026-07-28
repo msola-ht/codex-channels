@@ -579,6 +579,126 @@ describe("WeixinInputAdapter", () => {
     expect(service.submit).not.toHaveBeenCalled();
   });
 
+  it("downloads and submits an authorized UTF-8 text file", async () => {
+    let delivered = false;
+    const client: WeixinProtocolClient = {
+      getUpdates: vi.fn(async (_cursor, signal) => {
+        if (!delivered) {
+          delivered = true;
+          return {
+            cursor: "cursor-file",
+            messages: [{
+              kind: "file" as const,
+              messageId: "9007199254740995",
+              actorId,
+              conversationId: actorId,
+              contextToken: "context-file",
+              file: {
+                fileName: "settings.json",
+                encryptedQueryParam: "private-query",
+                mediaAesKey: "private-key",
+              },
+            }],
+          };
+        }
+        return await waitForAbort(signal);
+      }),
+      sendText: vi.fn(async () => {}),
+    };
+    const files = {
+      download: vi.fn(async () => ({
+        fileName: "settings.json",
+        text: "{\"enabled\":true}",
+        bytes: 16,
+      })),
+    };
+    const cursorStore = cursorStoreFixture();
+    const service = serviceFixture();
+    const adapter = new WeixinInputAdapter({
+      accountId,
+      client,
+      cursorStore,
+      service,
+      outbox: outboxFixture(),
+      access: accessFixture(true),
+      replyContexts: new WeixinReplyContextStore(accountId),
+      files,
+      onFatal: vi.fn(),
+    });
+
+    await adapter.start();
+    await vi.waitFor(() => {
+      expect(cursorStore.set).toHaveBeenCalledWith(
+        accountId,
+        "cursor-file",
+      );
+    }, { timeout: 2_000 });
+    await adapter.stop();
+
+    expect(files.download).toHaveBeenCalledWith({
+      fileName: "settings.json",
+      encryptedQueryParam: "private-query",
+      mediaAesKey: "private-key",
+    });
+    expect(service.submit).toHaveBeenCalledWith(
+      target,
+      expect.stringContaining("{\"enabled\":true}"),
+    );
+  });
+
+  it("commits an unauthorized file without contacting its CDN", async () => {
+    let delivered = false;
+    const client: WeixinProtocolClient = {
+      getUpdates: vi.fn(async (_cursor, signal) => {
+        if (!delivered) {
+          delivered = true;
+          return {
+            cursor: "cursor-file",
+            messages: [{
+              kind: "file" as const,
+              messageId: "9007199254740996",
+              actorId,
+              conversationId: actorId,
+              contextToken: "context-file",
+              file: {
+                fileName: "private.txt",
+                encryptedQueryParam: "private-query",
+              },
+            }],
+          };
+        }
+        return await waitForAbort(signal);
+      }),
+      sendText: vi.fn(async () => {}),
+    };
+    const files = { download: vi.fn() };
+    const cursorStore = cursorStoreFixture();
+    const service = serviceFixture();
+    const adapter = new WeixinInputAdapter({
+      accountId,
+      client,
+      cursorStore,
+      service,
+      outbox: outboxFixture(),
+      access: accessFixture(false),
+      replyContexts: new WeixinReplyContextStore(accountId),
+      files,
+      onFatal: vi.fn(),
+    });
+
+    await adapter.start();
+    await vi.waitFor(() => {
+      expect(cursorStore.set).toHaveBeenCalledWith(
+        accountId,
+        "cursor-file",
+      );
+    });
+    await adapter.stop();
+
+    expect(files.download).not.toHaveBeenCalled();
+    expect(service.submit).not.toHaveBeenCalled();
+  });
+
   it("reports a constrained fatal error and preserves the cursor on submission failure", async () => {
     const controller = clientFixture();
     const cursorStore = cursorStoreFixture();

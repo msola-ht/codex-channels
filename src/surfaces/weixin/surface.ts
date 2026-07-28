@@ -18,6 +18,7 @@ import {
   WeixinInputAdapter,
   type WeixinInputFatalError,
 } from "./input-adapter.js";
+import type { WeixinFilePort } from "./file-input.js";
 import type { WeixinImagePort } from "./image-store.js";
 import { WeixinInteractionPort } from "./interactions.js";
 import {
@@ -49,6 +50,7 @@ export interface WeixinSurfaceOptions {
   actorRegistry?: ConversationActorRegistry;
   replyContextPersistence?: WeixinReplyContextPersistence;
   images?: WeixinImagePort;
+  files?: WeixinFilePort;
   startupNotification?: {
     targets(): readonly ConversationTarget[];
     text(target: ConversationTarget): string;
@@ -135,6 +137,7 @@ export class WeixinSurface implements SurfaceAdapter {
       access: options.access,
       replyContexts,
       ...(options.images === undefined ? {} : { images: options.images }),
+      ...(options.files === undefined ? {} : { files: options.files }),
       ...(options.replyContextPersistence === undefined
         ? {}
         : {

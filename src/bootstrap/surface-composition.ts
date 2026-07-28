@@ -21,6 +21,7 @@ import {
   createWeixinReplyContextPersistence,
   FileWeixinUpdatesCursorStore,
   renderWeixinStartupNotification,
+  WeixinFileInput,
   WeixinImageStore,
   WeixinSurface,
   type SurfaceAdapter,
@@ -139,6 +140,7 @@ function createWeixinModule(
       ),
       options.logger,
     ),
+    files: new WeixinFileInput(),
     startupNotification: {
       targets: () => authorizedWeixinConversations(
         options.bindings,

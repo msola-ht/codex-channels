@@ -25,7 +25,7 @@ export interface CreateWeixinUpdatesMonitorOptions {
   client: WeixinProtocolClient;
   cursorStore: WeixinUpdatesCursorStore;
   handleMessage(message: Extract<WeixinInboundMessage, {
-    kind: "text" | "image";
+    kind: "text" | "image" | "file";
   }>): Promise<void>;
   maximumConsecutiveFailures?: number;
   recentMessageCapacity?: number;
@@ -167,7 +167,7 @@ export function createWeixinUpdatesMonitor(
             }
             continue;
           }
-          if (message.kind === "text") {
+          if (message.kind === "text" || message.kind === "file") {
             await options.handleMessage(message);
           }
           recentMessageIds.add(message.messageId);

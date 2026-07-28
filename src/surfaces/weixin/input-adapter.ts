@@ -16,6 +16,7 @@ import {
   type WeixinProtocolErrorCode,
 } from "./protocol-client.js";
 import { WeixinConversationAdapter } from "./conversation-adapter.js";
+import type { WeixinFilePort } from "./file-input.js";
 import type { WeixinImagePort } from "./image-store.js";
 import type { WeixinOutbox } from "./outbox.js";
 import type { WeixinUpdatesCursorStore } from "./updates-cursor-store.js";
@@ -28,7 +29,7 @@ import { WeixinReplyContextStore } from "./reply-context-store.js";
 
 type WeixinSupportedMessage = Extract<
   WeixinInboundMessage,
-  { kind: "text" | "image" }
+  { kind: "text" | "image" | "file" }
 >;
 
 const maximumQuotedTextCacheEntries = 1_000;
@@ -61,6 +62,7 @@ export interface WeixinInputAdapterOptions {
   removePersistedReplyContext?(target: ConversationTarget): Promise<void>;
   actorRegistry?: ConversationActorRegistry;
   images?: Pick<WeixinImagePort, "download">;
+  files?: Pick<WeixinFilePort, "download">;
   onFatal(error: WeixinInputFatalError): void;
   onRetry?(event: WeixinUpdatesRetryEvent): void;
   onStopTimeout?(): void;
@@ -95,6 +97,7 @@ export class WeixinInputAdapter {
         quietWindowMs: 1_000,
         pollingHealth: this.health,
       },
+      options.files,
     );
     this.monitor = createWeixinUpdatesMonitor({
       accountId: options.accountId,
@@ -171,23 +174,32 @@ export class WeixinInputAdapter {
     );
     this.options.actorRegistry?.rememberActor(target, message.actorId);
     try {
-      await this.conversations.handle({
-        target,
-        actorId: message.actorId,
-        ...(message.kind === "text"
-          ? { kind: "text", text: message.text }
-          : {
-              kind: "image",
+      const conversationMessage = message.kind === "text"
+        ? {
+            target,
+            actorId: message.actorId,
+            kind: "text" as const,
+            text: message.text,
+            ...(quotedText === undefined ? {} : { quotedText }),
+          }
+        : message.kind === "image"
+          ? {
+              target,
+              actorId: message.actorId,
+              kind: "image" as const,
               ...(message.text === undefined ? {} : { text: message.text }),
-              ...(quotedText === undefined
-                ? {}
-                : { quotedText }),
+              ...(quotedText === undefined ? {} : { quotedText }),
               images: message.images,
-            }),
-        ...(message.kind === "text" && quotedText !== undefined
-          ? { quotedText }
-          : {}),
-      });
+            }
+          : {
+              target,
+              actorId: message.actorId,
+              kind: "file" as const,
+              ...(message.text === undefined ? {} : { text: message.text }),
+              ...(quotedText === undefined ? {} : { quotedText }),
+              file: message.file,
+            };
+      await this.conversations.handle(conversationMessage);
     } catch (error) {
       throw new WeixinMessageProcessingError({ cause: error });
     }

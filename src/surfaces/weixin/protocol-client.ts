@@ -45,6 +45,15 @@ export interface WeixinImageReference {
   mediaAesKey?: string;
 }
 
+export interface WeixinFileReference {
+  fileName: string;
+  fullUrl?: string;
+  encryptedQueryParam?: string;
+  mediaAesKey?: string;
+  declaredLength?: string;
+  declaredMd5?: string;
+}
+
 export type WeixinInboundMessage =
   | {
       kind: "text";
@@ -67,6 +76,18 @@ export type WeixinInboundMessage =
       quotedText?: string;
       quotedMessageId?: string;
       images: readonly WeixinImageReference[];
+      createdAt?: number;
+    }
+  | {
+      kind: "file";
+      messageId: string;
+      actorId: string;
+      conversationId: string;
+      contextToken: string;
+      text?: string;
+      quotedText?: string;
+      quotedMessageId?: string;
+      file: WeixinFileReference;
       createdAt?: number;
     }
   | {
@@ -509,11 +530,16 @@ function parseInboundContent(
       Extract<WeixinInboundMessage, { kind: "image" }>,
       "kind" | "text" | "quotedText" | "quotedMessageId" | "images"
     >
+  | Pick<
+      Extract<WeixinInboundMessage, { kind: "file" }>,
+      "kind" | "text" | "quotedText" | "quotedMessageId" | "file"
+    >
   | null {
   let text: string | undefined;
   let quotedText: string | undefined;
   let quotedMessageId: string | undefined;
   const images: WeixinImageReference[] = [];
+  let file: WeixinFileReference | undefined;
   for (const item of items) {
     const record = requiredRecord(item, "微信消息项目无效");
     const type = optionalSafeInteger(
@@ -542,13 +568,29 @@ function parseInboundContent(
       continue;
     }
     if (type === 2) {
-      if (images.length >= maximumInboundImages) {
+      if (file !== undefined || images.length >= maximumInboundImages) {
         return null;
       }
       images.push(parseImageReference(record));
       continue;
     }
+    if (type === 4) {
+      if (file !== undefined || images.length > 0) {
+        return null;
+      }
+      file = parseFileReference(record);
+      continue;
+    }
     return null;
+  }
+  if (file !== undefined) {
+    return {
+      kind: "file",
+      ...(text === undefined ? {} : { text }),
+      ...(quotedText === undefined ? {} : { quotedText }),
+      ...(quotedMessageId === undefined ? {} : { quotedMessageId }),
+      file,
+    };
   }
   if (images.length > 0) {
     return {
@@ -668,6 +710,70 @@ function parseImageReference(value: unknown): WeixinImageReference {
       : { encryptedQueryParam }),
     ...(imageAesKey === undefined ? {} : { imageAesKey }),
     ...(mediaAesKey === undefined ? {} : { mediaAesKey }),
+  };
+}
+
+function parseFileReference(value: unknown): WeixinFileReference {
+  const item = requiredRecord(value, "微信文件消息项目无效");
+  const file = requiredRecord(
+    item.file_item,
+    "微信文件消息内容无效",
+  );
+  const media = requiredRecord(
+    file.media,
+    "微信文件媒体信息无效",
+  );
+  const fileName = optionalBoundedString(
+    file.file_name,
+    "微信文件名无效",
+    1_024,
+  );
+  if (fileName === undefined) {
+    throw new WeixinProtocolError(
+      "invalid-response",
+      "微信文件名无效",
+    );
+  }
+  const fullUrl = optionalBoundedString(
+    media.full_url,
+    "微信文件完整地址无效",
+    8_192,
+  );
+  const encryptedQueryParam = optionalBoundedString(
+    media.encrypt_query_param,
+    "微信文件下载参数无效",
+    65_536,
+  );
+  if (fullUrl === undefined && encryptedQueryParam === undefined) {
+    throw new WeixinProtocolError(
+      "invalid-response",
+      "微信文件没有可用下载地址",
+    );
+  }
+  const mediaAesKey = optionalBoundedString(
+    media.aes_key,
+    "微信文件媒体 AES key 无效",
+    1_024,
+  );
+  const declaredLength = optionalBoundedString(
+    file.len,
+    "微信文件声明长度无效",
+    64,
+  );
+  const declaredMd5 = optionalBoundedString(
+    file.md5,
+    "微信文件声明 MD5 无效",
+    128,
+  );
+  return {
+    fileName,
+    ...(fullUrl === undefined ? {} : { fullUrl }),
+    ...(encryptedQueryParam === undefined
+      ? {}
+      : { encryptedQueryParam }),
+    ...(mediaAesKey === undefined ? {} : { mediaAesKey }),
+    ...(declaredLength === undefined ? {} : { declaredLength }),
+    ...(declaredMd5 === undefined ? {} : { declaredMd5 }),
   };
 }
 

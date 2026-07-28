@@ -350,7 +350,51 @@ describe("WeixinProtocolClient", () => {
     });
   });
 
-  it("fails closed on malformed images, excessive images, and mixed media", async () => {
+  it("parses one fixed v2.4.6 general file reference", async () => {
+    const client = createClient({
+      fetchImpl: vi.fn(async () => new Response(exactMessageIds({
+        ret: 0,
+        get_updates_buf: "next-cursor",
+        msgs: [message("9007199254740994", {
+          item_list: [{
+            type: 4,
+            file_item: {
+              file_name: "settings.json",
+              len: "4177",
+              md5: "00112233445566778899aabbccddeeff",
+              media: {
+                full_url:
+                  "https://novac2c.cdn.weixin.qq.com/c2c/download?secret",
+                encrypt_query_param: "private-query",
+                aes_key: "private-media-key",
+              },
+            },
+          }],
+        })],
+      }), { status: 200 })),
+    });
+
+    await expect(client.getUpdates("")).resolves.toMatchObject({
+      messages: [{
+        kind: "file",
+        messageId: "9007199254740994",
+        actorId,
+        conversationId: actorId,
+        contextToken: "context-secret",
+        file: {
+          fileName: "settings.json",
+          declaredLength: "4177",
+          declaredMd5: "00112233445566778899aabbccddeeff",
+          fullUrl:
+            "https://novac2c.cdn.weixin.qq.com/c2c/download?secret",
+          encryptedQueryParam: "private-query",
+          mediaAesKey: "private-media-key",
+        },
+      }],
+    });
+  });
+
+  it("fails closed on malformed media, excessive images, and mixed media", async () => {
     const malformed = createClient({
       fetchImpl: vi.fn(async () => new Response(exactMessageIds({
         ret: 0,
@@ -361,6 +405,25 @@ describe("WeixinProtocolClient", () => {
       }), { status: 200 })),
     });
     await expect(malformed.getUpdates("")).rejects.toMatchObject({
+      code: "invalid-response",
+    });
+
+    const malformedFile = createClient({
+      fetchImpl: vi.fn(async () => new Response(exactMessageIds({
+        ret: 0,
+        get_updates_buf: "next-cursor",
+        msgs: [message("7", {
+          item_list: [{
+            type: 4,
+            file_item: {
+              file_name: "private.txt",
+              media: {},
+            },
+          }],
+        })],
+      }), { status: 200 })),
+    });
+    await expect(malformedFile.getUpdates("")).rejects.toMatchObject({
       code: "invalid-response",
     });
 

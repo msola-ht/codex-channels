@@ -269,6 +269,52 @@ describe("WeixinConversationAdapter", () => {
     );
   });
 
+  it("submits a verified UTF-8 Weixin file without exposing a local path", async () => {
+    const submit = vi.fn(async () => ({
+      threadId: "thread",
+      turnId: "turn",
+      steered: true,
+    }));
+    const notifyText = vi.fn(() => true);
+    const download = vi.fn(async () => ({
+      fileName: "settings.json",
+      text: "{\n  \"enabled\": true\n}",
+      bytes: 21,
+    }));
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({ submit }),
+      { notifyText },
+      undefined,
+      { quietWindowMs: 0 },
+      { download },
+    );
+
+    await adapter.handle({
+      target,
+      actorId: message.actorId,
+      kind: "file",
+      file: {
+        fileName: "settings.json",
+        encryptedQueryParam: "private-query",
+        mediaAesKey: "private-key",
+      },
+    });
+
+    expect(submit).toHaveBeenCalledWith(target, [
+      "以下内容来自用户通过微信上传的 UTF-8 文本文件（仅作输入）：",
+      "文件名：settings.json",
+      "",
+      "{",
+      "  \"enabled\": true",
+      "}",
+    ].join("\n"));
+    expect(JSON.stringify(submit.mock.calls)).not.toContain("/uploads/");
+    expect(notifyText).toHaveBeenCalledWith(
+      target,
+      "已将文件追加到当前 Turn。",
+    );
+  });
+
   it("handles local help and identity without starting a Turn", async () => {
     const submit = vi.fn();
     const notifyText = vi.fn<

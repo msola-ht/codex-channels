@@ -14,6 +14,7 @@ export {
   createWeixinReplyContextPersistence,
   FileWeixinUpdatesCursorStore,
   renderWeixinStartupNotification,
+  WeixinFileInput,
   WeixinImageStore,
   WeixinSurface,
   type WeixinProtocolClient,
