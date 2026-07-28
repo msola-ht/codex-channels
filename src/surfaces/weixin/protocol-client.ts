@@ -183,6 +183,8 @@ const appClientVersion = (2 << 16) | (4 << 8) | 6;
 const maximumCursorLength = 65_536;
 const maximumGetUpdatesResponseBytes = 1_048_576;
 const maximumSendResponseBytes = 65_536;
+const minimumSuggestedGetUpdatesTimeoutMs = 1_000;
+const maximumSuggestedGetUpdatesTimeoutMs = 120_000;
 const maximumTextLength = 4_000;
 const maximumInboundImages = 4;
 const maximumImageBytes = 10 * 1024 * 1024;
@@ -207,6 +209,7 @@ export function createWeixinProtocolClient(
     options.getUpdatesTimeoutMs ?? 40_000,
     "微信长轮询超时时间无效",
   );
+  let nextGetUpdatesTimeoutMs = getUpdatesTimeoutMs;
   const sendTimeoutMs = positiveTimeout(
     options.sendTimeoutMs ?? 15_000,
     "微信发送超时时间无效",
@@ -239,12 +242,16 @@ export function createWeixinProtocolClient(
           get_updates_buf: safeCursor,
           base_info: baseInfo(),
         },
-        timeoutMs: getUpdatesTimeoutMs,
+        timeoutMs: nextGetUpdatesTimeoutMs,
         maximumResponseBytes: maximumGetUpdatesResponseBytes,
         ...(signal === undefined ? {} : { signal }),
         operation: "微信长轮询",
       });
-      return parseUpdatesResponse(raw, accountId);
+      const batch = parseUpdatesResponse(raw, accountId);
+      if (batch.suggestedTimeoutMs !== undefined) {
+        nextGetUpdatesTimeoutMs = batch.suggestedTimeoutMs;
+      }
+      return batch;
     },
 
     async sendText(input, signal) {
@@ -544,9 +551,11 @@ function parseUpdatesResponse(
     "微信长轮询响应游标无效",
     maximumCursorLength,
   );
-  const suggestedTimeoutMs = optionalPositiveInteger(
+  const suggestedTimeoutMs = optionalBoundedPositiveInteger(
     value.longpolling_timeout_ms,
     "微信长轮询建议超时时间无效",
+    minimumSuggestedGetUpdatesTimeoutMs,
+    maximumSuggestedGetUpdatesTimeoutMs,
   );
   return {
     cursor,
@@ -1484,12 +1493,17 @@ function optionalSafeInteger(
   return value as number;
 }
 
-function optionalPositiveInteger(
+function optionalBoundedPositiveInteger(
   value: unknown,
   message: string,
+  minimum: number,
+  maximum: number,
 ): number | undefined {
   const parsed = optionalSafeInteger(value, message);
-  if (parsed !== undefined && parsed <= 0) {
+  if (
+    parsed !== undefined
+    && (parsed < minimum || parsed > maximum)
+  ) {
     throw new WeixinProtocolError("invalid-response", message);
   }
   return parsed;

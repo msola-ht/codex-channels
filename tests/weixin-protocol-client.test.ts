@@ -175,6 +175,64 @@ describe("WeixinProtocolClient", () => {
     );
   });
 
+  it("uses a bounded server timeout suggestion for the next long poll", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          ret: 0,
+          get_updates_buf: "next-cursor",
+          longpolling_timeout_ms: 1_000,
+          msgs: [],
+        }), { status: 200 }))
+        .mockImplementationOnce(abortableFetch());
+      const client = createClient({
+        fetchImpl,
+        getUpdatesTimeoutMs: 60_000,
+      });
+
+      await expect(client.getUpdates("current-cursor")).resolves.toMatchObject({
+        cursor: "next-cursor",
+        suggestedTimeoutMs: 1_000,
+      });
+      const controller = new AbortController();
+      const pending = client.getUpdates("next-cursor", controller.signal);
+      const outcome = pending.catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      const nextPollSignal = fetchImpl.mock.calls[1]?.[1]?.signal;
+      const usedSuggestedTimeout = nextPollSignal?.aborted === true;
+      if (!usedSuggestedTimeout) {
+        controller.abort();
+      }
+      await expect(outcome).resolves.toMatchObject({
+        code: usedSuggestedTimeout ? "timeout" : "aborted",
+      });
+      expect(usedSuggestedTimeout).toBe(true);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects unsafe server timeout suggestions", async () => {
+    for (const suggestedTimeoutMs of [999, 120_001]) {
+      const client = createClient({
+        fetchImpl: vi.fn(async () =>
+          new Response(JSON.stringify({
+            ret: 0,
+            get_updates_buf: "next-cursor",
+            longpolling_timeout_ms: suggestedTimeoutMs,
+            msgs: [],
+          }), { status: 200 })),
+      });
+
+      await expect(client.getUpdates("current-cursor")).rejects.toMatchObject({
+        code: "invalid-response",
+      });
+    }
+  });
+
   it("extracts bounded quoted text from a Weixin ref_msg", async () => {
     const client = createClient({
       fetchImpl: vi.fn(async () => new Response(exactMessageIds({

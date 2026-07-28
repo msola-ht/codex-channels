@@ -36,6 +36,29 @@ describe("WeixinUpdatesMonitor", () => {
     expect(onPollSuccess).toHaveBeenCalledWith(expect.any(Number));
   });
 
+  it("commits an advanced cursor from an empty successful poll", async () => {
+    const controller = new AbortController();
+    const cursorStore = cursorStoreFixture("old-cursor");
+    const handleMessage = vi.fn(async () => {});
+    const monitor = createWeixinUpdatesMonitor({
+      accountId,
+      client: clientFixture([
+        { cursor: "new-cursor", messages: [] },
+        () => {
+          controller.abort();
+          throw new WeixinProtocolError("aborted", "aborted");
+        },
+      ]),
+      cursorStore,
+      handleMessage,
+    });
+
+    await expect(monitor.run(controller.signal)).resolves.toBeUndefined();
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(cursorStore.set).toHaveBeenCalledOnce();
+    expect(cursorStore.set).toHaveBeenCalledWith(accountId, "new-cursor");
+  });
+
   it("delivers a batch in order and commits its cursor afterward", async () => {
     const controller = new AbortController();
     const events: string[] = [];
@@ -186,10 +209,10 @@ describe("WeixinUpdatesMonitor", () => {
         throw new WeixinProtocolError("network-error", "network");
       },
       () => {
-        throw new WeixinProtocolError("http-error", "server", 503);
+        throw new WeixinProtocolError("http-error", "rate limit", 429);
       },
       () => {
-        throw new WeixinProtocolError("network-error", "network");
+        throw new WeixinProtocolError("http-error", "server", 503);
       },
       { cursor: "cursor", messages: [] },
       () => {
@@ -221,13 +244,14 @@ describe("WeixinUpdatesMonitor", () => {
       code: "http-error",
       delayMs: 0,
       phase: "retry",
-      status: 503,
+      status: 429,
     });
     expect(onRetry).toHaveBeenNthCalledWith(3, {
       attempt: 3,
-      code: "network-error",
+      code: "http-error",
       delayMs: 0,
       phase: "backoff",
+      status: 503,
     });
     expect(cursorStore.set).not.toHaveBeenCalled();
   });

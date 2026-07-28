@@ -14,7 +14,8 @@
   失败关闭。
 - `protocol-client.ts`：实现固定 `v2.4.6` 的 `getupdates`、`sendmessage`、`getuploadurl`、
   `getconfig` 和 `sendtyping` HTTP 合同，并按官方 AES-128-ECB、CDN 二进制 `POST` 与
-  双层 key 编码发送生成图片和受限内存文件；
+  双层 key 编码发送生成图片和受限内存文件；成功长轮询响应给出的下一轮建议超时只在
+  1 至 120 秒边界内采用，越界响应失败关闭；
   在 JSON 数字转换前保留原始 `message_id`，只输出文本、带可选说明文字的最多 4 张图片引用、
   单个一般文件引用或带原因的忽略事件；文本项内受约束的 `ref_msg` 标题、引用文本与精确 `msg_id` 会作为
   独立引用信息输出；
