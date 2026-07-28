@@ -93,6 +93,11 @@ export class WeixinOutbox implements SurfaceOutputPort {
     }
     if (event.type === "turn.started") {
       this.options.typing?.start(event.target);
+      this.delivery.enqueue(
+        event.target.conversationId,
+        () => this.send(event.target, "已开始处理。"),
+        true,
+      );
       return;
     }
     if (event.type === "operation.updated") {

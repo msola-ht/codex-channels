@@ -41,7 +41,7 @@ describe("WeixinOutbox", () => {
     })).toThrow("微信回复目标无效");
   });
 
-  it("replaces the start bubble with typing and sends final text and completion", async () => {
+  it("acknowledges Turn start and sends final text and completion", async () => {
     const { outbox, sendText } = outboxFixture();
 
     outbox.handle(turnStarted());
@@ -55,6 +55,7 @@ describe("WeixinOutbox", () => {
     await outbox.close();
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
+      "已开始处理。",
       "final reply",
       "本次运行 · 已完成",
     ]);
@@ -87,8 +88,12 @@ describe("WeixinOutbox", () => {
 
     expect(typing.start).toHaveBeenCalledWith(target);
     expect(typing.stop).toHaveBeenCalledWith(target);
-    expect(events.indexOf("typing:stop")).toBeLessThan(
+    expect(events.filter((event) => event === "text:send")).toHaveLength(2);
+    expect(events.indexOf("typing:start")).toBeLessThan(
       events.indexOf("text:send"),
+    );
+    expect(events.indexOf("typing:stop")).toBeLessThan(
+      events.lastIndexOf("text:send"),
     );
     expect(typing.close).toHaveBeenCalledOnce();
     expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
