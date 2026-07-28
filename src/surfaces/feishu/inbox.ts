@@ -5,7 +5,11 @@ import type {
 } from "../../policy/index.js";
 
 import type { FeishuMessageEvent } from "./message-event.js";
-import { isSafeFeishuResourceIdentifier } from "./media.js";
+import {
+  parseFeishuImageContent,
+  parseFeishuPostContent,
+  parseFeishuTextContent,
+} from "./inbound-content.js";
 
 const DEFAULT_CAPACITY = 100;
 const DEFAULT_CLOSE_TIMEOUT_MS = 5_000;
@@ -19,6 +23,7 @@ interface FeishuInboxMessageBase {
   eventId: string | undefined;
   messageId: string;
   createdAtMs: number;
+  parentId?: string;
 }
 
 export type FeishuInboxMessage = FeishuInboxMessageBase & (
@@ -146,13 +151,13 @@ export class FeishuInbox {
     }
 
     const text = event.messageType === "text"
-      ? parseTextContent(event.content)
+      ? parseFeishuTextContent(event.content)
       : undefined;
     const content = event.messageType === "text"
       ? (text === undefined ? undefined : { kind: "text" as const, text })
       : event.messageType === "image"
-        ? parseImageContent(event.content)
-        : parsePostContent(event.content);
+        ? parseFeishuImageContent(event.content)
+        : parseFeishuPostContent(event.content);
     if (content === undefined) {
       return { status: "ignored", reason: "invalid-content" };
     }
@@ -188,6 +193,7 @@ export class FeishuInbox {
       eventId: event.eventId,
       messageId: event.messageId,
       createdAtMs,
+      ...(event.parentId === undefined ? {} : { parentId: event.parentId }),
       ...content,
     };
     this.rememberSeen(deduplicationKey, now);
@@ -357,156 +363,6 @@ function parseTimestamp(value: string): number | undefined {
   }
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) ? parsed : undefined;
-}
-
-function parseTextContent(value: string): string | undefined {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    return undefined;
-  }
-  if (
-    typeof parsed !== "object"
-    || parsed === null
-    || Array.isArray(parsed)
-  ) {
-    return undefined;
-  }
-  const text = (parsed as Record<string, unknown>).text;
-  return typeof text === "string" ? text : undefined;
-}
-
-function parseImageContent(
-  value: string,
-): { kind: "image"; imageKeys: readonly string[] } | undefined {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    return undefined;
-  }
-  if (
-    typeof parsed !== "object"
-    || parsed === null
-    || Array.isArray(parsed)
-  ) {
-    return undefined;
-  }
-  const imageKey = (parsed as Record<string, unknown>).image_key;
-  if (
-    typeof imageKey !== "string"
-    || !isSafeFeishuResourceIdentifier(imageKey)
-  ) {
-    return undefined;
-  }
-  return { kind: "image", imageKeys: [imageKey] };
-}
-
-function parsePostContent(
-  value: string,
-): (
-  | { kind: "text"; text: string }
-  | { kind: "image"; imageKeys: readonly string[]; text?: string }
-) | undefined {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    return undefined;
-  }
-  const body = unwrapPostLocale(parsed);
-  if (body === undefined || !Array.isArray(body.content)) {
-    return undefined;
-  }
-
-  const imageKeys: string[] = [];
-  const lines: string[] = [];
-  if (typeof body.title === "string" && body.title.length > 0) {
-    lines.push(body.title);
-  }
-  for (const paragraph of body.content) {
-    if (!Array.isArray(paragraph)) {
-      return undefined;
-    }
-    let line = "";
-    for (const element of paragraph) {
-      if (
-        typeof element !== "object"
-        || element === null
-        || Array.isArray(element)
-      ) {
-        return undefined;
-      }
-      const item = element as Record<string, unknown>;
-      if (item.tag === "text") {
-        if (typeof item.text !== "string") {
-          return undefined;
-        }
-        line += item.text;
-      } else if (item.tag === "a") {
-        if (
-          typeof item.text !== "string"
-          || typeof item.href !== "string"
-        ) {
-          return undefined;
-        }
-        line += item.text;
-        if (item.href.length > 0 && item.href !== item.text) {
-          line += ` (${item.href})`;
-        }
-      } else if (item.tag === "img") {
-        if (
-          typeof item.image_key !== "string"
-          || !isSafeFeishuResourceIdentifier(item.image_key)
-        ) {
-          return undefined;
-        }
-        imageKeys.push(item.image_key);
-      } else {
-        return undefined;
-      }
-    }
-    lines.push(line);
-  }
-  const text = lines.join("\n").trim();
-  if (imageKeys.length === 0) {
-    return text.length === 0
-      ? undefined
-      : { kind: "text", text };
-  }
-  return {
-    kind: "image",
-    imageKeys,
-    ...(text.length === 0 ? {} : { text }),
-  };
-}
-
-function unwrapPostLocale(
-  value: unknown,
-): Record<string, unknown> | undefined {
-  if (
-    typeof value !== "object"
-    || value === null
-    || Array.isArray(value)
-  ) {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  if ("title" in record || "content" in record) {
-    return record;
-  }
-  for (const locale of ["zh_cn", "en_us", "ja_jp"]) {
-    const body = record[locale];
-    if (
-      typeof body === "object"
-      && body !== null
-      && !Array.isArray(body)
-    ) {
-      return body as Record<string, unknown>;
-    }
-  }
-  return undefined;
 }
 
 function positiveInteger(value: number, name: string): number {

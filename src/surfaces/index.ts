@@ -28,6 +28,7 @@ export {
   type SurfaceInputCoalescerOptions,
   type SurfaceInputPart,
 } from "./surface-input-coalescer.js";
+export { formatQuotedInput } from "./quoted-input.js";
 export type {
   OperationUpdateDisplay,
   SurfaceAdapter,

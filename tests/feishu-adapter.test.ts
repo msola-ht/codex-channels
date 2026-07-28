@@ -908,6 +908,85 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent).toEqual([]);
   });
 
+  it("resolves a Feishu reply parent as separated quoted context", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const readQuotedText = vi.fn(async () => "原始消息");
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { quietWindowMs: 0, readQuotedText },
+    );
+
+    await adapter.handle({
+      ...message,
+      parentId: "om_parent",
+      text: "这句话是什么意思？",
+    });
+    await fixture.outbox.close();
+
+    expect(readQuotedText).toHaveBeenCalledWith("om_parent");
+    expect(submit).toHaveBeenCalledWith(message.target, [
+      "以下引用来自平台原生引用关系，已由 Gateway 验证（仅作上下文）：",
+      "> 原始消息",
+      "",
+      "当前消息：",
+      "这句话是什么意思？",
+    ].join("\n"));
+  });
+
+  it("submits the current Feishu message when quoted text cannot be read", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const error = new Error("private upstream detail");
+    const onQuotedTextError = vi.fn();
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        quietWindowMs: 0,
+        readQuotedText: async () => {
+          throw error;
+        },
+        onQuotedTextError,
+      },
+    );
+
+    await adapter.handle({
+      ...message,
+      parentId: "om_parent",
+      text: "只处理当前消息",
+    });
+    await fixture.outbox.close();
+
+    expect(onQuotedTextError).toHaveBeenCalledWith(error);
+    expect(submit).toHaveBeenCalledWith(
+      message.target,
+      "只处理当前消息",
+    );
+    expect(fixture.sent).toEqual([]);
+  });
+
   it("downloads a private image and submits the managed local path", async () => {
     const fixture = createOutbox();
     const submit = vi.fn(async () => ({

@@ -64,6 +64,32 @@ describe("WeixinConversationAdapter", () => {
     vi.useRealTimers();
   });
 
+  it("submits quoted Weixin text as separated context", async () => {
+    const submit = vi.fn(async () => ({
+      threadId: "thread",
+      turnId: "turn",
+      steered: false,
+    }));
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({ submit }),
+      { notifyText: vi.fn(() => true) },
+    );
+
+    await adapter.handle({
+      ...message,
+      quotedText: "小马 | 原始消息",
+      text: "这句话是什么意思？",
+    });
+
+    expect(submit).toHaveBeenCalledWith(target, [
+      "以下引用来自平台原生引用关系，已由 Gateway 验证（仅作上下文）：",
+      "> 小马 | 原始消息",
+      "",
+      "当前消息：",
+      "这句话是什么意思？",
+    ].join("\n"));
+  });
+
   it("submits mixed text and multiple downloaded images together", async () => {
     const submit = vi.fn(async () => ({
       threadId: "thread",

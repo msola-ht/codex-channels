@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
 import {
+  continueWeixinUpdatesContract,
   createWeixinUpdatesContractClient,
   loadConfiguredWeixinContractConnection,
   selectWeixinReplyContext,
@@ -15,6 +16,7 @@ const probeSequenceTexts = [
   "微信发送合同验证 2/2：Unicode 中文，emoji 🧪，Markdown **粗体** 与 `code`。",
 ];
 const probeLengthText = createFixedLengthProbeText(4_000);
+const probeEchoText = "微信发送合同验证：服务端消息 ID 映射。";
 
 export class WeixinSendContractError extends Error {
   constructor(code, message) {
@@ -197,6 +199,43 @@ export async function runWeixinReplyLengthContract({
     replyTexts: [probeLengthText],
     signal,
   });
+}
+
+export async function runWeixinReplyEchoContract({
+  updatesClient,
+  sendClient,
+  credential,
+  allowedUserIds,
+  signal,
+}) {
+  const inbound = await updatesClient.pollOnce({
+    baseUrl: credential.baseUrl,
+    botToken: credential.botToken,
+    signal,
+  });
+  if (inbound.kind !== "success") {
+    return { inbound };
+  }
+  const replyContext = selectWeixinReplyContext(inbound, allowedUserIds);
+  const outbound = await sendClient.sendText({
+    baseUrl: credential.baseUrl,
+    botToken: credential.botToken,
+    toUserId: replyContext.toUserId,
+    contextToken: replyContext.contextToken,
+    text: probeEchoText,
+    signal,
+  });
+  if (outbound.kind !== "success") {
+    return { inbound, outbound };
+  }
+  const echo = await continueWeixinUpdatesContract({
+    client: updatesClient,
+    previous: inbound,
+    baseUrl: credential.baseUrl,
+    botToken: credential.botToken,
+    signal,
+  });
+  return { inbound, outbound, echo };
 }
 
 async function runWeixinReplyTextsContract({
@@ -385,10 +424,12 @@ async function main(argv) {
       "  node scripts/weixin-send-contract-probe.mjs reply --live",
       "  node scripts/weixin-send-contract-probe.mjs sequence --live",
       "  node scripts/weixin-send-contract-probe.mjs limit --live",
+      "  node scripts/weixin-send-contract-probe.mjs echo --live",
       "",
       "显式执行后会读取微信安全凭据，从一条已授权完成态文本中取得内存回复上下文，",
       "reply 发送一条固定短文本；sequence 使用同一上下文连续发送两条固定短文本。",
       "limit 发送一条固定 4000 字符中文消息，只验证官方分片值，不探测最大上限。",
+      "echo 发送一条固定回复后继续轮询一次，只检查服务端消息 ID 与 client_id 形状。",
       "不会输出或保存正文、Token、context_token、游标、client_id 或完整用户标识。",
       "",
     ].join("\n"));
@@ -396,7 +437,7 @@ async function main(argv) {
   }
   if (
     argv.length !== 2
-    || !["reply", "sequence", "limit"].includes(argv[0])
+    || !["reply", "sequence", "limit", "echo"].includes(argv[0])
     || argv[1] !== "--live"
   ) {
     process.stderr.write("参数无效；请使用 --help 查看用法。\n");
@@ -423,12 +464,16 @@ async function main(argv) {
       ? await runWeixinReplySequenceContract(contractOptions)
       : argv[0] === "limit"
         ? await runWeixinReplyLengthContract(contractOptions)
-        : await runWeixinReplyContract(contractOptions);
+        : argv[0] === "echo"
+          ? await runWeixinReplyEchoContract(contractOptions)
+          : await runWeixinReplyContract(contractOptions);
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     const replyDescription = argv[0] === "sequence"
       ? "两条固定测试回复"
       : argv[0] === "limit"
         ? "一条 4000 字符测试回复"
+        : argv[0] === "echo"
+          ? "一条固定测试回复，并检查其后续回送"
         : "一条固定测试回复";
     process.stdout.write(
       `本次未保存消息、游标或回复上下文；请在微信中确认是否收到${replyDescription}。\n`,

@@ -8,6 +8,7 @@ import type {
   SurfaceAccessPolicy,
 } from "../../policy/index.js";
 
+import { truncateQuotedText } from "../quoted-input.js";
 import {
   WeixinProtocolError,
   type WeixinInboundMessage,
@@ -25,6 +26,8 @@ type WeixinSupportedMessage = Extract<
   WeixinInboundMessage,
   { kind: "text" | "image" }
 >;
+
+const maximumQuotedTextCacheEntries = 1_000;
 
 export type WeixinInputFatalCode =
   | WeixinProtocolErrorCode
@@ -69,6 +72,7 @@ export class WeixinInputAdapter {
   private runTask: Promise<void> | undefined;
   private stopPromise: Promise<void> | undefined;
   private readonly replyContextWrites = new Map<string, Promise<void>>();
+  private readonly quotedTexts = new Map<string, string>();
   private stopping = false;
 
   constructor(private readonly options: WeixinInputAdapterOptions) {
@@ -130,6 +134,15 @@ export class WeixinInputAdapter {
       await this.options.removePersistedReplyContext?.(target);
       return;
     }
+    const quotedText = message.quotedText
+      ?? (message.quotedMessageId === undefined
+        ? undefined
+        : this.quotedTexts.get(
+          quotedTextCacheKey(target, message.quotedMessageId),
+        ));
+    if (message.text !== undefined) {
+      this.rememberQuotedText(target, message.messageId, message.text);
+    }
     this.options.replyContexts.remember(
       target,
       message.actorId,
@@ -150,11 +163,34 @@ export class WeixinInputAdapter {
           : {
               kind: "image",
               ...(message.text === undefined ? {} : { text: message.text }),
+              ...(quotedText === undefined
+                ? {}
+                : { quotedText }),
               images: message.images,
             }),
+        ...(message.kind === "text" && quotedText !== undefined
+          ? { quotedText }
+          : {}),
       });
     } catch (error) {
       throw new WeixinMessageProcessingError({ cause: error });
+    }
+  }
+
+  private rememberQuotedText(
+    target: ConversationTarget,
+    messageId: string,
+    text: string,
+  ): void {
+    const key = quotedTextCacheKey(target, messageId);
+    this.quotedTexts.delete(key);
+    this.quotedTexts.set(key, truncateQuotedText(text));
+    while (this.quotedTexts.size > maximumQuotedTextCacheEntries) {
+      const oldest = this.quotedTexts.keys().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      this.quotedTexts.delete(oldest);
     }
   }
 
@@ -183,6 +219,7 @@ export class WeixinInputAdapter {
 
   private async stopOnce(): Promise<void> {
     this.stopping = true;
+    this.quotedTexts.clear();
     this.controller?.abort();
     await this.conversations.close();
     const task = this.runTask;
@@ -214,6 +251,13 @@ export class WeixinInputAdapter {
       // Fatal reporting must not create an unhandled rejection.
     }
   }
+}
+
+function quotedTextCacheKey(
+  target: ConversationTarget,
+  messageId: string,
+): string {
+  return `${conversationTargetKey(target)}\u0000${messageId}`;
 }
 
 class WeixinMessageProcessingError extends Error {

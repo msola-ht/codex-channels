@@ -21,6 +21,46 @@ afterEach(() => {
 });
 
 describe("Telegram image input", () => {
+  it("submits replied-to Telegram text as separated quoted context", async () => {
+    const submit = vi.fn().mockResolvedValue({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    });
+    const { surface, output } = createSurface(submit, vi.fn());
+
+    await surface.bot.handleUpdate({
+      update_id: 0,
+      message: {
+        message_id: 10,
+        date: 1,
+        from: telegramUser(),
+        chat: telegramChat(),
+        text: "这句话是什么意思？",
+        reply_to_message: {
+          message_id: 9,
+          date: 1,
+          chat: telegramChat(),
+          text: "原始消息",
+          reply_to_message: undefined as never,
+        },
+      },
+    });
+
+    expect(submit).toHaveBeenCalledWith(
+      { surface: "telegram", accountId: "default", conversationId: "100" },
+      [
+        "以下引用来自平台原生引用关系，已由 Gateway 验证（仅作上下文）：",
+        "> 原始消息",
+        "",
+        "当前消息：",
+        "这句话是什么意思？",
+      ].join("\n"),
+    );
+    await surface.stop();
+    await output.close();
+  });
+
   it("uses the largest photo and sends its caption with the local image", async () => {
     const submit = vi.fn().mockResolvedValue({ threadId: "thread-1", turnId: "turn-1", steered: false });
     const download = vi.fn().mockResolvedValue({
@@ -56,6 +96,66 @@ describe("Telegram image input", () => {
     expect(rememberActor).toHaveBeenCalledWith(
       { surface: "telegram", accountId: "default", conversationId: "100" },
       "123",
+    );
+    await surface.stop();
+    await output.close();
+  });
+
+  it("submits a replied-to caption with a Telegram image", async () => {
+    const submit = vi.fn().mockResolvedValue({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    });
+    const download = vi.fn().mockResolvedValue({
+      path: "/private/uploads/photo.jpg",
+      mimeType: "image/jpeg",
+      bytes: 100,
+    });
+    const { surface, output } = createSurface(submit, download);
+
+    await surface.bot.handleUpdate({
+      update_id: 3,
+      message: {
+        message_id: 12,
+        date: 1,
+        from: telegramUser(),
+        chat: telegramChat(),
+        caption: "比较一下",
+        photo: [{
+          file_id: "photo",
+          file_unique_id: "photo-u",
+          width: 100,
+          height: 100,
+        }],
+        reply_to_message: {
+          message_id: 9,
+          date: 1,
+          chat: telegramChat(),
+          caption: "上一张图的说明",
+          reply_to_message: undefined as never,
+          photo: [{
+            file_id: "old-photo",
+            file_unique_id: "old-photo-u",
+            width: 100,
+            height: 100,
+          }],
+        },
+      },
+    });
+
+    expect(submit).toHaveBeenCalledWith(
+      { surface: "telegram", accountId: "default", conversationId: "100" },
+      {
+        text: [
+          "以下引用来自平台原生引用关系，已由 Gateway 验证（仅作上下文）：",
+          "> 上一张图的说明",
+          "",
+          "当前消息：",
+          "比较一下",
+        ].join("\n"),
+        localImages: [{ path: "/private/uploads/photo.jpg" }],
+      },
     );
     await surface.stop();
     await output.close();

@@ -13,6 +13,7 @@ const {
   createWeixinSendContractClient,
   runWeixinReplyContract,
   runWeixinReplyLengthContract,
+  runWeixinReplyEchoContract,
   runWeixinReplySequenceContract,
   summarizeSendResponse,
 } = sendProbe;
@@ -35,9 +36,66 @@ describe("Weixin sendmessage contract probe", () => {
     expect(help.stdout).toContain("reply --live");
     expect(help.stdout).toContain("sequence --live");
     expect(help.stdout).toContain("limit --live");
+    expect(help.stdout).toContain("echo --live");
     expect(help.stdout).toContain("不保存消息或回复上下文");
     expect(rejected.status).toBe(2);
     expect(rejected.stderr).toContain("参数无效");
+  });
+
+  it("polls once after a fixed reply to inspect outbound echo structure", async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(exactUpdatesResponse({
+        ret: 0,
+        msgs: [inboundMessage("user@im.wechat", "context-secret", 7n)],
+        get_updates_buf: "next-cursor",
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(exactUpdatesResponse({
+        ret: 0,
+        msgs: [{
+          message_id: "8",
+          from_user_id: "bot@im.bot",
+          message_type: 2,
+          message_state: 2,
+          client_id: "codex-connect:1700000000000-aabbccdd",
+          item_list: [{
+            type: 1,
+            text_item: { text: "private outbound body" },
+          }],
+        }],
+        get_updates_buf: "echo-cursor",
+      }), { status: 200 }));
+    const updatesClient = createWeixinUpdatesContractClient({ fetchImpl });
+    const sendClient = {
+      sendText: vi.fn(async () => ({
+        kind: "success",
+        hasReturnCode: true,
+      })),
+    };
+
+    await expect(runWeixinReplyEchoContract({
+      updatesClient,
+      sendClient,
+      credential: {
+        baseUrl: "https://ilinkai.weixin.qq.com",
+        botToken: "bot-secret",
+      },
+      allowedUserIds: ["user@im.wechat"],
+      signal: new AbortController().signal,
+    })).resolves.toMatchObject({
+      inbound: { kind: "success", messageCount: 1 },
+      outbound: { kind: "success", hasReturnCode: true },
+      echo: {
+        kind: "success",
+        messageCount: 1,
+        messages: [{
+          messageType: 2,
+          clientIdShape: "codex-connect-client",
+        }],
+      },
+    });
+    expect(JSON.parse(String(fetchImpl.mock.calls[1]?.[1]?.body))).toMatchObject({
+      get_updates_buf: "next-cursor",
+    });
   });
 
   it("sends the fixed v2.4.6 completed text reply contract", async () => {

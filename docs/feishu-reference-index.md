@@ -8,7 +8,7 @@
 固定版本源码已按 [`本地上游源码工作流`](upstream-sources.md) 保存；本地基线存在且匹配时优先
 查阅本地仓库，不重复联网读取相同提交。
 
-截至 2026-07-26，项目已精确锁定 `@larksuiteoapi/node-sdk@1.71.1`，并完成私聊 Surface、
+截至 2026-07-27，项目已精确锁定 `@larksuiteoapi/node-sdk@1.71.1`，并完成私聊 Surface、
 严格配置和 Bootstrap 显式组合。测试应用已完成扫码配置、Doctor 探测、生产 Gateway
 首次握手、一次已授权私聊 Turn 和精确 Chat 文本回复；断线恢复、未授权/重复真实事件、代理和
 用户输入/MCP 卡片动作真实验收仍未完成。私聊 PNG/JPEG 图片、命令审批动作、Gateway 重启后的
@@ -71,6 +71,7 @@ OAuth Token 与 Thread 绑定恢复，以及长回复折叠显示和顺序均已
 | 更新消息卡片 | [更新应用发送的消息卡片](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message/patch) | 核对应用发送的交互卡片原地更新、14 天窗口、单消息 5 QPS 和请求大小限制 |
 | 卡片更新错误 | [错误码 230001：消息不是卡片](https://open.feishu.cn/document/faq/trouble-shooting/how-to-resolve-error-230001?lang=zh-CN) | 明确 `im.v1.message.patch` 只更新卡片；普通文本或富文本必须使用对应的编辑消息能力 |
 | 消息资源下载 | [获取消息中的资源文件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message-resource/get) | 核对用户消息资源使用 `message_id + file_key + type` 下载、机器人与消息同会话及 100 MiB 平台上限 |
+| 获取指定消息内容 | [获取指定消息内容](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message/get) | 按回复事件的 `parent_id` 读取文本、富文本或 CardKit 中受支持的可见文字；请求固定使用 `open_id + raw_card_content`，忽略按钮、输入值和未知消息类型 |
 | 消息常见问题 | [消息常见问题](https://open.feishu.cn/document/server-docs/im-v1/faq) | 核对用户发送资源可由同会话机器人下载，以及 `230020`、`99991400` 等官方消息频控信号；项目另收紧为 PNG/JPEG 与 10 MiB |
 | 机器人自定义菜单配置 | [机器人自定义菜单](https://open.larksuite.com/document/uAjLw4CM/ukTMukTMukTM/bot-v3/bot-customized-menu) | 核对菜单层级与数量限制；项目只要求一个 `codexc_home` 事件菜单，功能分类留在命令中心卡片内，避免 Owner 重复配置平台菜单 |
 | 机器人自定义菜单事件 | [机器人菜单事件](https://open.feishu.cn/document/client-docs/bot-v3/events/menu) | 核对 `application.bot.menu_v6` 只负责事件类型菜单点击后的事件投递，不负责创建或启用菜单；事件只提供操作者与事件 Key、不提供 Chat ID，项目只路由唯一已授权私聊 |
@@ -144,7 +145,8 @@ EventDispatcher`。
 `addons.preset = false` 的最小机器人基座。Setup 提供手动输入和扫码授权两种方式；扫码时不传
 `createOnly` 或 `appId`，由飞书授权页让用户选择新建或已有企业自建应用，只增量声明
 `application:application:self_manage`、`application:application:patch`、
-`im:message:send_as_bot`、`cardkit:card:write`、`im.message.receive_v1` 和
+`im:message:send_as_bot`、`im:message:readonly`、`cardkit:card:write`、
+`im.message.receive_v1` 和
 `application.bot.menu_v6`，卡片阶段另声明 `card.action.trigger` 回调。注册完成后使用
 `/open-apis/bot/v3/info` 验证凭据和 Bot 身份，不启动
 第二条消息长连接。`addons` 不能直接创建机器人菜单或设置订阅方式；Setup 原子保存配置后直接

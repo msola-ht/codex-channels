@@ -35,6 +35,7 @@ import {
   encodeFeishuPostContent,
   sanitizeFeishuMarkdown,
 } from "./message-content.js";
+import { extractFeishuQuotedText } from "./inbound-content.js";
 import type { FeishuMessagePort } from "./outbox.js";
 import {
   abortableSleep,
@@ -117,6 +118,10 @@ export interface FeishuMessageClientOptions {
   disableEnvironmentProxy?: boolean;
 }
 
+export interface FeishuQuotedMessagePort {
+  readQuotedText(messageId: string): Promise<string | undefined>;
+}
+
 export function createFeishuOAuthApi(
   options: FeishuMessageClientOptions,
   accountsHttpAgent?: unknown,
@@ -165,6 +170,8 @@ export type FeishuMessageErrorCode =
   | "invalid-response"
   | "download-failed"
   | "download-timeout"
+  | "read-failed"
+  | "read-timeout"
   | "rate-limited"
   | "send-failed"
   | "send-timeout";
@@ -205,6 +212,21 @@ interface FeishuSdkMessageClient {
     };
   }): Promise<{
     code?: number | undefined;
+  }>;
+  getMessage?(payload: {
+    params: {
+      user_id_type: "open_id";
+      card_msg_content_type: "raw_card_content";
+    };
+    path: { message_id: string };
+  }): Promise<{
+    code?: number | undefined;
+    data?: {
+      items?: Array<{
+        msg_type?: string | undefined;
+        body?: { content?: string | undefined } | undefined;
+      }> | undefined;
+    } | undefined;
   }>;
   createStreamingCard?(payload: {
     data: {
@@ -264,7 +286,11 @@ interface FeishuMessageClientDependencies {
   ): FeishuSdkMessageClient;
 }
 
-export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResourcePort {
+export class FeishuMessageClient implements
+  FeishuMessagePort,
+  FeishuImageResourcePort,
+  FeishuQuotedMessagePort
+{
   private readonly sdkClient: FeishuSdkMessageClient;
   private readonly sendTimeoutMs: number;
 
@@ -687,6 +713,75 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
     }
   }
 
+  async readQuotedText(messageId: string): Promise<string | undefined> {
+    if (!isSafeFeishuResourceIdentifier(messageId)) {
+      throw new FeishuMessageError(
+        "invalid-response",
+        "飞书引用消息标识无效",
+      );
+    }
+    if (!this.sdkClient.getMessage) {
+      return undefined;
+    }
+    try {
+      const response = await withTimeout(
+        this.sdkClient.getMessage({
+          params: {
+            user_id_type: "open_id",
+            card_msg_content_type: "raw_card_content",
+          },
+          path: { message_id: messageId },
+        }),
+        this.sendTimeoutMs,
+        new FeishuMessageError(
+          "read-timeout",
+          "飞书引用消息读取超时",
+        ),
+      );
+      if (response.code !== undefined && response.code !== 0) {
+        throw new FeishuMessageError(
+          "invalid-response",
+          "飞书引用消息响应无效",
+        );
+      }
+      const items = response.data?.items;
+      if (!Array.isArray(items) || items.length === 0) {
+        return undefined;
+      }
+      if (items.length > 100) {
+        throw new FeishuMessageError(
+          "invalid-response",
+          "飞书引用消息响应无效",
+        );
+      }
+      const item = items[0];
+      const messageType = item?.msg_type;
+      const content = item?.body?.content;
+      if (
+        typeof messageType !== "string"
+        || typeof content !== "string"
+        || Buffer.byteLength(content, "utf8") > 150 * 1_024
+      ) {
+        return undefined;
+      }
+      return extractFeishuQuotedText(messageType, content);
+    } catch (error) {
+      if (error instanceof FeishuMessageError) {
+        throw error;
+      }
+      if (isSdkTimeout(error)) {
+        throw new FeishuMessageError(
+          "read-timeout",
+          "飞书引用消息读取超时",
+        );
+      }
+      throw new FeishuMessageError(
+        "read-failed",
+        "飞书引用消息读取失败",
+      );
+    }
+  }
+
   private async sendMessage(
     chatId: string,
     messageType: "text" | "post" | "interactive",
@@ -1071,6 +1166,7 @@ const defaultMessageDependencies: FeishuMessageClientDependencies = {
     return {
       createMessage: (payload) => client.im.v1.message.create(payload),
       patchMessage: (payload) => client.im.v1.message.patch(payload),
+      getMessage: (payload) => client.im.v1.message.get(payload),
       createStreamingCard: (payload) =>
         client.cardkit.v1.card.create(payload),
       updateStreamingCard: (payload) =>

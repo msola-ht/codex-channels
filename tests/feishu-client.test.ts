@@ -1396,6 +1396,166 @@ describe("FeishuMessageClient", () => {
     });
   });
 
+  it("reads visible text from a referenced Feishu message", async () => {
+    const getMessage = vi.fn(async () => ({
+      code: 0,
+      data: {
+        items: [{
+          msg_type: "post",
+          body: {
+            content: JSON.stringify({
+              zh_cn: {
+                title: "标题",
+                content: [[
+                  { tag: "text", text: "原始" },
+                  { tag: "a", text: "链接", href: "https://example.com" },
+                ]],
+              },
+            }),
+          },
+        }],
+      },
+    }));
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage: async () => ({ data: { message_id: "om_message" } }),
+          patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
+          getMessage,
+        }),
+      },
+    );
+
+    await expect(client.readQuotedText("om_parent")).resolves.toBe([
+      "标题",
+      "原始链接 (https://example.com)",
+    ].join("\n"));
+    expect(getMessage).toHaveBeenCalledWith({
+      params: {
+        user_id_type: "open_id",
+        card_msg_content_type: "raw_card_content",
+      },
+      path: { message_id: "om_parent" },
+    });
+  });
+
+  it("reads visible text from a referenced CardKit message", async () => {
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage: async () => ({ data: { message_id: "om_message" } }),
+          patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
+          getMessage: async () => ({
+            code: 0,
+            data: {
+              items: [{
+                msg_type: "interactive",
+                body: {
+                  content: JSON.stringify({
+                    card_schema: 2,
+                    json_card: JSON.stringify({
+                      schema: "2.0",
+                      body: {
+                        elements: [
+                          {
+                            tag: "markdown",
+                            content: "这是被引用的 **Codex 回复**。",
+                          },
+                          {
+                            tag: "button",
+                            text: {
+                              tag: "plain_text",
+                              content: "不要提取按钮",
+                            },
+                            value: {
+                              interaction_token: "private-token",
+                            },
+                          },
+                        ],
+                      },
+                    }),
+                  }),
+                },
+              }],
+            },
+          }),
+        }),
+      },
+    );
+
+    await expect(client.readQuotedText("om_parent")).resolves.toBe(
+      "这是被引用的 **Codex 回复**。",
+    );
+  });
+
+  it("reads normalized Markdown elements from a referenced CardKit message", async () => {
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage: async () => ({ data: { message_id: "om_message" } }),
+          patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
+          getMessage: async () => ({
+            code: 0,
+            data: {
+              items: [{
+                msg_type: "interactive",
+                body: {
+                  content: JSON.stringify({
+                    card_schema: 2,
+                    json_card: JSON.stringify({
+                      schema: 2,
+                      body: {
+                        property: {
+                          elements: [{
+                            tag: "markdown",
+                            property: {
+                              elements: [
+                                {
+                                  tag: "text",
+                                  property: { content: "规范化的 " },
+                                },
+                                {
+                                  tag: "text",
+                                  property: { content: "CardKit 正文" },
+                                },
+                              ],
+                            },
+                          }],
+                        },
+                      },
+                    }),
+                  }),
+                },
+              }],
+            },
+          }),
+        }),
+      },
+    );
+
+    await expect(client.readQuotedText("om_parent")).resolves.toBe(
+      "规范化的 CardKit 正文",
+    );
+  });
+
   it("rejects unsafe image resource identifiers before calling the SDK", async () => {
     const downloadResource = vi.fn(successfulDownload);
     const client = new FeishuMessageClient(

@@ -53,6 +53,8 @@ export type WeixinInboundMessage =
       conversationId: string;
       contextToken: string;
       text: string;
+      quotedText?: string;
+      quotedMessageId?: string;
       createdAt?: number;
     }
   | {
@@ -62,6 +64,8 @@ export type WeixinInboundMessage =
       conversationId: string;
       contextToken: string;
       text?: string;
+      quotedText?: string;
+      quotedMessageId?: string;
       images: readonly WeixinImageReference[];
       createdAt?: number;
     }
@@ -497,13 +501,18 @@ function parseInboundMessage(
 
 function parseInboundContent(
   items: readonly unknown[],
-): Pick<Extract<WeixinInboundMessage, { kind: "text" }>, "kind" | "text">
+): Pick<
+    Extract<WeixinInboundMessage, { kind: "text" }>,
+    "kind" | "text" | "quotedText" | "quotedMessageId"
+  >
   | Pick<
       Extract<WeixinInboundMessage, { kind: "image" }>,
-      "kind" | "text" | "images"
+      "kind" | "text" | "quotedText" | "quotedMessageId" | "images"
     >
   | null {
   let text: string | undefined;
+  let quotedText: string | undefined;
+  let quotedMessageId: string | undefined;
   const images: WeixinImageReference[] = [];
   for (const item of items) {
     const record = requiredRecord(item, "微信消息项目无效");
@@ -527,6 +536,9 @@ function parseInboundContent(
         return null;
       }
       text = textItem.text;
+      const quoted = parseQuotedReference(record.ref_msg);
+      quotedText = quoted.text;
+      quotedMessageId = quoted.messageId;
       continue;
     }
     if (type === 2) {
@@ -542,10 +554,75 @@ function parseInboundContent(
     return {
       kind: "image",
       ...(text === undefined ? {} : { text }),
+      ...(quotedText === undefined ? {} : { quotedText }),
+      ...(quotedMessageId === undefined ? {} : { quotedMessageId }),
       images,
     };
   }
-  return text === undefined ? null : { kind: "text", text };
+  return text === undefined
+    ? null
+    : {
+        kind: "text",
+        text,
+        ...(quotedText === undefined ? {} : { quotedText }),
+        ...(quotedMessageId === undefined ? {} : { quotedMessageId }),
+      };
+}
+
+function parseQuotedReference(value: unknown): {
+  text?: string;
+  messageId?: string;
+} {
+  if (value === undefined) {
+    return {};
+  }
+  const reference = requiredRecord(value, "微信引用消息无效");
+  const title = optionalBoundedString(
+    reference.title,
+    "微信引用消息标题无效",
+    10_000,
+  )?.trim();
+  const messageItemValue = reference.message_item;
+  let messageText: string | undefined;
+  let messageId: string | undefined;
+  if (messageItemValue !== undefined) {
+    const messageItem = requiredRecord(
+      messageItemValue,
+      "微信引用消息内容无效",
+    );
+    if (optionalSafeInteger(
+      messageItem.type,
+      "微信引用消息类型无效",
+    ) === 1) {
+      const textItem = requiredRecord(
+        messageItem.text_item,
+        "微信引用文本内容无效",
+      );
+      messageText = optionalBoundedString(
+        textItem.text,
+        "微信引用文本无效",
+        100_000,
+      )?.trim();
+    }
+    messageId = optionalBoundedString(
+      messageItem.msg_id,
+      "微信引用消息 ID 无效",
+      64,
+    );
+    if (messageId !== undefined && !/^\d{1,64}$/u.test(messageId)) {
+      throw new WeixinProtocolError(
+        "invalid-response",
+        "微信引用消息 ID 无效",
+      );
+    }
+  }
+  const parts = [title, messageText].filter(
+    (part): part is string => part !== undefined && part.length > 0,
+  );
+  return {
+    ...(parts.length === 0 ? {} : { text: parts.join(" | ") }),
+    ...(messageId === undefined ? {} : { messageId }),
+  };
 }
 
 function parseImageReference(value: unknown): WeixinImageReference {

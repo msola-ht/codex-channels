@@ -167,6 +167,66 @@ describe("WeixinProtocolClient", () => {
     );
   });
 
+  it("extracts bounded quoted text from a Weixin ref_msg", async () => {
+    const client = createClient({
+      fetchImpl: vi.fn(async () => new Response(exactMessageIds({
+        ret: 0,
+        get_updates_buf: "next-cursor",
+        msgs: [message("7", {
+          item_list: [{
+            type: 1,
+            text_item: { text: "这句话是什么意思？" },
+            ref_msg: {
+              title: "小马",
+              message_item: {
+                type: 1,
+                text_item: { text: "原始消息" },
+              },
+            },
+          }],
+        })],
+      }), { status: 200 })),
+    });
+
+    await expect(client.getUpdates("")).resolves.toMatchObject({
+      messages: [{
+        kind: "text",
+        text: "这句话是什么意思？",
+        quotedText: "小马 | 原始消息",
+      }],
+    });
+  });
+
+  it("preserves the exact referenced message ID from a Weixin ref_msg", async () => {
+    const client = createClient({
+      fetchImpl: vi.fn(async () => new Response(exactMessageIds({
+        ret: 0,
+        get_updates_buf: "next-cursor",
+        msgs: [message("8", {
+          item_list: [{
+            type: 1,
+            text_item: { text: "引用测试" },
+            ref_msg: {
+              message_item: {
+                type: 0,
+                msg_id: "9007199254740993123",
+                button_item_list: [],
+              },
+            },
+          }],
+        })],
+      }), { status: 200 })),
+    });
+
+    await expect(client.getUpdates("")).resolves.toMatchObject({
+      messages: [{
+        kind: "text",
+        text: "引用测试",
+        quotedMessageId: "9007199254740993123",
+      }],
+    });
+  });
+
   it("classifies unsupported messages without exposing their content", async () => {
     const client = createClient({
       fetchImpl: vi.fn(async () => new Response(exactMessageIds({

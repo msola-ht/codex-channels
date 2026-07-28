@@ -22,8 +22,10 @@ import {
 import {
   createFeishuOAuthApi,
   FeishuEventConnection,
+  FeishuMessageError,
   FeishuMessageClient,
   type FeishuEventConnectionOptions,
+  type FeishuQuotedMessagePort,
 } from "./client.js";
 import {
   FeishuCommandCenter,
@@ -59,6 +61,7 @@ interface FeishuEventConnectionPort {
 interface FeishuSurfaceDependencies {
   messagePort?: FeishuMessagePort;
   imagePort?: FeishuImagePort;
+  quotedMessagePort?: FeishuQuotedMessagePort;
   createEventConnection: (
     options: FeishuEventConnectionOptions,
   ) => FeishuEventConnectionPort;
@@ -139,11 +142,12 @@ export class FeishuSurface implements SurfaceAdapter {
           ...(options.openApiAgent
             ? { httpAgent: options.openApiAgent }
             : {}),
-          ...(options.disableEnvironmentProxy
-            ? { disableEnvironmentProxy: true }
-            : {}),
-        });
+        ...(options.disableEnvironmentProxy
+          ? { disableEnvironmentProxy: true }
+          : {}),
+      });
     const messagePort = dependencies.messagePort ?? client!;
+    const quotedMessages = dependencies.quotedMessagePort ?? client;
     this.images = dependencies.imagePort ?? new FeishuImageStore(
       options.uploadsDirectory,
       client!,
@@ -213,7 +217,26 @@ export class FeishuSurface implements SurfaceAdapter {
       },
       this.applicationSetup,
       this.interactions,
-      { quietWindowMs: 0 },
+      {
+        quietWindowMs: 0,
+        ...(quotedMessages === undefined
+          ? {}
+          : {
+              readQuotedText: (messageId: string) =>
+                quotedMessages.readQuotedText(messageId),
+              onQuotedTextError: (error: unknown) => {
+                this.logger.warn(
+                  {
+                    surface: "feishu",
+                    errorCode: error instanceof FeishuMessageError
+                      ? error.code
+                      : "unknown",
+                  },
+                  "飞书引用消息读取失败，已忽略引用上下文",
+                );
+              },
+            }),
+      },
     );
     this.commandCenter = new FeishuCommandCenter(
       this.output,

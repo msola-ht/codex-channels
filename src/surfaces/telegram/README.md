@@ -8,6 +8,7 @@
 - `constants.ts`：Telegram Surface 的稳定账号标识。
 - `bot.ts`：注册 Telegram SDK 处理器，执行访问检查，把标准命令或普通输入提交给 Application；
   同一 `media_group_id` 的图片按 Actor 合并为一次最多 4 张的 Application 输入；
+  普通文本与图片说明可读取 `reply_to_message` 自带的文本或说明文字并作为明确引用上下文提交；
   `/queue <描述>` 把纯文本排到下一 Turn，`/rules <init|check>` 只操作当前 Workspace 且不提供
   强制覆盖；同时发送热加载、自动重启、重装要求和失败等配置
   生命周期通知，Workspace 新增通知带直接切换按钮；启动消息只使用组合根注入的 Gateway

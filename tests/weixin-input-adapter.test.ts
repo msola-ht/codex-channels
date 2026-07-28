@@ -72,6 +72,191 @@ describe("WeixinInputAdapter", () => {
     expect(onFatal).not.toHaveBeenCalled();
   });
 
+  it("resolves an authorized user quote from the bounded process cache", async () => {
+    let delivered = false;
+    const client: WeixinProtocolClient = {
+      getUpdates: vi.fn(async (_cursor, signal) => {
+        if (!delivered) {
+          delivered = true;
+          return {
+            cursor: "cursor-quote",
+            messages: [
+              {
+                kind: "text" as const,
+                messageId: "100",
+                actorId,
+                conversationId: actorId,
+                contextToken: "context-original",
+                text: "原始用户消息",
+              },
+              {
+                kind: "text" as const,
+                messageId: "101",
+                actorId,
+                conversationId: actorId,
+                contextToken: "context-reply",
+                text: "引用测试",
+                quotedMessageId: "100",
+              },
+            ],
+          };
+        }
+        return await waitForAbort(signal);
+      }),
+      sendText: vi.fn(async () => {}),
+    };
+    const cursorStore = cursorStoreFixture();
+    const service = serviceFixture();
+    const adapter = new WeixinInputAdapter({
+      accountId,
+      client,
+      cursorStore,
+      service,
+      outbox: outboxFixture(),
+      access: accessFixture(true),
+      replyContexts: new WeixinReplyContextStore(accountId),
+      onFatal: vi.fn(),
+    });
+
+    await adapter.start();
+    await vi.waitFor(() => {
+      expect(cursorStore.set).toHaveBeenCalledWith(
+        accountId,
+        "cursor-quote",
+      );
+    }, { timeout: 2_000 });
+    await adapter.stop();
+
+    expect(service.submit).toHaveBeenNthCalledWith(
+      1,
+      target,
+      "原始用户消息",
+    );
+    expect(service.submit).toHaveBeenNthCalledWith(
+      2,
+      target,
+      "以下引用来自平台原生引用关系，已由 Gateway 验证（仅作上下文）：\n> 原始用户消息\n\n当前消息：\n引用测试",
+    );
+  });
+
+  it("processes only the current text when a Weixin quote cache misses", async () => {
+    let delivered = false;
+    const client: WeixinProtocolClient = {
+      getUpdates: vi.fn(async (_cursor, signal) => {
+        if (!delivered) {
+          delivered = true;
+          return {
+            cursor: "cursor-quote-miss",
+            messages: [{
+              kind: "text" as const,
+              messageId: "102",
+              actorId,
+              conversationId: actorId,
+              contextToken: "context-reply",
+              text: "重启后的引用测试",
+              quotedMessageId: "unknown",
+            }],
+          };
+        }
+        return await waitForAbort(signal);
+      }),
+      sendText: vi.fn(async () => {}),
+    };
+    const cursorStore = cursorStoreFixture();
+    const service = serviceFixture();
+    const adapter = new WeixinInputAdapter({
+      accountId,
+      client,
+      cursorStore,
+      service,
+      outbox: outboxFixture(),
+      access: accessFixture(true),
+      replyContexts: new WeixinReplyContextStore(accountId),
+      onFatal: vi.fn(),
+    });
+
+    await adapter.start();
+    await vi.waitFor(() => {
+      expect(cursorStore.set).toHaveBeenCalledWith(
+        accountId,
+        "cursor-quote-miss",
+      );
+    }, { timeout: 2_000 });
+    await adapter.stop();
+
+    expect(service.submit).toHaveBeenCalledWith(
+      target,
+      "重启后的引用测试",
+    );
+  });
+
+  it("does not cache quoted text from an unauthorized Weixin message", async () => {
+    let delivered = false;
+    const client: WeixinProtocolClient = {
+      getUpdates: vi.fn(async (_cursor, signal) => {
+        if (!delivered) {
+          delivered = true;
+          return {
+            cursor: "cursor-unauthorized-quote",
+            messages: [
+              {
+                kind: "text" as const,
+                messageId: "200",
+                actorId,
+                conversationId: actorId,
+                contextToken: "context-original",
+                text: "未授权消息",
+              },
+              {
+                kind: "text" as const,
+                messageId: "201",
+                actorId,
+                conversationId: actorId,
+                contextToken: "context-reply",
+                text: "当前已授权消息",
+                quotedMessageId: "200",
+              },
+            ],
+          };
+        }
+        return await waitForAbort(signal);
+      }),
+      sendText: vi.fn(async () => {}),
+    };
+    const cursorStore = cursorStoreFixture();
+    const service = serviceFixture();
+    const access: SurfaceAccessPolicy = {
+      isAllowed: vi.fn()
+        .mockReturnValueOnce(false)
+        .mockReturnValueOnce(true),
+    };
+    const adapter = new WeixinInputAdapter({
+      accountId,
+      client,
+      cursorStore,
+      service,
+      outbox: outboxFixture(),
+      access,
+      replyContexts: new WeixinReplyContextStore(accountId),
+      onFatal: vi.fn(),
+    });
+
+    await adapter.start();
+    await vi.waitFor(() => {
+      expect(cursorStore.set).toHaveBeenCalledWith(
+        accountId,
+        "cursor-unauthorized-quote",
+      );
+    }, { timeout: 2_000 });
+    await adapter.stop();
+
+    expect(service.submit).toHaveBeenCalledOnce();
+    expect(service.submit).toHaveBeenCalledWith(
+      target,
+      "当前已授权消息",
+    );
+  });
+
   it("commits unauthorized messages without recording or submitting them", async () => {
     const controller = clientFixture();
     const cursorStore = cursorStoreFixture();

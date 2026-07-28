@@ -13,6 +13,7 @@ import { feishuCommandMenuEventKey } from "./command-center.js";
 const applicationInspectionScope = "application:application:self_manage";
 const applicationConfigurationScope = "application:application:patch";
 const requiredMessageScope = "im:message:send_as_bot";
+const requiredMessageReadScope = "im:message:readonly";
 const requiredStreamingScope = "cardkit:card:write";
 const requiredMessageEvent = "im.message.receive_v1";
 const requiredMenuEvent = "application.bot.menu_v6";
@@ -28,6 +29,7 @@ export const requiredFeishuApplicationTenantScopes = [
   applicationInspectionScope,
   applicationConfigurationScope,
   requiredMessageScope,
+  requiredMessageReadScope,
   requiredStreamingScope,
 ] as const;
 

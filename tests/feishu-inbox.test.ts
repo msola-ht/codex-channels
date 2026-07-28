@@ -121,6 +121,19 @@ describe("FeishuInbox", () => {
     });
   });
 
+  it("preserves the validated Feishu reply parent identifier", async () => {
+    const fixture = createFixture();
+
+    expect(fixture.inbox.receive(createEvent({
+      parentId: "om_parent",
+    }))).toEqual({ status: "accepted" });
+    await fixture.inbox.close();
+
+    expect(fixture.handled).toEqual([
+      expect.objectContaining({ parentId: "om_parent" }),
+    ]);
+  });
+
   it("accepts a private image key without downloading in the SDK callback", async () => {
     const fixture = createFixture();
 

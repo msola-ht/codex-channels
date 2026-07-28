@@ -28,10 +28,11 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
   版本响应。
 - `application-setup.ts`：生成精简 Doctor 和缺失权限授权卡片，绑定 App、Chat、Actor 和
   一次性令牌，管理有限任务、取消和安全结果。
-- `client.ts`：官方 SDK、事件长连接、消息与 CardKit 窄客户端及生命周期隔离。
+- `client.ts`：官方 SDK、事件长连接、消息读取/发送与 CardKit 窄客户端及生命周期隔离。
+- `inbound-content.ts`：统一严格解析入站与被引用消息的文本、富文本和图片元素。
 - `message-content.ts`：中和平台原生提及标签并生成飞书 `post + md` 降级内容。
 - `operation-format.ts`：把单个操作终态渲染为包含脱敏详情的静态 CardKit Markdown。
-- `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪。
+- `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪，保留回复事件的 `parent_id`。
 - `menu-event.ts`：严格裁剪 `application.bot.menu_v6` 的 App、Actor、事件和菜单 Key。
 - `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理；连续图片在一秒静默
   窗口内收集，普通文本与命令仍沿用既有顺序路径。
@@ -78,6 +79,11 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
   可重试错误语义。
 - 原生流式额外需要应用权限 `cardkit:card:write`。新扫码应用会声明该权限；已有应用由 Owner
   通过 `/feishu doctor` 只增量开通缺失权限，再由 Owner 发布，无需重新扫码或申请用户 OAuth。
+- 显式回复消息时使用 `parent_id` 按需读取一条被引用消息，需要应用权限
+  `im:message:readonly`。文本、富文本和 CardKit 只提取受支持的可见文字，忽略按钮、输入值与
+  引用附件；不扫描历史消息、不下载引用中的附件，也不持久化引用正文。引用读取失败时记录
+  受限错误码并降级为只处理当前消息，不因可选上下文丢失当前输入。新扫码应用会声明该权限，
+  已有应用由 Owner 通过 `/feishu doctor` 增量开通。
 - 扫码 Setup 在凭据与 Bot 身份验证并原子保存连接配置后，直接复用 Application v7 配置能力，
   保留已有菜单并自动发布 `codexc_home` 悬浮菜单、长连接菜单事件与卡片回调。发布失败时保留
   已验证连接配置，只输出稳定的 `/feishu doctor` 恢复入口；手动凭据 Setup 不直接修改远端应用。

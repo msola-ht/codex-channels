@@ -12,6 +12,7 @@ import {
 } from "../../conversation-core/index.js";
 import { parseSlashCommand } from "../slash-command.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
+import { formatQuotedInput } from "../quoted-input.js";
 
 import type {
   FeishuCommandCenter,
@@ -67,7 +68,11 @@ export class FeishuConversationAdapter {
     private readonly interactions?: {
       stopForActor(target: ConversationTarget, actorId: string): boolean;
     },
-    inputOptions: { quietWindowMs?: number } = { quietWindowMs: 0 },
+    private readonly inputOptions: {
+      quietWindowMs?: number;
+      readQuotedText?(messageId: string): Promise<string | undefined>;
+      onQuotedTextError?(error: unknown): void;
+    } = { quietWindowMs: 0 },
   ) {
     this.commands = new ConversationCommandService(conversations);
     this.inputs = new SurfaceInputCoalescer(
@@ -138,9 +143,10 @@ export class FeishuConversationAdapter {
         );
         return;
       }
+      const quotedText = await this.readQuotedText(message);
       const submission = await this.conversations.submit(
         message.target,
-        message.text,
+        formatQuotedInput(message.text, quotedText),
       );
       if (!submission.steered) {
         return;
@@ -372,11 +378,22 @@ export class FeishuConversationAdapter {
       const images = await Promise.all(message.imageKeys.map((imageKey) =>
         this.images.download(message.messageId, imageKey)
       ));
+      const quotedText = await this.readQuotedText(message);
+      const currentText = message.text?.trim();
       return {
         target: message.target,
         actorId: message.actorId,
         sequence,
-        ...(message.text?.trim().length ? { text: message.text } : {}),
+        ...(currentText
+          ? { text: formatQuotedInput(currentText, quotedText) }
+          : quotedText === undefined
+            ? {}
+            : {
+                text: formatQuotedInput(
+                  "请查看这张图片并根据图片内容协助我。",
+                  quotedText,
+                ),
+              }),
         localImages: images.map((image) => ({
           path: image.path,
           bytes: image.bytes,
@@ -392,6 +409,23 @@ export class FeishuConversationAdapter {
         messages[0]!.target.conversationId,
         "已将图片追加到当前 Turn。",
       );
+    }
+  }
+
+  private async readQuotedText(
+    message: FeishuInboxMessage,
+  ): Promise<string | undefined> {
+    if (
+      message.parentId === undefined
+      || this.inputOptions.readQuotedText === undefined
+    ) {
+      return undefined;
+    }
+    try {
+      return await this.inputOptions.readQuotedText(message.parentId);
+    } catch (error) {
+      this.inputOptions.onQuotedTextError?.(error);
+      return undefined;
     }
   }
 

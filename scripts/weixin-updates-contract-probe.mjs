@@ -166,6 +166,28 @@ export function selectWeixinImageContext(summary, allowedUserIds) {
   return selected;
 }
 
+export function continueWeixinUpdatesContract({
+  client,
+  previous,
+  baseUrl,
+  botToken,
+  signal,
+}) {
+  const cursor = previous?.[responseCursor];
+  if (typeof cursor !== "string" || cursor.length === 0) {
+    throw new WeixinUpdatesContractError(
+      "invalid-input",
+      "微信上一批次没有可继续使用的内存游标",
+    );
+  }
+  return client.pollOnce({
+    baseUrl,
+    botToken,
+    cursor,
+    signal,
+  });
+}
+
 export async function runWeixinUpdatesSequence({
   client,
   baseUrl,
@@ -329,6 +351,36 @@ function summarizeMessage(value, messageIdLexeme) {
     "微信消息发送者无效",
     1_024,
   );
+  const references = items.flatMap((item) => {
+    const itemRecord = requiredRecord(item);
+    if (itemRecord.ref_msg === undefined) {
+      return [];
+    }
+    const reference = requiredRecord(itemRecord.ref_msg);
+    const referencedItem = reference.message_item === undefined
+      ? undefined
+      : requiredRecord(reference.message_item);
+    const referencedText = referencedItem?.text_item === undefined
+      ? undefined
+      : requiredRecord(referencedItem.text_item).text;
+    return [{
+      referenceFields: safeFieldNames(reference),
+      hasTitle: typeof reference.title === "string"
+        && reference.title.length > 0,
+      referencedItemFields: referencedItem === undefined
+        ? []
+        : safeFieldNames(referencedItem),
+      referencedMessageIdShape: referencedMessageIdShape(
+        referencedItem?.msg_id,
+      ),
+      referencedItemType: optionalSafeInteger(
+        referencedItem?.type,
+        "ref_msg.message_item.type",
+      ),
+      hasReferencedText: typeof referencedText === "string"
+        && referencedText.length > 0,
+    }];
+  });
   return {
     fromUserShape: fromUserId.endsWith("@im.wechat")
       ? "wechat-user"
@@ -337,11 +389,45 @@ function summarizeMessage(value, messageIdLexeme) {
     messageState: optionalSafeInteger(record.message_state, "message_state"),
     itemTypes: items.map((item) =>
       optionalSafeInteger(requiredRecord(item).type, "item.type") ?? 0),
+    ...(clientIdShape(record.client_id) === "missing"
+      ? {}
+      : { clientIdShape: clientIdShape(record.client_id) }),
+    ...(references.length === 0 ? {} : { references }),
     hasContextToken: typeof record.context_token === "string"
       && record.context_token.length > 0,
     messageIdDigits: messageIdLexeme.replace(/^-?/u, "").length,
     messageIdSafeInteger: isSafeIntegerLexeme(messageIdLexeme),
   };
+}
+
+function safeFieldNames(value) {
+  return Object.keys(value)
+    .filter((field) => /^[a-z][a-z0-9_]{0,63}$/u.test(field))
+    .sort()
+    .slice(0, 20);
+}
+
+function referencedMessageIdShape(value) {
+  if (typeof value !== "string" || value.length === 0) {
+    return "missing";
+  }
+  if (/^\d{1,64}$/u.test(value)) {
+    return "numeric";
+  }
+  if (/^codex-connect:\d{1,20}-[0-9a-f]{8}$/u.test(value)) {
+    return "codex-connect-client";
+  }
+  return "other";
+}
+
+function clientIdShape(value) {
+  if (typeof value !== "string" || value.length === 0) {
+    return "missing";
+  }
+  if (/^codex-connect:\d{1,20}-[0-9a-f]{8}$/u.test(value)) {
+    return "codex-connect-client";
+  }
+  return "other";
 }
 
 function extractReplyContexts(value) {

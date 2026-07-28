@@ -24,6 +24,7 @@ function createEvent(): Record<string, unknown> {
       chat_type: "p2p",
       message_type: "text",
       content: "{\"text\":\"hello\"}",
+      parent_id: "om_parent",
       root_id: "ignored",
     },
   };
@@ -42,6 +43,7 @@ describe("decodeFeishuMessageEvent", () => {
       chatType: "p2p",
       messageType: "text",
       content: "{\"text\":\"hello\"}",
+      parentId: "om_parent",
     });
   });
 

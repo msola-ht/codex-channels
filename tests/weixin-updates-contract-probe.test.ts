@@ -124,6 +124,45 @@ describe("Weixin getupdates contract probe", () => {
     expect(JSON.stringify(result)).not.toContain("9007199254740993");
   });
 
+  it("reports quoted structure without retaining quoted text", () => {
+    const result = summarizeResponse(JSON.stringify({
+      ret: 0,
+      msgs: [{
+        message_id: 123,
+        from_user_id: "private-user@im.wechat",
+        message_type: 1,
+        message_state: 2,
+        context_token: "context-secret",
+        item_list: [{
+          type: 1,
+          text_item: { text: "current private body" },
+          ref_msg: {
+            title: "private author",
+            message_item: {
+              type: 1,
+              msg_id: "codex-connect:1785210000000-0123abcd",
+              text_item: { text: "quoted private body" },
+            },
+          },
+        }],
+      }],
+      get_updates_buf: "cursor-secret",
+    }));
+
+    expect(result.messages[0]).toMatchObject({
+      references: [{
+        referenceFields: ["message_item", "title"],
+        hasTitle: true,
+        referencedItemFields: ["msg_id", "text_item", "type"],
+        referencedMessageIdShape: "codex-connect-client",
+        referencedItemType: 1,
+        hasReferencedText: true,
+      }],
+    });
+    expect(JSON.stringify(result)).not.toContain("private");
+    expect(JSON.stringify(result)).not.toContain("secret");
+  });
+
   it("fails closed on malformed message lists and IDs", () => {
     expect(() => summarizeResponse(JSON.stringify({
       ret: 0,

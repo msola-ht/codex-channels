@@ -24,6 +24,7 @@ import type {
   SurfaceConfigurationChange,
 } from "../types.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
+import { formatQuotedInput } from "../quoted-input.js";
 import {
   formatConfigurationChange,
   formatStartupNotification,
@@ -262,7 +263,10 @@ export class TelegramSurface {
         target: target(context),
         actorId: String(context.from?.id ?? ""),
         sequence: this.takeInputSequence(),
-        text: context.message.text,
+        text: formatQuotedInput(
+          context.message.text,
+          telegramQuotedText(context.message.reply_to_message),
+        ),
       });
       if (result.tail) {
         this.outbox.setTurnReplyTarget(
@@ -322,11 +326,24 @@ export class TelegramSurface {
     if (!context.message) {
       throw new Error("Telegram 图片更新缺少消息信息");
     }
+    const quotedText = telegramQuotedText(
+      context.message.reply_to_message,
+    );
+    const currentText = caption?.trim();
     const result = await this.inputs.enqueue({
       target: target(context),
       actorId: String(context.from?.id ?? ""),
       sequence,
-      ...(caption?.trim() ? { text: caption } : {}),
+      ...(currentText
+        ? { text: formatQuotedInput(currentText, quotedText) }
+        : quotedText === undefined
+          ? {}
+          : {
+              text: formatQuotedInput(
+                "请查看这张图片并根据图片内容协助我。",
+                quotedText,
+              ),
+            }),
       localImages: [{ path: image.path, bytes: image.bytes }],
     });
     if (result.tail) {
@@ -409,6 +426,13 @@ export class TelegramSurface {
       stopTyping?.();
     }
   }
+}
+
+function telegramQuotedText(
+  message: { text?: string; caption?: string } | undefined,
+): string | undefined {
+  const text = message?.text?.trim() || message?.caption?.trim();
+  return text || undefined;
 }
 
 function isSupportedImageDocument(mimeType: string | undefined, fileName: string | undefined): boolean {

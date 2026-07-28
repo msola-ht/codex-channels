@@ -426,6 +426,7 @@ describe("Feishu Surface", () => {
           "application:application:self_manage",
           "application:application:patch",
           "im:message:send_as_bot",
+          "im:message:readonly",
           "cardkit:card:write",
         ],
       );
@@ -445,6 +446,7 @@ function createFixture(
       "application:application:self_manage",
       "application:application:patch",
       "im:message:send_as_bot",
+      "im:message:readonly",
       "cardkit:card:write",
     ],
     hasPendingVersion: false,

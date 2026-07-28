@@ -8,6 +8,7 @@ import {
   type ConversationTarget,
 } from "../../conversation-core/index.js";
 import { parseSlashCommand } from "../slash-command.js";
+import { formatQuotedInput } from "../quoted-input.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import {
   formatWeixinCommandText,
@@ -31,12 +32,14 @@ export type WeixinConversationMessage =
       actorId: string;
       kind: "text";
       text: string;
+      quotedText?: string;
     }
   | {
       target: ConversationTarget;
       actorId: string;
       kind: "image";
       text?: string;
+      quotedText?: string;
       images: readonly WeixinImageReference[];
     };
 
@@ -87,7 +90,14 @@ export class WeixinConversationAdapter {
           target: message.target,
           actorId: message.actorId,
           sequence,
-          ...(message.text === undefined ? {} : { text: message.text }),
+          ...(message.text === undefined
+            ? {}
+            : {
+                text: formatQuotedInput(
+                  message.text,
+                  message.quotedText,
+                ),
+              }),
           localImages,
         });
         if (result.tail && result.submission.steered) {
@@ -97,7 +107,10 @@ export class WeixinConversationAdapter {
       }
       const command = parseSlashCommand(message.text);
       if (command === null) {
-        await this.conversations.submit(message.target, message.text);
+        await this.conversations.submit(
+          message.target,
+          formatQuotedInput(message.text, message.quotedText),
+        );
         return;
       }
       if (command.name === "start" || command.name === "help") {
