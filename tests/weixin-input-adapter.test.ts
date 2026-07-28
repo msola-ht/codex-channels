@@ -86,7 +86,7 @@ describe("WeixinInputAdapter", () => {
               actorId,
               conversationId: actorId,
               contextToken: "context-approval",
-              text: "/approve opaque-token once",
+              text: "/批准一次 opaque-token",
             }],
           };
         }
@@ -123,7 +123,7 @@ describe("WeixinInputAdapter", () => {
     expect(interactions.handleText).toHaveBeenCalledWith(
       target,
       actorId,
-      "/approve opaque-token once",
+      "/批准一次 opaque-token",
     );
     expect(service.submit).not.toHaveBeenCalled();
   });

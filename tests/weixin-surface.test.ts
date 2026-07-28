@@ -149,17 +149,17 @@ describe("WeixinSurface", () => {
     });
     await vi.waitFor(() => {
       expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
-        text: expect.stringContaining("/approve "),
+        text: expect.stringContaining("/批准一次 "),
       }));
     });
     const command = sendText.mock.calls
       .map(([input]) => input.text)
-      .find((text) => /^\/approve [A-Za-z0-9_-]+ once$/u.test(text));
+      .find((text) => /^\/批准一次 [A-Za-z0-9_-]+$/u.test(text));
     const token = command?.match(
-      /^\/approve ([A-Za-z0-9_-]+) once$/u,
+      /^\/批准一次 ([A-Za-z0-9_-]+)$/u,
     )?.[1];
     expect(token).toBeDefined();
-    releaseApproval(`/approve ${token!} once`);
+    releaseApproval(`/批准一次 ${token!}`);
     await expect(pending).resolves.toEqual({
       type: "approval",
       approved: true,

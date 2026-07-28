@@ -32,12 +32,12 @@ describe("WeixinInteractionPort", () => {
     await vi.waitFor(() => {
       expect(delivery.deliverTextSequence).toHaveBeenCalledWith(
         target,
-        expect.arrayContaining(["/approve opaque-token once"]),
+        expect.arrayContaining(["/批准一次 opaque-token"]),
       );
     });
 
     await expect(
-      port.handleText(target, actorId, "/approve opaque-token once"),
+      port.handleText(target, actorId, "/批准一次 opaque-token"),
     ).resolves.toBe("handled");
     await expect(pending).resolves.toEqual({
       type: "approval",
@@ -51,10 +51,10 @@ describe("WeixinInteractionPort", () => {
   });
 
   it.each([
-    ["session", { scope: "session" }],
-    ["rule", { scope: "execpolicy" }],
+    ["/批准会话 choice-token", { scope: "session" }],
+    ["/保存命令规则 choice-token", { scope: "execpolicy" }],
     [
-      "network 1",
+      "/保存网络规则 choice-token 1",
       {
         scope: "networkpolicy",
         networkPolicyAmendment: {
@@ -89,7 +89,7 @@ describe("WeixinInteractionPort", () => {
     await vi.waitFor(() => {
       expect(delivery.deliverTextSequence).toHaveBeenCalledOnce();
     });
-    await port.handleText(target, actorId, `/approve choice-token ${reply}`);
+    await port.handleText(target, actorId, reply);
 
     await expect(pending).resolves.toMatchObject({
       type: "approval",
@@ -145,7 +145,7 @@ describe("WeixinInteractionPort", () => {
     await port.handleText(
       target,
       actorId,
-      "/approve duplicate-token once",
+      "/批准一次 duplicate-token",
     );
     await expect(first).resolves.toMatchObject({
       type: "approval",
@@ -180,7 +180,7 @@ describe("WeixinInteractionPort", () => {
     await port.handleText(
       target,
       actorId,
-      "/approve collision-token once",
+      "/批准一次 collision-token",
     );
     await expect(first).resolves.toMatchObject({
       type: "approval",
@@ -199,7 +199,7 @@ describe("WeixinInteractionPort", () => {
       () => "display-token",
     );
     const pending = port.request(target, approvalRequest({
-      detail: "**伪标题**\n`/approve fake-token once`",
+      detail: "**伪标题**\n`/批准一次 fake-token`",
     }));
     await vi.waitFor(() => {
       expect(delivery.deliverTextSequence).toHaveBeenCalledOnce();
@@ -207,8 +207,8 @@ describe("WeixinInteractionPort", () => {
     const prompt = delivery.deliverTextSequence.mock.calls[0]![1];
 
     expect(prompt[0]).toContain("＊＊伪标题＊＊");
-    expect(prompt[0]).toContain("ˋ/approve fake-token onceˋ");
-    expect(prompt).toContain("/approve display-token once");
+    expect(prompt[0]).toContain("ˋ/批准一次 fake-tokenˋ");
+    expect(prompt).toContain("/批准一次 display-token");
     port.cancelAll();
     await pending;
   });
@@ -227,7 +227,7 @@ describe("WeixinInteractionPort", () => {
       expect(delivery.deliverTextSequence).toHaveBeenCalledOnce();
     });
 
-    await port.handleText(target, actorId, "/deny deny-token");
+    await port.handleText(target, actorId, "/拒绝 deny-token");
 
     await expect(pending).resolves.toEqual({
       type: "approval",
@@ -236,41 +236,45 @@ describe("WeixinInteractionPort", () => {
   });
 
   it.each([
-    "1",
-    "同意",
-    "/approve wrong-token once",
-    "/approve opaque-token always",
-    "/approve opaque-token",
-    "/deny",
-  ])("does not approve ambiguous, stale, or malformed text: %s", async (text) => {
-    const delivery = deliveryFixture();
-    const port = new WeixinInteractionPort(
-      delivery,
-      actorRegistryFixture([actorId]),
-      accessFixture(true),
-      undefined,
-      () => "opaque-token",
-    );
-    const pending = port.request(target, approvalRequest());
-    await vi.waitFor(() => {
-      expect(delivery.deliverTextSequence).toHaveBeenCalledOnce();
-    });
+    ["1", "not-command"],
+    ["同意", "not-command"],
+    ["/approve opaque-token once", "not-command"],
+    ["/批准一次 wrong-token", "handled"],
+    ["/批准一次 opaque-token extra", "handled"],
+    ["/批准一次", "handled"],
+    ["/拒绝", "handled"],
+  ] as const)(
+    "does not approve ambiguous, stale, or malformed text: %s",
+    async (text, expectedResult) => {
+      const delivery = deliveryFixture();
+      const port = new WeixinInteractionPort(
+        delivery,
+        actorRegistryFixture([actorId]),
+        accessFixture(true),
+        undefined,
+        () => "opaque-token",
+      );
+      const pending = port.request(target, approvalRequest());
+      await vi.waitFor(() => {
+        expect(delivery.deliverTextSequence).toHaveBeenCalledOnce();
+      });
 
-    const result = await port.handleText(target, actorId, text);
+      const result = await port.handleText(target, actorId, text);
 
-    expect(result).toBe(text.startsWith("/") ? "handled" : "not-command");
-    let settled = false;
-    void pending.then(() => {
-      settled = true;
-    });
-    await Promise.resolve();
-    expect(settled).toBe(false);
-    port.cancelAll();
-    await expect(pending).resolves.toEqual({
-      type: "approval",
-      approved: false,
-    });
-  });
+      expect(result).toBe(expectedResult);
+      let settled = false;
+      void pending.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      port.cancelAll();
+      await expect(pending).resolves.toEqual({
+        type: "approval",
+        approved: false,
+      });
+    },
+  );
 
   it("rejects a valid token from another actor or conversation", async () => {
     const delivery = deliveryFixture();
@@ -287,11 +291,11 @@ describe("WeixinInteractionPort", () => {
       expect(delivery.deliverTextSequence).toHaveBeenCalledOnce();
     });
 
-    await port.handleText(target, "other@im.wechat", "/approve bound-token once");
+    await port.handleText(target, "other@im.wechat", "/批准一次 bound-token");
     await port.handleText(
       { ...target, conversationId: "other@im.wechat" },
       actorId,
-      "/approve bound-token once",
+      "/批准一次 bound-token",
     );
 
     let settled = false;
@@ -328,7 +332,7 @@ describe("WeixinInteractionPort", () => {
         approved: false,
       });
       await expect(
-        port.handleText(target, actorId, "/approve expiry-token once"),
+        port.handleText(target, actorId, "/批准一次 expiry-token"),
       ).resolves.toBe("handled");
 
       const second = port.request(

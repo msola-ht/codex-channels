@@ -288,47 +288,51 @@ function parseApprovalCommand(
   text: string,
 ): ParsedApprovalCommand | "invalid" | null {
   const normalized = text.trim();
-  if (!/^\/(?:approve|deny)(?:\s|$)/u.test(normalized)) {
+  if (
+    !/^\/(?:批准一次|批准会话|保存命令规则|保存网络规则|拒绝)(?:\s|$)/u
+      .test(normalized)
+  ) {
     return null;
   }
   const parts = normalized.split(/\s+/u);
   if (
-    parts[0] === "/deny"
+    parts[0] === "/拒绝"
     && parts.length === 2
     && interactionTokenPattern.test(parts[1]!)
   ) {
     return { action: "deny", token: parts[1]! };
   }
   if (
-    parts[0] !== "/approve"
-    || !interactionTokenPattern.test(parts[1] ?? "")
+    !interactionTokenPattern.test(parts[1] ?? "")
   ) {
     return "invalid";
   }
   if (
-    parts.length === 3
+    parts.length === 2
     && (
-      parts[2] === "once"
-      || parts[2] === "session"
-      || parts[2] === "rule"
+      parts[0] === "/批准一次"
+      || parts[0] === "/批准会话"
+      || parts[0] === "/保存命令规则"
     )
   ) {
     return {
       action: "approve",
       token: parts[1]!,
-      scope: parts[2],
+      scope: parts[0] === "/批准一次"
+        ? "once"
+        : parts[0] === "/批准会话" ? "session" : "rule",
     };
   }
   if (
-    parts.length === 4
-    && parts[2] === "network"
-    && /^[1-9]\d*$/u.test(parts[3]!)
+    parts.length === 3
+    && parts[0] === "/保存网络规则"
+    && /^[1-9]\d*$/u.test(parts[2]!)
   ) {
     return {
       action: "approve",
       token: parts[1]!,
       scope: "network",
-      amendmentNumber: Number(parts[3]),
+      amendmentNumber: Number(parts[2]),
     };
   }
   return "invalid";
@@ -362,15 +366,15 @@ function renderApprovalPrompt(
   token: string,
 ): readonly string[] {
   const choices = [
-    `/approve ${token} once`,
-    ...(request.allowSession ? [`/approve ${token} session`] : []),
+    `/批准一次 ${token}`,
+    ...(request.allowSession ? [`/批准会话 ${token}`] : []),
     ...(request.execPolicyAmendment
-      ? [`/approve ${token} rule`]
+      ? [`/保存命令规则 ${token}`]
       : []),
     ...(request.networkPolicyAmendments ?? []).map(
-      (_amendment, index) => `/approve ${token} network ${index + 1}`,
+      (_amendment, index) => `/保存网络规则 ${token} ${index + 1}`,
     ),
-    `/deny ${token}`,
+    `/拒绝 ${token}`,
   ];
   return [
     [
