@@ -309,9 +309,10 @@ UTF-16 码元。
 
 `src/surfaces/weixin/updates-monitor.ts` 在模块内部组合 Client 与游标 Store，但不自行拥有
 后台任务：逐条顺序投递文本，按原始消息 ID 做有界进程内去重，仅在整批处理成功后原子提交响应
-游标；处理失败保留旧游标以允许重放。网络、限流和服务端瞬时错误只做有限重试，协议/API 错误
-失败关闭，长轮询超时视为正常空轮询，取消立即退出。该监控器仍未注册为消息 Surface，也未调用
-Application；其生命周期和消息处理由输入 Adapter 组合。
+游标；处理失败保留旧游标以允许重放。网络、限流和服务端瞬时错误连续 3 次后进入 30 秒退避并
+继续轮询；官方 `-14` Bot Token 失效返回码暂停账号一小时并提示
+重新 Setup，其他未知 API/协议错误失败关闭。长轮询超时视为正常空轮询，取消立即退出。该监控器
+的生命周期和消息处理由输入 Adapter 组合。
 
 `src/surfaces/weixin/input-adapter.ts` 已实现上述输入侧所有权：按固定账号构造微信私聊目标，
 调用 `SurfaceAccessPolicy` 后记录 Actor 并提交普通文本给 `ConversationService`；未授权消息
@@ -358,8 +359,10 @@ Bootstrap 组合工厂、撤权绑定清理和显式启用配置已实现；Setu
 - 接入共享命令目录、解析和 `ConversationCommandService`，不重新实现 Thread、模型、Fast、
   Workspace、Goal、用量或额度逻辑。
 - 微信没有斜杠命令提示时，提供简短文本帮助和常用命令列表；命令本身仍使用统一规范名称。
-- 进行中：增加账号、运行条件、最近授权上下文、游标检查点和凭据可用性的 Doctor 观测，不显示
-  Token、`context_token`、游标或原始响应；独立 Doctor 不竞争消费 `getupdates`。
+- 进行中：微信 `/status` 已追加当前进程内的轮询、短重试、退避、Token 失效暂停或停止状态，
+  以及最近成功时间、连续失败次数和预计恢复时间；不显示 Token、`context_token`、游标或原始
+  响应，也不竞争消费 `getupdates`。账号、最近授权上下文、游标检查点和凭据可用性的独立 Doctor
+  观测仍待后续切片。
 - 已完成：接入 Turn 开始、最终文本和完成/停止/失败统计，并且只向仍在允许名单中的 Actor 发送。
   经单独持久化评审后，重启上线通知使用独立加密回复上下文；一般配置主动通知仍不支持。
 - 已完成：复用共享 `display.operation_updates` 三档配置，只把完成、失败和拒绝的操作终态作为

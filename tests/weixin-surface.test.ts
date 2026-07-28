@@ -278,7 +278,7 @@ describe("WeixinSurface", () => {
             "api-error",
             "private upstream response",
             undefined,
-            -14,
+            -15,
           );
         }),
         sendText: vi.fn(async () => {}),
@@ -300,6 +300,48 @@ describe("WeixinSurface", () => {
     expect(
       (onFatal.mock.calls[0]?.[0] as Error).message,
     ).not.toContain("private");
+    await surface.stop();
+  });
+
+  it("logs a stale credential pause without stopping the Gateway", async () => {
+    const onFatal = vi.fn();
+    const warn = vi.fn();
+    const surface = new WeixinSurface({
+      accountId,
+      client: {
+        getUpdates: vi.fn(async () => {
+          throw new WeixinProtocolError(
+            "api-error",
+            "private upstream response",
+            undefined,
+            -14,
+          );
+        }),
+        sendText: vi.fn(async () => {}),
+      },
+      cursorStore: cursorStoreFixture(),
+      service: serviceFixture(),
+      access: accessFixture(true),
+      logger: { warn } as unknown as pino.Logger,
+      onFatal,
+    });
+
+    await surface.start();
+    await vi.waitFor(() => {
+      expect(warn).toHaveBeenCalledWith(
+        {
+          surface: "weixin",
+          accountId,
+          attempt: 1,
+          code: "api-error",
+          delayMs: 3_600_000,
+          phase: "credential-pause",
+          returnCode: -14,
+        },
+        "微信 Bot Token 已失效，已暂停轮询；请重新运行 codexc setup",
+      );
+    });
+    expect(onFatal).not.toHaveBeenCalled();
     await surface.stop();
   });
 

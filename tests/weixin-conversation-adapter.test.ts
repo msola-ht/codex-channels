@@ -352,6 +352,49 @@ describe("WeixinConversationAdapter", () => {
     );
   });
 
+  it("adds the current Weixin polling health to /status", async () => {
+    const notifyText = vi.fn(() => true);
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({
+        status: vi.fn(() => ({
+          workspaceId: "main",
+          workspaceName: "Main",
+          cwd: "/workspace",
+          threadId: "thread",
+          turnId: null,
+          model: "gpt-test",
+          effort: "medium",
+          serviceTier: null,
+          modelPending: false,
+          effortPending: false,
+          fastModePending: false,
+        })),
+      }),
+      { notifyText },
+      undefined,
+      {
+        pollingHealth: {
+          snapshot: () => ({
+            phase: "backoff",
+            consecutiveFailures: 3,
+            lastSuccessfulPollAtMs: 1_000,
+            resumeAtMs: 31_500,
+          }),
+        },
+        now: () => 1_500,
+      },
+    );
+
+    await adapter.handle({ ...message, text: "/status" });
+
+    expect(notifyText).toHaveBeenCalledWith(
+      target,
+      expect.stringContaining(
+        "微信链路：退避中\n\n连续失败：3 次\n\n最近成功轮询：1秒内\n\n预计恢复：30秒后",
+      ),
+    );
+  });
+
   it("uses the shared service for commands beyond the initial basic set", async () => {
     const listSessions = vi.fn(async () => []);
     const status = vi.fn(() => ({ threadId: undefined }));

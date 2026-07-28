@@ -10,6 +10,9 @@ import type { WeixinUpdatesCursorStore } from "./updates-cursor-store.js";
 export interface WeixinUpdatesRetryEvent {
   attempt: number;
   code: WeixinProtocolErrorCode;
+  phase: "backoff" | "credential-pause" | "retry";
+  delayMs: number;
+  returnCode?: number;
   status?: number;
 }
 
@@ -27,8 +30,14 @@ export interface CreateWeixinUpdatesMonitorOptions {
   maximumConsecutiveFailures?: number;
   recentMessageCapacity?: number;
   retryDelayMs?: number;
+  backoffDelayMs?: number;
+  staleCredentialPauseMs?: number;
+  onPollStart?(): void;
+  onPollSuccess?(atMs: number): void;
   onRetry?(event: WeixinUpdatesRetryEvent): void;
 }
+
+const staleCredentialReturnCode = -14;
 
 export function createWeixinUpdatesMonitor(
   options: CreateWeixinUpdatesMonitorOptions,
@@ -46,6 +55,14 @@ export function createWeixinUpdatesMonitor(
     options.retryDelayMs ?? 2_000,
     "微信长轮询重试间隔无效",
   );
+  const backoffDelayMs = nonNegativeNumber(
+    options.backoffDelayMs ?? 30_000,
+    "微信长轮询退避间隔无效",
+  );
+  const staleCredentialPauseMs = nonNegativeNumber(
+    options.staleCredentialPauseMs ?? 60 * 60 * 1_000,
+    "微信失效凭据暂停时间无效",
+  );
   const recentMessageIds = new RecentMessageIds(recentMessageCapacity);
 
   return {
@@ -57,13 +74,28 @@ export function createWeixinUpdatesMonitor(
       let consecutiveFailures = 0;
       while (!signal.aborted) {
         let batch;
+        options.onPollStart?.();
         try {
           batch = await options.client.getUpdates(cursor, signal);
+          options.onPollSuccess?.(Date.now());
         } catch (error) {
           if (signal.aborted) {
             return;
           }
           if (isTimeout(error)) {
+            options.onPollSuccess?.(Date.now());
+            continue;
+          }
+          if (isStaleCredential(error)) {
+            consecutiveFailures = 0;
+            options.onRetry?.({
+              attempt: 1,
+              code: error.code,
+              phase: "credential-pause",
+              delayMs: staleCredentialPauseMs,
+              returnCode: staleCredentialReturnCode,
+            });
+            await abortableDelay(staleCredentialPauseMs, signal);
             continue;
           }
           if (!isRetryable(error)) {
@@ -71,11 +103,22 @@ export function createWeixinUpdatesMonitor(
           }
           consecutiveFailures += 1;
           if (consecutiveFailures >= maximumConsecutiveFailures) {
-            throw error;
+            options.onRetry?.({
+              attempt: consecutiveFailures,
+              code: error.code,
+              phase: "backoff",
+              delayMs: backoffDelayMs,
+              ...(error.status === undefined ? {} : { status: error.status }),
+            });
+            consecutiveFailures = 0;
+            await abortableDelay(backoffDelayMs, signal);
+            continue;
           }
           options.onRetry?.({
             attempt: consecutiveFailures,
             code: error.code,
+            phase: "retry",
+            delayMs: retryDelayMs,
             ...(error.status === undefined ? {} : { status: error.status }),
           });
           await abortableDelay(retryDelayMs, signal);
@@ -167,6 +210,12 @@ class RecentMessageIds {
 
 function isTimeout(error: unknown): boolean {
   return error instanceof WeixinProtocolError && error.code === "timeout";
+}
+
+function isStaleCredential(error: unknown): error is WeixinProtocolError {
+  return error instanceof WeixinProtocolError
+    && error.code === "api-error"
+    && error.returnCode === staleCredentialReturnCode;
 }
 
 function isRetryable(error: unknown): error is WeixinProtocolError {

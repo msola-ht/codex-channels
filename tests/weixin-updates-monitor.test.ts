@@ -11,6 +11,31 @@ import {
 const accountId = "account-fixture@im.bot";
 
 describe("WeixinUpdatesMonitor", () => {
+  it("reports each poll attempt and successful response for runtime health", async () => {
+    const controller = new AbortController();
+    const onPollStart = vi.fn();
+    const onPollSuccess = vi.fn();
+    const monitor = createWeixinUpdatesMonitor({
+      accountId,
+      client: clientFixture([
+        { cursor: "cursor", messages: [] },
+        () => {
+          controller.abort();
+          throw new WeixinProtocolError("aborted", "aborted");
+        },
+      ]),
+      cursorStore: cursorStoreFixture("cursor"),
+      handleMessage: async () => {},
+      onPollStart,
+      onPollSuccess,
+    });
+
+    await expect(monitor.run(controller.signal)).resolves.toBeUndefined();
+    expect(onPollStart).toHaveBeenCalledTimes(2);
+    expect(onPollSuccess).toHaveBeenCalledTimes(1);
+    expect(onPollSuccess).toHaveBeenCalledWith(expect.any(Number));
+  });
+
   it("delivers a batch in order and commits its cursor afterward", async () => {
     const controller = new AbortController();
     const events: string[] = [];
@@ -153,7 +178,7 @@ describe("WeixinUpdatesMonitor", () => {
     expect(cursorStore.set).toHaveBeenCalledWith(accountId, "new-cursor");
   });
 
-  it("retries constrained transient failures and resets after success", async () => {
+  it("backs off after constrained transient failures and resumes polling", async () => {
     const controller = new AbortController();
     const cursorStore = cursorStoreFixture("cursor");
     const client = clientFixture([
@@ -162,6 +187,9 @@ describe("WeixinUpdatesMonitor", () => {
       },
       () => {
         throw new WeixinProtocolError("http-error", "server", 503);
+      },
+      () => {
+        throw new WeixinProtocolError("network-error", "network");
       },
       { cursor: "cursor", messages: [] },
       () => {
@@ -176,6 +204,7 @@ describe("WeixinUpdatesMonitor", () => {
       cursorStore,
       handleMessage: async () => {},
       retryDelayMs: 0,
+      backoffDelayMs: 0,
       onRetry,
     });
 
@@ -184,22 +213,68 @@ describe("WeixinUpdatesMonitor", () => {
     expect(onRetry).toHaveBeenNthCalledWith(1, {
       attempt: 1,
       code: "network-error",
+      delayMs: 0,
+      phase: "retry",
     });
     expect(onRetry).toHaveBeenNthCalledWith(2, {
       attempt: 2,
       code: "http-error",
+      delayMs: 0,
+      phase: "retry",
       status: 503,
+    });
+    expect(onRetry).toHaveBeenNthCalledWith(3, {
+      attempt: 3,
+      code: "network-error",
+      delayMs: 0,
+      phase: "backoff",
     });
     expect(cursorStore.set).not.toHaveBeenCalled();
   });
 
-  it("does not retry API errors or batches without a commit cursor", async () => {
+  it("pauses a stale credential without stopping other Gateway surfaces", async () => {
+    const controller = new AbortController();
+    const onRetry = vi.fn();
+    const monitor = createWeixinUpdatesMonitor({
+      accountId,
+      client: clientFixture([
+        () => {
+          throw new WeixinProtocolError(
+            "api-error",
+            "stale credential",
+            undefined,
+            -14,
+          );
+        },
+        { cursor: "cursor", messages: [] },
+        () => {
+          controller.abort();
+          throw new WeixinProtocolError("aborted", "aborted");
+        },
+      ]),
+      cursorStore: cursorStoreFixture("cursor"),
+      handleMessage: async () => {},
+      staleCredentialPauseMs: 0,
+      onRetry,
+    });
+
+    await expect(monitor.run(controller.signal)).resolves.toBeUndefined();
+    expect(onRetry).toHaveBeenCalledWith({
+      attempt: 1,
+      code: "api-error",
+      delayMs: 0,
+      phase: "credential-pause",
+      returnCode: -14,
+    });
+  });
+
+  it("does not retry unknown API errors or batches without a commit cursor", async () => {
     const apiClient = clientFixture([() => {
       throw new WeixinProtocolError(
         "api-error",
         "expired",
         undefined,
-        -14,
+        -15,
       );
     }]);
     const apiRetry = vi.fn();

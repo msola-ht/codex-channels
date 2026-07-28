@@ -19,7 +19,11 @@ import { WeixinConversationAdapter } from "./conversation-adapter.js";
 import type { WeixinImagePort } from "./image-store.js";
 import type { WeixinOutbox } from "./outbox.js";
 import type { WeixinUpdatesCursorStore } from "./updates-cursor-store.js";
-import { createWeixinUpdatesMonitor } from "./updates-monitor.js";
+import {
+  createWeixinUpdatesMonitor,
+  type WeixinUpdatesRetryEvent,
+} from "./updates-monitor.js";
+import { WeixinPollingHealth } from "./polling-health.js";
 import { WeixinReplyContextStore } from "./reply-context-store.js";
 
 type WeixinSupportedMessage = Extract<
@@ -58,6 +62,7 @@ export interface WeixinInputAdapterOptions {
   actorRegistry?: ConversationActorRegistry;
   images?: Pick<WeixinImagePort, "download">;
   onFatal(error: WeixinInputFatalError): void;
+  onRetry?(event: WeixinUpdatesRetryEvent): void;
   onStopTimeout?(): void;
   closeTimeoutMs?: number;
 }
@@ -66,6 +71,7 @@ export class WeixinInputAdapter {
   readonly accountId: string;
 
   private readonly closeTimeoutMs: number;
+  private readonly health = new WeixinPollingHealth();
   private readonly monitor;
   private readonly conversations: WeixinConversationAdapter;
   private controller: AbortController | undefined;
@@ -85,13 +91,22 @@ export class WeixinInputAdapter {
       options.service,
       options.outbox,
       options.images,
-      { quietWindowMs: 1_000 },
+      {
+        quietWindowMs: 1_000,
+        pollingHealth: this.health,
+      },
     );
     this.monitor = createWeixinUpdatesMonitor({
       accountId: options.accountId,
       client: options.client,
       cursorStore: options.cursorStore,
       handleMessage: (message) => this.handle(message),
+      onPollStart: () => this.health.recordPollStart(),
+      onPollSuccess: (atMs) => this.health.recordSuccess(atMs),
+      onRetry: (event) => {
+        this.health.recordRetry(event, Date.now());
+        options.onRetry?.(event);
+      },
     });
   }
 
@@ -104,6 +119,7 @@ export class WeixinInputAdapter {
     }
     const controller = new AbortController();
     this.controller = controller;
+    this.health.start();
     const task = this.monitor.run(controller.signal);
     this.runTask = task;
     void task.catch((error: unknown) => {
@@ -219,6 +235,7 @@ export class WeixinInputAdapter {
 
   private async stopOnce(): Promise<void> {
     this.stopping = true;
+    this.health.stop();
     this.quotedTexts.clear();
     this.controller?.abort();
     await this.conversations.close();

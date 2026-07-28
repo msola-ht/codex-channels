@@ -50,6 +50,12 @@ export {
   type WeixinUpdatesRetryEvent,
 } from "./updates-monitor.js";
 export {
+  renderWeixinPollingHealth,
+  WeixinPollingHealth,
+  type WeixinPollingHealthPhase,
+  type WeixinPollingHealthSnapshot,
+} from "./polling-health.js";
+export {
   WeixinConversationAdapter,
   type WeixinConversationMessage,
 } from "./conversation-adapter.js";

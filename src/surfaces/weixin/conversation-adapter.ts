@@ -22,6 +22,10 @@ import {
   type WeixinImagePort,
 } from "./image-store.js";
 import type { WeixinOutbox } from "./outbox.js";
+import {
+  renderWeixinPollingHealth,
+  type WeixinPollingHealthSnapshot,
+} from "./polling-health.js";
 import type { WeixinImageReference } from "./protocol-client.js";
 
 const maximumInboundImageBatchBytes = 20 * 1024 * 1024;
@@ -52,7 +56,11 @@ export class WeixinConversationAdapter {
     private readonly conversations: ConversationService,
     private readonly outbox: Pick<WeixinOutbox, "notifyText">,
     private readonly images?: Pick<WeixinImagePort, "download">,
-    inputOptions: { quietWindowMs?: number } = { quietWindowMs: 0 },
+    private readonly inputOptions: {
+      quietWindowMs?: number;
+      pollingHealth?: { snapshot(): WeixinPollingHealthSnapshot };
+      now?: () => number;
+    } = { quietWindowMs: 0 },
   ) {
     this.commands = new ConversationCommandService(conversations);
     this.inputs = new SurfaceInputCoalescer(
@@ -133,7 +141,19 @@ export class WeixinConversationAdapter {
         command.name,
         command.argumentsText,
       );
-      this.notify(message.target, renderWeixinCommandResult(result));
+      const rendered = renderWeixinCommandResult(result);
+      this.notify(
+        message.target,
+        result.kind === "status" && this.inputOptions.pollingHealth
+          ? [
+              rendered,
+              renderWeixinPollingHealth(
+                this.inputOptions.pollingHealth.snapshot(),
+                this.inputOptions.now?.() ?? Date.now(),
+              ),
+            ].join("\n")
+          : rendered,
+      );
     } catch (error) {
       if (error instanceof WeixinOutputQueueError) {
         throw error;

@@ -33,6 +33,7 @@ import { WeixinReplyContextStore } from "./reply-context-store.js";
 import type { WeixinReplyContextPersistence } from "./reply-context-persistence.js";
 import { formatWeixinCommandText } from "./command-renderer.js";
 import type { WeixinUpdatesCursorStore } from "./updates-cursor-store.js";
+import type { WeixinUpdatesRetryEvent } from "./updates-monitor.js";
 import { WeixinTypingController } from "./typing-controller.js";
 
 export interface WeixinSurfaceOptions {
@@ -150,6 +151,13 @@ export class WeixinSurface implements SurfaceAdapter {
         ? {}
         : { actorRegistry: options.actorRegistry }),
       onFatal: options.onFatal,
+      onRetry: (event) => {
+        logUpdatesRetry(
+          options.logger,
+          options.accountId,
+          event,
+        );
+      },
       ...(options.inputCloseTimeoutMs === undefined
         ? {}
         : { closeTimeoutMs: options.inputCloseTimeoutMs }),
@@ -251,4 +259,36 @@ export class WeixinSurface implements SurfaceAdapter {
       }
     }
   }
+}
+
+function logUpdatesRetry(
+  logger: Logger,
+  accountId: string,
+  event: WeixinUpdatesRetryEvent,
+): void {
+  const details = {
+    surface: "weixin",
+    accountId,
+    attempt: event.attempt,
+    code: event.code,
+    delayMs: event.delayMs,
+    phase: event.phase,
+    ...(event.returnCode === undefined
+      ? {}
+      : { returnCode: event.returnCode }),
+    ...(event.status === undefined ? {} : { status: event.status }),
+  };
+  if (event.phase === "credential-pause") {
+    logger.warn(
+      details,
+      "微信 Bot Token 已失效，已暂停轮询；请重新运行 codexc setup",
+    );
+    return;
+  }
+  logger.warn(
+    details,
+    event.phase === "backoff"
+      ? "微信长轮询连续失败，进入退避后将自动恢复"
+      : "微信长轮询暂时失败，将自动重试",
+  );
 }

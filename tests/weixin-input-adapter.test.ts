@@ -72,6 +72,68 @@ describe("WeixinInputAdapter", () => {
     expect(onFatal).not.toHaveBeenCalled();
   });
 
+  it("composes live polling health into the shared /status reply", async () => {
+    let delivered = false;
+    const client: WeixinProtocolClient = {
+      getUpdates: vi.fn(async (_cursor, signal) => {
+        if (!delivered) {
+          delivered = true;
+          return {
+            cursor: "cursor-status",
+            messages: [{
+              kind: "text" as const,
+              messageId: "status-1",
+              actorId,
+              conversationId: actorId,
+              contextToken: "context-status",
+              text: "/status",
+            }],
+          };
+        }
+        return await waitForAbort(signal);
+      }),
+      sendText: vi.fn(async () => {}),
+    };
+    const outbox = outboxFixture();
+    const service = {
+      ...serviceFixture(),
+      status: vi.fn(() => ({
+        workspaceId: "main",
+        workspaceName: "Main",
+        cwd: "/workspace",
+        threadId: "thread",
+        turnId: null,
+        model: "gpt-test",
+        effort: "medium",
+        serviceTier: null,
+        modelPending: false,
+        effortPending: false,
+        fastModePending: false,
+      })),
+    } as unknown as ConversationService;
+    const adapter = new WeixinInputAdapter({
+      accountId,
+      client,
+      cursorStore: cursorStoreFixture(),
+      service,
+      outbox,
+      access: accessFixture(true),
+      replyContexts: new WeixinReplyContextStore(accountId),
+      onFatal: vi.fn(),
+    });
+
+    await adapter.start();
+    await vi.waitFor(() => {
+      expect(outbox.notifyText).toHaveBeenCalledWith(
+        target,
+        expect.stringContaining(
+          "微信链路：轮询中\n\n连续失败：0 次\n\n最近成功轮询：1秒内",
+        ),
+      );
+    }, { timeout: 2_000 });
+    await adapter.stop();
+  });
+
   it("resolves an authorized user quote from the bounded process cache", async () => {
     let delivered = false;
     const client: WeixinProtocolClient = {
