@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { ConversationStatus } from "../src/application/index.js";
+import type {
+  ConversationCommandResult,
+  ConversationStatus,
+} from "../src/application/index.js";
 import {
   conversationCommandHelpLines,
   formatConversationStatus,
@@ -8,9 +11,13 @@ import {
 import { formatConfigurationChange } from "../src/surfaces/telegram/format.js";
 import {
   renderFeishuConfigurationChange,
+  renderFeishuCommandResult,
   renderFeishuHelp,
 } from "../src/surfaces/feishu/renderer.js";
-import { renderWeixinHelp } from "../src/surfaces/weixin/command-renderer.js";
+import {
+  renderWeixinCommandResult,
+  renderWeixinHelp,
+} from "../src/surfaces/weixin/command-renderer.js";
 
 describe("shared surface copy contract", () => {
   it("keeps the shared command directory in Feishu and Weixin help", () => {
@@ -41,8 +48,140 @@ describe("shared surface copy contract", () => {
     };
 
     expect(formatConversationStatus(status)).toContain(
-      "周限：已使用 12% · 周期 10080 分钟",
+      "周限：已使用 12% · 周期 7 天",
     );
+  });
+
+  it("keeps platform-neutral command results identical in Feishu and Weixin", () => {
+    const results: ConversationCommandResult[] = [
+      {
+        kind: "workspaces",
+        workspaces: [{
+          id: "main",
+          name: "Main",
+          cwd: "/workspace/main",
+        }],
+        currentWorkspaceId: "main",
+      },
+      {
+        kind: "skills",
+        entries: [{ name: "tdd", description: "测试驱动开发" }],
+      },
+      {
+        kind: "mcp",
+        servers: [{ name: "docs", authStatus: "oAuth", toolCount: 2 }],
+      },
+      {
+        kind: "plugins",
+        result: [{ name: "github", enabled: true }],
+      },
+      {
+        kind: "permissions",
+        profiles: [{
+          id: "workspace-write",
+          allowed: true,
+          description: "允许工作区写入",
+        }],
+      },
+      {
+        kind: "project-rules",
+        action: "initialized",
+        projectRoot: "/workspace/main",
+        rulesPath: "/workspace/main/.codex/rules/default.rules",
+      },
+      {
+        kind: "artifacts",
+        view: "plan",
+        artifacts: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          diff: "",
+          plan: {
+            explanation: "按步骤执行",
+            steps: [{ step: "完成测试", status: "completed" }],
+          },
+        },
+      },
+      {
+        kind: "goal",
+        goal: {
+          threadId: "thread-1",
+          objective: "完成多渠道统一",
+          status: "active",
+          tokenBudget: 10_000,
+          tokensUsed: 100,
+          timeUsedSeconds: 5,
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      },
+      {
+        kind: "models",
+        view: "fast",
+        state: {
+          models: [{
+            id: "gpt-test",
+            model: "gpt-test",
+            displayName: "GPT Test",
+            supportedReasoningEfforts: [{
+              effort: "medium",
+              description: "平衡",
+            }],
+            defaultReasoningEffort: "medium",
+            serviceTiers: [{ id: "priority", name: "Fast" }],
+            defaultServiceTier: "default",
+            isDefault: true,
+          }],
+          model: "gpt-test",
+          effort: "medium",
+          serviceTier: "priority",
+          pending: false,
+          modelPending: false,
+          effortPending: false,
+          serviceTierPending: false,
+        },
+      },
+      {
+        kind: "usage",
+        result: {
+          summary: {
+            lifetimeTokens: 1_000_000,
+            peakDailyTokens: 100_000,
+            longestRunningTurnSec: 60,
+            currentStreakDays: 2,
+            longestStreakDays: 3,
+          },
+          daily: [{ startDate: "2026-07-28", tokens: 100_000 }],
+        },
+      },
+      {
+        kind: "limits",
+        result: {
+          limits: [{
+            limitId: "codex",
+            limitName: "周限",
+            primary: {
+              usedPercent: 12,
+              windowDurationMins: 10_080,
+              resetsAt: null,
+            },
+            secondary: null,
+            credits: null,
+            individualLimit: null,
+            spendControlReached: false,
+            planType: "plus",
+            rateLimitReachedType: null,
+          }],
+          resetCreditsAvailable: null,
+        },
+      },
+    ];
+
+    for (const result of results) {
+      expect(renderFeishuCommandResult(result)).toBe(
+        renderWeixinCommandResult(result),
+      );
+    }
   });
 
   it("keeps Telegram and Feishu configuration lifecycle wording aligned", () => {

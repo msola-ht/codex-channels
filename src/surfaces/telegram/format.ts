@@ -1,23 +1,17 @@
 import {
-  fastServiceTierId,
   isFastServiceTier,
   type AccountRateLimits,
   type AccountRateLimitWindow,
   type AccountUsage,
-  type InstalledSkill,
-  type InstalledPlugin,
-  type McpServerSummary,
   type ConversationSession,
   type ConversationStatus,
   type ModelSelectionState,
-  type PermissionProfileOption,
 } from "../../application/index.js";
 import type {
   McpServerStatus,
   RateLimitSnapshot,
   ThreadGoal,
   ThreadTokenUsage,
-  TurnArtifacts,
 } from "../../conversation-core/index.js";
 import { formatElapsedDuration } from "../elapsed-duration.js";
 import {
@@ -29,7 +23,12 @@ import {
   renderPlainLifecyclePresentation,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
-import { formatConversationStatus } from "../conversation-command-format.js";
+import {
+  formatConversationLimits,
+  formatConversationModels,
+  formatConversationStatus,
+  formatConversationUsage,
+} from "../conversation-command-format.js";
 import type { Workspace } from "../../policy/index.js";
 import type { SurfaceConfigurationChange } from "../types.js";
 
@@ -79,26 +78,6 @@ export function formatSessions(
   return lines.join("\n");
 }
 
-export function formatDiff(artifacts: TurnArtifacts | undefined): string {
-  const diff = artifacts?.diff;
-  if (!diff?.trim()) {
-    return "当前 Thread 暂无 Turn Diff。";
-  }
-  return [`Turn Diff · ${artifacts?.turnId ?? "未知 Turn"}`, "", diff].join("\n");
-}
-
-export function formatPlan(artifacts: TurnArtifacts | undefined): string {
-  if (!artifacts?.plan) {
-    return "当前 Thread 暂无计划。";
-  }
-  const symbols = { pending: "○", inProgress: "◐", completed: "●" } as const;
-  return [
-    `Turn 计划 · ${artifacts.turnId}`,
-    ...(artifacts.plan.explanation ? [artifacts.plan.explanation, ""] : [""]),
-    ...artifacts.plan.steps.map((entry) => `${symbols[entry.status]} ${entry.step}`),
-  ].join("\n");
-}
-
 export function formatAccountUpdate(authMode: string | null, planType: string | null): string {
   return `Codex 账户状态已更新：认证=${authMode ?? "未登录"} · 套餐=${planType ? formatPlanType(planType) : "未知"}`;
 }
@@ -129,146 +108,25 @@ function preview(value: string, limit = 48): string {
 }
 
 export function formatModels(state: ModelSelectionState): string {
-  return [
-    `当前模型：${state.model}${state.modelPending ? "（下一次 Turn 生效）" : ""}`,
-    `思考强度：${state.effort ?? "模型默认"}`,
-    `Fast 模式：${formatFastMode(state.serviceTier)}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
-    "",
-    `可用模型（${state.models.length}）：`,
-    ...state.models.map(
-      (model, index) =>
-        `${index + 1}. ${model.displayName} · ${model.model}${supportsFastMode(model) ? " · 支持 Fast" : ""}${model.model === state.model ? " ← 当前" : ""}`,
-    ),
-    "",
-    "切换：/model <序号、模型 ID 或名称>",
-  ].join("\n");
+  return formatConversationModels({ kind: "models", view: "model", state });
 }
 
 export function formatReasoningEfforts(state: ModelSelectionState): string {
-  const model = state.models.find((candidate) => candidate.model === state.model);
-  if (!model) {
-    throw new Error(`当前模型不在可用模型列表中：${state.model}`);
-  }
-  return [
-    `当前模型：${state.model}`,
-    `当前思考强度：${state.effort ?? model.defaultReasoningEffort}${state.effortPending ? "（下一次 Turn 生效）" : ""}`,
-    `Fast 模式：${formatFastMode(state.serviceTier)}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
-    "",
-    "可用思考强度：",
-    ...model.supportedReasoningEfforts.map(
-      (option, index) =>
-        `${index + 1}. ${option.effort}${option.effort === state.effort ? " ← 当前" : ""} · ${option.description}`,
-    ),
-    "",
-    "切换：/effort <序号或档位>",
-  ].join("\n");
+  return formatConversationModels({ kind: "models", view: "effort", state });
 }
 
 export function formatFastModeState(state: ModelSelectionState): string {
-  const model = state.models.find((candidate) => candidate.model === state.model);
-  return [
-    `当前模型：${state.model}${state.modelPending ? "（下一次 Turn 生效）" : ""}`,
-    `Fast 模式：${formatFastMode(state.serviceTier)}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
-    `模型支持：${model && supportsFastMode(model) ? "支持 Fast" : "不支持 Fast"}`,
-    "",
-    "切换：/fast [on|off|status]",
-  ].join("\n");
-}
-
-export function formatSkills(skills: InstalledSkill[]): string {
-  if (skills.length === 0) {
-    return "当前没有已启用的 Skills。";
-  }
-  const lines = [
-    `已安装 Skills（${skills.length}）：`,
-    ...skills.map((skill) => `- ${skill.name}：${skill.description}`),
-  ];
-  lines.push("", "使用：在消息中写 $Skill名称 并说明任务。");
-  return lines.join("\n");
-}
-
-export function formatMcpServers(servers: McpServerSummary[]): string {
-  return [
-    `MCP Servers（${servers.length}）：`,
-    ...servers.map(
-      (server) =>
-        `- ${server.name} · auth=${server.authStatus} · tools=${server.toolCount}`,
-    ),
-  ].join("\n");
-}
-
-export function formatPlugins(plugins: InstalledPlugin[]): string {
-  if (plugins.length === 0) {
-    return "当前没有已安装 Plugins。";
-  }
-  return [
-    `已安装 Plugins（${plugins.length}）：`,
-    ...plugins.map(
-      (plugin) => `- ${plugin.name} · ${plugin.enabled ? "已启用" : "未启用"}`,
-    ),
-  ].join("\n");
+  return formatConversationModels({ kind: "models", view: "fast", state });
 }
 
 export function formatUsage(result: AccountUsage): string {
-  const summary = result.summary;
-  const daily = [...result.daily]
-    .sort((left, right) => right.startDate.localeCompare(left.startDate))
-    .slice(0, 7);
-  const lines = [
-    "Codex 用量摘要：",
-    `累计 Tokens：${formatMillions(summary.lifetimeTokens)}`,
-    `单日峰值：${formatMillions(summary.peakDailyTokens)}`,
-    `最长 Turn：${formatMetric(summary.longestRunningTurnSec)} 秒`,
-    `当前连续天数：${formatMetric(summary.currentStreakDays)}`,
-    `最长连续天数：${formatMetric(summary.longestStreakDays)}`,
-    "",
-    "最近每日用量：",
-  ];
-  if (daily.length === 0) {
-    lines.push("暂无每日数据");
-  } else {
-    lines.push(...daily.map((bucket) => `- ${bucket.startDate}：${formatMillions(bucket.tokens)}`));
-  }
-  return lines.join("\n");
+  return formatConversationUsage({ kind: "usage", result });
 }
 
 export function formatLimits(
   result: AccountRateLimits,
 ): string {
-  const lines = ["Codex 额度："];
-  const planType = result.limits.find((snapshot) => snapshot.planType)?.planType;
-  lines.push(`套餐：${planType ? formatPlanType(planType) : "未知"}`);
-  for (const snapshot of result.limits) {
-    const label = snapshot.limitName ?? snapshot.limitId;
-    lines.push("", `${label}：`);
-    lines.push(`主窗口：${formatRateLimitWindow(snapshot.primary)}`);
-    if (snapshot.secondary) {
-      lines.push(`次窗口：${formatRateLimitWindow(snapshot.secondary)}`);
-    }
-    if (snapshot.credits) {
-      const credits = snapshot.credits.unlimited
-        ? "无限"
-        : snapshot.credits.hasCredits
-          ? `余额 ${snapshot.credits.balance ?? "未知"}`
-          : "无可用 Credits";
-      lines.push(`Credits：${credits}`);
-    }
-    if (snapshot.individualLimit) {
-      lines.push(
-        `个人限额：已用 ${snapshot.individualLimit.used} / ${snapshot.individualLimit.limit}`,
-        `个人限额剩余：${formatPercent(snapshot.individualLimit.remainingPercent)}`,
-        `个人限额重置：${formatResetTime(snapshot.individualLimit.resetsAt)}`,
-      );
-    }
-    if (snapshot.spendControlReached !== null) {
-      lines.push(`消费控制：${snapshot.spendControlReached ? "已达到上限" : "正常"}`);
-    }
-    lines.push(`限流状态：${formatRateLimitState(snapshot.rateLimitReachedType)}`);
-  }
-  if (result.resetCreditsAvailable !== null) {
-    lines.push("", `可用额度重置券：${result.resetCreditsAvailable}`);
-  }
-  return lines.join("\n");
+  return formatConversationLimits({ kind: "limits", result });
 }
 
 export function formatStatus(status: ConversationStatus): string {
@@ -363,19 +221,6 @@ function formatDuration(seconds: number): string {
   ].join("");
 }
 
-export function formatWorkspaces(workspaces: Workspace[], currentWorkspaceId: string): string {
-  return [
-    `Workspace（${workspaces.length}）：`,
-    ...workspaces.flatMap((workspace, index) => [
-      `│ ${index + 1}. ${workspace.name} · ${workspace.id}${workspace.id === currentWorkspaceId ? " ← 当前" : ""}`,
-      `│ ${workspace.cwd}`,
-      ...(index + 1 < workspaces.length ? [""] : []),
-    ]),
-    "",
-    "切换：/workspace <序号、ID 或名称>",
-  ].join("\n");
-}
-
 export function formatWorkspacesAdded(workspaces: readonly Workspace[]): string {
   return formatSharedWorkspacesAdded(workspaces, true);
 }
@@ -398,37 +243,8 @@ export function formatStartupNotification(
 
 export type StartupRuntimeInfo = LifecycleStartupRuntimeInfo;
 
-function supportsFastMode(model: ModelSelectionState["models"][number]): boolean {
-  return fastServiceTierId(model) !== undefined;
-}
-
 function formatFastMode(serviceTier: string | null): string {
   return isFastServiceTier(serviceTier) ? "开启" : "关闭";
-}
-
-export function formatPermissions(
-  profiles: PermissionProfileOption[],
-): string {
-  return [
-    "当前 Gateway 固定使用配置中的 read-only 或 workspace-write。",
-    "可用 Permission Profiles：",
-    ...profiles.map((profile) => `- ${profile.id} · ${profile.allowed ? "允许" : "受策略禁止"}${profile.description ? ` · ${profile.description}` : ""}`),
-  ].join("\n");
-}
-
-function formatMetric(value: bigint | number | null): string {
-  return value === null ? "未知" : String(value);
-}
-
-function formatMillions(value: bigint | number | null): string {
-  if (value === null) {
-    return "未知";
-  }
-  const millions = Number(value) / 1_000_000;
-  return `${millions.toLocaleString("zh-CN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })} M`;
 }
 
 function formatTokenCount(value: number): string {

@@ -3,22 +3,23 @@ import type { Context } from "grammy";
 import type {
   ConversationCommandResult,
 } from "../../application/index.js";
-import { formatConversationCommandOutcome } from "../conversation-command-format.js";
 import {
-  formatDiff,
-  formatFastModeState,
-  formatLimits,
-  formatMcpServers,
-  formatModels,
-  formatPermissions,
-  formatPlan,
-  formatPlugins,
-  formatReasoningEfforts,
+  formatConversationArtifacts,
+  formatConversationCommandOutcome,
+  formatConversationGoal,
+  formatConversationLimits,
+  formatConversationMcp,
+  formatConversationModels,
+  formatConversationPermissions,
+  formatConversationPlugins,
+  formatConversationProjectRules,
+  formatConversationSkills,
+  formatConversationUsage,
+  formatConversationWorkspaces,
+} from "../conversation-command-format.js";
+import {
   formatSessions,
-  formatSkills,
   formatStatus,
-  formatUsage,
-  formatWorkspaces,
 } from "./format.js";
 import { formatTelegramDiffChunks, formatTelegramPanelChunks } from "./html-format.js";
 
@@ -51,59 +52,43 @@ export async function renderTelegramCommandResult(
     case "workspaces":
       await replyTelegramPanel(
         context,
-        formatWorkspaces(result.workspaces, result.currentWorkspaceId),
+        formatConversationWorkspaces(result),
       );
       return;
     case "models":
-      await replyTelegramPanel(
-        context,
-        result.view === "model"
-          ? formatModels(result.state)
-          : result.view === "effort"
-            ? formatReasoningEfforts(result.state)
-            : formatFastModeState(result.state),
-      );
+      await replyTelegramPanel(context, formatConversationModels(result));
       return;
     case "skills":
-      await replyTelegramPanel(context, formatSkills(result.entries));
+      await replyTelegramPanel(context, formatConversationSkills(result));
       return;
     case "mcp":
-      await replyTelegramPanel(context, formatMcpServers(result.servers));
+      await replyTelegramPanel(context, formatConversationMcp(result));
       return;
     case "plugins":
-      await replyTelegramPanel(context, formatPlugins(result.result));
+      await replyTelegramPanel(context, formatConversationPlugins(result));
       return;
     case "usage":
-      await replyTelegramPanel(context, formatUsage(result.result));
+      await replyTelegramPanel(context, formatConversationUsage(result));
       return;
     case "limits":
-      await replyTelegramPanel(context, formatLimits(result.result));
+      await replyTelegramPanel(context, formatConversationLimits(result));
       return;
     case "permissions":
-      await replyTelegramPanel(context, formatPermissions(result.profiles));
+      await replyTelegramPanel(context, formatConversationPermissions(result));
       return;
     case "project-rules":
       await replyTelegramPanel(
         context,
-        [
-          result.action === "initialized"
-            ? "项目规则已生成并检查通过"
-            : "项目规则检查通过",
-          `Workspace：${result.projectRoot}`,
-          `规则文件：${result.rulesPath}`,
-          ...(result.action === "initialized"
-            ? ["重启 Codex/App Server 后生效；Gateway 无需重启。"]
-            : []),
-        ].join("\n"),
+        formatConversationProjectRules(result),
       );
       return;
     case "artifacts":
       if (result.view === "plan") {
-        await replyTelegramPanel(context, formatPlan(result.artifacts));
+        await replyTelegramPanel(context, formatConversationArtifacts(result));
         return;
       }
       for (const [index, chunk] of formatTelegramDiffChunks(
-        formatDiff(result.artifacts),
+        formatConversationArtifacts(result),
       ).entries()) {
         await context.reply(chunk, {
           parse_mode: "HTML",
@@ -112,12 +97,7 @@ export async function renderTelegramCommandResult(
       }
       return;
     case "goal":
-      await replyTelegramPanel(
-        context,
-        result.goal
-          ? `当前 Goal：${result.goal.objective}\n状态：${result.goal.status}\nTokens：${result.goal.tokensUsed}${result.goal.tokenBudget === null ? "" : ` / ${result.goal.tokenBudget}`}`
-          : "当前 Thread 没有 Goal。使用 /goal set <目标> 设置。",
-      );
+      await replyTelegramPanel(context, formatConversationGoal(result));
       return;
   }
 }

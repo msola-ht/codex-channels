@@ -97,6 +97,36 @@ describe("Telegram command renderer", () => {
     );
   });
 
+  it("uses the shared localized Goal summary", async () => {
+    const reply = vi.fn(async () => undefined);
+
+    await renderTelegramCommandResult(
+      { reply } as unknown as Context,
+      {
+        kind: "goal",
+        goal: {
+          threadId: "thread-1",
+          objective: "完成多渠道统一",
+          status: "active",
+          tokenBudget: 10_000,
+          tokensUsed: 100,
+          timeUsedSeconds: 5,
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      },
+    );
+
+    expect(reply).toHaveBeenCalledWith(
+      expect.stringContaining("<b>状态：</b>进行中"),
+      expect.objectContaining({ parse_mode: "HTML" }),
+    );
+    expect(reply).toHaveBeenCalledWith(
+      expect.stringContaining("<b>Tokens：</b>100 / 10 K"),
+      expect.objectContaining({ parse_mode: "HTML" }),
+    );
+  });
+
   it("shows MCP startup errors sanitized at the Client boundary", () => {
     const text = formatMcpStatusUpdate({
       threadId: "thread-1",
