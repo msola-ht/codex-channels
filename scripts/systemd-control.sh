@@ -33,12 +33,12 @@ show_logs() {
     esac
   done
 
-  set -- --user
+  set --
   if [ "$service" = "gateway" ] || [ "$service" = "all" ]; then
-    set -- "$@" --unit="$gateway_unit"
+    set -- "$@" --user-unit="$gateway_unit"
   fi
   if [ "$service" = "app-server" ] || [ "$service" = "all" ]; then
-    set -- "$@" --unit="$app_unit"
+    set -- "$@" --user-unit="$app_unit"
   fi
   set -- "$@" --lines="$lines" --no-pager
   if [ "$follow" -eq 1 ]; then
