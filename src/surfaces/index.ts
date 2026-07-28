@@ -14,6 +14,7 @@ export {
   createWeixinReplyContextPersistence,
   FileWeixinUpdatesCursorStore,
   renderWeixinStartupNotification,
+  WeixinImageStore,
   WeixinSurface,
   type WeixinProtocolClient,
 } from "./weixin/index.js";

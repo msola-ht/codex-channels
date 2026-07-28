@@ -105,6 +105,115 @@ describe("WeixinInputAdapter", () => {
     expect(replyContexts.get(target)).toBeUndefined();
   });
 
+  it("downloads an authorized image and submits it through localImages", async () => {
+    let delivered = false;
+    const client: WeixinProtocolClient = {
+      getUpdates: vi.fn(async (_cursor, signal) => {
+        if (!delivered) {
+          delivered = true;
+          return {
+            cursor: "cursor-image",
+            messages: [{
+              kind: "image" as const,
+              messageId: "9007199254740993",
+              actorId,
+              conversationId: actorId,
+              contextToken: "context-secret",
+              image: {
+                fullUrl:
+                  "https://novac2c.cdn.weixin.qq.com/c2c/download?private",
+                imageAesKey: "00112233445566778899aabbccddeeff",
+              },
+            }],
+          };
+        }
+        return await waitForAbort(signal);
+      }),
+      sendText: vi.fn(async () => {}),
+    };
+    const cursorStore = cursorStoreFixture();
+    const service = serviceFixture();
+    const images = {
+      download: vi.fn(async () => ({
+        path: "/private/weixin/image.png",
+        mimeType: "image/png" as const,
+        bytes: 8,
+      })),
+    };
+    const adapter = new WeixinInputAdapter({
+      accountId,
+      client,
+      cursorStore,
+      service,
+      outbox: outboxFixture(),
+      access: accessFixture(true),
+      replyContexts: new WeixinReplyContextStore(accountId),
+      images,
+      onFatal: vi.fn(),
+    });
+
+    await adapter.start();
+    await vi.waitFor(() => {
+      expect(cursorStore.set).toHaveBeenCalledWith(
+        accountId,
+        "cursor-image",
+      );
+    });
+    await adapter.stop();
+
+    expect(images.download).toHaveBeenCalledWith({
+      fullUrl:
+        "https://novac2c.cdn.weixin.qq.com/c2c/download?private",
+      imageAesKey: "00112233445566778899aabbccddeeff",
+    });
+    expect(service.submit).toHaveBeenCalledWith(target, {
+      text: "请查看这张图片并根据图片内容协助我。",
+      localImages: [{ path: "/private/weixin/image.png" }],
+    });
+  });
+
+  it("commits an unauthorized image without contacting its CDN", async () => {
+    let delivered = false;
+    const client: WeixinProtocolClient = {
+      getUpdates: vi.fn(async (_cursor, signal) => {
+        if (!delivered) {
+          delivered = true;
+          return imageBatch("cursor-image");
+        }
+        return await waitForAbort(signal);
+      }),
+      sendText: vi.fn(async () => {}),
+    };
+    const cursorStore = cursorStoreFixture();
+    const service = serviceFixture();
+    const images = {
+      download: vi.fn(),
+    };
+    const adapter = new WeixinInputAdapter({
+      accountId,
+      client,
+      cursorStore,
+      service,
+      outbox: outboxFixture(),
+      access: accessFixture(false),
+      replyContexts: new WeixinReplyContextStore(accountId),
+      images,
+      onFatal: vi.fn(),
+    });
+
+    await adapter.start();
+    await vi.waitFor(() => {
+      expect(cursorStore.set).toHaveBeenCalledWith(
+        accountId,
+        "cursor-image",
+      );
+    });
+    await adapter.stop();
+
+    expect(images.download).not.toHaveBeenCalled();
+    expect(service.submit).not.toHaveBeenCalled();
+  });
+
   it("reports a constrained fatal error and preserves the cursor on submission failure", async () => {
     const controller = clientFixture();
     const cursorStore = cursorStoreFixture();
@@ -266,6 +375,24 @@ function clientFixture(): {
       }
       deliver(cursor);
     },
+  };
+}
+
+function imageBatch(cursor: string) {
+  return {
+    cursor,
+    messages: [{
+      kind: "image" as const,
+      messageId: "9007199254740993",
+      actorId,
+      conversationId: actorId,
+      contextToken: "context-secret",
+      image: {
+        fullUrl:
+          "https://novac2c.cdn.weixin.qq.com/c2c/download?private",
+        imageAesKey: "00112233445566778899aabbccddeeff",
+      },
+    }],
   };
 }
 

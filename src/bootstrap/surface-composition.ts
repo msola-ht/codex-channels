@@ -21,6 +21,7 @@ import {
   createWeixinReplyContextPersistence,
   FileWeixinUpdatesCursorStore,
   renderWeixinStartupNotification,
+  WeixinImageStore,
   WeixinSurface,
   type SurfaceAdapter,
 } from "../surfaces/index.js";
@@ -129,6 +130,14 @@ function createWeixinModule(
     access,
     actorRegistry: options.bindings,
     replyContextPersistence,
+    images: new WeixinImageStore(
+      join(
+        dirname(options.config.stateDatabasePath),
+        "uploads",
+        "weixin",
+      ),
+      options.logger,
+    ),
     startupNotification: {
       targets: () => authorizedWeixinConversations(
         options.bindings,

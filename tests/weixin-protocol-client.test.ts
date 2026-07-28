@@ -166,7 +166,7 @@ describe("WeixinProtocolClient", () => {
           message("3", { to_user_id: "other@im.bot" }),
           message("4", { context_token: undefined }),
           message("5", {
-            item_list: [{ type: 2, image_item: { url: "private" } }],
+            item_list: [{ type: 3, voice_item: { text: "private" } }],
           }),
           message("6", {
             item_list: [{ type: 1, text_item: { text: "   " } }],
@@ -186,6 +186,88 @@ describe("WeixinProtocolClient", () => {
       { kind: "ignored", messageId: "6", reason: "unsupported-content" },
     ]);
     expect(JSON.stringify(result)).not.toContain("private");
+  });
+
+  it("parses one fixed v2.4.6 image reference without coercing the message ID", async () => {
+    const client = createClient({
+      fetchImpl: vi.fn(async () => new Response(exactMessageIds({
+        ret: 0,
+        get_updates_buf: "next-cursor",
+        msgs: [message("9007199254740993", {
+          item_list: [{
+            type: 2,
+            image_item: {
+              aeskey: "00112233445566778899aabbccddeeff",
+              media: {
+                full_url:
+                  "https://novac2c.cdn.weixin.qq.com/c2c/download?secret",
+                encrypt_query_param: "private-query",
+                aes_key: "private-fallback-key",
+              },
+            },
+          }],
+        })],
+      }), { status: 200 })),
+    });
+
+    await expect(client.getUpdates("")).resolves.toMatchObject({
+      messages: [{
+        kind: "image",
+        messageId: "9007199254740993",
+        actorId,
+        conversationId: actorId,
+        contextToken: "context-secret",
+        image: {
+          fullUrl:
+            "https://novac2c.cdn.weixin.qq.com/c2c/download?secret",
+          encryptedQueryParam: "private-query",
+          imageAesKey: "00112233445566778899aabbccddeeff",
+          mediaAesKey: "private-fallback-key",
+        },
+      }],
+    });
+  });
+
+  it("fails closed on malformed image media and mixed image content", async () => {
+    const malformed = createClient({
+      fetchImpl: vi.fn(async () => new Response(exactMessageIds({
+        ret: 0,
+        get_updates_buf: "next-cursor",
+        msgs: [message("7", {
+          item_list: [{ type: 2, image_item: { media: {} } }],
+        })],
+      }), { status: 200 })),
+    });
+    await expect(malformed.getUpdates("")).rejects.toMatchObject({
+      code: "invalid-response",
+    });
+
+    const mixed = createClient({
+      fetchImpl: vi.fn(async () => new Response(exactMessageIds({
+        ret: 0,
+        get_updates_buf: "next-cursor",
+        msgs: [message("8", {
+          item_list: [
+            {
+              type: 2,
+              image_item: {
+                media: {
+                  encrypt_query_param: "private-query",
+                },
+              },
+            },
+            { type: 1, text_item: { text: "caption" } },
+          ],
+        })],
+      }), { status: 200 })),
+    });
+    await expect(mixed.getUpdates("")).resolves.toMatchObject({
+      messages: [{
+        kind: "ignored",
+        messageId: "8",
+        reason: "unsupported-content",
+      }],
+    });
   });
 
   it("fails closed on malformed message IDs and response fields", async () => {

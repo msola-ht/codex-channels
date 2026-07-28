@@ -34,6 +34,13 @@ export type WeixinIgnoredMessageReason =
   | "unfinished"
   | "wrong-recipient";
 
+export interface WeixinImageReference {
+  fullUrl?: string;
+  encryptedQueryParam?: string;
+  imageAesKey?: string;
+  mediaAesKey?: string;
+}
+
 export type WeixinInboundMessage =
   | {
       kind: "text";
@@ -42,6 +49,15 @@ export type WeixinInboundMessage =
       conversationId: string;
       contextToken: string;
       text: string;
+      createdAt?: number;
+    }
+  | {
+      kind: "image";
+      messageId: string;
+      actorId: string;
+      conversationId: string;
+      contextToken: string;
+      image: WeixinImageReference;
       createdAt?: number;
     }
   | {
@@ -347,8 +363,8 @@ function parseInboundMessage(
       "微信消息项目列表无效",
     );
   }
-  const text = firstText(items);
-  if (text === null) {
+  const content = parseInboundContent(items);
+  if (content === null) {
     return { kind: "ignored", messageId, reason: "unsupported-content" };
   }
   const createdAt = optionalNonNegativeInteger(
@@ -356,17 +372,34 @@ function parseInboundMessage(
     "微信消息创建时间无效",
   );
   return {
-    kind: "text",
+    ...content,
     messageId,
     actorId,
     conversationId: actorId,
     contextToken: record.context_token,
-    text,
     ...(createdAt === undefined ? {} : { createdAt }),
   };
 }
 
-function firstText(items: readonly unknown[]): string | null {
+function parseInboundContent(
+  items: readonly unknown[],
+): Pick<Extract<WeixinInboundMessage, { kind: "text" }>, "kind" | "text">
+  | Pick<Extract<WeixinInboundMessage, { kind: "image" }>, "kind" | "image">
+  | null {
+  const imageItems = items.filter((item) =>
+    optionalSafeInteger(
+      requiredRecord(item, "微信消息项目无效").type,
+      "微信消息项目类型无效",
+    ) === 2);
+  if (imageItems.length > 0) {
+    if (imageItems.length !== 1 || items.length !== 1) {
+      return null;
+    }
+    return {
+      kind: "image",
+      image: parseImageReference(imageItems[0]),
+    };
+  }
   for (const item of items) {
     const record = requiredRecord(item, "微信消息项目无效");
     const type = optionalSafeInteger(record.type, "微信消息项目类型无效");
@@ -384,9 +417,55 @@ function firstText(items: readonly unknown[]): string | null {
     ) {
       return null;
     }
-    return textItem.text;
+    return { kind: "text", text: textItem.text };
   }
   return null;
+}
+
+function parseImageReference(value: unknown): WeixinImageReference {
+  const item = requiredRecord(value, "微信图片消息项目无效");
+  const image = requiredRecord(
+    item.image_item,
+    "微信图片消息内容无效",
+  );
+  const media = requiredRecord(
+    image.media,
+    "微信图片媒体信息无效",
+  );
+  const fullUrl = optionalBoundedString(
+    media.full_url,
+    "微信图片完整地址无效",
+    8_192,
+  );
+  const encryptedQueryParam = optionalBoundedString(
+    media.encrypt_query_param,
+    "微信图片下载参数无效",
+    65_536,
+  );
+  if (fullUrl === undefined && encryptedQueryParam === undefined) {
+    throw new WeixinProtocolError(
+      "invalid-response",
+      "微信图片没有可用下载地址",
+    );
+  }
+  const imageAesKey = optionalBoundedString(
+    image.aeskey,
+    "微信图片 AES key 无效",
+    1_024,
+  );
+  const mediaAesKey = optionalBoundedString(
+    media.aes_key,
+    "微信图片媒体 AES key 无效",
+    1_024,
+  );
+  return {
+    ...(fullUrl === undefined ? {} : { fullUrl }),
+    ...(encryptedQueryParam === undefined
+      ? {}
+      : { encryptedQueryParam }),
+    ...(imageAesKey === undefined ? {} : { imageAesKey }),
+    ...(mediaAesKey === undefined ? {} : { mediaAesKey }),
+  };
 }
 
 function parseSendResponse(raw: string): void {
@@ -637,6 +716,24 @@ function optionalResponseString(
     return "";
   }
   if (typeof value !== "string" || value.length > maximumLength) {
+    throw new WeixinProtocolError("invalid-response", message);
+  }
+  return value;
+}
+
+function optionalBoundedString(
+  value: unknown,
+  message: string,
+  maximumLength: number,
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (
+    typeof value !== "string"
+    || value.length === 0
+    || value.length > maximumLength
+  ) {
     throw new WeixinProtocolError("invalid-response", message);
   }
   return value;

@@ -21,6 +21,7 @@ export {
   createWeixinProtocolClient,
   type CreateWeixinProtocolClientOptions,
   type WeixinIgnoredMessageReason,
+  type WeixinImageReference,
   type WeixinInboundMessage,
   type WeixinProtocolClient,
   type WeixinProtocolErrorCode,
@@ -29,6 +30,12 @@ export {
   type WeixinTypingStatus,
   type WeixinUpdatesBatch,
 } from "./protocol-client.js";
+export {
+  maximumWeixinImageBytes,
+  WeixinImageDownloadError,
+  WeixinImageStore,
+  type WeixinImagePort,
+} from "./image-store.js";
 export {
   createWeixinUpdatesMonitor,
   type CreateWeixinUpdatesMonitorOptions,

@@ -19,11 +19,13 @@
   明确确认后只增量申请缺失的应用权限，并通过飞书客户端内的授权页自动补齐菜单、事件与回调后
   提交应用版本。Doctor 会分别检查菜单节点和启用开关；节点存在但
   未启用时显示“已添加，尚未启用”。当前不支持飞书群聊或一般文件。
-- 微信单账号私聊文本 Surface 已接入：`codexc setup` 会在明确确认连接替换风险后扫码，把
+- 微信单账号私聊文本与图片 Surface 已接入：`codexc setup` 会在明确确认连接替换风险后扫码，把
   Bot Token 保存到独立安全凭据后端，并记录脱敏账号与允许用户；将保存配置中的
   `weixin.enabled` 显式改为 `true` 并重载服务后开始接收和回复文本。微信支持
   `/start`、`/help`、`/whoami`，以及统一会话命令服务的全部命令；未知斜杠命令会明确拒绝，
-  不会作为普通消息提交给 Codex。每个 Turn 开始时显示微信原生输入状态并每 5 秒续期，最终回复、
+  不会作为普通消息提交给 Codex。单张 PNG/JPEG 图片会从固定官方 CDN 下载、按官方 key 解密，
+  通过统一图片输入提交；混合内容、多图片、其他媒体和超过 10 MiB 的图片不支持。每个 Turn
+  开始时显示微信原生输入状态并每 5 秒续期，最终回复、
   完成、停止或失败时取消；输入状态失败不阻断正常回复。最终回复后仍发送完成、停止
   或失败统计；已授权且已有绑定的私聊在至少接收过一条消息后，会使用独立加密保存的最近回复
   上下文接收 Gateway 重启上线通知。微信最终回复会把单行 Markdown 代码块压缩为行内代码，
@@ -135,10 +137,11 @@ allowed_user_ids = ["不透明用户@im.wechat"]
 
 Setup 默认保存 `enabled = false`，避免扫码完成后在操作者确认前启动长轮询。确认账号与允许名单
 后可将其改为 `true`，执行 `codexc service reload`；Gateway 会从安全凭据后端延迟读取 Token，
-接收允许用户的私聊文本，并在独立 `credentials/weixin-reply-context` 安全后端加密保存每个
+接收允许用户的私聊文本与单张 PNG/JPEG 图片，并在独立
+`credentials/weixin-reply-context` 安全后端加密保存每个
 已绑定私聊的最近回复上下文，用于重启上线通知和重启后恢复关键输出。回复上下文不进入 TOML、
 SQLite 或日志；撤权目标不会收到通知。`codexc doctor` 会只读检查连接凭据是否存在且载荷有效，
-不显示 Token。微信暂不支持媒体、群聊、一般主动推送或审批。
+不显示 Token。微信暂不支持混合/多图片消息、其他媒体、群聊、一般主动推送或审批。
 
 最终回复默认把常用 Markdown 安全转换为兼容性更好的 Telegram HTML。支持 Rich Messages
 的客户端可设置 `telegram.message_format = "rich"`；修改后执行 `codexc service reload`，
@@ -178,7 +181,8 @@ codexc doctor
 飞书启用状态、允许名单及凭据/Bot 身份，以及微信配置、Bot 凭据、消息游标、加密上线通知上下文
 覆盖数和最近授权消息时间；同时检查 Workspace、App Server 握手、运行中 App Server 的实际版本
 和系统服务状态。磁盘 CLI 或共享 App Server 与项目锁定版本不一致时诊断失败，但不会显示 Token、
-`context_token`、游标、App Secret、完整飞书响应或完整上游 User-Agent。Doctor 不额外调用微信
+`context_token`、游标、图片 CDN 地址或 AES key、App Secret、完整飞书响应或完整上游
+User-Agent。Doctor 不额外调用微信
 `getupdates`，不会与 Gateway 竞争消费消息。项目不读取或迁移旧 `.env` 配置。
 
 ## 常用命令

@@ -350,6 +350,34 @@ describe("WeixinSurface", () => {
     );
     expect(client.getUpdates).not.toHaveBeenCalled();
   });
+
+  it("starts the image store before input and closes it with the Surface", async () => {
+    const images = {
+      start: vi.fn(async () => {}),
+      close: vi.fn(),
+      download: vi.fn(),
+    };
+    const client: WeixinProtocolClient = {
+      getUpdates: vi.fn((_cursor, signal) => waitForAbort(signal)),
+      sendText: vi.fn(async () => {}),
+    };
+    const surface = new WeixinSurface({
+      accountId,
+      client,
+      cursorStore: cursorStoreFixture(),
+      service: serviceFixture(),
+      access: accessFixture(true),
+      images,
+      logger: pino({ level: "silent" }),
+      onFatal: vi.fn(),
+    });
+
+    await surface.start();
+    await surface.stop();
+
+    expect(images.start).toHaveBeenCalledOnce();
+    expect(images.close).toHaveBeenCalledOnce();
+  });
 });
 
 function inboundBatch(text = "hello") {

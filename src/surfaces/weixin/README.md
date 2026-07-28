@@ -1,7 +1,7 @@
 # 微信 Surface
 
-当前实现单账号私聊文本 Surface：独立安全凭据边界、运行时窄协议 Client、私有游标检查点、
-私聊文本输入 Adapter、完整命令 Adapter、加密重启上线通知、Turn 生命周期统计、纯文本 Outbox、
+当前实现单账号私聊文本与图片 Surface：独立安全凭据边界、运行时窄协议 Client、私有游标检查点、
+私聊输入 Adapter、完整命令 Adapter、加密重启上线通知、Turn 生命周期统计、纯文本 Outbox、
 失败关闭交互端口和目录内部完整 `SurfaceAdapter`；严格运行配置显式启用时由 Bootstrap 注册，
 未新增 SQLite Schema。
 
@@ -14,12 +14,16 @@
   失败关闭。
 - `protocol-client.ts`：实现固定 `v2.4.6` 的 `getupdates`、`sendmessage`、`getconfig` 和
   `sendtyping` HTTP 合同，
-  在 JSON 数字转换前保留原始 `message_id`，只输出文本或带原因的忽略事件，并限制出站文本为
-  已验证的 4000 个 UTF-16 码元。
+  在 JSON 数字转换前保留原始 `message_id`，只输出文本、单张图片引用或带原因的忽略事件，
+  混合/多图片内容失败关闭，并限制出站文本为已验证的 4000 个 UTF-16 码元。
+- `image-store.ts`：只接受固定官方微信 CDN，按 `image_item.aeskey` 或 `media.aes_key`
+  执行 AES-128-ECB 解密；复用共享 10 MiB、PNG/JPEG 签名、`0700/0600` 私有暂存和过期清理，
+  CDN 地址、查询参数、key 与响应正文不进入日志或用户消息。
 - `updates-monitor.ts`：组合协议 Client 与游标 Store，顺序处理单批消息、按原始消息 ID
   进程内去重，仅在整批处理成功后提交游标，并对网络、限流及服务端瞬时失败执行有限重试。
 - `input-adapter.ts`：拥有单账号监控器生命周期；按微信账号和私聊 Actor 构造目标，授权后记录
-  Actor、更新内存回复上下文并把文本交给目录内会话 Adapter。停止会取消长轮询并有限等待；
+  Actor、更新内存回复上下文并把文本或单张图片交给目录内会话 Adapter。图片只在授权后下载，
+  通过统一 `localImages` 输入提交。停止会取消长轮询并有限等待；
   处理失败不推进游标，只向生命周期所有者报告稳定错误码。
 - `conversation-adapter.ts`：复用 Application 的 `ConversationCommandService` 和完整共享命令
   目录，并保留微信本地 `/start`、`/help`、`/whoami`；命令解析复用 Surface 公共模板，未知
@@ -51,7 +55,8 @@
   停止时先取消输入，再取消交互并排空输出，重复停止安全。一般主动配置通知仍明确失败关闭。
 - `index.ts`：微信模块公开入口。
 
-二维码、验证码和消息正文不持久化；最近回复目标和 `context_token` 只进入独立加密回复上下文
+二维码、验证码和消息正文不持久化；解密图片只进入受限临时目录并按统一保留期清理；
+最近回复目标和 `context_token` 只进入独立加密回复上下文
 后端，长轮询游标只进入独立检查点，二者都不进入 Bot 凭据、TOML、SQLite 或日志。未知版本、
 身份不匹配、密文或载荷损坏失败关闭，不能当作未配置后静默
 重新扫码。微信目录通过一级 `src/surfaces/index.ts` 公开运行时组合所需的窄接口，并由 Bootstrap

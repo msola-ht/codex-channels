@@ -12,14 +12,15 @@ import {
   type WeixinProtocolErrorCode,
 } from "./protocol-client.js";
 import { WeixinConversationAdapter } from "./conversation-adapter.js";
+import type { WeixinImagePort } from "./image-store.js";
 import type { WeixinOutbox } from "./outbox.js";
 import type { WeixinUpdatesCursorStore } from "./updates-cursor-store.js";
 import { createWeixinUpdatesMonitor } from "./updates-monitor.js";
 import { WeixinReplyContextStore } from "./reply-context-store.js";
 
-type WeixinTextMessage = Extract<
+type WeixinSupportedMessage = Extract<
   WeixinInboundMessage,
-  { kind: "text" }
+  { kind: "text" | "image" }
 >;
 
 export type WeixinInputFatalCode =
@@ -49,6 +50,7 @@ export interface WeixinInputAdapterOptions {
   ): Promise<void>;
   removePersistedReplyContext?(target: ConversationTarget): Promise<void>;
   actorRegistry?: ConversationActorRegistry;
+  images?: Pick<WeixinImagePort, "download">;
   onFatal(error: WeixinInputFatalError): void;
   onStopTimeout?(): void;
   closeTimeoutMs?: number;
@@ -74,6 +76,7 @@ export class WeixinInputAdapter {
     this.conversations = new WeixinConversationAdapter(
       options.service,
       options.outbox,
+      options.images,
     );
     this.monitor = createWeixinUpdatesMonitor({
       accountId: options.accountId,
@@ -107,7 +110,7 @@ export class WeixinInputAdapter {
     return this.stopPromise;
   }
 
-  private async handle(message: WeixinTextMessage): Promise<void> {
+  private async handle(message: WeixinSupportedMessage): Promise<void> {
     const target: ConversationTarget = {
       surface: "weixin",
       accountId: this.accountId,
@@ -137,7 +140,9 @@ export class WeixinInputAdapter {
       await this.conversations.handle({
         target,
         actorId: message.actorId,
-        text: message.text,
+        ...(message.kind === "text"
+          ? { kind: "text", text: message.text }
+          : { kind: "image", image: message.image }),
       });
     } catch (error) {
       throw new WeixinMessageProcessingError({ cause: error });

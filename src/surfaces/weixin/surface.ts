@@ -18,6 +18,7 @@ import {
   WeixinInputAdapter,
   type WeixinInputFatalError,
 } from "./input-adapter.js";
+import type { WeixinImagePort } from "./image-store.js";
 import { WeixinInteractionPort } from "./interactions.js";
 import {
   WeixinOutbox,
@@ -44,6 +45,7 @@ export interface WeixinSurfaceOptions {
   onFatal: (error: WeixinInputFatalError) => void;
   actorRegistry?: ConversationActorRegistry;
   replyContextPersistence?: WeixinReplyContextPersistence;
+  images?: WeixinImagePort;
   startupNotification?: {
     targets(): readonly ConversationTarget[];
     text(target: ConversationTarget): string;
@@ -74,6 +76,7 @@ export class WeixinSurface implements SurfaceAdapter {
   private readonly startupNotification: WeixinSurfaceOptions["startupNotification"];
   private readonly access: SurfaceAccessPolicy;
   private readonly logger: Logger;
+  private readonly images: WeixinImagePort | undefined;
   private startPromise: Promise<void> | undefined;
   private stopPromise: Promise<void> | undefined;
 
@@ -84,6 +87,7 @@ export class WeixinSurface implements SurfaceAdapter {
     this.startupNotification = options.startupNotification;
     this.access = options.access;
     this.logger = options.logger;
+    this.images = options.images;
     this.accountId = options.accountId;
     this.interactions = new WeixinInteractionPort();
     const typing = options.typingClient === undefined
@@ -124,6 +128,7 @@ export class WeixinSurface implements SurfaceAdapter {
       outbox: this.output,
       access: options.access,
       replyContexts,
+      ...(options.images === undefined ? {} : { images: options.images }),
       ...(options.replyContextPersistence === undefined
         ? {}
         : {
@@ -176,6 +181,7 @@ export class WeixinSurface implements SurfaceAdapter {
     try {
       await this.input.stop();
     } finally {
+      this.images?.close();
       this.interactions.cancelAll("Gateway 已停止");
       await this.output.close();
     }
@@ -211,7 +217,13 @@ export class WeixinSurface implements SurfaceAdapter {
         restored.push(target);
       }
     }
-    await this.input.start();
+    await this.images?.start();
+    try {
+      await this.input.start();
+    } catch (error) {
+      this.images?.close();
+      throw error;
+    }
     for (const target of restored) {
       try {
         const text = this.startupNotification?.text(target);

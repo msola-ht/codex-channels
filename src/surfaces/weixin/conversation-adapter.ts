@@ -15,13 +15,26 @@ import {
   renderWeixinIdentity,
   renderWeixinUserFacingError,
 } from "./command-renderer.js";
+import {
+  WeixinImageDownloadError,
+  type WeixinImagePort,
+} from "./image-store.js";
 import type { WeixinOutbox } from "./outbox.js";
+import type { WeixinImageReference } from "./protocol-client.js";
 
-export interface WeixinConversationMessage {
-  target: ConversationTarget;
-  actorId: string;
-  text: string;
-}
+export type WeixinConversationMessage =
+  | {
+      target: ConversationTarget;
+      actorId: string;
+      kind: "text";
+      text: string;
+    }
+  | {
+      target: ConversationTarget;
+      actorId: string;
+      kind: "image";
+      image: WeixinImageReference;
+    };
 
 export class WeixinConversationAdapter {
   private readonly commands: ConversationCommandService;
@@ -29,12 +42,33 @@ export class WeixinConversationAdapter {
   constructor(
     private readonly conversations: ConversationService,
     private readonly outbox: Pick<WeixinOutbox, "notifyText">,
+    private readonly images?: Pick<WeixinImagePort, "download">,
   ) {
     this.commands = new ConversationCommandService(conversations);
   }
 
   async handle(message: WeixinConversationMessage): Promise<void> {
     try {
+      if (message.kind === "image") {
+        if (this.images === undefined) {
+          throw new UserFacingError(
+            "image.unsupported",
+            "微信图片输入尚未启用",
+          );
+        }
+        const image = await this.images.download(message.image);
+        const submission = await this.conversations.submit(
+          message.target,
+          {
+            text: "请查看这张图片并根据图片内容协助我。",
+            localImages: [{ path: image.path }],
+          },
+        );
+        if (submission.steered) {
+          this.notify(message.target, "已将图片追加到当前 Turn。");
+        }
+        return;
+      }
       const command = parseSlashCommand(message.text);
       if (command === null) {
         await this.conversations.submit(message.target, message.text);
@@ -64,6 +98,10 @@ export class WeixinConversationAdapter {
     } catch (error) {
       if (error instanceof WeixinOutputQueueError) {
         throw error;
+      }
+      if (error instanceof WeixinImageDownloadError) {
+        this.notify(message.target, `操作失败：${error.message}。`);
+        return;
       }
       if (!(error instanceof UserFacingError)) {
         throw error;

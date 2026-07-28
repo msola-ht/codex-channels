@@ -13,6 +13,7 @@ const maximumResponseBytes = 1_048_576;
 const responseCursor = Symbol("responseCursor");
 const responseMessageIds = Symbol("responseMessageIds");
 const responseReplyContexts = new WeakMap();
+const responseImageContexts = new WeakMap();
 
 export class WeixinUpdatesContractError extends Error {
   constructor(code, message) {
@@ -95,6 +96,7 @@ export function createWeixinUpdatesContractClient({
           value: extractMessageIdLexemes(raw),
         });
         responseReplyContexts.set(summary, extractReplyContexts(parsed));
+        responseImageContexts.set(summary, extractImageContexts(parsed));
         return summary;
       } catch (error) {
         if (error instanceof WeixinUpdatesContractError) {
@@ -138,6 +140,27 @@ export function selectWeixinReplyContext(summary, allowedUserIds) {
     throw new WeixinUpdatesContractError(
       "invalid-response",
       "本批消息中没有可用于回复的已授权完成态文本",
+    );
+  }
+  return selected;
+}
+
+export function selectWeixinImageContext(summary, allowedUserIds) {
+  if (!Array.isArray(allowedUserIds) || allowedUserIds.length === 0) {
+    throw new WeixinUpdatesContractError(
+      "invalid-input",
+      "微信允许用户列表无效",
+    );
+  }
+  const allowed = new Set(allowedUserIds);
+  const contexts = responseImageContexts.get(summary) ?? [];
+  responseImageContexts.delete(summary);
+  const selected = contexts.findLast((context) =>
+    allowed.has(context.fromUserId));
+  if (!selected) {
+    throw new WeixinUpdatesContractError(
+      "invalid-response",
+      "本批消息中没有已授权完成态图片",
     );
   }
   return selected;
@@ -360,6 +383,66 @@ function extractReplyContexts(value) {
     });
   }
   return contexts;
+}
+
+function extractImageContexts(value) {
+  if (
+    typeof value !== "object"
+    || value === null
+    || !Array.isArray(value.msgs)
+  ) {
+    return [];
+  }
+  const contexts = [];
+  for (const message of value.msgs) {
+    if (
+      typeof message !== "object"
+      || message === null
+      || message.message_type !== 1
+      || message.message_state !== 2
+      || typeof message.from_user_id !== "string"
+      || message.from_user_id.length === 0
+      || message.from_user_id.length > 1_024
+      || !Array.isArray(message.item_list)
+    ) {
+      continue;
+    }
+    for (const item of message.item_list) {
+      if (
+        typeof item !== "object"
+        || item === null
+        || item.type !== 2
+        || typeof item.image_item !== "object"
+        || item.image_item === null
+        || typeof item.image_item.media !== "object"
+        || item.image_item.media === null
+      ) {
+        continue;
+      }
+      contexts.push({
+        fromUserId: message.from_user_id,
+        fullUrl: boundedOptionalString(item.image_item.media.full_url, 8_192),
+        encryptedQueryParam: boundedOptionalString(
+          item.image_item.media.encrypt_query_param,
+          65_536,
+        ),
+        imageAesKey: boundedOptionalString(item.image_item.aeskey, 1_024),
+        mediaAesKey: boundedOptionalString(
+          item.image_item.media.aes_key,
+          1_024,
+        ),
+      });
+    }
+  }
+  return contexts;
+}
+
+function boundedOptionalString(value, maximumLength) {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= maximumLength
+    ? value
+    : undefined;
 }
 
 function extractMessageIdLexemes(raw) {

@@ -18,6 +18,7 @@ const target: ConversationTarget = {
 const message = {
   target,
   actorId: "actor-fixture@im.wechat",
+  kind: "text" as const,
   text: "继续开发",
 };
 
@@ -40,6 +41,45 @@ describe("WeixinConversationAdapter", () => {
 
     expect(submit).toHaveBeenCalledWith(target, "继续开发");
     expect(notifyText).not.toHaveBeenCalled();
+  });
+
+  it("submits a downloaded image through the shared localImages input", async () => {
+    const submit = vi.fn(async () => ({
+      threadId: "thread",
+      turnId: "turn",
+      steered: true,
+    }));
+    const notifyText = vi.fn(() => true);
+    const download = vi.fn(async () => ({
+      path: "/private/weixin/image.png",
+      mimeType: "image/png" as const,
+      bytes: 8,
+    }));
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({ submit }),
+      { notifyText },
+      { download },
+    );
+
+    await adapter.handle({
+      target,
+      actorId: message.actorId,
+      kind: "image",
+      image: {
+        fullUrl:
+          "https://novac2c.cdn.weixin.qq.com/c2c/download?private",
+        imageAesKey: "00112233445566778899aabbccddeeff",
+      },
+    });
+
+    expect(submit).toHaveBeenCalledWith(target, {
+      text: "请查看这张图片并根据图片内容协助我。",
+      localImages: [{ path: "/private/weixin/image.png" }],
+    });
+    expect(notifyText).toHaveBeenCalledWith(
+      target,
+      "已将图片追加到当前 Turn。",
+    );
   });
 
   it("handles local help and identity without starting a Turn", async () => {
