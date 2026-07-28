@@ -341,7 +341,7 @@ describe("WeixinOutbox", () => {
     );
     expect(previewChunks).toHaveLength(1);
     expect(previewChunks[0]).toHaveLength(4_000);
-    expect(previewChunks[0]).toMatch(/\[完整内容已作为文件发送\]$/u);
+    expect(previewChunks[0]).toMatch(/\[内容预览\]$/u);
     expect(second.sendFile).toHaveBeenCalledWith({
       actorId,
       contextToken: "context-secret",
@@ -367,6 +367,42 @@ describe("WeixinOutbox", () => {
     expect(chunks.join("")).toHaveLength(20_000);
     expect(chunks.at(-1)).toMatch(/\[内容过长，已截断\]$/u);
     expect(fixture.sendFile).not.toHaveBeenCalled();
+  });
+
+  it("falls back to remaining bounded text when the final-answer file fails", async () => {
+    const longText = "测".repeat(20_001);
+    const fixture = outboxFixture(
+      { value: true },
+      {},
+      async () => {},
+      async () => {},
+      async () => {
+        throw new WeixinProtocolError(
+          "network-error",
+          "private upload response",
+        );
+      },
+    );
+
+    fixture.outbox.handle(completed("final_answer", longText));
+    await fixture.outbox.close();
+
+    const chunks = fixture.sendText.mock.calls.map(([input]) => input.text);
+    expect(fixture.sendFile).toHaveBeenCalledOnce();
+    expect(chunks).toHaveLength(5);
+    expect(chunks.every((chunk) => chunk.length <= 4_000)).toBe(true);
+    expect(chunks[0]).toMatch(/\[内容预览\]$/u);
+    expect(chunks[1]).toMatch(
+      /^\[文件发送失败，已改为分段文本\]\n\n/u,
+    );
+    expect(chunks.at(-1)).toMatch(/\[内容过长，已截断\]$/u);
+
+    const previewText = chunks[0]!.replace(/\n\n\[内容预览\]$/u, "");
+    const fallbackText = chunks.slice(1).join("")
+      .replace(/^\[文件发送失败，已改为分段文本\]\n\n/u, "")
+      .replace(/\n\n\[内容过长，已截断\]$/u, "");
+    const deliveredText = previewText + fallbackText;
+    expect(deliveredText).toBe(longText.slice(0, deliveredText.length));
   });
 
   it("keeps one Conversation ordered while allowing another to progress", async () => {

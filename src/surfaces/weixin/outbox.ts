@@ -47,7 +47,8 @@ import type { WeixinTypingController } from "./typing-controller.js";
 const maximumChunkCharacters = 4_000;
 const maximumChunks = 5;
 const truncationNotice = "\n\n[内容过长，已截断]";
-const completeFileNotice = "\n\n[完整内容已作为文件发送]";
+const previewNotice = "\n\n[内容预览]";
+const fileFailureNotice = "[文件发送失败，已改为分段文本]\n\n";
 const finalAnswerFileName = "codex-final-answer.txt";
 
 export type WeixinOutboxErrorCode =
@@ -321,10 +322,11 @@ export class WeixinOutbox implements SurfaceOutputPort {
     ) {
       return false;
     }
-    const preview = safePrefix(
+    const previewLength = safePrefixLength(
       text,
-      maximumChunkCharacters - completeFileNotice.length,
-    ) + completeFileNotice;
+      maximumChunkCharacters - previewNotice.length,
+    );
+    const preview = text.slice(0, previewLength) + previewNotice;
     await this.send(target, preview);
     const context = this.contexts.get(target);
     if (context === undefined) {
@@ -337,24 +339,34 @@ export class WeixinOutbox implements SurfaceOutputPort {
       await this.invalidateContext(target);
       throw new WeixinOutboxError("unauthorized-recipient");
     }
-    await fileClient.sendFile({
-      actorId: context.actorId,
-      contextToken: context.contextToken,
-      fileName: finalAnswerFileName,
-      file,
-    });
+    try {
+      await fileClient.sendFile({
+        actorId: context.actorId,
+        contextToken: context.contextToken,
+        fileName: finalAnswerFileName,
+        file,
+      });
+    } catch (error) {
+      await this.send(
+        target,
+        fileFailureNotice + text.slice(previewLength),
+        maximumChunks - 1,
+      );
+      throw error;
+    }
     return true;
   }
 
   private async send(
     target: ConversationTarget,
     text: string,
+    maximumChunkCount = maximumChunks,
   ): Promise<void> {
     const context = this.contexts.get(target);
     if (context === undefined) {
       throw new WeixinOutboxError("missing-reply-context");
     }
-    for (const chunk of splitWeixinText(text)) {
+    for (const chunk of splitWeixinText(text, maximumChunkCount)) {
       if (!this.access.isAllowed({
         target,
         actorId: context.actorId,
@@ -424,8 +436,11 @@ function turnKey(threadId: string, turnId: string): string {
   return `${threadId}:${turnId}`;
 }
 
-function splitWeixinText(value: string): string[] {
-  const maximumCharacters = maximumChunkCharacters * maximumChunks;
+function splitWeixinText(
+  value: string,
+  maximumChunkCount = maximumChunks,
+): string[] {
+  const maximumCharacters = maximumChunkCharacters * maximumChunkCount;
   let text = value;
   if (text.length > maximumCharacters) {
     text = safePrefix(
