@@ -48,10 +48,14 @@ export class FeishuConversationAdapter {
 
   constructor(
     private readonly conversations: ConversationService,
-    private readonly outbox: Pick<
-      FeishuOutbox,
-      "notifyMarkdown" | "notifyText"
-    >,
+    private readonly outbox:
+      & Pick<FeishuOutbox, "notifyMarkdown" | "notifyText">
+      & Partial<Pick<
+        FeishuOutbox,
+        | "bindPendingTurnReplyTarget"
+        | "discardPendingTurnReplyTarget"
+        | "prepareTurnReplyTarget"
+      >>,
     private readonly images: Pick<FeishuImagePort, "download">,
     private readonly permissionStatus: () => FeishuPermissionRuntimeStatus =
       () => ({
@@ -144,10 +148,33 @@ export class FeishuConversationAdapter {
         return;
       }
       const quotedText = await this.readQuotedText(message);
-      const submission = await this.conversations.submit(
-        message.target,
-        formatQuotedInput(message.text, quotedText),
+      this.outbox.prepareTurnReplyTarget?.(
+        message.target.conversationId,
+        message.messageId,
       );
+      let submission;
+      try {
+        submission = await this.conversations.submit(
+          message.target,
+          formatQuotedInput(message.text, quotedText),
+        );
+      } catch (error) {
+        this.outbox.discardPendingTurnReplyTarget?.(
+          message.target.conversationId,
+        );
+        throw error;
+      }
+      if (submission.steered) {
+        this.outbox.discardPendingTurnReplyTarget?.(
+          message.target.conversationId,
+        );
+      } else {
+        this.outbox.bindPendingTurnReplyTarget?.(
+          message.target.conversationId,
+          submission.threadId,
+          submission.turnId,
+        );
+      }
       if (!submission.steered) {
         return;
       }
@@ -400,10 +427,34 @@ export class FeishuConversationAdapter {
         })),
       };
     }));
-    const results = await Promise.all(
-      prepared.map((input) => this.inputs.enqueue(input)),
+    const replyMessage = messages[0]!;
+    this.outbox.prepareTurnReplyTarget?.(
+      replyMessage.target.conversationId,
+      replyMessage.messageId,
     );
+    let results;
+    try {
+      results = await Promise.all(
+        prepared.map((input) => this.inputs.enqueue(input)),
+      );
+    } catch (error) {
+      this.outbox.discardPendingTurnReplyTarget?.(
+        replyMessage.target.conversationId,
+      );
+      throw error;
+    }
     const tail = results.find((result) => result.tail);
+    if (tail?.submission.steered) {
+      this.outbox.discardPendingTurnReplyTarget?.(
+        replyMessage.target.conversationId,
+      );
+    } else if (tail) {
+      this.outbox.bindPendingTurnReplyTarget?.(
+        replyMessage.target.conversationId,
+        tail.submission.threadId,
+        tail.submission.turnId,
+      );
+    }
     if (tail?.submission.steered) {
       this.notifyText(
         messages[0]!.target.conversationId,

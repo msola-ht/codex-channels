@@ -619,6 +619,52 @@ describe("FeishuMessageClient", () => {
     });
   });
 
+  it("replies to an exact Feishu message with a Markdown CardKit card", async () => {
+    const replyMessage = vi.fn(async () => ({
+      data: { message_id: "om_reply" },
+    }));
+    const createStreamingCard = vi.fn(async () => ({
+      code: 0,
+      data: { card_id: "7355372766134157313" },
+    }));
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage: async () => ({
+            data: { message_id: "om_message" },
+          }),
+          replyMessage,
+          patchMessage: successfulPatch,
+          createStreamingCard,
+          downloadResource: successfulDownload,
+        }),
+      },
+    );
+
+    await expect(
+      client.replyMarkdownCard("om_origin", "**已开始处理。**"),
+    ).resolves.toBeUndefined();
+
+    expect(replyMessage).toHaveBeenCalledWith({
+      path: { message_id: "om_origin" },
+      data: {
+        msg_type: "interactive",
+        content: JSON.stringify({
+          type: "card",
+          data: {
+            card_id: "7355372766134157313",
+          },
+        }),
+        reply_in_thread: false,
+      },
+    });
+  });
+
   it("creates and sends a native streaming CardKit card", async () => {
     const createMessage = vi.fn(async () => ({
       data: { message_id: "om_stream" },

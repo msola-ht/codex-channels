@@ -5,6 +5,7 @@ import {
   type OutputEvent,
 } from "../../conversation-core/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
+import { TurnReplyTargets } from "../turn-reply-targets.js";
 import type {
   OperationUpdateDisplay,
   SurfaceOutputPort,
@@ -32,6 +33,7 @@ interface FeishuStreamState {
   threadId: string;
   turnId: string;
   itemId: string;
+  phase?: "commentary" | "final_answer" | null;
   text: string;
   cardText: string;
   truncated: boolean;
@@ -47,10 +49,16 @@ export interface FeishuMessagePort {
   sendText(chatId: string, text: string): Promise<void>;
   sendPost(chatId: string, markdown: string): Promise<void>;
   sendMarkdownCard(chatId: string, markdown: string): Promise<void>;
+  replyPost?(messageId: string, markdown: string): Promise<void>;
+  replyMarkdownCard?(messageId: string, markdown: string): Promise<void>;
   sendCard(chatId: string, card: FeishuCardDocument): Promise<string>;
   updateCard(messageId: string, card: FeishuCardDocument): Promise<void>;
   createStreamingCard(
     chatId: string,
+    initialText: string,
+  ): Promise<{ cardId: string; messageId: string }>;
+  createStreamingReplyCard?(
+    messageId: string,
     initialText: string,
   ): Promise<{ cardId: string; messageId: string }>;
   updateStreamingCard(
@@ -76,6 +84,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     { chatId: string; messageId: string; status: string }
   >();
   private readonly streams = new Map<string, FeishuStreamState>();
+  private readonly replyTargets = new TurnReplyTargets<string>();
   private streamCapacityWarningIssued = false;
   private closed = false;
   private closeFinished = false;
@@ -102,6 +111,12 @@ export class FeishuOutbox implements SurfaceOutputPort {
     if (event.type === "text.delta") {
       this.acceptStreamDelta(event);
       return;
+    }
+    if (event.type === "turn.started") {
+      this.replyTargets.bindPending(
+        event.target.conversationId,
+        turnKey(event.threadId, event.turnId),
+      );
     }
     if (event.type === "text.completed" && this.completeStream(event)) {
       return;
@@ -146,10 +161,30 @@ export class FeishuOutbox implements SurfaceOutputPort {
       () => event.type === "turn.started"
           || event.type === "text.completed"
           || event.type === "turn.completed"
-        ? this.sendMarkdown(event.target.conversationId, rendered)
+        ? this.sendTurnMarkdown(event, rendered)
         : this.sendText(event.target.conversationId, rendered),
       event.type === "turn.started" || isCriticalOutputEvent(event),
     );
+  }
+
+  prepareTurnReplyTarget(chatId: string, messageId: string): void {
+    if (!this.closed) {
+      this.replyTargets.prepare(chatId, messageId);
+    }
+  }
+
+  bindPendingTurnReplyTarget(
+    chatId: string,
+    threadId: string,
+    turnId: string,
+  ): void {
+    if (!this.closed) {
+      this.replyTargets.bindPending(chatId, turnKey(threadId, turnId));
+    }
+  }
+
+  discardPendingTurnReplyTarget(chatId: string): void {
+    this.replyTargets.discardPending(chatId);
   }
 
   notifyText(chatId: string, text: string): boolean {
@@ -225,6 +260,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     this.closeFinished = true;
     this.threadStatusMessages.clear();
     this.streams.clear();
+    this.replyTargets.clear();
   }
 
   private async sendText(chatId: string, text: string): Promise<void> {
@@ -247,10 +283,16 @@ export class FeishuOutbox implements SurfaceOutputPort {
     chatId: string,
     markdown: string,
     maximumChunks = maximumFeishuMessageChunks,
+    replyTo?: string,
   ): Promise<void> {
+    let first = true;
     for (const chunk of splitFeishuMarkdownCards(markdown, maximumChunks)) {
       try {
-        await this.messagePort.sendMarkdownCard(chatId, chunk);
+        if (first && replyTo !== undefined && this.messagePort.replyMarkdownCard) {
+          await this.messagePort.replyMarkdownCard(replyTo, chunk);
+        } else {
+          await this.messagePort.sendMarkdownCard(chatId, chunk);
+        }
       } catch (error) {
         if (
           !(error instanceof FeishuMessageError)
@@ -265,8 +307,40 @@ export class FeishuOutbox implements SurfaceOutputPort {
           },
           "飞书静态 CardKit 创建失败，已降级为富文本",
         );
-        await this.sendPost(chatId, chunk, 1);
+        if (first && replyTo !== undefined && this.messagePort.replyPost) {
+          await this.messagePort.replyPost(replyTo, chunk);
+        } else {
+          await this.sendPost(chatId, chunk, 1);
+        }
       }
+      first = false;
+    }
+  }
+
+  private async sendTurnMarkdown(
+    event: Extract<
+      OutputEvent,
+      { type: "turn.started" | "text.completed" | "turn.completed" }
+    >,
+    markdown: string,
+  ): Promise<void> {
+    const key = turnKey(event.threadId, event.turnId);
+    const consumesReplyTarget = event.type === "turn.completed"
+      || (
+        event.type === "text.completed"
+        && event.phase !== "commentary"
+      );
+    const replyTo = event.type === "turn.started" || consumesReplyTarget
+      ? this.replyTargets.get(key)
+      : undefined;
+    await this.sendMarkdown(
+      event.target.conversationId,
+      markdown,
+      maximumFeishuMessageChunks,
+      replyTo,
+    );
+    if (consumesReplyTarget) {
+      this.replyTargets.delete(key);
     }
   }
 
@@ -339,6 +413,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       threadId: event.threadId,
       turnId: event.turnId,
       itemId: event.itemId,
+      ...(event.phase === undefined ? {} : { phase: event.phase }),
       text: "",
       cardText: "",
       truncated: false,
@@ -346,6 +421,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
       cardCount: 0,
       failed: false,
     };
+    if (event.phase !== undefined) {
+      state.phase = event.phase;
+    }
     const previousText = state.text;
     const appended = appendBoundedStreamText(state.text, event.text);
     state.text = appended.text;
@@ -377,6 +455,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
       return false;
     }
     const bounded = boundedStreamText(event.text);
+    if (event.phase !== undefined) {
+      state.phase = event.phase;
+    }
     const completedText = bounded.text;
     state.truncated = bounded.truncated;
     if (completedText.startsWith(state.text)) {
@@ -442,11 +523,19 @@ export class FeishuOutbox implements SurfaceOutputPort {
         const markdown = state.truncated
           ? `${state.cardText}${feishuTruncationNotice}`
           : state.cardText;
+        const replyKey = turnKey(state.threadId, state.turnId);
+        const replyTo = state.phase === "commentary"
+          ? undefined
+          : this.replyTargets.get(replyKey);
         await this.sendMarkdown(
           state.chatId,
           markdown,
           remainingMessageBudget,
+          replyTo,
         );
+        if (replyTo !== undefined) {
+          this.replyTargets.delete(replyKey);
+        }
       }
       return;
     }
@@ -565,10 +654,20 @@ export class FeishuOutbox implements SurfaceOutputPort {
     if (state.cardCount >= maximumFeishuStreamingCards) {
       throw new Error("飞书流式卡片数量超过单个结果上限");
     }
-    const created = await this.messagePort.createStreamingCard(
-      state.chatId,
-      initialText,
-    );
+    const replyKey = turnKey(state.threadId, state.turnId);
+    const replyTo = state.phase === "commentary"
+      ? undefined
+      : this.replyTargets.get(replyKey);
+    const created =
+      replyTo !== undefined && this.messagePort.createStreamingReplyCard
+        ? await this.messagePort.createStreamingReplyCard(replyTo, initialText)
+        : await this.messagePort.createStreamingCard(
+            state.chatId,
+            initialText,
+          );
+    if (replyTo !== undefined) {
+      this.replyTargets.delete(replyKey);
+    }
     state.cardId = created.cardId;
     state.lastSentText = initialText;
     state.cardCount += 1;
@@ -599,11 +698,22 @@ export class FeishuOutbox implements SurfaceOutputPort {
       const markdown = state.truncated
         ? `${state.text}${feishuTruncationNotice}`
         : state.text;
-      await this.sendPost(
-        state.chatId,
-        markdown,
-        remainingMessageBudget,
-      );
+      const replyKey = turnKey(state.threadId, state.turnId);
+      const replyTo = state.phase === "commentary"
+        ? undefined
+        : this.replyTargets.get(replyKey);
+      if (replyTo !== undefined && this.messagePort.replyPost) {
+        await this.messagePort.replyPost(replyTo, markdown);
+      } else {
+        await this.sendPost(
+          state.chatId,
+          markdown,
+          remainingMessageBudget,
+        );
+      }
+      if (replyTo !== undefined) {
+        this.replyTargets.delete(replyKey);
+      }
     }
     if (finishError) {
       throw finishError instanceof Error
@@ -842,4 +952,8 @@ function appendWithinByteLimit(
     }
   }
   return `${characters.slice(0, best).join("")}${suffix}`;
+}
+
+function turnKey(threadId: string, turnId: string): string {
+  return `${threadId}:${turnId}`;
 }

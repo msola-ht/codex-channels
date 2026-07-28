@@ -111,6 +111,24 @@ afterEach(() => {
 });
 
 describe("TelegramOutbox", () => {
+  it("replies to the originating input when acknowledging Turn start", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.prepareTurnReplyTarget(target.conversationId, 42);
+    outbox.handle(turnStarted());
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual([turnStartedPanel]);
+    expect(api.sendOptions[0]).toMatchObject({
+      reply_parameters: {
+        message_id: 42,
+        allow_sending_without_reply: true,
+      },
+    });
+  });
+
   it("queues a Workspace notification with direct switch buttons", async () => {
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);
@@ -260,6 +278,10 @@ describe("TelegramOutbox", () => {
     expect(api.sendOptions[0]).toEqual({
       parse_mode: "HTML",
       disable_notification: true,
+      reply_parameters: {
+        message_id: 42,
+        allow_sending_without_reply: true,
+      },
     });
     expect(api.sendOptions[1]).toEqual({ disable_notification: true });
     expect(api.sendOptions[2]).toMatchObject({

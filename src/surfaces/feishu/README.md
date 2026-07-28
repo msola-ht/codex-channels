@@ -49,7 +49,8 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
 - `renderer.ts`：把平台无关 `ConversationCommandResult`、`OutputEvent`、启动状态和结构化错误
   映射为稳定文本内容；启动通知、`/status` 与 `turn.completed` 结束统计均包含当前 Workspace
   Git 分支。
-- `outbox.ts`：精确账号路由并通过通用有界队列调用窄消息发送端口。
+- `outbox.ts`：精确账号路由并通过通用有界队列调用窄消息发送端口；在内存中按 Turn 关联
+  原始输入消息，使开始确认、短回复及首张流式卡片原生回复同一输入。
 - `status-card.ts`：把 Thread 状态映射为可原地更新的轻量交互卡片。
 - `surface.ts`：组合单账号连接、Inbox、Application Adapter、Outbox 和失败关闭交互端口，并由
   模块入口只暴露 `createFeishuSurface()` 工厂与生产选项类型。
@@ -69,7 +70,9 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
   Gateway 长连接可以收到动作。动作必须匹配一次性令牌、Chat、消息、授权 Actor 和当前请求提供的
   精确选项或表单字段，否则拒绝处理。表单回调只额外保留官方 `action.form_value` 中最多四个、
   每项最多 1,000 字符的字符串字段。
-- 消息发送只使用 `im.v1.message.create` 的 `chat_id + text/post/interactive` 窄能力；富文本只生成单个
+- 普通消息发送使用 `im.v1.message.create` 的 `chat_id + text/post/interactive` 窄能力；
+  普通 Turn 输入的开始确认和首条最终正文使用官方 `im.v1.message.reply` 回复精确
+  `message_id`，不创建话题串；富文本只生成单个
   `md` 元素，不暴露 SDK Client。模型或上游文本中的飞书原生 `<at>` 标签会在平台边界被中和，
   避免非预期提醒。审批结束和 Thread 状态都只更新 `interactive` 卡片，并使用
   `im.v1.message.patch`；普通文本不会交给卡片更新接口。调用设置 15 秒 HTTP 超时，创建响应必须

@@ -15,6 +15,8 @@
   版本字符串和当前 Workspace Git 分支，不读取生成协议。
 - `command-renderer.ts`：把平台无关的类型化命令结果渲染为 Telegram 消息。
 - `outbox.ts`：通过 Surface 共用的每 Conversation 有界顺序队列协调流式回复和审批显示顺序；
+  普通 Turn 输入会在内存中绑定到精确消息 ID，“已开始处理。”和首条最终正文均使用
+  `reply_parameters` 原生回复该输入；绑定在 Turn 结束、断线或关闭时清理；
   活动非终态流最多保留 100 个，单流正文最多保留 1,000,000 个 Unicode 字符并明确标记截断；
   每个 Turn 开始时发送共享确认；每轮状态卡复用共享生命周期字段，显示当前 Workspace Git
   分支、官方 Turn 对话耗时、最近 Turn 缓存命中率、当前 Goal、上下文压缩总次数和用量；最终回复默认使用兼容 HTML，也可选择

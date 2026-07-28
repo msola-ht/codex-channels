@@ -37,6 +37,7 @@ afterEach(() => {
 describe("Feishu outbox", () => {
   it("sends the shared Turn start confirmation as a Markdown card", async () => {
     const markdownCards: string[] = [];
+    const replies: Array<{ messageId: string; markdown: string }> = [];
     const outbox = new FeishuOutbox(
       "cli_app",
       {
@@ -46,10 +47,14 @@ describe("Feishu outbox", () => {
         sendMarkdownCard: async (_chatId, markdown) => {
           markdownCards.push(markdown);
         },
+        replyMarkdownCard: async (messageId, markdown) => {
+          replies.push({ messageId, markdown });
+        },
       },
       pino({ level: "silent" }),
     );
 
+    outbox.prepareTurnReplyTarget("oc_chat", "om_origin");
     outbox.handle({
       type: "turn.started",
       target,
@@ -58,7 +63,136 @@ describe("Feishu outbox", () => {
     });
     await outbox.close();
 
-    expect(markdownCards).toEqual(["**已开始处理。**"]);
+    expect(markdownCards).toEqual([]);
+    expect(replies).toEqual([{
+      messageId: "om_origin",
+      markdown: "**已开始处理。**",
+    }]);
+  });
+
+  it("keeps the reply target through commentary for the final static reply", async () => {
+    const markdownCards: string[] = [];
+    const replies: Array<{ messageId: string; markdown: string }> = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+        replyMarkdownCard: async (messageId, markdown) => {
+          replies.push({ messageId, markdown });
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.prepareTurnReplyTarget("oc_chat", "om_origin");
+    outbox.bindPendingTurnReplyTarget("oc_chat", "thread-1", "turn-1");
+    outbox.handle({
+      type: "text.completed",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "commentary-1",
+      text: "处理中",
+      phase: "commentary",
+    });
+    outbox.handle({
+      type: "text.completed",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "final-1",
+      text: "最终回复",
+      phase: "final_answer",
+    });
+    await outbox.close();
+
+    expect(markdownCards).toEqual(["处理中"]);
+    expect(replies).toEqual([{
+      messageId: "om_origin",
+      markdown: "最终回复",
+    }]);
+  });
+
+  it("keeps the reply target through commentary for the final streaming card", async () => {
+    vi.useFakeTimers();
+    const ordinaryCards: string[] = [];
+    const replyCards: Array<{ messageId: string; text: string }> = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        createStreamingCard: async (_chatId, initialText) => {
+          ordinaryCards.push(initialText);
+          return {
+            cardId: "7355372766134157313",
+            messageId: "om_commentary",
+          };
+        },
+        createStreamingReplyCard: async (messageId, initialText) => {
+          replyCards.push({ messageId, text: initialText });
+          return {
+            cardId: "7355372766134157314",
+            messageId: "om_final",
+          };
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.prepareTurnReplyTarget("oc_chat", "om_origin");
+    outbox.bindPendingTurnReplyTarget("oc_chat", "thread-1", "turn-1");
+    outbox.handle({
+      type: "text.delta",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "commentary-1",
+      text: "处理中",
+      phase: "commentary",
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle({
+      type: "text.completed",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "commentary-1",
+      text: "处理中",
+      phase: "commentary",
+    });
+    outbox.handle({
+      type: "text.delta",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "final-1",
+      text: "最终回复",
+      phase: "final_answer",
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle({
+      type: "text.completed",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "final-1",
+      text: "最终回复",
+      phase: "final_answer",
+    });
+    await outbox.close();
+
+    expect(ordinaryCards).toEqual(["处理中"]);
+    expect(replyCards).toEqual([{
+      messageId: "om_origin",
+      text: "最终回复",
+    }]);
   });
 
   it("streams coalesced deltas through one native CardKit card", async () => {

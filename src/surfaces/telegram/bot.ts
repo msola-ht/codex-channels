@@ -259,20 +259,33 @@ export class TelegramSurface {
       if (await this.interactions.handleText(context)) {
         return;
       }
-      const result = await this.inputs.enqueue({
-        target: target(context),
-        actorId: String(context.from?.id ?? ""),
-        sequence: this.takeInputSequence(),
-        text: formatQuotedInput(
-          context.message.text,
-          telegramQuotedText(context.message.reply_to_message),
-        ),
-      });
-      if (result.tail) {
-        this.outbox.setTurnReplyTarget(
+      const inputTarget = target(context);
+      this.outbox.prepareTurnReplyTarget(
+        inputTarget.conversationId,
+        context.message.message_id,
+      );
+      let result;
+      try {
+        result = await this.inputs.enqueue({
+          target: inputTarget,
+          actorId: String(context.from?.id ?? ""),
+          sequence: this.takeInputSequence(),
+          text: formatQuotedInput(
+            context.message.text,
+            telegramQuotedText(context.message.reply_to_message),
+          ),
+        });
+      } catch (error) {
+        this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+        throw error;
+      }
+      if (result.tail && result.submission.steered) {
+        this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+      } else if (result.tail) {
+        this.outbox.bindPendingTurnReplyTarget(
+          inputTarget.conversationId,
           result.submission.threadId,
           result.submission.turnId,
-          context.message.message_id,
         );
       }
       if (result.tail && result.submission.steered) {
@@ -330,27 +343,40 @@ export class TelegramSurface {
       context.message.reply_to_message,
     );
     const currentText = caption?.trim();
-    const result = await this.inputs.enqueue({
-      target: target(context),
-      actorId: String(context.from?.id ?? ""),
-      sequence,
-      ...(currentText
-        ? { text: formatQuotedInput(currentText, quotedText) }
-        : quotedText === undefined
-          ? {}
-          : {
-              text: formatQuotedInput(
-                "请查看这张图片并根据图片内容协助我。",
-                quotedText,
-              ),
-            }),
-      localImages: [{ path: image.path, bytes: image.bytes }],
-    });
-    if (result.tail) {
-      this.outbox.setTurnReplyTarget(
+    const inputTarget = target(context);
+    this.outbox.prepareTurnReplyTarget(
+      inputTarget.conversationId,
+      context.message.message_id,
+    );
+    let result;
+    try {
+      result = await this.inputs.enqueue({
+        target: inputTarget,
+        actorId: String(context.from?.id ?? ""),
+        sequence,
+        ...(currentText
+          ? { text: formatQuotedInput(currentText, quotedText) }
+          : quotedText === undefined
+            ? {}
+            : {
+                text: formatQuotedInput(
+                  "请查看这张图片并根据图片内容协助我。",
+                  quotedText,
+                ),
+              }),
+        localImages: [{ path: image.path, bytes: image.bytes }],
+      });
+    } catch (error) {
+      this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+      throw error;
+    }
+    if (result.tail && result.submission.steered) {
+      this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+    } else if (result.tail) {
+      this.outbox.bindPendingTurnReplyTarget(
+        inputTarget.conversationId,
         result.submission.threadId,
         result.submission.turnId,
-        context.message.message_id,
       );
     }
     if (result.tail && result.submission.steered && context.message) {
