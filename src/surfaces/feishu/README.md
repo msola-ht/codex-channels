@@ -1,7 +1,7 @@
 # 飞书 Surface
 
 本目录是飞书 Surface 的平台边界。当前已完成官方 SDK 与事件长连接窄封装、私聊普通文本、
-纯文字富文本、独立图片与单张图片说明文字 Inbox、输出渲染、Bootstrap 显式组合、全部平台无关
+纯文字富文本、独立图片与最多四张图片说明文字 Inbox、输出渲染、Bootstrap 显式组合、全部平台无关
 私聊命令、审批和用户输入卡片，以及
 按需 OAuth 与 Doctor。当前可通过严格 TOML 或统一 Setup 启用开发验证路径；群聊和一般文件
 仍未实现。展示体验已完成独立切片：启动通知、最终回复、命令
@@ -18,7 +18,8 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
 
 - `index.ts`：飞书模块受控出口；一级 `surfaces/index.ts` 只转出 Bootstrap 所需工厂、选项类型
   和启动文案渲染器。
-- `adapter.ts`：区分普通文本、平台本地命令和 Application 命令，并通过 Outbox 返回结果或安全错误。
+- `adapter.ts`：区分普通文本、平台本地命令和 Application 命令，把富文本内及 Inbox 收集的连续图片合并为
+  一次最多 4 张的 Application 输入，并通过 Outbox 返回结果或安全错误。
 - `approval-card.ts`：生成有界审批卡片和移除动作后的处理结果卡片。
 - `card-action.ts`：严格裁剪 `card.action.trigger` 的路由字段和受限字符串动作值。
 - `command-center.ts`：生成分类命令中心卡片，维护有界短期令牌与菜单事件去重，并复用
@@ -32,7 +33,8 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
 - `operation-format.ts`：把单个操作终态渲染为包含脱敏详情的静态 CardKit Markdown。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪。
 - `menu-event.ts`：严格裁剪 `application.bot.menu_v6` 的 App、Actor、事件和菜单 Key。
-- `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理。
+- `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理；连续图片在一秒静默
+  窗口内收集，普通文本与命令仍沿用既有顺序路径。
 - `input-card.ts`：生成有界用户输入表单、MCP JSON 表单、HTTP(S) URL 确认和处理结果卡片。
 - `interactions.ts`：维护私聊审批、用户输入和 MCP elicitation 的一次性令牌、Actor 绑定、
   请求去重、过期、取消和跨客户端失效。
@@ -120,8 +122,8 @@ Chat ID；`surface.ts` 只在 Actor 与当前 App 的一个已授权私聊绑定
 发送和命令任务由命令中心持有，Surface 停止时在关闭 Outbox 前有限等待。
 
 `inbox.ts` 只接受当前账号的已授权用户私聊普通文本、由 `text` 与 `a` 元素组成的纯文字
-`post` 富文本、独立图片，以及包含一张图片和可选说明文字的 `post`。超链接同时保留可见文字
-和目标 URL；未知元素、多张图片或畸形结构失败关闭，不能丢弃部分内容后提交。SDK 回调只做
+`post` 富文本、独立图片，以及包含最多四张图片和可选说明文字的 `post`。超链接同时保留可见文字
+和目标 URL；未知元素或畸形结构失败关闭，不能丢弃部分内容后提交。SDK 回调只做
 同步校验、富文本结构与图片 Key 裁剪和入队，不执行资源下载。同一 Chat
 按顺序处理，不同 Chat 可以并行。永久无效、未授权、重复或过旧事件被明确忽略；全局输入容量
 耗尽时返回 `retry/overloaded`。由于当前没有经过真实合同验证的 SDK 重试响应通道，Surface
@@ -184,7 +186,7 @@ StateStore 中已有绑定且仍有授权 Actor 的精确 Chat 生成消息；Su
 并通过同一 CardKit Markdown Outbox 入队。生成失败或输出队列关闭只记录受约束诊断，不阻塞长连接。
 
 `adapter.ts` 对普通文本调用 `ConversationService.submit()`，图片则先通过 `media.ts` 取得受管
-绝对路径，再调用同一 `submit()` 的 `localImages` 输入；富文本图片的原始说明文字与图片在同一次
+绝对路径，再调用同一 `submit()` 的 `localImages` 输入；富文本内的全部图片按原顺序与说明文字在同一次
 提交中传入，没有说明文字时才使用稳定图片提示。对已知平台无关命令调用
 `ConversationCommandService.execute()`；`/start`、`/help` 打开同一命令中心卡片，
 `/stop` 优先停止当前 Actor 在本私聊中的最新待处理交互，没有待处理交互时调用共享 Turn

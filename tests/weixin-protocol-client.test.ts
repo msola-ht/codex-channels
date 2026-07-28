@@ -229,18 +229,68 @@ describe("WeixinProtocolClient", () => {
         actorId,
         conversationId: actorId,
         contextToken: "context-secret",
-        image: {
+        images: [{
           fullUrl:
             "https://novac2c.cdn.weixin.qq.com/c2c/download?secret",
           encryptedQueryParam: "private-query",
           imageAesKey: "00112233445566778899aabbccddeeff",
           mediaAesKey: "private-fallback-key",
-        },
+        }],
       }],
     });
   });
 
-  it("fails closed on malformed image media and mixed image content", async () => {
+  it("parses mixed text and multiple images as one inbound message", async () => {
+    const client = createClient({
+      fetchImpl: vi.fn(async () => new Response(exactMessageIds({
+        ret: 0,
+        get_updates_buf: "next-cursor",
+        msgs: [message("8", {
+          item_list: [
+            { type: 1, text_item: { text: "比较这两张图" } },
+            {
+              type: 2,
+              image_item: {
+                aeskey: "00112233445566778899aabbccddeeff",
+                media: { encrypt_query_param: "first-private-query" },
+              },
+            },
+            {
+              type: 2,
+              image_item: {
+                media: {
+                  full_url:
+                    "https://novac2c.cdn.weixin.qq.com/c2c/download?second",
+                  aes_key: "second-private-key",
+                },
+              },
+            },
+          ],
+        })],
+      }), { status: 200 })),
+    });
+
+    await expect(client.getUpdates("")).resolves.toMatchObject({
+      messages: [{
+        kind: "image",
+        messageId: "8",
+        text: "比较这两张图",
+        images: [
+          {
+            encryptedQueryParam: "first-private-query",
+            imageAesKey: "00112233445566778899aabbccddeeff",
+          },
+          {
+            fullUrl:
+              "https://novac2c.cdn.weixin.qq.com/c2c/download?second",
+            mediaAesKey: "second-private-key",
+          },
+        ],
+      }],
+    });
+  });
+
+  it("fails closed on malformed images, excessive images, and mixed media", async () => {
     const malformed = createClient({
       fetchImpl: vi.fn(async () => new Response(exactMessageIds({
         ret: 0,
@@ -254,29 +304,77 @@ describe("WeixinProtocolClient", () => {
       code: "invalid-response",
     });
 
-    const mixed = createClient({
+    const excessive = createClient({
       fetchImpl: vi.fn(async () => new Response(exactMessageIds({
         ret: 0,
         get_updates_buf: "next-cursor",
         msgs: [message("8", {
+          item_list: Array.from({ length: 5 }, (_, index) => ({
+            type: 2,
+            image_item: {
+              media: {
+                encrypt_query_param: `private-query-${index}`,
+              },
+            },
+          })),
+        })],
+      }), { status: 200 })),
+    });
+    await expect(excessive.getUpdates("")).resolves.toMatchObject({
+      messages: [{
+        kind: "ignored",
+        messageId: "8",
+        reason: "unsupported-content",
+      }],
+    });
+
+    const mixedMedia = createClient({
+      fetchImpl: vi.fn(async () => new Response(exactMessageIds({
+        ret: 0,
+        get_updates_buf: "next-cursor",
+        msgs: [message("9", {
           item_list: [
             {
               type: 2,
               image_item: {
-                media: {
-                  encrypt_query_param: "private-query",
-                },
+                media: { encrypt_query_param: "private-query" },
               },
             },
-            { type: 1, text_item: { text: "caption" } },
+            { type: 4, file_item: { file_name: "private.txt" } },
           ],
         })],
       }), { status: 200 })),
     });
-    await expect(mixed.getUpdates("")).resolves.toMatchObject({
+    await expect(mixedMedia.getUpdates("")).resolves.toMatchObject({
       messages: [{
         kind: "ignored",
-        messageId: "8",
+        messageId: "9",
+        reason: "unsupported-content",
+      }],
+    });
+
+    const repeatedText = createClient({
+      fetchImpl: vi.fn(async () => new Response(exactMessageIds({
+        ret: 0,
+        get_updates_buf: "next-cursor",
+        msgs: [message("10", {
+          item_list: [
+            { type: 1, text_item: { text: "first" } },
+            { type: 1, text_item: { text: "second" } },
+            {
+              type: 2,
+              image_item: {
+                media: { encrypt_query_param: "private-query" },
+              },
+            },
+          ],
+        })],
+      }), { status: 200 })),
+    });
+    await expect(repeatedText.getUpdates("")).resolves.toMatchObject({
+      messages: [{
+        kind: "ignored",
+        messageId: "10",
         reason: "unsupported-content",
       }],
     });

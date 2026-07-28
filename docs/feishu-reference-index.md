@@ -5,6 +5,8 @@
 本页用于定位飞书开放平台、官方 Node SDK、本地实现和验证入口。它是飞书 Surface 的事实查询
 入口，不替代 [`飞书 Surface 接入计划`](feishu-surface-plan.md)；当前支持扫码 Setup 与开发验证
 中的私聊普通文本、纯文字富文本、独立图片、单张图片说明文字、命令、CardKit 输出和交互路径。
+固定版本源码已按 [`本地上游源码工作流`](upstream-sources.md) 保存；本地基线存在且匹配时优先
+查阅本地仓库，不重复联网读取相同提交。
 
 截至 2026-07-26，项目已精确锁定 `@larksuiteoapi/node-sdk@1.71.1`，并完成私聊 Surface、
 严格配置和 Bootstrap 显式组合。测试应用已完成扫码配置、Doctor 探测、生产 Gateway

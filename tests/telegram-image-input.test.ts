@@ -88,6 +88,76 @@ describe("Telegram image input", () => {
     await output.close();
   });
 
+  it("submits one Telegram media group as one multi-image input", async () => {
+    const submit = vi.fn().mockResolvedValue({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    });
+    const download = vi.fn()
+      .mockResolvedValueOnce({
+        path: "/private/uploads/first.jpg",
+        mimeType: "image/jpeg",
+        bytes: 100,
+      })
+      .mockResolvedValueOnce({
+        path: "/private/uploads/second.jpg",
+        mimeType: "image/jpeg",
+        bytes: 100,
+      });
+    const { surface, output } = createSurface(submit, download);
+
+    await Promise.all([
+      surface.bot.handleUpdate({
+        update_id: 20,
+        message: {
+          message_id: 20,
+          media_group_id: "album-1",
+          date: 1,
+          from: telegramUser(),
+          chat: telegramChat(),
+          caption: "比较这些图片",
+          photo: [{
+            file_id: "first",
+            file_unique_id: "first-u",
+            width: 100,
+            height: 100,
+          }],
+        },
+      }),
+      surface.bot.handleUpdate({
+        update_id: 21,
+        message: {
+          message_id: 21,
+          media_group_id: "album-1",
+          date: 1,
+          from: telegramUser(),
+          chat: telegramChat(),
+          photo: [{
+            file_id: "second",
+            file_unique_id: "second-u",
+            width: 100,
+            height: 100,
+          }],
+        },
+      }),
+    ]);
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledWith(
+      { surface: "telegram", accountId: "default", conversationId: "100" },
+      {
+        text: "比较这些图片",
+        localImages: [
+          { path: "/private/uploads/first.jpg" },
+          { path: "/private/uploads/second.jpg" },
+        ],
+      },
+    );
+    await surface.stop();
+    await output.close();
+  });
+
   it("rejects non-image documents before downloading them", async () => {
     const submit = vi.fn();
     const download = vi.fn();
@@ -370,6 +440,7 @@ function createSurface(
     pino({ level: "silent" }),
     {
       gatewayVersion: "0.145.0",
+      inputQuietWindowMs: 0,
       imageStore,
       actorRegistry: {
         actors: () => [],

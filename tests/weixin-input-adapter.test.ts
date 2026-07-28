@@ -54,7 +54,7 @@ describe("WeixinInputAdapter", () => {
     controller.deliver("cursor-one");
     await vi.waitFor(() => {
       expect(cursorStore.set).toHaveBeenCalledWith(accountId, "cursor-one");
-    });
+    }, { timeout: 2_000 });
     await adapter.stop();
 
     expect(events).toEqual([
@@ -105,7 +105,7 @@ describe("WeixinInputAdapter", () => {
     expect(replyContexts.get(target)).toBeUndefined();
   });
 
-  it("downloads an authorized image and submits it through localImages", async () => {
+  it("downloads authorized mixed images and submits them together", async () => {
     let delivered = false;
     const client: WeixinProtocolClient = {
       getUpdates: vi.fn(async (_cursor, signal) => {
@@ -119,11 +119,15 @@ describe("WeixinInputAdapter", () => {
               actorId,
               conversationId: actorId,
               contextToken: "context-secret",
-              image: {
-                fullUrl:
-                  "https://novac2c.cdn.weixin.qq.com/c2c/download?private",
-                imageAesKey: "00112233445566778899aabbccddeeff",
-              },
+              text: "比较图片",
+              images: [
+                {
+                  fullUrl:
+                    "https://novac2c.cdn.weixin.qq.com/c2c/download?first",
+                  imageAesKey: "00112233445566778899aabbccddeeff",
+                },
+                { encryptedQueryParam: "second-private-query" },
+              ],
             }],
           };
         }
@@ -134,11 +138,17 @@ describe("WeixinInputAdapter", () => {
     const cursorStore = cursorStoreFixture();
     const service = serviceFixture();
     const images = {
-      download: vi.fn(async () => ({
-        path: "/private/weixin/image.png",
-        mimeType: "image/png" as const,
-        bytes: 8,
-      })),
+      download: vi.fn()
+        .mockResolvedValueOnce({
+          path: "/private/weixin/first.png",
+          mimeType: "image/png" as const,
+          bytes: 8,
+        })
+        .mockResolvedValueOnce({
+          path: "/private/weixin/second.jpg",
+          mimeType: "image/jpeg" as const,
+          bytes: 9,
+        }),
     };
     const adapter = new WeixinInputAdapter({
       accountId,
@@ -158,17 +168,125 @@ describe("WeixinInputAdapter", () => {
         accountId,
         "cursor-image",
       );
-    });
+    }, { timeout: 2_000 });
     await adapter.stop();
 
-    expect(images.download).toHaveBeenCalledWith({
+    expect(images.download).toHaveBeenNthCalledWith(1, {
       fullUrl:
-        "https://novac2c.cdn.weixin.qq.com/c2c/download?private",
+        "https://novac2c.cdn.weixin.qq.com/c2c/download?first",
       imageAesKey: "00112233445566778899aabbccddeeff",
     });
+    expect(images.download).toHaveBeenNthCalledWith(2, {
+      encryptedQueryParam: "second-private-query",
+    });
     expect(service.submit).toHaveBeenCalledWith(target, {
-      text: "请查看这张图片并根据图片内容协助我。",
-      localImages: [{ path: "/private/weixin/image.png" }],
+      text: "比较图片",
+      localImages: [
+        { path: "/private/weixin/first.png" },
+        { path: "/private/weixin/second.jpg" },
+      ],
+    });
+  });
+
+  it("coalesces separate image messages and persists reply contexts in order", async () => {
+    let delivered = false;
+    let releaseFirstPersistence!: () => void;
+    const firstPersistence = new Promise<void>((resolve) => {
+      releaseFirstPersistence = resolve;
+    });
+    const persistReplyContext = vi.fn(async (
+      _target: ConversationTarget,
+      _actorId: string,
+      contextToken: string,
+    ) => {
+      if (contextToken === "context-first") {
+        await firstPersistence;
+      }
+    });
+    const client: WeixinProtocolClient = {
+      getUpdates: vi.fn(async (_cursor, signal) => {
+        if (!delivered) {
+          delivered = true;
+          return {
+            cursor: "cursor-images",
+            messages: [
+              {
+                kind: "image" as const,
+                messageId: "9007199254740993",
+                actorId,
+                conversationId: actorId,
+                contextToken: "context-first",
+                text: "比较这些图片",
+                images: [{ encryptedQueryParam: "first-private-query" }],
+              },
+              {
+                kind: "image" as const,
+                messageId: "9007199254740994",
+                actorId,
+                conversationId: actorId,
+                contextToken: "context-second",
+                images: [{ encryptedQueryParam: "second-private-query" }],
+              },
+            ],
+          };
+        }
+        return await waitForAbort(signal);
+      }),
+      sendText: vi.fn(async () => {}),
+    };
+    const cursorStore = cursorStoreFixture();
+    const service = serviceFixture();
+    const images = {
+      download: vi.fn()
+        .mockResolvedValueOnce({
+          path: "/private/weixin/first.png",
+          mimeType: "image/png" as const,
+          bytes: 8,
+        })
+        .mockResolvedValueOnce({
+          path: "/private/weixin/second.jpg",
+          mimeType: "image/jpeg" as const,
+          bytes: 9,
+        }),
+    };
+    const adapter = new WeixinInputAdapter({
+      accountId,
+      client,
+      cursorStore,
+      service,
+      outbox: outboxFixture(),
+      access: accessFixture(true),
+      replyContexts: new WeixinReplyContextStore(accountId),
+      persistReplyContext,
+      images,
+      onFatal: vi.fn(),
+    });
+
+    await adapter.start();
+    await vi.waitFor(() => {
+      expect(persistReplyContext).toHaveBeenCalledOnce();
+    });
+    expect(persistReplyContext.mock.calls[0]?.[2]).toBe("context-first");
+    releaseFirstPersistence();
+    await vi.waitFor(() => {
+      expect(cursorStore.set).toHaveBeenCalledWith(
+        accountId,
+        "cursor-images",
+      );
+    }, { timeout: 2_000 });
+    await adapter.stop();
+
+    expect(persistReplyContext.mock.calls.map((call) => call[2])).toEqual([
+      "context-first",
+      "context-second",
+    ]);
+    expect(service.submit).toHaveBeenCalledTimes(1);
+    expect(service.submit).toHaveBeenCalledWith(target, {
+      text: "比较这些图片",
+      localImages: [
+        { path: "/private/weixin/first.png" },
+        { path: "/private/weixin/second.jpg" },
+      ],
     });
   });
 
@@ -236,7 +354,7 @@ describe("WeixinInputAdapter", () => {
     controller.deliver("cursor-one");
     await vi.waitFor(() => {
       expect(onFatal).toHaveBeenCalledOnce();
-    });
+    }, { timeout: 2_000 });
     await adapter.stop();
 
     const error = onFatal.mock.calls[0]?.[0] as WeixinInputFatalError;
@@ -387,11 +505,11 @@ function imageBatch(cursor: string) {
       actorId,
       conversationId: actorId,
       contextToken: "context-secret",
-      image: {
+      images: [{
         fullUrl:
           "https://novac2c.cdn.weixin.qq.com/c2c/download?private",
         imageAesKey: "00112233445566778899aabbccddeeff",
-      },
+      }],
     }],
   };
 }

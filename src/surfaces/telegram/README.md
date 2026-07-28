@@ -7,6 +7,7 @@
 - `index.ts`：Telegram Surface 的公开导出入口。
 - `constants.ts`：Telegram Surface 的稳定账号标识。
 - `bot.ts`：注册 Telegram SDK 处理器，执行访问检查，把标准命令或普通输入提交给 Application；
+  同一 `media_group_id` 的图片按 Actor 合并为一次最多 4 张的 Application 输入；
   `/queue <描述>` 把纯文本排到下一 Turn，`/rules <init|check>` 只操作当前 Workspace 且不提供
   强制覆盖；同时发送热加载、自动重启、重装要求和失败等配置
   生命周期通知，Workspace 新增通知带直接切换按钮；启动消息只使用组合根注入的 Gateway
@@ -35,7 +36,8 @@
   当前聊天最新交互，没有待处理交互时进入共享 Turn 停止命令。初始交互使用 Conversation
   优先有序通道，会排在等待中的非关键流式或状态输出之前；最终带按钮的审批消息保持通知开启，
   长内容的前置折叠分片静默。发送成功或失败只记录脱敏身份和平台错误分类。
-- `lifecycle.ts`：Bot 命令注册、Long Polling、包含系统、会话与 Git 分支摘要的启动联通通知，以及可取消关闭；有界重试耗尽后上报致命故障，由进程管理器恢复 Gateway。
+- `lifecycle.ts`：Bot 命令注册、Long Polling、连续且属于同一原生媒体组的并发准备、包含系统、会话与 Git
+  分支摘要的启动联通通知，以及可取消关闭；有界重试耗尽后上报致命故障，由进程管理器恢复 Gateway。
 - `api-executor.ts`：统一执行 Telegram API 调用，处理超时、限流和有限重试。
 - `error-metadata.ts`：只保留异常类型和受约束的机器错误码，不记录任意异常消息。
 - `user-error-renderer.ts`：把平台无关的结构化用户错误映射为 Telegram 专属提示与命令用法。

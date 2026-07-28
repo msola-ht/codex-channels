@@ -102,6 +102,7 @@ export class FeishuSurface implements SurfaceAdapter {
   readonly output: FeishuOutbox;
 
   private readonly inbox: FeishuInbox;
+  private readonly adapter: FeishuConversationAdapter;
   private readonly commandCenter: FeishuCommandCenter;
   private readonly applicationSetup: FeishuApplicationSetupController;
   private readonly images: FeishuImagePort;
@@ -196,7 +197,7 @@ export class FeishuSurface implements SurfaceAdapter {
       options.access,
       options.logger,
     );
-    const adapter = new FeishuConversationAdapter(
+    this.adapter = new FeishuConversationAdapter(
       options.service,
       this.output,
       this.images,
@@ -212,12 +213,13 @@ export class FeishuSurface implements SurfaceAdapter {
       },
       this.applicationSetup,
       this.interactions,
+      { quietWindowMs: 0 },
     );
     this.commandCenter = new FeishuCommandCenter(
       this.output,
       options.access,
       (target, action, actorId, input) =>
-        adapter.handleCommandCenterAction(
+        this.adapter.handleCommandCenterAction(
           target,
           action,
           actorId,
@@ -231,7 +233,10 @@ export class FeishuSurface implements SurfaceAdapter {
       ...(options.actorRegistry
         ? { actorRegistry: options.actorRegistry }
         : {}),
-      handle: (message) => adapter.handle(message),
+      handle: (message) => this.adapter.handle(message),
+      handleImageBatch: (messages) =>
+        this.adapter.handleImageBatch(messages),
+      inputQuietWindowMs: 1_000,
       handleError: (error) => {
         options.logger.warn(
           {
@@ -383,6 +388,7 @@ export class FeishuSurface implements SurfaceAdapter {
     this.connectionReady = false;
     await this.connection.stop();
     await this.inbox.close();
+    await this.adapter.close();
     await this.applicationSetup.close();
     await this.oauth.close();
     this.images.close();

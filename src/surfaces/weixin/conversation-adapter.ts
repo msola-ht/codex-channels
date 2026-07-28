@@ -8,6 +8,7 @@ import {
   type ConversationTarget,
 } from "../../conversation-core/index.js";
 import { parseSlashCommand } from "../slash-command.js";
+import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import {
   formatWeixinCommandText,
   renderWeixinCommandResult,
@@ -22,6 +23,8 @@ import {
 import type { WeixinOutbox } from "./outbox.js";
 import type { WeixinImageReference } from "./protocol-client.js";
 
+const maximumInboundImageBatchBytes = 20 * 1024 * 1024;
+
 export type WeixinConversationMessage =
   | {
       target: ConversationTarget;
@@ -33,38 +36,61 @@ export type WeixinConversationMessage =
       target: ConversationTarget;
       actorId: string;
       kind: "image";
-      image: WeixinImageReference;
+      text?: string;
+      images: readonly WeixinImageReference[];
     };
 
 export class WeixinConversationAdapter {
   private readonly commands: ConversationCommandService;
+  private readonly inputs: SurfaceInputCoalescer;
+  private nextSequence = 0;
 
   constructor(
     private readonly conversations: ConversationService,
     private readonly outbox: Pick<WeixinOutbox, "notifyText">,
     private readonly images?: Pick<WeixinImagePort, "download">,
+    inputOptions: { quietWindowMs?: number } = { quietWindowMs: 0 },
   ) {
     this.commands = new ConversationCommandService(conversations);
+    this.inputs = new SurfaceInputCoalescer(
+      (target, input) => conversations.submit(target, input),
+      inputOptions,
+    );
   }
 
   async handle(message: WeixinConversationMessage): Promise<void> {
     try {
       if (message.kind === "image") {
+        const sequence = this.nextSequence;
+        this.nextSequence += 1;
         if (this.images === undefined) {
           throw new UserFacingError(
             "image.unsupported",
             "微信图片输入尚未启用",
           );
         }
-        const image = await this.images.download(message.image);
-        const submission = await this.conversations.submit(
-          message.target,
-          {
-            text: "请查看这张图片并根据图片内容协助我。",
-            localImages: [{ path: image.path }],
-          },
-        );
-        if (submission.steered) {
+        const localImages: Array<{ path: string; bytes: number }> = [];
+        let totalBytes = 0;
+        for (const reference of message.images) {
+          const image = await this.images.download(reference);
+          totalBytes += image.bytes;
+          if (totalBytes > maximumInboundImageBatchBytes) {
+            throw new UserFacingError(
+              "image.too-large",
+              "图片总大小超过 20 MiB 限制",
+              { scope: "batch" },
+            );
+          }
+          localImages.push({ path: image.path, bytes: image.bytes });
+        }
+        const result = await this.inputs.enqueue({
+          target: message.target,
+          actorId: message.actorId,
+          sequence,
+          ...(message.text === undefined ? {} : { text: message.text }),
+          localImages,
+        });
+        if (result.tail && result.submission.steered) {
           this.notify(message.target, "已将图片追加到当前 Turn。");
         }
         return;
@@ -111,6 +137,10 @@ export class WeixinConversationAdapter {
         `操作失败：${renderWeixinUserFacingError(error)}。`,
       );
     }
+  }
+
+  close(): Promise<void> {
+    return this.inputs.close();
   }
 
   private notify(target: ConversationTarget, text: string): void {

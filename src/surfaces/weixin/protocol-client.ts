@@ -61,7 +61,8 @@ export type WeixinInboundMessage =
       actorId: string;
       conversationId: string;
       contextToken: string;
-      image: WeixinImageReference;
+      text?: string;
+      images: readonly WeixinImageReference[];
       createdAt?: number;
     }
   | {
@@ -145,6 +146,7 @@ const maximumCursorLength = 65_536;
 const maximumGetUpdatesResponseBytes = 1_048_576;
 const maximumSendResponseBytes = 65_536;
 const maximumTextLength = 4_000;
+const maximumInboundImages = 4;
 const maximumImageBytes = 10 * 1024 * 1024;
 const maximumImageParameterLength = 65_536;
 const maximumImageUploadAttempts = 3;
@@ -496,42 +498,54 @@ function parseInboundMessage(
 function parseInboundContent(
   items: readonly unknown[],
 ): Pick<Extract<WeixinInboundMessage, { kind: "text" }>, "kind" | "text">
-  | Pick<Extract<WeixinInboundMessage, { kind: "image" }>, "kind" | "image">
+  | Pick<
+      Extract<WeixinInboundMessage, { kind: "image" }>,
+      "kind" | "text" | "images"
+    >
   | null {
-  const imageItems = items.filter((item) =>
-    optionalSafeInteger(
-      requiredRecord(item, "微信消息项目无效").type,
-      "微信消息项目类型无效",
-    ) === 2);
-  if (imageItems.length > 0) {
-    if (imageItems.length !== 1 || items.length !== 1) {
-      return null;
-    }
-    return {
-      kind: "image",
-      image: parseImageReference(imageItems[0]),
-    };
-  }
+  let text: string | undefined;
+  const images: WeixinImageReference[] = [];
   for (const item of items) {
     const record = requiredRecord(item, "微信消息项目无效");
-    const type = optionalSafeInteger(record.type, "微信消息项目类型无效");
-    if (type !== 1) {
+    const type = optionalSafeInteger(
+      record.type,
+      "微信消息项目类型无效",
+    );
+    if (type === 1) {
+      if (text !== undefined) {
+        return null;
+      }
+      const textItem = requiredRecord(
+        record.text_item,
+        "微信文本消息项目无效",
+      );
+      if (
+        typeof textItem.text !== "string"
+        || textItem.text.trim().length === 0
+        || textItem.text.length > 100_000
+      ) {
+        return null;
+      }
+      text = textItem.text;
       continue;
     }
-    const textItem = requiredRecord(
-      record.text_item,
-      "微信文本消息项目无效",
-    );
-    if (
-      typeof textItem.text !== "string"
-      || textItem.text.trim().length === 0
-      || textItem.text.length > 100_000
-    ) {
-      return null;
+    if (type === 2) {
+      if (images.length >= maximumInboundImages) {
+        return null;
+      }
+      images.push(parseImageReference(record));
+      continue;
     }
-    return { kind: "text", text: textItem.text };
+    return null;
   }
-  return null;
+  if (images.length > 0) {
+    return {
+      kind: "image",
+      ...(text === undefined ? {} : { text }),
+      images,
+    };
+  }
+  return text === undefined ? null : { kind: "text", text };
 }
 
 function parseImageReference(value: unknown): WeixinImageReference {

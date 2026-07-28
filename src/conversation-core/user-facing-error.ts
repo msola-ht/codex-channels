@@ -5,6 +5,7 @@ export type UserFacingErrorCode =
   | "conversation.busy"
   | "image.path.invalid"
   | "image.too-large"
+  | "image.too-many"
   | "image.unsupported"
   | "session.selector.required"
   | "session.selector.ambiguous"

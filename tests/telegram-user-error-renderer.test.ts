@@ -26,6 +26,14 @@ describe("Telegram user error renderer", () => {
     expect(formatTelegramUserFacingError(error)).toContain("/unarchive");
   });
 
+  it("distinguishes a batch image limit from a single-image limit", () => {
+    expect(formatTelegramUserFacingError(new UserFacingError(
+      "image.too-large",
+      "opaque",
+      { scope: "batch" },
+    ))).toBe("图片总大小超过 20 MiB 限制");
+  });
+
   it.each([
     ["queue.usage", "用法：/queue <描述>"],
     ["queue.inactive", "当前没有运行中的任务，请直接发送普通消息"],

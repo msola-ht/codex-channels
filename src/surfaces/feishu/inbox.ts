@@ -23,7 +23,7 @@ interface FeishuInboxMessageBase {
 
 export type FeishuInboxMessage = FeishuInboxMessageBase & (
   | { kind: "text"; text: string }
-  | { kind: "image"; imageKey: string; text?: string }
+  | { kind: "image"; imageKeys: readonly string[]; text?: string }
 );
 
 export interface FeishuInboxProcessingError {
@@ -55,6 +55,10 @@ export interface FeishuInboxOptions {
   access: SurfaceAccessPolicy;
   actorRegistry?: ConversationActorRegistry;
   handle(message: FeishuInboxMessage): Promise<void>;
+  handleImageBatch?(messages: readonly Extract<
+    FeishuInboxMessage,
+    { kind: "image" }
+  >[]): Promise<void>;
   handleError(error: FeishuInboxProcessingError): void;
   handleCloseTimeout(pendingCount: number): void;
   capacity?: number;
@@ -62,12 +66,14 @@ export interface FeishuInboxOptions {
   deduplicationCapacity?: number;
   deduplicationTtlMs?: number;
   maximumEventAgeMs?: number;
+  inputQuietWindowMs?: number;
   now?: () => number;
 }
 
 interface ConversationWorker {
   queue: FeishuInboxMessage[];
   done: Promise<void>;
+  revision: number;
 }
 
 export class FeishuInbox {
@@ -76,6 +82,7 @@ export class FeishuInbox {
   private readonly deduplicationCapacity: number;
   private readonly deduplicationTtlMs: number;
   private readonly maximumEventAgeMs: number;
+  private readonly inputQuietWindowMs: number;
   private readonly now: () => number;
   private readonly seen = new Map<string, number>();
   private readonly workers = new Map<string, ConversationWorker>();
@@ -100,6 +107,10 @@ export class FeishuInbox {
     this.maximumEventAgeMs = positiveInteger(
       options.maximumEventAgeMs ?? DEFAULT_MAXIMUM_EVENT_AGE_MS,
       "事件最大年龄",
+    );
+    this.inputQuietWindowMs = nonNegativeInteger(
+      options.inputQuietWindowMs ?? 0,
+      "输入聚合静默窗口",
     );
     this.now = options.now ?? Date.now;
   }
@@ -199,12 +210,14 @@ export class FeishuInbox {
     const existing = this.workers.get(conversationId);
     if (existing !== undefined) {
       existing.queue.push(message);
+      existing.revision += 1;
       return;
     }
     const queue = [message];
     const worker: ConversationWorker = {
       queue,
       done: Promise.resolve(),
+      revision: 0,
     };
     this.workers.set(conversationId, worker);
     worker.done = Promise.resolve().then(
@@ -216,7 +229,49 @@ export class FeishuInbox {
     conversationId: string,
     worker: ConversationWorker,
   ): Promise<void> {
+    const handleImageBatch = this.options.handleImageBatch === undefined
+      ? undefined
+      : (
+          messages: readonly Extract<
+            FeishuInboxMessage,
+            { kind: "image" }
+          >[],
+        ) => this.options.handleImageBatch!(messages);
     while (worker.queue.length > 0) {
+      const first = worker.queue[0];
+      if (
+        first?.kind === "image"
+        && handleImageBatch !== undefined
+        && this.inputQuietWindowMs > 0
+      ) {
+        const revision = worker.revision;
+        await delay(this.inputQuietWindowMs);
+        if (worker.revision !== revision) {
+          continue;
+        }
+      }
+      const imageBatch = first?.kind === "image"
+        && this.options.handleImageBatch !== undefined
+        ? takeLeadingImages(worker.queue)
+        : undefined;
+      if (imageBatch !== undefined && handleImageBatch !== undefined) {
+        try {
+          for (const message of imageBatch) {
+            this.options.actorRegistry?.rememberActor(
+              message.target,
+              message.actorId,
+            );
+          }
+          await handleImageBatch(imageBatch);
+        } catch (error) {
+          for (const message of imageBatch) {
+            this.reportProcessingError(message, error);
+          }
+        } finally {
+          this.pendingCount -= imageBatch.length;
+        }
+        continue;
+      }
       const message = worker.queue.shift();
       if (message === undefined) {
         break;
@@ -228,15 +283,7 @@ export class FeishuInbox {
         );
         await this.options.handle(message);
       } catch (error) {
-        try {
-          this.options.handleError({
-            target: message.target,
-            messageId: message.messageId,
-            errorType: safeErrorType(error),
-          });
-        } catch {
-          // Error reporting must not stop later messages for this Conversation.
-        }
+        this.reportProcessingError(message, error);
       } finally {
         this.pendingCount -= 1;
       }
@@ -244,6 +291,21 @@ export class FeishuInbox {
     const current = this.workers.get(conversationId);
     if (current === worker) {
       this.workers.delete(conversationId);
+    }
+  }
+
+  private reportProcessingError(
+    message: FeishuInboxMessage,
+    error: unknown,
+  ): void {
+    try {
+      this.options.handleError({
+        target: message.target,
+        messageId: message.messageId,
+        errorType: safeErrorType(error),
+      });
+    } catch {
+      // Error reporting must not stop later messages for this Conversation.
     }
   }
 
@@ -317,7 +379,7 @@ function parseTextContent(value: string): string | undefined {
 
 function parseImageContent(
   value: string,
-): { kind: "image"; imageKey: string } | undefined {
+): { kind: "image"; imageKeys: readonly string[] } | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);
@@ -338,14 +400,14 @@ function parseImageContent(
   ) {
     return undefined;
   }
-  return { kind: "image", imageKey };
+  return { kind: "image", imageKeys: [imageKey] };
 }
 
 function parsePostContent(
   value: string,
 ): (
   | { kind: "text"; text: string }
-  | { kind: "image"; imageKey: string; text?: string }
+  | { kind: "image"; imageKeys: readonly string[]; text?: string }
 ) | undefined {
   let parsed: unknown;
   try {
@@ -358,7 +420,7 @@ function parsePostContent(
     return undefined;
   }
 
-  let imageKey: string | undefined;
+  const imageKeys: string[] = [];
   const lines: string[] = [];
   if (typeof body.title === "string" && body.title.length > 0) {
     lines.push(body.title);
@@ -395,13 +457,12 @@ function parsePostContent(
         }
       } else if (item.tag === "img") {
         if (
-          imageKey !== undefined
-          || typeof item.image_key !== "string"
+          typeof item.image_key !== "string"
           || !isSafeFeishuResourceIdentifier(item.image_key)
         ) {
           return undefined;
         }
-        imageKey = item.image_key;
+        imageKeys.push(item.image_key);
       } else {
         return undefined;
       }
@@ -409,14 +470,14 @@ function parsePostContent(
     lines.push(line);
   }
   const text = lines.join("\n").trim();
-  if (imageKey === undefined) {
+  if (imageKeys.length === 0) {
     return text.length === 0
       ? undefined
       : { kind: "text", text };
   }
   return {
     kind: "image",
-    imageKey,
+    imageKeys,
     ...(text.length === 0 ? {} : { text }),
   };
 }
@@ -453,6 +514,33 @@ function positiveInteger(value: number, name: string): number {
     throw new Error(`飞书 Inbox ${name}必须是正整数`);
   }
   return value;
+}
+
+function nonNegativeInteger(value: number, name: string): number {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`飞书 Inbox ${name}必须是非负整数`);
+  }
+  return value;
+}
+
+function takeLeadingImages(
+  queue: FeishuInboxMessage[],
+): Array<Extract<FeishuInboxMessage, { kind: "image" }>> {
+  const images: Array<Extract<FeishuInboxMessage, { kind: "image" }>> = [];
+  while (queue[0]?.kind === "image") {
+    const message = queue.shift();
+    if (message?.kind === "image") {
+      images.push(message);
+    }
+  }
+  return images;
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, milliseconds);
+    timer.unref();
+  });
 }
 
 function safeErrorType(error: unknown): string {

@@ -23,6 +23,7 @@ import type {
   OperationUpdateDisplay,
   SurfaceConfigurationChange,
 } from "../types.js";
+import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import {
   formatConfigurationChange,
   formatStartupNotification,
@@ -56,6 +57,7 @@ export interface TelegramSurfaceOptions {
   finalMessageFormat?: TelegramFinalMessageFormat;
   operationUpdateDisplay?: OperationUpdateDisplay;
   codexUpstreamUserAgent?: () => string | undefined;
+  inputQuietWindowMs?: number;
 }
 
 export class TelegramSurface {
@@ -69,6 +71,8 @@ export class TelegramSurface {
   private readonly imageStore: TelegramImagePort;
   private readonly actorRegistry: ConversationActorRegistry | undefined;
   private readonly commands: ConversationCommandService;
+  private readonly inputs: SurfaceInputCoalescer;
+  private nextInputSequence = 0;
   private notificationRecipients: ReadonlySet<number>;
 
   constructor(
@@ -94,6 +98,12 @@ export class TelegramSurface {
     this.actorRegistry = options.actorRegistry;
     this.notificationRecipients = new Set(startupRecipients);
     this.commands = new ConversationCommandService(service);
+    this.inputs = new SurfaceInputCoalescer(
+      (inputTarget, input) => service.submit(inputTarget, input),
+      {
+        quietWindowMs: options.inputQuietWindowMs ?? 1_000,
+      },
+    );
     const apiExecutor = new TelegramApiExecutor(logger);
     this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor, {
       ...(options.finalMessageFormat
@@ -143,8 +153,9 @@ export class TelegramSurface {
   }
 
   async stop(): Promise<void> {
-    this.imageStore.close();
     const lifecycleStop = this.lifecycle.stop();
+    await this.inputs.close();
+    this.imageStore.close();
     await this.interactions.close();
     await this.outbox.close();
     await lifecycleStop;
@@ -247,13 +258,20 @@ export class TelegramSurface {
       if (await this.interactions.handleText(context)) {
         return;
       }
-      const submission = await this.service.submit(target(context), context.message.text);
-      this.outbox.setTurnReplyTarget(
-        submission.threadId,
-        submission.turnId,
-        context.message.message_id,
-      );
-      if (submission.steered) {
+      const result = await this.inputs.enqueue({
+        target: target(context),
+        actorId: String(context.from?.id ?? ""),
+        sequence: this.takeInputSequence(),
+        text: context.message.text,
+      });
+      if (result.tail) {
+        this.outbox.setTurnReplyTarget(
+          result.submission.threadId,
+          result.submission.turnId,
+          context.message.message_id,
+        );
+      }
+      if (result.tail && result.submission.steered) {
         await context.reply("已将补充要求追加到当前 Turn。", {
           disable_notification: true,
           reply_parameters: {
@@ -296,6 +314,7 @@ export class TelegramSurface {
     fileSize: number | undefined,
     caption: string | undefined,
   ): Promise<void> {
+    const sequence = this.takeInputSequence();
     if (fileSize !== undefined && fileSize > maximumTelegramImageBytes) {
       throw new UserFacingError("image.too-large", "图片超过 10 MiB 限制");
     }
@@ -303,16 +322,21 @@ export class TelegramSurface {
     if (!context.message) {
       throw new Error("Telegram 图片更新缺少消息信息");
     }
-    const submission = await this.service.submit(target(context), {
-      text: caption?.trim() || "请查看这张图片并根据图片内容协助我。",
-      localImages: [{ path: image.path }],
+    const result = await this.inputs.enqueue({
+      target: target(context),
+      actorId: String(context.from?.id ?? ""),
+      sequence,
+      ...(caption?.trim() ? { text: caption } : {}),
+      localImages: [{ path: image.path, bytes: image.bytes }],
     });
-    this.outbox.setTurnReplyTarget(
-      submission.threadId,
-      submission.turnId,
-      context.message.message_id,
-    );
-    if (submission.steered && context.message) {
+    if (result.tail) {
+      this.outbox.setTurnReplyTarget(
+        result.submission.threadId,
+        result.submission.turnId,
+        context.message.message_id,
+      );
+    }
+    if (result.tail && result.submission.steered && context.message) {
       await context.reply("已将图片和补充要求追加到当前 Turn。", {
         disable_notification: true,
         reply_parameters: {
@@ -321,6 +345,12 @@ export class TelegramSurface {
         },
       });
     }
+  }
+
+  private takeInputSequence(): number {
+    const sequence = this.nextInputSequence;
+    this.nextInputSequence += 1;
+    return sequence;
   }
 
   private async executeCommand(

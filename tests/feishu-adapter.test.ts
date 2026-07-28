@@ -40,7 +40,7 @@ function createImageMessage(
     messageId: message.messageId,
     createdAtMs: message.createdAtMs,
     kind: "image",
-    imageKey: "img_v2_resource",
+    imageKeys: ["img_v2_resource"],
     ...overrides,
   };
 }
@@ -974,6 +974,124 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent).toEqual([]);
   });
 
+  it("submits adjacent private images as one ordered multi-image input", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const download = vi.fn()
+      .mockResolvedValueOnce({
+        path: "/private/uploads/feishu/first.png",
+        mimeType: "image/png" as const,
+        bytes: 8,
+      })
+      .mockResolvedValueOnce({
+        path: "/private/uploads/feishu/second.jpg",
+        mimeType: "image/jpeg" as const,
+        bytes: 9,
+      });
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationService,
+      fixture.outbox,
+      { download },
+    );
+
+    await adapter.handleImageBatch([
+      createImageMessage({
+        messageId: "om_first",
+        imageKeys: ["img_v2_first"],
+        text: "比较这些图片",
+      }),
+      createImageMessage({
+        eventId: "event-2",
+        messageId: "om_second",
+        imageKeys: ["img_v2_second"],
+      }),
+    ]);
+    await fixture.outbox.close();
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledWith(message.target, {
+      text: "比较这些图片",
+      localImages: [
+        { path: "/private/uploads/feishu/first.png" },
+        { path: "/private/uploads/feishu/second.jpg" },
+      ],
+    });
+    expect(fixture.sent).toEqual([]);
+  });
+
+  it("submits multiple images from one rich post in their original order", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const download = vi.fn()
+      .mockResolvedValueOnce({
+        path: "/private/uploads/feishu/first.png",
+        mimeType: "image/png" as const,
+        bytes: 8,
+      })
+      .mockResolvedValueOnce({
+        path: "/private/uploads/feishu/second.jpg",
+        mimeType: "image/jpeg" as const,
+        bytes: 9,
+      });
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationService,
+      fixture.outbox,
+      { download },
+    );
+
+    await adapter.handle(createImageMessage({
+      imageKeys: ["img_v2_first", "img_v2_second"],
+      text: "飞书多图发送测试",
+    }));
+    await fixture.outbox.close();
+
+    expect(download.mock.calls).toEqual([
+      ["om_message", "img_v2_first"],
+      ["om_message", "img_v2_second"],
+    ]);
+    expect(submit).toHaveBeenCalledWith(message.target, {
+      text: "飞书多图发送测试",
+      localImages: [
+        { path: "/private/uploads/feishu/first.png" },
+        { path: "/private/uploads/feishu/second.jpg" },
+      ],
+    });
+    expect(fixture.sent).toEqual([]);
+  });
+
+  it("rejects more than four adjacent images before downloading", async () => {
+    const fixture = createOutbox();
+    const download = vi.fn();
+    const adapter = new FeishuConversationAdapter(
+      { submit: vi.fn() } as unknown as ConversationService,
+      fixture.outbox,
+      { download },
+    );
+
+    await expect(adapter.handleImageBatch(
+      Array.from({ length: 5 }, (_, index) => createImageMessage({
+        eventId: `event-${index}`,
+        messageId: `om_${index}`,
+        imageKeys: [`img_v2_${index}`],
+      })),
+    )).rejects.toMatchObject({ code: "image.too-many" });
+    await fixture.outbox.close();
+
+    expect(download).not.toHaveBeenCalled();
+    expect(fixture.sent).toEqual([{
+      chatId: "oc_chat",
+      text: "操作失败：一次最多处理 4 张图片。",
+    }]);
+  });
+
   it("uses a distinct confirmation when an image steers the active Turn", async () => {
     const fixture = createOutbox();
     const adapter = new FeishuConversationAdapter(
@@ -995,7 +1113,7 @@ describe("Feishu conversation adapter", () => {
     );
 
     await adapter.handle(createImageMessage({
-      imageKey: "img_resource",
+      imageKeys: ["img_resource"],
     }));
     await fixture.outbox.close();
 

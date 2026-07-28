@@ -50,6 +50,53 @@ describe("WeixinUpdatesMonitor", () => {
     expect(cursorStore.set).toHaveBeenCalledWith(accountId, "cursor-one");
   });
 
+  it("does not let a later text message overtake an earlier one", async () => {
+    const controller = new AbortController();
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const events: string[] = [];
+    const client = clientFixture([
+      {
+        cursor: "cursor-one",
+        messages: [
+          textMessage("1", "first"),
+          textMessage("2", "/new"),
+        ],
+      },
+      () => {
+        controller.abort();
+        throw new WeixinProtocolError("aborted", "aborted");
+      },
+    ]);
+    const monitor = createWeixinUpdatesMonitor({
+      accountId,
+      client,
+      cursorStore: cursorStoreFixture(null),
+      handleMessage: async (message) => {
+        events.push(`start:${message.messageId}`);
+        if (message.messageId === "1") {
+          await firstGate;
+        }
+        events.push(`end:${message.messageId}`);
+      },
+    });
+
+    const running = monitor.run(controller.signal);
+    await vi.waitFor(() => expect(events).toContain("start:1"));
+    expect(events).toEqual(["start:1"]);
+    releaseFirst();
+    await running;
+
+    expect(events).toEqual([
+      "start:1",
+      "end:1",
+      "start:2",
+      "end:2",
+    ]);
+  });
+
   it("does not commit a cursor when message handling fails", async () => {
     const cursorStore = cursorStoreFixture("old-cursor");
     const client = clientFixture([{

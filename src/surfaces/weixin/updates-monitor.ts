@@ -88,14 +88,47 @@ export function createWeixinUpdatesMonitor(
             "微信消息批次缺少可提交游标",
           );
         }
+        const messages: WeixinInboundMessage[] = [];
+        const batchMessageIds = new Set<string>();
         for (const message of batch.messages) {
-          if (recentMessageIds.has(message.messageId)) {
+          if (
+            recentMessageIds.has(message.messageId)
+            || batchMessageIds.has(message.messageId)
+          ) {
             continue;
           }
-          if (message.kind === "text" || message.kind === "image") {
+          batchMessageIds.add(message.messageId);
+          messages.push(message);
+        }
+        for (let index = 0; index < messages.length;) {
+          const message = messages[index]!;
+          if (message.kind === "image") {
+            const imageMessages: Array<Extract<
+              WeixinInboundMessage,
+              { kind: "image" }
+            >> = [];
+            while (messages[index]?.kind === "image") {
+              imageMessages.push(messages[index] as Extract<
+                WeixinInboundMessage,
+                { kind: "image" }
+              >);
+              index += 1;
+            }
+            await Promise.all(
+              imageMessages.map((imageMessage) =>
+                options.handleMessage(imageMessage)
+              ),
+            );
+            for (const imageMessage of imageMessages) {
+              recentMessageIds.add(imageMessage.messageId);
+            }
+            continue;
+          }
+          if (message.kind === "text") {
             await options.handleMessage(message);
           }
           recentMessageIds.add(message.messageId);
+          index += 1;
         }
         if (batch.cursor.length > 0 && batch.cursor !== cursor) {
           await options.cursorStore.set(accountId, batch.cursor);

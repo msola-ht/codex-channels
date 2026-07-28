@@ -11,6 +11,7 @@ import {
   type ConversationTarget,
 } from "../../conversation-core/index.js";
 import { parseSlashCommand } from "../slash-command.js";
+import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 
 import type {
   FeishuCommandCenter,
@@ -37,8 +38,12 @@ import {
   renderFeishuUserFacingError,
 } from "./renderer.js";
 
+const maximumInboundImages = 4;
+
 export class FeishuConversationAdapter {
   private readonly commands: ConversationCommandService;
+  private readonly inputs: SurfaceInputCoalescer;
+  private nextInputSequence = 0;
 
   constructor(
     private readonly conversations: ConversationService,
@@ -62,8 +67,13 @@ export class FeishuConversationAdapter {
     private readonly interactions?: {
       stopForActor(target: ConversationTarget, actorId: string): boolean;
     },
+    inputOptions: { quietWindowMs?: number } = { quietWindowMs: 0 },
   ) {
     this.commands = new ConversationCommandService(conversations);
+    this.inputs = new SurfaceInputCoalescer(
+      (target, input) => conversations.submit(target, input),
+      inputOptions,
+    );
   }
 
   async handle(message: FeishuInboxMessage): Promise<void> {
@@ -152,6 +162,33 @@ export class FeishuConversationAdapter {
       );
       throw error;
     }
+  }
+
+  async handleImageBatch(
+    messages: readonly Extract<FeishuInboxMessage, { kind: "image" }>[],
+  ): Promise<void> {
+    if (messages.length === 0) {
+      return;
+    }
+    try {
+      await this.submitImageBatch(messages);
+    } catch (error) {
+      if (error instanceof FeishuOutputQueueError) {
+        throw error;
+      }
+      const detail = error instanceof UserFacingError
+        ? renderFeishuUserFacingError(error)
+        : "Gateway 未能完成请求，请稍后重试";
+      this.notifyText(
+        messages[0]!.target.conversationId,
+        `操作失败：${detail}。`,
+      );
+      throw error;
+    }
+  }
+
+  close(): Promise<void> {
+    return this.inputs.close();
   }
 
   async handleCommandCenterAction(
@@ -312,22 +349,47 @@ export class FeishuConversationAdapter {
   private async handleImage(
     message: Extract<FeishuInboxMessage, { kind: "image" }>,
   ): Promise<void> {
-    const image = await this.images.download(
-      message.messageId,
-      message.imageKey,
+    await this.submitImageBatch([message]);
+  }
+
+  private async submitImageBatch(
+    messages: readonly Extract<FeishuInboxMessage, { kind: "image" }>[],
+  ): Promise<void> {
+    const imageCount = messages.reduce(
+      (count, message) => count + message.imageKeys.length,
+      0,
     );
-    const submission = await this.conversations.submit(
-      message.target,
-      {
-        text: message.text?.trim().length
-          ? message.text
-          : "请查看这张图片并根据图片内容协助我。",
-        localImages: [{ path: image.path }],
-      },
+    if (imageCount > maximumInboundImages) {
+      throw new UserFacingError(
+        "image.too-many",
+        `一次最多处理 ${maximumInboundImages} 张图片`,
+        { maximumImages: String(maximumInboundImages) },
+      );
+    }
+    const prepared = await Promise.all(messages.map(async (message) => {
+      const sequence = this.nextInputSequence;
+      this.nextInputSequence += 1;
+      const images = await Promise.all(message.imageKeys.map((imageKey) =>
+        this.images.download(message.messageId, imageKey)
+      ));
+      return {
+        target: message.target,
+        actorId: message.actorId,
+        sequence,
+        ...(message.text?.trim().length ? { text: message.text } : {}),
+        localImages: images.map((image) => ({
+          path: image.path,
+          bytes: image.bytes,
+        })),
+      };
+    }));
+    const results = await Promise.all(
+      prepared.map((input) => this.inputs.enqueue(input)),
     );
-    if (submission.steered) {
+    const tail = results.find((result) => result.tail);
+    if (tail?.submission.steered) {
       this.notifyText(
-        message.target.conversationId,
+        messages[0]!.target.conversationId,
         "已将图片追加到当前 Turn。",
       );
     }

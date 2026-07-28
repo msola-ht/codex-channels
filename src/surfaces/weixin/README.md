@@ -15,23 +15,29 @@
 - `protocol-client.ts`：实现固定 `v2.4.6` 的 `getupdates`、`sendmessage`、`getuploadurl`、
   `getconfig` 和 `sendtyping` HTTP 合同，并按官方 AES-128-ECB、CDN 二进制 `POST` 与
   双层 key 编码发送生成图片；
-  在 JSON 数字转换前保留原始 `message_id`，只输出文本、单张图片引用或带原因的忽略事件，
-  混合/多图片内容失败关闭，并限制出站文本为已验证的 4000 个 UTF-16 码元。
+  在 JSON 数字转换前保留原始 `message_id`，只输出文本、带可选说明文字的最多 4 张图片引用
+  或带原因的忽略事件；混入其他媒体、重复文本或超过图片数量上限时失败关闭，并限制出站文本为
+  已验证的 4000 个 UTF-16 码元。
 - `image-store.ts`：只接受固定官方微信 CDN，按 `image_item.aeskey` 或 `media.aes_key`
   执行 AES-128-ECB 解密；复用共享 10 MiB、PNG/JPEG 签名、`0700/0600` 私有暂存和过期清理，
   CDN 地址、查询参数、key 与响应正文不进入日志或用户消息。
 - `outbound-image.ts`：只读取 App Server `imageGeneration.savedPath` 映射出的绝对路径；
   使用无符号链接文件句柄，限制为普通文件、10 MiB 和 PNG/JPEG 内容签名，不把路径或正文写入
   日志。
-- `updates-monitor.ts`：组合协议 Client 与游标 Store，顺序处理单批消息、按原始消息 ID
-  进程内去重，仅在整批处理成功后提交游标，并对网络、限流及服务端瞬时失败执行有限重试。
+- `updates-monitor.ts`：组合协议 Client 与游标 Store；单批消息先按原始消息 ID 去重，只并发准备
+  连续图片段，使平台拆开的图片可以进入同一聚合窗口；文本、命令和不同图片段仍保持原始顺序。
+  仅在整批处理成功后提交游标，并对
+  网络、限流及服务端瞬时失败执行有限重试。
 - `input-adapter.ts`：拥有单账号监控器生命周期；按微信账号和私聊 Actor 构造目标，授权后记录
-  Actor、更新内存回复上下文并把文本或单张图片交给目录内会话 Adapter。图片只在授权后下载，
-  通过统一 `localImages` 输入提交。停止会取消长轮询并有限等待；
+  Actor、更新内存回复上下文并把文本、图文或最多 4 张图片交给目录内会话 Adapter。同一接收批次
+  内连续到达的文字和图片按 Actor 隔离，并在一秒静默窗口后合并；图片只在
+  授权后下载，整批成功后才通过同一次 `localImages` 输入提交；每张最多 10 MiB、整批最多
+  20 MiB。停止会取消长轮询并有限等待；
   处理失败不推进游标，只向生命周期所有者报告稳定错误码。
 - `conversation-adapter.ts`：复用 Application 的 `ConversationCommandService` 和完整共享命令
-  目录，并保留微信本地 `/start`、`/help`、`/whoami`；命令解析复用 Surface 公共模板，未知
-  斜杠命令明确拒绝，不会提交为普通 Codex 输入。
+  目录，并保留微信本地 `/start`、`/help`、`/whoami`；将说明文字和全部成功下载的图片一次
+  提交，任一图片失败或总大小超限时不提交部分输入。命令解析复用 Surface 公共模板，未知斜杠
+  命令明确拒绝，不会提交为普通 Codex 输入。
 - `command-renderer.ts`：按微信纯文本边界覆盖全部结构化命令结果与用户错误；多行内容转换为双
   换行段落，避免客户端把单换行折叠为空格。
 - `final-text-format.ts`：仅在微信最终回复边界把单行 fenced code 转为行内代码，避免客户端

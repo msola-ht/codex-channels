@@ -1,5 +1,8 @@
 import type { ConversationService } from "../../application/index.js";
-import type { ConversationTarget } from "../../conversation-core/index.js";
+import {
+  conversationTargetKey,
+  type ConversationTarget,
+} from "../../conversation-core/index.js";
 import type {
   ConversationActorRegistry,
   SurfaceAccessPolicy,
@@ -65,6 +68,7 @@ export class WeixinInputAdapter {
   private controller: AbortController | undefined;
   private runTask: Promise<void> | undefined;
   private stopPromise: Promise<void> | undefined;
+  private readonly replyContextWrites = new Map<string, Promise<void>>();
   private stopping = false;
 
   constructor(private readonly options: WeixinInputAdapterOptions) {
@@ -77,6 +81,7 @@ export class WeixinInputAdapter {
       options.service,
       options.outbox,
       options.images,
+      { quietWindowMs: 1_000 },
     );
     this.monitor = createWeixinUpdatesMonitor({
       accountId: options.accountId,
@@ -130,7 +135,7 @@ export class WeixinInputAdapter {
       message.actorId,
       message.contextToken,
     );
-    await this.options.persistReplyContext?.(
+    await this.persistReplyContext(
       target,
       message.actorId,
       message.contextToken,
@@ -142,16 +147,44 @@ export class WeixinInputAdapter {
         actorId: message.actorId,
         ...(message.kind === "text"
           ? { kind: "text", text: message.text }
-          : { kind: "image", image: message.image }),
+          : {
+              kind: "image",
+              ...(message.text === undefined ? {} : { text: message.text }),
+              images: message.images,
+            }),
       });
     } catch (error) {
       throw new WeixinMessageProcessingError({ cause: error });
     }
   }
 
+  private async persistReplyContext(
+    target: ConversationTarget,
+    actorId: string,
+    contextToken: string,
+  ): Promise<void> {
+    if (this.options.persistReplyContext === undefined) {
+      return;
+    }
+    const key = conversationTargetKey(target);
+    const previous = this.replyContextWrites.get(key) ?? Promise.resolve();
+    const task = previous.then(() =>
+      this.options.persistReplyContext!(target, actorId, contextToken)
+    );
+    this.replyContextWrites.set(key, task);
+    try {
+      await task;
+    } finally {
+      if (this.replyContextWrites.get(key) === task) {
+        this.replyContextWrites.delete(key);
+      }
+    }
+  }
+
   private async stopOnce(): Promise<void> {
     this.stopping = true;
     this.controller?.abort();
+    await this.conversations.close();
     const task = this.runTask;
     if (task === undefined) {
       return;

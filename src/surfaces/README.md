@@ -48,6 +48,9 @@ Telegram 和飞书在交互消息创建成功或失败时
 [`通讯渠道 Surface 接入指南`](../../docs/surface-integration-guide.md)。
 关闭队列时拒绝新输出、限时等待在途发送；并发关闭调用等待同一个关闭结果，不能提前报告完成。
 实现位于 `conversation-delivery-queue.ts`，并通过本目录 `index.ts` 公开。
+`surface-input-coalescer.ts` 在已授权的 Surface 输入边界按完整 Conversation 与 Actor 隔离，
+把平台拆分到相邻消息的文本和图片在一秒静默窗口内合并为一次 Application 提交；命令仍由各
+Surface 在入队前立即处理，停止时必须排空已接收的聚合输入。
 `elapsed-duration.ts` 只把 App Server 已提供的 Turn 毫秒耗时格式化为三个 Surface 共用的中文
 短文本，不负责计时、状态或持久化。
 `slash-command.ts` 统一飞书与微信的严格斜杠命令解析；`conversation-command-format.ts`

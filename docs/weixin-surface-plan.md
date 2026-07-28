@@ -25,6 +25,8 @@ Application、Conversation Core、Approval、Policy、Session Routing、Storage�
 [`Tencent/openclaw-weixin`](https://github.com/Tencent/openclaw-weixin/tree/v2.4.6) 的
 `v2.4.6` 标签，对应提交
 [`cef0bfc`](https://github.com/Tencent/openclaw-weixin/commit/cef0bfc390393f716903e16d50408118047f87e0)。
+固定源码已按 [`本地上游源码工作流`](upstream-sources.md) 保存到受主项目忽略的独立仓库；
+本地 HEAD 与本节基线一致时优先查阅本地源码和测试，不重复联网搜索相同版本。
 2026-07-27 已通过官方远端完整标签列表复核，`v2.4.6` 仍是最新标签；官方 `main` 的包版本同为
 `2.4.6`，但实现和实验仍只使用上述固定标签与提交，不能把变化中的 `main` 当作稳定合同。
 

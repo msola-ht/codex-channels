@@ -9,6 +9,13 @@
 
 ## 官方资料查阅
 
+- 微信或飞书 Surface 开发前先读取 `docs/upstream-sources.md`。如果其中记录的
+  `upstream/` 本地仓库存在且 HEAD 与项目锁定基线一致，必须优先查阅本地源码和测试，
+  不得先联网搜索同一版本内容。只有本地仓库缺失、基线不匹配、锁定源码未包含所需资料、
+  需要核对动态开放平台文档或用户明确要求更新时，才允许联网查询，并先说明原因。
+- `upstream/` 是被主项目忽略的只读参考仓库。不得修改、提交、推送其中内容，也不得静默
+  `fetch`、切换版本或以远端 `main` 替代项目锁定基线。升级上游基线必须先按
+  `docs/upstream-sources.md` 审查差异，再同步对应资料索引、实现与测试。
 - 新增、修改或删除任何 Codex App Server RPC 方法、`codex-protocol` 业务类型依赖，以及
   Transport、初始化、Thread、Turn、Item、Notification、Server Request、审批、模型设置、
   Fast、Goal、Review、账户用量、Skill、MCP、Plugin 或 Codex CLI 版本相关行为前，必须先查阅

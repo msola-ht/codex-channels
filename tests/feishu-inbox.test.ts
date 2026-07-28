@@ -136,9 +136,44 @@ describe("FeishuInbox", () => {
     expect(fixture.handled).toEqual([
       expect.objectContaining({
         kind: "image",
-        imageKey: "img_v2_resource",
+        imageKeys: ["img_v2_resource"],
       }),
     ]);
+  });
+
+  it("collects adjacent image events into one ordered image batch", async () => {
+    vi.useFakeTimers();
+    const batches: FeishuInboxMessage[][] = [];
+    const fixture = createFixture({
+      inputQuietWindowMs: 1_000,
+      handleImageBatch: async (messages) => {
+        batches.push([...messages]);
+      },
+    });
+
+    expect(fixture.inbox.receive(createEvent({
+      eventId: "event-image-1",
+      messageId: "om_image_1",
+      messageType: "image",
+      content: "{\"image_key\":\"img_v2_first\"}",
+    }))).toEqual({ status: "accepted" });
+    expect(fixture.inbox.receive(createEvent({
+      eventId: "event-image-2",
+      messageId: "om_image_2",
+      messageType: "image",
+      content: "{\"image_key\":\"img_v2_second\"}",
+    }))).toEqual({ status: "accepted" });
+
+    await settle();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await fixture.inbox.close();
+
+    expect(batches).toHaveLength(1);
+    expect(batches[0]?.map((item) => item.messageId)).toEqual([
+      "om_image_1",
+      "om_image_2",
+    ]);
+    expect(fixture.handled).toHaveLength(0);
   });
 
   it("accepts one private rich-post image with its text caption", async () => {
@@ -161,7 +196,7 @@ describe("FeishuInbox", () => {
     expect(fixture.handled).toEqual([
       expect.objectContaining({
         kind: "image",
-        imageKey: "img_v2_resource",
+        imageKeys: ["img_v2_resource"],
         text: "收得到吗",
       }),
     ]);
@@ -189,7 +224,7 @@ describe("FeishuInbox", () => {
     expect(fixture.handled).toEqual([
       expect.objectContaining({
         kind: "image",
-        imageKey: "img_v2_resource",
+        imageKeys: ["img_v2_resource"],
         text: "请看截图",
       }),
     ]);
@@ -233,7 +268,7 @@ describe("FeishuInbox", () => {
     ]);
   });
 
-  it("rejects a rich post with multiple images", async () => {
+  it("accepts multiple rich-post images with their shared caption", async () => {
     const fixture = createFixture();
 
     expect(fixture.inbox.receive(createEvent({
@@ -242,14 +277,21 @@ describe("FeishuInbox", () => {
         content: [[
           { tag: "img", image_key: "img_v2_first" },
           { tag: "img", image_key: "img_v2_second" },
+          { tag: "text", text: "飞书多图发送测试" },
         ]],
       }),
     }))).toEqual({
-      status: "ignored",
-      reason: "invalid-content",
+      status: "accepted",
     });
 
     await fixture.inbox.close();
+    expect(fixture.handled).toEqual([
+      expect.objectContaining({
+        kind: "image",
+        imageKeys: ["img_v2_first", "img_v2_second"],
+        text: "飞书多图发送测试",
+      }),
+    ]);
   });
 
   it.each([

@@ -262,7 +262,11 @@ export function renderFeishuUserFacingError(
     case "image.path.invalid":
       return "本地图片路径必须是绝对路径";
     case "image.too-large":
-      return "图片超过 10 MiB 限制";
+      return error.details.scope === "batch"
+        ? "图片总大小超过 20 MiB 限制"
+        : "图片超过 10 MiB 限制";
+    case "image.too-many":
+      return "一次最多处理 4 张图片";
     case "image.unsupported":
       return "仅支持 PNG 和 JPEG 图片";
     case "session.selector.required":

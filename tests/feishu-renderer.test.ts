@@ -7,6 +7,7 @@ import type {
 } from "../src/application/index.js";
 import {
   isCriticalOutputEvent,
+  UserFacingError,
   type OutputEvent,
 } from "../src/conversation-core/index.js";
 import {
@@ -14,6 +15,7 @@ import {
   renderFeishuOutput,
   renderFeishuStartupNotification,
 } from "../src/surfaces/feishu/index.js";
+import { renderFeishuUserFacingError } from "../src/surfaces/feishu/renderer.js";
 
 const target = {
   surface: "feishu",
@@ -22,6 +24,14 @@ const target = {
 } as const;
 
 describe("Feishu output renderer", () => {
+  it("distinguishes a batch image limit from a single-image limit", () => {
+    expect(renderFeishuUserFacingError(new UserFacingError(
+      "image.too-large",
+      "opaque",
+      { scope: "batch" },
+    ))).toBe("图片总大小超过 20 MiB 限制");
+  });
+
   it("renders a startup notification without the upstream build token", () => {
     const rendered = renderFeishuStartupNotification(
       [{ id: "main", name: "Main", cwd: "/workspace" }],

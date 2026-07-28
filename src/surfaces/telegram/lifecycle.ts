@@ -215,17 +215,21 @@ export class TelegramLifecycle {
         consecutiveFailures = 0;
         for (const update of updates) {
           offset = update.update_id + 1;
-          try {
-            await this.bot.handleUpdate(update);
-          } catch (error) {
-            this.logger.error(
-              {
-                ...telegramErrorMetadata(error),
-                updateId: update.update_id,
-              },
-              "Telegram 更新处理失败",
-            );
-          }
+        }
+        for (const group of groupTelegramUpdates(updates)) {
+          await Promise.all(group.map(async (update) => {
+            try {
+              await this.bot.handleUpdate(update);
+            } catch (error) {
+              this.logger.error(
+                {
+                  ...telegramErrorMetadata(error),
+                  updateId: update.update_id,
+                },
+                "Telegram 更新处理失败",
+              );
+            }
+          }));
         }
       } catch (error) {
         if (this.stopping || signal.aborted) {
@@ -252,6 +256,25 @@ export class TelegramLifecycle {
       }
     }
   }
+}
+
+function groupTelegramUpdates<T extends {
+  message?: { media_group_id?: string };
+}>(updates: readonly T[]): T[][] {
+  const groups: T[][] = [];
+  for (const update of updates) {
+    const mediaGroupId = update.message?.media_group_id;
+    const previous = groups.at(-1);
+    if (
+      mediaGroupId !== undefined
+      && previous?.at(-1)?.message?.media_group_id === mediaGroupId
+    ) {
+      previous.push(update);
+      continue;
+    }
+    groups.push([update]);
+  }
+  return groups;
 }
 
 function waitWithAbort(milliseconds: number, signal: AbortSignal): Promise<void> {

@@ -43,18 +43,45 @@ describe("WeixinConversationAdapter", () => {
     expect(notifyText).not.toHaveBeenCalled();
   });
 
-  it("submits a downloaded image through the shared localImages input", async () => {
+  it("does not delay ordinary text while waiting for adjacent images", async () => {
+    vi.useFakeTimers();
+    const submit = vi.fn(async () => ({
+      threadId: "thread",
+      turnId: "turn",
+      steered: false,
+    }));
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({ submit }),
+      { notifyText: vi.fn(() => true) },
+      undefined,
+      { quietWindowMs: 1_000 },
+    );
+
+    await adapter.handle(message);
+
+    expect(submit).toHaveBeenCalledWith(target, "继续开发");
+    await adapter.close();
+    vi.useRealTimers();
+  });
+
+  it("submits mixed text and multiple downloaded images together", async () => {
     const submit = vi.fn(async () => ({
       threadId: "thread",
       turnId: "turn",
       steered: true,
     }));
     const notifyText = vi.fn(() => true);
-    const download = vi.fn(async () => ({
-      path: "/private/weixin/image.png",
-      mimeType: "image/png" as const,
-      bytes: 8,
-    }));
+    const download = vi.fn()
+      .mockResolvedValueOnce({
+        path: "/private/weixin/first.png",
+        mimeType: "image/png" as const,
+        bytes: 8,
+      })
+      .mockResolvedValueOnce({
+        path: "/private/weixin/second.jpg",
+        mimeType: "image/jpeg" as const,
+        bytes: 9,
+      });
     const adapter = new WeixinConversationAdapter(
       serviceFixture({ submit }),
       { notifyText },
@@ -65,20 +92,154 @@ describe("WeixinConversationAdapter", () => {
       target,
       actorId: message.actorId,
       kind: "image",
-      image: {
-        fullUrl:
-          "https://novac2c.cdn.weixin.qq.com/c2c/download?private",
-        imageAesKey: "00112233445566778899aabbccddeeff",
-      },
+      text: "比较这两张图",
+      images: [
+        {
+          fullUrl:
+            "https://novac2c.cdn.weixin.qq.com/c2c/download?first",
+          imageAesKey: "00112233445566778899aabbccddeeff",
+        },
+        {
+          encryptedQueryParam: "second-private-query",
+          mediaAesKey: "second-private-key",
+        },
+      ],
     });
 
     expect(submit).toHaveBeenCalledWith(target, {
-      text: "请查看这张图片并根据图片内容协助我。",
-      localImages: [{ path: "/private/weixin/image.png" }],
+      text: "比较这两张图",
+      localImages: [
+        { path: "/private/weixin/first.png" },
+        { path: "/private/weixin/second.jpg" },
+      ],
     });
     expect(notifyText).toHaveBeenCalledWith(
       target,
       "已将图片追加到当前 Turn。",
+    );
+  });
+
+  it("coalesces adjacent image messages into one submission", async () => {
+    vi.useFakeTimers();
+    const submit = vi.fn(async () => ({
+      threadId: "thread",
+      turnId: "turn",
+      steered: false,
+    }));
+    const download = vi.fn()
+      .mockResolvedValueOnce({
+        path: "/private/weixin/first.png",
+        mimeType: "image/png" as const,
+        bytes: 8,
+      })
+      .mockResolvedValueOnce({
+        path: "/private/weixin/second.jpg",
+        mimeType: "image/jpeg" as const,
+        bytes: 9,
+      });
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({ submit }),
+      { notifyText: vi.fn(() => true) },
+      { download },
+    );
+
+    const first = adapter.handle({
+      target,
+      actorId: message.actorId,
+      kind: "image",
+      text: "比较这些图片",
+      images: [{ encryptedQueryParam: "first-private-query" }],
+    });
+    const second = adapter.handle({
+      target,
+      actorId: message.actorId,
+      kind: "image",
+      images: [{ encryptedQueryParam: "second-private-query" }],
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await Promise.all([first, second]);
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledWith(target, {
+      text: "比较这些图片",
+      localImages: [
+        { path: "/private/weixin/first.png" },
+        { path: "/private/weixin/second.jpg" },
+      ],
+    });
+    await adapter.close();
+    vi.useRealTimers();
+  });
+
+  it("does not submit a partially downloaded image batch", async () => {
+    const submit = vi.fn();
+    const notifyText = vi.fn(() => true);
+    const download = vi.fn()
+      .mockResolvedValueOnce({
+        path: "/private/weixin/first.png",
+        mimeType: "image/png" as const,
+        bytes: 8,
+      })
+      .mockRejectedValueOnce(new Error("private CDN failure"));
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({ submit }),
+      { notifyText },
+      { download },
+    );
+
+    await expect(adapter.handle({
+      target,
+      actorId: message.actorId,
+      kind: "image",
+      images: [
+        { encryptedQueryParam: "first-private-query" },
+        { encryptedQueryParam: "second-private-query" },
+      ],
+    })).rejects.toThrow("private CDN failure");
+
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("rejects an image batch over the 20 MiB total limit", async () => {
+    const submit = vi.fn();
+    const notifyText = vi.fn(() => true);
+    const download = vi.fn()
+      .mockResolvedValueOnce({
+        path: "/private/weixin/first.png",
+        mimeType: "image/png" as const,
+        bytes: 7 * 1024 * 1024,
+      })
+      .mockResolvedValueOnce({
+        path: "/private/weixin/second.jpg",
+        mimeType: "image/jpeg" as const,
+        bytes: 7 * 1024 * 1024,
+      })
+      .mockResolvedValueOnce({
+        path: "/private/weixin/third.png",
+        mimeType: "image/png" as const,
+        bytes: 7 * 1024 * 1024,
+      });
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({ submit }),
+      { notifyText },
+      { download },
+    );
+
+    await adapter.handle({
+      target,
+      actorId: message.actorId,
+      kind: "image",
+      images: [
+        { encryptedQueryParam: "first-private-query" },
+        { encryptedQueryParam: "second-private-query" },
+        { encryptedQueryParam: "third-private-query" },
+      ],
+    });
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(notifyText).toHaveBeenCalledWith(
+      target,
+      "操作失败：图片总大小超过 20 MiB 限制。",
     );
   });
 

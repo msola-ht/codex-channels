@@ -22,6 +22,12 @@ export {
   ConversationDeliveryQueue,
   type ConversationDeliveryQueueOptions,
 } from "./conversation-delivery-queue.js";
+export {
+  SurfaceInputCoalescer,
+  type SurfaceInputBatchResult,
+  type SurfaceInputCoalescerOptions,
+  type SurfaceInputPart,
+} from "./surface-input-coalescer.js";
 export type {
   OperationUpdateDisplay,
   SurfaceAdapter,
