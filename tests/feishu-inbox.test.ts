@@ -154,6 +154,30 @@ describe("FeishuInbox", () => {
     ]);
   });
 
+  it("accepts one private file reference without downloading in the SDK callback", async () => {
+    const fixture = createFixture();
+
+    expect(fixture.inbox.receive(createEvent({
+      messageType: "file",
+      content: JSON.stringify({
+        file_key: "file_v2_resource",
+        file_name: "settings.json",
+      }),
+    }))).toEqual({
+      status: "accepted",
+    });
+    expect(fixture.handled).toHaveLength(0);
+
+    await fixture.inbox.close();
+    expect(fixture.handled).toEqual([
+      expect.objectContaining({
+        kind: "file",
+        fileKey: "file_v2_resource",
+        fileName: "settings.json",
+      }),
+    ]);
+  });
+
   it("collects adjacent image events into one ordered image batch", async () => {
     vi.useFakeTimers();
     const batches: FeishuInboxMessage[][] = [];
@@ -311,7 +335,7 @@ describe("FeishuInbox", () => {
     [{ appId: "cli_ffffffffffffffff" }, "account-mismatch"],
     [{ senderType: "bot" }, "non-user"],
     [{ chatType: "group" }, "unsupported-chat"],
-    [{ messageType: "file" }, "unsupported-message"],
+    [{ messageType: "audio" }, "unsupported-message"],
     [{ createTime: "not-a-timestamp" }, "invalid-timestamp"],
     [{ content: "not-json" }, "invalid-content"],
     [{ content: "{}" }, "invalid-content"],
@@ -338,6 +362,25 @@ describe("FeishuInbox", () => {
 
     expect(fixture.inbox.receive(createEvent({
       messageType: "image",
+      content,
+    }))).toEqual({
+      status: "ignored",
+      reason: "invalid-content",
+    });
+    await fixture.inbox.close();
+  });
+
+  it.each([
+    "",
+    "{}",
+    "{\"file_key\":\"\",\"file_name\":\"notes.txt\"}",
+    "{\"file_key\":\"../secret\",\"file_name\":\"notes.txt\"}",
+    "{\"file_key\":\"file_v2_resource\",\"file_name\":\"../secret.txt\"}",
+  ])("rejects invalid file content", async (content) => {
+    const fixture = createFixture();
+
+    expect(fixture.inbox.receive(createEvent({
+      messageType: "file",
       content,
     }))).toEqual({
       status: "ignored",

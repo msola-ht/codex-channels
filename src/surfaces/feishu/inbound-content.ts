@@ -1,8 +1,10 @@
 import { isSafeFeishuResourceIdentifier } from "./media.js";
+import { isSafeFeishuFileName } from "./file-input.js";
 
 export type FeishuParsedContent =
   | { kind: "text"; text: string }
-  | { kind: "image"; imageKeys: readonly string[]; text?: string };
+  | { kind: "image"; imageKeys: readonly string[]; text?: string }
+  | { kind: "file"; fileKey: string; fileName: string };
 
 export function parseFeishuTextContent(value: string): string | undefined {
   let parsed: unknown;
@@ -48,10 +50,42 @@ export function parseFeishuImageContent(
   return { kind: "image", imageKeys: [imageKey] };
 }
 
+export function parseFeishuFileContent(
+  value: string,
+): Extract<FeishuParsedContent, { kind: "file" }> | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+  if (
+    typeof parsed !== "object"
+    || parsed === null
+    || Array.isArray(parsed)
+  ) {
+    return undefined;
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    typeof record.file_key !== "string"
+    || !isSafeFeishuResourceIdentifier(record.file_key)
+    || typeof record.file_name !== "string"
+    || !isSafeFeishuFileName(record.file_name)
+  ) {
+    return undefined;
+  }
+  return {
+    kind: "file",
+    fileKey: record.file_key,
+    fileName: record.file_name.trim(),
+  };
+}
+
 export function parseFeishuPostContent(
   value: string,
   options: { allowMarkdown?: boolean } = {},
-): FeishuParsedContent | undefined {
+): Exclude<FeishuParsedContent, { kind: "file" }> | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);

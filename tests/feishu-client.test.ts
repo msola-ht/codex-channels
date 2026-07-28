@@ -1598,6 +1598,46 @@ describe("FeishuMessageClient", () => {
     });
   });
 
+  it("downloads a file resource with the exact message and file keys", async () => {
+    const stream = Readable.from([Buffer.from("file")]);
+    const downloadResource = vi.fn(async () => ({
+      getReadableStream: () => stream,
+      headers: {
+        "content-length": "4",
+      },
+    }));
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage: async () => ({ data: { message_id: "om_message" } }),
+          patchMessage: successfulPatch,
+          downloadResource,
+        }),
+      },
+    );
+
+    await expect(
+      client.downloadFile("om_message", "file_v2_resource"),
+    ).resolves.toEqual({
+      stream,
+      contentLength: 4,
+    });
+    expect(downloadResource).toHaveBeenCalledWith({
+      params: {
+        type: "file",
+      },
+      path: {
+        message_id: "om_message",
+        file_key: "file_v2_resource",
+      },
+    });
+  });
+
   it("reads visible text from a referenced Feishu message", async () => {
     const getMessage = vi.fn(async () => ({
       code: 0,

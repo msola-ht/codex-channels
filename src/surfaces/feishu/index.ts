@@ -45,6 +45,15 @@ export {
   type FeishuMessageErrorCode,
 } from "./client.js";
 export {
+  FeishuFileInput,
+  FeishuFileInputError,
+  maximumFeishuTextFileBytes,
+  type FeishuFileInputErrorCode,
+  type FeishuFilePort,
+  type FeishuFileResourcePort,
+  type FeishuTextFile,
+} from "./file-input.js";
+export {
   FeishuInbox,
   type FeishuInboxIgnoredReason,
   type FeishuInboxMessage,

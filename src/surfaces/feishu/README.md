@@ -1,9 +1,10 @@
 # 飞书 Surface
 
 本目录是飞书 Surface 的平台边界。当前已完成官方 SDK 与事件长连接窄封装、私聊普通文本、
-纯文字富文本、独立图片与最多四张图片说明文字 Inbox、输出渲染、Bootstrap 显式组合、全部平台无关
+纯文字富文本、独立图片、最多四张图片说明文字与独立 UTF-8 文本文件 Inbox、输出渲染、
+Bootstrap 显式组合、全部平台无关
 私聊命令、审批和用户输入卡片，以及
-按需 OAuth 与 Doctor。当前可通过严格 TOML 或统一 Setup 启用开发验证路径；群聊和一般文件
+按需 OAuth 与 Doctor。当前可通过严格 TOML 或统一 Setup 启用开发验证路径；群聊和二进制文件
 仍未实现。展示体验已完成独立切片：上线通知、Turn 开始确认、最终回复、命令
 结果、操作过程与每轮结束统计统一使用 CardKit 2.0 Markdown，私聊 PNG/JPEG 图片复用
 Application 的本地图片输入，同一 Thread 的
@@ -29,6 +30,8 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
 - `application-setup.ts`：生成精简 Doctor 和缺失权限授权卡片，绑定 App、Chat、Actor 和
   一次性令牌，管理有限任务、取消和安全结果。
 - `client.ts`：官方 SDK、事件长连接、消息读取/发送与 CardKit 窄客户端及生命周期隔离。
+- `file-input.ts`：通过官方消息资源 API 在内存下载独立文件，限制为 1,000,000 字节并严格验证
+  文件名、UTF-8 和控制字符，不创建本地文件。
 - `inbound-content.ts`：统一严格解析入站与被引用消息的文本、富文本和图片元素。
 - `message-content.ts`：中和平台原生提及标签并生成飞书 `post + md` 降级内容。
 - `operation-format.ts`：把单个操作终态渲染为包含脱敏详情的静态 CardKit Markdown。
@@ -80,8 +83,8 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
 - 发送超时、SDK 失败和残缺响应只暴露稳定错误码，不回传 SDK message、响应正文或凭据。
 - 消息创建不自动重试；锁定 SDK 虽提供可选 `uuid` 字段，但当前官方资料未明确其幂等窗口和
   可重试错误语义。
-- 原生流式额外需要应用权限 `cardkit:card:write`；超长最终正文以完整文本文件补发时需要
-  `im:resource`。新扫码应用会声明这些权限；已有应用由 Owner
+- 原生流式额外需要应用权限 `cardkit:card:write`；UTF-8 文本文件输入和超长最终正文文件补发
+  需要 `im:resource`。新扫码应用会声明这些权限；已有应用由 Owner
   通过 `/feishu doctor` 只增量开通缺失权限，再由 Owner 发布，无需重新扫码或申请用户 OAuth。
 - 显式回复消息时使用 `parent_id` 按需读取一条被引用消息，需要应用权限
   `im:message:readonly`。文本、富文本和 CardKit 只提取受支持的可见文字，忽略按钮、输入值与
@@ -107,6 +110,9 @@ elicitation 已完成离线实现，继续等待真实卡片动作验收。
   固定使用 `zh_cn` 读取的已发布版本事件名称中识别“接收消息”和“机器人自定义菜单事件”。
 - 图片下载只使用 `im.v1.messageResource.get` 的 `message_id + image_key + type=image` 窄能力；
   SDK 响应被裁剪为下载流和可选长度，不向其他模块暴露 Client、Header 或上游错误。
+- 独立文件下载复用同一消息资源 API 的 `message_id + file_key + type=file` 窄能力；只接受
+  1,000,000 字节以内、不含二进制控制字符的非空 UTF-8 文本，并以内联文件名边界提交到
+  Application。文件不落盘，Office、压缩包、音视频及富文本内附件失败关闭。
 
 `message-event.ts` 在平台边界把 SDK 原始事件裁剪为稳定的 `FeishuMessageEvent`，只保留账号、
 Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、消息标识或 Chat 标识时失败关闭；
@@ -274,8 +280,8 @@ Setup 与只读 Doctor 凭据/Bot 身份探测已完成，真实应用的首次�
 真实应用验证；Gateway 重启后的 Token 恢复和精确 Thread 绑定也已通过验收。私聊 PNG/JPEG、
 命令审批一次批准，以及长回复在客户端折叠显示且顺序正确也已完成真实验收。持续回复以
 CardKit 原生流式卡片可见更新的主路径同样已通过验收；轻量 Thread 状态卡片的
-`active → idle` 原地更新也已通过真实验收。超长最终回复文件兜底已完成离线验证，真实文件上传、
-限流、失败回退和超长内容显示仍待验证。
+`active → idle` 原地更新也已通过真实验收。超长最终回复文件兜底与 UTF-8 文本文件输入已完成
+离线验证，真实文件收发、限流、失败回退和超长内容显示仍待验证。
 静态展示和按会话顺序发送的操作终态卡片已统一为 CardKit 2.0，并通过真实应用主路径验收。
 单个机器人菜单入口、分类命令中心、更多分类卡和模型、思考强度、Fast、工作区及会话选择卡
 已完成真实应用验收。

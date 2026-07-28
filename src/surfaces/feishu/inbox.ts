@@ -6,6 +6,7 @@ import type {
 
 import type { FeishuMessageEvent } from "./message-event.js";
 import {
+  parseFeishuFileContent,
   parseFeishuImageContent,
   parseFeishuPostContent,
   parseFeishuTextContent,
@@ -29,6 +30,7 @@ interface FeishuInboxMessageBase {
 export type FeishuInboxMessage = FeishuInboxMessageBase & (
   | { kind: "text"; text: string }
   | { kind: "image"; imageKeys: readonly string[]; text?: string }
+  | { kind: "file"; fileKey: string; fileName: string }
 );
 
 export interface FeishuInboxProcessingError {
@@ -136,6 +138,7 @@ export class FeishuInbox {
     if (
       event.messageType !== "text"
       && event.messageType !== "image"
+      && event.messageType !== "file"
       && event.messageType !== "post"
     ) {
       return { status: "ignored", reason: "unsupported-message" };
@@ -157,7 +160,9 @@ export class FeishuInbox {
       ? (text === undefined ? undefined : { kind: "text" as const, text })
       : event.messageType === "image"
         ? parseFeishuImageContent(event.content)
-        : parseFeishuPostContent(event.content);
+        : event.messageType === "file"
+          ? parseFeishuFileContent(event.content)
+          : parseFeishuPostContent(event.content);
     if (content === undefined) {
       return { status: "ignored", reason: "invalid-content" };
     }

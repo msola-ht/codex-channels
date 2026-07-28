@@ -7,8 +7,8 @@
 当前实现：
 
 - [`telegram/`](telegram/README.md)：Telegram Bot 输入、输出、交互、图片和生命周期。
-- [`feishu/`](feishu/README.md)：飞书官方 SDK 长连接、私聊文本与 PNG/JPEG 到 Application 的
-  窄 Adapter、富文本最终回复、纯文本安全提示、有界输出队列、私聊交互卡片、平台权限中心、
+- [`feishu/`](feishu/README.md)：飞书官方 SDK 长连接、私聊文本、PNG/JPEG 与 UTF-8 文本文件到
+  Application 的窄 Adapter、富文本最终回复、纯文本安全提示、有界输出队列、私聊交互卡片、平台权限中心、
   用户 OAuth Device Flow 和单账号生命周期组合；有效配置启用时由 Bootstrap 显式注册，私聊
   PNG/JPEG、命令审批动作、原生流式主路径及 OAuth Token 重启恢复已通过真实验收，用户输入与
   MCP 卡片仍待验收。

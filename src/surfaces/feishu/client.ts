@@ -22,6 +22,7 @@ import {
   type FeishuCardAction,
 } from "./card-action.js";
 import type { FeishuCardDocument } from "./approval-card.js";
+import type { FeishuFileResourcePort } from "./file-input.js";
 import {
   isSafeFeishuResourceIdentifier,
   type FeishuImageResourcePort,
@@ -295,7 +296,7 @@ interface FeishuSdkMessageClient {
   }>;
   downloadResource(payload: {
     params: {
-      type: "image";
+      type: "image" | "file";
     };
     path: {
       message_id: string;
@@ -318,6 +319,7 @@ interface FeishuMessageClientDependencies {
 export class FeishuMessageClient implements
   FeishuMessagePort,
   FeishuImageResourcePort,
+  FeishuFileResourcePort,
   FeishuQuotedMessagePort
 {
   private readonly sdkClient: FeishuSdkMessageClient;
@@ -689,30 +691,62 @@ export class FeishuMessageClient implements
     stream: import("node:stream").Readable;
     contentLength?: number;
   }> {
+    return this.downloadMessageResource(
+      messageId,
+      imageKey,
+      "image",
+      "图片",
+    );
+  }
+
+  async downloadFile(
+    messageId: string,
+    fileKey: string,
+  ): Promise<{
+    stream: import("node:stream").Readable;
+    contentLength?: number;
+  }> {
+    return this.downloadMessageResource(
+      messageId,
+      fileKey,
+      "file",
+      "文件",
+    );
+  }
+
+  private async downloadMessageResource(
+    messageId: string,
+    fileKey: string,
+    type: "image" | "file",
+    label: "图片" | "文件",
+  ): Promise<{
+    stream: import("node:stream").Readable;
+    contentLength?: number;
+  }> {
     if (
       !isSafeFeishuResourceIdentifier(messageId)
-      || !isSafeFeishuResourceIdentifier(imageKey)
+      || !isSafeFeishuResourceIdentifier(fileKey)
     ) {
       throw new FeishuMessageError(
         "invalid-response",
-        "飞书图片资源标识无效",
+        `飞书${label}资源标识无效`,
       );
     }
     try {
       const response = await withTimeout(
         this.sdkClient.downloadResource({
           params: {
-            type: "image",
+            type,
           },
           path: {
             message_id: messageId,
-            file_key: imageKey,
+            file_key: fileKey,
           },
         }),
         this.sendTimeoutMs,
         new FeishuMessageError(
           "download-timeout",
-          "飞书图片下载超时",
+          `飞书${label}下载超时`,
         ),
       );
       const stream = response.getReadableStream();
@@ -728,12 +762,12 @@ export class FeishuMessageClient implements
       if (isSdkTimeout(error)) {
         throw new FeishuMessageError(
           "download-timeout",
-          "飞书图片下载超时",
+          `飞书${label}下载超时`,
         );
       }
       throw new FeishuMessageError(
         "download-failed",
-        "飞书图片下载失败",
+        `飞书${label}下载失败`,
       );
     }
   }

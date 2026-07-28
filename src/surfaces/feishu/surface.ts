@@ -31,6 +31,10 @@ import {
   FeishuCommandCenter,
   feishuCommandMenuEventKey,
 } from "./command-center.js";
+import {
+  FeishuFileInput,
+  type FeishuFilePort,
+} from "./file-input.js";
 import { FeishuInbox } from "./inbox.js";
 import { FeishuInteractionPort } from "./interactions.js";
 import {
@@ -61,6 +65,7 @@ interface FeishuEventConnectionPort {
 interface FeishuSurfaceDependencies {
   messagePort?: FeishuMessagePort;
   imagePort?: FeishuImagePort;
+  filePort?: FeishuFilePort;
   quotedMessagePort?: FeishuQuotedMessagePort;
   createEventConnection: (
     options: FeishuEventConnectionOptions,
@@ -153,6 +158,8 @@ export class FeishuSurface implements SurfaceAdapter {
       client!,
       options.logger,
     );
+    const files = dependencies.filePort
+      ?? (client === undefined ? undefined : new FeishuFileInput(client));
     this.output = new FeishuOutbox(
       options.appId,
       messagePort,
@@ -219,6 +226,7 @@ export class FeishuSurface implements SurfaceAdapter {
       this.interactions,
       {
         quietWindowMs: 0,
+        ...(files === undefined ? {} : { files }),
         ...(quotedMessages === undefined
           ? {}
           : {

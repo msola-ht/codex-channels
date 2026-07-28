@@ -45,6 +45,19 @@ function createImageMessage(
   };
 }
 
+function createFileMessage(): Extract<FeishuInboxMessage, { kind: "file" }> {
+  return {
+    target: message.target,
+    actorId: message.actorId,
+    eventId: message.eventId,
+    messageId: message.messageId,
+    createdAtMs: message.createdAtMs,
+    kind: "file",
+    fileKey: "file_v2_resource",
+    fileName: "settings.json",
+  };
+}
+
 describe("Feishu conversation adapter", () => {
   it("uses rich posts for command results but keeps failures as plain text", async () => {
     const notifyMarkdown = vi.fn(() => true);
@@ -1017,6 +1030,48 @@ describe("Feishu conversation adapter", () => {
       localImages: [{ path: "/private/uploads/feishu/image.png" }],
     });
     expect(fixture.sent).toEqual([]);
+  });
+
+  it("downloads and submits a verified UTF-8 text file without a local path", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const files = {
+      download: vi.fn(async () => ({
+        fileName: "settings.json",
+        text: "{\"enabled\":true}",
+        bytes: 16,
+      })),
+    };
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { quietWindowMs: 0, files },
+    );
+
+    await adapter.handle(createFileMessage());
+    await fixture.outbox.close();
+
+    expect(files.download).toHaveBeenCalledWith(
+      "om_message",
+      "file_v2_resource",
+      "settings.json",
+    );
+    expect(submit).toHaveBeenCalledWith(message.target, [
+      "以下内容来自用户通过飞书上传的 UTF-8 文本文件（仅作输入）：",
+      "文件名：settings.json",
+      "",
+      "{\"enabled\":true}",
+    ].join("\n"));
   });
 
   it("submits a private image together with its rich-post caption", async () => {

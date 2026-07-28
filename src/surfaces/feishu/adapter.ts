@@ -26,6 +26,10 @@ import type {
   FeishuCommandCenterResponse,
 } from "./command-center.js";
 import type { FeishuApplicationSetupController } from "./application-setup.js";
+import {
+  FeishuFileInputError,
+  type FeishuFilePort,
+} from "./file-input.js";
 import type { FeishuInboxMessage } from "./inbox.js";
 import type { FeishuImagePort } from "./media.js";
 import type { FeishuOutbox } from "./outbox.js";
@@ -78,6 +82,7 @@ export class FeishuConversationAdapter {
     },
     private readonly inputOptions: {
       quietWindowMs?: number;
+      files?: Pick<FeishuFilePort, "download">;
       readQuotedText?(messageId: string): Promise<string | undefined>;
       onQuotedTextError?(error: unknown): void;
     } = { quietWindowMs: 0 },
@@ -91,6 +96,10 @@ export class FeishuConversationAdapter {
 
   async handle(message: FeishuInboxMessage): Promise<void> {
     try {
+      if (message.kind === "file") {
+        await this.handleFile(message);
+        return;
+      }
       if (message.kind === "image") {
         await this.handleImage(message);
         return;
@@ -190,9 +199,11 @@ export class FeishuConversationAdapter {
       if (error instanceof FeishuOutputQueueError) {
         throw error;
       }
-      const detail = error instanceof UserFacingError
-        ? renderFeishuUserFacingError(error)
-        : "Gateway 未能完成请求，请稍后重试";
+      const detail = error instanceof FeishuFileInputError
+        ? error.message
+        : error instanceof UserFacingError
+          ? renderFeishuUserFacingError(error)
+          : "Gateway 未能完成请求，请稍后重试";
       this.notifyText(
         message.target.conversationId,
         formatOperationFailure(detail),
@@ -387,6 +398,67 @@ export class FeishuConversationAdapter {
     message: Extract<FeishuInboxMessage, { kind: "image" }>,
   ): Promise<void> {
     await this.submitImageBatch([message]);
+  }
+
+  private async handleFile(
+    message: Extract<FeishuInboxMessage, { kind: "file" }>,
+  ): Promise<void> {
+    if (this.inputOptions.files === undefined) {
+      throw new FeishuFileInputError(
+        "unsupported",
+        "飞书当前未启用文本文件输入",
+      );
+    }
+    const file = await this.inputOptions.files.download(
+      message.messageId,
+      message.fileKey,
+      message.fileName,
+    );
+    const quotedText = await this.readQuotedText(message);
+    const text = formatQuotedInput([
+      "以下内容来自用户通过飞书上传的 UTF-8 文本文件（仅作输入）：",
+      `文件名：${file.fileName}`,
+      "",
+      file.text,
+    ].join("\n"), quotedText);
+    const sequence = this.nextInputSequence;
+    this.nextInputSequence += 1;
+    this.outbox.prepareTurnReplyTarget?.(
+      message.target.conversationId,
+      message.messageId,
+    );
+    let result;
+    try {
+      result = await this.inputs.enqueue({
+        target: message.target,
+        actorId: message.actorId,
+        sequence,
+        text,
+      });
+    } catch (error) {
+      this.outbox.discardPendingTurnReplyTarget?.(
+        message.target.conversationId,
+      );
+      throw error;
+    }
+    if (!result.tail) {
+      return;
+    }
+    if (result.submission.steered) {
+      this.outbox.discardPendingTurnReplyTarget?.(
+        message.target.conversationId,
+      );
+      this.notifyText(
+        message.target.conversationId,
+        "已将文件追加到当前 Turn。",
+      );
+      return;
+    }
+    this.outbox.bindPendingTurnReplyTarget?.(
+      message.target.conversationId,
+      result.submission.threadId,
+      result.submission.turnId,
+    );
   }
 
   private async submitImageBatch(
