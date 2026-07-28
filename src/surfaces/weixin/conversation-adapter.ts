@@ -22,6 +22,10 @@ import {
   type WeixinFilePort,
 } from "./file-input.js";
 import {
+  renderWeixinDoctor,
+  type WeixinDoctor,
+} from "./doctor.js";
+import {
   WeixinImageDownloadError,
   type WeixinImagePort,
 } from "./image-store.js";
@@ -74,6 +78,7 @@ export class WeixinConversationAdapter {
     private readonly inputOptions: {
       quietWindowMs?: number;
       pollingHealth?: { snapshot(): WeixinPollingHealthSnapshot };
+      doctor?: WeixinDoctor;
       now?: () => number;
     } = { quietWindowMs: 0 },
     private readonly files?: Pick<WeixinFilePort, "download">,
@@ -176,6 +181,20 @@ export class WeixinConversationAdapter {
       }
       if (command.name === "whoami") {
         this.notify(message.target, renderWeixinIdentity(message));
+        return;
+      }
+      if (
+        command.name === "weixin"
+        && command.argumentsText === "doctor"
+        && this.inputOptions.doctor
+      ) {
+        this.notify(
+          message.target,
+          renderWeixinDoctor(
+            await this.inputOptions.doctor.inspect(message.target),
+            this.inputOptions.now?.() ?? Date.now(),
+          ),
+        );
         return;
       }
       if (!isConversationCommandName(command.name)) {

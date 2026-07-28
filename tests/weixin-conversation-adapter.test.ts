@@ -450,6 +450,39 @@ describe("WeixinConversationAdapter", () => {
     );
   });
 
+  it("runs the read-only Weixin doctor without starting a Turn", async () => {
+    const submit = vi.fn();
+    const notifyText = vi.fn(() => true);
+    const inspect = vi.fn(async () => ({
+      credential: "available" as const,
+      replyContext: "available" as const,
+      cursor: "available" as const,
+      polling: {
+        phase: "polling" as const,
+        consecutiveFailures: 0,
+        lastSuccessfulPollAtMs: null,
+        resumeAtMs: null,
+      },
+    }));
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({ submit }),
+      { notifyText },
+      undefined,
+      {
+        doctor: { inspect },
+      },
+    );
+
+    await adapter.handle({ ...message, text: "/weixin doctor" });
+
+    expect(inspect).toHaveBeenCalledWith(target);
+    expect(submit).not.toHaveBeenCalled();
+    expect(notifyText).toHaveBeenCalledWith(
+      target,
+      expect.stringContaining("微信 Doctor\n\nBot 凭据：可用"),
+    );
+  });
+
   it("uses the shared service for commands beyond the initial basic set", async () => {
     const listSessions = vi.fn(async () => []);
     const status = vi.fn(() => ({ threadId: undefined }));

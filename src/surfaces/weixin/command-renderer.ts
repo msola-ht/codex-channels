@@ -67,6 +67,7 @@ export function renderWeixinHelp(): string {
     "/diff · /plan",
     "/goal [set <目标>|clear]",
     "/whoami",
+    "/weixin doctor",
     "/start · /help",
   ].join("\n");
 }

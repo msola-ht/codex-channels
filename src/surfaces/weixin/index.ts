@@ -65,6 +65,14 @@ export {
   type WeixinPollingHealthSnapshot,
 } from "./polling-health.js";
 export {
+  createWeixinDoctor,
+  renderWeixinDoctor,
+  type CreateWeixinDoctorOptions,
+  type WeixinDoctor,
+  type WeixinDoctorRecordStatus,
+  type WeixinDoctorSnapshot,
+} from "./doctor.js";
+export {
   WeixinConversationAdapter,
   type WeixinConversationMessage,
 } from "./conversation-adapter.js";

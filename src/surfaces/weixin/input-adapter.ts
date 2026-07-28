@@ -20,6 +20,10 @@ import type { WeixinFilePort } from "./file-input.js";
 import type { WeixinImagePort } from "./image-store.js";
 import type { WeixinInteractionPort } from "./interactions.js";
 import type { WeixinOutbox } from "./outbox.js";
+import {
+  createWeixinDoctor,
+  type CreateWeixinDoctorOptions,
+} from "./doctor.js";
 import type { WeixinUpdatesCursorStore } from "./updates-cursor-store.js";
 import {
   createWeixinUpdatesMonitor,
@@ -65,6 +69,10 @@ export interface WeixinInputAdapterOptions {
   interactions?: Pick<WeixinInteractionPort, "handleText">;
   images?: Pick<WeixinImagePort, "download">;
   files?: Pick<WeixinFilePort, "download">;
+  doctor?: Omit<
+    CreateWeixinDoctorOptions,
+    "accountId" | "cursorStore" | "pollingHealth"
+  >;
   onFatal(error: WeixinInputFatalError): void;
   onRetry?(event: WeixinUpdatesRetryEvent): void;
   onStopTimeout?(): void;
@@ -98,6 +106,16 @@ export class WeixinInputAdapter {
       {
         quietWindowMs: 1_000,
         pollingHealth: this.health,
+        ...(options.doctor === undefined
+          ? {}
+          : {
+              doctor: createWeixinDoctor({
+                accountId: options.accountId,
+                cursorStore: options.cursorStore,
+                pollingHealth: this.health,
+                ...options.doctor,
+              }),
+            }),
       },
       options.files,
     );

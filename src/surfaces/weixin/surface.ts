@@ -20,6 +20,7 @@ import {
 } from "./input-adapter.js";
 import type { WeixinFilePort } from "./file-input.js";
 import type { WeixinImagePort } from "./image-store.js";
+import type { WeixinCredentialStore } from "./credential-store.js";
 import { WeixinInteractionPort } from "./interactions.js";
 import {
   WeixinOutbox,
@@ -49,6 +50,7 @@ export interface WeixinSurfaceOptions {
   onFatal: (error: WeixinInputFatalError) => void;
   actorRegistry?: ConversationActorRegistry;
   replyContextPersistence?: WeixinReplyContextPersistence;
+  credentialStore?: Pick<WeixinCredentialStore, "get">;
   images?: WeixinImagePort;
   files?: WeixinFilePort;
   startupNotification?: {
@@ -155,6 +157,15 @@ export class WeixinSurface implements SurfaceAdapter {
               ),
             removePersistedReplyContext: (target) =>
               options.replyContextPersistence!.remove(target),
+          }),
+      ...(options.credentialStore === undefined
+        || options.replyContextPersistence === undefined
+        ? {}
+        : {
+            doctor: {
+              credentialStore: options.credentialStore,
+              replyContextPersistence: options.replyContextPersistence,
+            },
           }),
       ...(options.actorRegistry === undefined
         ? {}

@@ -131,6 +131,7 @@ function createWeixinModule(
     service: options.service,
     access,
     actorRegistry: options.bindings,
+    credentialStore,
     replyContextPersistence,
     images: new WeixinImageStore(
       join(
