@@ -2,6 +2,7 @@ import type {
   InteractionDecision,
   InteractionRequest,
 } from "../../approval/index.js";
+import { contentTruncatedText } from "../output-copy.js";
 
 export interface FeishuCardDocument {
   config: {
@@ -26,7 +27,7 @@ export type FeishuApprovalAction =
   | "reject";
 
 const maximumDetailBytes = 12_000;
-const truncatedSuffix = "\n\n[内容过长，已截断]";
+const truncatedSuffix = `\n\n[${contentTruncatedText}]`;
 
 export function renderFeishuApprovalCard(
   request: Extract<InteractionRequest, { type: "approval" }>,

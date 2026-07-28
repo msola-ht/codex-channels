@@ -9,6 +9,7 @@ import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
+import { contentTruncatedText } from "../output-copy.js";
 import { TurnReplyTargets } from "../turn-reply-targets.js";
 import type {
   OperationUpdateDisplay,
@@ -27,7 +28,7 @@ import { renderFeishuThreadStatusCard } from "./status-card.js";
 const maximumFeishuMessageContentBytes = 20_000;
 const maximumFeishuMessageChunks = 5;
 const feishuChunkHeaderReserveBytes = 64;
-const feishuTruncationNotice = "\n\n[内容过长，已截断]";
+const feishuTruncationNotice = `\n\n[${contentTruncatedText}]`;
 const feishuStreamFlushDelayMs = 300;
 const maximumFeishuStreamingElementCharacters = 5_000;
 const maximumFeishuStreamingCards = 5;

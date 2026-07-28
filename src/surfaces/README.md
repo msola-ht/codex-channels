@@ -63,7 +63,12 @@ Turn、Thread 或 Surface 关闭时清理。
 `elapsed-duration.ts` 只把 App Server 已提供的 Turn 毫秒耗时格式化为三个 Surface 共用的中文
 短文本，不负责计时、状态或持久化。
 `slash-command.ts` 统一飞书与微信的严格斜杠命令解析；`conversation-command-format.ts`
-统一 Telegram、飞书与微信共用的命令结果文案，并提供 Telegram 与微信共用的状态文本。
+统一 Telegram、飞书与微信共用的命令目录、命令结果文案与状态文本。
+`user-facing-error-format.ts` 统一三个渠道的结构化用户错误文案，只保留渠道名称差异；
+`output-copy.ts` 统一断线、警告、操作失败、停止交互与内容截断等输出语义，各渠道继续自行决定
+HTML、CardKit Markdown、纯文本布局和发送方式。
+`configuration-change-format.ts` 统一 Telegram 与飞书已有的配置热加载、重启、重装和失败通知；
+Workspace 操作提示只在 Telegram 实际提供切换按钮时声明可点击。
 `operation-presentation.ts` 统一操作标题、状态、耗时与退出码元数据、敏感占位符和单行摘要；
 Telegram HTML、飞书 CardKit Markdown 与微信安全文本的转义、布局、分组和发送仍由各自
 Adapter 负责。

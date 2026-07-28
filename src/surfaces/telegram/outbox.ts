@@ -19,6 +19,11 @@ import {
   createTurnStartedPresentation,
   renderPlainLifecyclePresentation,
 } from "../lifecycle-presentation.js";
+import {
+  contentTruncatedText,
+  formatCodexWarning,
+  formatConnectionLost,
+} from "../output-copy.js";
 import type { OperationUpdateDisplay } from "../types.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import { TelegramApprovalOperationCoordinator } from "./approval-operation-coordinator.js";
@@ -67,7 +72,7 @@ interface OperationLogState {
 const maximumRichMarkdownCharacters = 32_000;
 const maximumTelegramActiveStreams = 100;
 const maximumTelegramBufferedStreamCharacters = 1_000_000;
-const telegramStreamTruncationMarker = "\n\n（内容过长，已截断）";
+const telegramStreamTruncationMarker = `\n\n（${contentTruncatedText}）`;
 
 export type TelegramFinalMessageFormat = "html" | "rich";
 
@@ -330,7 +335,7 @@ export class TelegramOutbox {
         this.enqueue(chatId, async () => {
           await this.send(
             chatId,
-            `Codex 警告：${visibleUpstreamMessage(event.message)}`,
+            formatCodexWarning(visibleUpstreamMessage(event.message)),
             undefined,
             true,
           );
@@ -339,7 +344,7 @@ export class TelegramOutbox {
       case "connection.lost":
         this.clearThreadOutput(chatId, event.threadId);
         this.enqueue(chatId, async () => {
-          await this.send(chatId, `Codex 警告：${event.message}`);
+          await this.send(chatId, formatConnectionLost(event.message));
         }, true);
         return;
       case "account.updated":

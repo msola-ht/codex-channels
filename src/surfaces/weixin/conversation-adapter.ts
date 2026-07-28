@@ -8,6 +8,7 @@ import {
   type ConversationTarget,
 } from "../../conversation-core/index.js";
 import { parseSlashCommand } from "../slash-command.js";
+import { formatOperationFailure } from "../output-copy.js";
 import { formatQuotedInput } from "../quoted-input.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import {
@@ -227,11 +228,11 @@ export class WeixinConversationAdapter {
         throw error;
       }
       if (error instanceof WeixinImageDownloadError) {
-        this.notify(message.target, `操作失败：${error.message}。`);
+        this.notify(message.target, formatOperationFailure(error.message));
         return;
       }
       if (error instanceof WeixinFileInputError) {
-        this.notify(message.target, `操作失败：${error.message}。`);
+        this.notify(message.target, formatOperationFailure(error.message));
         return;
       }
       if (!(error instanceof UserFacingError)) {
@@ -239,7 +240,7 @@ export class WeixinConversationAdapter {
       }
       this.notify(
         message.target,
-        `操作失败：${renderWeixinUserFacingError(error)}。`,
+        formatOperationFailure(renderWeixinUserFacingError(error)),
       );
     }
   }

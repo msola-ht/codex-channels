@@ -11,6 +11,10 @@ import {
   type ConversationTarget,
 } from "../../conversation-core/index.js";
 import { parseSlashCommand } from "../slash-command.js";
+import {
+  formatOperationFailure,
+  interactionStoppedText,
+} from "../output-copy.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import { formatQuotedInput } from "../quoted-input.js";
 
@@ -117,7 +121,7 @@ export class FeishuConversationAdapter {
         ) {
           this.notifyText(
             message.target.conversationId,
-            "已停止当前交互请求。",
+            interactionStoppedText,
           );
           return;
         }
@@ -191,7 +195,7 @@ export class FeishuConversationAdapter {
         : "Gateway 未能完成请求，请稍后重试";
       this.notifyText(
         message.target.conversationId,
-        `操作失败：${detail}。`,
+        formatOperationFailure(detail),
       );
       throw error;
     }
@@ -214,7 +218,7 @@ export class FeishuConversationAdapter {
         : "Gateway 未能完成请求，请稍后重试";
       this.notifyText(
         messages[0]!.target.conversationId,
-        `操作失败：${detail}。`,
+        formatOperationFailure(detail),
       );
       throw error;
     }
@@ -282,7 +286,7 @@ export class FeishuConversationAdapter {
       ) {
         this.notifyText(
           target.conversationId,
-          "已停止当前交互请求。",
+          interactionStoppedText,
         );
         return;
       }
@@ -312,7 +316,7 @@ export class FeishuConversationAdapter {
         : "Gateway 未能完成请求，请稍后重试";
       this.notifyText(
         target.conversationId,
-        `操作失败：${detail}。`,
+        formatOperationFailure(detail),
       );
       throw error;
     }

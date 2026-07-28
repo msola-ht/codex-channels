@@ -620,7 +620,7 @@ describe("TelegramOutbox", () => {
     await settle();
 
     expect(api.edits.at(-1)).toContain(
-      "💻 <b>运行命令 · 已完成</b> · 125 ms · exit 0",
+      "💻 <b>运行命令 · 已完成</b> · 125毫秒 · exit 0",
     );
     expect(api.editOptions.at(-1)).toEqual({ parse_mode: "HTML" });
 
@@ -1048,7 +1048,7 @@ describe("TelegramOutbox", () => {
     expect(api.sent).toEqual([
       turnStartedPanel,
       "尚未完成",
-      "Codex 警告：连接已断开",
+      "Codex 连接已中断：连接已断开",
     ]);
     expect(api.sendOptions.at(-1)).not.toHaveProperty("disable_notification");
 
@@ -1129,7 +1129,7 @@ describe("TelegramOutbox", () => {
 
     expect(api.sent).toEqual([
       "<b>操作过程</b>\n\n"
-      + "💻 <b>运行命令 · 已完成</b> · 125 ms · exit 0"
+      + "💻 <b>运行命令 · 已完成</b> · 125毫秒 · exit 0"
       + " · <code>git status --short second line</code>",
     ]);
   });

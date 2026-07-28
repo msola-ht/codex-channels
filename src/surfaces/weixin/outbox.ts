@@ -19,6 +19,11 @@ import {
   createTurnStartedPresentation,
   renderPlainLifecyclePresentation,
 } from "../lifecycle-presentation.js";
+import {
+  contentTruncatedText,
+  formatCodexWarning,
+  formatConnectionLost,
+} from "../output-copy.js";
 
 import { validateWeixinAccountId } from "./credential-store.js";
 import {
@@ -46,7 +51,7 @@ import type { WeixinTypingController } from "./typing-controller.js";
 
 const maximumChunkCharacters = 4_000;
 const maximumChunks = 5;
-const truncationNotice = "\n\n[内容过长，已截断]";
+const truncationNotice = `\n\n[${contentTruncatedText}]`;
 const previewNotice = "\n\n[内容预览]";
 const fileFailureNotice = "[文件发送失败，已改为分段文本]\n\n";
 const finalAnswerFileName = "codex-final-answer.txt";
@@ -280,9 +285,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
         return formatWeixinCommandText(renderWeixinTurnCompleted(event));
       }
       case "connection.lost":
-        return `Codex 连接已中断：${visibleMessage(event.message)}`;
+        return formatConnectionLost(visibleMessage(event.message));
       case "warning":
-        return `Codex 警告：${visibleMessage(event.message)}`;
+        return formatCodexWarning(visibleMessage(event.message));
       default:
         return null;
     }

@@ -11,13 +11,18 @@ import type {
   ThreadGoal,
   UserFacingError,
 } from "../../conversation-core/index.js";
-import { formatConversationCommandOutcome } from "../conversation-command-format.js";
+import {
+  conversationCommandHelpLines,
+  formatConversationCommandOutcome,
+  formatConversationStatus,
+} from "../conversation-command-format.js";
 import {
   createStartupPresentation,
   createTurnCompletedPresentation,
   renderPlainLifecyclePresentation,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
+import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
 
 const maximumSessionEntries = 20;
 const maximumSessionLabelCharacters = 48;
@@ -50,22 +55,7 @@ export function renderWeixinHelp(): string {
   return [
     "微信 Codex 命令",
     "普通文本会发送到当前 Codex Thread。",
-    "/resume [序号|名称|Thread ID]",
-    "/sessions [搜索词] · /archived [搜索词]",
-    "/new",
-    "/archive · /unarchive <序号|名称|Thread ID>",
-    "/status",
-    "/workspace [序号|ID|名称]",
-    "/stop · /queue <描述>",
-    "/rename <名称> · /compact · /fork",
-    "/review [branch <分支>|commit <SHA>|custom <说明>]",
-    "/model [序号|模型 ID|名称]",
-    "/effort [序号|档位] · /fast [on|off|status]",
-    "/skills · /mcp · /plugins",
-    "/usage · /limits · /permissions",
-    "/rules <init|check>",
-    "/diff · /plan",
-    "/goal [set <目标>|clear]",
+    ...conversationCommandHelpLines,
     "/whoami",
     "/weixin doctor",
     "/start · /help",
@@ -104,7 +94,7 @@ export function renderWeixinCommandResult(
     case "sessions":
       return renderSessions(result);
     case "status":
-      return renderStatus(result.status);
+      return formatConversationStatus(result.status);
     case "workspaces":
       return [
         `Workspace（${result.workspaces.length}）：`,
@@ -203,88 +193,7 @@ export function renderWeixinCommandResult(
 export function renderWeixinUserFacingError(
   error: UserFacingError,
 ): string {
-  switch (error.code) {
-    case "command.unsupported":
-      return "不支持该微信命令，请发送 /help 查看可用命令";
-    case "message.empty":
-      return "消息不能为空";
-    case "conversation.name.invalid":
-      return "会话名称必须为 1–64 个字符";
-    case "conversation.missing":
-      return "当前还没有 Codex Thread";
-    case "conversation.busy":
-      return "当前任务运行中，请先使用 /stop 停止当前任务";
-    case "image.path.invalid":
-      return "本地图片路径必须是绝对路径";
-    case "image.too-large":
-      return error.details.scope === "batch"
-        ? "图片总大小超过 20 MiB 限制"
-        : "图片超过 10 MiB 限制";
-    case "image.too-many":
-      return "一次最多处理 4 张图片";
-    case "image.unsupported":
-      return "微信当前不支持图片输入";
-    case "session.selector.required":
-      return `用法：/${errorDetail(error, "command", "resume")} <序号、名称或 Thread ID>`;
-    case "session.selector.ambiguous":
-      return "会话选择不唯一";
-    case "session.selector.not-found":
-      return "找不到指定会话";
-    case "thread.bound":
-      return "该 Codex Thread 已绑定到其他会话";
-    case "goal.empty":
-      return "目标不能为空";
-    case "goal.usage":
-      return "用法：/goal [set <目标>|clear]";
-    case "queue.usage":
-      return "用法：/queue <描述>";
-    case "queue.inactive":
-      return "当前没有运行中的任务，请直接发送普通消息";
-    case "queue.full":
-      return "下一 Turn 队列已满，最多 10 条";
-    case "queue.thread-changed":
-      return "排队消息所属会话已切换，队列已清空";
-    case "workspace.missing":
-      return `Workspace 不存在或未获授权：${errorDetail(error, "workspaceId", "未知")}`;
-    case "workspace.selector.required":
-      return "用法：/workspace <序号、ID 或名称>";
-    case "workspace.selector.ambiguous":
-      return "Workspace 选择不唯一";
-    case "workspace.selector.not-found":
-      return "找不到指定 Workspace";
-    case "model.current.missing":
-      return `当前模型不在可用模型列表中：${errorDetail(error, "model", "未知")}`;
-    case "model.selector.required":
-      return "用法：/model <序号、模型 ID 或名称>";
-    case "model.selector.ambiguous":
-      return "模型选择不唯一";
-    case "model.selector.not-found":
-      return "找不到指定模型";
-    case "effort.unsupported": {
-      const options = error.details.options;
-      return `当前模型不支持该思考强度，可选：${Array.isArray(options) ? options.join("、") : "无"}`;
-    }
-    case "fast.usage":
-      return "用法：/fast [on|off|status]";
-    case "fast.unsupported":
-      return `当前模型不支持 Fast 模式：${errorDetail(error, "model", "未知")}`;
-    case "review.usage":
-      return "用法：/review [branch <分支>|commit <SHA>|custom <说明>]";
-    case "rules.usage":
-      return "用法：/rules <init|check>";
-    case "rules.exists":
-      return "当前 Workspace 已有项目规则；微信不提供强制覆盖，请在终端中处理";
-    case "rules.missing":
-      return "当前 Workspace 尚未生成项目规则，请先使用 /rules init";
-    case "rules.unsafe-path":
-      return "项目规则路径包含符号链接，已拒绝写入";
-    case "rules.check-failed":
-      return "项目规则检查失败，请在终端运行 codexc rules check 查看详情";
-    case "rules.unavailable":
-      return "项目规则服务当前不可用";
-    default:
-      return "Gateway 无法完成请求，请稍后重试";
-  }
+  return formatSurfaceUserFacingError(error, "微信");
 }
 
 export function formatWeixinCommandText(text: string): string {
@@ -324,56 +233,6 @@ function sessionLabel(value: string): string {
   return normalized.length > maximumSessionLabelCharacters
     ? `${normalized.slice(0, maximumSessionLabelCharacters - 1)}…`
     : normalized;
-}
-
-function renderStatus(
-  status: Extract<
-    ConversationCommandResult,
-    { kind: "status" }
-  >["status"],
-): string {
-  const lines = [
-    "Codex 状态",
-    `Workspace：${status.workspaceName} (${status.workspaceId})`,
-    `Thread：${status.threadId ?? "尚未绑定"}`,
-    `Turn：${status.turnId ?? "空闲"}`,
-    `工作目录：${status.cwd}`,
-    `Git 分支：${status.gitBranch ?? "未检测到"}`,
-    `模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
-    `思考强度：${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
-    `Fast 模式：${status.threadId ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭") : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`,
-  ];
-  if (status.contextCompactionCount !== undefined) {
-    lines.push(`上下文压缩：${status.contextCompactionCount} 次`);
-  }
-  if (status.goal) {
-    lines.push(
-      `Goal 状态：${goalStatusLabel(status.goal.status)}`,
-      `Goal 目标：${status.goal.objective}`,
-      `Goal Tokens：${formatGoalTokens(status.goal)}`,
-    );
-  }
-  if (status.tokenUsage) {
-    const { total, last, modelContextWindow } = status.tokenUsage;
-    lines.push(
-      "当前 Thread 用量：",
-      `累计：${formatTokenCount(total.totalTokens)}`,
-      `最近 Turn：${formatTokenCount(last.totalTokens)}`,
-      `输入：${formatTokenCount(total.inputTokens)}`,
-      `缓存输入：${formatTokenCount(total.cachedInputTokens)}`,
-      `缓存命中率：${formatCacheHitRate(total.inputTokens, total.cachedInputTokens)}`,
-      `缓存写入：${formatTokenCount(total.cacheWriteInputTokens)}`,
-      `输出：${formatTokenCount(total.outputTokens)}`,
-      `推理输出：${formatTokenCount(total.reasoningOutputTokens)}`,
-      `模型上下文窗口容量：${modelContextWindow === null ? "未知" : formatTokenCount(modelContextWindow)}`,
-    );
-  } else if (status.threadId) {
-    lines.push("当前 Thread 用量：等待 App Server 推送统计");
-  }
-  if (status.weeklyLimit) {
-    lines.push(`周限：${formatRateLimitWindow(status.weeklyLimit)}`);
-  }
-  return lines.join("\n");
 }
 
 function renderModels(
@@ -478,15 +337,6 @@ function renderLimits(
   ].join("\n");
 }
 
-function errorDetail(
-  error: UserFacingError,
-  key: string,
-  fallback: string,
-): string {
-  const value = error.details[key];
-  return typeof value === "string" ? value : fallback;
-}
-
 function formatRateLimitWindow(window: AccountRateLimitWindow): string {
   return [
     `已使用 ${formatPercent(window.usedPercent)}`,
@@ -569,15 +419,6 @@ function formatTokenCount(value: number): string {
     })} K`;
   }
   return value.toLocaleString("zh-CN");
-}
-
-function formatCacheHitRate(
-  inputTokens: number,
-  cachedInputTokens: number,
-): string {
-  return inputTokens > 0
-    ? formatPercent(Math.max(0, cachedInputTokens / inputTokens * 100))
-    : "未知";
 }
 
 function goalStatusLabel(status: ThreadGoal["status"]): string {

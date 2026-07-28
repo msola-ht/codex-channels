@@ -429,7 +429,7 @@ describe("Telegram image input", () => {
       },
     });
 
-    expect(sentTexts).toContain("操作失败：会话名称必须为 1–64 个字符");
+    expect(sentTexts).toContain("操作失败：会话名称必须为 1–64 个字符。");
     await surface.stop();
     await output.close();
   });

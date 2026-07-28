@@ -212,7 +212,16 @@ describe("Feishu Surface", () => {
 
     expect(fixture.sent).toEqual([{
       chatId: "oc_chat",
-      text: "Gateway 配置已热加载\n新增 Workspace：Docs",
+      text: [
+        "Workspace 已添加",
+        "",
+        "│ Docs · docs",
+        "│ /workspace/docs",
+        "",
+        "发送 /workspace 可查看并切换 Workspace。",
+        "",
+        "已生效：Workspace",
+      ].join("\n"),
     }]);
     await fixture.surface.stop();
   });

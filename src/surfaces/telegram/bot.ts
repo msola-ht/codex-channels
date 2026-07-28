@@ -23,6 +23,11 @@ import type {
   OperationUpdateDisplay,
   SurfaceConfigurationChange,
 } from "../types.js";
+import { conversationCommandHelpLines } from "../conversation-command-format.js";
+import {
+  formatOperationFailure,
+  interactionStoppedText,
+} from "../output-copy.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import { formatQuotedInput } from "../quoted-input.js";
 import {
@@ -203,25 +208,9 @@ export class TelegramSurface {
           "发送 PNG/JPEG 图片时，可在图片说明中写明需要 Codex 处理的任务。",
           "首次消息自动接续当前 Workspace 最近的空闲 CLI/App Server 会话。",
           "",
-          "/resume [序号|名称|Thread ID]",
-          "/sessions [搜索词] · /archived [搜索词]",
-          "/new",
-          "/archive · /unarchive <序号|名称|Thread ID>",
-          "/status",
-          "/workspace [序号|ID|名称]",
-          "/stop",
-          "/queue <描述>",
-          "/rename <名称>",
-          "/compact",
-          "/fork",
-          "/review [branch <分支>|commit <SHA>|custom <说明>]",
-          "/model [序号|模型 ID|名称]",
-          "/effort [序号|档位]",
-          "/fast [on|off|status]",
-          "/skills · /mcp · /plugins · /usage · /limits · /permissions",
-          "/rules <init|check>",
-          "/diff · /plan",
-          "/goal [set <目标>|clear]",
+          ...conversationCommandHelpLines,
+          "/whoami",
+          "/start · /help",
         ].join("\n"),
       ),
     );
@@ -232,7 +221,7 @@ export class TelegramSurface {
     }
     this.bot.command("stop", async (context) => {
       if (this.interactions.stopForChat(String(context.chat.id))) {
-        await context.reply("已停止当前交互请求。");
+        await context.reply(interactionStoppedText);
         return;
       }
       await this.executeCommand(context, "stop");
@@ -444,8 +433,8 @@ export class TelegramSurface {
       if (context.chat) {
         await context.reply(
           error instanceof UserFacingError
-            ? `操作失败：${formatTelegramUserFacingError(error)}`
-            : "操作失败：Gateway 未能完成请求，请稍后重试。",
+            ? formatOperationFailure(formatTelegramUserFacingError(error))
+            : formatOperationFailure("Gateway 未能完成请求，请稍后重试"),
         );
       }
     } finally {

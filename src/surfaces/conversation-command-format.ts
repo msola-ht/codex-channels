@@ -1,9 +1,60 @@
 import {
   isFastServiceTier,
+  type AccountRateLimitWindow,
+  type ConversationCommandName,
   type ConversationCommandOutcome,
   type ConversationStatus,
 } from "../application/index.js";
 import type { ThreadGoal } from "../conversation-core/index.js";
+
+export const conversationCommandDescriptions = {
+  resume: "列出或恢复 Codex 会话",
+  sessions: "搜索可恢复会话",
+  archived: "搜索已归档会话",
+  new: "下一条消息创建新会话",
+  archive: "归档当前会话",
+  unarchive: "恢复已归档会话",
+  status: "查看当前状态",
+  workspace: "列出或切换 Workspace",
+  stop: "停止当前任务",
+  queue: "排到下一 Turn",
+  rename: "命名当前会话",
+  compact: "压缩当前上下文",
+  fork: "分叉当前会话",
+  review: "启动代码审查",
+  model: "查看或切换模型",
+  effort: "查看或切换思考强度",
+  fast: "查看或切换 Fast 模式",
+  skills: "列出 Skills",
+  mcp: "列出 MCP Servers",
+  plugins: "列出 Plugins",
+  usage: "查看账号用量",
+  limits: "查看套餐与额度",
+  permissions: "查看权限配置",
+  rules: "生成或检查项目规则",
+  diff: "查看当前 Turn Diff",
+  plan: "查看当前 Turn 计划",
+  goal: "查看或管理 Goal",
+} satisfies Record<ConversationCommandName, string>;
+
+export const conversationCommandHelpLines = [
+  "/resume [序号|名称|Thread ID]",
+  "/sessions [搜索词] · /archived [搜索词]",
+  "/new",
+  "/archive · /unarchive <序号|名称|Thread ID>",
+  "/status",
+  "/workspace [序号|ID|名称]",
+  "/stop · /queue <描述>",
+  "/rename <名称> · /compact · /fork",
+  "/review [branch <分支>|commit <SHA>|custom <说明>]",
+  "/model [序号|模型 ID|名称]",
+  "/effort [序号|档位] · /fast [on|off|status]",
+  "/skills · /mcp · /plugins",
+  "/usage · /limits · /permissions",
+  "/rules <init|check>",
+  "/diff · /plan",
+  "/goal [set <目标>|clear]",
+] as const;
 
 export function formatConversationCommandOutcome(
   outcome: ConversationCommandOutcome,
@@ -80,6 +131,9 @@ export function formatConversationStatus(status: ConversationStatus): string {
   } else if (status.threadId) {
     lines.push("", "当前 Thread 用量：等待 App Server 推送统计");
   }
+  if (status.weeklyLimit) {
+    lines.push(`周限：${formatRateLimitWindow(status.weeklyLimit)}`);
+  }
   return lines.join("\n");
 }
 
@@ -145,4 +199,32 @@ function formatCacheHitRate(
         cachedInputTokens / inputTokens * 100,
       ).toLocaleString("zh-CN", { maximumFractionDigits: 1 })}%`
     : "未知";
+}
+
+function formatRateLimitWindow(window: AccountRateLimitWindow): string {
+  return [
+    `已使用 ${formatPercent(window.usedPercent)}`,
+    ...(window.windowDurationMins === null
+      ? []
+      : [`周期 ${window.windowDurationMins} 分钟`]),
+    ...(window.resetsAt === null
+      ? []
+      : [`重置 ${formatResetTime(window.resetsAt)}`]),
+  ].join(" · ");
+}
+
+function formatPercent(value: number): string {
+  return `${value.toLocaleString("zh-CN", {
+    maximumFractionDigits: 1,
+  })}%`;
+}
+
+function formatResetTime(timestamp: number): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(timestamp * 1_000));
 }

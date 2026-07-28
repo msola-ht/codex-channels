@@ -1,4 +1,5 @@
 import type { OperationUpdate } from "../../conversation-core/index.js";
+import { formatElapsedDuration } from "../elapsed-duration.js";
 import {
   compactOperationDetail,
   operationMetadata,
@@ -55,7 +56,7 @@ export function formatTelegramOperationSummary(
   }
   const duration = summary.totalDurationMs === undefined
     ? ""
-    : ` · ${summary.totalDurationMs} ms`;
+    : ` · ${formatElapsedDuration(summary.totalDurationMs)}`;
   return [
     "<b>操作过程</b>",
     "",

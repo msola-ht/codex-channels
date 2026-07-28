@@ -1,10 +1,11 @@
 import type { OperationUpdate } from "../conversation-core/index.js";
+import { formatElapsedDuration } from "./elapsed-duration.js";
 
 export function operationMetadata(record: OperationUpdate): string[] {
   return [
     record.durationMs === undefined || record.durationMs <= 0
       ? null
-      : `${record.durationMs} ms`,
+      : formatElapsedDuration(record.durationMs),
     record.exitCode === undefined ? null : `exit ${record.exitCode}`,
   ].filter((value): value is string => value !== null);
 }

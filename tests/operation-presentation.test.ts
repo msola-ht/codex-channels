@@ -45,7 +45,7 @@ describe("shared operation presentation", () => {
       ...operation("command"),
       durationMs: 125,
       exitCode: 0,
-    })).toEqual(["125 ms", "exit 0"]);
+    })).toEqual(["125毫秒", "exit 0"]);
     expect(operationMetadata({
       ...operation("command"),
       durationMs: 0,
