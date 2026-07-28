@@ -127,7 +127,7 @@ describe("WeixinInputAdapter", () => {
       expect(outbox.notifyText).toHaveBeenCalledWith(
         target,
         expect.stringContaining(
-          "微信链路：轮询中\n\n连续失败：0 次\n\n最近成功轮询：1秒内",
+          "微信链路：轮询中\n\n连续失败：0 次\n\n上次后台轮询：",
         ),
       );
     }, { timeout: 2_000 });

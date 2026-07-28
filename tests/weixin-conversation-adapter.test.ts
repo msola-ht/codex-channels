@@ -354,6 +354,14 @@ describe("WeixinConversationAdapter", () => {
 
   it("adds the current Weixin polling health to /status", async () => {
     const notifyText = vi.fn(() => true);
+    const lastSuccessfulPollAtMs = new Date(
+      2026,
+      6,
+      28,
+      3,
+      15,
+      42,
+    ).getTime();
     const adapter = new WeixinConversationAdapter(
       serviceFixture({
         status: vi.fn(() => ({
@@ -377,11 +385,11 @@ describe("WeixinConversationAdapter", () => {
           snapshot: () => ({
             phase: "backoff",
             consecutiveFailures: 3,
-            lastSuccessfulPollAtMs: 1_000,
-            resumeAtMs: 31_500,
+            lastSuccessfulPollAtMs,
+            resumeAtMs: lastSuccessfulPollAtMs + 30_500,
           }),
         },
-        now: () => 1_500,
+        now: () => lastSuccessfulPollAtMs + 500,
       },
     );
 
@@ -390,7 +398,8 @@ describe("WeixinConversationAdapter", () => {
     expect(notifyText).toHaveBeenCalledWith(
       target,
       expect.stringContaining(
-        "微信链路：退避中\n\n连续失败：3 次\n\n最近成功轮询：1秒内\n\n预计恢复：30秒后",
+        "微信链路：退避中\n\n连续失败：3 次\n\n"
+        + "上次后台轮询：2026-07-28 03:15:42\n\n预计恢复：30秒后",
       ),
     );
   });

@@ -16,6 +16,8 @@ export interface WeixinPollingHealthSnapshot {
 }
 
 export class WeixinPollingHealth {
+  private pendingSuccessfulPollAtMs: number | null = null;
+
   private state: WeixinPollingHealthSnapshot = {
     phase: "stopped",
     consecutiveFailures: 0,
@@ -24,6 +26,7 @@ export class WeixinPollingHealth {
   };
 
   start(): void {
+    this.pendingSuccessfulPollAtMs = null;
     this.state = {
       ...this.state,
       phase: "polling",
@@ -36,15 +39,19 @@ export class WeixinPollingHealth {
     this.state = {
       ...this.state,
       phase: "polling",
+      lastSuccessfulPollAtMs:
+        this.pendingSuccessfulPollAtMs ?? this.state.lastSuccessfulPollAtMs,
       resumeAtMs: null,
     };
+    this.pendingSuccessfulPollAtMs = null;
   }
 
   recordSuccess(atMs: number): void {
+    this.pendingSuccessfulPollAtMs = atMs;
     this.state = {
+      ...this.state,
       phase: "polling",
       consecutiveFailures: 0,
-      lastSuccessfulPollAtMs: atMs,
       resumeAtMs: null,
     };
   }
@@ -79,9 +86,9 @@ export function renderWeixinPollingHealth(
   const lines = [
     `微信链路：${phaseLabel(snapshot.phase)}`,
     `连续失败：${snapshot.consecutiveFailures} 次`,
-    `最近成功轮询：${snapshot.lastSuccessfulPollAtMs === null
+    `上次后台轮询：${snapshot.lastSuccessfulPollAtMs === null
       ? "尚无"
-      : elapsedLabel(nowMs - snapshot.lastSuccessfulPollAtMs)}`,
+      : formatLocalTimestamp(snapshot.lastSuccessfulPollAtMs)}`,
   ];
   if (snapshot.resumeAtMs !== null) {
     lines.push(
@@ -111,9 +118,17 @@ function phaseLabel(phase: WeixinPollingHealthPhase): string {
   }
 }
 
-function elapsedLabel(elapsedMs: number): string {
-  if (elapsedMs <= 1_000) {
-    return "1秒内";
-  }
-  return `${formatElapsedDuration(elapsedMs)}前`;
+function formatLocalTimestamp(timestampMs: number): string {
+  const timestamp = new Date(timestampMs);
+  return [
+    timestamp.getFullYear().toString().padStart(4, "0"),
+    (timestamp.getMonth() + 1).toString().padStart(2, "0"),
+    timestamp.getDate().toString().padStart(2, "0"),
+  ].join("-")
+    + " "
+    + [
+      timestamp.getHours().toString().padStart(2, "0"),
+      timestamp.getMinutes().toString().padStart(2, "0"),
+      timestamp.getSeconds().toString().padStart(2, "0"),
+    ].join(":");
 }
