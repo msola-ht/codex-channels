@@ -14,6 +14,7 @@ const responseCursor = Symbol("responseCursor");
 const responseMessageIds = Symbol("responseMessageIds");
 const responseReplyContexts = new WeakMap();
 const responseImageContexts = new WeakMap();
+const responseFileContexts = new WeakMap();
 
 export class WeixinUpdatesContractError extends Error {
   constructor(code, message) {
@@ -97,6 +98,7 @@ export function createWeixinUpdatesContractClient({
         });
         responseReplyContexts.set(summary, extractReplyContexts(parsed));
         responseImageContexts.set(summary, extractImageContexts(parsed));
+        responseFileContexts.set(summary, extractFileContexts(parsed));
         return summary;
       } catch (error) {
         if (error instanceof WeixinUpdatesContractError) {
@@ -161,6 +163,27 @@ export function selectWeixinImageContext(summary, allowedUserIds) {
     throw new WeixinUpdatesContractError(
       "invalid-response",
       "本批消息中没有已授权完成态图片",
+    );
+  }
+  return selected;
+}
+
+export function selectWeixinFileContext(summary, allowedUserIds) {
+  if (!Array.isArray(allowedUserIds) || allowedUserIds.length === 0) {
+    throw new WeixinUpdatesContractError(
+      "invalid-input",
+      "微信允许用户列表无效",
+    );
+  }
+  const allowed = new Set(allowedUserIds);
+  const contexts = responseFileContexts.get(summary) ?? [];
+  responseFileContexts.delete(summary);
+  const selected = contexts.findLast((context) =>
+    allowed.has(context.fromUserId));
+  if (!selected) {
+    throw new WeixinUpdatesContractError(
+      "invalid-response",
+      "本批消息中没有已授权完成态一般文件",
     );
   }
   return selected;
@@ -517,6 +540,60 @@ function extractImageContexts(value) {
           item.image_item.media.aes_key,
           1_024,
         ),
+      });
+    }
+  }
+  return contexts;
+}
+
+function extractFileContexts(value) {
+  if (
+    typeof value !== "object"
+    || value === null
+    || !Array.isArray(value.msgs)
+  ) {
+    return [];
+  }
+  const contexts = [];
+  for (const message of value.msgs) {
+    if (
+      typeof message !== "object"
+      || message === null
+      || message.message_type !== 1
+      || message.message_state !== 2
+      || typeof message.from_user_id !== "string"
+      || message.from_user_id.length === 0
+      || message.from_user_id.length > 1_024
+      || !Array.isArray(message.item_list)
+    ) {
+      continue;
+    }
+    for (const item of message.item_list) {
+      if (
+        typeof item !== "object"
+        || item === null
+        || item.type !== 4
+        || typeof item.file_item !== "object"
+        || item.file_item === null
+        || typeof item.file_item.media !== "object"
+        || item.file_item.media === null
+      ) {
+        continue;
+      }
+      contexts.push({
+        fromUserId: message.from_user_id,
+        fullUrl: boundedOptionalString(item.file_item.media.full_url, 8_192),
+        encryptedQueryParam: boundedOptionalString(
+          item.file_item.media.encrypt_query_param,
+          65_536,
+        ),
+        mediaAesKey: boundedOptionalString(
+          item.file_item.media.aes_key,
+          1_024,
+        ),
+        fileName: boundedOptionalString(item.file_item.file_name, 1_024),
+        declaredLength: boundedOptionalString(item.file_item.len, 64),
+        declaredMd5: boundedOptionalString(item.file_item.md5, 128),
       });
     }
   }

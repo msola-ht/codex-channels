@@ -112,6 +112,10 @@
 - 微信图片合同探针的已授权完成态图片筛选、固定官方 CDN 地址、`image_item.aeskey` 与
   `media.aes_key` 两种 AES-128-ECB key 形态、内存解密、10 MiB 上限、PNG/JPEG 签名校验，
   以及图片、地址、查询参数、key、Token、游标和完整身份不进入输出。
+- 微信一般文件合同探针的已授权完成态文件筛选、固定官方 CDN 地址、`media.aes_key`
+  AES-128-ECB key 形态、内存解密和 20 MiB 本地安全上限，声明长度与 MD5 校验、文件名形状
+  和扩展名 MIME 推断，以及文件名、文件正文、MD5、地址、查询参数、key、Token、游标和完整
+  身份不进入输出；非官方 CDN、畸形 key 和超限声明长度失败关闭。
 - 微信反向图片合同探针的已授权完成态文本上下文筛选、固定 `getuploadurl` 请求、
   PNG MD5/大小与 AES-128-ECB PKCS7 密文大小、官方 CDN 完整地址及参数回退、二进制 `POST`、
   `x-encrypted-param` 有限重试和 4xx 立即失败、单张图片 `sendmessage` 字段，以及图片、

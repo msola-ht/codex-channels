@@ -71,6 +71,11 @@
   仅在内存取得固定 `v2.4.6` CDN 下载参数，限定官方 CDN、响应正文和 10 MiB 明文上限，
   按消息提供的 key 执行 AES-128-ECB 解密并验证 PNG/JPEG 签名；不输出或保存图片、下载地址、
   查询参数、key、Token、游标或完整身份，不注册常驻 Surface。
+- `weixin-file-contract-probe.mjs`：显式 `download --live` 后从一条已授权完成态微信文件中
+  仅在内存取得固定 `v2.4.6` CDN 下载参数，限定官方 CDN，并以 20 MiB 作为本探针的明文内存
+  安全上限；按消息提供的 key 执行 AES-128-ECB 解密，只报告大小、声明长度和 MD5 是否匹配、
+  文件名形状及由扩展名推断的 MIME，不输出或保存文件名、文件正文、MD5、下载地址、查询参数、
+  key、Token、游标或完整身份，不注册常驻 Surface。
 - `weixin-image-send-contract-probe.mjs`：显式 `send --live` 后从一条已授权完成态微信文本中
   仅在内存取得回复上下文，生成固定 PNG，按固定 `v2.4.6` 合同申请官方 CDN 上传地址、
   AES-128-ECB 加密并以二进制 `POST` 上传，再发送单张图片消息；上传缺少下载参数时有限重试，
