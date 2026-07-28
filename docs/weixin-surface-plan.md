@@ -6,7 +6,8 @@
 离线探针、正常扫码和过期刷新实测，重定向、配对码及重复绑定状态仍只有离线合同覆盖。微信
 单账号私聊文本 Surface 已加入显式内置注册表且未新增依赖；独立安全凭据 Store、统一 Setup 的
 默认禁用连接配置、窄协议 Client、版本 1 游标检查点、私聊文本输入 Adapter、完整共享命令、
-独立加密回复上下文、重启上线通知、Turn 生命周期统计、纯文本 Outbox 与一次性精确文本审批端口已实现；
+独立加密回复上下文、重启上线通知、Turn 生命周期统计、纯文本 Outbox 与一次性精确文本审批、
+用户输入和 MCP 交互端口已实现；
 完整 `SurfaceAdapter` 已从一级 Surface 入口受控公开，显式 `enabled = true` 时由 Bootstrap
 注册。
 
@@ -337,7 +338,8 @@ UTF-16 码元。
 `surface + accountId` 的 Turn 开始、最终文本、完成/停止/失败统计、连接错误和警告，通过共享
 Conversation 队列投递；每个气泡最多 4000 个 UTF-16 码元、最多五个气泡，截断时显示提示且不
 拆开代理对。关闭队列后只清空进程内副本。`interactions.ts` 对命令、文件和临时权限请求发送
-带随机一次性 ID 的精确审批命令；用户输入返回空答案，MCP elicitation 立即取消。
+带随机一次性 ID 的精确审批命令；用户输入通过带同一类令牌的问题序号命令分项收集，MCP form
+接受有界 JSON，URL 模式仅接受 HTTP(S) 链接完成确认。敏感输入仍明确取消。
 
 `src/surfaces/weixin/surface.ts` 已把上述组件组合为正式 `SurfaceAdapter`：Input 与 Outbox
 共享同一个进程内回复上下文 Store；启动时只为当前允许名单中的已有绑定恢复严格加密上下文，
@@ -360,7 +362,7 @@ Bootstrap 组合工厂、撤权绑定清理和显式启用配置已实现；Setu
 6. 文本按阶段 0 验证后的限制进行有界分片；首版使用块式最终回复，不伪装原生流式编辑。
 7. 输出进入共享 Conversation 队列；过载时仍保护错误与 Turn 完成等关键事件。
 8. 提供限时、一次性、Actor/Conversation/Thread/Turn/请求绑定的文本审批 `InteractionPort`；
-   用户输入和 MCP elicitation 继续立即失败关闭，不得悬挂。
+   用户输入和 MCP elicitation 使用同一绑定与失效边界，敏感输入失败关闭。
 9. Adapter 启动失败由 Bootstrap 回滚；重复停止安全，Gateway 停止不终止共享 App Server。
 
 阶段 1 主路径已实现并完成真实私聊收发、重启恢复和长文本验收；媒体、群聊、多账号、交互按钮
@@ -395,7 +397,9 @@ Bootstrap 组合工厂、撤权绑定清理和显式启用配置已实现；Setu
   每条命令使用独立代码块提供单独复制入口，超长时只在完整选项之间分组。
 - ID 只存在当前进程内，限时且原子消费，并绑定账号、Conversation、唯一授权 Actor、Thread、
   Turn 和 App Server 请求；未知、重复、过期、已在其他客户端处理和跨边界动作必须拒绝。
-- 用户输入与 MCP elicitation 没有安全表单能力，继续立即失败关闭。
+- 用户输入最多接受三个非敏感问题，通过精确 `/选择` 或 `/填写` 命令逐项完成；MCP form 只接受
+  精确 `/提交表单` 命令后的有界有效 JSON，URL 模式仅展示经过校验的 HTTP(S) 链接并接受
+  `/完成`。两类请求均可精确 `/取消`，敏感答案不降级为普通聊天文本。
 
 ### 阶段 4：媒体与多账号
 
@@ -431,7 +435,7 @@ Bootstrap 组合工厂、撤权绑定清理和显式启用配置已实现；Setu
 - 账号、Conversation、Actor 和允许名单严格匹配；跨账号不能串消息。
 - 普通文本、共享命令、长文本分片、平台错误和未知内部异常。
 - 同 Conversation 顺序、不同 Conversation 并行、队列过载、发送超时和有限关闭。
-- 未实现交互时三类请求立即安全拒绝或取消。
+- 缺少唯一授权 Actor、回复上下文或安全展示能力时，交互立即安全拒绝或取消。
 - 配置热加载、账号撤权、Gateway 重启和共享 App Server 不被终止。
 - 日志与平台消息不包含 Bot Token、`context_token`、二维码、游标、Authorization 或原始响应。
 

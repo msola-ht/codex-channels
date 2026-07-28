@@ -61,8 +61,11 @@
   的精确 `/批准一次 <id>`、`/批准会话 <id>`、`/保存命令规则 <id>`、
   `/保存网络规则 <id> <序号>` 或 `/拒绝 <id>` 命令；回复数字、“同意”、错误或过期 ID 均不会
   批准。微信把同一审批的选项优先合并到一个 Markdown 消息，每条命令保留独立复制入口；
-  审批绑定当前账号、私聊 Actor、Conversation、Thread、Turn 与 App Server 请求，
-  用户输入和 MCP 表单在微信仍失败关闭。
+  审批绑定当前账号、私聊 Actor、Conversation、Thread、Turn 与 App Server 请求。Codex 用户输入
+  通过精确 `/选择 <id> <问题序号> <选项序号>` 或 `/填写 <id> <问题序号> <答案>` 分项收集；
+  MCP JSON 表单使用 `/提交表单 <id> <JSON>`，外部 URL 操作使用 `/完成 <id>` 确认，
+  `/取消 <id>` 安全取消。所有命令沿用一次性 ID、Actor/会话绑定、超时和跨客户端失效；
+  微信聊天无法隐藏敏感回答，带敏感标记的输入请求会明确取消。
 - 查看 Codex 流式回复、格式化最终回复、操作过程、计划、Diff、Goal、用量和额度；长文本自动折叠，超长代码以预览加完整文件发送；Telegram、飞书与微信的 `/status`、上线通知和每轮结束状态卡均显示当前授权 Workspace 的 Git 分支；`/status` 还显示 Thread 累计缓存命中率，每轮结束状态卡显示最近 Turn 缓存命中率、当前 Goal 状态及 Thread 上下文压缩总次数，并统一显示 App Server 返回的准确对话耗时。
 - App Server 明确返回的 Turn、warning、账户、额度和 MCP 状态会在统一脱敏并限长后显示到
   Telegram、飞书和微信；微信使用按会话排序的纯文本气泡，不模拟卡片或静默提醒。未知内部异常、
@@ -186,8 +189,7 @@ Setup 默认保存 `enabled = false`，避免扫码完成后在操作者确认�
 `credentials/weixin-reply-context` 安全后端加密保存每个
 已绑定私聊的最近回复上下文，用于重启上线通知和重启后恢复关键输出。回复上下文不进入 TOML、
 SQLite 或日志；撤权目标不会收到通知。`codexc doctor` 会只读检查连接凭据是否存在且载荷有效，
-不显示 Token。微信暂不支持二进制文件、语音、视频、群聊、一般主动推送、用户输入或 MCP
-表单交互；当前图片
+不显示 Token。微信暂不支持二进制文件、语音、视频、群聊或一般主动推送；当前图片
 输出只处理活动 Turn 中 App Server 明确返回的 `imageGeneration.savedPath`。
 
 最终回复默认把常用 Markdown 安全转换为兼容性更好的 Telegram HTML。支持 Rich Messages

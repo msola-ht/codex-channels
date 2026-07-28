@@ -356,21 +356,244 @@ describe("WeixinInteractionPort", () => {
     }
   });
 
-  it.each([
-    userInputRequest(),
-    elicitationRequest(),
-  ])("keeps unsupported %s interactions fail-closed", async (request) => {
+  it("collects fixed and free answers before resolving user input", async () => {
+    const delivery = deliveryFixture();
     const port = new WeixinInteractionPort(
-      deliveryFixture(),
+      delivery,
+      actorRegistryFixture([actorId]),
+      accessFixture(true),
+      undefined,
+      () => "input-token",
+    );
+    const request = userInputRequest({
+      questions: [
+        {
+          id: "environment",
+          header: "环境",
+          question: "请选择环境",
+          options: ["测试", "正式"],
+          allowOther: false,
+          secret: false,
+        },
+        {
+          id: "branch",
+          header: "分支",
+          question: "请输入分支",
+          options: [],
+          allowOther: true,
+          secret: false,
+        },
+      ],
+    });
+
+    const pending = port.request(target, request);
+    await vi.waitFor(() => {
+      expect(delivery.deliverTextSequence).toHaveBeenCalledWith(
+        target,
+        expect.arrayContaining([
+          expect.stringContaining("/选择 input-token 1 1"),
+          expect.stringContaining(
+            "/填写 input-token 2 在这里输入答案",
+          ),
+        ]),
+      );
+    });
+    await port.handleText(target, actorId, "/选择 input-token 1 2");
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(delivery.deliverText).toHaveBeenLastCalledWith(
+      target,
+      "已记录第 1 项，请继续回答第 2 项。",
+    );
+
+    await port.handleText(
+      target,
+      actorId,
+      "/填写 input-token 2 feature/weixin",
+    );
+
+    await expect(pending).resolves.toEqual({
+      type: "user-input",
+      answers: {
+        environment: ["正式"],
+        branch: ["feature/weixin"],
+      },
+    });
+  });
+
+  it("keeps invalid user answers pending and cancels secret questions", async () => {
+    const delivery = deliveryFixture();
+    const port = new WeixinInteractionPort(
+      delivery,
+      actorRegistryFixture([actorId]),
+      accessFixture(true),
+      undefined,
+      () => "answer-token",
+    );
+    const pending = port.request(target, userInputRequest());
+    await vi.waitFor(() => {
+      expect(delivery.deliverTextSequence).toHaveBeenCalledOnce();
+    });
+
+    await port.handleText(
+      target,
+      actorId,
+      "/填写 answer-token 1 未提供的选项",
+    );
+    expect(delivery.deliverText).toHaveBeenLastCalledWith(
+      target,
+      "回答无效，请使用当前问题提供的命令。",
+    );
+    port.cancelAll();
+    await expect(pending).resolves.toEqual({
+      type: "user-input",
+      answers: {},
+    });
+
+    const secretPort = new WeixinInteractionPort(
+      delivery,
       actorRegistryFixture([actorId]),
       accessFixture(true),
     );
-
-    await expect(port.request(target, request)).resolves.toEqual(
-      request.type === "user-input"
-        ? { type: "user-input", answers: {} }
-        : { type: "elicitation", action: "cancel", content: null },
+    await expect(secretPort.request(target, userInputRequest({
+      requestId: "secret-request",
+      questions: [{
+        id: "password",
+        header: "密码",
+        question: "请输入密码",
+        options: [],
+        allowOther: true,
+        secret: true,
+      }],
+    }))).resolves.toEqual({
+      type: "user-input",
+      answers: {},
+    });
+    expect(delivery.deliverText).toHaveBeenLastCalledWith(
+      target,
+      "微信聊天无法安全填写敏感信息，本次输入请求已取消。",
     );
+  });
+
+  it("accepts one bounded JSON MCP form and rejects malformed content", async () => {
+    const delivery = deliveryFixture();
+    const port = new WeixinInteractionPort(
+      delivery,
+      actorRegistryFixture([actorId]),
+      accessFixture(true),
+      undefined,
+      () => "form-token",
+    );
+    const pending = port.request(target, formElicitationRequest());
+    await vi.waitFor(() => {
+      expect(delivery.deliverTextSequence).toHaveBeenCalledWith(
+        target,
+        expect.arrayContaining([
+          expect.stringContaining("/提交表单 form-token"),
+        ]),
+      );
+    });
+
+    await port.handleText(
+      target,
+      actorId,
+      "/提交表单 form-token not-json",
+    );
+    expect(delivery.deliverText).toHaveBeenLastCalledWith(
+      target,
+      "MCP 交互命令或 JSON 内容无效。",
+    );
+    await port.handleText(
+      target,
+      actorId,
+      "/提交表单 form-token {\"project\":\"codex-channels\"}",
+    );
+
+    await expect(pending).resolves.toEqual({
+      type: "elicitation",
+      action: "accept",
+      content: { project: "codex-channels" },
+    });
+  });
+
+  it("supports safe MCP URL completion and fails unsafe URLs closed", async () => {
+    const delivery = deliveryFixture();
+    const port = new WeixinInteractionPort(
+      delivery,
+      actorRegistryFixture([actorId]),
+      accessFixture(true),
+      undefined,
+      () => "url-token",
+    );
+    const pending = port.request(target, elicitationRequest());
+    await vi.waitFor(() => {
+      expect(delivery.deliverTextSequence).toHaveBeenCalledWith(
+        target,
+        expect.arrayContaining([
+          expect.stringContaining("https://example.com/"),
+          expect.stringContaining("/完成 url-token"),
+        ]),
+      );
+    });
+    await port.handleText(target, actorId, "/完成 url-token");
+    await expect(pending).resolves.toEqual({
+      type: "elicitation",
+      action: "accept",
+      content: null,
+    });
+
+    await expect(port.request(target, {
+      ...elicitationRequest(),
+      requestId: "unsafe-url",
+      url: "javascript:alert(1)",
+    })).resolves.toEqual({
+      type: "elicitation",
+      action: "cancel",
+      content: null,
+    });
+    expect(delivery.deliverTextSequence).toHaveBeenCalledOnce();
+  });
+
+  it("cancels user input and invalidates MCP interaction resolved elsewhere", async () => {
+    const delivery = deliveryFixture();
+    const port = new WeixinInteractionPort(
+      delivery,
+      actorRegistryFixture([actorId]),
+      accessFixture(true),
+      undefined,
+      () => "cancel-token",
+    );
+    const input = port.request(target, userInputRequest());
+    await vi.waitFor(() => {
+      expect(delivery.deliverTextSequence).toHaveBeenCalledOnce();
+    });
+    await expect(port.handleText(
+      target,
+      actorId,
+      "/取消 cancel-token",
+    )).resolves.toBe("handled");
+    await expect(input).resolves.toEqual({
+      type: "user-input",
+      answers: {},
+    });
+
+    const elicitation = port.request(target, {
+      ...elicitationRequest(),
+      requestId: "resolved-elsewhere",
+    });
+    await vi.waitFor(() => {
+      expect(delivery.deliverTextSequence).toHaveBeenCalledTimes(2);
+    });
+    port.resolved("resolved-elsewhere");
+    await expect(elicitation).resolves.toEqual({
+      type: "elicitation",
+      action: "cancel",
+      content: null,
+    });
   });
 });
 
@@ -392,20 +615,35 @@ function approvalRequest(
   };
 }
 
-function userInputRequest(): InteractionRequest {
+function userInputRequest(
+  overrides: Partial<
+    Extract<InteractionRequest, { type: "user-input" }>
+  > = {},
+): Extract<InteractionRequest, { type: "user-input" }> {
   return {
     type: "user-input",
     requestId: "request-input",
     threadId: "thread",
     turnId: "turn",
     itemId: "item",
-    title: "title",
-    questions: [],
+    title: "Codex 需要补充信息",
+    questions: [{
+      id: "environment",
+      header: "环境",
+      question: "请选择环境",
+      options: ["测试", "正式"],
+      allowOther: false,
+      secret: false,
+    }],
     expiresInMs: 60_000,
+    ...overrides,
   };
 }
 
-function elicitationRequest(): InteractionRequest {
+function elicitationRequest(): Extract<
+  InteractionRequest,
+  { type: "elicitation" }
+> {
   return {
     type: "elicitation",
     requestId: "request-elicitation",
@@ -415,6 +653,22 @@ function elicitationRequest(): InteractionRequest {
     message: "message",
     mode: "url",
     url: "https://example.com",
+    expiresInMs: 60_000,
+  };
+}
+
+function formElicitationRequest(): Extract<
+  InteractionRequest,
+  { type: "elicitation" }
+> {
+  return {
+    type: "elicitation",
+    requestId: "request-elicitation",
+    threadId: "thread",
+    turnId: null,
+    title: "title",
+    message: "message",
+    mode: "form",
     expiresInMs: 60_000,
   };
 }

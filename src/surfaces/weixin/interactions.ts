@@ -18,6 +18,8 @@ import type {
 import { sanitizeWeixinMarkdownText } from "./operation-format.js";
 
 type ApprovalRequest = Extract<InteractionRequest, { type: "approval" }>;
+type UserInputRequest = Extract<InteractionRequest, { type: "user-input" }>;
+type ElicitationRequest = Extract<InteractionRequest, { type: "elicitation" }>;
 
 interface WeixinInteractionDelivery {
   deliverText(target: ConversationTarget, text: string): Promise<void>;
@@ -27,24 +29,27 @@ interface WeixinInteractionDelivery {
   ): Promise<void>;
 }
 
-interface PendingApproval {
+interface PendingInteraction {
   requestId: string;
   target: ConversationTarget;
   actorId: string;
-  request: ApprovalRequest;
+  request: InteractionRequest;
+  answers: Map<string, string[]>;
   resolve(decision: InteractionDecision): void;
   timer: NodeJS.Timeout;
 }
 
-export type WeixinApprovalTextResult = "handled" | "not-command";
+export type WeixinInteractionTextResult = "handled" | "not-command";
 
 const maximumConcurrentInteractions = 100;
 const maximumPromptCharacters = 16_000;
 const maximumPromptMessageCharacters = 4_000;
+const maximumQuestionCount = 3;
+const maximumInputCharacters = 1_000;
 const interactionTokenPattern = /^[A-Za-z0-9_-]{8,64}$/;
 
 export class WeixinInteractionPort implements InteractionPort {
-  private readonly pendingByToken = new Map<string, PendingApproval>();
+  private readonly pendingByToken = new Map<string, PendingInteraction>();
   private readonly tokenByRequest = new Map<string, string>();
   private closed = false;
 
@@ -60,28 +65,37 @@ export class WeixinInteractionPort implements InteractionPort {
     target: ConversationTarget,
     request: InteractionRequest,
   ): Promise<InteractionDecision> {
-    if (request.type !== "approval") {
+    if (!supportsInteraction(request)) {
+      if (
+        !this.closed && request.type === "user-input"
+        && request.questions.some((question) => question.secret)
+      ) {
+        void this.notify(
+          target,
+          "微信聊天无法安全填写敏感信息，本次输入请求已取消。",
+        );
+      }
       return Promise.resolve(safeInteractionDecision(request));
     }
-    return this.requestApproval(target, request);
+    return this.requestInteraction(target, request);
   }
 
   async handleText(
     target: ConversationTarget,
     actorId: string,
     text: string,
-  ): Promise<WeixinApprovalTextResult> {
-    const command = parseApprovalCommand(text);
+  ): Promise<WeixinInteractionTextResult> {
+    const command = parseInteractionCommand(text);
     if (command === null) {
       return "not-command";
     }
     if (command === "invalid") {
-      await this.notify(target, "审批命令格式无效，请复制审批提示中的完整命令。");
+      await this.notify(target, "交互命令格式无效，请复制提示中的完整命令。");
       return "handled";
     }
     const pending = this.pendingByToken.get(command.token);
     if (!pending) {
-      await this.notify(target, "审批请求不存在、已过期或已处理。");
+      await this.notify(target, "交互请求不存在、已过期或已处理。");
       return "handled";
     }
     if (
@@ -90,22 +104,10 @@ export class WeixinInteractionPort implements InteractionPort {
       || actorId !== pending.actorId
       || !this.access?.isAllowed({ target, actorId })
     ) {
-      await this.notify(target, "审批命令与当前账号或会话不匹配。");
+      await this.notify(target, "交互命令与当前账号或会话不匹配。");
       return "handled";
     }
-    const choice = approvalChoice(command);
-    const resolution = choice === undefined
-      ? undefined
-      : resolveApprovalChoice(pending.request, choice);
-    if (!resolution) {
-      await this.notify(target, "该审批选项未由当前请求提供。");
-      return "handled";
-    }
-    await this.finish(
-      command.token,
-      resolution.decision,
-      `Codex 审批已处理：${resolution.outcome}。`,
-    );
+    await this.handleCommand(command.token, pending, command);
     return "handled";
   }
 
@@ -121,7 +123,7 @@ export class WeixinInteractionPort implements InteractionPort {
     void this.finish(
       token,
       safeInteractionDecision(pending.request),
-      "Codex 审批已在其他客户端处理。",
+      "Codex 交互已在其他客户端处理。",
     );
   }
 
@@ -131,14 +133,14 @@ export class WeixinInteractionPort implements InteractionPort {
       void this.finish(
         token,
         safeInteractionDecision(pending.request),
-        `Codex 审批已取消：${outcome}。`,
+        `Codex 交互已取消：${outcome}。`,
       );
     }
   }
 
-  private async requestApproval(
+  private async requestInteraction(
     target: ConversationTarget,
-    request: ApprovalRequest,
+    request: InteractionRequest,
   ): Promise<InteractionDecision> {
     if (
       this.closed
@@ -163,12 +165,12 @@ export class WeixinInteractionPort implements InteractionPort {
     ) {
       return safeInteractionDecision(request);
     }
-    const prompt = renderApprovalPrompt(request, token);
+    const prompt = renderInteractionPrompt(request, token);
     if (
       prompt.reduce((length, message) => length + message.length, 0)
         > maximumPromptCharacters
     ) {
-      await this.notify(target, "审批详情过长，微信端已安全拒绝本次请求。");
+      await this.notify(target, "交互详情过长，微信端已安全取消本次请求。");
       return safeInteractionDecision(request);
     }
 
@@ -180,7 +182,7 @@ export class WeixinInteractionPort implements InteractionPort {
       void this.finish(
         token,
         safeInteractionDecision(request),
-        "Codex 审批请求已超时并拒绝。",
+        "Codex 交互请求已超时并取消。",
       );
     }, request.expiresInMs);
     timer.unref();
@@ -190,6 +192,7 @@ export class WeixinInteractionPort implements InteractionPort {
       target,
       actorId: actors[0]!,
       request,
+      answers: new Map(),
       resolve: resolveDecision,
       timer,
     });
@@ -212,7 +215,7 @@ export class WeixinInteractionPort implements InteractionPort {
           conversationId: target.conversationId,
           errorType: error instanceof Error ? error.name : typeof error,
         },
-        "微信审批请求发送失败",
+        "微信交互请求发送失败",
       );
       throw error;
     }
@@ -226,9 +229,146 @@ export class WeixinInteractionPort implements InteractionPort {
         accountId: target.accountId,
         conversationId: target.conversationId,
       },
-      "微信审批请求已送达",
+      "微信交互请求已送达",
     );
     return decision;
+  }
+
+  private async handleCommand(
+    token: string,
+    pending: PendingInteraction,
+    command: ParsedInteractionCommand,
+  ): Promise<void> {
+    if (command.action === "cancel") {
+      await this.finish(
+        token,
+        safeInteractionDecision(pending.request),
+        interactionCancelledOutcome(pending.request),
+      );
+      return;
+    }
+    if (pending.request.type === "approval") {
+      const choice = approvalChoice(command);
+      const resolution = choice === undefined
+        ? undefined
+        : resolveApprovalChoice(pending.request, choice);
+      if (!resolution) {
+        await this.notify(pending.target, "该审批选项未由当前请求提供。");
+        return;
+      }
+      await this.finish(
+        token,
+        resolution.decision,
+        `Codex 审批已处理：${resolution.outcome}。`,
+      );
+      return;
+    }
+    if (pending.request.type === "user-input") {
+      await this.handleUserInputCommand(
+        token,
+        pending,
+        pending.request,
+        command,
+      );
+      return;
+    }
+    await this.handleElicitationCommand(
+      token,
+      pending,
+      pending.request,
+      command,
+    );
+  }
+
+  private async handleUserInputCommand(
+    token: string,
+    pending: PendingInteraction,
+    request: UserInputRequest,
+    command: ParsedInteractionCommand,
+  ): Promise<void> {
+    if (command.action !== "select" && command.action !== "answer") {
+      await this.notify(pending.target, "该命令不适用于当前输入请求。");
+      return;
+    }
+    const question = request.questions[command.questionNumber - 1];
+    if (!question) {
+      await this.notify(pending.target, "问题序号不在当前请求范围内。");
+      return;
+    }
+    const answer = command.action === "select"
+      ? question.options[command.optionNumber - 1]
+      : command.answer.trim();
+    if (
+      answer === undefined
+      || answer.length === 0
+      || answer.length > maximumInputCharacters
+      || (
+        command.action === "answer"
+        && question.options.length > 0
+        && !question.allowOther
+      )
+    ) {
+      await this.notify(pending.target, "回答无效，请使用当前问题提供的命令。");
+      return;
+    }
+    pending.answers.set(question.id, [answer]);
+    if (
+      pending.answers.size !== request.questions.length
+    ) {
+      const next = request.questions.findIndex(
+        (candidate) => !pending.answers.has(candidate.id),
+      );
+      await this.notify(
+        pending.target,
+        `已记录第 ${command.questionNumber} 项，请继续回答第 ${next + 1} 项。`,
+      );
+      return;
+    }
+    await this.finish(
+      token,
+      {
+        type: "user-input",
+        answers: Object.fromEntries(pending.answers),
+      },
+      "Codex 输入已提交。",
+    );
+  }
+
+  private async handleElicitationCommand(
+    token: string,
+    pending: PendingInteraction,
+    request: ElicitationRequest,
+    command: ParsedInteractionCommand,
+  ): Promise<void> {
+    if (
+      request.mode === "url"
+      && command.action === "complete"
+    ) {
+      await this.finish(
+        token,
+        { type: "elicitation", action: "accept", content: null },
+        "MCP 外部操作已确认完成。",
+      );
+      return;
+    }
+    if (
+      request.mode === "form"
+      && command.action === "submit-form"
+      && command.content.length <= maximumInputCharacters
+    ) {
+      try {
+        const content = JSON.parse(command.content) as unknown;
+        await this.finish(
+          token,
+          { type: "elicitation", action: "accept", content },
+          "MCP 表单已提交。",
+        );
+        return;
+      } catch {
+        // 下面返回稳定提示，不暴露用户表单内容。
+      }
+    }
+    await this.notify(pending.target, "MCP 交互命令或 JSON 内容无效。");
   }
 
   private async finish(
@@ -265,13 +405,13 @@ export class WeixinInteractionPort implements InteractionPort {
           conversationId: target.conversationId,
           errorType: error instanceof Error ? error.name : typeof error,
         },
-        "微信审批状态发送失败",
+        "微信交互状态发送失败",
       );
     }
   }
 }
 
-type ParsedApprovalCommand =
+type ParsedInteractionCommand =
   | { action: "deny"; token: string }
   | {
       action: "approve";
@@ -283,19 +423,79 @@ type ParsedApprovalCommand =
       token: string;
       scope: "network";
       amendmentNumber: number;
-    };
+    }
+  | { action: "cancel"; token: string }
+  | {
+      action: "select";
+      token: string;
+      questionNumber: number;
+      optionNumber: number;
+    }
+  | {
+      action: "answer";
+      token: string;
+      questionNumber: number;
+      answer: string;
+    }
+  | { action: "submit-form"; token: string; content: string }
+  | { action: "complete"; token: string };
 
-function parseApprovalCommand(
+function parseInteractionCommand(
   text: string,
-): ParsedApprovalCommand | "invalid" | null {
+): ParsedInteractionCommand | "invalid" | null {
   const normalized = text.trim();
   if (
-    !/^\/(?:批准一次|批准会话|保存命令规则|保存网络规则|拒绝)(?:\s|$)/u
+    !/^\/(?:批准一次|批准会话|保存命令规则|保存网络规则|拒绝|取消|选择|填写|提交表单|完成)(?:\s|$)/u
       .test(normalized)
   ) {
     return null;
   }
   const parts = normalized.split(/\s+/u);
+  if (
+    (parts[0] === "/取消" || parts[0] === "/完成")
+    && parts.length === 2
+    && interactionTokenPattern.test(parts[1]!)
+  ) {
+    return {
+      action: parts[0] === "/取消" ? "cancel" : "complete",
+      token: parts[1]!,
+    };
+  }
+  if (
+    parts[0] === "/选择"
+    && parts.length === 4
+    && interactionTokenPattern.test(parts[1]!)
+    && positiveNumber(parts[2]!)
+    && positiveNumber(parts[3]!)
+  ) {
+    return {
+      action: "select",
+      token: parts[1]!,
+      questionNumber: Number(parts[2]),
+      optionNumber: Number(parts[3]),
+    };
+  }
+  const answerMatch = normalized.match(
+    /^\/填写\s+([A-Za-z0-9_-]{8,64})\s+([1-9]\d*)\s+([\s\S]+)$/u,
+  );
+  if (answerMatch) {
+    return {
+      action: "answer",
+      token: answerMatch[1]!,
+      questionNumber: Number(answerMatch[2]),
+      answer: answerMatch[3]!,
+    };
+  }
+  const formMatch = normalized.match(
+    /^\/提交表单\s+([A-Za-z0-9_-]{8,64})\s+([\s\S]+)$/u,
+  );
+  if (formMatch) {
+    return {
+      action: "submit-form",
+      token: formMatch[1]!,
+      content: formMatch[2]!,
+    };
+  }
   if (
     parts[0] === "/拒绝"
     && parts.length === 2
@@ -340,10 +540,13 @@ function parseApprovalCommand(
 }
 
 function approvalChoice(
-  command: ParsedApprovalCommand,
+  command: ParsedInteractionCommand,
 ): ApprovalChoice | undefined {
   if (command.action === "deny") {
     return { type: "reject" };
+  }
+  if (command.action !== "approve") {
+    return undefined;
   }
   switch (command.scope) {
     case "once":
@@ -359,6 +562,38 @@ function approvalChoice(
             amendmentIndex: command.amendmentNumber - 1,
           }
         : undefined;
+  }
+}
+
+function supportsInteraction(request: InteractionRequest): boolean {
+  if (request.type === "approval") {
+    return true;
+  }
+  if (request.type === "user-input") {
+    return request.questions.length > 0
+      && request.questions.length <= maximumQuestionCount
+      && !request.questions.some((question) => question.secret)
+      && new Set(request.questions.map((question) => question.id)).size
+        === request.questions.length;
+  }
+  return request.mode === "form"
+    || (
+      request.url !== undefined
+      && safeHttpUrl(request.url) !== undefined
+    );
+}
+
+function renderInteractionPrompt(
+  request: InteractionRequest,
+  token: string,
+): readonly string[] {
+  switch (request.type) {
+    case "approval":
+      return renderApprovalPrompt(request, token);
+    case "user-input":
+      return renderUserInputPrompt(request, token);
+    case "elicitation":
+      return renderElicitationPrompt(request, token);
   }
 }
 
@@ -420,6 +655,120 @@ function packApprovalChoiceMessages(
     messages.push(current);
   }
   return messages;
+}
+
+function renderUserInputPrompt(
+  request: UserInputRequest,
+  token: string,
+): readonly string[] {
+  const introduction = [
+    sanitizeWeixinMarkdownText(request.title),
+    "Codex 正在等待你的回答。每个问题只接受一项答案。",
+    `有效期：${Math.max(1, Math.ceil(request.expiresInMs / 1_000))} 秒`,
+  ].join("\n\n");
+  const blocks = request.questions.flatMap((question, questionIndex) => {
+    const number = questionIndex + 1;
+    const description = [
+      `问题 ${number}：${sanitizeWeixinMarkdownText(question.header)}`,
+      sanitizeWeixinMarkdownText(question.question),
+    ].join("\n");
+    const choices = question.options.map((option, optionIndex) => [
+      `${optionIndex + 1}. ${sanitizeWeixinMarkdownText(option)}`,
+      `\`\`\`text\n/选择 ${token} ${number} ${optionIndex + 1}\n\`\`\``,
+    ].join("\n"));
+    const other = question.allowOther || question.options.length === 0
+      ? [[
+          "填写其他内容（复制后替换最后的文字）：",
+          `\`\`\`text\n/填写 ${token} ${number} 在这里输入答案\n\`\`\``,
+        ].join("\n")]
+      : [];
+    return [description, ...choices, ...other];
+  });
+  return [
+    introduction,
+    ...packPromptBlocks([
+      ...blocks,
+      [
+        "取消本次输入：",
+        `\`\`\`text\n/取消 ${token}\n\`\`\``,
+      ].join("\n"),
+    ]),
+  ];
+}
+
+function renderElicitationPrompt(
+  request: ElicitationRequest,
+  token: string,
+): readonly string[] {
+  const introduction = [
+    sanitizeWeixinMarkdownText(request.title),
+    sanitizeWeixinMarkdownText(request.message),
+    `有效期：${Math.max(1, Math.ceil(request.expiresInMs / 1_000))} 秒`,
+  ].join("\n\n");
+  const action = request.mode === "url"
+    ? [
+        `请在浏览器打开：${safeHttpUrl(request.url!)}`,
+        "完成外部操作后发送：",
+        `\`\`\`text\n/完成 ${token}\n\`\`\``,
+      ].join("\n\n")
+    : [
+        "请提交不超过 1000 字符的有效 JSON（复制后替换示例内容）：",
+        `\`\`\`text\n/提交表单 ${token} {"key":"value"}\n\`\`\``,
+      ].join("\n\n");
+  return [
+    introduction,
+    ...packPromptBlocks([
+      action,
+      [
+        "取消本次交互：",
+        `\`\`\`text\n/取消 ${token}\n\`\`\``,
+      ].join("\n"),
+    ]),
+  ];
+}
+
+function packPromptBlocks(blocks: readonly string[]): string[] {
+  const messages: string[] = [];
+  let current = "";
+  for (const block of blocks) {
+    const candidate = current.length === 0 ? block : `${current}\n\n${block}`;
+    if (
+      current.length > 0
+      && candidate.length > maximumPromptMessageCharacters
+    ) {
+      messages.push(current);
+      current = block;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current.length > 0) {
+    messages.push(current);
+  }
+  return messages;
+}
+
+function safeHttpUrl(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.toString()
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function positiveNumber(value: string): boolean {
+  return /^[1-9]\d*$/u.test(value) && Number.isSafeInteger(Number(value));
+}
+
+function interactionCancelledOutcome(request: InteractionRequest): string {
+  return request.type === "approval"
+    ? "Codex 审批已取消。"
+    : request.type === "user-input"
+      ? "Codex 输入请求已取消。"
+      : "MCP 交互已取消。";
 }
 
 function sameTarget(
