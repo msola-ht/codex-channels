@@ -7,6 +7,8 @@ import type { OutputEvent } from "../src/conversation-core/events.js";
 import { TelegramOutbox } from "../src/surfaces/telegram/outbox.js";
 
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+const turnStartedPanel = "<b>已开始处理。</b>";
+const turnCompletedPanel = "<b>本次运行 · 已完成</b>";
 
 class FakeTelegramApi {
   readonly actions: string[] = [];
@@ -217,8 +219,13 @@ describe("TelegramOutbox", () => {
     await settle();
 
     expect(api.sent).toEqual([
+      turnStartedPanel,
       "执行到一半。",
-      "Codex 任务失败：命令执行失败，TOKEN=[已隐藏]",
+      [
+        "<b>本次运行 · 失败</b>",
+        "",
+        "<b>错误：</b>命令执行失败，TOKEN=[已隐藏]",
+      ].join("\n"),
     ]);
     expect(api.actions).toEqual([]);
 
@@ -243,15 +250,24 @@ describe("TelegramOutbox", () => {
     await settle();
     await outbox.close();
 
-    expect(api.sent).toEqual(["正在检查", "检查完成。"]);
+    expect(api.sent).toEqual([
+      turnStartedPanel,
+      "正在检查",
+      "检查完成。",
+      turnCompletedPanel,
+    ]);
     expect(api.edits).toContain("正在检查。");
-    expect(api.sendOptions[0]).toEqual({ disable_notification: true });
-    expect(api.sendOptions[1]).toMatchObject({
+    expect(api.sendOptions[0]).toEqual({
+      parse_mode: "HTML",
+      disable_notification: true,
+    });
+    expect(api.sendOptions[1]).toEqual({ disable_notification: true });
+    expect(api.sendOptions[2]).toMatchObject({
       reply_parameters: { message_id: 42 },
     });
-    expect(api.sendOptions[1]).not.toHaveProperty("disable_notification");
+    expect(api.sendOptions[2]).not.toHaveProperty("disable_notification");
     expect(api.richMessages).toEqual([]);
-    expect(api.sendOptions[1]).toMatchObject({ parse_mode: "HTML" });
+    expect(api.sendOptions[2]).toMatchObject({ parse_mode: "HTML" });
   });
 
   it("bounds the number of active non-terminal Telegram streams", async () => {
@@ -329,8 +345,12 @@ describe("TelegramOutbox", () => {
     expect(api.sent).toEqual([
       "<b>服务职责</b>\n\n• App Server\n• Gateway\n\n" +
       "<pre><code class=\"language-text\">App Server -&gt; Gateway -&gt; Telegram</code></pre>",
+      turnCompletedPanel,
     ]);
-    expect(api.sendOptions).toEqual([{ parse_mode: "HTML" }]);
+    expect(api.sendOptions).toEqual([
+      { parse_mode: "HTML" },
+      { parse_mode: "HTML", disable_notification: true },
+    ]);
   });
 
   it("sends command-only text fences as clickable Telegram commands", async () => {
@@ -350,8 +370,14 @@ describe("TelegramOutbox", () => {
     await settle();
     await outbox.close();
 
-    expect(api.sent).toEqual(["/status\n/goal unknown\n/fast status"]);
-    expect(api.sendOptions).toEqual([{ parse_mode: "HTML" }]);
+    expect(api.sent).toEqual([
+      "/status\n/goal unknown\n/fast status",
+      turnCompletedPanel,
+    ]);
+    expect(api.sendOptions).toEqual([
+      { parse_mode: "HTML" },
+      { parse_mode: "HTML", disable_notification: true },
+    ]);
   });
 
   it("collapses long final text regardless of where the turn started", async () => {
@@ -376,7 +402,7 @@ describe("TelegramOutbox", () => {
     expect(api.sent[0]).toContain("CLI 输入");
     expect(api.sendOptions[0]).toMatchObject({ disable_notification: true });
     expect(api.sent.slice(1).length).toBeGreaterThan(1);
-    expect(api.sendOptions.slice(1).every((options) =>
+    expect(api.sendOptions.slice(1, -1).every((options) =>
       hasEntityType(options, "expandable_blockquote")
     )).toBe(true);
     expect(api.sendOptions[1]).not.toHaveProperty("disable_notification");
@@ -401,8 +427,9 @@ describe("TelegramOutbox", () => {
     await settle();
     await outbox.close();
 
-    expect(api.sent).toHaveLength(1);
+    expect(api.sent).toHaveLength(2);
     expect(api.sent[0]).toContain("完整内容已作为文件发送");
+    expect(api.sent[1]).toBe(turnCompletedPanel);
     expect(api.documents).toHaveLength(1);
     expect(api.documents[0]?.filename).toBe("codex-response.md");
     expect(api.documents[0]?.options).toMatchObject({
@@ -436,7 +463,7 @@ describe("TelegramOutbox", () => {
     expect(api.documents).toEqual([]);
     expect(api.edits.length).toBeGreaterThan(0);
     expect(hasEntityType(api.editOptions[0], "expandable_blockquote")).toBe(true);
-    expect(api.sendOptions.slice(1).every((options) =>
+    expect(api.sendOptions.slice(1, -1).every((options) =>
       hasEntityType(options, "expandable_blockquote")
     )).toBe(true);
   });
@@ -453,7 +480,7 @@ describe("TelegramOutbox", () => {
     await outbox.close();
 
     expect(api.richMessages).toEqual([{ markdown }]);
-    expect(api.sent).toEqual([markdown]);
+    expect(api.sent).toEqual([markdown, turnCompletedPanel]);
   });
 
   it("upgrades a streamed final answer to Rich Markdown when completed", async () => {
@@ -469,7 +496,7 @@ describe("TelegramOutbox", () => {
     await settle();
     await outbox.close();
 
-    expect(api.sent).toEqual(["# 标题"]);
+    expect(api.sent).toEqual(["# 标题", turnCompletedPanel]);
     expect(api.richEdits).toEqual([{ markdown: "# 标题\n\n最终内容" }]);
     expect(api.edits).toContain("# 标题\n\n最终内容");
   });
@@ -486,7 +513,7 @@ describe("TelegramOutbox", () => {
     await outbox.close();
 
     expect(api.richMessages).toEqual([{ markdown: "# 无法解析的内容" }]);
-    expect(api.sent).toEqual(["# 无法解析的内容"]);
+    expect(api.sent).toEqual(["# 无法解析的内容", turnCompletedPanel]);
   });
 
   it("falls back to plain text when Telegram rejects compatible HTML", async () => {
@@ -525,6 +552,7 @@ describe("TelegramOutbox", () => {
     expect(api.sent).toEqual([
       "<b>CLI 输入</b>\n\n<blockquote>从 CLI 发来的输入\n第二行</blockquote>",
       "同步回复",
+      turnCompletedPanel,
     ]);
     expect(api.sendOptions[0]).toEqual({
       parse_mode: "HTML",
@@ -579,10 +607,11 @@ describe("TelegramOutbox", () => {
     await settle();
     await outbox.close();
 
-    expect(api.sent).toHaveLength(1);
+    expect(api.sent).toHaveLength(2);
     expect(api.edits.at(-1)).toContain(
       "🔧 <b>修改文件 · 已完成</b>\n<blockquote>README.md</blockquote>",
     );
+    expect(api.sent.at(-1)).toBe(turnCompletedPanel);
   });
 
   it("groups identical consecutive operations and escapes Telegram HTML", async () => {
@@ -620,11 +649,12 @@ describe("TelegramOutbox", () => {
     await settle();
     await outbox.close();
 
-    expect(api.sent).toHaveLength(4);
+    expect(api.sent).toHaveLength(5);
     expect(api.sent[0]).toContain("💻 <b>运行命令 · 已完成</b>");
     expect(api.sent[1]).toBe("第一段回复");
     expect(api.sent[2]).toContain("🔧 <b>修改文件 · 已完成</b>");
     expect(api.sent[3]).toBe("第二段回复");
+    expect(api.sent[4]).toBe(turnCompletedPanel);
   });
 
   it("flushes pending replies before an ordered interaction", async () => {
@@ -833,7 +863,11 @@ describe("TelegramOutbox", () => {
     await settle();
     await outbox.close();
 
-    expect(api.sent).toEqual(["来自 Codex 的回复", "补充说明"]);
+    expect(api.sent).toEqual([
+      "来自 Codex 的回复",
+      "补充说明",
+      turnCompletedPanel,
+    ]);
     expect(api.sendOptions[0]).toMatchObject({
       reply_parameters: {
         message_id: 42,
@@ -886,14 +920,14 @@ describe("TelegramOutbox", () => {
     expect(api.sent).toEqual([
       "处理完成",
       [
-        "<b>上下文：24.6 K / 258 K（9.5%）</b>",
-        "<b>缓存命中率：</b>2.1%",
-        "<b>当前模型：</b>gpt-5.6-sol",
-        "<b>思考强度：</b>medium",
-        "<b>Fast 模式：</b>开启",
+        turnCompletedPanel,
+        "",
+        "<b>上下文：</b>24.6 K / 258 K（9.5%）",
+        "<b>缓存命中：</b>2.1%",
+        "<b>模型：</b>gpt-5.6-sol · medium · Fast 开启",
         "<b>上下文压缩：</b>2 次",
         "<b>周限：</b>已使用 42%",
-        "<b>Goal：</b>进行中 · 12.5 K / 100 K · 1分30秒",
+        "<b>Goal：</b>进行中 · 12.5 K / 100 K",
         "<b>Git 分支：</b>feature/weixin-surface",
       ].join("\n"),
     ]);
@@ -916,7 +950,11 @@ describe("TelegramOutbox", () => {
     await outbox.close();
 
     expect(api.sent).toEqual([
-      "<b>Git 分支：feature/weixin-surface</b>",
+      [
+        turnCompletedPanel,
+        "",
+        "<b>Git 分支：</b>feature/weixin-surface",
+      ].join("\n"),
     ]);
   });
 
@@ -964,7 +1002,11 @@ describe("TelegramOutbox", () => {
     await settle();
 
     expect(api.actions).toEqual(["typing"]);
-    expect(api.sent).toEqual(["尚未完成", "Codex 警告：连接已断开"]);
+    expect(api.sent).toEqual([
+      turnStartedPanel,
+      "尚未完成",
+      "Codex 警告：连接已断开",
+    ]);
     expect(api.sendOptions.at(-1)).not.toHaveProperty("disable_notification");
 
     await outbox.close();

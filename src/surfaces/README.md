@@ -54,6 +54,9 @@ Telegram 和飞书在交互消息创建成功或失败时
 Surface 在入队前立即处理，停止时必须排空已接收的聚合输入。
 `quoted-input.ts` 把各平台已验证的回复/引用正文转换为有界、明确标记且与当前消息分离的上下文；
 引用获取仍由各 Surface 负责，不能读取 Gateway 私有历史或让引用内容参与命令解析。
+`lifecycle-presentation.ts` 统一 Telegram、飞书与微信的 Gateway 上线、Turn 开始确认和 Turn
+结束汇报信息模型、字段顺序与中文状态词；各 Surface 只保留 HTML、CardKit Markdown 或微信文本
+布局以及各自的发送策略。
 `elapsed-duration.ts` 只把 App Server 已提供的 Turn 毫秒耗时格式化为三个 Surface 共用的中文
 短文本，不负责计时、状态或持久化。
 `slash-command.ts` 统一飞书与微信的严格斜杠命令解析；`conversation-command-format.ts`

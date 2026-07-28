@@ -63,23 +63,25 @@ describe("Feishu output renderer", () => {
     );
 
     expect(rendered).toBe([
-      "Codex Connect 已联通",
-      "App Server：已连接",
+      "**Codex Connect 已上线**",
       "",
-      "运行环境：",
-      "- macOS · arm64",
-      "- Codex Connect 0.145.0 · Node.js v24.0.0",
-      "- Unix WebSocket",
-      "- UA：codex-cli/0.145.0 (macOS 15.0) (arm64)",
+      "- **App Server：** 已连接",
       "",
-      "当前会话：",
-      "- Main · main",
-      "- /workspace",
-      "- Thread：thread-1",
-      "- Git 分支：feature/weixin-surface",
-      "- gpt-test · medium",
-      "- Fast 模式：开启",
-      "- 周限：已使用 37%",
+      "**运行环境**",
+      "- **系统：** macOS · arm64",
+      "- **版本：** Codex Connect 0.145.0 · Node.js v24.0.0",
+      "- **连接：** Unix WebSocket",
+      "- **App Server UA：** codex-cli/0.145.0 (macOS 15.0) (arm64)",
+      "",
+      "**当前会话**",
+      "- **Workspace：** Main (main)",
+      "- **工作目录：** /workspace",
+      "- **Thread：** thread-1",
+      "- **Git 分支：** feature/weixin-surface",
+      "- **模型：** gpt-test",
+      "- **思考强度：** medium",
+      "- **Fast 模式：** 开启",
+      "- **周限：** 已使用 37%",
     ].join("\n"));
     expect(rendered).not.toContain("build-secret");
   });
@@ -360,9 +362,7 @@ describe("Feishu output renderer", () => {
       "- **上下文压缩：** 2 次",
       "- **周限：** 已使用 37%",
       "- **Git 分支：** feature/weixin-surface",
-      "",
-      "---",
-      "**耗时：** 1分5秒",
+      "- **耗时：** 1分5秒",
     ].join("\n"));
   });
 
@@ -734,7 +734,11 @@ describe("Feishu output renderer", () => {
       .every((text) => Boolean(text?.trim()))).toBe(true);
     expect(renderFeishuOutput(criticalEvents[2]!)).toBeNull();
     expect(progressEvents.some(isCriticalOutputEvent)).toBe(false);
-    expect(progressEvents.map(renderFeishuOutput)).toEqual([null, null, null]);
+    expect(progressEvents.map(renderFeishuOutput)).toEqual([
+      "**已开始处理。**",
+      null,
+      null,
+    ]);
   });
 
   it("shows sanitized upstream error and warning details", () => {

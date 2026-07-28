@@ -252,7 +252,7 @@ Core 输出仍由 `SurfaceManager` 按 `feishu + appId` 路由。飞书 Adapter 
 - 关闭时拒绝新输出，取消连接并等待同一个有限关闭任务。
 
 第一阶段建立的纯文本路径必须覆盖 `isCriticalOutputEvent()` 判定的所有关键输出和明确的
-结构化用户错误。当前启动通知、最终回复、命令结果、操作过程和每轮结束统计统一使用 CardKit
+结构化用户错误。当前上线通知、Turn 开始确认、最终回复、命令结果、操作过程和每轮结束统计统一使用 CardKit
 2.0 Markdown；错误和操作性提示继续使用受约束的纯文本，不能静默丢弃；非关键
 中间事件可以按现有队列规则合并或丢弃。不得直接复用 Telegram HTML、Rich Messages、折叠预览
 或按钮布局。飞书富文本、静态卡片和原生流式更新已经按官方限制独立实现，不复用 Telegram
@@ -525,7 +525,7 @@ Application 提交中保留原始说明文字；多图、一般文件、群聊�
 卡片能从蓝色“运行中”原地更新为绿色“空闲”，正文和 Turn 状态顺序保持不变。
 
 第四个体验切片复用现有状态来源。长连接就绪后，Bootstrap 只为已有绑定且仍有授权 Actor 的
-精确 Chat 生成启动通知，Surface 校验、去重后通过 CardKit Markdown Outbox 入队；每轮结束直接渲染
+精确 Chat 生成上线通知，Surface 校验、去重后通过 CardKit Markdown Outbox 入队；每轮结束直接渲染
 `turn.completed` 已携带的最近 Turn 上下文、缓存命中率、模型设置、压缩次数、周限和 Goal。
 本切片不新增状态查询、收件人存储或消息持久化，仍待真实飞书验收。
 

@@ -11,6 +11,10 @@ import type {
   OperationUpdateDisplay,
   SurfaceOutputPort,
 } from "../types.js";
+import {
+  createTurnStartedPresentation,
+  renderPlainLifecyclePresentation,
+} from "../lifecycle-presentation.js";
 
 import { validateWeixinAccountId } from "./credential-store.js";
 import {
@@ -95,7 +99,12 @@ export class WeixinOutbox implements SurfaceOutputPort {
       this.options.typing?.start(event.target);
       this.delivery.enqueue(
         event.target.conversationId,
-        () => this.send(event.target, "已开始处理。"),
+        () => this.send(
+          event.target,
+          renderPlainLifecyclePresentation(
+            createTurnStartedPresentation(),
+          ),
+        ),
         true,
       );
       return;

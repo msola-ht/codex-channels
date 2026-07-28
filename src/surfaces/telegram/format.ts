@@ -25,6 +25,11 @@ import type {
   TurnArtifacts,
 } from "../../conversation-core/index.js";
 import { formatElapsedDuration } from "../elapsed-duration.js";
+import {
+  createStartupPresentation,
+  renderPlainLifecyclePresentation,
+  type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
+} from "../lifecycle-presentation.js";
 import { formatConversationStatus } from "../conversation-command-format.js";
 import type { Workspace } from "../../policy/index.js";
 import type { SurfaceConfigurationChange } from "../types.js";
@@ -480,67 +485,12 @@ export function formatStartupNotification(
   status: Pick<ConversationStatus, "threadId" | "workspaceId" | "model" | "effort" | "serviceTier" | "modelPending" | "effortPending" | "fastModePending" | "weeklyLimit" | "gitBranch">,
   runtime: StartupRuntimeInfo,
 ): string {
-  const currentWorkspace = workspaces.find((workspace) => workspace.id === status.workspaceId);
-  if (!currentWorkspace) {
-    throw new Error(`当前 Workspace 不存在：${status.workspaceId}`);
-  }
-  return [
-    "Codex Connect 已联通",
-    "App Server 已连接",
-    "",
-    "运行环境：",
-    `│ ${formatPlatform(runtime.platform)} · ${runtime.architecture}`,
-    "│ ",
-    `│ Codex Connect ${runtime.gatewayVersion} · Node.js ${runtime.nodeVersion}`,
-    "│ ",
-    `│ ${runtime.transport}`,
-    "│ ",
-    `│ UA · ${formatCodexUpstreamUserAgent(runtime.codexUpstreamUserAgent)}`,
-    "",
-    "当前会话：",
-    `│ ${currentWorkspace.name} · ${currentWorkspace.id}`,
-    "│ ",
-    `│ ${currentWorkspace.cwd}`,
-    "│ ",
-    `│ Thread · ${status.threadId ?? "尚未绑定"}`,
-    "│ ",
-    `│ Git 分支 · ${status.gitBranch ?? "未检测到"}`,
-    "│ ",
-    `│ ${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""} · ${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
-    "│ ",
-    `│ Fast 模式 · ${status.threadId ? formatFastMode(status.serviceTier) : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`,
-    ...(status.weeklyLimit
-      ? ["│ ", `│ 周限 · ${formatWeeklyLimit(status.weeklyLimit)}`]
-      : []),
-    "",
-    formatWorkspaces(workspaces, status.workspaceId),
-  ].join("\n");
+  return renderPlainLifecyclePresentation(
+    createStartupPresentation(workspaces, status, runtime),
+  );
 }
 
-export interface StartupRuntimeInfo {
-  platform: NodeJS.Platform;
-  architecture: string;
-  gatewayVersion: string;
-  nodeVersion: string;
-  transport: string;
-  codexUpstreamUserAgent: string | null;
-}
-
-function formatPlatform(platform: NodeJS.Platform): string {
-  const labels: Partial<Record<NodeJS.Platform, string>> = {
-    darwin: "macOS",
-    linux: "Linux",
-    win32: "Windows",
-  };
-  return labels[platform] ?? platform;
-}
-
-function formatCodexUpstreamUserAgent(userAgent: string | null): string {
-  if (!userAgent) {
-    return "App Server 未返回";
-  }
-  return userAgent.replace(/(\([^)]*\))\s+\S+\s+(\([^)]*\))$/, "$1 $2");
-}
+export type StartupRuntimeInfo = LifecycleStartupRuntimeInfo;
 
 function supportsFastMode(model: ModelSelectionState["models"][number]): boolean {
   return fastServiceTierId(model) !== undefined;

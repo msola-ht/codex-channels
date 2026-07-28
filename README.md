@@ -51,14 +51,17 @@
   批准。微信把同一审批的选项优先合并到一个 Markdown 消息，每条命令保留独立复制入口；
   审批绑定当前账号、私聊 Actor、Conversation、Thread、Turn 与 App Server 请求，
   用户输入和 MCP 表单在微信仍失败关闭。
-- 查看 Codex 流式回复、格式化最终回复、操作过程、计划、Diff、Goal、用量和额度；长文本自动折叠，超长代码以预览加完整文件发送；Telegram 与飞书的 `/status`、启动联通通知和每轮结束状态卡均显示当前授权 Workspace 的 Git 分支；`/status` 还显示 Thread 累计缓存命中率，每轮结束状态卡显示最近 Turn 缓存命中率、当前 Goal 状态及 Thread 上下文压缩总次数，飞书把 App Server 返回的准确对话耗时单独放在卡片底栏。
+- 查看 Codex 流式回复、格式化最终回复、操作过程、计划、Diff、Goal、用量和额度；长文本自动折叠，超长代码以预览加完整文件发送；Telegram、飞书与微信的 `/status`、上线通知和每轮结束状态卡均显示当前授权 Workspace 的 Git 分支；`/status` 还显示 Thread 累计缓存命中率，每轮结束状态卡显示最近 Turn 缓存命中率、当前 Goal 状态及 Thread 上下文压缩总次数，并统一显示 App Server 返回的准确对话耗时。
 - App Server 明确返回的 Turn、warning 和 MCP 错误会在统一脱敏并限长后显示到对应通讯渠道；未知内部异常、凭据和未经约束的响应正文仍不会直接发送。
 - Telegram 通知按逻辑事件降噪：过程、状态、上下文和后续分片静默发送；最终回复、审批、用户输入与严重错误保留提醒。
 - 飞书不模拟 Telegram 的静默参数，也不调用加急接口；过程与状态通过流式或原地更新降噪，
   最终回复、错误、审批和用户输入使用新的普通消息或卡片获得平台标准提醒。
 - Telegram 与飞书审批交互优先于同一会话中尚未发送的非关键过程消息；两端只记录脱敏的请求
   路由、送达和失败状态，便于区分无需审批、无会话绑定与平台发送失败。
-- Gateway 启动时通知当前系统、版本、App Server 返回的上游 User-Agent、本地连接方式、Workspace、Git 分支、Thread、模型、思考强度、Fast 模式和周限。
+- Telegram、飞书和微信共用一套生命周期信息模型：Gateway 上线时按相同顺序通知当前系统、版本、
+  App Server 返回的上游 User-Agent、本地连接方式、Workspace、Git 分支、Thread、模型、
+  思考强度、Fast 模式和周限；每个 Turn 开始时统一确认“已开始处理。”，结束时统一汇报状态、
+  错误、上下文、缓存、模型、压缩、周限、Goal、Git 分支和耗时。各平台只保留自己的消息外观。
 - 处理命令、文件修改、临时权限、用户输入及 MCP 审批。
 - 在预配置 Workspace 间切换，并与原生 TUI 双向恢复 Thread。
 - 使用私有 Unix WebSocket；Gateway 与 App Server 独立运行。
@@ -311,7 +314,7 @@ Thread 恢复继续通过 App Server 通知校正。Gateway 只缓存当前 Goal
 已发布菜单只有在 `bot_menu_enable=true` 时才显示为“已启用”，节点存在但开关关闭时显示
 “已添加，尚未启用”。命令在飞书授权和有界输入队列之后进入同一个
 `ConversationCommandService`；未知或畸形斜杠命令会明确拒绝，不会作为普通消息提交给
-Codex。启动通知、短回复、命令结果和每轮结束统计使用 CardKit 2.0 静态 Markdown 卡片；
+Codex。上线通知、Turn 开始确认、短回复、命令结果和每轮结束统计使用 CardKit 2.0 静态 Markdown 卡片；
 持续产生的模型正文使用 CardKit 2.0 原生流式卡片。操作事件忽略运行中间帧，在完成、失败或
 拒绝时按会话时间线发送独立静态卡片，并显示 Core 已提供且经过脱敏和截断的命令、文件、工具
 或搜索摘要；错误、过载和操作性提示保留纯文本。
@@ -330,7 +333,7 @@ Codex。启动通知、短回复、命令结果和每轮结束统计使用 CardK
 本身不携带 Chat ID，因此只有当前 Actor 恰好匹配一个已授权私聊绑定时才会响应；事件和卡片
 令牌均为有界内存状态，重启后清空。卡片动作调用同一个 `ConversationCommandService`，
 不会把按钮伪装成用户文本，也不会在 Surface 中复制模型、会话或 Fast 状态逻辑。
-Gateway 长连接就绪后，会向已有授权绑定发送静态 CardKit 启动通知；每轮结束会使用紧凑
+Gateway 长连接就绪后，会向已有授权绑定发送静态 CardKit 上线通知；每轮结束会使用紧凑
 CardKit Markdown 列出
 `turn.completed` 已携带的用量和设置字段显示最近 Turn 上下文、缓存命中率、模型、思考强度、
 Fast、上下文压缩、周限和 Goal。两条路径均不新增状态来源或持久化消息内容。

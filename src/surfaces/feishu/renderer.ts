@@ -14,22 +14,21 @@ import type {
   ThreadGoal,
   UserFacingError,
 } from "../../conversation-core/index.js";
-import { formatElapsedDuration } from "../elapsed-duration.js";
 import { formatConversationCommandOutcome } from "../conversation-command-format.js";
+import {
+  createStartupPresentation,
+  createTurnCompletedPresentation,
+  createTurnStartedPresentation,
+  type LifecyclePresentation,
+  type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
+} from "../lifecycle-presentation.js";
 import type { SurfaceConfigurationChange } from "../types.js";
 import type { FeishuInboxMessage } from "./inbox.js";
 
 const maximumFeishuSessionEntries = 20;
 const maximumFeishuSessionLabelCharacters = 48;
 
-export interface FeishuStartupRuntimeInfo {
-  platform: NodeJS.Platform;
-  architecture: string;
-  gatewayVersion: string;
-  nodeVersion: string;
-  transport: string;
-  codexUpstreamUserAgent: string | null;
-}
+export type FeishuStartupRuntimeInfo = LifecycleStartupRuntimeInfo;
 
 export function renderFeishuStartupNotification(
   workspaces: ReadonlyArray<{ id: string; name: string; cwd: string }>,
@@ -48,31 +47,9 @@ export function renderFeishuStartupNotification(
   >,
   runtime: FeishuStartupRuntimeInfo,
 ): string {
-  const workspace = workspaces.find(({ id }) => id === status.workspaceId);
-  if (!workspace) {
-    throw new Error(`当前 Workspace 不存在：${status.workspaceId}`);
-  }
-  return [
-    "Codex Connect 已联通",
-    "App Server：已连接",
-    "",
-    "运行环境：",
-    `- ${feishuPlatformLabel(runtime.platform)} · ${runtime.architecture}`,
-    `- Codex Connect ${runtime.gatewayVersion} · Node.js ${runtime.nodeVersion}`,
-    `- ${runtime.transport}`,
-    `- UA：${formatFeishuUpstreamUserAgent(runtime.codexUpstreamUserAgent)}`,
-    "",
-    "当前会话：",
-    `- ${workspace.name} · ${workspace.id}`,
-    `- ${workspace.cwd}`,
-    `- Thread：${status.threadId ?? "尚未绑定"}`,
-    `- Git 分支：${status.gitBranch ?? "未检测到"}`,
-    `- ${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""} · ${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
-    `- Fast 模式：${status.threadId ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭") : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`,
-    ...(status.weeklyLimit
-      ? [`- 周限：${formatWeeklyLimit(status.weeklyLimit)}`]
-      : []),
-  ].join("\n");
+  return renderFeishuLifecyclePresentation(
+    createStartupPresentation(workspaces, status, runtime),
+  );
 }
 
 export function renderFeishuHelp(): string {
@@ -341,25 +318,12 @@ function errorDetail(
   return typeof value === "string" ? value : fallback;
 }
 
-function feishuPlatformLabel(platform: NodeJS.Platform): string {
-  const labels: Partial<Record<NodeJS.Platform, string>> = {
-    darwin: "macOS",
-    linux: "Linux",
-    win32: "Windows",
-  };
-  return labels[platform] ?? platform;
-}
-
-function formatFeishuUpstreamUserAgent(userAgent: string | null): string {
-  if (!userAgent) {
-    return "App Server 未返回";
-  }
-  return userAgent.replace(/(\([^)]*\))\s+\S+\s+(\([^)]*\))$/u, "$1 $2");
-}
-
 export function renderFeishuOutput(event: OutputEvent): string | null {
   switch (event.type) {
     case "turn.started":
+      return renderFeishuLifecyclePresentation(
+        createTurnStartedPresentation(),
+      );
     case "text.delta":
       return null;
     case "user.message":
@@ -391,48 +355,31 @@ export function renderFeishuOutput(event: OutputEvent): string | null {
 function renderFeishuTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
 ): string {
-  const details: string[] = [];
-  if (event.error) {
-    details.push(`- **错误：** ${visibleUpstreamMessage(event.error)}`);
-  }
-  if (event.tokenUsage) {
-    const current = event.tokenUsage.last.totalTokens;
-    const capacity = event.tokenUsage.modelContextWindow;
-    details.push(
-      capacity === null || capacity <= 0
-        ? `- **上下文：** ${formatTokenCount(current)}`
-        : `- **上下文：** ${formatTokenCount(current)} / ${formatTokenCount(capacity)}（${formatPercent(Math.max(0, current / capacity * 100))}）`,
-      `- **缓存命中：** ${formatCacheHitRate(
-        event.tokenUsage.last.inputTokens,
-        event.tokenUsage.last.cachedInputTokens,
-      )}`,
-    );
-  }
-  if (event.model) {
-    details.push(
-      `- **模型：** ${event.model} · ${event.effort ?? "模型默认"} · Fast ${isFastServiceTier(event.serviceTier ?? null) ? "开启" : "关闭"}`,
-    );
-  }
-  if (event.contextCompactionCount !== undefined) {
-    details.push(`- **上下文压缩：** ${event.contextCompactionCount} 次`);
-  }
-  if (event.weeklyLimit) {
-    details.push(`- **周限：** ${formatWeeklyLimit(event.weeklyLimit)}`);
-  }
-  if (event.goal) {
-    details.push(
-      `- **Goal：** ${goalStatusLabel(event.goal.status)} · ${formatGoalTokens(event.goal)}`,
-    );
-  }
-  if (Object.hasOwn(event, "gitBranch")) {
-    details.push(`- **Git 分支：** ${event.gitBranch ?? "未检测到"}`);
-  }
+  return renderFeishuLifecyclePresentation(
+    createTurnCompletedPresentation(event),
+  );
+}
+
+function renderFeishuLifecyclePresentation(
+  presentation: LifecyclePresentation,
+): string {
   return [
-    `**本次运行 · ${turnStatusLabel(event.status)}**`,
-    ...(details.length > 0 ? ["", ...details] : []),
-    ...(event.durationMs === undefined
-      ? []
-      : ["", "---", `**耗时：** ${formatElapsedDuration(event.durationMs)}`]),
+    `**${presentation.title}**`,
+    ...(presentation.fields.length > 0
+      ? [
+          "",
+          ...presentation.fields.map(
+            ({ label, value }) => `- **${label}：** ${value}`,
+          ),
+        ]
+      : []),
+    ...(presentation.sections ?? []).flatMap((section) => [
+      "",
+      `**${section.title}**`,
+      ...section.fields.map(
+        ({ label, value }) => `- **${label}：** ${value}`,
+      ),
+    ]),
   ].join("\n");
 }
 
@@ -776,18 +723,6 @@ function planStatusSymbol(
     completed: "●",
   } as const;
   return symbols[status];
-}
-
-function turnStatusLabel(
-  status: Extract<OutputEvent, { type: "turn.completed" }>["status"],
-): string {
-  const labels = {
-    completed: "已完成",
-    interrupted: "已中断",
-    failed: "失败",
-    inProgress: "运行中",
-  } as const;
-  return labels[status];
 }
 
 function threadStatusLabel(status: string): string {

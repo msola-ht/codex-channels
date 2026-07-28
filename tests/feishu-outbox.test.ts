@@ -35,6 +35,32 @@ afterEach(() => {
 });
 
 describe("Feishu outbox", () => {
+  it("sends the shared Turn start confirmation as a Markdown card", async () => {
+    const markdownCards: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle({
+      type: "turn.started",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+    });
+    await outbox.close();
+
+    expect(markdownCards).toEqual(["**已开始处理。**"]);
+  });
+
   it("streams coalesced deltas through one native CardKit card", async () => {
     vi.useFakeTimers();
     const created: string[] = [];

@@ -9,7 +9,11 @@ import {
   type OutputEvent,
 } from "../../conversation-core/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
-import { formatElapsedDuration } from "../elapsed-duration.js";
+import {
+  createTurnCompletedPresentation,
+  createTurnStartedPresentation,
+  renderPlainLifecyclePresentation,
+} from "../lifecycle-presentation.js";
 import type { OperationUpdateDisplay } from "../types.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import { TelegramApprovalOperationCoordinator } from "./approval-operation-coordinator.js";
@@ -17,7 +21,6 @@ import { telegramErrorMetadata } from "./error-metadata.js";
 import { telegramDefaultAccountId } from "./constants.js";
 import {
   formatAccountUpdate,
-  formatContextUsage,
   formatMcpStatusUpdate,
   formatRateLimitUpdate,
   splitTelegramText,
@@ -109,6 +112,20 @@ export class TelegramOutbox {
     switch (event.type) {
       case "turn.started":
         this.typing.start(chatId, this.turnActivityKey(event.threadId, event.turnId));
+        this.enqueue(
+          chatId,
+          async () => {
+            await this.sendPanel(
+              chatId,
+              renderPlainLifecyclePresentation(
+                createTurnStartedPresentation(),
+              ),
+              undefined,
+              true,
+            );
+          },
+          true,
+        );
         return;
       case "user.message": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
@@ -252,58 +269,14 @@ export class TelegramOutbox {
             await this.flush(chatId, key, true);
           }
           const replyTo = this.replyToByTurn.get(turnKey);
-          if (event.error) {
-            await this.send(
-              chatId,
-              `Codex 任务失败：${visibleUpstreamMessage(event.error)}`,
-              replyTo,
-            );
-          } else if (!new Set(["completed", "success"]).has(event.status)) {
-            await this.send(chatId, `Codex 任务状态：${event.status}`, replyTo);
-          }
-          if (event.tokenUsage) {
-            await this.sendPanel(
-              chatId,
-              formatContextUsage(
-                event.tokenUsage,
-                {
-                  ...(event.model
-                    ? {
-                      model: event.model,
-                      effort: event.effort ?? null,
-                      serviceTier: event.serviceTier ?? null,
-                    }
-                    : {}),
-                  ...(event.durationMs === undefined
-                    ? {}
-                    : { durationMs: event.durationMs }),
-                  ...(event.contextCompactionCount !== undefined
-                    ? { contextCompactionCount: event.contextCompactionCount }
-                    : {}),
-                  ...(event.weeklyLimit ? { weeklyLimit: event.weeklyLimit } : {}),
-                  ...(event.goal ? { goal: event.goal } : {}),
-                  gitBranch: event.gitBranch,
-                },
-              ),
-              undefined,
-              true,
-            );
-          } else if (
-            event.durationMs !== undefined
-            || Object.hasOwn(event, "gitBranch")
-          ) {
-            await this.sendPanel(
-              chatId,
-              [
-                ...(event.durationMs === undefined
-                  ? []
-                  : [`对话耗时：${formatElapsedDuration(event.durationMs)}`]),
-                `Git 分支：${event.gitBranch ?? "未检测到"}`,
-              ].join("\n"),
-              undefined,
-              true,
-            );
-          }
+          await this.sendPanel(
+            chatId,
+            renderPlainLifecyclePresentation(
+              createTurnCompletedPresentation(event),
+            ),
+            replyTo,
+            true,
+          );
           this.replyToByTurn.delete(turnKey);
           this.notifiedTurns.delete(turnKey);
           this.clearApprovalOperationsForTurn(turnKey);

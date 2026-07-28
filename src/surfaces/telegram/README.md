@@ -16,7 +16,8 @@
 - `command-renderer.ts`：把平台无关的类型化命令结果渲染为 Telegram 消息。
 - `outbox.ts`：通过 Surface 共用的每 Conversation 有界顺序队列协调流式回复和审批显示顺序；
   活动非终态流最多保留 100 个，单流正文最多保留 1,000,000 个 Unicode 字符并明确标记截断；
-  每轮状态卡显示当前 Workspace Git 分支、官方 Turn 对话耗时、最近 Turn 缓存命中率、当前 Goal、上下文压缩总次数和用量；最终回复默认使用兼容 HTML，也可选择
+  每个 Turn 开始时发送共享确认；每轮状态卡复用共享生命周期字段，显示当前 Workspace Git
+  分支、官方 Turn 对话耗时、最近 Turn 缓存命中率、当前 Goal、上下文压缩总次数和用量；最终回复默认使用兼容 HTML，也可选择
   Telegram 原生 Rich Markdown，超长或渲染失败时回退纯文本。
 - `approval-operation-coordinator.ts`：隔离审批请求与操作日志之间的等待、拒绝抑制和 Turn 清理状态。
 - 通知策略按逻辑事件降噪。Gateway 启动、CLI 输入镜像、思考/过程增量、操作过程、Turn 结束统计、
@@ -42,7 +43,7 @@
 - `api-executor.ts`：统一执行 Telegram API 调用，处理超时、限流和有限重试。
 - `error-metadata.ts`：只保留异常类型和受约束的机器错误码，不记录任意异常消息。
 - `user-error-renderer.ts`：把平台无关的结构化用户错误映射为 Telegram 专属提示与命令用法。
-- `format.ts`：格式化会话、Diff/Plan、Goal、模型、Workspace、Git 分支、权限、用量、缓存命中率、上下文压缩总次数和状态文本；启动通知、`/status` 与 Turn 结束统计均显示当前 Workspace Git 分支；Skill 只展示
+- `format.ts`：格式化会话、Diff/Plan、Goal、模型、Workspace、Git 分支、权限、用量、缓存命中率、上下文压缩总次数和状态文本；上线通知复用 Surface 共享生命周期字段，`/status` 与 Turn 结束统计均显示当前 Workspace Git 分支；Skill 只展示
   当前用户或 Workspace 直接安装的项，MCP 只展示稳定的名称、认证状态和工具数量，Plugin
   只展示本机已安装项，Permission Profile 只展示稳定目录选项。
 - `image-store.ts`：安全获取 Telegram 下载地址和下载流；大小、内容签名、私有暂存与过期清理

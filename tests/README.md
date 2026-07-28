@@ -14,7 +14,7 @@
   到官方 `UserInput` 的映射，以及 Review、Goal 和控制响应到稳定 Application 结果的映射。
 - 官方 Turn、Item、Diff、Plan、Goal、Token、账户、额度、MCP 和 warning Notification 到稳定 Core
   输入事件的映射，畸形与未知通知隔离；Conversation Core 状态归约、严格 Turn 完成状态、
-  官方 `Turn.durationMs` 校验、Telegram 对话耗时列表与飞书结束统计耗时底栏、可重试错误隔离、Thread/全局警告路由，
+  官方 `Turn.durationMs` 校验、三渠道统一结束汇报耗时字段、可重试错误隔离、Thread/全局警告路由，
   以及 Client 边界的操作摘要、Turn/warning/MCP 错误
   脱敏限长与敏感文本清洗。
 - 命令、文件修改、临时权限、用户输入和 MCP 审批的归属信息、优先于等待中非关键输出的双
@@ -84,8 +84,8 @@
 - Permission Profile 查询按授权 Workspace 发送精确 CWD，分页映射 ID、说明和策略可选状态；
   必需字段畸形或分页游标循环时失败关闭，并与高权限审批决定保持分离。
 - 当前授权 Workspace 的 Git 分支通过组合根有时限只读查询进入共享 Conversation 状态，并由
-  Telegram、飞书与微信的启动通知、`/status` 和 `turn.completed` 结束统计一致展示；非 Git 目录
-  安全回退。
+  Telegram、飞书与微信共用的上线通知、Turn 开始确认和 `turn.completed` 结束汇报契约一致展示；
+  `/status` 继续复用共享 Conversation 状态，非 Git 目录安全回退。
 - SQLite 最小绑定恢复、当前版本 Schema 缺失失败关闭、配置热加载与自动重启分类、Setup
   类别与通讯渠道菜单、Telegram Setup、飞书手动输入与扫码注册的消息和 CardKit 最小权限、卡片动作回调
   声明、应用选择、Bot 身份验证、扫码后自动发布悬浮菜单、发布失败保留连接配置并安全提示 Doctor

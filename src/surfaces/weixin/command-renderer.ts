@@ -12,19 +12,17 @@ import type {
   UserFacingError,
 } from "../../conversation-core/index.js";
 import { formatConversationCommandOutcome } from "../conversation-command-format.js";
-import { formatElapsedDuration } from "../elapsed-duration.js";
+import {
+  createStartupPresentation,
+  createTurnCompletedPresentation,
+  renderPlainLifecyclePresentation,
+  type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
+} from "../lifecycle-presentation.js";
 
 const maximumSessionEntries = 20;
 const maximumSessionLabelCharacters = 48;
 
-export interface WeixinStartupRuntimeInfo {
-  platform: NodeJS.Platform;
-  architecture: string;
-  gatewayVersion: string;
-  nodeVersion: string;
-  transport: string;
-  codexUpstreamUserAgent: string | null;
-}
+export type WeixinStartupRuntimeInfo = LifecycleStartupRuntimeInfo;
 
 export function renderWeixinStartupNotification(
   workspaces: ReadonlyArray<{ id: string; name: string; cwd: string }>,
@@ -43,30 +41,9 @@ export function renderWeixinStartupNotification(
   >,
   runtime: WeixinStartupRuntimeInfo,
 ): string {
-  const workspace = workspaces.find(({ id }) => id === status.workspaceId);
-  if (!workspace) {
-    throw new Error(`当前 Workspace 不存在：${status.workspaceId}`);
-  }
-  return [
-    "Codex Connect 已上线",
-    "App Server：已连接",
-    "运行环境：",
-    `${platformLabel(runtime.platform)} · ${runtime.architecture}`,
-    `Codex Connect ${runtime.gatewayVersion} · Node.js ${runtime.nodeVersion}`,
-    runtime.transport,
-    `UA：${formatUpstreamUserAgent(runtime.codexUpstreamUserAgent)}`,
-    "当前会话：",
-    `${workspace.name} · ${workspace.id}`,
-    workspace.cwd,
-    `Thread：${status.threadId ?? "尚未绑定"}`,
-    `Git 分支：${status.gitBranch ?? "未检测到"}`,
-    `模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
-    `思考强度：${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
-    `Fast 模式：${status.threadId ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭") : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`,
-    ...(status.weeklyLimit
-      ? [`周限：${formatRateLimitWindow(status.weeklyLimit)}`]
-      : []),
-  ].join("\n");
+  return renderPlainLifecyclePresentation(
+    createStartupPresentation(workspaces, status, runtime),
+  );
 }
 
 export function renderWeixinHelp(): string {
@@ -112,46 +89,9 @@ export function renderWeixinIdentity(message: {
 export function renderWeixinTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
 ): string {
-  const lines = [`本次运行 · ${turnStatusLabel(event.status)}`];
-  if (event.error) {
-    lines.push(`错误：${event.error.replaceAll("[REDACTED]", "[已隐藏]")}`);
-  }
-  if (event.tokenUsage) {
-    const current = event.tokenUsage.last.totalTokens;
-    const capacity = event.tokenUsage.modelContextWindow;
-    lines.push(
-      capacity === null || capacity <= 0
-        ? `上下文：${formatTokenCount(current)}`
-        : `上下文：${formatTokenCount(current)} / ${formatTokenCount(capacity)}（${formatPercent(Math.max(0, current / capacity * 100))}）`,
-      `缓存命中：${formatCacheHitRate(
-        event.tokenUsage.last.inputTokens,
-        event.tokenUsage.last.cachedInputTokens,
-      )}`,
-    );
-  }
-  if (event.model) {
-    lines.push(
-      `模型：${event.model} · ${event.effort ?? "模型默认"} · Fast ${isFastServiceTier(event.serviceTier ?? null) ? "开启" : "关闭"}`,
-    );
-  }
-  if (event.contextCompactionCount !== undefined) {
-    lines.push(`上下文压缩：${event.contextCompactionCount} 次`);
-  }
-  if (event.weeklyLimit) {
-    lines.push(`周限：${formatRateLimitWindow(event.weeklyLimit)}`);
-  }
-  if (event.goal) {
-    lines.push(
-      `Goal：${goalStatusLabel(event.goal.status)} · ${formatGoalTokens(event.goal)}`,
-    );
-  }
-  if (Object.hasOwn(event, "gitBranch")) {
-    lines.push(`Git 分支：${event.gitBranch ?? "未检测到"}`);
-  }
-  if (event.durationMs !== undefined) {
-    lines.push(`耗时：${formatElapsedDuration(event.durationMs)}`);
-  }
-  return lines.join("\n");
+  return renderPlainLifecyclePresentation(
+    createTurnCompletedPresentation(event),
+  );
 }
 
 export function renderWeixinCommandResult(
@@ -655,34 +595,6 @@ function formatGoalTokens(goal: ThreadGoal): string {
   return goal.tokenBudget === null
     ? formatTokenCount(goal.tokensUsed)
     : `${formatTokenCount(goal.tokensUsed)} / ${formatTokenCount(goal.tokenBudget)}`;
-}
-
-function turnStatusLabel(
-  status: Extract<OutputEvent, { type: "turn.completed" }>["status"],
-): string {
-  const labels = {
-    completed: "已完成",
-    interrupted: "已停止",
-    failed: "失败",
-    inProgress: "运行中",
-  } as const;
-  return labels[status];
-}
-
-function platformLabel(platform: NodeJS.Platform): string {
-  const labels: Partial<Record<NodeJS.Platform, string>> = {
-    darwin: "macOS",
-    linux: "Linux",
-    win32: "Windows",
-  };
-  return labels[platform] ?? platform;
-}
-
-function formatUpstreamUserAgent(userAgent: string | null): string {
-  if (!userAgent) {
-    return "App Server 未返回";
-  }
-  return userAgent.replace(/(\([^)]*\))\s+\S+\s+(\([^)]*\))$/u, "$1 $2");
 }
 
 function planStatusSymbol(

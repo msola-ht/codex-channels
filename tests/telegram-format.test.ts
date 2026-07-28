@@ -264,7 +264,7 @@ describe("formatWorkspaces", () => {
 });
 
 describe("formatStartupNotification", () => {
-  it("reports connectivity and includes the configured workspaces", () => {
+  it("reports connectivity and the current Workspace", () => {
     const text = formatStartupNotification(
       [
         { id: "main", name: "Main", cwd: "/workspace/main" },
@@ -296,28 +296,26 @@ describe("formatStartupNotification", () => {
       },
     );
 
-    expect(text).toContain("Codex Connect 已联通");
-    expect(text).toContain("App Server 已连接");
+    expect(text).toContain("Codex Connect 已上线");
+    expect(text).toContain("App Server：已连接");
     expect(text).toContain("运行环境：");
-    expect(text).toContain("│ macOS · arm64");
-    expect(text).toContain("│ Codex Connect 0.145.0 · Node.js v24.18.0");
+    expect(text).toContain("系统：macOS · arm64");
+    expect(text).toContain("版本：Codex Connect 0.145.0 · Node.js v24.18.0");
     expect(text).toContain(
-      "│ UA · codex_connect_gateway/0.145.0 (Mac OS 15.7.7; arm64) (codex_connect_gateway; 0.145.0)",
+      "App Server UA：codex_connect_gateway/0.145.0 (Mac OS 15.7.7; arm64) (codex_connect_gateway; 0.145.0)",
     );
-    expect(text).toContain("│ Unix WebSocket");
+    expect(text).toContain("连接：Unix WebSocket");
     expect(text).toContain("当前会话：");
-    expect(text).toContain("│ Main · main");
-    expect(text).toContain("│ /workspace/main");
-    expect(text).toContain("│ Thread · 019f8951-eb3");
-    expect(text).toContain("│ Git 分支 · feature/weixin-surface");
-    expect(text).toContain("│ gpt-main · high");
-    expect(text).toContain("│ 周限 · 已使用 42%");
+    expect(text).toContain("Workspace：Main (main)");
+    expect(text).toContain("工作目录：/workspace/main");
+    expect(text).toContain("Thread：019f8951-eb3");
+    expect(text).toContain("Git 分支：feature/weixin-surface");
+    expect(text).toContain("模型：gpt-main");
+    expect(text).toContain("思考强度：high");
+    expect(text).toContain("周限：已使用 42%");
     expect(text).not.toContain("本地握手");
     expect(text).not.toContain("本地未发送请求头");
-    expect(text).toContain("Workspace（2）：");
-    expect(text).toContain("│ 1. Main · main ← 当前");
-    expect(text).toContain("│ 2. Docs · docs");
-    expect(text).toContain("│ /workspace/docs");
+    expect(text).not.toContain("/workspace/docs");
   });
 
   it("reports an unbound thread and keeps unknown platform names", () => {
@@ -342,11 +340,11 @@ describe("formatStartupNotification", () => {
       },
     );
 
-    expect(text).toContain("│ freebsd · x64");
-    expect(text).toContain("│ UA · App Server 未返回");
-    expect(text).toContain("│ Thread · 尚未绑定");
-    expect(text).toContain("│ Git 分支 · 未检测到");
-    expect(text).toContain("│ Fast 模式 · 未知");
+    expect(text).toContain("系统：freebsd · x64");
+    expect(text).toContain("App Server UA：App Server 未返回");
+    expect(text).toContain("Thread：尚未绑定");
+    expect(text).toContain("Git 分支：未检测到");
+    expect(text).toContain("Fast 模式：未知");
   });
 });
 
