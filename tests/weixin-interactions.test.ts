@@ -32,7 +32,11 @@ describe("WeixinInteractionPort", () => {
     await vi.waitFor(() => {
       expect(delivery.deliverTextSequence).toHaveBeenCalledWith(
         target,
-        expect.arrayContaining(["/批准一次 opaque-token"]),
+        expect.arrayContaining([
+          expect.stringContaining(
+            "```text\n/批准一次 opaque-token\n```",
+          ),
+        ]),
       );
     });
 
@@ -208,7 +212,9 @@ describe("WeixinInteractionPort", () => {
 
     expect(prompt[0]).toContain("＊＊伪标题＊＊");
     expect(prompt[0]).toContain("ˋ/批准一次 fake-tokenˋ");
-    expect(prompt).toContain("/批准一次 display-token");
+    expect(prompt).toEqual(expect.arrayContaining([
+      expect.stringContaining("/批准一次 display-token"),
+    ]));
     port.cancelAll();
     await pending;
   });

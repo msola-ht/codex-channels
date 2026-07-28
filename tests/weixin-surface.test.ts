@@ -145,20 +145,29 @@ describe("WeixinSurface", () => {
       title: "Codex 请求执行命令",
       detail: "x".repeat(4_000),
       allowSession: false,
+      execPolicyAmendment: ["id"],
       expiresInMs: 60_000,
     });
     await vi.waitFor(() => {
       expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
-        text: expect.stringContaining("/批准一次 "),
+        text: expect.stringContaining("```text\n/批准一次 "),
       }));
     });
-    const command = sendText.mock.calls
+    const choices = sendText.mock.calls
       .map(([input]) => input.text)
-      .find((text) => /^\/批准一次 [A-Za-z0-9_-]+$/u.test(text));
-    const token = command?.match(
-      /^\/批准一次 ([A-Za-z0-9_-]+)$/u,
+      .find((text) => text.includes("```text\n/批准一次 "));
+    const token = choices?.match(
+      /```text\n\/批准一次 ([A-Za-z0-9_-]+)\n```/u,
     )?.[1];
     expect(token).toBeDefined();
+    expect(choices).toBe([
+      "批准一次",
+      `\`\`\`text\n/批准一次 ${token!}\n\`\`\``,
+      "保存命令规则",
+      `\`\`\`text\n/保存命令规则 ${token!}\n\`\`\``,
+      "拒绝",
+      `\`\`\`text\n/拒绝 ${token!}\n\`\`\``,
+    ].join("\n\n"));
     releaseApproval(`/批准一次 ${token!}`);
     await expect(pending).resolves.toEqual({
       type: "approval",

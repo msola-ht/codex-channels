@@ -40,6 +40,7 @@ export type WeixinApprovalTextResult = "handled" | "not-command";
 
 const maximumConcurrentInteractions = 100;
 const maximumPromptCharacters = 16_000;
+const maximumPromptMessageCharacters = 4_000;
 const interactionTokenPattern = /^[A-Za-z0-9_-]{8,64}$/;
 
 export class WeixinInteractionPort implements InteractionPort {
@@ -366,15 +367,20 @@ function renderApprovalPrompt(
   token: string,
 ): readonly string[] {
   const choices = [
-    `/批准一次 ${token}`,
-    ...(request.allowSession ? [`/批准会话 ${token}`] : []),
+    { label: "批准一次", command: `/批准一次 ${token}` },
+    ...(request.allowSession
+      ? [{ label: "批准当前会话", command: `/批准会话 ${token}` }]
+      : []),
     ...(request.execPolicyAmendment
-      ? [`/保存命令规则 ${token}`]
+      ? [{ label: "保存命令规则", command: `/保存命令规则 ${token}` }]
       : []),
     ...(request.networkPolicyAmendments ?? []).map(
-      (_amendment, index) => `/保存网络规则 ${token} ${index + 1}`,
+      (_amendment, index) => ({
+        label: `保存网络规则 ${index + 1}`,
+        command: `/保存网络规则 ${token} ${index + 1}`,
+      }),
     ),
-    `/拒绝 ${token}`,
+    { label: "拒绝", command: `/拒绝 ${token}` },
   ];
   return [
     [
@@ -385,8 +391,35 @@ function renderApprovalPrompt(
       "请完整复制并发送以下一条命令。",
       "普通数字、“同意”或修改后的命令不会批准。",
     ].join("\n\n"),
-    ...choices,
+    ...packApprovalChoiceMessages(choices),
   ];
+}
+
+function packApprovalChoiceMessages(
+  choices: readonly { label: string; command: string }[],
+): string[] {
+  const messages: string[] = [];
+  let current = "";
+  for (const choice of choices) {
+    const block = [
+      choice.label,
+      `\`\`\`text\n${choice.command}\n\`\`\``,
+    ].join("\n\n");
+    const candidate = current.length === 0 ? block : `${current}\n\n${block}`;
+    if (
+      current.length > 0
+      && candidate.length > maximumPromptMessageCharacters
+    ) {
+      messages.push(current);
+      current = block;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current.length > 0) {
+    messages.push(current);
+  }
+  return messages;
 }
 
 function sameTarget(

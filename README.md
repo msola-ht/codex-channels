@@ -48,7 +48,8 @@
   轮询时间、连续失败次数和预计恢复时间。命令、文件修改和临时权限审批会发送带随机一次性 ID
   的精确 `/批准一次 <id>`、`/批准会话 <id>`、`/保存命令规则 <id>`、
   `/保存网络规则 <id> <序号>` 或 `/拒绝 <id>` 命令；回复数字、“同意”、错误或过期 ID 均不会
-  批准。审批绑定当前账号、私聊 Actor、Conversation、Thread、Turn 与 App Server 请求，
+  批准。微信把同一审批的选项优先合并到一个 Markdown 消息，每条命令保留独立复制入口；
+  审批绑定当前账号、私聊 Actor、Conversation、Thread、Turn 与 App Server 请求，
   用户输入和 MCP 表单在微信仍失败关闭。
 - 查看 Codex 流式回复、格式化最终回复、操作过程、计划、Diff、Goal、用量和额度；长文本自动折叠，超长代码以预览加完整文件发送；Telegram 与飞书的 `/status`、启动联通通知和每轮结束状态卡均显示当前授权 Workspace 的 Git 分支；`/status` 还显示 Thread 累计缓存命中率，每轮结束状态卡显示最近 Turn 缓存命中率、当前 Goal 状态及 Thread 上下文压缩总次数，飞书把 App Server 返回的准确对话耗时单独放在卡片底栏。
 - App Server 明确返回的 Turn、warning 和 MCP 错误会在统一脱敏并限长后显示到对应通讯渠道；未知内部异常、凭据和未经约束的响应正文仍不会直接发送。
