@@ -122,6 +122,7 @@ function createWeixinModule(
   const adapter = new WeixinSurface({
     accountId: config.accountId,
     client,
+    imageSendClient: client,
     typingClient: client,
     cursorStore: new FileWeixinUpdatesCursorStore(
       join(dirname(options.config.stateDatabasePath), "weixin-updates"),

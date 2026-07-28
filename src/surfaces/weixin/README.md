@@ -1,7 +1,7 @@
 # 微信 Surface
 
 当前实现单账号私聊文本与图片 Surface：独立安全凭据边界、运行时窄协议 Client、私有游标检查点、
-私聊输入 Adapter、完整命令 Adapter、加密重启上线通知、Turn 生命周期统计、纯文本 Outbox、
+私聊输入 Adapter、完整命令 Adapter、加密重启上线通知、Turn 生命周期统计、文本与生成图片 Outbox、
 失败关闭交互端口和目录内部完整 `SurfaceAdapter`；严格运行配置显式启用时由 Bootstrap 注册，
 未新增 SQLite Schema。
 
@@ -12,13 +12,17 @@
 - `updates-cursor-store.ts`：在 `data/weixin-updates` 下按账号 SHA-256 文件名保存严格版本 1
   `get_updates_buf`；目录 `0700`、文件 `0600`，临时文件原子替换，损坏、未知版本和符号链接
   失败关闭。
-- `protocol-client.ts`：实现固定 `v2.4.6` 的 `getupdates`、`sendmessage`、`getconfig` 和
-  `sendtyping` HTTP 合同，
+- `protocol-client.ts`：实现固定 `v2.4.6` 的 `getupdates`、`sendmessage`、`getuploadurl`、
+  `getconfig` 和 `sendtyping` HTTP 合同，并按官方 AES-128-ECB、CDN 二进制 `POST` 与
+  双层 key 编码发送生成图片；
   在 JSON 数字转换前保留原始 `message_id`，只输出文本、单张图片引用或带原因的忽略事件，
   混合/多图片内容失败关闭，并限制出站文本为已验证的 4000 个 UTF-16 码元。
 - `image-store.ts`：只接受固定官方微信 CDN，按 `image_item.aeskey` 或 `media.aes_key`
   执行 AES-128-ECB 解密；复用共享 10 MiB、PNG/JPEG 签名、`0700/0600` 私有暂存和过期清理，
   CDN 地址、查询参数、key 与响应正文不进入日志或用户消息。
+- `outbound-image.ts`：只读取 App Server `imageGeneration.savedPath` 映射出的绝对路径；
+  使用无符号链接文件句柄，限制为普通文件、10 MiB 和 PNG/JPEG 内容签名，不把路径或正文写入
+  日志。
 - `updates-monitor.ts`：组合协议 Client 与游标 Store，顺序处理单批消息、按原始消息 ID
   进程内去重，仅在整批处理成功后提交游标，并对网络、限流及服务端瞬时失败执行有限重试。
 - `input-adapter.ts`：拥有单账号监控器生命周期；按微信账号和私聊 Actor 构造目标，授权后记录
@@ -42,12 +46,13 @@
 - `typing-controller.ts`：只在内存按 Actor 缓存最多 24 小时的 `typing_ticket`；Turn 开始时
   启用原生输入状态并每 5 秒续期，最终回复、完成、停止、失败或 Surface 关闭时取消；协议失败
   只记录受限元数据，不阻断正常回复。
-- `outbox.ts`：只处理匹配账号的 Turn 原生输入状态、最终文本、操作终态、带耗时/模型/上下文/缓存/
+- `outbox.ts`：只处理匹配账号的 Turn 原生输入状态、最终文本、生成图片产物、操作终态、带耗时/模型/上下文/缓存/
   分支的完成或停止统计、失败通知、连接错误和警告；最终回复使用微信专用格式器，操作展示复用
   共享 `full`、`compact`、`hidden` 三档配置，不发送 `running` 帧；操作终态和生命周期通知
   作为关键输出，不因已有最终回复而省略；发送时重新检查 Actor
   授权，通过共享 Conversation 队列顺序发送，单条最多 4000 个 UTF-16 码元、最多五条并显示
-  截断提示，避免拆开代理对。
+  截断提示，避免拆开代理对。生成图片独立于操作展示档位，读取前后各复查授权；`imageView`
+  和用户上传图片不会自动外发。
 - `interactions.ts`：审批立即拒绝、用户输入返回空答案、MCP elicitation 立即取消，不用普通
   微信文本模拟高权限交互。
 - `surface.ts`：共享一个内存回复上下文组合 Input、Outbox、Typing 与 InteractionPort；启动时只为当前

@@ -95,8 +95,14 @@ export function toOperationUpdate(
         ...(path ? { detail: truncate(path, 220) } : {}),
       };
     }
-    case "imageGeneration":
-      return { ...common, kind: "imageGeneration" };
+    case "imageGeneration": {
+      const imagePath = stringValue(item.savedPath);
+      return {
+        ...common,
+        kind: "imageGeneration",
+        ...(imagePath ? { imagePath } : {}),
+      };
+    }
     case "sleep":
       return { ...common, kind: "sleep" };
     case "plan":

@@ -1,3 +1,8 @@
+import {
+  createDecipheriv,
+  createHash,
+} from "node:crypto";
+
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -30,11 +35,13 @@ describe("WeixinProtocolClient", () => {
       messages: [],
     }));
     const sendText = vi.fn(async () => {});
+    const sendImage = vi.fn(async () => {});
     const getTypingTicket = vi.fn(async () => "typing-ticket");
     const setTyping = vi.fn(async () => {});
     const createClient = vi.fn(() => ({
       getUpdates,
       sendText,
+      sendImage,
       getTypingTicket,
       setTyping,
     }));
@@ -49,6 +56,11 @@ describe("WeixinProtocolClient", () => {
       actorId,
       contextToken: "context",
       text: "reply",
+    });
+    await client.sendImage({
+      actorId,
+      contextToken: "context",
+      image: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
     });
     await client.getTypingTicket({
       actorId,
@@ -369,6 +381,257 @@ describe("WeixinProtocolClient", () => {
       text: "测".repeat(4_001),
     })).rejects.toMatchObject({ code: "invalid-input" });
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("uploads and sends one fixed v2.4.6 PNG image contract", async () => {
+    const image = Buffer.from([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      0x01,
+    ]);
+    const aesKey = Buffer.from(
+      "00112233445566778899aabbccddeeff",
+      "hex",
+    );
+    const fileKey = Buffer.from(
+      "ffeeddccbbaa99887766554433221100",
+      "hex",
+    );
+    const randomValues = [
+      aesKey,
+      fileKey,
+      Buffer.from([0, 0, 0, 1]),
+      Buffer.from([0xaa, 0xbb, 0xcc, 0xdd]),
+      Buffer.from([0, 0, 0, 2]),
+    ];
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ret: 0,
+        upload_full_url:
+          "https://novac2c.cdn.weixin.qq.com/c2c/upload?private=upload",
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, {
+        status: 200,
+        headers: { "x-encrypted-param": "private-download-param" },
+      }))
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    const client = createClient({
+      fetchImpl,
+      nowImpl: () => 1_700_000_000_000,
+      randomBytesImpl: (length) => {
+        const value = randomValues.shift();
+        expect(value).toHaveLength(length);
+        return value!;
+      },
+    });
+
+    await expect(client.sendImage({
+      actorId,
+      contextToken: "context-secret",
+      image,
+    })).resolves.toBeUndefined();
+
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    const [uploadUrl, uploadInit] = fetchImpl.mock.calls[0]!;
+    expect(uploadUrl).toBe(
+      "https://ilinkai.weixin.qq.com/ilink/bot/getuploadurl",
+    );
+    expect(JSON.parse(String(uploadInit?.body))).toEqual({
+      filekey: fileKey.toString("hex"),
+      media_type: 1,
+      to_user_id: actorId,
+      rawsize: image.length,
+      rawfilemd5: createHash("md5").update(image).digest("hex"),
+      filesize: 16,
+      no_need_thumb: true,
+      aeskey: aesKey.toString("hex"),
+      base_info: {
+        channel_version: "2.4.6",
+        bot_agent: "CodexConnect/0.145.0",
+      },
+    });
+
+    const [cdnUrl, cdnInit] = fetchImpl.mock.calls[1]!;
+    expect(String(cdnUrl)).toBe(
+      "https://novac2c.cdn.weixin.qq.com/c2c/upload?private=upload",
+    );
+    expect(cdnInit).toMatchObject({
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      redirect: "error",
+      signal: expect.any(AbortSignal),
+    });
+    const decipher = createDecipheriv("aes-128-ecb", aesKey, null);
+    expect(Buffer.concat([
+      decipher.update(Buffer.from(cdnInit?.body as Uint8Array)),
+      decipher.final(),
+    ])).toEqual(image);
+
+    const [sendUrl, sendInit] = fetchImpl.mock.calls[2]!;
+    expect(sendUrl).toBe(
+      "https://ilinkai.weixin.qq.com/ilink/bot/sendmessage",
+    );
+    expect(JSON.parse(String(sendInit?.body))).toEqual({
+      msg: {
+        from_user_id: "",
+        to_user_id: actorId,
+        client_id: "codex-connect:1700000000000-aabbccdd",
+        message_type: 2,
+        message_state: 2,
+        item_list: [{
+          type: 2,
+          image_item: {
+            media: {
+              encrypt_query_param: "private-download-param",
+              aes_key: Buffer.from(aesKey.toString("hex"))
+                .toString("base64"),
+              encrypt_type: 1,
+            },
+            mid_size: 16,
+          },
+        }],
+        context_token: "context-secret",
+      },
+      base_info: {
+        channel_version: "2.4.6",
+        bot_agent: "CodexConnect/0.145.0",
+      },
+    });
+  });
+
+  it("rejects invalid image bytes and non-official upload URLs", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const client = createClient({ fetchImpl });
+    await expect(client.sendImage({
+      actorId,
+      contextToken: "context-secret",
+      image: Buffer.from("not-an-image"),
+    })).rejects.toMatchObject({ code: "invalid-input" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+
+    const foreignFetch = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ret: 0,
+        upload_full_url: "https://example.com/c2c/upload?private=upload",
+      }), { status: 200 }));
+    await expect(createClient({
+      fetchImpl: foreignFetch,
+      randomBytesImpl: (length) => Buffer.alloc(length, 1),
+    }).sendImage({
+      actorId,
+      contextToken: "context-secret",
+      image: Buffer.from([
+        0x89,
+        0x50,
+        0x4e,
+        0x47,
+        0x0d,
+        0x0a,
+        0x1a,
+        0x0a,
+      ]),
+    })).rejects.toMatchObject({ code: "invalid-response" });
+    expect(foreignFetch).toHaveBeenCalledOnce();
+  });
+
+  it("falls back from an empty full URL to the fixed CDN upload parameters", async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ret: 0,
+        upload_full_url: "",
+        upload_param: "private upload/+",
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, {
+        status: 200,
+        headers: { "x-encrypted-param": "private-download-param" },
+      }))
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    await createClient({
+      fetchImpl,
+      randomBytesImpl: (length) => Buffer.alloc(length, 1),
+    }).sendImage({
+      actorId,
+      contextToken: "context-secret",
+      image: Buffer.from([
+        0x89,
+        0x50,
+        0x4e,
+        0x47,
+        0x0d,
+        0x0a,
+        0x1a,
+        0x0a,
+      ]),
+    });
+
+    const cdnUrl = new URL(String(fetchImpl.mock.calls[1]![0]));
+    expect(cdnUrl.origin).toBe("https://novac2c.cdn.weixin.qq.com");
+    expect(cdnUrl.pathname).toBe("/c2c/upload");
+    expect(cdnUrl.searchParams.get("encrypted_query_param")).toBe(
+      "private upload/+",
+    );
+    expect(cdnUrl.searchParams.get("filekey")).toBe(
+      "01010101010101010101010101010101",
+    );
+  });
+
+  it("retries missing CDN download parameters but stops on 4xx", async () => {
+    const image = Buffer.from([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+    ]);
+    const uploadAddress = new Response(JSON.stringify({
+      ret: 0,
+      upload_full_url:
+        "https://novac2c.cdn.weixin.qq.com/c2c/upload?private=upload",
+    }), { status: 200 });
+    const retryFetch = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(uploadAddress)
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 500 }))
+      .mockResolvedValueOnce(new Response(null, {
+        status: 200,
+        headers: { "x-encrypted-param": "private-download-param" },
+      }))
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    await expect(createClient({
+      fetchImpl: retryFetch,
+      randomBytesImpl: (length) => Buffer.alloc(length, 1),
+    }).sendImage({
+      actorId,
+      contextToken: "context-secret",
+      image,
+    })).resolves.toBeUndefined();
+    expect(retryFetch).toHaveBeenCalledTimes(5);
+
+    const clientErrorFetch = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ret: 0,
+        upload_full_url:
+          "https://novac2c.cdn.weixin.qq.com/c2c/upload?private=upload",
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 403 }));
+    await expect(createClient({
+      fetchImpl: clientErrorFetch,
+      randomBytesImpl: (length) => Buffer.alloc(length, 1),
+    }).sendImage({
+      actorId,
+      contextToken: "context-secret",
+      image,
+    })).rejects.toMatchObject({ code: "http-error", status: 403 });
+    expect(clientErrorFetch).toHaveBeenCalledTimes(2);
   });
 
   it("gets a private typing ticket and sends typing lifecycle states", async () => {

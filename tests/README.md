@@ -110,7 +110,11 @@
 - 微信图片合同探针的已授权完成态图片筛选、固定官方 CDN 地址、`image_item.aeskey` 与
   `media.aes_key` 两种 AES-128-ECB key 形态、内存解密、10 MiB 上限、PNG/JPEG 签名校验，
   以及图片、地址、查询参数、key、Token、游标和完整身份不进入输出。
-- 微信运行时前置协议 Client 的固定 `getupdates/sendmessage/getconfig/sendtyping` 请求、
+- 微信反向图片合同探针的已授权完成态文本上下文筛选、固定 `getuploadurl` 请求、
+  PNG MD5/大小与 AES-128-ECB PKCS7 密文大小、官方 CDN 完整地址及参数回退、二进制 `POST`、
+  `x-encrypted-param` 有限重试和 4xx 立即失败、单张图片 `sendmessage` 字段，以及图片、
+  上传地址、参数、key、Token、游标和完整身份不进入输出。
+- 微信运行时前置协议 Client 的固定 `getupdates/sendmessage/getuploadurl/getconfig/sendtyping` 请求、
   原始 `message_id` 精度、输入状态票据严格裁剪与状态值映射、
   文本、单张图片引用与忽略事件裁剪、混合/多图片失败关闭、账号方向、4000 码元出站边界、
   响应体上限、API/HTTP 错误脱敏、超时和
@@ -124,6 +128,8 @@
   失败关闭、授权绑定恢复、重启上线通知失败隔离、账号隔离、Turn 原生输入状态的开始、5 秒续期、
   内存票据复用、取消与失败隔离、最终文本与
   单行代码块压缩及多行代码块保留、完成/停止/失败统计、操作终态的完整/紧凑/隐藏模式、
+  官方 `imageGeneration.savedPath` 到生成图片输出的映射、无符号链接普通文件读取、
+  10 MiB/PNG/JPEG 边界、读取前后撤权复查、官方 CDN 上传与双层 AES key 编码、
   详情脱敏与 Markdown 中和、4000 码元
   代理对安全分片、五片截断、同会话顺序、跨会话并行、发送前
   及分片中途撤权复查、缺少上下文、过载拒绝、关闭清理和日志脱敏，以及三类交互请求立即安全

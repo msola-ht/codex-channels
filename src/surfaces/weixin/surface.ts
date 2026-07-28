@@ -25,6 +25,7 @@ import {
   type WeixinOutboxOptions,
 } from "./outbox.js";
 import type {
+  WeixinImageSendProtocolClient,
   WeixinProtocolClient,
   WeixinTypingProtocolClient,
 } from "./protocol-client.js";
@@ -37,6 +38,7 @@ import { WeixinTypingController } from "./typing-controller.js";
 export interface WeixinSurfaceOptions {
   accountId: string;
   client: WeixinProtocolClient;
+  imageSendClient?: WeixinImageSendProtocolClient;
   typingClient?: WeixinTypingProtocolClient;
   cursorStore: WeixinUpdatesCursorStore;
   service: ConversationService;
@@ -106,6 +108,9 @@ export class WeixinSurface implements SurfaceAdapter {
       options.logger,
       {
         ...options.outbox,
+        ...(options.imageSendClient === undefined
+          ? {}
+          : { imageClient: options.imageSendClient }),
         ...(typing === undefined ? {} : { typing }),
         ...(options.operationUpdateDisplay === undefined
           ? {}

@@ -1,4 +1,8 @@
-import { randomBytes } from "node:crypto";
+import {
+  createCipheriv,
+  createHash,
+  randomBytes,
+} from "node:crypto";
 
 import {
   validateWeixinAccountId,
@@ -87,6 +91,17 @@ export interface WeixinProtocolClient {
   ): Promise<void>;
 }
 
+export interface WeixinImageSendProtocolClient {
+  sendImage(
+    input: {
+      actorId: string;
+      contextToken: string;
+      image: Buffer;
+    },
+    signal?: AbortSignal,
+  ): Promise<void>;
+}
+
 export type WeixinTypingStatus = "cancel" | "typing";
 
 export interface WeixinTypingProtocolClient {
@@ -109,6 +124,7 @@ export interface WeixinTypingProtocolClient {
 
 export type WeixinRuntimeProtocolClient =
   & WeixinProtocolClient
+  & WeixinImageSendProtocolClient
   & WeixinTypingProtocolClient;
 
 export interface CreateWeixinProtocolClientOptions {
@@ -118,6 +134,7 @@ export interface CreateWeixinProtocolClientOptions {
   fetchImpl?: typeof fetch;
   getUpdatesTimeoutMs?: number;
   sendTimeoutMs?: number;
+  imageUploadTimeoutMs?: number;
   typingTimeoutMs?: number;
   randomBytesImpl?: typeof randomBytes;
   nowImpl?: () => number;
@@ -128,6 +145,11 @@ const maximumCursorLength = 65_536;
 const maximumGetUpdatesResponseBytes = 1_048_576;
 const maximumSendResponseBytes = 65_536;
 const maximumTextLength = 4_000;
+const maximumImageBytes = 10 * 1024 * 1024;
+const maximumImageParameterLength = 65_536;
+const maximumImageUploadAttempts = 3;
+const weixinCdnOrigin = "https://novac2c.cdn.weixin.qq.com";
+const weixinCdnUploadPath = "/c2c/upload";
 
 export function createWeixinProtocolClient(
   options: CreateWeixinProtocolClientOptions,
@@ -147,6 +169,10 @@ export function createWeixinProtocolClient(
   const sendTimeoutMs = positiveTimeout(
     options.sendTimeoutMs ?? 15_000,
     "微信发送超时时间无效",
+  );
+  const imageUploadTimeoutMs = positiveTimeout(
+    options.imageUploadTimeoutMs ?? 30_000,
+    "微信图片上传超时时间无效",
   );
   const typingTimeoutMs = positiveTimeout(
     options.typingTimeoutMs ?? 10_000,
@@ -217,6 +243,92 @@ export function createWeixinProtocolClient(
         maximumResponseBytes: maximumSendResponseBytes,
         ...(signal === undefined ? {} : { signal }),
         operation: "微信发送",
+      });
+      parseSendResponse(raw);
+    },
+
+    async sendImage(input, signal) {
+      const actorId = validateActorInput(input.actorId);
+      const contextToken = requiredInputString(
+        input.contextToken,
+        "微信图片回复上下文无效",
+        maximumImageParameterLength,
+      );
+      const image = validateOutboundImage(input.image);
+      const aesKey = exactRandomBytes(
+        randomBytesImpl,
+        16,
+        "微信图片 AES key 生成失败",
+      );
+      const fileKey = exactRandomBytes(
+        randomBytesImpl,
+        16,
+        "微信图片文件标识生成失败",
+      ).toString("hex");
+      const ciphertext = encryptImage(image, aesKey);
+      const uploadResponse = parseImageUploadResponse(await request({
+        fetchImpl,
+        randomBytesImpl,
+        baseUrl,
+        botToken,
+        endpoint: "getuploadurl",
+        body: {
+          filekey: fileKey,
+          media_type: 1,
+          to_user_id: actorId,
+          rawsize: image.length,
+          rawfilemd5: createHash("md5").update(image).digest("hex"),
+          filesize: ciphertext.length,
+          no_need_thumb: true,
+          aeskey: aesKey.toString("hex"),
+          base_info: baseInfo(),
+        },
+        timeoutMs: sendTimeoutMs,
+        maximumResponseBytes: maximumSendResponseBytes,
+        ...(signal === undefined ? {} : { signal }),
+        operation: "微信图片上传地址",
+      }));
+      const uploadUrl = resolveImageUploadUrl(uploadResponse, fileKey);
+      const downloadParameter = await uploadImageCiphertext({
+        fetchImpl,
+        url: uploadUrl,
+        ciphertext,
+        timeoutMs: imageUploadTimeoutMs,
+        ...(signal === undefined ? {} : { signal }),
+      });
+      const raw = await request({
+        fetchImpl,
+        randomBytesImpl,
+        baseUrl,
+        botToken,
+        endpoint: "sendmessage",
+        body: {
+          msg: {
+            from_user_id: "",
+            to_user_id: actorId,
+            client_id: createClientId(randomBytesImpl, nowImpl),
+            message_type: 2,
+            message_state: 2,
+            item_list: [{
+              type: 2,
+              image_item: {
+                media: {
+                  encrypt_query_param: downloadParameter,
+                  aes_key: Buffer.from(aesKey.toString("hex"))
+                    .toString("base64"),
+                  encrypt_type: 1,
+                },
+                mid_size: ciphertext.length,
+              },
+            }],
+            context_token: contextToken,
+          },
+          base_info: baseInfo(),
+        },
+        timeoutMs: sendTimeoutMs,
+        maximumResponseBytes: maximumSendResponseBytes,
+        ...(signal === undefined ? {} : { signal }),
+        operation: "微信图片发送",
       });
       parseSendResponse(raw);
     },
@@ -468,6 +580,283 @@ function parseImageReference(value: unknown): WeixinImageReference {
   };
 }
 
+interface WeixinImageUploadResponse {
+  uploadFullUrl?: string;
+  uploadParameter?: string;
+}
+
+function validateOutboundImage(value: unknown): Buffer {
+  if (
+    !Buffer.isBuffer(value)
+    || value.length === 0
+    || value.length > maximumImageBytes
+  ) {
+    throw new WeixinProtocolError(
+      "invalid-input",
+      value instanceof Uint8Array && value.length > maximumImageBytes
+        ? "微信图片超过 10 MiB 限制"
+        : "微信图片正文无效",
+    );
+  }
+  if (!isPng(value) && !isJpeg(value)) {
+    throw new WeixinProtocolError(
+      "invalid-input",
+      "微信图片不是受支持的 PNG 或 JPEG",
+    );
+  }
+  return value;
+}
+
+function isPng(value: Buffer): boolean {
+  const signature = Buffer.from([
+    0x89,
+    0x50,
+    0x4e,
+    0x47,
+    0x0d,
+    0x0a,
+    0x1a,
+    0x0a,
+  ]);
+  return value.length >= signature.length
+    && value.subarray(0, signature.length).equals(signature);
+}
+
+function isJpeg(value: Buffer): boolean {
+  return value.length >= 3
+    && value[0] === 0xff
+    && value[1] === 0xd8
+    && value[2] === 0xff;
+}
+
+function exactRandomBytes(
+  randomBytesImpl: typeof randomBytes,
+  length: number,
+  message: string,
+): Buffer {
+  const value = randomBytesImpl(length);
+  if (!Buffer.isBuffer(value) || value.length !== length) {
+    throw new WeixinProtocolError("invalid-input", message);
+  }
+  return value;
+}
+
+function encryptImage(value: Buffer, aesKey: Buffer): Buffer {
+  const cipher = createCipheriv("aes-128-ecb", aesKey, null);
+  return Buffer.concat([cipher.update(value), cipher.final()]);
+}
+
+function parseImageUploadResponse(raw: string): WeixinImageUploadResponse {
+  const value = parseJsonRecord(raw, "微信图片上传地址响应");
+  throwForApiError(value, "微信图片上传地址");
+  const uploadFullUrl = optionalImageUploadString(
+    value.upload_full_url,
+    "微信图片完整上传地址无效",
+    131_072,
+  )?.trim();
+  const uploadParameter = optionalImageUploadString(
+    value.upload_param,
+    "微信图片上传参数无效",
+    maximumImageParameterLength,
+  );
+  if (!uploadFullUrl && uploadParameter === undefined) {
+    throw new WeixinProtocolError(
+      "invalid-response",
+      "微信图片上传地址响应缺少上传参数",
+    );
+  }
+  return {
+    ...(uploadFullUrl ? { uploadFullUrl } : {}),
+    ...(uploadParameter === undefined ? {} : { uploadParameter }),
+  };
+}
+
+function resolveImageUploadUrl(
+  response: WeixinImageUploadResponse,
+  fileKey: string,
+): URL {
+  if (response.uploadFullUrl) {
+    return validateImageUploadUrl(
+      parseImageUploadUrl(response.uploadFullUrl),
+    );
+  }
+  if (response.uploadParameter === undefined) {
+    throw new WeixinProtocolError(
+      "invalid-response",
+      "微信图片上传地址响应缺少上传参数",
+    );
+  }
+  const url = new URL(weixinCdnUploadPath, weixinCdnOrigin);
+  url.searchParams.set(
+    "encrypted_query_param",
+    response.uploadParameter,
+  );
+  url.searchParams.set("filekey", fileKey);
+  return validateImageUploadUrl(url);
+}
+
+function optionalImageUploadString(
+  value: unknown,
+  message: string,
+  maximumLength: number,
+): string | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (typeof value !== "string" || value.length > maximumLength) {
+    throw new WeixinProtocolError("invalid-response", message);
+  }
+  return value;
+}
+
+function parseImageUploadUrl(value: string): URL {
+  try {
+    return new URL(value);
+  } catch {
+    throw new WeixinProtocolError(
+      "invalid-response",
+      "微信图片上传地址无效",
+    );
+  }
+}
+
+function validateImageUploadUrl(url: URL): URL {
+  if (
+    url.protocol !== "https:"
+    || url.username
+    || url.password
+    || url.origin !== weixinCdnOrigin
+    || url.pathname !== weixinCdnUploadPath
+    || url.hash
+  ) {
+    throw new WeixinProtocolError(
+      "invalid-response",
+      "微信图片上传地址不属于固定官方 CDN",
+    );
+  }
+  return url;
+}
+
+async function uploadImageCiphertext(options: {
+  fetchImpl: typeof fetch;
+  url: URL;
+  ciphertext: Buffer;
+  timeoutMs: number;
+  signal?: AbortSignal;
+}): Promise<string> {
+  let lastError: WeixinProtocolError | undefined;
+  for (
+    let attempt = 0;
+    attempt < maximumImageUploadAttempts;
+    attempt += 1
+  ) {
+    try {
+      const response = await requestImageUpload(options);
+      if (response.status >= 400 && response.status < 500) {
+        throw new WeixinProtocolError(
+          "http-error",
+          `微信图片 CDN 上传失败（HTTP ${response.status}）`,
+          response.status,
+        );
+      }
+      if (response.status !== 200) {
+        lastError = new WeixinProtocolError(
+          "http-error",
+          `微信图片 CDN 上传失败（HTTP ${response.status}）`,
+          response.status,
+        );
+        continue;
+      }
+      const downloadParameter = response.headers.get("x-encrypted-param");
+      if (
+        typeof downloadParameter !== "string"
+        || downloadParameter.length === 0
+        || downloadParameter.length > maximumImageParameterLength
+      ) {
+        lastError = new WeixinProtocolError(
+          "invalid-response",
+          "微信图片 CDN 上传响应缺少下载参数",
+        );
+        continue;
+      }
+      return downloadParameter;
+    } catch (error) {
+      if (
+        error instanceof WeixinProtocolError
+        && (
+          error.code === "aborted"
+          || (error.code === "http-error" && error.status !== undefined
+            && error.status >= 400 && error.status < 500)
+        )
+      ) {
+        throw error;
+      }
+      lastError = error instanceof WeixinProtocolError
+        ? error
+        : new WeixinProtocolError(
+            "network-error",
+            "微信图片 CDN 上传网络请求失败",
+          );
+    }
+  }
+  throw lastError ?? new WeixinProtocolError(
+    "network-error",
+    "微信图片 CDN 上传网络请求失败",
+  );
+}
+
+async function requestImageUpload(options: {
+  fetchImpl: typeof fetch;
+  url: URL;
+  ciphertext: Buffer;
+  timeoutMs: number;
+  signal?: AbortSignal;
+}): Promise<Response> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const abort = () => controller.abort();
+  if (options.signal?.aborted) {
+    throw new WeixinProtocolError("aborted", "微信图片 CDN 上传已取消");
+  }
+  options.signal?.addEventListener("abort", abort, { once: true });
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, options.timeoutMs);
+  timeout.unref?.();
+  try {
+    return await options.fetchImpl(options.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: new Uint8Array(options.ciphertext),
+      redirect: "error",
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new WeixinProtocolError(
+        options.signal?.aborted
+          ? "aborted"
+          : timedOut
+            ? "timeout"
+            : "network-error",
+        options.signal?.aborted
+          ? "微信图片 CDN 上传已取消"
+          : timedOut
+            ? "微信图片 CDN 上传超时"
+            : "微信图片 CDN 上传网络请求失败",
+      );
+    }
+    throw new WeixinProtocolError(
+      "network-error",
+      "微信图片 CDN 上传网络请求失败",
+    );
+  } finally {
+    clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", abort);
+  }
+}
+
 function parseSendResponse(raw: string): void {
   const value = parseJsonRecord(raw, "微信发送响应");
   throwForApiError(value, "微信发送");
@@ -488,7 +877,12 @@ async function request(options: {
   randomBytesImpl: typeof randomBytes;
   baseUrl: string;
   botToken: string;
-  endpoint: "getconfig" | "getupdates" | "sendmessage" | "sendtyping";
+  endpoint:
+    | "getconfig"
+    | "getupdates"
+    | "getuploadurl"
+    | "sendmessage"
+    | "sendtyping";
   body: unknown;
   timeoutMs: number;
   maximumResponseBytes: number;

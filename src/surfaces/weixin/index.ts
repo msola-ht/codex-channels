@@ -22,6 +22,7 @@ export {
   type CreateWeixinProtocolClientOptions,
   type WeixinIgnoredMessageReason,
   type WeixinImageReference,
+  type WeixinImageSendProtocolClient,
   type WeixinInboundMessage,
   type WeixinProtocolClient,
   type WeixinProtocolErrorCode,
@@ -36,6 +37,12 @@ export {
   WeixinImageStore,
   type WeixinImagePort,
 } from "./image-store.js";
+export {
+  maximumWeixinOutboundImageBytes,
+  readWeixinOutboundImage,
+  WeixinOutboundImageError,
+  type WeixinOutboundImageErrorCode,
+} from "./outbound-image.js";
 export {
   createWeixinUpdatesMonitor,
   type CreateWeixinUpdatesMonitorOptions,

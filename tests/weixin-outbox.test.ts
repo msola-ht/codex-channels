@@ -9,6 +9,7 @@ import {
   WeixinOutbox,
   WeixinProtocolError,
   WeixinReplyContextStore,
+  type WeixinImageSendProtocolClient,
   type WeixinOutboxOptions,
   type WeixinProtocolClient,
 } from "../src/surfaces/weixin/index.js";
@@ -172,6 +173,85 @@ describe("WeixinOutbox", () => {
       + "耗时：125毫秒",
       "本次运行 · 已完成",
     ]);
+  });
+
+  it("sends a completed generated-image artifact before its operation summary", async () => {
+    const events: string[] = [];
+    const fixture = outboxFixture(
+      { value: true },
+      {
+        readImage: vi.fn(async (path) => {
+          events.push(`read:${path}`);
+          return Buffer.from("validated-image");
+        }),
+      },
+      async ({ text }) => {
+        events.push(`text:${text}`);
+      },
+      async ({ image }) => {
+        events.push(`image:${image.toString()}`);
+      },
+    );
+
+    fixture.outbox.handle(imageGenerationCompleted(
+      "/private/generated/image.png",
+    ));
+    await fixture.outbox.close();
+
+    expect(fixture.sendImage).toHaveBeenCalledWith({
+      actorId,
+      contextToken: "context-secret",
+      image: Buffer.from("validated-image"),
+    });
+    expect(events).toEqual([
+      "read:/private/generated/image.png",
+      "image:validated-image",
+      "text:生成图片 · 已完成",
+    ]);
+  });
+
+  it("sends generated images even when operation summaries are hidden", async () => {
+    const fixture = outboxFixture(
+      { value: true },
+      { operationUpdateDisplay: "hidden" },
+    );
+
+    fixture.outbox.handle(imageGenerationCompleted(
+      "/private/generated/image.png",
+    ));
+    fixture.outbox.handle({
+      ...imageGenerationCompleted("/private/uploads/inbound.png"),
+      operation: {
+        ...imageGenerationCompleted("/private/uploads/inbound.png").operation,
+        kind: "imageView",
+      },
+    });
+    await fixture.outbox.close();
+
+    expect(fixture.sendImage).toHaveBeenCalledOnce();
+    expect(fixture.sendText).not.toHaveBeenCalled();
+  });
+
+  it("rechecks authorization after reading a generated image", async () => {
+    const allowed = { value: true };
+    const fixture = outboxFixture(
+      allowed,
+      {
+        readImage: vi.fn(async () => {
+          allowed.value = false;
+          return Buffer.from("validated-image");
+        }),
+      },
+    );
+
+    fixture.outbox.handle(imageGenerationCompleted(
+      "/private/generated/image.png",
+    ));
+    await fixture.outbox.close();
+
+    expect(fixture.sendImage).not.toHaveBeenCalled();
+    expect(fixture.contexts.get(target)).toBeUndefined();
+    expect(fixture.onReplyContextInvalidated).toHaveBeenCalledWith(target);
   });
 
   it("hides operation updates without suppressing Turn completion", async () => {
@@ -422,14 +502,19 @@ function outboxFixture(
   allowed: { value: boolean } = { value: true },
   options: WeixinOutboxOptions = {},
   sendTextImpl: WeixinProtocolClient["sendText"] = async () => {},
+  sendImageImpl: WeixinImageSendProtocolClient["sendImage"] = async () => {},
 ) {
   const contexts = new WeixinReplyContextStore(accountId);
   contexts.remember(target, actorId, "context-secret");
   const sendText = vi.fn<WeixinProtocolClient["sendText"]>(sendTextImpl);
+  const sendImage = vi.fn<WeixinImageSendProtocolClient["sendImage"]>(
+    sendImageImpl,
+  );
   const onReplyContextInvalidated = vi.fn(async () => {});
   return {
     contexts,
     sendText,
+    sendImage,
     onReplyContextInvalidated,
     outbox: new WeixinOutbox(
       accountId,
@@ -438,10 +523,29 @@ function outboxFixture(
       accessFixture(() => allowed.value),
       pino({ level: "silent" }),
       {
+        imageClient: { sendImage },
+        readImage: async () => Buffer.from("validated-image"),
         ...options,
         onReplyContextInvalidated,
       },
     ),
+  };
+}
+
+function imageGenerationCompleted(
+  imagePath: string,
+): Extract<OutputEvent, { type: "operation.updated" }> {
+  return {
+    type: "operation.updated",
+    target,
+    threadId: "thread",
+    turnId: "turn",
+    operation: {
+      itemId: "generated-image",
+      kind: "imageGeneration",
+      status: "completed",
+      imagePath,
+    },
   };
 }
 

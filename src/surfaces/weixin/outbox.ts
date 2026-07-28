@@ -15,8 +15,13 @@ import type {
 import { validateWeixinAccountId } from "./credential-store.js";
 import {
   WeixinProtocolError,
+  type WeixinImageSendProtocolClient,
   type WeixinProtocolClient,
 } from "./protocol-client.js";
+import {
+  readWeixinOutboundImage,
+  WeixinOutboundImageError,
+} from "./outbound-image.js";
 import { WeixinReplyContextStore } from "./reply-context-store.js";
 import {
   formatWeixinCommandText,
@@ -31,6 +36,7 @@ const maximumChunks = 5;
 const truncationNotice = "\n\n[内容过长，已截断]";
 
 export type WeixinOutboxErrorCode =
+  | "image-sender-unavailable"
   | "missing-reply-context"
   | "unauthorized-recipient";
 
@@ -46,6 +52,8 @@ export interface WeixinOutboxOptions {
   closeTimeoutMs?: number;
   operationUpdateDisplay?: OperationUpdateDisplay;
   onReplyContextInvalidated?: (target: ConversationTarget) => Promise<void>;
+  imageClient?: Pick<WeixinImageSendProtocolClient, "sendImage">;
+  readImage?: typeof readWeixinOutboundImage;
   typing?: Pick<WeixinTypingController, "close" | "start" | "stop">;
 }
 
@@ -88,6 +96,18 @@ export class WeixinOutbox implements SurfaceOutputPort {
       return;
     }
     if (event.type === "operation.updated") {
+      const imagePath = event.operation.imagePath;
+      if (
+        event.operation.kind === "imageGeneration"
+        && event.operation.status === "completed"
+        && imagePath !== undefined
+      ) {
+        this.delivery.enqueue(
+          event.target.conversationId,
+          () => this.sendImage(event.target, imagePath),
+          true,
+        );
+      }
       if (
         this.options.operationUpdateDisplay === "hidden"
         || event.operation.status === "running"
@@ -198,8 +218,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
         target,
         actorId: context.actorId,
       })) {
-        this.contexts.remove(target);
-        await this.options.onReplyContextInvalidated?.(target);
+        await this.invalidateContext(target);
         throw new WeixinOutboxError("unauthorized-recipient");
       }
       await this.client.sendText({
@@ -208,6 +227,49 @@ export class WeixinOutbox implements SurfaceOutputPort {
         text: chunk,
       });
     }
+  }
+
+  private async sendImage(
+    target: ConversationTarget,
+    path: string,
+  ): Promise<void> {
+    const context = this.contexts.get(target);
+    if (context === undefined) {
+      throw new WeixinOutboxError("missing-reply-context");
+    }
+    if (!this.access.isAllowed({
+      target,
+      actorId: context.actorId,
+    })) {
+      await this.invalidateContext(target);
+      throw new WeixinOutboxError("unauthorized-recipient");
+    }
+    const client = this.options.imageClient;
+    if (client === undefined) {
+      throw new WeixinOutboxError("image-sender-unavailable");
+    }
+    const image = await (this.options.readImage ?? readWeixinOutboundImage)(
+      path,
+    );
+    if (!this.access.isAllowed({
+      target,
+      actorId: context.actorId,
+    })) {
+      await this.invalidateContext(target);
+      throw new WeixinOutboxError("unauthorized-recipient");
+    }
+    await client.sendImage({
+      actorId: context.actorId,
+      contextToken: context.contextToken,
+      image,
+    });
+  }
+
+  private async invalidateContext(
+    target: ConversationTarget,
+  ): Promise<void> {
+    this.contexts.remove(target);
+    await this.options.onReplyContextInvalidated?.(target);
   }
 
   private matches(target: ConversationTarget): boolean {
@@ -274,6 +336,9 @@ function weixinOutputErrorMetadata(
         ? {}
         : { returnCode: error.returnCode }),
     };
+  }
+  if (error instanceof WeixinOutboundImageError) {
+    return { errorType: error.name, errorCode: error.code };
   }
   return {
     errorType: error instanceof Error ? error.name : typeof error,

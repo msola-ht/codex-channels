@@ -35,6 +35,9 @@ export function createCredentialBackedWeixinClient(
     async sendText(input, signal) {
       return (await client()).sendText(input, signal);
     },
+    async sendImage(input, signal) {
+      return (await client()).sendImage(input, signal);
+    },
     async getTypingTicket(input, signal) {
       return (await client()).getTypingTicket(input, signal);
     },

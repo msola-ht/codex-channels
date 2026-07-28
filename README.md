@@ -24,7 +24,9 @@
   `weixin.enabled` 显式改为 `true` 并重载服务后开始接收和回复文本。微信支持
   `/start`、`/help`、`/whoami`，以及统一会话命令服务的全部命令；未知斜杠命令会明确拒绝，
   不会作为普通消息提交给 Codex。单张 PNG/JPEG 图片会从固定官方 CDN 下载、按官方 key 解密，
-  通过统一图片输入提交；混合内容、多图片、其他媒体和超过 10 MiB 的图片不支持。每个 Turn
+  通过统一图片输入提交；Codex 原生 `imageGeneration` 成功保存的 PNG/JPEG 会按同一会话顺序
+  加密上传并作为微信图片气泡发送，普通 `imageView` 不会自动外发。混合内容、多图片、其他媒体
+  和超过 10 MiB 的图片不支持。每个 Turn
   开始时显示微信原生输入状态并每 5 秒续期，最终回复、
   完成、停止或失败时取消；输入状态失败不阻断正常回复。最终回复后仍发送完成、停止
   或失败统计；已授权且已有绑定的私聊在至少接收过一条消息后，会使用独立加密保存的最近回复
@@ -141,7 +143,8 @@ Setup 默认保存 `enabled = false`，避免扫码完成后在操作者确认�
 `credentials/weixin-reply-context` 安全后端加密保存每个
 已绑定私聊的最近回复上下文，用于重启上线通知和重启后恢复关键输出。回复上下文不进入 TOML、
 SQLite 或日志；撤权目标不会收到通知。`codexc doctor` 会只读检查连接凭据是否存在且载荷有效，
-不显示 Token。微信暂不支持混合/多图片消息、其他媒体、群聊、一般主动推送或审批。
+不显示 Token。微信暂不支持混合/多图片消息、其他媒体、群聊、一般主动推送或审批；当前图片
+输出只处理活动 Turn 中 App Server 明确返回的 `imageGeneration.savedPath`。
 
 最终回复默认把常用 Markdown 安全转换为兼容性更好的 Telegram HTML。支持 Rich Messages
 的客户端可设置 `telegram.message_format = "rich"`；修改后执行 `codexc service reload`，

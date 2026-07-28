@@ -146,6 +146,7 @@ export interface OperationUpdate {
   kind: OperationKind;
   action?: string;
   detail?: string;
+  imagePath?: string;
   status: OperationStatus;
   durationMs?: number;
   exitCode?: number;
