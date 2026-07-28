@@ -30,7 +30,14 @@ describe("WeixinProtocolClient", () => {
       messages: [],
     }));
     const sendText = vi.fn(async () => {});
-    const createClient = vi.fn(() => ({ getUpdates, sendText }));
+    const getTypingTicket = vi.fn(async () => "typing-ticket");
+    const setTyping = vi.fn(async () => {});
+    const createClient = vi.fn(() => ({
+      getUpdates,
+      sendText,
+      getTypingTicket,
+      setTyping,
+    }));
     const client = createCredentialBackedWeixinClient({
       accountId,
       credentialStore: store,
@@ -42,6 +49,15 @@ describe("WeixinProtocolClient", () => {
       actorId,
       contextToken: "context",
       text: "reply",
+    });
+    await client.getTypingTicket({
+      actorId,
+      contextToken: "context",
+    });
+    await client.setTyping({
+      actorId,
+      typingTicket: "typing-ticket",
+      status: "typing",
     });
 
     expect(store.get).toHaveBeenCalledOnce();
@@ -269,6 +285,83 @@ describe("WeixinProtocolClient", () => {
       actorId,
       contextToken: "context-secret",
       text: "测".repeat(4_001),
+    })).rejects.toMatchObject({ code: "invalid-input" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("gets a private typing ticket and sends typing lifecycle states", async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ret: 0,
+        typing_ticket: "private-ticket",
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ret: 0,
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    const client = createClient({
+      fetchImpl,
+      randomBytesImpl: () => Buffer.from([0, 0, 0, 1]),
+    });
+
+    await expect(client.getTypingTicket({
+      actorId,
+      contextToken: "context-secret",
+    })).resolves.toBe("private-ticket");
+    await client.setTyping({
+      actorId,
+      typingTicket: "private-ticket",
+      status: "typing",
+    });
+    await client.setTyping({
+      actorId,
+      typingTicket: "private-ticket",
+      status: "cancel",
+    });
+
+    expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([
+      "https://ilinkai.weixin.qq.com/ilink/bot/getconfig",
+      "https://ilinkai.weixin.qq.com/ilink/bot/sendtyping",
+      "https://ilinkai.weixin.qq.com/ilink/bot/sendtyping",
+    ]);
+    expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body))).toEqual({
+      ilink_user_id: actorId,
+      context_token: "context-secret",
+      base_info: {
+        channel_version: "2.4.6",
+        bot_agent: "CodexConnect/0.145.0",
+      },
+    });
+    expect(
+      fetchImpl.mock.calls.slice(1).map(([, init]) =>
+        JSON.parse(String(init?.body)).status),
+    ).toEqual([1, 2]);
+    expect(JSON.stringify(fetchImpl.mock.calls)).not.toContain(
+      "private upstream",
+    );
+  });
+
+  it("fails closed when getconfig omits the typing ticket", async () => {
+    const client = createClient({
+      fetchImpl: vi.fn(async () =>
+        new Response(JSON.stringify({ ret: 0 }), { status: 200 })),
+    });
+
+    await expect(client.getTypingTicket({
+      actorId,
+      contextToken: "context-secret",
+    })).rejects.toMatchObject({ code: "invalid-response" });
+  });
+
+  it("rejects an invalid runtime typing state before the network", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const client = createClient({ fetchImpl });
+
+    await expect(client.setTyping({
+      actorId,
+      typingTicket: "private-ticket",
+      // @ts-expect-error Runtime input remains validated at the boundary.
+      status: "unknown",
     })).rejects.toMatchObject({ code: "invalid-input" });
     expect(fetchImpl).not.toHaveBeenCalled();
   });

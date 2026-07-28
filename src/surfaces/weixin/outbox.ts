@@ -24,6 +24,7 @@ import {
 } from "./command-renderer.js";
 import { formatWeixinFinalText } from "./final-text-format.js";
 import { formatWeixinOperation } from "./operation-format.js";
+import type { WeixinTypingController } from "./typing-controller.js";
 
 const maximumChunkCharacters = 4_000;
 const maximumChunks = 5;
@@ -45,6 +46,7 @@ export interface WeixinOutboxOptions {
   closeTimeoutMs?: number;
   operationUpdateDisplay?: OperationUpdateDisplay;
   onReplyContextInvalidated?: (target: ConversationTarget) => Promise<void>;
+  typing?: Pick<WeixinTypingController, "close" | "start" | "stop">;
 }
 
 export class WeixinOutbox implements SurfaceOutputPort {
@@ -81,6 +83,10 @@ export class WeixinOutbox implements SurfaceOutputPort {
     ) {
       return;
     }
+    if (event.type === "turn.started") {
+      this.options.typing?.start(event.target);
+      return;
+    }
     if (event.type === "operation.updated") {
       if (
         this.options.operationUpdateDisplay === "hidden"
@@ -107,8 +113,8 @@ export class WeixinOutbox implements SurfaceOutputPort {
     }
     this.delivery.enqueue(
       event.target.conversationId,
-      () => this.send(event.target, rendered),
-      isCriticalOutputEvent(event) || event.type === "turn.started",
+      () => this.sendEvent(event, rendered),
+      isCriticalOutputEvent(event),
     );
   }
 
@@ -139,14 +145,13 @@ export class WeixinOutbox implements SurfaceOutputPort {
       return;
     }
     this.closed = true;
+    await this.options.typing?.close();
     await this.delivery.close();
     this.contexts.clear();
   }
 
   private render(event: OutputEvent): string | null {
     switch (event.type) {
-      case "turn.started":
-        return "已开始处理。";
       case "text.completed":
         if (event.phase === "commentary") {
           return null;
@@ -164,6 +169,20 @@ export class WeixinOutbox implements SurfaceOutputPort {
       default:
         return null;
     }
+  }
+
+  private async sendEvent(event: OutputEvent, text: string): Promise<void> {
+    if (
+      event.type === "turn.completed"
+      || event.type === "connection.lost"
+      || (
+        event.type === "text.completed"
+        && event.phase === "final_answer"
+      )
+    ) {
+      await this.options.typing?.stop(event.target);
+    }
+    await this.send(event.target, text);
   }
 
   private async send(

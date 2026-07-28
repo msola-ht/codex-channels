@@ -23,15 +23,20 @@ import {
   WeixinOutbox,
   type WeixinOutboxOptions,
 } from "./outbox.js";
-import type { WeixinProtocolClient } from "./protocol-client.js";
+import type {
+  WeixinProtocolClient,
+  WeixinTypingProtocolClient,
+} from "./protocol-client.js";
 import { WeixinReplyContextStore } from "./reply-context-store.js";
 import type { WeixinReplyContextPersistence } from "./reply-context-persistence.js";
 import { formatWeixinCommandText } from "./command-renderer.js";
 import type { WeixinUpdatesCursorStore } from "./updates-cursor-store.js";
+import { WeixinTypingController } from "./typing-controller.js";
 
 export interface WeixinSurfaceOptions {
   accountId: string;
   client: WeixinProtocolClient;
+  typingClient?: WeixinTypingProtocolClient;
   cursorStore: WeixinUpdatesCursorStore;
   service: ConversationService;
   access: SurfaceAccessPolicy;
@@ -81,6 +86,14 @@ export class WeixinSurface implements SurfaceAdapter {
     this.logger = options.logger;
     this.accountId = options.accountId;
     this.interactions = new WeixinInteractionPort();
+    const typing = options.typingClient === undefined
+      ? undefined
+      : new WeixinTypingController(
+          options.typingClient,
+          replyContexts,
+          options.access,
+          options.logger,
+        );
     this.output = new WeixinOutbox(
       options.accountId,
       options.client,
@@ -89,6 +102,7 @@ export class WeixinSurface implements SurfaceAdapter {
       options.logger,
       {
         ...options.outbox,
+        ...(typing === undefined ? {} : { typing }),
         ...(options.operationUpdateDisplay === undefined
           ? {}
           : {

@@ -40,7 +40,7 @@ describe("WeixinOutbox", () => {
     })).toThrow("微信回复目标无效");
   });
 
-  it("sends start, final text, and completion through the reply context", async () => {
+  it("replaces the start bubble with typing and sends final text and completion", async () => {
     const { outbox, sendText } = outboxFixture();
 
     outbox.handle(turnStarted());
@@ -54,10 +54,45 @@ describe("WeixinOutbox", () => {
     await outbox.close();
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      "已开始处理。",
       "final reply",
       "本次运行 · 已完成",
     ]);
+  });
+
+  it("starts typing and cancels it before the final reply", async () => {
+    const events: string[] = [];
+    const typing = {
+      start: vi.fn(() => {
+        events.push("typing:start");
+      }),
+      stop: vi.fn(async () => {
+        events.push("typing:stop");
+      }),
+      close: vi.fn(async () => {
+        events.push("typing:close");
+      }),
+    };
+    const { outbox, sendText } = outboxFixture(
+      { value: true },
+      { typing },
+      async () => {
+        events.push("text:send");
+      },
+    );
+
+    outbox.handle(turnStarted());
+    outbox.handle(completed("final_answer", "final reply"));
+    await outbox.close();
+
+    expect(typing.start).toHaveBeenCalledWith(target);
+    expect(typing.stop).toHaveBeenCalledWith(target);
+    expect(events.indexOf("typing:stop")).toBeLessThan(
+      events.indexOf("text:send"),
+    );
+    expect(typing.close).toHaveBeenCalledOnce();
+    expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
+      text: "final reply",
+    }));
   });
 
   it("compacts single-line fenced code in final answers", async () => {
@@ -386,10 +421,11 @@ describe("WeixinOutbox", () => {
 function outboxFixture(
   allowed: { value: boolean } = { value: true },
   options: WeixinOutboxOptions = {},
+  sendTextImpl: WeixinProtocolClient["sendText"] = async () => {},
 ) {
   const contexts = new WeixinReplyContextStore(accountId);
   contexts.remember(target, actorId, "context-secret");
-  const sendText = vi.fn<WeixinProtocolClient["sendText"]>(async () => {});
+  const sendText = vi.fn<WeixinProtocolClient["sendText"]>(sendTextImpl);
   const onReplyContextInvalidated = vi.fn(async () => {});
   return {
     contexts,

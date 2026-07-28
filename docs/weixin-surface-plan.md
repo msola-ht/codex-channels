@@ -279,13 +279,28 @@ Token、用户 ID 或任意回复正文，不输出或保存消息、游标、�
 以一个气泡完整显示，末尾标记可见，没有发生截断。阶段 1 可以采用 4000 个 UTF-16 码元作为
 保守文本分片上限；该结论不证明 4001 字符会失败，也不声明服务端最大长度。
 
+`scripts/weixin-typing-contract-probe.mjs` 新增隔离的 `lifecycle --live` 输入状态实验：它从
+一条已授权完成态用户文本中只在内存选择回复目标与 `context_token`，调用固定 `v2.4.6`
+`getconfig` 取得临时 `typing_ticket`，再按官方宿主节奏发送开始、5 秒续期和取消状态。脚本
+不接受命令行 Token、用户 ID 或票据，不输出或保存正文、身份、上下文、游标或票据；续期失败时
+仍尝试取消。真实测试确认三个状态请求均显式返回 `ret: 0`，微信客户端可见输入状态，并在取消后
+消失。
+
+真实合同通过后，`src/surfaces/weixin/typing-controller.ts` 把输入状态接入常驻 Turn 生命周期：
+`typing_ticket` 只按 Actor 缓存在当前进程内，最多复用 24 小时，不写配置、SQLite、日志或回复
+上下文存储；Turn 开始后每 5 秒续期，最终回复、完成、停止、失败或 Surface 关闭时取消。
+`getconfig`、续期或取消失败只记录受限错误元数据，不阻断正常文本输出；原有“已开始处理。”
+气泡已由原生输入状态替代。部署后的真实 Turn 已确认输入状态可以正常开始、续期并在最终回复前
+取消，完成统计继续发送。
+
 经明确批准后，`src/surfaces/weixin/updates-cursor-store.ts` 实现独立版本 1 游标检查点：
 `data/weixin-updates` 目录权限为 `0700`，每个账号使用 SHA-256 文件名，严格载荷只包含版本、
 账号 ID 和游标，文件权限为 `0600` 并通过临时文件原子替换。缺失记录表示首次拉取；损坏、未知
 版本、账号不匹配和符号链接失败关闭。回滚时删除该目录即可，不影响凭据、配置、SQLite 或其他
 Surface。
 
-`src/surfaces/weixin/protocol-client.ts` 把已验证的 `getupdates/sendmessage` 合同移入微信
+`src/surfaces/weixin/protocol-client.ts` 把已验证的
+`getupdates/sendmessage/getconfig/sendtyping` 合同移入微信
 模块：保留原始十进制 `message_id`，按账号方向把消息裁剪为文本或稳定忽略原因，限制响应体、
 超时和取消，并把 HTTP/API 错误约束为不含上游正文的稳定错误。出站文本限定为已验证的 4000 个
 UTF-16 码元。
@@ -368,7 +383,8 @@ Bootstrap 组合工厂、撤权绑定清理和显式启用配置已实现；Setu
 
 1. 图片输入与输出：内容签名、大小上限、AES-128-ECB CDN 合同、私有临时文件和过期清理。
 2. 一般文件：文件名、MIME、大小、下载来源和上传失败语义。
-3. 输入状态：只有官方 `getconfig` 与 `sendtyping` 合同稳定后启用。
+3. 输入状态：已通过固定 `v2.4.6` 的 `getconfig` 与 `sendtyping` 真实合同验收并接入 Turn
+   生命周期；票据只在内存缓存，失败不阻断正常回复。
 4. 多账号：每个 Bot 独立凭据、游标、允许名单、长轮询、输出队列和 `surface + accountId`
    生命周期；不能依靠收件人猜测发送账号。
 5. 主动推送：加密 `context_token` 保存、账号隔离、撤权校验和重启上线通知已完成；配置通知、

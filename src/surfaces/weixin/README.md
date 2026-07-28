@@ -12,7 +12,8 @@
 - `updates-cursor-store.ts`：在 `data/weixin-updates` 下按账号 SHA-256 文件名保存严格版本 1
   `get_updates_buf`；目录 `0700`、文件 `0600`，临时文件原子替换，损坏、未知版本和符号链接
   失败关闭。
-- `protocol-client.ts`：实现固定 `v2.4.6` 的 `getupdates` 和 `sendmessage` HTTP 合同，
+- `protocol-client.ts`：实现固定 `v2.4.6` 的 `getupdates`、`sendmessage`、`getconfig` 和
+  `sendtyping` HTTP 合同，
   在 JSON 数字转换前保留原始 `message_id`，只输出文本或带原因的忽略事件，并限制出站文本为
   已验证的 4000 个 UTF-16 码元。
 - `updates-monitor.ts`：组合协议 Client 与游标 Store，顺序处理单批消息、按原始消息 ID
@@ -34,7 +35,10 @@
 - `reply-context-persistence.ts`：按精确账号和私聊 Actor 保存严格版本 1 的最近回复上下文；
   macOS 使用独立 Keychain Service，Linux 使用独立
   `credentials/weixin-reply-context` AES-256-GCM 私有目录。载荷、密文或身份不匹配失败关闭。
-- `outbox.ts`：只处理匹配账号的 Turn 开始提示、最终文本、操作终态、带耗时/模型/上下文/缓存/
+- `typing-controller.ts`：只在内存按 Actor 缓存最多 24 小时的 `typing_ticket`；Turn 开始时
+  启用原生输入状态并每 5 秒续期，最终回复、完成、停止、失败或 Surface 关闭时取消；协议失败
+  只记录受限元数据，不阻断正常回复。
+- `outbox.ts`：只处理匹配账号的 Turn 原生输入状态、最终文本、操作终态、带耗时/模型/上下文/缓存/
   分支的完成或停止统计、失败通知、连接错误和警告；最终回复使用微信专用格式器，操作展示复用
   共享 `full`、`compact`、`hidden` 三档配置，不发送 `running` 帧；操作终态和生命周期通知
   作为关键输出，不因已有最终回复而省略；发送时重新检查 Actor
@@ -42,7 +46,7 @@
   截断提示，避免拆开代理对。
 - `interactions.ts`：审批立即拒绝、用户输入返回空答案、MCP elicitation 立即取消，不用普通
   微信文本模拟高权限交互。
-- `surface.ts`：共享一个内存回复上下文组合 Input、Outbox 与 InteractionPort；启动时只为当前
+- `surface.ts`：共享一个内存回复上下文组合 Input、Outbox、Typing 与 InteractionPort；启动时只为当前
   允许名单中已有绑定且存在加密回复上下文的私聊恢复收件人并发送上线通知，通知失败不停止长轮询；
   停止时先取消输入，再取消交互并排空输出，重复停止安全。一般主动配置通知仍明确失败关闭。
 - `index.ts`：微信模块公开入口。

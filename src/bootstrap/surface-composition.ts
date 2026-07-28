@@ -114,12 +114,14 @@ function createWeixinModule(
   const replyContextPersistence = createWeixinReplyContextPersistence(
     join(options.config.credentialsDirectory, "weixin-reply-context"),
   );
+  const client = createCredentialBackedWeixinClient({
+    accountId: config.accountId,
+    credentialStore,
+  });
   const adapter = new WeixinSurface({
     accountId: config.accountId,
-    client: createCredentialBackedWeixinClient({
-      accountId: config.accountId,
-      credentialStore,
-    }),
+    client,
+    typingClient: client,
     cursorStore: new FileWeixinUpdatesCursorStore(
       join(dirname(options.config.stateDatabasePath), "weixin-updates"),
     ),

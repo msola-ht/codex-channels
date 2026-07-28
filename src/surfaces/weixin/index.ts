@@ -24,6 +24,9 @@ export {
   type WeixinInboundMessage,
   type WeixinProtocolClient,
   type WeixinProtocolErrorCode,
+  type WeixinRuntimeProtocolClient,
+  type WeixinTypingProtocolClient,
+  type WeixinTypingStatus,
   type WeixinUpdatesBatch,
 } from "./protocol-client.js";
 export {
@@ -71,6 +74,10 @@ export {
   type WeixinOutboxOptions,
 } from "./outbox.js";
 export { WeixinInteractionPort } from "./interactions.js";
+export {
+  WeixinTypingController,
+  type WeixinTypingControllerOptions,
+} from "./typing-controller.js";
 export {
   WeixinConfigurationDeliveryError,
   WeixinSurface,

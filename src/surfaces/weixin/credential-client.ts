@@ -1,7 +1,7 @@
 import type { WeixinCredentialStore } from "./credential-store.js";
 import {
   createWeixinProtocolClient,
-  type WeixinProtocolClient,
+  type WeixinRuntimeProtocolClient,
 } from "./protocol-client.js";
 
 export interface CreateCredentialBackedWeixinClientOptions {
@@ -12,9 +12,9 @@ export interface CreateCredentialBackedWeixinClientOptions {
 
 export function createCredentialBackedWeixinClient(
   options: CreateCredentialBackedWeixinClientOptions,
-): WeixinProtocolClient {
-  let clientTask: Promise<WeixinProtocolClient> | undefined;
-  const client = (): Promise<WeixinProtocolClient> => {
+): WeixinRuntimeProtocolClient {
+  let clientTask: Promise<WeixinRuntimeProtocolClient> | undefined;
+  const client = (): Promise<WeixinRuntimeProtocolClient> => {
     clientTask ??= options.credentialStore.get(options.accountId)
       .then((credential) => {
         if (credential === null) {
@@ -34,6 +34,12 @@ export function createCredentialBackedWeixinClient(
     },
     async sendText(input, signal) {
       return (await client()).sendText(input, signal);
+    },
+    async getTypingTicket(input, signal) {
+      return (await client()).getTypingTicket(input, signal);
+    },
+    async setTyping(input, signal) {
+      return (await client()).setTyping(input, signal);
     },
   };
 }
