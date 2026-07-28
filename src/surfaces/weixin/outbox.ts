@@ -22,7 +22,9 @@ import {
 
 import { validateWeixinAccountId } from "./credential-store.js";
 import {
+  maximumWeixinOutboundFileBytes,
   WeixinProtocolError,
+  type WeixinFileSendProtocolClient,
   type WeixinImageSendProtocolClient,
   type WeixinProtocolClient,
 } from "./protocol-client.js";
@@ -45,6 +47,8 @@ import type { WeixinTypingController } from "./typing-controller.js";
 const maximumChunkCharacters = 4_000;
 const maximumChunks = 5;
 const truncationNotice = "\n\n[内容过长，已截断]";
+const completeFileNotice = "\n\n[完整内容已作为文件发送]";
+const finalAnswerFileName = "codex-final-answer.txt";
 
 export type WeixinOutboxErrorCode =
   | "image-sender-unavailable"
@@ -64,6 +68,7 @@ export interface WeixinOutboxOptions {
   operationUpdateDisplay?: OperationUpdateDisplay;
   onReplyContextInvalidated?: (target: ConversationTarget) => Promise<void>;
   imageClient?: Pick<WeixinImageSendProtocolClient, "sendImage">;
+  fileClient?: Pick<WeixinFileSendProtocolClient, "sendFile">;
   readImage?: typeof readWeixinOutboundImage;
   typing?: Pick<WeixinTypingController, "close" | "start" | "stop">;
 }
@@ -293,7 +298,52 @@ export class WeixinOutbox implements SurfaceOutputPort {
     ) {
       await this.options.typing?.stop(event.target);
     }
+    if (
+      event.type === "text.completed"
+      && event.phase === "final_answer"
+      && text.length > maximumChunkCharacters * maximumChunks
+      && await this.sendLongFinalAnswer(event.target, text)
+    ) {
+      return;
+    }
     await this.send(event.target, text);
+  }
+
+  private async sendLongFinalAnswer(
+    target: ConversationTarget,
+    text: string,
+  ): Promise<boolean> {
+    const fileClient = this.options.fileClient;
+    const file = Buffer.from(text, "utf8");
+    if (
+      fileClient === undefined
+      || file.length > maximumWeixinOutboundFileBytes
+    ) {
+      return false;
+    }
+    const preview = safePrefix(
+      text,
+      maximumChunkCharacters - completeFileNotice.length,
+    ) + completeFileNotice;
+    await this.send(target, preview);
+    const context = this.contexts.get(target);
+    if (context === undefined) {
+      throw new WeixinOutboxError("missing-reply-context");
+    }
+    if (!this.access.isAllowed({
+      target,
+      actorId: context.actorId,
+    })) {
+      await this.invalidateContext(target);
+      throw new WeixinOutboxError("unauthorized-recipient");
+    }
+    await fileClient.sendFile({
+      actorId: context.actorId,
+      contextToken: context.contextToken,
+      fileName: finalAnswerFileName,
+      file,
+    });
+    return true;
   }
 
   private async send(

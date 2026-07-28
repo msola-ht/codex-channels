@@ -21,6 +21,7 @@ export {
   createWeixinProtocolClient,
   type CreateWeixinProtocolClientOptions,
   type WeixinFileReference,
+  type WeixinFileSendProtocolClient,
   type WeixinIgnoredMessageReason,
   type WeixinImageReference,
   type WeixinImageSendProtocolClient,
@@ -31,6 +32,7 @@ export {
   type WeixinTypingProtocolClient,
   type WeixinTypingStatus,
   type WeixinUpdatesBatch,
+  maximumWeixinOutboundFileBytes,
 } from "./protocol-client.js";
 export {
   maximumWeixinImageBytes,

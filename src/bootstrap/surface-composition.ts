@@ -123,6 +123,7 @@ function createWeixinModule(
   const adapter = new WeixinSurface({
     accountId: config.accountId,
     client,
+    fileSendClient: client,
     imageSendClient: client,
     typingClient: client,
     cursorStore: new FileWeixinUpdatesCursorStore(

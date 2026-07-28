@@ -15,6 +15,7 @@ import * as updatesProbe from "../scripts/weixin-updates-contract-probe.mjs";
 
 const {
   createWeixinImageSendContractClient,
+  runWeixinFileSendContract,
   runWeixinImageSendContract,
   summarizeSendResponse,
 } = imageSendProbe;
@@ -46,10 +47,95 @@ describe("Weixin outbound image contract probe", () => {
 
     expect(help.status).toBe(0);
     expect(help.stdout).toContain("send --live");
+    expect(help.stdout).toContain("file --live");
     expect(help.stdout).toContain("停止 Gateway");
-    expect(help.stdout).toContain("不会输出或保存图片");
+    expect(help.stdout).toContain("不会输出或保存正文");
     expect(rejected.status).toBe(2);
     expect(rejected.stderr).toContain("参数无效");
+  });
+
+  it("uses the exact v2.4.6 file upload and message shapes", async () => {
+    const aesKey = Buffer.from("00112233445566778899aabbccddeeff", "hex");
+    const fileKey = Buffer.from("ffeeddccbbaa99887766554433221100", "hex");
+    const fileBytes = Buffer.from("fixed file body\n", "utf8");
+    const fetchImpl = successfulFetchSequence();
+    const randomValues = [
+      aesKey,
+      fileKey,
+      Buffer.from([0, 0, 0, 1]),
+      Buffer.from([0, 0, 0, 2]),
+      Buffer.from([0xaa, 0xbb, 0xcc, 0xdd]),
+    ];
+    const client = createWeixinImageSendContractClient({
+      fetchImpl,
+      nowImpl: () => 1_700_000_000_000,
+      randomBytesImpl: (length: number) => {
+        const value = randomValues.shift();
+        expect(value).toHaveLength(length);
+        return value;
+      },
+    });
+
+    await client.sendFile({
+      baseUrl: "https://ilinkai.weixin.qq.com",
+      botToken: "bot-secret",
+      toUserId: "private-user@im.wechat",
+      contextToken: "private-context",
+      fileName: "fixed-test.txt",
+      fileBytes,
+    });
+
+    const uploadBody = JSON.parse(String(
+      fetchImpl.mock.calls[0]![1]?.body,
+    ));
+    expect(uploadBody).toMatchObject({
+      filekey: fileKey.toString("hex"),
+      media_type: 3,
+      to_user_id: "private-user@im.wechat",
+      rawsize: fileBytes.length,
+      rawfilemd5: createHash("md5").update(fileBytes).digest("hex"),
+      no_need_thumb: true,
+      aeskey: aesKey.toString("hex"),
+    });
+
+    const ciphertext = Buffer.from(
+      fetchImpl.mock.calls[1]![1]?.body as Uint8Array,
+    );
+    const decipher = createDecipheriv("aes-128-ecb", aesKey, null);
+    expect(Buffer.concat([
+      decipher.update(ciphertext),
+      decipher.final(),
+    ])).toEqual(fileBytes);
+
+    const sendBody = JSON.parse(String(
+      fetchImpl.mock.calls[2]![1]?.body,
+    ));
+    expect(sendBody).toEqual({
+      msg: {
+        from_user_id: "",
+        to_user_id: "private-user@im.wechat",
+        client_id: "codex-connect:1700000000000-aabbccdd",
+        message_type: 2,
+        message_state: 2,
+        item_list: [{
+          type: 4,
+          file_item: {
+            media: {
+              encrypt_query_param: "private-download-param",
+              aes_key: Buffer.from(aesKey.toString("hex")).toString("base64"),
+              encrypt_type: 1,
+            },
+            file_name: "fixed-test.txt",
+            len: String(fileBytes.length),
+          },
+        }],
+        context_token: "private-context",
+      },
+      base_info: {
+        channel_version: "2.4.6",
+        bot_agent: "CodexConnect/0.145.0",
+      },
+    });
   });
 
   it("uses the exact v2.4.6 getuploadurl, CDN and image message shapes", async () => {
@@ -325,6 +411,52 @@ describe("Weixin outbound image contract probe", () => {
     expect(serialized).not.toContain("private-cursor");
     expect(serialized).not.toContain("bot-secret");
     expect(serialized).not.toContain("iVBOR");
+  });
+
+  it("uses a fixed file without exposing its context in the result", async () => {
+    const updatesClient = createWeixinUpdatesContractClient({
+      fetchImpl: vi.fn(async () => new Response(exactUpdatesResponse({
+        ret: 0,
+        get_updates_buf: "private-cursor",
+        msgs: [
+          inboundMessage("allowed-user@im.wechat", "reply-context", 2n),
+        ],
+      }), { status: 200 })),
+    });
+    const sendFile = vi.fn(async (input: {
+      fileName: string;
+      fileBytes: Buffer;
+    }) => {
+      expect(input.fileName).toBe("codex-connect-weixin-test.txt");
+      expect(input.fileBytes.toString("utf8")).toContain("合同验证");
+      return {
+        uploadUrl: { kind: "success", urlSource: "full-url" },
+        cdn: {
+          kind: "success",
+          hasDownloadParam: true,
+          ciphertextBytes: 48,
+        },
+        outbound: { kind: "success", hasReturnCode: true },
+      };
+    });
+
+    const result = await runWeixinFileSendContract({
+      updatesClient,
+      fileSendClient: { sendFile },
+      credential: {
+        baseUrl: "https://ilinkai.weixin.qq.com",
+        botToken: "bot-secret",
+      },
+      allowedUserIds: ["allowed-user@im.wechat"],
+    });
+
+    expect(result).toMatchObject({
+      inbound: { kind: "success", messageCount: 1 },
+      outbound: { kind: "success" },
+    });
+    expect(JSON.stringify(result)).not.toContain("allowed-user");
+    expect(JSON.stringify(result)).not.toContain("reply-context");
+    expect(JSON.stringify(result)).not.toContain("合同验证");
   });
 });
 

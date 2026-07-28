@@ -36,12 +36,14 @@ describe("WeixinProtocolClient", () => {
     }));
     const sendText = vi.fn(async () => {});
     const sendImage = vi.fn(async () => {});
+    const sendFile = vi.fn(async () => {});
     const getTypingTicket = vi.fn(async () => "typing-ticket");
     const setTyping = vi.fn(async () => {});
     const createClient = vi.fn(() => ({
       getUpdates,
       sendText,
       sendImage,
+      sendFile,
       getTypingTicket,
       setTyping,
     }));
@@ -61,6 +63,12 @@ describe("WeixinProtocolClient", () => {
       actorId,
       contextToken: "context",
       image: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+    });
+    await client.sendFile({
+      actorId,
+      contextToken: "context",
+      fileName: "reply.txt",
+      file: Buffer.from("reply"),
     });
     await client.getTypingTicket({
       actorId,
@@ -724,6 +732,115 @@ describe("WeixinProtocolClient", () => {
         bot_agent: "CodexConnect/0.145.0",
       },
     });
+  });
+
+  it("uploads and sends one fixed v2.4.6 file contract", async () => {
+    const file = Buffer.from("fixed file body\n", "utf8");
+    const aesKey = Buffer.from(
+      "00112233445566778899aabbccddeeff",
+      "hex",
+    );
+    const fileKey = Buffer.from(
+      "ffeeddccbbaa99887766554433221100",
+      "hex",
+    );
+    const randomValues = [
+      aesKey,
+      fileKey,
+      Buffer.from([0, 0, 0, 1]),
+      Buffer.from([0xaa, 0xbb, 0xcc, 0xdd]),
+      Buffer.from([0, 0, 0, 2]),
+    ];
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ret: 0,
+        upload_full_url:
+          "https://novac2c.cdn.weixin.qq.com/c2c/upload?private=upload",
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, {
+        status: 200,
+        headers: { "x-encrypted-param": "private-download-param" },
+      }))
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    const client = createClient({
+      fetchImpl,
+      nowImpl: () => 1_700_000_000_000,
+      randomBytesImpl: (length) => {
+        const value = randomValues.shift();
+        expect(value).toHaveLength(length);
+        return value!;
+      },
+    });
+
+    await expect(client.sendFile({
+      actorId,
+      contextToken: "context-secret",
+      fileName: "codex-final-answer.txt",
+      file,
+    })).resolves.toBeUndefined();
+
+    const uploadBody = JSON.parse(String(fetchImpl.mock.calls[0]![1]?.body));
+    expect(uploadBody).toMatchObject({
+      filekey: fileKey.toString("hex"),
+      media_type: 3,
+      to_user_id: actorId,
+      rawsize: file.length,
+      rawfilemd5: createHash("md5").update(file).digest("hex"),
+      no_need_thumb: true,
+      aeskey: aesKey.toString("hex"),
+    });
+    const decipher = createDecipheriv("aes-128-ecb", aesKey, null);
+    expect(Buffer.concat([
+      decipher.update(Buffer.from(
+        fetchImpl.mock.calls[1]![1]?.body as Uint8Array,
+      )),
+      decipher.final(),
+    ])).toEqual(file);
+    expect(JSON.parse(String(fetchImpl.mock.calls[2]![1]?.body))).toEqual({
+      msg: {
+        from_user_id: "",
+        to_user_id: actorId,
+        client_id: "codex-connect:1700000000000-aabbccdd",
+        message_type: 2,
+        message_state: 2,
+        item_list: [{
+          type: 4,
+          file_item: {
+            media: {
+              encrypt_query_param: "private-download-param",
+              aes_key: Buffer.from(aesKey.toString("hex")).toString("base64"),
+              encrypt_type: 1,
+            },
+            file_name: "codex-final-answer.txt",
+            len: String(file.length),
+          },
+        }],
+        context_token: "context-secret",
+      },
+      base_info: {
+        channel_version: "2.4.6",
+        bot_agent: "CodexConnect/0.145.0",
+      },
+    });
+  });
+
+  it("rejects unsafe outbound file names and oversized buffers", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const client = createClient({ fetchImpl });
+
+    await expect(client.sendFile({
+      actorId,
+      contextToken: "context-secret",
+      fileName: "../reply.txt",
+      file: Buffer.from("reply"),
+    })).rejects.toMatchObject({ code: "invalid-input" });
+    await expect(client.sendFile({
+      actorId,
+      contextToken: "context-secret",
+      fileName: "reply.txt",
+      file: Buffer.alloc(1_000_001),
+    })).rejects.toMatchObject({ code: "invalid-input" });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("rejects invalid image bytes and non-official upload URLs", async () => {

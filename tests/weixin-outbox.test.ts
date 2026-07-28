@@ -9,6 +9,7 @@ import {
   WeixinOutbox,
   WeixinProtocolError,
   WeixinReplyContextStore,
+  type WeixinFileSendProtocolClient,
   type WeixinImageSendProtocolClient,
   type WeixinOutboxOptions,
   type WeixinProtocolClient,
@@ -314,7 +315,7 @@ describe("WeixinOutbox", () => {
     ]);
   });
 
-  it("splits without breaking surrogate pairs and truncates after five chunks", async () => {
+  it("splits surrogate pairs and sends long final answers as a text file", async () => {
     const first = outboxFixture();
     const surrogateText = `${"a".repeat(3_999)}😀b`;
     first.outbox.handle(completed("final_answer", surrogateText));
@@ -328,19 +329,44 @@ describe("WeixinOutbox", () => {
     expect(surrogateChunks.join("")).toBe(surrogateText);
 
     const second = outboxFixture();
+    const longText = "测".repeat(20_001);
     second.outbox.handle(completed(
       "final_answer",
-      "测".repeat(20_001),
+      longText,
     ));
     await second.outbox.close();
 
-    const truncatedChunks = second.sendText.mock.calls.map(
+    const previewChunks = second.sendText.mock.calls.map(
       ([input]) => input.text,
     );
-    expect(truncatedChunks).toHaveLength(5);
-    expect(truncatedChunks.every((chunk) => chunk.length <= 4_000)).toBe(true);
-    expect(truncatedChunks.join("")).toHaveLength(20_000);
-    expect(truncatedChunks.at(-1)).toMatch(/\[内容过长，已截断\]$/u);
+    expect(previewChunks).toHaveLength(1);
+    expect(previewChunks[0]).toHaveLength(4_000);
+    expect(previewChunks[0]).toMatch(/\[完整内容已作为文件发送\]$/u);
+    expect(second.sendFile).toHaveBeenCalledWith({
+      actorId,
+      contextToken: "context-secret",
+      fileName: "codex-final-answer.txt",
+      file: Buffer.from(longText, "utf8"),
+    });
+  });
+
+  it("keeps bounded text truncation when file sending is unavailable", async () => {
+    const fixture = outboxFixture(
+      { value: true },
+      { includeFileClient: false },
+    );
+    fixture.outbox.handle(completed(
+      "final_answer",
+      "测".repeat(20_001),
+    ));
+    await fixture.outbox.close();
+
+    const chunks = fixture.sendText.mock.calls.map(([input]) => input.text);
+    expect(chunks).toHaveLength(5);
+    expect(chunks.every((chunk) => chunk.length <= 4_000)).toBe(true);
+    expect(chunks.join("")).toHaveLength(20_000);
+    expect(chunks.at(-1)).toMatch(/\[内容过长，已截断\]$/u);
+    expect(fixture.sendFile).not.toHaveBeenCalled();
   });
 
   it("keeps one Conversation ordered while allowing another to progress", async () => {
@@ -521,9 +547,12 @@ describe("WeixinOutbox", () => {
 
 function outboxFixture(
   allowed: { value: boolean } = { value: true },
-  options: WeixinOutboxOptions = {},
+  options: WeixinOutboxOptions & {
+    includeFileClient?: boolean;
+  } = {},
   sendTextImpl: WeixinProtocolClient["sendText"] = async () => {},
   sendImageImpl: WeixinImageSendProtocolClient["sendImage"] = async () => {},
+  sendFileImpl: WeixinFileSendProtocolClient["sendFile"] = async () => {},
 ) {
   const contexts = new WeixinReplyContextStore(accountId);
   contexts.remember(target, actorId, "context-secret");
@@ -531,11 +560,19 @@ function outboxFixture(
   const sendImage = vi.fn<WeixinImageSendProtocolClient["sendImage"]>(
     sendImageImpl,
   );
+  const sendFile = vi.fn<WeixinFileSendProtocolClient["sendFile"]>(
+    sendFileImpl,
+  );
   const onReplyContextInvalidated = vi.fn(async () => {});
+  const {
+    includeFileClient = true,
+    ...outboxOptions
+  } = options;
   return {
     contexts,
     sendText,
     sendImage,
+    sendFile,
     onReplyContextInvalidated,
     outbox: new WeixinOutbox(
       accountId,
@@ -544,9 +581,10 @@ function outboxFixture(
       accessFixture(() => allowed.value),
       pino({ level: "silent" }),
       {
+        ...(includeFileClient ? { fileClient: { sendFile } } : {}),
         imageClient: { sendImage },
         readImage: async () => Buffer.from("validated-image"),
-        ...options,
+        ...outboxOptions,
         onReplyContextInvalidated,
       },
     ),

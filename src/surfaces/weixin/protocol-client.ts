@@ -128,6 +128,18 @@ export interface WeixinImageSendProtocolClient {
   ): Promise<void>;
 }
 
+export interface WeixinFileSendProtocolClient {
+  sendFile(
+    input: {
+      actorId: string;
+      contextToken: string;
+      fileName: string;
+      file: Buffer;
+    },
+    signal?: AbortSignal,
+  ): Promise<void>;
+}
+
 export type WeixinTypingStatus = "cancel" | "typing";
 
 export interface WeixinTypingProtocolClient {
@@ -151,6 +163,7 @@ export interface WeixinTypingProtocolClient {
 export type WeixinRuntimeProtocolClient =
   & WeixinProtocolClient
   & WeixinImageSendProtocolClient
+  & WeixinFileSendProtocolClient
   & WeixinTypingProtocolClient;
 
 export interface CreateWeixinProtocolClientOptions {
@@ -173,6 +186,7 @@ const maximumSendResponseBytes = 65_536;
 const maximumTextLength = 4_000;
 const maximumInboundImages = 4;
 const maximumImageBytes = 10 * 1024 * 1024;
+export const maximumWeixinOutboundFileBytes = 1_000_000;
 const maximumImageParameterLength = 65_536;
 const maximumImageUploadAttempts = 3;
 const weixinCdnOrigin = "https://novac2c.cdn.weixin.qq.com";
@@ -292,7 +306,7 @@ export function createWeixinProtocolClient(
         16,
         "微信图片文件标识生成失败",
       ).toString("hex");
-      const ciphertext = encryptImage(image, aesKey);
+      const ciphertext = encryptMedia(image, aesKey);
       const uploadResponse = parseImageUploadResponse(await request({
         fetchImpl,
         randomBytesImpl,
@@ -356,6 +370,94 @@ export function createWeixinProtocolClient(
         maximumResponseBytes: maximumSendResponseBytes,
         ...(signal === undefined ? {} : { signal }),
         operation: "微信图片发送",
+      });
+      parseSendResponse(raw);
+    },
+
+    async sendFile(input, signal) {
+      const actorId = validateActorInput(input.actorId);
+      const contextToken = requiredInputString(
+        input.contextToken,
+        "微信文件回复上下文无效",
+        maximumImageParameterLength,
+      );
+      const fileName = validateOutboundFileName(input.fileName);
+      const file = validateOutboundFile(input.file);
+      const aesKey = exactRandomBytes(
+        randomBytesImpl,
+        16,
+        "微信文件 AES key 生成失败",
+      );
+      const fileKey = exactRandomBytes(
+        randomBytesImpl,
+        16,
+        "微信文件标识生成失败",
+      ).toString("hex");
+      const ciphertext = encryptMedia(file, aesKey);
+      const uploadResponse = parseImageUploadResponse(await request({
+        fetchImpl,
+        randomBytesImpl,
+        baseUrl,
+        botToken,
+        endpoint: "getuploadurl",
+        body: {
+          filekey: fileKey,
+          media_type: 3,
+          to_user_id: actorId,
+          rawsize: file.length,
+          rawfilemd5: createHash("md5").update(file).digest("hex"),
+          filesize: ciphertext.length,
+          no_need_thumb: true,
+          aeskey: aesKey.toString("hex"),
+          base_info: baseInfo(),
+        },
+        timeoutMs: sendTimeoutMs,
+        maximumResponseBytes: maximumSendResponseBytes,
+        ...(signal === undefined ? {} : { signal }),
+        operation: "微信文件上传地址",
+      }));
+      const uploadUrl = resolveImageUploadUrl(uploadResponse, fileKey);
+      const downloadParameter = await uploadImageCiphertext({
+        fetchImpl,
+        url: uploadUrl,
+        ciphertext,
+        timeoutMs: imageUploadTimeoutMs,
+        ...(signal === undefined ? {} : { signal }),
+      });
+      const raw = await request({
+        fetchImpl,
+        randomBytesImpl,
+        baseUrl,
+        botToken,
+        endpoint: "sendmessage",
+        body: {
+          msg: {
+            from_user_id: "",
+            to_user_id: actorId,
+            client_id: createClientId(randomBytesImpl, nowImpl),
+            message_type: 2,
+            message_state: 2,
+            item_list: [{
+              type: 4,
+              file_item: {
+                media: {
+                  encrypt_query_param: downloadParameter,
+                  aes_key: Buffer.from(aesKey.toString("hex"))
+                    .toString("base64"),
+                  encrypt_type: 1,
+                },
+                file_name: fileName,
+                len: String(file.length),
+              },
+            }],
+            context_token: contextToken,
+          },
+          base_info: baseInfo(),
+        },
+        timeoutMs: sendTimeoutMs,
+        maximumResponseBytes: maximumSendResponseBytes,
+        ...(signal === undefined ? {} : { signal }),
+        operation: "微信文件发送",
       });
       parseSendResponse(raw);
     },
@@ -782,6 +884,45 @@ interface WeixinImageUploadResponse {
   uploadParameter?: string;
 }
 
+function validateOutboundFile(value: unknown): Buffer {
+  if (
+    !Buffer.isBuffer(value)
+    || value.length === 0
+    || value.length > maximumWeixinOutboundFileBytes
+  ) {
+    throw new WeixinProtocolError(
+      "invalid-input",
+      value instanceof Uint8Array
+        && value.length > maximumWeixinOutboundFileBytes
+        ? "微信文件超过 1,000,000 字节限制"
+        : "微信文件正文无效",
+    );
+  }
+  return value;
+}
+
+function validateOutboundFileName(value: unknown): string {
+  const fileName = requiredInputString(
+    value,
+    "微信文件名无效",
+    255,
+  );
+  if (
+    fileName === "."
+    || fileName === ".."
+    || fileName.includes("/")
+    || fileName.includes("\\")
+    || Array.from(fileName).some((character) => {
+      const codePoint = character.codePointAt(0);
+      return codePoint !== undefined
+        && (codePoint <= 0x1f || codePoint === 0x7f);
+    })
+  ) {
+    throw new WeixinProtocolError("invalid-input", "微信文件名无效");
+  }
+  return fileName;
+}
+
 function validateOutboundImage(value: unknown): Buffer {
   if (
     !Buffer.isBuffer(value)
@@ -838,7 +979,7 @@ function exactRandomBytes(
   return value;
 }
 
-function encryptImage(value: Buffer, aesKey: Buffer): Buffer {
+function encryptMedia(value: Buffer, aesKey: Buffer): Buffer {
   const cipher = createCipheriv("aes-128-ecb", aesKey, null);
   return Buffer.concat([cipher.update(value), cipher.final()]);
 }

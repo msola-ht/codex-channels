@@ -23,6 +23,11 @@ const probePng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAa0lEQVR42u3XMQ0AIAxFwapAEgM2MYgEDJSpC4RLGDtw08uPNkf6Vu/pu+0+AAAAAABKgFc+eroHAAAAAKgBlBgAAADAHlBiAAAAAHtAiQEAAADsASUGAAAAsAeUGAAAAMAeUGIAAACAbwAbHFH5Hhhmv2kAAAAASUVORK5CYII=",
   "base64",
 );
+const probeFile = Buffer.from(
+  "Codex Connect 微信文件发送合同验证。\n",
+  "utf8",
+);
+const probeFileName = "codex-connect-weixin-test.txt";
 
 export class WeixinImageSendContractError extends Error {
   constructor(code, message) {
@@ -78,7 +83,7 @@ export function createWeixinImageSendContractClient({
         16,
         "微信图片文件标识生成失败",
       ).toString("hex");
-      const ciphertext = encryptPng(plaintext, aesKey);
+      const ciphertext = encryptMedia(plaintext, aesKey);
 
       const uploadContract = await requestUploadContract({
         fetchImpl,
@@ -129,6 +134,94 @@ export function createWeixinImageSendContractClient({
         outbound,
       };
     },
+    async sendFile({
+      baseUrl,
+      botToken,
+      toUserId,
+      contextToken,
+      fileName,
+      fileBytes,
+      signal,
+    }) {
+      const origin = normalizeBaseUrl(baseUrl);
+      const token = requiredString(
+        botToken,
+        "微信 Bot Token 无效",
+        16_384,
+      );
+      const target = requiredString(
+        toUserId,
+        "微信文件回复目标无效",
+        1_024,
+      );
+      const context = requiredString(
+        contextToken,
+        "微信文件回复上下文无效",
+        maximumParameterLength,
+      );
+      const name = validateFileName(fileName);
+      const plaintext = validateFile(fileBytes);
+      const aesKey = exactRandomBytes(
+        randomBytesImpl,
+        16,
+        "微信文件 AES key 生成失败",
+      );
+      const fileKey = exactRandomBytes(
+        randomBytesImpl,
+        16,
+        "微信文件标识生成失败",
+      ).toString("hex");
+      const ciphertext = encryptMedia(plaintext, aesKey);
+      const uploadContract = await requestUploadContract({
+        fetchImpl,
+        timeoutMs: apiRequestTimeoutMs,
+        randomBytesImpl,
+        origin,
+        token,
+        target,
+        plaintext,
+        ciphertext,
+        aesKey,
+        fileKey,
+        mediaType: 3,
+        signal,
+      });
+      const uploadTarget = resolveUploadUrl(uploadContract, fileKey);
+      const downloadParameter = await uploadCiphertext({
+        fetchImpl,
+        timeoutMs: cdnRequestTimeoutMs,
+        url: uploadTarget.url,
+        ciphertext,
+        signal,
+      });
+      const outbound = await sendFileMessage({
+        fetchImpl,
+        timeoutMs: apiRequestTimeoutMs,
+        randomBytesImpl,
+        nowImpl,
+        origin,
+        token,
+        target,
+        context,
+        plaintext,
+        aesKey,
+        downloadParameter,
+        fileName: name,
+        signal,
+      });
+      return {
+        uploadUrl: {
+          kind: "success",
+          urlSource: uploadTarget.source,
+        },
+        cdn: {
+          kind: "success",
+          hasDownloadParam: true,
+          ciphertextBytes: ciphertext.length,
+        },
+        outbound,
+      };
+    },
   };
 }
 
@@ -159,6 +252,34 @@ export async function runWeixinImageSendContract({
   return { inbound, ...result };
 }
 
+export async function runWeixinFileSendContract({
+  updatesClient,
+  fileSendClient,
+  credential,
+  allowedUserIds,
+  signal,
+}) {
+  const inbound = await updatesClient.pollOnce({
+    baseUrl: credential.baseUrl,
+    botToken: credential.botToken,
+    signal,
+  });
+  if (inbound.kind !== "success") {
+    return { inbound };
+  }
+  const replyContext = selectWeixinReplyContext(inbound, allowedUserIds);
+  const result = await fileSendClient.sendFile({
+    baseUrl: credential.baseUrl,
+    botToken: credential.botToken,
+    toUserId: replyContext.toUserId,
+    contextToken: replyContext.contextToken,
+    fileName: probeFileName,
+    fileBytes: probeFile,
+    signal,
+  });
+  return { inbound, ...result };
+}
+
 async function requestUploadContract({
   fetchImpl,
   timeoutMs,
@@ -170,6 +291,7 @@ async function requestUploadContract({
   ciphertext,
   aesKey,
   fileKey,
+  mediaType = 1,
   signal,
 }) {
   const response = await fetchWithTimeout({
@@ -181,7 +303,7 @@ async function requestUploadContract({
       headers: createApiHeaders(token, randomBytesImpl),
       body: JSON.stringify({
         filekey: fileKey,
-        media_type: 1,
+        media_type: mediaType,
         to_user_id: target,
         rawsize: plaintext.length,
         rawfilemd5: createHash("md5").update(plaintext).digest("hex"),
@@ -414,6 +536,67 @@ async function sendImageMessage({
   );
 }
 
+async function sendFileMessage({
+  fetchImpl,
+  timeoutMs,
+  randomBytesImpl,
+  nowImpl,
+  origin,
+  token,
+  target,
+  context,
+  plaintext,
+  aesKey,
+  downloadParameter,
+  fileName,
+  signal,
+}) {
+  const response = await fetchWithTimeout({
+    fetchImpl,
+    timeoutMs,
+    url: `${origin}/ilink/bot/sendmessage`,
+    init: {
+      method: "POST",
+      headers: createApiHeaders(token, randomBytesImpl),
+      body: JSON.stringify({
+        msg: {
+          from_user_id: "",
+          to_user_id: target,
+          client_id: createClientId(randomBytesImpl, nowImpl),
+          message_type: 2,
+          message_state: 2,
+          item_list: [{
+            type: 4,
+            file_item: {
+              media: {
+                encrypt_query_param: downloadParameter,
+                aes_key: Buffer.from(aesKey.toString("hex")).toString("base64"),
+                encrypt_type: 1,
+              },
+              file_name: fileName,
+              len: String(plaintext.length),
+            },
+          }],
+          context_token: context,
+        },
+        base_info: createBaseInfo(),
+      }),
+    },
+    signal,
+    timeoutMessage: "微信文件消息发送超时",
+    networkMessage: "微信文件消息发送网络请求失败",
+  });
+  if (!response.ok) {
+    throw new WeixinImageSendContractError(
+      "http-error",
+      `微信文件消息发送失败（HTTP ${response.status}）`,
+    );
+  }
+  return summarizeSendResponse(
+    await readLimitedResponseText(response, maximumResponseBytes),
+  );
+}
+
 export function summarizeSendResponse(raw) {
   const value = parseJsonObject(raw, "微信图片发送响应格式无效");
   const ret = optionalReturnCode(value.ret, "微信图片发送响应返回码无效");
@@ -422,7 +605,7 @@ export function summarizeSendResponse(raw) {
     : { kind: "success", hasReturnCode: ret === 0 };
 }
 
-function encryptPng(value, key) {
+function encryptMedia(value, key) {
   const cipher = createCipheriv("aes-128-ecb", key, null);
   return Buffer.concat([cipher.update(value), cipher.final()]);
 }
@@ -451,6 +634,41 @@ function validatePng(value) {
     );
   }
   return value;
+}
+
+function validateFile(value) {
+  if (
+    !Buffer.isBuffer(value)
+    || value.length === 0
+    || value.length > 1_000_000
+  ) {
+    throw new WeixinImageSendContractError(
+      "invalid-input",
+      "微信测试文件无效",
+    );
+  }
+  return value;
+}
+
+function validateFileName(value) {
+  const name = requiredString(value, "微信测试文件名无效", 255);
+  if (
+    name === "."
+    || name === ".."
+    || name.includes("/")
+    || name.includes("\\")
+    || Array.from(name).some((character) => {
+      const codePoint = character.codePointAt(0);
+      return codePoint !== undefined
+        && (codePoint <= 0x1f || codePoint === 0x7f);
+    })
+  ) {
+    throw new WeixinImageSendContractError(
+      "invalid-input",
+      "微信测试文件名无效",
+    );
+  }
+  return name;
 }
 
 function createApiHeaders(token, randomBytesImpl) {
@@ -674,22 +892,23 @@ async function readLimitedResponseText(response, maximumBytes) {
 async function main(argv) {
   if (argv.length === 0 || argv.includes("-h") || argv.includes("--help")) {
     process.stdout.write([
-      "微信图片反向发送合同探针（隔离验证，不保存图片或密钥）",
+      "微信图片与文件反向发送合同探针（隔离验证，不保存正文或密钥）",
       "",
       "用法：",
       "  node scripts/weixin-image-send-contract-probe.mjs send --live",
+      "  node scripts/weixin-image-send-contract-probe.mjs file --live",
       "",
       "运行前请停止 Gateway，避免两个 getupdates 消费者竞争消息。",
-      "显式执行后会等待一条已授权完成态文本，在内存生成固定 PNG、",
-      "按固定 v2.4.6 合同加密上传，并向同一微信会话发送一张测试图片。",
-      "不会输出或保存图片、上传地址、参数、密钥、Token、游标或完整用户标识。",
+      "send 会生成固定 PNG；file 会生成固定 UTF-8 文本文件。",
+      "两者都按固定 v2.4.6 合同加密上传并发送到同一微信会话。",
+      "不会输出或保存正文、上传地址、参数、密钥、Token、游标或完整用户标识。",
       "",
     ].join("\n"));
     return 0;
   }
   if (
     argv.length !== 2
-    || argv[0] !== "send"
+    || (argv[0] !== "send" && argv[0] !== "file")
     || argv[1] !== "--live"
   ) {
     process.stderr.write("参数无效；请使用 --help 查看用法。\n");
@@ -704,25 +923,37 @@ async function main(argv) {
     const connection = await loadConfiguredWeixinContractConnection(
       process.env,
     );
-    process.stdout.write(
-      "等待一条已授权微信文本；请现在向机器人发送“测试图片回复”。\n",
-    );
-    const result = await runWeixinImageSendContract({
-      updatesClient: createWeixinUpdatesContractClient(),
-      imageSendClient: createWeixinImageSendContractClient(),
-      ...connection,
-      signal: controller.signal,
-    });
+    const fileMode = argv[0] === "file";
+    process.stdout.write(fileMode
+      ? "等待一条已授权微信文本；请现在向机器人发送“测试文件回复”。\n"
+      : "等待一条已授权微信文本；请现在向机器人发送“测试图片回复”。\n");
+    const updatesClient = createWeixinUpdatesContractClient();
+    const mediaSendClient = createWeixinImageSendContractClient();
+    const result = fileMode
+      ? await runWeixinFileSendContract({
+          updatesClient,
+          fileSendClient: mediaSendClient,
+          ...connection,
+          signal: controller.signal,
+        })
+      : await runWeixinImageSendContract({
+          updatesClient,
+          imageSendClient: mediaSendClient,
+          ...connection,
+          signal: controller.signal,
+        });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     process.stdout.write(
-      "本次仅在内存验证反向图片；未保存消息、游标、上传参数、密钥或图片正文。\n",
+      fileMode
+        ? "本次仅在内存验证反向文件；未保存消息、游标、上传参数、密钥或文件正文。\n"
+        : "本次仅在内存验证反向图片；未保存消息、游标、上传参数、密钥或图片正文。\n",
     );
     return result.outbound?.kind === "success" ? 0 : 1;
   } catch (error) {
     const message = error instanceof WeixinImageSendContractError
       || error?.name === "WeixinUpdatesContractError"
       ? error.message
-      : "微信图片反向发送合同探针失败";
+      : "微信媒体反向发送合同探针失败";
     process.stderr.write(`${message}\n`);
     return 1;
   } finally {

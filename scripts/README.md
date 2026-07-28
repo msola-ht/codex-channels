@@ -76,11 +76,11 @@
   安全上限；按消息提供的 key 执行 AES-128-ECB 解密，只报告大小、声明长度和 MD5 是否匹配、
   文件名形状及由扩展名推断的 MIME，不输出或保存文件名、文件正文、MD5、下载地址、查询参数、
   key、Token、游标或完整身份，不注册常驻 Surface。
-- `weixin-image-send-contract-probe.mjs`：显式 `send --live` 后从一条已授权完成态微信文本中
-  仅在内存取得回复上下文，生成固定 PNG，按固定 `v2.4.6` 合同申请官方 CDN 上传地址、
-  AES-128-ECB 加密并以二进制 `POST` 上传，再发送单张图片消息；上传缺少下载参数时有限重试，
-  4xx 立即失败；不输出或保存图片、上传地址、参数、key、Token、游标或完整身份，不注册常驻
-  Surface。
+- `weixin-image-send-contract-probe.mjs`：显式 `send --live` 或 `file --live` 后从一条已授权
+  完成态微信文本中仅在内存取得回复上下文；前者生成固定 PNG，后者生成固定 UTF-8 文本文件，
+  均按固定 `v2.4.6` 合同申请官方 CDN 上传地址、AES-128-ECB 加密并以二进制 `POST` 上传，
+  再发送单张图片或单个一般文件消息；上传缺少下载参数时有限重试，4xx 立即失败；不输出或保存
+  媒体正文、上传地址、参数、key、Token、游标或完整身份，不注册常驻 Surface。
 - `check-gateway-version.mjs`：校验 npm 包和 Gateway 版本都与 Codex CLI 协议版本一致。
 - `check-docs.mjs`：校验项目 Markdown 本地链接、根文档索引、源码模块索引、协议数字和相关目录
   文件索引，并拒绝已移除的文档名称；常规项目文档检查排除 `.codex/skills/**` 附带的技能参考资料。
