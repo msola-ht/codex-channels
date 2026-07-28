@@ -159,6 +159,23 @@ export class WeixinOutbox implements SurfaceOutputPort {
     );
   }
 
+  deliverTextSequence(
+    target: ConversationTarget,
+    texts: readonly string[],
+  ): Promise<void> {
+    if (this.closed || !this.matches(target)) {
+      return Promise.reject(new Error("微信输出目标无效或队列已关闭"));
+    }
+    return this.delivery.runOrdered(
+      target.conversationId,
+      async () => {
+        for (const text of texts) {
+          await this.send(target, text);
+        }
+      },
+    );
+  }
+
   async close(): Promise<void> {
     if (this.closed) {
       await this.delivery.close();

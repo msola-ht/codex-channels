@@ -94,7 +94,6 @@ export class WeixinSurface implements SurfaceAdapter {
     this.logger = options.logger;
     this.images = options.images;
     this.accountId = options.accountId;
-    this.interactions = new WeixinInteractionPort();
     const typing = options.typingClient === undefined
       ? undefined
       : new WeixinTypingController(
@@ -128,6 +127,12 @@ export class WeixinSurface implements SurfaceAdapter {
             }),
       },
     );
+    this.interactions = new WeixinInteractionPort(
+      this.output,
+      options.actorRegistry,
+      options.access,
+      options.logger,
+    );
     this.input = new WeixinInputAdapter({
       accountId: options.accountId,
       client: options.client,
@@ -136,6 +141,7 @@ export class WeixinSurface implements SurfaceAdapter {
       outbox: this.output,
       access: options.access,
       replyContexts,
+      interactions: this.interactions,
       ...(options.images === undefined ? {} : { images: options.images }),
       ...(options.files === undefined ? {} : { files: options.files }),
       ...(options.replyContextPersistence === undefined

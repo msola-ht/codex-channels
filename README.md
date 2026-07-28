@@ -45,7 +45,10 @@
   429 或 5xx 连续故障时自动退避恢复，不停止 Telegram、飞书或共享 App Server；官方 `-14`
   Token 失效会暂停微信轮询并在日志提示重新执行 Setup。微信 `/status` 会追加当前轮询、短重试、
   退避、Token 失效暂停或停止状态，以及按 Gateway 本地时间显示的当前消息到达前上一次后台成功
-  轮询时间、连续失败次数和预计恢复时间。
+  轮询时间、连续失败次数和预计恢复时间。命令、文件修改和临时权限审批会发送带随机一次性 ID
+  的精确 `/approve <id> ...` 或 `/deny <id>` 命令；回复数字、“同意”、错误或过期 ID 均不会
+  批准。审批绑定当前账号、私聊 Actor、Conversation、Thread、Turn 与 App Server 请求，
+  用户输入和 MCP 表单在微信仍失败关闭。
 - 查看 Codex 流式回复、格式化最终回复、操作过程、计划、Diff、Goal、用量和额度；长文本自动折叠，超长代码以预览加完整文件发送；Telegram 与飞书的 `/status`、启动联通通知和每轮结束状态卡均显示当前授权 Workspace 的 Git 分支；`/status` 还显示 Thread 累计缓存命中率，每轮结束状态卡显示最近 Turn 缓存命中率、当前 Goal 状态及 Thread 上下文压缩总次数，飞书把 App Server 返回的准确对话耗时单独放在卡片底栏。
 - App Server 明确返回的 Turn、warning 和 MCP 错误会在统一脱敏并限长后显示到对应通讯渠道；未知内部异常、凭据和未经约束的响应正文仍不会直接发送。
 - Telegram 通知按逻辑事件降噪：过程、状态、上下文和后续分片静默发送；最终回复、审批、用户输入与严重错误保留提醒。
@@ -159,7 +162,8 @@ Setup 默认保存 `enabled = false`，避免扫码完成后在操作者确认�
 `credentials/weixin-reply-context` 安全后端加密保存每个
 已绑定私聊的最近回复上下文，用于重启上线通知和重启后恢复关键输出。回复上下文不进入 TOML、
 SQLite 或日志；撤权目标不会收到通知。`codexc doctor` 会只读检查连接凭据是否存在且载荷有效，
-不显示 Token。微信暂不支持二进制文件、语音、视频、群聊、一般主动推送或审批；当前图片
+不显示 Token。微信暂不支持二进制文件、语音、视频、群聊、一般主动推送、用户输入或 MCP
+表单交互；当前图片
 输出只处理活动 Turn 中 App Server 明确返回的 `imageGeneration.savedPath`。
 
 最终回复默认把常用 Markdown 安全转换为兼容性更好的 Telegram HTML。支持 Rich Messages

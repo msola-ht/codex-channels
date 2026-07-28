@@ -2,7 +2,7 @@
 
 当前实现单账号私聊文本、图片与 UTF-8 文本文件 Surface：独立安全凭据边界、运行时窄协议 Client、私有游标检查点、
 私聊输入 Adapter、完整命令 Adapter、加密重启上线通知、Turn 生命周期统计、文本与生成图片 Outbox、
-失败关闭交互端口和目录内部完整 `SurfaceAdapter`；严格运行配置显式启用时由 Bootstrap 注册，
+一次性精确文本审批端口和目录内部完整 `SurfaceAdapter`；严格运行配置显式启用时由 Bootstrap 注册，
 未新增 SQLite Schema。
 
 - `credential-store.ts`：严格校验版本 1 微信 Bot 凭据；macOS 使用独立 Keychain Service，
@@ -75,8 +75,11 @@
   授权，通过共享 Conversation 队列顺序发送，单条最多 4000 个 UTF-16 码元、最多五条并显示
   截断提示，避免拆开代理对。生成图片独立于操作展示档位，读取前后各复查授权；`imageView`
   和用户上传图片不会自动外发。
-- `interactions.ts`：审批立即拒绝、用户输入返回空答案、MCP elicitation 立即取消，不用普通
-  微信文本模拟高权限交互。
+- `interactions.ts`：命令、文件和临时权限审批使用 96 位随机、一次性、限时的 ID，提示用户完整
+  复制 `/approve <id> once|session|rule|network <序号>` 或 `/deny <id>`；只接受当前请求实际
+  提供的原值决定，并再次绑定账号、Conversation、唯一授权 Actor、Thread、Turn 和请求 ID。
+  裸数字、“同意”、畸形、未知、重复、过期或跨账号/Actor/会话命令不会批准；用户输入返回空
+  答案，MCP elicitation 仍立即取消。
 - `surface.ts`：共享一个内存回复上下文组合 Input、Outbox、Typing 与 InteractionPort；启动时只为当前
   允许名单中已有绑定且存在加密回复上下文的私聊恢复收件人并发送上线通知，通知失败不停止长轮询；
   停止时先取消输入，再取消交互并排空输出，重复停止安全。一般主动配置通知仍明确失败关闭。

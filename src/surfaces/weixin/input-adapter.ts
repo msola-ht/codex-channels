@@ -18,6 +18,7 @@ import {
 import { WeixinConversationAdapter } from "./conversation-adapter.js";
 import type { WeixinFilePort } from "./file-input.js";
 import type { WeixinImagePort } from "./image-store.js";
+import type { WeixinInteractionPort } from "./interactions.js";
 import type { WeixinOutbox } from "./outbox.js";
 import type { WeixinUpdatesCursorStore } from "./updates-cursor-store.js";
 import {
@@ -61,6 +62,7 @@ export interface WeixinInputAdapterOptions {
   ): Promise<void>;
   removePersistedReplyContext?(target: ConversationTarget): Promise<void>;
   actorRegistry?: ConversationActorRegistry;
+  interactions?: Pick<WeixinInteractionPort, "handleText">;
   images?: Pick<WeixinImagePort, "download">;
   files?: Pick<WeixinFilePort, "download">;
   onFatal(error: WeixinInputFatalError): void;
@@ -173,6 +175,16 @@ export class WeixinInputAdapter {
       message.contextToken,
     );
     this.options.actorRegistry?.rememberActor(target, message.actorId);
+    if (
+      message.kind === "text"
+      && await this.options.interactions?.handleText(
+        target,
+        message.actorId,
+        message.text,
+      ) === "handled"
+    ) {
+      return;
+    }
     try {
       const conversationMessage = message.kind === "text"
         ? {

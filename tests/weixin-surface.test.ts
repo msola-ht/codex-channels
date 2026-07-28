@@ -84,6 +84,90 @@ describe("WeixinSurface", () => {
     expect(onFatal).not.toHaveBeenCalled();
   });
 
+  it("keeps an exact approval command in one message through the live input loop", async () => {
+    let releaseApproval!: (text: string) => void;
+    const approvalText = new Promise<string>((resolve) => {
+      releaseApproval = resolve;
+    });
+    let pollCount = 0;
+    const sendText = vi.fn<WeixinProtocolClient["sendText"]>(async () => {});
+    const client: WeixinProtocolClient = {
+      getUpdates: vi.fn(async (_cursor, signal) => {
+        pollCount += 1;
+        if (pollCount === 1) {
+          return inboundBatch("建立审批上下文");
+        }
+        if (pollCount === 2) {
+          const text = await approvalText;
+          return {
+            cursor: "cursor-two",
+            messages: [{
+              kind: "text" as const,
+              messageId: "approval-message",
+              actorId,
+              conversationId: actorId,
+              contextToken: "context-secret",
+              text,
+            }],
+          };
+        }
+        return await waitForAbort(signal);
+      }),
+      sendText,
+    };
+    const actorRegistry = actorRegistryFixture([actorId]);
+    const service = serviceFixture();
+    const surface = new WeixinSurface({
+      accountId,
+      client,
+      cursorStore: cursorStoreFixture(),
+      service,
+      access: accessFixture(true),
+      actorRegistry,
+      logger: pino({ level: "silent" }),
+      onFatal: vi.fn(),
+    });
+
+    await surface.start();
+    await vi.waitFor(() => {
+      expect(service.submit).toHaveBeenCalledWith(
+        target,
+        "建立审批上下文",
+      );
+    });
+    const pending = surface.interactions.request(target, {
+      type: "approval",
+      requestId: "surface-request",
+      kind: "command",
+      threadId: "thread",
+      turnId: "turn",
+      itemId: "item",
+      title: "Codex 请求执行命令",
+      detail: "x".repeat(4_000),
+      allowSession: false,
+      expiresInMs: 60_000,
+    });
+    await vi.waitFor(() => {
+      expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
+        text: expect.stringContaining("/approve "),
+      }));
+    });
+    const command = sendText.mock.calls
+      .map(([input]) => input.text)
+      .find((text) => /^\/approve [A-Za-z0-9_-]+ once$/u.test(text));
+    const token = command?.match(
+      /^\/approve ([A-Za-z0-9_-]+) once$/u,
+    )?.[1];
+    expect(token).toBeDefined();
+    releaseApproval(`/approve ${token!} once`);
+    await expect(pending).resolves.toEqual({
+      type: "approval",
+      approved: true,
+      scope: "once",
+    });
+    await surface.stop();
+  });
+
   it("restores an encrypted reply context and sends the startup notification", async () => {
     const replyContextPersistence = replyContextPersistenceFixture({
       version: 1,
@@ -501,11 +585,13 @@ function serviceFixture(): ConversationService & {
   };
 }
 
-function actorRegistryFixture(): ConversationActorRegistry & {
+function actorRegistryFixture(
+  actors: string[] = [],
+): ConversationActorRegistry & {
   rememberActor: ReturnType<typeof vi.fn>;
 } {
   return {
-    actors: vi.fn(() => []),
+    actors: vi.fn(() => actors),
     rememberActor: vi.fn<ConversationActorRegistry["rememberActor"]>(),
   };
 }

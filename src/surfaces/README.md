@@ -16,7 +16,7 @@
   私有原子游标检查点、可取消接收监控器、授权后提交 Application 的私聊文本、图片与 UTF-8
   文本文件输入 Adapter，
   以及复用统一会话命令服务的完整命令目录、加密回复上下文、重启上线通知和 Turn 完成统计；
-  文本与生成图片有界 Outbox、失败关闭交互端口和目录内部完整 `SurfaceAdapter`
+  文本与生成图片有界 Outbox、带随机一次性 ID 的精确文本审批端口和目录内部完整 `SurfaceAdapter`
   已实现；严格运行配置显式启用时由 Bootstrap 注册单账号私聊文本 Surface。
 
 `secure-credential-store.ts` 提供 Surface 内部复用的 macOS Keychain 和 Linux AES-256-GCM

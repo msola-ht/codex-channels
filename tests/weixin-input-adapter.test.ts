@@ -72,6 +72,110 @@ describe("WeixinInputAdapter", () => {
     expect(onFatal).not.toHaveBeenCalled();
   });
 
+  it("routes exact approval commands before ordinary conversation input", async () => {
+    let delivered = false;
+    const client: WeixinProtocolClient = {
+      getUpdates: vi.fn(async (_cursor, signal) => {
+        if (!delivered) {
+          delivered = true;
+          return {
+            cursor: "cursor-approval",
+            messages: [{
+              kind: "text" as const,
+              messageId: "approval-message",
+              actorId,
+              conversationId: actorId,
+              contextToken: "context-approval",
+              text: "/approve opaque-token once",
+            }],
+          };
+        }
+        return await waitForAbort(signal);
+      }),
+      sendText: vi.fn(async () => {}),
+    };
+    const interactions = {
+      handleText: vi.fn(async () => "handled" as const),
+    };
+    const service = serviceFixture();
+    const cursorStore = cursorStoreFixture();
+    const adapter = new WeixinInputAdapter({
+      accountId,
+      client,
+      cursorStore,
+      service,
+      outbox: outboxFixture(),
+      access: accessFixture(true),
+      replyContexts: new WeixinReplyContextStore(accountId),
+      interactions,
+      onFatal: vi.fn(),
+    });
+
+    await adapter.start();
+    await vi.waitFor(() => {
+      expect(cursorStore.set).toHaveBeenCalledWith(
+        accountId,
+        "cursor-approval",
+      );
+    });
+    await adapter.stop();
+
+    expect(interactions.handleText).toHaveBeenCalledWith(
+      target,
+      actorId,
+      "/approve opaque-token once",
+    );
+    expect(service.submit).not.toHaveBeenCalled();
+  });
+
+  it("keeps bare numbers as ordinary conversation text", async () => {
+    let delivered = false;
+    const client: WeixinProtocolClient = {
+      getUpdates: vi.fn(async (_cursor, signal) => {
+        if (!delivered) {
+          delivered = true;
+          return {
+            cursor: "cursor-number",
+            messages: [{
+              kind: "text" as const,
+              messageId: "number-message",
+              actorId,
+              conversationId: actorId,
+              contextToken: "context-number",
+              text: "1",
+            }],
+          };
+        }
+        return await waitForAbort(signal);
+      }),
+      sendText: vi.fn(async () => {}),
+    };
+    const interactions = {
+      handleText: vi.fn(async () => "not-command" as const),
+    };
+    const service = serviceFixture();
+    const cursorStore = cursorStoreFixture();
+    const adapter = new WeixinInputAdapter({
+      accountId,
+      client,
+      cursorStore,
+      service,
+      outbox: outboxFixture(),
+      access: accessFixture(true),
+      replyContexts: new WeixinReplyContextStore(accountId),
+      interactions,
+      onFatal: vi.fn(),
+    });
+
+    await adapter.start();
+    await vi.waitFor(() => {
+      expect(cursorStore.set).toHaveBeenCalledWith(accountId, "cursor-number");
+    });
+    await adapter.stop();
+
+    expect(service.submit).toHaveBeenCalledWith(target, "1");
+  });
+
   it("composes live polling health into the shared /status reply", async () => {
     let delivered = false;
     const client: WeixinProtocolClient = {

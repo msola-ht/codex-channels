@@ -24,7 +24,7 @@ export function formatWeixinOperation(
     return [
       heading,
       ...(record.detail
-        ? [safeWeixinDetail(compactOperationDetail(record.detail))]
+        ? [sanitizeWeixinMarkdownText(compactOperationDetail(record.detail))]
         : []),
       ...(duration ? [duration] : []),
     ].join(" · ");
@@ -32,13 +32,16 @@ export function formatWeixinOperation(
   return [
     heading,
     ...(record.detail
-      ? ["具体内容：", safeWeixinDetail(redactOperationDetail(record.detail))]
+      ? [
+          "具体内容：",
+          sanitizeWeixinMarkdownText(redactOperationDetail(record.detail)),
+        ]
       : []),
     ...(duration ? [duration] : []),
   ].join("\n\n");
 }
 
-function safeWeixinDetail(value: string): string {
+export function sanitizeWeixinMarkdownText(value: string): string {
   return value
     .replaceAll("`", "ˋ")
     .replaceAll("*", "＊")
