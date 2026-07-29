@@ -15,6 +15,11 @@ import type {
   ConversationActorRegistry,
   SurfaceAccessPolicy,
 } from "../../policy/index.js";
+import {
+  formatCancelledInteraction,
+  formatProcessedInteractionOutcome,
+  interactionOutcome,
+} from "../interaction-copy.js";
 import { sanitizeWeixinMarkdownText } from "./operation-format.js";
 
 type ApprovalRequest = Extract<InteractionRequest, { type: "approval" }>;
@@ -124,7 +129,7 @@ export class WeixinInteractionPort implements InteractionPort {
     void this.finish(
       token,
       safeInteractionDecision(pending.request),
-      "Codex 交互已在其他客户端处理。",
+      formatProcessedInteractionOutcome(interactionOutcome.resolvedElsewhere),
     );
   }
 
@@ -134,7 +139,7 @@ export class WeixinInteractionPort implements InteractionPort {
       void this.finish(
         token,
         safeInteractionDecision(pending.request),
-        `Codex 交互已取消：${outcome}。`,
+        formatCancelledInteraction(outcome),
       );
     }
   }
@@ -198,7 +203,7 @@ export class WeixinInteractionPort implements InteractionPort {
       void this.finish(
         token,
         safeInteractionDecision(request),
-        "Codex 交互请求已超时并取消。",
+        formatProcessedInteractionOutcome(interactionOutcome.timedOut),
       );
     }, request.expiresInMs);
     timer.unref();
@@ -260,7 +265,7 @@ export class WeixinInteractionPort implements InteractionPort {
       await this.finish(
         token,
         safeInteractionDecision(pending.request),
-        interactionCancelledOutcome(pending.request),
+        interactionCancelledOutcome(),
       );
       return;
     }
@@ -276,7 +281,7 @@ export class WeixinInteractionPort implements InteractionPort {
       await this.finish(
         token,
         resolution.decision,
-        `Codex 审批已处理：${resolution.outcome}。`,
+        formatProcessedInteractionOutcome(resolution.outcome),
       );
       return;
     }
@@ -365,7 +370,7 @@ export class WeixinInteractionPort implements InteractionPort {
         await this.finish(
           token,
           safeInteractionDecision(request),
-          "Codex 输入请求无法继续，已安全取消。",
+          formatProcessedInteractionOutcome(interactionOutcome.userInputFailed),
         );
       }
       return;
@@ -376,7 +381,7 @@ export class WeixinInteractionPort implements InteractionPort {
         type: "user-input",
         answers: Object.fromEntries(pending.answers),
       },
-      "Codex 输入已提交。",
+      formatProcessedInteractionOutcome(interactionOutcome.answered),
     );
   }
 
@@ -393,7 +398,7 @@ export class WeixinInteractionPort implements InteractionPort {
       await this.finish(
         token,
         { type: "elicitation", action: "accept", content: null },
-        "MCP 外部操作已确认完成。",
+        formatProcessedInteractionOutcome(interactionOutcome.completed),
       );
       return;
     }
@@ -407,7 +412,7 @@ export class WeixinInteractionPort implements InteractionPort {
         await this.finish(
           token,
           { type: "elicitation", action: "accept", content },
-          "MCP 表单已提交。",
+          formatProcessedInteractionOutcome(interactionOutcome.formSubmitted),
         );
         return;
       } catch {
@@ -813,12 +818,8 @@ function positiveNumber(value: string): boolean {
   return /^[1-9]\d*$/u.test(value) && Number.isSafeInteger(Number(value));
 }
 
-function interactionCancelledOutcome(request: InteractionRequest): string {
-  return request.type === "approval"
-    ? "Codex 审批已取消。"
-    : request.type === "user-input"
-      ? "Codex 输入请求已取消。"
-      : "MCP 交互已取消。";
+function interactionCancelledOutcome(): string {
+  return formatCancelledInteraction();
 }
 
 function sameTarget(

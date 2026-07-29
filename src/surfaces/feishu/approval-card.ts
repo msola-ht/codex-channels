@@ -2,6 +2,7 @@ import type {
   InteractionDecision,
   InteractionRequest,
 } from "../../approval/index.js";
+import { interactionProcessedTitle } from "../interaction-copy.js";
 import { contentTruncatedText } from "../output-copy.js";
 
 export interface FeishuLegacyCardDocument {
@@ -149,7 +150,7 @@ export function renderFeishuApprovalOutcomeCard(
       template: decision.approved ? "green" : "grey",
       title: {
         tag: "plain_text",
-        content: "Codex 审批已处理",
+        content: interactionProcessedTitle,
       },
     },
     elements: [

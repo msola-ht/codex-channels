@@ -1,5 +1,10 @@
 import { createDecipheriv, createHash } from "node:crypto";
 
+import {
+  formatTextFileDownloadFailed,
+  formatTextFileTooLarge,
+  formatUnsupportedTextFile,
+} from "../text-file-copy.js";
 import type { WeixinFileReference } from "./protocol-client.js";
 
 export const maximumWeixinTextFileBytes = 1_000_000;
@@ -85,7 +90,7 @@ export class WeixinFileInput implements WeixinFilePort {
       // CDN 地址、参数、AES key、文件名、正文和底层异常不得越过微信边界。
       throw new WeixinFileInputError(
         "download-failed",
-        "下载微信文件失败，请重新发送",
+        formatTextFileDownloadFailed("微信"),
       );
     }
   }
@@ -294,14 +299,14 @@ async function downloadCdnBytes(
 function tooLarge(): WeixinFileInputError {
   return new WeixinFileInputError(
     "too-large",
-    "微信文本文件超过 1,000,000 字节限制",
+    formatTextFileTooLarge("微信"),
   );
 }
 
 function unsupportedFile(): WeixinFileInputError {
   return new WeixinFileInputError(
     "unsupported",
-    "微信当前仅支持 UTF-8 文本文件",
+    formatUnsupportedTextFile("微信"),
   );
 }
 

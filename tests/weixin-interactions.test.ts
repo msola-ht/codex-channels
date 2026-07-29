@@ -51,7 +51,7 @@ describe("WeixinInteractionPort", () => {
     });
     expect(delivery.deliverText).toHaveBeenLastCalledWith(
       target,
-      "Codex 审批已处理：已批准一次。",
+      "Codex 交互已处理：已批准一次。",
     );
   });
 
@@ -489,7 +489,7 @@ describe("WeixinInteractionPort", () => {
     });
     expect(delivery.deliverText).toHaveBeenLastCalledWith(
       target,
-      "Codex 输入请求无法继续，已安全取消。",
+      "Codex 交互已处理：输入请求无法继续，已安全取消。",
     );
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({

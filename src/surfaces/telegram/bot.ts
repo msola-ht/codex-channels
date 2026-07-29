@@ -28,6 +28,7 @@ import {
   formatOperationFailure,
   interactionStoppedText,
 } from "../output-copy.js";
+import { formatTextFileTooLarge } from "../text-file-copy.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import { formatQuotedInput } from "../quoted-input.js";
 import {
@@ -326,7 +327,7 @@ export class TelegramSurface {
         && document.file_size > maximumTelegramTextFileBytes
       ) {
         await context.reply(
-          "Telegram 文本文件超过 1,000,000 字节限制。",
+          `${formatTextFileTooLarge("Telegram")}。`,
         );
         return;
       }

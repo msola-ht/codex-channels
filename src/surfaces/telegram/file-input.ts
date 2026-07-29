@@ -3,6 +3,11 @@ import type { Readable } from "node:stream";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
 
+import {
+  formatTextFileDownloadFailed,
+  formatTextFileTooLarge,
+  formatUnsupportedTextFile,
+} from "../text-file-copy.js";
 import type {
   ImageDownloadResponse,
   TelegramFileApi,
@@ -100,7 +105,7 @@ export class TelegramTextFileInput implements TelegramTextFilePort {
       // Bot API、文件地址、下载流和正文异常不得越过 Telegram 边界。
       throw new TelegramTextFileInputError(
         "download-failed",
-        "下载 Telegram 文件失败，请重新发送",
+        formatTextFileDownloadFailed("Telegram"),
       );
     }
   }
@@ -224,13 +229,13 @@ function createDownloader(
 function tooLarge(): TelegramTextFileInputError {
   return new TelegramTextFileInputError(
     "too-large",
-    "Telegram 文本文件超过 1,000,000 字节限制",
+    formatTextFileTooLarge("Telegram"),
   );
 }
 
 function unsupportedFile(): TelegramTextFileInputError {
   return new TelegramTextFileInputError(
     "unsupported",
-    "Telegram 当前仅支持 UTF-8 文本文件",
+    formatUnsupportedTextFile("Telegram"),
   );
 }

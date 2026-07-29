@@ -1,5 +1,10 @@
 import type { Readable } from "node:stream";
 
+import {
+  formatTextFileDownloadFailed,
+  formatTextFileTooLarge,
+  formatUnsupportedTextFile,
+} from "../text-file-copy.js";
 import { isSafeFeishuResourceIdentifier } from "./media.js";
 
 export const maximumFeishuTextFileBytes = 1_000_000;
@@ -81,7 +86,7 @@ export class FeishuFileInput implements FeishuFilePort {
       // SDK 响应、资源标识、文件名和底层流异常不得越过飞书边界。
       throw new FeishuFileInputError(
         "download-failed",
-        "下载飞书文件失败，请重新发送",
+        formatTextFileDownloadFailed("飞书"),
       );
     }
   }
@@ -173,13 +178,13 @@ function hasUnsupportedTextControl(value: string): boolean {
 function tooLarge(): FeishuFileInputError {
   return new FeishuFileInputError(
     "too-large",
-    "飞书文本文件超过 1,000,000 字节限制",
+    formatTextFileTooLarge("飞书"),
   );
 }
 
 function unsupportedFile(): FeishuFileInputError {
   return new FeishuFileInputError(
     "unsupported",
-    "飞书当前仅支持 UTF-8 文本文件",
+    formatUnsupportedTextFile("飞书"),
   );
 }

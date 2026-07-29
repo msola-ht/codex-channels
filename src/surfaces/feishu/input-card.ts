@@ -2,6 +2,7 @@ import type {
   InteractionDecision,
   InteractionRequest,
 } from "../../approval/index.js";
+import { interactionProcessedTitle } from "../interaction-copy.js";
 import type { FeishuCardDocument } from "./approval-card.js";
 
 export type FeishuInputAction = "submit" | "complete" | "cancel";
@@ -42,7 +43,7 @@ export function renderFeishuInputOutcomeCard(
 ): FeishuCardDocument {
   if (request.type === "elicitation" && request.mode === "url") {
     return legacyCard(
-      "Codex 交互已处理",
+      interactionProcessedTitle,
       request.title,
       [note(`处理结果：${outcome}`)],
       accepted(decision) ? "green" : "grey",
@@ -68,7 +69,7 @@ export function renderFeishuInputOutcomeCard(
     }
   }
   return cardKit(
-    "Codex 交互已处理",
+    interactionProcessedTitle,
     elements,
     accepted(decision) ? "green" : "grey",
   );

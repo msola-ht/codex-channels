@@ -8,6 +8,18 @@ import {
   conversationCommandHelpLines,
   formatConversationStatus,
 } from "../src/surfaces/conversation-command-format.js";
+import {
+  formatCancelledInteraction,
+  formatProcessedInteractionOutcome,
+  interactionCancelledTitle,
+  interactionOutcome,
+  interactionProcessedTitle,
+} from "../src/surfaces/interaction-copy.js";
+import {
+  formatTextFileDownloadFailed,
+  formatTextFileTooLarge,
+  formatUnsupportedTextFile,
+} from "../src/surfaces/text-file-copy.js";
 import { formatConfigurationChange } from "../src/surfaces/telegram/format.js";
 import {
   renderFeishuConfigurationChange,
@@ -26,6 +38,34 @@ import {
 } from "../src/surfaces/weixin/command-renderer.js";
 
 describe("shared surface copy contract", () => {
+  it("keeps interaction outcomes platform-neutral", () => {
+    expect(interactionProcessedTitle).toBe("Codex 交互已处理");
+    expect(interactionCancelledTitle).toBe("Codex 交互已取消");
+    expect(formatProcessedInteractionOutcome(interactionOutcome.answered))
+      .toBe("Codex 交互已处理：已提交回答。");
+    expect(formatProcessedInteractionOutcome(interactionOutcome.formSubmitted))
+      .toBe("Codex 交互已处理：已提交表单。");
+    expect(formatProcessedInteractionOutcome(interactionOutcome.resolvedElsewhere))
+      .toBe("Codex 交互已处理：已在其他客户端处理。");
+    expect(formatCancelledInteraction()).toBe("Codex 交互已取消。");
+    expect(formatCancelledInteraction("Gateway 已停止"))
+      .toBe("Codex 交互已取消：Gateway 已停止。");
+  });
+
+  it("keeps text-file error semantics aligned while naming the platform", () => {
+    for (const platform of ["Telegram", "飞书", "微信"]) {
+      const label = platform === "Telegram" ? "Telegram " : platform;
+      expect(formatTextFileDownloadFailed(platform))
+        .toBe(platform === "Telegram"
+          ? "下载 Telegram 文件失败，请重新发送"
+          : `下载${platform}文件失败，请重新发送`);
+      expect(formatTextFileTooLarge(platform))
+        .toBe(`${label}文本文件超过 1,000,000 字节限制`);
+      expect(formatUnsupportedTextFile(platform))
+        .toBe(`${label}当前仅支持 UTF-8 文本文件`);
+    }
+  });
+
   it("keeps the shared command directory in Feishu and Weixin help", () => {
     for (const line of conversationCommandHelpLines) {
       expect(renderFeishuHelp()).toContain(line);

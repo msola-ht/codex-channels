@@ -13,6 +13,10 @@ import type {
   ConversationActorRegistry,
   SurfaceAccessPolicy,
 } from "../../policy/index.js";
+import {
+  interactionCancelledTitle,
+  interactionOutcome,
+} from "../interaction-copy.js";
 import type { Logger } from "pino";
 import {
   renderFeishuApprovalCard,
@@ -95,7 +99,7 @@ export class FeishuInteractionPort implements InteractionPort {
       this.finish(
         token,
         safeInteractionDecision(pending.request),
-        "已在其他客户端处理",
+        interactionOutcome.resolvedElsewhere,
       );
     } else {
       this.resolvedBeforePending.add(token);
@@ -267,7 +271,7 @@ export class FeishuInteractionPort implements InteractionPort {
         this.finish(
           token,
           safeInteractionDecision(request),
-          "请求已超时",
+          interactionOutcome.timedOut,
         );
       }, request.expiresInMs);
       timer.unref();
@@ -284,7 +288,7 @@ export class FeishuInteractionPort implements InteractionPort {
         this.finish(
           token,
           safeInteractionDecision(request),
-          "已在其他客户端处理",
+          interactionOutcome.resolvedElsewhere,
         );
       }
     });
@@ -417,7 +421,7 @@ function mapInteractionDecision(
   if (action === "cancel") {
     return {
       decision: safeInteractionDecision(request),
-      outcome: "已取消",
+      outcome: interactionOutcome.cancelled,
     };
   }
   if (request.type === "user-input") {
@@ -433,7 +437,7 @@ function mapInteractionDecision(
             action: "accept",
             content: null,
           },
-          outcome: "已确认完成",
+          outcome: interactionOutcome.completed,
         }
       : undefined;
   }
@@ -489,7 +493,7 @@ function mapUserInputDecision(
   }
   return {
     decision: { type: "user-input", answers },
-    outcome: "已提交回答",
+    outcome: interactionOutcome.answered,
   };
 }
 
@@ -526,7 +530,7 @@ function mapElicitationFormDecision(
         action: "accept",
         content,
       },
-      outcome: "已提交表单",
+      outcome: interactionOutcome.formSubmitted,
     };
   } catch {
     return undefined;
@@ -543,7 +547,7 @@ function renderMismatchedOutcomeCard(title: string): FeishuCardDocument {
       template: "grey",
       title: {
         tag: "plain_text",
-        content: "Codex 交互已取消",
+        content: interactionCancelledTitle,
       },
     },
     elements: [{

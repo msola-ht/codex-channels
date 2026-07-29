@@ -12,6 +12,7 @@ import {
   type InteractionRequest,
 } from "../../approval/index.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
+import { interactionOutcome } from "../interaction-copy.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import {
   formatTelegramExpandableQuotePanelChunks,
@@ -163,7 +164,11 @@ export class TelegramInteractionPort implements InteractionPort {
         this.textTokenByChat.set(target.conversationId, token);
       }
       if (this.resolvedBeforePending.delete(token)) {
-        this.finish(token, safeInteractionDecision(request), "已在其他客户端处理");
+        this.finish(
+          token,
+          safeInteractionDecision(request),
+          interactionOutcome.resolvedElsewhere,
+        );
       }
     });
   }
@@ -260,7 +265,7 @@ export class TelegramInteractionPort implements InteractionPort {
         this.finish(
           token,
           safeInteractionDecision(pending.request),
-          "已在其他客户端处理",
+          interactionOutcome.resolvedElsewhere,
         );
       } else {
         this.resolvedBeforePending.add(token);
@@ -288,7 +293,7 @@ export class TelegramInteractionPort implements InteractionPort {
         this.finish(
           token!,
           { type: "user-input", answers: completeAnswers },
-          "已提交回答",
+          interactionOutcome.answered,
         );
         return true;
       }
@@ -324,7 +329,7 @@ export class TelegramInteractionPort implements InteractionPort {
         this.finish(
           token!,
           { type: "user-input", answers: pending.answers },
-          "已提交回答",
+          interactionOutcome.answered,
         );
         return true;
       }
@@ -340,7 +345,11 @@ export class TelegramInteractionPort implements InteractionPort {
     if (pending.request.type === "elicitation" && pending.request.mode === "form") {
       try {
         const content = JSON.parse(text) as unknown;
-        this.finish(token!, { type: "elicitation", action: "accept", content }, "已提交表单");
+        this.finish(
+          token!,
+          { type: "elicitation", action: "accept", content },
+          interactionOutcome.formSubmitted,
+        );
       } catch {
         await this.queue.runOrdered(
           pending.target.conversationId,
@@ -363,7 +372,11 @@ export class TelegramInteractionPort implements InteractionPort {
     if (!pending) {
       return false;
     }
-    this.finish(token!, safeInteractionDecision(pending.request), "已取消");
+    this.finish(
+      token!,
+      safeInteractionDecision(pending.request),
+      interactionOutcome.cancelled,
+    );
     return true;
   }
 
@@ -473,7 +486,9 @@ export class TelegramInteractionPort implements InteractionPort {
       this.finish(
         token!,
         { type: "elicitation", action: action === "a" ? "accept" : "cancel", content: null },
-        action === "a" ? "已确认" : "已取消",
+        action === "a"
+          ? interactionOutcome.completed
+          : interactionOutcome.cancelled,
       );
     } else if (pending.request.type === "user-input") {
       await this.handleUserInputCallback(context, pending, token!, action);
@@ -535,7 +550,7 @@ export class TelegramInteractionPort implements InteractionPort {
       this.finish(
         token,
         { type: "user-input", answers: pending.answers },
-        "已提交回答",
+        interactionOutcome.answered,
       );
       await context.answerCallbackQuery({ text: `已选择：${answer}` });
       return;
@@ -582,7 +597,7 @@ export class TelegramInteractionPort implements InteractionPort {
       this.finish(
         token,
         safeInteractionDecision(pending.request),
-        "Codex 输入请求无法继续，已安全取消",
+        interactionOutcome.userInputFailed,
       );
     }
   }
@@ -671,7 +686,11 @@ export class TelegramInteractionPort implements InteractionPort {
     };
   }
 
-  private finish(token: string, decision: InteractionDecision, outcome = "请求已超时"): void {
+  private finish(
+    token: string,
+    decision: InteractionDecision,
+    outcome: string = interactionOutcome.timedOut,
+  ): void {
     const pending = this.pendingByToken.get(token);
     if (!pending) {
       return;
