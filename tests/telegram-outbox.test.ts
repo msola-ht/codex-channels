@@ -752,6 +752,22 @@ describe("TelegramOutbox", () => {
     ]);
   });
 
+  it("flushes pending streamed text before a visible operation update", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle(textDelta("commentary", "先说明，再执行命令。", "commentary"));
+    outbox.handle(operationUpdated("command-1", "completed", "command", "git status --short"));
+    await vi.advanceTimersByTimeAsync(750);
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toHaveLength(2);
+    expect(api.sent[0]).toBe("先说明，再执行命令。");
+    expect(api.sent[1]).toContain("💻 <b>运行命令 · 已完成</b>");
+  });
+
   it("segments operations around agent replies in chronological order", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();

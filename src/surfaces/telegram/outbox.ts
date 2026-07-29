@@ -258,12 +258,22 @@ export class TelegramOutbox {
         return;
       }
       case "operation.updated": {
+        const turnKey = this.turnKey(event.threadId, event.turnId);
+        let streamFlushed = false;
+        const flushStreamBeforeOutput = (): void => {
+          if (streamFlushed) {
+            return;
+          }
+          streamFlushed = true;
+          this.flushStreamsBeforeVisibleOutput(chatId, turnKey);
+        };
         const imagePath = event.operation.imagePath;
         if (
           event.operation.kind === "imageGeneration"
           && event.operation.status === "completed"
           && imagePath !== undefined
         ) {
+          flushStreamBeforeOutput();
           this.enqueue(
             chatId,
             () => this.sendGeneratedImage(chatId, imagePath),
@@ -273,7 +283,6 @@ export class TelegramOutbox {
         if (this.options.operationUpdateDisplay === "hidden") {
           return;
         }
-        const turnKey = this.turnKey(event.threadId, event.turnId);
         const operationKey = this.operationKey(turnKey, event.operation.itemId);
         const disposition = this.approvalOperations.routeOperation(operationKey, {
           chatId,
@@ -286,6 +295,7 @@ export class TelegramOutbox {
         if (disposition === "hold") {
           return;
         }
+        flushStreamBeforeOutput();
         if (this.operationUpdates.accept(turnKey, event.operation, chatId)) {
           return;
         }
@@ -767,6 +777,17 @@ export class TelegramOutbox {
       return;
     }
     this.enqueueOperationSummary(chatId, buffered.summary, turnKey);
+  }
+
+  private flushStreamsBeforeVisibleOutput(chatId: string, turnKey: string): void {
+    for (const [key, state] of this.streams) {
+      if (state.turnKey !== turnKey || !state.timer) {
+        continue;
+      }
+      clearTimeout(state.timer);
+      state.timer = undefined;
+      this.enqueue(chatId, () => this.flush(chatId, key, false), true);
+    }
   }
 
   private enqueueOperationSummary(
