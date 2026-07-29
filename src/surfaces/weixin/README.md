@@ -25,6 +25,8 @@
   已验证的 4000 个 UTF-16 码元。
 - `cdn-download.ts`：统一校验固定官方 CDN 地址，并执行禁止重定向、30 秒超时和有界响应下载；
   图片与文件复用该传输边界，各自保留解密、大小、内容与完整性校验。
+- `media-crypto.ts`：统一解析媒体 Base64 AES Key 并执行 AES-128-ECB 解密；图片专属 Hex Key
+  入口与文件完整性校验仍留在各自边界。
 - `image-store.ts`：只接受固定官方微信 CDN，按 `image_item.aeskey` 或 `media.aes_key`
   执行 AES-128-ECB 解密；复用共享 10 MiB、PNG/JPEG 签名、`0700/0600` 私有暂存和过期清理，
   CDN 地址、查询参数、key 与响应正文不进入日志或用户消息。

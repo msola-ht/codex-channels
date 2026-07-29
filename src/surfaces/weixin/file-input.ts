@@ -1,4 +1,4 @@
-import { createDecipheriv, createHash } from "node:crypto";
+import { createHash } from "node:crypto";
 
 import {
   formatTextFileDownloadFailed,
@@ -9,6 +9,10 @@ import {
   downloadWeixinCdnBytes,
   resolveWeixinCdnUrl,
 } from "./cdn-download.js";
+import {
+  decryptWeixinMedia,
+  parseWeixinMediaAesKey,
+} from "./media-crypto.js";
 import type { WeixinFileReference } from "./protocol-client.js";
 
 export const maximumWeixinTextFileBytes = 1_000_000;
@@ -53,7 +57,7 @@ export class WeixinFileInput implements WeixinFilePort {
       }
       const key = reference.mediaAesKey === undefined
         ? undefined
-        : parseBase64AesKey(reference.mediaAesKey);
+        : parseWeixinMediaAesKey(reference.mediaAesKey);
       const encrypted = await downloadWeixinCdnBytes({
         fetchImpl: this.fetchImpl,
         url: resolveWeixinCdnUrl(reference),
@@ -64,7 +68,7 @@ export class WeixinFileInput implements WeixinFilePort {
       });
       const plaintext = key === undefined
         ? encrypted
-        : decryptFile(encrypted, key);
+        : decryptWeixinMedia(encrypted, key);
       if (plaintext.length > maximumWeixinTextFileBytes) {
         throw tooLarge();
       }
@@ -113,25 +117,6 @@ function validateFileName(value: string): string {
   return normalized;
 }
 
-function parseBase64AesKey(value: string): Buffer {
-  if (
-    value.length > 1_024
-    || !/^[A-Za-z0-9+/]+={0,2}$/u.test(value)
-    || value.length % 4 !== 0
-  ) {
-    throw new Error("invalid Weixin file AES key");
-  }
-  const decoded = Buffer.from(value, "base64");
-  if (decoded.length === 16) {
-    return decoded;
-  }
-  const ascii = decoded.toString("ascii");
-  if (decoded.length === 32 && /^[0-9a-fA-F]{32}$/u.test(ascii)) {
-    return Buffer.from(ascii, "hex");
-  }
-  throw new Error("invalid Weixin file AES key");
-}
-
 function parseDeclaredLength(value: string | undefined): number | undefined {
   if (value === undefined) {
     return undefined;
@@ -154,14 +139,6 @@ function parseDeclaredMd5(value: string | undefined): string | undefined {
     throw new Error("invalid Weixin file MD5");
   }
   return value.toLowerCase();
-}
-
-function decryptFile(value: Buffer, key: Buffer): Buffer {
-  if (value.length === 0 || value.length % 16 !== 0) {
-    throw new Error("invalid Weixin encrypted file length");
-  }
-  const decipher = createDecipheriv("aes-128-ecb", key, null);
-  return Buffer.concat([decipher.update(value), decipher.final()]);
 }
 
 function decodeUtf8Text(value: Buffer): string {

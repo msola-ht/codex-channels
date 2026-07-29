@@ -1,4 +1,3 @@
-import { createDecipheriv } from "node:crypto";
 import { Readable } from "node:stream";
 
 import type { Logger } from "pino";
@@ -13,6 +12,10 @@ import {
   downloadWeixinCdnBytes,
   resolveWeixinCdnUrl,
 } from "./cdn-download.js";
+import {
+  decryptWeixinMedia,
+  parseWeixinMediaAesKey,
+} from "./media-crypto.js";
 import type { WeixinImageReference } from "./protocol-client.js";
 
 export const maximumWeixinImageBytes = maximumManagedImageBytes;
@@ -82,7 +85,7 @@ export class WeixinImageStore implements WeixinImagePort {
       });
       const plaintext = encryption.key === undefined
         ? response
-        : decryptImage(response, encryption.key);
+        : decryptWeixinMedia(response, encryption.key);
       return await this.storage.store({
         stream: Readable.from([plaintext]),
         contentLength: plaintext.length,
@@ -107,36 +110,9 @@ function resolveEncryption(
     return { key: Buffer.from(reference.imageAesKey, "hex") };
   }
   if (reference.mediaAesKey !== undefined) {
-    return { key: parseBase64AesKey(reference.mediaAesKey) };
+    return { key: parseWeixinMediaAesKey(reference.mediaAesKey) };
   }
   return {};
-}
-
-function parseBase64AesKey(value: string): Buffer {
-  if (
-    value.length > 1_024
-    || !/^[A-Za-z0-9+/]+={0,2}$/u.test(value)
-    || value.length % 4 !== 0
-  ) {
-    throw new Error("invalid Weixin image AES key");
-  }
-  const decoded = Buffer.from(value, "base64");
-  if (decoded.length === 16) {
-    return decoded;
-  }
-  const ascii = decoded.toString("ascii");
-  if (decoded.length === 32 && /^[0-9a-fA-F]{32}$/u.test(ascii)) {
-    return Buffer.from(ascii, "hex");
-  }
-  throw new Error("invalid Weixin image AES key");
-}
-
-function decryptImage(value: Buffer, key: Buffer): Buffer {
-  if (value.length === 0 || value.length % 16 !== 0) {
-    throw new Error("invalid Weixin encrypted image length");
-  }
-  const decipher = createDecipheriv("aes-128-ecb", key, null);
-  return Buffer.concat([decipher.update(value), decipher.final()]);
 }
 
 function imageTooLarge(): UserFacingError {
