@@ -5,6 +5,11 @@
 
 当前版本要求 `codex-cli 0.145.0`，npm 包与 Gateway 直接使用同一版本号 `0.145.0`，不维护独立版本；版本不匹配时 Gateway 会拒绝启动。
 
+渠道只运输和呈现项目已经接入的 Codex CLI/App Server 能力；当前能力范围以
+[`docs/index.md`](docs/index.md) 的支持矩阵为准。平台 SDK 自身具备某项功能，或生成协议中
+出现某个类型，不代表 Gateway 已支持该能力。Setup、Doctor、菜单、输入状态、连接健康和平台
+媒体传输属于渠道运维或呈现能力，不建立第二套 Thread、Turn、历史、工具或审批语义。
+
 ## 功能
 
 - Telegram、飞书和微信均识别平台明确携带的回复/引用关系，把可验证的引用文字作为有界上下文与
@@ -25,9 +30,9 @@
 - 可选启用飞书企业自建应用，通过已授权用户的私聊文本提交 Turn；启动通知、短回复、命令结果、
   操作过程和每轮结束统计统一使用 CardKit 2.0 Markdown，持续模型增量使用原生流式卡片，错误与操作性提示
   保留纯文本；同一 Turn 的运行中与空闲状态已实现合并到一条
-  可更新消息，启动通知和每轮上下文状态已完成离线实现，私聊 PNG/JPEG 图片、命令审批卡片、
-  静态展示、操作终态、每轮状态、原生流式主路径及状态卡片更新已通过真实应用验收，启动通知、
-  CardKit 2.0 原生用户输入卡已通过真实验收，MCP form/URL 卡片仍待真实验收，
+  可更新消息。私聊 PNG/JPEG 图片、命令审批卡片、静态展示、操作终态、启动通知、每轮状态、
+  原生流式主路径、状态卡片更新和 CardKit 2.0 原生用户输入卡已通过真实应用验收；
+  MCP form/URL 卡片仍待真实验收，
   Codex 原生 `imageGeneration` 成功保存的 PNG/JPEG 会经安全文件校验、官方图片上传接口
   和私聊消息接口发送；该反向图片路径已完成离线验证，真实发送仍待验收。
   `/start`、`/help` 与机器人自定义菜单可打开分类命令中心卡片；
@@ -299,7 +304,7 @@ SOCKS `ALL_PROXY` 连接。目标未命中 `NO_PROXY` 时，无效或不支持�
 Telegram、飞书长连接与 App Server 均采用受约束的连接恢复；连续失败耗尽后 Gateway 会退出，
 由 launchd 或 systemd 自动拉起，避免进程存活但不再接收消息。
 
-Gateway 会监测用户 `config.toml`：新增 Workspace 和 Telegram 允许用户会直接热加载；Workspace 新增后，Telegram 会向授权用户发送通知，并提供直接切换按钮。Workspace 新增事件会先写入 `~/.codex-connect/data/config-events.json`，Gateway 热加载或重启并通过平台 API 实际发送成功后再确认删除，因此不会因配置监听合并或重启窗口静默丢失；平台 API 重试后仍失败时保留事件，等待下次启动或 `codexc service reload`，发送后、确认前崩溃可能导致重复通知。删除允许用户会先重启 Gateway 并清理其旧 Thread 绑定；Bot Token、Telegram 代理、数据库、默认模型等 Gateway 配置变化时，Gateway 会优雅退出并由 launchd 或 systemd 自动拉起，Codex App Server 保持运行。`codex.binary`、`codex.socket_path` 或有效 `network` 代理同时影响独立 App Server，需要重新执行 `codexc service install` 使两项服务采用新值。系统代理和标准环境变量会在每次服务启动时重新读取，不会复制进服务定义。配置校验失败时继续使用当前有效配置。Telegram 会通知热加载成功项、自动重启原因、需要重装的服务配置或加载失败状态，但不会发送原始配置和异常详情。可执行 `codexc service reload` 立即触发检查，无需等待文件监测。
+Gateway 会监测用户 `config.toml`：新增 Workspace 和各渠道允许用户列表中的受支持变更会直接热加载。Workspace 新增后，持久化事件会投递给各渠道当前可安全确定的授权收件人；Telegram 另外提供直接切换按钮，飞书和微信只使用已有授权绑定及各自安全收件人条件。Workspace 新增事件会先写入 `~/.codex-connect/data/config-events.json`，Gateway 热加载或重启并通过平台 API 实际发送成功后再确认删除，因此不会因配置监听合并或重启窗口静默丢失；平台 API 重试后仍失败时保留事件，等待下次启动或 `codexc service reload`，发送后、确认前崩溃可能导致重复通知。删除允许用户会先重启 Gateway 并清理其旧 Thread 绑定；Bot Token、Telegram 代理、数据库、默认模型等 Gateway 配置变化时，Gateway 会优雅退出并由 launchd 或 systemd 自动拉起，Codex App Server 保持运行。`codex.binary`、`codex.socket_path` 或有效 `network` 代理同时影响独立 App Server，需要重新执行 `codexc service install` 使两项服务采用新值。系统代理和标准环境变量会在每次服务启动时重新读取，不会复制进服务定义。配置校验失败时继续使用当前有效配置。三个渠道都会按各自安全收件人条件通知热加载成功项、自动重启原因、需要重装的服务配置或加载失败状态，但不会发送原始配置和异常详情。可执行 `codexc service reload` 立即触发检查，无需等待文件监测。
 
 飞书 `allowed_open_ids` 可热加载，并会清理已撤权 Actor 的旧绑定；启用状态、App ID 或 App Secret
 变化会重启 Gateway。飞书配置通知只发送给已有绑定且仍有授权 Actor 的私聊，不会广播凭据或
@@ -318,7 +323,7 @@ Gateway 会监测用户 `config.toml`：新增 Workspace 和 Telegram 允许用�
 - 扩展：`/skills`、`/mcp`、`/plugins`、`/rules <init|check>`
 - 交互：`/stop` 会优先停止当前待处理交互，没有待处理交互时停止当前 Turn；`/whoami`
 
-Telegram 只能选择预配置 Workspace，不能通过消息提交任意工作目录。命令和文件审批在 App Server
+三个渠道只能选择预配置 Workspace，不能通过消息提交任意工作目录。命令和文件审批在 App Server
 支持时提供“批准一次”“本次会话始终同意”和“拒绝”；命令审批收到 App Server 的精确规则提议时，
 还会提供“始终允许此前缀”或带精确域名的“始终允许/拒绝”网络规则，由 App Server 保存对应规则。
 网络专用审批会显示目标主机和协议，“本会话允许”也会标明其适用主机。
@@ -533,7 +538,8 @@ npm run codex:upgrade -- <目标版本>
 已有文件默认不覆盖；明确使用 `--force` 才会重新生成。生成后会自动调用当前 Codex CLI 验证，
 也可随时运行 `codexc rules check` 复查。规则与磁盘项目目录关联，不依赖该目录是否注册为
 `codexc ws`；Codex 只在项目受信任时加载，生成或修改后需重启 Codex。
-Telegram 可在当前选中的授权 Workspace 中运行 `/rules init` 或 `/rules check`；远程入口不会
+Telegram、飞书和微信均可在当前选中的授权 Workspace 中运行 `/rules init` 或 `/rules check`；
+远程入口不会
 向上搜索父项目，也不提供强制覆盖，并拒绝通过符号链接把规则写到 Workspace 外。
 
 CI 使用隔离 `CODEX_HOME` 运行 Fast 默认值和共享 Thread 设置通知合同测试；该测试不需要登录，
@@ -552,6 +558,8 @@ RUN_CODEX_INTEGRATION=1 npm test -- --run tests/real-app-server.test.ts
 ## 文档索引
 
 - [`docs/index.md`](docs/index.md)：Codex 官方文档、固定版本源码、协议数量与本项目实现映射。
+- [`docs/channel-acceptance-matrix.md`](docs/channel-acceptance-matrix.md)：Telegram、飞书和微信
+  的统一真实验收状态、待验收顺序与记录规则。
 - [`docs/upstream-sources.md`](docs/upstream-sources.md)：微信与飞书本地上游源码的固定基线、
   本地优先规则和显式更新流程。
 - [`docs/codex-cli-upgrade.md`](docs/codex-cli-upgrade.md)：CLI 协议生成、Codex 审查和验证流程。

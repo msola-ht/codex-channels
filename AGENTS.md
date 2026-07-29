@@ -141,6 +141,12 @@ Surface -> Application/Core <- Codex Client
 - Surface 通过编译期内置插件注册表显式接入，并通过统一的输入、输出、授权和审批接口调用
   Application/Core。每个插件 ID 必须与其返回的 Surface ID 一致，`surface + accountId` 不得重复；
   不扫描目录、不动态加载 npm 包，也不允许插件绕过组合根直接注册。
+- Surface 对外提供的 Codex 能力必须已经列入 `docs/index.md` 当前支持矩阵，并由当前锁定版本的
+  官方协议、受控类型、本地实现和验证共同支撑。平台 SDK 自身具备某项能力，不代表 Gateway 可以
+  把它解释为新的 Thread、Turn、Item、工具、审批或历史能力。
+- Setup、Doctor、菜单、输入状态、连接健康和平台媒体传输属于渠道运维或呈现能力，必须留在
+  Surface 边界；它们不得复制 Codex 状态、伪造 App Server 事件，或为协议未支持的行为建立
+  平行语义。
 - 所有外部输入先完成 Surface Actor 与 Workspace 授权，再调用会话能力。
 - App Server Reader 只负责读取、解析、关联 Response 和投递事件，不等待平台网络请求。
 - 平台输出使用有界队列；同一 Conversation 保持顺序，不同 Conversation 可以并行。

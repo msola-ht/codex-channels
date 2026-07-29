@@ -18,7 +18,7 @@
 - [`storage/`](storage/README.md)：最小绑定状态的可替换存储。
 - [`surfaces/`](surfaces/README.md)：外部平台适配器。
 
-依赖方向保持为 `Surface -> Application/Core <- Codex Client`，由 `bootstrap` 负责组合具体实现。每个一级模块通过自己的 `index.ts` 暴露公开能力，跨模块不得导入内部实现文件。核心模块不得依赖 Telegram、SQLite 或 launchd。Thread 生命周期端口和稳定快照由
+依赖方向保持为 `Surface -> Application/Core <- Codex Client`，由 `bootstrap` 负责组合具体实现。每个一级模块通过自己的 `index.ts` 暴露公开能力，跨模块不得导入内部实现文件。核心模块不得依赖任何平台 SDK、SQLite 或服务管理器。Thread 生命周期端口和稳定快照由
 `session-routing` 拥有，`codex-client` 负责把固定版本官方响应映射到该边界；Routing 不反向依赖
 Client 或生成协议。Turn、Review 和 Goal 的执行端口由 `application` 拥有；Goal 的稳定状态类型
 由 `conversation-core` 统一定义，供请求结果和通知归约共同使用，Client 只在适配边界构造官方输入

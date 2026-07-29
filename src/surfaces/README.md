@@ -4,6 +4,12 @@
 
 `index.ts` 是所有 Surface 的公开导出入口。
 
+Surface 只运输和呈现项目已经接入的 Codex CLI/App Server 能力。当前能力范围以
+[`docs/index.md`](../../docs/index.md) 的支持矩阵为准；平台 SDK 提供某项能力或生成协议中出现
+某个类型，不代表 Surface 可以自行建立新的 Thread、Turn、历史、工具或审批语义。Setup、
+Doctor、菜单、输入状态、连接健康和平台媒体传输属于渠道运维或呈现能力，不能伪装成 Codex
+原生功能。
+
 当前实现：
 
 - [`telegram/`](telegram/README.md)：Telegram Bot 输入、输出、交互、图片、UTF-8 文本文件和生命周期。
@@ -84,7 +90,7 @@ Surface 共用的中文短文本，不负责计时、状态或持久化。
 BOM 清理、控制字符拒绝和有界流读取；平台下载与错误类型仍留在各自 Surface。
 `runtime-status-format.ts` 统一账户、额度与 MCP Server 运行状态的稳定中文语义和脱敏；
 Telegram、飞书与微信分别通过 HTML 面板、CardKit Markdown 或按会话排序的纯文本气泡发送。
-`configuration-change-format.ts` 统一 Telegram 与飞书已有的配置热加载、重启、重装和失败通知；
+`configuration-change-format.ts` 统一 Telegram、飞书与微信已有的配置热加载、重启、重装和失败通知；
 Workspace 操作提示只在 Telegram 实际提供切换按钮时声明可点击。
 `operation-presentation.ts` 统一操作标题、状态、耗时与退出码元数据、敏感占位符和单行摘要；
 Telegram HTML、飞书 CardKit Markdown 与微信安全文本的转义、布局、分组和发送仍由各自
