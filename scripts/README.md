@@ -45,10 +45,10 @@
 - `write-upgrade-report.mjs`：把 CI 中生成的升级工作树写成 Markdown 摘要、文件清单、统计和
   二进制安全 Patch，并比较 `HEAD` 生成协议的 RPC 名称和顶层字段结构，合并逐阶段结果；生成
   或验证失败且没有差异时仍会输出报告。
-- `protocol-schema.mjs`：在同一文件系统临时生成、逐文件比较并安全替换协议类型目录。
-- `generate-protocol.mjs`：先在临时目录调用当前 Codex CLI 生成协议，成功后替换协议类型、
-  记录版本并同步 npm/Gateway 版本。
-- `check-protocol.mjs`：校验本机 Codex CLI 版本，并重新生成到临时目录确认类型逐文件一致。
+- `protocol-schema.mjs`：在同一文件系统按指定稳定/实验模式临时生成、逐文件比较并安全替换协议类型目录。
+- `generate-protocol.mjs`：先在临时目录调用当前 Codex CLI 的 `generate-ts --experimental`，
+  成功后替换协议类型、记录版本与实验状态并同步 npm/Gateway 版本；实验生成只服务于受控 Plan 边界。
+- `check-protocol.mjs`：校验本机 Codex CLI 版本，并按记录的实验状态重新生成到临时目录确认类型逐文件一致。
 - `weixin-qr-contract-probe.mjs`：阶段 0 隔离二维码合同探针；默认离线显示帮助，只有显式
   `qr --live` 并再次确认连接替换风险后才访问固定微信端点，严格裁剪状态、限制官方重定向域名
   并有限取消；不注册 Surface、不写配置或凭据，也不属于公开 `codexc` 命令。

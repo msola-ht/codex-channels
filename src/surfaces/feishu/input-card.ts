@@ -40,29 +40,38 @@ export function renderFeishuInputOutcomeCard(
   decision: Exclude<InteractionDecision, { type: "approval" }>,
   outcome: string,
 ): FeishuCardDocument {
-  return {
-    config: {
-      update_multi: true,
-      wide_screen_mode: true,
-    },
-    header: {
-      template: accepted(decision) ? "green" : "grey",
-      title: {
-        tag: "plain_text",
-        content: "Codex 交互已处理",
-      },
-    },
-    elements: [
-      plainText(request.title),
-      {
-        tag: "note",
-        elements: [{
-          tag: "plain_text",
-          content: `处理结果：${outcome}`,
-        }],
-      },
-    ],
-  };
+  if (request.type === "elicitation" && request.mode === "url") {
+    return legacyCard(
+      "Codex 交互已处理",
+      request.title,
+      [note(`处理结果：${outcome}`)],
+      accepted(decision) ? "green" : "grey",
+    );
+  }
+  const elements = [
+    markdown(`**处理结果：** ${escapeMarkdown(outcome)}`),
+  ];
+  if (
+    request.type === "user-input"
+    && decision.type === "user-input"
+    && Object.keys(decision.answers).length > 0
+  ) {
+    for (const question of request.questions) {
+      const answer = question.secret
+        ? "已提交（敏感内容不显示）"
+        : decision.answers[question.id]?.join("、");
+      if (answer) {
+        elements.push(markdown(
+          `**${escapeMarkdown(question.header)}：** ${escapeMarkdown(answer)}`,
+        ));
+      }
+    }
+  }
+  return cardKit(
+    "Codex 交互已处理",
+    elements,
+    accepted(decision) ? "green" : "grey",
+  );
 }
 
 function renderUserInputCard(
@@ -71,69 +80,63 @@ function renderUserInputCard(
 ): FeishuCardDocument {
   const formElements: Array<Record<string, unknown>> = [];
   request.questions.forEach((question, index) => {
-    const optionText = question.options.length > 0
-      ? `可选：${question.options.join(" / ")}${
-        question.allowOther ? "；也可输入其他内容" : ""
-      }`
-      : undefined;
-    formElements.push(
-      plainText(truncate(question.question, maximumDisplayLength)),
-    );
-    if (optionText) {
-      formElements.push(note(truncate(optionText, maximumDisplayLength)));
+    if (index > 0) {
+      formElements.push({ tag: "hr" });
     }
-    formElements.push({
-      tag: "input",
-      name: `q${index}`,
-      required: true,
-      input_type: question.secret ? "password" : "multiline_text",
-      ...(question.secret
-        ? { show_icon: false }
-        : { rows: 2, auto_resize: true, max_rows: 5 }),
-      max_length: maximumInputLength,
-      width: "fill",
-      label: {
-        tag: "plain_text",
-        content: truncate(
-          question.header || `问题 ${index + 1}`,
-          maximumLabelLength,
-        ),
-      },
-      label_position: "top",
-      placeholder: {
-        tag: "plain_text",
-        content: question.secret ? "请输入敏感内容" : "请输入回答",
-      },
-      fallback: {
-        tag: "fallback_text",
-        text: {
+    formElements.push(markdown(
+      `**${escapeMarkdown(truncate(
+        question.header || `问题 ${index + 1}`,
+        maximumLabelLength,
+      ))}**\n${escapeMarkdown(truncate(question.question, maximumDisplayLength))}`,
+    ));
+    if (question.options.length > 0) {
+      formElements.push({
+        tag: "select_static",
+        name: `q${index}_choice`,
+        required: !question.allowOther,
+        placeholder: {
           tag: "plain_text",
-          content: "请升级飞书客户端后填写此请求",
+          content: "请选择",
         },
-      },
-    });
+        options: question.options.map((option) => ({
+          text: {
+            tag: "plain_text",
+            content: truncate(option, maximumLabelLength),
+          },
+          value: option,
+        })),
+      });
+      if (question.allowOther) {
+        formElements.push(input(
+          `q${index}_other`,
+          "其他内容（可选）",
+          "如不采用上方选项，请在这里输入",
+          false,
+          false,
+        ));
+      }
+      return;
+    }
+    formElements.push(input(
+      `q${index}_text`,
+      question.secret ? "敏感回答" : "回答",
+      question.secret ? "请输入敏感内容" : "请输入回答",
+      true,
+      question.secret,
+    ));
   });
-  formElements.push(
-    formSubmitButton("提交回答", interactionToken),
-  );
+  formElements.push({ tag: "hr" });
+  formElements.push(formSubmitButton("提交回答", interactionToken));
 
-  return card(
+  return cardKit(
     "Codex 需要补充信息",
-    request.title,
     [
       {
         tag: "form",
         name: "codexc_user_input",
         elements: formElements,
-        fallback: {
-          tag: "fallback_text",
-          text: {
-            tag: "plain_text",
-            content: "请升级飞书客户端后填写此请求",
-          },
-        },
       },
-      cancelAction(interactionToken),
+      actionButton("取消", "danger", interactionToken, "cancel"),
     ],
   );
 }
@@ -142,54 +145,20 @@ function renderFormElicitationCard(
   request: Extract<InteractionRequest, { type: "elicitation" }>,
   interactionToken: string,
 ): FeishuCardDocument {
-  return card(
+  return cardKit(
     "MCP 请求输入",
-    request.title,
     [
-      plainText(truncate(request.message, maximumDisplayLength)),
-      note("请填写有效 JSON。提交内容不会写入 Gateway 数据库或日志。"),
+      markdown(escapeMarkdown(truncate(request.message, maximumDisplayLength))),
+      markdown("请填写有效 JSON。提交内容不会写入 Gateway 数据库或日志。"),
       {
         tag: "form",
         name: "codexc_mcp_form",
         elements: [
-          {
-            tag: "input",
-            name: "content",
-            required: true,
-            input_type: "multiline_text",
-            rows: 4,
-            auto_resize: true,
-            max_rows: 8,
-            max_length: maximumInputLength,
-            width: "fill",
-            label: {
-              tag: "plain_text",
-              content: "JSON 内容",
-            },
-            label_position: "top",
-            placeholder: {
-              tag: "plain_text",
-              content: "{\"key\":\"value\"}",
-            },
-            fallback: {
-              tag: "fallback_text",
-              text: {
-                tag: "plain_text",
-                content: "请升级飞书客户端后填写此请求",
-              },
-            },
-          },
+          input("content", "JSON 内容", "{\"key\":\"value\"}", true, false, 4, 8),
           formSubmitButton("提交表单", interactionToken),
         ],
-        fallback: {
-          tag: "fallback_text",
-          text: {
-            tag: "plain_text",
-            content: "请升级飞书客户端后填写此请求",
-          },
-        },
       },
-      cancelAction(interactionToken),
+      actionButton("取消", "danger", interactionToken, "cancel"),
     ],
   );
 }
@@ -202,7 +171,7 @@ function renderUrlElicitationCard(
   if (!url) {
     throw new Error("飞书 MCP URL 无效");
   }
-  return card(
+  return legacyCard(
     "MCP 请求确认",
     request.title,
     [
@@ -227,10 +196,11 @@ function renderUrlElicitationCard(
   );
 }
 
-function card(
+function legacyCard(
   header: string,
   title: string,
   elements: Array<Record<string, unknown>>,
+  template: "blue" | "green" | "grey" = "blue",
 ): FeishuCardDocument {
   return {
     config: {
@@ -238,7 +208,7 @@ function card(
       wide_screen_mode: true,
     },
     header: {
-      template: "blue",
+      template,
       title: {
         tag: "plain_text",
         content: header,
@@ -248,6 +218,30 @@ function card(
       plainText(truncate(title, maximumDisplayLength)),
       ...elements,
     ],
+  };
+}
+
+function cardKit(
+  header: string,
+  elements: Array<Record<string, unknown>>,
+  template: "blue" | "green" | "grey" = "blue",
+): FeishuCardDocument {
+  return {
+    schema: "2.0",
+    config: {
+      update_multi: true,
+      wide_screen_mode: true,
+    },
+    header: {
+      template,
+      title: {
+        tag: "plain_text",
+        content: header,
+      },
+    },
+    body: {
+      elements,
+    },
   };
 }
 
@@ -282,22 +276,12 @@ function formSubmitButton(
       tag: "plain_text",
       content: text,
     },
-    name: "codexc_submit",
-    complex_interaction: true,
-    action_type: "form_submit",
+    name: `codexc_submit_${interactionToken}`,
+    form_action_type: "submit",
     value: {
       interaction_token: interactionToken,
       decision: "submit",
     },
-  };
-}
-
-function cancelAction(interactionToken: string): Record<string, unknown> {
-  return {
-    tag: "action",
-    actions: [
-      actionButton("取消", "danger", interactionToken, "cancel"),
-    ],
   };
 }
 
@@ -319,6 +303,48 @@ function actionButton(
       decision,
     },
   };
+}
+
+function input(
+  name: string,
+  label: string,
+  placeholder: string,
+  required: boolean,
+  secret: boolean,
+  rows = 2,
+  maximumRows = 5,
+): Record<string, unknown> {
+  return {
+    tag: "input",
+    name,
+    required,
+    input_type: secret ? "password" : "multiline_text",
+    ...(secret
+      ? { show_icon: false }
+      : { rows, auto_resize: true, max_rows: maximumRows }),
+    max_length: maximumInputLength,
+    width: "fill",
+    label: {
+      tag: "plain_text",
+      content: label,
+    },
+    label_position: "top",
+    placeholder: {
+      tag: "plain_text",
+      content: placeholder,
+    },
+  };
+}
+
+function markdown(content: string): Record<string, unknown> {
+  return {
+    tag: "markdown",
+    content,
+  };
+}
+
+function escapeMarkdown(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll(/([`*_~[\]()>#+\-.!|])/gu, "\\$1");
 }
 
 function accepted(

@@ -6,6 +6,7 @@ import type {
   OutputEvent,
 } from "../src/conversation-core/index.js";
 import {
+  feishuCardElements,
   FeishuMessageError,
   FeishuOutbox,
   type FeishuCardDocument,
@@ -1627,7 +1628,7 @@ function turnCompleted(): OutputEvent {
 }
 
 function statusCardText(card: FeishuCardDocument): string {
-  const element = card.elements[0] as {
+  const element = feishuCardElements(card)[0] as {
     text?: {
       content?: unknown;
     };

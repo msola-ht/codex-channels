@@ -74,6 +74,8 @@ describe("Feishu conversation adapter", () => {
       modelPending: false,
       effortPending: false,
       fastModePending: false,
+      collaborationMode: "default",
+      collaborationModePending: false,
     }));
     const adapter = new FeishuConversationAdapter(
       { status } as unknown as ConversationService,
@@ -825,6 +827,8 @@ describe("Feishu conversation adapter", () => {
       modelPending: false,
       effortPending: false,
       fastModePending: false,
+      collaborationMode: "default",
+      collaborationModePending: false,
     }));
     const adapter = new FeishuConversationAdapter(
       { submit, status } as unknown as ConversationService,
@@ -851,6 +855,7 @@ describe("Feishu conversation adapter", () => {
         "模型：gpt-test",
         "思考强度：medium",
         "Fast 模式：开启",
+        "协作模式：Default",
         "",
         "当前 Thread 用量：等待 App Server 推送统计",
       ].join("\n"),

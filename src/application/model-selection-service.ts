@@ -127,6 +127,7 @@ export class ModelSelectionService {
         serviceTier: hasServiceTierOverride(pending)
           ? pending.serviceTier ?? null
           : current.serviceTier,
+        collaborationMode: current.collaborationMode,
       });
     }
     this.pendingByConversation.delete(key);

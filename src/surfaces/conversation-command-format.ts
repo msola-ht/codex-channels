@@ -35,7 +35,7 @@ export const conversationCommandDescriptions = {
   permissions: "查看权限配置",
   rules: "生成或检查项目规则",
   diff: "查看当前 Turn Diff",
-  plan: "查看当前 Turn 计划",
+  plan: "切换 Plan 模式或直接开始规划",
   goal: "查看或管理 Goal",
 } satisfies Record<ConversationCommandName, string>;
 
@@ -54,7 +54,7 @@ export const conversationCommandHelpLines = [
   "/skills · /mcp · /plugins",
   "/usage · /limits · /permissions",
   "/rules <init|check>",
-  "/diff · /plan",
+  "/diff · /plan [规划需求]",
   "/goal [set <目标>|clear]",
 ] as const;
 
@@ -86,6 +86,8 @@ export function formatConversationCommandOutcome(
       return `已分叉并切换到新会话\nThread：${outcome.threadId}`;
     case "review.started":
       return `已启动 Codex Review\nTurn：${outcome.turnId}`;
+    case "plan.started":
+      return `已进入 Plan 模式并开始规划\nTurn：${outcome.turnId}`;
     case "goal.cleared":
       return "已清除当前 Thread Goal。";
     case "goal.updated":
@@ -179,27 +181,26 @@ export function formatConversationProjectRules(
 export function formatConversationArtifacts(
   result: Extract<ConversationCommandResult, { kind: "artifacts" }>,
 ): string {
-  if (result.view === "diff") {
-    return result.artifacts?.diff?.trim()
-      ? [
-          `Turn Diff · ${result.artifacts.turnId}`,
-          "",
-          result.artifacts.diff,
-        ].join("\n")
-      : "当前 Thread 暂无 Turn Diff。";
-  }
-  if (!result.artifacts?.plan) {
-    return "当前 Thread 暂无计划。";
-  }
-  const symbols = { pending: "○", inProgress: "◐", completed: "●" } as const;
+  return result.artifacts?.diff?.trim()
+    ? [
+        `Turn Diff · ${result.artifacts.turnId}`,
+        "",
+        result.artifacts.diff,
+      ].join("\n")
+    : "当前 Thread 暂无 Turn Diff。";
+}
+
+export function formatConversationCollaborationMode(
+  result: Extract<ConversationCommandResult, { kind: "collaboration-mode" }>,
+): string {
+  const label = result.state.mode === "plan" ? "Plan" : "Default";
   return [
-    `Turn 计划 · ${result.artifacts.turnId}`,
-    ...(result.artifacts.plan.explanation
-      ? [result.artifacts.plan.explanation, ""]
-      : []),
-    ...result.artifacts.plan.steps.map(
-      (step) => `${symbols[step.status]} ${step.step}`,
-    ),
+    `协作模式：${label}${result.state.pending ? "（下一次 Turn 生效）" : ""}`,
+    "",
+    result.state.mode === "plan"
+      ? "下一条普通消息将按 Plan 模式处理；再次发送 /plan 可切回 Default。"
+      : "下一条普通消息将按 Default 模式处理；发送 /plan 可切换到 Plan。",
+    "也可发送 /plan <规划需求>，直接进入 Plan 并开始规划。",
   ].join("\n");
 }
 
@@ -335,6 +336,7 @@ export function formatConversationStatus(status: ConversationStatus): string {
     `模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
     `思考强度：${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
     `Fast 模式：${status.threadId ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭") : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`,
+    `协作模式：${status.collaborationMode === "plan" ? "Plan" : "Default"}${status.collaborationModePending ? "（下一次 Turn 生效）" : ""}`,
   ];
   if (status.contextCompactionCount !== undefined) {
     lines.push(`上下文压缩：${status.contextCompactionCount} 次`);

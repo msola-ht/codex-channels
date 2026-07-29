@@ -45,6 +45,8 @@ describe("shared surface copy contract", () => {
       modelPending: false,
       effortPending: false,
       fastModePending: false,
+      collaborationMode: "default",
+      collaborationModePending: false,
       weeklyLimit: {
         usedPercent: 12,
         windowDurationMins: 10_080,
@@ -96,16 +98,10 @@ describe("shared surface copy contract", () => {
         rulesPath: "/workspace/main/.codex/rules/default.rules",
       },
       {
-        kind: "artifacts",
-        view: "plan",
-        artifacts: {
-          threadId: "thread-1",
-          turnId: "turn-1",
-          diff: "",
-          plan: {
-            explanation: "按步骤执行",
-            steps: [{ step: "完成测试", status: "completed" }],
-          },
+        kind: "collaboration-mode",
+        state: {
+          mode: "plan",
+          pending: true,
         },
       },
       {

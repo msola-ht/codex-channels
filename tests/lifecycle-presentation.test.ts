@@ -21,6 +21,8 @@ describe("shared Surface lifecycle presentation", () => {
           modelPending: false,
           effortPending: false,
           fastModePending: false,
+          collaborationMode: "default",
+          collaborationModePending: false,
           gitBranch: "feature/lifecycle",
           weeklyLimit: {
             usedPercent: 37,
@@ -59,6 +61,7 @@ describe("shared Surface lifecycle presentation", () => {
       "模型：gpt-test",
       "思考强度：medium",
       "Fast 模式：开启",
+      "协作模式：Default",
       "周限：已使用 37%",
     ].join("\n"));
   });

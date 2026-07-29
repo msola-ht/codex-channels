@@ -28,6 +28,7 @@ export {
   type FeishuCommandCenterActionResult,
 } from "./command-center.js";
 export {
+  feishuCardElements,
   renderFeishuApprovalCard,
   renderFeishuApprovalOutcomeCard,
   type FeishuApprovalAction,

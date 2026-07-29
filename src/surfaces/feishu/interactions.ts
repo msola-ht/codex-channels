@@ -168,7 +168,7 @@ export class FeishuInteractionPort implements InteractionPort {
       return "stale";
     }
     if (
-      action.tag !== "button"
+      !supportedActionTag(pending.request, action)
       || action.chatId !== pending.target.conversationId
       || action.messageId !== pending.messageId
       || action.actorOpenId !== pending.actorId
@@ -453,27 +453,56 @@ function mapUserInputDecision(
     return undefined;
   }
   const answers: Record<string, string[]> = {};
+  const allowedFields = new Set<string>();
   for (const [index, question] of request.questions.entries()) {
-    const answer = formValues[`q${index}`]?.trim();
+    let answer: string | undefined;
+    if (question.options.length > 0) {
+      const choiceField = `q${index}_choice`;
+      const otherField = `q${index}_other`;
+      allowedFields.add(choiceField);
+      const choice = formValues[choiceField]?.trim();
+      const other = question.allowOther
+        ? formValues[otherField]?.trim()
+        : undefined;
+      if (question.allowOther) {
+        allowedFields.add(otherField);
+      }
+      if (other) {
+        answer = other;
+      } else if (choice && question.options.includes(choice)) {
+        answer = choice;
+      }
+    } else {
+      const textField = `q${index}_text`;
+      allowedFields.add(textField);
+      answer = formValues[textField]?.trim();
+    }
     if (
       !answer
-      || (
-        question.options.length > 0
-        && !question.allowOther
-        && !question.options.includes(answer)
-      )
     ) {
       return undefined;
     }
     answers[question.id] = [answer];
   }
-  if (Object.keys(formValues).length !== request.questions.length) {
+  if (Object.keys(formValues).some((field) => !allowedFields.has(field))) {
     return undefined;
   }
   return {
     decision: { type: "user-input", answers },
     outcome: "已提交回答",
   };
+}
+
+function supportedActionTag(
+  request: InteractionRequest,
+  action: FeishuCardAction,
+): boolean {
+  if (action.tag === "button") {
+    return true;
+  }
+  return request.type !== "approval"
+    && action.tag === "form_submit"
+    && action.value.decision === "submit";
 }
 
 function mapElicitationFormDecision(

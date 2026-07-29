@@ -9,6 +9,7 @@ import type {
 import {
   conversationCommandHelpLines,
   formatConversationArtifacts,
+  formatConversationCollaborationMode,
   formatConversationCommandOutcome,
   formatConversationGoal,
   formatConversationLimits,
@@ -47,6 +48,8 @@ export function renderWeixinStartupNotification(
     | "modelPending"
     | "effortPending"
     | "fastModePending"
+    | "collaborationMode"
+    | "collaborationModePending"
     | "weeklyLimit"
     | "gitBranch"
   >,
@@ -105,6 +108,8 @@ export function renderWeixinCommandResult(
       return formatConversationWorkspaces(result);
     case "models":
       return formatConversationModels(result);
+    case "collaboration-mode":
+      return formatConversationCollaborationMode(result);
     case "skills":
       return formatConversationSkills(result);
     case "mcp":

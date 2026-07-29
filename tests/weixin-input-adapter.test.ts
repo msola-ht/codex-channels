@@ -213,6 +213,8 @@ describe("WeixinInputAdapter", () => {
         modelPending: false,
         effortPending: false,
         fastModePending: false,
+        collaborationMode: "default",
+        collaborationModePending: false,
       })),
     } as unknown as ConversationService;
     const adapter = new WeixinInputAdapter({

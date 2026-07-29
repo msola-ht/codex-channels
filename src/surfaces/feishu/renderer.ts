@@ -9,6 +9,7 @@ import type {
 import {
   conversationCommandHelpLines,
   formatConversationArtifacts,
+  formatConversationCollaborationMode,
   formatConversationCommandOutcome,
   formatConversationGoal,
   formatConversationLimits,
@@ -60,6 +61,8 @@ export function renderFeishuStartupNotification(
     | "modelPending"
     | "effortPending"
     | "fastModePending"
+    | "collaborationMode"
+    | "collaborationModePending"
     | "weeklyLimit"
     | "gitBranch"
   >,
@@ -108,6 +111,8 @@ export function renderFeishuCommandResult(
       return formatConversationWorkspaces(result);
     case "models":
       return formatConversationModels(result);
+    case "collaboration-mode":
+      return formatConversationCollaborationMode(result);
     case "skills":
       return formatConversationSkills(result);
     case "mcp":

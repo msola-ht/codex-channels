@@ -48,6 +48,34 @@ describe("decodeFeishuCardAction", () => {
     });
   });
 
+  it("normalizes a CardKit form submit from its bounded button name", () => {
+    const input = createAction();
+    input.action = {
+      tag: "form_submit",
+      name: "codexc_submit_opaque-token",
+      form_name: "codexc_user_input",
+      form_value: {
+        q0_choice: "测试环境",
+        q0_other: "",
+      },
+    };
+
+    expect(decodeFeishuCardAction(input)).toEqual({
+      messageId: "om_message",
+      chatId: "oc_chat",
+      actorOpenId: "ou_actor",
+      tag: "form_submit",
+      value: {
+        interaction_token: "opaque-token",
+        decision: "submit",
+      },
+      formValues: {
+        q0_choice: "测试环境",
+        q0_other: "",
+      },
+    });
+  });
+
   it.each<[unknown, FeishuCardActionField]>([
     [null, "event"],
     [{}, "context"],

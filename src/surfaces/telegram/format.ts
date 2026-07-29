@@ -207,7 +207,7 @@ export function formatConfigurationChange(
 
 export function formatStartupNotification(
   workspaces: Workspace[],
-  status: Pick<ConversationStatus, "threadId" | "workspaceId" | "model" | "effort" | "serviceTier" | "modelPending" | "effortPending" | "fastModePending" | "weeklyLimit" | "gitBranch">,
+  status: Pick<ConversationStatus, "threadId" | "workspaceId" | "model" | "effort" | "serviceTier" | "modelPending" | "effortPending" | "fastModePending" | "collaborationMode" | "collaborationModePending" | "weeklyLimit" | "gitBranch">,
   runtime: StartupRuntimeInfo,
 ): string {
   return renderPlainLifecyclePresentation(

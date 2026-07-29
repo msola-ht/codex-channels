@@ -14,6 +14,10 @@
   Plugin 和 Permission Profile 均使用稳定结果。
 - `model-selection-service.ts`：查询模型与思考强度，保存按 Conversation 生效的 Turn 覆盖设置；
   Fast 切换同时通过模型窄端口保存用户级默认层级，与原生 CLI 的重启行为一致。
+- `collaboration-mode-port.ts`：定义 Default/Plan 预设的稳定查询边界，不向 Application
+  暴露完整实验协议。
+- `collaboration-mode-service.ts`：把官方预设与当前模型设置组合为下一 Turn 的协作模式覆盖；
+  模式按 Thread 同步，只在内存保存尚未生效的选择。
 - `model-port.ts`：定义项目拥有的模型目录、思考强度、服务层级与 Fast 默认值写入窄端口；
   Application 和 Surface 不接收完整官方模型对象。
 - `account-port.ts`：定义账户 Token 用量、额度窗口、Credits 与消费控制的稳定查询结果；
@@ -34,7 +38,9 @@ Surface 应通过这里的用例接口驱动会话，不应直接拼装 JSON-RPC
 下一 Turn 队列按 Conversation 隔离、每个会话最多 10 条且只保存在内存中；`turn.completed`
 后一次启动一条，Thread 变化或启动失败时清空，不能把消息正文写入 StateStore。
 扩展查询也保持平台无关：Skill 只返回当前用户或 Workspace 直接安装且已启用的项，排除系统和插件缓存内容；MCP 只返回展示所需的稳定摘要，并按当前 Thread 读取项目级配置；Plugin 只返回已安装项的稳定摘要，不触发 `plugin/list` 市场目录查询。
-成功启动 Turn 后，模型、思考强度和服务层级以 App Server 的 Thread 设置为准；Gateway 重启时通过恢复 Thread 重新取得这些设置。
+成功启动 Turn 后，模型、思考强度、服务层级和协作模式以 App Server 的 Thread 设置为准；
+Gateway 重启时通过恢复 Thread 和设置通知重新取得这些设置。`/plan` 无参数切换
+Default/Plan，带参数时在空闲边界内直接启动 Plan Turn；活动 Turn 不允许中途切换。
 Turn、steer、停止、重命名、压缩、Review 和 Goal 只依赖 `TurnExecutionPort`；当前版本官方字段由
 `codex-client` 负责映射。Goal set/clear 请求成功后，Application 使用已确认结果立即更新 Core；
 App Server 通知继续处理其他客户端修改与恢复后的状态校正。

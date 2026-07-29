@@ -5,6 +5,7 @@ import type {
 } from "../../application/index.js";
 import {
   formatConversationArtifacts,
+  formatConversationCollaborationMode,
   formatConversationCommandOutcome,
   formatConversationGoal,
   formatConversationLimits,
@@ -58,6 +59,12 @@ export async function renderTelegramCommandResult(
     case "models":
       await replyTelegramPanel(context, formatConversationModels(result));
       return;
+    case "collaboration-mode":
+      await replyTelegramPanel(
+        context,
+        formatConversationCollaborationMode(result),
+      );
+      return;
     case "skills":
       await replyTelegramPanel(context, formatConversationSkills(result));
       return;
@@ -83,10 +90,6 @@ export async function renderTelegramCommandResult(
       );
       return;
     case "artifacts":
-      if (result.view === "plan") {
-        await replyTelegramPanel(context, formatConversationArtifacts(result));
-        return;
-      }
       for (const [index, chunk] of formatTelegramDiffChunks(
         formatConversationArtifacts(result),
       ).entries()) {

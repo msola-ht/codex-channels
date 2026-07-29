@@ -573,6 +573,233 @@ describe("TelegramInteractionPort", () => {
     });
   });
 
+  it("collects multiple user-input answers with buttons followed by ForceReply", async () => {
+    let nextMessageId = 10;
+    const sendMessage = vi.fn(async (
+      chatId: string,
+      text: string,
+      options?: unknown,
+    ) => {
+      void chatId;
+      void text;
+      void options;
+      return { message_id: nextMessageId++ };
+    });
+    const callbackQuery = vi.fn();
+    const bot = {
+      callbackQuery,
+      api: {
+        sendMessage,
+        editMessageText: vi.fn(async () => true as const),
+      },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    const decision = interactions.request(target, {
+      ...userInputRequest(),
+      questions: [
+        {
+          id: "deployment_environment",
+          header: "部署环境",
+          question: "请选择本次发布的部署环境。",
+          options: ["测试环境", "生产环境"],
+          allowOther: false,
+          secret: false,
+        },
+        {
+          id: "release_notes",
+          header: "本次发布说明",
+          question: "请填写本次发布说明。",
+          options: [],
+          allowOther: true,
+          secret: false,
+        },
+      ],
+    });
+    await settle();
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage.mock.calls[0]?.[1]).toContain("<b>问题 1/2：</b>部署环境");
+    expect(sendMessage.mock.calls[0]?.[1]).not.toContain("release_notes");
+    const firstOptions = sendMessage.mock.calls[0]?.[2] as {
+      reply_markup: {
+        inline_keyboard: Array<Array<{ text: string; callback_data?: string }>>;
+      };
+    };
+    const testButton = firstOptions.reply_markup.inline_keyboard
+      .flat()
+      .find((button) => button.text === "测试环境");
+    expect(testButton?.callback_data).toMatch(/^ix:q0\.0:/);
+
+    const callback = callbackQuery.mock.calls[0]?.[1] as
+      (context: Context) => Promise<void>;
+    await callback({
+      callbackQuery: { data: testButton!.callback_data! },
+      chat: { id: 100 },
+      answerCallbackQuery: vi.fn(async () => true as const),
+    } as unknown as Context);
+    await settle();
+
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(sendMessage.mock.calls[1]?.[1]).toContain("<b>问题 2/2：</b>本次发布说明");
+    expect(sendMessage.mock.calls[1]?.[2]).toEqual(expect.objectContaining({
+      reply_markup: expect.objectContaining({ force_reply: true }),
+    }));
+    expect(await interactions.handleText(textContext("测试发布", 11))).toBe(true);
+    await expect(decision).resolves.toEqual({
+      type: "user-input",
+      answers: {
+        deployment_environment: ["测试环境"],
+        release_notes: ["测试发布"],
+      },
+    });
+  });
+
+  it("safely cancels when the next user-input question cannot be delivered", async () => {
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+    } as unknown as Logger;
+    let nextMessageId = 30;
+    const sendMessage = vi.fn(async (
+      _chatId: string,
+      _text: string,
+      _options?: unknown,
+    ) => {
+      void _chatId;
+      void _text;
+      void _options;
+      if (nextMessageId > 30) {
+        throw new Error("private upstream detail");
+      }
+      return { message_id: nextMessageId++ };
+    });
+    const callbackQuery = vi.fn();
+    const bot = {
+      callbackQuery,
+      api: {
+        sendMessage,
+        editMessageText: vi.fn(async () => true as const),
+      },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, logger);
+    const decision = interactions.request(target, {
+      ...userInputRequest(),
+      questions: [
+        {
+          id: "environment",
+          header: "环境",
+          question: "请选择环境。",
+          options: ["测试", "生产"],
+          allowOther: false,
+          secret: false,
+        },
+        {
+          id: "notes",
+          header: "说明",
+          question: "请输入说明。",
+          options: [],
+          allowOther: true,
+          secret: false,
+        },
+      ],
+    });
+    await settle();
+
+    const options = sendMessage.mock.calls[0]?.[2] as {
+      reply_markup: {
+        inline_keyboard: Array<Array<{ text: string; callback_data?: string }>>;
+      };
+    };
+    const button = options.reply_markup.inline_keyboard.flat()[0]!;
+    const callback = callbackQuery.mock.calls[0]?.[1] as
+      (context: Context) => Promise<void>;
+    const answerCallbackQuery = vi.fn(async () => true as const);
+    await expect(callback({
+      callbackQuery: { data: button.callback_data! },
+      chat: { id: 100 },
+      answerCallbackQuery,
+    } as unknown as Context)).resolves.toBeUndefined();
+
+    expect(answerCallbackQuery).toHaveBeenCalledWith({ text: "已选择：测试" });
+    await expect(decision).resolves.toEqual({
+      type: "user-input",
+      answers: {},
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        surface: "telegram",
+        requestId: "request-input",
+        requestType: "user-input",
+        errorType: "Error",
+      }),
+      "Telegram 下一项输入请求发送失败",
+    );
+    expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain(
+      "private upstream detail",
+    );
+  });
+
+  it("opens a ForceReply prompt when an offered question chooses other content", async () => {
+    let nextMessageId = 20;
+    const sendMessage = vi.fn(async (
+      _chatId: string,
+      _text: string,
+      _options?: unknown,
+    ) => {
+      void _chatId;
+      void _text;
+      void _options;
+      return { message_id: nextMessageId++ };
+    });
+    const callbackQuery = vi.fn();
+    const bot = {
+      callbackQuery,
+      api: {
+        sendMessage,
+        editMessageText: vi.fn(async () => true as const),
+      },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    const decision = interactions.request(target, {
+      ...userInputRequest(),
+      questions: [{
+        id: "environment",
+        header: "部署环境",
+        question: "请选择部署环境。",
+        options: ["测试环境", "生产环境"],
+        allowOther: true,
+        secret: false,
+      }],
+    });
+    await settle();
+
+    const options = sendMessage.mock.calls[0]?.[2] as {
+      reply_markup: {
+        inline_keyboard: Array<Array<{ text: string; callback_data?: string }>>;
+      };
+    };
+    const otherButton = options.reply_markup.inline_keyboard
+      .flat()
+      .find((button) => button.text === "其他内容");
+    expect(otherButton?.callback_data).toMatch(/^ix:q0\.o:/);
+    const callback = callbackQuery.mock.calls[0]?.[1] as
+      (context: Context) => Promise<void>;
+    await callback({
+      callbackQuery: { data: otherButton!.callback_data! },
+      chat: { id: 100 },
+      answerCallbackQuery: vi.fn(async () => true as const),
+    } as unknown as Context);
+    await settle();
+
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(sendMessage.mock.calls[1]?.[1]).toContain("请输入其他内容");
+    expect(await interactions.handleText(textContext("预发布环境", 21))).toBe(true);
+    await expect(decision).resolves.toEqual({
+      type: "user-input",
+      answers: { environment: ["预发布环境"] },
+    });
+  });
+
   it("keeps a fixed-choice input pending until an offered option is submitted", async () => {
     const bot = {
       callbackQuery: vi.fn(),

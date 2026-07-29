@@ -89,17 +89,20 @@ describe("SessionRouter", () => {
       model: "gpt-main",
       effort: "high",
       serviceTier: "fast",
+      collaborationMode: "default",
     });
 
     router.updateModelSettings("idle", {
       model: "gpt-updated",
       effort: "xhigh",
       serviceTier: "default",
+      collaborationMode: "plan",
     });
     expect(router.modelSettings(target)).toEqual({
       model: "gpt-updated",
       effort: "xhigh",
       serviceTier: "default",
+      collaborationMode: "plan",
     });
   });
 
@@ -146,6 +149,7 @@ describe("SessionRouter", () => {
       model: "gpt-main",
       effort: "high",
       serviceTier: "priority",
+      collaborationMode: "default",
     });
     expect(router.contextCompactionItemIdsForThread("bound"))
       .toEqual(["compact-1", "compact-2"]);

@@ -495,9 +495,17 @@ describe("Feishu interaction port", () => {
     await settle();
 
     expect(fixture.sentCards).toHaveLength(1);
-    const cardJson = JSON.stringify(fixture.sentCards[0]!.card);
+    const card = fixture.sentCards[0]!.card;
+    const cardJson = JSON.stringify(card);
+    expect(card).toMatchObject({ schema: "2.0" });
     expect(cardJson).toContain("\"tag\":\"form\"");
+    expect(cardJson).toContain("\"name\":\"codexc_user_input\"");
+    expect(cardJson).toContain("\"tag\":\"select_static\"");
+    expect(cardJson).toContain("\"name\":\"q0_choice\"");
+    expect(cardJson).toContain("\"name\":\"q1_text\"");
     expect(cardJson).toContain("\"input_type\":\"password\"");
+    expect(cardJson).toContain("\"form_action_type\":\"submit\"");
+    expect(cardJson).not.toContain("\"fallback\"");
     const token = interactionToken(fixture.sentCards[0]!.card, "submit");
     const action = {
       messageId: "om_card",
@@ -509,8 +517,8 @@ describe("Feishu interaction port", () => {
         decision: "submit",
       },
       formValues: {
-        q0: "其他",
-        q1: "secret-value",
+        q0_choice: "其他",
+        q1_text: "secret-value",
       },
     };
 
@@ -518,8 +526,8 @@ describe("Feishu interaction port", () => {
     expect(fixture.interactions.handleCardAction({
       ...action,
       formValues: {
-        q0: "选项一",
-        q1: "secret-value",
+        q0_choice: "选项一",
+        q1_text: "secret-value",
       },
     })).toBe("accepted");
     await expect(decision).resolves.toEqual({
@@ -531,15 +539,54 @@ describe("Feishu interaction port", () => {
     });
     await fixture.interactions.close();
     expect(JSON.stringify(fixture.updatedCards[0]?.card))
-      .toContain("处理结果：已提交回答");
+      .toContain("已提交回答");
     expect(JSON.stringify(fixture.updatedCards[0]?.card))
       .not.toContain("secret-value");
+  });
+
+  it("prefers bounded custom text over a selected option when other input is allowed", async () => {
+    const fixture = createConfiguredFixture();
+    const request = userInputRequest();
+    request.questions = [{
+      ...request.questions[0]!,
+      allowOther: true,
+    }];
+    const decision = fixture.interactions.request(target, request);
+    await settle();
+
+    const cardJson = JSON.stringify(fixture.sentCards[0]!.card);
+    expect(cardJson).toContain("\"name\":\"q0_other\"");
+    const token = interactionToken(fixture.sentCards[0]!.card, "submit");
+    expect(fixture.interactions.handleCardAction({
+      messageId: "om_card",
+      chatId: target.conversationId,
+      actorOpenId: "ou_actor",
+      tag: "form_submit",
+      value: {
+        interaction_token: token,
+        decision: "submit",
+      },
+      formValues: {
+        q0_choice: "选项一",
+        q0_other: "自定义环境",
+      },
+    })).toBe("accepted");
+    await expect(decision).resolves.toEqual({
+      type: "user-input",
+      answers: {
+        choice: ["自定义环境"],
+      },
+    });
+    await fixture.interactions.close();
   });
 
   it("parses an MCP form as bounded JSON and keeps invalid submissions pending", async () => {
     const fixture = createConfiguredFixture();
     const decision = fixture.interactions.request(target, elicitationRequest());
     await settle();
+    const cardJson = JSON.stringify(fixture.sentCards[0]!.card);
+    expect(fixture.sentCards[0]!.card).toMatchObject({ schema: "2.0" });
+    expect(cardJson).toContain("\"name\":\"codexc_mcp_form\"");
     const token = interactionToken(fixture.sentCards[0]!.card, "submit");
     const action = {
       messageId: "om_card",

@@ -33,6 +33,8 @@ describe("Weixin command renderer", () => {
           modelPending: false,
           effortPending: false,
           fastModePending: false,
+          collaborationMode: "default",
+          collaborationModePending: false,
         },
       },
       {
@@ -134,6 +136,8 @@ describe("Weixin command renderer", () => {
         modelPending: false,
         effortPending: false,
         fastModePending: false,
+        collaborationMode: "default",
+        collaborationModePending: false,
         gitBranch: "feature/weixin-surface",
       },
       {

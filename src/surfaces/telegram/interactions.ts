@@ -27,6 +27,9 @@ interface PendingInteraction {
   timer: NodeJS.Timeout;
   messageId: number;
   messageText: string;
+  answers: Record<string, string[]>;
+  questionIndex: number;
+  awaitingOther: boolean;
 }
 
 export interface TelegramInteractionQueue {
@@ -82,10 +85,10 @@ export class TelegramInteractionPort implements InteractionPort {
       return safeInteractionDecision(request);
     }
     const token = randomBytes(12).toString("base64url");
-    const keyboard = this.keyboard(request, token);
+    const keyboard = this.keyboard(request, token, 0);
     const chunks = request.type === "approval"
       ? formatTelegramExpandableQuotePanelChunks(request.title, request.detail, 3_600)
-      : formatTelegramPanelChunks(formatInteraction(request), 3_600);
+      : formatTelegramPanelChunks(formatInteraction(request, 0), 3_600);
     this.tokenByRequest.set(request.requestId, token);
     this.queue.prepareInteraction(target.conversationId, request);
     const preparation = this.prepareInteraction(
@@ -151,6 +154,9 @@ export class TelegramInteractionPort implements InteractionPort {
         timer,
         messageId: message.message_id,
         messageText: chunks.at(-1)!,
+        answers: {},
+        questionIndex: 0,
+        awaitingOther: false,
       });
       this.latestTokenByChat.set(target.conversationId, token);
       if (request.type === "user-input" || (request.type === "elicitation" && request.mode === "form")) {
@@ -277,8 +283,26 @@ export class TelegramInteractionPort implements InteractionPort {
       return false;
     }
     if (pending.request.type === "user-input") {
-      const answers = parseAnswers(pending.request, text);
-      if (!answers) {
+      const completeAnswers = parseAnswers(pending.request, text);
+      if (completeAnswers) {
+        this.finish(
+          token!,
+          { type: "user-input", answers: completeAnswers },
+          "已提交回答",
+        );
+        return true;
+      }
+      const question = pending.request.questions[pending.questionIndex];
+      const answer = text.trim();
+      if (
+        !question
+        || (
+          !pending.awaitingOther
+          && question.options.length > 0
+          && !question.options.includes(answer)
+        )
+        || !isValidAnswer(question, answer)
+      ) {
         await this.queue.runOrdered(
           pending.target.conversationId,
           () => this.executor.call(
@@ -291,7 +315,26 @@ export class TelegramInteractionPort implements InteractionPort {
         );
         return true;
       }
-      this.finish(token!, { type: "user-input", answers }, "已提交回答");
+      pending.answers[question.id] = [answer];
+      const nextQuestion = nextUnansweredQuestion(
+        pending.request,
+        pending.answers,
+      );
+      if (nextQuestion === undefined) {
+        this.finish(
+          token!,
+          { type: "user-input", answers: pending.answers },
+          "已提交回答",
+        );
+        return true;
+      }
+      await this.tryMoveToUserInputQuestion(
+        pending,
+        token!,
+        nextQuestion,
+        false,
+        "已回答",
+      );
       return true;
     }
     if (pending.request.type === "elicitation" && pending.request.mode === "form") {
@@ -345,7 +388,12 @@ export class TelegramInteractionPort implements InteractionPort {
     }
   }
 
-  private keyboard(request: InteractionRequest, token: string): InlineKeyboard | undefined {
+  private keyboard(
+    request: InteractionRequest,
+    token: string,
+    questionIndex: number,
+    awaitingOther = false,
+  ): InlineKeyboard | undefined {
     if (request.type === "approval") {
       const keyboard = new InlineKeyboard().text("批准一次", `ix:a:${token}`);
       if (request.execPolicyAmendment) {
@@ -371,6 +419,25 @@ export class TelegramInteractionPort implements InteractionPort {
         keyboard.url("打开链接", request.url).row();
       }
       return keyboard.text("完成", `ix:a:${token}`).text("取消", `ix:c:${token}`);
+    }
+    if (request.type === "user-input" && !awaitingOther) {
+      const question = request.questions[questionIndex];
+      if (question && question.options.length > 0) {
+        const keyboard = new InlineKeyboard();
+        for (const [optionIndex, option] of question.options.entries()) {
+          keyboard.text(
+            option,
+            `ix:q${questionIndex}.${optionIndex}:${token}`,
+          ).row();
+        }
+        if (question.allowOther) {
+          keyboard.text(
+            "其他内容",
+            `ix:q${questionIndex}.o:${token}`,
+          ).row();
+        }
+        return keyboard;
+      }
     }
     return undefined;
   }
@@ -408,8 +475,200 @@ export class TelegramInteractionPort implements InteractionPort {
         { type: "elicitation", action: action === "a" ? "accept" : "cancel", content: null },
         action === "a" ? "已确认" : "已取消",
       );
+    } else if (pending.request.type === "user-input") {
+      await this.handleUserInputCallback(context, pending, token!, action);
+      return;
     }
     await context.answerCallbackQuery();
+  }
+
+  private async handleUserInputCallback(
+    context: Context,
+    pending: PendingInteraction,
+    token: string,
+    action: string | undefined,
+  ): Promise<void> {
+    if (pending.request.type !== "user-input") {
+      await context.answerCallbackQuery({ text: "该请求已失效" });
+      return;
+    }
+    const request = pending.request;
+    const match = /^q(\d+)\.(\d+|o)$/u.exec(action ?? "");
+    const questionIndex = match ? Number(match[1]) : -1;
+    const answerIndex = match?.[2];
+    const question = request.questions[questionIndex];
+    if (
+      !question
+      || questionIndex !== pending.questionIndex
+      || pending.awaitingOther
+    ) {
+      await context.answerCallbackQuery({ text: "该问题已处理" });
+      return;
+    }
+    if (answerIndex === "o") {
+      if (!question.allowOther) {
+        await context.answerCallbackQuery({ text: "该问题不支持其他内容" });
+        return;
+      }
+      await context.answerCallbackQuery({ text: "请回复其他内容" });
+      await this.tryMoveToUserInputQuestion(
+        pending,
+        token,
+        questionIndex,
+        true,
+        "已选择其他内容",
+      );
+      return;
+    }
+    const optionIndex = Number(answerIndex);
+    const answer = question.options[optionIndex];
+    if (!answer) {
+      await context.answerCallbackQuery({ text: "该选项已失效" });
+      return;
+    }
+    pending.answers[question.id] = [answer];
+    const nextQuestion = nextUnansweredQuestion(
+      request,
+      pending.answers,
+    );
+    if (nextQuestion === undefined) {
+      this.finish(
+        token,
+        { type: "user-input", answers: pending.answers },
+        "已提交回答",
+      );
+      await context.answerCallbackQuery({ text: `已选择：${answer}` });
+      return;
+    }
+    await context.answerCallbackQuery({ text: `已选择：${answer}` });
+    await this.tryMoveToUserInputQuestion(
+      pending,
+      token,
+      nextQuestion,
+      false,
+      `已选择：${answer}`,
+    );
+  }
+
+  private async tryMoveToUserInputQuestion(
+    pending: PendingInteraction,
+    token: string,
+    questionIndex: number,
+    awaitingOther: boolean,
+    outcome: string,
+  ): Promise<void> {
+    try {
+      await this.moveToUserInputQuestion(
+        pending,
+        token,
+        questionIndex,
+        awaitingOther,
+        outcome,
+      );
+    } catch (error) {
+      this.logger.warn(
+        {
+          surface: pending.target.surface,
+          accountId: pending.target.accountId,
+          conversationId: pending.target.conversationId,
+          requestId: pending.requestId,
+          requestType: pending.request.type,
+          threadId: pending.request.threadId,
+          turnId: pending.request.turnId,
+          ...telegramErrorMetadata(error),
+        },
+        "Telegram 下一项输入请求发送失败",
+      );
+      this.finish(
+        token,
+        safeInteractionDecision(pending.request),
+        "Codex 输入请求无法继续，已安全取消",
+      );
+    }
+  }
+
+  private async moveToUserInputQuestion(
+    pending: PendingInteraction,
+    token: string,
+    questionIndex: number,
+    awaitingOther: boolean,
+    outcome: string,
+  ): Promise<void> {
+    if (pending.request.type !== "user-input") {
+      throw new Error("Telegram 用户输入状态不匹配");
+    }
+    await this.updateInteractionMessage(
+      pending.target,
+      pending.requestId,
+      pending.messageId,
+      pending.messageText,
+      outcome,
+    );
+    const { message, messageText } = await this.sendUserInputQuestion(
+      pending.target,
+      pending.request,
+      token,
+      questionIndex,
+      awaitingOther,
+    );
+    pending.messageId = message.message_id;
+    pending.messageText = messageText;
+    pending.questionIndex = questionIndex;
+    pending.awaitingOther = awaitingOther;
+  }
+
+  private async sendUserInputQuestion(
+    target: ConversationTarget,
+    request: Extract<InteractionRequest, { type: "user-input" }>,
+    token: string,
+    questionIndex: number,
+    awaitingOther: boolean,
+  ): Promise<{
+    message: Awaited<ReturnType<Bot["api"]["sendMessage"]>>;
+    messageText: string;
+  }> {
+    const chunks = formatTelegramPanelChunks(
+      formatInteraction(request, questionIndex, awaitingOther),
+      3_600,
+    );
+    const keyboard = this.keyboard(
+      request,
+      token,
+      questionIndex,
+      awaitingOther,
+    );
+    const message = await this.queue.runOrdered(
+      target.conversationId,
+      async () => {
+        let sent: Awaited<ReturnType<typeof this.bot.api.sendMessage>>
+          | undefined;
+        for (const [index, chunk] of chunks.entries()) {
+          const isLast = index === chunks.length - 1;
+          sent = await this.executor.call(
+            {
+              chatId: target.conversationId,
+              operation: "sendMessage",
+              critical: true,
+            },
+            () => this.bot.api.sendMessage(
+              target.conversationId,
+              chunk,
+              isLast
+                ? interactionOptions(request, keyboard)
+                : { parse_mode: "HTML", disable_notification: true },
+            ),
+          );
+        }
+        return sent;
+      },
+    );
+    if (!message) {
+      throw new Error("Telegram 用户输入消息为空");
+    }
+    return {
+      message,
+      messageText: chunks.at(-1)!,
+    };
   }
 
   private finish(token: string, decision: InteractionDecision, outcome = "请求已超时"): void {
@@ -536,19 +795,44 @@ function unsupportedApprovalChoiceMessage(
   }
 }
 
-function formatInteraction(request: Exclude<InteractionRequest, { type: "approval" }>): string {
+function formatInteraction(
+  request: Exclude<InteractionRequest, { type: "approval" }>,
+  questionIndex = 0,
+  awaitingOther = false,
+): string {
   if (request.type === "user-input") {
-    const questions = request.questions.map((question) => {
-      const options = question.options.length ? `\n选项：${question.options.join(" / ")}` : "";
-      return `${question.id}: ${question.question}${options}`;
-    });
+    const question = request.questions[questionIndex]!;
+    const title = question.header.trim() || `问题 ${questionIndex + 1}`;
+    const instruction = awaitingOther
+      ? "请输入其他内容并回复本消息。"
+      : question.options.length > 0
+        ? "请选择下方按钮。"
+        : "请回复本消息。";
     const secretWarning = request.questions.some((question) => question.secret)
       ? "\n\n安全提示：Telegram 回复会保留在聊天记录中，请勿发送密钥、Token 或其他敏感凭据。"
       : "";
-    return `${request.title}\n\n${questions.join("\n\n")}\n\n请回复本消息。多个问题使用“问题ID=回答”，每行一个。${secretWarning}`;
+    return [
+      request.title,
+      "",
+      `问题 ${questionIndex + 1}/${request.questions.length}：${title}`,
+      question.question,
+      "",
+      instruction,
+      "发送 /stop 可停止当前请求。",
+    ].join("\n") + secretWarning;
   }
   const instruction = request.mode === "form" ? "请回复有效 JSON 对象，或发送 /stop 停止当前请求。" : "请打开链接完成操作，然后点击“完成”。";
   return `${request.title}\n\n${request.message}\n\n${instruction}`;
+}
+
+function nextUnansweredQuestion(
+  request: Extract<InteractionRequest, { type: "user-input" }>,
+  answers: Readonly<Record<string, string[]>>,
+): number | undefined {
+  const index = request.questions.findIndex((question) =>
+    answers[question.id] === undefined
+  );
+  return index < 0 ? undefined : index;
 }
 
 function interactionOptions(

@@ -185,6 +185,8 @@ describe("formatStartupNotification", () => {
         modelPending: false,
         effortPending: false,
         fastModePending: false,
+        collaborationMode: "default",
+        collaborationModePending: false,
         gitBranch: "feature/weixin-surface",
         weeklyLimit: {
           usedPercent: 42,
@@ -235,6 +237,8 @@ describe("formatStartupNotification", () => {
         modelPending: false,
         effortPending: false,
         fastModePending: false,
+        collaborationMode: "default",
+        collaborationModePending: false,
       },
       {
         platform: "freebsd",
@@ -342,6 +346,8 @@ describe("formatStatus", () => {
       modelPending: false,
       effortPending: false,
       fastModePending: false,
+      collaborationMode: "default",
+      collaborationModePending: false,
       contextCompactionCount: 2,
       goal: {
         threadId: "thread-1",
@@ -401,6 +407,8 @@ describe("formatStatus", () => {
       modelPending: false,
       effortPending: false,
       fastModePending: false,
+      collaborationMode: "default",
+      collaborationModePending: false,
     }))
       .toContain("等待 App Server 推送统计");
     const statusWithoutBranch = formatStatus({
@@ -414,6 +422,8 @@ describe("formatStatus", () => {
       modelPending: false,
       effortPending: false,
       fastModePending: false,
+      collaborationMode: "default",
+      collaborationModePending: false,
     });
     expect(statusWithoutBranch).toContain("Fast 模式：关闭");
     expect(statusWithoutBranch).toContain("Git 分支：未检测到");

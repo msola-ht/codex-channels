@@ -8,7 +8,10 @@ import {
 } from "../../application/index.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
-import type { FeishuCardDocument } from "./approval-card.js";
+import {
+  feishuCardElements,
+  type FeishuCardDocument,
+} from "./approval-card.js";
 import type { FeishuCardAction } from "./card-action.js";
 import type { FeishuOutbox } from "./outbox.js";
 
@@ -37,6 +40,7 @@ const directStateChangingActions = new Set<FeishuCommandCenterAction>([
   "archive",
   "compact",
   "fork",
+  "plan",
 ]);
 
 export const feishuCommandCenterActions = [
@@ -50,6 +54,7 @@ export const feishuCommandCenterActions = [
   "effort",
   "workspace",
   "goal",
+  "plan",
   "help",
 ] as const satisfies ReadonlyArray<FeishuCommandCenterAction>;
 
@@ -529,7 +534,6 @@ function renderFeishuCategorizedCommandsCard(
       actionRow(token, [
         ["权限", "permissions", "default"],
         ["Diff", "diff", "default"],
-        ["Plan", "plan", "default"],
         ["项目规则", "rules", "default"],
         ["Review", "review", "default"],
       ]),
@@ -592,6 +596,7 @@ export function renderFeishuCommandCenterCard(
       ]),
       actionRow(token, [
         ["Goal", "goal", "default"],
+        ["Plan 模式", "plan", "default"],
       ]),
       sectionTitle("更多"),
       actionRow(token, [
@@ -672,7 +677,7 @@ function collectCommandSelections(
   token: string,
 ): ReadonlySet<string> {
   const selections = new Set<string>();
-  for (const element of card.elements) {
+  for (const element of feishuCardElements(card)) {
     const actions: readonly unknown[] = Array.isArray(element.actions)
       ? element.actions as unknown[]
       : [];

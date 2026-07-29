@@ -44,6 +44,8 @@ describe("Feishu output renderer", () => {
         modelPending: false,
         effortPending: false,
         fastModePending: false,
+        collaborationMode: "default",
+        collaborationModePending: false,
         gitBranch: "feature/weixin-surface",
         weeklyLimit: {
           usedPercent: 37,
@@ -81,6 +83,7 @@ describe("Feishu output renderer", () => {
       "- **模型：** gpt-test",
       "- **思考强度：** medium",
       "- **Fast 模式：** 开启",
+      "- **协作模式：** Default",
       "- **周限：** 已使用 37%",
     ].join("\n"));
     expect(rendered).not.toContain("build-secret");
@@ -109,6 +112,8 @@ describe("Feishu output renderer", () => {
           modelPending: false,
           effortPending: false,
           fastModePending: false,
+          collaborationMode: "default",
+          collaborationModePending: false,
         },
       },
       {
@@ -230,6 +235,8 @@ describe("Feishu output renderer", () => {
         modelPending: false,
         effortPending: false,
         fastModePending: false,
+        collaborationMode: "default",
+        collaborationModePending: false,
         tokenUsage: {
           total: {
             totalTokens: 1_000,
@@ -537,18 +544,12 @@ describe("Feishu output renderer", () => {
       },
     })).toContain("+新增");
     expect(renderFeishuCommandResult({
-      kind: "artifacts",
-      view: "plan",
-      artifacts: {
-        threadId: "thread-1",
-        turnId: "turn-1",
-        diff: "",
-        plan: {
-          explanation: "按步骤执行",
-          steps: [{ step: "完成测试", status: "completed" }],
-        },
+      kind: "collaboration-mode",
+      state: {
+        mode: "plan",
+        pending: true,
       },
-    })).toContain("● 完成测试");
+    })).toContain("协作模式：Plan（下一次 Turn 生效）");
     expect(renderFeishuCommandResult({
       kind: "goal",
       goal: {

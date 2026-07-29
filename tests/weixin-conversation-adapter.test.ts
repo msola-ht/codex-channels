@@ -361,6 +361,8 @@ describe("WeixinConversationAdapter", () => {
       modelPending: false,
       effortPending: false,
       fastModePending: false,
+      collaborationMode: "default",
+      collaborationModePending: false,
     }));
     const newSession = vi.fn(async () => {});
     const stop = vi.fn(async () => true);
@@ -422,6 +424,8 @@ describe("WeixinConversationAdapter", () => {
           modelPending: false,
           effortPending: false,
           fastModePending: false,
+          collaborationMode: "default",
+          collaborationModePending: false,
         })),
       }),
       { notifyText },

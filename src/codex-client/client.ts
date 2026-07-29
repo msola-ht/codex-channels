@@ -11,6 +11,8 @@ import type {
   AccountQueryPort,
   AccountRateLimits,
   AccountUsage,
+  CollaborationModeQueryPort,
+  CollaborationModePreset,
   InstalledSkill,
   SkillQueryPort,
   McpQueryPort,
@@ -23,6 +25,7 @@ import type {
 import type {
   ConfigReadParams,
   ConfigReadResponse,
+  CollaborationModeListResponse,
   GetAccountTokenUsageResponse,
   GetAccountRateLimitsResponse,
   InitializeResponse,
@@ -78,6 +81,7 @@ export class CodexAppServerClient implements
   TurnExecutionPort,
   ModelSelectionPort,
   AccountQueryPort,
+  CollaborationModeQueryPort,
   SkillQueryPort,
   McpQueryPort,
   PluginQueryPort,
@@ -144,6 +148,24 @@ export class CodexAppServerClient implements
       }
     } while (cursor);
     return threads;
+  }
+
+  async listCollaborationModes(): Promise<CollaborationModePreset[]> {
+    const response = await this.rpc.request<CollaborationModeListResponse>({
+      method: "collaborationMode/list",
+      params: {},
+    }, { retryOverload: true });
+    return response.data.flatMap((preset) => {
+      if (preset.mode !== "default" && preset.mode !== "plan") {
+        return [];
+      }
+      return [{
+        name: preset.name,
+        mode: preset.mode,
+        model: preset.model,
+        effort: preset.reasoning_effort,
+      }];
+    });
   }
 
   async readThread(threadId: string): Promise<ThreadSnapshot> {
@@ -228,6 +250,19 @@ export class CodexAppServerClient implements
         ...(overrides.effort ? { effort: overrides.effort } : {}),
         ...(Object.hasOwn(overrides, "serviceTier")
           ? { serviceTier: overrides.serviceTier ?? null }
+          : {}),
+        ...(overrides.collaborationMode
+          ? {
+              collaborationMode: {
+                mode: overrides.collaborationMode.mode,
+                settings: {
+                  model: overrides.collaborationMode.settings.model,
+                  reasoning_effort: overrides.collaborationMode.settings.effort,
+                  developer_instructions:
+                    overrides.collaborationMode.settings.developerInstructions,
+                },
+              },
+            }
           : {}),
       },
     }, { retryOverload: false });

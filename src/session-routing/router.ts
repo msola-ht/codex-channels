@@ -11,6 +11,7 @@ export interface ThreadModelSettings {
   model: string;
   effort: string | null;
   serviceTier: string | null;
+  collaborationMode: "default" | "plan";
 }
 
 export interface SubscriptionRestoreFailure {
@@ -80,6 +81,16 @@ export class SessionRouter {
   updateModelSettings(threadId: string, settings: ThreadModelSettings): void {
     if (this.bindings.getByThread(threadId)) {
       this.modelSettingsByThread.set(threadId, settings);
+    }
+  }
+
+  updateCollaborationMode(
+    threadId: string,
+    collaborationMode: ThreadModelSettings["collaborationMode"],
+  ): void {
+    const current = this.modelSettingsByThread.get(threadId);
+    if (current && this.bindings.getByThread(threadId)) {
+      this.modelSettingsByThread.set(threadId, { ...current, collaborationMode });
     }
   }
 
@@ -288,7 +299,12 @@ export class SessionRouter {
     effort: string | null,
     serviceTier: string | null | undefined,
   ): void {
-    this.modelSettingsByThread.set(threadId, { model, effort, serviceTier: serviceTier ?? null });
+    this.modelSettingsByThread.set(threadId, {
+      model,
+      effort,
+      serviceTier: serviceTier ?? null,
+      collaborationMode: "default",
+    });
   }
 }
 

@@ -4,7 +4,7 @@ import type {
 } from "../../approval/index.js";
 import { contentTruncatedText } from "../output-copy.js";
 
-export interface FeishuCardDocument {
+export interface FeishuLegacyCardDocument {
   config: {
     update_multi: true;
     wide_screen_mode: true;
@@ -17,6 +17,34 @@ export interface FeishuCardDocument {
     };
   };
   elements: Array<Record<string, unknown>>;
+}
+
+export interface FeishuCardKitDocument {
+  schema: "2.0";
+  config: {
+    update_multi: true;
+    wide_screen_mode: true;
+  };
+  header: {
+    template: "blue" | "green" | "grey";
+    title: {
+      tag: "plain_text";
+      content: string;
+    };
+  };
+  body: {
+    elements: Array<Record<string, unknown>>;
+  };
+}
+
+export type FeishuCardDocument =
+  | FeishuLegacyCardDocument
+  | FeishuCardKitDocument;
+
+export function feishuCardElements(
+  card: FeishuCardDocument,
+): readonly Record<string, unknown>[] {
+  return "schema" in card ? card.body.elements : card.elements;
 }
 
 export type FeishuApprovalAction =

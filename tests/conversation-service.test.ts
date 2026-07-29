@@ -6,6 +6,7 @@ import {
   type ConversationQueryPort,
 } from "../src/application/conversation-service.js";
 import type { ModelSelectionService } from "../src/application/model-selection-service.js";
+import type { CollaborationModeSelectionService } from "../src/application/collaboration-mode-service.js";
 import type { TurnExecutionPort } from "../src/application/turn-port.js";
 import {
   ConversationCore,
@@ -230,6 +231,94 @@ describe("ConversationService model selection", () => {
     await expect(service.queueFollowUp(target, "下一轮再检查测试"))
       .resolves.toEqual({ position: 1 });
     expect(steerTurn).not.toHaveBeenCalled();
+  });
+
+  it("starts an inline Plan prompt with the selected collaboration mode override", async () => {
+    const startTurn = vi.fn(async () => ({ turnId: "turn-plan" }));
+    const markTurnStarted = vi.fn();
+    const select = vi.fn(async () => ({ mode: "plan" as const, pending: true }));
+    const markApplied = vi.fn();
+    const service = new ConversationService(
+      turnPort({ startTurn }),
+      {
+        ensure: async () => ({
+          target,
+          workspaceId: "main",
+          threadId: "thread-1",
+          sessionId: "session-1",
+        }),
+        workspace: () => main,
+      } as unknown as SessionRouter,
+      {
+        activeTurn: () => undefined,
+        markTurnStarted,
+      } as unknown as ConversationCore,
+      {
+        turnOverrides: () => ({}),
+        markApplied: vi.fn(),
+      } as unknown as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      {
+        select,
+        turnOverride: () => ({
+          mode: "plan",
+          settings: {
+            model: "gpt-5.6-sol",
+            effort: "medium",
+            developerInstructions: null,
+          },
+        }),
+        markApplied,
+      } as unknown as CollaborationModeSelectionService,
+    );
+
+    await expect(service.startPlan(target, " 设计发布流程 ")).resolves.toEqual({
+      threadId: "thread-1",
+      turnId: "turn-plan",
+      steered: false,
+    });
+    expect(select).toHaveBeenCalledWith(target, "plan");
+    expect(startTurn).toHaveBeenCalledWith(
+      "thread-1",
+      [{ type: "text", text: "设计发布流程" }],
+      expect.stringMatching(/^codex_connect_gateway:/),
+      main.cwd,
+      {
+        collaborationMode: {
+          mode: "plan",
+          settings: {
+            model: "gpt-5.6-sol",
+            effort: "medium",
+            developerInstructions: null,
+          },
+        },
+      },
+    );
+    expect(markApplied).toHaveBeenCalledWith(target);
+    expect(markTurnStarted).toHaveBeenCalledWith(target, "thread-1", "turn-plan");
+  });
+
+  it("does not change collaboration mode during an active Turn", async () => {
+    const toggle = vi.fn();
+    const service = new ConversationService(
+      turnPort(),
+      {} as SessionRouter,
+      {
+        activeTurn: () => ({ threadId: "thread-1", turnId: "turn-1" }),
+      } as unknown as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      { toggle } as unknown as CollaborationModeSelectionService,
+    );
+
+    await expect(service.togglePlanMode(target)).rejects.toMatchObject({
+      code: "conversation.busy",
+    });
+    expect(toggle).not.toHaveBeenCalled();
   });
 
   it("starts the first queued follow-up as a new Turn after the active Turn completes", async () => {

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ConversationService } from "../src/application/index.js";
 import {
+  feishuCardElements,
   FeishuEventConnection,
   type FeishuApplicationSnapshot,
   type FeishuCardDocument,
@@ -398,6 +399,8 @@ describe("Feishu Surface", () => {
       modelPending: false,
       effortPending: false,
       fastModePending: false,
+      collaborationMode: "default" as const,
+      collaborationModePending: false,
     }));
     const fixture = createFixture({
       submit: async () => ({
@@ -744,7 +747,7 @@ function createFixture(
       if (!sentCard) {
         throw new Error("飞书命令中心卡片尚未发送");
       }
-      const value = sentCard.card.elements.flatMap((element) =>
+      const value = feishuCardElements(sentCard.card).flatMap((element) =>
         Array.isArray(element.actions) ? element.actions : [],
       ).flatMap((action) => {
         if (
@@ -786,7 +789,7 @@ function createFixture(
       if (!sentCard) {
         throw new Error("飞书 Doctor 配置卡片尚未发送");
       }
-      const value = sentCard.card.elements.flatMap((element) =>
+      const value = feishuCardElements(sentCard.card).flatMap((element) =>
         Array.isArray(element.actions) ? element.actions : [],
       ).flatMap((action) => {
         if (

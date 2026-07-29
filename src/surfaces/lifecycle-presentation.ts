@@ -44,6 +44,8 @@ type StartupStatus = Pick<
   | "modelPending"
   | "effortPending"
   | "fastModePending"
+  | "collaborationMode"
+  | "collaborationModePending"
   | "weeklyLimit"
   | "gitBranch"
 >;
@@ -105,6 +107,10 @@ export function createStartupPresentation(
             value: `${status.threadId
               ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭")
               : "未知"}${pendingSuffix(status.fastModePending)}`,
+          },
+          {
+            label: "协作模式",
+            value: `${status.collaborationMode === "plan" ? "Plan" : "Default"}${pendingSuffix(status.collaborationModePending)}`,
           },
           ...(status.weeklyLimit
             ? [{

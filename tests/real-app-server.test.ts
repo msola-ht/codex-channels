@@ -354,6 +354,14 @@ contractSuite("isolated Codex App Server state contract", () => {
       && typeof profile.allowed === "boolean")).toBe(true);
   });
 
+  it("lists the locked App Server collaboration presets", async () => {
+    const modes = await ownerClient.listCollaborationModes();
+
+    expect(modes.some((mode) => mode.mode === "default")).toBe(true);
+    expect(modes.some((mode) =>
+      mode.mode === "plan" && mode.effort === "medium")).toBe(true);
+  });
+
   it("persists Fast defaults for peer reads and subsequently started threads", async () => {
     const startedThreadIds: string[] = [];
     try {
@@ -387,10 +395,19 @@ contractSuite("isolated Codex App Server state contract", () => {
     const started = await ownerClient.startThread(workdir);
     const threadId = started.thread.id;
     const observedTurnIds: string[] = [];
+    let observedPlanMode = false;
     let completedTurnDurationMs: number | undefined;
     const observedGoalEvents: string[] = [];
     const removeNotification = ownerClient.onNotification((notification) => {
       const event = toConversationInputEvent(notification);
+      const threadState = toThreadStateEvent(notification);
+      if (
+        threadState?.type === "thread.settings.updated"
+        && threadState.threadId === threadId
+        && threadState.settings.collaborationMode === "plan"
+      ) {
+        observedPlanMode = true;
+      }
       if (event?.type === "turn.started" && event.threadId === threadId) {
         observedTurnIds.push(event.turnId);
       }
@@ -416,10 +433,21 @@ contractSuite("isolated Codex App Server state contract", () => {
         [{ type: "text", text: "contract-only" }],
         "codex_connect_gateway:contract",
         workdir,
+        {
+          collaborationMode: {
+            mode: "plan",
+            settings: {
+              model: started.model,
+              effort: "medium",
+              developerInstructions: null,
+            },
+          },
+        },
       );
       turnId = turn.turnId;
       expect(turnId).not.toBe("");
       await waitFor(() => observedTurnIds.includes(turn.turnId), 2_000);
+      await waitFor(() => observedPlanMode, 2_000);
 
       const updated = await ownerClient.setGoal(threadId, "验证稳定 Goal 映射");
       const read = await peerClient.getGoal(threadId);
@@ -486,6 +514,7 @@ contractSuite("isolated Codex App Server state contract", () => {
       model: string;
       effort: string | null;
       serviceTier: string | null;
+      collaborationMode: "default" | "plan";
     }> = [];
     const removeNotification = ownerClient.onNotification((notification) => {
       const event = toThreadStateEvent(notification);
@@ -503,7 +532,7 @@ contractSuite("isolated Codex App Server state contract", () => {
           effort: "high",
           serviceTier: "priority",
         },
-        // 该实验请求不在默认生成的稳定 ClientRequest 中，仅用于固定版本真实合同。
+        // 仅用于固定版本真实合同，不进入业务公开接口。
       } as never);
       await waitFor(
         () => observedSettings.some((settings) =>
@@ -526,7 +555,7 @@ contractSuite("isolated Codex App Server state contract", () => {
           effort: "low",
           serviceTier: "default",
         },
-        // 该实验请求不在默认生成的稳定 ClientRequest 中，仅用于固定版本真实合同。
+        // 仅用于固定版本真实合同，不进入业务公开接口。
       } as never);
       await waitFor(
         () => observedSettings.some((settings) =>

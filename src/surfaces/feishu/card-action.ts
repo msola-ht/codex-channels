@@ -7,6 +7,8 @@ export type FeishuCardActionField =
   | "operator.open_id"
   | "action"
   | "action.tag"
+  | "action.name"
+  | "action.form_name"
   | "action.value"
   | "action.form_value";
 
@@ -38,6 +40,7 @@ export function decodeFeishuCardAction(input: unknown): FeishuCardAction {
     action.form_value,
     "action.form_value",
   );
+  const tag = requireString(action.tag, "action.tag");
   return {
     messageId: requireString(
       context.open_message_id,
@@ -45,9 +48,39 @@ export function decodeFeishuCardAction(input: unknown): FeishuCardAction {
     ),
     chatId: requireString(context.open_chat_id, "context.open_chat_id"),
     actorOpenId: requireString(operator.open_id, "operator.open_id"),
-    tag: requireString(action.tag, "action.tag"),
-    value: requireStringRecord(action.value, "action.value"),
+    tag,
+    value: normalizedActionValue(action, tag),
     ...(formValues === undefined ? {} : { formValues }),
+  };
+}
+
+function normalizedActionValue(
+  action: Record<string, unknown>,
+  tag: string,
+): Readonly<Record<string, string>> {
+  if (action.value !== undefined) {
+    return requireStringRecord(action.value, "action.value");
+  }
+  const name = optionalString(action.name, "action.name");
+  const formName = optionalString(action.form_name, "action.form_name");
+  const prefix = "codexc_submit_";
+  const token = name?.startsWith(prefix)
+    ? name.slice(prefix.length)
+    : undefined;
+  if (
+    (tag !== "button" && tag !== "form_submit")
+    || (formName !== undefined
+      && formName !== "codexc_user_input"
+      && formName !== "codexc_mcp_form")
+    || !token
+    || token.length > 64
+    || !/^[A-Za-z0-9_-]+$/u.test(token)
+  ) {
+    throw new FeishuCardActionError("action.value");
+  }
+  return {
+    interaction_token: token,
+    decision: "submit",
   };
 }
 
@@ -73,6 +106,16 @@ function requireString(
     throw new FeishuCardActionError(field);
   }
   return value;
+}
+
+function optionalString(
+  value: unknown,
+  field: FeishuCardActionField,
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return requireString(value, field);
 }
 
 function requireStringRecord(

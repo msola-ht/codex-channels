@@ -35,6 +35,7 @@ interface PendingInteraction {
   actorId: string;
   request: InteractionRequest;
   answers: Map<string, string[]>;
+  questionIndex: number;
   resolve(decision: InteractionDecision): void;
   timer: NodeJS.Timeout;
 }
@@ -166,9 +167,24 @@ export class WeixinInteractionPort implements InteractionPort {
       return safeInteractionDecision(request);
     }
     const prompt = renderInteractionPrompt(request, token);
+    const promptCharacters = request.type === "user-input"
+      ? request.questions.reduce(
+          (length, _question, index) =>
+            length
+            + renderUserInputPrompt(
+              request,
+              token,
+              index,
+              index === 0,
+            ).reduce(
+              (messageLength, message) => messageLength + message.length,
+              0,
+            ),
+          0,
+        )
+      : prompt.reduce((length, message) => length + message.length, 0);
     if (
-      prompt.reduce((length, message) => length + message.length, 0)
-        > maximumPromptCharacters
+      promptCharacters > maximumPromptCharacters
     ) {
       await this.notify(target, "交互详情过长，微信端已安全取消本次请求。");
       return safeInteractionDecision(request);
@@ -193,6 +209,7 @@ export class WeixinInteractionPort implements InteractionPort {
       actorId: actors[0]!,
       request,
       answers: new Map(),
+      questionIndex: 0,
       resolve: resolveDecision,
       timer,
     });
@@ -290,6 +307,13 @@ export class WeixinInteractionPort implements InteractionPort {
       await this.notify(pending.target, "该命令不适用于当前输入请求。");
       return;
     }
+    if (command.questionNumber - 1 !== pending.questionIndex) {
+      await this.notify(
+        pending.target,
+        `请先回答第 ${pending.questionIndex + 1} 项。`,
+      );
+      return;
+    }
     const question = request.questions[command.questionNumber - 1];
     if (!question) {
       await this.notify(pending.target, "问题序号不在当前请求范围内。");
@@ -318,10 +342,32 @@ export class WeixinInteractionPort implements InteractionPort {
       const next = request.questions.findIndex(
         (candidate) => !pending.answers.has(candidate.id),
       );
-      await this.notify(
-        pending.target,
-        `已记录第 ${command.questionNumber} 项，请继续回答第 ${next + 1} 项。`,
-      );
+      pending.questionIndex = next;
+      try {
+        await this.delivery?.deliverTextSequence(
+          pending.target,
+          renderUserInputPrompt(request, token, next, false),
+        );
+      } catch (error) {
+        this.logger?.warn(
+          {
+            requestId: pending.requestId,
+            requestType: request.type,
+            threadId: request.threadId,
+            turnId: request.turnId,
+            surface: pending.target.surface,
+            accountId: pending.target.accountId,
+            conversationId: pending.target.conversationId,
+            errorType: error instanceof Error ? error.name : typeof error,
+          },
+          "微信下一项输入请求发送失败",
+        );
+        await this.finish(
+          token,
+          safeInteractionDecision(request),
+          "Codex 输入请求无法继续，已安全取消。",
+        );
+      }
       return;
     }
     await this.finish(
@@ -591,7 +637,7 @@ function renderInteractionPrompt(
     case "approval":
       return renderApprovalPrompt(request, token);
     case "user-input":
-      return renderUserInputPrompt(request, token);
+      return renderUserInputPrompt(request, token, 0, true);
     case "elicitation":
       return renderElicitationPrompt(request, token);
   }
@@ -660,34 +706,38 @@ function packApprovalChoiceMessages(
 function renderUserInputPrompt(
   request: UserInputRequest,
   token: string,
+  questionIndex: number,
+  includeIntroduction: boolean,
 ): readonly string[] {
   const introduction = [
     sanitizeWeixinMarkdownText(request.title),
     "Codex 正在等待你的回答。每个问题只接受一项答案。",
     `有效期：${Math.max(1, Math.ceil(request.expiresInMs / 1_000))} 秒`,
   ].join("\n\n");
-  const blocks = request.questions.flatMap((question, questionIndex) => {
-    const number = questionIndex + 1;
-    const description = [
-      `问题 ${number}：${sanitizeWeixinMarkdownText(question.header)}`,
-      sanitizeWeixinMarkdownText(question.question),
-    ].join("\n");
-    const choices = question.options.map((option, optionIndex) => [
-      `${optionIndex + 1}. ${sanitizeWeixinMarkdownText(option)}`,
-      `\`\`\`text\n/选择 ${token} ${number} ${optionIndex + 1}\n\`\`\``,
-    ].join("\n"));
-    const other = question.allowOther || question.options.length === 0
-      ? [[
-          "填写其他内容（复制后替换最后的文字）：",
-          `\`\`\`text\n/填写 ${token} ${number} 在这里输入答案\n\`\`\``,
-        ].join("\n")]
-      : [];
-    return [description, ...choices, ...other];
-  });
+  const question = request.questions[questionIndex]!;
+  const number = questionIndex + 1;
+  const description = [
+    `问题 ${number}/${request.questions.length}：${
+      sanitizeWeixinMarkdownText(question.header)
+    }`,
+    sanitizeWeixinMarkdownText(question.question),
+  ].join("\n");
+  const choices = question.options.map((option, optionIndex) => [
+    `${optionIndex + 1}. ${sanitizeWeixinMarkdownText(option)}`,
+    `\`\`\`text\n/选择 ${token} ${number} ${optionIndex + 1}\n\`\`\``,
+  ].join("\n"));
+  const other = question.allowOther || question.options.length === 0
+    ? [[
+        "填写其他内容（复制后替换最后的文字）：",
+        `\`\`\`text\n/填写 ${token} ${number} 在这里输入答案\n\`\`\``,
+      ].join("\n")]
+    : [];
   return [
-    introduction,
+    ...(includeIntroduction ? [introduction] : []),
     ...packPromptBlocks([
-      ...blocks,
+      description,
+      ...choices,
+      ...other,
       [
         "取消本次输入：",
         `\`\`\`text\n/取消 ${token}\n\`\`\``,

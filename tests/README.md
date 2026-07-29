@@ -57,7 +57,7 @@
   暂存与过期清理，文件的安全名称、1,000,000 字节、控制字符、纯内存和错误脱敏边界，活动 Turn
   追加提示、命令参数透传、
   全部平台无关命令结果种类与 Outcome、模型视图、
-  非空集合、会话列表条数与预览边界、Diff、Plan、Goal、本地帮助/身份/取消、未知斜杠命令
+  非空集合、会话列表条数与预览边界、Diff、Default/Plan 切换与直接规划、Goal、本地帮助/身份/取消、未知斜杠命令
   失败关闭、输出队列拒绝不重试状态修改、结构化用户错误和
   未知异常脱敏；单账号 Surface 的长连接启停、重连事件去重、关闭排空、连续输入过载提示收敛和配置通知
   失败关闭与安全发送；审批、最多三个问题的用户输入表单、秘密输入、MCP JSON/URL 卡片，
@@ -209,7 +209,8 @@ RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
 读取，之后新建 Thread 的运行时 `serviceTier` 按 `default → priority → default` 变化，并验证
 第二个 Client 修改共享 Thread 的模型、思考强度和 Fast 设置时，订阅方收到完整的
 `thread/settings/updated`；第二个 Client 重连后再次修改仍会广播。合同还会启动并立即清理一个
-不等待模型结果的 Turn，验证稳定 Turn ID、中断后的官方非负 `durationMs`、Skill、MCP、Plugin
+不等待模型结果的 Plan Turn，验证 Default/Plan 预设、Plan 设置通知、稳定 Turn ID、中断后的
+官方非负 `durationMs`、Skill、MCP、Plugin
 与 Permission Profile 查询摘要，
 以及跨 Client 的 Goal 设置、读取和清除映射；第二个 Client 重新连接并 resume 当前 Thread 后，
 还必须重新收到已有 Goal 状态。

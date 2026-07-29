@@ -1,3 +1,4 @@
+import type { Logger } from "pino";
 import { describe, expect, it, vi } from "vitest";
 
 import type {
@@ -392,12 +393,23 @@ describe("WeixinInteractionPort", () => {
         target,
         expect.arrayContaining([
           expect.stringContaining("/选择 input-token 1 1"),
-          expect.stringContaining(
-            "/填写 input-token 2 在这里输入答案",
-          ),
         ]),
       );
     });
+    expect(JSON.stringify(
+      delivery.deliverTextSequence.mock.calls[0]?.[1],
+    )).not.toContain("/填写 input-token 2");
+
+    await port.handleText(
+      target,
+      actorId,
+      "/填写 input-token 2 不能提前回答",
+    );
+    expect(delivery.deliverText).toHaveBeenLastCalledWith(
+      target,
+      "请先回答第 1 项。",
+    );
+
     await port.handleText(target, actorId, "/选择 input-token 1 2");
     let settled = false;
     void pending.then(() => {
@@ -405,9 +417,12 @@ describe("WeixinInteractionPort", () => {
     });
     await Promise.resolve();
     expect(settled).toBe(false);
-    expect(delivery.deliverText).toHaveBeenLastCalledWith(
+    expect(delivery.deliverTextSequence).toHaveBeenLastCalledWith(
       target,
-      "已记录第 1 项，请继续回答第 2 项。",
+      expect.arrayContaining([
+        expect.stringContaining("问题 2/2：分支"),
+        expect.stringContaining("/填写 input-token 2 在这里输入答案"),
+      ]),
     );
 
     await port.handleText(
@@ -423,6 +438,70 @@ describe("WeixinInteractionPort", () => {
         branch: ["feature/weixin"],
       },
     });
+  });
+
+  it("safely cancels when the next user-input question cannot be delivered", async () => {
+    const delivery = deliveryFixture();
+    delivery.deliverTextSequence
+      .mockResolvedValueOnce()
+      .mockRejectedValueOnce(new Error("private upstream detail"));
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+    };
+    const port = new WeixinInteractionPort(
+      delivery,
+      actorRegistryFixture([actorId]),
+      accessFixture(true),
+      logger as unknown as Logger,
+      () => "input-token",
+    );
+    const pending = port.request(target, userInputRequest({
+      questions: [
+        {
+          id: "environment",
+          header: "环境",
+          question: "请选择环境",
+          options: ["测试", "正式"],
+          allowOther: false,
+          secret: false,
+        },
+        {
+          id: "branch",
+          header: "分支",
+          question: "请输入分支",
+          options: [],
+          allowOther: true,
+          secret: false,
+        },
+      ],
+    }));
+    await vi.waitFor(() => {
+      expect(delivery.deliverTextSequence).toHaveBeenCalledTimes(1);
+    });
+
+    await expect(
+      port.handleText(target, actorId, "/选择 input-token 1 1"),
+    ).resolves.toBe("handled");
+    await expect(pending).resolves.toEqual({
+      type: "user-input",
+      answers: {},
+    });
+    expect(delivery.deliverText).toHaveBeenLastCalledWith(
+      target,
+      "Codex 输入请求无法继续，已安全取消。",
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "request-input",
+        requestType: "user-input",
+        errorType: "Error",
+      }),
+      "微信下一项输入请求发送失败",
+    );
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(
+      "private upstream detail",
+    );
   });
 
   it("keeps invalid user answers pending and cancels secret questions", async () => {

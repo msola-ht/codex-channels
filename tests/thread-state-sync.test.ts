@@ -56,6 +56,7 @@ describe("ThreadStateSynchronizer", () => {
         model: "gpt-5.6-sol",
         effort: "high",
         serviceTier: "priority",
+        collaborationMode: "plan",
       },
     });
 
@@ -63,6 +64,7 @@ describe("ThreadStateSynchronizer", () => {
       model: "gpt-5.6-sol",
       effort: "high",
       serviceTier: "priority",
+      collaborationMode: "plan",
     });
   });
 

@@ -2,6 +2,7 @@ import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  feishuCardElements,
   FeishuApplicationSetupController,
   type FeishuApplicationApi,
   type FeishuApplicationSnapshot,
@@ -535,7 +536,7 @@ function runtimeStatus() {
 function setupAction(
   card: FeishuCardDocument,
 ): Readonly<Record<string, string>> {
-  for (const element of card.elements) {
+  for (const element of feishuCardElements(card)) {
     if (!Array.isArray(element.actions)) {
       continue;
     }
