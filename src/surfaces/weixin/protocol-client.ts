@@ -9,6 +9,10 @@ import {
   validateWeixinActorId,
   validateWeixinBaseUrl,
 } from "./credential-store.js";
+import {
+  withWeixinRequestAbort,
+  WeixinRequestAbortError,
+} from "./request-abort.js";
 
 export type WeixinProtocolErrorCode =
   | "aborted"
@@ -1159,48 +1163,22 @@ async function requestImageUpload(options: {
   timeoutMs: number;
   signal?: AbortSignal;
 }): Promise<Response> {
-  const controller = new AbortController();
-  let timedOut = false;
-  const abort = () => controller.abort();
-  if (options.signal?.aborted) {
-    throw new WeixinProtocolError("aborted", "微信图片 CDN 上传已取消");
-  }
-  options.signal?.addEventListener("abort", abort, { once: true });
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, options.timeoutMs);
-  timeout.unref?.();
   try {
-    return await options.fetchImpl(options.url, {
-      method: "POST",
-      headers: { "Content-Type": "application/octet-stream" },
-      body: new Uint8Array(options.ciphertext),
-      redirect: "error",
-      signal: controller.signal,
-    });
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new WeixinProtocolError(
-        options.signal?.aborted
-          ? "aborted"
-          : timedOut
-            ? "timeout"
-            : "network-error",
-        options.signal?.aborted
-          ? "微信图片 CDN 上传已取消"
-          : timedOut
-            ? "微信图片 CDN 上传超时"
-            : "微信图片 CDN 上传网络请求失败",
-      );
-    }
-    throw new WeixinProtocolError(
-      "network-error",
-      "微信图片 CDN 上传网络请求失败",
+    return await withWeixinRequestAbort(
+      {
+        timeoutMs: options.timeoutMs,
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+      },
+      (signal) => options.fetchImpl(options.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: new Uint8Array(options.ciphertext),
+        redirect: "error",
+        signal,
+      }),
     );
-  } finally {
-    clearTimeout(timeout);
-    options.signal?.removeEventListener("abort", abort);
+  } catch (error) {
+    throw toWeixinNetworkError(error, "微信图片 CDN 上传");
   }
 }
 
@@ -1236,76 +1214,68 @@ async function request(options: {
   signal?: AbortSignal;
   operation: string;
 }): Promise<string> {
-  const controller = new AbortController();
-  let timedOut = false;
-  const abort = () => controller.abort();
-  if (options.signal?.aborted) {
-    throw new WeixinProtocolError(
-      "aborted",
-      `${options.operation}已取消`,
-    );
-  }
-  options.signal?.addEventListener("abort", abort, { once: true });
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, options.timeoutMs);
-  timeout.unref?.();
   try {
-    const response = await options.fetchImpl(
-      `${options.baseUrl}/ilink/bot/${options.endpoint}`,
+    return await withWeixinRequestAbort(
       {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${options.botToken}`,
-          AuthorizationType: "ilink_bot_token",
-          "X-WECHAT-UIN": randomWechatUin(options.randomBytesImpl),
-          "iLink-App-Id": "bot",
-          "iLink-App-ClientVersion": String(appClientVersion),
-        },
-        body: JSON.stringify(options.body),
-        signal: controller.signal,
+        timeoutMs: options.timeoutMs,
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
       },
-    );
-    if (!response.ok) {
-      throw new WeixinProtocolError(
-        "http-error",
-        `${options.operation}请求失败（HTTP ${response.status}）`,
-        response.status,
-      );
-    }
-    return await readLimitedResponseText(
-      response,
-      options.maximumResponseBytes,
-      options.operation,
+      async (signal) => {
+        const response = await options.fetchImpl(
+          `${options.baseUrl}/ilink/bot/${options.endpoint}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${options.botToken}`,
+              AuthorizationType: "ilink_bot_token",
+              "X-WECHAT-UIN": randomWechatUin(options.randomBytesImpl),
+              "iLink-App-Id": "bot",
+              "iLink-App-ClientVersion": String(appClientVersion),
+            },
+            body: JSON.stringify(options.body),
+            signal,
+          },
+        );
+        if (!response.ok) {
+          throw new WeixinProtocolError(
+            "http-error",
+            `${options.operation}请求失败（HTTP ${response.status}）`,
+            response.status,
+          );
+        }
+        return await readLimitedResponseText(
+          response,
+          options.maximumResponseBytes,
+          options.operation,
+        );
+      },
     );
   } catch (error) {
     if (error instanceof WeixinProtocolError) {
       throw error;
     }
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new WeixinProtocolError(
-        options.signal?.aborted
-          ? "aborted"
-          : timedOut
-            ? "timeout"
-            : "network-error",
-        options.signal?.aborted
-          ? `${options.operation}已取消`
-          : timedOut
-            ? `${options.operation}超时`
-            : `${options.operation}网络请求失败`,
-      );
-    }
-    throw new WeixinProtocolError(
-      "network-error",
-      `${options.operation}网络请求失败`,
-    );
-  } finally {
-    clearTimeout(timeout);
-    options.signal?.removeEventListener("abort", abort);
+    throw toWeixinNetworkError(error, options.operation);
   }
+}
+
+function toWeixinNetworkError(
+  error: unknown,
+  operation: string,
+): WeixinProtocolError {
+  const code = error instanceof WeixinRequestAbortError
+    ? error.reason === "network-abort"
+      ? "network-error"
+      : error.reason
+    : "network-error";
+  return new WeixinProtocolError(
+    code,
+    code === "aborted"
+      ? `${operation}已取消`
+      : code === "timeout"
+        ? `${operation}超时`
+        : `${operation}网络请求失败`,
+  );
 }
 
 function throwForApiError(

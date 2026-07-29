@@ -6,6 +6,12 @@ import {
   formatUnsupportedTextFile,
 } from "../text-file-copy.js";
 import {
+  decodeUtf8TextFile,
+  maximumTextFileBytes,
+  normalizeTextFileName,
+  TextFileValidationError,
+} from "../text-file-input.js";
+import {
   downloadWeixinCdnBytes,
   resolveWeixinCdnUrl,
 } from "./cdn-download.js";
@@ -15,7 +21,7 @@ import {
 } from "./media-crypto.js";
 import type { WeixinFileReference } from "./protocol-client.js";
 
-export const maximumWeixinTextFileBytes = 1_000_000;
+export const maximumWeixinTextFileBytes = maximumTextFileBytes;
 
 const maximumEncryptedFileBytes = maximumWeixinTextFileBytes + 16;
 
@@ -87,12 +93,15 @@ export class WeixinFileInput implements WeixinFilePort {
       }
       return {
         fileName,
-        text: decodeUtf8Text(plaintext),
+        text: decodeUtf8TextFile(plaintext),
         bytes: plaintext.length,
       };
     } catch (error) {
       if (error instanceof WeixinFileInputError) {
         throw error;
+      }
+      if (error instanceof TextFileValidationError) {
+        throw error.code === "too-large" ? tooLarge() : unsupportedFile();
       }
       // CDN 地址、参数、AES key、文件名、正文和底层异常不得越过微信边界。
       throw new WeixinFileInputError(
@@ -104,17 +113,11 @@ export class WeixinFileInput implements WeixinFilePort {
 }
 
 function validateFileName(value: string): string {
-  const normalized = value.trim();
-  if (
-    normalized.length === 0
-    || normalized.length > 255
-    || normalized === "."
-    || normalized === ".."
-    || hasInvalidFileNameCharacter(normalized)
-  ) {
-    throw new Error("invalid Weixin file name");
+  try {
+    return normalizeTextFileName(value, { maximumCodeUnits: 255 });
+  } catch (error) {
+    throw new Error("invalid Weixin file name", { cause: error });
   }
-  return normalized;
 }
 
 function parseDeclaredLength(value: string | undefined): number | undefined {
@@ -139,54 +142,6 @@ function parseDeclaredMd5(value: string | undefined): string | undefined {
     throw new Error("invalid Weixin file MD5");
   }
   return value.toLowerCase();
-}
-
-function decodeUtf8Text(value: Buffer): string {
-  let text: string;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(value);
-  } catch {
-    throw unsupportedFile();
-  }
-  const normalized = text.startsWith("\uFEFF") ? text.slice(1) : text;
-  if (
-    normalized.length === 0
-    || hasUnsupportedTextControl(normalized)
-  ) {
-    throw unsupportedFile();
-  }
-  return normalized;
-}
-
-function hasInvalidFileNameCharacter(value: string): boolean {
-  for (const character of value) {
-    const code = character.charCodeAt(0);
-    if (
-      character === "/"
-      || character === "\\"
-      || code <= 0x1f
-      || code === 0x7f
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function hasUnsupportedTextControl(value: string): boolean {
-  for (const character of value) {
-    const code = character.charCodeAt(0);
-    if (
-      code <= 0x08
-      || code === 0x0b
-      || code === 0x0c
-      || (code >= 0x0e && code <= 0x1f)
-      || code === 0x7f
-    ) {
-      return true;
-    }
-  }
-  return false;
 }
 
 function tooLarge(): WeixinFileInputError {

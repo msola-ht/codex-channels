@@ -45,6 +45,11 @@ describe("WeixinFileInput", () => {
   });
 
   it("fails closed on oversized, binary and integrity-mismatched files", async () => {
+    await expect(new WeixinFileInput(vi.fn()).download({
+      ...reference(),
+      fileName: "../secret.txt",
+    })).rejects.toMatchObject({ code: "download-failed" });
+
     const oversized = new WeixinFileInput(vi.fn(async () =>
       new Response(Buffer.alloc(0), {
         status: 200,

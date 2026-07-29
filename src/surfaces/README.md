@@ -77,7 +77,8 @@ Surface 共用的中文短文本，不负责计时、状态或持久化。
 `interaction-copy.ts` 统一审批、用户输入和 MCP 交互的处理、取消、超时、跨客户端解决及提交结果
 语义；平台仍各自使用按钮、卡片或可复制命令完成交互。
 `text-file-copy.ts` 统一三个渠道文本文件下载失败、1,000,000 字节上限和 UTF-8 类型拒绝文案，
-同时保留渠道名称以便定位来源。
+同时保留渠道名称以便定位来源。`text-file-input.ts` 统一文件名安全校验、UTF-8 严格解码、
+BOM 清理、控制字符拒绝和有界流读取；平台下载与错误类型仍留在各自 Surface。
 `runtime-status-format.ts` 统一账户、额度与 MCP Server 运行状态的稳定中文语义和脱敏；
 Telegram、飞书与微信分别通过 HTML 面板、CardKit Markdown 或按会话排序的纯文本气泡发送。
 `configuration-change-format.ts` 统一 Telegram 与飞书已有的配置热加载、重启、重装和失败通知；

@@ -1,10 +1,15 @@
-import type { Readable } from "node:stream";
-
 import {
   formatTextFileDownloadFailed,
   formatTextFileTooLarge,
   formatUnsupportedTextFile,
 } from "../text-file-copy.js";
+import {
+  decodeUtf8TextFile,
+  maximumTextFileBytes,
+  normalizeTextFileName,
+  readBoundedTextFile,
+  TextFileValidationError,
+} from "../text-file-input.js";
 import {
   createTelegramFileDownloader,
   resolveTelegramFileUrl,
@@ -12,7 +17,7 @@ import {
   type TelegramFileDownloader,
 } from "./file-download.js";
 
-export const maximumTelegramTextFileBytes = 1_000_000;
+export const maximumTelegramTextFileBytes = maximumTextFileBytes;
 
 export type TelegramTextFileInputErrorCode =
   | "download-failed"
@@ -87,15 +92,18 @@ export class TelegramTextFileInput implements TelegramTextFilePort {
         response.stream.destroy();
         throw tooLarge();
       }
-      const content = await readBoundedFile(response.stream);
+      const content = await readBoundedTextFile(response.stream);
       return {
         fileName: normalizedName,
-        text: decodeUtf8Text(content),
+        text: decodeUtf8TextFile(content),
         bytes: content.length,
       };
     } catch (error) {
       if (error instanceof TelegramTextFileInputError) {
         throw error;
+      }
+      if (error instanceof TextFileValidationError) {
+        throw error.code === "too-large" ? tooLarge() : unsupportedFile();
       }
       // Bot API、文件地址、下载流和正文异常不得越过 Telegram 边界。
       throw new TelegramTextFileInputError(
@@ -107,83 +115,7 @@ export class TelegramTextFileInput implements TelegramTextFilePort {
 }
 
 function validateFileName(value: string): string {
-  const normalized = value.trim();
-  if (
-    normalized.length === 0
-    || Buffer.byteLength(normalized, "utf8") > 255
-    || normalized === "."
-    || normalized === ".."
-    || hasInvalidFileNameCharacter(normalized)
-  ) {
-    throw unsupportedFile();
-  }
-  return normalized;
-}
-
-function hasInvalidFileNameCharacter(value: string): boolean {
-  for (const character of value) {
-    const codePoint = character.codePointAt(0);
-    if (
-      character === "/"
-      || character === "\\"
-      || codePoint === undefined
-      || codePoint <= 0x1f
-      || codePoint === 0x7f
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
-async function readBoundedFile(stream: Readable): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  let bytes = 0;
-  for await (const chunk of stream) {
-    const candidate: unknown = chunk;
-    if (!(candidate instanceof Uint8Array)) {
-      stream.destroy();
-      throw unsupportedFile();
-    }
-    const value = Buffer.from(candidate);
-    bytes += value.length;
-    if (bytes > maximumTelegramTextFileBytes) {
-      stream.destroy();
-      throw tooLarge();
-    }
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks, bytes);
-}
-
-function decodeUtf8Text(value: Buffer): string {
-  let text: string;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(value);
-  } catch {
-    throw unsupportedFile();
-  }
-  const normalized = text.startsWith("\uFEFF") ? text.slice(1) : text;
-  if (normalized.length === 0 || hasUnsupportedTextControl(normalized)) {
-    throw unsupportedFile();
-  }
-  return normalized;
-}
-
-function hasUnsupportedTextControl(value: string): boolean {
-  for (const character of value) {
-    const code = character.charCodeAt(0);
-    if (
-      code <= 0x08
-      || code === 0x0b
-      || code === 0x0c
-      || (code >= 0x0e && code <= 0x1f)
-      || code === 0x7f
-    ) {
-      return true;
-    }
-  }
-  return false;
+  return normalizeTextFileName(value, { maximumUtf8Bytes: 255 });
 }
 
 function tooLarge(): TelegramTextFileInputError {
