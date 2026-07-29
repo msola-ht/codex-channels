@@ -30,7 +30,8 @@ Application 的本地图片输入，同一 Thread 的
   版本响应。
 - `application-setup.ts`：生成精简 Doctor 和缺失权限授权卡片，绑定 App、Chat、Actor 和
   一次性令牌，管理有限任务、取消和安全结果。
-- `client.ts`：官方 SDK、事件长连接、消息读取/发送、生成图片上传与 CardKit 窄客户端及生命周期隔离。
+- `client.ts`：隔离官方 HTTP SDK，提供消息读取/发送、生成图片上传、CardKit 与 OAuth 窄客户端。
+- `event-connection.ts`：隔离官方 WebSocket SDK，管理事件注册、握手、重连、停止和失败关闭生命周期。
 - `file-input.ts`：通过官方消息资源 API 在内存下载独立文件，限制为 1,000,000 字节并严格验证
   文件名、UTF-8 和控制字符，不创建本地文件。
 - `inbound-content.ts`：统一严格解析入站与被引用消息的文本、富文本和图片元素。
@@ -62,7 +63,8 @@ Application 的本地图片输入，同一 Thread 的
 
 ## 当前边界
 
-`client.ts` 与 `application-api.ts` 隔离 `@larksuiteoapi/node-sdk`：
+`client.ts`、`event-connection.ts` 与 `application-api.ts` 隔离
+`@larksuiteoapi/node-sdk`：
 
 - `start()` 只有在 SDK 触发 `onReady` 后才成功，不能把 `WSClient.start()` 返回当作握手完成。
 - 首次连接设置有限超时；失败和超时只暴露稳定、脱敏的本地错误。

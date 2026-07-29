@@ -13,17 +13,11 @@ import {
 import type { BindingStore } from "../storage/index.js";
 import {
   createFeishuSurface,
+  createTelegramSurface,
+  createWeixinSurface,
   renderFeishuStartupNotification,
-  TelegramSurface,
   telegramDefaultAccountId,
-  createCredentialBackedWeixinClient,
-  createWeixinCredentialStore,
-  createWeixinReplyContextPersistence,
-  FileWeixinUpdatesCursorStore,
   renderWeixinStartupNotification,
-  WeixinFileInput,
-  WeixinImageStore,
-  WeixinSurface,
   type SurfaceAdapter,
 } from "../surfaces/index.js";
 import {
@@ -110,39 +104,28 @@ function createWeixinModule(
   if (removedBindings > 0) {
     options.logger.warn({ removedBindings }, "已清理不再授权的微信会话绑定");
   }
-  const credentialStore = createWeixinCredentialStore(
-    join(options.config.credentialsDirectory, "weixin"),
-  );
-  const replyContextPersistence = createWeixinReplyContextPersistence(
-    join(options.config.credentialsDirectory, "weixin-reply-context"),
-  );
-  const client = createCredentialBackedWeixinClient({
+  const adapter = createWeixinSurface({
     accountId: config.accountId,
-    credentialStore,
-  });
-  const adapter = new WeixinSurface({
-    accountId: config.accountId,
-    client,
-    fileSendClient: client,
-    imageSendClient: client,
-    typingClient: client,
-    cursorStore: new FileWeixinUpdatesCursorStore(
-      join(dirname(options.config.stateDatabasePath), "weixin-updates"),
-    ),
     service: options.service,
     access,
     actorRegistry: options.bindings,
-    credentialStore,
-    replyContextPersistence,
-    images: new WeixinImageStore(
-      join(
-        dirname(options.config.stateDatabasePath),
-        "uploads",
-        "weixin",
-      ),
-      options.logger,
+    credentialDirectory: join(
+      options.config.credentialsDirectory,
+      "weixin",
     ),
-    files: new WeixinFileInput(),
+    replyContextDirectory: join(
+      options.config.credentialsDirectory,
+      "weixin-reply-context",
+    ),
+    cursorDirectory: join(
+      dirname(options.config.stateDatabasePath),
+      "weixin-updates",
+    ),
+    uploadsDirectory: join(
+      dirname(options.config.stateDatabasePath),
+      "uploads",
+      "weixin",
+    ),
     startupNotification: {
       targets: () => authorizedWeixinConversations(
         options.bindings,
@@ -338,24 +321,24 @@ function createTelegramModule(
     config.telegramAllowedUserIds,
     telegramDefaultAccountId,
   );
-  const adapter = new TelegramSurface(
-    config.telegramBotToken,
-    config.telegramProxyUrl,
-    options.service,
+  const adapter = createTelegramSurface({
+    token: config.telegramBotToken,
+    ...(config.telegramProxyUrl === undefined
+      ? {}
+      : { proxyUrl: config.telegramProxyUrl }),
+    service: options.service,
     access,
-    config.telegramAllowedUserIds,
-    config.workspaces,
-    join(dirname(config.stateDatabasePath), "uploads"),
+    startupRecipients: config.telegramAllowedUserIds,
+    workspaces: config.workspaces,
+    uploadsDirectory: join(dirname(config.stateDatabasePath), "uploads"),
     logger,
-    {
-      actorRegistry: bindings,
-      onFatal: (error) => options.onFatal("telegram", telegramDefaultAccountId, error),
-      finalMessageFormat: config.telegramMessageFormat,
-      operationUpdateDisplay: config.operationUpdateDisplay,
-      gatewayVersion: options.gatewayVersion,
-      codexUpstreamUserAgent: options.codexUpstreamUserAgent,
-    },
-  );
+    actorRegistry: bindings,
+    onFatal: (error) => options.onFatal("telegram", telegramDefaultAccountId, error),
+    finalMessageFormat: config.telegramMessageFormat,
+    operationUpdateDisplay: config.operationUpdateDisplay,
+    gatewayVersion: options.gatewayVersion,
+    codexUpstreamUserAgent: options.codexUpstreamUserAgent,
+  });
   return createTelegramRuntimeModule(
     adapter,
     access,

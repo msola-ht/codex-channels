@@ -1,0 +1,69 @@
+import type { Logger } from "pino";
+
+import type { ConversationService } from "../../application/index.js";
+import type {
+  ConversationActorRegistry,
+  SurfaceAccessPolicy,
+} from "../../policy/index.js";
+import type { OperationUpdateDisplay } from "../types.js";
+import { createCredentialBackedWeixinClient } from "./credential-client.js";
+import { createWeixinCredentialStore } from "./credential-store.js";
+import { WeixinFileInput } from "./file-input.js";
+import { WeixinImageStore } from "./image-store.js";
+import type { WeixinInputFatalError } from "./input-adapter.js";
+import { createWeixinReplyContextPersistence } from "./reply-context-persistence.js";
+import {
+  WeixinSurface,
+  type WeixinStartupNotification,
+} from "./surface.js";
+import { FileWeixinUpdatesCursorStore } from "./updates-cursor-store.js";
+
+export interface CreateWeixinSurfaceOptions {
+  accountId: string;
+  service: ConversationService;
+  access: SurfaceAccessPolicy;
+  actorRegistry: ConversationActorRegistry;
+  credentialDirectory: string;
+  replyContextDirectory: string;
+  cursorDirectory: string;
+  uploadsDirectory: string;
+  startupNotification: WeixinStartupNotification;
+  operationUpdateDisplay?: OperationUpdateDisplay;
+  logger: Logger;
+  onFatal(error: WeixinInputFatalError): void;
+}
+
+export function createWeixinSurface(
+  options: CreateWeixinSurfaceOptions,
+): WeixinSurface {
+  const credentialStore = createWeixinCredentialStore(
+    options.credentialDirectory,
+  );
+  const client = createCredentialBackedWeixinClient({
+    accountId: options.accountId,
+    credentialStore,
+  });
+  return new WeixinSurface({
+    accountId: options.accountId,
+    client,
+    fileSendClient: client,
+    imageSendClient: client,
+    typingClient: client,
+    cursorStore: new FileWeixinUpdatesCursorStore(options.cursorDirectory),
+    service: options.service,
+    access: options.access,
+    actorRegistry: options.actorRegistry,
+    credentialStore,
+    replyContextPersistence: createWeixinReplyContextPersistence(
+      options.replyContextDirectory,
+    ),
+    images: new WeixinImageStore(options.uploadsDirectory, options.logger),
+    files: new WeixinFileInput(),
+    startupNotification: options.startupNotification,
+    ...(options.operationUpdateDisplay === undefined
+      ? {}
+      : { operationUpdateDisplay: options.operationUpdateDisplay }),
+    logger: options.logger,
+    onFatal: (error) => options.onFatal(error),
+  });
+}

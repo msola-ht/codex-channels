@@ -35,16 +35,18 @@ export {
   type FeishuCardDocument,
 } from "./approval-card.js";
 export {
-  FeishuConnectionError,
-  FeishuEventConnection,
   FeishuMessageClient,
   FeishuMessageError,
-  type FeishuConnectionErrorCode,
-  type FeishuConnectionState,
-  type FeishuEventConnectionOptions,
   type FeishuMessageClientOptions,
   type FeishuMessageErrorCode,
 } from "./client.js";
+export {
+  FeishuConnectionError,
+  FeishuEventConnection,
+  type FeishuConnectionErrorCode,
+  type FeishuConnectionState,
+  type FeishuEventConnectionOptions,
+} from "./event-connection.js";
 export {
   FeishuFileInput,
   FeishuFileInputError,

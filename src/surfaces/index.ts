@@ -4,20 +4,15 @@ export {
   type FeishuSurfaceOptions,
 } from "./feishu/index.js";
 export {
-  TelegramSurface,
+  createTelegramSurface,
   telegramDefaultAccountId,
+  type CreateTelegramSurfaceOptions,
   type TelegramImagePort,
 } from "./telegram/index.js";
 export {
-  createCredentialBackedWeixinClient,
-  createWeixinCredentialStore,
-  createWeixinReplyContextPersistence,
-  FileWeixinUpdatesCursorStore,
+  createWeixinSurface,
   renderWeixinStartupNotification,
-  WeixinFileInput,
-  WeixinImageStore,
-  WeixinSurface,
-  type WeixinProtocolClient,
+  type CreateWeixinSurfaceOptions,
 } from "./weixin/index.js";
 export {
   ConversationDeliveryQueue,

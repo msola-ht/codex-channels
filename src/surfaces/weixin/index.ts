@@ -13,6 +13,10 @@ export {
   type CreateCredentialBackedWeixinClientOptions,
 } from "./credential-client.js";
 export {
+  createWeixinSurface,
+  type CreateWeixinSurfaceOptions,
+} from "./factory.js";
+export {
   FileWeixinUpdatesCursorStore,
   type WeixinUpdatesCursorStore,
 } from "./updates-cursor-store.js";
@@ -120,5 +124,6 @@ export {
 export {
   WeixinConfigurationDeliveryError,
   WeixinSurface,
+  type WeixinStartupNotification,
   type WeixinSurfaceOptions,
 } from "./surface.js";

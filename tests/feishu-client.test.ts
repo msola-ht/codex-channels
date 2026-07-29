@@ -4,12 +4,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   applyFeishuHttpPolicy,
-  FeishuConnectionError,
-  FeishuEventConnection,
   FeishuMessageError,
   FeishuMessageClient,
-  type FeishuConnectionState,
 } from "../src/surfaces/feishu/client.js";
+import {
+  FeishuConnectionError,
+  FeishuEventConnection,
+  type FeishuConnectionState,
+} from "../src/surfaces/feishu/event-connection.js";
 import type {
   HttpInstance,
 } from "@larksuiteoapi/node-sdk";

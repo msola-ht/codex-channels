@@ -75,6 +75,33 @@ export interface TelegramSurfaceOptions {
   inputQuietWindowMs?: number;
 }
 
+export interface CreateTelegramSurfaceOptions extends TelegramSurfaceOptions {
+  token: string;
+  proxyUrl?: string;
+  service: ConversationService;
+  access: SurfaceAccessPolicy;
+  startupRecipients: ReadonlySet<number>;
+  workspaces: Workspace[];
+  uploadsDirectory: string;
+  logger: Logger;
+}
+
+export function createTelegramSurface(
+  options: CreateTelegramSurfaceOptions,
+): TelegramSurface {
+  return new TelegramSurface(
+    options.token,
+    options.proxyUrl,
+    options.service,
+    options.access,
+    options.startupRecipients,
+    options.workspaces,
+    options.uploadsDirectory,
+    options.logger,
+    options,
+  );
+}
+
 export class TelegramSurface {
   readonly surface = "telegram" as const;
   readonly accountId = telegramDefaultAccountId;

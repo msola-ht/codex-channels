@@ -40,6 +40,11 @@ import type { WeixinUpdatesCursorStore } from "./updates-cursor-store.js";
 import type { WeixinUpdatesRetryEvent } from "./updates-monitor.js";
 import { WeixinTypingController } from "./typing-controller.js";
 
+export interface WeixinStartupNotification {
+  targets(): readonly ConversationTarget[];
+  text(target: ConversationTarget): string;
+}
+
 export interface WeixinSurfaceOptions {
   accountId: string;
   client: WeixinProtocolClient;
@@ -56,10 +61,7 @@ export interface WeixinSurfaceOptions {
   credentialStore?: Pick<WeixinCredentialStore, "get">;
   images?: WeixinImagePort;
   files?: WeixinFilePort;
-  startupNotification?: {
-    targets(): readonly ConversationTarget[];
-    text(target: ConversationTarget): string;
-  };
+  startupNotification?: WeixinStartupNotification;
   operationUpdateDisplay?: OperationUpdateDisplay;
   inputCloseTimeoutMs?: number;
   outbox?: WeixinOutboxOptions;

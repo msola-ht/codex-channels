@@ -7,7 +7,8 @@
 
 - `index.ts`：Telegram Surface 的公开导出入口。
 - `constants.ts`：Telegram Surface 的稳定账号标识。
-- `bot.ts`：注册 Telegram SDK 处理器，执行访问检查，把标准命令或普通输入提交给 Application；
+- `bot.ts`：提供 Bootstrap 使用的单一选项工厂，注册 Telegram SDK 处理器，执行访问检查，
+  把标准命令或普通输入提交给 Application；
   同一 `media_group_id` 的图片按 Actor 合并为一次最多 4 张的 Application 输入；
   普通文本与图片说明可读取 `reply_to_message` 自带的文本或说明文字并作为明确引用上下文提交；
   `/queue <描述>` 把纯文本排到下一 Turn，`/rules <init|check>` 只操作当前 Workspace 且不提供

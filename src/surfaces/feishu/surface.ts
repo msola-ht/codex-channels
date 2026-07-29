@@ -21,12 +21,14 @@ import {
 } from "./application-setup.js";
 import {
   createFeishuOAuthApi,
-  FeishuEventConnection,
   FeishuMessageError,
   FeishuMessageClient,
-  type FeishuEventConnectionOptions,
   type FeishuQuotedMessagePort,
 } from "./client.js";
+import {
+  FeishuEventConnection,
+  type FeishuEventConnectionOptions,
+} from "./event-connection.js";
 import {
   FeishuCommandCenter,
   feishuCommandMenuEventKey,

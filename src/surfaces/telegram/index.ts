@@ -1,2 +1,7 @@
-export { TelegramSurface, type TelegramImagePort } from "./bot.js";
+export {
+  createTelegramSurface,
+  TelegramSurface,
+  type CreateTelegramSurfaceOptions,
+  type TelegramImagePort,
+} from "./bot.js";
 export { telegramDefaultAccountId } from "./constants.js";
