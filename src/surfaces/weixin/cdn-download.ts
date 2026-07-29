@@ -1,3 +1,6 @@
+import { readBoundedFetchBody } from "./fetch-body.js";
+import { withWeixinRequestAbort } from "./request-abort.js";
+
 const weixinCdnOrigin = "https://novac2c.cdn.weixin.qq.com";
 const weixinCdnDownloadPath = "/c2c/download";
 const downloadTimeoutMs = 30_000;
@@ -32,53 +35,25 @@ export function resolveWeixinCdnUrl(reference: WeixinCdnReference): URL {
 export async function downloadWeixinCdnBytes(
   options: DownloadWeixinCdnBytesOptions,
 ): Promise<Buffer> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), downloadTimeoutMs);
-  timeout.unref?.();
-  try {
-    const response = await options.fetchImpl(options.url, {
-      method: "GET",
-      redirect: "error",
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      throw new Error("Weixin CDN request failed");
-    }
-    const rawLength = response.headers.get("content-length");
-    if (rawLength !== null) {
-      const contentLength = Number(rawLength);
-      if (!Number.isSafeInteger(contentLength) || contentLength < 0) {
-        throw new Error("invalid Weixin CDN content length");
+  return await withWeixinRequestAbort(
+    { timeoutMs: downloadTimeoutMs },
+    async (signal) => {
+      const response = await options.fetchImpl(options.url, {
+        method: "GET",
+        redirect: "error",
+        signal,
+      });
+      if (!response.ok) {
+        throw new Error("Weixin CDN request failed");
       }
-      if (contentLength > options.maximumBytes) {
-        throw options.tooLarge();
-      }
-    }
-    if (!response.body) {
-      return Buffer.alloc(0);
-    }
-    const reader = response.body.getReader();
-    const chunks: Buffer[] = [];
-    let bytes = 0;
-    try {
-      while (true) {
-        const chunk = await reader.read();
-        if (chunk.done) {
-          return Buffer.concat(chunks, bytes);
-        }
-        bytes += chunk.value.byteLength;
-        if (bytes > options.maximumBytes) {
-          await reader.cancel();
-          throw options.tooLarge();
-        }
-        chunks.push(Buffer.from(chunk.value));
-      }
-    } finally {
-      reader.releaseLock();
-    }
-  } finally {
-    clearTimeout(timeout);
-  }
+      return await readBoundedFetchBody(
+        response,
+        options.maximumBytes,
+        () => new Error("invalid Weixin CDN content length"),
+        () => options.tooLarge(),
+      );
+    },
+  );
 }
 
 function validateWeixinCdnUrl(value: string): URL {

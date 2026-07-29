@@ -17,6 +17,7 @@ import {
   interactionCancelledTitle,
   interactionOutcome,
 } from "../interaction-copy.js";
+import { PendingInteractionRegistry } from "../pending-interaction-registry.js";
 import type { Logger } from "pino";
 import {
   renderFeishuApprovalCard,
@@ -53,17 +54,13 @@ interface PendingInteraction {
   messageId: string;
 }
 
-const maximumConcurrentInteractions = 100;
-
 export type FeishuCardActionResult =
   | "accepted"
   | "invalid"
   | "stale";
 
 export class FeishuInteractionPort implements InteractionPort {
-  private readonly pendingByToken = new Map<string, PendingInteraction>();
-  private readonly tokenByRequest = new Map<string, string>();
-  private readonly resolvedBeforePending = new Set<string>();
+  private readonly pending = new PendingInteractionRegistry<PendingInteraction>();
   private readonly preparations = new Set<Promise<string | undefined>>();
   private readonly preparationCancellations = new Set<() => void>();
   private readonly statusUpdates = new Set<Promise<void>>();
@@ -90,28 +87,18 @@ export class FeishuInteractionPort implements InteractionPort {
   }
 
   resolved(requestId: string): void {
-    const token = this.tokenByRequest.get(requestId);
-    if (!token) {
-      return;
-    }
-    const pending = this.pendingByToken.get(token);
-    if (pending) {
+    const resolution = this.pending.resolved(requestId);
+    if (resolution?.pending) {
       this.finish(
-        token,
-        safeInteractionDecision(pending.request),
+        resolution.token,
+        safeInteractionDecision(resolution.pending.request),
         interactionOutcome.resolvedElsewhere,
       );
-    } else {
-      this.resolvedBeforePending.add(token);
     }
   }
 
   cancelAll(outcome = "连接已断开"): void {
-    for (const token of this.pendingByToken.keys()) {
-      const pending = this.pendingByToken.get(token);
-      if (!pending) {
-        continue;
-      }
+    for (const [token, pending] of this.pending.entries()) {
       this.finish(
         token,
         safeInteractionDecision(pending.request),
@@ -121,18 +108,17 @@ export class FeishuInteractionPort implements InteractionPort {
   }
 
   stopForActor(target: ConversationTarget, actorId: string): boolean {
-    const token = [...this.pendingByToken.entries()]
-      .reverse()
-      .find(([, pending]) =>
+    const token = this.pending.newest(
+      (pending) =>
         pending.target.surface === target.surface
         && pending.target.accountId === target.accountId
         && pending.target.conversationId === target.conversationId
-        && pending.actorId === actorId
-      )?.[0];
+        && pending.actorId === actorId,
+    )?.[0];
     if (!token) {
       return false;
     }
-    const pending = this.pendingByToken.get(token);
+    const pending = this.pending.get(token);
     if (!pending) {
       return false;
     }
@@ -153,7 +139,7 @@ export class FeishuInteractionPort implements InteractionPort {
       this.preparationCancellations.clear();
     }
     this.cancelAll("Gateway 已停止");
-    this.resolvedBeforePending.clear();
+    this.pending.clearPreparingResolutions();
     await waitAtMost(Promise.allSettled([...this.preparations]), 5_000);
     await waitAtMost(Promise.allSettled([...this.statusUpdates]), 5_000);
   }
@@ -167,7 +153,7 @@ export class FeishuInteractionPort implements InteractionPort {
     if (!token || !actionName) {
       return "invalid";
     }
-    const pending = this.pendingByToken.get(token);
+    const pending = this.pending.get(token);
     if (!pending) {
       return "stale";
     }
@@ -207,12 +193,6 @@ export class FeishuInteractionPort implements InteractionPort {
     ) {
       return safeInteractionDecision(request);
     }
-    if (this.tokenByRequest.has(request.requestId)) {
-      return safeInteractionDecision(request);
-    }
-    if (this.tokenByRequest.size >= maximumConcurrentInteractions) {
-      return safeInteractionDecision(request);
-    }
     const authorizedActors = this.actorRegistry.actors(target).filter(
       (actorId) => this.access!.isAllowed({ target, actorId }),
     );
@@ -221,7 +201,9 @@ export class FeishuInteractionPort implements InteractionPort {
     }
 
     const token = randomBytes(18).toString("base64url");
-    this.tokenByRequest.set(request.requestId, token);
+    if (!this.pending.reserve(request.requestId, token)) {
+      return safeInteractionDecision(request);
+    }
     const preparation = this.prepareInteractionCard(
       target,
       request,
@@ -252,10 +234,7 @@ export class FeishuInteractionPort implements InteractionPort {
     ]);
     this.preparationCancellations.delete(cancelPreparation);
     if (result.type !== "prepared") {
-      if (this.tokenByRequest.get(request.requestId) === token) {
-        this.tokenByRequest.delete(request.requestId);
-      }
-      this.resolvedBeforePending.delete(token);
+      this.pending.release(request.requestId, token);
       if (result.type === "failed") {
         throw result.error;
       }
@@ -275,7 +254,7 @@ export class FeishuInteractionPort implements InteractionPort {
         );
       }, request.expiresInMs);
       timer.unref();
-      this.pendingByToken.set(token, {
+      const activation = this.pending.activate(token, {
         requestId: request.requestId,
         target,
         actorId: authorizedActors[0]!,
@@ -284,7 +263,10 @@ export class FeishuInteractionPort implements InteractionPort {
         timer,
         messageId,
       });
-      if (this.resolvedBeforePending.delete(token)) {
+      if (activation === "missing") {
+        clearTimeout(timer);
+        resolve(safeInteractionDecision(request));
+      } else if (activation === "resolved-before-active") {
         this.finish(
           token,
           safeInteractionDecision(request),
@@ -327,7 +309,7 @@ export class FeishuInteractionPort implements InteractionPort {
     if (!this.closed) {
       return messageId;
     }
-    this.tokenByRequest.delete(request.requestId);
+    this.pending.release(request.requestId, token);
     await this.updateCard(
       target,
       messageId,
@@ -343,13 +325,10 @@ export class FeishuInteractionPort implements InteractionPort {
     decision: InteractionDecision,
     outcome: string,
   ): void {
-    const pending = this.pendingByToken.get(token);
+    const pending = this.pending.take(token);
     if (!pending) {
       return;
     }
-    clearTimeout(pending.timer);
-    this.pendingByToken.delete(token);
-    this.tokenByRequest.delete(pending.requestId);
     pending.resolve(decision);
 
     const statusUpdate = this.updateCard(

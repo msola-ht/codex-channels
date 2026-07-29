@@ -1159,6 +1159,19 @@ describe("WeixinProtocolClient", () => {
     });
   });
 
+  it("rejects invalid response content lengths before parsing", async () => {
+    const client = createClient({
+      fetchImpl: vi.fn(async () => new Response("{}", {
+        status: 200,
+        headers: { "Content-Length": "invalid" },
+      })),
+    });
+
+    await expect(client.getUpdates("")).rejects.toMatchObject({
+      code: "invalid-response",
+    });
+  });
+
   it("distinguishes timeout and external cancellation", async () => {
     const client = createClient({
       fetchImpl: abortableFetch(),

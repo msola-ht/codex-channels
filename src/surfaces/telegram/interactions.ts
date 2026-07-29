@@ -13,6 +13,7 @@ import {
 } from "../../approval/index.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
 import { interactionOutcome } from "../interaction-copy.js";
+import { PendingInteractionRegistry } from "../pending-interaction-registry.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import {
   formatTelegramExpandableQuotePanelChunks,
@@ -49,14 +50,10 @@ const directInteractionQueue: TelegramInteractionQueue = {
   runOrdered: (_chatId, run) => run(),
 };
 
-const maximumConcurrentInteractions = 100;
-
 export class TelegramInteractionPort implements InteractionPort {
-  private readonly pendingByToken = new Map<string, PendingInteraction>();
-  private readonly tokenByRequest = new Map<string, string>();
+  private readonly pending = new PendingInteractionRegistry<PendingInteraction>();
   private readonly textTokenByChat = new Map<string, string>();
   private readonly latestTokenByChat = new Map<string, string>();
-  private readonly resolvedBeforePending = new Set<string>();
   private readonly preparations = new Set<Promise<
     Awaited<ReturnType<Bot["api"]["sendMessage"]>> | undefined
   >>();
@@ -77,20 +74,17 @@ export class TelegramInteractionPort implements InteractionPort {
     target: ConversationTarget,
     request: InteractionRequest,
   ): Promise<InteractionDecision> {
-    if (
-      this.closed
-      ||
-      this.tokenByRequest.has(request.requestId)
-      || this.tokenByRequest.size >= maximumConcurrentInteractions
-    ) {
+    if (this.closed) {
       return safeInteractionDecision(request);
     }
     const token = randomBytes(12).toString("base64url");
+    if (!this.pending.reserve(request.requestId, token)) {
+      return safeInteractionDecision(request);
+    }
     const keyboard = this.keyboard(request, token, 0);
     const chunks = request.type === "approval"
       ? formatTelegramExpandableQuotePanelChunks(request.title, request.detail, 3_600)
       : formatTelegramPanelChunks(formatInteraction(request, 0), 3_600);
-    this.tokenByRequest.set(request.requestId, token);
     this.queue.prepareInteraction(target.conversationId, request);
     const preparation = this.prepareInteraction(
       target,
@@ -118,10 +112,7 @@ export class TelegramInteractionPort implements InteractionPort {
     ]);
     this.preparationCancellations.delete(cancelPreparation);
     if (result.type !== "prepared") {
-      if (this.tokenByRequest.get(request.requestId) === token) {
-        this.tokenByRequest.delete(request.requestId);
-      }
-      this.resolvedBeforePending.delete(token);
+      this.pending.release(request.requestId, token);
       if (result.type === "failed") {
         throw result.error;
       }
@@ -147,7 +138,7 @@ export class TelegramInteractionPort implements InteractionPort {
         this.finish(token, safeInteractionDecision(request));
       }, request.expiresInMs);
       timer.unref();
-      this.pendingByToken.set(token, {
+      const activation = this.pending.activate(token, {
         requestId: request.requestId,
         target,
         request,
@@ -163,7 +154,10 @@ export class TelegramInteractionPort implements InteractionPort {
       if (request.type === "user-input" || (request.type === "elicitation" && request.mode === "form")) {
         this.textTokenByChat.set(target.conversationId, token);
       }
-      if (this.resolvedBeforePending.delete(token)) {
+      if (activation === "missing") {
+        clearTimeout(timer);
+        resolve(safeInteractionDecision(request));
+      } else if (activation === "resolved-before-active") {
         this.finish(
           token,
           safeInteractionDecision(request),
@@ -197,10 +191,7 @@ export class TelegramInteractionPort implements InteractionPort {
         return sent;
       });
     } catch (error) {
-      if (this.tokenByRequest.get(request.requestId) === token) {
-        this.tokenByRequest.delete(request.requestId);
-      }
-      this.resolvedBeforePending.delete(token);
+      this.pending.release(request.requestId, token);
       this.logger.warn(
         {
           ...interactionLogMetadata(target, request),
@@ -240,9 +231,7 @@ export class TelegramInteractionPort implements InteractionPort {
     messageId: number,
     messageText: string,
   ): Promise<void> {
-    if (this.tokenByRequest.get(request.requestId) === token) {
-      this.tokenByRequest.delete(request.requestId);
-    }
+    this.pending.release(request.requestId, token);
     await this.updateInteractionMessage(
       target,
       request.requestId,
@@ -258,18 +247,13 @@ export class TelegramInteractionPort implements InteractionPort {
   }
 
   resolved(requestId: string): void {
-    const token = this.tokenByRequest.get(requestId);
-    if (token) {
-      const pending = this.pendingByToken.get(token);
-      if (pending) {
-        this.finish(
-          token,
-          safeInteractionDecision(pending.request),
-          interactionOutcome.resolvedElsewhere,
-        );
-      } else {
-        this.resolvedBeforePending.add(token);
-      }
+    const resolution = this.pending.resolved(requestId);
+    if (resolution?.pending) {
+      this.finish(
+        resolution.token,
+        safeInteractionDecision(resolution.pending.request),
+        interactionOutcome.resolvedElsewhere,
+      );
     }
   }
 
@@ -280,7 +264,7 @@ export class TelegramInteractionPort implements InteractionPort {
       return false;
     }
     const token = this.textTokenByChat.get(String(chatId));
-    const pending = token ? this.pendingByToken.get(token) : undefined;
+    const pending = token ? this.pending.get(token) : undefined;
     if (!pending) {
       return false;
     }
@@ -368,7 +352,7 @@ export class TelegramInteractionPort implements InteractionPort {
 
   stopForChat(chatId: string): boolean {
     const token = this.latestTokenByChat.get(chatId);
-    const pending = token ? this.pendingByToken.get(token) : undefined;
+    const pending = token ? this.pending.get(token) : undefined;
     if (!pending) {
       return false;
     }
@@ -389,14 +373,14 @@ export class TelegramInteractionPort implements InteractionPort {
       this.preparationCancellations.clear();
     }
     this.cancelAll("Gateway 已停止");
-    this.resolvedBeforePending.clear();
+    this.pending.clearPreparingResolutions();
     await waitAtMost(Promise.allSettled([...this.preparations]), 5_000);
     const updates = Promise.allSettled([...this.statusUpdates]);
     await waitAtMost(updates, 5_000);
   }
 
   cancelAll(outcome = "连接已断开"): void {
-    for (const [token, pending] of this.pendingByToken) {
+    for (const [token, pending] of this.pending.entries()) {
       this.finish(token, safeInteractionDecision(pending.request), outcome);
     }
   }
@@ -465,7 +449,7 @@ export class TelegramInteractionPort implements InteractionPort {
       return;
     }
     const [, action, token] = data.split(":");
-    const pending = token ? this.pendingByToken.get(token) : undefined;
+    const pending = token ? this.pending.get(token) : undefined;
     if (!pending || String(context.chat?.id) !== pending.target.conversationId) {
       await context.answerCallbackQuery({ text: "该请求已失效" });
       return;
@@ -691,13 +675,10 @@ export class TelegramInteractionPort implements InteractionPort {
     decision: InteractionDecision,
     outcome: string = interactionOutcome.timedOut,
   ): void {
-    const pending = this.pendingByToken.get(token);
+    const pending = this.pending.take(token);
     if (!pending) {
       return;
     }
-    clearTimeout(pending.timer);
-    this.pendingByToken.delete(token);
-    this.tokenByRequest.delete(pending.requestId);
     if (this.textTokenByChat.get(pending.target.conversationId) === token) {
       const previousText = this.previousPendingToken(
         pending.target.conversationId,
@@ -768,11 +749,10 @@ export class TelegramInteractionPort implements InteractionPort {
     conversationId: string,
     predicate: (pending: PendingInteraction) => boolean = () => true,
   ): string | undefined {
-    return [...this.pendingByToken.entries()]
-      .reverse()
-      .find(([, candidate]) =>
+    return this.pending.newest(
+      (candidate) =>
         candidate.target.conversationId === conversationId && predicate(candidate),
-      )?.[0];
+    )?.[0];
   }
 }
 

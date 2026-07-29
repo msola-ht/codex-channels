@@ -16,15 +16,18 @@
   失败关闭。
 - `protocol-client.ts`：实现固定 `v2.4.6` 的 `getupdates`、`sendmessage`、`getuploadurl`、
   `getconfig` 和 `sendtyping` HTTP 合同，并按官方 AES-128-ECB、CDN 二进制 `POST` 与
-  双层 key 编码发送生成图片和受限内存文件；成功长轮询响应给出的下一轮建议超时只在
+  双层 key 编码发送生成图片和受限内存文件；图片与文件复用同一媒体上传管线，只在验证和
+  最终消息项结构处区分；成功长轮询响应给出的下一轮建议超时只在
   1 至 120 秒边界内采用，越界响应失败关闭；
   在 JSON 数字转换前保留原始 `message_id`，只输出文本、带可选说明文字的最多 4 张图片引用、
   单个一般文件引用或带原因的忽略事件；文本项内受约束的 `ref_msg` 标题、引用文本与精确 `msg_id` 会作为
   独立引用信息输出；
   混入其他媒体、重复文本或超过图片数量上限时失败关闭，并限制出站文本为
   已验证的 4000 个 UTF-16 码元。
-- `request-abort.ts`：统一微信 JSON API 与 CDN 二进制上传的请求超时、外部取消、监听器清理
+- `request-abort.ts`：统一微信 JSON API、CDN 下载与二进制上传的请求超时、外部取消、监听器清理
   和 Abort 原因分类；协议 Client 仍负责按具体操作映射稳定错误码与中文文案。
+- `fetch-body.ts`：统一微信 Fetch 响应的 Content-Length 校验、流式累计、超限取消与 Reader
+  清理；JSON API 将有界 Buffer 解码为文本，CDN 下载保留二进制。
 - `cdn-download.ts`：统一校验固定官方 CDN 地址，并执行禁止重定向、30 秒超时和有界响应下载；
   图片与文件复用该传输边界，各自保留解密、大小、内容与完整性校验。
 - `media-crypto.ts`：统一解析媒体 Base64 AES Key 并执行 AES-128-ECB 解密；图片专属 Hex Key

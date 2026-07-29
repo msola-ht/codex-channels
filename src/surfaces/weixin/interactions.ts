@@ -20,6 +20,7 @@ import {
   formatProcessedInteractionOutcome,
   interactionOutcome,
 } from "../interaction-copy.js";
+import { PendingInteractionRegistry } from "../pending-interaction-registry.js";
 import { sanitizeWeixinMarkdownText } from "./operation-format.js";
 
 type ApprovalRequest = Extract<InteractionRequest, { type: "approval" }>;
@@ -47,7 +48,6 @@ interface PendingInteraction {
 
 export type WeixinInteractionTextResult = "handled" | "not-command";
 
-const maximumConcurrentInteractions = 100;
 const maximumPromptCharacters = 16_000;
 const maximumPromptMessageCharacters = 4_000;
 const maximumQuestionCount = 3;
@@ -55,8 +55,7 @@ const maximumInputCharacters = 1_000;
 const interactionTokenPattern = /^[A-Za-z0-9_-]{8,64}$/;
 
 export class WeixinInteractionPort implements InteractionPort {
-  private readonly pendingByToken = new Map<string, PendingInteraction>();
-  private readonly tokenByRequest = new Map<string, string>();
+  private readonly pending = new PendingInteractionRegistry<PendingInteraction>();
   private closed = false;
 
   constructor(
@@ -99,7 +98,7 @@ export class WeixinInteractionPort implements InteractionPort {
       await this.notify(target, "交互命令格式无效，请复制提示中的完整命令。");
       return "handled";
     }
-    const pending = this.pendingByToken.get(command.token);
+    const pending = this.pending.get(command.token);
     if (!pending) {
       await this.notify(target, "交互请求不存在、已过期或已处理。");
       return "handled";
@@ -118,24 +117,20 @@ export class WeixinInteractionPort implements InteractionPort {
   }
 
   resolved(requestId: string): void {
-    const token = this.tokenByRequest.get(requestId);
-    if (!token) {
-      return;
-    }
-    const pending = this.pendingByToken.get(token);
-    if (!pending) {
+    const resolution = this.pending.resolved(requestId);
+    if (!resolution?.pending) {
       return;
     }
     void this.finish(
-      token,
-      safeInteractionDecision(pending.request),
+      resolution.token,
+      safeInteractionDecision(resolution.pending.request),
       formatProcessedInteractionOutcome(interactionOutcome.resolvedElsewhere),
     );
   }
 
   cancelAll(outcome = "Gateway 已停止"): void {
     this.closed = true;
-    for (const [token, pending] of this.pendingByToken) {
+    for (const [token, pending] of this.pending.entries()) {
       void this.finish(
         token,
         safeInteractionDecision(pending.request),
@@ -153,8 +148,6 @@ export class WeixinInteractionPort implements InteractionPort {
       || !this.delivery
       || !this.actorRegistry
       || !this.access
-      || this.tokenByRequest.has(request.requestId)
-      || this.tokenByRequest.size >= maximumConcurrentInteractions
     ) {
       return safeInteractionDecision(request);
     }
@@ -165,10 +158,10 @@ export class WeixinInteractionPort implements InteractionPort {
       return safeInteractionDecision(request);
     }
     const token = this.createToken();
-    if (
-      !interactionTokenPattern.test(token)
-      || this.pendingByToken.has(token)
-    ) {
+    if (!interactionTokenPattern.test(token)) {
+      return safeInteractionDecision(request);
+    }
+    if (!this.pending.reserve(request.requestId, token)) {
       return safeInteractionDecision(request);
     }
     const prompt = renderInteractionPrompt(request, token);
@@ -191,6 +184,7 @@ export class WeixinInteractionPort implements InteractionPort {
     if (
       promptCharacters > maximumPromptCharacters
     ) {
+      this.pending.release(request.requestId, token);
       await this.notify(target, "交互详情过长，微信端已安全取消本次请求。");
       return safeInteractionDecision(request);
     }
@@ -207,8 +201,7 @@ export class WeixinInteractionPort implements InteractionPort {
       );
     }, request.expiresInMs);
     timer.unref();
-    this.tokenByRequest.set(request.requestId, token);
-    this.pendingByToken.set(token, {
+    const activation = this.pending.activate(token, {
       requestId: request.requestId,
       target,
       actorId: actors[0]!,
@@ -218,6 +211,10 @@ export class WeixinInteractionPort implements InteractionPort {
       resolve: resolveDecision,
       timer,
     });
+    if (activation === "missing") {
+      clearTimeout(timer);
+      return safeInteractionDecision(request);
+    }
 
     try {
       await this.delivery.deliverTextSequence(target, prompt);
@@ -427,15 +424,10 @@ export class WeixinInteractionPort implements InteractionPort {
     decision: InteractionDecision,
     outcome?: string,
   ): Promise<void> {
-    const pending = this.pendingByToken.get(token);
+    const pending = this.pending.take(token);
     if (!pending) {
       return;
     }
-    this.pendingByToken.delete(token);
-    if (this.tokenByRequest.get(pending.requestId) === token) {
-      this.tokenByRequest.delete(pending.requestId);
-    }
-    clearTimeout(pending.timer);
     pending.resolve(decision);
     if (outcome !== undefined) {
       await this.notify(pending.target, outcome);
