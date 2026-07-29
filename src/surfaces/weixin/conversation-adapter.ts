@@ -7,6 +7,7 @@ import {
   UserFacingError,
   type ConversationTarget,
 } from "../../conversation-core/index.js";
+import { formatTurnInputAppended } from "../input-copy.js";
 import { parseSlashCommand } from "../slash-command.js";
 import { formatOperationFailure } from "../output-copy.js";
 import { formatQuotedInput } from "../quoted-input.js";
@@ -122,7 +123,10 @@ export class WeixinConversationAdapter {
           text: fileText,
         });
         if (result.tail && result.submission.steered) {
-          this.notify(message.target, "已将文件追加到当前 Turn。");
+          this.notify(
+            message.target,
+            formatTurnInputAppended("file", Boolean(message.text?.trim())),
+          );
         }
         return;
       }
@@ -164,7 +168,10 @@ export class WeixinConversationAdapter {
           localImages,
         });
         if (result.tail && result.submission.steered) {
-          this.notify(message.target, "已将图片追加到当前 Turn。");
+          this.notify(
+            message.target,
+            formatTurnInputAppended("image", Boolean(message.text?.trim())),
+          );
         }
         return;
       }

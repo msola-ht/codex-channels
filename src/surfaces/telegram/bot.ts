@@ -24,6 +24,7 @@ import type {
   SurfaceConfigurationChange,
 } from "../types.js";
 import { conversationCommandHelpLines } from "../conversation-command-format.js";
+import { formatTurnInputAppended } from "../input-copy.js";
 import {
   formatOperationFailure,
   interactionStoppedText,
@@ -290,7 +291,7 @@ export class TelegramSurface {
         );
       }
       if (result.tail && result.submission.steered) {
-        await context.reply("已将补充要求追加到当前 Turn。", {
+        await context.reply(formatTurnInputAppended("text"), {
           disable_notification: true,
           reply_parameters: {
             message_id: context.message.message_id,
@@ -401,7 +402,7 @@ export class TelegramSurface {
       );
     }
     if (result.tail && result.submission.steered) {
-      await context.reply("已将文件追加到当前 Turn。", {
+      await context.reply(formatTurnInputAppended("file", Boolean(currentText)), {
         disable_notification: true,
         reply_parameters: {
           message_id: context.message.message_id,
@@ -466,7 +467,7 @@ export class TelegramSurface {
       );
     }
     if (result.tail && result.submission.steered && context.message) {
-      await context.reply("已将图片和补充要求追加到当前 Turn。", {
+      await context.reply(formatTurnInputAppended("image", Boolean(currentText)), {
         disable_notification: true,
         reply_parameters: {
           message_id: context.message.message_id,

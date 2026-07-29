@@ -10,6 +10,7 @@ import {
   UserFacingError,
   type ConversationTarget,
 } from "../../conversation-core/index.js";
+import { formatTurnInputAppended } from "../input-copy.js";
 import { parseSlashCommand } from "../slash-command.js";
 import {
   formatOperationFailure,
@@ -193,7 +194,7 @@ export class FeishuConversationAdapter {
       }
       this.notifyText(
         message.target.conversationId,
-        "已将补充要求追加到当前 Turn。",
+        formatTurnInputAppended("text"),
       );
     } catch (error) {
       if (error instanceof FeishuOutputQueueError) {
@@ -450,7 +451,7 @@ export class FeishuConversationAdapter {
       );
       this.notifyText(
         message.target.conversationId,
-        "已将文件追加到当前 Turn。",
+        formatTurnInputAppended("file"),
       );
       return;
     }
@@ -534,7 +535,10 @@ export class FeishuConversationAdapter {
     if (tail?.submission.steered) {
       this.notifyText(
         messages[0]!.target.conversationId,
-        "已将图片追加到当前 Turn。",
+        formatTurnInputAppended(
+          "image",
+          messages.some((message) => Boolean(message.text?.trim())),
+        ),
       );
     }
   }

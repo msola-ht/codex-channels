@@ -141,7 +141,7 @@ describe("WeixinConversationAdapter", () => {
     });
     expect(notifyText).toHaveBeenCalledWith(
       target,
-      "已将图片追加到当前 Turn。",
+      "已将图片和补充要求追加到当前 Turn。",
     );
   });
 

@@ -9,6 +9,13 @@ import {
   formatConversationStatus,
 } from "../src/surfaces/conversation-command-format.js";
 import {
+  formatPercent,
+  formatPlanType,
+  formatRateLimitState,
+  formatRateLimitWindow,
+} from "../src/surfaces/account-format.js";
+import { formatTurnInputAppended } from "../src/surfaces/input-copy.js";
+import {
   formatCancelledInteraction,
   formatProcessedInteractionOutcome,
   interactionCancelledTitle,
@@ -32,12 +39,32 @@ import {
   formatRuntimeMcpStatusUpdate,
   formatRuntimeRateLimitUpdate,
 } from "../src/surfaces/runtime-status-format.js";
+import { emptyCodexResponseText } from "../src/surfaces/output-copy.js";
 import {
   renderWeixinCommandResult,
   renderWeixinHelp,
 } from "../src/surfaces/weixin/command-renderer.js";
 
 describe("shared surface copy contract", () => {
+  it("keeps account, quota, appended-input, and empty-response copy shared", () => {
+    expect(formatPercent(12.34)).toBe("12.3%");
+    expect(formatPlanType("self_serve_business_usage_based"))
+      .toBe("Business（按量）");
+    expect(formatRateLimitState(null)).toBe("正常");
+    expect(formatRateLimitWindow({
+      usedPercent: 12,
+      windowDurationMins: 10_080,
+      resetsAt: null,
+    })).toBe("已使用 12% · 周期 7 天");
+    expect(formatTurnInputAppended("text"))
+      .toBe("已将补充要求追加到当前 Turn。");
+    expect(formatTurnInputAppended("file"))
+      .toBe("已将文件追加到当前 Turn。");
+    expect(formatTurnInputAppended("image", true))
+      .toBe("已将图片和补充要求追加到当前 Turn。");
+    expect(emptyCodexResponseText).toBe("Codex 返回了空消息。");
+  });
+
   it("keeps interaction outcomes platform-neutral", () => {
     expect(interactionProcessedTitle).toBe("Codex 交互已处理");
     expect(interactionCancelledTitle).toBe("Codex 交互已取消");

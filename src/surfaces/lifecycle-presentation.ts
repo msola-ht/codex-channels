@@ -7,6 +7,10 @@ import type {
   ThreadGoal,
 } from "../conversation-core/index.js";
 
+import {
+  formatPercent,
+  formatRateLimitWindow,
+} from "./account-format.js";
 import { formatElapsedDuration } from "./elapsed-duration.js";
 
 export interface LifecyclePresentation {
@@ -248,22 +252,7 @@ function formatUpstreamUserAgent(userAgent: string | null): string {
 function formatWeeklyLimit(
   window: NonNullable<StartupStatus["weeklyLimit"]>,
 ): string {
-  return [
-    `已使用 ${formatPercent(window.usedPercent)}`,
-    ...(window.resetsAt === null
-      ? []
-      : [`重置 ${formatResetTime(window.resetsAt)}`]),
-  ].join(" · ");
-}
-
-function formatResetTime(timestamp: number): string {
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(timestamp * 1_000));
+  return formatRateLimitWindow(window, { includeDuration: false });
 }
 
 function formatTokenCount(value: number): string {
@@ -287,12 +276,6 @@ function formatCacheHitRate(
   return inputTokens > 0
     ? formatPercent(Math.max(0, cachedInputTokens / inputTokens * 100))
     : "未知";
-}
-
-function formatPercent(value: number): string {
-  return `${value.toLocaleString("zh-CN", {
-    maximumFractionDigits: 1,
-  })}%`;
 }
 
 function goalStatusLabel(status: ThreadGoal["status"]): string {

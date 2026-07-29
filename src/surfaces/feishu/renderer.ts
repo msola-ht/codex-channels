@@ -23,6 +23,7 @@ import {
   formatConversationUsage,
   formatConversationWorkspaces,
 } from "../conversation-command-format.js";
+import { emptyCodexResponseText } from "../output-copy.js";
 import { formatSurfaceConfigurationChange } from "../configuration-change-format.js";
 import {
   createStartupPresentation,
@@ -157,7 +158,7 @@ export function renderFeishuOutput(event: OutputEvent): string | null {
     case "user.message":
       return `CLI 输入\n${event.text}`;
     case "text.completed":
-      return event.text.trim() ? event.text : "Codex 返回了空消息。";
+      return event.text.trim() ? event.text : emptyCodexResponseText;
     case "operation.updated":
       return null;
     case "turn.completed":

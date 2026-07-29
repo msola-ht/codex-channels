@@ -63,12 +63,15 @@ Turn、Thread 或 Surface 关闭时清理。
 布局以及各自的发送策略。
 `elapsed-duration.ts` 只把 App Server 已提供的 Turn 毫秒耗时格式化为三个 Surface 共用的中文
 短文本，不负责计时、状态或持久化。
+`account-format.ts` 统一套餐名称、额度状态、百分比、周期与重置时间格式，供命令结果、运行时通知
+和生命周期汇报复用。
 `slash-command.ts` 统一飞书与微信的严格斜杠命令解析；`conversation-command-format.ts`
 统一 Telegram、飞书与微信共用的命令目录、Workspace、Skill、MCP、Plugin、权限、项目规则、
 Diff、Goal、模型选择、Default/Plan 模式、用量与额度等平台无关命令结果文案与状态文本。
 `user-facing-error-format.ts` 统一三个渠道的结构化用户错误文案，只保留渠道名称差异；
-`output-copy.ts` 统一断线、警告、操作失败、停止交互与内容截断等输出语义，各渠道继续自行决定
-HTML、CardKit Markdown、纯文本布局和发送方式。
+`input-copy.ts` 统一补充文字、文件与图片追加到当前 Turn 的确认文案；
+`output-copy.ts` 统一断线、警告、操作失败、停止交互、空回复与内容截断等输出语义，各渠道继续
+自行决定 HTML、CardKit Markdown、纯文本布局和发送方式。
 `interaction-copy.ts` 统一审批、用户输入和 MCP 交互的处理、取消、超时、跨客户端解决及提交结果
 语义；平台仍各自使用按钮、卡片或可复制命令完成交互。
 `text-file-copy.ts` 统一三个渠道文本文件下载失败、1,000,000 字节上限和 UTF-8 类型拒绝文案，

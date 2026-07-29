@@ -21,6 +21,7 @@ import {
 } from "../lifecycle-presentation.js";
 import {
   contentTruncatedText,
+  emptyCodexResponseText,
   formatCodexWarning,
   formatConnectionLost,
 } from "../output-copy.js";
@@ -284,7 +285,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
           return null;
         }
         return event.text.trim().length === 0
-          ? "Codex 返回了空消息。"
+          ? emptyCodexResponseText
           : formatWeixinFinalText(event.text);
       case "turn.completed": {
         return formatWeixinCommandText(renderWeixinTurnCompleted(event));
@@ -476,7 +477,7 @@ function splitWeixinText(
     chunks.push(text.slice(0, end));
     text = text.slice(end);
   }
-  return chunks.length === 0 ? ["Codex 返回了空消息。"] : chunks;
+  return chunks.length === 0 ? [emptyCodexResponseText] : chunks;
 }
 
 function safePrefix(value: string, maximumLength: number): string {

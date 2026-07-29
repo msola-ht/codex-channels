@@ -434,6 +434,20 @@ describe("TelegramOutbox", () => {
     ]);
   });
 
+  it("shows the shared fallback for a blank final answer", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle(textCompleted("blank", " \n ", "final_answer"));
+    outbox.handle(turnCompleted());
+    await outbox.close();
+
+    expect(api.sent).toEqual([
+      "Codex 返回了空消息。",
+      turnCompletedPanel,
+    ]);
+  });
+
   it("sends command-only text fences as clickable Telegram commands", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();

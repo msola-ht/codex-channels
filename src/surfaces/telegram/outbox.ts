@@ -22,6 +22,7 @@ import {
 } from "../lifecycle-presentation.js";
 import {
   contentTruncatedText,
+  emptyCodexResponseText,
   formatCodexWarning,
   formatConnectionLost,
 } from "../output-copy.js";
@@ -578,10 +579,13 @@ export class TelegramOutbox {
       return;
     }
     if (!state.text.trim()) {
-      if (final && !standaloneState) {
-        this.streams.delete(key);
+      if (!final || state.phase === "commentary") {
+        if (final && !standaloneState) {
+          this.streams.delete(key);
+        }
+        return;
       }
-      return;
+      state.text = emptyCodexResponseText;
     }
     const text = state.text.trimEnd();
     if (final && state.phase !== "commentary") {
