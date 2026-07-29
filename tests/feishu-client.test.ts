@@ -1134,6 +1134,7 @@ describe("FeishuMessageClient", () => {
       "7355372766134157313",
       2,
       "结尾不能少字：尚未推送。",
+      "**本次运行 · 已完成**",
     );
 
     expect(finishStreamingCard).toHaveBeenCalledWith({
@@ -1152,11 +1153,20 @@ describe("FeishuMessageClient", () => {
               },
             },
             body: {
-              elements: [{
-                tag: "markdown",
-                element_id: "codexc_stream",
-                content: "结尾不能少字：尚未推送。",
-              }],
+              elements: [
+                {
+                  tag: "markdown",
+                  element_id: "codexc_stream",
+                  content: "结尾不能少字：尚未推送。",
+                },
+                {
+                  tag: "hr",
+                },
+                {
+                  tag: "markdown",
+                  content: "**本次运行 · 已完成**",
+                },
+              ],
             },
           }),
         },

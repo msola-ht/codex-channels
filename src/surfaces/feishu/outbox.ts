@@ -34,6 +34,7 @@ const feishuStreamFlushDelayMs = 300;
 const maximumFeishuStreamingElementCharacters = 5_000;
 const maximumFeishuStreamingCards = 5;
 const maximumFeishuActiveStreams = 100;
+const maximumFeishuFinishedStreams = 100;
 const maximumFeishuBufferedStreamCharacters =
   maximumFeishuStreamingElementCharacters * maximumFeishuStreamingCards + 1;
 const maximumFeishuFinalAnswerFileBytes = 1_000_000;
@@ -56,6 +57,14 @@ interface FeishuStreamState {
   lastSentText?: string;
   timer?: NodeJS.Timeout;
   failed: boolean;
+  completionFooter?: string;
+}
+
+interface FinishedFeishuStream {
+  chatId: string;
+  cardId: string;
+  sequence: number;
+  summary: string;
 }
 
 export interface FeishuMessagePort {
@@ -85,6 +94,7 @@ export interface FeishuMessagePort {
     cardId: string,
     sequence: number,
     summary: string,
+    footer?: string,
   ): Promise<void>;
 }
 
@@ -100,6 +110,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     { chatId: string; messageId: string; status: string }
   >();
   private readonly streams = new Map<string, FeishuStreamState>();
+  private readonly finishedStreams = new Map<string, FinishedFeishuStream>();
   private readonly operationUpdates = new OperationUpdateBuffer<string>();
   private readonly replyTargets = new TurnReplyTargets<string>();
   private streamCapacityWarningIssued = false;
@@ -148,12 +159,21 @@ export class FeishuOutbox implements SurfaceOutputPort {
       }
     }
     if (event.type === "operation.updated") {
+      let streamFlushed = false;
+      const flushStreamBeforeOutput = (): void => {
+        if (streamFlushed) {
+          return;
+        }
+        streamFlushed = true;
+        this.flushStreamsBeforeVisibleOutput(event.threadId, event.turnId);
+      };
       const imagePath = event.operation.imagePath;
       if (
         event.operation.kind === "imageGeneration"
         && event.operation.status === "completed"
         && imagePath !== undefined
       ) {
+        flushStreamBeforeOutput();
         this.delivery.enqueue(
           event.target.conversationId,
           () => this.sendGeneratedImage(
@@ -176,6 +196,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         return;
       }
       if (event.operation.status !== "running") {
+        flushStreamBeforeOutput();
         const markdown = formatFeishuOperation(
           event.operation,
           this.options.operationUpdateDisplay === "compact" ? "compact" : "full",
@@ -192,11 +213,17 @@ export class FeishuOutbox implements SurfaceOutputPort {
       return;
     }
     if (event.type === "turn.completed") {
-      this.finishStreamsForTurn(event.threadId, event.turnId);
       this.flushOperationUpdates(
         event.target.conversationId,
         turnKey(event.threadId, event.turnId),
       );
+      const completion = renderFeishuOutput(event);
+      if (
+        completion !== null
+        && this.finishStreamsForTurn(event.threadId, event.turnId, completion)
+      ) {
+        return;
+      }
     }
     if (event.type === "thread.status") {
       this.delivery.enqueue(
@@ -333,6 +360,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     this.closeFinished = true;
     this.threadStatusMessages.clear();
     this.streams.clear();
+    this.finishedStreams.clear();
     this.operationUpdates.clear();
     this.replyTargets.clear();
   }
@@ -676,10 +704,40 @@ export class FeishuOutbox implements SurfaceOutputPort {
     return true;
   }
 
-  private finishStreamsForTurn(threadId: string, turnId: string): void {
+  private flushStreamsBeforeVisibleOutput(
+    threadId: string,
+    turnId: string,
+  ): void {
     for (const [key, state] of this.streams) {
       if (state.threadId !== threadId || state.turnId !== turnId) {
         continue;
+      }
+      if (state.timer) {
+        clearTimeout(state.timer);
+        delete state.timer;
+      }
+      this.delivery.enqueue(
+        state.chatId,
+        () => this.flushStream(key, false, false),
+        true,
+      );
+    }
+  }
+
+  private finishStreamsForTurn(
+    threadId: string,
+    turnId: string,
+    footer: string,
+  ): boolean {
+    const matching = [...this.streams].filter(([, state]) =>
+      state.threadId === threadId && state.turnId === turnId
+    );
+    const footerTarget = matching.findLast(([, state]) =>
+      state.phase !== "commentary"
+    );
+    for (const [key, state] of matching) {
+      if (footerTarget?.[0] === key) {
+        state.completionFooter = footer;
       }
       if (state.timer) {
         clearTimeout(state.timer);
@@ -691,6 +749,33 @@ export class FeishuOutbox implements SurfaceOutputPort {
         true,
       );
     }
+    if (footerTarget !== undefined) {
+      return true;
+    }
+    const key = turnKey(threadId, turnId);
+    const completed = this.finishedStreams.get(key);
+    if (!completed) {
+      return false;
+    }
+    this.finishedStreams.delete(key);
+    this.delivery.enqueue(
+      completed.chatId,
+      async () => {
+        try {
+          await this.messagePort.finishStreamingCard(
+            completed.cardId,
+            completed.sequence + 1,
+            completed.summary,
+            footer,
+          );
+        } catch (error) {
+          await this.sendMarkdown(completed.chatId, footer);
+          throw error;
+        }
+      },
+      true,
+    );
+    return true;
   }
 
   private async flushStream(
@@ -730,6 +815,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
           this.replyTargets.delete(replyKey);
         }
       }
+      if (state.completionFooter !== undefined) {
+        await this.sendMarkdown(state.chatId, state.completionFooter);
+      }
       return;
     }
     try {
@@ -765,14 +853,68 @@ export class FeishuOutbox implements SurfaceOutputPort {
       throw error;
     }
     if (terminal) {
+      try {
+        state.sequence += 1;
+        const footerAtStart = state.completionFooter;
+        if (footerAtStart === undefined) {
+          await this.messagePort.finishStreamingCard(
+            state.cardId!,
+            state.sequence,
+            state.cardText,
+          );
+        } else {
+          await this.messagePort.finishStreamingCard(
+            state.cardId!,
+            state.sequence,
+            state.cardText,
+            footerAtStart,
+          );
+        }
+        if (
+          footerAtStart === undefined
+          && state.completionFooter !== undefined
+        ) {
+          state.sequence += 1;
+          await this.messagePort.finishStreamingCard(
+            state.cardId!,
+            state.sequence,
+            state.cardText,
+            state.completionFooter,
+          );
+        }
+      } catch (error) {
+        this.streams.delete(key);
+        if (state.completionFooter !== undefined) {
+          await this.sendMarkdown(state.chatId, state.completionFooter);
+        }
+        throw error;
+      }
+      if (state.completionFooter === undefined && state.phase !== "commentary") {
+        this.rememberFinishedStream(turnKey(state.threadId, state.turnId), {
+          chatId: state.chatId,
+          cardId: state.cardId!,
+          sequence: state.sequence,
+          summary: state.cardText,
+        });
+      }
       this.streams.delete(key);
-      state.sequence += 1;
-      await this.messagePort.finishStreamingCard(
-        state.cardId!,
-        state.sequence,
-        state.cardText,
-      );
     }
+  }
+
+  private rememberFinishedStream(
+    key: string,
+    stream: FinishedFeishuStream,
+  ): void {
+    if (
+      !this.finishedStreams.has(key)
+      && this.finishedStreams.size >= maximumFeishuFinishedStreams
+    ) {
+      const oldest = this.finishedStreams.keys().next().value;
+      if (oldest !== undefined) {
+        this.finishedStreams.delete(oldest);
+      }
+    }
+    this.finishedStreams.set(key, stream);
   }
 
   private async rollStreamingCards(
@@ -907,6 +1049,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
       if (replyTo !== undefined) {
         this.replyTargets.delete(replyKey);
       }
+    }
+    if (state.completionFooter !== undefined) {
+      await this.sendMarkdown(state.chatId, state.completionFooter);
     }
     if (finishError) {
       throw finishError instanceof Error

@@ -602,6 +602,7 @@ export class FeishuMessageClient implements
     cardId: string,
     sequence: number,
     summary: string,
+    footer?: string,
   ): Promise<void> {
     if (!this.sdkClient.finishStreamingCard) {
       throw new FeishuMessageError(
@@ -610,6 +611,9 @@ export class FeishuMessageClient implements
       );
     }
     const safeMarkdown = sanitizeFeishuMarkdown(summary);
+    const safeFooter = footer === undefined
+      ? undefined
+      : sanitizeFeishuMarkdown(footer);
     await this.runStreamingOperation(
       () => this.sdkClient.finishStreamingCard!({
         path: {
@@ -627,11 +631,22 @@ export class FeishuMessageClient implements
                 },
               },
               body: {
-                elements: [{
-                  tag: "markdown",
-                  element_id: "codexc_stream",
-                  content: safeMarkdown || "...",
-                }],
+                elements: [
+                  {
+                    tag: "markdown",
+                    element_id: "codexc_stream",
+                    content: safeMarkdown || "...",
+                  },
+                  ...(safeFooter === undefined
+                    ? []
+                    : [
+                        { tag: "hr" },
+                        {
+                          tag: "markdown",
+                          content: safeFooter || "...",
+                        },
+                      ]),
+                ],
               },
             }),
           },

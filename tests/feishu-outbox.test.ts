@@ -239,6 +239,55 @@ describe("Feishu outbox", () => {
     }]);
   });
 
+  it("keeps Turn completion separate from a commentary-only stream", async () => {
+    vi.useFakeTimers();
+    const finished: Array<{ summary: string; footer?: string }> = [];
+    const staticCards: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          staticCards.push(markdown);
+        },
+        createStreamingCard: async () => ({
+          cardId: "7355372766134157313",
+          messageId: "om_commentary",
+        }),
+        finishStreamingCard: async (
+          _cardId,
+          _sequence,
+          summary,
+          footer?: string,
+        ) => {
+          finished.push({
+            summary,
+            ...(footer === undefined ? {} : { footer }),
+          });
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle({
+      type: "text.delta",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "commentary-1",
+      text: "处理中",
+      phase: "commentary",
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle(turnCompleted());
+    await outbox.close();
+
+    expect(finished).toEqual([{ summary: "处理中" }]);
+    expect(staticCards).toEqual(["**本次运行 · 已完成**"]);
+  });
+
   it("streams coalesced deltas through one native CardKit card", async () => {
     vi.useFakeTimers();
     const created: string[] = [];
@@ -292,6 +341,37 @@ describe("Feishu outbox", () => {
     expect(posts).toEqual([]);
   });
 
+  it("flushes pending streamed text before a visible operation result", async () => {
+    vi.useFakeTimers();
+    const operations: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          operations.push(`operation:${markdown}`);
+        },
+        createStreamingCard: async (_chatId, initialText) => {
+          operations.push(`stream:${initialText}`);
+          return {
+            cardId: "7355372766134157313",
+            messageId: "om_stream",
+          };
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(delta("先说明，再执行命令。"));
+    outbox.handle(operationUpdated("completed"));
+    await outbox.close();
+
+    expect(operations[0]).toBe("stream:先说明，再执行命令。");
+    expect(operations[1]).toMatch(/^operation:\*\*运行命令/u);
+  });
+
   it("does not append a working footer to active Turn output", async () => {
     vi.useFakeTimers();
     const created: string[] = [];
@@ -317,8 +397,13 @@ describe("Feishu outbox", () => {
         updateStreamingCard: async (_cardId, content) => {
           updated.push(content);
         },
-        finishStreamingCard: async (_cardId, _sequence, summary) => {
-          finished.push(summary);
+        finishStreamingCard: async (
+          _cardId,
+          _sequence,
+          summary,
+          footer?: string,
+        ) => {
+          finished.push(`${summary}|${footer ?? ""}`);
         },
       },
       pino({ level: "silent" }),
@@ -338,9 +423,11 @@ describe("Feishu outbox", () => {
 
     expect(created).toEqual(["正在处理"]);
     expect(updated).toEqual(["正在处理。"]);
-    expect(finished).toEqual(["正在处理。"]);
+    expect(finished).toEqual([
+      "正在处理。|**本次运行 · 已完成**",
+    ]);
     expect(markdownCards[0]).not.toContain("工作中");
-    expect(markdownCards.at(-1)).toBe("**本次运行 · 已完成**");
+    expect(markdownCards.at(-1)).toContain("**运行命令 · 已完成**");
   });
 
   it("uses the full streaming element budget without a footer", async () => {
@@ -855,6 +942,10 @@ describe("Feishu outbox", () => {
   it("finishes an active native stream before a Turn completion status", async () => {
     vi.useFakeTimers();
     const operations: string[] = [];
+    let resolveInitialFinish!: () => void;
+    const initialFinish = new Promise<void>((resolve) => {
+      resolveInitialFinish = resolve;
+    });
     const outbox = new FeishuOutbox(
       "cli_app",
       {
@@ -875,8 +966,52 @@ describe("Feishu outbox", () => {
             messageId: "om_stream",
           };
         },
+        finishStreamingCard: async (
+          _cardId,
+          _sequence,
+          summary,
+          footer?: string,
+        ) => {
+          operations.push(`finish:${summary}|${footer ?? ""}`);
+          if (footer === undefined) {
+            resolveInitialFinish();
+          }
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(delta("部分正文"));
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+    outbox.handle(completed({}, "部分正文", "item-1"));
+    await initialFinish;
+    await Promise.resolve();
+    await Promise.resolve();
+    outbox.handle(turnCompleted());
+    await outbox.close();
+
+    expect(operations).toEqual([
+      "create:部分正文",
+      "finish:部分正文|",
+      "finish:部分正文|**本次运行 · 已完成**",
+    ]);
+  });
+
+  it("falls back to a static completion status when finishing a stream fails", async () => {
+    vi.useFakeTimers();
+    const markdownCards: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
         finishStreamingCard: async () => {
-          operations.push("finish");
+          throw new Error("stream finish failed");
         },
       },
       pino({ level: "silent" }),
@@ -888,11 +1023,8 @@ describe("Feishu outbox", () => {
     outbox.handle(turnCompleted());
     await outbox.close();
 
-    expect(operations).toEqual([
-      "create:部分正文",
-      "finish",
-      "static:**本次运行 · 已完成**",
-    ]);
+    expect(markdownCards).toEqual(["**本次运行 · 已完成**"]);
+    expect(streamCount(outbox)).toBe(0);
   });
 
   it("preserves a short partial reply when Turn completion arrives first", async () => {
@@ -1715,6 +1847,14 @@ function statusBindingCount(outbox: FeishuOutbox): number {
       threadStatusMessages: ReadonlyMap<string, unknown>;
     }
   ).threadStatusMessages.size;
+}
+
+function streamCount(outbox: FeishuOutbox): number {
+  return (
+    outbox as unknown as {
+      streams: ReadonlyMap<string, unknown>;
+    }
+  ).streams.size;
 }
 
 async function settle(): Promise<void> {

@@ -34,7 +34,8 @@
    JSON-RPC 消息、初始化、Thread/Turn/Item、审批、通知和 Schema 生成的主文档。
 2. [Codex 开源组件](https://learn.chatgpt.com/docs/open-source)：官方开源范围和仓库入口。
 3. [OpenAI Codex 仓库](https://github.com/openai/codex)：当前官方源码；排查本项目锁定协议时，
-   应优先打开下面固定到 `rust-v0.145.0` 的链接，而不是直接以 `main` 为准。
+   优先读取 [`upstream/openai-codex`](upstream-sources.md) 的固定本地副本；本地副本缺失时
+   再打开下面固定到 `rust-v0.145.0` 的链接，不能直接以 `main` 为准。
 
 官方文档定义产品和协议行为；本项目实际字段必须以当前锁定 CLI 生成的 TypeScript 类型为准。
 如果两者看起来不一致，先检查文档是否描述了更新版本，再审查固定版本源码和生成差异。
@@ -144,7 +145,8 @@ Client 与 Surface，不终止共享 App Server。
 1. 先从本页按问题找到官方概念和本项目模块。
 2. 查协议字段时打开生成的 `ClientRequest.ts`、`ServerNotification.ts` 或 `ServerRequest.ts`，
    再沿具体类型文件查看参数，不能凭官方 `main` 分支或记忆手写字段。
-3. 查行为语义时阅读官方 App Server 文档，再查看 `rust-v0.145.0` 固定版本实现和测试。
+3. 查行为语义时阅读官方 App Server 文档，再优先查看 `upstream/openai-codex` 中
+   `rust-v0.145.0` 固定版本实现和测试；本地副本缺失或基线不符时才使用上面的固定版本链接。
 4. 查本项目行为时从模块 `index.ts` 和 README 进入，最后运行对应测试或真实合同测试。
 
 协议升级从 [`Codex CLI 升级流程`](codex-cli-upgrade.md) 开始，使用
