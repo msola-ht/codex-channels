@@ -166,6 +166,54 @@ describe("WeixinUpdatesMonitor", () => {
     expect(cursorStore.set).not.toHaveBeenCalled();
   });
 
+  it("replays a handled message after restart when its cursor commit failed", async () => {
+    let commitAttempts = 0;
+    const cursorStore = cursorStoreFixture(
+      "old-cursor",
+      async () => {
+        commitAttempts += 1;
+        if (commitAttempts === 1) {
+          throw new Error("cursor unavailable");
+        }
+      },
+    );
+    const handleMessage = vi.fn(async () => {});
+    const first = createWeixinUpdatesMonitor({
+      accountId,
+      client: clientFixture([{
+        cursor: "new-cursor",
+        messages: [textMessage("1", "text")],
+      }]),
+      cursorStore,
+      handleMessage,
+    });
+
+    await expect(first.run(new AbortController().signal)).rejects.toThrow(
+      "cursor unavailable",
+    );
+
+    const controller = new AbortController();
+    const restarted = createWeixinUpdatesMonitor({
+      accountId,
+      client: clientFixture([
+        {
+          cursor: "new-cursor",
+          messages: [textMessage("1", "text")],
+        },
+        () => {
+          controller.abort();
+          throw new WeixinProtocolError("aborted", "aborted");
+        },
+      ]),
+      cursorStore,
+      handleMessage,
+    });
+
+    await expect(restarted.run(controller.signal)).resolves.toBeUndefined();
+    expect(handleMessage).toHaveBeenCalledTimes(2);
+    expect(cursorStore.set).toHaveBeenCalledTimes(2);
+  });
+
   it("deduplicates raw message IDs before committing the batch", async () => {
     const controller = new AbortController();
     const cursorStore = cursorStoreFixture("old-cursor");

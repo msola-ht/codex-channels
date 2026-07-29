@@ -156,7 +156,7 @@ src/surfaces/feishu/
 ├── oauth.ts          # Actor 级授权生命周期
 ├── outbox.ts         # 飞书发送操作与 ConversationDeliveryQueue
 ├── status-card.ts    # Thread 状态轻量交互卡片
-└── media.ts          # 私聊图片下载；一般文件与上传尚未实现
+└── media.ts          # 私聊图片和受限 UTF-8 文件下载；输出上传由 Client/Outbox 负责
 ```
 
 `src/surfaces/feishu/index.ts` 只导出 Bootstrap 装配所需的类型和工厂，再由

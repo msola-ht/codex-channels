@@ -69,7 +69,10 @@
   的游标。网络、429 或 5xx 连续故障时自动退避恢复，不停止 Telegram、飞书或共享 App Server；官方 `-14`
   Token 失效会暂停微信轮询并在日志提示重新执行 Setup。微信 `/status` 会追加当前轮询、短重试、
   退避、Token 失效暂停或停止状态，以及按 Gateway 本地时间显示的当前消息到达前上一次后台成功
-  轮询时间、连续失败次数和预计恢复时间。命令、文件修改和临时权限审批会发送带随机一次性 ID
+  轮询时间、连续失败次数和预计恢复时间。微信消息采用至少一次处理语义：仅在整批消息成功处理后
+  保存官方游标；如果进程在消息已经提交给 App Server、游标尚未落盘的极短窗口内退出，重启后
+  可能再次提交该消息。固定版 App Server 的 `clientUserMessageId` 只标记用户消息来源，不提供
+  重复 Turn 拒绝。命令、文件修改和临时权限审批会发送带随机一次性 ID
   的精确 `/批准一次 <id>`、`/批准会话 <id>`、`/保存命令规则 <id>`、
   `/保存网络规则 <id> <序号>` 或 `/拒绝 <id>` 命令；回复数字、“同意”、错误或过期 ID 均不会
   批准。微信把同一审批的选项优先合并到一个 Markdown 消息，每条命令保留独立复制入口；
@@ -300,7 +303,9 @@ SOCKS `ALL_PROXY` 连接。目标未命中 `NO_PROXY` 时，无效或不支持�
 `codexc service logs` 默认显示 Gateway 日志；使用 `codexc service logs app-server` 查看 App Server，
 使用 `codexc service logs all` 查看两者。目标必须放在日志选项之前；`-n 200` 可调整显示行数，
 `-f` 可持续跟踪。macOS 默认忽略早于正常日志的陈旧 stderr，日志文件位于
-`.codex-connect/runtime`；Linux 日志来自 systemd user journal。
+`.codex-connect/runtime`；Linux 日志来自 systemd user journal。Gateway 的结构化日志会裁剪错误并
+脱敏已知凭据字段；App Server 是独立的官方进程，其原始 stdout/stderr 可能包含命令、工作内容或
+诊断上下文，不经过 Gateway 脱敏器。分享 `app-server` 或 `all` 日志前必须人工检查内容。
 
 Telegram、飞书长连接与 App Server 均采用受约束的连接恢复；连续失败耗尽后 Gateway 会退出，
 由 launchd 或 systemd 自动拉起，避免进程存活但不再接收消息。

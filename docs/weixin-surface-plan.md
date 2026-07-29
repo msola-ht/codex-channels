@@ -325,7 +325,10 @@ UTF-16 码元。
 游标；处理失败保留旧游标以允许重放。网络、限流和服务端瞬时错误连续 3 次后进入 30 秒退避并
 继续轮询；官方 `-14` Bot Token 失效返回码暂停账号一小时并提示
 重新 Setup，其他未知 API/协议错误失败关闭。长轮询超时视为正常空轮询，取消立即退出。该监控器
-的生命周期和消息处理由输入 Adapter 组合。
+的生命周期和消息处理由输入 Adapter 组合。该设计明确是至少一次处理：Application 接受消息后、
+游标落盘前退出会在重启后重放同一消息；进程内去重不能跨重启。固定版 App Server 每次
+`turn/start` 都生成新的 Turn ID，`clientUserMessageId` 只写入用户消息 `client_id`，不提供幂等
+拒绝，因此不能把复用微信消息 ID 当作跨进程去重修复。
 
 `src/surfaces/weixin/input-adapter.ts` 已实现上述输入侧所有权：按固定账号构造微信私聊目标，
 调用 `SurfaceAccessPolicy` 后记录 Actor 并提交普通文本给 `ConversationService`；未授权消息
