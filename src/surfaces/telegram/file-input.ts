@@ -1,21 +1,18 @@
-import { get as httpsGet } from "node:https";
 import type { Readable } from "node:stream";
-
-import { HttpsProxyAgent } from "https-proxy-agent";
 
 import {
   formatTextFileDownloadFailed,
   formatTextFileTooLarge,
   formatUnsupportedTextFile,
 } from "../text-file-copy.js";
-import type {
-  ImageDownloadResponse,
-  TelegramFileApi,
-} from "./image-store.js";
+import {
+  createTelegramFileDownloader,
+  resolveTelegramFileUrl,
+  type TelegramFileApi,
+  type TelegramFileDownloader,
+} from "./file-download.js";
 
 export const maximumTelegramTextFileBytes = 1_000_000;
-
-const downloadTimeoutMs = 30_000;
 
 export type TelegramTextFileInputErrorCode =
   | "download-failed"
@@ -38,9 +35,7 @@ export interface TelegramTextFile {
   bytes: number;
 }
 
-export type TelegramTextFileDownloader = (
-  url: URL,
-) => Promise<ImageDownloadResponse>;
+export type TelegramTextFileDownloader = TelegramFileDownloader;
 
 export interface TelegramTextFilePort {
   download(
@@ -58,7 +53,7 @@ export class TelegramTextFileInput implements TelegramTextFilePort {
     proxyUrl: string | undefined,
     downloader?: TelegramTextFileDownloader,
   ) {
-    this.downloader = downloader ?? createDownloader(proxyUrl);
+    this.downloader = downloader ?? createTelegramFileDownloader(proxyUrl);
   }
 
   async download(
@@ -68,18 +63,18 @@ export class TelegramTextFileInput implements TelegramTextFilePort {
   ): Promise<TelegramTextFile> {
     try {
       const normalizedName = validateFileName(fileName);
-      const filePath = (await api.getFile(fileId)).file_path;
-      if (!filePath || !isSafeTelegramFilePath(filePath)) {
-        throw new Error("invalid Telegram file path");
-      }
+      const url = await resolveTelegramFileUrl(api, fileId, this.token);
       const response = await this.downloader(
-        new URL(`https://api.telegram.org/file/bot${this.token}/${filePath}`),
+        url,
       );
       if (
-        response.contentLength !== undefined
+        response.invalidContentLength === true
+        || (
+          response.contentLength !== undefined
         && (
           !Number.isSafeInteger(response.contentLength)
           || response.contentLength < 0
+        )
         )
       ) {
         response.stream.destroy();
@@ -189,41 +184,6 @@ function hasUnsupportedTextControl(value: string): boolean {
     }
   }
   return false;
-}
-
-function isSafeTelegramFilePath(value: string): boolean {
-  return !value.startsWith("/")
-    && !value.includes("\\")
-    && !value.split("/").includes("..")
-    && /^[A-Za-z0-9._/-]+$/u.test(value);
-}
-
-function createDownloader(
-  proxyUrl: string | undefined,
-): TelegramTextFileDownloader {
-  const agent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
-  return (url) => new Promise<ImageDownloadResponse>((resolve, reject) => {
-    const request = httpsGet(url, { agent }, (response) => {
-      if (response.statusCode !== 200) {
-        response.resume();
-        reject(new Error("Telegram 文件服务器返回非成功状态"));
-        return;
-      }
-      const rawLength = response.headers["content-length"];
-      const parsedLength = typeof rawLength === "string"
-        ? Number(rawLength)
-        : undefined;
-      resolve({
-        stream: response,
-        ...(parsedLength === undefined ? {} : { contentLength: parsedLength }),
-      });
-    });
-    request.setTimeout(
-      downloadTimeoutMs,
-      () => request.destroy(new Error("Telegram 文件下载超时")),
-    );
-    request.once("error", reject);
-  });
 }
 
 function tooLarge(): TelegramTextFileInputError {

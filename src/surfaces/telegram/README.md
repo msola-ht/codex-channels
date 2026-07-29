@@ -53,6 +53,8 @@
   上下文压缩总次数和状态文本；可复用语义委托给 Surface 共享格式器，账户、额度与 MCP 运行状态
   由 `runtime-status-format.ts` 提供；上线通知复用 Surface 共享生命周期字段，`/status` 与 Turn
   结束统计均显示当前 Workspace Git 分支。
+- `file-download.ts`：统一通过 Bot API 定位文件，并执行支持 HTTPS 代理、超时和状态校验的下载；
+  图片与文本文件复用该传输边界，各自保留大小、内容和错误语义校验。
 - `image-store.ts`：安全获取 Telegram 下载地址和下载流；大小、内容签名、私有暂存与过期清理
   复用上层 `managed-image-store.ts`。
 - `file-input.ts`：通过 Bot API 在内存下载最多 1,000,000 字节的普通文件，严格验证文件名、

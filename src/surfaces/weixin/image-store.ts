@@ -9,13 +9,15 @@ import {
   maximumManagedImageBytes,
   type StoredManagedImage,
 } from "../managed-image-store.js";
+import {
+  downloadWeixinCdnBytes,
+  resolveWeixinCdnUrl,
+} from "./cdn-download.js";
 import type { WeixinImageReference } from "./protocol-client.js";
 
 export const maximumWeixinImageBytes = maximumManagedImageBytes;
 
-const cdnBaseUrl = "https://novac2c.cdn.weixin.qq.com/c2c";
 const maximumEncryptedImageBytes = maximumWeixinImageBytes + 16;
-const downloadTimeoutMs = 30_000;
 
 export interface WeixinImagePort {
   start(): Promise<void>;
@@ -70,13 +72,14 @@ export class WeixinImageStore implements WeixinImagePort {
     await this.start();
     try {
       const encryption = resolveEncryption(reference);
-      const response = await downloadCdnBytes(
-        this.fetchImpl,
-        resolveCdnUrl(reference),
-        encryption.key === undefined
+      const response = await downloadWeixinCdnBytes({
+        fetchImpl: this.fetchImpl,
+        url: resolveWeixinCdnUrl(reference),
+        maximumBytes: encryption.key === undefined
           ? maximumWeixinImageBytes
           : maximumEncryptedImageBytes,
-      );
+        tooLarge: imageTooLarge,
+      });
       const plaintext = encryption.key === undefined
         ? response
         : decryptImage(response, encryption.key);
@@ -92,36 +95,6 @@ export class WeixinImageStore implements WeixinImagePort {
       throw new WeixinImageDownloadError();
     }
   }
-}
-
-function resolveCdnUrl(reference: WeixinImageReference): URL {
-  if (reference.fullUrl !== undefined) {
-    return validateCdnUrl(reference.fullUrl);
-  }
-  if (reference.encryptedQueryParam === undefined) {
-    throw new Error("missing Weixin image URL");
-  }
-  const url = new URL(`${cdnBaseUrl}/download`);
-  url.searchParams.set(
-    "encrypted_query_param",
-    reference.encryptedQueryParam,
-  );
-  return validateCdnUrl(url.href);
-}
-
-function validateCdnUrl(value: string): URL {
-  const url = new URL(value);
-  if (
-    url.protocol !== "https:"
-    || url.username
-    || url.password
-    || url.hostname.toLowerCase() !== "novac2c.cdn.weixin.qq.com"
-    || !url.pathname.startsWith("/c2c/")
-    || url.hash
-  ) {
-    throw new Error("unexpected Weixin image CDN URL");
-  }
-  return url;
 }
 
 function resolveEncryption(
@@ -166,65 +139,9 @@ function decryptImage(value: Buffer, key: Buffer): Buffer {
   return Buffer.concat([decipher.update(value), decipher.final()]);
 }
 
-async function downloadCdnBytes(
-  fetchImpl: typeof fetch,
-  url: URL,
-  maximumBytes: number,
-): Promise<Buffer> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), downloadTimeoutMs);
-  timeout.unref?.();
-  try {
-    const response = await fetchImpl(url, {
-      method: "GET",
-      redirect: "error",
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      throw new Error("Weixin image CDN request failed");
-    }
-    const rawLength = response.headers.get("content-length");
-    if (rawLength !== null) {
-      const contentLength = Number(rawLength);
-      if (
-        !Number.isSafeInteger(contentLength)
-        || contentLength < 0
-      ) {
-        throw new Error("invalid Weixin image content length");
-      }
-      if (contentLength > maximumBytes) {
-        throw new UserFacingError(
-          "image.too-large",
-          "图片超过 10 MiB 限制",
-        );
-      }
-    }
-    if (!response.body) {
-      return Buffer.alloc(0);
-    }
-    const reader = response.body.getReader();
-    const chunks: Buffer[] = [];
-    let bytes = 0;
-    try {
-      while (true) {
-        const chunk = await reader.read();
-        if (chunk.done) {
-          return Buffer.concat(chunks, bytes);
-        }
-        bytes += chunk.value.byteLength;
-        if (bytes > maximumBytes) {
-          await reader.cancel();
-          throw new UserFacingError(
-            "image.too-large",
-            "图片超过 10 MiB 限制",
-          );
-        }
-        chunks.push(Buffer.from(chunk.value));
-      }
-    } finally {
-      reader.releaseLock();
-    }
-  } finally {
-    clearTimeout(timeout);
-  }
+function imageTooLarge(): UserFacingError {
+  return new UserFacingError(
+    "image.too-large",
+    "图片超过 10 MiB 限制",
+  );
 }

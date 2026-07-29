@@ -5,13 +5,15 @@ import {
   formatTextFileTooLarge,
   formatUnsupportedTextFile,
 } from "../text-file-copy.js";
+import {
+  downloadWeixinCdnBytes,
+  resolveWeixinCdnUrl,
+} from "./cdn-download.js";
 import type { WeixinFileReference } from "./protocol-client.js";
 
 export const maximumWeixinTextFileBytes = 1_000_000;
 
-const cdnBaseUrl = "https://novac2c.cdn.weixin.qq.com/c2c";
 const maximumEncryptedFileBytes = maximumWeixinTextFileBytes + 16;
-const downloadTimeoutMs = 30_000;
 
 export type WeixinFileInputErrorCode =
   | "download-failed"
@@ -52,13 +54,14 @@ export class WeixinFileInput implements WeixinFilePort {
       const key = reference.mediaAesKey === undefined
         ? undefined
         : parseBase64AesKey(reference.mediaAesKey);
-      const encrypted = await downloadCdnBytes(
-        this.fetchImpl,
-        resolveCdnUrl(reference),
-        key === undefined
+      const encrypted = await downloadWeixinCdnBytes({
+        fetchImpl: this.fetchImpl,
+        url: resolveWeixinCdnUrl(reference),
+        maximumBytes: key === undefined
           ? maximumWeixinTextFileBytes
           : maximumEncryptedFileBytes,
-      );
+        tooLarge,
+      });
       const plaintext = key === undefined
         ? encrypted
         : decryptFile(encrypted, key);
@@ -108,36 +111,6 @@ function validateFileName(value: string): string {
     throw new Error("invalid Weixin file name");
   }
   return normalized;
-}
-
-function resolveCdnUrl(reference: WeixinFileReference): URL {
-  if (reference.fullUrl !== undefined) {
-    return validateCdnUrl(reference.fullUrl);
-  }
-  if (reference.encryptedQueryParam === undefined) {
-    throw new Error("missing Weixin file URL");
-  }
-  const url = new URL(`${cdnBaseUrl}/download`);
-  url.searchParams.set(
-    "encrypted_query_param",
-    reference.encryptedQueryParam,
-  );
-  return validateCdnUrl(url.href);
-}
-
-function validateCdnUrl(value: string): URL {
-  const url = new URL(value);
-  if (
-    url.protocol !== "https:"
-    || url.username
-    || url.password
-    || url.hostname.toLowerCase() !== "novac2c.cdn.weixin.qq.com"
-    || !url.pathname.startsWith("/c2c/")
-    || url.hash
-  ) {
-    throw new Error("unexpected Weixin file CDN URL");
-  }
-  return url;
 }
 
 function parseBase64AesKey(value: string): Buffer {
@@ -237,63 +210,6 @@ function hasUnsupportedTextControl(value: string): boolean {
     }
   }
   return false;
-}
-
-async function downloadCdnBytes(
-  fetchImpl: typeof fetch,
-  url: URL,
-  maximumBytes: number,
-): Promise<Buffer> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), downloadTimeoutMs);
-  timeout.unref?.();
-  try {
-    const response = await fetchImpl(url, {
-      method: "GET",
-      redirect: "error",
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      throw new Error("Weixin file CDN request failed");
-    }
-    const rawLength = response.headers.get("content-length");
-    if (rawLength !== null) {
-      const contentLength = Number(rawLength);
-      if (
-        !Number.isSafeInteger(contentLength)
-        || contentLength < 0
-      ) {
-        throw new Error("invalid Weixin file content length");
-      }
-      if (contentLength > maximumBytes) {
-        throw tooLarge();
-      }
-    }
-    if (!response.body) {
-      return Buffer.alloc(0);
-    }
-    const reader = response.body.getReader();
-    const chunks: Buffer[] = [];
-    let bytes = 0;
-    try {
-      while (true) {
-        const chunk = await reader.read();
-        if (chunk.done) {
-          return Buffer.concat(chunks, bytes);
-        }
-        bytes += chunk.value.byteLength;
-        if (bytes > maximumBytes) {
-          await reader.cancel();
-          throw tooLarge();
-        }
-        chunks.push(Buffer.from(chunk.value));
-      }
-    } finally {
-      reader.releaseLock();
-    }
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 
 function tooLarge(): WeixinFileInputError {
