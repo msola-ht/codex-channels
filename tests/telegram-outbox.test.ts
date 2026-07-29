@@ -24,6 +24,11 @@ class FakeTelegramApi {
     options: unknown;
     content: string;
   }> = [];
+  readonly photos: Array<{
+    filename: string | undefined;
+    options: unknown;
+    content: Buffer;
+  }> = [];
   rejectRichMessages = false;
   rejectHtmlMessages = false;
   rejectDocuments = false;
@@ -100,6 +105,23 @@ class FakeTelegramApi {
       filename: document.filename,
       options,
       content: Buffer.from(raw).toString("utf8"),
+    });
+    return { message_id: this.nextMessageId++ };
+  }
+
+  async sendPhoto(
+    _chatId: string,
+    photo: InputFile,
+    options?: unknown,
+  ): Promise<{ message_id: number }> {
+    const raw = await photo.toRaw();
+    if (!(raw instanceof Uint8Array)) {
+      throw new Error("Fake Telegram API only accepts in-memory photos");
+    }
+    this.photos.push({
+      filename: photo.filename,
+      options,
+      content: Buffer.from(raw),
     });
     return { message_id: this.nextMessageId++ };
   }
@@ -192,6 +214,43 @@ describe("TelegramOutbox", () => {
     await settle();
     await outbox.close();
 
+    expect(api.sent).toEqual([]);
+  });
+
+  it("sends completed generated images even when operation summaries are hidden", async () => {
+    const api = new FakeTelegramApi();
+    const image = Buffer.from("validated-image");
+    const outbox = new TelegramOutbox(
+      api as unknown as Api,
+      pino({ level: "silent" }),
+      undefined,
+      {
+        operationUpdateDisplay: "hidden",
+        readGeneratedImage: vi.fn(async () => ({
+          bytes: image,
+          format: "png" as const,
+        })),
+      },
+    );
+
+    outbox.handle({
+      ...operationUpdated("image-1", "completed", "imageGeneration"),
+      operation: {
+        ...operationUpdated(
+          "image-1",
+          "completed",
+          "imageGeneration",
+        ).operation,
+        imagePath: "/private/generated/image.png",
+      },
+    });
+    await outbox.close();
+
+    expect(api.photos).toEqual([{
+      filename: "codex-generated-image.png",
+      options: { disable_notification: true },
+      content: image,
+    }]);
     expect(api.sent).toEqual([]);
   });
 

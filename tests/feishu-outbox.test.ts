@@ -71,6 +71,49 @@ describe("Feishu outbox", () => {
     }]);
   });
 
+  it("sends completed generated images even when operation summaries are hidden", async () => {
+    const sentImages: Array<{ chatId: string; image: Buffer }> = [];
+    const image = Buffer.from("validated-image");
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendImage: async (chatId, value) => {
+          sentImages.push({ chatId, image: value });
+        },
+      },
+      pino({ level: "silent" }),
+      {
+        operationUpdateDisplay: "hidden",
+        readGeneratedImage: vi.fn(async () => ({
+          bytes: image,
+          format: "png" as const,
+        })),
+      },
+    );
+
+    const event = operationUpdated(
+      "completed",
+      "imageGeneration",
+      "image-1",
+    );
+    outbox.handle({
+      ...event,
+      operation: {
+        ...event.operation,
+        imagePath: "/private/generated/image.png",
+      },
+    });
+    await outbox.close();
+
+    expect(sentImages).toEqual([{
+      chatId: "oc_chat",
+      image,
+    }]);
+  });
+
   it("keeps the reply target through commentary for the final static reply", async () => {
     const markdownCards: string[] = [];
     const replies: Array<{ messageId: string; markdown: string }> = [];
@@ -1579,7 +1622,7 @@ function operationUpdated(
     { type: "operation.updated" }
   >["operation"]["kind"] = "command",
   itemId = "command-1",
-): OutputEvent {
+): Extract<OutputEvent, { type: "operation.updated" }> {
   return {
     type: "operation.updated",
     target,

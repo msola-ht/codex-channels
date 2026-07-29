@@ -700,6 +700,82 @@ describe("FeishuMessageClient", () => {
     expect(createMessage).not.toHaveBeenCalled();
   });
 
+  it("uploads and sends a generated image to an exact chat ID", async () => {
+    const createImage = vi.fn(async () => ({
+      image_key: "img_generated",
+    }));
+    const createMessage = vi.fn(async () => ({
+      data: { message_id: "om_image" },
+    }));
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage,
+          createImage,
+          patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
+        }),
+      },
+    );
+    const image = Buffer.from("validated-image");
+
+    await expect(
+      client.sendImage("oc_chat", image),
+    ).resolves.toBeUndefined();
+
+    expect(createImage).toHaveBeenCalledWith({
+      data: {
+        image_type: "message",
+        image,
+      },
+    });
+    expect(createMessage).toHaveBeenCalledWith({
+      params: {
+        receive_id_type: "chat_id",
+      },
+      data: {
+        receive_id: "oc_chat",
+        msg_type: "image",
+        content: "{\"image_key\":\"img_generated\"}",
+      },
+    });
+  });
+
+  it("fails closed when an image upload omits its image key", async () => {
+    const createMessage = vi.fn(async () => ({
+      data: { message_id: "om_image" },
+    }));
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 1_000,
+        createSdkClient: () => ({
+          createMessage,
+          createImage: async () => ({}),
+          patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
+        }),
+      },
+    );
+
+    await expect(
+      client.sendImage("oc_chat", Buffer.from("validated-image")),
+    ).rejects.toMatchObject({
+      name: "FeishuMessageError",
+      code: "invalid-response",
+      message: "飞书图片上传响应无效",
+    });
+    expect(createMessage).not.toHaveBeenCalled();
+  });
+
   it("replies to an exact Feishu message with a Markdown CardKit card", async () => {
     const replyMessage = vi.fn(async () => ({
       data: { message_id: "om_reply" },

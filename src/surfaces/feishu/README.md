@@ -9,7 +9,8 @@ Bootstrap 显式组合、全部平台无关
 结果、操作过程与每轮结束统计统一使用 CardKit 2.0 Markdown，私聊 PNG/JPEG 图片复用
 Application 的本地图片输入，同一 Thread 的
 运行中与空闲状态已实现合并到一条可更新消息，上线通知与每轮上下文状态复用共享生命周期数据，
-持续模型增量使用 CardKit 2.0 原生流式卡片；
+持续模型增量使用 CardKit 2.0 原生流式卡片；Codex 原生 `imageGeneration` 完成后只读取经
+共享安全边界校验的 PNG/JPEG，通过官方图片上传和私聊图片消息接口顺序发送；
 这些路径均已通过离线测试，纯文字富文本输入与原生流式主路径另已通过真实应用验收。审批能力已完成
 私聊审批卡片的离线主路径，命令审批的一次批准及当前 Gateway 长连接动作接收已通过真实验收；
 私聊 PNG/JPEG 真实消息也已通过。用户输入卡已通过真实验收；MCP form/URL elicitation
@@ -29,7 +30,7 @@ Application 的本地图片输入，同一 Thread 的
   版本响应。
 - `application-setup.ts`：生成精简 Doctor 和缺失权限授权卡片，绑定 App、Chat、Actor 和
   一次性令牌，管理有限任务、取消和安全结果。
-- `client.ts`：官方 SDK、事件长连接、消息读取/发送与 CardKit 窄客户端及生命周期隔离。
+- `client.ts`：官方 SDK、事件长连接、消息读取/发送、生成图片上传与 CardKit 窄客户端及生命周期隔离。
 - `file-input.ts`：通过官方消息资源 API 在内存下载独立文件，限制为 1,000,000 字节并严格验证
   文件名、UTF-8 和控制字符，不创建本地文件。
 - `inbound-content.ts`：统一严格解析入站与被引用消息的文本、富文本和图片元素。
@@ -53,7 +54,8 @@ Application 的本地图片输入，同一 Thread 的
   映射为稳定文本内容；启动通知、`/status` 与 `turn.completed` 结束统计均包含当前 Workspace
   Git 分支。
 - `outbox.ts`：精确账号路由并通过通用有界队列调用窄消息发送端口；在内存中按 Turn 关联
-  原始输入消息，使开始确认、短回复及首张流式卡片原生回复同一输入。
+  原始输入消息，使开始确认、短回复及首张流式卡片原生回复同一输入；完成的原生生成图片
+  独立于操作显示档位上传并发送。
 - `status-card.ts`：把 Thread 状态映射为可原地更新的轻量交互卡片。
 - `surface.ts`：组合单账号连接、Inbox、Application Adapter、Outbox 和失败关闭交互端口，并由
   模块入口只暴露 `createFeishuSurface()` 工厂与生产选项类型。
@@ -170,7 +172,9 @@ Turn、warning 和 MCP 错误会显示 Client 边界已经统一脱敏并限长�
 `ConversationDeliveryQueue`。同一 Chat 串行、不同 Chat 可并行；关闭后拒绝新输出并有限等待
 已接收发送。飞书 SDK 发送对象由 `FeishuMessageClient` 通过 `FeishuMessagePort`
 注入，Outbox 不持有完整 SDK Client。Adapter 的追加确认和错误提示也进入同一有界队列，不绕过
-平台输出顺序和关闭边界。静态 CardKit Markdown 按单元素 5,000 个 Unicode 字符、最多 5 张卡片
+平台输出顺序和关闭边界。生成图片只消费 App Server 明确给出的 `imageGeneration.savedPath`，
+并在共享读取边界验证绝对路径、无符号链接普通文件、10 MiB 与 PNG/JPEG 签名；`imageView`
+和用户上传图片不会自动外发。静态 CardKit Markdown 按单元素 5,000 个 Unicode 字符、最多 5 张卡片
 分片；纯文本和 `post + md` 降级按 UTF-8 序列化后的 20,000 字节计量。每个逻辑结果
 最多发送 5 条，超出时明确标记截断，避免单个结果无限占用同一 Chat 的发送任务。消息创建失败
 不自动改发另一种格式，避免非幂等重发产生重复消息；卡片创建和更新进入相同 Chat 顺序边界，

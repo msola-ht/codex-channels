@@ -9,6 +9,7 @@ import {
   type OutputEvent,
 } from "../../conversation-core/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
+import { readGeneratedImage } from "../generated-image.js";
 import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
@@ -80,6 +81,7 @@ export interface TelegramOutboxOptions {
   finalMessageFormat?: TelegramFinalMessageFormat;
   accountId?: string;
   operationUpdateDisplay?: OperationUpdateDisplay;
+  readGeneratedImage?: typeof readGeneratedImage;
 }
 
 export class TelegramOutbox {
@@ -254,6 +256,18 @@ export class TelegramOutbox {
         return;
       }
       case "operation.updated": {
+        const imagePath = event.operation.imagePath;
+        if (
+          event.operation.kind === "imageGeneration"
+          && event.operation.status === "completed"
+          && imagePath !== undefined
+        ) {
+          this.enqueue(
+            chatId,
+            () => this.sendGeneratedImage(chatId, imagePath),
+            true,
+          );
+        }
         if (this.options.operationUpdateDisplay === "hidden") {
           return;
         }
@@ -380,6 +394,30 @@ export class TelegramOutbox {
       case "thread.status":
         return;
     }
+  }
+
+  private async sendGeneratedImage(
+    chatId: string,
+    imagePath: string,
+  ): Promise<void> {
+    const image = await (
+      this.options.readGeneratedImage ?? readGeneratedImage
+    )(imagePath);
+    await this.executor.call(
+      {
+        chatId,
+        operation: "sendPhoto",
+        critical: false,
+      },
+      () => this.api.sendPhoto(
+        chatId,
+        new InputFile(
+          image.bytes,
+          `codex-generated-image.${image.format === "jpeg" ? "jpg" : "png"}`,
+        ),
+        { disable_notification: true },
+      ),
+    );
   }
 
   async close(): Promise<void> {

@@ -193,7 +193,7 @@ interface FeishuSdkMessagePayload {
   };
   data: {
     receive_id: string;
-    msg_type: "text" | "post" | "interactive" | "file";
+    msg_type: "text" | "post" | "interactive" | "file" | "image";
     content: string;
   };
 }
@@ -214,6 +214,17 @@ interface FeishuSdkMessageClient {
     file_key?: string | undefined;
     data?: {
       file_key?: string | undefined;
+    } | undefined;
+  } | null>;
+  createImage?(payload: {
+    data: {
+      image_type: "message";
+      image: Buffer;
+    };
+  }): Promise<{
+    image_key?: string | undefined;
+    data?: {
+      image_key?: string | undefined;
     } | undefined;
   } | null>;
   replyMessage?(payload: {
@@ -424,6 +435,63 @@ export class FeishuMessageClient implements
       throw new FeishuMessageError(
         "send-failed",
         "飞书文件发送失败",
+      );
+    }
+  }
+
+  async sendImage(chatId: string, image: Buffer): Promise<void> {
+    if (
+      !this.sdkClient.createImage
+      || image.length === 0
+      || image.length > 10 * 1_024 * 1_024
+    ) {
+      throw new FeishuMessageError(
+        "invalid-response",
+        "飞书图片发送参数无效",
+      );
+    }
+    try {
+      const response = await withTimeout(
+        this.sdkClient.createImage({
+          data: {
+            image_type: "message",
+            image,
+          },
+        }),
+        this.sendTimeoutMs,
+        new FeishuMessageError(
+          "send-timeout",
+          "飞书图片上传超时",
+        ),
+      );
+      const imageKey = response?.image_key ?? response?.data?.image_key;
+      if (
+        typeof imageKey !== "string"
+        || !isSafeFeishuResourceIdentifier(imageKey)
+      ) {
+        throw new FeishuMessageError(
+          "invalid-response",
+          "飞书图片上传响应无效",
+        );
+      }
+      await this.sendMessage(
+        chatId,
+        "image",
+        JSON.stringify({ image_key: imageKey }),
+      );
+    } catch (error) {
+      if (error instanceof FeishuMessageError) {
+        throw error;
+      }
+      if (isSdkTimeout(error)) {
+        throw new FeishuMessageError(
+          "send-timeout",
+          "飞书图片上传超时",
+        );
+      }
+      throw new FeishuMessageError(
+        "send-failed",
+        "飞书图片发送失败",
       );
     }
   }
@@ -1038,7 +1106,7 @@ export class FeishuMessageClient implements
 
   private async sendMessage(
     chatId: string,
-    messageType: "text" | "post" | "interactive" | "file",
+    messageType: "text" | "post" | "interactive" | "file" | "image",
     content: string,
   ): Promise<string> {
     try {
@@ -1420,6 +1488,7 @@ const defaultMessageDependencies: FeishuMessageClientDependencies = {
     return {
       createMessage: (payload) => client.im.v1.message.create(payload),
       createFile: (payload) => client.im.v1.file.create(payload),
+      createImage: (payload) => client.im.v1.image.create(payload),
       replyMessage: (payload) => client.im.v1.message.reply(payload),
       patchMessage: (payload) => client.im.v1.message.patch(payload),
       getMessage: (payload) => client.im.v1.message.get(payload),

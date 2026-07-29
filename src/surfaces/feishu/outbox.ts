@@ -5,6 +5,7 @@ import {
   type OutputEvent,
 } from "../../conversation-core/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
+import { readGeneratedImage } from "../generated-image.js";
 import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
@@ -62,6 +63,7 @@ export interface FeishuMessagePort {
   sendPost(chatId: string, markdown: string): Promise<void>;
   sendMarkdownCard(chatId: string, markdown: string): Promise<void>;
   sendFile?(chatId: string, fileName: string, file: Buffer): Promise<void>;
+  sendImage?(chatId: string, image: Buffer): Promise<void>;
   replyPost?(messageId: string, markdown: string): Promise<void>;
   replyMarkdownCard?(messageId: string, markdown: string): Promise<void>;
   sendCard(chatId: string, card: FeishuCardDocument): Promise<string>;
@@ -88,6 +90,7 @@ export interface FeishuMessagePort {
 
 export interface FeishuOutboxOptions {
   operationUpdateDisplay?: OperationUpdateDisplay;
+  readGeneratedImage?: typeof readGeneratedImage;
 }
 
 export class FeishuOutbox implements SurfaceOutputPort {
@@ -145,6 +148,21 @@ export class FeishuOutbox implements SurfaceOutputPort {
       }
     }
     if (event.type === "operation.updated") {
+      const imagePath = event.operation.imagePath;
+      if (
+        event.operation.kind === "imageGeneration"
+        && event.operation.status === "completed"
+        && imagePath !== undefined
+      ) {
+        this.delivery.enqueue(
+          event.target.conversationId,
+          () => this.sendGeneratedImage(
+            event.target.conversationId,
+            imagePath,
+          ),
+          true,
+        );
+      }
       if (this.options.operationUpdateDisplay === "hidden") {
         return;
       }
@@ -201,6 +219,22 @@ export class FeishuOutbox implements SurfaceOutputPort {
         : this.sendText(event.target.conversationId, rendered),
       event.type === "turn.started" || isCriticalOutputEvent(event),
     );
+  }
+
+  private async sendGeneratedImage(
+    chatId: string,
+    imagePath: string,
+  ): Promise<void> {
+    if (this.messagePort.sendImage === undefined) {
+      throw new FeishuMessageError(
+        "invalid-response",
+        "飞书图片发送能力不可用",
+      );
+    }
+    const image = await (
+      this.options.readGeneratedImage ?? readGeneratedImage
+    )(imagePath);
+    await this.messagePort.sendImage(chatId, image.bytes);
   }
 
   prepareTurnReplyTarget(chatId: string, messageId: string): void {

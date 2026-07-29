@@ -78,6 +78,9 @@ Telegram HTML、飞书 CardKit Markdown 与微信安全文本的转义、布局�
 Adapter 负责。
 `operation-update-buffer.ts` 在 Surface 边界按 Turn 有界暂存成功的 MCP、动态工具和网页搜索；
 最终回复前单项保持原详情，多项生成一次分类计数汇总。失败、拒绝和其他操作不进入该缓冲。
+`generated-image.ts` 只读取 App Server `imageGeneration.savedPath` 指向的绝对普通文件，
+拒绝符号链接、空文件、超过 10 MiB 的内容和非 PNG/JPEG 签名；Telegram、飞书与微信分别负责
+平台上传和发送，不读取 `imageView` 或用户上传图片路径。
 Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类型引入 Conversation Core。
 
 会话命令统一映射到 Application 的 `ConversationCommandService`；Surface 负责提取命令名和参数，
