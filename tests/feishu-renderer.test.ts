@@ -318,7 +318,7 @@ describe("Feishu output renderer", () => {
     expect(rendered).toContain("累计 Tokens：6,439.12 M");
     expect(rendered).toContain("单日峰值：389.15 M");
     expect(rendered).toContain("2026-07-26：128.02 M");
-    expect(rendered).toContain("最长 Turn：1138 秒");
+    expect(rendered).toContain("最长 Turn：18分58秒");
   });
 
   it("renders detailed context after a completed Turn", () => {

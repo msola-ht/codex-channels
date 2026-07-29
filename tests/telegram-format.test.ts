@@ -264,7 +264,7 @@ describe("formatUsage", () => {
       summary: {
         lifetimeTokens: 5_054_682_221n,
         peakDailyTokens: 202_768_846n,
-        longestRunningTurnSec: 647n,
+        longestRunningTurnSec: 38_784n,
         currentStreakDays: 40n,
         longestStreakDays: 40n,
       },
@@ -282,6 +282,7 @@ describe("formatUsage", () => {
 
     expect(text).toContain("累计 Tokens：5,054.68 M");
     expect(text).toContain("单日峰值：202.77 M");
+    expect(text).toContain("最长 Turn：10小时46分24秒");
     expect(text).toContain("- 2026-07-22：12.35 M");
     expect(text).not.toContain("2026-07-15");
     expect(text.indexOf("2026-07-22")).toBeLessThan(text.indexOf("2026-07-21"));
@@ -300,6 +301,7 @@ describe("formatUsage", () => {
     });
 
     expect(text).toContain("累计 Tokens：未知");
+    expect(text).toContain("最长 Turn：未知");
     expect(text).toContain("暂无每日数据");
   });
 });

@@ -61,8 +61,8 @@ Turn、Thread 或 Surface 关闭时清理。
 `lifecycle-presentation.ts` 统一 Telegram、飞书与微信的 Gateway 上线、Turn 开始确认和 Turn
 结束汇报信息模型、字段顺序与中文状态词；各 Surface 只保留 HTML、CardKit Markdown 或微信文本
 布局以及各自的发送策略。
-`elapsed-duration.ts` 只把 App Server 已提供的 Turn 毫秒耗时格式化为三个 Surface 共用的中文
-短文本，不负责计时、状态或持久化。
+`elapsed-duration.ts` 只把 App Server 已提供的 Turn 毫秒耗时或账户用量秒数格式化为三个
+Surface 共用的中文短文本，不负责计时、状态或持久化。
 `account-format.ts` 统一套餐名称、额度状态、百分比、周期与重置时间格式，供命令结果、运行时通知
 和生命周期汇报复用。
 `slash-command.ts` 统一飞书与微信的严格斜杠命令解析；`conversation-command-format.ts`

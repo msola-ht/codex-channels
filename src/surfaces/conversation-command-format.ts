@@ -15,6 +15,7 @@ import {
   formatRateLimitWindow,
   formatResetTime,
 } from "./account-format.js";
+import { formatElapsedSeconds } from "./elapsed-duration.js";
 
 export const conversationCommandDescriptions = {
   resume: "列出或恢复 Codex 会话",
@@ -278,7 +279,7 @@ export function formatConversationUsage(
     "Codex 用量摘要：",
     `累计 Tokens：${formatMillions(result.result.summary.lifetimeTokens)}`,
     `单日峰值：${formatMillions(result.result.summary.peakDailyTokens)}`,
-    `最长 Turn：${formatMetric(result.result.summary.longestRunningTurnSec)} 秒`,
+    `最长 Turn：${formatAccountDuration(result.result.summary.longestRunningTurnSec)}`,
     `当前连续天数：${formatMetric(result.result.summary.currentStreakDays)}`,
     `最长连续天数：${formatMetric(result.result.summary.longestStreakDays)}`,
     "",
@@ -457,6 +458,10 @@ function formatAccountLimitWindow(
 
 function formatMetric(value: bigint | number | null): string {
   return value === null ? "未知" : String(value);
+}
+
+function formatAccountDuration(value: bigint | number | null): string {
+  return value === null ? "未知" : formatElapsedSeconds(value);
 }
 
 function formatMillions(value: bigint | number | null): string {
