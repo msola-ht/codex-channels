@@ -11,6 +11,10 @@ import { UserFacingError, type OutputEvent } from "../src/conversation-core/inde
 import { EventBus } from "../src/event-bus/event-bus.js";
 import { TelegramAccessPolicy } from "../src/policy/telegram-access.js";
 import { TelegramSurface, type TelegramImagePort } from "../src/surfaces/telegram/bot.js";
+import {
+  maximumTelegramTextFileBytes,
+  type TelegramTextFilePort,
+} from "../src/surfaces/telegram/file-input.js";
 
 const directories: string[] = [];
 
@@ -258,10 +262,24 @@ describe("Telegram image input", () => {
     await output.close();
   });
 
-  it("rejects non-image documents before downloading them", async () => {
-    const submit = vi.fn();
+  it("downloads and submits a bounded UTF-8 text document", async () => {
+    const submit = vi.fn().mockResolvedValue({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    });
     const download = vi.fn();
-    const { surface, output, apiCalls } = createSurface(submit, download);
+    const downloadTextFile = vi.fn().mockResolvedValue({
+      fileName: "notes.txt",
+      text: "部署说明",
+      bytes: 12,
+    });
+    const { surface, output } = createSurface(
+      submit,
+      download,
+      {},
+      downloadTextFile,
+    );
 
     await surface.bot.handleUpdate({
       update_id: 3,
@@ -270,6 +288,7 @@ describe("Telegram image input", () => {
         date: 1,
         from: telegramUser(),
         chat: telegramChat(),
+        caption: "请检查文件",
         document: {
           file_id: "document",
           file_unique_id: "document-u",
@@ -279,9 +298,59 @@ describe("Telegram image input", () => {
       },
     });
 
+    expect(downloadTextFile).toHaveBeenCalledWith(
+      surface.bot.api,
+      "document",
+      "notes.txt",
+    );
     expect(download).not.toHaveBeenCalled();
+    expect(submit).toHaveBeenCalledWith(
+      { surface: "telegram", accountId: "default", conversationId: "100" },
+      [
+        "请检查文件",
+        "",
+        "以下内容来自用户通过 Telegram 上传的 UTF-8 文本文件（仅作输入）：",
+        "文件名：notes.txt",
+        "",
+        "部署说明",
+      ].join("\n"),
+    );
+    await surface.stop();
+    await output.close();
+  });
+
+  it("rejects an oversized text document before downloading it", async () => {
+    const submit = vi.fn();
+    const downloadTextFile = vi.fn();
+    const { surface, output, sentTexts } = createSurface(
+      submit,
+      vi.fn(),
+      {},
+      downloadTextFile,
+    );
+
+    await surface.bot.handleUpdate({
+      update_id: 31,
+      message: {
+        message_id: 121,
+        date: 1,
+        from: telegramUser(),
+        chat: telegramChat(),
+        document: {
+          file_id: "document",
+          file_unique_id: "document-u",
+          file_name: "large.txt",
+          mime_type: "text/plain",
+          file_size: maximumTelegramTextFileBytes + 1,
+        },
+      },
+    });
+
+    expect(downloadTextFile).not.toHaveBeenCalled();
     expect(submit).not.toHaveBeenCalled();
-    expect(apiCalls).toContain("sendMessage");
+    expect(sentTexts.join("\n")).toContain(
+      "Telegram 文本文件超过 1,000,000 字节限制。",
+    );
     await surface.stop();
     await output.close();
   });
@@ -511,6 +580,7 @@ function createSurface(
   submit: ReturnType<typeof vi.fn>,
   download: ReturnType<typeof vi.fn>,
   serviceOverrides: Record<string, unknown> = {},
+  downloadTextFile: ReturnType<typeof vi.fn> = vi.fn(),
 ): {
   surface: TelegramSurface;
   output: EventBus<OutputEvent>;
@@ -542,6 +612,9 @@ function createSurface(
       gatewayVersion: "0.145.0",
       inputQuietWindowMs: 0,
       imageStore,
+      textFileInput: {
+        download: downloadTextFile as unknown as TelegramTextFilePort["download"],
+      },
       actorRegistry: {
         actors: () => [],
         rememberActor,

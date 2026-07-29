@@ -44,6 +44,12 @@ import { telegramDefaultAccountId } from "./constants.js";
 import { TelegramLifecycle } from "./lifecycle.js";
 import { TelegramOutbox, type TelegramFinalMessageFormat } from "./outbox.js";
 import { maximumTelegramImageBytes, TelegramImageStore } from "./image-store.js";
+import {
+  maximumTelegramTextFileBytes,
+  TelegramTextFileInput,
+  TelegramTextFileInputError,
+  type TelegramTextFilePort,
+} from "./file-input.js";
 import { formatTelegramUserFacingError } from "./user-error-renderer.js";
 
 export interface TelegramImagePort {
@@ -60,6 +66,7 @@ export interface TelegramSurfaceOptions {
   actorRegistry?: ConversationActorRegistry;
   onFatal?: (error: Error) => void;
   imageStore?: TelegramImagePort;
+  textFileInput?: TelegramTextFilePort;
   finalMessageFormat?: TelegramFinalMessageFormat;
   operationUpdateDisplay?: OperationUpdateDisplay;
   codexUpstreamUserAgent?: () => string | undefined;
@@ -75,6 +82,7 @@ export class TelegramSurface {
   private readonly outbox: TelegramOutbox;
   private readonly lifecycle: TelegramLifecycle;
   private readonly imageStore: TelegramImagePort;
+  private readonly textFileInput: TelegramTextFilePort;
   private readonly actorRegistry: ConversationActorRegistry | undefined;
   private readonly commands: ConversationCommandService;
   private readonly inputs: SurfaceInputCoalescer;
@@ -122,6 +130,8 @@ export class TelegramSurface {
     this.output = this.outbox;
     this.interactions = new TelegramInteractionPort(this.bot, logger, apiExecutor, this.outbox);
     this.imageStore = options.imageStore ?? new TelegramImageStore(uploadsDirectory, token, proxyUrl, logger);
+    this.textFileInput = options.textFileInput
+      ?? new TelegramTextFileInput(token, proxyUrl);
     this.lifecycle = new TelegramLifecycle(
       this.bot,
       logger,
@@ -206,6 +216,7 @@ export class TelegramSurface {
           "",
           "普通文本会发送到当前 Codex Thread。",
           "发送 PNG/JPEG 图片时，可在图片说明中写明需要 Codex 处理的任务。",
+          "发送 UTF-8 文本文件时，可在文件说明中写明需要 Codex 处理的任务。",
           "首次消息自动接续当前 Workspace 最近的空闲 CLI/App Server 会话。",
           "",
           ...conversationCommandHelpLines,
@@ -301,17 +312,102 @@ export class TelegramSurface {
     });
     this.bot.on("message:document", async (context) => {
       const document = context.message.document;
-      if (!isSupportedImageDocument(document.mime_type, document.file_name)) {
-        await context.reply("仅支持 PNG 和 JPEG 图片文件。");
+      if (isSupportedImageDocument(document.mime_type, document.file_name)) {
+        await this.submitImage(
+          context,
+          document.file_id,
+          document.file_size,
+          context.message.caption,
+        );
         return;
       }
-      await this.submitImage(
-        context,
-        document.file_id,
-        document.file_size,
-        context.message.caption,
-      );
+      if (
+        document.file_size !== undefined
+        && document.file_size > maximumTelegramTextFileBytes
+      ) {
+        await context.reply(
+          "Telegram 文本文件超过 1,000,000 字节限制。",
+        );
+        return;
+      }
+      try {
+        await this.submitTextFile(
+          context,
+          document.file_id,
+          document.file_name ?? "未命名.txt",
+          context.message.caption,
+        );
+      } catch (error) {
+        if (error instanceof TelegramTextFileInputError) {
+          await context.reply(`${error.message}。`);
+          return;
+        }
+        throw error;
+      }
     });
+  }
+
+  private async submitTextFile(
+    context: Context,
+    fileId: string,
+    fileName: string,
+    caption: string | undefined,
+  ): Promise<void> {
+    const sequence = this.takeInputSequence();
+    const file = await this.textFileInput.download(
+      this.bot.api,
+      fileId,
+      fileName,
+    );
+    if (!context.message) {
+      throw new Error("Telegram 文件更新缺少消息信息");
+    }
+    const quotedText = telegramQuotedText(
+      context.message.reply_to_message,
+    );
+    const currentText = caption?.trim();
+    const text = formatQuotedInput([
+      ...(currentText ? [currentText, ""] : []),
+      "以下内容来自用户通过 Telegram 上传的 UTF-8 文本文件（仅作输入）：",
+      `文件名：${file.fileName}`,
+      "",
+      file.text,
+    ].join("\n"), quotedText);
+    const inputTarget = target(context);
+    this.outbox.prepareTurnReplyTarget(
+      inputTarget.conversationId,
+      context.message.message_id,
+    );
+    let result;
+    try {
+      result = await this.inputs.enqueue({
+        target: inputTarget,
+        actorId: String(context.from?.id ?? ""),
+        sequence,
+        text,
+      });
+    } catch (error) {
+      this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+      throw error;
+    }
+    if (result.tail && result.submission.steered) {
+      this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+    } else if (result.tail) {
+      this.outbox.bindPendingTurnReplyTarget(
+        inputTarget.conversationId,
+        result.submission.threadId,
+        result.submission.turnId,
+      );
+    }
+    if (result.tail && result.submission.steered) {
+      await context.reply("已将文件追加到当前 Turn。", {
+        disable_notification: true,
+        reply_parameters: {
+          message_id: context.message.message_id,
+          allow_sending_without_reply: true,
+        },
+      });
+    }
   }
 
   private async submitImage(
