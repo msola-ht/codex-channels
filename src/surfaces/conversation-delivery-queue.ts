@@ -1,6 +1,7 @@
 import type { Logger } from "pino";
 
 import { BoundedAsyncQueue } from "../event-bus/index.js";
+import { surfaceErrorMetadata } from "./error-metadata.js";
 
 interface DeliveryOperation {
   critical: boolean;
@@ -162,9 +163,8 @@ export class ConversationDeliveryQueue {
       } catch (error) {
         this.logger.warn(
           {
-            ...(this.options.errorMetadata?.(error) ?? {
-              errorType: error instanceof Error ? error.name : typeof error,
-            }),
+            ...(this.options.errorMetadata?.(error)
+              ?? surfaceErrorMetadata(error)),
             component: this.options.component,
             conversationId,
             critical: operation.critical,

@@ -32,6 +32,10 @@ export {
   type ManagedAudioSource,
   type StoredManagedAudio,
 } from "./managed-audio-store.js";
+export {
+  surfaceErrorMetadata,
+  type SurfaceErrorMetadata,
+} from "./error-metadata.js";
 export { formatQuotedInput } from "./quoted-input.js";
 export type {
   OperationUpdateDisplay,

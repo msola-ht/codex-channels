@@ -8,6 +8,7 @@ import {
 } from "../../application/index.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
+import { surfaceErrorMetadata } from "../error-metadata.js";
 import {
   feishuCardElements,
   type FeishuCardDocument,
@@ -300,7 +301,7 @@ export class FeishuCommandCenter {
             accountId: pending.target.accountId,
             conversationId: pending.target.conversationId,
             action: command,
-            errorType: error instanceof Error ? error.name : typeof error,
+            ...surfaceErrorMetadata(error),
           },
           "飞书命令中心动作执行失败",
         );

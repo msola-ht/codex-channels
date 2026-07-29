@@ -2,6 +2,7 @@ import type { Logger } from "pino";
 
 import type { ConversationTarget } from "../../conversation-core/index.js";
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
+import { surfaceErrorMetadata } from "../error-metadata.js";
 
 import {
   WeixinProtocolError,
@@ -280,7 +281,7 @@ function abortableDelay(
 function typingErrorMetadata(error: unknown): Record<string, unknown> {
   if (error instanceof WeixinProtocolError) {
     return {
-      errorType: error.name,
+      ...surfaceErrorMetadata(error),
       errorCode: error.code,
       ...(error.status === undefined ? {} : { status: error.status }),
       ...(error.returnCode === undefined
@@ -288,7 +289,5 @@ function typingErrorMetadata(error: unknown): Record<string, unknown> {
         : { returnCode: error.returnCode }),
     };
   }
-  return {
-    errorType: error instanceof Error ? error.name : typeof error,
-  };
+  return surfaceErrorMetadata(error);
 }

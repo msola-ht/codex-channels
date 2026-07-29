@@ -20,6 +20,7 @@ import {
   formatProcessedInteractionOutcome,
   interactionOutcome,
 } from "../interaction-copy.js";
+import { surfaceErrorMetadata } from "../error-metadata.js";
 import { PendingInteractionRegistry } from "../pending-interaction-registry.js";
 import { sanitizeWeixinMarkdownText } from "./operation-format.js";
 
@@ -232,7 +233,7 @@ export class WeixinInteractionPort implements InteractionPort {
           surface: target.surface,
           accountId: target.accountId,
           conversationId: target.conversationId,
-          errorType: error instanceof Error ? error.name : typeof error,
+          ...surfaceErrorMetadata(error),
         },
         "微信交互请求发送失败",
       );
@@ -360,7 +361,7 @@ export class WeixinInteractionPort implements InteractionPort {
             surface: pending.target.surface,
             accountId: pending.target.accountId,
             conversationId: pending.target.conversationId,
-            errorType: error instanceof Error ? error.name : typeof error,
+            ...surfaceErrorMetadata(error),
           },
           "微信下一项输入请求发送失败",
         );
@@ -446,7 +447,7 @@ export class WeixinInteractionPort implements InteractionPort {
           surface: target.surface,
           accountId: target.accountId,
           conversationId: target.conversationId,
-          errorType: error instanceof Error ? error.name : typeof error,
+          ...surfaceErrorMetadata(error),
         },
         "微信交互状态发送失败",
       );

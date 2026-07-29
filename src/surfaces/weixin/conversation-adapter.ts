@@ -9,7 +9,10 @@ import {
 } from "../../conversation-core/index.js";
 import { formatTurnInputAppended } from "../input-copy.js";
 import { parseSlashCommand } from "../slash-command.js";
-import { formatOperationFailure } from "../output-copy.js";
+import {
+  formatOperationFailure,
+  gatewayRequestFailedText,
+} from "../output-copy.js";
 import { formatQuotedInput } from "../quoted-input.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import {
@@ -291,6 +294,10 @@ export class WeixinConversationAdapter {
         return;
       }
       if (!(error instanceof UserFacingError)) {
+        this.notify(
+          message.target,
+          formatOperationFailure(gatewayRequestFailedText),
+        );
         throw error;
       }
       this.notify(

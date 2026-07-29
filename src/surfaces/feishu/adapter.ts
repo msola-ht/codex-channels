@@ -14,6 +14,7 @@ import { formatTurnInputAppended } from "../input-copy.js";
 import { parseSlashCommand } from "../slash-command.js";
 import {
   formatOperationFailure,
+  gatewayRequestFailedText,
   interactionStoppedText,
 } from "../output-copy.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
@@ -213,7 +214,7 @@ export class FeishuConversationAdapter {
         ? error.message
         : error instanceof UserFacingError
           ? renderFeishuUserFacingError(error)
-          : "Gateway 未能完成请求，请稍后重试";
+          : gatewayRequestFailedText;
       this.notifyText(
         message.target.conversationId,
         formatOperationFailure(detail),
@@ -236,7 +237,7 @@ export class FeishuConversationAdapter {
       }
       const detail = error instanceof UserFacingError
         ? renderFeishuUserFacingError(error)
-        : "Gateway 未能完成请求，请稍后重试";
+        : gatewayRequestFailedText;
       this.notifyText(
         messages[0]!.target.conversationId,
         formatOperationFailure(detail),
@@ -334,7 +335,7 @@ export class FeishuConversationAdapter {
       }
       const detail = error instanceof UserFacingError
         ? renderFeishuUserFacingError(error)
-        : "Gateway 未能完成请求，请稍后重试";
+        : gatewayRequestFailedText;
       this.notifyText(
         target.conversationId,
         formatOperationFailure(detail),

@@ -4,6 +4,7 @@ import type { Logger } from "pino";
 
 import type { ConversationTarget } from "../../conversation-core/index.js";
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
+import { surfaceErrorMetadata } from "../error-metadata.js";
 import type { FeishuCardDocument } from "./approval-card.js";
 import {
   feishuFloatingMenuDisplayStrategy,
@@ -339,7 +340,7 @@ export class FeishuApplicationSetupController {
           error instanceof FeishuApplicationSetupError
             ? error.authorizationDiagnostic
             : undefined,
-        errorType: error instanceof Error ? error.name : typeof error,
+        ...surfaceErrorMetadata(error),
       },
       "飞书应用授权失败",
     );

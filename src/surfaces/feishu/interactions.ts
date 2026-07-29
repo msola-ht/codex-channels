@@ -17,6 +17,7 @@ import {
   interactionCancelledTitle,
   interactionOutcome,
 } from "../interaction-copy.js";
+import { surfaceErrorMetadata } from "../error-metadata.js";
 import { PendingInteractionRegistry } from "../pending-interaction-registry.js";
 import type { Logger } from "pino";
 import {
@@ -293,7 +294,7 @@ export class FeishuInteractionPort implements InteractionPort {
       this.logger?.warn(
         {
           ...interactionLogMetadata(target, request),
-          errorType: error instanceof Error ? error.name : typeof error,
+          ...surfaceErrorMetadata(error),
         },
         "飞书交互请求发送失败",
       );

@@ -135,7 +135,7 @@ export class GatewayApplication {
       } catch (error) {
         this.logger.warn(
           {
-            errorType: error instanceof Error ? error.name : typeof error,
+            err: error,
             surface: event.target.surface,
             accountId: event.target.accountId,
             conversationId: event.target.conversationId,

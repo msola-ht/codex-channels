@@ -11,6 +11,7 @@ import type {
   SurfaceAdapter,
   SurfaceConfigurationChange,
 } from "../types.js";
+import { surfaceErrorMetadata } from "../error-metadata.js";
 import { FeishuConversationAdapter } from "./adapter.js";
 import {
   FeishuApplicationHttpApi,
@@ -387,9 +388,7 @@ export class FeishuSurface implements SurfaceAdapter {
           options.logger.warn(
             {
               ...this.lifecycleContext(),
-              errorType: error instanceof Error
-                ? error.name
-                : typeof error,
+              ...surfaceErrorMetadata(error),
             },
             "飞书机器人菜单路由失败",
           );
@@ -500,7 +499,7 @@ export class FeishuSurface implements SurfaceAdapter {
       this.logger.warn(
         {
           ...this.lifecycleContext(),
-          errorType: error instanceof Error ? error.name : typeof error,
+          ...surfaceErrorMetadata(error),
         },
         "飞书启动联通通知生成失败",
       );
@@ -571,7 +570,7 @@ export class FeishuSurface implements SurfaceAdapter {
         {
           ...this.lifecycleContext(),
           conversationId: target.conversationId,
-          errorType: error instanceof Error ? error.name : typeof error,
+          ...surfaceErrorMetadata(error),
         },
         "飞书机器人菜单卡片发送失败",
       );

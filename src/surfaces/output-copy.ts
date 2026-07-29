@@ -2,6 +2,7 @@ export const contentTruncatedText = "内容过长，已截断";
 export const emptyCodexResponseText = "Codex 返回了空消息。";
 export const interactionStoppedText = "已停止当前交互请求。";
 export const cliInputTitle = "CLI 输入";
+export const gatewayRequestFailedText = "Gateway 未能完成请求，请稍后重试";
 
 export function formatCliInput(text: string): string {
   return `${cliInputTitle}\n\n${text}`;

@@ -7,6 +7,7 @@ import {
 } from "../../conversation-core/index.js";
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
+import { surfaceErrorMetadata } from "../error-metadata.js";
 import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
@@ -511,11 +512,11 @@ function weixinOutputErrorMetadata(
   error: unknown,
 ): Record<string, unknown> {
   if (error instanceof WeixinOutboxError) {
-    return { errorType: error.name, errorCode: error.code };
+    return { ...surfaceErrorMetadata(error), errorCode: error.code };
   }
   if (error instanceof WeixinProtocolError) {
     return {
-      errorType: error.name,
+      ...surfaceErrorMetadata(error),
       errorCode: error.code,
       ...(error.status === undefined ? {} : { status: error.status }),
       ...(error.returnCode === undefined
@@ -524,9 +525,7 @@ function weixinOutputErrorMetadata(
     };
   }
   if (error instanceof WeixinOutboundImageError) {
-    return { errorType: error.name, errorCode: error.code };
+    return { ...surfaceErrorMetadata(error), errorCode: error.code };
   }
-  return {
-    errorType: error instanceof Error ? error.name : typeof error,
-  };
+  return surfaceErrorMetadata(error);
 }

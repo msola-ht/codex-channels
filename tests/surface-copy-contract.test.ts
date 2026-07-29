@@ -67,6 +67,31 @@ describe("shared surface copy contract", () => {
     }
   });
 
+  it("reports Plan and collaboration mode errors consistently on every surface", () => {
+    const cases = [
+      [
+        new UserFacingError("plan.prompt.empty", "Plan 需求不能为空"),
+        "Plan 需求不能为空",
+      ],
+      [
+        new UserFacingError("collaboration-mode.unavailable", "Plan 模式服务不可用"),
+        "Plan 模式服务不可用",
+      ],
+      [
+        new UserFacingError(
+          "collaboration-mode.unsupported",
+          "当前 Codex App Server 不支持 Plan 模式",
+        ),
+        "当前 Codex App Server 不支持该协作模式",
+      ],
+    ] as const;
+    for (const surface of ["Telegram", "飞书", "微信"] as const) {
+      for (const [error, expected] of cases) {
+        expect(formatSurfaceUserFacingError(error, surface)).toBe(expected);
+      }
+    }
+  });
+
   it("keeps account, quota, appended-input, and empty-response copy shared", () => {
     expect(formatPercent(12.34)).toBe("12.3%");
     expect(formatPlanType("self_serve_business_usage_based"))

@@ -1,8 +1,23 @@
 import { describe, expect, it } from "vitest";
 
-import { createLogger } from "../src/observability/index.js";
+import {
+  createLogger,
+  safeErrorMetadata,
+} from "../src/observability/index.js";
 
 describe("createLogger", () => {
+  it("summarizes unknown process errors without exposing their contents", () => {
+    const error = Object.assign(new Error("Authorization Bearer secret"), {
+      name: "opaque-secret",
+      code: "unsafe-secret",
+      responseBody: "token=secret",
+    });
+
+    expect(safeErrorMetadata(error)).toEqual({
+      type: "Error",
+    });
+  });
+
   it("logs only constrained metadata for Error objects", () => {
     const secret = "opaque-upstream-secret";
     const record = captureLog(() => {

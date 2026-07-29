@@ -14,6 +14,7 @@ import type {
   SurfaceConfigurationChange,
 } from "../types.js";
 import { formatSurfaceConfigurationChange } from "../configuration-change-format.js";
+import { surfaceErrorMetadata } from "../error-metadata.js";
 
 import {
   WeixinInputAdapter,
@@ -320,7 +321,7 @@ export class WeixinSurface implements SurfaceAdapter {
             surface: "weixin",
             accountId: this.accountId,
             conversationId: target.conversationId,
-            errorType: error instanceof Error ? error.name : typeof error,
+            ...surfaceErrorMetadata(error),
           },
           "微信启动联通通知发送失败，不影响长轮询",
         );

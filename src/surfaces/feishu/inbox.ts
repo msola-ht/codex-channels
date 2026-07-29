@@ -3,6 +3,7 @@ import type {
   ConversationActorRegistry,
   SurfaceAccessPolicy,
 } from "../../policy/index.js";
+import { surfaceErrorMetadata } from "../error-metadata.js";
 
 import type { FeishuMessageEvent } from "./message-event.js";
 import {
@@ -318,7 +319,7 @@ export class FeishuInbox {
       this.options.handleError({
         target: message.target,
         messageId: message.messageId,
-        errorType: safeErrorType(error),
+        errorType: surfaceErrorMetadata(error).errorType,
       });
     } catch {
       // Error reporting must not stop later messages for this Conversation.
@@ -407,19 +408,6 @@ function delay(milliseconds: number): Promise<void> {
     const timer = setTimeout(resolve, milliseconds);
     timer.unref();
   });
-}
-
-function safeErrorType(error: unknown): string {
-  const constructorName = error instanceof Error
-    ? error.constructor.name
-    : undefined;
-  if (
-    typeof constructorName === "string"
-    && /^[A-Za-z][A-Za-z0-9]{0,40}$/u.test(constructorName)
-  ) {
-    return constructorName;
-  }
-  return error instanceof Error ? "Error" : typeof error;
 }
 
 async function waitAtMost<T>(

@@ -77,6 +77,8 @@ Surface 共用的中文短文本，不负责计时、状态或持久化。
 权限、项目规则、Diff、Goal、模型选择、Default/Plan 模式、用量与额度等平台无关命令结果文案
 与状态文本。
 `user-facing-error-format.ts` 统一三个渠道的结构化用户错误文案，只保留渠道名称差异；
+`error-metadata.ts` 统一渠道日志中的受约束异常类型和机器错误码，拒绝异常正文、堆栈及
+上游自定义名称进入日志；Bootstrap 继续通过注入的 Pino `err` 序列化器处理组合根异常。
 `input-copy.ts` 统一补充文字、文件、图片与音频追加到当前 Turn 的确认文案；
 `output-copy.ts` 统一 CLI 输入镜像、断线、警告、操作失败、停止交互、空回复与内容截断等输出
 语义，各渠道继续自行决定 HTML、CardKit Markdown、纯文本布局和发送方式。

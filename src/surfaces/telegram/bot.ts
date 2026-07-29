@@ -27,6 +27,7 @@ import { conversationCommandHelpLines } from "../conversation-command-format.js"
 import { formatTurnInputAppended } from "../input-copy.js";
 import {
   formatOperationFailure,
+  gatewayRequestFailedText,
   interactionStoppedText,
 } from "../output-copy.js";
 import { formatTextFileTooLarge } from "../text-file-copy.js";
@@ -51,6 +52,7 @@ import {
   maximumTelegramAudioDurationSeconds,
   TelegramAudioStore,
 } from "./audio-store.js";
+import { telegramErrorMetadata } from "./error-metadata.js";
 import {
   maximumTelegramTextFileBytes,
   TelegramTextFileInput,
@@ -649,7 +651,7 @@ export class TelegramSurface {
     } catch (error) {
       this.logger.error(
         {
-          errorType: error instanceof Error ? error.name : typeof error,
+          ...telegramErrorMetadata(error),
           chatId: context.chat?.id,
         },
         "Telegram 命令执行失败",
@@ -658,7 +660,7 @@ export class TelegramSurface {
         await context.reply(
           error instanceof UserFacingError
             ? formatOperationFailure(formatTelegramUserFacingError(error))
-            : formatOperationFailure("Gateway 未能完成请求，请稍后重试"),
+            : formatOperationFailure(gatewayRequestFailedText),
         );
       }
     } finally {

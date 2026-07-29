@@ -1,4 +1,5 @@
 import type { UserFacingError } from "../conversation-core/index.js";
+import { gatewayRequestFailedText } from "./output-copy.js";
 
 export function formatSurfaceUserFacingError(
   error: UserFacingError,
@@ -79,6 +80,12 @@ export function formatSurfaceUserFacingError(
       return "用法：/fast [on|off|status]";
     case "fast.unsupported":
       return `当前模型不支持 Fast 模式：${detail(error, "model", "未知")}`;
+    case "collaboration-mode.unsupported":
+      return "当前 Codex App Server 不支持该协作模式";
+    case "collaboration-mode.unavailable":
+      return "Plan 模式服务不可用";
+    case "plan.prompt.empty":
+      return "Plan 需求不能为空";
     case "command.unsupported":
       return surfaceLabel === "Telegram"
         ? `不支持的会话命令：${detail(error, "command", "未知")}`
@@ -98,7 +105,7 @@ export function formatSurfaceUserFacingError(
     case "rules.unavailable":
       return "项目规则服务当前不可用";
     default:
-      return "Gateway 无法完成请求，请稍后重试";
+      return gatewayRequestFailedText;
   }
 }
 

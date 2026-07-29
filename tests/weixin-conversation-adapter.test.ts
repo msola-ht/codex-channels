@@ -602,6 +602,23 @@ describe("WeixinConversationAdapter", () => {
     );
   });
 
+  it("notifies a generic failure before propagating an unknown conversation error", async () => {
+    const failure = new Error("opaque upstream detail");
+    const notifyText = vi.fn(() => true);
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({
+        submit: vi.fn().mockRejectedValue(failure),
+      }),
+      { notifyText },
+    );
+
+    await expect(adapter.handle(message)).rejects.toBe(failure);
+    expect(notifyText).toHaveBeenCalledWith(
+      target,
+      "操作失败：Gateway 未能完成请求，请稍后重试。",
+    );
+  });
+
   it("fails the input batch when a command result cannot enter the output queue", async () => {
     const adapter = new WeixinConversationAdapter(
       serviceFixture({
