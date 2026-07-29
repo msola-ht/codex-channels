@@ -438,7 +438,106 @@ describe("WeixinSurface", () => {
     await surface.stop();
   });
 
-  it("fails proactive configuration delivery closed without a reply context", async () => {
+  it("delivers a persistent configuration change through a restored reply context", async () => {
+    const replyContextPersistence = replyContextPersistenceFixture({
+      version: 1,
+      accountId,
+      actorId,
+      contextToken: "restored-context",
+      updatedAt: 1_000,
+    });
+    const sendText = vi.fn<WeixinProtocolClient["sendText"]>(async () => {});
+    const surface = new WeixinSurface({
+      accountId,
+      client: {
+        getUpdates: vi.fn((_cursor, signal) => waitForAbort(signal)),
+        sendText,
+      },
+      cursorStore: cursorStoreFixture(),
+      service: serviceFixture(),
+      access: accessFixture(true),
+      replyContextPersistence,
+      startupNotification: {
+        targets: () => [target],
+        text: () => "",
+      },
+      logger: pino({ level: "silent" }),
+      onFatal: vi.fn(),
+    });
+
+    await surface.start();
+    await expect(surface.deliverConfigurationChange({
+      action: "reloaded",
+      changes: [{ code: "workspace.registry", scope: "global" }],
+      addedWorkspaces: [{
+        id: "docs",
+        name: "Docs",
+        cwd: "/workspace/docs",
+      }],
+    })).resolves.toBeUndefined();
+    await surface.stop();
+
+    expect(sendText).toHaveBeenCalledWith({
+      actorId,
+      contextToken: "restored-context",
+      text: [
+        "Workspace 已添加",
+        "│ Docs · docs",
+        "│ /workspace/docs",
+        "发送 /workspace 可查看并切换 Workspace。",
+        "已生效：Workspace",
+      ].join("\n\n"),
+    });
+  });
+
+  it("queues a runtime configuration change through a restored reply context", async () => {
+    const replyContextPersistence = replyContextPersistenceFixture({
+      version: 1,
+      accountId,
+      actorId,
+      contextToken: "restored-context",
+      updatedAt: 1_000,
+    });
+    const sendText = vi.fn<WeixinProtocolClient["sendText"]>(async () => {});
+    const surface = new WeixinSurface({
+      accountId,
+      client: {
+        getUpdates: vi.fn((_cursor, signal) => waitForAbort(signal)),
+        sendText,
+      },
+      cursorStore: cursorStoreFixture(),
+      service: serviceFixture(),
+      access: accessFixture(true),
+      replyContextPersistence,
+      startupNotification: {
+        targets: () => [target],
+        text: () => "",
+      },
+      logger: pino({ level: "silent" }),
+      onFatal: vi.fn(),
+    });
+    const adapter: SurfaceAdapter = surface;
+
+    await surface.start();
+    adapter.configurationChanged?.({
+      action: "restarting",
+      changes: [{ code: "codex.default-model", scope: "global" }],
+      addedWorkspaces: [],
+    });
+    await surface.stop();
+
+    expect(sendText).toHaveBeenCalledWith({
+      actorId,
+      contextToken: "restored-context",
+      text: [
+        "Gateway 配置需要重启",
+        "变更：默认模型",
+        "当前 Gateway 将退出；若由系统服务托管，将自动重新启动。",
+      ].join("\n\n"),
+    });
+  });
+
+  it("fails proactive configuration delivery closed without a reply context provider", async () => {
     const client: WeixinProtocolClient = {
       getUpdates: vi.fn((_cursor, signal) => waitForAbort(signal)),
       sendText: vi.fn(async () => {}),

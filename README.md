@@ -199,7 +199,8 @@ Setup 默认保存 `enabled = false`，避免扫码完成后在操作者确认�
 `credentials/weixin-reply-context` 安全后端加密保存每个
 已绑定私聊的最近回复上下文，用于重启上线通知和重启后恢复关键输出。回复上下文不进入 TOML、
 SQLite 或日志；撤权目标不会收到通知。`codexc doctor` 会只读检查连接凭据是否存在且载荷有效，
-不显示 Token。微信暂不支持二进制文件、语音、视频、群聊或一般主动推送；当前图片
+不显示 Token。微信暂不支持二进制文件、语音、视频、群聊或脱离已保存回复上下文的一般主动推送；
+已有授权绑定且存在安全回复上下文的私聊可以接收上线和配置生命周期通知。当前图片
 输出只处理活动 Turn 中 App Server 明确返回的 `imageGeneration.savedPath`。
 
 最终回复默认把常用 Markdown 安全转换为兼容性更好的 Telegram HTML。支持 Rich Messages
@@ -302,6 +303,9 @@ Gateway 会监测用户 `config.toml`：新增 Workspace 和 Telegram 允许用�
 飞书 `allowed_open_ids` 可热加载，并会清理已撤权 Actor 的旧绑定；启用状态、App ID 或 App Secret
 变化会重启 Gateway。飞书配置通知只发送给已有绑定且仍有授权 Actor 的私聊，不会广播凭据或
 允许名单；尚未建立安全会话时没有飞书通知收件人。
+
+微信配置通知同样只发送给已有授权绑定且当前存在安全回复上下文的私聊；缺少安全收件人来源时，
+持久化配置通知失败关闭，不会退化为任意主动推送。
 
 ## Telegram 命令
 

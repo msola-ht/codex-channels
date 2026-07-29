@@ -13,6 +13,7 @@ import type {
   SurfaceAdapter,
   SurfaceConfigurationChange,
 } from "../types.js";
+import { formatSurfaceConfigurationChange } from "../configuration-change-format.js";
 
 import {
   WeixinInputAdapter,
@@ -66,7 +67,7 @@ export interface WeixinSurfaceOptions {
 
 export class WeixinConfigurationDeliveryError extends Error {
   constructor() {
-    super("微信 Surface 不支持主动配置通知");
+    super("微信 Surface 尚未配置安全的配置通知收件人");
     this.name = "WeixinConfigurationDeliveryError";
   }
 }
@@ -208,11 +209,41 @@ export class WeixinSurface implements SurfaceAdapter {
     return this.stopPromise;
   }
 
+  configurationChanged(change: SurfaceConfigurationChange): void {
+    if (!this.startupNotification) {
+      return;
+    }
+    const text = formatWeixinCommandText(
+      formatSurfaceConfigurationChange(change, "weixin"),
+    );
+    for (const target of this.safeConfigurationTargets()) {
+      if (!this.output.notifyText(target, text)) {
+        this.logger.warn(
+          {
+            surface: "weixin",
+            accountId: this.accountId,
+            conversationId: target.conversationId,
+          },
+          "微信配置通知未进入输出队列",
+        );
+      }
+    }
+  }
+
   deliverConfigurationChange(
     change: SurfaceConfigurationChange,
   ): Promise<void> {
-    void change;
-    return Promise.reject(new WeixinConfigurationDeliveryError());
+    if (!this.startupNotification) {
+      return Promise.reject(new WeixinConfigurationDeliveryError());
+    }
+    const text = formatWeixinCommandText(
+      formatSurfaceConfigurationChange(change, "weixin"),
+    );
+    return Promise.all(
+      this.safeConfigurationTargets().map(
+        (target) => this.output.deliverText(target, text),
+      ),
+    ).then(() => undefined);
   }
 
   private async stopOnce(): Promise<void> {
@@ -283,6 +314,24 @@ export class WeixinSurface implements SurfaceAdapter {
         );
       }
     }
+  }
+
+  private safeConfigurationTargets(): ConversationTarget[] {
+    const targets = this.startupNotification?.targets() ?? [];
+    const seen = new Set<string>();
+    return targets.filter((target) => {
+      if (
+        target.surface !== "weixin"
+        || target.accountId !== this.accountId
+        || seen.has(target.conversationId)
+      ) {
+        return false;
+      }
+      seen.add(target.conversationId);
+      const context = this.replyContexts.get(target);
+      return context !== undefined
+        && this.access.isAllowed({ target, actorId: context.actorId });
+    });
   }
 }
 
