@@ -713,6 +713,44 @@ describe("ConversationService model selection", () => {
     })).rejects.toThrow("本地图片路径必须是绝对路径");
   });
 
+  it("passes local audio to a new turn", async () => {
+    const startTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
+    const service = new ConversationService(
+      turnPort({ startTurn }),
+      {
+        ensure: async () => ({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }),
+        workspace: () => main,
+      } as unknown as SessionRouter,
+      { activeTurn: () => undefined, markTurnStarted: vi.fn() } as unknown as ConversationCore,
+      { turnOverrides: () => ({}), markApplied: vi.fn() } as unknown as ModelSelectionService,
+      queryPort(),
+    );
+
+    await service.submit(target, {
+      text: "分析语音",
+      localAudios: [{ path: "/private/uploads/voice.ogg" }],
+    });
+
+    expect(startTurn.mock.calls[0]?.[1]).toEqual([
+      { type: "text", text: "分析语音" },
+      { type: "localAudio", path: "/private/uploads/voice.ogg" },
+    ]);
+  });
+
+  it("rejects relative audio paths at the application boundary", async () => {
+    const service = new ConversationService(
+      turnPort(),
+      {} as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort(),
+    );
+
+    await expect(service.submit(target, {
+      localAudios: [{ path: "relative/voice.ogg" }],
+    })).rejects.toThrow("本地音频路径必须是绝对路径");
+  });
+
   it("uses the stable Turn port for control, Review and Goal operations", async () => {
     let active = { threadId: "thread-1", turnId: "turn-1" } as
       | { threadId: string; turnId: string }

@@ -47,6 +47,11 @@ import { TelegramLifecycle } from "./lifecycle.js";
 import { TelegramOutbox, type TelegramFinalMessageFormat } from "./outbox.js";
 import { maximumTelegramImageBytes, TelegramImageStore } from "./image-store.js";
 import {
+  maximumTelegramAudioBytes,
+  maximumTelegramAudioDurationSeconds,
+  TelegramAudioStore,
+} from "./audio-store.js";
+import {
   maximumTelegramTextFileBytes,
   TelegramTextFileInput,
   TelegramTextFileInputError,
@@ -63,11 +68,21 @@ export interface TelegramImagePort {
   ): ReturnType<TelegramImageStore["download"]>;
 }
 
+export interface TelegramAudioPort {
+  start(): Promise<void>;
+  close(): void;
+  download(
+    api: Parameters<TelegramAudioStore["download"]>[0],
+    fileId: string,
+  ): ReturnType<TelegramAudioStore["download"]>;
+}
+
 export interface TelegramSurfaceOptions {
   gatewayVersion: string;
   actorRegistry?: ConversationActorRegistry;
   onFatal?: (error: Error) => void;
   imageStore?: TelegramImagePort;
+  audioStore?: TelegramAudioPort;
   textFileInput?: TelegramTextFilePort;
   finalMessageFormat?: TelegramFinalMessageFormat;
   operationUpdateDisplay?: OperationUpdateDisplay;
@@ -111,6 +126,7 @@ export class TelegramSurface {
   private readonly outbox: TelegramOutbox;
   private readonly lifecycle: TelegramLifecycle;
   private readonly imageStore: TelegramImagePort;
+  private readonly audioStore: TelegramAudioPort;
   private readonly textFileInput: TelegramTextFilePort;
   private readonly actorRegistry: ConversationActorRegistry | undefined;
   private readonly commands: ConversationCommandService;
@@ -159,6 +175,8 @@ export class TelegramSurface {
     this.output = this.outbox;
     this.interactions = new TelegramInteractionPort(this.bot, logger, apiExecutor, this.outbox);
     this.imageStore = options.imageStore ?? new TelegramImageStore(uploadsDirectory, token, proxyUrl, logger);
+    this.audioStore = options.audioStore
+      ?? new TelegramAudioStore(uploadsDirectory, token, proxyUrl, logger);
     this.textFileInput = options.textFileInput
       ?? new TelegramTextFileInput(token, proxyUrl);
     this.lifecycle = new TelegramLifecycle(
@@ -193,14 +211,24 @@ export class TelegramSurface {
   }
 
   async start(): Promise<void> {
-    await this.imageStore.start();
-    this.lifecycle.start();
+    try {
+      await Promise.all([
+        this.imageStore.start(),
+        this.audioStore.start(),
+      ]);
+      this.lifecycle.start();
+    } catch (error) {
+      this.imageStore.close();
+      this.audioStore.close();
+      throw error;
+    }
   }
 
   async stop(): Promise<void> {
     const lifecycleStop = this.lifecycle.stop();
     await this.inputs.close();
     this.imageStore.close();
+    this.audioStore.close();
     await this.interactions.close();
     await this.outbox.close();
     await lifecycleStop;
@@ -336,6 +364,19 @@ export class TelegramSurface {
         context,
         photo.file_id,
         photo.file_size,
+        context.message.caption,
+      );
+    });
+    this.bot.on(["message:voice", "message:audio"], async (context) => {
+      const audio = context.message.voice ?? context.message.audio;
+      if (!audio) {
+        throw new Error("Telegram 语音消息缺少文件信息");
+      }
+      await this.submitAudio(
+        context,
+        audio.file_id,
+        audio.file_size,
+        audio.duration,
         context.message.caption,
       );
     });
@@ -501,6 +542,64 @@ export class TelegramSurface {
           allow_sending_without_reply: true,
         },
       });
+    }
+  }
+
+  private async submitAudio(
+    context: Context,
+    fileId: string,
+    fileSize: number | undefined,
+    duration: number,
+    caption: string | undefined,
+  ): Promise<void> {
+    if (fileSize !== undefined && fileSize > maximumTelegramAudioBytes) {
+      throw new UserFacingError("audio.too-large", "音频超过 20 MiB 限制");
+    }
+    if (duration > maximumTelegramAudioDurationSeconds) {
+      throw new UserFacingError("audio.too-large", "语音最长支持 5 分钟");
+    }
+    const inputTarget = target(context);
+    const actorId = String(context.from?.id ?? "");
+    await this.inputs.flushPending(inputTarget, actorId);
+    const audio = await this.audioStore.download(this.bot.api, fileId);
+    const quotedText = telegramQuotedText(context.message?.reply_to_message);
+    const currentText = caption?.trim();
+    this.outbox.prepareTurnReplyTarget(
+      inputTarget.conversationId,
+      context.message!.message_id,
+    );
+    let submission;
+    try {
+      submission = await this.service.submit(inputTarget, {
+        ...(currentText || quotedText !== undefined
+          ? {
+              text: formatQuotedInput(
+                currentText || "请听取这段语音并根据内容协助我。",
+                quotedText,
+              ),
+            }
+          : {}),
+        localAudios: [{ path: audio.path }],
+      });
+    } catch (error) {
+      this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+      throw error;
+    }
+    if (submission.steered) {
+      this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+      await context.reply(formatTurnInputAppended("audio", Boolean(currentText)), {
+        disable_notification: true,
+        reply_parameters: {
+          message_id: context.message!.message_id,
+          allow_sending_without_reply: true,
+        },
+      });
+    } else {
+      this.outbox.bindPendingTurnReplyTarget(
+        inputTarget.conversationId,
+        submission.threadId,
+        submission.turnId,
+      );
     }
   }
 

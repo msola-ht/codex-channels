@@ -293,6 +293,47 @@ describe("WeixinProtocolClient", () => {
     });
   });
 
+  it("parses one fixed v2.4.6 voice reference and transcript", async () => {
+    const client = createClient({
+      fetchImpl: vi.fn(async () => new Response(exactMessageIds({
+        ret: 0,
+        get_updates_buf: "next-cursor",
+        msgs: [message("9007199254740995", {
+          item_list: [{
+            type: 3,
+            voice_item: {
+              encode_type: 7,
+              playtime: 12_345,
+              text: "语音转写内容",
+              media: {
+                full_url:
+                  "https://novac2c.cdn.weixin.qq.com/c2c/download?voice",
+                encrypt_query_param: "private-voice-query",
+                aes_key: "private-voice-key",
+              },
+            },
+          }],
+        })],
+      }), { status: 200 })),
+    });
+
+    await expect(client.getUpdates("")).resolves.toMatchObject({
+      messages: [{
+        kind: "audio",
+        messageId: "9007199254740995",
+        audio: {
+          encodeType: 7,
+          durationMs: 12_345,
+          transcript: "语音转写内容",
+          fullUrl:
+            "https://novac2c.cdn.weixin.qq.com/c2c/download?voice",
+          encryptedQueryParam: "private-voice-query",
+          mediaAesKey: "private-voice-key",
+        },
+      }],
+    });
+  });
+
   it("classifies unsupported messages without exposing their content", async () => {
     const client = createClient({
       fetchImpl: vi.fn(async () => new Response(exactMessageIds({
@@ -304,7 +345,7 @@ describe("WeixinProtocolClient", () => {
           message("3", { to_user_id: "other@im.bot" }),
           message("4", { context_token: undefined }),
           message("5", {
-            item_list: [{ type: 3, voice_item: { text: "private" } }],
+            item_list: [{ type: 9, unknown_item: { text: "private" } }],
           }),
           message("6", {
             item_list: [{ type: 1, text_item: { text: "   " } }],

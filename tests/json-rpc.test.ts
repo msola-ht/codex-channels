@@ -1163,6 +1163,7 @@ describe("JsonRpcClient", () => {
       [
         { type: "text", text: "测试输入" },
         { type: "localImage", path: "/tmp/screenshot.png" },
+        { type: "localAudio", path: "/tmp/voice.ogg" },
       ],
       "codex_connect_gateway:request-1",
       "/tmp/project",
@@ -1188,6 +1189,7 @@ describe("JsonRpcClient", () => {
         input: [
           { type: "text", text: "测试输入", text_elements: [] },
           { type: "localImage", path: "/tmp/screenshot.png" },
+          { type: "localAudio", path: "/tmp/voice.ogg" },
         ],
         cwd: "/tmp/project",
         model: "gpt-selected",

@@ -23,6 +23,14 @@ export function formatSurfaceUserFacingError(
       return "一次最多处理 4 张图片";
     case "image.unsupported":
       return "仅支持 PNG 和 JPEG 图片";
+    case "audio.path.invalid":
+      return "本地音频路径必须是绝对路径";
+    case "audio.duration-missing":
+      return "无法确认音频时长，请重新发送";
+    case "audio.too-large":
+      return "音频超过 20 MiB 限制";
+    case "audio.unsupported":
+      return "仅支持 WAV、MP3、M4A、WebM 和 OGG 音频";
     case "session.selector.required":
       return `用法：/${detail(error, "command", "resume")} <序号、名称或 Thread ID>`;
     case "session.selector.ambiguous":

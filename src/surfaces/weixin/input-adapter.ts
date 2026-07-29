@@ -16,6 +16,7 @@ import {
   type WeixinProtocolErrorCode,
 } from "./protocol-client.js";
 import { WeixinConversationAdapter } from "./conversation-adapter.js";
+import type { WeixinAudioPort } from "./audio-store.js";
 import type { WeixinFilePort } from "./file-input.js";
 import type { WeixinImagePort } from "./image-store.js";
 import type { WeixinInteractionPort } from "./interactions.js";
@@ -34,7 +35,7 @@ import { WeixinReplyContextStore } from "./reply-context-store.js";
 
 type WeixinSupportedMessage = Extract<
   WeixinInboundMessage,
-  { kind: "text" | "image" | "file" }
+  { kind: "text" | "image" | "file" | "audio" }
 >;
 
 const maximumQuotedTextCacheEntries = 1_000;
@@ -69,6 +70,7 @@ export interface WeixinInputAdapterOptions {
   interactions?: Pick<WeixinInteractionPort, "handleText">;
   images?: Pick<WeixinImagePort, "download">;
   files?: Pick<WeixinFilePort, "download">;
+  audios?: Pick<WeixinAudioPort, "download">;
   doctor?: Omit<
     CreateWeixinDoctorOptions,
     "accountId" | "cursorStore" | "pollingHealth"
@@ -118,6 +120,7 @@ export class WeixinInputAdapter {
             }),
       },
       options.files,
+      options.audios,
     );
     this.monitor = createWeixinUpdatesMonitor({
       accountId: options.accountId,
@@ -179,7 +182,7 @@ export class WeixinInputAdapter {
         : this.quotedTexts.get(
           quotedTextCacheKey(target, message.quotedMessageId),
         ));
-    if (message.text !== undefined) {
+    if ("text" in message && message.text !== undefined) {
       this.rememberQuotedText(target, message.messageId, message.text);
     }
     this.options.replyContexts.remember(
@@ -221,14 +224,22 @@ export class WeixinInputAdapter {
               ...(quotedText === undefined ? {} : { quotedText }),
               images: message.images,
             }
-          : {
-              target,
-              actorId: message.actorId,
-              kind: "file" as const,
-              ...(message.text === undefined ? {} : { text: message.text }),
-              ...(quotedText === undefined ? {} : { quotedText }),
-              file: message.file,
-            };
+          : message.kind === "file"
+            ? {
+                target,
+                actorId: message.actorId,
+                kind: "file" as const,
+                ...(message.text === undefined ? {} : { text: message.text }),
+                ...(quotedText === undefined ? {} : { quotedText }),
+                file: message.file,
+              }
+            : {
+                target,
+                actorId: message.actorId,
+                kind: "audio" as const,
+                ...(quotedText === undefined ? {} : { quotedText }),
+                audio: message.audio,
+              };
       await this.conversations.handle(conversationMessage);
     } catch (error) {
       throw new WeixinMessageProcessingError({ cause: error });

@@ -43,6 +43,10 @@ import {
   FeishuImageStore,
   type FeishuImagePort,
 } from "./media.js";
+import {
+  FeishuAudioStore,
+  type FeishuAudioPort,
+} from "./audio.js";
 import type { FeishuMessageEventError } from "./message-event.js";
 import type {
   FeishuMenuEvent,
@@ -67,6 +71,7 @@ interface FeishuEventConnectionPort {
 interface FeishuSurfaceDependencies {
   messagePort?: FeishuMessagePort;
   imagePort?: FeishuImagePort;
+  audioPort?: FeishuAudioPort;
   filePort?: FeishuFilePort;
   quotedMessagePort?: FeishuQuotedMessagePort;
   createEventConnection: (
@@ -116,6 +121,7 @@ export class FeishuSurface implements SurfaceAdapter {
   private readonly commandCenter: FeishuCommandCenter;
   private readonly applicationSetup: FeishuApplicationSetupController;
   private readonly images: FeishuImagePort;
+  private readonly audios: FeishuAudioPort;
   private readonly connection: FeishuEventConnectionPort;
   private readonly oauth: FeishuOAuthControllerPort & {
     close(): Promise<void>;
@@ -141,7 +147,9 @@ export class FeishuSurface implements SurfaceAdapter {
     this.configurationRecipients = options.configurationRecipients;
     this.startupNotification = options.startupNotification;
     this.logger = options.logger;
-    const client = dependencies.messagePort && dependencies.imagePort
+    const client = dependencies.messagePort
+        && dependencies.imagePort
+        && dependencies.audioPort
       ? undefined
       : new FeishuMessageClient({
           appId: options.appId,
@@ -156,6 +164,11 @@ export class FeishuSurface implements SurfaceAdapter {
     const messagePort = dependencies.messagePort ?? client!;
     const quotedMessages = dependencies.quotedMessagePort ?? client;
     this.images = dependencies.imagePort ?? new FeishuImageStore(
+      options.uploadsDirectory,
+      client!,
+      options.logger,
+    );
+    this.audios = dependencies.audioPort ?? new FeishuAudioStore(
       options.uploadsDirectory,
       client!,
       options.logger,
@@ -229,6 +242,7 @@ export class FeishuSurface implements SurfaceAdapter {
       {
         quietWindowMs: 0,
         ...(files === undefined ? {} : { files }),
+        audios: this.audios,
         ...(quotedMessages === undefined
           ? {}
           : {
@@ -398,13 +412,15 @@ export class FeishuSurface implements SurfaceAdapter {
 
   async start(): Promise<void> {
     const imagesStarting = this.images.start();
+    const audiosStarting = this.audios.start();
     this.logger.info(this.lifecycleContext(), "飞书长连接正在连接");
     const connectionStarting = this.connection.start();
     try {
-      await Promise.all([imagesStarting, connectionStarting]);
+      await Promise.all([imagesStarting, audiosStarting, connectionStarting]);
     } catch (error) {
       await this.connection.stop();
       this.images.close();
+      this.audios.close();
       throw error;
     }
     this.connectionReady = true;
@@ -425,6 +441,7 @@ export class FeishuSurface implements SurfaceAdapter {
     await this.applicationSetup.close();
     await this.oauth.close();
     this.images.close();
+    this.audios.close();
     await this.interactions.close();
     await this.commandCenter.close();
     await this.output.close();

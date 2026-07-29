@@ -714,11 +714,26 @@ export class FeishuMessageClient implements
     );
   }
 
+  async downloadAudio(
+    messageId: string,
+    fileKey: string,
+  ): Promise<{
+    stream: import("node:stream").Readable;
+    contentLength?: number;
+  }> {
+    return this.downloadMessageResource(
+      messageId,
+      fileKey,
+      "file",
+      "音频",
+    );
+  }
+
   private async downloadMessageResource(
     messageId: string,
     fileKey: string,
     type: "image" | "file",
-    label: "图片" | "文件",
+    label: "图片" | "文件" | "音频",
   ): Promise<{
     stream: import("node:stream").Readable;
     contentLength?: number;

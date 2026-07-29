@@ -315,6 +315,84 @@ describe("WeixinConversationAdapter", () => {
     );
   });
 
+  it("prefers the verified Weixin voice transcript", async () => {
+    const submit = vi.fn(async () => ({
+      threadId: "thread",
+      turnId: "turn",
+      steered: false,
+    }));
+    const download = vi.fn();
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({ submit }),
+      { notifyText: vi.fn(() => true) },
+      undefined,
+      { quietWindowMs: 0 },
+      undefined,
+      { download },
+    );
+
+    await adapter.handle({
+      target,
+      actorId: message.actorId,
+      kind: "audio",
+      quotedText: "原始引用",
+      audio: {
+        transcript: "语音转写内容",
+        encodeType: 6,
+      },
+    });
+
+    expect(submit).toHaveBeenCalledWith(target, [
+      "以下引用来自平台原生引用关系，已由 Gateway 验证（仅作上下文）：",
+      "> 原始引用",
+      "",
+      "当前消息：",
+      "语音转写内容",
+    ].join("\n"));
+    expect(download).not.toHaveBeenCalled();
+  });
+
+  it("submits directly supported Weixin audio as localAudio", async () => {
+    const submit = vi.fn(async () => ({
+      threadId: "thread",
+      turnId: "turn",
+      steered: true,
+    }));
+    const notifyText = vi.fn(() => true);
+    const download = vi.fn(async () => ({
+      path: "/private/weixin/voice.ogg",
+      mimeType: "audio/ogg" as const,
+      bytes: 12,
+    }));
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({ submit }),
+      { notifyText },
+      undefined,
+      { quietWindowMs: 0 },
+      undefined,
+      { download },
+    );
+
+    await adapter.handle({
+      target,
+      actorId: message.actorId,
+      kind: "audio",
+      audio: {
+        encodeType: 8,
+        durationMs: 12_000,
+        encryptedQueryParam: "private-query",
+      },
+    });
+
+    expect(submit).toHaveBeenCalledWith(target, {
+      localAudios: [{ path: "/private/weixin/voice.ogg" }],
+    });
+    expect(notifyText).toHaveBeenCalledWith(
+      target,
+      "已将语音追加到当前 Turn。",
+    );
+  });
+
   it("handles local help and identity without starting a Turn", async () => {
     const submit = vi.fn();
     const notifyText = vi.fn<

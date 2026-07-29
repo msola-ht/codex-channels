@@ -1,5 +1,12 @@
 export { FeishuConversationAdapter } from "./adapter.js";
 export {
+  FeishuAudioStore,
+  maximumFeishuAudioBytes,
+  maximumFeishuAudioDurationMs,
+  type FeishuAudioPort,
+  type FeishuAudioResourcePort,
+} from "./audio.js";
+export {
   FeishuApplicationHttpApi,
   FeishuApplicationSetupError,
   type FeishuApplicationApi,

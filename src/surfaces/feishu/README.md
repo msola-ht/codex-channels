@@ -1,7 +1,7 @@
 # 飞书 Surface
 
 本目录是飞书 Surface 的平台边界。当前已完成官方 SDK 与事件长连接窄封装、私聊普通文本、
-纯文字富文本、独立图片、最多四张图片说明文字与独立 UTF-8 文本文件 Inbox、输出渲染、
+纯文字富文本、独立图片、最多四张图片说明文字、一次性音频与独立 UTF-8 文本文件 Inbox、输出渲染、
 Bootstrap 显式组合、全部平台无关
 私聊命令、审批和用户输入卡片，以及
 按需 OAuth 与 Doctor。当前可通过严格 TOML 或统一 Setup 启用开发验证路径；群聊和二进制文件
@@ -32,10 +32,12 @@ Application 的本地图片输入，同一 Thread 的
 - `application-setup.ts`：生成精简 Doctor 和缺失权限授权卡片，绑定 App、Chat、Actor 和
   一次性令牌，管理有限任务、取消和安全结果。
 - `client.ts`：隔离官方 HTTP SDK，提供消息读取/发送、生成图片上传、CardKit 与 OAuth 窄客户端。
+- `audio.ts`：通过既有消息资源权限下载独立音频，限制为 5 分钟、20 MiB 和 Codex CLI
+  支持的 WAV/MP3/M4A/WebM/OGG，写入一小时私有临时文件后提交 `localAudio`。
 - `event-connection.ts`：隔离官方 WebSocket SDK，管理事件注册、握手、重连、停止和失败关闭生命周期。
 - `file-input.ts`：通过官方消息资源 API 在内存下载独立文件，限制为 1,000,000 字节并严格验证
   文件名、UTF-8 和控制字符，不创建本地文件。
-- `inbound-content.ts`：统一严格解析入站与被引用消息的文本、富文本和图片元素。
+- `inbound-content.ts`：统一严格解析入站与被引用消息的文本、富文本、图片、文件和音频元素。
 - `message-content.ts`：中和平台原生提及标签并生成飞书 `post + md` 降级内容。
 - `operation-format.ts`：把单个操作终态渲染为包含脱敏详情的静态 CardKit Markdown。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪，保留回复事件的 `parent_id`。
@@ -88,8 +90,8 @@ Application 的本地图片输入，同一 Thread 的
 - 发送超时、SDK 失败和残缺响应只暴露稳定错误码，不回传 SDK message、响应正文或凭据。
 - 消息创建不自动重试；锁定 SDK 虽提供可选 `uuid` 字段，但当前官方资料未明确其幂等窗口和
   可重试错误语义。
-- 原生流式额外需要应用权限 `cardkit:card:write`；UTF-8 文本文件输入和超长最终正文文件补发
-  需要 `im:resource`。新扫码应用会声明这些权限；已有应用由 Owner
+- 原生流式额外需要应用权限 `cardkit:card:write`；一次性音频、UTF-8 文本文件输入和超长最终正文文件补发
+  共用既有 `im:resource`。新扫码应用会声明这些权限；已有应用由 Owner
   通过 `/feishu doctor` 只增量开通缺失权限，再由 Owner 发布，无需重新扫码或申请用户 OAuth。
 - 显式回复消息时使用 `parent_id` 按需读取一条被引用消息，需要应用权限
   `im:message:readonly`。文本、富文本和 CardKit 只提取受支持的可见文字，忽略按钮、输入值与

@@ -32,7 +32,8 @@
   当前 Workspace 可见目录，不授予权限，也不承载审批决定。
 - `turn-port.ts`：定义项目拥有的 Turn 输入、设置覆盖、Review 目标与执行窄端口，并复用 Core
   统一的 Goal 稳定状态类型；
-  Application 不构造官方 `UserInput`，也不接收完整官方 Turn 响应。
+  输入只允许文本、绝对本地图片路径和绝对本地音频路径；Application 不构造官方 `UserInput`，
+  也不接收完整官方 Turn 响应。
 
 Surface 应通过这里的用例接口驱动会话，不应直接拼装 JSON-RPC。Thread 的权威状态仍来自 App Server，本模块只编排请求和必要的本地选择。
 下一 Turn 队列按 Conversation 隔离、每个会话最多 10 条且只保存在内存中；`turn.completed`

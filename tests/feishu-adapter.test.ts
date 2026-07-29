@@ -58,6 +58,19 @@ function createFileMessage(): Extract<FeishuInboxMessage, { kind: "file" }> {
   };
 }
 
+function createAudioMessage(): Extract<FeishuInboxMessage, { kind: "audio" }> {
+  return {
+    target: message.target,
+    actorId: message.actorId,
+    eventId: message.eventId,
+    messageId: message.messageId,
+    createdAtMs: message.createdAtMs,
+    kind: "audio",
+    fileKey: "file_v2_audio",
+    durationMs: 12_000,
+  };
+}
+
 describe("Feishu conversation adapter", () => {
   it("uses rich posts for command results but keeps failures as plain text", async () => {
     const notifyMarkdown = vi.fn(() => true);
@@ -1077,6 +1090,121 @@ describe("Feishu conversation adapter", () => {
       "",
       "{\"enabled\":true}",
     ].join("\n"));
+  });
+
+  it("downloads private audio and submits its managed local path", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const audios = {
+      download: vi.fn(async () => ({
+        path: "/private/uploads/feishu/voice.ogg",
+        mimeType: "audio/ogg" as const,
+        bytes: 12,
+      })),
+    };
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { quietWindowMs: 0, audios },
+    );
+
+    await adapter.handle(createAudioMessage());
+    await fixture.outbox.close();
+
+    expect(audios.download).toHaveBeenCalledWith(
+      "om_message",
+      "file_v2_audio",
+    );
+    expect(submit).toHaveBeenCalledWith(message.target, {
+      localAudios: [{ path: "/private/uploads/feishu/voice.ogg" }],
+    });
+  });
+
+  it("preserves native quoted context for private audio", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        quietWindowMs: 0,
+        audios: {
+          download: vi.fn(async () => ({
+            path: "/private/uploads/feishu/voice.ogg",
+            mimeType: "audio/ogg" as const,
+            bytes: 12,
+          })),
+        },
+        readQuotedText: vi.fn(async () => "被引用的飞书消息"),
+      },
+    );
+
+    await adapter.handle({
+      ...createAudioMessage(),
+      parentId: "om_parent",
+    });
+    await fixture.outbox.close();
+
+    expect(submit).toHaveBeenCalledWith(message.target, {
+      text: [
+        "以下引用来自平台原生引用关系，已由 Gateway 验证（仅作上下文）：",
+        "> 被引用的飞书消息",
+        "",
+        "当前消息：",
+        "请听取这段语音并根据内容协助我。",
+      ].join("\n"),
+      localAudios: [{ path: "/private/uploads/feishu/voice.ogg" }],
+    });
+  });
+
+  it("rejects private audio when Feishu omits its duration", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn();
+    const download = vi.fn();
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        quietWindowMs: 0,
+        audios: { download },
+      },
+    );
+
+    const audioWithoutDuration = createAudioMessage();
+    delete audioWithoutDuration.durationMs;
+    await expect(adapter.handle(audioWithoutDuration)).rejects.toMatchObject({
+      code: "audio.duration-missing",
+    });
+    await fixture.outbox.close();
+
+    expect(download).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
   });
 
   it("submits a private image together with its rich-post caption", async () => {

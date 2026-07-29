@@ -23,6 +23,7 @@ import {
   WeixinFileInputError,
   type WeixinFilePort,
 } from "./file-input.js";
+import type { WeixinAudioPort } from "./audio-store.js";
 import {
   renderWeixinDoctor,
   type WeixinDoctor,
@@ -37,6 +38,7 @@ import {
   type WeixinPollingHealthSnapshot,
 } from "./polling-health.js";
 import type {
+  WeixinAudioReference,
   WeixinFileReference,
   WeixinImageReference,
 } from "./protocol-client.js";
@@ -66,6 +68,13 @@ export type WeixinConversationMessage =
       text?: string;
       quotedText?: string;
       file: WeixinFileReference;
+    }
+  | {
+      target: ConversationTarget;
+      actorId: string;
+      kind: "audio";
+      quotedText?: string;
+      audio: WeixinAudioReference;
     };
 
 export class WeixinConversationAdapter {
@@ -84,6 +93,7 @@ export class WeixinConversationAdapter {
       now?: () => number;
     } = { quietWindowMs: 0 },
     private readonly files?: Pick<WeixinFilePort, "download">,
+    private readonly audios?: Pick<WeixinAudioPort, "download">,
   ) {
     this.commands = new ConversationCommandService(conversations);
     this.inputs = new SurfaceInputCoalescer(
@@ -94,6 +104,44 @@ export class WeixinConversationAdapter {
 
   async handle(message: WeixinConversationMessage): Promise<void> {
     try {
+      if (message.kind === "audio") {
+        await this.inputs.flushPending(message.target, message.actorId);
+        if (message.audio.transcript !== undefined) {
+          await this.conversations.submit(
+            message.target,
+            formatQuotedInput(
+              message.audio.transcript,
+              message.quotedText,
+            ),
+          );
+          return;
+        }
+        if (this.audios === undefined) {
+          throw new UserFacingError(
+            "audio.unsupported",
+            "微信语音输入尚未启用",
+          );
+        }
+        const audio = await this.audios.download(message.audio);
+        const result = await this.conversations.submit(message.target, {
+          ...(message.quotedText === undefined
+            ? {}
+            : {
+                text: formatQuotedInput(
+                  "请听取这段语音并根据内容协助我。",
+                  message.quotedText,
+                ),
+              }),
+          localAudios: [{ path: audio.path }],
+        });
+        if (result.steered) {
+          this.notify(
+            message.target,
+            formatTurnInputAppended("audio", false),
+          );
+        }
+        return;
+      }
       if (message.kind === "file") {
         const sequence = this.nextSequence;
         this.nextSequence += 1;

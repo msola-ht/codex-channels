@@ -178,6 +178,29 @@ describe("FeishuInbox", () => {
     ]);
   });
 
+  it("accepts one private audio reference without downloading in the SDK callback", async () => {
+    const fixture = createFixture();
+
+    expect(fixture.inbox.receive(createEvent({
+      messageType: "audio",
+      content: JSON.stringify({
+        file_key: "file_v2_audio",
+        duration: 12_000,
+      }),
+    }))).toEqual({
+      status: "accepted",
+    });
+
+    await fixture.inbox.close();
+    expect(fixture.handled).toEqual([
+      expect.objectContaining({
+        kind: "audio",
+        fileKey: "file_v2_audio",
+        durationMs: 12_000,
+      }),
+    ]);
+  });
+
   it("collects adjacent image events into one ordered image batch", async () => {
     vi.useFakeTimers();
     const batches: FeishuInboxMessage[][] = [];
@@ -335,7 +358,7 @@ describe("FeishuInbox", () => {
     [{ appId: "cli_ffffffffffffffff" }, "account-mismatch"],
     [{ senderType: "bot" }, "non-user"],
     [{ chatType: "group" }, "unsupported-chat"],
-    [{ messageType: "audio" }, "unsupported-message"],
+    [{ messageType: "media" }, "unsupported-message"],
     [{ createTime: "not-a-timestamp" }, "invalid-timestamp"],
     [{ content: "not-json" }, "invalid-content"],
     [{ content: "{}" }, "invalid-content"],

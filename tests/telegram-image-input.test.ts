@@ -10,7 +10,11 @@ import type { ConversationService } from "../src/application/conversation-servic
 import { UserFacingError, type OutputEvent } from "../src/conversation-core/index.js";
 import { EventBus } from "../src/event-bus/event-bus.js";
 import { TelegramAccessPolicy } from "../src/policy/telegram-access.js";
-import { TelegramSurface, type TelegramImagePort } from "../src/surfaces/telegram/bot.js";
+import {
+  TelegramSurface,
+  type TelegramAudioPort,
+  type TelegramImagePort,
+} from "../src/surfaces/telegram/bot.js";
 import {
   maximumTelegramTextFileBytes,
   type TelegramTextFilePort,
@@ -100,6 +104,55 @@ describe("Telegram image input", () => {
     expect(rememberActor).toHaveBeenCalledWith(
       { surface: "telegram", accountId: "default", conversationId: "100" },
       "123",
+    );
+    await surface.stop();
+    await output.close();
+  });
+
+  it("submits Telegram voice as stable localAudio", async () => {
+    const submit = vi.fn().mockResolvedValue({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    });
+    const downloadAudio = vi.fn().mockResolvedValue({
+      path: "/private/uploads/voice.ogg",
+      mimeType: "audio/ogg",
+      bytes: 100,
+    });
+    const { surface, output } = createSurface(
+      submit,
+      vi.fn(),
+      {},
+      vi.fn(),
+      downloadAudio,
+    );
+
+    await surface.bot.handleUpdate({
+      update_id: 2,
+      message: {
+        message_id: 11,
+        date: 1,
+        from: telegramUser(),
+        chat: telegramChat(),
+        voice: {
+          file_id: "voice-file",
+          file_unique_id: "voice-unique",
+          duration: 12,
+          file_size: 100,
+        },
+      },
+    });
+
+    expect(downloadAudio).toHaveBeenCalledWith(
+      surface.bot.api,
+      "voice-file",
+    );
+    expect(submit).toHaveBeenCalledWith(
+      { surface: "telegram", accountId: "default", conversationId: "100" },
+      {
+        localAudios: [{ path: "/private/uploads/voice.ogg" }],
+      },
     );
     await surface.stop();
     await output.close();
@@ -581,6 +634,7 @@ function createSurface(
   download: ReturnType<typeof vi.fn>,
   serviceOverrides: Record<string, unknown> = {},
   downloadTextFile: ReturnType<typeof vi.fn> = vi.fn(),
+  downloadAudio: ReturnType<typeof vi.fn> = vi.fn(),
 ): {
   surface: TelegramSurface;
   output: EventBus<OutputEvent>;
@@ -595,6 +649,11 @@ function createSurface(
     start: async () => undefined,
     close: () => undefined,
     download: download as unknown as TelegramImagePort["download"],
+  };
+  const audioStore: TelegramAudioPort = {
+    start: async () => undefined,
+    close: () => undefined,
+    download: downloadAudio as unknown as TelegramAudioPort["download"],
   };
   const directory = mkdtempSync(join(tmpdir(), "codex-telegram-surface-"));
   const rememberActor = vi.fn();
@@ -612,6 +671,7 @@ function createSurface(
       gatewayVersion: "0.145.0",
       inputQuietWindowMs: 0,
       imageStore,
+      audioStore,
       textFileInput: {
         download: downloadTextFile as unknown as TelegramTextFilePort["download"],
       },

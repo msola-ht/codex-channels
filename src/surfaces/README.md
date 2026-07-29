@@ -12,15 +12,15 @@ Doctor、菜单、输入状态、连接健康和平台媒体传输属于渠道�
 
 当前实现：
 
-- [`telegram/`](telegram/README.md)：Telegram Bot 输入、输出、交互、图片、UTF-8 文本文件和生命周期。
-- [`feishu/`](feishu/README.md)：飞书官方 SDK 长连接、私聊文本、PNG/JPEG 与 UTF-8 文本文件到
+- [`telegram/`](telegram/README.md)：Telegram Bot 输入、输出、交互、图片、一次性音频、UTF-8 文本文件和生命周期。
+- [`feishu/`](feishu/README.md)：飞书官方 SDK 长连接、私聊文本、PNG/JPEG、一次性音频与 UTF-8 文本文件到
   Application 的窄 Adapter、富文本最终回复、纯文本安全提示、有界输出队列、私聊交互卡片、平台权限中心、
   用户 OAuth Device Flow 和单账号生命周期组合；有效配置启用时由 Bootstrap 显式注册，私聊
   PNG/JPEG、命令审批动作、原生流式主路径、用户输入卡及 OAuth Token 重启恢复已通过真实验收，
   MCP form/URL 卡片仍待验收。
 - [`weixin/`](weixin/README.md)：微信阶段 0/Setup 的严格独立凭据边界、固定版窄协议 Client、
-  私有原子游标检查点、可取消接收监控器、授权后提交 Application 的私聊文本、图片与 UTF-8
-  文本文件输入 Adapter，
+  私有原子游标检查点、可取消接收监控器、授权后提交 Application 的私聊文本、图片、一次性
+  音频与 UTF-8 文本文件输入 Adapter，
   以及复用统一会话命令服务的完整命令目录、加密回复上下文、重启上线通知、受限配置通知和
   Turn 完成统计；
   文本与生成图片有界 Outbox、带随机一次性 ID 的精确文本审批、用户输入与 MCP 交互端口，以及
@@ -77,7 +77,7 @@ Surface 共用的中文短文本，不负责计时、状态或持久化。
 权限、项目规则、Diff、Goal、模型选择、Default/Plan 模式、用量与额度等平台无关命令结果文案
 与状态文本。
 `user-facing-error-format.ts` 统一三个渠道的结构化用户错误文案，只保留渠道名称差异；
-`input-copy.ts` 统一补充文字、文件与图片追加到当前 Turn 的确认文案；
+`input-copy.ts` 统一补充文字、文件、图片与音频追加到当前 Turn 的确认文案；
 `output-copy.ts` 统一 CLI 输入镜像、断线、警告、操作失败、停止交互、空回复与内容截断等输出
 语义，各渠道继续自行决定 HTML、CardKit Markdown、纯文本布局和发送方式。
 `interaction-copy.ts` 统一审批、用户输入和 MCP 交互的处理、取消、超时、跨客户端解决及提交结果
@@ -106,6 +106,8 @@ Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类
 会话命令统一映射到 Application 的 `ConversationCommandService`；Surface 负责提取命令名和参数，
 并渲染类型化结果。普通文本、图片下载、平台帮助、身份查询和交互取消保留在平台边界。PNG/JPEG
 的大小限制、内容签名校验、私有暂存和过期清理由 `managed-image-store.ts` 在 Surface 内复用；
+一次性音频的 20 MiB、WAV/MP3/M4A/WebM/OGG 内容签名、`0700/0600` 私有暂存和一小时清理由
+`managed-audio-store.ts` 复用，Application 只接收绝对本地路径；
 平台仍各自负责取得受信下载流。所有输入在调用 Application 前必须构造
 `SurfaceAccessContext` 并通过对应访问策略。
 

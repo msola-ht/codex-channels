@@ -59,6 +59,15 @@ export interface WeixinFileReference {
   declaredMd5?: string;
 }
 
+export interface WeixinAudioReference {
+  fullUrl?: string;
+  encryptedQueryParam?: string;
+  mediaAesKey?: string;
+  encodeType?: number;
+  durationMs?: number;
+  transcript?: string;
+}
+
 export type WeixinInboundMessage =
   | {
       kind: "text";
@@ -93,6 +102,17 @@ export type WeixinInboundMessage =
       quotedText?: string;
       quotedMessageId?: string;
       file: WeixinFileReference;
+      createdAt?: number;
+    }
+  | {
+      kind: "audio";
+      messageId: string;
+      actorId: string;
+      conversationId: string;
+      contextToken: string;
+      quotedText?: string;
+      quotedMessageId?: string;
+      audio: WeixinAudioReference;
       createdAt?: number;
     }
   | {
@@ -640,12 +660,17 @@ function parseInboundContent(
       Extract<WeixinInboundMessage, { kind: "file" }>,
       "kind" | "text" | "quotedText" | "quotedMessageId" | "file"
     >
+  | Pick<
+      Extract<WeixinInboundMessage, { kind: "audio" }>,
+      "kind" | "quotedText" | "quotedMessageId" | "audio"
+    >
   | null {
   let text: string | undefined;
   let quotedText: string | undefined;
   let quotedMessageId: string | undefined;
   const images: WeixinImageReference[] = [];
   let file: WeixinFileReference | undefined;
+  let audio: WeixinAudioReference | undefined;
   for (const item of items) {
     const record = requiredRecord(item, "微信消息项目无效");
     const type = optionalSafeInteger(
@@ -674,20 +699,47 @@ function parseInboundContent(
       continue;
     }
     if (type === 2) {
-      if (file !== undefined || images.length >= maximumInboundImages) {
+      if (
+        file !== undefined
+        || audio !== undefined
+        || images.length >= maximumInboundImages
+      ) {
         return null;
       }
       images.push(parseImageReference(record));
       continue;
     }
+    if (type === 3) {
+      if (
+        audio !== undefined
+        || file !== undefined
+        || images.length > 0
+        || text !== undefined
+      ) {
+        return null;
+      }
+      audio = parseAudioReference(record);
+      const quoted = parseQuotedReference(record.ref_msg);
+      quotedText = quoted.text;
+      quotedMessageId = quoted.messageId;
+      continue;
+    }
     if (type === 4) {
-      if (file !== undefined || images.length > 0) {
+      if (file !== undefined || audio !== undefined || images.length > 0) {
         return null;
       }
       file = parseFileReference(record);
       continue;
     }
     return null;
+  }
+  if (audio !== undefined) {
+    return {
+      kind: "audio",
+      ...(quotedText === undefined ? {} : { quotedText }),
+      ...(quotedMessageId === undefined ? {} : { quotedMessageId }),
+      audio,
+    };
   }
   if (file !== undefined) {
     return {
@@ -715,6 +767,83 @@ function parseInboundContent(
         ...(quotedText === undefined ? {} : { quotedText }),
         ...(quotedMessageId === undefined ? {} : { quotedMessageId }),
       };
+}
+
+function parseAudioReference(value: unknown): WeixinAudioReference {
+  const item = requiredRecord(value, "微信语音消息项目无效");
+  const audio = requiredRecord(
+    item.voice_item,
+    "微信语音消息内容无效",
+  );
+  const mediaValue = audio.media;
+  const media = mediaValue === undefined
+    ? undefined
+    : requiredRecord(mediaValue, "微信语音媒体信息无效");
+  const fullUrl = media === undefined
+    ? undefined
+    : optionalBoundedString(
+        media.full_url,
+        "微信语音完整地址无效",
+        8_192,
+      );
+  const encryptedQueryParam = media === undefined
+    ? undefined
+    : optionalBoundedString(
+        media.encrypt_query_param,
+        "微信语音下载参数无效",
+        65_536,
+      );
+  const mediaAesKey = media === undefined
+    ? undefined
+    : optionalBoundedString(
+        media.aes_key,
+        "微信语音媒体 AES key 无效",
+        1_024,
+      );
+  const transcript = optionalBoundedString(
+    audio.text,
+    "微信语音转写文本无效",
+    100_000,
+  )?.trim();
+  if (
+    transcript === undefined
+    && fullUrl === undefined
+    && encryptedQueryParam === undefined
+  ) {
+    throw new WeixinProtocolError(
+      "invalid-response",
+      "微信语音没有转写文本或可用下载地址",
+    );
+  }
+  const encodeType = optionalSafeInteger(
+    audio.encode_type,
+    "微信语音编码类型无效",
+  );
+  if (
+    encodeType !== undefined
+    && (encodeType < 1 || encodeType > 8)
+  ) {
+    throw new WeixinProtocolError(
+      "invalid-response",
+      "微信语音编码类型无效",
+    );
+  }
+  const durationMs = optionalNonNegativeInteger(
+    audio.playtime,
+    "微信语音时长无效",
+  );
+  return {
+    ...(fullUrl === undefined ? {} : { fullUrl }),
+    ...(encryptedQueryParam === undefined
+      ? {}
+      : { encryptedQueryParam }),
+    ...(mediaAesKey === undefined ? {} : { mediaAesKey }),
+    ...(encodeType === undefined ? {} : { encodeType }),
+    ...(durationMs === undefined ? {} : { durationMs }),
+    ...(transcript === undefined || transcript.length === 0
+      ? {}
+      : { transcript }),
+  };
 }
 
 function parseQuotedReference(value: unknown): {

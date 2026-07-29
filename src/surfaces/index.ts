@@ -7,12 +7,14 @@ export {
   createTelegramSurface,
   telegramDefaultAccountId,
   type CreateTelegramSurfaceOptions,
+  type TelegramAudioPort,
   type TelegramImagePort,
 } from "./telegram/index.js";
 export {
   createWeixinSurface,
   renderWeixinStartupNotification,
   type CreateWeixinSurfaceOptions,
+  type WeixinAudioPort,
 } from "./weixin/index.js";
 export {
   ConversationDeliveryQueue,
@@ -24,6 +26,12 @@ export {
   type SurfaceInputCoalescerOptions,
   type SurfaceInputPart,
 } from "./surface-input-coalescer.js";
+export {
+  ManagedAudioStore,
+  maximumManagedAudioBytes,
+  type ManagedAudioSource,
+  type StoredManagedAudio,
+} from "./managed-audio-store.js";
 export { formatQuotedInput } from "./quoted-input.js";
 export type {
   OperationUpdateDisplay,

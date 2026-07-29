@@ -163,6 +163,15 @@ export class SurfaceInputCoalescer {
     await Promise.allSettled([...this.inFlight]);
   }
 
+  flushPending(
+    target: ConversationTarget,
+    actorId: string,
+  ): Promise<void> {
+    const key = batchKey(target, actorId);
+    const batch = this.pending.get(key);
+    return batch === undefined ? Promise.resolve() : this.flush(key, batch);
+  }
+
   private scheduleFlush(key: string, batch: PendingBatch): NodeJS.Timeout {
     const timer = setTimeout(() => {
       void this.flush(key, batch);

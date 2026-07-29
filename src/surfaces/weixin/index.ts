@@ -24,6 +24,7 @@ export {
   WeixinProtocolError,
   createWeixinProtocolClient,
   type CreateWeixinProtocolClientOptions,
+  type WeixinAudioReference,
   type WeixinFileReference,
   type WeixinFileSendProtocolClient,
   type WeixinIgnoredMessageReason,
@@ -44,6 +45,13 @@ export {
   WeixinImageStore,
   type WeixinImagePort,
 } from "./image-store.js";
+export {
+  maximumWeixinAudioBytes,
+  maximumWeixinAudioDurationMs,
+  WeixinAudioDownloadError,
+  WeixinAudioStore,
+  type WeixinAudioPort,
+} from "./audio-store.js";
 export {
   maximumWeixinTextFileBytes,
   WeixinFileInput,

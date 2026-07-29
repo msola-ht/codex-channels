@@ -46,6 +46,7 @@ export interface Submission {
 export interface ConversationInput {
   text?: string;
   localImages?: ReadonlyArray<{ path: string }>;
+  localAudios?: ReadonlyArray<{ path: string }>;
 }
 
 export interface ConversationSession {
@@ -638,6 +639,12 @@ function normalizeInput(value: string | ConversationInput): TurnInput[] {
       throw new UserFacingError("image.path.invalid", "本地图片路径必须是绝对路径");
     }
     input.push({ type: "localImage", path: image.path });
+  }
+  for (const audio of normalized.localAudios ?? []) {
+    if (!isAbsolute(audio.path)) {
+      throw new UserFacingError("audio.path.invalid", "本地音频路径必须是绝对路径");
+    }
+    input.push({ type: "localAudio", path: audio.path });
   }
   return input;
 }

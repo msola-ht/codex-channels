@@ -33,6 +33,10 @@ import {
 } from "./file-input.js";
 import type { FeishuInboxMessage } from "./inbox.js";
 import type { FeishuImagePort } from "./media.js";
+import {
+  maximumFeishuAudioDurationMs,
+  type FeishuAudioPort,
+} from "./audio.js";
 import type { FeishuOutbox } from "./outbox.js";
 import type { FeishuOAuthControllerPort } from "./oauth.js";
 import {
@@ -84,6 +88,7 @@ export class FeishuConversationAdapter {
     private readonly inputOptions: {
       quietWindowMs?: number;
       files?: Pick<FeishuFilePort, "download">;
+      audios?: Pick<FeishuAudioPort, "download">;
       readQuotedText?(messageId: string): Promise<string | undefined>;
       onQuotedTextError?(error: unknown): void;
     } = { quietWindowMs: 0 },
@@ -99,6 +104,10 @@ export class FeishuConversationAdapter {
     try {
       if (message.kind === "file") {
         await this.handleFile(message);
+        return;
+      }
+      if (message.kind === "audio") {
+        await this.handleAudio(message);
         return;
       }
       if (message.kind === "image") {
@@ -459,6 +468,67 @@ export class FeishuConversationAdapter {
       message.target.conversationId,
       result.submission.threadId,
       result.submission.turnId,
+    );
+  }
+
+  private async handleAudio(
+    message: Extract<FeishuInboxMessage, { kind: "audio" }>,
+  ): Promise<void> {
+    if (this.inputOptions.audios === undefined) {
+      throw new UserFacingError("audio.unsupported", "飞书当前未启用语音输入");
+    }
+    if (message.durationMs === undefined) {
+      throw new UserFacingError(
+        "audio.duration-missing",
+        "无法确认飞书语音时长，请重新发送",
+      );
+    }
+    if (message.durationMs > maximumFeishuAudioDurationMs) {
+      throw new UserFacingError("audio.too-large", "语音最长支持 5 分钟");
+    }
+    await this.inputs.flushPending(message.target, message.actorId);
+    const audio = await this.inputOptions.audios.download(
+      message.messageId,
+      message.fileKey,
+    );
+    const quotedText = await this.readQuotedText(message);
+    this.outbox.prepareTurnReplyTarget?.(
+      message.target.conversationId,
+      message.messageId,
+    );
+    let submission;
+    try {
+      submission = await this.conversations.submit(message.target, {
+        ...(quotedText === undefined
+          ? {}
+          : {
+              text: formatQuotedInput(
+                "请听取这段语音并根据内容协助我。",
+                quotedText,
+              ),
+            }),
+        localAudios: [{ path: audio.path }],
+      });
+    } catch (error) {
+      this.outbox.discardPendingTurnReplyTarget?.(
+        message.target.conversationId,
+      );
+      throw error;
+    }
+    if (submission.steered) {
+      this.outbox.discardPendingTurnReplyTarget?.(
+        message.target.conversationId,
+      );
+      this.notifyText(
+        message.target.conversationId,
+        formatTurnInputAppended("audio"),
+      );
+      return;
+    }
+    this.outbox.bindPendingTurnReplyTarget?.(
+      message.target.conversationId,
+      submission.threadId,
+      submission.turnId,
     );
   }
 

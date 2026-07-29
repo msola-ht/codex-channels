@@ -5,7 +5,8 @@ import type {
 
 export type TurnInput =
   | { type: "text"; text: string }
-  | { type: "localImage"; path: string };
+  | { type: "localImage"; path: string }
+  | { type: "localAudio"; path: string };
 
 export interface TurnCollaborationMode {
   mode: "default" | "plan";

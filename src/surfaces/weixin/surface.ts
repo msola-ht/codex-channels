@@ -19,6 +19,7 @@ import {
   WeixinInputAdapter,
   type WeixinInputFatalError,
 } from "./input-adapter.js";
+import type { WeixinAudioPort } from "./audio-store.js";
 import type { WeixinFilePort } from "./file-input.js";
 import type { WeixinImagePort } from "./image-store.js";
 import type { WeixinCredentialStore } from "./credential-store.js";
@@ -61,6 +62,7 @@ export interface WeixinSurfaceOptions {
   credentialStore?: Pick<WeixinCredentialStore, "get">;
   images?: WeixinImagePort;
   files?: WeixinFilePort;
+  audios?: WeixinAudioPort;
   startupNotification?: WeixinStartupNotification;
   operationUpdateDisplay?: OperationUpdateDisplay;
   inputCloseTimeoutMs?: number;
@@ -89,6 +91,7 @@ export class WeixinSurface implements SurfaceAdapter {
   private readonly access: SurfaceAccessPolicy;
   private readonly logger: Logger;
   private readonly images: WeixinImagePort | undefined;
+  private readonly audios: WeixinAudioPort | undefined;
   private startPromise: Promise<void> | undefined;
   private stopPromise: Promise<void> | undefined;
 
@@ -100,6 +103,7 @@ export class WeixinSurface implements SurfaceAdapter {
     this.access = options.access;
     this.logger = options.logger;
     this.images = options.images;
+    this.audios = options.audios;
     this.accountId = options.accountId;
     const typing = options.typingClient === undefined
       ? undefined
@@ -154,6 +158,7 @@ export class WeixinSurface implements SurfaceAdapter {
       interactions: this.interactions,
       ...(options.images === undefined ? {} : { images: options.images }),
       ...(options.files === undefined ? {} : { files: options.files }),
+      ...(options.audios === undefined ? {} : { audios: options.audios }),
       ...(options.replyContextPersistence === undefined
         ? {}
         : {
@@ -253,6 +258,7 @@ export class WeixinSurface implements SurfaceAdapter {
       await this.input.stop();
     } finally {
       this.images?.close();
+      this.audios?.close();
       this.interactions.cancelAll("Gateway 已停止");
       await this.output.close();
     }
@@ -288,11 +294,15 @@ export class WeixinSurface implements SurfaceAdapter {
         restored.push(target);
       }
     }
-    await this.images?.start();
+    await Promise.all([
+      this.images?.start(),
+      this.audios?.start(),
+    ]);
     try {
       await this.input.start();
     } catch (error) {
       this.images?.close();
+      this.audios?.close();
       throw error;
     }
     for (const target of restored) {

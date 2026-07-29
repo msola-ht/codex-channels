@@ -6,6 +6,7 @@ import type {
   SurfaceAccessPolicy,
 } from "../../policy/index.js";
 import type { OperationUpdateDisplay } from "../types.js";
+import { WeixinAudioStore } from "./audio-store.js";
 import { createCredentialBackedWeixinClient } from "./credential-client.js";
 import { createWeixinCredentialStore } from "./credential-store.js";
 import { WeixinFileInput } from "./file-input.js";
@@ -59,6 +60,7 @@ export function createWeixinSurface(
     ),
     images: new WeixinImageStore(options.uploadsDirectory, options.logger),
     files: new WeixinFileInput(),
+    audios: new WeixinAudioStore(options.uploadsDirectory, options.logger),
     startupNotification: options.startupNotification,
     ...(options.operationUpdateDisplay === undefined
       ? {}

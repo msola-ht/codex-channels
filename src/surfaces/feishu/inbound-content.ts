@@ -4,7 +4,8 @@ import { isSafeFeishuFileName } from "./file-input.js";
 export type FeishuParsedContent =
   | { kind: "text"; text: string }
   | { kind: "image"; imageKeys: readonly string[]; text?: string }
-  | { kind: "file"; fileKey: string; fileName: string };
+  | { kind: "file"; fileKey: string; fileName: string }
+  | { kind: "audio"; fileKey: string; durationMs?: number };
 
 export function parseFeishuTextContent(value: string): string | undefined {
   let parsed: unknown;
@@ -79,6 +80,47 @@ export function parseFeishuFileContent(
     kind: "file",
     fileKey: record.file_key,
     fileName: record.file_name.trim(),
+  };
+}
+
+export function parseFeishuAudioContent(
+  value: string,
+): Extract<FeishuParsedContent, { kind: "audio" }> | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+  if (
+    typeof parsed !== "object"
+    || parsed === null
+    || Array.isArray(parsed)
+  ) {
+    return undefined;
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    typeof record.file_key !== "string"
+    || !isSafeFeishuResourceIdentifier(record.file_key)
+  ) {
+    return undefined;
+  }
+  const durationMs = record.duration;
+  if (
+    durationMs !== undefined
+    && (
+      typeof durationMs !== "number"
+      || !Number.isSafeInteger(durationMs)
+      || durationMs < 0
+    )
+  ) {
+    return undefined;
+  }
+  return {
+    kind: "audio",
+    fileKey: record.file_key,
+    ...(durationMs === undefined ? {} : { durationMs }),
   };
 }
 
@@ -174,7 +216,9 @@ export function extractFeishuQuotedText(
     return undefined;
   }
   const parsed = parseFeishuPostContent(content, { allowMarkdown: true });
-  return parsed?.text?.trim() || undefined;
+  return parsed?.kind === "text" || parsed?.kind === "image"
+    ? parsed.text?.trim() || undefined
+    : undefined;
 }
 
 function parseFeishuInteractiveContent(

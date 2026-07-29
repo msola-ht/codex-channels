@@ -1,6 +1,6 @@
 # Telegram Surface
 
-本目录实现 Telegram Bot 适配器，把聊天、命令、图片、UTF-8 文本文件和按钮交互连接到平台无关
+本目录实现 Telegram Bot 适配器，把聊天、命令、图片、一次性音频、UTF-8 文本文件和按钮交互连接到平台无关
 的应用与核心模块。
 
 ## 文件
@@ -10,6 +10,8 @@
 - `bot.ts`：提供 Bootstrap 使用的单一选项工厂，注册 Telegram SDK 处理器，执行访问检查，
   把标准命令或普通输入提交给 Application；
   同一 `media_group_id` 的图片按 Actor 合并为一次最多 4 张的 Application 输入；
+  原生 Voice/Audio 最长 5 分钟、最大 20 MiB，只在下载后验证为 WAV、MP3、M4A、WebM 或 OGG
+  才通过稳定 `localAudio` 提交，私有临时文件一小时后清理；
   普通文本与图片说明可读取 `reply_to_message` 自带的文本或说明文字并作为明确引用上下文提交；
   `/queue <描述>` 把纯文本排到下一 Turn，`/rules <init|check>` 只操作当前 Workspace 且不提供
   强制覆盖；同时发送热加载、自动重启、重装要求和失败等配置
@@ -57,6 +59,8 @@
   图片与文本文件复用该传输边界，各自保留大小、内容和错误语义校验。
 - `image-store.ts`：安全获取 Telegram 下载地址和下载流；大小、内容签名、私有暂存与过期清理
   复用上层 `managed-image-store.ts`。
+- `audio-store.ts`：复用统一文件定位与下载边界，把受支持音频交给
+  `managed-audio-store.ts` 验证、私有暂存和一小时清理。
 - `file-input.ts`：通过 Bot API 在内存下载最多 1,000,000 字节的普通文件，严格验证文件名、
   UTF-8 和控制字符并返回有界文本；二进制正文不进入 Application，也不创建本地文件。单个
   UTF-8 文本文件的文件名、说明文字、正文解析和最终原生回复已通过真实 Bot 主路径验收；
