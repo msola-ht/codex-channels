@@ -119,12 +119,33 @@ describe("shared surface copy contract", () => {
         windowDurationMins: 10_080,
         resetsAt: null,
       },
+      tokenUsage: {
+        total: {
+          totalTokens: 1_000,
+          inputTokens: 800,
+          cachedInputTokens: 600,
+          cacheWriteInputTokens: 0,
+          outputTokens: 200,
+          reasoningOutputTokens: 100,
+        },
+        last: {
+          totalTokens: 100,
+          inputTokens: 80,
+          cachedInputTokens: 40,
+          cacheWriteInputTokens: 0,
+          outputTokens: 20,
+          reasoningOutputTokens: 10,
+        },
+        modelContextWindow: 258_400,
+      },
       gitBranch: "feature/shared-copy",
     };
 
-    expect(formatConversationStatus(status)).toContain(
+    const rendered = formatConversationStatus(status);
+    expect(rendered).toContain(
       "周限：已使用 12% · 周期 7 天",
     );
+    expect(rendered).not.toContain("缓存写入");
   });
 
   it("keeps platform-neutral command results identical in Feishu and Weixin", () => {
