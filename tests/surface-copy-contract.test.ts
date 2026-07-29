@@ -4,6 +4,7 @@ import type {
   ConversationCommandResult,
   ConversationStatus,
 } from "../src/application/index.js";
+import { UserFacingError } from "../src/conversation-core/index.js";
 import {
   conversationCommandHelpLines,
   formatConversationSessions,
@@ -16,6 +17,7 @@ import {
   formatRateLimitWindow,
 } from "../src/surfaces/account-format.js";
 import { formatTurnInputAppended } from "../src/surfaces/input-copy.js";
+import { formatSurfaceUserFacingError } from "../src/surfaces/user-facing-error-format.js";
 import {
   formatCancelledInteraction,
   formatProcessedInteractionOutcome,
@@ -53,6 +55,18 @@ import {
 } from "../src/surfaces/weixin/command-renderer.js";
 
 describe("shared surface copy contract", () => {
+  it("reports unsupported model audio before a Turn on every surface", () => {
+    const error = new UserFacingError(
+      "model.input.audio.unsupported",
+      "当前模型 gpt-test 不支持语音输入，请发送文字或图片",
+      { model: "gpt-test" },
+    );
+    for (const surface of ["Telegram", "飞书", "微信"] as const) {
+      expect(formatSurfaceUserFacingError(error, surface))
+        .toBe("当前模型 gpt-test 不支持语音输入，请发送文字或图片");
+    }
+  });
+
   it("keeps account, quota, appended-input, and empty-response copy shared", () => {
     expect(formatPercent(12.34)).toBe("12.3%");
     expect(formatPlanType("self_serve_business_usage_based"))
@@ -262,6 +276,7 @@ describe("shared surface copy contract", () => {
             serviceTiers: [{ id: "priority", name: "Fast" }],
             defaultServiceTier: "default",
             isDefault: true,
+            inputModalities: ["text", "image"],
           }],
           model: "gpt-test",
           effort: "medium",

@@ -715,6 +715,7 @@ describe("ConversationService model selection", () => {
 
   it("passes local audio to a new turn", async () => {
     const startTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
+    const requireInputModality = vi.fn().mockResolvedValue(undefined);
     const service = new ConversationService(
       turnPort({ startTurn }),
       {
@@ -722,7 +723,11 @@ describe("ConversationService model selection", () => {
         workspace: () => main,
       } as unknown as SessionRouter,
       { activeTurn: () => undefined, markTurnStarted: vi.fn() } as unknown as ConversationCore,
-      { turnOverrides: () => ({}), markApplied: vi.fn() } as unknown as ModelSelectionService,
+      {
+        requireInputModality,
+        turnOverrides: () => ({}),
+        markApplied: vi.fn(),
+      } as unknown as ModelSelectionService,
       queryPort(),
     );
 
@@ -735,6 +740,30 @@ describe("ConversationService model selection", () => {
       { type: "text", text: "分析语音" },
       { type: "localAudio", path: "/private/uploads/voice.ogg" },
     ]);
+    expect(requireInputModality).toHaveBeenCalledWith(target, "audio");
+  });
+
+  it("rejects local audio before creating a Turn when the current model lacks audio input", async () => {
+    const startTurn = vi.fn();
+    const service = new ConversationService(
+      turnPort({ startTurn }),
+      {
+        ensure: vi.fn(),
+        workspace: () => main,
+      } as unknown as SessionRouter,
+      { activeTurn: () => undefined } as unknown as ConversationCore,
+      {
+        requireInputModality: vi.fn().mockRejectedValue(
+          new Error("当前模型 gpt-main 不支持语音输入，请发送文字或图片"),
+        ),
+      } as unknown as ModelSelectionService,
+      queryPort(),
+    );
+
+    await expect(service.submit(target, {
+      localAudios: [{ path: "/private/uploads/voice.ogg" }],
+    })).rejects.toThrow("当前模型 gpt-main 不支持语音输入，请发送文字或图片");
+    expect(startTurn).not.toHaveBeenCalled();
   });
 
   it("rejects relative audio paths at the application boundary", async () => {

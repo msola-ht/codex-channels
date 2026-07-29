@@ -35,6 +35,7 @@ function model(
       : [],
     defaultServiceTier: "default",
     isDefault,
+    inputModalities: ["text", "image"],
   };
 }
 

@@ -16,6 +16,7 @@ function model(
   isDefault = false,
   supportsFast = false,
   fastTierId = "priority",
+  inputModalities: ModelOption["inputModalities"] = ["text", "image"],
 ): ModelOption {
   return {
     id: name,
@@ -31,6 +32,7 @@ function model(
       : [],
     defaultServiceTier: "default",
     isDefault,
+    inputModalities,
   };
 }
 
@@ -62,6 +64,17 @@ function createService(settings?: {
 }
 
 describe("ModelSelectionService", () => {
+  it("rejects an input modality not supported by the current model", async () => {
+    const service = createService({
+      model: "gpt-main",
+      effort: "medium",
+      serviceTier: "default",
+    });
+
+    await expect(service.requireInputModality(target, "audio"))
+      .rejects.toThrow("当前模型 gpt-main 不支持语音输入，请发送文字或图片");
+  });
+
   it("uses the App Server thread settings as the current selection", async () => {
     const service = createService({ model: "gpt-main", effort: "high", serviceTier: "priority" });
 

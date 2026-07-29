@@ -58,6 +58,7 @@ describe("Weixin command renderer", () => {
             serviceTiers: [{ id: "priority", name: "Fast" }],
             defaultServiceTier: "default",
             isDefault: true,
+            inputModalities: ["text", "image"],
           }],
           model: "gpt-test",
           effort: "medium",

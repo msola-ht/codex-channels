@@ -11,7 +11,8 @@
   把标准命令或普通输入提交给 Application；
   同一 `media_group_id` 的图片按 Actor 合并为一次最多 4 张的 Application 输入；
   原生 Voice/Audio 最长 5 分钟、最大 20 MiB，只在下载后验证为 WAV、MP3、M4A、WebM 或 OGG
-  才通过稳定 `localAudio` 提交，私有临时文件一小时后清理；
+  才构造稳定 `localAudio`，私有临时文件一小时后清理；Application 仅在当前模型目录包含
+  `audio` 时提交，否则在创建或追加 Turn 前明确拒绝；
   普通文本与图片说明可读取 `reply_to_message` 自带的文本或说明文字并作为明确引用上下文提交；
   `/queue <描述>` 把纯文本排到下一 Turn，`/rules <init|check>` 只操作当前 Workspace 且不提供
   强制覆盖；同时发送热加载、自动重启、重装要求和失败等配置

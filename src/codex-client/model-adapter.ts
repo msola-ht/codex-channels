@@ -1,5 +1,8 @@
 import type { ModelListResponse } from "../codex-protocol/index.js";
-import type { ModelOption } from "../application/index.js";
+import type {
+  ModelInputModality,
+  ModelOption,
+} from "../application/index.js";
 
 export function toModelOption(model: ModelListResponse["data"][number]): ModelOption | null {
   if (typeof model.hidden !== "boolean") {
@@ -24,6 +27,9 @@ export function toModelOption(model: ModelListResponse["data"][number]): ModelOp
   if (typeof model.isDefault !== "boolean") {
     throw new Error("Codex 响应缺少有效 model isDefault");
   }
+  if (!Array.isArray(model.inputModalities)) {
+    throw new Error("Codex 响应缺少有效 model inputModalities");
+  }
   return {
     id: model.id,
     model: model.model,
@@ -46,7 +52,15 @@ export function toModelOption(model: ModelListResponse["data"][number]): ModelOp
     }),
     defaultServiceTier: model.defaultServiceTier,
     isDefault: model.isDefault,
+    inputModalities: model.inputModalities.map(toInputModality),
   };
+}
+
+function toInputModality(value: unknown): ModelInputModality {
+  if (value === "text" || value === "image" || value === "audio") {
+    return value;
+  }
+  throw new Error("Codex 响应包含未知 model inputModalities");
 }
 
 function requireNonEmptyString(value: unknown, field: string): asserts value is string {

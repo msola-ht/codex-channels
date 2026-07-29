@@ -1368,6 +1368,7 @@ describe("JsonRpcClient", () => {
       }],
       defaultServiceTier: "default",
       isDefault: true,
+      inputModalities: ["text"],
     }]);
   });
 
@@ -1381,5 +1382,17 @@ describe("JsonRpcClient", () => {
 
     await expect(client.listModels())
       .rejects.toThrow("Codex 响应缺少有效 model displayName");
+  });
+
+  it("fails closed when a model response contains an unknown input modality", async () => {
+    const transport = new FakeTransport();
+    transport.modelListData = [appServerModel({ inputModalities: ["text", "video"] })];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listModels())
+      .rejects.toThrow("Codex 响应包含未知 model inputModalities");
   });
 });

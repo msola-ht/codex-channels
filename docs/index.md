@@ -111,12 +111,13 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 | --- | --- | --- | --- |
 | 文本 | `turn/start`、`turn/steer` 的稳定 `UserInput.text` | Telegram、飞书、微信已支持 | 由 Application 的 `TurnInput.text` 进入统一 Turn |
 | 本地图片 | `turn/start`、`turn/steer` 的稳定 `UserInput.localImage` | 三渠道受限 PNG/JPEG 已支持 | Surface 完成下载、签名和大小校验后，Application 只接收临时本地图片路径 |
-| 一次性音频 | 稳定 `UserInput.audio` / `UserInput.localAudio`；固定源码支持 WAV、MP3、M4A、WebM 与 OGG 本地音频 | 三渠道离线主路径已实现，真实 App Server 与平台消息待验收 | Surface 要求平台提供可信时长并验证最长 5 分钟，同时验证最大 20 MiB 与支持格式；通过后写入一小时私有临时文件，由 Application 只提交 `localAudio`。微信有可信转写时优先提交转写，未引入解码依赖的 SILK 明确拒绝 |
+| 一次性音频 | 稳定 `UserInput.audio` / `UserInput.localAudio`；模型目录用 `inputModalities` 声明实际能力；固定源码支持 WAV、MP3、M4A、WebM 与 OGG 本地音频 | 三渠道平台接收与受限转换已实现；当前可见模型均未声明 `audio`，原始音频不属于当前端到端支持 | Surface 先验证可信时长、最长 5 分钟、最大 20 MiB 与格式并写入一小时私有临时文件；Application 再按当前或下一 Turn 模型的 `inputModalities` 检查 `audio`，缺失时在 `turn/start` / `turn/steer` 前明确拒绝。微信可信转写仍作为文本提交；SILK 明确拒绝 |
 | 实时语音 | 实验 `thread/realtime/start`、`appendAudio`、`appendSpeech`、`stop` 及 Realtime 通知 | 禁止接入 | 当前项目只允许 Plan 所需实验协议；不得导出、调用或消费 Realtime 业务能力 |
 | ChatGPT Voice / 语音听写 | 官方桌面应用产品能力，不是当前 CLI 命令入口 | 不属于 Gateway | 不用平台模拟实现第二套 Codex 实时会话或语音输出 |
 
-Application 的 `TurnInput` 是只含 `text`、`localImage` 与 `localAudio` 的封闭联合；Codex Client
-只映射这三个稳定变体。模块边界测试同时禁止生产 Client 调用 `thread/realtime/*`，Surface
+Application 的 `TurnInput` 是只含 `text`、`localImage` 与 `localAudio` 的封闭联合；模型目录
+只把 `text`、`image`、`audio` 三种官方输入能力映射为稳定类型，包含 `localAudio` 的提交必须
+先通过当前模型能力检查。Codex Client 只映射这三个稳定输入变体。模块边界测试同时禁止生产 Client 调用 `thread/realtime/*`，Surface
 不得把平台音频地址、密钥、实时音频或未验证的编解码数据带入 Application/Core。
 
 ## 本项目实现映射

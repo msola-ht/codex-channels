@@ -31,6 +31,10 @@ export function formatSurfaceUserFacingError(
       return "音频超过 20 MiB 限制";
     case "audio.unsupported":
       return "仅支持 WAV、MP3、M4A、WebM 和 OGG 音频";
+    case "model.input.audio.unsupported":
+      return `当前模型 ${detail(error, "model", "未知")} 不支持语音输入，请发送文字或图片`;
+    case "model.input.unsupported":
+      return `当前模型 ${detail(error, "model", "未知")} 不支持该输入类型`;
     case "session.selector.required":
       return `用法：/${detail(error, "command", "resume")} <序号、名称或 Thread ID>`;
     case "session.selector.ambiguous":

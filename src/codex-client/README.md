@@ -15,7 +15,8 @@
   和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；缺少必需字段时失败关闭。
 - `turn-adapter.ts`：把 Application 的文本、本地图片与本地音频输入编码为官方 `UserInput`，并映射
   Turn、Review 和 Goal 响应；缺少稳定结果必需字段时失败关闭。
-- `model-adapter.ts`：把当前版本官方模型目录裁剪为 Application 拥有的模型选项，过滤不可见项，
+- `model-adapter.ts`：把当前版本官方模型目录裁剪为 Application 拥有的模型选项和
+  `text/image/audio` 输入能力，过滤不可见项，
   并在缺少模型选择必需字段时失败关闭。
 - `account-adapter.ts`：把账户 Token 用量、单桶或多桶额度与重置券数量映射为 Application
   稳定摘要；未知枚举或畸形数值失败关闭，不把上游响应正文交给 Surface。
@@ -61,5 +62,6 @@ Default/Plan 协作模式。Client 只额外调用 `collaborationMode/list` 并�
 同时出现的实验审批字段必须在 `approval` 边界显式展示或默认拒绝，不能静默扩大授权。
 
 固定协议的一次性 `localAudio` 已由 Application 的封闭 `TurnInput` 受控接入；Surface 只能提交
-经过格式、大小和私有临时文件边界验证的绝对路径。远端 `audio` 和实验 `thread/realtime/*`
+经过格式、大小和私有临时文件边界验证的绝对路径，Application 还必须在 Turn 前确认当前模型目录
+包含 `audio`。远端 `audio` 和实验 `thread/realtime/*`
 不得由本模块调用或映射；生成目录中存在 Realtime 请求和通知类型不改变该边界。

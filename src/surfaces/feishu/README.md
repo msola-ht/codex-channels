@@ -33,7 +33,8 @@ Application 的本地图片输入，同一 Thread 的
   一次性令牌，管理有限任务、取消和安全结果。
 - `client.ts`：隔离官方 HTTP SDK，提供消息读取/发送、生成图片上传、CardKit 与 OAuth 窄客户端。
 - `audio.ts`：通过既有消息资源权限下载独立音频，限制为 5 分钟、20 MiB 和 Codex CLI
-  支持的 WAV/MP3/M4A/WebM/OGG，写入一小时私有临时文件后提交 `localAudio`。
+  支持的 WAV/MP3/M4A/WebM/OGG，写入一小时私有临时文件后构造 `localAudio`；Application
+  仅在当前模型目录包含 `audio` 时提交，否则在创建或追加 Turn 前明确拒绝。
 - `event-connection.ts`：隔离官方 WebSocket SDK，管理事件注册、握手、重连、停止和失败关闭生命周期。
 - `file-input.ts`：通过官方消息资源 API 在内存下载独立文件，限制为 1,000,000 字节并严格验证
   文件名、UTF-8 和控制字符，不创建本地文件。

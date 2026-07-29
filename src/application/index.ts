@@ -46,6 +46,7 @@ export {
   type ModelSelectionState,
 } from "./model-selection-service.js";
 export {
+  type ModelInputModality,
   type ModelOption,
   type ModelSelectionPort,
   type ReasoningEffortOption,

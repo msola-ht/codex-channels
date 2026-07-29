@@ -11,6 +11,8 @@ export type UserFacingErrorCode =
   | "audio.duration-missing"
   | "audio.too-large"
   | "audio.unsupported"
+  | "model.input.audio.unsupported"
+  | "model.input.unsupported"
   | "session.selector.required"
   | "session.selector.ambiguous"
   | "session.selector.not-found"

@@ -133,6 +133,9 @@ export class ConversationService {
       return Promise.reject(new UserFacingError("message.empty", "消息不能为空"));
     }
     return this.locked(target, async () => {
+      if (input.some((item) => item.type === "localAudio")) {
+        await this.models.requireInputModality(target, "audio");
+      }
       const active = this.core.activeTurn(target);
       const clientUserMessageId = `${gatewayUserMessageClientIdPrefix}${randomUUID()}`;
       if (active) {
