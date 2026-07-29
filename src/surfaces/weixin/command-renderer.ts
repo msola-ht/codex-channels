@@ -18,6 +18,7 @@ import {
   formatConversationPermissions,
   formatConversationPlugins,
   formatConversationProjectRules,
+  formatConversationSessions,
   formatConversationSkills,
   formatConversationStatus,
   formatConversationUsage,
@@ -30,9 +31,6 @@ import {
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
-
-const maximumSessionEntries = 20;
-const maximumSessionLabelCharacters = 48;
 
 export type WeixinStartupRuntimeInfo = LifecycleStartupRuntimeInfo;
 
@@ -101,7 +99,7 @@ export function renderWeixinCommandResult(
     case "outcome":
       return formatConversationCommandOutcome(result.outcome);
     case "sessions":
-      return renderSessions(result);
+      return formatConversationSessions(result);
     case "status":
       return formatConversationStatus(result.status);
     case "workspaces":
@@ -139,39 +137,4 @@ export function renderWeixinUserFacingError(
 
 export function formatWeixinCommandText(text: string): string {
   return text.replace(/(?:\r?\n)+/gu, "\n\n");
-}
-
-function renderSessions(
-  result: Extract<ConversationCommandResult, { kind: "sessions" }>,
-): string {
-  if (result.sessions.length === 0) {
-    return result.archived
-      ? "当前 Workspace 没有匹配的已归档会话。"
-      : "当前 Workspace 没有匹配的可恢复会话。";
-  }
-  const sessions = result.sessions.slice(0, maximumSessionEntries);
-  const hiddenCount = result.sessions.length - sessions.length;
-  return [
-    `${result.archived ? "已归档会话" : "历史会话"}（${result.sessions.length}）${result.searchTerm ? ` · 搜索：${result.searchTerm}` : ""}：`,
-    ...sessions.map(
-      (session, index) =>
-        `${index + 1}. ${sessionLabel(session.name ?? session.preview)} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : ""}`,
-    ),
-    ...(hiddenCount > 0
-      ? [`另有 ${hiddenCount} 条未显示，请使用搜索词缩小范围。`]
-      : []),
-    result.archived
-      ? "恢复归档：/unarchive <序号、名称或 Thread ID>"
-      : "恢复：/resume <序号、名称或 Thread ID>",
-  ].join("\n");
-}
-
-function sessionLabel(value: string): string {
-  const normalized = value.replace(/\s+/gu, " ").trim();
-  if (!normalized) {
-    return "未命名";
-  }
-  return normalized.length > maximumSessionLabelCharacters
-    ? `${normalized.slice(0, maximumSessionLabelCharacters - 1)}…`
-    : normalized;
 }

@@ -75,6 +75,8 @@
   `/取消 <id>` 安全取消。所有命令沿用一次性 ID、Actor/会话绑定、超时和跨客户端失效；
   微信聊天无法隐藏敏感回答，带敏感标记的输入请求会明确取消。
 - 查看 Codex 流式回复、格式化最终回复、操作过程、计划、Diff、Goal、用量和额度；长文本自动折叠，超长代码以预览加完整文件发送；Telegram、飞书与微信的 `/status`、上线通知和每轮结束状态卡均显示当前授权 Workspace 的 Git 分支；`/status` 还显示 Thread 累计缓存命中率，每轮结束状态卡显示最近 Turn 缓存命中率、当前 Goal 状态及 Thread 上下文压缩总次数，并统一显示 App Server 返回的准确对话耗时。
+- 原生 Codex CLI/TUI 向已绑定 Thread 发送的用户输入会镜像到 Telegram、飞书和微信；三端共用
+  “CLI 输入”语义，并分别使用引用块、CardKit Markdown 或普通文本气泡展示。
 - App Server 明确返回的 Turn、warning、账户、额度和 MCP 状态会在统一脱敏并限长后显示到
   Telegram、飞书和微信；微信使用按会话排序的纯文本气泡，不模拟卡片或静默提醒。未知内部异常、
   凭据和未经约束的响应正文仍不会直接发送。
@@ -320,6 +322,8 @@ Telegram 只能选择预配置 Workspace，不能通过消息提交任意工作�
 当前 Turn 运行时，普通消息会通过 `turn/steer` 立即追加；使用 `/queue <描述>` 可把纯文本
 排到下一 Turn。队列按 Conversation 隔离，每个会话最多 10 条，只保存在 Gateway 内存中；
 Turn 完成后逐条启动，Gateway 重启、Thread 切换或排队 Turn 启动失败时会清空，不写入 SQLite。
+`/sessions [搜索词]` 与 `/archived [搜索词]` 在三个渠道统一最多显示 20 条会话，名称压缩为
+单行并限制长度；超过上限时显示未展示数量和对应的搜索命令。
 `/skills` 显示当前用户或 Workspace 直接安装且已启用的 Skill，不重复列出系统或插件附带 Skill；`/plugins` 只查询本机已安装插件，不加载远端插件市场目录。
 `/fast on` 和 `/fast off` 与原生 Codex CLI 保持一致：既为下一次 Turn 显式选择服务层级，
 也通过 App Server 保存用户级默认值，因此之后重启 `codexc remote resume` 不会恢复成旧的

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  formatContextUsage,
   formatConfigurationChange,
   formatFastModeState,
   formatModels,
@@ -429,90 +428,5 @@ describe("formatStatus", () => {
     });
     expect(statusWithoutBranch).toContain("Fast 模式：关闭");
     expect(statusWithoutBranch).toContain("Git 分支：未检测到");
-  });
-});
-
-describe("formatContextUsage", () => {
-  it("uses the latest context count rather than cumulative thread tokens", () => {
-    expect(formatContextUsage(
-      {
-        total: {
-          totalTokens: 1_250_000,
-          inputTokens: 1_000_000,
-          cachedInputTokens: 750_000,
-          cacheWriteInputTokens: 0,
-          outputTokens: 250_000,
-          reasoningOutputTokens: 50_000,
-        },
-        last: {
-          totalTokens: 12_500,
-          inputTokens: 10_000,
-          cachedInputTokens: 6_000,
-          cacheWriteInputTokens: 0,
-          outputTokens: 2_500,
-          reasoningOutputTokens: 500,
-        },
-        modelContextWindow: 200_000,
-      },
-      {
-        model: "gpt-main",
-        effort: "high",
-        serviceTier: "priority",
-        durationMs: 65_432,
-        contextCompactionCount: 2,
-        weeklyLimit: {
-          usedPercent: 42,
-          windowDurationMins: 10_080,
-          resetsAt: null,
-        },
-        goal: {
-          threadId: "thread-1",
-          objective: "完成 Gateway",
-          status: "active",
-          tokenBudget: 100_000,
-          tokensUsed: 12_500,
-          timeUsedSeconds: 90,
-          createdAt: 1_000,
-          updatedAt: 2_000,
-        },
-        gitBranch: "feature/weixin-surface",
-      },
-    )).toBe([
-      "上下文：12.5 K / 200 K（6.3%）",
-      "缓存命中率：60%",
-      "当前模型：gpt-main",
-      "思考强度：high",
-      "Fast 模式：开启",
-      "对话耗时：1分5秒",
-      "上下文压缩：2 次",
-      "周限：已使用 42%",
-      "Goal：进行中 · 12.5 K / 100 K · 1分30秒",
-      "Git 分支：feature/weixin-surface",
-    ].join("\n"));
-  });
-
-  it("reports an unknown cache hit rate when the turn has no input tokens", () => {
-    expect(formatContextUsage(
-      {
-        total: {
-          totalTokens: 0,
-          inputTokens: 0,
-          cachedInputTokens: 0,
-          cacheWriteInputTokens: 0,
-          outputTokens: 0,
-          reasoningOutputTokens: 0,
-        },
-        last: {
-          totalTokens: 0,
-          inputTokens: 0,
-          cachedInputTokens: 0,
-          cacheWriteInputTokens: 0,
-          outputTokens: 0,
-          reasoningOutputTokens: 0,
-        },
-        modelContextWindow: null,
-      },
-      undefined,
-    )).toContain("缓存命中率：未知");
   });
 });

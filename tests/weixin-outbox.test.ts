@@ -62,6 +62,26 @@ describe("WeixinOutbox", () => {
     ]);
   });
 
+  it("mirrors CLI input into the bound Weixin conversation", async () => {
+    const { outbox, sendText } = outboxFixture();
+
+    outbox.handle({
+      type: "user.message",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "external-input",
+      text: "从 CLI 发来的输入\n第二行",
+    });
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledWith({
+      actorId,
+      contextToken: "context-secret",
+      text: "CLI 输入\n\n从 CLI 发来的输入\n第二行",
+    });
+  });
+
   it("starts typing and cancels it before the final reply", async () => {
     const events: string[] = [];
     const typing = {

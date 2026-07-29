@@ -22,6 +22,7 @@ import {
 import {
   contentTruncatedText,
   emptyCodexResponseText,
+  formatCliInput,
   formatCodexWarning,
   formatConnectionLost,
 } from "../output-copy.js";
@@ -280,6 +281,8 @@ export class WeixinOutbox implements SurfaceOutputPort {
 
   private render(event: OutputEvent): string | null {
     switch (event.type) {
+      case "user.message":
+        return formatCliInput(event.text);
       case "text.completed":
         if (event.phase === "commentary") {
           return null;

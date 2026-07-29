@@ -18,12 +18,16 @@ import {
   formatConversationPermissions,
   formatConversationPlugins,
   formatConversationProjectRules,
+  formatConversationSessions,
   formatConversationSkills,
   formatConversationStatus,
   formatConversationUsage,
   formatConversationWorkspaces,
 } from "../conversation-command-format.js";
-import { emptyCodexResponseText } from "../output-copy.js";
+import {
+  emptyCodexResponseText,
+  formatCliInput,
+} from "../output-copy.js";
 import { formatSurfaceConfigurationChange } from "../configuration-change-format.js";
 import {
   createStartupPresentation,
@@ -44,9 +48,6 @@ import {
 } from "../runtime-status-format.js";
 import type { SurfaceConfigurationChange } from "../types.js";
 import type { FeishuInboxMessage } from "./inbox.js";
-
-const maximumFeishuSessionEntries = 20;
-const maximumFeishuSessionLabelCharacters = 48;
 
 export type FeishuStartupRuntimeInfo = LifecycleStartupRuntimeInfo;
 
@@ -105,7 +106,7 @@ export function renderFeishuCommandResult(
     case "outcome":
       return formatConversationCommandOutcome(result.outcome);
     case "sessions":
-      return renderFeishuSessions(result);
+      return formatConversationSessions(result);
     case "status":
       return formatConversationStatus(result.status);
     case "workspaces":
@@ -156,7 +157,7 @@ export function renderFeishuOutput(event: OutputEvent): string | null {
     case "text.delta":
       return null;
     case "user.message":
-      return `CLI 输入\n${event.text}`;
+      return formatCliInput(event.text);
     case "text.completed":
       return event.text.trim() ? event.text : emptyCodexResponseText;
     case "operation.updated":
@@ -211,50 +212,6 @@ function renderFeishuLifecyclePresentation(
 
 function visibleUpstreamMessage(message: string): string {
   return message.replaceAll("[REDACTED]", "[已隐藏]");
-}
-
-function renderFeishuSessions(
-  result: Extract<ConversationCommandResult, { kind: "sessions" }>,
-): string {
-  if (result.sessions.length === 0) {
-    return result.archived
-      ? "当前 Workspace 没有匹配的已归档会话。"
-      : "当前 Workspace 没有匹配的可恢复会话。";
-  }
-  const visibleSessions = result.sessions.slice(
-    0,
-    maximumFeishuSessionEntries,
-  );
-  const hiddenCount = result.sessions.length - visibleSessions.length;
-  return [
-    `${result.archived ? "已归档会话" : "历史会话"}（${result.sessions.length}）${result.searchTerm ? ` · 搜索：${result.searchTerm}` : ""}：`,
-    ...visibleSessions.map((session, index) => {
-      const label = formatFeishuSessionLabel(
-        session.name ?? session.preview,
-      );
-      return `${index + 1}. ${label} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : ""}`;
-    }),
-    ...(hiddenCount > 0
-      ? [
-          "",
-          `另有 ${hiddenCount} 条未显示，请使用 /${result.archived ? "archived" : "sessions"} <搜索词> 缩小范围。`,
-        ]
-      : []),
-    "",
-    result.archived
-      ? "恢复归档：/unarchive <序号、名称或 Thread ID>"
-      : "恢复：/resume <序号、名称或 Thread ID>",
-  ].join("\n");
-}
-
-function formatFeishuSessionLabel(value: string): string {
-  const normalized = value.replace(/\s+/gu, " ").trim();
-  if (normalized.length === 0) {
-    return "未命名";
-  }
-  return normalized.length > maximumFeishuSessionLabelCharacters
-    ? `${normalized.slice(0, maximumFeishuSessionLabelCharacters - 1)}…`
-    : normalized;
 }
 
 function threadStatusLabel(status: string): string {

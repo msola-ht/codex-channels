@@ -6,6 +6,7 @@ import type {
 } from "../src/application/index.js";
 import {
   conversationCommandHelpLines,
+  formatConversationSessions,
   formatConversationStatus,
 } from "../src/surfaces/conversation-command-format.js";
 import {
@@ -27,7 +28,10 @@ import {
   formatTextFileTooLarge,
   formatUnsupportedTextFile,
 } from "../src/surfaces/text-file-copy.js";
-import { formatConfigurationChange } from "../src/surfaces/telegram/format.js";
+import {
+  formatConfigurationChange,
+  formatSessions as formatTelegramSessions,
+} from "../src/surfaces/telegram/format.js";
 import {
   renderFeishuConfigurationChange,
   renderFeishuCommandResult,
@@ -39,7 +43,10 @@ import {
   formatRuntimeMcpStatusUpdate,
   formatRuntimeRateLimitUpdate,
 } from "../src/surfaces/runtime-status-format.js";
-import { emptyCodexResponseText } from "../src/surfaces/output-copy.js";
+import {
+  emptyCodexResponseText,
+  formatCliInput,
+} from "../src/surfaces/output-copy.js";
 import {
   renderWeixinCommandResult,
   renderWeixinHelp,
@@ -63,6 +70,8 @@ describe("shared surface copy contract", () => {
     expect(formatTurnInputAppended("image", true))
       .toBe("已将图片和补充要求追加到当前 Turn。");
     expect(emptyCodexResponseText).toBe("Codex 返回了空消息。");
+    expect(formatCliInput("继续处理"))
+      .toBe("CLI 输入\n\n继续处理");
   });
 
   it("keeps interaction outcomes platform-neutral", () => {
@@ -98,6 +107,38 @@ describe("shared surface copy contract", () => {
       expect(renderFeishuHelp()).toContain(line);
       expect(renderWeixinHelp()).toContain(line);
     }
+  });
+
+  it("keeps bounded session lists identical across all surfaces", () => {
+    const result: Extract<
+      ConversationCommandResult,
+      { kind: "sessions" }
+    > = {
+      kind: "sessions",
+      sessions: Array.from({ length: 21 }, (_, index) => ({
+        id: `thread-${String(index + 1).padStart(12, "0")}`,
+        name: null,
+        preview: index === 0
+          ? `第一行\n第二行 ${"长".repeat(60)}`
+          : `会话 ${index + 1}`,
+        status: { type: "idle" },
+      })),
+      currentThreadId: "thread-000000000001",
+      archived: false,
+    };
+    const expected = formatConversationSessions(result);
+
+    expect(formatTelegramSessions(
+      result.sessions,
+      result.currentThreadId,
+      { archived: result.archived },
+    )).toBe(expected);
+    expect(renderFeishuCommandResult(result)).toBe(expected);
+    expect(renderWeixinCommandResult(result)).toBe(expected);
+    expect(expected).toContain(
+      "另有 1 条未显示，请使用 /sessions <搜索词> 缩小范围。",
+    );
+    expect(expected).not.toContain("21. 会话 21");
   });
 
   it("formats the complete shared status including weekly limits", () => {

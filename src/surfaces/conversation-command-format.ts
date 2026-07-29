@@ -17,6 +17,9 @@ import {
 } from "./account-format.js";
 import { formatElapsedSeconds } from "./elapsed-duration.js";
 
+const maximumSessionEntries = 20;
+const maximumSessionLabelCharacters = 48;
+
 export const conversationCommandDescriptions = {
   resume: "列出或恢复 Codex 会话",
   sessions: "搜索可恢复会话",
@@ -65,6 +68,36 @@ export const conversationCommandHelpLines = [
   "/diff · /plan [规划需求]",
   "/goal [set <目标>|clear]",
 ] as const;
+
+export function formatConversationSessions(
+  result: Extract<ConversationCommandResult, { kind: "sessions" }>,
+): string {
+  if (result.sessions.length === 0) {
+    return result.archived
+      ? "当前 Workspace 没有匹配的已归档会话。"
+      : "当前 Workspace 没有匹配的可恢复会话。";
+  }
+  const visibleSessions = result.sessions.slice(0, maximumSessionEntries);
+  const hiddenCount = result.sessions.length - visibleSessions.length;
+  const searchCommand = result.archived ? "archived" : "sessions";
+  return [
+    `${result.archived ? "已归档会话" : "历史会话"}（${result.sessions.length}）${result.searchTerm ? ` · 搜索：${result.searchTerm}` : ""}：`,
+    ...visibleSessions.map(
+      (session, index) =>
+        `${index + 1}. ${formatSessionLabel(session.name ?? session.preview)} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : ""}`,
+    ),
+    ...(hiddenCount > 0
+      ? [
+          "",
+          `另有 ${hiddenCount} 条未显示，请使用 /${searchCommand} <搜索词> 缩小范围。`,
+        ]
+      : []),
+    "",
+    result.archived
+      ? "恢复归档：/unarchive <序号、名称或 Thread ID>"
+      : "恢复：/resume <序号、名称或 Thread ID>",
+  ].join("\n");
+}
 
 export function formatConversationCommandOutcome(
   outcome: ConversationCommandOutcome,
@@ -380,6 +413,16 @@ export function formatConversationStatus(status: ConversationStatus): string {
     lines.push(`周限：${formatRateLimitWindow(status.weeklyLimit)}`);
   }
   return lines.join("\n");
+}
+
+function formatSessionLabel(value: string): string {
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  if (!normalized) {
+    return "未命名";
+  }
+  return normalized.length > maximumSessionLabelCharacters
+    ? `${normalized.slice(0, maximumSessionLabelCharacters - 1)}…`
+    : normalized;
 }
 
 function formatGoalStatus(status: ThreadGoal["status"]): string {

@@ -21,6 +21,7 @@ import {
   renderPlainLifecyclePresentation,
 } from "../lifecycle-presentation.js";
 import {
+  cliInputTitle,
   contentTruncatedText,
   emptyCodexResponseText,
   formatCodexWarning,
@@ -176,7 +177,7 @@ export class TelegramOutbox {
         this.enqueue(chatId, async () => {
           const messageId = await this.sendPanel(
             chatId,
-            formatCliInput(event.text),
+            formatTelegramCliInput(event.text),
             undefined,
             true,
           );
@@ -1145,13 +1146,13 @@ export class TelegramOutbox {
 
 }
 
-function formatCliInput(text: string): string {
+function formatTelegramCliInput(text: string): string {
   const quote = text
     .trim()
     .split("\n")
     .map((line) => `│ ${line}`)
     .join("\n");
-  return `CLI 输入\n\n${quote}`;
+  return `${cliInputTitle}\n\n${quote}`;
 }
 
 function errorMessageForClassification(error: unknown): string {

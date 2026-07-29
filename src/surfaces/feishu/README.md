@@ -51,8 +51,8 @@ Application 的本地图片输入，同一 Thread 的
 - `oauth-token-store.ts`：macOS Keychain 与 Linux AES-256-GCM 私有凭据后端。
 - `oauth.ts`：按 App 与 Actor 协调单一进行中授权、身份匹配、凭据写入、撤销和停止取消。
 - `renderer.ts`：把平台无关 `ConversationCommandResult`、`OutputEvent`、启动状态和结构化错误
-  映射为稳定文本内容；启动通知、`/status` 与 `turn.completed` 结束统计均包含当前 Workspace
-  Git 分支。
+  映射为稳定文本内容；CLI/TUI 输入使用共享“CLI 输入”语义，启动通知、`/status` 与
+  `turn.completed` 结束统计均包含当前 Workspace Git 分支。
 - `outbox.ts`：精确账号路由并通过通用有界队列调用窄消息发送端口；在内存中按 Turn 关联
   原始输入消息，使开始确认、短回复及首张流式卡片原生回复同一输入；完成的原生生成图片
   独立于操作显示档位上传并发送。
