@@ -62,6 +62,24 @@ describe("shared operation presentation", () => {
     expect(Array.from(detail)).toHaveLength(160);
     expect(detail).toBe(`${"界".repeat(159)}…`);
   });
+
+  it("redacts private Codex paths without hiding ordinary project paths", () => {
+    const detail = [
+      "/usr/bin/zsh -lc \"sed -n '1,400p'",
+      "/root/.codex/skills/.system/imagegen/SKILL.md\"",
+      "git -C /root/github/codex-channels status --short",
+      "/Users/example/.codex-connect/credentials/private.bin",
+    ].join(" ");
+
+    expect(redactOperationDetail(detail)).toBe([
+      "/usr/bin/zsh -lc \"sed -n '1,400p'",
+      "[内部路径]\"",
+      "git -C /root/github/codex-channels status --short",
+      "[内部路径]",
+    ].join(" "));
+    expect(compactOperationDetail(detail)).not.toContain("/root/.codex");
+    expect(compactOperationDetail(detail)).not.toContain("/Users/example/.codex-connect");
+  });
 });
 
 function operation(

@@ -43,13 +43,13 @@
   `message_id + image_key + type=image`、`message_id + file_key + type=file` Payload、资源标识
   约束、长度裁剪和错误脱敏；回复事件
   `parent_id` 裁剪、指定消息读取及文本/富文本/CardKit 可见内容解析与交互值忽略；私聊文本、
-  独立图片与单张图片说明文字 `post` Inbox 的账号/类型/授权筛选、同步有界
+  独立图片与最多四张图片说明文字 `post` Inbox 的账号/类型/授权筛选、同步有界
   入队、授权拒绝不污染去重键、事件去重、旧事件过滤、同 Chat 顺序、跨 Chat 并行、过载重试和有限关闭；卡片动作
   稳定字段裁剪、受限字符串动作值、畸形输入失败关闭和 WebSocket 独立分流；所有关键
   `OutputEvent` 的 CardKit Markdown 最终回复、启动环境与脱敏 UA、每轮上下文和设置的紧凑
   CardKit Markdown、活动 Turn 输出不追加状态尾栏、纯文本安全回退、
   操作终态静态卡片与助手消息顺序，以及脱敏上游错误详情展示；共享操作标题、状态、飞书耗时底栏与
-  退出码元数据、脱敏、Unicode 单行摘要边界及三渠道按 Turn 聚合成功查询类操作；Outbox
+  退出码元数据、敏感占位符与 Codex 私有目录绝对路径清洗、Unicode 单行摘要边界及三渠道按 Turn 聚合成功查询类操作；Outbox
   的精确账号路由、同 Chat 顺序、跨 Chat 并行、静态 CardKit 单元素 5,000 字符与最多 5 张卡片、
   纯文本及降级富文本 20,000 字节上限、
   明确截断、关闭等待及完整、单行摘要、隐藏三档操作输出；同一 Thread 的 active/idle 轻量状态卡片创建、重复抑制、顺序更新、更新错误

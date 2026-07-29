@@ -21,7 +21,12 @@ export function compactOperationDetail(value: string): string {
 }
 
 export function redactOperationDetail(value: string): string {
-  return value.replaceAll("[REDACTED]", "[已隐藏]");
+  return value
+    .replaceAll("[REDACTED]", "[已隐藏]")
+    .replace(
+      /(?:\/[^/\s"'`;&|<>()[\]{}]+)*\/\.(?:codex-connect|codex)(?:\/[^/\s"'`;&|<>()[\]{}]+)*/gu,
+      "[内部路径]",
+    );
 }
 
 export function operationStatus(status: OperationUpdate["status"]): string {

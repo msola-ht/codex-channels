@@ -55,6 +55,19 @@ describe("Feishu operation log formatter", () => {
     );
   });
 
+  it("does not expose private Codex paths in command details", () => {
+    const text = formatFeishuOperation({
+      itemId: "command-1",
+      kind: "command",
+      detail: "/usr/bin/zsh -lc \"sed -n '1,400p' /root/.codex/skills/imagegen/SKILL.md\"",
+      status: "completed",
+      exitCode: 0,
+    });
+
+    expect(text).toContain("[内部路径]");
+    expect(text).not.toContain("/root/.codex");
+  });
+
   it("omits the duration footer when no positive duration is available", () => {
     expect(formatFeishuOperation({
       itemId: "command-1",
