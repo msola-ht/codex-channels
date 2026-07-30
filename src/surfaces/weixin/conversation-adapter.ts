@@ -235,11 +235,11 @@ export class WeixinConversationAdapter {
         return;
       }
       if (command.name === "start" || command.name === "help") {
-        this.notify(message.target, renderWeixinHelp());
+        this.notifyCommand(message.target, renderWeixinHelp());
         return;
       }
       if (command.name === "whoami") {
-        this.notify(message.target, renderWeixinIdentity(message));
+        this.notifyCommand(message.target, renderWeixinIdentity(message));
         return;
       }
       if (
@@ -247,7 +247,7 @@ export class WeixinConversationAdapter {
         && command.argumentsText === "doctor"
         && this.inputOptions.doctor
       ) {
-        this.notify(
+        this.notifyCommand(
           message.target,
           renderWeixinDoctor(
             await this.inputOptions.doctor.inspect(message.target),
@@ -269,7 +269,7 @@ export class WeixinConversationAdapter {
         command.argumentsText,
       );
       const rendered = renderWeixinCommandResult(result);
-      this.notify(
+      this.notifyCommand(
         message.target,
         result.kind === "status" && this.inputOptions.pollingHealth
           ? [
@@ -313,6 +313,15 @@ export class WeixinConversationAdapter {
 
   private notify(target: ConversationTarget, text: string): void {
     if (!this.outbox.notifyText(target, formatWeixinCommandText(text))) {
+      throw new WeixinOutputQueueError();
+    }
+  }
+
+  private notifyCommand(target: ConversationTarget, text: string): void {
+    if (!this.outbox.notifyText(
+      target,
+      formatWeixinCommandText(text, { structuredFields: true }),
+    )) {
       throw new WeixinOutputQueueError();
     }
   }

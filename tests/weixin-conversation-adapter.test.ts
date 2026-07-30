@@ -463,7 +463,7 @@ describe("WeixinConversationAdapter", () => {
       1,
       target,
       expect.stringMatching(
-        /^Codex 状态 {2}\nWorkspace：[\s\S]* {2}\nGit 分支：feature\/weixin-surface/u,
+        /^\*\*Codex 状态\*\*\n- Workspace：[\s\S]*\n- Git 分支：feature\/weixin-surface/u,
       ),
     );
     expect(notifyText).toHaveBeenNthCalledWith(
@@ -526,8 +526,8 @@ describe("WeixinConversationAdapter", () => {
     expect(notifyText).toHaveBeenCalledWith(
       target,
       expect.stringContaining(
-        "微信链路：退避中  \n连续失败：3 次  \n"
-        + "上次后台轮询：2026-07-28 03:15:42  \n预计恢复：30秒后",
+        "- 微信链路：退避中\n- 连续失败：3 次\n"
+        + "- 上次后台轮询：2026-07-28 03:15:42\n- 预计恢复：30秒后",
       ),
     );
   });
@@ -563,7 +563,7 @@ describe("WeixinConversationAdapter", () => {
     expect(submit).not.toHaveBeenCalled();
     expect(notifyText).toHaveBeenCalledWith(
       target,
-      expect.stringContaining("微信 Doctor  \nBot 凭据：可用"),
+      expect.stringContaining("**微信 Doctor**\n- Bot 凭据：可用"),
     );
   });
 

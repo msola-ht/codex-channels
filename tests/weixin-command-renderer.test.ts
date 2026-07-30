@@ -14,14 +14,80 @@ describe("Weixin command renderer", () => {
   it("keeps compact lines while preserving intentional paragraphs", () => {
     expect(formatWeixinCommandText(
       "标题\r\n字段一：值一\n字段二：值二\n\n\n段落二",
-    )).toBe("标题  \n字段一：值一  \n字段二：值二\n\n段落二");
+      { structuredFields: true },
+    )).toBe("**标题**\n- 字段一：值一\n- 字段二：值二\n\n段落二");
+  });
+
+  it("renders shared command sections and fields as compact Markdown lists", () => {
+    expect(formatWeixinCommandText([
+      "Codex 额度：",
+      "套餐：Pro",
+      "",
+      "GPT-5.3-Codex-Spark：",
+      "主窗口：已使用 0% · 周期 7 天",
+      "限流状态：正常",
+      "",
+      "codex：",
+      "主窗口：已使用 17% · 周期 7 天",
+      "Credits：无可用 Credits",
+      "消费控制：正常",
+      "限流状态：正常",
+    ].join("\n"), { structuredFields: true })).toBe([
+      "**Codex 额度**",
+      "- 套餐：Pro",
+      "",
+      "**GPT-5.3-Codex-Spark**",
+      "- 主窗口：已使用 0% · 周期 7 天",
+      "- 限流状态：正常",
+      "",
+      "**codex**",
+      "- 主窗口：已使用 17% · 周期 7 天",
+      "- Credits：无可用 Credits",
+      "- 消费控制：正常",
+      "- 限流状态：正常",
+    ].join("\n"));
+  });
+
+  it("renders a leading command title before structured fields", () => {
+    expect(formatWeixinCommandText([
+      "Codex 状态",
+      "Workspace：Main",
+      "Thread：thread-1",
+    ].join("\n"), { structuredFields: true })).toBe([
+      "**Codex 状态**",
+      "- Workspace：Main",
+      "- Thread：thread-1",
+    ].join("\n"));
+  });
+
+  it("renders isolated command fields as list items", () => {
+    expect(formatWeixinCommandText([
+      "协作模式：Plan",
+      "",
+      "下一条普通消息将按 Plan 模式处理。",
+      "切换：/plan",
+    ].join("\n"), { structuredFields: true })).toBe([
+      "- 协作模式：Plan",
+      "",
+      "下一条普通消息将按 Plan 模式处理。  ",
+      "- 切换：/plan",
+    ].join("\n"));
+  });
+
+  it("leaves structured-looking non-command notifications unchanged", () => {
+    expect(formatWeixinCommandText(
+      "操作失败：请求暂时不可用\n错误代码：temporary",
+    )).toBe(
+      "操作失败：请求暂时不可用  \n错误代码：temporary",
+    );
   });
 
   it("does not change copied code inside fenced blocks", () => {
     expect(formatWeixinCommandText(
       "命令：\n```sh\nprintf 'a'\nprintf 'b'\n```\n完成",
+      { structuredFields: true },
     )).toBe(
-      "命令：\n```sh\nprintf 'a'\nprintf 'b'\n```\n完成",
+      "**命令**\n```sh\nprintf 'a'\nprintf 'b'\n```\n完成",
     );
   });
 

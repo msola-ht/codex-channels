@@ -233,7 +233,7 @@ describe("WeixinInputAdapter", () => {
       expect(outbox.notifyText).toHaveBeenCalledWith(
         target,
         expect.stringContaining(
-          "微信链路：轮询中  \n连续失败：0 次  \n上次后台轮询：",
+          "- 微信链路：轮询中\n- 连续失败：0 次\n- 上次后台轮询：",
         ),
       );
     }, { timeout: 2_000 });

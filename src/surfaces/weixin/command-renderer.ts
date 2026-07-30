@@ -135,7 +135,10 @@ export function renderWeixinUserFacingError(
   return formatSurfaceUserFacingError(error, "微信");
 }
 
-export function formatWeixinCommandText(text: string): string {
+export function formatWeixinCommandText(
+  text: string,
+  options: { structuredFields?: boolean } = {},
+): string {
   const lines = text
     .replace(/\r\n/gu, "\n")
     .replace(/\n{3,}/gu, "\n\n")
@@ -146,10 +149,28 @@ export function formatWeixinCommandText(text: string): string {
       fenced = !fenced;
       return line;
     }
+    if (!fenced && options.structuredFields === true) {
+      const section = /^([^：\n]{1,64})：\s*$/u.exec(line);
+      if (section) {
+        return `**${section[1]}**`;
+      }
+      if (
+        index === 0
+        && line.length > 0
+        && parseWeixinCommandField(lines[index + 1]) !== null
+      ) {
+        return `**${line}**`;
+      }
+      const field = parseWeixinCommandField(line);
+      if (field) {
+        return `- ${field.label}：${field.value}`;
+      }
+    }
     const next = lines[index + 1];
     if (
       fenced
       || line.length === 0
+      || isMarkdownBlockLine(line)
       || next === undefined
       || next.length === 0
       || next.trimStart().startsWith("```")
@@ -158,6 +179,23 @@ export function formatWeixinCommandText(text: string): string {
     }
     return `${line}  `;
   }).join("\n");
+}
+
+function isMarkdownBlockLine(line: string): boolean {
+  return /^\s*(?:[-+*]\s+|\d+\.\s+|>|#{1,6}\s+|\||-{3,}\s*$)/u
+    .test(line);
+}
+
+function parseWeixinCommandField(
+  line: string | undefined,
+): { label: string; value: string } | null {
+  if (line === undefined || isMarkdownBlockLine(line)) {
+    return null;
+  }
+  const field = /^([^：\n]{1,40})：\s*(.+)$/u.exec(line);
+  return field === null
+    ? null
+    : { label: field[1]!, value: field[2]! };
 }
 
 function renderWeixinLifecyclePresentation(
