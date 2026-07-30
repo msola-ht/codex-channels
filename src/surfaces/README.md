@@ -128,4 +128,5 @@ Bootstrap 把共享的 `display.operation_updates` 三档模式显式注入各 S
 
 Bootstrap 还把默认关闭的 `display.plan_updates` 注入三个 Surface Outbox。开启后，各端消费
 Core 发布的结构化 `plan.updated`：首次发送完整计划，后续只在步骤首次完成时发送一条紧凑
-进度，不解析或拆分模型正文。关闭时不产生任何计划渠道消息，Core 的计划归约保持不变。
+进度；飞书额外在原消息中同步更新完整计划卡，Telegram 和微信保留首次快照。不解析或拆分模型
+正文。关闭时不产生任何计划渠道消息，Core 的计划归约保持不变。

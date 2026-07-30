@@ -36,7 +36,7 @@ afterEach(() => {
 });
 
 describe("Feishu outbox", () => {
-  it("shows one initial plan card and one card for each completed step", async () => {
+  it("updates the initial plan card and sends one card for each completed step", async () => {
     const sent: FeishuCardDocument[] = [];
     const updated: FeishuCardDocument[] = [];
     const outbox = new FeishuOutbox(
@@ -65,12 +65,20 @@ describe("Feishu outbox", () => {
       { step: "检查实现", status: "completed" },
       { step: "补充测试", status: "inProgress" },
     ]));
+    outbox.handle(planUpdated([
+      { step: "检查实现", status: "completed" },
+      { step: "补充测试", status: "inProgress" },
+    ]));
     await outbox.close();
 
     expect(sent).toHaveLength(2);
     expect(sent[0]?.header.title.content).toBe("任务计划 · 0/2");
     expect(sent[1]?.header.title.content).toBe("计划进度 · 1/2");
-    expect(updated).toEqual([]);
+    expect(updated).toHaveLength(1);
+    expect(updated[0]?.header.title.content).toBe("任务计划 · 1/2");
+    expect(statusCardText(updated[0]!)).toBe(
+      "✓ 检查实现\n◐ 补充测试",
+    );
   });
 
   it("sends the shared Turn start confirmation as a Markdown card", async () => {

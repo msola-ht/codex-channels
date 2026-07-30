@@ -11,7 +11,11 @@ import {
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
 import { contentTruncatedText } from "../output-copy.js";
-import { PlanProgressTracker } from "../plan-presentation.js";
+import {
+  createPlanPresentation,
+  type PlanPresentation,
+  PlanProgressTracker,
+} from "../plan-presentation.js";
 import { TurnReplyTargets } from "../turn-reply-targets.js";
 import type {
   OperationUpdateDisplay,
@@ -71,6 +75,12 @@ interface FinishedFeishuStream {
   summary: string;
 }
 
+interface FeishuPlanState {
+  tracker: PlanProgressTracker;
+  messageId?: string;
+  fingerprint?: string;
+}
+
 export interface FeishuMessagePort {
   sendText(chatId: string, text: string): Promise<void>;
   sendPost(chatId: string, markdown: string): Promise<void>;
@@ -116,7 +126,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   >();
   private readonly planMessages = new Map<
     string,
-    PlanProgressTracker
+    FeishuPlanState
   >();
   private readonly streams = new Map<string, FeishuStreamState>();
   private readonly finishedStreams = new Map<string, FinishedFeishuStream>();
@@ -226,9 +236,24 @@ export class FeishuOutbox implements SurfaceOutputPort {
         return;
       }
       const key = turnKey(event.threadId, event.turnId);
-      const tracker = this.planMessages.get(key) ?? new PlanProgressTracker();
-      this.planMessages.set(key, tracker);
-      for (const presentation of tracker.accept(event)) {
+      const state = this.planMessages.get(key) ?? {
+        tracker: new PlanProgressTracker(),
+      };
+      this.planMessages.set(key, state);
+      const snapshot = createPlanPresentation(event);
+      this.delivery.enqueue(
+        event.target.conversationId,
+        () => this.deliverPlanSnapshot(
+          event.target.conversationId,
+          state,
+          snapshot,
+        ),
+        true,
+      );
+      for (const presentation of state.tracker.accept(event)) {
+        if (presentation.fingerprint === snapshot.fingerprint) {
+          continue;
+        }
         this.delivery.enqueue(
           event.target.conversationId,
           () => this.messagePort.sendCard(
@@ -275,6 +300,23 @@ export class FeishuOutbox implements SurfaceOutputPort {
         : this.sendText(event.target.conversationId, rendered),
       event.type === "turn.started" || isCriticalOutputEvent(event),
     );
+  }
+
+  private async deliverPlanSnapshot(
+    chatId: string,
+    state: FeishuPlanState,
+    presentation: PlanPresentation,
+  ): Promise<void> {
+    if (state.fingerprint === presentation.fingerprint) {
+      return;
+    }
+    const card = renderFeishuPlanCard(presentation);
+    if (state.messageId === undefined) {
+      state.messageId = await this.messagePort.sendCard(chatId, card);
+    } else {
+      await this.messagePort.updateCard(state.messageId, card);
+    }
+    state.fingerprint = presentation.fingerprint;
   }
 
   private async sendGeneratedImage(
