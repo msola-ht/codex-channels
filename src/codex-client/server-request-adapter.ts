@@ -7,6 +7,8 @@ import type {
   CommandApprovalOption,
   FileSystemPath,
   FileSystemSandboxEntry,
+  JsonValue,
+  McpToolApproval,
   NetworkApprovalContext,
   NetworkPolicyAmendment,
 } from "../approval/index.js";
@@ -222,6 +224,12 @@ function decodeElicitationRequest(
       : undefined;
   }
   if (params?.mode === "form" || params?.mode === "openai/form") {
+    const parsedToolApproval = params.mode === "form"
+      ? parseMcpToolApproval(params.requestedSchema, params._meta)
+      : { kind: "not-tool" as const };
+    if (parsedToolApproval.kind === "invalid") {
+      return undefined;
+    }
     return {
       type: "elicitation",
       requestId: request.id,
@@ -230,6 +238,9 @@ function decodeElicitationRequest(
       serverName,
       mode: params.mode,
       message,
+      ...(parsedToolApproval.kind === "valid"
+        ? { toolApproval: parsedToolApproval.value }
+        : {}),
     };
   }
   return undefined;
@@ -265,9 +276,97 @@ function encodeApprovalResponse(
       return {
         action: response.action,
         content: response.action === "accept" ? response.content : null,
-        _meta: null,
+        _meta: response.action === "accept" && response.persist
+          ? { persist: response.persist }
+          : null,
       };
   }
+}
+
+function parseMcpToolApproval(
+  requestedSchema: unknown,
+  metaValue: unknown,
+):
+  | { kind: "not-tool" }
+  | { kind: "invalid" }
+  | { kind: "valid"; value: McpToolApproval } {
+  const schema = asRecord(requestedSchema);
+  const properties = asRecord(schema?.properties);
+  const meta = asRecord(metaValue);
+  if (meta?.codex_approval_kind !== "mcp_tool_call") {
+    return { kind: "not-tool" };
+  }
+  if (
+    schema?.type !== "object"
+    || !properties
+    || Object.keys(properties).length > 0
+  ) {
+    return { kind: "invalid" };
+  }
+  const persist = parseMcpToolApprovalPersist(meta.persist);
+  const parameters = parseMcpToolApprovalParameters(meta.tool_params_display);
+  if (!persist.valid || !parameters.valid) {
+    return { kind: "invalid" };
+  }
+  return {
+    kind: "valid",
+    value: {
+      connectorName: optionalNonEmptyString(meta.connector_name),
+      toolTitle: optionalNonEmptyString(meta.tool_title),
+      toolDescription: optionalNonEmptyString(meta.tool_description),
+      parameters: parameters.value,
+      allowSession: persist.value.includes("session"),
+      allowAlways: persist.value.includes("always"),
+    },
+  };
+}
+
+function parseMcpToolApprovalPersist(
+  value: unknown,
+): { valid: true; value: Array<"session" | "always"> } | { valid: false } {
+  if (value === undefined) {
+    return { valid: true, value: [] };
+  }
+  const values = Array.isArray(value) ? value : [value];
+  if (
+    values.some((entry) => entry !== "session" && entry !== "always")
+  ) {
+    return { valid: false };
+  }
+  return {
+    valid: true,
+    value: [...new Set(values as Array<"session" | "always">)],
+  };
+}
+
+function parseMcpToolApprovalParameters(
+  value: unknown,
+): {
+  valid: true;
+  value: McpToolApproval["parameters"];
+} | { valid: false } {
+  if (value === undefined) {
+    return { valid: true, value: [] };
+  }
+  if (!Array.isArray(value)) {
+    return { valid: false };
+  }
+  const parameters = value.map((entry) => {
+    const record = asRecord(entry);
+    const name = nonEmptyString(record?.name);
+    const displayName = nonEmptyString(record?.display_name);
+    return name && displayName && isJsonValue(record?.value)
+      ? { name, displayName, value: record.value }
+      : undefined;
+  });
+  return parameters.some((entry) => entry === undefined)
+    ? { valid: false }
+    : {
+        valid: true,
+        value: parameters.filter(
+          (entry): entry is NonNullable<typeof entry> => entry !== undefined,
+        ),
+      };
 }
 
 function encodeCommandDecision(
@@ -723,4 +822,25 @@ function stringValue(value: unknown): string | undefined {
 
 function nonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function optionalNonEmptyString(value: unknown): string | null {
+  return nonEmptyString(value) ?? null;
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+  if (
+    value === null
+    || typeof value === "string"
+    || typeof value === "boolean"
+    || (typeof value === "number" && Number.isFinite(value))
+  ) {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.every(isJsonValue);
+  }
+  return typeof value === "object"
+    && value !== null
+    && Object.values(value as Record<string, unknown>).every(isJsonValue);
 }

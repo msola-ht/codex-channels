@@ -417,7 +417,38 @@ export class WeixinInteractionPort implements InteractionPort {
         // 下面返回稳定提示，不暴露用户表单内容。
       }
     }
-    await this.notify(pending.target, "MCP 交互命令或 JSON 内容无效。");
+    if (
+      request.mode === "tool-approval"
+      && command.action === "approve"
+    ) {
+      const scope = command.scope === "once"
+        ? "once"
+        : command.scope === "session" && request.toolApproval?.allowSession
+          ? "session"
+          : command.scope === "always" && request.toolApproval?.allowAlways
+            ? "always"
+            : undefined;
+      if (scope) {
+        await this.finish(
+          token,
+          {
+            type: "elicitation",
+            action: "accept",
+            content: null,
+            scope,
+          },
+          formatProcessedInteractionOutcome(
+            scope === "session"
+              ? interactionOutcome.mcpAllowedSession
+              : scope === "always"
+                ? interactionOutcome.mcpAllowedAlways
+                : interactionOutcome.mcpAllowedOnce,
+          ),
+        );
+        return;
+      }
+    }
+    await this.notify(pending.target, "MCP 交互命令或内容无效。");
   }
 
   private async finish(
@@ -460,7 +491,7 @@ type ParsedInteractionCommand =
   | {
       action: "approve";
       token: string;
-      scope: "once" | "session" | "rule";
+      scope: "once" | "session" | "always" | "rule";
     }
   | {
       action: "approve";
@@ -489,7 +520,7 @@ function parseInteractionCommand(
 ): ParsedInteractionCommand | "invalid" | null {
   const normalized = text.trim();
   if (
-    !/^\/(?:批准一次|批准会话|保存命令规则|保存网络规则|拒绝|取消|选择|填写|提交表单|完成)(?:\s|$)/u
+    !/^\/(?:批准一次|批准会话|始终允许|保存命令规则|保存网络规则|拒绝|取消|选择|填写|提交表单|完成)(?:\s|$)/u
       .test(normalized)
   ) {
     return null;
@@ -557,6 +588,7 @@ function parseInteractionCommand(
     && (
       parts[0] === "/批准一次"
       || parts[0] === "/批准会话"
+      || parts[0] === "/始终允许"
       || parts[0] === "/保存命令规则"
     )
   ) {
@@ -565,7 +597,9 @@ function parseInteractionCommand(
       token: parts[1]!,
       scope: parts[0] === "/批准一次"
         ? "once"
-        : parts[0] === "/批准会话" ? "session" : "rule",
+        : parts[0] === "/批准会话"
+          ? "session"
+          : parts[0] === "/始终允许" ? "always" : "rule",
     };
   }
   if (
@@ -599,6 +633,8 @@ function approvalChoice(
       return { type: "session" };
     case "rule":
       return { type: "execpolicy" };
+    case "always":
+      return undefined;
     case "network":
       return Number.isSafeInteger(command.amendmentNumber)
         ? {
@@ -621,6 +657,7 @@ function supportsInteraction(request: InteractionRequest): boolean {
         === request.questions.length;
   }
   return request.mode === "form"
+    || (request.mode === "tool-approval" && request.toolApproval !== undefined)
     || (
       request.url !== undefined
       && safeHttpUrl(request.url) !== undefined
@@ -759,7 +796,9 @@ function renderElicitationPrompt(
         "完成外部操作后发送：",
         `\`\`\`text\n/完成 ${token}\n\`\`\``,
       ].join("\n\n")
-    : [
+    : request.mode === "tool-approval" && request.toolApproval
+      ? renderMcpToolApprovalActions(request, token)
+      : [
         "请提交不超过 1000 字符的有效 JSON（复制后替换示例内容）：",
         `\`\`\`text\n/提交表单 ${token} {"key":"value"}\n\`\`\``,
       ].join("\n\n");
@@ -773,6 +812,34 @@ function renderElicitationPrompt(
       ].join("\n"),
     ]),
   ];
+}
+
+function renderMcpToolApprovalActions(
+  request: ElicitationRequest,
+  token: string,
+): string {
+  const tool = request.toolApproval!;
+  return [
+    `工具：${sanitizeWeixinMarkdownText(tool.toolTitle ?? "未命名工具")}`,
+    ...(tool.detail
+      ? [`参数：${sanitizeWeixinMarkdownText(tool.detail)}`]
+      : []),
+    "请完整复制并发送以下一条命令。",
+    "允许一次",
+    `\`\`\`text\n/批准一次 ${token}\n\`\`\``,
+    ...(tool.allowSession
+      ? [
+          "本会话允许",
+          `\`\`\`text\n/批准会话 ${token}\n\`\`\``,
+        ]
+      : []),
+    ...(tool.allowAlways
+      ? [
+          "始终允许",
+          `\`\`\`text\n/始终允许 ${token}\n\`\`\``,
+        ]
+      : []),
+  ].join("\n\n");
 }
 
 function packPromptBlocks(blocks: readonly string[]): string[] {

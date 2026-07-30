@@ -11,8 +11,10 @@ import { join, resolve } from "node:path";
 import pino from "pino";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import type { ApprovalRequest } from "../src/approval/index.js";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import {
+  handleApprovalServerRequest,
   toConversationInputEvent,
   toThreadStateEvent,
 } from "../src/codex-client/index.js";
@@ -271,6 +273,7 @@ contractSuite("isolated Codex App Server state contract", () => {
   let codexHome: string;
   let socketPath: string;
   let processHandle: ChildProcess;
+  let ownerRpc: JsonRpcClient;
   let ownerClient: CodexAppServerClient;
   let peerRpc: JsonRpcClient;
   let peerClient: CodexAppServerClient;
@@ -282,6 +285,18 @@ contractSuite("isolated Codex App Server state contract", () => {
     codexHome = join(testRuntime, "codex-home");
     socketPath = join(testRuntime, "app-server.sock");
     mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    const approvalProbe = resolve(
+      "tests/fixtures/mcp-tool-approval-server.mjs",
+    );
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      [
+        "[mcp_servers.approval_probe]",
+        `command = ${JSON.stringify(process.execPath)}`,
+        `args = [${JSON.stringify(approvalProbe)}]`,
+        "",
+      ].join("\n"),
+    );
     processHandle = spawn(
       process.env.CODEX_BINARY ?? "codex",
       ["app-server", "--listen", `unix://${socketPath}`],
@@ -302,8 +317,9 @@ contractSuite("isolated Codex App Server state contract", () => {
         ? undefined
         : new Error(appServerFailure("隔离 Codex App Server 在创建 Unix Socket 前退出", appServerStderr)),
     );
+    ownerRpc = new JsonRpcClient(new UnixWebSocketTransport(socketPath));
     ownerClient = new CodexAppServerClient(
-      new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
+      ownerRpc,
       { sandbox: "read-only" },
     );
     peerRpc = new JsonRpcClient(new UnixWebSocketTransport(socketPath));
@@ -341,6 +357,66 @@ contractSuite("isolated Codex App Server state contract", () => {
       && typeof server.authStatus === "string"
       && Number.isInteger(server.toolCount))).toBe(true);
   });
+
+  it("round-trips MCP tool approval metadata through the real App Server", async () => {
+    const started = await ownerClient.startThread(workdir);
+    const threadId = started.thread.id;
+    let observed: ApprovalRequest | undefined;
+    ownerClient.setServerRequestHandler((request) =>
+      handleApprovalServerRequest(request, {
+        handle: async (approval) => {
+          observed = approval;
+          return {
+            type: "elicitation",
+            action: "accept",
+            content: null,
+            persist: "session",
+          };
+        },
+      }));
+    try {
+      const response = await ownerRpc.request<{
+        content: Array<{ type?: unknown; text?: unknown }>;
+        isError?: boolean;
+      }>({
+        method: "mcpServer/tool/call",
+        params: {
+          threadId,
+          server: "approval_probe",
+          tool: "approval_probe",
+          arguments: { pull_number: 146 },
+        },
+      } as never);
+
+      expect(observed).toMatchObject({
+        type: "elicitation",
+        threadId,
+        turnId: null,
+        serverName: "approval_probe",
+        mode: "form",
+        toolApproval: {
+          connectorName: "GitHub",
+          toolTitle: "Update pull request",
+          parameters: [{
+            name: "pull_number",
+            displayName: "Pull request",
+            value: 146,
+          }],
+          allowSession: true,
+          allowAlways: true,
+        },
+      });
+      expect(response.isError).toBe(false);
+      expect(JSON.parse(String(response.content[0]?.text))).toEqual({
+        action: "accept",
+        content: {},
+        _meta: { persist: "session" },
+      });
+    } finally {
+      await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
+      await ownerClient.deleteThread(threadId);
+    }
+  }, 15_000);
 
   it("maps the isolated App Server Plugin list to stable installed entries", async () => {
     const plugins = await ownerClient.listPlugins(workdir);

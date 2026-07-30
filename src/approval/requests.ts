@@ -39,6 +39,19 @@ export interface AdditionalPermissionProfile {
   fileSystem: AdditionalFileSystemPermissions | null;
 }
 
+export interface McpToolApproval {
+  connectorName: string | null;
+  toolTitle: string | null;
+  toolDescription: string | null;
+  parameters: Array<{
+    name: string;
+    displayName: string;
+    value: JsonValue;
+  }>;
+  allowSession: boolean;
+  allowAlways: boolean;
+}
+
 export type CommandApprovalOption =
   | "accept"
   | "acceptForSession"
@@ -99,6 +112,7 @@ export type ApprovalRequest =
       mode: "form" | "openai/form" | "url";
       message: string;
       url?: string;
+      toolApproval?: McpToolApproval;
     });
 
 export type JsonValue =
@@ -130,6 +144,7 @@ export type ApprovalResponse =
       type: "elicitation";
       action: "accept" | "decline" | "cancel";
       content: JsonValue | null;
+      persist: "session" | "always" | null;
     };
 
 export interface ApprovalRequestHandler {

@@ -617,6 +617,53 @@ describe("Feishu interaction port", () => {
     await fixture.interactions.close();
   });
 
+  it("renders MCP tool approval choices instead of a JSON form", async () => {
+    const fixture = createConfiguredFixture();
+    const request: Extract<InteractionRequest, { type: "elicitation" }> = {
+      ...elicitationRequest(),
+      title: "MCP GitHub 请求批准",
+      mode: "tool-approval",
+      message: "允许 GitHub 更新拉取请求吗？",
+      toolApproval: {
+        toolTitle: "Update pull request",
+        detail: "Pull request：146",
+        allowSession: true,
+        allowAlways: true,
+      },
+    };
+    const decision = fixture.interactions.request(target, request);
+    await settle();
+
+    const cardJson = JSON.stringify(fixture.sentCards[0]!.card);
+    expect(cardJson).toContain("Update pull request");
+    expect(cardJson).toContain("允许一次");
+    expect(cardJson).toContain("本会话允许");
+    expect(cardJson).toContain("始终允许");
+    expect(cardJson).not.toContain("codexc_mcp_form");
+
+    const token = interactionToken(
+      fixture.sentCards[0]!.card,
+      "mcp-session",
+    );
+    expect(fixture.interactions.handleCardAction({
+      messageId: "om_card",
+      chatId: target.conversationId,
+      actorOpenId: "ou_actor",
+      tag: "button",
+      value: {
+        interaction_token: token,
+        decision: "mcp-session",
+      },
+    })).toBe("accepted");
+    await expect(decision).resolves.toEqual({
+      type: "elicitation",
+      action: "accept",
+      content: null,
+      scope: "session",
+    });
+    await fixture.interactions.close();
+  });
+
   it("cancels pending user input when another client resolves it", async () => {
     const fixture = createConfiguredFixture();
     const decision = fixture.interactions.request(target, userInputRequest());

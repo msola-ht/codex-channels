@@ -36,8 +36,9 @@
   清洗命令、查询及上游错误中的敏感文本；只把 `imageGeneration.savedPath` 映射为稳定生成图片
   产物路径，不把 `imageView` 当作可外发产物。
 - `server-request-adapter.ts`：把命令、文件、临时权限、用户输入和 MCP elicitation 五类
-  Server Request 解码为 Approval 稳定请求，并把稳定决定精确编码为当前官方响应；畸形请求
-  安全拒绝，未知请求返回明确 JSON-RPC 方法错误。
+  Server Request 解码为 Approval 稳定请求；其中按固定版本的空对象 Schema 与
+  `mcp_tool_call` 元数据识别 MCP 工具审批，保留工具展示参数和上游提供的持久范围。稳定决定
+  精确编码为当前官方响应；畸形请求安全拒绝，未知请求返回明确 JSON-RPC 方法错误。
 - `protocol-info.ts`：从精确协议基线公开受支持的 Codex CLI 版本和 Gateway 显示版本，供组合根
   校验并向 Surface 注入纯字符串。
 - `client.ts`：Thread 搜索/归档、Turn、模型、权限、已安装插件、Skill、用量及用户级配置

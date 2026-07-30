@@ -22,6 +22,10 @@
 对应 Surface 端口时必须记录明确的安全拒绝原因，不得记录命令、审批理由、表单内容或 MCP
 输入正文。Surface 在平台创建交互消息后记录送达结果，便于区分上游未请求、路由失败和平台
 发送失败。
+固定版本 MCP 工具审批通过 form elicitation 的
+`_meta.codex_approval_kind = "mcp_tool_call"` 识别；协调器只把上游明确提供的
+`session` / `always` 持久范围交给 Surface，并在用户选择后原样返回 `_meta.persist`。
+普通 MCP form 仍按 JSON 输入处理，工具审批不得降级为要求用户手写 JSON。
 本模块不导入 `codex-client` 或 `codex-protocol`，也不接收原始 RPC method/params；畸形与未知
 Server Request 在 Client 适配边界安全拒绝，原始 params 不进入业务模块或错误消息。
 命令审批携带实验性的额外网络或文件系统权限时，Client 适配器必须先按当前协议基线验证，

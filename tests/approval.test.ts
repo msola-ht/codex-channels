@@ -1232,6 +1232,109 @@ describe("ApprovalCoordinator", () => {
     });
   });
 
+  it("maps an MCP tool approval to a session decision without asking for JSON", async () => {
+    const interaction = new FakeInteraction({
+      type: "elicitation",
+      action: "accept",
+      content: null,
+      scope: "session",
+    });
+    const coordinator = new ApprovalCoordinator(
+      routerWithTarget(),
+      interaction,
+      30_000,
+    );
+
+    const response = await handleRaw(coordinator, {
+      id: "request-mcp-tool",
+      method: "mcpServer/elicitation/request",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        serverName: "codex_apps",
+        mode: "form",
+        message: "Allow GitHub to update a pull request?",
+        requestedSchema: {
+          type: "object",
+          properties: {},
+        },
+        _meta: {
+          codex_approval_kind: "mcp_tool_call",
+          connector_name: "GitHub",
+          tool_title: "Update pull request",
+          persist: ["session", "always"],
+          tool_params_display: [{
+            name: "pull_number",
+            display_name: "Pull request",
+            value: 146,
+          }],
+        },
+      },
+    });
+
+    expect(interaction.requests[0]).toEqual({
+      type: "elicitation",
+      requestId: "request-mcp-tool",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      title: "MCP GitHub 请求批准",
+      message: "Allow GitHub to update a pull request?",
+      mode: "tool-approval",
+      toolApproval: {
+        toolTitle: "Update pull request",
+        detail: "Pull request：146",
+        allowSession: true,
+        allowAlways: true,
+      },
+      expiresInMs: 30_000,
+    });
+    expect(response).toEqual({
+      action: "accept",
+      content: null,
+      _meta: { persist: "session" },
+    });
+  });
+
+  it("cancels malformed MCP tool approval metadata instead of degrading to a form", async () => {
+    const interaction = new FakeInteraction({
+      type: "elicitation",
+      action: "accept",
+      content: { approved: true },
+    });
+    const coordinator = new ApprovalCoordinator(
+      routerWithTarget(),
+      interaction,
+      30_000,
+    );
+
+    const response = await handleRaw(coordinator, {
+      id: "request-mcp-tool-malformed",
+      method: "mcpServer/elicitation/request",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        serverName: "codex_apps",
+        mode: "form",
+        message: "Allow this tool?",
+        requestedSchema: {
+          type: "object",
+          properties: {},
+        },
+        _meta: {
+          codex_approval_kind: "mcp_tool_call",
+          persist: "forever",
+        },
+      },
+    });
+
+    expect(response).toEqual({
+      action: "cancel",
+      content: null,
+      _meta: null,
+    });
+    expect(interaction.requests).toEqual([]);
+  });
+
   it.each([
     ["item/fileChange/requestApproval", { decision: "decline" }],
     ["item/permissions/requestApproval", { permissions: {}, scope: "turn" }],

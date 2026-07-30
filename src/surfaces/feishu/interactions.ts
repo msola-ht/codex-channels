@@ -421,9 +421,44 @@ function mapInteractionDecision(
         }
       : undefined;
   }
+  if (request.mode === "tool-approval") {
+    return mapMcpToolApprovalDecision(request, action);
+  }
   return action === "submit"
     ? mapElicitationFormDecision(formValues)
     : undefined;
+}
+
+function mapMcpToolApprovalDecision(
+  request: Extract<InteractionRequest, { type: "elicitation" }>,
+  action: string,
+): {
+  decision: Extract<InteractionDecision, { type: "elicitation" }>;
+  outcome: string;
+} | undefined {
+  const scope = action === "mcp-once"
+    ? "once"
+    : action === "mcp-session" && request.toolApproval?.allowSession
+      ? "session"
+      : action === "mcp-always" && request.toolApproval?.allowAlways
+        ? "always"
+        : undefined;
+  if (!scope) {
+    return undefined;
+  }
+  return {
+    decision: {
+      type: "elicitation",
+      action: "accept",
+      content: null,
+      scope,
+    },
+    outcome: scope === "session"
+      ? interactionOutcome.mcpAllowedSession
+      : scope === "always"
+        ? interactionOutcome.mcpAllowedAlways
+        : interactionOutcome.mcpAllowedOnce,
+  };
 }
 
 function mapUserInputDecision(
