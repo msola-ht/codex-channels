@@ -6,7 +6,7 @@
 
 - `index.ts`：本模块的公开导出入口。
 - `conversation-command-service.ts`：定义平台无关的会话命令名称，解析参数并返回结构化结果；不包含平台文案或消息布局。
-- `conversation-service.ts`：新建、恢复、切换、归档和查询 Thread，提交、steer 或将纯文本
+- `conversation-service.ts`：新建、恢复、切换、归档、固定和查询 Thread，提交、steer 或将纯文本
   排到下一 Turn，公开 Conversation 状态与最近 Turn 产物，并通过注入端口把项目规则操作限制
   到当前授权 Workspace；Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，
   并通过组合根注入的只读端口取得当前 Workspace Git 分支；
@@ -44,7 +44,7 @@ Surface 应通过这里的用例接口驱动会话，不应直接拼装 JSON-RPC
 成功启动 Turn 后，模型、思考强度、服务层级和协作模式以 App Server 的 Thread 设置为准；
 Gateway 重启时通过恢复 Thread 和设置通知重新取得这些设置。`/plan` 无参数切换
 Default/Plan，带参数时在空闲边界内直接启动 Plan Turn；活动 Turn 不允许中途切换。
-Turn、steer、停止、重命名、压缩、Review 和 Goal 只依赖 `TurnExecutionPort`；当前版本官方字段由
+Turn、steer、停止、重命名、固定、压缩、Review 和 Goal 只依赖 `TurnExecutionPort`；当前版本官方字段由
 `codex-client` 负责映射。Goal set/clear 请求成功后，Application 使用已确认结果立即更新 Core；
 App Server 通知继续处理其他客户端修改与恢复后的状态校正。
 模型选择和 Fast 只依赖 `ModelSelectionPort`；不可见模型过滤、官方模型字段裁剪以及

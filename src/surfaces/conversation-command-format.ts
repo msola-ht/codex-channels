@@ -27,6 +27,8 @@ export const conversationCommandDescriptions = {
   new: "下一条消息创建新会话",
   archive: "归档当前会话",
   unarchive: "恢复已归档会话",
+  pin: "固定当前会话",
+  unpin: "取消固定当前会话",
   status: "查看当前状态",
   workspace: "列出或切换 Workspace",
   stop: "停止当前任务",
@@ -57,6 +59,7 @@ export const conversationCommandHelpSections = [
       "/resume [序号|名称|Thread ID]",
       "/sessions [搜索词] · /archived [搜索词]",
       "/new · /archive · /unarchive <序号|名称|Thread ID>",
+      "/pin · /unpin",
       "/rename <名称> · /compact · /fork",
     ],
   },
@@ -111,7 +114,7 @@ export function formatConversationSessions(
     `${result.archived ? "已归档会话" : "历史会话"}（${result.sessions.length}）${result.searchTerm ? ` · 搜索：${result.searchTerm}` : ""}：`,
     ...visibleSessions.map(
       (session, index) =>
-        `${index + 1}. ${formatSessionLabel(session.name ?? session.preview)} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : ""}`,
+        `${index + 1}. ${session.isPinned ? "固定 · " : ""}${formatSessionLabel(session.name ?? session.preview)} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : ""}`,
     ),
     ...(hiddenCount > 0
       ? [
@@ -138,6 +141,8 @@ export function formatConversationCommandOutcome(
       return `已归档 Codex Thread\nThread：${outcome.threadId}\n下一条普通消息将创建新会话。`;
     case "thread.unarchived":
       return `已取消归档并切换会话\nThread：${outcome.threadId}`;
+    case "thread.pin-updated":
+      return outcome.pinned ? "已固定当前会话。" : "已取消固定当前会话。";
     case "workspace.selected":
       return `已切换 Workspace\nWorkspace：${outcome.workspace.name}\n工作目录：${outcome.workspace.cwd}`;
     case "turn.stop-requested":

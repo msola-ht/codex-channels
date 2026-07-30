@@ -418,6 +418,14 @@ describe("Feishu output renderer", () => {
         expected: "名称：新名称",
       },
       {
+        outcome: { type: "thread.pin-updated", pinned: true },
+        expected: "已固定当前会话",
+      },
+      {
+        outcome: { type: "thread.pin-updated", pinned: false },
+        expected: "已取消固定当前会话",
+      },
+      {
         outcome: { type: "thread.compaction-requested" },
         expected: "已请求压缩当前 Codex Thread",
       },
@@ -466,13 +474,14 @@ describe("Feishu output renderer", () => {
         id: "thread-1234567890",
         name: "会话名称",
         preview: "预览",
+        isPinned: true,
         status: { type: "idle" },
       }],
       currentThreadId: "thread-1234567890",
       archived: false,
       searchTerm: "会话",
     });
-    expect(sessions).toContain("会话名称 · thread-12345 · idle ← 当前");
+    expect(sessions).toContain("固定 · 会话名称 · thread-12345 · idle ← 当前");
 
     expect(renderFeishuCommandResult({
       kind: "skills",
@@ -576,6 +585,7 @@ describe("Feishu output renderer", () => {
         preview: index === 0
           ? `第一行\n第二行 ${"长".repeat(60)}`
           : `会话 ${index + 1}`,
+        isPinned: false,
         status: { type: "idle" as const },
       })),
       archived: false,

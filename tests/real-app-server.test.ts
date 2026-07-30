@@ -358,6 +358,25 @@ contractSuite("isolated Codex App Server state contract", () => {
       && Number.isInteger(server.toolCount))).toBe(true);
   });
 
+  it("shares persisted Thread pin state across clients without local storage", async () => {
+    const started = await ownerClient.startThread(workdir);
+    const threadId = started.thread.id;
+    try {
+      await ownerClient.setThreadPinned(threadId, true);
+
+      const peerRead = await peerClient.readThread(threadId);
+      expect(peerRead.isPinned).toBe(true);
+
+      await peerClient.setThreadPinned(threadId, false);
+      await expect(ownerClient.readThread(threadId)).resolves
+        .toMatchObject({ id: threadId, isPinned: false });
+    } finally {
+      await ownerClient.setThreadPinned(threadId, false).catch(() => undefined);
+      await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
+      await ownerClient.deleteThread(threadId);
+    }
+  }, 15_000);
+
   it("round-trips MCP tool approval metadata through the real App Server", async () => {
     const started = await ownerClient.startThread(workdir);
     const threadId = started.thread.id;

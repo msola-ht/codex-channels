@@ -25,6 +25,7 @@ function thread(id: string, status: ThreadStatus): ThreadSnapshot {
     id,
     sessionId: id,
     preview: "test",
+    isPinned: false,
     status,
     cwd: "/workspace",
     source: "cli",

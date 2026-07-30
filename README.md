@@ -129,7 +129,7 @@ codexc service logs -f             # 持续跟踪 Gateway 日志
 
 ### 常用聊天命令
 
-- 会话：`/new`、`/resume`、`/sessions`、`/archive`、`/unarchive`
+- 会话：`/new`、`/resume`、`/sessions`、`/archive`、`/unarchive`、`/pin`、`/unpin`
 - Workspace：`/workspace`
 - 运行：`/status`、`/stop`、`/queue <描述>`、`/compact`、`/fork`、`/review`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`

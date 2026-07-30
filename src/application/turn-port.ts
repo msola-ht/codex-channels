@@ -56,6 +56,7 @@ export interface TurnExecutionPort {
   ): Promise<TurnStarted>;
   interruptTurn(threadId: string, turnId: string): Promise<void>;
   setThreadName(threadId: string, name: string): Promise<void>;
+  setThreadPinned(threadId: string, pinned: boolean): Promise<void>;
   compactThread(threadId: string): Promise<void>;
   startReview(threadId: string, target: ReviewTarget): Promise<ReviewStarted>;
   getGoal(threadId: string): Promise<ThreadGoal | null>;

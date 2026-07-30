@@ -11,6 +11,7 @@ export interface ThreadSnapshot {
   sessionId: string;
   preview: string;
   name: string | null;
+  isPinned: boolean;
   status: ThreadStatus;
   cwd: string;
   source: ThreadSource;

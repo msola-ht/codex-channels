@@ -53,6 +53,7 @@ export interface ConversationSession {
   id: string;
   preview: string;
   name: string | null;
+  isPinned: boolean;
   status: { type: "notLoaded" | "idle" | "systemError" | "active" };
 }
 
@@ -239,19 +240,21 @@ export class ConversationService {
     target: ConversationTarget,
     options: { archived?: boolean; searchTerm?: string } = {},
   ): Promise<ConversationSession[]> {
-    const sessions = await this.router.list(target, options);
-    return sessions.map(({ id, preview, name, status }) => ({
-      id,
-      preview,
-      name,
-      status,
-    }));
+    const sessions = pinnedFirst(await this.router.list(target, options));
+    return sessions
+      .map(({ id, preview, name, isPinned, status }) => ({
+        id,
+        preview,
+        name,
+        isPinned,
+        status,
+      }));
   }
 
   resume(target: ConversationTarget, selector: string): Promise<string> {
     return this.locked(target, async () => {
       this.requireIdle(target);
-      const sessions = await this.router.list(target);
+      const sessions = pinnedFirst(await this.router.list(target));
       const selected = resolveThread(sessions, selector.trim());
       const binding = await this.router.resume(target, selected.id);
       this.clearPendingSelections(target);
@@ -279,7 +282,9 @@ export class ConversationService {
   unarchive(target: ConversationTarget, selector: string): Promise<string> {
     return this.locked(target, async () => {
       this.requireIdle(target);
-      const sessions = await this.router.list(target, { archived: true });
+      const sessions = pinnedFirst(
+        await this.router.list(target, { archived: true }),
+      );
       const selected = resolveThread(sessions, selector.trim(), "unarchive");
       const binding = await this.router.unarchive(target, selected.id);
       this.clearPendingSelections(target);
@@ -334,6 +339,16 @@ export class ConversationService {
         throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
       }
       await this.codex.setThreadName(binding.threadId, normalized);
+    });
+  }
+
+  setPinned(target: ConversationTarget, pinned: boolean): Promise<void> {
+    return this.locked(target, async () => {
+      const binding = this.router.current(target);
+      if (!binding) {
+        throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
+      }
+      await this.codex.setThreadPinned(binding.threadId, pinned);
     });
   }
 
@@ -684,4 +699,11 @@ export function resolveThread(
     ambiguous ? "session.selector.ambiguous" : "session.selector.not-found",
     ambiguous ? "会话选择不唯一" : "找不到指定会话",
   );
+}
+
+function pinnedFirst<T extends { isPinned: boolean }>(
+  sessions: readonly T[],
+): T[] {
+  return sessions.toSorted((left, right) =>
+    Number(right.isPinned) - Number(left.isPinned));
 }

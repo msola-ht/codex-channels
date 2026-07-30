@@ -224,7 +224,7 @@ jobs:
 
             ## 对本项目的收益
 
-            待 Codex 对照当前 Gateway 架构、支持矩阵和实际使用路径填写；不要照抄上游功能清单。
+            待 Codex 对照当前 Gateway 架构、支持矩阵和实际使用路径填写；每项先用一句普通话解释用途，不要照抄上游功能清单。
 
             ## 本次采用
 
@@ -244,7 +244,7 @@ jobs:
             - 对照固定版本官方源码和测试审查协议语义；
             - 修复业务枚举、通知、Server Request 与安全边界适配；
             - 把上述四个占位章节替换为本项目的实际收益与取舍结论；
-            - 更新 `docs/index.md`、README、CI 锁定版本及相关测试；
+            - 更新 `docs/index.md`、`docs/codex-cli-upgrade-decisions.md`、README、CI 锁定版本及相关测试；
             - 运行 `npm run verify:commit` 并审查最终差异。
 
             占位内容未替换时，升级 PR 描述门禁会阻止 Ready PR 通过。本工作流不会自动转为 Ready、合并、发布或部署。

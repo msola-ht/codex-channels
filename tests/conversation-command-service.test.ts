@@ -21,6 +21,7 @@ describe("ConversationCommandService", () => {
     expect(conversationCommandNames).toContain("resume");
     expect(conversationCommandNames).toContain("fast");
     expect(conversationCommandNames).toContain("goal");
+    expect(conversationCommandNames).toContain("pin");
     expect(conversationCommandNames).toContain("rules");
     expect(isConversationCommandName("status")).toBe(true);
     expect(isConversationCommandName("whoami")).toBe(false);
@@ -268,6 +269,7 @@ describe("ConversationCommandService", () => {
       newSession: vi.fn(async () => undefined),
       archive: vi.fn(async () => "thread-archived"),
       unarchive: vi.fn(async () => "thread-unarchived"),
+      setPinned: vi.fn(async () => undefined),
       selectWorkspace: vi.fn(async () => ({ id: "main", name: "Main", cwd: "/workspace" })),
       listWorkspaces: vi.fn(() => [{ id: "main", name: "Main", cwd: "/workspace" }]),
       stop: vi.fn(async () => true),
@@ -303,6 +305,8 @@ describe("ConversationCommandService", () => {
       ["new", "", "newSession"],
       ["archive", "", "archive"],
       ["unarchive", "thread-1", "unarchive"],
+      ["pin", "", "setPinned"],
+      ["unpin", "", "setPinned"],
       ["status", "", "status"],
       ["workspace", "main", "selectWorkspace"],
       ["stop", "", "stop"],
@@ -335,6 +339,8 @@ describe("ConversationCommandService", () => {
     expect(service.status).toHaveBeenCalledWith(target, {
       includeGitBranch: true,
     });
+    expect(service.setPinned).toHaveBeenNthCalledWith(1, target, true);
+    expect(service.setPinned).toHaveBeenNthCalledWith(2, target, false);
   });
 
   it("returns structured goal query and clear results", async () => {

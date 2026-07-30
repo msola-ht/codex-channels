@@ -11,6 +11,8 @@
 - [`docs/channel-acceptance-matrix.md`](docs/channel-acceptance-matrix.md)：Telegram、飞书和微信验收状态。
 - [`docs/upstream-sources.md`](docs/upstream-sources.md)：飞书与微信上游源码基线。
 - [`docs/codex-cli-upgrade.md`](docs/codex-cli-upgrade.md)：Codex CLI 升级流程。
+- [`docs/codex-cli-upgrade-decisions.md`](docs/codex-cli-upgrade-decisions.md)：各正式版本对本项目的
+  采用、暂缓和拒绝决策。
 - [`docs/surface-integration-guide.md`](docs/surface-integration-guide.md)：新增通讯渠道指南。
 - [`docs/feishu-surface-plan.md`](docs/feishu-surface-plan.md)：飞书 Surface 设计。
 - [`docs/feishu-reference-index.md`](docs/feishu-reference-index.md)：飞书资料与实现映射。

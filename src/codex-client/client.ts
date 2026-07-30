@@ -41,6 +41,7 @@ import type {
   ThreadGoalGetResponse,
   ThreadGoalSetResponse,
   ThreadListResponse,
+  ThreadMetadataUpdateResponse,
   ThreadReadResponse,
   ThreadResumeResponse,
   ThreadStartResponse,
@@ -299,6 +300,17 @@ export class CodexAppServerClient implements
       method: "thread/name/set",
       params: { threadId, name },
     }, { retryOverload: false });
+  }
+
+  async setThreadPinned(threadId: string, pinned: boolean): Promise<void> {
+    const response = await this.rpc.request<ThreadMetadataUpdateResponse>({
+      method: "thread/metadata/update",
+      params: { threadId, isPinned: pinned },
+    }, { retryOverload: false });
+    const updated = toThreadSnapshot(response.thread);
+    if (updated.id !== threadId || updated.isPinned !== pinned) {
+      throw new Error("Codex Thread 固定状态更新结果不一致");
+    }
   }
 
   async compactThread(threadId: string): Promise<void> {

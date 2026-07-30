@@ -12,6 +12,8 @@ export const conversationCommandNames = [
   "new",
   "archive",
   "unarchive",
+  "pin",
+  "unpin",
   "status",
   "workspace",
   "stop",
@@ -93,6 +95,7 @@ export type ConversationCommandOutcome =
   | { type: "session.new" }
   | { type: "thread.archived"; threadId: string }
   | { type: "thread.unarchived"; threadId: string }
+  | { type: "thread.pin-updated"; pinned: boolean }
   | {
       type: "workspace.selected";
       workspace: Awaited<ReturnType<ConversationService["selectWorkspace"]>>;
@@ -182,6 +185,18 @@ export class ConversationCommandService {
           outcome: { type: "thread.unarchived", threadId },
         };
       }
+      case "pin":
+        await this.conversations.setPinned(target, true);
+        return {
+          kind: "outcome",
+          outcome: { type: "thread.pin-updated", pinned: true },
+        };
+      case "unpin":
+        await this.conversations.setPinned(target, false);
+        return {
+          kind: "outcome",
+          outcome: { type: "thread.pin-updated", pinned: false },
+        };
       case "status":
         return {
           kind: "status",

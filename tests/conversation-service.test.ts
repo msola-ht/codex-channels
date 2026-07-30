@@ -29,6 +29,7 @@ function turnPort(overrides: Partial<TurnExecutionPort> = {}): TurnExecutionPort
     steerTurn: unsupported,
     interruptTurn: unsupported,
     setThreadName: unsupported,
+    setThreadPinned: unsupported,
     compactThread: unsupported,
     startReview: unsupported,
     getGoal: unsupported,
@@ -786,6 +787,7 @@ describe("ConversationService model selection", () => {
       | undefined;
     const interruptTurn = vi.fn(async () => undefined);
     const setThreadName = vi.fn(async () => undefined);
+    const setThreadPinned = vi.fn(async () => undefined);
     const compactThread = vi.fn(async () => undefined);
     const startReview = vi.fn(async () => ({
       threadId: "thread-1",
@@ -809,6 +811,7 @@ describe("ConversationService model selection", () => {
       turnPort({
         interruptTurn,
         setThreadName,
+        setThreadPinned,
         compactThread,
         startReview,
         getGoal,
@@ -839,6 +842,8 @@ describe("ConversationService model selection", () => {
     );
 
     await expect(service.stop(target)).resolves.toBe(true);
+    await service.setPinned(target, true);
+    await service.setPinned(target, false);
     active = undefined;
     await service.rename(target, "新名称");
     await service.compact(target);
@@ -854,11 +859,74 @@ describe("ConversationService model selection", () => {
 
     expect(interruptTurn).toHaveBeenCalledWith("thread-1", "turn-1");
     expect(setThreadName).toHaveBeenCalledWith("thread-1", "新名称");
+    expect(setThreadPinned).toHaveBeenNthCalledWith(1, "thread-1", true);
+    expect(setThreadPinned).toHaveBeenNthCalledWith(2, "thread-1", false);
     expect(compactThread).toHaveBeenCalledWith("thread-1");
     expect(startReview).toHaveBeenCalledWith("thread-1", { type: "uncommittedChanges" });
     expect(markTurnStarted).toHaveBeenCalledWith(target, "thread-1", "review-turn-1");
     expect(setGoal).toHaveBeenCalledWith("thread-1", "完成阶段 2");
     expect(clearGoal).toHaveBeenCalledWith("thread-1");
+  });
+
+  it("keeps pinned sessions first without changing order inside each group", async () => {
+    const resume = vi.fn(async (resumeTarget, threadId: string) => ({
+      target: resumeTarget,
+      workspaceId: "main",
+      threadId,
+      sessionId: `session-${threadId}`,
+    }));
+    const service = new ConversationService(
+      turnPort(),
+      {
+        list: async () => [
+          {
+            id: "recent",
+            sessionId: "session-recent",
+            preview: "最近",
+            name: null,
+            isPinned: false,
+            status: { type: "idle" as const },
+            cwd: main.cwd,
+            source: "cli" as const,
+            activeTurnId: null,
+          },
+          {
+            id: "pinned-old",
+            sessionId: "session-pinned-old",
+            preview: "固定较早",
+            name: null,
+            isPinned: true,
+            status: { type: "idle" as const },
+            cwd: main.cwd,
+            source: "cli" as const,
+            activeTurnId: null,
+          },
+          {
+            id: "pinned-new",
+            sessionId: "session-pinned-new",
+            preview: "固定较新",
+            name: null,
+            isPinned: true,
+            status: { type: "idle" as const },
+            cwd: main.cwd,
+            source: "cli" as const,
+            activeTurnId: null,
+          },
+        ],
+        resume,
+      } as unknown as SessionRouter,
+      { activeTurn: () => undefined } as unknown as ConversationCore,
+      { clear: vi.fn() } as unknown as ModelSelectionService,
+      queryPort(),
+    );
+
+    await expect(service.listSessions(target)).resolves.toEqual([
+      expect.objectContaining({ id: "pinned-old", isPinned: true }),
+      expect.objectContaining({ id: "pinned-new", isPinned: true }),
+      expect.objectContaining({ id: "recent", isPinned: false }),
+    ]);
+    await expect(service.resume(target, "1")).resolves.toBe("pinned-old");
+    expect(resume).toHaveBeenCalledWith(target, "pinned-old");
   });
 
   it("keeps pending settings when selecting the same workspace", async () => {

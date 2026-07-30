@@ -183,6 +183,7 @@ describe("shared surface copy contract", () => {
         preview: index === 0
           ? `第一行\n第二行 ${"长".repeat(60)}`
           : `会话 ${index + 1}`,
+        isPinned: false,
         status: { type: "idle" },
       })),
       currentThreadId: "thread-000000000001",

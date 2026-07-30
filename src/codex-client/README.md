@@ -11,8 +11,9 @@
 - `json-rpc.ts`：使用生成的 `ClientRequest` / `ClientNotification` 约束出站消息，并处理
   initialize、请求关联、通知与 Server Request 分流、超时、断线清理及安全重试；初始化期间
   已失效的连接不得重新进入 connected 状态。
-- `thread-adapter.ts`：把当前版本生成的官方 Thread、状态、来源、运行 Turn、上下文压缩 Item ID
-  和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；缺少必需字段时失败关闭。
+- `thread-adapter.ts`：把当前版本生成的官方 Thread、固定状态、运行状态、来源、运行 Turn、
+  上下文压缩 Item ID 和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；
+  缺少必需字段时失败关闭。
 - `turn-adapter.ts`：把 Application 的文本、本地图片与本地音频输入编码为官方 `UserInput`，并映射
   Turn、Review 和 Goal 响应；缺少稳定结果必需字段时失败关闭。
 - `model-adapter.ts`：把当前版本官方模型目录裁剪为 Application 拥有的模型选项和
@@ -41,7 +42,7 @@
   精确编码为当前官方响应；畸形请求安全拒绝，未知请求返回明确 JSON-RPC 方法错误。
 - `protocol-info.ts`：从精确协议基线公开受支持的 Codex CLI 版本和 Gateway 显示版本，供组合根
   校验并向 Surface 注入纯字符串。
-- `client.ts`：Thread 搜索/归档、Turn、模型、权限、已安装插件、Skill、用量及用户级配置
+- `client.ts`：Thread 搜索/归档/固定、Turn、模型、权限、已安装插件、Skill、用量及用户级配置
   读取与服务层级写入等 App Server 方法的类型化封装；MCP 查询按 Thread 使用
   `toolsAndAuthOnly` 分页，配置读取只公开稳定服务层级值，Plugin 查询只调用
   `plugin/installed`，不得改用 `plugin/list` 加载市场目录；Permission Profile 按 CWD 分页，

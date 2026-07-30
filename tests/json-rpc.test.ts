@@ -14,6 +14,7 @@ function appServerThread(
     parentThreadId: null,
     preview: "测试 Thread",
     ephemeral: false,
+    isPinned: false,
     modelProvider: "openai",
     createdAt: 1,
     updatedAt: 1,
@@ -231,6 +232,16 @@ class FakeTransport extends BaseTransport {
         this.emitMessage(JSON.stringify({
           id: decoded.id,
           result: { thread: appServerThread() },
+        })),
+      );
+    } else if (decoded.method === "thread/metadata/update") {
+      const params = decoded.params as { isPinned?: boolean };
+      queueMicrotask(() =>
+        this.emitMessage(JSON.stringify({
+          id: decoded.id,
+          result: {
+            thread: appServerThread({ isPinned: params.isPinned }),
+          },
         })),
       );
     } else if (decoded.method === "model/list") {
@@ -633,6 +644,7 @@ describe("JsonRpcClient", () => {
       sessionId: "session-1",
       preview: "测试 Thread",
       name: null,
+      isPinned: false,
       status: { type: "active" },
       cwd: "/tmp/project",
       source: "other",
@@ -679,6 +691,18 @@ describe("JsonRpcClient", () => {
       .rejects.toThrow("Codex Thread 响应缺少有效 sessionId");
   });
 
+  it("fails closed when an official Thread response lacks pin state", async () => {
+    const transport = new FakeTransport();
+    transport.threadListData = [appServerThread({ isPinned: undefined })];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listThreads("/tmp/project"))
+      .rejects.toThrow("Codex Thread 响应缺少有效 isPinned");
+  });
+
   it("passes stable search/archive filters and uses explicit archive methods", async () => {
     const transport = new FakeTransport();
     const rpc = new JsonRpcClient(transport);
@@ -688,6 +712,7 @@ describe("JsonRpcClient", () => {
     await client.listThreads("/tmp/project", { archived: true, searchTerm: "修复" });
     await client.archiveThread("thread-1");
     await client.unarchiveThread("thread-1");
+    await client.setThreadPinned("thread-1", true);
 
     expect(transport.sent.find((message) => message.method === "thread/list")?.params)
       .toMatchObject({ archived: true, searchTerm: "修复" });
@@ -695,6 +720,8 @@ describe("JsonRpcClient", () => {
       .toEqual({ threadId: "thread-1" });
     expect(transport.sent.find((message) => message.method === "thread/unarchive")?.params)
       .toEqual({ threadId: "thread-1" });
+    expect(transport.sent.find((message) => message.method === "thread/metadata/update")?.params)
+      .toEqual({ threadId: "thread-1", isPinned: true });
   });
 
   it("reads account rate limits through the stable App Server method", async () => {
@@ -1270,6 +1297,7 @@ describe("JsonRpcClient", () => {
     await client.clearGoal("thread-1");
     await client.interruptTurn("thread-1", "turn-1");
     await client.setThreadName("thread-1", "新名称");
+    await client.setThreadPinned("thread-1", false);
     await client.compactThread("thread-1");
 
     expect(review).toEqual({ threadId: "thread-1", turnId: "review-turn-1" });
@@ -1298,6 +1326,8 @@ describe("JsonRpcClient", () => {
       });
     expect(transport.sent.find((message) => message.method === "turn/interrupt")?.params)
       .toEqual({ threadId: "thread-1", turnId: "turn-1" });
+    expect(transport.sent.find((message) => message.method === "thread/metadata/update")?.params)
+      .toEqual({ threadId: "thread-1", isPinned: false });
   });
 
   it("fails closed when a Goal response lacks a required stable field", async () => {

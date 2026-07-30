@@ -113,6 +113,8 @@ describe("Feishu command center", () => {
     for (const command of [
       "stop",
       "archive",
+      "pin",
+      "unpin",
       "compact",
       "fork",
     ]) {
