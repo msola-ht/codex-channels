@@ -13,6 +13,12 @@ enabled = false
 # app_secret = "你的_飞书_App_Secret"
 # allowed_open_ids = ["ou_xxx"]
 
+# 微信只能通过 codexc setup 扫码保存凭据；确认账号后可改为 true。
+# [weixin]
+# enabled = false
+# account_id = "不透明账号@im.bot"
+# allowed_user_ids = ["不透明用户@im.wechat"]
+
 [network]
 # 留空时依次使用标准代理环境变量和当前系统代理；填写的字段优先。
 http_proxy = ""
@@ -32,6 +38,8 @@ timeout_seconds = 300
 [display]
 # full：完整详情；compact：单行摘要；hidden：隐藏操作过程。
 operation_updates = "full"
+# 是否在渠道显示 App Server 的自动任务计划更新。
+plan_updates = false
 
 [storage]
 database_path = "data/gateway.sqlite3"

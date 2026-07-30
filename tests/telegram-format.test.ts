@@ -1,22 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  formatContextUsage,
   formatConfigurationChange,
-  formatDiff,
   formatFastModeState,
   formatModels,
-  formatPlan,
-  formatPermissions,
   formatReasoningEfforts,
   formatLimits,
-  formatMcpServers,
-  formatPlugins,
   formatStatus,
   formatStartupNotification,
-  formatSkills,
   formatUsage,
-  formatWorkspaces,
   formatWorkspacesAdded,
   splitTelegramText,
 } from "../src/surfaces/telegram/format.js";
@@ -43,6 +35,7 @@ function model(
       : [],
     defaultServiceTier: "default",
     isDefault,
+    inputModalities: ["text", "image"],
   };
 }
 
@@ -55,79 +48,6 @@ describe("splitTelegramText", () => {
     expect(chunks.join("")).toBe(text);
     expect(chunks.every((chunk) => !/[\uD800-\uDBFF]$/.test(chunk))).toBe(true);
     expect(chunks.every((chunk) => !/^[\uDC00-\uDFFF]/.test(chunk))).toBe(true);
-  });
-});
-
-describe("extension formatting", () => {
-  it("renders the filtered installed Skills with usage guidance", () => {
-    const entries = [{
-      name: "personal-skill",
-      description: "个人说明",
-    }];
-
-    const text = formatSkills(entries);
-
-    expect(text).toContain("已安装 Skills（1）");
-    expect(text).toContain("personal-skill：个人说明");
-    expect(text).toContain("$Skill名称");
-  });
-
-  it("shows installed Plugins only", () => {
-    const result = [
-      { name: "github", enabled: true },
-      { name: "local-tools", enabled: false },
-    ];
-
-    const text = formatPlugins(result);
-
-    expect(text).toContain("已安装 Plugins（2）");
-    expect(text).toContain("github · 已启用");
-    expect(text).toContain("local-tools · 未启用");
-  });
-
-  it("renders only stable MCP status fields", () => {
-    const text = formatMcpServers([{
-      name: "project-tools",
-      authStatus: "oAuth",
-      toolCount: 2,
-    }]);
-
-    expect(text).toContain("MCP Servers（1）");
-    expect(text).toContain("project-tools · auth=oAuth · tools=2");
-  });
-
-  it("renders stable Permission Profile options", () => {
-    const text = formatPermissions([
-      { id: ":read-only", description: null, allowed: true },
-      { id: "project", description: "项目策略", allowed: false },
-    ]);
-
-    expect(text).toContain(":read-only · 允许");
-    expect(text).toContain("project · 受策略禁止 · 项目策略");
-  });
-});
-
-describe("turn artifact formatting", () => {
-  const artifacts = {
-    threadId: "thread-1",
-    turnId: "turn-1",
-    diff: "diff --git a/a.ts b/a.ts",
-    plan: {
-      explanation: "按顺序执行",
-      steps: [
-        { step: "检查", status: "completed" as const },
-        { step: "修改", status: "inProgress" as const },
-      ],
-    },
-  };
-
-  it("renders the latest diff", () => {
-    expect(formatDiff(artifacts)).toContain("diff --git a/a.ts b/a.ts");
-  });
-
-  it("renders plan state symbols", () => {
-    expect(formatPlan(artifacts)).toContain("● 检查");
-    expect(formatPlan(artifacts)).toContain("◐ 修改");
   });
 });
 
@@ -191,21 +111,7 @@ describe("model formatting", () => {
   });
 });
 
-describe("formatWorkspaces", () => {
-  it("marks the current workspace and only renders configured paths", () => {
-    const text = formatWorkspaces(
-      [
-        { id: "main", name: "Main", cwd: "/workspace/main" },
-        { id: "docs", name: "Docs", cwd: "/workspace/docs" },
-      ],
-      "docs",
-    );
-
-    expect(text).toContain("2. Docs · docs ← 当前");
-    expect(text).toContain("/workspace/main");
-    expect(text).toContain("/workspace/docs");
-  });
-
+describe("formatWorkspacesAdded", () => {
   it("formats newly added workspaces as a switch notification", () => {
     const text = formatWorkspacesAdded([
       {
@@ -264,7 +170,7 @@ describe("formatWorkspaces", () => {
 });
 
 describe("formatStartupNotification", () => {
-  it("reports connectivity and includes the configured workspaces", () => {
+  it("reports connectivity and the current Workspace", () => {
     const text = formatStartupNotification(
       [
         { id: "main", name: "Main", cwd: "/workspace/main" },
@@ -279,6 +185,8 @@ describe("formatStartupNotification", () => {
         modelPending: false,
         effortPending: false,
         fastModePending: false,
+        collaborationMode: "default",
+        collaborationModePending: false,
         gitBranch: "feature/weixin-surface",
         weeklyLimit: {
           usedPercent: 42,
@@ -296,28 +204,26 @@ describe("formatStartupNotification", () => {
       },
     );
 
-    expect(text).toContain("Codex Connect 已联通");
-    expect(text).toContain("App Server 已连接");
+    expect(text).toContain("Codex Connect 已上线");
+    expect(text).toContain("- App Server：已连接");
     expect(text).toContain("运行环境：");
-    expect(text).toContain("│ macOS · arm64");
-    expect(text).toContain("│ Codex Connect 0.145.0 · Node.js v24.18.0");
+    expect(text).toContain("- 系统：macOS · arm64");
+    expect(text).toContain("版本：Codex Connect 0.145.0 · Node.js v24.18.0");
     expect(text).toContain(
-      "│ UA · codex_connect_gateway/0.145.0 (Mac OS 15.7.7; arm64) (codex_connect_gateway; 0.145.0)",
+      "App Server UA：codex_connect_gateway/0.145.0 (Mac OS 15.7.7; arm64) (codex_connect_gateway; 0.145.0)",
     );
-    expect(text).toContain("│ Unix WebSocket");
+    expect(text).toContain("连接：Unix WebSocket");
     expect(text).toContain("当前会话：");
-    expect(text).toContain("│ Main · main");
-    expect(text).toContain("│ /workspace/main");
-    expect(text).toContain("│ Thread · 019f8951-eb3");
-    expect(text).toContain("│ Git 分支 · feature/weixin-surface");
-    expect(text).toContain("│ gpt-main · high");
-    expect(text).toContain("│ 周限 · 已使用 42%");
+    expect(text).toContain("- Workspace：Main (main)");
+    expect(text).toContain("工作目录：/workspace/main");
+    expect(text).toContain("Thread：019f8951-eb3");
+    expect(text).toContain("Git 分支：feature/weixin-surface");
+    expect(text).toContain("模型：gpt-main");
+    expect(text).toContain("思考强度：high");
+    expect(text).toContain("周限：已使用 42%");
     expect(text).not.toContain("本地握手");
     expect(text).not.toContain("本地未发送请求头");
-    expect(text).toContain("Workspace（2）：");
-    expect(text).toContain("│ 1. Main · main ← 当前");
-    expect(text).toContain("│ 2. Docs · docs");
-    expect(text).toContain("│ /workspace/docs");
+    expect(text).not.toContain("/workspace/docs");
   });
 
   it("reports an unbound thread and keeps unknown platform names", () => {
@@ -331,6 +237,8 @@ describe("formatStartupNotification", () => {
         modelPending: false,
         effortPending: false,
         fastModePending: false,
+        collaborationMode: "default",
+        collaborationModePending: false,
       },
       {
         platform: "freebsd",
@@ -342,11 +250,11 @@ describe("formatStartupNotification", () => {
       },
     );
 
-    expect(text).toContain("│ freebsd · x64");
-    expect(text).toContain("│ UA · App Server 未返回");
-    expect(text).toContain("│ Thread · 尚未绑定");
-    expect(text).toContain("│ Git 分支 · 未检测到");
-    expect(text).toContain("│ Fast 模式 · 未知");
+    expect(text).toContain("系统：freebsd · x64");
+    expect(text).toContain("App Server UA：App Server 未返回");
+    expect(text).toContain("Thread：尚未绑定");
+    expect(text).toContain("Git 分支：未检测到");
+    expect(text).toContain("Fast 模式：未知");
   });
 });
 
@@ -356,7 +264,7 @@ describe("formatUsage", () => {
       summary: {
         lifetimeTokens: 5_054_682_221n,
         peakDailyTokens: 202_768_846n,
-        longestRunningTurnSec: 647n,
+        longestRunningTurnSec: 38_784n,
         currentStreakDays: 40n,
         longestStreakDays: 40n,
       },
@@ -374,6 +282,7 @@ describe("formatUsage", () => {
 
     expect(text).toContain("累计 Tokens：5,054.68 M");
     expect(text).toContain("单日峰值：202.77 M");
+    expect(text).toContain("最长 Turn：10小时46分24秒");
     expect(text).toContain("- 2026-07-22：12.35 M");
     expect(text).not.toContain("2026-07-15");
     expect(text.indexOf("2026-07-22")).toBeLessThan(text.indexOf("2026-07-21"));
@@ -392,6 +301,7 @@ describe("formatUsage", () => {
     });
 
     expect(text).toContain("累计 Tokens：未知");
+    expect(text).toContain("最长 Turn：未知");
     expect(text).toContain("暂无每日数据");
   });
 });
@@ -438,6 +348,8 @@ describe("formatStatus", () => {
       modelPending: false,
       effortPending: false,
       fastModePending: false,
+      collaborationMode: "default",
+      collaborationModePending: false,
       contextCompactionCount: 2,
       goal: {
         threadId: "thread-1",
@@ -497,6 +409,8 @@ describe("formatStatus", () => {
       modelPending: false,
       effortPending: false,
       fastModePending: false,
+      collaborationMode: "default",
+      collaborationModePending: false,
     }))
       .toContain("等待 App Server 推送统计");
     const statusWithoutBranch = formatStatus({
@@ -510,93 +424,10 @@ describe("formatStatus", () => {
       modelPending: false,
       effortPending: false,
       fastModePending: false,
+      collaborationMode: "default",
+      collaborationModePending: false,
     });
     expect(statusWithoutBranch).toContain("Fast 模式：关闭");
     expect(statusWithoutBranch).toContain("Git 分支：未检测到");
-  });
-});
-
-describe("formatContextUsage", () => {
-  it("uses the latest context count rather than cumulative thread tokens", () => {
-    expect(formatContextUsage(
-      {
-        total: {
-          totalTokens: 1_250_000,
-          inputTokens: 1_000_000,
-          cachedInputTokens: 750_000,
-          cacheWriteInputTokens: 0,
-          outputTokens: 250_000,
-          reasoningOutputTokens: 50_000,
-        },
-        last: {
-          totalTokens: 12_500,
-          inputTokens: 10_000,
-          cachedInputTokens: 6_000,
-          cacheWriteInputTokens: 0,
-          outputTokens: 2_500,
-          reasoningOutputTokens: 500,
-        },
-        modelContextWindow: 200_000,
-      },
-      {
-        model: "gpt-main",
-        effort: "high",
-        serviceTier: "priority",
-        durationMs: 65_432,
-        contextCompactionCount: 2,
-        weeklyLimit: {
-          usedPercent: 42,
-          windowDurationMins: 10_080,
-          resetsAt: null,
-        },
-        goal: {
-          threadId: "thread-1",
-          objective: "完成 Gateway",
-          status: "active",
-          tokenBudget: 100_000,
-          tokensUsed: 12_500,
-          timeUsedSeconds: 90,
-          createdAt: 1_000,
-          updatedAt: 2_000,
-        },
-        gitBranch: "feature/weixin-surface",
-      },
-    )).toBe([
-      "上下文：12.5 K / 200 K（6.3%）",
-      "缓存命中率：60%",
-      "当前模型：gpt-main",
-      "思考强度：high",
-      "Fast 模式：开启",
-      "对话耗时：1分5秒",
-      "上下文压缩：2 次",
-      "周限：已使用 42%",
-      "Goal：进行中 · 12.5 K / 100 K · 1分30秒",
-      "Git 分支：feature/weixin-surface",
-    ].join("\n"));
-  });
-
-  it("reports an unknown cache hit rate when the turn has no input tokens", () => {
-    expect(formatContextUsage(
-      {
-        total: {
-          totalTokens: 0,
-          inputTokens: 0,
-          cachedInputTokens: 0,
-          cacheWriteInputTokens: 0,
-          outputTokens: 0,
-          reasoningOutputTokens: 0,
-        },
-        last: {
-          totalTokens: 0,
-          inputTokens: 0,
-          cachedInputTokens: 0,
-          cacheWriteInputTokens: 0,
-          outputTokens: 0,
-          reasoningOutputTokens: 0,
-        },
-        modelContextWindow: null,
-      },
-      undefined,
-    )).toContain("缓存命中率：未知");
   });
 });

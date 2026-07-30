@@ -9,6 +9,15 @@ export {
   type AccountUsage,
 } from "./account-port.js";
 export {
+  CollaborationModeSelectionService,
+  type CollaborationModeState,
+} from "./collaboration-mode-service.js";
+export {
+  type CollaborationModeKind,
+  type CollaborationModePreset,
+  type CollaborationModeQueryPort,
+} from "./collaboration-mode-port.js";
+export {
   ConversationCommandService,
   conversationCommandNames,
   isConversationCommandName,
@@ -37,6 +46,7 @@ export {
   type ModelSelectionState,
 } from "./model-selection-service.js";
 export {
+  type ModelInputModality,
   type ModelOption,
   type ModelSelectionPort,
   type ReasoningEffortOption,
@@ -63,6 +73,7 @@ export {
   type ReviewStarted,
   type ReviewTarget,
   type ThreadGoal,
+  type TurnCollaborationMode,
   type TurnExecutionPort,
   type TurnInput,
   type TurnOverrides,

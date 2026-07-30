@@ -6,6 +6,7 @@ config.toml
 # Local environments and dependencies
 .venv/
 node_modules/
+upstream/
 
 # Build, test and tool output
 dist/

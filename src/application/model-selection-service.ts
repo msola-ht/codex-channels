@@ -3,7 +3,11 @@ import {
   conversationTargetKey,
   type ConversationTarget,
 } from "../conversation-core/index.js";
-import type { ModelOption, ModelSelectionPort } from "./model-port.js";
+import type {
+  ModelInputModality,
+  ModelOption,
+  ModelSelectionPort,
+} from "./model-port.js";
 import type { TurnOverrides } from "./turn-port.js";
 import type { SessionRouter } from "../session-routing/index.js";
 
@@ -32,6 +36,36 @@ export class ModelSelectionService {
   async state(target: ConversationTarget): Promise<ModelSelectionState> {
     const models = await this.codex.listModels();
     return this.resolveState(target, models);
+  }
+
+  async requireInputModality(
+    target: ConversationTarget,
+    modality: ModelInputModality,
+  ): Promise<void> {
+    const current = await this.state(target);
+    const model = current.models.find((candidate) => candidate.model === current.model);
+    if (!model) {
+      throw new UserFacingError(
+        "model.current.missing",
+        `当前模型不在可用模型列表中：${current.model}`,
+        { model: current.model },
+      );
+    }
+    if (model.inputModalities.includes(modality)) {
+      return;
+    }
+    if (modality === "audio") {
+      throw new UserFacingError(
+        "model.input.audio.unsupported",
+        `当前模型 ${current.model} 不支持语音输入，请发送文字或图片`,
+        { model: current.model },
+      );
+    }
+    throw new UserFacingError(
+      "model.input.unsupported",
+      `当前模型 ${current.model} 不支持该输入类型`,
+      { model: current.model, modality },
+    );
   }
 
   async selectModel(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
@@ -127,6 +161,7 @@ export class ModelSelectionService {
         serviceTier: hasServiceTierOverride(pending)
           ? pending.serviceTier ?? null
           : current.serviceTier,
+        collaborationMode: current.collaborationMode,
       });
     }
     this.pendingByConversation.delete(key);

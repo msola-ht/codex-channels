@@ -45,6 +45,17 @@ const feishuSchema = z.strictObject({
   }
 });
 
+const weixinSetupSchema = z.strictObject({
+  enabled: z.boolean(),
+  account_id: z.string().regex(/^[^\s@]{1,1000}@im\.bot$/u),
+  allowed_user_ids: z.array(
+    z.string().regex(/^[^\s@]{1,1000}@im\.wechat$/u),
+  ).min(1).refine(
+    (values) => new Set(values).size === values.length,
+    "allowed_user_ids 不能包含重复项",
+  ),
+});
+
 const gatewayDocumentSchema = z.strictObject({
   version: z.literal(1),
   default_workspace: z.string().trim().min(1),
@@ -55,6 +66,7 @@ const gatewayDocumentSchema = z.strictObject({
     message_format: z.enum(["html", "rich"]).default("html"),
   }),
   feishu: feishuSchema.optional(),
+  weixin: weixinSetupSchema.optional(),
   network: z.strictObject({
     http_proxy: z.string().optional(),
     https_proxy: z.string().optional(),
@@ -71,8 +83,9 @@ const gatewayDocumentSchema = z.strictObject({
     timeout_seconds: z.number().int().min(30).max(3600).default(300),
   }).default({ timeout_seconds: 300 }),
   display: z.strictObject({
-    operation_updates: z.enum(["full", "compact", "hidden"]).default("full"),
-  }).default({ operation_updates: "full" }),
+    operation_updates: z.enum(["full", "compact", "hidden"]).default("compact"),
+    plan_updates: z.boolean().default(false),
+  }).default({ operation_updates: "compact", plan_updates: false }),
   storage: z.strictObject({
     database_path: z.string().min(1).default("data/gateway.sqlite3"),
   }).default({ database_path: "data/gateway.sqlite3" }),
@@ -116,6 +129,22 @@ export function readGatewayConfig(configPath) {
   return parseGatewayConfig(readFileSync(configPath, "utf8"), configPath);
 }
 
+export function materializeGatewayConfigDefaults(configPath, document) {
+  const defaults = validateGatewayConfigDocument(document);
+  if (!mergeMissingDefaults(document, defaults)) {
+    return false;
+  }
+  const source = sourceByDocument.get(document);
+  if (
+    source === undefined
+    || readFileSync(configPath, "utf8") !== source.content
+  ) {
+    throw new Error("config.toml 在自动补齐期间已发生变化");
+  }
+  writeGatewayConfig(configPath, document);
+  return true;
+}
+
 export function writeGatewayConfig(configPath, document) {
   const temporaryPath = `${configPath}.${process.pid}.tmp`;
   try {
@@ -133,8 +162,8 @@ export function writeGatewayConfig(configPath, document) {
       mode: 0o600,
       flag: "wx",
     });
+    chmodSync(temporaryPath, 0o600);
     renameSync(temporaryPath, configPath);
-    chmodSync(configPath, 0o600);
     sourceByDocument.set(document, {
       content,
       workspaceIds: workspaceIds(document),
@@ -143,6 +172,28 @@ export function writeGatewayConfig(configPath, document) {
     rmSync(temporaryPath, { force: true });
     throw error;
   }
+}
+
+function mergeMissingDefaults(target, defaults) {
+  let changed = false;
+  for (const [key, value] of Object.entries(defaults)) {
+    if (!Object.hasOwn(target, key)) {
+      target[key] = value;
+      changed = true;
+      continue;
+    }
+    if (isTomlTable(target[key]) && isTomlTable(value)) {
+      changed = mergeMissingDefaults(target[key], value) || changed;
+    }
+  }
+  return changed;
+}
+
+function isTomlTable(value) {
+  return value !== null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && !(value instanceof Date);
 }
 
 function preserveTomlComments(source, generated, sourceWorkspaceIds, generatedWorkspaceIds) {

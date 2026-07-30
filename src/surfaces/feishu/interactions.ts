@@ -13,6 +13,12 @@ import type {
   ConversationActorRegistry,
   SurfaceAccessPolicy,
 } from "../../policy/index.js";
+import {
+  interactionCancelledTitle,
+  interactionOutcome,
+} from "../interaction-copy.js";
+import { surfaceErrorMetadata } from "../error-metadata.js";
+import { PendingInteractionRegistry } from "../pending-interaction-registry.js";
 import type { Logger } from "pino";
 import {
   renderFeishuApprovalCard,
@@ -49,17 +55,13 @@ interface PendingInteraction {
   messageId: string;
 }
 
-const maximumConcurrentInteractions = 100;
-
 export type FeishuCardActionResult =
   | "accepted"
   | "invalid"
   | "stale";
 
 export class FeishuInteractionPort implements InteractionPort {
-  private readonly pendingByToken = new Map<string, PendingInteraction>();
-  private readonly tokenByRequest = new Map<string, string>();
-  private readonly resolvedBeforePending = new Set<string>();
+  private readonly pending = new PendingInteractionRegistry<PendingInteraction>();
   private readonly preparations = new Set<Promise<string | undefined>>();
   private readonly preparationCancellations = new Set<() => void>();
   private readonly statusUpdates = new Set<Promise<void>>();
@@ -86,28 +88,18 @@ export class FeishuInteractionPort implements InteractionPort {
   }
 
   resolved(requestId: string): void {
-    const token = this.tokenByRequest.get(requestId);
-    if (!token) {
-      return;
-    }
-    const pending = this.pendingByToken.get(token);
-    if (pending) {
+    const resolution = this.pending.resolved(requestId);
+    if (resolution?.pending) {
       this.finish(
-        token,
-        safeInteractionDecision(pending.request),
-        "已在其他客户端处理",
+        resolution.token,
+        safeInteractionDecision(resolution.pending.request),
+        interactionOutcome.resolvedElsewhere,
       );
-    } else {
-      this.resolvedBeforePending.add(token);
     }
   }
 
   cancelAll(outcome = "连接已断开"): void {
-    for (const token of this.pendingByToken.keys()) {
-      const pending = this.pendingByToken.get(token);
-      if (!pending) {
-        continue;
-      }
+    for (const [token, pending] of this.pending.entries()) {
       this.finish(
         token,
         safeInteractionDecision(pending.request),
@@ -117,18 +109,17 @@ export class FeishuInteractionPort implements InteractionPort {
   }
 
   stopForActor(target: ConversationTarget, actorId: string): boolean {
-    const token = [...this.pendingByToken.entries()]
-      .reverse()
-      .find(([, pending]) =>
+    const token = this.pending.newest(
+      (pending) =>
         pending.target.surface === target.surface
         && pending.target.accountId === target.accountId
         && pending.target.conversationId === target.conversationId
-        && pending.actorId === actorId
-      )?.[0];
+        && pending.actorId === actorId,
+    )?.[0];
     if (!token) {
       return false;
     }
-    const pending = this.pendingByToken.get(token);
+    const pending = this.pending.get(token);
     if (!pending) {
       return false;
     }
@@ -149,7 +140,7 @@ export class FeishuInteractionPort implements InteractionPort {
       this.preparationCancellations.clear();
     }
     this.cancelAll("Gateway 已停止");
-    this.resolvedBeforePending.clear();
+    this.pending.clearPreparingResolutions();
     await waitAtMost(Promise.allSettled([...this.preparations]), 5_000);
     await waitAtMost(Promise.allSettled([...this.statusUpdates]), 5_000);
   }
@@ -163,12 +154,12 @@ export class FeishuInteractionPort implements InteractionPort {
     if (!token || !actionName) {
       return "invalid";
     }
-    const pending = this.pendingByToken.get(token);
+    const pending = this.pending.get(token);
     if (!pending) {
       return "stale";
     }
     if (
-      action.tag !== "button"
+      !supportedActionTag(pending.request, action)
       || action.chatId !== pending.target.conversationId
       || action.messageId !== pending.messageId
       || action.actorOpenId !== pending.actorId
@@ -203,12 +194,6 @@ export class FeishuInteractionPort implements InteractionPort {
     ) {
       return safeInteractionDecision(request);
     }
-    if (this.tokenByRequest.has(request.requestId)) {
-      return safeInteractionDecision(request);
-    }
-    if (this.tokenByRequest.size >= maximumConcurrentInteractions) {
-      return safeInteractionDecision(request);
-    }
     const authorizedActors = this.actorRegistry.actors(target).filter(
       (actorId) => this.access!.isAllowed({ target, actorId }),
     );
@@ -217,7 +202,9 @@ export class FeishuInteractionPort implements InteractionPort {
     }
 
     const token = randomBytes(18).toString("base64url");
-    this.tokenByRequest.set(request.requestId, token);
+    if (!this.pending.reserve(request.requestId, token)) {
+      return safeInteractionDecision(request);
+    }
     const preparation = this.prepareInteractionCard(
       target,
       request,
@@ -248,10 +235,7 @@ export class FeishuInteractionPort implements InteractionPort {
     ]);
     this.preparationCancellations.delete(cancelPreparation);
     if (result.type !== "prepared") {
-      if (this.tokenByRequest.get(request.requestId) === token) {
-        this.tokenByRequest.delete(request.requestId);
-      }
-      this.resolvedBeforePending.delete(token);
+      this.pending.release(request.requestId, token);
       if (result.type === "failed") {
         throw result.error;
       }
@@ -267,11 +251,11 @@ export class FeishuInteractionPort implements InteractionPort {
         this.finish(
           token,
           safeInteractionDecision(request),
-          "请求已超时",
+          interactionOutcome.timedOut,
         );
       }, request.expiresInMs);
       timer.unref();
-      this.pendingByToken.set(token, {
+      const activation = this.pending.activate(token, {
         requestId: request.requestId,
         target,
         actorId: authorizedActors[0]!,
@@ -280,11 +264,14 @@ export class FeishuInteractionPort implements InteractionPort {
         timer,
         messageId,
       });
-      if (this.resolvedBeforePending.delete(token)) {
+      if (activation === "missing") {
+        clearTimeout(timer);
+        resolve(safeInteractionDecision(request));
+      } else if (activation === "resolved-before-active") {
         this.finish(
           token,
           safeInteractionDecision(request),
-          "已在其他客户端处理",
+          interactionOutcome.resolvedElsewhere,
         );
       }
     });
@@ -307,7 +294,7 @@ export class FeishuInteractionPort implements InteractionPort {
       this.logger?.warn(
         {
           ...interactionLogMetadata(target, request),
-          errorType: error instanceof Error ? error.name : typeof error,
+          ...surfaceErrorMetadata(error),
         },
         "飞书交互请求发送失败",
       );
@@ -323,7 +310,7 @@ export class FeishuInteractionPort implements InteractionPort {
     if (!this.closed) {
       return messageId;
     }
-    this.tokenByRequest.delete(request.requestId);
+    this.pending.release(request.requestId, token);
     await this.updateCard(
       target,
       messageId,
@@ -339,13 +326,10 @@ export class FeishuInteractionPort implements InteractionPort {
     decision: InteractionDecision,
     outcome: string,
   ): void {
-    const pending = this.pendingByToken.get(token);
+    const pending = this.pending.take(token);
     if (!pending) {
       return;
     }
-    clearTimeout(pending.timer);
-    this.pendingByToken.delete(token);
-    this.tokenByRequest.delete(pending.requestId);
     pending.resolve(decision);
 
     const statusUpdate = this.updateCard(
@@ -417,7 +401,7 @@ function mapInteractionDecision(
   if (action === "cancel") {
     return {
       decision: safeInteractionDecision(request),
-      outcome: "已取消",
+      outcome: interactionOutcome.cancelled,
     };
   }
   if (request.type === "user-input") {
@@ -433,7 +417,7 @@ function mapInteractionDecision(
             action: "accept",
             content: null,
           },
-          outcome: "已确认完成",
+          outcome: interactionOutcome.completed,
         }
       : undefined;
   }
@@ -453,27 +437,56 @@ function mapUserInputDecision(
     return undefined;
   }
   const answers: Record<string, string[]> = {};
+  const allowedFields = new Set<string>();
   for (const [index, question] of request.questions.entries()) {
-    const answer = formValues[`q${index}`]?.trim();
+    let answer: string | undefined;
+    if (question.options.length > 0) {
+      const choiceField = `q${index}_choice`;
+      const otherField = `q${index}_other`;
+      allowedFields.add(choiceField);
+      const choice = formValues[choiceField]?.trim();
+      const other = question.allowOther
+        ? formValues[otherField]?.trim()
+        : undefined;
+      if (question.allowOther) {
+        allowedFields.add(otherField);
+      }
+      if (other) {
+        answer = other;
+      } else if (choice && question.options.includes(choice)) {
+        answer = choice;
+      }
+    } else {
+      const textField = `q${index}_text`;
+      allowedFields.add(textField);
+      answer = formValues[textField]?.trim();
+    }
     if (
       !answer
-      || (
-        question.options.length > 0
-        && !question.allowOther
-        && !question.options.includes(answer)
-      )
     ) {
       return undefined;
     }
     answers[question.id] = [answer];
   }
-  if (Object.keys(formValues).length !== request.questions.length) {
+  if (Object.keys(formValues).some((field) => !allowedFields.has(field))) {
     return undefined;
   }
   return {
     decision: { type: "user-input", answers },
-    outcome: "已提交回答",
+    outcome: interactionOutcome.answered,
   };
+}
+
+function supportedActionTag(
+  request: InteractionRequest,
+  action: FeishuCardAction,
+): boolean {
+  if (action.tag === "button") {
+    return true;
+  }
+  return request.type !== "approval"
+    && action.tag === "form_submit"
+    && action.value.decision === "submit";
 }
 
 function mapElicitationFormDecision(
@@ -497,7 +510,7 @@ function mapElicitationFormDecision(
         action: "accept",
         content,
       },
-      outcome: "已提交表单",
+      outcome: interactionOutcome.formSubmitted,
     };
   } catch {
     return undefined;
@@ -514,7 +527,7 @@ function renderMismatchedOutcomeCard(title: string): FeishuCardDocument {
       template: "grey",
       title: {
         tag: "plain_text",
-        content: "Codex 交互已取消",
+        content: interactionCancelledTitle,
       },
     },
     elements: [{

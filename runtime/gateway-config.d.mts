@@ -20,6 +20,11 @@ export interface GatewayConfigDocument {
     app_secret: string;
     allowed_open_ids: string[];
   };
+  weixin?: {
+    enabled: boolean;
+    account_id: string;
+    allowed_user_ids: string[];
+  };
   network?: {
     http_proxy?: string;
     https_proxy?: string;
@@ -33,7 +38,10 @@ export interface GatewayConfigDocument {
     sandbox: "read-only" | "workspace-write";
   };
   approval: { timeout_seconds: number };
-  display: { operation_updates: "full" | "compact" | "hidden" };
+  display: {
+    operation_updates: "full" | "compact" | "hidden";
+    plan_updates: boolean;
+  };
   storage: { database_path: string };
   logging: { level: "fatal" | "error" | "warn" | "info" | "debug" | "trace" };
   workspaces: Array<{ id: string; name: string; cwd: string }>;
@@ -43,4 +51,8 @@ export function parseGatewayConfig(content: string, source?: string): TomlTable;
 export function tomlErrorSummary(error: unknown): string;
 export function validateGatewayConfigDocument(document: unknown): GatewayConfigDocument;
 export function readGatewayConfig(configPath: string): TomlTable;
+export function materializeGatewayConfigDefaults(
+  configPath: string,
+  document: TomlTable,
+): boolean;
 export function writeGatewayConfig(configPath: string, document: TomlTable): void;

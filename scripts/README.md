@@ -15,8 +15,11 @@
   所需权限、事件与回调。
   两种方式都验证凭据与 Bot 身份，并原子保存 App ID、App Secret 和允许的用户 Open ID；二维码和
   短期授权状态不持久化。扫码保存后立即保留已有菜单并自动发布 `codexc_home` 悬浮菜单、长连接
-  事件与卡片回调；失败时保留连接配置并提示通过 `/feishu doctor` 恢复。手动凭据流程仍由
-  `/feishu doctor` 完成应用授权与发布。
+  事件与卡片回调；失败时保留连接配置并提示通过 `/fs doctor` 恢复。手动凭据流程仍由
+  `/fs doctor` 完成应用授权与发布。
+- `weixin-setup.mjs`：从统一 Setup 菜单执行连接替换风险确认、微信扫码和严格结果裁剪，把
+  Bot Token 原子写入微信独立安全凭据后端，并只向 TOML 写入禁用态账号与允许用户元数据；
+  Setup 不直接启动消息 Surface，操作者显式启用配置并重载 Gateway 后生效。
 - `feishu-application.mjs`：为 Setup 与 Doctor 提供带有限超时的飞书凭据/Bot 身份只读探测，
   不建立消息长连接，并把 SDK 错误和残缺响应收敛为不含敏感详情的稳定错误。
 - `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。
@@ -42,10 +45,43 @@
 - `write-upgrade-report.mjs`：把 CI 中生成的升级工作树写成 Markdown 摘要、文件清单、统计和
   二进制安全 Patch，并比较 `HEAD` 生成协议的 RPC 名称和顶层字段结构，合并逐阶段结果；生成
   或验证失败且没有差异时仍会输出报告。
-- `protocol-schema.mjs`：在同一文件系统临时生成、逐文件比较并安全替换协议类型目录。
-- `generate-protocol.mjs`：先在临时目录调用当前 Codex CLI 生成协议，成功后替换协议类型、
-  记录版本并同步 npm/Gateway 版本。
-- `check-protocol.mjs`：校验本机 Codex CLI 版本，并重新生成到临时目录确认类型逐文件一致。
+- `protocol-schema.mjs`：在同一文件系统按指定稳定/实验模式临时生成、逐文件比较并安全替换协议类型目录。
+- `generate-protocol.mjs`：先在临时目录调用当前 Codex CLI 的 `generate-ts --experimental`，
+  成功后替换协议类型、记录版本与实验状态并同步 npm/Gateway 版本；实验生成只服务于受控 Plan 边界。
+- `check-protocol.mjs`：校验本机 Codex CLI 版本，并按记录的实验状态重新生成到临时目录确认类型逐文件一致。
+- `weixin-qr-contract-probe.mjs`：阶段 0 隔离二维码合同探针；默认离线显示帮助，只有显式
+  `qr --live` 并再次确认连接替换风险后才访问固定微信端点，严格裁剪状态、限制官方重定向域名
+  并有限取消；不注册 Surface、不写配置或凭据，也不属于公开 `codexc` 命令。
+- `weixin-updates-contract-probe.mjs`：从已验证的微信安全凭据执行一次显式 `once --live`
+  `getupdates` 长轮询，只报告消息数量、字段形状、项目类型、上下文令牌存在性和
+  `message_id` 精度；`sequence --live` 只在内存把首轮游标传给第二轮并比较重放数量和游标推进；
+  `replay --live` 再次复用首轮游标，判断第二批消息是否重放及返回游标是否一致；
+  不输出或保存正文、完整身份、Token、上下文令牌和游标。
+- `weixin-send-contract-probe.mjs`：显式 `reply --live` 后从一条已授权完成态微信文本中仅在
+  内存取得回复目标和 `context_token`，按固定 `v2.4.6` 合同发送一条短文本；不接受命令行
+  Token、用户 ID 或正文；`sequence --live` 使用同一上下文连续发送两条固定短文本，第二条
+  包含 Unicode、emoji 和 Markdown 符号；不输出或保存消息、游标、回复上下文、`client_id`
+  或完整身份，首条发送失败时不继续；`limit --live` 只发送一条固定 4000 字符中文消息，
+  验证官方宿主分片值而不探测未知最大上限；`echo --live` 发送固定回复后再轮询一次，只检查
+  服务端消息 ID 与 `client_id` 形状，不把回送内容写入日志或 Fixture。
+- `weixin-typing-contract-probe.mjs`：显式 `lifecycle --live` 后从一条已授权完成态微信文本中
+  仅在内存取得回复目标和 `context_token`，按固定 `v2.4.6` 合同调用 `getconfig` 获取临时
+  `typing_ticket`，再执行开始、5 秒续期和取消输入状态；不输出或保存消息、游标、回复上下文、
+  票据、Token 或完整身份，不注册常驻 Surface。
+- `weixin-image-contract-probe.mjs`：显式 `download --live` 后从一条已授权完成态微信图片中
+  仅在内存取得固定 `v2.4.6` CDN 下载参数，限定官方 CDN、响应正文和 10 MiB 明文上限，
+  按消息提供的 key 执行 AES-128-ECB 解密并验证 PNG/JPEG 签名；不输出或保存图片、下载地址、
+  查询参数、key、Token、游标或完整身份，不注册常驻 Surface。
+- `weixin-file-contract-probe.mjs`：显式 `download --live` 后从一条已授权完成态微信文件中
+  仅在内存取得固定 `v2.4.6` CDN 下载参数，限定官方 CDN，并以 20 MiB 作为本探针的明文内存
+  安全上限；按消息提供的 key 执行 AES-128-ECB 解密，只报告大小、声明长度和 MD5 是否匹配、
+  文件名形状及由扩展名推断的 MIME，不输出或保存文件名、文件正文、MD5、下载地址、查询参数、
+  key、Token、游标或完整身份，不注册常驻 Surface。
+- `weixin-image-send-contract-probe.mjs`：显式 `send --live` 或 `file --live` 后从一条已授权
+  完成态微信文本中仅在内存取得回复上下文；前者生成固定 PNG，后者生成固定 UTF-8 文本文件，
+  均按固定 `v2.4.6` 合同申请官方 CDN 上传地址、AES-128-ECB 加密并以二进制 `POST` 上传，
+  再发送单张图片或单个一般文件消息；上传缺少下载参数时有限重试，4xx 立即失败；不输出或保存
+  媒体正文、上传地址、参数、key、Token、游标或完整身份，不注册常驻 Surface。
 - `check-gateway-version.mjs`：校验 npm 包和 Gateway 版本都与 Codex CLI 协议版本一致。
 - `check-docs.mjs`：校验项目 Markdown 本地链接、根文档索引、源码模块索引、协议数字和相关目录
   文件索引，并拒绝已移除的文档名称；常规项目文档检查排除 `.codex/skills/**` 附带的技能参考资料。
@@ -68,6 +104,8 @@
 - `check-release-tag.mjs`：要求 Git Tag 与 `package.json` 版本严格一致，防止发布错版。
 - `sync-gateway-version.mjs`：以锁定的 Codex CLI 协议版本同步 `package.json`、锁文件和 Gateway 运行时版本；不维护独立版本号。
 - `doctor.mjs`：检查 npm 包、Node、Codex CLI、当前 TOML 配置、Workspace、飞书凭据/Bot 身份、
+  微信配置与 Bot 凭据、消息游标检查点、允许用户的加密回复上下文覆盖数和最近保存时间，
+  以及微信运行时启用状态；Doctor 不调用 `getupdates`，不显示 Token、`context_token` 或游标；
   Unix WebSocket、`initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，不输出
   完整 User-Agent、飞书上游响应或敏感配置内容。
 - `install-launchd.mjs`：渲染并安装 launchd plist；代理由 CLI 服务入口在每次启动时解析。

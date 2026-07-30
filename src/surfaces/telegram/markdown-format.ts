@@ -34,6 +34,28 @@ export function formatMarkdownAsTelegramHtml(markdown: string): string | undefin
       continue;
     }
 
+    const tableHeader = parseMarkdownTableRow(line);
+    const tableSeparator = index + 1 < lines.length
+      ? parseMarkdownTableSeparator(lines[index + 1]!)
+      : undefined;
+    if (
+      tableHeader
+      && tableSeparator
+      && tableHeader.length === tableSeparator.length
+    ) {
+      output.push(`<b>${tableHeader.map(formatInlineMarkdown).join(" · ")}</b>`);
+      index += 1;
+      while (index + 1 < lines.length) {
+        const row = parseMarkdownTableRow(lines[index + 1]!);
+        if (!row || row.length !== tableHeader.length) {
+          break;
+        }
+        output.push(`• ${row.map(formatInlineMarkdown).join(" · ")}`);
+        index += 1;
+      }
+      continue;
+    }
+
     const heading = line.match(/^#{1,6}\s+(.+)$/);
     if (heading) {
       output.push(`<b>${formatInlineMarkdown(heading[1]!)}</b>`);
@@ -78,20 +100,62 @@ export function formatMarkdownAsTelegramHtml(markdown: string): string | undefin
 }
 
 function formatInlineMarkdown(text: string): string {
-  const code: string[] = [];
+  const protectedHtml: string[] = [];
+  const protect = (html: string): string => {
+    const index = protectedHtml.push(html) - 1;
+    return `\uE000HTML${index}\uE001`;
+  };
   const withPlaceholders = text.replace(/`([^`\n]+)`/g, (_match, content: string) => {
     const rendered = isBotCommand(content.trim())
       ? escapeHtml(content.trim())
       : `<code>${escapeHtml(content)}</code>`;
-    const index = code.push(rendered) - 1;
-    return `\uE000CODE${index}\uE001`;
-  });
+    return protect(rendered);
+  }).replace(
+    /(?<!!)\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/gi,
+    (match, label: string, destination: string) => {
+      if (!isSafeHttpUrl(destination)) {
+        return match;
+      }
+      return protect(
+        `<a href="${escapeHtml(destination)}">${formatInlineMarkdown(label)}</a>`,
+      );
+    },
+  );
   const formatted = escapeHtml(withPlaceholders)
     .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
     .replace(/__([^_\n]+)__/g, "<b>$1</b>")
     .replace(/~~([^~\n]+)~~/g, "<s>$1</s>")
-    .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, "<i>$1</i>");
-  return formatted.replace(/\uE000CODE(\d+)\uE001/g, (_match, index: string) => code[Number(index)] ?? "");
+    .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, "<i>$1</i>")
+    .replace(/(?<![_A-Za-z0-9])_([^_\n]+)_(?![_A-Za-z0-9])/g, "<i>$1</i>");
+  return formatted.replace(
+    /\uE000HTML(\d+)\uE001/g,
+    (_match, index: string) => protectedHtml[Number(index)] ?? "",
+  );
+}
+
+function parseMarkdownTableRow(line: string): string[] | undefined {
+  if (!line.includes("|")) {
+    return undefined;
+  }
+  const trimmed = line.trim().replace(/^\|/u, "").replace(/\|$/u, "");
+  const cells = trimmed.split("|").map((cell) => cell.trim());
+  return cells.length >= 2 && cells.every(Boolean) ? cells : undefined;
+}
+
+function parseMarkdownTableSeparator(line: string): string[] | undefined {
+  const cells = parseMarkdownTableRow(line);
+  return cells?.every((cell) => /^:?-{3,}:?$/u.test(cell))
+    ? cells
+    : undefined;
+}
+
+function isSafeHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function isBotCommandBlock(lines: readonly string[]): boolean {

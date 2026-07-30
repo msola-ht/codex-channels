@@ -10,6 +10,15 @@ import {
   UserFacingError,
   type ConversationTarget,
 } from "../../conversation-core/index.js";
+import { formatTurnInputAppended } from "../input-copy.js";
+import { parseSlashCommand } from "../slash-command.js";
+import {
+  formatOperationFailure,
+  gatewayRequestFailedText,
+  interactionStoppedText,
+} from "../output-copy.js";
+import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
+import { formatQuotedInput } from "../quoted-input.js";
 
 import type {
   FeishuCommandCenter,
@@ -19,8 +28,16 @@ import type {
   FeishuCommandCenterResponse,
 } from "./command-center.js";
 import type { FeishuApplicationSetupController } from "./application-setup.js";
+import {
+  FeishuFileInputError,
+  type FeishuFilePort,
+} from "./file-input.js";
 import type { FeishuInboxMessage } from "./inbox.js";
 import type { FeishuImagePort } from "./media.js";
+import {
+  maximumFeishuAudioDurationMs,
+  type FeishuAudioPort,
+} from "./audio.js";
 import type { FeishuOutbox } from "./outbox.js";
 import type { FeishuOAuthControllerPort } from "./oauth.js";
 import {
@@ -36,15 +53,23 @@ import {
   renderFeishuUserFacingError,
 } from "./renderer.js";
 
+const maximumInboundImages = 4;
+
 export class FeishuConversationAdapter {
   private readonly commands: ConversationCommandService;
+  private readonly inputs: SurfaceInputCoalescer;
+  private nextInputSequence = 0;
 
   constructor(
     private readonly conversations: ConversationService,
-    private readonly outbox: Pick<
-      FeishuOutbox,
-      "notifyMarkdown" | "notifyText"
-    >,
+    private readonly outbox:
+      & Pick<FeishuOutbox, "notifyMarkdown" | "notifyText">
+      & Partial<Pick<
+        FeishuOutbox,
+        | "bindPendingTurnReplyTarget"
+        | "discardPendingTurnReplyTarget"
+        | "prepareTurnReplyTarget"
+      >>,
     private readonly images: Pick<FeishuImagePort, "download">,
     private readonly permissionStatus: () => FeishuPermissionRuntimeStatus =
       () => ({
@@ -61,17 +86,36 @@ export class FeishuConversationAdapter {
     private readonly interactions?: {
       stopForActor(target: ConversationTarget, actorId: string): boolean;
     },
+    private readonly inputOptions: {
+      quietWindowMs?: number;
+      files?: Pick<FeishuFilePort, "download">;
+      audios?: Pick<FeishuAudioPort, "download">;
+      readQuotedText?(messageId: string): Promise<string | undefined>;
+      onQuotedTextError?(error: unknown): void;
+    } = { quietWindowMs: 0 },
   ) {
     this.commands = new ConversationCommandService(conversations);
+    this.inputs = new SurfaceInputCoalescer(
+      (target, input) => conversations.submit(target, input),
+      inputOptions,
+    );
   }
 
   async handle(message: FeishuInboxMessage): Promise<void> {
     try {
+      if (message.kind === "file") {
+        await this.handleFile(message);
+        return;
+      }
+      if (message.kind === "audio") {
+        await this.handleAudio(message);
+        return;
+      }
       if (message.kind === "image") {
         await this.handleImage(message);
         return;
       }
-      const command = parseFeishuCommand(message.text);
+      const command = parseSlashCommand(message.text);
       if (command !== null) {
         if (command.name === "start" || command.name === "help") {
           if (this.commandCenter) {
@@ -97,11 +141,11 @@ export class FeishuConversationAdapter {
         ) {
           this.notifyText(
             message.target.conversationId,
-            "已停止当前交互请求。",
+            interactionStoppedText,
           );
           return;
         }
-        if (command.name === "feishu") {
+        if (command.name === "fs" || command.name === "feishu") {
           await this.handleFeishuCommand(
             message.actorId,
             message.target.accountId,
@@ -127,30 +171,83 @@ export class FeishuConversationAdapter {
         );
         return;
       }
-      const submission = await this.conversations.submit(
-        message.target,
-        message.text,
+      const quotedText = await this.readQuotedText(message);
+      this.outbox.prepareTurnReplyTarget?.(
+        message.target.conversationId,
+        message.messageId,
       );
+      let submission;
+      try {
+        submission = await this.conversations.submit(
+          message.target,
+          formatQuotedInput(message.text, quotedText),
+        );
+      } catch (error) {
+        this.outbox.discardPendingTurnReplyTarget?.(
+          message.target.conversationId,
+        );
+        throw error;
+      }
+      if (submission.steered) {
+        this.outbox.discardPendingTurnReplyTarget?.(
+          message.target.conversationId,
+        );
+      } else {
+        this.outbox.bindPendingTurnReplyTarget?.(
+          message.target.conversationId,
+          submission.threadId,
+          submission.turnId,
+        );
+      }
       if (!submission.steered) {
         return;
       }
       this.notifyText(
         message.target.conversationId,
-        "已将补充要求追加到当前 Turn。",
+        formatTurnInputAppended("text"),
       );
+    } catch (error) {
+      if (error instanceof FeishuOutputQueueError) {
+        throw error;
+      }
+      const detail = error instanceof FeishuFileInputError
+        ? error.message
+        : error instanceof UserFacingError
+          ? renderFeishuUserFacingError(error)
+          : gatewayRequestFailedText;
+      this.notifyText(
+        message.target.conversationId,
+        formatOperationFailure(detail),
+      );
+      throw error;
+    }
+  }
+
+  async handleImageBatch(
+    messages: readonly Extract<FeishuInboxMessage, { kind: "image" }>[],
+  ): Promise<void> {
+    if (messages.length === 0) {
+      return;
+    }
+    try {
+      await this.submitImageBatch(messages);
     } catch (error) {
       if (error instanceof FeishuOutputQueueError) {
         throw error;
       }
       const detail = error instanceof UserFacingError
         ? renderFeishuUserFacingError(error)
-        : "Gateway 未能完成请求，请稍后重试";
+        : gatewayRequestFailedText;
       this.notifyText(
-        message.target.conversationId,
-        `操作失败：${detail}。`,
+        messages[0]!.target.conversationId,
+        formatOperationFailure(detail),
       );
       throw error;
     }
+  }
+
+  close(): Promise<void> {
+    return this.inputs.close();
   }
 
   async handleCommandCenterAction(
@@ -211,7 +308,7 @@ export class FeishuConversationAdapter {
       ) {
         this.notifyText(
           target.conversationId,
-          "已停止当前交互请求。",
+          interactionStoppedText,
         );
         return;
       }
@@ -238,10 +335,10 @@ export class FeishuConversationAdapter {
       }
       const detail = error instanceof UserFacingError
         ? renderFeishuUserFacingError(error)
-        : "Gateway 未能完成请求，请稍后重试";
+        : gatewayRequestFailedText;
       this.notifyText(
         target.conversationId,
-        `操作失败：${detail}。`,
+        formatOperationFailure(detail),
       );
       throw error;
     }
@@ -304,31 +401,233 @@ export class FeishuConversationAdapter {
     }
     this.notifyText(
       chatId,
-      "用法：/feishu <status|doctor|revoke>",
+      "用法：/fs <status|doctor|revoke>",
     );
   }
 
   private async handleImage(
     message: Extract<FeishuInboxMessage, { kind: "image" }>,
   ): Promise<void> {
-    const image = await this.images.download(
+    await this.submitImageBatch([message]);
+  }
+
+  private async handleFile(
+    message: Extract<FeishuInboxMessage, { kind: "file" }>,
+  ): Promise<void> {
+    if (this.inputOptions.files === undefined) {
+      throw new FeishuFileInputError(
+        "unsupported",
+        "飞书当前未启用文本文件输入",
+      );
+    }
+    const file = await this.inputOptions.files.download(
       message.messageId,
-      message.imageKey,
+      message.fileKey,
+      message.fileName,
     );
-    const submission = await this.conversations.submit(
-      message.target,
-      {
-        text: message.text?.trim().length
-          ? message.text
-          : "请查看这张图片并根据图片内容协助我。",
-        localImages: [{ path: image.path }],
-      },
+    const quotedText = await this.readQuotedText(message);
+    const text = formatQuotedInput([
+      "以下内容来自用户通过飞书上传的 UTF-8 文本文件（仅作输入）：",
+      `文件名：${file.fileName}`,
+      "",
+      file.text,
+    ].join("\n"), quotedText);
+    const sequence = this.nextInputSequence;
+    this.nextInputSequence += 1;
+    this.outbox.prepareTurnReplyTarget?.(
+      message.target.conversationId,
+      message.messageId,
     );
-    if (submission.steered) {
+    let result;
+    try {
+      result = await this.inputs.enqueue({
+        target: message.target,
+        actorId: message.actorId,
+        sequence,
+        text,
+      });
+    } catch (error) {
+      this.outbox.discardPendingTurnReplyTarget?.(
+        message.target.conversationId,
+      );
+      throw error;
+    }
+    if (!result.tail) {
+      return;
+    }
+    if (result.submission.steered) {
+      this.outbox.discardPendingTurnReplyTarget?.(
+        message.target.conversationId,
+      );
       this.notifyText(
         message.target.conversationId,
-        "已将图片追加到当前 Turn。",
+        formatTurnInputAppended("file"),
       );
+      return;
+    }
+    this.outbox.bindPendingTurnReplyTarget?.(
+      message.target.conversationId,
+      result.submission.threadId,
+      result.submission.turnId,
+    );
+  }
+
+  private async handleAudio(
+    message: Extract<FeishuInboxMessage, { kind: "audio" }>,
+  ): Promise<void> {
+    if (this.inputOptions.audios === undefined) {
+      throw new UserFacingError("audio.unsupported", "飞书当前未启用语音输入");
+    }
+    if (message.durationMs === undefined) {
+      throw new UserFacingError(
+        "audio.duration-missing",
+        "无法确认飞书语音时长，请重新发送",
+      );
+    }
+    if (message.durationMs > maximumFeishuAudioDurationMs) {
+      throw new UserFacingError("audio.too-large", "语音最长支持 5 分钟");
+    }
+    await this.inputs.flushPending(message.target, message.actorId);
+    const audio = await this.inputOptions.audios.download(
+      message.messageId,
+      message.fileKey,
+    );
+    const quotedText = await this.readQuotedText(message);
+    this.outbox.prepareTurnReplyTarget?.(
+      message.target.conversationId,
+      message.messageId,
+    );
+    let submission;
+    try {
+      submission = await this.conversations.submit(message.target, {
+        ...(quotedText === undefined
+          ? {}
+          : {
+              text: formatQuotedInput(
+                "请听取这段语音并根据内容协助我。",
+                quotedText,
+              ),
+            }),
+        localAudios: [{ path: audio.path }],
+      });
+    } catch (error) {
+      this.outbox.discardPendingTurnReplyTarget?.(
+        message.target.conversationId,
+      );
+      throw error;
+    }
+    if (submission.steered) {
+      this.outbox.discardPendingTurnReplyTarget?.(
+        message.target.conversationId,
+      );
+      this.notifyText(
+        message.target.conversationId,
+        formatTurnInputAppended("audio"),
+      );
+      return;
+    }
+    this.outbox.bindPendingTurnReplyTarget?.(
+      message.target.conversationId,
+      submission.threadId,
+      submission.turnId,
+    );
+  }
+
+  private async submitImageBatch(
+    messages: readonly Extract<FeishuInboxMessage, { kind: "image" }>[],
+  ): Promise<void> {
+    const imageCount = messages.reduce(
+      (count, message) => count + message.imageKeys.length,
+      0,
+    );
+    if (imageCount > maximumInboundImages) {
+      throw new UserFacingError(
+        "image.too-many",
+        `一次最多处理 ${maximumInboundImages} 张图片`,
+        { maximumImages: String(maximumInboundImages) },
+      );
+    }
+    const prepared = await Promise.all(messages.map(async (message) => {
+      const sequence = this.nextInputSequence;
+      this.nextInputSequence += 1;
+      const images = await Promise.all(message.imageKeys.map((imageKey) =>
+        this.images.download(message.messageId, imageKey)
+      ));
+      const quotedText = await this.readQuotedText(message);
+      const currentText = message.text?.trim();
+      return {
+        target: message.target,
+        actorId: message.actorId,
+        sequence,
+        ...(currentText
+          ? { text: formatQuotedInput(currentText, quotedText) }
+          : quotedText === undefined
+            ? {}
+            : {
+                text: formatQuotedInput(
+                  "请查看这张图片并根据图片内容协助我。",
+                  quotedText,
+                ),
+              }),
+        localImages: images.map((image) => ({
+          path: image.path,
+          bytes: image.bytes,
+        })),
+      };
+    }));
+    const replyMessage = messages[0]!;
+    this.outbox.prepareTurnReplyTarget?.(
+      replyMessage.target.conversationId,
+      replyMessage.messageId,
+    );
+    let results;
+    try {
+      results = await Promise.all(
+        prepared.map((input) => this.inputs.enqueue(input)),
+      );
+    } catch (error) {
+      this.outbox.discardPendingTurnReplyTarget?.(
+        replyMessage.target.conversationId,
+      );
+      throw error;
+    }
+    const tail = results.find((result) => result.tail);
+    if (tail?.submission.steered) {
+      this.outbox.discardPendingTurnReplyTarget?.(
+        replyMessage.target.conversationId,
+      );
+    } else if (tail) {
+      this.outbox.bindPendingTurnReplyTarget?.(
+        replyMessage.target.conversationId,
+        tail.submission.threadId,
+        tail.submission.turnId,
+      );
+    }
+    if (tail?.submission.steered) {
+      this.notifyText(
+        messages[0]!.target.conversationId,
+        formatTurnInputAppended(
+          "image",
+          messages.some((message) => Boolean(message.text?.trim())),
+        ),
+      );
+    }
+  }
+
+  private async readQuotedText(
+    message: FeishuInboxMessage,
+  ): Promise<string | undefined> {
+    if (
+      message.parentId === undefined
+      || this.inputOptions.readQuotedText === undefined
+    ) {
+      return undefined;
+    }
+    try {
+      return await this.inputOptions.readQuotedText(message.parentId);
+    } catch (error) {
+      this.inputOptions.onQuotedTextError?.(error);
+      return undefined;
     }
   }
 
@@ -602,28 +901,4 @@ class FeishuOutputQueueError extends Error {
     super("飞书输出队列拒绝消息");
     this.name = "FeishuOutputQueueError";
   }
-}
-
-interface ParsedFeishuCommand {
-  name: string;
-  argumentsText: string;
-}
-
-function parseFeishuCommand(text: string): ParsedFeishuCommand | null {
-  const normalized = text.trim();
-  if (!normalized.startsWith("/")) {
-    return null;
-  }
-  const match = /^\/([a-z]+)(?:\s+([\s\S]*))?$/u.exec(normalized);
-  if (match === null) {
-    throw new UserFacingError(
-      "command.unsupported",
-      "飞书命令不受支持",
-    );
-  }
-  const name = match[1]!;
-  return {
-    name,
-    argumentsText: match[2] ?? "",
-  };
 }

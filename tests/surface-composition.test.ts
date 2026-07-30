@@ -1,5 +1,9 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import pino from "pino";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ConversationService } from "../src/application/index.js";
 import type { InteractionPort } from "../src/approval/index.js";
@@ -7,9 +11,12 @@ import {
   createFeishuRuntimeModule,
   createSurfaceModules,
   createTelegramRuntimeModule,
+  createWeixinRuntimeModule,
   selectFeishuProxyUrl,
+  weixinSurfacePlugin,
   type FeishuRuntimeAdapter,
   type TelegramRuntimeAdapter,
+  type WeixinRuntimeAdapter,
 } from "../src/bootstrap/surface-composition.js";
 import {
   composeBuiltInSurfacePlugins,
@@ -18,8 +25,17 @@ import {
 } from "../src/bootstrap/surface-plugin.js";
 import type { GatewayConfig } from "../src/config/index.js";
 import { MemoryBindingStore } from "../src/storage/index.js";
+import { EncryptedFileWeixinCredentialStore } from "../src/surfaces/weixin/index.js";
 
 const interactions = {} as InteractionPort;
+const temporaryDirectories: string[] = [];
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 describe("Telegram Surface runtime composition", () => {
   it("hot reloads authorization and notification recipients", () => {
@@ -86,13 +102,17 @@ describe("Telegram Surface runtime composition", () => {
 });
 
 describe("configured Surface composition", () => {
-  it("registers Feishu only when its runtime config is enabled", () => {
+  it("registers optional Surfaces only when their runtime config is enabled", () => {
     const disabled = createSurfaceModules(options(config()));
     const enabled = createSurfaceModules(options(config({
       feishu: {
         appId: "cli_0123456789abcdef",
         appSecret: "secret",
         allowedOpenIds: new Set(["ou_actor"]),
+      },
+      weixin: {
+        accountId: "bot-fixture@im.bot",
+        allowedUserIds: new Set(["actor-fixture@im.wechat"]),
       },
     })));
 
@@ -102,7 +122,76 @@ describe("configured Surface composition", () => {
     expect(enabled.map((module) => module.adapter.surface)).toEqual([
       "telegram",
       "feishu",
+      "weixin",
     ]);
+  });
+
+  it("loads Weixin credentials from the config directory independently of the database path", async () => {
+    const root = mkdtempSync(join(tmpdir(), "weixin-composition-"));
+    temporaryDirectories.push(root);
+    const credentialsDirectory = join(root, "credentials");
+    const accountId = "bot-fixture@im.bot";
+    await new EncryptedFileWeixinCredentialStore(
+      join(credentialsDirectory, "weixin"),
+    ).set({
+      version: 1,
+      accountId,
+      baseUrl: "https://ilinkai.weixin.qq.com",
+      botToken: "bot-secret",
+      grantedAt: 1,
+    });
+    const runtimeConfig = config({
+      credentialsDirectory,
+      stateDatabasePath: join(root, "separate-state", "gateway.sqlite3"),
+      weixin: {
+        accountId,
+        allowedUserIds: new Set(["actor-fixture@im.wechat"]),
+      },
+    });
+    const context = options(runtimeConfig);
+    const [module] = createSurfaceModules(context, [weixinSurfacePlugin]);
+    const fetchImpl = vi.fn<typeof fetch>((input, init) => {
+      const url = String(input);
+      if (
+        url.endsWith("/msg/notifystart")
+        || url.endsWith("/msg/notifystop")
+      ) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ ret: 0 }), { status: 200 }),
+        );
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        const abort = () => {
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          reject(error);
+        };
+        if (init?.signal?.aborted) {
+          abort();
+          return;
+        }
+        init?.signal?.addEventListener("abort", abort, { once: true });
+      });
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+
+    try {
+      await module?.adapter.start();
+      await vi.waitFor(() => {
+        expect(fetchImpl).toHaveBeenCalledTimes(2);
+      });
+      expect(fetchImpl.mock.calls.map(([input]) => String(input)).sort())
+        .toEqual([
+          "https://ilinkai.weixin.qq.com/ilink/bot/getupdates",
+          "https://ilinkai.weixin.qq.com/ilink/bot/msg/notifystart",
+        ]);
+      expect(context.onFatal).not.toHaveBeenCalled();
+    } finally {
+      await module?.adapter.stop();
+    }
+    expect(fetchImpl.mock.calls.at(-1)?.[0]).toBe(
+      "https://ilinkai.weixin.qq.com/ilink/bot/msg/notifystop",
+    );
   });
 
   it("selects the shared HTTPS proxy unless NO_PROXY covers the Feishu host", () => {
@@ -256,6 +345,57 @@ describe("Feishu Surface runtime composition", () => {
   });
 });
 
+describe("Weixin Surface runtime composition", () => {
+  it("hot reloads authorization and removes bindings for revoked actors", () => {
+    const bindings = new MemoryBindingStore();
+    const accountId = "bot-fixture@im.bot";
+    const allowed = {
+      surface: "weixin",
+      accountId,
+      conversationId: "allowed@im.wechat",
+    } as const;
+    const revoked = {
+      surface: "weixin",
+      accountId,
+      conversationId: "revoked@im.wechat",
+    } as const;
+    for (const [target, actorId, threadId] of [
+      [allowed, "allowed@im.wechat", "thread-allowed"],
+      [revoked, "revoked@im.wechat", "thread-revoked"],
+    ] as const) {
+      bindings.bind({
+        target,
+        workspaceId: "main",
+        threadId,
+        sessionId: `session-${threadId}`,
+      });
+      bindings.rememberActor(target, actorId);
+    }
+    const replaceAccess = vi.fn();
+    const module = createWeixinRuntimeModule(
+      weixinAdapter(),
+      { replace: replaceAccess },
+      bindings,
+      pino({ level: "silent" }),
+    );
+    const next = config({
+      weixin: {
+        accountId,
+        allowedUserIds: new Set(["allowed@im.wechat"]),
+      },
+    });
+
+    module.applyHotReload(next, [{
+      code: "surface.weixin.allowed-users",
+      scope: "weixin",
+    }]);
+
+    expect(replaceAccess).toHaveBeenCalledWith(next.weixin?.allowedUserIds);
+    expect(bindings.getByThread("thread-allowed")).toBeDefined();
+    expect(bindings.getByThread("thread-revoked")).toBeUndefined();
+  });
+});
+
 function adapter(recipientSnapshots: number[][]): TelegramRuntimeAdapter {
   return {
     surface: "telegram",
@@ -277,6 +417,20 @@ function feishuAdapter(): FeishuRuntimeAdapter {
   return {
     surface: "feishu",
     accountId: "cli_0123456789abcdef",
+    interactions,
+    output: {
+      handle() {},
+    },
+    async start() {},
+    async stop() {},
+    async deliverConfigurationChange() {},
+  };
+}
+
+function weixinAdapter(): WeixinRuntimeAdapter {
+  return {
+    surface: "weixin",
+    accountId: "bot-fixture@im.bot",
     interactions,
     output: {
       handle() {},
@@ -320,6 +474,8 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     codexSocketPath: "/tmp/codex.sock",
     codexSandbox: "workspace-write",
     operationUpdateDisplay: "full",
+    planUpdatesEnabled: false,
+    credentialsDirectory: "/tmp/credentials",
     stateDatabasePath: "/tmp/gateway.sqlite3",
     approvalTimeoutMs: 300_000,
     logLevel: "info",

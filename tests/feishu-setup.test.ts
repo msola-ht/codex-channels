@@ -165,6 +165,8 @@ describe("Feishu setup", () => {
             "application:application:self_manage",
             "application:application:patch",
             "im:message:send_as_bot",
+            "im:resource",
+            "im:message:readonly",
             "cardkit:card:write",
           ],
         },
@@ -207,7 +209,7 @@ describe("Feishu setup", () => {
     expect(renderedOutput).toContain("cli_0123456789abcdef");
     expect(renderedOutput).toContain("悬浮菜单已自动配置并发布");
     expect(renderedOutput).not.toContain(
-      "发送 /feishu doctor 完成机器人菜单和订阅配置",
+      "发送 /fs doctor 完成机器人菜单和订阅配置",
     );
     expect(renderedOutput).not.toContain(
       "请在开放平台添加事件类型菜单项",
@@ -293,7 +295,7 @@ describe("Feishu setup", () => {
     expect(renderedOutput).toContain(
       "机器人菜单自动配置未完成",
     );
-    expect(renderedOutput).toContain("/feishu doctor");
+    expect(renderedOutput).toContain("/fs doctor");
     expect(renderedOutput).not.toContain("upstream secret response");
     expect(renderedOutput).not.toContain("app-secret");
   });

@@ -6,20 +6,21 @@
 ## 版本与数字
 
 当前索引对应 [`src/codex-protocol/version.json`](../src/codex-protocol/version.json) 锁定的
-`codex-cli 0.145.0`，生成时未启用实验协议。
+`codex-cli 0.145.0`。生成时启用实验类型，但业务只采用固定版本官方 Plan 模式所需的
+`collaborationMode/list` 与 `turn/start.collaborationMode`；其他实验类型不表示已支持。
 
 | 数量 | 是什么 | 事实来源 |
 | ---: | --- | --- |
-| 617 | 当前 CLI 生成的 TypeScript 文件总数 | `src/codex-protocol/generated/` |
-| 90 | 生成目录根层的公共、兼容和初始化类型 | `src/codex-protocol/generated/*.ts` |
-| 526 | v2 请求、响应、通知和数据类型 | `src/codex-protocol/generated/v2/*.ts` |
+| 697 | 当前 CLI 生成的 TypeScript 文件总数 | `src/codex-protocol/generated/` |
+| 97 | 生成目录根层的公共、兼容和初始化类型 | `src/codex-protocol/generated/*.ts` |
+| 599 | v2 请求、响应、通知和数据类型 | `src/codex-protocol/generated/v2/*.ts` |
 | 1 | `serde_json` 辅助类型 | `src/codex-protocol/generated/serde_json/` |
-| 92 | 客户端发给 App Server 的 Request 方法 | [`ClientRequest.ts`](../src/codex-protocol/generated/ClientRequest.ts) |
+| 129 | 客户端发给 App Server 的 Request 方法 | [`ClientRequest.ts`](../src/codex-protocol/generated/ClientRequest.ts) |
 | 72 | App Server 发给客户端的 Notification 方法 | [`ServerNotification.ts`](../src/codex-protocol/generated/ServerNotification.ts) |
-| 10 | App Server 发给客户端、需要回应的 Request 方法 | [`ServerRequest.ts`](../src/codex-protocol/generated/ServerRequest.ts) |
+| 11 | App Server 发给客户端、需要回应的 Request 方法 | [`ServerRequest.ts`](../src/codex-protocol/generated/ServerRequest.ts) |
 | 1 | 客户端发给 App Server 的 Notification，即 `initialized` | [`ClientNotification.ts`](../src/codex-protocol/generated/ClientNotification.ts) |
-| 34 | Codex Client 适配边界使用的受控协议类型导出 | [`src/codex-protocol/index.ts`](../src/codex-protocol/index.ts) |
-| 27 | 本项目直接调用的业务 Request 方法，不含连接层的 `initialize` | [`client.ts`](../src/codex-client/client.ts) |
+| 35 | Codex Client 适配边界使用的受控协议类型导出 | [`src/codex-protocol/index.ts`](../src/codex-protocol/index.ts) |
+| 28 | 本项目直接调用的业务 Request 方法，不含连接层的 `initialize` | [`client.ts`](../src/codex-client/client.ts) |
 | 5 | 本项目显式协调的 Server Request 类型 | [`server-request-adapter.ts`](../src/codex-client/server-request-adapter.ts) |
 | 13 | 本项目 TypeScript Gateway 的一级业务模块 | [`src/README.md`](../src/README.md) |
 
@@ -33,7 +34,8 @@
    JSON-RPC 消息、初始化、Thread/Turn/Item、审批、通知和 Schema 生成的主文档。
 2. [Codex 开源组件](https://learn.chatgpt.com/docs/open-source)：官方开源范围和仓库入口。
 3. [OpenAI Codex 仓库](https://github.com/openai/codex)：当前官方源码；排查本项目锁定协议时，
-   应优先打开下面固定到 `rust-v0.145.0` 的链接，而不是直接以 `main` 为准。
+   优先读取 [`upstream/openai-codex`](upstream-sources.md) 的固定本地副本；本地副本缺失时
+   再打开下面固定到 `rust-v0.145.0` 的链接，不能直接以 `main` 为准。
 
 官方文档定义产品和协议行为；本项目实际字段必须以当前锁定 CLI 生成的 TypeScript 类型为准。
 如果两者看起来不一致，先检查文档是否描述了更新版本，再审查固定版本源码和生成差异。
@@ -50,7 +52,9 @@
 | v2 协议入口 | [`v2/mod.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server-protocol/src/protocol/v2/mod.rs) | v2 模块与受支持类型汇总 |
 | Thread | [`thread.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server-protocol/src/protocol/v2/thread.rs) | Thread 请求、响应和生命周期 |
 | Turn | [`turn.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server-protocol/src/protocol/v2/turn.rs) | Turn 启动、追加、停止和状态 |
+| 用户输入 | [`user_input.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/protocol/src/user_input.rs) | 文本、图片、一次性音频、Skill 与 Mention 输入 |
 | Item | [`item.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server-protocol/src/protocol/v2/item.rs) | 消息、命令、文件、工具等 Item |
+| 图片生成 Item 与产物 | [`image_generation.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/ext/items/src/image_generation.rs)、[`artifact.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/ext/image-generation/src/artifact.rs) | `ImageGenerationItem.savedPath` 与生成图片落盘目录 |
 | 权限协议 | [`permissions.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server-protocol/src/protocol/v2/permissions.rs) | 临时权限、命令网络上下文与持久规则结构 |
 | MCP 协议 | [`mcp.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server-protocol/src/protocol/v2/mcp.rs) | MCP 状态与 form、openai/form、URL elicitation |
 | 通知 | [`notification.rs`](https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/app-server-protocol/src/protocol/v2/notification.rs) | v2 Notification 参数 |
@@ -85,21 +89,36 @@
 | --- | --- | --- |
 | 初始化与连接 | `initialize`、`initialized` | [`codex-client/`](../src/codex-client/README.md)、[`doctor.mjs`](../scripts/doctor.mjs)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`codexc-cli.test.ts`](../tests/codexc-cli.test.ts)；发送消息受生成的 `ClientRequest` / `ClientNotification` 约束，Doctor 只从 `initialize.userAgent` 提取运行中 App Server 的实际版本并与锁定版本比较 |
 | Thread 生命周期 | `thread/list`、`thread/read`、`thread/start`、`thread/resume`、`thread/fork`、`thread/archive`、`thread/unarchive`、`thread/delete`、`thread/unsubscribe`、`thread/name/set`、`thread/compact/start`、`thread/closed`、`thread/archived`、`thread/deleted` | [`thread-adapter.ts`](../src/codex-client/thread-adapter.ts) 把官方响应映射为稳定快照，[`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 把生命周期通知映射为 [`session-routing/`](../src/session-routing/README.md) 的稳定事件；[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`session-router.test.ts`](../tests/session-router.test.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts)、[`thread-state-sync.test.ts`](../tests/thread-state-sync.test.ts) |
-| Thread 设置 | `thread/settings/updated`、`model/list`、`config/read`、`config/batchWrite` | [`model-port.ts`](../src/application/model-port.ts) 定义稳定模型边界，[`model-adapter.ts`](../src/codex-client/model-adapter.ts) 映射官方目录，[`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 隔离设置通知；[`thread-state-sync.ts`](../src/session-routing/thread-state-sync.ts)、[`model-selection-service.test.ts`](../tests/model-selection-service.test.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts) |
-| Turn 控制 | `turn/start`、`turn/steer`、`turn/interrupt`、`turn/started`、`error`、`turn/completed` | [`turn-port.ts`](../src/application/turn-port.ts) 定义稳定执行端口，[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts) 编码请求与响应，[`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 映射生命周期通知、校验官方 `Turn.durationMs` 并统一脱敏、限长可显示的错误；[`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts)、[`telegram-format.test.ts`](../tests/telegram-format.test.ts)、[`feishu-renderer.test.ts`](../tests/feishu-renderer.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
-| Item 与流式输出 | `item/started`、`item/completed`、`item/agentMessage/delta` | [`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 分类稳定 Item 事件，[`operation-adapter.ts`](../src/codex-client/operation-adapter.ts) 生成脱敏操作摘要，[`core.ts`](../src/conversation-core/core.ts) 只归约稳定输入；[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts)、[`operation-adapter.test.ts`](../tests/operation-adapter.test.ts)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts) |
+| Thread 设置 | `thread/settings/updated`、`model/list`、`config/read`、`config/batchWrite`、实验 `collaborationMode/list` | [`model-port.ts`](../src/application/model-port.ts) 与 [`collaboration-mode-port.ts`](../src/application/collaboration-mode-port.ts) 定义稳定设置边界，[`model-adapter.ts`](../src/codex-client/model-adapter.ts) 映射官方目录，[`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 隔离模型、Fast 与 Default/Plan 设置通知；[`thread-state-sync.ts`](../src/session-routing/thread-state-sync.ts)、[`model-selection-service.test.ts`](../tests/model-selection-service.test.ts)、[`collaboration-mode-service.test.ts`](../tests/collaboration-mode-service.test.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts) |
+| Turn 控制 | `turn/start`、实验 `turn/start.collaborationMode`、`turn/steer`、`turn/interrupt`、`turn/started`、`error`、`turn/completed` | [`turn-port.ts`](../src/application/turn-port.ts) 定义稳定执行与 Default/Plan 覆盖端口，[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts) 编码请求与响应，[`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 映射生命周期通知、校验官方 `Turn.durationMs` 并统一脱敏、限长可显示的错误；活动 Turn 不允许切换协作模式；[`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+| Item 与流式输出 | `item/started`、`item/completed`、`item/agentMessage/delta` | [`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 分类稳定 Item 事件，[`operation-adapter.ts`](../src/codex-client/operation-adapter.ts) 生成脱敏操作摘要，并只把官方 `imageGeneration.savedPath` 映射为生成图片产物，[`core.ts`](../src/conversation-core/core.ts) 只归约稳定输入；[`generated-image.ts`](../src/surfaces/generated-image.ts) 对三渠道共用的生成图片本地读取执行绝对路径、无符号链接、普通文件、10 MiB 与 PNG/JPEG 签名校验；[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts)、[`operation-adapter.test.ts`](../tests/operation-adapter.test.ts)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts)、[`telegram-outbox.test.ts`](../tests/telegram-outbox.test.ts)、[`feishu-outbox.test.ts`](../tests/feishu-outbox.test.ts)、[`weixin-outbox.test.ts`](../tests/weixin-outbox.test.ts) |
 | 上下文压缩 | `thread/compact/start`、`contextCompaction` Thread Item 与 `item/completed` | [`thread-adapter.ts`](../src/codex-client/thread-adapter.ts) 从恢复历史提取压缩 Item ID，[`core.ts`](../src/conversation-core/core.ts) 合并实时完成 Item 并去重，[`conversation-service.ts`](../src/application/conversation-service.ts) 公开总次数；[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`session-router.test.ts`](../tests/session-router.test.ts)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts)、[`telegram-format.test.ts`](../tests/telegram-format.test.ts)、[`telegram-outbox.test.ts`](../tests/telegram-outbox.test.ts)。生成类型中的 `thread/compacted` 已标记废弃，统计不依赖它；当前 Item 不提供手动/自动触发来源，因此只显示总次数 |
 | 警告 | `warning`（Thread 目标或全局） | [`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 映射并统一脱敏、限长消息，[`core.ts`](../src/conversation-core/core.ts) 只负责目标路由；[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts) |
-| Diff、Plan 与 Review | `turn/diff/updated`、`turn/plan/updated`、`review/start` | Review 目标与结果由 [`turn-port.ts`](../src/application/turn-port.ts) 定义，[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts) 映射；Diff/Plan 通知经 [`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 转成稳定事件后由 Core 归约 |
+| Diff、计划产物与 Review | `turn/diff/updated`、`turn/plan/updated`、`review/start` | Review 目标与结果由 [`turn-port.ts`](../src/application/turn-port.ts) 定义，[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts) 映射；Diff/计划产物通知经 [`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 转成稳定事件后由 Core 归约。计划还通过结构化 `plan.updated` 输出，在 `display.plan_updates` 显式开启时由三个 Surface 展示；计划产物通知与切换官方 Plan 协作模式是两个独立边界 |
 | Goal | `thread/goal/get`、`thread/goal/set`、`thread/goal/clear`、`thread/goal/updated`、`thread/goal/cleared` | [`turn-port.ts`](../src/application/turn-port.ts) 定义执行端口，[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts) 映射请求结果，[`conversation-service.ts`](../src/application/conversation-service.ts) 在 set/clear 成功后立即同步 Core，[`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 把外部变更与恢复通知转换为稳定 Core 事件；[`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`conversation-command-service.test.ts`](../tests/conversation-command-service.test.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
-| 审批和用户输入 | 命令、文件、权限、用户输入、MCP elicitation 共 5 类 Server Request | [`server-request-adapter.ts`](../src/codex-client/server-request-adapter.ts) 负责协议解码与编码，[`approval/`](../src/approval/README.md) 负责稳定授权语义；[`approval.test.ts`](../tests/approval.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
-| Skill、MCP 与 Plugin | `skills/list`、`mcpServerStatus/list`、`plugin/installed`、MCP 状态通知 | Skill、MCP 和 Plugin 查询分别由 [`skill-port.ts`](../src/application/skill-port.ts)、[`mcp-port.ts`](../src/application/mcp-port.ts)、[`plugin-port.ts`](../src/application/plugin-port.ts) 及对应 Client 适配器隔离；MCP 通知由 [`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 映射并脱敏；[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts) |
-| 用量、额度与权限 | `account/usage/read`、`account/rateLimits/read`、账户通知、`permissionProfile/list` | 账户查询由 [`account-port.ts`](../src/application/account-port.ts) 与 [`account-adapter.ts`](../src/codex-client/account-adapter.ts) 隔离，账户通知由 [`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 映射为稳定 Core 事件；Permission Profile 目录由 [`permission-port.ts`](../src/application/permission-port.ts) 与 [`permission-adapter.ts`](../src/codex-client/permission-adapter.ts) 隔离；[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts) |
-| 真实合同 | Fast 默认值、Skill/MCP/Plugin/Permission 稳定查询、共享 Thread 设置通知、Turn 启动结果、跨客户端 Goal 请求与通知、重连后 resume Goal 恢复、双客户端连接恢复 | [`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+| 审批和用户输入 | 命令、文件、权限、用户输入、MCP elicitation 共 5 类 Server Request | [`server-request-adapter.ts`](../src/codex-client/server-request-adapter.ts) 负责协议解码与编码，[`approval/`](../src/approval/README.md) 负责稳定授权语义，各 Surface 只实现平台交互；[`approval.test.ts`](../tests/approval.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`weixin-interactions.test.ts`](../tests/weixin-interactions.test.ts) |
+| Skill、MCP 与 Plugin | `skills/list`、`mcpServerStatus/list`、`plugin/installed`、MCP 状态通知 | Skill、MCP 和 Plugin 查询分别由 [`skill-port.ts`](../src/application/skill-port.ts)、[`mcp-port.ts`](../src/application/mcp-port.ts)、[`plugin-port.ts`](../src/application/plugin-port.ts) 及对应 Client 适配器隔离；MCP 通知由 [`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 映射并脱敏，再由 [`runtime-status-format.ts`](../src/surfaces/runtime-status-format.ts) 为 Telegram、飞书和微信生成共享稳定语义；[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts)、[`surface-copy-contract.test.ts`](../tests/surface-copy-contract.test.ts)、[`weixin-outbox.test.ts`](../tests/weixin-outbox.test.ts) |
+| 用量、额度与权限 | `account/usage/read`、`account/rateLimits/read`、账户通知、`permissionProfile/list` | 账户查询由 [`account-port.ts`](../src/application/account-port.ts) 与 [`account-adapter.ts`](../src/codex-client/account-adapter.ts) 隔离，账户通知由 [`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 映射为稳定 Core 事件，并通过 [`runtime-status-format.ts`](../src/surfaces/runtime-status-format.ts) 进入三个 Surface；Permission Profile 目录由 [`permission-port.ts`](../src/application/permission-port.ts) 与 [`permission-adapter.ts`](../src/codex-client/permission-adapter.ts) 隔离；[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts)、[`surface-copy-contract.test.ts`](../tests/surface-copy-contract.test.ts)、[`weixin-outbox.test.ts`](../tests/weixin-outbox.test.ts) |
+| 真实合同 | Fast 默认值、Skill/MCP/Plugin/Permission 稳定查询、Default/Plan 预设与 Plan Turn 设置通知、共享 Thread 设置通知、Turn 启动结果、跨客户端 Goal 请求与通知、重连后 resume Goal 恢复、双客户端连接恢复 | [`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 
 当前生成协议还包含文件系统 RPC、独立命令执行、登录、Marketplace、App、Realtime、
 Remote Control、动态工具、Attestation 和实验能力等类型；它们没有因此自动成为 Gateway
 公开能力。采用其中任何能力前，必须先审查对应 Server Request、Notification、安全边界和真实合同。
+
+### 输入与语音边界
+
+| 输入或交互 | 固定 CLI 0.145.0 | Gateway 当前状态 | 边界 |
+| --- | --- | --- | --- |
+| 文本 | `turn/start`、`turn/steer` 的稳定 `UserInput.text` | Telegram、飞书、微信已支持 | 由 Application 的 `TurnInput.text` 进入统一 Turn |
+| 本地图片 | `turn/start`、`turn/steer` 的稳定 `UserInput.localImage` | 三渠道受限 PNG/JPEG 已支持 | Surface 完成下载、签名和大小校验后，Application 只接收临时本地图片路径 |
+| 一次性音频 | 稳定 `UserInput.audio` / `UserInput.localAudio`；模型目录用 `inputModalities` 声明实际能力；固定源码支持 WAV、MP3、M4A、WebM 与 OGG 本地音频 | 三渠道平台接收与受限转换已实现；当前可见模型均未声明 `audio`，原始音频不属于当前端到端支持 | Surface 先验证可信时长、最长 5 分钟、最大 20 MiB 与格式并写入一小时私有临时文件；Application 再按当前或下一 Turn 模型的 `inputModalities` 检查 `audio`，缺失时在 `turn/start` / `turn/steer` 前明确拒绝。微信可信转写仍作为文本提交；SILK 明确拒绝 |
+| 实时语音 | 实验 `thread/realtime/start`、`appendAudio`、`appendSpeech`、`stop` 及 Realtime 通知 | 禁止接入 | 当前项目只允许 Plan 所需实验协议；不得导出、调用或消费 Realtime 业务能力 |
+| ChatGPT Voice / 语音听写 | 官方桌面应用产品能力，不是当前 CLI 命令入口 | 不属于 Gateway | 不用平台模拟实现第二套 Codex 实时会话或语音输出 |
+
+Application 的 `TurnInput` 是只含 `text`、`localImage` 与 `localAudio` 的封闭联合；模型目录
+只把 `text`、`image`、`audio` 三种官方输入能力映射为稳定类型，包含 `localAudio` 的提交必须
+先通过当前模型能力检查。Codex Client 只映射这三个稳定输入变体。模块边界测试同时禁止生产 Client 调用 `thread/realtime/*`，Surface
+不得把平台音频地址、密钥、实时音频或未验证的编解码数据带入 Application/Core。
 
 ## 本项目实现映射
 
@@ -119,7 +138,7 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 | MCP 状态查询如何隔离 | [`mcp-port.ts`](../src/application/mcp-port.ts)、[`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts) | [`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`telegram-format.test.ts`](../tests/telegram-format.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | 已安装 Plugin 查询如何隔离 | [`plugin-port.ts`](../src/application/plugin-port.ts)、[`plugin-adapter.ts`](../src/codex-client/plugin-adapter.ts) | [`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`telegram-format.test.ts`](../tests/telegram-format.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | Permission Profile 查询如何隔离 | [`permission-port.ts`](../src/application/permission-port.ts)、[`permission-adapter.ts`](../src/codex-client/permission-adapter.ts) | [`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`telegram-format.test.ts`](../tests/telegram-format.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
-| Server Request 如何适配并协调 | [`server-request-adapter.ts`](../src/codex-client/server-request-adapter.ts)、[`approval/`](../src/approval/README.md) | [`approval.test.ts`](../tests/approval.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
+| Server Request 如何适配并协调 | [`server-request-adapter.ts`](../src/codex-client/server-request-adapter.ts)、[`approval/`](../src/approval/README.md)、各 Surface 的 `interactions.ts` | [`approval.test.ts`](../tests/approval.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`telegram-interactions.test.ts`](../tests/telegram-interactions.test.ts)、[`feishu-interactions.test.ts`](../tests/feishu-interactions.test.ts)、[`weixin-interactions.test.ts`](../tests/weixin-interactions.test.ts) |
 | 各模块如何装配和管理生命周期 | [`bootstrap/`](../src/bootstrap/README.md) | [`gateway-startup-cleanup.test.ts`](../tests/gateway-startup-cleanup.test.ts) |
 | Telegram 如何适配核心事件 | [`surfaces/telegram/`](../src/surfaces/telegram/README.md) | [`tests/README.md`](../tests/README.md) |
 | 新通讯渠道如何按模块接入 | [`通讯渠道 Surface 接入指南`](surface-integration-guide.md)、[`surfaces/`](../src/surfaces/README.md) | [`module-boundaries.test.ts`](../tests/module-boundaries.test.ts)、[`surface-manager.test.ts`](../tests/surface-manager.test.ts) |
@@ -142,7 +161,8 @@ Client 与 Surface，不终止共享 App Server。
 1. 先从本页按问题找到官方概念和本项目模块。
 2. 查协议字段时打开生成的 `ClientRequest.ts`、`ServerNotification.ts` 或 `ServerRequest.ts`，
    再沿具体类型文件查看参数，不能凭官方 `main` 分支或记忆手写字段。
-3. 查行为语义时阅读官方 App Server 文档，再查看 `rust-v0.145.0` 固定版本实现和测试。
+3. 查行为语义时阅读官方 App Server 文档，再优先查看 `upstream/openai-codex` 中
+   `rust-v0.145.0` 固定版本实现和测试；本地副本缺失或基线不符时才使用上面的固定版本链接。
 4. 查本项目行为时从模块 `index.ts` 和 README 进入，最后运行对应测试或真实合同测试。
 
 协议升级从 [`Codex CLI 升级流程`](codex-cli-upgrade.md) 开始，使用

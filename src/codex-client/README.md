@@ -13,9 +13,10 @@
   已失效的连接不得重新进入 connected 状态。
 - `thread-adapter.ts`：把当前版本生成的官方 Thread、状态、来源、运行 Turn、上下文压缩 Item ID
   和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；缺少必需字段时失败关闭。
-- `turn-adapter.ts`：把 Application 的文本与本地图片输入编码为官方 `UserInput`，并映射
+- `turn-adapter.ts`：把 Application 的文本、本地图片与本地音频输入编码为官方 `UserInput`，并映射
   Turn、Review 和 Goal 响应；缺少稳定结果必需字段时失败关闭。
-- `model-adapter.ts`：把当前版本官方模型目录裁剪为 Application 拥有的模型选项，过滤不可见项，
+- `model-adapter.ts`：把当前版本官方模型目录裁剪为 Application 拥有的模型选项和
+  `text/image/audio` 输入能力，过滤不可见项，
   并在缺少模型选择必需字段时失败关闭。
 - `account-adapter.ts`：把账户 Token 用量、单桶或多桶额度与重置券数量映射为 Application
   稳定摘要；未知枚举或畸形数值失败关闭，不把上游响应正文交给 Surface。
@@ -32,7 +33,8 @@
   生命周期字段；`turn/completed` 只接受官方 `Turn.durationMs` 的非负安全整数并转为稳定耗时，
   Turn、warning 和 MCP 错误在此统一脱敏并限长，残缺或无关通知不进入业务模块。
 - `operation-adapter.ts`：把官方 Item 转换为安全、简洁的操作摘要，并在离开 Client 边界前
-  清洗命令、查询及上游错误中的敏感文本。
+  清洗命令、查询及上游错误中的敏感文本；只把 `imageGeneration.savedPath` 映射为稳定生成图片
+  产物路径，不把 `imageView` 当作可外发产物。
 - `server-request-adapter.ts`：把命令、文件、临时权限、用户输入和 MCP elicitation 五类
   Server Request 解码为 Approval 稳定请求，并把稳定决定精确编码为当前官方响应；畸形请求
   安全拒绝，未知请求返回明确 JSON-RPC 方法错误。
@@ -54,5 +56,12 @@ Notification 适配只返回当前支持的稳定事件；未知或畸形通知�
 Server Request 适配只把已校验的稳定请求交给 Approval；Approval 不接触生成协议或 RPC 信封，
 响应类型与请求不一致时失败关闭。
 当前精确协议基线要求 initialize 协商实验 API，App Server 才会发送已生成并受控导出的
-`thread/settings/updated`；该通知用于同步共享 Thread 的模型、思考强度和服务层级。启用该能力
+`thread/settings/updated`；该通知用于同步共享 Thread 的模型、思考强度、服务层级和
+Default/Plan 协作模式。Client 只额外调用 `collaborationMode/list` 并把受控的
+`turn/start.collaborationMode` 映射到 Application 窄类型；其他实验请求不属于业务入口。启用该能力
 同时出现的实验审批字段必须在 `approval` 边界显式展示或默认拒绝，不能静默扩大授权。
+
+固定协议的一次性 `localAudio` 已由 Application 的封闭 `TurnInput` 受控接入；Surface 只能提交
+经过格式、大小和私有临时文件边界验证的绝对路径，Application 还必须在 Turn 前确认当前模型目录
+包含 `audio`。远端 `audio` 和实验 `thread/realtime/*`
+不得由本模块调用或映射；生成目录中存在 Realtime 请求和通知类型不改变该边界。

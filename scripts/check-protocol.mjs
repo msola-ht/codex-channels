@@ -24,6 +24,7 @@ if (actual !== expected.codexCli) {
 }
 
 const regenerated = generateProtocolTree(codex, root, dirname(generated), {
+  experimental: expected.experimental === true,
   stdio: "ignore",
 });
 try {

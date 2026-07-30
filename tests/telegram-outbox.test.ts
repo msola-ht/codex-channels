@@ -7,6 +7,8 @@ import type { OutputEvent } from "../src/conversation-core/events.js";
 import { TelegramOutbox } from "../src/surfaces/telegram/outbox.js";
 
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+const turnStartedPanel = "<b>已开始处理。</b>";
+const turnCompletedPanel = "<b>本次运行 · 已完成</b>";
 
 class FakeTelegramApi {
   readonly actions: string[] = [];
@@ -21,6 +23,11 @@ class FakeTelegramApi {
     filename: string | undefined;
     options: unknown;
     content: string;
+  }> = [];
+  readonly photos: Array<{
+    filename: string | undefined;
+    options: unknown;
+    content: Buffer;
   }> = [];
   rejectRichMessages = false;
   rejectHtmlMessages = false;
@@ -102,6 +109,23 @@ class FakeTelegramApi {
     return { message_id: this.nextMessageId++ };
   }
 
+  async sendPhoto(
+    _chatId: string,
+    photo: InputFile,
+    options?: unknown,
+  ): Promise<{ message_id: number }> {
+    const raw = await photo.toRaw();
+    if (!(raw instanceof Uint8Array)) {
+      throw new Error("Fake Telegram API only accepts in-memory photos");
+    }
+    this.photos.push({
+      filename: photo.filename,
+      options,
+      content: Buffer.from(raw),
+    });
+    return { message_id: this.nextMessageId++ };
+  }
+
 }
 
 afterEach(() => {
@@ -109,6 +133,72 @@ afterEach(() => {
 });
 
 describe("TelegramOutbox", () => {
+  it("shows one initial plan and one message for each completed step", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = new TelegramOutbox(
+      api as unknown as Api,
+      pino({ level: "silent" }),
+      undefined,
+      { planUpdatesEnabled: true },
+    );
+
+    outbox.handle(planUpdated([
+      { step: "检查实现", status: "inProgress" },
+      { step: "补充测试", status: "pending" },
+    ]));
+    outbox.handle(planUpdated([
+      { step: "检查实现", status: "completed" },
+      { step: "补充测试", status: "inProgress" },
+    ]));
+    outbox.handle(planUpdated([
+      { step: "检查实现", status: "completed" },
+      { step: "补充测试", status: "inProgress" },
+    ]));
+    outbox.handle(planUpdated([
+      { step: "检查实现", status: "completed" },
+      { step: "补充测试", status: "completed" },
+    ]));
+    await outbox.close();
+
+    expect(api.sent).toHaveLength(3);
+    expect(api.sent[0]).toContain("任务计划 · 0/2");
+    expect(api.sent[1]).toContain("计划进度 · 1/2");
+    expect(api.sent[1]).toContain("第 1 步完成：检查实现");
+    expect(api.sent[2]).toContain("计划进度 · 2/2");
+    expect(api.sent[2]).toContain("第 2 步完成：补充测试");
+    expect(api.edits).toEqual([]);
+  });
+
+  it("hides automatic plan updates by default", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle(planUpdated([
+      { step: "不应展示", status: "inProgress" },
+    ]));
+    await outbox.close();
+
+    expect(api.sent).toEqual([]);
+  });
+
+  it("replies to the originating input when acknowledging Turn start", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.prepareTurnReplyTarget(target.conversationId, 42);
+    outbox.handle(turnStarted());
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual([turnStartedPanel]);
+    expect(api.sendOptions[0]).toMatchObject({
+      reply_parameters: {
+        message_id: 42,
+        allow_sending_without_reply: true,
+      },
+    });
+  });
+
   it("queues a Workspace notification with direct switch buttons", async () => {
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);
@@ -175,6 +265,43 @@ describe("TelegramOutbox", () => {
     expect(api.sent).toEqual([]);
   });
 
+  it("sends completed generated images even when operation summaries are hidden", async () => {
+    const api = new FakeTelegramApi();
+    const image = Buffer.from("validated-image");
+    const outbox = new TelegramOutbox(
+      api as unknown as Api,
+      pino({ level: "silent" }),
+      undefined,
+      {
+        operationUpdateDisplay: "hidden",
+        readGeneratedImage: vi.fn(async () => ({
+          bytes: image,
+          format: "png" as const,
+        })),
+      },
+    );
+
+    outbox.handle({
+      ...operationUpdated("image-1", "completed", "imageGeneration"),
+      operation: {
+        ...operationUpdated(
+          "image-1",
+          "completed",
+          "imageGeneration",
+        ).operation,
+        imagePath: "/private/generated/image.png",
+      },
+    });
+    await outbox.close();
+
+    expect(api.photos).toEqual([{
+      filename: "codex-generated-image.png",
+      options: { disable_notification: true },
+      content: image,
+    }]);
+    expect(api.sent).toEqual([]);
+  });
+
   it("keeps Telegram typing active while a turn is running and stops on completion", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();
@@ -217,8 +344,13 @@ describe("TelegramOutbox", () => {
     await settle();
 
     expect(api.sent).toEqual([
+      turnStartedPanel,
       "执行到一半。",
-      "Codex 任务失败：命令执行失败，TOKEN=[已隐藏]",
+      [
+        "<b>本次运行 · 失败</b>",
+        "",
+        "• <b>错误：</b>命令执行失败，TOKEN=[已隐藏]",
+      ].join("\n"),
     ]);
     expect(api.actions).toEqual([]);
 
@@ -243,15 +375,28 @@ describe("TelegramOutbox", () => {
     await settle();
     await outbox.close();
 
-    expect(api.sent).toEqual(["正在检查", "检查完成。"]);
+    expect(api.sent).toEqual([
+      turnStartedPanel,
+      "正在检查",
+      "检查完成。",
+      turnCompletedPanel,
+    ]);
     expect(api.edits).toContain("正在检查。");
-    expect(api.sendOptions[0]).toEqual({ disable_notification: true });
-    expect(api.sendOptions[1]).toMatchObject({
+    expect(api.sendOptions[0]).toEqual({
+      parse_mode: "HTML",
+      disable_notification: true,
+      reply_parameters: {
+        message_id: 42,
+        allow_sending_without_reply: true,
+      },
+    });
+    expect(api.sendOptions[1]).toEqual({ disable_notification: true });
+    expect(api.sendOptions[2]).toMatchObject({
       reply_parameters: { message_id: 42 },
     });
-    expect(api.sendOptions[1]).not.toHaveProperty("disable_notification");
+    expect(api.sendOptions[2]).not.toHaveProperty("disable_notification");
     expect(api.richMessages).toEqual([]);
-    expect(api.sendOptions[1]).toMatchObject({ parse_mode: "HTML" });
+    expect(api.sendOptions[2]).toMatchObject({ parse_mode: "HTML" });
   });
 
   it("bounds the number of active non-terminal Telegram streams", async () => {
@@ -329,8 +474,26 @@ describe("TelegramOutbox", () => {
     expect(api.sent).toEqual([
       "<b>服务职责</b>\n\n• App Server\n• Gateway\n\n" +
       "<pre><code class=\"language-text\">App Server -&gt; Gateway -&gt; Telegram</code></pre>",
+      turnCompletedPanel,
     ]);
-    expect(api.sendOptions).toEqual([{ parse_mode: "HTML" }]);
+    expect(api.sendOptions).toEqual([
+      { parse_mode: "HTML" },
+      { parse_mode: "HTML", disable_notification: true },
+    ]);
+  });
+
+  it("shows the shared fallback for a blank final answer", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle(textCompleted("blank", " \n ", "final_answer"));
+    outbox.handle(turnCompleted());
+    await outbox.close();
+
+    expect(api.sent).toEqual([
+      "Codex 返回了空消息。",
+      turnCompletedPanel,
+    ]);
   });
 
   it("sends command-only text fences as clickable Telegram commands", async () => {
@@ -350,8 +513,14 @@ describe("TelegramOutbox", () => {
     await settle();
     await outbox.close();
 
-    expect(api.sent).toEqual(["/status\n/goal unknown\n/fast status"]);
-    expect(api.sendOptions).toEqual([{ parse_mode: "HTML" }]);
+    expect(api.sent).toEqual([
+      "/status\n/goal unknown\n/fast status",
+      turnCompletedPanel,
+    ]);
+    expect(api.sendOptions).toEqual([
+      { parse_mode: "HTML" },
+      { parse_mode: "HTML", disable_notification: true },
+    ]);
   });
 
   it("collapses long final text regardless of where the turn started", async () => {
@@ -376,7 +545,7 @@ describe("TelegramOutbox", () => {
     expect(api.sent[0]).toContain("CLI 输入");
     expect(api.sendOptions[0]).toMatchObject({ disable_notification: true });
     expect(api.sent.slice(1).length).toBeGreaterThan(1);
-    expect(api.sendOptions.slice(1).every((options) =>
+    expect(api.sendOptions.slice(1, -1).every((options) =>
       hasEntityType(options, "expandable_blockquote")
     )).toBe(true);
     expect(api.sendOptions[1]).not.toHaveProperty("disable_notification");
@@ -401,8 +570,9 @@ describe("TelegramOutbox", () => {
     await settle();
     await outbox.close();
 
-    expect(api.sent).toHaveLength(1);
+    expect(api.sent).toHaveLength(2);
     expect(api.sent[0]).toContain("完整内容已作为文件发送");
+    expect(api.sent[1]).toBe(turnCompletedPanel);
     expect(api.documents).toHaveLength(1);
     expect(api.documents[0]?.filename).toBe("codex-response.md");
     expect(api.documents[0]?.options).toMatchObject({
@@ -436,7 +606,7 @@ describe("TelegramOutbox", () => {
     expect(api.documents).toEqual([]);
     expect(api.edits.length).toBeGreaterThan(0);
     expect(hasEntityType(api.editOptions[0], "expandable_blockquote")).toBe(true);
-    expect(api.sendOptions.slice(1).every((options) =>
+    expect(api.sendOptions.slice(1, -1).every((options) =>
       hasEntityType(options, "expandable_blockquote")
     )).toBe(true);
   });
@@ -453,7 +623,7 @@ describe("TelegramOutbox", () => {
     await outbox.close();
 
     expect(api.richMessages).toEqual([{ markdown }]);
-    expect(api.sent).toEqual([markdown]);
+    expect(api.sent).toEqual([markdown, turnCompletedPanel]);
   });
 
   it("upgrades a streamed final answer to Rich Markdown when completed", async () => {
@@ -469,7 +639,7 @@ describe("TelegramOutbox", () => {
     await settle();
     await outbox.close();
 
-    expect(api.sent).toEqual(["# 标题"]);
+    expect(api.sent).toEqual(["# 标题", turnCompletedPanel]);
     expect(api.richEdits).toEqual([{ markdown: "# 标题\n\n最终内容" }]);
     expect(api.edits).toContain("# 标题\n\n最终内容");
   });
@@ -486,7 +656,7 @@ describe("TelegramOutbox", () => {
     await outbox.close();
 
     expect(api.richMessages).toEqual([{ markdown: "# 无法解析的内容" }]);
-    expect(api.sent).toEqual(["# 无法解析的内容"]);
+    expect(api.sent).toEqual(["# 无法解析的内容", turnCompletedPanel]);
   });
 
   it("falls back to plain text when Telegram rejects compatible HTML", async () => {
@@ -525,6 +695,7 @@ describe("TelegramOutbox", () => {
     expect(api.sent).toEqual([
       "<b>CLI 输入</b>\n\n<blockquote>从 CLI 发来的输入\n第二行</blockquote>",
       "同步回复",
+      turnCompletedPanel,
     ]);
     expect(api.sendOptions[0]).toEqual({
       parse_mode: "HTML",
@@ -570,7 +741,7 @@ describe("TelegramOutbox", () => {
     await settle();
 
     expect(api.edits.at(-1)).toContain(
-      "💻 <b>运行命令 · 已完成</b> · 125 ms · exit 0",
+      "💻 <b>运行命令 · 已完成</b> · 125毫秒 · exit 0",
     );
     expect(api.editOptions.at(-1)).toEqual({ parse_mode: "HTML" });
 
@@ -579,20 +750,20 @@ describe("TelegramOutbox", () => {
     await settle();
     await outbox.close();
 
-    expect(api.sent).toHaveLength(1);
+    expect(api.sent).toHaveLength(2);
     expect(api.edits.at(-1)).toContain(
       "🔧 <b>修改文件 · 已完成</b>\n<blockquote>README.md</blockquote>",
     );
+    expect(api.sent.at(-1)).toBe(turnCompletedPanel);
   });
 
-  it("groups identical consecutive operations and escapes Telegram HTML", async () => {
+  it("groups identical consecutive file operations and escapes Telegram HTML", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);
 
     outbox.handle(operationUpdated("file-1", "completed", "fileChange", "src/a<b>.ts & README.md"));
     outbox.handle(operationUpdated("file-2", "completed", "fileChange", "src/a<b>.ts & README.md"));
-    outbox.handle(operationUpdated("tool-1", "completed", "dynamicTool", "browser.open"));
     await vi.advanceTimersByTimeAsync(750);
     await settle();
 
@@ -600,11 +771,49 @@ describe("TelegramOutbox", () => {
       "🔧 <b>修改文件 (×2) · 已完成</b>\n"
       + "<blockquote>src/a&lt;b&gt;.ts &amp; README.md</blockquote>",
     );
-    expect(api.sent[0]).toContain(
-      "🧰 <b>调用工具 · 已完成</b>\n<blockquote>browser.open</blockquote>",
-    );
-
     await outbox.close();
+  });
+
+  it("summarizes repeated query operations once before the final reply", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle(operationUpdated("mcp-1", "completed", "mcpTool", "docs.read"));
+    outbox.handle(operationUpdated("mcp-2", "completed", "mcpTool", "docs.read"));
+    outbox.handle(operationUpdated("tool-1", "completed", "dynamicTool", "docs.search"));
+    await vi.advanceTimersByTimeAsync(750);
+    await settle();
+    expect(api.sent).toEqual([]);
+
+    outbox.handle(textCompleted("final", "查询完成", "final_answer"));
+    outbox.handle(turnCompleted());
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual([
+      "<b>操作过程</b>\n\n<b>工具查询 · 已完成</b>\n"
+      + "• MCP 工具：2 次\n"
+      + "• 动态工具：1 次",
+      "查询完成",
+      turnCompletedPanel,
+    ]);
+  });
+
+  it("flushes pending streamed text before a visible operation update", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle(textDelta("commentary", "先说明，再执行命令。", "commentary"));
+    outbox.handle(operationUpdated("command-1", "completed", "command", "git status --short"));
+    await vi.advanceTimersByTimeAsync(750);
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toHaveLength(2);
+    expect(api.sent[0]).toBe("先说明，再执行命令。");
+    expect(api.sent[1]).toContain("💻 <b>运行命令 · 已完成</b>");
   });
 
   it("segments operations around agent replies in chronological order", async () => {
@@ -620,11 +829,12 @@ describe("TelegramOutbox", () => {
     await settle();
     await outbox.close();
 
-    expect(api.sent).toHaveLength(4);
+    expect(api.sent).toHaveLength(5);
     expect(api.sent[0]).toContain("💻 <b>运行命令 · 已完成</b>");
     expect(api.sent[1]).toBe("第一段回复");
     expect(api.sent[2]).toContain("🔧 <b>修改文件 · 已完成</b>");
     expect(api.sent[3]).toBe("第二段回复");
+    expect(api.sent[4]).toBe(turnCompletedPanel);
   });
 
   it("flushes pending replies before an ordered interaction", async () => {
@@ -833,7 +1043,11 @@ describe("TelegramOutbox", () => {
     await settle();
     await outbox.close();
 
-    expect(api.sent).toEqual(["来自 Codex 的回复", "补充说明"]);
+    expect(api.sent).toEqual([
+      "来自 Codex 的回复",
+      "补充说明",
+      turnCompletedPanel,
+    ]);
     expect(api.sendOptions[0]).toMatchObject({
       reply_parameters: {
         message_id: 42,
@@ -886,15 +1100,15 @@ describe("TelegramOutbox", () => {
     expect(api.sent).toEqual([
       "处理完成",
       [
-        "<b>上下文：24.6 K / 258 K（9.5%）</b>",
-        "<b>缓存命中率：</b>2.1%",
-        "<b>当前模型：</b>gpt-5.6-sol",
-        "<b>思考强度：</b>medium",
-        "<b>Fast 模式：</b>开启",
-        "<b>上下文压缩：</b>2 次",
-        "<b>周限：</b>已使用 42%",
-        "<b>Goal：</b>进行中 · 12.5 K / 100 K · 1分30秒",
-        "<b>Git 分支：</b>feature/weixin-surface",
+        turnCompletedPanel,
+        "",
+        "• <b>上下文：</b>24.6 K / 258 K（9.5%）",
+        "• <b>缓存命中：</b>2.1%",
+        "• <b>模型：</b>gpt-5.6-sol · medium · Fast 开启",
+        "• <b>上下文压缩：</b>2 次",
+        "• <b>周限：</b>已使用 42%",
+        "• <b>Goal：</b>进行中 · 12.5 K / 100 K",
+        "• <b>Git 分支：</b>feature/weixin-surface",
       ].join("\n"),
     ]);
     expect(api.sendOptions[1]).toEqual({
@@ -916,7 +1130,11 @@ describe("TelegramOutbox", () => {
     await outbox.close();
 
     expect(api.sent).toEqual([
-      "<b>Git 分支：feature/weixin-surface</b>",
+      [
+        turnCompletedPanel,
+        "",
+        "• <b>Git 分支：</b>feature/weixin-surface",
+      ].join("\n"),
     ]);
   });
 
@@ -964,7 +1182,11 @@ describe("TelegramOutbox", () => {
     await settle();
 
     expect(api.actions).toEqual(["typing"]);
-    expect(api.sent).toEqual(["尚未完成", "Codex 警告：连接已断开"]);
+    expect(api.sent).toEqual([
+      turnStartedPanel,
+      "尚未完成",
+      "Codex 连接已中断：连接已断开",
+    ]);
     expect(api.sendOptions.at(-1)).not.toHaveProperty("disable_notification");
 
     await outbox.close();
@@ -1044,7 +1266,7 @@ describe("TelegramOutbox", () => {
 
     expect(api.sent).toEqual([
       "<b>操作过程</b>\n\n"
-      + "💻 <b>运行命令 · 已完成</b> · 125 ms · exit 0"
+      + "💻 <b>运行命令 · 已完成</b> · 125毫秒 · exit 0"
       + " · <code>git status --short second line</code>",
     ]);
   });
@@ -1064,6 +1286,19 @@ function createOutbox(
 
 function turnStarted(): Extract<OutputEvent, { type: "turn.started" }> {
   return { type: "turn.started", target, threadId: "thread-1", turnId: "turn-1" };
+}
+
+function planUpdated(
+  steps: Extract<OutputEvent, { type: "plan.updated" }>["steps"],
+): Extract<OutputEvent, { type: "plan.updated" }> {
+  return {
+    type: "plan.updated",
+    target,
+    threadId: "thread-1",
+    turnId: "turn-1",
+    explanation: null,
+    steps,
+  };
 }
 
 function turnCompleted(): Extract<OutputEvent, { type: "turn.completed" }> {

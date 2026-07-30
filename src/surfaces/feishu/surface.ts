@@ -11,6 +11,7 @@ import type {
   SurfaceAdapter,
   SurfaceConfigurationChange,
 } from "../types.js";
+import { surfaceErrorMetadata } from "../error-metadata.js";
 import { FeishuConversationAdapter } from "./adapter.js";
 import {
   FeishuApplicationHttpApi,
@@ -21,20 +22,32 @@ import {
 } from "./application-setup.js";
 import {
   createFeishuOAuthApi,
-  FeishuEventConnection,
+  FeishuMessageError,
   FeishuMessageClient,
-  type FeishuEventConnectionOptions,
+  type FeishuQuotedMessagePort,
 } from "./client.js";
+import {
+  FeishuEventConnection,
+  type FeishuEventConnectionOptions,
+} from "./event-connection.js";
 import {
   FeishuCommandCenter,
   feishuCommandMenuEventKey,
 } from "./command-center.js";
+import {
+  FeishuFileInput,
+  type FeishuFilePort,
+} from "./file-input.js";
 import { FeishuInbox } from "./inbox.js";
 import { FeishuInteractionPort } from "./interactions.js";
 import {
   FeishuImageStore,
   type FeishuImagePort,
 } from "./media.js";
+import {
+  FeishuAudioStore,
+  type FeishuAudioPort,
+} from "./audio.js";
 import type { FeishuMessageEventError } from "./message-event.js";
 import type {
   FeishuMenuEvent,
@@ -59,6 +72,9 @@ interface FeishuEventConnectionPort {
 interface FeishuSurfaceDependencies {
   messagePort?: FeishuMessagePort;
   imagePort?: FeishuImagePort;
+  audioPort?: FeishuAudioPort;
+  filePort?: FeishuFilePort;
+  quotedMessagePort?: FeishuQuotedMessagePort;
   createEventConnection: (
     options: FeishuEventConnectionOptions,
   ) => FeishuEventConnectionPort;
@@ -85,6 +101,7 @@ export interface FeishuSurfaceOptions {
   webSocketAgent?: unknown;
   disableEnvironmentProxy?: boolean;
   operationUpdateDisplay?: OperationUpdateDisplay;
+  planUpdatesEnabled?: boolean;
   configurationRecipients?: () => readonly string[];
   startupNotification?: FeishuStartupNotification;
 }
@@ -102,9 +119,11 @@ export class FeishuSurface implements SurfaceAdapter {
   readonly output: FeishuOutbox;
 
   private readonly inbox: FeishuInbox;
+  private readonly adapter: FeishuConversationAdapter;
   private readonly commandCenter: FeishuCommandCenter;
   private readonly applicationSetup: FeishuApplicationSetupController;
   private readonly images: FeishuImagePort;
+  private readonly audios: FeishuAudioPort;
   private readonly connection: FeishuEventConnectionPort;
   private readonly oauth: FeishuOAuthControllerPort & {
     close(): Promise<void>;
@@ -130,7 +149,9 @@ export class FeishuSurface implements SurfaceAdapter {
     this.configurationRecipients = options.configurationRecipients;
     this.startupNotification = options.startupNotification;
     this.logger = options.logger;
-    const client = dependencies.messagePort && dependencies.imagePort
+    const client = dependencies.messagePort
+        && dependencies.imagePort
+        && dependencies.audioPort
       ? undefined
       : new FeishuMessageClient({
           appId: options.appId,
@@ -138,16 +159,24 @@ export class FeishuSurface implements SurfaceAdapter {
           ...(options.openApiAgent
             ? { httpAgent: options.openApiAgent }
             : {}),
-          ...(options.disableEnvironmentProxy
-            ? { disableEnvironmentProxy: true }
-            : {}),
-        });
+        ...(options.disableEnvironmentProxy
+          ? { disableEnvironmentProxy: true }
+          : {}),
+      });
     const messagePort = dependencies.messagePort ?? client!;
+    const quotedMessages = dependencies.quotedMessagePort ?? client;
     this.images = dependencies.imagePort ?? new FeishuImageStore(
       options.uploadsDirectory,
       client!,
       options.logger,
     );
+    this.audios = dependencies.audioPort ?? new FeishuAudioStore(
+      options.uploadsDirectory,
+      client!,
+      options.logger,
+    );
+    const files = dependencies.filePort
+      ?? (client === undefined ? undefined : new FeishuFileInput(client));
     this.output = new FeishuOutbox(
       options.appId,
       messagePort,
@@ -155,6 +184,9 @@ export class FeishuSurface implements SurfaceAdapter {
       {
         ...(options.operationUpdateDisplay !== undefined
           ? { operationUpdateDisplay: options.operationUpdateDisplay }
+          : {}),
+        ...(options.planUpdatesEnabled !== undefined
+          ? { planUpdatesEnabled: options.planUpdatesEnabled }
           : {}),
       },
     );
@@ -196,7 +228,7 @@ export class FeishuSurface implements SurfaceAdapter {
       options.access,
       options.logger,
     );
-    const adapter = new FeishuConversationAdapter(
+    this.adapter = new FeishuConversationAdapter(
       options.service,
       this.output,
       this.images,
@@ -212,12 +244,34 @@ export class FeishuSurface implements SurfaceAdapter {
       },
       this.applicationSetup,
       this.interactions,
+      {
+        quietWindowMs: 0,
+        ...(files === undefined ? {} : { files }),
+        audios: this.audios,
+        ...(quotedMessages === undefined
+          ? {}
+          : {
+              readQuotedText: (messageId: string) =>
+                quotedMessages.readQuotedText(messageId),
+              onQuotedTextError: (error: unknown) => {
+                this.logger.warn(
+                  {
+                    surface: "feishu",
+                    errorCode: error instanceof FeishuMessageError
+                      ? error.code
+                      : "unknown",
+                  },
+                  "飞书引用消息读取失败，已忽略引用上下文",
+                );
+              },
+            }),
+      },
     );
     this.commandCenter = new FeishuCommandCenter(
       this.output,
       options.access,
       (target, action, actorId, input) =>
-        adapter.handleCommandCenterAction(
+        this.adapter.handleCommandCenterAction(
           target,
           action,
           actorId,
@@ -231,7 +285,10 @@ export class FeishuSurface implements SurfaceAdapter {
       ...(options.actorRegistry
         ? { actorRegistry: options.actorRegistry }
         : {}),
-      handle: (message) => adapter.handle(message),
+      handle: (message) => this.adapter.handle(message),
+      handleImageBatch: (messages) =>
+        this.adapter.handleImageBatch(messages),
+      inputQuietWindowMs: 1_000,
       handleError: (error) => {
         options.logger.warn(
           {
@@ -240,6 +297,12 @@ export class FeishuSurface implements SurfaceAdapter {
             conversationId: error.target.conversationId,
             messageId: error.messageId,
             errorType: error.errorType,
+            ...(error.errorCode === undefined
+              ? {}
+              : { errorCode: error.errorCode }),
+            ...(error.errorReason === undefined
+              ? {}
+              : { errorReason: error.errorReason }),
           },
           "飞书消息处理失败",
         );
@@ -335,9 +398,7 @@ export class FeishuSurface implements SurfaceAdapter {
           options.logger.warn(
             {
               ...this.lifecycleContext(),
-              errorType: error instanceof Error
-                ? error.name
-                : typeof error,
+              ...surfaceErrorMetadata(error),
             },
             "飞书机器人菜单路由失败",
           );
@@ -360,13 +421,15 @@ export class FeishuSurface implements SurfaceAdapter {
 
   async start(): Promise<void> {
     const imagesStarting = this.images.start();
+    const audiosStarting = this.audios.start();
     this.logger.info(this.lifecycleContext(), "飞书长连接正在连接");
     const connectionStarting = this.connection.start();
     try {
-      await Promise.all([imagesStarting, connectionStarting]);
+      await Promise.all([imagesStarting, audiosStarting, connectionStarting]);
     } catch (error) {
       await this.connection.stop();
       this.images.close();
+      this.audios.close();
       throw error;
     }
     this.connectionReady = true;
@@ -383,9 +446,11 @@ export class FeishuSurface implements SurfaceAdapter {
     this.connectionReady = false;
     await this.connection.stop();
     await this.inbox.close();
+    await this.adapter.close();
     await this.applicationSetup.close();
     await this.oauth.close();
     this.images.close();
+    this.audios.close();
     await this.interactions.close();
     await this.commandCenter.close();
     await this.output.close();
@@ -444,7 +509,7 @@ export class FeishuSurface implements SurfaceAdapter {
       this.logger.warn(
         {
           ...this.lifecycleContext(),
-          errorType: error instanceof Error ? error.name : typeof error,
+          ...surfaceErrorMetadata(error),
         },
         "飞书启动联通通知生成失败",
       );
@@ -515,7 +580,7 @@ export class FeishuSurface implements SurfaceAdapter {
         {
           ...this.lifecycleContext(),
           conversationId: target.conversationId,
-          errorType: error instanceof Error ? error.name : typeof error,
+          ...surfaceErrorMetadata(error),
         },
         "飞书机器人菜单卡片发送失败",
       );

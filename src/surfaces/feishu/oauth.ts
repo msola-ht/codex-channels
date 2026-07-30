@@ -1,5 +1,6 @@
 import type { Logger } from "pino";
 
+import { surfaceErrorMetadata } from "../error-metadata.js";
 import type { FeishuOutbox } from "./outbox.js";
 import {
   renderFeishuOAuthCard,
@@ -78,7 +79,7 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
         {
           surface: "feishu",
           accountId: this.appId,
-          errorType: safeErrorType(error),
+          ...surfaceErrorMetadata(error),
         },
         "飞书用户授权流程失败",
       );
@@ -129,7 +130,7 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
         {
           surface: "feishu",
           accountId: this.appId,
-          errorType: safeErrorType(error),
+          ...surfaceErrorMetadata(error),
         },
         "飞书用户凭据读取失败，已按撤销请求清除本地凭据",
       );
@@ -349,10 +350,4 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
       );
     }
   }
-}
-
-function safeErrorType(error: unknown): string {
-  return error instanceof Error && error.name
-    ? error.name.slice(0, 80)
-    : "unknown";
 }

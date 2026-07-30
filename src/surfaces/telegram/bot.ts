@@ -23,6 +23,17 @@ import type {
   OperationUpdateDisplay,
   SurfaceConfigurationChange,
 } from "../types.js";
+import { conversationCommandHelpLines } from "../conversation-command-format.js";
+import { formatTurnInputAppended } from "../input-copy.js";
+import {
+  formatOperationFailure,
+  gatewayRequestFailedText,
+  interactionStoppedText,
+} from "../output-copy.js";
+import { formatTextFileTooLarge } from "../text-file-copy.js";
+import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
+import { formatQuotedInput } from "../quoted-input.js";
+import { surfaceCommandAliases } from "../slash-command.js";
 import {
   formatConfigurationChange,
   formatStartupNotification,
@@ -37,6 +48,18 @@ import { telegramDefaultAccountId } from "./constants.js";
 import { TelegramLifecycle } from "./lifecycle.js";
 import { TelegramOutbox, type TelegramFinalMessageFormat } from "./outbox.js";
 import { maximumTelegramImageBytes, TelegramImageStore } from "./image-store.js";
+import {
+  maximumTelegramAudioBytes,
+  maximumTelegramAudioDurationSeconds,
+  TelegramAudioStore,
+} from "./audio-store.js";
+import { telegramErrorMetadata } from "./error-metadata.js";
+import {
+  maximumTelegramTextFileBytes,
+  TelegramTextFileInput,
+  TelegramTextFileInputError,
+  type TelegramTextFilePort,
+} from "./file-input.js";
 import { formatTelegramUserFacingError } from "./user-error-renderer.js";
 
 export interface TelegramImagePort {
@@ -48,14 +71,54 @@ export interface TelegramImagePort {
   ): ReturnType<TelegramImageStore["download"]>;
 }
 
+export interface TelegramAudioPort {
+  start(): Promise<void>;
+  close(): void;
+  download(
+    api: Parameters<TelegramAudioStore["download"]>[0],
+    fileId: string,
+  ): ReturnType<TelegramAudioStore["download"]>;
+}
+
 export interface TelegramSurfaceOptions {
   gatewayVersion: string;
   actorRegistry?: ConversationActorRegistry;
   onFatal?: (error: Error) => void;
   imageStore?: TelegramImagePort;
+  audioStore?: TelegramAudioPort;
+  textFileInput?: TelegramTextFilePort;
   finalMessageFormat?: TelegramFinalMessageFormat;
   operationUpdateDisplay?: OperationUpdateDisplay;
+  planUpdatesEnabled?: boolean;
   codexUpstreamUserAgent?: () => string | undefined;
+  inputQuietWindowMs?: number;
+}
+
+export interface CreateTelegramSurfaceOptions extends TelegramSurfaceOptions {
+  token: string;
+  proxyUrl?: string;
+  service: ConversationService;
+  access: SurfaceAccessPolicy;
+  startupRecipients: ReadonlySet<number>;
+  workspaces: Workspace[];
+  uploadsDirectory: string;
+  logger: Logger;
+}
+
+export function createTelegramSurface(
+  options: CreateTelegramSurfaceOptions,
+): TelegramSurface {
+  return new TelegramSurface(
+    options.token,
+    options.proxyUrl,
+    options.service,
+    options.access,
+    options.startupRecipients,
+    options.workspaces,
+    options.uploadsDirectory,
+    options.logger,
+    options,
+  );
 }
 
 export class TelegramSurface {
@@ -67,8 +130,12 @@ export class TelegramSurface {
   private readonly outbox: TelegramOutbox;
   private readonly lifecycle: TelegramLifecycle;
   private readonly imageStore: TelegramImagePort;
+  private readonly audioStore: TelegramAudioPort;
+  private readonly textFileInput: TelegramTextFilePort;
   private readonly actorRegistry: ConversationActorRegistry | undefined;
   private readonly commands: ConversationCommandService;
+  private readonly inputs: SurfaceInputCoalescer;
+  private nextInputSequence = 0;
   private notificationRecipients: ReadonlySet<number>;
 
   constructor(
@@ -94,6 +161,12 @@ export class TelegramSurface {
     this.actorRegistry = options.actorRegistry;
     this.notificationRecipients = new Set(startupRecipients);
     this.commands = new ConversationCommandService(service);
+    this.inputs = new SurfaceInputCoalescer(
+      (inputTarget, input) => service.submit(inputTarget, input),
+      {
+        quietWindowMs: options.inputQuietWindowMs ?? 1_000,
+      },
+    );
     const apiExecutor = new TelegramApiExecutor(logger);
     this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor, {
       ...(options.finalMessageFormat
@@ -102,10 +175,17 @@ export class TelegramSurface {
       ...(options.operationUpdateDisplay !== undefined
         ? { operationUpdateDisplay: options.operationUpdateDisplay }
         : {}),
+      ...(options.planUpdatesEnabled !== undefined
+        ? { planUpdatesEnabled: options.planUpdatesEnabled }
+        : {}),
     });
     this.output = this.outbox;
     this.interactions = new TelegramInteractionPort(this.bot, logger, apiExecutor, this.outbox);
     this.imageStore = options.imageStore ?? new TelegramImageStore(uploadsDirectory, token, proxyUrl, logger);
+    this.audioStore = options.audioStore
+      ?? new TelegramAudioStore(uploadsDirectory, token, proxyUrl, logger);
+    this.textFileInput = options.textFileInput
+      ?? new TelegramTextFileInput(token, proxyUrl);
     this.lifecycle = new TelegramLifecycle(
       this.bot,
       logger,
@@ -138,13 +218,24 @@ export class TelegramSurface {
   }
 
   async start(): Promise<void> {
-    await this.imageStore.start();
-    this.lifecycle.start();
+    try {
+      await Promise.all([
+        this.imageStore.start(),
+        this.audioStore.start(),
+      ]);
+      this.lifecycle.start();
+    } catch (error) {
+      this.imageStore.close();
+      this.audioStore.close();
+      throw error;
+    }
   }
 
   async stop(): Promise<void> {
-    this.imageStore.close();
     const lifecycleStop = this.lifecycle.stop();
+    await this.inputs.close();
+    this.imageStore.close();
+    this.audioStore.close();
     await this.interactions.close();
     await this.outbox.close();
     await lifecycleStop;
@@ -181,7 +272,7 @@ export class TelegramSurface {
 
   private registerHandlers(): void {
     this.bot.command("whoami", (context) => context.reply(`你的 Telegram 用户 ID：${context.from?.id ?? "未知"}`));
-    this.bot.command(["start", "help"], (context) =>
+    this.bot.command(["start", "help", "h"], (context) =>
       replyTelegramPanel(
         context,
         [
@@ -189,27 +280,13 @@ export class TelegramSurface {
           "",
           "普通文本会发送到当前 Codex Thread。",
           "发送 PNG/JPEG 图片时，可在图片说明中写明需要 Codex 处理的任务。",
+          "发送 UTF-8 文本文件时，可在文件说明中写明需要 Codex 处理的任务。",
           "首次消息自动接续当前 Workspace 最近的空闲 CLI/App Server 会话。",
           "",
-          "/resume [序号|名称|Thread ID]",
-          "/sessions [搜索词] · /archived [搜索词]",
-          "/new",
-          "/archive · /unarchive <序号|名称|Thread ID>",
-          "/status",
-          "/workspace [序号|ID|名称]",
-          "/stop",
-          "/queue <描述>",
-          "/rename <名称>",
-          "/compact",
-          "/fork",
-          "/review [branch <分支>|commit <SHA>|custom <说明>]",
-          "/model [序号|模型 ID|名称]",
-          "/effort [序号|档位]",
-          "/fast [on|off|status]",
-          "/skills · /mcp · /plugins · /usage · /limits · /permissions",
-          "/rules <init|check>",
-          "/diff · /plan",
-          "/goal [set <目标>|clear]",
+          ...conversationCommandHelpLines,
+          "Telegram：",
+          "- /whoami",
+          "- /start · /help · /h",
         ].join("\n"),
       ),
     );
@@ -218,9 +295,13 @@ export class TelegramSurface {
     )) {
       this.bot.command(command, (context) => this.executeCommand(context, command));
     }
+    this.bot.command("work", (context) =>
+      this.executeCommand(context, surfaceCommandAliases.work));
+    this.bot.command("r", (context) =>
+      this.executeCommand(context, surfaceCommandAliases.r));
     this.bot.command("stop", async (context) => {
       if (this.interactions.stopForChat(String(context.chat.id))) {
-        await context.reply("已停止当前交互请求。");
+        await context.reply(interactionStoppedText);
         return;
       }
       await this.executeCommand(context, "stop");
@@ -247,14 +328,37 @@ export class TelegramSurface {
       if (await this.interactions.handleText(context)) {
         return;
       }
-      const submission = await this.service.submit(target(context), context.message.text);
-      this.outbox.setTurnReplyTarget(
-        submission.threadId,
-        submission.turnId,
+      const inputTarget = target(context);
+      this.outbox.prepareTurnReplyTarget(
+        inputTarget.conversationId,
         context.message.message_id,
       );
-      if (submission.steered) {
-        await context.reply("已将补充要求追加到当前 Turn。", {
+      let result;
+      try {
+        result = await this.inputs.enqueue({
+          target: inputTarget,
+          actorId: String(context.from?.id ?? ""),
+          sequence: this.takeInputSequence(),
+          text: formatQuotedInput(
+            context.message.text,
+            telegramQuotedText(context.message.reply_to_message),
+          ),
+        });
+      } catch (error) {
+        this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+        throw error;
+      }
+      if (result.tail && result.submission.steered) {
+        this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+      } else if (result.tail) {
+        this.outbox.bindPendingTurnReplyTarget(
+          inputTarget.conversationId,
+          result.submission.threadId,
+          result.submission.turnId,
+        );
+      }
+      if (result.tail && result.submission.steered) {
+        await context.reply(formatTurnInputAppended("text"), {
           disable_notification: true,
           reply_parameters: {
             message_id: context.message.message_id,
@@ -275,19 +379,117 @@ export class TelegramSurface {
         context.message.caption,
       );
     });
-    this.bot.on("message:document", async (context) => {
-      const document = context.message.document;
-      if (!isSupportedImageDocument(document.mime_type, document.file_name)) {
-        await context.reply("仅支持 PNG 和 JPEG 图片文件。");
-        return;
+    this.bot.on(["message:voice", "message:audio"], async (context) => {
+      const audio = context.message.voice ?? context.message.audio;
+      if (!audio) {
+        throw new Error("Telegram 语音消息缺少文件信息");
       }
-      await this.submitImage(
+      await this.submitAudio(
         context,
-        document.file_id,
-        document.file_size,
+        audio.file_id,
+        audio.file_size,
+        audio.duration,
         context.message.caption,
       );
     });
+    this.bot.on("message:document", async (context) => {
+      const document = context.message.document;
+      if (isSupportedImageDocument(document.mime_type, document.file_name)) {
+        await this.submitImage(
+          context,
+          document.file_id,
+          document.file_size,
+          context.message.caption,
+        );
+        return;
+      }
+      if (
+        document.file_size !== undefined
+        && document.file_size > maximumTelegramTextFileBytes
+      ) {
+        await context.reply(
+          `${formatTextFileTooLarge("Telegram")}。`,
+        );
+        return;
+      }
+      try {
+        await this.submitTextFile(
+          context,
+          document.file_id,
+          document.file_name ?? "未命名.txt",
+          context.message.caption,
+        );
+      } catch (error) {
+        if (error instanceof TelegramTextFileInputError) {
+          await context.reply(`${error.message}。`);
+          return;
+        }
+        throw error;
+      }
+    });
+  }
+
+  private async submitTextFile(
+    context: Context,
+    fileId: string,
+    fileName: string,
+    caption: string | undefined,
+  ): Promise<void> {
+    const sequence = this.takeInputSequence();
+    const file = await this.textFileInput.download(
+      this.bot.api,
+      fileId,
+      fileName,
+    );
+    if (!context.message) {
+      throw new Error("Telegram 文件更新缺少消息信息");
+    }
+    const quotedText = telegramQuotedText(
+      context.message.reply_to_message,
+    );
+    const currentText = caption?.trim();
+    const text = formatQuotedInput([
+      ...(currentText ? [currentText, ""] : []),
+      "以下内容来自用户通过 Telegram 上传的 UTF-8 文本文件（仅作输入）：",
+      `文件名：${file.fileName}`,
+      "",
+      file.text,
+    ].join("\n"), quotedText);
+    const inputTarget = target(context);
+    this.outbox.prepareTurnReplyTarget(
+      inputTarget.conversationId,
+      context.message.message_id,
+    );
+    let result;
+    try {
+      result = await this.inputs.enqueue({
+        target: inputTarget,
+        actorId: String(context.from?.id ?? ""),
+        sequence,
+        text,
+      });
+    } catch (error) {
+      this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+      throw error;
+    }
+    if (result.tail && result.submission.steered) {
+      this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+    } else if (result.tail) {
+      this.outbox.bindPendingTurnReplyTarget(
+        inputTarget.conversationId,
+        result.submission.threadId,
+        result.submission.turnId,
+      );
+    }
+    if (result.tail && result.submission.steered) {
+      await context.reply(formatTurnInputAppended("file", Boolean(currentText)), {
+        disable_notification: true,
+        reply_parameters: {
+          message_id: context.message.message_id,
+          allow_sending_without_reply: true,
+        },
+      });
+    }
   }
 
   private async submitImage(
@@ -296,6 +498,7 @@ export class TelegramSurface {
     fileSize: number | undefined,
     caption: string | undefined,
   ): Promise<void> {
+    const sequence = this.takeInputSequence();
     if (fileSize !== undefined && fileSize > maximumTelegramImageBytes) {
       throw new UserFacingError("image.too-large", "图片超过 10 MiB 限制");
     }
@@ -303,17 +506,48 @@ export class TelegramSurface {
     if (!context.message) {
       throw new Error("Telegram 图片更新缺少消息信息");
     }
-    const submission = await this.service.submit(target(context), {
-      text: caption?.trim() || "请查看这张图片并根据图片内容协助我。",
-      localImages: [{ path: image.path }],
-    });
-    this.outbox.setTurnReplyTarget(
-      submission.threadId,
-      submission.turnId,
+    const quotedText = telegramQuotedText(
+      context.message.reply_to_message,
+    );
+    const currentText = caption?.trim();
+    const inputTarget = target(context);
+    this.outbox.prepareTurnReplyTarget(
+      inputTarget.conversationId,
       context.message.message_id,
     );
-    if (submission.steered && context.message) {
-      await context.reply("已将图片和补充要求追加到当前 Turn。", {
+    let result;
+    try {
+      result = await this.inputs.enqueue({
+        target: inputTarget,
+        actorId: String(context.from?.id ?? ""),
+        sequence,
+        ...(currentText
+          ? { text: formatQuotedInput(currentText, quotedText) }
+          : quotedText === undefined
+            ? {}
+            : {
+                text: formatQuotedInput(
+                  "请查看这张图片并根据图片内容协助我。",
+                  quotedText,
+                ),
+              }),
+        localImages: [{ path: image.path, bytes: image.bytes }],
+      });
+    } catch (error) {
+      this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+      throw error;
+    }
+    if (result.tail && result.submission.steered) {
+      this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+    } else if (result.tail) {
+      this.outbox.bindPendingTurnReplyTarget(
+        inputTarget.conversationId,
+        result.submission.threadId,
+        result.submission.turnId,
+      );
+    }
+    if (result.tail && result.submission.steered && context.message) {
+      await context.reply(formatTurnInputAppended("image", Boolean(currentText)), {
         disable_notification: true,
         reply_parameters: {
           message_id: context.message.message_id,
@@ -321,6 +555,70 @@ export class TelegramSurface {
         },
       });
     }
+  }
+
+  private async submitAudio(
+    context: Context,
+    fileId: string,
+    fileSize: number | undefined,
+    duration: number,
+    caption: string | undefined,
+  ): Promise<void> {
+    if (fileSize !== undefined && fileSize > maximumTelegramAudioBytes) {
+      throw new UserFacingError("audio.too-large", "音频超过 20 MiB 限制");
+    }
+    if (duration > maximumTelegramAudioDurationSeconds) {
+      throw new UserFacingError("audio.too-large", "语音最长支持 5 分钟");
+    }
+    const inputTarget = target(context);
+    const actorId = String(context.from?.id ?? "");
+    await this.inputs.flushPending(inputTarget, actorId);
+    const audio = await this.audioStore.download(this.bot.api, fileId);
+    const quotedText = telegramQuotedText(context.message?.reply_to_message);
+    const currentText = caption?.trim();
+    this.outbox.prepareTurnReplyTarget(
+      inputTarget.conversationId,
+      context.message!.message_id,
+    );
+    let submission;
+    try {
+      submission = await this.service.submit(inputTarget, {
+        ...(currentText || quotedText !== undefined
+          ? {
+              text: formatQuotedInput(
+                currentText || "请听取这段语音并根据内容协助我。",
+                quotedText,
+              ),
+            }
+          : {}),
+        localAudios: [{ path: audio.path }],
+      });
+    } catch (error) {
+      this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+      throw error;
+    }
+    if (submission.steered) {
+      this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+      await context.reply(formatTurnInputAppended("audio", Boolean(currentText)), {
+        disable_notification: true,
+        reply_parameters: {
+          message_id: context.message!.message_id,
+          allow_sending_without_reply: true,
+        },
+      });
+    } else {
+      this.outbox.bindPendingTurnReplyTarget(
+        inputTarget.conversationId,
+        submission.threadId,
+        submission.turnId,
+      );
+    }
+  }
+
+  private takeInputSequence(): number {
+    const sequence = this.nextInputSequence;
+    this.nextInputSequence += 1;
+    return sequence;
   }
 
   private async executeCommand(
@@ -363,7 +661,7 @@ export class TelegramSurface {
     } catch (error) {
       this.logger.error(
         {
-          errorType: error instanceof Error ? error.name : typeof error,
+          ...telegramErrorMetadata(error),
           chatId: context.chat?.id,
         },
         "Telegram 命令执行失败",
@@ -371,14 +669,21 @@ export class TelegramSurface {
       if (context.chat) {
         await context.reply(
           error instanceof UserFacingError
-            ? `操作失败：${formatTelegramUserFacingError(error)}`
-            : "操作失败：Gateway 未能完成请求，请稍后重试。",
+            ? formatOperationFailure(formatTelegramUserFacingError(error))
+            : formatOperationFailure(gatewayRequestFailedText),
         );
       }
     } finally {
       stopTyping?.();
     }
   }
+}
+
+function telegramQuotedText(
+  message: { text?: string; caption?: string } | undefined,
+): string | undefined {
+  const text = message?.text?.trim() || message?.caption?.trim();
+  return text || undefined;
 }
 
 function isSupportedImageDocument(mimeType: string | undefined, fileName: string | undefined): boolean {

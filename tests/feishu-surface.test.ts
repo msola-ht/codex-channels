@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ConversationService } from "../src/application/index.js";
 import {
+  feishuCardElements,
   FeishuEventConnection,
   type FeishuApplicationSnapshot,
   type FeishuCardDocument,
@@ -212,7 +213,16 @@ describe("Feishu Surface", () => {
 
     expect(fixture.sent).toEqual([{
       chatId: "oc_chat",
-      text: "Gateway 配置已热加载\n新增 Workspace：Docs",
+      text: [
+        "Workspace 已添加",
+        "",
+        "│ Docs · docs",
+        "│ /workspace/docs",
+        "",
+        "发送 /workspace 可查看并切换 Workspace。",
+        "",
+        "已生效：Workspace",
+      ].join("\n"),
     }]);
     await fixture.surface.stop();
   });
@@ -299,6 +309,37 @@ describe("Feishu Surface", () => {
     });
   });
 
+  it("routes an authorized private text file through the file port", async () => {
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const fixture = createFixture({ submit });
+    const starting = fixture.surface.start();
+    fixture.ready();
+    await starting;
+
+    fixture.emitFile();
+    await fixture.surface.stop();
+
+    expect(fixture.fileDownload).toHaveBeenCalledWith(
+      "om_file",
+      "file_v2_resource",
+      "settings.json",
+    );
+    expect(submit).toHaveBeenCalledWith({
+      surface: "feishu",
+      accountId: "cli_0123456789abcdef",
+      conversationId: "oc_chat",
+    }, [
+      "以下内容来自用户通过飞书上传的 UTF-8 文本文件（仅作输入）：",
+      "文件名：settings.json",
+      "",
+      "{\"enabled\":true}",
+    ].join("\n"));
+  });
+
   it("reports card callback verification only after observing a valid callback event", async () => {
     const fixture = createFixture();
     const starting = fixture.surface.start();
@@ -358,6 +399,8 @@ describe("Feishu Surface", () => {
       modelPending: false,
       effortPending: false,
       fastModePending: false,
+      collaborationMode: "default" as const,
+      collaborationModePending: false,
     }));
     const fixture = createFixture({
       submit: async () => ({
@@ -426,6 +469,8 @@ describe("Feishu Surface", () => {
           "application:application:self_manage",
           "application:application:patch",
           "im:message:send_as_bot",
+          "im:resource",
+          "im:message:readonly",
           "cardkit:card:write",
         ],
       );
@@ -445,6 +490,8 @@ function createFixture(
       "application:application:self_manage",
       "application:application:patch",
       "im:message:send_as_bot",
+      "im:resource",
+      "im:message:readonly",
       "cardkit:card:write",
     ],
     hasPendingVersion: false,
@@ -488,6 +535,11 @@ function createFixture(
     path: "/private/uploads/feishu/image.png",
     mimeType: "image/png" as const,
     bytes: 8,
+  }));
+  const fileDownload = vi.fn(async () => ({
+    fileName: "settings.json",
+    text: "{\"enabled\":true}",
+    bytes: 16,
   }));
   const oauthClose = vi.fn(async () => {});
   const applicationApi = {
@@ -561,6 +613,9 @@ function createFixture(
       close: () => {},
       download: imageDownload,
     },
+    filePort: {
+      download: fileDownload,
+    },
     createEventConnection: (options) => new FeishuEventConnection(
       options,
       {
@@ -602,6 +657,7 @@ function createFixture(
     sdkStart,
     sdkClose,
     imageDownload,
+    fileDownload,
     oauthClose,
     applicationApi,
     ready() {
@@ -691,7 +747,7 @@ function createFixture(
       if (!sentCard) {
         throw new Error("飞书命令中心卡片尚未发送");
       }
-      const value = sentCard.card.elements.flatMap((element) =>
+      const value = feishuCardElements(sentCard.card).flatMap((element) =>
         Array.isArray(element.actions) ? element.actions : [],
       ).flatMap((action) => {
         if (
@@ -733,7 +789,7 @@ function createFixture(
       if (!sentCard) {
         throw new Error("飞书 Doctor 配置卡片尚未发送");
       }
-      const value = sentCard.card.elements.flatMap((element) =>
+      const value = feishuCardElements(sentCard.card).flatMap((element) =>
         Array.isArray(element.actions) ? element.actions : [],
       ).flatMap((action) => {
         if (
@@ -786,6 +842,31 @@ function createFixture(
           chat_type: "p2p",
           message_type: "image",
           content: "{\"image_key\":\"img_v2_resource\"}",
+        },
+      });
+    },
+    emitFile() {
+      if (!messageHandler) {
+        throw new Error("飞书 SDK 尚未注册消息处理器");
+      }
+      messageHandler({
+        event_id: "event-file",
+        sender: {
+          sender_id: {
+            open_id: "ou_actor",
+          },
+          sender_type: "user",
+        },
+        message: {
+          message_id: "om_file",
+          create_time: String(Date.now()),
+          chat_id: "oc_chat",
+          chat_type: "p2p",
+          message_type: "file",
+          content: JSON.stringify({
+            file_key: "file_v2_resource",
+            file_name: "settings.json",
+          }),
         },
       });
     },

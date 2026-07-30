@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { JsonRpcError } from "../src/codex-client/index.js";
 import {
   FeishuInbox,
   type FeishuInboxMessage,
@@ -121,6 +122,19 @@ describe("FeishuInbox", () => {
     });
   });
 
+  it("preserves the validated Feishu reply parent identifier", async () => {
+    const fixture = createFixture();
+
+    expect(fixture.inbox.receive(createEvent({
+      parentId: "om_parent",
+    }))).toEqual({ status: "accepted" });
+    await fixture.inbox.close();
+
+    expect(fixture.handled).toEqual([
+      expect.objectContaining({ parentId: "om_parent" }),
+    ]);
+  });
+
   it("accepts a private image key without downloading in the SDK callback", async () => {
     const fixture = createFixture();
 
@@ -136,9 +150,91 @@ describe("FeishuInbox", () => {
     expect(fixture.handled).toEqual([
       expect.objectContaining({
         kind: "image",
-        imageKey: "img_v2_resource",
+        imageKeys: ["img_v2_resource"],
       }),
     ]);
+  });
+
+  it("accepts one private file reference without downloading in the SDK callback", async () => {
+    const fixture = createFixture();
+
+    expect(fixture.inbox.receive(createEvent({
+      messageType: "file",
+      content: JSON.stringify({
+        file_key: "file_v2_resource",
+        file_name: "settings.json",
+      }),
+    }))).toEqual({
+      status: "accepted",
+    });
+    expect(fixture.handled).toHaveLength(0);
+
+    await fixture.inbox.close();
+    expect(fixture.handled).toEqual([
+      expect.objectContaining({
+        kind: "file",
+        fileKey: "file_v2_resource",
+        fileName: "settings.json",
+      }),
+    ]);
+  });
+
+  it("accepts one private audio reference without downloading in the SDK callback", async () => {
+    const fixture = createFixture();
+
+    expect(fixture.inbox.receive(createEvent({
+      messageType: "audio",
+      content: JSON.stringify({
+        file_key: "file_v2_audio",
+        duration: 12_000,
+      }),
+    }))).toEqual({
+      status: "accepted",
+    });
+
+    await fixture.inbox.close();
+    expect(fixture.handled).toEqual([
+      expect.objectContaining({
+        kind: "audio",
+        fileKey: "file_v2_audio",
+        durationMs: 12_000,
+      }),
+    ]);
+  });
+
+  it("collects adjacent image events into one ordered image batch", async () => {
+    vi.useFakeTimers();
+    const batches: FeishuInboxMessage[][] = [];
+    const fixture = createFixture({
+      inputQuietWindowMs: 1_000,
+      handleImageBatch: async (messages) => {
+        batches.push([...messages]);
+      },
+    });
+
+    expect(fixture.inbox.receive(createEvent({
+      eventId: "event-image-1",
+      messageId: "om_image_1",
+      messageType: "image",
+      content: "{\"image_key\":\"img_v2_first\"}",
+    }))).toEqual({ status: "accepted" });
+    expect(fixture.inbox.receive(createEvent({
+      eventId: "event-image-2",
+      messageId: "om_image_2",
+      messageType: "image",
+      content: "{\"image_key\":\"img_v2_second\"}",
+    }))).toEqual({ status: "accepted" });
+
+    await settle();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await fixture.inbox.close();
+
+    expect(batches).toHaveLength(1);
+    expect(batches[0]?.map((item) => item.messageId)).toEqual([
+      "om_image_1",
+      "om_image_2",
+    ]);
+    expect(fixture.handled).toHaveLength(0);
   });
 
   it("accepts one private rich-post image with its text caption", async () => {
@@ -161,7 +257,7 @@ describe("FeishuInbox", () => {
     expect(fixture.handled).toEqual([
       expect.objectContaining({
         kind: "image",
-        imageKey: "img_v2_resource",
+        imageKeys: ["img_v2_resource"],
         text: "收得到吗",
       }),
     ]);
@@ -189,7 +285,7 @@ describe("FeishuInbox", () => {
     expect(fixture.handled).toEqual([
       expect.objectContaining({
         kind: "image",
-        imageKey: "img_v2_resource",
+        imageKeys: ["img_v2_resource"],
         text: "请看截图",
       }),
     ]);
@@ -233,7 +329,7 @@ describe("FeishuInbox", () => {
     ]);
   });
 
-  it("rejects a rich post with multiple images", async () => {
+  it("accepts multiple rich-post images with their shared caption", async () => {
     const fixture = createFixture();
 
     expect(fixture.inbox.receive(createEvent({
@@ -242,21 +338,28 @@ describe("FeishuInbox", () => {
         content: [[
           { tag: "img", image_key: "img_v2_first" },
           { tag: "img", image_key: "img_v2_second" },
+          { tag: "text", text: "飞书多图发送测试" },
         ]],
       }),
     }))).toEqual({
-      status: "ignored",
-      reason: "invalid-content",
+      status: "accepted",
     });
 
     await fixture.inbox.close();
+    expect(fixture.handled).toEqual([
+      expect.objectContaining({
+        kind: "image",
+        imageKeys: ["img_v2_first", "img_v2_second"],
+        text: "飞书多图发送测试",
+      }),
+    ]);
   });
 
   it.each([
     [{ appId: "cli_ffffffffffffffff" }, "account-mismatch"],
     [{ senderType: "bot" }, "non-user"],
     [{ chatType: "group" }, "unsupported-chat"],
-    [{ messageType: "file" }, "unsupported-message"],
+    [{ messageType: "media" }, "unsupported-message"],
     [{ createTime: "not-a-timestamp" }, "invalid-timestamp"],
     [{ content: "not-json" }, "invalid-content"],
     [{ content: "{}" }, "invalid-content"],
@@ -283,6 +386,25 @@ describe("FeishuInbox", () => {
 
     expect(fixture.inbox.receive(createEvent({
       messageType: "image",
+      content,
+    }))).toEqual({
+      status: "ignored",
+      reason: "invalid-content",
+    });
+    await fixture.inbox.close();
+  });
+
+  it.each([
+    "",
+    "{}",
+    "{\"file_key\":\"\",\"file_name\":\"notes.txt\"}",
+    "{\"file_key\":\"../secret\",\"file_name\":\"notes.txt\"}",
+    "{\"file_key\":\"file_v2_resource\",\"file_name\":\"../secret.txt\"}",
+  ])("rejects invalid file content", async (content) => {
+    const fixture = createFixture();
+
+    expect(fixture.inbox.receive(createEvent({
+      messageType: "file",
       content,
     }))).toEqual({
       status: "ignored",
@@ -481,6 +603,39 @@ describe("FeishuInbox", () => {
     }]);
     expect(JSON.stringify(fixture.errors)).not.toContain("sensitive");
     expect(JSON.stringify(fixture.errors)).not.toContain("first");
+  });
+
+  it("preserves sanitized JSON-RPC diagnostics without exposing messages", async () => {
+    const fixture = createFixture({
+      handle: async () => {
+        throw new JsonRpcError(
+          -32600,
+          "no active turn to steer",
+          { token: "secret" },
+        );
+      },
+    });
+
+    fixture.inbox.receive(createEvent({
+      eventId: "event-rpc",
+      messageId: "message-rpc",
+      content: "{\"text\":\"image follow-up\"}",
+    }));
+    await fixture.inbox.close();
+
+    expect(fixture.errors).toEqual([{
+      target: {
+        surface: "feishu",
+        accountId: "cli_0123456789abcdef",
+        conversationId: "oc_chat",
+      },
+      messageId: "message-rpc",
+      errorType: "JsonRpcError",
+      errorCode: -32600,
+      errorReason: "no-active-turn",
+    }]);
+    expect(JSON.stringify(fixture.errors)).not.toContain("secret");
+    expect(JSON.stringify(fixture.errors)).not.toContain("image follow-up");
   });
 
   it("isolates error-reporter failures from later messages", async () => {

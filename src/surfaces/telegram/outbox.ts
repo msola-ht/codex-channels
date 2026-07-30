@@ -9,17 +9,36 @@ import {
   type OutputEvent,
 } from "../../conversation-core/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
-import { formatElapsedDuration } from "../elapsed-duration.js";
+import { readGeneratedImage } from "../generated-image.js";
+import {
+  OperationUpdateBuffer,
+  type OperationUpdateSummary,
+} from "../operation-update-buffer.js";
+import { TurnReplyTargets } from "../turn-reply-targets.js";
+import {
+  createTurnCompletedPresentation,
+  createTurnStartedPresentation,
+} from "../lifecycle-presentation.js";
+import {
+  cliInputTitle,
+  contentTruncatedText,
+  emptyCodexResponseText,
+  formatCodexWarning,
+  formatConnectionLost,
+} from "../output-copy.js";
+import {
+  formatRuntimeAccountUpdate,
+  formatRuntimeMcpStatusUpdate,
+  formatRuntimeRateLimitUpdate,
+} from "../runtime-status-format.js";
+import { PlanProgressTracker } from "../plan-presentation.js";
 import type { OperationUpdateDisplay } from "../types.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import { TelegramApprovalOperationCoordinator } from "./approval-operation-coordinator.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
 import { telegramDefaultAccountId } from "./constants.js";
 import {
-  formatAccountUpdate,
-  formatContextUsage,
-  formatMcpStatusUpdate,
-  formatRateLimitUpdate,
+  renderTelegramLifecyclePresentation,
   splitTelegramText,
 } from "./format.js";
 import { formatMarkdownAsTelegramHtml } from "./markdown-format.js";
@@ -29,7 +48,10 @@ import {
   splitExpandableMessage,
   type LongFinalMessagePlan,
 } from "./long-message-format.js";
-import { formatOperationLog } from "./operation-format.js";
+import {
+  formatOperationLog,
+  formatTelegramOperationSummary,
+} from "./operation-format.js";
 import { TelegramTypingIndicator } from "./typing-indicator.js";
 
 interface StreamState {
@@ -53,10 +75,14 @@ interface OperationLogState {
   timer: NodeJS.Timeout | undefined;
 }
 
+interface PlanMessageState {
+  tracker: PlanProgressTracker;
+}
+
 const maximumRichMarkdownCharacters = 32_000;
 const maximumTelegramActiveStreams = 100;
 const maximumTelegramBufferedStreamCharacters = 1_000_000;
-const telegramStreamTruncationMarker = "\n\n（内容过长，已截断）";
+const telegramStreamTruncationMarker = `\n\n（${contentTruncatedText}）`;
 
 export type TelegramFinalMessageFormat = "html" | "rich";
 
@@ -64,12 +90,16 @@ export interface TelegramOutboxOptions {
   finalMessageFormat?: TelegramFinalMessageFormat;
   accountId?: string;
   operationUpdateDisplay?: OperationUpdateDisplay;
+  planUpdatesEnabled?: boolean;
+  readGeneratedImage?: typeof readGeneratedImage;
 }
 
 export class TelegramOutbox {
   private readonly streams = new Map<string, StreamState>();
   private readonly operationLogs = new Map<string, OperationLogState>();
-  private readonly replyToByTurn = new Map<string, number>();
+  private readonly operationUpdates = new OperationUpdateBuffer<string>();
+  private readonly planMessages = new Map<string, PlanMessageState>();
+  private readonly replyTargets = new TurnReplyTargets<number>();
   private readonly typing: TelegramTypingIndicator;
   private readonly delivery: ConversationDeliveryQueue;
   private readonly approvalOperations = new TelegramApprovalOperationCoordinator();
@@ -90,11 +120,34 @@ export class TelegramOutbox {
     this.typing = new TelegramTypingIndicator((chatId) => this.enqueueTyping(chatId));
   }
 
+  prepareTurnReplyTarget(conversationId: string, messageId: number): void {
+    if (!this.closed) {
+      this.replyTargets.prepare(conversationId, messageId);
+    }
+  }
+
+  discardPendingTurnReplyTarget(conversationId: string): void {
+    this.replyTargets.discardPending(conversationId);
+  }
+
+  bindPendingTurnReplyTarget(
+    conversationId: string,
+    threadId: string,
+    turnId: string,
+  ): void {
+    if (!this.closed) {
+      this.replyTargets.bindPending(
+        conversationId,
+        this.turnKey(threadId, turnId),
+      );
+    }
+  }
+
   setTurnReplyTarget(threadId: string, turnId: string, messageId: number): void {
     if (this.closed) {
       return;
     }
-    this.replyToByTurn.set(this.turnKey(threadId, turnId), messageId);
+    this.replyTargets.set(this.turnKey(threadId, turnId), messageId);
   }
 
   handle(event: OutputEvent): void {
@@ -108,19 +161,37 @@ export class TelegramOutbox {
     const chatId = event.target.conversationId;
     switch (event.type) {
       case "turn.started":
+        this.replyTargets.bindPending(
+          chatId,
+          this.turnKey(event.threadId, event.turnId),
+        );
         this.typing.start(chatId, this.turnActivityKey(event.threadId, event.turnId));
+        this.enqueue(
+          chatId,
+          async () => {
+            await this.sendPanel(
+              chatId,
+              renderTelegramLifecyclePresentation(
+                createTurnStartedPresentation(),
+              ),
+              this.replyTargets.get(this.turnKey(event.threadId, event.turnId)),
+              true,
+            );
+          },
+          true,
+        );
         return;
       case "user.message": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
         this.enqueue(chatId, async () => {
           const messageId = await this.sendPanel(
             chatId,
-            formatCliInput(event.text),
+            formatTelegramCliInput(event.text),
             undefined,
             true,
           );
           if (messageId !== undefined) {
-            this.replyToByTurn.set(turnKey, messageId);
+            this.replyTargets.set(turnKey, messageId);
           }
         }, true);
         return;
@@ -167,6 +238,9 @@ export class TelegramOutbox {
       }
       case "text.completed": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
+        if (event.phase !== "commentary") {
+          this.flushOperationUpdates(chatId, turnKey);
+        }
         this.sealOperationLog(chatId, turnKey);
         const key = this.streamKey(turnKey, event.itemId);
         const existing = this.streams.get(key);
@@ -193,10 +267,31 @@ export class TelegramOutbox {
         return;
       }
       case "operation.updated": {
+        const turnKey = this.turnKey(event.threadId, event.turnId);
+        let streamFlushed = false;
+        const flushStreamBeforeOutput = (): void => {
+          if (streamFlushed) {
+            return;
+          }
+          streamFlushed = true;
+          this.flushStreamsBeforeVisibleOutput(chatId, turnKey);
+        };
+        const imagePath = event.operation.imagePath;
+        if (
+          event.operation.kind === "imageGeneration"
+          && event.operation.status === "completed"
+          && imagePath !== undefined
+        ) {
+          flushStreamBeforeOutput();
+          this.enqueue(
+            chatId,
+            () => this.sendGeneratedImage(chatId, imagePath),
+            true,
+          );
+        }
         if (this.options.operationUpdateDisplay === "hidden") {
           return;
         }
-        const turnKey = this.turnKey(event.threadId, event.turnId);
         const operationKey = this.operationKey(turnKey, event.operation.itemId);
         const disposition = this.approvalOperations.routeOperation(operationKey, {
           chatId,
@@ -207,6 +302,10 @@ export class TelegramOutbox {
           return;
         }
         if (disposition === "hold") {
+          return;
+        }
+        flushStreamBeforeOutput();
+        if (this.operationUpdates.accept(turnKey, event.operation, chatId)) {
           return;
         }
         const state = this.operationLogs.get(turnKey) ?? this.createOperationLog(chatId, turnKey);
@@ -235,8 +334,33 @@ export class TelegramOutbox {
         this.operationLogs.set(turnKey, state);
         return;
       }
+      case "plan.updated": {
+        if (!this.options.planUpdatesEnabled) {
+          return;
+        }
+        const turnKey = this.turnKey(event.threadId, event.turnId);
+        const state = this.planMessages.get(turnKey) ?? {
+          tracker: new PlanProgressTracker(),
+        };
+        this.planMessages.set(turnKey, state);
+        for (const presentation of state.tracker.accept(event)) {
+          this.enqueue(
+            chatId,
+            () => this.send(
+              chatId,
+              presentation.text,
+              undefined,
+              true,
+            ).then(() => undefined),
+            true,
+          );
+        }
+        return;
+      }
       case "turn.completed": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
+        this.planMessages.delete(turnKey);
+        this.flushOperationUpdates(chatId, turnKey);
         this.sealOperationLog(chatId, turnKey);
         const keys = this.streamKeysForTurn(event.threadId, event.turnId);
         for (const key of keys) {
@@ -251,60 +375,16 @@ export class TelegramOutbox {
           for (const key of keys) {
             await this.flush(chatId, key, true);
           }
-          const replyTo = this.replyToByTurn.get(turnKey);
-          if (event.error) {
-            await this.send(
-              chatId,
-              `Codex 任务失败：${visibleUpstreamMessage(event.error)}`,
-              replyTo,
-            );
-          } else if (!new Set(["completed", "success"]).has(event.status)) {
-            await this.send(chatId, `Codex 任务状态：${event.status}`, replyTo);
-          }
-          if (event.tokenUsage) {
-            await this.sendPanel(
-              chatId,
-              formatContextUsage(
-                event.tokenUsage,
-                {
-                  ...(event.model
-                    ? {
-                      model: event.model,
-                      effort: event.effort ?? null,
-                      serviceTier: event.serviceTier ?? null,
-                    }
-                    : {}),
-                  ...(event.durationMs === undefined
-                    ? {}
-                    : { durationMs: event.durationMs }),
-                  ...(event.contextCompactionCount !== undefined
-                    ? { contextCompactionCount: event.contextCompactionCount }
-                    : {}),
-                  ...(event.weeklyLimit ? { weeklyLimit: event.weeklyLimit } : {}),
-                  ...(event.goal ? { goal: event.goal } : {}),
-                  gitBranch: event.gitBranch,
-                },
-              ),
-              undefined,
-              true,
-            );
-          } else if (
-            event.durationMs !== undefined
-            || Object.hasOwn(event, "gitBranch")
-          ) {
-            await this.sendPanel(
-              chatId,
-              [
-                ...(event.durationMs === undefined
-                  ? []
-                  : [`对话耗时：${formatElapsedDuration(event.durationMs)}`]),
-                `Git 分支：${event.gitBranch ?? "未检测到"}`,
-              ].join("\n"),
-              undefined,
-              true,
-            );
-          }
-          this.replyToByTurn.delete(turnKey);
+          const replyTo = this.replyTargets.get(turnKey);
+          await this.sendPanel(
+            chatId,
+            renderTelegramLifecyclePresentation(
+              createTurnCompletedPresentation(event),
+            ),
+            replyTo,
+            true,
+          );
+          this.replyTargets.delete(turnKey);
           this.notifiedTurns.delete(turnKey);
           this.clearApprovalOperationsForTurn(turnKey);
         }, true);
@@ -314,7 +394,7 @@ export class TelegramOutbox {
         this.enqueue(chatId, async () => {
           await this.send(
             chatId,
-            `Codex 警告：${visibleUpstreamMessage(event.message)}`,
+            formatCodexWarning(visibleUpstreamMessage(event.message)),
             undefined,
             true,
           );
@@ -323,14 +403,14 @@ export class TelegramOutbox {
       case "connection.lost":
         this.clearThreadOutput(chatId, event.threadId);
         this.enqueue(chatId, async () => {
-          await this.send(chatId, `Codex 警告：${event.message}`);
+          await this.send(chatId, formatConnectionLost(event.message));
         }, true);
         return;
       case "account.updated":
         this.enqueue(chatId, async () => {
           await this.sendPanel(
             chatId,
-            formatAccountUpdate(event.authMode, event.planType),
+            formatRuntimeAccountUpdate(event.authMode, event.planType),
             undefined,
             true,
           );
@@ -340,7 +420,7 @@ export class TelegramOutbox {
         this.enqueue(chatId, async () => {
           await this.sendPanel(
             chatId,
-            formatRateLimitUpdate(event.rateLimits),
+            formatRuntimeRateLimitUpdate(event.rateLimits),
             undefined,
             true,
           );
@@ -350,7 +430,7 @@ export class TelegramOutbox {
         this.enqueue(chatId, async () => {
           await this.sendPanel(
             chatId,
-            formatMcpStatusUpdate(event),
+            formatRuntimeMcpStatusUpdate(event),
             undefined,
             event.status !== "failed",
           );
@@ -361,8 +441,35 @@ export class TelegramOutbox {
     }
   }
 
+  private async sendGeneratedImage(
+    chatId: string,
+    imagePath: string,
+  ): Promise<void> {
+    const image = await (
+      this.options.readGeneratedImage ?? readGeneratedImage
+    )(imagePath);
+    await this.executor.call(
+      {
+        chatId,
+        operation: "sendPhoto",
+        critical: false,
+      },
+      () => this.api.sendPhoto(
+        chatId,
+        new InputFile(
+          image.bytes,
+          `codex-generated-image.${image.format === "jpeg" ? "jpg" : "png"}`,
+        ),
+        { disable_notification: true },
+      ),
+    );
+  }
+
   async close(): Promise<void> {
     this.closed = true;
+    for (const { target, summary } of this.operationUpdates.drain()) {
+      this.enqueueOperationSummary(target, summary);
+    }
     for (const [key, state] of this.streams) {
       if (state.timer) {
         clearTimeout(state.timer);
@@ -386,7 +493,9 @@ export class TelegramOutbox {
     await this.delivery.close();
     this.streams.clear();
     this.operationLogs.clear();
-    this.replyToByTurn.clear();
+    this.operationUpdates.clear();
+    this.planMessages.clear();
+    this.replyTargets.clear();
     this.approvalOperations.clear();
     this.notifiedTurns.clear();
   }
@@ -515,10 +624,13 @@ export class TelegramOutbox {
       return;
     }
     if (!state.text.trim()) {
-      if (final && !standaloneState) {
-        this.streams.delete(key);
+      if (!final || state.phase === "commentary") {
+        if (final && !standaloneState) {
+          this.streams.delete(key);
+        }
+        return;
       }
-      return;
+      state.text = emptyCodexResponseText;
     }
     const text = state.text.trimEnd();
     if (final && state.phase !== "commentary") {
@@ -693,6 +805,47 @@ export class TelegramOutbox {
     this.enqueue(chatId, () => this.flushOperationLog(state, true), true);
   }
 
+  private flushOperationUpdates(chatId: string, turnKey: string): void {
+    const buffered = this.operationUpdates.take(turnKey);
+    if (buffered === null) {
+      return;
+    }
+    this.enqueueOperationSummary(chatId, buffered.summary, turnKey);
+  }
+
+  private flushStreamsBeforeVisibleOutput(chatId: string, turnKey: string): void {
+    for (const [key, state] of this.streams) {
+      if (state.turnKey !== turnKey || !state.timer) {
+        continue;
+      }
+      clearTimeout(state.timer);
+      state.timer = undefined;
+      this.enqueue(chatId, () => this.flush(chatId, key, false), true);
+    }
+  }
+
+  private enqueueOperationSummary(
+    chatId: string,
+    summary: OperationUpdateSummary,
+    turnKey?: string,
+  ): void {
+    const text = formatTelegramOperationSummary(
+      summary,
+      this.options.operationUpdateDisplay === "compact" ? "compact" : "full",
+    );
+    this.enqueue(
+      chatId,
+      async () => {
+        await this.sendOperationMessage(
+          chatId,
+          text,
+          turnKey === undefined ? undefined : this.replyTargets.get(turnKey),
+        );
+      },
+      true,
+    );
+  }
+
   private async flushOperationLog(state: OperationLogState, final: boolean): Promise<void> {
     if (state.records.size === 0) {
       if (state.messageId !== undefined) {
@@ -728,7 +881,7 @@ export class TelegramOutbox {
           state.messageId = await this.sendOperationMessage(
             chatId,
             text,
-            this.replyToByTurn.get(turnKey),
+            this.replyTargets.get(turnKey),
           );
         }
       }
@@ -736,7 +889,7 @@ export class TelegramOutbox {
       state.messageId = await this.sendOperationMessage(
         chatId,
         text,
-        this.replyToByTurn.get(turnKey),
+        this.replyTargets.get(turnKey),
       );
     }
     if (final && this.operationLogs.get(turnKey) === state) {
@@ -810,7 +963,7 @@ export class TelegramOutbox {
   private async sendFirstChunk(chatId: string, state: StreamState, text: string): Promise<number> {
     const replyTo = state.phase === "commentary"
       ? undefined
-      : this.replyToByTurn.get(state.turnKey);
+      : this.replyTargets.get(state.turnKey);
     const silent = state.phase === "commentary" || this.notifiedTurns.has(state.turnKey);
     const message = await this.executor.call(
       { chatId, operation: "sendMessage", critical: true },
@@ -820,7 +973,7 @@ export class TelegramOutbox {
       this.notifiedTurns.add(state.turnKey);
     }
     if (replyTo !== undefined) {
-      this.replyToByTurn.delete(state.turnKey);
+      this.replyTargets.delete(state.turnKey);
     }
     return message.message_id;
   }
@@ -839,7 +992,7 @@ export class TelegramOutbox {
       return state.messageId;
     }
 
-    const replyTo = this.replyToByTurn.get(state.turnKey);
+    const replyTo = this.replyTargets.get(state.turnKey);
     const silent = this.notifiedTurns.has(state.turnKey);
     const message = await this.executor.call(
       { chatId, operation: "sendRichMessage", critical: true },
@@ -849,7 +1002,7 @@ export class TelegramOutbox {
       this.notifiedTurns.add(state.turnKey);
     }
     if (replyTo !== undefined) {
-      this.replyToByTurn.delete(state.turnKey);
+      this.replyTargets.delete(state.turnKey);
     }
     return message.message_id;
   }
@@ -867,7 +1020,7 @@ export class TelegramOutbox {
       return state.messageId;
     }
 
-    const replyTo = this.replyToByTurn.get(state.turnKey);
+    const replyTo = this.replyTargets.get(state.turnKey);
     const silent = this.notifiedTurns.has(state.turnKey);
     const message = await this.executor.call(
       { chatId, operation: "sendMessage", critical: true },
@@ -877,7 +1030,7 @@ export class TelegramOutbox {
       this.notifiedTurns.add(state.turnKey);
     }
     if (replyTo !== undefined) {
-      this.replyToByTurn.delete(state.turnKey);
+      this.replyTargets.delete(state.turnKey);
     }
     return message.message_id;
   }
@@ -940,7 +1093,7 @@ export class TelegramOutbox {
         ),
       );
     } else {
-      const replyTo = this.replyToByTurn.get(state.turnKey);
+      const replyTo = this.replyTargets.get(state.turnKey);
       const silent = this.notifiedTurns.has(state.turnKey);
       const message = await this.executor.call(
         { chatId, operation: "sendMessage", critical: true },
@@ -955,7 +1108,7 @@ export class TelegramOutbox {
         this.notifiedTurns.add(state.turnKey);
       }
       if (replyTo !== undefined) {
-        this.replyToByTurn.delete(state.turnKey);
+        this.replyTargets.delete(state.turnKey);
       }
     }
 
@@ -1035,11 +1188,7 @@ export class TelegramOutbox {
         this.operationLogs.delete(key);
       }
     }
-    for (const key of this.replyToByTurn.keys()) {
-      if (key.startsWith(`${threadId}:`)) {
-        this.replyToByTurn.delete(key);
-      }
-    }
+    this.replyTargets.clearThread(threadId);
     const prefix = `${threadId}:`;
     this.approvalOperations.clearThread(threadId);
     for (const turnKey of this.notifiedTurns) {
@@ -1052,13 +1201,13 @@ export class TelegramOutbox {
 
 }
 
-function formatCliInput(text: string): string {
+function formatTelegramCliInput(text: string): string {
   const quote = text
     .trim()
     .split("\n")
     .map((line) => `│ ${line}`)
     .join("\n");
-  return `CLI 输入\n\n${quote}`;
+  return `${cliInputTitle}\n\n${quote}`;
 }
 
 function errorMessageForClassification(error: unknown): string {

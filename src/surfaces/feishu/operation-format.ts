@@ -7,6 +7,10 @@ import {
   redactOperationDetail,
 } from "../operation-presentation.js";
 import type { OperationUpdateDisplay } from "../types.js";
+import {
+  operationSummaryRows,
+  type OperationUpdateSummary,
+} from "../operation-update-buffer.js";
 
 export function formatFeishuOperation(
   record: OperationUpdate,
@@ -33,6 +37,20 @@ export function formatFeishuOperation(
     }
   }
   return withOperationDurationFooter(lines.join("\n"), record.durationMs);
+}
+
+export function formatFeishuOperationSummary(
+  summary: OperationUpdateSummary,
+  display: Exclude<OperationUpdateDisplay, "hidden"> = "full",
+): string {
+  if (summary.records.length === 1) {
+    return formatFeishuOperation(summary.records[0]!, display);
+  }
+  const markdown = [
+    "**工具查询 · 已完成**",
+    ...operationSummaryRows(summary).map((row) => `- ${row}`),
+  ].join("\n");
+  return withOperationDurationFooter(markdown, summary.totalDurationMs);
 }
 
 function withOperationDurationFooter(

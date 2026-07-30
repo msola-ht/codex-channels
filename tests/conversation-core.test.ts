@@ -503,9 +503,18 @@ describe("ConversationCore", () => {
 
   it("keeps the latest turn diff and plan in ephemeral core state", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = {
+      surface: "telegram",
+      accountId: "default",
+      conversationId: "100",
+    };
     const core = new ConversationCore({
       allBindings: () => [],
-      targetForThread: () => undefined,
+      targetForThread: () => target,
       modelSettingsForThread: () => undefined,
       contextCompactionItemIdsForThread: () => undefined,
     }, output);
@@ -539,7 +548,6 @@ describe("ConversationCore", () => {
         ],
       },
     });
-
     core.markTurnStarted(
       { surface: "telegram", accountId: "default", conversationId: "100" },
       "thread-1",
@@ -550,6 +558,17 @@ describe("ConversationCore", () => {
       turnId: "turn-2",
     });
     await output.close();
+    expect(events).toContainEqual({
+      type: "plan.updated",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      explanation: "实施计划",
+      steps: [
+        { step: "检查", status: "completed" },
+        { step: "修改", status: "inProgress" },
+      ],
+    });
   });
 
   it("merges sparse rate-limit updates and broadcasts threshold crossings once", async () => {

@@ -54,6 +54,23 @@ Surface -> Application/Core <- Codex Client
 不要为新渠道改变上述方向，也不要扩大
 [`tests/module-boundaries.test.ts`](../tests/module-boundaries.test.ts) 的白名单来绕过边界。
 
+### Codex 能力门禁
+
+Surface 只能适配项目已经接入的 Codex CLI/App Server 能力。当前公开能力以
+[`Codex CLI 官方资料与实现索引`](index.md) 的支持矩阵为准，并且必须同时具有当前锁定版本的
+官方协议依据、`codex-protocol` 受控类型、本地实现入口和对应验证。生成类型中出现字段或方法，
+以及平台 SDK 自身能够展示按钮、表单、文件或流式内容，都不能单独作为新增 Gateway 能力的依据。
+
+新增 Codex 能力时，先在 `docs/index.md` 记录官方方法、本地入口和验证方式，再完成协议导出、
+Client/Application/Core 适配与真实 App Server 合同，最后才由各 Surface 做平台呈现。条件不完整
+时必须保持未支持或失败关闭，不能在某个 Surface 内模拟第二套 Thread、Turn、历史、工具、审批、
+模型设置或状态归约。
+
+Setup、Doctor、菜单、输入状态、连接健康、平台授权和媒体传输属于渠道运维或呈现能力，可以按
+平台差异实现，但不得被描述为 Codex 原生能力，也不得伪造 App Server 事件。平台只负责运输和
+展示已存在的结构化输入、输出与交互；平台能力强于当前 Codex 输入合同时，仍以 Codex 合同边界
+为准。
+
 ### 公开合同
 
 跨模块使用能力时只能从对应一级模块的 `index.ts` 导入。下表列出接入新渠道最常用的合同，

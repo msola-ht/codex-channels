@@ -1,5 +1,11 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 
 import pino from "pino";
@@ -354,6 +360,14 @@ contractSuite("isolated Codex App Server state contract", () => {
       && typeof profile.allowed === "boolean")).toBe(true);
   });
 
+  it("lists the locked App Server collaboration presets", async () => {
+    const modes = await ownerClient.listCollaborationModes();
+
+    expect(modes.some((mode) => mode.mode === "default")).toBe(true);
+    expect(modes.some((mode) =>
+      mode.mode === "plan" && mode.effort === "medium")).toBe(true);
+  });
+
   it("persists Fast defaults for peer reads and subsequently started threads", async () => {
     const startedThreadIds: string[] = [];
     try {
@@ -387,10 +401,19 @@ contractSuite("isolated Codex App Server state contract", () => {
     const started = await ownerClient.startThread(workdir);
     const threadId = started.thread.id;
     const observedTurnIds: string[] = [];
+    let observedPlanMode = false;
     let completedTurnDurationMs: number | undefined;
     const observedGoalEvents: string[] = [];
     const removeNotification = ownerClient.onNotification((notification) => {
       const event = toConversationInputEvent(notification);
+      const threadState = toThreadStateEvent(notification);
+      if (
+        threadState?.type === "thread.settings.updated"
+        && threadState.threadId === threadId
+        && threadState.settings.collaborationMode === "plan"
+      ) {
+        observedPlanMode = true;
+      }
       if (event?.type === "turn.started" && event.threadId === threadId) {
         observedTurnIds.push(event.turnId);
       }
@@ -416,10 +439,21 @@ contractSuite("isolated Codex App Server state contract", () => {
         [{ type: "text", text: "contract-only" }],
         "codex_connect_gateway:contract",
         workdir,
+        {
+          collaborationMode: {
+            mode: "plan",
+            settings: {
+              model: started.model,
+              effort: "medium",
+              developerInstructions: null,
+            },
+          },
+        },
       );
       turnId = turn.turnId;
       expect(turnId).not.toBe("");
       await waitFor(() => observedTurnIds.includes(turn.turnId), 2_000);
+      await waitFor(() => observedPlanMode, 2_000);
 
       const updated = await ownerClient.setGoal(threadId, "验证稳定 Goal 映射");
       const read = await peerClient.getGoal(threadId);
@@ -479,6 +513,30 @@ contractSuite("isolated Codex App Server state contract", () => {
     }
   }, 15_000);
 
+  it("accepts stable localAudio input through the real App Server", async () => {
+    const started = await ownerClient.startThread(workdir);
+    const threadId = started.thread.id;
+    const audioPath = join(testRuntime, "contract-silence.wav");
+    writeFileSync(audioPath, wavSilence());
+    let turnId: string | undefined;
+    try {
+      const turn = await ownerClient.startTurn(
+        threadId,
+        [{ type: "localAudio", path: audioPath }],
+        "codex_connect_gateway:contract",
+        workdir,
+      );
+      turnId = turn.turnId;
+      expect(turnId).not.toBe("");
+    } finally {
+      if (turnId !== undefined) {
+        await ownerClient.interruptTurn(threadId, turnId).catch(() => undefined);
+      }
+      await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
+      await ownerClient.deleteThread(threadId);
+    }
+  }, 15_000);
+
   it("broadcasts peer model, effort and Fast changes across a peer reconnect", async () => {
     const started = await ownerClient.startThread(workdir);
     const threadId = started.thread.id;
@@ -486,6 +544,7 @@ contractSuite("isolated Codex App Server state contract", () => {
       model: string;
       effort: string | null;
       serviceTier: string | null;
+      collaborationMode: "default" | "plan";
     }> = [];
     const removeNotification = ownerClient.onNotification((notification) => {
       const event = toThreadStateEvent(notification);
@@ -503,7 +562,7 @@ contractSuite("isolated Codex App Server state contract", () => {
           effort: "high",
           serviceTier: "priority",
         },
-        // 该实验请求不在默认生成的稳定 ClientRequest 中，仅用于固定版本真实合同。
+        // 仅用于固定版本真实合同，不进入业务公开接口。
       } as never);
       await waitFor(
         () => observedSettings.some((settings) =>
@@ -526,7 +585,7 @@ contractSuite("isolated Codex App Server state contract", () => {
           effort: "low",
           serviceTier: "default",
         },
-        // 该实验请求不在默认生成的稳定 ClientRequest 中，仅用于固定版本真实合同。
+        // 仅用于固定版本真实合同，不进入业务公开接口。
       } as never);
       await waitFor(
         () => observedSettings.some((settings) =>
@@ -571,6 +630,27 @@ async function waitFor(
 
 function appendDiagnostic(current: string, chunk: string): string {
   return `${current}${chunk}`.slice(-4_000);
+}
+
+function wavSilence(): Buffer {
+  const sampleRate = 16_000;
+  const sampleCount = 1_600;
+  const dataBytes = sampleCount * 2;
+  const result = Buffer.alloc(44 + dataBytes);
+  result.write("RIFF", 0);
+  result.writeUInt32LE(36 + dataBytes, 4);
+  result.write("WAVE", 8);
+  result.write("fmt ", 12);
+  result.writeUInt32LE(16, 16);
+  result.writeUInt16LE(1, 20);
+  result.writeUInt16LE(1, 22);
+  result.writeUInt32LE(sampleRate, 24);
+  result.writeUInt32LE(sampleRate * 2, 28);
+  result.writeUInt16LE(2, 32);
+  result.writeUInt16LE(16, 34);
+  result.write("data", 36);
+  result.writeUInt32LE(dataBytes, 40);
+  return result;
 }
 
 function appServerFailure(message: string, stderr: string): string {

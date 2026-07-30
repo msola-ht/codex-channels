@@ -26,7 +26,11 @@ import {
   type ConfigReloadResult,
   type GatewayConfig,
 } from "../config/index.js";
-import { ConversationService, ModelSelectionService } from "../application/index.js";
+import {
+  CollaborationModeSelectionService,
+  ConversationService,
+  ModelSelectionService,
+} from "../application/index.js";
 import {
   ConversationCore,
   surfaceAccountKey,
@@ -96,6 +100,11 @@ export class GatewayApplication {
     this.threadState = new ThreadStateSynchronizer(this.router);
     this.core = new ConversationCore(this.router, this.output);
     const models = new ModelSelectionService(this.codex, this.router, config.codexModel);
+    const collaborationModes = new CollaborationModeSelectionService(
+      this.codex,
+      this.router,
+      models,
+    );
     const service = new ConversationService(
       this.codex,
       this.router,
@@ -112,6 +121,7 @@ export class GatewayApplication {
       {
         currentGitBranch,
       },
+      collaborationModes,
     );
     this.output.subscribe("conversation-follow-up", async (event) => {
       if (event.type !== "turn.completed") {
@@ -125,7 +135,7 @@ export class GatewayApplication {
       } catch (error) {
         this.logger.warn(
           {
-            errorType: error instanceof Error ? error.name : typeof error,
+            err: error,
             surface: event.target.surface,
             accountId: event.target.accountId,
             conversationId: event.target.conversationId,

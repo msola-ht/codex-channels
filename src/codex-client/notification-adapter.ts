@@ -185,7 +185,14 @@ function toThreadSettingsUpdatedEvent(
   const model = nonEmptyString(settings?.model);
   const effort = strictNullableString(settings?.effort);
   const serviceTier = strictNullableString(settings?.serviceTier);
-  if (!threadId || !model || !effort.valid || !serviceTier.valid) {
+  const collaborationMode = parseCollaborationMode(settings?.collaborationMode);
+  if (
+    !threadId
+    || !model
+    || !effort.valid
+    || !serviceTier.valid
+    || !collaborationMode
+  ) {
     return undefined;
   }
   return {
@@ -195,8 +202,14 @@ function toThreadSettingsUpdatedEvent(
       model,
       effort: effort.value,
       serviceTier: serviceTier.value,
+      collaborationMode,
     },
   };
+}
+
+function parseCollaborationMode(value: unknown): "default" | "plan" | undefined {
+  const mode = nonEmptyString(asRecord(value)?.mode);
+  return mode === "default" || mode === "plan" ? mode : undefined;
 }
 
 function toThreadLifecycleEvent(

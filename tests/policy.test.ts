@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   FeishuAccessPolicy,
   TelegramAccessPolicy,
+  WeixinAccessPolicy,
   WorkspaceRegistry,
 } from "../src/policy/index.js";
 
@@ -116,5 +117,72 @@ describe("FeishuAccessPolicy", () => {
     expect(policy.isAllowed({ target, actorId: "ou_first" })).toBe(false);
     expect(policy.isAllowed({ target, actorId: "ou_second" })).toBe(true);
     expect(policy.isAllowed({ target, actorId: "ou_late" })).toBe(false);
+  });
+});
+
+describe("WeixinAccessPolicy", () => {
+  it("requires the exact Surface account and Weixin user ID", () => {
+    const configured = new Set(["allowed@im.wechat"]);
+    const policy = new WeixinAccessPolicy(configured, "bot@im.bot");
+    configured.add("late@im.wechat");
+    const target = {
+      surface: "weixin" as const,
+      accountId: "bot@im.bot",
+      conversationId: "allowed@im.wechat",
+    };
+
+    expect(policy.isAllowed({
+      target,
+      actorId: "allowed@im.wechat",
+    })).toBe(true);
+    expect(policy.isAllowed({
+      target,
+      actorId: "ALLOWED@im.wechat",
+    })).toBe(false);
+    expect(policy.isAllowed({
+      target,
+      actorId: " allowed@im.wechat",
+    })).toBe(false);
+    expect(policy.isAllowed({
+      target,
+      actorId: "late@im.wechat",
+    })).toBe(false);
+    expect(policy.isAllowed({
+      target: { ...target, accountId: "other@im.bot" },
+      actorId: "allowed@im.wechat",
+    })).toBe(false);
+    expect(policy.isAllowed({
+      target: { ...target, surface: "feishu" },
+      actorId: "allowed@im.wechat",
+    })).toBe(false);
+  });
+
+  it("atomically replaces the allowed Weixin user ID snapshot", () => {
+    const policy = new WeixinAccessPolicy(
+      new Set(["first@im.wechat"]),
+      "bot@im.bot",
+    );
+    const replacement = new Set(["second@im.wechat"]);
+    const target = {
+      surface: "weixin" as const,
+      accountId: "bot@im.bot",
+      conversationId: "second@im.wechat",
+    };
+
+    policy.replace(replacement);
+    replacement.add("late@im.wechat");
+
+    expect(policy.isAllowed({
+      target,
+      actorId: "first@im.wechat",
+    })).toBe(false);
+    expect(policy.isAllowed({
+      target,
+      actorId: "second@im.wechat",
+    })).toBe(true);
+    expect(policy.isAllowed({
+      target,
+      actorId: "late@im.wechat",
+    })).toBe(false);
   });
 });

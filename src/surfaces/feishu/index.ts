@@ -1,5 +1,12 @@
 export { FeishuConversationAdapter } from "./adapter.js";
 export {
+  FeishuAudioStore,
+  maximumFeishuAudioBytes,
+  maximumFeishuAudioDurationMs,
+  type FeishuAudioPort,
+  type FeishuAudioResourcePort,
+} from "./audio.js";
+export {
   FeishuApplicationHttpApi,
   FeishuApplicationSetupError,
   type FeishuApplicationApi,
@@ -28,22 +35,34 @@ export {
   type FeishuCommandCenterActionResult,
 } from "./command-center.js";
 export {
+  feishuCardElements,
   renderFeishuApprovalCard,
   renderFeishuApprovalOutcomeCard,
   type FeishuApprovalAction,
   type FeishuCardDocument,
 } from "./approval-card.js";
 export {
-  FeishuConnectionError,
-  FeishuEventConnection,
   FeishuMessageClient,
   FeishuMessageError,
-  type FeishuConnectionErrorCode,
-  type FeishuConnectionState,
-  type FeishuEventConnectionOptions,
   type FeishuMessageClientOptions,
   type FeishuMessageErrorCode,
 } from "./client.js";
+export {
+  FeishuConnectionError,
+  FeishuEventConnection,
+  type FeishuConnectionErrorCode,
+  type FeishuConnectionState,
+  type FeishuEventConnectionOptions,
+} from "./event-connection.js";
+export {
+  FeishuFileInput,
+  FeishuFileInputError,
+  maximumFeishuTextFileBytes,
+  type FeishuFileInputErrorCode,
+  type FeishuFilePort,
+  type FeishuFileResourcePort,
+  type FeishuTextFile,
+} from "./file-input.js";
 export {
   FeishuInbox,
   type FeishuInboxIgnoredReason,

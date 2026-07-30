@@ -2,8 +2,10 @@ import type {
   InteractionDecision,
   InteractionRequest,
 } from "../../approval/index.js";
+import { interactionProcessedTitle } from "../interaction-copy.js";
+import { contentTruncatedText } from "../output-copy.js";
 
-export interface FeishuCardDocument {
+export interface FeishuLegacyCardDocument {
   config: {
     update_multi: true;
     wide_screen_mode: true;
@@ -18,6 +20,34 @@ export interface FeishuCardDocument {
   elements: Array<Record<string, unknown>>;
 }
 
+export interface FeishuCardKitDocument {
+  schema: "2.0";
+  config: {
+    update_multi: true;
+    wide_screen_mode: true;
+  };
+  header: {
+    template: "blue" | "green" | "grey";
+    title: {
+      tag: "plain_text";
+      content: string;
+    };
+  };
+  body: {
+    elements: Array<Record<string, unknown>>;
+  };
+}
+
+export type FeishuCardDocument =
+  | FeishuLegacyCardDocument
+  | FeishuCardKitDocument;
+
+export function feishuCardElements(
+  card: FeishuCardDocument,
+): readonly Record<string, unknown>[] {
+  return "schema" in card ? card.body.elements : card.elements;
+}
+
 export type FeishuApprovalAction =
   | "approve-once"
   | "approve-session"
@@ -26,7 +56,7 @@ export type FeishuApprovalAction =
   | "reject";
 
 const maximumDetailBytes = 12_000;
-const truncatedSuffix = "\n\n[内容过长，已截断]";
+const truncatedSuffix = `\n\n[${contentTruncatedText}]`;
 
 export function renderFeishuApprovalCard(
   request: Extract<InteractionRequest, { type: "approval" }>,
@@ -120,7 +150,7 @@ export function renderFeishuApprovalOutcomeCard(
       template: decision.approved ? "green" : "grey",
       title: {
         tag: "plain_text",
-        content: "Codex 审批已处理",
+        content: interactionProcessedTitle,
       },
     },
     elements: [

@@ -12,7 +12,8 @@ export type FeishuMessageEventField =
   | "message.chat_id"
   | "message.chat_type"
   | "message.message_type"
-  | "message.content";
+  | "message.content"
+  | "message.parent_id";
 
 export class FeishuMessageEventError extends Error {
   readonly code = "invalid-message-event";
@@ -34,6 +35,7 @@ export interface FeishuMessageEvent {
   chatType: string;
   messageType: string;
   content: string;
+  parentId?: string;
 }
 
 const maximumIdentifierBytes = 1_024;
@@ -48,6 +50,10 @@ export function decodeFeishuMessageEvent(input: unknown): FeishuMessageEvent {
   const message = requireRecord(event.message, "message");
   const eventId = optionalString(event.event_id, "event_id");
   const appId = optionalString(event.app_id, "app_id");
+  const parentId = optionalString(
+    message.parent_id,
+    "message.parent_id",
+  );
 
   return {
     ...(eventId === undefined ? {} : { eventId }),
@@ -93,6 +99,7 @@ export function decodeFeishuMessageEvent(input: unknown): FeishuMessageEvent {
       maximumContentBytes,
       true,
     ),
+    ...(parentId === undefined ? {} : { parentId }),
   };
 }
 

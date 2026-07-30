@@ -32,6 +32,10 @@ import type {
   TurnExecutionPort,
   TurnInput,
 } from "./turn-port.js";
+import type {
+  CollaborationModeSelectionService,
+  CollaborationModeState,
+} from "./collaboration-mode-service.js";
 
 export interface Submission {
   threadId: string;
@@ -42,6 +46,7 @@ export interface Submission {
 export interface ConversationInput {
   text?: string;
   localImages?: ReadonlyArray<{ path: string }>;
+  localAudios?: ReadonlyArray<{ path: string }>;
 }
 
 export interface ConversationSession {
@@ -92,6 +97,8 @@ export interface ConversationStatus {
   modelPending: boolean;
   effortPending: boolean;
   fastModePending: boolean;
+  collaborationMode: "default" | "plan";
+  collaborationModePending: boolean;
   goal?: ThreadGoal;
   contextCompactionCount?: number;
   tokenUsage?: ThreadTokenUsage;
@@ -110,6 +117,7 @@ export class ConversationService {
     private readonly queries: ConversationQueryPort,
     private readonly projectRules?: ProjectRulesPort,
     private readonly workspaceStatus?: WorkspaceStatusPort,
+    private readonly collaborationModes?: CollaborationModeSelectionService,
   ) {}
 
   submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission> {
@@ -125,25 +133,16 @@ export class ConversationService {
       return Promise.reject(new UserFacingError("message.empty", "消息不能为空"));
     }
     return this.locked(target, async () => {
+      if (input.some((item) => item.type === "localAudio")) {
+        await this.models.requireInputModality(target, "audio");
+      }
       const active = this.core.activeTurn(target);
       const clientUserMessageId = `${gatewayUserMessageClientIdPrefix}${randomUUID()}`;
       if (active) {
         await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId);
         return { threadId: active.threadId, turnId: active.turnId, steered: true };
       }
-      const binding = await this.router.ensure(target);
-      const workspace = this.router.workspace(target);
-      const overrides = this.models.turnOverrides(target);
-      const result = await this.codex.startTurn(
-        binding.threadId,
-        input,
-        clientUserMessageId,
-        workspace.cwd,
-        overrides,
-      );
-      this.models.markApplied(target);
-      this.core.markTurnStarted(target, binding.threadId, result.turnId);
-      return { threadId: binding.threadId, turnId: result.turnId, steered: false };
+      return this.startNewTurn(target, input, clientUserMessageId);
     });
   }
 
@@ -211,7 +210,7 @@ export class ConversationService {
         );
       }
       const workspace = this.router.workspace(target);
-      const overrides = this.models.turnOverrides(target);
+      const overrides = this.turnOverrides(target);
       let result;
       try {
         result = await this.codex.startTurn(
@@ -230,6 +229,7 @@ export class ConversationService {
         this.queuedFollowUps.delete(key);
       }
       this.models.markApplied(target);
+      this.collaborationModes?.markApplied(target);
       this.core.markTurnStarted(target, threadId, result.turnId);
       return { threadId, turnId: result.turnId, steered: false };
     });
@@ -254,7 +254,7 @@ export class ConversationService {
       const sessions = await this.router.list(target);
       const selected = resolveThread(sessions, selector.trim());
       const binding = await this.router.resume(target, selected.id);
-      this.models.clear(target);
+      this.clearPendingSelections(target);
       return binding.threadId;
     });
   }
@@ -263,7 +263,7 @@ export class ConversationService {
     return this.locked(target, async () => {
       this.requireIdle(target);
       await this.router.newSession(target);
-      this.models.clear(target);
+      this.clearPendingSelections(target);
     });
   }
 
@@ -271,7 +271,7 @@ export class ConversationService {
     return this.locked(target, async () => {
       this.requireIdle(target);
       const threadId = await this.router.archive(target);
-      this.models.clear(target);
+      this.clearPendingSelections(target);
       return threadId;
     });
   }
@@ -282,7 +282,7 @@ export class ConversationService {
       const sessions = await this.router.list(target, { archived: true });
       const selected = resolveThread(sessions, selector.trim(), "unarchive");
       const binding = await this.router.unarchive(target, selected.id);
-      this.models.clear(target);
+      this.clearPendingSelections(target);
       return binding.threadId;
     });
   }
@@ -303,7 +303,7 @@ export class ConversationService {
       const currentWorkspaceId = this.router.workspace(target).id;
       const workspace = await this.router.selectWorkspace(target, selected.id);
       if (workspace.id !== currentWorkspaceId) {
-        this.models.clear(target);
+        this.clearPendingSelections(target);
       }
       return workspace;
     });
@@ -350,8 +350,31 @@ export class ConversationService {
       this.requireIdle(target);
       await this.router.ensure(target);
       const binding = await this.router.fork(target);
-      this.models.clear(target);
+      this.clearPendingSelections(target);
       return binding.threadId;
+    });
+  }
+
+  togglePlanMode(target: ConversationTarget): Promise<CollaborationModeState> {
+    return this.locked(target, async () => {
+      this.requireIdle(target);
+      return this.requireCollaborationModes().toggle(target);
+    });
+  }
+
+  startPlan(target: ConversationTarget, prompt: string): Promise<Submission> {
+    const normalized = prompt.trim();
+    if (!normalized) {
+      return Promise.reject(new UserFacingError("plan.prompt.empty", "Plan 需求不能为空"));
+    }
+    return this.locked(target, async () => {
+      this.requireIdle(target);
+      await this.requireCollaborationModes().select(target, "plan");
+      return this.startNewTurn(
+        target,
+        [{ type: "text", text: normalized }],
+        `${gatewayUserMessageClientIdPrefix}${randomUUID()}`,
+      );
     });
   }
 
@@ -488,6 +511,10 @@ export class ConversationService {
       : undefined;
     const weeklyLimit = this.core.weeklyRateLimit();
     const model = this.models.status(target);
+    const collaborationMode = this.collaborationModes?.status(target) ?? {
+      mode: "default" as const,
+      pending: false,
+    };
     const gitBranch = options.includeGitBranch
       ? this.workspaceStatus?.currentGitBranch(workspace.cwd)
       : undefined;
@@ -508,7 +535,49 @@ export class ConversationService {
       modelPending: model.modelPending,
       effortPending: model.effortPending,
       fastModePending: model.serviceTierPending,
+      collaborationMode: collaborationMode.mode,
+      collaborationModePending: collaborationMode.pending,
     };
+  }
+
+  private async startNewTurn(
+    target: ConversationTarget,
+    input: TurnInput[],
+    clientUserMessageId: string,
+  ): Promise<Submission> {
+    const binding = await this.router.ensure(target);
+    const workspace = this.router.workspace(target);
+    const result = await this.codex.startTurn(
+      binding.threadId,
+      input,
+      clientUserMessageId,
+      workspace.cwd,
+      this.turnOverrides(target),
+    );
+    this.models.markApplied(target);
+    this.collaborationModes?.markApplied(target);
+    this.core.markTurnStarted(target, binding.threadId, result.turnId);
+    return { threadId: binding.threadId, turnId: result.turnId, steered: false };
+  }
+
+  private turnOverrides(target: ConversationTarget) {
+    const collaborationMode = this.collaborationModes?.turnOverride(target);
+    return {
+      ...this.models.turnOverrides(target),
+      ...(collaborationMode ? { collaborationMode } : {}),
+    };
+  }
+
+  private clearPendingSelections(target: ConversationTarget): void {
+    this.models.clear(target);
+    this.collaborationModes?.clear(target);
+  }
+
+  private requireCollaborationModes(): CollaborationModeSelectionService {
+    if (!this.collaborationModes) {
+      throw new UserFacingError("collaboration-mode.unavailable", "Plan 模式服务不可用");
+    }
+    return this.collaborationModes;
   }
 
   private requireIdle(target: ConversationTarget): void {
@@ -573,6 +642,12 @@ function normalizeInput(value: string | ConversationInput): TurnInput[] {
       throw new UserFacingError("image.path.invalid", "本地图片路径必须是绝对路径");
     }
     input.push({ type: "localImage", path: image.path });
+  }
+  for (const audio of normalized.localAudios ?? []) {
+    if (!isAbsolute(audio.path)) {
+      throw new UserFacingError("audio.path.invalid", "本地音频路径必须是绝对路径");
+    }
+    input.push({ type: "localAudio", path: audio.path });
   }
   return input;
 }

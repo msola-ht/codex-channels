@@ -14,7 +14,13 @@ export function generateProtocolTree(codex, root, outputParent, options = {}) {
   mkdirSync(outputParent, { recursive: true });
   const generated = mkdtempSync(join(outputParent, ".generated-"));
   try {
-    execFileSync(codex, ["app-server", "generate-ts", "--out", generated], {
+    execFileSync(codex, [
+      "app-server",
+      "generate-ts",
+      "--out",
+      generated,
+      ...(options.experimental ? ["--experimental"] : []),
+    ], {
       cwd: root,
       stdio: options.stdio ?? "inherit",
     });

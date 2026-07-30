@@ -2,39 +2,24 @@ import {
   AppType,
   Client,
   Domain,
-  EventDispatcher,
   LoggerLevel,
-  WSClient,
   defaultHttpInstance,
   type HttpInstance,
   type HttpRequestOptions,
   type Logger,
 } from "@larksuiteoapi/node-sdk";
 
-import {
-  decodeFeishuMessageEvent,
-  FeishuMessageEventError,
-  type FeishuMessageEvent,
-} from "./message-event.js";
-import {
-  decodeFeishuCardAction,
-  FeishuCardActionError,
-  type FeishuCardAction,
-} from "./card-action.js";
 import type { FeishuCardDocument } from "./approval-card.js";
+import type { FeishuFileResourcePort } from "./file-input.js";
 import {
   isSafeFeishuResourceIdentifier,
   type FeishuImageResourcePort,
 } from "./media.js";
 import {
-  decodeFeishuMenuEvent,
-  FeishuMenuEventError,
-  type FeishuMenuEvent,
-} from "./menu-event.js";
-import {
   encodeFeishuPostContent,
   sanitizeFeishuMarkdown,
 } from "./message-content.js";
+import { extractFeishuQuotedText } from "./inbound-content.js";
 import type { FeishuMessagePort } from "./outbox.js";
 import {
   abortableSleep,
@@ -43,78 +28,16 @@ import {
 } from "./oauth-device-flow.js";
 
 const FEISHU_APP_ID_PATTERN = /^cli_[0-9a-fA-F]{16}$/u;
-const DEFAULT_STARTUP_TIMEOUT_MS = 60_000;
-
-export type FeishuConnectionState =
-  | "idle"
-  | "starting"
-  | "running"
-  | "reconnecting"
-  | "failed"
-  | "stopped";
-
-export type FeishuConnectionErrorCode =
-  | "invalid-credentials"
-  | "start-failed"
-  | "start-timeout"
-  | "stopped";
-
-export class FeishuConnectionError extends Error {
-  readonly code: FeishuConnectionErrorCode;
-
-  constructor(code: FeishuConnectionErrorCode, message: string) {
-    super(message);
-    this.name = "FeishuConnectionError";
-    this.code = code;
-  }
-}
-
-export interface FeishuEventConnectionOptions {
-  appId: string;
-  appSecret: string;
-  webSocketAgent?: unknown;
-  onMessage(event: FeishuMessageEvent): void;
-  onInvalidMessage(error: FeishuMessageEventError): void;
-  onCardAction?(event: FeishuCardAction): void;
-  onInvalidCardAction?(error: FeishuCardActionError): void;
-  onMenuEvent?(event: FeishuMenuEvent): void;
-  onInvalidMenuEvent?(error: FeishuMenuEventError): void;
-  onReconnecting?(): void;
-  onReconnected?(): void;
-  onFatal(error: FeishuConnectionError): void;
-}
-
-interface FeishuSdkCallbacks {
-  onReady(): void;
-  onError(error: Error): void;
-  onReconnecting(): void;
-  onReconnected(): void;
-}
-
-interface FeishuSdkConnection {
-  registerMessageHandler(handler: (event: unknown) => void): void;
-  registerCardActionHandler(handler: (event: unknown) => void): void;
-  registerMenuEventHandler(handler: (event: unknown) => void): void;
-  start(): Promise<void>;
-  close(force: boolean): void;
-}
-
-interface FeishuEventConnectionDependencies {
-  startupTimeoutMs: number;
-  createSdkConnection(
-    options: Pick<
-      FeishuEventConnectionOptions,
-      "appId" | "appSecret" | "webSocketAgent"
-    >,
-    callbacks: FeishuSdkCallbacks,
-  ): FeishuSdkConnection;
-}
 
 export interface FeishuMessageClientOptions {
   appId: string;
   appSecret: string;
   httpAgent?: unknown;
   disableEnvironmentProxy?: boolean;
+}
+
+export interface FeishuQuotedMessagePort {
+  readQuotedText(messageId: string): Promise<string | undefined>;
 }
 
 export function createFeishuOAuthApi(
@@ -165,6 +88,8 @@ export type FeishuMessageErrorCode =
   | "invalid-response"
   | "download-failed"
   | "download-timeout"
+  | "read-failed"
+  | "read-timeout"
   | "rate-limited"
   | "send-failed"
   | "send-timeout";
@@ -185,13 +110,50 @@ interface FeishuSdkMessagePayload {
   };
   data: {
     receive_id: string;
-    msg_type: "text" | "post" | "interactive";
+    msg_type: "text" | "post" | "interactive" | "file" | "image";
     content: string;
   };
 }
 
 interface FeishuSdkMessageClient {
   createMessage(payload: FeishuSdkMessagePayload): Promise<{
+    data?: {
+      message_id?: string | undefined;
+    } | undefined;
+  }>;
+  createFile?(payload: {
+    data: {
+      file_type: "stream";
+      file_name: string;
+      file: Buffer;
+    };
+  }): Promise<{
+    file_key?: string | undefined;
+    data?: {
+      file_key?: string | undefined;
+    } | undefined;
+  } | null>;
+  createImage?(payload: {
+    data: {
+      image_type: "message";
+      image: Buffer;
+    };
+  }): Promise<{
+    image_key?: string | undefined;
+    data?: {
+      image_key?: string | undefined;
+    } | undefined;
+  } | null>;
+  replyMessage?(payload: {
+    path: {
+      message_id: string;
+    };
+    data: {
+      msg_type: "post" | "interactive";
+      content: string;
+      reply_in_thread: false;
+    };
+  }): Promise<{
     data?: {
       message_id?: string | undefined;
     } | undefined;
@@ -205,6 +167,21 @@ interface FeishuSdkMessageClient {
     };
   }): Promise<{
     code?: number | undefined;
+  }>;
+  getMessage?(payload: {
+    params: {
+      user_id_type: "open_id";
+      card_msg_content_type: "raw_card_content";
+    };
+    path: { message_id: string };
+  }): Promise<{
+    code?: number | undefined;
+    data?: {
+      items?: Array<{
+        msg_type?: string | undefined;
+        body?: { content?: string | undefined } | undefined;
+      }> | undefined;
+    } | undefined;
   }>;
   createStreamingCard?(payload: {
     data: {
@@ -235,7 +212,10 @@ interface FeishuSdkMessageClient {
       card_id: string;
     };
     data: {
-      settings: string;
+      card: {
+        type: "card_json";
+        data: string;
+      };
       sequence: number;
       uuid: string;
     };
@@ -244,7 +224,7 @@ interface FeishuSdkMessageClient {
   }>;
   downloadResource(payload: {
     params: {
-      type: "image";
+      type: "image" | "file";
     };
     path: {
       message_id: string;
@@ -264,7 +244,12 @@ interface FeishuMessageClientDependencies {
   ): FeishuSdkMessageClient;
 }
 
-export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResourcePort {
+export class FeishuMessageClient implements
+  FeishuMessagePort,
+  FeishuImageResourcePort,
+  FeishuFileResourcePort,
+  FeishuQuotedMessagePort
+{
   private readonly sdkClient: FeishuSdkMessageClient;
   private readonly sendTimeoutMs: number;
 
@@ -305,63 +290,158 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
     );
   }
 
-  async sendMarkdownCard(chatId: string, markdown: string): Promise<void> {
-    if (!this.sdkClient.createStreamingCard) {
+  async sendFile(
+    chatId: string,
+    fileName: string,
+    file: Buffer,
+  ): Promise<void> {
+    if (
+      !this.sdkClient.createFile
+      || file.length === 0
+      || file.length > 30 * 1_024 * 1_024
+      || Buffer.byteLength(fileName, "utf8") > 255
+      || fileName.length === 0
+      || fileName.includes("/")
+      || fileName.includes("\\")
+    ) {
       throw new FeishuMessageError(
-        "card-create-failed",
-        "飞书静态卡片创建失败",
+        "invalid-response",
+        "飞书文件发送参数无效",
       );
     }
-    const safeMarkdown = sanitizeFeishuMarkdown(markdown);
-    let cardId: string;
     try {
       const response = await withTimeout(
-        this.sdkClient.createStreamingCard({
+        this.sdkClient.createFile({
           data: {
-            type: "card_json",
-            data: JSON.stringify({
-              schema: "2.0",
-              config: {
-                summary: {
-                  content: streamingSummary(safeMarkdown),
-                },
-              },
-              body: {
-                elements: [{
-                  tag: "markdown",
-                  content: safeMarkdown,
-                }],
-              },
-            }),
+            file_type: "stream",
+            file_name: fileName,
+            file,
           },
         }),
         this.sendTimeoutMs,
         new FeishuMessageError(
           "send-timeout",
-          "飞书静态卡片创建超时",
+          "飞书文件上传超时",
         ),
       );
-      const candidate = response.data?.card_id;
+      const fileKey = response?.file_key ?? response?.data?.file_key;
       if (
-        (response.code !== undefined && response.code !== 0)
-        || typeof candidate !== "string"
-        || candidate.length === 0
-        || candidate.length > 20
+        typeof fileKey !== "string"
+        || !isSafeFeishuResourceIdentifier(fileKey)
       ) {
         throw new FeishuMessageError(
           "invalid-response",
-          "飞书静态卡片创建响应无效",
+          "飞书文件上传响应无效",
         );
       }
-      cardId = candidate;
-    } catch {
+      await this.sendMessage(
+        chatId,
+        "file",
+        JSON.stringify({ file_key: fileKey }),
+      );
+    } catch (error) {
+      if (error instanceof FeishuMessageError) {
+        throw error;
+      }
+      if (isSdkTimeout(error)) {
+        throw new FeishuMessageError(
+          "send-timeout",
+          "飞书文件上传超时",
+        );
+      }
       throw new FeishuMessageError(
-        "card-create-failed",
-        "飞书静态卡片创建失败",
+        "send-failed",
+        "飞书文件发送失败",
       );
     }
+  }
+
+  async sendImage(chatId: string, image: Buffer): Promise<void> {
+    if (
+      !this.sdkClient.createImage
+      || image.length === 0
+      || image.length > 10 * 1_024 * 1_024
+    ) {
+      throw new FeishuMessageError(
+        "invalid-response",
+        "飞书图片发送参数无效",
+      );
+    }
+    try {
+      const response = await withTimeout(
+        this.sdkClient.createImage({
+          data: {
+            image_type: "message",
+            image,
+          },
+        }),
+        this.sendTimeoutMs,
+        new FeishuMessageError(
+          "send-timeout",
+          "飞书图片上传超时",
+        ),
+      );
+      const imageKey = response?.image_key ?? response?.data?.image_key;
+      if (
+        typeof imageKey !== "string"
+        || !isSafeFeishuResourceIdentifier(imageKey)
+      ) {
+        throw new FeishuMessageError(
+          "invalid-response",
+          "飞书图片上传响应无效",
+        );
+      }
+      await this.sendMessage(
+        chatId,
+        "image",
+        JSON.stringify({ image_key: imageKey }),
+      );
+    } catch (error) {
+      if (error instanceof FeishuMessageError) {
+        throw error;
+      }
+      if (isSdkTimeout(error)) {
+        throw new FeishuMessageError(
+          "send-timeout",
+          "飞书图片上传超时",
+        );
+      }
+      throw new FeishuMessageError(
+        "send-failed",
+        "飞书图片发送失败",
+      );
+    }
+  }
+
+  async replyPost(messageId: string, markdown: string): Promise<void> {
+    await this.replyMessage(
+      messageId,
+      "post",
+      encodeFeishuPostContent(markdown),
+    );
+  }
+
+  async sendMarkdownCard(chatId: string, markdown: string): Promise<void> {
+    const cardId = await this.createMarkdownCard(markdown);
     await this.sendMessage(
       chatId,
+      "interactive",
+      JSON.stringify({
+        type: "card",
+        data: {
+          card_id: cardId,
+        },
+      }),
+    );
+  }
+
+  async replyMarkdownCard(
+    messageId: string,
+    markdown: string,
+  ): Promise<void> {
+    const cardId = await this.createMarkdownCard(markdown);
+    await this.replyMessage(
+      messageId,
       "interactive",
       JSON.stringify({
         type: "card",
@@ -376,79 +456,7 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
     chatId: string,
     initialText: string,
   ): Promise<{ cardId: string; messageId: string }> {
-    if (!this.sdkClient.createStreamingCard) {
-      throw new FeishuMessageError(
-        "client-create-failed",
-        "飞书流式卡片客户端未初始化",
-      );
-    }
-    let cardId: string;
-    try {
-      const response = await withTimeout(
-        this.sdkClient.createStreamingCard({
-          data: {
-            type: "card_json",
-            data: JSON.stringify({
-              schema: "2.0",
-              config: {
-                streaming_mode: true,
-                summary: {
-                  content: "生成中",
-                },
-                streaming_config: {
-                  print_frequency_ms: {
-                    default: 70,
-                  },
-                  print_step: {
-                    default: 1,
-                  },
-                  print_strategy: "fast",
-                },
-              },
-              body: {
-                elements: [{
-                  tag: "markdown",
-                  element_id: "codexc_stream",
-                  content: sanitizeFeishuMarkdown(initialText || "..."),
-                }],
-              },
-            }),
-          },
-        }),
-        this.sendTimeoutMs,
-        new FeishuMessageError(
-          "send-timeout",
-          "飞书流式卡片创建超时",
-        ),
-      );
-      const candidate = response.data?.card_id;
-      if (
-        (response.code !== undefined && response.code !== 0)
-        || typeof candidate !== "string"
-        || candidate.length === 0
-        || candidate.length > 20
-      ) {
-        throw new FeishuMessageError(
-          "invalid-response",
-          "飞书流式卡片创建响应无效",
-        );
-      }
-      cardId = candidate;
-    } catch (error) {
-      if (error instanceof FeishuMessageError) {
-        throw error;
-      }
-      if (isSdkTimeout(error)) {
-        throw new FeishuMessageError(
-          "send-timeout",
-          "飞书流式卡片创建超时",
-        );
-      }
-      throw new FeishuMessageError(
-        "send-failed",
-        "飞书流式卡片创建失败",
-      );
-    }
+    const cardId = await this.createStreamingCardResource(initialText);
     const messageId = await this.sendMessage(
       chatId,
       "interactive",
@@ -460,6 +468,24 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
       }),
     );
     return { cardId, messageId };
+  }
+
+  async createStreamingReplyCard(
+    messageId: string,
+    initialText: string,
+  ): Promise<{ cardId: string; messageId: string }> {
+    const cardId = await this.createStreamingCardResource(initialText);
+    const replyMessageId = await this.replyMessage(
+      messageId,
+      "interactive",
+      JSON.stringify({
+        type: "card",
+        data: {
+          card_id: cardId,
+        },
+      }),
+    );
+    return { cardId, messageId: replyMessageId };
   }
 
   async updateStreamingCard(
@@ -493,6 +519,7 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
     cardId: string,
     sequence: number,
     summary: string,
+    footer?: string,
   ): Promise<void> {
     if (!this.sdkClient.finishStreamingCard) {
       throw new FeishuMessageError(
@@ -500,22 +527,48 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
         "飞书流式卡片客户端未初始化",
       );
     }
+    const safeMarkdown = sanitizeFeishuMarkdown(summary);
+    const safeFooter = footer === undefined
+      ? undefined
+      : sanitizeFeishuMarkdown(footer);
     await this.runStreamingOperation(
       () => this.sdkClient.finishStreamingCard!({
         path: {
           card_id: cardId,
         },
         data: {
-          settings: JSON.stringify({
-            config: {
-              streaming_mode: false,
-              summary: {
-                content: streamingSummary(sanitizeFeishuMarkdown(summary)),
+          card: {
+            type: "card_json",
+            data: JSON.stringify({
+              schema: "2.0",
+              config: {
+                streaming_mode: false,
+                summary: {
+                  content: streamingSummary(safeMarkdown),
+                },
               },
-            },
-          }),
+              body: {
+                elements: [
+                  {
+                    tag: "markdown",
+                    element_id: "codexc_stream",
+                    content: safeMarkdown || "...",
+                  },
+                  ...(safeFooter === undefined
+                    ? []
+                    : [
+                        { tag: "hr" },
+                        {
+                          tag: "markdown",
+                          content: safeFooter || "...",
+                        },
+                      ]),
+                ],
+              },
+            }),
+          },
           sequence,
-          uuid: `s_${cardId}_${sequence}`,
+          uuid: `f_${cardId}_${sequence}`,
         },
       }),
       "飞书流式卡片结束",
@@ -638,30 +691,77 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
     stream: import("node:stream").Readable;
     contentLength?: number;
   }> {
+    return this.downloadMessageResource(
+      messageId,
+      imageKey,
+      "image",
+      "图片",
+    );
+  }
+
+  async downloadFile(
+    messageId: string,
+    fileKey: string,
+  ): Promise<{
+    stream: import("node:stream").Readable;
+    contentLength?: number;
+  }> {
+    return this.downloadMessageResource(
+      messageId,
+      fileKey,
+      "file",
+      "文件",
+    );
+  }
+
+  async downloadAudio(
+    messageId: string,
+    fileKey: string,
+  ): Promise<{
+    stream: import("node:stream").Readable;
+    contentLength?: number;
+  }> {
+    return this.downloadMessageResource(
+      messageId,
+      fileKey,
+      "file",
+      "音频",
+    );
+  }
+
+  private async downloadMessageResource(
+    messageId: string,
+    fileKey: string,
+    type: "image" | "file",
+    label: "图片" | "文件" | "音频",
+  ): Promise<{
+    stream: import("node:stream").Readable;
+    contentLength?: number;
+  }> {
     if (
       !isSafeFeishuResourceIdentifier(messageId)
-      || !isSafeFeishuResourceIdentifier(imageKey)
+      || !isSafeFeishuResourceIdentifier(fileKey)
     ) {
       throw new FeishuMessageError(
         "invalid-response",
-        "飞书图片资源标识无效",
+        `飞书${label}资源标识无效`,
       );
     }
     try {
       const response = await withTimeout(
         this.sdkClient.downloadResource({
           params: {
-            type: "image",
+            type,
           },
           path: {
             message_id: messageId,
-            file_key: imageKey,
+            file_key: fileKey,
           },
         }),
         this.sendTimeoutMs,
         new FeishuMessageError(
           "download-timeout",
-          "飞书图片下载超时",
+          `飞书${label}下载超时`,
         ),
       );
       const stream = response.getReadableStream();
@@ -677,19 +777,283 @@ export class FeishuMessageClient implements FeishuMessagePort, FeishuImageResour
       if (isSdkTimeout(error)) {
         throw new FeishuMessageError(
           "download-timeout",
-          "飞书图片下载超时",
+          `飞书${label}下载超时`,
         );
       }
       throw new FeishuMessageError(
         "download-failed",
-        "飞书图片下载失败",
+        `飞书${label}下载失败`,
+      );
+    }
+  }
+
+  async readQuotedText(messageId: string): Promise<string | undefined> {
+    if (!isSafeFeishuResourceIdentifier(messageId)) {
+      throw new FeishuMessageError(
+        "invalid-response",
+        "飞书引用消息标识无效",
+      );
+    }
+    if (!this.sdkClient.getMessage) {
+      return undefined;
+    }
+    try {
+      const response = await withTimeout(
+        this.sdkClient.getMessage({
+          params: {
+            user_id_type: "open_id",
+            card_msg_content_type: "raw_card_content",
+          },
+          path: { message_id: messageId },
+        }),
+        this.sendTimeoutMs,
+        new FeishuMessageError(
+          "read-timeout",
+          "飞书引用消息读取超时",
+        ),
+      );
+      if (response.code !== undefined && response.code !== 0) {
+        throw new FeishuMessageError(
+          "invalid-response",
+          "飞书引用消息响应无效",
+        );
+      }
+      const items = response.data?.items;
+      if (!Array.isArray(items) || items.length === 0) {
+        return undefined;
+      }
+      if (items.length > 100) {
+        throw new FeishuMessageError(
+          "invalid-response",
+          "飞书引用消息响应无效",
+        );
+      }
+      const item = items[0];
+      const messageType = item?.msg_type;
+      const content = item?.body?.content;
+      if (
+        typeof messageType !== "string"
+        || typeof content !== "string"
+        || Buffer.byteLength(content, "utf8") > 150 * 1_024
+      ) {
+        return undefined;
+      }
+      return extractFeishuQuotedText(messageType, content);
+    } catch (error) {
+      if (error instanceof FeishuMessageError) {
+        throw error;
+      }
+      if (isSdkTimeout(error)) {
+        throw new FeishuMessageError(
+          "read-timeout",
+          "飞书引用消息读取超时",
+        );
+      }
+      throw new FeishuMessageError(
+        "read-failed",
+        "飞书引用消息读取失败",
+      );
+    }
+  }
+
+  private async createStreamingCardResource(
+    initialText: string,
+  ): Promise<string> {
+    if (!this.sdkClient.createStreamingCard) {
+      throw new FeishuMessageError(
+        "client-create-failed",
+        "飞书流式卡片客户端未初始化",
+      );
+    }
+    try {
+      const response = await withTimeout(
+        this.sdkClient.createStreamingCard({
+          data: {
+            type: "card_json",
+            data: JSON.stringify({
+              schema: "2.0",
+              config: {
+                streaming_mode: true,
+                summary: {
+                  content: "生成中",
+                },
+                streaming_config: {
+                  print_frequency_ms: {
+                    default: 70,
+                  },
+                  print_step: {
+                    default: 1,
+                  },
+                  print_strategy: "fast",
+                },
+              },
+              body: {
+                elements: [{
+                  tag: "markdown",
+                  element_id: "codexc_stream",
+                  content: sanitizeFeishuMarkdown(initialText || "..."),
+                }],
+              },
+            }),
+          },
+        }),
+        this.sendTimeoutMs,
+        new FeishuMessageError(
+          "send-timeout",
+          "飞书流式卡片创建超时",
+        ),
+      );
+      const candidate = response.data?.card_id;
+      if (
+        (response.code !== undefined && response.code !== 0)
+        || typeof candidate !== "string"
+        || candidate.length === 0
+        || candidate.length > 20
+      ) {
+        throw new FeishuMessageError(
+          "invalid-response",
+          "飞书流式卡片创建响应无效",
+        );
+      }
+      return candidate;
+    } catch (error) {
+      if (error instanceof FeishuMessageError) {
+        throw error;
+      }
+      if (isSdkTimeout(error)) {
+        throw new FeishuMessageError(
+          "send-timeout",
+          "飞书流式卡片创建超时",
+        );
+      }
+      throw new FeishuMessageError(
+        "send-failed",
+        "飞书流式卡片创建失败",
+      );
+    }
+  }
+
+  private async createMarkdownCard(markdown: string): Promise<string> {
+    if (!this.sdkClient.createStreamingCard) {
+      throw new FeishuMessageError(
+        "card-create-failed",
+        "飞书静态卡片创建失败",
+      );
+    }
+    const safeMarkdown = sanitizeFeishuMarkdown(markdown);
+    try {
+      const response = await withTimeout(
+        this.sdkClient.createStreamingCard({
+          data: {
+            type: "card_json",
+            data: JSON.stringify({
+              schema: "2.0",
+              config: {
+                summary: {
+                  content: streamingSummary(safeMarkdown),
+                },
+              },
+              body: {
+                elements: [{
+                  tag: "markdown",
+                  content: safeMarkdown,
+                }],
+              },
+            }),
+          },
+        }),
+        this.sendTimeoutMs,
+        new FeishuMessageError(
+          "send-timeout",
+          "飞书静态卡片创建超时",
+        ),
+      );
+      const candidate = response.data?.card_id;
+      if (
+        (response.code !== undefined && response.code !== 0)
+        || typeof candidate !== "string"
+        || candidate.length === 0
+        || candidate.length > 20
+      ) {
+        throw new FeishuMessageError(
+          "invalid-response",
+          "飞书静态卡片创建响应无效",
+        );
+      }
+      return candidate;
+    } catch {
+      throw new FeishuMessageError(
+        "card-create-failed",
+        "飞书静态卡片创建失败",
+      );
+    }
+  }
+
+  private async replyMessage(
+    messageId: string,
+    messageType: "post" | "interactive",
+    content: string,
+  ): Promise<string> {
+    if (!isSafeFeishuResourceIdentifier(messageId)) {
+      throw new FeishuMessageError(
+        "invalid-response",
+        "飞书回复消息标识无效",
+      );
+    }
+    if (!this.sdkClient.replyMessage) {
+      throw new FeishuMessageError(
+        "client-create-failed",
+        "飞书回复消息客户端未初始化",
+      );
+    }
+    try {
+      const response = await withTimeout(
+        this.sdkClient.replyMessage({
+          path: {
+            message_id: messageId,
+          },
+          data: {
+            msg_type: messageType,
+            content,
+            reply_in_thread: false,
+          },
+        }),
+        this.sendTimeoutMs,
+        new FeishuMessageError(
+          "send-timeout",
+          "飞书回复消息发送超时",
+        ),
+      );
+      if (
+        typeof response?.data?.message_id !== "string"
+        || response.data.message_id.trim().length === 0
+      ) {
+        throw new FeishuMessageError(
+          "invalid-response",
+          "飞书回复消息响应无效",
+        );
+      }
+      return response.data.message_id;
+    } catch (error) {
+      if (error instanceof FeishuMessageError) {
+        throw error;
+      }
+      if (isSdkTimeout(error)) {
+        throw new FeishuMessageError(
+          "send-timeout",
+          "飞书回复消息发送超时",
+        );
+      }
+      throw new FeishuMessageError(
+        "send-failed",
+        "飞书回复消息发送失败",
       );
     }
   }
 
   private async sendMessage(
     chatId: string,
-    messageType: "text" | "post" | "interactive",
+    messageType: "text" | "post" | "interactive" | "file" | "image",
     content: string,
   ): Promise<string> {
     try {
@@ -790,272 +1154,6 @@ function readContentLength(headers: unknown): number | undefined {
     : undefined;
 }
 
-export class FeishuEventConnection {
-  private stateValue: FeishuConnectionState = "idle";
-  private sdkConnection: FeishuSdkConnection | undefined;
-  private startPromise: Promise<void> | undefined;
-  private rejectStart: ((error: Error) => void) | undefined;
-  private startupTimer: NodeJS.Timeout | undefined;
-  private generation = 0;
-
-  constructor(
-    private readonly options: FeishuEventConnectionOptions,
-    private readonly dependencies: FeishuEventConnectionDependencies =
-      defaultDependencies,
-  ) {}
-
-  get state(): FeishuConnectionState {
-    return this.stateValue;
-  }
-
-  start(): Promise<void> {
-    if (this.stateValue === "running" || this.stateValue === "reconnecting") {
-      return Promise.resolve();
-    }
-    if (this.stateValue === "stopped") {
-      return Promise.reject(new FeishuConnectionError(
-        "stopped",
-        "飞书长连接已经停止",
-      ));
-    }
-    if (this.startPromise !== undefined) {
-      return this.startPromise;
-    }
-
-    const validationError = validateCredentials(this.options);
-    if (validationError !== undefined) {
-      this.stateValue = "failed";
-      return Promise.reject(validationError);
-    }
-
-    this.stateValue = "starting";
-    const generation = ++this.generation;
-    this.startPromise = new Promise<void>((resolve, reject) => {
-      this.rejectStart = reject;
-      const callbacks: FeishuSdkCallbacks = {
-        onReady: () => {
-          if (!this.isCurrent(generation) || this.stateValue !== "starting") {
-            return;
-          }
-          this.clearStartupTimer();
-          this.rejectStart = undefined;
-          this.stateValue = "running";
-          resolve();
-        },
-        onError: () => {
-          if (!this.isCurrent(generation)) {
-            return;
-          }
-          if (this.stateValue === "starting") {
-            this.failStart(
-              generation,
-              new FeishuConnectionError(
-                "start-failed",
-                "飞书长连接启动失败",
-              ),
-            );
-            return;
-          }
-          if (
-            this.stateValue === "running"
-            || this.stateValue === "reconnecting"
-          ) {
-            this.stateValue = "failed";
-            this.sdkConnection?.close(true);
-            this.sdkConnection = undefined;
-            this.options.onFatal(new FeishuConnectionError(
-              "start-failed",
-              "飞书长连接运行失败",
-            ));
-          }
-        },
-        onReconnecting: () => {
-          if (
-            this.isCurrent(generation)
-            && this.stateValue === "running"
-          ) {
-            this.stateValue = "reconnecting";
-            this.notifyLifecycle("onReconnecting");
-          }
-        },
-        onReconnected: () => {
-          if (
-            this.isCurrent(generation)
-            && this.stateValue === "reconnecting"
-          ) {
-            this.stateValue = "running";
-            this.notifyLifecycle("onReconnected");
-          }
-        },
-      };
-
-      try {
-        const sdkConnection = this.dependencies.createSdkConnection(
-          this.options,
-          callbacks,
-        );
-        this.sdkConnection = sdkConnection;
-        sdkConnection.registerMessageHandler((event) => {
-          if (
-            this.isCurrent(generation)
-            && (
-              this.stateValue === "running"
-              || this.stateValue === "reconnecting"
-            )
-          ) {
-            try {
-              this.options.onMessage(decodeFeishuMessageEvent(event));
-            } catch (error) {
-              if (error instanceof FeishuMessageEventError) {
-                try {
-                  this.options.onInvalidMessage(error);
-                } catch {
-                  // Permanent invalid events must not enter a retry loop.
-                }
-                return;
-              }
-              throw error;
-            }
-          }
-        });
-        sdkConnection.registerCardActionHandler((event) => {
-          if (
-            this.isCurrent(generation)
-            && (
-              this.stateValue === "running"
-              || this.stateValue === "reconnecting"
-            )
-          ) {
-            try {
-              this.options.onCardAction?.(decodeFeishuCardAction(event));
-            } catch (error) {
-              if (error instanceof FeishuCardActionError) {
-                try {
-                  this.options.onInvalidCardAction?.(error);
-                } catch {
-                  // Permanent invalid actions must not enter a retry loop.
-                }
-                return;
-              }
-              throw error;
-            }
-          }
-        });
-        sdkConnection.registerMenuEventHandler((event) => {
-          if (
-            this.isCurrent(generation)
-            && (
-              this.stateValue === "running"
-              || this.stateValue === "reconnecting"
-            )
-          ) {
-            try {
-              this.options.onMenuEvent?.(decodeFeishuMenuEvent(event));
-            } catch (error) {
-              if (error instanceof FeishuMenuEventError) {
-                try {
-                  this.options.onInvalidMenuEvent?.(error);
-                } catch {
-                  // Permanent invalid events must not enter a retry loop.
-                }
-                return;
-              }
-              throw error;
-            }
-          }
-        });
-        this.startupTimer = setTimeout(() => {
-          this.failStart(
-            generation,
-            new FeishuConnectionError(
-              "start-timeout",
-              "飞书长连接启动超时",
-            ),
-          );
-        }, this.dependencies.startupTimeoutMs);
-        void sdkConnection.start().catch(() => {
-          this.failStart(
-            generation,
-            new FeishuConnectionError(
-              "start-failed",
-              "飞书长连接启动失败",
-            ),
-          );
-        });
-      } catch {
-        this.failStart(
-          generation,
-          new FeishuConnectionError(
-            "start-failed",
-            "飞书长连接启动失败",
-          ),
-        );
-      }
-    }).finally(() => {
-      if (this.stateValue !== "starting") {
-        this.startPromise = undefined;
-      }
-    });
-    return this.startPromise;
-  }
-
-  stop(): Promise<void> {
-    if (this.stateValue === "stopped") {
-      return Promise.resolve();
-    }
-    const wasStarting = this.stateValue === "starting";
-    this.generation += 1;
-    this.clearStartupTimer();
-    this.stateValue = "stopped";
-    this.sdkConnection?.close(wasStarting);
-    this.sdkConnection = undefined;
-    if (this.rejectStart !== undefined) {
-      this.rejectStart(new FeishuConnectionError(
-        "stopped",
-        "飞书长连接在启动完成前被停止",
-      ));
-      this.rejectStart = undefined;
-    }
-    return Promise.resolve();
-  }
-
-  private isCurrent(generation: number): boolean {
-    return generation === this.generation && this.stateValue !== "stopped";
-  }
-
-  private failStart(
-    generation: number,
-    error: FeishuConnectionError,
-  ): void {
-    if (!this.isCurrent(generation) || this.stateValue !== "starting") {
-      return;
-    }
-    this.clearStartupTimer();
-    this.stateValue = "failed";
-    this.sdkConnection?.close(true);
-    this.sdkConnection = undefined;
-    this.rejectStart?.(error);
-    this.rejectStart = undefined;
-  }
-
-  private clearStartupTimer(): void {
-    if (this.startupTimer !== undefined) {
-      clearTimeout(this.startupTimer);
-      this.startupTimer = undefined;
-    }
-  }
-
-  private notifyLifecycle(
-    callback: "onReconnecting" | "onReconnected",
-  ): void {
-    try {
-      this.options[callback]?.();
-    } catch {
-      // Observability callbacks must not interrupt the SDK reader.
-    }
-  }
-}
-
 const redactedSdkLogger: Logger = {
   error: () => {},
   warn: () => {},
@@ -1070,13 +1168,17 @@ const defaultMessageDependencies: FeishuMessageClientDependencies = {
     const client = createSdkClient(options, sendTimeoutMs);
     return {
       createMessage: (payload) => client.im.v1.message.create(payload),
+      createFile: (payload) => client.im.v1.file.create(payload),
+      createImage: (payload) => client.im.v1.image.create(payload),
+      replyMessage: (payload) => client.im.v1.message.reply(payload),
       patchMessage: (payload) => client.im.v1.message.patch(payload),
+      getMessage: (payload) => client.im.v1.message.get(payload),
       createStreamingCard: (payload) =>
         client.cardkit.v1.card.create(payload),
       updateStreamingCard: (payload) =>
         client.cardkit.v1.cardElement.content(payload),
       finishStreamingCard: (payload) =>
-        client.cardkit.v1.card.settings(payload),
+        client.cardkit.v1.card.update(payload),
       downloadResource: (payload) => client.im.v1.messageResource.get(payload),
     };
   },
@@ -1215,63 +1317,8 @@ function optionalHttpErrorResponse(error: unknown): {
     : undefined;
 }
 
-const defaultDependencies: FeishuEventConnectionDependencies = {
-  startupTimeoutMs: DEFAULT_STARTUP_TIMEOUT_MS,
-  createSdkConnection: (options, callbacks) => {
-    const eventDispatcher = new EventDispatcher({
-      logger: redactedSdkLogger,
-      loggerLevel: LoggerLevel.error,
-    });
-    const wsClient = new WSClient({
-      appId: options.appId,
-      appSecret: options.appSecret,
-      agent: options.webSocketAgent,
-      autoReconnect: true,
-      domain: Domain.Feishu,
-      logger: redactedSdkLogger,
-      loggerLevel: LoggerLevel.error,
-      source: "codexc",
-      handshakeTimeoutMs: 15_000,
-      ...callbacks,
-    });
-    return {
-      registerMessageHandler: (handler) => {
-        eventDispatcher.register({
-          "im.message.receive_v1": handler,
-        });
-      },
-      registerCardActionHandler: (handler) => {
-        eventDispatcher.register({
-          "card.action.trigger": handler,
-        });
-      },
-      registerMenuEventHandler: (handler) => {
-        eventDispatcher.register({
-          "application.bot.menu_v6": handler,
-        });
-      },
-      start: () => wsClient.start({ eventDispatcher }),
-      close: (force) => {
-        wsClient.close({ force });
-      },
-    };
-  },
-};
-
-function validateCredentials(
-  options: Pick<FeishuEventConnectionOptions, "appId" | "appSecret">,
-): FeishuConnectionError | undefined {
-  if (!hasValidCredentials(options)) {
-    return new FeishuConnectionError(
-      "invalid-credentials",
-      "飞书应用凭据格式无效",
-    );
-  }
-  return undefined;
-}
-
 function hasValidCredentials(
-  options: Pick<FeishuEventConnectionOptions, "appId" | "appSecret">,
+  options: Pick<FeishuMessageClientOptions, "appId" | "appSecret">,
 ): boolean {
   return FEISHU_APP_ID_PATTERN.test(options.appId)
     && options.appSecret.trim().length > 0;

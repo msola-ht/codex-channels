@@ -3,46 +3,16 @@ import type { Logger } from "pino";
 
 import {
   conversationCommandNames,
-  type ConversationCommandName,
 } from "../../application/index.js";
+import { conversationCommandDescriptions } from "../conversation-command-format.js";
 import { formatTelegramPanelChunks } from "./html-format.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
-
-const commandDescriptions = {
-  resume: "列出或恢复 Codex 会话",
-  sessions: "搜索可恢复会话",
-  archived: "搜索已归档会话",
-  new: "下一条消息创建新会话",
-  archive: "归档当前会话",
-  unarchive: "恢复已归档会话",
-  status: "查看当前状态",
-  workspace: "列出或切换 Workspace",
-  stop: "停止当前任务",
-  queue: "排到下一 Turn",
-  rename: "命名当前会话",
-  compact: "压缩当前上下文",
-  fork: "分叉当前会话",
-  review: "启动代码审查",
-  model: "查看或切换模型",
-  effort: "查看或切换思考强度",
-  fast: "查看或切换 Fast 模式",
-  skills: "列出 Skills",
-  mcp: "列出 MCP Servers",
-  plugins: "列出 Plugins",
-  usage: "查看账号用量",
-  limits: "查看套餐与额度",
-  permissions: "查看权限配置",
-  rules: "生成或检查项目规则",
-  diff: "查看当前 Turn Diff",
-  plan: "查看当前 Turn 计划",
-  goal: "查看或管理 Goal",
-} satisfies Record<ConversationCommandName, string>;
 
 const commands = [
   { command: "start", description: "使用说明" },
   ...conversationCommandNames.map((name) => ({
     command: name,
-    description: commandDescriptions[name],
+    description: conversationCommandDescriptions[name],
   })),
   { command: "whoami", description: "显示 Telegram 用户 ID" },
 ];
@@ -215,17 +185,21 @@ export class TelegramLifecycle {
         consecutiveFailures = 0;
         for (const update of updates) {
           offset = update.update_id + 1;
-          try {
-            await this.bot.handleUpdate(update);
-          } catch (error) {
-            this.logger.error(
-              {
-                ...telegramErrorMetadata(error),
-                updateId: update.update_id,
-              },
-              "Telegram 更新处理失败",
-            );
-          }
+        }
+        for (const group of groupTelegramUpdates(updates)) {
+          await Promise.all(group.map(async (update) => {
+            try {
+              await this.bot.handleUpdate(update);
+            } catch (error) {
+              this.logger.error(
+                {
+                  ...telegramErrorMetadata(error),
+                  updateId: update.update_id,
+                },
+                "Telegram 更新处理失败",
+              );
+            }
+          }));
         }
       } catch (error) {
         if (this.stopping || signal.aborted) {
@@ -252,6 +226,25 @@ export class TelegramLifecycle {
       }
     }
   }
+}
+
+function groupTelegramUpdates<T extends {
+  message?: { media_group_id?: string };
+}>(updates: readonly T[]): T[][] {
+  const groups: T[][] = [];
+  for (const update of updates) {
+    const mediaGroupId = update.message?.media_group_id;
+    const previous = groups.at(-1);
+    if (
+      mediaGroupId !== undefined
+      && previous?.at(-1)?.message?.media_group_id === mediaGroupId
+    ) {
+      previous.push(update);
+      continue;
+    }
+    groups.push([update]);
+  }
+  return groups;
 }
 
 function waitWithAbort(milliseconds: number, signal: AbortSignal): Promise<void> {

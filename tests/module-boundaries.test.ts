@@ -108,6 +108,25 @@ describe("module boundaries", () => {
     );
     expect([...exported].filter((name) => !imported.has(name))).toEqual([]);
   });
+
+  it("keeps realtime APIs outside business entry points", () => {
+    const turnPort = readFileSync(
+      resolve(sourceRoot, "application/turn-port.ts"),
+      "utf8",
+    );
+    expect(turnPort).not.toContain('type: "audio"');
+    expect(turnPort).toContain('type: "localAudio"');
+
+    const realtimeCallers = typescriptFiles(
+      resolve(sourceRoot, "codex-client"),
+    ).flatMap((file) => {
+      const source = readFileSync(file, "utf8");
+      return source.includes('"thread/realtime/')
+        ? [relative(sourceRoot, file)]
+        : [];
+    });
+    expect(realtimeCallers).toEqual([]);
+  });
 });
 
 function moduleImportersOutside(

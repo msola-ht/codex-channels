@@ -9,6 +9,9 @@ export type { ServerRequest } from "./generated/ServerRequest.js";
 export type { Thread } from "./generated/v2/Thread.js";
 export type { ConfigReadParams } from "./generated/v2/ConfigReadParams.js";
 export type { ConfigReadResponse } from "./generated/v2/ConfigReadResponse.js";
+export type {
+  CollaborationModeListResponse,
+} from "./generated/v2/CollaborationModeListResponse.js";
 export type { RateLimitSnapshot } from "./generated/v2/RateLimitSnapshot.js";
 export type { ThreadDeleteResponse } from "./generated/v2/ThreadDeleteResponse.js";
 export type { ThreadListResponse } from "./generated/v2/ThreadListResponse.js";

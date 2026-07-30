@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, resolve } from "node:path";
 
 import {
+  materializeGatewayConfigDefaults,
   parseGatewayConfig,
   validateGatewayConfigDocument,
   type GatewayConfigDocument,
@@ -21,6 +22,7 @@ export {
   type FeishuConfigChangeCode,
   type GlobalConfigChangeCode,
   type TelegramConfigChangeCode,
+  type WeixinConfigChangeCode,
 } from "./config-change.js";
 export {
   classifyConfigReload,
@@ -37,6 +39,10 @@ export interface GatewayConfig {
     appSecret: string;
     allowedOpenIds: ReadonlySet<string>;
   };
+  weixin?: {
+    accountId: string;
+    allowedUserIds: ReadonlySet<string>;
+  };
   codexBinary: string;
   networkProxy: {
     http?: string;
@@ -50,6 +56,8 @@ export interface GatewayConfig {
   codexModel?: string;
   codexSandbox: "read-only" | "workspace-write";
   operationUpdateDisplay: OperationUpdateDisplay;
+  planUpdatesEnabled: boolean;
+  credentialsDirectory: string;
   stateDatabasePath: string;
   approvalTimeoutMs: number;
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace";
@@ -70,14 +78,20 @@ export function loadRuntimeConfig(environment: NodeJS.ProcessEnv = process.env):
     configuredPath
       || resolve(environment.CODEX_CONNECT_HOME?.trim() || resolve(homedir(), ".codex-connect"), "config.toml"),
   );
-  return {
-    config: loadConfigDocument(
-      readFileSync(configPath, "utf8"),
-      dirname(configPath),
-      { environment, detectSystemProxy: true },
-    ),
-    configPath,
-  };
+  const documents = parseConfigDocuments(readFileSync(configPath, "utf8"));
+  const config = loadValidatedConfigDocument(
+    documents.validated,
+    dirname(configPath),
+    { environment, detectSystemProxy: true },
+  );
+  try {
+    materializeGatewayConfigDefaults(configPath, documents.source);
+  } catch {
+    throw new ConfigurationError(
+      "config.toml 安全默认值自动补齐失败，请检查文件权限后重试",
+    );
+  }
+  return { config, configPath };
 }
 
 export function loadConfigDocument(
@@ -91,15 +105,42 @@ export function loadConfigDocument(
     detectSystemProxy?: boolean;
   } = {},
 ): GatewayConfig {
+  const documents = parseConfigDocuments(content);
+  return loadValidatedConfigDocument(
+    documents.validated,
+    baseDirectory,
+    { environment, detectSystemProxy },
+  );
+}
+
+function parseConfigDocuments(content: string): {
+  source: ReturnType<typeof parseGatewayConfig>;
+  validated: GatewayConfigDocument;
+} {
   let document: GatewayConfigDocument;
+  let source: ReturnType<typeof parseGatewayConfig>;
   try {
-    document = validateGatewayConfigDocument(parseGatewayConfig(content));
+    source = parseGatewayConfig(content);
+    document = validateGatewayConfigDocument(source);
   } catch (error) {
     throw new ConfigurationError(
       error instanceof Error ? error.message : String(error),
     );
   }
-  const raw = document;
+  return { source, validated: document };
+}
+
+function loadValidatedConfigDocument(
+  raw: GatewayConfigDocument,
+  baseDirectory: string,
+  {
+    environment = {},
+    detectSystemProxy = false,
+  }: {
+    environment?: NodeJS.ProcessEnv;
+    detectSystemProxy?: boolean;
+  } = {},
+): GatewayConfig {
   const workspaces = validateWorkspaces(raw.workspaces);
   if (!workspaces.some((workspace) => workspace.id === raw.default_workspace)) {
     throw new ConfigurationError(`default_workspace 不存在：${raw.default_workspace}`);
@@ -129,6 +170,14 @@ export function loadConfigDocument(
           },
         }
       : {}),
+    ...(raw.weixin?.enabled
+      ? {
+          weixin: {
+            accountId: raw.weixin.account_id,
+            allowedUserIds: new Set(raw.weixin.allowed_user_ids),
+          },
+        }
+      : {}),
     codexBinary: raw.codex.binary,
     networkProxy: {
       ...(proxyEnvironment.HTTP_PROXY ? { http: proxyEnvironment.HTTP_PROXY } : {}),
@@ -142,6 +191,8 @@ export function loadConfigDocument(
     ...(raw.codex.default_model ? { codexModel: raw.codex.default_model } : {}),
     codexSandbox: raw.codex.sandbox,
     operationUpdateDisplay: raw.display.operation_updates,
+    planUpdatesEnabled: raw.display.plan_updates,
+    credentialsDirectory: resolve(baseDirectory, "credentials"),
     stateDatabasePath: resolveConfiguredPath(raw.storage.database_path, baseDirectory),
     approvalTimeoutMs: raw.approval.timeout_seconds * 1000,
     logLevel: raw.logging.level,

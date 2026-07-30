@@ -245,6 +245,30 @@ class FakeTransport extends BaseTransport {
           }),
         ),
       );
+    } else if (decoded.method === "collaborationMode/list") {
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({
+            id: decoded.id,
+            result: {
+              data: [
+                {
+                  name: "Default",
+                  mode: "default",
+                  model: null,
+                  reasoning_effort: null,
+                },
+                {
+                  name: "Plan",
+                  mode: "plan",
+                  model: null,
+                  reasoning_effort: "medium",
+                },
+              ],
+            },
+          }),
+        ),
+      );
     } else if (decoded.method === "account/rateLimits/read") {
       queueMicrotask(() =>
         this.emitMessage(
@@ -1139,6 +1163,7 @@ describe("JsonRpcClient", () => {
       [
         { type: "text", text: "测试输入" },
         { type: "localImage", path: "/tmp/screenshot.png" },
+        { type: "localAudio", path: "/tmp/voice.ogg" },
       ],
       "codex_connect_gateway:request-1",
       "/tmp/project",
@@ -1164,6 +1189,7 @@ describe("JsonRpcClient", () => {
         input: [
           { type: "text", text: "测试输入", text_elements: [] },
           { type: "localImage", path: "/tmp/screenshot.png" },
+          { type: "localAudio", path: "/tmp/voice.ogg" },
         ],
         cwd: "/tmp/project",
         model: "gpt-selected",
@@ -1177,6 +1203,49 @@ describe("JsonRpcClient", () => {
       });
     expect(transport.sent.find((message) => message.method === "turn/steer")?.params)
       .toMatchObject({ clientUserMessageId: "codex_connect_gateway:request-2" });
+  });
+
+  it("lists official collaboration presets and sends the selected mode on turn/start", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listCollaborationModes()).resolves.toEqual([
+      { name: "Default", mode: "default", model: null, effort: null },
+      { name: "Plan", mode: "plan", model: null, effort: "medium" },
+    ]);
+    await client.startTurn(
+      "thread-1",
+      [{ type: "text", text: "设计发布流程" }],
+      "codex_connect_gateway:plan-1",
+      "/tmp/project",
+      {
+        collaborationMode: {
+          mode: "plan",
+          settings: {
+            model: "gpt-selected",
+            effort: "medium",
+            developerInstructions: null,
+          },
+        },
+      },
+    );
+
+    expect(transport.sent.find((message) => message.method === "collaborationMode/list"))
+      .toMatchObject({ params: {} });
+    expect(transport.sent.find((message) => message.method === "turn/start")?.params)
+      .toMatchObject({
+        collaborationMode: {
+          mode: "plan",
+          settings: {
+            model: "gpt-selected",
+            reasoning_effort: "medium",
+            developer_instructions: null,
+          },
+        },
+      });
   });
 
   it("maps Review and Goal responses to stable Application results", async () => {
@@ -1299,6 +1368,7 @@ describe("JsonRpcClient", () => {
       }],
       defaultServiceTier: "default",
       isDefault: true,
+      inputModalities: ["text"],
     }]);
   });
 
@@ -1312,5 +1382,17 @@ describe("JsonRpcClient", () => {
 
     await expect(client.listModels())
       .rejects.toThrow("Codex 响应缺少有效 model displayName");
+  });
+
+  it("fails closed when a model response contains an unknown input modality", async () => {
+    const transport = new FakeTransport();
+    transport.modelListData = [appServerModel({ inputModalities: ["text", "video"] })];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listModels())
+      .rejects.toThrow("Codex 响应包含未知 model inputModalities");
   });
 });

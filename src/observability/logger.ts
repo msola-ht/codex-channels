@@ -2,13 +2,18 @@ import pino, { type Logger } from "pino";
 
 import type { GatewayConfig } from "../config/index.js";
 
+export interface SafeErrorMetadata extends Record<string, unknown> {
+  type: string;
+  code?: string | number;
+}
+
 export function createLogger(
   config: Pick<GatewayConfig, "logLevel">,
 ): Logger {
   return pino({
     level: config.logLevel,
     serializers: {
-      err: errorMetadata,
+      err: safeErrorMetadata,
     },
     redact: {
       paths: [
@@ -42,7 +47,7 @@ export function createLogger(
   });
 }
 
-function errorMetadata(error: unknown): Record<string, unknown> {
+export function safeErrorMetadata(error: unknown): SafeErrorMetadata {
   const constructorName = error instanceof Error
     ? error.constructor.name
     : undefined;

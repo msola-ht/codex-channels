@@ -62,6 +62,10 @@ export type ConversationCommandResult =
       view: "model" | "effort" | "fast";
       state: Awaited<ReturnType<ConversationService["modelState"]>>;
     }
+  | {
+      kind: "collaboration-mode";
+      state: Awaited<ReturnType<ConversationService["togglePlanMode"]>>;
+    }
   | { kind: "skills"; entries: Awaited<ReturnType<ConversationService["listSkills"]>> }
   | { kind: "mcp"; servers: Awaited<ReturnType<ConversationService["listMcpServers"]>> }
   | { kind: "plugins"; result: Awaited<ReturnType<ConversationService["listPlugins"]>> }
@@ -79,7 +83,7 @@ export type ConversationCommandResult =
     }
   | {
       kind: "artifacts";
-      view: "diff" | "plan";
+      view: "diff";
       artifacts: ReturnType<ConversationService["artifacts"]>;
     }
   | { kind: "goal"; goal: ThreadGoal | null };
@@ -99,6 +103,7 @@ export type ConversationCommandOutcome =
   | { type: "thread.compaction-requested" }
   | { type: "thread.forked"; threadId: string }
   | { type: "review.started"; turnId: string }
+  | { type: "plan.started"; turnId: string }
   | { type: "goal.cleared" }
   | {
       type: "goal.updated";
@@ -308,11 +313,22 @@ export class ConversationCommandService {
         throw new UserFacingError("rules.usage", "Rules 参数无效");
       }
       case "diff":
-      case "plan":
         return {
           kind: "artifacts",
-          view: command,
+          view: "diff",
           artifacts: this.conversations.artifacts(target),
+        };
+      case "plan":
+        if (argumentsText) {
+          const submission = await this.conversations.startPlan(target, argumentsText);
+          return {
+            kind: "outcome",
+            outcome: { type: "plan.started", turnId: submission.turnId },
+          };
+        }
+        return {
+          kind: "collaboration-mode",
+          state: await this.conversations.togglePlanMode(target),
         };
       case "goal":
         return this.goal(target, argumentsText);

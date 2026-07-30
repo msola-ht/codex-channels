@@ -98,6 +98,45 @@ describe("TelegramLifecycle", () => {
     await lifecycle.stop();
   });
 
+  it("does not reorder an update between non-contiguous media groups", async () => {
+    const handled: number[] = [];
+    let delivered = false;
+    const bot = {
+      botInfo: { username: "test_bot" },
+      init: async () => undefined,
+      handleUpdate: async (update: { update_id: number }) => {
+        handled.push(update.update_id);
+      },
+      api: {
+        setMyCommands: async () => true,
+        getUpdates: async (_options: unknown, signal: AbortSignal) => {
+          if (!delivered) {
+            delivered = true;
+            return [
+              telegramUpdate(1, "album"),
+              telegramUpdate(2),
+              telegramUpdate(3, "album"),
+            ];
+          }
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return [];
+        },
+      },
+    };
+    const lifecycle = new TelegramLifecycle(
+      bot as unknown as Bot,
+      pino({ level: "silent" }),
+    );
+
+    lifecycle.start();
+    await vi.waitFor(() => expect(handled).toHaveLength(3));
+    await lifecycle.stop();
+
+    expect(handled).toEqual([1, 2, 3]);
+  });
+
   it("keeps polling when startup notification generation fails", async () => {
     let polling = false;
     const bot = {
@@ -167,3 +206,25 @@ describe("TelegramLifecycle", () => {
     }
   });
 });
+
+function telegramUpdate(updateId: number, mediaGroupId?: string) {
+  return {
+    update_id: updateId,
+    message: {
+      message_id: updateId,
+      date: 1,
+      chat: { id: 1, type: "private" as const },
+      ...(mediaGroupId === undefined
+        ? { text: "middle" }
+        : {
+            media_group_id: mediaGroupId,
+            photo: [{
+              file_id: `photo-${updateId}`,
+              file_unique_id: `unique-${updateId}`,
+              width: 10,
+              height: 10,
+            }],
+          }),
+    },
+  };
+}

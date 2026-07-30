@@ -112,6 +112,7 @@ describe("Gateway config reload", () => {
     ["surface.telegram.proxy", "telegram", { telegramProxyUrl: "http://127.0.0.1:7890/" }],
     ["surface.telegram.message-format", "telegram", { telegramMessageFormat: "rich" }],
     ["display.operation-updates", "global", { operationUpdateDisplay: "compact" }],
+    ["display.plan-updates", "global", { planUpdatesEnabled: true }],
     ["codex.default-model", "global", { codexModel: "other-model" }],
   ] as const)("restarts for %s changes", (code, scope, change) => {
     expect(classifyConfigReload(config(), config(change))).toEqual({
@@ -179,6 +180,54 @@ describe("Gateway config reload", () => {
     )).toEqual({
       action: "reload",
       changes: [{ code: "surface.feishu.allowed-users", scope: "feishu" }],
+    });
+  });
+
+  it("restarts when Weixin is enabled or its account changes", () => {
+    const weixin = {
+      accountId: "bot-fixture@im.bot",
+      allowedUserIds: new Set(["actor-fixture@im.wechat"]),
+    };
+    expect(classifyConfigReload(config(), config({ weixin }))).toEqual({
+      action: "restart",
+      changes: [{ code: "surface.weixin.enabled", scope: "weixin" }],
+    });
+    expect(classifyConfigReload(
+      config({ weixin }),
+      config({
+        weixin: {
+          ...weixin,
+          accountId: "other-fixture@im.bot",
+        },
+      }),
+    )).toEqual({
+      action: "restart",
+      changes: [{ code: "surface.weixin.account", scope: "weixin" }],
+    });
+  });
+
+  it("hot reloads Weixin allowed user IDs", () => {
+    const current = config({
+      weixin: {
+        accountId: "bot-fixture@im.bot",
+        allowedUserIds: new Set([
+          "actor-fixture@im.wechat",
+          "reviewer-fixture@im.wechat",
+        ]),
+      },
+    });
+
+    expect(classifyConfigReload(
+      current,
+      config({
+        weixin: {
+          accountId: "bot-fixture@im.bot",
+          allowedUserIds: new Set(["actor-fixture@im.wechat"]),
+        },
+      }),
+    )).toEqual({
+      action: "reload",
+      changes: [{ code: "surface.weixin.allowed-users", scope: "weixin" }],
     });
   });
 
@@ -341,6 +390,8 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     codexSocketPath: "/tmp/codex.sock",
     codexSandbox: "workspace-write",
     operationUpdateDisplay: "full",
+    planUpdatesEnabled: false,
+    credentialsDirectory: "/tmp/credentials",
     stateDatabasePath: "/tmp/gateway.sqlite3",
     approvalTimeoutMs: 300_000,
     logLevel: "info",

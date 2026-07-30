@@ -5,12 +5,23 @@ import type {
 
 export type TurnInput =
   | { type: "text"; text: string }
-  | { type: "localImage"; path: string };
+  | { type: "localImage"; path: string }
+  | { type: "localAudio"; path: string };
+
+export interface TurnCollaborationMode {
+  mode: "default" | "plan";
+  settings: {
+    model: string;
+    effort: string | null;
+    developerInstructions: null;
+  };
+}
 
 export interface TurnOverrides {
   model?: string;
   effort?: string;
   serviceTier?: string | null;
+  collaborationMode?: TurnCollaborationMode;
 }
 
 export interface TurnStarted {

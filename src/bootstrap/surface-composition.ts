@@ -4,16 +4,20 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
 
 import type { GatewayConfig } from "../config/index.js";
+import type { ConversationTarget } from "../conversation-core/index.js";
 import {
   FeishuAccessPolicy,
   TelegramAccessPolicy,
+  WeixinAccessPolicy,
 } from "../policy/index.js";
 import type { BindingStore } from "../storage/index.js";
 import {
   createFeishuSurface,
+  createTelegramSurface,
+  createWeixinSurface,
   renderFeishuStartupNotification,
-  TelegramSurface,
   telegramDefaultAccountId,
+  renderWeixinStartupNotification,
   type SurfaceAdapter,
 } from "../surfaces/index.js";
 import {
@@ -40,6 +44,14 @@ export interface ReloadableFeishuAccess {
   replace(allowedOpenIds: ReadonlySet<string>): void;
 }
 
+export interface WeixinRuntimeAdapter extends SurfaceAdapter {
+  readonly surface: "weixin";
+}
+
+export interface ReloadableWeixinAccess {
+  replace(allowedUserIds: ReadonlySet<string>): void;
+}
+
 export function createSurfaceModules(
   options: SurfacePluginContext,
   plugins: readonly BuiltInSurfacePlugin[] = builtInSurfacePlugins,
@@ -59,11 +71,93 @@ export const feishuSurfacePlugin: BuiltInSurfacePlugin = {
     : [],
 };
 
+export const weixinSurfacePlugin: BuiltInSurfacePlugin = {
+  id: "weixin",
+  create: (options) => options.config.weixin
+    ? [createWeixinModule(options)]
+    : [],
+};
+
 export const builtInSurfacePlugins: readonly BuiltInSurfacePlugin[] =
   Object.freeze([
     telegramSurfacePlugin,
     feishuSurfacePlugin,
+    weixinSurfacePlugin,
   ]);
+
+function createWeixinModule(
+  options: SurfacePluginContext,
+): SurfaceRuntimeModule {
+  const config = options.config.weixin;
+  if (!config) {
+    throw new Error("微信运行配置不存在");
+  }
+  const access = new WeixinAccessPolicy(
+    config.allowedUserIds,
+    config.accountId,
+  );
+  const removedBindings = removeUnauthorizedWeixinBindings(
+    options.bindings,
+    config.allowedUserIds,
+    config.accountId,
+  );
+  if (removedBindings > 0) {
+    options.logger.warn({ removedBindings }, "已清理不再授权的微信会话绑定");
+  }
+  const adapter = createWeixinSurface({
+    accountId: config.accountId,
+    service: options.service,
+    access,
+    actorRegistry: options.bindings,
+    credentialDirectory: join(
+      options.config.credentialsDirectory,
+      "weixin",
+    ),
+    replyContextDirectory: join(
+      options.config.credentialsDirectory,
+      "weixin-reply-context",
+    ),
+    cursorDirectory: join(
+      dirname(options.config.stateDatabasePath),
+      "weixin-updates",
+    ),
+    uploadsDirectory: join(
+      dirname(options.config.stateDatabasePath),
+      "uploads",
+      "weixin",
+    ),
+    startupNotification: {
+      targets: () => authorizedWeixinConversations(
+        options.bindings,
+        access,
+        config.accountId,
+      ),
+      text: (target) => renderWeixinStartupNotification(
+        options.config.workspaces,
+        options.service.status(target, { includeGitBranch: true }),
+        {
+          platform: process.platform,
+          architecture: process.arch,
+          gatewayVersion: options.gatewayVersion,
+          nodeVersion: process.version,
+          transport: "Unix WebSocket",
+          codexUpstreamUserAgent:
+            options.codexUpstreamUserAgent() ?? null,
+        },
+      ),
+    },
+    operationUpdateDisplay: options.config.operationUpdateDisplay,
+    planUpdatesEnabled: options.config.planUpdatesEnabled,
+    logger: options.logger,
+    onFatal: (error) => options.onFatal("weixin", config.accountId, error),
+  });
+  return createWeixinRuntimeModule(
+    adapter,
+    access,
+    options.bindings,
+    options.logger,
+  );
+}
 
 function createFeishuModule(
   options: SurfacePluginContext,
@@ -107,6 +201,7 @@ function createFeishuModule(
     ),
     disableEnvironmentProxy: true,
     operationUpdateDisplay: options.config.operationUpdateDisplay,
+    planUpdatesEnabled: options.config.planUpdatesEnabled,
     ...(openApiAgent
       ? {
           openApiAgent,
@@ -228,24 +323,25 @@ function createTelegramModule(
     config.telegramAllowedUserIds,
     telegramDefaultAccountId,
   );
-  const adapter = new TelegramSurface(
-    config.telegramBotToken,
-    config.telegramProxyUrl,
-    options.service,
+  const adapter = createTelegramSurface({
+    token: config.telegramBotToken,
+    ...(config.telegramProxyUrl === undefined
+      ? {}
+      : { proxyUrl: config.telegramProxyUrl }),
+    service: options.service,
     access,
-    config.telegramAllowedUserIds,
-    config.workspaces,
-    join(dirname(config.stateDatabasePath), "uploads"),
+    startupRecipients: config.telegramAllowedUserIds,
+    workspaces: config.workspaces,
+    uploadsDirectory: join(dirname(config.stateDatabasePath), "uploads"),
     logger,
-    {
-      actorRegistry: bindings,
-      onFatal: (error) => options.onFatal("telegram", telegramDefaultAccountId, error),
-      finalMessageFormat: config.telegramMessageFormat,
-      operationUpdateDisplay: config.operationUpdateDisplay,
-      gatewayVersion: options.gatewayVersion,
-      codexUpstreamUserAgent: options.codexUpstreamUserAgent,
-    },
-  );
+    actorRegistry: bindings,
+    onFatal: (error) => options.onFatal("telegram", telegramDefaultAccountId, error),
+    finalMessageFormat: config.telegramMessageFormat,
+    operationUpdateDisplay: config.operationUpdateDisplay,
+    planUpdatesEnabled: config.planUpdatesEnabled,
+    gatewayVersion: options.gatewayVersion,
+    codexUpstreamUserAgent: options.codexUpstreamUserAgent,
+  });
   return createTelegramRuntimeModule(
     adapter,
     access,
@@ -309,6 +405,37 @@ export function createFeishuRuntimeModule(
   };
 }
 
+export function createWeixinRuntimeModule(
+  adapter: WeixinRuntimeAdapter,
+  access: ReloadableWeixinAccess,
+  bindings: BindingStore,
+  logger: Logger,
+): SurfaceRuntimeModule {
+  return {
+    adapter,
+    applyHotReload(next, changes) {
+      if (!changes.some((change) => change.code === "surface.weixin.allowed-users")) {
+        return;
+      }
+      if (!next.weixin) {
+        throw new Error("微信允许名单热加载缺少运行配置");
+      }
+      access.replace(next.weixin.allowedUserIds);
+      const removedBindings = removeUnauthorizedWeixinBindings(
+        bindings,
+        next.weixin.allowedUserIds,
+        adapter.accountId,
+      );
+      if (removedBindings > 0) {
+        logger.warn({ removedBindings }, "已清理不再授权的微信会话绑定");
+      }
+    },
+    prepareRestartNotification() {
+      return () => {};
+    },
+  };
+}
+
 function intersectNumberSets(
   left: ReadonlySet<number>,
   right: ReadonlySet<number>,
@@ -361,6 +488,30 @@ export function removeUnauthorizedFeishuBindings(
   return removed;
 }
 
+export function removeUnauthorizedWeixinBindings(
+  bindings: BindingStore,
+  allowedUserIds: ReadonlySet<string>,
+  accountId: string,
+): number {
+  let removed = 0;
+  for (const binding of bindings.list()) {
+    if (
+      binding.target.surface !== "weixin"
+      || binding.target.accountId !== accountId
+    ) {
+      continue;
+    }
+    const allowedActors = new Set(
+      bindings.actors(binding.target).filter((actorId) =>
+        allowedUserIds.has(actorId)),
+    );
+    if (bindings.retainActors(binding.target, allowedActors)) {
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
 function authorizedFeishuConversations(
   bindings: BindingStore,
   access: FeishuAccessPolicy,
@@ -378,5 +529,27 @@ function authorizedFeishuConversations(
       return [];
     }
     return [binding.target.conversationId];
+  });
+}
+
+function authorizedWeixinConversations(
+  bindings: BindingStore,
+  access: WeixinAccessPolicy,
+  accountId: string,
+): ConversationTarget[] {
+  return bindings.list().flatMap((binding) => {
+    if (
+      binding.target.surface !== "weixin"
+      || binding.target.accountId !== accountId
+      || !bindings.actors(binding.target).some((actorId) =>
+        actorId === binding.target.conversationId
+        && access.isAllowed({
+          target: binding.target,
+          actorId,
+        }))
+    ) {
+      return [];
+    }
+    return [binding.target];
   });
 }

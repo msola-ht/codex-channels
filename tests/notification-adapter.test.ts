@@ -15,6 +15,7 @@ describe("Notification adapter", () => {
           model: "gpt-5.6-sol",
           effort: "high",
           serviceTier: "priority",
+          collaborationMode: { mode: "plan", settings: {} },
         },
       },
     })).toEqual({
@@ -24,6 +25,7 @@ describe("Notification adapter", () => {
         model: "gpt-5.6-sol",
         effort: "high",
         serviceTier: "priority",
+        collaborationMode: "plan",
       },
     });
   });
@@ -37,6 +39,7 @@ describe("Notification adapter", () => {
           model: "gpt-5.6-sol",
           effort: null,
           serviceTier: null,
+          collaborationMode: { mode: "default", settings: {} },
         },
       },
     })).toEqual({
@@ -46,6 +49,7 @@ describe("Notification adapter", () => {
         model: "gpt-5.6-sol",
         effort: null,
         serviceTier: null,
+        collaborationMode: "default",
       },
     });
   });

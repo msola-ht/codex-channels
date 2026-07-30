@@ -146,6 +146,7 @@ export interface OperationUpdate {
   kind: OperationKind;
   action?: string;
   detail?: string;
+  imagePath?: string;
   status: OperationStatus;
   durationMs?: number;
   exitCode?: number;
@@ -167,6 +168,7 @@ export type OutputEvent =
   | { type: "text.delta"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null }
   | { type: "text.completed"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null }
   | { type: "operation.updated"; target: ConversationTarget; threadId: string; turnId: string; operation: OperationUpdate }
+  | { type: "plan.updated"; target: ConversationTarget; threadId: string; turnId: string; explanation: string | null; steps: TurnPlanStep[] }
   | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: TurnStatus; error?: string; durationMs?: number; tokenUsage?: ThreadTokenUsage; model?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; goal?: ThreadGoal; contextCompactionCount?: number; gitBranch?: string | undefined }
   | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string }
   | { type: "connection.lost"; target: ConversationTarget; threadId: string; message: string }
@@ -177,5 +179,6 @@ export type OutputEvent =
 
 export function isCriticalOutputEvent(event: OutputEvent): boolean {
   return event.type !== "text.delta" && event.type !== "turn.started" &&
+    event.type !== "plan.updated" &&
     !(event.type === "operation.updated" && event.operation.status === "running");
 }

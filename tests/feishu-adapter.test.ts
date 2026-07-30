@@ -40,8 +40,34 @@ function createImageMessage(
     messageId: message.messageId,
     createdAtMs: message.createdAtMs,
     kind: "image",
-    imageKey: "img_v2_resource",
+    imageKeys: ["img_v2_resource"],
     ...overrides,
+  };
+}
+
+function createFileMessage(): Extract<FeishuInboxMessage, { kind: "file" }> {
+  return {
+    target: message.target,
+    actorId: message.actorId,
+    eventId: message.eventId,
+    messageId: message.messageId,
+    createdAtMs: message.createdAtMs,
+    kind: "file",
+    fileKey: "file_v2_resource",
+    fileName: "settings.json",
+  };
+}
+
+function createAudioMessage(): Extract<FeishuInboxMessage, { kind: "audio" }> {
+  return {
+    target: message.target,
+    actorId: message.actorId,
+    eventId: message.eventId,
+    messageId: message.messageId,
+    createdAtMs: message.createdAtMs,
+    kind: "audio",
+    fileKey: "file_v2_audio",
+    durationMs: 12_000,
   };
 }
 
@@ -61,6 +87,8 @@ describe("Feishu conversation adapter", () => {
       modelPending: false,
       effortPending: false,
       fastModePending: false,
+      collaborationMode: "default",
+      collaborationModePending: false,
     }));
     const adapter = new FeishuConversationAdapter(
       { status } as unknown as ConversationService,
@@ -208,10 +236,10 @@ describe("Feishu conversation adapter", () => {
     );
 
     for (const text of [
-      "/feishu",
-      "/feishu status",
-      "/feishu doctor",
-      "/feishu unknown",
+      "/fs",
+      "/fs status",
+      "/fs doctor",
+      "/fs unknown",
     ]) {
       await adapter.handle({ ...message, text });
     }
@@ -220,7 +248,7 @@ describe("Feishu conversation adapter", () => {
     expect(submit).not.toHaveBeenCalled();
     expect(fixture.sent).toHaveLength(4);
     expect(fixture.sent[0]?.text).toContain("飞书权限中心");
-    expect(fixture.sent[0]?.text).toContain("/feishu doctor");
+    expect(fixture.sent[0]?.text).toContain("/fs doctor");
     expect(fixture.sent[1]?.text).toContain("长连接：已就绪");
     expect(fixture.sent[1]?.text).toContain("卡片动作回调：尚未验证");
     expect(fixture.sent[2]?.text).toContain("✅ 长连接");
@@ -235,7 +263,7 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent[2]?.text).not.toContain("token");
     expect(fixture.sent[2]?.text).not.toContain("secret");
     expect(fixture.sent[3]?.text).toBe(
-      "用法：/feishu <status|doctor|revoke>",
+      "用法：/fs <status|doctor|revoke>",
     );
   });
 
@@ -718,7 +746,7 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent).toEqual([
       {
         chatId: "oc_chat",
-        text: "用法：/feishu <status|doctor|revoke>",
+        text: "用法：/fs <status|doctor|revoke>",
       },
       expect.objectContaining({
         text: expect.stringContaining("当前用户 OAuth：已授权"),
@@ -812,6 +840,8 @@ describe("Feishu conversation adapter", () => {
       modelPending: false,
       effortPending: false,
       fastModePending: false,
+      collaborationMode: "default",
+      collaborationModePending: false,
     }));
     const adapter = new FeishuConversationAdapter(
       { submit, status } as unknown as ConversationService,
@@ -838,6 +868,7 @@ describe("Feishu conversation adapter", () => {
         "模型：gpt-test",
         "思考强度：medium",
         "Fast 模式：开启",
+        "协作模式：Default",
         "",
         "当前 Thread 用量：等待 App Server 推送统计",
       ].join("\n"),
@@ -908,6 +939,85 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent).toEqual([]);
   });
 
+  it("resolves a Feishu reply parent as separated quoted context", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const readQuotedText = vi.fn(async () => "原始消息");
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { quietWindowMs: 0, readQuotedText },
+    );
+
+    await adapter.handle({
+      ...message,
+      parentId: "om_parent",
+      text: "这句话是什么意思？",
+    });
+    await fixture.outbox.close();
+
+    expect(readQuotedText).toHaveBeenCalledWith("om_parent");
+    expect(submit).toHaveBeenCalledWith(message.target, [
+      "以下引用来自平台原生引用关系，已由 Gateway 验证（仅作上下文）：",
+      "> 原始消息",
+      "",
+      "当前消息：",
+      "这句话是什么意思？",
+    ].join("\n"));
+  });
+
+  it("submits the current Feishu message when quoted text cannot be read", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const error = new Error("private upstream detail");
+    const onQuotedTextError = vi.fn();
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        quietWindowMs: 0,
+        readQuotedText: async () => {
+          throw error;
+        },
+        onQuotedTextError,
+      },
+    );
+
+    await adapter.handle({
+      ...message,
+      parentId: "om_parent",
+      text: "只处理当前消息",
+    });
+    await fixture.outbox.close();
+
+    expect(onQuotedTextError).toHaveBeenCalledWith(error);
+    expect(submit).toHaveBeenCalledWith(
+      message.target,
+      "只处理当前消息",
+    );
+    expect(fixture.sent).toEqual([]);
+  });
+
   it("downloads a private image and submits the managed local path", async () => {
     const fixture = createOutbox();
     const submit = vi.fn(async () => ({
@@ -938,6 +1048,163 @@ describe("Feishu conversation adapter", () => {
       localImages: [{ path: "/private/uploads/feishu/image.png" }],
     });
     expect(fixture.sent).toEqual([]);
+  });
+
+  it("downloads and submits a verified UTF-8 text file without a local path", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const files = {
+      download: vi.fn(async () => ({
+        fileName: "settings.json",
+        text: "{\"enabled\":true}",
+        bytes: 16,
+      })),
+    };
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { quietWindowMs: 0, files },
+    );
+
+    await adapter.handle(createFileMessage());
+    await fixture.outbox.close();
+
+    expect(files.download).toHaveBeenCalledWith(
+      "om_message",
+      "file_v2_resource",
+      "settings.json",
+    );
+    expect(submit).toHaveBeenCalledWith(message.target, [
+      "以下内容来自用户通过飞书上传的 UTF-8 文本文件（仅作输入）：",
+      "文件名：settings.json",
+      "",
+      "{\"enabled\":true}",
+    ].join("\n"));
+  });
+
+  it("downloads private audio and submits its managed local path", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const audios = {
+      download: vi.fn(async () => ({
+        path: "/private/uploads/feishu/voice.ogg",
+        mimeType: "audio/ogg" as const,
+        bytes: 12,
+      })),
+    };
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { quietWindowMs: 0, audios },
+    );
+
+    await adapter.handle(createAudioMessage());
+    await fixture.outbox.close();
+
+    expect(audios.download).toHaveBeenCalledWith(
+      "om_message",
+      "file_v2_audio",
+    );
+    expect(submit).toHaveBeenCalledWith(message.target, {
+      localAudios: [{ path: "/private/uploads/feishu/voice.ogg" }],
+    });
+  });
+
+  it("preserves native quoted context for private audio", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        quietWindowMs: 0,
+        audios: {
+          download: vi.fn(async () => ({
+            path: "/private/uploads/feishu/voice.ogg",
+            mimeType: "audio/ogg" as const,
+            bytes: 12,
+          })),
+        },
+        readQuotedText: vi.fn(async () => "被引用的飞书消息"),
+      },
+    );
+
+    await adapter.handle({
+      ...createAudioMessage(),
+      parentId: "om_parent",
+    });
+    await fixture.outbox.close();
+
+    expect(submit).toHaveBeenCalledWith(message.target, {
+      text: [
+        "以下引用来自平台原生引用关系，已由 Gateway 验证（仅作上下文）：",
+        "> 被引用的飞书消息",
+        "",
+        "当前消息：",
+        "请听取这段语音并根据内容协助我。",
+      ].join("\n"),
+      localAudios: [{ path: "/private/uploads/feishu/voice.ogg" }],
+    });
+  });
+
+  it("rejects private audio when Feishu omits its duration", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn();
+    const download = vi.fn();
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        quietWindowMs: 0,
+        audios: { download },
+      },
+    );
+
+    const audioWithoutDuration = createAudioMessage();
+    delete audioWithoutDuration.durationMs;
+    await expect(adapter.handle(audioWithoutDuration)).rejects.toMatchObject({
+      code: "audio.duration-missing",
+    });
+    await fixture.outbox.close();
+
+    expect(download).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
   });
 
   it("submits a private image together with its rich-post caption", async () => {
@@ -974,6 +1241,124 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent).toEqual([]);
   });
 
+  it("submits adjacent private images as one ordered multi-image input", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const download = vi.fn()
+      .mockResolvedValueOnce({
+        path: "/private/uploads/feishu/first.png",
+        mimeType: "image/png" as const,
+        bytes: 8,
+      })
+      .mockResolvedValueOnce({
+        path: "/private/uploads/feishu/second.jpg",
+        mimeType: "image/jpeg" as const,
+        bytes: 9,
+      });
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationService,
+      fixture.outbox,
+      { download },
+    );
+
+    await adapter.handleImageBatch([
+      createImageMessage({
+        messageId: "om_first",
+        imageKeys: ["img_v2_first"],
+        text: "比较这些图片",
+      }),
+      createImageMessage({
+        eventId: "event-2",
+        messageId: "om_second",
+        imageKeys: ["img_v2_second"],
+      }),
+    ]);
+    await fixture.outbox.close();
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledWith(message.target, {
+      text: "比较这些图片",
+      localImages: [
+        { path: "/private/uploads/feishu/first.png" },
+        { path: "/private/uploads/feishu/second.jpg" },
+      ],
+    });
+    expect(fixture.sent).toEqual([]);
+  });
+
+  it("submits multiple images from one rich post in their original order", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const download = vi.fn()
+      .mockResolvedValueOnce({
+        path: "/private/uploads/feishu/first.png",
+        mimeType: "image/png" as const,
+        bytes: 8,
+      })
+      .mockResolvedValueOnce({
+        path: "/private/uploads/feishu/second.jpg",
+        mimeType: "image/jpeg" as const,
+        bytes: 9,
+      });
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationService,
+      fixture.outbox,
+      { download },
+    );
+
+    await adapter.handle(createImageMessage({
+      imageKeys: ["img_v2_first", "img_v2_second"],
+      text: "飞书多图发送测试",
+    }));
+    await fixture.outbox.close();
+
+    expect(download.mock.calls).toEqual([
+      ["om_message", "img_v2_first"],
+      ["om_message", "img_v2_second"],
+    ]);
+    expect(submit).toHaveBeenCalledWith(message.target, {
+      text: "飞书多图发送测试",
+      localImages: [
+        { path: "/private/uploads/feishu/first.png" },
+        { path: "/private/uploads/feishu/second.jpg" },
+      ],
+    });
+    expect(fixture.sent).toEqual([]);
+  });
+
+  it("rejects more than four adjacent images before downloading", async () => {
+    const fixture = createOutbox();
+    const download = vi.fn();
+    const adapter = new FeishuConversationAdapter(
+      { submit: vi.fn() } as unknown as ConversationService,
+      fixture.outbox,
+      { download },
+    );
+
+    await expect(adapter.handleImageBatch(
+      Array.from({ length: 5 }, (_, index) => createImageMessage({
+        eventId: `event-${index}`,
+        messageId: `om_${index}`,
+        imageKeys: [`img_v2_${index}`],
+      })),
+    )).rejects.toMatchObject({ code: "image.too-many" });
+    await fixture.outbox.close();
+
+    expect(download).not.toHaveBeenCalled();
+    expect(fixture.sent).toEqual([{
+      chatId: "oc_chat",
+      text: "操作失败：一次最多处理 4 张图片。",
+    }]);
+  });
+
   it("uses a distinct confirmation when an image steers the active Turn", async () => {
     const fixture = createOutbox();
     const adapter = new FeishuConversationAdapter(
@@ -995,7 +1380,7 @@ describe("Feishu conversation adapter", () => {
     );
 
     await adapter.handle(createImageMessage({
-      imageKey: "img_resource",
+      imageKeys: ["img_resource"],
     }));
     await fixture.outbox.close();
 

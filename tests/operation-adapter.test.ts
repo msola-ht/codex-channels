@@ -34,6 +34,27 @@ describe("operation normalization", () => {
     )?.status).toBe("declined");
   });
 
+  it("maps only the official generated-image saved path as an artifact", () => {
+    expect(toOperationUpdate({
+      type: "imageGeneration",
+      id: "image",
+      status: "completed",
+      savedPath: "/private/generated/image.png",
+      result: "private image body",
+    }, "completed")).toEqual({
+      itemId: "image",
+      kind: "imageGeneration",
+      status: "completed",
+      imagePath: "/private/generated/image.png",
+    });
+
+    expect(toOperationUpdate({
+      type: "imageView",
+      id: "view",
+      path: "/private/uploads/inbound.png",
+    }, "completed")).not.toHaveProperty("imagePath");
+  });
+
   it("redacts common credential forms without exposing their values", () => {
     const cases = [
       ["TELEGRAM_BOT_TOKEN=bot-secret", /bot-secret/],

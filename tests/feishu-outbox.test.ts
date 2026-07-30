@@ -6,6 +6,7 @@ import type {
   OutputEvent,
 } from "../src/conversation-core/index.js";
 import {
+  feishuCardElements,
   FeishuMessageError,
   FeishuOutbox,
   type FeishuCardDocument,
@@ -35,6 +36,303 @@ afterEach(() => {
 });
 
 describe("Feishu outbox", () => {
+  it("updates the initial plan card and sends one card for each completed step", async () => {
+    const sent: FeishuCardDocument[] = [];
+    const updated: FeishuCardDocument[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendCard: async (_chatId, card) => {
+          sent.push(card);
+          return "om_plan";
+        },
+        updateCard: async (_messageId, card) => {
+          updated.push(card);
+        },
+      },
+      pino({ level: "silent" }),
+      { planUpdatesEnabled: true },
+    );
+
+    outbox.handle(planUpdated([
+      { step: "检查实现", status: "inProgress" },
+      { step: "补充测试", status: "pending" },
+    ]));
+    outbox.handle(planUpdated([
+      { step: "检查实现", status: "completed" },
+      { step: "补充测试", status: "inProgress" },
+    ]));
+    outbox.handle(planUpdated([
+      { step: "检查实现", status: "completed" },
+      { step: "补充测试", status: "inProgress" },
+    ]));
+    await outbox.close();
+
+    expect(sent).toHaveLength(2);
+    expect(sent[0]?.header.title.content).toBe("任务计划 · 0/2");
+    expect(sent[1]?.header.title.content).toBe("计划进度 · 1/2");
+    expect(updated).toHaveLength(1);
+    expect(updated[0]?.header.title.content).toBe("任务计划 · 1/2");
+    expect(statusCardText(updated[0]!)).toBe(
+      "✓ 检查实现\n◐ 补充测试",
+    );
+  });
+
+  it("sends the shared Turn start confirmation as a Markdown card", async () => {
+    const markdownCards: string[] = [];
+    const replies: Array<{ messageId: string; markdown: string }> = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+        replyMarkdownCard: async (messageId, markdown) => {
+          replies.push({ messageId, markdown });
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.prepareTurnReplyTarget("oc_chat", "om_origin");
+    outbox.handle({
+      type: "turn.started",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+    });
+    await outbox.close();
+
+    expect(markdownCards).toEqual([]);
+    expect(replies).toEqual([{
+      messageId: "om_origin",
+      markdown: "**已开始处理。**",
+    }]);
+  });
+
+  it("sends completed generated images even when operation summaries are hidden", async () => {
+    const sentImages: Array<{ chatId: string; image: Buffer }> = [];
+    const image = Buffer.from("validated-image");
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendImage: async (chatId, value) => {
+          sentImages.push({ chatId, image: value });
+        },
+      },
+      pino({ level: "silent" }),
+      {
+        operationUpdateDisplay: "hidden",
+        readGeneratedImage: vi.fn(async () => ({
+          bytes: image,
+          format: "png" as const,
+        })),
+      },
+    );
+
+    const event = operationUpdated(
+      "completed",
+      "imageGeneration",
+      "image-1",
+    );
+    outbox.handle({
+      ...event,
+      operation: {
+        ...event.operation,
+        imagePath: "/private/generated/image.png",
+      },
+    });
+    await outbox.close();
+
+    expect(sentImages).toEqual([{
+      chatId: "oc_chat",
+      image,
+    }]);
+  });
+
+  it("keeps the reply target through commentary for the final static reply", async () => {
+    const markdownCards: string[] = [];
+    const replies: Array<{ messageId: string; markdown: string }> = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+        replyMarkdownCard: async (messageId, markdown) => {
+          replies.push({ messageId, markdown });
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.prepareTurnReplyTarget("oc_chat", "om_origin");
+    outbox.bindPendingTurnReplyTarget("oc_chat", "thread-1", "turn-1");
+    outbox.handle({
+      type: "text.completed",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "commentary-1",
+      text: "处理中",
+      phase: "commentary",
+    });
+    outbox.handle({
+      type: "text.completed",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "final-1",
+      text: "最终回复",
+      phase: "final_answer",
+    });
+    await outbox.close();
+
+    expect(markdownCards).toEqual(["处理中"]);
+    expect(replies).toEqual([{
+      messageId: "om_origin",
+      markdown: "最终回复",
+    }]);
+  });
+
+  it("keeps the reply target through commentary for the final streaming card", async () => {
+    vi.useFakeTimers();
+    const ordinaryCards: string[] = [];
+    const replyCards: Array<{ messageId: string; text: string }> = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        createStreamingCard: async (_chatId, initialText) => {
+          ordinaryCards.push(initialText);
+          return {
+            cardId: "7355372766134157313",
+            messageId: "om_commentary",
+          };
+        },
+        createStreamingReplyCard: async (messageId, initialText) => {
+          replyCards.push({ messageId, text: initialText });
+          return {
+            cardId: "7355372766134157314",
+            messageId: "om_final",
+          };
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.prepareTurnReplyTarget("oc_chat", "om_origin");
+    outbox.bindPendingTurnReplyTarget("oc_chat", "thread-1", "turn-1");
+    outbox.handle({
+      type: "text.delta",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "commentary-1",
+      text: "处理中",
+      phase: "commentary",
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle({
+      type: "text.completed",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "commentary-1",
+      text: "处理中",
+      phase: "commentary",
+    });
+    outbox.handle({
+      type: "text.delta",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "final-1",
+      text: "最终回复",
+      phase: "final_answer",
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle({
+      type: "text.completed",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "final-1",
+      text: "最终回复",
+      phase: "final_answer",
+    });
+    await outbox.close();
+
+    expect(ordinaryCards).toEqual(["处理中"]);
+    expect(replyCards).toEqual([{
+      messageId: "om_origin",
+      text: "最终回复",
+    }]);
+  });
+
+  it("keeps Turn completion separate from a commentary-only stream", async () => {
+    vi.useFakeTimers();
+    const finished: Array<{ summary: string; footer?: string }> = [];
+    const staticCards: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          staticCards.push(markdown);
+        },
+        createStreamingCard: async () => ({
+          cardId: "7355372766134157313",
+          messageId: "om_commentary",
+        }),
+        finishStreamingCard: async (
+          _cardId,
+          _sequence,
+          summary,
+          footer?: string,
+        ) => {
+          finished.push({
+            summary,
+            ...(footer === undefined ? {} : { footer }),
+          });
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle({
+      type: "text.delta",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "commentary-1",
+      text: "处理中",
+      phase: "commentary",
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle(turnCompleted());
+    await outbox.close();
+
+    expect(finished).toEqual([{ summary: "处理中" }]);
+    expect(staticCards).toEqual(["**本次运行 · 已完成**"]);
+  });
+
   it("streams coalesced deltas through one native CardKit card", async () => {
     vi.useFakeTimers();
     const created: string[] = [];
@@ -88,6 +386,37 @@ describe("Feishu outbox", () => {
     expect(posts).toEqual([]);
   });
 
+  it("flushes pending streamed text before a visible operation result", async () => {
+    vi.useFakeTimers();
+    const operations: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          operations.push(`operation:${markdown}`);
+        },
+        createStreamingCard: async (_chatId, initialText) => {
+          operations.push(`stream:${initialText}`);
+          return {
+            cardId: "7355372766134157313",
+            messageId: "om_stream",
+          };
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(delta("先说明，再执行命令。"));
+    outbox.handle(operationUpdated("completed"));
+    await outbox.close();
+
+    expect(operations[0]).toBe("stream:先说明，再执行命令。");
+    expect(operations[1]).toMatch(/^operation:\*\*运行命令/u);
+  });
+
   it("does not append a working footer to active Turn output", async () => {
     vi.useFakeTimers();
     const created: string[] = [];
@@ -113,8 +442,13 @@ describe("Feishu outbox", () => {
         updateStreamingCard: async (_cardId, content) => {
           updated.push(content);
         },
-        finishStreamingCard: async (_cardId, _sequence, summary) => {
-          finished.push(summary);
+        finishStreamingCard: async (
+          _cardId,
+          _sequence,
+          summary,
+          footer?: string,
+        ) => {
+          finished.push(`${summary}|${footer ?? ""}`);
         },
       },
       pino({ level: "silent" }),
@@ -134,9 +468,11 @@ describe("Feishu outbox", () => {
 
     expect(created).toEqual(["正在处理"]);
     expect(updated).toEqual(["正在处理。"]);
-    expect(finished).toEqual(["正在处理。"]);
+    expect(finished).toEqual([
+      "正在处理。|**本次运行 · 已完成**",
+    ]);
     expect(markdownCards[0]).not.toContain("工作中");
-    expect(markdownCards.at(-1)).toBe("**本次运行 · 已完成**");
+    expect(markdownCards.at(-1)).toContain("**运行命令 · 已完成**");
   });
 
   it("uses the full streaming element budget without a footer", async () => {
@@ -520,6 +856,50 @@ describe("Feishu outbox", () => {
     expect(posts).toEqual([]);
   });
 
+  it("appends a complete text file after an oversized streaming reply", async () => {
+    vi.useFakeTimers();
+    const operations: string[] = [];
+    const files: Buffer[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async (_chatId, text) => {
+          operations.push(`text:${text}`);
+        },
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          operations.push(`static:${markdown}`);
+        },
+        createStreamingCard: async (_chatId, initialText) => {
+          operations.push(`create:${initialText}`);
+          return {
+            cardId: `73553727661341573${operations.length}`,
+            messageId: `om_stream_${operations.length}`,
+          };
+        },
+        finishStreamingCard: async () => {
+          operations.push("finish");
+        },
+        sendFile: async (_chatId, fileName, file) => {
+          operations.push(`file:${fileName}`);
+          files.push(file);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+    const text = "流式长回复".repeat(6_000);
+
+    outbox.handle(delta(text));
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+    outbox.handle(completed({}, text, "item-1"));
+    await outbox.close();
+
+    expect(operations.at(-1)).toBe("file:codex-final-answer.txt");
+    expect(files).toEqual([Buffer.from(text, "utf8")]);
+  });
+
   it("keeps streaming cards and fallback posts within one five-message budget", async () => {
     vi.useFakeTimers();
     const created: string[] = [];
@@ -607,6 +987,10 @@ describe("Feishu outbox", () => {
   it("finishes an active native stream before a Turn completion status", async () => {
     vi.useFakeTimers();
     const operations: string[] = [];
+    let resolveInitialFinish!: () => void;
+    const initialFinish = new Promise<void>((resolve) => {
+      resolveInitialFinish = resolve;
+    });
     const outbox = new FeishuOutbox(
       "cli_app",
       {
@@ -627,8 +1011,52 @@ describe("Feishu outbox", () => {
             messageId: "om_stream",
           };
         },
+        finishStreamingCard: async (
+          _cardId,
+          _sequence,
+          summary,
+          footer?: string,
+        ) => {
+          operations.push(`finish:${summary}|${footer ?? ""}`);
+          if (footer === undefined) {
+            resolveInitialFinish();
+          }
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(delta("部分正文"));
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+    outbox.handle(completed({}, "部分正文", "item-1"));
+    await initialFinish;
+    await Promise.resolve();
+    await Promise.resolve();
+    outbox.handle(turnCompleted());
+    await outbox.close();
+
+    expect(operations).toEqual([
+      "create:部分正文",
+      "finish:部分正文|",
+      "finish:部分正文|**本次运行 · 已完成**",
+    ]);
+  });
+
+  it("falls back to a static completion status when finishing a stream fails", async () => {
+    vi.useFakeTimers();
+    const markdownCards: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
         finishStreamingCard: async () => {
-          operations.push("finish");
+          throw new Error("stream finish failed");
         },
       },
       pino({ level: "silent" }),
@@ -640,11 +1068,8 @@ describe("Feishu outbox", () => {
     outbox.handle(turnCompleted());
     await outbox.close();
 
-    expect(operations).toEqual([
-      "create:部分正文",
-      "finish",
-      "static:**本次运行 · 已完成**",
-    ]);
+    expect(markdownCards).toEqual(["**本次运行 · 已完成**"]);
+    expect(streamCount(outbox)).toBe(0);
   });
 
   it("preserves a short partial reply when Turn completion arrives first", async () => {
@@ -790,6 +1215,36 @@ describe("Feishu outbox", () => {
       "**运行命令 · 已完成** · exit 0 · `git status --short`\n\n"
       + "---\n"
       + "**耗时：** 125毫秒",
+    ]);
+  });
+
+  it("summarizes repeated query operations once before Turn completion", async () => {
+    const markdownCards: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(operationUpdated("completed", "mcpTool", "mcp-1"));
+    outbox.handle(operationUpdated("completed", "mcpTool", "mcp-2"));
+    await settle();
+    expect(markdownCards).toEqual([]);
+
+    outbox.handle(turnCompleted());
+    await outbox.close();
+
+    expect(markdownCards).toEqual([
+      "**工具查询 · 已完成**\n- MCP 工具：2 次\n\n"
+      + "---\n**耗时：** 250毫秒",
+      "**本次运行 · 已完成**",
     ]);
   });
 
@@ -1151,6 +1606,141 @@ describe("Feishu outbox", () => {
     expect(sent.every((chunk) => [...chunk].length <= 5_000)).toBe(true);
   });
 
+  it("sends a static long final answer as one preview card and a text file", async () => {
+    const operations: string[] = [];
+    const files: Array<{
+      chatId: string;
+      fileName: string;
+      file: Buffer;
+    }> = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          operations.push(`card:${markdown}`);
+        },
+        sendFile: async (chatId, fileName, file) => {
+          operations.push(`file:${fileName}`);
+          files.push({ chatId, fileName, file });
+        },
+      },
+      pino({ level: "silent" }),
+    );
+    const text = "长回复".repeat(10_000);
+
+    outbox.handle(completed({}, text));
+    await outbox.close();
+
+    expect(operations).toHaveLength(2);
+    expect(operations[0]).toMatch(/^card:/u);
+    expect(operations[0]).toMatch(/\[内容预览，完整回复见附件\]$/u);
+    expect([...operations[0]!.slice("card:".length)].length)
+      .toBeLessThanOrEqual(5_000);
+    expect(operations[1]).toBe("file:codex-final-answer.txt");
+    expect(files).toEqual([{
+      chatId: "oc_chat",
+      fileName: "codex-final-answer.txt",
+      file: Buffer.from(text, "utf8"),
+    }]);
+  });
+
+  it("falls back to remaining bounded cards when a final-answer file fails", async () => {
+    const cards: string[] = [];
+    const text = "长回复".repeat(10_000);
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          cards.push(markdown);
+        },
+        sendFile: async () => {
+          throw new FeishuMessageError(
+            "send-failed",
+            "飞书文件发送失败",
+          );
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(completed({}, text));
+    await outbox.close();
+
+    expect(cards).toHaveLength(5);
+    expect(cards[0]).toMatch(/\[内容预览，完整回复见附件\]$/u);
+    expect(cards[1]).toMatch(
+      /^\[完整文件发送失败，已改为分段文本\]\n\n/u,
+    );
+    expect(cards.at(-1)).toMatch(/\[内容过长，已截断\]$/u);
+  });
+
+  it("consumes the native reply target after a preview even when its file fails", async () => {
+    const ordinaryCards: string[] = [];
+    const replies: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          ordinaryCards.push(markdown);
+        },
+        replyMarkdownCard: async (_messageId, markdown) => {
+          replies.push(markdown);
+        },
+        sendFile: async () => {
+          throw new FeishuMessageError(
+            "send-failed",
+            "飞书文件发送失败",
+          );
+        },
+      },
+      pino({ level: "silent" }),
+    );
+    outbox.prepareTurnReplyTarget("oc_chat", "om_origin");
+    outbox.bindPendingTurnReplyTarget("oc_chat", "thread-1", "turn-1");
+
+    outbox.handle(completed({}, "长回复".repeat(10_000)));
+    outbox.handle(turnCompleted());
+    await outbox.close();
+
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toMatch(/\[内容预览，完整回复见附件\]$/u);
+    expect(ordinaryCards.at(-1)).toBe("**本次运行 · 已完成**");
+  });
+
+  it("does not upload a final answer beyond the bounded file limit", async () => {
+    const cards: string[] = [];
+    const sendFile = vi.fn(async () => {});
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          cards.push(markdown);
+        },
+        sendFile,
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(completed({}, "中".repeat(400_000)));
+    await outbox.close();
+
+    expect(sendFile).not.toHaveBeenCalled();
+    expect(cards).toHaveLength(5);
+    expect(cards.at(-1)).toMatch(/\[内容过长，已截断\]$/u);
+  });
+
   it("waits for accepted output during close and rejects later events", async () => {
     const pending = deferred();
     const sent: string[] = [];
@@ -1204,15 +1794,20 @@ function completed(
 
 function operationUpdated(
   status: "running" | "completed",
-): OutputEvent {
+  kind: Extract<
+    OutputEvent,
+    { type: "operation.updated" }
+  >["operation"]["kind"] = "command",
+  itemId = "command-1",
+): Extract<OutputEvent, { type: "operation.updated" }> {
   return {
     type: "operation.updated",
     target,
     threadId: "thread-1",
     turnId: "turn-1",
     operation: {
-      itemId: "command-1",
-      kind: "command",
+      itemId,
+      kind,
       detail: "git status --short",
       status,
       ...(status === "completed"
@@ -1252,8 +1847,21 @@ function turnCompleted(): OutputEvent {
   };
 }
 
+function planUpdated(
+  steps: Extract<OutputEvent, { type: "plan.updated" }>["steps"],
+): Extract<OutputEvent, { type: "plan.updated" }> {
+  return {
+    type: "plan.updated",
+    target,
+    threadId: "thread-1",
+    turnId: "turn-1",
+    explanation: null,
+    steps,
+  };
+}
+
 function statusCardText(card: FeishuCardDocument): string {
-  const element = card.elements[0] as {
+  const element = feishuCardElements(card)[0] as {
     text?: {
       content?: unknown;
     };
@@ -1297,6 +1905,14 @@ function statusBindingCount(outbox: FeishuOutbox): number {
       threadStatusMessages: ReadonlyMap<string, unknown>;
     }
   ).threadStatusMessages.size;
+}
+
+function streamCount(outbox: FeishuOutbox): number {
+  return (
+    outbox as unknown as {
+      streams: ReadonlyMap<string, unknown>;
+    }
+  ).streams.size;
 }
 
 async function settle(): Promise<void> {

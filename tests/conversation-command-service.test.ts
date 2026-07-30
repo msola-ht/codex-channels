@@ -112,6 +112,30 @@ describe("ConversationCommandService", () => {
     });
   });
 
+  it("uses canonical /plan to toggle mode or start a Plan Turn with an inline prompt", async () => {
+    const togglePlanMode = vi.fn(async () => ({ mode: "plan" as const, pending: true }));
+    const startPlan = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-plan",
+      steered: false,
+    }));
+    const commands = new ConversationCommandService({
+      togglePlanMode,
+      startPlan,
+    } as unknown as ConversationService);
+
+    await expect(commands.execute(target, "plan")).resolves.toEqual({
+      kind: "collaboration-mode",
+      state: { mode: "plan", pending: true },
+    });
+    await expect(commands.execute(target, "plan", " 设计发布流程 ")).resolves.toEqual({
+      kind: "outcome",
+      outcome: { type: "plan.started", turnId: "turn-plan" },
+    });
+    expect(togglePlanMode).toHaveBeenCalledWith(target);
+    expect(startPlan).toHaveBeenCalledWith(target, "设计发布流程");
+  });
+
   it("normalizes goal commands before calling the application service", async () => {
     const setGoal = vi.fn(async (_target: ConversationTarget, objective: string) => ({
       threadId: "thread-1",
@@ -266,6 +290,7 @@ describe("ConversationCommandService", () => {
         rulesPath: "/workspace/.codex/rules/default.rules",
       })),
       artifacts: vi.fn(() => undefined),
+      togglePlanMode: vi.fn(async () => ({ mode: "plan" as const, pending: true })),
       setGoal: vi.fn(async () => goal),
     };
     const commands = new ConversationCommandService(
@@ -297,7 +322,7 @@ describe("ConversationCommandService", () => {
       ["permissions", "", "listPermissionProfiles"],
       ["rules", "init", "initializeProjectRules"],
       ["diff", "", "artifacts"],
-      ["plan", "", "artifacts"],
+      ["plan", "", "togglePlanMode"],
       ["goal", "set ship", "setGoal"],
     ] as const;
 

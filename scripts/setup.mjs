@@ -4,6 +4,7 @@ import * as clackPrompts from "@clack/prompts";
 
 import { runFeishuSetup } from "./feishu-setup.mjs";
 import { runTelegramSetup } from "./telegram-setup.mjs";
+import { runWeixinSetup } from "./weixin-setup.mjs";
 
 export async function runSetup({
   input = process.stdin,
@@ -11,6 +12,7 @@ export async function runSetup({
   prompts = clackPrompts,
   feishuSetup = runFeishuSetup,
   telegramSetup = runTelegramSetup,
+  weixinSetup = runWeixinSetup,
 } = {}) {
   prompts.intro("Codex Connect Setup");
   const section = await prompts.select({
@@ -34,6 +36,7 @@ export async function runSetup({
         prompts,
         feishuSetup,
         telegramSetup,
+        weixinSetup,
       });
     default:
       throw new Error(`未知 Setup 类别：${String(section)}`);
@@ -46,6 +49,7 @@ async function runChannelSetup({
   prompts,
   feishuSetup,
   telegramSetup,
+  weixinSetup,
 }) {
   const channel = await prompts.select({
     message: "选择通讯渠道",
@@ -61,6 +65,11 @@ async function runChannelSetup({
         label: "飞书",
         hint: "企业自建应用与用户授权",
       },
+      {
+        value: "weixin",
+        label: "微信",
+        hint: "扫码连接（消息接收开发中）",
+      },
     ],
   });
   if (prompts.isCancel(channel)) {
@@ -72,6 +81,8 @@ async function runChannelSetup({
       return telegramSetup({ input, output });
     case "feishu":
       return feishuSetup({ input, output });
+    case "weixin":
+      return weixinSetup({ input, output });
     default:
       throw new Error(`未知通讯渠道：${String(channel)}`);
   }

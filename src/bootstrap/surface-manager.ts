@@ -94,7 +94,7 @@ export class SurfaceManager {
       } catch (error) {
         this.logger.warn(
           {
-            errorType: error instanceof Error ? error.name : typeof error,
+            err: error,
             surface: surface.surface,
             accountId: surface.accountId,
           },
@@ -171,7 +171,7 @@ export class SurfaceManager {
     } catch (error) {
       this.logger.warn(
         {
-          errorType: error instanceof Error ? error.name : typeof error,
+          err: error,
           surface: surface.surface,
           accountId: surface.accountId,
           eventType: event.type,

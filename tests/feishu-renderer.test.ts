@@ -7,6 +7,7 @@ import type {
 } from "../src/application/index.js";
 import {
   isCriticalOutputEvent,
+  UserFacingError,
   type OutputEvent,
 } from "../src/conversation-core/index.js";
 import {
@@ -14,6 +15,7 @@ import {
   renderFeishuOutput,
   renderFeishuStartupNotification,
 } from "../src/surfaces/feishu/index.js";
+import { renderFeishuUserFacingError } from "../src/surfaces/feishu/renderer.js";
 
 const target = {
   surface: "feishu",
@@ -22,6 +24,14 @@ const target = {
 } as const;
 
 describe("Feishu output renderer", () => {
+  it("distinguishes a batch image limit from a single-image limit", () => {
+    expect(renderFeishuUserFacingError(new UserFacingError(
+      "image.too-large",
+      "opaque",
+      { scope: "batch" },
+    ))).toBe("图片总大小超过 20 MiB 限制");
+  });
+
   it("renders a startup notification without the upstream build token", () => {
     const rendered = renderFeishuStartupNotification(
       [{ id: "main", name: "Main", cwd: "/workspace" }],
@@ -34,6 +44,8 @@ describe("Feishu output renderer", () => {
         modelPending: false,
         effortPending: false,
         fastModePending: false,
+        collaborationMode: "default",
+        collaborationModePending: false,
         gitBranch: "feature/weixin-surface",
         weeklyLimit: {
           usedPercent: 37,
@@ -53,23 +65,26 @@ describe("Feishu output renderer", () => {
     );
 
     expect(rendered).toBe([
-      "Codex Connect 已联通",
-      "App Server：已连接",
+      "**Codex Connect 已上线**",
       "",
-      "运行环境：",
-      "- macOS · arm64",
-      "- Codex Connect 0.145.0 · Node.js v24.0.0",
-      "- Unix WebSocket",
-      "- UA：codex-cli/0.145.0 (macOS 15.0) (arm64)",
+      "- **App Server：** 已连接",
       "",
-      "当前会话：",
-      "- Main · main",
-      "- /workspace",
-      "- Thread：thread-1",
-      "- Git 分支：feature/weixin-surface",
-      "- gpt-test · medium",
-      "- Fast 模式：开启",
-      "- 周限：已使用 37%",
+      "**运行环境**",
+      "- **系统：** macOS · arm64",
+      "- **版本：** Codex Connect 0.145.0 · Node.js v24.0.0",
+      "- **连接：** Unix WebSocket",
+      "- **App Server UA：** codex-cli/0.145.0 (macOS 15.0) (arm64)",
+      "",
+      "**当前会话**",
+      "- **Workspace：** Main (main)",
+      "- **工作目录：** /workspace",
+      "- **Thread：** thread-1",
+      "- **Git 分支：** feature/weixin-surface",
+      "- **模型：** gpt-test",
+      "- **思考强度：** medium",
+      "- **Fast 模式：** 开启",
+      "- **协作模式：** Default",
+      "- **周限：** 已使用 37%",
     ].join("\n"));
     expect(rendered).not.toContain("build-secret");
   });
@@ -97,6 +112,8 @@ describe("Feishu output renderer", () => {
           modelPending: false,
           effortPending: false,
           fastModePending: false,
+          collaborationMode: "default",
+          collaborationModePending: false,
         },
       },
       {
@@ -120,6 +137,7 @@ describe("Feishu output renderer", () => {
             serviceTiers: [{ id: "priority", name: "Fast" }],
             defaultServiceTier: "default",
             isDefault: true,
+            inputModalities: ["text", "image"],
           }],
           model: "gpt-test",
           effort: "medium",
@@ -218,6 +236,8 @@ describe("Feishu output renderer", () => {
         modelPending: false,
         effortPending: false,
         fastModePending: false,
+        collaborationMode: "default",
+        collaborationModePending: false,
         tokenUsage: {
           total: {
             totalTokens: 1_000,
@@ -299,7 +319,7 @@ describe("Feishu output renderer", () => {
     expect(rendered).toContain("累计 Tokens：6,439.12 M");
     expect(rendered).toContain("单日峰值：389.15 M");
     expect(rendered).toContain("2026-07-26：128.02 M");
-    expect(rendered).toContain("最长 Turn：1138 秒");
+    expect(rendered).toContain("最长 Turn：18分58秒");
   });
 
   it("renders detailed context after a completed Turn", () => {
@@ -350,9 +370,7 @@ describe("Feishu output renderer", () => {
       "- **上下文压缩：** 2 次",
       "- **周限：** 已使用 37%",
       "- **Git 分支：** feature/weixin-surface",
-      "",
-      "---",
-      "**耗时：** 1分5秒",
+      "- **耗时：** 1分5秒",
     ].join("\n"));
   });
 
@@ -496,6 +514,7 @@ describe("Feishu output renderer", () => {
         serviceTiers: [{ id: "priority", name: "Fast" }],
         defaultServiceTier: "default",
         isDefault: true,
+        inputModalities: ["text", "image"],
       }],
       model: "gpt-test",
       effort: "medium",
@@ -527,18 +546,12 @@ describe("Feishu output renderer", () => {
       },
     })).toContain("+新增");
     expect(renderFeishuCommandResult({
-      kind: "artifacts",
-      view: "plan",
-      artifacts: {
-        threadId: "thread-1",
-        turnId: "turn-1",
-        diff: "",
-        plan: {
-          explanation: "按步骤执行",
-          steps: [{ step: "完成测试", status: "completed" }],
-        },
+      kind: "collaboration-mode",
+      state: {
+        mode: "plan",
+        pending: true,
       },
-    })).toContain("● 完成测试");
+    })).toContain("协作模式：Plan（下一次 Turn 生效）");
     expect(renderFeishuCommandResult({
       kind: "goal",
       goal: {
@@ -724,7 +737,11 @@ describe("Feishu output renderer", () => {
       .every((text) => Boolean(text?.trim()))).toBe(true);
     expect(renderFeishuOutput(criticalEvents[2]!)).toBeNull();
     expect(progressEvents.some(isCriticalOutputEvent)).toBe(false);
-    expect(progressEvents.map(renderFeishuOutput)).toEqual([null, null, null]);
+    expect(progressEvents.map(renderFeishuOutput)).toEqual([
+      "**已开始处理。**",
+      null,
+      null,
+    ]);
   });
 
   it("shows sanitized upstream error and warning details", () => {

@@ -9,6 +9,13 @@
 
 ## 官方资料查阅
 
+- 微信或飞书 Surface 开发前先读取 `docs/upstream-sources.md`。如果其中记录的
+  `upstream/` 本地仓库存在且 HEAD 与项目锁定基线一致，必须优先查阅本地源码和测试，
+  不得先联网搜索同一版本内容。只有本地仓库缺失、基线不匹配、锁定源码未包含所需资料、
+  需要核对动态开放平台文档或用户明确要求更新时，才允许联网查询，并先说明原因。
+- `upstream/` 是被主项目忽略的只读参考仓库。不得修改、提交、推送其中内容，也不得静默
+  `fetch`、切换版本或以远端 `main` 替代项目锁定基线。升级上游基线必须先按
+  `docs/upstream-sources.md` 审查差异，再同步对应资料索引、实现与测试。
 - 新增、修改或删除任何 Codex App Server RPC 方法、`codex-protocol` 业务类型依赖，以及
   Transport、初始化、Thread、Turn、Item、Notification、Server Request、审批、模型设置、
   Fast、Goal、Review、账户用量、Skill、MCP、Plugin 或 Codex CLI 版本相关行为前，必须先查阅
@@ -87,7 +94,11 @@ Surface -> Application/Core <- Codex Client
 - 协议类型由受支持的 Codex CLI 生成；不得凭记忆手写协议字段。
 - 仓库必须记录并校验生成类型对应的精确 Codex CLI 版本。
 - 升级协议时先审查生成差异，再更新 `codex-protocol` 的受控导出、实现和测试。
-- 稳定业务代码不得依赖实验生成参数才会出现的字段。
+- 稳定业务代码不得依赖实验生成参数才会出现的字段。唯一例外是当前锁定
+  `codex-cli 0.145.0` 的官方 Plan 模式：只允许使用
+  `collaborationMode/list` 和 `turn/start.collaborationMode`，必须通过
+  `--experimental` 生成类型、从 `codex-protocol` 受控导出，并由真实 App Server
+  合同测试覆盖；不得借此接入或暴露其他实验方法、字段或通知。
 - 运行时只可协商当前精确版本、默认生成类型已覆盖且当前功能必需的实验能力；启用前必须审查
   同时开放的 Notification、Server Request 和字段，新增高权限输入必须显式展示或失败关闭，并
   增加真实 App Server 合同测试。
@@ -120,6 +131,8 @@ Surface -> Application/Core <- Codex Client
   日志、平台消息或 Application/Core，必须提供按当前 Surface Actor 撤销和进程停止取消路径。
 - 用户级 Gateway 配置唯一来源是 `~/.codex-connect/config.toml` 或
   `CODEX_CONNECT_CONFIG_FILE` 显式指定的 TOML 文件；不得重新读取、迁移或兼容旧 `.env` 配置。
+- Gateway 只可在当前配置版本完成结构与运行语义校验后，原子补入严格 Schema 明确定义的缺失安全
+  默认值；不得覆盖已有值，不得补渠道凭据、身份或允许名单，不得借此兼容未知字段或迁移不受支持版本。
 - 代理字段未明确配置时可以读取标准代理环境变量及受支持的当前系统代理；TOML 明确值优先，
   自动发现只形成进程环境，不得回写用户配置或服务定义。
 - `codexc doctor` 只诊断当前 TOML 配置，不改写配置，也不得输出敏感内容。
@@ -130,6 +143,12 @@ Surface -> Application/Core <- Codex Client
 - Surface 通过编译期内置插件注册表显式接入，并通过统一的输入、输出、授权和审批接口调用
   Application/Core。每个插件 ID 必须与其返回的 Surface ID 一致，`surface + accountId` 不得重复；
   不扫描目录、不动态加载 npm 包，也不允许插件绕过组合根直接注册。
+- Surface 对外提供的 Codex 能力必须已经列入 `docs/index.md` 当前支持矩阵，并由当前锁定版本的
+  官方协议、受控类型、本地实现和验证共同支撑。平台 SDK 自身具备某项能力，不代表 Gateway 可以
+  把它解释为新的 Thread、Turn、Item、工具、审批或历史能力。
+- Setup、Doctor、菜单、输入状态、连接健康和平台媒体传输属于渠道运维或呈现能力，必须留在
+  Surface 边界；它们不得复制 Codex 状态、伪造 App Server 事件，或为协议未支持的行为建立
+  平行语义。
 - 所有外部输入先完成 Surface Actor 与 Workspace 授权，再调用会话能力。
 - App Server Reader 只负责读取、解析、关联 Response 和投递事件，不等待平台网络请求。
 - 平台输出使用有界队列；同一 Conversation 保持顺序，不同 Conversation 可以并行。
@@ -174,6 +193,8 @@ Surface -> Application/Core <- Codex Client
 - 不把网络、协议、状态、渲染和存储职责集中到同一个大型模块。
 - 修改公开命令、配置键、协议基线、持久化格式或默认行为时，同步更新 README、示例和测试。
 - 删除或替换实现时同步删除孤儿入口、依赖、配置、脚本和测试。
+- 已使用计划工具的多步骤任务，每完成一步必须立即更新官方计划状态，并在开始下一步时同步其
+  进行中状态；不得等到任务结束后批量完成多个步骤，也不得提前标记尚未完成的步骤。
 
 ## 命令与提权
 

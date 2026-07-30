@@ -1,20 +1,9 @@
 import {
-  createCipheriv,
-  createDecipheriv,
-  createHash,
-  randomBytes,
-} from "node:crypto";
-import { execFile } from "node:child_process";
-import {
-  chmod,
-  mkdir,
-  readFile,
-  rename,
-  unlink,
-  writeFile,
-} from "node:fs/promises";
-import { join } from "node:path";
-import { promisify } from "node:util";
+  EncryptedFileCredentialRecordStore,
+  MacKeychainCredentialRecordStore,
+  type KeychainCommandRunner,
+  type SecureCredentialRecordStore,
+} from "../secure-credential-store.js";
 
 export interface StoredFeishuUserToken {
   appId: string;
@@ -34,11 +23,6 @@ export interface FeishuUserTokenStore {
 }
 
 const keychainService = "codexc-feishu-uat";
-const executeFile = promisify(execFile);
-const keychainCommandTimeoutMs = 5_000;
-const keyBytes = 32;
-const ivBytes = 12;
-const tagBytes = 16;
 const maximumStoredScopes = 101;
 const maximumStoredScopeLength = 128;
 const maximumStoredScopeBytes = 8_192;
@@ -60,107 +44,55 @@ export function createFeishuUserTokenStore(
 
 export class MacKeychainFeishuUserTokenStore
 implements FeishuUserTokenStore {
+  private readonly records: SecureCredentialRecordStore;
+
   constructor(
-    private readonly run: (
-      file: string,
-      arguments_: readonly string[],
-    ) => Promise<{ stdout: string | Buffer }> = runKeychainCommand,
-  ) {}
+    run?: KeychainCommandRunner,
+  ) {
+    this.records = new MacKeychainCredentialRecordStore(
+      keychainService,
+      run,
+    );
+  }
 
   async get(
     appId: string,
     userOpenId: string,
   ): Promise<StoredFeishuUserToken | null> {
-    try {
-      const { stdout } = await this.run("security", [
-        "find-generic-password",
-        "-s",
-        keychainService,
-        "-a",
-        accountKey(appId, userOpenId),
-        "-w",
-      ]);
-      return parseStoredToken(String(stdout).trim(), appId, userOpenId);
-    } catch (error) {
-      const code = (error as { code?: unknown }).code;
-      if (code === 44 || code === "44") {
-        return null;
-      }
-      throw error;
-    }
+    const value = await this.records.get(accountKey(appId, userOpenId));
+    return value === null
+      ? null
+      : parseStoredToken(value, appId, userOpenId);
   }
 
   async set(token: StoredFeishuUserToken): Promise<void> {
     const account = accountKey(token.appId, token.userOpenId);
-    await this.run("security", [
-      "add-generic-password",
-      "-U",
-      "-s",
-      keychainService,
-      "-a",
-      account,
-      "-w",
-      JSON.stringify(token),
-    ]);
+    await this.records.set(account, JSON.stringify(token));
   }
 
   async remove(appId: string, userOpenId: string): Promise<void> {
-    try {
-      await this.run("security", [
-        "delete-generic-password",
-        "-s",
-        keychainService,
-        "-a",
-        accountKey(appId, userOpenId),
-      ]);
-    } catch (error) {
-      const code = (error as { code?: unknown }).code;
-      if (code !== 44 && code !== "44") {
-        throw error;
-      }
-    }
+    await this.records.remove(accountKey(appId, userOpenId));
   }
-}
-
-async function runKeychainCommand(
-  file: string,
-  arguments_: readonly string[],
-): Promise<{ stdout: string | Buffer }> {
-  const { stdout } = await executeFile(file, [...arguments_], {
-    timeout: keychainCommandTimeoutMs,
-    maxBuffer: 1_048_576,
-  });
-  return { stdout };
 }
 
 export class EncryptedFileFeishuUserTokenStore
 implements FeishuUserTokenStore {
-  private readonly masterKeyPath: string;
+  private readonly records: SecureCredentialRecordStore;
 
-  constructor(private readonly directory: string) {
-    this.masterKeyPath = join(directory, "master.key");
+  constructor(directory: string) {
+    this.records = new EncryptedFileCredentialRecordStore(directory);
   }
 
   async get(
     appId: string,
     userOpenId: string,
   ): Promise<StoredFeishuUserToken | null> {
-    let payload: Buffer;
     try {
-      payload = await readFile(this.tokenPath(appId, userOpenId));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      const value = await this.records.get(accountKey(appId, userOpenId));
+      if (value === null) {
         return null;
       }
-      throw new Error("读取飞书加密凭据失败", { cause: error });
-    }
-    try {
-      const key = await this.readMasterKey();
-      const token = parseStoredToken(
-        decrypt(payload, key),
-        appId,
-        userOpenId,
-      );
+      const token = parseStoredToken(value, appId, userOpenId);
       if (!token) {
         throw new Error("飞书加密凭据载荷无效");
       }
@@ -171,81 +103,14 @@ implements FeishuUserTokenStore {
   }
 
   async set(token: StoredFeishuUserToken): Promise<void> {
-    await this.ensureDirectory();
-    const key = await this.readOrCreateMasterKey();
-    const path = this.tokenPath(token.appId, token.userOpenId);
-    const temporaryPath = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
-    try {
-      await writeFile(
-        temporaryPath,
-        encrypt(JSON.stringify(token), key),
-        { flag: "wx", mode: 0o600 },
-      );
-      await chmod(temporaryPath, 0o600);
-      await rename(temporaryPath, path);
-    } catch (error) {
-      try {
-        await unlink(temporaryPath);
-      } catch {
-        // The temporary file may not exist or may already have been renamed.
-      }
-      throw error;
-    }
+    await this.records.set(
+      accountKey(token.appId, token.userOpenId),
+      JSON.stringify(token),
+    );
   }
 
   async remove(appId: string, userOpenId: string): Promise<void> {
-    try {
-      await unlink(this.tokenPath(appId, userOpenId));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        throw error;
-      }
-    }
-  }
-
-  private async ensureDirectory(): Promise<void> {
-    await mkdir(this.directory, { recursive: true, mode: 0o700 });
-    await chmod(this.directory, 0o700);
-  }
-
-  private async readMasterKey(): Promise<Buffer> {
-    const key = await readFile(this.masterKeyPath);
-    if (key.length !== keyBytes) {
-      throw new Error("飞书凭据主密钥无效");
-    }
-    return key;
-  }
-
-  private async readOrCreateMasterKey(): Promise<Buffer> {
-    try {
-      return await this.readMasterKey();
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        throw error;
-      }
-    }
-    await this.ensureDirectory();
-    const key = randomBytes(keyBytes);
-    try {
-      await writeFile(this.masterKeyPath, key, {
-        flag: "wx",
-        mode: 0o600,
-      });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-        return this.readMasterKey();
-      }
-      throw error;
-    }
-    await chmod(this.masterKeyPath, 0o600);
-    return key;
-  }
-
-  private tokenPath(appId: string, userOpenId: string): string {
-    const digest = createHash("sha256")
-      .update(accountKey(appId, userOpenId))
-      .digest("hex");
-    return join(this.directory, `${digest}.enc`);
+    await this.records.remove(accountKey(appId, userOpenId));
   }
 }
 
@@ -267,32 +132,6 @@ export function feishuTokenStatus(
 
 function accountKey(appId: string, userOpenId: string): string {
   return `${appId}:${userOpenId}`;
-}
-
-function encrypt(value: string, key: Buffer): Buffer {
-  const iv = randomBytes(ivBytes);
-  const cipher = createCipheriv("aes-256-gcm", key, iv);
-  const encrypted = Buffer.concat([
-    cipher.update(value, "utf8"),
-    cipher.final(),
-  ]);
-  return Buffer.concat([iv, cipher.getAuthTag(), encrypted]);
-}
-
-function decrypt(value: Buffer, key: Buffer): string {
-  if (value.length <= ivBytes + tagBytes) {
-    throw new Error("飞书凭据密文无效");
-  }
-  const decipher = createDecipheriv(
-    "aes-256-gcm",
-    key,
-    value.subarray(0, ivBytes),
-  );
-  decipher.setAuthTag(value.subarray(ivBytes, ivBytes + tagBytes));
-  return Buffer.concat([
-    decipher.update(value.subarray(ivBytes + tagBytes)),
-    decipher.final(),
-  ]).toString("utf8");
 }
 
 function parseStoredToken(

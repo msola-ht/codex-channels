@@ -212,14 +212,13 @@ describe("systemd installer", () => {
     expect(reloadCalls).toContain("--user kill --kill-whom=main --signal=HUP codex-connect-gateway.service");
     expect(reloadCalls).not.toContain("codex-connect-app-server.service");
     expect(logs).toContain("gateway journal line");
-    expect(journalctlCalls).toContain("--user");
-    expect(journalctlCalls).toContain("--unit=codex-connect-gateway.service");
-    expect(journalctlCalls).not.toContain("--unit=codex-connect-app-server.service");
-    expect(journalctlCalls).toContain("--lines=25");
-    expect(journalctlCalls).toContain("--no-pager");
-    expect(journalctlCalls).toContain("--follow");
-    expect(allJournalctlCalls).toContain("--unit=codex-connect-gateway.service");
-    expect(allJournalctlCalls).toContain("--unit=codex-connect-app-server.service");
+    expect(journalctlCalls.trim()).toBe(
+      "--user-unit=codex-connect-gateway.service --lines=25 --no-pager --follow",
+    );
+    expect(allJournalctlCalls.trim()).toBe(
+      "--user-unit=codex-connect-gateway.service "
+      + "--user-unit=codex-connect-app-server.service --lines=10 --no-pager",
+    );
     expect(gatewayStatusCalls).toContain("codex-connect-gateway.service");
     expect(gatewayStatusCalls).not.toContain("codex-connect-app-server.service");
     expect(uninstalled).toContain("用户配置与运行数据保留");

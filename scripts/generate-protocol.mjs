@@ -10,7 +10,9 @@ import {
 const root = resolve(import.meta.dirname, "..");
 const output = resolve(root, "src/codex-protocol/generated");
 const codex = process.env.CODEX_BINARY || "codex";
-const generated = generateProtocolTree(codex, root, dirname(output));
+const generated = generateProtocolTree(codex, root, dirname(output), {
+  experimental: true,
+});
 try {
   const version = execFileSync(codex, ["--version"], {
     cwd: root,
@@ -19,7 +21,7 @@ try {
   replaceProtocolTree(generated, output);
   writeFileSync(
     resolve(root, "src/codex-protocol/version.json"),
-    `${JSON.stringify({ codexCli: version, experimental: false }, null, 2)}\n`,
+    `${JSON.stringify({ codexCli: version, experimental: true }, null, 2)}\n`,
   );
   await import("./sync-gateway-version.mjs");
 } finally {

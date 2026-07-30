@@ -9,6 +9,7 @@ describe("Codex Connect setup", () => {
     const output = {};
     const telegramSetup = vi.fn(async () => "telegram-configured");
     const feishuSetup = vi.fn();
+    const weixinSetup = vi.fn();
     const intro = vi.fn();
     const select = vi.fn()
       .mockResolvedValueOnce("channels")
@@ -25,6 +26,7 @@ describe("Codex Connect setup", () => {
       },
       telegramSetup,
       feishuSetup,
+      weixinSetup,
     });
 
     expect(result).toBe("telegram-configured");
@@ -49,6 +51,10 @@ describe("Codex Connect setup", () => {
         value: "feishu",
         label: "飞书",
         hint: "企业自建应用与用户授权",
+      }, {
+        value: "weixin",
+        label: "微信",
+        hint: "扫码连接（消息接收开发中）",
       }],
     });
     expect(telegramSetup).toHaveBeenCalledWith({ input, output });
@@ -60,6 +66,7 @@ describe("Codex Connect setup", () => {
     const output = {};
     const telegramSetup = vi.fn();
     const feishuSetup = vi.fn(async () => "feishu-configured");
+    const weixinSetup = vi.fn();
 
     const result = await runSetup({
       input,
@@ -74,6 +81,7 @@ describe("Codex Connect setup", () => {
       },
       telegramSetup,
       feishuSetup,
+      weixinSetup,
     });
 
     expect(result).toBe("feishu-configured");
@@ -81,9 +89,32 @@ describe("Codex Connect setup", () => {
     expect(telegramSetup).not.toHaveBeenCalled();
   });
 
+  it("selects Weixin under the communication channels category", async () => {
+    const weixinSetup = vi.fn(async () => "weixin-configured");
+    const result = await runSetup({
+      input: {},
+      output: {},
+      prompts: {
+        intro: vi.fn(),
+        select: vi.fn()
+          .mockResolvedValueOnce("channels")
+          .mockResolvedValueOnce("weixin"),
+        isCancel: () => false,
+        cancel: vi.fn(),
+      },
+      telegramSetup: vi.fn(),
+      feishuSetup: vi.fn(),
+      weixinSetup,
+    });
+
+    expect(result).toBe("weixin-configured");
+    expect(weixinSetup).toHaveBeenCalledOnce();
+  });
+
   it("cancels without starting a module setup", async () => {
     const telegramSetup = vi.fn();
     const feishuSetup = vi.fn();
+    const weixinSetup = vi.fn();
     const cancel = vi.fn();
 
     const result = await runSetup({
@@ -95,6 +126,7 @@ describe("Codex Connect setup", () => {
       },
       telegramSetup,
       feishuSetup,
+      weixinSetup,
     });
 
     expect(result).toBeUndefined();
@@ -106,6 +138,7 @@ describe("Codex Connect setup", () => {
   it("cancels from the channel menu without starting Telegram setup", async () => {
     const telegramSetup = vi.fn();
     const feishuSetup = vi.fn();
+    const weixinSetup = vi.fn();
     const cancel = vi.fn();
     const select = vi.fn()
       .mockResolvedValueOnce("channels")
@@ -120,6 +153,7 @@ describe("Codex Connect setup", () => {
       },
       telegramSetup,
       feishuSetup,
+      weixinSetup,
     });
 
     expect(result).toBeUndefined();

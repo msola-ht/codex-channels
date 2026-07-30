@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -103,12 +111,103 @@ describe("Gateway config.toml", () => {
     expect(runtime.config.telegramBotToken).toBe("secret");
     expect(runtime.config.telegramAllowedUserIds).toEqual(new Set([123, 456]));
     expect(runtime.config.telegramMessageFormat).toBe("rich");
-    expect(runtime.config.operationUpdateDisplay).toBe("full");
+    expect(runtime.config.operationUpdateDisplay).toBe("compact");
+    expect(runtime.config.planUpdatesEnabled).toBe(false);
+    expect(runtime.config.credentialsDirectory).toBe(join(fixture.root, "credentials"));
     expect(runtime.config.codexSocketPath).toBe(join(fixture.root, "runtime/app-server.sock"));
     expect(runtime.config.stateDatabasePath).toBe(join(fixture.root, "data/gateway.sqlite3"));
     expect(runtime.config.workspaces).toEqual([
       { id: "main", name: "Main", cwd: realpathSync(fixture.workspace) },
     ]);
+  });
+
+  it("materializes missing safe defaults after a successful load", () => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    delete document.approval;
+    delete document.display;
+    delete document.storage;
+    delete document.logging;
+    const telegram = document.telegram;
+    const codex = document.codex;
+    if (
+      telegram === null
+      || typeof telegram !== "object"
+      || Array.isArray(telegram)
+      || telegram instanceof Date
+      || codex === null
+      || typeof codex !== "object"
+      || Array.isArray(codex)
+      || codex instanceof Date
+    ) {
+      throw new Error("测试配置缺少 Telegram 或 Codex 表");
+    }
+    delete telegram.message_format;
+    delete codex.binary;
+    delete codex.socket_path;
+    delete codex.sandbox;
+    writeGatewayConfig(fixture.configPath, document);
+    writeFileSync(
+      fixture.configPath,
+      readFixture(fixture.configPath).replace(
+        "version = 1",
+        "# 自动补齐前的注释\nversion = 1",
+      ),
+    );
+
+    loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    });
+
+    const persisted = readGatewayConfig(fixture.configPath);
+    expect(persisted.telegram).toMatchObject({ message_format: "html" });
+    expect(persisted.codex).toMatchObject({
+      binary: "codex",
+      socket_path: "runtime/codex-app-server.sock",
+      sandbox: "workspace-write",
+    });
+    expect(persisted.approval).toEqual({ timeout_seconds: 300 });
+    expect(persisted.display).toEqual({
+      operation_updates: "compact",
+      plan_updates: false,
+    });
+    expect(persisted.storage).toEqual({
+      database_path: "data/gateway.sqlite3",
+    });
+    expect(persisted.logging).toEqual({ level: "info" });
+    expect(persisted.feishu).toBeUndefined();
+    expect(persisted.weixin).toBeUndefined();
+    expect(readFixture(fixture.configPath)).toContain(
+      "# 自动补齐前的注释",
+    );
+    expect(statSync(fixture.configPath).mode & 0o777).toBe(0o600);
+  });
+
+  it("does not materialize defaults when semantic validation fails", () => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    delete document.display;
+    const workspaces = document.workspaces;
+    if (!Array.isArray(workspaces) || workspaces.length === 0) {
+      throw new Error("测试配置缺少 Workspace");
+    }
+    const workspace = workspaces[0];
+    if (
+      workspace === null
+      || typeof workspace !== "object"
+      || Array.isArray(workspace)
+      || workspace instanceof Date
+    ) {
+      throw new Error("测试 Workspace 格式无效");
+    }
+    workspace.cwd = join(fixture.root, "missing-workspace");
+    writeGatewayConfig(fixture.configPath, document);
+    const before = readFixture(fixture.configPath);
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow("cwd 必须是已存在的目录");
+    expect(readFixture(fixture.configPath)).toBe(before);
   });
 
   it("uses CODEX_CONNECT_HOME when no explicit config file is set", () => {
@@ -156,6 +255,19 @@ describe("Gateway config.toml", () => {
       }).config.operationUpdateDisplay).toBe(operationUpdates);
     },
   );
+
+  it("accepts explicit automatic plan display", () => {
+    const fixture = createFixture({
+      display: {
+        operation_updates: "compact",
+        plan_updates: true,
+      },
+    });
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.planUpdatesEnabled).toBe(true);
+  });
 
   it("rejects the removed boolean operation update setting", () => {
     const fixture = createFixture({
@@ -205,6 +317,72 @@ describe("Gateway config.toml", () => {
     expect(loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: disabled.configPath,
     }).config.feishu).toBeUndefined();
+  });
+
+  it("keeps disabled Weixin setup metadata out of runtime config", () => {
+    const fixture = createFixture({
+      weixin: {
+        enabled: false,
+        account_id: "bot-fixture@im.bot",
+        allowed_user_ids: ["actor-fixture@im.wechat"],
+      },
+    });
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.weixin).toBeUndefined();
+  });
+
+  it("loads an explicitly enabled Weixin account without a plaintext token", () => {
+    const enabled = createFixture({
+      weixin: {
+        enabled: true,
+        account_id: "bot-fixture@im.bot",
+        allowed_user_ids: ["actor-fixture@im.wechat"],
+      },
+    });
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: enabled.configPath,
+    }).config.weixin).toEqual({
+      accountId: "bot-fixture@im.bot",
+      allowedUserIds: new Set(["actor-fixture@im.wechat"]),
+    });
+  });
+
+  it.each([
+    [
+      "invalid account ID",
+      {
+        enabled: true,
+        account_id: "invalid",
+        allowed_user_ids: ["actor-fixture@im.wechat"],
+      },
+    ],
+    [
+      "invalid user ID",
+      {
+        enabled: true,
+        account_id: "bot-fixture@im.bot",
+        allowed_user_ids: ["invalid"],
+      },
+    ],
+    [
+      "duplicate user IDs",
+      {
+        enabled: true,
+        account_id: "bot-fixture@im.bot",
+        allowed_user_ids: [
+          "actor-fixture@im.wechat",
+          "actor-fixture@im.wechat",
+        ],
+      },
+    ],
+  ])("rejects Weixin %s", (_name, weixin) => {
+    const fixture = createFixture({ weixin });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow(ConfigurationError);
   });
 
   it.each([

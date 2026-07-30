@@ -3,6 +3,8 @@ export interface ReasoningEffortOption {
   description: string;
 }
 
+export type ModelInputModality = "text" | "image" | "audio";
+
 export interface ModelOption {
   id: string;
   model: string;
@@ -15,6 +17,7 @@ export interface ModelOption {
   }>;
   defaultServiceTier: string | null;
   isDefault: boolean;
+  inputModalities: ModelInputModality[];
 }
 
 export interface ModelSelectionPort {

@@ -8,6 +8,7 @@ import {
 import type { ConversationTarget } from "../src/conversation-core/index.js";
 import {
   FeishuCommandCenter,
+  feishuCardElements,
   feishuCommandCenterActions,
   feishuCommandMenuEventKey,
   renderFeishuCommandCenterCard,
@@ -28,7 +29,7 @@ describe("Feishu command center", () => {
 
   it("renders common actions first and groups the remaining actions", () => {
     const card = renderFeishuCommandCenterCard("opaque-token");
-    const values = card.elements.flatMap((element) =>
+    const values = feishuCardElements(card).flatMap((element) =>
       Array.isArray(element.actions)
         ? element.actions.flatMap((action) => {
             if (
@@ -59,6 +60,7 @@ describe("Feishu command center", () => {
       "effort",
       "workspace",
       "goal",
+      "plan",
       "help",
     ]);
     expect(JSON.stringify(card)).toContain("常用");

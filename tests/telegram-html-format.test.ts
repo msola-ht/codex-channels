@@ -14,6 +14,7 @@ describe("Telegram HTML formatter", () => {
       "Workspace：main <unsafe>",
       "切换：/workspace <序号>",
       "- 可用项目",
+      "- Git 分支：feature/test",
       "  /Users/example/project",
     ].join("\n"))).toEqual([
       [
@@ -21,6 +22,7 @@ describe("Telegram HTML formatter", () => {
         "<b>Workspace：</b>main &lt;unsafe&gt;",
         "<b>切换：</b><code>/workspace &lt;序号&gt;</code>",
         "• 可用项目",
+        "• <b>Git 分支：</b>feature/test",
         "<code>/Users/example/project</code>",
       ].join("\n"),
     ]);
