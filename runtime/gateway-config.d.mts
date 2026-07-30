@@ -51,4 +51,8 @@ export function parseGatewayConfig(content: string, source?: string): TomlTable;
 export function tomlErrorSummary(error: unknown): string;
 export function validateGatewayConfigDocument(document: unknown): GatewayConfigDocument;
 export function readGatewayConfig(configPath: string): TomlTable;
+export function materializeGatewayConfigDefaults(
+  configPath: string,
+  document: TomlTable,
+): boolean;
 export function writeGatewayConfig(configPath: string, document: TomlTable): void;

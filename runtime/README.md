@@ -4,8 +4,9 @@
 
 - `config-event-queue.mjs`：以有界、版本化、原子更新的队列保存待投递配置事件。
 - `config-event-queue.d.mts`：声明配置事件队列共享模块的 TypeScript 接口。
-- `gateway-config.mjs`：安全解析、严格校验 Telegram、飞书私聊与微信私聊配置，并在保留已有
-  注释的前提下以 `0600` 权限原子写入 CLI、脚本和 Gateway 共享的 TOML 配置。
+- `gateway-config.mjs`：安全解析、严格校验 Telegram、飞书私聊与微信私聊配置，在保留已有
+  注释的前提下合并缺失的 Schema 安全默认值，并以 `0600` 权限原子写入 CLI、脚本和 Gateway
+  共享的 TOML 配置。
 - `gateway-config.d.mts`：声明共享 TOML 配置模块的 TypeScript 接口。
 - `network-proxy.mjs`：按 TOML、标准环境变量和受支持系统代理的顺序解析统一代理环境，只返回
   实际解析出的大小写代理变量，并集中选择、校验 HTTP(S) 客户端代理。

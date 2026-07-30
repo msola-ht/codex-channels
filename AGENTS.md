@@ -131,6 +131,8 @@ Surface -> Application/Core <- Codex Client
   日志、平台消息或 Application/Core，必须提供按当前 Surface Actor 撤销和进程停止取消路径。
 - 用户级 Gateway 配置唯一来源是 `~/.codex-connect/config.toml` 或
   `CODEX_CONNECT_CONFIG_FILE` 显式指定的 TOML 文件；不得重新读取、迁移或兼容旧 `.env` 配置。
+- Gateway 只可在当前配置版本完成结构与运行语义校验后，原子补入严格 Schema 明确定义的缺失安全
+  默认值；不得覆盖已有值，不得补渠道凭据、身份或允许名单，不得借此兼容未知字段或迁移不受支持版本。
 - 代理字段未明确配置时可以读取标准代理环境变量及受支持的当前系统代理；TOML 明确值优先，
   自动发现只形成进程环境，不得回写用户配置或服务定义。
 - `codexc doctor` 只诊断当前 TOML 配置，不改写配置，也不得输出敏感内容。

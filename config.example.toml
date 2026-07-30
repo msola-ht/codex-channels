@@ -38,6 +38,8 @@ timeout_seconds = 300
 [display]
 # full：完整详情；compact：单行摘要；hidden：隐藏操作过程。
 operation_updates = "full"
+# 是否在渠道显示 App Server 的自动任务计划更新。
+plan_updates = false
 
 [storage]
 database_path = "data/gateway.sqlite3"

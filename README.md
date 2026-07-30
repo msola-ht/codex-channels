@@ -182,6 +182,10 @@ plan_updates = false
 保留首次完整计划消息。该能力只消费官方 `turn/plan/updated`，不从模型正文
 推断步骤或拆分普通回复，也不改变 `/plan` 协作模式。
 
+Gateway 成功完成配置结构和运行语义校验后，会把当前 Schema 中缺失的安全默认字段原子补入
+`config.toml`。该过程保留已有值与注释，不补写渠道凭据、账号、允许名单或可选渠道表，也不迁移
+未知字段或不受支持的配置版本；补写失败时启动失败并保留原文件。
+
 飞书模块提供“手动输入应用凭据”和“扫码授权”两种方式。扫码后在飞书授权页选择新建应用或
 已有企业自建应用；流程只申请应用只读检测与配置写入、机器人发送消息、原生 CardKit 流式卡片、
 `im.message.receive_v1`、`application.bot.menu_v6` 事件和
@@ -309,7 +313,7 @@ codexc service -h                # 查看服务命令及目标默认值
 `codexc -h` 显示全部公开命令；每个命令和子命令都支持 `-h` 或 `--help`，例如
 `codexc ws add -h`、`codexc rules init -h` 和 `codexc service restart -h`。
 
-用户配置、Workspace Registry、SQLite、配置事件队列、Socket、日志和上传图片均位于 `~/.codex-connect`，不会写入全局 npm 包目录。统一配置文件是 `config.toml`；`CODEX_CONNECT_CONFIG_FILE` 可显式选择其他配置文件，其相对路径和运行数据以该文件所在目录为基准，但不会修改已存在父目录的权限。`CODEX_CONNECT_HOME` 可用于隔离测试或多 Profile。
+用户配置、Workspace Registry、SQLite、配置事件队列、Socket、日志和上传图片均位于 `~/.codex-connect`，不会写入全局 npm 包目录。统一配置文件是 `config.toml`；`CODEX_CONNECT_CONFIG_FILE` 可显式选择其他配置文件，其相对路径和运行数据以该文件所在目录为基准，但不会修改已存在父目录的权限。`CODEX_CONNECT_HOME` 可用于隔离测试或多 Profile。升级后首次启动 Gateway 即可自动补齐当前 Schema 新增的安全默认字段，无需额外执行配置命令。
 
 macOS 使用 `com.hegenai.codex-app-server` 与 `com.hegenai.codex-gateway` 两个 launchd Job。Linux 使用
 `systemctl --user` 管理两个独立服务。`start`、`stop` 和 `status` 默认目标为 `all`；

@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -111,6 +119,95 @@ describe("Gateway config.toml", () => {
     expect(runtime.config.workspaces).toEqual([
       { id: "main", name: "Main", cwd: realpathSync(fixture.workspace) },
     ]);
+  });
+
+  it("materializes missing safe defaults after a successful load", () => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    delete document.approval;
+    delete document.display;
+    delete document.storage;
+    delete document.logging;
+    const telegram = document.telegram;
+    const codex = document.codex;
+    if (
+      telegram === null
+      || typeof telegram !== "object"
+      || Array.isArray(telegram)
+      || telegram instanceof Date
+      || codex === null
+      || typeof codex !== "object"
+      || Array.isArray(codex)
+      || codex instanceof Date
+    ) {
+      throw new Error("测试配置缺少 Telegram 或 Codex 表");
+    }
+    delete telegram.message_format;
+    delete codex.binary;
+    delete codex.socket_path;
+    delete codex.sandbox;
+    writeGatewayConfig(fixture.configPath, document);
+    writeFileSync(
+      fixture.configPath,
+      readFixture(fixture.configPath).replace(
+        "version = 1",
+        "# 自动补齐前的注释\nversion = 1",
+      ),
+    );
+
+    loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    });
+
+    const persisted = readGatewayConfig(fixture.configPath);
+    expect(persisted.telegram).toMatchObject({ message_format: "html" });
+    expect(persisted.codex).toMatchObject({
+      binary: "codex",
+      socket_path: "runtime/codex-app-server.sock",
+      sandbox: "workspace-write",
+    });
+    expect(persisted.approval).toEqual({ timeout_seconds: 300 });
+    expect(persisted.display).toEqual({
+      operation_updates: "compact",
+      plan_updates: false,
+    });
+    expect(persisted.storage).toEqual({
+      database_path: "data/gateway.sqlite3",
+    });
+    expect(persisted.logging).toEqual({ level: "info" });
+    expect(persisted.feishu).toBeUndefined();
+    expect(persisted.weixin).toBeUndefined();
+    expect(readFixture(fixture.configPath)).toContain(
+      "# 自动补齐前的注释",
+    );
+    expect(statSync(fixture.configPath).mode & 0o777).toBe(0o600);
+  });
+
+  it("does not materialize defaults when semantic validation fails", () => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    delete document.display;
+    const workspaces = document.workspaces;
+    if (!Array.isArray(workspaces) || workspaces.length === 0) {
+      throw new Error("测试配置缺少 Workspace");
+    }
+    const workspace = workspaces[0];
+    if (
+      workspace === null
+      || typeof workspace !== "object"
+      || Array.isArray(workspace)
+      || workspace instanceof Date
+    ) {
+      throw new Error("测试 Workspace 格式无效");
+    }
+    workspace.cwd = join(fixture.root, "missing-workspace");
+    writeGatewayConfig(fixture.configPath, document);
+    const before = readFixture(fixture.configPath);
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow("cwd 必须是已存在的目录");
+    expect(readFixture(fixture.configPath)).toBe(before);
   });
 
   it("uses CODEX_CONNECT_HOME when no explicit config file is set", () => {

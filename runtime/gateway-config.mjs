@@ -129,6 +129,22 @@ export function readGatewayConfig(configPath) {
   return parseGatewayConfig(readFileSync(configPath, "utf8"), configPath);
 }
 
+export function materializeGatewayConfigDefaults(configPath, document) {
+  const defaults = validateGatewayConfigDocument(document);
+  if (!mergeMissingDefaults(document, defaults)) {
+    return false;
+  }
+  const source = sourceByDocument.get(document);
+  if (
+    source === undefined
+    || readFileSync(configPath, "utf8") !== source.content
+  ) {
+    throw new Error("config.toml 在自动补齐期间已发生变化");
+  }
+  writeGatewayConfig(configPath, document);
+  return true;
+}
+
 export function writeGatewayConfig(configPath, document) {
   const temporaryPath = `${configPath}.${process.pid}.tmp`;
   try {
@@ -146,8 +162,8 @@ export function writeGatewayConfig(configPath, document) {
       mode: 0o600,
       flag: "wx",
     });
+    chmodSync(temporaryPath, 0o600);
     renameSync(temporaryPath, configPath);
-    chmodSync(configPath, 0o600);
     sourceByDocument.set(document, {
       content,
       workspaceIds: workspaceIds(document),
@@ -156,6 +172,28 @@ export function writeGatewayConfig(configPath, document) {
     rmSync(temporaryPath, { force: true });
     throw error;
   }
+}
+
+function mergeMissingDefaults(target, defaults) {
+  let changed = false;
+  for (const [key, value] of Object.entries(defaults)) {
+    if (!Object.hasOwn(target, key)) {
+      target[key] = value;
+      changed = true;
+      continue;
+    }
+    if (isTomlTable(target[key]) && isTomlTable(value)) {
+      changed = mergeMissingDefaults(target[key], value) || changed;
+    }
+  }
+  return changed;
+}
+
+function isTomlTable(value) {
+  return value !== null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && !(value instanceof Date);
 }
 
 function preserveTomlComments(source, generated, sourceWorkspaceIds, generatedWorkspaceIds) {
