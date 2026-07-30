@@ -36,7 +36,7 @@ afterEach(() => {
 });
 
 describe("Feishu outbox", () => {
-  it("updates the initial plan card and sends one card for each completed step", async () => {
+  it("keeps one plan card and updates it in place", async () => {
     const sent: FeishuCardDocument[] = [];
     const updated: FeishuCardDocument[] = [];
     const outbox = new FeishuOutbox(
@@ -71,9 +71,8 @@ describe("Feishu outbox", () => {
     ]));
     await outbox.close();
 
-    expect(sent).toHaveLength(2);
+    expect(sent).toHaveLength(1);
     expect(sent[0]?.header.title.content).toBe("任务计划 · 0/2");
-    expect(sent[1]?.header.title.content).toBe("计划进度 · 1/2");
     expect(updated).toHaveLength(1);
     expect(updated[0]?.header.title.content).toBe("任务计划 · 1/2");
     expect(statusCardText(updated[0]!)).toBe(
@@ -1246,6 +1245,33 @@ describe("Feishu outbox", () => {
       + "---\n**耗时：** 250毫秒",
       "**本次运行 · 已完成**",
     ]);
+  });
+
+  it("sends a completed web search immediately before the final answer", async () => {
+    const markdownCards: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(operationUpdated("completed", "webSearch", "search-1"));
+    await settle();
+
+    expect(markdownCards).toHaveLength(1);
+    expect(markdownCards[0]).toContain("搜索网页 · 已完成");
+
+    outbox.handle(completed({}, "最终回复"));
+    await outbox.close();
+
+    expect(markdownCards[1]).toBe("最终回复");
   });
 
   it("updates one thread status card from active to idle", async () => {

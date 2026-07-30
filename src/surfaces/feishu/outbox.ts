@@ -14,7 +14,6 @@ import { contentTruncatedText } from "../output-copy.js";
 import {
   createPlanPresentation,
   type PlanPresentation,
-  PlanProgressTracker,
 } from "../plan-presentation.js";
 import { TurnReplyTargets } from "../turn-reply-targets.js";
 import type {
@@ -76,7 +75,6 @@ interface FinishedFeishuStream {
 }
 
 interface FeishuPlanState {
-  tracker: PlanProgressTracker;
   messageId?: string;
   fingerprint?: string;
 }
@@ -206,6 +204,25 @@ export class FeishuOutbox implements SurfaceOutputPort {
         return;
       }
       if (
+        event.operation.kind === "webSearch"
+        && event.operation.status === "completed"
+      ) {
+        flushStreamBeforeOutput();
+        const markdown = formatFeishuOperation(
+          event.operation,
+          this.options.operationUpdateDisplay === "compact" ? "compact" : "full",
+        );
+        this.delivery.enqueue(
+          event.target.conversationId,
+          () => this.sendMarkdown(
+            event.target.conversationId,
+            markdown,
+          ),
+          true,
+        );
+        return;
+      }
+      if (
         this.operationUpdates.accept(
           turnKey(event.threadId, event.turnId),
           event.operation,
@@ -236,9 +253,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         return;
       }
       const key = turnKey(event.threadId, event.turnId);
-      const state = this.planMessages.get(key) ?? {
-        tracker: new PlanProgressTracker(),
-      };
+      const state = this.planMessages.get(key) ?? {};
       this.planMessages.set(key, state);
       const snapshot = createPlanPresentation(event);
       this.delivery.enqueue(
@@ -250,19 +265,6 @@ export class FeishuOutbox implements SurfaceOutputPort {
         ),
         true,
       );
-      for (const presentation of state.tracker.accept(event)) {
-        if (presentation.fingerprint === snapshot.fingerprint) {
-          continue;
-        }
-        this.delivery.enqueue(
-          event.target.conversationId,
-          () => this.messagePort.sendCard(
-            event.target.conversationId,
-            renderFeishuPlanCard(presentation),
-          ).then(() => undefined),
-          true,
-        );
-      }
       return;
     }
     if (event.type === "turn.completed") {

@@ -101,8 +101,9 @@ Workspace 操作提示只在 Telegram 实际提供切换按钮时声明可点击
 目录绝对路径清洗和单行摘要；
 Telegram HTML、飞书 CardKit Markdown 与微信安全文本的转义、布局、分组和发送仍由各自
 Adapter 负责。
-`operation-update-buffer.ts` 在 Surface 边界按 Turn 有界暂存成功的 MCP、动态工具和网页搜索；
-最终回复前单项保持原详情，多项生成一次分类计数汇总。失败、拒绝和其他操作不进入该缓冲。
+`operation-update-buffer.ts` 在 Surface 边界按 Turn 有界暂存成功的查询操作；最终回复前单项
+保持原详情，多项生成一次分类计数汇总。飞书网页搜索完成后直接发送，不进入该缓冲；失败、
+拒绝和其他操作同样不进入缓冲。
 `generated-image.ts` 只读取 App Server `imageGeneration.savedPath` 指向的绝对普通文件，
 拒绝符号链接、空文件、超过 10 MiB 的内容和非 PNG/JPEG 签名；Telegram、飞书与微信分别负责
 平台上传和发送，不读取 `imageView` 或用户上传图片路径。
@@ -122,12 +123,13 @@ warning 和 MCP 错误只使用 Client 边界已经统一脱敏并限长的稳�
 
 Bootstrap 把共享的 `display.operation_updates` 三档模式显式注入各 Surface Outbox。`full`
 显示完整操作，`compact` 显示单行摘要，`hidden` 忽略 `operation.updated`；Core 始终正常归约
-操作，审批与其他关键输出不受影响。三个渠道统一把同一 Turn 的成功查询类操作延迟聚合，微信
+操作，审批与其他关键输出不受影响。Telegram 和微信把同一 Turn 的成功查询类操作延迟聚合；
+飞书只聚合 MCP 与动态工具，网页搜索完成后立即发送。微信
 对其余操作仍仅发送终态，避免用普通气泡模拟持续更新；Surface 只实现平台格式，不各自定义
 第二套显示配置。
 
 Bootstrap 还把默认关闭的 `display.plan_updates` 注入三个 Surface Outbox。开启后，各端消费
-Core 发布的结构化 `plan.updated`：首次发送完整计划，后续只在步骤首次完成时发送一条紧凑
-进度；飞书额外在原消息中同步更新完整计划卡，Telegram 和微信保留首次快照。不解析或拆分模型
+Core 发布的结构化 `plan.updated`：首次发送完整计划；飞书后续只原地更新这一张卡，
+Telegram 和微信则在步骤首次完成时发送紧凑进度并保留首次快照。不解析或拆分模型
 正文，也不根据操作事件推断步骤完成时间；多个步骤若在同一官方通知中完成，只能按该通知的实际
 到达时间展示。关闭时不产生任何计划渠道消息，Core 的计划归约保持不变。
