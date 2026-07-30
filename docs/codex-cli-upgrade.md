@@ -38,8 +38,8 @@ npm run codex:upgrade -- <正式版本> --dry-run
 脚本不会安装全局 CLI、自动改业务代码、批量替换文档版本、提交、推送或重建服务。生成失败时
 不会执行 Git 回退；这样不会覆盖用户数据，也能保留失败现场供 Codex 诊断。
 
-GitHub Actions 每天自动运行 `Codex upgrade preview`，也支持手动触发。版本留空时读取官方最新
-正式 Release；指定版本时会验证对应 `rust-v<版本>` 确实是正式 Release。项目已是该版本时自动
+GitHub Actions `Codex upgrade preview` 只手动触发。版本留空时读取官方最新正式 Release；
+指定版本时会验证对应 `rust-v<版本>` 确实是正式 Release。项目已是该版本时自动
 结束，不安装 CLI 或生成 Artifact；发现新版本时生成：
 
 - `base-commit.txt`：生成差异所基于的项目提交。

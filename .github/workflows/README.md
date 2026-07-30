@@ -9,8 +9,8 @@
   Lint、文档链接和索引、全量测试、Shell、真实 tarball 与干净源码安装冒烟及平台模板检查。
   独立的 App Server 合同任务安装锁定的 Codex CLI 0.145.0，检查协议版本与生成类型，并使用隔离
   `CODEX_HOME` 验证 Fast 默认值的跨客户端读取和新 Thread 状态。
-- `codex-upgrade-preview.yml`：每天自动检查，也可手动选择 `openai/codex` 正式发行版本；留空
-  则使用最新正式 Release。项目已经同步时跳过，发现更新时安装对应 npm CLI、生成协议与版本
+- `codex-upgrade-preview.yml`：手动检查 `openai/codex` 正式发行版本；版本留空时使用最新正式
+  Release。项目已经同步时跳过，发现更新时安装对应 npm CLI、生成协议与版本
   差异，独立运行协议、类型、Lint、全量测试、真实合同、构建和打包检查，把逐项结果写入 Job
   Summary，并上传结构化结果、逐阶段日志、协议结构影响、清单、统计、完整 Patch 和摘要
   Artifact。单项失败不阻止其他检查，最终仍把任务标为失败。该工作流拒绝 Draft、Pre-release
