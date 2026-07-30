@@ -239,7 +239,21 @@ describe("Feishu command center", () => {
     )).toBe("accepted");
     await settle();
 
-    expect(JSON.stringify(cards[2]?.card)).toContain("重命名会话");
+    const formCard = cards[2]!.card;
+    expect(formCard).toHaveProperty("schema", "2.0");
+    expect(formCard).not.toHaveProperty("elements");
+    const form = feishuCardElements(formCard).find((element) =>
+      element.tag === "form"
+    );
+    expect(form).toBeDefined();
+    const submitButton = (
+      form as { elements: Array<Record<string, unknown>> }
+    ).elements.find((element) => element.tag === "button");
+    expect(submitButton).toMatchObject({
+      form_action_type: "submit",
+    });
+    expect(submitButton).not.toHaveProperty("action_type");
+    expect(JSON.stringify(formCard)).toContain("重命名会话");
     const submit = cardAction(cards[2]!, "rename");
     expect(center.handleCardAction({
       ...submit,
