@@ -1,6 +1,8 @@
-name: Codex upgrade preview
+name: Codex upgrade proposal
 
 on:
+  schedule:
+    - cron: "17 3 * * *"
   workflow_dispatch:
     inputs:
       version:
@@ -13,13 +15,16 @@ permissions:
 
 concurrency:
   group: codex-upgrade-preview
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   preview:
     name: Generate released CLI diff
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      upgrade_available: ${{ steps.release.outputs.upgrade_available }}
+      version: ${{ steps.release.outputs.version }}
 
     steps:
       - name: Checkout
@@ -134,3 +139,100 @@ jobs:
             )
           )
         run: exit 1
+
+  propose:
+    name: Create draft upgrade pull request
+    needs: preview
+    if: >-
+      needs.preview.result == 'success' &&
+      needs.preview.outputs.upgrade_available == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Find existing draft proposal
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_TITLE: 升级 Codex CLI 至 ${{ needs.preview.outputs.version }}
+        run: |
+          existing_url="$(
+            gh pr list \
+              --state open \
+              --search "$PR_TITLE in:title" \
+              --json url \
+              --jq '.[0].url // ""'
+          )"
+          echo "url=$existing_url" >> "$GITHUB_OUTPUT"
+          if [[ -n "$existing_url" ]]; then
+            echo "已存在升级提案：$existing_url"
+          fi
+
+      - name: Download validated upgrade patch
+        if: steps.existing.outputs.url == ''
+        uses: actions/download-artifact@v8
+        with:
+          name: codex-upgrade-${{ needs.preview.outputs.version }}
+          path: ${{ runner.temp }}/codex-upgrade-report
+
+      - name: Apply validated upgrade patch
+        if: steps.existing.outputs.url == ''
+        env:
+          REPORT_DIRECTORY: ${{ runner.temp }}/codex-upgrade-report
+        run: |
+          git apply --check "$REPORT_DIRECTORY/upgrade.patch"
+          git apply "$REPORT_DIRECTORY/upgrade.patch"
+
+      - name: Commit and push proposal branch
+        if: steps.existing.outputs.url == ''
+        env:
+          BRANCH_NAME: automation/codex-upgrade-${{ needs.preview.outputs.version }}-${{ github.run_id }}
+          CODEX_VERSION: ${{ needs.preview.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH_NAME"
+          git add --all
+          git commit -m "准备升级 Codex CLI 至 $CODEX_VERSION"
+          gh auth setup-git
+          git push --set-upstream origin "$BRANCH_NAME"
+
+      - name: Create draft pull request
+        if: steps.existing.outputs.url == ''
+        env:
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          BRANCH_NAME: automation/codex-upgrade-${{ needs.preview.outputs.version }}-${{ github.run_id }}
+          CODEX_VERSION: ${{ needs.preview.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          PR_BODY: |
+            这是由 Codex 正式版升级工作流生成的 Draft PR。
+
+            自动阶段已经完成协议生成、类型检查、Lint、全量测试、真实 App Server 合同、构建和打包验证。完整 Patch、协议影响、结构化结果与逐阶段日志保存在本次运行的 Artifact 中。
+
+            合并前仍需由 Codex：
+
+            - 对照固定版本官方源码和测试审查协议语义；
+            - 修复业务枚举、通知、Server Request 与安全边界适配；
+            - 更新 `docs/index.md`、README、CI 锁定版本及相关测试；
+            - 运行 `npm run verify:commit` 并审查最终差异。
+
+            本工作流不会自动转为 Ready、合并、发布或部署。
+
+            升级运行：https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: >-
+          gh pr create
+          --draft
+          --base "$BASE_BRANCH"
+          --head "$BRANCH_NAME"
+          --title "升级 Codex CLI 至 $CODEX_VERSION"
+          --body "$PR_BODY"

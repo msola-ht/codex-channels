@@ -29,17 +29,19 @@
   生成类型仍是当前锁定 CLI 协议字段的最终事实来源。
 - 升级锁定的 Codex CLI 时，只采用 `openai/codex` GitHub Releases 中非 Draft、非 Pre-release
   的正式发行版；先按 `docs/codex-cli-upgrade.md` 在干净工作区运行
-  `npm run codex:upgrade -- <正式版本>`，或运行 `Codex upgrade preview` GitHub Actions。
-  生成后由 Codex 审查协议差异、完成业务适配、文档更新和验证。不得要求操作者人工判断协议
-  差异，也不得为旧 CLI 保留兼容层。
+  `npm run codex:upgrade -- <正式版本>`，或使用 `Codex upgrade proposal` GitHub Actions
+  创建的 Draft PR。生成后由 Codex 审查协议差异、完成业务适配、文档更新和验证。Draft PR
+  不得自动转为 Ready、合并、发布或部署；不得要求操作者人工判断协议差异，也不得为旧 CLI
+  保留兼容层。
 - 官方 Alpha 只允许在 `Codex alpha canary` 的临时 Runner 或明确隔离的本地分支/worktree 中
   用于前向兼容测试；不得把 Alpha 生成类型、版本或专属适配提交到 `main`，不得据此更新稳定
   协议基线、固定版本索引或公开支持矩阵。Canary 成功和失败都必须保留差异与日志，正式 Release
   发布后重新走正式升级流程。
-- 正式升级预览和 Alpha Canary 必须独立运行协议检查、类型检查、Lint、测试、真实合同、构建
+- 正式升级提案和 Alpha Canary 必须独立运行协议检查、类型检查、Lint、测试、真实合同、构建
   与打包验证；单项失败不得阻止其他可独立执行的检查。Artifact 必须包含逐阶段日志、结构化结果、
-  完整 Patch 和协议结构影响摘要。预览阶段不修改稳定版文档，文档索引检查明确跳过并在正式适配
-  完成后通过 `verify:commit` 执行。
+  完整 Patch 和协议结构影响摘要。自动提案阶段不修改稳定版文档，文档索引检查明确跳过并在正式
+  适配完成后通过 `verify:commit` 执行。只有创建 Draft PR 的独立 Job 可以申请最小
+  `contents: write` 和 `pull-requests: write`，生成与验证 Job 保持只读。
 - GitHub Release 解析的网络请求与响应正文读取只对网络异常、429 和 5xx 有限重试；解析仍失败
   时工作流必须上传带 `unresolved-<run id>` 标识的失败报告和解析日志，再将任务标红，不能因
   目标版本为空或开发依赖尚未安装而丢失现场。

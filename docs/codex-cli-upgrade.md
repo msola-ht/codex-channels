@@ -38,8 +38,8 @@ npm run codex:upgrade -- <正式版本> --dry-run
 脚本不会安装全局 CLI、自动改业务代码、批量替换文档版本、提交、推送或重建服务。生成失败时
 不会执行 Git 回退；这样不会覆盖用户数据，也能保留失败现场供 Codex 诊断。
 
-GitHub Actions `Codex upgrade preview` 只手动触发。版本留空时读取官方最新正式 Release；
-指定版本时会验证对应 `rust-v<版本>` 确实是正式 Release。项目已是该版本时自动
+GitHub Actions `Codex upgrade proposal` 每日检查一次，也可以手动触发。版本留空时读取官方
+最新正式 Release；指定版本时会验证对应 `rust-v<版本>` 确实是正式 Release。项目已是该版本时自动
 结束，不安装 CLI 或生成 Artifact；发现新版本时生成：
 
 - `base-commit.txt`：生成差异所基于的项目提交。
@@ -56,10 +56,20 @@ GitHub Actions `Codex upgrade preview` 只手动触发。版本留空时读取�
   安装和协议生成过程。
 - `logs/*.log`：协议、类型、Lint、测试、真实合同、构建和打包的逐阶段日志。
 
-同一摘要会显示在 GitHub Actions Job Summary。该预览不会创建分支、提交、推送或部署。下载
-Artifact 后把目录交给 Codex；Codex 先确认本地提交与 `base-commit.txt` 一致，再审查并应用
-`upgrade.patch`。如果本地分支已经前进，则重新运行预览或在本地重新生成，不直接强行应用旧 Patch。
-协议生成失败时同样会上传报告和日志，随后把工作流标为失败。
+同一摘要会显示在 GitHub Actions Job Summary。生成与验证 Job 保持只读；全部自动检查成功后，
+独立提案 Job 才申请 `contents: write` 和 `pull-requests: write`，把已验证 Patch 应用到自动化
+分支并创建 Draft PR。已有同版本开放提案时不重复创建。Draft PR 不自动转为 Ready、合并、发布
+或部署，仍需 Codex 完成协议语义、业务实现、稳定文档、CI 锁定版本和测试适配。协议生成或验证
+失败时不会创建 PR，但仍上传报告和日志，随后把工作流标为失败。
+
+仓库的 Settings → Actions → General 必须允许 GitHub Actions 创建 Pull Request，同时继续把
+默认 `GITHUB_TOKEN` 权限保持为只读；工作流只在提案 Job 中显式提升所需权限。由
+`GITHUB_TOKEN` 创建的 PR，其首次 `pull_request` CI 可能显示为等待仓库维护者批准，批准后才会
+执行；不使用长期 PAT 绕过该安全闸门。
+
+需要在本地处理失败现场时，下载 Artifact 并交给 Codex。Codex 先确认本地提交与
+`base-commit.txt` 一致，再审查并应用 `upgrade.patch`；如果本地分支已经前进，则重新运行提案
+或在本地重新生成，不直接强行应用旧 Patch。
 
 ## Alpha Canary
 
@@ -81,17 +91,18 @@ GitHub Release API 的请求或响应正文读取遇到网络异常时，与 429
 Alpha Canary 只提供正式版本发布前的兼容预警。不得把 Alpha 生成类型、项目版本或针对 Alpha 的
 业务适配直接提交到 `main`，也不得更新 `docs/index.md` 的当前稳定版本、固定源码链接或支持矩阵。
 需要提前分析时，应由 Codex 在临时分支或 Git worktree 中读取 Artifact；正式 Release 发布后，
-仍从正式升级预览重新生成并审查，不能直接复用 Alpha Patch。
+仍从正式升级提案重新生成并审查，不能直接复用 Alpha Patch。
 
-正式升级预览使用同一套分阶段验证和报告，不在首个失败处停止。预览通过表示生成后的项目已经
+正式升级提案使用同一套分阶段验证和报告，不在首个失败处停止。自动验证通过表示生成后的项目已经
 通过可自动执行的兼容检查，但不代替 Codex 对官方固定版本源码、行为语义、安全边界和文档更新
 的审查。
 
 ## 2. 本地让 Codex 审查并适配
 
-正式升级预览发现新版本后，优先在本地干净工作区完成适配。确定性的版本校验、协议生成、差异
-提取和验证由仓库脚本负责；协议语义、业务影响、安全边界、源码修改和最终审查由 Codex 负责。
-不要再编写一个复制这些脚本的大型“自动修复”程序。
+正式升级提案发现新版本后，优先在自动创建的 Draft PR 分支继续适配；需要本地重现或提案失败时，
+再在干净工作区处理 Artifact 或重新生成。确定性的版本校验、协议生成、差异提取和验证由仓库
+脚本负责；协议语义、业务影响、安全边界、源码修改和最终审查由 Codex 负责。不要再编写一个复制
+这些脚本的大型“自动修复”程序。
 
 ### 直接在当前 Codex 会话中执行
 

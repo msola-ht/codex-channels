@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 // @ts-expect-error JavaScript upgrade helper intentionally has no declaration file.
@@ -45,5 +48,27 @@ describe("Codex CLI upgrade preparation", () => {
     expect(upgradeReviewChecklist("0.146.0").join("\n")).toContain(
       "请让 Codex 按 docs/codex-cli-upgrade.md 审查",
     );
+  });
+
+  it("keeps automated upgrade proposals draft-only with isolated write permissions", () => {
+    const workflow = readFileSync(
+      join(process.cwd(), ".github/workflows/codex-upgrade-preview.yml"),
+      "utf8",
+    );
+    const proposalStart = workflow.indexOf("\n  propose:");
+    expect(proposalStart).toBeGreaterThan(0);
+
+    const preview = workflow.slice(0, proposalStart);
+    const proposal = workflow.slice(proposalStart);
+    expect(workflow).toContain('cron: "17 3 * * *"');
+    expect(preview).toContain("contents: read");
+    expect(preview).not.toContain("contents: write");
+    expect(preview).not.toContain("pull-requests: write");
+    expect(proposal).toContain("contents: write");
+    expect(proposal).toContain("pull-requests: write");
+    expect(proposal).toContain("gh pr create");
+    expect(proposal).toContain("--draft");
+    expect(workflow).not.toContain("gh pr merge");
+    expect(workflow).not.toContain("npm publish");
   });
 });

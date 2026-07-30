@@ -29,7 +29,7 @@ export function renderUpgradeSummary(
   const protocolEntries = entries.filter((entry) =>
     entry.includes("src/codex-protocol/"));
   const isAlpha = channel === "alpha";
-  const title = isAlpha ? "Alpha Canary" : "正式升级预览";
+  const title = isAlpha ? "Alpha Canary" : "正式升级提案";
   const source = isAlpha
     ? "openai/codex 官方 GitHub Pre-release"
     : "openai/codex 正式 GitHub Release";
