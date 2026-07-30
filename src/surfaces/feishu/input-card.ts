@@ -201,8 +201,9 @@ function renderToolApprovalCard(
       : []),
     actionButton("取消", "danger", interactionToken, "cancel"),
   ];
-  return cardKit(
+  return legacyCard(
     "MCP 工具请求批准",
+    request.title,
     [
       markdown(escapeMarkdown(truncate(request.message, maximumDisplayLength))),
       markdown(
