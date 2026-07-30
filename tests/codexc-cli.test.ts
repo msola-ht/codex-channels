@@ -26,6 +26,7 @@ import {
 const temporaryDirectories: string[] = [];
 const cli = resolve("bin/codexc.mjs");
 const execFileAsync = promisify(execFile);
+const linuxIt = process.platform === "linux" ? it : it.skip;
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -641,7 +642,7 @@ describe("codexc CLI", () => {
     expect(diagnosed.stdout).not.toContain("[失败] 配置目录权限");
   });
 
-  it("reports safe Weixin runtime readiness without exposing private values", async () => {
+  linuxIt("reports safe Linux Weixin runtime readiness without exposing private values", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-weixin-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");

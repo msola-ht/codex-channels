@@ -613,6 +613,15 @@ function createFixture(
       close: () => {},
       download: imageDownload,
     },
+    audioPort: {
+      start: async () => {},
+      close: () => {},
+      download: async () => ({
+        path: "/private/uploads/feishu/audio.mp3",
+        mimeType: "audio/mpeg",
+        bytes: 8,
+      }),
+    },
     filePort: {
       download: fileDownload,
     },

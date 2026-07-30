@@ -197,6 +197,8 @@
 npm test
 ```
 
+该命令会先构建当前源码到 `dist/`，再运行完整测试，避免 CLI 与 Doctor 用例读取旧构建产物。
+
 生成包含未执行源码的 V8 Coverage 报告：
 
 ```bash

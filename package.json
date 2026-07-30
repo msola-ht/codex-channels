@@ -53,7 +53,7 @@
     "dev": "tsx src/main.ts",
     "dev:all": "node scripts/dev-all.mjs",
     "start": "node dist/main.js",
-    "test": "vitest run --config vitest.config.ts",
+    "test": "npm run build && vitest run --config vitest.config.ts",
     "test:package": "npm run build && node scripts/smoke-package.mjs && node scripts/smoke-source-prepare.mjs",
     "test:watch": "vitest --config vitest.config.ts",
     "codex:upgrade": "node scripts/prepare-codex-upgrade.mjs",

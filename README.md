@@ -553,6 +553,9 @@ npm run protocol:check
 npm run verify:commit
 ```
 
+`npm test` 会先构建 `dist/`，确保 CLI 与 Doctor 测试始终验证当前源码生成的运行文件，
+不依赖工作区中可能残留的旧构建产物。
+
 `npm run verify:commit` 是本地 hook 与 GitHub CI 共用的提交门禁，覆盖暂存差异格式、
 类型与版本、全目录 Lint、文档链接和索引、全量测试、Shell 语法、npm tarball 安装冒烟，
 干净源码全局安装冒烟，以及 macOS 上的 launchd 模板检查。不要使用

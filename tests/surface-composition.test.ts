@@ -29,6 +29,7 @@ import { EncryptedFileWeixinCredentialStore } from "../src/surfaces/weixin/index
 
 const interactions = {} as InteractionPort;
 const temporaryDirectories: string[] = [];
+const linuxIt = process.platform === "linux" ? it : it.skip;
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -163,7 +164,7 @@ describe("configured Surface composition", () => {
     expect(bindings.getByThread("thread-revoked")).toBeUndefined();
   });
 
-  it("loads Weixin credentials from the config directory independently of the database path", async () => {
+  linuxIt("loads Linux Weixin credentials from the config directory independently of the database path", async () => {
     const root = mkdtempSync(join(tmpdir(), "weixin-composition-"));
     temporaryDirectories.push(root);
     const credentialsDirectory = join(root, "credentials");
