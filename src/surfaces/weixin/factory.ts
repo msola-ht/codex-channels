@@ -47,6 +47,7 @@ export function createWeixinSurface(
   return new WeixinSurface({
     accountId: options.accountId,
     client,
+    lifecycleClient: client,
     fileSendClient: client,
     imageSendClient: client,
     typingClient: client,

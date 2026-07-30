@@ -35,7 +35,9 @@
   失败、配置变更和用户主动执行的命令结果保留普通提醒。审批前置长内容只静默发送折叠分片，
   最后带按钮的消息始终开启提醒；静默只控制客户端提醒，不改变队列关键性和失败处理。
 - `html-format.ts`：安全转义并分块渲染命令面板、启动通知、审批卡与 Diff；长审批详情先显示约六行普通引用预览，再以文字分隔可展开的剩余全文，避免 Telegram 合并相邻引用或让长命令默认占满聊天界面。
-- `markdown-format.ts`：把常见 Markdown 块与行内样式安全转换为传统 Telegram HTML；仅包含 Bot 命令的文本代码块和行内命令会转为可点击纯文本，普通代码块保持不变。
+- `markdown-format.ts`：把常见 Markdown 块与行内样式安全转换为传统 Telegram HTML；
+  HTTP(S) 链接转换为可点击链接，Markdown 表格降级为紧凑的粗体表头与项目符号行；
+  仅包含 Bot 命令的文本代码块和行内命令会转为可点击纯文本，普通代码块保持不变。
 - `long-message-format.ts`：统一规划终端或 Telegram 发起 Turn 的长回复；普通长文本使用可展开引用块，超长代码与内容使用预览加内存文件。
 - `operation-format.ts`：把操作记录分组、截断、脱敏并按完整或单行摘要模式渲染为 Telegram
   HTML；完整模式同时显示状态、耗时和退出码。
@@ -54,8 +56,8 @@
 - `user-error-renderer.ts`：把平台无关的结构化用户错误映射为 Telegram 专属提示与命令用法。
 - `format.ts`：格式化会话、Diff/Plan、Goal、模型、Workspace、Git 分支、权限、用量、缓存命中率、
   上下文压缩总次数和状态文本；可复用语义委托给 Surface 共享格式器，账户、额度与 MCP 运行状态
-  由 `runtime-status-format.ts` 提供；上线通知复用 Surface 共享生命周期字段，`/status` 与 Turn
-  结束统计均显示当前 Workspace Git 分支。
+  由 `runtime-status-format.ts` 提供；上线通知复用 Surface 共享生命周期字段并把结构化字段渲染为
+  紧凑项目符号列表，`/status` 与 Turn 结束统计均显示当前 Workspace Git 分支。
 - `file-download.ts`：统一通过 Bot API 定位文件，并执行支持 HTTPS 代理、超时和状态校验的下载；
   图片与文本文件复用该传输边界，各自保留大小、内容和错误语义校验。
 - `image-store.ts`：安全获取 Telegram 下载地址和下载流；大小、内容签名、私有暂存与过期清理
@@ -71,6 +73,9 @@ Telegram 网络调用不得阻塞 App Server Reader。每个 Conversation 的最
 必须保持纯内存、有界且严格验证 UTF-8。
 下一 Turn 输入队列属于 Application，不得复用本目录的 Telegram 输出队列；Telegram 只负责
 命令解析及位置、容量和内存生命周期提示。
+Telegram 手动命令注册显式接入三个渠道共享的 `/h`、`/work`、`/r` 快捷入口，分别执行
+`/help`、`/workspace`、`/resume`；快捷入口不重复写入 BotFather 菜单。帮助消息复用共享的
+分组列表，只在 Telegram 边界转换为安全 HTML。
 审批请求晚于操作日志发送时，Outbox 必须撤回已经发送的命令消息，不能只清理内存状态。
 账户额度和 MCP 状态通知也必须进入每聊天有界输出队列；不得从 App Server Reader 直接等待 Telegram 网络发送。
 结构化用户错误由 `bot.ts` 转换为 Telegram 专属文案；App Server Turn、warning 和 MCP 错误会

@@ -29,6 +29,12 @@ export function createCredentialBackedWeixinClient(
     return clientTask;
   };
   return {
+    async notifyStart(signal) {
+      return (await client()).notifyStart(signal);
+    },
+    async notifyStop(signal) {
+      return (await client()).notifyStop(signal);
+    },
     async getUpdates(cursor, signal) {
       return (await client()).getUpdates(cursor, signal);
     },

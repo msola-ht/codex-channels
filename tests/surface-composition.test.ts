@@ -150,8 +150,17 @@ describe("configured Surface composition", () => {
     });
     const context = options(runtimeConfig);
     const [module] = createSurfaceModules(context, [weixinSurfacePlugin]);
-    const fetchImpl = vi.fn<typeof fetch>((_input, init) =>
-      new Promise<Response>((_resolve, reject) => {
+    const fetchImpl = vi.fn<typeof fetch>((input, init) => {
+      const url = String(input);
+      if (
+        url.endsWith("/msg/notifystart")
+        || url.endsWith("/msg/notifystop")
+      ) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ ret: 0 }), { status: 200 }),
+        );
+      }
+      return new Promise<Response>((_resolve, reject) => {
         const abort = () => {
           const error = new Error("aborted");
           error.name = "AbortError";
@@ -162,18 +171,27 @@ describe("configured Surface composition", () => {
           return;
         }
         init?.signal?.addEventListener("abort", abort, { once: true });
-      }));
+      });
+    });
     vi.stubGlobal("fetch", fetchImpl);
 
     try {
       await module?.adapter.start();
       await vi.waitFor(() => {
-        expect(fetchImpl).toHaveBeenCalledOnce();
+        expect(fetchImpl).toHaveBeenCalledTimes(2);
       });
+      expect(fetchImpl.mock.calls.map(([input]) => String(input)).sort())
+        .toEqual([
+          "https://ilinkai.weixin.qq.com/ilink/bot/getupdates",
+          "https://ilinkai.weixin.qq.com/ilink/bot/msg/notifystart",
+        ]);
       expect(context.onFatal).not.toHaveBeenCalled();
     } finally {
       await module?.adapter.stop();
     }
+    expect(fetchImpl.mock.calls.at(-1)?.[0]).toBe(
+      "https://ilinkai.weixin.qq.com/ilink/bot/msg/notifystop",
+    );
   });
 
   it("selects the shared HTTPS proxy unless NO_PROXY covers the Feishu host", () => {

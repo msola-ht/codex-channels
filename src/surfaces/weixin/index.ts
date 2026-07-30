@@ -31,6 +31,7 @@ export {
   type WeixinImageReference,
   type WeixinImageSendProtocolClient,
   type WeixinInboundMessage,
+  type WeixinLifecycleProtocolClient,
   type WeixinProtocolClient,
   type WeixinProtocolErrorCode,
   type WeixinRuntimeProtocolClient,

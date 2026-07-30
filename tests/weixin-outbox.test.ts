@@ -155,6 +155,83 @@ describe("WeixinOutbox", () => {
     });
   });
 
+  it("normalizes supported Markdown for Weixin final answers", async () => {
+    const { outbox, sendText } = outboxFixture();
+
+    outbox.handle(completed("final_answer", [
+      "##### 发布结果",
+      "###### 兼容说明",
+      "",
+      "中文 *斜体* 与 _强调_。",
+      "标识符 foo_中文_bar 保持原样。",
+      "English *italic* and **bold**.",
+      "[项目文档](https://example.com/docs)",
+      "移除图片：![架构图](https://example.com/diagram.png)",
+      "",
+      "> **引用**",
+      "- 列表",
+      "~~删除线~~",
+      "| A | B |",
+      "|---|---|",
+      "| 1 | 2 |",
+    ].join("\n")));
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledWith({
+      actorId,
+      contextToken: "context-secret",
+      text: [
+        "**发布结果**",
+        "**兼容说明**",
+        "",
+        "中文 斜体 与 强调。",
+        "标识符 foo_中文_bar 保持原样。",
+        "English *italic* and **bold**.",
+        "[项目文档](https://example.com/docs)",
+        "移除图片：",
+        "",
+        "> **引用**",
+        "- 列表",
+        "~~删除线~~",
+        "| A | B |",
+        "|---|---|",
+        "| 1 | 2 |",
+      ].join("\n"),
+    });
+  });
+
+  it("leaves Markdown inside code intact and degrades an unclosed fence", async () => {
+    const { outbox, sendText } = outboxFixture();
+
+    outbox.handle(completed("final_answer", [
+      "```md",
+      "##### code heading",
+      "[code link](https://example.com/code)",
+      "*中文代码*",
+      "```",
+      "",
+      "未闭合代码：",
+      "```ts",
+      "const value = 1;",
+    ].join("\n")));
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledWith({
+      actorId,
+      contextToken: "context-secret",
+      text: [
+        "```md",
+        "##### code heading",
+        "[code link](https://example.com/code)",
+        "*中文代码*",
+        "```",
+        "",
+        "未闭合代码：",
+        "const value = 1;",
+      ].join("\n"),
+    });
+  });
+
   it("renders terminal status when no final text was produced", async () => {
     const { outbox, sendText } = outboxFixture();
 
@@ -180,7 +257,7 @@ describe("WeixinOutbox", () => {
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
       "本次运行 · 已停止",
-      "本次运行 · 失败\n\n错误：受控错误",
+      "本次运行 · 失败  \n- 错误：受控错误",
     ]);
   });
 
@@ -229,11 +306,11 @@ describe("WeixinOutbox", () => {
         "周限 额度提醒",
         "主窗口：已使用 12% · 周期 7 天",
         "状态：正常",
-      ].join("\n\n"),
+      ].join("  \n"),
       [
         "MCP Server：docs · 启动失败",
         "原因：认证失败，TOKEN=[已隐藏]",
-      ].join("\n\n"),
+      ].join("  \n"),
     ]);
   });
 

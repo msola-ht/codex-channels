@@ -32,9 +32,11 @@ import {
 import type {
   WeixinFileSendProtocolClient,
   WeixinImageSendProtocolClient,
+  WeixinLifecycleProtocolClient,
   WeixinProtocolClient,
   WeixinTypingProtocolClient,
 } from "./protocol-client.js";
+import { WeixinProtocolError } from "./protocol-client.js";
 import { WeixinReplyContextStore } from "./reply-context-store.js";
 import type { WeixinReplyContextPersistence } from "./reply-context-persistence.js";
 import { formatWeixinCommandText } from "./command-renderer.js";
@@ -53,6 +55,7 @@ export interface WeixinSurfaceOptions {
   fileSendClient?: WeixinFileSendProtocolClient;
   imageSendClient?: WeixinImageSendProtocolClient;
   typingClient?: WeixinTypingProtocolClient;
+  lifecycleClient?: WeixinLifecycleProtocolClient;
   cursorStore: WeixinUpdatesCursorStore;
   service: ConversationService;
   access: SurfaceAccessPolicy;
@@ -93,6 +96,7 @@ export class WeixinSurface implements SurfaceAdapter {
   private readonly logger: Logger;
   private readonly images: WeixinImagePort | undefined;
   private readonly audios: WeixinAudioPort | undefined;
+  private readonly lifecycleClient: WeixinLifecycleProtocolClient | undefined;
   private startPromise: Promise<void> | undefined;
   private stopPromise: Promise<void> | undefined;
 
@@ -105,6 +109,7 @@ export class WeixinSurface implements SurfaceAdapter {
     this.logger = options.logger;
     this.images = options.images;
     this.audios = options.audios;
+    this.lifecycleClient = options.lifecycleClient;
     this.accountId = options.accountId;
     const typing = options.typingClient === undefined
       ? undefined
@@ -258,6 +263,7 @@ export class WeixinSurface implements SurfaceAdapter {
     try {
       await this.input.stop();
     } finally {
+      await this.notifyLifecycle("stop");
       this.images?.close();
       this.audios?.close();
       this.interactions.cancelAll("Gateway 已停止");
@@ -306,6 +312,7 @@ export class WeixinSurface implements SurfaceAdapter {
       this.audios?.close();
       throw error;
     }
+    await this.notifyLifecycle("start");
     for (const target of restored) {
       try {
         const text = this.startupNotification?.text(target);
@@ -321,11 +328,36 @@ export class WeixinSurface implements SurfaceAdapter {
             surface: "weixin",
             accountId: this.accountId,
             conversationId: target.conversationId,
-            ...surfaceErrorMetadata(error),
+            ...weixinSurfaceErrorMetadata(error),
           },
           "微信启动联通通知发送失败，不影响长轮询",
         );
       }
+    }
+  }
+
+  private async notifyLifecycle(
+    state: "start" | "stop",
+  ): Promise<void> {
+    if (!this.lifecycleClient) {
+      return;
+    }
+    try {
+      if (state === "start") {
+        await this.lifecycleClient.notifyStart();
+      } else {
+        await this.lifecycleClient.notifyStop();
+      }
+    } catch (error) {
+      this.logger.warn(
+        {
+          surface: "weixin",
+          accountId: this.accountId,
+          state,
+          ...weixinSurfaceErrorMetadata(error),
+        },
+        `微信${state === "start" ? "上线" : "下线"}状态对账失败，不影响 Gateway`,
+      );
     }
   }
 
@@ -346,6 +378,22 @@ export class WeixinSurface implements SurfaceAdapter {
         && this.access.isAllowed({ target, actorId: context.actorId });
     });
   }
+}
+
+function weixinSurfaceErrorMetadata(
+  error: unknown,
+): Record<string, unknown> {
+  if (error instanceof WeixinProtocolError) {
+    return {
+      ...surfaceErrorMetadata(error),
+      errorCode: error.code,
+      ...(error.status === undefined ? {} : { status: error.status }),
+      ...(error.returnCode === undefined
+        ? {}
+        : { returnCode: error.returnCode }),
+    };
+  }
+  return surfaceErrorMetadata(error);
 }
 
 function logUpdatesRetry(

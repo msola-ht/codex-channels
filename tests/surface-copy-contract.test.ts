@@ -53,6 +53,7 @@ import {
   renderWeixinCommandResult,
   renderWeixinHelp,
 } from "../src/surfaces/weixin/command-renderer.js";
+import { parseSlashCommand } from "../src/surfaces/slash-command.js";
 
 describe("shared surface copy contract", () => {
   it("reports unsupported model audio before a Turn on every surface", () => {
@@ -146,6 +147,27 @@ describe("shared surface copy contract", () => {
       expect(renderFeishuHelp()).toContain(line);
       expect(renderWeixinHelp()).toContain(line);
     }
+    for (const help of [renderFeishuHelp(), renderWeixinHelp()]) {
+      expect(help).toContain("快捷命令：");
+      expect(help).toContain("- /h → /help");
+      expect(help).toContain("- /work → /workspace");
+      expect(help).toContain("- /r → /resume");
+    }
+  });
+
+  it("normalizes documented Surface shortcuts before channel dispatch", () => {
+    expect(parseSlashCommand("/h")).toEqual({
+      name: "help",
+      argumentsText: "",
+    });
+    expect(parseSlashCommand("/work docs")).toEqual({
+      name: "workspace",
+      argumentsText: "docs",
+    });
+    expect(parseSlashCommand("/r thread-1")).toEqual({
+      name: "resume",
+      argumentsText: "thread-1",
+    });
   });
 
   it("keeps bounded session lists identical across all surfaces", () => {

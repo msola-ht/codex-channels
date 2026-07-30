@@ -33,6 +33,7 @@ import {
 import { formatTextFileTooLarge } from "../text-file-copy.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import { formatQuotedInput } from "../quoted-input.js";
+import { surfaceCommandAliases } from "../slash-command.js";
 import {
   formatConfigurationChange,
   formatStartupNotification,
@@ -267,7 +268,7 @@ export class TelegramSurface {
 
   private registerHandlers(): void {
     this.bot.command("whoami", (context) => context.reply(`你的 Telegram 用户 ID：${context.from?.id ?? "未知"}`));
-    this.bot.command(["start", "help"], (context) =>
+    this.bot.command(["start", "help", "h"], (context) =>
       replyTelegramPanel(
         context,
         [
@@ -279,8 +280,9 @@ export class TelegramSurface {
           "首次消息自动接续当前 Workspace 最近的空闲 CLI/App Server 会话。",
           "",
           ...conversationCommandHelpLines,
-          "/whoami",
-          "/start · /help",
+          "Telegram：",
+          "- /whoami",
+          "- /start · /help · /h",
         ].join("\n"),
       ),
     );
@@ -289,6 +291,10 @@ export class TelegramSurface {
     )) {
       this.bot.command(command, (context) => this.executeCommand(context, command));
     }
+    this.bot.command("work", (context) =>
+      this.executeCommand(context, surfaceCommandAliases.work));
+    this.bot.command("r", (context) =>
+      this.executeCommand(context, surfaceCommandAliases.r));
     this.bot.command("stop", async (context) => {
       if (this.interactions.stopForChat(String(context.chat.id))) {
         await context.reply(interactionStoppedText);

@@ -5,6 +5,12 @@ export interface ParsedSlashCommand {
   argumentsText: string;
 }
 
+export const surfaceCommandAliases = {
+  h: "help",
+  work: "workspace",
+  r: "resume",
+} as const;
+
 export function parseSlashCommand(text: string): ParsedSlashCommand | null {
   const normalized = text.trim();
   if (!normalized.startsWith("/")) {
@@ -18,7 +24,13 @@ export function parseSlashCommand(text: string): ParsedSlashCommand | null {
     );
   }
   return {
-    name: match[1]!,
+    name: normalizeSurfaceCommandName(match[1]!),
     argumentsText: match[2] ?? "",
   };
+}
+
+export function normalizeSurfaceCommandName(name: string): string {
+  return surfaceCommandAliases[
+    name as keyof typeof surfaceCommandAliases
+  ] ?? name;
 }

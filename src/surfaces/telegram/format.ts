@@ -11,7 +11,7 @@ import {
 } from "../configuration-change-format.js";
 import {
   createStartupPresentation,
-  renderPlainLifecyclePresentation,
+  type LifecyclePresentation,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
 import {
@@ -102,9 +102,31 @@ export function formatStartupNotification(
   status: Pick<ConversationStatus, "threadId" | "workspaceId" | "model" | "effort" | "serviceTier" | "modelPending" | "effortPending" | "fastModePending" | "collaborationMode" | "collaborationModePending" | "weeklyLimit" | "gitBranch">,
   runtime: StartupRuntimeInfo,
 ): string {
-  return renderPlainLifecyclePresentation(
+  return renderTelegramLifecyclePresentation(
     createStartupPresentation(workspaces, status, runtime),
   );
 }
 
+export function renderTelegramLifecyclePresentation(
+  presentation: LifecyclePresentation,
+): string {
+  return [
+    presentation.title,
+    ...(presentation.fields.length > 0
+      ? ["", ...presentation.fields.map(formatLifecycleListField)]
+      : []),
+    ...(presentation.sections ?? []).flatMap((section) => [
+      "",
+      `${section.title}：`,
+      ...section.fields.map(formatLifecycleListField),
+    ]),
+  ].join("\n");
+}
+
 export type StartupRuntimeInfo = LifecycleStartupRuntimeInfo;
+
+function formatLifecycleListField(
+  field: LifecyclePresentation["fields"][number],
+): string {
+  return `- ${field.label}：${field.value}`;
+}

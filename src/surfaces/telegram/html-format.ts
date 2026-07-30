@@ -96,7 +96,10 @@ export function formatTelegramPanelHtml(
 
     const bullet = line.match(/^(\s*)-\s+(.+)$/);
     if (bullet) {
-      output.push(`${bullet[1]}• ${escapeTelegramHtml(bullet[2]!)}`);
+      const field = bullet[2]!.match(/^([^：\n]{1,32}：)(.*)$/);
+      output.push(field
+        ? `${bullet[1]}• <b>${escapeTelegramHtml(field[1]!)}</b>${escapeTelegramHtml(field[2]!)}`
+        : `${bullet[1]}• ${escapeTelegramHtml(bullet[2]!)}`);
       continue;
     }
 

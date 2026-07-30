@@ -27,7 +27,7 @@ import {
 import {
   createStartupPresentation,
   createTurnCompletedPresentation,
-  renderPlainLifecyclePresentation,
+  type LifecyclePresentation,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
@@ -53,7 +53,7 @@ export function renderWeixinStartupNotification(
   >,
   runtime: WeixinStartupRuntimeInfo,
 ): string {
-  return renderPlainLifecyclePresentation(
+  return renderWeixinLifecyclePresentation(
     createStartupPresentation(workspaces, status, runtime),
   );
 }
@@ -63,9 +63,9 @@ export function renderWeixinHelp(): string {
     "微信 Codex 命令",
     "普通文本会发送到当前 Codex Thread。",
     ...conversationCommandHelpLines,
-    "/whoami",
-    "/wx doctor",
-    "/start · /help",
+    "微信：",
+    "- /whoami · /wx doctor",
+    "- /start · /help · /h",
   ].join("\n");
 }
 
@@ -87,7 +87,7 @@ export function renderWeixinIdentity(message: {
 export function renderWeixinTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
 ): string {
-  return renderPlainLifecyclePresentation(
+  return renderWeixinLifecyclePresentation(
     createTurnCompletedPresentation(event),
   );
 }
@@ -136,5 +136,46 @@ export function renderWeixinUserFacingError(
 }
 
 export function formatWeixinCommandText(text: string): string {
-  return text.replace(/(?:\r?\n)+/gu, "\n\n");
+  const lines = text
+    .replace(/\r\n/gu, "\n")
+    .replace(/\n{3,}/gu, "\n\n")
+    .split("\n");
+  let fenced = false;
+  return lines.map((line, index) => {
+    if (line.trimStart().startsWith("```")) {
+      fenced = !fenced;
+      return line;
+    }
+    const next = lines[index + 1];
+    if (
+      fenced
+      || line.length === 0
+      || next === undefined
+      || next.length === 0
+      || next.trimStart().startsWith("```")
+    ) {
+      return line;
+    }
+    return `${line}  `;
+  }).join("\n");
+}
+
+function renderWeixinLifecyclePresentation(
+  presentation: LifecyclePresentation,
+): string {
+  return [
+    presentation.title,
+    ...presentation.fields.map(formatLifecycleField),
+    ...(presentation.sections ?? []).flatMap((section) => [
+      "",
+      section.title,
+      ...section.fields.map(formatLifecycleField),
+    ]),
+  ].join("\n");
+}
+
+function formatLifecycleField(
+  field: LifecyclePresentation["fields"][number],
+): string {
+  return `- ${field.label}：${field.value}`;
 }

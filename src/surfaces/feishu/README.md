@@ -224,7 +224,8 @@ StateStore 中已有绑定且仍有授权 Actor 的精确 Chat 生成消息；Su
 `adapter.ts` 对普通文本调用 `ConversationService.submit()`，图片则先通过 `media.ts` 取得受管
 绝对路径，再调用同一 `submit()` 的 `localImages` 输入；富文本内的全部图片按原顺序与说明文字在同一次
 提交中传入，没有说明文字时才使用稳定图片提示。对已知平台无关命令调用
-`ConversationCommandService.execute()`；`/start`、`/help` 打开同一命令中心卡片，
+`ConversationCommandService.execute()`；手动输入的 `/h`、`/work`、`/r` 分别规范化为
+`/help`、`/workspace`、`/resume`，不重复加入命令中心菜单。`/start`、`/help` 打开同一命令中心卡片，
 `/stop` 优先停止当前 Actor 在本私聊中的最新待处理交互，没有待处理交互时调用共享 Turn
 停止命令；`/whoami` 和
 `/fs <status|doctor|revoke>` 留在飞书边界，并兼容旧的 `/feishu` 入口。`status` 展示当前进程实际观测到的

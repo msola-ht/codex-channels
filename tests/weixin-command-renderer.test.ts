@@ -4,12 +4,27 @@ import type {
   ConversationCommandResult,
 } from "../src/application/index.js";
 import {
+  formatWeixinCommandText,
   renderWeixinCommandResult,
   renderWeixinStartupNotification,
   renderWeixinTurnCompleted,
 } from "../src/surfaces/weixin/index.js";
 
 describe("Weixin command renderer", () => {
+  it("keeps compact lines while preserving intentional paragraphs", () => {
+    expect(formatWeixinCommandText(
+      "标题\r\n字段一：值一\n字段二：值二\n\n\n段落二",
+    )).toBe("标题  \n字段一：值一  \n字段二：值二\n\n段落二");
+  });
+
+  it("does not change copied code inside fenced blocks", () => {
+    expect(formatWeixinCommandText(
+      "命令：\n```sh\nprintf 'a'\nprintf 'b'\n```\n完成",
+    )).toBe(
+      "命令：\n```sh\nprintf 'a'\nprintf 'b'\n```\n完成",
+    );
+  });
+
   it("renders every shared command result kind as text", () => {
     const results: ConversationCommandResult[] = [
       {
@@ -152,6 +167,8 @@ describe("Weixin command renderer", () => {
       },
     );
     expect(startup).toContain("Codex Connect 已上线");
+    expect(startup).toContain("- App Server：已连接");
+    expect(startup).toContain("- 系统：Linux · x64");
     expect(startup).not.toContain("private-build-token");
 
     const rendered = renderWeixinTurnCompleted({
@@ -192,7 +209,7 @@ describe("Weixin command renderer", () => {
     });
 
     expect(rendered).toContain("本次运行 · 已完成");
-    expect(rendered).toContain("上下文：10 K / 100 K（10%）");
+    expect(rendered).toContain("- 上下文：10 K / 100 K（10%）");
     expect(rendered).toContain("缓存命中：75%");
     expect(rendered).toContain("模型：gpt-test · medium · Fast 开启");
     expect(rendered).toContain("上下文压缩：2 次");

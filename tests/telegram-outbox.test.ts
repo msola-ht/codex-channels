@@ -301,7 +301,7 @@ describe("TelegramOutbox", () => {
       [
         "<b>本次运行 · 失败</b>",
         "",
-        "<b>错误：</b>命令执行失败，TOKEN=[已隐藏]",
+        "• <b>错误：</b>命令执行失败，TOKEN=[已隐藏]",
       ].join("\n"),
     ]);
     expect(api.actions).toEqual([]);
@@ -1054,13 +1054,13 @@ describe("TelegramOutbox", () => {
       [
         turnCompletedPanel,
         "",
-        "<b>上下文：</b>24.6 K / 258 K（9.5%）",
-        "<b>缓存命中：</b>2.1%",
-        "<b>模型：</b>gpt-5.6-sol · medium · Fast 开启",
-        "<b>上下文压缩：</b>2 次",
-        "<b>周限：</b>已使用 42%",
-        "<b>Goal：</b>进行中 · 12.5 K / 100 K",
-        "<b>Git 分支：</b>feature/weixin-surface",
+        "• <b>上下文：</b>24.6 K / 258 K（9.5%）",
+        "• <b>缓存命中：</b>2.1%",
+        "• <b>模型：</b>gpt-5.6-sol · medium · Fast 开启",
+        "• <b>上下文压缩：</b>2 次",
+        "• <b>周限：</b>已使用 42%",
+        "• <b>Goal：</b>进行中 · 12.5 K / 100 K",
+        "• <b>Git 分支：</b>feature/weixin-surface",
       ].join("\n"),
     ]);
     expect(api.sendOptions[1]).toEqual({
@@ -1085,7 +1085,7 @@ describe("TelegramOutbox", () => {
       [
         turnCompletedPanel,
         "",
-        "<b>Git 分支：</b>feature/weixin-surface",
+        "• <b>Git 分支：</b>feature/weixin-surface",
       ].join("\n"),
     ]);
   });

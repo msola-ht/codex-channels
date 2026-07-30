@@ -185,11 +185,17 @@ export interface WeixinTypingProtocolClient {
   ): Promise<void>;
 }
 
+export interface WeixinLifecycleProtocolClient {
+  notifyStart(signal?: AbortSignal): Promise<void>;
+  notifyStop(signal?: AbortSignal): Promise<void>;
+}
+
 export type WeixinRuntimeProtocolClient =
   & WeixinProtocolClient
   & WeixinImageSendProtocolClient
   & WeixinFileSendProtocolClient
-  & WeixinTypingProtocolClient;
+  & WeixinTypingProtocolClient
+  & WeixinLifecycleProtocolClient;
 
 export interface CreateWeixinProtocolClientOptions {
   accountId: string;
@@ -309,6 +315,38 @@ export function createWeixinProtocolClient(
   };
 
   return {
+    async notifyStart(signal) {
+      const raw = await request({
+        fetchImpl,
+        randomBytesImpl,
+        baseUrl,
+        botToken,
+        endpoint: "msg/notifystart",
+        body: { base_info: baseInfo() },
+        timeoutMs: sendTimeoutMs,
+        maximumResponseBytes: maximumSendResponseBytes,
+        ...(signal === undefined ? {} : { signal }),
+        operation: "微信上线通知",
+      });
+      parseLifecycleResponse(raw, "微信上线通知");
+    },
+
+    async notifyStop(signal) {
+      const raw = await request({
+        fetchImpl,
+        randomBytesImpl,
+        baseUrl,
+        botToken,
+        endpoint: "msg/notifystop",
+        body: { base_info: baseInfo() },
+        timeoutMs: sendTimeoutMs,
+        maximumResponseBytes: maximumSendResponseBytes,
+        ...(signal === undefined ? {} : { signal }),
+        operation: "微信下线通知",
+      });
+      parseLifecycleResponse(raw, "微信下线通知");
+    },
+
     async getUpdates(cursor, signal) {
       const safeCursor = optionalInputString(
         cursor,
@@ -1327,6 +1365,11 @@ function parseSendResponse(raw: string): void {
   throwForApiError(value, "微信发送");
 }
 
+function parseLifecycleResponse(raw: string, operation: string): void {
+  const value = parseJsonRecord(raw, `${operation}响应`);
+  throwForApiError(value, operation);
+}
+
 function parseTypingTicketResponse(raw: string): string {
   const value = parseJsonRecord(raw, "微信输入状态配置响应");
   throwForApiError(value, "微信输入状态配置");
@@ -1346,6 +1389,8 @@ async function request(options: {
     | "getconfig"
     | "getupdates"
     | "getuploadurl"
+    | "msg/notifystart"
+    | "msg/notifystop"
     | "sendmessage"
     | "sendtyping";
   body: unknown;

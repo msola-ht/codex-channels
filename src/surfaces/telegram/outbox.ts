@@ -18,7 +18,6 @@ import { TurnReplyTargets } from "../turn-reply-targets.js";
 import {
   createTurnCompletedPresentation,
   createTurnStartedPresentation,
-  renderPlainLifecyclePresentation,
 } from "../lifecycle-presentation.js";
 import {
   cliInputTitle,
@@ -37,7 +36,10 @@ import { TelegramApiExecutor } from "./api-executor.js";
 import { TelegramApprovalOperationCoordinator } from "./approval-operation-coordinator.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
 import { telegramDefaultAccountId } from "./constants.js";
-import { splitTelegramText } from "./format.js";
+import {
+  renderTelegramLifecyclePresentation,
+  splitTelegramText,
+} from "./format.js";
 import { formatMarkdownAsTelegramHtml } from "./markdown-format.js";
 import { formatTelegramPanelChunks } from "./html-format.js";
 import {
@@ -162,7 +164,7 @@ export class TelegramOutbox {
           async () => {
             await this.sendPanel(
               chatId,
-              renderPlainLifecyclePresentation(
+              renderTelegramLifecyclePresentation(
                 createTurnStartedPresentation(),
               ),
               this.replyTargets.get(this.turnKey(event.threadId, event.turnId)),
@@ -345,7 +347,7 @@ export class TelegramOutbox {
           const replyTo = this.replyTargets.get(turnKey);
           await this.sendPanel(
             chatId,
-            renderPlainLifecyclePresentation(
+            renderTelegramLifecyclePresentation(
               createTurnCompletedPresentation(event),
             ),
             replyTo,

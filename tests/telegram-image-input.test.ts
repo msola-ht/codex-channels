@@ -470,6 +470,54 @@ describe("Telegram image input", () => {
     await output.close();
   });
 
+  it("accepts the documented shared command shortcuts", async () => {
+    const selectWorkspace = vi.fn().mockResolvedValue({
+      id: "main",
+      name: "Main",
+      cwd: "/workspace",
+    });
+    const resume = vi.fn().mockResolvedValue("thread-1");
+    const { surface, output, sentTexts } = createSurface(
+      vi.fn(),
+      vi.fn(),
+      {
+        listWorkspaces: () => [{
+          id: "main",
+          name: "Main",
+          cwd: "/workspace",
+        }],
+        selectWorkspace,
+        resume,
+      },
+    );
+
+    for (const [index, text] of ["/h", "/work main", "/r thread-1"].entries()) {
+      await surface.bot.handleUpdate({
+        update_id: 50 + index,
+        message: {
+          message_id: 50 + index,
+          date: 1,
+          from: telegramUser(),
+          chat: telegramChat(),
+          text,
+          entities: [{ offset: 0, length: text.split(" ")[0]!.length, type: "bot_command" }],
+        },
+      });
+    }
+
+    expect(sentTexts.join("\n")).toContain("快捷命令：");
+    expect(selectWorkspace).toHaveBeenCalledWith(
+      { surface: "telegram", accountId: "default", conversationId: "100" },
+      "main",
+    );
+    expect(resume).toHaveBeenCalledWith(
+      { surface: "telegram", accountId: "default", conversationId: "100" },
+      "thread-1",
+    );
+    await surface.stop();
+    await output.close();
+  });
+
   it("does not let lookalike or other-bot whoami commands bypass authorization", async () => {
     const submit = vi.fn().mockResolvedValue({
       threadId: "thread-1",

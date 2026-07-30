@@ -15,6 +15,7 @@ import {
   WeixinProtocolError,
   WeixinSurface,
   type WeixinProtocolClient,
+  type WeixinLifecycleProtocolClient,
   type WeixinReplyContextPersistence,
   type WeixinUpdatesCursorStore,
 } from "../src/surfaces/weixin/index.js";
@@ -212,8 +213,117 @@ describe("WeixinSurface", () => {
     expect(sendText).toHaveBeenCalledWith({
       actorId,
       contextToken: "restored-context",
-      text: "Codex Connect 已上线\n\nApp Server：已连接",
+      text: "Codex Connect 已上线  \nApp Server：已连接",
     });
+  });
+
+  it("uses official lifecycle notifications without depending on reply context", async () => {
+    const lifecycleClient: WeixinLifecycleProtocolClient = {
+      notifyStart: vi.fn(async () => {}),
+      notifyStop: vi.fn(async () => {}),
+    };
+    const surface = new WeixinSurface({
+      accountId,
+      client: {
+        getUpdates: vi.fn((_cursor, signal) => waitForAbort(signal)),
+        sendText: vi.fn(async () => {}),
+      },
+      lifecycleClient,
+      cursorStore: cursorStoreFixture(),
+      service: serviceFixture(),
+      access: accessFixture(true),
+      logger: pino({ level: "silent" }),
+      onFatal: vi.fn(),
+    });
+
+    await surface.start();
+    await surface.stop();
+
+    expect(lifecycleClient.notifyStart).toHaveBeenCalledOnce();
+    expect(lifecycleClient.notifyStop).toHaveBeenCalledOnce();
+  });
+
+  it("keeps polling when an official lifecycle notification fails", async () => {
+    const warn = vi.fn();
+    const lifecycleClient: WeixinLifecycleProtocolClient = {
+      notifyStart: vi.fn(async () => {
+        throw new WeixinProtocolError(
+          "api-error",
+          "private upstream response",
+          undefined,
+          -14,
+        );
+      }),
+      notifyStop: vi.fn(async () => {}),
+    };
+    const surface = new WeixinSurface({
+      accountId,
+      client: {
+        getUpdates: vi.fn((_cursor, signal) => waitForAbort(signal)),
+        sendText: vi.fn(async () => {}),
+      },
+      lifecycleClient,
+      cursorStore: cursorStoreFixture(),
+      service: serviceFixture(),
+      access: accessFixture(true),
+      logger: { warn } as unknown as pino.Logger,
+      onFatal: vi.fn(),
+    });
+
+    await surface.start();
+    await surface.stop();
+
+    expect(warn).toHaveBeenCalledWith(
+      {
+        surface: "weixin",
+        accountId,
+        state: "start",
+        errorType: "WeixinProtocolError",
+        errorCode: "api-error",
+        returnCode: -14,
+      },
+      "微信上线状态对账失败，不影响 Gateway",
+    );
+    expect(lifecycleClient.notifyStop).toHaveBeenCalledOnce();
+  });
+
+  it("keeps restored reply context when startup delivery reports a token error", async () => {
+    const replyContextPersistence = replyContextPersistenceFixture({
+      version: 1,
+      accountId,
+      actorId,
+      contextToken: "restored-context",
+      updatedAt: 1_000,
+    });
+    const surface = new WeixinSurface({
+      accountId,
+      client: {
+        getUpdates: vi.fn((_cursor, signal) => waitForAbort(signal)),
+        sendText: vi.fn(async () => {
+          throw new WeixinProtocolError(
+            "api-error",
+            "private upstream response",
+            undefined,
+            -14,
+          );
+        }),
+      },
+      cursorStore: cursorStoreFixture(),
+      service: serviceFixture(),
+      access: accessFixture(true),
+      replyContextPersistence,
+      startupNotification: {
+        targets: () => [target],
+        text: () => "Codex Connect 已上线",
+      },
+      logger: pino({ level: "silent" }),
+      onFatal: vi.fn(),
+    });
+
+    await surface.start();
+    await surface.stop();
+
+    expect(replyContextPersistence.remove).not.toHaveBeenCalled();
   });
 
   it("removes a restored context instead of notifying a revoked actor", async () => {
@@ -482,11 +592,14 @@ describe("WeixinSurface", () => {
       contextToken: "restored-context",
       text: [
         "Workspace 已添加",
-        "│ Docs · docs",
+        "",
+        "│ Docs · docs  ",
         "│ /workspace/docs",
+        "",
         "发送 /workspace 可查看并切换 Workspace。",
+        "",
         "已生效：Workspace",
-      ].join("\n\n"),
+      ].join("\n"),
     });
   });
 
@@ -531,9 +644,10 @@ describe("WeixinSurface", () => {
       contextToken: "restored-context",
       text: [
         "Gateway 配置需要重启",
-        "变更：默认模型",
+        "",
+        "变更：默认模型  ",
         "当前 Gateway 将退出；若由系统服务托管，将自动重新启动。",
-      ].join("\n\n"),
+      ].join("\n"),
     });
   });
 

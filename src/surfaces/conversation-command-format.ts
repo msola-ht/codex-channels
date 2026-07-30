@@ -50,24 +50,51 @@ export const conversationCommandDescriptions = {
   goal: "查看或管理 Goal",
 } satisfies Record<ConversationCommandName, string>;
 
-export const conversationCommandHelpLines = [
-  "/resume [序号|名称|Thread ID]",
-  "/sessions [搜索词] · /archived [搜索词]",
-  "/new",
-  "/archive · /unarchive <序号|名称|Thread ID>",
-  "/status",
-  "/workspace [序号|ID|名称]",
-  "/stop · /queue <描述>",
-  "/rename <名称> · /compact · /fork",
-  "/review [branch <分支>|commit <SHA>|custom <说明>]",
-  "/model [序号|模型 ID|名称]",
-  "/effort [序号|档位] · /fast [on|off|status]",
-  "/skills · /mcp · /plugins",
-  "/usage · /limits · /permissions",
-  "/rules <init|check>",
-  "/diff · /plan [规划需求]",
-  "/goal [set <目标>|clear]",
+export const conversationCommandHelpSections = [
+  {
+    title: "会话：",
+    lines: [
+      "/resume [序号|名称|Thread ID]",
+      "/sessions [搜索词] · /archived [搜索词]",
+      "/new · /archive · /unarchive <序号|名称|Thread ID>",
+      "/rename <名称> · /compact · /fork",
+    ],
+  },
+  {
+    title: "运行与项目：",
+    lines: [
+      "/status · /workspace [序号|ID|名称]",
+      "/stop · /queue <描述>",
+      "/review [branch <分支>|commit <SHA>|custom <说明>]",
+      "/rules <init|check> · /diff",
+      "/plan [规划需求] · /goal [set <目标>|clear]",
+    ],
+  },
+  {
+    title: "模型与能力：",
+    lines: [
+      "/model [序号|模型 ID|名称]",
+      "/effort [序号|档位] · /fast [on|off|status]",
+      "/skills · /mcp · /plugins",
+      "/usage · /limits · /permissions",
+    ],
+  },
+  {
+    title: "快捷命令：",
+    lines: [
+      "/h → /help",
+      "/work → /workspace",
+      "/r → /resume",
+    ],
+  },
 ] as const;
+
+export const conversationCommandHelpLines = conversationCommandHelpSections
+  .flatMap((section) => [
+    section.title,
+    ...section.lines.map((line) => `- ${line}`),
+    "",
+  ]);
 
 export function formatConversationSessions(
   result: Extract<ConversationCommandResult, { kind: "sessions" }>,

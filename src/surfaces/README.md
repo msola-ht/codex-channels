@@ -72,8 +72,10 @@ Turn、Thread 或 Surface 关闭时清理。
 Surface 共用的中文短文本，不负责计时、状态或持久化。
 `account-format.ts` 统一套餐名称、额度状态、百分比、周期与重置时间格式，供命令结果、运行时通知
 和生命周期汇报复用。
-`slash-command.ts` 统一飞书与微信的严格斜杠命令解析；`conversation-command-format.ts`
-统一 Telegram、飞书与微信共用的命令目录、有界会话列表、Workspace、Skill、MCP、Plugin、
+`slash-command.ts` 统一飞书与微信的严格斜杠命令解析，并规范化三个渠道共同公开的
+`/h`、`/work`、`/r` 快捷命令；Telegram 在 Bot 注册边界接入同一组显式映射。
+`conversation-command-format.ts`
+统一 Telegram、飞书与微信共用的分组命令目录、有界会话列表、Workspace、Skill、MCP、Plugin、
 权限、项目规则、Diff、Goal、模型选择、Default/Plan 模式、用量与额度等平台无关命令结果文案
 与状态文本。
 `user-facing-error-format.ts` 统一三个渠道的结构化用户错误文案，只保留渠道名称差异；

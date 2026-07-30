@@ -82,9 +82,9 @@ export function renderFeishuHelp(): string {
     "普通文本会发送到当前 Codex Thread。",
     "",
     ...conversationCommandHelpLines,
-    "/whoami",
-    "/fs <status|doctor|revoke>",
-    "/start · /help",
+    "飞书：",
+    "- /whoami · /fs <status|doctor|revoke>",
+    "- /start · /help · /h",
   ].join("\n");
 }
 

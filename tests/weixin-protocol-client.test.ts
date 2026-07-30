@@ -39,6 +39,8 @@ describe("WeixinProtocolClient", () => {
     const sendFile = vi.fn(async () => {});
     const getTypingTicket = vi.fn(async () => "typing-ticket");
     const setTyping = vi.fn(async () => {});
+    const notifyStart = vi.fn(async () => {});
+    const notifyStop = vi.fn(async () => {});
     const createClient = vi.fn(() => ({
       getUpdates,
       sendText,
@@ -46,6 +48,8 @@ describe("WeixinProtocolClient", () => {
       sendFile,
       getTypingTicket,
       setTyping,
+      notifyStart,
+      notifyStop,
     }));
     const client = createCredentialBackedWeixinClient({
       accountId,
@@ -79,6 +83,8 @@ describe("WeixinProtocolClient", () => {
       typingTicket: "typing-ticket",
       status: "typing",
     });
+    await client.notifyStart();
+    await client.notifyStop();
 
     expect(store.get).toHaveBeenCalledOnce();
     expect(store.get).toHaveBeenCalledWith(accountId);
@@ -88,6 +94,41 @@ describe("WeixinProtocolClient", () => {
       baseUrl: credential.baseUrl,
       botToken: credential.botToken,
     });
+    expect(notifyStart).toHaveBeenCalledOnce();
+    expect(notifyStop).toHaveBeenCalledOnce();
+  });
+
+  it("notifies the official service when the channel starts and stops", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      new Response(JSON.stringify({ ret: 0 }), { status: 200 }));
+    const client = createClient({ fetchImpl });
+
+    await client.notifyStart();
+    await client.notifyStop();
+
+    expect(fetchImpl.mock.calls.map(([url, init]) => ({
+      url,
+      body: JSON.parse(String(init?.body)),
+    }))).toEqual([
+      {
+        url: "https://ilinkai.weixin.qq.com/ilink/bot/msg/notifystart",
+        body: {
+          base_info: {
+            channel_version: "2.4.6",
+            bot_agent: "CodexConnect/0.145.0",
+          },
+        },
+      },
+      {
+        url: "https://ilinkai.weixin.qq.com/ilink/bot/msg/notifystop",
+        body: {
+          base_info: {
+            channel_version: "2.4.6",
+            bot_agent: "CodexConnect/0.145.0",
+          },
+        },
+      },
+    ]);
   });
 
   it("fails closed when the configured account has no secure credential", async () => {
