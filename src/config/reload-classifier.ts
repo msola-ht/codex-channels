@@ -108,6 +108,15 @@ function restartRequiredReasons(
   ) {
     reasons.push(configChange("surface.weixin.account", "weixin"));
   }
+  if (
+    current.weixin !== undefined
+    && next.weixin !== undefined
+    && ![...current.weixin.allowedUserIds].every(
+      (userId) => next.weixin!.allowedUserIds.has(userId),
+    )
+  ) {
+    reasons.push(configChange("surface.weixin.allowed-users", "weixin"));
+  }
   if (!preservesExistingWorkspaces(current.workspaces, next.workspaces)) {
     reasons.push(configChange("workspace.registry"));
   }
@@ -151,6 +160,9 @@ function hotReloadReasons(
   if (
     current.weixin !== undefined
     && next.weixin !== undefined
+    && [...current.weixin.allowedUserIds].every(
+      (userId) => next.weixin!.allowedUserIds.has(userId),
+    )
     && !sameSet(
       current.weixin.allowedUserIds,
       next.weixin.allowedUserIds,

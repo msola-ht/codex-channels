@@ -206,7 +206,32 @@ describe("Gateway config reload", () => {
     });
   });
 
-  it("hot reloads Weixin allowed user IDs", () => {
+  it("hot reloads added Weixin allowed user IDs", () => {
+    const current = config({
+      weixin: {
+        accountId: "bot-fixture@im.bot",
+        allowedUserIds: new Set(["actor-fixture@im.wechat"]),
+      },
+    });
+
+    expect(classifyConfigReload(
+      current,
+      config({
+        weixin: {
+          accountId: "bot-fixture@im.bot",
+          allowedUserIds: new Set([
+            "actor-fixture@im.wechat",
+            "reviewer-fixture@im.wechat",
+          ]),
+        },
+      }),
+    )).toEqual({
+      action: "reload",
+      changes: [{ code: "surface.weixin.allowed-users", scope: "weixin" }],
+    });
+  });
+
+  it("restarts when Weixin allowed user IDs are removed", () => {
     const current = config({
       weixin: {
         accountId: "bot-fixture@im.bot",
@@ -226,7 +251,7 @@ describe("Gateway config reload", () => {
         },
       }),
     )).toEqual({
-      action: "reload",
+      action: "restart",
       changes: [{ code: "surface.weixin.allowed-users", scope: "weixin" }],
     });
   });

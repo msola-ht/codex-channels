@@ -54,7 +54,7 @@ describe("Codex Connect setup", () => {
       }, {
         value: "weixin",
         label: "微信",
-        hint: "扫码连接（消息接收开发中）",
+        hint: "扫码连接与用户授权",
       }],
     });
     expect(telegramSetup).toHaveBeenCalledWith({ input, output });

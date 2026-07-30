@@ -154,8 +154,6 @@ function createWeixinModule(
   return createWeixinRuntimeModule(
     adapter,
     access,
-    options.bindings,
-    options.logger,
   );
 }
 
@@ -408,8 +406,6 @@ export function createFeishuRuntimeModule(
 export function createWeixinRuntimeModule(
   adapter: WeixinRuntimeAdapter,
   access: ReloadableWeixinAccess,
-  bindings: BindingStore,
-  logger: Logger,
 ): SurfaceRuntimeModule {
   return {
     adapter,
@@ -421,14 +417,6 @@ export function createWeixinRuntimeModule(
         throw new Error("微信允许名单热加载缺少运行配置");
       }
       access.replace(next.weixin.allowedUserIds);
-      const removedBindings = removeUnauthorizedWeixinBindings(
-        bindings,
-        next.weixin.allowedUserIds,
-        adapter.accountId,
-      );
-      if (removedBindings > 0) {
-        logger.warn({ removedBindings }, "已清理不再授权的微信会话绑定");
-      }
     },
     prepareRestartNotification() {
       return () => {};

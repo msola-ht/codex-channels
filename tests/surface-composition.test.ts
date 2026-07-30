@@ -126,6 +126,43 @@ describe("configured Surface composition", () => {
     ]);
   });
 
+  it("removes revoked Weixin bindings while composing a restarted Surface", () => {
+    const bindings = new MemoryBindingStore();
+    const accountId = "bot-fixture@im.bot";
+    const allowed = {
+      surface: "weixin",
+      accountId,
+      conversationId: "allowed@im.wechat",
+    } as const;
+    const revoked = {
+      surface: "weixin",
+      accountId,
+      conversationId: "revoked@im.wechat",
+    } as const;
+    for (const [target, actorId, threadId] of [
+      [allowed, "allowed@im.wechat", "thread-allowed"],
+      [revoked, "revoked@im.wechat", "thread-revoked"],
+    ] as const) {
+      bindings.bind({
+        target,
+        workspaceId: "main",
+        threadId,
+        sessionId: `session-${threadId}`,
+      });
+      bindings.rememberActor(target, actorId);
+    }
+
+    createSurfaceModules(options(config({
+      weixin: {
+        accountId,
+        allowedUserIds: new Set(["allowed@im.wechat"]),
+      },
+    }), bindings));
+
+    expect(bindings.getByThread("thread-allowed")).toBeDefined();
+    expect(bindings.getByThread("thread-revoked")).toBeUndefined();
+  });
+
   it("loads Weixin credentials from the config directory independently of the database path", async () => {
     const root = mkdtempSync(join(tmpdir(), "weixin-composition-"));
     temporaryDirectories.push(root);
@@ -346,42 +383,20 @@ describe("Feishu Surface runtime composition", () => {
 });
 
 describe("Weixin Surface runtime composition", () => {
-  it("hot reloads authorization and removes bindings for revoked actors", () => {
-    const bindings = new MemoryBindingStore();
+  it("hot reloads added authorization without changing bindings", () => {
     const accountId = "bot-fixture@im.bot";
-    const allowed = {
-      surface: "weixin",
-      accountId,
-      conversationId: "allowed@im.wechat",
-    } as const;
-    const revoked = {
-      surface: "weixin",
-      accountId,
-      conversationId: "revoked@im.wechat",
-    } as const;
-    for (const [target, actorId, threadId] of [
-      [allowed, "allowed@im.wechat", "thread-allowed"],
-      [revoked, "revoked@im.wechat", "thread-revoked"],
-    ] as const) {
-      bindings.bind({
-        target,
-        workspaceId: "main",
-        threadId,
-        sessionId: `session-${threadId}`,
-      });
-      bindings.rememberActor(target, actorId);
-    }
     const replaceAccess = vi.fn();
     const module = createWeixinRuntimeModule(
       weixinAdapter(),
       { replace: replaceAccess },
-      bindings,
-      pino({ level: "silent" }),
     );
     const next = config({
       weixin: {
         accountId,
-        allowedUserIds: new Set(["allowed@im.wechat"]),
+        allowedUserIds: new Set([
+          "allowed@im.wechat",
+          "new@im.wechat",
+        ]),
       },
     });
 
@@ -391,8 +406,6 @@ describe("Weixin Surface runtime composition", () => {
     }]);
 
     expect(replaceAccess).toHaveBeenCalledWith(next.weixin?.allowedUserIds);
-    expect(bindings.getByThread("thread-allowed")).toBeDefined();
-    expect(bindings.getByThread("thread-revoked")).toBeUndefined();
   });
 });
 
@@ -483,11 +496,14 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
   };
 }
 
-function options(runtimeConfig: GatewayConfig) {
+function options(
+  runtimeConfig: GatewayConfig,
+  bindings = new MemoryBindingStore(),
+) {
   return {
     config: runtimeConfig,
     service: {} as ConversationService,
-    bindings: new MemoryBindingStore(),
+    bindings,
     logger: pino({ level: "silent" }),
     gatewayVersion: "0.145.0",
     codexUpstreamUserAgent: () => undefined,
