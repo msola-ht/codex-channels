@@ -41,6 +41,7 @@ Application 的本地图片输入，同一 Thread 的
 - `inbound-content.ts`：统一严格解析入站与被引用消息的文本、富文本、图片、文件和音频元素。
 - `message-content.ts`：中和平台原生提及标签并生成飞书 `post + md` 降级内容。
 - `operation-format.ts`：把单个操作终态渲染为包含脱敏详情的静态 CardKit Markdown。
+- `outbox-content.ts`：集中处理 Outbox 的纯文本缓冲、CardKit 字符分片、富文本字节分片与截断标记。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪，保留回复事件的 `parent_id`。
 - `menu-event.ts`：严格裁剪 `application.bot.menu_v6` 的 App、Actor、事件和菜单 Key。
 - `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理；连续图片在一秒静默

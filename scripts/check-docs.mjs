@@ -98,8 +98,9 @@ function localLinkTarget(raw) {
 }
 
 function checkRootIndex() {
-  const readme = readFileSync(join(root, "README.md"), "utf8");
+  const index = readFileSync(join(root, "index.md"), "utf8");
   for (const target of [
+    "README.md",
     "docs/index.md",
     "config.example.toml",
     "src/README.md",
@@ -112,8 +113,8 @@ function checkRootIndex() {
     ".githooks/README.md",
     ".github/workflows/README.md",
   ]) {
-    if (!readme.includes(`](${target})`)) {
-      failures.push(`README.md 文档索引缺少 ${target}`);
+    if (!index.includes(`](${target})`)) {
+      failures.push(`index.md 文档索引缺少 ${target}`);
     }
   }
 }

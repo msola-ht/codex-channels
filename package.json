@@ -34,6 +34,7 @@
     "systemd/",
     "scripts/",
     "config.example.toml",
+    "index.md",
     "LICENSE",
     "README.md"
   ],

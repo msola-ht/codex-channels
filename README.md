@@ -1,5 +1,11 @@
 # Codex Connect Gateway
 
+[![CI](https://github.com/msola-ht/codex-channels/actions/workflows/ci.yml/badge.svg)](https://github.com/msola-ht/codex-channels/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@hegenai/codexc)](https://www.npmjs.com/package/@hegenai/codexc)
+![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.13-339933?logo=nodedotjs&logoColor=white)
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555555)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 在 Telegram、飞书或微信中使用本机 Codex。
 
 Gateway 与原生 Codex TUI 连接同一个 Codex App Server，因此会话、Thread 和运行状态可以在聊天客户端与终端之间继续使用。
@@ -191,30 +197,7 @@ npm run verify:commit
 npm run install:global
 ```
 
-项目架构和模块边界见 [`src/README.md`](src/README.md)。Codex App Server 的支持范围与精确协议基线见 [`docs/index.md`](docs/index.md)。
-
-## 详细文档
-
-- [`docs/index.md`](docs/index.md)：Codex 协议基线、支持矩阵和实现入口。
-- [`docs/channel-acceptance-matrix.md`](docs/channel-acceptance-matrix.md)：Telegram、飞书和微信验收状态。
-- [`docs/upstream-sources.md`](docs/upstream-sources.md)：飞书与微信上游源码基线。
-- [`docs/codex-cli-upgrade.md`](docs/codex-cli-upgrade.md)：Codex CLI 升级流程。
-- [`docs/surface-integration-guide.md`](docs/surface-integration-guide.md)：新增通讯渠道指南。
-- [`docs/feishu-surface-plan.md`](docs/feishu-surface-plan.md)：飞书 Surface 设计。
-- [`docs/feishu-reference-index.md`](docs/feishu-reference-index.md)：飞书资料与实现映射。
-- [`docs/weixin-surface-plan.md`](docs/weixin-surface-plan.md)：微信 Surface 设计。
-- [`src/README.md`](src/README.md)：源码模块。
-- [`bin/README.md`](bin/README.md)：CLI 入口。
-- [`scripts/README.md`](scripts/README.md)：构建、验证和服务脚本。
-- [`runtime/README.md`](runtime/README.md)：共享运行时。
-- [`launchd/README.md`](launchd/README.md)：macOS 服务。
-- [`systemd/README.md`](systemd/README.md)：Linux 服务。
-- [`tests/README.md`](tests/README.md)：测试范围。
-- [`.githooks/README.md`](.githooks/README.md)：提交前检查。
-- [`.github/workflows/README.md`](.github/workflows/README.md)：CI 与发布工作流。
-- [`AGENTS.md`](AGENTS.md)：项目开发约束。
-
-Telegram、飞书和微信的具体输入、输出与平台限制见 [`src/surfaces/README.md`](src/surfaces/README.md) 及其子目录文档。
+完整项目文档见 [`index.md`](index.md)。
 
 ## License
 
