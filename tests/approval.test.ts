@@ -59,6 +59,29 @@ class FakeInteraction implements InteractionPort {
   }
 }
 
+class ControlledInteraction implements InteractionPort {
+  requests: InteractionRequest[] = [];
+  private readonly resolvers: Array<(decision: InteractionDecision) => void> = [];
+
+  request(
+    _target: ConversationTarget,
+    request: InteractionRequest,
+  ): Promise<InteractionDecision> {
+    this.requests.push(request);
+    return new Promise((resolve) => {
+      this.resolvers.push(resolve);
+    });
+  }
+
+  resolveNext(decision: InteractionDecision): void {
+    const resolve = this.resolvers.shift();
+    if (!resolve) {
+      throw new Error("没有等待处理的交互");
+    }
+    resolve(decision);
+  }
+}
+
 describe("resolveApprovalChoice", () => {
   it.each<{
     choice: ApprovalChoice;
@@ -116,6 +139,193 @@ describe("resolveApprovalChoice", () => {
 });
 
 describe("InteractionRouter", () => {
+  it("delivers only one interaction at a time within the same Conversation", async () => {
+    const interaction = new ControlledInteraction();
+    const router = new InteractionRouter();
+    router.register("telegram", "default", interaction);
+    const firstRequest = approvalInteractionRequest({
+      requestId: "request-first",
+    });
+    const secondRequest = approvalInteractionRequest({
+      requestId: "request-second",
+    });
+
+    const first = router.request(target, firstRequest);
+    const second = router.request(target, secondRequest);
+
+    expect(interaction.requests).toEqual([firstRequest]);
+    interaction.resolveNext({
+      type: "approval",
+      approved: true,
+      scope: "once",
+    });
+    await expect(first).resolves.toEqual({
+      type: "approval",
+      approved: true,
+      scope: "once",
+    });
+    expect(interaction.requests).toEqual([firstRequest, secondRequest]);
+
+    interaction.resolveNext({ type: "approval", approved: false });
+    await expect(second).resolves.toEqual({
+      type: "approval",
+      approved: false,
+    });
+  });
+
+  it("does not deliver a queued interaction after another client resolves it", async () => {
+    const interaction = new ControlledInteraction();
+    const router = new InteractionRouter();
+    router.register("feishu", "default", interaction);
+    const feishuTarget: ConversationTarget = {
+      surface: "feishu",
+      accountId: "default",
+      conversationId: "chat-1",
+    };
+    const firstRequest = approvalInteractionRequest({
+      requestId: "request-first",
+    });
+    const secondRequest = approvalInteractionRequest({
+      requestId: "request-second",
+    });
+    const first = router.request(feishuTarget, firstRequest);
+    const second = router.request(feishuTarget, secondRequest);
+    let secondDecision: InteractionDecision | undefined;
+    void second.then((decision) => {
+      secondDecision = decision;
+    });
+
+    router.resolved("request-second");
+    await Promise.resolve();
+
+    expect(secondDecision).toEqual({
+      type: "approval",
+      approved: false,
+    });
+    interaction.resolveNext({
+      type: "approval",
+      approved: true,
+      scope: "once",
+    });
+    await first;
+    await second;
+    expect(interaction.requests).toEqual([firstRequest]);
+  });
+
+  it("cancels queued interactions without delivering them when the Gateway closes", async () => {
+    const interaction = new ControlledInteraction();
+    const router = new InteractionRouter();
+    router.register("weixin", "default", interaction);
+    const weixinTarget: ConversationTarget = {
+      surface: "weixin",
+      accountId: "default",
+      conversationId: "user-1",
+    };
+    const firstRequest = approvalInteractionRequest({
+      requestId: "request-first",
+    });
+    const secondRequest = approvalInteractionRequest({
+      requestId: "request-second",
+    });
+    const first = router.request(weixinTarget, firstRequest);
+    const second = router.request(weixinTarget, secondRequest);
+    let secondDecision: InteractionDecision | undefined;
+    void second.then((decision) => {
+      secondDecision = decision;
+    });
+
+    router.cancelAll("Gateway 已停止");
+    await Promise.resolve();
+
+    expect(secondDecision).toEqual({
+      type: "approval",
+      approved: false,
+    });
+    interaction.resolveNext({ type: "approval", approved: false });
+    await first;
+    await second;
+    expect(interaction.requests).toEqual([firstRequest]);
+  });
+
+  it("fails closed when the same request ID is already pending", async () => {
+    const interaction = new ControlledInteraction();
+    const router = new InteractionRouter();
+    router.register("telegram", "default", interaction);
+    const request = approvalInteractionRequest({
+      requestId: "request-duplicate",
+    });
+
+    const first = router.request(target, request);
+    const duplicate = router.request(target, request);
+
+    await expect(duplicate).resolves.toEqual({
+      type: "approval",
+      approved: false,
+    });
+    expect(interaction.requests).toEqual([request]);
+
+    interaction.resolveNext({ type: "approval", approved: false });
+    await first;
+  });
+
+  it("fails closed when the shared interaction queue reaches its capacity", async () => {
+    const interaction = new ControlledInteraction();
+    const router = new InteractionRouter(undefined, 2);
+    router.register("telegram", "default", interaction);
+    const firstRequest = approvalInteractionRequest({
+      requestId: "request-first",
+    });
+    const secondRequest = approvalInteractionRequest({
+      requestId: "request-second",
+    });
+    const excessRequest = approvalInteractionRequest({
+      requestId: "request-excess",
+    });
+
+    const first = router.request(target, firstRequest);
+    const second = router.request(target, secondRequest);
+
+    await expect(router.request(target, excessRequest)).resolves.toEqual({
+      type: "approval",
+      approved: false,
+    });
+    expect(interaction.requests).toEqual([firstRequest]);
+
+    interaction.resolveNext({ type: "approval", approved: false });
+    await first;
+    await Promise.resolve();
+    interaction.resolveNext({ type: "approval", approved: false });
+    await second;
+  });
+
+  it("delivers interactions for different Conversations independently", async () => {
+    const interaction = new ControlledInteraction();
+    const router = new InteractionRouter();
+    router.register("feishu", "default", interaction);
+    const firstRequest = approvalInteractionRequest({
+      requestId: "request-chat-1",
+    });
+    const secondRequest = approvalInteractionRequest({
+      requestId: "request-chat-2",
+    });
+
+    const first = router.request({
+      surface: "feishu",
+      accountId: "default",
+      conversationId: "chat-1",
+    }, firstRequest);
+    const second = router.request({
+      surface: "feishu",
+      accountId: "default",
+      conversationId: "chat-2",
+    }, secondRequest);
+
+    expect(interaction.requests).toEqual([firstRequest, secondRequest]);
+    interaction.resolveNext({ type: "approval", approved: false });
+    interaction.resolveNext({ type: "approval", approved: false });
+    await Promise.all([first, second]);
+  });
+
   it("provides the shared fail-closed decision for every interaction type", () => {
     expect(safeInteractionDecision({
       type: "approval",

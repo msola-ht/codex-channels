@@ -11,8 +11,9 @@
 - `interaction-decision.ts`：把 Surface 已验证的审批选择统一映射为一次、会话、命令规则、网络规则
   或拒绝决定，并再次校验当前请求确实提供对应能力。
 - `coordinator.ts`：验证请求归属，分派交互，处理拒绝、一次/会话批准、命令前缀规则和跨客户端解决。
-- `interaction-router.ts`：按 `surface + accountId` 将请求路由到对应 Surface，并公开统一的失败关闭
-  决定；未注册、超时、关闭或不支持的交互默认拒绝或取消。
+- `interaction-router.ts`：按 `surface + accountId` 将请求路由到对应 Surface，并按完整 Conversation
+  有界串行审批、用户输入和 MCP 交互；不同 Conversation 可并行。重复请求、容量溢出、未注册、
+  超时、关闭或不支持的交互默认拒绝或取消。
 
 审批必须绑定 Thread、协议提供的 Turn 与请求标识。MCP elicitation 无法关联活动 Turn 时允许
 `turnId` 为 `null`，此时 App Server 请求 ID 是该交互的协议身份。未知、缺少必需归属信息或
