@@ -56,11 +56,11 @@ describe("Feishu output renderer", () => {
       {
         platform: "darwin",
         architecture: "arm64",
-        gatewayVersion: "0.145.0",
+        gatewayVersion: "0.146.0",
         nodeVersion: "v24.0.0",
         transport: "Unix WebSocket",
         codexUpstreamUserAgent:
-          "codex-cli/0.145.0 (macOS 15.0) build-secret (arm64)",
+          "codex-cli/0.146.0 (macOS 15.0) build-secret (arm64)",
       },
     );
 
@@ -71,9 +71,9 @@ describe("Feishu output renderer", () => {
       "",
       "**运行环境**",
       "- **系统：** macOS · arm64",
-      "- **版本：** Codex Connect 0.145.0 · Node.js v24.0.0",
+      "- **版本：** Codex Connect 0.146.0 · Node.js v24.0.0",
       "- **连接：** Unix WebSocket",
-      "- **App Server UA：** codex-cli/0.145.0 (macOS 15.0) (arm64)",
+      "- **App Server UA：** codex-cli/0.146.0 (macOS 15.0) (arm64)",
       "",
       "**当前会话**",
       "- **Workspace：** Main (main)",

@@ -182,11 +182,11 @@ describe("Notification adapter", () => {
   it("maps account, MCP and warning notifications without generated response types", () => {
     expect(toConversationInputEvent({
       method: "account/updated",
-      params: { authMode: "chatgpt", planType: "pro" },
+      params: { authMode: "chatgpt", planType: "ent26" },
     })).toEqual({
       type: "account.updated",
       authMode: "chatgpt",
-      planType: "pro",
+      planType: "ent26",
     });
     expect(toConversationInputEvent({
       method: "mcpServer/startupStatus/updated",

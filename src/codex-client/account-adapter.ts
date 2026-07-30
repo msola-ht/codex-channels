@@ -156,6 +156,7 @@ const accountPlanTypes = new Set<AccountPlanType>([
   "team",
   "self_serve_business_usage_based",
   "business",
+  "ent26",
   "enterprise_cbp_usage_based",
   "enterprise",
   "edu",

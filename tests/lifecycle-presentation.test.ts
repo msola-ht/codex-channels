@@ -33,11 +33,11 @@ describe("shared Surface lifecycle presentation", () => {
         {
           platform: "linux",
           architecture: "x64",
-          gatewayVersion: "0.145.0",
+          gatewayVersion: "0.146.0",
           nodeVersion: "v22.23.1",
           transport: "Unix WebSocket",
           codexUpstreamUserAgent:
-            "codex/0.145.0 (Linux; x64) private-build (gateway; 0.145.0)",
+            "codex/0.146.0 (Linux; x64) private-build (gateway; 0.146.0)",
         },
       ),
     );
@@ -49,9 +49,9 @@ describe("shared Surface lifecycle presentation", () => {
       "",
       "运行环境：",
       "系统：Linux · x64",
-      "版本：Codex Connect 0.145.0 · Node.js v22.23.1",
+      "版本：Codex Connect 0.146.0 · Node.js v22.23.1",
       "连接：Unix WebSocket",
-      "App Server UA：codex/0.145.0 (Linux; x64) (gateway; 0.145.0)",
+      "App Server UA：codex/0.146.0 (Linux; x64) (gateway; 0.146.0)",
       "",
       "当前会话：",
       "Workspace：Main (main)",

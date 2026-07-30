@@ -540,6 +540,7 @@ function parsePlanType(
     || value === "team"
     || value === "self_serve_business_usage_based"
     || value === "business"
+    || value === "ent26"
     || value === "enterprise_cbp_usage_based"
     || value === "enterprise"
     || value === "edu"

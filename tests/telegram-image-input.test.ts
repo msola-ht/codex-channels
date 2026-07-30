@@ -716,7 +716,7 @@ function createSurface(
     directory,
     pino({ level: "silent" }),
     {
-      gatewayVersion: "0.145.0",
+      gatewayVersion: "0.146.0",
       inputQuietWindowMs: 0,
       imageStore,
       audioStore,
