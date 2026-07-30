@@ -64,7 +64,7 @@ export function renderWeixinHelp(): string {
     "普通文本会发送到当前 Codex Thread。",
     ...conversationCommandHelpLines,
     "/whoami",
-    "/weixin doctor",
+    "/wx doctor",
     "/start · /help",
   ].join("\n");
 }

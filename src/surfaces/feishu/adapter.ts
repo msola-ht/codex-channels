@@ -145,7 +145,7 @@ export class FeishuConversationAdapter {
           );
           return;
         }
-        if (command.name === "feishu") {
+        if (command.name === "fs" || command.name === "feishu") {
           await this.handleFeishuCommand(
             message.actorId,
             message.target.accountId,
@@ -401,7 +401,7 @@ export class FeishuConversationAdapter {
     }
     this.notifyText(
       chatId,
-      "用法：/feishu <status|doctor|revoke>",
+      "用法：/fs <status|doctor|revoke>",
     );
   }
 

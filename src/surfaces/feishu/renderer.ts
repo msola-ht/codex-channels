@@ -83,7 +83,7 @@ export function renderFeishuHelp(): string {
     "",
     ...conversationCommandHelpLines,
     "/whoami",
-    "/feishu <status|doctor|revoke>",
+    "/fs <status|doctor|revoke>",
     "/start · /help",
   ].join("\n");
 }

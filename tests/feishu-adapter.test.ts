@@ -236,10 +236,10 @@ describe("Feishu conversation adapter", () => {
     );
 
     for (const text of [
-      "/feishu",
-      "/feishu status",
-      "/feishu doctor",
-      "/feishu unknown",
+      "/fs",
+      "/fs status",
+      "/fs doctor",
+      "/fs unknown",
     ]) {
       await adapter.handle({ ...message, text });
     }
@@ -248,7 +248,7 @@ describe("Feishu conversation adapter", () => {
     expect(submit).not.toHaveBeenCalled();
     expect(fixture.sent).toHaveLength(4);
     expect(fixture.sent[0]?.text).toContain("飞书权限中心");
-    expect(fixture.sent[0]?.text).toContain("/feishu doctor");
+    expect(fixture.sent[0]?.text).toContain("/fs doctor");
     expect(fixture.sent[1]?.text).toContain("长连接：已就绪");
     expect(fixture.sent[1]?.text).toContain("卡片动作回调：尚未验证");
     expect(fixture.sent[2]?.text).toContain("✅ 长连接");
@@ -263,7 +263,7 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent[2]?.text).not.toContain("token");
     expect(fixture.sent[2]?.text).not.toContain("secret");
     expect(fixture.sent[3]?.text).toBe(
-      "用法：/feishu <status|doctor|revoke>",
+      "用法：/fs <status|doctor|revoke>",
     );
   });
 
@@ -746,7 +746,7 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent).toEqual([
       {
         chatId: "oc_chat",
-        text: "用法：/feishu <status|doctor|revoke>",
+        text: "用法：/fs <status|doctor|revoke>",
       },
       expect.objectContaining({
         text: expect.stringContaining("当前用户 OAuth：已授权"),

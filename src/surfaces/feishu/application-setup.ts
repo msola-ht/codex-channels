@@ -255,7 +255,7 @@ export class FeishuApplicationSetupController {
         ? "菜单、事件与回调已自动配置并提交发布，正在等待管理员审核。"
         : applicationConfigurationComplete(configured, pending.runtime)
           ? "菜单、事件与回调已自动配置并发布完成。"
-          : "菜单、事件与回调已自动配置并提交发布，请稍后发送 /feishu doctor 复查。";
+          : "菜单、事件与回调已自动配置并提交发布，请稍后发送 /fs doctor 复查。";
       await this.outbox.updateCard(
         pending.target.conversationId,
         pending.messageId,
@@ -640,24 +640,24 @@ function setupFailureText(error: unknown): string {
     return "当前应用已有待发布版本，未自动覆盖。请先在飞书开放平台处理该版本。";
   }
   if (code === "configuration-failed") {
-    return "飞书自动配置或发布失败，未继续重试。请发送 /feishu doctor 复查。";
+    return "飞书自动配置或发布失败，未继续重试。请发送 /fs doctor 复查。";
   }
   if (code === "authorization-invalid") {
     const failure = (error as Partial<FeishuApplicationSetupError>)
       .authorizationFailure;
     if (failure === "access-denied") {
-      return "飞书授权页未完成确认或已拒绝，请重新发送 /feishu doctor。";
+      return "飞书授权页未完成确认或已拒绝，请重新发送 /fs doctor。";
     }
     if (failure === "expired") {
-      return "飞书应用授权已过期，请重新发送 /feishu doctor。";
+      return "飞书应用授权已过期，请重新发送 /fs doctor。";
     }
     if (failure === "app-mismatch") {
-      return "飞书授权结果不是当前应用，已安全拒绝。请重新发送 /feishu doctor。";
+      return "飞书授权结果不是当前应用，已安全拒绝。请重新发送 /fs doctor。";
     }
     if (failure === "unsupported-tenant") {
       return "当前项目暂不支持 Lark 租户。";
     }
-    return "应用授权未完成或已失效，请重新发送 /feishu doctor。";
+    return "应用授权未完成或已失效，请重新发送 /fs doctor。";
   }
-  return "授权未完成。Gateway 已隐藏上游错误详情，请发送 /feishu doctor 复查。";
+  return "授权未完成。Gateway 已隐藏上游错误详情，请发送 /fs doctor 复查。";
 }

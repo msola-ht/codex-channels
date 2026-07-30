@@ -93,15 +93,15 @@ Application 的本地图片输入，同一 Thread 的
   可重试错误语义。
 - 原生流式额外需要应用权限 `cardkit:card:write`；一次性音频、UTF-8 文本文件输入和超长最终正文文件补发
   共用既有 `im:resource`。新扫码应用会声明这些权限；已有应用由 Owner
-  通过 `/feishu doctor` 只增量开通缺失权限，再由 Owner 发布，无需重新扫码或申请用户 OAuth。
+  通过 `/fs doctor` 只增量开通缺失权限，再由 Owner 发布，无需重新扫码或申请用户 OAuth。
 - 显式回复消息时使用 `parent_id` 按需读取一条被引用消息，需要应用权限
   `im:message:readonly`。文本、富文本和 CardKit 只提取受支持的可见文字，忽略按钮、输入值与
   引用附件；不扫描历史消息、不下载引用中的附件，也不持久化引用正文。引用读取失败时记录
   受限错误码并降级为只处理当前消息，不因可选上下文丢失当前输入。新扫码应用会声明该权限，
-  已有应用由 Owner 通过 `/feishu doctor` 增量开通。
+  已有应用由 Owner 通过 `/fs doctor` 增量开通。
 - 扫码 Setup 在凭据与 Bot 身份验证并原子保存连接配置后，直接复用 Application v7 配置能力，
   保留已有菜单并自动发布 `codexc_home` 悬浮菜单、长连接菜单事件与卡片回调。发布失败时保留
-  已验证连接配置，只输出稳定的 `/feishu doctor` 恢复入口；手动凭据 Setup 不直接修改远端应用。
+  已验证连接配置，只输出稳定的 `/fs doctor` 恢复入口；手动凭据 Setup 不直接修改远端应用。
 - Doctor 使用 `application:application:self_manage` 做只读检测，并默认申请
   `application:application:patch` 完成受控配置写入。当前授权 Actor 点击一次性卡片后通过 SDK
   官方流程只授权缺失差集；授权页包装为飞书 AppLink，在客户端侧边栏完成确认。
@@ -227,7 +227,7 @@ StateStore 中已有绑定且仍有授权 Actor 的精确 Chat 生成消息；Su
 `ConversationCommandService.execute()`；`/start`、`/help` 打开同一命令中心卡片，
 `/stop` 优先停止当前 Actor 在本私聊中的最新待处理交互，没有待处理交互时调用共享 Turn
 停止命令；`/whoami` 和
-`/feishu <status|doctor|revoke>` 留在飞书边界。`status` 展示当前进程实际观测到的
+`/fs <status|doctor|revoke>` 留在飞书边界，并兼容旧的 `/feishu` 入口。`status` 展示当前进程实际观测到的
 连接、消息事件、卡片回调和当前 Actor OAuth 状态；`doctor` 只显示长连接、消息接收、卡片交互
 和自定义菜单四项摘要，用户 OAuth 状态与撤销分别留在 `status` 和 `revoke`。用户级能力必须把
 自身需要的 Scope 显式传给 OAuth 控制器；控制器先比较应用已开通权限与安全凭据后端中的有效
@@ -245,7 +245,7 @@ Inbox 现有诊断路径仅记录受约束的错误类型。命令结果、追�
 Adapter 不会重试已经执行的状态修改，而是把稳定的队列错误交回同一诊断路径。会话列表最多展示
 20 条，名称或预览会规范空白并限制为 48 个字符，剩余项通过搜索提示收敛。
 
-`/feishu doctor` 在 Surface 内调用 `application-setup.ts`，不经过 Conversation Core，也不把
+`/fs doctor` 在 Surface 内调用 `application-setup.ts`，不经过 Conversation Core，也不把
 应用 SDK 类型带入 Application。Doctor 先读取租户已开通权限、已发布版本、事件和回调形成快照，
 再以当前进程真实收到的消息、卡片动作和菜单事件为优先证据。只有必需租户权限仍有缺项且当前
 Actor 仍获授权时才生成授权按钮，并把精确差集传给 SDK；菜单、事件、回调或待发布版本缺项只

@@ -57,7 +57,7 @@
 - `polling-health.ts`：只在当前进程内归约轮询中、短重试、退避、Token 失效暂停和停止状态，
   按 Gateway 本地时间显示当前消息到达前上一次后台成功轮询时间，并记录连续失败次数及预计恢复
   时间；不保存消息、游标、Token 或上游响应。
-- `doctor.ts`：为微信内 `/weixin doctor` 提供只读诊断；严格读取 Bot 凭据、当前私聊回复上下文
+- `doctor.ts`：为微信内 `/wx doctor` 提供只读诊断；严格读取 Bot 凭据、当前私聊回复上下文
   和后台游标后立即降维为可用性状态，并组合进程内轮询健康与 Token 失效状态。诊断不显示或返回
   Token、`context_token`、游标正文及底层存储错误。
 - `input-adapter.ts`：拥有单账号监控器生命周期；按微信账号和私聊 Actor 构造目标，授权后记录
@@ -69,7 +69,8 @@
   停止会清空引用缓存、取消长轮询并有限等待；
   处理失败不推进游标，只向生命周期所有者报告稳定错误码。
 - `conversation-adapter.ts`：复用 Application 的 `ConversationCommandService` 和完整共享命令
-  目录，并保留微信本地 `/start`、`/help`、`/whoami`、`/weixin doctor`；将说明文字和全部成功下载的图片一次
+  目录，并保留微信本地 `/start`、`/help`、`/whoami`、`/wx doctor`，同时兼容旧的
+  `/weixin doctor`；将说明文字和全部成功下载的图片一次
   提交；UTF-8 文本文件以内联文本和明确文件名边界提交，不使用本地文件路径。引用正文与当前
   消息明确分离，任一图片失败或总大小超限时不提交部分输入。命令解析只看
   当前消息并复用 Surface 公共模板，未知斜杠

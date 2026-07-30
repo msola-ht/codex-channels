@@ -437,7 +437,7 @@ Codex 输入。Outbox 对纯文本按 UTF-8 字节、对富文本按序列化后
 选择卡和原生用户输入卡已经通过真实验收；未授权/重复真实事件和直接命令矩阵仍须补充真实验证。
 群聊的严格配置、身份校验和真实事件 Fixture 继续暂停，不属于当前公开支持。
 
-`/feishu <status|doctor|revoke>` 属于平台本地权限中心，不占用 Application 的
+`/fs <status|doctor|revoke>` 属于平台本地权限中心，并兼容旧的 `/feishu` 入口，不占用 Application 的
 `/permissions`。`status` 记录当前进程事件观测和当前 Actor OAuth；`doctor` 只显示长连接、
 消息接收、卡片交互和自定义菜单四项摘要。Doctor 读取已有租户 Scope 与已发布配置，并以当前
 进程真实收到的事件为优先证据；只有必需权限缺失时才通过绑定 App、Chat、消息和 Actor 的一次性

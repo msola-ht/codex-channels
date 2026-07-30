@@ -65,9 +65,9 @@ export function renderFeishuDoctor(
 export function renderFeishuPermissionHelp(): string {
   return [
     "飞书权限中心",
-    "/feishu status · 查看当前运行观测",
-    "/feishu doctor · 检查必要能力并给出修复入口",
-    "/feishu revoke · 清除当前账号的本地授权",
+    "/fs status · 查看当前运行观测",
+    "/fs doctor · 检查必要能力并给出修复入口",
+    "/fs revoke · 清除当前账号的本地授权",
     "用户权限会在使用相关飞书能力时按需申请。",
   ].join("\n");
 }

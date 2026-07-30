@@ -555,8 +555,10 @@ describe("WeixinConversationAdapter", () => {
       },
     );
 
+    await adapter.handle({ ...message, text: "/wx doctor" });
     await adapter.handle({ ...message, text: "/weixin doctor" });
 
+    expect(inspect).toHaveBeenCalledTimes(2);
     expect(inspect).toHaveBeenCalledWith(target);
     expect(submit).not.toHaveBeenCalled();
     expect(notifyText).toHaveBeenCalledWith(

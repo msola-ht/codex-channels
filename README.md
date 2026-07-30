@@ -37,7 +37,7 @@
   Codex 原生 `imageGeneration` 成功保存的 PNG/JPEG 会经安全文件校验、官方图片上传接口
   和私聊消息接口发送；该反向图片路径已通过真实应用验收。
   `/start`、`/help` 与机器人自定义菜单可打开分类命令中心卡片；
-  `/feishu doctor` 可在 Actor
+  `/fs doctor` 可在 Actor
   明确确认后只增量申请缺失的应用权限，并通过飞书客户端内的授权页自动补齐菜单、事件与回调后
   提交应用版本。Doctor 会分别检查菜单节点和启用开关；节点存在但
   未启用时显示“已添加，尚未启用”。飞书独立音频复用既有 `im:resource`，限制为 5 分钟、
@@ -48,7 +48,8 @@
 - 微信单账号私聊文本、图片、语音转写与 UTF-8 文本文件 Surface 已接入：`codexc setup` 会在明确确认连接替换风险后扫码，把
   Bot Token 保存到独立安全凭据后端，并记录脱敏账号与允许用户；将保存配置中的
   `weixin.enabled` 显式改为 `true` 并重载服务后开始接收和回复文本。微信支持
-  `/start`、`/help`、`/whoami`、只读 `/weixin doctor`，以及统一会话命令服务的全部命令；
+  `/start`、`/help`、`/whoami`、只读 `/wx doctor`，以及统一会话命令服务的全部命令；
+  旧的 `/weixin doctor` 入口仍兼容；
   Doctor 仅显示 Bot 凭据、回复上下文、后台游标和轮询/Token 状态，不显示对应私密正文；
   未知斜杠命令会明确拒绝，
   不会作为普通消息提交给 Codex。单条消息及同一接收批次内连续发送的图片支持说明文字和最多
@@ -172,7 +173,7 @@ operation_updates = "compact"
 统一配置。二维码、设备码和短期授权状态不会保存；已有允许名单只会在终端再次确认后保留。
 扫码方式保存配置后会立即保留已有菜单，自动启用 Event Key 为 `codexc_home` 的悬浮 `Codex`
 事件菜单、追加长连接菜单事件与卡片回调并提交应用版本。自动配置失败不会删除已验证的连接配置，
-可在 Gateway 启动后通过 `/feishu doctor` 恢复。手动输入凭据不会在终端直接修改应用配置。
+可在 Gateway 启动后通过 `/fs doctor` 恢复。手动输入凭据不会在终端直接修改应用配置。
 也可以手工在同一配置文件中加入：
 
 ```toml
@@ -184,7 +185,7 @@ allowed_open_ids = ["ou_xxx"]
 ```
 
 手工配置后、扫码自动配置失败时，或需要复查当前应用状态时，可在飞书私聊发送
-`/feishu doctor`。Doctor 以当前 Gateway 已收到的消息、
+`/fs doctor`。Doctor 以当前 Gateway 已收到的消息、
 卡片动作和菜单事件为优先证据，并只读复查应用已开通的租户权限与已发布配置；卡片只显示四项
 摘要和当前仍需处理的入口。缺少应用权限时，一次性授权按钮只申请差集，并在飞书客户端侧边栏
 完成确认；随后 Gateway 保留已有菜单，自动启用一个 Event Key 为 `codexc_home` 的悬浮 `Codex`
@@ -366,7 +367,7 @@ Thread 恢复继续通过 App Server 通知校正。Gateway 只缓存当前 Goal
 
 飞书私聊的开发实现已复用上述全部平台无关会话命令，并另外提供 `/start`、`/help`、
 `/whoami` 和
-`/feishu <status|doctor|revoke>`。`status` 显示当前进程实际观测到的长连接、消息事件、
+`/fs <status|doctor|revoke>`；旧的 `/feishu` 入口仍兼容。`status` 显示当前进程实际观测到的长连接、消息事件、
 卡片回调、机器人菜单事件和当前 Actor OAuth 状态；`doctor` 只显示长连接、消息接收、卡片交互
 和自定义菜单四项摘要。Doctor 会读取当前租户已开通权限和已发布配置，运行时已经收到的事件优先于
 远端快照；缺少应用权限或菜单配置时显示一次性配置按钮，并只申请缺失权限。该动作以一次性令牌
@@ -438,13 +439,13 @@ Thread 状态卡片更新及用户输入卡已通过真实应用验收；MCP for
 后台有限轮询、校验实际授权账号并原地更新结果卡片。该流程需要应用权限
 `application:application:self_manage`。macOS Token 保存到系统 Keychain，Linux 保存到 Gateway
 数据目录下的 AES-256-GCM 私有凭据文件，不进入配置、会话 SQLite、日志或平台消息；
-`/feishu status` 会区分授权进行中与已保存凭据，`/feishu revoke` 会取消进行中的授权并清除当前
+`/fs status` 会区分授权进行中与已保存凭据，`/fs revoke` 会取消进行中的授权并清除当前
 Actor 本地凭据；即使本地凭据已经损坏、无法解密，明确撤销仍会清除对应文件并记录脱敏告警。
 Surface 停止会取消授权任务并最多等待 5 秒；若停止或存储错误与 Token 写入
 竞态，则尝试恢复停止前的凭据，恢复失败会记录不含 Token 的警告。真实 Device Flow、身份校验
 与安全写入及 Gateway 重启后的 Token 恢复已通过测试应用验收。当前 Surface 对话不依赖
 用户 OAuth，也没有飞书 CLI 工具消费该 Token，因此当前不会主动发起用户授权；已有凭据保持不变，
-可通过 `/feishu revoke` 清除。
+可通过 `/fs revoke` 清除。
 
 这组命令仍属于开发验证能力；Gateway 重启后的 Thread 绑定恢复已通过验收，仍需完成真实应用中
 的帮助、选择器、状态修改、Diff 和错误参数等命令矩阵后，才能更新为公开支持。

@@ -151,14 +151,14 @@ export async function runFeishuSetup({
       } catch {
         output.write(
           "飞书连接配置已保存，但机器人菜单自动配置未完成；"
-          + "Gateway 启动后可发送 /feishu doctor 恢复。\n",
+          + "Gateway 启动后可发送 /fs doctor 恢复。\n",
         );
       }
     }
     output.write("下一步运行：codexc doctor\n");
     if (!scanRegistration) {
       output.write(
-        "Gateway 启动后，在飞书私聊发送 /feishu doctor "
+        "Gateway 启动后，在飞书私聊发送 /fs doctor "
         + "完成机器人菜单和订阅配置。\n",
       );
     }
