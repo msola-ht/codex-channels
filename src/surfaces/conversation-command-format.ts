@@ -134,7 +134,9 @@ export function formatConversationCommandOutcome(
 ): string {
   switch (outcome.type) {
     case "thread.resumed":
-      return `已恢复 Codex Thread\nThread：${outcome.threadId}`;
+      return outcome.transferredFrom
+        ? `${formatTakeoverSource(outcome.transferredFrom)}\nThread：${outcome.threadId}`
+        : `已恢复 Codex Thread\nThread：${outcome.threadId}`;
     case "session.new":
       return "已退出当前会话，下一条普通消息将创建新的 Codex Thread。";
     case "thread.archived":
@@ -165,6 +167,19 @@ export function formatConversationCommandOutcome(
       return "已清除当前 Thread Goal。";
     case "goal.updated":
       return `Goal 已设置\n目标：${outcome.goal.objective}`;
+  }
+}
+
+function formatTakeoverSource(surface: string): string {
+  switch (surface) {
+    case "telegram":
+      return "已从 Telegram 接管 Codex Thread";
+    case "feishu":
+      return "已从飞书接管 Codex Thread";
+    case "weixin":
+      return "已从微信接管 Codex Thread";
+    default:
+      return "已从其他渠道接管 Codex Thread";
   }
 }
 

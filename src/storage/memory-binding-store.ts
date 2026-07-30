@@ -1,5 +1,9 @@
 import { conversationTargetKey, type ConversationTarget } from "../conversation-core/index.js";
-import type { BindingStore, ConversationBinding } from "./binding-store.js";
+import type {
+  BindingStore,
+  BindingTransfer,
+  ConversationBinding,
+} from "./binding-store.js";
 
 export class MemoryBindingStore implements BindingStore {
   private readonly workspaceByConversation = new Map<string, string>();
@@ -80,6 +84,35 @@ export class MemoryBindingStore implements BindingStore {
     this.byConversation.set(conversationKey, binding);
     this.byThread.set(binding.threadId, binding);
     this.workspaceByConversation.set(conversationKey, binding.workspaceId);
+  }
+
+  transfer(threadId: string, target: ConversationTarget): BindingTransfer {
+    const previousOwner = this.byThread.get(threadId);
+    if (!previousOwner) {
+      throw new Error("待转移的 Codex Thread 当前没有外部会话绑定");
+    }
+    const targetKey = this.key(target);
+    const ownerKey = this.key(previousOwner.target);
+    if (targetKey === ownerKey) {
+      return { binding: previousOwner, previousOwner };
+    }
+    const replaced = this.byConversation.get(targetKey);
+    const binding = {
+      target,
+      workspaceId: previousOwner.workspaceId,
+      threadId: previousOwner.threadId,
+      sessionId: previousOwner.sessionId,
+    };
+    this.unbind(previousOwner.target);
+    if (replaced) {
+      this.unbind(replaced.target);
+    }
+    this.bind(binding);
+    return {
+      binding,
+      previousOwner,
+      ...(replaced ? { replaced } : {}),
+    };
   }
 
   unbind(target: ConversationTarget): ConversationBinding | undefined {

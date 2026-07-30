@@ -868,6 +868,210 @@ describe("ConversationService model selection", () => {
     expect(clearGoal).toHaveBeenCalledWith("thread-1");
   });
 
+  it("takes over an idle Thread and notifies the previous channel", async () => {
+    const previousTarget = {
+      surface: "feishu" as const,
+      accountId: "tenant-a",
+      conversationId: "chat-a",
+    };
+    const destinationBinding = {
+      target,
+      workspaceId: "main",
+      threadId: "thread-destination",
+      sessionId: "session-destination",
+    };
+    const previousOwner = {
+      target: previousTarget,
+      workspaceId: "main",
+      threadId: "thread-shared",
+      sessionId: "session-shared",
+    };
+    const transferredBinding = {
+      ...previousOwner,
+      target,
+    };
+    const transferBinding = vi.fn(async () => ({
+      binding: transferredBinding,
+      previousOwner,
+      replaced: destinationBinding,
+    }));
+    const clear = vi.fn();
+    const notifyTransferred = vi.fn();
+    const router = {
+      list: async () => [{
+        id: "thread-shared",
+        sessionId: "session-shared",
+        preview: "共享会话",
+        name: null,
+        isPinned: false,
+        status: { type: "idle" as const },
+        cwd: main.cwd,
+        source: "cli" as const,
+        activeTurnId: null,
+      }],
+      targetForThread: () => previousTarget,
+      current: (candidate: typeof target | typeof previousTarget) =>
+        candidate.surface === "telegram" ? destinationBinding : previousOwner,
+      transferBinding,
+    } as unknown as SessionRouter;
+    const service = new ConversationService(
+      turnPort(),
+      router,
+      { activeTurn: () => undefined } as unknown as ConversationCore,
+      { clear } as unknown as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      {
+        hasPendingInteraction: () => false,
+        notifyTransferred,
+      },
+    );
+
+    await expect(service.resume(target, "thread-shared")).resolves.toEqual({
+      threadId: "thread-shared",
+      transferredFrom: "feishu",
+    });
+    expect(transferBinding).toHaveBeenCalledWith(target, "thread-shared");
+    expect(clear).toHaveBeenCalledWith(previousTarget);
+    expect(clear).toHaveBeenCalledWith(target);
+    expect(notifyTransferred).toHaveBeenCalledWith({
+      previousTarget,
+      nextTarget: target,
+      threadId: "thread-shared",
+    });
+  });
+
+  it("does not take over a Thread with a pending interaction", async () => {
+    const previousTarget = {
+      surface: "weixin" as const,
+      accountId: "bot-a",
+      conversationId: "user-a",
+    };
+    const transferBinding = vi.fn();
+    const service = new ConversationService(
+      turnPort(),
+      {
+        list: async () => [{
+          id: "thread-shared",
+          sessionId: "session-shared",
+          preview: "共享会话",
+          name: null,
+          isPinned: false,
+          status: { type: "idle" as const },
+          cwd: main.cwd,
+          source: "cli" as const,
+          activeTurnId: null,
+        }],
+        targetForThread: () => previousTarget,
+        current: () => undefined,
+        transferBinding,
+      } as unknown as SessionRouter,
+      { activeTurn: () => undefined } as unknown as ConversationCore,
+      { clear: vi.fn() } as unknown as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      {
+        hasPendingInteraction: () => true,
+        notifyTransferred: vi.fn(),
+      },
+    );
+
+    await expect(service.resume(target, "thread-shared"))
+      .rejects.toMatchObject({ code: "thread.takeover.busy" });
+    expect(transferBinding).not.toHaveBeenCalled();
+  });
+
+  it("does not take over a Thread while either channel has a queued follow-up", async () => {
+    const previousTarget = {
+      surface: "feishu" as const,
+      accountId: "tenant-a",
+      conversationId: "chat-a",
+    };
+    const transferBinding = vi.fn();
+    let activeTarget: typeof previousTarget | undefined = previousTarget;
+    const service = new ConversationService(
+      turnPort(),
+      {
+        list: async () => [{
+          id: "thread-shared",
+          sessionId: "session-shared",
+          preview: "共享会话",
+          name: null,
+          isPinned: false,
+          status: { type: "idle" as const },
+          cwd: main.cwd,
+          source: "cli" as const,
+          activeTurnId: null,
+        }],
+        targetForThread: () => previousTarget,
+        current: () => undefined,
+        transferBinding,
+      } as unknown as SessionRouter,
+      {
+        activeTurn: (candidate: typeof target | typeof previousTarget) =>
+          activeTarget
+          && candidate.surface === activeTarget.surface
+          && candidate.accountId === activeTarget.accountId
+          && candidate.conversationId === activeTarget.conversationId
+            ? { threadId: "thread-shared", turnId: "turn-1" }
+            : undefined,
+      } as unknown as ConversationCore,
+      { clear: vi.fn() } as unknown as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      {
+        hasPendingInteraction: () => false,
+        notifyTransferred: vi.fn(),
+      },
+    );
+    await service.queueFollowUp(previousTarget, "下一轮继续");
+    activeTarget = undefined;
+
+    await expect(service.resume(target, "thread-shared"))
+      .rejects.toMatchObject({ code: "thread.takeover.busy" });
+    expect(transferBinding).not.toHaveBeenCalled();
+  });
+
+  it("does not automatically take over another Conversation on the same Surface", async () => {
+    const sameSurfaceOwner = {
+      surface: "telegram" as const,
+      accountId: "default",
+      conversationId: "200",
+    };
+    const transferBinding = vi.fn();
+    const service = new ConversationService(
+      turnPort(),
+      {
+        list: async () => [{
+          id: "thread-shared",
+          sessionId: "session-shared",
+          preview: "共享会话",
+          name: null,
+          isPinned: false,
+          status: { type: "idle" as const },
+          cwd: main.cwd,
+          source: "cli" as const,
+          activeTurnId: null,
+        }],
+        targetForThread: () => sameSurfaceOwner,
+        transferBinding,
+      } as unknown as SessionRouter,
+      { activeTurn: () => undefined } as unknown as ConversationCore,
+      { clear: vi.fn() } as unknown as ModelSelectionService,
+      queryPort(),
+    );
+
+    await expect(service.resume(target, "thread-shared"))
+      .rejects.toMatchObject({ code: "thread.bound" });
+    expect(transferBinding).not.toHaveBeenCalled();
+  });
+
   it("keeps pinned sessions first without changing order inside each group", async () => {
     const resume = vi.fn(async (resumeTarget, threadId: string) => ({
       target: resumeTarget,
@@ -914,6 +1118,7 @@ describe("ConversationService model selection", () => {
           },
         ],
         resume,
+        targetForThread: () => undefined,
       } as unknown as SessionRouter,
       { activeTurn: () => undefined } as unknown as ConversationCore,
       { clear: vi.fn() } as unknown as ModelSelectionService,
@@ -925,7 +1130,9 @@ describe("ConversationService model selection", () => {
       expect.objectContaining({ id: "pinned-new", isPinned: true }),
       expect.objectContaining({ id: "recent", isPinned: false }),
     ]);
-    await expect(service.resume(target, "1")).resolves.toBe("pinned-old");
+    await expect(service.resume(target, "1")).resolves.toEqual({
+      threadId: "pinned-old",
+    });
     expect(resume).toHaveBeenCalledWith(target, "pinned-old");
   });
 

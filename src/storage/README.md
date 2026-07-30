@@ -10,7 +10,9 @@
 - `sqlite-binding-store.ts`：单机 Gateway 使用的 SQLite 实现，负责当前 Schema、文件权限和持久恢复。
 
 Conversation 使用 `surface + accountId + conversationId` 作为复合身份；一个 Codex Thread
-只能绑定一个外部 Conversation。数据库必须使用当前 Schema v3；其他版本会失败关闭，不执行自动迁移。
+只能绑定一个外部 Conversation。空闲 Thread 的跨渠道接管在同一个 SQLite 事务中移除原绑定、
+释放目标 Conversation 原绑定并写入新绑定，不增加持久化字段。数据库必须使用当前 Schema v3；
+其他版本会失败关闭，不执行自动迁移。
 标记为当前版本但缺少必需表或字段的数据库同样会失败关闭，不执行自动补表或修补。
 
 授权操作者通过独立的 Conversation→Actor 关联保存，不从群聊或私聊的 Conversation ID

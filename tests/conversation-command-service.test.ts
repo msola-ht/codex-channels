@@ -74,6 +74,25 @@ describe("ConversationCommandService", () => {
     expect(listSessions).toHaveBeenCalledWith(target, { searchTerm: "fix" });
   });
 
+  it("preserves automatic takeover details in the shared resume outcome", async () => {
+    const commands = new ConversationCommandService({
+      resume: vi.fn(async () => ({
+        threadId: "thread-shared",
+        transferredFrom: "weixin",
+      })),
+    } as unknown as ConversationService);
+
+    await expect(commands.execute(target, "resume", "thread-shared"))
+      .resolves.toEqual({
+        kind: "outcome",
+        outcome: {
+          type: "thread.resumed",
+          threadId: "thread-shared",
+          transferredFrom: "weixin",
+        },
+      });
+  });
+
   it("keeps review parsing and business invocation outside Surface adapters", async () => {
     const review = vi.fn(async () => ({
       threadId: "review-thread",
@@ -263,7 +282,7 @@ describe("ConversationCommandService", () => {
       updatedAt: 1,
     };
     const service = {
-      resume: vi.fn(async () => "thread-resumed"),
+      resume: vi.fn(async () => ({ threadId: "thread-resumed" })),
       listSessions: vi.fn(async () => []),
       status: vi.fn(() => ({ workspaceId: "main" })),
       newSession: vi.fn(async () => undefined),

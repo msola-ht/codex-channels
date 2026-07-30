@@ -4,7 +4,11 @@ import {
   type ConversationTarget,
 } from "../conversation-core/index.js";
 import type { Workspace, WorkspaceRegistry } from "../policy/index.js";
-import type { BindingStore, ConversationBinding } from "../storage/index.js";
+import type {
+  BindingStore,
+  BindingTransfer,
+  ConversationBinding,
+} from "../storage/index.js";
 import type { ThreadLifecyclePort, ThreadSnapshot } from "./thread-port.js";
 
 export interface ThreadModelSettings {
@@ -211,6 +215,75 @@ export class SessionRouter {
     this.bindings.bind(binding);
     this.forceNew.delete(this.key(target));
     return binding;
+  }
+
+  async transferBinding(
+    target: ConversationTarget,
+    threadId: string,
+  ): Promise<BindingTransfer> {
+    const owner = this.bindings.getByThread(threadId);
+    if (!owner) {
+      throw new UserFacingError(
+        "thread.takeover.changed",
+        "Codex Thread 绑定已变化，请重新选择",
+      );
+    }
+    if (this.key(owner.target) === this.key(target)) {
+      return { binding: owner, previousOwner: owner };
+    }
+    if (owner.target.surface === target.surface) {
+      throw new UserFacingError(
+        "thread.bound",
+        "同一渠道中的其他 Conversation 已绑定该 Codex Thread",
+      );
+    }
+    const workspace = this.workspace(target);
+    if (owner.workspaceId !== workspace.id) {
+      throw new UserFacingError(
+        "thread.takeover.workspace",
+        "只能接管当前 Workspace 中的 Codex Thread",
+      );
+    }
+    const replaced = this.bindings.get(target);
+    const threads = await Promise.all([
+      this.codex.readThread(threadId),
+      ...(replaced && replaced.threadId !== threadId
+        ? [this.codex.readThread(replaced.threadId)]
+        : []),
+    ]);
+    if (threads.some((thread) => thread.status.type !== "idle")) {
+      throw new UserFacingError(
+        "thread.takeover.busy",
+        "原渠道或当前渠道仍有运行中的任务，暂不能接管",
+      );
+    }
+    if (replaced && replaced.threadId !== threadId) {
+      await this.codex.unsubscribeThread(replaced.threadId);
+    }
+    let transfer: BindingTransfer;
+    try {
+      transfer = this.bindings.transfer(threadId, target);
+    } catch (error) {
+      if (replaced && replaced.threadId !== threadId) {
+        try {
+          await this.codex.resumeThread(replaced.threadId, workspace.cwd);
+        } catch (restoreError) {
+          throw new AggregateError(
+            [error, restoreError],
+            "Thread 绑定转移失败，且目标渠道原订阅恢复失败",
+            { cause: restoreError },
+          );
+        }
+      }
+      throw error;
+    }
+    if (replaced && replaced.threadId !== threadId) {
+      this.modelSettingsByThread.delete(replaced.threadId);
+      this.contextCompactionItemIdsByThread.delete(replaced.threadId);
+    }
+    this.forceNew.add(this.key(owner.target));
+    this.forceNew.delete(this.key(target));
+    return transfer;
   }
 
   async newSession(target: ConversationTarget): Promise<void> {

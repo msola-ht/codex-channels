@@ -91,7 +91,7 @@ export type ConversationCommandResult =
   | { kind: "goal"; goal: ThreadGoal | null };
 
 export type ConversationCommandOutcome =
-  | { type: "thread.resumed"; threadId: string }
+  | { type: "thread.resumed"; threadId: string; transferredFrom?: string }
   | { type: "session.new" }
   | { type: "thread.archived"; threadId: string }
   | { type: "thread.unarchived"; threadId: string }
@@ -125,10 +125,16 @@ export class ConversationCommandService {
     switch (command) {
       case "resume": {
         if (argumentsText) {
-          const threadId = await this.conversations.resume(target, argumentsText);
+          const resumed = await this.conversations.resume(target, argumentsText);
           return {
             kind: "outcome",
-            outcome: { type: "thread.resumed", threadId },
+            outcome: {
+              type: "thread.resumed",
+              threadId: resumed.threadId,
+              ...(resumed.transferredFrom
+                ? { transferredFrom: resumed.transferredFrom }
+                : {}),
+            },
           };
         }
         const sessions = await this.conversations.listSessions(target);

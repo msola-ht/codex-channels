@@ -44,6 +44,12 @@ export function formatSurfaceUserFacingError(
       return "找不到指定会话";
     case "thread.bound":
       return "该 Codex Thread 已绑定到其他会话";
+    case "thread.takeover.busy":
+      return "原渠道或当前渠道仍有任务或待处理交互，暂不能接管";
+    case "thread.takeover.workspace":
+      return "只能接管当前 Workspace 中的 Codex Thread";
+    case "thread.takeover.changed":
+      return "会话绑定刚刚发生变化，请重新打开会话列表后再试";
     case "goal.empty":
       return "目标不能为空";
     case "goal.usage":

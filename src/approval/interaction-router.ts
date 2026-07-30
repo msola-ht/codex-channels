@@ -131,6 +131,15 @@ export class InteractionRouter implements InteractionPort {
     }
   }
 
+  hasPendingForThread(threadId: string): boolean {
+    for (const pending of this.pendingByRequestId.values()) {
+      if (pending.request.threadId === threadId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   cancelAll(outcome?: string): void {
     for (const queue of this.queues.values()) {
       for (const queued of queue.entries.splice(0)) {
@@ -187,6 +196,9 @@ export class InteractionRouter implements InteractionPort {
     next.active = true;
     void next.port.request(next.target, next.request).then(
       (decision) => {
+        if (this.pendingByRequestId.get(next.request.requestId) === next) {
+          this.pendingByRequestId.delete(next.request.requestId);
+        }
         next.resolve(decision);
       },
       (error: unknown) => {

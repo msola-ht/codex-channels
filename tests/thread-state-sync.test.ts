@@ -20,6 +20,7 @@ function unusedThreadPort(): ThreadLifecyclePort {
   };
   return {
     listThreads: unsupported,
+    readThread: unsupported,
     startThread: unsupported,
     resumeThread: unsupported,
     forkThread: unsupported,

@@ -3,7 +3,11 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import type { ConversationTarget, SurfaceId } from "../conversation-core/index.js";
-import type { BindingStore, ConversationBinding } from "./binding-store.js";
+import type {
+  BindingStore,
+  BindingTransfer,
+  ConversationBinding,
+} from "./binding-store.js";
 import { MemoryBindingStore } from "./memory-binding-store.js";
 
 interface BindingRow {
@@ -221,6 +225,79 @@ export class SqliteBindingStore implements BindingStore {
     }
   }
 
+  transfer(threadId: string, target: ConversationTarget): BindingTransfer {
+    this.requireOpen();
+    const previousOwner = this.memory.getByThread(threadId);
+    if (!previousOwner) {
+      throw new Error("待转移的 Codex Thread 当前没有外部会话绑定");
+    }
+    if (sameTarget(previousOwner.target, target)) {
+      return { binding: previousOwner, previousOwner };
+    }
+    const replaced = this.memory.get(target);
+    const binding = {
+      target,
+      workspaceId: previousOwner.workspaceId,
+      threadId: previousOwner.threadId,
+      sessionId: previousOwner.sessionId,
+    };
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const removeBinding = this.database.prepare(`
+        DELETE FROM conversation_bindings
+        WHERE surface = ? AND account_id = ? AND conversation_id = ?
+      `);
+      if (replaced) {
+        removeBinding.run(
+          replaced.target.surface,
+          replaced.target.accountId,
+          replaced.target.conversationId,
+        );
+      }
+      removeBinding.run(
+        previousOwner.target.surface,
+        previousOwner.target.accountId,
+        previousOwner.target.conversationId,
+      );
+      this.database
+        .prepare(`
+          INSERT INTO conversation_workspaces (
+            surface, account_id, conversation_id, workspace_id, updated_at
+          ) VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(surface, account_id, conversation_id) DO UPDATE SET
+            workspace_id = excluded.workspace_id,
+            updated_at = excluded.updated_at
+        `)
+        .run(
+          target.surface,
+          target.accountId,
+          target.conversationId,
+          binding.workspaceId,
+          Date.now(),
+        );
+      this.database
+        .prepare(`
+          INSERT INTO conversation_bindings (
+            surface, account_id, conversation_id, workspace_id, thread_id, session_id, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `)
+        .run(
+          target.surface,
+          target.accountId,
+          target.conversationId,
+          binding.workspaceId,
+          binding.threadId,
+          binding.sessionId,
+          Date.now(),
+        );
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+    return this.memory.transfer(threadId, target);
+  }
+
   unbind(target: ConversationTarget): ConversationBinding | undefined {
     this.requireOpen();
     const binding = this.memory.get(target);
@@ -364,6 +441,15 @@ export class SqliteBindingStore implements BindingStore {
       throw new Error("状态数据库已经关闭");
     }
   }
+}
+
+function sameTarget(
+  left: ConversationTarget,
+  right: ConversationTarget,
+): boolean {
+  return left.surface === right.surface
+    && left.accountId === right.accountId
+    && left.conversationId === right.conversationId;
 }
 
 function parseSurfaceId(value: string): SurfaceId {

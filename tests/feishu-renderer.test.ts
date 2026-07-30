@@ -384,6 +384,14 @@ describe("Feishu output renderer", () => {
         expected: "Thread：thread-resumed",
       },
       {
+        outcome: {
+          type: "thread.resumed",
+          threadId: "thread-transferred",
+          transferredFrom: "telegram",
+        },
+        expected: "已从 Telegram 接管 Codex Thread",
+      },
+      {
         outcome: { type: "session.new" },
         expected: "下一条普通消息将创建新的 Codex Thread",
       },

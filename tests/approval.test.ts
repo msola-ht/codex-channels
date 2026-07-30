@@ -139,6 +139,24 @@ describe("resolveApprovalChoice", () => {
 });
 
 describe("InteractionRouter", () => {
+  it("reports pending interactions for the exact Thread until they resolve", async () => {
+    const interaction = new ControlledInteraction();
+    const router = new InteractionRouter();
+    router.register("telegram", "default", interaction);
+    const request = approvalInteractionRequest({
+      requestId: "request-thread",
+      threadId: "thread-pending",
+    });
+
+    const decision = router.request(target, request);
+
+    expect(router.hasPendingForThread("thread-pending")).toBe(true);
+    expect(router.hasPendingForThread("thread-other")).toBe(false);
+    interaction.resolveNext({ type: "approval", approved: false });
+    await decision;
+    expect(router.hasPendingForThread("thread-pending")).toBe(false);
+  });
+
   it("delivers only one interaction at a time within the same Conversation", async () => {
     const interaction = new ControlledInteraction();
     const router = new InteractionRouter();

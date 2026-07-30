@@ -34,6 +34,7 @@ export interface ThreadQueryOptions {
 
 export interface ThreadLifecyclePort {
   listThreads(cwd: string, options?: ThreadQueryOptions): Promise<ThreadSnapshot[]>;
+  readThread(threadId: string): Promise<ThreadSnapshot>;
   startThread(cwd: string): Promise<ThreadSession>;
   resumeThread(threadId: string, cwd: string): Promise<ThreadSession>;
   forkThread(threadId: string, cwd: string): Promise<ThreadSession>;

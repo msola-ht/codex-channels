@@ -22,6 +22,7 @@ import {
   gatewayUserMessageClientIdPrefix,
   type ConversationTarget,
   type RateLimitSnapshot,
+  type SurfaceId,
   type ThreadGoal,
   type ThreadTokenUsage,
   type TurnArtifacts,
@@ -69,6 +70,20 @@ export interface ProjectRulesPort {
 
 export interface WorkspaceStatusPort {
   currentGitBranch(projectRoot: string): string | undefined;
+}
+
+export interface ConversationTransferPort {
+  hasPendingInteraction(threadId: string): boolean;
+  notifyTransferred(event: {
+    previousTarget: ConversationTarget;
+    nextTarget: ConversationTarget;
+    threadId: string;
+  }): void;
+}
+
+export interface ConversationResumeResult {
+  threadId: string;
+  transferredFrom?: SurfaceId;
 }
 
 export type ConversationQueryPort =
@@ -119,6 +134,7 @@ export class ConversationService {
     private readonly projectRules?: ProjectRulesPort,
     private readonly workspaceStatus?: WorkspaceStatusPort,
     private readonly collaborationModes?: CollaborationModeSelectionService,
+    private readonly transfers?: ConversationTransferPort,
   ) {}
 
   submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission> {
@@ -251,14 +267,88 @@ export class ConversationService {
       }));
   }
 
-  resume(target: ConversationTarget, selector: string): Promise<string> {
+  async resume(
+    target: ConversationTarget,
+    selector: string,
+  ): Promise<ConversationResumeResult> {
+    const sessions = pinnedFirst(await this.router.list(target));
+    const selected = resolveThread(sessions, selector.trim());
+    const owner = this.router.targetForThread(selected.id);
+    if (owner && conversationTargetKey(owner) !== conversationTargetKey(target)) {
+      if (owner.surface === target.surface) {
+        throw new UserFacingError(
+          "thread.bound",
+          "该 Codex Thread 已绑定到同一渠道中的其他会话",
+        );
+      }
+      if (!this.transfers) {
+        throw new UserFacingError(
+          "thread.bound",
+          "当前服务没有启用跨渠道 Thread 接管",
+        );
+      }
+      const transfers = this.transfers;
+      return this.lockedTargets([owner, target], async () => {
+        const currentOwner = this.router.targetForThread(selected.id);
+        if (
+          !currentOwner
+          || conversationTargetKey(currentOwner) !== conversationTargetKey(owner)
+        ) {
+          throw new UserFacingError(
+            "thread.takeover.changed",
+            "Codex Thread 绑定已变化，请重新选择",
+          );
+        }
+        this.requireIdle(owner);
+        this.requireIdle(target);
+        if (this.hasQueuedFollowUps(owner) || this.hasQueuedFollowUps(target)) {
+          throw new UserFacingError(
+            "thread.takeover.busy",
+            "原渠道或当前渠道仍有排队消息，暂不能接管",
+          );
+        }
+        const destination = this.router.current(target);
+        if (
+          transfers.hasPendingInteraction(selected.id)
+          || (
+            destination
+            && transfers.hasPendingInteraction(destination.threadId)
+          )
+        ) {
+          throw new UserFacingError(
+            "thread.takeover.busy",
+            "原渠道或当前渠道仍有待处理交互，暂不能接管",
+          );
+        }
+        const transfer = await this.router.transferBinding(target, selected.id);
+        this.clearConversationState(owner);
+        this.clearConversationState(target);
+        transfers.notifyTransferred({
+          previousTarget: owner,
+          nextTarget: target,
+          threadId: transfer.binding.threadId,
+        });
+        return {
+          threadId: transfer.binding.threadId,
+          transferredFrom: owner.surface,
+        };
+      });
+    }
     return this.locked(target, async () => {
       this.requireIdle(target);
-      const sessions = pinnedFirst(await this.router.list(target));
-      const selected = resolveThread(sessions, selector.trim());
+      const currentOwner = this.router.targetForThread(selected.id);
+      if (
+        currentOwner
+        && conversationTargetKey(currentOwner) !== conversationTargetKey(target)
+      ) {
+        throw new UserFacingError(
+          "thread.takeover.changed",
+          "Codex Thread 绑定已变化，请重新选择",
+        );
+      }
       const binding = await this.router.resume(target, selected.id);
       this.clearPendingSelections(target);
-      return binding.threadId;
+      return { threadId: binding.threadId };
     });
   }
 
@@ -588,6 +678,15 @@ export class ConversationService {
     this.collaborationModes?.clear(target);
   }
 
+  private clearConversationState(target: ConversationTarget): void {
+    this.clearPendingSelections(target);
+    this.queuedFollowUps.delete(conversationTargetKey(target));
+  }
+
+  private hasQueuedFollowUps(target: ConversationTarget): boolean {
+    return (this.queuedFollowUps.get(conversationTargetKey(target))?.length ?? 0) > 0;
+  }
+
   private requireCollaborationModes(): CollaborationModeSelectionService {
     if (!this.collaborationModes) {
       throw new UserFacingError("collaboration-mode.unavailable", "Plan 模式服务不可用");
@@ -605,7 +704,27 @@ export class ConversationService {
     target: ConversationTarget,
     action: () => Promise<T> | T,
   ): Promise<T> {
-    const key = conversationTargetKey(target);
+    return this.lockedKey(conversationTargetKey(target), action);
+  }
+
+  private lockedTargets<T>(
+    targets: readonly ConversationTarget[],
+    action: () => Promise<T> | T,
+  ): Promise<T> {
+    const keys = [...new Set(targets.map(conversationTargetKey))].sort();
+    const acquire = (index: number): Promise<T> => {
+      const key = keys[index];
+      return key === undefined
+        ? Promise.resolve(action())
+        : this.lockedKey(key, () => acquire(index + 1));
+    };
+    return acquire(0);
+  }
+
+  private async lockedKey<T>(
+    key: string,
+    action: () => Promise<T> | T,
+  ): Promise<T> {
     const previous = this.locks.get(key) ?? Promise.resolve();
     let release: (() => void) | undefined;
     const current = new Promise<void>((resolve) => {

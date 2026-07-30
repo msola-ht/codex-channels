@@ -99,6 +99,7 @@ export class GatewayApplication {
     );
     this.threadState = new ThreadStateSynchronizer(this.router);
     this.core = new ConversationCore(this.router, this.output);
+    this.interactions = new InteractionRouter(logger);
     const models = new ModelSelectionService(this.codex, this.router, config.codexModel);
     const collaborationModes = new CollaborationModeSelectionService(
       this.codex,
@@ -122,6 +123,23 @@ export class GatewayApplication {
         currentGitBranch,
       },
       collaborationModes,
+      {
+        hasPendingInteraction: (threadId) =>
+          this.interactions.hasPendingForThread(threadId),
+        notifyTransferred: ({ previousTarget, nextTarget, threadId }) => {
+          this.logger.info({
+            threadId,
+            previousSurface: previousTarget.surface,
+            nextSurface: nextTarget.surface,
+          }, "Codex Thread 外部会话绑定已跨渠道转移");
+          this.output.publish({
+            type: "warning",
+            target: previousTarget,
+            threadId,
+            message: `当前 Codex Thread 已转移到${surfaceLabel(nextTarget.surface)}。本渠道已解除绑定，下一条普通消息将创建新会话。`,
+          }, true);
+        },
+      },
     );
     this.output.subscribe("conversation-follow-up", async (event) => {
       if (event.type !== "turn.completed") {
@@ -171,7 +189,6 @@ export class GatewayApplication {
       logger,
       (target) => service.status(target, { includeGitBranch: true }).gitBranch,
     );
-    this.interactions = new InteractionRouter(logger);
     for (const surface of this.surfaces) {
       this.interactions.register(surface.surface, surface.accountId, surface.interactions);
     }
@@ -583,6 +600,19 @@ export class GatewayApplication {
       );
     }
     return failures.every((failure) => failure.bindingRemoved);
+  }
+}
+
+function surfaceLabel(surface: string): string {
+  switch (surface) {
+    case "telegram":
+      return " Telegram";
+    case "feishu":
+      return "飞书";
+    case "weixin":
+      return "微信";
+    default:
+      return "其他渠道";
   }
 }
 

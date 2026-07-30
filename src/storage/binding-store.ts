@@ -7,6 +7,12 @@ export interface ConversationBinding {
   sessionId: string;
 }
 
+export interface BindingTransfer {
+  binding: ConversationBinding;
+  previousOwner: ConversationBinding;
+  replaced?: ConversationBinding;
+}
+
 export interface BindingStore {
   actors(target: ConversationTarget): string[];
   rememberActor(target: ConversationTarget, actorId: string): void;
@@ -19,6 +25,7 @@ export interface BindingStore {
   getByThread(threadId: string): ConversationBinding | undefined;
   list(): ConversationBinding[];
   bind(binding: ConversationBinding): void;
+  transfer(threadId: string, target: ConversationTarget): BindingTransfer;
   unbind(target: ConversationTarget): ConversationBinding | undefined;
   close(): void;
 }
