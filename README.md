@@ -19,7 +19,7 @@ Gateway 与原生 Codex TUI 连接同一个 Codex App Server，因此会话、Th
 
 ```bash
 npm install -g @openai/codex@0.146.0
-npm install -g @hegenai/codexc
+npm install -g @hegenai/codexc@0.146.0
 ```
 
 初始化并按提示配置 Telegram、飞书或微信：
