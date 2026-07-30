@@ -1,0 +1,28 @@
+name: Codex upgrade PR description
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: read
+
+jobs:
+  description:
+    name: Project benefits and tradeoffs
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check upgrade pull request description
+        run: node scripts/check-upgrade-pr-description.mjs

@@ -45,6 +45,8 @@
 - `write-upgrade-report.mjs`：把 CI 中生成的升级工作树写成 Markdown 摘要、文件清单、统计和
   二进制安全 Patch，并比较 `HEAD` 生成协议的 RPC 名称和顶层字段结构，合并逐阶段结果；生成
   或验证失败且没有差异时仍会输出报告。
+- `check-upgrade-pr-description.mjs`：正式升级 PR 转为 Ready 后，检查描述已把自动占位内容
+  替换为本项目的收益、采用项、不采用项及风险与验证；Draft 和普通 PR 跳过。
 - `protocol-schema.mjs`：在同一文件系统按指定稳定/实验模式临时生成、逐文件比较并安全替换协议类型目录。
 - `generate-protocol.mjs`：先在临时目录调用当前 Codex CLI 的 `generate-ts --experimental`，
   成功后替换协议类型、记录版本与实验状态并同步 npm/Gateway 版本；实验生成只服务于受控 Plan 边界。
