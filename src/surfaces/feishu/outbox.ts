@@ -11,6 +11,7 @@ import {
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
 import { contentTruncatedText } from "../output-copy.js";
+import { PlanProgressTracker } from "../plan-presentation.js";
 import { TurnReplyTargets } from "../turn-reply-targets.js";
 import type {
   OperationUpdateDisplay,
@@ -24,7 +25,10 @@ import {
   formatFeishuOperationSummary,
 } from "./operation-format.js";
 import { renderFeishuOutput } from "./renderer.js";
-import { renderFeishuThreadStatusCard } from "./status-card.js";
+import {
+  renderFeishuPlanCard,
+  renderFeishuThreadStatusCard,
+} from "./status-card.js";
 
 const maximumFeishuMessageContentBytes = 20_000;
 const maximumFeishuMessageChunks = 5;
@@ -100,6 +104,7 @@ export interface FeishuMessagePort {
 
 export interface FeishuOutboxOptions {
   operationUpdateDisplay?: OperationUpdateDisplay;
+  planUpdatesEnabled?: boolean;
   readGeneratedImage?: typeof readGeneratedImage;
 }
 
@@ -108,6 +113,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
   private readonly threadStatusMessages = new Map<
     string,
     { chatId: string; messageId: string; status: string }
+  >();
+  private readonly planMessages = new Map<
+    string,
+    PlanProgressTracker
   >();
   private readonly streams = new Map<string, FeishuStreamState>();
   private readonly finishedStreams = new Map<string, FinishedFeishuStream>();
@@ -212,7 +221,27 @@ export class FeishuOutbox implements SurfaceOutputPort {
       }
       return;
     }
+    if (event.type === "plan.updated") {
+      if (!this.options.planUpdatesEnabled) {
+        return;
+      }
+      const key = turnKey(event.threadId, event.turnId);
+      const tracker = this.planMessages.get(key) ?? new PlanProgressTracker();
+      this.planMessages.set(key, tracker);
+      for (const presentation of tracker.accept(event)) {
+        this.delivery.enqueue(
+          event.target.conversationId,
+          () => this.messagePort.sendCard(
+            event.target.conversationId,
+            renderFeishuPlanCard(presentation),
+          ).then(() => undefined),
+          true,
+        );
+      }
+      return;
+    }
     if (event.type === "turn.completed") {
+      this.planMessages.delete(turnKey(event.threadId, event.turnId));
       this.flushOperationUpdates(
         event.target.conversationId,
         turnKey(event.threadId, event.turnId),
@@ -359,6 +388,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     await this.delivery.close();
     this.closeFinished = true;
     this.threadStatusMessages.clear();
+    this.planMessages.clear();
     this.streams.clear();
     this.finishedStreams.clear();
     this.operationUpdates.clear();

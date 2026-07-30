@@ -112,6 +112,7 @@ describe("Gateway config reload", () => {
     ["surface.telegram.proxy", "telegram", { telegramProxyUrl: "http://127.0.0.1:7890/" }],
     ["surface.telegram.message-format", "telegram", { telegramMessageFormat: "rich" }],
     ["display.operation-updates", "global", { operationUpdateDisplay: "compact" }],
+    ["display.plan-updates", "global", { planUpdatesEnabled: true }],
     ["codex.default-model", "global", { codexModel: "other-model" }],
   ] as const)("restarts for %s changes", (code, scope, change) => {
     expect(classifyConfigReload(config(), config(change))).toEqual({
@@ -389,6 +390,7 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     codexSocketPath: "/tmp/codex.sock",
     codexSandbox: "workspace-write",
     operationUpdateDisplay: "full",
+    planUpdatesEnabled: false,
     credentialsDirectory: "/tmp/credentials",
     stateDatabasePath: "/tmp/gateway.sqlite3",
     approvalTimeoutMs: 300_000,

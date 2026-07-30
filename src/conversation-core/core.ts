@@ -173,6 +173,13 @@ export class ConversationCore {
           turnId: event.turnId,
           plan: { explanation: event.explanation, steps: event.plan },
         });
+        this.publishForThread(event.threadId, {
+          type: "plan.updated",
+          threadId: event.threadId,
+          turnId: event.turnId,
+          explanation: event.explanation,
+          steps: event.plan,
+        });
         return;
       }
       case "item.agentMessage.started":

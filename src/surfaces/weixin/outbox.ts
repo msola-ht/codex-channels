@@ -32,6 +32,7 @@ import {
   formatRuntimeMcpStatusUpdate,
   formatRuntimeRateLimitUpdate,
 } from "../runtime-status-format.js";
+import { PlanProgressTracker } from "../plan-presentation.js";
 
 import { validateWeixinAccountId } from "./credential-store.js";
 import {
@@ -80,6 +81,7 @@ export interface WeixinOutboxOptions {
   capacity?: number;
   closeTimeoutMs?: number;
   operationUpdateDisplay?: OperationUpdateDisplay;
+  planUpdatesEnabled?: boolean;
   onReplyContextInvalidated?: (target: ConversationTarget) => Promise<void>;
   imageClient?: Pick<WeixinImageSendProtocolClient, "sendImage">;
   fileClient?: Pick<WeixinFileSendProtocolClient, "sendFile">;
@@ -91,6 +93,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
   private readonly delivery: ConversationDeliveryQueue;
   private readonly operationUpdates =
     new OperationUpdateBuffer<ConversationTarget>();
+  private readonly planUpdates = new Map<string, PlanProgressTracker>();
   private readonly accountId: string;
   private closed = false;
 
@@ -178,6 +181,22 @@ export class WeixinOutbox implements SurfaceOutputPort {
       );
       return;
     }
+    if (event.type === "plan.updated") {
+      if (!this.options.planUpdatesEnabled) {
+        return;
+      }
+      const key = turnKey(event.threadId, event.turnId);
+      const tracker = this.planUpdates.get(key) ?? new PlanProgressTracker();
+      this.planUpdates.set(key, tracker);
+      for (const presentation of tracker.accept(event)) {
+        this.delivery.enqueue(
+          event.target.conversationId,
+          () => this.send(event.target, presentation.text),
+          true,
+        );
+      }
+      return;
+    }
     if (
       (
         event.type === "text.completed"
@@ -185,6 +204,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
       )
       || event.type === "turn.completed"
     ) {
+      if (event.type === "turn.completed") {
+        this.planUpdates.delete(turnKey(event.threadId, event.turnId));
+      }
       this.flushOperationUpdates(
         event.target,
         turnKey(event.threadId, event.turnId),
@@ -251,6 +273,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     await this.options.typing?.close();
     await this.delivery.close();
     this.operationUpdates.clear();
+    this.planUpdates.clear();
     this.contexts.clear();
   }
 
@@ -310,6 +333,8 @@ export class WeixinOutbox implements SurfaceOutputPort {
         return formatWeixinCommandText(
           formatRuntimeMcpStatusUpdate(event),
         );
+      case "plan.updated":
+        return null;
       default:
         return null;
     }

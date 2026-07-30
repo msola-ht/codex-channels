@@ -161,6 +161,7 @@ export function renderFeishuOutput(event: OutputEvent): string | null {
     case "text.completed":
       return event.text.trim() ? event.text : emptyCodexResponseText;
     case "operation.updated":
+    case "plan.updated":
       return null;
     case "turn.completed":
       return renderFeishuTurnCompleted(event);

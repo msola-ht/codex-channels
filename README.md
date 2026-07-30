@@ -162,6 +162,7 @@ message_format = "html"
 
 [display]
 operation_updates = "compact"
+plan_updates = false
 ```
 
 `display.operation_updates` 控制 Telegram、飞书和微信的命令、文件修改、MCP 工具及搜索过程：
@@ -174,6 +175,11 @@ operation_updates = "compact"
 最终回复、错误和回合结束统计不受影响。默认值为
 `"compact"`；旧的布尔字段不再接受。修改后执行 `codexc service reload`，Gateway 会自动重启，
 共享 App Server 和活动 Thread 不受影响。
+
+`display.plan_updates` 控制是否把 App Server 的自动任务计划更新显示到渠道，默认 `false`。
+开启后三个渠道先发送一次完整计划；每个步骤首次变为完成时，再单独发送一条紧凑进度，
+不重复发送进行中与完成两份完整快照。该能力只消费官方 `turn/plan/updated`，不从模型正文
+推断步骤或拆分普通回复，也不改变 `/plan` 协作模式。
 
 飞书模块提供“手动输入应用凭据”和“扫码授权”两种方式。扫码后在飞书授权页选择新建应用或
 已有企业自建应用；流程只申请应用只读检测与配置写入、机器人发送消息、原生 CardKit 流式卡片、

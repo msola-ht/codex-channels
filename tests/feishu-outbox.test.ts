@@ -36,6 +36,43 @@ afterEach(() => {
 });
 
 describe("Feishu outbox", () => {
+  it("shows one initial plan card and one card for each completed step", async () => {
+    const sent: FeishuCardDocument[] = [];
+    const updated: FeishuCardDocument[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendCard: async (_chatId, card) => {
+          sent.push(card);
+          return "om_plan";
+        },
+        updateCard: async (_messageId, card) => {
+          updated.push(card);
+        },
+      },
+      pino({ level: "silent" }),
+      { planUpdatesEnabled: true },
+    );
+
+    outbox.handle(planUpdated([
+      { step: "检查实现", status: "inProgress" },
+      { step: "补充测试", status: "pending" },
+    ]));
+    outbox.handle(planUpdated([
+      { step: "检查实现", status: "completed" },
+      { step: "补充测试", status: "inProgress" },
+    ]));
+    await outbox.close();
+
+    expect(sent).toHaveLength(2);
+    expect(sent[0]?.header.title.content).toBe("任务计划 · 0/2");
+    expect(sent[1]?.header.title.content).toBe("计划进度 · 1/2");
+    expect(updated).toEqual([]);
+  });
+
   it("sends the shared Turn start confirmation as a Markdown card", async () => {
     const markdownCards: string[] = [];
     const replies: Array<{ messageId: string; markdown: string }> = [];
@@ -1799,6 +1836,19 @@ function turnCompleted(): OutputEvent {
     threadId: "thread-1",
     turnId: "turn-1",
     status: "completed",
+  };
+}
+
+function planUpdated(
+  steps: Extract<OutputEvent, { type: "plan.updated" }>["steps"],
+): Extract<OutputEvent, { type: "plan.updated" }> {
+  return {
+    type: "plan.updated",
+    target,
+    threadId: "thread-1",
+    turnId: "turn-1",
+    explanation: null,
+    steps,
   };
 }
 

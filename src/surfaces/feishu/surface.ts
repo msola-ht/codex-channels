@@ -101,6 +101,7 @@ export interface FeishuSurfaceOptions {
   webSocketAgent?: unknown;
   disableEnvironmentProxy?: boolean;
   operationUpdateDisplay?: OperationUpdateDisplay;
+  planUpdatesEnabled?: boolean;
   configurationRecipients?: () => readonly string[];
   startupNotification?: FeishuStartupNotification;
 }
@@ -183,6 +184,9 @@ export class FeishuSurface implements SurfaceAdapter {
       {
         ...(options.operationUpdateDisplay !== undefined
           ? { operationUpdateDisplay: options.operationUpdateDisplay }
+          : {}),
+        ...(options.planUpdatesEnabled !== undefined
+          ? { planUpdatesEnabled: options.planUpdatesEnabled }
           : {}),
       },
     );
@@ -293,6 +297,12 @@ export class FeishuSurface implements SurfaceAdapter {
             conversationId: error.target.conversationId,
             messageId: error.messageId,
             errorType: error.errorType,
+            ...(error.errorCode === undefined
+              ? {}
+              : { errorCode: error.errorCode }),
+            ...(error.errorReason === undefined
+              ? {}
+              : { errorReason: error.errorReason }),
           },
           "飞书消息处理失败",
         );

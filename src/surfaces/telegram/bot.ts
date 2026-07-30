@@ -89,6 +89,7 @@ export interface TelegramSurfaceOptions {
   textFileInput?: TelegramTextFilePort;
   finalMessageFormat?: TelegramFinalMessageFormat;
   operationUpdateDisplay?: OperationUpdateDisplay;
+  planUpdatesEnabled?: boolean;
   codexUpstreamUserAgent?: () => string | undefined;
   inputQuietWindowMs?: number;
 }
@@ -173,6 +174,9 @@ export class TelegramSurface {
         : {}),
       ...(options.operationUpdateDisplay !== undefined
         ? { operationUpdateDisplay: options.operationUpdateDisplay }
+        : {}),
+      ...(options.planUpdatesEnabled !== undefined
+        ? { planUpdatesEnabled: options.planUpdatesEnabled }
         : {}),
     });
     this.output = this.outbox;

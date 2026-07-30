@@ -30,6 +30,7 @@ export interface CreateWeixinSurfaceOptions {
   uploadsDirectory: string;
   startupNotification: WeixinStartupNotification;
   operationUpdateDisplay?: OperationUpdateDisplay;
+  planUpdatesEnabled?: boolean;
   logger: Logger;
   onFatal(error: WeixinInputFatalError): void;
 }
@@ -66,6 +67,9 @@ export function createWeixinSurface(
     ...(options.operationUpdateDisplay === undefined
       ? {}
       : { operationUpdateDisplay: options.operationUpdateDisplay }),
+    ...(options.planUpdatesEnabled === undefined
+      ? {}
+      : { planUpdatesEnabled: options.planUpdatesEnabled }),
     logger: options.logger,
     onFatal: (error) => options.onFatal(error),
   });

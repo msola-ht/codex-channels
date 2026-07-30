@@ -133,6 +133,54 @@ afterEach(() => {
 });
 
 describe("TelegramOutbox", () => {
+  it("shows one initial plan and one message for each completed step", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = new TelegramOutbox(
+      api as unknown as Api,
+      pino({ level: "silent" }),
+      undefined,
+      { planUpdatesEnabled: true },
+    );
+
+    outbox.handle(planUpdated([
+      { step: "检查实现", status: "inProgress" },
+      { step: "补充测试", status: "pending" },
+    ]));
+    outbox.handle(planUpdated([
+      { step: "检查实现", status: "completed" },
+      { step: "补充测试", status: "inProgress" },
+    ]));
+    outbox.handle(planUpdated([
+      { step: "检查实现", status: "completed" },
+      { step: "补充测试", status: "inProgress" },
+    ]));
+    outbox.handle(planUpdated([
+      { step: "检查实现", status: "completed" },
+      { step: "补充测试", status: "completed" },
+    ]));
+    await outbox.close();
+
+    expect(api.sent).toHaveLength(3);
+    expect(api.sent[0]).toContain("任务计划 · 0/2");
+    expect(api.sent[1]).toContain("计划进度 · 1/2");
+    expect(api.sent[1]).toContain("第 1 步完成：检查实现");
+    expect(api.sent[2]).toContain("计划进度 · 2/2");
+    expect(api.sent[2]).toContain("第 2 步完成：补充测试");
+    expect(api.edits).toEqual([]);
+  });
+
+  it("hides automatic plan updates by default", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle(planUpdated([
+      { step: "不应展示", status: "inProgress" },
+    ]));
+    await outbox.close();
+
+    expect(api.sent).toEqual([]);
+  });
+
   it("replies to the originating input when acknowledging Turn start", async () => {
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);
@@ -1238,6 +1286,19 @@ function createOutbox(
 
 function turnStarted(): Extract<OutputEvent, { type: "turn.started" }> {
   return { type: "turn.started", target, threadId: "thread-1", turnId: "turn-1" };
+}
+
+function planUpdated(
+  steps: Extract<OutputEvent, { type: "plan.updated" }>["steps"],
+): Extract<OutputEvent, { type: "plan.updated" }> {
+  return {
+    type: "plan.updated",
+    target,
+    threadId: "thread-1",
+    turnId: "turn-1",
+    explanation: null,
+    steps,
+  };
 }
 
 function turnCompleted(): Extract<OutputEvent, { type: "turn.completed" }> {

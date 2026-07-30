@@ -104,6 +104,7 @@ describe("Gateway config.toml", () => {
     expect(runtime.config.telegramAllowedUserIds).toEqual(new Set([123, 456]));
     expect(runtime.config.telegramMessageFormat).toBe("rich");
     expect(runtime.config.operationUpdateDisplay).toBe("compact");
+    expect(runtime.config.planUpdatesEnabled).toBe(false);
     expect(runtime.config.credentialsDirectory).toBe(join(fixture.root, "credentials"));
     expect(runtime.config.codexSocketPath).toBe(join(fixture.root, "runtime/app-server.sock"));
     expect(runtime.config.stateDatabasePath).toBe(join(fixture.root, "data/gateway.sqlite3"));
@@ -157,6 +158,19 @@ describe("Gateway config.toml", () => {
       }).config.operationUpdateDisplay).toBe(operationUpdates);
     },
   );
+
+  it("accepts explicit automatic plan display", () => {
+    const fixture = createFixture({
+      display: {
+        operation_updates: "compact",
+        plan_updates: true,
+      },
+    });
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.planUpdatesEnabled).toBe(true);
+  });
 
   it("rejects the removed boolean operation update setting", () => {
     const fixture = createFixture({

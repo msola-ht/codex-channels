@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { JsonRpcError } from "../src/codex-client/index.js";
 import {
   FeishuInbox,
   type FeishuInboxMessage,
@@ -602,6 +603,39 @@ describe("FeishuInbox", () => {
     }]);
     expect(JSON.stringify(fixture.errors)).not.toContain("sensitive");
     expect(JSON.stringify(fixture.errors)).not.toContain("first");
+  });
+
+  it("preserves sanitized JSON-RPC diagnostics without exposing messages", async () => {
+    const fixture = createFixture({
+      handle: async () => {
+        throw new JsonRpcError(
+          -32600,
+          "no active turn to steer",
+          { token: "secret" },
+        );
+      },
+    });
+
+    fixture.inbox.receive(createEvent({
+      eventId: "event-rpc",
+      messageId: "message-rpc",
+      content: "{\"text\":\"image follow-up\"}",
+    }));
+    await fixture.inbox.close();
+
+    expect(fixture.errors).toEqual([{
+      target: {
+        surface: "feishu",
+        accountId: "cli_0123456789abcdef",
+        conversationId: "oc_chat",
+      },
+      messageId: "message-rpc",
+      errorType: "JsonRpcError",
+      errorCode: -32600,
+      errorReason: "no-active-turn",
+    }]);
+    expect(JSON.stringify(fixture.errors)).not.toContain("secret");
+    expect(JSON.stringify(fixture.errors)).not.toContain("image follow-up");
   });
 
   it("isolates error-reporter failures from later messages", async () => {

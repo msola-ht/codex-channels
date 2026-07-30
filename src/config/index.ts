@@ -55,6 +55,7 @@ export interface GatewayConfig {
   codexModel?: string;
   codexSandbox: "read-only" | "workspace-write";
   operationUpdateDisplay: OperationUpdateDisplay;
+  planUpdatesEnabled: boolean;
   credentialsDirectory: string;
   stateDatabasePath: string;
   approvalTimeoutMs: number;
@@ -156,6 +157,7 @@ export function loadConfigDocument(
     ...(raw.codex.default_model ? { codexModel: raw.codex.default_model } : {}),
     codexSandbox: raw.codex.sandbox,
     operationUpdateDisplay: raw.display.operation_updates,
+    planUpdatesEnabled: raw.display.plan_updates,
     credentialsDirectory: resolve(baseDirectory, "credentials"),
     stateDatabasePath: resolveConfiguredPath(raw.storage.database_path, baseDirectory),
     approvalTimeoutMs: raw.approval.timeout_seconds * 1000,

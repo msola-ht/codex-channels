@@ -38,7 +38,10 @@ export interface GatewayConfigDocument {
     sandbox: "read-only" | "workspace-write";
   };
   approval: { timeout_seconds: number };
-  display: { operation_updates: "full" | "compact" | "hidden" };
+  display: {
+    operation_updates: "full" | "compact" | "hidden";
+    plan_updates: boolean;
+  };
   storage: { database_path: string };
   logging: { level: "fatal" | "error" | "warn" | "info" | "debug" | "trace" };
   workspaces: Array<{ id: string; name: string; cwd: string }>;

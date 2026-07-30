@@ -69,6 +69,7 @@ export interface WeixinSurfaceOptions {
   audios?: WeixinAudioPort;
   startupNotification?: WeixinStartupNotification;
   operationUpdateDisplay?: OperationUpdateDisplay;
+  planUpdatesEnabled?: boolean;
   inputCloseTimeoutMs?: number;
   outbox?: WeixinOutboxOptions;
 }
@@ -138,6 +139,11 @@ export class WeixinSurface implements SurfaceAdapter {
           ? {}
           : {
               operationUpdateDisplay: options.operationUpdateDisplay,
+            }),
+        ...(options.planUpdatesEnabled === undefined
+          ? {}
+          : {
+              planUpdatesEnabled: options.planUpdatesEnabled,
             }),
         ...(options.replyContextPersistence === undefined
           ? {}

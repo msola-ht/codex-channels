@@ -94,6 +94,7 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "storage.database": "State Database",
     "approval.timeout": "审批超时",
     "display.operation-updates": "操作过程显示",
+    "display.plan-updates": "自动计划显示",
     "observability.log-level": "日志级别",
     "workspace.default": "默认 Workspace",
     "workspace.registry": "Workspace",

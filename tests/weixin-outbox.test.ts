@@ -24,6 +24,30 @@ const target = {
 } as const;
 
 describe("WeixinOutbox", () => {
+  it("shows one initial plan and one message for each completed step", async () => {
+    const { outbox, sendText } = outboxFixture(
+      { value: true },
+      { planUpdatesEnabled: true },
+    );
+
+    outbox.handle(planUpdated([
+      { step: "检查实现", status: "inProgress" },
+      { step: "补充测试", status: "pending" },
+    ]));
+    outbox.handle(planUpdated([
+      { step: "检查实现", status: "completed" },
+      { step: "补充测试", status: "inProgress" },
+    ]));
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledTimes(2);
+    expect(sendText.mock.calls[0]?.[0].text).toContain("任务计划 · 0/2");
+    expect(sendText.mock.calls[1]?.[0].text).toContain("计划进度 · 1/2");
+    expect(sendText.mock.calls[1]?.[0].text).toContain(
+      "第 1 步完成：检查实现",
+    );
+  });
+
   it("keeps reply contexts private to one account and Conversation", () => {
     const contexts = new WeixinReplyContextStore(accountId);
     contexts.remember(target, actorId, "context-secret");
@@ -862,5 +886,18 @@ function turnCompleted(
     threadId: "thread",
     turnId: "turn",
     status,
+  };
+}
+
+function planUpdated(
+  steps: Extract<OutputEvent, { type: "plan.updated" }>["steps"],
+): Extract<OutputEvent, { type: "plan.updated" }> {
+  return {
+    type: "plan.updated",
+    target,
+    threadId: "thread",
+    turnId: "turn",
+    explanation: null,
+    steps,
   };
 }

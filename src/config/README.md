@@ -18,6 +18,10 @@
 三种模式都不影响审批、错误、最终回复和 Turn 完成事件；变化需要重启 Gateway，不需要重装或
 重启共享 App Server。微信只发送终态操作，不发送 `running` 更新。
 
+`display.plan_updates` 是自动计划展示开关，默认关闭。开启后只影响官方
+`turn/plan/updated` 的平台展示，不影响 Core 保存最新计划，也不切换 `/plan` 协作模式。
+变化需要重启 Gateway，不需要重启共享 App Server。
+
 飞书配置表当前只定义私聊 Surface 所需的 `enabled`、`app_id`、`app_secret` 和
 `allowed_open_ids`。整表缺失或 `enabled = false` 时运行配置不包含飞书账号；启用时四项必须
 同时有效，Open ID 不得重复。群 Chat、`@Bot` 和其他未支持字段仍由严格 Schema 拒绝。

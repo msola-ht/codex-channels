@@ -147,6 +147,7 @@ function createWeixinModule(
       ),
     },
     operationUpdateDisplay: options.config.operationUpdateDisplay,
+    planUpdatesEnabled: options.config.planUpdatesEnabled,
     logger: options.logger,
     onFatal: (error) => options.onFatal("weixin", config.accountId, error),
   });
@@ -200,6 +201,7 @@ function createFeishuModule(
     ),
     disableEnvironmentProxy: true,
     operationUpdateDisplay: options.config.operationUpdateDisplay,
+    planUpdatesEnabled: options.config.planUpdatesEnabled,
     ...(openApiAgent
       ? {
           openApiAgent,
@@ -336,6 +338,7 @@ function createTelegramModule(
     onFatal: (error) => options.onFatal("telegram", telegramDefaultAccountId, error),
     finalMessageFormat: config.telegramMessageFormat,
     operationUpdateDisplay: config.operationUpdateDisplay,
+    planUpdatesEnabled: config.planUpdatesEnabled,
     gatewayVersion: options.gatewayVersion,
     codexUpstreamUserAgent: options.codexUpstreamUserAgent,
   });

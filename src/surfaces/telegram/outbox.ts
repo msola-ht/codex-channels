@@ -31,6 +31,7 @@ import {
   formatRuntimeMcpStatusUpdate,
   formatRuntimeRateLimitUpdate,
 } from "../runtime-status-format.js";
+import { PlanProgressTracker } from "../plan-presentation.js";
 import type { OperationUpdateDisplay } from "../types.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import { TelegramApprovalOperationCoordinator } from "./approval-operation-coordinator.js";
@@ -74,6 +75,10 @@ interface OperationLogState {
   timer: NodeJS.Timeout | undefined;
 }
 
+interface PlanMessageState {
+  tracker: PlanProgressTracker;
+}
+
 const maximumRichMarkdownCharacters = 32_000;
 const maximumTelegramActiveStreams = 100;
 const maximumTelegramBufferedStreamCharacters = 1_000_000;
@@ -85,6 +90,7 @@ export interface TelegramOutboxOptions {
   finalMessageFormat?: TelegramFinalMessageFormat;
   accountId?: string;
   operationUpdateDisplay?: OperationUpdateDisplay;
+  planUpdatesEnabled?: boolean;
   readGeneratedImage?: typeof readGeneratedImage;
 }
 
@@ -92,6 +98,7 @@ export class TelegramOutbox {
   private readonly streams = new Map<string, StreamState>();
   private readonly operationLogs = new Map<string, OperationLogState>();
   private readonly operationUpdates = new OperationUpdateBuffer<string>();
+  private readonly planMessages = new Map<string, PlanMessageState>();
   private readonly replyTargets = new TurnReplyTargets<number>();
   private readonly typing: TelegramTypingIndicator;
   private readonly delivery: ConversationDeliveryQueue;
@@ -327,8 +334,32 @@ export class TelegramOutbox {
         this.operationLogs.set(turnKey, state);
         return;
       }
+      case "plan.updated": {
+        if (!this.options.planUpdatesEnabled) {
+          return;
+        }
+        const turnKey = this.turnKey(event.threadId, event.turnId);
+        const state = this.planMessages.get(turnKey) ?? {
+          tracker: new PlanProgressTracker(),
+        };
+        this.planMessages.set(turnKey, state);
+        for (const presentation of state.tracker.accept(event)) {
+          this.enqueue(
+            chatId,
+            () => this.send(
+              chatId,
+              presentation.text,
+              undefined,
+              true,
+            ).then(() => undefined),
+            true,
+          );
+        }
+        return;
+      }
       case "turn.completed": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
+        this.planMessages.delete(turnKey);
         this.flushOperationUpdates(chatId, turnKey);
         this.sealOperationLog(chatId, turnKey);
         const keys = this.streamKeysForTurn(event.threadId, event.turnId);
@@ -463,6 +494,7 @@ export class TelegramOutbox {
     this.streams.clear();
     this.operationLogs.clear();
     this.operationUpdates.clear();
+    this.planMessages.clear();
     this.replyTargets.clear();
     this.approvalOperations.clear();
     this.notifiedTurns.clear();

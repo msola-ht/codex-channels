@@ -7,6 +7,7 @@ export type GlobalConfigChangeCode =
   | "storage.database"
   | "approval.timeout"
   | "display.operation-updates"
+  | "display.plan-updates"
   | "observability.log-level"
   | "workspace.default"
   | "workspace.registry";

@@ -78,6 +78,11 @@ function restartRequiredReasons(
       current.operationUpdateDisplay,
       next.operationUpdateDisplay,
     ],
+    [
+      configChange("display.plan-updates"),
+      current.planUpdatesEnabled,
+      next.planUpdatesEnabled,
+    ],
     [configChange("observability.log-level"), current.logLevel, next.logLevel],
     [configChange("workspace.default"), current.defaultWorkspaceId, next.defaultWorkspaceId],
   ];

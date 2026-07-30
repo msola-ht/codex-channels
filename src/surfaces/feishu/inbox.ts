@@ -3,7 +3,10 @@ import type {
   ConversationActorRegistry,
   SurfaceAccessPolicy,
 } from "../../policy/index.js";
-import { surfaceErrorMetadata } from "../error-metadata.js";
+import {
+  surfaceErrorMetadata,
+  type SurfaceErrorMetadata,
+} from "../error-metadata.js";
 
 import type { FeishuMessageEvent } from "./message-event.js";
 import {
@@ -36,10 +39,9 @@ export type FeishuInboxMessage = FeishuInboxMessageBase & (
   | { kind: "audio"; fileKey: string; durationMs?: number }
 );
 
-export interface FeishuInboxProcessingError {
+export interface FeishuInboxProcessingError extends SurfaceErrorMetadata {
   target: ConversationTarget;
   messageId: string;
-  errorType: string;
 }
 
 export type FeishuInboxIgnoredReason =
@@ -319,7 +321,7 @@ export class FeishuInbox {
       this.options.handleError({
         target: message.target,
         messageId: message.messageId,
-        errorType: surfaceErrorMetadata(error).errorType,
+        ...surfaceErrorMetadata(error),
       });
     } catch {
       // Error reporting must not stop later messages for this Conversation.
