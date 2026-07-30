@@ -10,15 +10,15 @@
 
 Gateway 与原生 Codex TUI 连接同一个 Codex App Server，因此会话、Thread 和运行状态可以在聊天客户端与终端之间继续使用。
 
-当前版本：`0.145.0`
-要求：macOS 或 Linux、Node.js 22.13+、已登录的 `codex-cli 0.145.0`
+当前版本：`0.146.0`
+要求：macOS 或 Linux、Node.js 22.13+、已登录的 `codex-cli 0.146.0`
 
 ## 快速开始
 
 安装 Codex CLI 和 Gateway：
 
 ```bash
-npm install -g @openai/codex@0.145.0
+npm install -g @openai/codex@0.146.0
 npm install -g @hegenai/codexc
 ```
 
@@ -153,7 +153,7 @@ codexc service logs -n 100
 
 - 修改配置后没有生效：运行 `codexc service reload`。
 - Gateway 需要重启：运行 `codexc service restart`，共享 App Server 和活动 Thread 会保留。
-- Codex CLI 版本不一致：重新安装精确版本 `@openai/codex@0.145.0`。
+- Codex CLI 版本不一致：重新安装精确版本 `@openai/codex@0.146.0`。
 - 飞书收不到消息或菜单不完整：在飞书私聊发送 `/fs doctor`。
 - 需要查看命令参数：运行 `codexc -h` 或 `codexc <命令> -h`。
 

@@ -506,7 +506,7 @@ function options(
     service: {} as ConversationService,
     bindings,
     logger: pino({ level: "silent" }),
-    gatewayVersion: "0.145.0",
+    gatewayVersion: "0.146.0",
     codexUpstreamUserAgent: () => undefined,
     onFatal: vi.fn(),
   };

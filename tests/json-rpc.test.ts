@@ -21,7 +21,7 @@ function appServerThread(
     status: { type: "idle" },
     path: null,
     cwd: "/tmp/project",
-    cliVersion: "0.145.0",
+    cliVersion: "0.146.0",
     source: "cli",
     threadSource: null,
     agentNickname: null,
@@ -699,6 +699,11 @@ describe("JsonRpcClient", () => {
 
   it("reads account rate limits through the stable App Server method", async () => {
     const transport = new FakeTransport();
+    transport.accountRateLimitsResult = {
+      rateLimits: appServerRateLimit({ planType: "ent26" }),
+      rateLimitsByLimitId: null,
+      rateLimitResetCredits: null,
+    };
     const rpc = new JsonRpcClient(transport);
     const client = new CodexAppServerClient(rpc, {
       sandbox: "workspace-write",
@@ -707,7 +712,7 @@ describe("JsonRpcClient", () => {
 
     const result = await client.accountRateLimits();
 
-    expect(result.limits[0]?.planType).toBe("pro");
+    expect(result.limits[0]?.planType).toBe("ent26");
     expect(transport.sent.some((message) => message.method === "account/rateLimits/read")).toBe(true);
   });
 
