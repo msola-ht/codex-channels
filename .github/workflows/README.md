@@ -22,7 +22,10 @@
   生成协议，并使用与正式预览相同的独立兼容检查和报告。成功或失败都会上传完整现场，失败后
   任务标红；Release 解析失败同样保留 `unresolved` 报告；结果只作前向兼容预警，不进入正式
   版本基线。
-- `publish.yml`：推送与 Codex CLI 协议版本一致的 `v*` Tag 后，执行同一完整提交检查，再使用 npm Trusted Publishing 发布公开包，不保存长期 npm Token。
+- `publish.yml`：推送与 Codex CLI 协议版本一致的 `v*` Tag 后，执行同一完整提交检查，再使用
+  npm Trusted Publishing 发布公开包，不保存长期 npm Token。合并升级 PR 或普通 push 不会发布；
+  GitHub Release、本机安装、服务重启和部署也不由该工作流执行。完整收尾步骤见
+  [`docs/codex-cli-upgrade.md`](../../docs/codex-cli-upgrade.md)。
 
 启用发布工作流前，需要在 npm 包的 Trusted Publisher 设置中绑定 GitHub 仓库 `msola-ht/codex-channels`、工作流文件 `publish.yml`，并允许 `npm publish`。工作流使用 GitHub OIDC 和 `id-token: write` 获取短期凭据。
 

@@ -167,6 +167,83 @@ npm run verify:commit
 真实合同测试需要目标版本 Codex CLI，但不调用模型。全部检查通过并经差异审查后，才可以按用户
 明确指示提交、推送、重新全局安装并重建服务。
 
+升级 PR 转为 Ready 或合并前，把自动提案的通用描述更新为实际审查结果，至少写明：
+
+- 协议和版本基线发生了什么变化。
+- 本地业务代码实际适配了什么。
+- 生成协议中有哪些新能力仍未导出、调用或加入支持矩阵。
+- 本地完整门禁、真实 App Server 合同和 PR CI 的结果。
+- 合并只更新开发基线，不创建 Tag、发布 npm 或部署服务。
+
+## 4. 合并升级基线
+
+升级 PR 通过审查和 CI 后，先同步最新 `main`，解决冲突并重新运行提交门禁。冲突解决提交推送后，
+确认 PR 恢复可合并且新一轮 CI 全部通过，再把 Draft 转为 Ready 并使用普通 Merge Commit 合并。
+不要通过 Rebase 或强制推送改写已经用于审查的升级历史。
+
+合并升级 PR 只表示 `main` 进入目标 Codex CLI 的开发基线。此时：
+
+- `package.json`、Gateway、生成协议、README 和 CI 已使用目标版本。
+- 后续修复和功能修改可以继续基于该版本进行。
+- 自动升级提案会把该版本视为已同步，不再重复创建同版本 PR。
+- 不创建 `v<版本>` Tag，不触发 npm Trusted Publishing，也不创建 GitHub Release 或部署服务。
+
+合并到 `main` 后等待 push CI 全部通过。需要继续修改时按普通开发流程提交和验证；在准备正式发布
+之前，不要提前创建发布 Tag。
+
+## 5. 正式发布
+
+只有明确决定对外发布时才执行本节。发布前确认：
+
+1. `main` 已同步远端、工作区干净，目标提交的 GitHub CI 全部通过。
+2. `package.json`、`src/version.json`、`src/codex-protocol/version.json`、README 安装命令和
+   `ci.yml` 的 Codex CLI 精确版本一致。
+3. npm Trusted Publisher 已绑定本仓库的 `publish.yml`。
+4. 发布 Tag 与包版本完全一致，并先在本地校验：
+
+```bash
+RELEASE_VERSION=0.147.0
+npm run release:check -- "v$RELEASE_VERSION"
+```
+
+确认无误后，在准备发布的 `main` 提交上创建并推送 Tag：
+
+```bash
+git tag -a "v$RELEASE_VERSION" -m "发布 v$RELEASE_VERSION"
+git push origin "v$RELEASE_VERSION"
+```
+
+`publish.yml` 只监听 `v*` Tag。它会再次校验 Tag 与包版本、运行完整 `verify:commit`，然后通过
+npm Trusted Publishing 执行公开发布。普通 push、合并 PR 和手动运行 CI 都不会发布 npm。
+
+等待 `Publish npm package` 工作流成功后再创建对应的 GitHub Release。Release 说明应基于升级
+PR 的实际改动、验证结果和发布边界整理，不能继续使用自动提案的通用占位描述。当前工作流不会
+自动创建 GitHub Release，也不会自动安装本机包、重启 Gateway 或部署服务。
+
+## 6. 发布后验证与本机升级
+
+先核对 npm 和 GitHub Release，再安装精确版本：
+
+```bash
+RELEASE_VERSION=0.147.0
+npm view @hegenai/codexc version
+npm install -g "@openai/codex@$RELEASE_VERSION"
+npm install -g "@hegenai/codexc@$RELEASE_VERSION"
+codexc service install
+codexc doctor
+codexc service status
+```
+
+如果需要让 App Server 一并切换到新 CLI，再明确执行：
+
+```bash
+codexc service restart all
+```
+
+发布完成的判断标准是：npm 返回目标版本、GitHub Release 指向同一 Tag、本机诊断通过且所需服务
+状态正常。发布后发现仅文档有误时按普通修复提交处理，不移动已经发布的 Tag；包内容有误时不得
+覆盖同一 npm 版本，应先评估并准备新的正式版本。
+
 ## 升级失败时
 
 - 脚本在生成前失败：修正它报告的 CLI 版本、工作区或参数问题后重试。
