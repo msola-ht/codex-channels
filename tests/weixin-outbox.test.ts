@@ -684,6 +684,46 @@ describe("WeixinOutbox", () => {
     await outbox.close();
   });
 
+  it("invalidates only the failed Conversation when Weixin rejects its reply context", async () => {
+    const {
+      outbox,
+      contexts,
+      onReplyContextInvalidated,
+    } = outboxFixture(
+      { value: true },
+      {},
+      async () => {
+        throw new WeixinProtocolError(
+          "api-error",
+          "private upstream response",
+          undefined,
+          -2,
+        );
+      },
+    );
+    const otherTarget = {
+      ...target,
+      conversationId: "other-fixture@im.wechat",
+    };
+    contexts.remember(
+      otherTarget,
+      "other-fixture@im.wechat",
+      "other-context",
+    );
+
+    await expect(outbox.deliverText(target, "blocked"))
+      .rejects.toMatchObject({ code: "api-error", returnCode: -2 });
+
+    expect(contexts.get(target)).toBeUndefined();
+    expect(contexts.get(otherTarget)).toEqual({
+      actorId: "other-fixture@im.wechat",
+      contextToken: "other-context",
+    });
+    expect(onReplyContextInvalidated).toHaveBeenCalledOnce();
+    expect(onReplyContextInvalidated).toHaveBeenCalledWith(target);
+    await outbox.close();
+  });
+
   it("stops remaining chunks when authorization is revoked during delivery", async () => {
     const allowed = { value: true };
     const contexts = new WeixinReplyContextStore(accountId);

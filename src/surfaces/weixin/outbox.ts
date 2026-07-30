@@ -426,11 +426,18 @@ export class WeixinOutbox implements SurfaceOutputPort {
         await this.invalidateContext(target);
         throw new WeixinOutboxError("unauthorized-recipient");
       }
-      await this.client.sendText({
-        actorId: context.actorId,
-        contextToken: context.contextToken,
-        text: chunk,
-      });
+      try {
+        await this.client.sendText({
+          actorId: context.actorId,
+          contextToken: context.contextToken,
+          text: chunk,
+        });
+      } catch (error) {
+        if (isRejectedReplyContext(error)) {
+          await this.invalidateContext(target);
+        }
+        throw error;
+      }
     }
   }
 
@@ -553,4 +560,10 @@ function weixinOutputErrorMetadata(
     return { ...surfaceErrorMetadata(error), errorCode: error.code };
   }
   return surfaceErrorMetadata(error);
+}
+
+function isRejectedReplyContext(error: unknown): boolean {
+  return error instanceof WeixinProtocolError
+    && error.code === "api-error"
+    && error.returnCode === -2;
 }

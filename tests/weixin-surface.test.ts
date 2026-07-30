@@ -287,7 +287,7 @@ describe("WeixinSurface", () => {
     expect(lifecycleClient.notifyStop).toHaveBeenCalledOnce();
   });
 
-  it("keeps restored reply context when startup delivery reports a token error", async () => {
+  it("keeps restored reply context when startup delivery reports an expired Bot Token", async () => {
     const replyContextPersistence = replyContextPersistenceFixture({
       version: 1,
       accountId,
@@ -324,6 +324,75 @@ describe("WeixinSurface", () => {
     await surface.stop();
 
     expect(replyContextPersistence.remove).not.toHaveBeenCalled();
+  });
+
+  it("drops a rejected restored context while polling accepts the next inbound context", async () => {
+    const replyContextPersistence = replyContextPersistenceFixture({
+      version: 1,
+      accountId,
+      actorId,
+      contextToken: "restored-context",
+      updatedAt: 1_000,
+    });
+    let releaseInbound!: () => void;
+    const inboundReady = new Promise<void>((resolve) => {
+      releaseInbound = resolve;
+    });
+    let pollCount = 0;
+    const getUpdates = vi.fn<WeixinProtocolClient["getUpdates"]>(
+      async (_cursor, signal) => {
+        pollCount += 1;
+        if (pollCount === 1) {
+          await inboundReady;
+          return inboundBatch("refresh reply context");
+        }
+        return await waitForAbort(signal);
+      },
+    );
+    const service = serviceFixture();
+    const onFatal = vi.fn();
+    const surface = new WeixinSurface({
+      accountId,
+      client: {
+        getUpdates,
+        sendText: vi.fn(async () => {
+          throw new WeixinProtocolError(
+            "api-error",
+            "private upstream response",
+            undefined,
+            -2,
+          );
+        }),
+      },
+      cursorStore: cursorStoreFixture(),
+      service,
+      access: accessFixture(true),
+      replyContextPersistence,
+      startupNotification: {
+        targets: () => [target],
+        text: () => "Codex Connect 已上线",
+      },
+      logger: pino({ level: "silent" }),
+      onFatal,
+    });
+
+    await surface.start();
+
+    expect(replyContextPersistence.remove).toHaveBeenCalledWith(target);
+    releaseInbound();
+    await vi.waitFor(() => {
+      expect(replyContextPersistence.set).toHaveBeenCalledWith(
+        target,
+        actorId,
+        "context-secret",
+      );
+    });
+    expect(service.submit).toHaveBeenCalledWith(
+      target,
+      "refresh reply context",
+    );
+    expect(onFatal).not.toHaveBeenCalled();
+    await surface.stop();
   });
 
   it("removes a restored context instead of notifying a revoked actor", async () => {
