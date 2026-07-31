@@ -63,22 +63,22 @@ describe("shared operation presentation", () => {
     expect(detail).toBe(`${"界".repeat(159)}…`);
   });
 
-  it("redacts private Codex paths without hiding ordinary project paths", () => {
+  it("shows local paths while preserving explicit sensitive placeholders", () => {
     const detail = [
       "/usr/bin/zsh -lc \"sed -n '1,400p'",
       "/root/.codex/skills/.system/imagegen/SKILL.md\"",
       "git -C /root/github/codex-channels status --short",
       "/Users/example/.codex-connect/credentials/private.bin",
+      "TOKEN=[REDACTED]",
     ].join(" ");
 
-    expect(redactOperationDetail(detail)).toBe([
-      "/usr/bin/zsh -lc \"sed -n '1,400p'",
-      "[内部路径]\"",
-      "git -C /root/github/codex-channels status --short",
-      "[内部路径]",
-    ].join(" "));
-    expect(compactOperationDetail(detail)).not.toContain("/root/.codex");
-    expect(compactOperationDetail(detail)).not.toContain("/Users/example/.codex-connect");
+    expect(redactOperationDetail(detail)).toBe(
+      detail.replace("[REDACTED]", "[已隐藏]"),
+    );
+    expect(redactOperationDetail(detail)).toContain("/root/.codex");
+    expect(redactOperationDetail(detail)).toContain(
+      "/Users/example/.codex-connect",
+    );
   });
 });
 
