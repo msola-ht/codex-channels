@@ -36,7 +36,8 @@
 ## 开发与协议
 
 - `dev-all.mjs`：开发模式下复用或启动 App Server，再启动 Gateway。
-- `codex-remote.mjs`：为原生 `codex --remote` 选择 Socket 和工作目录。
+- `codex-remote.mjs`：为原生 `codex --remote` 选择 Socket 和工作目录；明确拒绝官方 Remote 模式
+  无法正确传递 Provider 的 DeepSeek Profile，并提示通过渠道创建 DeepSeek Thread 后恢复。
 - `prepare-codex-upgrade.mjs`：在干净工作区校验精确目标 CLI，调用现有协议生成和版本同步，
   完成基础一致性检查后把差异交给 Codex 审查。
 - `codex-release-api.mjs`：为稳定版和 Alpha 解析器调用 GitHub Release API；请求或响应正文

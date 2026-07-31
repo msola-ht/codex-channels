@@ -22,6 +22,13 @@ if (workspaceFlag !== -1) {
   workdir = workspace.cwd;
   passthrough.splice(workspaceFlag, 2);
 }
+if (usesDeepseekProfile(passthrough)) {
+  throw new Error(
+    "Remote TUI 不支持 DeepSeek Profile：Codex 0.146 Remote 不会把 Provider 传给共享 App Server。" +
+    "请先在渠道使用 /model 切换到 DeepSeek，再运行 codexc remote resume；" +
+    "独立 TUI 请运行 codex --profile deepseek。",
+  );
+}
 const socketPath = resolveConfiguredPath(
   stringValue(codex.socket_path),
   runtime.dataDir,
@@ -47,4 +54,12 @@ function table(value) {
 
 function stringValue(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function usesDeepseekProfile(args) {
+  return args.some((argument, index) =>
+    ((argument === "--profile" || argument === "-p") && args[index + 1] === "deepseek")
+    || argument === "--profile=deepseek"
+    || argument === "-p=deepseek"
+    || argument === "-pdeepseek");
 }

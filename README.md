@@ -141,6 +141,10 @@ codexc remote resume
 ```
 
 原生 TUI 与聊天客户端共享 App Server 和 Thread。
+Codex 0.146 的 Remote TUI 不会把本地 Profile 的 Provider 传给共享 App Server，因此
+`codexc remote --profile deepseek` 会被明确拒绝。需要共享 DeepSeek Thread 时，先在任一渠道通过
+`/model` 切换，再运行 `codexc remote resume`；不共享渠道 Thread 时直接运行
+`codex --profile deepseek`。
 
 ### 管理后台服务
 

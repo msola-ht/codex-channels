@@ -463,6 +463,39 @@ describe("codexc CLI", () => {
     ]);
   });
 
+  it("rejects the DeepSeek profile before starting a remote TUI", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-remote-profile-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    mkdirSync(workspace);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+
+    for (const args of [
+      ["--profile", "deepseek"],
+      ["--profile=deepseek"],
+      ["-p", "deepseek"],
+      ["-p=deepseek"],
+      ["-pdeepseek"],
+    ]) {
+      const result = spawnSync(process.execPath, [cli, "remote", ...args], {
+        cwd: workspace,
+        env: environment,
+        encoding: "utf8",
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("Remote TUI 不支持 DeepSeek Profile");
+      expect(result.stderr).toContain("codexc remote resume");
+      expect(result.stderr).toContain("codex --profile deepseek");
+    }
+  });
+
   it("starts the App Server through the service entry with effective proxy settings", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-service-entry-"));
     temporaryDirectories.push(root);

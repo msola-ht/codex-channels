@@ -68,7 +68,8 @@ const helpText = {
 在前台启动 Codex App Server 与 Gateway。`,
   remote: `用法：codexc remote [--workspace ID] [Codex 参数...]
 
-连接共享 App Server，并把其余参数传给原生 Codex CLI。`,
+连接共享 App Server，并把其余参数传给原生 Codex CLI。
+DeepSeek Profile 不能用于 Remote TUI；请先在渠道切换，再运行 codexc remote resume。`,
   ws: `用法：codexc ws
 
 其他用法：
