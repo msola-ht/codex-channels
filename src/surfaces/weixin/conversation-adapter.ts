@@ -243,7 +243,7 @@ export class WeixinConversationAdapter {
         return;
       }
       if (
-        (command.name === "wx" || command.name === "weixin")
+        command.name === "wx"
         && command.argumentsText === "doctor"
         && this.inputOptions.doctor
       ) {

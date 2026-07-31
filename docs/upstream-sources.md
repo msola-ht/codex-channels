@@ -6,9 +6,10 @@ Codex 协议、微信和飞书开发优先使用项目内已经固定版本的�
 远端 `main` 当作当前协议事实。上游仓库位于主项目的 `upstream/` 目录，由 `.gitignore`
 整体忽略，各自保留独立 Git 历史，不进入 `codex-channels` 提交或 npm 包。
 
-本页只规定源码查阅和更新方式；微信支持范围以
-[`微信 Surface 接入计划`](weixin-surface-plan.md) 为准，飞书支持范围以
-[`飞书官方资料与实现索引`](feishu-reference-index.md) 为准。
+本页只规定源码查阅和更新方式；渠道公开范围与真实验收以
+[`通讯渠道验收矩阵`](channel-acceptance-matrix.md) 为准，微信上游边界见
+[`微信 Surface 设计决策`](weixin-surface-plan.md)，飞书资料基线见
+[`飞书官方资料与实现索引`](feishu-reference-index.md)。
 
 ## 当前锁定基线
 

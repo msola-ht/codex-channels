@@ -556,9 +556,8 @@ describe("WeixinConversationAdapter", () => {
     );
 
     await adapter.handle({ ...message, text: "/wx doctor" });
-    await adapter.handle({ ...message, text: "/weixin doctor" });
 
-    expect(inspect).toHaveBeenCalledTimes(2);
+    expect(inspect).toHaveBeenCalledTimes(1);
     expect(inspect).toHaveBeenCalledWith(target);
     expect(submit).not.toHaveBeenCalled();
     expect(notifyText).toHaveBeenCalledWith(
@@ -595,9 +594,12 @@ describe("WeixinConversationAdapter", () => {
       { notifyText },
     );
 
-    await adapter.handle({ ...message, text: "/unknown value" });
+    for (const text of ["/unknown value", "/weixin doctor"]) {
+      await adapter.handle({ ...message, text });
+    }
 
     expect(submit).not.toHaveBeenCalled();
+    expect(notifyText).toHaveBeenCalledTimes(2);
     expect(notifyText).toHaveBeenCalledWith(
       target,
       "操作失败：不支持该微信命令，请发送 /help 查看可用命令。",

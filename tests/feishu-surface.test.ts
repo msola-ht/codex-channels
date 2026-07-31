@@ -346,10 +346,10 @@ describe("Feishu Surface", () => {
     fixture.ready();
     await starting;
 
-    fixture.emitMessage(0, "/feishu status");
+    fixture.emitMessage(0, "/fs status");
     await settle();
     fixture.emitCardAction();
-    fixture.emitMessage(1, "/feishu status");
+    fixture.emitMessage(1, "/fs status");
     await fixture.surface.stop();
 
     expect(fixture.sent).toHaveLength(2);
@@ -453,7 +453,7 @@ describe("Feishu Surface", () => {
     fixture.ready();
     await starting;
 
-    fixture.emitMessage(0, "/feishu doctor");
+    fixture.emitMessage(0, "/fs doctor");
     await settle();
     fixture.emitSetupAction();
     await vi.waitFor(() => {

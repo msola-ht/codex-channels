@@ -147,16 +147,6 @@ Codex 应按以下顺序处理，操作者不需要人工阅读协议文件：
 若类型生成没有业务差异，Codex 仍需确认版本、文档索引和真实合同，而不是仅凭 TypeScript
 编译通过判定升级完成。
 
-### 使用项目技能
-
-后续可以增加项目级 `codex-cli-upgrade-adapter` 技能，把上面的读取顺序、官方资料查询、逐层
-修复、验证和停止条件固化下来。技能必须以本页为流程事实来源，并直接复用
-`prepare-codex-upgrade.mjs`、`analyze-upgrade-protocol.mjs`、
-`run-upgrade-validation.mjs` 和 `write-upgrade-report.mjs`，不得复制一套版本生成或验证逻辑。
-
-技能只负责编排和需要判断的适配工作；精确版本校验、文件生成、报告与测试仍由仓库脚本执行。
-技能完成后仍默认停在未提交的本地工作区，等待用户要求审查、提交或推送。
-
 ## 3. 完成验证
 
 Codex 完成适配后至少运行：

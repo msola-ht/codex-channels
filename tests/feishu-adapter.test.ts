@@ -735,9 +735,9 @@ describe("Feishu conversation adapter", () => {
       },
     );
 
-    await adapter.handle({ ...message, text: "/feishu authorize" });
-    await adapter.handle({ ...message, text: "/feishu status" });
-    await adapter.handle({ ...message, text: "/feishu revoke" });
+    await adapter.handle({ ...message, text: "/fs authorize" });
+    await adapter.handle({ ...message, text: "/fs status" });
+    await adapter.handle({ ...message, text: "/fs revoke" });
     await fixture.outbox.close();
 
     expect(beginAuthorization).not.toHaveBeenCalled();
@@ -776,7 +776,7 @@ describe("Feishu conversation adapter", () => {
       },
     );
 
-    await adapter.handle({ ...message, text: "/feishu status" });
+    await adapter.handle({ ...message, text: "/fs status" });
     await fixture.outbox.close();
 
     expect(fixture.sent[0]?.text).toContain("当前用户 OAuth：授权进行中");
@@ -790,7 +790,7 @@ describe("Feishu conversation adapter", () => {
       imagePort,
     );
 
-    await adapter.handle({ ...message, text: "/feishu status" });
+    await adapter.handle({ ...message, text: "/fs status" });
     await fixture.outbox.close();
 
     expect(fixture.sent).toHaveLength(1);
@@ -807,7 +807,13 @@ describe("Feishu conversation adapter", () => {
       imagePort,
     );
 
-    for (const text of ["/unknown", "/unknown-command", "/STATUS", "/"]) {
+    for (const text of [
+      "/unknown",
+      "/unknown-command",
+      "/feishu status",
+      "/STATUS",
+      "/",
+    ]) {
       await expect(
         adapter.handle({ ...message, text }),
       ).rejects.toMatchObject({ code: "command.unsupported" });
@@ -815,7 +821,7 @@ describe("Feishu conversation adapter", () => {
     await fixture.outbox.close();
 
     expect(submit).not.toHaveBeenCalled();
-    expect(fixture.sent).toEqual(Array.from({ length: 4 }, () => ({
+    expect(fixture.sent).toEqual(Array.from({ length: 5 }, () => ({
       chatId: "oc_chat",
       text: "操作失败：不支持该飞书命令，请发送 /help 查看可用命令。",
     })));

@@ -3,7 +3,7 @@
 ## 用途与状态
 
 本页用于定位飞书开放平台、官方 Node SDK、本地实现和验证入口。它是飞书 Surface 的事实查询
-入口，不替代 [`飞书 Surface 接入计划`](feishu-surface-plan.md)；当前支持扫码 Setup 与开发验证
+入口，并与 [`飞书 Surface 设计决策`](feishu-surface-plan.md) 共同约束实现；当前支持扫码 Setup 与开发验证
 中的私聊普通文本、纯文字富文本、独立图片、最多四张图片说明文字、命令、CardKit 输出和交互路径。
 固定版本源码已按 [`本地上游源码工作流`](upstream-sources.md) 保存；本地基线存在且匹配时优先
 查阅本地仓库，不重复联网读取相同提交。
@@ -86,7 +86,7 @@ OAuth Token 与 Thread 绑定恢复，以及长回复折叠显示和顺序均已
 | 卡片输入框与表单 | [输入框组件](https://open.feishu.cn/document/feishu-cards/card-components/interactive-components/input) | 核对 CardKit 2.0 `form` 容器、原生选择器、`form_submit`、`action.form_value`、1,000 字符上限和密码输入；实现结构同时对照锁定 OpenClaw 飞书插件 |
 | 开放平台总入口 | [飞书开放平台](https://open.feishu.cn/) | 定位事件、API、权限和应用发布文档 |
 
-开放平台页面是动态资料。阶段 0 应把实际采用的消息事件、发送 API、权限点、卡片动作和应用发布
+开放平台页面是动态资料。首次接入或基线升级时，应把实际采用的消息事件、发送 API、权限点、卡片动作和应用发布
 页面补成精确链接，并记录查阅日期；不能只保留开放平台首页或搜索结果。
 
 ## 已知约束与待验证差异
@@ -106,7 +106,7 @@ OAuth Token 与 Thread 绑定恢复，以及长回复折叠显示和顺序均已
 ### 卡片动作
 
 当前 SDK `main` 的 Channel 文档提供 `cardAction`，而长连接资料仍说明不支持回调订阅。两者不能
-直接合并成“卡片审批可通过 WebSocket”这一结论。阶段 0 必须在准备锁定的正式 SDK 版本和测试
+直接合并成“卡片审批可通过 WebSocket”这一结论。必须在准备锁定的正式 SDK 版本和测试
 应用中验证：
 
 1. `card.action.trigger` 实际使用长连接还是 HTTPS 回调。
@@ -129,7 +129,7 @@ EventDispatcher`。
 `FeishuOutbox` 在内存中维护，并进入项目既有 Chat 队列。不得调用 `createLarkChannel()` 再建立
 第二套去重、串行、重试、发送回退、媒体或生命周期。
 
-阶段 0 可以比较 Channel，但只有能够关闭重复职责、不会形成第二事实来源且明显减少平台胶水时，
+研究时可以比较 Channel，但只有能够关闭重复职责、不会形成第二事实来源且明显减少平台胶水时，
 才可重新提议采用；不能为了使用便利绕过项目授权、关键事件保护或队列边界。
 
 ### 文本发送
@@ -159,32 +159,32 @@ EventDispatcher`。
 
 ## 项目支持矩阵
 
-| 能力 | 官方入口 | 项目状态 | 实施阶段 |
+| 能力 | 官方入口 | 项目状态 | 当前边界 |
 | --- | --- | --- | --- |
-| Node SDK | npm 包、固定官方源码 | 已精确锁定 `1.71.1` | 阶段 0 |
-| WebSocket 握手和重连 | `WSClient` | 生命周期封装、统一 HTTP/HTTPS 代理注入、离线合同和真实首次握手已完成；真实断线恢复与代理待验证 | 阶段 0 |
-| 消息事件字段裁剪 | `im.message.receive_v1` | 稳定字段映射、畸形输入失败关闭和一条真实私聊文本事件已验证 | 阶段 0 |
-| 私聊文本事件 | `im.message.receive_v1` | 普通 `text` 与由官方 `text`、`a` 元素组成的纯文字 `post` 均经过平台本地筛选、有界入队、Access Policy 和 Application 提交；富文本链接保留可见文字与目标 URL，未知元素失败关闭。真实普通文本与纯文字富文本主路径已通过，未授权/重复真实事件待验证 | 阶段 1 |
-| 文本与富文本发送 | `client.im.v1.message.create` | `chat_id` 的 `text` 与 `post + md` Payload、平台原生提及标签中和、有限 HTTP 超时和脱敏错误已完成；`post + md` 当前只用于静态 CardKit 实体创建失败和流式失败降级 | 阶段 1 / 阶段 4 切片 |
-| CardKit Markdown | `cardkit.v1.card.create`、`cardElement.content`、`card.update` | 启动通知、短回复、命令结果、操作终态与每轮统计使用静态 CardKit；持续回复使用 300 ms 增量合并、递增序列与 UUID，并在终态全量更新含完整正文且关闭流式模式的静态卡片，统一采用 5,000 字符单卡和最多 5 张卡片预算；操作终态按会话顺序显示 Core 已脱敏详情。持续回复、静态展示、操作终态和每轮状态的真实主路径已通过，真实限流、失败降级和超长滚动待验收 | 阶段 4 切片 |
-| 超长最终回复文件兜底 | `im.v1.file.create`、`im.v1.message.create` 的 `msg_type=file` | 超过五张卡片可靠展示预算且不超过 1,000,000 字节时，静态路径发送一张预览卡和完整 `codex-final-answer.txt`，流式路径在已有卡片后追加完整文件；只接受当前最终正文的内存 Buffer，不读取本地路径，不自动重试；文件失败时静态路径继续发送剩余有界正文。离线 SDK Payload、顺序、边界和失败路径已验证，真实文件上传待验收 | 阶段 4 切片 |
-| Thread 状态消息更新 | `client.im.v1.message.create/patch` | 同一 Thread 的 `active → idle` 轻量交互卡片创建、重复抑制、同 Chat 顺序更新、失败绑定清理和有限关闭已离线验证；蓝色运行中原地更新为绿色空闲的真实主路径已通过，不更新模型正文且不自动重试 | 阶段 4 切片 |
-| 输出渲染 | `OutputEvent`、`operation.updated`、`turn.completed` | 展示型 Markdown 统一使用 CardKit；操作运行帧忽略，终态按事件顺序发送独立静态卡片并显示受控详情；安全错误和操作性提示使用纯文本；每轮上下文状态、安全启动收件人、有界 Outbox 和 Surface 生命周期已离线验证，静态 CardKit、操作终态与每轮状态的真实主路径已通过 | 阶段 1 / 阶段 4 切片 |
-| 事件去重与旧事件过滤 | 平台事件 ID、毫秒时间戳 | 已实现飞书模块内有界内存状态；真实重投待验证 | 阶段 1 |
-| 严格配置与重载分类 | 统一 `config.toml` | 私聊字段、失败关闭校验、变更码、公开示例和 Bootstrap 显式组合已完成 | 阶段 1 |
-| 私聊命令 | `ConversationCommandService`、私聊文本事件、`application.bot.menu_v6` | 全部平台无关命令结果、帮助、身份、`/stop` 优先停止当前 Actor 待处理交互并在没有交互时停止 Turn、`status/doctor/revoke` 权限中心、未知命令失败关闭、会话列表收敛和有界安全分片已完成离线验证；用户 OAuth 不提供全量预授权命令；`/start`、`/help` 与单个 `codexc_home` 菜单打开主分类卡片，主卡提供新会话、会话切换、状态、Fast、用量、额度、模型、思考强度、工作区、Goal 和“更多命令”，后者再按会话查询、会话操作、能力与集成、当前内容、飞书提供二十一个按钮，不发送完整帮助长文本；全部 29 个共享命令都可由主卡、分类卡或结果选择卡到达，合法性直接复用 Application 命令目录；会话、归档、模型、思考强度、Fast 与工作区使用最多 18 项的选择卡，会话与归档搜索、重命名、下一 Turn 追加、Review 和 Goal 共用一个有界输入卡，项目规则只展示 `init/check`；选择与输入绑定消息、Chat、Actor、访问策略和一次性短期令牌，直接新建、停止、归档、固定、取消固定、压缩或分叉会话也会消费当前卡片令牌，提交仍进入共享命令服务，不建立飞书专属状态、语法或队列；状态命令、分类命令中心、选择卡和原生用户输入真实显示均已通过，直接命令矩阵待集中实机复验 | 阶段 2（私聊已完成） |
-| 用户 OAuth | OAuth Device Flow、应用用户 Scope、飞书 AppLink | 已完成精确授权 Origin 与完整 URL、能力所需 Scope 与应用已开通 Scope 的交集检查、有效 Token 覆盖检查与缺失差集授权、空需求不授权、`offline_access` 完整卡片、统一 HTTP/HTTPS 代理、显式直连与无效代理失败关闭、有限轮询、身份匹配、macOS Keychain/Linux 加密文件、进行中/持久状态、撤销、限时停止和写入错误/取消竞态回滚；不提供全量预授权命令；真实 Device Flow、身份校验、安全写入和 Gateway 重启恢复已通过，代理待验收，尚无飞书 CLI API 消费 Token | 阶段 2（授权基础已完成） |
-| 群聊 | 群消息事件、群身份与 @Bot | 已记录为后续需求，当前开发批次不实施 | 阶段 2 |
-| 卡片交互 | `im.v1.message.create/patch`、`card.action.trigger` | 私聊审批、CardKit 2.0 用户输入与 MCP form、MCP 工具审批、MCP URL 卡片、一次性令牌、Actor/Chat/消息/请求绑定、重复请求失败关闭、原值决定、超时、有限停止、结果更新失败隔离和跨客户端失效已离线验证；用户输入使用原生选择器并允许单独填写“其他内容”，同时兼容动作值和 CardKit 表单按钮名两种回调载荷；命令审批卡片的一次批准、原生用户输入、MCP 工具审批的一次批准及当前 Gateway 长连接动作接收已通过真实验收，MCP form/URL 卡片仍待真实验收 | 阶段 3 |
-| 私聊 PNG/JPEG 图片 | `im.message.receive_v1`、`im.v1.messageResource.get` | 已完成独立 `image` 与最多四张图片附带说明文字的 `post` 事件裁剪、授权后异步下载、10 MiB 限制、内容签名、私有暂存、过期清理，以及图片与原始说明文字同次提交；独立图片及两图至四图加说明文字的顺序和单 Turn 主路径已通过真实验收 | 阶段 4 |
-| 私聊一次性音频 | `im.message.receive_v1`、`im.v1.messageResource.get` | 复用既有 `im:resource`，按 `message_id + file_key + type=file` 下载；限制为 5 分钟、20 MiB 及 WAV/MP3/M4A/WebM/OGG，私有暂存一小时。真实飞书接收与 App Server 转换已验证；当前模型目录未声明 `audio`，Application 在创建 Turn 前明确拒绝，不列为当前端到端支持 | 阶段 4 |
-| 生成图片回传 | `im.v1.image.create`、`im.v1.message.create` 的 `msg_type=image` | 只接受官方 `imageGeneration.savedPath`，共享边界拒绝相对路径、符号链接、非普通文件、超过 10 MiB 和非 PNG/JPEG 内容；上传后严格裁剪 `image_key` 并按 Chat 顺序发送，独立于操作显示档位。离线 Payload、顺序和失败关闭已验证，真实发送主路径已通过 | 阶段 4 |
-| UTF-8 文本文件输入 | `im.message.receive_v1`、`im.v1.messageResource.get` | 独立 `file` 消息在授权后按 `message_id + file_key + type=file` 下载；严格验证文件名、1,000,000 字节、UTF-8 与控制字符，内联提交且不落盘。Office、压缩包、文件消息内的音视频和富文本内附件不支持；离线主路径已完成，真实文件待验收 | 阶段 4 |
-| 飞书 Setup 与应用配置 | SDK Device Authorization、`bot/v3/info`、Application v6 只读详情、Application v7 配置写入与发布、机器人菜单事件文档 | 已实现手动输入与扫码、飞书页应用选择、消息/CardKit/只读检测与配置写入权限及消息/菜单事件与卡片动作回调声明、身份验证和原子配置；扫码保存后直接保留已有菜单并自动补齐 `codexc_home` 悬浮菜单、长连接事件与回调并提交应用版本，失败时保留连接配置并提供 Doctor 恢复；Doctor 解析已有租户 Scope、只申请缺失差集，并以运行时已收到事件为优先证据显示四项摘要；单个菜单节点与启用开关独立检测，消息路径真实扫码、Doctor 身份探测、命令审批动作回调和菜单点击均已通过 | 阶段 0 / 阶段 2 / 阶段 3 / 阶段 4 |
-| 飞书以外的 Lark | SDK Domain 配置 | 不在首版范围 | 未计划 |
+| Node SDK | npm 包、固定官方源码 | 已精确锁定 `1.71.1` | 研究基线 |
+| WebSocket 握手和重连 | `WSClient` | 生命周期封装、统一 HTTP/HTTPS 代理注入、离线合同和真实首次握手已完成；真实断线恢复与代理待验证 | 已接入 |
+| 消息事件字段裁剪 | `im.message.receive_v1` | 稳定字段映射、畸形输入失败关闭和一条真实私聊文本事件已验证 | 已接入 |
+| 私聊文本事件 | `im.message.receive_v1` | 普通 `text` 与由官方 `text`、`a` 元素组成的纯文字 `post` 均经过平台本地筛选、有界入队、Access Policy 和 Application 提交；富文本链接保留可见文字与目标 URL，未知元素失败关闭。真实普通文本与纯文字富文本主路径已通过，未授权/重复真实事件待验证 | 已接入 |
+| 文本与富文本发送 | `client.im.v1.message.create` | `chat_id` 的 `text` 与 `post + md` Payload、平台原生提及标签中和、有限 HTTP 超时和脱敏错误已完成；`post + md` 当前只用于静态 CardKit 实体创建失败和流式失败降级 | 已接入 |
+| CardKit Markdown | `cardkit.v1.card.create`、`cardElement.content`、`card.update` | 启动通知、短回复、命令结果、操作终态与每轮统计使用静态 CardKit；持续回复使用 300 ms 增量合并、递增序列与 UUID，并在终态全量更新含完整正文且关闭流式模式的静态卡片，统一采用 5,000 字符单卡和最多 5 张卡片预算；操作终态按会话顺序显示 Core 已脱敏详情。持续回复、静态展示、操作终态和每轮状态的真实主路径已通过，真实限流、失败降级和超长滚动待验收 | 已接入 |
+| 超长最终回复文件兜底 | `im.v1.file.create`、`im.v1.message.create` 的 `msg_type=file` | 超过五张卡片可靠展示预算且不超过 1,000,000 字节时，静态路径发送一张预览卡和完整 `codex-final-answer.txt`，流式路径在已有卡片后追加完整文件；只接受当前最终正文的内存 Buffer，不读取本地路径，不自动重试；文件失败时静态路径继续发送剩余有界正文。离线 SDK Payload、顺序、边界和失败路径已验证，真实文件上传待验收 | 已接入 |
+| Thread 状态消息更新 | `client.im.v1.message.create/patch` | 同一 Thread 的 `active → idle` 轻量交互卡片创建、重复抑制、同 Chat 顺序更新、失败绑定清理和有限关闭已离线验证；蓝色运行中原地更新为绿色空闲的真实主路径已通过，不更新模型正文且不自动重试 | 已接入 |
+| 输出渲染 | `OutputEvent`、`operation.updated`、`turn.completed` | 展示型 Markdown 统一使用 CardKit；操作运行帧忽略，终态按事件顺序发送独立静态卡片并显示受控详情；安全错误和操作性提示使用纯文本；每轮上下文状态、安全启动收件人、有界 Outbox 和 Surface 生命周期已离线验证，静态 CardKit、操作终态与每轮状态的真实主路径已通过 | 已接入 |
+| 事件去重与旧事件过滤 | 平台事件 ID、毫秒时间戳 | 已实现飞书模块内有界内存状态；真实重投待验证 | 已接入 |
+| 严格配置与重载分类 | 统一 `config.toml` | 私聊字段、失败关闭校验、变更码、公开示例和 Bootstrap 显式组合已完成 | 已接入 |
+| 私聊命令 | `ConversationCommandService`、私聊文本事件、`application.bot.menu_v6` | 全部平台无关命令结果、帮助、身份、`/stop` 优先停止当前 Actor 待处理交互并在没有交互时停止 Turn、`status/doctor/revoke` 权限中心、未知命令失败关闭、会话列表收敛和有界安全分片已完成离线验证；用户 OAuth 不提供全量预授权命令；`/start`、`/help` 与单个 `codexc_home` 菜单打开主分类卡片，主卡提供新会话、会话切换、状态、Fast、用量、额度、模型、思考强度、工作区、Goal 和“更多命令”，后者再按会话查询、会话操作、能力与集成、当前内容、飞书提供二十一个按钮，不发送完整帮助长文本；全部 29 个共享命令都可由主卡、分类卡或结果选择卡到达，合法性直接复用 Application 命令目录；会话、归档、模型、思考强度、Fast 与工作区使用最多 18 项的选择卡，会话与归档搜索、重命名、下一 Turn 追加、Review 和 Goal 共用一个有界输入卡，项目规则只展示 `init/check`；选择与输入绑定消息、Chat、Actor、访问策略和一次性短期令牌，直接新建、停止、归档、固定、取消固定、压缩或分叉会话也会消费当前卡片令牌，提交仍进入共享命令服务，不建立飞书专属状态、语法或队列；状态命令、分类命令中心、选择卡和原生用户输入真实显示均已通过，直接命令矩阵待集中实机复验 | 已接入 |
+| 用户 OAuth | OAuth Device Flow、应用用户 Scope、飞书 AppLink | 已完成精确授权 Origin 与完整 URL、能力所需 Scope 与应用已开通 Scope 的交集检查、有效 Token 覆盖检查与缺失差集授权、空需求不授权、`offline_access` 完整卡片、统一 HTTP/HTTPS 代理、显式直连与无效代理失败关闭、有限轮询、身份匹配、macOS Keychain/Linux 加密文件、进行中/持久状态、撤销、限时停止和写入错误/取消竞态回滚；不提供全量预授权命令；真实 Device Flow、身份校验、安全写入和 Gateway 重启恢复已通过，代理待验收，尚无飞书 CLI API 消费 Token | 已接入 |
+| 群聊 | 群消息事件、群身份与 @Bot | 已记录为后续需求，当前开发批次不实施 | 未支持 |
+| 卡片交互 | `im.v1.message.create/patch`、`card.action.trigger` | 私聊审批、CardKit 2.0 用户输入与 MCP form、MCP 工具审批、MCP URL 卡片、一次性令牌、Actor/Chat/消息/请求绑定、重复请求失败关闭、原值决定、超时、有限停止、结果更新失败隔离和跨客户端失效已离线验证；用户输入使用原生选择器并允许单独填写“其他内容”，同时兼容动作值和 CardKit 表单按钮名两种回调载荷；命令审批卡片的一次批准、原生用户输入、MCP 工具审批的一次批准及当前 Gateway 长连接动作接收已通过真实验收，MCP form/URL 卡片仍待真实验收 | 已接入 |
+| 私聊 PNG/JPEG 图片 | `im.message.receive_v1`、`im.v1.messageResource.get` | 已完成独立 `image` 与最多四张图片附带说明文字的 `post` 事件裁剪、授权后异步下载、10 MiB 限制、内容签名、私有暂存、过期清理，以及图片与原始说明文字同次提交；独立图片及两图至四图加说明文字的顺序和单 Turn 主路径已通过真实验收 | 已接入 |
+| 私聊一次性音频 | `im.message.receive_v1`、`im.v1.messageResource.get` | 复用既有 `im:resource`，按 `message_id + file_key + type=file` 下载；限制为 5 分钟、20 MiB 及 WAV/MP3/M4A/WebM/OGG，私有暂存一小时。真实飞书接收与 App Server 转换已验证；当前模型目录未声明 `audio`，Application 在创建 Turn 前明确拒绝，不列为当前端到端支持 | 受限接入 |
+| 生成图片回传 | `im.v1.image.create`、`im.v1.message.create` 的 `msg_type=image` | 只接受官方 `imageGeneration.savedPath`，共享边界拒绝相对路径、符号链接、非普通文件、超过 10 MiB 和非 PNG/JPEG 内容；上传后严格裁剪 `image_key` 并按 Chat 顺序发送，独立于操作显示档位。离线 Payload、顺序和失败关闭已验证，真实发送主路径已通过 | 已接入 |
+| UTF-8 文本文件输入 | `im.message.receive_v1`、`im.v1.messageResource.get` | 独立 `file` 消息在授权后按 `message_id + file_key + type=file` 下载；严格验证文件名、1,000,000 字节、UTF-8 与控制字符，内联提交且不落盘。Office、压缩包、文件消息内的音视频和富文本内附件不支持；离线主路径已完成，真实文件待验收 | 已接入 |
+| 飞书 Setup 与应用配置 | SDK Device Authorization、`bot/v3/info`、Application v6 只读详情、Application v7 配置写入与发布、机器人菜单事件文档 | 已实现手动输入与扫码、飞书页应用选择、消息/CardKit/只读检测与配置写入权限及消息/菜单事件与卡片动作回调声明、身份验证和原子配置；扫码保存后直接保留已有菜单并自动补齐 `codexc_home` 悬浮菜单、长连接事件与回调并提交应用版本，失败时保留连接配置并提供 Doctor 恢复；Doctor 解析已有租户 Scope、只申请缺失差集，并以运行时已收到事件为优先证据显示四项摘要；单个菜单节点与启用开关独立检测，消息路径真实扫码、Doctor 身份探测、命令审批动作回调和菜单点击均已通过 | 已接入 |
+| 飞书以外的 Lark | SDK Domain 配置 | 不在首版范围 | 未支持 |
 
-“计划中”不是公开支持。只有源码、配置、README、测试和真实测试应用冒烟均完成后，才能更新为
-“已支持”。
+“已接入”只表示本地实现和离线验证入口存在；真实平台状态仍以
+[`通讯渠道验收矩阵`](channel-acceptance-matrix.md) 为准。未支持能力不得因 SDK 提供接口而隐式开放。
 
 ## 真实验收记录
 
@@ -274,9 +274,9 @@ SDK 响应。
 实施或排查飞书行为时：
 
 1. 从本页按能力找到官方入口、已知约束和项目状态。
-2. 查看项目锁定版本；未锁定时只能进行阶段 0 研究，不能写稳定适配。
+2. 查看项目锁定版本；未锁定时只能进行隔离研究，不能写稳定适配。
 3. 阅读对应固定版本 SDK 类型和源码，再查开放平台动态文档。
-4. 对照 [`飞书 Surface 接入计划`](feishu-surface-plan.md) 和
+4. 对照 [`飞书 Surface 设计决策`](feishu-surface-plan.md) 和
    [`通讯渠道 Surface 接入指南`](surface-integration-guide.md) 确认模块归属。
 5. 用测试应用验证仍不明确的投递、重试、权限和回调行为。
 6. 实现后更新支持矩阵、本地映射、测试入口和查阅日期。

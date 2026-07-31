@@ -145,7 +145,7 @@ export class FeishuConversationAdapter {
           );
           return;
         }
-        if (command.name === "fs" || command.name === "feishu") {
+        if (command.name === "fs") {
           await this.handleFeishuCommand(
             message.actorId,
             message.target.accountId,
