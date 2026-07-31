@@ -33,7 +33,9 @@
 1. [Codex App Server](https://learn.chatgpt.com/docs/app-server)：协议定位、Transport、
    JSON-RPC 消息、初始化、Thread/Turn/Item、审批、通知和 Schema 生成的主文档。
 2. [Codex 开源组件](https://learn.chatgpt.com/docs/open-source)：官方开源范围和仓库入口。
-3. [OpenAI Codex 仓库](https://github.com/openai/codex)：当前官方源码；排查本项目锁定协议时，
+3. [Codex 高级配置](https://learn.chatgpt.com/docs/config-file/config-advanced#profiles)：独立
+   `profile-name.config.toml` 的加载顺序、命名与 `--profile` 用法。
+4. [OpenAI Codex 仓库](https://github.com/openai/codex)：当前官方源码；排查本项目锁定协议时，
    优先读取 [`upstream/openai-codex`](upstream-sources.md) 的固定本地副本；本地副本缺失时
    再打开下面固定到 `rust-v0.146.0` 的链接，不能直接以 `main` 为准。
 

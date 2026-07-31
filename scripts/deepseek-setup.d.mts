@@ -3,6 +3,8 @@ export const deepseekSetupScriptUrl: string;
 export interface DeepseekSetupResult {
   mode: "switching" | "exclusive" | "restored";
   configPath: string;
+  profilePath: string;
+  gatewayProfilePath: string;
   catalogPath: string;
   backupPath: string;
 }

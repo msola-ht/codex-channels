@@ -97,7 +97,8 @@ plan_updates = false
 运行 `codexc setup`，选择“模型提供方”，填写 DeepSeek API Key 后选择：
 
 - OpenAI + DeepSeek 切换模式：保留 OpenAI 为原生 Codex 默认；终端使用 `codex` 启动 OpenAI，
-  使用 `codex --profile deepseek` 启动 DeepSeek。三个聊天渠道在 `/model` 中统一选择模型。
+  使用 `codex --profile deepseek` 启动 DeepSeek。基础 `~/.codex/config.toml` 保持安装前原文；共享
+  App Server 自动加载项目专属 Provider Profile，三个聊天渠道仍可在 `/model` 中逐会话选择模型。
 - 仅 DeepSeek 固定模式：把原生 Codex 默认模型改为 `deepseek-v4-flash`，CLI、TUI、IDE 和 Gateway
   都默认使用 DeepSeek。
 - 恢复安装前配置：恢复首次安装前的原始文件；如果原来没有配置文件则移除 Setup 创建的配置，
@@ -107,9 +108,12 @@ Setup 从 DeepSeek 官方安装脚本下载并提取模型目录，校验后写�
 `~/.codex/deepseek.models.json`；该文件不随项目或 npm 包发布。目前 DeepSeek 官方仅声明
 `deepseek-v4-flash` 支持 Codex；Pro 会在 `/model` 中显示为“暂不可用”，且在官方支持前不能切换。
 
-两种模式都会在权限为 `0600` 的 `~/.codex/config.toml` 注册 DeepSeek Provider，并按官方
-Codex 接入方式保存 API Key。首次修改前，原配置会备份到
-`~/.codex/backup-codex-connect-deepseek/config.toml`。切换到另一 Provider 时不能原地修改正在
+切换模式把 CLI 的模型、Provider 与认证选择写入官方新版 Profile 文件
+`~/.codex/deepseek.config.toml`，并把共享 App Server 所需的 Provider 注册单独写入
+`~/.codex/codex-connect-deepseek.config.toml`；两个文件权限均为 `0600`，基础配置和 OpenAI 登录
+凭据不会被修改。固定模式则按其含义直接在权限为 `0600` 的 `~/.codex/config.toml` 注册并选中
+DeepSeek。首次修改前，原配置及原有同名 Profile 会备份到
+`~/.codex/backup-codex-connect-deepseek/`。切换到另一 Provider 时不能原地修改正在
 使用的 Thread；如果当前会话已有空闲 Thread，渠道会通过官方 `thread/fork` 复制当前历史并绑定
 到所选 Provider，后续切回时继续从当前分支 Fork，因此话题上下文不会变成空白。旧 Thread 仍可恢复；
 当前没有 Thread 时才为所选 Provider 新建会话。

@@ -4,6 +4,9 @@
 
 - `config-event-queue.mjs`：以有界、版本化、原子更新的队列保存待投递配置事件。
 - `config-event-queue.d.mts`：声明配置事件队列共享模块的 TypeScript 接口。
+- `codex-provider-profile.mjs`：只在 DeepSeek 双模式安装了项目专属 Provider Profile 时，为共享
+  App Server 返回对应的官方 `--profile` 启动参数，不改变原生 Codex 基础配置。
+- `codex-provider-profile.d.mts`：声明共享 App Server Profile 参数模块的 TypeScript 接口。
 - `gateway-config.mjs`：安全解析、严格校验 Telegram、飞书私聊与微信私聊配置，在保留已有
   注释的前提下合并缺失的 Schema 安全默认值，并以 `0600` 权限原子写入 CLI、脚本和 Gateway
   共享的 TOML 配置。

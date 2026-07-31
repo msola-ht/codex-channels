@@ -28,10 +28,17 @@ export async function runDeepseekSetup({
     const choice = await askChoice(prompt, "请选择 [1-3]", 3);
     const codexHome = resolve(environment.CODEX_HOME?.trim() || join(homedir(), ".codex"));
     const configPath = join(codexHome, "config.toml");
+    const profilePath = join(codexHome, "deepseek.config.toml");
+    const gatewayProfilePath = join(codexHome, "codex-connect-deepseek.config.toml");
     const catalogPath = join(codexHome, "deepseek.models.json");
     const manifestPath = join(codexHome, "deepseek.models.manifest.json");
     const backupDirectory = join(codexHome, "backup-codex-connect-deepseek");
     const backupPath = join(backupDirectory, "config.toml");
+    const profileBackupPath = join(backupDirectory, "deepseek.config.toml");
+    const gatewayProfileBackupPath = join(
+      backupDirectory,
+      "codex-connect-deepseek.config.toml",
+    );
     const backupStatePath = join(backupDirectory, "state.json");
     if (choice === "3") {
       output.write("恢复会覆盖 DeepSeek 安装后对 ~/.codex/config.toml 做的其他修改。\n");
@@ -41,16 +48,22 @@ export async function runDeepseekSetup({
       }
       return restoreInitialConfig({
         configPath,
+        profilePath,
+        gatewayProfilePath,
         catalogPath,
         manifestPath,
         backupPath,
+        profileBackupPath,
+        gatewayProfileBackupPath,
         backupStatePath,
         output,
       });
     }
     const mode = choice === "1" ? "switching" : "exclusive";
     if (mode === "switching") {
-      output.write("\n切换模式会在权限为 0600 的 ~/.codex/config.toml 中保存 DeepSeek API Key。\n");
+      output.write(
+        "\n切换模式保持 ~/.codex/config.toml 不变，并把 DeepSeek API Key 保存到权限为 0600 的独立 Profile。\n",
+      );
     }
     if (mode === "exclusive") {
       output.write("\n固定模式会修改 ~/.codex/config.toml，并将 DeepSeek API Key 写入该 0600 文件。\n");
@@ -63,8 +76,16 @@ export async function runDeepseekSetup({
 
     const downloaded = await downloadDeepseekCatalog(fetchImpl);
     await mkdir(codexHome, { recursive: true, mode: 0o700 });
-    await preserveInitialConfig(configPath, backupPath, backupStatePath);
-    const configContent = await buildCodexConfig({
+    await preserveInitialConfig({
+      configPath,
+      profilePath,
+      gatewayProfilePath,
+      backupPath,
+      profileBackupPath,
+      gatewayProfileBackupPath,
+      backupStatePath,
+    });
+    const { configContent, profileContent, gatewayProfileContent } = await buildCodexConfig({
       backupPath,
       backupStatePath,
       catalogPath,
@@ -77,14 +98,29 @@ export async function runDeepseekSetup({
       sha256: downloaded.sha256,
       downloadedAt: new Date().toISOString(),
     }, null, 2)}\n`);
-    await atomicWrite(configPath, configContent);
-    output.write(`\nDeepSeek 配置已保存：${configPath}\n`);
+    await replaceOptionalFile(configPath, configContent);
+    await replaceOptionalFile(profilePath, profileContent);
+    await replaceOptionalFile(gatewayProfilePath, gatewayProfileContent);
+    if (mode === "switching") {
+      output.write(`\nCodex 基础配置保持安装前内容：${configPath}\n`);
+      output.write(`DeepSeek CLI Profile 已保存：${profilePath}\n`);
+      output.write(`Gateway DeepSeek Profile 已保存：${gatewayProfilePath}\n`);
+    } else {
+      output.write(`\nDeepSeek 固定配置已保存：${configPath}\n`);
+    }
     output.write(`模型目录已从官方脚本下载：${catalogPath}\n`);
     output.write(mode === "switching"
       ? "原生 Codex 使用 OpenAI：codex；使用 DeepSeek：codex --profile deepseek\n"
       : "原生 Codex 和 Gateway 将默认使用 deepseek-v4-flash。\n");
     output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
-    return { mode, configPath, catalogPath, backupPath };
+    return {
+      mode,
+      configPath,
+      profilePath,
+      gatewayProfilePath,
+      catalogPath,
+      backupPath,
+    };
   } finally {
     prompt.close();
   }
@@ -150,10 +186,12 @@ async function buildCodexConfig({
   mode,
 }) {
   let document = {};
+  let originalContent;
   try {
     const state = JSON.parse(await readFile(backupStatePath, "utf8"));
     if (state.originalConfigExisted === true) {
-      document = parse(await readFile(backupPath, "utf8"));
+      originalContent = await readFile(backupPath, "utf8");
+      document = parse(originalContent);
     } else if (state.originalConfigExisted !== false) {
       throw new Error("invalid backup state");
     }
@@ -164,61 +202,116 @@ async function buildCodexConfig({
       throw new Error("现有 Codex config.toml 无法读取或解析，未修改配置");
     }
   }
-  document.model_providers = table(document.model_providers);
-  document.model_providers[providerId] = {
+  const provider = {
     name: "deepseek",
     base_url: "https://api.deepseek.com/",
     wire_api: "responses",
     experimental_bearer_token: apiKey,
   };
-  document.profiles = table(document.profiles);
-  document.profiles.deepseek = {
+  const providerLayer = {
+    model_providers: { [providerId]: provider },
+  };
+  const profile = {
+    ...providerLayer,
     model: supportedModel,
     model_provider: providerId,
+    preferred_auth_method: "apikey",
+    forced_login_method: "api",
     model_reasoning_effort: "high",
     model_catalog_json: catalogPath,
   };
-  if (mode === "exclusive") {
-    Object.assign(document, {
-      model: supportedModel,
-      model_provider: providerId,
-      preferred_auth_method: "apikey",
-      forced_login_method: "api",
-      model_reasoning_effort: "high",
-      model_catalog_json: catalogPath,
-    });
+  if (mode === "switching") {
+    if (document.profile === providerId || table(document.profiles).deepseek !== undefined) {
+      throw new Error(
+        "安装前的 Codex config.toml 已占用旧式 deepseek profile；请先手工迁移或改名",
+      );
+    }
+    return {
+      configContent: originalContent,
+      profileContent: stringify(profile),
+      gatewayProfileContent: stringify(providerLayer),
+    };
   }
-  return stringify(document);
+
+  document.model_providers = table(document.model_providers);
+  document.model_providers[providerId] = provider;
+  if (document.profile === providerId) {
+    delete document.profile;
+  }
+  const profiles = table(document.profiles);
+  delete profiles.deepseek;
+  if (Object.keys(profiles).length === 0) {
+    delete document.profiles;
+  } else {
+    document.profiles = profiles;
+  }
+  Object.assign(document, {
+    model: supportedModel,
+    model_provider: providerId,
+    preferred_auth_method: "apikey",
+    forced_login_method: "api",
+    model_reasoning_effort: "high",
+    model_catalog_json: catalogPath,
+  });
+  return {
+    configContent: stringify(document),
+    profileContent: undefined,
+    gatewayProfileContent: undefined,
+  };
 }
 
-async function preserveInitialConfig(configPath, backupPath, backupStatePath) {
+async function preserveInitialConfig({
+  configPath,
+  profilePath,
+  gatewayProfilePath,
+  backupPath,
+  profileBackupPath,
+  gatewayProfileBackupPath,
+  backupStatePath,
+}) {
+  let state;
   try {
-    await readFile(backupStatePath);
-    return;
+    state = JSON.parse(await readFile(backupStatePath, "utf8"));
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
-  let source;
+  if (state === undefined) {
+    state = {};
+    state.originalConfigExisted = await backupIfPresent(configPath, backupPath);
+  } else if (typeof state.originalConfigExisted !== "boolean") {
+    throw new Error("Codex 初始配置备份状态无效");
+  }
+  if (typeof state.originalProfileExisted !== "boolean") {
+    state.originalProfileExisted = await backupIfPresent(profilePath, profileBackupPath);
+  }
+  if (typeof state.originalGatewayProfileExisted !== "boolean") {
+    state.originalGatewayProfileExisted = await backupIfPresent(
+      gatewayProfilePath,
+      gatewayProfileBackupPath,
+    );
+  }
+  await atomicWrite(backupStatePath, `${JSON.stringify(state)}\n`);
+}
+
+async function backupIfPresent(sourcePath, backupPath) {
   try {
-    source = await readFile(configPath);
+    await atomicWrite(backupPath, await readFile(sourcePath));
+    return true;
   } catch (error) {
-    if (error.code === "ENOENT") {
-      await mkdir(dirname(backupStatePath), { recursive: true, mode: 0o700 });
-      await atomicWrite(backupStatePath, '{"originalConfigExisted":false}\n');
-      return;
-    }
+    if (error.code === "ENOENT") return false;
     throw error;
   }
-  await mkdir(dirname(backupPath), { recursive: true, mode: 0o700 });
-  await atomicWrite(backupPath, source);
-  await atomicWrite(backupStatePath, '{"originalConfigExisted":true}\n');
 }
 
 async function restoreInitialConfig({
   configPath,
+  profilePath,
+  gatewayProfilePath,
   catalogPath,
   manifestPath,
   backupPath,
+  profileBackupPath,
+  gatewayProfileBackupPath,
   backupStatePath,
   output,
 }) {
@@ -235,11 +328,41 @@ async function restoreInitialConfig({
   } else {
     throw new Error("Codex 初始配置备份状态无效");
   }
+  if (state.originalProfileExisted === true) {
+    await atomicWrite(profilePath, await readFile(profileBackupPath));
+  } else if (state.originalProfileExisted === false) {
+    await removeFile(profilePath);
+  }
+  if (state.originalGatewayProfileExisted === true) {
+    await atomicWrite(gatewayProfilePath, await readFile(gatewayProfileBackupPath));
+  } else if (state.originalGatewayProfileExisted === false) {
+    await removeFile(gatewayProfilePath);
+  }
   await removeFile(catalogPath);
   await removeFile(manifestPath);
   output.write("已恢复安装前的 Codex 配置；备份目录保留以便审计。\n");
   output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
-  return { mode: "restored", configPath, catalogPath, backupPath };
+  return {
+    mode: "restored",
+    configPath,
+    profilePath,
+    gatewayProfilePath,
+    catalogPath,
+    backupPath,
+  };
+}
+
+async function replaceOptionalFile(path, content) {
+  if (content === undefined) {
+    await removeFile(path);
+    return;
+  }
+  try {
+    if (await readFile(path, "utf8") === content) return;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  await atomicWrite(path, content);
 }
 
 async function removeFile(path) {
