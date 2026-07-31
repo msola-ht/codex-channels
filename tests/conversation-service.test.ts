@@ -1037,6 +1037,7 @@ describe("ConversationService model selection", () => {
       list: async () => [{
         id: "thread-shared",
         sessionId: "session-shared",
+        modelProvider: "openai",
         preview: "共享会话",
         name: null,
         isPinned: false,
@@ -1092,6 +1093,7 @@ describe("ConversationService model selection", () => {
         list: async () => [{
           id: "thread-shared",
           sessionId: "session-shared",
+          modelProvider: "openai",
           preview: "共享会话",
           name: null,
           isPinned: false,
@@ -1135,6 +1137,7 @@ describe("ConversationService model selection", () => {
         list: async () => [{
           id: "thread-shared",
           sessionId: "session-shared",
+          modelProvider: "openai",
           preview: "共享会话",
           name: null,
           isPinned: false,
@@ -1187,6 +1190,7 @@ describe("ConversationService model selection", () => {
         list: async () => [{
           id: "thread-shared",
           sessionId: "session-shared",
+          modelProvider: "openai",
           preview: "共享会话",
           name: null,
           isPinned: false,
@@ -1222,6 +1226,7 @@ describe("ConversationService model selection", () => {
           {
             id: "recent",
             sessionId: "session-recent",
+            modelProvider: "openai",
             preview: "最近",
             name: null,
             isPinned: false,
@@ -1233,6 +1238,7 @@ describe("ConversationService model selection", () => {
           {
             id: "pinned-old",
             sessionId: "session-pinned-old",
+            modelProvider: "openai",
             preview: "固定较早",
             name: null,
             isPinned: true,
@@ -1244,6 +1250,7 @@ describe("ConversationService model selection", () => {
           {
             id: "pinned-new",
             sessionId: "session-pinned-new",
+            modelProvider: "openai",
             preview: "固定较新",
             name: null,
             isPinned: true,

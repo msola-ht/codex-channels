@@ -625,6 +625,7 @@ describe("JsonRpcClient", () => {
     const request = transport.sent.find((message) => message.method === "thread/list");
     expect(request?.params).toMatchObject({
       cwd: "/tmp/project",
+      modelProviders: [],
       sourceKinds: ["cli", "vscode", "appServer"],
       useStateDbOnly: true,
       archived: false,
@@ -657,6 +658,7 @@ describe("JsonRpcClient", () => {
     expect(threads).toEqual([{
       id: "thread-1",
       sessionId: "session-1",
+      modelProvider: "openai",
       preview: "测试 Thread",
       name: null,
       isPinned: false,
@@ -692,6 +694,67 @@ describe("JsonRpcClient", () => {
     const session = await client.resumeThread("thread-1", "/tmp/project");
 
     expect(session.contextCompactionItemIds).toEqual(["compact-1", "compact-2"]);
+  });
+
+  it("reapplies a provider model catalog when resuming a thread", async () => {
+    const transport = new FakeTransport();
+    transport.resumeThreadData = appServerThread({
+      modelProvider: "deepseek",
+      status: { type: "notLoaded" },
+    });
+    transport.threadListData = [transport.resumeThreadData];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+      modelCatalogsByProvider: new Map([
+        ["deepseek", "/private/deepseek.models.json"],
+      ]),
+    });
+    await client.connect();
+
+    await client.resumeThread("thread-1", "/tmp/project");
+
+    const requests = transport.sent.filter((message) =>
+      message.method === "thread/list" || message.method === "thread/resume"
+    );
+    expect(requests.map((message) => message.method))
+      .toEqual(["thread/list", "thread/resume"]);
+    expect(requests[1]?.params).toMatchObject({
+      threadId: "thread-1",
+      config: { model_catalog_json: "/private/deepseek.models.json" },
+    });
+  });
+
+  it("does not apply a third-party catalog when resuming an OpenAI thread", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+      modelCatalogsByProvider: new Map([
+        ["deepseek", "/private/deepseek.models.json"],
+      ]),
+    });
+    await client.connect();
+
+    await client.resumeThread("thread-1", "/tmp/project");
+
+    expect(transport.sent.find((message) => message.method === "thread/resume")?.params)
+      .not.toHaveProperty("config");
+  });
+
+  it("does not send resume config to an already loaded third-party thread", async () => {
+    const transport = new FakeTransport();
+    transport.resumeThreadData = appServerThread({ modelProvider: "deepseek" });
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+      modelCatalogsByProvider: new Map([
+        ["deepseek", "/private/deepseek.models.json"],
+      ]),
+    });
+    await client.connect();
+
+    await client.resumeThread("thread-1", "/tmp/project");
+
+    expect(transport.sent.find((message) => message.method === "thread/resume")?.params)
+      .not.toHaveProperty("config");
   });
 
   it("fails closed when an official Thread response lacks a required routing field", async () => {

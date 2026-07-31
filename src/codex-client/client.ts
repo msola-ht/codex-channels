@@ -79,6 +79,7 @@ import { toPermissionProfilePage } from "./permission-adapter.js";
 
 export interface ThreadDefaults {
   model?: string;
+  modelCatalogsByProvider?: ReadonlyMap<string, string>;
   sandbox: "read-only" | "workspace-write";
 }
 
@@ -134,6 +135,7 @@ export class CodexAppServerClient implements
         method: "thread/list",
         params: {
           cwd,
+          modelProviders: [],
           sourceKinds: ["cli", "vscode", "appServer"],
           sortKey: "updated_at",
           sortDirection: "desc",
@@ -201,6 +203,7 @@ export class CodexAppServerClient implements
   }
 
   async resumeThread(threadId: string, cwd: string): Promise<ThreadSession> {
+    const config = await this.resumeModelCatalogConfig(threadId, cwd);
     const response = await this.rpc.request<ThreadResumeResponse>({
       method: "thread/resume",
       params: {
@@ -208,9 +211,31 @@ export class CodexAppServerClient implements
         cwd,
         sandbox: this.defaults.sandbox,
         approvalPolicy: "on-request",
+        ...(config ? { config } : {}),
       },
     }, { retryOverload: false });
     return toThreadSession(response);
+  }
+
+  private async resumeModelCatalogConfig(
+    threadId: string,
+    cwd: string,
+  ): Promise<Record<string, string> | undefined> {
+    const catalogs = this.defaults.modelCatalogsByProvider;
+    if (!catalogs || catalogs.size === 0) {
+      return undefined;
+    }
+    let thread = (await this.listThreads(cwd))
+      .find((candidate) => candidate.id === threadId);
+    if (!thread) {
+      thread = (await this.listThreads(cwd, { fullScan: true }))
+        .find((candidate) => candidate.id === threadId);
+    }
+    if (!thread || thread.status.type !== "notLoaded") {
+      return undefined;
+    }
+    const catalogPath = catalogs.get(thread.modelProvider);
+    return catalogPath ? { model_catalog_json: catalogPath } : undefined;
   }
 
   async unsubscribeThread(threadId: string): Promise<void> {

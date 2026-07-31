@@ -37,6 +37,7 @@ export function toThreadSnapshot(thread: Thread): ThreadSnapshot {
   return {
     id: thread.id,
     sessionId: thread.sessionId,
+    modelProvider: toThreadModelProvider(thread),
     preview: thread.preview,
     name: thread.name,
     isPinned: thread.isPinned,
@@ -45,6 +46,11 @@ export function toThreadSnapshot(thread: Thread): ThreadSnapshot {
     source: toThreadSource(thread.source),
     activeTurnId: activeTurn?.id ?? null,
   };
+}
+
+function toThreadModelProvider(thread: Thread): string {
+  requireString(thread.modelProvider, "modelProvider");
+  return thread.modelProvider;
 }
 
 export function toThreadSession(response: ThreadSessionResponse): ThreadSession {

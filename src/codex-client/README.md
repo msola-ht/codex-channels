@@ -50,8 +50,10 @@
   读取与服务层级写入等 App Server 方法的类型化封装；MCP 查询按 Thread 使用
   `toolsAndAuthOnly` 分页，配置读取只公开稳定服务层级值，Plugin 查询只调用
   `plugin/installed`，不得改用 `plugin/list` 加载市场目录；Permission Profile 按 CWD 分页，
-  仅用于只读目录展示。
-  新 Thread 和 Fork 可显式携带官方 `modelProvider` 与受控 `model_catalog_json`；已有 Thread
+  仅用于只读目录展示。Thread 列表显式传空 `modelProviders` 获取当前 Workspace 的全部 Provider，
+  供跨 Provider 会话展示和冷恢复定位使用。
+  新 Thread 和 Fork 可显式携带官方 `modelProvider` 与受控 `model_catalog_json`；冷恢复 Thread
+  时先读取官方 `modelProvider`，只为已登记的第三方 Provider 重新附带对应目录。已有 Thread
   不在 Turn 覆盖中更换 Provider。Application 跨 Provider 选择时新建 Thread；`thread/fork`
   只用于用户显式创建同一 Provider 的历史分支，不承担跨 Provider 历史转换。
 

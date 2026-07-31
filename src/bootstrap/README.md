@@ -9,7 +9,8 @@
   订阅恢复与关闭，并通过 Client 适配器把稳定事件分别转交 Core 与 `session-routing`、把
   Server Request 转交 Approval；未知或畸形 Notification 只记录 method 后忽略，未知或畸形
   高权限请求明确拒绝；受支持版本通过 Client 运行时信息读取，并把显示版本注入 Surface；
-  对当前授权 Workspace 执行有时限的只读 Git 分支查询并注入 Application 状态。
+  对当前授权 Workspace 执行有时限的只读 Git 分支查询并注入 Application 状态；把 Setup
+  已校验的第三方 Provider 模型目录按 Provider 注入 Client，供 Thread 冷恢复时精确重载。
 - `surface-plugin.ts`：定义编译期内置 Surface 插件、插件上下文和运行时模块契约，并校验插件 ID、
   实际 Surface ID 与账号实例唯一性。
 - `surface-composition.ts`：显式注册 Telegram、飞书和微信内置插件，并保留各平台访问策略、

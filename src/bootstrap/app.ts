@@ -87,11 +87,24 @@ export class GatewayApplication {
     private readonly logger: Logger,
   ) {
     verifyCodexVersion(config);
+    const supplementaryModels = loadDeepseekModelOptions();
+    const modelCatalogsByProvider = new Map<string, string>();
+    for (const model of supplementaryModels) {
+      if (!model.provider || !model.catalogPath) continue;
+      const existing = modelCatalogsByProvider.get(model.provider);
+      if (existing && existing !== model.catalogPath) {
+        throw new Error(`模型 Provider ${model.provider} 配置了多个目录`);
+      }
+      modelCatalogsByProvider.set(model.provider, model.catalogPath);
+    }
     this.transport = new UnixWebSocketTransport(config.codexSocketPath);
     this.rpc = new JsonRpcClient(this.transport, 60_000, logger);
     this.codex = new CodexAppServerClient(this.rpc, {
       sandbox: config.codexSandbox,
       ...(config.codexModel ? { model: config.codexModel } : {}),
+      ...(modelCatalogsByProvider.size > 0
+        ? { modelCatalogsByProvider }
+        : {}),
     });
     this.inbound = new EventBus<RpcNotification>(logger, 2_000);
     this.output = new EventBus<OutputEvent>(logger, 1_000);
@@ -109,7 +122,7 @@ export class GatewayApplication {
       this.codex,
       this.router,
       config.codexModel,
-      loadDeepseekModelOptions(),
+      supplementaryModels,
     );
     const collaborationModes = new CollaborationModeSelectionService(
       this.codex,

@@ -9,6 +9,7 @@ export type ThreadSource = "cli" | "vscode" | "appServer" | "other";
 export interface ThreadSnapshot {
   id: string;
   sessionId: string;
+  modelProvider: string;
   preview: string;
   name: string | null;
   isPinned: boolean;

@@ -120,7 +120,8 @@ Setup 从 DeepSeek 官方安装脚本下载并提取模型目录，校验后写�
 不复制可能包含 Provider 专属 reasoning、工具结果或加密内容的历史。旧 Thread 可通过 `/resume`
 恢复；同一 Provider 内切换模型仍在当前 Thread 的下一次 Turn 生效。
 Setup 完成或恢复后运行 `codexc service restart all`，让 App Server 重新读取 Provider，并让 Gateway
-重新载入下载的模型目录。
+重新载入下载的模型目录。之后 Gateway 在恢复绑定或执行 `/resume` 时会先读取 Thread 状态；仅当
+App Server 已卸载该 DeepSeek Thread 时重新附带该目录，OpenAI 与仍在内存中的 Thread 不受影响。
 
 TUI 和 `/status` 中的 Token、上下文窗口、缓存和压缩次数始终来自当前 Thread，适用于 OpenAI
 与第三方 Provider；它们不是账户余额。OpenAI 的 Fast 与周限不会显示在 DeepSeek 或未知 Provider

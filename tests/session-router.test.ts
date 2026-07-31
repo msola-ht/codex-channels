@@ -24,6 +24,7 @@ function thread(id: string, status: ThreadStatus): ThreadSnapshot {
   return {
     id,
     sessionId: id,
+    modelProvider: "openai",
     preview: "test",
     isPinned: false,
     status,

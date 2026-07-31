@@ -23,7 +23,8 @@
 自动接续前必须检查来源、Workspace、活动状态和是否被其他 Conversation 占用。App Server 响应是事实来源，Router 的缓存只用于路由和界面加速。
 Gateway 重连或重启后，Client 必须从 `thread/resume` 返回的 `status` 与 `turns` 映射
 `activeTurnId`，组合根再恢复仍在运行的 Turn，不能只恢复绑定，否则 steer、停止和下一 Turn
-队列会误判为空闲。
+队列会误判为空闲。Client 还必须根据 Thread 的官方 `modelProvider` 为已登记的第三方 Provider
+重新附带模型目录，不能让冷恢复退回 fallback 元数据，也不能把第三方目录应用到 OpenAI Thread。
 
 本模块不得导入 `codex-client` 或 `codex-protocol`；具体 Client 由组合根作为
 `ThreadLifecyclePort` 实现注入。

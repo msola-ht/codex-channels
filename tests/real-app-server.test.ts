@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { createServer } from "node:http";
 import {
   existsSync,
   mkdirSync,
@@ -26,6 +27,8 @@ const run = process.env.RUN_CODEX_INTEGRATION === "1";
 const suite = run ? describe : describe.skip;
 const runContract = process.env.RUN_CODEX_CONTRACT === "1";
 const contractSuite = runContract ? describe : describe.skip;
+const deepseekCatalogPath = process.env.CODEX_DEEPSEEK_MODEL_CATALOG;
+const deepseekCatalogContractTest = runContract && deepseekCatalogPath ? it : it.skip;
 const archiveFixtureThreadId = process.env.CODEX_ARCHIVE_FIXTURE_THREAD_ID;
 const archiveTest = run && archiveFixtureThreadId ? it : it.skip;
 const resumeFixtureThreadId = process.env.CODEX_RESUME_FIXTURE_THREAD_ID;
@@ -783,6 +786,135 @@ contractSuite("isolated Codex App Server state contract", () => {
     }
   }, 15_000);
 });
+
+deepseekCatalogContractTest(
+  "cold-resumes a third-party thread with its provider model catalog",
+  async () => {
+    const workdir = process.cwd();
+    const runtimeRoot = resolve(".runtime");
+    mkdirSync(runtimeRoot, { recursive: true });
+    const testRuntime = mkdtempSync(join(runtimeRoot, "deepseek-resume-contract-"));
+    const codexHome = join(testRuntime, "codex-home");
+    const socketPath = join(testRuntime, "app-server.sock");
+    const apiServer = createServer((_request, response) => {
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        error: { type: "invalid_request_error", message: "contract failure" },
+      }));
+    });
+    await new Promise<void>((resolveListen, rejectListen) => {
+      apiServer.once("error", rejectListen);
+      apiServer.listen(0, "127.0.0.1", () => resolveListen());
+    });
+    const apiAddress = apiServer.address();
+    if (!apiAddress || typeof apiAddress === "string") {
+      throw new Error("DeepSeek 冷恢复合同无法创建本机 API 夹具");
+    }
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      [
+        "[model_providers.deepseek]",
+        'name = "deepseek"',
+        `base_url = "http://127.0.0.1:${apiAddress.port}/"`,
+        'wire_api = "responses"',
+        'experimental_bearer_token = "sk-contract-placeholder"',
+        "",
+      ].join("\n"),
+      { mode: 0o600 },
+    );
+    let processHandle: ChildProcess | undefined;
+    let appServerStderr = "";
+    let client: CodexAppServerClient | undefined;
+    const startServer = async (): Promise<void> => {
+      appServerStderr = "";
+      processHandle = spawn(
+        process.env.CODEX_BINARY ?? "codex",
+        ["app-server", "--listen", `unix://${socketPath}`],
+        {
+          cwd: workdir,
+          env: { ...process.env, CODEX_HOME: codexHome },
+          stdio: ["ignore", "ignore", "pipe"],
+        },
+      );
+      processHandle.stderr?.setEncoding("utf8");
+      processHandle.stderr?.on("data", (chunk: string) => {
+        appServerStderr = appendDiagnostic(appServerStderr, chunk);
+      });
+      await waitFor(
+        () => existsSync(socketPath),
+        10_000,
+        () => processHandle?.exitCode === null
+          ? undefined
+          : new Error(appServerFailure(
+            "DeepSeek 冷恢复合同 App Server 启动失败",
+            appServerStderr,
+          )),
+      );
+    };
+    const stopServer = async (): Promise<void> => {
+      if (processHandle?.exitCode === null) {
+        processHandle.kill("SIGTERM");
+        await new Promise((resolveExit) => processHandle?.once("exit", resolveExit));
+      }
+      rmSync(socketPath, { force: true });
+    };
+    try {
+      await startServer();
+      client = new CodexAppServerClient(
+        new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
+        { sandbox: "read-only" },
+      );
+      await client.connect();
+      const started = await client.startThread(workdir, {
+        model: "deepseek-v4-flash",
+        modelProvider: "deepseek",
+        config: { model_catalog_json: deepseekCatalogPath! },
+      });
+      const threadId = started.thread.id;
+      let turnCompleted = false;
+      const removeNotification = client.onNotification((notification) => {
+        if (notification.method !== "turn/completed") return;
+        const params = notification.params as { threadId?: unknown } | undefined;
+        if (params?.threadId === threadId) turnCompleted = true;
+      });
+      await client.startTurn(
+        threadId,
+        [{ type: "text", text: "Persist the contract fixture." }],
+        "codex_connect_gateway:deepseek-resume-contract",
+        workdir,
+      );
+      await waitFor(() => turnCompleted, 10_000);
+      removeNotification();
+      await client.close();
+      client = undefined;
+      await stopServer();
+
+      await startServer();
+      client = new CodexAppServerClient(
+        new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
+        {
+          sandbox: "read-only",
+          modelCatalogsByProvider: new Map([["deepseek", deepseekCatalogPath!]]),
+        },
+      );
+      await client.connect();
+
+      const resumed = await client.resumeThread(threadId, workdir);
+
+      expect(resumed.model).toBe("deepseek-v4-flash");
+      expect(resumed.modelProvider).toBe("deepseek");
+      await client.unsubscribeThread(threadId).catch(() => undefined);
+      await client.deleteThread(threadId);
+    } finally {
+      await client?.close().catch(() => undefined);
+      await stopServer();
+      await new Promise<void>((resolveClose) => apiServer.close(() => resolveClose()));
+      rmSync(testRuntime, { recursive: true, force: true });
+    }
+  },
+  30_000,
+);
 
 async function expectConfiguredTier(
   client: CodexAppServerClient,
