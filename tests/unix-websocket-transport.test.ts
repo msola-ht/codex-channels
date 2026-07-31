@@ -1,5 +1,10 @@
 import { createServer } from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -78,5 +83,26 @@ describe("UnixWebSocketTransport", () => {
       await new Promise<void>((resolveClose) => webSocketServer.close(() => resolveClose()));
       await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
     }
+  });
+
+  it("rejects a socket inside a directory accessible by other users", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-ws-"));
+    temporaryDirectories.push(root);
+    chmodSync(root, 0o755);
+
+    await expect(new UnixWebSocketTransport(
+      join(root, "app.sock"),
+    ).connect()).rejects.toThrow("Codex Unix Socket 父目录权限不安全");
+  });
+
+  it("rejects a non-socket target before opening a connection", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-ws-"));
+    temporaryDirectories.push(root);
+    const socketPath = join(root, "app.sock");
+    writeFileSync(socketPath, "not a socket", { mode: 0o600 });
+
+    await expect(new UnixWebSocketTransport(
+      socketPath,
+    ).connect()).rejects.toThrow("Codex Unix Socket 必须是当前用户拥有的 Socket");
   });
 });

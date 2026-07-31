@@ -4,6 +4,7 @@ import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const sourceRoot = resolve("src");
+const runtimeRoot = resolve("runtime");
 
 const allowedModuleDependencies: Record<string, readonly string[]> = {
   application: [
@@ -64,6 +65,10 @@ describe("module boundaries", () => {
 
   it("prevents production source from depending on CLI and project scripts", () => {
     expect(externalDirectoryViolations(["bin", "scripts", "tests"])).toEqual([]);
+  });
+
+  it("limits shared runtime imports to the composition and config modules", () => {
+    expect(runtimeImportViolations()).toEqual([]);
   });
 
   it("requires cross-module imports to use public entry points", () => {
@@ -173,6 +178,29 @@ function externalDirectoryViolations(forbiddenDirectories: string[]): string[] {
       const target = resolve(dirname(file), specifier);
       const forbidden = forbiddenRoots.find((root) => isInside(root, target));
       if (forbidden) {
+        found.push(`${relative(sourceRoot, file)} -> ${relative(sourceRoot, target)}`);
+      }
+    }
+  }
+  return found;
+}
+
+function runtimeImportViolations(): string[] {
+  const allowedModules = new Set(["bootstrap", "config"]);
+  const moduleNames = new Set(Object.keys(allowedModuleDependencies));
+  const found: string[] = [];
+  for (const file of typescriptFiles(sourceRoot)) {
+    const sourceModule = topLevelModule(file, moduleNames);
+    if (sourceModule && allowedModules.has(sourceModule)) {
+      continue;
+    }
+    const source = readFileSync(file, "utf8");
+    for (const specifier of importSpecifiers(source)) {
+      if (!specifier.startsWith(".")) {
+        continue;
+      }
+      const target = resolve(dirname(file), specifier);
+      if (isInside(runtimeRoot, target)) {
         found.push(`${relative(sourceRoot, file)} -> ${relative(sourceRoot, target)}`);
       }
     }

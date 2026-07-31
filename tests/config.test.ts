@@ -1,10 +1,12 @@
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -119,6 +121,34 @@ describe("Gateway config.toml", () => {
     expect(runtime.config.workspaces).toEqual([
       { id: "main", name: "Main", cwd: realpathSync(fixture.workspace) },
     ]);
+  });
+
+  it("rejects a config file readable by group or other users", () => {
+    const fixture = createFixture();
+    chmodSync(fixture.configPath, 0o640);
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow("config.toml 权限不安全");
+  });
+
+  it("rejects a config file reached through a symbolic link", () => {
+    const fixture = createFixture();
+    const linkedPath = join(fixture.root, "linked-config.toml");
+    symlinkSync(fixture.configPath, linkedPath);
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: linkedPath,
+    })).toThrow("config.toml 必须是普通文件且不能是符号链接");
+  });
+
+  it("rejects a config file in a group-writable directory", () => {
+    const fixture = createFixture();
+    chmodSync(fixture.root, 0o770);
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow("config.toml 父目录权限不安全");
   });
 
   it("materializes missing safe defaults after a successful load", () => {

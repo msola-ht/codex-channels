@@ -1,4 +1,10 @@
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, resolve } from "node:path";
 
@@ -78,6 +84,7 @@ export function loadRuntimeConfig(environment: NodeJS.ProcessEnv = process.env):
     configuredPath
       || resolve(environment.CODEX_CONNECT_HOME?.trim() || resolve(homedir(), ".codex-connect"), "config.toml"),
   );
+  validateRuntimeConfigPermissions(configPath);
   const documents = parseConfigDocuments(readFileSync(configPath, "utf8"));
   const config = loadValidatedConfigDocument(
     documents.validated,
@@ -92,6 +99,37 @@ export function loadRuntimeConfig(environment: NodeJS.ProcessEnv = process.env):
     );
   }
   return { config, configPath };
+}
+
+function validateRuntimeConfigPermissions(configPath: string): void {
+  let configStatus: ReturnType<typeof lstatSync>;
+  let parentStatus: ReturnType<typeof lstatSync>;
+  try {
+    configStatus = lstatSync(configPath);
+    parentStatus = lstatSync(dirname(configPath));
+  } catch {
+    throw new ConfigurationError("config.toml 不可用，请检查文件路径和权限");
+  }
+  if (!configStatus.isFile()) {
+    throw new ConfigurationError("config.toml 必须是普通文件且不能是符号链接");
+  }
+  const currentUserId = process.getuid?.();
+  if (
+    currentUserId !== undefined
+    && (configStatus.uid !== currentUserId || parentStatus.uid !== currentUserId)
+  ) {
+    throw new ConfigurationError("config.toml 及其父目录必须由当前用户拥有");
+  }
+  if ((configStatus.mode & 0o077) !== 0) {
+    throw new ConfigurationError(
+      "config.toml 权限不安全：不能允许组或其他用户访问",
+    );
+  }
+  if (!parentStatus.isDirectory() || (parentStatus.mode & 0o022) !== 0) {
+    throw new ConfigurationError(
+      "config.toml 父目录权限不安全：不能允许组或其他用户写入",
+    );
+  }
 }
 
 export function loadConfigDocument(

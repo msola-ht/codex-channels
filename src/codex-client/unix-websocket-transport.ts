@@ -1,4 +1,6 @@
+import { lstatSync } from "node:fs";
 import { createConnection } from "node:net";
+import { dirname } from "node:path";
 
 import WebSocket, { type ClientOptions, type RawData } from "ws";
 
@@ -30,6 +32,7 @@ export class UnixWebSocketTransport extends BaseTransport {
       return;
     }
 
+    validateUnixSocket(this.socketPath);
     const options: ClientOptions = {
       perMessageDeflate: false,
       handshakeTimeout: this.connectTimeoutMs,
@@ -106,6 +109,35 @@ export class UnixWebSocketTransport extends BaseTransport {
         resolve();
       }, 2_000).unref();
     });
+  }
+}
+
+function validateUnixSocket(socketPath: string): void {
+  let parentStatus: ReturnType<typeof lstatSync>;
+  let socketStatus: ReturnType<typeof lstatSync>;
+  try {
+    parentStatus = lstatSync(dirname(socketPath));
+  } catch {
+    throw new Error("Codex Unix Socket 父目录不可用");
+  }
+  const currentUserId = process.getuid?.();
+  if (
+    !parentStatus.isDirectory()
+    || (parentStatus.mode & 0o077) !== 0
+    || (currentUserId !== undefined && parentStatus.uid !== currentUserId)
+  ) {
+    throw new Error("Codex Unix Socket 父目录权限不安全");
+  }
+  try {
+    socketStatus = lstatSync(socketPath);
+  } catch {
+    throw new Error("Codex Unix Socket 不可用");
+  }
+  if (
+    !socketStatus.isSocket()
+    || (currentUserId !== undefined && socketStatus.uid !== currentUserId)
+  ) {
+    throw new Error("Codex Unix Socket 必须是当前用户拥有的 Socket");
   }
 }
 
