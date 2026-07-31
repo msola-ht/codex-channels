@@ -5,7 +5,13 @@
 ## 配置与 Workspace
 
 - `runtime-config.mjs`：解析用户数据目录和运行时路径，并初始化 `.codex-connect`。
-- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并从“通讯渠道”把流程委派给具体适配器。
+- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“通讯渠道”和“模型提供方”流程
+  委派给具体适配器。
+- `deepseek-setup.mjs`：提供 OpenAI/DeepSeek 切换和仅 DeepSeek 两种安装模式；只下载、不执行
+  DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小、JSON 与 Flash 模型后写入用户
+  `CODEX_HOME`。首次修改前记录原配置是否存在并备份原文，固定模式显式确认后才覆盖默认 Provider，
+  恢复选项可精确还原首次安装状态。
+- `deepseek-setup.d.mts`：声明 DeepSeek Setup 的公开脚本类型。
 - `terminal-prompter.mjs`：为各通讯渠道 Setup 提供最小的终端文本、确认和可见凭据输入接口。
 - `telegram-setup.mjs`：独立完成 Telegram Bot Token 验证、一次性私聊配对、用户 ID 获取和用户配置写入；
   复用统一 TOML、环境变量和系统代理解析；交互输入的 Token 在当前终端明文显示，但验证错误

@@ -1416,6 +1416,27 @@ describe("JsonRpcClient", () => {
       .not.toHaveProperty("model");
   });
 
+  it("starts a new thread with an explicit model provider and catalog", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await client.startThread("/tmp/project", {
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+      config: { model_catalog_json: "/private/deepseek.models.json" },
+    });
+
+    expect(transport.sent.find((message) => message.method === "thread/start")?.params)
+      .toMatchObject({
+        model: "deepseek-v4-flash",
+        modelProvider: "deepseek",
+        config: { model_catalog_json: "/private/deepseek.models.json" },
+      });
+  });
+
   it("rejects repeated pagination cursors", async () => {
     const transport = new FakeTransport();
     transport.circularModelCursor = true;

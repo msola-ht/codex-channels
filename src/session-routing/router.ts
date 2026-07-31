@@ -9,10 +9,11 @@ import type {
   BindingTransfer,
   ConversationBinding,
 } from "../storage/index.js";
-import type { ThreadLifecyclePort, ThreadSnapshot } from "./thread-port.js";
+import type { ThreadLifecyclePort, ThreadSnapshot, ThreadStartOptions } from "./thread-port.js";
 
 export interface ThreadModelSettings {
   model: string;
+  modelProvider?: string;
   effort: string | null;
   serviceTier: string | null;
   collaborationMode: "default" | "plan";
@@ -112,7 +113,7 @@ export class SessionRouter {
       try {
         const workspace = this.workspaces.require(binding.workspaceId);
         const resumed = await this.codex.resumeThread(binding.threadId, workspace.cwd);
-        this.captureModelSettings(resumed.thread.id, resumed.model, resumed.reasoningEffort, resumed.serviceTier);
+        this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier);
         this.contextCompactionItemIdsByThread.set(
           resumed.thread.id,
           resumed.contextCompactionItemIds,
@@ -156,7 +157,10 @@ export class SessionRouter {
       : this.codex.listThreads(workspace.cwd, { ...options, fullScan: true });
   }
 
-  async ensure(target: ConversationTarget): Promise<ConversationBinding> {
+  async ensure(
+    target: ConversationTarget,
+    startOptions: ThreadStartOptions = {},
+  ): Promise<ConversationBinding> {
     const current = this.bindings.get(target);
     if (current) {
       return current;
@@ -172,7 +176,7 @@ export class SessionRouter {
       );
       if (candidate) {
         const resumed = await this.codex.resumeThread(candidate.id, workspace.cwd);
-        this.captureModelSettings(resumed.thread.id, resumed.model, resumed.reasoningEffort, resumed.serviceTier);
+        this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier);
         this.contextCompactionItemIdsByThread.set(
           resumed.thread.id,
           resumed.contextCompactionItemIds,
@@ -183,8 +187,8 @@ export class SessionRouter {
       }
     }
 
-    const started = await this.codex.startThread(workspace.cwd);
-    this.captureModelSettings(started.thread.id, started.model, started.reasoningEffort, started.serviceTier);
+    const started = await this.codex.startThread(workspace.cwd, startOptions);
+    this.captureModelSettings(started.thread.id, started.model, started.modelProvider, started.reasoningEffort, started.serviceTier);
     this.contextCompactionItemIdsByThread.set(
       started.thread.id,
       started.contextCompactionItemIds,
@@ -206,7 +210,7 @@ export class SessionRouter {
     if (current && current.threadId !== resumed.thread.id) {
       await this.detach(target);
     }
-    this.captureModelSettings(resumed.thread.id, resumed.model, resumed.reasoningEffort, resumed.serviceTier);
+    this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier);
     this.contextCompactionItemIdsByThread.set(
       resumed.thread.id,
       resumed.contextCompactionItemIds,
@@ -309,7 +313,7 @@ export class SessionRouter {
     }
     const workspace = this.workspaces.require(current.workspaceId);
     const forked = await this.codex.forkThread(current.threadId, workspace.cwd);
-    this.captureModelSettings(forked.thread.id, forked.model, forked.reasoningEffort, forked.serviceTier);
+    this.captureModelSettings(forked.thread.id, forked.model, forked.modelProvider, forked.reasoningEffort, forked.serviceTier);
     this.contextCompactionItemIdsByThread.set(
       forked.thread.id,
       forked.contextCompactionItemIds,
@@ -369,11 +373,13 @@ export class SessionRouter {
   private captureModelSettings(
     threadId: string,
     model: string,
+    modelProvider: string | undefined,
     effort: string | null,
     serviceTier: string | null | undefined,
   ): void {
     this.modelSettingsByThread.set(threadId, {
       model,
+      modelProvider: modelProvider ?? "openai",
       effort,
       serviceTier: serviceTier ?? null,
       collaborationMode: "default",

@@ -180,6 +180,7 @@ describe("SessionRouter", () => {
     expect(resumed).toEqual(["idle"]);
     expect(router.modelSettings(target)).toEqual({
       model: "gpt-main",
+      modelProvider: "openai",
       effort: "high",
       serviceTier: "fast",
       collaborationMode: "default",
@@ -240,6 +241,7 @@ describe("SessionRouter", () => {
     expect(router.current(target)?.threadId).toBe("bound");
     expect(router.modelSettings(target)).toEqual({
       model: "gpt-main",
+      modelProvider: "openai",
       effort: "high",
       serviceTier: "priority",
       collaborationMode: "default",

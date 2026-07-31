@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import * as clackPrompts from "@clack/prompts";
 
 import { runFeishuSetup } from "./feishu-setup.mjs";
+import { runDeepseekSetup } from "./deepseek-setup.mjs";
 import { runTelegramSetup } from "./telegram-setup.mjs";
 import { runWeixinSetup } from "./weixin-setup.mjs";
 
@@ -11,6 +12,7 @@ export async function runSetup({
   output = process.stdout,
   prompts = clackPrompts,
   feishuSetup = runFeishuSetup,
+  deepseekSetup = runDeepseekSetup,
   telegramSetup = runTelegramSetup,
   weixinSetup = runWeixinSetup,
 } = {}) {
@@ -18,11 +20,18 @@ export async function runSetup({
   const section = await prompts.select({
     message: "选择设置类别",
     showInstructions: false,
-    options: [{
-      value: "channels",
-      label: "通讯渠道",
-      hint: "配置外部消息入口",
-    }],
+    options: [
+      {
+        value: "channels",
+        label: "通讯渠道",
+        hint: "配置外部消息入口",
+      },
+      {
+        value: "models",
+        label: "模型提供方",
+        hint: "配置 OpenAI 与 DeepSeek",
+      },
+    ],
   });
   if (prompts.isCancel(section)) {
     prompts.cancel("Setup 已取消");
@@ -38,6 +47,8 @@ export async function runSetup({
         telegramSetup,
         weixinSetup,
       });
+    case "models":
+      return deepseekSetup({ input, output, prompts });
     default:
       throw new Error(`未知 Setup 类别：${String(section)}`);
   }

@@ -14,6 +14,7 @@ import type { SessionRouter } from "../session-routing/index.js";
 export interface ModelSelectionState {
   models: ModelOption[];
   model: string;
+  modelProvider?: string;
   effort: string | null;
   serviceTier: string | null;
   pending: boolean;
@@ -31,10 +32,11 @@ export class ModelSelectionService {
     private readonly codex: ModelSelectionPort,
     private readonly router: SessionRouter,
     private readonly configuredDefaultModel?: string,
+    private readonly supplementaryModels: readonly ModelOption[] = [],
   ) {}
 
   async state(target: ConversationTarget): Promise<ModelSelectionState> {
-    const models = await this.codex.listModels();
+    const models = await this.listModels();
     return this.resolveState(target, models);
   }
 
@@ -69,9 +71,25 @@ export class ModelSelectionService {
   }
 
   async selectModel(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
-    const models = await this.codex.listModels();
+    const models = await this.listModels();
     const selected = resolveModel(models, selector);
+    if (selected.available === false) {
+      throw new UserFacingError(
+        "model.unavailable",
+        `${selected.displayName} 暂不可用${selected.unavailableReason ? `：${selected.unavailableReason}` : ""}`,
+        {
+          model: selected.model,
+          ...(selected.provider ? { provider: selected.provider } : {}),
+          ...(selected.unavailableReason ? { reason: selected.unavailableReason } : {}),
+        },
+      );
+    }
     const current = this.resolveState(target, models);
+    const selectedProvider = selected.provider ?? "openai";
+    const providerChanged = selectedProvider !== current.modelProvider;
+    if (providerChanged) {
+      await this.router.newSession(target);
+    }
     const supported = selected.supportedReasoningEfforts.map((option) => option.effort);
     const effort = current.effort && supported.includes(current.effort)
       ? current.effort
@@ -83,6 +101,8 @@ export class ModelSelectionService {
     this.pendingByConversation.set(this.key(target), {
       ...pending,
       model: selected.model,
+      ...(providerChanged ? { modelProvider: selectedProvider } : {}),
+      ...(selected.catalogPath ? { modelCatalogPath: selected.catalogPath } : {}),
       effort,
       ...(currentFast
         ? { serviceTier: selectedFastTier ?? standardServiceTierRequestValue }
@@ -92,7 +112,7 @@ export class ModelSelectionService {
   }
 
   async selectEffort(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
-    const models = await this.codex.listModels();
+    const models = await this.listModels();
     const current = this.resolveState(target, models);
     const model = models.find((candidate) => candidate.model === current.model);
     if (!model) {
@@ -114,7 +134,7 @@ export class ModelSelectionService {
     if (normalized && !new Set(["on", "off", "status"]).has(normalized)) {
       throw new UserFacingError("fast.usage", "Fast 模式参数必须是 on、off 或 status");
     }
-    const models = await this.codex.listModels();
+    const models = await this.listModels();
     const current = this.resolveState(target, models);
     const model = models.find((candidate) => candidate.model === current.model);
     const currentFast = isFastServiceTier(current.serviceTier, model);
@@ -149,6 +169,17 @@ export class ModelSelectionService {
     return { ...this.pendingByConversation.get(this.key(target)) };
   }
 
+  threadStartOptions(target: ConversationTarget) {
+    const pending = this.pendingByConversation.get(this.key(target));
+    return {
+      ...(pending?.model ? { model: pending.model } : {}),
+      ...(pending?.modelProvider ? { modelProvider: pending.modelProvider } : {}),
+      ...(pending?.modelCatalogPath
+        ? { config: { model_catalog_json: pending.modelCatalogPath } }
+        : {}),
+    };
+  }
+
   markApplied(target: ConversationTarget): void {
     const key = this.key(target);
     const pending = this.pendingByConversation.get(key);
@@ -157,6 +188,7 @@ export class ModelSelectionService {
     if (pending && binding && current) {
       this.router.updateModelSettings(binding.threadId, {
         model: pending.model ?? current.model,
+        modelProvider: pending.modelProvider ?? current.modelProvider ?? "openai",
         effort: pending.effort ?? current.effort,
         serviceTier: hasServiceTierOverride(pending)
           ? pending.serviceTier ?? null
@@ -177,6 +209,7 @@ export class ModelSelectionService {
     const serviceTierPending = hasServiceTierOverride(pending);
     return {
       model: pending?.model ?? current?.model ?? this.configuredDefaultModel ?? "默认模型",
+      modelProvider: pending?.modelProvider ?? current?.modelProvider ?? "openai",
       effort: pending?.effort ?? current?.effort ?? null,
       serviceTier: serviceTierPending ? pending?.serviceTier ?? null : current?.serviceTier ?? null,
       pending: pending !== undefined,
@@ -201,6 +234,10 @@ export class ModelSelectionService {
     return {
       models,
       model,
+      modelProvider: pending?.modelProvider
+        ?? current?.modelProvider
+        ?? catalogModel?.provider
+        ?? "openai",
       effort: pending?.effort ?? current?.effort ?? catalogModel?.defaultReasoningEffort ?? null,
       serviceTier: serviceTierPending
         ? pending?.serviceTier ?? null
@@ -216,6 +253,15 @@ export class ModelSelectionService {
 
   private key(target: ConversationTarget): string {
     return conversationTargetKey(target);
+  }
+
+  private async listModels(): Promise<ModelOption[]> {
+    const primary = await this.codex.listModels();
+    const combined = new Map(primary.map((model) => [model.model, model]));
+    for (const model of this.supplementaryModels) {
+      combined.set(model.model, model);
+    }
+    return [...combined.values()];
   }
 }
 

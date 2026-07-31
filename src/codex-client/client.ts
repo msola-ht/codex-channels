@@ -55,6 +55,7 @@ import type {
   ThreadLifecyclePort,
   ThreadQueryOptions,
   ThreadSession,
+  ThreadStartOptions,
   ThreadSnapshot,
 } from "../session-routing/index.js";
 import { JsonRpcClient, type RpcNotification, type ServerRequestHandler } from "./json-rpc.js";
@@ -181,7 +182,7 @@ export class CodexAppServerClient implements
     return toThreadSnapshot(result.thread);
   }
 
-  async startThread(cwd: string): Promise<ThreadSession> {
+  async startThread(cwd: string, options: ThreadStartOptions = {}): Promise<ThreadSession> {
     const response = await this.rpc.request<ThreadStartResponse>({
       method: "thread/start",
       params: {
@@ -189,7 +190,11 @@ export class CodexAppServerClient implements
         sandbox: this.defaults.sandbox,
         approvalPolicy: "on-request",
         serviceName: "codex_connect_gateway",
-        ...(this.defaults.model ? { model: this.defaults.model } : {}),
+        ...(options.model
+          ? { model: options.model }
+          : this.defaults.model ? { model: this.defaults.model } : {}),
+        ...(options.modelProvider ? { modelProvider: options.modelProvider } : {}),
+        ...(options.config ? { config: options.config } : {}),
       },
     }, { retryOverload: false });
     return toThreadSession(response);

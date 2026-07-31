@@ -227,4 +227,69 @@ describe("ModelSelectionService", () => {
       serviceTier: "fast",
     });
   });
+
+  it("starts a new Thread when selecting a model from another provider", async () => {
+    const newSession = vi.fn().mockResolvedValue(undefined);
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+    } satisfies ModelSelectionPort;
+    const router = {
+      newSession,
+      modelSettings: () => ({
+        model: "gpt-main",
+        modelProvider: "openai",
+        effort: "medium",
+        serviceTier: "default",
+      }),
+    } as unknown as SessionRouter;
+    const deepseek = {
+      ...model("deepseek-v4-flash", ["low", "high"], "high"),
+      provider: "deepseek",
+      catalogPath: "/private/deepseek.models.json",
+    };
+    const service = new ModelSelectionService(codex, router, undefined, [deepseek]);
+
+    await service.selectModel(target, "deepseek-v4-flash");
+
+    expect(newSession).toHaveBeenCalledOnce();
+    expect(service.threadStartOptions(target)).toEqual({
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+      config: { model_catalog_json: "/private/deepseek.models.json" },
+    });
+  });
+
+  it("shows but rejects an unavailable provider model", async () => {
+    const newSession = vi.fn().mockResolvedValue(undefined);
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+    } satisfies ModelSelectionPort;
+    const router = {
+      newSession,
+      modelSettings: () => ({
+        model: "gpt-main",
+        modelProvider: "openai",
+        effort: "medium",
+        serviceTier: "default",
+      }),
+    } as unknown as SessionRouter;
+    const pro = {
+      ...model("deepseek-v4-pro", ["high"], "high"),
+      provider: "deepseek",
+      available: false,
+      unavailableReason: "DeepSeek 官方暂未支持该模型接入 Codex",
+    };
+    const service = new ModelSelectionService(codex, router, undefined, [pro]);
+
+    await expect(service.state(target)).resolves.toMatchObject({
+      models: expect.arrayContaining([
+        expect.objectContaining({ model: "deepseek-v4-pro", available: false }),
+      ]),
+    });
+    await expect(service.selectModel(target, "deepseek-v4-pro"))
+      .rejects.toThrow("DeepSeek 官方暂未支持该模型接入 Codex");
+    expect(newSession).not.toHaveBeenCalled();
+  });
 });

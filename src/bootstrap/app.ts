@@ -11,6 +11,7 @@ import {
   CodexAppServerClient,
   gatewayVersion,
   handleApprovalServerRequest,
+  loadDeepseekModelOptions,
   JsonRpcClient,
   supportedCodexCliVersion,
   toConversationInputEvent,
@@ -100,7 +101,12 @@ export class GatewayApplication {
     this.threadState = new ThreadStateSynchronizer(this.router);
     this.core = new ConversationCore(this.router, this.output);
     this.interactions = new InteractionRouter(logger);
-    const models = new ModelSelectionService(this.codex, this.router, config.codexModel);
+    const models = new ModelSelectionService(
+      this.codex,
+      this.router,
+      config.codexModel,
+      loadDeepseekModelOptions(),
+    );
     const collaborationModes = new CollaborationModeSelectionService(
       this.codex,
       this.router,

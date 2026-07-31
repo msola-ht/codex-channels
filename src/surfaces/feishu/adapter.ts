@@ -848,7 +848,7 @@ function renderCommandCenterChoices(
       title: "选择模型",
       description: `当前：${result.state.model}`,
       choices: result.state.models.map((model) => ({
-        label: `${model.model === result.state.model ? "✓ " : ""}${model.displayName}`,
+        label: `${model.model === result.state.model ? "✓ " : ""}${model.displayName}${model.available === false ? "（暂不可用）" : ""}`,
         action: "model",
         input: model.model,
       })),

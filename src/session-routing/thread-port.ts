@@ -21,9 +21,16 @@ export interface ThreadSnapshot {
 export interface ThreadSession {
   thread: ThreadSnapshot;
   model: string;
+  modelProvider?: string;
   reasoningEffort: string | null;
   serviceTier: string | null;
   contextCompactionItemIds: readonly string[];
+}
+
+export interface ThreadStartOptions {
+  model?: string;
+  modelProvider?: string;
+  config?: Record<string, string>;
 }
 
 export interface ThreadQueryOptions {
@@ -35,7 +42,7 @@ export interface ThreadQueryOptions {
 export interface ThreadLifecyclePort {
   listThreads(cwd: string, options?: ThreadQueryOptions): Promise<ThreadSnapshot[]>;
   readThread(threadId: string): Promise<ThreadSnapshot>;
-  startThread(cwd: string): Promise<ThreadSession>;
+  startThread(cwd: string, options?: ThreadStartOptions): Promise<ThreadSession>;
   resumeThread(threadId: string, cwd: string): Promise<ThreadSession>;
   forkThread(threadId: string, cwd: string): Promise<ThreadSession>;
   archiveThread(threadId: string): Promise<void>;

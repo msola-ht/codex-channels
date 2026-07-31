@@ -542,7 +542,7 @@ describe("Feishu output renderer", () => {
       serviceTierPending: false,
     };
     for (const [view, expected] of [
-      ["model", "可用模型（1）"],
+      ["model", "模型列表（1）"],
       ["effort", "可用思考强度"],
       ["fast", "模型支持：支持 Fast"],
     ] as const) {

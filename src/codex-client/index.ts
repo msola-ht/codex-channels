@@ -22,6 +22,7 @@ export {
   gatewayVersion,
   supportedCodexCliVersion,
 } from "./protocol-info.js";
+export { loadDeepseekModelOptions } from "./deepseek-catalog.js";
 export {
   decodeApprovalServerRequest,
   handleApprovalServerRequest,

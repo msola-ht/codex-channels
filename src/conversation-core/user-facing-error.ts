@@ -31,6 +31,7 @@ export type UserFacingErrorCode =
   | "workspace.selector.ambiguous"
   | "workspace.selector.not-found"
   | "model.current.missing"
+  | "model.unavailable"
   | "model.selector.required"
   | "model.selector.ambiguous"
   | "model.selector.not-found"

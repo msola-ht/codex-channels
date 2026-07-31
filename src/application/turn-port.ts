@@ -20,6 +20,8 @@ export interface TurnCollaborationMode {
 
 export interface TurnOverrides {
   model?: string;
+  modelProvider?: string;
+  modelCatalogPath?: string;
   effort?: string;
   serviceTier?: string | null;
   collaborationMode?: TurnCollaborationMode;

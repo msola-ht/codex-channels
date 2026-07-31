@@ -10,6 +10,7 @@ describe("Codex Connect setup", () => {
     const telegramSetup = vi.fn(async () => "telegram-configured");
     const feishuSetup = vi.fn();
     const weixinSetup = vi.fn();
+    const deepseekSetup = vi.fn();
     const intro = vi.fn();
     const select = vi.fn()
       .mockResolvedValueOnce("channels")
@@ -27,6 +28,7 @@ describe("Codex Connect setup", () => {
       telegramSetup,
       feishuSetup,
       weixinSetup,
+      deepseekSetup,
     });
 
     expect(result).toBe("telegram-configured");
@@ -38,6 +40,10 @@ describe("Codex Connect setup", () => {
         value: "channels",
         label: "通讯渠道",
         hint: "配置外部消息入口",
+      }, {
+        value: "models",
+        label: "模型提供方",
+        hint: "配置 OpenAI 与 DeepSeek",
       }],
     });
     expect(select).toHaveBeenNthCalledWith(2, {
@@ -109,6 +115,31 @@ describe("Codex Connect setup", () => {
 
     expect(result).toBe("weixin-configured");
     expect(weixinSetup).toHaveBeenCalledOnce();
+  });
+
+  it("selects the model provider setup category", async () => {
+    const input = {};
+    const output = {};
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn().mockResolvedValueOnce("models"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+    const deepseekSetup = vi.fn(async () => "deepseek-configured");
+
+    const result = await runSetup({
+      input,
+      output,
+      prompts,
+      telegramSetup: vi.fn(),
+      feishuSetup: vi.fn(),
+      weixinSetup: vi.fn(),
+      deepseekSetup,
+    });
+
+    expect(result).toBe("deepseek-configured");
+    expect(deepseekSetup).toHaveBeenCalledWith({ input, output, prompts });
   });
 
   it("cancels without starting a module setup", async () => {

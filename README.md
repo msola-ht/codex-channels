@@ -92,6 +92,28 @@ plan_updates = false
 
 配置、数据库、日志、Socket 和临时文件都保存在 `~/.codex-connect`，不会写入全局 npm 包目录。Gateway 不读取或复制 Codex 的完整会话文件。
 
+## 配置 DeepSeek
+
+运行 `codexc setup`，选择“模型提供方”，填写 DeepSeek API Key 后选择：
+
+- OpenAI + DeepSeek 切换模式：保留 OpenAI 为原生 Codex 默认；终端使用 `codex` 启动 OpenAI，
+  使用 `codex --profile deepseek` 启动 DeepSeek。三个聊天渠道在 `/model` 中统一选择模型。
+- 仅 DeepSeek 固定模式：把原生 Codex 默认模型改为 `deepseek-v4-flash`，CLI、TUI、IDE 和 Gateway
+  都默认使用 DeepSeek。
+- 恢复安装前配置：恢复首次安装前的原始文件；如果原来没有配置文件则移除 Setup 创建的配置，
+  同时清理下载的模型目录。
+
+Setup 从 DeepSeek 官方安装脚本下载并提取模型目录，校验后写入
+`~/.codex/deepseek.models.json`；该文件不随项目或 npm 包发布。目前 DeepSeek 官方仅声明
+`deepseek-v4-flash` 支持 Codex；Pro 会在 `/model` 中显示为“暂不可用”，且在官方支持前不能切换。
+
+两种模式都会在权限为 `0600` 的 `~/.codex/config.toml` 注册 DeepSeek Provider，并按官方
+Codex 接入方式保存 API Key。首次修改前，原配置会备份到
+`~/.codex/backup-codex-connect-deepseek/config.toml`。切换到另一 Provider 时不能修改正在使用的
+Thread；渠道会保留空闲旧 Thread，并为所选 Provider 新建可恢复的 Thread。
+Setup 完成或恢复后运行 `codexc service restart all`，让 App Server 重新读取 Provider，并让 Gateway
+重新载入下载的模型目录。
+
 ## 日常使用
 
 ### 管理项目

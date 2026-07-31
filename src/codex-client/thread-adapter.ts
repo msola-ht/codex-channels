@@ -58,6 +58,7 @@ export function toThreadSession(response: ThreadSessionResponse): ThreadSession 
   return {
     thread: toThreadSnapshot(response.thread),
     model: response.model,
+    modelProvider: response.modelProvider,
     reasoningEffort: response.reasoningEffort,
     serviceTier: response.serviceTier,
     contextCompactionItemIds: contextCompactionItemIds(response.thread),

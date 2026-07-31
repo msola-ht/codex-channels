@@ -344,10 +344,10 @@ export function formatConversationModels(
     `思考强度：${state.effort ?? "模型默认"}`,
     `Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
     "",
-    `可用模型（${state.models.length}）：`,
+    `模型列表（${state.models.length}）：`,
     ...state.models.map(
       (model, index) =>
-        `${index + 1}. ${model.displayName} · ${model.model}${fastServiceTierId(model) ? " · 支持 Fast" : ""}${model.model === state.model ? " ← 当前" : ""}`,
+        `${index + 1}. ${model.displayName} · ${model.model}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${model.unavailableReason}）` : ""}` : ""}${fastServiceTierId(model) ? " · 支持 Fast" : ""}${model.model === state.model ? " ← 当前" : ""}`,
     ),
     "",
     "切换：/model <序号、模型 ID 或名称>",

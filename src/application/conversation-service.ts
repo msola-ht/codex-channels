@@ -724,7 +724,10 @@ export class ConversationService {
     input: TurnInput[],
     clientUserMessageId: string,
   ): Promise<Submission> {
-    const binding = await this.router.ensure(target);
+    const threadStartOptions = this.models.threadStartOptions?.(target) ?? {};
+    const binding = Object.keys(threadStartOptions).length > 0
+      ? await this.router.ensure(target, threadStartOptions)
+      : await this.router.ensure(target);
     const workspace = this.router.workspace(target);
     const result = await this.codex.startTurn(
       binding.threadId,

@@ -82,7 +82,9 @@
 - Skill 用户与 Workspace 安装过滤、结构化显式调用、已安装 Plugin 稳定摘要及远端市场隔离。
 - 官方模型目录到稳定 Application 模型选项的映射、不可见项过滤、必需字段失败关闭，模型、
   思考强度和 Fast 的 Thread 覆盖、Codex 用户级 Fast 默认值持久化、共享客户端完整或残缺设置
-  通知、Thread 失效通知及 Gateway/CLI 连接恢复。
+  通知、Thread 失效通知及 Gateway/CLI 连接恢复；DeepSeek 官方脚本目录提取、两种 Setup 模式、
+  API Key 输出隔离、下载失败不修改、Flash 可选与 Pro 可见但不可选，以及跨 Provider 新 Thread
+  的精确启动参数。
 - 账户 Token 用量与单桶/多桶额度到稳定 Application 摘要的映射、重置券数量、畸形指标与未知
   枚举失败关闭，以及启动时周限缓存继续使用同一映射结果。
 - Skill 查询按授权 Workspace 发送精确 CWD，Client 只映射启用的用户与项目直接安装项，排除

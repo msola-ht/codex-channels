@@ -6,6 +6,10 @@ export interface ReasoningEffortOption {
 export type ModelInputModality = "text" | "image" | "audio";
 
 export interface ModelOption {
+  provider?: string;
+  catalogPath?: string;
+  available?: boolean;
+  unavailableReason?: string;
   id: string;
   model: string;
   displayName: string;

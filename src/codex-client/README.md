@@ -20,6 +20,8 @@
 - `model-adapter.ts`：把当前版本官方模型目录裁剪为 Application 拥有的模型选项和
   `text/image/audio` 输入能力，过滤不可见项，
   并在缺少模型选择必需字段时失败关闭。
+- `deepseek-catalog.ts`：只读取 Setup 下载到用户 `CODEX_HOME` 的 DeepSeek 模型目录，把当前官方
+  支持的 Flash 映射为可选模型，并保留 Pro 为带不可用原因、不能切换的展示项。
 - `account-adapter.ts`：把账户 Token 用量、单桶或多桶额度与重置券数量映射为 Application
   稳定摘要；未知枚举或畸形数值失败关闭，不把上游响应正文交给 Surface。
 - `skill-adapter.ts`：从官方按 CWD 返回的 Skill 条目中只保留启用的用户或项目直接安装项，
@@ -49,6 +51,8 @@
   `toolsAndAuthOnly` 分页，配置读取只公开稳定服务层级值，Plugin 查询只调用
   `plugin/installed`，不得改用 `plugin/list` 加载市场目录；Permission Profile 按 CWD 分页，
   仅用于只读目录展示。
+  新 Thread 可显式携带官方 `modelProvider` 与受控 `model_catalog_json`；已有 Thread 不在 Turn
+  覆盖中更换 Provider。
 
 本模块不得调用 Telegram API、生成平台文案或保存业务绑定。协议字段必须来自
 `codex-protocol`；无参数请求和通知不得自行补空对象，写操作不得在过载或断线后盲目重试。
