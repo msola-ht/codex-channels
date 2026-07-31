@@ -20,7 +20,8 @@
 ## 0.146.0
 
 - 官方 Release：[`rust-v0.146.0`](https://github.com/openai/codex/releases/tag/rust-v0.146.0)
-- 项目基线：Gateway、生成协议、CI 和公开安装版本统一锁定 `0.146.0`
+- 项目开发基线：Gateway、生成协议和 CI 锁定 `0.146.0`；README 保留 npm 当前正式版，
+  发布包在 Runner 临时渲染，GitHub Release 与 npm 均成功后再自动写回 `main`
 - 评估范围：CLI/TUI、App Server 协议、App Server 内部修复及其对现有 Gateway 路径的影响
 
 ### 已采用

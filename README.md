@@ -10,16 +10,17 @@
 
 Gateway 与原生 Codex TUI 连接同一个 Codex App Server，因此会话、Thread 和运行状态可以在聊天客户端与终端之间继续使用。
 
-当前版本：`0.146.0`
-要求：macOS 或 Linux、Node.js 22.13+、已登录的 `codex-cli 0.146.0`
+`main` 开发基线：`0.146.0`（尚未发布）
+当前正式版：`0.145.0`
+要求：macOS 或 Linux、Node.js 22.13+、已登录的 `codex-cli 0.145.0`
 
 ## 快速开始
 
 安装 Codex CLI 和 Gateway：
 
 ```bash
-npm install -g @openai/codex@0.146.0
-npm install -g @hegenai/codexc@0.146.0
+npm install -g @openai/codex@0.145.0
+npm install -g @hegenai/codexc@0.145.0
 ```
 
 初始化并按提示配置 Telegram、飞书或微信：
@@ -164,7 +165,7 @@ codexc service logs -n 100
 - 单个聊天渠道暂时断线：Gateway 会保持其他渠道运行，并对故障渠道独立退避重连；可用
   `codexc service logs -f` 查看断线与恢复记录。
 - Gateway 需要重启：运行 `codexc service restart`，共享 App Server 和活动 Thread 会保留。
-- Codex CLI 版本不一致：重新安装精确版本 `@openai/codex@0.146.0`。
+- Codex CLI 版本不一致：重新安装精确版本 `@openai/codex@0.145.0`。
 - 飞书收不到消息或菜单不完整：在飞书私聊发送 `/fs doctor`。
 - 需要查看命令参数：运行 `codexc -h` 或 `codexc <命令> -h`。
 
@@ -175,12 +176,14 @@ codexc service logs -n 100
 升级 npm 包后重新安装服务并诊断：
 
 ```bash
-npm install -g @hegenai/codexc
+npm install -g @hegenai/codexc@0.145.0
+npm install -g @openai/codex@0.145.0
 codexc service install
 codexc doctor
 ```
 
-如果新版本要求不同的 Codex CLI，请安装 README 声明的精确版本。
+npm 包与 Codex CLI 使用相同版本。正式 npm 包和 GitHub Release 均发布成功后，发布工作流会
+自动把本页安装命令同步到新版本。
 
 ## 源码开发
 

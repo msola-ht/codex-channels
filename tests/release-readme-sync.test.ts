@@ -1,0 +1,57 @@
+import { describe, expect, it } from "vitest";
+
+// @ts-expect-error JavaScript release helper intentionally has no declaration file.
+import * as releaseReadmeHelpers from "../scripts/sync-published-readme.mjs";
+
+const { renderPublishedReadme } = releaseReadmeHelpers;
+
+const readme = `# Codex Connect Gateway
+
+\`main\` 开发基线：\`0.146.0\`（尚未发布）
+当前正式版：\`0.145.0\`
+要求：已登录的 \`codex-cli 0.145.0\`
+
+\`\`\`bash
+npm install -g @openai/codex@0.145.0
+npm install -g @hegenai/codexc@0.145.0
+\`\`\`
+
+- 重新安装精确版本 \`@openai/codex@0.145.0\`。
+`;
+
+describe("published README synchronization", () => {
+  it("updates only the published version and remains idempotent", () => {
+    const updated = renderPublishedReadme(readme, "0.146.0");
+
+    expect(updated).toContain("`main` 开发基线：`0.146.0`");
+    expect(updated).not.toContain("`0.146.0`（尚未发布）");
+    expect(updated).toContain("当前正式版：`0.146.0`");
+    expect(updated).toContain("`codex-cli 0.146.0`");
+    expect(updated).toContain("@openai/codex@0.146.0");
+    expect(updated).toContain("@hegenai/codexc@0.146.0");
+    expect(updated).not.toContain("0.145.0");
+    expect(renderPublishedReadme(updated, "0.146.0")).toBe(updated);
+  });
+
+  it("keeps a newer main baseline marked as unpublished", () => {
+    const nextBaseline = readme.replace(
+      "`main` 开发基线：`0.146.0`",
+      "`main` 开发基线：`0.147.0`",
+    );
+
+    expect(renderPublishedReadme(nextBaseline, "0.146.0")).toContain(
+      "`main` 开发基线：`0.147.0`（尚未发布）",
+    );
+  });
+
+  it("fails closed for downgrade, prerelease, or an uncontrolled README", () => {
+    expect(() => renderPublishedReadme(readme, "0.144.0")).toThrow("降级");
+    expect(() => renderPublishedReadme(readme, "0.147.0")).toThrow("开发基线");
+    expect(() => renderPublishedReadme(readme, "0.146.0-alpha.1")).toThrow(
+      "正式版本",
+    );
+    expect(() =>
+      renderPublishedReadme("# Codex Connect Gateway\n", "0.146.0")
+    ).toThrow("受控");
+  });
+});

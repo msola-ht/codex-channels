@@ -104,6 +104,8 @@
   全局安装命令会完成构建并生成 `codexc` 入口。
 - `smoke-package.mjs`：生成实际 tarball，在隔离目录安装并执行公开的 `codexc` 入口与配置预检。
 - `check-release-tag.mjs`：要求 Git Tag 与 `package.json` 版本严格一致，防止发布错版。
+- `sync-published-readme.mjs`：把受控的 README 正式版本与安装命令渲染为已发布版本；拒绝
+  预发布、降级、高于开发基线和缺少受控标记的文档。
 - `sync-gateway-version.mjs`：以锁定的 Codex CLI 协议版本同步 `package.json`、锁文件和 Gateway 运行时版本；不维护独立版本号。
 - `doctor.mjs`：检查 npm 包、Node、Codex CLI、当前 TOML 配置、Workspace、飞书凭据/Bot 身份、
   微信配置与 Bot 凭据、消息游标检查点、允许用户的加密回复上下文覆盖数和最近保存时间，

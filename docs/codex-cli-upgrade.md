@@ -198,7 +198,8 @@ npm run verify:commit
 
 合并升级 PR 只表示 `main` 进入目标 Codex CLI 的开发基线。此时：
 
-- `package.json`、Gateway、生成协议、README 和 CI 已使用目标版本。
+- `package.json`、Gateway、生成协议和 CI 已使用目标开发基线；README 继续保留上一正式版，
+  不提前写入 npm 尚不存在的安装版本。
 - 后续修复和功能修改可以继续基于该版本进行。
 - 自动升级提案会把该版本视为已同步，不再重复创建同版本 PR。
 - 不创建 `v<版本>` Tag，不触发 npm Trusted Publishing，也不创建 GitHub Release 或部署服务。
@@ -211,8 +212,8 @@ npm run verify:commit
 只有明确决定对外发布时才执行本节。发布前确认：
 
 1. `main` 已同步远端、工作区干净，目标提交的 GitHub CI 全部通过。
-2. `package.json`、`src/version.json`、`src/codex-protocol/version.json`、README 安装命令和
-   `ci.yml` 的 Codex CLI 精确版本一致。
+2. `package.json`、`src/version.json`、`src/codex-protocol/version.json` 和 `ci.yml` 的
+   Codex CLI 精确版本一致；README 仍显示上一正式版，由发布工作流临时渲染包内副本。
 3. npm Trusted Publisher 已绑定本仓库的 `publish.yml`。
 4. 发布 Tag 与包版本完全一致，并先在本地校验：
 
@@ -228,12 +229,15 @@ git tag -a "v$RELEASE_VERSION" -m "发布 v$RELEASE_VERSION"
 git push origin "v$RELEASE_VERSION"
 ```
 
-`publish.yml` 只监听 `v*` Tag。它会再次校验 Tag 与包版本、运行完整 `verify:commit`，然后通过
-npm Trusted Publishing 执行公开发布。普通 push、合并 PR 和手动运行 CI 都不会发布 npm。
+`publish.yml` 只监听 `v*` Tag。它会再次校验 Tag 与包版本，在 Runner 临时工作区把包内 README
+渲染为 Tag 版本并运行完整 `verify:commit`，然后通过 npm Trusted Publishing 执行公开发布；
+此时不修改 `main`。普通 push、合并 PR 和手动运行 CI 都不会发布 npm。
 
 等待 `Publish npm package` 工作流成功后再创建对应的 GitHub Release。Release 说明应基于升级
-PR 的实际改动、验证结果和发布边界整理，不能继续使用自动提案的通用占位描述。当前工作流不会
-自动创建 GitHub Release，也不会自动安装本机包、重启 Gateway 或部署服务。
+PR 的实际改动、验证结果和发布边界整理，不能继续使用自动提案的通用占位描述。正式 Release
+发布后，`sync-published-readme.yml` 会先确认 Tag 与 npm 精确版本已经存在，再在 `main` 渲染
+同一 README、执行完整提交门禁并自动提交；npm 失败、Draft 或 Pre-release 不会修改 README。
+当前工作流不会自动创建 GitHub Release，也不会自动安装本机包、重启 Gateway 或部署服务。
 
 ## 6. 发布后验证与本机升级
 
