@@ -5,7 +5,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { configEventQueuePath } from "../runtime/config-event-queue.mjs";
-import { gatewayCodexProfileArguments } from "../runtime/codex-provider-profile.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { resolveProxyEnvironment } from "../runtime/network-proxy.mjs";
 import {
@@ -280,7 +279,6 @@ function runServiceAppServer(args) {
     join(runtime.dataDir, "runtime", "codex-app-server.sock"),
   );
   const child = spawn(runtime.environment.CODEX_BINARY, [
-    ...gatewayCodexProfileArguments(runtime.environment),
     "app-server",
     "--listen",
     `unix://${socketPath}`,

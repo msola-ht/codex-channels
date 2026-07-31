@@ -339,6 +339,12 @@ contractSuite("isolated Codex App Server state contract", () => {
         `command = ${JSON.stringify(process.execPath)}`,
         `args = [${JSON.stringify(approvalProbe)}]`,
         "",
+        "[model_providers.deepseek]",
+        'name = "deepseek"',
+        'base_url = "https://api.deepseek.com/"',
+        'wire_api = "responses"',
+        'experimental_bearer_token = "sk-contract-placeholder"',
+        "",
       ].join("\n"),
     );
     processHandle = spawn(

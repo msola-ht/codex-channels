@@ -226,7 +226,8 @@ CI 中的隔离 App Server 合同测试要求安装受支持的 Codex CLI，但�
 RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
 ```
 
-该合同测试使用临时 `CODEX_HOME` 和本地测试 MCP 进程，验证 MCP 工具审批元数据及
+该合同测试使用临时 `CODEX_HOME`、provider-only DeepSeek 基础配置和本地测试 MCP 进程，验证
+App Server 不依赖 CLI Profile 即可初始化，并验证 MCP 工具审批元数据及
 `_meta.persist` 通过真实 App Server 往返；同时验证一个 Client 写入的 Fast 用户默认值能被另一个 Client
 读取，之后新建 Thread 的运行时 `serviceTier` 按 `default → priority → default` 变化，并验证
 第二个 Client 修改共享 Thread 的模型、思考强度和 Fast 设置时，订阅方收到完整的

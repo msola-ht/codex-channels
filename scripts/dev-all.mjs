@@ -4,7 +4,6 @@ import { createConnection } from "node:net";
 import { dirname, isAbsolute, join } from "node:path";
 
 import WebSocket from "ws";
-import { gatewayCodexProfileArguments } from "../runtime/codex-provider-profile.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { packageDir, resolveConfiguredPath, runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
@@ -36,12 +35,7 @@ if (await socketAcceptsWebSocket(socketPath)) {
 } else {
   preserveStaleSocket(socketPath, runtimeDir);
   ownsAppServer = true;
-  appServer = spawn(codexBinary, [
-    ...gatewayCodexProfileArguments(process.env),
-    "app-server",
-    "--listen",
-    `unix://${socketPath}`,
-  ], {
+  appServer = spawn(codexBinary, ["app-server", "--listen", `unix://${socketPath}`], {
     cwd: workdir,
     stdio: "inherit",
   });

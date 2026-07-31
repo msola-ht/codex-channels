@@ -470,10 +470,7 @@ describe("codexc CLI", () => {
     const workspace = join(root, "Workspace");
     const capturePath = join(root, "capture.json");
     const fakeCodex = join(root, "fake-codex.mjs");
-    const codexHome = join(root, ".codex");
     mkdirSync(workspace);
-    mkdirSync(codexHome);
-    writeFileSync(join(codexHome, "codex-connect-deepseek.config.toml"), "[model_providers.deepseek]\n");
     writeFileSync(fakeCodex, [
       "#!/usr/bin/env node",
       "import { writeFileSync } from 'node:fs';",
@@ -490,7 +487,6 @@ describe("codexc CLI", () => {
       CODEX_CONNECT_HOME: home,
       CODEX_CONNECT_CONFIG_FILE: "",
       CODEX_TEST_CAPTURE: capturePath,
-      CODEX_HOME: codexHome,
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
     const configPath = join(home, "config.toml");
@@ -506,8 +502,6 @@ describe("codexc CLI", () => {
 
     expect(JSON.parse(readFileSync(capturePath, "utf8"))).toEqual({
       args: [
-        "--profile",
-        "codex-connect-deepseek",
         "app-server",
         "--listen",
         `unix://${join(home, "runtime", "codex-app-server.sock")}`,

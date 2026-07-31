@@ -62,7 +62,7 @@ export async function runDeepseekSetup({
     const mode = choice === "1" ? "switching" : "exclusive";
     if (mode === "switching") {
       output.write(
-        "\n切换模式保持 ~/.codex/config.toml 不变，并把 DeepSeek API Key 保存到权限为 0600 的独立 Profile。\n",
+        "\n切换模式只在 ~/.codex/config.toml 登记 DeepSeek Provider，不改变 OpenAI 默认模型或授权；DeepSeek 模型选择保存在独立 Profile。\n",
       );
     }
     if (mode === "exclusive") {
@@ -102,9 +102,8 @@ export async function runDeepseekSetup({
     await replaceOptionalFile(profilePath, profileContent);
     await replaceOptionalFile(gatewayProfilePath, gatewayProfileContent);
     if (mode === "switching") {
-      output.write(`\nCodex 基础配置保持安装前内容：${configPath}\n`);
+      output.write(`\nDeepSeek Provider 已登记，OpenAI 默认保持不变：${configPath}\n`);
       output.write(`DeepSeek CLI Profile 已保存：${profilePath}\n`);
-      output.write(`Gateway DeepSeek Profile 已保存：${gatewayProfilePath}\n`);
     } else {
       output.write(`\nDeepSeek 固定配置已保存：${configPath}\n`);
     }
@@ -212,7 +211,6 @@ async function buildCodexConfig({
     model_providers: { [providerId]: provider },
   };
   const profile = {
-    ...providerLayer,
     model: supportedModel,
     model_provider: providerId,
     preferred_auth_method: "apikey",
@@ -226,10 +224,15 @@ async function buildCodexConfig({
         "安装前的 Codex config.toml 已占用旧式 deepseek profile；请先手工迁移或改名",
       );
     }
+    if (table(document.model_providers).deepseek !== undefined) {
+      throw new Error(
+        "安装前的 Codex config.toml 已存在 deepseek Provider；请先手工移除或改名",
+      );
+    }
     return {
-      configContent: originalContent,
+      configContent: appendProviderLayer(originalContent, providerLayer),
       profileContent: stringify(profile),
-      gatewayProfileContent: stringify(providerLayer),
+      gatewayProfileContent: undefined,
     };
   }
 
@@ -258,6 +261,15 @@ async function buildCodexConfig({
     profileContent: undefined,
     gatewayProfileContent: undefined,
   };
+}
+
+function appendProviderLayer(originalContent, providerLayer) {
+  const providerContent = stringify(providerLayer);
+  if (originalContent === undefined || originalContent.length === 0) {
+    return providerContent;
+  }
+  const separator = originalContent.endsWith("\n") ? "\n" : "\n\n";
+  return `${originalContent}${separator}${providerContent}`;
 }
 
 async function preserveInitialConfig({

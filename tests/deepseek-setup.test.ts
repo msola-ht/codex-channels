@@ -43,26 +43,21 @@ describe("DeepSeek setup", () => {
     });
     const config = parse(readFileSync(join(fixture.home, "config.toml"), "utf8"));
     expect(result?.mode).toBe("switching");
-    expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(original);
+    expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toContain(
+      '# keep formatting',
+    );
     expect(config.model).toBe("gpt-5.4");
     expect(config.model_provider).toBe("openai");
     expect(record(config.profiles).deepseek).toBeUndefined();
-    expect(record(config.model_providers).deepseek).toBeUndefined();
+    expect(record(record(config.model_providers).deepseek).experimental_bearer_token)
+      .toBe("sk-secret");
     const profile = parse(readFileSync(join(fixture.home, "deepseek.config.toml"), "utf8"));
     expect(profile.model).toBe("deepseek-v4-flash");
     expect(profile.model_provider).toBe("deepseek");
     expect(profile.preferred_auth_method).toBe("apikey");
     expect(profile.forced_login_method).toBe("api");
-    expect(record(record(profile.model_providers).deepseek).experimental_bearer_token)
-      .toBe("sk-secret");
-    const gatewayProfile = parse(readFileSync(
-      join(fixture.home, "codex-connect-deepseek.config.toml"),
-      "utf8",
-    ));
-    expect(record(record(gatewayProfile.model_providers).deepseek).experimental_bearer_token)
-      .toBe("sk-secret");
-    expect(gatewayProfile.model).toBeUndefined();
-    expect(gatewayProfile.model_provider).toBeUndefined();
+    expect(record(profile.model_providers).deepseek).toBeUndefined();
+    expect(existsSync(join(fixture.home, "codex-connect-deepseek.config.toml"))).toBe(false);
     expect(readFileSync(join(fixture.home, "auth.json"), "utf8"))
       .toBe('{"tokens":"openai"}\n');
     expect(fixture.text()).not.toContain("sk-secret");
@@ -120,7 +115,9 @@ describe("DeepSeek setup", () => {
       fetchImpl: successfulFetch,
       prompter: prompter(["1"], ["sk-switching"]),
     });
-    expect(existsSync(join(home, "config.toml"))).toBe(false);
+    expect(record(record(
+      parse(readFileSync(join(home, "config.toml"), "utf8")).model_providers,
+    ).deepseek).experimental_bearer_token).toBe("sk-switching");
     expect(parse(readFileSync(join(home, "deepseek.config.toml"), "utf8")).model)
       .toBe("deepseek-v4-flash");
   });
@@ -146,7 +143,10 @@ describe("DeepSeek setup", () => {
 
     const config = parse(readFileSync(join(fixture.home, "config.toml"), "utf8"));
     expect(record(config.profiles).deepseek).toBeUndefined();
-    expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(original);
+    expect(config.model).toBe("gpt-5.4");
+    expect(config.model_provider).toBe("openai");
+    expect(record(record(config.model_providers).deepseek).experimental_bearer_token)
+      .toBe("sk-migrated");
     expect(parse(readFileSync(join(fixture.home, "deepseek.config.toml"), "utf8")).model)
       .toBe("deepseek-v4-flash");
   });
