@@ -10,7 +10,7 @@ import { usesOpenAiAccount } from "../conversation-core/index.js";
 
 import {
   formatPercent,
-  formatRateLimitWindow,
+  formatRemainingRateLimitWindow,
 } from "./account-format.js";
 import { formatElapsedDuration } from "./elapsed-duration.js";
 import { formatProviderLabel } from "./provider-format.js";
@@ -267,7 +267,7 @@ function formatUpstreamUserAgent(userAgent: string | null): string {
 function formatWeeklyLimit(
   window: NonNullable<StartupStatus["weeklyLimit"]>,
 ): string {
-  return formatRateLimitWindow(window, { includeDuration: false });
+  return formatRemainingRateLimitWindow(window, { includeDuration: false });
 }
 
 function formatTokenCount(value: number): string {

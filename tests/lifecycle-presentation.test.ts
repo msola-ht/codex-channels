@@ -63,7 +63,7 @@ describe("shared Surface lifecycle presentation", () => {
       "思考强度：medium",
       "Fast 模式：开启",
       "协作模式：Default",
-      "周限：已使用 37%",
+      "周限：剩余 63%",
     ].join("\n"));
   });
 
@@ -123,7 +123,7 @@ describe("shared Surface lifecycle presentation", () => {
       "模型：gpt-test · medium · Fast 开启",
       "Provider：OpenAI",
       "上下文压缩：2 次",
-      "周限：已使用 37%",
+      "周限：剩余 63%",
       "Goal：进行中 · 12.5 K / 100 K",
       "Git 分支：feature/lifecycle",
       "耗时：1分5秒",

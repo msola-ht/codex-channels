@@ -15,6 +15,7 @@ import {
   formatPercent,
   formatPlanType,
   formatRateLimitState,
+  formatRemainingRateLimitWindow,
   formatRateLimitWindow,
   formatResetTime,
 } from "./account-format.js";
@@ -499,7 +500,7 @@ export function formatConversationStatus(status: ConversationStatus): string {
     lines.push("", "当前 Thread 用量：等待 App Server 推送统计");
   }
   if (usesOpenAiAccount(status.modelProvider) && status.weeklyLimit) {
-    lines.push(`周限：${formatRateLimitWindow(status.weeklyLimit)}`);
+    lines.push(`周限：${formatRemainingRateLimitWindow(status.weeklyLimit)}`);
   }
   return lines.join("\n");
 }

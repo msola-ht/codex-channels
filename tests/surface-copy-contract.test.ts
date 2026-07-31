@@ -14,6 +14,7 @@ import {
   formatPercent,
   formatPlanType,
   formatRateLimitState,
+  formatRemainingRateLimitWindow,
   formatRateLimitWindow,
 } from "../src/surfaces/account-format.js";
 import { formatTurnInputAppended } from "../src/surfaces/input-copy.js";
@@ -104,6 +105,16 @@ describe("shared surface copy contract", () => {
       windowDurationMins: 10_080,
       resetsAt: null,
     })).toBe("已使用 12% · 周期 7 天");
+    expect(formatRemainingRateLimitWindow({
+      usedPercent: 44,
+      windowDurationMins: 10_080,
+      resetsAt: null,
+    })).toBe("剩余 56% · 周期 7 天");
+    expect(formatRemainingRateLimitWindow({
+      usedPercent: 120,
+      windowDurationMins: null,
+      resetsAt: null,
+    })).toBe("剩余 0%");
     expect(formatTurnInputAppended("text"))
       .toBe("已将补充要求追加到当前 Turn。");
     expect(formatTurnInputAppended("file"))
@@ -247,7 +258,7 @@ describe("shared surface copy contract", () => {
 
     const rendered = formatConversationStatus(status);
     expect(rendered).toContain(
-      "周限：已使用 12% · 周期 7 天",
+      "周限：剩余 88% · 周期 7 天",
     );
     expect(rendered).not.toContain("缓存写入");
   });

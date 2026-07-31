@@ -23,6 +23,22 @@ export function formatRateLimitWindow(
   ].join(" · ");
 }
 
+export function formatRemainingRateLimitWindow(
+  window: RateLimitWindowView,
+  options: { includeDuration?: boolean } = {},
+): string {
+  return [
+    `剩余 ${formatPercent(Math.min(100, Math.max(0, 100 - window.usedPercent)))}`,
+    ...(options.includeDuration === false
+      || window.windowDurationMins === null
+      ? []
+      : [`周期 ${formatMinutes(window.windowDurationMins)}`]),
+    ...(window.resetsAt === null
+      ? []
+      : [`重置 ${formatResetTime(window.resetsAt)}`]),
+  ].join(" · ");
+}
+
 export function formatPercent(value: number): string {
   return `${value.toLocaleString("zh-CN", {
     maximumFractionDigits: 1,

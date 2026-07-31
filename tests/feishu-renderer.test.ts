@@ -85,7 +85,7 @@ describe("Feishu output renderer", () => {
       "- **思考强度：** medium",
       "- **Fast 模式：** 开启",
       "- **协作模式：** Default",
-      "- **周限：** 已使用 37%",
+      "- **周限：** 剩余 63%",
     ].join("\n"));
     expect(rendered).not.toContain("build-secret");
   });
@@ -273,7 +273,7 @@ describe("Feishu output renderer", () => {
     expect(status).toContain("缓存命中率：75%");
     expect(status).toContain("缓存写入：50");
     expect(status).toContain("Git 分支：feature/weixin-surface");
-    expect(status).toContain("周限：已使用 37%");
+    expect(status).toContain("周限：剩余 63%");
 
     const limits = renderFeishuCommandResult({
       kind: "limits",
@@ -384,7 +384,7 @@ describe("Feishu output renderer", () => {
       "- **模型：** gpt-test · medium · Fast 开启",
       "- **Provider：** OpenAI",
       "- **上下文压缩：** 2 次",
-      "- **周限：** 已使用 37%",
+      "- **周限：** 剩余 63%",
       "- **Git 分支：** feature/weixin-surface",
       "- **耗时：** 1分5秒",
     ].join("\n"));
