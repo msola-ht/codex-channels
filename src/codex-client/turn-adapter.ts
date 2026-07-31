@@ -24,6 +24,8 @@ export function toProtocolTurnInput(input: TurnInput[]): UserInput[] {
         return { type: "localImage", path: item.path };
       case "localAudio":
         return { type: "localAudio", path: item.path };
+      case "skill":
+        return { type: "skill", name: item.name, path: item.path };
     }
   });
 }

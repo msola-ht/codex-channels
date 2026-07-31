@@ -25,7 +25,8 @@ Client 或生成协议。Turn、Review 和 Goal 的执行端口由 `application`
 和解释响应。模型目录、思考强度和服务层级的稳定类型同样由
 `application` 拥有，Client 负责裁剪官方模型目录并封装 Fast 默认值配置。账户用量与额度查询
 同样由 Application 窄端口承接，Client 统一选择官方多桶或兼容单桶响应并
-输出稳定摘要。直接安装 Skill 查询也已在 Client 边界完成路径与 Scope 裁剪，MCP 状态查询
+输出稳定摘要。直接安装 Skill 查询也已在 Client 边界完成路径与 Scope 裁剪；显式调用只把
+实时解析且通过校验的 Skill 引用交给 Application，Surface 不接触本机路径。MCP 状态查询
 已裁剪为按当前 Thread 获取的名称、认证状态和工具数量，Plugin 查询只输出已安装项的名称与
 启用状态，Permission Profile 查询只输出稳定的目录选项。
 

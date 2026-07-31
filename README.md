@@ -139,7 +139,7 @@ codexc service logs -f             # 持续跟踪 Gateway 日志
 - 运行：`/status`、`/stop`、`/queue <描述>`、`/compact`、`/fork`、`/review`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
 - 状态：`/diff`、`/usage`、`/limits`、`/permissions`、`/goal`
-- 扩展：`/skills`、`/mcp`、`/plugins`、`/rules`
+- 扩展：`/skill [名称或序号 任务]`、`/mcp`、`/plugins`、`/rules`
 - 帮助：`/help`、`/whoami`
 
 `/resume` 选择已被其他渠道绑定的 Thread 时，只在原渠道和当前渠道都空闲、没有排队消息、

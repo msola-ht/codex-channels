@@ -149,18 +149,74 @@ export class ConversationService {
     if (input.length === 0) {
       return Promise.reject(new UserFacingError("message.empty", "消息不能为空"));
     }
+    return this.submitInput(target, input);
+  }
+
+  async invokeSkill(
+    target: ConversationTarget,
+    selector: string,
+    task: string,
+  ): Promise<Submission & { skillName: string }> {
+    const normalizedSelector = selector.trim();
+    const normalizedTask = task.trim();
+    if (!normalizedSelector || !normalizedTask) {
+      throw new UserFacingError(
+        "skill.usage",
+        "需要提供 Skill 名称或序号及任务内容",
+      );
+    }
     return this.locked(target, async () => {
-      if (input.some((item) => item.type === "localAudio")) {
-        await this.models.requireInputModality(target, "audio");
+      const workspace = this.router.workspace(target);
+      const skillName = await this.resolveSkillName(
+        workspace.cwd,
+        normalizedSelector,
+      );
+      const skill = await this.queries.resolveSkill(workspace.cwd, skillName);
+      if (!skill) {
+        throw new UserFacingError(
+          "skill.not-found",
+          "指定的 Skill 不存在、未启用或不属于当前 Workspace",
+        );
       }
-      const active = this.core.activeTurn(target);
-      const clientUserMessageId = `${gatewayUserMessageClientIdPrefix}${randomUUID()}`;
-      if (active) {
-        await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId);
-        return { threadId: active.threadId, turnId: active.turnId, steered: true };
-      }
-      return this.startNewTurn(target, input, clientUserMessageId);
+      const submission = await this.submitInputLocked(target, [
+        {
+          type: "text",
+          text: `$${skill.name} ${normalizedTask}`,
+        },
+        {
+          type: "skill",
+          name: skill.name,
+          path: skill.path,
+        },
+      ]);
+      return { ...submission, skillName: skill.name };
     });
+  }
+
+  private submitInput(
+    target: ConversationTarget,
+    input: TurnInput[],
+  ): Promise<Submission> {
+    return this.locked(
+      target,
+      () => this.submitInputLocked(target, input),
+    );
+  }
+
+  private async submitInputLocked(
+    target: ConversationTarget,
+    input: TurnInput[],
+  ): Promise<Submission> {
+    if (input.some((item) => item.type === "localAudio")) {
+      await this.models.requireInputModality(target, "audio");
+    }
+    const active = this.core.activeTurn(target);
+    const clientUserMessageId = `${gatewayUserMessageClientIdPrefix}${randomUUID()}`;
+    if (active) {
+      await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId);
+      return { threadId: active.threadId, turnId: active.turnId, steered: true };
+    }
+    return this.startNewTurn(target, input, clientUserMessageId);
   }
 
   queueFollowUp(
@@ -523,6 +579,24 @@ export class ConversationService {
 
   listSkills(target: ConversationTarget): Promise<InstalledSkill[]> {
     return this.queries.listSkills(this.router.workspace(target).cwd);
+  }
+
+  private async resolveSkillName(
+    cwd: string,
+    selector: string,
+  ): Promise<string> {
+    if (!/^[1-9]\d*$/u.test(selector)) {
+      return selector;
+    }
+    const index = Number(selector);
+    if (!Number.isSafeInteger(index)) {
+      throw new UserFacingError("skill.not-found", "Skill 序号不存在");
+    }
+    const skill = (await this.queries.listSkills(cwd))[index - 1];
+    if (!skill) {
+      throw new UserFacingError("skill.not-found", "Skill 序号不存在");
+    }
+    return skill.name;
   }
 
   listMcpServers(target: ConversationTarget): Promise<McpServerSummary[]> {

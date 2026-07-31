@@ -586,6 +586,35 @@ describe("WeixinConversationAdapter", () => {
     );
   });
 
+  it("invokes a numbered Skill with an explicit task", async () => {
+    const invokeSkill = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+      skillName: "systematic-debugging",
+    }));
+    const notifyText = vi.fn(() => true);
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({ invokeSkill }),
+      { notifyText },
+    );
+
+    await adapter.handle({
+      ...message,
+      text: "/skill 2 排查微信断线",
+    });
+
+    expect(invokeSkill).toHaveBeenCalledWith(
+      target,
+      "2",
+      "排查微信断线",
+    );
+    expect(notifyText).toHaveBeenCalledWith(
+      target,
+      expect.stringContaining("已使用 Skill 开始任务"),
+    );
+  });
+
   it("rejects unknown slash commands without submitting them to Codex", async () => {
     const submit = vi.fn();
     const notifyText = vi.fn(() => true);

@@ -92,6 +92,10 @@ export function formatSurfaceUserFacingError(
       return "Plan 模式服务不可用";
     case "plan.prompt.empty":
       return "Plan 需求不能为空";
+    case "skill.usage":
+      return "用法：/skill <名称或序号> <任务>";
+    case "skill.not-found":
+      return "指定的 Skill 不存在、未启用或不属于当前 Workspace";
     case "command.unsupported":
       return surfaceLabel === "Telegram"
         ? `不支持的会话命令：${detail(error, "command", "未知")}`

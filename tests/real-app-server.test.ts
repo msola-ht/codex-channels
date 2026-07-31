@@ -285,6 +285,27 @@ contractSuite("isolated Codex App Server state contract", () => {
     codexHome = join(testRuntime, "codex-home");
     socketPath = join(testRuntime, "app-server.sock");
     mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    const contractSkillDirectory = join(
+      codexHome,
+      "skills",
+      "contract-skill",
+    );
+    mkdirSync(contractSkillDirectory, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      join(contractSkillDirectory, "SKILL.md"),
+      [
+        "---",
+        "name: contract-skill",
+        "description: Validate structured Skill input.",
+        "---",
+        "",
+        "# Contract Skill",
+        "",
+        "Reply concisely.",
+        "",
+      ].join("\n"),
+      { mode: 0o600 },
+    );
     const approvalProbe = resolve(
       "tests/fixtures/mcp-tool-approval-server.mjs",
     );
@@ -347,6 +368,43 @@ contractSuite("isolated Codex App Server state contract", () => {
     expect(skills.every((skill) =>
       typeof skill.name === "string" && typeof skill.description === "string")).toBe(true);
   });
+
+  it("accepts the official Skill marker and structured input together", async () => {
+    const skill = await ownerClient.resolveSkill(workdir, "contract-skill");
+    expect(skill).toEqual({
+      name: "contract-skill",
+      path: join(codexHome, "skills", "contract-skill", "SKILL.md"),
+    });
+    if (!skill) {
+      throw new Error("隔离 App Server 未返回 contract-skill");
+    }
+    const started = await ownerClient.startThread(workdir);
+    const threadId = started.thread.id;
+    let turnId: string | undefined;
+    try {
+      const turn = await ownerClient.startTurn(
+        threadId,
+        [
+          { type: "text", text: "$contract-skill 验证结构化调用" },
+          {
+            type: "skill",
+            name: skill.name,
+            path: skill.path,
+          },
+        ],
+        "codex_connect_gateway:skill-contract",
+        workdir,
+      );
+      turnId = turn.turnId;
+      expect(turnId).not.toBe("");
+    } finally {
+      if (turnId !== undefined) {
+        await ownerClient.interruptTurn(threadId, turnId).catch(() => undefined);
+      }
+      await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
+      await ownerClient.deleteThread(threadId);
+    }
+  }, 15_000);
 
   it("maps the isolated App Server MCP list to stable summaries", async () => {
     const servers = await ownerClient.listMcpServers();

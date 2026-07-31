@@ -890,6 +890,16 @@ describe("JsonRpcClient", () => {
             enabled: false,
           },
         ],
+      }, {
+        cwd: "/tmp/other",
+        errors: [],
+        skills: [{
+          name: "repo",
+          description: "Other repository",
+          path: "/tmp/other/.codex/skills/repo/SKILL.md",
+          scope: "repo",
+          enabled: true,
+        }],
       }],
     };
     const client = new CodexAppServerClient(new JsonRpcClient(transport), {
@@ -901,6 +911,12 @@ describe("JsonRpcClient", () => {
       { name: "personal", description: "Personal" },
       { name: "repo", description: "Repository" },
     ]);
+    await expect(client.resolveSkill("/tmp/project", "repo")).resolves.toEqual({
+      name: "repo",
+      path: "/tmp/project/.codex/skills/repo/SKILL.md",
+    });
+    await expect(client.resolveSkill("/tmp/project", "system"))
+      .resolves.toBeUndefined();
     expect(transport.sent.find((message) => message.method === "skills/list")?.params)
       .toEqual({ cwds: ["/tmp/project"], forceReload: false });
   });
@@ -927,6 +943,30 @@ describe("JsonRpcClient", () => {
 
     await expect(client.listSkills("/tmp/project"))
       .rejects.toThrow("Codex 响应缺少有效 skill name");
+  });
+
+  it("fails closed when an invocable Skill has an unsafe name or path", async () => {
+    const transport = new FakeTransport();
+    transport.skillsResult = {
+      data: [{
+        cwd: "/tmp/project",
+        errors: [],
+        skills: [{
+          name: "unsafe skill",
+          description: "Broken",
+          path: "relative/SKILL.md",
+          scope: "repo",
+          enabled: true,
+        }],
+      }],
+    };
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.resolveSkill("/tmp/project", "unsafe skill"))
+      .rejects.toThrow("Codex 返回了无法安全调用的 Skill");
   });
 
   it("maps and paginates MCP status into stable summaries", async () => {
@@ -1196,6 +1236,11 @@ describe("JsonRpcClient", () => {
         { type: "text", text: "测试输入" },
         { type: "localImage", path: "/tmp/screenshot.png" },
         { type: "localAudio", path: "/tmp/voice.ogg" },
+        {
+          type: "skill",
+          name: "systematic-debugging",
+          path: "/tmp/project/.codex/skills/systematic-debugging/SKILL.md",
+        },
       ],
       "codex_connect_gateway:request-1",
       "/tmp/project",
@@ -1222,6 +1267,11 @@ describe("JsonRpcClient", () => {
           { type: "text", text: "测试输入", text_elements: [] },
           { type: "localImage", path: "/tmp/screenshot.png" },
           { type: "localAudio", path: "/tmp/voice.ogg" },
+          {
+            type: "skill",
+            name: "systematic-debugging",
+            path: "/tmp/project/.codex/skills/systematic-debugging/SKILL.md",
+          },
         ],
         cwd: "/tmp/project",
         model: "gpt-selected",

@@ -40,7 +40,7 @@ export const conversationCommandDescriptions = {
   model: "查看或切换模型",
   effort: "查看或切换思考强度",
   fast: "查看或切换 Fast 模式",
-  skills: "列出 Skills",
+  skill: "查看或调用 Skill",
   mcp: "列出 MCP Servers",
   plugins: "列出 Plugins",
   usage: "查看账号用量",
@@ -78,7 +78,8 @@ export const conversationCommandHelpSections = [
     lines: [
       "/model [序号|模型 ID|名称]",
       "/effort [序号|档位] · /fast [on|off|status]",
-      "/skills · /mcp · /plugins",
+      "/skill [名称或序号 任务]",
+      "/mcp · /plugins",
       "/usage · /limits · /permissions",
     ],
   },
@@ -163,6 +164,10 @@ export function formatConversationCommandOutcome(
       return `已启动 Codex Review\nTurn：${outcome.turnId}`;
     case "plan.started":
       return `已进入 Plan 模式并开始规划\nTurn：${outcome.turnId}`;
+    case "skill.started":
+      return outcome.steered
+        ? `已把 Skill 追加到当前任务\nSkill：${outcome.skillName}`
+        : `已使用 Skill 开始任务\nSkill：${outcome.skillName}\nTurn：${outcome.turnId}`;
     case "goal.cleared":
       return "已清除当前 Thread Goal。";
     case "goal.updated":
@@ -205,10 +210,10 @@ export function formatConversationSkills(
     : [
         `已安装 Skills（${result.entries.length}）：`,
         ...result.entries.map(
-          (skill) => `- ${skill.name}：${skill.description}`,
+          (skill, index) => `${index + 1}. ${skill.name}：${skill.description}`,
         ),
         "",
-        "使用：在消息中写 $Skill名称 并说明任务。",
+        "使用：/skill <名称或序号> <任务>",
       ].join("\n");
 }
 

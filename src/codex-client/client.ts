@@ -14,6 +14,7 @@ import type {
   CollaborationModeQueryPort,
   CollaborationModePreset,
   InstalledSkill,
+  InvocableSkill,
   SkillQueryPort,
   McpQueryPort,
   McpServerSummary,
@@ -67,7 +68,10 @@ import {
 } from "./turn-adapter.js";
 import { toModelOption } from "./model-adapter.js";
 import { toAccountRateLimits, toAccountUsage } from "./account-adapter.js";
-import { toInstalledSkills } from "./skill-adapter.js";
+import {
+  resolveInvocableSkill,
+  toInstalledSkills,
+} from "./skill-adapter.js";
 import { toMcpServerSummaryPage } from "./mcp-adapter.js";
 import { toInstalledPlugins } from "./plugin-adapter.js";
 import { toPermissionProfilePage } from "./permission-adapter.js";
@@ -390,11 +394,15 @@ export class CodexAppServerClient implements
   }
 
   async listSkills(cwd: string): Promise<InstalledSkill[]> {
-    const response = await this.rpc.request<SkillsListResponse>({
-      method: "skills/list",
-      params: { cwds: [cwd], forceReload: false },
-    }, { retryOverload: true });
-    return toInstalledSkills(response);
+    const response = await this.readSkills(cwd);
+    return toInstalledSkills(response, cwd);
+  }
+
+  async resolveSkill(
+    cwd: string,
+    name: string,
+  ): Promise<InvocableSkill | undefined> {
+    return resolveInvocableSkill(await this.readSkills(cwd), cwd, name);
   }
 
   async listMcpServers(threadId?: string): Promise<McpServerSummary[]> {
@@ -418,6 +426,13 @@ export class CodexAppServerClient implements
       rememberCursor("mcpServerStatus/list", cursor, cursors);
     } while (cursor);
     return servers;
+  }
+
+  private readSkills(cwd: string): Promise<SkillsListResponse> {
+    return this.rpc.request<SkillsListResponse>({
+      method: "skills/list",
+      params: { cwds: [cwd], forceReload: false },
+    }, { retryOverload: true });
   }
 
   async listPlugins(cwd: string): Promise<InstalledPlugin[]> {

@@ -79,7 +79,8 @@ Bot API 与文件下载使用 Bootstrap 按 `api.telegram.org` 选择的统一 H
 命令解析及位置、容量和内存生命周期提示。
 Telegram 手动命令注册显式接入三个渠道共享的 `/h`、`/work`、`/r` 快捷入口，分别执行
 `/help`、`/workspace`、`/resume`；快捷入口不重复写入 BotFather 菜单。帮助消息复用共享的
-分组列表，只在 Telegram 边界转换为安全 HTML。
+分组列表，只在 Telegram 边界转换为安全 HTML。无参数 `/skill` 与其他渠道一样展示编号列表，
+调用统一使用 `/skill <名称或序号> <任务>`，不维护渠道私有选择状态。
 审批请求晚于操作日志发送时，Outbox 必须撤回已经发送的命令消息，不能只清理内存状态。
 账户额度和 MCP 状态通知也必须进入每聊天有界输出队列；不得从 App Server Reader 直接等待 Telegram 网络发送。
 结构化用户错误由 `bot.ts` 转换为 Telegram 专属文案；App Server Turn、warning 和 MCP 错误会

@@ -40,6 +40,8 @@ export type UserFacingErrorCode =
   | "collaboration-mode.unsupported"
   | "collaboration-mode.unavailable"
   | "plan.prompt.empty"
+  | "skill.usage"
+  | "skill.not-found"
   | "command.unsupported"
   | "review.usage"
   | "rules.usage"

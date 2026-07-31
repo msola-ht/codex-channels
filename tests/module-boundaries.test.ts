@@ -121,6 +121,7 @@ describe("module boundaries", () => {
     );
     expect(turnPort).not.toContain('type: "audio"');
     expect(turnPort).toContain('type: "localAudio"');
+    expect(turnPort).toContain('type: "skill"');
 
     const realtimeCallers = typescriptFiles(
       resolve(sourceRoot, "codex-client"),

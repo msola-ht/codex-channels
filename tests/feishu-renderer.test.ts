@@ -494,7 +494,7 @@ describe("Feishu output renderer", () => {
     expect(renderFeishuCommandResult({
       kind: "skills",
       entries: [{ name: "tdd", description: "测试驱动开发" }],
-    })).toContain("- tdd：测试驱动开发");
+    })).toContain("1. tdd：测试驱动开发");
     expect(renderFeishuCommandResult({
       kind: "mcp",
       servers: [{ name: "docs", authStatus: "oAuth", toolCount: 2 }],

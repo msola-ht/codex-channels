@@ -242,7 +242,7 @@ describe("ConversationCommandService", () => {
       view: "fast",
       state,
     });
-    await expect(commands.execute(target, "skills")).resolves.toEqual({
+    await expect(commands.execute(target, "skill")).resolves.toEqual({
       kind: "skills",
       entries: ["skill"],
     });
@@ -269,6 +269,45 @@ describe("ConversationCommandService", () => {
     expect(selectModel).toHaveBeenCalledWith(target, "gpt-test");
     expect(selectEffort).toHaveBeenCalledWith(target, "high");
     expect(selectFastMode).toHaveBeenCalledWith(target, "on");
+  });
+
+  it("invokes a Skill through the shared command boundary", async () => {
+    const invokeSkill = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+      skillName: "systematic-debugging",
+    }));
+    const commands = new ConversationCommandService({
+      invokeSkill,
+    } as unknown as ConversationService);
+
+    await expect(commands.execute(
+      target,
+      "skill",
+      "systematic-debugging 排查断线",
+    )).resolves.toEqual({
+      kind: "outcome",
+      outcome: {
+        type: "skill.started",
+        skillName: "systematic-debugging",
+        turnId: "turn-1",
+        steered: false,
+      },
+    });
+    expect(invokeSkill).toHaveBeenCalledWith(
+      target,
+      "systematic-debugging",
+      "排查断线",
+    );
+  });
+
+  it("rejects /skill without both selector and task", async () => {
+    const commands = new ConversationCommandService(
+      {} as ConversationService,
+    );
+    await expect(commands.execute(target, "skill", "systematic-debugging"))
+      .rejects.toMatchObject({ code: "skill.usage" });
   });
 
   it("covers every registered command through the shared dispatcher", async () => {
@@ -301,6 +340,12 @@ describe("ConversationCommandService", () => {
       selectEffort: vi.fn(async () => ({ model: "gpt-test" })),
       selectFastMode: vi.fn(async () => ({ model: "gpt-test" })),
       listSkills: vi.fn(async () => []),
+      invokeSkill: vi.fn(async () => ({
+        threadId: "thread-1",
+        turnId: "turn-skill",
+        steered: false,
+        skillName: "skill",
+      })),
       listMcpServers: vi.fn(async () => []),
       listPlugins: vi.fn(async () => ({})),
       accountUsage: vi.fn(async () => ({})),
@@ -337,7 +382,7 @@ describe("ConversationCommandService", () => {
       ["model", "gpt-test", "selectModel"],
       ["effort", "high", "selectEffort"],
       ["fast", "on", "selectFastMode"],
-      ["skills", "", "listSkills"],
+      ["skill", "", "listSkills"],
       ["mcp", "", "listMcpServers"],
       ["plugins", "", "listPlugins"],
       ["usage", "", "accountUsage"],

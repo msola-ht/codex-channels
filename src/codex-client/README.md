@@ -15,7 +15,7 @@
 - `thread-adapter.ts`：把当前版本生成的官方 Thread、固定状态、运行状态、来源、运行 Turn、
   上下文压缩 Item ID 和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；
   缺少必需字段时失败关闭。
-- `turn-adapter.ts`：把 Application 的文本、本地图片与本地音频输入编码为官方 `UserInput`，并映射
+- `turn-adapter.ts`：把 Application 的文本、本地图片、本地音频与已解析 Skill 输入编码为官方 `UserInput`，并映射
   Turn、Review 和 Goal 响应；缺少稳定结果必需字段时失败关闭。
 - `model-adapter.ts`：把当前版本官方模型目录裁剪为 Application 拥有的模型选项和
   `text/image/audio` 输入能力，过滤不可见项，
@@ -23,7 +23,8 @@
 - `account-adapter.ts`：把账户 Token 用量、单桶或多桶额度与重置券数量映射为 Application
   稳定摘要；未知枚举或畸形数值失败关闭，不把上游响应正文交给 Surface。
 - `skill-adapter.ts`：从官方按 CWD 返回的 Skill 条目中只保留启用的用户或项目直接安装项，
-  排除系统与插件缓存，并映射为不含本机路径的稳定结果。
+  排除系统与插件缓存；列表结果不含本机路径，显式调用只向 Application 返回精确匹配且名称、
+  绝对路径均通过校验的引用。
 - `mcp-adapter.ts`：把官方 MCP Server 状态页裁剪为名称、认证状态和工具数量，并校验分页与
   展示必需字段；不向 Application 传播工具 Schema、资源或 Server Info。
 - `plugin-adapter.ts`：从官方已安装 Plugin 响应中只保留名称和启用状态，排除安装建议与

@@ -55,6 +55,7 @@ export {
 } from "./model-port.js";
 export {
   type InstalledSkill,
+  type InvocableSkill,
   type SkillQueryPort,
 } from "./skill-port.js";
 export {

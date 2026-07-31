@@ -80,7 +80,8 @@ Surface 共用的中文短文本，不负责计时、状态或持久化。
 `conversation-command-format.ts`
 统一 Telegram、飞书与微信共用的分组命令目录、有界会话列表、Workspace、Skill、MCP、Plugin、
 权限、项目规则、Diff、Goal、模型选择、Default/Plan 模式、用量与额度等平台无关命令结果文案
-与状态文本。
+与状态文本。`/skill` 返回带序号的已启用项，`/skill <名称或序号> <任务>` 通过 Application
+提交官方结构化 Skill 输入；Surface 不接收或拼装本机 Skill 路径。
 `user-facing-error-format.ts` 统一三个渠道的结构化用户错误文案，只保留渠道名称差异；
 `error-metadata.ts` 统一渠道日志中的受约束异常类型、机器错误码和锁定 App Server
 白名单拒绝分类，拒绝异常正文、堆栈、请求标识及上游自定义名称进入日志；Bootstrap

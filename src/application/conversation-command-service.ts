@@ -25,7 +25,7 @@ export const conversationCommandNames = [
   "model",
   "effort",
   "fast",
-  "skills",
+  "skill",
   "mcp",
   "plugins",
   "usage",
@@ -107,6 +107,12 @@ export type ConversationCommandOutcome =
   | { type: "thread.forked"; threadId: string }
   | { type: "review.started"; turnId: string }
   | { type: "plan.started"; turnId: string }
+  | {
+      type: "skill.started";
+      skillName: string;
+      turnId: string;
+      steered: boolean;
+    }
   | { type: "goal.cleared" }
   | {
       type: "goal.updated";
@@ -292,11 +298,29 @@ export class ConversationCommandService {
           view: "fast",
           state: await this.conversations.selectFastMode(target, argumentsText),
         };
-      case "skills":
+      case "skill": {
+        if (!argumentsText) {
+          return {
+            kind: "skills",
+            entries: await this.conversations.listSkills(target),
+          };
+        }
+        const invocation = parseSkillInvocation(argumentsText);
+        const submission = await this.conversations.invokeSkill(
+          target,
+          invocation.selector,
+          invocation.task,
+        );
         return {
-          kind: "skills",
-          entries: await this.conversations.listSkills(target),
+          kind: "outcome",
+          outcome: {
+            type: "skill.started",
+            skillName: submission.skillName,
+            turnId: submission.turnId,
+            steered: submission.steered,
+          },
         };
+      }
       case "mcp":
         return {
           kind: "mcp",
@@ -388,6 +412,23 @@ export class ConversationCommandService {
     const goal = await this.conversations.getGoal(target);
     return { kind: "goal", goal };
   }
+}
+
+function parseSkillInvocation(input: string): {
+  selector: string;
+  task: string;
+} {
+  const match = /^(\S+)\s+([\s\S]+)$/u.exec(input.trim());
+  if (!match?.[1] || !match[2]?.trim()) {
+    throw new UserFacingError(
+      "skill.usage",
+      "用法：/skill <名称或序号> <任务>",
+    );
+  }
+  return {
+    selector: match[1],
+    task: match[2].trim(),
+  };
 }
 
 function parseReviewTarget(input: string): ReviewTarget {

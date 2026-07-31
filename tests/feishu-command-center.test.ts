@@ -122,12 +122,12 @@ describe("Feishu command center", () => {
     }
 
     expect(fixture.center.handleCardAction(
-      cardAction(categorized, "skills"),
+      cardAction(categorized, "skill"),
     )).toBe("accepted");
     await settle();
     expect(fixture.execute).toHaveBeenCalledWith(
       target,
-      "skills",
+      "skill",
       "ou_actor",
       "",
     );

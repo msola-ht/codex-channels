@@ -377,6 +377,49 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent[0]?.text).toContain("当前思考强度：high");
   });
 
+  it("uses the shared Skill list and explicit invocation commands", async () => {
+    const fixture = createOutbox();
+    const listSkills = vi.fn(async () => [{
+      name: "systematic-debugging",
+      description: "系统化排查",
+    }]);
+    const invokeSkill = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+      skillName: "systematic-debugging",
+    }));
+    const adapter = new FeishuConversationAdapter(
+      {
+        listSkills,
+        invokeSkill,
+      } as unknown as ConversationService,
+      fixture.outbox,
+      imagePort,
+    );
+
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "skill",
+      message.actorId,
+    )).resolves.toBeUndefined();
+    await adapter.handleCommandCenterAction(
+      message.target,
+      "skill",
+      message.actorId,
+      "systematic-debugging 排查断线",
+    );
+    await fixture.outbox.close();
+
+    expect(invokeSkill).toHaveBeenCalledWith(
+      message.target,
+      "systematic-debugging",
+      "排查断线",
+    );
+    expect(fixture.sent[0]?.text).toContain("1. systematic-debugging");
+    expect(fixture.sent[1]?.text).toContain("已使用 Skill 开始任务");
+  });
+
   it("turns active and archived session results into exact card choices", async () => {
     const fixture = createOutbox();
     const sessions = [{

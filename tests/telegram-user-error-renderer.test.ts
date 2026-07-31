@@ -35,6 +35,15 @@ describe("Telegram user error renderer", () => {
   });
 
   it.each([
+    ["skill.usage", "用法：/skill <名称或序号> <任务>"],
+    ["skill.not-found", "指定的 Skill 不存在、未启用或不属于当前 Workspace"],
+  ] as const)("renders %s Skill errors", (code, expected) => {
+    expect(formatTelegramUserFacingError(
+      new UserFacingError(code, "opaque-internal-fallback"),
+    )).toBe(expected);
+  });
+
+  it.each([
     ["queue.usage", "用法：/queue <描述>"],
     ["queue.inactive", "当前没有运行中的任务，请直接发送普通消息"],
     ["queue.full", "下一 Turn 队列已满，最多 10 条"],
