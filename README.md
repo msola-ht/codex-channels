@@ -109,8 +109,10 @@ Setup 从 DeepSeek 官方安装脚本下载并提取模型目录，校验后写�
 
 两种模式都会在权限为 `0600` 的 `~/.codex/config.toml` 注册 DeepSeek Provider，并按官方
 Codex 接入方式保存 API Key。首次修改前，原配置会备份到
-`~/.codex/backup-codex-connect-deepseek/config.toml`。切换到另一 Provider 时不能修改正在使用的
-Thread；渠道会保留空闲旧 Thread，并为所选 Provider 新建可恢复的 Thread。
+`~/.codex/backup-codex-connect-deepseek/config.toml`。切换到另一 Provider 时不能原地修改正在
+使用的 Thread；如果当前会话已有空闲 Thread，渠道会通过官方 `thread/fork` 复制当前历史并绑定
+到所选 Provider，后续切回时继续从当前分支 Fork，因此话题上下文不会变成空白。旧 Thread 仍可恢复；
+当前没有 Thread 时才为所选 Provider 新建会话。
 Setup 完成或恢复后运行 `codexc service restart all`，让 App Server 重新读取 Provider，并让 Gateway
 重新载入下载的模型目录。
 

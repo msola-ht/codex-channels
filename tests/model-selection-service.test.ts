@@ -228,13 +228,16 @@ describe("ModelSelectionService", () => {
     });
   });
 
-  it("starts a new Thread when selecting a model from another provider", async () => {
+  it("forks the current Thread when selecting a model from another provider", async () => {
     const newSession = vi.fn().mockResolvedValue(undefined);
+    const fork = vi.fn().mockResolvedValue(undefined);
     const codex = {
       listModels: async () => models,
       writeDefaultFastMode: async () => undefined,
     } satisfies ModelSelectionPort;
     const router = {
+      current: () => ({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }),
+      fork,
       newSession,
       modelSettings: () => ({
         model: "gpt-main",
@@ -252,11 +255,68 @@ describe("ModelSelectionService", () => {
 
     await service.selectModel(target, "deepseek-v4-flash");
 
-    expect(newSession).toHaveBeenCalledOnce();
+    expect(fork).toHaveBeenCalledWith(target, {
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+      config: { model_catalog_json: "/private/deepseek.models.json" },
+    });
+    expect(newSession).not.toHaveBeenCalled();
     expect(service.threadStartOptions(target)).toEqual({
       model: "deepseek-v4-flash",
       modelProvider: "deepseek",
       config: { model_catalog_json: "/private/deepseek.models.json" },
+    });
+  });
+
+  it("starts a new Thread for another provider when no Thread is bound", async () => {
+    const newSession = vi.fn().mockResolvedValue(undefined);
+    const fork = vi.fn().mockResolvedValue(undefined);
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+    } satisfies ModelSelectionPort;
+    const router = {
+      current: () => undefined,
+      fork,
+      newSession,
+      modelSettings: () => undefined,
+    } as unknown as SessionRouter;
+    const deepseek = {
+      ...model("deepseek-v4-flash", ["low", "high"], "high"),
+      provider: "deepseek",
+      catalogPath: "/private/deepseek.models.json",
+    };
+    const service = new ModelSelectionService(codex, router, undefined, [deepseek]);
+
+    await service.selectModel(target, "deepseek-v4-flash");
+
+    expect(newSession).toHaveBeenCalledOnce();
+    expect(fork).not.toHaveBeenCalled();
+  });
+
+  it("uses the default catalog when forking back to OpenAI", async () => {
+    const fork = vi.fn().mockResolvedValue(undefined);
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+    } satisfies ModelSelectionPort;
+    const router = {
+      current: () => ({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }),
+      fork,
+      modelSettings: () => ({
+        model: "deepseek-v4-flash",
+        modelProvider: "deepseek",
+        effort: "high",
+        serviceTier: "default",
+      }),
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService(codex, router);
+
+    await service.selectModel(target, "gpt-main");
+
+    expect(fork).toHaveBeenCalledWith(target, {
+      model: "gpt-main",
+      modelProvider: "openai",
     });
   });
 

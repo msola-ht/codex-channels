@@ -30,6 +30,7 @@ const archiveFixtureThreadId = process.env.CODEX_ARCHIVE_FIXTURE_THREAD_ID;
 const archiveTest = run && archiveFixtureThreadId ? it : it.skip;
 const resumeFixtureThreadId = process.env.CODEX_RESUME_FIXTURE_THREAD_ID;
 const resumeTest = run && resumeFixtureThreadId ? it : it.skip;
+const forkTest = run && resumeFixtureThreadId ? it : it.skip;
 
 suite("real Codex App Server over Unix WebSocket", () => {
   const workdir = process.cwd();
@@ -188,6 +189,28 @@ suite("real Codex App Server over Unix WebSocket", () => {
       if (ownerSubscribed) {
         await client.unsubscribeThread(threadId).catch(() => undefined);
       }
+    }
+  });
+
+  forkTest("forks an idle history thread with explicit provider settings", async () => {
+    const source = await client.resumeThread(resumeFixtureThreadId!, workdir);
+    let forkedId: string | undefined;
+    try {
+      const forked = await client.forkThread(source.thread.id, workdir, {
+        model: source.model,
+        modelProvider: source.modelProvider ?? "openai",
+      });
+      forkedId = forked.thread.id;
+
+      expect(forked.thread.id).not.toBe(source.thread.id);
+      expect(forked.model).toBe(source.model);
+      expect(forked.modelProvider).toBe(source.modelProvider ?? "openai");
+    } finally {
+      if (forkedId) {
+        await client.unsubscribeThread(forkedId).catch(() => undefined);
+        await client.deleteThread(forkedId).catch(() => undefined);
+      }
+      await client.unsubscribeThread(source.thread.id).catch(() => undefined);
     }
   });
 

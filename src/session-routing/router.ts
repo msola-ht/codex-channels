@@ -306,13 +306,20 @@ export class SessionRouter {
     return workspace;
   }
 
-  async fork(target: ConversationTarget): Promise<ConversationBinding> {
+  async fork(
+    target: ConversationTarget,
+    startOptions: ThreadStartOptions = {},
+  ): Promise<ConversationBinding> {
     const current = this.bindings.get(target);
     if (!current) {
       throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
     }
     const workspace = this.workspaces.require(current.workspaceId);
-    const forked = await this.codex.forkThread(current.threadId, workspace.cwd);
+    const forked = await this.codex.forkThread(
+      current.threadId,
+      workspace.cwd,
+      startOptions,
+    );
     this.captureModelSettings(forked.thread.id, forked.model, forked.modelProvider, forked.reasoningEffort, forked.serviceTier);
     this.contextCompactionItemIdsByThread.set(
       forked.thread.id,

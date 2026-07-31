@@ -44,7 +44,11 @@ export interface ThreadLifecyclePort {
   readThread(threadId: string): Promise<ThreadSnapshot>;
   startThread(cwd: string, options?: ThreadStartOptions): Promise<ThreadSession>;
   resumeThread(threadId: string, cwd: string): Promise<ThreadSession>;
-  forkThread(threadId: string, cwd: string): Promise<ThreadSession>;
+  forkThread(
+    threadId: string,
+    cwd: string,
+    options?: ThreadStartOptions,
+  ): Promise<ThreadSession>;
   archiveThread(threadId: string): Promise<void>;
   unarchiveThread(threadId: string): Promise<ThreadSnapshot>;
   unsubscribeThread(threadId: string): Promise<void>;

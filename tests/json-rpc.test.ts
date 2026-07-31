@@ -223,6 +223,21 @@ class FakeTransport extends BaseTransport {
           }),
         ),
       );
+    } else if (decoded.method === "thread/fork") {
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({
+            id: decoded.id,
+            result: {
+              thread: appServerThread({ id: "thread-forked", forkedFromId: "thread-1" }),
+              model: "deepseek-v4-flash",
+              modelProvider: "deepseek",
+              reasoningEffort: "high",
+              serviceTier: "default",
+            },
+          }),
+        ),
+      );
     } else if (decoded.method === "thread/archive") {
       queueMicrotask(() =>
         this.emitMessage(JSON.stringify({ id: decoded.id, result: {} })),
@@ -1431,6 +1446,33 @@ describe("JsonRpcClient", () => {
 
     expect(transport.sent.find((message) => message.method === "thread/start")?.params)
       .toMatchObject({
+        model: "deepseek-v4-flash",
+        modelProvider: "deepseek",
+        config: { model_catalog_json: "/private/deepseek.models.json" },
+      });
+  });
+
+  it("forks a thread with an explicit model provider and catalog", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    const forked = await client.forkThread("thread-1", "/tmp/project", {
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+      config: { model_catalog_json: "/private/deepseek.models.json" },
+    });
+
+    expect(forked).toMatchObject({
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+      thread: { id: "thread-forked" },
+    });
+    expect(transport.sent.find((message) => message.method === "thread/fork")?.params)
+      .toMatchObject({
+        threadId: "thread-1",
         model: "deepseek-v4-flash",
         modelProvider: "deepseek",
         config: { model_catalog_json: "/private/deepseek.models.json" },

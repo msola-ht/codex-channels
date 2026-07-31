@@ -377,7 +377,11 @@ export class CodexAppServerClient implements
     return serviceTier;
   }
 
-  async forkThread(threadId: string, cwd: string): Promise<ThreadSession> {
+  async forkThread(
+    threadId: string,
+    cwd: string,
+    options: ThreadStartOptions = {},
+  ): Promise<ThreadSession> {
     const response = await this.rpc.request<ThreadForkResponse>({
       method: "thread/fork",
       params: {
@@ -385,6 +389,9 @@ export class CodexAppServerClient implements
         cwd,
         sandbox: this.defaults.sandbox,
         approvalPolicy: "on-request",
+        ...(options.model ? { model: options.model } : {}),
+        ...(options.modelProvider ? { modelProvider: options.modelProvider } : {}),
+        ...(options.config ? { config: options.config } : {}),
       },
     }, { retryOverload: false });
     return toThreadSession(response);

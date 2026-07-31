@@ -13,7 +13,8 @@
   压缩 Item ID 及 `thread/unsubscribe`；切换目标恢复成功后才解除当前绑定，启动恢复只有在 Thread 明确不存在、
   已删除或已归档时才移除持久化绑定；订阅恢复时把稳定 Thread 快照交回组合根。跨渠道接管只允许
   当前 Thread 与目标 Conversation 原 Thread 都由 App Server 报告为空闲时执行；保留被接管
-  Thread 的现有订阅，只取消目标 Conversation 被替换 Thread 的订阅。
+  Thread 的现有订阅，只取消目标 Conversation 被替换 Thread 的订阅。跨 Provider 模型切换先以
+  精确 Provider、模型和目录 Fork 当前 Thread，Fork 成功后才替换绑定并取消旧订阅；Fork 失败保留原绑定。
 - `thread-state-sync.ts`：定义并消费不含协议信封的稳定 Thread 路由事件，同步模型、思考强度和
   服务层级；归档或删除事件会清理对应绑定，关闭事件只表示无订阅者的空闲 Thread 已从
   App Server 内存卸载，保留可恢复的持久化绑定。官方通知的校验和转换由 `codex-client` 完成。

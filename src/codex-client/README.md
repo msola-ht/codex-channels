@@ -51,8 +51,8 @@
   `toolsAndAuthOnly` 分页，配置读取只公开稳定服务层级值，Plugin 查询只调用
   `plugin/installed`，不得改用 `plugin/list` 加载市场目录；Permission Profile 按 CWD 分页，
   仅用于只读目录展示。
-  新 Thread 可显式携带官方 `modelProvider` 与受控 `model_catalog_json`；已有 Thread 不在 Turn
-  覆盖中更换 Provider。
+  新 Thread 和 Fork 可显式携带官方 `modelProvider` 与受控 `model_catalog_json`；已有 Thread
+  不在 Turn 覆盖中更换 Provider，跨 Provider 由 Application/Router 通过 Fork 保留历史。
 
 本模块不得调用 Telegram API、生成平台文案或保存业务绑定。协议字段必须来自
 `codex-protocol`；无参数请求和通知不得自行补空对象，写操作不得在过载或断线后盲目重试。

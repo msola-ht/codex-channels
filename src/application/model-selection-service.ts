@@ -88,7 +88,17 @@ export class ModelSelectionService {
     const selectedProvider = selected.provider ?? "openai";
     const providerChanged = selectedProvider !== current.modelProvider;
     if (providerChanged) {
-      await this.router.newSession(target);
+      if (this.router.current(target)) {
+        await this.router.fork(target, {
+          model: selected.model,
+          modelProvider: selectedProvider,
+          ...(selected.catalogPath
+            ? { config: { model_catalog_json: selected.catalogPath } }
+            : {}),
+        });
+      } else {
+        await this.router.newSession(target);
+      }
     }
     const supported = selected.supportedReasoningEfforts.map((option) => option.effort);
     const effort = current.effort && supported.includes(current.effort)

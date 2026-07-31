@@ -66,6 +66,68 @@ function threadPort(overrides: Partial<ThreadLifecyclePort> = {}): ThreadLifecyc
 }
 
 describe("SessionRouter", () => {
+  it("forks the current Thread with provider options before replacing its binding", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "original", sessionId: "original" });
+    const calls: unknown[] = [];
+    const unsubscribed: string[] = [];
+    const client = threadPort({
+      forkThread: async (threadId, cwd, options) => {
+        calls.push({ threadId, cwd, options });
+        return session(thread("forked", { type: "idle" }), {
+          model: "deepseek-v4-flash",
+          modelProvider: "deepseek",
+          reasoningEffort: "high",
+        });
+      },
+      unsubscribeThread: async (threadId) => {
+        unsubscribed.push(threadId);
+      },
+    });
+    const router = new SessionRouter(client, store, registry);
+
+    await router.fork(target, {
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+      config: { model_catalog_json: "/private/deepseek.models.json" },
+    });
+
+    expect(calls).toEqual([{
+      threadId: "original",
+      cwd: "/workspace",
+      options: {
+        model: "deepseek-v4-flash",
+        modelProvider: "deepseek",
+        config: { model_catalog_json: "/private/deepseek.models.json" },
+      },
+    }]);
+    expect(unsubscribed).toEqual(["original"]);
+    expect(store.get(target)?.threadId).toBe("forked");
+  });
+
+  it("keeps the original binding when a provider Fork fails", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "original", sessionId: "original" });
+    const unsubscribed: string[] = [];
+    const client = threadPort({
+      forkThread: async () => {
+        throw new Error("fork failed");
+      },
+      unsubscribeThread: async (threadId) => {
+        unsubscribed.push(threadId);
+      },
+    });
+    const router = new SessionRouter(client, store, registry);
+
+    await expect(router.fork(target, {
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+    })).rejects.toThrow("fork failed");
+
+    expect(store.get(target)?.threadId).toBe("original");
+    expect(unsubscribed).toEqual([]);
+  });
+
   it("transfers an idle binding without unsubscribing the selected Thread", async () => {
     const destination = {
       surface: "feishu" as const,
