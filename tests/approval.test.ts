@@ -166,6 +166,34 @@ describe("InteractionRouter", () => {
     expect(router.hasPendingForThread("thread-pending")).toBe(false);
   });
 
+  it("cancels only interactions owned by disconnected Provider Threads", async () => {
+    const interaction = new ControlledInteraction();
+    const router = new InteractionRouter();
+    router.register("telegram", "default", interaction);
+    const affected = router.request(target, approvalInteractionRequest({
+      requestId: "request-deepseek",
+      threadId: "thread-deepseek",
+    }));
+    const unaffectedTarget = { ...target, conversationId: "200" };
+    const unaffected = router.request(unaffectedTarget, approvalInteractionRequest({
+      requestId: "request-openai",
+      threadId: "thread-openai",
+    }));
+
+    router.cancelThreads(new Set(["thread-deepseek"]));
+
+    await expect(affected).resolves.toEqual({ type: "approval", approved: false });
+    expect(router.hasPendingForThread("thread-deepseek")).toBe(false);
+    expect(router.hasPendingForThread("thread-openai")).toBe(true);
+    interaction.resolveNext({ type: "approval", approved: false });
+    interaction.resolveNext({ type: "approval", approved: true, scope: "once" });
+    await expect(unaffected).resolves.toEqual({
+      type: "approval",
+      approved: true,
+      scope: "once",
+    });
+  });
+
   it("delivers only one interaction at a time within the same Conversation", async () => {
     const interaction = new ControlledInteraction();
     const router = new InteractionRouter();

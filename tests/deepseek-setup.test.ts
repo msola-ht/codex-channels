@@ -66,7 +66,7 @@ describe("DeepSeek setup", () => {
     expect(parse(readFileSync(
       join(fixture.home, "codex-connect-deepseek.config.toml"),
       "utf8",
-    ))).toEqual({ version: 1, provider: "deepseek" });
+    ))).toEqual({ version: 1, provider: "deepseek", mode: "switching" });
     expect(readFileSync(join(fixture.home, "auth.json"), "utf8"))
       .toBe('{"tokens":"openai"}\n');
     expect(fixture.text()).not.toContain("sk-secret");
@@ -93,7 +93,10 @@ describe("DeepSeek setup", () => {
     expect(config.forced_login_method).toBeUndefined();
     expect(config.preferred_auth_method).toBeUndefined();
     expect(existsSync(join(fixture.home, "deepseek.config.toml"))).toBe(false);
-    expect(existsSync(join(fixture.home, "codex-connect-deepseek.config.toml"))).toBe(false);
+    expect(parse(readFileSync(
+      join(fixture.home, "codex-connect-deepseek.config.toml"),
+      "utf8",
+    ))).toEqual({ version: 1, provider: "deepseek", mode: "exclusive" });
     expect(readFileSync(
       join(fixture.home, "backup-codex-connect-deepseek", "config.toml"),
       "utf8",

@@ -696,58 +696,10 @@ describe("JsonRpcClient", () => {
     expect(session.contextCompactionItemIds).toEqual(["compact-1", "compact-2"]);
   });
 
-  it("reapplies a provider model catalog when resuming a thread", async () => {
-    const transport = new FakeTransport();
-    transport.resumeThreadData = appServerThread({
-      modelProvider: "deepseek",
-      status: { type: "notLoaded" },
-    });
-    transport.threadListData = [transport.resumeThreadData];
-    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
-      sandbox: "workspace-write",
-      modelCatalogsByProvider: new Map([
-        ["deepseek", "/private/deepseek.models.json"],
-      ]),
-    });
-    await client.connect();
-
-    await client.resumeThread("thread-1", "/tmp/project");
-
-    const requests = transport.sent.filter((message) =>
-      message.method === "thread/list" || message.method === "thread/resume"
-    );
-    expect(requests.map((message) => message.method))
-      .toEqual(["thread/list", "thread/resume"]);
-    expect(requests[1]?.params).toMatchObject({
-      threadId: "thread-1",
-      config: { model_catalog_json: "/private/deepseek.models.json" },
-    });
-  });
-
-  it("does not apply a third-party catalog when resuming an OpenAI thread", async () => {
+  it("does not override process-owned provider configuration when resuming a thread", async () => {
     const transport = new FakeTransport();
     const client = new CodexAppServerClient(new JsonRpcClient(transport), {
       sandbox: "workspace-write",
-      modelCatalogsByProvider: new Map([
-        ["deepseek", "/private/deepseek.models.json"],
-      ]),
-    });
-    await client.connect();
-
-    await client.resumeThread("thread-1", "/tmp/project");
-
-    expect(transport.sent.find((message) => message.method === "thread/resume")?.params)
-      .not.toHaveProperty("config");
-  });
-
-  it("does not send resume config to an already loaded third-party thread", async () => {
-    const transport = new FakeTransport();
-    transport.resumeThreadData = appServerThread({ modelProvider: "deepseek" });
-    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
-      sandbox: "workspace-write",
-      modelCatalogsByProvider: new Map([
-        ["deepseek", "/private/deepseek.models.json"],
-      ]),
     });
     await client.connect();
 
@@ -1494,7 +1446,7 @@ describe("JsonRpcClient", () => {
       .not.toHaveProperty("model");
   });
 
-  it("starts a new thread with an explicit model provider and catalog", async () => {
+  it("starts a new thread with an explicit model provider", async () => {
     const transport = new FakeTransport();
     const client = new CodexAppServerClient(new JsonRpcClient(transport), {
       sandbox: "workspace-write",
@@ -1504,18 +1456,16 @@ describe("JsonRpcClient", () => {
     await client.startThread("/tmp/project", {
       model: "deepseek-v4-flash",
       modelProvider: "deepseek",
-      config: { model_catalog_json: "/private/deepseek.models.json" },
     });
 
     expect(transport.sent.find((message) => message.method === "thread/start")?.params)
       .toMatchObject({
         model: "deepseek-v4-flash",
         modelProvider: "deepseek",
-        config: { model_catalog_json: "/private/deepseek.models.json" },
       });
   });
 
-  it("forks a thread with an explicit model provider and catalog", async () => {
+  it("forks a thread with an explicit model provider", async () => {
     const transport = new FakeTransport();
     const client = new CodexAppServerClient(new JsonRpcClient(transport), {
       sandbox: "workspace-write",
@@ -1525,7 +1475,6 @@ describe("JsonRpcClient", () => {
     const forked = await client.forkThread("thread-1", "/tmp/project", {
       model: "deepseek-v4-flash",
       modelProvider: "deepseek",
-      config: { model_catalog_json: "/private/deepseek.models.json" },
     });
 
     expect(forked).toMatchObject({
@@ -1538,7 +1487,6 @@ describe("JsonRpcClient", () => {
         threadId: "thread-1",
         model: "deepseek-v4-flash",
         modelProvider: "deepseek",
-        config: { model_catalog_json: "/private/deepseek.models.json" },
       });
   });
 

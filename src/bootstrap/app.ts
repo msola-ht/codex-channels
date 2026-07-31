@@ -6,9 +6,15 @@ import {
   checkProjectRulesAtRoot,
   initializeProjectRulesAtRoot,
 } from "../../runtime/project-rules.mjs";
+import {
+  loadManagedModelProvider,
+  loadPrimaryModelProvider,
+  providerAppServerSocketPath,
+} from "../../runtime/model-provider-runtime.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
 import {
   CodexAppServerClient,
+  ProviderRoutingClient,
   gatewayVersion,
   handleApprovalServerRequest,
   loadDeepseekModelOptions,
@@ -57,8 +63,8 @@ import { createProxyFetch } from "./proxy-fetch.js";
 
 export class GatewayApplication {
   private readonly transport: UnixWebSocketTransport;
-  private readonly rpc: JsonRpcClient;
-  private readonly codex: CodexAppServerClient;
+  private readonly codex: ProviderRoutingClient;
+  private readonly primaryProvider: string;
   private readonly inbound: EventBus<RpcNotification>;
   private readonly output: EventBus<OutputEvent>;
   private readonly surfaceModules: SurfaceRuntimeModule[];
@@ -79,6 +85,7 @@ export class GatewayApplication {
   private startupSettled = false;
   private reconnecting: Promise<void> | undefined;
   private reconnectAbort: AbortController | undefined;
+  private readonly disconnectedProviders = new Set<string>();
   private codexUpstreamUserAgent: string | undefined;
   private stopping = false;
 
@@ -88,24 +95,30 @@ export class GatewayApplication {
   ) {
     verifyCodexVersion(config);
     const supplementaryModels = loadDeepseekModelOptions();
-    const modelCatalogsByProvider = new Map<string, string>();
-    for (const model of supplementaryModels) {
-      if (!model.provider || !model.catalogPath) continue;
-      const existing = modelCatalogsByProvider.get(model.provider);
-      if (existing && existing !== model.catalogPath) {
-        throw new Error(`模型 Provider ${model.provider} 配置了多个目录`);
-      }
-      modelCatalogsByProvider.set(model.provider, model.catalogPath);
-    }
     this.transport = new UnixWebSocketTransport(config.codexSocketPath);
-    this.rpc = new JsonRpcClient(this.transport, 60_000, logger);
-    this.codex = new CodexAppServerClient(this.rpc, {
+    const primaryProvider = loadPrimaryModelProvider();
+    this.primaryProvider = primaryProvider;
+    const clients = new Map<string, CodexAppServerClient>();
+    clients.set(primaryProvider, new CodexAppServerClient(
+      new JsonRpcClient(this.transport, 60_000, logger),
+      {
       sandbox: config.codexSandbox,
       ...(config.codexModel ? { model: config.codexModel } : {}),
-      ...(modelCatalogsByProvider.size > 0
-        ? { modelCatalogsByProvider }
-        : {}),
-    });
+      },
+    ));
+    const managedProvider = loadManagedModelProvider();
+    if (managedProvider) {
+      const providerTransport = new UnixWebSocketTransport(
+        providerAppServerSocketPath(config.codexSocketPath, managedProvider.provider),
+      );
+      clients.set(managedProvider.provider, new CodexAppServerClient(
+        new JsonRpcClient(providerTransport, 60_000, logger),
+        {
+          sandbox: config.codexSandbox,
+        },
+      ));
+    }
+    this.codex = new ProviderRoutingClient(primaryProvider, clients);
     this.inbound = new EventBus<RpcNotification>(logger, 2_000);
     this.output = new EventBus<OutputEvent>(logger, 1_000);
     this.bindings = new SqliteBindingStore(config.stateDatabasePath);
@@ -327,19 +340,30 @@ export class GatewayApplication {
       this.removeRpcNotification = this.codex.onNotification((notification) => {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
       });
-      this.removeRpcDisconnect = this.codex.onDisconnect((error) => {
-        if (this.stopping || this.reconnecting) {
+      this.removeRpcDisconnect = this.codex.onDisconnect((error, provider) => {
+        if (this.stopping) {
           return;
         }
-        this.logger.warn({ err: error }, "Codex App Server 连接已断开");
-        this.interactions.cancelAll("Codex App Server 连接已断开");
-        this.core.connectionLost("Codex App Server 连接已断开，正在恢复连接");
+        this.disconnectedProviders.add(provider);
+        this.logger.warn({ err: error, provider }, "Codex App Server 连接已断开");
+        const affectedThreadIds = new Set(
+          this.router.allBindings()
+            .map((binding) => binding.threadId)
+            .filter((threadId) => this.codex.knownProvider(threadId) === provider),
+        );
+        this.interactions.cancelThreads(affectedThreadIds);
+        this.core.connectionLost(
+          `${provider} App Server 连接已断开，正在恢复连接`,
+          affectedThreadIds,
+        );
         this.beginReconnect();
       });
       const initialized = await this.codex.connect();
       this.requireRunning();
       this.codexUpstreamUserAgent = initialized.userAgent;
-      await this.refreshRateLimits();
+      if (this.primaryProvider !== "deepseek") {
+        await this.refreshRateLimits();
+      }
       this.requireRunning();
       if (!(await this.restoreBindings())) {
         throw new Error("恢复 Codex Thread 订阅暂时失败，请由进程管理器重试启动");
@@ -473,6 +497,9 @@ export class GatewayApplication {
   }
 
   private beginReconnect(): void {
+    if (this.reconnecting) {
+      return;
+    }
     const controller = new AbortController();
     this.reconnectAbort = controller;
     const task = this.reconnect(controller.signal)
@@ -493,11 +520,22 @@ export class GatewayApplication {
         if (this.reconnectAbort === controller) {
           this.reconnectAbort = undefined;
         }
+        if (!this.stopping && this.disconnectedProviders.size > 0) {
+          queueMicrotask(() => this.beginReconnect());
+        }
       });
     this.reconnecting = task;
   }
 
   private async reconnect(signal: AbortSignal): Promise<void> {
+    while (this.disconnectedProviders.size > 0 && !this.stopping && !signal.aborted) {
+      const provider = this.disconnectedProviders.values().next().value as string;
+      await this.reconnectProvider(provider, signal);
+      this.disconnectedProviders.delete(provider);
+    }
+  }
+
+  private async reconnectProvider(provider: string, signal: AbortSignal): Promise<void> {
     const maximumAttempts = 12;
     for (
       let attempt = 1;
@@ -515,39 +553,46 @@ export class GatewayApplication {
         return;
       }
       try {
-        const initialized = await this.codex.reconnect();
+        const initialized = await this.codex.reconnectProvider(provider);
         if (this.stopping || signal.aborted) {
-          await this.codex.close();
           return;
         }
         this.codexUpstreamUserAgent = initialized.userAgent;
-        await this.refreshRateLimits();
+        if (provider === "openai") {
+          await this.refreshRateLimits();
+        }
         if (this.stopping || signal.aborted) {
-          await this.codex.close();
           return;
         }
-        if (!(await this.restoreBindings())) {
-          await this.codex.close();
+        if (!(await this.restoreBindings(provider))) {
+          await this.codex.closeProvider(provider);
           throw new Error("仍有 Codex Thread 订阅暂时无法恢复");
         }
         if (this.stopping || signal.aborted) {
-          await this.codex.close();
           return;
         }
         this.logger.info(
-          { attempt, platformFamily: initialized.platformFamily, platformOs: initialized.platformOs },
-          "Codex App Server 已重新连接",
+          {
+            attempt,
+            provider,
+            platformFamily: initialized.platformFamily,
+            platformOs: initialized.platformOs,
+          },
+          "模型 Provider App Server 已重新连接",
         );
         return;
       } catch (error) {
         if (this.stopping || signal.aborted) {
           return;
         }
-        this.logger.warn({ err: error, attempt, maximumAttempts }, "Codex App Server 重连失败");
+        this.logger.warn(
+          { err: error, provider, attempt, maximumAttempts },
+          "模型 Provider App Server 重连失败",
+        );
       }
     }
     if (!this.stopping && !signal.aborted) {
-      throw new Error(`Codex App Server 重连 ${maximumAttempts} 次后仍然失败`);
+      throw new Error(`${provider} App Server 重连 ${maximumAttempts} 次后仍然失败`);
     }
   }
 
@@ -584,13 +629,15 @@ export class GatewayApplication {
     }
   }
 
-  private async restoreBindings(): Promise<boolean> {
+  private async restoreBindings(provider?: string): Promise<boolean> {
     const enabledSurfaces = new Set(
       this.surfaces.map((surface) => surfaceAccountKey(surface.surface, surface.accountId)),
     );
     const failures = await this.router.restoreSubscriptions(
-      (target) => !this.stopping
-        && enabledSurfaces.has(surfaceAccountKey(target.surface, target.accountId)),
+      (target, binding) => !this.stopping
+        && enabledSurfaces.has(surfaceAccountKey(target.surface, target.accountId))
+        && (provider === undefined
+          || this.codex.knownProvider(binding.threadId) === provider),
       (binding, thread) => {
         if (thread.status.type !== "active") {
           return;

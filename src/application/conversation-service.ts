@@ -60,6 +60,7 @@ export interface ConversationSession {
   name: string | null;
   isPinned: boolean;
   status: { type: "notLoaded" | "idle" | "systemError" | "active" };
+  model?: string;
 }
 
 export interface ProjectRulesResult {
@@ -319,14 +320,17 @@ export class ConversationService {
     options: { archived?: boolean; searchTerm?: string } = {},
   ): Promise<ConversationSession[]> {
     const sessions = pinnedFirst(await this.router.list(target, options));
-    return sessions
-      .map(({ id, preview, name, isPinned, status }) => ({
+    return sessions.map(({ id, preview, name, isPinned, status }) => {
+      const model = this.router.modelSettingsForThread(id)?.model;
+      return {
         id,
         preview,
         name,
         isPinned,
         status,
-      }));
+        ...(model ? { model } : {}),
+      };
+    });
   }
 
   async resume(

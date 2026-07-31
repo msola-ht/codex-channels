@@ -625,6 +625,26 @@ describe("Feishu output renderer", () => {
     expect(sessions).not.toContain("21. 会话 21");
   });
 
+  it("annotates session rows with the model when known", () => {
+    const sessions = renderFeishuCommandResult({
+      kind: "sessions",
+      sessions: [{
+        id: "thread-1234567890",
+        name: "会话名称",
+        preview: "预览",
+        isPinned: true,
+        status: { type: "idle" },
+        model: "gpt-test",
+      }],
+      currentThreadId: "thread-1234567890",
+      archived: false,
+    });
+
+    expect(sessions).toContain(
+      "固定 · 会话名称 · 模型：gpt-test · thread-12345 · idle ← 当前",
+    );
+  });
+
   it("renders completed assistant content for the CardKit boundary", () => {
     const event: OutputEvent = {
       type: "text.completed",

@@ -32,6 +32,8 @@ export interface ThreadListOptions {
 
 export class SessionRouter {
   private readonly forceNew = new Set<string>();
+  // 模型设置保留到进程结束：thread/list 不返回 model，
+  // 会话列表需要借助本缓存标注已知模型的会话。
   private readonly modelSettingsByThread = new Map<string, ThreadModelSettings>();
   private readonly contextCompactionItemIdsByThread = new Map<string, readonly string[]>();
 
@@ -108,12 +110,15 @@ export class SessionRouter {
   }
 
   async restoreSubscriptions(
-    shouldRestore: (target: ConversationTarget) => boolean = () => true,
+    shouldRestore: (
+      target: ConversationTarget,
+      binding: ConversationBinding,
+    ) => boolean = () => true,
     onRestored: (binding: ConversationBinding, thread: ThreadSnapshot) => void = () => undefined,
   ): Promise<SubscriptionRestoreFailure[]> {
     const failures: SubscriptionRestoreFailure[] = [];
     for (const binding of this.bindings.list()) {
-      if (!shouldRestore(binding.target)) {
+      if (!shouldRestore(binding.target, binding)) {
         continue;
       }
       let restoredBinding: ConversationBinding;
@@ -135,7 +140,7 @@ export class SessionRouter {
         restoredThread = resumed.thread;
         this.bindings.bind(restoredBinding);
       } catch (error) {
-        if (!shouldRestore(binding.target)) {
+        if (!shouldRestore(binding.target, binding)) {
           return failures;
         }
         const normalized = error instanceof Error ? error : new Error(String(error));
@@ -290,7 +295,6 @@ export class SessionRouter {
       throw error;
     }
     if (replaced && replaced.threadId !== threadId) {
-      this.modelSettingsByThread.delete(replaced.threadId);
       this.contextCompactionItemIdsByThread.delete(replaced.threadId);
     }
     this.forceNew.add(this.key(owner.target));
@@ -363,7 +367,6 @@ export class SessionRouter {
   forgetThread(threadId: string): ConversationTarget | undefined {
     const binding = this.bindings.getByThread(threadId);
     if (binding) {
-      this.modelSettingsByThread.delete(threadId);
       this.contextCompactionItemIdsByThread.delete(threadId);
       this.bindings.unbind(binding.target);
       return binding.target;
@@ -371,11 +374,15 @@ export class SessionRouter {
     return undefined;
   }
 
+  forgetDeletedThread(threadId: string): ConversationTarget | undefined {
+    this.modelSettingsByThread.delete(threadId);
+    return this.forgetThread(threadId);
+  }
+
   async detach(target: ConversationTarget): Promise<void> {
     const current = this.bindings.get(target);
     if (current) {
       await this.codex.unsubscribeThread(current.threadId);
-      this.modelSettingsByThread.delete(current.threadId);
       this.contextCompactionItemIdsByThread.delete(current.threadId);
       this.bindings.unbind(target);
     }

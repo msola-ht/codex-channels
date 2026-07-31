@@ -814,6 +814,10 @@ deepseekCatalogContractTest(
     writeFileSync(
       join(codexHome, "config.toml"),
       [
+        'model = "deepseek-v4-flash"',
+        'model_provider = "deepseek"',
+        `model_catalog_json = ${JSON.stringify(deepseekCatalogPath!)}`,
+        "",
         "[model_providers.deepseek]",
         'name = "deepseek"',
         `base_url = "http://127.0.0.1:${apiAddress.port}/"`,
@@ -869,7 +873,6 @@ deepseekCatalogContractTest(
       const started = await client.startThread(workdir, {
         model: "deepseek-v4-flash",
         modelProvider: "deepseek",
-        config: { model_catalog_json: deepseekCatalogPath! },
       });
       const threadId = started.thread.id;
       let turnCompleted = false;
@@ -893,10 +896,7 @@ deepseekCatalogContractTest(
       await startServer();
       client = new CodexAppServerClient(
         new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
-        {
-          sandbox: "read-only",
-          modelCatalogsByProvider: new Map([["deepseek", deepseekCatalogPath!]]),
-        },
+        { sandbox: "read-only" },
       );
       await client.connect();
 

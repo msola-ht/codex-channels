@@ -7,7 +7,10 @@ import { join } from "node:path";
 import { configEventQueuePath } from "../runtime/config-event-queue.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { resolveProxyEnvironment } from "../runtime/network-proxy.mjs";
-import { loadManagedModelProvider } from "../runtime/model-provider-runtime.mjs";
+import {
+  loadManagedProviderAppServer,
+  providerAppServerSocketPath,
+} from "../runtime/model-provider-runtime.mjs";
 import {
   initializeUserData,
   packageDir,
@@ -70,7 +73,7 @@ const helpText = {
   remote: `用法：codexc remote [--workspace ID] [Codex 参数...]
 
 连接共享 App Server，并把其余参数传给原生 Codex CLI。
-DeepSeek Profile 不能用于 Remote TUI；请先在渠道切换，再运行 codexc remote resume。`,
+切换模式下使用 --profile deepseek 连接隔离的 DeepSeek App Server。`,
   ws: `用法：codexc ws
 
 其他用法：
@@ -280,28 +283,32 @@ function runServiceAppServer(args) {
     runtime.dataDir,
     join(runtime.dataDir, "runtime", "codex-app-server.sock"),
   );
-  const managedProvider = loadManagedModelProvider(runtime.environment);
-  const providerArguments = managedProvider === undefined ? [] : [
-    "-c", `model_providers.${managedProvider.provider}.name=${JSON.stringify(managedProvider.name)}`,
-    "-c", `model_providers.${managedProvider.provider}.base_url=${JSON.stringify(managedProvider.baseUrl)}`,
-    "-c", `model_providers.${managedProvider.provider}.wire_api=${JSON.stringify(managedProvider.wireApi)}`,
-    "-c", `model_providers.${managedProvider.provider}.env_key=${JSON.stringify(managedProvider.childEnvironmentKey)}`,
-    "-c", `model_providers.${managedProvider.provider}.requires_openai_auth=false`,
-  ];
-  const child = spawn(runtime.environment.CODEX_BINARY, [
-    ...providerArguments,
+  const managedProvider = loadManagedProviderAppServer(runtime.environment);
+  const children = [spawn(runtime.environment.CODEX_BINARY, [
     "app-server",
     "--listen",
     `unix://${socketPath}`,
   ], {
     stdio: "inherit",
-    env: managedProvider === undefined ? runtime.environment : {
-      ...runtime.environment,
-      [managedProvider.childEnvironmentKey]: managedProvider.apiKey,
-    },
+    env: runtime.environment,
     cwd: defaultWorkspace.cwd,
-  });
-  forwardChildLifecycle(child);
+  })];
+  if (managedProvider) {
+    children.push(spawn(runtime.environment.CODEX_BINARY, [
+      ...managedProvider.arguments,
+      "app-server",
+      "--listen",
+      `unix://${providerAppServerSocketPath(socketPath, managedProvider.provider)}`,
+    ], {
+      stdio: "inherit",
+      env: {
+        ...runtime.environment,
+        ...managedProvider.childEnvironment,
+      },
+      cwd: defaultWorkspace.cwd,
+    }));
+  }
+  forwardChildrenLifecycle(children);
 }
 
 function workspace(args) {
@@ -525,10 +532,13 @@ function configuredEnvironment() {
   };
 }
 
-function forwardChildLifecycle(child) {
+function forwardChildrenLifecycle(children) {
+  let settled = false;
   const forward = (signal) => {
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill(signal);
+    for (const child of children) {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill(signal);
+      }
     }
   };
   const terminate = () => forward("SIGTERM");
@@ -537,21 +547,28 @@ function forwardChildLifecycle(child) {
     process.off("SIGTERM", terminate);
     process.off("SIGINT", interrupt);
   };
-  process.on("SIGTERM", terminate);
-  process.on("SIGINT", interrupt);
-  child.once("error", (error) => {
+  const finish = (code, signal, error) => {
+    if (settled) return;
+    settled = true;
     cleanup();
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-  });
-  child.once("exit", (code, signal) => {
-    cleanup();
+    forward("SIGTERM");
+    if (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+      return;
+    }
     if (signal) {
       process.kill(process.pid, signal);
       return;
     }
     process.exitCode = code ?? 1;
-  });
+  };
+  process.on("SIGTERM", terminate);
+  process.on("SIGINT", interrupt);
+  for (const child of children) {
+    child.once("error", (error) => finish(1, null, error));
+    child.once("exit", (code, signal) => finish(code, signal));
+  }
 }
 
 function table(value) {

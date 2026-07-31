@@ -9,8 +9,8 @@
   订阅恢复与关闭，并通过 Client 适配器把稳定事件分别转交 Core 与 `session-routing`、把
   Server Request 转交 Approval；未知或畸形 Notification 只记录 method 后忽略，未知或畸形
   高权限请求明确拒绝；受支持版本通过 Client 运行时信息读取，并把显示版本注入 Surface；
-  对当前授权 Workspace 执行有时限的只读 Git 分支查询并注入 Application 状态；把 Setup
-  已校验的第三方 Provider 模型目录按 Provider 注入 Client，供 Thread 冷恢复时精确重载。
+  对当前授权 Workspace 执行有时限的只读 Git 分支查询并注入 Application 状态；按 Setup 管理
+  标记装配主 Client 与可选 Provider Client，并通过 Provider 路由复用其余业务模块。
 - `surface-plugin.ts`：定义编译期内置 Surface 插件、插件上下文和运行时模块契约，并校验插件 ID、
   实际 Surface ID 与账号实例唯一性。
 - `surface-composition.ts`：显式注册 Telegram、飞书和微信内置插件，并保留各平台访问策略、
@@ -37,7 +37,7 @@ Provider 账户能力同样通过编译期显式注册：OpenAI 复用 Codex Cli
 `GatewayApplication` 添加平台专属字段。当前插件层只用于模块化单体内部装配，不扫描目录、
 不动态导入包，也不是外部插件 API。
 未启用 Surface 的持久绑定应保留但不恢复订阅。Gateway 关闭不得主动终止独立运行的 Codex App Server。
-启动、停止和 App Server 重连由同一生命周期协调；恢复订阅时会把 `thread/resume` 返回的活动 Turn 重新归约
-到 Core。停止会中断启动中的 Codex 请求、取消并限时等待重连任务，且不会把主动关闭误判为永久
+启动、停止和 App Server 重连由同一生命周期协调；单 Provider 断线只重连并恢复该侧订阅，
+只取消该侧 Thread 的待处理交互，`thread/resume` 返回的活动 Turn 会重新归约到 Core。停止会中断启动中的 Codex 请求、取消并限时等待重连任务，且不会把主动关闭误判为永久
 Thread 恢复失败。启动失败、启动中停止和正常停止共享同一个组件关闭任务；除中断未完成连接所需
 的 Client 关闭外，Surface、事件总线、Client 收尾和存储不会被组合根重复关闭。

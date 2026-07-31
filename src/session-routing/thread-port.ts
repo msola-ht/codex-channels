@@ -31,7 +31,6 @@ export interface ThreadSession {
 export interface ThreadStartOptions {
   model?: string;
   modelProvider?: string;
-  config?: Record<string, string>;
 }
 
 export interface ThreadQueryOptions {

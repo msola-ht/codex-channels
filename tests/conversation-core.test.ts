@@ -466,6 +466,47 @@ describe("ConversationCore", () => {
     });
   });
 
+  it("isolates a Provider connection loss to its affected Threads", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const openaiTarget = {
+      surface: "telegram" as const,
+      accountId: "default",
+      conversationId: "openai",
+    };
+    const deepseekTarget = {
+      surface: "feishu" as const,
+      accountId: "default",
+      conversationId: "deepseek",
+    };
+    const core = new ConversationCore({
+      allBindings: () => [
+        { target: openaiTarget, threadId: "thread-openai" },
+        { target: deepseekTarget, threadId: "thread-deepseek" },
+      ],
+      targetForThread: () => undefined,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+    core.markTurnStarted(openaiTarget, "thread-openai", "turn-openai");
+    core.markTurnStarted(deepseekTarget, "thread-deepseek", "turn-deepseek");
+
+    core.connectionLost("DeepSeek 连接已断开", new Set(["thread-deepseek"]));
+    await output.close();
+
+    expect(core.activeTurn(openaiTarget)?.turnId).toBe("turn-openai");
+    expect(core.activeTurn(deepseekTarget)).toBeUndefined();
+    expect(events.filter((event) => event.type === "connection.lost")).toEqual([{
+      type: "connection.lost",
+      target: deepseekTarget,
+      threadId: "thread-deepseek",
+      message: "DeepSeek 连接已断开",
+    }]);
+  });
+
   it("publishes sanitized operation snapshots for command and file items", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const events: OutputEvent[] = [];

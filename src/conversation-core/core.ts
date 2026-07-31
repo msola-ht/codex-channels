@@ -113,7 +113,32 @@ export class ConversationCore {
     return this.artifactsByThread.get(threadId);
   }
 
-  connectionLost(message: string): void {
+  connectionLost(message: string, affectedThreadIds?: ReadonlySet<string>): void {
+    if (affectedThreadIds) {
+      for (const [key, active] of this.activeByConversation) {
+        if (affectedThreadIds.has(active.threadId)) {
+          this.activeByConversation.delete(key);
+        }
+      }
+      for (const threadId of affectedThreadIds) {
+        this.usageByThread.delete(threadId);
+        this.usageTurnByThread.delete(threadId);
+        this.goalsByThread.delete(threadId);
+        this.contextCompactionItemIdsByThread.delete(threadId);
+        this.artifactsByThread.delete(threadId);
+      }
+      for (const binding of this.router.allBindings()) {
+        if (affectedThreadIds.has(binding.threadId)) {
+          this.publish({
+            type: "connection.lost",
+            target: binding.target,
+            threadId: binding.threadId,
+            message,
+          });
+        }
+      }
+      return;
+    }
     this.activeByConversation.clear();
     this.errorsByTurn.clear();
     this.usageByThread.clear();

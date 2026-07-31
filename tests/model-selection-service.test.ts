@@ -49,6 +49,7 @@ function createService(settings?: {
   const codex = {
     listModels: async () => models,
     writeDefaultFastMode: async () => undefined,
+    readDefaultServiceTier: async () => "default",
   } satisfies ModelSelectionPort;
   let currentSettings = settings;
   const router = {
@@ -133,6 +134,7 @@ describe("ModelSelectionService", () => {
     const codex = {
       listModels: async () => models,
       writeDefaultFastMode,
+      readDefaultServiceTier: async () => "default",
     } satisfies ModelSelectionPort;
     const router = {
       current: () => ({
@@ -209,6 +211,7 @@ describe("ModelSelectionService", () => {
     const codex = {
       listModels: async () => tierModels,
       writeDefaultFastMode: async () => undefined,
+      readDefaultServiceTier: async () => "default",
     } satisfies ModelSelectionPort;
     const router = {
       modelSettings: () => ({
@@ -234,6 +237,7 @@ describe("ModelSelectionService", () => {
     const codex = {
       listModels: async () => models,
       writeDefaultFastMode: async () => undefined,
+      readDefaultServiceTier: async () => "default",
     } satisfies ModelSelectionPort;
     const router = {
       current: () => ({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }),
@@ -249,7 +253,6 @@ describe("ModelSelectionService", () => {
     const deepseek = {
       ...model("deepseek-v4-flash", ["low", "high"], "high"),
       provider: "deepseek",
-      catalogPath: "/private/deepseek.models.json",
     };
     const service = new ModelSelectionService(codex, router, undefined, [deepseek]);
 
@@ -261,7 +264,6 @@ describe("ModelSelectionService", () => {
     expect(service.threadStartOptions(target)).toEqual({
       model: "deepseek-v4-flash",
       modelProvider: "deepseek",
-      config: { model_catalog_json: "/private/deepseek.models.json" },
     });
   });
 
@@ -271,6 +273,7 @@ describe("ModelSelectionService", () => {
     const codex = {
       listModels: async () => models,
       writeDefaultFastMode: async () => undefined,
+      readDefaultServiceTier: async () => "default",
     } satisfies ModelSelectionPort;
     const router = {
       current: () => undefined,
@@ -281,7 +284,6 @@ describe("ModelSelectionService", () => {
     const deepseek = {
       ...model("deepseek-v4-flash", ["low", "high"], "high"),
       provider: "deepseek",
-      catalogPath: "/private/deepseek.models.json",
     };
     const service = new ModelSelectionService(codex, router, undefined, [deepseek]);
 
@@ -294,14 +296,17 @@ describe("ModelSelectionService", () => {
   it("starts a clean OpenAI Thread when switching back from a third-party provider", async () => {
     const newSession = vi.fn().mockResolvedValue(undefined);
     const fork = vi.fn().mockResolvedValue(undefined);
+    const readDefaultServiceTier = vi.fn().mockResolvedValue("fast");
     const codex = {
       listModels: async () => models,
       writeDefaultFastMode: async () => undefined,
-    } satisfies ModelSelectionPort;
+      readDefaultServiceTier,
+    } as unknown as ModelSelectionPort;
     const router = {
       current: () => ({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }),
       fork,
       newSession,
+      workspace: () => ({ id: "main", name: "main", cwd: "/workspace" }),
       modelSettings: () => ({
         model: "deepseek-v4-flash",
         modelProvider: "deepseek",
@@ -311,10 +316,16 @@ describe("ModelSelectionService", () => {
     } as unknown as SessionRouter;
     const service = new ModelSelectionService(codex, router);
 
-    await service.selectModel(target, "gpt-main");
+    const state = await service.selectModel(target, "gpt-main");
 
     expect(newSession).toHaveBeenCalledOnce();
     expect(fork).not.toHaveBeenCalled();
+    expect(readDefaultServiceTier).toHaveBeenCalledWith("/workspace", "openai");
+    expect(state).toMatchObject({
+      model: "gpt-main",
+      serviceTier: "priority",
+      serviceTierPending: true,
+    });
   });
 
   it("shows but rejects an unavailable provider model", async () => {
@@ -322,6 +333,7 @@ describe("ModelSelectionService", () => {
     const codex = {
       listModels: async () => models,
       writeDefaultFastMode: async () => undefined,
+      readDefaultServiceTier: async () => "default",
     } satisfies ModelSelectionPort;
     const router = {
       newSession,

@@ -109,7 +109,7 @@ export async function runDeepseekSetup({
     }
     output.write(`模型目录已从官方脚本下载：${catalogPath}\n`);
     output.write(mode === "switching"
-      ? "原生 Codex 使用 OpenAI：codex；使用 DeepSeek：codex --profile deepseek\n"
+      ? "原生 Codex 使用 OpenAI：codex；使用 DeepSeek：codex --profile deepseek\n共享 TUI：codexc remote；DeepSeek 共享 TUI：codexc remote --profile deepseek\n"
       : "原生 Codex 和 Gateway 将默认使用 deepseek-v4-flash。\n");
     output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
     return {
@@ -232,7 +232,11 @@ async function buildCodexConfig({
     return {
       configContent: originalContent,
       profileContent: stringify(profile),
-      gatewayProfileContent: stringify({ version: 1, provider: providerId }),
+      gatewayProfileContent: stringify({
+        version: 1,
+        provider: providerId,
+        mode: "switching",
+      }),
     };
   }
 
@@ -259,7 +263,11 @@ async function buildCodexConfig({
   return {
     configContent: stringify(document),
     profileContent: undefined,
-    gatewayProfileContent: undefined,
+    gatewayProfileContent: stringify({
+      version: 1,
+      provider: providerId,
+      mode: "exclusive",
+    }),
   };
 }
 

@@ -40,7 +40,6 @@ export function loadDeepseekModelOptions(
     }
     return [{
       provider: "deepseek",
-      catalogPath,
       available: model.slug === supportedSlug,
       ...(model.slug === supportedSlug
         ? {}

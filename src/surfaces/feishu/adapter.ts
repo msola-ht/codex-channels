@@ -793,7 +793,7 @@ function renderCommandCenterChoices(
           input: "",
         },
         ...result.sessions.map((session) => ({
-          label: `${session.id === result.currentThreadId ? "✓ " : ""}${(session.name ?? session.preview) || "未命名"}`,
+          label: `${session.id === result.currentThreadId ? "✓ " : ""}${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${session.model}` : ""}`,
           action: "resume" as const,
           input: session.id,
         })),
@@ -814,7 +814,7 @@ function renderCommandCenterChoices(
           input: "",
         },
         ...result.sessions.map((session) => ({
-          label: (session.name ?? session.preview) || "未命名",
+          label: `${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${session.model}` : ""}`,
           action: "unarchive" as const,
           input: session.id,
         })),

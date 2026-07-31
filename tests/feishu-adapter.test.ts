@@ -428,6 +428,7 @@ describe("Feishu conversation adapter", () => {
       preview: "",
       cwd: "/workspace",
       updatedAt: 1,
+      model: "gpt-test",
     }];
     const archived = [{
       id: "thread-archived",
@@ -435,6 +436,7 @@ describe("Feishu conversation adapter", () => {
       preview: "",
       cwd: "/workspace",
       updatedAt: 1,
+      model: "gpt-test",
     }];
     const adapter = new FeishuConversationAdapter(
       {
@@ -464,7 +466,7 @@ describe("Feishu conversation adapter", () => {
           input: "",
         },
         {
-          label: "✓ 当前会话",
+          label: "✓ 当前会话 · 模型：gpt-test",
           action: "resume",
           input: "thread-active",
         },
@@ -483,7 +485,7 @@ describe("Feishu conversation adapter", () => {
           input: "",
         },
         {
-          label: "旧会话",
+          label: "旧会话 · 模型：gpt-test",
           action: "unarchive",
           input: "thread-archived",
         },

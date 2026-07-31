@@ -94,19 +94,42 @@ describe("ThreadStateSynchronizer", () => {
     expect(router.modelSettings(target)?.modelProvider).toBe("deepseek");
   });
 
-  it.each([
-    "thread.archived",
-    "thread.deleted",
-  ] as const)("forgets a bound Thread after %s", (type) => {
+  it("forgets a bound archived Thread while retaining its known model", () => {
     const router = createBoundRouter();
+    router.updateModelSettings("thread-1", {
+      model: "gpt-5.6-sol",
+      effort: "high",
+      serviceTier: "default",
+      collaborationMode: "default",
+    });
     const synchronizer = new ThreadStateSynchronizer(router);
 
     synchronizer.handle({
-      type,
+      type: "thread.archived",
       threadId: "thread-1",
     });
 
     expect(router.current(target)).toBeUndefined();
+    expect(router.modelSettingsForThread("thread-1")?.model).toBe("gpt-5.6-sol");
+  });
+
+  it("forgets a deleted Thread and clears its known model", () => {
+    const router = createBoundRouter();
+    router.updateModelSettings("thread-1", {
+      model: "gpt-5.6-sol",
+      effort: "high",
+      serviceTier: "default",
+      collaborationMode: "default",
+    });
+    const synchronizer = new ThreadStateSynchronizer(router);
+
+    synchronizer.handle({
+      type: "thread.deleted",
+      threadId: "thread-1",
+    });
+
+    expect(router.current(target)).toBeUndefined();
+    expect(router.modelSettingsForThread("thread-1")).toBeUndefined();
   });
 
   it("keeps a bound Thread after App Server unloads it from memory", () => {

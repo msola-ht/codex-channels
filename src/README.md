@@ -22,7 +22,7 @@
 `session-routing` 拥有，`codex-client` 负责把固定版本官方响应映射到该边界；Routing 不反向依赖
 Client 或生成协议。Turn、Review 和 Goal 的执行端口由 `application` 拥有；Goal 的稳定状态类型
 由 `conversation-core` 统一定义，供请求结果和通知归约共同使用，Client 只在适配边界构造官方输入
-和解释响应。模型目录、思考强度和服务层级的稳定类型同样由
+和解释响应。模型信息、思考强度和服务层级的稳定类型同样由
 `application` 拥有，Client 负责裁剪官方模型目录并封装 Fast 默认值配置。Provider 账户能力
 由 Application 的编译期注册窄端口承接：OpenAI 通过 Client 选择官方多桶或兼容单桶响应，
 DeepSeek 由 Bootstrap 具体适配器查询官方余额；未知 Provider 不回退到 OpenAI。直接安装 Skill
@@ -30,6 +30,10 @@ DeepSeek 由 Bootstrap 具体适配器查询官方余额；未知 Provider 不�
 实时解析且通过校验的 Skill 引用交给 Application，Surface 不接触本机路径。MCP 状态查询
 已裁剪为按当前 Thread 获取的名称、认证状态和工具数量，Plugin 查询只输出已安装项的名称与
 启用状态，Permission Profile 查询只输出稳定的目录选项。
+
+切换模式复用完整 `CodexAppServerClient`，由 Provider 路由层按官方 Thread `modelProvider` 选择
+OpenAI 主 App Server 或独立 Provider App Server；Session Routing、Application、Core、Approval、
+Storage 和 Surface 不复制实现。固定模式仍只有一个由基础配置决定 Provider 的主实例。
 
 Client 把 Thread 路由通知与 Turn、Item、Goal、Token、账户、额度、MCP 和 warning 等通知转换为
 稳定事件；`conversation-core` 不解析原始协议。Client 同样解码和编码五类 Server Request，

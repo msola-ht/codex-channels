@@ -19,8 +19,10 @@ export class ThreadStateSynchronizer {
         this.router.updateModelSettings(event.threadId, event.settings);
         return;
       case "thread.archived":
-      case "thread.deleted":
         this.router.forgetThread(event.threadId);
+        return;
+      case "thread.deleted":
+        this.router.forgetDeletedThread(event.threadId);
         return;
       case "thread.closed":
         return;

@@ -88,6 +88,13 @@ export class ModelSelectionService {
     const current = this.resolveState(target, models);
     const selectedProvider = selected.provider ?? "openai";
     const providerChanged = selectedProvider !== current.modelProvider;
+    const selectedFastTier = fastServiceTierId(selected);
+    const providerDefaultTier = providerChanged && selectedFastTier
+      ? await this.codex.readDefaultServiceTier(
+          this.router.workspace(target).cwd,
+          selectedProvider,
+        )
+      : undefined;
     if (providerChanged) {
       await this.router.newSession(target);
     }
@@ -95,19 +102,28 @@ export class ModelSelectionService {
     const effort = current.effort && supported.includes(current.effort)
       ? current.effort
       : selected.defaultReasoningEffort;
-    const pending = this.pendingByConversation.get(this.key(target));
+    const pending = { ...this.pendingByConversation.get(this.key(target)) };
+    if (providerChanged) {
+      delete pending.serviceTier;
+    }
     const currentModel = current.models.find((candidate) => candidate.model === current.model);
     const currentFast = isFastServiceTier(current.serviceTier, currentModel);
-    const selectedFastTier = fastServiceTierId(selected);
     this.pendingByConversation.set(this.key(target), {
       ...pending,
       model: selected.model,
       ...(providerChanged ? { modelProvider: selectedProvider } : {}),
-      ...(selected.catalogPath ? { modelCatalogPath: selected.catalogPath } : {}),
       effort,
-      ...(currentFast
-        ? { serviceTier: selectedFastTier ?? standardServiceTierRequestValue }
-        : {}),
+      ...(providerChanged
+        ? selectedFastTier
+          ? {
+              serviceTier: isFastServiceTier(providerDefaultTier ?? null, selected)
+                ? selectedFastTier
+                : standardServiceTierRequestValue,
+            }
+          : {}
+        : currentFast
+          ? { serviceTier: selectedFastTier ?? standardServiceTierRequestValue }
+          : {}),
     });
     return this.resolveState(target, models);
   }
@@ -175,9 +191,6 @@ export class ModelSelectionService {
     return {
       ...(pending?.model ? { model: pending.model } : {}),
       ...(pending?.modelProvider ? { modelProvider: pending.modelProvider } : {}),
-      ...(pending?.modelCatalogPath
-        ? { config: { model_catalog_json: pending.modelCatalogPath } }
-        : {}),
     };
   }
 

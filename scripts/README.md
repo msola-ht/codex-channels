@@ -35,9 +35,9 @@
 
 ## 开发与协议
 
-- `dev-all.mjs`：开发模式下复用或启动 App Server，再启动 Gateway。
-- `codex-remote.mjs`：为原生 `codex --remote` 选择 Socket 和工作目录；明确拒绝官方 Remote 模式
-  无法正确传递 Provider 的 DeepSeek Profile，并提示通过渠道创建 DeepSeek Thread 后恢复。
+- `dev-all.mjs`：开发模式下复用或启动主 App Server 与已配置的隔离 Provider App Server，再启动 Gateway。
+- `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下消费
+  `--profile deepseek` 选择隔离实例，不把 Profile 参数错误传入已经运行的 Remote App Server。
 - `prepare-codex-upgrade.mjs`：在干净工作区校验精确目标 CLI，调用现有协议生成和版本同步，
   完成基础一致性检查后把差异交给 Codex 审查。
 - `codex-release-api.mjs`：为稳定版和 Alpha 解析器调用 GitHub Release API；请求或响应正文
@@ -119,7 +119,7 @@
 - `doctor.mjs`：检查 npm 包、Node、Codex CLI、当前 TOML 配置、Workspace、飞书凭据/Bot 身份、
   微信配置与 Bot 凭据、消息游标检查点、允许用户的加密回复上下文覆盖数和最近保存时间，
   以及微信运行时启用状态；Doctor 不调用 `getupdates`，不显示 Token、`context_token` 或游标；
-  Unix WebSocket、`initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，不输出
+  主 Unix WebSocket、已配置 Provider Socket、`initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，不输出
   完整 User-Agent、飞书上游响应或敏感配置内容。
 - `install-launchd.mjs`：渲染并安装 launchd plist；代理由 CLI 服务入口在每次启动时解析。
 - `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载两个 launchd 服务；启停、

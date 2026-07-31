@@ -187,6 +187,27 @@ export class InteractionRouter implements InteractionPort {
     return false;
   }
 
+  cancelThreads(threadIds: ReadonlySet<string>): void {
+    for (const queued of [...this.pendingByRequestId.values()]) {
+      if (!threadIds.has(queued.request.threadId)) {
+        continue;
+      }
+      const queue = this.queues.get(queued.queueKey);
+      this.pendingByRequestId.delete(queued.request.requestId);
+      if (queue?.active === queued) {
+        delete queue.active;
+        queued.port.resolved?.(queued.request.requestId);
+      } else if (queue) {
+        const index = queue.entries.indexOf(queued);
+        if (index >= 0) queue.entries.splice(index, 1);
+      }
+      queued.resolve(safeInteractionDecision(queued.request));
+      if (queue) {
+        this.dispatchNext(queued.queueKey, queue);
+      }
+    }
+  }
+
   cancelAll(outcome?: string): void {
     for (const queue of this.queues.values()) {
       for (const queued of queue.entries.splice(0)) {

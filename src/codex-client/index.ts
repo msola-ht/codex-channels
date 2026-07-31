@@ -3,6 +3,10 @@ export {
   type ThreadDefaults,
 } from "./client.js";
 export {
+  ProviderRoutingClient,
+  type ProviderClientInstance,
+} from "./provider-routing-client.js";
+export {
   JsonRpcClient,
   JsonRpcError,
   type ProtocolLogger,

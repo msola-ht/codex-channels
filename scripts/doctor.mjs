@@ -14,6 +14,10 @@ import {
   readGatewayConfig,
   validateGatewayConfigDocument,
 } from "../runtime/gateway-config.mjs";
+import {
+  loadManagedModelProvider,
+  providerAppServerSocketPath,
+} from "../runtime/model-provider-runtime.mjs";
 import { validateFeishuApplication } from "./feishu-application.mjs";
 import { packageDir, resolveConfiguredPath, runtimeConfig, userDataDir } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
@@ -225,21 +229,36 @@ if (document) {
     dataDir,
     join(dataDir, "runtime", "codex-app-server.sock"),
   );
-  if (!existsSync(socketPath)) {
-    record("Codex App Server", false, `Socket 不存在：${socketPath}`);
-  } else {
-    try {
-      const appServerUserAgent = await initializeUnixWebSocket(socketPath);
-      record("Codex App Server", true, `initialize 握手通过：${socketPath}`);
-      const actualVersion = appServerVersion(appServerUserAgent);
-      record(
-        "App Server 版本",
-        actualVersion === requiredAppServerVersion,
-        `${actualVersion ?? "无法识别"}（要求 ${requiredAppServerVersion}）`,
+  await checkAppServer("Codex App Server", socketPath);
+  try {
+    const managedProvider = loadManagedModelProvider(process.env);
+    if (managedProvider) {
+      await checkAppServer(
+        `${managedProvider.provider} App Server`,
+        providerAppServerSocketPath(socketPath, managedProvider.provider),
       );
-    } catch (error) {
-      record("Codex App Server", false, `连接失败：${errorMessage(error)}`);
     }
+  } catch (error) {
+    record("模型 Provider 配置", false, errorMessage(error));
+  }
+}
+
+async function checkAppServer(label, socketPath) {
+  if (!existsSync(socketPath)) {
+    record(label, false, `Socket 不存在：${socketPath}`);
+    return;
+  }
+  try {
+    const appServerUserAgent = await initializeUnixWebSocket(socketPath);
+    record(label, true, `initialize 握手通过：${socketPath}`);
+    const actualVersion = appServerVersion(appServerUserAgent);
+    record(
+      label === "Codex App Server" ? "App Server 版本" : `${label} 版本`,
+      actualVersion === requiredAppServerVersion,
+      `${actualVersion ?? "无法识别"}（要求 ${requiredAppServerVersion}）`,
+    );
+  } catch (error) {
+    record(label, false, `连接失败：${errorMessage(error)}`);
   }
 }
 

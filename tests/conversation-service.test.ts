@@ -1262,6 +1262,7 @@ describe("ConversationService model selection", () => {
         ],
         resume,
         targetForThread: () => undefined,
+        modelSettingsForThread: () => undefined,
       } as unknown as SessionRouter,
       { activeTurn: () => undefined } as unknown as ConversationCore,
       { clear: vi.fn() } as unknown as ModelSelectionService,
@@ -1277,6 +1278,49 @@ describe("ConversationService model selection", () => {
       threadId: "pinned-old",
     });
     expect(resume).toHaveBeenCalledWith(target, "pinned-old");
+  });
+
+  it("annotates sessions with the model the router knows", async () => {
+    const service = new ConversationService(
+      turnPort(),
+      {
+        list: async () => [{
+          id: "known-model",
+          sessionId: "session-known",
+          modelProvider: "openai",
+          preview: "已知模型",
+          name: null,
+          isPinned: false,
+          status: { type: "idle" as const },
+          cwd: main.cwd,
+          source: "cli" as const,
+          activeTurnId: null,
+        }, {
+          id: "unknown-model",
+          sessionId: "session-unknown",
+          modelProvider: "openai",
+          preview: "未知模型",
+          name: null,
+          isPinned: false,
+          status: { type: "idle" as const },
+          cwd: main.cwd,
+          source: "cli" as const,
+          activeTurnId: null,
+        }],
+        modelSettingsForThread: (threadId: string) =>
+          threadId === "known-model"
+            ? { model: "gpt-test", effort: null, serviceTier: null, collaborationMode: "default" }
+            : undefined,
+      } as unknown as SessionRouter,
+      { activeTurn: () => undefined } as unknown as ConversationCore,
+      { clear: vi.fn() } as unknown as ModelSelectionService,
+      queryPort(),
+    );
+
+    await expect(service.listSessions(target)).resolves.toEqual([
+      { id: "known-model", preview: "已知模型", name: null, isPinned: false, status: { type: "idle" }, model: "gpt-test" },
+      { id: "unknown-model", preview: "未知模型", name: null, isPinned: false, status: { type: "idle" } },
+    ]);
   });
 
   it("keeps pending settings when selecting the same workspace", async () => {

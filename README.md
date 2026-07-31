@@ -8,7 +8,8 @@
 
 在 Telegram、飞书或微信中使用本机 Codex。
 
-Gateway 与原生 Codex TUI 连接同一个 Codex App Server，因此会话、Thread 和运行状态可以在聊天客户端与终端之间继续使用。
+Gateway 与原生 Codex TUI 按 Provider 连接同一个 Codex App Server，因此对应 Provider 的会话、
+Thread 和运行状态可以在聊天客户端与终端之间继续使用。
 
 `main` 开发基线：`0.146.0`（尚未发布）
 当前正式版：`0.145.0`
@@ -111,17 +112,19 @@ Setup 从 DeepSeek 官方安装脚本下载并提取模型目录，校验后写�
 
 切换模式把模型、Provider 和 API Key 都写入权限为 `0600` 的官方新版 Profile 文件
 `~/.codex/deepseek.config.toml`，并写入一个不含凭据的 Gateway 管理标记；不会改写 OpenAI 基础配置、
-默认模型或登录凭据。Codex 0.146 的 App Server 不支持 `--profile`，因此服务入口只在子进程启动时
-从该私有 Profile 读取 Key 到进程环境，并通过非敏感配置覆盖登记 Provider；Key 不进入命令行、
+默认模型或登录凭据。后台服务在同一个既有服务目标内监管两个隔离的 App Server：OpenAI 主实例
+保持原生登录和 TUI 共享；服务入口从私有 Profile 校验 DeepSeek 配置，再通过 App Server 支持的
+进程级 `-c` 覆盖加载模型目录和 Provider，并只在子进程环境中提供 Key。Key 不进入命令行、
 服务定义或日志。固定模式则按其含义直接在基础配置中注册并选中 DeepSeek，同时不强制改变 Codex
 的登录方式。首次修改前，原配置及原有同名 Profile 会备份到
 `~/.codex/backup-codex-connect-deepseek/`。切换到另一 Provider 时不能原地修改正在
 使用的 Thread；渠道会保留并解绑当前 Thread，在下一条消息中为所选 Provider 新建 Thread，
 不复制可能包含 Provider 专属 reasoning、工具结果或加密内容的历史。旧 Thread 可通过 `/resume`
 恢复；同一 Provider 内切换模型仍在当前 Thread 的下一次 Turn 生效。
-Setup 完成或恢复后运行 `codexc service restart all`，让 App Server 重新读取 Provider，并让 Gateway
-重新载入下载的模型目录。之后 Gateway 在恢复绑定或执行 `/resume` 时会先读取 Thread 状态；仅当
-App Server 已卸载该 DeepSeek Thread 时重新附带该目录，OpenAI 与仍在内存中的 Thread 不受影响。
+Setup 完成或恢复后运行 `codexc service restart all`，让服务入口按当前模式重建 App Server，并让
+Gateway 重新连接。Gateway 按 Thread 的官方 `modelProvider` 把新建、恢复、Turn、Review、Goal、
+MCP 和审批请求路由到对应实例；模型目录由对应 App Server 启动配置一次性加载，不再依赖无效的
+Thread 级冷恢复覆盖。任一 Provider 单独断线时，只重连并恢复该侧绑定。
 
 TUI 和 `/status` 中的 Token、上下文窗口、缓存和压缩次数始终来自当前 Thread，适用于 OpenAI
 与第三方 Provider；它们不是账户余额。OpenAI 的 Fast 与周限不会显示在 DeepSeek 或未知 Provider
@@ -148,13 +151,14 @@ codexc ws remove <序号|ID|名称>      # 删除注册，不删除项目文件
 cd /absolute/path/to/project
 codexc remote
 codexc remote resume
+codexc remote --profile deepseek resume   # 切换模式：继续 DeepSeek Thread
 ```
 
-原生 TUI 与聊天客户端共享 App Server 和 Thread。
-Codex 0.146 的 Remote TUI 不会把本地 Profile 的 Provider 传给共享 App Server，因此
-`codexc remote --profile deepseek` 会被明确拒绝。需要共享 DeepSeek Thread 时，先在任一渠道通过
-`/model` 切换，再运行 `codexc remote resume`；不共享渠道 Thread 时直接运行
-`codex --profile deepseek`。
+原生 TUI 与聊天客户端共享对应 Provider 的 App Server 和 Thread。
+切换模式下，`codexc remote` 连接 OpenAI 主实例，`codexc remote --profile deepseek` 连接隔离的
+DeepSeek 实例；两者都可使用 `resume` 恢复各自 Provider 的渠道 Thread。独立、不共享 Gateway
+Thread 的 TUI 仍可直接运行 `codex --profile deepseek`。固定模式只有一个 DeepSeek 主实例，直接
+使用 `codexc remote`。
 
 ### 管理后台服务
 

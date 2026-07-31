@@ -52,10 +52,12 @@
   `plugin/installed`，不得改用 `plugin/list` 加载市场目录；Permission Profile 按 CWD 分页，
   仅用于只读目录展示。Thread 列表显式传空 `modelProviders` 获取当前 Workspace 的全部 Provider，
   供跨 Provider 会话展示和冷恢复定位使用。
-  新 Thread 和 Fork 可显式携带官方 `modelProvider` 与受控 `model_catalog_json`；冷恢复 Thread
-  时先读取官方 `modelProvider`，只为已登记的第三方 Provider 重新附带对应目录。已有 Thread
+  新 Thread 和 Fork 可显式携带官方 `modelProvider`。已有 Thread
   不在 Turn 覆盖中更换 Provider。Application 跨 Provider 选择时新建 Thread；`thread/fork`
   只用于用户显式创建同一 Provider 的历史分支，不承担跨 Provider 历史转换。
+- `provider-routing-client.ts`：复用多个完整 Client 实例，按 Thread 的官方 `modelProvider` 路由
+  生命周期、Turn、Review、Goal 和 MCP；合并各实例的进程内状态，隔离 Server Request ID，
+  并让单 Provider 重连只恢复该侧 Thread。模型目录由对应 App Server 启动配置持有。
 
 本模块不得调用 Telegram API、生成平台文案或保存业务绑定。协议字段必须来自
 `codex-protocol`；无参数请求和通知不得自行补空对象，写操作不得在过载或断线后盲目重试。

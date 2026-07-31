@@ -90,7 +90,6 @@ describe("SessionRouter", () => {
     await router.fork(target, {
       model: "deepseek-v4-flash",
       modelProvider: "deepseek",
-      config: { model_catalog_json: "/private/deepseek.models.json" },
     });
 
     expect(calls).toEqual([{
@@ -99,7 +98,6 @@ describe("SessionRouter", () => {
       options: {
         model: "deepseek-v4-flash",
         modelProvider: "deepseek",
-        config: { model_catalog_json: "/private/deepseek.models.json" },
       },
     }]);
     expect(unsubscribed).toEqual(["original"]);
@@ -279,6 +277,27 @@ describe("SessionRouter", () => {
     await router.ensure(target);
 
     expect(unsubscribed).toEqual(["new"]);
+  });
+
+  it("keeps model settings after detaching so session lists can annotate them", async () => {
+    const client = threadPort({
+      listThreads: async () => [],
+      startThread: async () => session(thread("new", { type: "idle" })),
+      unsubscribeThread: async () => undefined,
+    });
+    const router = new SessionRouter(client, new MemoryBindingStore(), registry);
+    await router.ensure(target);
+
+    await router.newSession(target);
+
+    expect(router.current(target)).toBeUndefined();
+    expect(router.modelSettingsForThread("new")).toEqual({
+      model: "gpt-main",
+      modelProvider: "openai",
+      effort: "medium",
+      serviceTier: "default",
+      collaborationMode: "default",
+    });
   });
 
   it("restores bound thread model, effort and Fast state after Gateway reconnect", async () => {
