@@ -63,7 +63,10 @@ export class FeishuImageStore implements FeishuImagePort {
     if (this.closed) {
       return Promise.reject(new Error("飞书图片暂存器已经关闭"));
     }
-    this.startPromise ??= this.storage.start();
+    this.startPromise ??= this.storage.start().catch((error: unknown) => {
+      this.startPromise = undefined;
+      throw error;
+    });
     return this.startPromise;
   }
 

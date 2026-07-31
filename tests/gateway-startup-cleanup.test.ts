@@ -1,5 +1,5 @@
 import pino from "pino";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { AccountRateLimits } from "../src/application/index.js";
 import { GatewayApplication } from "../src/bootstrap/app.js";
@@ -22,6 +22,36 @@ function emptyRateLimits(): AccountRateLimits {
 }
 
 describe("GatewayApplication startup cleanup", () => {
+  it("delegates a Surface fatal error without stopping the Gateway", () => {
+    const reportFatal = vi.fn();
+    const application = Object.create(
+      GatewayApplication.prototype,
+    ) as unknown as Record<string, unknown>;
+    Object.assign(application, {
+      stopping: false,
+      surfaceManager: { reportFatal },
+    });
+    const handleSurfaceFatal = Reflect.get(
+      GatewayApplication.prototype,
+      "handleSurfaceFatal",
+    ) as (
+      this: GatewayApplication,
+      surface: string,
+      accountId: string,
+      error: Error,
+    ) => void;
+    const error = new Error("offline");
+
+    handleSurfaceFatal.call(
+      application as unknown as GatewayApplication,
+      "telegram",
+      "default",
+      error,
+    );
+
+    expect(reportFatal).toHaveBeenCalledWith("telegram", "default", error);
+  });
+
   it("closes every initialized component and preserves the startup error", async () => {
     const calls: string[] = [];
     const application = Object.create(

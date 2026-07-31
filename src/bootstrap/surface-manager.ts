@@ -1,6 +1,7 @@
 import type { Logger } from "pino";
 
 import {
+  isCriticalOutputEvent,
   surfaceAccountKey,
   type OutputEvent,
 } from "../conversation-core/index.js";
@@ -10,12 +11,36 @@ import type {
   SurfaceConfigurationChange,
 } from "../surfaces/index.js";
 
+const defaultRetryDelaysMs = [1_000, 2_000, 5_000, 10_000, 30_000, 60_000] as const;
+
+interface SurfaceRuntime {
+  state: "idle" | "starting" | "running" | "retrying";
+  retryAttempt: number;
+  retryTimer?: NodeJS.Timeout;
+  pendingCriticalOutput: OutputEvent[];
+}
+
+export interface SurfaceManagerOptions {
+  retryDelaysMs?: readonly number[];
+  maximumPendingCriticalOutput?: number;
+  setInteractionAvailable?(
+    surface: string,
+    accountId: string,
+    available: boolean,
+    outcome?: string,
+  ): void;
+}
+
 export class SurfaceManager {
-  private readonly started: SurfaceAdapter[] = [];
+  private readonly attempted = new Set<SurfaceAdapter>();
   private readonly active = new Set<SurfaceAdapter>();
   private readonly surfacesByAccount = new Map<string, SurfaceAdapter>();
+  private readonly runtimeBySurface = new Map<SurfaceAdapter, SurfaceRuntime>();
+  private readonly retryDelaysMs: readonly number[];
+  private readonly maximumPendingCriticalOutput: number;
   private removeOutputSubscription: (() => void) | undefined;
   private acceptingOutput = true;
+  private stopping = false;
 
   constructor(
     private readonly surfaces: readonly SurfaceAdapter[],
@@ -24,13 +49,24 @@ export class SurfaceManager {
     private readonly currentGitBranch?: (
       target: OutputEvent["target"],
     ) => string | undefined,
+    private readonly options: SurfaceManagerOptions = {},
   ) {
+    this.retryDelaysMs = options.retryDelaysMs?.length
+      ? options.retryDelaysMs
+      : defaultRetryDelaysMs;
+    this.maximumPendingCriticalOutput = options.maximumPendingCriticalOutput
+      ?? 100;
     for (const surface of surfaces) {
       const key = surfaceAccountKey(surface.surface, surface.accountId);
       if (this.surfacesByAccount.has(key)) {
         throw new Error(`Surface 重复注册：${key}`);
       }
       this.surfacesByAccount.set(key, surface);
+      this.runtimeBySurface.set(surface, {
+        state: "idle",
+        retryAttempt: 0,
+        pendingCriticalOutput: [],
+      });
     }
     this.removeOutputSubscription = output.subscribe(
       "surface-output-router",
@@ -39,27 +75,65 @@ export class SurfaceManager {
   }
 
   async start(): Promise<void> {
-    try {
-      for (const surface of this.surfaces) {
-        this.started.push(surface);
-        await surface.start();
-        this.active.add(surface);
-      }
-    } catch (error) {
-      await this.stop().catch((cleanupError) => {
-        this.logger.error({ err: cleanupError }, "Surface 启动失败后的回滚不完整");
-      });
-      throw error;
+    if (this.stopping) {
+      throw new Error("SurfaceManager 正在停止");
     }
+    await Promise.all(this.surfaces.map((surface) => this.startSurface(surface)));
+  }
+
+  reportFatal(surfaceId: string, accountId: string, error: Error): void {
+    if (this.stopping) {
+      return;
+    }
+    const surface = this.surfacesByAccount.get(
+      surfaceAccountKey(surfaceId, accountId),
+    );
+    if (!surface) {
+      this.logger.error(
+        { err: error, surface: surfaceId, accountId },
+        "未注册的 Surface 报告连接故障",
+      );
+      return;
+    }
+    const runtime = this.requireRuntime(surface);
+    if (runtime.state === "retrying") {
+      return;
+    }
+    this.active.delete(surface);
+    runtime.state = "retrying";
+    runtime.retryAttempt = 0;
+    this.setInteractionAvailable(
+      surface,
+      false,
+      "渠道连接已中断，请恢复后重试",
+    );
+    this.logger.error(
+      { err: error, surface: surface.surface, accountId: surface.accountId },
+      "Surface 连接已中断，将独立重试",
+    );
+    this.scheduleRetry(surface);
   }
 
   async stop(): Promise<void> {
+    this.stopping = true;
     this.acceptingOutput = false;
     this.active.clear();
     this.removeOutputSubscription?.();
     this.removeOutputSubscription = undefined;
+    for (const runtime of this.runtimeBySurface.values()) {
+      if (runtime.retryTimer) {
+        clearTimeout(runtime.retryTimer);
+        delete runtime.retryTimer;
+      }
+      runtime.pendingCriticalOutput.length = 0;
+    }
+    for (const surface of this.surfaces) {
+      this.setInteractionAvailable(surface, false, "Gateway 已停止");
+    }
     const failures: Array<{ surface: SurfaceAdapter; error: unknown }> = [];
-    for (const surface of this.started.splice(0).reverse()) {
+    const attempted = [...this.attempted];
+    this.attempted.clear();
+    for (const surface of attempted.reverse()) {
       try {
         await surface.stop();
       } catch (error) {
@@ -75,7 +149,9 @@ export class SurfaceManager {
       }
     }
     if (failures.length > 0) {
-      this.started.push(...failures.map(({ surface }) => surface).reverse());
+      for (const { surface } of failures.reverse()) {
+        this.attempted.add(surface);
+      }
       throw new AggregateError(
         failures.map(({ error }) => error),
         "部分 Surface 未能停止",
@@ -84,7 +160,10 @@ export class SurfaceManager {
   }
 
   configurationChanged(change: SurfaceConfigurationChange): void {
-    for (const surface of this.started) {
+    for (const surface of this.surfaces) {
+      if (!this.active.has(surface)) {
+        continue;
+      }
       const scopedChange = configurationChangeForSurface(surface, change);
       if (!scopedChange) {
         continue;
@@ -105,10 +184,10 @@ export class SurfaceManager {
   }
 
   async deliverConfigurationChange(change: SurfaceConfigurationChange): Promise<void> {
-    if (this.started.length !== this.surfaces.length) {
-      throw new Error("Surface 尚未全部启动，不能确认持久化配置事件");
+    if (this.active.size !== this.surfaces.length) {
+      throw new Error("部分 Surface 当前不可用，不能确认持久化配置事件");
     }
-    const surfaces = [...this.started];
+    const surfaces = [...this.surfaces];
     const results = await Promise.allSettled(
       surfaces.map(async (surface) => {
         const scopedChange = configurationChangeForSurface(surface, change);
@@ -156,18 +235,120 @@ export class SurfaceManager {
       );
       return;
     }
+    const routedEvent = event.type === "turn.completed"
+      ? {
+          ...event,
+          gitBranch: this.currentGitBranch?.(event.target),
+        }
+      : event;
     if (!this.active.has(surface)) {
+      const runtime = this.requireRuntime(surface);
+      if (isCriticalOutputEvent(routedEvent)) {
+        if (
+          runtime.pendingCriticalOutput.length
+          >= this.maximumPendingCriticalOutput
+        ) {
+          const dropped = runtime.pendingCriticalOutput.shift();
+          this.logger.error(
+            {
+              surface: surface.surface,
+              accountId: surface.accountId,
+              droppedEventType: dropped?.type,
+            },
+            "Surface 恢复队列已满，最早的关键输出被丢弃",
+          );
+        }
+        runtime.pendingCriticalOutput.push(routedEvent);
+      } else {
+        this.logger.debug(
+          {
+            surface: surface.surface,
+            accountId: surface.accountId,
+            eventType: event.type,
+          },
+          "Surface 不可用，输出事件未投递",
+        );
+      }
       return;
     }
+    this.deliverOutput(surface, routedEvent);
+  }
+
+  private async startSurface(surface: SurfaceAdapter): Promise<void> {
+    if (this.stopping) {
+      return;
+    }
+    const runtime = this.requireRuntime(surface);
+    if (runtime.state === "starting" || runtime.state === "running") {
+      return;
+    }
+    if (runtime.retryTimer) {
+      clearTimeout(runtime.retryTimer);
+      delete runtime.retryTimer;
+    }
+    runtime.state = "starting";
+    this.attempted.add(surface);
     try {
-      surface.output.handle(
-        event.type === "turn.completed"
-          ? {
-              ...event,
-              gitBranch: this.currentGitBranch?.(event.target),
-            }
-          : event,
+      await surface.start();
+    } catch (error) {
+      if (this.stopping) {
+        return;
+      }
+      runtime.state = "retrying";
+      this.logger.warn(
+        {
+          err: error,
+          surface: surface.surface,
+          accountId: surface.accountId,
+          retryAttempt: runtime.retryAttempt + 1,
+        },
+        "Surface 启动失败，将独立重试",
       );
+      this.scheduleRetry(surface);
+      return;
+    }
+    if (this.stopping) {
+      return;
+    }
+    runtime.state = "running";
+    runtime.retryAttempt = 0;
+    this.setInteractionAvailable(surface, true);
+    this.active.add(surface);
+    const pending = runtime.pendingCriticalOutput.splice(0);
+    for (const event of pending) {
+      this.deliverOutput(surface, event);
+    }
+    this.logger.info(
+      {
+        surface: surface.surface,
+        accountId: surface.accountId,
+        recoveredOutputEvents: pending.length,
+      },
+      "Surface 已就绪",
+    );
+  }
+
+  private scheduleRetry(surface: SurfaceAdapter): void {
+    const runtime = this.requireRuntime(surface);
+    if (this.stopping || runtime.retryTimer) {
+      return;
+    }
+    const delayIndex = Math.min(
+      runtime.retryAttempt,
+      this.retryDelaysMs.length - 1,
+    );
+    const delayMs = this.retryDelaysMs[delayIndex]!;
+    runtime.retryAttempt += 1;
+    runtime.retryTimer = setTimeout(() => {
+      delete runtime.retryTimer;
+      void this.startSurface(surface);
+    }, delayMs);
+    runtime.retryTimer.unref();
+  }
+
+  private deliverOutput(surface: SurfaceAdapter, event: OutputEvent): void {
+    try {
+      surface.output.handle(event);
     } catch (error) {
       this.logger.warn(
         {
@@ -177,6 +358,39 @@ export class SurfaceManager {
           eventType: event.type,
         },
         "Surface 拒绝输出事件",
+      );
+    }
+  }
+
+  private requireRuntime(surface: SurfaceAdapter): SurfaceRuntime {
+    const runtime = this.runtimeBySurface.get(surface);
+    if (!runtime) {
+      throw new Error(`Surface 运行状态不存在：${surface.surface}`);
+    }
+    return runtime;
+  }
+
+  private setInteractionAvailable(
+    surface: SurfaceAdapter,
+    available: boolean,
+    outcome?: string,
+  ): void {
+    try {
+      this.options.setInteractionAvailable?.(
+        surface.surface,
+        surface.accountId,
+        available,
+        outcome,
+      );
+    } catch (error) {
+      this.logger.warn(
+        {
+          err: error,
+          surface: surface.surface,
+          accountId: surface.accountId,
+          available,
+        },
+        "Surface 交互可用状态更新失败",
       );
     }
   }

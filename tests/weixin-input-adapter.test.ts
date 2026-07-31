@@ -869,6 +869,43 @@ describe("WeixinInputAdapter", () => {
     await adapter.stop();
   });
 
+  it("can start a fresh update monitor after a fatal abort", async () => {
+    let attempts = 0;
+    const onFatal = vi.fn();
+    const client: WeixinProtocolClient = {
+      getUpdates: vi.fn(async (_cursor, signal) => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new WeixinProtocolError("aborted", "unexpected abort");
+        }
+        return await waitForAbort(signal);
+      }),
+      sendText: vi.fn(async () => {}),
+    };
+    const adapter = new WeixinInputAdapter({
+      accountId,
+      client,
+      cursorStore: cursorStoreFixture(),
+      service: serviceFixture(),
+      outbox: outboxFixture(),
+      access: accessFixture(true),
+      replyContexts: new WeixinReplyContextStore(accountId),
+      onFatal,
+    });
+
+    await adapter.start();
+    await vi.waitFor(() => {
+      expect(onFatal).toHaveBeenCalledOnce();
+    });
+    await Promise.resolve();
+    await adapter.start();
+    await vi.waitFor(() => {
+      expect(client.getUpdates).toHaveBeenCalledTimes(2);
+    });
+
+    await adapter.stop();
+  });
+
   it("starts once and stops repeated calls without reporting cancellation as fatal", async () => {
     const client: WeixinProtocolClient = {
       getUpdates: vi.fn((_cursor, signal) => waitForAbort(signal)),

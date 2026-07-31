@@ -148,11 +148,18 @@ export class WeixinInputAdapter {
     this.health.start();
     const task = this.monitor.run(controller.signal);
     this.runTask = task;
-    void task.catch((error: unknown) => {
-      if (!this.stopping) {
-        this.reportFatal(error);
-      }
-    });
+    void task
+      .catch((error: unknown) => {
+        if (!this.stopping) {
+          this.reportFatal(error);
+        }
+      })
+      .finally(() => {
+        if (this.runTask === task) {
+          this.runTask = undefined;
+          this.controller = undefined;
+        }
+      });
     return Promise.resolve();
   }
 

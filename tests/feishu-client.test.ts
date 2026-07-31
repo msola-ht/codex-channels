@@ -247,6 +247,22 @@ describe("FeishuEventConnection", () => {
     expect(fixture.close).toHaveBeenCalledOnce();
   });
 
+  it("can start a fresh SDK connection after a runtime fatal error", async () => {
+    const fixture = createFixture();
+    const firstStart = fixture.connection.start();
+    fixture.callbacks.onReady();
+    await firstStart;
+    fixture.callbacks.onError(new Error("offline"));
+
+    const recovery = fixture.connection.start();
+    fixture.callbacks.onReady();
+    await recovery;
+
+    expect(fixture.connection.state).toBe("running");
+    expect(fixture.start).toHaveBeenCalledTimes(2);
+    await fixture.connection.stop();
+  });
+
   it("tracks reconnect lifecycle without resolving a second start", async () => {
     const fixture = createFixture();
     const states: FeishuConnectionState[] = [];

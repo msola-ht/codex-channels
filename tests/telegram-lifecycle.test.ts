@@ -174,6 +174,7 @@ describe("TelegramLifecycle", () => {
     vi.useFakeTimers();
     try {
       let pollingAttempts = 0;
+      let recovering = false;
       const failures: Error[] = [];
       const bot = {
         botInfo: { username: "test_bot" },
@@ -181,8 +182,17 @@ describe("TelegramLifecycle", () => {
         handleUpdate: async () => undefined,
         api: {
           setMyCommands: async () => true,
-          getUpdates: async () => {
+          getUpdates: async (_options: unknown, signal?: AbortSignal) => {
             pollingAttempts += 1;
+            if (recovering && signal) {
+              return await new Promise<never>((_resolve, reject) => {
+                signal.addEventListener(
+                  "abort",
+                  () => reject(signal.reason),
+                  { once: true },
+                );
+              });
+            }
             throw new Error("network unavailable");
           },
         },
@@ -200,6 +210,9 @@ describe("TelegramLifecycle", () => {
       expect(pollingAttempts).toBe(12);
       expect(failures).toHaveLength(1);
       expect(failures[0]?.message).toContain("连续失败 12 次");
+      recovering = true;
+      lifecycle.start();
+      await vi.waitFor(() => expect(pollingAttempts).toBe(13));
       await lifecycle.stop();
     } finally {
       vi.useRealTimers();

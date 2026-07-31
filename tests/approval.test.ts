@@ -61,7 +61,10 @@ class FakeInteraction implements InteractionPort {
 
 class ControlledInteraction implements InteractionPort {
   requests: InteractionRequest[] = [];
-  private readonly resolvers: Array<(decision: InteractionDecision) => void> = [];
+  private readonly pending: Array<{
+    request: InteractionRequest;
+    resolve(decision: InteractionDecision): void;
+  }> = [];
 
   request(
     _target: ConversationTarget,
@@ -69,16 +72,22 @@ class ControlledInteraction implements InteractionPort {
   ): Promise<InteractionDecision> {
     this.requests.push(request);
     return new Promise((resolve) => {
-      this.resolvers.push(resolve);
+      this.pending.push({ request, resolve });
     });
   }
 
   resolveNext(decision: InteractionDecision): void {
-    const resolve = this.resolvers.shift();
-    if (!resolve) {
+    const pending = this.pending.shift();
+    if (!pending) {
       throw new Error("没有等待处理的交互");
     }
-    resolve(decision);
+    pending.resolve(decision);
+  }
+
+  cancelAll(): void {
+    for (const pending of this.pending.splice(0)) {
+      pending.resolve(safeInteractionDecision(pending.request));
+    }
   }
 }
 
@@ -259,10 +268,70 @@ describe("InteractionRouter", () => {
       type: "approval",
       approved: false,
     });
-    interaction.resolveNext({ type: "approval", approved: false });
     await first;
     await second;
     expect(interaction.requests).toEqual([firstRequest]);
+  });
+
+  it("fails closed and cancels only the unavailable Surface account", async () => {
+    const telegram = new ControlledInteraction();
+    const feishu = new ControlledInteraction();
+    const router = new InteractionRouter();
+    router.register("telegram", "default", telegram);
+    router.register("feishu", "tenant-a", feishu);
+    const telegramRequest = approvalInteractionRequest({
+      requestId: "request-telegram",
+    });
+    const queuedTelegramRequest = approvalInteractionRequest({
+      requestId: "request-telegram-queued",
+    });
+    const feishuRequest = approvalInteractionRequest({
+      requestId: "request-feishu",
+    });
+    const telegramDecision = router.request(target, telegramRequest);
+    const queuedTelegramDecision = router.request(
+      target,
+      queuedTelegramRequest,
+    );
+    const feishuDecision = router.request({
+      surface: "feishu",
+      accountId: "tenant-a",
+      conversationId: "chat-feishu",
+    }, feishuRequest);
+
+    router.setAvailable(
+      "telegram",
+      "default",
+      false,
+      "渠道连接已中断",
+    );
+
+    await expect(telegramDecision).resolves.toEqual({
+      type: "approval",
+      approved: false,
+    });
+    await expect(queuedTelegramDecision).resolves.toEqual({
+      type: "approval",
+      approved: false,
+    });
+    await expect(router.request(target, approvalInteractionRequest({
+      requestId: "request-telegram-offline",
+    }))).resolves.toEqual({
+      type: "approval",
+      approved: false,
+    });
+    expect(telegram.requests).toEqual([telegramRequest]);
+    expect(feishu.requests).toEqual([feishuRequest]);
+
+    feishu.resolveNext({ type: "approval", approved: false });
+    await feishuDecision;
+    router.setAvailable("telegram", "default", true);
+    const recovered = router.request(target, approvalInteractionRequest({
+      requestId: "request-telegram-recovered",
+    }));
+    expect(telegram.requests).toHaveLength(2);
+    telegram.resolveNext({ type: "approval", approved: false });
+    await recovered;
   });
 
   it("fails closed when the same request ID is already pending", async () => {

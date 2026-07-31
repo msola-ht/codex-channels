@@ -218,17 +218,11 @@ export class TelegramSurface {
   }
 
   async start(): Promise<void> {
-    try {
-      await Promise.all([
-        this.imageStore.start(),
-        this.audioStore.start(),
-      ]);
-      this.lifecycle.start();
-    } catch (error) {
-      this.imageStore.close();
-      this.audioStore.close();
-      throw error;
-    }
+    await Promise.all([
+      this.imageStore.start(),
+      this.audioStore.start(),
+    ]);
+    this.lifecycle.start();
   }
 
   async stop(): Promise<void> {

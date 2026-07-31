@@ -67,6 +67,7 @@ import { renderFeishuConfigurationChange } from "./renderer.js";
 interface FeishuEventConnectionPort {
   start(): Promise<void>;
   stop(): Promise<void>;
+  resetAfterStartFailure?(): void;
 }
 
 interface FeishuSurfaceDependencies {
@@ -427,9 +428,7 @@ export class FeishuSurface implements SurfaceAdapter {
     try {
       await Promise.all([imagesStarting, audiosStarting, connectionStarting]);
     } catch (error) {
-      await this.connection.stop();
-      this.images.close();
-      this.audios.close();
+      this.connection.resetAfterStartFailure?.();
       throw error;
     }
     this.connectionReady = true;

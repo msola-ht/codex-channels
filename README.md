@@ -127,6 +127,10 @@ codexc service logs -f             # 持续跟踪 Gateway 日志
 
 `start`、`stop` 和 `status` 默认操作全部服务；`restart` 和 `logs` 默认只操作 Gateway。运行 `codexc service -h` 查看完整用法。
 
+服务重启建议从本机终端执行。聊天 Turn 内执行 `codexc service restart` 会主动断开当前 Gateway，
+过程或完成消息可能落在重连窗口；不要在渠道内执行 `codexc service restart all`，因为它会同时
+终止正在执行该命令的 App Server。
+
 ### 常用聊天命令
 
 - 会话：`/new`、`/resume`、`/sessions`、`/archive`、`/unarchive`、`/pin`、`/unpin`
@@ -157,6 +161,8 @@ codexc service logs -n 100
 常见处理：
 
 - 修改配置后没有生效：运行 `codexc service reload`。
+- 单个聊天渠道暂时断线：Gateway 会保持其他渠道运行，并对故障渠道独立退避重连；可用
+  `codexc service logs -f` 查看断线与恢复记录。
 - Gateway 需要重启：运行 `codexc service restart`，共享 App Server 和活动 Thread 会保留。
 - Codex CLI 版本不一致：重新安装精确版本 `@openai/codex@0.146.0`。
 - 飞书收不到消息或菜单不完整：在飞书私聊发送 `/fs doctor`。

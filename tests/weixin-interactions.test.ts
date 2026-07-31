@@ -19,6 +19,38 @@ const target: ConversationTarget = {
 };
 
 describe("WeixinInteractionPort", () => {
+  it("remains reusable after transient interactions are cancelled", async () => {
+    const delivery = deliveryFixture();
+    const port = new WeixinInteractionPort(
+      delivery,
+      actorRegistryFixture([actorId]),
+      accessFixture(true),
+      undefined,
+      () => "reusable-token",
+    );
+    const first = port.request(target, approvalRequest({
+      requestId: "request-before-disconnect",
+    }));
+    await vi.waitFor(() => {
+      expect(delivery.deliverTextSequence).toHaveBeenCalledOnce();
+    });
+
+    port.cancelAll("渠道连接已中断");
+    await expect(first).resolves.toEqual({
+      type: "approval",
+      approved: false,
+    });
+    const second = port.request(target, approvalRequest({
+      requestId: "request-after-recovery",
+    }));
+    await vi.waitFor(() => {
+      expect(delivery.deliverTextSequence).toHaveBeenCalledTimes(2);
+    });
+
+    port.cancelAll();
+    await second;
+  });
+
   it("delivers an opaque one-time command and resolves an exact once approval", async () => {
     const delivery = deliveryFixture();
     const port = new WeixinInteractionPort(

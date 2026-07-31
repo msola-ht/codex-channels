@@ -48,6 +48,9 @@ export class ManagedAudioStore {
     if (this.closed) {
       return;
     }
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+    }
     this.cleanupTimer = setInterval(() => {
       void this.cleanupExpired().catch(this.onCleanupFailure);
     }, cleanupIntervalMs);

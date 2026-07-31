@@ -35,7 +35,8 @@ MCP form 与 URL elicitation 已完成离线实现，继续等待真实卡片动
 - `audio.ts`：通过既有消息资源权限下载独立音频，限制为 5 分钟、20 MiB 和 Codex CLI
   支持的 WAV/MP3/M4A/WebM/OGG，写入一小时私有临时文件后构造 `localAudio`；Application
   仅在当前模型目录包含 `audio` 时提交，否则在创建或追加 Turn 前明确拒绝。
-- `event-connection.ts`：隔离官方 WebSocket SDK，管理事件注册、握手、重连、停止和失败关闭生命周期。
+- `event-connection.ts`：隔离官方 WebSocket SDK，管理事件注册、握手、SDK 重连、失败后重新启动
+  和最终停止生命周期。
 - `file-input.ts`：通过官方消息资源 API 在内存下载独立文件，限制为 1,000,000 字节并严格验证
   文件名、UTF-8 和控制字符，不创建本地文件。
 - `inbound-content.ts`：统一严格解析入站与被引用消息的文本、富文本、图片、文件和音频元素。
@@ -290,8 +291,9 @@ HTTP(S) 链接。其他客户端解决、取消、超时和 Surface 停止会按
 待处理内存和协议响应中，不写入数据库或日志。同时进行的交互最多保留 100 个，超过容量的请求
 按类型安全拒绝或取消，不再发送新卡片；`/stop` 只匹配精确 App、Chat 和 Actor。
 
-`surface.ts` 实现单账号 `SurfaceAdapter` 生命周期：启动等待长连接就绪；停止先切断新事件，再
-有限排空 Inbox 和 Outbox。Bootstrap 从现有绑定中选择仍有授权 Actor 的 Chat 作为配置通知
+`surface.ts` 实现单账号 `SurfaceAdapter` 生命周期：启动等待长连接就绪，运行故障后允许
+Bootstrap 只重新建立本账号长连接；最终停止先切断新事件，再有限排空 Inbox 和 Outbox。
+Bootstrap 从现有绑定中选择仍有授权 Actor 的 Chat 作为配置通知
 收件人；持久通知等待平台实际发送完成，没有已知安全会话时不广播。
 
 本模块已有严格 TOML/运行配置、变更分类和 Bootstrap 显式组合，可启用当前飞书私聊 Surface；

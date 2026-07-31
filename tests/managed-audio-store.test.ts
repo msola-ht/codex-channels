@@ -13,12 +13,26 @@ import {
 const directories: string[] = [];
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const directory of directories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
 });
 
 describe("ManagedAudioStore", () => {
+  it("keeps one cleanup timer when startup is repeated", async () => {
+    vi.useFakeTimers();
+    const store = new ManagedAudioStore(temporaryDirectory(), vi.fn());
+
+    await store.start();
+    const timerCount = vi.getTimerCount();
+    await store.start();
+
+    expect(timerCount).toBe(1);
+    expect(vi.getTimerCount()).toBe(1);
+    store.close();
+  });
+
   it.each([
     ["wav", wavBytes(), "audio/wav"],
     ["mp3", Buffer.from("ID3test"), "audio/mpeg"],

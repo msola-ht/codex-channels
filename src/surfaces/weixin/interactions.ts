@@ -130,7 +130,6 @@ export class WeixinInteractionPort implements InteractionPort {
   }
 
   cancelAll(outcome = "Gateway 已停止"): void {
-    this.closed = true;
     for (const [token, pending] of this.pending.entries()) {
       void this.finish(
         token,
@@ -138,6 +137,11 @@ export class WeixinInteractionPort implements InteractionPort {
         formatCancelledInteraction(outcome),
       );
     }
+  }
+
+  close(): void {
+    this.closed = true;
+    this.cancelAll("Gateway 已停止");
   }
 
   private async requestInteraction(

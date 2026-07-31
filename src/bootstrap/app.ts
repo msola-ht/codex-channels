@@ -188,9 +188,23 @@ export class GatewayApplication {
       this.output,
       logger,
       (target) => service.status(target, { includeGitBranch: true }).gitBranch,
+      {
+        setInteractionAvailable: (
+          surface,
+          accountId,
+          available,
+          outcome,
+        ) => this.interactions.setAvailable(
+          surface,
+          accountId,
+          available,
+          outcome,
+        ),
+      },
     );
     for (const surface of this.surfaces) {
       this.interactions.register(surface.surface, surface.accountId, surface.interactions);
+      this.interactions.setAvailable(surface.surface, surface.accountId, false);
     }
     this.approval = new ApprovalCoordinator(
       this.router,
@@ -517,18 +531,7 @@ export class GatewayApplication {
     if (this.stopping) {
       return;
     }
-    this.logger.fatal(
-      { err: error, surface, accountId },
-      "Surface 连接重试耗尽，Gateway 将停止以交由进程管理器重启",
-    );
-    process.exitCode = 1;
-    void this.stop().catch((stopError) => {
-      this.logger.error(
-        { err: stopError, surface, accountId },
-        "Surface 故障后停止 Gateway 失败",
-      );
-      process.exitCode = 1;
-    });
+    this.surfaceManager.reportFatal(surface, accountId, error);
   }
 
   private async refreshRateLimits(): Promise<void> {

@@ -21,7 +21,7 @@ interface QueuedInteraction {
 }
 
 interface ConversationInteractionQueue {
-  active: boolean;
+  active?: QueuedInteraction;
   entries: QueuedInteraction[];
 }
 
@@ -29,6 +29,7 @@ const DEFAULT_INTERACTION_CAPACITY = 100;
 
 export class InteractionRouter implements InteractionPort {
   private readonly ports = new Map<string, InteractionPort>();
+  private readonly unavailablePorts = new Set<string>();
   private readonly queues = new Map<string, ConversationInteractionQueue>();
   private readonly pendingByRequestId = new Map<string, QueuedInteraction>();
 
@@ -50,16 +51,63 @@ export class InteractionRouter implements InteractionPort {
     return () => {
       if (this.ports.get(key) === port) {
         this.ports.delete(key);
+        this.unavailablePorts.delete(key);
       }
     };
+  }
+
+  setAvailable(
+    surface: SurfaceId,
+    accountId: string,
+    available: boolean,
+    outcome = "渠道连接已中断，请恢复后重试",
+  ): void {
+    const key = this.key(surface, accountId);
+    if (available) {
+      this.unavailablePorts.delete(key);
+      return;
+    }
+    this.unavailablePorts.add(key);
+    for (const queued of [...this.pendingByRequestId.values()]) {
+      if (this.key(queued.target.surface, queued.target.accountId) !== key) {
+        continue;
+      }
+      const queue = this.queues.get(queued.queueKey);
+      if (queue?.active === queued) {
+        delete queue.active;
+      } else if (queue) {
+        const index = queue.entries.indexOf(queued);
+        if (index >= 0) {
+          queue.entries.splice(index, 1);
+        }
+      }
+      this.pendingByRequestId.delete(queued.request.requestId);
+      queued.resolve(safeInteractionDecision(queued.request));
+      if (queue && queue.active === undefined && queue.entries.length === 0) {
+        this.queues.delete(queued.queueKey);
+      }
+    }
+    try {
+      this.ports.get(key)?.cancelAll?.(outcome);
+    } catch (error) {
+      this.logger?.warn(
+        { surface, accountId, errorType: error instanceof Error ? error.name : typeof error },
+        "不可用 Surface 的交互清理失败",
+      );
+    }
   }
 
   request(
     target: ConversationTarget,
     request: InteractionRequest,
   ): Promise<InteractionDecision> {
-    const port = this.ports.get(this.key(target.surface, target.accountId));
+    const portKey = this.key(target.surface, target.accountId);
+    const port = this.ports.get(portKey);
     if (port) {
+      if (this.unavailablePorts.has(portKey)) {
+        this.warnRejected(target, request, "surface-unavailable");
+        return Promise.resolve(safeInteractionDecision(request));
+      }
       if (this.pendingByRequestId.has(request.requestId)) {
         this.warnRejected(target, request, "duplicate-request-id");
         return Promise.resolve(safeInteractionDecision(request));
@@ -70,7 +118,6 @@ export class InteractionRouter implements InteractionPort {
       }
       const queueKey = this.conversationKey(target);
       const queue = this.queues.get(queueKey) ?? {
-        active: false,
         entries: [],
       };
       if (!this.queues.has(queueKey)) {
@@ -184,7 +231,7 @@ export class InteractionRouter implements InteractionPort {
     queueKey: string,
     queue: ConversationInteractionQueue,
   ): void {
-    if (queue.active) {
+    if (queue.active !== undefined) {
       return;
     }
     const next = queue.entries.shift();
@@ -192,7 +239,7 @@ export class InteractionRouter implements InteractionPort {
       this.queues.delete(queueKey);
       return;
     }
-    queue.active = true;
+    queue.active = next;
     next.active = true;
     void next.port.request(next.target, next.request).then(
       (decision) => {
@@ -208,8 +255,10 @@ export class InteractionRouter implements InteractionPort {
       if (this.pendingByRequestId.get(next.request.requestId) === next) {
         this.pendingByRequestId.delete(next.request.requestId);
       }
-      queue.active = false;
-      this.dispatchNext(queueKey, queue);
+      if (queue.active === next) {
+        delete queue.active;
+        this.dispatchNext(queueKey, queue);
+      }
     });
   }
 }
