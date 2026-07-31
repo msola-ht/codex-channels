@@ -7,6 +7,7 @@ export interface RoutedThread {
 
 export interface RoutedThreadModelSettings {
   model: string;
+  modelProvider?: string;
   effort: string | null;
   serviceTier: string | null;
 }

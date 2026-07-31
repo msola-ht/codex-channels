@@ -915,6 +915,7 @@ describe("Feishu conversation adapter", () => {
         "工作目录：/workspace",
         "Git 分支：未检测到",
         "模型：gpt-test",
+        "Provider：OpenAI",
         "思考强度：medium",
         "Fast 模式：开启",
         "协作模式：Default",

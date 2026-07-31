@@ -88,6 +88,8 @@ export function formatSurfaceUserFacingError(
       return "用法：/fast [on|off|status]";
     case "fast.unsupported":
       return `当前模型不支持 Fast 模式：${detail(error, "model", "未知")}`;
+    case "provider.account.unavailable":
+      return `${detail(error, "provider", "当前 Provider")} 账户查询失败，请检查配置或稍后重试`;
     case "collaboration-mode.unsupported":
       return "当前 Codex App Server 不支持该协作模式";
     case "collaboration-mode.unavailable":

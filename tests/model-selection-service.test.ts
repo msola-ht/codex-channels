@@ -228,7 +228,7 @@ describe("ModelSelectionService", () => {
     });
   });
 
-  it("forks the current Thread when selecting a model from another provider", async () => {
+  it("starts a new Thread when selecting a model from another provider", async () => {
     const newSession = vi.fn().mockResolvedValue(undefined);
     const fork = vi.fn().mockResolvedValue(undefined);
     const codex = {
@@ -253,14 +253,11 @@ describe("ModelSelectionService", () => {
     };
     const service = new ModelSelectionService(codex, router, undefined, [deepseek]);
 
-    await service.selectModel(target, "deepseek-v4-flash");
+    const state = await service.selectModel(target, "deepseek-v4-flash");
 
-    expect(fork).toHaveBeenCalledWith(target, {
-      model: "deepseek-v4-flash",
-      modelProvider: "deepseek",
-      config: { model_catalog_json: "/private/deepseek.models.json" },
-    });
-    expect(newSession).not.toHaveBeenCalled();
+    expect(newSession).toHaveBeenCalledOnce();
+    expect(fork).not.toHaveBeenCalled();
+    expect(state.providerPending).toBe(true);
     expect(service.threadStartOptions(target)).toEqual({
       model: "deepseek-v4-flash",
       modelProvider: "deepseek",
@@ -294,7 +291,8 @@ describe("ModelSelectionService", () => {
     expect(fork).not.toHaveBeenCalled();
   });
 
-  it("uses the default catalog when forking back to OpenAI", async () => {
+  it("starts a clean OpenAI Thread when switching back from a third-party provider", async () => {
+    const newSession = vi.fn().mockResolvedValue(undefined);
     const fork = vi.fn().mockResolvedValue(undefined);
     const codex = {
       listModels: async () => models,
@@ -303,6 +301,7 @@ describe("ModelSelectionService", () => {
     const router = {
       current: () => ({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }),
       fork,
+      newSession,
       modelSettings: () => ({
         model: "deepseek-v4-flash",
         modelProvider: "deepseek",
@@ -314,10 +313,8 @@ describe("ModelSelectionService", () => {
 
     await service.selectModel(target, "gpt-main");
 
-    expect(fork).toHaveBeenCalledWith(target, {
-      model: "gpt-main",
-      modelProvider: "openai",
-    });
+    expect(newSession).toHaveBeenCalledOnce();
+    expect(fork).not.toHaveBeenCalled();
   });
 
   it("shows but rejects an unavailable provider model", async () => {

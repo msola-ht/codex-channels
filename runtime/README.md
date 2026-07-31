@@ -12,6 +12,10 @@
   实际解析出的大小写代理变量；集中按目标协议选择、校验 HTTP(S) 客户端代理并匹配
   `NO_PROXY`。渠道显式代理优先于共享代理和 `NO_PROXY`。
 - `network-proxy.d.mts`：声明共享代理解析模块的 TypeScript 接口。
+- `model-provider-runtime.mjs`：通过编译期受控 Provider 描述读取 Setup 管理标记和私有 Profile；
+  为 App Server 子进程生成不含凭据的 Provider 参数，并向 DeepSeek 账户适配器提供同源凭据。
+  切换模式的 Key 只进入子进程环境，固定模式才从基础配置读取。
+- `model-provider-runtime.d.mts`：声明受控模型 Provider 运行时接口。
 - `project-rules.mjs`：生成并检查项目级 Codex 命令规则；Gateway 使用精确 Workspace 根目录，
   并拒绝通过符号链接把写入转移到 Workspace 外。
 - `project-rules.d.mts`：声明共享项目规则模块的 TypeScript 接口。

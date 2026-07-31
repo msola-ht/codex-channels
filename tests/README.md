@@ -83,10 +83,12 @@
 - 官方模型目录到稳定 Application 模型选项的映射、不可见项过滤、必需字段失败关闭，模型、
   思考强度和 Fast 的 Thread 覆盖、Codex 用户级 Fast 默认值持久化、共享客户端完整或残缺设置
   通知、Thread 失效通知及 Gateway/CLI 连接恢复；DeepSeek 官方脚本目录提取、两种 Setup 模式、
-  API Key 输出隔离、下载失败不修改、Flash 可选与 Pro 可见但不可选，以及跨 Provider Fork
-  的历史保留、精确 Provider/目录参数、回切默认目录和失败时原绑定保留。
-- 账户 Token 用量与单桶/多桶额度到稳定 Application 摘要的映射、重置券数量、畸形指标与未知
-  枚举失败关闭，以及启动时周限缓存继续使用同一映射结果。
+  API Key 输出隔离、下载失败不修改、Flash 可选与 Pro 可见但不可选，以及跨 Provider 新建
+  Thread、原 Thread 可恢复、精确 Provider/目录参数和设置通知不覆盖不可变 Provider。
+- Provider 账户能力的编译期唯一注册、未知 Provider 不回退、OpenAI Token 用量与单桶/多桶额度
+  到稳定 Application 摘要的映射、重置券数量，以及 DeepSeek 私有配置读取、统一代理、官方余额
+  Schema 裁剪、响应上限和错误脱敏；Thread Token/上下文对 Provider 通用，OpenAI Fast 与周限
+  不进入 DeepSeek 状态或完成卡片。
 - Skill 查询按授权 Workspace 发送精确 CWD，Client 只映射启用的用户与项目直接安装项，排除
   系统和插件缓存并在缺少显示字段时失败关闭；显式调用重新解析精确名称、校验绝对路径，并同时
   发送 `$Skill` 文本标记与结构化 Skill 输入；三个渠道统一覆盖无参数 `/skill` 编号列表与
@@ -226,7 +228,7 @@ CI 中的隔离 App Server 合同测试要求安装受支持的 Codex CLI，但�
 RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
 ```
 
-该合同测试使用临时 `CODEX_HOME`、provider-only DeepSeek 基础配置和本地测试 MCP 进程，验证
+该合同测试使用临时 `CODEX_HOME`、provider-only DeepSeek 测试配置和本地测试 MCP 进程，验证
 App Server 不依赖 CLI Profile 即可初始化，并验证 MCP 工具审批元数据及
 `_meta.persist` 通过真实 App Server 往返；同时验证一个 Client 写入的 Fast 用户默认值能被另一个 Client
 读取，之后新建 Thread 的运行时 `serviceTier` 按 `default → priority → default` 变化，并验证

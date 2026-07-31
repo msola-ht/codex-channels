@@ -85,7 +85,15 @@ export class SessionRouter {
 
   updateModelSettings(threadId: string, settings: ThreadModelSettings): void {
     if (this.bindings.getByThread(threadId)) {
-      this.modelSettingsByThread.set(threadId, settings);
+      const current = this.modelSettingsByThread.get(threadId);
+      this.modelSettingsByThread.set(threadId, {
+        ...settings,
+        ...(settings.modelProvider
+          ? { modelProvider: settings.modelProvider }
+          : current?.modelProvider
+            ? { modelProvider: current.modelProvider }
+            : {}),
+      });
     }
   }
 

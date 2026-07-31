@@ -81,6 +81,7 @@ describe("Feishu output renderer", () => {
       "- **Thread：** thread-1",
       "- **Git 分支：** feature/weixin-surface",
       "- **模型：** gpt-test",
+      "- **Provider：** OpenAI",
       "- **思考强度：** medium",
       "- **Fast 模式：** 开启",
       "- **协作模式：** Default",
@@ -154,21 +155,26 @@ describe("Feishu output renderer", () => {
       {
         kind: "usage",
         result: {
-          summary: {
-            lifetimeTokens: null,
-            peakDailyTokens: null,
-            longestRunningTurnSec: null,
-            currentStreakDays: null,
-            longestStreakDays: null,
+          kind: "token-usage",
+          provider: "openai",
+          usage: {
+            summary: {
+              lifetimeTokens: null,
+              peakDailyTokens: null,
+              longestRunningTurnSec: null,
+              currentStreakDays: null,
+              longestStreakDays: null,
+            },
+            daily: [],
           },
-          daily: [],
         },
       },
       {
         kind: "limits",
         result: {
-          limits: [],
-          resetCreditsAvailable: null,
+          kind: "rate-limits",
+          provider: "openai",
+          limits: { limits: [], resetCreditsAvailable: null },
         },
       },
       { kind: "permissions", profiles: [] },
@@ -211,7 +217,7 @@ describe("Feishu output renderer", () => {
       "当前没有已启用的 Skills。",
       "MCP Servers（0）：",
       "当前没有已安装 Plugins。",
-      expect.stringContaining("Codex 用量摘要"),
+      expect.stringContaining("OpenAI Codex 账户用量摘要"),
       expect.stringContaining("Codex 额度"),
       expect.stringContaining("可用 Permission Profiles"),
       expect.stringContaining("项目规则检查通过"),
@@ -272,23 +278,27 @@ describe("Feishu output renderer", () => {
     const limits = renderFeishuCommandResult({
       kind: "limits",
       result: {
-        limits: [{
-          limitId: "codex",
-          limitName: "Codex",
-          primary: null,
-          secondary: null,
-          credits: null,
-          individualLimit: {
-            limit: "100",
-            used: "25",
-            remainingPercent: 75,
-            resetsAt: 1_800_000_000,
-          },
-          spendControlReached: false,
-          planType: "pro",
-          rateLimitReachedType: "workspace_member_usage_limit_reached",
-        }],
-        resetCreditsAvailable: null,
+        kind: "rate-limits",
+        provider: "openai",
+        limits: {
+          limits: [{
+            limitId: "codex",
+            limitName: "Codex",
+            primary: null,
+            secondary: null,
+            credits: null,
+            individualLimit: {
+              limit: "100",
+              used: "25",
+              remainingPercent: 75,
+              resetsAt: 1_800_000_000,
+            },
+            spendControlReached: false,
+            planType: "pro",
+            rateLimitReachedType: "workspace_member_usage_limit_reached",
+          }],
+          resetCreditsAvailable: null,
+        },
       },
     });
     expect(limits).toContain("套餐：Pro");
@@ -302,17 +312,21 @@ describe("Feishu output renderer", () => {
     const rendered = renderFeishuCommandResult({
       kind: "usage",
       result: {
-        summary: {
-          lifetimeTokens: 6_439_124_350,
-          peakDailyTokens: 389_153_809,
-          longestRunningTurnSec: 1_138,
-          currentStreakDays: 45,
-          longestStreakDays: 45,
+        kind: "token-usage",
+        provider: "openai",
+        usage: {
+          summary: {
+            lifetimeTokens: 6_439_124_350,
+            peakDailyTokens: 389_153_809,
+            longestRunningTurnSec: 1_138,
+            currentStreakDays: 45,
+            longestStreakDays: 45,
+          },
+          daily: [{
+            startDate: "2026-07-26",
+            tokens: 128_021_979,
+          }],
         },
-        daily: [{
-          startDate: "2026-07-26",
-          tokens: 128_021_979,
-        }],
       },
     });
 
@@ -350,6 +364,7 @@ describe("Feishu output renderer", () => {
         modelContextWindow: 200,
       },
       model: "gpt-test",
+      modelProvider: "openai",
       effort: "medium",
       serviceTier: "priority",
       gitBranch: "feature/weixin-surface",
@@ -367,6 +382,7 @@ describe("Feishu output renderer", () => {
       "- **上下文：** 100 / 200（50%）",
       "- **缓存命中：** 50%",
       "- **模型：** gpt-test · medium · Fast 开启",
+      "- **Provider：** OpenAI",
       "- **上下文压缩：** 2 次",
       "- **周限：** 已使用 37%",
       "- **Git 分支：** feature/weixin-surface",

@@ -69,6 +69,31 @@ describe("ThreadStateSynchronizer", () => {
     });
   });
 
+  it("preserves the Provider when settings notifications omit the immutable field", () => {
+    const router = createBoundRouter();
+    router.updateModelSettings("thread-1", {
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+      effort: "high",
+      serviceTier: null,
+      collaborationMode: "default",
+    });
+    const synchronizer = new ThreadStateSynchronizer(router);
+
+    synchronizer.handle({
+      type: "thread.settings.updated",
+      threadId: "thread-1",
+      settings: {
+        model: "deepseek-v4-flash",
+        effort: "high",
+        serviceTier: null,
+        collaborationMode: "default",
+      },
+    });
+
+    expect(router.modelSettings(target)?.modelProvider).toBe("deepseek");
+  });
+
   it.each([
     "thread.archived",
     "thread.deleted",

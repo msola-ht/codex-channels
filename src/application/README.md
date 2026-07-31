@@ -15,8 +15,8 @@
   扩展查询通过 `ConversationQueryPort` 组合窄端口，Skill、MCP 与
   Plugin 和 Permission Profile 均使用稳定结果。
 - `model-selection-service.ts`：查询模型、输入能力与思考强度，保存按 Conversation 生效的 Turn 覆盖设置；
-  选择不同 Provider 时通过路由层 Fork 空闲当前 Thread，复制历史并为新分支提供精确
-  `modelProvider` 与模型目录；没有当前 Thread 时才为下一 Turn 新建，旧 Thread 保持可恢复；
+  选择不同 Provider 时保留并解绑当前 Thread，为下一 Turn 新建带精确 `modelProvider` 和模型目录
+  的 Thread，避免把 Provider 专属历史发送到不兼容的 API；旧 Thread 保持可恢复；
   含本地音频的输入在创建或追加 Turn 前必须通过当前模型的 `audio` 能力检查；
   Fast 切换同时通过模型窄端口保存用户级默认层级，与原生 CLI 的重启行为一致。
 - `collaboration-mode-port.ts`：定义 Default/Plan 预设的稳定查询边界，不向 Application
@@ -25,8 +25,10 @@
   模式按 Thread 同步，只在内存保存尚未生效的选择。
 - `model-port.ts`：定义项目拥有的 Provider、模型目录来源、`text/image/audio` 输入能力、思考强度、服务层级与 Fast 默认值写入窄端口；
   Application 和 Surface 不接收完整官方模型对象。
-- `account-port.ts`：定义账户 Token 用量、额度窗口、Credits 与消费控制的稳定查询结果；
-  多额度桶和官方重置券响应由 Client 在边界裁剪。
+- `account-port.ts`：分别定义 OpenAI 账户 Token/额度、第三方余额和未支持状态的可辨识结果，
+  以及 Provider 账户适配器与查询窄端口；不同来源不得共用含义不一致的字段。
+- `provider-account-service.ts`：维护编译期显式 Provider 账户适配器注册表；OpenAI 适配器复用
+  App Server 账户查询，未知 Provider 默认返回不支持，不回退到 OpenAI。
 - `skill-port.ts`：定义已直接安装 Skill 的稳定名称与说明查询，以及只供 Application 启动
   Turn 使用的精确 Skill 路径解析；路径不向 Surface 暴露，也不传播 Scope、依赖或上游扫描错误。
 - `mcp-port.ts`：定义 MCP Server 名称、认证状态与工具数量的稳定查询摘要，不向 Surface 暴露
@@ -57,8 +59,10 @@ Turn、steer、停止、重命名、固定、压缩、Review 和 Goal 只依赖 
 App Server 通知继续处理其他客户端修改与恢复后的状态校正。
 模型选择和 Fast 只依赖 `ModelSelectionPort`；不可见模型过滤、官方模型字段裁剪以及
 `config/read` / `config/batchWrite` 的版本差异由 `codex-client` 处理。
-账户用量和额度查询只依赖 `AccountQueryPort`；Application、Bootstrap 和 Surface 不解析
-`account/usage/read` 或 `account/rateLimits/read` 的完整官方响应。
+OpenAI 原生账户查询只依赖 `AccountQueryPort`；当前 Thread 的 `/usage` 与 `/limits` 通过
+`ProviderAccountQueryPort` 按 `modelProvider` 选择显式注册的适配器。新增第三方时实现
+`ProviderAccountAdapter` 并在 Bootstrap 登记；未提供的账户能力保持不支持。Application 和
+Surface 不解析 `account/usage/read`、`account/rateLimits/read` 或第三方完整响应。
 Skill 查询与显式调用只依赖 `SkillQueryPort`；用户和项目直接安装项的筛选、调用名称与绝对路径
 校验由 Client 适配器在协议边界完成。
 MCP 查询只依赖 `McpQueryPort`；分页、Thread 配置上下文与官方清单裁剪由 Client 适配器处理。

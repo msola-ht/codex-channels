@@ -62,7 +62,7 @@ export async function runDeepseekSetup({
     const mode = choice === "1" ? "switching" : "exclusive";
     if (mode === "switching") {
       output.write(
-        "\n切换模式只在 ~/.codex/config.toml 登记 DeepSeek Provider，不改变 OpenAI 默认模型或授权；DeepSeek 模型选择保存在独立 Profile。\n",
+        "\n切换模式不修改 ~/.codex/config.toml；DeepSeek 模型、Provider 与 API Key 全部保存在独立 Profile。\n",
       );
     }
     if (mode === "exclusive") {
@@ -102,7 +102,7 @@ export async function runDeepseekSetup({
     await replaceOptionalFile(profilePath, profileContent);
     await replaceOptionalFile(gatewayProfilePath, gatewayProfileContent);
     if (mode === "switching") {
-      output.write(`\nDeepSeek Provider 已登记，OpenAI 默认保持不变：${configPath}\n`);
+      output.write(`\nOpenAI 基础配置保持不变：${configPath}\n`);
       output.write(`DeepSeek CLI Profile 已保存：${profilePath}\n`);
     } else {
       output.write(`\nDeepSeek 固定配置已保存：${configPath}\n`);
@@ -205,6 +205,7 @@ async function buildCodexConfig({
     name: "deepseek",
     base_url: "https://api.deepseek.com/",
     wire_api: "responses",
+    requires_openai_auth: false,
     experimental_bearer_token: apiKey,
   };
   const providerLayer = {
@@ -213,10 +214,9 @@ async function buildCodexConfig({
   const profile = {
     model: supportedModel,
     model_provider: providerId,
-    preferred_auth_method: "apikey",
-    forced_login_method: "api",
     model_reasoning_effort: "high",
     model_catalog_json: catalogPath,
+    ...providerLayer,
   };
   if (mode === "switching") {
     if (document.profile === providerId || table(document.profiles).deepseek !== undefined) {
@@ -230,9 +230,9 @@ async function buildCodexConfig({
       );
     }
     return {
-      configContent: appendProviderLayer(originalContent, providerLayer),
+      configContent: originalContent,
       profileContent: stringify(profile),
-      gatewayProfileContent: undefined,
+      gatewayProfileContent: stringify({ version: 1, provider: providerId }),
     };
   }
 
@@ -251,25 +251,16 @@ async function buildCodexConfig({
   Object.assign(document, {
     model: supportedModel,
     model_provider: providerId,
-    preferred_auth_method: "apikey",
-    forced_login_method: "api",
     model_reasoning_effort: "high",
     model_catalog_json: catalogPath,
   });
+  delete document.preferred_auth_method;
+  delete document.forced_login_method;
   return {
     configContent: stringify(document),
     profileContent: undefined,
     gatewayProfileContent: undefined,
   };
-}
-
-function appendProviderLayer(originalContent, providerLayer) {
-  const providerContent = stringify(providerLayer);
-  if (originalContent === undefined || originalContent.length === 0) {
-    return providerContent;
-  }
-  const separator = originalContent.endsWith("\n") ? "\n" : "\n\n";
-  return `${originalContent}${separator}${providerContent}`;
 }
 
 async function preserveInitialConfig({

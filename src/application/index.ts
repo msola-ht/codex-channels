@@ -7,7 +7,16 @@ export {
   type AccountRateLimits,
   type AccountRateLimitWindow,
   type AccountUsage,
+  type ProviderAccountAdapter,
+  type ProviderAccountLimits,
+  type ProviderAccountQueryPort,
+  type ProviderAccountUsage,
+  type ProviderBalance,
 } from "./account-port.js";
+export {
+  ProviderAccountService,
+  createOpenAiAccountAdapter,
+} from "./provider-account-service.js";
 export {
   CollaborationModeSelectionService,
   type CollaborationModeState,

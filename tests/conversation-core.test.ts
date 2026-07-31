@@ -119,6 +119,7 @@ describe("ConversationCore", () => {
       targetForThread: () => target,
       modelSettingsForThread: () => ({
         model: "gpt-main",
+        modelProvider: "openai",
         effort: "high",
         serviceTier: "fast",
       }),
@@ -169,6 +170,7 @@ describe("ConversationCore", () => {
     expect(completions[0]).toMatchObject({
       turnId: "turn-1",
       model: "gpt-main",
+      modelProvider: "openai",
       effort: "high",
       serviceTier: "fast",
       weeklyLimit: {
@@ -182,6 +184,50 @@ describe("ConversationCore", () => {
       },
     });
     expect(completions[1]).not.toHaveProperty("tokenUsage");
+  });
+
+  it("does not attach OpenAI account limits to a third-party Provider completion", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+    const core = new ConversationCore({
+      allBindings: () => [],
+      targetForThread: () => target,
+      modelSettingsForThread: () => ({
+        model: "deepseek-v4-flash",
+        modelProvider: "deepseek",
+        effort: "high",
+        serviceTier: null,
+      }),
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+    core.rememberRateLimits([{
+      limitId: "codex",
+      limitName: "Codex",
+      primary: null,
+      secondary: { usedPercent: 42, windowDurationMins: 10_080, resetsAt: null },
+      credits: null,
+      individualLimit: null,
+      spendControlReached: false,
+      planType: "pro",
+      rateLimitReachedType: null,
+    }]);
+
+    handleNotification(core, {
+      method: "turn/completed",
+      params: {
+        threadId: "thread-deepseek",
+        turn: { id: "turn-1", status: "completed", error: null },
+      },
+    });
+    await output.close();
+
+    const completion = events.find((event) => event.type === "turn.completed");
+    expect(completion).toMatchObject({ modelProvider: "deepseek" });
+    expect(completion).not.toHaveProperty("weeklyLimit");
   });
 
   it("restores and deduplicates completed context compactions for thread status", async () => {

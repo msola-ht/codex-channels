@@ -24,6 +24,7 @@ export {
   conversationTargetKey,
   gatewayUserMessageClientIdPrefix,
   isCriticalOutputEvent,
+  usesOpenAiAccount,
   surfaceAccountKey,
   type ConversationTarget,
   type OperationKind,

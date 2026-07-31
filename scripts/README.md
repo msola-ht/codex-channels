@@ -9,9 +9,9 @@
   委派给具体适配器。
 - `deepseek-setup.mjs`：提供 OpenAI/DeepSeek 切换和仅 DeepSeek 两种安装模式；只下载、不执行
   DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小、JSON 与 Flash 模型后写入用户
-  `CODEX_HOME`。切换模式只在基础配置中登记共享 App Server 必需的 DeepSeek Provider，不改变
-  OpenAI 默认模型或授权，并按 Codex 新版独立 Profile 文件格式写入 CLI 使用的
-  `deepseek.config.toml`；首次修改前记录原配置和同名 Profile 是否存在并备份原文，固定模式显式
+  `CODEX_HOME`。切换模式保持基础配置不变，按 Codex 新版独立 Profile 文件格式把模型、Provider
+  与 API Key 写入 CLI 使用的 `deepseek.config.toml`，并写入不含凭据的 Gateway 管理标记；
+  首次修改前记录原配置和同名 Profile 是否存在并备份原文，固定模式显式
   确认后才覆盖默认 Provider，恢复选项可精确还原首次安装状态。
 - `deepseek-setup.d.mts`：声明 DeepSeek Setup 的公开脚本类型。
 - `terminal-prompter.mjs`：为各通讯渠道 Setup 提供最小的终端文本、确认和可见凭据输入接口。

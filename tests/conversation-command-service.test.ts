@@ -211,8 +211,8 @@ describe("ConversationCommandService", () => {
     const listSkills = vi.fn(async () => ["skill"]);
     const listMcpServers = vi.fn(async () => ["mcp"]);
     const listPlugins = vi.fn(async () => ({ plugins: ["plugin"] }));
-    const accountUsage = vi.fn(async () => ({ usage: "usage" }));
-    const accountRateLimits = vi.fn(async () => ({ limits: "limits" }));
+    const providerAccountUsage = vi.fn(async () => ({ usage: "usage" }));
+    const providerAccountLimits = vi.fn(async () => ({ limits: "limits" }));
     const listPermissionProfiles = vi.fn(async () => ["permissions"]);
     const commands = new ConversationCommandService({
       modelState,
@@ -222,8 +222,8 @@ describe("ConversationCommandService", () => {
       listSkills,
       listMcpServers,
       listPlugins,
-      accountUsage,
-      accountRateLimits,
+      providerAccountUsage,
+      providerAccountLimits,
       listPermissionProfiles,
     } as unknown as ConversationService);
 
@@ -348,8 +348,8 @@ describe("ConversationCommandService", () => {
       })),
       listMcpServers: vi.fn(async () => []),
       listPlugins: vi.fn(async () => ({})),
-      accountUsage: vi.fn(async () => ({})),
-      accountRateLimits: vi.fn(async () => ({})),
+      providerAccountUsage: vi.fn(async () => ({})),
+      providerAccountLimits: vi.fn(async () => ({})),
       listPermissionProfiles: vi.fn(async () => []),
       initializeProjectRules: vi.fn(async () => ({
         projectRoot: "/workspace",
@@ -385,8 +385,8 @@ describe("ConversationCommandService", () => {
       ["skill", "", "listSkills"],
       ["mcp", "", "listMcpServers"],
       ["plugins", "", "listPlugins"],
-      ["usage", "", "accountUsage"],
-      ["limits", "", "accountRateLimits"],
+      ["usage", "", "providerAccountUsage"],
+      ["limits", "", "providerAccountLimits"],
       ["permissions", "", "listPermissionProfiles"],
       ["rules", "init", "initializeProjectRules"],
       ["diff", "", "artifacts"],

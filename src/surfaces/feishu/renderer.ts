@@ -58,6 +58,7 @@ export function renderFeishuStartupNotification(
     | "threadId"
     | "workspaceId"
     | "model"
+    | "modelProvider"
     | "effort"
     | "serviceTier"
     | "modelPending"

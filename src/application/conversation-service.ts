@@ -5,6 +5,9 @@ import type {
   AccountQueryPort,
   AccountRateLimits,
   AccountUsage,
+  ProviderAccountLimits,
+  ProviderAccountQueryPort,
+  ProviderAccountUsage,
 } from "./account-port.js";
 import type { InstalledSkill, SkillQueryPort } from "./skill-port.js";
 import type { McpQueryPort, McpServerSummary } from "./mcp-port.js";
@@ -20,6 +23,7 @@ import {
   UserFacingError,
   conversationTargetKey,
   gatewayUserMessageClientIdPrefix,
+  usesOpenAiAccount,
   type ConversationTarget,
   type RateLimitSnapshot,
   type SurfaceId,
@@ -108,6 +112,7 @@ export interface ConversationStatus {
   cwd: string;
   gitBranch?: string;
   model: string;
+  modelProvider?: string;
   effort: string | null;
   serviceTier: string | null;
   modelPending: boolean;
@@ -135,6 +140,7 @@ export class ConversationService {
     private readonly workspaceStatus?: WorkspaceStatusPort,
     private readonly collaborationModes?: CollaborationModeSelectionService,
     private readonly transfers?: ConversationTransferPort,
+    private readonly providerAccounts?: ProviderAccountQueryPort,
   ) {}
 
   submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission> {
@@ -615,6 +621,20 @@ export class ConversationService {
     return this.queries.accountRateLimits();
   }
 
+  providerAccountUsage(target: ConversationTarget): Promise<ProviderAccountUsage> {
+    const provider = this.models.status(target).modelProvider ?? "openai";
+    return this.providerAccounts
+      ? this.providerAccounts.accountUsage(provider)
+      : Promise.resolve({ kind: "unsupported", provider });
+  }
+
+  providerAccountLimits(target: ConversationTarget): Promise<ProviderAccountLimits> {
+    const provider = this.models.status(target).modelProvider ?? "openai";
+    return this.providerAccounts
+      ? this.providerAccounts.accountLimits(provider)
+      : Promise.resolve({ kind: "unsupported", provider });
+  }
+
   listPermissionProfiles(target: ConversationTarget): Promise<PermissionProfileOption[]> {
     return this.queries.listPermissionProfiles(this.router.workspace(target).cwd);
   }
@@ -688,8 +708,10 @@ export class ConversationService {
     const contextCompactionCount = binding
       ? this.core.contextCompactionCount(binding.threadId)
       : undefined;
-    const weeklyLimit = this.core.weeklyRateLimit();
     const model = this.models.status(target);
+    const weeklyLimit = usesOpenAiAccount(model.modelProvider)
+      ? this.core.weeklyRateLimit()
+      : undefined;
     const collaborationMode = this.collaborationModes?.status(target) ?? {
       mode: "default" as const,
       pending: false,
@@ -709,6 +731,7 @@ export class ConversationService {
       cwd: workspace.cwd,
       ...(gitBranch ? { gitBranch } : {}),
       model: model.model,
+      ...(model.modelProvider ? { modelProvider: model.modelProvider } : {}),
       effort: model.effort,
       serviceTier: model.serviceTier,
       modelPending: model.modelPending,

@@ -41,6 +41,7 @@ export function renderWeixinStartupNotification(
     | "threadId"
     | "workspaceId"
     | "model"
+    | "modelProvider"
     | "effort"
     | "serviceTier"
     | "modelPending"

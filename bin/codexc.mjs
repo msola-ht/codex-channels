@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { configEventQueuePath } from "../runtime/config-event-queue.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { resolveProxyEnvironment } from "../runtime/network-proxy.mjs";
+import { loadManagedModelProvider } from "../runtime/model-provider-runtime.mjs";
 import {
   initializeUserData,
   packageDir,
@@ -279,13 +280,25 @@ function runServiceAppServer(args) {
     runtime.dataDir,
     join(runtime.dataDir, "runtime", "codex-app-server.sock"),
   );
+  const managedProvider = loadManagedModelProvider(runtime.environment);
+  const providerArguments = managedProvider === undefined ? [] : [
+    "-c", `model_providers.${managedProvider.provider}.name=${JSON.stringify(managedProvider.name)}`,
+    "-c", `model_providers.${managedProvider.provider}.base_url=${JSON.stringify(managedProvider.baseUrl)}`,
+    "-c", `model_providers.${managedProvider.provider}.wire_api=${JSON.stringify(managedProvider.wireApi)}`,
+    "-c", `model_providers.${managedProvider.provider}.env_key=${JSON.stringify(managedProvider.childEnvironmentKey)}`,
+    "-c", `model_providers.${managedProvider.provider}.requires_openai_auth=false`,
+  ];
   const child = spawn(runtime.environment.CODEX_BINARY, [
+    ...providerArguments,
     "app-server",
     "--listen",
     `unix://${socketPath}`,
   ], {
     stdio: "inherit",
-    env: runtime.environment,
+    env: managedProvider === undefined ? runtime.environment : {
+      ...runtime.environment,
+      [managedProvider.childEnvironmentKey]: managedProvider.apiKey,
+    },
     cwd: defaultWorkspace.cwd,
   });
   forwardChildLifecycle(child);

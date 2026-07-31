@@ -21,6 +21,7 @@ export interface ModelSelectionState {
   modelPending: boolean;
   effortPending: boolean;
   serviceTierPending: boolean;
+  providerPending?: boolean;
 }
 
 const standardServiceTierRequestValue = "default";
@@ -88,17 +89,7 @@ export class ModelSelectionService {
     const selectedProvider = selected.provider ?? "openai";
     const providerChanged = selectedProvider !== current.modelProvider;
     if (providerChanged) {
-      if (this.router.current(target)) {
-        await this.router.fork(target, {
-          model: selected.model,
-          modelProvider: selectedProvider,
-          ...(selected.catalogPath
-            ? { config: { model_catalog_json: selected.catalogPath } }
-            : {}),
-        });
-      } else {
-        await this.router.newSession(target);
-      }
+      await this.router.newSession(target);
     }
     const supported = selected.supportedReasoningEfforts.map((option) => option.effort);
     const effort = current.effort && supported.includes(current.effort)
@@ -226,6 +217,7 @@ export class ModelSelectionService {
       modelPending: hasOverride(pending, "model"),
       effortPending: hasOverride(pending, "effort"),
       serviceTierPending,
+      providerPending: hasOverride(pending, "modelProvider"),
     };
   }
 
@@ -258,6 +250,7 @@ export class ModelSelectionService {
       modelPending: hasOverride(pending, "model"),
       effortPending: hasOverride(pending, "effort"),
       serviceTierPending,
+      providerPending: hasOverride(pending, "modelProvider"),
     };
   }
 

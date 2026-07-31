@@ -6,12 +6,14 @@ import type {
   OutputEvent,
   ThreadGoal,
 } from "../conversation-core/index.js";
+import { usesOpenAiAccount } from "../conversation-core/index.js";
 
 import {
   formatPercent,
   formatRateLimitWindow,
 } from "./account-format.js";
 import { formatElapsedDuration } from "./elapsed-duration.js";
+import { formatProviderLabel } from "./provider-format.js";
 
 export interface LifecyclePresentation {
   title: string;
@@ -43,6 +45,7 @@ type StartupStatus = Pick<
   | "threadId"
   | "workspaceId"
   | "model"
+  | "modelProvider"
   | "effort"
   | "serviceTier"
   | "modelPending"
@@ -103,20 +106,26 @@ export function createStartupPresentation(
             value: `${status.model}${pendingSuffix(status.modelPending)}`,
           },
           {
+            label: "Provider",
+            value: formatProviderLabel(status.modelProvider ?? "openai"),
+          },
+          {
             label: "思考强度",
             value: `${status.effort ?? "模型默认"}${pendingSuffix(status.effortPending)}`,
           },
-          {
-            label: "Fast 模式",
-            value: `${status.threadId
-              ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭")
-              : "未知"}${pendingSuffix(status.fastModePending)}`,
-          },
+          ...(usesOpenAiAccount(status.modelProvider)
+            ? [{
+                label: "Fast 模式",
+                value: `${status.threadId
+                  ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭")
+                  : "未知"}${pendingSuffix(status.fastModePending)}`,
+              }]
+            : []),
           {
             label: "协作模式",
             value: `${status.collaborationMode === "plan" ? "Plan" : "Default"}${pendingSuffix(status.collaborationModePending)}`,
           },
-          ...(status.weeklyLimit
+          ...(usesOpenAiAccount(status.modelProvider) && status.weeklyLimit
             ? [{
                 label: "周限",
                 value: formatWeeklyLimit(status.weeklyLimit),
@@ -167,7 +176,13 @@ export function createTurnCompletedPresentation(
   if (event.model) {
     fields.push({
       label: "模型",
-      value: `${event.model} · ${event.effort ?? "模型默认"} · Fast ${isFastServiceTier(event.serviceTier ?? null) ? "开启" : "关闭"}`,
+      value: usesOpenAiAccount(event.modelProvider)
+        ? `${event.model} · ${event.effort ?? "模型默认"} · Fast ${isFastServiceTier(event.serviceTier ?? null) ? "开启" : "关闭"}`
+        : `${event.model} · ${event.effort ?? "模型默认"}`,
+    });
+    fields.push({
+      label: "Provider",
+      value: formatProviderLabel(event.modelProvider ?? "openai"),
     });
   }
   if (event.contextCompactionCount !== undefined) {
@@ -176,7 +191,7 @@ export function createTurnCompletedPresentation(
       value: `${event.contextCompactionCount} 次`,
     });
   }
-  if (event.weeklyLimit) {
+  if (usesOpenAiAccount(event.modelProvider) && event.weeklyLimit) {
     fields.push({
       label: "周限",
       value: formatWeeklyLimit(event.weeklyLimit),

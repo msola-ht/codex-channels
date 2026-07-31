@@ -20,7 +20,7 @@ describe("Weixin command renderer", () => {
 
   it("renders shared command sections and fields as compact Markdown lists", () => {
     expect(formatWeixinCommandText([
-      "Codex 额度：",
+      "OpenAI Codex 额度：",
       "套餐：Pro",
       "",
       "GPT-5.3-Codex-Spark：",
@@ -33,7 +33,7 @@ describe("Weixin command renderer", () => {
       "消费控制：正常",
       "限流状态：正常",
     ].join("\n"), { structuredFields: true })).toBe([
-      "**Codex 额度**",
+      "**OpenAI Codex 额度**",
       "- 套餐：Pro",
       "",
       "**GPT-5.3-Codex-Spark**",
@@ -156,21 +156,26 @@ describe("Weixin command renderer", () => {
       {
         kind: "usage",
         result: {
-          summary: {
-            lifetimeTokens: null,
-            peakDailyTokens: null,
-            longestRunningTurnSec: null,
-            currentStreakDays: null,
-            longestStreakDays: null,
+          kind: "token-usage",
+          provider: "openai",
+          usage: {
+            summary: {
+              lifetimeTokens: null,
+              peakDailyTokens: null,
+              longestRunningTurnSec: null,
+              currentStreakDays: null,
+              longestStreakDays: null,
+            },
+            daily: [],
           },
-          daily: [],
         },
       },
       {
         kind: "limits",
         result: {
-          limits: [],
-          resetCreditsAvailable: null,
+          kind: "rate-limits",
+          provider: "openai",
+          limits: { limits: [], resetCreditsAvailable: null },
         },
       },
       { kind: "permissions", profiles: [] },
@@ -197,7 +202,7 @@ describe("Weixin command renderer", () => {
       "当前没有已启用的 Skills。",
       "MCP Servers（0）：",
       "当前没有已安装 Plugins。",
-      expect.stringContaining("Codex 用量摘要"),
+      expect.stringContaining("OpenAI Codex 账户用量摘要"),
       expect.stringContaining("Codex 额度"),
       expect.stringContaining("可用 Permission Profiles"),
       expect.stringContaining("项目规则检查通过"),

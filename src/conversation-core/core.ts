@@ -10,6 +10,7 @@ import {
   type ThreadTokenUsage,
   type TurnArtifacts,
   isCriticalOutputEvent,
+  usesOpenAiAccount,
 } from "./events.js";
 import type { ConversationInputEvent } from "./input-events.js";
 import type { ConversationRoutingPort } from "./routing-port.js";
@@ -254,7 +255,9 @@ export class ConversationCore {
           ? this.usageByThread.get(event.threadId)
           : undefined;
         const modelSettings = this.router.modelSettingsForThread(event.threadId);
-        const weeklyLimit = this.weeklyRateLimit();
+        const weeklyLimit = usesOpenAiAccount(modelSettings?.modelProvider)
+          ? this.weeklyRateLimit()
+          : undefined;
         const goal = this.goalsByThread.get(event.threadId);
         const contextCompactionCount = this.contextCompactionCount(event.threadId);
         this.errorsByTurn.delete(event.turnId);
@@ -272,6 +275,7 @@ export class ConversationCore {
           ...(modelSettings
             ? {
                 model: modelSettings.model,
+                modelProvider: modelSettings.modelProvider ?? "openai",
                 effort: modelSettings.effort,
                 serviceTier: modelSettings.serviceTier,
               }

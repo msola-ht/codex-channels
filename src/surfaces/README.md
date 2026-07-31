@@ -69,18 +69,21 @@ Turn、Thread 或 Surface 关闭时清理。
 `quoted-input.ts` 把各平台已验证的回复/引用正文转换为有界、明确标记且与当前消息分离的上下文；
 引用获取仍由各 Surface 负责，不能读取 Gateway 私有历史或让引用内容参与命令解析。
 `lifecycle-presentation.ts` 统一 Telegram、飞书与微信的 Gateway 上线、Turn 开始确认和 Turn
-结束汇报信息模型、字段顺序与中文状态词；各 Surface 只保留 HTML、CardKit Markdown 或微信文本
-布局以及各自的发送策略。
+结束汇报信息模型、字段顺序与中文状态词；它显示当前 Provider，保留 Provider 通用的 Thread
+Token/上下文指标，并只在 OpenAI Thread 显示 Fast 与 OpenAI 周限；各 Surface 只保留 HTML、
+CardKit Markdown 或微信文本布局以及各自的发送策略。
 `elapsed-duration.ts` 只把 App Server 已提供的 Turn 毫秒耗时或账户用量秒数格式化为三个
 Surface 共用的中文短文本，不负责计时、状态或持久化。
 `account-format.ts` 统一套餐名称、额度状态、百分比、周期与重置时间格式，供命令结果、运行时通知
 和生命周期汇报复用。
+`provider-format.ts` 统一已知 Provider 显示名，并对后续 Provider 标识做有界展示。
 `slash-command.ts` 统一飞书与微信的严格斜杠命令解析，并规范化三个渠道共同公开的
 `/h`、`/work`、`/r` 快捷命令；Telegram 在 Bot 注册边界接入同一组显式映射。
 `conversation-command-format.ts`
 统一 Telegram、飞书与微信共用的分组命令目录、有界会话列表、Workspace、Skill、MCP、Plugin、
-权限、项目规则、Diff、Goal、模型选择、Default/Plan 模式、用量与额度等平台无关命令结果文案
-与状态文本。`/skill` 返回带序号的已启用项，`/skill <名称或序号> <任务>` 通过 Application
+权限、项目规则、Diff、Goal、模型选择、Default/Plan 模式、Provider 感知的用量与额度等平台无关
+命令结果文案与状态文本；DeepSeek `/usage` 显示余额，未支持的 Provider 明确说明能力缺失。
+`/skill` 返回带序号的已启用项，`/skill <名称或序号> <任务>` 通过 Application
 提交官方结构化 Skill 输入；Surface 不接收或拼装本机 Skill 路径。
 `user-facing-error-format.ts` 统一三个渠道的结构化用户错误文案，只保留渠道名称差异；
 `error-metadata.ts` 统一渠道日志中的受约束异常类型、机器错误码和锁定 App Server

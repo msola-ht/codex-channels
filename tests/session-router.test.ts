@@ -256,6 +256,7 @@ describe("SessionRouter", () => {
     });
     expect(router.modelSettings(target)).toEqual({
       model: "gpt-updated",
+      modelProvider: "openai",
       effort: "xhigh",
       serviceTier: "default",
       collaborationMode: "plan",

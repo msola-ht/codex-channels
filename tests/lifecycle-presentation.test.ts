@@ -59,6 +59,7 @@ describe("shared Surface lifecycle presentation", () => {
       "Thread：thread-1",
       "Git 分支：feature/lifecycle",
       "模型：gpt-test",
+      "Provider：OpenAI",
       "思考强度：medium",
       "Fast 模式：开启",
       "协作模式：Default",
@@ -90,6 +91,7 @@ describe("shared Surface lifecycle presentation", () => {
           modelContextWindow: 100_000,
         },
         model: "gpt-test",
+        modelProvider: "openai",
         effort: "medium",
         serviceTier: "priority",
         contextCompactionCount: 2,
@@ -119,12 +121,45 @@ describe("shared Surface lifecycle presentation", () => {
       "上下文：10 K / 100 K（10%）",
       "缓存命中：75%",
       "模型：gpt-test · medium · Fast 开启",
+      "Provider：OpenAI",
       "上下文压缩：2 次",
       "周限：已使用 37%",
       "Goal：进行中 · 12.5 K / 100 K",
       "Git 分支：feature/lifecycle",
       "耗时：1分5秒",
     ].join("\n"));
+  });
+
+  it("keeps Thread metrics but hides OpenAI-only fields for DeepSeek", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: { surface: "feishu", accountId: "default", conversationId: "chat" },
+        threadId: "thread-deepseek",
+        turnId: "turn-deepseek",
+        status: "completed",
+        tokenUsage: {
+          total: tokenBreakdown(30_000, 20_000, 10_000),
+          last: tokenBreakdown(20_000, 16_000, 8_000),
+          modelContextWindow: 1_048_576,
+        },
+        model: "deepseek-v4-flash",
+        modelProvider: "deepseek",
+        effort: "high",
+        serviceTier: null,
+        weeklyLimit: {
+          usedPercent: 90,
+          windowDurationMins: 10_080,
+          resetsAt: null,
+        },
+      }),
+    );
+
+    expect(rendered).toContain("上下文：20 K / 1.05 M");
+    expect(rendered).toContain("模型：deepseek-v4-flash · high");
+    expect(rendered).toContain("Provider：DeepSeek");
+    expect(rendered).not.toContain("Fast");
+    expect(rendered).not.toContain("周限");
   });
 });
 

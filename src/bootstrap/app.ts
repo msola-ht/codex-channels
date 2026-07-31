@@ -31,6 +31,8 @@ import {
   CollaborationModeSelectionService,
   ConversationService,
   ModelSelectionService,
+  ProviderAccountService,
+  createOpenAiAccountAdapter,
 } from "../application/index.js";
 import {
   ConversationCore,
@@ -50,6 +52,8 @@ import {
 } from "./surface-composition.js";
 import type { SurfaceRuntimeModule } from "./surface-plugin.js";
 import { SurfaceManager } from "./surface-manager.js";
+import { createDeepseekAccountAdapter } from "./deepseek-account-adapter.js";
+import { createProxyFetch } from "./proxy-fetch.js";
 
 export class GatewayApplication {
   private readonly transport: UnixWebSocketTransport;
@@ -112,6 +116,12 @@ export class GatewayApplication {
       this.router,
       models,
     );
+    const providerAccounts = new ProviderAccountService([
+      createOpenAiAccountAdapter(this.codex),
+      createDeepseekAccountAdapter({
+        fetchImpl: createProxyFetch(config.networkProxy),
+      }),
+    ]);
     const service = new ConversationService(
       this.codex,
       this.router,
@@ -146,6 +156,7 @@ export class GatewayApplication {
           }, true);
         },
       },
+      providerAccounts,
     );
     this.output.subscribe("conversation-follow-up", async (event) => {
       if (event.type !== "turn.completed") {

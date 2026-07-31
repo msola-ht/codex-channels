@@ -339,35 +339,43 @@ describe("shared surface copy contract", () => {
       {
         kind: "usage",
         result: {
-          summary: {
-            lifetimeTokens: 1_000_000,
-            peakDailyTokens: 100_000,
-            longestRunningTurnSec: 60,
-            currentStreakDays: 2,
-            longestStreakDays: 3,
+          kind: "token-usage",
+          provider: "openai",
+          usage: {
+            summary: {
+              lifetimeTokens: 1_000_000,
+              peakDailyTokens: 100_000,
+              longestRunningTurnSec: 60,
+              currentStreakDays: 2,
+              longestStreakDays: 3,
+            },
+            daily: [{ startDate: "2026-07-28", tokens: 100_000 }],
           },
-          daily: [{ startDate: "2026-07-28", tokens: 100_000 }],
         },
       },
       {
         kind: "limits",
         result: {
-          limits: [{
-            limitId: "codex",
-            limitName: "周限",
-            primary: {
-              usedPercent: 12,
-              windowDurationMins: 10_080,
-              resetsAt: null,
-            },
-            secondary: null,
-            credits: null,
-            individualLimit: null,
-            spendControlReached: false,
-            planType: "plus",
-            rateLimitReachedType: null,
-          }],
-          resetCreditsAvailable: null,
+          kind: "rate-limits",
+          provider: "openai",
+          limits: {
+            limits: [{
+              limitId: "codex",
+              limitName: "周限",
+              primary: {
+                usedPercent: 12,
+                windowDurationMins: 10_080,
+                resetsAt: null,
+              },
+              secondary: null,
+              credits: null,
+              individualLimit: null,
+              spendControlReached: false,
+              planType: "plus",
+              rateLimitReachedType: null,
+            }],
+            resetCreditsAvailable: null,
+          },
         },
       },
     ];

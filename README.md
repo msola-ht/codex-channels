@@ -97,9 +97,9 @@ plan_updates = false
 运行 `codexc setup`，选择“模型提供方”，填写 DeepSeek API Key 后选择：
 
 - OpenAI + DeepSeek 切换模式：保留 OpenAI 为原生 Codex 默认；终端使用 `codex` 启动 OpenAI，
-  使用 `codex --profile deepseek` 启动 DeepSeek。基础 `~/.codex/config.toml` 只登记共享 App Server
-  必需的 DeepSeek Provider，不改变 OpenAI 默认模型或授权；三个聊天渠道仍可在 `/model` 中逐会话
-  选择模型。
+  使用 `codex --profile deepseek` 启动 DeepSeek。基础 `~/.codex/config.toml` 完全保持不变，
+  DeepSeek 的模型、Provider 和 API Key 只保存在 `~/.codex/deepseek.config.toml`；三个聊天渠道
+  仍可在 `/model` 中逐会话选择模型。
 - 仅 DeepSeek 固定模式：把原生 Codex 默认模型改为 `deepseek-v4-flash`，CLI、TUI、IDE 和 Gateway
   都默认使用 DeepSeek。
 - 恢复安装前配置：恢复首次安装前的原始文件；如果原来没有配置文件则移除 Setup 创建的配置，
@@ -109,16 +109,25 @@ Setup 从 DeepSeek 官方安装脚本下载并提取模型目录，校验后写�
 `~/.codex/deepseek.models.json`；该文件不随项目或 npm 包发布。目前 DeepSeek 官方仅声明
 `deepseek-v4-flash` 支持 Codex；Pro 会在 `/model` 中显示为“暂不可用”，且在官方支持前不能切换。
 
-切换模式把共享 App Server 所需的 Provider 注册写入权限为 `0600` 的基础配置，并把 CLI 的模型、
-Provider 与认证选择写入官方新版 Profile 文件 `~/.codex/deepseek.config.toml`；不会改写 OpenAI
-默认模型或登录凭据。固定模式则按其含义直接在基础配置中注册并选中 DeepSeek。首次修改前，原配置
-及原有同名 Profile 会备份到
+切换模式把模型、Provider 和 API Key 都写入权限为 `0600` 的官方新版 Profile 文件
+`~/.codex/deepseek.config.toml`，并写入一个不含凭据的 Gateway 管理标记；不会改写 OpenAI 基础配置、
+默认模型或登录凭据。Codex 0.146 的 App Server 不支持 `--profile`，因此服务入口只在子进程启动时
+从该私有 Profile 读取 Key 到进程环境，并通过非敏感配置覆盖登记 Provider；Key 不进入命令行、
+服务定义或日志。固定模式则按其含义直接在基础配置中注册并选中 DeepSeek，同时不强制改变 Codex
+的登录方式。首次修改前，原配置及原有同名 Profile 会备份到
 `~/.codex/backup-codex-connect-deepseek/`。切换到另一 Provider 时不能原地修改正在
-使用的 Thread；如果当前会话已有空闲 Thread，渠道会通过官方 `thread/fork` 复制当前历史并绑定
-到所选 Provider，后续切回时继续从当前分支 Fork，因此话题上下文不会变成空白。旧 Thread 仍可恢复；
-当前没有 Thread 时才为所选 Provider 新建会话。
+使用的 Thread；渠道会保留并解绑当前 Thread，在下一条消息中为所选 Provider 新建 Thread，
+不复制可能包含 Provider 专属 reasoning、工具结果或加密内容的历史。旧 Thread 可通过 `/resume`
+恢复；同一 Provider 内切换模型仍在当前 Thread 的下一次 Turn 生效。
 Setup 完成或恢复后运行 `codexc service restart all`，让 App Server 重新读取 Provider，并让 Gateway
 重新载入下载的模型目录。
+
+TUI 和 `/status` 中的 Token、上下文窗口、缓存和压缩次数始终来自当前 Thread，适用于 OpenAI
+与第三方 Provider；它们不是账户余额。OpenAI 的 Fast 与周限不会显示在 DeepSeek 或未知 Provider
+上。`/usage` 按当前 Thread 的 Provider 查询账户信息：
+OpenAI 显示 Codex Token 汇总，DeepSeek 使用官方余额接口显示 API 可用状态与余额；`/limits`
+当前只对 OpenAI 提供额度窗口，未接入账户能力的后续 Provider 会明确显示不支持，不会回退为
+OpenAI 数据。
 
 ## 日常使用
 

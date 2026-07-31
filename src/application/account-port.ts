@@ -70,3 +70,30 @@ export interface AccountQueryPort {
   accountUsage(): Promise<AccountUsage>;
   accountRateLimits(): Promise<AccountRateLimits>;
 }
+
+export interface ProviderBalance {
+  currency: "CNY" | "USD";
+  totalBalance: string;
+  grantedBalance: string;
+  toppedUpBalance: string;
+}
+
+export type ProviderAccountUsage =
+  | { kind: "token-usage"; provider: "openai"; usage: AccountUsage }
+  | { kind: "balance"; provider: string; available: boolean; balances: ProviderBalance[] }
+  | { kind: "unsupported"; provider: string };
+
+export type ProviderAccountLimits =
+  | { kind: "rate-limits"; provider: "openai"; limits: AccountRateLimits }
+  | { kind: "unsupported"; provider: string };
+
+export interface ProviderAccountAdapter {
+  provider: string;
+  accountUsage(): Promise<ProviderAccountUsage>;
+  accountLimits?(): Promise<ProviderAccountLimits>;
+}
+
+export interface ProviderAccountQueryPort {
+  accountUsage(modelProvider: string): Promise<ProviderAccountUsage>;
+  accountLimits(modelProvider: string): Promise<ProviderAccountLimits>;
+}

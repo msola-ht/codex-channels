@@ -71,8 +71,8 @@ export type ConversationCommandResult =
   | { kind: "skills"; entries: Awaited<ReturnType<ConversationService["listSkills"]>> }
   | { kind: "mcp"; servers: Awaited<ReturnType<ConversationService["listMcpServers"]>> }
   | { kind: "plugins"; result: Awaited<ReturnType<ConversationService["listPlugins"]>> }
-  | { kind: "usage"; result: Awaited<ReturnType<ConversationService["accountUsage"]>> }
-  | { kind: "limits"; result: Awaited<ReturnType<ConversationService["accountRateLimits"]>> }
+  | { kind: "usage"; result: Awaited<ReturnType<ConversationService["providerAccountUsage"]>> }
+  | { kind: "limits"; result: Awaited<ReturnType<ConversationService["providerAccountLimits"]>> }
   | {
       kind: "permissions";
       profiles: Awaited<ReturnType<ConversationService["listPermissionProfiles"]>>;
@@ -334,12 +334,12 @@ export class ConversationCommandService {
       case "usage":
         return {
           kind: "usage",
-          result: await this.conversations.accountUsage(),
+          result: await this.conversations.providerAccountUsage(target),
         };
       case "limits":
         return {
           kind: "limits",
-          result: await this.conversations.accountRateLimits(),
+          result: await this.conversations.providerAccountLimits(target),
         };
       case "permissions":
         return {

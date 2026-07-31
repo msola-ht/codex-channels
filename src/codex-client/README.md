@@ -52,7 +52,8 @@
   `plugin/installed`，不得改用 `plugin/list` 加载市场目录；Permission Profile 按 CWD 分页，
   仅用于只读目录展示。
   新 Thread 和 Fork 可显式携带官方 `modelProvider` 与受控 `model_catalog_json`；已有 Thread
-  不在 Turn 覆盖中更换 Provider，跨 Provider 由 Application/Router 通过 Fork 保留历史。
+  不在 Turn 覆盖中更换 Provider。Application 跨 Provider 选择时新建 Thread；`thread/fork`
+  只用于用户显式创建同一 Provider 的历史分支，不承担跨 Provider 历史转换。
 
 本模块不得调用 Telegram API、生成平台文案或保存业务绑定。协议字段必须来自
 `codex-protocol`；无参数请求和通知不得自行补空对象，写操作不得在过载或断线后盲目重试。

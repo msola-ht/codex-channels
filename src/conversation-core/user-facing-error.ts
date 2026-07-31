@@ -38,6 +38,7 @@ export type UserFacingErrorCode =
   | "effort.unsupported"
   | "fast.usage"
   | "fast.unsupported"
+  | "provider.account.unavailable"
   | "collaboration-mode.unsupported"
   | "collaboration-mode.unavailable"
   | "plan.prompt.empty"
