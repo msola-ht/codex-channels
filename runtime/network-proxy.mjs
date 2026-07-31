@@ -42,6 +42,26 @@ export function resolveHttpProxyUrl(explicitProxy, proxyEnvironment = {}) {
   const normalized = stringValue(explicitProxy)
     || stringValue(proxyEnvironment.HTTPS_PROXY)
     || stringValue(proxyEnvironment.HTTP_PROXY);
+  return validateHttpProxyUrl(normalized);
+}
+
+export function selectHttpProxyUrl(proxy, target, explicitProxy) {
+  const explicit = stringValue(explicitProxy);
+  if (explicit) {
+    return validateHttpProxyUrl(explicit);
+  }
+  const targetUrl = target instanceof URL ? target : new URL(target);
+  if (matchesNoProxy(targetUrl, proxy.no)) {
+    return undefined;
+  }
+  const selected = targetUrl.protocol === "http:"
+    ? stringValue(proxy.http) || stringValue(proxy.all)
+    : stringValue(proxy.https) || stringValue(proxy.http) || stringValue(proxy.all);
+  return validateHttpProxyUrl(selected);
+}
+
+function validateHttpProxyUrl(value) {
+  const normalized = stringValue(value);
   if (!normalized) {
     return undefined;
   }
@@ -55,6 +75,64 @@ export function resolveHttpProxyUrl(explicitProxy, proxyEnvironment = {}) {
     throw new Error("HTTP(S) 客户端代理只支持 http:// 或 https://");
   }
   return parsed.toString();
+}
+
+function matchesNoProxy(targetUrl, noProxy) {
+  const targetHostname = normalizedHostname(targetUrl.hostname);
+  const targetPort = targetUrl.port || defaultPort(targetUrl.protocol);
+  return stringValue(noProxy).split(",").some((rawEntry) => {
+    const parsed = parseNoProxyEntry(rawEntry);
+    if (!parsed) {
+      return false;
+    }
+    if (parsed.hostname === "*") {
+      return true;
+    }
+    if (parsed.port && parsed.port !== targetPort) {
+      return false;
+    }
+    const hostname = parsed.hostname.startsWith("*.")
+      ? parsed.hostname.slice(1)
+      : parsed.hostname;
+    return hostname.startsWith(".")
+      ? targetHostname === hostname.slice(1) || targetHostname.endsWith(hostname)
+      : targetHostname === hostname;
+  });
+}
+
+function parseNoProxyEntry(value) {
+  const entry = stringValue(value).toLowerCase();
+  if (!entry) {
+    return undefined;
+  }
+  if (entry.startsWith("[")) {
+    const match = /^\[([^\]]+)\](?::(\d+))?$/u.exec(entry);
+    return match
+      ? { hostname: normalizedHostname(match[1]), port: match[2] || "" }
+      : { hostname: entry, port: "" };
+  }
+  const portMatch = /^(.*):(\d+)$/u.exec(entry);
+  return {
+    hostname: normalizedHostname(portMatch?.[1] ?? entry),
+    port: portMatch?.[2] ?? "",
+  };
+}
+
+function normalizedHostname(value) {
+  const hostname = stringValue(value).toLowerCase();
+  return hostname.startsWith("[") && hostname.endsWith("]")
+    ? hostname.slice(1, -1)
+    : hostname;
+}
+
+function defaultPort(protocol) {
+  if (protocol === "http:") {
+    return "80";
+  }
+  if (protocol === "https:") {
+    return "443";
+  }
+  return "";
 }
 
 export function readMacSystemProxy(output = run("/usr/sbin/scutil", ["--proxy"])) {

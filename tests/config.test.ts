@@ -439,7 +439,7 @@ describe("Gateway config.toml", () => {
     })).toThrow(ConfigurationError);
   });
 
-  it("prefers the Telegram proxy and otherwise uses the network proxy", () => {
+  it("keeps the Telegram proxy explicit and resolves shared proxies separately", () => {
     const explicit = createFixture({
       telegram: {
         bot_token: "secret",
@@ -456,9 +456,11 @@ describe("Gateway config.toml", () => {
     expect(loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: explicit.configPath,
     }).config.telegramProxyUrl).toBe("http://127.0.0.1:7897/");
-    expect(loadRuntimeConfig({
+    const fallbackConfig = loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fallback.configPath,
-    }).config.telegramProxyUrl).toBe("http://127.0.0.1:7890/");
+    }).config;
+    expect(fallbackConfig.telegramProxyUrl).toBeUndefined();
+    expect(fallbackConfig.networkProxy.https).toBe("http://127.0.0.1:7890");
   });
 
   it("uses inherited proxy variables when network config is empty", () => {
@@ -469,7 +471,7 @@ describe("Gateway config.toml", () => {
       NO_PROXY: "localhost",
     }).config;
 
-    expect(config.telegramProxyUrl).toBe("http://127.0.0.1:8899/");
+    expect(config.telegramProxyUrl).toBeUndefined();
     expect(config.networkProxy).toMatchObject({
       https: "http://127.0.0.1:8899",
       no: "localhost",

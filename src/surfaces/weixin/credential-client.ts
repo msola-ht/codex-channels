@@ -7,6 +7,7 @@ import {
 export interface CreateCredentialBackedWeixinClientOptions {
   accountId: string;
   credentialStore: WeixinCredentialStore;
+  fetchImpl?: typeof fetch;
   createClient?: typeof createWeixinProtocolClient;
 }
 
@@ -24,6 +25,9 @@ export function createCredentialBackedWeixinClient(
           accountId: credential.accountId,
           baseUrl: credential.baseUrl,
           botToken: credential.botToken,
+          ...(options.fetchImpl === undefined
+            ? {}
+            : { fetchImpl: options.fetchImpl }),
         });
       });
     return clientTask;

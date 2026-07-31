@@ -186,8 +186,6 @@ describe("configured Surface composition", () => {
         allowedUserIds: new Set(["actor-fixture@im.wechat"]),
       },
     });
-    const context = options(runtimeConfig);
-    const [module] = createSurfaceModules(context, [weixinSurfacePlugin]);
     const fetchImpl = vi.fn<typeof fetch>((input, init) => {
       const url = String(input);
       if (
@@ -212,6 +210,8 @@ describe("configured Surface composition", () => {
       });
     });
     vi.stubGlobal("fetch", fetchImpl);
+    const context = options(runtimeConfig);
+    const [module] = createSurfaceModules(context, [weixinSurfacePlugin]);
 
     try {
       await module?.adapter.start();
@@ -240,7 +240,7 @@ describe("configured Surface composition", () => {
     };
 
     expect(selectFeishuProxyUrl(proxy, "open.feishu.cn")).toBe(
-      "http://127.0.0.1:7891",
+      "http://127.0.0.1:7891/",
     );
     expect(selectFeishuProxyUrl(
       { ...proxy, no: "localhost,.feishu.cn" },
@@ -252,11 +252,11 @@ describe("configured Surface composition", () => {
     expect(() => selectFeishuProxyUrl(
       { all: "socks5://127.0.0.1:7890" },
       "open.feishu.cn",
-    )).toThrow("飞书代理只支持 http:// 或 https://");
+    )).toThrow("HTTP(S) 客户端代理只支持 http:// 或 https://");
     expect(() => selectFeishuProxyUrl(
       { https: "not a proxy URL" },
       "open.feishu.cn",
-    )).toThrow("飞书代理配置无效");
+    )).toThrow("HTTP(S) 代理不是有效 URL");
     expect(selectFeishuProxyUrl(
       {
         all: "socks5://127.0.0.1:7890",

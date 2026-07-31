@@ -9,7 +9,8 @@
   共享的 TOML 配置。
 - `gateway-config.d.mts`：声明共享 TOML 配置模块的 TypeScript 接口。
 - `network-proxy.mjs`：按 TOML、标准环境变量和受支持系统代理的顺序解析统一代理环境，只返回
-  实际解析出的大小写代理变量，并集中选择、校验 HTTP(S) 客户端代理。
+  实际解析出的大小写代理变量；集中按目标协议选择、校验 HTTP(S) 客户端代理并匹配
+  `NO_PROXY`。渠道显式代理优先于共享代理和 `NO_PROXY`。
 - `network-proxy.d.mts`：声明共享代理解析模块的 TypeScript 接口。
 - `project-rules.mjs`：生成并检查项目级 Codex 命令规则；Gateway 使用精确 Workspace 根目录，
   并拒绝通过符号链接把写入转移到 Workspace 外。

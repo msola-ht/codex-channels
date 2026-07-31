@@ -10,7 +10,8 @@
 - `credential-client.ts`：首次协议调用时从安全存储读取并缓存当前进程的凭据 Client；缺失或
   损坏凭据失败关闭，不把 Token 提升到 Bootstrap 配置或日志。
 - `factory.ts`：接收 Bootstrap 已决策的精确凭据、游标、回复上下文和上传目录，组合微信固定的
-  协议 Client、存储与媒体实现；一级 Surface 出口不暴露这些具体实现。
+  协议 Client、存储与媒体实现，并把同一个代理感知 Fetch 注入 JSON API、CDN 上传和下载；
+  一级 Surface 出口不暴露这些具体实现。
 - `updates-cursor-store.ts`：在 `data/weixin-updates` 下按账号 SHA-256 文件名保存严格版本 1
   `get_updates_buf`；目录 `0700`、文件 `0600`，临时文件原子替换，损坏、未知版本和符号链接
   失败关闭。

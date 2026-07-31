@@ -31,6 +31,7 @@ export interface CreateWeixinSurfaceOptions {
   startupNotification: WeixinStartupNotification;
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
+  fetchImpl?: typeof fetch;
   logger: Logger;
   onFatal(error: WeixinInputFatalError): void;
 }
@@ -44,6 +45,7 @@ export function createWeixinSurface(
   const client = createCredentialBackedWeixinClient({
     accountId: options.accountId,
     credentialStore,
+    ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
   });
   return new WeixinSurface({
     accountId: options.accountId,
@@ -60,9 +62,17 @@ export function createWeixinSurface(
     replyContextPersistence: createWeixinReplyContextPersistence(
       options.replyContextDirectory,
     ),
-    images: new WeixinImageStore(options.uploadsDirectory, options.logger),
-    files: new WeixinFileInput(),
-    audios: new WeixinAudioStore(options.uploadsDirectory, options.logger),
+    images: new WeixinImageStore(
+      options.uploadsDirectory,
+      options.logger,
+      options.fetchImpl,
+    ),
+    files: new WeixinFileInput(options.fetchImpl),
+    audios: new WeixinAudioStore(
+      options.uploadsDirectory,
+      options.logger,
+      options.fetchImpl,
+    ),
     startupNotification: options.startupNotification,
     ...(options.operationUpdateDisplay === undefined
       ? {}

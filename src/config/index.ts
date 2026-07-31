@@ -152,7 +152,7 @@ function loadValidatedConfigDocument(
   );
   let proxyUrl: string | undefined;
   try {
-    proxyUrl = resolveHttpProxyUrl(raw.telegram.proxy_url, proxyEnvironment);
+    proxyUrl = resolveHttpProxyUrl(raw.telegram.proxy_url);
   } catch (error) {
     throw new ConfigurationError(error instanceof Error ? error.message : String(error));
   }

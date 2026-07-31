@@ -16,6 +16,13 @@ export interface ProxyEnvironment {
   no_proxy?: string;
 }
 
+export interface HttpClientProxySettings {
+  http?: string;
+  https?: string;
+  all?: string;
+  no?: string;
+}
+
 export function resolveProxyEnvironment(
   configured?: ProxySettings,
   environment?: NodeJS.ProcessEnv,
@@ -28,6 +35,12 @@ export function resolveProxyEnvironment(
 export function resolveHttpProxyUrl(
   explicitProxy: string | undefined,
   proxyEnvironment?: ProxyEnvironment,
+): string | undefined;
+
+export function selectHttpProxyUrl(
+  proxy: HttpClientProxySettings,
+  target: string | URL,
+  explicitProxy?: string,
 ): string | undefined;
 
 export function readMacSystemProxy(output?: string): ProxySettings;

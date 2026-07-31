@@ -14,7 +14,10 @@
   实际 Surface ID 与账号实例唯一性。
 - `surface-composition.ts`：显式注册 Telegram、飞书和微信内置插件，并保留各平台访问策略、
   热加载钩子和故障上报装配。Telegram 插件始终创建一个实例；飞书和微信插件只在严格运行配置
-  启用时创建实例。微信协议 Client 在首次调用时从独立安全存储读取凭据，不把 Token 放入运行配置。
+  启用时创建实例。三个渠道按目标复用共享代理选择；微信协议 Client 在首次调用时从独立安全存储
+  读取凭据，不把 Token 放入运行配置。
+- `proxy-fetch.ts`：把共享 HTTP(S) 代理选择适配到微信使用的 Fetch 接口；命中 `NO_PROXY`
+  时使用直连 Fetch，否则通过按代理 URL 复用的 Undici Dispatcher 发出请求。
 - `config-lifecycle.ts`：管理配置监听、防抖重载、持久配置事件投递、信号与进程退出。
 - `surface-manager.ts`：按 `surface + accountId` 向已启动 Surface 集中路由 Core 输出，并为
   `turn.completed` 注入当前授权 Workspace 的 Git 分支；并行完成各 Surface 的首次启动，
