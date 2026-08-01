@@ -156,7 +156,8 @@ Thread 级冷恢复覆盖。任一 Provider 的连接单独断开时，只重连
 
 TUI 和 `/status` 中的 Token、有效上下文窗口、缓存和压缩次数始终来自当前 Thread，适用于 OpenAI
 与第三方 Provider；它们不是账户余额。`/status` 的累计值覆盖当前 Thread，最近模型请求值对应
-App Server 的最后一次模型响应；缓存输入是输入 Token 的子集，推理输出是输出 Token 的子集。
+App Server 的最后一次模型响应；输入总计会拆分为命中缓存与未命中缓存，缓存命中率固定显示两位
+小数；推理输出是输出 Token 的子集。
 OpenAI 的 Fast 与周限不会显示在 DeepSeek 或未知 Provider 上。`/usage` 按当前 Thread 的 Provider
 查询账户信息：
 OpenAI 显示 Codex Token 汇总，DeepSeek 使用官方余额接口显示 API 可用状态与余额；`/limits`

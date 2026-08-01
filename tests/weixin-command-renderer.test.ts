@@ -281,7 +281,7 @@ describe("Weixin command renderer", () => {
 
     expect(rendered).toContain("本次运行 · 已完成");
     expect(rendered).toContain("- 上下文：10 K / 100 K（10%）");
-    expect(rendered).toContain("最近请求缓存命中：75%");
+    expect(rendered).toContain("最近请求缓存命中：75.00%");
     expect(rendered).toContain("模型：gpt-test · medium · Fast 开启");
     expect(rendered).toContain("上下文压缩：2 次");
     expect(rendered).toContain("Git 分支：feature/weixin-surface");

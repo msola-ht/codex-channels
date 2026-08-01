@@ -486,8 +486,9 @@ export function formatConversationStatus(status: ConversationStatus): string {
       "当前 Thread 用量：",
       `累计：${formatTokenCount(total.totalTokens)}`,
       `最近模型请求：${formatTokenCount(last.totalTokens)}`,
-      `输入：${formatTokenCount(total.inputTokens)}`,
-      `缓存输入：${formatTokenCount(total.cachedInputTokens)}`,
+      `输入总计：${formatTokenCount(total.inputTokens)}`,
+      `命中缓存：${formatTokenCount(total.cachedInputTokens)}`,
+      `未命中缓存：${formatTokenCount(Math.max(0, total.inputTokens - total.cachedInputTokens))}`,
       `缓存命中率：${formatCacheHitRate(total.inputTokens, total.cachedInputTokens)}`,
       ...(total.cacheWriteInputTokens > 0
         ? [`缓存写入：${formatTokenCount(total.cacheWriteInputTokens)}`]
@@ -581,7 +582,10 @@ function formatCacheHitRate(
     ? `${Math.max(
         0,
         cachedInputTokens / inputTokens * 100,
-      ).toLocaleString("zh-CN", { maximumFractionDigits: 1 })}%`
+      ).toLocaleString("zh-CN", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}%`
     : "未知";
 }
 

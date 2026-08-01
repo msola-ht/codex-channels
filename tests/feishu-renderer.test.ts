@@ -270,7 +270,10 @@ describe("Feishu output renderer", () => {
         },
       },
     });
-    expect(status).toContain("缓存命中率：75%");
+    expect(status).toContain("输入总计：800");
+    expect(status).toContain("命中缓存：600");
+    expect(status).toContain("未命中缓存：200");
+    expect(status).toContain("缓存命中率：75.00%");
     expect(status).toContain("缓存写入：50");
     expect(status).toContain("Git 分支：feature/weixin-surface");
     expect(status).toContain("周限：剩余 63%");
@@ -380,7 +383,7 @@ describe("Feishu output renderer", () => {
       "**本次运行 · 已完成**",
       "",
       "- **上下文：** 100 / 200（50%）",
-      "- **最近请求缓存命中：** 50%",
+      "- **最近请求缓存命中：** 50.00%",
       "- **模型：** gpt-test · medium · Fast 开启",
       "- **提供商：** OpenAI",
       "- **上下文压缩：** 2 次",

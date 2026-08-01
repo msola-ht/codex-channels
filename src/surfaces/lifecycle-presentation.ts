@@ -310,7 +310,13 @@ function formatCacheHitRate(
   cachedInputTokens: number,
 ): string {
   return inputTokens > 0
-    ? formatPercent(Math.max(0, cachedInputTokens / inputTokens * 100))
+    ? `${Math.max(
+        0,
+        cachedInputTokens / inputTokens * 100,
+      ).toLocaleString("zh-CN", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}%`
     : "未知";
 }
 
