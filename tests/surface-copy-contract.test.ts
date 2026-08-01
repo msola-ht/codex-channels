@@ -119,6 +119,11 @@ describe("shared surface copy contract", () => {
       windowDurationMins: null,
       resetsAt: null,
     })).toBe("剩余 0%");
+    expect(formatRemainingRateLimitWindow({
+      usedPercent: 44,
+      windowDurationMins: null,
+      resetsAt: new Date(2026, 7, 5, 12, 34).getTime() / 1_000,
+    })).toBe("剩余 56% · 重置 8月5日 12:34");
     expect(formatTurnInputAppended("text"))
       .toBe("已将补充要求追加到当前 Turn。");
     expect(formatTurnInputAppended("file"))
