@@ -73,6 +73,15 @@ const gatewayDocumentSchema = z.strictObject({
     all_proxy: z.string().optional(),
     no_proxy: z.string().optional(),
   }).optional(),
+  ds_proxy: z.strictObject({
+    listen: z.string().regex(/^127\.0\.0\.1:\d+$/u).refine(
+      (value) => {
+        const port = Number(value.split(":")[1]);
+        return Number.isInteger(port) && port >= 1 && port <= 65535;
+      },
+      "ds_proxy.listen 端口必须在 1-65535 之间",
+    ),
+  }).optional(),
   codex: z.strictObject({
     binary: z.string().min(1).default("codex"),
     socket_path: z.string().min(1).default("runtime/codex-app-server.sock"),

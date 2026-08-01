@@ -12,7 +12,10 @@ import {
   formatPercent,
   formatRemainingRateLimitWindow,
 } from "./account-format.js";
-import { formatElapsedDuration } from "./elapsed-duration.js";
+import {
+  formatElapsedDuration,
+  formatTokensPerSecond,
+} from "./elapsed-duration.js";
 import { formatProviderLabel } from "./provider-format.js";
 
 export interface LifecyclePresentation {
@@ -201,6 +204,24 @@ export function createTurnCompletedPresentation(
     fields.push({
       label: "Goal",
       value: `${goalStatusLabel(event.goal.status)} · ${formatGoalTokens(event.goal)}`,
+    });
+  }
+  if (event.timing?.outputTokensPerSecond !== undefined) {
+    fields.push({
+      label: "输出速度",
+      value: `${formatTokensPerSecond(event.timing.outputTokensPerSecond)}（非推理）`,
+    });
+  }
+  if (event.timing?.thinkingTokensPerSecond !== undefined) {
+    fields.push({
+      label: "思考速度",
+      value: `${formatTokensPerSecond(event.timing.thinkingTokensPerSecond)}（推理）`,
+    });
+  }
+  if (event.timing?.generationTokensPerSecond !== undefined) {
+    fields.push({
+      label: "生成速度",
+      value: `${formatTokensPerSecond(event.timing.generationTokensPerSecond)}（含推理）`,
     });
   }
   if (Object.hasOwn(event, "gitBranch")) {

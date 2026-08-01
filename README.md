@@ -91,6 +91,28 @@ plan_updates = true
 - `operation_updates`：`full` 显示完整操作详情，`compact` 显示摘要，`hidden` 隐藏操作过程。
 - `plan_updates`：是否在聊天中显示 Codex 计划，默认开启；设为 `false` 可关闭。开启后，飞书在同一 Turn 内固定更新一张计划卡；Telegram 和微信发送计划及步骤完成进度。
 
+每次 Turn 完成摘要会显示耗时、上下文用量与输出速度；速度使用最后一次模型响应的
+非推理输出 Token 与最终回答流式时长计算，适用于 OpenAI 和第三方 Provider。
+启用 `ds_proxy` 后还会显示思考速度（推理 token/s）与生成速度（含推理）。
+
+### DeepSeek 思考与生成速度统计
+
+在配置中加入并保存：
+
+```toml
+[ds_proxy]
+listen = "127.0.0.1:38473"
+```
+
+App Server 服务会在该回环地址启动转发代理，DeepSeek 模型请求改走代理再到达
+`api.deepseek.com`。代理复用统一网络代理，保持上游状态码、响应头和流式响应；本地读取
+`x-codex-turn-metadata` 后不会把它发送给模型 Provider。推理流时间戳通过私有 Unix Socket
+交给 Gateway，并在首个可见输出或响应完成事件前确认归约，用于可靠计算短回复及无文本响应的
+思考/生成速度；Gateway 未运行或重启时指标直接降级丢弃，DeepSeek 请求仍然可用，当前 Turn 最多
+缺少这两项速度。启用或修改后执行 `codexc service install`，让 App Server 与 Gateway 共同应用
+新配置。当前仅支持 DeepSeek
+切换模式，其他模式配置该字段会明确拒绝启动。
+
 配置、数据库、日志、Socket 和临时文件都保存在 `~/.codex-connect`，不会写入全局 npm 包目录。Gateway 不读取或复制 Codex 的完整会话文件。
 
 ## 配置 DeepSeek

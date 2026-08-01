@@ -161,6 +161,36 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).not.toContain("Fast");
     expect(rendered).not.toContain("周限");
   });
+
+  it("shows output, thinking and combined generation speeds", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "telegram",
+          accountId: "default",
+          conversationId: "100",
+        },
+        threadId: "thread-1",
+        turnId: "turn-1",
+        status: "completed",
+        timing: {
+          nonReasoningOutputTokens: 42,
+          outputTokensPerSecond: 2.1,
+          reasoningTokens: 80,
+          thinkingTokensPerSecond: 20,
+          generationTokensPerSecond: 120,
+        },
+      }),
+    );
+
+    expect(rendered).toContain("输出速度：2.1 token/s（非推理）");
+    expect(rendered).toContain("思考速度：20 token/s（推理）");
+    expect(rendered).toContain("生成速度：120 token/s（含推理）");
+    expect(rendered).not.toContain("首字时间");
+    expect(rendered).not.toContain("思考时长");
+    expect(rendered).not.toContain("输出时长");
+  });
 });
 
 function tokenBreakdown(

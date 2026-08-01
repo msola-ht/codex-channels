@@ -31,6 +31,9 @@ export interface GatewayConfigDocument {
     all_proxy?: string;
     no_proxy?: string;
   };
+  ds_proxy?: {
+    listen: string;
+  };
   codex: {
     binary: string;
     socket_path: string;

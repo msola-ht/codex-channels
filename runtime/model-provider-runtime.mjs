@@ -64,6 +64,33 @@ export function providerAppServerSocketPath(primarySocketPath, provider) {
   return resolve(dirname(primarySocketPath), `${stem}-${provider}${extension}`);
 }
 
+export function providerMetricsSocketPath(primarySocketPath, provider) {
+  const extension = extname(primarySocketPath);
+  const stem = basename(primarySocketPath, extension);
+  return resolve(dirname(primarySocketPath), `${stem}-${provider}-metrics${extension}`);
+}
+
+export function withProviderBaseUrl(argumentsList, provider, baseUrl) {
+  const prefix = `model_providers.${provider}.base_url=`;
+  const kept = [];
+  for (let index = 0; index < argumentsList.length; index += 1) {
+    const value = argumentsList[index];
+    if (value === "-c") {
+      const next = argumentsList[index + 1];
+      if (typeof next === "string" && next.startsWith(prefix)) {
+        index += 1;
+        continue;
+      }
+    }
+    kept.push(value);
+  }
+  return [
+    ...kept,
+    "-c",
+    `model_providers.${provider}.base_url=${JSON.stringify(baseUrl)}`,
+  ];
+}
+
 export function loadDeepseekAccountCredential(environment = process.env) {
   const managed = loadManagedProviderProfile(environment);
   if (managed !== undefined) return managed.apiKey;

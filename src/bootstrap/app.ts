@@ -10,8 +10,10 @@ import {
   loadManagedModelProvider,
   loadPrimaryModelProvider,
   providerAppServerSocketPath,
+  providerMetricsSocketPath,
 } from "../../runtime/model-provider-runtime.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
+import { ProviderProxyMetricsServer } from "../provider-proxy/index.js";
 import {
   CodexAppServerClient,
   ProviderRoutingClient,
@@ -75,6 +77,7 @@ export class GatewayApplication {
   private readonly router: SessionRouter;
   private readonly threadState: ThreadStateSynchronizer;
   private readonly core: ConversationCore;
+  private readonly providerMetricsServer: ProviderProxyMetricsServer | undefined;
   private readonly bindings: SqliteBindingStore;
   private readonly workspaces: WorkspaceRegistry;
   private removeRpcNotification: (() => void) | undefined;
@@ -96,6 +99,9 @@ export class GatewayApplication {
     verifyCodexVersion(config);
     const primaryProvider = loadPrimaryModelProvider();
     const managedProvider = loadManagedModelProvider();
+    if (config.dsProxyListen && managedProvider?.provider !== "deepseek") {
+      throw new Error("ds_proxy 仅支持 DeepSeek 切换模式");
+    }
     const supplementaryModels = loadDeepseekModelOptions(
       process.env,
       primaryProvider === "deepseek" || managedProvider?.provider === "deepseek",
@@ -133,6 +139,44 @@ export class GatewayApplication {
     );
     this.threadState = new ThreadStateSynchronizer(this.router);
     this.core = new ConversationCore(this.router, this.output);
+    if (config.dsProxyListen && managedProvider?.provider === "deepseek") {
+      this.providerMetricsServer = new ProviderProxyMetricsServer(
+        providerMetricsSocketPath(config.codexSocketPath, managedProvider.provider),
+        (metrics) => {
+          const hasTurnMetadata = metrics.threadId !== null
+            && metrics.turnId !== null;
+          const hasReasoningWindow = metrics.firstReasoningDeltaAtMs !== null
+            && metrics.lastReasoningDeltaAtMs !== null;
+          if (
+            metrics.threadId === null
+            || metrics.turnId === null
+            || metrics.firstReasoningDeltaAtMs === null
+            || metrics.lastReasoningDeltaAtMs === null
+          ) {
+            this.logger.debug(
+              { hasTurnMetadata, hasReasoningWindow },
+              "DeepSeek 模型代理指标缺少 Turn 关联或推理窗口，已跳过",
+            );
+            return;
+          }
+          this.core.handle({
+            type: "turn.modelTiming.updated",
+            threadId: metrics.threadId,
+            turnId: metrics.turnId,
+            requestStartedAtMs: metrics.requestStartedAtMs,
+            thinkingDurationMs: Math.max(
+              0,
+              metrics.lastReasoningDeltaAtMs - metrics.firstReasoningDeltaAtMs,
+            ),
+          });
+        },
+        (error) => {
+          this.logger.warn({ err: error }, "DeepSeek 模型代理指标接收失败");
+        },
+      );
+    } else {
+      this.providerMetricsServer = undefined;
+    }
     this.interactions = new InteractionRouter(logger);
     const models = new ModelSelectionService(
       this.codex,
@@ -340,6 +384,18 @@ export class GatewayApplication {
   private async startInternal(): Promise<void> {
     try {
       this.requireRunning();
+      if (this.providerMetricsServer) {
+        await this.providerMetricsServer.start();
+        this.logger.info(
+          {
+            socketPath: providerMetricsSocketPath(
+              this.config.codexSocketPath,
+              "deepseek",
+            ),
+          },
+          "DeepSeek 模型代理指标接收已启动",
+        );
+      }
       this.removeRpcNotification = this.codex.onNotification((notification) => {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
       });
@@ -406,6 +462,10 @@ export class GatewayApplication {
     const failures: unknown[] = [];
     for (const [component, close] of [
       ["Surface", () => this.surfaceManager.stop()],
+      [
+        "Provider Proxy Metrics",
+        () => this.providerMetricsServer?.close() ?? Promise.resolve(),
+      ],
       ["Inbound Event Bus", () => this.inbound.close()],
       ["Output Event Bus", () => this.output.close()],
       ["Codex Client", () => this.codex.close()],

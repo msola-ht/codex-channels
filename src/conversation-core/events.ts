@@ -71,6 +71,17 @@ export interface ThreadGoal {
   updatedAt: number;
 }
 
+export interface TurnOutputTiming {
+  ttftMs?: number;
+  outputDurationMs?: number;
+  thinkingDurationMs?: number;
+  nonReasoningOutputTokens?: number;
+  reasoningTokens?: number;
+  outputTokensPerSecond?: number;
+  thinkingTokensPerSecond?: number;
+  generationTokensPerSecond?: number;
+}
+
 export interface RateLimitWindow {
   usedPercent: number;
   windowDurationMins: number | null;
@@ -170,7 +181,7 @@ export type OutputEvent =
   | { type: "text.completed"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null }
   | { type: "operation.updated"; target: ConversationTarget; threadId: string; turnId: string; operation: OperationUpdate }
   | { type: "plan.updated"; target: ConversationTarget; threadId: string; turnId: string; explanation: string | null; steps: TurnPlanStep[] }
-  | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: TurnStatus; error?: string; durationMs?: number; tokenUsage?: ThreadTokenUsage; model?: string; modelProvider?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; goal?: ThreadGoal; contextCompactionCount?: number; gitBranch?: string | undefined }
+  | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: TurnStatus; error?: string; durationMs?: number; timing?: TurnOutputTiming; tokenUsage?: ThreadTokenUsage; model?: string; modelProvider?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; goal?: ThreadGoal; contextCompactionCount?: number; gitBranch?: string | undefined }
   | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string }
   | { type: "connection.lost"; target: ConversationTarget; threadId: string; message: string }
   | ({ type: "account.updated"; target: ConversationTarget } & AccountStatus)

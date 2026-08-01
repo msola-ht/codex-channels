@@ -32,3 +32,14 @@ export function providerAppServerSocketPath(
   primarySocketPath: string,
   provider: string,
 ): string;
+
+export function providerMetricsSocketPath(
+  primarySocketPath: string,
+  provider: string,
+): string;
+
+export function withProviderBaseUrl(
+  argumentsList: string[],
+  provider: string,
+  baseUrl: string,
+): string[];

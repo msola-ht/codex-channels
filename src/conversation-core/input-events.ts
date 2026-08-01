@@ -11,7 +11,7 @@ import type {
 } from "./events.js";
 
 export type ConversationInputEvent =
-  | { type: "turn.started"; threadId: string; turnId: string }
+  | { type: "turn.started"; threadId: string; turnId: string; receivedAtMs?: number }
   | {
       type: "thread.tokenUsage.updated";
       threadId: string;
@@ -41,6 +41,7 @@ export type ConversationInputEvent =
       turnId: string;
       itemId: string;
       text: string;
+      receivedAtMs?: number;
     }
   | {
       type: "item.agentMessage.completed";
@@ -49,6 +50,13 @@ export type ConversationInputEvent =
       itemId: string;
       text: string;
       phase: MessagePhase | null;
+    }
+  | {
+      type: "turn.modelTiming.updated";
+      threadId: string;
+      turnId: string;
+      requestStartedAtMs: number;
+      thinkingDurationMs: number;
     }
   | {
       type: "item.userMessage";

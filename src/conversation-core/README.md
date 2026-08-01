@@ -7,11 +7,15 @@
 - `index.ts`：本模块的公开导出入口。
 - `core.ts`：维护活动 Turn、Token、当前 Goal、上下文压缩 Item ID、最近 Diff/Plan 和事件去重状态，
   把稳定输入事件归约为文本、操作、状态和完成事件；Turn 完成事件原样携带 Client 已校验的官方
-  `durationMs` 与 Router 已确认的 `modelProvider`，不在 Core 内建立第二套计时器；Thread Token
-  指标对所有 Provider 保持通用，OpenAI 账户周限只附加到 OpenAI Thread；可重试错误不污染最终
-  完成状态，Thread 与全局 warning 分开路由。
+  `durationMs` 与 Router 已确认的 `modelProvider`；输出速度由 Client 在通知边界打接收时间戳、
+  Core 按 Thread 归约最后一次模型响应的非推理 Token 与最终回答流式时长（不新建协议计时器，
+  也不消费新协议字段）；思考速度与生成速度只在模型代理提供推理流时间戳时归约；
+  Thread Token 指标对所有 Provider 保持通用，OpenAI 账户周限只附加到 OpenAI Thread；可重试错误
+  不污染最终完成状态，Thread 与全局 warning 分开路由。
 - `input-events.ts`：定义 Client 可投递给 Core 的平台无关可辨识输入联合，不含 RPC method、
-  未知 params 或生成协议类型。
+  未知 params 或生成协议类型；其中 `turn.modelTiming.updated` 由 Bootstrap 把模型代理的
+  推理流指标转换为稳定输入，Core 按 Thread/Turn 保留请求时间最新的一次推理时长并计算
+  思考/生成速度，避免重试累计重复计时。
 - `events.ts`：定义 Conversation 目标、稳定 Token、Plan、Goal、Turn、额度、账户和 MCP 类型，以及
   输出事件、Turn 产物、操作状态、OpenAI 账户归属判定和关键事件判定。
 - `routing-port.ts`：Core 查询 Thread 路由所需的窄接口。

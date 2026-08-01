@@ -4,12 +4,19 @@ import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { HttpsProxyAgent } from "https-proxy-agent";
+
 import { configEventQueuePath } from "../runtime/config-event-queue.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
-import { resolveProxyEnvironment } from "../runtime/network-proxy.mjs";
+import {
+  resolveProxyEnvironment,
+  selectHttpProxyUrl,
+} from "../runtime/network-proxy.mjs";
 import {
   loadManagedProviderAppServer,
   providerAppServerSocketPath,
+  providerMetricsSocketPath,
+  withProviderBaseUrl,
 } from "../runtime/model-provider-runtime.mjs";
 import {
   initializeUserData,
@@ -178,7 +185,7 @@ try {
       if (showRequestedHelp(args, "service-app-server")) {
         break;
       }
-      runServiceAppServer(args);
+      await runServiceAppServer(args);
       break;
     case "remote":
       if (showRequestedHelp(args, "remote")) {
@@ -271,7 +278,7 @@ function runGateway(args) {
   });
 }
 
-function runServiceAppServer(args) {
+async function runServiceAppServer(args) {
   if (args.length > 0) {
     throw new Error("内部服务入口不接受参数");
   }
@@ -285,6 +292,40 @@ function runServiceAppServer(args) {
     join(runtime.dataDir, "runtime", "codex-app-server.sock"),
   );
   const managedProvider = loadManagedProviderAppServer(runtime.environment);
+  const dsProxyListen = stringValue(table(runtime.document.ds_proxy)?.listen);
+  if (dsProxyListen && managedProvider?.provider !== "deepseek") {
+    throw new Error("ds_proxy 仅支持 DeepSeek 切换模式");
+  }
+  let providerProxy;
+  let upstreamAgent;
+  if (managedProvider?.provider === "deepseek" && dsProxyListen) {
+    const {
+      ProviderProxy,
+      sendProviderProxyMetrics,
+    } = await import("../dist/provider-proxy/index.js");
+    const upstreamUrl = new URL("https://api.deepseek.com/");
+    const proxyUrl = selectHttpProxyUrl({
+      http: runtime.environment.HTTP_PROXY,
+      https: runtime.environment.HTTPS_PROXY,
+      all: runtime.environment.ALL_PROXY,
+      no: runtime.environment.NO_PROXY,
+    }, upstreamUrl);
+    upstreamAgent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
+    const metricsSocketPath = providerMetricsSocketPath(
+      socketPath,
+      managedProvider.provider,
+    );
+    providerProxy = new ProviderProxy(dsProxyListen, {
+      ...(upstreamAgent ? { upstreamAgent } : {}),
+      upstreamHost: upstreamUrl.hostname,
+      onMetrics: (metrics) => sendProviderProxyMetrics(metricsSocketPath, metrics),
+      onError: (error) => console.error(
+        `DeepSeek 模型代理转发失败：${error instanceof Error ? error.message : String(error)}`,
+      ),
+    });
+    await providerProxy.start();
+    console.log(`DeepSeek 模型代理已启动：${providerProxy.address()}`);
+  }
   const children = [spawn(runtime.environment.CODEX_BINARY, [
     "app-server",
     "--listen",
@@ -295,8 +336,15 @@ function runServiceAppServer(args) {
     cwd: defaultWorkspace.cwd,
   })];
   if (managedProvider) {
+    const managedArguments = dsProxyListen
+      ? withProviderBaseUrl(
+          managedProvider.arguments,
+          managedProvider.provider,
+          `http://${dsProxyListen}/`,
+        )
+      : managedProvider.arguments;
     children.push(spawn(runtime.environment.CODEX_BINARY, [
-      ...managedProvider.arguments,
+      ...managedArguments,
       "app-server",
       "--listen",
       `unix://${providerAppServerSocketPath(socketPath, managedProvider.provider)}`,
@@ -309,7 +357,10 @@ function runServiceAppServer(args) {
       cwd: defaultWorkspace.cwd,
     }));
   }
-  forwardChildrenLifecycle(children);
+  forwardChildrenLifecycle(children, async () => {
+    await providerProxy?.close();
+    upstreamAgent?.destroy();
+  });
 }
 
 function workspace(args) {
@@ -548,7 +599,7 @@ function configuredEnvironment() {
   };
 }
 
-function forwardChildrenLifecycle(children) {
+function forwardChildrenLifecycle(children, closeResources = async () => undefined) {
   let settled = false;
   const forward = (signal) => {
     for (const child of children) {
@@ -568,16 +619,21 @@ function forwardChildrenLifecycle(children) {
     settled = true;
     cleanup();
     forward("SIGTERM");
-    if (error) {
-      console.error(error instanceof Error ? error.message : String(error));
+    void Promise.resolve(closeResources()).then(() => {
+      if (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exitCode = 1;
+        return;
+      }
+      if (signal) {
+        process.kill(process.pid, signal);
+        return;
+      }
+      process.exitCode = code ?? 1;
+    }).catch((closeError) => {
+      console.error(closeError instanceof Error ? closeError.message : String(closeError));
       process.exitCode = 1;
-      return;
-    }
-    if (signal) {
-      process.kill(process.pid, signal);
-      return;
-    }
-    process.exitCode = code ?? 1;
+    });
   };
   process.on("SIGTERM", terminate);
   process.on("SIGINT", interrupt);
