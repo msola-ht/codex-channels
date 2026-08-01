@@ -209,7 +209,7 @@ export function createTurnCompletedPresentation(
   if (event.timing?.outputTokensPerSecond !== undefined) {
     fields.push({
       label: "输出速度",
-      value: `${formatTokensPerSecond(event.timing.outputTokensPerSecond)}（仅可见输出）`,
+      value: `${formatTokensPerSecond(event.timing.outputTokensPerSecond)}（非推理）`,
     });
   }
   if (event.timing?.thinkingTokensPerSecond !== undefined) {

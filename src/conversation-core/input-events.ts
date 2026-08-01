@@ -55,6 +55,7 @@ export type ConversationInputEvent =
       type: "turn.modelTiming.updated";
       threadId: string;
       turnId: string;
+      requestStartedAtMs: number;
       thinkingDurationMs: number;
     }
   | {

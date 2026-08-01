@@ -260,6 +260,7 @@ describe("Gateway config reload", () => {
     ["codex.binary", { codexBinary: "/opt/codex" }],
     ["codex.socket", { codexSocketPath: "/tmp/other.sock" }],
     ["network.proxy", { networkProxy: { http: "http://127.0.0.1:7890" } }],
+    ["model.provider-proxy", { dsProxyListen: "127.0.0.1:38473" }],
   ] as const)("requires service reinstall for %s changes", (code, change) => {
     expect(classifyConfigReload(config(), config(change))).toEqual({
       action: "reinstall",

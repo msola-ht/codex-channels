@@ -10,9 +10,10 @@ import {
   loadManagedModelProvider,
   loadPrimaryModelProvider,
   providerAppServerSocketPath,
+  providerMetricsSocketPath,
 } from "../../runtime/model-provider-runtime.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
-import { ProviderProxy } from "../provider-proxy/index.js";
+import { ProviderProxyMetricsServer } from "../provider-proxy/index.js";
 import {
   CodexAppServerClient,
   ProviderRoutingClient,
@@ -76,7 +77,7 @@ export class GatewayApplication {
   private readonly router: SessionRouter;
   private readonly threadState: ThreadStateSynchronizer;
   private readonly core: ConversationCore;
-  private readonly providerProxy: ProviderProxy | undefined;
+  private readonly providerMetricsServer: ProviderProxyMetricsServer | undefined;
   private readonly bindings: SqliteBindingStore;
   private readonly workspaces: WorkspaceRegistry;
   private removeRpcNotification: (() => void) | undefined;
@@ -98,6 +99,9 @@ export class GatewayApplication {
     verifyCodexVersion(config);
     const primaryProvider = loadPrimaryModelProvider();
     const managedProvider = loadManagedModelProvider();
+    if (config.dsProxyListen && managedProvider?.provider !== "deepseek") {
+      throw new Error("ds_proxy 仅支持 DeepSeek 切换模式");
+    }
     const supplementaryModels = loadDeepseekModelOptions(
       process.env,
       primaryProvider === "deepseek" || managedProvider?.provider === "deepseek",
@@ -136,9 +140,9 @@ export class GatewayApplication {
     this.threadState = new ThreadStateSynchronizer(this.router);
     this.core = new ConversationCore(this.router, this.output);
     if (config.dsProxyListen && managedProvider?.provider === "deepseek") {
-      this.providerProxy = new ProviderProxy(config.dsProxyListen, {
-        upstreamHost: "api.deepseek.com",
-        onMetrics: (metrics) => {
+      this.providerMetricsServer = new ProviderProxyMetricsServer(
+        providerMetricsSocketPath(config.codexSocketPath, managedProvider.provider),
+        (metrics) => {
           const hasTurnMetadata = metrics.threadId !== null
             && metrics.turnId !== null;
           const hasReasoningWindow = metrics.firstReasoningDeltaAtMs !== null
@@ -159,23 +163,19 @@ export class GatewayApplication {
             type: "turn.modelTiming.updated",
             threadId: metrics.threadId,
             turnId: metrics.turnId,
+            requestStartedAtMs: metrics.requestStartedAtMs,
             thinkingDurationMs: Math.max(
               0,
               metrics.lastReasoningDeltaAtMs - metrics.firstReasoningDeltaAtMs,
             ),
           });
         },
-        onError: (error) => {
-          this.logger.warn({ err: error }, "DeepSeek 模型代理转发失败");
+        (error) => {
+          this.logger.warn({ err: error }, "DeepSeek 模型代理指标接收失败");
         },
-      });
-    } else if (config.dsProxyListen) {
-      this.logger.warn(
-        { listen: config.dsProxyListen },
-        "ds_proxy 已配置但当前模型 Provider 模式不适用，代理未启动",
       );
     } else {
-      this.providerProxy = undefined;
+      this.providerMetricsServer = undefined;
     }
     this.interactions = new InteractionRouter(logger);
     const models = new ModelSelectionService(
@@ -384,11 +384,16 @@ export class GatewayApplication {
   private async startInternal(): Promise<void> {
     try {
       this.requireRunning();
-      if (this.providerProxy) {
-        await this.providerProxy.start();
+      if (this.providerMetricsServer) {
+        await this.providerMetricsServer.start();
         this.logger.info(
-          { listen: this.providerProxy.address() },
-          "DeepSeek 模型代理已启动",
+          {
+            socketPath: providerMetricsSocketPath(
+              this.config.codexSocketPath,
+              "deepseek",
+            ),
+          },
+          "DeepSeek 模型代理指标接收已启动",
         );
       }
       this.removeRpcNotification = this.codex.onNotification((notification) => {
@@ -457,7 +462,10 @@ export class GatewayApplication {
     const failures: unknown[] = [];
     for (const [component, close] of [
       ["Surface", () => this.surfaceManager.stop()],
-      ["Provider Proxy", () => this.providerProxy?.close() ?? Promise.resolve()],
+      [
+        "Provider Proxy Metrics",
+        () => this.providerMetricsServer?.close() ?? Promise.resolve(),
+      ],
       ["Inbound Event Bus", () => this.inbound.close()],
       ["Output Event Bus", () => this.output.close()],
       ["Codex Client", () => this.codex.close()],

@@ -33,6 +33,10 @@
 `turn/plan/updated` 的平台展示，不影响 Core 保存最新计划，也不切换 `/plan` 协作模式。
 变化需要重启 Gateway，不需要重启 App Server。
 
+`ds_proxy.listen` 是 DeepSeek 切换模式可选的回环模型代理地址。它同时改变 App Server 服务中的
+模型数据通路和 Gateway 指标接收端，新增、修改或删除都需要重新安装整套服务；不得按热加载或
+仅重启 Gateway 处理。未配置 DeepSeek 切换模式时设置该字段会在服务启动时明确失败，不会静默忽略。
+
 飞书配置表当前只定义私聊 Surface 所需的 `enabled`、`app_id`、`app_secret` 和
 `allowed_open_ids`。整表缺失或 `enabled = false` 时运行配置不包含飞书账号；启用时四项必须
 同时有效，Open ID 不得重复。群 Chat、`@Bot` 和其他未支持字段仍由严格 Schema 拒绝。

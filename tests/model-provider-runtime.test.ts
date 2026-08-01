@@ -10,6 +10,7 @@ import {
   loadManagedProviderAppServer,
   loadPrimaryModelProvider,
   providerAppServerSocketPath,
+  providerMetricsSocketPath,
   validateConfiguredModelProvider,
   withProviderBaseUrl,
 } from "../runtime/model-provider-runtime.mjs";
@@ -36,6 +37,13 @@ describe("model provider runtime topology", () => {
       "/private/runtime/codex-app-server.sock",
       "deepseek",
     )).toBe("/private/runtime/codex-app-server-deepseek.sock");
+  });
+
+  it("derives a private metrics socket beside the provider App Server socket", () => {
+    expect(providerMetricsSocketPath(
+      "/private/runtime/codex-app-server.sock",
+      "deepseek",
+    )).toBe("/private/runtime/codex-app-server-deepseek-metrics.sock");
   });
 
   it("replaces the managed provider base URL with a local proxy address", async () => {

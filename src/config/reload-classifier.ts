@@ -42,6 +42,9 @@ function serviceReinstallReasons(
   if (current.codexSocketPath !== next.codexSocketPath) {
     reasons.push(configChange("codex.socket"));
   }
+  if (current.dsProxyListen !== next.dsProxyListen) {
+    reasons.push(configChange("model.provider-proxy"));
+  }
   if (!sameNetworkProxy(current.networkProxy, next.networkProxy)) {
     reasons.push(configChange("network.proxy"));
   }

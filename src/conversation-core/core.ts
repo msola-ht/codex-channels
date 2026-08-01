@@ -30,8 +30,8 @@ interface TurnTimingState {
   firstAnyDeltaAtMs?: number;
   lastAnyDeltaAtMs?: number;
   thinkingDurationMs?: number;
+  thinkingRequestStartedAtMs?: number;
   finalItemDeltas: Map<string, { firstAtMs: number; lastAtMs: number }>;
-  usageSnapshot?: ThreadTokenUsage;
 }
 
 type WithoutTarget<T> = T extends unknown ? Omit<T, "target"> : never;
@@ -177,14 +177,12 @@ export class ConversationCore {
   handle(event: ConversationInputEvent): void {
     switch (event.type) {
       case "turn.started": {
-        const usageSnapshot = this.usageByThread.get(event.threadId);
         this.timingByThread.set(event.threadId, {
           turnId: event.turnId,
           finalItemDeltas: new Map(),
           ...(event.receivedAtMs === undefined
             ? {}
             : { turnStartedAtMs: event.receivedAtMs }),
-          ...(usageSnapshot === undefined ? {} : { usageSnapshot }),
         });
         const target = this.router.targetForThread(event.threadId);
         if (target) {
@@ -269,9 +267,16 @@ export class ConversationCore {
       }
       case "turn.modelTiming.updated": {
         const timing = this.timingByThread.get(event.threadId);
-        if (timing && timing.turnId === event.turnId) {
-          timing.thinkingDurationMs = (timing.thinkingDurationMs ?? 0)
-            + event.thinkingDurationMs;
+        if (
+          timing
+          && timing.turnId === event.turnId
+          && (
+            timing.thinkingRequestStartedAtMs === undefined
+            || event.requestStartedAtMs >= timing.thinkingRequestStartedAtMs
+          )
+        ) {
+          timing.thinkingRequestStartedAtMs = event.requestStartedAtMs;
+          timing.thinkingDurationMs = event.thinkingDurationMs;
         }
         return;
       }
@@ -554,41 +559,27 @@ export class ConversationCore {
     ) {
       result.outputDurationMs = timing.lastAnyDeltaAtMs - timing.firstAnyDeltaAtMs;
     }
-    let visibleOutputTokens: number | undefined;
+    let nonReasoningOutputTokens: number | undefined;
     let reasoningTokens: number | undefined;
     if (this.usageTurnByThread.get(threadId) === turnId) {
       const current = this.usageByThread.get(threadId);
       if (current) {
-        const snapshot = timing.usageSnapshot;
-        visibleOutputTokens = snapshot === undefined
-          ? Math.max(
-              0,
-              current.last.outputTokens - current.last.reasoningOutputTokens,
-            )
-          : Math.max(
-              0,
-              (current.total.outputTokens - snapshot.total.outputTokens)
-              - (current.total.reasoningOutputTokens
-                - snapshot.total.reasoningOutputTokens),
-            );
-        reasoningTokens = snapshot === undefined
-          ? Math.max(0, current.last.reasoningOutputTokens)
-          : Math.max(
-              0,
-              current.total.reasoningOutputTokens
-              - snapshot.total.reasoningOutputTokens,
-            );
+        nonReasoningOutputTokens = Math.max(
+          0,
+          current.last.outputTokens - current.last.reasoningOutputTokens,
+        );
+        reasoningTokens = Math.max(0, current.last.reasoningOutputTokens);
       }
     }
     if (
-      visibleOutputTokens !== undefined
-      && visibleOutputTokens > 0
+      nonReasoningOutputTokens !== undefined
+      && nonReasoningOutputTokens > 0
       && result.outputDurationMs !== undefined
       && result.outputDurationMs > 0
     ) {
       result.outputTokensPerSecond =
-        visibleOutputTokens / (result.outputDurationMs / 1_000);
-      result.visibleOutputTokens = visibleOutputTokens;
+        nonReasoningOutputTokens / (result.outputDurationMs / 1_000);
+      result.nonReasoningOutputTokens = nonReasoningOutputTokens;
     }
     if (
       reasoningTokens !== undefined
@@ -601,10 +592,16 @@ export class ConversationCore {
         reasoningTokens / (timing.thinkingDurationMs / 1_000);
       result.thinkingDurationMs = timing.thinkingDurationMs;
     }
-    const totalOutputTokens = (visibleOutputTokens ?? 0) + (reasoningTokens ?? 0);
-    const totalStreamMs = (timing.thinkingDurationMs ?? 0)
-      + (result.outputDurationMs ?? 0);
-    if (totalOutputTokens > 0 && totalStreamMs > 0) {
+    const totalOutputTokens = (nonReasoningOutputTokens ?? 0) + (reasoningTokens ?? 0);
+    if (
+      reasoningTokens !== undefined
+      && reasoningTokens > 0
+      && timing.thinkingDurationMs !== undefined
+      && timing.thinkingDurationMs > 0
+      && result.outputDurationMs !== undefined
+      && result.outputDurationMs > 0
+    ) {
+      const totalStreamMs = timing.thinkingDurationMs + result.outputDurationMs;
       result.generationTokensPerSecond =
         totalOutputTokens / (totalStreamMs / 1_000);
     }

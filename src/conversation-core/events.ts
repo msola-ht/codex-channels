@@ -75,7 +75,7 @@ export interface TurnOutputTiming {
   ttftMs?: number;
   outputDurationMs?: number;
   thinkingDurationMs?: number;
-  visibleOutputTokens?: number;
+  nonReasoningOutputTokens?: number;
   reasoningTokens?: number;
   outputTokensPerSecond?: number;
   thinkingTokensPerSecond?: number;

@@ -64,6 +64,12 @@ export function providerAppServerSocketPath(primarySocketPath, provider) {
   return resolve(dirname(primarySocketPath), `${stem}-${provider}${extension}`);
 }
 
+export function providerMetricsSocketPath(primarySocketPath, provider) {
+  const extension = extname(primarySocketPath);
+  const stem = basename(primarySocketPath, extension);
+  return resolve(dirname(primarySocketPath), `${stem}-${provider}-metrics${extension}`);
+}
+
 export function withProviderBaseUrl(argumentsList, provider, baseUrl) {
   const prefix = `model_providers.${provider}.base_url=`;
   const kept = [];

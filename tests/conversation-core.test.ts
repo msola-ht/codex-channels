@@ -1014,12 +1014,14 @@ describe("ConversationCore", () => {
       type: "turn.modelTiming.updated",
       threadId: "thread-1",
       turnId: "turn-1",
+      requestStartedAtMs: 1_100,
       thinkingDurationMs: 600,
     });
     core.handle({
       type: "turn.modelTiming.updated",
       threadId: "thread-1",
       turnId: "turn-1",
+      requestStartedAtMs: 1_200,
       thinkingDurationMs: 400,
     });
     handleNotification(core, {
@@ -1055,14 +1057,98 @@ describe("ConversationCore", () => {
       timing: {
         ttftMs: 1_000,
         outputDurationMs: 1_500,
-        thinkingDurationMs: 1_000,
-        visibleOutputTokens: 20,
+        thinkingDurationMs: 400,
+        nonReasoningOutputTokens: 20,
         reasoningTokens: 40,
       },
     });
     expect(completed?.timing?.outputTokensPerSecond).toBeCloseTo(20 / 1.5);
-    expect(completed?.timing?.thinkingTokensPerSecond).toBeCloseTo(40);
-    expect(completed?.timing?.generationTokensPerSecond).toBeCloseTo(24);
+    expect(completed?.timing?.thinkingTokensPerSecond).toBeCloseTo(100);
+    expect(completed?.timing?.generationTokensPerSecond).toBeCloseTo(60 / 1.9);
+  });
+
+  it("does not include reasoning tokens in generation speed without reasoning timing", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = {
+      surface: "telegram" as const,
+      accountId: "default",
+      conversationId: "100",
+    };
+    const core = new ConversationCore({
+      allBindings: () => [],
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+
+    handleNotification(core, {
+      method: "turn/started",
+      receivedAtMs: 1_000,
+      params: { threadId: "thread-openai", turn: { id: "turn-openai" } },
+    });
+    handleNotification(core, {
+      method: "item/started",
+      params: {
+        threadId: "thread-openai",
+        turnId: "turn-openai",
+        item: {
+          type: "agentMessage",
+          id: "final-openai",
+          text: "",
+          phase: "final_answer",
+        },
+      },
+    });
+    for (const [receivedAtMs, delta] of [[2_000, "A"], [3_000, "B"]] as const) {
+      handleNotification(core, {
+        method: "item/agentMessage/delta",
+        receivedAtMs,
+        params: {
+          threadId: "thread-openai",
+          turnId: "turn-openai",
+          itemId: "final-openai",
+          delta,
+        },
+      });
+    }
+    handleNotification(core, {
+      method: "thread/tokenUsage/updated",
+      params: {
+        threadId: "thread-openai",
+        turnId: "turn-openai",
+        tokenUsage: {
+          total: usageBreakdown(320, 200),
+          last: usageBreakdown(60, 40),
+          modelContextWindow: 200_000,
+        },
+      },
+    });
+    handleNotification(core, {
+      method: "turn/completed",
+      params: {
+        threadId: "thread-openai",
+        turn: {
+          id: "turn-openai",
+          status: "completed",
+          error: null,
+        },
+      },
+    });
+
+    await output.close();
+    const completed = events.find(
+      (event) => event.type === "turn.completed",
+    ) as Extract<OutputEvent, { type: "turn.completed" }> | undefined;
+    expect(completed?.timing).toMatchObject({
+      nonReasoningOutputTokens: 20,
+      outputTokensPerSecond: 20,
+    });
+    expect(completed?.timing?.thinkingTokensPerSecond).toBeUndefined();
+    expect(completed?.timing?.generationTokensPerSecond).toBeUndefined();
   });
 });
 

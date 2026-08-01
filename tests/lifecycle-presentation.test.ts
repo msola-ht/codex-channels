@@ -175,7 +175,7 @@ describe("shared Surface lifecycle presentation", () => {
         turnId: "turn-1",
         status: "completed",
         timing: {
-          visibleOutputTokens: 42,
+          nonReasoningOutputTokens: 42,
           outputTokensPerSecond: 2.1,
           reasoningTokens: 80,
           thinkingTokensPerSecond: 20,
@@ -184,7 +184,7 @@ describe("shared Surface lifecycle presentation", () => {
       }),
     );
 
-    expect(rendered).toContain("输出速度：2.1 token/s（仅可见输出）");
+    expect(rendered).toContain("输出速度：2.1 token/s（非推理）");
     expect(rendered).toContain("思考速度：20 token/s（推理）");
     expect(rendered).toContain("生成速度：120 token/s（含推理）");
     expect(rendered).not.toContain("首字时间");
