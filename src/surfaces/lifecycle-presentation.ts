@@ -206,7 +206,7 @@ export function createTurnCompletedPresentation(
       value: `${goalStatusLabel(event.goal.status)} · ${formatGoalTokens(event.goal)}`,
     });
   }
-  if (event.timing?.ttftMs !== undefined) {
+  if (!usesOpenAiAccount(event.modelProvider) && event.timing?.ttftMs !== undefined) {
     fields.push({
       label: "首字延时",
       value: formatElapsedDuration(event.timing.ttftMs),
@@ -222,14 +222,6 @@ export function createTurnCompletedPresentation(
     fields.push({
       label: "思考速度",
       value: `${formatTokensPerSecond(event.timing.thinkingTokensPerSecond)}（推理）`,
-    });
-  } else if (
-    event.timing?.reasoningTokens !== undefined
-    && event.timing.reasoningTokens > 0
-  ) {
-    fields.push({
-      label: "推理输出",
-      value: `${formatTokenCount(event.timing.reasoningTokens)} token（未提供计时流）`,
     });
   }
   if (event.timing?.generationTokensPerSecond !== undefined) {
