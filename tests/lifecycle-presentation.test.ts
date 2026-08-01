@@ -59,7 +59,7 @@ describe("shared Surface lifecycle presentation", () => {
       "Thread：thread-1",
       "Git 分支：feature/lifecycle",
       "模型：gpt-test",
-      "Provider：OpenAI",
+      "提供商：OpenAI",
       "思考强度：medium",
       "Fast 模式：开启",
       "协作模式：Default",
@@ -121,7 +121,7 @@ describe("shared Surface lifecycle presentation", () => {
       "上下文：10 K / 100 K（10%）",
       "最近请求缓存命中：75%",
       "模型：gpt-test · medium · Fast 开启",
-      "Provider：OpenAI",
+      "提供商：OpenAI",
       "上下文压缩：2 次",
       "周限：剩余 63%",
       "Goal：进行中 · 12.5 K / 100 K",
@@ -157,7 +157,7 @@ describe("shared Surface lifecycle presentation", () => {
 
     expect(rendered).toContain("上下文：20 K / 1.05 M");
     expect(rendered).toContain("模型：deepseek-v4-flash · high");
-    expect(rendered).toContain("Provider：DeepSeek");
+    expect(rendered).toContain("提供商：DeepSeek");
     expect(rendered).not.toContain("Fast");
     expect(rendered).not.toContain("周限");
   });

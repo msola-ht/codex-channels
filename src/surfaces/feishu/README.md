@@ -181,7 +181,7 @@ Turn、warning 和 MCP 错误会显示 Client 边界已经统一脱敏并限长�
 多项仅发送一次分类计数；失败与拒绝仍即时发送。`hidden` 不发送命令、
 文件、工具或搜索操作终态卡片；审批、错误、最终回复和 Turn 完成统计保持原有行为。
 `display.plan_updates = true` 时，官方自动计划在同一 Turn 内固定使用一张卡片显示完整步骤；
-后续计划状态全部在原消息中更新，不再为完成步骤新增卡片，默认关闭。
+后续计划状态全部在原消息中更新，不再为完成步骤新增卡片；默认开启，可通过 `display.plan_updates = false` 关闭。
 
 `outbox.ts` 只同步接收匹配 `feishu + accountId` 的输出，并按 Chat ID 进入
 `ConversationDeliveryQueue`。同一 Chat 串行、不同 Chat 可并行；关闭后拒绝新输出并有限等待

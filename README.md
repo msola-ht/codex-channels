@@ -85,11 +85,11 @@ codexc service reload
 ```toml
 [display]
 operation_updates = "compact"
-plan_updates = false
+plan_updates = true
 ```
 
 - `operation_updates`：`full` 显示完整操作详情，`compact` 显示摘要，`hidden` 隐藏操作过程。
-- `plan_updates`：是否在聊天中显示 Codex 计划。开启后，飞书在同一 Turn 内固定更新一张计划卡；Telegram 和微信发送计划及步骤完成进度。
+- `plan_updates`：是否在聊天中显示 Codex 计划，默认开启；设为 `false` 可关闭。开启后，飞书在同一 Turn 内固定更新一张计划卡；Telegram 和微信发送计划及步骤完成进度。
 
 配置、数据库、日志、Socket 和临时文件都保存在 `~/.codex-connect`，不会写入全局 npm 包目录。Gateway 不读取或复制 Codex 的完整会话文件。
 

@@ -94,7 +94,7 @@ describe("Telegram setup", () => {
     });
     expect(configured.display).toEqual({
       operation_updates: "compact",
-      plan_updates: false,
+      plan_updates: true,
     });
     expect(configured.default_workspace).toBe("codex-connect");
     expect(renderedOutput).toContain("?start=setup-code");

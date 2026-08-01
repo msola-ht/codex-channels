@@ -78,7 +78,7 @@ export function initializeUserData({ environment = process.env, cwd = process.cw
     approval: { timeout_seconds: 300 },
     display: {
       operation_updates: "compact",
-      plan_updates: false,
+      plan_updates: true,
     },
     storage: { database_path: "data/gateway.sqlite3" },
     logging: { level: "info" },

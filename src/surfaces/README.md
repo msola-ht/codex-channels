@@ -134,7 +134,7 @@ Bootstrap 把共享的 `display.operation_updates` 三档模式显式注入各 S
 对其余操作仍仅发送终态，避免用普通气泡模拟持续更新；Surface 只实现平台格式，不各自定义
 第二套显示配置。
 
-Bootstrap 还把默认关闭的 `display.plan_updates` 注入三个 Surface Outbox。开启后，各端消费
+Bootstrap 还把默认开启的 `display.plan_updates` 注入三个 Surface Outbox。开启后，各端消费
 Core 发布的结构化 `plan.updated`：首次发送完整计划；飞书后续只原地更新这一张卡，
 Telegram 和微信则在步骤首次完成时发送紧凑进度并保留首次快照。不解析或拆分模型
 正文，也不根据操作事件推断步骤完成时间；多个步骤若在同一官方通知中完成，只能按该通知的实际

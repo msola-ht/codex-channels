@@ -70,7 +70,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(formatConversationLimits({
       kind: "limits",
       result: { kind: "unsupported", provider: "future-provider" },
-    })).toContain("future-provider 暂不支持账户限额查询");
+    })).toContain("可使用 /usage 查看该提供商已接入的账户信息");
   });
 
   it("keeps Thread metrics and hides OpenAI-only state for DeepSeek", () => {
@@ -100,7 +100,7 @@ describe("provider-aware conversation command formatting", () => {
       },
     });
 
-    expect(rendered).toContain("Provider：DeepSeek");
+    expect(rendered).toContain("提供商：DeepSeek");
     expect(rendered).toContain("Codex 有效上下文窗口：1.05 M");
     expect(rendered).not.toContain("Fast 模式");
     expect(rendered).not.toContain("周限");

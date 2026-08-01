@@ -321,7 +321,7 @@ export function formatConversationModels(
   const current = state.models.find((model) => model.model === state.model);
   const fast = isFastServiceTier(state.serviceTier, current) ? "开启" : "关闭";
   const providerSwitchNotice = state.providerPending
-    ? ["Provider 切换将在下一条消息中创建新 Thread；当前 Thread 会保留，可通过 /resume 恢复。", ""]
+    ? ["提供商切换将在下一条消息中创建新 Thread；当前 Thread 会保留，可通过 /resume 恢复。", ""]
     : [];
   if (result.view === "fast") {
     return [
@@ -413,7 +413,7 @@ export function formatConversationLimits(
   result: Extract<ConversationCommandResult, { kind: "limits" }>,
 ): string {
   if (result.result.kind === "unsupported") {
-    return `${formatProviderLabel(result.result.provider)} 暂不支持账户限额查询。可使用 /usage 查看该 Provider 已接入的账户信息。`;
+    return `${formatProviderLabel(result.result.provider)} 暂不支持账户限额查询。可使用 /usage 查看该提供商已接入的账户信息。`;
   }
   const planType = result.result.limits.limits.find(
     (limit) => limit.planType,
@@ -462,7 +462,7 @@ export function formatConversationStatus(status: ConversationStatus): string {
     `工作目录：${status.cwd}`,
     `Git 分支：${status.gitBranch ?? "未检测到"}`,
     `模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
-    `Provider：${formatProviderLabel(status.modelProvider ?? "openai")}`,
+    `提供商：${formatProviderLabel(status.modelProvider ?? "openai")}`,
     `思考强度：${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
     ...(usesOpenAiAccount(status.modelProvider)
       ? [`Fast 模式：${status.threadId ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭") : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`]

@@ -29,7 +29,7 @@
 三种模式都不影响审批、错误、最终回复和 Turn 完成事件；变化需要重启 Gateway，不需要重装或
 重启 App Server。微信只发送终态操作，不发送 `running` 更新。
 
-`display.plan_updates` 是自动计划展示开关，默认关闭。开启后只影响官方
+`display.plan_updates` 是自动计划展示开关，默认开启；显式设为 `false` 可关闭。开启后只影响官方
 `turn/plan/updated` 的平台展示，不影响 Core 保存最新计划，也不切换 `/plan` 协作模式。
 变化需要重启 Gateway，不需要重启 App Server。
 

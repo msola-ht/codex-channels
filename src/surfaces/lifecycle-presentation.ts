@@ -106,7 +106,7 @@ export function createStartupPresentation(
             value: `${status.model}${pendingSuffix(status.modelPending)}`,
           },
           {
-            label: "Provider",
+            label: "提供商",
             value: formatProviderLabel(status.modelProvider ?? "openai"),
           },
           {
@@ -181,7 +181,7 @@ export function createTurnCompletedPresentation(
         : `${event.model} · ${event.effort ?? "模型默认"}`,
     });
     fields.push({
-      label: "Provider",
+      label: "提供商",
       value: formatProviderLabel(event.modelProvider ?? "openai"),
     });
   }

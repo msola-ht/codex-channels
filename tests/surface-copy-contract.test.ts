@@ -95,6 +95,10 @@ describe("shared surface copy contract", () => {
   });
 
   it("keeps account, quota, appended-input, and empty-response copy shared", () => {
+    expect(formatSurfaceUserFacingError(
+      new UserFacingError("provider.account.unavailable", "账户查询失败"),
+      "飞书",
+    )).toBe("当前提供商的账户查询失败，请检查配置或稍后重试");
     expect(formatPercent(12.34)).toBe("12.3%");
     expect(formatPlanType("self_serve_business_usage_based"))
       .toBe("Business（按量）");
