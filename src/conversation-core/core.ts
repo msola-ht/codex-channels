@@ -30,7 +30,10 @@ interface TurnTimingState {
   firstAnyDeltaAtMs?: number;
   lastAnyDeltaAtMs?: number;
   thinkingDurationMs?: number;
-  thinkingRequestStartedAtMs?: number;
+  modelOutputDurationMs?: number;
+  modelGenerationDurationMs?: number;
+  modelTtftMs?: number;
+  modelRequestStartedAtMs?: number;
   finalItemDeltas: Map<string, { firstAtMs: number; lastAtMs: number }>;
 }
 
@@ -271,12 +274,25 @@ export class ConversationCore {
           timing
           && timing.turnId === event.turnId
           && (
-            timing.thinkingRequestStartedAtMs === undefined
-            || event.requestStartedAtMs >= timing.thinkingRequestStartedAtMs
+            timing.modelRequestStartedAtMs === undefined
+            || event.requestStartedAtMs >= timing.modelRequestStartedAtMs
           )
         ) {
-          timing.thinkingRequestStartedAtMs = event.requestStartedAtMs;
-          timing.thinkingDurationMs = event.thinkingDurationMs;
+          timing.modelRequestStartedAtMs = event.requestStartedAtMs;
+          delete timing.modelTtftMs;
+          delete timing.thinkingDurationMs;
+          delete timing.modelOutputDurationMs;
+          delete timing.modelGenerationDurationMs;
+          if (event.ttftMs !== undefined) timing.modelTtftMs = event.ttftMs;
+          if (event.thinkingDurationMs !== undefined) {
+            timing.thinkingDurationMs = event.thinkingDurationMs;
+          }
+          if (event.outputDurationMs !== undefined) {
+            timing.modelOutputDurationMs = event.outputDurationMs;
+          }
+          if (event.generationDurationMs !== undefined) {
+            timing.modelGenerationDurationMs = event.generationDurationMs;
+          }
         }
         return;
       }
@@ -533,8 +549,11 @@ export class ConversationCore {
       return undefined;
     }
     const result: TurnOutputTiming = {};
+    if (timing.modelTtftMs !== undefined) {
+      result.ttftMs = timing.modelTtftMs;
+    }
     const firstDeltaAtMs = timing.firstFinalDeltaAtMs ?? timing.firstAnyDeltaAtMs;
-    if (firstDeltaAtMs !== undefined) {
+    if (result.ttftMs === undefined && firstDeltaAtMs !== undefined) {
       if (
         timing.turnStartedAtMs !== undefined
         && firstDeltaAtMs >= timing.turnStartedAtMs
@@ -542,7 +561,9 @@ export class ConversationCore {
         result.ttftMs = firstDeltaAtMs - timing.turnStartedAtMs;
       }
     }
-    if (timing.finalItemDeltas.size > 0) {
+    if (timing.modelOutputDurationMs !== undefined) {
+      result.outputDurationMs = timing.modelOutputDurationMs;
+    } else if (timing.finalItemDeltas.size > 0) {
       let totalOutputDurationMs = 0;
       for (const itemTiming of timing.finalItemDeltas.values()) {
         if (itemTiming.lastAtMs >= itemTiming.firstAtMs) {
@@ -584,10 +605,15 @@ export class ConversationCore {
     if (
       reasoningTokens !== undefined
       && reasoningTokens > 0
+    ) {
+      result.reasoningTokens = reasoningTokens;
+    }
+    if (
+      reasoningTokens !== undefined
+      && reasoningTokens > 0
       && timing.thinkingDurationMs !== undefined
       && timing.thinkingDurationMs > 0
     ) {
-      result.reasoningTokens = reasoningTokens;
       result.thinkingTokensPerSecond =
         reasoningTokens / (timing.thinkingDurationMs / 1_000);
       result.thinkingDurationMs = timing.thinkingDurationMs;
@@ -601,9 +627,12 @@ export class ConversationCore {
       && result.outputDurationMs !== undefined
       && result.outputDurationMs > 0
     ) {
-      const totalStreamMs = timing.thinkingDurationMs + result.outputDurationMs;
-      result.generationTokensPerSecond =
-        totalOutputTokens / (totalStreamMs / 1_000);
+      const totalStreamMs = timing.modelGenerationDurationMs
+        ?? timing.thinkingDurationMs + result.outputDurationMs;
+      if (totalStreamMs > 0) {
+        result.generationTokensPerSecond =
+          totalOutputTokens / (totalStreamMs / 1_000);
+      }
     }
     if (
       result.ttftMs === undefined

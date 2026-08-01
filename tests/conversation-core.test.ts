@@ -1015,14 +1015,20 @@ describe("ConversationCore", () => {
       threadId: "thread-1",
       turnId: "turn-1",
       requestStartedAtMs: 1_100,
+      ttftMs: 300,
       thinkingDurationMs: 600,
+      outputDurationMs: 800,
+      generationDurationMs: 1_400,
     });
     core.handle({
       type: "turn.modelTiming.updated",
       threadId: "thread-1",
       turnId: "turn-1",
       requestStartedAtMs: 1_200,
+      ttftMs: 250,
       thinkingDurationMs: 400,
+      outputDurationMs: 500,
+      generationDurationMs: 900,
     });
     handleNotification(core, {
       method: "thread/tokenUsage/updated",
@@ -1055,16 +1061,16 @@ describe("ConversationCore", () => {
     ) as Extract<OutputEvent, { type: "turn.completed" }> | undefined;
     expect(completed).toMatchObject({
       timing: {
-        ttftMs: 1_000,
-        outputDurationMs: 1_500,
+        ttftMs: 250,
+        outputDurationMs: 500,
         thinkingDurationMs: 400,
         nonReasoningOutputTokens: 20,
         reasoningTokens: 40,
       },
     });
-    expect(completed?.timing?.outputTokensPerSecond).toBeCloseTo(20 / 1.5);
+    expect(completed?.timing?.outputTokensPerSecond).toBeCloseTo(40);
     expect(completed?.timing?.thinkingTokensPerSecond).toBeCloseTo(100);
-    expect(completed?.timing?.generationTokensPerSecond).toBeCloseTo(60 / 1.9);
+    expect(completed?.timing?.generationTokensPerSecond).toBeCloseTo(60 / 0.9);
   });
 
   it("does not include reasoning tokens in generation speed without reasoning timing", async () => {
@@ -1115,6 +1121,25 @@ describe("ConversationCore", () => {
         },
       });
     }
+    core.handle({
+      type: "turn.modelTiming.updated",
+      threadId: "thread-openai",
+      turnId: "turn-openai",
+      requestStartedAtMs: 1_100,
+      ttftMs: 200,
+      thinkingDurationMs: 500,
+      outputDurationMs: 1_000,
+      generationDurationMs: 1_500,
+    });
+    core.handle({
+      type: "turn.modelTiming.updated",
+      threadId: "thread-openai",
+      turnId: "turn-openai",
+      requestStartedAtMs: 1_200,
+      ttftMs: 300,
+      outputDurationMs: 1_000,
+      generationDurationMs: 1_000,
+    });
     handleNotification(core, {
       method: "thread/tokenUsage/updated",
       params: {
@@ -1144,7 +1169,9 @@ describe("ConversationCore", () => {
       (event) => event.type === "turn.completed",
     ) as Extract<OutputEvent, { type: "turn.completed" }> | undefined;
     expect(completed?.timing).toMatchObject({
+      ttftMs: 300,
       nonReasoningOutputTokens: 20,
+      reasoningTokens: 40,
       outputTokensPerSecond: 20,
     });
     expect(completed?.timing?.thinkingTokensPerSecond).toBeUndefined();

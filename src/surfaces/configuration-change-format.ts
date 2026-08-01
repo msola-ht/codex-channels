@@ -90,7 +90,6 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "codex.socket": "Codex Socket",
     "codex.default-model": "默认模型",
     "codex.sandbox": "Sandbox",
-    "model.provider-proxy": "模型 Provider 代理",
     "network.proxy": "网络代理",
     "storage.database": "State Database",
     "approval.timeout": "审批超时",

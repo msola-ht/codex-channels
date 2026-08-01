@@ -1,4 +1,11 @@
-import { closeSync, constants, fstatSync, openSync, readFileSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 
@@ -58,6 +65,40 @@ export function loadPrimaryModelProvider(environment = process.env) {
   return marker?.mode === "exclusive" ? marker.provider : "openai";
 }
 
+export function loadOpenAiBaseUrl(environment = process.env) {
+  const path = join(codexHomePath(environment), "config.toml");
+  let document;
+  try {
+    document = record(parse(readCodexConfigFile(path)));
+  } catch (error) {
+    if (error?.code === "ENOENT") return undefined;
+    // TOML 解析错误可能包含用户配置原文，不能作为 cause 暴露。
+    // eslint-disable-next-line preserve-caught-error
+    throw new Error("Codex OpenAI base URL 配置无法安全读取");
+  }
+  const configured = document.openai_base_url;
+  if (configured === undefined) return undefined;
+  if (typeof configured !== "string") {
+    throw new Error("Codex openai_base_url 必须是 HTTP(S) URL");
+  }
+  let url;
+  try {
+    url = new URL(configured);
+  } catch {
+    throw new Error("Codex openai_base_url 必须是 HTTP(S) URL");
+  }
+  if (
+    (url.protocol !== "http:" && url.protocol !== "https:")
+    || url.username !== ""
+    || url.password !== ""
+    || url.search !== ""
+    || url.hash !== ""
+  ) {
+    throw new Error("Codex openai_base_url 必须是无凭据、查询和片段的 HTTP(S) URL");
+  }
+  return url.toString();
+}
+
 export function providerAppServerSocketPath(primarySocketPath, provider) {
   const extension = extname(primarySocketPath);
   const stem = basename(primarySocketPath, extension);
@@ -89,6 +130,23 @@ export function withProviderBaseUrl(argumentsList, provider, baseUrl) {
     "-c",
     `model_providers.${provider}.base_url=${JSON.stringify(baseUrl)}`,
   ];
+}
+
+export function withOpenAiBaseUrl(argumentsList, baseUrl) {
+  const prefix = "openai_base_url=";
+  const kept = [];
+  for (let index = 0; index < argumentsList.length; index += 1) {
+    const value = argumentsList[index];
+    if (value === "-c") {
+      const next = argumentsList[index + 1];
+      if (typeof next === "string" && next.startsWith(prefix)) {
+        index += 1;
+        continue;
+      }
+    }
+    kept.push(value);
+  }
+  return [...kept, "-c", `openai_base_url=${JSON.stringify(baseUrl)}`];
 }
 
 export function loadDeepseekAccountCredential(environment = process.env) {
@@ -199,6 +257,25 @@ function readPrivateFile(path, maximumBytes = maximumConfigBytes) {
       || (currentUid !== undefined && metadata.uid !== currentUid)
     ) {
       throw new Error("Codex 提供商配置文件权限或类型无效");
+    }
+    return readFileSync(descriptor, "utf8");
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function readCodexConfigFile(path) {
+  const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
+  const descriptor = openSync(realpathSync(path), constants.O_RDONLY | noFollow);
+  try {
+    const metadata = fstatSync(descriptor);
+    const currentUid = process.getuid?.();
+    if (
+      !metadata.isFile()
+      || metadata.size > maximumConfigBytes
+      || (currentUid !== undefined && metadata.uid !== currentUid)
+    ) {
+      throw new Error("Codex 配置文件权限、类型或大小无效");
     }
     return readFileSync(descriptor, "utf8");
   } finally {

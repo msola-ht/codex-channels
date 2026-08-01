@@ -61,6 +61,7 @@ describe("GatewayApplication startup cleanup", () => {
         config: { codexSocketPath: "/tmp/codex.sock" },
         logger: pino({ level: "silent" }),
         transport: { kind: "unix-websocket" },
+        providerMetricsServers: [],
         stopping: false,
         reconnecting: undefined,
         codex: {
@@ -164,6 +165,7 @@ describe("GatewayApplication startup cleanup", () => {
       config: { codexSocketPath: "/tmp/codex.sock" },
       logger: pino({ level: "silent" }),
       transport: { kind: "unix-websocket" },
+      providerMetricsServers: [],
       stopping: false,
       disconnectedProviders: new Set<string>(),
       codex: {
@@ -247,6 +249,7 @@ describe("GatewayApplication startup cleanup", () => {
       config: { codexSocketPath: "/tmp/codex.sock" },
       logger: pino({ level: "silent" }),
       transport: { kind: "unix-websocket" },
+      providerMetricsServers: [],
       stopping: false,
       disconnectedProviders: new Set<string>(),
       codex: {

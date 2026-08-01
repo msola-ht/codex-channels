@@ -77,7 +77,7 @@ export class GatewayApplication {
   private readonly router: SessionRouter;
   private readonly threadState: ThreadStateSynchronizer;
   private readonly core: ConversationCore;
-  private readonly providerMetricsServer: ProviderProxyMetricsServer | undefined;
+  private readonly providerMetricsServers: ProviderProxyMetricsServer[];
   private readonly bindings: SqliteBindingStore;
   private readonly workspaces: WorkspaceRegistry;
   private removeRpcNotification: (() => void) | undefined;
@@ -99,9 +99,6 @@ export class GatewayApplication {
     verifyCodexVersion(config);
     const primaryProvider = loadPrimaryModelProvider();
     const managedProvider = loadManagedModelProvider();
-    if (config.dsProxyListen && managedProvider?.provider !== "deepseek") {
-      throw new Error("ds_proxy 仅支持 DeepSeek 切换模式");
-    }
     const supplementaryModels = loadDeepseekModelOptions(
       process.env,
       primaryProvider === "deepseek" || managedProvider?.provider === "deepseek",
@@ -139,44 +136,58 @@ export class GatewayApplication {
     );
     this.threadState = new ThreadStateSynchronizer(this.router);
     this.core = new ConversationCore(this.router, this.output);
-    if (config.dsProxyListen && managedProvider?.provider === "deepseek") {
-      this.providerMetricsServer = new ProviderProxyMetricsServer(
-        providerMetricsSocketPath(config.codexSocketPath, managedProvider.provider),
+    this.providerMetricsServers = [...new Set([
+      primaryProvider,
+      ...(managedProvider ? [managedProvider.provider] : []),
+    ])].map((provider) => new ProviderProxyMetricsServer(
+        providerMetricsSocketPath(config.codexSocketPath, provider),
         (metrics) => {
+          const firstTokenAtMs = metrics.firstTokenAtMs;
           const hasTurnMetadata = metrics.threadId !== null
             && metrics.turnId !== null;
-          const hasReasoningWindow = metrics.firstReasoningDeltaAtMs !== null
-            && metrics.lastReasoningDeltaAtMs !== null;
-          if (
-            metrics.threadId === null
-            || metrics.turnId === null
-            || metrics.firstReasoningDeltaAtMs === null
-            || metrics.lastReasoningDeltaAtMs === null
-          ) {
+          const hasTokenWindow = firstTokenAtMs !== null;
+          if (metrics.threadId === null || metrics.turnId === null || !hasTokenWindow) {
             this.logger.debug(
-              { hasTurnMetadata, hasReasoningWindow },
-              "DeepSeek 模型代理指标缺少 Turn 关联或推理窗口，已跳过",
+              { provider, hasTurnMetadata, hasTokenWindow },
+              "模型统计代理指标缺少 Turn 关联或 Token 窗口，已跳过",
             );
             return;
           }
+          const lastTokenAtMs = Math.max(
+            metrics.lastReasoningDeltaAtMs ?? firstTokenAtMs,
+            metrics.lastOutputDeltaAtMs ?? firstTokenAtMs,
+          );
+          const thinkingDurationMs = metrics.firstReasoningDeltaAtMs === null
+            || metrics.lastReasoningDeltaAtMs === null
+            ? undefined
+            : metrics.lastReasoningDeltaAtMs - metrics.firstReasoningDeltaAtMs;
+          const outputDurationMs = metrics.firstOutputDeltaAtMs === null
+            || metrics.lastOutputDeltaAtMs === null
+            ? undefined
+            : metrics.lastOutputDeltaAtMs - metrics.firstOutputDeltaAtMs;
+          const generationDurationMs = lastTokenAtMs - firstTokenAtMs;
           this.core.handle({
             type: "turn.modelTiming.updated",
             threadId: metrics.threadId,
             turnId: metrics.turnId,
             requestStartedAtMs: metrics.requestStartedAtMs,
-            thinkingDurationMs: Math.max(
+            ttftMs: Math.max(
               0,
-              metrics.lastReasoningDeltaAtMs - metrics.firstReasoningDeltaAtMs,
+              firstTokenAtMs - metrics.requestStartedAtMs,
             ),
+            ...(thinkingDurationMs !== undefined && thinkingDurationMs > 0
+              ? { thinkingDurationMs }
+              : {}),
+            ...(outputDurationMs !== undefined && outputDurationMs > 0
+              ? { outputDurationMs }
+              : {}),
+            ...(generationDurationMs > 0 ? { generationDurationMs } : {}),
           });
         },
         (error) => {
-          this.logger.warn({ err: error }, "DeepSeek 模型代理指标接收失败");
+          this.logger.warn({ err: error, provider }, "模型统计代理指标接收失败");
         },
-      );
-    } else {
-      this.providerMetricsServer = undefined;
-    }
+      ));
     this.interactions = new InteractionRouter(logger);
     const models = new ModelSelectionService(
       this.codex,
@@ -384,18 +395,11 @@ export class GatewayApplication {
   private async startInternal(): Promise<void> {
     try {
       this.requireRunning();
-      if (this.providerMetricsServer) {
-        await this.providerMetricsServer.start();
-        this.logger.info(
-          {
-            socketPath: providerMetricsSocketPath(
-              this.config.codexSocketPath,
-              "deepseek",
-            ),
-          },
-          "DeepSeek 模型代理指标接收已启动",
-        );
-      }
+      await Promise.all(this.providerMetricsServers.map((server) => server.start()));
+      this.logger.info(
+        { providerCount: this.providerMetricsServers.length },
+        "模型统计代理指标接收已启动",
+      );
       this.removeRpcNotification = this.codex.onNotification((notification) => {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
       });
@@ -464,7 +468,9 @@ export class GatewayApplication {
       ["Surface", () => this.surfaceManager.stop()],
       [
         "Provider Proxy Metrics",
-        () => this.providerMetricsServer?.close() ?? Promise.resolve(),
+        () => Promise.all(
+          this.providerMetricsServers.map((server) => server.close()),
+        ).then(() => undefined),
       ],
       ["Inbound Event Bus", () => this.inbound.close()],
       ["Output Event Bus", () => this.output.close()],

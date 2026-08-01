@@ -8,11 +8,13 @@ import { describe, expect, it } from "vitest";
 import {
   loadManagedModelProvider,
   loadManagedProviderAppServer,
+  loadOpenAiBaseUrl,
   loadPrimaryModelProvider,
   providerAppServerSocketPath,
   providerMetricsSocketPath,
   validateConfiguredModelProvider,
   withProviderBaseUrl,
+  withOpenAiBaseUrl,
 } from "../runtime/model-provider-runtime.mjs";
 
 describe("model provider runtime topology", () => {
@@ -44,6 +46,29 @@ describe("model provider runtime topology", () => {
       "/private/runtime/codex-app-server.sock",
       "deepseek",
     )).toBe("/private/runtime/codex-app-server-deepseek-metrics.sock");
+  });
+
+  it("preserves a configured OpenAI base URL behind the local metrics proxy", async () => {
+    const codexHome = await configuredHome("switching");
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      'openai_base_url = "https://regional.example.test/codex"\n',
+      { mode: 0o600 },
+    );
+
+    expect(loadOpenAiBaseUrl({ CODEX_HOME: codexHome }))
+      .toBe("https://regional.example.test/codex");
+    expect(withOpenAiBaseUrl([], "http://127.0.0.1:45678"))
+      .toEqual(["-c", 'openai_base_url="http://127.0.0.1:45678"']);
+  });
+
+  it("does not invent an OpenAI base URL when config.toml does not declare one", async () => {
+    const codexHome = await configuredHome("switching");
+    writeFileSync(join(codexHome, "config.toml"), 'model = "gpt-5.6-sol"\n', {
+      mode: 0o600,
+    });
+
+    expect(loadOpenAiBaseUrl({ CODEX_HOME: codexHome })).toBeUndefined();
   });
 
   it("replaces the managed provider base URL with a local proxy address", async () => {

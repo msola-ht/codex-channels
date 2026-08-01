@@ -6,6 +6,7 @@ import {
 import type { AddressInfo } from "node:net";
 
 import { afterEach, describe, expect, it } from "vitest";
+import WebSocket, { WebSocketServer } from "ws";
 
 import {
   ProviderProxy,
@@ -312,13 +313,21 @@ describe("ProviderProxy", () => {
     expect(metric.threadId).toBe("thread-1");
     expect(metric.turnId).toBe("turn-1");
     if (
-      metric.firstReasoningDeltaAtMs === null
+      metric.firstTokenAtMs === null
+      || metric.firstReasoningDeltaAtMs === null
       || metric.lastReasoningDeltaAtMs === null
+      || metric.firstOutputDeltaAtMs === null
+      || metric.lastOutputDeltaAtMs === null
     ) {
-      throw new Error("缺少推理流时间戳");
+      throw new Error("缺少模型流时间戳");
     }
+    expect(metric.firstTokenAtMs).toBe(metric.firstReasoningDeltaAtMs);
     expect(metric.lastReasoningDeltaAtMs - metric.firstReasoningDeltaAtMs)
       .toBeGreaterThan(0);
+    expect(metric.lastOutputDeltaAtMs).toBe(metric.firstOutputDeltaAtMs);
+    expect(metric.responseCompletedAtMs).toBeGreaterThanOrEqual(
+      metric.lastOutputDeltaAtMs,
+    );
     expect(received).toHaveLength(1);
     expect(received[0]?.host).toBe(`127.0.0.1:${upstreamAddress.port}`);
     expect(received[0]?.authorization).toBe("Bearer sk-test1234");
@@ -499,7 +508,7 @@ describe("ProviderProxy", () => {
     expect(responseBody).toContain("response.completed");
   });
 
-  it("does not emit metrics when turn metadata is missing but still forwards", async () => {
+  it("forwards and emits safely discardable metrics when turn metadata is missing", async () => {
     const upstream = createServer((_request, response) => {
       response.writeHead(200, { "content-type": "text/event-stream" });
       response.write(sse("response.created", { type: "response.created" }));
@@ -548,6 +557,92 @@ describe("ProviderProxy", () => {
     expect(metrics[0]?.turnId).toBeNull();
   });
 
+  it("proxies Responses WebSocket traffic and strips private turn metadata", async () => {
+    const upstreamServer = createServer();
+    const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });
+    let upstreamMessage: Record<string, unknown> | undefined;
+    let upstreamPath = "";
+    upstreamWebSocket.on("connection", (socket, request) => {
+      upstreamPath = request.url ?? "";
+      socket.on("message", (data) => {
+        upstreamMessage = JSON.parse(data.toString("utf8")) as Record<string, unknown>;
+        socket.send(JSON.stringify({
+          type: "response.reasoning_summary_text.delta",
+          delta: "thinking",
+        }));
+        socket.send(JSON.stringify({ type: "response.output_text.delta", delta: "OK" }));
+        socket.send(JSON.stringify({ type: "response.completed", response: { id: "r1" } }));
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstreamServer.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstreamServer.address() as AddressInfo;
+    openServers.push({
+      close: async () => {
+        for (const client of upstreamWebSocket.clients) client.terminate();
+        await new Promise<void>((resolveClose) => upstreamWebSocket.close(() => resolveClose()));
+        await new Promise<void>((resolveClose) => upstreamServer.close(() => resolveClose()));
+      },
+    });
+
+    const metrics: ProviderProxyMetrics[] = [];
+    const requestStartedAtMs = Date.now() - 50;
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      upstreamBasePath: "/backend-api/codex",
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    const completed = new Promise<void>((resolve, reject) => {
+      client.on("open", () => {
+        client.send(JSON.stringify({
+          type: "response.create",
+          client_metadata: {
+            "x-codex-turn-metadata": JSON.stringify({
+              thread_id: "thread-ws",
+              turn_id: "turn-ws",
+            }),
+            "x-codex-ws-stream-request-start-ms": String(requestStartedAtMs),
+            stable: "kept",
+          },
+        }));
+      });
+      client.on("message", (data) => {
+        const message = JSON.parse(data.toString("utf8")) as { type?: string };
+        if (message.type === "response.completed") resolve();
+      });
+      client.on("error", reject);
+    });
+    await completed;
+    client.close();
+
+    expect(upstreamMessage).toEqual({
+      type: "response.create",
+      client_metadata: {
+        "x-codex-ws-stream-request-start-ms": String(requestStartedAtMs),
+        stable: "kept",
+      },
+    });
+    expect(upstreamPath).toBe("/backend-api/codex/responses");
+    expect(metrics).toHaveLength(1);
+    expect(metrics[0]).toMatchObject({
+      threadId: "thread-ws",
+      turnId: "turn-ws",
+      requestStartedAtMs,
+    });
+    expect(metrics[0]?.firstTokenAtMs).not.toBeNull();
+    expect(metrics[0]?.firstReasoningDeltaAtMs).not.toBeNull();
+    expect(metrics[0]?.firstOutputDeltaAtMs).not.toBeNull();
+  });
+
   it("rejects a non-loopback listen address", async () => {
     const proxy = new ProviderProxy("0.0.0.0:1234", {
       upstreamHost: "api.deepseek.com",
@@ -556,7 +651,110 @@ describe("ProviderProxy", () => {
     await expect(proxy.start()).rejects.toThrow(/回环/u);
   });
 
-  it("rejects paths other than /responses", async () => {
+  it("forwards HTTP compaction requests through the configured upstream base path", async () => {
+    let receivedPath = "";
+    const upstream = createServer((request, response) => {
+      receivedPath = request.url ?? "";
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end('{"output":[]}');
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstream.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push({
+      close: () => new Promise<void>((resolveClose) => {
+        upstream.close(() => resolveClose());
+      }),
+    });
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      upstreamBasePath: "/v1/",
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    const proxyPort = Number(proxy.address().split(":")[1]);
+    const status = await new Promise<number>((resolveStatus, rejectStatus) => {
+      const request = httpRequest({
+        hostname: "127.0.0.1",
+        port: proxyPort,
+        path: "/responses/compact?mode=test",
+        method: "POST",
+      }, (response) => {
+        response.resume();
+        response.on("end", () => resolveStatus(response.statusCode ?? 0));
+        response.on("error", rejectStatus);
+      });
+      request.on("error", rejectStatus);
+      request.end("{}");
+    });
+
+    expect(status).toBe(200);
+    expect(receivedPath).toBe("/v1/responses/compact?mode=test");
+  });
+
+  it("forwards the Codex model catalog request through the configured upstream base path", async () => {
+    let receivedMethod = "";
+    let receivedPath = "";
+    const upstream = createServer((request, response) => {
+      receivedMethod = request.method ?? "";
+      receivedPath = request.url ?? "";
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end('{"models":[]}');
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstream.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push({
+      close: () => new Promise<void>((resolveClose) => {
+        upstream.close(() => resolveClose());
+      }),
+    });
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      upstreamBasePath: "/backend-api/codex/",
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    const proxyPort = Number(proxy.address().split(":")[1]);
+    const result = await new Promise<{ body: string; status: number }>((resolve, reject) => {
+      const request = httpRequest({
+        hostname: "127.0.0.1",
+        port: proxyPort,
+        path: "/models?client_version=0.146.0",
+        method: "GET",
+      }, (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () => resolve({
+          body: Buffer.concat(chunks).toString("utf8"),
+          status: response.statusCode ?? 0,
+        }));
+        response.on("error", reject);
+      });
+      request.on("error", reject);
+      request.end();
+    });
+
+    expect(result).toEqual({ body: '{"models":[]}', status: 200 });
+    expect(receivedMethod).toBe("GET");
+    expect(receivedPath).toBe("/backend-api/codex/models?client_version=0.146.0");
+  });
+
+  it("rejects unsupported paths", async () => {
     const proxy = new ProviderProxy("127.0.0.1:0", {
       upstreamHost: "127.0.0.1",
       upstreamPort: 1,
@@ -572,6 +770,34 @@ describe("ProviderProxy", () => {
         port: proxyPort,
         path: "/user/balance",
         method: "GET",
+      }, (response) => {
+        response.resume();
+        response.on("end", () => resolveStatus(response.statusCode ?? 0));
+        response.on("error", rejectStatus);
+      });
+      request.on("error", rejectStatus);
+      request.end();
+    });
+
+    expect(status).toBe(404);
+  });
+
+  it("rejects non-read-only model catalog requests", async () => {
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: 1,
+      upstreamProtocol: "http",
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    const proxyPort = Number(proxy.address().split(":")[1]);
+    const status = await new Promise<number>((resolveStatus, rejectStatus) => {
+      const request = httpRequest({
+        hostname: "127.0.0.1",
+        port: proxyPort,
+        path: "/models",
+        method: "POST",
       }, (response) => {
         response.resume();
         response.on("end", () => resolveStatus(response.statusCode ?? 0));

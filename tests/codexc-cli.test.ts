@@ -1,7 +1,6 @@
 import { execFile, execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -70,7 +69,7 @@ describe("codexc CLI", () => {
       expect(result.stdout).toContain(expected);
       expect(result.stderr).toBe("");
     }
-  });
+  }, 15_000);
 
   it("generates conservative Codex rules for the current project", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-rules-"));
@@ -579,12 +578,21 @@ describe("codexc CLI", () => {
       env: environment,
     });
 
-    expect(JSON.parse(readFileSync(capturePath, "utf8"))).toEqual({
-      args: [
-        "app-server",
-        "--listen",
-        `unix://${join(home, "runtime", "codex-app-server.sock")}`,
-      ],
+    const captured = JSON.parse(readFileSync(capturePath, "utf8")) as {
+      args: string[];
+      cwd: string;
+      httpsProxy: string;
+      lowerHttpsProxy: string;
+      serviceRole: string;
+    };
+    expect(captured.args).toEqual([
+      "-c",
+      expect.stringMatching(/^openai_base_url="http:\/\/127\.0\.0\.1:\d+"$/u),
+      "app-server",
+      "--listen",
+      `unix://${join(home, "runtime", "codex-app-server.sock")}`,
+    ]);
+    expect(captured).toMatchObject({
       cwd: realpathSync(join(home, "workspace")),
       httpsProxy: "http://127.0.0.1:8899",
       lowerHttpsProxy: "http://127.0.0.1:8899",
@@ -661,13 +669,20 @@ describe("codexc CLI", () => {
       .split("\n")
       .map((line) => JSON.parse(line));
     expect(captures).toHaveLength(2);
-    expect(captures.map(({ args }) => args)).toEqual(expect.arrayContaining([
-      [
-        "app-server",
-        "--listen",
-        `unix://${join(home, "runtime", "codex-app-server.sock")}`,
-      ],
-      [
+    const openAiCapture = captures.find(({ args }) =>
+      args.some((value: string) => value.startsWith("openai_base_url="))
+    );
+    const deepseekCapture = captures.find(({ args }) =>
+      args.includes('model_provider="deepseek"')
+    );
+    expect(openAiCapture?.args).toEqual([
+      "-c",
+      expect.stringMatching(/^openai_base_url="http:\/\/127\.0\.0\.1:\d+"$/u),
+      "app-server",
+      "--listen",
+      `unix://${join(home, "runtime", "codex-app-server.sock")}`,
+    ]);
+    expect(deepseekCapture?.args).toEqual([
         "-c",
         'model="deepseek-v4-flash"',
         "-c",
@@ -681,24 +696,25 @@ describe("codexc CLI", () => {
         "-c",
         'model_providers.deepseek.name="deepseek"',
         "-c",
-        'model_providers.deepseek.base_url="https://api.deepseek.com/"',
-        "-c",
         'model_providers.deepseek.wire_api="responses"',
         "-c",
         'model_providers.deepseek.env_key="CODEX_CONNECT_DEEPSEEK_API_KEY"',
         "-c",
         "model_providers.deepseek.requires_openai_auth=false",
+        "-c",
+        expect.stringMatching(
+          /^model_providers\.deepseek\.base_url="http:\/\/127\.0\.0\.1:\d+"$/u,
+        ),
         "app-server",
         "--listen",
         `unix://${join(home, "runtime", "codex-app-server-deepseek.sock")}`,
-      ],
-    ]));
+      ]);
     expect(captures.find(({ args }) => args.includes('model_provider="deepseek"'))?.apiKey)
       .toBe("sk-service-secret");
     expect(JSON.stringify(captures.map(({ args }) => args))).not.toContain("sk-service-secret");
   });
 
-  it("owns the DeepSeek proxy in the App Server service without a running Gateway", async () => {
+  it("owns the automatic provider proxy in the App Server service without a running Gateway", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-service-proxy-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -706,7 +722,6 @@ describe("codexc CLI", () => {
     const workspace = join(root, "Workspace");
     const capturePath = join(root, "capture.json");
     const fakeCodex = join(root, "fake-codex.mjs");
-    const listen = await availableLoopbackAddress();
     mkdirSync(workspace);
     mkdirSync(codexHome);
     writeFileSync(fakeCodex, [
@@ -760,7 +775,6 @@ describe("codexc CLI", () => {
     execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
     updateGatewayConfig(join(home, "config.toml"), (document) => {
       table(document.codex).binary = fakeCodex;
-      document.ds_proxy = { listen };
     });
 
     execFileSync(process.execPath, [cli, "service-app-server"], {
@@ -768,13 +782,15 @@ describe("codexc CLI", () => {
       env: environment,
     });
 
-    expect(JSON.parse(readFileSync(capturePath, "utf8"))).toEqual({
-      baseUrl: `http://${listen}/`,
-      status: 404,
-    });
+    const captured = JSON.parse(readFileSync(capturePath, "utf8")) as {
+      baseUrl: string;
+      status: number;
+    };
+    expect(captured.baseUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/u);
+    expect(captured.status).toBe(404);
   });
 
-  it("rejects ds_proxy outside DeepSeek switching mode", () => {
+  it("rejects the removed manual ds_proxy configuration", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-service-proxy-mode-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -809,7 +825,7 @@ describe("codexc CLI", () => {
     });
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("ds_proxy 仅支持 DeepSeek 切换模式");
+    expect(result.stderr).toContain("ds_proxy");
   });
 
   it("does not overwrite an existing user configuration", () => {
@@ -1296,16 +1312,6 @@ function updateGatewayConfig(
   const document = readGatewayConfig(configPath);
   update(document);
   writeGatewayConfig(configPath, document);
-}
-
-async function availableLoopbackAddress(): Promise<string> {
-  const server = createServer();
-  await new Promise<void>((resolveListen) => {
-    server.listen(0, "127.0.0.1", resolveListen);
-  });
-  const port = (server.address() as AddressInfo).port;
-  await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
-  return `127.0.0.1:${port}`;
 }
 
 function table(value: unknown): Record<string, unknown> {

@@ -91,10 +91,12 @@
   到稳定 Application 摘要的映射、重置券数量，以及 DeepSeek 私有配置读取、统一代理、官方余额
   Schema 裁剪、响应上限和错误脱敏；Thread Token/上下文对 Provider 通用，OpenAI Fast 与周限
   不进入 DeepSeek 状态或完成卡片。
-- 全 Provider 最后一次模型响应的非推理输出速度、缺少推理计时时的安全降级；DeepSeek 回环代理
-  的精确路径、上游状态/Header、私有元数据剥离、流式转发、统一代理 Agent、App Server 服务
-  独立生命周期、首个可见输出或无文本响应完成前的指标确认、启动失败监听清理、非切换模式失败
-  关闭，以及 `0600` Unix Socket 指标投递和 Gateway 缺席时无损模型请求。
+- 全 Provider 最后一次模型响应的首字延时、非推理输出速度、Provider 暴露推理流时的思考/生成
+  速度、缺少推理计时时的真实推理输出量；自动回环代理的精确 `/responses`、`/responses/compact`
+  与只读 `/models` 路径、HTTP/SSE 与 WebSocket、上游
+  状态/Header、私有元数据剥离、流式转发、统一代理 Agent、OpenAI 自定义上游保留、App Server
+  服务独立生命周期、响应完成前的指标确认、启动失败清理，以及 `0600` Unix Socket 指标投递和
+  Gateway 缺席时无损模型请求。
 - Skill 查询按授权 Workspace 发送精确 CWD，Client 只映射启用的用户与项目直接安装项，排除
   系统和插件缓存并在缺少显示字段时失败关闭；显式调用重新解析精确名称、校验绝对路径，并同时
   发送 `$Skill` 文本标记与结构化 Skill 输入；三个渠道统一覆盖无参数 `/skill` 编号列表与

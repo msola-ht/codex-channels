@@ -56,7 +56,10 @@ export type ConversationInputEvent =
       threadId: string;
       turnId: string;
       requestStartedAtMs: number;
-      thinkingDurationMs: number;
+      ttftMs?: number;
+      thinkingDurationMs?: number;
+      outputDurationMs?: number;
+      generationDurationMs?: number;
     }
   | {
       type: "item.userMessage";

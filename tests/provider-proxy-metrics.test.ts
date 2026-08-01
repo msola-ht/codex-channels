@@ -90,7 +90,11 @@ function metrics(): ProviderProxyMetrics {
     threadId: "thread-1",
     turnId: "turn-1",
     requestStartedAtMs: 1_000,
+    firstTokenAtMs: 1_200,
     firstReasoningDeltaAtMs: 1_200,
     lastReasoningDeltaAtMs: 1_500,
+    firstOutputDeltaAtMs: 1_600,
+    lastOutputDeltaAtMs: 1_800,
+    responseCompletedAtMs: 1_900,
   };
 }

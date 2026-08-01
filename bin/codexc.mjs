@@ -14,8 +14,11 @@ import {
 } from "../runtime/network-proxy.mjs";
 import {
   loadManagedProviderAppServer,
+  loadOpenAiBaseUrl,
+  loadPrimaryModelProvider,
   providerAppServerSocketPath,
   providerMetricsSocketPath,
+  withOpenAiBaseUrl,
   withProviderBaseUrl,
 } from "../runtime/model-provider-runtime.mjs";
 import {
@@ -283,6 +286,9 @@ async function runServiceAppServer(args) {
     throw new Error("内部服务入口不接受参数");
   }
   const runtime = configuredEnvironment();
+  if (Object.hasOwn(runtime.document, "ds_proxy")) {
+    throw new Error("ds_proxy 已移除，模型统计代理现在由 App Server 服务自动管理");
+  }
   runtime.environment.CODEX_CONNECT_SERVICE_ROLE = "app-server";
   const codex = table(runtime.document.codex);
   const { defaultWorkspace } = readWorkspaceConfig(runtime.document);
@@ -292,41 +298,108 @@ async function runServiceAppServer(args) {
     join(runtime.dataDir, "runtime", "codex-app-server.sock"),
   );
   const managedProvider = loadManagedProviderAppServer(runtime.environment);
-  const dsProxyListen = stringValue(table(runtime.document.ds_proxy)?.listen);
-  if (dsProxyListen && managedProvider?.provider !== "deepseek") {
-    throw new Error("ds_proxy 仅支持 DeepSeek 切换模式");
-  }
-  let providerProxy;
-  let upstreamAgent;
-  if (managedProvider?.provider === "deepseek" && dsProxyListen) {
-    const {
-      ProviderProxy,
-      sendProviderProxyMetrics,
-    } = await import("../dist/provider-proxy/index.js");
-    const upstreamUrl = new URL("https://api.deepseek.com/");
+  const primaryProvider = loadPrimaryModelProvider(runtime.environment);
+  const {
+    ProviderProxy,
+    sendProviderProxyMetrics,
+  } = await import("../dist/provider-proxy/index.js");
+  const providerProxies = [];
+  const upstreamAgents = new Set();
+  const upstreamAgentFor = (upstreamUrl) => {
     const proxyUrl = selectHttpProxyUrl({
       http: runtime.environment.HTTP_PROXY,
       https: runtime.environment.HTTPS_PROXY,
       all: runtime.environment.ALL_PROXY,
       no: runtime.environment.NO_PROXY,
     }, upstreamUrl);
-    upstreamAgent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
-    const metricsSocketPath = providerMetricsSocketPath(
-      socketPath,
-      managedProvider.provider,
-    );
-    providerProxy = new ProviderProxy(dsProxyListen, {
-      ...(upstreamAgent ? { upstreamAgent } : {}),
-      upstreamHost: upstreamUrl.hostname,
-      onMetrics: (metrics) => sendProviderProxyMetrics(metricsSocketPath, metrics),
+    if (!proxyUrl) return undefined;
+    const agent = new HttpsProxyAgent(proxyUrl);
+    upstreamAgents.add(agent);
+    return agent;
+  };
+  const startProviderProxy = async (provider, options) => {
+    const modelProxy = new ProviderProxy("127.0.0.1:0", {
+      ...options,
+      onMetrics: (metrics) => sendProviderProxyMetrics(
+        providerMetricsSocketPath(socketPath, provider),
+        metrics,
+      ),
       onError: (error) => console.error(
-        `DeepSeek 模型代理转发失败：${error instanceof Error ? error.message : String(error)}`,
+        `${provider} 模型统计代理失败：${error instanceof Error ? error.message : String(error)}`,
       ),
     });
-    await providerProxy.start();
-    console.log(`DeepSeek 模型代理已启动：${providerProxy.address()}`);
+    await modelProxy.start();
+    providerProxies.push(modelProxy);
+    console.log(`${provider} 模型统计代理已启动：${modelProxy.address()}`);
+    return `http://${modelProxy.address()}`;
+  };
+  const deepseekUrl = new URL("https://api.deepseek.com/");
+  const proxyOptionsForUrl = (upstreamUrl) => {
+    const upstreamAgent = upstreamAgentFor(upstreamUrl);
+    return {
+      ...(upstreamAgent ? { upstreamAgent } : {}),
+      upstreamHost: upstreamUrl.hostname,
+      ...(upstreamUrl.port ? { upstreamPort: Number(upstreamUrl.port) } : {}),
+      upstreamProtocol: upstreamUrl.protocol === "http:" ? "http" : "https",
+      upstreamBasePath: upstreamUrl.pathname,
+    };
+  };
+  let primaryArguments = [];
+  let managedArguments;
+  try {
+    if (primaryProvider === "openai") {
+      const configuredOpenAiBaseUrl = loadOpenAiBaseUrl(runtime.environment);
+      let openAiProxyOptions;
+      if (configuredOpenAiBaseUrl) {
+        openAiProxyOptions = proxyOptionsForUrl(new URL(configuredOpenAiBaseUrl));
+      } else {
+        const chatgptUrl = new URL("https://chatgpt.com/backend-api/codex");
+        const apiUrl = new URL("https://api.openai.com/v1");
+        const chatgptAgent = upstreamAgentFor(chatgptUrl);
+        const apiAgent = upstreamAgentFor(apiUrl);
+        openAiProxyOptions = {
+          upstreamHost: apiUrl.hostname,
+          upstreamProtocol: "https",
+          upstreamBasePath: apiUrl.pathname,
+          resolveUpstream: (headers) => {
+            const target = headers["chatgpt-account-id"] === undefined ? apiUrl : chatgptUrl;
+            const agent = target === chatgptUrl ? chatgptAgent : apiAgent;
+            return {
+              ...(agent ? { agent } : {}),
+              host: target.hostname,
+              protocol: "https",
+              basePath: target.pathname,
+            };
+          },
+        };
+      }
+      const localBaseUrl = await startProviderProxy("openai", openAiProxyOptions);
+      primaryArguments = withOpenAiBaseUrl(primaryArguments, localBaseUrl);
+    } else if (primaryProvider === "deepseek") {
+      const localBaseUrl = await startProviderProxy(
+        "deepseek",
+        proxyOptionsForUrl(deepseekUrl),
+      );
+      primaryArguments = withProviderBaseUrl(primaryArguments, "deepseek", localBaseUrl);
+    }
+    if (managedProvider) {
+      const localBaseUrl = await startProviderProxy(
+        managedProvider.provider,
+        proxyOptionsForUrl(deepseekUrl),
+      );
+      managedArguments = withProviderBaseUrl(
+        managedProvider.arguments,
+        managedProvider.provider,
+        localBaseUrl,
+      );
+    }
+  } catch (error) {
+    await Promise.all(providerProxies.map((proxy) => proxy.close()));
+    for (const agent of upstreamAgents) agent.destroy();
+    throw error;
   }
   const children = [spawn(runtime.environment.CODEX_BINARY, [
+    ...primaryArguments,
     "app-server",
     "--listen",
     `unix://${socketPath}`,
@@ -335,14 +408,7 @@ async function runServiceAppServer(args) {
     env: runtime.environment,
     cwd: defaultWorkspace.cwd,
   })];
-  if (managedProvider) {
-    const managedArguments = dsProxyListen
-      ? withProviderBaseUrl(
-          managedProvider.arguments,
-          managedProvider.provider,
-          `http://${dsProxyListen}/`,
-        )
-      : managedProvider.arguments;
+  if (managedProvider && managedArguments) {
     children.push(spawn(runtime.environment.CODEX_BINARY, [
       ...managedArguments,
       "app-server",
@@ -358,8 +424,8 @@ async function runServiceAppServer(args) {
     }));
   }
   forwardChildrenLifecycle(children, async () => {
-    await providerProxy?.close();
-    upstreamAgent?.destroy();
+    await Promise.all(providerProxies.map((proxy) => proxy.close()));
+    for (const agent of upstreamAgents) agent.destroy();
   });
 }
 

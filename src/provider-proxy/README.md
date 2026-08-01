@@ -5,13 +5,14 @@
 
 ## 文件
 
-- `proxy.ts`：HTTP 转发实现。监听回环地址，把精确 `/responses` 路径流式转发到上游
+- `proxy.ts`：HTTP/SSE 与 WebSocket 转发实现。监听自动分配的回环地址，把精确
+  `/responses`、HTTP `/responses/compact` 与只读 `/models` 路径转发到上游
   Provider，保留端到端状态码与响应头；Authorization 只用于上游请求，不落日志、不进指标，
   `x-codex-turn-metadata` 在本地读取后移除，Hop-by-hop Header 不透传；
-  转发 SSE 响应时按事件类型记录推理流首尾时间，并在首个可见输出或响应完成事件前完成指标
-  投递确认；从
+  转发 SSE 或 WebSocket 响应时按事件类型记录首 Token、推理与非推理输出首尾时间，并在
+  响应完成事件前完成指标投递确认；从
   `x-codex-turn-metadata` 提取 `thread_id` / `turn_id` 用于按 Turn 关联。
-  只转发 `/responses` 路径，其余路径返回 404；监听地址强制为回环（模块与配置双重校验），
+  其他路径以及非 GET 的 `/models` 返回 404；监听地址强制为回环，
   上游空闲超时默认 60 秒并处理双向流式背压；客户端提前断开时取消上游请求。服务入口按统一
   `network.proxy` 选择传入上游 Agent。
 - `metrics-channel.ts`：App Server 服务把单条有界指标写入 Gateway 拥有的 `0600` Unix Socket，
@@ -23,5 +24,6 @@
 模块只依赖 Node 内置 HTTP/HTTPS/Unix Socket 能力，不接触平台 SDK、数据库或协议生成类型；
 `bin/codexc.mjs` 把代理装配到 App Server 服务生命周期，`bootstrap` 只把收到的指标转换为
 `conversation-core` 的稳定输入事件。
-监听地址必须由配置层限制为回环地址；`ds_proxy` 只允许用于 DeepSeek 切换模式，其他模式明确
-失败关闭；代理失败按配置错误失败关闭。
+App Server 服务为主 Provider 和可选切换 Provider 自动创建独立代理，不暴露手工监听配置。
+OpenAI 保留用户配置的 `openai_base_url`；没有显式上游时，按官方认证请求 Header 选择 ChatGPT
+或 API 上游。代理启动失败时 App Server 服务失败关闭，不以绕过统计代理的方式静默降级。

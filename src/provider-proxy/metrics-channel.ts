@@ -192,8 +192,12 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     !nullableString(record.threadId)
     || !nullableString(record.turnId)
     || !finiteNumber(record.requestStartedAtMs)
+    || !nullableFiniteNumber(record.firstTokenAtMs)
     || !nullableFiniteNumber(record.firstReasoningDeltaAtMs)
     || !nullableFiniteNumber(record.lastReasoningDeltaAtMs)
+    || !nullableFiniteNumber(record.firstOutputDeltaAtMs)
+    || !nullableFiniteNumber(record.lastOutputDeltaAtMs)
+    || !finiteNumber(record.responseCompletedAtMs)
   ) {
     return undefined;
   }

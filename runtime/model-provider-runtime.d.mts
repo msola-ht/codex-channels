@@ -28,6 +28,10 @@ export function loadPrimaryModelProvider(
   environment?: NodeJS.ProcessEnv,
 ): "openai" | "deepseek";
 
+export function loadOpenAiBaseUrl(
+  environment?: NodeJS.ProcessEnv,
+): string | undefined;
+
 export function providerAppServerSocketPath(
   primarySocketPath: string,
   provider: string,
@@ -43,3 +47,4 @@ export function withProviderBaseUrl(
   provider: string,
   baseUrl: string,
 ): string[];
+export function withOpenAiBaseUrl(argumentsList: string[], baseUrl: string): string[];
