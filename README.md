@@ -166,7 +166,8 @@ codexc remote --profile deepseek resume   # 切换模式：继续 DeepSeek Threa
 
 原生 TUI 与聊天客户端共享对应 Provider 的 App Server 和 Thread。
 切换模式下，`codexc remote` 连接 OpenAI 主实例，`codexc remote --profile deepseek` 连接隔离的
-DeepSeek 实例；两者都可使用 `resume` 恢复各自 Provider 的渠道 Thread。独立、不共享 Gateway
+DeepSeek 实例，并保留该 Profile 供 Remote TUI 使用 DeepSeek API Key 而不触发 OpenAI 登录；
+两者都可使用 `resume` 恢复各自 Provider 的渠道 Thread。独立、不共享 Gateway
 Thread 的 TUI 仍可直接运行 `codex --profile deepseek`。固定模式只有一个 DeepSeek 主实例，直接
 使用 `codexc remote`。
 

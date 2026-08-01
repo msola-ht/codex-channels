@@ -46,7 +46,14 @@ const codexBinary = isAbsolute(configuredBinary)
   : configuredBinary;
 const result = spawnSync(
   codexBinary,
-  ["--remote", `unix://${socketPath}`, "-C", workdir, ...passthrough],
+  [
+    "--remote",
+    `unix://${socketPath}`,
+    "-C",
+    workdir,
+    ...(selectedProfile === "deepseek" ? ["--profile", "deepseek"] : []),
+    ...passthrough,
+  ],
   { stdio: "inherit" },
 );
 if (result.error) {

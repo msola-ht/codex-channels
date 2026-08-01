@@ -38,8 +38,8 @@
 ## 开发与协议
 
 - `dev-all.mjs`：开发模式下复用或启动主 App Server 与已配置的隔离 Provider App Server，再启动 Gateway。
-- `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下消费
-  `--profile deepseek` 选择隔离实例，不把 Profile 参数错误传入已经运行的 Remote App Server。
+- `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下规范化
+  `--profile deepseek`，既选择隔离实例，也保留 Profile 供 Remote TUI 完成第三方 Provider 认证。
 - `prepare-codex-upgrade.mjs`：在干净工作区校验精确目标 CLI，调用现有协议生成和版本同步，
   完成基础一致性检查后把差异交给 Codex 审查。
 - `codex-release-api.mjs`：为稳定版和 Alpha 解析器调用 GitHub Release API；请求或响应正文

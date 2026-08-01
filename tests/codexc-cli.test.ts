@@ -463,7 +463,7 @@ describe("codexc CLI", () => {
     ]);
   });
 
-  it("routes the DeepSeek profile to its isolated remote App Server", () => {
+  it("routes the DeepSeek profile to its isolated remote App Server and authenticates the TUI", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-remote-profile-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -530,6 +530,8 @@ describe("codexc CLI", () => {
         `unix://${join(home, "runtime", "codex-app-server-deepseek.sock")}`,
         "-C",
         realpathSync(workspace),
+        "--profile",
+        "deepseek",
         "resume",
       ]);
     }
