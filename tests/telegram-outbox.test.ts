@@ -1103,7 +1103,7 @@ describe("TelegramOutbox", () => {
         turnCompletedPanel,
         "",
         "• <b>上下文：</b>24.6 K / 258 K（9.5%）",
-        "• <b>缓存命中：</b>2.1%",
+        "• <b>最近请求缓存命中：</b>2.1%",
         "• <b>模型：</b>gpt-5.6-sol · medium · Fast 开启",
         "• <b>Provider：</b>OpenAI",
         "• <b>上下文压缩：</b>2 次",

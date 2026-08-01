@@ -383,10 +383,10 @@ describe("formatStatus", () => {
     });
 
     expect(text).toContain("累计：1.25 M");
-    expect(text).toContain("最近 Turn：12.5 K");
+    expect(text).toContain("最近模型请求：12.5 K");
     expect(text).toContain("缓存输入：750 K");
     expect(text).toContain("缓存命中率：75%");
-    expect(text).toContain("模型上下文窗口容量：200 K");
+    expect(text).toContain("Codex 有效上下文窗口：200 K");
     expect(text).toContain("模型：gpt-main");
     expect(text).toContain("思考强度：high");
     expect(text).toContain("Fast 模式：开启");

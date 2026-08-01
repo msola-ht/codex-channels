@@ -165,7 +165,7 @@ export function createTurnCompletedPresentation(
           : `${formatTokenCount(current)} / ${formatTokenCount(capacity)}（${formatPercent(Math.max(0, current / capacity * 100))}）`,
       },
       {
-        label: "缓存命中",
+        label: "最近请求缓存命中",
         value: formatCacheHitRate(
           event.tokenUsage.last.inputTokens,
           event.tokenUsage.last.cachedInputTokens,

@@ -101,7 +101,7 @@ describe("provider-aware conversation command formatting", () => {
     });
 
     expect(rendered).toContain("Provider：DeepSeek");
-    expect(rendered).toContain("模型上下文窗口容量：1.05 M");
+    expect(rendered).toContain("Codex 有效上下文窗口：1.05 M");
     expect(rendered).not.toContain("Fast 模式");
     expect(rendered).not.toContain("周限");
   });

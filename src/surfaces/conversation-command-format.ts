@@ -485,7 +485,7 @@ export function formatConversationStatus(status: ConversationStatus): string {
       "",
       "当前 Thread 用量：",
       `累计：${formatTokenCount(total.totalTokens)}`,
-      `最近 Turn：${formatTokenCount(last.totalTokens)}`,
+      `最近模型请求：${formatTokenCount(last.totalTokens)}`,
       `输入：${formatTokenCount(total.inputTokens)}`,
       `缓存输入：${formatTokenCount(total.cachedInputTokens)}`,
       `缓存命中率：${formatCacheHitRate(total.inputTokens, total.cachedInputTokens)}`,
@@ -493,8 +493,8 @@ export function formatConversationStatus(status: ConversationStatus): string {
         ? [`缓存写入：${formatTokenCount(total.cacheWriteInputTokens)}`]
         : []),
       `输出：${formatTokenCount(total.outputTokens)}`,
-      `推理输出：${formatTokenCount(total.reasoningOutputTokens)}`,
-      `模型上下文窗口容量：${modelContextWindow === null ? "未知" : formatTokenCount(modelContextWindow)}`,
+      `其中推理输出：${formatTokenCount(total.reasoningOutputTokens)}`,
+      `Codex 有效上下文窗口：${modelContextWindow === null ? "未知" : formatTokenCount(modelContextWindow)}`,
     );
   } else if (status.threadId) {
     lines.push("", "当前 Thread 用量：等待 App Server 推送统计");

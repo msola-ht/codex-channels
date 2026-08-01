@@ -119,7 +119,7 @@ describe("shared Surface lifecycle presentation", () => {
       "",
       "错误：失败：[已隐藏]",
       "上下文：10 K / 100 K（10%）",
-      "缓存命中：75%",
+      "最近请求缓存命中：75%",
       "模型：gpt-test · medium · Fast 开启",
       "Provider：OpenAI",
       "上下文压缩：2 次",
