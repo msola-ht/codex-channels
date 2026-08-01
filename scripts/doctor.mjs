@@ -235,7 +235,7 @@ if (document) {
     const configuredProvider = validateConfiguredModelProvider(process.env);
     if (configuredProvider) {
       record(
-        "模型 Provider 配置",
+        "模型提供商配置",
         true,
         `${configuredProvider.provider} ${configuredProvider.mode === "switching" ? "切换" : "固定"}模式有效`,
       );
@@ -248,7 +248,7 @@ if (document) {
       );
     }
   } catch (error) {
-    record("模型 Provider 配置", false, errorMessage(error));
+    record("模型提供商配置", false, errorMessage(error));
   }
 }
 

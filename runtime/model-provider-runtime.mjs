@@ -112,7 +112,7 @@ function readProviderProfile(
     if (error?.code === "ENOENT") throw error;
     // TOML 解析错误可能包含带 API Key 的原始配置行，不能作为 cause 暴露。
     // eslint-disable-next-line preserve-caught-error
-    throw new Error("Codex 模型 Provider 配置无法安全读取");
+    throw new Error("Codex 模型提供商配置无法安全读取");
   }
   if (
     requireSelection
@@ -136,7 +136,7 @@ function readProviderProfile(
     || provider.wire_api !== descriptor.wireApi
     || provider.requires_openai_auth !== false
   ) {
-    throw new Error("Codex DeepSeek Provider 配置无效");
+    throw new Error("Codex DeepSeek 提供商配置无效");
   }
   const apiKey = provider.experimental_bearer_token;
   if (
@@ -171,7 +171,7 @@ function readPrivateFile(path, maximumBytes = maximumConfigBytes) {
       || (metadata.mode & 0o077) !== 0
       || (currentUid !== undefined && metadata.uid !== currentUid)
     ) {
-      throw new Error("Codex Provider 配置文件权限或类型无效");
+      throw new Error("Codex 提供商配置文件权限或类型无效");
     }
     return readFileSync(descriptor, "utf8");
   } finally {
