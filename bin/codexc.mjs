@@ -21,6 +21,7 @@ import {
   withOpenAiBaseUrl,
   withProviderBaseUrl,
 } from "../runtime/model-provider-runtime.mjs";
+import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import {
   initializeUserData,
   packageDir,
@@ -333,7 +334,7 @@ async function runServiceAppServer(args) {
     console.log(`${provider} 模型统计代理已启动：${modelProxy.address()}`);
     return `http://${modelProxy.address()}`;
   };
-  const deepseekUrl = new URL("https://api.deepseek.com/");
+  const deepseekUrl = new URL(deepseekProviderDefinition.baseUrl);
   const proxyOptionsForUrl = (upstreamUrl) => {
     const upstreamAgent = upstreamAgentFor(upstreamUrl);
     return {
@@ -375,12 +376,16 @@ async function runServiceAppServer(args) {
       }
       const localBaseUrl = await startProviderProxy("openai", openAiProxyOptions);
       primaryArguments = withOpenAiBaseUrl(primaryArguments, localBaseUrl);
-    } else if (primaryProvider === "deepseek") {
+    } else if (primaryProvider === deepseekProviderDefinition.id) {
       const localBaseUrl = await startProviderProxy(
-        "deepseek",
+        deepseekProviderDefinition.id,
         proxyOptionsForUrl(deepseekUrl),
       );
-      primaryArguments = withProviderBaseUrl(primaryArguments, "deepseek", localBaseUrl);
+      primaryArguments = withProviderBaseUrl(
+        primaryArguments,
+        deepseekProviderDefinition.id,
+        localBaseUrl,
+      );
     }
     if (managedProvider) {
       const localBaseUrl = await startProviderProxy(

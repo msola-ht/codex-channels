@@ -87,7 +87,8 @@ plan_updates = true
 - `operation_updates`：`full` 显示完整操作详情，`compact` 显示摘要，`hidden` 隐藏操作过程。
 - `plan_updates`：是否显示 Codex 计划，默认开启。
 
-每次 Turn 完成后会按实际可用数据展示耗时、上下文、缓存、首字延时、输出速度和提供商账户状态。
+每次 Turn 完成后会按实际可用数据展示耗时、上下文、缓存、非推理输出速度和提供商账户状态；
+DeepSeek 还会展示可观测的首字延时、思考速度与含推理生成速度。
 
 ### DeepSeek
 

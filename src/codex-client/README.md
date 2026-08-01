@@ -20,7 +20,8 @@
 - `model-adapter.ts`：把当前版本官方模型目录裁剪为 Application 拥有的模型选项和
   `text/image/audio` 输入能力，过滤不可见项，
   并在缺少模型选择必需字段时失败关闭。
-- `deepseek-catalog.ts`：只读取 Setup 下载到用户 `CODEX_HOME` 的 DeepSeek 模型目录，把当前官方
+- `deepseek-catalog.ts`：按 Bootstrap 注入的编译期 DeepSeek 定义，只读取 Setup 下载到用户
+  `CODEX_HOME` 的模型目录，把当前官方
   支持的 Flash 映射为可选模型，并保留 Pro 为带不可用原因、不能切换的展示项。
 - `account-adapter.ts`：把账户 Token 用量、单桶或多桶额度与重置券数量映射为 Application
   稳定摘要；未知枚举或畸形数值失败关闭，不把上游响应正文交给 Surface。

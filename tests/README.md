@@ -92,8 +92,9 @@
   到稳定 Application 摘要的映射、重置券数量，以及 DeepSeek 私有配置读取、统一代理、官方余额
   Schema 裁剪、响应上限和错误脱敏；Thread Token/上下文对 Provider 通用，OpenAI Fast 与周限
   不进入 DeepSeek 状态或完成卡片。
-- 全 Provider 最后一次模型响应的首字延时、文本与函数/自定义工具参数的非推理输出速度、Provider
-  暴露推理流时的思考/生成速度、缺少推理计时时的真实推理输出量；自动回环代理的精确 `/responses`、`/responses/compact`
+- 全 Provider 最后一次模型响应的文本与函数/自定义工具参数非推理输出速度；DeepSeek 可观测的
+  首字延时、思考/生成速度，以及 OpenAI 即使收到推理摘要计时也只保留非推理输出指标；自动回环
+  代理的精确 `/responses`、`/responses/compact`
   与只读 `/models` 路径、HTTP/SSE 与 WebSocket、上游
   状态/Header、私有元数据剥离、流式转发、统一代理 Agent、OpenAI 自定义上游保留、App Server
   服务独立生命周期、响应完成前的指标确认、启动失败清理，以及 `0600` Unix Socket 指标投递和

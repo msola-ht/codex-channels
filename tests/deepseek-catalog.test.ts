@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import { loadDeepseekModelOptions } from "../src/codex-client/deepseek-catalog.js";
 
 describe("DeepSeek model catalog", () => {
@@ -17,7 +18,11 @@ describe("DeepSeek model catalog", () => {
       ],
     }));
 
-    const models = loadDeepseekModelOptions({ CODEX_HOME: codexHome });
+    const models = loadDeepseekModelOptions(
+      { CODEX_HOME: codexHome },
+      true,
+      deepseekProviderDefinition,
+    );
 
     expect(models).toMatchObject([
       { model: "deepseek-v4-flash", available: true },
@@ -33,7 +38,11 @@ describe("DeepSeek model catalog", () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-deepseek-catalog-disabled-"));
     writeFileSync(join(codexHome, "deepseek.models.json"), "not-json");
 
-    expect(loadDeepseekModelOptions({ CODEX_HOME: codexHome }, false)).toEqual([]);
+    expect(loadDeepseekModelOptions(
+      { CODEX_HOME: codexHome },
+      false,
+      deepseekProviderDefinition,
+    )).toEqual([]);
   });
 });
 

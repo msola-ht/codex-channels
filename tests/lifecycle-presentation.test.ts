@@ -208,7 +208,6 @@ describe("shared Surface lifecycle presentation", () => {
         status: "completed",
         modelProvider: "openai",
         timing: {
-          ttftMs: 5_000,
           reasoningTokens: 40,
           outputTokensPerSecond: 96,
         },

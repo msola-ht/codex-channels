@@ -354,7 +354,11 @@ export class ConversationCore {
           : undefined;
         const goal = this.goalsByThread.get(event.threadId);
         const contextCompactionCount = this.contextCompactionCount(event.threadId);
-        const timing = this.computeTurnOutputTiming(event.threadId, event.turnId);
+        const timing = this.computeTurnOutputTiming(
+          event.threadId,
+          event.turnId,
+          supportsDetailedModelTiming(modelSettings?.modelProvider),
+        );
         this.timingByThread.delete(event.threadId);
         this.errorsByTurn.delete(event.turnId);
         this.publish({
@@ -543,17 +547,22 @@ export class ConversationCore {
   private computeTurnOutputTiming(
     threadId: string,
     turnId: string,
+    detailedTiming: boolean,
   ): TurnOutputTiming | undefined {
     const timing = this.timingByThread.get(threadId);
     if (!timing || timing.turnId !== turnId) {
       return undefined;
     }
     const result: TurnOutputTiming = {};
-    if (timing.modelTtftMs !== undefined) {
+    if (detailedTiming && timing.modelTtftMs !== undefined) {
       result.ttftMs = timing.modelTtftMs;
     }
     const firstDeltaAtMs = timing.firstFinalDeltaAtMs ?? timing.firstAnyDeltaAtMs;
-    if (result.ttftMs === undefined && firstDeltaAtMs !== undefined) {
+    if (
+      detailedTiming
+      && result.ttftMs === undefined
+      && firstDeltaAtMs !== undefined
+    ) {
       if (
         timing.turnStartedAtMs !== undefined
         && firstDeltaAtMs >= timing.turnStartedAtMs
@@ -603,13 +612,15 @@ export class ConversationCore {
       result.nonReasoningOutputTokens = nonReasoningOutputTokens;
     }
     if (
-      reasoningTokens !== undefined
+      detailedTiming
+      && reasoningTokens !== undefined
       && reasoningTokens > 0
     ) {
       result.reasoningTokens = reasoningTokens;
     }
     if (
-      reasoningTokens !== undefined
+      detailedTiming
+      && reasoningTokens !== undefined
       && reasoningTokens > 0
       && timing.thinkingDurationMs !== undefined
       && timing.thinkingDurationMs > 0
@@ -620,7 +631,8 @@ export class ConversationCore {
     }
     const totalOutputTokens = (nonReasoningOutputTokens ?? 0) + (reasoningTokens ?? 0);
     if (
-      reasoningTokens !== undefined
+      detailedTiming
+      && reasoningTokens !== undefined
       && reasoningTokens > 0
       && timing.thinkingDurationMs !== undefined
       && timing.thinkingDurationMs > 0
@@ -682,6 +694,10 @@ export class ConversationCore {
   private key(target: ConversationTarget): string {
     return conversationTargetKey(target);
   }
+}
+
+function supportsDetailedModelTiming(modelProvider: string | undefined): boolean {
+  return modelProvider === "deepseek";
 }
 
 function rateLimitNoticeFingerprint(snapshot: RateLimitSnapshot): string | undefined {

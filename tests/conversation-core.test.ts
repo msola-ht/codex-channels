@@ -887,7 +887,12 @@ describe("ConversationCore", () => {
     const core = new ConversationCore({
       allBindings: () => [],
       targetForThread: () => target,
-      modelSettingsForThread: () => undefined,
+      modelSettingsForThread: () => ({
+        model: "deepseek-v4-flash",
+        modelProvider: "deepseek",
+        effort: "high",
+        serviceTier: null,
+      }),
       contextCompactionItemIdsForThread: () => undefined,
     }, output);
 
@@ -1073,7 +1078,7 @@ describe("ConversationCore", () => {
     expect(completed?.timing?.generationTokensPerSecond).toBeCloseTo(60 / 0.9);
   });
 
-  it("does not include reasoning tokens in generation speed without reasoning timing", async () => {
+  it("keeps only non-reasoning output timing for OpenAI", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const events: OutputEvent[] = [];
     output.subscribe("test", (event) => {
@@ -1087,7 +1092,12 @@ describe("ConversationCore", () => {
     const core = new ConversationCore({
       allBindings: () => [],
       targetForThread: () => target,
-      modelSettingsForThread: () => undefined,
+      modelSettingsForThread: () => ({
+        model: "gpt-5.6-sol",
+        modelProvider: "openai",
+        effort: "medium",
+        serviceTier: null,
+      }),
       contextCompactionItemIdsForThread: () => undefined,
     }, output);
 
@@ -1137,8 +1147,9 @@ describe("ConversationCore", () => {
       turnId: "turn-openai",
       requestStartedAtMs: 1_200,
       ttftMs: 300,
+      thinkingDurationMs: 400,
       outputDurationMs: 1_000,
-      generationDurationMs: 1_000,
+      generationDurationMs: 1_400,
     });
     handleNotification(core, {
       method: "thread/tokenUsage/updated",
@@ -1169,11 +1180,11 @@ describe("ConversationCore", () => {
       (event) => event.type === "turn.completed",
     ) as Extract<OutputEvent, { type: "turn.completed" }> | undefined;
     expect(completed?.timing).toMatchObject({
-      ttftMs: 300,
       nonReasoningOutputTokens: 20,
-      reasoningTokens: 40,
       outputTokensPerSecond: 20,
     });
+    expect(completed?.timing?.ttftMs).toBeUndefined();
+    expect(completed?.timing?.reasoningTokens).toBeUndefined();
     expect(completed?.timing?.thinkingTokensPerSecond).toBeUndefined();
     expect(completed?.timing?.generationTokensPerSecond).toBeUndefined();
   });

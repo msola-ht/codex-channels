@@ -11,18 +11,18 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 
 import { parse } from "smol-toml";
 
+import { deepseekProviderDefinition } from "./model-provider-definitions.mjs";
+
 const maximumConfigBytes = 1_048_576;
 const maximumCatalogBytes = 2_097_152;
-const managedMarkerName = "codex-connect-deepseek.config.toml";
-const deepseekApiKeyEnvironmentKey = "CODEX_CONNECT_DEEPSEEK_API_KEY";
+const managedMarkerName = deepseekProviderDefinition.managedMarkerFileName;
+const deepseekApiKeyEnvironmentKey = deepseekProviderDefinition.apiKeyEnvironmentKey;
 
-const providers = Object.freeze({
-  deepseek: Object.freeze({
-    id: "deepseek",
-    profileName: "deepseek.config.toml",
-    baseUrl: "https://api.deepseek.com/",
-    wireApi: "responses",
-  }),
+const deepseekProvider = Object.freeze({
+  id: deepseekProviderDefinition.id,
+  profileName: deepseekProviderDefinition.profileFileName,
+  baseUrl: deepseekProviderDefinition.baseUrl,
+  wireApi: deepseekProviderDefinition.wireApi,
 });
 
 export function loadManagedModelProvider(environment = process.env) {
@@ -153,17 +153,17 @@ export function loadDeepseekAccountCredential(environment = process.env) {
   const managed = loadManagedProviderProfile(environment);
   if (managed !== undefined) return managed.apiKey;
   const configPath = join(codexHomePath(environment), "config.toml");
-  return readProviderProfile(configPath, providers.deepseek, { requireSelection: false }).apiKey;
+  return readProviderProfile(configPath, deepseekProvider, { requireSelection: false }).apiKey;
 }
 
 function loadManagedProviderProfile(environment, { requireLaunchConfig = false } = {}) {
   const codexHome = codexHomePath(environment);
   const marker = readManagedMarker(codexHome);
   if (!marker || marker.mode === "exclusive") return undefined;
-  const descriptor = providers.deepseek;
+  const descriptor = deepseekProvider;
   const profile = readProviderProfile(join(codexHome, descriptor.profileName), descriptor, {
     ...(requireLaunchConfig
-      ? { expectedCatalogPath: join(codexHome, "deepseek.models.json") }
+      ? { expectedCatalogPath: join(codexHome, deepseekProviderDefinition.catalogFileName) }
       : {}),
   });
   if (requireLaunchConfig) validateModelCatalog(profile.catalogPath);
@@ -174,12 +174,12 @@ function loadConfiguredProviderProfile(environment) {
   const codexHome = codexHomePath(environment);
   const marker = readManagedMarker(codexHome);
   if (!marker) return undefined;
-  const descriptor = providers.deepseek;
+  const descriptor = deepseekProvider;
   const profilePath = marker.mode === "exclusive"
     ? join(codexHome, "config.toml")
     : join(codexHome, descriptor.profileName);
   const profile = readProviderProfile(profilePath, descriptor, {
-    expectedCatalogPath: join(codexHome, "deepseek.models.json"),
+    expectedCatalogPath: join(codexHome, deepseekProviderDefinition.catalogFileName),
   });
   validateModelCatalog(profile.catalogPath);
   return { ...profile, mode: marker.mode };
@@ -201,14 +201,17 @@ function readProviderProfile(
   }
   if (
     requireSelection
-    && (document.model !== "deepseek-v4-flash" || document.model_provider !== descriptor.id)
+    && (
+      document.model !== deepseekProviderDefinition.defaultModel
+      || document.model_provider !== descriptor.id
+    )
   ) {
     throw new Error("Codex DeepSeek Profile 未选择受支持模型");
   }
   if (
     expectedCatalogPath !== undefined
     && (
-      document.model_reasoning_effort !== "high"
+      document.model_reasoning_effort !== deepseekProviderDefinition.defaultReasoningEffort
       || document.model_catalog_json !== expectedCatalogPath
     )
   ) {
@@ -292,7 +295,9 @@ function validateModelCatalog(path) {
   }
   if (
     !Array.isArray(catalog?.models)
-    || !catalog.models.some((model) => record(model).slug === "deepseek-v4-flash")
+    || !catalog.models.some(
+      (model) => record(model).slug === deepseekProviderDefinition.defaultModel,
+    )
   ) {
     throw new Error("Codex DeepSeek 模型目录无效");
   }
@@ -311,7 +316,7 @@ function readManagedMarker(codexHome) {
   }
   if (
     marker.version !== 1
-    || marker.provider !== "deepseek"
+    || marker.provider !== deepseekProviderDefinition.id
     || ![undefined, "switching", "exclusive"].includes(marker.mode)
   ) {
     throw new Error("Codex Connect 模型 Provider 标记无效");

@@ -6,10 +6,12 @@ import { dirname, join, resolve } from "node:path";
 import { parse, stringify } from "smol-toml";
 import * as clackPrompts from "@clack/prompts";
 
+import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
+
 export const deepseekSetupScriptUrl =
   "https://cdn.deepseek.com/api-docs/codex-deepseek-setup.sh";
-const providerId = "deepseek";
-const supportedModel = "deepseek-v4-flash";
+const providerId = deepseekProviderDefinition.id;
+const supportedModel = deepseekProviderDefinition.defaultModel;
 const maximumScriptBytes = 2 * 1024 * 1024;
 const defaultDownloadAttempts = 3;
 const defaultDownloadTimeoutMs = 30_000;
@@ -37,16 +39,25 @@ export async function runDeepseekSetup({
     if (choice === "4") return { action: "back" };
     const codexHome = resolve(environment.CODEX_HOME?.trim() || join(homedir(), ".codex"));
     const configPath = join(codexHome, "config.toml");
-    const profilePath = join(codexHome, "deepseek.config.toml");
-    const gatewayProfilePath = join(codexHome, "codex-connect-deepseek.config.toml");
-    const catalogPath = join(codexHome, "deepseek.models.json");
-    const manifestPath = join(codexHome, "deepseek.models.manifest.json");
-    const backupDirectory = join(codexHome, "backup-codex-connect-deepseek");
+    const profilePath = join(codexHome, deepseekProviderDefinition.profileFileName);
+    const gatewayProfilePath = join(
+      codexHome,
+      deepseekProviderDefinition.managedMarkerFileName,
+    );
+    const catalogPath = join(codexHome, deepseekProviderDefinition.catalogFileName);
+    const manifestPath = join(
+      codexHome,
+      deepseekProviderDefinition.catalogManifestFileName,
+    );
+    const backupDirectory = join(codexHome, deepseekProviderDefinition.backupDirectoryName);
     const backupPath = join(backupDirectory, "config.toml");
-    const profileBackupPath = join(backupDirectory, "deepseek.config.toml");
+    const profileBackupPath = join(
+      backupDirectory,
+      deepseekProviderDefinition.profileFileName,
+    );
     const gatewayProfileBackupPath = join(
       backupDirectory,
-      "codex-connect-deepseek.config.toml",
+      deepseekProviderDefinition.managedMarkerFileName,
     );
     const backupStatePath = join(backupDirectory, "state.json");
     if (choice === "3") {
@@ -123,7 +134,7 @@ export async function runDeepseekSetup({
     output.write(`模型目录已从官方脚本下载：${catalogPath}\n`);
     output.write(mode === "switching"
       ? "原生 Codex 使用 OpenAI：codex；使用 DeepSeek：codex --profile deepseek\n共享 TUI：codexc remote；DeepSeek 共享 TUI：codexc remote --profile deepseek\n"
-      : "原生 Codex 和 Gateway 将默认使用 deepseek-v4-flash。\n");
+      : `原生 Codex 和 Gateway 将默认使用 ${supportedModel}。\n`);
     output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
     return {
       mode,
@@ -303,9 +314,9 @@ async function buildCodexConfig({
     && backupState.restored !== true
     && hasDeepseekBaseConfig(document);
   const provider = {
-    name: "deepseek",
-    base_url: "https://api.deepseek.com/",
-    wire_api: "responses",
+    name: providerId,
+    base_url: deepseekProviderDefinition.baseUrl,
+    wire_api: deepseekProviderDefinition.wireApi,
     requires_openai_auth: false,
     experimental_bearer_token: apiKey,
   };
@@ -315,7 +326,7 @@ async function buildCodexConfig({
   const profile = {
     model: supportedModel,
     model_provider: providerId,
-    model_reasoning_effort: "high",
+    model_reasoning_effort: deepseekProviderDefinition.defaultReasoningEffort,
     model_catalog_json: catalogPath,
     ...providerLayer,
   };
@@ -324,12 +335,15 @@ async function buildCodexConfig({
       document = restoreManagedBaseConfig(document, initialDocument);
       configContent = Object.keys(document).length === 0 ? undefined : stringify(document);
     }
-    if (document.profile === providerId || table(document.profiles).deepseek !== undefined) {
+    if (
+      document.profile === providerId
+      || table(document.profiles)[providerId] !== undefined
+    ) {
       throw new Error(
         "安装前的 Codex config.toml 已占用旧式 deepseek profile；请先手工迁移或改名",
       );
     }
-    if (table(document.model_providers).deepseek !== undefined) {
+    if (table(document.model_providers)[providerId] !== undefined) {
       throw new Error(
         "安装前的 Codex config.toml 已存在 deepseek Provider；请先手工移除或改名",
       );
@@ -351,7 +365,7 @@ async function buildCodexConfig({
     delete document.profile;
   }
   const profiles = table(document.profiles);
-  delete profiles.deepseek;
+  delete profiles[providerId];
   if (Object.keys(profiles).length === 0) {
     delete document.profiles;
   } else {
@@ -360,7 +374,7 @@ async function buildCodexConfig({
   Object.assign(document, {
     model: supportedModel,
     model_provider: providerId,
-    model_reasoning_effort: "high",
+    model_reasoning_effort: deepseekProviderDefinition.defaultReasoningEffort,
     model_catalog_json: catalogPath,
   });
   delete document.preferred_auth_method;
@@ -416,8 +430,8 @@ async function readCurrentManagedMode(gatewayProfilePath, originalGatewayProfile
 
 function hasDeepseekBaseConfig(document) {
   return document.profile === providerId
-    || table(document.profiles).deepseek !== undefined
-    || table(document.model_providers).deepseek !== undefined;
+    || table(document.profiles)[providerId] !== undefined
+    || table(document.model_providers)[providerId] !== undefined;
 }
 
 function restoreManagedBaseConfig(current, initial) {

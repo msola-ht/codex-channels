@@ -4,16 +4,28 @@ import { join, resolve } from "node:path";
 
 import type { ModelOption } from "../application/index.js";
 
-const deepseekSlugs = new Set(["deepseek-v4-flash", "deepseek-v4-pro"]);
-const supportedSlug = "deepseek-v4-flash";
+interface DeepseekCatalogDefinition {
+  id: string;
+  displayName: string;
+  catalogFileName: string;
+  defaultModel: string;
+  defaultReasoningEffort: string;
+  models: ReadonlyArray<{
+    slug: string;
+    available: boolean;
+    unavailableReason?: string;
+  }>;
+}
 
 export function loadDeepseekModelOptions(
-  environment: NodeJS.ProcessEnv = process.env,
-  enabled = true,
+  environment: NodeJS.ProcessEnv,
+  enabled: boolean,
+  definition: DeepseekCatalogDefinition,
 ): ModelOption[] {
   if (!enabled) return [];
+  const knownModels = new Map(definition.models.map((model) => [model.slug, model]));
   const codexHome = resolve(environment.CODEX_HOME?.trim() || join(homedir(), ".codex"));
-  const catalogPath = join(codexHome, "deepseek.models.json");
+  const catalogPath = join(codexHome, definition.catalogFileName);
   if (!existsSync(catalogPath)) return [];
   let parsed: unknown;
   try {
@@ -27,7 +39,9 @@ export function loadDeepseekModelOptions(
   }
   return models.flatMap((candidate) => {
     const model = record(candidate);
-    if (typeof model.slug !== "string" || !deepseekSlugs.has(model.slug)) return [];
+    if (typeof model.slug !== "string") return [];
+    const knownModel = knownModels.get(model.slug);
+    if (!knownModel) return [];
     const levels = Array.isArray(model.supported_reasoning_levels)
       ? model.supported_reasoning_levels
       : [];
@@ -41,20 +55,20 @@ export function loadDeepseekModelOptions(
       throw new Error(`DeepSeek 模型目录缺少推理强度：${catalogPath}`);
     }
     return [{
-      provider: "deepseek",
-      available: model.slug === supportedSlug,
-      ...(model.slug === supportedSlug
-        ? {}
-        : { unavailableReason: "DeepSeek 官方暂未支持该模型接入 Codex" }),
+      provider: definition.id,
+      available: knownModel.available,
+      ...(knownModel.unavailableReason
+        ? { unavailableReason: knownModel.unavailableReason }
+        : {}),
       id: model.slug,
       model: model.slug,
-      displayName: `DeepSeek · ${typeof model.display_name === "string"
+      displayName: `${definition.displayName} · ${typeof model.display_name === "string"
         ? model.display_name
         : model.slug}`,
       supportedReasoningEfforts: efforts,
       defaultReasoningEffort: typeof model.default_reasoning_level === "string"
         ? model.default_reasoning_level
-        : "high",
+        : definition.defaultReasoningEffort,
       serviceTiers: [],
       defaultServiceTier: null,
       isDefault: false,

@@ -7,6 +7,9 @@ import {
   initializeProjectRulesAtRoot,
 } from "../../runtime/project-rules.mjs";
 import {
+  deepseekProviderDefinition,
+} from "../../runtime/model-provider-definitions.mjs";
+import {
   loadManagedModelProvider,
   loadPrimaryModelProvider,
   providerAppServerSocketPath,
@@ -101,7 +104,9 @@ export class GatewayApplication {
     const managedProvider = loadManagedModelProvider();
     const supplementaryModels = loadDeepseekModelOptions(
       process.env,
-      primaryProvider === "deepseek" || managedProvider?.provider === "deepseek",
+      primaryProvider === deepseekProviderDefinition.id
+        || managedProvider?.provider === deepseekProviderDefinition.id,
+      deepseekProviderDefinition,
     );
     this.transport = new UnixWebSocketTransport(config.codexSocketPath);
     this.primaryProvider = primaryProvider;
@@ -424,7 +429,7 @@ export class GatewayApplication {
       const initialized = await this.codex.connect();
       this.requireRunning();
       this.codexUpstreamUserAgent = initialized.userAgent;
-      if (this.primaryProvider !== "deepseek") {
+      if (this.primaryProvider !== deepseekProviderDefinition.id) {
         await this.refreshRateLimits();
       }
       this.requireRunning();

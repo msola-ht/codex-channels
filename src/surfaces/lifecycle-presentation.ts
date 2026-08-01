@@ -206,7 +206,7 @@ export function createTurnCompletedPresentation(
       value: `${goalStatusLabel(event.goal.status)} · ${formatGoalTokens(event.goal)}`,
     });
   }
-  if (!usesOpenAiAccount(event.modelProvider) && event.timing?.ttftMs !== undefined) {
+  if (event.timing?.ttftMs !== undefined) {
     fields.push({
       label: "首字延时",
       value: formatElapsedDuration(event.timing.ttftMs),

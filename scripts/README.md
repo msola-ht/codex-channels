@@ -7,7 +7,8 @@
 - `runtime-config.mjs`：解析用户数据目录和运行时路径，并初始化 `.codex-connect`。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“通讯渠道”和“模型渠道”流程
   委派给具体适配器。
-- `deepseek-setup.mjs`：提供 OpenAI/DeepSeek 切换和仅 DeepSeek 两种安装模式；只下载、不执行
+- `deepseek-setup.mjs`：复用共享的非敏感 DeepSeek Provider 定义，提供 OpenAI/DeepSeek 切换和
+  仅 DeepSeek 两种安装模式；只下载、不执行
   DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小、JSON 与 Flash 模型后写入用户
   `CODEX_HOME`。切换模式保持基础配置不变，按 Codex 新版独立 Profile 文件格式把模型、Provider
   与 API Key 写入 CLI 使用的 `deepseek.config.toml`，并写入不含凭据的 Gateway 管理标记；

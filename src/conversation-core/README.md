@@ -10,13 +10,14 @@
   `durationMs` 与 Router 已确认的 `modelProvider`；输出速度由 Client 在通知边界打接收时间戳、
   Core 按 Thread 归约最后一次模型响应的非推理 Token 与最终回答流式时长（不新建协议计时器，
   也不消费新协议字段）；模型代理提供时优先使用最后一次请求的首 Token、推理和输出时间窗，
-  推理输出 Token 始终采用官方用量，思考速度与生成速度只在 Provider 实际提供推理流时间戳时归约；
+  非推理输出 Token 始终采用官方用量；OpenAI 只归约非推理输出速度，DeepSeek 才使用可观测推理流
+  归约首字延时、推理 Token、思考速度与含推理生成速度，未知 Provider 默认关闭这些详细指标；
   Thread Token 指标对所有 Provider 保持通用，OpenAI 账户周限只附加到 OpenAI Thread；可重试错误
   不污染最终完成状态，Thread 与全局 warning 分开路由。
 - `input-events.ts`：定义 Client 可投递给 Core 的平台无关可辨识输入联合，不含 RPC method、
   未知 params 或生成协议类型；其中 `turn.modelTiming.updated` 由 Bootstrap 把模型代理的
-  模型流指标转换为稳定输入，Core 按 Thread/Turn 保留请求时间最新的一次指标并计算首字延时、
-  输出、思考与生成速度，避免重试累计重复计时。
+  模型流指标转换为稳定输入，Core 按 Thread/Turn 保留请求时间最新的一次指标并根据 Provider 能力
+  计算输出或详细计时，避免重试累计重复计时。
 - `events.ts`：定义 Conversation 目标、稳定 Token、Plan、Goal、Turn、额度、账户和 MCP 类型，以及
   输出事件、Turn 产物、操作状态、OpenAI 账户归属判定和关键事件判定。
 - `routing-port.ts`：Core 查询 Thread 路由所需的窄接口。

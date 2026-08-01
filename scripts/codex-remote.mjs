@@ -7,6 +7,7 @@ import {
   loadManagedModelProvider,
   providerAppServerSocketPath,
 } from "../runtime/model-provider-runtime.mjs";
+import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import { resolveConfiguredPath, runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
@@ -33,7 +34,7 @@ const primarySocketPath = resolveConfiguredPath(
   join(runtime.dataDir, "runtime", "codex-app-server.sock"),
 );
 let socketPath = primarySocketPath;
-if (selectedProfile === "deepseek") {
+if (selectedProfile === deepseekProviderDefinition.profileName) {
   const managedProvider = loadManagedModelProvider();
   if (!managedProvider) {
     throw new Error("DeepSeek 切换模式尚未配置，请先运行 codexc setup");
@@ -51,7 +52,9 @@ const result = spawnSync(
     `unix://${socketPath}`,
     "-C",
     workdir,
-    ...(selectedProfile === "deepseek" ? ["--profile", "deepseek"] : []),
+    ...(selectedProfile === deepseekProviderDefinition.profileName
+      ? ["--profile", deepseekProviderDefinition.profileName]
+      : []),
     ...passthrough,
   ],
   { stdio: "inherit" },
@@ -72,13 +75,20 @@ function stringValue(value) {
 function removeDeepseekProfile(args) {
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
-    if ((argument === "--profile" || argument === "-p") && args[index + 1] === "deepseek") {
+    if (
+      (argument === "--profile" || argument === "-p")
+      && args[index + 1] === deepseekProviderDefinition.profileName
+    ) {
       args.splice(index, 2);
-      return "deepseek";
+      return deepseekProviderDefinition.profileName;
     }
-    if (["--profile=deepseek", "-p=deepseek", "-pdeepseek"].includes(argument)) {
+    if ([
+      `--profile=${deepseekProviderDefinition.profileName}`,
+      `-p=${deepseekProviderDefinition.profileName}`,
+      `-p${deepseekProviderDefinition.profileName}`,
+    ].includes(argument)) {
       args.splice(index, 1);
-      return "deepseek";
+      return deepseekProviderDefinition.profileName;
     }
   }
   return undefined;
