@@ -8,6 +8,7 @@ import {
   type RateLimitSnapshot,
   type ThreadGoal,
   type ThreadTokenUsage,
+  type TurnOutputTiming,
   type TurnArtifacts,
   isCriticalOutputEvent,
   usesOpenAiAccount,
@@ -19,6 +20,18 @@ interface ActiveTurn {
   target: ConversationTarget;
   threadId: string;
   turnId: string;
+}
+
+interface TurnTimingState {
+  turnId: string;
+  turnStartedAtMs?: number;
+  firstFinalDeltaAtMs?: number;
+  lastFinalDeltaAtMs?: number;
+  firstAnyDeltaAtMs?: number;
+  lastAnyDeltaAtMs?: number;
+  thinkingDurationMs?: number;
+  finalItemDeltas: Map<string, { firstAtMs: number; lastAtMs: number }>;
+  usageSnapshot?: ThreadTokenUsage;
 }
 
 type WithoutTarget<T> = T extends unknown ? Omit<T, "target"> : never;
@@ -34,6 +47,7 @@ export class ConversationCore {
   private readonly seenUserMessages = new Set<string>();
   private readonly phaseByItem = new Map<string, MessagePhase | null>();
   private readonly artifactsByThread = new Map<string, TurnArtifacts>();
+  private readonly timingByThread = new Map<string, TurnTimingState>();
   private readonly mcpStatus = new Map<string, string>();
   private accountStatus: string | undefined;
   private readonly rateLimitNotices = new Map<string, string>();
@@ -126,6 +140,7 @@ export class ConversationCore {
         this.goalsByThread.delete(threadId);
         this.contextCompactionItemIdsByThread.delete(threadId);
         this.artifactsByThread.delete(threadId);
+        this.timingByThread.delete(threadId);
       }
       for (const binding of this.router.allBindings()) {
         if (affectedThreadIds.has(binding.threadId)) {
@@ -147,6 +162,7 @@ export class ConversationCore {
     this.contextCompactionItemIdsByThread.clear();
     this.seenUserMessages.clear();
     this.phaseByItem.clear();
+    this.timingByThread.clear();
     this.mcpStatus.clear();
     for (const binding of this.router.allBindings()) {
       this.publish({
@@ -161,6 +177,15 @@ export class ConversationCore {
   handle(event: ConversationInputEvent): void {
     switch (event.type) {
       case "turn.started": {
+        const usageSnapshot = this.usageByThread.get(event.threadId);
+        this.timingByThread.set(event.threadId, {
+          turnId: event.turnId,
+          finalItemDeltas: new Map(),
+          ...(event.receivedAtMs === undefined
+            ? {}
+            : { turnStartedAtMs: event.receivedAtMs }),
+          ...(usageSnapshot === undefined ? {} : { usageSnapshot }),
+        });
         const target = this.router.targetForThread(event.threadId);
         if (target) {
           this.markTurnStarted(target, event.threadId, event.turnId);
@@ -215,9 +240,23 @@ export class ConversationCore {
         );
         return;
       case "item.agentMessage.delta": {
-        const phase = this.phaseByItem.get(
-          this.itemKey(event.threadId, event.turnId, event.itemId),
-        );
+        const key = this.itemKey(event.threadId, event.turnId, event.itemId);
+        const phase = this.phaseByItem.get(key);
+        if (event.receivedAtMs !== undefined) {
+          const timing = this.timingByThread.get(event.threadId);
+          if (timing && timing.turnId === event.turnId) {
+            timing.firstAnyDeltaAtMs ??= event.receivedAtMs;
+            timing.lastAnyDeltaAtMs = event.receivedAtMs;
+            if (phase === "final_answer") {
+              timing.firstFinalDeltaAtMs ??= event.receivedAtMs;
+              timing.lastFinalDeltaAtMs = event.receivedAtMs;
+              const itemTiming = timing.finalItemDeltas.get(key)
+                ?? { firstAtMs: event.receivedAtMs, lastAtMs: event.receivedAtMs };
+              itemTiming.lastAtMs = event.receivedAtMs;
+              timing.finalItemDeltas.set(key, itemTiming);
+            }
+          }
+        }
         this.publishForThread(event.threadId, {
           type: "text.delta",
           threadId: event.threadId,
@@ -226,6 +265,14 @@ export class ConversationCore {
           text: event.text,
           ...(phase !== undefined ? { phase } : {}),
         });
+        return;
+      }
+      case "turn.modelTiming.updated": {
+        const timing = this.timingByThread.get(event.threadId);
+        if (timing && timing.turnId === event.turnId) {
+          timing.thinkingDurationMs = (timing.thinkingDurationMs ?? 0)
+            + event.thinkingDurationMs;
+        }
         return;
       }
       case "item.agentMessage.completed": {
@@ -269,6 +316,7 @@ export class ConversationCore {
         this.clearItemPhases(event.threadId, event.turnId);
         const target = this.router.targetForThread(event.threadId);
         if (!target) {
+          this.timingByThread.delete(event.threadId);
           return;
         }
         const active = this.activeByConversation.get(this.key(target));
@@ -285,6 +333,8 @@ export class ConversationCore {
           : undefined;
         const goal = this.goalsByThread.get(event.threadId);
         const contextCompactionCount = this.contextCompactionCount(event.threadId);
+        const timing = this.computeTurnOutputTiming(event.threadId, event.turnId);
+        this.timingByThread.delete(event.threadId);
         this.errorsByTurn.delete(event.turnId);
         this.publish({
           type: "turn.completed",
@@ -296,6 +346,7 @@ export class ConversationCore {
           ...(event.durationMs === undefined
             ? {}
             : { durationMs: event.durationMs }),
+          ...(timing ? { timing } : {}),
           ...(tokenUsage ? { tokenUsage } : {}),
           ...(modelSettings
             ? {
@@ -326,6 +377,7 @@ export class ConversationCore {
         this.usageTurnByThread.delete(event.threadId);
         this.goalsByThread.delete(event.threadId);
         this.contextCompactionItemIdsByThread.delete(event.threadId);
+        this.timingByThread.delete(event.threadId);
         this.clearSeenUserMessages(event.threadId);
         this.clearItemPhases(event.threadId);
         this.artifactsByThread.delete(event.threadId);
@@ -465,6 +517,105 @@ export class ConversationCore {
 
   private itemKey(threadId: string, turnId: string, itemId: string): string {
     return `${threadId}:${turnId}:${itemId}`;
+  }
+
+  private computeTurnOutputTiming(
+    threadId: string,
+    turnId: string,
+  ): TurnOutputTiming | undefined {
+    const timing = this.timingByThread.get(threadId);
+    if (!timing || timing.turnId !== turnId) {
+      return undefined;
+    }
+    const result: TurnOutputTiming = {};
+    const firstDeltaAtMs = timing.firstFinalDeltaAtMs ?? timing.firstAnyDeltaAtMs;
+    if (firstDeltaAtMs !== undefined) {
+      if (
+        timing.turnStartedAtMs !== undefined
+        && firstDeltaAtMs >= timing.turnStartedAtMs
+      ) {
+        result.ttftMs = firstDeltaAtMs - timing.turnStartedAtMs;
+      }
+    }
+    if (timing.finalItemDeltas.size > 0) {
+      let totalOutputDurationMs = 0;
+      for (const itemTiming of timing.finalItemDeltas.values()) {
+        if (itemTiming.lastAtMs >= itemTiming.firstAtMs) {
+          totalOutputDurationMs += itemTiming.lastAtMs - itemTiming.firstAtMs;
+        }
+      }
+      if (totalOutputDurationMs > 0) {
+        result.outputDurationMs = totalOutputDurationMs;
+      }
+    } else if (
+      timing.firstAnyDeltaAtMs !== undefined
+      && timing.lastAnyDeltaAtMs !== undefined
+      && timing.lastAnyDeltaAtMs >= timing.firstAnyDeltaAtMs
+    ) {
+      result.outputDurationMs = timing.lastAnyDeltaAtMs - timing.firstAnyDeltaAtMs;
+    }
+    let visibleOutputTokens: number | undefined;
+    let reasoningTokens: number | undefined;
+    if (this.usageTurnByThread.get(threadId) === turnId) {
+      const current = this.usageByThread.get(threadId);
+      if (current) {
+        const snapshot = timing.usageSnapshot;
+        visibleOutputTokens = snapshot === undefined
+          ? Math.max(
+              0,
+              current.last.outputTokens - current.last.reasoningOutputTokens,
+            )
+          : Math.max(
+              0,
+              (current.total.outputTokens - snapshot.total.outputTokens)
+              - (current.total.reasoningOutputTokens
+                - snapshot.total.reasoningOutputTokens),
+            );
+        reasoningTokens = snapshot === undefined
+          ? Math.max(0, current.last.reasoningOutputTokens)
+          : Math.max(
+              0,
+              current.total.reasoningOutputTokens
+              - snapshot.total.reasoningOutputTokens,
+            );
+      }
+    }
+    if (
+      visibleOutputTokens !== undefined
+      && visibleOutputTokens > 0
+      && result.outputDurationMs !== undefined
+      && result.outputDurationMs > 0
+    ) {
+      result.outputTokensPerSecond =
+        visibleOutputTokens / (result.outputDurationMs / 1_000);
+      result.visibleOutputTokens = visibleOutputTokens;
+    }
+    if (
+      reasoningTokens !== undefined
+      && reasoningTokens > 0
+      && timing.thinkingDurationMs !== undefined
+      && timing.thinkingDurationMs > 0
+    ) {
+      result.reasoningTokens = reasoningTokens;
+      result.thinkingTokensPerSecond =
+        reasoningTokens / (timing.thinkingDurationMs / 1_000);
+      result.thinkingDurationMs = timing.thinkingDurationMs;
+    }
+    const totalOutputTokens = (visibleOutputTokens ?? 0) + (reasoningTokens ?? 0);
+    const totalStreamMs = (timing.thinkingDurationMs ?? 0)
+      + (result.outputDurationMs ?? 0);
+    if (totalOutputTokens > 0 && totalStreamMs > 0) {
+      result.generationTokensPerSecond =
+        totalOutputTokens / (totalStreamMs / 1_000);
+    }
+    if (
+      result.ttftMs === undefined
+      && result.outputDurationMs === undefined
+      && result.thinkingDurationMs === undefined
+    ) {
+      return undefined;
+    }
+    return result;
   }
 
   private publish(event: OutputEvent): void {

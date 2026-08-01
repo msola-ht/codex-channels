@@ -25,6 +25,7 @@ const allowedModuleDependencies: Record<string, readonly string[]> = {
     "event-bus",
     "observability",
     "policy",
+    "provider-proxy",
     "session-routing",
     "storage",
     "surfaces",
@@ -40,6 +41,7 @@ const allowedModuleDependencies: Record<string, readonly string[]> = {
   config: [],
   "conversation-core": ["event-bus"],
   "event-bus": [],
+  "provider-proxy": [],
   observability: ["config"],
   policy: ["conversation-core"],
   "session-routing": [

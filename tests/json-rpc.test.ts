@@ -474,7 +474,11 @@ describe("JsonRpcClient", () => {
     const transport = new FakeTransport();
     const client = new JsonRpcClient(transport);
     const methods: string[] = [];
-    client.onNotification((notification) => methods.push(notification.method));
+    const receivedTimes: Array<number | undefined> = [];
+    client.onNotification((notification) => {
+      methods.push(notification.method);
+      receivedTimes.push(notification.receivedAtMs);
+    });
 
     const initialized = await client.connect();
     transport.receive({ method: "warning", params: { message: "test" } });
@@ -496,6 +500,7 @@ describe("JsonRpcClient", () => {
       },
     });
     expect(methods).toEqual(["warning"]);
+    expect(receivedTimes).toEqual([expect.any(Number)]);
   });
 
   it("responds to server requests without treating them as notifications", async () => {

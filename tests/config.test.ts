@@ -123,6 +123,38 @@ describe("Gateway config.toml", () => {
     ]);
   });
 
+  it("loads the DeepSeek proxy listen address when configured", () => {
+    const fixture = createFixture({
+      ds_proxy: { listen: "127.0.0.1:38473" },
+    });
+
+    const runtime = loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    });
+
+    expect(runtime.config.dsProxyListen).toBe("127.0.0.1:38473");
+  });
+
+  it("rejects a DeepSeek proxy listen address that is not loopback", () => {
+    const fixture = createFixture({
+      ds_proxy: { listen: "0.0.0.0:38473" },
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow(/ds_proxy/u);
+  });
+
+  it("rejects a DeepSeek proxy listen port outside the valid range", () => {
+    const fixture = createFixture({
+      ds_proxy: { listen: "127.0.0.1:99999" },
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow(/端口必须在 1-65535/u);
+  });
+
   it("rejects a config file readable by group or other users", () => {
     const fixture = createFixture();
     chmodSync(fixture.configPath, 0o640);

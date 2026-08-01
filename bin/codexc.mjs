@@ -10,6 +10,7 @@ import { resolveProxyEnvironment } from "../runtime/network-proxy.mjs";
 import {
   loadManagedProviderAppServer,
   providerAppServerSocketPath,
+  withProviderBaseUrl,
 } from "../runtime/model-provider-runtime.mjs";
 import {
   initializeUserData,
@@ -285,6 +286,7 @@ function runServiceAppServer(args) {
     join(runtime.dataDir, "runtime", "codex-app-server.sock"),
   );
   const managedProvider = loadManagedProviderAppServer(runtime.environment);
+  const dsProxyListen = stringValue(table(runtime.document.ds_proxy)?.listen);
   const children = [spawn(runtime.environment.CODEX_BINARY, [
     "app-server",
     "--listen",
@@ -295,8 +297,15 @@ function runServiceAppServer(args) {
     cwd: defaultWorkspace.cwd,
   })];
   if (managedProvider) {
+    const managedArguments = dsProxyListen
+      ? withProviderBaseUrl(
+          managedProvider.arguments,
+          managedProvider.provider,
+          `http://${dsProxyListen}/`,
+        )
+      : managedProvider.arguments;
     children.push(spawn(runtime.environment.CODEX_BINARY, [
-      ...managedProvider.arguments,
+      ...managedArguments,
       "app-server",
       "--listen",
       `unix://${providerAppServerSocketPath(socketPath, managedProvider.provider)}`,

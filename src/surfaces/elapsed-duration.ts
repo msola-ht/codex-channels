@@ -5,6 +5,13 @@ export function formatElapsedDuration(durationMs: number): string {
   return formatElapsedSeconds(Math.round(durationMs / 1_000));
 }
 
+export function formatTokensPerSecond(value: number): string {
+  const rounded = value >= 10
+    ? Math.round(value)
+    : Math.round(value * 10) / 10;
+  return `${rounded} token/s`;
+}
+
 export function formatElapsedSeconds(
   durationSeconds: bigint | number,
 ): string {

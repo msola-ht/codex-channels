@@ -12,6 +12,7 @@ import {
   providerAppServerSocketPath,
 } from "../../runtime/model-provider-runtime.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
+import { ProviderProxy } from "../provider-proxy/index.js";
 import {
   CodexAppServerClient,
   ProviderRoutingClient,
@@ -75,6 +76,7 @@ export class GatewayApplication {
   private readonly router: SessionRouter;
   private readonly threadState: ThreadStateSynchronizer;
   private readonly core: ConversationCore;
+  private readonly providerProxy: ProviderProxy | undefined;
   private readonly bindings: SqliteBindingStore;
   private readonly workspaces: WorkspaceRegistry;
   private removeRpcNotification: (() => void) | undefined;
@@ -133,6 +135,48 @@ export class GatewayApplication {
     );
     this.threadState = new ThreadStateSynchronizer(this.router);
     this.core = new ConversationCore(this.router, this.output);
+    if (config.dsProxyListen && managedProvider?.provider === "deepseek") {
+      this.providerProxy = new ProviderProxy(config.dsProxyListen, {
+        upstreamHost: "api.deepseek.com",
+        onMetrics: (metrics) => {
+          const hasTurnMetadata = metrics.threadId !== null
+            && metrics.turnId !== null;
+          const hasReasoningWindow = metrics.firstReasoningDeltaAtMs !== null
+            && metrics.lastReasoningDeltaAtMs !== null;
+          if (
+            metrics.threadId === null
+            || metrics.turnId === null
+            || metrics.firstReasoningDeltaAtMs === null
+            || metrics.lastReasoningDeltaAtMs === null
+          ) {
+            this.logger.debug(
+              { hasTurnMetadata, hasReasoningWindow },
+              "DeepSeek 模型代理指标缺少 Turn 关联或推理窗口，已跳过",
+            );
+            return;
+          }
+          this.core.handle({
+            type: "turn.modelTiming.updated",
+            threadId: metrics.threadId,
+            turnId: metrics.turnId,
+            thinkingDurationMs: Math.max(
+              0,
+              metrics.lastReasoningDeltaAtMs - metrics.firstReasoningDeltaAtMs,
+            ),
+          });
+        },
+        onError: (error) => {
+          this.logger.warn({ err: error }, "DeepSeek 模型代理转发失败");
+        },
+      });
+    } else if (config.dsProxyListen) {
+      this.logger.warn(
+        { listen: config.dsProxyListen },
+        "ds_proxy 已配置但当前模型 Provider 模式不适用，代理未启动",
+      );
+    } else {
+      this.providerProxy = undefined;
+    }
     this.interactions = new InteractionRouter(logger);
     const models = new ModelSelectionService(
       this.codex,
@@ -340,6 +384,13 @@ export class GatewayApplication {
   private async startInternal(): Promise<void> {
     try {
       this.requireRunning();
+      if (this.providerProxy) {
+        await this.providerProxy.start();
+        this.logger.info(
+          { listen: this.providerProxy.address() },
+          "DeepSeek 模型代理已启动",
+        );
+      }
       this.removeRpcNotification = this.codex.onNotification((notification) => {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
       });
@@ -406,6 +457,7 @@ export class GatewayApplication {
     const failures: unknown[] = [];
     for (const [component, close] of [
       ["Surface", () => this.surfaceManager.stop()],
+      ["Provider Proxy", () => this.providerProxy?.close() ?? Promise.resolve()],
       ["Inbound Event Bus", () => this.inbound.close()],
       ["Output Event Bus", () => this.output.close()],
       ["Codex Client", () => this.codex.close()],

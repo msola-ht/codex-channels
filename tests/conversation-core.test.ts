@@ -872,6 +872,198 @@ describe("ConversationCore", () => {
     });
     await output.close();
   });
+
+  it("computes per-turn first-token time, output duration and visible tokens/s", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = {
+      surface: "telegram" as const,
+      accountId: "default",
+      conversationId: "100",
+    };
+    const core = new ConversationCore({
+      allBindings: () => [],
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+
+    handleNotification(core, {
+      method: "thread/tokenUsage/updated",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-0",
+        tokenUsage: {
+          total: usageBreakdown(100, 0),
+          last: usageBreakdown(100, 0),
+          modelContextWindow: 200_000,
+        },
+      },
+    });
+    handleNotification(core, {
+      method: "turn/started",
+      receivedAtMs: 1_000,
+      params: { threadId: "thread-1", turn: { id: "turn-1" } },
+    });
+    handleNotification(core, {
+      method: "item/started",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "agentMessage",
+          id: "commentary-1",
+          text: "",
+          phase: "commentary",
+        },
+      },
+    });
+    handleNotification(core, {
+      method: "item/agentMessage/delta",
+      receivedAtMs: 1_500,
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "commentary-1",
+        delta: "思考",
+      },
+    });
+    handleNotification(core, {
+      method: "item/started",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "agentMessage",
+          id: "final-1",
+          text: "",
+          phase: "final_answer",
+        },
+      },
+    });
+    handleNotification(core, {
+      method: "item/agentMessage/delta",
+      receivedAtMs: 2_000,
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "final-1",
+        delta: "A",
+      },
+    });
+    handleNotification(core, {
+      method: "item/agentMessage/delta",
+      receivedAtMs: 3_000,
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "final-1",
+        delta: "B",
+      },
+    });
+    handleNotification(core, {
+      method: "item/started",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "agentMessage",
+          id: "final-2",
+          text: "",
+          phase: "final_answer",
+        },
+      },
+    });
+    handleNotification(core, {
+      method: "item/agentMessage/delta",
+      receivedAtMs: 4_000,
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "final-2",
+        delta: "C",
+      },
+    });
+    handleNotification(core, {
+      method: "item/agentMessage/delta",
+      receivedAtMs: 4_500,
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "final-2",
+        delta: "D",
+      },
+    });
+    handleNotification(core, {
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "agentMessage",
+          id: "final-1",
+          text: "AB",
+          phase: "final_answer",
+        },
+      },
+    });
+    core.handle({
+      type: "turn.modelTiming.updated",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      thinkingDurationMs: 600,
+    });
+    core.handle({
+      type: "turn.modelTiming.updated",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      thinkingDurationMs: 400,
+    });
+    handleNotification(core, {
+      method: "thread/tokenUsage/updated",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        tokenUsage: {
+          total: usageBreakdown(160, 40),
+          last: usageBreakdown(60, 40),
+          modelContextWindow: 200_000,
+        },
+      },
+    });
+    handleNotification(core, {
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: {
+          id: "turn-1",
+          status: "completed",
+          error: null,
+          durationMs: 5_000,
+        },
+      },
+    });
+
+    await output.close();
+    const completed = events.find(
+      (event) => event.type === "turn.completed",
+    ) as Extract<OutputEvent, { type: "turn.completed" }> | undefined;
+    expect(completed).toMatchObject({
+      timing: {
+        ttftMs: 1_000,
+        outputDurationMs: 1_500,
+        thinkingDurationMs: 1_000,
+        visibleOutputTokens: 20,
+        reasoningTokens: 40,
+      },
+    });
+    expect(completed?.timing?.outputTokensPerSecond).toBeCloseTo(20 / 1.5);
+    expect(completed?.timing?.thinkingTokensPerSecond).toBeCloseTo(40);
+    expect(completed?.timing?.generationTokensPerSecond).toBeCloseTo(24);
+  });
 });
 
 function handleNotification(
@@ -892,5 +1084,16 @@ function breakdown(totalTokens: number) {
     cacheWriteInputTokens: 100,
     outputTokens: 400,
     reasoningOutputTokens: 50,
+  };
+}
+
+function usageBreakdown(outputTokens: number, reasoningOutputTokens: number) {
+  return {
+    totalTokens: outputTokens + 1_000,
+    inputTokens: 1_000,
+    cachedInputTokens: 0,
+    cacheWriteInputTokens: 0,
+    outputTokens,
+    reasoningOutputTokens,
   };
 }

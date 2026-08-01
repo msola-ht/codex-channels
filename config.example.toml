@@ -27,6 +27,12 @@ https_proxy = ""
 all_proxy = ""
 no_proxy = "localhost,127.0.0.1"
 
+[ds_proxy]
+# 可选：DeepSeek 模型请求的本地回环代理，用于统计思考/生成速度。开启后 Gateway 会监听该
+# 地址并把 DeepSeek App Server 的 base_url 指向它；DS 请求多一跳本机转发，Gateway
+# 重启的几秒窗口内 DeepSeek 请求会短暂失败。仅支持切换模式，监听必须为回环地址。
+# listen = "127.0.0.1:38473"
+
 [codex]
 binary = "codex"
 socket_path = "runtime/codex-app-server.sock"

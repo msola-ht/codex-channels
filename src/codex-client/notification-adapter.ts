@@ -111,7 +111,7 @@ export function toConversationInputEvent(
 ): ConversationInputEvent | undefined {
   switch (notification.method) {
     case coreMethods.turnStarted:
-      return toTurnStartedEvent(notification.params);
+      return toTurnStartedEvent(notification.params, notification.receivedAtMs);
     case coreMethods.goalUpdated:
       return toGoalUpdatedEvent(notification.params);
     case coreMethods.goalCleared:
@@ -123,7 +123,7 @@ export function toConversationInputEvent(
     case coreMethods.turnPlanUpdated:
       return toTurnPlanEvent(notification.params);
     case coreMethods.agentMessageDelta:
-      return toAgentMessageDeltaEvent(notification.params);
+      return toAgentMessageDeltaEvent(notification.params, notification.receivedAtMs);
     case coreMethods.itemStarted:
       return toItemEvent(notification.params, "started");
     case coreMethods.itemCompleted:
@@ -220,11 +220,21 @@ function toThreadLifecycleEvent(
   return threadId ? { type, threadId } : undefined;
 }
 
-function toTurnStartedEvent(value: unknown): ConversationInputEvent | undefined {
+function toTurnStartedEvent(
+  value: unknown,
+  receivedAtMs: number | undefined,
+): ConversationInputEvent | undefined {
   const params = asRecord(value);
   const threadId = nonEmptyString(params?.threadId);
   const turnId = nonEmptyString(asRecord(params?.turn)?.id);
-  return threadId && turnId ? { type: "turn.started", threadId, turnId } : undefined;
+  return threadId && turnId
+    ? {
+        type: "turn.started",
+        threadId,
+        turnId,
+        ...(receivedAtMs === undefined ? {} : { receivedAtMs }),
+      }
+    : undefined;
 }
 
 function toTokenUsageEvent(value: unknown): ConversationInputEvent | undefined {
@@ -266,6 +276,7 @@ function toTurnPlanEvent(value: unknown): ConversationInputEvent | undefined {
 
 function toAgentMessageDeltaEvent(
   value: unknown,
+  receivedAtMs: number | undefined,
 ): ConversationInputEvent | undefined {
   const params = asRecord(value);
   const threadId = nonEmptyString(params?.threadId);
@@ -273,7 +284,14 @@ function toAgentMessageDeltaEvent(
   const itemId = nonEmptyString(params?.itemId);
   const text = nonEmptyString(params?.delta);
   return threadId && turnId && itemId && text
-    ? { type: "item.agentMessage.delta", threadId, turnId, itemId, text }
+    ? {
+        type: "item.agentMessage.delta",
+        threadId,
+        turnId,
+        itemId,
+        text,
+        ...(receivedAtMs === undefined ? {} : { receivedAtMs }),
+      }
     : undefined;
 }
 

@@ -11,6 +11,7 @@ import {
   loadPrimaryModelProvider,
   providerAppServerSocketPath,
   validateConfiguredModelProvider,
+  withProviderBaseUrl,
 } from "../runtime/model-provider-runtime.mjs";
 
 describe("model provider runtime topology", () => {
@@ -35,6 +36,35 @@ describe("model provider runtime topology", () => {
       "/private/runtime/codex-app-server.sock",
       "deepseek",
     )).toBe("/private/runtime/codex-app-server-deepseek.sock");
+  });
+
+  it("replaces the managed provider base URL with a local proxy address", async () => {
+    const codexHome = await configuredHome("switching");
+    const environment = { CODEX_HOME: codexHome };
+    const managed = loadManagedProviderAppServer(environment);
+    if (!managed) {
+      throw new Error("测试环境缺少 DeepSeek 托管配置");
+    }
+    expect(managed.arguments).toContain(
+      "model_providers.deepseek.base_url=\"https://api.deepseek.com/\"",
+    );
+
+    const overridden = withProviderBaseUrl(
+      managed.arguments,
+      managed.provider,
+      "http://127.0.0.1:38473/",
+    );
+
+    expect(overridden).not.toContain(
+      "model_providers.deepseek.base_url=\"https://api.deepseek.com/\"",
+    );
+    expect(overridden).toContain(
+      "model_providers.deepseek.base_url=\"http://127.0.0.1:38473/\"",
+    );
+    expect(overridden.at(-2)).toBe("-c");
+    expect(overridden.some((value, index) =>
+      value === "-c" && overridden[index + 1] === "-c"
+    )).toBe(false);
   });
 
   it("rejects a switching profile that cannot launch the managed App Server", async () => {
