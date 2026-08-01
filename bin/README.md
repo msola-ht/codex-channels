@@ -19,9 +19,9 @@
 - `service`：完整校验配置后安装整套后台服务；启停、重启、状态和日志命令使用
   `gateway`、`app-server` 或 `all` 明确目标，日常 `restart` 默认只操作 Gateway。
 
-内部 `service-app-server` 入口同时监管主 App Server、可选 Provider App Server，以及启用时的
-DeepSeek 回环代理；任一受监管组件退出都会共同重建。代理指标通过私有 Unix Socket 发送给
-Gateway，Gateway 生命周期不再控制模型数据通路。
+内部 `service-app-server` 入口同时监管主 App Server、可选 Provider App Server，以及每个已启用
+Provider 的独立回环统计代理；任一受监管组件退出都会共同重建。代理指标通过私有 Unix Socket
+发送给 Gateway，Gateway 生命周期不再控制模型数据通路。
 
 所有公开命令和子命令都支持 `-h` / `--help`；`gateway` 与 `service-app-server` 仅作为服务模板的
 内部进程入口，不出现在公开命令列表。CLI 只负责参数校验、环境装配和进程分发，不保存

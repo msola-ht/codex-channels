@@ -3,20 +3,13 @@
 ## 用途与状态
 
 本页用于定位飞书开放平台、官方 Node SDK、本地实现和验证入口。它是飞书 Surface 的事实查询
-入口，并与 [`飞书 Surface 设计决策`](feishu-surface-plan.md) 共同约束实现；当前支持扫码 Setup 与开发验证
-中的私聊普通文本、纯文字富文本、独立图片、最多四张图片说明文字、命令、CardKit 输出和交互路径。
+入口，并与 [`飞书 Surface 设计决策`](feishu-surface-plan.md) 共同约束实现；当前支持扫码 Setup、
+授权私聊输入、命令、CardKit 输出和交互路径。
 固定版本源码已按 [`本地上游源码工作流`](upstream-sources.md) 保存；本地基线存在且匹配时优先
 查阅本地仓库，不重复联网读取相同提交。
 
-截至 2026-07-30，项目已精确锁定 `@larksuiteoapi/node-sdk@1.71.1`，并完成私聊 Surface、
-严格配置和 Bootstrap 显式组合。测试应用已完成扫码配置、Doctor 探测、生产 Gateway
-首次握手、一次已授权私聊 Turn 和精确 Chat 文本回复；断线恢复、未授权/重复真实事件、代理和
-MCP form/URL 卡片动作真实验收仍未完成；原生用户输入卡和 MCP 工具审批的一次批准已经通过真实验收。私聊 PNG/JPEG 图片、
-命令审批动作、Gateway 重启后的
-OAuth Token 与 Thread 绑定恢复，以及长回复折叠显示和顺序均已通过真实验收；持续回复在飞书
-客户端可见 CardKit 原生流式更新、静态展示、操作终态和每轮状态的真实主路径也已通过验收。
-当前启用路径仍属于开发验证，
-不应视为生产就绪。
+项目精确锁定 `@larksuiteoapi/node-sdk@1.71.1`。本页记录资料、实现和验证入口；当前真实平台
+验收状态只以 [`通讯渠道验收矩阵`](channel-acceptance-matrix.md) 为准。
 
 ## 资料优先级
 
@@ -29,8 +22,8 @@ OAuth Token 与 Thread 绑定恢复，以及长回复折叠显示和顺序均已
 5. 本项目的真实测试应用实验、脱敏 Fixture 和自动化测试。
 
 官方资料与锁定 SDK 不一致时，先记录差异并用测试应用验证，不通过反复修改生产路径推断行为。
-本项目的支持状态以本页矩阵、实际实现和测试共同为准；官方 SDK 提供某项能力不等于 Gateway
-已经支持。
+本项目的实现范围以本页矩阵、实际实现和测试共同为准；官方 SDK 提供某项能力不等于 Gateway
+已经支持，真实平台验收状态仍以统一验收矩阵为准。
 
 ## 版本基线
 
@@ -43,9 +36,9 @@ OAuth Token 与 Thread 绑定恢复，以及长回复折叠显示和顺序均已
 | 固定官方源码 | [`8b3e0df`](https://github.com/larksuite/node-sdk/tree/8b3e0df3af9401c263dc96026e1c7f17460a21cc) |
 | 项目依赖状态 | 已安装并由 `package-lock.json` 精确锁定 |
 | 目标应用类型 | 飞书企业自建应用 |
-| 首版目标传输 | WebSocket 长连接 |
-| 首版目标范围 | 单 Bot 账号、授权私聊文本 |
-| Lark 海外版 | 不在首版范围 |
+| 当前传输 | WebSocket 长连接 |
+| 当前范围 | 单 Bot 账号、授权私聊 |
+| Lark 海外版 | 未支持 |
 
 依赖升级时不得只修改版本数字；还要复核下方资料、已知约束、支持矩阵、实现映射和验证结果。
 
@@ -135,13 +128,13 @@ EventDispatcher`。
 ### 文本发送
 
 锁定 SDK 的 `im.v1.message.create` 接口支持 `chat_id` 接收目标、文本消息和可选 `uuid`。当前
-官方资料没有明确 `uuid` 的幂等窗口、冲突结果和哪些网络或平台错误允许安全重试，因此首版只
+官方资料没有明确 `uuid` 的幂等窗口、冲突结果和哪些网络或平台错误允许安全重试，因此当前实现只
 设置有限 HTTP 超时，不自动重试消息创建。响应缺少 `message_id` 时失败关闭；SDK 错误正文不进入
 平台消息或日志。
 
 ### 身份与 Setup
 
-当前 SDK `main` 的 Channel 会在缺少 `open_id` 时向 `user_id` 或 `union_id` 回退；本项目首版不
+当前 SDK `main` 的 Channel 会在缺少 `open_id` 时向 `user_id` 或 `union_id` 回退；本项目当前实现不
 采用该回退，只接受明确的 `sender.open_id`。
 
 锁定 SDK `1.71.1` 的 `registerApp()` 已确认返回应用凭据和可选的扫码用户 `open_id`，并支持
@@ -174,58 +167,17 @@ EventDispatcher`。
 | 严格配置与重载分类 | 统一 `config.toml` | 私聊字段、失败关闭校验、变更码、公开示例和 Bootstrap 显式组合已完成 | 已接入 |
 | 私聊命令 | `ConversationCommandService`、私聊文本事件、`application.bot.menu_v6` | 全部平台无关命令结果、帮助、身份、`/stop` 优先停止当前 Actor 待处理交互并在没有交互时停止 Turn、`status/doctor/revoke` 权限中心、未知命令失败关闭、会话列表收敛和有界安全分片已完成离线验证；用户 OAuth 不提供全量预授权命令；`/start`、`/help` 与单个 `codexc_home` 菜单打开主分类卡片，主卡提供新会话、会话切换、状态、Fast、用量、额度、模型、思考强度、工作区、Goal 和“更多命令”，后者再按会话查询、会话操作、能力与集成、当前内容、飞书提供二十一个按钮，不发送完整帮助长文本；全部 30 个共享命令都可由主卡、分类卡或结果选择卡到达，合法性直接复用 Application 命令目录；会话、归档、模型、思考强度、Fast、工作区与 Skill 使用最多 18 项的选择卡，Skill 选择后再打开一次性任务表单并通过共享 `/skill` 提交，不向 Surface 暴露本机路径；会话与归档搜索、重命名、下一 Turn 追加、Review 和 Goal 共用一个有界输入卡，项目规则只展示 `init/check`；选择与输入绑定消息、Chat、Actor、访问策略和一次性短期令牌，直接新建、停止、归档、固定、取消固定、压缩或分叉会话也会消费当前卡片令牌，提交仍进入共享命令服务，不建立飞书专属状态、语法或队列；状态命令、分类命令中心、选择卡和原生用户输入真实显示均已通过，直接命令矩阵待集中实机复验 | 已接入 |
 | 用户 OAuth | OAuth Device Flow、应用用户 Scope、飞书 AppLink | 已完成精确授权 Origin 与完整 URL、能力所需 Scope 与应用已开通 Scope 的交集检查、有效 Token 覆盖检查与缺失差集授权、空需求不授权、`offline_access` 完整卡片、统一 HTTP/HTTPS 代理、显式直连与无效代理失败关闭、有限轮询、身份匹配、macOS Keychain/Linux 加密文件、进行中/持久状态、撤销、限时停止和写入错误/取消竞态回滚；不提供全量预授权命令；真实 Device Flow、身份校验、安全写入和 Gateway 重启恢复已通过，代理待验收，尚无飞书 CLI API 消费 Token | 已接入 |
-| 群聊 | 群消息事件、群身份与 @Bot | 已记录为后续需求，当前开发批次不实施 | 未支持 |
+| 群聊 | 群消息事件、群身份与 @Bot | 当前未接入 | 未支持 |
 | 卡片交互 | `im.v1.message.create/patch`、`card.action.trigger` | 私聊审批、CardKit 2.0 用户输入与 MCP form、MCP 工具审批、MCP URL 卡片、一次性令牌、Actor/Chat/消息/请求绑定、重复请求失败关闭、原值决定、超时、有限停止、结果更新失败隔离和跨客户端失效已离线验证；用户输入使用原生选择器并允许单独填写“其他内容”，同时兼容动作值和 CardKit 表单按钮名两种回调载荷；命令审批卡片的一次批准、原生用户输入、MCP 工具审批的一次批准及当前 Gateway 长连接动作接收已通过真实验收，MCP form/URL 卡片仍待真实验收 | 已接入 |
 | 私聊 PNG/JPEG 图片 | `im.message.receive_v1`、`im.v1.messageResource.get` | 已完成独立 `image` 与最多四张图片附带说明文字的 `post` 事件裁剪、授权后异步下载、10 MiB 限制、内容签名、私有暂存、过期清理，以及图片与原始说明文字同次提交；独立图片及两图至四图加说明文字的顺序和单 Turn 主路径已通过真实验收 | 已接入 |
 | 私聊一次性音频 | `im.message.receive_v1`、`im.v1.messageResource.get` | 复用既有 `im:resource`，按 `message_id + file_key + type=file` 下载；限制为 5 分钟、20 MiB 及 WAV/MP3/M4A/WebM/OGG，私有暂存一小时。真实飞书接收与 App Server 转换已验证；当前模型目录未声明 `audio`，Application 在创建 Turn 前明确拒绝，不列为当前端到端支持 | 受限接入 |
 | 生成图片回传 | `im.v1.image.create`、`im.v1.message.create` 的 `msg_type=image` | 只接受官方 `imageGeneration.savedPath`，共享边界拒绝相对路径、符号链接、非普通文件、超过 10 MiB 和非 PNG/JPEG 内容；上传后严格裁剪 `image_key` 并按 Chat 顺序发送，独立于操作显示档位。离线 Payload、顺序和失败关闭已验证，真实发送主路径已通过 | 已接入 |
 | UTF-8 文本文件输入 | `im.message.receive_v1`、`im.v1.messageResource.get` | 独立 `file` 消息在授权后按 `message_id + file_key + type=file` 下载；严格验证文件名、1,000,000 字节、UTF-8 与控制字符，内联提交且不落盘。Office、压缩包、文件消息内的音视频和富文本内附件不支持；离线主路径已完成，真实文件待验收 | 已接入 |
 | 飞书 Setup 与应用配置 | SDK Device Authorization、`bot/v3/info`、Application v6 只读详情、Application v7 配置写入与发布、机器人菜单事件文档 | 已实现手动输入与扫码、飞书页应用选择、消息/CardKit/只读检测与配置写入权限及消息/菜单事件与卡片动作回调声明、身份验证和原子配置；扫码保存后直接保留已有菜单并自动补齐 `codexc_home` 悬浮菜单、长连接事件与回调并提交应用版本，失败时保留连接配置并提供 Doctor 恢复；Doctor 解析已有租户 Scope、只申请缺失差集，并以运行时已收到事件为优先证据显示四项摘要；单个菜单节点与启用开关独立检测，消息路径真实扫码、Doctor 身份探测、命令审批动作回调和菜单点击均已通过 | 已接入 |
-| 飞书以外的 Lark | SDK Domain 配置 | 不在首版范围 | 未支持 |
+| 飞书以外的 Lark | SDK Domain 配置 | 当前未接入 | 未支持 |
 
 “已接入”只表示本地实现和离线验证入口存在；真实平台状态仍以
 [`通讯渠道验收矩阵`](channel-acceptance-matrix.md) 为准。未支持能力不得因 SDK 提供接口而隐式开放。
-
-## 真实验收记录
-
-2026-07-25 由操作者在本机开发环境使用测试应用完成以下最小验收：
-
-- 扫码授权完成应用选择并原子保存配置，随后 Doctor 凭据与 Bot 身份探测通过；
-- 生产 Gateway 等待 `WSClient.onReady` 后完成启动；
-- 一条已授权私聊文本事件成功提交并完成一个 Codex Turn；
-- 最终纯文本输出返回原精确 Chat。
-
-2026-07-26 由操作者在 Gateway 重启后继续使用测试应用，确认飞书私聊命令可以返回结果，且命令
-与状态当时均为纯文本格式。随后实现切换最终回复和命令结果为 `post + md`，并在 Gateway 重启
-后用状态命令和普通 Turn 短回复验证标题、列表、加粗、行内代码和链接能够正确显示。当时长回复
-和消息更新尚未验证，不据此把群聊标记为已开始。
-
-同日操作者通过飞书内授权卡片完成真实 OAuth Device Flow，Gateway 校验当前 Actor 后成功写入
-安全凭据后端；重复执行授权时暴露出缺少现有 Scope 覆盖检测，随后改为已覆盖时不重复授权、
-部分缺失时只申请差集。OAuth 按钮是打开 AppLink 的链接动作，不构成
-`card.action.trigger` 回调验收。
-
-随后操作者完成私聊 PNG/JPEG 图片消息、命令审批卡片一次批准和长回复验收：当前 Gateway
-通过长连接收到 `card.action.trigger` 后任务继续完成，长回复由飞书客户端折叠显示且消息顺序
-正确。再次重启 Gateway 后，原 Thread 绑定恢复且用户 OAuth 仍显示已授权。
-
-同日完成原生流式实现、重建并重启 Gateway 后，操作者确认持续生成的普通回复在飞书客户端
-以 CardKit 原生流式卡片可见更新。该验收只覆盖权限、卡片创建、消息引用、至少一次增量更新和
-正常结束组成的主路径，不覆盖限流、失败回退、超长内容滚动或网络中断。
-
-同日修正普通文本误用卡片更新接口后，操作者确认同一条轻量 Thread 状态卡片能够从蓝色“运行中”
-原地更新为绿色“空闲”，最终正文和 Turn 状态保持原有顺序。该验收不扩大到通用消息编辑或
-CardKit 流式失败路径。
-
-2026-07-26 后续离线切片把启动通知、短回复、命令结果和每轮结束统计统一为 CardKit 2.0
-静态 Markdown；操作运行中间帧不输出，终态按会话时间线发送独立静态卡片，并展示 Core 已完成
-脱敏与截断的命令、文件、工具和搜索摘要。`post + md` 只保留为卡片实体创建失败或流式失败
-降级。静态展示、操作终态和每轮状态卡片的真实主路径已完成验收。
-
-尚未验证真实断线恢复、代理、未授权/重复事件重投、MCP form/URL 卡片动作、CardKit 真实限流、
-失败回退和超长内容滚动。
-本记录不保存真实消息、应用标识、用户 Open ID、Chat ID、Token、Secret、临时跳转链接或完整
-SDK 响应。
 
 ## 本地实现映射
 

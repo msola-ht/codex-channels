@@ -14,8 +14,9 @@
 - `network-proxy.d.mts`：声明共享代理解析模块的 TypeScript 接口。
 - `model-provider-runtime.mjs`：通过编译期受控 Provider 描述读取 Setup 管理标记和私有 Profile；
   判定切换/固定模式的主 Provider、派生私有 Provider Socket，并向 DeepSeek 账户适配器提供同源
-  凭据。切换模式为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，并只在子进程环境
-  提供 Key；固定模式从基础配置读取。
+  凭据；读取并校验用户已有的 OpenAI 上游地址，并为 App Server 提供本机统计代理地址的参数替换。
+  切换模式为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，并只在子进程环境提供
+  Key；固定模式从基础配置读取。
 - `model-provider-runtime.d.mts`：声明受控模型 Provider 运行时接口。
 - `project-rules.mjs`：生成并检查项目级 Codex 命令规则；Gateway 使用精确 Workspace 根目录，
   并拒绝通过符号链接把写入转移到 Workspace 外。

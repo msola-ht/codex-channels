@@ -5,7 +5,7 @@
 ## 配置与 Workspace
 
 - `runtime-config.mjs`：解析用户数据目录和运行时路径，并初始化 `.codex-connect`。
-- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“通讯渠道”和“模型提供方”流程
+- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“通讯渠道”和“模型渠道”流程
   委派给具体适配器。
 - `deepseek-setup.mjs`：提供 OpenAI/DeepSeek 切换和仅 DeepSeek 两种安装模式；只下载、不执行
   DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小、JSON 与 Flash 模型后写入用户
@@ -62,7 +62,7 @@
 - `generate-protocol.mjs`：先在临时目录调用当前 Codex CLI 的 `generate-ts --experimental`，
   成功后替换协议类型、记录版本与实验状态并同步 npm/Gateway 版本；实验生成只服务于受控 Plan 边界。
 - `check-protocol.mjs`：校验本机 Codex CLI 版本，并按记录的实验状态重新生成到临时目录确认类型逐文件一致。
-- `weixin-qr-contract-probe.mjs`：阶段 0 隔离二维码合同探针；默认离线显示帮助，只有显式
+- `weixin-qr-contract-probe.mjs`：隔离二维码合同探针；默认离线显示帮助，只有显式
   `qr --live` 并再次确认连接替换风险后才访问固定微信端点，严格裁剪状态、限制官方重定向域名
   并有限取消；不注册 Surface、不写配置或凭据，也不属于公开 `codexc` 命令。
 - `weixin-updates-contract-probe.mjs`：从已验证的微信安全凭据执行一次显式 `once --live`

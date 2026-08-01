@@ -15,10 +15,9 @@ Doctor、菜单、输入状态、连接健康和平台媒体传输属于渠道�
 - [`telegram/`](telegram/README.md)：Telegram Bot 输入、输出、交互、图片、一次性音频、UTF-8 文本文件和生命周期。
 - [`feishu/`](feishu/README.md)：飞书官方 SDK 长连接、私聊文本、PNG/JPEG、一次性音频与 UTF-8 文本文件到
   Application 的窄 Adapter、富文本最终回复、纯文本安全提示、有界输出队列、私聊交互卡片、平台权限中心、
-  用户 OAuth Device Flow 和单账号生命周期组合；有效配置启用时由 Bootstrap 显式注册，私聊
-  PNG/JPEG、命令审批动作、原生流式主路径、用户输入卡及 OAuth Token 重启恢复已通过真实验收，
-  MCP form/URL 卡片仍待验收。
-- [`weixin/`](weixin/README.md)：微信阶段 0/Setup 的严格独立凭据边界、固定版窄协议 Client、
+  用户 OAuth Device Flow 和单账号生命周期组合；有效配置启用时由 Bootstrap 显式注册。真实平台
+  状态见 [`通讯渠道验收矩阵`](../../docs/channel-acceptance-matrix.md)。
+- [`weixin/`](weixin/README.md)：微信 Setup 的严格独立凭据边界、固定版窄协议 Client、
   私有原子游标检查点、可取消接收监控器、授权后提交 Application 的私聊文本、图片、一次性
   音频与 UTF-8 文本文件输入 Adapter，
   以及复用统一会话命令服务的完整命令目录、加密回复上下文、重启上线通知、受限配置通知和
@@ -72,8 +71,8 @@ Turn、Thread 或 Surface 关闭时清理。
 结束汇报信息模型、字段顺序与中文状态词；它显示当前 Provider，保留 Provider 通用的 Thread
 Token/上下文指标，并只在 OpenAI Thread 显示 Fast 与 OpenAI 周限；各 Surface 只保留 HTML、
 CardKit Markdown 或微信文本布局以及各自的发送策略。
-`elapsed-duration.ts` 只把 App Server 已提供的 Turn 毫秒耗时或账户用量秒数格式化为三个
-Surface 共用的中文短文本，不负责计时、状态或持久化。
+`elapsed-duration.ts` 只把已确认的 Turn、首字延时等毫秒值或账户用量秒数格式化为三个 Surface
+共用的中文短文本，不负责计时、状态或持久化。
 `account-format.ts` 统一套餐名称、额度状态、百分比、周期与重置时间格式，供命令结果、运行时通知
 和生命周期汇报复用。
 `provider-format.ts` 统一已知 Provider 显示名，并对后续 Provider 标识做有界展示。
