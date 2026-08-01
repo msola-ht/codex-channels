@@ -45,9 +45,9 @@ function createService(settings?: {
   model: string;
   effort: string | null;
   serviceTier: string | null;
-}): ModelSelectionService {
+}, availableModels: ModelOption[] = models): ModelSelectionService {
   const codex = {
-    listModels: async () => models,
+    listModels: async () => availableModels,
     writeDefaultFastMode: async () => undefined,
     readDefaultServiceTier: async () => "default",
   } satisfies ModelSelectionPort;
@@ -74,6 +74,27 @@ describe("ModelSelectionService", () => {
 
     await expect(service.requireInputModality(target, "audio"))
       .rejects.toThrow("当前模型 gpt-main 不支持语音输入，请发送文字或图片");
+  });
+
+  it("explains how to continue when the current model lacks image input", async () => {
+    const service = createService({
+      model: "deepseek-v4-flash",
+      effort: "high",
+      serviceTier: "default",
+    }, [model(
+        "deepseek-v4-flash",
+        ["high"],
+        "high",
+        true,
+        false,
+        "priority",
+        ["text"],
+      )]);
+
+    await expect(service.requireInputModality(target, "image"))
+      .rejects.toThrow(
+        "当前模型 deepseek-v4-flash 不支持图片输入，请发送文字或切换支持图片的模型",
+      );
   });
 
   it("uses the App Server thread settings as the current selection", async () => {

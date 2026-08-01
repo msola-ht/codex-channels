@@ -787,6 +787,7 @@ describe("ConversationService model selection", () => {
 
   it("passes text and local images to a new turn", async () => {
     const startTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
+    const requireInputModality = vi.fn().mockResolvedValue(undefined);
     const service = new ConversationService(
       turnPort({ startTurn }),
       {
@@ -794,7 +795,11 @@ describe("ConversationService model selection", () => {
         workspace: () => main,
       } as unknown as SessionRouter,
       { activeTurn: () => undefined, markTurnStarted: vi.fn() } as unknown as ConversationCore,
-      { turnOverrides: () => ({}), markApplied: vi.fn() } as unknown as ModelSelectionService,
+      {
+        requireInputModality,
+        turnOverrides: () => ({}),
+        markApplied: vi.fn(),
+      } as unknown as ModelSelectionService,
       queryPort(),
     );
 
@@ -807,15 +812,17 @@ describe("ConversationService model selection", () => {
       { type: "text", text: "检查截图" },
       { type: "localImage", path: "/private/uploads/screenshot.png" },
     ]);
+    expect(requireInputModality).toHaveBeenCalledWith(target, "image");
   });
 
   it("steers local images into the active turn", async () => {
     const steerTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
+    const requireInputModality = vi.fn().mockResolvedValue(undefined);
     const service = new ConversationService(
       turnPort({ steerTurn }),
       {} as SessionRouter,
       { activeTurn: () => ({ threadId: "thread-1", turnId: "turn-1" }) } as unknown as ConversationCore,
-      {} as ModelSelectionService,
+      { requireInputModality } as unknown as ModelSelectionService,
       queryPort(),
     );
 
@@ -834,6 +841,7 @@ describe("ConversationService model selection", () => {
       expect.stringMatching(/^codex_connect_gateway:/),
     );
     expect(submission.steered).toBe(true);
+    expect(requireInputModality).toHaveBeenCalledWith(target, "image");
   });
 
   it("rejects relative image paths at the application boundary", async () => {
@@ -848,6 +856,31 @@ describe("ConversationService model selection", () => {
     await expect(service.submit(target, {
       localImages: [{ path: "relative/image.png" }],
     })).rejects.toThrow("本地图片路径必须是绝对路径");
+  });
+
+  it("rejects local images before creating a Turn when the current model lacks image input", async () => {
+    const startTurn = vi.fn();
+    const requireInputModality = vi.fn().mockRejectedValue(
+      new Error("当前模型 deepseek-v4-flash 不支持图片输入，请发送文字或切换支持图片的模型"),
+    );
+    const service = new ConversationService(
+      turnPort({ startTurn }),
+      {
+        ensure: vi.fn(),
+        workspace: () => main,
+      } as unknown as SessionRouter,
+      { activeTurn: () => undefined } as unknown as ConversationCore,
+      { requireInputModality } as unknown as ModelSelectionService,
+      queryPort(),
+    );
+
+    await expect(service.submit(target, {
+      localImages: [{ path: "/private/uploads/screenshot.png" }],
+    })).rejects.toThrow(
+      "当前模型 deepseek-v4-flash 不支持图片输入，请发送文字或切换支持图片的模型",
+    );
+    expect(requireInputModality).toHaveBeenCalledWith(target, "image");
+    expect(startTurn).not.toHaveBeenCalled();
   });
 
   it("passes local audio to a new turn", async () => {

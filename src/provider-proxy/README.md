@@ -9,7 +9,8 @@
   `/responses`、HTTP `/responses/compact` 与只读 `/models` 路径转发到上游
   Provider，保留端到端状态码与响应头；Authorization 只用于上游请求，不落日志、不进指标，
   `x-codex-turn-metadata` 在本地读取后移除，Hop-by-hop Header 不透传；
-  转发 SSE 或 WebSocket 响应时按事件类型记录首 Token、推理与非推理输出首尾时间，并在
+  转发 SSE 或 WebSocket 响应时按事件类型记录首 Token、推理、文本与函数/自定义工具参数输出的
+  首尾时间，并在
   响应完成事件前完成指标投递确认；从
   `x-codex-turn-metadata` 提取 `thread_id` / `turn_id` 用于按 Turn 关联。
   其他路径以及非 GET 的 `/models` 返回 404；监听地址强制为回环，

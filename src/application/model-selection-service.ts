@@ -64,6 +64,13 @@ export class ModelSelectionService {
         { model: current.model },
       );
     }
+    if (modality === "image") {
+      throw new UserFacingError(
+        "model.input.image.unsupported",
+        `当前模型 ${current.model} 不支持图片输入，请发送文字或切换支持图片的模型`,
+        { model: current.model },
+      );
+    }
     throw new UserFacingError(
       "model.input.unsupported",
       `当前模型 ${current.model} 不支持该输入类型`,

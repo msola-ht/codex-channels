@@ -69,6 +69,19 @@ describe("shared surface copy contract", () => {
     }
   });
 
+  it("reports unsupported model images before a Turn on every surface", () => {
+    const error = new UserFacingError(
+      "model.input.image.unsupported",
+      "当前模型 deepseek-v4-flash 不支持图片输入，请发送文字或切换支持图片的模型",
+      { model: "deepseek-v4-flash" },
+    );
+    for (const surface of ["Telegram", "飞书", "微信"] as const) {
+      expect(formatSurfaceUserFacingError(error, surface)).toBe(
+        "当前模型 deepseek-v4-flash 不支持图片输入，请发送文字或切换支持图片的模型",
+      );
+    }
+  });
+
   it("reports Plan and collaboration mode errors consistently on every surface", () => {
     const cases = [
       [

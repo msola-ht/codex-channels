@@ -86,13 +86,14 @@
   思考强度和 Fast 的 Thread 覆盖、Codex 用户级 Fast 默认值持久化、共享客户端完整或残缺设置
   通知、Thread 失效通知及 Gateway/CLI 连接恢复；DeepSeek 官方脚本目录提取、两种 Setup 模式、
   API Key 输出隔离、下载失败不修改、Flash 可选与 Pro 可见但不可选，以及跨 Provider 新建
-  Thread、原 Thread 可恢复、精确 Provider 路由和设置通知不覆盖不可变 Provider。
+  Thread、原 Thread 可恢复、精确 Provider 路由、设置通知不覆盖不可变 Provider，以及在文本模型
+  上创建或追加 Turn 前拒绝图片输入。
 - Provider 账户能力的编译期唯一注册、未知 Provider 不回退、OpenAI Token 用量与单桶/多桶额度
   到稳定 Application 摘要的映射、重置券数量，以及 DeepSeek 私有配置读取、统一代理、官方余额
   Schema 裁剪、响应上限和错误脱敏；Thread Token/上下文对 Provider 通用，OpenAI Fast 与周限
   不进入 DeepSeek 状态或完成卡片。
-- 全 Provider 最后一次模型响应的首字延时、非推理输出速度、Provider 暴露推理流时的思考/生成
-  速度、缺少推理计时时的真实推理输出量；自动回环代理的精确 `/responses`、`/responses/compact`
+- 全 Provider 最后一次模型响应的首字延时、文本与函数/自定义工具参数的非推理输出速度、Provider
+  暴露推理流时的思考/生成速度、缺少推理计时时的真实推理输出量；自动回环代理的精确 `/responses`、`/responses/compact`
   与只读 `/models` 路径、HTTP/SSE 与 WebSocket、上游
   状态/Header、私有元数据剥离、流式转发、统一代理 Agent、OpenAI 自定义上游保留、App Server
   服务独立生命周期、响应完成前的指标确认、启动失败清理，以及 `0600` Unix Socket 指标投递和

@@ -362,6 +362,7 @@ function observeResponseEvent(
 ): boolean {
   const isReasoningDelta = type.includes("reasoning") && type.includes(".delta");
   const isOutputDelta = type === "response.output_text.delta"
+    || type === "response.function_call_arguments.delta"
     || type === "response.custom_tool_call_input.delta";
   if (isReasoningDelta || isOutputDelta) metrics.firstTokenAtMs ??= receivedAtMs;
   if (isReasoningDelta) {

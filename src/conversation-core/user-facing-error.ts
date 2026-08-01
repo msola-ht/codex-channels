@@ -12,6 +12,7 @@ export type UserFacingErrorCode =
   | "audio.too-large"
   | "audio.unsupported"
   | "model.input.audio.unsupported"
+  | "model.input.image.unsupported"
   | "model.input.unsupported"
   | "session.selector.required"
   | "session.selector.ambiguous"

@@ -104,7 +104,8 @@ plan_updates = true
 codexc service restart all
 ```
 
-当前仅 `deepseek-v4-flash` 可用。配置文件、跨提供商切换行为、TUI 使用方式和账户指标说明见
+当前仅 `deepseek-v4-flash` 可用且只支持文字输入；图片应先切换到支持图片的 OpenAI 模型。配置文件、
+跨提供商切换行为、TUI 使用方式和账户指标说明见
 [`DeepSeek 使用说明`](docs/deepseek.md)。
 
 ## 日常使用

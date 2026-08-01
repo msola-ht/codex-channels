@@ -214,6 +214,9 @@ export class ConversationService {
     target: ConversationTarget,
     input: TurnInput[],
   ): Promise<Submission> {
+    if (input.some((item) => item.type === "localImage")) {
+      await this.models.requireInputModality(target, "image");
+    }
     if (input.some((item) => item.type === "localAudio")) {
       await this.models.requireInputModality(target, "audio");
     }

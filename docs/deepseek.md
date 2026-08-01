@@ -44,6 +44,10 @@ DeepSeek Provider。
 当前 DeepSeek 官方只声明 `deepseek-v4-flash` 支持 Codex。`deepseek-v4-pro` 会显示为暂不可用，
 在官方支持前不能选择。
 
+当前 Responses API 只支持文字输入。DeepSeek 会把收到的图片替换成占位文本而不是报错，因此
+Gateway 会在创建或追加 Turn 前明确拒绝图片，并提示先切换到支持图片的模型，避免产生“模型已经
+看图”的误解。
+
 ## App Server 与 Thread
 
 切换模式由同一个后台服务监管 OpenAI 主 App Server 和隔离的 DeepSeek App Server。服务入口读取并
@@ -66,8 +70,8 @@ App Server 服务会共同重建受监管实例。
 ## 用量与运行统计
 
 - `/status` 的 Token、有效上下文窗口、缓存和压缩次数来自当前 Thread，不代表账户余额。
-- Turn 完成摘要按 Provider 实际响应展示首字延时、输出速度、推理输出或推理速度；上游没有提供
-  计时流时不会估算速度。
+- Turn 完成摘要按 Provider 实际响应展示首字延时、输出速度、推理输出或推理速度；文本、函数调用
+  参数和自定义工具参数增量都计入非推理输出时间窗，上游没有提供计时流时不会估算速度。
 - OpenAI Fast 和周限不会显示在 DeepSeek Thread 上。
 - `/usage` 在 OpenAI Thread 中显示 Codex Token 汇总，在 DeepSeek Thread 中调用官方余额接口。
 - `/limits` 当前只支持 OpenAI；DeepSeek 不会回退显示 OpenAI 限额。

@@ -334,6 +334,81 @@ describe("ProviderProxy", () => {
     expect(received[0]?.body).toContain("deepseek-v4-flash");
   });
 
+  it("records function call argument deltas as model output timing", async () => {
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.end([
+          sse("response.function_call_arguments.delta", {
+            type: "response.function_call_arguments.delta",
+            delta: '{"path":',
+          }),
+          sse("response.function_call_arguments.delta", {
+            type: "response.function_call_arguments.delta",
+            delta: '"README.md"}',
+          }),
+          sse("response.completed", {
+            type: "response.completed",
+            response: { id: "r-function", usage: null },
+          }),
+        ].join(""));
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstream.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push({
+      close: () => new Promise<void>((resolveClose) => {
+        upstream.close(() => resolveClose());
+      }),
+    });
+
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    const proxyPort = Number(proxy.address().split(":")[1]);
+    await new Promise<void>((resolveResponse, rejectResponse) => {
+      const request = httpRequest({
+        hostname: "127.0.0.1",
+        port: proxyPort,
+        path: "/responses",
+        method: "POST",
+        headers: {
+          "x-codex-turn-metadata": JSON.stringify({
+            thread_id: "thread-function",
+            turn_id: "turn-function",
+          }),
+        },
+      }, (response) => {
+        response.resume();
+        response.on("end", resolveResponse);
+        response.on("error", rejectResponse);
+      });
+      request.on("error", rejectResponse);
+      request.end("{}");
+    });
+
+    expect(metrics).toHaveLength(1);
+    expect(metrics[0]).toMatchObject({
+      threadId: "thread-function",
+      turnId: "turn-function",
+    });
+    expect(metrics[0]?.firstTokenAtMs).not.toBeNull();
+    expect(metrics[0]?.firstOutputDeltaAtMs).not.toBeNull();
+    expect(metrics[0]?.lastOutputDeltaAtMs).not.toBeNull();
+  });
+
   it("waits for reasoning metrics before forwarding the first visible output", async () => {
     const upstream = createServer((request, response) => {
       request.resume();
