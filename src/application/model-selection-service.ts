@@ -99,7 +99,7 @@ export class ModelSelectionService {
       await this.router.newSession(target);
     }
     const supported = selected.supportedReasoningEfforts.map((option) => option.effort);
-    const effort = current.effort && supported.includes(current.effort)
+    const effort = !providerChanged && current.effort && supported.includes(current.effort)
       ? current.effort
       : selected.defaultReasoningEffort;
     const pending = { ...this.pendingByConversation.get(this.key(target)) };

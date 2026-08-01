@@ -28,7 +28,7 @@ const suite = run ? describe : describe.skip;
 const runContract = process.env.RUN_CODEX_CONTRACT === "1";
 const contractSuite = runContract ? describe : describe.skip;
 const deepseekCatalogPath = process.env.CODEX_DEEPSEEK_MODEL_CATALOG;
-const deepseekCatalogContractTest = runContract && deepseekCatalogPath ? it : it.skip;
+const deepseekCatalogContractTest = runContract ? it : it.skip;
 const archiveFixtureThreadId = process.env.CODEX_ARCHIVE_FIXTURE_THREAD_ID;
 const archiveTest = run && archiveFixtureThreadId ? it : it.skip;
 const resumeFixtureThreadId = process.env.CODEX_RESUME_FIXTURE_THREAD_ID;
@@ -795,6 +795,8 @@ deepseekCatalogContractTest(
     mkdirSync(runtimeRoot, { recursive: true });
     const testRuntime = mkdtempSync(join(runtimeRoot, "deepseek-resume-contract-"));
     const codexHome = join(testRuntime, "codex-home");
+    const resolvedCatalogPath = deepseekCatalogPath
+      ?? join(testRuntime, "deepseek.models.json");
     const socketPath = join(testRuntime, "app-server.sock");
     const apiServer = createServer((_request, response) => {
       response.writeHead(400, { "content-type": "application/json" });
@@ -811,12 +813,43 @@ deepseekCatalogContractTest(
       throw new Error("DeepSeek 冷恢复合同无法创建本机 API 夹具");
     }
     mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    if (!deepseekCatalogPath) {
+      writeFileSync(
+        resolvedCatalogPath,
+        `${JSON.stringify({
+          models: [{
+            slug: "deepseek-v4-flash",
+            display_name: "DeepSeek-V4-Flash",
+            description: "DeepSeek contract fixture",
+            default_reasoning_level: "high",
+            supported_reasoning_levels: [{
+              effort: "high",
+              description: "DeepSeek contract fixture",
+            }],
+            shell_type: "shell_command",
+            visibility: "list",
+            supported_in_api: true,
+            priority: 1,
+            availability_nux: null,
+            upgrade: null,
+            base_instructions: "You are a coding agent.",
+            support_verbosity: true,
+            default_verbosity: "low",
+            apply_patch_tool_type: "freeform",
+            truncation_policy: { mode: "tokens", limit: 10_000 },
+            supports_parallel_tool_calls: true,
+            experimental_supported_tools: [],
+          }],
+        })}\n`,
+        { mode: 0o600 },
+      );
+    }
     writeFileSync(
       join(codexHome, "config.toml"),
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "deepseek"',
-        `model_catalog_json = ${JSON.stringify(deepseekCatalogPath!)}`,
+        `model_catalog_json = ${JSON.stringify(resolvedCatalogPath)}`,
         "",
         "[model_providers.deepseek]",
         'name = "deepseek"',

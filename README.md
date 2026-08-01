@@ -95,7 +95,8 @@ plan_updates = false
 
 ## 配置 DeepSeek
 
-运行 `codexc setup`，选择“模型提供方”，填写 DeepSeek API Key 后选择：
+运行 `codexc setup`，选择第一项“模型渠道”，填写 DeepSeek API Key 后选择。Setup 顶层可直接取消，
+模型和通讯渠道子菜单都可返回上一级：
 
 - OpenAI + DeepSeek 切换模式：保留 OpenAI 为原生 Codex 默认；终端使用 `codex` 启动 OpenAI，
   使用 `codex --profile deepseek` 启动 DeepSeek。基础 `~/.codex/config.toml` 完全保持不变，
@@ -128,6 +129,8 @@ Gateway 重新连接。Gateway 按 Thread 的官方 `modelProvider` 把新建、
 MCP 和审批请求路由到对应实例；模型目录由对应 App Server 启动配置一次性加载，不再依赖无效的
 Thread 级冷恢复覆盖。任一 Provider 的连接单独断开时，只重连并恢复该侧绑定；两个 App Server
 仍由同一个服务进程监管，任一子进程退出会让该服务共同重建两个实例。
+跨 Provider 新建 Thread 时使用目标模型目录声明的默认思考强度，不继承原 Provider Thread 的
+思考强度；当前 DeepSeek 官方目录默认值为 `high`。同一 Provider 内换模型时，兼容强度仍会保留。
 
 TUI 和 `/status` 中的 Token、有效上下文窗口、缓存和压缩次数始终来自当前 Thread，适用于 OpenAI
 与第三方 Provider；它们不是账户余额。`/status` 的累计值覆盖当前 Thread，最近模型请求值对应

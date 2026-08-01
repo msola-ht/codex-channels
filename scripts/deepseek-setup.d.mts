@@ -9,5 +9,23 @@ export interface DeepseekSetupResult {
   backupPath: string;
 }
 
-export function runDeepseekSetup(options?: Record<string, unknown>): Promise<DeepseekSetupResult | undefined>;
+export interface DeepseekSetupBackResult {
+  action: "back";
+  mode?: never;
+}
+
+export function runDeepseekSetup(options?: Record<string, unknown>): Promise<
+  DeepseekSetupResult | DeepseekSetupBackResult | undefined
+>;
+export function downloadDeepseekCatalog(
+  fetchImplementation: typeof fetch,
+  options?: {
+    attempts?: number;
+    sleep?: (milliseconds: number) => Promise<void>;
+    timeoutMs?: number;
+  },
+): Promise<{
+  catalog: { models: Array<Record<string, unknown>> };
+  sha256: string;
+}>;
 export function extractDeepseekCatalog(script: string): { models: Array<Record<string, unknown>> };

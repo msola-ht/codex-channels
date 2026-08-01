@@ -17,40 +17,53 @@ export async function runSetup({
   weixinSetup = runWeixinSetup,
 } = {}) {
   prompts.intro("Codex Connect Setup");
-  const section = await prompts.select({
-    message: "选择设置类别",
-    showInstructions: false,
-    options: [
-      {
-        value: "channels",
-        label: "通讯渠道",
-        hint: "配置外部消息入口",
-      },
-      {
-        value: "models",
-        label: "模型提供方",
-        hint: "配置 OpenAI 与 DeepSeek",
-      },
-    ],
-  });
-  if (prompts.isCancel(section)) {
-    prompts.cancel("Setup 已取消");
-    return undefined;
-  }
-  switch (section) {
-    case "channels":
-      return runChannelSetup({
-        input,
-        output,
-        prompts,
-        feishuSetup,
-        telegramSetup,
-        weixinSetup,
-      });
-    case "models":
-      return deepseekSetup({ input, output, prompts });
-    default:
-      throw new Error(`未知 Setup 类别：${String(section)}`);
+  while (true) {
+    const section = await prompts.select({
+      message: "选择设置类别",
+      showInstructions: false,
+      options: [
+        {
+          value: "models",
+          label: "模型渠道",
+          hint: "配置 OpenAI 与 DeepSeek",
+        },
+        {
+          value: "channels",
+          label: "通讯渠道",
+          hint: "配置外部消息入口",
+        },
+        {
+          value: "cancel",
+          label: "取消",
+          hint: "退出 Setup",
+        },
+      ],
+    });
+    if (prompts.isCancel(section) || section === "cancel") {
+      prompts.cancel("Setup 已取消");
+      return undefined;
+    }
+    switch (section) {
+      case "channels": {
+        const result = await runChannelSetup({
+          input,
+          output,
+          prompts,
+          feishuSetup,
+          telegramSetup,
+          weixinSetup,
+        });
+        if (isBackResult(result)) continue;
+        return result;
+      }
+      case "models": {
+        const result = await deepseekSetup({ input, output, prompts, allowBack: true });
+        if (isBackResult(result)) continue;
+        return result;
+      }
+      default:
+        throw new Error(`未知 Setup 类别：${String(section)}`);
+    }
   }
 }
 
@@ -81,11 +94,15 @@ async function runChannelSetup({
         label: "微信",
         hint: "扫码连接与用户授权",
       },
+      {
+        value: "back",
+        label: "返回",
+        hint: "返回设置类别",
+      },
     ],
   });
-  if (prompts.isCancel(channel)) {
-    prompts.cancel("Setup 已取消");
-    return undefined;
+  if (prompts.isCancel(channel) || channel === "back") {
+    return { action: "back" };
   }
   switch (channel) {
     case "telegram":
@@ -97,6 +114,10 @@ async function runChannelSetup({
     default:
       throw new Error(`未知通讯渠道：${String(channel)}`);
   }
+}
+
+function isBackResult(result) {
+  return result?.action === "back";
 }
 
 function isDirectExecution(moduleUrl, argvPath) {

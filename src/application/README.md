@@ -16,7 +16,8 @@
   Plugin 和 Permission Profile 均使用稳定结果。
 - `model-selection-service.ts`：查询模型、输入能力与思考强度，保存按 Conversation 生效的 Turn 覆盖设置；
   选择不同 Provider 时保留并解绑当前 Thread，为下一 Turn 在对应 App Server 新建带精确
-  `modelProvider` 的 Thread，避免把 Provider 专属历史发送到不兼容的 API；旧 Thread 保持可恢复；
+  `modelProvider` 的 Thread，并采用目标模型目录的默认思考强度，避免把原 Provider 的设置或专属
+  历史发送到不兼容的 API；旧 Thread 保持可恢复；
   含本地音频的输入在创建或追加 Turn 前必须通过当前模型的 `audio` 能力检查；
   Fast 只允许当前模型目录明确声明支持时切换，并通过模型窄端口保存用户级默认层级；第三方模型
   不得借关闭 Fast 改写 OpenAI 默认设置。

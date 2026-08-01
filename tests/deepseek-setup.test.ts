@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   deepseekSetupScriptUrl,
+  downloadDeepseekCatalog,
   extractDeepseekCatalog,
   runDeepseekSetup,
 } from "../scripts/deepseek-setup.mjs";
@@ -29,6 +30,89 @@ describe("DeepSeek setup", () => {
   it("extracts exactly one official model catalog heredoc", () => {
     expect(extractDeepseekCatalog(script).models).toHaveLength(2);
     expect(() => extractDeepseekCatalog("echo no-catalog")).toThrow("模型目录标记无效");
+  });
+
+  it("returns to the parent setup without reading a key or changing files", async () => {
+    const fixture = setupFixture('model = "gpt-5.4"\n');
+    const fetchImpl = vi.fn();
+    const prompt = prompter(["4"], []);
+
+    await expect(runDeepseekSetup({
+      allowBack: true,
+      environment: { CODEX_HOME: fixture.home },
+      output: fixture.output,
+      fetchImpl,
+      prompter: prompt,
+    })).resolves.toEqual({ action: "back" });
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(readFileSync(join(fixture.home, "config.toml"), "utf8"))
+      .toBe('model = "gpt-5.4"\n');
+  });
+
+  it("shows a return option in the model channel menu", async () => {
+    const select = vi.fn(async () => "4");
+
+    await expect(runDeepseekSetup({
+      allowBack: true,
+      output: outputFixture(mkdtempSync(join(tmpdir(), "codexc-deepseek-menu-"))).output,
+      prompts: {
+        select,
+        password: vi.fn(),
+        confirm: vi.fn(),
+        isCancel: () => false,
+      },
+    })).resolves.toEqual({ action: "back" });
+
+    expect(select).toHaveBeenCalledWith({
+      message: "选择 DeepSeek 安装模式",
+      options: [
+        { value: "1", label: "OpenAI + DeepSeek 切换模式" },
+        { value: "2", label: "仅 DeepSeek 固定模式" },
+        { value: "3", label: "恢复安装前配置" },
+        { value: "4", label: "返回上一级" },
+      ],
+    });
+  });
+
+  it("retries retryable download failures and passes an abort signal", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response("busy", { status: 503 }))
+      .mockImplementationOnce(successfulFetch);
+
+    await expect(downloadDeepseekCatalog(fetchImpl, {
+      sleep: async () => undefined,
+    })).resolves.toMatchObject({ catalog: { models: expect.any(Array) } });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("times out a stalled official script download", async () => {
+    const fetchImpl = vi.fn((
+      _url: string | URL | Request,
+      init?: RequestInit,
+    ) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    }));
+
+    await expect(downloadDeepseekCatalog(fetchImpl, {
+      attempts: 1,
+      timeoutMs: 5,
+    })).rejects.toThrow("下载超时");
+  });
+
+  it("stops reading an oversized streamed official script", async () => {
+    const oversizedChunk = new Uint8Array((2 * 1024 * 1024) + 1);
+    const fetchImpl = vi.fn(async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(oversizedChunk);
+        controller.close();
+      },
+    })));
+
+    await expect(downloadDeepseekCatalog(fetchImpl, { attempts: 1 }))
+      .rejects.toThrow("超过允许大小");
   });
 
   it("installs a switching profile without replacing the OpenAI default", async () => {
@@ -131,9 +215,9 @@ describe("DeepSeek setup", () => {
     await expect(runDeepseekSetup({
       environment: { CODEX_HOME: fixture.home },
       output: fixture.output,
-      fetchImpl: vi.fn(async () => new Response("failed", { status: 503 })),
+      fetchImpl: vi.fn(async () => new Response("failed", { status: 404 })),
       prompter: prompter(["1"], ["sk-secret"]),
-    })).rejects.toThrow("HTTP 503");
+    })).rejects.toThrow("HTTP 404");
     expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(original);
   });
 

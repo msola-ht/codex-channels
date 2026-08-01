@@ -272,7 +272,7 @@ describe("ModelSelectionService", () => {
       modelSettings: () => ({
         model: "gpt-main",
         modelProvider: "openai",
-        effort: "medium",
+        effort: "low",
         serviceTier: "default",
       }),
     } as unknown as SessionRouter;
@@ -286,7 +286,14 @@ describe("ModelSelectionService", () => {
 
     expect(newSession).toHaveBeenCalledOnce();
     expect(fork).not.toHaveBeenCalled();
-    expect(state.providerPending).toBe(true);
+    expect(state).toMatchObject({
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+      effort: "high",
+      effortPending: true,
+      providerPending: true,
+    });
+    expect(service.turnOverrides(target)).toMatchObject({ effort: "high" });
     expect(service.threadStartOptions(target)).toEqual({
       model: "deepseek-v4-flash",
       modelProvider: "deepseek",

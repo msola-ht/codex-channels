@@ -11,21 +11,30 @@ export const deepseekSetupScriptUrl =
 const providerId = "deepseek";
 const supportedModel = "deepseek-v4-flash";
 const maximumScriptBytes = 2 * 1024 * 1024;
+const defaultDownloadAttempts = 3;
+const defaultDownloadTimeoutMs = 30_000;
 
 export async function runDeepseekSetup({
+  allowBack = false,
   environment = process.env,
   output = process.stdout,
   fetchImpl = globalThis.fetch,
   prompter,
   prompts = clackPrompts,
 } = {}) {
-  const prompt = prompter ?? createHiddenPrompter(prompts);
+  const prompt = prompter ?? createHiddenPrompter(prompts, { allowBack });
   try {
     output.write("\nCodex Connect DeepSeek Setup\n\n");
     output.write("1. OpenAI + DeepSeek 切换模式（保留 OpenAI 默认）\n");
     output.write("2. 仅 DeepSeek 固定模式（原生 Codex 也默认使用 DeepSeek）\n");
     output.write("3. 恢复安装前的 Codex 配置\n");
-    const choice = await askChoice(prompt, "请选择 [1-3]", 3);
+    if (allowBack) output.write("4. 返回上一级\n");
+    const choice = await askChoice(
+      prompt,
+      allowBack ? "请选择 [1-4]" : "请选择 [1-3]",
+      allowBack ? 4 : 3,
+    );
+    if (choice === "4") return { action: "back" };
     const codexHome = resolve(environment.CODEX_HOME?.trim() || join(homedir(), ".codex"));
     const configPath = join(codexHome, "config.toml");
     const profilePath = join(codexHome, "deepseek.config.toml");
@@ -129,33 +138,104 @@ export async function runDeepseekSetup({
   }
 }
 
-export async function downloadDeepseekCatalog(fetchImpl) {
+export async function downloadDeepseekCatalog(
+  fetchImpl,
+  {
+    attempts = defaultDownloadAttempts,
+    sleep = defaultSleep,
+    timeoutMs = defaultDownloadTimeoutMs,
+  } = {},
+) {
   if (typeof fetchImpl !== "function") {
     throw new Error("当前 Node.js 环境不支持 fetch");
   }
-  const response = await fetchImpl(deepseekSetupScriptUrl, {
-    headers: { accept: "text/plain" },
-    redirect: "follow",
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const signal = globalThis.AbortSignal.timeout(timeoutMs);
+    let response;
+    try {
+      response = await fetchImpl(deepseekSetupScriptUrl, {
+        headers: { accept: "text/plain" },
+        redirect: "follow",
+        signal,
+      });
+    } catch {
+      lastError = signal.aborted
+        ? new Error("DeepSeek 官方脚本下载超时")
+        : new Error("DeepSeek 官方脚本网络请求失败");
+      if (attempt < attempts) {
+        await sleep(attempt * 1_000);
+        continue;
+      }
+      throw lastError;
+    }
+    if (!response.ok) {
+      lastError = new Error(`DeepSeek 官方脚本下载失败：HTTP ${response.status}`);
+      if (!isRetryableStatus(response.status) || attempt === attempts) throw lastError;
+      await sleep(attempt * 1_000);
+      continue;
+    }
+    if (response.url && response.url !== deepseekSetupScriptUrl) {
+      throw new Error("DeepSeek 官方脚本下载发生了未允许的重定向");
+    }
+    let script;
+    try {
+      script = await readLimitedResponseText(response, maximumScriptBytes);
+    } catch (error) {
+      if (error instanceof Error && error.message === "DeepSeek 官方脚本超过允许大小") {
+        throw error;
+      }
+      lastError = signal.aborted
+        ? new Error("DeepSeek 官方脚本下载超时")
+        : new Error("DeepSeek 官方脚本响应读取失败");
+      if (attempt < attempts) {
+        await sleep(attempt * 1_000);
+        continue;
+      }
+      throw lastError;
+    }
+    const catalog = extractDeepseekCatalog(script);
+    return {
+      catalog,
+      sha256: createHash("sha256").update(script).digest("hex"),
+    };
+  }
+  throw lastError ?? new Error("DeepSeek 官方脚本下载失败");
+}
+
+async function readLimitedResponseText(response, maximumBytes) {
+  const contentLength = response.headers.get("content-length");
+  if (contentLength !== null && Number(contentLength) > maximumBytes) {
+    throw new Error("DeepSeek 官方脚本超过允许大小");
+  }
+  if (!response.body) {
+    throw new Error("DeepSeek 官方脚本响应缺少正文");
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > maximumBytes) {
+      await reader.cancel();
+      throw new Error("DeepSeek 官方脚本超过允许大小");
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
+}
+
+function isRetryableStatus(status) {
+  return status === 429 || (status >= 500 && status <= 599);
+}
+
+function defaultSleep(milliseconds) {
+  return new Promise((resolveSleep) => {
+    setTimeout(resolveSleep, milliseconds);
   });
-  if (!response.ok) {
-    throw new Error(`DeepSeek 官方脚本下载失败：HTTP ${response.status}`);
-  }
-  if (response.url && response.url !== deepseekSetupScriptUrl) {
-    throw new Error("DeepSeek 官方脚本下载发生了未允许的重定向");
-  }
-  const contentLength = Number(response.headers.get("content-length") || 0);
-  if (contentLength > maximumScriptBytes) {
-    throw new Error("DeepSeek 官方脚本超过允许大小");
-  }
-  const script = await response.text();
-  if (Buffer.byteLength(script) > maximumScriptBytes) {
-    throw new Error("DeepSeek 官方脚本超过允许大小");
-  }
-  const catalog = extractDeepseekCatalog(script);
-  return {
-    catalog,
-    sha256: createHash("sha256").update(script).digest("hex"),
-  };
 }
 
 export function extractDeepseekCatalog(script) {
@@ -535,16 +615,22 @@ function table(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
-function createHiddenPrompter(prompts) {
+function createHiddenPrompter(prompts, { allowBack }) {
   return {
-    ask: async () => requirePromptValue(prompts, await prompts.select({
-      message: "选择 DeepSeek 安装模式",
-      options: [
-        { value: "1", label: "OpenAI + DeepSeek 切换模式" },
-        { value: "2", label: "仅 DeepSeek 固定模式" },
-        { value: "3", label: "恢复安装前配置" },
-      ],
-    })),
+    ask: async () => {
+      const value = await prompts.select({
+        message: "选择 DeepSeek 安装模式",
+        options: [
+          { value: "1", label: "OpenAI + DeepSeek 切换模式" },
+          { value: "2", label: "仅 DeepSeek 固定模式" },
+          { value: "3", label: "恢复安装前配置" },
+          ...(allowBack ? [{ value: "4", label: "返回上一级" }] : []),
+        ],
+      });
+      return prompts.isCancel(value) && allowBack
+        ? "4"
+        : requirePromptValue(prompts, value);
+    },
     secret: async (label) => requirePromptValue(
       prompts,
       await prompts.password({ message: label }),
