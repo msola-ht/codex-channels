@@ -41,6 +41,11 @@ import type {
   CollaborationModeSelectionService,
   CollaborationModeState,
 } from "./collaboration-mode-service.js";
+import {
+  replaceLocalImagesWithVisionContext,
+  visionUserPrompt,
+  type VisionRecognitionPort,
+} from "./vision-port.js";
 
 export interface Submission {
   threadId: string;
@@ -142,6 +147,7 @@ export class ConversationService {
     private readonly collaborationModes?: CollaborationModeSelectionService,
     private readonly transfers?: ConversationTransferPort,
     private readonly providerAccounts?: ProviderAccountQueryPort,
+    private readonly vision?: VisionRecognitionPort,
   ) {}
 
   submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission> {
@@ -215,7 +221,33 @@ export class ConversationService {
     input: TurnInput[],
   ): Promise<Submission> {
     if (input.some((item) => item.type === "localImage")) {
-      await this.models.requireInputModality(target, "image");
+      try {
+        await this.models.requireInputModality(target, "image");
+      } catch (error) {
+        if (
+          !(error instanceof UserFacingError)
+          || error.code !== "model.input.image.unsupported"
+          || !this.vision
+        ) {
+          throw error;
+        }
+        const images = input.flatMap((item) =>
+          item.type === "localImage" ? [{ path: item.path }] : []
+        );
+        let result;
+        try {
+          result = await this.vision.recognize({
+            images,
+            userPrompt: visionUserPrompt(input),
+            onRequestStarted: () => {
+              this.core.visionStarted(target, { imageCount: images.length });
+            },
+          });
+        } catch {
+          throw new UserFacingError("vision.failed", "图片识别失败");
+        }
+        input = replaceLocalImagesWithVisionContext(input, result);
+      }
     }
     if (input.some((item) => item.type === "localAudio")) {
       await this.models.requireInputModality(target, "audio");

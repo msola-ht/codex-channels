@@ -115,12 +115,53 @@ describe("Gateway config.toml", () => {
     expect(runtime.config.telegramMessageFormat).toBe("rich");
     expect(runtime.config.operationUpdateDisplay).toBe("compact");
     expect(runtime.config.planUpdatesEnabled).toBe(true);
+    expect(runtime.config.vision).toEqual({ mode: "disabled" });
     expect(runtime.config.credentialsDirectory).toBe(join(fixture.root, "credentials"));
     expect(runtime.config.codexSocketPath).toBe(join(fixture.root, "runtime/app-server.sock"));
     expect(runtime.config.stateDatabasePath).toBe(join(fixture.root, "data/gateway.sqlite3"));
     expect(runtime.config.workspaces).toEqual([
       { id: "main", name: "Main", cwd: realpathSync(fixture.workspace) },
     ]);
+  });
+
+  it("rejects the removed App Server vision mode", () => {
+    const appServer = createFixture({
+      vision: { mode: "openai_app_server", model: "gpt-vision" },
+    });
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: appServer.configPath,
+    })).toThrow(/vision\.mode/u);
+  });
+
+  it("loads external vision settings without reading API key contents into config", () => {
+    const external = createFixture({
+      vision: {
+        mode: "responses_api",
+        endpoint: "https://vision.example/v1/responses",
+        model: "vision-model",
+      },
+    });
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: external.configPath,
+    }).config.vision).toEqual({
+      mode: "responses_api",
+      endpoint: "https://vision.example/v1/responses",
+      model: "vision-model",
+    });
+  });
+
+  it("rejects insecure remote vision endpoints", () => {
+    const fixture = createFixture({
+      vision: {
+        mode: "responses_api",
+        endpoint: "http://vision.example/v1/responses",
+        model: "vision-model",
+      },
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow("必须使用 HTTPS");
   });
 
   it("rejects the removed manual DeepSeek proxy setting", () => {

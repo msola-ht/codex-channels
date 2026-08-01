@@ -109,6 +109,11 @@ codexc service restart all
 跨提供商切换行为、TUI 使用方式和账户指标说明见
 [`DeepSeek 使用说明`](docs/deepseek.md)。
 
+需要让不支持图片的模型处理图片时，在 `codexc setup` 的“模型渠道 → 图片识别”中配置外部
+Responses 视觉接口、模型 ID 和独立 API Key。双 Provider 与仅 DeepSeek 模式使用同一条代理链路：
+视觉模型识别后把受控结果交给原会话回答。默认不开启，配置与安全边界见
+[`图片识别代理`](docs/vision.md)。
+
 ## 日常使用
 
 ### 管理项目

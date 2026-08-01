@@ -14,6 +14,9 @@
   以及 Routing 不再解析原始协议信封。
 - 活动 Turn 的即时 steer 与下一 Turn 有界内存队列、顺序启动、Thread 隔离和失败清理；项目输入
   到官方 `UserInput` 的映射，以及 Review、Goal 和控制响应到稳定 Application 结果的映射。
+- 图片识别结果的严格数量、顺序、长度和提示注入隔离；双 Provider 与仅 DeepSeek Setup 均为
+  外部视觉接口分离保存 Key；模型不支持图片时使用单次 Responses 请求、私有 Key 和稳定响应裁剪，
+  三渠道只在外部请求发起后发送一次包含图片数量与本条要求的视觉 API 识别提示。
 - 官方 Turn、Item、Diff、Plan、Goal、Token、账户、额度、MCP 和 warning Notification 到稳定 Core
   输入事件的映射，畸形与未知通知隔离；Conversation Core 状态归约、严格 Turn 完成状态、
   官方 `Turn.durationMs` 校验、三渠道统一结束汇报耗时字段、可重试错误隔离、Thread/全局警告路由，

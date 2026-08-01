@@ -1,5 +1,10 @@
 export type AppendedInputKind = "text" | "file" | "image" | "audio";
 
+export function formatVisionStarted(imageCount: number): string {
+  const imageLabel = imageCount === 1 ? "图片" : `${imageCount} 张图片`;
+  return `${imageLabel}和本条要求已发送到视觉 API，正在识别。`;
+}
+
 export function formatTurnInputAppended(
   kind: AppendedInputKind,
   includesText = false,

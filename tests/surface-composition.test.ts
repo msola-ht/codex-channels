@@ -489,6 +489,7 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     codexSandbox: "workspace-write",
     operationUpdateDisplay: "full",
     planUpdatesEnabled: false,
+    vision: { mode: "disabled" },
     credentialsDirectory: "/tmp/credentials",
     stateDatabasePath: "/tmp/gateway.sqlite3",
     approvalTimeoutMs: 300_000,

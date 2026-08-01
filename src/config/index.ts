@@ -63,6 +63,13 @@ export interface GatewayConfig {
   codexSandbox: "read-only" | "workspace-write";
   operationUpdateDisplay: OperationUpdateDisplay;
   planUpdatesEnabled: boolean;
+  vision:
+    | { mode: "disabled" }
+    | {
+        mode: "responses_api";
+        endpoint: string;
+        model: string;
+      };
   credentialsDirectory: string;
   stateDatabasePath: string;
   approvalTimeoutMs: number;
@@ -230,10 +237,35 @@ function loadValidatedConfigDocument(
     codexSandbox: raw.codex.sandbox,
     operationUpdateDisplay: raw.display.operation_updates,
     planUpdatesEnabled: raw.display.plan_updates,
+    vision: toVisionConfig(raw.vision),
     credentialsDirectory: resolve(baseDirectory, "credentials"),
     stateDatabasePath: resolveConfiguredPath(raw.storage.database_path, baseDirectory),
     approvalTimeoutMs: raw.approval.timeout_seconds * 1000,
     logLevel: raw.logging.level,
+  };
+}
+
+function toVisionConfig(raw: GatewayConfigDocument["vision"]): GatewayConfig["vision"] {
+  if (raw.mode === "disabled") return raw;
+  let endpoint: URL;
+  try {
+    endpoint = new URL(raw.endpoint);
+  } catch {
+    throw new ConfigurationError("vision.endpoint 必须是有效 URL");
+  }
+  const loopback = endpoint.hostname === "localhost"
+    || endpoint.hostname === "127.0.0.1"
+    || endpoint.hostname === "[::1]";
+  if (endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && loopback)) {
+    throw new ConfigurationError("vision.endpoint 必须使用 HTTPS；本机回环地址可以使用 HTTP");
+  }
+  if (endpoint.username || endpoint.password || endpoint.hash) {
+    throw new ConfigurationError("vision.endpoint 不能包含凭据或 URL Fragment");
+  }
+  return {
+    mode: raw.mode,
+    endpoint: endpoint.toString(),
+    model: raw.model,
   };
 }
 

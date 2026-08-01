@@ -20,6 +20,7 @@ import {
   createTurnStartedPresentation,
   renderPlainLifecyclePresentation,
 } from "../lifecycle-presentation.js";
+import { formatVisionStarted } from "../input-copy.js";
 import {
   contentTruncatedText,
   emptyCodexResponseText,
@@ -305,6 +306,10 @@ export class WeixinOutbox implements SurfaceOutputPort {
 
   private render(event: OutputEvent): string | null {
     switch (event.type) {
+      case "vision.started":
+        return formatWeixinCommandText(
+          formatVisionStarted(event.imageCount),
+        );
       case "user.message":
         return formatCliInput(event.text);
       case "text.completed":

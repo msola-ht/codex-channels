@@ -56,6 +56,15 @@ const weixinSetupSchema = z.strictObject({
   ),
 });
 
+const visionSchema = z.discriminatedUnion("mode", [
+  z.strictObject({ mode: z.literal("disabled") }),
+  z.strictObject({
+    mode: z.literal("responses_api"),
+    endpoint: z.url(),
+    model: z.string().trim().min(1),
+  }),
+]);
+
 const gatewayDocumentSchema = z.strictObject({
   version: z.literal(1),
   default_workspace: z.string().trim().min(1),
@@ -86,6 +95,7 @@ const gatewayDocumentSchema = z.strictObject({
     operation_updates: z.enum(["full", "compact", "hidden"]).default("compact"),
     plan_updates: z.boolean().default(true),
   }).default({ operation_updates: "compact", plan_updates: true }),
+  vision: visionSchema.default({ mode: "disabled" }),
   storage: z.strictObject({
     database_path: z.string().min(1).default("data/gateway.sqlite3"),
   }).default({ database_path: "data/gateway.sqlite3" }),

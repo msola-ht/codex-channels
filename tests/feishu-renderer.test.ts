@@ -761,6 +761,11 @@ describe("Feishu output renderer", () => {
     ];
     const progressEvents: OutputEvent[] = [
       {
+        type: "vision.started",
+        target,
+        imageCount: 2,
+      },
+      {
         type: "turn.started",
         target,
         threadId: "thread-1",
@@ -795,6 +800,7 @@ describe("Feishu output renderer", () => {
     expect(renderFeishuOutput(criticalEvents[2]!)).toBeNull();
     expect(progressEvents.some(isCriticalOutputEvent)).toBe(false);
     expect(progressEvents.map(renderFeishuOutput)).toEqual([
+      "2 张图片和本条要求已发送到视觉 API，正在识别。",
       "**已开始处理。**",
       null,
       null,

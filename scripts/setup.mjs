@@ -6,6 +6,7 @@ import { runFeishuSetup } from "./feishu-setup.mjs";
 import { runDeepseekSetup } from "./deepseek-setup.mjs";
 import { runTelegramSetup } from "./telegram-setup.mjs";
 import { runWeixinSetup } from "./weixin-setup.mjs";
+import { runVisionSetup } from "./vision-setup.mjs";
 
 export async function runSetup({
   input = process.stdin,
@@ -15,6 +16,7 @@ export async function runSetup({
   deepseekSetup = runDeepseekSetup,
   telegramSetup = runTelegramSetup,
   weixinSetup = runWeixinSetup,
+  visionSetup = runVisionSetup,
 } = {}) {
   prompts.intro("Codex Connect Setup");
   while (true) {
@@ -57,7 +59,13 @@ export async function runSetup({
         return result;
       }
       case "models": {
-        const result = await deepseekSetup({ input, output, prompts, allowBack: true });
+        const result = await runModelSetup({
+          input,
+          output,
+          prompts,
+          deepseekSetup,
+          visionSetup,
+        });
         if (isBackResult(result)) continue;
         return result;
       }
@@ -65,6 +73,24 @@ export async function runSetup({
         throw new Error(`未知 Setup 类别：${String(section)}`);
     }
   }
+}
+
+async function runModelSetup({ input, output, prompts, deepseekSetup, visionSetup }) {
+  const module = await prompts.select({
+    message: "选择模型渠道设置",
+    showInstructions: false,
+    options: [
+      { value: "deepseek", label: "DeepSeek", hint: "安装、切换或恢复模型提供商" },
+      { value: "vision", label: "图片识别", hint: "为不支持图片的模型配置视觉代理" },
+      { value: "back", label: "返回", hint: "返回设置类别" },
+    ],
+  });
+  if (prompts.isCancel(module) || module === "back") return { action: "back" };
+  if (module === "deepseek") {
+    return deepseekSetup({ input, output, prompts, allowBack: true });
+  }
+  if (module === "vision") return visionSetup({ input, output, prompts });
+  throw new Error(`未知模型渠道设置：${String(module)}`);
 }
 
 async function runChannelSetup({

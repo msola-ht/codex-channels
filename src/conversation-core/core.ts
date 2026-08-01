@@ -74,6 +74,13 @@ export class ConversationCore {
     this.publish({ type: "turn.started", target, threadId, turnId });
   }
 
+  visionStarted(
+    target: ConversationTarget,
+    details: { imageCount: number },
+  ): void {
+    this.publish({ type: "vision.started", target, ...details });
+  }
+
   activeTurn(target: ConversationTarget): ActiveTurn | undefined {
     return this.activeByConversation.get(this.key(target));
   }

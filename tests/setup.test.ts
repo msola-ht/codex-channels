@@ -130,7 +130,9 @@ describe("Codex Connect setup", () => {
     const output = {};
     const prompts = {
       intro: vi.fn(),
-      select: vi.fn().mockResolvedValueOnce("models"),
+      select: vi.fn()
+        .mockResolvedValueOnce("models")
+        .mockResolvedValueOnce("deepseek"),
       isCancel: () => false,
       cancel: vi.fn(),
     };
@@ -148,6 +150,28 @@ describe("Codex Connect setup", () => {
 
     expect(result).toBe("deepseek-configured");
     expect(deepseekSetup).toHaveBeenCalledWith({ input, output, prompts, allowBack: true });
+  });
+
+  it("selects image recognition under the model channel category", async () => {
+    const visionSetup = vi.fn(async () => "vision-configured");
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("models")
+        .mockResolvedValueOnce("vision"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    await expect(runSetup({
+      input: {},
+      output: {},
+      prompts,
+      deepseekSetup: vi.fn(),
+      visionSetup,
+    })).resolves.toBe("vision-configured");
+
+    expect(visionSetup).toHaveBeenCalledWith({ input: {}, output: {}, prompts });
   });
 
   it("returns from the channel menu and can cancel at the category menu", async () => {
@@ -182,6 +206,7 @@ describe("Codex Connect setup", () => {
     const deepseekSetup = vi.fn(async () => ({ action: "back" }));
     const select = vi.fn()
       .mockResolvedValueOnce("models")
+      .mockResolvedValueOnce("deepseek")
       .mockResolvedValueOnce("cancel");
 
     const result = await runSetup({
@@ -201,7 +226,7 @@ describe("Codex Connect setup", () => {
 
     expect(result).toBeUndefined();
     expect(deepseekSetup).toHaveBeenCalledWith(expect.objectContaining({ allowBack: true }));
-    expect(select).toHaveBeenCalledTimes(2);
+    expect(select).toHaveBeenCalledTimes(3);
     expect(cancel).toHaveBeenCalledWith("Setup 已取消");
   });
 

@@ -86,6 +86,21 @@ describe("WeixinOutbox", () => {
     ]);
   });
 
+  it("reports when image input is sent to the visual API", async () => {
+    const { outbox, sendText } = outboxFixture();
+
+    outbox.handle({
+      type: "vision.started",
+      target,
+      imageCount: 2,
+    });
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
+      text: "2 张图片和本条要求已发送到视觉 API，正在识别。",
+    }));
+  });
+
   it("mirrors CLI input into the bound Weixin conversation", async () => {
     const { outbox, sendText } = outboxFixture();
 

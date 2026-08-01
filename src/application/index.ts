@@ -91,3 +91,14 @@ export {
   type TurnOverrides,
   type TurnStarted,
 } from "./turn-port.js";
+export {
+  parseVisionRecognitionPayload,
+  replaceLocalImagesWithVisionContext,
+  visionRecognitionJsonSchema,
+  visionUserPrompt,
+  type VisionJsonValue,
+  type VisionRecognitionImage,
+  type VisionRecognitionPort,
+  type VisionRecognitionRequest,
+  type VisionRecognitionResult,
+} from "./vision-port.js";

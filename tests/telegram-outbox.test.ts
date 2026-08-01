@@ -199,6 +199,22 @@ describe("TelegramOutbox", () => {
     });
   });
 
+  it("reports when image and text input is sent to the visual API", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      type: "vision.started",
+      target,
+      imageCount: 1,
+    });
+    await outbox.close();
+
+    expect(api.sent).toEqual([
+      "<b>图片和本条要求已发送到视觉 API，正在识别。</b>",
+    ]);
+  });
+
   it("queues a Workspace notification with direct switch buttons", async () => {
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);

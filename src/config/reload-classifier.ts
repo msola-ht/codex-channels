@@ -84,6 +84,11 @@ function restartRequiredReasons(
       next.planUpdatesEnabled,
     ],
     [configChange("observability.log-level"), current.logLevel, next.logLevel],
+    [
+      configChange("vision.provider"),
+      JSON.stringify(current.vision),
+      JSON.stringify(next.vision),
+    ],
     [configChange("workspace.default"), current.defaultWorkspaceId, next.defaultWorkspaceId],
   ];
   for (const [change, before, after] of fields) {

@@ -7,6 +7,7 @@ export type UserFacingErrorCode =
   | "image.too-large"
   | "image.too-many"
   | "image.unsupported"
+  | "vision.failed"
   | "audio.path.invalid"
   | "audio.duration-missing"
   | "audio.too-large"

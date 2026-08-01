@@ -42,6 +42,13 @@ operation_updates = "compact"
 # 是否在渠道显示 App Server 的自动任务计划更新。
 plan_updates = true
 
+[vision]
+# disabled：不代理识图；responses_api：当前模型不支持图片时调用外部视觉接口。
+mode = "disabled"
+# model = "视觉模型"
+# endpoint = "https://example.com/v1/responses"
+# API Key 通过 codexc setup 保存到独立私有凭据文件，不写入本配置。
+
 [storage]
 database_path = "data/gateway.sqlite3"
 

@@ -23,5 +23,7 @@
 - `project-rules.mjs`：生成并检查项目级 Codex 命令规则；Gateway 使用精确 Workspace 根目录，
   并拒绝通过符号链接把写入转移到 Workspace 外。
 - `project-rules.d.mts`：声明共享项目规则模块的 TypeScript 接口。
+- `vision-credential.mjs` / `vision-credential.d.mts`：供 Setup 与 Gateway 共享外部视觉 API Key
+  的固定私有路径和严格读写；目录、文件所有者、权限与符号链接异常均失败关闭。
 
 这里的模块同时被 `bin/`、`scripts/`、`src/config` 和 `src/bootstrap` 使用，必须保持无平台 SDK 依赖，并随 npm 包发布。

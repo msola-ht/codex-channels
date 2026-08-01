@@ -88,7 +88,8 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。
 `error-metadata.ts` 统一渠道日志中的受约束异常类型、机器错误码和锁定 App Server
 白名单拒绝分类，拒绝异常正文、堆栈、请求标识及上游自定义名称进入日志；Bootstrap
 继续通过注入的 Pino `err` 序列化器处理组合根异常。
-`input-copy.ts` 统一补充文字、文件、图片与音频追加到当前 Turn 的确认文案；
+`input-copy.ts` 统一补充文字、文件、图片与音频追加到当前 Turn 的确认文案，以及外部视觉 API
+开始识别图片与本条要求时的进度文案；
 `output-copy.ts` 统一 CLI 输入镜像、断线、警告、操作失败、停止交互、空回复与内容截断等输出
 语义，各渠道继续自行决定 HTML、CardKit Markdown、纯文本布局和发送方式。
 `interaction-copy.ts` 统一审批、用户输入和 MCP 交互的处理、取消、超时、跨客户端解决及提交结果

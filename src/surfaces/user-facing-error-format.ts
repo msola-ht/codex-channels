@@ -24,6 +24,8 @@ export function formatSurfaceUserFacingError(
       return "一次最多处理 4 张图片";
     case "image.unsupported":
       return "仅支持 PNG 和 JPEG 图片";
+    case "vision.failed":
+      return "图片识别失败，请稍后重试或切换支持图片的模型";
     case "audio.path.invalid":
       return "本地音频路径必须是绝对路径";
     case "audio.duration-missing":

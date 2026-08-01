@@ -79,6 +79,12 @@ App Server 服务会共同重建受监管实例。
 - `/limits` 当前只支持 OpenAI；DeepSeek 不会回退显示 OpenAI 限额。
 - DeepSeek 不支持 Fast，执行 `/fast on` 或 `/fast off` 会明确拒绝。
 
+## 图片识别
+
+DeepSeek 模型目录当前只声明文字输入。Gateway 默认继续在 Turn 前拒绝图片；如需识图，可按
+[`图片识别代理`](vision.md) 配置统一的外部 Responses 视觉接口。识别结果作为标明来源的不可信
+文字资料进入当前 DeepSeek Thread。
+
 App Server 服务会为每个启用的 Provider 启动独立的本机回环统计代理。代理支持项目当前使用的
 HTTP/SSE、Responses WebSocket、压缩和模型目录请求，复用统一网络代理，并保留用户已有的
 `openai_base_url` 上游。认证 Header、请求正文和响应正文只做内存转发，不写入指标或日志。

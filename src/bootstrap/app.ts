@@ -15,6 +15,7 @@ import {
   providerAppServerSocketPath,
   providerMetricsSocketPath,
 } from "../../runtime/model-provider-runtime.mjs";
+import { readVisionApiKey } from "../../runtime/vision-credential.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
 import { ProviderProxyMetricsServer } from "../provider-proxy/index.js";
 import {
@@ -65,6 +66,7 @@ import type { SurfaceRuntimeModule } from "./surface-plugin.js";
 import { SurfaceManager } from "./surface-manager.js";
 import { createDeepseekAccountAdapter } from "./deepseek-account-adapter.js";
 import { createProxyFetch } from "./proxy-fetch.js";
+import { createResponsesVisionAdapter } from "./responses-vision-adapter.js";
 
 export class GatewayApplication {
   private readonly transport: UnixWebSocketTransport;
@@ -211,6 +213,14 @@ export class GatewayApplication {
         fetchImpl: createProxyFetch(config.networkProxy),
       }),
     ]);
+    const vision = config.vision.mode === "disabled"
+      ? undefined
+      : createResponsesVisionAdapter({
+          endpoint: config.vision.endpoint,
+          model: config.vision.model,
+          loadApiKey: () => readVisionApiKey(config.credentialsDirectory),
+          fetchImpl: createProxyFetch(config.networkProxy),
+        });
     const service = new ConversationService(
       this.codex,
       this.router,
@@ -246,6 +256,7 @@ export class GatewayApplication {
         },
       },
       providerAccounts,
+      vision,
     );
     this.output.subscribe("conversation-follow-up", async (event) => {
       if (event.type !== "turn.completed") {

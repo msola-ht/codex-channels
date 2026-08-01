@@ -19,6 +19,7 @@ import {
   createTurnCompletedPresentation,
   createTurnStartedPresentation,
 } from "../lifecycle-presentation.js";
+import { formatVisionStarted } from "../input-copy.js";
 import {
   cliInputTitle,
   contentTruncatedText,
@@ -160,6 +161,18 @@ export class TelegramOutbox {
     }
     const chatId = event.target.conversationId;
     switch (event.type) {
+      case "vision.started":
+        this.enqueue(
+          chatId,
+          () => this.sendPanel(
+            chatId,
+            formatVisionStarted(event.imageCount),
+            undefined,
+            true,
+          ).then(() => undefined),
+          false,
+        );
+        return;
       case "turn.started":
         this.replyTargets.bindPending(
           chatId,

@@ -36,6 +36,7 @@ import {
   type LifecyclePresentation,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
+import { formatVisionStarted } from "../input-copy.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
 import {
   formatCodexWarning,
@@ -151,6 +152,8 @@ export function renderFeishuUserFacingError(
 
 export function renderFeishuOutput(event: OutputEvent): string | null {
   switch (event.type) {
+    case "vision.started":
+      return formatVisionStarted(event.imageCount);
     case "turn.started":
       return renderFeishuLifecyclePresentation(
         createTurnStartedPresentation(),

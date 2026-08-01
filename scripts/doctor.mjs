@@ -19,6 +19,7 @@ import {
   providerAppServerSocketPath,
   validateConfiguredModelProvider,
 } from "../runtime/model-provider-runtime.mjs";
+import { readVisionApiKey } from "../runtime/vision-credential.mjs";
 import { validateFeishuApplication } from "./feishu-application.mjs";
 import { packageDir, resolveConfiguredPath, runtimeConfig, userDataDir } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
@@ -196,6 +197,18 @@ if (document) {
     );
   } else {
     note("微信", "未配置");
+  }
+
+  const vision = table(document.vision);
+  if (vision.mode === "responses_api") {
+    try {
+      readVisionApiKey(join(dataDir, "credentials"));
+      record("图片识别", true, "外部视觉 API 配置与私有凭据有效（内容已隐藏）");
+    } catch {
+      record("图片识别", false, "外部视觉 API 私有凭据不存在或权限无效；请重新运行 codexc setup");
+    }
+  } else {
+    note("图片识别", "未启用");
   }
 
   try {

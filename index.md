@@ -5,6 +5,7 @@
 - [`README.md`](README.md)：安装、配置、日常使用、排障和升级。
 - [`config.example.toml`](config.example.toml)：Gateway 配置示例。
 - [`docs/deepseek.md`](docs/deepseek.md)：DeepSeek 配置模式、终端使用、Provider 切换与运行统计。
+- [`docs/vision.md`](docs/vision.md)：双 Provider 与仅 DeepSeek 的图片识别代理配置和安全边界。
 
 ## 协议与设计
 

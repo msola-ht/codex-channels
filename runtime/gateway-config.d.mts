@@ -42,6 +42,13 @@ export interface GatewayConfigDocument {
     operation_updates: "full" | "compact" | "hidden";
     plan_updates: boolean;
   };
+  vision:
+    | { mode: "disabled" }
+    | {
+        mode: "responses_api";
+        endpoint: string;
+        model: string;
+      };
   storage: { database_path: string };
   logging: { level: "fatal" | "error" | "warn" | "info" | "debug" | "trace" };
   workspaces: Array<{ id: string; name: string; cwd: string }>;
