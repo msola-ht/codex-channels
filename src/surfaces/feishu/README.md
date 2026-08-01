@@ -18,7 +18,7 @@ Application 的本地图片输入，同一 Thread 的
 
 - `index.ts`：飞书模块受控出口；一级 `surfaces/index.ts` 只转出 Bootstrap 所需工厂、选项类型
   和启动文案渲染器。
-- `adapter.ts`：区分普通文本、平台本地命令和 Application 命令，把富文本内及 Inbox 收集的连续图片合并为
+- `adapter.ts`：区分普通文本、平台本地命令和 Application 命令，把同一富文本或 Inbox 已明确成批的图片合并为
   一次最多 4 张的 Application 输入，并通过 Outbox 返回结果或安全错误。
 - `approval-card.ts`：生成有界审批卡片和移除动作后的处理结果卡片。
 - `card-action.ts`：严格裁剪 `card.action.trigger` 的路由字段和受限字符串动作值。
@@ -42,8 +42,8 @@ Application 的本地图片输入，同一 Thread 的
 - `outbox-content.ts`：集中处理 Outbox 的纯文本缓冲、CardKit 字符分片、富文本字节分片与截断标记。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪，保留回复事件的 `parent_id`。
 - `menu-event.ts`：严格裁剪 `application.bot.menu_v6` 的 App、Actor、事件和菜单 Key。
-- `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理；连续图片在一秒静默
-  窗口内收集，普通文本与命令仍沿用既有顺序路径。
+- `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理；不等待独立文字或图片，
+  已在队列中明确相邻的图片可成批处理，普通文本与命令仍沿用既有顺序路径。
 - `input-card.ts`：生成有界用户输入表单、MCP JSON 表单、工具审批、HTTP(S) URL 确认和处理结果卡片。
 - `interactions.ts`：维护私聊审批、用户输入和 MCP elicitation 的一次性令牌、Actor 绑定、
   请求去重、过期、取消和跨客户端失效。
@@ -230,6 +230,7 @@ StateStore 中已有绑定且仍有授权 Actor 的精确 Chat 生成消息；Su
 提交中传入，没有说明文字时才使用稳定图片提示。对已知平台无关命令调用
 `ConversationCommandService.execute()`；手动输入的 `/h`、`/work`、`/r` 分别规范化为
 `/help`、`/workspace`、`/resume`，不重复加入命令中心菜单。`/start`、`/help` 打开同一命令中心卡片，
+`/vision <要求>` 在当前 Actor 与私聊内预设下一批图片的识别要求，`/vision cancel` 取消；
 `/stop` 优先停止当前 Actor 在本私聊中的最新待处理交互，没有待处理交互时调用共享 Turn
 停止命令；`/whoami` 和
 `/fs <status|doctor|revoke>` 留在飞书边界。`status` 展示当前进程实际观测到的

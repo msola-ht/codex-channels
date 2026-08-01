@@ -76,7 +76,12 @@ describe("Responses vision adapter", () => {
       }],
       text: { format: { type: "json_schema", strict: true } },
     });
-    expect(String(init?.body)).toContain("解释截图里的错误");
+    const body = String(init?.body);
+    expect(body).toContain("解释截图里的错误");
+    expect(body).toContain("只做视觉观察和文字提取");
+    expect(body).toContain("仅用于确定观察和文字提取重点");
+    expect(body).toContain("不要分析、核实或回答用户的问题");
+    expect(body).not.toContain("按顺序分析这");
     expect(onRequestStarted).toHaveBeenCalledOnce();
     expect(fetchImpl.mock.invocationCallOrder[0]).toBeLessThan(
       onRequestStarted.mock.invocationCallOrder[0]!,

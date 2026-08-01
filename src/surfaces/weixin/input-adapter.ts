@@ -106,7 +106,7 @@ export class WeixinInputAdapter {
       options.outbox,
       options.images,
       {
-        quietWindowMs: 1_000,
+        quietWindowMs: 0,
         pollingHealth: this.health,
         ...(options.doctor === undefined
           ? {}

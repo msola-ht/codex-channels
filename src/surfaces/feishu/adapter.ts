@@ -19,6 +19,7 @@ import {
 } from "../output-copy.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import { formatQuotedInput } from "../quoted-input.js";
+import { executeVisionCommand } from "../vision-command.js";
 
 import type {
   FeishuCommandCenter,
@@ -151,6 +152,19 @@ export class FeishuConversationAdapter {
             message.target.accountId,
             message.target.conversationId,
             command.argumentsText,
+          );
+          return;
+        }
+        if (command.name === "vision") {
+          await this.inputs.flushPending(message.target, message.actorId);
+          this.notifyText(
+            message.target.conversationId,
+            executeVisionCommand(
+              this.inputs,
+              message.target,
+              message.actorId,
+              command.argumentsText,
+            ),
           );
           return;
         }
@@ -547,6 +561,7 @@ export class FeishuConversationAdapter {
         { maximumImages: String(maximumInboundImages) },
       );
     }
+    const replyMessage = messages[0]!;
     const prepared = await Promise.all(messages.map(async (message) => {
       const sequence = this.nextInputSequence;
       this.nextInputSequence += 1;
@@ -559,6 +574,7 @@ export class FeishuConversationAdapter {
         target: message.target,
         actorId: message.actorId,
         sequence,
+        aggregationKey: `feishu:${replyMessage.messageId}`,
         ...(currentText
           ? { text: formatQuotedInput(currentText, quotedText) }
           : quotedText === undefined
@@ -575,7 +591,6 @@ export class FeishuConversationAdapter {
         })),
       };
     }));
-    const replyMessage = messages[0]!;
     this.outbox.prepareTurnReplyTarget?.(
       replyMessage.target.conversationId,
       replyMessage.messageId,

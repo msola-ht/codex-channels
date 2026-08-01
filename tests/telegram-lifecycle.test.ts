@@ -2,7 +2,10 @@ import type { Bot } from "grammy";
 import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 
-import { TelegramLifecycle } from "../src/surfaces/telegram/lifecycle.js";
+import {
+  TelegramLifecycle,
+  telegramUpdateGroupSize,
+} from "../src/surfaces/telegram/lifecycle.js";
 
 describe("TelegramLifecycle", () => {
   it("initializes the bot, registers commands and stops long polling by aborting it", async () => {
@@ -64,6 +67,7 @@ describe("TelegramLifecycle", () => {
     expect(registeredCommands.some((command) => command.command === "diff")).toBe(true);
     expect(registeredCommands.some((command) => command.command === "rules")).toBe(true);
     expect(registeredCommands.some((command) => command.command === "stop")).toBe(true);
+    expect(registeredCommands.some((command) => command.command === "vision")).toBe(true);
     expect(registeredCommands.some((command) => command.command === "cancel")).toBe(false);
   });
 
@@ -135,6 +139,41 @@ describe("TelegramLifecycle", () => {
     await lifecycle.stop();
 
     expect(handled).toEqual([1, 2, 3]);
+  });
+
+  it("exposes the size of one contiguous media group while handling it", async () => {
+    const handled: Array<[number, number | undefined]> = [];
+    let delivered = false;
+    const bot = {
+      botInfo: { username: "test_bot" },
+      init: async () => undefined,
+      handleUpdate: async (update: ReturnType<typeof telegramUpdate>) => {
+        handled.push([update.update_id, telegramUpdateGroupSize(update)]);
+      },
+      api: {
+        setMyCommands: async () => true,
+        getUpdates: async (_options: unknown, signal: AbortSignal) => {
+          if (!delivered) {
+            delivered = true;
+            return [telegramUpdate(1, "album"), telegramUpdate(2, "album")];
+          }
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return [];
+        },
+      },
+    };
+    const lifecycle = new TelegramLifecycle(
+      bot as unknown as Bot,
+      pino({ level: "silent" }),
+    );
+
+    lifecycle.start();
+    await vi.waitFor(() => expect(handled).toHaveLength(2));
+    await lifecycle.stop();
+
+    expect(handled).toEqual([[1, 2], [2, 2]]);
   });
 
   it("keeps polling when startup notification generation fails", async () => {

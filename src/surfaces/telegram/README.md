@@ -10,6 +10,7 @@
 - `bot.ts`：提供 Bootstrap 使用的单一选项工厂，注册 Telegram SDK 处理器，执行访问检查，
   把标准命令或普通输入提交给 Application；
   同一 `media_group_id` 的图片按 Actor 合并为一次最多 4 张的 Application 输入；
+  普通文字、单图和没有相册标识的独立图片立即提交，不用时间窗口猜测图文关系；
   原生 Voice/Audio 最长 5 分钟、最大 20 MiB，只在下载后验证为 WAV、MP3、M4A、WebM 或 OGG
   才构造稳定 `localAudio`，私有临时文件一小时后清理；Application 仅在当前模型目录包含
   `audio` 时提交，否则在创建或追加 Turn 前明确拒绝；
@@ -81,6 +82,8 @@ Telegram 手动命令注册显式接入三个渠道共享的 `/h`、`/work`、`/
 `/help`、`/workspace`、`/resume`；快捷入口不重复写入 BotFather 菜单。帮助消息复用共享的
 分组列表，只在 Telegram 边界转换为安全 HTML。无参数 `/skill` 与其他渠道一样展示编号列表，
 调用统一使用 `/skill <名称或序号> <任务>`，不维护渠道私有选择状态。
+`/vision <要求>` 预设当前用户与聊天的下一批图片识别要求，`/vision cancel` 取消；该入口加入
+Bot 命令菜单，但不进入 Application 会话命令目录。
 审批请求晚于操作日志发送时，Outbox 必须撤回已经发送的命令消息，不能只清理内存状态。
 账户额度和 MCP 状态通知也必须进入每聊天有界输出队列；不得从 App Server Reader 直接等待 Telegram 网络发送。
 结构化用户错误由 `bot.ts` 转换为 Telegram 专属文案；App Server Turn、warning 和 MCP 错误会

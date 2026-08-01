@@ -33,6 +33,7 @@ import {
 import { formatTextFileTooLarge } from "../text-file-copy.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import { formatQuotedInput } from "../quoted-input.js";
+import { executeVisionCommand } from "../vision-command.js";
 import { surfaceCommandAliases } from "../slash-command.js";
 import {
   formatConfigurationChange,
@@ -45,7 +46,10 @@ import {
 import { TelegramInteractionPort } from "./interactions.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import { telegramDefaultAccountId } from "./constants.js";
-import { TelegramLifecycle } from "./lifecycle.js";
+import {
+  TelegramLifecycle,
+  telegramUpdateGroupSize,
+} from "./lifecycle.js";
 import { TelegramOutbox, type TelegramFinalMessageFormat } from "./outbox.js";
 import { maximumTelegramImageBytes, TelegramImageStore } from "./image-store.js";
 import {
@@ -279,6 +283,7 @@ export class TelegramSurface {
           "",
           ...conversationCommandHelpLines,
           "Telegram：",
+          "- /vision <图片识别要求> · /vision cancel",
           "- /whoami",
           "- /start · /help · /h",
         ].join("\n"),
@@ -293,6 +298,18 @@ export class TelegramSurface {
       this.executeCommand(context, surfaceCommandAliases.work));
     this.bot.command("r", (context) =>
       this.executeCommand(context, surfaceCommandAliases.r));
+    this.bot.command("vision", async (context) => {
+      await this.inputs.flushPending(
+        target(context),
+        String(context.from?.id ?? ""),
+      );
+      await context.reply(executeVisionCommand(
+        this.inputs,
+        target(context),
+        String(context.from?.id ?? ""),
+        commandArguments(context),
+      ));
+    });
     this.bot.command("stop", async (context) => {
       if (this.interactions.stopForChat(String(context.chat.id))) {
         await context.reply(interactionStoppedText);
@@ -505,6 +522,7 @@ export class TelegramSurface {
     );
     const currentText = caption?.trim();
     const inputTarget = target(context);
+    const aggregationSize = telegramUpdateGroupSize(context.update);
     this.outbox.prepareTurnReplyTarget(
       inputTarget.conversationId,
       context.message.message_id,
@@ -515,6 +533,14 @@ export class TelegramSurface {
         target: inputTarget,
         actorId: String(context.from?.id ?? ""),
         sequence,
+        ...(context.message.media_group_id
+          ? {
+              aggregationKey: `telegram:${context.message.media_group_id}`,
+              ...(aggregationSize === undefined
+                ? {}
+                : { aggregationSize }),
+            }
+          : {}),
         ...(currentText
           ? { text: formatQuotedInput(currentText, quotedText) }
           : quotedText === undefined

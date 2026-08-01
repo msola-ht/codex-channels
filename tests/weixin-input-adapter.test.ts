@@ -541,7 +541,7 @@ describe("WeixinInputAdapter", () => {
     });
   });
 
-  it("coalesces separate image messages and persists reply contexts in order", async () => {
+  it("submits separate image messages immediately and persists reply contexts in order", async () => {
     let delivered = false;
     let releaseFirstPersistence!: () => void;
     const firstPersistence = new Promise<void>((resolve) => {
@@ -633,13 +633,14 @@ describe("WeixinInputAdapter", () => {
       "context-first",
       "context-second",
     ]);
-    expect(service.submit).toHaveBeenCalledTimes(1);
-    expect(service.submit).toHaveBeenCalledWith(target, {
+    expect(service.submit).toHaveBeenCalledTimes(2);
+    expect(service.submit).toHaveBeenNthCalledWith(1, target, {
       text: "比较这些图片",
-      localImages: [
-        { path: "/private/weixin/first.png" },
-        { path: "/private/weixin/second.jpg" },
-      ],
+      localImages: [{ path: "/private/weixin/first.png" }],
+    });
+    expect(service.submit).toHaveBeenNthCalledWith(2, target, {
+      text: "请查看这张图片并根据图片内容协助我。",
+      localImages: [{ path: "/private/weixin/second.jpg" }],
     });
   });
 

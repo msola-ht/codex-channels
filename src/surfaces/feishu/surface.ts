@@ -289,7 +289,7 @@ export class FeishuSurface implements SurfaceAdapter {
       handle: (message) => this.adapter.handle(message),
       handleImageBatch: (messages) =>
         this.adapter.handleImageBatch(messages),
-      inputQuietWindowMs: 1_000,
+      inputQuietWindowMs: 0,
       handleError: (error) => {
         options.logger.warn(
           {

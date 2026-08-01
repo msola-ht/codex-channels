@@ -143,6 +143,37 @@ describe("Feishu conversation adapter", () => {
     ].join("\n"));
   });
 
+  it("applies /vision to the next Feishu image only", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread",
+      turnId: "turn",
+      steered: false,
+    }));
+    const download = vi.fn().mockResolvedValue({
+      path: "/private/feishu/error.png",
+      mimeType: "image/png",
+      bytes: 10,
+    });
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationService,
+      fixture.outbox,
+      { download },
+    );
+
+    await adapter.handle({ ...message, text: "/vision 分析报错原因" });
+    await adapter.handle(createImageMessage());
+    await fixture.outbox.close();
+
+    expect(submit).toHaveBeenCalledWith(message.target, {
+      text: "分析报错原因",
+      localImages: [{ path: "/private/feishu/error.png" }],
+    });
+    expect(fixture.sent.some((entry) =>
+      entry.text.includes("已记录图片识别要求")
+    )).toBe(true);
+  });
+
   it("uses /stop to stop a pending interaction before stopping the active Turn", async () => {
     const fixture = createOutbox();
     const stop = vi.fn(async () => true);

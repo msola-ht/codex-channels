@@ -60,8 +60,11 @@ Telegram 和飞书在交互消息创建成功或失败时
 关闭队列时拒绝新输出、限时等待在途发送；并发关闭调用等待同一个关闭结果，不能提前报告完成。
 实现位于 `conversation-delivery-queue.ts`，并通过本目录 `index.ts` 公开。
 `surface-input-coalescer.ts` 在已授权的 Surface 输入边界按完整 Conversation 与 Actor 隔离，
-把平台拆分到相邻消息的文本和图片在一秒静默窗口内合并为一次 Application 提交；命令仍由各
-Surface 在入队前立即处理，停止时必须排空已接收的聚合输入。
+普通文字、单图和没有平台批次标识的独立消息立即提交；只有 Surface 显式提供相同批次标识时才
+短暂收集并合并，不再用时间猜测独立文字与图片的关系。命令仍由各 Surface 在入队前立即处理，
+停止时必须排空已接收的显式批次。它还只在内存中保存五分钟有效、
+一次消费的下一批图片识别要求；`vision-command.ts` 统一 `/vision <要求>`、替换和取消语义，
+三个 Surface 只负责调用及发送结果。
 `turn-reply-targets.ts` 只在 Surface 内存中把待提交输入的精确平台消息 ID 绑定到实际
 Thread 与 Turn，允许 `turn.started` 早于提交响应时仍原生回复正确输入；不保存消息正文，
 Turn、Thread 或 Surface 关闭时清理。

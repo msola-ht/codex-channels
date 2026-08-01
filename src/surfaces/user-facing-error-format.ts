@@ -26,6 +26,12 @@ export function formatSurfaceUserFacingError(
       return "仅支持 PNG 和 JPEG 图片";
     case "vision.failed":
       return "图片识别失败，请稍后重试或切换支持图片的模型";
+    case "vision.command.usage":
+      return "用法：/vision <图片识别要求>，取消：/vision cancel";
+    case "vision.prompt.invalid":
+      return "图片识别要求必须为 1 至 4000 个字符";
+    case "vision.prompt.capacity":
+      return "待处理的图片识别要求已满，请稍后重试";
     case "audio.path.invalid":
       return "本地音频路径必须是绝对路径";
     case "audio.duration-missing":

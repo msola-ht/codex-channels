@@ -54,6 +54,14 @@ describe("vision application boundary", () => {
       type: "text",
       text: expect.stringContaining("识图已经完成，无需搜索工作区或要求用户重新上传图片"),
     });
+    expect(input[1]).toEqual({
+      type: "text",
+      text: expect.stringContaining("默认不得调用网页搜索、命令或其他工具"),
+    });
+    expect(input[1]).toEqual({
+      type: "text",
+      text: expect.stringContaining("只有用户原始问题明确要求搜索、核实或调用工具时"),
+    });
   });
 
   it("binds the output schema to the exact image count", () => {

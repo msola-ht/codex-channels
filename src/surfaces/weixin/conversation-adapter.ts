@@ -15,6 +15,7 @@ import {
 } from "../output-copy.js";
 import { formatQuotedInput } from "../quoted-input.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
+import { executeVisionCommand } from "../vision-command.js";
 import {
   formatWeixinCommandText,
   renderWeixinCommandResult,
@@ -252,6 +253,19 @@ export class WeixinConversationAdapter {
           renderWeixinDoctor(
             await this.inputOptions.doctor.inspect(message.target),
             this.inputOptions.now?.() ?? Date.now(),
+          ),
+        );
+        return;
+      }
+      if (command.name === "vision") {
+        await this.inputs.flushPending(message.target, message.actorId);
+        this.notifyCommand(
+          message.target,
+          executeVisionCommand(
+            this.inputs,
+            message.target,
+            message.actorId,
+            command.argumentsText,
           ),
         );
         return;

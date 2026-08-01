@@ -16,7 +16,9 @@
   到官方 `UserInput` 的映射，以及 Review、Goal 和控制响应到稳定 Application 结果的映射。
 - 图片识别结果的严格数量、顺序、长度和提示注入隔离；双 Provider 与仅 DeepSeek Setup 均为
   外部视觉接口分离保存 Key；模型不支持图片时使用单次 Responses 请求、私有 Key 和稳定响应裁剪，
-  三渠道只在外部请求发起后发送一次包含图片数量与本条要求的视觉 API 识别提示。
+  外部视觉模型只做客观观察和文字提取，原 Thread 默认不额外搜索、核实或调用工具；
+  三渠道只在外部请求发起后发送一次包含图片数量与本条要求的视觉 API 识别提示；`/vision`
+  下一批图片要求的 Actor/Conversation 隔离、替换、取消、五分钟过期和一次消费。
 - 官方 Turn、Item、Diff、Plan、Goal、Token、账户、额度、MCP 和 warning Notification 到稳定 Core
   输入事件的映射，畸形与未知通知隔离；Conversation Core 状态归约、严格 Turn 完成状态、
   官方 `Turn.durationMs` 校验、三渠道统一结束汇报耗时字段、可重试错误隔离、Thread/全局警告路由，
@@ -162,7 +164,7 @@
   解密、单张 10 MiB/PNG/JPEG 边界、私有暂存和敏感错误裁剪；语音转写优先、MP3/OGG
   下载、5 分钟/20 MiB、SILK 明确拒绝，以及当前模型缺少 `audio` 时在 Turn 前拒绝；
   私聊文本、图文与多图片输入
-  Adapter 的授权、Actor 记录、相邻消息一秒聚合、整批 20 MiB 限制、失败不提交部分输入及
+  Adapter 的授权、Actor 记录、协议单次更新多图兼容与客户端独立消息立即提交、整批 20 MiB 限制、失败不提交部分输入及
   Application `localImages` 同次提交、
   单个一般文件解析、授权后固定 CDN 下载、AES-128-ECB 内存解密、声明长度与 MD5 校验、
   1,000,000 字节 UTF-8 文本边界、二进制拒绝、Gateway 不保存文件副本及未授权不接触 CDN，

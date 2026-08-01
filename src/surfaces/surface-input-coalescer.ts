@@ -10,6 +10,9 @@ import {
 const DEFAULT_QUIET_WINDOW_MS = 1_000;
 const DEFAULT_MAXIMUM_IMAGES = 4;
 const DEFAULT_MAXIMUM_IMAGE_BYTES = 20 * 1024 * 1024;
+const DEFAULT_VISION_PROMPT_TTL_MS = 5 * 60 * 1_000;
+const DEFAULT_MAXIMUM_PENDING_VISION_PROMPTS = 1_000;
+const MAXIMUM_VISION_PROMPT_LENGTH = 4_000;
 
 export interface SurfaceInputPart {
   target: ConversationTarget;
@@ -17,6 +20,8 @@ export interface SurfaceInputPart {
   sequence: number;
   text?: string;
   localImages?: ReadonlyArray<{ path: string; bytes?: number }>;
+  aggregationKey?: string;
+  aggregationSize?: number;
 }
 
 export interface SurfaceInputBatchResult {
@@ -28,6 +33,8 @@ export interface SurfaceInputCoalescerOptions {
   quietWindowMs?: number;
   maximumImages?: number;
   maximumImageBytes?: number;
+  visionPromptTtlMs?: number;
+  maximumPendingVisionPrompts?: number;
 }
 
 type SubmitConversationInput = (
@@ -43,7 +50,14 @@ interface PendingPart extends SurfaceInputPart {
 
 interface PendingBatch {
   target: ConversationTarget;
+  actorKey: string;
+  expectedParts?: number;
   parts: PendingPart[];
+  timer: NodeJS.Timeout;
+}
+
+interface PendingVisionPrompt {
+  prompt: string;
   timer: NodeJS.Timeout;
 }
 
@@ -51,7 +65,10 @@ export class SurfaceInputCoalescer {
   private readonly quietWindowMs: number;
   private readonly maximumImages: number;
   private readonly maximumImageBytes: number;
+  private readonly visionPromptTtlMs: number;
+  private readonly maximumPendingVisionPrompts: number;
   private readonly pending = new Map<string, PendingBatch>();
+  private readonly pendingVisionPrompts = new Map<string, PendingVisionPrompt>();
   private readonly inFlight = new Set<Promise<void>>();
   private nextOrder = 0;
   private closed = false;
@@ -72,6 +89,62 @@ export class SurfaceInputCoalescer {
       options.maximumImageBytes ?? DEFAULT_MAXIMUM_IMAGE_BYTES,
       "输入聚合图片总大小上限无效",
     );
+    this.visionPromptTtlMs = positiveInteger(
+      options.visionPromptTtlMs ?? DEFAULT_VISION_PROMPT_TTL_MS,
+      "图片识别要求有效期无效",
+    );
+    this.maximumPendingVisionPrompts = positiveInteger(
+      options.maximumPendingVisionPrompts ?? DEFAULT_MAXIMUM_PENDING_VISION_PROMPTS,
+      "待处理图片识别要求容量无效",
+    );
+  }
+
+  setVisionPrompt(
+    target: ConversationTarget,
+    actorId: string,
+    value: string,
+  ): { replaced: boolean } {
+    if (this.closed) throw new Error("输入聚合器已关闭");
+    const prompt = value.trim();
+    if (!prompt || prompt.length > MAXIMUM_VISION_PROMPT_LENGTH) {
+      throw new UserFacingError(
+        "vision.prompt.invalid",
+        "图片识别要求必须为 1 至 4000 个字符",
+      );
+    }
+    const key = batchKey(target, actorId);
+    const previous = this.pendingVisionPrompts.get(key);
+    if (
+      previous === undefined
+      && this.pendingVisionPrompts.size >= this.maximumPendingVisionPrompts
+    ) {
+      throw new UserFacingError(
+        "vision.prompt.capacity",
+        "待处理的图片识别要求已满",
+      );
+    }
+    if (previous !== undefined) clearTimeout(previous.timer);
+    const entry: PendingVisionPrompt = {
+      prompt,
+      timer: undefined as never,
+    };
+    entry.timer = setTimeout(() => {
+      if (this.pendingVisionPrompts.get(key) === entry) {
+        this.pendingVisionPrompts.delete(key);
+      }
+    }, this.visionPromptTtlMs);
+    entry.timer.unref();
+    this.pendingVisionPrompts.set(key, entry);
+    return { replaced: previous !== undefined };
+  }
+
+  cancelVisionPrompt(target: ConversationTarget, actorId: string): boolean {
+    const key = batchKey(target, actorId);
+    const pending = this.pendingVisionPrompts.get(key);
+    if (pending === undefined) return false;
+    clearTimeout(pending.timer);
+    this.pendingVisionPrompts.delete(key);
+    return true;
   }
 
   enqueue(input: SurfaceInputPart): Promise<SurfaceInputBatchResult> {
@@ -83,8 +156,22 @@ export class SurfaceInputCoalescer {
     if ((text === undefined || text.length === 0) && localImages.length === 0) {
       return Promise.reject(new Error("输入聚合内容为空"));
     }
-    const key = batchKey(input.target, input.actorId);
-    const existing = this.pending.get(key);
+    const actorKey = batchKey(input.target, input.actorId);
+    const aggregationKey = input.aggregationKey?.trim();
+    const key = aggregationKey
+      ? `${actorKey}\u0000${aggregationKey}`
+      : undefined;
+    const aggregationSize = key === undefined || input.aggregationSize === undefined
+      ? undefined
+      : positiveInteger(input.aggregationSize, "输入聚合批次大小无效");
+    const existing = key === undefined ? undefined : this.pending.get(key);
+    if (
+      existing?.expectedParts !== undefined
+      && aggregationSize !== undefined
+      && existing.expectedParts !== aggregationSize
+    ) {
+      return Promise.reject(new Error("输入聚合批次大小不一致"));
+    }
     const currentImageCount = existing?.parts.reduce(
       (total, part) => total + (part.localImages?.length ?? 0),
       0,
@@ -114,7 +201,7 @@ export class SurfaceInputCoalescer {
           )
         : undefined;
     if (limitError !== undefined) {
-      if (existing !== undefined) {
+      if (key !== undefined && existing !== undefined) {
         clearTimeout(existing.timer);
         this.pending.delete(key);
         for (const part of existing.parts) {
@@ -136,19 +223,47 @@ export class SurfaceInputCoalescer {
         reject,
       };
       this.nextOrder += 1;
+      if (key === undefined) {
+        const batch: PendingBatch = {
+          target: input.target,
+          actorKey,
+          parts: [part],
+          timer: undefined as never,
+        };
+        const task = this.submitBatch(actorKey, batch).finally(() => {
+          this.inFlight.delete(task);
+        });
+        this.inFlight.add(task);
+        return;
+      }
       if (existing !== undefined) {
         clearTimeout(existing.timer);
         existing.parts.push(part);
-        existing.timer = this.scheduleFlush(key, existing);
+        if (
+          existing.expectedParts !== undefined
+          && existing.parts.length >= existing.expectedParts
+        ) {
+          void this.flush(key, existing);
+        } else {
+          existing.timer = this.scheduleFlush(key, existing);
+        }
         return;
       }
       const batch: PendingBatch = {
         target: input.target,
+        actorKey,
+        ...(aggregationSize === undefined
+          ? {}
+          : { expectedParts: aggregationSize }),
         parts: [part],
         timer: undefined as never,
       };
-      batch.timer = this.scheduleFlush(key, batch);
       this.pending.set(key, batch);
+      if (batch.expectedParts === 1) {
+        void this.flush(key, batch);
+      } else {
+        batch.timer = this.scheduleFlush(key, batch);
+      }
     });
   }
 
@@ -159,6 +274,10 @@ export class SurfaceInputCoalescer {
         clearTimeout(batch.timer);
         void this.flush(key, batch);
       }
+      for (const pending of this.pendingVisionPrompts.values()) {
+        clearTimeout(pending.timer);
+      }
+      this.pendingVisionPrompts.clear();
     }
     await Promise.allSettled([...this.inFlight]);
   }
@@ -167,9 +286,15 @@ export class SurfaceInputCoalescer {
     target: ConversationTarget,
     actorId: string,
   ): Promise<void> {
-    const key = batchKey(target, actorId);
-    const batch = this.pending.get(key);
-    return batch === undefined ? Promise.resolve() : this.flush(key, batch);
+    const actorKey = batchKey(target, actorId);
+    const pending = [...this.pending].filter(([, batch]) =>
+      batch.actorKey === actorKey
+    );
+    return pending.length === 0
+      ? Promise.resolve()
+      : Promise.all(pending.map(([key, batch]) => this.flush(key, batch))).then(
+          () => undefined,
+        );
   }
 
   private scheduleFlush(key: string, batch: PendingBatch): NodeJS.Timeout {
@@ -186,14 +311,14 @@ export class SurfaceInputCoalescer {
     }
     this.pending.delete(key);
     clearTimeout(batch.timer);
-    const task = this.submitBatch(batch).finally(() => {
+    const task = this.submitBatch(batch.actorKey, batch).finally(() => {
       this.inFlight.delete(task);
     });
     this.inFlight.add(task);
     return task;
   }
 
-  private async submitBatch(batch: PendingBatch): Promise<void> {
+  private async submitBatch(key: string, batch: PendingBatch): Promise<void> {
     const parts = [...batch.parts].sort(
       (left, right) => left.sequence - right.sequence || left.order - right.order,
     );
@@ -203,11 +328,16 @@ export class SurfaceInputCoalescer {
     const localImages = parts.flatMap((part) =>
       (part.localImages ?? []).map(({ path }) => ({ path }))
     );
-    const text = texts.length > 0
-      ? texts.join("\n")
-      : localImages.length === 1
-        ? "请查看这张图片并根据图片内容协助我。"
-        : "请查看这些图片并根据图片内容协助我。";
+    const visionPrompt = localImages.length === 0
+      ? undefined
+      : this.consumeVisionPrompt(key);
+    const providedText = [
+      ...(visionPrompt === undefined ? [] : [visionPrompt]),
+      ...texts,
+    ].join("\n\n");
+    const text = providedText || (localImages.length === 1
+      ? "请查看这张图片并根据图片内容协助我。"
+      : "请查看这些图片并根据图片内容协助我。");
     const value = localImages.length === 0
       ? text
       : { text, localImages };
@@ -224,6 +354,14 @@ export class SurfaceInputCoalescer {
         part.reject(error);
       }
     }
+  }
+
+  private consumeVisionPrompt(key: string): string | undefined {
+    const pending = this.pendingVisionPrompts.get(key);
+    if (pending === undefined) return undefined;
+    clearTimeout(pending.timer);
+    this.pendingVisionPrompts.delete(key);
+    return pending.prompt;
   }
 }
 

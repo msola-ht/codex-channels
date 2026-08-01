@@ -87,6 +87,7 @@ export function renderFeishuHelp(): string {
     "飞书：",
     "- /whoami · /fs <status|doctor|revoke>",
     "- /start · /help · /h",
+    "- /vision <图片识别要求> · /vision cancel",
   ].join("\n");
 }
 

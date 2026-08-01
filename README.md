@@ -165,6 +165,7 @@ Server 时必须从本机终端执行。
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
 - 状态：`/diff`、`/usage`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/skill [名称或序号 任务]`、`/mcp`、`/plugins`、`/rules`
+- 图片：`/vision <下一批图片的识别要求>`、`/vision cancel`
 - 帮助：`/help`、`/whoami`
 
 命令、文件修改和额外权限默认不会自动批准。审批、用户输入和 MCP 交互会逐项显示，并绑定当前
