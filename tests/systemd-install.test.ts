@@ -68,6 +68,8 @@ describe("systemd installer", () => {
     expect(gateway).not.toContain(`WorkingDirectory="${configDir}"`);
     expect(gateway).toContain(`ExecStart="${nodeBinary}"`);
     expect(gateway).toContain("codex-connect-app-server.service");
+    expect(appServer).toContain('Environment="CODEX_CONNECT_SERVICE_ROLE=app-server"');
+    expect(gateway).toContain('Environment="CODEX_CONNECT_SERVICE_ROLE=gateway"');
     for (const unit of [appServer, gateway]) {
       expect(unit).toContain("UMask=0077");
       expect(unit).toContain("Restart=always");

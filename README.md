@@ -180,8 +180,9 @@ codexc service logs -f             # 持续跟踪 Gateway 日志
 `start`、`stop` 和 `status` 默认操作全部服务；`restart` 和 `logs` 默认只操作 Gateway。运行 `codexc service -h` 查看完整用法。
 
 服务重启建议从本机终端执行。聊天 Turn 内执行 `codexc service restart` 会主动断开当前 Gateway，
-过程或完成消息可能落在重连窗口；不要在渠道内执行 `codexc service restart all`，因为它会同时
-终止正在执行该命令的 App Server。
+过程或完成消息可能落在重连窗口；App Server 服务会给渠道命令注入运行角色，渠道内执行
+`codexc service restart app-server` 或 `codexc service restart all` 会在调用服务管理器前明确拒绝，
+避免终止正在执行该命令的 App Server。需要重启 App Server 时必须从本机终端执行。
 
 ### 常用聊天命令
 

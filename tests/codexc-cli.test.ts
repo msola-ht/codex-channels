@@ -1,5 +1,5 @@
 import { execFile, execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -553,6 +553,7 @@ describe("codexc CLI", () => {
       "  cwd: process.cwd(),",
       "  httpsProxy: process.env.HTTPS_PROXY,",
       "  lowerHttpsProxy: process.env.https_proxy,",
+      "  serviceRole: process.env.CODEX_CONNECT_SERVICE_ROLE,",
       "}));",
     ].join("\n"));
     chmodSync(fakeCodex, 0o700);
@@ -584,6 +585,7 @@ describe("codexc CLI", () => {
       cwd: realpathSync(join(home, "workspace")),
       httpsProxy: "http://127.0.0.1:8899",
       lowerHttpsProxy: "http://127.0.0.1:8899",
+      serviceRole: "app-server",
     });
   });
 
@@ -763,6 +765,54 @@ describe("codexc CLI", () => {
     expect(removedServiceOption.stderr).toContain("未知日志参数");
     expect(invalidTarget.status).toBe(1);
     expect(invalidTarget.stderr).toContain("服务目标必须是");
+  });
+
+  linuxIt("rejects App Server self-restart while allowing a Gateway restart", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-service-role-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    const systemctlLog = join(root, "systemctl.log");
+    const fakeSystemctl = join(root, "systemctl");
+    mkdirSync(workspace);
+    writeFileSync(
+      fakeSystemctl,
+      "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SYSTEMCTL_LOG\"\n",
+    );
+    chmodSync(fakeSystemctl, 0o755);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_CONNECT_SERVICE_ROLE: "app-server",
+      SYSTEMCTL_BINARY: fakeSystemctl,
+      SYSTEMCTL_LOG: systemctlLog,
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+
+    for (const target of ["app-server", "all"]) {
+      const result = spawnSync(
+        process.execPath,
+        [cli, "service", "restart", target],
+        { cwd: workspace, env: environment, encoding: "utf8" },
+      );
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("不能在 Codex App Server 内重启 App Server");
+    }
+    expect(existsSync(systemctlLog) ? readFileSync(systemctlLog, "utf8") : "").toBe("");
+
+    const gateway = spawnSync(
+      process.execPath,
+      [cli, "service", "restart", "gateway"],
+      { cwd: workspace, env: environment, encoding: "utf8" },
+    );
+    expect(gateway.status).toBe(0);
+    expect(readFileSync(systemctlLog, "utf8")).toContain(
+      "--user restart codex-connect-gateway.service",
+    );
+    expect(readFileSync(systemctlLog, "utf8")).not.toContain(
+      "codex-connect-app-server.service",
+    );
   });
 
   it("rejects the removed workspace command alias", () => {

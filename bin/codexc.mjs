@@ -276,6 +276,7 @@ function runServiceAppServer(args) {
     throw new Error("内部服务入口不接受参数");
   }
   const runtime = configuredEnvironment();
+  runtime.environment.CODEX_CONNECT_SERVICE_ROLE = "app-server";
   const codex = table(runtime.document.codex);
   const { defaultWorkspace } = readWorkspaceConfig(runtime.document);
   const socketPath = resolveConfiguredPath(
@@ -405,6 +406,7 @@ function service(args) {
     throw new Error("用法：codexc service <install|uninstall|start|stop|reload|restart|status|logs>");
   }
   const serviceArgs = parseServiceArguments(action, rest);
+  rejectAppServerSelfRestart(action, serviceArgs, process.env);
   if (action === "install") {
     runScript("scripts/validate-config.mjs", []);
   }
@@ -436,6 +438,20 @@ function service(args) {
     return;
   }
   throw new Error("codexc service 当前支持 macOS launchd 与 Linux systemd；Windows Transport 尚未支持");
+}
+
+function rejectAppServerSelfRestart(action, serviceArgs, environment) {
+  const target = serviceArgs[0];
+  if (
+    environment.CODEX_CONNECT_SERVICE_ROLE === "app-server"
+    && action === "restart"
+    && (target === "app-server" || target === "all")
+  ) {
+    throw new Error(
+      "不能在 Codex App Server 内重启 App Server；请在本机终端运行 "
+      + `codexc service restart ${target}。渠道内只能运行 codexc service restart gateway。`,
+    );
+  }
 }
 
 function showConfig(args) {
