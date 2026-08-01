@@ -57,7 +57,9 @@
   只用于用户显式创建同一 Provider 的历史分支，不承担跨 Provider 历史转换。
 - `provider-routing-client.ts`：复用多个完整 Client 实例，按 Thread 的官方 `modelProvider` 路由
   生命周期、Turn、Review、Goal 和 MCP；合并各实例的进程内状态，隔离 Server Request ID，
-  并让单 Provider 重连只恢复该侧 Thread。模型目录由对应 App Server 启动配置持有。
+  并让单 Provider 重连只恢复该侧 Thread。第三方 Provider 的账户通知不会进入 OpenAI 账户状态；
+  无法关联 Thread 的 MCP 与 warning 全局通知携带 Provider 来源，只发送到对应 Provider 会话。
+  模型目录由对应 App Server 启动配置持有。
 
 本模块不得调用 Telegram API、生成平台文案或保存业务绑定。协议字段必须来自
 `codex-protocol`；无参数请求和通知不得自行补空对象，写操作不得在过载或断线后盲目重试。

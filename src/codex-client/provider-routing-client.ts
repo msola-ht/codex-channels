@@ -96,7 +96,10 @@ export class ProviderRoutingClient {
     const removers = [...this.clients.entries()].map(([provider, client]) =>
       client.onNotification((notification) => {
         this.rememberNotificationProvider(provider, notification);
-        handler(namespaceResolvedNotification(provider, notification));
+        const routed = routeNotification(provider, notification);
+        if (routed) {
+          handler(routed);
+        }
       })
     );
     return () => removers.forEach((remove) => remove());
@@ -464,6 +467,26 @@ function namespaceResolvedNotification(
       requestId: namespaceRequestId(provider, params.requestId),
     },
   };
+}
+
+function routeNotification(
+  provider: string,
+  notification: RpcNotification,
+): RpcNotification | undefined {
+  const routed = namespaceResolvedNotification(provider, notification);
+  if (
+    routed.method === "account/updated"
+    || routed.method === "account/rateLimits/updated"
+  ) {
+    return provider === "openai" ? { ...routed, provider } : undefined;
+  }
+  if (
+    (routed.method === "mcpServer/startupStatus/updated" || routed.method === "warning")
+    && typeof asRecord(routed.params)?.threadId !== "string"
+  ) {
+    return { ...routed, provider };
+  }
+  return routed;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

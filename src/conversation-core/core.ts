@@ -338,7 +338,7 @@ export class ConversationCore {
         const fingerprint = `${event.authMode ?? ""}:${event.planType ?? ""}`;
         if (fingerprint !== this.accountStatus) {
           this.accountStatus = fingerprint;
-          this.broadcast({
+          this.broadcastForProvider(event.modelProvider, {
             type: "account.updated",
             authMode: event.authMode,
             planType: event.planType,
@@ -362,7 +362,7 @@ export class ConversationCore {
           this.rateLimitNotices.delete(limitId);
         }
         if (fingerprint && fingerprint !== previous) {
-          this.broadcast({
+          this.broadcastForProvider(event.modelProvider, {
             type: "account.rateLimits.updated",
             rateLimits,
           });
@@ -370,7 +370,7 @@ export class ConversationCore {
         return;
       }
       case "mcp.status.updated": {
-        const key = `${event.threadId ?? "global"}:${event.name}`;
+        const key = `${event.modelProvider ?? "global"}:${event.threadId ?? "global"}:${event.name}`;
         const fingerprint =
           `${event.status}:${event.error ?? ""}:${event.failureReason ?? ""}`;
         if (this.mcpStatus.get(key) === fingerprint) {
@@ -388,7 +388,7 @@ export class ConversationCore {
         if (event.threadId) {
           this.publishForThread(event.threadId, outputEvent);
         } else {
-          this.broadcast(outputEvent);
+          this.broadcastForProvider(event.modelProvider, outputEvent);
         }
         return;
       }
@@ -400,7 +400,10 @@ export class ConversationCore {
             message: event.message,
           });
         } else {
-          this.broadcast({ type: "warning", message: event.message });
+          this.broadcastForProvider(event.modelProvider, {
+            type: "warning",
+            message: event.message,
+          });
         }
         return;
     }
@@ -473,6 +476,26 @@ export class ConversationCore {
     for (const binding of this.router.allBindings()) {
       const key = this.key(binding.target);
       if (!seen.has(key)) {
+        seen.add(key);
+        this.publish({ ...event, target: binding.target });
+      }
+    }
+  }
+
+  private broadcastForProvider(
+    modelProvider: string | undefined,
+    event: UntargetedOutputEvent,
+  ): void {
+    if (!modelProvider) {
+      this.broadcast(event);
+      return;
+    }
+    const seen = new Set<string>();
+    for (const binding of this.router.allBindings()) {
+      const provider = this.router.modelSettingsForThread(binding.threadId)?.modelProvider
+        ?? "openai";
+      const key = this.key(binding.target);
+      if (provider === modelProvider && !seen.has(key)) {
         seen.add(key);
         this.publish({ ...event, target: binding.target });
       }

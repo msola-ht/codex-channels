@@ -82,7 +82,16 @@ export type ConversationInputEvent =
   | { type: "thread.closed"; threadId: string }
   | { type: "thread.archived"; threadId: string }
   | { type: "thread.deleted"; threadId: string }
-  | ({ type: "account.updated" } & AccountStatus)
-  | { type: "account.rateLimits.updated"; rateLimits: RateLimitSnapshot }
-  | ({ type: "mcp.status.updated" } & McpServerStatus)
-  | { type: "warning"; threadId: string | null; message: string };
+  | ({ type: "account.updated"; modelProvider?: string } & AccountStatus)
+  | {
+      type: "account.rateLimits.updated";
+      rateLimits: RateLimitSnapshot;
+      modelProvider?: string;
+    }
+  | ({ type: "mcp.status.updated"; modelProvider?: string } & McpServerStatus)
+  | {
+      type: "warning";
+      threadId: string | null;
+      message: string;
+      modelProvider?: string;
+    };

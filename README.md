@@ -121,10 +121,13 @@ Setup 从 DeepSeek 官方安装脚本下载并提取模型目录，校验后写�
 使用的 Thread；渠道会保留并解绑当前 Thread，在下一条消息中为所选 Provider 新建 Thread，
 不复制可能包含 Provider 专属 reasoning、工具结果或加密内容的历史。旧 Thread 可通过 `/resume`
 恢复；同一 Provider 内切换模型仍在当前 Thread 的下一次 Turn 生效。
+重复运行 Setup 更新 Key 或保持当前模式时，会保留当前基础配置中的后续修改；从固定模式切回
+切换模式时，只还原 Setup 管理的模型、Provider 与认证字段，其他用户配置继续保留。
 Setup 完成或恢复后运行 `codexc service restart all`，让服务入口按当前模式重建 App Server，并让
 Gateway 重新连接。Gateway 按 Thread 的官方 `modelProvider` 把新建、恢复、Turn、Review、Goal、
 MCP 和审批请求路由到对应实例；模型目录由对应 App Server 启动配置一次性加载，不再依赖无效的
-Thread 级冷恢复覆盖。任一 Provider 单独断线时，只重连并恢复该侧绑定。
+Thread 级冷恢复覆盖。任一 Provider 的连接单独断开时，只重连并恢复该侧绑定；两个 App Server
+仍由同一个服务进程监管，任一子进程退出会让该服务共同重建两个实例。
 
 TUI 和 `/status` 中的 Token、上下文窗口、缓存和压缩次数始终来自当前 Thread，适用于 OpenAI
 与第三方 Provider；它们不是账户余额。OpenAI 的 Fast 与周限不会显示在 DeepSeek 或未知 Provider
@@ -132,6 +135,8 @@ TUI 和 `/status` 中的 Token、上下文窗口、缓存和压缩次数始终�
 OpenAI 显示 Codex Token 汇总，DeepSeek 使用官方余额接口显示 API 可用状态与余额；`/limits`
 当前只对 OpenAI 提供额度窗口，未接入账户能力的后续 Provider 会明确显示不支持，不会回退为
 OpenAI 数据。
+DeepSeek 等未声明 Fast 层级的模型执行 `/fast on` 或 `/fast off` 会明确拒绝，不会改写 OpenAI
+默认设置。
 
 ## 日常使用
 

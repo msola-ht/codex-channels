@@ -94,9 +94,13 @@ export class GatewayApplication {
     private readonly logger: Logger,
   ) {
     verifyCodexVersion(config);
-    const supplementaryModels = loadDeepseekModelOptions();
-    this.transport = new UnixWebSocketTransport(config.codexSocketPath);
     const primaryProvider = loadPrimaryModelProvider();
+    const managedProvider = loadManagedModelProvider();
+    const supplementaryModels = loadDeepseekModelOptions(
+      process.env,
+      primaryProvider === "deepseek" || managedProvider?.provider === "deepseek",
+    );
+    this.transport = new UnixWebSocketTransport(config.codexSocketPath);
     this.primaryProvider = primaryProvider;
     const clients = new Map<string, CodexAppServerClient>();
     clients.set(primaryProvider, new CodexAppServerClient(
@@ -106,7 +110,6 @@ export class GatewayApplication {
       ...(config.codexModel ? { model: config.codexModel } : {}),
       },
     ));
-    const managedProvider = loadManagedModelProvider();
     if (managedProvider) {
       const providerTransport = new UnixWebSocketTransport(
         providerAppServerSocketPath(config.codexSocketPath, managedProvider.provider),

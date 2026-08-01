@@ -139,6 +139,66 @@ describe("ProviderRoutingClient", () => {
     });
   });
 
+  it("suppresses third-party account state and tags Provider-global notifications", () => {
+    const openai = client();
+    const deepseek = client();
+    const routed = routing(openai, deepseek);
+    const notifications: Array<{ method: string; params: unknown }> = [];
+    routed.onNotification((notification) => notifications.push(notification));
+
+    deepseek.emitNotification({
+      method: "account/rateLimits/updated",
+      params: { rateLimits: { limitId: "codex" } },
+    });
+    deepseek.emitNotification({
+      method: "mcpServer/startupStatus/updated",
+      params: {
+        threadId: null,
+        name: "codex_apps",
+        status: "failed",
+        error: null,
+        failureReason: null,
+      },
+    });
+    deepseek.emitNotification({ method: "warning", params: { message: "provider warning" } });
+    deepseek.emitNotification({
+      method: "thread/status/changed",
+      params: { threadId: "thread-deepseek", status: { type: "idle" } },
+    });
+    openai.emitNotification({
+      method: "account/rateLimits/updated",
+      params: { rateLimits: { limitId: "codex" } },
+    });
+
+    expect(notifications).toEqual([
+      {
+        method: "mcpServer/startupStatus/updated",
+        params: {
+          threadId: null,
+          name: "codex_apps",
+          status: "failed",
+          error: null,
+          failureReason: null,
+        },
+        provider: "deepseek",
+      },
+      {
+        method: "warning",
+        params: { message: "provider warning" },
+        provider: "deepseek",
+      },
+      {
+        method: "thread/status/changed",
+        params: { threadId: "thread-deepseek", status: { type: "idle" } },
+      },
+      {
+        method: "account/rateLimits/updated",
+        params: { rateLimits: { limitId: "codex" } },
+        provider: "openai",
+      },
+    ]);
+  });
+
   it("reports and reconnects only the disconnected Provider", async () => {
     const openai = client();
     const deepseek = client();

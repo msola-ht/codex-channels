@@ -629,6 +629,11 @@ describe("codexc CLI", () => {
       'version = 1\nprovider = "deepseek"\n',
       { mode: 0o600 },
     );
+    writeFileSync(
+      join(codexHome, "deepseek.models.json"),
+      '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
+      { mode: 0o600 },
+    );
     const environment = {
       ...process.env,
       CODEX_CONNECT_HOME: home,

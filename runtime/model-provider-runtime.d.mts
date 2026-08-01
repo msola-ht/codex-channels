@@ -16,6 +16,10 @@ export function loadManagedProviderAppServer(
   environment?: NodeJS.ProcessEnv,
 ): ManagedProviderAppServerRuntime | undefined;
 
+export function validateConfiguredModelProvider(
+  environment?: NodeJS.ProcessEnv,
+): { provider: "deepseek"; mode: "switching" | "exclusive" } | undefined;
+
 export function loadDeepseekAccountCredential(
   environment?: NodeJS.ProcessEnv,
 ): string;

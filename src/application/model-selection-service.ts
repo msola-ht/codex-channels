@@ -158,18 +158,16 @@ export class ModelSelectionService {
     if (normalized === "status") {
       return current;
     }
-    const enable = normalized ? normalized === "on" : !currentFast;
     const tierId = model ? fastServiceTierId(model) : undefined;
-    if (enable) {
-      if (!tierId) {
-        throw new UserFacingError(
-          "fast.unsupported",
-          `当前模型不支持 Fast 模式：${current.model}`,
-          { model: current.model },
-        );
-      }
+    if (!tierId) {
+      throw new UserFacingError(
+        "fast.unsupported",
+        `当前模型不支持 Fast 模式：${current.model}`,
+        { model: current.model },
+      );
     }
-    const selectedTier = enable ? tierId! : standardServiceTierRequestValue;
+    const enable = normalized ? normalized === "on" : !currentFast;
+    const selectedTier = enable ? tierId : standardServiceTierRequestValue;
     await this.codex.writeDefaultFastMode(enable);
     if ((enable && currentFast) || (!enable && !currentFast)) {
       return current;

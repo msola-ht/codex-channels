@@ -28,6 +28,13 @@ describe("DeepSeek model catalog", () => {
       },
     ]);
   });
+
+  it("ignores a leftover catalog when DeepSeek is not configured", () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codexc-deepseek-catalog-disabled-"));
+    writeFileSync(join(codexHome, "deepseek.models.json"), "not-json");
+
+    expect(loadDeepseekModelOptions({ CODEX_HOME: codexHome }, false)).toEqual([]);
+  });
 });
 
 function model(slug: string, displayName: string) {

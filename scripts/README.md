@@ -12,7 +12,9 @@
   `CODEX_HOME`。切换模式保持基础配置不变，按 Codex 新版独立 Profile 文件格式把模型、Provider
   与 API Key 写入 CLI 使用的 `deepseek.config.toml`，并写入不含凭据的 Gateway 管理标记；
   首次修改前记录原配置和同名 Profile 是否存在并备份原文，固定模式显式
-  确认后才覆盖默认 Provider，恢复选项可精确还原首次安装状态。
+  确认后才覆盖默认 Provider，恢复选项可精确还原首次安装状态，并在保留的审计备份中记录已恢复
+  生命周期。重复安装基于当前配置更新，不从首次备份回滚后续修改；退出固定模式时只还原 Setup
+  管理的字段，恢复后新增的同名用户 Provider 不会被误判为旧版托管配置。
 - `deepseek-setup.d.mts`：声明 DeepSeek Setup 的公开脚本类型。
 - `terminal-prompter.mjs`：为各通讯渠道 Setup 提供最小的终端文本、确认和可见凭据输入接口。
 - `telegram-setup.mjs`：独立完成 Telegram Bot Token 验证、一次性私聊配对、用户 ID 获取和用户配置写入；
@@ -119,8 +121,9 @@
 - `doctor.mjs`：检查 npm 包、Node、Codex CLI、当前 TOML 配置、Workspace、飞书凭据/Bot 身份、
   微信配置与 Bot 凭据、消息游标检查点、允许用户的加密回复上下文覆盖数和最近保存时间，
   以及微信运行时启用状态；Doctor 不调用 `getupdates`，不显示 Token、`context_token` 或游标；
-  主 Unix WebSocket、已配置 Provider Socket、`initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，不输出
-  完整 User-Agent、飞书上游响应或敏感配置内容。
+  主 Unix WebSocket、已配置 Provider 的切换或固定配置、实际模型目录、Provider Socket、
+  `initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，不输出完整 User-Agent、飞书
+  上游响应或敏感配置内容。
 - `install-launchd.mjs`：渲染并安装 launchd plist；代理由 CLI 服务入口在每次启动时解析。
 - `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载两个 launchd 服务；启停、
   重启、状态和日志支持 `gateway`、`app-server`、`all` 目标，日常重启默认只更新 Gateway；

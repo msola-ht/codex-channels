@@ -86,6 +86,9 @@ export async function runDeepseekSetup({
       backupStatePath,
     });
     const { configContent, profileContent, gatewayProfileContent } = await buildCodexConfig({
+      configPath,
+      gatewayProfilePath,
+      gatewayProfileBackupPath,
       backupPath,
       backupStatePath,
       catalogPath,
@@ -101,6 +104,7 @@ export async function runDeepseekSetup({
     await replaceOptionalFile(configPath, configContent);
     await replaceOptionalFile(profilePath, profileContent);
     await replaceOptionalFile(gatewayProfilePath, gatewayProfileContent);
+    await setBackupRestoredState(backupStatePath, false);
     if (mode === "switching") {
       output.write(`\nOpenAI 基础配置保持不变：${configPath}\n`);
       output.write(`DeepSeek CLI Profile 已保存：${profilePath}\n`);
@@ -178,20 +182,24 @@ export function extractDeepseekCatalog(script) {
 }
 
 async function buildCodexConfig({
+  configPath,
+  gatewayProfilePath,
+  gatewayProfileBackupPath,
   backupPath,
   backupStatePath,
   catalogPath,
   apiKey,
   mode,
 }) {
-  let document = {};
+  let initialDocument = {};
   let originalContent;
+  let backupState;
   try {
-    const state = JSON.parse(await readFile(backupStatePath, "utf8"));
-    if (state.originalConfigExisted === true) {
+    backupState = JSON.parse(await readFile(backupStatePath, "utf8"));
+    if (backupState.originalConfigExisted === true) {
       originalContent = await readFile(backupPath, "utf8");
-      document = parse(originalContent);
-    } else if (state.originalConfigExisted !== false) {
+      initialDocument = parse(originalContent);
+    } else if (backupState.originalConfigExisted !== false) {
       throw new Error("invalid backup state");
     }
   } catch (error) {
@@ -201,6 +209,19 @@ async function buildCodexConfig({
       throw new Error("现有 Codex config.toml 无法读取或解析，未修改配置");
     }
   }
+  const current = await readCurrentConfig(configPath);
+  let document = current.document;
+  let configContent = current.content;
+  const managedMode = await readCurrentManagedMode(
+    gatewayProfilePath,
+    backupState?.originalGatewayProfileExisted === true
+      ? gatewayProfileBackupPath
+      : undefined,
+  );
+  const legacyManagedLayout = managedMode === undefined
+    && backupState !== undefined
+    && backupState.restored !== true
+    && hasDeepseekBaseConfig(document);
   const provider = {
     name: "deepseek",
     base_url: "https://api.deepseek.com/",
@@ -219,6 +240,10 @@ async function buildCodexConfig({
     ...providerLayer,
   };
   if (mode === "switching") {
+    if (managedMode === "exclusive" || legacyManagedLayout) {
+      document = restoreManagedBaseConfig(document, initialDocument);
+      configContent = Object.keys(document).length === 0 ? undefined : stringify(document);
+    }
     if (document.profile === providerId || table(document.profiles).deepseek !== undefined) {
       throw new Error(
         "安装前的 Codex config.toml 已占用旧式 deepseek profile；请先手工迁移或改名",
@@ -230,7 +255,7 @@ async function buildCodexConfig({
       );
     }
     return {
-      configContent: originalContent,
+      configContent,
       profileContent: stringify(profile),
       gatewayProfileContent: stringify({
         version: 1,
@@ -271,6 +296,91 @@ async function buildCodexConfig({
   };
 }
 
+async function readCurrentConfig(configPath) {
+  try {
+    const content = await readFile(configPath, "utf8");
+    return { content, document: parse(content) };
+  } catch (error) {
+    if (error.code === "ENOENT") return { content: undefined, document: {} };
+    // TOML 解析错误可能包含带 API Key 的原始配置行，不能作为 cause 暴露。
+    // eslint-disable-next-line preserve-caught-error
+    throw new Error("现有 Codex config.toml 无法读取或解析，未修改配置");
+  }
+}
+
+async function readCurrentManagedMode(gatewayProfilePath, originalGatewayProfilePath) {
+  try {
+    const content = await readFile(gatewayProfilePath, "utf8");
+    if (
+      originalGatewayProfilePath !== undefined
+      && content === await readFile(originalGatewayProfilePath, "utf8")
+    ) {
+      return undefined;
+    }
+    const marker = parse(content);
+    if (
+      marker.version !== 1
+      || marker.provider !== providerId
+      || ![undefined, "switching", "exclusive"].includes(marker.mode)
+    ) {
+      throw new Error("invalid marker");
+    }
+    return marker.mode ?? "switching";
+  } catch (error) {
+    if (error.code === "ENOENT") return undefined;
+    // 原同名文件可能包含用户私有配置，不能把解析内容作为 cause 暴露。
+    // eslint-disable-next-line preserve-caught-error
+    throw new Error("Codex Connect DeepSeek 管理标记无效，未修改配置");
+  }
+}
+
+function hasDeepseekBaseConfig(document) {
+  return document.profile === providerId
+    || table(document.profiles).deepseek !== undefined
+    || table(document.model_providers).deepseek !== undefined;
+}
+
+function restoreManagedBaseConfig(current, initial) {
+  const restored = { ...current };
+  for (const key of [
+    "model",
+    "model_provider",
+    "model_reasoning_effort",
+    "model_catalog_json",
+    "profile",
+    "preferred_auth_method",
+    "forced_login_method",
+  ]) {
+    restoreProperty(restored, initial, key);
+  }
+  restoreTableEntry(restored, initial, "model_providers", providerId);
+  restoreTableEntry(restored, initial, "profiles", providerId);
+  return restored;
+}
+
+function restoreProperty(target, source, key) {
+  if (Object.hasOwn(source, key)) {
+    target[key] = source[key];
+  } else {
+    delete target[key];
+  }
+}
+
+function restoreTableEntry(target, source, tableName, key) {
+  const targetTable = { ...table(target[tableName]) };
+  const sourceTable = table(source[tableName]);
+  if (Object.hasOwn(sourceTable, key)) {
+    targetTable[key] = sourceTable[key];
+  } else {
+    delete targetTable[key];
+  }
+  if (Object.keys(targetTable).length === 0) {
+    delete target[tableName];
+  } else {
+    target[tableName] = targetTable;
+  }
+}
+
 async function preserveInitialConfig({
   configPath,
   profilePath,
@@ -301,6 +411,20 @@ async function preserveInitialConfig({
       gatewayProfileBackupPath,
     );
   }
+  await atomicWrite(backupStatePath, `${JSON.stringify(state)}\n`);
+}
+
+async function setBackupRestoredState(backupStatePath, restored) {
+  let state;
+  try {
+    state = JSON.parse(await readFile(backupStatePath, "utf8"));
+  } catch {
+    throw new Error("Codex 初始配置备份状态无效");
+  }
+  if (typeof state.originalConfigExisted !== "boolean") {
+    throw new Error("Codex 初始配置备份状态无效");
+  }
+  state.restored = restored;
   await atomicWrite(backupStatePath, `${JSON.stringify(state)}\n`);
 }
 
@@ -351,6 +475,7 @@ async function restoreInitialConfig({
   }
   await removeFile(catalogPath);
   await removeFile(manifestPath);
+  await setBackupRestoredState(backupStatePath, true);
   output.write("已恢复安装前的 Codex 配置；备份目录保留以便审计。\n");
   output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
   return {

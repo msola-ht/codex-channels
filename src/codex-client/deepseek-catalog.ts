@@ -9,7 +9,9 @@ const supportedSlug = "deepseek-v4-flash";
 
 export function loadDeepseekModelOptions(
   environment: NodeJS.ProcessEnv = process.env,
+  enabled = true,
 ): ModelOption[] {
+  if (!enabled) return [];
   const codexHome = resolve(environment.CODEX_HOME?.trim() || join(homedir(), ".codex"));
   const catalogPath = join(codexHome, "deepseek.models.json");
   if (!existsSync(catalogPath)) return [];

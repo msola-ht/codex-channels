@@ -18,7 +18,8 @@
   选择不同 Provider 时保留并解绑当前 Thread，为下一 Turn 在对应 App Server 新建带精确
   `modelProvider` 的 Thread，避免把 Provider 专属历史发送到不兼容的 API；旧 Thread 保持可恢复；
   含本地音频的输入在创建或追加 Turn 前必须通过当前模型的 `audio` 能力检查；
-  Fast 切换同时通过模型窄端口保存用户级默认层级，与原生 CLI 的重启行为一致。
+  Fast 只允许当前模型目录明确声明支持时切换，并通过模型窄端口保存用户级默认层级；第三方模型
+  不得借关闭 Fast 改写 OpenAI 默认设置。
 - `collaboration-mode-port.ts`：定义 Default/Plan 预设的稳定查询边界，不向 Application
   暴露完整实验协议。
 - `collaboration-mode-service.ts`：把官方预设与当前模型设置组合为下一 Turn 的协作模式覆盖；

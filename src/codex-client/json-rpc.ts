@@ -34,6 +34,7 @@ interface PendingRequest {
 export interface RpcNotification {
   method: string;
   params: unknown;
+  provider?: string;
 }
 
 export interface RpcServerRequest {

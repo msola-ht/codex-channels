@@ -5,6 +5,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { parse } from "smol-toml";
 
 const maximumConfigBytes = 1_048_576;
+const maximumCatalogBytes = 2_097_152;
 const managedMarkerName = "codex-connect-deepseek.config.toml";
 const deepseekApiKeyEnvironmentKey = "CODEX_CONNECT_DEEPSEEK_API_KEY";
 
@@ -45,6 +46,13 @@ export function loadManagedProviderAppServer(environment = process.env) {
   };
 }
 
+export function validateConfiguredModelProvider(environment = process.env) {
+  const configured = loadConfiguredProviderProfile(environment);
+  return configured === undefined
+    ? undefined
+    : { provider: configured.provider, mode: configured.mode };
+}
+
 export function loadPrimaryModelProvider(environment = process.env) {
   const marker = readManagedMarker(codexHomePath(environment));
   return marker?.mode === "exclusive" ? marker.provider : "openai";
@@ -68,11 +76,28 @@ function loadManagedProviderProfile(environment, { requireLaunchConfig = false }
   const marker = readManagedMarker(codexHome);
   if (!marker || marker.mode === "exclusive") return undefined;
   const descriptor = providers.deepseek;
-  return readProviderProfile(join(codexHome, descriptor.profileName), descriptor, {
+  const profile = readProviderProfile(join(codexHome, descriptor.profileName), descriptor, {
     ...(requireLaunchConfig
       ? { expectedCatalogPath: join(codexHome, "deepseek.models.json") }
       : {}),
   });
+  if (requireLaunchConfig) validateModelCatalog(profile.catalogPath);
+  return profile;
+}
+
+function loadConfiguredProviderProfile(environment) {
+  const codexHome = codexHomePath(environment);
+  const marker = readManagedMarker(codexHome);
+  if (!marker) return undefined;
+  const descriptor = providers.deepseek;
+  const profilePath = marker.mode === "exclusive"
+    ? join(codexHome, "config.toml")
+    : join(codexHome, descriptor.profileName);
+  const profile = readProviderProfile(profilePath, descriptor, {
+    expectedCatalogPath: join(codexHome, "deepseek.models.json"),
+  });
+  validateModelCatalog(profile.catalogPath);
+  return { ...profile, mode: marker.mode };
 }
 
 function readProviderProfile(
@@ -109,7 +134,7 @@ function readProviderProfile(
     provider.name !== descriptor.id
     || provider.base_url !== descriptor.baseUrl
     || provider.wire_api !== descriptor.wireApi
-    || provider.requires_openai_auth === true
+    || provider.requires_openai_auth !== false
   ) {
     throw new Error("Codex DeepSeek Provider 配置无效");
   }
@@ -134,7 +159,7 @@ function readProviderProfile(
   };
 }
 
-function readPrivateFile(path) {
+function readPrivateFile(path, maximumBytes = maximumConfigBytes) {
   const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
   const descriptor = openSync(path, constants.O_RDONLY | noFollow);
   try {
@@ -142,7 +167,7 @@ function readPrivateFile(path) {
     const currentUid = process.getuid?.();
     if (
       !metadata.isFile()
-      || metadata.size > maximumConfigBytes
+      || metadata.size > maximumBytes
       || (metadata.mode & 0o077) !== 0
       || (currentUid !== undefined && metadata.uid !== currentUid)
     ) {
@@ -151,6 +176,21 @@ function readPrivateFile(path) {
     return readFileSync(descriptor, "utf8");
   } finally {
     closeSync(descriptor);
+  }
+}
+
+function validateModelCatalog(path) {
+  let catalog;
+  try {
+    catalog = JSON.parse(readPrivateFile(path, maximumCatalogBytes));
+  } catch {
+    throw new Error("Codex DeepSeek 模型目录无法安全读取");
+  }
+  if (
+    !Array.isArray(catalog?.models)
+    || !catalog.models.some((model) => record(model).slug === "deepseek-v4-flash")
+  ) {
+    throw new Error("Codex DeepSeek 模型目录无效");
   }
 }
 

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtemp } from "node:fs/promises";
@@ -7,8 +7,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   loadManagedModelProvider,
+  loadManagedProviderAppServer,
   loadPrimaryModelProvider,
   providerAppServerSocketPath,
+  validateConfiguredModelProvider,
 } from "../runtime/model-provider-runtime.mjs";
 
 describe("model provider runtime topology", () => {
@@ -34,6 +36,52 @@ describe("model provider runtime topology", () => {
       "deepseek",
     )).toBe("/private/runtime/codex-app-server-deepseek.sock");
   });
+
+  it("rejects a switching profile that cannot launch the managed App Server", async () => {
+    const codexHome = await configuredHome("switching");
+    writeFileSync(
+      join(codexHome, "deepseek.config.toml"),
+      providerProfile(codexHome).replace('model_reasoning_effort = "high"\n', ""),
+      { mode: 0o600 },
+    );
+    const environment = { CODEX_HOME: codexHome };
+
+    expect(loadManagedModelProvider(environment)).toMatchObject({ provider: "deepseek" });
+    expect(() => loadManagedProviderAppServer(environment))
+      .toThrow("模型目录或推理强度无效");
+  });
+
+  it("validates both switching and exclusive managed configurations", async () => {
+    const switchingHome = await configuredHome("switching");
+    const exclusiveHome = await configuredHome("exclusive");
+
+    expect(validateConfiguredModelProvider({ CODEX_HOME: switchingHome }))
+      .toEqual({ provider: "deepseek", mode: "switching" });
+    expect(validateConfiguredModelProvider({ CODEX_HOME: exclusiveHome }))
+      .toEqual({ provider: "deepseek", mode: "exclusive" });
+  });
+
+  it("rejects a managed configuration whose actual model catalog is missing", async () => {
+    const codexHome = await configuredHome("switching");
+    rmSync(join(codexHome, "deepseek.models.json"));
+
+    expect(() => loadManagedProviderAppServer({ CODEX_HOME: codexHome }))
+      .toThrow("模型目录");
+    expect(() => validateConfiguredModelProvider({ CODEX_HOME: codexHome }))
+      .toThrow("模型目录");
+  });
+
+  it("rejects an exclusive configuration that cannot launch the primary App Server", async () => {
+    const codexHome = await configuredHome("exclusive");
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      providerProfile(codexHome).replace('model_reasoning_effort = "high"\n', ""),
+      { mode: 0o600 },
+    );
+
+    expect(() => validateConfiguredModelProvider({ CODEX_HOME: codexHome }))
+      .toThrow("模型目录或推理强度无效");
+  });
 });
 
 async function configuredHome(mode: "switching" | "exclusive"): Promise<string> {
@@ -44,20 +92,28 @@ async function configuredHome(mode: "switching" | "exclusive"): Promise<string> 
     `version = 1\nprovider = "deepseek"\nmode = "${mode}"\n`,
     { mode: 0o600 },
   );
+  const profilePath = mode === "exclusive" ? "config.toml" : "deepseek.config.toml";
+  writeFileSync(join(codexHome, profilePath), providerProfile(codexHome), { mode: 0o600 });
   writeFileSync(
-    join(codexHome, "deepseek.config.toml"),
-    [
-      'model = "deepseek-v4-flash"',
-      'model_provider = "deepseek"',
-      "[model_providers.deepseek]",
-      'name = "deepseek"',
-      'base_url = "https://api.deepseek.com/"',
-      'wire_api = "responses"',
-      "requires_openai_auth = false",
-      'experimental_bearer_token = "sk-test-secret"',
-      "",
-    ].join("\n"),
+    join(codexHome, "deepseek.models.json"),
+    '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
     { mode: 0o600 },
   );
   return codexHome;
+}
+
+function providerProfile(codexHome: string): string {
+  return [
+    'model = "deepseek-v4-flash"',
+    'model_provider = "deepseek"',
+    'model_reasoning_effort = "high"',
+    `model_catalog_json = ${JSON.stringify(join(codexHome, "deepseek.models.json"))}`,
+    "[model_providers.deepseek]",
+    'name = "deepseek"',
+    'base_url = "https://api.deepseek.com/"',
+    'wire_api = "responses"',
+    "requires_openai_auth = false",
+    'experimental_bearer_token = "sk-test-secret"',
+    "",
+  ].join("\n");
 }

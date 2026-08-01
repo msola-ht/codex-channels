@@ -141,13 +141,13 @@ export function toConversationInputEvent(
     case coreMethods.threadDeleted:
       return toCoreThreadLifecycleEvent("thread.deleted", notification.params);
     case coreMethods.accountUpdated:
-      return toAccountUpdatedEvent(notification.params);
+      return toAccountUpdatedEvent(notification.params, notification.provider);
     case coreMethods.accountRateLimitsUpdated:
-      return toRateLimitsUpdatedEvent(notification.params);
+      return toRateLimitsUpdatedEvent(notification.params, notification.provider);
     case coreMethods.mcpStatusUpdated:
-      return toMcpStatusEvent(notification.params);
+      return toMcpStatusEvent(notification.params, notification.provider);
     case coreMethods.warning:
-      return toWarningEvent(notification.params);
+      return toWarningEvent(notification.params, notification.provider);
     default:
       return undefined;
   }
@@ -379,7 +379,10 @@ function toCoreThreadLifecycleEvent(
   return threadId ? { type, threadId } : undefined;
 }
 
-function toAccountUpdatedEvent(value: unknown): ConversationInputEvent | undefined {
+function toAccountUpdatedEvent(
+  value: unknown,
+  modelProvider?: string,
+): ConversationInputEvent | undefined {
   const params = asRecord(value);
   const authMode = parseAuthMode(params?.authMode);
   const planType = parsePlanType(params?.planType);
@@ -388,20 +391,29 @@ function toAccountUpdatedEvent(value: unknown): ConversationInputEvent | undefin
         type: "account.updated",
         authMode: authMode.value,
         planType: planType.value,
+        ...(modelProvider ? { modelProvider } : {}),
       }
     : undefined;
 }
 
 function toRateLimitsUpdatedEvent(
   value: unknown,
+  modelProvider?: string,
 ): ConversationInputEvent | undefined {
   const rateLimits = parseRateLimitSnapshot(asRecord(value)?.rateLimits);
   return rateLimits
-    ? { type: "account.rateLimits.updated", rateLimits }
+    ? {
+        type: "account.rateLimits.updated",
+        rateLimits,
+        ...(modelProvider ? { modelProvider } : {}),
+      }
     : undefined;
 }
 
-function toMcpStatusEvent(value: unknown): ConversationInputEvent | undefined {
+function toMcpStatusEvent(
+  value: unknown,
+  modelProvider?: string,
+): ConversationInputEvent | undefined {
   const params = asRecord(value);
   const threadId = strictNullableString(params?.threadId);
   const name = nonEmptyString(params?.name);
@@ -424,10 +436,14 @@ function toMcpStatusEvent(value: unknown): ConversationInputEvent | undefined {
     status,
     error: error.value === null ? null : sanitizeOperationText(error.value),
     failureReason: failureReason.value,
+    ...(modelProvider ? { modelProvider } : {}),
   };
 }
 
-function toWarningEvent(value: unknown): ConversationInputEvent | undefined {
+function toWarningEvent(
+  value: unknown,
+  modelProvider?: string,
+): ConversationInputEvent | undefined {
   const params = asRecord(value);
   const threadId = strictNullableString(params?.threadId);
   const message = nonEmptyString(params?.message);
@@ -436,6 +452,7 @@ function toWarningEvent(value: unknown): ConversationInputEvent | undefined {
         type: "warning",
         threadId: threadId.value,
         message: sanitizeOperationText(message),
+        ...(modelProvider ? { modelProvider } : {}),
       }
     : undefined;
 }

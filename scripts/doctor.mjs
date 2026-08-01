@@ -15,8 +15,9 @@ import {
   validateGatewayConfigDocument,
 } from "../runtime/gateway-config.mjs";
 import {
-  loadManagedModelProvider,
+  loadManagedProviderAppServer,
   providerAppServerSocketPath,
+  validateConfiguredModelProvider,
 } from "../runtime/model-provider-runtime.mjs";
 import { validateFeishuApplication } from "./feishu-application.mjs";
 import { packageDir, resolveConfiguredPath, runtimeConfig, userDataDir } from "./runtime-config.mjs";
@@ -231,7 +232,15 @@ if (document) {
   );
   await checkAppServer("Codex App Server", socketPath);
   try {
-    const managedProvider = loadManagedModelProvider(process.env);
+    const configuredProvider = validateConfiguredModelProvider(process.env);
+    if (configuredProvider) {
+      record(
+        "模型 Provider 配置",
+        true,
+        `${configuredProvider.provider} ${configuredProvider.mode === "switching" ? "切换" : "固定"}模式有效`,
+      );
+    }
+    const managedProvider = loadManagedProviderAppServer(process.env);
     if (managedProvider) {
       await checkAppServer(
         `${managedProvider.provider} App Server`,

@@ -761,6 +761,77 @@ describe("ConversationCore", () => {
     });
   });
 
+  it("routes Provider-global MCP status and warnings only to matching conversations", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const openaiTarget = {
+      surface: "telegram" as const,
+      accountId: "default",
+      conversationId: "openai",
+    };
+    const deepseekTarget = {
+      surface: "feishu" as const,
+      accountId: "default",
+      conversationId: "deepseek",
+    };
+    const core = new ConversationCore({
+      allBindings: () => [
+        { target: openaiTarget, threadId: "thread-openai" },
+        { target: deepseekTarget, threadId: "thread-deepseek" },
+      ],
+      targetForThread: () => undefined,
+      modelSettingsForThread: (threadId) => threadId === "thread-deepseek"
+        ? {
+          model: "deepseek-v4-flash",
+          modelProvider: "deepseek",
+          effort: "high",
+          serviceTier: null,
+        }
+        : {
+          model: "gpt-5.6-sol",
+          modelProvider: "openai",
+          effort: "medium",
+          serviceTier: null,
+        },
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+
+    handleNotification(core, {
+      method: "mcpServer/startupStatus/updated",
+      params: {
+        threadId: null,
+        name: "codex_apps",
+        status: "failed",
+        error: null,
+        failureReason: null,
+      },
+      provider: "deepseek",
+    });
+    handleNotification(core, {
+      method: "warning",
+      params: { threadId: null, message: "DeepSeek 配置警告" },
+      provider: "deepseek",
+    });
+    await output.close();
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: "mcp.status.updated",
+        target: deepseekTarget,
+        name: "codex_apps",
+        status: "failed",
+      }),
+      {
+        type: "warning",
+        target: deepseekTarget,
+        message: "DeepSeek 配置警告",
+      },
+    ]);
+  });
+
   it("uses only the main Codex seven-day window as the weekly limit", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const core = new ConversationCore({

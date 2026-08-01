@@ -191,6 +191,32 @@ describe("ModelSelectionService", () => {
       .rejects.toThrow("当前模型不支持 Fast 模式");
   });
 
+  it("does not change the OpenAI Fast default from a DeepSeek conversation", async () => {
+    const writeDefaultFastMode = vi.fn().mockResolvedValue(undefined);
+    const deepseek = {
+      ...model("deepseek-v4-flash", ["high"], "high"),
+      provider: "deepseek",
+    };
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode,
+      readDefaultServiceTier: async () => "default",
+    } satisfies ModelSelectionPort;
+    const router = {
+      modelSettings: () => ({
+        model: "deepseek-v4-flash",
+        modelProvider: "deepseek",
+        effort: "high",
+        serviceTier: "default",
+      }),
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService(codex, router, undefined, [deepseek]);
+
+    await expect(service.selectFastMode(target, "off"))
+      .rejects.toThrow("当前模型不支持 Fast 模式");
+    expect(writeDefaultFastMode).not.toHaveBeenCalled();
+  });
+
   it("turns Fast mode off when switching to a model without that tier", async () => {
     const service = createService({ model: "gpt-main", effort: "medium", serviceTier: "priority" });
 

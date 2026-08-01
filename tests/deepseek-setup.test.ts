@@ -78,6 +78,28 @@ describe("DeepSeek setup", () => {
       .toContain(deepseekSetupScriptUrl);
   });
 
+  it("preserves OpenAI config changes made after a switching install", async () => {
+    const original = 'model = "gpt-5.4"\ncustom_before = true\n';
+    const fixture = setupFixture(original);
+    await runDeepseekSetup({
+      environment: { CODEX_HOME: fixture.home },
+      output: fixture.output,
+      fetchImpl: successfulFetch,
+      prompter: prompter(["1"], ["sk-first"]),
+    });
+    const current = 'model = "gpt-5.6-sol"\ncustom_after = true\n';
+    writeFileSync(join(fixture.home, "config.toml"), current, { mode: 0o600 });
+
+    await runDeepseekSetup({
+      environment: { CODEX_HOME: fixture.home },
+      output: fixture.output,
+      fetchImpl: successfulFetch,
+      prompter: prompter(["1"], ["sk-second"]),
+    });
+
+    expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(current);
+  });
+
   it("installs exclusive mode and keeps the initial config backup", async () => {
     const original = 'model = "gpt-5.4"\n';
     const fixture = setupFixture(original);
@@ -135,6 +157,38 @@ describe("DeepSeek setup", () => {
     expect(profile.model).toBe("deepseek-v4-flash");
     expect(record(record(profile.model_providers).deepseek).experimental_bearer_token)
       .toBe("sk-switching");
+  });
+
+  it("restores managed fields but preserves unrelated edits when leaving exclusive mode", async () => {
+    const original = 'model = "gpt-5.4"\nmodel_provider = "openai"\n';
+    const fixture = setupFixture(original);
+    await runDeepseekSetup({
+      environment: { CODEX_HOME: fixture.home },
+      output: fixture.output,
+      fetchImpl: successfulFetch,
+      prompter: prompter(["2"], ["sk-fixed"], true),
+    });
+    const exclusive = readFileSync(join(fixture.home, "config.toml"), "utf8");
+    writeFileSync(
+      join(fixture.home, "config.toml"),
+      `custom_after = true\n${exclusive}`,
+      { mode: 0o600 },
+    );
+
+    await runDeepseekSetup({
+      environment: { CODEX_HOME: fixture.home },
+      output: fixture.output,
+      fetchImpl: successfulFetch,
+      prompter: prompter(["1"], ["sk-switching"]),
+    });
+
+    const config = parse(readFileSync(join(fixture.home, "config.toml"), "utf8"));
+    expect(config).toMatchObject({
+      model: "gpt-5.4",
+      model_provider: "openai",
+      custom_after: true,
+    });
+    expect(record(config.model_providers).deepseek).toBeUndefined();
   });
 
   it("migrates the legacy managed profile created by an earlier setup", async () => {
@@ -221,6 +275,33 @@ describe("DeepSeek setup", () => {
     expect(result?.mode).toBe("restored");
     expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(original);
     expect(existsSync(join(fixture.home, "deepseek.config.toml"))).toBe(false);
+  });
+
+  it("does not treat a user DeepSeek provider added after restore as legacy managed config", async () => {
+    const original = 'model = "gpt-5.4"\n';
+    const fixture = setupFixture(original);
+    await runDeepseekSetup({
+      environment: { CODEX_HOME: fixture.home },
+      output: fixture.output,
+      fetchImpl: successfulFetch,
+      prompter: prompter(["2"], ["sk-fixed"], true),
+    });
+    await runDeepseekSetup({
+      environment: { CODEX_HOME: fixture.home },
+      output: fixture.output,
+      fetchImpl: vi.fn(),
+      prompter: prompter(["3"], [], true),
+    });
+    const userConfig = `${original}\n[model_providers.deepseek]\nname = "user-managed"\n`;
+    writeFileSync(join(fixture.home, "config.toml"), userConfig, { mode: 0o600 });
+
+    await expect(runDeepseekSetup({
+      environment: { CODEX_HOME: fixture.home },
+      output: fixture.output,
+      fetchImpl: successfulFetch,
+      prompter: prompter(["1"], ["sk-second"]),
+    })).rejects.toThrow("已存在 deepseek Provider");
+    expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(userConfig);
   });
 
   it("backs up and restores an existing deepseek profile file", async () => {
