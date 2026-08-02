@@ -278,6 +278,7 @@ describe("WeixinInputAdapter", () => {
       persistReplyContext: vi.fn(async () => {}),
       onFatal: vi.fn(),
       now,
+      debugEnabled: true,
     };
     const adapter = new WeixinInputAdapter(options);
 

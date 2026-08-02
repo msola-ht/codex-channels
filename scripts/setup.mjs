@@ -7,6 +7,7 @@ import { runDeepseekSetup } from "./deepseek-setup.mjs";
 import { runTelegramSetup } from "./telegram-setup.mjs";
 import { runWeixinSetup } from "./weixin-setup.mjs";
 import { runVisionSetup } from "./vision-setup.mjs";
+import { runDebugSetup } from "./debug-setup.mjs";
 
 export async function runSetup({
   input = process.stdin,
@@ -17,6 +18,7 @@ export async function runSetup({
   telegramSetup = runTelegramSetup,
   weixinSetup = runWeixinSetup,
   visionSetup = runVisionSetup,
+  debugSetup = runDebugSetup,
 } = {}) {
   prompts.intro("Codex Connect Setup");
   while (true) {
@@ -33,6 +35,11 @@ export async function runSetup({
           value: "channels",
           label: "通讯渠道",
           hint: "配置外部消息入口",
+        },
+        {
+          value: "system",
+          label: "系统设置",
+          hint: "配置全局调试模式",
         },
         {
           value: "cancel",
@@ -69,10 +76,38 @@ export async function runSetup({
         if (isBackResult(result)) continue;
         return result;
       }
+      case "system": {
+        const result = await runSystemSetup({
+          input,
+          output,
+          prompts,
+          debugSetup,
+        });
+        if (isBackResult(result)) continue;
+        return result;
+      }
       default:
         throw new Error(`未知 Setup 类别：${String(section)}`);
     }
   }
+}
+
+async function runSystemSetup({ input, output, prompts, debugSetup }) {
+  const module = await prompts.select({
+    message: "选择系统设置",
+    showInstructions: false,
+    options: [
+      {
+        value: "debug",
+        label: "调试模式",
+        hint: "控制全局脱敏调试日志和渠道技术字段",
+      },
+      { value: "back", label: "返回", hint: "返回设置类别" },
+    ],
+  });
+  if (prompts.isCancel(module) || module === "back") return { action: "back" };
+  if (module === "debug") return debugSetup({ input, output, prompts });
+  throw new Error(`未知系统设置：${String(module)}`);
 }
 
 async function runModelSetup({ input, output, prompts, deepseekSetup, visionSetup }) {

@@ -33,6 +33,12 @@
 `turn/plan/updated` 的平台展示，不影响 Core 保存最新计划，也不切换 `/plan` 协作模式。
 变化需要重启 Gateway，不需要重启 App Server。
 
+`logging.level` 是全局日志级别；`debug` 与 `trace` 同时启用全局调试模式，`info`、`warn`、
+`error` 和 `fatal` 关闭调试模式。调试模式允许各模块记录受约束的类型、阶段、耗时和结果，并在
+渠道中展示 `/vision` 接收与 Gateway 处理耗时；消息正文、请求参数、上游响应、凭据和审批内容
+仍不得进入日志。可通过 Setup 的“系统设置 → 调试模式”在 `debug` 与 `info` 间切换，变化需要
+重启 Gateway，不需要重启 App Server。
+
 模型统计代理由 App Server 服务按已启用 Provider 自动装配，不属于用户配置；其上游网络请求继续
 复用 `network` 与标准代理环境变量。
 

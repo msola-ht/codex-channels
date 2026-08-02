@@ -31,6 +31,7 @@ export interface CreateWeixinSurfaceOptions {
   startupNotification: WeixinStartupNotification;
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
+  debugEnabled?: boolean;
   fetchImpl?: typeof fetch;
   logger: Logger;
   onFatal(error: WeixinInputFatalError): void;
@@ -80,6 +81,9 @@ export function createWeixinSurface(
     ...(options.planUpdatesEnabled === undefined
       ? {}
       : { planUpdatesEnabled: options.planUpdatesEnabled }),
+    ...(options.debugEnabled === undefined
+      ? {}
+      : { debugEnabled: options.debugEnabled }),
     logger: options.logger,
     onFatal: (error) => options.onFatal(error),
   });

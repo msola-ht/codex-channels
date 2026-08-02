@@ -349,6 +349,16 @@ export class SurfaceManager {
   private deliverOutput(surface: SurfaceAdapter, event: OutputEvent): void {
     try {
       surface.output.handle(event);
+      if (event.type !== "text.delta") {
+        this.logger.debug(
+          {
+            surface: surface.surface,
+            accountId: surface.accountId,
+            eventType: event.type,
+          },
+          "输出事件已提交到 Surface 队列",
+        );
+      }
     } catch (error) {
       this.logger.warn(
         {

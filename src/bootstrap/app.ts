@@ -190,6 +190,20 @@ export class GatewayApplication {
               : {}),
             ...(generationDurationMs > 0 ? { generationDurationMs } : {}),
           });
+          this.logger.debug(
+            {
+              provider,
+              ttftMs: Math.max(0, firstTokenAtMs - metrics.requestStartedAtMs),
+              ...(thinkingDurationMs === undefined
+                ? {}
+                : { thinkingDurationMs }),
+              ...(outputDurationMs === undefined
+                ? {}
+                : { outputDurationMs }),
+              ...(generationDurationMs > 0 ? { generationDurationMs } : {}),
+            },
+            "模型统计代理指标已关联到 Turn",
+          );
         },
         (error) => {
           this.logger.warn({ err: error, provider }, "模型统计代理指标接收失败");
@@ -360,6 +374,7 @@ export class GatewayApplication {
         !coreEvent
         && !threadStateEvent
         && notification.method !== "serverRequest/resolved"
+        && !isHighFrequencyNotification(notification.method)
       ) {
         this.logger.debug(
           { method: notification.method },
@@ -793,6 +808,10 @@ export class GatewayApplication {
     }
     return failures.every((failure) => failure.bindingRemoved);
   }
+}
+
+function isHighFrequencyNotification(method: string): boolean {
+  return /\/(?:delta|outputDelta|progress)$/u.test(method);
 }
 
 function surfaceLabel(surface: string): string {

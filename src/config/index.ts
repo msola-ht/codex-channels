@@ -78,6 +78,12 @@ export interface GatewayConfig {
 
 export type OperationUpdateDisplay = "full" | "compact" | "hidden";
 
+export function isDebugLogLevel(
+  level: GatewayConfig["logLevel"],
+): boolean {
+  return level === "debug" || level === "trace";
+}
+
 export class ConfigurationError extends Error {}
 
 export interface RuntimeGatewayConfig {

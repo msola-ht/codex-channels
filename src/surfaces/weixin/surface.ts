@@ -70,6 +70,7 @@ export interface WeixinSurfaceOptions {
   startupNotification?: WeixinStartupNotification;
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
+  debugEnabled?: boolean;
   inputCloseTimeoutMs?: number;
   outbox?: WeixinOutboxOptions;
 }
@@ -196,6 +197,8 @@ export class WeixinSurface implements SurfaceAdapter {
         ? {}
         : { actorRegistry: options.actorRegistry }),
       onFatal: options.onFatal,
+      debugEnabled: options.debugEnabled ?? false,
+      logger: options.logger,
       onRetry: (event) => {
         logUpdatesRetry(
           options.logger,

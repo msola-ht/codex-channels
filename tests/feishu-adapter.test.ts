@@ -74,7 +74,11 @@ function createAudioMessage(): Extract<FeishuInboxMessage, { kind: "audio" }> {
 describe("Feishu conversation adapter", () => {
   it("shows /vision delivery and Gateway handling latency", async () => {
     const fixture = createOutbox();
-    const inputOptions = { quietWindowMs: 0, now: () => 1_450 };
+    const inputOptions = {
+      quietWindowMs: 0,
+      now: () => 1_450,
+      debugEnabled: true,
+    };
     const adapter = new FeishuConversationAdapter(
       {} as ConversationUseCases,
       fixture.outbox,
@@ -97,6 +101,32 @@ describe("Feishu conversation adapter", () => {
 
     expect(fixture.sent[0]?.text).toContain("接收延迟：200毫秒");
     expect(fixture.sent[0]?.text).toContain("Gateway 处理：250毫秒");
+  });
+
+  it("hides /vision technical timing outside debug mode", async () => {
+    const fixture = createOutbox();
+    const adapter = new FeishuConversationAdapter(
+      {} as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { quietWindowMs: 0, now: () => 1_450 },
+    );
+
+    await adapter.handle({
+      ...message,
+      text: "/vision 2 比较两张图片",
+      createdAtMs: 1_000,
+      receivedAtMs: 1_200,
+    });
+    await fixture.outbox.close();
+
+    expect(fixture.sent[0]?.text).not.toContain("接收延迟");
+    expect(fixture.sent[0]?.text).not.toContain("Gateway 处理");
   });
 
   it("uses rich posts for command results but keeps failures as plain text", async () => {

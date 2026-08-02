@@ -103,6 +103,7 @@ export interface FeishuSurfaceOptions {
   disableEnvironmentProxy?: boolean;
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
+  debugEnabled?: boolean;
   configurationRecipients?: () => readonly string[];
   startupNotification?: FeishuStartupNotification;
 }
@@ -247,6 +248,7 @@ export class FeishuSurface implements SurfaceAdapter {
       this.interactions,
       {
         quietWindowMs: 0,
+        debugEnabled: options.debugEnabled ?? false,
         ...(files === undefined ? {} : { files }),
         audios: this.audios,
         ...(quotedMessages === undefined
@@ -323,6 +325,16 @@ export class FeishuSurface implements SurfaceAdapter {
         : {}),
       onMessage: (event) => {
         const result = this.inbox.receive(event);
+        options.logger.debug(
+          {
+            surface: "feishu",
+            accountId: options.appId,
+            messageType: event.messageType,
+            outcome: result.status,
+            ...(result.status === "accepted" ? {} : { reason: result.reason }),
+          },
+          "飞书输入已到达 Gateway",
+        );
         if (result.status === "accepted") {
           this.overloadNotifiedChats.delete(event.chatId);
         } else if (

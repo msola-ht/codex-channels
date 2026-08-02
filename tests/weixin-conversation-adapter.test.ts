@@ -32,7 +32,7 @@ describe("WeixinConversationAdapter", () => {
       serviceFixture({}),
       { notifyText },
       undefined,
-      { quietWindowMs: 0, now: () => 1_450 },
+      { quietWindowMs: 0, now: () => 1_450, debugEnabled: true },
     );
 
     await adapter.handle({
@@ -49,6 +49,35 @@ describe("WeixinConversationAdapter", () => {
     expect(notifyText).toHaveBeenCalledWith(
       target,
       expect.stringContaining("Gateway 处理：250毫秒"),
+    );
+  });
+
+  it("hides /vision technical timing outside debug mode", async () => {
+    const notifyText = vi.fn<(
+      target: ConversationTarget,
+      text: string,
+    ) => boolean>(() => true);
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({}),
+      { notifyText },
+      undefined,
+      { quietWindowMs: 0, now: () => 1_450 },
+    );
+
+    await adapter.handle({
+      ...message,
+      text: "/vision 2 比较两张图片",
+      createdAtMs: 1_000,
+      receivedAtMs: 1_200,
+    });
+
+    expect(notifyText).not.toHaveBeenCalledWith(
+      target,
+      expect.stringContaining("接收延迟"),
+    );
+    expect(notifyText).not.toHaveBeenCalledWith(
+      target,
+      expect.stringContaining("Gateway 处理"),
     );
   });
 

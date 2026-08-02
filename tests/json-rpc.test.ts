@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
@@ -470,6 +470,28 @@ class FakeTransport extends BaseTransport {
 }
 
 describe("JsonRpcClient", () => {
+  it("logs sanitized request timing at debug level", async () => {
+    const transport = new FakeTransport();
+    const debug = vi.fn();
+    const client = new JsonRpcClient(transport, 60_000, {
+      warn: vi.fn(),
+      debug,
+    });
+
+    await client.connect();
+
+    expect(debug).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "initialize",
+        requestId: 1,
+        durationMs: expect.any(Number),
+        outcome: "success",
+      }),
+      "Codex JSON-RPC 请求完成",
+    );
+    expect(JSON.stringify(debug.mock.calls)).not.toContain("clientInfo");
+  });
+
   it("initializes once and routes notifications", async () => {
     const transport = new FakeTransport();
     const client = new JsonRpcClient(transport);

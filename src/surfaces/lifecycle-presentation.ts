@@ -41,6 +41,7 @@ export interface StartupRuntimeInfo {
   nodeVersion: string;
   transport: string;
   codexUpstreamUserAgent: string | null;
+  debugEnabled?: boolean;
 }
 
 type StartupStatus = Pick<
@@ -88,6 +89,10 @@ export function createStartupPresentation(
           {
             label: "App Server UA",
             value: formatUpstreamUserAgent(runtime.codexUpstreamUserAgent),
+          },
+          {
+            label: "调试模式",
+            value: runtime.debugEnabled ? "开启" : "关闭",
           },
         ],
       },

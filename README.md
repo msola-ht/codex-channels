@@ -56,7 +56,7 @@ sudo loginctl enable-linger "$USER"
 
 ## 配置通讯渠道
 
-运行 `codexc setup`，按菜单配置通讯渠道。Gateway 与通讯渠道配置保存在：
+运行 `codexc setup`，按菜单配置模型渠道、通讯渠道和系统设置。Gateway 与通讯渠道配置保存在：
 
 ```text
 ~/.codex-connect/config.toml
@@ -86,6 +86,20 @@ plan_updates = true
 
 - `operation_updates`：`full` 显示完整操作详情，`compact` 显示摘要，`hidden` 隐藏操作过程。
 - `plan_updates`：是否显示 Codex 计划，默认开启。
+
+### 调试模式
+
+在 `codexc setup` 中选择“系统设置 → 调试模式”可全局开启或关闭脱敏调试信息。开启后会把
+`[logging].level` 设为 `debug`，同时启用 Gateway 各模块的脱敏调试日志，并在渠道中显示
+`/vision` 的接收延迟与 Gateway 处理耗时；关闭后恢复为 `info`，隐藏这些技术字段。修改后只需
+重启 Gateway：
+
+```bash
+codexc service restart gateway
+```
+
+调试日志只记录受约束的类型、阶段、耗时和结果，不记录消息正文、请求参数、上游响应、凭据或
+审批内容。分享日志前仍需人工检查。
 
 每次 Turn 完成后会按实际可用数据展示耗时、上下文、缓存、非推理输出速度和提供商账户状态；
 DeepSeek 还会展示可观测的首字延时、思考速度与含推理生成速度。

@@ -52,6 +52,7 @@ describe("shared Surface lifecycle presentation", () => {
       "版本：Codex Connect 0.146.0 · Node.js v22.23.1",
       "连接：Unix WebSocket",
       "App Server UA：codex/0.146.0 (Linux; x64) (gateway; 0.146.0)",
+      "调试模式：关闭",
       "",
       "当前会话：",
       "Workspace：Main (main)",

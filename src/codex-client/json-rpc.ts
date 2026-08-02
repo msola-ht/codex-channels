@@ -29,6 +29,8 @@ interface PendingRequest {
   resolve(value: unknown): void;
   reject(error: Error): void;
   timer: NodeJS.Timeout;
+  method: string;
+  startedAtMs: number;
 }
 
 export interface RpcNotification {
@@ -51,6 +53,7 @@ type RpcClientRequest = RequestWithoutId<ClientRequest>;
 
 export interface ProtocolLogger {
   warn(fields: Record<string, unknown>, message: string): void;
+  debug?(fields: Record<string, unknown>, message: string): void;
 }
 
 export class JsonRpcError extends Error {
@@ -185,13 +188,23 @@ export class JsonRpcClient {
   private async requestOnce<T>(request: RpcClientRequest): Promise<T> {
     const { method } = request;
     const id = this.nextId++;
+    const startedAtMs = Date.now();
     const response = new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        this.logger?.debug?.(
+          {
+            method,
+            requestId: id,
+            durationMs: Date.now() - startedAtMs,
+            outcome: "timeout",
+          },
+          "Codex JSON-RPC 请求完成",
+        );
         reject(new Error(`Codex JSON-RPC 请求超时：${method}`));
       }, this.requestTimeoutMs);
       timer.unref();
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject, timer, method, startedAtMs });
     });
 
     try {
@@ -230,6 +243,16 @@ export class JsonRpcClient {
       }
       clearTimeout(pending.timer);
       this.pending.delete(message.id);
+      this.logger?.debug?.(
+        {
+          method: pending.method,
+          requestId: message.id,
+          durationMs: Date.now() - pending.startedAtMs,
+          outcome: message.error ? "error" : "success",
+          ...(message.error ? { errorCode: message.error.code } : {}),
+        },
+        "Codex JSON-RPC 请求完成",
+      );
       if (message.error) {
         pending.reject(new JsonRpcError(message.error.code, message.error.message, message.error.data));
       } else {

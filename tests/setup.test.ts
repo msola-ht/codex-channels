@@ -45,6 +45,10 @@ describe("Codex Connect setup", () => {
         label: "通讯渠道",
         hint: "配置外部消息入口",
       }, {
+        value: "system",
+        label: "系统设置",
+        hint: "配置全局调试模式",
+      }, {
         value: "cancel",
         label: "取消",
         hint: "退出 Setup",
@@ -73,6 +77,42 @@ describe("Codex Connect setup", () => {
     });
     expect(telegramSetup).toHaveBeenCalledWith({ input, output });
     expect(feishuSetup).not.toHaveBeenCalled();
+  });
+
+  it("selects global debug mode under system settings", async () => {
+    const input = {};
+    const output = {};
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("system")
+        .mockResolvedValueOnce("debug"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+    const debugSetup = vi.fn(async () => "debug-configured");
+
+    await expect(runSetup({
+      input,
+      output,
+      prompts,
+      debugSetup,
+    })).resolves.toBe("debug-configured");
+
+    expect(prompts.select).toHaveBeenNthCalledWith(2, {
+      message: "选择系统设置",
+      showInstructions: false,
+      options: [{
+        value: "debug",
+        label: "调试模式",
+        hint: "控制全局脱敏调试日志和渠道技术字段",
+      }, {
+        value: "back",
+        label: "返回",
+        hint: "返回设置类别",
+      }],
+    });
+    expect(debugSetup).toHaveBeenCalledWith({ input, output, prompts });
   });
 
   it("selects Feishu under the communication channels category", async () => {

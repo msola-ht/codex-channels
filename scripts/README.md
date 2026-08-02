@@ -7,8 +7,11 @@
 - `runtime-config.mjs`：解析用户数据目录和运行时路径，并初始化 `.codex-connect`。
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
   升级到 v4；不自动迁移未知版本。
-- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“通讯渠道”和“模型渠道”流程
-  委派给具体适配器；模型渠道下继续区分 DeepSeek 与图片识别。
+- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型渠道”“通讯渠道”和
+  “系统设置”流程委派给具体适配器；模型渠道下继续区分 DeepSeek 与图片识别，系统设置提供
+  全局调试模式入口。
+- `debug-setup.mjs`：在严格配置中原子切换 `logging.level` 的 `debug` / `info`，控制全局脱敏
+  调试日志和渠道技术字段，不改写显示设置或凭据。
 - `vision-setup.mjs`：为双 Provider 与仅 DeepSeek 模式统一配置外部 Responses 视觉接口；API Key
   写入独立私有凭据文件，不进入主配置或输出。
 - `deepseek-setup.mjs`：复用共享的非敏感 DeepSeek Provider 定义，提供 OpenAI/DeepSeek 切换和

@@ -1,3 +1,5 @@
+import type { Logger } from "pino";
+
 import type { ConversationUseCases } from "../../application/index.js";
 import {
   conversationTargetKey,
@@ -7,7 +9,6 @@ import type {
   ConversationActorRegistry,
   SurfaceAccessPolicy,
 } from "../../policy/index.js";
-
 import { truncateQuotedText } from "../quoted-input.js";
 import {
   WeixinProtocolError,
@@ -80,6 +81,8 @@ export interface WeixinInputAdapterOptions {
   onStopTimeout?(): void;
   closeTimeoutMs?: number;
   now?: () => number;
+  debugEnabled?: boolean;
+  logger?: Pick<Logger, "debug">;
 }
 
 export class WeixinInputAdapter {
@@ -112,6 +115,7 @@ export class WeixinInputAdapter {
         quietWindowMs: 0,
         pollingHealth: this.health,
         now: this.now,
+        debugEnabled: options.debugEnabled ?? false,
         ...(options.doctor === undefined
           ? {}
           : {
@@ -174,6 +178,14 @@ export class WeixinInputAdapter {
 
   private async handle(message: WeixinSupportedMessage): Promise<void> {
     const receivedAtMs = this.now();
+    this.options.logger?.debug(
+      {
+        surface: "weixin",
+        accountId: this.accountId,
+        messageType: message.kind,
+      },
+      "微信输入已到达 Gateway",
+    );
     const target: ConversationTarget = {
       surface: "weixin",
       accountId: this.accountId,

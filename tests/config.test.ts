@@ -21,6 +21,7 @@ import {
 } from "../runtime/gateway-config.mjs";
 import {
   ConfigurationError,
+  isDebugLogLevel,
   loadConfigDocument,
   loadRuntimeConfig,
 } from "../src/config/index.js";
@@ -34,6 +35,13 @@ afterEach(() => {
 });
 
 describe("Gateway config.toml", () => {
+  it("derives global debug mode from debug and trace log levels", () => {
+    expect(isDebugLogLevel("debug")).toBe(true);
+    expect(isDebugLogLevel("trace")).toBe(true);
+    expect(isDebugLogLevel("info")).toBe(false);
+    expect(isDebugLogLevel("warn")).toBe(false);
+  });
+
   it("preserves comments when updating an existing configuration", () => {
     const fixture = createFixture();
     const commented = readFixture(fixture.configPath)

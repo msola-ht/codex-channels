@@ -74,6 +74,7 @@ describe("Feishu output renderer", () => {
       "- **版本：** Codex Connect 0.146.0 · Node.js v24.0.0",
       "- **连接：** Unix WebSocket",
       "- **App Server UA：** codex-cli/0.146.0 (macOS 15.0) (arm64)",
+      "- **调试模式：** 关闭",
       "",
       "**当前会话**",
       "- **Workspace：** Main (main)",

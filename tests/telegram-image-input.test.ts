@@ -151,6 +151,7 @@ describe("Telegram image input", () => {
     });
 
     expect(sentTexts.some((text) => text.includes("图片识别要求已记录"))).toBe(true);
+    expect(sentTexts.some((text) => text.includes("Gateway 处理"))).toBe(false);
     expect(submit).toHaveBeenCalledWith(
       { surface: "telegram", accountId: "default", conversationId: "100" },
       {
@@ -173,6 +174,7 @@ describe("Telegram image input", () => {
       vi.fn(),
       vi.fn(),
       now,
+      true,
     );
 
     await surface.bot.handleUpdate({
@@ -820,6 +822,7 @@ function createSurface(
   downloadTextFile: ReturnType<typeof vi.fn> = vi.fn(),
   downloadAudio: ReturnType<typeof vi.fn> = vi.fn(),
   now?: () => number,
+  debugEnabled = false,
 ): {
   surface: TelegramSurface;
   output: EventBus<OutputEvent>;
@@ -861,6 +864,7 @@ function createSurface(
       rememberActor,
     },
     ...(now === undefined ? {} : { now }),
+    debugEnabled,
   };
   const surface = new TelegramSurface(
     "123:token",

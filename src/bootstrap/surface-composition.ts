@@ -3,7 +3,10 @@ import { dirname, join } from "node:path";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
 
-import type { GatewayConfig } from "../config/index.js";
+import {
+  isDebugLogLevel,
+  type GatewayConfig,
+} from "../config/index.js";
 import { selectHttpProxyUrl } from "../../runtime/network-proxy.mjs";
 import {
   conversationTargetKey,
@@ -148,11 +151,13 @@ function createWeixinModule(
           transport: "Unix WebSocket",
           codexUpstreamUserAgent:
             options.codexUpstreamUserAgent() ?? null,
+          debugEnabled: isDebugLogLevel(options.config.logLevel),
         },
       ),
     },
     operationUpdateDisplay: options.config.operationUpdateDisplay,
     planUpdatesEnabled: options.config.planUpdatesEnabled,
+    debugEnabled: isDebugLogLevel(options.config.logLevel),
     fetchImpl: createProxyFetch(options.config.networkProxy),
     logger: options.logger,
     onFatal: (error) => options.onFatal("weixin", config.accountId, error),
@@ -206,6 +211,7 @@ function createFeishuModule(
     disableEnvironmentProxy: true,
     operationUpdateDisplay: options.config.operationUpdateDisplay,
     planUpdatesEnabled: options.config.planUpdatesEnabled,
+    debugEnabled: isDebugLogLevel(options.config.logLevel),
     ...(openApiAgent
       ? {
           openApiAgent,
@@ -247,6 +253,7 @@ function createFeishuModule(
               transport: "Unix WebSocket",
               codexUpstreamUserAgent:
                 options.codexUpstreamUserAgent() ?? null,
+              debugEnabled: isDebugLogLevel(options.config.logLevel),
             },
           ),
         };
@@ -310,6 +317,7 @@ function createTelegramModule(
     finalMessageFormat: config.telegramMessageFormat,
     operationUpdateDisplay: config.operationUpdateDisplay,
     planUpdatesEnabled: config.planUpdatesEnabled,
+    debugEnabled: isDebugLogLevel(config.logLevel),
     gatewayVersion: options.gatewayVersion,
     codexUpstreamUserAgent: options.codexUpstreamUserAgent,
   });

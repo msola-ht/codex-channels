@@ -125,7 +125,7 @@
   `/status` 继续复用共享 Conversation 状态，非 Git 目录安全回退。
 - SQLite 前台与后台最小绑定恢复、Schema v3 显式备份升级到 v4、当前版本 Schema 缺失失败关闭、配置文件类型/所有者/权限和父目录
   写权限失败关闭、配置热加载与自动重启分类、Setup
-  类别与通讯渠道菜单、Telegram Setup、飞书手动输入与扫码注册的消息和 CardKit 最小权限、卡片动作回调
+  类别、通讯渠道菜单与全局调试模式的原子启停、Telegram Setup、飞书手动输入与扫码注册的消息和 CardKit 最小权限、卡片动作回调
   声明、应用选择、Bot 身份验证、扫码后自动发布悬浮菜单、发布失败保留连接配置并安全提示 Doctor
   恢复、授权域名约束、允许名单确认、原子保存和错误脱敏、
   CLI 项目规则生成/检查、launchd、systemd、Unix WebSocket 私有目录/真实 Socket 校验和请求头、

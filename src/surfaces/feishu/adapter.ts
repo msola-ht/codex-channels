@@ -99,6 +99,7 @@ export class FeishuConversationAdapter {
       readQuotedText?(messageId: string): Promise<string | undefined>;
       onQuotedTextError?(error: unknown): void;
       now?: () => number;
+      debugEnabled?: boolean;
     } = { quietWindowMs: 0 },
   ) {
     this.commands = new ConversationCommandService(conversations);
@@ -181,11 +182,13 @@ export class FeishuConversationAdapter {
           );
           this.notifyMarkdown(
             message.target.conversationId,
-            formatVisionCommandTiming(rendered, {
-              createdAtMs: message.createdAtMs,
-              receivedAtMs,
-              respondedAtMs: now(),
-            }),
+            this.inputOptions.debugEnabled
+              ? formatVisionCommandTiming(rendered, {
+                  createdAtMs: message.createdAtMs,
+                  receivedAtMs,
+                  respondedAtMs: now(),
+                })
+              : rendered,
           );
           return;
         }

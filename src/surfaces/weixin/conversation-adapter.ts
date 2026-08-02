@@ -102,6 +102,7 @@ export class WeixinConversationAdapter {
       pollingHealth?: { snapshot(): WeixinPollingHealthSnapshot };
       doctor?: WeixinDoctor;
       now?: () => number;
+      debugEnabled?: boolean;
     } = { quietWindowMs: 0 },
     private readonly files?: Pick<WeixinFilePort, "download">,
     private readonly audios?: Pick<WeixinAudioPort, "download">,
@@ -301,13 +302,15 @@ export class WeixinConversationAdapter {
         );
         this.notifyCommand(
           message.target,
-          formatVisionCommandTiming(rendered, {
-            ...(message.createdAtMs === undefined
-              ? {}
-              : { createdAtMs: message.createdAtMs }),
-            receivedAtMs,
-            respondedAtMs: now(),
-          }),
+          this.inputOptions.debugEnabled
+            ? formatVisionCommandTiming(rendered, {
+                ...(message.createdAtMs === undefined
+                  ? {}
+                  : { createdAtMs: message.createdAtMs }),
+                receivedAtMs,
+                respondedAtMs: now(),
+              })
+            : rendered,
         );
         return;
       }
