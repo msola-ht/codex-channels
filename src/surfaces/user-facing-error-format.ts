@@ -14,6 +14,10 @@ export function formatSurfaceUserFacingError(
       return "当前还没有 Codex Thread";
     case "conversation.busy":
       return "当前任务运行中，请先使用 /stop 停止当前任务";
+    case "conversation.background-limit":
+      return error.message;
+    case "conversation.background-queued":
+      return "当前任务仍有下一 Turn 排队消息，暂不能切换会话";
     case "image.path.invalid":
       return "本地图片路径必须是绝对路径";
     case "image.too-large":

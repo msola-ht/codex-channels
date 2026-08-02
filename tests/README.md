@@ -8,6 +8,8 @@
   重试和断线清理。
 - Thread 新建、列表、恢复、切换、删除、订阅、恢复失败绑定保留、关闭/归档/删除通知语义、
   官方响应到稳定路由快照的映射与必需字段失败关闭、活动 Turn 重启恢复和 Workspace 路由。
+- 运行中 `/resume`/`new` 的前台转后台、订阅保留、前后台 Turn 独立归约、后台完成清理、会话列表
+  标识，以及后台审批和结果继续投递原 Conversation。
 - 多 Provider Client 的 Thread 归属发现、状态合并、Turn 路由、Server Request ID 隔离、独立重连
   与定向绑定/交互恢复；切换模式双 App Server、固定模式单主实例和 Provider Remote TUI Socket 选择。
 - Thread 设置、归档、删除和关闭 Notification 到稳定 Routing 事件的映射，残缺或无关通知隔离，
@@ -121,7 +123,7 @@
 - 当前授权 Workspace 的 Git 分支通过组合根有时限只读查询进入共享 Conversation 状态，并由
   Telegram、飞书与微信共用的上线通知、Turn 开始确认和 `turn.completed` 结束汇报契约一致展示；
   `/status` 继续复用共享 Conversation 状态，非 Git 目录安全回退。
-- SQLite 最小绑定恢复、当前版本 Schema 缺失失败关闭、配置文件类型/所有者/权限和父目录
+- SQLite 前台与后台最小绑定恢复、Schema v3 显式备份升级到 v4、当前版本 Schema 缺失失败关闭、配置文件类型/所有者/权限和父目录
   写权限失败关闭、配置热加载与自动重启分类、Setup
   类别与通讯渠道菜单、Telegram Setup、飞书手动输入与扫码注册的消息和 CardKit 最小权限、卡片动作回调
   声明、应用选择、Bot 身份验证、扫码后自动发布悬浮菜单、发布失败保留连接配置并安全提示 Doctor

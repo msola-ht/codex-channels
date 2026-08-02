@@ -55,6 +55,9 @@ Surface 应依赖 `ConversationUseCases` 驱动会话，不依赖具体服务类
 Thread 的权威状态仍来自 App Server，本模块只编排请求和必要的本地选择。
 下一 Turn 队列按 Conversation 隔离、每个会话最多 10 条且只保存在内存中；`turn.completed`
 后一次启动一条，Thread 变化或启动失败时清空，不能把消息正文写入 StateStore。
+运行中通过 `/resume` 或 `/new` 切换时，Application 只把当前 Thread 转为有界后台绑定，不停止
+Turn；后续普通输入、`/queue` 与 `/stop` 仍只作用于前台 Thread。后台完成事件不消费前台下一
+Turn 队列。
 扩展查询也保持平台无关：Skill 只向 Surface 返回当前用户或 Workspace 直接安装且已启用项的
 名称与说明；显式调用时由 Client 再按精确名称解析绝对路径，排除系统和插件缓存内容。MCP 只返回
 展示所需的稳定摘要，并按当前 Thread 读取项目级配置；Plugin 只返回已安装项的稳定摘要，不触发

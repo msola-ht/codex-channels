@@ -43,6 +43,30 @@ afterEach(() => {
 });
 
 describe("SqliteBindingStore", () => {
+  it("persists foreground and background bindings independently", () => {
+    const { path } = databasePath();
+    const first = new SqliteBindingStore(path);
+    first.bind({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" });
+    const switched = first.switchForeground(
+      { target, workspaceId: "main", threadId: "thread-2", sessionId: "session-2" },
+      true,
+    );
+
+    expect(switched.backgrounded?.threadId).toBe("thread-1");
+    expect(first.get(target)?.threadId).toBe("thread-2");
+    expect(first.backgrounds(target).map(({ threadId }) => threadId)).toEqual(["thread-1"]);
+    first.close();
+
+    const reopened = new SqliteBindingStore(path);
+    expect(reopened.get(target)?.threadId).toBe("thread-2");
+    expect(reopened.backgrounds(target).map(({ threadId }) => threadId)).toEqual(["thread-1"]);
+    expect(reopened.isBackground("thread-1")).toBe(true);
+    expect(reopened.list()).toHaveLength(2);
+    reopened.removeThread("thread-1");
+    expect(reopened.getByThread("thread-1")).toBeUndefined();
+    reopened.close();
+  });
+
   it("atomically transfers a Thread binding and persists the replaced destination", () => {
     const { path } = databasePath();
     const destination = {
@@ -195,7 +219,7 @@ describe("SqliteBindingStore", () => {
     database.close();
 
     expect(() => new SqliteBindingStore(path)).toThrow(
-      "状态数据库版本不兼容：当前 2，Gateway 需要 3",
+      "状态数据库版本不兼容：当前 2，Gateway 需要 4",
     );
   });
 
@@ -224,7 +248,17 @@ describe("SqliteBindingStore", () => {
         PRIMARY KEY (surface, account_id, conversation_id)
       ) STRICT;
 
-      PRAGMA user_version = 3;
+      CREATE TABLE conversation_background_bindings (
+        surface TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        thread_id TEXT NOT NULL PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      PRAGMA user_version = 4;
     `);
     database.close();
 
@@ -283,6 +317,20 @@ describe("SqliteBindingStore", () => {
 });
 
 describe("MemoryBindingStore", () => {
+  it("promotes one background binding while demoting the active foreground", () => {
+    const store = new MemoryBindingStore();
+    const first = { target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" };
+    const second = { target, workspaceId: "main", threadId: "thread-2", sessionId: "session-2" };
+    store.bind(first);
+    store.switchForeground(second, true);
+    store.switchForeground(first, true);
+
+    expect(store.get(target)).toEqual(first);
+    expect(store.backgrounds(target)).toEqual([second]);
+    expect(store.getByThread("thread-1")).toEqual(first);
+    expect(store.getByThread("thread-2")).toEqual(second);
+  });
+
   it("moves one Thread between conversations while releasing the destination binding", () => {
     const store = new MemoryBindingStore();
     const destination = {

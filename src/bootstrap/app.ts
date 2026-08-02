@@ -262,6 +262,24 @@ export class GatewayApplication {
       if (event.type !== "turn.completed") {
         return;
       }
+      if (this.router.isBackgroundThread(event.threadId)) {
+        try {
+          await this.router.releaseBackground(event.threadId);
+        } catch (error) {
+          this.logger.warn(
+            { err: error, threadId: event.threadId },
+            "后台 Thread 完成后的订阅清理失败，已保留绑定供重启重试",
+          );
+          this.output.publish({
+            type: "warning",
+            target: event.target,
+            threadId: event.threadId,
+            background: true,
+            message: "后台任务已完成，但订阅清理暂时失败；Gateway 重启后会重试。",
+          }, true);
+        }
+        return;
+      }
       try {
         await service.handleTurnCompleted(
           event.target,
@@ -725,6 +743,15 @@ export class GatewayApplication {
           || this.codex.knownProvider(binding.threadId) === provider),
       (binding, thread) => {
         if (thread.status.type !== "active") {
+          if (this.router.isBackgroundThread(binding.threadId)) {
+            this.output.publish({
+              type: "warning",
+              target: binding.target,
+              threadId: binding.threadId,
+              background: true,
+              message: "后台任务已在 Gateway 离线期间结束，可通过 /resume 查看完整会话。",
+            }, true);
+          }
           return;
         }
         if (thread.activeTurnId) {

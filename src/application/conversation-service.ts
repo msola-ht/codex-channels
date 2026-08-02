@@ -93,6 +93,7 @@ export interface ConversationTransferPort {
 
 export interface ConversationResumeResult {
   threadId: string;
+  backgroundedThreadId?: string;
   transferredFrom?: SurfaceId;
 }
 
@@ -109,6 +110,7 @@ interface QueuedFollowUp {
 }
 
 const maximumQueuedFollowUpsPerConversation = 10;
+const maximumBackgroundThreadsPerConversation = 3;
 const maximumConcurrentVisionRecognitions = 2;
 const visionHeartbeatInitialDelayMs = 10_000;
 const visionHeartbeatIntervalMs = 20_000;
@@ -152,8 +154,9 @@ export interface ConversationUseCases {
     target: ConversationTarget,
     options?: { archived?: boolean; searchTerm?: string },
   ): Promise<ConversationSession[]>;
+  backgroundThreadIds?(target: ConversationTarget): string[];
   resume(target: ConversationTarget, selector: string): Promise<ConversationResumeResult>;
-  newSession(target: ConversationTarget): Promise<void>;
+  newSession(target: ConversationTarget): Promise<string | undefined>;
   archive(target: ConversationTarget): Promise<string>;
   unarchive(target: ConversationTarget, selector: string): Promise<string>;
   artifacts(target: ConversationTarget): TurnArtifacts | undefined;
@@ -381,6 +384,9 @@ export class ConversationService implements ConversationUseCases {
     threadId: string,
   ): Promise<Submission | undefined> {
     return this.locked(target, async () => {
+      if (this.router.isBackgroundThread?.(threadId)) {
+        return undefined;
+      }
       if (this.core.activeTurn(target)) {
         return undefined;
       }
@@ -449,6 +455,10 @@ export class ConversationService implements ConversationUseCases {
     });
   }
 
+  backgroundThreadIds(target: ConversationTarget): string[] {
+    return (this.router.backgroundBindings?.(target) ?? []).map((binding) => binding.threadId);
+  }
+
   async resume(
     target: ConversationTarget,
     selector: string,
@@ -457,6 +467,12 @@ export class ConversationService implements ConversationUseCases {
     const selected = resolveThread(sessions, selector.trim());
     const owner = this.router.targetForThread(selected.id);
     if (owner && conversationTargetKey(owner) !== conversationTargetKey(target)) {
+      if (this.router.isBackgroundThread?.(selected.id)) {
+        throw new UserFacingError(
+          "thread.takeover.busy",
+          "运行中的后台 Thread 不能跨渠道接管",
+        );
+      }
       if (owner.surface === target.surface) {
         throw new UserFacingError(
           "thread.bound",
@@ -517,7 +533,7 @@ export class ConversationService implements ConversationUseCases {
       });
     }
     return this.locked(target, async () => {
-      this.requireIdle(target);
+      const active = this.core.activeTurn(target);
       const currentOwner = this.router.targetForThread(selected.id);
       if (
         currentOwner
@@ -528,17 +544,56 @@ export class ConversationService implements ConversationUseCases {
           "Codex Thread 绑定已变化，请重新选择",
         );
       }
-      const binding = await this.router.resume(target, selected.id);
+      const current = this.router.current?.(target);
+      const preserveCurrent = active !== undefined && current?.threadId !== selected.id;
+      if (preserveCurrent && this.hasQueuedFollowUps(target)) {
+        throw new UserFacingError(
+          "conversation.background-queued",
+          "当前任务仍有下一 Turn 排队消息，暂不能转入后台",
+        );
+      }
+      if (
+        preserveCurrent
+        && !this.router.isBackgroundThread?.(selected.id)
+        && (this.router.backgroundBindings?.(target).length ?? 0) >= maximumBackgroundThreadsPerConversation
+      ) {
+        throw new UserFacingError(
+          "conversation.background-limit",
+          `后台任务已满，最多同时运行 ${maximumBackgroundThreadsPerConversation} 个`,
+        );
+      }
+      const binding = preserveCurrent
+        ? await this.router.resume(target, selected.id, true)
+        : await this.router.resume(target, selected.id);
       this.clearPendingSelections(target);
-      return { threadId: binding.threadId };
+      return {
+        threadId: binding.threadId,
+        ...(preserveCurrent && current ? { backgroundedThreadId: current.threadId } : {}),
+      };
     });
   }
 
-  newSession(target: ConversationTarget): Promise<void> {
+  newSession(target: ConversationTarget): Promise<string | undefined> {
     return this.locked(target, async () => {
-      this.requireIdle(target);
-      await this.router.newSession(target);
+      const active = this.core.activeTurn(target);
+      if (active && this.hasQueuedFollowUps(target)) {
+        throw new UserFacingError(
+          "conversation.background-queued",
+          "当前任务仍有下一 Turn 排队消息，暂不能转入后台",
+        );
+      }
+      if (
+        active
+        && (this.router.backgroundBindings?.(target).length ?? 0) >= maximumBackgroundThreadsPerConversation
+      ) {
+        throw new UserFacingError(
+          "conversation.background-limit",
+          `后台任务已满，最多同时运行 ${maximumBackgroundThreadsPerConversation} 个`,
+        );
+      }
+      await this.router.newSession(target, active !== undefined);
       this.clearPendingSelections(target);
+      return active?.threadId;
     });
   }
 
@@ -576,6 +631,12 @@ export class ConversationService implements ConversationUseCases {
   selectWorkspace(target: ConversationTarget, selector: string): Promise<Workspace> {
     return this.locked(target, async () => {
       this.requireIdle(target);
+      if ((this.router.backgroundBindings?.(target).length ?? 0) > 0) {
+        throw new UserFacingError(
+          "conversation.busy",
+          "仍有后台任务运行，暂不能切换 Workspace",
+        );
+      }
       const selected = this.router.resolveWorkspace(selector);
       const currentWorkspaceId = this.router.workspace(target).id;
       const workspace = await this.router.selectWorkspace(target, selected.id);

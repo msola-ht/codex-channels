@@ -116,11 +116,12 @@ export function formatConversationSessions(
   const visibleSessions = result.sessions.slice(0, maximumSessionEntries);
   const hiddenCount = result.sessions.length - visibleSessions.length;
   const searchCommand = result.archived ? "archived" : "sessions";
+  const backgroundThreadIds = new Set(result.backgroundThreadIds ?? []);
   return [
     `${result.archived ? "已归档会话" : "历史会话"}（${result.sessions.length}）${result.searchTerm ? ` · 搜索：${result.searchTerm}` : ""}：`,
     ...visibleSessions.map(
       (session, index) =>
-        `${index + 1}. ${session.isPinned ? "固定 · " : ""}${formatSessionLabel(session.name ?? session.preview)}${session.model ? ` · 模型：${session.model}` : ""} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : ""}`,
+        `${index + 1}. ${session.isPinned ? "固定 · " : ""}${formatSessionLabel(session.name ?? session.preview)}${session.model ? ` · 模型：${session.model}` : ""} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : backgroundThreadIds.has(session.id) ? " · 后台运行" : ""}`,
     ),
     ...(hiddenCount > 0
       ? [
@@ -142,9 +143,17 @@ export function formatConversationCommandOutcome(
     case "thread.resumed":
       return outcome.transferredFrom
         ? `${formatTakeoverSource(outcome.transferredFrom)}\nThread：${outcome.threadId}`
-        : `已恢复 Codex Thread\nThread：${outcome.threadId}`;
+        : [
+            "已恢复 Codex Thread",
+            `Thread：${outcome.threadId}`,
+            ...(outcome.backgroundedThreadId
+              ? [`原任务已转入后台：${outcome.backgroundedThreadId}`]
+              : []),
+          ].join("\n");
     case "session.new":
-      return "已退出当前会话，下一条普通消息将创建新的 Codex Thread。";
+      return outcome.backgroundedThreadId
+        ? `已切换到新会话，原任务继续在后台运行。\n后台 Thread：${outcome.backgroundedThreadId}\n下一条普通消息将创建新的 Codex Thread。`
+        : "已退出当前会话，下一条普通消息将创建新的 Codex Thread。";
     case "thread.archived":
       return `已归档 Codex Thread\nThread：${outcome.threadId}\n下一条普通消息将创建新会话。`;
     case "thread.unarchived":

@@ -58,6 +58,8 @@ describe("codexc CLI", () => {
       [["rules", "-h"], "用法：codexc rules"],
       [["rules", "init", "-h"], "用法：codexc rules init"],
       [["rules", "check", "--help"], "用法：codexc rules check"],
+      [["state", "-h"], "用法：codexc state upgrade"],
+      [["state", "upgrade", "--help"], "用法：codexc state upgrade"],
       [["version", "-h"], "用法：codexc version"],
       [["gateway", "-h"], "用法：codexc gateway"],
       [["service-app-server", "--help"], "用法：codexc service-app-server"],

@@ -48,6 +48,9 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
     }
 
     const requestId = String(request.requestId);
+    const title = (value: string): string => this.router.isBackgroundThread(request.threadId)
+      ? `后台任务 · ${request.threadId.slice(0, 12)} · ${value}`
+      : value;
     switch (request.type) {
       case "command": {
         if (!offersCommandDecision(request.availableDecisions, "accept")) {
@@ -70,7 +73,7 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
           threadId: request.threadId,
           turnId: request.turnId,
           itemId: request.itemId,
-          title: isNetworkOnly ? "Codex 请求访问网络" : "Codex 请求执行命令",
+          title: title(isNetworkOnly ? "Codex 请求访问网络" : "Codex 请求执行命令"),
           detail: [
             request.reason ?? undefined,
             hasCommand ? request.command ?? undefined : undefined,
@@ -114,7 +117,7 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
           threadId: request.threadId,
           turnId: request.turnId,
           itemId: request.itemId,
-          title: "Codex 请求修改文件",
+          title: title("Codex 请求修改文件"),
           detail: request.reason ?? "Codex 请求修改文件",
           allowSession: true,
           expiresInMs: this.timeoutMs,
@@ -132,7 +135,7 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
           threadId: request.threadId,
           turnId: request.turnId,
           itemId: request.itemId,
-          title: "Codex 请求临时权限",
+          title: title("Codex 请求临时权限"),
           detail: request.reason ?? JSON.stringify(request.permissions, null, 2),
           allowSession: false,
           expiresInMs: this.timeoutMs,
@@ -152,7 +155,7 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
           threadId: request.threadId,
           turnId: request.turnId,
           itemId: request.itemId,
-          title: "Codex 需要补充信息",
+          title: title("Codex 需要补充信息"),
           questions: request.questions.map((question) => ({
             id: question.id,
             header: question.header,
@@ -175,9 +178,9 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
           requestId,
           threadId: request.threadId,
           turnId: request.turnId,
-          title: toolApproval
+          title: title(toolApproval
             ? `MCP ${toolApproval.connectorName ?? request.serverName} 请求批准`
-            : `MCP ${request.serverName} 请求输入`,
+            : `MCP ${request.serverName} 请求输入`),
           message: request.message,
           mode: toolApproval
             ? "tool-approval"

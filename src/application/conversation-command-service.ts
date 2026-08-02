@@ -50,6 +50,7 @@ export type ConversationCommandResult =
       kind: "sessions";
       sessions: Awaited<ReturnType<ConversationUseCases["listSessions"]>>;
       currentThreadId?: string;
+      backgroundThreadIds?: string[];
       archived: boolean;
       searchTerm?: string;
     }
@@ -91,8 +92,8 @@ export type ConversationCommandResult =
   | { kind: "goal"; goal: ThreadGoal | null };
 
 export type ConversationCommandOutcome =
-  | { type: "thread.resumed"; threadId: string; transferredFrom?: string }
-  | { type: "session.new" }
+  | { type: "thread.resumed"; threadId: string; backgroundedThreadId?: string; transferredFrom?: string }
+  | { type: "session.new"; backgroundedThreadId?: string }
   | { type: "thread.archived"; threadId: string }
   | { type: "thread.unarchived"; threadId: string }
   | { type: "thread.pin-updated"; pinned: boolean }
@@ -137,6 +138,9 @@ export class ConversationCommandService {
             outcome: {
               type: "thread.resumed",
               threadId: resumed.threadId,
+              ...(resumed.backgroundedThreadId
+                ? { backgroundedThreadId: resumed.backgroundedThreadId }
+                : {}),
               ...(resumed.transferredFrom
                 ? { transferredFrom: resumed.transferredFrom }
                 : {}),
@@ -145,11 +149,13 @@ export class ConversationCommandService {
         }
         const sessions = await this.conversations.listSessions(target);
         const currentThreadId = this.conversations.status(target).threadId;
+        const backgroundThreadIds = this.conversations.backgroundThreadIds?.(target) ?? [];
         return {
           kind: "sessions",
           sessions,
           archived: false,
           ...(currentThreadId ? { currentThreadId } : {}),
+          ...(backgroundThreadIds.length > 0 ? { backgroundThreadIds } : {}),
         };
       }
       case "sessions": {
@@ -157,11 +163,13 @@ export class ConversationCommandService {
           ...(argumentsText ? { searchTerm: argumentsText } : {}),
         });
         const currentThreadId = this.conversations.status(target).threadId;
+        const backgroundThreadIds = this.conversations.backgroundThreadIds?.(target) ?? [];
         return {
           kind: "sessions",
           sessions,
           archived: false,
           ...(currentThreadId ? { currentThreadId } : {}),
+          ...(backgroundThreadIds.length > 0 ? { backgroundThreadIds } : {}),
           ...(argumentsText ? { searchTerm: argumentsText } : {}),
         };
       }
@@ -177,12 +185,16 @@ export class ConversationCommandService {
           ...(argumentsText ? { searchTerm: argumentsText } : {}),
         };
       }
-      case "new":
-        await this.conversations.newSession(target);
+      case "new": {
+        const backgroundedThreadId = await this.conversations.newSession(target);
         return {
           kind: "outcome",
-          outcome: { type: "session.new" },
+          outcome: {
+            type: "session.new",
+            ...(backgroundedThreadId ? { backgroundedThreadId } : {}),
+          },
         };
+      }
       case "archive": {
         const threadId = await this.conversations.archive(target);
         return {

@@ -42,7 +42,7 @@ type WithoutTarget<T> = T extends unknown ? Omit<T, "target"> : never;
 type UntargetedOutputEvent = WithoutTarget<OutputEvent>;
 
 export class ConversationCore {
-  private readonly activeByConversation = new Map<string, ActiveTurn>();
+  private readonly activeByThread = new Map<string, ActiveTurn>();
   private readonly errorsByTurn = new Map<string, string>();
   private readonly usageByThread = new Map<string, ThreadTokenUsage>();
   private readonly usageTurnByThread = new Map<string, string>();
@@ -63,7 +63,7 @@ export class ConversationCore {
   ) {}
 
   markTurnStarted(target: ConversationTarget, threadId: string, turnId: string): void {
-    const current = this.activeByConversation.get(this.key(target));
+    const current = this.activeByThread.get(threadId);
     if (current?.threadId === threadId && current.turnId === turnId) {
       return;
     }
@@ -71,8 +71,14 @@ export class ConversationCore {
     if (artifacts?.turnId !== turnId) {
       this.artifactsByThread.set(threadId, { threadId, turnId });
     }
-    this.activeByConversation.set(this.key(target), { target, threadId, turnId });
-    this.publish({ type: "turn.started", target, threadId, turnId });
+    this.activeByThread.set(threadId, { target, threadId, turnId });
+    this.publish({
+      type: "turn.started",
+      target,
+      threadId,
+      turnId,
+      ...(this.isBackgroundThread(threadId) ? { background: true } : {}),
+    });
   }
 
   visionStarted(
@@ -103,7 +109,16 @@ export class ConversationCore {
   }
 
   activeTurn(target: ConversationTarget): ActiveTurn | undefined {
-    return this.activeByConversation.get(this.key(target));
+    const threadId = this.router.foregroundThreadId?.(target);
+    if (threadId) return this.activeByThread.get(threadId);
+    return [...this.activeByThread.values()].find(
+      (active) => this.key(active.target) === this.key(target)
+        && !this.isBackgroundThread(active.threadId),
+    );
+  }
+
+  activeTurnForThread(threadId: string): ActiveTurn | undefined {
+    return this.activeByThread.get(threadId);
   }
 
   tokenUsage(threadId: string): ThreadTokenUsage | undefined {
@@ -160,9 +175,9 @@ export class ConversationCore {
 
   connectionLost(message: string, affectedThreadIds?: ReadonlySet<string>): void {
     if (affectedThreadIds) {
-      for (const [key, active] of this.activeByConversation) {
+      for (const [threadId, active] of this.activeByThread) {
         if (affectedThreadIds.has(active.threadId)) {
-          this.activeByConversation.delete(key);
+          this.activeByThread.delete(threadId);
         }
       }
       for (const threadId of affectedThreadIds) {
@@ -185,7 +200,7 @@ export class ConversationCore {
       }
       return;
     }
-    this.activeByConversation.clear();
+    this.activeByThread.clear();
     this.errorsByTurn.clear();
     this.usageByThread.clear();
     this.usageTurnByThread.clear();
@@ -368,9 +383,9 @@ export class ConversationCore {
           this.timingByThread.delete(event.threadId);
           return;
         }
-        const active = this.activeByConversation.get(this.key(target));
+        const active = this.activeByThread.get(event.threadId);
         if (active?.turnId === event.turnId) {
-          this.activeByConversation.delete(this.key(target));
+          this.activeByThread.delete(event.threadId);
         }
         const error = event.error ?? this.errorsByTurn.get(event.turnId);
         const tokenUsage = this.usageTurnByThread.get(event.threadId) === event.turnId
@@ -412,6 +427,7 @@ export class ConversationCore {
           ...(weeklyLimit ? { weeklyLimit } : {}),
           ...(goal ? { goal } : {}),
           ...(contextCompactionCount !== undefined ? { contextCompactionCount } : {}),
+          ...(this.isBackgroundThread(event.threadId) ? { background: true } : {}),
         });
         return;
       }
@@ -435,7 +451,7 @@ export class ConversationCore {
         this.clearItemPhases(event.threadId);
         this.artifactsByThread.delete(event.threadId);
         if (target) {
-          this.activeByConversation.delete(this.key(target));
+          this.activeByThread.delete(event.threadId);
         }
         return;
       }
@@ -520,8 +536,16 @@ export class ConversationCore {
   ): void {
     const target = this.router.targetForThread(threadId);
     if (target) {
-      this.publish({ ...event, target });
+      this.publish({
+        ...event,
+        target,
+        ...(this.isBackgroundThread(threadId) ? { background: true } : {}),
+      });
     }
+  }
+
+  private isBackgroundThread(threadId: string): boolean {
+    return this.router.isBackgroundThread?.(threadId) ?? false;
   }
 
   private publishUserMessage(
@@ -547,6 +571,7 @@ export class ConversationCore {
       turnId: event.turnId,
       itemId: event.itemId,
       text: event.text,
+      ...(this.isBackgroundThread(event.threadId) ? { background: true } : {}),
     });
   }
 

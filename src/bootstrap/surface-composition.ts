@@ -5,7 +5,10 @@ import type { Logger } from "pino";
 
 import type { GatewayConfig } from "../config/index.js";
 import { selectHttpProxyUrl } from "../../runtime/network-proxy.mjs";
-import type { ConversationTarget } from "../conversation-core/index.js";
+import {
+  conversationTargetKey,
+  type ConversationTarget,
+} from "../conversation-core/index.js";
 import {
   FeishuAccessPolicy,
   TelegramAccessPolicy,
@@ -407,7 +410,7 @@ export function removeUnauthorizedTelegramBindings(
   accountId = telegramDefaultAccountId,
 ): number {
   let removed = 0;
-  for (const binding of bindings.list()) {
+  for (const binding of uniqueConversationBindings(bindings)) {
     if (binding.target.surface !== "telegram" || binding.target.accountId !== accountId) {
       continue;
     }
@@ -429,7 +432,7 @@ export function removeUnauthorizedFeishuBindings(
   accountId: string,
 ): number {
   let removed = 0;
-  for (const binding of bindings.list()) {
+  for (const binding of uniqueConversationBindings(bindings)) {
     if (
       binding.target.surface !== "feishu"
       || binding.target.accountId !== accountId
@@ -452,7 +455,7 @@ export function removeUnauthorizedWeixinBindings(
   accountId: string,
 ): number {
   let removed = 0;
-  for (const binding of bindings.list()) {
+  for (const binding of uniqueConversationBindings(bindings)) {
     if (
       binding.target.surface !== "weixin"
       || binding.target.accountId !== accountId
@@ -475,7 +478,7 @@ function authorizedFeishuConversations(
   access: FeishuAccessPolicy,
   accountId: string,
 ): string[] {
-  return bindings.list().flatMap((binding) => {
+  return uniqueConversationBindings(bindings).flatMap((binding) => {
     if (
       binding.target.surface !== "feishu"
       || binding.target.accountId !== accountId
@@ -495,7 +498,7 @@ function authorizedWeixinConversations(
   access: WeixinAccessPolicy,
   accountId: string,
 ): ConversationTarget[] {
-  return bindings.list().flatMap((binding) => {
+  return uniqueConversationBindings(bindings).flatMap((binding) => {
     if (
       binding.target.surface !== "weixin"
       || binding.target.accountId !== accountId
@@ -510,4 +513,12 @@ function authorizedWeixinConversations(
     }
     return [binding.target];
   });
+}
+
+function uniqueConversationBindings(bindings: BindingStore) {
+  const unique = new Map<string, ReturnType<BindingStore["list"]>[number]>();
+  for (const binding of bindings.list()) {
+    unique.set(conversationTargetKey(binding.target), binding);
+  }
+  return [...unique.values()];
 }

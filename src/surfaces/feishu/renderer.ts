@@ -165,14 +165,16 @@ export function renderFeishuOutput(event: OutputEvent): string | null {
       return formatVisionCompleted(event);
     case "turn.started":
       return renderFeishuLifecyclePresentation(
-        createTurnStartedPresentation(),
+        createTurnStartedPresentation(event.background ? event.threadId : undefined),
       );
     case "text.delta":
       return null;
     case "user.message":
       return formatCliInput(event.text);
     case "text.completed":
-      return event.text.trim() ? event.text : emptyCodexResponseText;
+      return event.text.trim()
+        ? `${event.background ? `后台任务 · ${event.threadId.slice(0, 12)}\n\n` : ""}${event.text}`
+        : emptyCodexResponseText;
     case "operation.updated":
     case "plan.updated":
       return null;

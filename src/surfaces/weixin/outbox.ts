@@ -138,7 +138,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
         () => this.send(
           event.target,
           renderPlainLifecyclePresentation(
-            createTurnStartedPresentation(),
+            createTurnStartedPresentation(event.background ? event.threadId : undefined),
           ),
         ),
         true,
@@ -333,7 +333,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
         }
         return event.text.trim().length === 0
           ? emptyCodexResponseText
-          : formatWeixinFinalText(event.text);
+          : formatWeixinFinalText(
+              `${event.background ? `后台任务 · ${event.threadId.slice(0, 12)}\n\n` : ""}${event.text}`,
+            );
       case "turn.completed": {
         return formatWeixinCommandText(renderWeixinTurnCompleted(event));
       }

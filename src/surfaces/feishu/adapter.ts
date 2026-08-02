@@ -833,6 +833,7 @@ function renderCommandCenterChoices(
     if (result.sessions.length === 0) {
       return undefined;
     }
+    const backgroundThreadIds = new Set(result.backgroundThreadIds ?? []);
     return {
       title: "选择会话",
       description: "点击后切换到对应 Codex Thread。",
@@ -843,7 +844,7 @@ function renderCommandCenterChoices(
           input: "",
         },
         ...result.sessions.map((session) => ({
-          label: `${session.id === result.currentThreadId ? "✓ " : ""}${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${session.model}` : ""}`,
+          label: `${session.id === result.currentThreadId ? "✓ " : backgroundThreadIds.has(session.id) ? "后台 · " : ""}${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${session.model}` : ""}`,
           action: "resume" as const,
           input: session.id,
         })),

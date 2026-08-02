@@ -14,6 +14,44 @@ import { EventBus } from "../src/event-bus/event-bus.js";
 import type { ConversationRoutingPort } from "../src/conversation-core/routing-port.js";
 
 describe("ConversationCore", () => {
+  it("tracks foreground and background Turns independently", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+    let foregroundThreadId = "thread-1";
+    const background = new Set<string>();
+    const core = new ConversationCore({
+      allBindings: () => [],
+      foregroundThreadId: () => foregroundThreadId,
+      isBackgroundThread: (threadId) => background.has(threadId),
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+    core.markTurnStarted(target, "thread-1", "turn-1");
+    background.add("thread-1");
+    foregroundThreadId = "thread-2";
+    core.markTurnStarted(target, "thread-2", "turn-2");
+
+    handleNotification(core, {
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed", error: null },
+      },
+    });
+    await output.close();
+
+    expect(core.activeTurn(target)?.threadId).toBe("thread-2");
+    expect(core.activeTurnForThread("thread-1")).toBeUndefined();
+    expect(events.find(
+      (event) => event.type === "turn.completed" && event.threadId === "thread-1",
+    )).toMatchObject({ background: true, target });
+  });
+
   it("reduces thread token usage notifications for status rendering", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const router = {

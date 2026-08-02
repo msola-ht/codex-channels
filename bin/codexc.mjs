@@ -55,6 +55,7 @@ const helpText = {
   ws remove <目标>             删除 Workspace 注册
   rules init                   生成项目 Codex 命令预设
   rules check                  检查项目 Codex 命令预设
+  state upgrade               显式升级 Gateway 状态数据库
 
 后台服务：
   start                        前台启动 App Server 与 Gateway
@@ -133,6 +134,12 @@ const helpText = {
   "rules.check": `用法：codexc rules check
 
 使用当前 Codex CLI 检查项目规则。`,
+  state: `用法：codexc state upgrade
+
+停止 Gateway 后，备份并显式升级状态数据库。`,
+  "state.upgrade": `用法：codexc state upgrade
+
+停止 Gateway 后，备份并显式升级状态数据库。`,
   version: "用法：codexc version",
   gateway: `用法：codexc gateway
 
@@ -217,6 +224,9 @@ try {
       break;
     case "rules":
       projectRules(args);
+      break;
+    case "state":
+      state(args);
       break;
     default:
       throw new Error(`未知命令：${command}\n运行 codexc --help 查看用法`);
@@ -648,6 +658,22 @@ function runScript(relativePath, args, additionalEnvironment = {}, workingDirect
     { ...runtime.environment, ...additionalEnvironment },
     workingDirectory ?? runtime.dataDir,
   );
+}
+
+function state(args) {
+  if (showRequestedHelp(args, "state") ||
+    showSubcommandHelp(args, "upgrade", "state.upgrade")) {
+    return;
+  }
+  const [subcommand, ...rest] = args;
+  if (subcommand === undefined) {
+    console.log(helpText.state);
+    return;
+  }
+  if (subcommand !== "upgrade" || rest.length > 0) {
+    throw new Error("用法：codexc state upgrade");
+  }
+  runScript("scripts/upgrade-state.mjs", []);
 }
 
 function configuredEnvironment() {

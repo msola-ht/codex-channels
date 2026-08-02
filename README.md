@@ -168,6 +168,10 @@ Server 时必须从本机终端执行。
 - 图片：`/vision <下一批要求>`；多图：`/vision <2–4> <要求>`，收齐自动提交；取消：`/vision cancel`
 - 帮助：`/help`、`/whoami`
 
+任务运行中也可以使用 `/resume` 或 `/new` 切换会话：原任务会继续在后台运行，结果和审批仍返回
+当前聊天并标记所属 Thread；同一聊天最多保留 3 个后台任务。普通消息只发送给当前前台 Thread，
+需要继续操作后台任务时使用 `/resume` 将其切回前台。
+
 命令、文件修改和额外权限默认不会自动批准。审批、用户输入和 MCP 交互会逐项显示，并绑定当前
 用户、会话和 Turn。
 
@@ -199,6 +203,16 @@ npm install -g @openai/codex@0.145.0
 codexc service install
 codexc doctor
 ```
+
+如果升级后提示状态数据库仍是 Schema 3，先只停止 Gateway，再显式备份升级并重新启动：
+
+```bash
+codexc service stop gateway
+codexc state upgrade
+codexc service start gateway
+```
+
+`codexc state upgrade` 不会修改 Codex Thread，只新增后台绑定存储；命令会显示升级前数据库备份路径。
 
 npm 包与 Codex CLI 使用相同版本。正式 npm 包和 GitHub Release 均发布成功后，发布工作流会自动
 同步本页安装版本。

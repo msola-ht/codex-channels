@@ -1501,6 +1501,54 @@ describe("ConversationService model selection", () => {
     expect(resume).toHaveBeenCalledWith(target, "pinned-old");
   });
 
+  it("moves the active Thread to the background when resuming another session", async () => {
+    const resume = vi.fn(async (resumeTarget, threadId: string) => ({
+      target: resumeTarget,
+      workspaceId: "main",
+      threadId,
+      sessionId: `session-${threadId}`,
+    }));
+    const service = new ConversationService(
+      turnPort(),
+      {
+        list: async () => [{
+          id: "selected",
+          sessionId: "session-selected",
+          modelProvider: "openai",
+          preview: "另一个会话",
+          name: null,
+          isPinned: false,
+          status: { type: "idle" as const },
+          cwd: main.cwd,
+          source: "cli" as const,
+          activeTurnId: null,
+        }],
+        current: () => ({
+          target,
+          workspaceId: "main",
+          threadId: "running",
+          sessionId: "session-running",
+        }),
+        targetForThread: () => undefined,
+        backgroundBindings: () => [],
+        isBackgroundThread: () => false,
+        modelSettingsForThread: () => undefined,
+        resume,
+      } as unknown as SessionRouter,
+      {
+        activeTurn: () => ({ target, threadId: "running", turnId: "turn-running" }),
+      } as unknown as ConversationCore,
+      { clear: vi.fn() } as unknown as ModelSelectionService,
+      queryPort(),
+    );
+
+    await expect(service.resume(target, "selected")).resolves.toEqual({
+      threadId: "selected",
+      backgroundedThreadId: "running",
+    });
+    expect(resume).toHaveBeenCalledWith(target, "selected", true);
+  });
+
   it("annotates sessions with the model the router knows", async () => {
     const service = new ConversationService(
       turnPort(),

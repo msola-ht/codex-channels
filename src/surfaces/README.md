@@ -76,7 +76,8 @@ Turn、Thread 或 Surface 关闭时清理。
 `lifecycle-presentation.ts` 统一 Telegram、飞书与微信的 Gateway 上线、Turn 开始确认和 Turn
 结束汇报信息模型、字段顺序与中文状态词；它显示当前 Provider，保留 Provider 通用的 Thread
 Token/上下文指标，并只在 OpenAI Thread 显示 Fast 与 OpenAI 周限；各 Surface 只保留 HTML、
-CardKit Markdown 或微信文本布局以及各自的发送策略。
+CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Thread 的文本、审批和完成汇报均标注
+短 Thread ID，并继续进入原 Conversation 的有界顺序队列。
 `elapsed-duration.ts` 只把已确认的 Turn、首字延时等毫秒值或账户用量秒数格式化为三个 Surface
 共用的中文短文本，不负责计时、状态或持久化。
 `account-format.ts` 统一套餐名称、额度状态、百分比、周期与重置时间格式，供命令结果、运行时通知

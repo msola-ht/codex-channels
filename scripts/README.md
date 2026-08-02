@@ -5,6 +5,8 @@
 ## 配置与 Workspace
 
 - `runtime-config.mjs`：解析用户数据目录和运行时路径，并初始化 `.codex-connect`。
+- `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
+  升级到 v4；不自动迁移未知版本。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“通讯渠道”和“模型渠道”流程
   委派给具体适配器；模型渠道下继续区分 DeepSeek 与图片识别。
 - `vision-setup.mjs`：为双 Provider 与仅 DeepSeek 模式统一配置外部 Responses 视觉接口；API Key

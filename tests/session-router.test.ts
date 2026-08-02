@@ -279,6 +279,27 @@ describe("SessionRouter", () => {
     expect(unsubscribed).toEqual(["new"]);
   });
 
+  it("keeps an active foreground subscription when switching it to the background", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "running", sessionId: "running" });
+    const unsubscribed: string[] = [];
+    const client = threadPort({
+      resumeThread: async (threadId) => session(thread(threadId, { type: "idle" })),
+      unsubscribeThread: async (threadId) => {
+        unsubscribed.push(threadId);
+      },
+    });
+    const router = new SessionRouter(client, store, registry);
+
+    await router.resume(target, "selected", true);
+
+    expect(router.current(target)?.threadId).toBe("selected");
+    expect(router.backgroundBindings(target).map(({ threadId }) => threadId)).toEqual(["running"]);
+    expect(router.targetForThread("running")).toEqual(target);
+    expect(unsubscribed).toEqual([]);
+  });
+
+
   it("keeps model settings after detaching so session lists can annotate them", async () => {
     const client = threadPort({
       listThreads: async () => [],

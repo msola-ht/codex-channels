@@ -195,7 +195,7 @@ export class TelegramOutbox {
             await this.sendPanel(
               chatId,
               renderTelegramLifecyclePresentation(
-                createTurnStartedPresentation(),
+                createTurnStartedPresentation(event.background ? event.threadId : undefined),
               ),
               this.replyTargets.get(this.turnKey(event.threadId, event.turnId)),
               true,
@@ -268,7 +268,9 @@ export class TelegramOutbox {
         const key = this.streamKey(turnKey, event.itemId);
         const existing = this.streams.get(key);
         const state = existing ?? this.createStream(chatId, turnKey);
-        const bounded = boundedTelegramStreamText(event.text);
+        const bounded = boundedTelegramStreamText(
+          `${event.background ? `后台任务 · ${event.threadId.slice(0, 12)}\n\n` : ""}${event.text}`,
+        );
         state.text = bounded.text;
         state.truncated = bounded.truncated;
         state.completed = true;

@@ -674,6 +674,32 @@ describe("ApprovalCoordinator", () => {
     });
   });
 
+  it("labels approvals from a background Thread", async () => {
+    const interaction = new FakeInteraction();
+    const coordinator = new ApprovalCoordinator(
+      routerWithTarget({ background: true }),
+      interaction,
+      30_000,
+    );
+
+    await handleRaw(coordinator, {
+      id: "request-background",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId: "thread-background-1",
+        turnId: "turn-1",
+        itemId: "command-1",
+        command: "npm test",
+      },
+    });
+
+    expect(interaction.requests[0]).toMatchObject({
+      type: "approval",
+      title: "后台任务 · thread-backg · Codex 请求执行命令",
+      threadId: "thread-background-1",
+    });
+  });
+
   it("declines a command approval with neither a command nor network context", async () => {
     const interaction = new FakeInteraction();
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
@@ -1508,8 +1534,11 @@ describe("ApprovalCoordinator", () => {
   });
 });
 
-function routerWithTarget(): SessionRouter {
-  return { targetForThread: () => target } as unknown as SessionRouter;
+function routerWithTarget(options: { background?: boolean } = {}): SessionRouter {
+  return {
+    targetForThread: () => target,
+    isBackgroundThread: () => options.background ?? false,
+  } as unknown as SessionRouter;
 }
 
 function routerWithoutTarget(): SessionRouter {

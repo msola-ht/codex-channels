@@ -1,5 +1,6 @@
 export type {
   BindingStore,
+  BindingSwitch,
   BindingTransfer,
   ConversationBinding,
 } from "./binding-store.js";

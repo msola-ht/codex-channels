@@ -140,10 +140,14 @@ export function createStartupPresentation(
   };
 }
 
-export function createTurnStartedPresentation(): LifecyclePresentation {
+export function createTurnStartedPresentation(
+  backgroundThreadId?: string,
+): LifecyclePresentation {
   return {
-    title: "已开始处理。",
-    fields: [],
+    title: backgroundThreadId ? "后台任务继续处理中。" : "已开始处理。",
+    fields: backgroundThreadId
+      ? [{ label: "Thread", value: backgroundThreadId }]
+      : [],
   };
 }
 
@@ -243,8 +247,10 @@ export function createTurnCompletedPresentation(
     });
   }
   return {
-    title: `本次运行 · ${turnStatusLabel(event.status)}`,
-    fields,
+    title: `${event.background ? "后台任务" : "本次运行"} · ${turnStatusLabel(event.status)}`,
+    fields: event.background
+      ? [{ label: "Thread", value: event.threadId }, ...fields]
+      : fields,
   };
 }
 
