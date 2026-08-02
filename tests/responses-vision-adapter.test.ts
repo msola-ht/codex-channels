@@ -20,9 +20,21 @@ describe("Responses vision adapter", () => {
       void input;
       void init;
       return new Response(JSON.stringify({
+        model: "gpt-5.6-luna",
+        status: "completed",
+        created_at: 1_785_640_800,
+        completed_at: 1_785_640_814,
+        service_tier: "default",
         usage: {
           input_tokens: 1_234,
+          input_tokens_details: {
+            cached_tokens: 120,
+            cache_write_tokens: 10,
+          },
           output_tokens: 56,
+          output_tokens_details: {
+            reasoning_tokens: 12,
+          },
           total_tokens: 1_290,
         },
         output: [{
@@ -55,11 +67,16 @@ describe("Responses vision adapter", () => {
       onRequestStarted,
     })).resolves.toEqual({
       provider: "外部视觉 API",
-      model: "vision-model",
+      model: "gpt-5.6-luna",
       elapsedMs: expect.any(Number),
+      upstreamDurationMs: 14_000,
+      serviceTier: "default",
       usage: {
         inputTokens: 1_234,
+        cachedInputTokens: 120,
+        cacheWriteInputTokens: 10,
         outputTokens: 56,
+        reasoningOutputTokens: 12,
         totalTokens: 1_290,
       },
       images: [{
@@ -97,6 +114,42 @@ describe("Responses vision adapter", () => {
     expect(fetchImpl.mock.invocationCallOrder[0]).toBeLessThan(
       onRequestStarted.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it("rejects a successful HTTP response whose upstream status is incomplete", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-vision-"));
+    const imagePath = join(root, "image.png");
+    writeFileSync(imagePath, Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00,
+    ]));
+    const adapter = createResponsesVisionAdapter({
+      endpoint: "https://vision.example/v1/responses",
+      model: "vision-model",
+      loadApiKey: () => "private-key",
+      fetchImpl: async () => new Response(JSON.stringify({
+        model: "gpt-5.6-luna",
+        status: "incomplete",
+        output: [{
+          content: [{
+            type: "output_text",
+            text: JSON.stringify({
+              images: [{
+                index: 1,
+                description: "不完整图片描述",
+                extractedText: null,
+                uncertainty: null,
+              }],
+            }),
+          }],
+        }],
+      }), { status: 200 }),
+    });
+
+    await expect(adapter.recognize({
+      images: [{ path: imagePath }],
+      userPrompt: "识别图片",
+      onRequestStarted: vi.fn(),
+    })).rejects.toThrow("响应尚未完成");
   });
 
   it("does not send a request when the stored key is absent", async () => {

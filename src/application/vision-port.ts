@@ -40,6 +40,8 @@ export interface VisionRecognitionResult {
   provider: string;
   model: string;
   elapsedMs?: number;
+  upstreamDurationMs?: number;
+  serviceTier?: string;
   usage?: VisionTokenUsage;
   images: readonly VisionRecognitionImage[];
 }

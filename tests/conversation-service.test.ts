@@ -897,9 +897,14 @@ describe("ConversationService model selection", () => {
         provider: "OpenAI",
         model: "vision-model",
         elapsedMs: 31_000,
+        upstreamDurationMs: 30_000,
+        serviceTier: "default",
         usage: {
           inputTokens: 1_234,
+          cachedInputTokens: 120,
+          cacheWriteInputTokens: 10,
           outputTokens: 56,
+          reasoningOutputTokens: 12,
           totalTokens: 1_290,
         },
         images: [{
@@ -972,9 +977,14 @@ describe("ConversationService model selection", () => {
     expect(visionCompleted).toHaveBeenCalledWith(target, {
       model: "vision-model",
       elapsedMs: 31_000,
+      upstreamDurationMs: 30_000,
+      serviceTier: "default",
       usage: {
         inputTokens: 1_234,
+        cachedInputTokens: 120,
+        cacheWriteInputTokens: 10,
         outputTokens: 56,
+        reasoningOutputTokens: 12,
         totalTokens: 1_290,
       },
     });

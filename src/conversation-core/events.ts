@@ -176,7 +176,10 @@ export interface TurnArtifacts {
 
 export interface VisionTokenUsage {
   inputTokens?: number;
+  cachedInputTokens?: number;
+  cacheWriteInputTokens?: number;
   outputTokens?: number;
+  reasoningOutputTokens?: number;
   totalTokens?: number;
 }
 
@@ -188,6 +191,8 @@ export type OutputEvent =
       target: ConversationTarget;
       model: string;
       elapsedMs?: number;
+      upstreamDurationMs?: number;
+      serviceTier?: string;
       usage?: VisionTokenUsage;
     }
   | { type: "turn.started"; target: ConversationTarget; threadId: string; turnId: string }

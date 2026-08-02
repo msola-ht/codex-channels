@@ -94,6 +94,8 @@ export class ConversationCore {
     details: {
       model: string;
       elapsedMs?: number;
+      upstreamDurationMs?: number;
+      serviceTier?: string;
       usage?: VisionTokenUsage;
     },
   ): void {

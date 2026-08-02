@@ -310,6 +310,12 @@ export class ConversationService implements ConversationUseCases {
             ...(result.elapsedMs === undefined
               ? {}
               : { elapsedMs: result.elapsedMs }),
+            ...(result.upstreamDurationMs === undefined
+              ? {}
+              : { upstreamDurationMs: result.upstreamDurationMs }),
+            ...(result.serviceTier === undefined
+              ? {}
+              : { serviceTier: result.serviceTier }),
             ...(result.usage === undefined ? {} : { usage: result.usage }),
           });
         } catch {

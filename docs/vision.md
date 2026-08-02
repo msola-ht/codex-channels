@@ -34,6 +34,11 @@ Telegram 转成兼容 HTML、微信转成富文本。收齐时先显示“正在
 实际发给 Responses API 的视觉模型 ID 和 Gateway 实测的 API 往返耗时；上游响应提供标准
 `usage.input_tokens`、`usage.output_tokens` 或 `usage.total_tokens` 时按实际字段显示 Token 用量，
 缺失字段不估算。
+
+适配器优先采用响应体 `model` 作为实际识别模型，缺失或格式不安全时才回退请求配置值；响应体
+存在 `status` 时必须为 `completed`，避免把不完整输出交给当前模型。`created_at`、`completed_at`、
+`service_tier`、缓存命中/写入 Token 和推理输出 Token 会经过类型与范围裁剪后进入当前请求的临时
+完成事件，暂不增加到渠道完成卡片；请求结束后不持久化。
 `/vision cancel` 会丢弃尚未提交的收集。旧的 `/vision begin <要求>` 与 `/vision done` 继续兼容，
 用于无法预先确定图片数量的场景。手动收集同样按 Actor 与 Conversation 隔离，仅保存在
 内存中，五分钟无新图片即过期，Gateway 重启或 Surface 停止时直接丢弃。Telegram 原生相册和
@@ -63,7 +68,8 @@ model = "视觉模型"
 - 识别进度和模型 ID 只发送到发起请求的 Conversation，不写入 SQLite 或结构化日志；心跳只
   保存在当前请求计时器中，完成、失败或进程停止时取消。
 - 识别耗时是 Gateway 从发起 HTTP 请求到读取并解析响应的本地观测值，不冒充上游内部处理时长；
-  Token 用量只裁剪响应体中非负安全整数，不根据图片大小或文本长度推算。
+  上游时间戳差值仅作为内部观测。Token 用量只裁剪响应体中非负安全整数，不根据图片大小或文本
+  长度推算。
 - `/vision` 待处理要求和手动多图收集不写入 SQLite、配置或日志，不跨 Actor、Conversation 或
   Gateway 重启恢复。
 - 外部 API Key 的目录和文件分别限制为 `0700`、`0600`，符号链接、错误所有者或开放权限失败关闭；

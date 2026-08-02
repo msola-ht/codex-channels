@@ -81,11 +81,23 @@ export function createResponsesVisionAdapter(
       }
       const raw = await readLimitedResponseText(response);
       const parsed = parseVisionResponse(raw);
+      if (parsed.status !== undefined && parsed.status !== "completed") {
+        throw new Error("视觉 API 响应尚未完成");
+      }
       const usage = parseTokenUsage(parsed.usage);
+      const upstreamDurationMs = parseUpstreamDurationMs(
+        parsed.createdAt,
+        parsed.completedAt,
+      );
+      const serviceTier = safeIdentifier(parsed.serviceTier, 64);
       return {
         provider: "外部视觉 API",
-        model: options.model,
+        model: safeIdentifier(parsed.model, 128)
+          ?? safeIdentifier(options.model, 128)
+          ?? "未提供",
         elapsedMs: Math.max(0, Date.now() - requestStartedAt),
+        ...(upstreamDurationMs === undefined ? {} : { upstreamDurationMs }),
+        ...(serviceTier === undefined ? {} : { serviceTier }),
         ...(usage ? { usage } : {}),
         images: parseVisionRecognitionPayload(
           parsed.outputText,
@@ -143,6 +155,11 @@ async function readLimitedResponseText(response: Response): Promise<string> {
 }
 
 function parseVisionResponse(raw: string): {
+  model?: unknown;
+  status?: unknown;
+  createdAt?: unknown;
+  completedAt?: unknown;
+  serviceTier?: unknown;
   usage?: unknown;
   outputText: string;
 } {
@@ -161,6 +178,11 @@ function parseVisionResponse(raw: string): {
       const candidate = asRecord(part);
       if (candidate?.type === "output_text" && typeof candidate.text === "string") {
         return {
+          model: record?.model,
+          status: record?.status,
+          createdAt: record?.created_at,
+          completedAt: record?.completed_at,
+          serviceTier: record?.service_tier,
           usage: record?.usage,
           outputText: candidate.text,
         };
@@ -174,20 +196,57 @@ function parseTokenUsage(value: unknown): VisionRecognitionResult["usage"] {
   const record = asRecord(value);
   if (!record) return undefined;
   const inputTokens = nonNegativeSafeInteger(record.input_tokens);
+  const inputDetails = asRecord(record.input_tokens_details);
+  const cachedInputTokens = nonNegativeSafeInteger(inputDetails?.cached_tokens);
+  const cacheWriteInputTokens = nonNegativeSafeInteger(
+    inputDetails?.cache_write_tokens,
+  );
   const outputTokens = nonNegativeSafeInteger(record.output_tokens);
+  const outputDetails = asRecord(record.output_tokens_details);
+  const reasoningOutputTokens = nonNegativeSafeInteger(
+    outputDetails?.reasoning_tokens,
+  );
   const totalTokens = nonNegativeSafeInteger(record.total_tokens);
   if (
     inputTokens === undefined
+    && cachedInputTokens === undefined
+    && cacheWriteInputTokens === undefined
     && outputTokens === undefined
+    && reasoningOutputTokens === undefined
     && totalTokens === undefined
   ) {
     return undefined;
   }
   return {
     ...(inputTokens === undefined ? {} : { inputTokens }),
+    ...(cachedInputTokens === undefined ? {} : { cachedInputTokens }),
+    ...(cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens }),
     ...(outputTokens === undefined ? {} : { outputTokens }),
+    ...(reasoningOutputTokens === undefined ? {} : { reasoningOutputTokens }),
     ...(totalTokens === undefined ? {} : { totalTokens }),
   };
+}
+
+function parseUpstreamDurationMs(
+  createdAtValue: unknown,
+  completedAtValue: unknown,
+): number | undefined {
+  const createdAt = nonNegativeSafeInteger(createdAtValue);
+  const completedAt = nonNegativeSafeInteger(completedAtValue);
+  if (createdAt === undefined || completedAt === undefined || completedAt < createdAt) {
+    return undefined;
+  }
+  const durationMs = (completedAt - createdAt) * 1_000;
+  return Number.isSafeInteger(durationMs) ? durationMs : undefined;
+}
+
+function safeIdentifier(value: unknown, maximumLength: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized.length <= maximumLength
+      && /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/u.test(normalized)
+    ? normalized
+    : undefined;
 }
 
 function nonNegativeSafeInteger(value: unknown): number | undefined {
