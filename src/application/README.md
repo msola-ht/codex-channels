@@ -34,7 +34,8 @@
   App Server 账户查询，未知 Provider 默认返回不支持，不回退到 OpenAI。
 - `vision-port.ts`：定义模型无原生图片能力时使用的稳定识别端口、严格结果 Schema 和已完成但
   不可信的图片资料格式；`conversation-service.ts` 只在模型目录明确拒绝图片且组合根注入适配器时
-  传递当前提示并替换 `localImage`，未配置时保持原有失败关闭行为。
+  传递当前提示并替换 `localImage`，未配置时保持原有失败关闭行为；外部识图全局最多两个在途
+  请求，超出后明确拒绝而不建立无界队列。
 - `skill-port.ts`：定义已直接安装 Skill 的稳定名称与说明查询，以及只供 Application 启动
   Turn 使用的精确 Skill 路径解析；路径不向 Surface 暴露，也不传播 Scope、依赖或上游扫描错误。
 - `mcp-port.ts`：定义 MCP Server 名称、认证状态与工具数量的稳定查询摘要，不向 Surface 暴露

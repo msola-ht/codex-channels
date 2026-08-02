@@ -249,6 +249,48 @@ describe("WeixinUpdatesMonitor", () => {
     expect(cursorStore.set).toHaveBeenCalledWith(accountId, "new-cursor");
   });
 
+  it("does not repeat a successful image when another image in the batch is retried", async () => {
+    const controller = new AbortController();
+    const cursorStore = cursorStoreFixture("old-cursor");
+    const batch = {
+      cursor: "new-cursor",
+      messages: [imageMessage("1"), imageMessage("2")],
+    };
+    const monitor = createWeixinUpdatesMonitor({
+      accountId,
+      client: clientFixture([
+        batch,
+        batch,
+        () => {
+          controller.abort();
+          throw new WeixinProtocolError("aborted", "aborted");
+        },
+      ]),
+      cursorStore,
+      handleMessage: vi.fn(async (message) => {
+        if (message.messageId === "2" && handlingCounts.get("2") === undefined) {
+          handlingCounts.set("2", 1);
+          throw new Error("temporary image failure");
+        }
+        handlingCounts.set(
+          message.messageId,
+          (handlingCounts.get(message.messageId) ?? 0) + 1,
+        );
+      }),
+    });
+    const handlingCounts = new Map<string, number>();
+
+    await expect(monitor.run(controller.signal)).rejects.toThrow(
+      "temporary image failure",
+    );
+    await expect(monitor.run(controller.signal)).resolves.toBeUndefined();
+
+    expect(handlingCounts.get("1")).toBe(1);
+    expect(handlingCounts.get("2")).toBe(2);
+    expect(cursorStore.set).toHaveBeenCalledOnce();
+    expect(cursorStore.set).toHaveBeenCalledWith(accountId, "new-cursor");
+  });
+
   it("backs off after constrained transient failures and resumes polling", async () => {
     const controller = new AbortController();
     const cursorStore = cursorStoreFixture("cursor");
@@ -430,6 +472,19 @@ function textMessage(
     conversationId: "actor-fixture@im.wechat",
     contextToken: "context-secret",
     text,
+  };
+}
+
+function imageMessage(
+  messageId: string,
+): Extract<WeixinInboundMessage, { kind: "image" }> {
+  return {
+    kind: "image",
+    messageId,
+    actorId: "actor-fixture@im.wechat",
+    conversationId: "actor-fixture@im.wechat",
+    contextToken: "context-secret",
+    images: [{ fullUrl: `https://cdn.example/${messageId}.jpg` }],
   };
 }
 

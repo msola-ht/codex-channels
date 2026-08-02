@@ -1000,6 +1000,77 @@ describe("ConversationService model selection", () => {
     ]);
   });
 
+  it("rejects a third concurrent external vision request without queueing it", async () => {
+    const targets = [
+      target,
+      { ...target, conversationId: "200" },
+      { ...target, conversationId: "300" },
+    ];
+    const releases: Array<() => void> = [];
+    const recognize = vi.fn(async (request: { onRequestStarted(): void }) => {
+      request.onRequestStarted();
+      await new Promise<void>((resolve) => releases.push(resolve));
+      return {
+        provider: "OpenAI",
+        model: "vision-model",
+        images: [{
+          index: 1,
+          description: "图片",
+          extractedText: null,
+          uncertainty: null,
+        }],
+      };
+    });
+    const service = new ConversationService(
+      turnPort({ startTurn: vi.fn().mockResolvedValue({ turnId: "turn-1" }) }),
+      {
+        ensure: async (currentTarget: typeof target) => ({
+          target: currentTarget,
+          workspaceId: "main",
+          threadId: `thread-${currentTarget.conversationId}`,
+          sessionId: `session-${currentTarget.conversationId}`,
+        }),
+        workspace: () => main,
+      } as unknown as SessionRouter,
+      {
+        activeTurn: () => undefined,
+        markTurnStarted: vi.fn(),
+        visionStarted: vi.fn(),
+        visionProgress: vi.fn(),
+        visionCompleted: vi.fn(),
+      } as unknown as ConversationCore,
+      {
+        requireInputModality: vi.fn().mockRejectedValue(new UserFacingError(
+          "model.input.image.unsupported",
+          "不支持图片",
+        )),
+        turnOverrides: () => ({}),
+        markApplied: vi.fn(),
+      } as unknown as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { recognize },
+    );
+    const submissions = targets.slice(0, 2).map((currentTarget) =>
+      service.submit(currentTarget, {
+        localImages: [{ path: `/private/uploads/${currentTarget.conversationId}.png` }],
+      })
+    );
+    await vi.waitFor(() => expect(recognize).toHaveBeenCalledTimes(2));
+
+    await expect(service.submit(targets[2]!, {
+      localImages: [{ path: "/private/uploads/third.png" }],
+    })).rejects.toMatchObject({ code: "vision.busy" });
+    expect(recognize).toHaveBeenCalledTimes(2);
+
+    for (const release of releases) release();
+    await Promise.all(submissions);
+  });
+
   it("passes local audio to a new turn", async () => {
     const startTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
     const requireInputModality = vi.fn().mockResolvedValue(undefined);

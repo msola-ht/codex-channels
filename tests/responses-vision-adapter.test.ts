@@ -171,4 +171,44 @@ describe("Responses vision adapter", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(onRequestStarted).not.toHaveBeenCalled();
   });
+
+  it("keeps the request timeout active while reading the response body", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-vision-"));
+    const imagePath = join(root, "image.png");
+    writeFileSync(imagePath, Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00,
+    ]));
+    let requestSignal: AbortSignal | undefined;
+    let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const adapter = createResponsesVisionAdapter({
+      endpoint: "https://vision.example/v1/responses",
+      model: "vision-model",
+      loadApiKey: () => "private-key",
+      requestTimeoutMs: 10,
+      fetchImpl: async (_input, init) => {
+        requestSignal = init?.signal ?? undefined;
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            bodyController = controller;
+            requestSignal?.addEventListener("abort", () => {
+              controller.error(new Error("aborted"));
+            }, { once: true });
+          },
+        });
+        return new Response(body, { status: 200 });
+      },
+    });
+    const recognition = adapter.recognize({
+      images: [{ path: imagePath }],
+      userPrompt: "识别图片",
+      onRequestStarted: vi.fn(),
+    }).catch((error: unknown) => error);
+
+    await vi.waitFor(() => expect(requestSignal).toBeDefined());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const aborted = requestSignal?.aborted ?? false;
+    if (!aborted) bodyController?.error(new Error("test cleanup"));
+    await recognition;
+    expect(aborted).toBe(true);
+  });
 });

@@ -109,6 +109,7 @@ interface QueuedFollowUp {
 }
 
 const maximumQueuedFollowUpsPerConversation = 10;
+const maximumConcurrentVisionRecognitions = 2;
 const visionHeartbeatInitialDelayMs = 10_000;
 const visionHeartbeatIntervalMs = 20_000;
 
@@ -192,6 +193,7 @@ export interface ConversationUseCases {
 export class ConversationService implements ConversationUseCases {
   private readonly locks = new Map<string, Promise<void>>();
   private readonly queuedFollowUps = new Map<string, QueuedFollowUp[]>();
+  private activeVisionRecognitions = 0;
 
   constructor(
     private readonly codex: TurnExecutionPort,
@@ -291,6 +293,7 @@ export class ConversationService implements ConversationUseCases {
         const images = input.flatMap((item) =>
           item.type === "localImage" ? [{ path: item.path }] : []
         );
+        const releaseVisionRecognition = this.reserveVisionRecognition();
         let result;
         let stopHeartbeat = (): void => {};
         let requestStarted = false;
@@ -322,6 +325,7 @@ export class ConversationService implements ConversationUseCases {
           throw new UserFacingError("vision.failed", "图片识别失败");
         } finally {
           stopHeartbeat();
+          releaseVisionRecognition();
         }
         input = replaceLocalImagesWithVisionContext(input, result);
       }
@@ -933,6 +937,22 @@ export class ConversationService implements ConversationUseCases {
     return () => {
       clearTimeout(initial);
       if (interval) clearInterval(interval);
+    };
+  }
+
+  private reserveVisionRecognition(): () => void {
+    if (this.activeVisionRecognitions >= maximumConcurrentVisionRecognitions) {
+      throw new UserFacingError(
+        "vision.busy",
+        "视觉识别任务繁忙，请稍后重试",
+      );
+    }
+    this.activeVisionRecognitions += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.activeVisionRecognitions -= 1;
     };
   }
 

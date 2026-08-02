@@ -7,6 +7,7 @@ export type UserFacingErrorCode =
   | "image.too-large"
   | "image.too-many"
   | "image.unsupported"
+  | "vision.busy"
   | "vision.failed"
   | "vision.command.usage"
   | "vision.prompt.invalid"

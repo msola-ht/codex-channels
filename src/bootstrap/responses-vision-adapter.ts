@@ -15,6 +15,7 @@ export interface ResponsesVisionAdapterOptions {
   model: string;
   loadApiKey: () => string | Promise<string>;
   fetchImpl: typeof fetch;
+  requestTimeoutMs?: number;
 }
 
 export function createResponsesVisionAdapter(
@@ -35,9 +36,9 @@ export function createResponsesVisionAdapter(
         detail: "high",
       })));
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+      const timeoutMs = options.requestTimeoutMs ?? requestTimeoutMs;
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
       timer.unref();
-      let response: Response;
       const requestStartedAt = Date.now();
       try {
         const pendingResponse = options.fetchImpl(options.endpoint, {
@@ -71,39 +72,39 @@ export function createResponsesVisionAdapter(
           signal: controller.signal,
         });
         request.onRequestStarted();
-        response = await pendingResponse;
+        const response = await pendingResponse;
+        if (!response.ok) {
+          await response.body?.cancel().catch(() => undefined);
+          throw new Error(`视觉 API 请求失败：HTTP ${response.status}`);
+        }
+        const raw = await readLimitedResponseText(response);
+        const parsed = parseVisionResponse(raw);
+        if (parsed.status !== undefined && parsed.status !== "completed") {
+          throw new Error("视觉 API 响应尚未完成");
+        }
+        const usage = parseTokenUsage(parsed.usage);
+        const upstreamDurationMs = parseUpstreamDurationMs(
+          parsed.createdAt,
+          parsed.completedAt,
+        );
+        const serviceTier = safeIdentifier(parsed.serviceTier, 64);
+        return {
+          provider: "外部视觉 API",
+          model: safeIdentifier(parsed.model, 128)
+            ?? safeIdentifier(options.model, 128)
+            ?? "未提供",
+          elapsedMs: Math.max(0, Date.now() - requestStartedAt),
+          ...(upstreamDurationMs === undefined ? {} : { upstreamDurationMs }),
+          ...(serviceTier === undefined ? {} : { serviceTier }),
+          ...(usage ? { usage } : {}),
+          images: parseVisionRecognitionPayload(
+            parsed.outputText,
+            request.images.length,
+          ),
+        };
       } finally {
         clearTimeout(timer);
       }
-      if (!response.ok) {
-        await response.body?.cancel().catch(() => undefined);
-        throw new Error(`视觉 API 请求失败：HTTP ${response.status}`);
-      }
-      const raw = await readLimitedResponseText(response);
-      const parsed = parseVisionResponse(raw);
-      if (parsed.status !== undefined && parsed.status !== "completed") {
-        throw new Error("视觉 API 响应尚未完成");
-      }
-      const usage = parseTokenUsage(parsed.usage);
-      const upstreamDurationMs = parseUpstreamDurationMs(
-        parsed.createdAt,
-        parsed.completedAt,
-      );
-      const serviceTier = safeIdentifier(parsed.serviceTier, 64);
-      return {
-        provider: "外部视觉 API",
-        model: safeIdentifier(parsed.model, 128)
-          ?? safeIdentifier(options.model, 128)
-          ?? "未提供",
-        elapsedMs: Math.max(0, Date.now() - requestStartedAt),
-        ...(upstreamDurationMs === undefined ? {} : { upstreamDurationMs }),
-        ...(serviceTier === undefined ? {} : { serviceTier }),
-        ...(usage ? { usage } : {}),
-        images: parseVisionRecognitionPayload(
-          parsed.outputText,
-          request.images.length,
-        ),
-      };
     },
   };
 }
