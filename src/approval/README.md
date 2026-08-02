@@ -11,8 +11,11 @@
 - `interaction-decision.ts`：把 Surface 已验证的审批选择统一映射为一次、会话、命令规则、网络规则
   或拒绝决定，并再次校验当前请求确实提供对应能力。
 - `coordinator.ts`：验证请求归属，分派交互，处理拒绝、一次/会话批准、命令前缀规则和跨客户端解决。
-- `interaction-router.ts`：按 `surface + accountId` 将请求路由到对应 Surface，并公开统一的失败关闭
-  决定；未注册、超时、关闭或不支持的交互默认拒绝或取消。
+- `interaction-router.ts`：按 `surface + accountId` 将请求路由到对应 Surface，并按完整 Conversation
+  有界串行审批、用户输入和 MCP 交互；不同 Conversation 可并行。重复请求、容量溢出、未注册、
+  渠道不可用、超时、关闭或不支持的交互默认拒绝或取消；渠道故障时只清理对应账号的活动与排队
+  交互，恢复前的新请求立即失败关闭，不影响其他渠道账号。同时提供按 Thread 查询待处理交互的只读保护，
+  供空闲会话跨渠道接管在转移绑定前失败关闭，不迁移审批、输入或 MCP 交互。
 
 审批必须绑定 Thread、协议提供的 Turn 与请求标识。MCP elicitation 无法关联活动 Turn 时允许
 `turnId` 为 `null`，此时 App Server 请求 ID 是该交互的协议身份。未知、缺少必需归属信息或
@@ -21,6 +24,10 @@
 对应 Surface 端口时必须记录明确的安全拒绝原因，不得记录命令、审批理由、表单内容或 MCP
 输入正文。Surface 在平台创建交互消息后记录送达结果，便于区分上游未请求、路由失败和平台
 发送失败。
+固定版本 MCP 工具审批通过 form elicitation 的
+`_meta.codex_approval_kind = "mcp_tool_call"` 识别；协调器只把上游明确提供的
+`session` / `always` 持久范围交给 Surface，并在用户选择后原样返回 `_meta.persist`。
+普通 MCP form 仍按 JSON 输入处理，工具审批不得降级为要求用户手写 JSON。
 本模块不导入 `codex-client` 或 `codex-protocol`，也不接收原始 RPC method/params；畸形与未知
 Server Request 在 Client 适配边界安全拒绝，原始 params 不进入业务模块或错误消息。
 命令审批携带实验性的额外网络或文件系统权限时，Client 适配器必须先按当前协议基线验证，

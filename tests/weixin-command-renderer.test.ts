@@ -20,7 +20,7 @@ describe("Weixin command renderer", () => {
 
   it("renders shared command sections and fields as compact Markdown lists", () => {
     expect(formatWeixinCommandText([
-      "Codex 额度：",
+      "OpenAI Codex 额度：",
       "套餐：Pro",
       "",
       "GPT-5.3-Codex-Spark：",
@@ -33,7 +33,7 @@ describe("Weixin command renderer", () => {
       "消费控制：正常",
       "限流状态：正常",
     ].join("\n"), { structuredFields: true })).toBe([
-      "**Codex 额度**",
+      "**OpenAI Codex 额度**",
       "- 套餐：Pro",
       "",
       "**GPT-5.3-Codex-Spark**",
@@ -156,21 +156,26 @@ describe("Weixin command renderer", () => {
       {
         kind: "usage",
         result: {
-          summary: {
-            lifetimeTokens: null,
-            peakDailyTokens: null,
-            longestRunningTurnSec: null,
-            currentStreakDays: null,
-            longestStreakDays: null,
+          kind: "token-usage",
+          provider: "openai",
+          usage: {
+            summary: {
+              lifetimeTokens: null,
+              peakDailyTokens: null,
+              longestRunningTurnSec: null,
+              currentStreakDays: null,
+              longestStreakDays: null,
+            },
+            daily: [],
           },
-          daily: [],
         },
       },
       {
         kind: "limits",
         result: {
-          limits: [],
-          resetCreditsAvailable: null,
+          kind: "rate-limits",
+          provider: "openai",
+          limits: { limits: [], resetCreditsAvailable: null },
         },
       },
       { kind: "permissions", profiles: [] },
@@ -197,7 +202,7 @@ describe("Weixin command renderer", () => {
       "当前没有已启用的 Skills。",
       "MCP Servers（0）：",
       "当前没有已安装 Plugins。",
-      expect.stringContaining("Codex 用量摘要"),
+      expect.stringContaining("OpenAI Codex 账户用量摘要"),
       expect.stringContaining("Codex 额度"),
       expect.stringContaining("可用 Permission Profiles"),
       expect.stringContaining("项目规则检查通过"),
@@ -225,11 +230,11 @@ describe("Weixin command renderer", () => {
       {
         platform: "linux",
         architecture: "x64",
-        gatewayVersion: "0.145.0",
+        gatewayVersion: "0.146.0",
         nodeVersion: "v22.23.1",
         transport: "Unix WebSocket",
         codexUpstreamUserAgent:
-          "codex_connect_gateway/0.145.0 (Linux; x64) private-build-token (codex_connect_gateway; 0.145.0)",
+          "codex_connect_gateway/0.146.0 (Linux; x64) private-build-token (codex_connect_gateway; 0.146.0)",
       },
     );
     expect(startup).toContain("Codex Connect 已上线");
@@ -276,7 +281,7 @@ describe("Weixin command renderer", () => {
 
     expect(rendered).toContain("本次运行 · 已完成");
     expect(rendered).toContain("- 上下文：10 K / 100 K（10%）");
-    expect(rendered).toContain("缓存命中：75%");
+    expect(rendered).toContain("最近请求缓存命中：75.00%");
     expect(rendered).toContain("模型：gpt-test · medium · Fast 开启");
     expect(rendered).toContain("上下文压缩：2 次");
     expect(rendered).toContain("Git 分支：feature/weixin-surface");

@@ -5,7 +5,13 @@ import type {
 import { interactionProcessedTitle } from "../interaction-copy.js";
 import type { FeishuCardDocument } from "./approval-card.js";
 
-export type FeishuInputAction = "submit" | "complete" | "cancel";
+export type FeishuInputAction =
+  | "submit"
+  | "complete"
+  | "cancel"
+  | "mcp-once"
+  | "mcp-session"
+  | "mcp-always";
 
 const maximumQuestionCount = 3;
 const maximumInputLength = 1_000;
@@ -21,6 +27,7 @@ export function supportsFeishuInputRequest(
       && request.questions.length <= maximumQuestionCount;
   }
   return request.mode === "form"
+    || (request.mode === "tool-approval" && request.toolApproval !== undefined)
     || (request.url !== undefined && safeHttpUrl(request.url) !== undefined);
 }
 
@@ -31,8 +38,11 @@ export function renderFeishuInputCard(
   if (request.type === "user-input") {
     return renderUserInputCard(request, interactionToken);
   }
-  return request.mode === "url"
-    ? renderUrlElicitationCard(request, interactionToken)
+  if (request.mode === "url") {
+    return renderUrlElicitationCard(request, interactionToken);
+  }
+  return request.mode === "tool-approval"
+    ? renderToolApprovalCard(request, interactionToken)
     : renderFormElicitationCard(request, interactionToken);
 }
 
@@ -164,6 +174,60 @@ function renderFormElicitationCard(
   );
 }
 
+function renderToolApprovalCard(
+  request: Extract<InteractionRequest, { type: "elicitation" }>,
+  interactionToken: string,
+): FeishuCardDocument {
+  if (!request.toolApproval) {
+    throw new Error("飞书 MCP 工具审批信息缺失");
+  }
+  const actions = [
+    actionButton("允许一次", "primary", interactionToken, "mcp-once"),
+    ...(request.toolApproval.allowSession
+      ? [actionButton(
+          "本会话允许",
+          "default",
+          interactionToken,
+          "mcp-session",
+        )]
+      : []),
+    ...(request.toolApproval.allowAlways
+      ? [actionButton(
+          "始终允许",
+          "default",
+          interactionToken,
+          "mcp-always",
+        )]
+      : []),
+    actionButton("取消", "danger", interactionToken, "cancel"),
+  ];
+  return legacyCard(
+    "MCP 工具请求批准",
+    request.title,
+    [
+      markdown(escapeMarkdown(truncate(request.message, maximumDisplayLength))),
+      markdown(
+        `**工具：** ${escapeMarkdown(truncate(
+          request.toolApproval.toolTitle ?? "未命名工具",
+          maximumLabelLength,
+        ))}`,
+      ),
+      ...(request.toolApproval.detail
+        ? [markdown(
+            `**参数：** ${escapeMarkdown(truncate(
+              request.toolApproval.detail,
+              maximumDisplayLength,
+            ))}`,
+          )]
+        : []),
+      {
+        tag: "action",
+        actions,
+      },
+    ],
+  );
+}
+
 function renderUrlElicitationCard(
   request: Extract<InteractionRequest, { type: "elicitation" }>,
   interactionToken: string,
@@ -288,7 +352,7 @@ function formSubmitButton(
 
 function actionButton(
   text: string,
-  type: "default" | "danger",
+  type: "primary" | "default" | "danger",
   interactionToken: string,
   decision: FeishuInputAction,
 ): Record<string, unknown> {

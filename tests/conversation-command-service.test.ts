@@ -4,7 +4,7 @@ import {
   ConversationCommandService,
   conversationCommandNames,
   isConversationCommandName,
-  type ConversationService,
+  type ConversationUseCases,
 } from "../src/application/index.js";
 import type { ConversationTarget } from "../src/conversation-core/index.js";
 import { TelegramAccessPolicy } from "../src/policy/index.js";
@@ -21,6 +21,7 @@ describe("ConversationCommandService", () => {
     expect(conversationCommandNames).toContain("resume");
     expect(conversationCommandNames).toContain("fast");
     expect(conversationCommandNames).toContain("goal");
+    expect(conversationCommandNames).toContain("pin");
     expect(conversationCommandNames).toContain("rules");
     expect(isConversationCommandName("status")).toBe(true);
     expect(isConversationCommandName("whoami")).toBe(false);
@@ -36,7 +37,7 @@ describe("ConversationCommandService", () => {
     const commands = new ConversationCommandService({
       initializeProjectRules,
       checkProjectRules,
-    } as unknown as ConversationService);
+    } as unknown as ConversationUseCases);
 
     await expect(commands.execute(target, "rules", "init")).resolves.toEqual({
       kind: "project-rules",
@@ -60,7 +61,7 @@ describe("ConversationCommandService", () => {
     const conversations = {
       listSessions,
       status: () => ({ threadId: "thread-1" }),
-    } as unknown as ConversationService;
+    } as unknown as ConversationUseCases;
     const commands = new ConversationCommandService(conversations);
 
     await expect(commands.execute(target, "sessions", " fix ")).resolves.toEqual({
@@ -73,6 +74,25 @@ describe("ConversationCommandService", () => {
     expect(listSessions).toHaveBeenCalledWith(target, { searchTerm: "fix" });
   });
 
+  it("preserves automatic takeover details in the shared resume outcome", async () => {
+    const commands = new ConversationCommandService({
+      resume: vi.fn(async () => ({
+        threadId: "thread-shared",
+        transferredFrom: "weixin",
+      })),
+    } as unknown as ConversationUseCases);
+
+    await expect(commands.execute(target, "resume", "thread-shared"))
+      .resolves.toEqual({
+        kind: "outcome",
+        outcome: {
+          type: "thread.resumed",
+          threadId: "thread-shared",
+          transferredFrom: "weixin",
+        },
+      });
+  });
+
   it("keeps review parsing and business invocation outside Surface adapters", async () => {
     const review = vi.fn(async () => ({
       threadId: "review-thread",
@@ -81,7 +101,7 @@ describe("ConversationCommandService", () => {
     }));
     const commands = new ConversationCommandService({
       review,
-    } as unknown as ConversationService);
+    } as unknown as ConversationUseCases);
 
     await expect(commands.execute(target, "review", "branch main")).resolves.toEqual({
       kind: "outcome",
@@ -122,7 +142,7 @@ describe("ConversationCommandService", () => {
     const commands = new ConversationCommandService({
       togglePlanMode,
       startPlan,
-    } as unknown as ConversationService);
+    } as unknown as ConversationUseCases);
 
     await expect(commands.execute(target, "plan")).resolves.toEqual({
       kind: "collaboration-mode",
@@ -148,7 +168,7 @@ describe("ConversationCommandService", () => {
     }));
     const commands = new ConversationCommandService({
       setGoal,
-    } as unknown as ConversationService);
+    } as unknown as ConversationUseCases);
 
     await expect(commands.execute(target, "goal", " set ship it ")).resolves.toEqual({
       kind: "outcome",
@@ -161,7 +181,7 @@ describe("ConversationCommandService", () => {
     const queueFollowUp = vi.fn(async () => ({ position: 2 }));
     const commands = new ConversationCommandService({
       queueFollowUp,
-    } as unknown as ConversationService);
+    } as unknown as ConversationUseCases);
 
     await expect(commands.execute(target, "queue", " 下一轮检查测试 "))
       .resolves.toEqual({
@@ -175,7 +195,7 @@ describe("ConversationCommandService", () => {
     const queueFollowUp = vi.fn();
     const commands = new ConversationCommandService({
       queueFollowUp,
-    } as unknown as ConversationService);
+    } as unknown as ConversationUseCases);
 
     await expect(commands.execute(target, "queue", " "))
       .rejects.toMatchObject({ code: "queue.usage" });
@@ -191,8 +211,8 @@ describe("ConversationCommandService", () => {
     const listSkills = vi.fn(async () => ["skill"]);
     const listMcpServers = vi.fn(async () => ["mcp"]);
     const listPlugins = vi.fn(async () => ({ plugins: ["plugin"] }));
-    const accountUsage = vi.fn(async () => ({ usage: "usage" }));
-    const accountRateLimits = vi.fn(async () => ({ limits: "limits" }));
+    const providerAccountUsage = vi.fn(async () => ({ usage: "usage" }));
+    const providerAccountLimits = vi.fn(async () => ({ limits: "limits" }));
     const listPermissionProfiles = vi.fn(async () => ["permissions"]);
     const commands = new ConversationCommandService({
       modelState,
@@ -202,10 +222,10 @@ describe("ConversationCommandService", () => {
       listSkills,
       listMcpServers,
       listPlugins,
-      accountUsage,
-      accountRateLimits,
+      providerAccountUsage,
+      providerAccountLimits,
       listPermissionProfiles,
-    } as unknown as ConversationService);
+    } as unknown as ConversationUseCases);
 
     await expect(commands.execute(target, "model", "gpt-test")).resolves.toMatchObject({
       kind: "models",
@@ -222,7 +242,7 @@ describe("ConversationCommandService", () => {
       view: "fast",
       state,
     });
-    await expect(commands.execute(target, "skills")).resolves.toEqual({
+    await expect(commands.execute(target, "skill")).resolves.toEqual({
       kind: "skills",
       entries: ["skill"],
     });
@@ -251,6 +271,45 @@ describe("ConversationCommandService", () => {
     expect(selectFastMode).toHaveBeenCalledWith(target, "on");
   });
 
+  it("invokes a Skill through the shared command boundary", async () => {
+    const invokeSkill = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+      skillName: "systematic-debugging",
+    }));
+    const commands = new ConversationCommandService({
+      invokeSkill,
+    } as unknown as ConversationUseCases);
+
+    await expect(commands.execute(
+      target,
+      "skill",
+      "systematic-debugging 排查断线",
+    )).resolves.toEqual({
+      kind: "outcome",
+      outcome: {
+        type: "skill.started",
+        skillName: "systematic-debugging",
+        turnId: "turn-1",
+        steered: false,
+      },
+    });
+    expect(invokeSkill).toHaveBeenCalledWith(
+      target,
+      "systematic-debugging",
+      "排查断线",
+    );
+  });
+
+  it("rejects /skill without both selector and task", async () => {
+    const commands = new ConversationCommandService(
+      {} as ConversationUseCases,
+    );
+    await expect(commands.execute(target, "skill", "systematic-debugging"))
+      .rejects.toMatchObject({ code: "skill.usage" });
+  });
+
   it("covers every registered command through the shared dispatcher", async () => {
     const goal = {
       threadId: "thread-1",
@@ -262,12 +321,13 @@ describe("ConversationCommandService", () => {
       updatedAt: 1,
     };
     const service = {
-      resume: vi.fn(async () => "thread-resumed"),
+      resume: vi.fn(async () => ({ threadId: "thread-resumed" })),
       listSessions: vi.fn(async () => []),
       status: vi.fn(() => ({ workspaceId: "main" })),
       newSession: vi.fn(async () => undefined),
       archive: vi.fn(async () => "thread-archived"),
       unarchive: vi.fn(async () => "thread-unarchived"),
+      setPinned: vi.fn(async () => undefined),
       selectWorkspace: vi.fn(async () => ({ id: "main", name: "Main", cwd: "/workspace" })),
       listWorkspaces: vi.fn(() => [{ id: "main", name: "Main", cwd: "/workspace" }]),
       stop: vi.fn(async () => true),
@@ -280,10 +340,16 @@ describe("ConversationCommandService", () => {
       selectEffort: vi.fn(async () => ({ model: "gpt-test" })),
       selectFastMode: vi.fn(async () => ({ model: "gpt-test" })),
       listSkills: vi.fn(async () => []),
+      invokeSkill: vi.fn(async () => ({
+        threadId: "thread-1",
+        turnId: "turn-skill",
+        steered: false,
+        skillName: "skill",
+      })),
       listMcpServers: vi.fn(async () => []),
       listPlugins: vi.fn(async () => ({})),
-      accountUsage: vi.fn(async () => ({})),
-      accountRateLimits: vi.fn(async () => ({})),
+      providerAccountUsage: vi.fn(async () => ({})),
+      providerAccountLimits: vi.fn(async () => ({})),
       listPermissionProfiles: vi.fn(async () => []),
       initializeProjectRules: vi.fn(async () => ({
         projectRoot: "/workspace",
@@ -294,7 +360,7 @@ describe("ConversationCommandService", () => {
       setGoal: vi.fn(async () => goal),
     };
     const commands = new ConversationCommandService(
-      service as unknown as ConversationService,
+      service as unknown as ConversationUseCases,
     );
     const cases = [
       ["resume", "thread-1", "resume"],
@@ -303,6 +369,8 @@ describe("ConversationCommandService", () => {
       ["new", "", "newSession"],
       ["archive", "", "archive"],
       ["unarchive", "thread-1", "unarchive"],
+      ["pin", "", "setPinned"],
+      ["unpin", "", "setPinned"],
       ["status", "", "status"],
       ["workspace", "main", "selectWorkspace"],
       ["stop", "", "stop"],
@@ -314,11 +382,11 @@ describe("ConversationCommandService", () => {
       ["model", "gpt-test", "selectModel"],
       ["effort", "high", "selectEffort"],
       ["fast", "on", "selectFastMode"],
-      ["skills", "", "listSkills"],
+      ["skill", "", "listSkills"],
       ["mcp", "", "listMcpServers"],
       ["plugins", "", "listPlugins"],
-      ["usage", "", "accountUsage"],
-      ["limits", "", "accountRateLimits"],
+      ["usage", "", "providerAccountUsage"],
+      ["limits", "", "providerAccountLimits"],
       ["permissions", "", "listPermissionProfiles"],
       ["rules", "init", "initializeProjectRules"],
       ["diff", "", "artifacts"],
@@ -335,6 +403,8 @@ describe("ConversationCommandService", () => {
     expect(service.status).toHaveBeenCalledWith(target, {
       includeGitBranch: true,
     });
+    expect(service.setPinned).toHaveBeenNthCalledWith(1, target, true);
+    expect(service.setPinned).toHaveBeenNthCalledWith(2, target, false);
   });
 
   it("returns structured goal query and clear results", async () => {
@@ -343,7 +413,7 @@ describe("ConversationCommandService", () => {
     const commands = new ConversationCommandService({
       getGoal,
       clearGoal,
-    } as unknown as ConversationService);
+    } as unknown as ConversationUseCases);
 
     await expect(commands.execute(target, "goal")).resolves.toEqual({
       kind: "goal",
@@ -359,7 +429,7 @@ describe("ConversationCommandService", () => {
     const getGoal = vi.fn(async () => null);
     const commands = new ConversationCommandService({
       getGoal,
-    } as unknown as ConversationService);
+    } as unknown as ConversationUseCases);
 
     for (const input of ["set", "clear extra", "unknown"]) {
       await expect(commands.execute(target, "goal", input)).rejects.toMatchObject({

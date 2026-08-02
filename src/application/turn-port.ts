@@ -6,7 +6,8 @@ import type {
 export type TurnInput =
   | { type: "text"; text: string }
   | { type: "localImage"; path: string }
-  | { type: "localAudio"; path: string };
+  | { type: "localAudio"; path: string }
+  | { type: "skill"; name: string; path: string };
 
 export interface TurnCollaborationMode {
   mode: "default" | "plan";
@@ -19,6 +20,7 @@ export interface TurnCollaborationMode {
 
 export interface TurnOverrides {
   model?: string;
+  modelProvider?: string;
   effort?: string;
   serviceTier?: string | null;
   collaborationMode?: TurnCollaborationMode;
@@ -56,6 +58,7 @@ export interface TurnExecutionPort {
   ): Promise<TurnStarted>;
   interruptTurn(threadId: string, turnId: string): Promise<void>;
   setThreadName(threadId: string, name: string): Promise<void>;
+  setThreadPinned(threadId: string, pinned: boolean): Promise<void>;
   compactThread(threadId: string): Promise<void>;
   startReview(threadId: string, target: ReviewTarget): Promise<ReviewStarted>;
   getGoal(threadId: string): Promise<ThreadGoal | null>;

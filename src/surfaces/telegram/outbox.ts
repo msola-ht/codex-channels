@@ -20,6 +20,11 @@ import {
   createTurnStartedPresentation,
 } from "../lifecycle-presentation.js";
 import {
+  formatVisionCompleted,
+  formatVisionProgress,
+  formatVisionStarted,
+} from "../input-copy.js";
+import {
   cliInputTitle,
   contentTruncatedText,
   emptyCodexResponseText,
@@ -160,6 +165,24 @@ export class TelegramOutbox {
     }
     const chatId = event.target.conversationId;
     switch (event.type) {
+      case "vision.started":
+        this.enqueue(
+          chatId,
+          () => this.sendPanel(
+            chatId,
+            formatVisionStarted(event.imageCount),
+            undefined,
+            true,
+          ).then(() => undefined),
+          false,
+        );
+        return;
+      case "vision.progress":
+        this.notifyPanel(chatId, formatVisionProgress(event.elapsedSeconds));
+        return;
+      case "vision.completed":
+        this.notifyPanel(chatId, formatVisionCompleted(event));
+        return;
       case "turn.started":
         this.replyTargets.bindPending(
           chatId,
@@ -172,7 +195,7 @@ export class TelegramOutbox {
             await this.sendPanel(
               chatId,
               renderTelegramLifecyclePresentation(
-                createTurnStartedPresentation(),
+                createTurnStartedPresentation(event.background ? event.threadId : undefined),
               ),
               this.replyTargets.get(this.turnKey(event.threadId, event.turnId)),
               true,
@@ -245,7 +268,9 @@ export class TelegramOutbox {
         const key = this.streamKey(turnKey, event.itemId);
         const existing = this.streams.get(key);
         const state = existing ?? this.createStream(chatId, turnKey);
-        const bounded = boundedTelegramStreamText(event.text);
+        const bounded = boundedTelegramStreamText(
+          `${event.background ? `后台任务 · ${event.threadId.slice(0, 12)}\n\n` : ""}${event.text}`,
+        );
         state.text = bounded.text;
         state.truncated = bounded.truncated;
         state.completed = true;

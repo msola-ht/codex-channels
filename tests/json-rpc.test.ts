@@ -14,6 +14,7 @@ function appServerThread(
     parentThreadId: null,
     preview: "测试 Thread",
     ephemeral: false,
+    isPinned: false,
     modelProvider: "openai",
     createdAt: 1,
     updatedAt: 1,
@@ -21,7 +22,7 @@ function appServerThread(
     status: { type: "idle" },
     path: null,
     cwd: "/tmp/project",
-    cliVersion: "0.145.0",
+    cliVersion: "0.146.0",
     source: "cli",
     threadSource: null,
     agentNickname: null,
@@ -222,6 +223,21 @@ class FakeTransport extends BaseTransport {
           }),
         ),
       );
+    } else if (decoded.method === "thread/fork") {
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({
+            id: decoded.id,
+            result: {
+              thread: appServerThread({ id: "thread-forked", forkedFromId: "thread-1" }),
+              model: "deepseek-v4-flash",
+              modelProvider: "deepseek",
+              reasoningEffort: "high",
+              serviceTier: "default",
+            },
+          }),
+        ),
+      );
     } else if (decoded.method === "thread/archive") {
       queueMicrotask(() =>
         this.emitMessage(JSON.stringify({ id: decoded.id, result: {} })),
@@ -231,6 +247,16 @@ class FakeTransport extends BaseTransport {
         this.emitMessage(JSON.stringify({
           id: decoded.id,
           result: { thread: appServerThread() },
+        })),
+      );
+    } else if (decoded.method === "thread/metadata/update") {
+      const params = decoded.params as { isPinned?: boolean };
+      queueMicrotask(() =>
+        this.emitMessage(JSON.stringify({
+          id: decoded.id,
+          result: {
+            thread: appServerThread({ isPinned: params.isPinned }),
+          },
         })),
       );
     } else if (decoded.method === "model/list") {
@@ -448,7 +474,11 @@ describe("JsonRpcClient", () => {
     const transport = new FakeTransport();
     const client = new JsonRpcClient(transport);
     const methods: string[] = [];
-    client.onNotification((notification) => methods.push(notification.method));
+    const receivedTimes: Array<number | undefined> = [];
+    client.onNotification((notification) => {
+      methods.push(notification.method);
+      receivedTimes.push(notification.receivedAtMs);
+    });
 
     const initialized = await client.connect();
     transport.receive({ method: "warning", params: { message: "test" } });
@@ -470,6 +500,7 @@ describe("JsonRpcClient", () => {
       },
     });
     expect(methods).toEqual(["warning"]);
+    expect(receivedTimes).toEqual([expect.any(Number)]);
   });
 
   it("responds to server requests without treating them as notifications", async () => {
@@ -599,6 +630,7 @@ describe("JsonRpcClient", () => {
     const request = transport.sent.find((message) => message.method === "thread/list");
     expect(request?.params).toMatchObject({
       cwd: "/tmp/project",
+      modelProviders: [],
       sourceKinds: ["cli", "vscode", "appServer"],
       useStateDbOnly: true,
       archived: false,
@@ -631,8 +663,10 @@ describe("JsonRpcClient", () => {
     expect(threads).toEqual([{
       id: "thread-1",
       sessionId: "session-1",
+      modelProvider: "openai",
       preview: "测试 Thread",
       name: null,
+      isPinned: false,
       status: { type: "active" },
       cwd: "/tmp/project",
       source: "other",
@@ -667,6 +701,19 @@ describe("JsonRpcClient", () => {
     expect(session.contextCompactionItemIds).toEqual(["compact-1", "compact-2"]);
   });
 
+  it("does not override process-owned provider configuration when resuming a thread", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await client.resumeThread("thread-1", "/tmp/project");
+
+    expect(transport.sent.find((message) => message.method === "thread/resume")?.params)
+      .not.toHaveProperty("config");
+  });
+
   it("fails closed when an official Thread response lacks a required routing field", async () => {
     const transport = new FakeTransport();
     transport.threadListData = [appServerThread({ sessionId: undefined })];
@@ -679,6 +726,18 @@ describe("JsonRpcClient", () => {
       .rejects.toThrow("Codex Thread 响应缺少有效 sessionId");
   });
 
+  it("fails closed when an official Thread response lacks pin state", async () => {
+    const transport = new FakeTransport();
+    transport.threadListData = [appServerThread({ isPinned: undefined })];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listThreads("/tmp/project"))
+      .rejects.toThrow("Codex Thread 响应缺少有效 isPinned");
+  });
+
   it("passes stable search/archive filters and uses explicit archive methods", async () => {
     const transport = new FakeTransport();
     const rpc = new JsonRpcClient(transport);
@@ -688,6 +747,7 @@ describe("JsonRpcClient", () => {
     await client.listThreads("/tmp/project", { archived: true, searchTerm: "修复" });
     await client.archiveThread("thread-1");
     await client.unarchiveThread("thread-1");
+    await client.setThreadPinned("thread-1", true);
 
     expect(transport.sent.find((message) => message.method === "thread/list")?.params)
       .toMatchObject({ archived: true, searchTerm: "修复" });
@@ -695,10 +755,17 @@ describe("JsonRpcClient", () => {
       .toEqual({ threadId: "thread-1" });
     expect(transport.sent.find((message) => message.method === "thread/unarchive")?.params)
       .toEqual({ threadId: "thread-1" });
+    expect(transport.sent.find((message) => message.method === "thread/metadata/update")?.params)
+      .toEqual({ threadId: "thread-1", isPinned: true });
   });
 
   it("reads account rate limits through the stable App Server method", async () => {
     const transport = new FakeTransport();
+    transport.accountRateLimitsResult = {
+      rateLimits: appServerRateLimit({ planType: "ent26" }),
+      rateLimitsByLimitId: null,
+      rateLimitResetCredits: null,
+    };
     const rpc = new JsonRpcClient(transport);
     const client = new CodexAppServerClient(rpc, {
       sandbox: "workspace-write",
@@ -707,7 +774,7 @@ describe("JsonRpcClient", () => {
 
     const result = await client.accountRateLimits();
 
-    expect(result.limits[0]?.planType).toBe("pro");
+    expect(result.limits[0]?.planType).toBe("ent26");
     expect(transport.sent.some((message) => message.method === "account/rateLimits/read")).toBe(true);
   });
 
@@ -858,6 +925,16 @@ describe("JsonRpcClient", () => {
             enabled: false,
           },
         ],
+      }, {
+        cwd: "/tmp/other",
+        errors: [],
+        skills: [{
+          name: "repo",
+          description: "Other repository",
+          path: "/tmp/other/.codex/skills/repo/SKILL.md",
+          scope: "repo",
+          enabled: true,
+        }],
       }],
     };
     const client = new CodexAppServerClient(new JsonRpcClient(transport), {
@@ -869,6 +946,12 @@ describe("JsonRpcClient", () => {
       { name: "personal", description: "Personal" },
       { name: "repo", description: "Repository" },
     ]);
+    await expect(client.resolveSkill("/tmp/project", "repo")).resolves.toEqual({
+      name: "repo",
+      path: "/tmp/project/.codex/skills/repo/SKILL.md",
+    });
+    await expect(client.resolveSkill("/tmp/project", "system"))
+      .resolves.toBeUndefined();
     expect(transport.sent.find((message) => message.method === "skills/list")?.params)
       .toEqual({ cwds: ["/tmp/project"], forceReload: false });
   });
@@ -895,6 +978,30 @@ describe("JsonRpcClient", () => {
 
     await expect(client.listSkills("/tmp/project"))
       .rejects.toThrow("Codex 响应缺少有效 skill name");
+  });
+
+  it("fails closed when an invocable Skill has an unsafe name or path", async () => {
+    const transport = new FakeTransport();
+    transport.skillsResult = {
+      data: [{
+        cwd: "/tmp/project",
+        errors: [],
+        skills: [{
+          name: "unsafe skill",
+          description: "Broken",
+          path: "relative/SKILL.md",
+          scope: "repo",
+          enabled: true,
+        }],
+      }],
+    };
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.resolveSkill("/tmp/project", "unsafe skill"))
+      .rejects.toThrow("Codex 返回了无法安全调用的 Skill");
   });
 
   it("maps and paginates MCP status into stable summaries", async () => {
@@ -1164,6 +1271,11 @@ describe("JsonRpcClient", () => {
         { type: "text", text: "测试输入" },
         { type: "localImage", path: "/tmp/screenshot.png" },
         { type: "localAudio", path: "/tmp/voice.ogg" },
+        {
+          type: "skill",
+          name: "systematic-debugging",
+          path: "/tmp/project/.codex/skills/systematic-debugging/SKILL.md",
+        },
       ],
       "codex_connect_gateway:request-1",
       "/tmp/project",
@@ -1190,6 +1302,11 @@ describe("JsonRpcClient", () => {
           { type: "text", text: "测试输入", text_elements: [] },
           { type: "localImage", path: "/tmp/screenshot.png" },
           { type: "localAudio", path: "/tmp/voice.ogg" },
+          {
+            type: "skill",
+            name: "systematic-debugging",
+            path: "/tmp/project/.codex/skills/systematic-debugging/SKILL.md",
+          },
         ],
         cwd: "/tmp/project",
         model: "gpt-selected",
@@ -1265,6 +1382,7 @@ describe("JsonRpcClient", () => {
     await client.clearGoal("thread-1");
     await client.interruptTurn("thread-1", "turn-1");
     await client.setThreadName("thread-1", "新名称");
+    await client.setThreadPinned("thread-1", false);
     await client.compactThread("thread-1");
 
     expect(review).toEqual({ threadId: "thread-1", turnId: "review-turn-1" });
@@ -1293,6 +1411,8 @@ describe("JsonRpcClient", () => {
       });
     expect(transport.sent.find((message) => message.method === "turn/interrupt")?.params)
       .toEqual({ threadId: "thread-1", turnId: "turn-1" });
+    expect(transport.sent.find((message) => message.method === "thread/metadata/update")?.params)
+      .toEqual({ threadId: "thread-1", isPinned: false });
   });
 
   it("fails closed when a Goal response lacks a required stable field", async () => {
@@ -1329,6 +1449,50 @@ describe("JsonRpcClient", () => {
       .toMatchObject({ model: "gpt-configured" });
     expect(transport.sent.find((message) => message.method === "turn/start")?.params)
       .not.toHaveProperty("model");
+  });
+
+  it("starts a new thread with an explicit model provider", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await client.startThread("/tmp/project", {
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+    });
+
+    expect(transport.sent.find((message) => message.method === "thread/start")?.params)
+      .toMatchObject({
+        model: "deepseek-v4-flash",
+        modelProvider: "deepseek",
+      });
+  });
+
+  it("forks a thread with an explicit model provider", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    const forked = await client.forkThread("thread-1", "/tmp/project", {
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+    });
+
+    expect(forked).toMatchObject({
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+      thread: { id: "thread-forked" },
+    });
+    expect(transport.sent.find((message) => message.method === "thread/fork")?.params)
+      .toMatchObject({
+        threadId: "thread-1",
+        model: "deepseek-v4-flash",
+        modelProvider: "deepseek",
+      });
   });
 
   it("rejects repeated pagination cursors", async () => {

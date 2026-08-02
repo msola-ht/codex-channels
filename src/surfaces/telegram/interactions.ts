@@ -417,6 +417,17 @@ export class TelegramInteractionPort implements InteractionPort {
       }
       return keyboard.text("完成", `ix:a:${token}`).text("取消", `ix:c:${token}`);
     }
+    if (request.type === "elicitation" && request.mode === "tool-approval") {
+      const keyboard = new InlineKeyboard()
+        .text("允许一次", `ix:mo:${token}`);
+      if (request.toolApproval?.allowSession) {
+        keyboard.text("本会话允许", `ix:ms:${token}`).row();
+      }
+      if (request.toolApproval?.allowAlways) {
+        keyboard.text("始终允许", `ix:ma:${token}`).row();
+      }
+      return keyboard.text("取消", `ix:c:${token}`);
+    }
     if (request.type === "user-input" && !awaitingOther) {
       const question = request.questions[questionIndex];
       if (question && question.options.length > 0) {
@@ -463,6 +474,16 @@ export class TelegramInteractionPort implements InteractionPort {
         await context.answerCallbackQuery({
           text: unsupportedApprovalChoiceMessage(choice),
         });
+        return;
+      }
+      this.finish(token!, resolution.decision, resolution.outcome);
+    } else if (
+      pending.request.type === "elicitation"
+      && pending.request.mode === "tool-approval"
+    ) {
+      const resolution = mapMcpToolApprovalDecision(pending.request, action);
+      if (!resolution) {
+        await context.answerCallbackQuery({ text: "该授权选项不可用" });
         return;
       }
       this.finish(token!, resolution.decision, resolution.outcome);
@@ -820,8 +841,65 @@ function formatInteraction(
       "发送 /stop 可停止当前请求。",
     ].join("\n") + secretWarning;
   }
+  if (request.mode === "tool-approval") {
+    const toolTitle = request.toolApproval?.toolTitle ?? "未命名工具";
+    const detail = request.toolApproval?.detail
+      ? `\n参数：${request.toolApproval.detail}`
+      : "";
+    return [
+      request.title,
+      "",
+      request.message,
+      "",
+      `工具：${toolTitle}${detail}`,
+      "",
+      "请选择下方授权范围。",
+    ].join("\n");
+  }
   const instruction = request.mode === "form" ? "请回复有效 JSON 对象，或发送 /stop 停止当前请求。" : "请打开链接完成操作，然后点击“完成”。";
   return `${request.title}\n\n${request.message}\n\n${instruction}`;
+}
+
+function mapMcpToolApprovalDecision(
+  request: Extract<InteractionRequest, { type: "elicitation" }>,
+  action: string | undefined,
+): {
+  decision: Extract<InteractionDecision, { type: "elicitation" }>;
+  outcome: string;
+} | undefined {
+  if (action === "c") {
+    return {
+      decision: {
+        type: "elicitation",
+        action: "cancel",
+        content: null,
+      },
+      outcome: interactionOutcome.cancelled,
+    };
+  }
+  const scope = action === "mo"
+    ? "once"
+    : action === "ms" && request.toolApproval?.allowSession
+      ? "session"
+      : action === "ma" && request.toolApproval?.allowAlways
+        ? "always"
+        : undefined;
+  if (!scope) {
+    return undefined;
+  }
+  return {
+    decision: {
+      type: "elicitation",
+      action: "accept",
+      content: null,
+      scope,
+    },
+    outcome: scope === "session"
+      ? interactionOutcome.mcpAllowedSession
+      : scope === "always"
+        ? interactionOutcome.mcpAllowedAlways
+        : interactionOutcome.mcpAllowedOnce,
+  };
 }
 
 function nextUnansweredQuestion(

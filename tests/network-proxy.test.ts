@@ -5,6 +5,7 @@ import {
   readMacSystemProxy,
   resolveHttpProxyUrl,
   resolveProxyEnvironment,
+  selectHttpProxyUrl,
 } from "../runtime/network-proxy.mjs";
 
 describe("network proxy discovery", () => {
@@ -36,6 +37,57 @@ describe("network proxy discovery", () => {
     expect(() => resolveHttpProxyUrl("socks5://proxy.example:1080")).toThrow(
       "HTTP(S) 客户端代理只支持 http:// 或 https://",
     );
+  });
+
+  it("selects one HTTP(S) proxy route for a target and honors NO_PROXY", () => {
+    const proxy = {
+      http: "http://http.example:8080",
+      https: "http://https.example:8443",
+      all: "http://all.example:9000",
+      no: "localhost,.internal.example,api.example:8443,[::1]",
+    };
+
+    expect(selectHttpProxyUrl(proxy, "https://open.feishu.cn")).toBe(
+      "http://https.example:8443/",
+    );
+    expect(selectHttpProxyUrl(proxy, "http://open.feishu.cn")).toBe(
+      "http://http.example:8080/",
+    );
+    expect(selectHttpProxyUrl(proxy, "https://service.internal.example")).toBeUndefined();
+    expect(selectHttpProxyUrl(proxy, "https://api.example:8443")).toBeUndefined();
+    expect(selectHttpProxyUrl(proxy, "https://api.example:9443")).toBe(
+      "http://https.example:8443/",
+    );
+    expect(selectHttpProxyUrl(proxy, "https://[::1]")).toBeUndefined();
+  });
+
+  it("keeps an explicit client proxy ahead of shared NO_PROXY", () => {
+    expect(selectHttpProxyUrl(
+      {
+        https: "http://shared.example:8443",
+        no: "api.telegram.org",
+      },
+      "https://api.telegram.org",
+      "http://telegram.example:8080",
+    )).toBe("http://telegram.example:8080/");
+  });
+
+  it("fails closed when the selected shared proxy is invalid or unsupported", () => {
+    expect(() => selectHttpProxyUrl(
+      { https: "not-a-url" },
+      "https://open.feishu.cn",
+    )).toThrow("HTTP(S) 代理不是有效 URL");
+    expect(() => selectHttpProxyUrl(
+      { all: "socks5://127.0.0.1:1080" },
+      "https://open.feishu.cn",
+    )).toThrow("HTTP(S) 客户端代理只支持 http:// 或 https://");
+    expect(selectHttpProxyUrl(
+      {
+        all: "socks5://127.0.0.1:1080",
+        no: ".feishu.cn",
+      },
+      "https://open.feishu.cn",
+    )).toBeUndefined();
   });
 
   it("prefers explicit config, then inherited environment, then the system proxy", () => {

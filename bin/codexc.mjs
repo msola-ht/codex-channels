@@ -4,9 +4,24 @@ import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { HttpsProxyAgent } from "https-proxy-agent";
+
 import { configEventQueuePath } from "../runtime/config-event-queue.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
-import { resolveProxyEnvironment } from "../runtime/network-proxy.mjs";
+import {
+  resolveProxyEnvironment,
+  selectHttpProxyUrl,
+} from "../runtime/network-proxy.mjs";
+import {
+  loadManagedProviderAppServer,
+  loadOpenAiBaseUrl,
+  loadPrimaryModelProvider,
+  providerAppServerSocketPath,
+  providerMetricsSocketPath,
+  withOpenAiBaseUrl,
+  withProviderBaseUrl,
+} from "../runtime/model-provider-runtime.mjs";
+import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import {
   initializeUserData,
   packageDir,
@@ -40,6 +55,7 @@ const helpText = {
   ws remove <目标>             删除 Workspace 注册
   rules init                   生成项目 Codex 命令预设
   rules check                  检查项目 Codex 命令预设
+  state upgrade               显式升级 Gateway 状态数据库
 
 后台服务：
   start                        前台启动 App Server 与 Gateway
@@ -68,7 +84,8 @@ const helpText = {
 在前台启动 Codex App Server 与 Gateway。`,
   remote: `用法：codexc remote [--workspace ID] [Codex 参数...]
 
-连接共享 App Server，并把其余参数传给原生 Codex CLI。`,
+连接共享 App Server，并把其余参数传给原生 Codex CLI。
+切换模式下使用 --profile deepseek 连接隔离的 DeepSeek App Server。`,
   ws: `用法：codexc ws
 
 其他用法：
@@ -117,6 +134,12 @@ const helpText = {
   "rules.check": `用法：codexc rules check
 
 使用当前 Codex CLI 检查项目规则。`,
+  state: `用法：codexc state upgrade
+
+停止 Gateway 后，备份并显式升级状态数据库。`,
+  "state.upgrade": `用法：codexc state upgrade
+
+停止 Gateway 后，备份并显式升级状态数据库。`,
   version: "用法：codexc version",
   gateway: `用法：codexc gateway
 
@@ -173,7 +196,7 @@ try {
       if (showRequestedHelp(args, "service-app-server")) {
         break;
       }
-      runServiceAppServer(args);
+      await runServiceAppServer(args);
       break;
     case "remote":
       if (showRequestedHelp(args, "remote")) {
@@ -201,6 +224,9 @@ try {
       break;
     case "rules":
       projectRules(args);
+      break;
+    case "state":
+      state(args);
       break;
     default:
       throw new Error(`未知命令：${command}\n运行 codexc --help 查看用法`);
@@ -266,11 +292,15 @@ function runGateway(args) {
   });
 }
 
-function runServiceAppServer(args) {
+async function runServiceAppServer(args) {
   if (args.length > 0) {
     throw new Error("内部服务入口不接受参数");
   }
   const runtime = configuredEnvironment();
+  if (Object.hasOwn(runtime.document, "ds_proxy")) {
+    throw new Error("ds_proxy 已移除，模型统计代理现在由 App Server 服务自动管理");
+  }
+  runtime.environment.CODEX_CONNECT_SERVICE_ROLE = "app-server";
   const codex = table(runtime.document.codex);
   const { defaultWorkspace } = readWorkspaceConfig(runtime.document);
   const socketPath = resolveConfiguredPath(
@@ -278,7 +308,113 @@ function runServiceAppServer(args) {
     runtime.dataDir,
     join(runtime.dataDir, "runtime", "codex-app-server.sock"),
   );
-  const child = spawn(runtime.environment.CODEX_BINARY, [
+  const managedProvider = loadManagedProviderAppServer(runtime.environment);
+  const primaryProvider = loadPrimaryModelProvider(runtime.environment);
+  const {
+    ProviderProxy,
+    sendProviderProxyMetrics,
+  } = await import("../dist/provider-proxy/index.js");
+  const providerProxies = [];
+  const upstreamAgents = new Set();
+  const upstreamAgentFor = (upstreamUrl) => {
+    const proxyUrl = selectHttpProxyUrl({
+      http: runtime.environment.HTTP_PROXY,
+      https: runtime.environment.HTTPS_PROXY,
+      all: runtime.environment.ALL_PROXY,
+      no: runtime.environment.NO_PROXY,
+    }, upstreamUrl);
+    if (!proxyUrl) return undefined;
+    const agent = new HttpsProxyAgent(proxyUrl);
+    upstreamAgents.add(agent);
+    return agent;
+  };
+  const startProviderProxy = async (provider, options) => {
+    const modelProxy = new ProviderProxy("127.0.0.1:0", {
+      ...options,
+      onMetrics: (metrics) => sendProviderProxyMetrics(
+        providerMetricsSocketPath(socketPath, provider),
+        metrics,
+      ),
+      onError: (error) => console.error(
+        `${provider} 模型统计代理失败：${error instanceof Error ? error.message : String(error)}`,
+      ),
+    });
+    await modelProxy.start();
+    providerProxies.push(modelProxy);
+    console.log(`${provider} 模型统计代理已启动：${modelProxy.address()}`);
+    return `http://${modelProxy.address()}`;
+  };
+  const deepseekUrl = new URL(deepseekProviderDefinition.baseUrl);
+  const proxyOptionsForUrl = (upstreamUrl) => {
+    const upstreamAgent = upstreamAgentFor(upstreamUrl);
+    return {
+      ...(upstreamAgent ? { upstreamAgent } : {}),
+      upstreamHost: upstreamUrl.hostname,
+      ...(upstreamUrl.port ? { upstreamPort: Number(upstreamUrl.port) } : {}),
+      upstreamProtocol: upstreamUrl.protocol === "http:" ? "http" : "https",
+      upstreamBasePath: upstreamUrl.pathname,
+    };
+  };
+  let primaryArguments = [];
+  let managedArguments;
+  try {
+    if (primaryProvider === "openai") {
+      const configuredOpenAiBaseUrl = loadOpenAiBaseUrl(runtime.environment);
+      let openAiProxyOptions;
+      if (configuredOpenAiBaseUrl) {
+        openAiProxyOptions = proxyOptionsForUrl(new URL(configuredOpenAiBaseUrl));
+      } else {
+        const chatgptUrl = new URL("https://chatgpt.com/backend-api/codex");
+        const apiUrl = new URL("https://api.openai.com/v1");
+        const chatgptAgent = upstreamAgentFor(chatgptUrl);
+        const apiAgent = upstreamAgentFor(apiUrl);
+        openAiProxyOptions = {
+          upstreamHost: apiUrl.hostname,
+          upstreamProtocol: "https",
+          upstreamBasePath: apiUrl.pathname,
+          resolveUpstream: (headers) => {
+            const target = headers["chatgpt-account-id"] === undefined ? apiUrl : chatgptUrl;
+            const agent = target === chatgptUrl ? chatgptAgent : apiAgent;
+            return {
+              ...(agent ? { agent } : {}),
+              host: target.hostname,
+              protocol: "https",
+              basePath: target.pathname,
+            };
+          },
+        };
+      }
+      const localBaseUrl = await startProviderProxy("openai", openAiProxyOptions);
+      primaryArguments = withOpenAiBaseUrl(primaryArguments, localBaseUrl);
+    } else if (primaryProvider === deepseekProviderDefinition.id) {
+      const localBaseUrl = await startProviderProxy(
+        deepseekProviderDefinition.id,
+        proxyOptionsForUrl(deepseekUrl),
+      );
+      primaryArguments = withProviderBaseUrl(
+        primaryArguments,
+        deepseekProviderDefinition.id,
+        localBaseUrl,
+      );
+    }
+    if (managedProvider) {
+      const localBaseUrl = await startProviderProxy(
+        managedProvider.provider,
+        proxyOptionsForUrl(deepseekUrl),
+      );
+      managedArguments = withProviderBaseUrl(
+        managedProvider.arguments,
+        managedProvider.provider,
+        localBaseUrl,
+      );
+    }
+  } catch (error) {
+    await Promise.all(providerProxies.map((proxy) => proxy.close()));
+    for (const agent of upstreamAgents) agent.destroy();
+    throw error;
+  }
+  const children = [spawn(runtime.environment.CODEX_BINARY, [
+    ...primaryArguments,
     "app-server",
     "--listen",
     `unix://${socketPath}`,
@@ -286,8 +422,26 @@ function runServiceAppServer(args) {
     stdio: "inherit",
     env: runtime.environment,
     cwd: defaultWorkspace.cwd,
+  })];
+  if (managedProvider && managedArguments) {
+    children.push(spawn(runtime.environment.CODEX_BINARY, [
+      ...managedArguments,
+      "app-server",
+      "--listen",
+      `unix://${providerAppServerSocketPath(socketPath, managedProvider.provider)}`,
+    ], {
+      stdio: "inherit",
+      env: {
+        ...runtime.environment,
+        ...managedProvider.childEnvironment,
+      },
+      cwd: defaultWorkspace.cwd,
+    }));
+  }
+  forwardChildrenLifecycle(children, async () => {
+    await Promise.all(providerProxies.map((proxy) => proxy.close()));
+    for (const agent of upstreamAgents) agent.destroy();
   });
-  forwardChildLifecycle(child);
 }
 
 function workspace(args) {
@@ -384,6 +538,7 @@ function service(args) {
     throw new Error("用法：codexc service <install|uninstall|start|stop|reload|restart|status|logs>");
   }
   const serviceArgs = parseServiceArguments(action, rest);
+  rejectAppServerSelfRestart(action, serviceArgs, process.env);
   if (action === "install") {
     runScript("scripts/validate-config.mjs", []);
   }
@@ -415,6 +570,20 @@ function service(args) {
     return;
   }
   throw new Error("codexc service 当前支持 macOS launchd 与 Linux systemd；Windows Transport 尚未支持");
+}
+
+function rejectAppServerSelfRestart(action, serviceArgs, environment) {
+  const target = serviceArgs[0];
+  if (
+    environment.CODEX_CONNECT_SERVICE_ROLE === "app-server"
+    && action === "restart"
+    && (target === "app-server" || target === "all")
+  ) {
+    throw new Error(
+      "不能在 Codex App Server 内重启 App Server；请在本机终端运行 "
+      + `codexc service restart ${target}。渠道内只能运行 codexc service restart gateway。`,
+    );
+  }
 }
 
 function showConfig(args) {
@@ -491,6 +660,22 @@ function runScript(relativePath, args, additionalEnvironment = {}, workingDirect
   );
 }
 
+function state(args) {
+  if (showRequestedHelp(args, "state") ||
+    showSubcommandHelp(args, "upgrade", "state.upgrade")) {
+    return;
+  }
+  const [subcommand, ...rest] = args;
+  if (subcommand === undefined) {
+    console.log(helpText.state);
+    return;
+  }
+  if (subcommand !== "upgrade" || rest.length > 0) {
+    throw new Error("用法：codexc state upgrade");
+  }
+  runScript("scripts/upgrade-state.mjs", []);
+}
+
 function configuredEnvironment() {
   const { configPath, dataDir } = requireUserConfig();
   const document = readGatewayConfig(configPath);
@@ -511,10 +696,13 @@ function configuredEnvironment() {
   };
 }
 
-function forwardChildLifecycle(child) {
+function forwardChildrenLifecycle(children, closeResources = async () => undefined) {
+  let settled = false;
   const forward = (signal) => {
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill(signal);
+    for (const child of children) {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill(signal);
+      }
     }
   };
   const terminate = () => forward("SIGTERM");
@@ -523,21 +711,33 @@ function forwardChildLifecycle(child) {
     process.off("SIGTERM", terminate);
     process.off("SIGINT", interrupt);
   };
+  const finish = (code, signal, error) => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    forward("SIGTERM");
+    void Promise.resolve(closeResources()).then(() => {
+      if (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exitCode = 1;
+        return;
+      }
+      if (signal) {
+        process.kill(process.pid, signal);
+        return;
+      }
+      process.exitCode = code ?? 1;
+    }).catch((closeError) => {
+      console.error(closeError instanceof Error ? closeError.message : String(closeError));
+      process.exitCode = 1;
+    });
+  };
   process.on("SIGTERM", terminate);
   process.on("SIGINT", interrupt);
-  child.once("error", (error) => {
-    cleanup();
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-  });
-  child.once("exit", (code, signal) => {
-    cleanup();
-    if (signal) {
-      process.kill(process.pid, signal);
-      return;
-    }
-    process.exitCode = code ?? 1;
-  });
+  for (const child of children) {
+    child.once("error", (error) => finish(1, null, error));
+    child.once("exit", (code, signal) => finish(code, signal));
+  }
 }
 
 function table(value) {

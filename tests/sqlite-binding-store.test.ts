@@ -25,6 +25,7 @@ function threadPort(overrides: Partial<ThreadLifecyclePort> = {}): ThreadLifecyc
   };
   return {
     listThreads: unsupported,
+    readThread: unsupported,
     startThread: unsupported,
     resumeThread: unsupported,
     forkThread: unsupported,
@@ -42,6 +43,70 @@ afterEach(() => {
 });
 
 describe("SqliteBindingStore", () => {
+  it("persists foreground and background bindings independently", () => {
+    const { path } = databasePath();
+    const first = new SqliteBindingStore(path);
+    first.bind({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" });
+    const switched = first.switchForeground(
+      { target, workspaceId: "main", threadId: "thread-2", sessionId: "session-2" },
+      true,
+    );
+
+    expect(switched.backgrounded?.threadId).toBe("thread-1");
+    expect(first.get(target)?.threadId).toBe("thread-2");
+    expect(first.backgrounds(target).map(({ threadId }) => threadId)).toEqual(["thread-1"]);
+    first.close();
+
+    const reopened = new SqliteBindingStore(path);
+    expect(reopened.get(target)?.threadId).toBe("thread-2");
+    expect(reopened.backgrounds(target).map(({ threadId }) => threadId)).toEqual(["thread-1"]);
+    expect(reopened.isBackground("thread-1")).toBe(true);
+    expect(reopened.list()).toHaveLength(2);
+    reopened.removeThread("thread-1");
+    expect(reopened.getByThread("thread-1")).toBeUndefined();
+    reopened.close();
+  });
+
+  it("atomically transfers a Thread binding and persists the replaced destination", () => {
+    const { path } = databasePath();
+    const destination = {
+      surface: "feishu" as const,
+      accountId: "tenant-a",
+      conversationId: "chat-a",
+    };
+    const store = new SqliteBindingStore(path);
+    store.bind({
+      target,
+      workspaceId: "main",
+      threadId: "thread-owned",
+      sessionId: "session-owned",
+    });
+    store.bind({
+      target: destination,
+      workspaceId: "main",
+      threadId: "thread-replaced",
+      sessionId: "session-replaced",
+    });
+
+    const transfer = store.transfer("thread-owned", destination);
+
+    expect(transfer.previousOwner.target).toEqual(target);
+    expect(transfer.replaced?.threadId).toBe("thread-replaced");
+    expect(store.get(target)).toBeUndefined();
+    expect(store.get(destination)).toMatchObject({
+      threadId: "thread-owned",
+      sessionId: "session-owned",
+    });
+    expect(store.getByThread("thread-replaced")).toBeUndefined();
+    store.close();
+
+    const reopened = new SqliteBindingStore(path);
+    expect(reopened.get(target)).toBeUndefined();
+    expect(reopened.get(destination)?.threadId).toBe("thread-owned");
+    expect(reopened.getByThread("thread-replaced")).toBeUndefined();
+    reopened.close();
+  });
+
   it("persists only the current conversation binding with private permissions", () => {
     const { path } = databasePath();
     const first = new SqliteBindingStore(path);
@@ -154,7 +219,7 @@ describe("SqliteBindingStore", () => {
     database.close();
 
     expect(() => new SqliteBindingStore(path)).toThrow(
-      "状态数据库版本不兼容：当前 2，Gateway 需要 3",
+      "状态数据库版本不兼容：当前 2，Gateway 需要 4",
     );
   });
 
@@ -183,7 +248,17 @@ describe("SqliteBindingStore", () => {
         PRIMARY KEY (surface, account_id, conversation_id)
       ) STRICT;
 
-      PRAGMA user_version = 3;
+      CREATE TABLE conversation_background_bindings (
+        surface TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        thread_id TEXT NOT NULL PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      PRAGMA user_version = 4;
     `);
     database.close();
 
@@ -242,6 +317,49 @@ describe("SqliteBindingStore", () => {
 });
 
 describe("MemoryBindingStore", () => {
+  it("promotes one background binding while demoting the active foreground", () => {
+    const store = new MemoryBindingStore();
+    const first = { target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" };
+    const second = { target, workspaceId: "main", threadId: "thread-2", sessionId: "session-2" };
+    store.bind(first);
+    store.switchForeground(second, true);
+    store.switchForeground(first, true);
+
+    expect(store.get(target)).toEqual(first);
+    expect(store.backgrounds(target)).toEqual([second]);
+    expect(store.getByThread("thread-1")).toEqual(first);
+    expect(store.getByThread("thread-2")).toEqual(second);
+  });
+
+  it("moves one Thread between conversations while releasing the destination binding", () => {
+    const store = new MemoryBindingStore();
+    const destination = {
+      surface: "weixin" as const,
+      accountId: "bot-a",
+      conversationId: "user-a",
+    };
+    store.bind({
+      target,
+      workspaceId: "main",
+      threadId: "thread-owned",
+      sessionId: "session-owned",
+    });
+    store.bind({
+      target: destination,
+      workspaceId: "main",
+      threadId: "thread-replaced",
+      sessionId: "session-replaced",
+    });
+
+    const transfer = store.transfer("thread-owned", destination);
+
+    expect(transfer.previousOwner.target).toEqual(target);
+    expect(transfer.replaced?.threadId).toBe("thread-replaced");
+    expect(store.get(target)).toBeUndefined();
+    expect(store.get(destination)?.threadId).toBe("thread-owned");
+    expect(store.getByThread("thread-replaced")).toBeUndefined();
+  });
+
   it("tracks authorized Actors independently from Conversation identity", () => {
     const store = new MemoryBindingStore();
     store.rememberActor(target, "123");

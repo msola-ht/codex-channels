@@ -1,472 +1,117 @@
-# 微信 Surface 接入计划
+# 微信 Surface 设计决策
 
-## 状态与目标
+## 文档定位
 
-状态：阶段 0 第一步“固定官方基线与源码入口”已于 2026-07-27 完成；第二步二维码合同已完成
-离线探针、正常扫码和过期刷新实测，重定向、配对码及重复绑定状态仍只有离线合同覆盖。微信
-单账号私聊文本 Surface 已加入显式内置注册表且未新增依赖；独立安全凭据 Store、统一 Setup 的
-默认禁用连接配置、窄协议 Client、版本 1 游标检查点、私聊文本输入 Adapter、完整共享命令、
-独立加密回复上下文、重启上线通知、Turn 生命周期统计、纯文本 Outbox 与一次性精确文本审批、
-用户输入和 MCP 交互端口已实现；
-完整 `SurfaceAdapter` 已从一级 Surface 入口受控公开，显式 `enabled = true` 时由 Bootstrap
-注册。
+本页只记录微信 Surface 当前仍有效的上游基线、接入决策、安全边界和停止条件，不再维护阶段实施
+流水。
 
-本计划用于把腾讯微信 ClawBot 接入现有 TypeScript 模块化 Gateway。实现必须继续遵守
-[`通讯渠道 Surface 接入指南`](surface-integration-guide.md)，并与 Telegram、飞书共享
-Application、Conversation Core、Approval、Policy、Session Routing、Storage、Event Bus 和
-同一个 Codex App Server。
+- 当前实现与文件职责以 [`src/surfaces/weixin/README.md`](../src/surfaces/weixin/README.md) 为准。
+- 真实平台验收状态以 [`通讯渠道验收矩阵`](channel-acceptance-matrix.md) 为唯一入口。
+- 上游源码固定与更新方式见 [`本地上游源码工作流`](upstream-sources.md)。
+- 通用渠道约束见 [`通讯渠道 Surface 接入指南`](surface-integration-guide.md)。
 
-首个目标是单个微信 Bot 账号与已授权用户之间的私聊闭环。当前已支持文本、PNG/JPEG、受限
-UTF-8 文本文件、生成图片回传、共享命令、精确文本交互、输入状态和安全配置通知；只使用已加密
-保存的最近回复上下文向已有授权绑定主动发送上线或配置通知。不承诺群聊、原生交互按钮、原生
-流式消息、任意主动推送、多账号或通用二进制媒体能力。
+历史二维码实验、协议探针、阶段清单和日期流水保留在 Git 历史中，不再作为当前事实来源。
 
 ## 官方参考基线
 
-当前研究基线固定为腾讯官方仓库
-[`Tencent/openclaw-weixin`](https://github.com/Tencent/openclaw-weixin/tree/v2.4.6) 的
-`v2.4.6` 标签，对应提交
+微信协议研究基线固定为腾讯官方
+[`Tencent/openclaw-weixin v2.4.6`](https://github.com/Tencent/openclaw-weixin/tree/v2.4.6)，
+对应提交
 [`cef0bfc`](https://github.com/Tencent/openclaw-weixin/commit/cef0bfc390393f716903e16d50408118047f87e0)。
-固定源码已按 [`本地上游源码工作流`](upstream-sources.md) 保存到受主项目忽略的独立仓库；
-本地 HEAD 与本节基线一致时优先查阅本地源码和测试，不重复联网搜索相同版本。
-2026-07-27 已通过官方远端完整标签列表复核，`v2.4.6` 仍是最新标签；官方 `main` 的包版本同为
-`2.4.6`，但实现和实验仍只使用上述固定标签与提交，不能把变化中的 `main` 当作稳定合同。
 
-| 查询目标 | 固定资料 | 当前事实 |
-| --- | --- | --- |
-| 安装、登录与后端协议 | [`README.zh_CN.md`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/README.zh_CN.md) | 扫码登录；HTTP JSON API；`getupdates` 长轮询；文本、图片、视频和文件发送 |
-| 包与宿主要求 | [`package.json`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/package.json) | Node.js 22+；官方插件声明 OpenClaw `>=2026.5.12` Peer 依赖并依赖 Plugin SDK |
-| 渠道能力 | [`channel.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/channel.ts) | 当前声明只支持私聊、媒体和块式回复，不声明群聊或交互卡片；宿主侧文本分片值为 4000 |
-| 扫码合同 | [`login-qr.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/auth/login-qr.ts) | 固定二维码主机、Bot Type `3`、5 分钟会话、35 秒状态长轮询、配对码、过期刷新、IDC 重定向、重复绑定、Bot Token、Bot ID、扫码者 ID 和业务 Base URL |
-| HTTP API | [`api.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/api/api.ts)、[`types.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/api/types.ts) | Bearer Token、随机 `X-WECHAT-UIN`、iLink App/版本 Header、`base_info`、长轮询、发送、输入状态、启动/停止通知和错误响应 |
-| 消息循环 | [`monitor.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/monitor/monitor.ts) | 按账号维护游标、有限重试、退避和可取消长轮询；官方实现先持久化响应游标，再逐条处理该批消息 |
-| 身份与回复上下文 | [`inbound.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/messaging/inbound.ts)、[`send.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/messaging/send.ts) | `from_user_id`、数值 `message_id`、`context_token` 和块式文本发送；官方实现缺少上下文令牌时仍尝试发送 |
-| 账号、回复上下文与游标存储 | [`accounts.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/auth/accounts.ts)、[`inbound.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/messaging/inbound.ts)、[`sync-buf.ts`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/src/storage/sync-buf.ts) | 官方插件把账号 Token、账号索引、每用户 `context_token` 和 `get_updates_buf` 保存为本地 JSON；这是参考行为，不是本项目可复用的安全存储设计 |
-| 许可证 | [`LICENSE`](https://github.com/Tencent/openclaw-weixin/blob/v2.4.6/LICENSE) | MIT |
+本项目只参考固定标签中的扫码、HTTP JSON、长轮询、媒体、输入状态和消息发送合同：
 
-官方 README 对 OpenClaw 宿主兼容范围的概述比 `v2.4.6` 包元数据更宽；这只影响官方插件作为
-OpenClaw 扩展运行。Codex Connect 不采用该宿主合同，阶段 0 只把固定标签中的微信 HTTP 协议和
-行为作为待验证参考。
+- 不以官方浮动 `main` 替代固定标签；
+- 不采用 OpenClaw 的 Channel、会话、授权或路由实现；
+- MIT 许可证不自动证明线上后端允许任意第三方客户端；API 使用约束变化时必须停止并重新评审；
+- 上游基线变化时先更新 [`upstream-sources.md`](upstream-sources.md)，再修改实现与测试。
 
-### 2026-07-27 基线复核结论
+## 当前范围
 
-阶段 0 第一步只固定可审查事实，不代表已获得生产接入授权：
+微信只支持单 Bot 账号和已授权用户之间的私聊。当前已接入：
 
-- 官方中文 README 公开了 `getupdates`、`sendmessage`、`getuploadurl`、`getconfig` 和
-  `sendtyping` 的 HTTP JSON 结构，固定源码还实现了二维码、启动通知和停止通知端点。
-- 二维码端点、完整 Header、扫码状态枚举、重定向与配对码主要来自固定源码，而不是 README
-  的公开后端端点表；后续实验必须把“源码行为”和“公开协议承诺”分开记录。
-- MIT 许可证允许使用和修改仓库代码，但不单独证明第三方客户端可以使用腾讯线上微信后端。
-  在执行真实扫码或 API 实验前，仍须确认服务条款和独立客户端接入边界；无法确认时按停止条件
-  结束当前阶段。
-- 官方类型把 `message_id` 表示为 JavaScript `number`，但没有证明真实值始终处于安全整数范围；
-  合同 Fixture 必须保留原始 JSON 并验证精度，业务实现不能先按 `number` 固化。
-- 官方消息循环在处理批次前保存新 `get_updates_buf`。本项目不能直接照搬：阶段 0 必须验证服务端
-  重放和确认语义，再决定持久化时机，避免处理失败后静默丢消息或重启后大量重复。
-- 官方插件会把 Bot Token、`context_token` 和游标保存为普通 JSON，并在缺少
-  `context_token` 时继续尝试发送。本项目明确不复制这些行为：敏感凭据必须进入独立安全后端，
-  回复上下文默认只存在内存，缺少必需令牌时失败关闭。
-- 固定标签的最小协议审查入口为 `src/auth/login-qr.ts`、`src/api/api.ts`、
-  `src/api/types.ts`、`src/monitor/monitor.ts`、`src/messaging/inbound.ts`、
-  `src/messaging/send.ts`、`src/auth/accounts.ts` 与 `src/storage/sync-buf.ts`；OpenClaw 的
-  Channel、路由和会话实现不进入本项目协议 Adapter。
+- 文本、平台引用、PNG/JPEG、可信语音转写、UTF-8 文本文件，以及受限 MP3/OGG 的接收校验；
+- 共享会话、Workspace、模型、Fast、Goal、用量和其他平台无关命令；
+- 精确文本审批、用户输入和 MCP elicitation；
+- 原生输入状态、块式最终回复、操作过程、Turn 统计和生成图片回传；
+- Setup、Doctor、私有游标、安全凭据、加密回复上下文和重启恢复。
 
-## 接入决策
+群聊、多账号、原生交互按钮、原生流式编辑、定时主动推送、SILK、视频、Office、压缩包及其他
+通用二进制输入均不支持。
+当前模型目录未声明 `audio` 时，原始 MP3/OGG 会在创建或追加 Turn 前明确拒绝，不视为端到端
+语音支持。
 
-### 不引入第二个 Gateway
+## 不引入第二个 Gateway
 
 不安装 OpenClaw、不启动 OpenClaw Gateway，也不把
-`@tencent-weixin/openclaw-weixin` 作为运行时依赖。该包的 Channel、路由、会话、授权和回复分发
-依赖 OpenClaw Plugin SDK，直接嵌入会形成第二套 Core 和生命周期。
-
-优先方案是在 `src/surfaces/weixin/` 内实现最小微信协议 Adapter：
+`@tencent-weixin/openclaw-weixin` 作为运行时依赖。项目只在
+`src/surfaces/weixin/` 内实现固定版本所需的最小协议 Adapter：
 
 ```text
 微信 ClawBot
-  │ 扫码登录 / HTTP JSON / getupdates 长轮询
-  ▼
+  ↓ 扫码 / HTTP JSON / getupdates
 Weixin Surface
-  ├─ 微信协议窄客户端
-  ├─ 身份、访问策略与输入队列
-  ├─ OutputEvent 文本渲染
-  └─ 失败关闭 InteractionPort
-  │
-  ▼
-Application / Core / Approval / Routing
-  │
-  ▼
+  ↓
+Policy / Application / Core / Approval / Routing
+  ↓
 共享 Codex App Server
 ```
 
-阶段 0 必须先确认 Codex Connect 作为独立客户端直接调用微信后端属于受支持的接入方式，并确认
-API 使用约束、服务条款以及扫码、长轮询和发送合同仍与固定标签一致。若只能通过 OpenClaw 宿主
-获得受支持连接，则停止实现，不以子进程、微服务或协议猜测绕过。
-
-### 模块边界
-
-- Surface ID 使用 `weixin`；“微信 ClawBot”只是显示名称。
-- 微信协议、二维码、媒体和错误类型只存在于 `src/surfaces/weixin/`。
-- Bootstrap 通过现有编译期内置插件注册表显式创建 Weixin Surface，不扫描目录、不动态加载 npm
-  包。
-- 普通消息调用 `ConversationService`，共享命令调用 `ConversationCommandService`。
-- 微信不得导入 `codex-client`、`codex-protocol` 或其他 Surface 的内部文件。
-- 平台输出继续使用 `ConversationDeliveryQueue`；同一私聊串行，不同私聊可以并行。
-- 只复用已经公开的平台无关能力，不复制 Telegram HTML、飞书 CardKit、平台文案或交互状态机。
+- 微信协议、二维码、媒体和错误类型不得离开微信目录。
+- Bootstrap 通过编译期内置插件注册表显式组合，不扫描目录、不动态加载 npm 插件。
+- 普通输入和共享命令复用 Application；输出复用 `ConversationDeliveryQueue`。
+- 微信不得导入 `codex-client`、`codex-protocol` 或其他 Surface 的内部实现。
+- Gateway 停止或微信故障不得终止共享 App Server。
 
 ## 身份、授权与状态
 
-首个版本只支持私聊：
+- Surface ID 固定为 `weixin`；账号和 Actor 使用固定协议返回的完整字符串身份。
+- 只接受当前 Bot、已授权 Actor 和私聊消息；未知、畸形、重复、过旧或未授权输入失败关闭。
+- 公开本地命令只保留 `/wx doctor`；未知或旧命令明确拒绝，不作为模型输入。
+- App Server 是 Thread、Turn、Item、Goal 和历史的唯一事实来源。
+- 微信回复上下文和轮询游标只服务平台传输，不形成第二套会话状态。
 
-| 稳定概念 | 微信来源 | 要求 |
-| --- | --- | --- |
-| `surface` | 固定值 `weixin` | 不使用官方插件 ID 作为项目内部 Surface ID |
-| `accountId` | 扫码结果中的 Bot 账号 ID | 规范化规则必须在阶段 0 用真实结果固定，不使用显示名称 |
-| `conversationId` | 私聊对端 `from_user_id` | 与账号共同确定回复目标 |
-| `actorId` | 当前消息的 `from_user_id` | 私聊中可与 Conversation 值相同，但仍独立构造并校验 |
+## 凭据、游标与回复上下文
 
-所有输入必须先验证消息方向、账号、Actor、时间戳和内容，再执行
-`SurfaceAccessPolicy.isAllowed()`。扫码者不能仅因完成扫码就永久获得全部 Workspace 权限；
-Setup 必须显示识别到的微信 Actor，并由操作者在终端确认允许名单。
+- Bot Token 使用独立安全凭据 Store；macOS 使用 Keychain，Linux 使用 AES-256-GCM 私有文件。
+- `get_updates_buf` 使用账号隔离、严格版本和原子替换的私有检查点。
+- 最近 `context_token` 使用独立加密回复上下文后端，只用于已有授权绑定的回复、上线和受限配置
+  通知。
+- Token、`context_token`、游标、二维码、CDN URL、AES Key、消息正文和原始响应不得进入 TOML、
+  SQLite、日志或平台消息。
+- 消息批次只有在业务处理全部成功后才推进游标；进程在提交后、保存游标前退出时允许至少一次
+  重放，不伪造无法证明的精确一次语义。
 
-当前官方能力只声明私聊。群聊身份、`@Bot`、群成员授权和 Conversation ID 在官方合同明确前不进入
-配置 Schema，也不以私聊 ID 规则推断。
+## 网络、媒体与交互
 
-## 凭据与最小持久状态
+- JSON API、CDN 下载和上传统一使用项目代理感知 Fetch、超时、取消和有界响应读取。
+- 只接受固定官方 CDN 与受支持媒体合同；图片、音频和文本文件分别执行大小、签名、完整性、
+  格式和保留期校验。
+- 普通回复采用官方已验证的块式消息，不模拟原生流式编辑。
+- 输入状态票据只在内存有界缓存，失败不阻断正常回复。
+- 审批和 MCP 交互只接受包含不可预测一次性 ID 的精确命令；裸数字、模糊同意、过期、重复或跨
+  Actor/Conversation 动作必须拒绝。
+- 平台发送返回回复上下文失效时，只清除对应 Conversation 的上下文，等待后续入站消息自然恢复。
 
-官方插件的磁盘布局不能直接复制到本项目：
+## 未支持边界与停止条件
 
-- Bot Token 属于敏感凭据。macOS 必须使用系统 Keychain，Linux 必须使用与项目现有凭据机制
-  同等的 AES-256-GCM 私有文件；不得写入 `config.toml`、SQLite、日志或聊天消息。
-- 二维码内容、扫码会话和短期验证码只保存在内存中，成功、取消、过期或进程停止时清除。
-- `context_token` 是回复当前用户所需的敏感路由令牌。经单独批准后，当前实现按精确账号与私聊
-  Actor 写入独立严格版本 1 安全记录：macOS 使用独立 Keychain Service，Linux 使用独立
-  `credentials/weixin-reply-context` AES-256-GCM 私有目录。它不进入 Bot 凭据、TOML、SQLite
-  或日志，只用于重启后恢复关键输出和向仍在允许名单中的已有绑定发送上线通知。
-- `get_updates_buf` 是避免重启后漏取或大量重放的传输游标，不属于 Thread 或消息历史。阶段 0
-  已确认服务端重放语义并取得明确批准：以严格版本 1 私有原子文件保存在 Gateway 数据目录，
-  不进入 SQLite、TOML 或凭据 Store。
-- 不持久化微信消息正文、媒体内容、引用消息、Codex 回复或完整事件原文。
+出现以下任一情况时必须停止当前改造并单独评审：
 
-当前加密回复上下文设计已覆盖账号隔离、严格身份校验、撤权后拒绝发送和独立回滚；删除
-`credentials/weixin-reply-context` 不影响 Bot 凭据、配置、游标、SQLite 或其他 Surface。
-若后续需要配置通知、定时发送或其他一般主动推送，仍须单独验证令牌有效期与撤销语义，不能把
-Token 放进 StateStore。
-
-### Bot Token 存储决策
-
-当前仓库没有可直接使用的通用凭据 Store。现有实现是飞书用户 OAuth 专用的
-`StoredFeishuUserToken`、Keychain Service 和 Linux 文件载荷；微信不得导入、包装或写入飞书
-Surface 的内部存储，也不得沿用其 Service、文件名或账号键。
-
-阶段 0 必须在写入生产凭据前完成并批准以下最小设计：
-
-1. 只从飞书实现中抽取平台无关的 Keychain 调用、AES-256-GCM、私有目录、原子替换和删除机制；
-   微信仍拥有自己的严格载荷解析、账号键、错误文案和撤销语义。共享机制属于 `surfaces` 模块
-   内部基础设施，不建立新的一级模块，也不向 Application、Storage 或 Config 暴露 Token。
-2. 保留飞书现有 Keychain Service、Linux 路径、主密钥和载荷格式，不迁移、不重写现有凭据。
-   微信使用独立命名空间和独立凭据文件；共享代码不等于共享凭据记录。
-3. 微信载荷必须带显式当前版本，只包含阶段 0 证明为恢复登录必需的账号身份、Bot Token 和服务端
-   返回的稳定连接信息。未知版本、字段缺失、身份不匹配、解密失败或内容损坏必须失败关闭，不能
-   当作“未登录”后静默重新授权。
-4. 写入必须先验证完整新载荷，再原子替换；写入、关闭或取消失败时保留上一个有效记录。撤销只删除
-   精确微信账号的凭据，不影响 TOML、Thread 绑定、飞书凭据或其他微信账号。
-5. 回滚以禁用微信 Surface 并删除新增的微信凭据记录为界，不需要迁移 SQLite 或改写飞书数据。
-   如果实现需要改变既有飞书格式、共用一份跨 Surface 载荷或迁移现有凭据，则停止并另行评审。
-
-该设计会新增微信凭据持久化格式。进入阶段 1 前必须说明必要性、当前数据处理和回滚方式并取得
-明确批准；计划文档本身不授权实现该格式。
-
-## 分阶段实施
-
-### 阶段 0：协议合同实验
-
-本阶段不接入生产 Gateway，不新增公开配置：
-
-1. 已完成（2026-07-27）：固定官方标签、提交和采用的源码入口，并记录源码行为与公开协议承诺
-   的差异。
-2. 进行中：二维码创建、扫描、确认和过期刷新已完成真实验证；重定向、配对码和重复绑定状态
-   已完成离线合同验证，尚无可控的真实触发条件。
-3. 记录登录成功返回的账号 ID、Actor ID、Bot Token 与 Base URL 的稳定形状，但所有 Fixture
-   必须脱敏。
-4. 进行中：`getupdates` 的固定请求、超时、取消、错误和脱敏响应裁剪已完成离线合同测试；
-   成功响应给出的下一轮建议超时会在 1 至 120 秒边界内采用，空响应游标推进、批量顺序、
-   HTTP 429/5xx 与网络错误退避均有离线回归；游标推进和旧游标重放已完成真实验证，空轮询、
-   批量消息和 Token 失效仍待真实验证。
-5. 验证 `message_id` 的实际 JSON 表示和精度，不能默认 JavaScript `number` 安全。
-6. 进行中：固定 `sendmessage` 请求和携带当前 `context_token` 的短文本回复已完成离线合同
-   测试与真实验证；同一上下文双消息模式也已完成真实复用验证，缺失或过期上下文以及重启后
-   Token 有效期仍待验证。
-7. 进行中：固定 Unicode、emoji 和 Markdown 符号文本已完成真实呈现验证；官方宿主 4000 字符
-   分片值已完成单次中文消息真实送达验证，引用消息、错误码、限流、代理和 `NO_PROXY`
-   仍待验证。
-8. 确认停止长轮询时可以通过 `AbortSignal` 有限退出，不遗留后台任务。
-9. 完成 Bot Token 独立命名空间、严格载荷、原子写入、撤销和回滚设计，证明不需要迁移飞书凭据。
-
-完成标准：形成脱敏合同 Fixture 和最小假客户端测试；明确游标提交时机、凭据撤销方式和阶段 1
-所需依赖，并取得新增微信凭据格式的明确批准。任一关键语义不明确时停在阶段 0，不通过反复试改
-生产代码推断协议。
-
-2026-07-27 已增加隔离的 `scripts/weixin-qr-contract-probe.mjs` 和
-`tests/weixin-qr-contract-probe.test.ts`：固定 `v2.4.6` 的二维码创建与状态请求、严格响应裁剪、
-请求超时与外部取消区分、8 分钟整体上限、配对码、有限刷新和仅允许 `weixin.qq.com` 官方域名的
-重定向。脚本默认只显示帮助，只有人工传入 `qr --live` 才访问固定端点；确认结果中的 Bot Token
-只保存在当前进程内存，不写配置、凭据文件、SQLite、日志或 Fixture。真实扫码只记录下述脱敏
-形状，不保留真实标识或凭据。
-
-2026-07-27 的真实扫码验证得到以下脱敏结果：
-
-- 正常二维码和过期后自动刷新的新二维码均可完成扫码确认并返回凭据。
-- 账号 ID 的稳定形状为不透明主体加 `@im.bot`，扫码者 ID 为不透明主体加 `@im.wechat`；
-  业务 Base URL 返回固定二维码主机。文档、日志和 Fixture 不记录真实主体或 Bot Token。
-- 使用刷新后的新二维码连接时，微信客户端明确提示新连接会删除旧连接。这证明重新扫码具有替换
-  既有连接的外部副作用，但尚不能据此断言所有账号始终只允许一个连接。
-- 阶段 0 探针因此在联网前再次要求人工输入“继续”，明确提醒可能替换旧连接；取消时不得请求
-  二维码。正式设置流程也必须二次确认，并在安全凭据写入成功后才原子替换本地旧凭据。
-- 真实验证产生的 Bot Token 未保存，当前不能用于消息长轮询；进入该实验前必须先完成并批准
-  独立安全凭据后端设计。
-
-同日开始实现已批准的凭据格式与统一 Setup：共享机制仅抽取 Keychain 调用、AES-256-GCM、私有
-权限和原子文件替换；飞书既有 Service、目录、键和载荷保持不变。微信使用独立 Service 与
-`credentials/weixin`，版本 1 载荷只包含账号 ID、Bot Token、业务 Base URL 和授权时间。
-Setup 写入 `enabled = false` 的严格非敏感元数据；该批实现时消息 Surface 尚未接入。后续已
-完成显式启用配置与运行时组合，Setup 默认值仍保持关闭，需由操作者确认后改为 `true`。
-
-真实 Setup 已完成风险确认、扫码、凭据加密写入和非敏感配置保存；随后 `codexc doctor` 成功从
-独立后端读取并严格校验凭据，且全程未显示 Bot Token。实际账号与扫码者标识只保存在用户配置和
-加密凭据所需位置，不进入本文、日志或测试 Fixture。
-
-`scripts/weixin-updates-contract-probe.mjs` 已固定 `v2.4.6` 的 `getupdates` 请求合同，从安全
-凭据读取连接并只允许显式 `once --live` 执行一次长轮询。它在 JSON 解析前检查
-`message_id` 的原始数字词法，输出只包含消息数量、字段形状、项目类型、上下文令牌存在性和安全
-整数结论；消息正文、完整身份、Token、上下文令牌、游标和原始响应均不输出或持久化。探针不保存
-返回游标，因此重复运行可能收到重放消息，不能据此决定生产游标提交时机。
-
-真实单次长轮询已收到一条完成态用户文本消息：响应包含下一游标和非空 `context_token`；
-`message_id` 的原始十进制表示为 19 位，超出 JavaScript 安全整数范围。后续 Adapter 必须在
-JSON 数字转换前保留原始 ID，并以十进制字符串进入去重与路由，不能使用已失真的 `number`。
-探针新增 `sequence --live` 双轮模式，只在进程内把首轮游标传给第二轮，并只报告游标是否推进及
-第二轮与首轮重复的消息数量。真实双轮测试确认游标会推进，第二轮收到的新消息没有与首轮重放；
-新增 `replay --live` 三轮模式会再次使用首轮游标，验证第二批消息是否重放。第三轮不要求发送
-新消息，并且只报告重放数量、等待超时以及返回游标关系，不输出任何游标或消息标识。
-
-真实三轮测试确认：再次使用首轮游标会完整重放第二批消息，因此 `getupdates` 具备可由客户端游标
-触发的至少一次投递语义；但重放响应返回的游标与第二轮游标不相等，游标值不能作为批次身份或消息
-去重键。阶段 1 必须先按原始十进制 `message_id` 幂等处理并完成该批消息，再原子保存该次响应
-返回的游标；处理失败时保留旧游标以允许重放。
-
-`scripts/weixin-send-contract-probe.mjs` 新增隔离的 `reply --live` 短文本回复实验：它复用
-`getupdates` 的严格裁剪，只从当前批次中选择已授权 Actor 的完成态用户文本，把回复目标和
-`context_token` 留在进程内，并按固定 `v2.4.6` 合同发送一条固定短文本。脚本不接受命令行
-Token、用户 ID 或任意回复正文，不输出或保存消息、游标、回复上下文、`client_id` 或完整身份；
-未找到合格上下文时在发送前失败关闭。该探针已完成当前上下文的真实短文本回复验证，但不代表
-运行时 Surface 已启用。
-
-真实短文本回复已成功送达微信客户端，证明当前入站消息的 `context_token` 可原样用于
-`sendmessage` 回复。成功响应正文为不含 `ret` 的空对象，固定源码把缺失返回码视为成功的行为
-与真实服务一致；实现不能要求成功响应必须显式包含 `ret: 0`。该结果只证明当前上下文的即时回复，
-不证明缺失、过期或进程重启后的上下文仍然有效。
-
-发送探针新增 `sequence --live`：从一条合格入站消息取得一次回复上下文，顺序发送两条固定短文本，
-第二条包含中文、emoji 和 Markdown 符号；每条使用独立随机 `client_id`，首条 API 错误时停止，
-不把失败扩大为后续发送。该模式只用于验证同一 `context_token` 是否可连续回复及客户端如何呈现
-固定字符，不探测或声明文本长度上限，也不接受操作者提供任意消息内容。
-
-真实双消息测试确认：同一个当前 `context_token` 可连续完成两次 `sendmessage`，两条消息按请求
-顺序到达微信客户端，且两次成功响应均为不含 `ret` 的空对象。中文和 emoji 正常显示；
-`**粗体**` 被渲染为粗体，反引号包裹的内容被渲染为行内代码，说明文本项会解释这两种 Markdown
-语法。阶段 1 输出必须中和非预期平台格式，不能把任意上游文本未经处理直接当作微信纯文本。
-
-反向媒体探针新增 `file --live`：只从一条合格入站文本取得当前回复上下文，在内存生成固定
-UTF-8 文本文件，按固定源码的 `media_type: 3` 申请官方 CDN 上传地址，执行 AES-128-ECB
-加密上传，再以 `type: 4` 的 `file_item` 发送。探针不接受任意文件路径或正文，不输出或保存
-文件、上传参数、密钥、Token、游标或完整身份；离线合同测试已覆盖上传类型、密文、文件名、
-明文长度和消息形状。真实测试确认固定 UTF-8 文件成功到达微信客户端，上传地址来自完整官方
-CDN URL，成功响应仍是不含 `ret` 的空对象；生产链路据此只为内存生成的超长最终回复发送
-受限 `.txt` 文件，不开放任意本地路径。
-
-固定版 `channel.ts` 把宿主侧 `textChunkLimit` 设置为 4000，但没有说明计量单位，也没有证明这是
-服务端最大值。发送探针新增 `limit --live`，只发送一条恰好 4000 个 JavaScript 字符的固定中文
-消息，UTF-8 字节数大于 4000，并用明确首尾标记验证完整送达。该实验只用于证明 4000 是多字节
-文本的安全分片值，不发送 4001 字符或批量超长消息，不尝试撞击未知服务端上限。
-
-真实长度测试确认：恰好 4000 个 JavaScript 字符的固定中文消息被服务端接受，并在微信客户端
-以一个气泡完整显示，末尾标记可见，没有发生截断。阶段 1 可以采用 4000 个 UTF-16 码元作为
-保守文本分片上限；该结论不证明 4001 字符会失败，也不声明服务端最大长度。
-
-`scripts/weixin-typing-contract-probe.mjs` 新增隔离的 `lifecycle --live` 输入状态实验：它从
-一条已授权完成态用户文本中只在内存选择回复目标与 `context_token`，调用固定 `v2.4.6`
-`getconfig` 取得临时 `typing_ticket`，再按官方宿主节奏发送开始、5 秒续期和取消状态。脚本
-不接受命令行 Token、用户 ID 或票据，不输出或保存正文、身份、上下文、游标或票据；续期失败时
-仍尝试取消。真实测试确认三个状态请求均显式返回 `ret: 0`，微信客户端可见输入状态，并在取消后
-消失。
-
-真实合同通过后，`src/surfaces/weixin/typing-controller.ts` 把输入状态接入常驻 Turn 生命周期：
-`typing_ticket` 只按 Actor 缓存在当前进程内，最多复用 24 小时，不写配置、SQLite、日志或回复
-上下文存储；Turn 开始后每 5 秒续期，最终回复、完成、停止、失败或 Surface 关闭时取消。
-`getconfig`、续期或取消失败只记录受限错误元数据，不阻断正常文本输出；Turn 开始时同时发送
-共享的“已开始处理。”确认，避免客户端只在顶部显示输入状态时无法确认消息已收到。部署后的真实
-Turn 已确认输入状态可以正常开始、续期并在最终回复前
-取消，完成统计继续发送。
-
-经明确批准后，`src/surfaces/weixin/updates-cursor-store.ts` 实现独立版本 1 游标检查点：
-`data/weixin-updates` 目录权限为 `0700`，每个账号使用 SHA-256 文件名，严格载荷只包含版本、
-账号 ID 和游标，文件权限为 `0600` 并通过临时文件原子替换。缺失记录表示首次拉取；损坏、未知
-版本、账号不匹配和符号链接失败关闭。回滚时删除该目录即可，不影响凭据、配置、SQLite 或其他
-Surface。
-
-`src/surfaces/weixin/protocol-client.ts` 把已验证的
-`getupdates/sendmessage/getconfig/sendtyping` 合同移入微信
-模块：保留原始十进制 `message_id`，按账号方向把消息裁剪为文本或稳定忽略原因，限制响应体、
-超时和取消，并把 HTTP/API 错误约束为不含上游正文的稳定错误。出站文本限定为已验证的 4000 个
-UTF-16 码元。
-
-`src/surfaces/weixin/updates-monitor.ts` 在模块内部组合 Client 与游标 Store，但不自行拥有
-后台任务：逐条顺序投递文本，按原始消息 ID 做有界进程内去重，仅在整批处理成功后原子提交响应
-游标；处理失败保留旧游标以允许重放。网络、限流和服务端瞬时错误连续 3 次后进入 30 秒退避并
-继续轮询；官方 `-14` Bot Token 失效返回码暂停账号一小时并提示
-重新 Setup，其他未知 API/协议错误失败关闭。长轮询超时视为正常空轮询，取消立即退出。该监控器
-的生命周期和消息处理由输入 Adapter 组合。该设计明确是至少一次处理：Application 接受消息后、
-游标落盘前退出会在重启后重放同一消息；进程内去重不能跨重启。固定版 App Server 每次
-`turn/start` 都生成新的 Turn ID，`clientUserMessageId` 只写入用户消息 `client_id`，不提供幂等
-拒绝，因此不能把复用微信消息 ID 当作跨进程去重修复。
-
-`src/surfaces/weixin/input-adapter.ts` 已实现上述输入侧所有权：按固定账号构造微信私聊目标，
-调用 `SurfaceAccessPolicy` 后记录 Actor 并提交普通文本给 `ConversationService`；未授权消息
-不进入 Application，并删除该私聊的旧回复上下文，但仍允许整批推进游标。授权消息把最新
-`actorId + context_token` 更新到有界内存 Store 后再提交；接收或消息处理失败不推进游标，只向
-生命周期所有者报告稳定错误码；重复停止安全，取消后有限等待。
-
-`src/surfaces/weixin/reply-context-store.ts`、`reply-context-persistence.ts` 与 `outbox.ts`
-实现安全输出边界：运行时上下文按账号与私聊隔离，最近回复上下文进入独立安全后端；真正发送时
-再次调用 `SurfaceAccessPolicy`，撤权后删除上下文并拒绝发送。Outbox 接收匹配
-`surface + accountId` 的 Turn 开始、最终文本、完成/停止/失败统计、连接错误和警告，通过共享
-Conversation 队列投递；每个气泡最多 4000 个 UTF-16 码元、最多五个气泡，截断时显示提示且不
-拆开代理对。关闭队列后只清空进程内副本。`interactions.ts` 对命令、文件和临时权限请求发送
-带随机一次性 ID 的精确审批命令；用户输入通过带同一类令牌的问题序号命令分项收集，MCP form
-接受有界 JSON，URL 模式仅接受 HTTP(S) 链接完成确认。敏感输入仍明确取消。
-
-`src/surfaces/weixin/surface.ts` 已把上述组件组合为正式 `SurfaceAdapter`：Input 与 Outbox
-共享同一个进程内回复上下文 Store；启动时只为当前允许名单中的已有绑定恢复严格加密上下文，
-开启输入监控后发送上线通知，通知失败不停止长轮询；停止先取消输入，随后取消交互并排空输出，
-最后由 Outbox 清空进程内副本，重复停止等待同一个关闭任务。接收致命错误只向生命周期所有者
-报告稳定分类。一般持久配置通知仍明确失败关闭，不尝试向未知用户推送。
-
-该类型已通过一级 Surface 入口向 Bootstrap 导出。微信 Access Policy、延迟安全凭据 Client、
-Bootstrap 组合工厂、撤权绑定清理和显式启用配置已实现；Setup 仍默认保存禁用态，操作者确认后
-需显式设置 `enabled = true` 才启动真实长轮询。
-
-### 阶段 1：单账号私聊文本
-
-1. 在统一 `codexc setup` 中增加微信扫码入口；二维码仍只显示在当前终端。
-2. 把非敏感启用状态、账号 ID 和允许 Actor 写入严格 TOML；按照阶段 0 已批准的独立格式把
-   Bot Token 写入微信安全凭据 Store。
-3. 实现可取消的单账号长轮询、有限重试、退避和致命故障上报。
-4. 对事件做严格裁剪，过滤 Bot 消息、空消息、过旧消息、重复消息和未授权 Actor。
-5. 普通文本经授权后提交给 Application；最终回复以微信安全纯文本发送。
-6. 文本按阶段 0 验证后的限制进行有界分片；首版使用块式最终回复，不伪装原生流式编辑。
-7. 输出进入共享 Conversation 队列；过载时仍保护错误与 Turn 完成等关键事件。
-8. 提供限时、一次性、Actor/Conversation/Thread/Turn/请求绑定的文本审批 `InteractionPort`；
-   用户输入和 MCP elicitation 使用同一绑定与失效边界，敏感输入失败关闭。
-9. Adapter 启动失败由 Bootstrap 回滚；重复停止安全，Gateway 停止不终止共享 App Server。
-
-阶段 1 主路径已实现并完成真实私聊收发、重启恢复和长文本验收；媒体、群聊、多账号、交互按钮
-和一般主动推送仍不属于本阶段。
-
-### 阶段 2：共享命令与运行观测
-
-- 接入共享命令目录、解析和 `ConversationCommandService`，不重新实现 Thread、模型、Fast、
-  Workspace、Goal、用量或额度逻辑。
-- 微信没有斜杠命令提示时，提供简短文本帮助和常用命令列表；命令本身仍使用统一规范名称。
-- 已完成：微信 `/status` 已追加当前进程内的轮询、短重试、退避、Token 失效暂停或停止状态，
-  以及按 Gateway 本地时间显示的当前消息到达前上一次后台成功轮询时间、连续失败次数和预计恢复
-  时间；不显示 Token、`context_token`、游标或原始响应，也不竞争消费 `getupdates`。微信内
-  `/wx doctor` 已提供授权上下文、游标检查点、凭据可用性、后台轮询与 Token
-  失效状态的只读观测，所有私密正文和底层存储错误均保持隐藏。
-- 已完成：接入 Turn 开始、最终文本和完成/停止/失败统计，并且只向仍在允许名单中的 Actor 发送。
-  经单独持久化评审后，重启上线通知和受限配置通知使用独立加密回复上下文；缺少安全收件人时
-  失败关闭，不提供任意主动推送。
-- 已完成：复用共享 `display.operation_updates` 三档配置，只把完成、失败和拒绝的操作终态作为
-  关键输出发送；完整详情会脱敏并中和 Markdown 控制字符，不用普通气泡模拟进行中更新。
-- 未知或畸形命令明确拒绝，不作为普通文本提交给 Codex。
-
-### 阶段 3：审批能力门槛
-
-当前官方协议没有提供经过确认的按钮、表单或动作回调。对腾讯固定版协议和同源实现重新审查后，
-本项目采用应用层的一次性精确文本挑战，不把普通对话文本当作决定：
-
-- 每个审批生成 96 位随机 ID，只显示当前请求明确提供的一次、会话、命令规则或单条网络规则，
-  并复用 Approval 的统一决定语义。
-- 只接受完整 `/批准一次 <id>`、`/批准会话 <id>`、`/保存命令规则 <id>`、
-  `/保存网络规则 <id> <序号>` 或 `/拒绝 <id>`；不得接受
-  “回复 1”“回复同意”、别名或宽松文本解析。同一审批的选项优先合并到一个 Markdown 消息，
-  每条命令使用独立代码块提供单独复制入口，超长时只在完整选项之间分组。
-- ID 只存在当前进程内，限时且原子消费，并绑定账号、Conversation、唯一授权 Actor、Thread、
-  Turn 和 App Server 请求；未知、重复、过期、已在其他客户端处理和跨边界动作必须拒绝。
-- 用户输入最多接受三个非敏感问题，每次只发送当前题，通过精确 `/选择` 或 `/填写` 命令完成后
-  才发送下一题；MCP form 只接受
-  精确 `/提交表单` 命令后的有界有效 JSON，URL 模式仅展示经过校验的 HTTP(S) 链接并接受
-  `/完成`。两类请求均可精确 `/取消`，敏感答案不降级为普通聊天文本。
-
-### 阶段 4：媒体与多账号
-
-每项单独实施，不合并成一次大改：
-
-1. 图片输入与输出：内容签名、大小上限、AES-128-ECB CDN 合同、私有临时文件和过期清理。
-2. 一般文件：隔离的入站合同探针已按固定 `v2.4.6` 实现完成态文件筛选、官方 CDN 下载、
-   AES-128-ECB 内存解密、声明长度与 MD5 校验，以及脱敏的文件名形状和扩展名 MIME 推断；
-   20 MiB 仅为探针内存安全上限，不代表平台上限。真实合同已用两个文件验收：均通过声明长度与
-   MD5 校验，已覆盖未知扩展名安全回落和 JSON 扩展名 MIME 推断。生产 Surface 已接入单个
-   UTF-8 文本文件：授权后下载、内存解密和校验，最多 1,000,000 字节；Gateway 不保存文件副本，
-   正文以内联用户文本进入 App Server Thread；超长最终回复的内存 TXT 文件发送失败时，会从
-   已发送预览的截断点继续发送剩余有界文本并保留脱敏失败记录。当前锁定 Codex 协议没有通用
-   文件输入，因此二进制文件明确拒绝。
-3. 输入状态：已通过固定 `v2.4.6` 的 `getconfig` 与 `sendtyping` 真实合同验收并接入 Turn
-   生命周期；票据只在内存缓存，失败不阻断正常回复。
-4. 多账号：每个 Bot 独立凭据、游标、允许名单、长轮询、输出队列和 `surface + accountId`
-   生命周期；不能依靠收件人猜测发送账号。
-5. 主动推送：加密 `context_token` 保存、账号隔离、撤权校验、重启上线通知和受限配置通知已
-   完成；定时发送及令牌过期策略仍须单独评审。
-
-群聊只有在官方渠道明确声明支持、身份合同可验证且 Access Policy 能正确区分群与 Actor 后另立
-切片，不属于本计划当前完成标准。
-
-## 验证
-
-离线测试至少覆盖：
-
-- 二维码会话成功、取消、过期、重定向、重复登录和敏感字段清洗。
-- 微信凭据命名空间与飞书隔离；覆盖首次写入、原子替换、写入/关闭竞态、撤销、未知版本、身份
-  不匹配、密文损坏、Keychain 失败、Linux 权限以及失败后保留上一份有效记录。
-- 长轮询空响应、批量响应、游标重放、重复消息、精度异常、限流、Token 失效和中止。
-- 账号、Conversation、Actor 和允许名单严格匹配；跨账号不能串消息。
-- 普通文本、共享命令、长文本分片、平台错误和未知内部异常。
-- 同 Conversation 顺序、不同 Conversation 并行、队列过载、发送超时和有限关闭。
-- 缺少唯一授权 Actor、回复上下文或安全展示能力时，交互立即安全拒绝或取消。
-- 配置热加载、账号撤权、Gateway 重启和共享 App Server 不被终止。
-- 日志与平台消息不包含 Bot Token、`context_token`、二维码、游标、Authorization 或原始响应。
-
-真实验收按阶段执行：
-
-1. 扫码登录并只保存目标账号。
-2. 已授权私聊文本产生一个 Codex Turn 并返回正确会话。
-3. 未授权用户、重复事件和 Gateway 重启不产生额外 Turn。
-4. `/status`、Workspace 与会话切换继续使用共享服务。
-5. 停止或重启微信 Surface 不影响 Telegram、飞书、原生 CLI 和共享 App Server。
-
-## 停止条件
-
-出现以下任一情况时停止当前阶段并重新评审：
-
-- 官方协议、API 使用约束或服务条款不支持 Codex Connect 作为独立客户端直接接入微信后端。
-- 登录、Token 撤销、游标确认或消息身份无法形成稳定合同。
-- 必须运行 OpenClaw Gateway 才能获得受支持连接。
-- 需要把消息正文、完整事件或明文凭据持久化才能工作。
-- 安全保存微信凭据必须迁移、重写或共用现有飞书凭据记录。
-- 需要修改 Codex App Server 协议、SQLite 会话 Schema 或其他 Surface 的平台实现。
+- 官方协议、API 使用约束或服务条款不允许独立客户端接入；
+- 必须运行 OpenClaw Gateway 才能获得受支持连接；
+- 登录、Token 撤销、游标确认、消息身份或媒体合同无法形成稳定边界；
+- 需要保存消息正文、完整事件或明文凭据才能工作；
+- 需要迁移或共用其他 Surface 的凭据记录；
+- 需要修改 Codex App Server 协议、SQLite Schema 或复制其他模块状态；
 - 平台没有安全交互能力却要求放宽审批规则。
 
-## 完成判定
+## 验证与变更
 
-当前计划完成不等于微信功能已经支持。只有源码、严格配置、Setup/Doctor、模块索引、离线测试和
-真实微信验收全部完成后，README 才能声明微信私聊可用。每个阶段保持独立、可审查和可回退；
-未经明确要求不提交、推送、发布或重建服务。
+新增微信能力时：
+
+1. 先确认本地 `upstream/openclaw-weixin` 与固定基线一致。
+2. 查阅固定源码和现有合同探针，不从官方 `main` 猜测协议。
+3. 更新模块 README、实现和最接近边界的测试。
+4. 真实平台结论只更新 [`channel-acceptance-matrix.md`](channel-acceptance-matrix.md)。
+5. 运行定向测试、`npm run docs:check` 和受影响的提交门禁。
+6. 未经用户明确要求，不执行真实扫码、发送平台消息、提交、推送、发布或部署。

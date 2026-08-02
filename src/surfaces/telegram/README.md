@@ -10,6 +10,7 @@
 - `bot.ts`：提供 Bootstrap 使用的单一选项工厂，注册 Telegram SDK 处理器，执行访问检查，
   把标准命令或普通输入提交给 Application；
   同一 `media_group_id` 的图片按 Actor 合并为一次最多 4 张的 Application 输入；
+  普通文字、单图和没有相册标识的独立图片立即提交，不用时间窗口猜测图文关系；
   原生 Voice/Audio 最长 5 分钟、最大 20 MiB，只在下载后验证为 WAV、MP3、M4A、WebM 或 OGG
   才构造稳定 `localAudio`，私有临时文件一小时后清理；Application 仅在当前模型目录包含
   `audio` 时提交，否则在创建或追加 Turn 前明确拒绝；
@@ -25,7 +26,7 @@
   可见操作结果或生成图片入队前会先刷新同一 Turn 仍在合并窗口内的正文，避免过程通知越过说明文字；
   活动非终态流最多保留 100 个，单流正文最多保留 1,000,000 个 Unicode 字符并明确标记截断；
   每个 Turn 开始时发送共享确认；每轮状态卡复用共享生命周期字段，显示当前 Workspace Git
-  分支、官方 Turn 对话耗时、最近 Turn 缓存命中率、当前 Goal、上下文压缩总次数和用量；最终回复默认使用兼容 HTML，也可选择
+  分支、官方 Turn 对话耗时、最近模型请求缓存命中率、当前 Goal、上下文压缩总次数和用量；最终回复默认使用兼容 HTML，也可选择
   Telegram 原生 Rich Markdown，超长或渲染失败时回退纯文本；完成的原生 `imageGeneration`
   PNG/JPEG 经过共享安全读取边界后使用 `sendPhoto` 静默发送，且不受操作过程显示档位影响。
 - `approval-operation-coordinator.ts`：隔离审批请求与操作日志之间的等待、拒绝抑制和 Turn 清理状态。
@@ -44,13 +45,15 @@
 - `typing-indicator.ts`：维护活动请求和 Turn 的 Typing 状态、刷新与限速。
 - `interactions.ts`：发送一次/会话/命令前缀或网络规则持久审批以及用户输入卡片，按协议能力显示
   互不混淆的按钮；网络会话按钮显示目标主机，持久按钮明确显示允许/拒绝动作和主机，并处理
-  超时、回调和跨客户端失效。同一请求 ID 只允许一个待处理交互，同时最多保留 100 个；固定选项
+  超时、回调和跨客户端失效。MCP 工具审批使用独立按钮，并只显示上游提供的一次、会话或始终
+  允许范围，不进入 ForceReply JSON 输入。同一请求 ID 只允许一个待处理交互，同时最多保留 100 个；固定选项
   和多问题回复完整验证，Gateway 关闭期间未完成的消息发送不会重新建立交互。`/stop` 优先停止
   当前聊天最新交互，没有待处理交互时进入共享 Turn 停止命令。初始交互使用 Conversation
   优先有序通道，会排在等待中的非关键流式或状态输出之前；最终带按钮的审批消息保持通知开启，
   长内容的前置折叠分片静默。发送成功或失败只记录脱敏身份和平台错误分类。
 - `lifecycle.ts`：Bot 命令注册、Long Polling、连续且属于同一原生媒体组的并发准备、包含系统、会话与 Git
-  分支摘要的启动联通通知，以及可取消关闭；有界重试耗尽后上报致命故障，由进程管理器恢复 Gateway。
+  分支摘要的启动联通通知，以及可取消关闭；有界重试耗尽后向 Bootstrap 报告渠道故障，由该
+  Telegram 实例独立退避重连，不停止 Gateway 或其他 Surface。
 - `api-executor.ts`：统一执行 Telegram API 调用，处理超时、限流和有限重试。
 - `error-metadata.ts`：只保留异常类型和受约束的机器错误码，不记录任意异常消息。
 - `user-error-renderer.ts`：把平台无关的结构化用户错误映射为 Telegram 专属提示与命令用法。
@@ -71,11 +74,17 @@
 
 Telegram 网络调用不得阻塞 App Server Reader。每个 Conversation 的最终输出保持顺序；审批卡状态更新必须先于批准后的操作展示。图片下载必须限制大小、路径、类型和保留时间，文本文件下载
 必须保持纯内存、有界且严格验证 UTF-8。
+Bot API 与文件下载使用 Bootstrap 按 `api.telegram.org` 选择的统一 HTTP(S) 代理；共享代理
+遵循 `NO_PROXY`，Telegram 私有 `proxy_url` 作为显式覆盖。
 下一 Turn 输入队列属于 Application，不得复用本目录的 Telegram 输出队列；Telegram 只负责
 命令解析及位置、容量和内存生命周期提示。
 Telegram 手动命令注册显式接入三个渠道共享的 `/h`、`/work`、`/r` 快捷入口，分别执行
 `/help`、`/workspace`、`/resume`；快捷入口不重复写入 BotFather 菜单。帮助消息复用共享的
-分组列表，只在 Telegram 边界转换为安全 HTML。
+分组列表，只在 Telegram 边界转换为安全 HTML。无参数 `/skill` 与其他渠道一样展示编号列表，
+调用统一使用 `/skill <名称或序号> <任务>`，不维护渠道私有选择状态。
+`/vision <要求>` 预设当前用户与聊天的下一批图片识别要求；多图使用
+`/vision <2–4> <要求>` 声明数量，收齐后自动提交；兼容的 `/vision begin <要求>`、
+`/vision done` 保留给数量未知的收集，`/vision cancel` 取消；该入口加入 Bot 命令菜单，但不进入 Application 会话命令目录。
 审批请求晚于操作日志发送时，Outbox 必须撤回已经发送的命令消息，不能只清理内存状态。
 账户额度和 MCP 状态通知也必须进入每聊天有界输出队列；不得从 App Server Reader 直接等待 Telegram 网络发送。
 结构化用户错误由 `bot.ts` 转换为 Telegram 专属文案；App Server Turn、warning 和 MCP 错误会
@@ -85,4 +94,4 @@ Telegram 手动命令注册显式接入三个渠道共享的 `/h`、`/work`、`/
 过程；成功的 MCP、动态工具和网页搜索按 Turn 延迟到最终回复前聚合，单项保留详情，多项仅显示
 一次分类计数，失败与拒绝保持即时展示。审批、错误、最终回复和 Turn 完成统计保持原有行为。
 `display.plan_updates = true` 时，官方自动计划先发送一次静默文本清单，每个步骤首次完成时
-再发送一条紧凑进度；默认关闭，不解析模型正文，也不改变 `/plan` 模式。
+再发送一条紧凑进度；默认开启，可通过 `display.plan_updates = false` 关闭，不解析模型正文，也不改变 `/plan` 模式。

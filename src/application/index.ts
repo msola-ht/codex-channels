@@ -7,7 +7,16 @@ export {
   type AccountRateLimits,
   type AccountRateLimitWindow,
   type AccountUsage,
+  type ProviderAccountAdapter,
+  type ProviderAccountLimits,
+  type ProviderAccountQueryPort,
+  type ProviderAccountUsage,
+  type ProviderBalance,
 } from "./account-port.js";
+export {
+  ProviderAccountService,
+  createOpenAiAccountAdapter,
+} from "./provider-account-service.js";
 export {
   CollaborationModeSelectionService,
   type CollaborationModeState,
@@ -30,8 +39,11 @@ export {
   resolveThread,
   type ConversationInput,
   type ConversationQueryPort,
+  type ConversationResumeResult,
   type ConversationSession,
   type ConversationStatus,
+  type ConversationTransferPort,
+  type ConversationUseCases,
   type ProjectRulesPort,
   type ProjectRulesResult,
   type Submission,
@@ -53,6 +65,7 @@ export {
 } from "./model-port.js";
 export {
   type InstalledSkill,
+  type InvocableSkill,
   type SkillQueryPort,
 } from "./skill-port.js";
 export {
@@ -79,3 +92,14 @@ export {
   type TurnOverrides,
   type TurnStarted,
 } from "./turn-port.js";
+export {
+  parseVisionRecognitionPayload,
+  replaceLocalImagesWithVisionContext,
+  visionRecognitionJsonSchema,
+  visionUserPrompt,
+  type VisionJsonValue,
+  type VisionRecognitionImage,
+  type VisionRecognitionPort,
+  type VisionRecognitionRequest,
+  type VisionRecognitionResult,
+} from "./vision-port.js";

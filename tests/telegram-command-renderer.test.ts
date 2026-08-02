@@ -22,6 +22,27 @@ describe("Telegram command renderer", () => {
     );
   });
 
+  it("identifies the previous channel after an automatic Thread takeover", async () => {
+    const reply = vi.fn(async () => undefined);
+
+    await renderTelegramCommandResult(
+      { reply } as unknown as Context,
+      {
+        kind: "outcome",
+        outcome: {
+          type: "thread.resumed",
+          threadId: "thread-1",
+          transferredFrom: "feishu",
+        },
+      },
+    );
+
+    expect(reply).toHaveBeenCalledWith(
+      expect.stringContaining("已从飞书接管 Codex Thread"),
+      expect.objectContaining({ parse_mode: "HTML" }),
+    );
+  });
+
   it("keeps brief notices as native platform text", async () => {
     const reply = vi.fn(async () => undefined);
 

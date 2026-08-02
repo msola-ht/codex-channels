@@ -111,7 +111,7 @@ export function toConversationInputEvent(
 ): ConversationInputEvent | undefined {
   switch (notification.method) {
     case coreMethods.turnStarted:
-      return toTurnStartedEvent(notification.params);
+      return toTurnStartedEvent(notification.params, notification.receivedAtMs);
     case coreMethods.goalUpdated:
       return toGoalUpdatedEvent(notification.params);
     case coreMethods.goalCleared:
@@ -123,7 +123,7 @@ export function toConversationInputEvent(
     case coreMethods.turnPlanUpdated:
       return toTurnPlanEvent(notification.params);
     case coreMethods.agentMessageDelta:
-      return toAgentMessageDeltaEvent(notification.params);
+      return toAgentMessageDeltaEvent(notification.params, notification.receivedAtMs);
     case coreMethods.itemStarted:
       return toItemEvent(notification.params, "started");
     case coreMethods.itemCompleted:
@@ -141,13 +141,13 @@ export function toConversationInputEvent(
     case coreMethods.threadDeleted:
       return toCoreThreadLifecycleEvent("thread.deleted", notification.params);
     case coreMethods.accountUpdated:
-      return toAccountUpdatedEvent(notification.params);
+      return toAccountUpdatedEvent(notification.params, notification.provider);
     case coreMethods.accountRateLimitsUpdated:
-      return toRateLimitsUpdatedEvent(notification.params);
+      return toRateLimitsUpdatedEvent(notification.params, notification.provider);
     case coreMethods.mcpStatusUpdated:
-      return toMcpStatusEvent(notification.params);
+      return toMcpStatusEvent(notification.params, notification.provider);
     case coreMethods.warning:
-      return toWarningEvent(notification.params);
+      return toWarningEvent(notification.params, notification.provider);
     default:
       return undefined;
   }
@@ -220,11 +220,21 @@ function toThreadLifecycleEvent(
   return threadId ? { type, threadId } : undefined;
 }
 
-function toTurnStartedEvent(value: unknown): ConversationInputEvent | undefined {
+function toTurnStartedEvent(
+  value: unknown,
+  receivedAtMs: number | undefined,
+): ConversationInputEvent | undefined {
   const params = asRecord(value);
   const threadId = nonEmptyString(params?.threadId);
   const turnId = nonEmptyString(asRecord(params?.turn)?.id);
-  return threadId && turnId ? { type: "turn.started", threadId, turnId } : undefined;
+  return threadId && turnId
+    ? {
+        type: "turn.started",
+        threadId,
+        turnId,
+        ...(receivedAtMs === undefined ? {} : { receivedAtMs }),
+      }
+    : undefined;
 }
 
 function toTokenUsageEvent(value: unknown): ConversationInputEvent | undefined {
@@ -266,6 +276,7 @@ function toTurnPlanEvent(value: unknown): ConversationInputEvent | undefined {
 
 function toAgentMessageDeltaEvent(
   value: unknown,
+  receivedAtMs: number | undefined,
 ): ConversationInputEvent | undefined {
   const params = asRecord(value);
   const threadId = nonEmptyString(params?.threadId);
@@ -273,7 +284,14 @@ function toAgentMessageDeltaEvent(
   const itemId = nonEmptyString(params?.itemId);
   const text = nonEmptyString(params?.delta);
   return threadId && turnId && itemId && text
-    ? { type: "item.agentMessage.delta", threadId, turnId, itemId, text }
+    ? {
+        type: "item.agentMessage.delta",
+        threadId,
+        turnId,
+        itemId,
+        text,
+        ...(receivedAtMs === undefined ? {} : { receivedAtMs }),
+      }
     : undefined;
 }
 
@@ -379,7 +397,10 @@ function toCoreThreadLifecycleEvent(
   return threadId ? { type, threadId } : undefined;
 }
 
-function toAccountUpdatedEvent(value: unknown): ConversationInputEvent | undefined {
+function toAccountUpdatedEvent(
+  value: unknown,
+  modelProvider?: string,
+): ConversationInputEvent | undefined {
   const params = asRecord(value);
   const authMode = parseAuthMode(params?.authMode);
   const planType = parsePlanType(params?.planType);
@@ -388,20 +409,29 @@ function toAccountUpdatedEvent(value: unknown): ConversationInputEvent | undefin
         type: "account.updated",
         authMode: authMode.value,
         planType: planType.value,
+        ...(modelProvider ? { modelProvider } : {}),
       }
     : undefined;
 }
 
 function toRateLimitsUpdatedEvent(
   value: unknown,
+  modelProvider?: string,
 ): ConversationInputEvent | undefined {
   const rateLimits = parseRateLimitSnapshot(asRecord(value)?.rateLimits);
   return rateLimits
-    ? { type: "account.rateLimits.updated", rateLimits }
+    ? {
+        type: "account.rateLimits.updated",
+        rateLimits,
+        ...(modelProvider ? { modelProvider } : {}),
+      }
     : undefined;
 }
 
-function toMcpStatusEvent(value: unknown): ConversationInputEvent | undefined {
+function toMcpStatusEvent(
+  value: unknown,
+  modelProvider?: string,
+): ConversationInputEvent | undefined {
   const params = asRecord(value);
   const threadId = strictNullableString(params?.threadId);
   const name = nonEmptyString(params?.name);
@@ -424,10 +454,14 @@ function toMcpStatusEvent(value: unknown): ConversationInputEvent | undefined {
     status,
     error: error.value === null ? null : sanitizeOperationText(error.value),
     failureReason: failureReason.value,
+    ...(modelProvider ? { modelProvider } : {}),
   };
 }
 
-function toWarningEvent(value: unknown): ConversationInputEvent | undefined {
+function toWarningEvent(
+  value: unknown,
+  modelProvider?: string,
+): ConversationInputEvent | undefined {
   const params = asRecord(value);
   const threadId = strictNullableString(params?.threadId);
   const message = nonEmptyString(params?.message);
@@ -436,6 +470,7 @@ function toWarningEvent(value: unknown): ConversationInputEvent | undefined {
         type: "warning",
         threadId: threadId.value,
         message: sanitizeOperationText(message),
+        ...(modelProvider ? { modelProvider } : {}),
       }
     : undefined;
 }
@@ -540,6 +575,7 @@ function parsePlanType(
     || value === "team"
     || value === "self_serve_business_usage_based"
     || value === "business"
+    || value === "ent26"
     || value === "enterprise_cbp_usage_based"
     || value === "enterprise"
     || value === "edu"

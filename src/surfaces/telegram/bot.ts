@@ -8,7 +8,7 @@ import {
   ConversationCommandService,
   conversationCommandNames,
   type ConversationCommandName,
-  type ConversationService,
+  type ConversationUseCases,
 } from "../../application/index.js";
 import {
   UserFacingError,
@@ -33,6 +33,11 @@ import {
 import { formatTextFileTooLarge } from "../text-file-copy.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import { formatQuotedInput } from "../quoted-input.js";
+import {
+  executeVisionCommand,
+  formatVisionCollectionReady,
+  formatVisionImagesCollected,
+} from "../vision-command.js";
 import { surfaceCommandAliases } from "../slash-command.js";
 import {
   formatConfigurationChange,
@@ -42,10 +47,14 @@ import {
   renderTelegramCommandResult,
   replyTelegramPanel,
 } from "./command-renderer.js";
+import { formatTelegramPanelHtml } from "./html-format.js";
 import { TelegramInteractionPort } from "./interactions.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import { telegramDefaultAccountId } from "./constants.js";
-import { TelegramLifecycle } from "./lifecycle.js";
+import {
+  TelegramLifecycle,
+  telegramUpdateGroupSize,
+} from "./lifecycle.js";
 import { TelegramOutbox, type TelegramFinalMessageFormat } from "./outbox.js";
 import { maximumTelegramImageBytes, TelegramImageStore } from "./image-store.js";
 import {
@@ -97,7 +106,7 @@ export interface TelegramSurfaceOptions {
 export interface CreateTelegramSurfaceOptions extends TelegramSurfaceOptions {
   token: string;
   proxyUrl?: string;
-  service: ConversationService;
+  service: ConversationUseCases;
   access: SurfaceAccessPolicy;
   startupRecipients: ReadonlySet<number>;
   workspaces: Workspace[];
@@ -141,7 +150,7 @@ export class TelegramSurface {
   constructor(
     token: string,
     proxyUrl: string | undefined,
-    private readonly service: ConversationService,
+    private readonly service: ConversationUseCases,
     private readonly access: SurfaceAccessPolicy,
     startupRecipients: ReadonlySet<number>,
     workspaces: Workspace[],
@@ -161,12 +170,6 @@ export class TelegramSurface {
     this.actorRegistry = options.actorRegistry;
     this.notificationRecipients = new Set(startupRecipients);
     this.commands = new ConversationCommandService(service);
-    this.inputs = new SurfaceInputCoalescer(
-      (inputTarget, input) => service.submit(inputTarget, input),
-      {
-        quietWindowMs: options.inputQuietWindowMs ?? 1_000,
-      },
-    );
     const apiExecutor = new TelegramApiExecutor(logger);
     this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor, {
       ...(options.finalMessageFormat
@@ -180,6 +183,18 @@ export class TelegramSurface {
         : {}),
     });
     this.output = this.outbox;
+    this.inputs = new SurfaceInputCoalescer(
+      (inputTarget, input) => service.submit(inputTarget, input),
+      {
+        quietWindowMs: options.inputQuietWindowMs ?? 1_000,
+        onVisionCollectionReady: (inputTarget, imageCount, maximumImages) => {
+          this.outbox.notifyPanel(
+            inputTarget.conversationId,
+            formatVisionCollectionReady(imageCount, maximumImages),
+          );
+        },
+      },
+    );
     this.interactions = new TelegramInteractionPort(this.bot, logger, apiExecutor, this.outbox);
     this.imageStore = options.imageStore ?? new TelegramImageStore(uploadsDirectory, token, proxyUrl, logger);
     this.audioStore = options.audioStore
@@ -218,17 +233,11 @@ export class TelegramSurface {
   }
 
   async start(): Promise<void> {
-    try {
-      await Promise.all([
-        this.imageStore.start(),
-        this.audioStore.start(),
-      ]);
-      this.lifecycle.start();
-    } catch (error) {
-      this.imageStore.close();
-      this.audioStore.close();
-      throw error;
-    }
+    await Promise.all([
+      this.imageStore.start(),
+      this.audioStore.start(),
+    ]);
+    this.lifecycle.start();
   }
 
   async stop(): Promise<void> {
@@ -285,6 +294,7 @@ export class TelegramSurface {
           "",
           ...conversationCommandHelpLines,
           "Telegram：",
+          "- /vision <要求> · /vision <2–4> <要求> · /vision cancel",
           "- /whoami",
           "- /start · /help · /h",
         ].join("\n"),
@@ -299,6 +309,18 @@ export class TelegramSurface {
       this.executeCommand(context, surfaceCommandAliases.work));
     this.bot.command("r", (context) =>
       this.executeCommand(context, surfaceCommandAliases.r));
+    this.bot.command("vision", async (context) => {
+      await this.inputs.flushPending(
+        target(context),
+        String(context.from?.id ?? ""),
+      );
+      await replyTelegramPanel(context, await executeVisionCommand(
+        this.inputs,
+        target(context),
+        String(context.from?.id ?? ""),
+        commandArguments(context),
+      ));
+    });
     this.bot.command("stop", async (context) => {
       if (this.interactions.stopForChat(String(context.chat.id))) {
         await context.reply(interactionStoppedText);
@@ -347,6 +369,10 @@ export class TelegramSurface {
       } catch (error) {
         this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
         throw error;
+      }
+      if (result.kind === "collected") {
+        this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+        throw new Error("纯文本不能进入图片收集");
       }
       if (result.tail && result.submission.steered) {
         this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
@@ -472,6 +498,10 @@ export class TelegramSurface {
       this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
       throw error;
     }
+    if (result.kind === "collected") {
+      this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+      throw new Error("文本文件不能进入图片收集");
+    }
     if (result.tail && result.submission.steered) {
       this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
     } else if (result.tail) {
@@ -511,6 +541,7 @@ export class TelegramSurface {
     );
     const currentText = caption?.trim();
     const inputTarget = target(context);
+    const aggregationSize = telegramUpdateGroupSize(context.update);
     this.outbox.prepareTurnReplyTarget(
       inputTarget.conversationId,
       context.message.message_id,
@@ -521,6 +552,14 @@ export class TelegramSurface {
         target: inputTarget,
         actorId: String(context.from?.id ?? ""),
         sequence,
+        ...(context.message.media_group_id
+          ? {
+              aggregationKey: `telegram:${context.message.media_group_id}`,
+              ...(aggregationSize === undefined
+                ? {}
+                : { aggregationSize }),
+            }
+          : {}),
         ...(currentText
           ? { text: formatQuotedInput(currentText, quotedText) }
           : quotedText === undefined
@@ -536,6 +575,22 @@ export class TelegramSurface {
     } catch (error) {
       this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
       throw error;
+    }
+    if (result.kind === "collected") {
+      this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+      await context.reply(formatTelegramPanelHtml(formatVisionImagesCollected(
+        result.imageCount,
+        result.maximumImages,
+        result.automatic,
+      )), {
+        parse_mode: "HTML",
+        disable_notification: true,
+        reply_parameters: {
+          message_id: context.message.message_id,
+          allow_sending_without_reply: true,
+        },
+      });
+      return;
     }
     if (result.tail && result.submission.steered) {
       this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);

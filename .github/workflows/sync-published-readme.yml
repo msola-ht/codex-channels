@@ -1,0 +1,140 @@
+name: Sync published README
+
+on:
+  release:
+    types:
+      - published
+
+concurrency:
+  group: sync-published-readme
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify ${{ github.event.release.tag_name }}
+    if: ${{ !github.event.release.draft && !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Verify release tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: node scripts/check-release-tag.mjs "$RELEASE_TAG"
+
+      - name: Verify npm package
+        env:
+          RELEASE_VERSION: ${{ github.event.release.tag_name }}
+        run: |
+          RELEASE_VERSION="${RELEASE_VERSION#v}"
+          PUBLISHED_VERSION="$(npm view "@hegenai/codexc@${RELEASE_VERSION}" version)"
+          test "$PUBLISHED_VERSION" = "$RELEASE_VERSION"
+
+  prepare:
+    name: Prepare verified README
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Setup npm
+        run: npm install --global npm@12.0.1
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Render published README
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          node scripts/sync-published-readme.mjs "$RELEASE_TAG"
+          git add README.md
+
+      - name: Run commit verification
+        run: npm run verify:commit
+
+      - name: Prepare verified artifact
+        run: |
+          mkdir verified-readme
+          cp README.md verified-readme/README.md
+          git rev-parse HEAD > verified-readme/base-sha
+
+      - name: Upload verified README
+        uses: actions/upload-artifact@v7
+        with:
+          name: published-readme-${{ github.run_id }}
+          path: verified-readme/
+          if-no-files-found: error
+          retention-days: 1
+
+  sync:
+    name: Sync README to main
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Download verified README
+        uses: actions/download-artifact@v8
+        with:
+          name: published-readme-${{ github.run_id }}
+          path: ${{ runner.temp }}/verified-readme
+
+      - name: Apply verified README
+        run: |
+          EXPECTED_SHA="$(cat "${RUNNER_TEMP}/verified-readme/base-sha")"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          cp "${RUNNER_TEMP}/verified-readme/README.md" README.md
+          CHANGED_FILES="$(git diff --name-only)"
+          test -z "$CHANGED_FILES" || test "$CHANGED_FILES" = "README.md"
+          git diff --check
+          git add README.md
+
+      - name: Commit README
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if git diff --cached --quiet -- README.md; then
+            echo "README 已同步，无需提交"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "同步正式发布版本 ${RELEASE_TAG}"
+          git push origin HEAD:main

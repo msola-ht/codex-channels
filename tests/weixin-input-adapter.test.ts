@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { ConversationService } from "../src/application/index.js";
+import type { ConversationUseCases } from "../src/application/index.js";
 import type { ConversationTarget } from "../src/conversation-core/index.js";
 import type {
   ConversationActorRegistry,
@@ -216,7 +216,7 @@ describe("WeixinInputAdapter", () => {
         collaborationMode: "default",
         collaborationModePending: false,
       })),
-    } as unknown as ConversationService;
+    } as unknown as ConversationUseCases;
     const adapter = new WeixinInputAdapter({
       accountId,
       client,
@@ -541,7 +541,7 @@ describe("WeixinInputAdapter", () => {
     });
   });
 
-  it("coalesces separate image messages and persists reply contexts in order", async () => {
+  it("submits separate image messages immediately and persists reply contexts in order", async () => {
     let delivered = false;
     let releaseFirstPersistence!: () => void;
     const firstPersistence = new Promise<void>((resolve) => {
@@ -633,13 +633,14 @@ describe("WeixinInputAdapter", () => {
       "context-first",
       "context-second",
     ]);
-    expect(service.submit).toHaveBeenCalledTimes(1);
-    expect(service.submit).toHaveBeenCalledWith(target, {
+    expect(service.submit).toHaveBeenCalledTimes(2);
+    expect(service.submit).toHaveBeenNthCalledWith(1, target, {
       text: "比较这些图片",
-      localImages: [
-        { path: "/private/weixin/first.png" },
-        { path: "/private/weixin/second.jpg" },
-      ],
+      localImages: [{ path: "/private/weixin/first.png" }],
+    });
+    expect(service.submit).toHaveBeenNthCalledWith(2, target, {
+      text: "请查看这张图片并根据图片内容协助我。",
+      localImages: [{ path: "/private/weixin/second.jpg" }],
     });
   });
 
@@ -869,6 +870,43 @@ describe("WeixinInputAdapter", () => {
     await adapter.stop();
   });
 
+  it("can start a fresh update monitor after a fatal abort", async () => {
+    let attempts = 0;
+    const onFatal = vi.fn();
+    const client: WeixinProtocolClient = {
+      getUpdates: vi.fn(async (_cursor, signal) => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new WeixinProtocolError("aborted", "unexpected abort");
+        }
+        return await waitForAbort(signal);
+      }),
+      sendText: vi.fn(async () => {}),
+    };
+    const adapter = new WeixinInputAdapter({
+      accountId,
+      client,
+      cursorStore: cursorStoreFixture(),
+      service: serviceFixture(),
+      outbox: outboxFixture(),
+      access: accessFixture(true),
+      replyContexts: new WeixinReplyContextStore(accountId),
+      onFatal,
+    });
+
+    await adapter.start();
+    await vi.waitFor(() => {
+      expect(onFatal).toHaveBeenCalledOnce();
+    });
+    await Promise.resolve();
+    await adapter.start();
+    await vi.waitFor(() => {
+      expect(client.getUpdates).toHaveBeenCalledTimes(2);
+    });
+
+    await adapter.stop();
+  });
+
   it("starts once and stops repeated calls without reporting cancellation as fatal", async () => {
     const client: WeixinProtocolClient = {
       getUpdates: vi.fn((_cursor, signal) => waitForAbort(signal)),
@@ -1046,17 +1084,17 @@ function serviceFixture(
   implementation: (
     target: ConversationTarget,
     text: string,
-  ) => ReturnType<ConversationService["submit"]> = async () => ({
+  ) => ReturnType<ConversationUseCases["submit"]> = async () => ({
     threadId: "thread",
     turnId: "turn",
     steered: false,
   }),
-): ConversationService & {
+): ConversationUseCases & {
   submit: ReturnType<typeof vi.fn>;
 } {
   return {
     submit: vi.fn(implementation),
-  } as unknown as ConversationService & {
+  } as unknown as ConversationUseCases & {
     submit: ReturnType<typeof vi.fn>;
   };
 }

@@ -23,6 +23,22 @@ export function formatRateLimitWindow(
   ].join(" · ");
 }
 
+export function formatRemainingRateLimitWindow(
+  window: RateLimitWindowView,
+  options: { includeDuration?: boolean } = {},
+): string {
+  return [
+    `剩余 ${formatPercent(Math.min(100, Math.max(0, 100 - window.usedPercent)))}`,
+    ...(options.includeDuration === false
+      || window.windowDurationMins === null
+      ? []
+      : [`周期 ${formatMinutes(window.windowDurationMins)}`]),
+    ...(window.resetsAt === null
+      ? []
+      : [`重置 ${formatResetTime(window.resetsAt)}`]),
+  ].join(" · ");
+}
+
 export function formatPercent(value: number): string {
   return `${value.toLocaleString("zh-CN", {
     maximumFractionDigits: 1,
@@ -39,6 +55,7 @@ export function formatPlanType(value: string): string {
     team: "Team",
     self_serve_business_usage_based: "Business（按量）",
     business: "Business",
+    ent26: "Enterprise",
     enterprise_cbp_usage_based: "Enterprise（按量）",
     enterprise: "Enterprise",
     edu: "Edu",
@@ -60,7 +77,7 @@ export function formatRateLimitState(value: string | null): string {
 
 export function formatResetTime(timestamp: number): string {
   return new Intl.DateTimeFormat("zh-CN", {
-    month: "numeric",
+    month: "long",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",

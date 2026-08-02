@@ -14,8 +14,15 @@ const commands = [
     command: name,
     description: conversationCommandDescriptions[name],
   })),
+  { command: "vision", description: "设置要求或收集多张图片" },
   { command: "whoami", description: "显示 Telegram 用户 ID" },
 ];
+
+const updateGroupSizes = new WeakMap<object, number>();
+
+export function telegramUpdateGroupSize(update: object): number | undefined {
+  return updateGroupSizes.get(update);
+}
 
 class TelegramLifecycleError extends Error {
   constructor(message: string) {
@@ -187,6 +194,11 @@ export class TelegramLifecycle {
           offset = update.update_id + 1;
         }
         for (const group of groupTelegramUpdates(updates)) {
+          if (group.length > 1) {
+            for (const update of group) {
+              updateGroupSizes.set(update, group.length);
+            }
+          }
           await Promise.all(group.map(async (update) => {
             try {
               await this.bot.handleUpdate(update);

@@ -86,6 +86,53 @@ describe("WeixinOutbox", () => {
     ]);
   });
 
+  it("reports when image input is sent to the visual API", async () => {
+    const { outbox, sendText } = outboxFixture();
+
+    outbox.handle({
+      type: "vision.started",
+      target,
+      imageCount: 2,
+    });
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
+      text: [
+        "**视觉识别中**",
+        "- 图片：2 张",
+        "- 状态：已发送至视觉 API",
+      ].join("\n"),
+    }));
+  });
+
+  it("reports structured visual completion details with the recognition model", async () => {
+    const { outbox, sendText } = outboxFixture();
+
+    outbox.handle({
+      type: "vision.completed",
+      target,
+      model: "gpt-5.6-luna",
+      elapsedMs: 18_000,
+      usage: {
+        inputTokens: 9_433,
+        outputTokens: 483,
+        totalTokens: 9_916,
+      },
+    });
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
+      text: [
+        "**图片识别完成**",
+        "- 识别模型：gpt-5.6-luna",
+        "- 视觉 API 耗时：18秒",
+        "- Token 用量：输入 9,433 · 输出 483 · 总计 9,916",
+        "",
+        "正在交给当前模型处理。",
+      ].join("\n"),
+    }));
+  });
+
   it("mirrors CLI input into the bound Weixin conversation", async () => {
     const { outbox, sendText } = outboxFixture();
 
@@ -681,6 +728,46 @@ describe("WeixinOutbox", () => {
     allowed.value = true;
     await expect(outbox.deliverText(target, "missing"))
       .rejects.toMatchObject({ code: "missing-reply-context" });
+    await outbox.close();
+  });
+
+  it("invalidates only the failed Conversation when Weixin rejects its reply context", async () => {
+    const {
+      outbox,
+      contexts,
+      onReplyContextInvalidated,
+    } = outboxFixture(
+      { value: true },
+      {},
+      async () => {
+        throw new WeixinProtocolError(
+          "api-error",
+          "private upstream response",
+          undefined,
+          -2,
+        );
+      },
+    );
+    const otherTarget = {
+      ...target,
+      conversationId: "other-fixture@im.wechat",
+    };
+    contexts.remember(
+      otherTarget,
+      "other-fixture@im.wechat",
+      "other-context",
+    );
+
+    await expect(outbox.deliverText(target, "blocked"))
+      .rejects.toMatchObject({ code: "api-error", returnCode: -2 });
+
+    expect(contexts.get(target)).toBeUndefined();
+    expect(contexts.get(otherTarget)).toEqual({
+      actorId: "other-fixture@im.wechat",
+      contextToken: "other-context",
+    });
+    expect(onReplyContextInvalidated).toHaveBeenCalledOnce();
+    expect(onReplyContextInvalidated).toHaveBeenCalledWith(target);
     await outbox.close();
   });
 

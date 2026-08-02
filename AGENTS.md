@@ -49,10 +49,12 @@
 ## 当前实现
 
 - 仓库只包含一个 TypeScript 模块化 Gateway；正式本机入口是 npm CLI `codexc`。
-- Codex App Server 独立运行，原生 Codex TUI 与 Gateway 连接同一个实例，共享 Thread 和实时状态。
+- Codex App Server 独立运行；默认或固定模式使用一个主实例，切换模式可增加由同一服务入口监管的
+  Provider 隔离实例。原生 Codex TUI 与 Gateway 按 Provider 连接对应实例，共享该侧 Thread 和实时状态。
 - App Server 是 Thread、Turn、Item、Goal 和会话历史的唯一事实来源。
 - Gateway 停止或重启不得主动终止共享 App Server。
-- 本机 App Server 连接使用私有 Unix WebSocket；Socket 生命周期和权限由运行时与服务安装脚本管理。
+- 本机主 App Server 与可选 Provider App Server 都使用各自的私有 Unix WebSocket；Socket 生命周期
+  和权限由运行时与服务安装脚本管理。
 - 原生终端交互由 `codex --remote` 提供，Gateway 不实现第二套终端会话界面。
 - Gateway 不读取、解析或修改 Codex 内部会话文件，也不复制完整会话历史。
 
@@ -97,7 +99,7 @@ Surface -> Application/Core <- Codex Client
 - 仓库必须记录并校验生成类型对应的精确 Codex CLI 版本。
 - 升级协议时先审查生成差异，再更新 `codex-protocol` 的受控导出、实现和测试。
 - 稳定业务代码不得依赖实验生成参数才会出现的字段。唯一例外是当前锁定
-  `codex-cli 0.145.0` 的官方 Plan 模式：只允许使用
+  `codex-cli 0.146.0` 的官方 Plan 模式：只允许使用
   `collaborationMode/list` 和 `turn/start.collaborationMode`，必须通过
   `--experimental` 生成类型、从 `codex-protocol` 受控导出，并由真实 App Server
   合同测试覆盖；不得借此接入或暴露其他实验方法、字段或通知。

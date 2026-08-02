@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { createServer } from "node:http";
 import {
   existsSync,
   mkdirSync,
@@ -11,8 +12,10 @@ import { join, resolve } from "node:path";
 import pino from "pino";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import type { ApprovalRequest } from "../src/approval/index.js";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import {
+  handleApprovalServerRequest,
   toConversationInputEvent,
   toThreadStateEvent,
 } from "../src/codex-client/index.js";
@@ -24,10 +27,13 @@ const run = process.env.RUN_CODEX_INTEGRATION === "1";
 const suite = run ? describe : describe.skip;
 const runContract = process.env.RUN_CODEX_CONTRACT === "1";
 const contractSuite = runContract ? describe : describe.skip;
+const deepseekCatalogPath = process.env.CODEX_DEEPSEEK_MODEL_CATALOG;
+const deepseekCatalogContractTest = runContract ? it : it.skip;
 const archiveFixtureThreadId = process.env.CODEX_ARCHIVE_FIXTURE_THREAD_ID;
 const archiveTest = run && archiveFixtureThreadId ? it : it.skip;
 const resumeFixtureThreadId = process.env.CODEX_RESUME_FIXTURE_THREAD_ID;
 const resumeTest = run && resumeFixtureThreadId ? it : it.skip;
+const forkTest = run && resumeFixtureThreadId ? it : it.skip;
 
 suite("real Codex App Server over Unix WebSocket", () => {
   const workdir = process.cwd();
@@ -189,6 +195,28 @@ suite("real Codex App Server over Unix WebSocket", () => {
     }
   });
 
+  forkTest("forks an idle history thread with explicit provider settings", async () => {
+    const source = await client.resumeThread(resumeFixtureThreadId!, workdir);
+    let forkedId: string | undefined;
+    try {
+      const forked = await client.forkThread(source.thread.id, workdir, {
+        model: source.model,
+        modelProvider: source.modelProvider ?? "openai",
+      });
+      forkedId = forked.thread.id;
+
+      expect(forked.thread.id).not.toBe(source.thread.id);
+      expect(forked.model).toBe(source.model);
+      expect(forked.modelProvider).toBe(source.modelProvider ?? "openai");
+    } finally {
+      if (forkedId) {
+        await client.unsubscribeThread(forkedId).catch(() => undefined);
+        await client.deleteThread(forkedId).catch(() => undefined);
+      }
+      await client.unsubscribeThread(source.thread.id).catch(() => undefined);
+    }
+  });
+
   archiveTest("archives and restores an explicitly selected idle fixture thread", async () => {
     const threadId = archiveFixtureThreadId!;
     const fixture = await client.readThread(threadId);
@@ -271,6 +299,7 @@ contractSuite("isolated Codex App Server state contract", () => {
   let codexHome: string;
   let socketPath: string;
   let processHandle: ChildProcess;
+  let ownerRpc: JsonRpcClient;
   let ownerClient: CodexAppServerClient;
   let peerRpc: JsonRpcClient;
   let peerClient: CodexAppServerClient;
@@ -282,6 +311,45 @@ contractSuite("isolated Codex App Server state contract", () => {
     codexHome = join(testRuntime, "codex-home");
     socketPath = join(testRuntime, "app-server.sock");
     mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    const contractSkillDirectory = join(
+      codexHome,
+      "skills",
+      "contract-skill",
+    );
+    mkdirSync(contractSkillDirectory, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      join(contractSkillDirectory, "SKILL.md"),
+      [
+        "---",
+        "name: contract-skill",
+        "description: Validate structured Skill input.",
+        "---",
+        "",
+        "# Contract Skill",
+        "",
+        "Reply concisely.",
+        "",
+      ].join("\n"),
+      { mode: 0o600 },
+    );
+    const approvalProbe = resolve(
+      "tests/fixtures/mcp-tool-approval-server.mjs",
+    );
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      [
+        "[mcp_servers.approval_probe]",
+        `command = ${JSON.stringify(process.execPath)}`,
+        `args = [${JSON.stringify(approvalProbe)}]`,
+        "",
+        "[model_providers.deepseek]",
+        'name = "deepseek"',
+        'base_url = "https://api.deepseek.com/"',
+        'wire_api = "responses"',
+        'experimental_bearer_token = "sk-contract-placeholder"',
+        "",
+      ].join("\n"),
+    );
     processHandle = spawn(
       process.env.CODEX_BINARY ?? "codex",
       ["app-server", "--listen", `unix://${socketPath}`],
@@ -302,8 +370,9 @@ contractSuite("isolated Codex App Server state contract", () => {
         ? undefined
         : new Error(appServerFailure("隔离 Codex App Server 在创建 Unix Socket 前退出", appServerStderr)),
     );
+    ownerRpc = new JsonRpcClient(new UnixWebSocketTransport(socketPath));
     ownerClient = new CodexAppServerClient(
-      new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
+      ownerRpc,
       { sandbox: "read-only" },
     );
     peerRpc = new JsonRpcClient(new UnixWebSocketTransport(socketPath));
@@ -332,6 +401,43 @@ contractSuite("isolated Codex App Server state contract", () => {
       typeof skill.name === "string" && typeof skill.description === "string")).toBe(true);
   });
 
+  it("accepts the official Skill marker and structured input together", async () => {
+    const skill = await ownerClient.resolveSkill(workdir, "contract-skill");
+    expect(skill).toEqual({
+      name: "contract-skill",
+      path: join(codexHome, "skills", "contract-skill", "SKILL.md"),
+    });
+    if (!skill) {
+      throw new Error("隔离 App Server 未返回 contract-skill");
+    }
+    const started = await ownerClient.startThread(workdir);
+    const threadId = started.thread.id;
+    let turnId: string | undefined;
+    try {
+      const turn = await ownerClient.startTurn(
+        threadId,
+        [
+          { type: "text", text: "$contract-skill 验证结构化调用" },
+          {
+            type: "skill",
+            name: skill.name,
+            path: skill.path,
+          },
+        ],
+        "codex_connect_gateway:skill-contract",
+        workdir,
+      );
+      turnId = turn.turnId;
+      expect(turnId).not.toBe("");
+    } finally {
+      if (turnId !== undefined) {
+        await ownerClient.interruptTurn(threadId, turnId).catch(() => undefined);
+      }
+      await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
+      await ownerClient.deleteThread(threadId);
+    }
+  }, 15_000);
+
   it("maps the isolated App Server MCP list to stable summaries", async () => {
     const servers = await ownerClient.listMcpServers();
 
@@ -341,6 +447,85 @@ contractSuite("isolated Codex App Server state contract", () => {
       && typeof server.authStatus === "string"
       && Number.isInteger(server.toolCount))).toBe(true);
   });
+
+  it("shares persisted Thread pin state across clients without local storage", async () => {
+    const started = await ownerClient.startThread(workdir);
+    const threadId = started.thread.id;
+    try {
+      await ownerClient.setThreadPinned(threadId, true);
+
+      const peerRead = await peerClient.readThread(threadId);
+      expect(peerRead.isPinned).toBe(true);
+
+      await peerClient.setThreadPinned(threadId, false);
+      await expect(ownerClient.readThread(threadId)).resolves
+        .toMatchObject({ id: threadId, isPinned: false });
+    } finally {
+      await ownerClient.setThreadPinned(threadId, false).catch(() => undefined);
+      await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
+      await ownerClient.deleteThread(threadId);
+    }
+  }, 15_000);
+
+  it("round-trips MCP tool approval metadata through the real App Server", async () => {
+    const started = await ownerClient.startThread(workdir);
+    const threadId = started.thread.id;
+    let observed: ApprovalRequest | undefined;
+    ownerClient.setServerRequestHandler((request) =>
+      handleApprovalServerRequest(request, {
+        handle: async (approval) => {
+          observed = approval;
+          return {
+            type: "elicitation",
+            action: "accept",
+            content: null,
+            persist: "session",
+          };
+        },
+      }));
+    try {
+      const response = await ownerRpc.request<{
+        content: Array<{ type?: unknown; text?: unknown }>;
+        isError?: boolean;
+      }>({
+        method: "mcpServer/tool/call",
+        params: {
+          threadId,
+          server: "approval_probe",
+          tool: "approval_probe",
+          arguments: { pull_number: 146 },
+        },
+      } as never);
+
+      expect(observed).toMatchObject({
+        type: "elicitation",
+        threadId,
+        turnId: null,
+        serverName: "approval_probe",
+        mode: "form",
+        toolApproval: {
+          connectorName: "GitHub",
+          toolTitle: "Update pull request",
+          parameters: [{
+            name: "pull_number",
+            displayName: "Pull request",
+            value: 146,
+          }],
+          allowSession: true,
+          allowAlways: true,
+        },
+      });
+      expect(response.isError).toBe(false);
+      expect(JSON.parse(String(response.content[0]?.text))).toEqual({
+        action: "accept",
+        content: {},
+        _meta: { persist: "session" },
+      });
+    } finally {
+      await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
+      await ownerClient.deleteThread(threadId);
+    }
+  }, 15_000);
 
   it("maps the isolated App Server Plugin list to stable installed entries", async () => {
     const plugins = await ownerClient.listPlugins(workdir);
@@ -601,6 +786,168 @@ contractSuite("isolated Codex App Server state contract", () => {
     }
   }, 15_000);
 });
+
+deepseekCatalogContractTest(
+  "cold-resumes a third-party thread with its provider model catalog",
+  async () => {
+    const workdir = process.cwd();
+    const runtimeRoot = resolve(".runtime");
+    mkdirSync(runtimeRoot, { recursive: true });
+    const testRuntime = mkdtempSync(join(runtimeRoot, "deepseek-resume-contract-"));
+    const codexHome = join(testRuntime, "codex-home");
+    const resolvedCatalogPath = deepseekCatalogPath
+      ?? join(testRuntime, "deepseek.models.json");
+    const socketPath = join(testRuntime, "app-server.sock");
+    const apiServer = createServer((_request, response) => {
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        error: { type: "invalid_request_error", message: "contract failure" },
+      }));
+    });
+    await new Promise<void>((resolveListen, rejectListen) => {
+      apiServer.once("error", rejectListen);
+      apiServer.listen(0, "127.0.0.1", () => resolveListen());
+    });
+    const apiAddress = apiServer.address();
+    if (!apiAddress || typeof apiAddress === "string") {
+      throw new Error("DeepSeek 冷恢复合同无法创建本机 API 夹具");
+    }
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    if (!deepseekCatalogPath) {
+      writeFileSync(
+        resolvedCatalogPath,
+        `${JSON.stringify({
+          models: [{
+            slug: "deepseek-v4-flash",
+            display_name: "DeepSeek-V4-Flash",
+            description: "DeepSeek contract fixture",
+            default_reasoning_level: "high",
+            supported_reasoning_levels: [{
+              effort: "high",
+              description: "DeepSeek contract fixture",
+            }],
+            shell_type: "shell_command",
+            visibility: "list",
+            supported_in_api: true,
+            priority: 1,
+            availability_nux: null,
+            upgrade: null,
+            base_instructions: "You are a coding agent.",
+            support_verbosity: true,
+            default_verbosity: "low",
+            apply_patch_tool_type: "freeform",
+            truncation_policy: { mode: "tokens", limit: 10_000 },
+            supports_parallel_tool_calls: true,
+            experimental_supported_tools: [],
+          }],
+        })}\n`,
+        { mode: 0o600 },
+      );
+    }
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      [
+        'model = "deepseek-v4-flash"',
+        'model_provider = "deepseek"',
+        `model_catalog_json = ${JSON.stringify(resolvedCatalogPath)}`,
+        "",
+        "[model_providers.deepseek]",
+        'name = "deepseek"',
+        `base_url = "http://127.0.0.1:${apiAddress.port}/"`,
+        'wire_api = "responses"',
+        'experimental_bearer_token = "sk-contract-placeholder"',
+        "",
+      ].join("\n"),
+      { mode: 0o600 },
+    );
+    let processHandle: ChildProcess | undefined;
+    let appServerStderr = "";
+    let client: CodexAppServerClient | undefined;
+    const startServer = async (): Promise<void> => {
+      appServerStderr = "";
+      processHandle = spawn(
+        process.env.CODEX_BINARY ?? "codex",
+        ["app-server", "--listen", `unix://${socketPath}`],
+        {
+          cwd: workdir,
+          env: { ...process.env, CODEX_HOME: codexHome },
+          stdio: ["ignore", "ignore", "pipe"],
+        },
+      );
+      processHandle.stderr?.setEncoding("utf8");
+      processHandle.stderr?.on("data", (chunk: string) => {
+        appServerStderr = appendDiagnostic(appServerStderr, chunk);
+      });
+      await waitFor(
+        () => existsSync(socketPath),
+        10_000,
+        () => processHandle?.exitCode === null
+          ? undefined
+          : new Error(appServerFailure(
+            "DeepSeek 冷恢复合同 App Server 启动失败",
+            appServerStderr,
+          )),
+      );
+    };
+    const stopServer = async (): Promise<void> => {
+      if (processHandle?.exitCode === null) {
+        processHandle.kill("SIGTERM");
+        await new Promise((resolveExit) => processHandle?.once("exit", resolveExit));
+      }
+      rmSync(socketPath, { force: true });
+    };
+    try {
+      await startServer();
+      client = new CodexAppServerClient(
+        new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
+        { sandbox: "read-only" },
+      );
+      await client.connect();
+      const started = await client.startThread(workdir, {
+        model: "deepseek-v4-flash",
+        modelProvider: "deepseek",
+      });
+      const threadId = started.thread.id;
+      let turnCompleted = false;
+      const removeNotification = client.onNotification((notification) => {
+        if (notification.method !== "turn/completed") return;
+        const params = notification.params as { threadId?: unknown } | undefined;
+        if (params?.threadId === threadId) turnCompleted = true;
+      });
+      await client.startTurn(
+        threadId,
+        [{ type: "text", text: "Persist the contract fixture." }],
+        "codex_connect_gateway:deepseek-resume-contract",
+        workdir,
+      );
+      await waitFor(() => turnCompleted, 10_000);
+      removeNotification();
+      await client.close();
+      client = undefined;
+      await stopServer();
+
+      await startServer();
+      client = new CodexAppServerClient(
+        new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
+        { sandbox: "read-only" },
+      );
+      await client.connect();
+
+      const resumed = await client.resumeThread(threadId, workdir);
+
+      expect(resumed.model).toBe("deepseek-v4-flash");
+      expect(resumed.modelProvider).toBe("deepseek");
+      await client.unsubscribeThread(threadId).catch(() => undefined);
+      await client.deleteThread(threadId);
+    } finally {
+      await client?.close().catch(() => undefined);
+      await stopServer();
+      await new Promise<void>((resolveClose) => apiServer.close(() => resolveClose()));
+      rmSync(testRuntime, { recursive: true, force: true });
+    }
+  },
+  30_000,
+);
 
 async function expectConfiguredTier(
   client: CodexAppServerClient,

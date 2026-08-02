@@ -6,12 +6,17 @@ import type {
   OutputEvent,
   ThreadGoal,
 } from "../conversation-core/index.js";
+import { usesOpenAiAccount } from "../conversation-core/index.js";
 
 import {
   formatPercent,
-  formatRateLimitWindow,
+  formatRemainingRateLimitWindow,
 } from "./account-format.js";
-import { formatElapsedDuration } from "./elapsed-duration.js";
+import {
+  formatElapsedDuration,
+  formatTokensPerSecond,
+} from "./elapsed-duration.js";
+import { formatProviderLabel } from "./provider-format.js";
 
 export interface LifecyclePresentation {
   title: string;
@@ -43,6 +48,7 @@ type StartupStatus = Pick<
   | "threadId"
   | "workspaceId"
   | "model"
+  | "modelProvider"
   | "effort"
   | "serviceTier"
   | "modelPending"
@@ -103,20 +109,26 @@ export function createStartupPresentation(
             value: `${status.model}${pendingSuffix(status.modelPending)}`,
           },
           {
+            label: "提供商",
+            value: formatProviderLabel(status.modelProvider ?? "openai"),
+          },
+          {
             label: "思考强度",
             value: `${status.effort ?? "模型默认"}${pendingSuffix(status.effortPending)}`,
           },
-          {
-            label: "Fast 模式",
-            value: `${status.threadId
-              ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭")
-              : "未知"}${pendingSuffix(status.fastModePending)}`,
-          },
+          ...(usesOpenAiAccount(status.modelProvider)
+            ? [{
+                label: "Fast 模式",
+                value: `${status.threadId
+                  ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭")
+                  : "未知"}${pendingSuffix(status.fastModePending)}`,
+              }]
+            : []),
           {
             label: "协作模式",
             value: `${status.collaborationMode === "plan" ? "Plan" : "Default"}${pendingSuffix(status.collaborationModePending)}`,
           },
-          ...(status.weeklyLimit
+          ...(usesOpenAiAccount(status.modelProvider) && status.weeklyLimit
             ? [{
                 label: "周限",
                 value: formatWeeklyLimit(status.weeklyLimit),
@@ -128,10 +140,14 @@ export function createStartupPresentation(
   };
 }
 
-export function createTurnStartedPresentation(): LifecyclePresentation {
+export function createTurnStartedPresentation(
+  backgroundThreadId?: string,
+): LifecyclePresentation {
   return {
-    title: "已开始处理。",
-    fields: [],
+    title: backgroundThreadId ? "后台任务继续处理中。" : "已开始处理。",
+    fields: backgroundThreadId
+      ? [{ label: "Thread", value: backgroundThreadId }]
+      : [],
   };
 }
 
@@ -156,7 +172,7 @@ export function createTurnCompletedPresentation(
           : `${formatTokenCount(current)} / ${formatTokenCount(capacity)}（${formatPercent(Math.max(0, current / capacity * 100))}）`,
       },
       {
-        label: "缓存命中",
+        label: "最近请求缓存命中",
         value: formatCacheHitRate(
           event.tokenUsage.last.inputTokens,
           event.tokenUsage.last.cachedInputTokens,
@@ -167,7 +183,13 @@ export function createTurnCompletedPresentation(
   if (event.model) {
     fields.push({
       label: "模型",
-      value: `${event.model} · ${event.effort ?? "模型默认"} · Fast ${isFastServiceTier(event.serviceTier ?? null) ? "开启" : "关闭"}`,
+      value: usesOpenAiAccount(event.modelProvider)
+        ? `${event.model} · ${event.effort ?? "模型默认"} · Fast ${isFastServiceTier(event.serviceTier ?? null) ? "开启" : "关闭"}`
+        : `${event.model} · ${event.effort ?? "模型默认"}`,
+    });
+    fields.push({
+      label: "提供商",
+      value: formatProviderLabel(event.modelProvider ?? "openai"),
     });
   }
   if (event.contextCompactionCount !== undefined) {
@@ -176,7 +198,7 @@ export function createTurnCompletedPresentation(
       value: `${event.contextCompactionCount} 次`,
     });
   }
-  if (event.weeklyLimit) {
+  if (usesOpenAiAccount(event.modelProvider) && event.weeklyLimit) {
     fields.push({
       label: "周限",
       value: formatWeeklyLimit(event.weeklyLimit),
@@ -186,6 +208,30 @@ export function createTurnCompletedPresentation(
     fields.push({
       label: "Goal",
       value: `${goalStatusLabel(event.goal.status)} · ${formatGoalTokens(event.goal)}`,
+    });
+  }
+  if (event.timing?.ttftMs !== undefined) {
+    fields.push({
+      label: "首字延时",
+      value: formatElapsedDuration(event.timing.ttftMs),
+    });
+  }
+  if (event.timing?.outputTokensPerSecond !== undefined) {
+    fields.push({
+      label: "输出速度",
+      value: `${formatTokensPerSecond(event.timing.outputTokensPerSecond)}（非推理）`,
+    });
+  }
+  if (event.timing?.thinkingTokensPerSecond !== undefined) {
+    fields.push({
+      label: "思考速度",
+      value: `${formatTokensPerSecond(event.timing.thinkingTokensPerSecond)}（推理）`,
+    });
+  }
+  if (event.timing?.generationTokensPerSecond !== undefined) {
+    fields.push({
+      label: "生成速度",
+      value: `${formatTokensPerSecond(event.timing.generationTokensPerSecond)}（含推理）`,
     });
   }
   if (Object.hasOwn(event, "gitBranch")) {
@@ -201,8 +247,10 @@ export function createTurnCompletedPresentation(
     });
   }
   return {
-    title: `本次运行 · ${turnStatusLabel(event.status)}`,
-    fields,
+    title: `${event.background ? "后台任务" : "本次运行"} · ${turnStatusLabel(event.status)}`,
+    fields: event.background
+      ? [{ label: "Thread", value: event.threadId }, ...fields]
+      : fields,
   };
 }
 
@@ -252,7 +300,7 @@ function formatUpstreamUserAgent(userAgent: string | null): string {
 function formatWeeklyLimit(
   window: NonNullable<StartupStatus["weeklyLimit"]>,
 ): string {
-  return formatRateLimitWindow(window, { includeDuration: false });
+  return formatRemainingRateLimitWindow(window, { includeDuration: false });
 }
 
 function formatTokenCount(value: number): string {
@@ -274,7 +322,13 @@ function formatCacheHitRate(
   cachedInputTokens: number,
 ): string {
   return inputTokens > 0
-    ? formatPercent(Math.max(0, cachedInputTokens / inputTokens * 100))
+    ? `${Math.max(
+        0,
+        cachedInputTokens / inputTokens * 100,
+      ).toLocaleString("zh-CN", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}%`
     : "未知";
 }
 

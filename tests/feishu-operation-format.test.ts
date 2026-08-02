@@ -64,8 +64,7 @@ describe("Feishu operation log formatter", () => {
       exitCode: 0,
     });
 
-    expect(text).toContain("[内部路径]");
-    expect(text).not.toContain("/root/.codex");
+    expect(text).toContain("/root/.codex/skills/imagegen/SKILL.md");
   });
 
   it("omits the duration footer when no positive duration is available", () => {

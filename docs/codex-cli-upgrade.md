@@ -120,35 +120,32 @@ Codex 应按以下顺序处理，操作者不需要人工阅读协议文件：
 1. 先读取 `AGENTS.md`、`docs/index.md`、本页和相关模块 README。
 2. 执行 `git status -sb`，拒绝在不明来源的未提交改动上生成协议；尚未生成时先运行
    `npm run codex:upgrade -- <正式版本> --dry-run`，通过后再运行正式升级命令。
-3. 比较生成的 `ClientRequest`、`ClientNotification`、`ServerNotification` 和
-   `ServerRequest`，识别新增、删除及参数变化。
-4. 对照目标版本的官方 App Server 文档、`rust-v<正式版本>` 固定版本源码与测试；不能采用
-   Alpha Patch，也不能用官方 `main` 猜测锁定版本。
-5. 审查 `src/codex-protocol/index.ts` 的受控导出，再沿实际差异检查 `codex-client`、
+3. 先阅读目标版本官方 Release 的 New Features、Bug Fixes 和 Chores，按 CLI/TUI、App Server
+   协议、App Server 内部修复初步筛选与本项目有关的变化；不要从完整源码差异开始漫游分析。
+4. 再比较生成的 `ClientRequest`、`ClientNotification`、`ServerNotification` 和
+   `ServerRequest`，只核实更新日志涉及的协议变化，以及本项目现有调用路径可能受影响的新增、
+   删除和参数变化。
+5. 仅对本项目现有路径或准备采用的候选能力，查阅官方 App Server 文档、`rust-v<正式版本>`
+   固定版本源码与测试；不能采用 Alpha Patch，也不能用官方 `main` 猜测锁定版本。
+6. 把确认后的官方 Release 变化按本项目分为四类：现有路径必须适配、能给当前 Gateway 带来明确收益、
+   暂不采用、纯上游内部变化。每项采用或不采用决定都要写明对应的本地入口、用户价值或拒绝理由；
+   并先用一句普通话解释该能力让用户或管理员能做什么，不能只列 RPC、类型名、上游功能清单或
+   生成类型数量。
+7. 审查 `src/codex-protocol/index.ts` 的受控导出，再沿实际差异检查 `codex-client`、
    `conversation-core`、`approval`、`session-routing` 和其他受影响模块。
-6. 先解决类型和现有测试的阻塞点，再验证运行时行为；每解决一层都重新运行最接近的定向测试，
+8. 先解决类型和现有测试的阻塞点，再验证运行时行为；每解决一层都重新运行最接近的定向测试，
    不能只修复第一个编译错误就宣告完成。
-7. 新增的 Notification 可以在明确安全时记录并忽略；新增的 Server Request 必须明确处理或
+9. 新增的 Notification 可以在明确安全时记录并忽略；新增的 Server Request 必须明确处理或
    安全拒绝，不能悬挂。写请求不能因升级而获得盲目重试或更宽权限。
-8. 不为旧 CLI 保留兼容层，不通过扩大模块依赖白名单、审批权限、网络权限或文件权限绕过失败。
-9. 更新 `docs/index.md` 的版本、协议数字、固定版本链接、支持矩阵和实现映射，并更新所有受影响
-   README 与测试索引。
-10. 增加或调整单元测试；协议、Transport 或共享 App Server 行为变化时补充真实合同测试。
-11. 运行本页完整验证，重新审查规则文件、文档索引和最终 Git 差异；未经用户明确要求不提交、
+10. 不为旧 CLI 保留兼容层，不通过扩大模块依赖白名单、审批权限、网络权限或文件权限绕过失败。
+11. 更新 `docs/index.md` 的版本、协议数字、固定版本链接、支持矩阵和实现映射；在
+   `docs/codex-cli-upgrade-decisions.md` 新增本版本的项目取舍，并更新所有受影响 README 与测试索引。
+12. 增加或调整单元测试；协议、Transport 或共享 App Server 行为变化时补充真实合同测试。
+13. 运行本页完整验证，重新审查规则文件、文档索引和最终 Git 差异；未经用户明确要求不提交、
     推送、发布或重建服务。
 
 若类型生成没有业务差异，Codex 仍需确认版本、文档索引和真实合同，而不是仅凭 TypeScript
 编译通过判定升级完成。
-
-### 使用项目技能
-
-后续可以增加项目级 `codex-cli-upgrade-adapter` 技能，把上面的读取顺序、官方资料查询、逐层
-修复、验证和停止条件固化下来。技能必须以本页为流程事实来源，并直接复用
-`prepare-codex-upgrade.mjs`、`analyze-upgrade-protocol.mjs`、
-`run-upgrade-validation.mjs` 和 `write-upgrade-report.mjs`，不得复制一套版本生成或验证逻辑。
-
-技能只负责编排和需要判断的适配工作；精确版本校验、文件生成、报告与测试仍由仓库脚本执行。
-技能完成后仍默认停在未提交的本地工作区，等待用户要求审查、提交或推送。
 
 ## 3. 完成验证
 
@@ -166,6 +163,95 @@ npm run verify:commit
 
 真实合同测试需要目标版本 Codex CLI，但不调用模型。全部检查通过并经差异审查后，才可以按用户
 明确指示提交、推送、重新全局安装并重建服务。
+
+升级 PR 转为 Ready 或合并前，把自动提案的通用描述更新为实际审查结果，至少写明：
+
+- `对本项目的收益`：只写当前 Gateway、Surface 或运维路径实际得到的价值，不照抄上游清单。
+- `本次采用`：写明协议和版本基线、本地业务适配、项目入口以及采用理由。
+- `本次不采用`：写明未导出、未调用或未加入支持矩阵的上游能力，以及不采用原因；没有项目需求、
+  仅生成了类型、属于 TUI/其他宿主或会扩大安全边界，都应明确说明。
+- 上述每项能力都先用一句非协议术语解释用途，确保不熟悉上游实现的人也能判断是否需要。
+- `风险与验证`：写明安全与兼容风险、本地完整门禁、真实 App Server 合同和 PR CI 结果。
+- 同步 [`Codex CLI 升级决策记录`](codex-cli-upgrade-decisions.md)，保留延后能力的重新评估条件。
+- 合并只更新开发基线，不创建 Tag、发布 npm 或部署服务。
+
+自动 Draft 会预置上述四个章节和官方 Release 链接，但不会自动替项目做产品判断。PR 保持 Draft
+时允许暂留占位文字；转为 Ready 后，`Codex upgrade PR description` 工作流会拒绝缺少章节或仍含
+占位内容的描述。项目取舍应以当前支持矩阵、实际入口和验证为证据，不能为了“跟上上游”接入无需求
+能力。
+
+## 4. 合并升级基线
+
+升级 PR 通过审查和 CI 后，先同步最新 `main`，解决冲突并重新运行提交门禁。冲突解决提交推送后，
+确认 PR 恢复可合并且新一轮 CI 全部通过，再把 Draft 转为 Ready 并使用普通 Merge Commit 合并。
+不要通过 Rebase 或强制推送改写已经用于审查的升级历史。
+
+合并升级 PR 只表示 `main` 进入目标 Codex CLI 的开发基线。此时：
+
+- `package.json`、Gateway、生成协议和 CI 已使用目标开发基线；README 继续保留上一正式版，
+  不提前写入 npm 尚不存在的安装版本。
+- 后续修复和功能修改可以继续基于该版本进行。
+- 自动升级提案会把该版本视为已同步，不再重复创建同版本 PR。
+- 不创建 `v<版本>` Tag，不触发 npm Trusted Publishing，也不创建 GitHub Release 或部署服务。
+
+合并到 `main` 后等待 push CI 全部通过。需要继续修改时按普通开发流程提交和验证；在准备正式发布
+之前，不要提前创建发布 Tag。
+
+## 5. 正式发布
+
+只有明确决定对外发布时才执行本节。发布前确认：
+
+1. `main` 已同步远端、工作区干净，目标提交的 GitHub CI 全部通过。
+2. `package.json`、`src/version.json`、`src/codex-protocol/version.json` 和 `ci.yml` 的
+   Codex CLI 精确版本一致；README 仍显示上一正式版，由发布工作流临时渲染包内副本。
+3. npm Trusted Publisher 已绑定本仓库的 `publish.yml`。
+4. 发布 Tag 与包版本完全一致，并先在本地校验：
+
+```bash
+RELEASE_VERSION=0.147.0
+npm run release:check -- "v$RELEASE_VERSION"
+```
+
+确认无误后，在准备发布的 `main` 提交上创建并推送 Tag：
+
+```bash
+git tag -a "v$RELEASE_VERSION" -m "发布 v$RELEASE_VERSION"
+git push origin "v$RELEASE_VERSION"
+```
+
+`publish.yml` 只监听 `v*` Tag。它会再次校验 Tag 与包版本，在 Runner 临时工作区把包内 README
+渲染为 Tag 版本并运行完整 `verify:commit`，然后通过 npm Trusted Publishing 执行公开发布；
+此时不修改 `main`。普通 push、合并 PR 和手动运行 CI 都不会发布 npm。
+
+等待 `Publish npm package` 工作流成功后再创建对应的 GitHub Release。Release 说明应基于升级
+PR 的实际改动、验证结果和发布边界整理，不能继续使用自动提案的通用占位描述。正式 Release
+发布后，`sync-published-readme.yml` 会先确认 Tag 与 npm 精确版本已经存在，再在 `main` 渲染
+同一 README、执行完整提交门禁并自动提交；npm 失败、Draft 或 Pre-release 不会修改 README。
+当前工作流不会自动创建 GitHub Release，也不会自动安装本机包、重启 Gateway 或部署服务。
+
+## 6. 发布后验证与本机升级
+
+先核对 npm 和 GitHub Release，再安装精确版本：
+
+```bash
+RELEASE_VERSION=0.147.0
+npm view @hegenai/codexc version
+npm install -g "@openai/codex@$RELEASE_VERSION"
+npm install -g "@hegenai/codexc@$RELEASE_VERSION"
+codexc service install
+codexc doctor
+codexc service status
+```
+
+如果需要让 App Server 一并切换到新 CLI，再明确执行：
+
+```bash
+codexc service restart all
+```
+
+发布完成的判断标准是：npm 返回目标版本、GitHub Release 指向同一 Tag、本机诊断通过且所需服务
+状态正常。发布后发现仅文档有误时按普通修复提交处理，不移动已经发布的 Tag；包内容有误时不得
+覆盖同一 npm 版本，应先评估并准备新的正式版本。
 
 ## 升级失败时
 

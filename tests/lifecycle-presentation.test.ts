@@ -33,11 +33,11 @@ describe("shared Surface lifecycle presentation", () => {
         {
           platform: "linux",
           architecture: "x64",
-          gatewayVersion: "0.145.0",
+          gatewayVersion: "0.146.0",
           nodeVersion: "v22.23.1",
           transport: "Unix WebSocket",
           codexUpstreamUserAgent:
-            "codex/0.145.0 (Linux; x64) private-build (gateway; 0.145.0)",
+            "codex/0.146.0 (Linux; x64) private-build (gateway; 0.146.0)",
         },
       ),
     );
@@ -49,9 +49,9 @@ describe("shared Surface lifecycle presentation", () => {
       "",
       "运行环境：",
       "系统：Linux · x64",
-      "版本：Codex Connect 0.145.0 · Node.js v22.23.1",
+      "版本：Codex Connect 0.146.0 · Node.js v22.23.1",
       "连接：Unix WebSocket",
-      "App Server UA：codex/0.145.0 (Linux; x64) (gateway; 0.145.0)",
+      "App Server UA：codex/0.146.0 (Linux; x64) (gateway; 0.146.0)",
       "",
       "当前会话：",
       "Workspace：Main (main)",
@@ -59,10 +59,11 @@ describe("shared Surface lifecycle presentation", () => {
       "Thread：thread-1",
       "Git 分支：feature/lifecycle",
       "模型：gpt-test",
+      "提供商：OpenAI",
       "思考强度：medium",
       "Fast 模式：开启",
       "协作模式：Default",
-      "周限：已使用 37%",
+      "周限：剩余 63%",
     ].join("\n"));
   });
 
@@ -90,6 +91,7 @@ describe("shared Surface lifecycle presentation", () => {
           modelContextWindow: 100_000,
         },
         model: "gpt-test",
+        modelProvider: "openai",
         effort: "medium",
         serviceTier: "priority",
         contextCompactionCount: 2,
@@ -117,14 +119,106 @@ describe("shared Surface lifecycle presentation", () => {
       "",
       "错误：失败：[已隐藏]",
       "上下文：10 K / 100 K（10%）",
-      "缓存命中：75%",
+      "最近请求缓存命中：75.00%",
       "模型：gpt-test · medium · Fast 开启",
+      "提供商：OpenAI",
       "上下文压缩：2 次",
-      "周限：已使用 37%",
+      "周限：剩余 63%",
       "Goal：进行中 · 12.5 K / 100 K",
       "Git 分支：feature/lifecycle",
       "耗时：1分5秒",
     ].join("\n"));
+  });
+
+  it("keeps Thread metrics but hides OpenAI-only fields for DeepSeek", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: { surface: "feishu", accountId: "default", conversationId: "chat" },
+        threadId: "thread-deepseek",
+        turnId: "turn-deepseek",
+        status: "completed",
+        tokenUsage: {
+          total: tokenBreakdown(30_000, 20_000, 10_000),
+          last: tokenBreakdown(20_000, 16_000, 8_000),
+          modelContextWindow: 1_048_576,
+        },
+        model: "deepseek-v4-flash",
+        modelProvider: "deepseek",
+        effort: "high",
+        serviceTier: null,
+        weeklyLimit: {
+          usedPercent: 90,
+          windowDurationMins: 10_080,
+          resetsAt: null,
+        },
+      }),
+    );
+
+    expect(rendered).toContain("上下文：20 K / 1.05 M");
+    expect(rendered).toContain("模型：deepseek-v4-flash · high");
+    expect(rendered).toContain("提供商：DeepSeek");
+    expect(rendered).not.toContain("Fast");
+    expect(rendered).not.toContain("周限");
+  });
+
+  it("shows output, thinking and combined generation speeds", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "telegram",
+          accountId: "default",
+          conversationId: "100",
+        },
+        threadId: "thread-1",
+        turnId: "turn-1",
+        status: "completed",
+        modelProvider: "deepseek",
+        timing: {
+          ttftMs: 640,
+          nonReasoningOutputTokens: 42,
+          outputTokensPerSecond: 2.1,
+          reasoningTokens: 80,
+          thinkingTokensPerSecond: 20,
+          generationTokensPerSecond: 120,
+        },
+      }),
+    );
+
+    expect(rendered).toContain("首字延时：640毫秒");
+    expect(rendered).toContain("输出速度：2.1 token/s（非推理）");
+    expect(rendered).toContain("思考速度：20 token/s（推理）");
+    expect(rendered).toContain("生成速度：120 token/s（含推理）");
+    expect(rendered).not.toContain("思考时长");
+    expect(rendered).not.toContain("输出时长");
+  });
+
+  it("omits reasoning metrics when the provider does not expose a timing stream", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "telegram",
+          accountId: "default",
+          conversationId: "100",
+        },
+        threadId: "thread-openai",
+        turnId: "turn-openai",
+        status: "completed",
+        modelProvider: "openai",
+        timing: {
+          reasoningTokens: 40,
+          outputTokensPerSecond: 96,
+        },
+      }),
+    );
+
+    expect(rendered).toContain("输出速度：96 token/s（非推理）");
+    expect(rendered).not.toContain("首字延时");
+    expect(rendered).not.toContain("推理输出");
+    expect(rendered).not.toContain("思考速度");
+    expect(rendered).not.toContain("生成速度");
   });
 });
 

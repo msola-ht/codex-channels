@@ -4,6 +4,7 @@ import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const sourceRoot = resolve("src");
+const runtimeRoot = resolve("runtime");
 
 const allowedModuleDependencies: Record<string, readonly string[]> = {
   application: [
@@ -24,6 +25,7 @@ const allowedModuleDependencies: Record<string, readonly string[]> = {
     "event-bus",
     "observability",
     "policy",
+    "provider-proxy",
     "session-routing",
     "storage",
     "surfaces",
@@ -39,6 +41,7 @@ const allowedModuleDependencies: Record<string, readonly string[]> = {
   config: [],
   "conversation-core": ["event-bus"],
   "event-bus": [],
+  "provider-proxy": [],
   observability: ["config"],
   policy: ["conversation-core"],
   "session-routing": [
@@ -62,8 +65,31 @@ describe("module boundaries", () => {
     expect(moduleDependencyViolations()).toEqual([]);
   });
 
+  it("keeps the top-level module dependency graph acyclic", () => {
+    expect(moduleDependencyCycles()).toEqual([]);
+  });
+
+  it("keeps built-in Surface channels isolated", () => {
+    expect(surfaceChannelImportViolations()).toEqual([]);
+  });
+
+  it("keeps Surfaces behind the application use-case interface", () => {
+    const concreteDependencies = typescriptFiles(
+      resolve(sourceRoot, "surfaces"),
+    ).flatMap((file) =>
+      readFileSync(file, "utf8").includes("ConversationService")
+        ? [relative(sourceRoot, file)]
+        : []
+    );
+    expect(concreteDependencies).toEqual([]);
+  });
+
   it("prevents production source from depending on CLI and project scripts", () => {
     expect(externalDirectoryViolations(["bin", "scripts", "tests"])).toEqual([]);
+  });
+
+  it("limits shared runtime imports to the composition and config modules", () => {
+    expect(runtimeImportViolations()).toEqual([]);
   });
 
   it("requires cross-module imports to use public entry points", () => {
@@ -116,6 +142,7 @@ describe("module boundaries", () => {
     );
     expect(turnPort).not.toContain('type: "audio"');
     expect(turnPort).toContain('type: "localAudio"');
+    expect(turnPort).toContain('type: "skill"');
 
     const realtimeCallers = typescriptFiles(
       resolve(sourceRoot, "codex-client"),
@@ -173,6 +200,29 @@ function externalDirectoryViolations(forbiddenDirectories: string[]): string[] {
       const target = resolve(dirname(file), specifier);
       const forbidden = forbiddenRoots.find((root) => isInside(root, target));
       if (forbidden) {
+        found.push(`${relative(sourceRoot, file)} -> ${relative(sourceRoot, target)}`);
+      }
+    }
+  }
+  return found;
+}
+
+function runtimeImportViolations(): string[] {
+  const allowedModules = new Set(["bootstrap", "config"]);
+  const moduleNames = new Set(Object.keys(allowedModuleDependencies));
+  const found: string[] = [];
+  for (const file of typescriptFiles(sourceRoot)) {
+    const sourceModule = topLevelModule(file, moduleNames);
+    if (sourceModule && allowedModules.has(sourceModule)) {
+      continue;
+    }
+    const source = readFileSync(file, "utf8");
+    for (const specifier of importSpecifiers(source)) {
+      if (!specifier.startsWith(".")) {
+        continue;
+      }
+      const target = resolve(dirname(file), specifier);
+      if (isInside(runtimeRoot, target)) {
         found.push(`${relative(sourceRoot, file)} -> ${relative(sourceRoot, target)}`);
       }
     }
@@ -256,6 +306,95 @@ function moduleDependencyViolations(): string[] {
       const targetModule = topLevelModule(target, moduleNames);
       if (targetModule && targetModule !== sourceModule && !allowed.has(targetModule)) {
         found.push(`${relative(sourceRoot, file)} -> ${targetModule}`);
+      }
+    }
+  }
+  return found.sort();
+}
+
+function moduleDependencyCycles(): string[] {
+  const graph = actualModuleDependencies();
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const stack: string[] = [];
+  const found = new Set<string>();
+
+  const visit = (moduleName: string): void => {
+    if (visited.has(moduleName)) {
+      return;
+    }
+    if (visiting.has(moduleName)) {
+      const cycleStart = stack.indexOf(moduleName);
+      found.add([...stack.slice(cycleStart), moduleName].join(" -> "));
+      return;
+    }
+    visiting.add(moduleName);
+    stack.push(moduleName);
+    for (const dependency of [...(graph.get(moduleName) ?? [])].sort()) {
+      visit(dependency);
+    }
+    stack.pop();
+    visiting.delete(moduleName);
+    visited.add(moduleName);
+  };
+
+  for (const moduleName of [...graph.keys()].sort()) {
+    visit(moduleName);
+  }
+  return [...found].sort();
+}
+
+function actualModuleDependencies(): Map<string, Set<string>> {
+  const moduleNames = new Set(
+    readdirSync(sourceRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name),
+  );
+  const graph = new Map(
+    [...moduleNames].map((moduleName) => [moduleName, new Set<string>()]),
+  );
+  for (const file of typescriptFiles(sourceRoot)) {
+    const sourceModule = topLevelModule(file, moduleNames);
+    if (!sourceModule) {
+      continue;
+    }
+    for (const specifier of importSpecifiers(readFileSync(file, "utf8"))) {
+      if (!specifier.startsWith(".")) {
+        continue;
+      }
+      const targetModule = topLevelModule(
+        resolve(dirname(file), specifier),
+        moduleNames,
+      );
+      if (targetModule && targetModule !== sourceModule) {
+        graph.get(sourceModule)?.add(targetModule);
+      }
+    }
+  }
+  return graph;
+}
+
+function surfaceChannelImportViolations(): string[] {
+  const channels = ["feishu", "telegram", "weixin"] as const;
+  const channelRoots = new Map(
+    channels.map((channel) => [channel, resolve(sourceRoot, "surfaces", channel)]),
+  );
+  const found: string[] = [];
+  for (const channel of channels) {
+    const root = channelRoots.get(channel)!;
+    for (const file of typescriptFiles(root)) {
+      for (const specifier of importSpecifiers(readFileSync(file, "utf8"))) {
+        if (!specifier.startsWith(".")) {
+          continue;
+        }
+        const target = resolve(dirname(file), specifier);
+        for (const [otherChannel, otherRoot] of channelRoots) {
+          if (otherChannel !== channel && isInside(otherRoot, target)) {
+            found.push(
+              `${relative(sourceRoot, file)} -> surfaces/${otherChannel}`,
+            );
+          }
+        }
       }
     }
   }

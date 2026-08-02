@@ -24,7 +24,9 @@ function thread(id: string, status: ThreadStatus): ThreadSnapshot {
   return {
     id,
     sessionId: id,
+    modelProvider: "openai",
     preview: "test",
+    isPinned: false,
     status,
     cwd: "/workspace",
     source: "cli",
@@ -53,6 +55,7 @@ function threadPort(overrides: Partial<ThreadLifecyclePort> = {}): ThreadLifecyc
   };
   return {
     listThreads: unsupported,
+    readThread: unsupported,
     startThread: unsupported,
     resumeThread: unsupported,
     forkThread: unsupported,
@@ -64,6 +67,157 @@ function threadPort(overrides: Partial<ThreadLifecyclePort> = {}): ThreadLifecyc
 }
 
 describe("SessionRouter", () => {
+  it("forks the current Thread with provider options before replacing its binding", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "original", sessionId: "original" });
+    const calls: unknown[] = [];
+    const unsubscribed: string[] = [];
+    const client = threadPort({
+      forkThread: async (threadId, cwd, options) => {
+        calls.push({ threadId, cwd, options });
+        return session(thread("forked", { type: "idle" }), {
+          model: "deepseek-v4-flash",
+          modelProvider: "deepseek",
+          reasoningEffort: "high",
+        });
+      },
+      unsubscribeThread: async (threadId) => {
+        unsubscribed.push(threadId);
+      },
+    });
+    const router = new SessionRouter(client, store, registry);
+
+    await router.fork(target, {
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+    });
+
+    expect(calls).toEqual([{
+      threadId: "original",
+      cwd: "/workspace",
+      options: {
+        model: "deepseek-v4-flash",
+        modelProvider: "deepseek",
+      },
+    }]);
+    expect(unsubscribed).toEqual(["original"]);
+    expect(store.get(target)?.threadId).toBe("forked");
+  });
+
+  it("keeps the original binding when a provider Fork fails", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "original", sessionId: "original" });
+    const unsubscribed: string[] = [];
+    const client = threadPort({
+      forkThread: async () => {
+        throw new Error("fork failed");
+      },
+      unsubscribeThread: async (threadId) => {
+        unsubscribed.push(threadId);
+      },
+    });
+    const router = new SessionRouter(client, store, registry);
+
+    await expect(router.fork(target, {
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+    })).rejects.toThrow("fork failed");
+
+    expect(store.get(target)?.threadId).toBe("original");
+    expect(unsubscribed).toEqual([]);
+  });
+
+  it("transfers an idle binding without unsubscribing the selected Thread", async () => {
+    const destination = {
+      surface: "feishu" as const,
+      accountId: "tenant-a",
+      conversationId: "chat-a",
+    };
+    const store = new MemoryBindingStore();
+    store.bind({
+      target,
+      workspaceId: "main",
+      threadId: "thread-owned",
+      sessionId: "session-owned",
+    });
+    store.bind({
+      target: destination,
+      workspaceId: "main",
+      threadId: "thread-replaced",
+      sessionId: "session-replaced",
+    });
+    const unsubscribed: string[] = [];
+    const listed: string[] = [];
+    const router = new SessionRouter(
+      threadPort({
+        readThread: async (threadId) => thread(threadId, { type: "idle" }),
+        unsubscribeThread: async (threadId) => {
+          unsubscribed.push(threadId);
+        },
+        listThreads: async () => {
+          listed.push("listed");
+          return [];
+        },
+        startThread: async () => session(thread("thread-new", { type: "idle" })),
+      }),
+      store,
+      registry,
+    );
+
+    const transfer = await router.transferBinding(destination, "thread-owned");
+
+    expect(transfer.previousOwner.target).toEqual(target);
+    expect(transfer.replaced?.threadId).toBe("thread-replaced");
+    expect(router.current(target)).toBeUndefined();
+    expect(router.current(destination)?.threadId).toBe("thread-owned");
+    expect(unsubscribed).toEqual(["thread-replaced"]);
+
+    await expect(router.ensure(target)).resolves
+      .toMatchObject({ threadId: "thread-new" });
+    expect(listed).toEqual([]);
+  });
+
+  it("keeps both bindings when either side is not idle", async () => {
+    const destination = {
+      surface: "feishu" as const,
+      accountId: "tenant-a",
+      conversationId: "chat-a",
+    };
+    const store = new MemoryBindingStore();
+    store.bind({
+      target,
+      workspaceId: "main",
+      threadId: "thread-owned",
+      sessionId: "session-owned",
+    });
+    store.bind({
+      target: destination,
+      workspaceId: "main",
+      threadId: "thread-replaced",
+      sessionId: "session-replaced",
+    });
+    let activeThreadId = "thread-owned";
+    const router = new SessionRouter(
+      threadPort({
+        readThread: async (threadId) =>
+          thread(
+            threadId,
+            threadId === activeThreadId ? { type: "active" } : { type: "idle" },
+          ),
+      }),
+      store,
+      registry,
+    );
+
+    await expect(router.transferBinding(destination, "thread-owned"))
+      .rejects.toMatchObject({ code: "thread.takeover.busy" });
+    activeThreadId = "thread-replaced";
+    await expect(router.transferBinding(destination, "thread-owned"))
+      .rejects.toMatchObject({ code: "thread.takeover.busy" });
+    expect(router.current(target)?.threadId).toBe("thread-owned");
+    expect(router.current(destination)?.threadId).toBe("thread-replaced");
+  });
+
   it("skips active threads and resumes the latest idle thread", async () => {
     const resumed: string[] = [];
     const client = threadPort({
@@ -87,6 +241,7 @@ describe("SessionRouter", () => {
     expect(resumed).toEqual(["idle"]);
     expect(router.modelSettings(target)).toEqual({
       model: "gpt-main",
+      modelProvider: "openai",
       effort: "high",
       serviceTier: "fast",
       collaborationMode: "default",
@@ -100,6 +255,7 @@ describe("SessionRouter", () => {
     });
     expect(router.modelSettings(target)).toEqual({
       model: "gpt-updated",
+      modelProvider: "openai",
       effort: "xhigh",
       serviceTier: "default",
       collaborationMode: "plan",
@@ -121,6 +277,48 @@ describe("SessionRouter", () => {
     await router.ensure(target);
 
     expect(unsubscribed).toEqual(["new"]);
+  });
+
+  it("keeps an active foreground subscription when switching it to the background", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "running", sessionId: "running" });
+    const unsubscribed: string[] = [];
+    const client = threadPort({
+      resumeThread: async (threadId) => session(thread(threadId, { type: "idle" })),
+      unsubscribeThread: async (threadId) => {
+        unsubscribed.push(threadId);
+      },
+    });
+    const router = new SessionRouter(client, store, registry);
+
+    await router.resume(target, "selected", true);
+
+    expect(router.current(target)?.threadId).toBe("selected");
+    expect(router.backgroundBindings(target).map(({ threadId }) => threadId)).toEqual(["running"]);
+    expect(router.targetForThread("running")).toEqual(target);
+    expect(unsubscribed).toEqual([]);
+  });
+
+
+  it("keeps model settings after detaching so session lists can annotate them", async () => {
+    const client = threadPort({
+      listThreads: async () => [],
+      startThread: async () => session(thread("new", { type: "idle" })),
+      unsubscribeThread: async () => undefined,
+    });
+    const router = new SessionRouter(client, new MemoryBindingStore(), registry);
+    await router.ensure(target);
+
+    await router.newSession(target);
+
+    expect(router.current(target)).toBeUndefined();
+    expect(router.modelSettingsForThread("new")).toEqual({
+      model: "gpt-main",
+      modelProvider: "openai",
+      effort: "medium",
+      serviceTier: "default",
+      collaborationMode: "default",
+    });
   });
 
   it("restores bound thread model, effort and Fast state after Gateway reconnect", async () => {
@@ -147,6 +345,7 @@ describe("SessionRouter", () => {
     expect(router.current(target)?.threadId).toBe("bound");
     expect(router.modelSettings(target)).toEqual({
       model: "gpt-main",
+      modelProvider: "openai",
       effort: "high",
       serviceTier: "priority",
       collaborationMode: "default",

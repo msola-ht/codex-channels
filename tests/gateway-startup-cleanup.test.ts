@@ -1,5 +1,5 @@
 import pino from "pino";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { AccountRateLimits } from "../src/application/index.js";
 import { GatewayApplication } from "../src/bootstrap/app.js";
@@ -22,6 +22,36 @@ function emptyRateLimits(): AccountRateLimits {
 }
 
 describe("GatewayApplication startup cleanup", () => {
+  it("delegates a Surface fatal error without stopping the Gateway", () => {
+    const reportFatal = vi.fn();
+    const application = Object.create(
+      GatewayApplication.prototype,
+    ) as unknown as Record<string, unknown>;
+    Object.assign(application, {
+      stopping: false,
+      surfaceManager: { reportFatal },
+    });
+    const handleSurfaceFatal = Reflect.get(
+      GatewayApplication.prototype,
+      "handleSurfaceFatal",
+    ) as (
+      this: GatewayApplication,
+      surface: string,
+      accountId: string,
+      error: Error,
+    ) => void;
+    const error = new Error("offline");
+
+    handleSurfaceFatal.call(
+      application as unknown as GatewayApplication,
+      "telegram",
+      "default",
+      error,
+    );
+
+    expect(reportFatal).toHaveBeenCalledWith("telegram", "default", error);
+  });
+
   it("closes every initialized component and preserves the startup error", async () => {
     const calls: string[] = [];
     const application = Object.create(
@@ -31,6 +61,7 @@ describe("GatewayApplication startup cleanup", () => {
         config: { codexSocketPath: "/tmp/codex.sock" },
         logger: pino({ level: "silent" }),
         transport: { kind: "unix-websocket" },
+        providerMetricsServers: [],
         stopping: false,
         reconnecting: undefined,
         codex: {
@@ -134,7 +165,9 @@ describe("GatewayApplication startup cleanup", () => {
       config: { codexSocketPath: "/tmp/codex.sock" },
       logger: pino({ level: "silent" }),
       transport: { kind: "unix-websocket" },
+      providerMetricsServers: [],
       stopping: false,
+      disconnectedProviders: new Set<string>(),
       codex: {
         onNotification: () => () => undefined,
         onDisconnect: () => () => undefined,
@@ -205,8 +238,10 @@ describe("GatewayApplication startup cleanup", () => {
   });
 
   it("cancels and awaits the reconnect task during shutdown", async () => {
-    let disconnect: ((error: Error) => void) | undefined;
+    let disconnect: ((error: Error, provider: string) => void) | undefined;
     let reconnectAttempts = 0;
+    let cancelAllCalls = 0;
+    const cancelledThreadSets: ReadonlySet<string>[] = [];
     const application = Object.create(
       GatewayApplication.prototype,
     ) as unknown as Record<string, unknown>;
@@ -214,10 +249,12 @@ describe("GatewayApplication startup cleanup", () => {
       config: { codexSocketPath: "/tmp/codex.sock" },
       logger: pino({ level: "silent" }),
       transport: { kind: "unix-websocket" },
+      providerMetricsServers: [],
       stopping: false,
+      disconnectedProviders: new Set<string>(),
       codex: {
         onNotification: () => () => undefined,
-        onDisconnect: (handler: (error: Error) => void) => {
+        onDisconnect: (handler: (error: Error, provider: string) => void) => {
           disconnect = handler;
           return () => undefined;
         },
@@ -226,10 +263,12 @@ describe("GatewayApplication startup cleanup", () => {
           platformFamily: "unix",
           platformOs: "linux",
         }),
-        reconnect: async () => {
+        reconnectProvider: async () => {
           reconnectAttempts += 1;
           throw new Error("offline");
         },
+        knownProvider: () => "openai",
+        closeProvider: async () => undefined,
         accountRateLimits: async () => emptyRateLimits(),
         close: async () => undefined,
       },
@@ -241,7 +280,12 @@ describe("GatewayApplication startup cleanup", () => {
         close: async () => undefined,
       },
       interactions: {
-        cancelAll: () => undefined,
+        cancelAll: () => {
+          cancelAllCalls += 1;
+        },
+        cancelThreads: (threadIds: ReadonlySet<string>) => {
+          cancelledThreadSets.push(threadIds);
+        },
       },
       core: {
         rememberRateLimits: () => undefined,
@@ -263,11 +307,13 @@ describe("GatewayApplication startup cleanup", () => {
     const gateway = application as unknown as GatewayApplication;
     await gateway.start();
 
-    disconnect?.(new Error("connection lost"));
+    disconnect?.(new Error("connection lost"), "openai");
     await Promise.resolve();
     await Promise.resolve();
 
     await expect(gateway.stop()).resolves.toBeUndefined();
     expect(reconnectAttempts).toBe(1);
+    expect(cancelAllCalls).toBe(0);
+    expect(cancelledThreadSets).toEqual([new Set()]);
   });
 });

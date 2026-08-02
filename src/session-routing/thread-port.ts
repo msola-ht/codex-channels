@@ -9,8 +9,10 @@ export type ThreadSource = "cli" | "vscode" | "appServer" | "other";
 export interface ThreadSnapshot {
   id: string;
   sessionId: string;
+  modelProvider: string;
   preview: string;
   name: string | null;
+  isPinned: boolean;
   status: ThreadStatus;
   cwd: string;
   source: ThreadSource;
@@ -20,9 +22,15 @@ export interface ThreadSnapshot {
 export interface ThreadSession {
   thread: ThreadSnapshot;
   model: string;
+  modelProvider?: string;
   reasoningEffort: string | null;
   serviceTier: string | null;
   contextCompactionItemIds: readonly string[];
+}
+
+export interface ThreadStartOptions {
+  model?: string;
+  modelProvider?: string;
 }
 
 export interface ThreadQueryOptions {
@@ -33,9 +41,14 @@ export interface ThreadQueryOptions {
 
 export interface ThreadLifecyclePort {
   listThreads(cwd: string, options?: ThreadQueryOptions): Promise<ThreadSnapshot[]>;
-  startThread(cwd: string): Promise<ThreadSession>;
+  readThread(threadId: string): Promise<ThreadSnapshot>;
+  startThread(cwd: string, options?: ThreadStartOptions): Promise<ThreadSession>;
   resumeThread(threadId: string, cwd: string): Promise<ThreadSession>;
-  forkThread(threadId: string, cwd: string): Promise<ThreadSession>;
+  forkThread(
+    threadId: string,
+    cwd: string,
+    options?: ThreadStartOptions,
+  ): Promise<ThreadSession>;
   archiveThread(threadId: string): Promise<void>;
   unarchiveThread(threadId: string): Promise<ThreadSnapshot>;
   unsubscribeThread(threadId: string): Promise<void>;

@@ -7,7 +7,7 @@
 - `ci.yml`：在 push、Pull Request 和手动触发时，分别使用 Ubuntu 与 macOS、Node.js 22.13.0
   执行与本地 pre-commit hook 相同的 `npm run verify:commit`，覆盖提交差异、类型和版本、生产与测试
   Lint、文档链接和索引、全量测试、Shell、真实 tarball 与干净源码安装冒烟及平台模板检查。
-  独立的 App Server 合同任务安装锁定的 Codex CLI 0.145.0，检查协议版本与生成类型，并使用隔离
+  独立的 App Server 合同任务安装锁定的 Codex CLI 0.146.0，检查协议版本与生成类型，并使用隔离
   `CODEX_HOME` 验证 Fast 默认值的跨客户端读取和新 Thread 状态。
 - `codex-upgrade-preview.yml`：每日及手动检查 `openai/codex` 正式发行版本；版本留空时使用
   最新正式 Release。项目已经同步时跳过，发现更新时安装对应 npm CLI、生成协议与版本
@@ -18,23 +18,34 @@
   Draft PR，同版本已有开放提案时不重复创建。它不自动转为 Ready、合并、发布或部署。官方
   Release 解析失败时仍上传以 `unresolved-<run id>` 命名的失败 Artifact 和 `resolve.log`，
   不会因目标版本为空丢失现场。
+- `codex-upgrade-pr.yml`：在正式升级 PR 打开、更新、编辑或转为 Ready 时检查描述；Draft
+  阶段允许自动占位内容，Ready 后必须写清对本项目的收益、本次采用、本次不采用及风险与验证。
+  普通 PR 不受此检查影响。
 - `codex-alpha-canary.yml`：每天选择 `openai/codex` 最高版本号的官方 Alpha，在临时 Runner
   生成协议，并使用与正式预览相同的独立兼容检查和报告。成功或失败都会上传完整现场，失败后
   任务标红；Release 解析失败同样保留 `unresolved` 报告；结果只作前向兼容预警，不进入正式
   版本基线。
-- `publish.yml`：推送与 Codex CLI 协议版本一致的 `v*` Tag 后，执行同一完整提交检查，再使用 npm Trusted Publishing 发布公开包，不保存长期 npm Token。
+- `publish.yml`：推送与 Codex CLI 协议版本一致的 `v*` Tag 后，先在 Runner 临时工作区把包内
+  README 渲染为 Tag 版本并执行同一完整提交检查，再使用 npm Trusted Publishing 发布公开包，
+  不保存长期 npm Token。该临时渲染不会提前修改 `main`；合并升级 PR 或普通 push 不会发布。
+- `sync-published-readme.yml`：正式 GitHub Release 发布后，先在只读 Job 验证 Release Tag 与
+  npm 精确版本均已存在，再由第二个只读 Job 在 `main` 渲染同一 README、执行完整提交门禁并
+  上传带基线 SHA 的短期产物；独立 `contents: write` Job 只在 `main` 未前进时应用该产物并提交，
+  不执行仓库脚本或依赖。Draft、Pre-release、npm 尚未发布、降级或文档标记不完整时均不写入。
+  GitHub Release 创建、本机安装、服务重启和部署仍不由工作流执行。完整收尾步骤见
+  [`docs/codex-cli-upgrade.md`](../../docs/codex-cli-upgrade.md)。
 
 启用发布工作流前，需要在 npm 包的 Trusted Publisher 设置中绑定 GitHub 仓库 `msola-ht/codex-channels`、工作流文件 `publish.yml`，并允许 `npm publish`。工作流使用 GitHub OIDC 和 `id-token: write` 获取短期凭据。
 
-除正式升级提案的 Draft PR Job 外，工作流只申请 `contents: read`，Checkout 不保留写入凭据。
-Draft PR Job 单独申请 `contents: write` 和 `pull-requests: write`，只用于推送自动化升级分支和
-创建提案。同一升级工作流串行运行，不在推送分支或创建 PR 时取消前一轮。隔离 App Server 合同
-测试不读取 Runner 登录态、不调用模型；依赖账号、模型列表或指定 fixture Thread 的完整真实集成
-测试仍只在本机按需执行。
+除正式升级提案的 Draft PR Job 与发布后 README 同步 Job 外，工作流只申请 `contents: read`，
+Checkout 不保留写入凭据。Draft PR Job 单独申请 `contents: write` 和 `pull-requests: write`，
+只用于推送自动化升级分支和创建提案；README 同步 Job 只在只读验证成功后申请
+`contents: write`，且完整门禁通过后只提交 `README.md`。隔离 App Server 合同测试不读取 Runner
+登录态、不调用模型；依赖账号、模型列表或指定 fixture Thread 的完整真实集成测试仍只在本机按需执行。
 
-仓库 Settings → Actions → General 需要允许 GitHub Actions 创建 Pull Request，但默认工作流
-权限继续保持只读。自动提案使用仓库 `GITHUB_TOKEN`，不保存长期 PAT；GitHub 可能要求维护者批准
-该自动 PR 的首次 CI 运行。
+仓库 Settings → Actions → General 需要允许 GitHub Actions 创建 Pull Request，并允许
+`sync-published-readme.yml` 的最小写权限提交 `README.md`；默认工作流权限继续保持只读。
+自动提案与 README 同步都使用仓库 `GITHUB_TOKEN`，不保存长期 PAT。
 
 GitHub Actions 使用 `npm ci --ignore-scripts`，不会修改 Runner 的 Git hook 配置；随后直接调用
 `npm run verify:commit`。本地 `npm ci`、`npm install` 或 `npm run hooks:install` 则启用

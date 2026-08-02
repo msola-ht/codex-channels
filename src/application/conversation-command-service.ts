@@ -2,7 +2,7 @@ import {
   UserFacingError,
   type ConversationTarget,
 } from "../conversation-core/index.js";
-import type { ConversationService } from "./conversation-service.js";
+import type { ConversationUseCases } from "./conversation-service.js";
 import type { ReviewTarget, ThreadGoal } from "./turn-port.js";
 
 export const conversationCommandNames = [
@@ -12,6 +12,8 @@ export const conversationCommandNames = [
   "new",
   "archive",
   "unarchive",
+  "pin",
+  "unpin",
   "status",
   "workspace",
   "stop",
@@ -23,7 +25,7 @@ export const conversationCommandNames = [
   "model",
   "effort",
   "fast",
-  "skills",
+  "skill",
   "mcp",
   "plugins",
   "usage",
@@ -46,34 +48,35 @@ export type ConversationCommandResult =
   | { kind: "outcome"; outcome: ConversationCommandOutcome }
   | {
       kind: "sessions";
-      sessions: Awaited<ReturnType<ConversationService["listSessions"]>>;
+      sessions: Awaited<ReturnType<ConversationUseCases["listSessions"]>>;
       currentThreadId?: string;
+      backgroundThreadIds?: string[];
       archived: boolean;
       searchTerm?: string;
     }
-  | { kind: "status"; status: ReturnType<ConversationService["status"]> }
+  | { kind: "status"; status: ReturnType<ConversationUseCases["status"]> }
   | {
       kind: "workspaces";
-      workspaces: ReturnType<ConversationService["listWorkspaces"]>;
+      workspaces: ReturnType<ConversationUseCases["listWorkspaces"]>;
       currentWorkspaceId: string;
     }
   | {
       kind: "models";
       view: "model" | "effort" | "fast";
-      state: Awaited<ReturnType<ConversationService["modelState"]>>;
+      state: Awaited<ReturnType<ConversationUseCases["modelState"]>>;
     }
   | {
       kind: "collaboration-mode";
-      state: Awaited<ReturnType<ConversationService["togglePlanMode"]>>;
+      state: Awaited<ReturnType<ConversationUseCases["togglePlanMode"]>>;
     }
-  | { kind: "skills"; entries: Awaited<ReturnType<ConversationService["listSkills"]>> }
-  | { kind: "mcp"; servers: Awaited<ReturnType<ConversationService["listMcpServers"]>> }
-  | { kind: "plugins"; result: Awaited<ReturnType<ConversationService["listPlugins"]>> }
-  | { kind: "usage"; result: Awaited<ReturnType<ConversationService["accountUsage"]>> }
-  | { kind: "limits"; result: Awaited<ReturnType<ConversationService["accountRateLimits"]>> }
+  | { kind: "skills"; entries: Awaited<ReturnType<ConversationUseCases["listSkills"]>> }
+  | { kind: "mcp"; servers: Awaited<ReturnType<ConversationUseCases["listMcpServers"]>> }
+  | { kind: "plugins"; result: Awaited<ReturnType<ConversationUseCases["listPlugins"]>> }
+  | { kind: "usage"; result: Awaited<ReturnType<ConversationUseCases["providerAccountUsage"]>> }
+  | { kind: "limits"; result: Awaited<ReturnType<ConversationUseCases["providerAccountLimits"]>> }
   | {
       kind: "permissions";
-      profiles: Awaited<ReturnType<ConversationService["listPermissionProfiles"]>>;
+      profiles: Awaited<ReturnType<ConversationUseCases["listPermissionProfiles"]>>;
     }
   | {
       kind: "project-rules";
@@ -84,18 +87,19 @@ export type ConversationCommandResult =
   | {
       kind: "artifacts";
       view: "diff";
-      artifacts: ReturnType<ConversationService["artifacts"]>;
+      artifacts: ReturnType<ConversationUseCases["artifacts"]>;
     }
   | { kind: "goal"; goal: ThreadGoal | null };
 
 export type ConversationCommandOutcome =
-  | { type: "thread.resumed"; threadId: string }
-  | { type: "session.new" }
+  | { type: "thread.resumed"; threadId: string; backgroundedThreadId?: string; transferredFrom?: string }
+  | { type: "session.new"; backgroundedThreadId?: string }
   | { type: "thread.archived"; threadId: string }
   | { type: "thread.unarchived"; threadId: string }
+  | { type: "thread.pin-updated"; pinned: boolean }
   | {
       type: "workspace.selected";
-      workspace: Awaited<ReturnType<ConversationService["selectWorkspace"]>>;
+      workspace: Awaited<ReturnType<ConversationUseCases["selectWorkspace"]>>;
     }
   | { type: "turn.stop-requested"; stopped: boolean }
   | { type: "turn.follow-up-queued"; position: number }
@@ -104,6 +108,12 @@ export type ConversationCommandOutcome =
   | { type: "thread.forked"; threadId: string }
   | { type: "review.started"; turnId: string }
   | { type: "plan.started"; turnId: string }
+  | {
+      type: "skill.started";
+      skillName: string;
+      turnId: string;
+      steered: boolean;
+    }
   | { type: "goal.cleared" }
   | {
       type: "goal.updated";
@@ -111,7 +121,7 @@ export type ConversationCommandOutcome =
     };
 
 export class ConversationCommandService {
-  constructor(private readonly conversations: ConversationService) {}
+  constructor(private readonly conversations: ConversationUseCases) {}
 
   async execute(
     target: ConversationTarget,
@@ -122,19 +132,30 @@ export class ConversationCommandService {
     switch (command) {
       case "resume": {
         if (argumentsText) {
-          const threadId = await this.conversations.resume(target, argumentsText);
+          const resumed = await this.conversations.resume(target, argumentsText);
           return {
             kind: "outcome",
-            outcome: { type: "thread.resumed", threadId },
+            outcome: {
+              type: "thread.resumed",
+              threadId: resumed.threadId,
+              ...(resumed.backgroundedThreadId
+                ? { backgroundedThreadId: resumed.backgroundedThreadId }
+                : {}),
+              ...(resumed.transferredFrom
+                ? { transferredFrom: resumed.transferredFrom }
+                : {}),
+            },
           };
         }
         const sessions = await this.conversations.listSessions(target);
         const currentThreadId = this.conversations.status(target).threadId;
+        const backgroundThreadIds = this.conversations.backgroundThreadIds?.(target) ?? [];
         return {
           kind: "sessions",
           sessions,
           archived: false,
           ...(currentThreadId ? { currentThreadId } : {}),
+          ...(backgroundThreadIds.length > 0 ? { backgroundThreadIds } : {}),
         };
       }
       case "sessions": {
@@ -142,11 +163,13 @@ export class ConversationCommandService {
           ...(argumentsText ? { searchTerm: argumentsText } : {}),
         });
         const currentThreadId = this.conversations.status(target).threadId;
+        const backgroundThreadIds = this.conversations.backgroundThreadIds?.(target) ?? [];
         return {
           kind: "sessions",
           sessions,
           archived: false,
           ...(currentThreadId ? { currentThreadId } : {}),
+          ...(backgroundThreadIds.length > 0 ? { backgroundThreadIds } : {}),
           ...(argumentsText ? { searchTerm: argumentsText } : {}),
         };
       }
@@ -162,12 +185,16 @@ export class ConversationCommandService {
           ...(argumentsText ? { searchTerm: argumentsText } : {}),
         };
       }
-      case "new":
-        await this.conversations.newSession(target);
+      case "new": {
+        const backgroundedThreadId = await this.conversations.newSession(target);
         return {
           kind: "outcome",
-          outcome: { type: "session.new" },
+          outcome: {
+            type: "session.new",
+            ...(backgroundedThreadId ? { backgroundedThreadId } : {}),
+          },
         };
+      }
       case "archive": {
         const threadId = await this.conversations.archive(target);
         return {
@@ -182,6 +209,18 @@ export class ConversationCommandService {
           outcome: { type: "thread.unarchived", threadId },
         };
       }
+      case "pin":
+        await this.conversations.setPinned(target, true);
+        return {
+          kind: "outcome",
+          outcome: { type: "thread.pin-updated", pinned: true },
+        };
+      case "unpin":
+        await this.conversations.setPinned(target, false);
+        return {
+          kind: "outcome",
+          outcome: { type: "thread.pin-updated", pinned: false },
+        };
       case "status":
         return {
           kind: "status",
@@ -271,11 +310,29 @@ export class ConversationCommandService {
           view: "fast",
           state: await this.conversations.selectFastMode(target, argumentsText),
         };
-      case "skills":
+      case "skill": {
+        if (!argumentsText) {
+          return {
+            kind: "skills",
+            entries: await this.conversations.listSkills(target),
+          };
+        }
+        const invocation = parseSkillInvocation(argumentsText);
+        const submission = await this.conversations.invokeSkill(
+          target,
+          invocation.selector,
+          invocation.task,
+        );
         return {
-          kind: "skills",
-          entries: await this.conversations.listSkills(target),
+          kind: "outcome",
+          outcome: {
+            type: "skill.started",
+            skillName: submission.skillName,
+            turnId: submission.turnId,
+            steered: submission.steered,
+          },
         };
+      }
       case "mcp":
         return {
           kind: "mcp",
@@ -289,12 +346,12 @@ export class ConversationCommandService {
       case "usage":
         return {
           kind: "usage",
-          result: await this.conversations.accountUsage(),
+          result: await this.conversations.providerAccountUsage(target),
         };
       case "limits":
         return {
           kind: "limits",
-          result: await this.conversations.accountRateLimits(),
+          result: await this.conversations.providerAccountLimits(target),
         };
       case "permissions":
         return {
@@ -367,6 +424,23 @@ export class ConversationCommandService {
     const goal = await this.conversations.getGoal(target);
     return { kind: "goal", goal };
   }
+}
+
+function parseSkillInvocation(input: string): {
+  selector: string;
+  task: string;
+} {
+  const match = /^(\S+)\s+([\s\S]+)$/u.exec(input.trim());
+  if (!match?.[1] || !match[2]?.trim()) {
+    throw new UserFacingError(
+      "skill.usage",
+      "用法：/skill <名称或序号> <任务>",
+    );
+  }
+  return {
+    selector: match[1],
+    task: match[2].trim(),
+  };
 }
 
 function parseReviewTarget(input: string): ReviewTarget {

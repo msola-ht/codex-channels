@@ -21,6 +21,7 @@ export type {
   FileSystemSandboxEntry,
   FileSystemSpecialPath,
   JsonValue,
+  McpToolApproval,
   NetworkApprovalContext,
   NetworkPolicyAmendment,
   ServerRequestId,

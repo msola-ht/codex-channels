@@ -3,6 +3,10 @@ export {
   type ThreadDefaults,
 } from "./client.js";
 export {
+  ProviderRoutingClient,
+  type ProviderClientInstance,
+} from "./provider-routing-client.js";
+export {
   JsonRpcClient,
   JsonRpcError,
   type ProtocolLogger,
@@ -22,6 +26,7 @@ export {
   gatewayVersion,
   supportedCodexCliVersion,
 } from "./protocol-info.js";
+export { loadDeepseekModelOptions } from "./deepseek-catalog.js";
 export {
   decodeApprovalServerRequest,
   handleApprovalServerRequest,

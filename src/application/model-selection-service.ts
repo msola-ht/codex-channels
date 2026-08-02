@@ -14,12 +14,14 @@ import type { SessionRouter } from "../session-routing/index.js";
 export interface ModelSelectionState {
   models: ModelOption[];
   model: string;
+  modelProvider?: string;
   effort: string | null;
   serviceTier: string | null;
   pending: boolean;
   modelPending: boolean;
   effortPending: boolean;
   serviceTierPending: boolean;
+  providerPending?: boolean;
 }
 
 const standardServiceTierRequestValue = "default";
@@ -31,10 +33,11 @@ export class ModelSelectionService {
     private readonly codex: ModelSelectionPort,
     private readonly router: SessionRouter,
     private readonly configuredDefaultModel?: string,
+    private readonly supplementaryModels: readonly ModelOption[] = [],
   ) {}
 
   async state(target: ConversationTarget): Promise<ModelSelectionState> {
-    const models = await this.codex.listModels();
+    const models = await this.listModels();
     return this.resolveState(target, models);
   }
 
@@ -61,6 +64,13 @@ export class ModelSelectionService {
         { model: current.model },
       );
     }
+    if (modality === "image") {
+      throw new UserFacingError(
+        "model.input.image.unsupported",
+        `当前模型 ${current.model} 不支持图片输入，请发送文字或切换支持图片的模型`,
+        { model: current.model },
+      );
+    }
     throw new UserFacingError(
       "model.input.unsupported",
       `当前模型 ${current.model} 不支持该输入类型`,
@@ -69,30 +79,64 @@ export class ModelSelectionService {
   }
 
   async selectModel(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
-    const models = await this.codex.listModels();
+    const models = await this.listModels();
     const selected = resolveModel(models, selector);
+    if (selected.available === false) {
+      throw new UserFacingError(
+        "model.unavailable",
+        `${selected.displayName} 暂不可用${selected.unavailableReason ? `：${selected.unavailableReason}` : ""}`,
+        {
+          model: selected.model,
+          ...(selected.provider ? { provider: selected.provider } : {}),
+          ...(selected.unavailableReason ? { reason: selected.unavailableReason } : {}),
+        },
+      );
+    }
     const current = this.resolveState(target, models);
+    const selectedProvider = selected.provider ?? "openai";
+    const providerChanged = selectedProvider !== current.modelProvider;
+    const selectedFastTier = fastServiceTierId(selected);
+    const providerDefaultTier = providerChanged && selectedFastTier
+      ? await this.codex.readDefaultServiceTier(
+          this.router.workspace(target).cwd,
+          selectedProvider,
+        )
+      : undefined;
+    if (providerChanged) {
+      await this.router.newSession(target);
+    }
     const supported = selected.supportedReasoningEfforts.map((option) => option.effort);
-    const effort = current.effort && supported.includes(current.effort)
+    const effort = !providerChanged && current.effort && supported.includes(current.effort)
       ? current.effort
       : selected.defaultReasoningEffort;
-    const pending = this.pendingByConversation.get(this.key(target));
+    const pending = { ...this.pendingByConversation.get(this.key(target)) };
+    if (providerChanged) {
+      delete pending.serviceTier;
+    }
     const currentModel = current.models.find((candidate) => candidate.model === current.model);
     const currentFast = isFastServiceTier(current.serviceTier, currentModel);
-    const selectedFastTier = fastServiceTierId(selected);
     this.pendingByConversation.set(this.key(target), {
       ...pending,
       model: selected.model,
+      ...(providerChanged ? { modelProvider: selectedProvider } : {}),
       effort,
-      ...(currentFast
-        ? { serviceTier: selectedFastTier ?? standardServiceTierRequestValue }
-        : {}),
+      ...(providerChanged
+        ? selectedFastTier
+          ? {
+              serviceTier: isFastServiceTier(providerDefaultTier ?? null, selected)
+                ? selectedFastTier
+                : standardServiceTierRequestValue,
+            }
+          : {}
+        : currentFast
+          ? { serviceTier: selectedFastTier ?? standardServiceTierRequestValue }
+          : {}),
     });
     return this.resolveState(target, models);
   }
 
   async selectEffort(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
-    const models = await this.codex.listModels();
+    const models = await this.listModels();
     const current = this.resolveState(target, models);
     const model = models.find((candidate) => candidate.model === current.model);
     if (!model) {
@@ -114,25 +158,23 @@ export class ModelSelectionService {
     if (normalized && !new Set(["on", "off", "status"]).has(normalized)) {
       throw new UserFacingError("fast.usage", "Fast 模式参数必须是 on、off 或 status");
     }
-    const models = await this.codex.listModels();
+    const models = await this.listModels();
     const current = this.resolveState(target, models);
     const model = models.find((candidate) => candidate.model === current.model);
     const currentFast = isFastServiceTier(current.serviceTier, model);
     if (normalized === "status") {
       return current;
     }
-    const enable = normalized ? normalized === "on" : !currentFast;
     const tierId = model ? fastServiceTierId(model) : undefined;
-    if (enable) {
-      if (!tierId) {
-        throw new UserFacingError(
-          "fast.unsupported",
-          `当前模型不支持 Fast 模式：${current.model}`,
-          { model: current.model },
-        );
-      }
+    if (!tierId) {
+      throw new UserFacingError(
+        "fast.unsupported",
+        `当前模型不支持 Fast 模式：${current.model}`,
+        { model: current.model },
+      );
     }
-    const selectedTier = enable ? tierId! : standardServiceTierRequestValue;
+    const enable = normalized ? normalized === "on" : !currentFast;
+    const selectedTier = enable ? tierId : standardServiceTierRequestValue;
     await this.codex.writeDefaultFastMode(enable);
     if ((enable && currentFast) || (!enable && !currentFast)) {
       return current;
@@ -149,6 +191,14 @@ export class ModelSelectionService {
     return { ...this.pendingByConversation.get(this.key(target)) };
   }
 
+  threadStartOptions(target: ConversationTarget) {
+    const pending = this.pendingByConversation.get(this.key(target));
+    return {
+      ...(pending?.model ? { model: pending.model } : {}),
+      ...(pending?.modelProvider ? { modelProvider: pending.modelProvider } : {}),
+    };
+  }
+
   markApplied(target: ConversationTarget): void {
     const key = this.key(target);
     const pending = this.pendingByConversation.get(key);
@@ -157,6 +207,7 @@ export class ModelSelectionService {
     if (pending && binding && current) {
       this.router.updateModelSettings(binding.threadId, {
         model: pending.model ?? current.model,
+        modelProvider: pending.modelProvider ?? current.modelProvider ?? "openai",
         effort: pending.effort ?? current.effort,
         serviceTier: hasServiceTierOverride(pending)
           ? pending.serviceTier ?? null
@@ -177,12 +228,14 @@ export class ModelSelectionService {
     const serviceTierPending = hasServiceTierOverride(pending);
     return {
       model: pending?.model ?? current?.model ?? this.configuredDefaultModel ?? "默认模型",
+      modelProvider: pending?.modelProvider ?? current?.modelProvider ?? "openai",
       effort: pending?.effort ?? current?.effort ?? null,
       serviceTier: serviceTierPending ? pending?.serviceTier ?? null : current?.serviceTier ?? null,
       pending: pending !== undefined,
       modelPending: hasOverride(pending, "model"),
       effortPending: hasOverride(pending, "effort"),
       serviceTierPending,
+      providerPending: hasOverride(pending, "modelProvider"),
     };
   }
 
@@ -201,6 +254,10 @@ export class ModelSelectionService {
     return {
       models,
       model,
+      modelProvider: pending?.modelProvider
+        ?? current?.modelProvider
+        ?? catalogModel?.provider
+        ?? "openai",
       effort: pending?.effort ?? current?.effort ?? catalogModel?.defaultReasoningEffort ?? null,
       serviceTier: serviceTierPending
         ? pending?.serviceTier ?? null
@@ -211,11 +268,21 @@ export class ModelSelectionService {
       modelPending: hasOverride(pending, "model"),
       effortPending: hasOverride(pending, "effort"),
       serviceTierPending,
+      providerPending: hasOverride(pending, "modelProvider"),
     };
   }
 
   private key(target: ConversationTarget): string {
     return conversationTargetKey(target);
+  }
+
+  private async listModels(): Promise<ModelOption[]> {
+    const primary = await this.codex.listModels();
+    const combined = new Map(primary.map((model) => [model.model, model]));
+    for (const model of this.supplementaryModels) {
+      combined.set(model.model, model);
+    }
+    return [...combined.values()];
   }
 }
 

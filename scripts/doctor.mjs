@@ -14,6 +14,12 @@ import {
   readGatewayConfig,
   validateGatewayConfigDocument,
 } from "../runtime/gateway-config.mjs";
+import {
+  loadManagedProviderAppServer,
+  providerAppServerSocketPath,
+  validateConfiguredModelProvider,
+} from "../runtime/model-provider-runtime.mjs";
+import { readVisionApiKey } from "../runtime/vision-credential.mjs";
 import { validateFeishuApplication } from "./feishu-application.mjs";
 import { packageDir, resolveConfiguredPath, runtimeConfig, userDataDir } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
@@ -193,6 +199,18 @@ if (document) {
     note("微信", "未配置");
   }
 
+  const vision = table(document.vision);
+  if (vision.mode === "responses_api") {
+    try {
+      readVisionApiKey(join(dataDir, "credentials"));
+      record("图片识别", true, "外部视觉 API 配置与私有凭据有效（内容已隐藏）");
+    } catch {
+      record("图片识别", false, "外部视觉 API 私有凭据不存在或权限无效；请重新运行 codexc setup");
+    }
+  } else {
+    note("图片识别", "未启用");
+  }
+
   try {
     const { workspaces, defaultWorkspace } = readWorkspaceConfig(document);
     record("Workspace", true, `${workspaces.length} 个，默认 ${defaultWorkspace.id}`);
@@ -225,21 +243,44 @@ if (document) {
     dataDir,
     join(dataDir, "runtime", "codex-app-server.sock"),
   );
-  if (!existsSync(socketPath)) {
-    record("Codex App Server", false, `Socket 不存在：${socketPath}`);
-  } else {
-    try {
-      const appServerUserAgent = await initializeUnixWebSocket(socketPath);
-      record("Codex App Server", true, `initialize 握手通过：${socketPath}`);
-      const actualVersion = appServerVersion(appServerUserAgent);
+  await checkAppServer("Codex App Server", socketPath);
+  try {
+    const configuredProvider = validateConfiguredModelProvider(process.env);
+    if (configuredProvider) {
       record(
-        "App Server 版本",
-        actualVersion === requiredAppServerVersion,
-        `${actualVersion ?? "无法识别"}（要求 ${requiredAppServerVersion}）`,
+        "模型提供商配置",
+        true,
+        `${configuredProvider.provider} ${configuredProvider.mode === "switching" ? "切换" : "固定"}模式有效`,
       );
-    } catch (error) {
-      record("Codex App Server", false, `连接失败：${errorMessage(error)}`);
     }
+    const managedProvider = loadManagedProviderAppServer(process.env);
+    if (managedProvider) {
+      await checkAppServer(
+        `${managedProvider.provider} App Server`,
+        providerAppServerSocketPath(socketPath, managedProvider.provider),
+      );
+    }
+  } catch (error) {
+    record("模型提供商配置", false, errorMessage(error));
+  }
+}
+
+async function checkAppServer(label, socketPath) {
+  if (!existsSync(socketPath)) {
+    record(label, false, `Socket 不存在：${socketPath}`);
+    return;
+  }
+  try {
+    const appServerUserAgent = await initializeUnixWebSocket(socketPath);
+    record(label, true, `initialize 握手通过：${socketPath}`);
+    const actualVersion = appServerVersion(appServerUserAgent);
+    record(
+      label === "Codex App Server" ? "App Server 版本" : `${label} 版本`,
+      actualVersion === requiredAppServerVersion,
+      `${actualVersion ?? "无法识别"}（要求 ${requiredAppServerVersion}）`,
+    );
+  } catch (error) {
+    record(label, false, `连接失败：${errorMessage(error)}`);
   }
 }
 

@@ -26,6 +26,7 @@ export type PlanType =
   | "team"
   | "self_serve_business_usage_based"
   | "business"
+  | "ent26"
   | "enterprise_cbp_usage_based"
   | "enterprise"
   | "edu"
@@ -68,6 +69,17 @@ export interface ThreadGoal {
   timeUsedSeconds: number;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface TurnOutputTiming {
+  ttftMs?: number;
+  outputDurationMs?: number;
+  thinkingDurationMs?: number;
+  nonReasoningOutputTokens?: number;
+  reasoningTokens?: number;
+  outputTokensPerSecond?: number;
+  thinkingTokensPerSecond?: number;
+  generationTokensPerSecond?: number;
 }
 
 export interface RateLimitWindow {
@@ -162,23 +174,49 @@ export interface TurnArtifacts {
   };
 }
 
+export interface VisionTokenUsage {
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  cacheWriteInputTokens?: number;
+  outputTokens?: number;
+  reasoningOutputTokens?: number;
+  totalTokens?: number;
+}
+
 export type OutputEvent =
-  | { type: "turn.started"; target: ConversationTarget; threadId: string; turnId: string }
-  | { type: "user.message"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string }
-  | { type: "text.delta"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null }
-  | { type: "text.completed"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null }
-  | { type: "operation.updated"; target: ConversationTarget; threadId: string; turnId: string; operation: OperationUpdate }
-  | { type: "plan.updated"; target: ConversationTarget; threadId: string; turnId: string; explanation: string | null; steps: TurnPlanStep[] }
-  | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: TurnStatus; error?: string; durationMs?: number; tokenUsage?: ThreadTokenUsage; model?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; goal?: ThreadGoal; contextCompactionCount?: number; gitBranch?: string | undefined }
-  | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string }
-  | { type: "connection.lost"; target: ConversationTarget; threadId: string; message: string }
+  | { type: "vision.started"; target: ConversationTarget; imageCount: number }
+  | { type: "vision.progress"; target: ConversationTarget; elapsedSeconds: number }
+  | {
+      type: "vision.completed";
+      target: ConversationTarget;
+      model: string;
+      elapsedMs?: number;
+      upstreamDurationMs?: number;
+      serviceTier?: string;
+      usage?: VisionTokenUsage;
+    }
+  | { type: "turn.started"; target: ConversationTarget; threadId: string; turnId: string; background?: boolean }
+  | { type: "user.message"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; background?: boolean }
+  | { type: "text.delta"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null; background?: boolean }
+  | { type: "text.completed"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null; background?: boolean }
+  | { type: "operation.updated"; target: ConversationTarget; threadId: string; turnId: string; operation: OperationUpdate; background?: boolean }
+  | { type: "plan.updated"; target: ConversationTarget; threadId: string; turnId: string; explanation: string | null; steps: TurnPlanStep[]; background?: boolean }
+  | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: TurnStatus; error?: string; durationMs?: number; timing?: TurnOutputTiming; tokenUsage?: ThreadTokenUsage; model?: string; modelProvider?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; goal?: ThreadGoal; contextCompactionCount?: number; gitBranch?: string | undefined; background?: boolean }
+  | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string; background?: boolean }
+  | { type: "connection.lost"; target: ConversationTarget; threadId: string; message: string; background?: boolean }
   | ({ type: "account.updated"; target: ConversationTarget } & AccountStatus)
   | { type: "account.rateLimits.updated"; target: ConversationTarget; rateLimits: RateLimitSnapshot }
   | ({ type: "mcp.status.updated"; target: ConversationTarget } & McpServerStatus)
-  | { type: "warning"; target: ConversationTarget; threadId?: string; message: string };
+  | { type: "warning"; target: ConversationTarget; threadId?: string; message: string; background?: boolean };
 
 export function isCriticalOutputEvent(event: OutputEvent): boolean {
   return event.type !== "text.delta" && event.type !== "turn.started" &&
+    event.type !== "vision.started" &&
+    event.type !== "vision.progress" &&
     event.type !== "plan.updated" &&
     !(event.type === "operation.updated" && event.operation.status === "running");
+}
+
+export function usesOpenAiAccount(modelProvider: string | undefined): boolean {
+  return (modelProvider ?? "openai") === "openai";
 }

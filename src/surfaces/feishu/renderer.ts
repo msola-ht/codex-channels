@@ -36,6 +36,11 @@ import {
   type LifecyclePresentation,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
+import {
+  formatVisionCompleted,
+  formatVisionProgress,
+  formatVisionStarted,
+} from "../input-copy.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
 import {
   formatCodexWarning,
@@ -58,6 +63,7 @@ export function renderFeishuStartupNotification(
     | "threadId"
     | "workspaceId"
     | "model"
+    | "modelProvider"
     | "effort"
     | "serviceTier"
     | "modelPending"
@@ -85,6 +91,7 @@ export function renderFeishuHelp(): string {
     "飞书：",
     "- /whoami · /fs <status|doctor|revoke>",
     "- /start · /help · /h",
+    "- /vision <要求> · /vision <2–4> <要求> · /vision cancel",
   ].join("\n");
 }
 
@@ -150,16 +157,24 @@ export function renderFeishuUserFacingError(
 
 export function renderFeishuOutput(event: OutputEvent): string | null {
   switch (event.type) {
+    case "vision.started":
+      return formatVisionStarted(event.imageCount);
+    case "vision.progress":
+      return formatVisionProgress(event.elapsedSeconds);
+    case "vision.completed":
+      return formatVisionCompleted(event);
     case "turn.started":
       return renderFeishuLifecyclePresentation(
-        createTurnStartedPresentation(),
+        createTurnStartedPresentation(event.background ? event.threadId : undefined),
       );
     case "text.delta":
       return null;
     case "user.message":
       return formatCliInput(event.text);
     case "text.completed":
-      return event.text.trim() ? event.text : emptyCodexResponseText;
+      return event.text.trim()
+        ? `${event.background ? `后台任务 · ${event.threadId.slice(0, 12)}\n\n` : ""}${event.text}`
+        : emptyCodexResponseText;
     case "operation.updated":
     case "plan.updated":
       return null;

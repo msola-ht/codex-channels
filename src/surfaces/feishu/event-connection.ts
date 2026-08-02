@@ -319,6 +319,25 @@ export class FeishuEventConnection {
     return Promise.resolve();
   }
 
+  resetAfterStartFailure(): void {
+    if (this.stateValue === "stopped") {
+      return;
+    }
+    const wasStarting = this.stateValue === "starting";
+    this.generation += 1;
+    this.clearStartupTimer();
+    this.stateValue = "failed";
+    this.sdkConnection?.close(wasStarting);
+    this.sdkConnection = undefined;
+    if (this.rejectStart !== undefined) {
+      this.rejectStart(new FeishuConnectionError(
+        "start-failed",
+        "飞书长连接启动已取消",
+      ));
+      this.rejectStart = undefined;
+    }
+  }
+
   private isCurrent(generation: number): boolean {
     return generation === this.generation && this.stateValue !== "stopped";
   }

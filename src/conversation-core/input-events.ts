@@ -11,7 +11,7 @@ import type {
 } from "./events.js";
 
 export type ConversationInputEvent =
-  | { type: "turn.started"; threadId: string; turnId: string }
+  | { type: "turn.started"; threadId: string; turnId: string; receivedAtMs?: number }
   | {
       type: "thread.tokenUsage.updated";
       threadId: string;
@@ -41,6 +41,7 @@ export type ConversationInputEvent =
       turnId: string;
       itemId: string;
       text: string;
+      receivedAtMs?: number;
     }
   | {
       type: "item.agentMessage.completed";
@@ -49,6 +50,16 @@ export type ConversationInputEvent =
       itemId: string;
       text: string;
       phase: MessagePhase | null;
+    }
+  | {
+      type: "turn.modelTiming.updated";
+      threadId: string;
+      turnId: string;
+      requestStartedAtMs: number;
+      ttftMs?: number;
+      thinkingDurationMs?: number;
+      outputDurationMs?: number;
+      generationDurationMs?: number;
     }
   | {
       type: "item.userMessage";
@@ -82,7 +93,16 @@ export type ConversationInputEvent =
   | { type: "thread.closed"; threadId: string }
   | { type: "thread.archived"; threadId: string }
   | { type: "thread.deleted"; threadId: string }
-  | ({ type: "account.updated" } & AccountStatus)
-  | { type: "account.rateLimits.updated"; rateLimits: RateLimitSnapshot }
-  | ({ type: "mcp.status.updated" } & McpServerStatus)
-  | { type: "warning"; threadId: string | null; message: string };
+  | ({ type: "account.updated"; modelProvider?: string } & AccountStatus)
+  | {
+      type: "account.rateLimits.updated";
+      rateLimits: RateLimitSnapshot;
+      modelProvider?: string;
+    }
+  | ({ type: "mcp.status.updated"; modelProvider?: string } & McpServerStatus)
+  | {
+      type: "warning";
+      threadId: string | null;
+      message: string;
+      modelProvider?: string;
+    };

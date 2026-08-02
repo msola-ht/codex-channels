@@ -12,6 +12,60 @@ import {
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
 
 describe("TelegramInteractionPort", () => {
+  it("renders and resolves an MCP tool approval without ForceReply", async () => {
+    const sendMessage = vi.fn(async (
+      _chatId: string,
+      _text: string,
+      _options?: unknown,
+    ) => {
+      void _chatId;
+      void _text;
+      void _options;
+      return { message_id: 5 };
+    });
+    const callbackQuery = vi.fn();
+    const bot = {
+      callbackQuery,
+      api: {
+        sendMessage,
+        editMessageText: vi.fn(async () => true as const),
+      },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(
+      bot,
+      pino({ level: "silent" }),
+    );
+    const decision = interactions.request(target, mcpToolApprovalRequest());
+    await settle();
+
+    expect(sendMessage.mock.calls[0]?.[1]).toContain("Update pull request");
+    const options = sendMessage.mock.calls[0]?.[2] as {
+      reply_markup: {
+        inline_keyboard: Array<Array<{ text: string; callback_data?: string }>>;
+      };
+    };
+    expect(options.reply_markup).not.toHaveProperty("force_reply");
+    const alwaysButton = options.reply_markup.inline_keyboard
+      .flat()
+      .find((button) => button.text === "始终允许");
+    expect(alwaysButton?.callback_data).toMatch(/^ix:ma:/);
+
+    const callback = callbackQuery.mock.calls[0]?.[1] as
+      (context: Context) => Promise<void>;
+    await callback({
+      callbackQuery: { data: alwaysButton!.callback_data! },
+      chat: { id: 100 },
+      answerCallbackQuery: vi.fn(async () => true as const),
+    } as unknown as Context);
+
+    await expect(decision).resolves.toEqual({
+      type: "elicitation",
+      action: "accept",
+      content: null,
+      scope: "always",
+    });
+  });
+
   it("offers and resolves an explicit session approval", async () => {
     const logger = {
       info: vi.fn(),
@@ -1080,6 +1134,28 @@ function userInputRequest(
       allowOther: true,
       secret: false,
     }],
+    expiresInMs: 30_000,
+  };
+}
+
+function mcpToolApprovalRequest(): Extract<
+  InteractionRequest,
+  { type: "elicitation" }
+> {
+  return {
+    type: "elicitation",
+    requestId: "request-mcp-tool",
+    threadId: "thread-1",
+    turnId: "turn-1",
+    title: "MCP GitHub 请求批准",
+    message: "允许 GitHub 更新拉取请求吗？",
+    mode: "tool-approval",
+    toolApproval: {
+      toolTitle: "Update pull request",
+      detail: "Pull request：146",
+      allowSession: true,
+      allowAlways: true,
+    },
     expiresInMs: 30_000,
   };
 }

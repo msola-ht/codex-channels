@@ -3,6 +3,11 @@ import { realpathSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import {
+  loadManagedModelProvider,
+  providerAppServerSocketPath,
+} from "../runtime/model-provider-runtime.mjs";
+import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import { resolveConfiguredPath, runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
@@ -22,18 +27,36 @@ if (workspaceFlag !== -1) {
   workdir = workspace.cwd;
   passthrough.splice(workspaceFlag, 2);
 }
-const socketPath = resolveConfiguredPath(
+const selectedProfile = removeDeepseekProfile(passthrough);
+const primarySocketPath = resolveConfiguredPath(
   stringValue(codex.socket_path),
   runtime.dataDir,
   join(runtime.dataDir, "runtime", "codex-app-server.sock"),
 );
+let socketPath = primarySocketPath;
+if (selectedProfile === deepseekProviderDefinition.profileName) {
+  const managedProvider = loadManagedModelProvider();
+  if (!managedProvider) {
+    throw new Error("DeepSeek 切换模式尚未配置，请先运行 codexc setup");
+  }
+  socketPath = providerAppServerSocketPath(primarySocketPath, managedProvider.provider);
+}
 const configuredBinary = stringValue(codex.binary) || "codex";
 const codexBinary = isAbsolute(configuredBinary)
   ? realpathSync(configuredBinary)
   : configuredBinary;
 const result = spawnSync(
   codexBinary,
-  ["--remote", `unix://${socketPath}`, "-C", workdir, ...passthrough],
+  [
+    "--remote",
+    `unix://${socketPath}`,
+    "-C",
+    workdir,
+    ...(selectedProfile === deepseekProviderDefinition.profileName
+      ? ["--profile", deepseekProviderDefinition.profileName]
+      : []),
+    ...passthrough,
+  ],
   { stdio: "inherit" },
 );
 if (result.error) {
@@ -47,4 +70,26 @@ function table(value) {
 
 function stringValue(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function removeDeepseekProfile(args) {
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (
+      (argument === "--profile" || argument === "-p")
+      && args[index + 1] === deepseekProviderDefinition.profileName
+    ) {
+      args.splice(index, 2);
+      return deepseekProviderDefinition.profileName;
+    }
+    if ([
+      `--profile=${deepseekProviderDefinition.profileName}`,
+      `-p=${deepseekProviderDefinition.profileName}`,
+      `-p${deepseekProviderDefinition.profileName}`,
+    ].includes(argument)) {
+      args.splice(index, 1);
+      return deepseekProviderDefinition.profileName;
+    }
+  }
+  return undefined;
 }

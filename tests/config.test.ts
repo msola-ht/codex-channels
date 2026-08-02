@@ -1,10 +1,12 @@
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -112,13 +114,92 @@ describe("Gateway config.toml", () => {
     expect(runtime.config.telegramAllowedUserIds).toEqual(new Set([123, 456]));
     expect(runtime.config.telegramMessageFormat).toBe("rich");
     expect(runtime.config.operationUpdateDisplay).toBe("compact");
-    expect(runtime.config.planUpdatesEnabled).toBe(false);
+    expect(runtime.config.planUpdatesEnabled).toBe(true);
+    expect(runtime.config.vision).toEqual({ mode: "disabled" });
     expect(runtime.config.credentialsDirectory).toBe(join(fixture.root, "credentials"));
     expect(runtime.config.codexSocketPath).toBe(join(fixture.root, "runtime/app-server.sock"));
     expect(runtime.config.stateDatabasePath).toBe(join(fixture.root, "data/gateway.sqlite3"));
     expect(runtime.config.workspaces).toEqual([
       { id: "main", name: "Main", cwd: realpathSync(fixture.workspace) },
     ]);
+  });
+
+  it("rejects the removed App Server vision mode", () => {
+    const appServer = createFixture({
+      vision: { mode: "openai_app_server", model: "gpt-vision" },
+    });
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: appServer.configPath,
+    })).toThrow(/vision\.mode/u);
+  });
+
+  it("loads external vision settings without reading API key contents into config", () => {
+    const external = createFixture({
+      vision: {
+        mode: "responses_api",
+        endpoint: "https://vision.example/v1/responses",
+        model: "vision-model",
+      },
+    });
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: external.configPath,
+    }).config.vision).toEqual({
+      mode: "responses_api",
+      endpoint: "https://vision.example/v1/responses",
+      model: "vision-model",
+    });
+  });
+
+  it("rejects insecure remote vision endpoints", () => {
+    const fixture = createFixture({
+      vision: {
+        mode: "responses_api",
+        endpoint: "http://vision.example/v1/responses",
+        model: "vision-model",
+      },
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow("必须使用 HTTPS");
+  });
+
+  it("rejects the removed manual DeepSeek proxy setting", () => {
+    const fixture = createFixture({
+      ds_proxy: { listen: "127.0.0.1:38473" },
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow(/ds_proxy/u);
+  });
+
+  it("rejects a config file readable by group or other users", () => {
+    const fixture = createFixture();
+    chmodSync(fixture.configPath, 0o640);
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow("config.toml 权限不安全");
+  });
+
+  it("rejects a config file reached through a symbolic link", () => {
+    const fixture = createFixture();
+    const linkedPath = join(fixture.root, "linked-config.toml");
+    symlinkSync(fixture.configPath, linkedPath);
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: linkedPath,
+    })).toThrow("config.toml 必须是普通文件且不能是符号链接");
+  });
+
+  it("rejects a config file in a group-writable directory", () => {
+    const fixture = createFixture();
+    chmodSync(fixture.root, 0o770);
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow("config.toml 父目录权限不安全");
   });
 
   it("materializes missing safe defaults after a successful load", () => {
@@ -169,7 +250,7 @@ describe("Gateway config.toml", () => {
     expect(persisted.approval).toEqual({ timeout_seconds: 300 });
     expect(persisted.display).toEqual({
       operation_updates: "compact",
-      plan_updates: false,
+      plan_updates: true,
     });
     expect(persisted.storage).toEqual({
       database_path: "data/gateway.sqlite3",
@@ -256,17 +337,17 @@ describe("Gateway config.toml", () => {
     },
   );
 
-  it("accepts explicit automatic plan display", () => {
+  it("preserves an explicit automatic plan display opt-out", () => {
     const fixture = createFixture({
       display: {
         operation_updates: "compact",
-        plan_updates: true,
+        plan_updates: false,
       },
     });
 
     expect(loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    }).config.planUpdatesEnabled).toBe(true);
+    }).config.planUpdatesEnabled).toBe(false);
   });
 
   it("rejects the removed boolean operation update setting", () => {
@@ -439,7 +520,7 @@ describe("Gateway config.toml", () => {
     })).toThrow(ConfigurationError);
   });
 
-  it("prefers the Telegram proxy and otherwise uses the network proxy", () => {
+  it("keeps the Telegram proxy explicit and resolves shared proxies separately", () => {
     const explicit = createFixture({
       telegram: {
         bot_token: "secret",
@@ -456,9 +537,11 @@ describe("Gateway config.toml", () => {
     expect(loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: explicit.configPath,
     }).config.telegramProxyUrl).toBe("http://127.0.0.1:7897/");
-    expect(loadRuntimeConfig({
+    const fallbackConfig = loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fallback.configPath,
-    }).config.telegramProxyUrl).toBe("http://127.0.0.1:7890/");
+    }).config;
+    expect(fallbackConfig.telegramProxyUrl).toBeUndefined();
+    expect(fallbackConfig.networkProxy.https).toBe("http://127.0.0.1:7890");
   });
 
   it("uses inherited proxy variables when network config is empty", () => {
@@ -469,7 +552,7 @@ describe("Gateway config.toml", () => {
       NO_PROXY: "localhost",
     }).config;
 
-    expect(config.telegramProxyUrl).toBe("http://127.0.0.1:8899/");
+    expect(config.telegramProxyUrl).toBeUndefined();
     expect(config.networkProxy).toMatchObject({
       https: "http://127.0.0.1:8899",
       no: "localhost",

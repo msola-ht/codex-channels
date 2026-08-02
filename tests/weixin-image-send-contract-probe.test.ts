@@ -133,7 +133,7 @@ describe("Weixin outbound image contract probe", () => {
       },
       base_info: {
         channel_version: "2.4.6",
-        bot_agent: "CodexConnect/0.145.0",
+        bot_agent: "CodexConnect/0.146.0",
       },
     });
   });
@@ -217,7 +217,7 @@ describe("Weixin outbound image contract probe", () => {
       aeskey: aesKey.toString("hex"),
       base_info: {
         channel_version: "2.4.6",
-        bot_agent: "CodexConnect/0.145.0",
+        bot_agent: "CodexConnect/0.146.0",
       },
     });
 
@@ -272,7 +272,7 @@ describe("Weixin outbound image contract probe", () => {
       },
       base_info: {
         channel_version: "2.4.6",
-        bot_agent: "CodexConnect/0.145.0",
+        bot_agent: "CodexConnect/0.146.0",
       },
     });
   });

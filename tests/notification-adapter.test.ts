@@ -139,6 +139,36 @@ describe("Notification adapter", () => {
     })).toEqual({ type: "thread.closed", threadId: "thread-1" });
   });
 
+  it("propagates the receipt timestamp for turn start and text deltas", () => {
+    expect(toConversationInputEvent({
+      method: "turn/started",
+      receivedAtMs: 123,
+      params: { threadId: "thread-1", turn: { id: "turn-1" } },
+    })).toEqual({
+      type: "turn.started",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      receivedAtMs: 123,
+    });
+    expect(toConversationInputEvent({
+      method: "item/agentMessage/delta",
+      receivedAtMs: 456,
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-1",
+        delta: "OK",
+      },
+    })).toEqual({
+      type: "item.agentMessage.delta",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      text: "OK",
+      receivedAtMs: 456,
+    });
+  });
+
   it("maps Goal updates and clears to stable Core events", () => {
     expect(toConversationInputEvent({
       method: "thread/goal/updated",
@@ -182,11 +212,11 @@ describe("Notification adapter", () => {
   it("maps account, MCP and warning notifications without generated response types", () => {
     expect(toConversationInputEvent({
       method: "account/updated",
-      params: { authMode: "chatgpt", planType: "pro" },
+      params: { authMode: "chatgpt", planType: "ent26" },
     })).toEqual({
       type: "account.updated",
       authMode: "chatgpt",
-      planType: "pro",
+      planType: "ent26",
     });
     expect(toConversationInputEvent({
       method: "mcpServer/startupStatus/updated",

@@ -1,4 +1,5 @@
 import type { Context } from "grammy";
+import type { InlineKeyboardMarkup } from "grammy/types";
 
 import type {
   ConversationCommandResult,
@@ -126,10 +127,17 @@ function renderOutcome(
   };
 }
 
-export async function replyTelegramPanel(context: Context, text: string): Promise<void> {
+export async function replyTelegramPanel(
+  context: Context,
+  text: string,
+  replyMarkup?: InlineKeyboardMarkup,
+): Promise<void> {
   for (const [index, chunk] of formatTelegramPanelChunks(text).entries()) {
     await context.reply(chunk, {
       parse_mode: "HTML",
+      ...(index === 0 && replyMarkup
+        ? { reply_markup: replyMarkup }
+        : {}),
       ...(index === 0 ? {} : { disable_notification: true }),
     });
   }

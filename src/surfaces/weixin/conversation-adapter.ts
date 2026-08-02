@@ -1,7 +1,7 @@
 import {
   ConversationCommandService,
   isConversationCommandName,
-  type ConversationService,
+  type ConversationUseCases,
 } from "../../application/index.js";
 import {
   UserFacingError,
@@ -15,6 +15,11 @@ import {
 } from "../output-copy.js";
 import { formatQuotedInput } from "../quoted-input.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
+import {
+  executeVisionCommand,
+  formatVisionCollectionReady,
+  formatVisionImagesCollected,
+} from "../vision-command.js";
 import {
   formatWeixinCommandText,
   renderWeixinCommandResult,
@@ -86,7 +91,7 @@ export class WeixinConversationAdapter {
   private nextSequence = 0;
 
   constructor(
-    private readonly conversations: ConversationService,
+    private readonly conversations: ConversationUseCases,
     private readonly outbox: Pick<WeixinOutbox, "notifyText">,
     private readonly images?: Pick<WeixinImagePort, "download">,
     private readonly inputOptions: {
@@ -101,7 +106,18 @@ export class WeixinConversationAdapter {
     this.commands = new ConversationCommandService(conversations);
     this.inputs = new SurfaceInputCoalescer(
       (target, input) => conversations.submit(target, input),
-      inputOptions,
+      {
+        ...inputOptions,
+        onVisionCollectionReady: (target, imageCount, maximumImages) => {
+          this.outbox.notifyText(
+            target,
+            formatWeixinCommandText(
+              formatVisionCollectionReady(imageCount, maximumImages),
+              { structuredFields: true },
+            ),
+          );
+        },
+      },
     );
   }
 
@@ -173,6 +189,9 @@ export class WeixinConversationAdapter {
           sequence,
           text: fileText,
         });
+        if (result.kind === "collected") {
+          throw new Error("文本文件不能进入图片收集");
+        }
         if (result.tail && result.submission.steered) {
           this.notify(
             message.target,
@@ -218,6 +237,17 @@ export class WeixinConversationAdapter {
               }),
           localImages,
         });
+        if (result.kind === "collected") {
+          this.notifyCommand(
+            message.target,
+            formatVisionImagesCollected(
+              result.imageCount,
+              result.maximumImages,
+              result.automatic,
+            ),
+          );
+          return;
+        }
         if (result.tail && result.submission.steered) {
           this.notify(
             message.target,
@@ -243,7 +273,7 @@ export class WeixinConversationAdapter {
         return;
       }
       if (
-        (command.name === "wx" || command.name === "weixin")
+        command.name === "wx"
         && command.argumentsText === "doctor"
         && this.inputOptions.doctor
       ) {
@@ -252,6 +282,19 @@ export class WeixinConversationAdapter {
           renderWeixinDoctor(
             await this.inputOptions.doctor.inspect(message.target),
             this.inputOptions.now?.() ?? Date.now(),
+          ),
+        );
+        return;
+      }
+      if (command.name === "vision") {
+        await this.inputs.flushPending(message.target, message.actorId);
+        this.notifyCommand(
+          message.target,
+          await executeVisionCommand(
+            this.inputs,
+            message.target,
+            message.actorId,
+            command.argumentsText,
           ),
         );
         return;

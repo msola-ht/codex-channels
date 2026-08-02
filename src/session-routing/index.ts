@@ -8,6 +8,7 @@ export {
   type ThreadLifecyclePort,
   type ThreadQueryOptions,
   type ThreadSession,
+  type ThreadStartOptions,
   type ThreadSnapshot,
   type ThreadSource,
   type ThreadStatus,

@@ -45,10 +45,11 @@ function createService(settings?: {
   model: string;
   effort: string | null;
   serviceTier: string | null;
-}): ModelSelectionService {
+}, availableModels: ModelOption[] = models): ModelSelectionService {
   const codex = {
-    listModels: async () => models,
+    listModels: async () => availableModels,
     writeDefaultFastMode: async () => undefined,
+    readDefaultServiceTier: async () => "default",
   } satisfies ModelSelectionPort;
   let currentSettings = settings;
   const router = {
@@ -73,6 +74,27 @@ describe("ModelSelectionService", () => {
 
     await expect(service.requireInputModality(target, "audio"))
       .rejects.toThrow("当前模型 gpt-main 不支持语音输入，请发送文字或图片");
+  });
+
+  it("explains how to continue when the current model lacks image input", async () => {
+    const service = createService({
+      model: "deepseek-v4-flash",
+      effort: "high",
+      serviceTier: "default",
+    }, [model(
+        "deepseek-v4-flash",
+        ["high"],
+        "high",
+        true,
+        false,
+        "priority",
+        ["text"],
+      )]);
+
+    await expect(service.requireInputModality(target, "image"))
+      .rejects.toThrow(
+        "当前模型 deepseek-v4-flash 不支持图片输入，请发送文字或切换支持图片的模型",
+      );
   });
 
   it("uses the App Server thread settings as the current selection", async () => {
@@ -133,6 +155,7 @@ describe("ModelSelectionService", () => {
     const codex = {
       listModels: async () => models,
       writeDefaultFastMode,
+      readDefaultServiceTier: async () => "default",
     } satisfies ModelSelectionPort;
     const router = {
       current: () => ({
@@ -189,6 +212,32 @@ describe("ModelSelectionService", () => {
       .rejects.toThrow("当前模型不支持 Fast 模式");
   });
 
+  it("does not change the OpenAI Fast default from a DeepSeek conversation", async () => {
+    const writeDefaultFastMode = vi.fn().mockResolvedValue(undefined);
+    const deepseek = {
+      ...model("deepseek-v4-flash", ["high"], "high"),
+      provider: "deepseek",
+    };
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode,
+      readDefaultServiceTier: async () => "default",
+    } satisfies ModelSelectionPort;
+    const router = {
+      modelSettings: () => ({
+        model: "deepseek-v4-flash",
+        modelProvider: "deepseek",
+        effort: "high",
+        serviceTier: "default",
+      }),
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService(codex, router, undefined, [deepseek]);
+
+    await expect(service.selectFastMode(target, "off"))
+      .rejects.toThrow("当前模型不支持 Fast 模式");
+    expect(writeDefaultFastMode).not.toHaveBeenCalled();
+  });
+
   it("turns Fast mode off when switching to a model without that tier", async () => {
     const service = createService({ model: "gpt-main", effort: "medium", serviceTier: "priority" });
 
@@ -209,6 +258,7 @@ describe("ModelSelectionService", () => {
     const codex = {
       listModels: async () => tierModels,
       writeDefaultFastMode: async () => undefined,
+      readDefaultServiceTier: async () => "default",
     } satisfies ModelSelectionPort;
     const router = {
       modelSettings: () => ({
@@ -226,5 +276,143 @@ describe("ModelSelectionService", () => {
       effort: "medium",
       serviceTier: "fast",
     });
+  });
+
+  it("starts a new Thread when selecting a model from another provider", async () => {
+    const newSession = vi.fn().mockResolvedValue(undefined);
+    const fork = vi.fn().mockResolvedValue(undefined);
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultServiceTier: async () => "default",
+    } satisfies ModelSelectionPort;
+    const router = {
+      current: () => ({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }),
+      fork,
+      newSession,
+      modelSettings: () => ({
+        model: "gpt-main",
+        modelProvider: "openai",
+        effort: "low",
+        serviceTier: "default",
+      }),
+    } as unknown as SessionRouter;
+    const deepseek = {
+      ...model("deepseek-v4-flash", ["low", "high"], "high"),
+      provider: "deepseek",
+    };
+    const service = new ModelSelectionService(codex, router, undefined, [deepseek]);
+
+    const state = await service.selectModel(target, "deepseek-v4-flash");
+
+    expect(newSession).toHaveBeenCalledOnce();
+    expect(fork).not.toHaveBeenCalled();
+    expect(state).toMatchObject({
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+      effort: "high",
+      effortPending: true,
+      providerPending: true,
+    });
+    expect(service.turnOverrides(target)).toMatchObject({ effort: "high" });
+    expect(service.threadStartOptions(target)).toEqual({
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+    });
+  });
+
+  it("starts a new Thread for another provider when no Thread is bound", async () => {
+    const newSession = vi.fn().mockResolvedValue(undefined);
+    const fork = vi.fn().mockResolvedValue(undefined);
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultServiceTier: async () => "default",
+    } satisfies ModelSelectionPort;
+    const router = {
+      current: () => undefined,
+      fork,
+      newSession,
+      modelSettings: () => undefined,
+    } as unknown as SessionRouter;
+    const deepseek = {
+      ...model("deepseek-v4-flash", ["low", "high"], "high"),
+      provider: "deepseek",
+    };
+    const service = new ModelSelectionService(codex, router, undefined, [deepseek]);
+
+    await service.selectModel(target, "deepseek-v4-flash");
+
+    expect(newSession).toHaveBeenCalledOnce();
+    expect(fork).not.toHaveBeenCalled();
+  });
+
+  it("starts a clean OpenAI Thread when switching back from a third-party provider", async () => {
+    const newSession = vi.fn().mockResolvedValue(undefined);
+    const fork = vi.fn().mockResolvedValue(undefined);
+    const readDefaultServiceTier = vi.fn().mockResolvedValue("fast");
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultServiceTier,
+    } as unknown as ModelSelectionPort;
+    const router = {
+      current: () => ({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }),
+      fork,
+      newSession,
+      workspace: () => ({ id: "main", name: "main", cwd: "/workspace" }),
+      modelSettings: () => ({
+        model: "deepseek-v4-flash",
+        modelProvider: "deepseek",
+        effort: "high",
+        serviceTier: "default",
+      }),
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService(codex, router);
+
+    const state = await service.selectModel(target, "gpt-main");
+
+    expect(newSession).toHaveBeenCalledOnce();
+    expect(fork).not.toHaveBeenCalled();
+    expect(readDefaultServiceTier).toHaveBeenCalledWith("/workspace", "openai");
+    expect(state).toMatchObject({
+      model: "gpt-main",
+      serviceTier: "priority",
+      serviceTierPending: true,
+    });
+  });
+
+  it("shows but rejects an unavailable provider model", async () => {
+    const newSession = vi.fn().mockResolvedValue(undefined);
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultServiceTier: async () => "default",
+    } satisfies ModelSelectionPort;
+    const router = {
+      newSession,
+      modelSettings: () => ({
+        model: "gpt-main",
+        modelProvider: "openai",
+        effort: "medium",
+        serviceTier: "default",
+      }),
+    } as unknown as SessionRouter;
+    const pro = {
+      ...model("deepseek-v4-pro", ["high"], "high"),
+      provider: "deepseek",
+      available: false,
+      unavailableReason: "DeepSeek 官方暂未支持该模型接入 Codex",
+    };
+    const service = new ModelSelectionService(codex, router, undefined, [pro]);
+
+    await expect(service.state(target)).resolves.toMatchObject({
+      models: expect.arrayContaining([
+        expect.objectContaining({ model: "deepseek-v4-pro", available: false }),
+      ]),
+    });
+    await expect(service.selectModel(target, "deepseek-v4-pro"))
+      .rejects.toThrow("DeepSeek 官方暂未支持该模型接入 Codex");
+    expect(newSession).not.toHaveBeenCalled();
   });
 });

@@ -14,6 +14,7 @@ import {
   formatPercent,
   formatPlanType,
   formatRateLimitState,
+  formatRemainingRateLimitWindow,
   formatRateLimitWindow,
 } from "../src/surfaces/account-format.js";
 import { formatTurnInputAppended } from "../src/surfaces/input-copy.js";
@@ -68,6 +69,19 @@ describe("shared surface copy contract", () => {
     }
   });
 
+  it("reports unsupported model images before a Turn on every surface", () => {
+    const error = new UserFacingError(
+      "model.input.image.unsupported",
+      "当前模型 deepseek-v4-flash 不支持图片输入，请发送文字或切换支持图片的模型",
+      { model: "deepseek-v4-flash" },
+    );
+    for (const surface of ["Telegram", "飞书", "微信"] as const) {
+      expect(formatSurfaceUserFacingError(error, surface)).toBe(
+        "当前模型 deepseek-v4-flash 不支持图片输入，请发送文字或切换支持图片的模型",
+      );
+    }
+  });
+
   it("reports Plan and collaboration mode errors consistently on every surface", () => {
     const cases = [
       [
@@ -94,15 +108,35 @@ describe("shared surface copy contract", () => {
   });
 
   it("keeps account, quota, appended-input, and empty-response copy shared", () => {
+    expect(formatSurfaceUserFacingError(
+      new UserFacingError("provider.account.unavailable", "账户查询失败"),
+      "飞书",
+    )).toBe("当前提供商的账户查询失败，请检查配置或稍后重试");
     expect(formatPercent(12.34)).toBe("12.3%");
     expect(formatPlanType("self_serve_business_usage_based"))
       .toBe("Business（按量）");
+    expect(formatPlanType("ent26")).toBe("Enterprise");
     expect(formatRateLimitState(null)).toBe("正常");
     expect(formatRateLimitWindow({
       usedPercent: 12,
       windowDurationMins: 10_080,
       resetsAt: null,
     })).toBe("已使用 12% · 周期 7 天");
+    expect(formatRemainingRateLimitWindow({
+      usedPercent: 44,
+      windowDurationMins: 10_080,
+      resetsAt: null,
+    })).toBe("剩余 56% · 周期 7 天");
+    expect(formatRemainingRateLimitWindow({
+      usedPercent: 120,
+      windowDurationMins: null,
+      resetsAt: null,
+    })).toBe("剩余 0%");
+    expect(formatRemainingRateLimitWindow({
+      usedPercent: 44,
+      windowDurationMins: null,
+      resetsAt: new Date(2026, 7, 5, 12, 34).getTime() / 1_000,
+    })).toBe("剩余 56% · 重置 8月5日 12:34");
     expect(formatTurnInputAppended("text"))
       .toBe("已将补充要求追加到当前 Turn。");
     expect(formatTurnInputAppended("file"))
@@ -182,6 +216,7 @@ describe("shared surface copy contract", () => {
         preview: index === 0
           ? `第一行\n第二行 ${"长".repeat(60)}`
           : `会话 ${index + 1}`,
+        isPinned: false,
         status: { type: "idle" },
       })),
       currentThreadId: "thread-000000000001",
@@ -245,7 +280,7 @@ describe("shared surface copy contract", () => {
 
     const rendered = formatConversationStatus(status);
     expect(rendered).toContain(
-      "周限：已使用 12% · 周期 7 天",
+      "周限：剩余 88% · 周期 7 天",
     );
     expect(rendered).not.toContain("缓存写入");
   });
@@ -337,35 +372,43 @@ describe("shared surface copy contract", () => {
       {
         kind: "usage",
         result: {
-          summary: {
-            lifetimeTokens: 1_000_000,
-            peakDailyTokens: 100_000,
-            longestRunningTurnSec: 60,
-            currentStreakDays: 2,
-            longestStreakDays: 3,
+          kind: "token-usage",
+          provider: "openai",
+          usage: {
+            summary: {
+              lifetimeTokens: 1_000_000,
+              peakDailyTokens: 100_000,
+              longestRunningTurnSec: 60,
+              currentStreakDays: 2,
+              longestStreakDays: 3,
+            },
+            daily: [{ startDate: "2026-07-28", tokens: 100_000 }],
           },
-          daily: [{ startDate: "2026-07-28", tokens: 100_000 }],
         },
       },
       {
         kind: "limits",
         result: {
-          limits: [{
-            limitId: "codex",
-            limitName: "周限",
-            primary: {
-              usedPercent: 12,
-              windowDurationMins: 10_080,
-              resetsAt: null,
-            },
-            secondary: null,
-            credits: null,
-            individualLimit: null,
-            spendControlReached: false,
-            planType: "plus",
-            rateLimitReachedType: null,
-          }],
-          resetCreditsAvailable: null,
+          kind: "rate-limits",
+          provider: "openai",
+          limits: {
+            limits: [{
+              limitId: "codex",
+              limitName: "周限",
+              primary: {
+                usedPercent: 12,
+                windowDurationMins: 10_080,
+                resetsAt: null,
+              },
+              secondary: null,
+              credits: null,
+              individualLimit: null,
+              spendControlReached: false,
+              planType: "plus",
+              rateLimitReachedType: null,
+            }],
+            resetCreditsAvailable: null,
+          },
         },
       },
     ];

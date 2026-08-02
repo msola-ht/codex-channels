@@ -74,13 +74,19 @@ export function formatFastModeState(state: ModelSelectionState): string {
 }
 
 export function formatUsage(result: AccountUsage): string {
-  return formatConversationUsage({ kind: "usage", result });
+  return formatConversationUsage({
+    kind: "usage",
+    result: { kind: "token-usage", provider: "openai", usage: result },
+  });
 }
 
 export function formatLimits(
   result: AccountRateLimits,
 ): string {
-  return formatConversationLimits({ kind: "limits", result });
+  return formatConversationLimits({
+    kind: "limits",
+    result: { kind: "rate-limits", provider: "openai", limits: result },
+  });
 }
 
 export function formatStatus(status: ConversationStatus): string {
@@ -99,7 +105,7 @@ export function formatConfigurationChange(
 
 export function formatStartupNotification(
   workspaces: Workspace[],
-  status: Pick<ConversationStatus, "threadId" | "workspaceId" | "model" | "effort" | "serviceTier" | "modelPending" | "effortPending" | "fastModePending" | "collaborationMode" | "collaborationModePending" | "weeklyLimit" | "gitBranch">,
+  status: Pick<ConversationStatus, "threadId" | "workspaceId" | "model" | "modelProvider" | "effort" | "serviceTier" | "modelPending" | "effortPending" | "fastModePending" | "collaborationMode" | "collaborationModePending" | "weeklyLimit" | "gitBranch">,
   runtime: StartupRuntimeInfo,
 ): string {
   return renderTelegramLifecyclePresentation(

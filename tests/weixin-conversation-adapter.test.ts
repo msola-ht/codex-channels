@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   conversationCommandNames,
-  type ConversationService,
+  type ConversationUseCases,
 } from "../src/application/index.js";
 import type { ConversationTarget } from "../src/conversation-core/index.js";
 import {
@@ -96,7 +96,10 @@ describe("WeixinConversationAdapter", () => {
       turnId: "turn",
       steered: true,
     }));
-    const notifyText = vi.fn(() => true);
+    const notifyText = vi.fn<(
+      target: ConversationTarget,
+      text: string,
+    ) => boolean>(() => true);
     const download = vi.fn()
       .mockResolvedValueOnce({
         path: "/private/weixin/first.png",
@@ -145,7 +148,109 @@ describe("WeixinConversationAdapter", () => {
     );
   });
 
-  it("coalesces adjacent image messages into one submission", async () => {
+  it("applies /vision to the next Weixin image only", async () => {
+    const submit = vi.fn(async () => ({
+      threadId: "thread",
+      turnId: "turn",
+      steered: false,
+    }));
+    const notifyText = vi.fn<(
+      target: ConversationTarget,
+      text: string,
+    ) => boolean>(() => true);
+    const download = vi.fn().mockResolvedValue({
+      path: "/private/weixin/error.jpg",
+      mimeType: "image/jpeg" as const,
+      bytes: 9,
+    });
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({ submit }),
+      { notifyText },
+      { download },
+    );
+
+    await adapter.handle({ ...message, text: "/vision 提取全部错误文字" });
+    await adapter.handle({
+      target,
+      actorId: message.actorId,
+      kind: "image",
+      images: [{
+        fullUrl: "https://novac2c.cdn.weixin.qq.com/c2c/download?error",
+        imageAesKey: "00112233445566778899aabbccddeeff",
+      }],
+    });
+
+    expect(submit).toHaveBeenCalledWith(target, {
+      text: "提取全部错误文字",
+      localImages: [{ path: "/private/weixin/error.jpg" }],
+    });
+    expect(notifyText.mock.calls.some(([, text]) =>
+      text.includes("图片识别要求已记录")
+    )).toBe(true);
+  });
+
+  it("collects separate Weixin image messages after /vision begin", async () => {
+    const submit = vi.fn(async () => ({
+      threadId: "thread",
+      turnId: "turn",
+      steered: false,
+    }));
+    const notifyText = vi.fn<(
+      target: ConversationTarget,
+      text: string,
+    ) => boolean>(() => true);
+    const download = vi.fn()
+      .mockResolvedValueOnce({
+        path: "/private/weixin/first.jpg",
+        mimeType: "image/jpeg" as const,
+        bytes: 9,
+      })
+      .mockResolvedValueOnce({
+        path: "/private/weixin/second.jpg",
+        mimeType: "image/jpeg" as const,
+        bytes: 10,
+      });
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({ submit }),
+      { notifyText },
+      { download },
+    );
+
+    await adapter.handle({ ...message, text: "/vision begin 比较两张图片" });
+    await adapter.handle({
+      target,
+      actorId: message.actorId,
+      kind: "image",
+      images: [{ encryptedQueryParam: "first-private-query" }],
+    });
+    await adapter.handle({
+      target,
+      actorId: message.actorId,
+      kind: "image",
+      images: [{ encryptedQueryParam: "second-private-query" }],
+    });
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(notifyText.mock.calls.some(([, text]) =>
+      text.includes("进度：2/4 张")
+    )).toBe(true);
+
+    await adapter.handle({ ...message, text: "/vision done" });
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledWith(target, {
+      text: "比较两张图片",
+      localImages: [
+        { path: "/private/weixin/first.jpg" },
+        { path: "/private/weixin/second.jpg" },
+      ],
+    });
+    expect(notifyText.mock.calls.some(([, text]) =>
+      text.includes("图片已提交") && text.includes("数量：2 张")
+    )).toBe(true);
+  });
+
+  it("submits separate Weixin image messages without a quiet-window delay", async () => {
     vi.useFakeTimers();
     const submit = vi.fn(async () => ({
       threadId: "thread",
@@ -182,16 +287,16 @@ describe("WeixinConversationAdapter", () => {
       kind: "image",
       images: [{ encryptedQueryParam: "second-private-query" }],
     });
-    await vi.advanceTimersByTimeAsync(1_000);
     await Promise.all([first, second]);
 
-    expect(submit).toHaveBeenCalledTimes(1);
-    expect(submit).toHaveBeenCalledWith(target, {
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(submit).toHaveBeenNthCalledWith(1, target, {
       text: "比较这些图片",
-      localImages: [
-        { path: "/private/weixin/first.png" },
-        { path: "/private/weixin/second.jpg" },
-      ],
+      localImages: [{ path: "/private/weixin/first.png" }],
+    });
+    expect(submit).toHaveBeenNthCalledWith(2, target, {
+      text: "请查看这张图片并根据图片内容协助我。",
+      localImages: [{ path: "/private/weixin/second.jpg" }],
     });
     await adapter.close();
     vi.useRealTimers();
@@ -556,9 +661,8 @@ describe("WeixinConversationAdapter", () => {
     );
 
     await adapter.handle({ ...message, text: "/wx doctor" });
-    await adapter.handle({ ...message, text: "/weixin doctor" });
 
-    expect(inspect).toHaveBeenCalledTimes(2);
+    expect(inspect).toHaveBeenCalledTimes(1);
     expect(inspect).toHaveBeenCalledWith(target);
     expect(submit).not.toHaveBeenCalled();
     expect(notifyText).toHaveBeenCalledWith(
@@ -587,6 +691,35 @@ describe("WeixinConversationAdapter", () => {
     );
   });
 
+  it("invokes a numbered Skill with an explicit task", async () => {
+    const invokeSkill = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+      skillName: "systematic-debugging",
+    }));
+    const notifyText = vi.fn(() => true);
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({ invokeSkill }),
+      { notifyText },
+    );
+
+    await adapter.handle({
+      ...message,
+      text: "/skill 2 排查微信断线",
+    });
+
+    expect(invokeSkill).toHaveBeenCalledWith(
+      target,
+      "2",
+      "排查微信断线",
+    );
+    expect(notifyText).toHaveBeenCalledWith(
+      target,
+      expect.stringContaining("已使用 Skill 开始任务"),
+    );
+  });
+
   it("rejects unknown slash commands without submitting them to Codex", async () => {
     const submit = vi.fn();
     const notifyText = vi.fn(() => true);
@@ -595,9 +728,12 @@ describe("WeixinConversationAdapter", () => {
       { notifyText },
     );
 
-    await adapter.handle({ ...message, text: "/unknown value" });
+    for (const text of ["/unknown value", "/weixin doctor"]) {
+      await adapter.handle({ ...message, text });
+    }
 
     expect(submit).not.toHaveBeenCalled();
+    expect(notifyText).toHaveBeenCalledTimes(2);
     expect(notifyText).toHaveBeenCalledWith(
       target,
       "操作失败：不支持该微信命令，请发送 /help 查看可用命令。",
@@ -636,7 +772,7 @@ describe("WeixinConversationAdapter", () => {
 });
 
 function serviceFixture(
-  methods: Partial<Record<keyof ConversationService, unknown>>,
-): ConversationService {
-  return methods as unknown as ConversationService;
+  methods: Partial<Record<keyof ConversationUseCases, unknown>>,
+): ConversationUseCases {
+  return methods as ConversationUseCases;
 }

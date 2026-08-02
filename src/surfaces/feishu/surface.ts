@@ -1,6 +1,6 @@
 import type { Logger } from "pino";
 
-import type { ConversationService } from "../../application/index.js";
+import type { ConversationUseCases } from "../../application/index.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
 import type {
   ConversationActorRegistry,
@@ -67,6 +67,7 @@ import { renderFeishuConfigurationChange } from "./renderer.js";
 interface FeishuEventConnectionPort {
   start(): Promise<void>;
   stop(): Promise<void>;
+  resetAfterStartFailure?(): void;
 }
 
 interface FeishuSurfaceDependencies {
@@ -89,7 +90,7 @@ export interface FeishuStartupNotification {
 export interface FeishuSurfaceOptions {
   appId: string;
   appSecret: string;
-  service: ConversationService;
+  service: ConversationUseCases;
   access: SurfaceAccessPolicy;
   logger: Logger;
   uploadsDirectory: string;
@@ -288,7 +289,7 @@ export class FeishuSurface implements SurfaceAdapter {
       handle: (message) => this.adapter.handle(message),
       handleImageBatch: (messages) =>
         this.adapter.handleImageBatch(messages),
-      inputQuietWindowMs: 1_000,
+      inputQuietWindowMs: 0,
       handleError: (error) => {
         options.logger.warn(
           {
@@ -427,9 +428,7 @@ export class FeishuSurface implements SurfaceAdapter {
     try {
       await Promise.all([imagesStarting, audiosStarting, connectionStarting]);
     } catch (error) {
-      await this.connection.stop();
-      this.images.close();
-      this.audios.close();
+      this.connection.resetAfterStartFailure?.();
       throw error;
     }
     this.connectionReady = true;

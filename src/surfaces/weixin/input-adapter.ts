@@ -1,4 +1,4 @@
-import type { ConversationService } from "../../application/index.js";
+import type { ConversationUseCases } from "../../application/index.js";
 import {
   conversationTargetKey,
   type ConversationTarget,
@@ -56,7 +56,7 @@ export interface WeixinInputAdapterOptions {
   accountId: string;
   client: WeixinProtocolClient;
   cursorStore: WeixinUpdatesCursorStore;
-  service: ConversationService;
+  service: ConversationUseCases;
   outbox: Pick<WeixinOutbox, "notifyText">;
   access: SurfaceAccessPolicy;
   replyContexts: WeixinReplyContextStore;
@@ -106,7 +106,7 @@ export class WeixinInputAdapter {
       options.outbox,
       options.images,
       {
-        quietWindowMs: 1_000,
+        quietWindowMs: 0,
         pollingHealth: this.health,
         ...(options.doctor === undefined
           ? {}
@@ -148,11 +148,18 @@ export class WeixinInputAdapter {
     this.health.start();
     const task = this.monitor.run(controller.signal);
     this.runTask = task;
-    void task.catch((error: unknown) => {
-      if (!this.stopping) {
-        this.reportFatal(error);
-      }
-    });
+    void task
+      .catch((error: unknown) => {
+        if (!this.stopping) {
+          this.reportFatal(error);
+        }
+      })
+      .finally(() => {
+        if (this.runTask === task) {
+          this.runTask = undefined;
+          this.controller = undefined;
+        }
+      });
     return Promise.resolve();
   }
 

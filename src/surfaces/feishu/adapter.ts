@@ -4,7 +4,7 @@ import {
   isConversationCommandName,
   isFastServiceTier,
   type ConversationCommandResult,
-  type ConversationService,
+  type ConversationUseCases,
 } from "../../application/index.js";
 import {
   UserFacingError,
@@ -19,6 +19,11 @@ import {
 } from "../output-copy.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import { formatQuotedInput } from "../quoted-input.js";
+import {
+  executeVisionCommand,
+  formatVisionCollectionReady,
+  formatVisionImagesCollected,
+} from "../vision-command.js";
 
 import type {
   FeishuCommandCenter,
@@ -61,7 +66,7 @@ export class FeishuConversationAdapter {
   private nextInputSequence = 0;
 
   constructor(
-    private readonly conversations: ConversationService,
+    private readonly conversations: ConversationUseCases,
     private readonly outbox:
       & Pick<FeishuOutbox, "notifyMarkdown" | "notifyText">
       & Partial<Pick<
@@ -97,7 +102,15 @@ export class FeishuConversationAdapter {
     this.commands = new ConversationCommandService(conversations);
     this.inputs = new SurfaceInputCoalescer(
       (target, input) => conversations.submit(target, input),
-      inputOptions,
+      {
+        ...inputOptions,
+        onVisionCollectionReady: (target, imageCount, maximumImages) => {
+          this.outbox.notifyMarkdown(
+            target.conversationId,
+            formatVisionCollectionReady(imageCount, maximumImages),
+          );
+        },
+      },
     );
   }
 
@@ -145,12 +158,25 @@ export class FeishuConversationAdapter {
           );
           return;
         }
-        if (command.name === "fs" || command.name === "feishu") {
+        if (command.name === "fs") {
           await this.handleFeishuCommand(
             message.actorId,
             message.target.accountId,
             message.target.conversationId,
             command.argumentsText,
+          );
+          return;
+        }
+        if (command.name === "vision") {
+          await this.inputs.flushPending(message.target, message.actorId);
+          this.notifyMarkdown(
+            message.target.conversationId,
+            await executeVisionCommand(
+              this.inputs,
+              message.target,
+              message.actorId,
+              command.argumentsText,
+            ),
           );
           return;
         }
@@ -452,6 +478,12 @@ export class FeishuConversationAdapter {
       );
       throw error;
     }
+    if (result.kind === "collected") {
+      this.outbox.discardPendingTurnReplyTarget?.(
+        message.target.conversationId,
+      );
+      throw new Error("文本输入不能进入图片收集");
+    }
     if (!result.tail) {
       return;
     }
@@ -547,6 +579,7 @@ export class FeishuConversationAdapter {
         { maximumImages: String(maximumInboundImages) },
       );
     }
+    const replyMessage = messages[0]!;
     const prepared = await Promise.all(messages.map(async (message) => {
       const sequence = this.nextInputSequence;
       this.nextInputSequence += 1;
@@ -559,6 +592,7 @@ export class FeishuConversationAdapter {
         target: message.target,
         actorId: message.actorId,
         sequence,
+        aggregationKey: `feishu:${replyMessage.messageId}`,
         ...(currentText
           ? { text: formatQuotedInput(currentText, quotedText) }
           : quotedText === undefined
@@ -575,7 +609,6 @@ export class FeishuConversationAdapter {
         })),
       };
     }));
-    const replyMessage = messages[0]!;
     this.outbox.prepareTurnReplyTarget?.(
       replyMessage.target.conversationId,
       replyMessage.messageId,
@@ -591,7 +624,24 @@ export class FeishuConversationAdapter {
       );
       throw error;
     }
-    const tail = results.find((result) => result.tail);
+    const collected = results.filter((result) => result.kind === "collected");
+    const submitted = results.filter((result) => result.kind !== "collected");
+    if (collected.length > 0 && submitted.length === 0) {
+      this.outbox.discardPendingTurnReplyTarget?.(
+        replyMessage.target.conversationId,
+      );
+      const imageCount = Math.max(...collected.map((result) => result.imageCount));
+      this.notifyMarkdown(
+        replyMessage.target.conversationId,
+        formatVisionImagesCollected(
+          imageCount,
+          collected[0]!.maximumImages,
+          collected[0]!.automatic,
+        ),
+      );
+      return;
+    }
+    const tail = submitted.find((result) => result.tail);
     if (tail?.submission.steered) {
       this.outbox.discardPendingTurnReplyTarget?.(
         replyMessage.target.conversationId,
@@ -783,6 +833,7 @@ function renderCommandCenterChoices(
     if (result.sessions.length === 0) {
       return undefined;
     }
+    const backgroundThreadIds = new Set(result.backgroundThreadIds ?? []);
     return {
       title: "选择会话",
       description: "点击后切换到对应 Codex Thread。",
@@ -793,7 +844,7 @@ function renderCommandCenterChoices(
           input: "",
         },
         ...result.sessions.map((session) => ({
-          label: `${session.id === result.currentThreadId ? "✓ " : ""}${(session.name ?? session.preview) || "未命名"}`,
+          label: `${session.id === result.currentThreadId ? "✓ " : backgroundThreadIds.has(session.id) ? "后台 · " : ""}${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${session.model}` : ""}`,
           action: "resume" as const,
           input: session.id,
         })),
@@ -814,7 +865,7 @@ function renderCommandCenterChoices(
           input: "",
         },
         ...result.sessions.map((session) => ({
-          label: (session.name ?? session.preview) || "未命名",
+          label: `${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${session.model}` : ""}`,
           action: "unarchive" as const,
           input: session.id,
         })),
@@ -848,7 +899,7 @@ function renderCommandCenterChoices(
       title: "选择模型",
       description: `当前：${result.state.model}`,
       choices: result.state.models.map((model) => ({
-        label: `${model.model === result.state.model ? "✓ " : ""}${model.displayName}`,
+        label: `${model.model === result.state.model ? "✓ " : ""}${model.displayName}${model.available === false ? "（暂不可用）" : ""}`,
         action: "model",
         input: model.model,
       })),

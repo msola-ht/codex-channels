@@ -1,6 +1,6 @@
 import type { Logger } from "pino";
 
-import type { ConversationService } from "../application/index.js";
+import type { ConversationUseCases } from "../application/index.js";
 import type { ConfigChange, GatewayConfig } from "../config/index.js";
 import type { BindingStore } from "../storage/index.js";
 import type { SurfaceAdapter } from "../surfaces/index.js";
@@ -13,7 +13,7 @@ export interface SurfaceRuntimeModule {
 
 export interface SurfacePluginContext {
   config: GatewayConfig;
-  service: ConversationService;
+  service: ConversationUseCases;
   bindings: BindingStore;
   logger: Logger;
   gatewayVersion: string;

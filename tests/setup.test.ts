@@ -10,6 +10,7 @@ describe("Codex Connect setup", () => {
     const telegramSetup = vi.fn(async () => "telegram-configured");
     const feishuSetup = vi.fn();
     const weixinSetup = vi.fn();
+    const deepseekSetup = vi.fn();
     const intro = vi.fn();
     const select = vi.fn()
       .mockResolvedValueOnce("channels")
@@ -27,6 +28,7 @@ describe("Codex Connect setup", () => {
       telegramSetup,
       feishuSetup,
       weixinSetup,
+      deepseekSetup,
     });
 
     expect(result).toBe("telegram-configured");
@@ -35,9 +37,17 @@ describe("Codex Connect setup", () => {
       message: "选择设置类别",
       showInstructions: false,
       options: [{
+        value: "models",
+        label: "模型渠道",
+        hint: "配置 OpenAI 与 DeepSeek",
+      }, {
         value: "channels",
         label: "通讯渠道",
         hint: "配置外部消息入口",
+      }, {
+        value: "cancel",
+        label: "取消",
+        hint: "退出 Setup",
       }],
     });
     expect(select).toHaveBeenNthCalledWith(2, {
@@ -55,6 +65,10 @@ describe("Codex Connect setup", () => {
         value: "weixin",
         label: "微信",
         hint: "扫码连接与用户授权",
+      }, {
+        value: "back",
+        label: "返回",
+        hint: "返回设置类别",
       }],
     });
     expect(telegramSetup).toHaveBeenCalledWith({ input, output });
@@ -111,6 +125,111 @@ describe("Codex Connect setup", () => {
     expect(weixinSetup).toHaveBeenCalledOnce();
   });
 
+  it("selects the model provider setup category", async () => {
+    const input = {};
+    const output = {};
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("models")
+        .mockResolvedValueOnce("deepseek"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+    const deepseekSetup = vi.fn(async () => "deepseek-configured");
+
+    const result = await runSetup({
+      input,
+      output,
+      prompts,
+      telegramSetup: vi.fn(),
+      feishuSetup: vi.fn(),
+      weixinSetup: vi.fn(),
+      deepseekSetup,
+    });
+
+    expect(result).toBe("deepseek-configured");
+    expect(deepseekSetup).toHaveBeenCalledWith({ input, output, prompts, allowBack: true });
+  });
+
+  it("selects image recognition under the model channel category", async () => {
+    const visionSetup = vi.fn(async () => "vision-configured");
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("models")
+        .mockResolvedValueOnce("vision"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    await expect(runSetup({
+      input: {},
+      output: {},
+      prompts,
+      deepseekSetup: vi.fn(),
+      visionSetup,
+    })).resolves.toBe("vision-configured");
+
+    expect(visionSetup).toHaveBeenCalledWith({ input: {}, output: {}, prompts });
+  });
+
+  it("returns from the channel menu and can cancel at the category menu", async () => {
+    const cancel = vi.fn();
+    const select = vi.fn()
+      .mockResolvedValueOnce("channels")
+      .mockResolvedValueOnce("back")
+      .mockResolvedValueOnce("cancel");
+    const telegramSetup = vi.fn();
+
+    const result = await runSetup({
+      prompts: {
+        intro: vi.fn(),
+        select,
+        isCancel: () => false,
+        cancel,
+      },
+      telegramSetup,
+      feishuSetup: vi.fn(),
+      weixinSetup: vi.fn(),
+      deepseekSetup: vi.fn(),
+    });
+
+    expect(result).toBeUndefined();
+    expect(select).toHaveBeenCalledTimes(3);
+    expect(cancel).toHaveBeenCalledWith("Setup 已取消");
+    expect(telegramSetup).not.toHaveBeenCalled();
+  });
+
+  it("returns from the model menu to the category menu", async () => {
+    const cancel = vi.fn();
+    const deepseekSetup = vi.fn(async () => ({ action: "back" }));
+    const select = vi.fn()
+      .mockResolvedValueOnce("models")
+      .mockResolvedValueOnce("deepseek")
+      .mockResolvedValueOnce("cancel");
+
+    const result = await runSetup({
+      input: {},
+      output: {},
+      prompts: {
+        intro: vi.fn(),
+        select,
+        isCancel: () => false,
+        cancel,
+      },
+      telegramSetup: vi.fn(),
+      feishuSetup: vi.fn(),
+      weixinSetup: vi.fn(),
+      deepseekSetup,
+    });
+
+    expect(result).toBeUndefined();
+    expect(deepseekSetup).toHaveBeenCalledWith(expect.objectContaining({ allowBack: true }));
+    expect(select).toHaveBeenCalledTimes(3);
+    expect(cancel).toHaveBeenCalledWith("Setup 已取消");
+  });
+
   it("cancels without starting a module setup", async () => {
     const telegramSetup = vi.fn();
     const feishuSetup = vi.fn();
@@ -135,14 +254,15 @@ describe("Codex Connect setup", () => {
     expect(feishuSetup).not.toHaveBeenCalled();
   });
 
-  it("cancels from the channel menu without starting Telegram setup", async () => {
+  it("returns from the channel menu when the prompt is cancelled", async () => {
     const telegramSetup = vi.fn();
     const feishuSetup = vi.fn();
     const weixinSetup = vi.fn();
     const cancel = vi.fn();
     const select = vi.fn()
       .mockResolvedValueOnce("channels")
-      .mockResolvedValueOnce(Symbol("cancel"));
+      .mockResolvedValueOnce(Symbol("cancel"))
+      .mockResolvedValueOnce("cancel");
 
     const result = await runSetup({
       prompts: {
@@ -158,6 +278,7 @@ describe("Codex Connect setup", () => {
 
     expect(result).toBeUndefined();
     expect(cancel).toHaveBeenCalledWith("Setup 已取消");
+    expect(select).toHaveBeenCalledTimes(3);
     expect(telegramSetup).not.toHaveBeenCalled();
     expect(feishuSetup).not.toHaveBeenCalled();
   });

@@ -44,8 +44,14 @@ export type InteractionRequest =
       turnId: string | null;
       title: string;
       message: string;
-      mode: "form" | "url";
+      mode: "form" | "tool-approval" | "url";
       url?: string;
+      toolApproval?: {
+        toolTitle: string | null;
+        detail: string;
+        allowSession: boolean;
+        allowAlways: boolean;
+      };
       expiresInMs: number;
     };
 
@@ -59,7 +65,12 @@ export type InteractionDecision =
     }
   | { type: "approval"; approved: false }
   | { type: "user-input"; answers: Record<string, string[]> }
-  | { type: "elicitation"; action: "accept" | "decline" | "cancel"; content: unknown };
+  | {
+      type: "elicitation";
+      action: "accept" | "decline" | "cancel";
+      content: unknown;
+      scope?: "once" | "session" | "always";
+    };
 
 export interface InteractionPort {
   request(target: ConversationTarget, request: InteractionRequest): Promise<InteractionDecision>;

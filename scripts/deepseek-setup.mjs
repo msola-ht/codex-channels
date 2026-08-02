@@ -1,0 +1,665 @@
+import { createHash, randomBytes } from "node:crypto";
+import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+
+import { parse, stringify } from "smol-toml";
+import * as clackPrompts from "@clack/prompts";
+
+import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
+
+export const deepseekSetupScriptUrl =
+  "https://cdn.deepseek.com/api-docs/codex-deepseek-setup.sh";
+const providerId = deepseekProviderDefinition.id;
+const supportedModel = deepseekProviderDefinition.defaultModel;
+const maximumScriptBytes = 2 * 1024 * 1024;
+const defaultDownloadAttempts = 3;
+const defaultDownloadTimeoutMs = 30_000;
+
+export async function runDeepseekSetup({
+  allowBack = false,
+  environment = process.env,
+  output = process.stdout,
+  fetchImpl = globalThis.fetch,
+  prompter,
+  prompts = clackPrompts,
+} = {}) {
+  const prompt = prompter ?? createHiddenPrompter(prompts, { allowBack });
+  try {
+    output.write("\nCodex Connect DeepSeek Setup\n\n");
+    output.write("1. OpenAI + DeepSeek 切换模式（保留 OpenAI 默认）\n");
+    output.write("2. 仅 DeepSeek 固定模式（原生 Codex 也默认使用 DeepSeek）\n");
+    output.write("3. 恢复安装前的 Codex 配置\n");
+    if (allowBack) output.write("4. 返回上一级\n");
+    const choice = await askChoice(
+      prompt,
+      allowBack ? "请选择 [1-4]" : "请选择 [1-3]",
+      allowBack ? 4 : 3,
+    );
+    if (choice === "4") return { action: "back" };
+    const codexHome = resolve(environment.CODEX_HOME?.trim() || join(homedir(), ".codex"));
+    const configPath = join(codexHome, "config.toml");
+    const profilePath = join(codexHome, deepseekProviderDefinition.profileFileName);
+    const gatewayProfilePath = join(
+      codexHome,
+      deepseekProviderDefinition.managedMarkerFileName,
+    );
+    const catalogPath = join(codexHome, deepseekProviderDefinition.catalogFileName);
+    const manifestPath = join(
+      codexHome,
+      deepseekProviderDefinition.catalogManifestFileName,
+    );
+    const backupDirectory = join(codexHome, deepseekProviderDefinition.backupDirectoryName);
+    const backupPath = join(backupDirectory, "config.toml");
+    const profileBackupPath = join(
+      backupDirectory,
+      deepseekProviderDefinition.profileFileName,
+    );
+    const gatewayProfileBackupPath = join(
+      backupDirectory,
+      deepseekProviderDefinition.managedMarkerFileName,
+    );
+    const backupStatePath = join(backupDirectory, "state.json");
+    if (choice === "3") {
+      output.write("恢复会覆盖 DeepSeek 安装后对 ~/.codex/config.toml 做的其他修改。\n");
+      if (!await prompt.confirm("确认恢复首次安装前的配置？", false)) {
+        output.write("已取消，未修改任何文件。\n");
+        return undefined;
+      }
+      return restoreInitialConfig({
+        configPath,
+        profilePath,
+        gatewayProfilePath,
+        catalogPath,
+        manifestPath,
+        backupPath,
+        profileBackupPath,
+        gatewayProfileBackupPath,
+        backupStatePath,
+        output,
+      });
+    }
+    const mode = choice === "1" ? "switching" : "exclusive";
+    if (mode === "switching") {
+      output.write(
+        "\n切换模式不修改 ~/.codex/config.toml；DeepSeek 模型、Provider 与 API Key 全部保存在独立 Profile。\n",
+      );
+    }
+    if (mode === "exclusive") {
+      output.write("\n固定模式会修改 ~/.codex/config.toml，并将 DeepSeek API Key 写入该 0600 文件。\n");
+      if (!await prompt.confirm("确认继续并先备份原配置？", false)) {
+        output.write("已取消，未修改任何文件。\n");
+        return undefined;
+      }
+    }
+    const apiKey = await askApiKey(prompt);
+
+    const downloaded = await downloadDeepseekCatalog(fetchImpl);
+    await mkdir(codexHome, { recursive: true, mode: 0o700 });
+    await preserveInitialConfig({
+      configPath,
+      profilePath,
+      gatewayProfilePath,
+      backupPath,
+      profileBackupPath,
+      gatewayProfileBackupPath,
+      backupStatePath,
+    });
+    const { configContent, profileContent, gatewayProfileContent } = await buildCodexConfig({
+      configPath,
+      gatewayProfilePath,
+      gatewayProfileBackupPath,
+      backupPath,
+      backupStatePath,
+      catalogPath,
+      apiKey,
+      mode,
+    });
+    await atomicWrite(catalogPath, `${JSON.stringify(downloaded.catalog, null, 2)}\n`);
+    await atomicWrite(manifestPath, `${JSON.stringify({
+      source: deepseekSetupScriptUrl,
+      sha256: downloaded.sha256,
+      downloadedAt: new Date().toISOString(),
+    }, null, 2)}\n`);
+    await replaceOptionalFile(configPath, configContent);
+    await replaceOptionalFile(profilePath, profileContent);
+    await replaceOptionalFile(gatewayProfilePath, gatewayProfileContent);
+    await setBackupRestoredState(backupStatePath, false);
+    if (mode === "switching") {
+      output.write(`\nOpenAI 基础配置保持不变：${configPath}\n`);
+      output.write(`DeepSeek CLI Profile 已保存：${profilePath}\n`);
+    } else {
+      output.write(`\nDeepSeek 固定配置已保存：${configPath}\n`);
+    }
+    output.write(`模型目录已从官方脚本下载：${catalogPath}\n`);
+    output.write(mode === "switching"
+      ? "原生 Codex 使用 OpenAI：codex；使用 DeepSeek：codex --profile deepseek\n共享 TUI：codexc remote；DeepSeek 共享 TUI：codexc remote --profile deepseek\n"
+      : `原生 Codex 和 Gateway 将默认使用 ${supportedModel}。\n`);
+    output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
+    return {
+      mode,
+      configPath,
+      profilePath,
+      gatewayProfilePath,
+      catalogPath,
+      backupPath,
+    };
+  } finally {
+    prompt.close();
+  }
+}
+
+export async function downloadDeepseekCatalog(
+  fetchImpl,
+  {
+    attempts = defaultDownloadAttempts,
+    sleep = defaultSleep,
+    timeoutMs = defaultDownloadTimeoutMs,
+  } = {},
+) {
+  if (typeof fetchImpl !== "function") {
+    throw new Error("当前 Node.js 环境不支持 fetch");
+  }
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const signal = globalThis.AbortSignal.timeout(timeoutMs);
+    let response;
+    try {
+      response = await fetchImpl(deepseekSetupScriptUrl, {
+        headers: { accept: "text/plain" },
+        redirect: "follow",
+        signal,
+      });
+    } catch {
+      lastError = signal.aborted
+        ? new Error("DeepSeek 官方脚本下载超时")
+        : new Error("DeepSeek 官方脚本网络请求失败");
+      if (attempt < attempts) {
+        await sleep(attempt * 1_000);
+        continue;
+      }
+      throw lastError;
+    }
+    if (!response.ok) {
+      lastError = new Error(`DeepSeek 官方脚本下载失败：HTTP ${response.status}`);
+      if (!isRetryableStatus(response.status) || attempt === attempts) throw lastError;
+      await sleep(attempt * 1_000);
+      continue;
+    }
+    if (response.url && response.url !== deepseekSetupScriptUrl) {
+      throw new Error("DeepSeek 官方脚本下载发生了未允许的重定向");
+    }
+    let script;
+    try {
+      script = await readLimitedResponseText(response, maximumScriptBytes);
+    } catch (error) {
+      if (error instanceof Error && error.message === "DeepSeek 官方脚本超过允许大小") {
+        throw error;
+      }
+      lastError = signal.aborted
+        ? new Error("DeepSeek 官方脚本下载超时")
+        : new Error("DeepSeek 官方脚本响应读取失败");
+      if (attempt < attempts) {
+        await sleep(attempt * 1_000);
+        continue;
+      }
+      throw lastError;
+    }
+    const catalog = extractDeepseekCatalog(script);
+    return {
+      catalog,
+      sha256: createHash("sha256").update(script).digest("hex"),
+    };
+  }
+  throw lastError ?? new Error("DeepSeek 官方脚本下载失败");
+}
+
+async function readLimitedResponseText(response, maximumBytes) {
+  const contentLength = response.headers.get("content-length");
+  if (contentLength !== null && Number(contentLength) > maximumBytes) {
+    throw new Error("DeepSeek 官方脚本超过允许大小");
+  }
+  if (!response.body) {
+    throw new Error("DeepSeek 官方脚本响应缺少正文");
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > maximumBytes) {
+      await reader.cancel();
+      throw new Error("DeepSeek 官方脚本超过允许大小");
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
+}
+
+function isRetryableStatus(status) {
+  return status === 429 || (status >= 500 && status <= 599);
+}
+
+function defaultSleep(milliseconds) {
+  return new Promise((resolveSleep) => {
+    setTimeout(resolveSleep, milliseconds);
+  });
+}
+
+export function extractDeepseekCatalog(script) {
+  const matches = [...script.matchAll(
+    /<<'CODEX_MODELS_JSON'\s*\r?\n([\s\S]*?)\r?\nCODEX_MODELS_JSON(?:\r?\n|$)/gu,
+  )];
+  if (matches.length !== 1) {
+    throw new Error("DeepSeek 官方脚本中的模型目录标记无效");
+  }
+  let catalog;
+  try {
+    catalog = JSON.parse(matches[0][1]);
+  } catch {
+    throw new Error("DeepSeek 官方模型目录不是有效 JSON");
+  }
+  if (!catalog || !Array.isArray(catalog.models)) {
+    throw new Error("DeepSeek 官方模型目录缺少 models");
+  }
+  const flash = catalog.models.find((model) => model?.slug === supportedModel);
+  if (!flash || typeof flash !== "object") {
+    throw new Error(`DeepSeek 官方模型目录缺少 ${supportedModel}`);
+  }
+  return catalog;
+}
+
+async function buildCodexConfig({
+  configPath,
+  gatewayProfilePath,
+  gatewayProfileBackupPath,
+  backupPath,
+  backupStatePath,
+  catalogPath,
+  apiKey,
+  mode,
+}) {
+  let initialDocument = {};
+  let originalContent;
+  let backupState;
+  try {
+    backupState = JSON.parse(await readFile(backupStatePath, "utf8"));
+    if (backupState.originalConfigExisted === true) {
+      originalContent = await readFile(backupPath, "utf8");
+      initialDocument = parse(originalContent);
+    } else if (backupState.originalConfigExisted !== false) {
+      throw new Error("invalid backup state");
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      // TOML 解析错误可能包含带 API Key 的原始配置行，不能作为 cause 暴露。
+      // eslint-disable-next-line preserve-caught-error
+      throw new Error("现有 Codex config.toml 无法读取或解析，未修改配置");
+    }
+  }
+  const current = await readCurrentConfig(configPath);
+  let document = current.document;
+  let configContent = current.content;
+  const managedMode = await readCurrentManagedMode(
+    gatewayProfilePath,
+    backupState?.originalGatewayProfileExisted === true
+      ? gatewayProfileBackupPath
+      : undefined,
+  );
+  const legacyManagedLayout = managedMode === undefined
+    && backupState !== undefined
+    && backupState.restored !== true
+    && hasDeepseekBaseConfig(document);
+  const provider = {
+    name: providerId,
+    base_url: deepseekProviderDefinition.baseUrl,
+    wire_api: deepseekProviderDefinition.wireApi,
+    requires_openai_auth: false,
+    experimental_bearer_token: apiKey,
+  };
+  const providerLayer = {
+    model_providers: { [providerId]: provider },
+  };
+  const profile = {
+    model: supportedModel,
+    model_provider: providerId,
+    model_reasoning_effort: deepseekProviderDefinition.defaultReasoningEffort,
+    model_catalog_json: catalogPath,
+    ...providerLayer,
+  };
+  if (mode === "switching") {
+    if (managedMode === "exclusive" || legacyManagedLayout) {
+      document = restoreManagedBaseConfig(document, initialDocument);
+      configContent = Object.keys(document).length === 0 ? undefined : stringify(document);
+    }
+    if (
+      document.profile === providerId
+      || table(document.profiles)[providerId] !== undefined
+    ) {
+      throw new Error(
+        "安装前的 Codex config.toml 已占用旧式 deepseek profile；请先手工迁移或改名",
+      );
+    }
+    if (table(document.model_providers)[providerId] !== undefined) {
+      throw new Error(
+        "安装前的 Codex config.toml 已存在 deepseek Provider；请先手工移除或改名",
+      );
+    }
+    return {
+      configContent,
+      profileContent: stringify(profile),
+      gatewayProfileContent: stringify({
+        version: 1,
+        provider: providerId,
+        mode: "switching",
+      }),
+    };
+  }
+
+  document.model_providers = table(document.model_providers);
+  document.model_providers[providerId] = provider;
+  if (document.profile === providerId) {
+    delete document.profile;
+  }
+  const profiles = table(document.profiles);
+  delete profiles[providerId];
+  if (Object.keys(profiles).length === 0) {
+    delete document.profiles;
+  } else {
+    document.profiles = profiles;
+  }
+  Object.assign(document, {
+    model: supportedModel,
+    model_provider: providerId,
+    model_reasoning_effort: deepseekProviderDefinition.defaultReasoningEffort,
+    model_catalog_json: catalogPath,
+  });
+  delete document.preferred_auth_method;
+  delete document.forced_login_method;
+  return {
+    configContent: stringify(document),
+    profileContent: undefined,
+    gatewayProfileContent: stringify({
+      version: 1,
+      provider: providerId,
+      mode: "exclusive",
+    }),
+  };
+}
+
+async function readCurrentConfig(configPath) {
+  try {
+    const content = await readFile(configPath, "utf8");
+    return { content, document: parse(content) };
+  } catch (error) {
+    if (error.code === "ENOENT") return { content: undefined, document: {} };
+    // TOML 解析错误可能包含带 API Key 的原始配置行，不能作为 cause 暴露。
+    // eslint-disable-next-line preserve-caught-error
+    throw new Error("现有 Codex config.toml 无法读取或解析，未修改配置");
+  }
+}
+
+async function readCurrentManagedMode(gatewayProfilePath, originalGatewayProfilePath) {
+  try {
+    const content = await readFile(gatewayProfilePath, "utf8");
+    if (
+      originalGatewayProfilePath !== undefined
+      && content === await readFile(originalGatewayProfilePath, "utf8")
+    ) {
+      return undefined;
+    }
+    const marker = parse(content);
+    if (
+      marker.version !== 1
+      || marker.provider !== providerId
+      || ![undefined, "switching", "exclusive"].includes(marker.mode)
+    ) {
+      throw new Error("invalid marker");
+    }
+    return marker.mode ?? "switching";
+  } catch (error) {
+    if (error.code === "ENOENT") return undefined;
+    // 原同名文件可能包含用户私有配置，不能把解析内容作为 cause 暴露。
+    // eslint-disable-next-line preserve-caught-error
+    throw new Error("Codex Connect DeepSeek 管理标记无效，未修改配置");
+  }
+}
+
+function hasDeepseekBaseConfig(document) {
+  return document.profile === providerId
+    || table(document.profiles)[providerId] !== undefined
+    || table(document.model_providers)[providerId] !== undefined;
+}
+
+function restoreManagedBaseConfig(current, initial) {
+  const restored = { ...current };
+  for (const key of [
+    "model",
+    "model_provider",
+    "model_reasoning_effort",
+    "model_catalog_json",
+    "profile",
+    "preferred_auth_method",
+    "forced_login_method",
+  ]) {
+    restoreProperty(restored, initial, key);
+  }
+  restoreTableEntry(restored, initial, "model_providers", providerId);
+  restoreTableEntry(restored, initial, "profiles", providerId);
+  return restored;
+}
+
+function restoreProperty(target, source, key) {
+  if (Object.hasOwn(source, key)) {
+    target[key] = source[key];
+  } else {
+    delete target[key];
+  }
+}
+
+function restoreTableEntry(target, source, tableName, key) {
+  const targetTable = { ...table(target[tableName]) };
+  const sourceTable = table(source[tableName]);
+  if (Object.hasOwn(sourceTable, key)) {
+    targetTable[key] = sourceTable[key];
+  } else {
+    delete targetTable[key];
+  }
+  if (Object.keys(targetTable).length === 0) {
+    delete target[tableName];
+  } else {
+    target[tableName] = targetTable;
+  }
+}
+
+async function preserveInitialConfig({
+  configPath,
+  profilePath,
+  gatewayProfilePath,
+  backupPath,
+  profileBackupPath,
+  gatewayProfileBackupPath,
+  backupStatePath,
+}) {
+  let state;
+  try {
+    state = JSON.parse(await readFile(backupStatePath, "utf8"));
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  if (state === undefined) {
+    state = {};
+    state.originalConfigExisted = await backupIfPresent(configPath, backupPath);
+  } else if (typeof state.originalConfigExisted !== "boolean") {
+    throw new Error("Codex 初始配置备份状态无效");
+  }
+  if (typeof state.originalProfileExisted !== "boolean") {
+    state.originalProfileExisted = await backupIfPresent(profilePath, profileBackupPath);
+  }
+  if (typeof state.originalGatewayProfileExisted !== "boolean") {
+    state.originalGatewayProfileExisted = await backupIfPresent(
+      gatewayProfilePath,
+      gatewayProfileBackupPath,
+    );
+  }
+  await atomicWrite(backupStatePath, `${JSON.stringify(state)}\n`);
+}
+
+async function setBackupRestoredState(backupStatePath, restored) {
+  let state;
+  try {
+    state = JSON.parse(await readFile(backupStatePath, "utf8"));
+  } catch {
+    throw new Error("Codex 初始配置备份状态无效");
+  }
+  if (typeof state.originalConfigExisted !== "boolean") {
+    throw new Error("Codex 初始配置备份状态无效");
+  }
+  state.restored = restored;
+  await atomicWrite(backupStatePath, `${JSON.stringify(state)}\n`);
+}
+
+async function backupIfPresent(sourcePath, backupPath) {
+  try {
+    await atomicWrite(backupPath, await readFile(sourcePath));
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function restoreInitialConfig({
+  configPath,
+  profilePath,
+  gatewayProfilePath,
+  catalogPath,
+  manifestPath,
+  backupPath,
+  profileBackupPath,
+  gatewayProfileBackupPath,
+  backupStatePath,
+  output,
+}) {
+  let state;
+  try {
+    state = JSON.parse(await readFile(backupStatePath, "utf8"));
+  } catch {
+    throw new Error("未找到可恢复的 Codex 初始配置");
+  }
+  if (state.originalConfigExisted === true) {
+    await atomicWrite(configPath, await readFile(backupPath));
+  } else if (state.originalConfigExisted === false) {
+    await removeFile(configPath);
+  } else {
+    throw new Error("Codex 初始配置备份状态无效");
+  }
+  if (state.originalProfileExisted === true) {
+    await atomicWrite(profilePath, await readFile(profileBackupPath));
+  } else if (state.originalProfileExisted === false) {
+    await removeFile(profilePath);
+  }
+  if (state.originalGatewayProfileExisted === true) {
+    await atomicWrite(gatewayProfilePath, await readFile(gatewayProfileBackupPath));
+  } else if (state.originalGatewayProfileExisted === false) {
+    await removeFile(gatewayProfilePath);
+  }
+  await removeFile(catalogPath);
+  await removeFile(manifestPath);
+  await setBackupRestoredState(backupStatePath, true);
+  output.write("已恢复安装前的 Codex 配置；备份目录保留以便审计。\n");
+  output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
+  return {
+    mode: "restored",
+    configPath,
+    profilePath,
+    gatewayProfilePath,
+    catalogPath,
+    backupPath,
+  };
+}
+
+async function replaceOptionalFile(path, content) {
+  if (content === undefined) {
+    await removeFile(path);
+    return;
+  }
+  try {
+    if (await readFile(path, "utf8") === content) return;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  await atomicWrite(path, content);
+}
+
+async function removeFile(path) {
+  try {
+    await unlink(path);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+}
+
+async function atomicWrite(path, content) {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const temporaryPath = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+  await writeFile(temporaryPath, content, { mode: 0o600, flag: "wx" });
+  await chmod(temporaryPath, 0o600);
+  await rename(temporaryPath, path);
+}
+
+async function askChoice(prompt, label, maximum) {
+  while (true) {
+    const choice = await prompt.ask(label);
+    if (new RegExp(`^[1-${maximum}]$`, "u").test(choice)) return choice;
+  }
+}
+
+async function askApiKey(prompt) {
+  while (true) {
+    const apiKey = await prompt.secret("DeepSeek API Key（以 sk- 开头）");
+    if (/^sk-[^\s"]+$/u.test(apiKey)) return apiKey;
+  }
+}
+
+function table(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function createHiddenPrompter(prompts, { allowBack }) {
+  return {
+    ask: async () => {
+      const value = await prompts.select({
+        message: "选择 DeepSeek 安装模式",
+        options: [
+          { value: "1", label: "OpenAI + DeepSeek 切换模式" },
+          { value: "2", label: "仅 DeepSeek 固定模式" },
+          { value: "3", label: "恢复安装前配置" },
+          ...(allowBack ? [{ value: "4", label: "返回上一级" }] : []),
+        ],
+      });
+      return prompts.isCancel(value) && allowBack
+        ? "4"
+        : requirePromptValue(prompts, value);
+    },
+    secret: async (label) => requirePromptValue(
+      prompts,
+      await prompts.password({ message: label }),
+    ),
+    confirm: async (label, initialValue) => requirePromptValue(
+      prompts,
+      await prompts.confirm({ message: label, initialValue }),
+    ),
+    close: () => undefined,
+  };
+}
+
+function requirePromptValue(prompts, value) {
+  if (prompts.isCancel(value)) {
+    throw new Error("DeepSeek Setup 已取消");
+  }
+  return value;
+}

@@ -6,11 +6,24 @@ import {
   checkProjectRulesAtRoot,
   initializeProjectRulesAtRoot,
 } from "../../runtime/project-rules.mjs";
+import {
+  deepseekProviderDefinition,
+} from "../../runtime/model-provider-definitions.mjs";
+import {
+  loadManagedModelProvider,
+  loadPrimaryModelProvider,
+  providerAppServerSocketPath,
+  providerMetricsSocketPath,
+} from "../../runtime/model-provider-runtime.mjs";
+import { readVisionApiKey } from "../../runtime/vision-credential.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
+import { ProviderProxyMetricsServer } from "../provider-proxy/index.js";
 import {
   CodexAppServerClient,
+  ProviderRoutingClient,
   gatewayVersion,
   handleApprovalServerRequest,
+  loadDeepseekModelOptions,
   JsonRpcClient,
   supportedCodexCliVersion,
   toConversationInputEvent,
@@ -30,6 +43,8 @@ import {
   CollaborationModeSelectionService,
   ConversationService,
   ModelSelectionService,
+  ProviderAccountService,
+  createOpenAiAccountAdapter,
 } from "../application/index.js";
 import {
   ConversationCore,
@@ -49,11 +64,14 @@ import {
 } from "./surface-composition.js";
 import type { SurfaceRuntimeModule } from "./surface-plugin.js";
 import { SurfaceManager } from "./surface-manager.js";
+import { createDeepseekAccountAdapter } from "./deepseek-account-adapter.js";
+import { createProxyFetch } from "./proxy-fetch.js";
+import { createResponsesVisionAdapter } from "./responses-vision-adapter.js";
 
 export class GatewayApplication {
   private readonly transport: UnixWebSocketTransport;
-  private readonly rpc: JsonRpcClient;
-  private readonly codex: CodexAppServerClient;
+  private readonly codex: ProviderRoutingClient;
+  private readonly primaryProvider: string;
   private readonly inbound: EventBus<RpcNotification>;
   private readonly output: EventBus<OutputEvent>;
   private readonly surfaceModules: SurfaceRuntimeModule[];
@@ -64,6 +82,7 @@ export class GatewayApplication {
   private readonly router: SessionRouter;
   private readonly threadState: ThreadStateSynchronizer;
   private readonly core: ConversationCore;
+  private readonly providerMetricsServers: ProviderProxyMetricsServer[];
   private readonly bindings: SqliteBindingStore;
   private readonly workspaces: WorkspaceRegistry;
   private removeRpcNotification: (() => void) | undefined;
@@ -74,6 +93,7 @@ export class GatewayApplication {
   private startupSettled = false;
   private reconnecting: Promise<void> | undefined;
   private reconnectAbort: AbortController | undefined;
+  private readonly disconnectedProviders = new Set<string>();
   private codexUpstreamUserAgent: string | undefined;
   private stopping = false;
 
@@ -82,12 +102,36 @@ export class GatewayApplication {
     private readonly logger: Logger,
   ) {
     verifyCodexVersion(config);
+    const primaryProvider = loadPrimaryModelProvider();
+    const managedProvider = loadManagedModelProvider();
+    const supplementaryModels = loadDeepseekModelOptions(
+      process.env,
+      primaryProvider === deepseekProviderDefinition.id
+        || managedProvider?.provider === deepseekProviderDefinition.id,
+      deepseekProviderDefinition,
+    );
     this.transport = new UnixWebSocketTransport(config.codexSocketPath);
-    this.rpc = new JsonRpcClient(this.transport, 60_000, logger);
-    this.codex = new CodexAppServerClient(this.rpc, {
+    this.primaryProvider = primaryProvider;
+    const clients = new Map<string, CodexAppServerClient>();
+    clients.set(primaryProvider, new CodexAppServerClient(
+      new JsonRpcClient(this.transport, 60_000, logger),
+      {
       sandbox: config.codexSandbox,
       ...(config.codexModel ? { model: config.codexModel } : {}),
-    });
+      },
+    ));
+    if (managedProvider) {
+      const providerTransport = new UnixWebSocketTransport(
+        providerAppServerSocketPath(config.codexSocketPath, managedProvider.provider),
+      );
+      clients.set(managedProvider.provider, new CodexAppServerClient(
+        new JsonRpcClient(providerTransport, 60_000, logger),
+        {
+          sandbox: config.codexSandbox,
+        },
+      ));
+    }
+    this.codex = new ProviderRoutingClient(primaryProvider, clients);
     this.inbound = new EventBus<RpcNotification>(logger, 2_000);
     this.output = new EventBus<OutputEvent>(logger, 1_000);
     this.bindings = new SqliteBindingStore(config.stateDatabasePath);
@@ -99,12 +143,84 @@ export class GatewayApplication {
     );
     this.threadState = new ThreadStateSynchronizer(this.router);
     this.core = new ConversationCore(this.router, this.output);
-    const models = new ModelSelectionService(this.codex, this.router, config.codexModel);
+    this.providerMetricsServers = [...new Set([
+      primaryProvider,
+      ...(managedProvider ? [managedProvider.provider] : []),
+    ])].map((provider) => new ProviderProxyMetricsServer(
+        providerMetricsSocketPath(config.codexSocketPath, provider),
+        (metrics) => {
+          const firstTokenAtMs = metrics.firstTokenAtMs;
+          const hasTurnMetadata = metrics.threadId !== null
+            && metrics.turnId !== null;
+          const hasTokenWindow = firstTokenAtMs !== null;
+          if (metrics.threadId === null || metrics.turnId === null || !hasTokenWindow) {
+            this.logger.debug(
+              { provider, hasTurnMetadata, hasTokenWindow },
+              "模型统计代理指标缺少 Turn 关联或 Token 窗口，已跳过",
+            );
+            return;
+          }
+          const lastTokenAtMs = Math.max(
+            metrics.lastReasoningDeltaAtMs ?? firstTokenAtMs,
+            metrics.lastOutputDeltaAtMs ?? firstTokenAtMs,
+          );
+          const thinkingDurationMs = metrics.firstReasoningDeltaAtMs === null
+            || metrics.lastReasoningDeltaAtMs === null
+            ? undefined
+            : metrics.lastReasoningDeltaAtMs - metrics.firstReasoningDeltaAtMs;
+          const outputDurationMs = metrics.firstOutputDeltaAtMs === null
+            || metrics.lastOutputDeltaAtMs === null
+            ? undefined
+            : metrics.lastOutputDeltaAtMs - metrics.firstOutputDeltaAtMs;
+          const generationDurationMs = lastTokenAtMs - firstTokenAtMs;
+          this.core.handle({
+            type: "turn.modelTiming.updated",
+            threadId: metrics.threadId,
+            turnId: metrics.turnId,
+            requestStartedAtMs: metrics.requestStartedAtMs,
+            ttftMs: Math.max(
+              0,
+              firstTokenAtMs - metrics.requestStartedAtMs,
+            ),
+            ...(thinkingDurationMs !== undefined && thinkingDurationMs > 0
+              ? { thinkingDurationMs }
+              : {}),
+            ...(outputDurationMs !== undefined && outputDurationMs > 0
+              ? { outputDurationMs }
+              : {}),
+            ...(generationDurationMs > 0 ? { generationDurationMs } : {}),
+          });
+        },
+        (error) => {
+          this.logger.warn({ err: error, provider }, "模型统计代理指标接收失败");
+        },
+      ));
+    this.interactions = new InteractionRouter(logger);
+    const models = new ModelSelectionService(
+      this.codex,
+      this.router,
+      config.codexModel,
+      supplementaryModels,
+    );
     const collaborationModes = new CollaborationModeSelectionService(
       this.codex,
       this.router,
       models,
     );
+    const providerAccounts = new ProviderAccountService([
+      createOpenAiAccountAdapter(this.codex),
+      createDeepseekAccountAdapter({
+        fetchImpl: createProxyFetch(config.networkProxy),
+      }),
+    ]);
+    const vision = config.vision.mode === "disabled"
+      ? undefined
+      : createResponsesVisionAdapter({
+          endpoint: config.vision.endpoint,
+          model: config.vision.model,
+          loadApiKey: () => readVisionApiKey(config.credentialsDirectory),
+          fetchImpl: createProxyFetch(config.networkProxy),
+        });
     const service = new ConversationService(
       this.codex,
       this.router,
@@ -122,9 +238,46 @@ export class GatewayApplication {
         currentGitBranch,
       },
       collaborationModes,
+      {
+        hasPendingInteraction: (threadId) =>
+          this.interactions.hasPendingForThread(threadId),
+        notifyTransferred: ({ previousTarget, nextTarget, threadId }) => {
+          this.logger.info({
+            threadId,
+            previousSurface: previousTarget.surface,
+            nextSurface: nextTarget.surface,
+          }, "Codex Thread 外部会话绑定已跨渠道转移");
+          this.output.publish({
+            type: "warning",
+            target: previousTarget,
+            threadId,
+            message: `当前 Codex Thread 已转移到${surfaceLabel(nextTarget.surface)}。本渠道已解除绑定，下一条普通消息将创建新会话。`,
+          }, true);
+        },
+      },
+      providerAccounts,
+      vision,
     );
     this.output.subscribe("conversation-follow-up", async (event) => {
       if (event.type !== "turn.completed") {
+        return;
+      }
+      if (this.router.isBackgroundThread(event.threadId)) {
+        try {
+          await this.router.releaseBackground(event.threadId);
+        } catch (error) {
+          this.logger.warn(
+            { err: error, threadId: event.threadId },
+            "后台 Thread 完成后的订阅清理失败，已保留绑定供重启重试",
+          );
+          this.output.publish({
+            type: "warning",
+            target: event.target,
+            threadId: event.threadId,
+            background: true,
+            message: "后台任务已完成，但订阅清理暂时失败；Gateway 重启后会重试。",
+          }, true);
+        }
         return;
       }
       try {
@@ -170,10 +323,23 @@ export class GatewayApplication {
       this.output,
       logger,
       (target) => service.status(target, { includeGitBranch: true }).gitBranch,
+      {
+        setInteractionAvailable: (
+          surface,
+          accountId,
+          available,
+          outcome,
+        ) => this.interactions.setAvailable(
+          surface,
+          accountId,
+          available,
+          outcome,
+        ),
+      },
     );
-    this.interactions = new InteractionRouter(logger);
     for (const surface of this.surfaces) {
       this.interactions.register(surface.surface, surface.accountId, surface.interactions);
+      this.interactions.setAvailable(surface.surface, surface.accountId, false);
     }
     this.approval = new ApprovalCoordinator(
       this.router,
@@ -263,22 +429,38 @@ export class GatewayApplication {
   private async startInternal(): Promise<void> {
     try {
       this.requireRunning();
+      await Promise.all(this.providerMetricsServers.map((server) => server.start()));
+      this.logger.info(
+        { providerCount: this.providerMetricsServers.length },
+        "模型统计代理指标接收已启动",
+      );
       this.removeRpcNotification = this.codex.onNotification((notification) => {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
       });
-      this.removeRpcDisconnect = this.codex.onDisconnect((error) => {
-        if (this.stopping || this.reconnecting) {
+      this.removeRpcDisconnect = this.codex.onDisconnect((error, provider) => {
+        if (this.stopping) {
           return;
         }
-        this.logger.warn({ err: error }, "Codex App Server 连接已断开");
-        this.interactions.cancelAll("Codex App Server 连接已断开");
-        this.core.connectionLost("Codex App Server 连接已断开，正在恢复连接");
+        this.disconnectedProviders.add(provider);
+        this.logger.warn({ err: error, provider }, "Codex App Server 连接已断开");
+        const affectedThreadIds = new Set(
+          this.router.allBindings()
+            .map((binding) => binding.threadId)
+            .filter((threadId) => this.codex.knownProvider(threadId) === provider),
+        );
+        this.interactions.cancelThreads(affectedThreadIds);
+        this.core.connectionLost(
+          `${provider} App Server 连接已断开，正在恢复连接`,
+          affectedThreadIds,
+        );
         this.beginReconnect();
       });
       const initialized = await this.codex.connect();
       this.requireRunning();
       this.codexUpstreamUserAgent = initialized.userAgent;
-      await this.refreshRateLimits();
+      if (this.primaryProvider !== deepseekProviderDefinition.id) {
+        await this.refreshRateLimits();
+      }
       this.requireRunning();
       if (!(await this.restoreBindings())) {
         throw new Error("恢复 Codex Thread 订阅暂时失败，请由进程管理器重试启动");
@@ -318,6 +500,12 @@ export class GatewayApplication {
     const failures: unknown[] = [];
     for (const [component, close] of [
       ["Surface", () => this.surfaceManager.stop()],
+      [
+        "Provider Proxy Metrics",
+        () => Promise.all(
+          this.providerMetricsServers.map((server) => server.close()),
+        ).then(() => undefined),
+      ],
       ["Inbound Event Bus", () => this.inbound.close()],
       ["Output Event Bus", () => this.output.close()],
       ["Codex Client", () => this.codex.close()],
@@ -412,6 +600,9 @@ export class GatewayApplication {
   }
 
   private beginReconnect(): void {
+    if (this.reconnecting) {
+      return;
+    }
     const controller = new AbortController();
     this.reconnectAbort = controller;
     const task = this.reconnect(controller.signal)
@@ -432,11 +623,22 @@ export class GatewayApplication {
         if (this.reconnectAbort === controller) {
           this.reconnectAbort = undefined;
         }
+        if (!this.stopping && this.disconnectedProviders.size > 0) {
+          queueMicrotask(() => this.beginReconnect());
+        }
       });
     this.reconnecting = task;
   }
 
   private async reconnect(signal: AbortSignal): Promise<void> {
+    while (this.disconnectedProviders.size > 0 && !this.stopping && !signal.aborted) {
+      const provider = this.disconnectedProviders.values().next().value as string;
+      await this.reconnectProvider(provider, signal);
+      this.disconnectedProviders.delete(provider);
+    }
+  }
+
+  private async reconnectProvider(provider: string, signal: AbortSignal): Promise<void> {
     const maximumAttempts = 12;
     for (
       let attempt = 1;
@@ -454,39 +656,46 @@ export class GatewayApplication {
         return;
       }
       try {
-        const initialized = await this.codex.reconnect();
+        const initialized = await this.codex.reconnectProvider(provider);
         if (this.stopping || signal.aborted) {
-          await this.codex.close();
           return;
         }
         this.codexUpstreamUserAgent = initialized.userAgent;
-        await this.refreshRateLimits();
+        if (provider === "openai") {
+          await this.refreshRateLimits();
+        }
         if (this.stopping || signal.aborted) {
-          await this.codex.close();
           return;
         }
-        if (!(await this.restoreBindings())) {
-          await this.codex.close();
+        if (!(await this.restoreBindings(provider))) {
+          await this.codex.closeProvider(provider);
           throw new Error("仍有 Codex Thread 订阅暂时无法恢复");
         }
         if (this.stopping || signal.aborted) {
-          await this.codex.close();
           return;
         }
         this.logger.info(
-          { attempt, platformFamily: initialized.platformFamily, platformOs: initialized.platformOs },
-          "Codex App Server 已重新连接",
+          {
+            attempt,
+            provider,
+            platformFamily: initialized.platformFamily,
+            platformOs: initialized.platformOs,
+          },
+          "模型 Provider App Server 已重新连接",
         );
         return;
       } catch (error) {
         if (this.stopping || signal.aborted) {
           return;
         }
-        this.logger.warn({ err: error, attempt, maximumAttempts }, "Codex App Server 重连失败");
+        this.logger.warn(
+          { err: error, provider, attempt, maximumAttempts },
+          "模型 Provider App Server 重连失败",
+        );
       }
     }
     if (!this.stopping && !signal.aborted) {
-      throw new Error(`Codex App Server 重连 ${maximumAttempts} 次后仍然失败`);
+      throw new Error(`${provider} App Server 重连 ${maximumAttempts} 次后仍然失败`);
     }
   }
 
@@ -500,18 +709,7 @@ export class GatewayApplication {
     if (this.stopping) {
       return;
     }
-    this.logger.fatal(
-      { err: error, surface, accountId },
-      "Surface 连接重试耗尽，Gateway 将停止以交由进程管理器重启",
-    );
-    process.exitCode = 1;
-    void this.stop().catch((stopError) => {
-      this.logger.error(
-        { err: stopError, surface, accountId },
-        "Surface 故障后停止 Gateway 失败",
-      );
-      process.exitCode = 1;
-    });
+    this.surfaceManager.reportFatal(surface, accountId, error);
   }
 
   private async refreshRateLimits(): Promise<void> {
@@ -534,15 +732,26 @@ export class GatewayApplication {
     }
   }
 
-  private async restoreBindings(): Promise<boolean> {
+  private async restoreBindings(provider?: string): Promise<boolean> {
     const enabledSurfaces = new Set(
       this.surfaces.map((surface) => surfaceAccountKey(surface.surface, surface.accountId)),
     );
     const failures = await this.router.restoreSubscriptions(
-      (target) => !this.stopping
-        && enabledSurfaces.has(surfaceAccountKey(target.surface, target.accountId)),
+      (target, binding) => !this.stopping
+        && enabledSurfaces.has(surfaceAccountKey(target.surface, target.accountId))
+        && (provider === undefined
+          || this.codex.knownProvider(binding.threadId) === provider),
       (binding, thread) => {
         if (thread.status.type !== "active") {
+          if (this.router.isBackgroundThread(binding.threadId)) {
+            this.output.publish({
+              type: "warning",
+              target: binding.target,
+              threadId: binding.threadId,
+              background: true,
+              message: "后台任务已在 Gateway 离线期间结束，可通过 /resume 查看完整会话。",
+            }, true);
+          }
           return;
         }
         if (thread.activeTurnId) {
@@ -583,6 +792,19 @@ export class GatewayApplication {
       );
     }
     return failures.every((failure) => failure.bindingRemoved);
+  }
+}
+
+function surfaceLabel(surface: string): string {
+  switch (surface) {
+    case "telegram":
+      return " Telegram";
+    case "feishu":
+      return "飞书";
+    case "weixin":
+      return "微信";
+    default:
+      return "其他渠道";
   }
 }
 

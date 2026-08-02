@@ -25,6 +25,7 @@ jobs:
     outputs:
       upgrade_available: ${{ steps.release.outputs.upgrade_available }}
       version: ${{ steps.release.outputs.version }}
+      release_url: ${{ steps.release.outputs.url }}
 
     steps:
       - name: Checkout
@@ -219,14 +220,34 @@ jobs:
 
             自动阶段已经完成协议生成、类型检查、Lint、全量测试、真实 App Server 合同、构建和打包验证。完整 Patch、协议影响、结构化结果与逐阶段日志保存在本次运行的 Artifact 中。
 
+            官方发布说明：${{ needs.preview.outputs.release_url }}
+
+            ## 对本项目的收益
+
+            待 Codex 对照当前 Gateway 架构、支持矩阵和实际使用路径填写；每项先用一句普通话解释用途，不要照抄上游功能清单。
+
+            ## 本次采用
+
+            待 Codex 逐项写明必须适配或决定接入的变化、项目入口及采用理由。
+
+            ## 本次不采用
+
+            待 Codex 逐项写明仅存在于生成类型或上游产品、但本项目不导出或不接入的变化及理由。
+
+            ## 风险与验证
+
+            待 Codex 写明安全边界、兼容风险、定向测试、真实合同和完整门禁结果。
+
             合并前仍需由 Codex：
 
+            - 先从上述官方发布说明筛选 CLI/TUI、App Server 协议和内部修复对本项目的影响；
             - 对照固定版本官方源码和测试审查协议语义；
             - 修复业务枚举、通知、Server Request 与安全边界适配；
-            - 更新 `docs/index.md`、README、CI 锁定版本及相关测试；
+            - 把上述四个占位章节替换为本项目的实际收益与取舍结论；
+            - 更新 `docs/index.md`、`docs/codex-cli-upgrade-decisions.md`、README、CI 锁定版本及相关测试；
             - 运行 `npm run verify:commit` 并审查最终差异。
 
-            本工作流不会自动转为 Ready、合并、发布或部署。
+            占位内容未替换时，升级 PR 描述门禁会阻止 Ready PR 通过。本工作流不会自动转为 Ready、合并、发布或部署。
 
             升级运行：https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: >-

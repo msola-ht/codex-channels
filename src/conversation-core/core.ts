@@ -8,8 +8,11 @@ import {
   type RateLimitSnapshot,
   type ThreadGoal,
   type ThreadTokenUsage,
+  type TurnOutputTiming,
   type TurnArtifacts,
+  type VisionTokenUsage,
   isCriticalOutputEvent,
+  usesOpenAiAccount,
 } from "./events.js";
 import type { ConversationInputEvent } from "./input-events.js";
 import type { ConversationRoutingPort } from "./routing-port.js";
@@ -20,11 +23,26 @@ interface ActiveTurn {
   turnId: string;
 }
 
+interface TurnTimingState {
+  turnId: string;
+  turnStartedAtMs?: number;
+  firstFinalDeltaAtMs?: number;
+  lastFinalDeltaAtMs?: number;
+  firstAnyDeltaAtMs?: number;
+  lastAnyDeltaAtMs?: number;
+  thinkingDurationMs?: number;
+  modelOutputDurationMs?: number;
+  modelGenerationDurationMs?: number;
+  modelTtftMs?: number;
+  modelRequestStartedAtMs?: number;
+  finalItemDeltas: Map<string, { firstAtMs: number; lastAtMs: number }>;
+}
+
 type WithoutTarget<T> = T extends unknown ? Omit<T, "target"> : never;
 type UntargetedOutputEvent = WithoutTarget<OutputEvent>;
 
 export class ConversationCore {
-  private readonly activeByConversation = new Map<string, ActiveTurn>();
+  private readonly activeByThread = new Map<string, ActiveTurn>();
   private readonly errorsByTurn = new Map<string, string>();
   private readonly usageByThread = new Map<string, ThreadTokenUsage>();
   private readonly usageTurnByThread = new Map<string, string>();
@@ -33,6 +51,7 @@ export class ConversationCore {
   private readonly seenUserMessages = new Set<string>();
   private readonly phaseByItem = new Map<string, MessagePhase | null>();
   private readonly artifactsByThread = new Map<string, TurnArtifacts>();
+  private readonly timingByThread = new Map<string, TurnTimingState>();
   private readonly mcpStatus = new Map<string, string>();
   private accountStatus: string | undefined;
   private readonly rateLimitNotices = new Map<string, string>();
@@ -44,7 +63,7 @@ export class ConversationCore {
   ) {}
 
   markTurnStarted(target: ConversationTarget, threadId: string, turnId: string): void {
-    const current = this.activeByConversation.get(this.key(target));
+    const current = this.activeByThread.get(threadId);
     if (current?.threadId === threadId && current.turnId === turnId) {
       return;
     }
@@ -52,12 +71,54 @@ export class ConversationCore {
     if (artifacts?.turnId !== turnId) {
       this.artifactsByThread.set(threadId, { threadId, turnId });
     }
-    this.activeByConversation.set(this.key(target), { target, threadId, turnId });
-    this.publish({ type: "turn.started", target, threadId, turnId });
+    this.activeByThread.set(threadId, { target, threadId, turnId });
+    this.publish({
+      type: "turn.started",
+      target,
+      threadId,
+      turnId,
+      ...(this.isBackgroundThread(threadId) ? { background: true } : {}),
+    });
+  }
+
+  visionStarted(
+    target: ConversationTarget,
+    details: { imageCount: number },
+  ): void {
+    this.publish({ type: "vision.started", target, ...details });
+  }
+
+  visionProgress(
+    target: ConversationTarget,
+    details: { elapsedSeconds: number },
+  ): void {
+    this.publish({ type: "vision.progress", target, ...details });
+  }
+
+  visionCompleted(
+    target: ConversationTarget,
+    details: {
+      model: string;
+      elapsedMs?: number;
+      upstreamDurationMs?: number;
+      serviceTier?: string;
+      usage?: VisionTokenUsage;
+    },
+  ): void {
+    this.publish({ type: "vision.completed", target, ...details });
   }
 
   activeTurn(target: ConversationTarget): ActiveTurn | undefined {
-    return this.activeByConversation.get(this.key(target));
+    const threadId = this.router.foregroundThreadId?.(target);
+    if (threadId) return this.activeByThread.get(threadId);
+    return [...this.activeByThread.values()].find(
+      (active) => this.key(active.target) === this.key(target)
+        && !this.isBackgroundThread(active.threadId),
+    );
+  }
+
+  activeTurnForThread(threadId: string): ActiveTurn | undefined {
+    return this.activeByThread.get(threadId);
   }
 
   tokenUsage(threadId: string): ThreadTokenUsage | undefined {
@@ -112,8 +173,34 @@ export class ConversationCore {
     return this.artifactsByThread.get(threadId);
   }
 
-  connectionLost(message: string): void {
-    this.activeByConversation.clear();
+  connectionLost(message: string, affectedThreadIds?: ReadonlySet<string>): void {
+    if (affectedThreadIds) {
+      for (const [threadId, active] of this.activeByThread) {
+        if (affectedThreadIds.has(active.threadId)) {
+          this.activeByThread.delete(threadId);
+        }
+      }
+      for (const threadId of affectedThreadIds) {
+        this.usageByThread.delete(threadId);
+        this.usageTurnByThread.delete(threadId);
+        this.goalsByThread.delete(threadId);
+        this.contextCompactionItemIdsByThread.delete(threadId);
+        this.artifactsByThread.delete(threadId);
+        this.timingByThread.delete(threadId);
+      }
+      for (const binding of this.router.allBindings()) {
+        if (affectedThreadIds.has(binding.threadId)) {
+          this.publish({
+            type: "connection.lost",
+            target: binding.target,
+            threadId: binding.threadId,
+            message,
+          });
+        }
+      }
+      return;
+    }
+    this.activeByThread.clear();
     this.errorsByTurn.clear();
     this.usageByThread.clear();
     this.usageTurnByThread.clear();
@@ -121,6 +208,7 @@ export class ConversationCore {
     this.contextCompactionItemIdsByThread.clear();
     this.seenUserMessages.clear();
     this.phaseByItem.clear();
+    this.timingByThread.clear();
     this.mcpStatus.clear();
     for (const binding of this.router.allBindings()) {
       this.publish({
@@ -135,6 +223,13 @@ export class ConversationCore {
   handle(event: ConversationInputEvent): void {
     switch (event.type) {
       case "turn.started": {
+        this.timingByThread.set(event.threadId, {
+          turnId: event.turnId,
+          finalItemDeltas: new Map(),
+          ...(event.receivedAtMs === undefined
+            ? {}
+            : { turnStartedAtMs: event.receivedAtMs }),
+        });
         const target = this.router.targetForThread(event.threadId);
         if (target) {
           this.markTurnStarted(target, event.threadId, event.turnId);
@@ -189,9 +284,23 @@ export class ConversationCore {
         );
         return;
       case "item.agentMessage.delta": {
-        const phase = this.phaseByItem.get(
-          this.itemKey(event.threadId, event.turnId, event.itemId),
-        );
+        const key = this.itemKey(event.threadId, event.turnId, event.itemId);
+        const phase = this.phaseByItem.get(key);
+        if (event.receivedAtMs !== undefined) {
+          const timing = this.timingByThread.get(event.threadId);
+          if (timing && timing.turnId === event.turnId) {
+            timing.firstAnyDeltaAtMs ??= event.receivedAtMs;
+            timing.lastAnyDeltaAtMs = event.receivedAtMs;
+            if (phase === "final_answer") {
+              timing.firstFinalDeltaAtMs ??= event.receivedAtMs;
+              timing.lastFinalDeltaAtMs = event.receivedAtMs;
+              const itemTiming = timing.finalItemDeltas.get(key)
+                ?? { firstAtMs: event.receivedAtMs, lastAtMs: event.receivedAtMs };
+              itemTiming.lastAtMs = event.receivedAtMs;
+              timing.finalItemDeltas.set(key, itemTiming);
+            }
+          }
+        }
         this.publishForThread(event.threadId, {
           type: "text.delta",
           threadId: event.threadId,
@@ -200,6 +309,34 @@ export class ConversationCore {
           text: event.text,
           ...(phase !== undefined ? { phase } : {}),
         });
+        return;
+      }
+      case "turn.modelTiming.updated": {
+        const timing = this.timingByThread.get(event.threadId);
+        if (
+          timing
+          && timing.turnId === event.turnId
+          && (
+            timing.modelRequestStartedAtMs === undefined
+            || event.requestStartedAtMs >= timing.modelRequestStartedAtMs
+          )
+        ) {
+          timing.modelRequestStartedAtMs = event.requestStartedAtMs;
+          delete timing.modelTtftMs;
+          delete timing.thinkingDurationMs;
+          delete timing.modelOutputDurationMs;
+          delete timing.modelGenerationDurationMs;
+          if (event.ttftMs !== undefined) timing.modelTtftMs = event.ttftMs;
+          if (event.thinkingDurationMs !== undefined) {
+            timing.thinkingDurationMs = event.thinkingDurationMs;
+          }
+          if (event.outputDurationMs !== undefined) {
+            timing.modelOutputDurationMs = event.outputDurationMs;
+          }
+          if (event.generationDurationMs !== undefined) {
+            timing.modelGenerationDurationMs = event.generationDurationMs;
+          }
+        }
         return;
       }
       case "item.agentMessage.completed": {
@@ -243,20 +380,29 @@ export class ConversationCore {
         this.clearItemPhases(event.threadId, event.turnId);
         const target = this.router.targetForThread(event.threadId);
         if (!target) {
+          this.timingByThread.delete(event.threadId);
           return;
         }
-        const active = this.activeByConversation.get(this.key(target));
+        const active = this.activeByThread.get(event.threadId);
         if (active?.turnId === event.turnId) {
-          this.activeByConversation.delete(this.key(target));
+          this.activeByThread.delete(event.threadId);
         }
         const error = event.error ?? this.errorsByTurn.get(event.turnId);
         const tokenUsage = this.usageTurnByThread.get(event.threadId) === event.turnId
           ? this.usageByThread.get(event.threadId)
           : undefined;
         const modelSettings = this.router.modelSettingsForThread(event.threadId);
-        const weeklyLimit = this.weeklyRateLimit();
+        const weeklyLimit = usesOpenAiAccount(modelSettings?.modelProvider)
+          ? this.weeklyRateLimit()
+          : undefined;
         const goal = this.goalsByThread.get(event.threadId);
         const contextCompactionCount = this.contextCompactionCount(event.threadId);
+        const timing = this.computeTurnOutputTiming(
+          event.threadId,
+          event.turnId,
+          supportsDetailedModelTiming(modelSettings?.modelProvider),
+        );
+        this.timingByThread.delete(event.threadId);
         this.errorsByTurn.delete(event.turnId);
         this.publish({
           type: "turn.completed",
@@ -268,10 +414,12 @@ export class ConversationCore {
           ...(event.durationMs === undefined
             ? {}
             : { durationMs: event.durationMs }),
+          ...(timing ? { timing } : {}),
           ...(tokenUsage ? { tokenUsage } : {}),
           ...(modelSettings
             ? {
                 model: modelSettings.model,
+                modelProvider: modelSettings.modelProvider ?? "openai",
                 effort: modelSettings.effort,
                 serviceTier: modelSettings.serviceTier,
               }
@@ -279,6 +427,7 @@ export class ConversationCore {
           ...(weeklyLimit ? { weeklyLimit } : {}),
           ...(goal ? { goal } : {}),
           ...(contextCompactionCount !== undefined ? { contextCompactionCount } : {}),
+          ...(this.isBackgroundThread(event.threadId) ? { background: true } : {}),
         });
         return;
       }
@@ -297,11 +446,12 @@ export class ConversationCore {
         this.usageTurnByThread.delete(event.threadId);
         this.goalsByThread.delete(event.threadId);
         this.contextCompactionItemIdsByThread.delete(event.threadId);
+        this.timingByThread.delete(event.threadId);
         this.clearSeenUserMessages(event.threadId);
         this.clearItemPhases(event.threadId);
         this.artifactsByThread.delete(event.threadId);
         if (target) {
-          this.activeByConversation.delete(this.key(target));
+          this.activeByThread.delete(event.threadId);
         }
         return;
       }
@@ -309,7 +459,7 @@ export class ConversationCore {
         const fingerprint = `${event.authMode ?? ""}:${event.planType ?? ""}`;
         if (fingerprint !== this.accountStatus) {
           this.accountStatus = fingerprint;
-          this.broadcast({
+          this.broadcastForProvider(event.modelProvider, {
             type: "account.updated",
             authMode: event.authMode,
             planType: event.planType,
@@ -333,7 +483,7 @@ export class ConversationCore {
           this.rateLimitNotices.delete(limitId);
         }
         if (fingerprint && fingerprint !== previous) {
-          this.broadcast({
+          this.broadcastForProvider(event.modelProvider, {
             type: "account.rateLimits.updated",
             rateLimits,
           });
@@ -341,7 +491,7 @@ export class ConversationCore {
         return;
       }
       case "mcp.status.updated": {
-        const key = `${event.threadId ?? "global"}:${event.name}`;
+        const key = `${event.modelProvider ?? "global"}:${event.threadId ?? "global"}:${event.name}`;
         const fingerprint =
           `${event.status}:${event.error ?? ""}:${event.failureReason ?? ""}`;
         if (this.mcpStatus.get(key) === fingerprint) {
@@ -359,7 +509,7 @@ export class ConversationCore {
         if (event.threadId) {
           this.publishForThread(event.threadId, outputEvent);
         } else {
-          this.broadcast(outputEvent);
+          this.broadcastForProvider(event.modelProvider, outputEvent);
         }
         return;
       }
@@ -371,7 +521,10 @@ export class ConversationCore {
             message: event.message,
           });
         } else {
-          this.broadcast({ type: "warning", message: event.message });
+          this.broadcastForProvider(event.modelProvider, {
+            type: "warning",
+            message: event.message,
+          });
         }
         return;
     }
@@ -383,8 +536,16 @@ export class ConversationCore {
   ): void {
     const target = this.router.targetForThread(threadId);
     if (target) {
-      this.publish({ ...event, target });
+      this.publish({
+        ...event,
+        target,
+        ...(this.isBackgroundThread(threadId) ? { background: true } : {}),
+      });
     }
+  }
+
+  private isBackgroundThread(threadId: string): boolean {
+    return this.router.isBackgroundThread?.(threadId) ?? false;
   }
 
   private publishUserMessage(
@@ -410,6 +571,7 @@ export class ConversationCore {
       turnId: event.turnId,
       itemId: event.itemId,
       text: event.text,
+      ...(this.isBackgroundThread(event.threadId) ? { background: true } : {}),
     });
   }
 
@@ -435,6 +597,118 @@ export class ConversationCore {
     return `${threadId}:${turnId}:${itemId}`;
   }
 
+  private computeTurnOutputTiming(
+    threadId: string,
+    turnId: string,
+    detailedTiming: boolean,
+  ): TurnOutputTiming | undefined {
+    const timing = this.timingByThread.get(threadId);
+    if (!timing || timing.turnId !== turnId) {
+      return undefined;
+    }
+    const result: TurnOutputTiming = {};
+    if (detailedTiming && timing.modelTtftMs !== undefined) {
+      result.ttftMs = timing.modelTtftMs;
+    }
+    const firstDeltaAtMs = timing.firstFinalDeltaAtMs ?? timing.firstAnyDeltaAtMs;
+    if (
+      detailedTiming
+      && result.ttftMs === undefined
+      && firstDeltaAtMs !== undefined
+    ) {
+      if (
+        timing.turnStartedAtMs !== undefined
+        && firstDeltaAtMs >= timing.turnStartedAtMs
+      ) {
+        result.ttftMs = firstDeltaAtMs - timing.turnStartedAtMs;
+      }
+    }
+    if (timing.modelOutputDurationMs !== undefined) {
+      result.outputDurationMs = timing.modelOutputDurationMs;
+    } else if (timing.finalItemDeltas.size > 0) {
+      let totalOutputDurationMs = 0;
+      for (const itemTiming of timing.finalItemDeltas.values()) {
+        if (itemTiming.lastAtMs >= itemTiming.firstAtMs) {
+          totalOutputDurationMs += itemTiming.lastAtMs - itemTiming.firstAtMs;
+        }
+      }
+      if (totalOutputDurationMs > 0) {
+        result.outputDurationMs = totalOutputDurationMs;
+      }
+    } else if (
+      timing.firstAnyDeltaAtMs !== undefined
+      && timing.lastAnyDeltaAtMs !== undefined
+      && timing.lastAnyDeltaAtMs >= timing.firstAnyDeltaAtMs
+    ) {
+      result.outputDurationMs = timing.lastAnyDeltaAtMs - timing.firstAnyDeltaAtMs;
+    }
+    let nonReasoningOutputTokens: number | undefined;
+    let reasoningTokens: number | undefined;
+    if (this.usageTurnByThread.get(threadId) === turnId) {
+      const current = this.usageByThread.get(threadId);
+      if (current) {
+        nonReasoningOutputTokens = Math.max(
+          0,
+          current.last.outputTokens - current.last.reasoningOutputTokens,
+        );
+        reasoningTokens = Math.max(0, current.last.reasoningOutputTokens);
+      }
+    }
+    if (
+      nonReasoningOutputTokens !== undefined
+      && nonReasoningOutputTokens > 0
+      && result.outputDurationMs !== undefined
+      && result.outputDurationMs > 0
+    ) {
+      result.outputTokensPerSecond =
+        nonReasoningOutputTokens / (result.outputDurationMs / 1_000);
+      result.nonReasoningOutputTokens = nonReasoningOutputTokens;
+    }
+    if (
+      detailedTiming
+      && reasoningTokens !== undefined
+      && reasoningTokens > 0
+    ) {
+      result.reasoningTokens = reasoningTokens;
+    }
+    if (
+      detailedTiming
+      && reasoningTokens !== undefined
+      && reasoningTokens > 0
+      && timing.thinkingDurationMs !== undefined
+      && timing.thinkingDurationMs > 0
+    ) {
+      result.thinkingTokensPerSecond =
+        reasoningTokens / (timing.thinkingDurationMs / 1_000);
+      result.thinkingDurationMs = timing.thinkingDurationMs;
+    }
+    const totalOutputTokens = (nonReasoningOutputTokens ?? 0) + (reasoningTokens ?? 0);
+    if (
+      detailedTiming
+      && reasoningTokens !== undefined
+      && reasoningTokens > 0
+      && timing.thinkingDurationMs !== undefined
+      && timing.thinkingDurationMs > 0
+      && result.outputDurationMs !== undefined
+      && result.outputDurationMs > 0
+    ) {
+      const totalStreamMs = timing.modelGenerationDurationMs
+        ?? timing.thinkingDurationMs + result.outputDurationMs;
+      if (totalStreamMs > 0) {
+        result.generationTokensPerSecond =
+          totalOutputTokens / (totalStreamMs / 1_000);
+      }
+    }
+    if (
+      result.ttftMs === undefined
+      && result.outputDurationMs === undefined
+      && result.thinkingDurationMs === undefined
+    ) {
+      return undefined;
+    }
+    return result;
+  }
+
   private publish(event: OutputEvent): void {
     this.output.publish(event, isCriticalOutputEvent(event));
   }
@@ -450,9 +724,33 @@ export class ConversationCore {
     }
   }
 
+  private broadcastForProvider(
+    modelProvider: string | undefined,
+    event: UntargetedOutputEvent,
+  ): void {
+    if (!modelProvider) {
+      this.broadcast(event);
+      return;
+    }
+    const seen = new Set<string>();
+    for (const binding of this.router.allBindings()) {
+      const provider = this.router.modelSettingsForThread(binding.threadId)?.modelProvider
+        ?? "openai";
+      const key = this.key(binding.target);
+      if (provider === modelProvider && !seen.has(key)) {
+        seen.add(key);
+        this.publish({ ...event, target: binding.target });
+      }
+    }
+  }
+
   private key(target: ConversationTarget): string {
     return conversationTargetKey(target);
   }
+}
+
+function supportsDetailedModelTiming(modelProvider: string | undefined): boolean {
+  return modelProvider === "deepseek";
 }
 
 function rateLimitNoticeFingerprint(snapshot: RateLimitSnapshot): string | undefined {

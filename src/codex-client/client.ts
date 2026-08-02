@@ -14,6 +14,7 @@ import type {
   CollaborationModeQueryPort,
   CollaborationModePreset,
   InstalledSkill,
+  InvocableSkill,
   SkillQueryPort,
   McpQueryPort,
   McpServerSummary,
@@ -41,6 +42,7 @@ import type {
   ThreadGoalGetResponse,
   ThreadGoalSetResponse,
   ThreadListResponse,
+  ThreadMetadataUpdateResponse,
   ThreadReadResponse,
   ThreadResumeResponse,
   ThreadStartResponse,
@@ -53,6 +55,7 @@ import type {
   ThreadLifecyclePort,
   ThreadQueryOptions,
   ThreadSession,
+  ThreadStartOptions,
   ThreadSnapshot,
 } from "../session-routing/index.js";
 import { JsonRpcClient, type RpcNotification, type ServerRequestHandler } from "./json-rpc.js";
@@ -66,7 +69,10 @@ import {
 } from "./turn-adapter.js";
 import { toModelOption } from "./model-adapter.js";
 import { toAccountRateLimits, toAccountUsage } from "./account-adapter.js";
-import { toInstalledSkills } from "./skill-adapter.js";
+import {
+  resolveInvocableSkill,
+  toInstalledSkills,
+} from "./skill-adapter.js";
 import { toMcpServerSummaryPage } from "./mcp-adapter.js";
 import { toInstalledPlugins } from "./plugin-adapter.js";
 import { toPermissionProfilePage } from "./permission-adapter.js";
@@ -128,6 +134,7 @@ export class CodexAppServerClient implements
         method: "thread/list",
         params: {
           cwd,
+          modelProviders: [],
           sourceKinds: ["cli", "vscode", "appServer"],
           sortKey: "updated_at",
           sortDirection: "desc",
@@ -176,7 +183,7 @@ export class CodexAppServerClient implements
     return toThreadSnapshot(result.thread);
   }
 
-  async startThread(cwd: string): Promise<ThreadSession> {
+  async startThread(cwd: string, options: ThreadStartOptions = {}): Promise<ThreadSession> {
     const response = await this.rpc.request<ThreadStartResponse>({
       method: "thread/start",
       params: {
@@ -184,7 +191,10 @@ export class CodexAppServerClient implements
         sandbox: this.defaults.sandbox,
         approvalPolicy: "on-request",
         serviceName: "codex_connect_gateway",
-        ...(this.defaults.model ? { model: this.defaults.model } : {}),
+        ...(options.model
+          ? { model: options.model }
+          : this.defaults.model ? { model: this.defaults.model } : {}),
+        ...(options.modelProvider ? { modelProvider: options.modelProvider } : {}),
       },
     }, { retryOverload: false });
     return toThreadSession(response);
@@ -301,6 +311,17 @@ export class CodexAppServerClient implements
     }, { retryOverload: false });
   }
 
+  async setThreadPinned(threadId: string, pinned: boolean): Promise<void> {
+    const response = await this.rpc.request<ThreadMetadataUpdateResponse>({
+      method: "thread/metadata/update",
+      params: { threadId, isPinned: pinned },
+    }, { retryOverload: false });
+    const updated = toThreadSnapshot(response.thread);
+    if (updated.id !== threadId || updated.isPinned !== pinned) {
+      throw new Error("Codex Thread 固定状态更新结果不一致");
+    }
+  }
+
   async compactThread(threadId: string): Promise<void> {
     await this.rpc.request({
       method: "thread/compact/start",
@@ -356,7 +377,11 @@ export class CodexAppServerClient implements
     return serviceTier;
   }
 
-  async forkThread(threadId: string, cwd: string): Promise<ThreadSession> {
+  async forkThread(
+    threadId: string,
+    cwd: string,
+    options: ThreadStartOptions = {},
+  ): Promise<ThreadSession> {
     const response = await this.rpc.request<ThreadForkResponse>({
       method: "thread/fork",
       params: {
@@ -364,6 +389,8 @@ export class CodexAppServerClient implements
         cwd,
         sandbox: this.defaults.sandbox,
         approvalPolicy: "on-request",
+        ...(options.model ? { model: options.model } : {}),
+        ...(options.modelProvider ? { modelProvider: options.modelProvider } : {}),
       },
     }, { retryOverload: false });
     return toThreadSession(response);
@@ -378,11 +405,15 @@ export class CodexAppServerClient implements
   }
 
   async listSkills(cwd: string): Promise<InstalledSkill[]> {
-    const response = await this.rpc.request<SkillsListResponse>({
-      method: "skills/list",
-      params: { cwds: [cwd], forceReload: false },
-    }, { retryOverload: true });
-    return toInstalledSkills(response);
+    const response = await this.readSkills(cwd);
+    return toInstalledSkills(response, cwd);
+  }
+
+  async resolveSkill(
+    cwd: string,
+    name: string,
+  ): Promise<InvocableSkill | undefined> {
+    return resolveInvocableSkill(await this.readSkills(cwd), cwd, name);
   }
 
   async listMcpServers(threadId?: string): Promise<McpServerSummary[]> {
@@ -406,6 +437,13 @@ export class CodexAppServerClient implements
       rememberCursor("mcpServerStatus/list", cursor, cursors);
     } while (cursor);
     return servers;
+  }
+
+  private readSkills(cwd: string): Promise<SkillsListResponse> {
+    return this.rpc.request<SkillsListResponse>({
+      method: "skills/list",
+      params: { cwds: [cwd], forceReload: false },
+    }, { retryOverload: true });
   }
 
   async listPlugins(cwd: string): Promise<InstalledPlugin[]> {

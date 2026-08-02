@@ -199,6 +199,65 @@ describe("TelegramOutbox", () => {
     });
   });
 
+  it("reports when image and text input is sent to the visual API", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      type: "vision.started",
+      target,
+      imageCount: 1,
+    });
+    await outbox.close();
+
+    expect(api.sent).toEqual([
+      [
+        "<b>视觉识别中</b>",
+        "• <b>图片：</b>1 张",
+        "• <b>状态：</b>已发送至视觉 API",
+      ].join("\n"),
+    ]);
+  });
+
+  it("reports visual recognition heartbeats and structured completion details", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      type: "vision.progress",
+      target,
+      elapsedSeconds: 30,
+    });
+    outbox.handle({
+      type: "vision.completed",
+      target,
+      model: "gpt-5.6-luna",
+      elapsedMs: 31_000,
+      usage: {
+        inputTokens: 1_234,
+        outputTokens: 56,
+        totalTokens: 1_290,
+      },
+    });
+    await outbox.close();
+
+    expect(api.sent).toEqual([
+      [
+        "<b>视觉识别中</b>",
+        "• <b>已等待：</b>30 秒",
+        "• <b>状态：</b>上游仍在处理",
+      ].join("\n"),
+      [
+        "<b>图片识别完成</b>",
+        "• <b>识别模型：</b>gpt-5.6-luna",
+        "• <b>视觉 API 耗时：</b>31秒",
+        "• <b>Token 用量：</b>输入 1,234 · 输出 56 · 总计 1,290",
+        "",
+        "正在交给当前模型处理。",
+      ].join("\n"),
+    ]);
+  });
+
   it("queues a Workspace notification with direct switch buttons", async () => {
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);
@@ -1103,10 +1162,11 @@ describe("TelegramOutbox", () => {
         turnCompletedPanel,
         "",
         "• <b>上下文：</b>24.6 K / 258 K（9.5%）",
-        "• <b>缓存命中：</b>2.1%",
+        "• <b>最近请求缓存命中：</b>2.07%",
         "• <b>模型：</b>gpt-5.6-sol · medium · Fast 开启",
+        "• <b>提供商：</b>OpenAI",
         "• <b>上下文压缩：</b>2 次",
-        "• <b>周限：</b>已使用 42%",
+        "• <b>周限：</b>剩余 58%",
         "• <b>Goal：</b>进行中 · 12.5 K / 100 K",
         "• <b>Git 分支：</b>feature/weixin-surface",
       ].join("\n"),

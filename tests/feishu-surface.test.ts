@@ -1,7 +1,7 @@
 import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 
-import type { ConversationService } from "../src/application/index.js";
+import type { ConversationUseCases } from "../src/application/index.js";
 import {
   feishuCardElements,
   FeishuEventConnection,
@@ -346,10 +346,10 @@ describe("Feishu Surface", () => {
     fixture.ready();
     await starting;
 
-    fixture.emitMessage(0, "/feishu status");
+    fixture.emitMessage(0, "/fs status");
     await settle();
     fixture.emitCardAction();
-    fixture.emitMessage(1, "/feishu status");
+    fixture.emitMessage(1, "/fs status");
     await fixture.surface.stop();
 
     expect(fixture.sent).toHaveLength(2);
@@ -453,7 +453,7 @@ describe("Feishu Surface", () => {
     fixture.ready();
     await starting;
 
-    fixture.emitMessage(0, "/feishu doctor");
+    fixture.emitMessage(0, "/fs doctor");
     await settle();
     fixture.emitSetupAction();
     await vi.waitFor(() => {
@@ -480,7 +480,7 @@ describe("Feishu Surface", () => {
 });
 
 function createFixture(
-  service: Partial<ConversationService> | undefined = undefined,
+  service: Partial<ConversationUseCases> | undefined = undefined,
   configurationRecipients?: () => readonly string[],
   startupNotification?: {
     messages(): ReadonlyArray<{ chatId: string; text: string }>;
@@ -511,7 +511,7 @@ function createFixture(
       steered: false,
     }),
     ...service,
-  }) as ConversationService;
+  }) as ConversationUseCases;
   let readyCallback: (() => void) | undefined;
   let reconnectingCallback: (() => void) | undefined;
   let reconnectedCallback: (() => void) | undefined;

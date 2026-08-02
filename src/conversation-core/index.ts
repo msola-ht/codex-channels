@@ -19,11 +19,13 @@ export type {
   TurnPlanStep,
   TurnPlanStepStatus,
   TurnStatus,
+  VisionTokenUsage,
 } from "./events.js";
 export {
   conversationTargetKey,
   gatewayUserMessageClientIdPrefix,
   isCriticalOutputEvent,
+  usesOpenAiAccount,
   surfaceAccountKey,
   type ConversationTarget,
   type OperationKind,

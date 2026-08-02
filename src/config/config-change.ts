@@ -8,6 +8,7 @@ export type GlobalConfigChangeCode =
   | "approval.timeout"
   | "display.operation-updates"
   | "display.plan-updates"
+  | "vision.provider"
   | "observability.log-level"
   | "workspace.default"
   | "workspace.registry";

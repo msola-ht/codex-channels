@@ -1,4 +1,10 @@
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, resolve } from "node:path";
 
@@ -57,6 +63,13 @@ export interface GatewayConfig {
   codexSandbox: "read-only" | "workspace-write";
   operationUpdateDisplay: OperationUpdateDisplay;
   planUpdatesEnabled: boolean;
+  vision:
+    | { mode: "disabled" }
+    | {
+        mode: "responses_api";
+        endpoint: string;
+        model: string;
+      };
   credentialsDirectory: string;
   stateDatabasePath: string;
   approvalTimeoutMs: number;
@@ -78,6 +91,7 @@ export function loadRuntimeConfig(environment: NodeJS.ProcessEnv = process.env):
     configuredPath
       || resolve(environment.CODEX_CONNECT_HOME?.trim() || resolve(homedir(), ".codex-connect"), "config.toml"),
   );
+  validateRuntimeConfigPermissions(configPath);
   const documents = parseConfigDocuments(readFileSync(configPath, "utf8"));
   const config = loadValidatedConfigDocument(
     documents.validated,
@@ -92,6 +106,37 @@ export function loadRuntimeConfig(environment: NodeJS.ProcessEnv = process.env):
     );
   }
   return { config, configPath };
+}
+
+function validateRuntimeConfigPermissions(configPath: string): void {
+  let configStatus: ReturnType<typeof lstatSync>;
+  let parentStatus: ReturnType<typeof lstatSync>;
+  try {
+    configStatus = lstatSync(configPath);
+    parentStatus = lstatSync(dirname(configPath));
+  } catch {
+    throw new ConfigurationError("config.toml 不可用，请检查文件路径和权限");
+  }
+  if (!configStatus.isFile()) {
+    throw new ConfigurationError("config.toml 必须是普通文件且不能是符号链接");
+  }
+  const currentUserId = process.getuid?.();
+  if (
+    currentUserId !== undefined
+    && (configStatus.uid !== currentUserId || parentStatus.uid !== currentUserId)
+  ) {
+    throw new ConfigurationError("config.toml 及其父目录必须由当前用户拥有");
+  }
+  if ((configStatus.mode & 0o077) !== 0) {
+    throw new ConfigurationError(
+      "config.toml 权限不安全：不能允许组或其他用户访问",
+    );
+  }
+  if (!parentStatus.isDirectory() || (parentStatus.mode & 0o022) !== 0) {
+    throw new ConfigurationError(
+      "config.toml 父目录权限不安全：不能允许组或其他用户写入",
+    );
+  }
 }
 
 export function loadConfigDocument(
@@ -152,7 +197,7 @@ function loadValidatedConfigDocument(
   );
   let proxyUrl: string | undefined;
   try {
-    proxyUrl = resolveHttpProxyUrl(raw.telegram.proxy_url, proxyEnvironment);
+    proxyUrl = resolveHttpProxyUrl(raw.telegram.proxy_url);
   } catch (error) {
     throw new ConfigurationError(error instanceof Error ? error.message : String(error));
   }
@@ -192,10 +237,35 @@ function loadValidatedConfigDocument(
     codexSandbox: raw.codex.sandbox,
     operationUpdateDisplay: raw.display.operation_updates,
     planUpdatesEnabled: raw.display.plan_updates,
+    vision: toVisionConfig(raw.vision),
     credentialsDirectory: resolve(baseDirectory, "credentials"),
     stateDatabasePath: resolveConfiguredPath(raw.storage.database_path, baseDirectory),
     approvalTimeoutMs: raw.approval.timeout_seconds * 1000,
     logLevel: raw.logging.level,
+  };
+}
+
+function toVisionConfig(raw: GatewayConfigDocument["vision"]): GatewayConfig["vision"] {
+  if (raw.mode === "disabled") return raw;
+  let endpoint: URL;
+  try {
+    endpoint = new URL(raw.endpoint);
+  } catch {
+    throw new ConfigurationError("vision.endpoint 必须是有效 URL");
+  }
+  const loopback = endpoint.hostname === "localhost"
+    || endpoint.hostname === "127.0.0.1"
+    || endpoint.hostname === "[::1]";
+  if (endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && loopback)) {
+    throw new ConfigurationError("vision.endpoint 必须使用 HTTPS；本机回环地址可以使用 HTTP");
+  }
+  if (endpoint.username || endpoint.password || endpoint.hash) {
+    throw new ConfigurationError("vision.endpoint 不能包含凭据或 URL Fragment");
+  }
+  return {
+    mode: raw.mode,
+    endpoint: endpoint.toString(),
+    model: raw.model,
   };
 }
 

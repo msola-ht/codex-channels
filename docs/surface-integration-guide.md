@@ -14,9 +14,9 @@ Turn、Item、Goal 和历史的唯一事实来源。
 Surface 证明当前公开合同不足，应先单独评审合同、依赖方向和测试变更，再同步更新本指南，不能让
 平台模块通过内部导入或复制核心逻辑绕过合同。
 
-具体平台计划必须继续服从本指南。当前飞书的分阶段范围、组合工厂、身份、输入队列、配置和验证
-设计见 [`飞书 Surface 接入计划`](feishu-surface-plan.md)；微信 ClawBot 的官方协议研究、
-凭据边界、分阶段范围和停止条件见 [`微信 Surface 接入计划`](weixin-surface-plan.md)。
+具体平台设计必须继续服从本指南。当前飞书的组合工厂、身份、输入队列、配置和停止条件见
+[`飞书 Surface 设计决策`](feishu-surface-plan.md)；微信 ClawBot 的官方协议基线、凭据边界和
+停止条件见 [`微信 Surface 设计决策`](weixin-surface-plan.md)。
 
 ## 固定架构
 

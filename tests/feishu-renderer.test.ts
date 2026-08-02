@@ -56,11 +56,11 @@ describe("Feishu output renderer", () => {
       {
         platform: "darwin",
         architecture: "arm64",
-        gatewayVersion: "0.145.0",
+        gatewayVersion: "0.146.0",
         nodeVersion: "v24.0.0",
         transport: "Unix WebSocket",
         codexUpstreamUserAgent:
-          "codex-cli/0.145.0 (macOS 15.0) build-secret (arm64)",
+          "codex-cli/0.146.0 (macOS 15.0) build-secret (arm64)",
       },
     );
 
@@ -71,9 +71,9 @@ describe("Feishu output renderer", () => {
       "",
       "**运行环境**",
       "- **系统：** macOS · arm64",
-      "- **版本：** Codex Connect 0.145.0 · Node.js v24.0.0",
+      "- **版本：** Codex Connect 0.146.0 · Node.js v24.0.0",
       "- **连接：** Unix WebSocket",
-      "- **App Server UA：** codex-cli/0.145.0 (macOS 15.0) (arm64)",
+      "- **App Server UA：** codex-cli/0.146.0 (macOS 15.0) (arm64)",
       "",
       "**当前会话**",
       "- **Workspace：** Main (main)",
@@ -81,10 +81,11 @@ describe("Feishu output renderer", () => {
       "- **Thread：** thread-1",
       "- **Git 分支：** feature/weixin-surface",
       "- **模型：** gpt-test",
+      "- **提供商：** OpenAI",
       "- **思考强度：** medium",
       "- **Fast 模式：** 开启",
       "- **协作模式：** Default",
-      "- **周限：** 已使用 37%",
+      "- **周限：** 剩余 63%",
     ].join("\n"));
     expect(rendered).not.toContain("build-secret");
   });
@@ -154,21 +155,26 @@ describe("Feishu output renderer", () => {
       {
         kind: "usage",
         result: {
-          summary: {
-            lifetimeTokens: null,
-            peakDailyTokens: null,
-            longestRunningTurnSec: null,
-            currentStreakDays: null,
-            longestStreakDays: null,
+          kind: "token-usage",
+          provider: "openai",
+          usage: {
+            summary: {
+              lifetimeTokens: null,
+              peakDailyTokens: null,
+              longestRunningTurnSec: null,
+              currentStreakDays: null,
+              longestStreakDays: null,
+            },
+            daily: [],
           },
-          daily: [],
         },
       },
       {
         kind: "limits",
         result: {
-          limits: [],
-          resetCreditsAvailable: null,
+          kind: "rate-limits",
+          provider: "openai",
+          limits: { limits: [], resetCreditsAvailable: null },
         },
       },
       { kind: "permissions", profiles: [] },
@@ -211,7 +217,7 @@ describe("Feishu output renderer", () => {
       "当前没有已启用的 Skills。",
       "MCP Servers（0）：",
       "当前没有已安装 Plugins。",
-      expect.stringContaining("Codex 用量摘要"),
+      expect.stringContaining("OpenAI Codex 账户用量摘要"),
       expect.stringContaining("Codex 额度"),
       expect.stringContaining("可用 Permission Profiles"),
       expect.stringContaining("项目规则检查通过"),
@@ -264,31 +270,38 @@ describe("Feishu output renderer", () => {
         },
       },
     });
-    expect(status).toContain("缓存命中率：75%");
+    expect(status).toContain("输入总计：800");
+    expect(status).toContain("命中缓存：600");
+    expect(status).toContain("未命中缓存：200");
+    expect(status).toContain("缓存命中率：75.00%");
     expect(status).toContain("缓存写入：50");
     expect(status).toContain("Git 分支：feature/weixin-surface");
-    expect(status).toContain("周限：已使用 37%");
+    expect(status).toContain("周限：剩余 63%");
 
     const limits = renderFeishuCommandResult({
       kind: "limits",
       result: {
-        limits: [{
-          limitId: "codex",
-          limitName: "Codex",
-          primary: null,
-          secondary: null,
-          credits: null,
-          individualLimit: {
-            limit: "100",
-            used: "25",
-            remainingPercent: 75,
-            resetsAt: 1_800_000_000,
-          },
-          spendControlReached: false,
-          planType: "pro",
-          rateLimitReachedType: "workspace_member_usage_limit_reached",
-        }],
-        resetCreditsAvailable: null,
+        kind: "rate-limits",
+        provider: "openai",
+        limits: {
+          limits: [{
+            limitId: "codex",
+            limitName: "Codex",
+            primary: null,
+            secondary: null,
+            credits: null,
+            individualLimit: {
+              limit: "100",
+              used: "25",
+              remainingPercent: 75,
+              resetsAt: 1_800_000_000,
+            },
+            spendControlReached: false,
+            planType: "pro",
+            rateLimitReachedType: "workspace_member_usage_limit_reached",
+          }],
+          resetCreditsAvailable: null,
+        },
       },
     });
     expect(limits).toContain("套餐：Pro");
@@ -302,17 +315,21 @@ describe("Feishu output renderer", () => {
     const rendered = renderFeishuCommandResult({
       kind: "usage",
       result: {
-        summary: {
-          lifetimeTokens: 6_439_124_350,
-          peakDailyTokens: 389_153_809,
-          longestRunningTurnSec: 1_138,
-          currentStreakDays: 45,
-          longestStreakDays: 45,
+        kind: "token-usage",
+        provider: "openai",
+        usage: {
+          summary: {
+            lifetimeTokens: 6_439_124_350,
+            peakDailyTokens: 389_153_809,
+            longestRunningTurnSec: 1_138,
+            currentStreakDays: 45,
+            longestStreakDays: 45,
+          },
+          daily: [{
+            startDate: "2026-07-26",
+            tokens: 128_021_979,
+          }],
         },
-        daily: [{
-          startDate: "2026-07-26",
-          tokens: 128_021_979,
-        }],
       },
     });
 
@@ -350,6 +367,7 @@ describe("Feishu output renderer", () => {
         modelContextWindow: 200,
       },
       model: "gpt-test",
+      modelProvider: "openai",
       effort: "medium",
       serviceTier: "priority",
       gitBranch: "feature/weixin-surface",
@@ -365,10 +383,11 @@ describe("Feishu output renderer", () => {
       "**本次运行 · 已完成**",
       "",
       "- **上下文：** 100 / 200（50%）",
-      "- **缓存命中：** 50%",
+      "- **最近请求缓存命中：** 50.00%",
       "- **模型：** gpt-test · medium · Fast 开启",
+      "- **提供商：** OpenAI",
       "- **上下文压缩：** 2 次",
-      "- **周限：** 已使用 37%",
+      "- **周限：** 剩余 63%",
       "- **Git 分支：** feature/weixin-surface",
       "- **耗时：** 1分5秒",
     ].join("\n"));
@@ -382,6 +401,14 @@ describe("Feishu output renderer", () => {
       {
         outcome: { type: "thread.resumed", threadId: "thread-resumed" },
         expected: "Thread：thread-resumed",
+      },
+      {
+        outcome: {
+          type: "thread.resumed",
+          threadId: "thread-transferred",
+          transferredFrom: "telegram",
+        },
+        expected: "已从 Telegram 接管 Codex Thread",
       },
       {
         outcome: { type: "session.new" },
@@ -416,6 +443,14 @@ describe("Feishu output renderer", () => {
       {
         outcome: { type: "thread.renamed", name: "新名称" },
         expected: "名称：新名称",
+      },
+      {
+        outcome: { type: "thread.pin-updated", pinned: true },
+        expected: "已固定当前会话",
+      },
+      {
+        outcome: { type: "thread.pin-updated", pinned: false },
+        expected: "已取消固定当前会话",
       },
       {
         outcome: { type: "thread.compaction-requested" },
@@ -466,18 +501,19 @@ describe("Feishu output renderer", () => {
         id: "thread-1234567890",
         name: "会话名称",
         preview: "预览",
+        isPinned: true,
         status: { type: "idle" },
       }],
       currentThreadId: "thread-1234567890",
       archived: false,
       searchTerm: "会话",
     });
-    expect(sessions).toContain("会话名称 · thread-12345 · idle ← 当前");
+    expect(sessions).toContain("固定 · 会话名称 · thread-12345 · idle ← 当前");
 
     expect(renderFeishuCommandResult({
       kind: "skills",
       entries: [{ name: "tdd", description: "测试驱动开发" }],
-    })).toContain("- tdd：测试驱动开发");
+    })).toContain("1. tdd：测试驱动开发");
     expect(renderFeishuCommandResult({
       kind: "mcp",
       servers: [{ name: "docs", authStatus: "oAuth", toolCount: 2 }],
@@ -525,7 +561,7 @@ describe("Feishu output renderer", () => {
       serviceTierPending: false,
     };
     for (const [view, expected] of [
-      ["model", "可用模型（1）"],
+      ["model", "模型列表（1）"],
       ["effort", "可用思考强度"],
       ["fast", "模型支持：支持 Fast"],
     ] as const) {
@@ -576,6 +612,7 @@ describe("Feishu output renderer", () => {
         preview: index === 0
           ? `第一行\n第二行 ${"长".repeat(60)}`
           : `会话 ${index + 1}`,
+        isPinned: false,
         status: { type: "idle" as const },
       })),
       archived: false,
@@ -589,6 +626,26 @@ describe("Feishu output renderer", () => {
       "另有 1 条未显示，请使用 /sessions <搜索词> 缩小范围。",
     );
     expect(sessions).not.toContain("21. 会话 21");
+  });
+
+  it("annotates session rows with the model when known", () => {
+    const sessions = renderFeishuCommandResult({
+      kind: "sessions",
+      sessions: [{
+        id: "thread-1234567890",
+        name: "会话名称",
+        preview: "预览",
+        isPinned: true,
+        status: { type: "idle" },
+        model: "gpt-test",
+      }],
+      currentThreadId: "thread-1234567890",
+      archived: false,
+    });
+
+    expect(sessions).toContain(
+      "固定 · 会话名称 · 模型：gpt-test · thread-12345 · idle ← 当前",
+    );
   });
 
   it("renders completed assistant content for the CardKit boundary", () => {
@@ -615,6 +672,27 @@ describe("Feishu output renderer", () => {
     };
 
     expect(renderFeishuOutput(event)).toBe("Codex 返回了空消息。");
+  });
+
+  it("renders structured visual completion details with the recognition model", () => {
+    expect(renderFeishuOutput({
+      type: "vision.completed",
+      target,
+      model: "gpt-5.6-luna",
+      elapsedMs: 18_000,
+      usage: {
+        inputTokens: 9_433,
+        outputTokens: 483,
+        totalTokens: 9_916,
+      },
+    })).toBe([
+      "图片识别完成",
+      "- 识别模型：gpt-5.6-luna",
+      "- 视觉 API 耗时：18秒",
+      "- Token 用量：输入 9,433 · 输出 483 · 总计 9,916",
+      "",
+      "正在交给当前模型处理。",
+    ].join("\n"));
   });
 
   it("renders every critical output event and ignores non-critical progress", () => {
@@ -704,6 +782,11 @@ describe("Feishu output renderer", () => {
     ];
     const progressEvents: OutputEvent[] = [
       {
+        type: "vision.started",
+        target,
+        imageCount: 2,
+      },
+      {
         type: "turn.started",
         target,
         threadId: "thread-1",
@@ -738,6 +821,7 @@ describe("Feishu output renderer", () => {
     expect(renderFeishuOutput(criticalEvents[2]!)).toBeNull();
     expect(progressEvents.some(isCriticalOutputEvent)).toBe(false);
     expect(progressEvents.map(renderFeishuOutput)).toEqual([
+      "视觉识别中\n- 图片：2 张\n- 状态：已发送至视觉 API",
       "**已开始处理。**",
       null,
       null,

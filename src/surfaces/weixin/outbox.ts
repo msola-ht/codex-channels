@@ -21,6 +21,11 @@ import {
   renderPlainLifecyclePresentation,
 } from "../lifecycle-presentation.js";
 import {
+  formatVisionCompleted,
+  formatVisionProgress,
+  formatVisionStarted,
+} from "../input-copy.js";
+import {
   contentTruncatedText,
   emptyCodexResponseText,
   formatCliInput,
@@ -133,7 +138,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
         () => this.send(
           event.target,
           renderPlainLifecyclePresentation(
-            createTurnStartedPresentation(),
+            createTurnStartedPresentation(event.background ? event.threadId : undefined),
           ),
         ),
         true,
@@ -305,6 +310,21 @@ export class WeixinOutbox implements SurfaceOutputPort {
 
   private render(event: OutputEvent): string | null {
     switch (event.type) {
+      case "vision.started":
+        return formatWeixinCommandText(
+          formatVisionStarted(event.imageCount),
+          { structuredFields: true },
+        );
+      case "vision.progress":
+        return formatWeixinCommandText(
+          formatVisionProgress(event.elapsedSeconds),
+          { structuredFields: true },
+        );
+      case "vision.completed":
+        return formatWeixinCommandText(
+          formatVisionCompleted(event),
+          { structuredFields: true },
+        );
       case "user.message":
         return formatCliInput(event.text);
       case "text.completed":
@@ -313,7 +333,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
         }
         return event.text.trim().length === 0
           ? emptyCodexResponseText
-          : formatWeixinFinalText(event.text);
+          : formatWeixinFinalText(
+              `${event.background ? `后台任务 · ${event.threadId.slice(0, 12)}\n\n` : ""}${event.text}`,
+            );
       case "turn.completed": {
         return formatWeixinCommandText(renderWeixinTurnCompleted(event));
       }
@@ -426,11 +448,18 @@ export class WeixinOutbox implements SurfaceOutputPort {
         await this.invalidateContext(target);
         throw new WeixinOutboxError("unauthorized-recipient");
       }
-      await this.client.sendText({
-        actorId: context.actorId,
-        contextToken: context.contextToken,
-        text: chunk,
-      });
+      try {
+        await this.client.sendText({
+          actorId: context.actorId,
+          contextToken: context.contextToken,
+          text: chunk,
+        });
+      } catch (error) {
+        if (isRejectedReplyContext(error)) {
+          await this.invalidateContext(target);
+        }
+        throw error;
+      }
     }
   }
 
@@ -553,4 +582,10 @@ function weixinOutputErrorMetadata(
     return { ...surfaceErrorMetadata(error), errorCode: error.code };
   }
   return surfaceErrorMetadata(error);
+}
+
+function isRejectedReplyContext(error: unknown): boolean {
+  return error instanceof WeixinProtocolError
+    && error.code === "api-error"
+    && error.returnCode === -2;
 }

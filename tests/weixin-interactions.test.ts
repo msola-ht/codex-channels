@@ -19,6 +19,38 @@ const target: ConversationTarget = {
 };
 
 describe("WeixinInteractionPort", () => {
+  it("remains reusable after transient interactions are cancelled", async () => {
+    const delivery = deliveryFixture();
+    const port = new WeixinInteractionPort(
+      delivery,
+      actorRegistryFixture([actorId]),
+      accessFixture(true),
+      undefined,
+      () => "reusable-token",
+    );
+    const first = port.request(target, approvalRequest({
+      requestId: "request-before-disconnect",
+    }));
+    await vi.waitFor(() => {
+      expect(delivery.deliverTextSequence).toHaveBeenCalledOnce();
+    });
+
+    port.cancelAll("渠道连接已中断");
+    await expect(first).resolves.toEqual({
+      type: "approval",
+      approved: false,
+    });
+    const second = port.request(target, approvalRequest({
+      requestId: "request-after-recovery",
+    }));
+    await vi.waitFor(() => {
+      expect(delivery.deliverTextSequence).toHaveBeenCalledTimes(2);
+    });
+
+    port.cancelAll();
+    await second;
+  });
+
   it("delivers an opaque one-time command and resolves an exact once approval", async () => {
     const delivery = deliveryFixture();
     const port = new WeixinInteractionPort(
@@ -584,7 +616,7 @@ describe("WeixinInteractionPort", () => {
     );
     expect(delivery.deliverText).toHaveBeenLastCalledWith(
       target,
-      "MCP 交互命令或 JSON 内容无效。",
+      "MCP 交互命令或内容无效。",
     );
     await port.handleText(
       target,
@@ -596,6 +628,43 @@ describe("WeixinInteractionPort", () => {
       type: "elicitation",
       action: "accept",
       content: { project: "codex-channels" },
+    });
+  });
+
+  it("renders and resolves MCP tool approval commands without asking for JSON", async () => {
+    const delivery = deliveryFixture();
+    const port = new WeixinInteractionPort(
+      delivery,
+      actorRegistryFixture([actorId]),
+      accessFixture(true),
+      undefined,
+      () => "mcp-tool-token",
+    );
+    const pending = port.request(target, mcpToolApprovalRequest());
+    await vi.waitFor(() => {
+      expect(delivery.deliverTextSequence).toHaveBeenCalledWith(
+        target,
+        expect.arrayContaining([
+          expect.stringContaining("Update pull request"),
+          expect.stringContaining("/批准一次 mcp-tool-token"),
+          expect.stringContaining("/批准会话 mcp-tool-token"),
+          expect.stringContaining("/始终允许 mcp-tool-token"),
+        ]),
+      );
+    });
+    expect(JSON.stringify(delivery.deliverTextSequence.mock.calls))
+      .not.toContain("/提交表单");
+
+    await port.handleText(
+      target,
+      actorId,
+      "/批准会话 mcp-tool-token",
+    );
+    await expect(pending).resolves.toEqual({
+      type: "elicitation",
+      action: "accept",
+      content: null,
+      scope: "session",
     });
   });
 
@@ -748,6 +817,28 @@ function formElicitationRequest(): Extract<
     title: "title",
     message: "message",
     mode: "form",
+    expiresInMs: 60_000,
+  };
+}
+
+function mcpToolApprovalRequest(): Extract<
+  InteractionRequest,
+  { type: "elicitation" }
+> {
+  return {
+    type: "elicitation",
+    requestId: "request-mcp-tool",
+    threadId: "thread",
+    turnId: "turn",
+    title: "MCP GitHub 请求批准",
+    message: "允许 GitHub 更新拉取请求吗？",
+    mode: "tool-approval",
+    toolApproval: {
+      toolTitle: "Update pull request",
+      detail: "Pull request：146",
+      allowSession: true,
+      allowAlways: true,
+    },
     expiresInMs: 60_000,
   };
 }

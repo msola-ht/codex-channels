@@ -18,6 +18,8 @@
     <string>__CONFIG_DIR__</string>
     <key>CODEX_CONNECT_CONFIG_FILE</key>
     <string>__CONFIG_PATH__</string>
+    <key>CODEX_CONNECT_SERVICE_ROLE</key>
+    <string>app-server</string>
     <key>PATH</key>
     <string>__LAUNCHD_PATH__</string>
   </dict>

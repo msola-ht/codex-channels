@@ -1,5 +1,5 @@
 import pino from "pino";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { InteractionPort } from "../src/approval/index.js";
 import { SurfaceManager } from "../src/bootstrap/surface-manager.js";
@@ -11,7 +11,11 @@ const interactions = {} as InteractionPort;
 const logger = pino({ level: "silent" });
 
 describe("SurfaceManager", () => {
-  it("starts in registration order and stops in reverse order", async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("starts every Surface and stops them in reverse registration order", async () => {
     const calls: string[] = [];
     const manager = createManager([
       surface("telegram", "default", calls),
@@ -29,21 +33,156 @@ describe("SurfaceManager", () => {
     ]);
   });
 
-  it("rolls back started Surfaces when a later start fails", async () => {
+  it("keeps healthy Surfaces running and retries a failed Surface independently", async () => {
+    vi.useFakeTimers();
     const calls: string[] = [];
+    let feishuStarts = 0;
+    const feishu = surface("feishu", "tenant-a", calls);
+    feishu.start = async () => {
+      feishuStarts += 1;
+      calls.push("start:feishu");
+      if (feishuStarts === 1) {
+        throw new Error("start failed");
+      }
+    };
     const manager = createManager([
       surface("telegram", "default", calls),
-      surface("feishu", "tenant-a", calls, { failStart: true }),
+      feishu,
+    ], undefined, { retryDelaysMs: [10] });
+
+    await expect(manager.start()).resolves.toBeUndefined();
+    expect(calls).toEqual([
+      "start:telegram",
+      "start:feishu",
     ]);
 
-    await expect(manager.start()).rejects.toThrow("start failed");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(calls).toEqual([
+      "start:telegram",
+      "start:feishu",
+      "start:feishu",
+    ]);
+
+    await manager.stop();
+    expect(calls.slice(-2)).toEqual(["stop:feishu", "stop:telegram"]);
+  });
+
+  it("recovers only the failed Surface after a runtime fatal error", async () => {
+    vi.useFakeTimers();
+    const calls: string[] = [];
+    const availability: string[] = [];
+    const telegram = surface("telegram", "default", calls);
+    const feishu = surface("feishu", "tenant-a", calls);
+    const manager = createManager(
+      [telegram, feishu],
+      undefined,
+      {
+        retryDelaysMs: [10],
+        setInteractionAvailable: (surfaceId, accountId, available) => {
+          availability.push(`${surfaceId}:${accountId}:${available}`);
+        },
+      },
+    );
+    await manager.start();
+
+    manager.reportFatal("telegram", "default", new Error("polling failed"));
+    await vi.advanceTimersByTimeAsync(10);
 
     expect(calls).toEqual([
       "start:telegram",
       "start:feishu",
-      "stop:feishu",
-      "stop:telegram",
+      "start:telegram",
     ]);
+    expect(availability).toEqual([
+      "telegram:default:true",
+      "feishu:tenant-a:true",
+      "telegram:default:false",
+      "telegram:default:true",
+    ]);
+    await manager.stop();
+  });
+
+  it("queues critical output during recovery and flushes it after reconnecting", async () => {
+    vi.useFakeTimers();
+    const calls: string[] = [];
+    const received: string[] = [];
+    const telegram = surface("telegram", "default", calls);
+    telegram.output.handle = (event) => {
+      received.push(event.type);
+    };
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager(
+      [telegram],
+      output,
+      { retryDelaysMs: [10] },
+    );
+    await manager.start();
+    manager.reportFatal("telegram", "default", new Error("polling failed"));
+
+    output.publish({
+      type: "warning",
+      target: {
+        surface: "telegram",
+        accountId: "default",
+        conversationId: "chat-1",
+      },
+      threadId: "thread-1",
+      message: "需要保留",
+    });
+    output.publish({
+      type: "text.delta",
+      target: {
+        surface: "telegram",
+        accountId: "default",
+        conversationId: "chat-1",
+      },
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      text: "可以丢弃",
+    });
+    await settle();
+
+    expect(received).toEqual([]);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(received).toEqual(["warning"]);
+    await manager.stop();
+  });
+
+  it("queues critical output while a Surface is still starting", async () => {
+    const calls: string[] = [];
+    const received: string[] = [];
+    let resolveStart!: () => void;
+    const telegram = surface("telegram", "default", calls);
+    telegram.start = () => new Promise<void>((resolve) => {
+      calls.push("start:telegram");
+      resolveStart = resolve;
+    });
+    telegram.output.handle = (event) => {
+      received.push(event.type);
+    };
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager([telegram], output);
+
+    const starting = manager.start();
+    output.publish({
+      type: "warning",
+      target: {
+        surface: "telegram",
+        accountId: "default",
+        conversationId: "chat-1",
+      },
+      threadId: "thread-1",
+      message: "启动期间不能丢失",
+    });
+    await settle();
+    expect(received).toEqual([]);
+
+    resolveStart();
+    await starting;
+    expect(received).toEqual(["warning"]);
+    await manager.stop();
+    await output.close();
   });
 
   it("continues stopping remaining Surfaces after one stop fails", async () => {
@@ -209,7 +348,7 @@ describe("SurfaceManager", () => {
       action: "reloaded",
       changes: [{ code: "workspace.registry", scope: "global" }],
       addedWorkspaces: [{ id: "docs", name: "Docs", cwd: "/docs" }],
-    })).rejects.toThrow("Surface 尚未全部启动");
+    })).rejects.toThrow("部分 Surface 当前不可用");
   });
 
   it("routes output by exact Surface and account", async () => {
@@ -243,7 +382,7 @@ describe("SurfaceManager", () => {
     await output.close();
   });
 
-  it("routes output only while the target Surface is started", async () => {
+  it("buffers critical output before startup and stops routing after shutdown", async () => {
     const feishu = surface("feishu", "tenant-a", []);
     const received: string[] = [];
     feishu.output.handle = (event) => {
@@ -271,7 +410,7 @@ describe("SurfaceManager", () => {
     output.publish(event);
     await settle();
 
-    expect(received).toEqual(["thread.status"]);
+    expect(received).toEqual(["thread.status", "thread.status"]);
     await output.close();
   });
 
@@ -393,8 +532,9 @@ describe("SurfaceManager", () => {
 function createManager(
   surfaces: SurfaceAdapter[],
   output = new EventBus<OutputEvent>(logger),
+  options?: ConstructorParameters<typeof SurfaceManager>[4],
 ): SurfaceManager {
-  return new SurfaceManager(surfaces, output, logger);
+  return new SurfaceManager(surfaces, output, logger, undefined, options);
 }
 
 function surface(

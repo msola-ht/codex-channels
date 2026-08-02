@@ -9,6 +9,7 @@ import type {
   ExecPolicyAmendment,
   FileSystemPath,
   JsonValue,
+  McpToolApproval,
   NetworkApprovalContext,
   NetworkPolicyAmendment,
 } from "./requests.js";
@@ -47,6 +48,9 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
     }
 
     const requestId = String(request.requestId);
+    const title = (value: string): string => this.router.isBackgroundThread(request.threadId)
+      ? `后台任务 · ${request.threadId.slice(0, 12)} · ${value}`
+      : value;
     switch (request.type) {
       case "command": {
         if (!offersCommandDecision(request.availableDecisions, "accept")) {
@@ -69,7 +73,7 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
           threadId: request.threadId,
           turnId: request.turnId,
           itemId: request.itemId,
-          title: isNetworkOnly ? "Codex 请求访问网络" : "Codex 请求执行命令",
+          title: title(isNetworkOnly ? "Codex 请求访问网络" : "Codex 请求执行命令"),
           detail: [
             request.reason ?? undefined,
             hasCommand ? request.command ?? undefined : undefined,
@@ -113,7 +117,7 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
           threadId: request.threadId,
           turnId: request.turnId,
           itemId: request.itemId,
-          title: "Codex 请求修改文件",
+          title: title("Codex 请求修改文件"),
           detail: request.reason ?? "Codex 请求修改文件",
           allowSession: true,
           expiresInMs: this.timeoutMs,
@@ -131,7 +135,7 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
           threadId: request.threadId,
           turnId: request.turnId,
           itemId: request.itemId,
-          title: "Codex 请求临时权限",
+          title: title("Codex 请求临时权限"),
           detail: request.reason ?? JSON.stringify(request.permissions, null, 2),
           allowSession: false,
           expiresInMs: this.timeoutMs,
@@ -151,7 +155,7 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
           threadId: request.threadId,
           turnId: request.turnId,
           itemId: request.itemId,
-          title: "Codex 需要补充信息",
+          title: title("Codex 需要补充信息"),
           questions: request.questions.map((question) => ({
             id: question.id,
             header: question.header,
@@ -168,24 +172,80 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
         };
       }
       case "elicitation": {
+        const toolApproval = request.toolApproval;
         const decision = await this.interaction.request(target, {
           type: "elicitation",
           requestId,
           threadId: request.threadId,
           turnId: request.turnId,
-          title: `MCP ${request.serverName} 请求输入`,
+          title: title(toolApproval
+            ? `MCP ${toolApproval.connectorName ?? request.serverName} 请求批准`
+            : `MCP ${request.serverName} 请求输入`),
           message: request.message,
-          mode: request.mode === "url" ? "url" : "form",
+          mode: toolApproval
+            ? "tool-approval"
+            : request.mode === "url"
+              ? "url"
+              : "form",
           ...(request.mode === "url" ? { url: request.url } : {}),
+          ...(toolApproval
+            ? {
+                toolApproval: {
+                  toolTitle: toolApproval.toolTitle,
+                  detail: formatMcpToolApprovalDetail(toolApproval),
+                  allowSession: toolApproval.allowSession,
+                  allowAlways: toolApproval.allowAlways,
+                },
+              }
+            : {}),
           expiresInMs: this.timeoutMs,
         });
+        if (toolApproval) {
+          if (
+            decision.type !== "elicitation"
+            || decision.action !== "accept"
+          ) {
+            return {
+              type: "elicitation",
+              action: decision.type === "elicitation"
+                ? decision.action
+                : "cancel",
+              content: null,
+              persist: null,
+            };
+          }
+          const scope = decision.scope ?? "once";
+          if (
+            (scope === "session" && !toolApproval.allowSession)
+            || (scope === "always" && !toolApproval.allowAlways)
+          ) {
+            return {
+              type: "elicitation",
+              action: "cancel",
+              content: null,
+              persist: null,
+            };
+          }
+          return {
+            type: "elicitation",
+            action: "accept",
+            content: null,
+            persist: scope === "once" ? null : scope,
+          };
+        }
         if (decision.type !== "elicitation" || !isJsonValue(decision.content)) {
-          return { type: "elicitation", action: "cancel", content: null };
+          return {
+            type: "elicitation",
+            action: "cancel",
+            content: null,
+            persist: null,
+          };
         }
         return {
           type: "elicitation",
           action: decision.action,
           content: decision.action === "accept" ? decision.content : null,
+          persist: null,
         };
       }
     }
@@ -211,7 +271,12 @@ function safeDecline(request: ApprovalRequest): ApprovalResponse {
     case "user-input":
       return { type: "user-input", answers: {} };
     case "elicitation":
-      return { type: "elicitation", action: "cancel", content: null };
+      return {
+        type: "elicitation",
+        action: "cancel",
+        content: null,
+        persist: null,
+      };
   }
 }
 
@@ -419,4 +484,30 @@ function isJsonValue(value: unknown): value is JsonValue {
   }
   return typeof value === "object"
     && Object.values(value as Record<string, unknown>).every(isJsonValue);
+}
+
+function formatMcpToolApprovalDetail(approval: McpToolApproval): string {
+  const parameters = approval.parameters.slice(0, 10).map((parameter) =>
+    `${truncate(parameter.displayName, 100)}：${truncate(
+      displayJsonValue(parameter.value),
+      300,
+    )}`
+  );
+  if (approval.parameters.length > parameters.length) {
+    parameters.push(`另有 ${approval.parameters.length - parameters.length} 项参数`);
+  }
+  return parameters.join("\n")
+    || approval.toolDescription
+    || approval.toolTitle
+    || "此 MCP 工具操作需要明确批准。";
+}
+
+function displayJsonValue(value: JsonValue): string {
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+function truncate(value: string, maximumLength: number): string {
+  return value.length <= maximumLength
+    ? value
+    : `${value.slice(0, maximumLength - 1)}…`;
 }

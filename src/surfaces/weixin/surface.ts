@@ -1,6 +1,6 @@
 import type { Logger } from "pino";
 
-import type { ConversationService } from "../../application/index.js";
+import type { ConversationUseCases } from "../../application/index.js";
 import type {
   ConversationTarget,
 } from "../../conversation-core/index.js";
@@ -57,7 +57,7 @@ export interface WeixinSurfaceOptions {
   typingClient?: WeixinTypingProtocolClient;
   lifecycleClient?: WeixinLifecycleProtocolClient;
   cursorStore: WeixinUpdatesCursorStore;
-  service: ConversationService;
+  service: ConversationUseCases;
   access: SurfaceAccessPolicy;
   logger: Logger;
   onFatal: (error: WeixinInputFatalError) => void;
@@ -219,7 +219,9 @@ export class WeixinSurface implements SurfaceAdapter {
   }
 
   start(): Promise<void> {
-    this.startPromise ??= this.startOnce();
+    this.startPromise ??= this.startOnce().finally(() => {
+      this.startPromise = undefined;
+    });
     return this.startPromise;
   }
 
@@ -272,7 +274,7 @@ export class WeixinSurface implements SurfaceAdapter {
       await this.notifyLifecycle("stop");
       this.images?.close();
       this.audios?.close();
-      this.interactions.cancelAll("Gateway 已停止");
+      this.interactions.close();
       await this.output.close();
     }
   }
@@ -311,13 +313,7 @@ export class WeixinSurface implements SurfaceAdapter {
       this.images?.start(),
       this.audios?.start(),
     ]);
-    try {
-      await this.input.start();
-    } catch (error) {
-      this.images?.close();
-      this.audios?.close();
-      throw error;
-    }
+    await this.input.start();
     await this.notifyLifecycle("start");
     for (const target of restored) {
       try {

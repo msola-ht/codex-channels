@@ -24,6 +24,9 @@ export function toThreadSnapshot(thread: Thread): ThreadSnapshot {
   if (thread.name !== null) {
     requireString(thread.name, "name");
   }
+  if (typeof thread.isPinned !== "boolean") {
+    throw new Error("Codex Thread 响应缺少有效 isPinned");
+  }
   if (!Array.isArray(thread.turns)) {
     throw new Error("Codex Thread 响应缺少有效 turns");
   }
@@ -34,13 +37,20 @@ export function toThreadSnapshot(thread: Thread): ThreadSnapshot {
   return {
     id: thread.id,
     sessionId: thread.sessionId,
+    modelProvider: toThreadModelProvider(thread),
     preview: thread.preview,
     name: thread.name,
+    isPinned: thread.isPinned,
     status: toThreadStatus(thread.status),
     cwd: thread.cwd,
     source: toThreadSource(thread.source),
     activeTurnId: activeTurn?.id ?? null,
   };
+}
+
+function toThreadModelProvider(thread: Thread): string {
+  requireString(thread.modelProvider, "modelProvider");
+  return thread.modelProvider;
 }
 
 export function toThreadSession(response: ThreadSessionResponse): ThreadSession {
@@ -54,6 +64,7 @@ export function toThreadSession(response: ThreadSessionResponse): ThreadSession 
   return {
     thread: toThreadSnapshot(response.thread),
     model: response.model,
+    modelProvider: response.modelProvider,
     reasoningEffort: response.reasoningEffort,
     serviceTier: response.serviceTier,
     contextCompactionItemIds: contextCompactionItemIds(response.thread),

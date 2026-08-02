@@ -4,7 +4,11 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
 
 import type { GatewayConfig } from "../config/index.js";
-import type { ConversationTarget } from "../conversation-core/index.js";
+import { selectHttpProxyUrl } from "../../runtime/network-proxy.mjs";
+import {
+  conversationTargetKey,
+  type ConversationTarget,
+} from "../conversation-core/index.js";
 import {
   FeishuAccessPolicy,
   TelegramAccessPolicy,
@@ -26,6 +30,7 @@ import {
   type SurfacePluginContext,
   type SurfaceRuntimeModule,
 } from "./surface-plugin.js";
+import { createProxyFetch } from "./proxy-fetch.js";
 
 export interface TelegramRuntimeAdapter extends SurfaceAdapter {
   readonly surface: "telegram";
@@ -148,6 +153,7 @@ function createWeixinModule(
     },
     operationUpdateDisplay: options.config.operationUpdateDisplay,
     planUpdatesEnabled: options.config.planUpdatesEnabled,
+    fetchImpl: createProxyFetch(options.config.networkProxy),
     logger: options.logger,
     onFatal: (error) => options.onFatal("weixin", config.accountId, error),
   });
@@ -267,49 +273,18 @@ export function selectFeishuProxyUrl(
   proxy: GatewayConfig["networkProxy"],
   hostname: string,
 ): string | undefined {
-  if (matchesNoProxy(hostname, proxy.no)) {
-    return undefined;
-  }
-  const selected = proxy.https ?? proxy.http ?? proxy.all;
-  if (!selected) {
-    return undefined;
-  }
-  let protocol: string;
-  try {
-    protocol = new URL(selected).protocol;
-  } catch {
-    throw new Error("飞书代理配置无效");
-  }
-  if (protocol !== "http:" && protocol !== "https:") {
-    throw new Error("飞书代理只支持 http:// 或 https://");
-  }
-  return selected;
-}
-
-function matchesNoProxy(hostname: string, noProxy: string | undefined): boolean {
-  const target = hostname.toLowerCase();
-  return (noProxy ?? "").split(",").some((rawEntry) => {
-    let entry = rawEntry.trim().toLowerCase();
-    if (!entry) {
-      return false;
-    }
-    if (entry === "*") {
-      return true;
-    }
-    entry = entry.replace(/:\d+$/u, "");
-    if (entry.startsWith("*.")) {
-      entry = entry.slice(1);
-    }
-    return entry.startsWith(".")
-      ? target === entry.slice(1) || target.endsWith(entry)
-      : target === entry;
-  });
+  return selectHttpProxyUrl(proxy, `https://${hostname}`);
 }
 
 function createTelegramModule(
   options: SurfacePluginContext,
 ): SurfaceRuntimeModule {
   const { config, bindings, logger } = options;
+  const proxyUrl = selectHttpProxyUrl(
+    config.networkProxy,
+    "https://api.telegram.org",
+    config.telegramProxyUrl,
+  );
   const removedBindings = removeUnauthorizedTelegramBindings(
     bindings,
     config.telegramAllowedUserIds,
@@ -323,9 +298,7 @@ function createTelegramModule(
   );
   const adapter = createTelegramSurface({
     token: config.telegramBotToken,
-    ...(config.telegramProxyUrl === undefined
-      ? {}
-      : { proxyUrl: config.telegramProxyUrl }),
+    ...(proxyUrl === undefined ? {} : { proxyUrl }),
     service: options.service,
     access,
     startupRecipients: config.telegramAllowedUserIds,
@@ -437,7 +410,7 @@ export function removeUnauthorizedTelegramBindings(
   accountId = telegramDefaultAccountId,
 ): number {
   let removed = 0;
-  for (const binding of bindings.list()) {
+  for (const binding of uniqueConversationBindings(bindings)) {
     if (binding.target.surface !== "telegram" || binding.target.accountId !== accountId) {
       continue;
     }
@@ -459,7 +432,7 @@ export function removeUnauthorizedFeishuBindings(
   accountId: string,
 ): number {
   let removed = 0;
-  for (const binding of bindings.list()) {
+  for (const binding of uniqueConversationBindings(bindings)) {
     if (
       binding.target.surface !== "feishu"
       || binding.target.accountId !== accountId
@@ -482,7 +455,7 @@ export function removeUnauthorizedWeixinBindings(
   accountId: string,
 ): number {
   let removed = 0;
-  for (const binding of bindings.list()) {
+  for (const binding of uniqueConversationBindings(bindings)) {
     if (
       binding.target.surface !== "weixin"
       || binding.target.accountId !== accountId
@@ -505,7 +478,7 @@ function authorizedFeishuConversations(
   access: FeishuAccessPolicy,
   accountId: string,
 ): string[] {
-  return bindings.list().flatMap((binding) => {
+  return uniqueConversationBindings(bindings).flatMap((binding) => {
     if (
       binding.target.surface !== "feishu"
       || binding.target.accountId !== accountId
@@ -525,7 +498,7 @@ function authorizedWeixinConversations(
   access: WeixinAccessPolicy,
   accountId: string,
 ): ConversationTarget[] {
-  return bindings.list().flatMap((binding) => {
+  return uniqueConversationBindings(bindings).flatMap((binding) => {
     if (
       binding.target.surface !== "weixin"
       || binding.target.accountId !== accountId
@@ -540,4 +513,12 @@ function authorizedWeixinConversations(
     }
     return [binding.target];
   });
+}
+
+function uniqueConversationBindings(bindings: BindingStore) {
+  const unique = new Map<string, ReturnType<BindingStore["list"]>[number]>();
+  for (const binding of bindings.list()) {
+    unique.set(conversationTargetKey(binding.target), binding);
+  }
+  return [...unique.values()];
 }

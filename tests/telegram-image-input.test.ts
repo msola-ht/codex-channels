@@ -6,7 +6,7 @@ import { join } from "node:path";
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ConversationService } from "../src/application/conversation-service.js";
+import type { ConversationUseCases } from "../src/application/conversation-service.js";
 import { UserFacingError, type OutputEvent } from "../src/conversation-core/index.js";
 import { EventBus } from "../src/event-bus/event-bus.js";
 import { TelegramAccessPolicy } from "../src/policy/telegram-access.js";
@@ -104,6 +104,59 @@ describe("Telegram image input", () => {
     expect(rememberActor).toHaveBeenCalledWith(
       { surface: "telegram", accountId: "default", conversationId: "100" },
       "123",
+    );
+    await surface.stop();
+    await output.close();
+  });
+
+  it("applies /vision to the next Telegram image only", async () => {
+    const submit = vi.fn().mockResolvedValue({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    });
+    const download = vi.fn().mockResolvedValue({
+      path: "/private/uploads/error.jpg",
+      mimeType: "image/jpeg",
+      bytes: 100,
+    });
+    const { surface, output, sentTexts } = createSurface(submit, download);
+
+    await surface.bot.handleUpdate({
+      update_id: 101,
+      message: {
+        message_id: 101,
+        date: 1,
+        from: telegramUser(),
+        chat: telegramChat(),
+        text: "/vision 检查页面报错",
+        entities: [{ offset: 0, length: 7, type: "bot_command" }],
+      },
+    });
+    await surface.bot.handleUpdate({
+      update_id: 102,
+      message: {
+        message_id: 102,
+        date: 1,
+        from: telegramUser(),
+        chat: telegramChat(),
+        photo: [{
+          file_id: "error",
+          file_unique_id: "error-u",
+          width: 1000,
+          height: 1000,
+          file_size: 100,
+        }],
+      },
+    });
+
+    expect(sentTexts.some((text) => text.includes("图片识别要求已记录"))).toBe(true);
+    expect(submit).toHaveBeenCalledWith(
+      { surface: "telegram", accountId: "default", conversationId: "100" },
+      {
+        text: "检查页面报错",
+        localImages: [{ path: "/private/uploads/error.jpg" }],
+      },
     );
     await surface.stop();
     await output.close();
@@ -470,6 +523,58 @@ describe("Telegram image input", () => {
     await output.close();
   });
 
+  it("uses the shared Skill list and explicit invocation commands", async () => {
+    const listSkills = vi.fn(async () => [{
+      name: "systematic-debugging",
+      description: "系统化排查",
+    }]);
+    const invokeSkill = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+      skillName: "systematic-debugging",
+    }));
+    const { surface, output, sentTexts } = createSurface(
+      vi.fn(),
+      vi.fn(),
+      { listSkills, invokeSkill },
+    );
+
+    await surface.bot.handleUpdate({
+      update_id: 60,
+      message: {
+        message_id: 60,
+        date: 1,
+        from: telegramUser(),
+        chat: telegramChat(),
+        text: "/skill",
+        entities: [{ offset: 0, length: 6, type: "bot_command" }],
+      },
+    });
+    await surface.bot.handleUpdate({
+      update_id: 61,
+      message: {
+        message_id: 61,
+        date: 1,
+        from: telegramUser(),
+        chat: telegramChat(),
+        text: "/skill systematic-debugging 排查微信断线",
+        entities: [{ offset: 0, length: 6, type: "bot_command" }],
+      },
+    });
+
+    expect(sentTexts.some((text) =>
+      text.includes("1. systematic-debugging")
+    )).toBe(true);
+    expect(invokeSkill).toHaveBeenCalledWith(
+      { surface: "telegram", accountId: "default", conversationId: "100" },
+      "systematic-debugging",
+      "排查微信断线",
+    );
+    await surface.stop();
+    await output.close();
+  });
+
   it("accepts the documented shared command shortcuts", async () => {
     const selectWorkspace = vi.fn().mockResolvedValue({
       id: "main",
@@ -688,11 +793,16 @@ function createSurface(
   output: EventBus<OutputEvent>;
   apiCalls: string[];
   sentTexts: string[];
+  apiPayloads: Array<{ method: string; payload: Record<string, unknown> }>;
   rememberActor: ReturnType<typeof vi.fn>;
 } {
   const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
   const apiCalls: string[] = [];
   const sentTexts: string[] = [];
+  const apiPayloads: Array<{
+    method: string;
+    payload: Record<string, unknown>;
+  }> = [];
   const imageStore: TelegramImagePort = {
     start: async () => undefined,
     close: () => undefined,
@@ -709,14 +819,14 @@ function createSurface(
   const surface = new TelegramSurface(
     "123:token",
     undefined,
-    { submit, ...serviceOverrides } as unknown as ConversationService,
+    { submit, ...serviceOverrides } as unknown as ConversationUseCases,
     new TelegramAccessPolicy(new Set([123]), "default"),
     new Set(),
     [{ id: "main", name: "Main", cwd: "/workspace" }],
     directory,
     pino({ level: "silent" }),
     {
-      gatewayVersion: "0.145.0",
+      gatewayVersion: "0.146.0",
       inputQuietWindowMs: 0,
       imageStore,
       audioStore,
@@ -749,6 +859,10 @@ function createSurface(
   };
   surface.bot.api.config.use(async (_previous, method, payload) => {
     apiCalls.push(method);
+    apiPayloads.push({
+      method,
+      payload: payload as Record<string, unknown>,
+    });
     if (method === "sendMessage") {
       const text = (payload as { text?: unknown }).text;
       if (typeof text === "string") {
@@ -766,7 +880,14 @@ function createSurface(
     }
     return { ok: true, result: true } as never;
   });
-  return { surface, output, apiCalls, sentTexts, rememberActor };
+  return {
+    surface,
+    output,
+    apiCalls,
+    sentTexts,
+    apiPayloads,
+    rememberActor,
+  };
 }
 
 function telegramUser() {

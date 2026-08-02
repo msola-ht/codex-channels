@@ -3,44 +3,94 @@ import { pathToFileURL } from "node:url";
 import * as clackPrompts from "@clack/prompts";
 
 import { runFeishuSetup } from "./feishu-setup.mjs";
+import { runDeepseekSetup } from "./deepseek-setup.mjs";
 import { runTelegramSetup } from "./telegram-setup.mjs";
 import { runWeixinSetup } from "./weixin-setup.mjs";
+import { runVisionSetup } from "./vision-setup.mjs";
 
 export async function runSetup({
   input = process.stdin,
   output = process.stdout,
   prompts = clackPrompts,
   feishuSetup = runFeishuSetup,
+  deepseekSetup = runDeepseekSetup,
   telegramSetup = runTelegramSetup,
   weixinSetup = runWeixinSetup,
+  visionSetup = runVisionSetup,
 } = {}) {
   prompts.intro("Codex Connect Setup");
-  const section = await prompts.select({
-    message: "选择设置类别",
+  while (true) {
+    const section = await prompts.select({
+      message: "选择设置类别",
+      showInstructions: false,
+      options: [
+        {
+          value: "models",
+          label: "模型渠道",
+          hint: "配置 OpenAI 与 DeepSeek",
+        },
+        {
+          value: "channels",
+          label: "通讯渠道",
+          hint: "配置外部消息入口",
+        },
+        {
+          value: "cancel",
+          label: "取消",
+          hint: "退出 Setup",
+        },
+      ],
+    });
+    if (prompts.isCancel(section) || section === "cancel") {
+      prompts.cancel("Setup 已取消");
+      return undefined;
+    }
+    switch (section) {
+      case "channels": {
+        const result = await runChannelSetup({
+          input,
+          output,
+          prompts,
+          feishuSetup,
+          telegramSetup,
+          weixinSetup,
+        });
+        if (isBackResult(result)) continue;
+        return result;
+      }
+      case "models": {
+        const result = await runModelSetup({
+          input,
+          output,
+          prompts,
+          deepseekSetup,
+          visionSetup,
+        });
+        if (isBackResult(result)) continue;
+        return result;
+      }
+      default:
+        throw new Error(`未知 Setup 类别：${String(section)}`);
+    }
+  }
+}
+
+async function runModelSetup({ input, output, prompts, deepseekSetup, visionSetup }) {
+  const module = await prompts.select({
+    message: "选择模型渠道设置",
     showInstructions: false,
-    options: [{
-      value: "channels",
-      label: "通讯渠道",
-      hint: "配置外部消息入口",
-    }],
+    options: [
+      { value: "deepseek", label: "DeepSeek", hint: "安装、切换或恢复模型提供商" },
+      { value: "vision", label: "图片识别", hint: "为不支持图片的模型配置视觉代理" },
+      { value: "back", label: "返回", hint: "返回设置类别" },
+    ],
   });
-  if (prompts.isCancel(section)) {
-    prompts.cancel("Setup 已取消");
-    return undefined;
+  if (prompts.isCancel(module) || module === "back") return { action: "back" };
+  if (module === "deepseek") {
+    return deepseekSetup({ input, output, prompts, allowBack: true });
   }
-  switch (section) {
-    case "channels":
-      return runChannelSetup({
-        input,
-        output,
-        prompts,
-        feishuSetup,
-        telegramSetup,
-        weixinSetup,
-      });
-    default:
-      throw new Error(`未知 Setup 类别：${String(section)}`);
-  }
+  if (module === "vision") return visionSetup({ input, output, prompts });
+  throw new Error(`未知模型渠道设置：${String(module)}`);
 }
 
 async function runChannelSetup({
@@ -70,11 +120,15 @@ async function runChannelSetup({
         label: "微信",
         hint: "扫码连接与用户授权",
       },
+      {
+        value: "back",
+        label: "返回",
+        hint: "返回设置类别",
+      },
     ],
   });
-  if (prompts.isCancel(channel)) {
-    prompts.cancel("Setup 已取消");
-    return undefined;
+  if (prompts.isCancel(channel) || channel === "back") {
+    return { action: "back" };
   }
   switch (channel) {
     case "telegram":
@@ -86,6 +140,10 @@ async function runChannelSetup({
     default:
       throw new Error(`未知通讯渠道：${String(channel)}`);
   }
+}
+
+function isBackResult(result) {
+  return result?.action === "back";
 }
 
 function isDirectExecution(moduleUrl, argvPath) {

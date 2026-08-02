@@ -6,16 +6,21 @@ import {
   type ConversationCommandResult,
   type ConversationStatus,
 } from "../application/index.js";
-import type { ThreadGoal } from "../conversation-core/index.js";
+import {
+  usesOpenAiAccount,
+  type ThreadGoal,
+} from "../conversation-core/index.js";
 
 import {
   formatPercent,
   formatPlanType,
   formatRateLimitState,
+  formatRemainingRateLimitWindow,
   formatRateLimitWindow,
   formatResetTime,
 } from "./account-format.js";
 import { formatElapsedSeconds } from "./elapsed-duration.js";
+import { formatProviderLabel } from "./provider-format.js";
 
 const maximumSessionEntries = 20;
 const maximumSessionLabelCharacters = 48;
@@ -27,6 +32,8 @@ export const conversationCommandDescriptions = {
   new: "下一条消息创建新会话",
   archive: "归档当前会话",
   unarchive: "恢复已归档会话",
+  pin: "固定当前会话",
+  unpin: "取消固定当前会话",
   status: "查看当前状态",
   workspace: "列出或切换 Workspace",
   stop: "停止当前任务",
@@ -38,7 +45,7 @@ export const conversationCommandDescriptions = {
   model: "查看或切换模型",
   effort: "查看或切换思考强度",
   fast: "查看或切换 Fast 模式",
-  skills: "列出 Skills",
+  skill: "查看或调用 Skill",
   mcp: "列出 MCP Servers",
   plugins: "列出 Plugins",
   usage: "查看账号用量",
@@ -57,6 +64,7 @@ export const conversationCommandHelpSections = [
       "/resume [序号|名称|Thread ID]",
       "/sessions [搜索词] · /archived [搜索词]",
       "/new · /archive · /unarchive <序号|名称|Thread ID>",
+      "/pin · /unpin",
       "/rename <名称> · /compact · /fork",
     ],
   },
@@ -75,7 +83,8 @@ export const conversationCommandHelpSections = [
     lines: [
       "/model [序号|模型 ID|名称]",
       "/effort [序号|档位] · /fast [on|off|status]",
-      "/skills · /mcp · /plugins",
+      "/skill [名称或序号 任务]",
+      "/mcp · /plugins",
       "/usage · /limits · /permissions",
     ],
   },
@@ -107,11 +116,12 @@ export function formatConversationSessions(
   const visibleSessions = result.sessions.slice(0, maximumSessionEntries);
   const hiddenCount = result.sessions.length - visibleSessions.length;
   const searchCommand = result.archived ? "archived" : "sessions";
+  const backgroundThreadIds = new Set(result.backgroundThreadIds ?? []);
   return [
     `${result.archived ? "已归档会话" : "历史会话"}（${result.sessions.length}）${result.searchTerm ? ` · 搜索：${result.searchTerm}` : ""}：`,
     ...visibleSessions.map(
       (session, index) =>
-        `${index + 1}. ${formatSessionLabel(session.name ?? session.preview)} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : ""}`,
+        `${index + 1}. ${session.isPinned ? "固定 · " : ""}${formatSessionLabel(session.name ?? session.preview)}${session.model ? ` · 模型：${session.model}` : ""} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : backgroundThreadIds.has(session.id) ? " · 后台运行" : ""}`,
     ),
     ...(hiddenCount > 0
       ? [
@@ -131,13 +141,25 @@ export function formatConversationCommandOutcome(
 ): string {
   switch (outcome.type) {
     case "thread.resumed":
-      return `已恢复 Codex Thread\nThread：${outcome.threadId}`;
+      return outcome.transferredFrom
+        ? `${formatTakeoverSource(outcome.transferredFrom)}\nThread：${outcome.threadId}`
+        : [
+            "已恢复 Codex Thread",
+            `Thread：${outcome.threadId}`,
+            ...(outcome.backgroundedThreadId
+              ? [`原任务已转入后台：${outcome.backgroundedThreadId}`]
+              : []),
+          ].join("\n");
     case "session.new":
-      return "已退出当前会话，下一条普通消息将创建新的 Codex Thread。";
+      return outcome.backgroundedThreadId
+        ? `已切换到新会话，原任务继续在后台运行。\n后台 Thread：${outcome.backgroundedThreadId}\n下一条普通消息将创建新的 Codex Thread。`
+        : "已退出当前会话，下一条普通消息将创建新的 Codex Thread。";
     case "thread.archived":
       return `已归档 Codex Thread\nThread：${outcome.threadId}\n下一条普通消息将创建新会话。`;
     case "thread.unarchived":
       return `已取消归档并切换会话\nThread：${outcome.threadId}`;
+    case "thread.pin-updated":
+      return outcome.pinned ? "已固定当前会话。" : "已取消固定当前会话。";
     case "workspace.selected":
       return `已切换 Workspace\nWorkspace：${outcome.workspace.name}\n工作目录：${outcome.workspace.cwd}`;
     case "turn.stop-requested":
@@ -156,10 +178,27 @@ export function formatConversationCommandOutcome(
       return `已启动 Codex Review\nTurn：${outcome.turnId}`;
     case "plan.started":
       return `已进入 Plan 模式并开始规划\nTurn：${outcome.turnId}`;
+    case "skill.started":
+      return outcome.steered
+        ? `已把 Skill 追加到当前任务\nSkill：${outcome.skillName}`
+        : `已使用 Skill 开始任务\nSkill：${outcome.skillName}\nTurn：${outcome.turnId}`;
     case "goal.cleared":
       return "已清除当前 Thread Goal。";
     case "goal.updated":
       return `Goal 已设置\n目标：${outcome.goal.objective}`;
+  }
+}
+
+function formatTakeoverSource(surface: string): string {
+  switch (surface) {
+    case "telegram":
+      return "已从 Telegram 接管 Codex Thread";
+    case "feishu":
+      return "已从飞书接管 Codex Thread";
+    case "weixin":
+      return "已从微信接管 Codex Thread";
+    default:
+      return "已从其他渠道接管 Codex Thread";
   }
 }
 
@@ -185,10 +224,10 @@ export function formatConversationSkills(
     : [
         `已安装 Skills（${result.entries.length}）：`,
         ...result.entries.map(
-          (skill) => `- ${skill.name}：${skill.description}`,
+          (skill, index) => `${index + 1}. ${skill.name}：${skill.description}`,
         ),
         "",
-        "使用：在消息中写 $Skill名称 并说明任务。",
+        "使用：/skill <名称或序号> <任务>",
       ].join("\n");
 }
 
@@ -290,6 +329,9 @@ export function formatConversationModels(
   const { state } = result;
   const current = state.models.find((model) => model.model === state.model);
   const fast = isFastServiceTier(state.serviceTier, current) ? "开启" : "关闭";
+  const providerSwitchNotice = state.providerPending
+    ? ["提供商切换将在下一条消息中创建新 Thread；当前 Thread 会保留，可通过 /resume 恢复。", ""]
+    : [];
   if (result.view === "fast") {
     return [
       `当前模型：${state.model}${state.modelPending ? "（下一次 Turn 生效）" : ""}`,
@@ -303,8 +345,11 @@ export function formatConversationModels(
     return [
       `当前模型：${state.model}`,
       `当前思考强度：${state.effort ?? current?.defaultReasoningEffort ?? "模型默认"}${state.effortPending ? "（下一次 Turn 生效）" : ""}`,
-      `Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
+      ...(current && fastServiceTierId(current)
+        ? [`Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
+        : []),
       "",
+      ...providerSwitchNotice,
       "可用思考强度：",
       ...(current?.supportedReasoningEfforts ?? []).map(
         (option, index) =>
@@ -317,12 +362,15 @@ export function formatConversationModels(
   return [
     `当前模型：${state.model}${state.modelPending ? "（下一次 Turn 生效）" : ""}`,
     `思考强度：${state.effort ?? "模型默认"}`,
-    `Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
+    ...(current && fastServiceTierId(current)
+      ? [`Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
+      : []),
     "",
-    `可用模型（${state.models.length}）：`,
+    ...providerSwitchNotice,
+    `模型列表（${state.models.length}）：`,
     ...state.models.map(
       (model, index) =>
-        `${index + 1}. ${model.displayName} · ${model.model}${fastServiceTierId(model) ? " · 支持 Fast" : ""}${model.model === state.model ? " ← 当前" : ""}`,
+        `${index + 1}. ${model.displayName} · ${model.model}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${model.unavailableReason}）` : ""}` : ""}${fastServiceTierId(model) ? " · 支持 Fast" : ""}${model.model === state.model ? " ← 当前" : ""}`,
     ),
     "",
     "切换：/model <序号、模型 ID 或名称>",
@@ -332,16 +380,34 @@ export function formatConversationModels(
 export function formatConversationUsage(
   result: Extract<ConversationCommandResult, { kind: "usage" }>,
 ): string {
-  const daily = [...result.result.daily]
+  if (result.result.kind === "unsupported") {
+    return `${formatProviderLabel(result.result.provider)} 暂不支持账户用量查询。当前 Thread 的 Token 与上下文仍可通过 /status 查看。`;
+  }
+  if (result.result.kind === "balance") {
+    return [
+      `${formatProviderLabel(result.result.provider)} 账户余额：`,
+      `API 可用：${result.result.available ? "是" : "否"}`,
+      ...(result.result.balances.length === 0
+        ? ["暂无余额信息"]
+        : result.result.balances.flatMap((balance) => [
+            "",
+            `${balance.currency}：`,
+            `总余额：${balance.totalBalance}`,
+            `赠金余额：${balance.grantedBalance}`,
+            `充值余额：${balance.toppedUpBalance}`,
+          ])),
+    ].join("\n");
+  }
+  const daily = [...result.result.usage.daily]
     .sort((left, right) => right.startDate.localeCompare(left.startDate))
     .slice(0, 7);
   return [
-    "Codex 用量摘要：",
-    `累计 Tokens：${formatMillions(result.result.summary.lifetimeTokens)}`,
-    `单日峰值：${formatMillions(result.result.summary.peakDailyTokens)}`,
-    `最长 Turn：${formatAccountDuration(result.result.summary.longestRunningTurnSec)}`,
-    `当前连续天数：${formatMetric(result.result.summary.currentStreakDays)}`,
-    `最长连续天数：${formatMetric(result.result.summary.longestStreakDays)}`,
+    "OpenAI Codex 账户用量摘要：",
+    `累计 Tokens：${formatMillions(result.result.usage.summary.lifetimeTokens)}`,
+    `单日峰值：${formatMillions(result.result.usage.summary.peakDailyTokens)}`,
+    `最长 Turn：${formatAccountDuration(result.result.usage.summary.longestRunningTurnSec)}`,
+    `当前连续天数：${formatMetric(result.result.usage.summary.currentStreakDays)}`,
+    `最长连续天数：${formatMetric(result.result.usage.summary.longestStreakDays)}`,
     "",
     "最近每日用量：",
     ...(daily.length === 0
@@ -355,13 +421,16 @@ export function formatConversationUsage(
 export function formatConversationLimits(
   result: Extract<ConversationCommandResult, { kind: "limits" }>,
 ): string {
-  const planType = result.result.limits.find(
+  if (result.result.kind === "unsupported") {
+    return `${formatProviderLabel(result.result.provider)} 暂不支持账户限额查询。可使用 /usage 查看该提供商已接入的账户信息。`;
+  }
+  const planType = result.result.limits.limits.find(
     (limit) => limit.planType,
   )?.planType;
   return [
-    "Codex 额度：",
+    "OpenAI Codex 额度：",
     `套餐：${planType ? formatPlanType(planType) : "未知"}`,
-    ...result.result.limits.flatMap((limit) => [
+    ...result.result.limits.limits.flatMap((limit) => [
       "",
       `${limit.limitName ?? limit.limitId}：`,
       `主窗口：${formatAccountLimitWindow(limit.primary)}`,
@@ -387,9 +456,9 @@ export function formatConversationLimits(
         : [`消费控制：${limit.spendControlReached ? "已达到上限" : "正常"}`]),
       `限流状态：${formatRateLimitState(limit.rateLimitReachedType)}`,
     ]),
-    ...(result.result.resetCreditsAvailable === null
+    ...(result.result.limits.resetCreditsAvailable === null
       ? []
-      : ["", `可用额度重置券：${result.result.resetCreditsAvailable}`]),
+      : ["", `可用额度重置券：${result.result.limits.resetCreditsAvailable}`]),
   ].join("\n");
 }
 
@@ -402,8 +471,11 @@ export function formatConversationStatus(status: ConversationStatus): string {
     `工作目录：${status.cwd}`,
     `Git 分支：${status.gitBranch ?? "未检测到"}`,
     `模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
+    `提供商：${formatProviderLabel(status.modelProvider ?? "openai")}`,
     `思考强度：${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
-    `Fast 模式：${status.threadId ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭") : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`,
+    ...(usesOpenAiAccount(status.modelProvider)
+      ? [`Fast 模式：${status.threadId ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭") : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`]
+      : []),
     `协作模式：${status.collaborationMode === "plan" ? "Plan" : "Default"}${status.collaborationModePending ? "（下一次 Turn 生效）" : ""}`,
   ];
   if (status.contextCompactionCount !== undefined) {
@@ -422,22 +494,23 @@ export function formatConversationStatus(status: ConversationStatus): string {
       "",
       "当前 Thread 用量：",
       `累计：${formatTokenCount(total.totalTokens)}`,
-      `最近 Turn：${formatTokenCount(last.totalTokens)}`,
-      `输入：${formatTokenCount(total.inputTokens)}`,
-      `缓存输入：${formatTokenCount(total.cachedInputTokens)}`,
+      `最近模型请求：${formatTokenCount(last.totalTokens)}`,
+      `输入总计：${formatTokenCount(total.inputTokens)}`,
+      `命中缓存：${formatTokenCount(total.cachedInputTokens)}`,
+      `未命中缓存：${formatTokenCount(Math.max(0, total.inputTokens - total.cachedInputTokens))}`,
       `缓存命中率：${formatCacheHitRate(total.inputTokens, total.cachedInputTokens)}`,
       ...(total.cacheWriteInputTokens > 0
         ? [`缓存写入：${formatTokenCount(total.cacheWriteInputTokens)}`]
         : []),
       `输出：${formatTokenCount(total.outputTokens)}`,
-      `推理输出：${formatTokenCount(total.reasoningOutputTokens)}`,
-      `模型上下文窗口容量：${modelContextWindow === null ? "未知" : formatTokenCount(modelContextWindow)}`,
+      `其中推理输出：${formatTokenCount(total.reasoningOutputTokens)}`,
+      `Codex 有效上下文窗口：${modelContextWindow === null ? "未知" : formatTokenCount(modelContextWindow)}`,
     );
   } else if (status.threadId) {
     lines.push("", "当前 Thread 用量：等待 App Server 推送统计");
   }
-  if (status.weeklyLimit) {
-    lines.push(`周限：${formatRateLimitWindow(status.weeklyLimit)}`);
+  if (usesOpenAiAccount(status.modelProvider) && status.weeklyLimit) {
+    lines.push(`周限：${formatRemainingRateLimitWindow(status.weeklyLimit)}`);
   }
   return lines.join("\n");
 }
@@ -518,7 +591,10 @@ function formatCacheHitRate(
     ? `${Math.max(
         0,
         cachedInputTokens / inputTokens * 100,
-      ).toLocaleString("zh-CN", { maximumFractionDigits: 1 })}%`
+      ).toLocaleString("zh-CN", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}%`
     : "未知";
 }
 

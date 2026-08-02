@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   conversationCommandNames,
-  type ConversationService,
+  type ConversationUseCases,
 } from "../src/application/index.js";
 import { UserFacingError } from "../src/conversation-core/index.js";
 import {
@@ -91,7 +91,7 @@ describe("Feishu conversation adapter", () => {
       collaborationModePending: false,
     }));
     const adapter = new FeishuConversationAdapter(
-      { status } as unknown as ConversationService,
+      { status } as unknown as ConversationUseCases,
       { notifyMarkdown, notifyText } as unknown as FeishuOutbox,
       imagePort,
     );
@@ -117,7 +117,7 @@ describe("Feishu conversation adapter", () => {
     const fixture = createOutbox();
     const submit = vi.fn();
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationService,
+      { submit } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
@@ -143,12 +143,43 @@ describe("Feishu conversation adapter", () => {
     ].join("\n"));
   });
 
+  it("applies /vision to the next Feishu image only", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread",
+      turnId: "turn",
+      steered: false,
+    }));
+    const download = vi.fn().mockResolvedValue({
+      path: "/private/feishu/error.png",
+      mimeType: "image/png",
+      bytes: 10,
+    });
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationUseCases,
+      fixture.outbox,
+      { download },
+    );
+
+    await adapter.handle({ ...message, text: "/vision 分析报错原因" });
+    await adapter.handle(createImageMessage());
+    await fixture.outbox.close();
+
+    expect(submit).toHaveBeenCalledWith(message.target, {
+      text: "分析报错原因",
+      localImages: [{ path: "/private/feishu/error.png" }],
+    });
+    expect(fixture.sent.some((entry) =>
+      entry.text.includes("图片识别要求已记录")
+    )).toBe(true);
+  });
+
   it("uses /stop to stop a pending interaction before stopping the active Turn", async () => {
     const fixture = createOutbox();
     const stop = vi.fn(async () => true);
     const stopForActor = vi.fn(() => true);
     const adapter = new FeishuConversationAdapter(
-      { stop } as unknown as ConversationService,
+      { stop } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
       undefined,
@@ -172,7 +203,7 @@ describe("Feishu conversation adapter", () => {
     const stop = vi.fn(async () => true);
     const stopForActor = vi.fn(() => false);
     const adapter = new FeishuConversationAdapter(
-      { stop } as unknown as ConversationService,
+      { stop } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
       undefined,
@@ -195,7 +226,7 @@ describe("Feishu conversation adapter", () => {
     const submit = vi.fn();
     const open = vi.fn(async () => {});
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationService,
+      { submit } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
       undefined,
@@ -225,7 +256,7 @@ describe("Feishu conversation adapter", () => {
     const fixture = createOutbox();
     const submit = vi.fn();
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationService,
+      { submit } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
       () => ({
@@ -271,7 +302,7 @@ describe("Feishu conversation adapter", () => {
     const fixture = createOutbox();
     const openDoctor = vi.fn(async () => {});
     const adapter = new FeishuConversationAdapter(
-      {} as ConversationService,
+      {} as ConversationUseCases,
       fixture.outbox,
       imagePort,
       () => ({
@@ -346,7 +377,7 @@ describe("Feishu conversation adapter", () => {
       {
         modelState,
         selectEffort,
-      } as unknown as ConversationService,
+      } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
@@ -377,6 +408,49 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent[0]?.text).toContain("当前思考强度：high");
   });
 
+  it("uses the shared Skill list and explicit invocation commands", async () => {
+    const fixture = createOutbox();
+    const listSkills = vi.fn(async () => [{
+      name: "systematic-debugging",
+      description: "系统化排查",
+    }]);
+    const invokeSkill = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+      skillName: "systematic-debugging",
+    }));
+    const adapter = new FeishuConversationAdapter(
+      {
+        listSkills,
+        invokeSkill,
+      } as unknown as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+    );
+
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "skill",
+      message.actorId,
+    )).resolves.toBeUndefined();
+    await adapter.handleCommandCenterAction(
+      message.target,
+      "skill",
+      message.actorId,
+      "systematic-debugging 排查断线",
+    );
+    await fixture.outbox.close();
+
+    expect(invokeSkill).toHaveBeenCalledWith(
+      message.target,
+      "systematic-debugging",
+      "排查断线",
+    );
+    expect(fixture.sent[0]?.text).toContain("1. systematic-debugging");
+    expect(fixture.sent[1]?.text).toContain("已使用 Skill 开始任务");
+  });
+
   it("turns active and archived session results into exact card choices", async () => {
     const fixture = createOutbox();
     const sessions = [{
@@ -385,6 +459,7 @@ describe("Feishu conversation adapter", () => {
       preview: "",
       cwd: "/workspace",
       updatedAt: 1,
+      model: "gpt-test",
     }];
     const archived = [{
       id: "thread-archived",
@@ -392,6 +467,7 @@ describe("Feishu conversation adapter", () => {
       preview: "",
       cwd: "/workspace",
       updatedAt: 1,
+      model: "gpt-test",
     }];
     const adapter = new FeishuConversationAdapter(
       {
@@ -403,7 +479,7 @@ describe("Feishu conversation adapter", () => {
           threadId: "thread-active",
           workspaceId: "workspace",
         })),
-      } as unknown as ConversationService,
+      } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
@@ -421,7 +497,7 @@ describe("Feishu conversation adapter", () => {
           input: "",
         },
         {
-          label: "✓ 当前会话",
+          label: "✓ 当前会话 · 模型：gpt-test",
           action: "resume",
           input: "thread-active",
         },
@@ -440,7 +516,7 @@ describe("Feishu conversation adapter", () => {
           input: "",
         },
         {
-          label: "旧会话",
+          label: "旧会话 · 模型：gpt-test",
           action: "unarchive",
           input: "thread-archived",
         },
@@ -465,7 +541,7 @@ describe("Feishu conversation adapter", () => {
           threadId: "thread-current",
           workspaceId: "workspace",
         })),
-      } as unknown as ConversationService,
+      } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
@@ -505,7 +581,7 @@ describe("Feishu conversation adapter", () => {
       updatedAt: 1,
     }]);
     const adapter = new FeishuConversationAdapter(
-      { listSessions } as unknown as ConversationService,
+      { listSessions } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
@@ -544,7 +620,7 @@ describe("Feishu conversation adapter", () => {
     const fixture = createOutbox();
     const queueFollowUp = vi.fn(async () => ({ position: 1 }));
     const adapter = new FeishuConversationAdapter(
-      { queueFollowUp } as unknown as ConversationService,
+      { queueFollowUp } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
@@ -580,7 +656,7 @@ describe("Feishu conversation adapter", () => {
       rulesPath: "/workspace/.codex/rules/default.rules",
     }));
     const adapter = new FeishuConversationAdapter(
-      { checkProjectRules } as unknown as ConversationService,
+      { checkProjectRules } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
@@ -616,7 +692,7 @@ describe("Feishu conversation adapter", () => {
       steered: false,
     }));
     const adapter = new FeishuConversationAdapter(
-      { review } as unknown as ConversationService,
+      { review } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
@@ -673,7 +749,7 @@ describe("Feishu conversation adapter", () => {
       updatedAt: 1,
     }));
     const adapter = new FeishuConversationAdapter(
-      { setGoal } as unknown as ConversationService,
+      { setGoal } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
@@ -720,7 +796,7 @@ describe("Feishu conversation adapter", () => {
     const status = vi.fn(async () => "valid" as const);
     const revoke = vi.fn(async () => true);
     const adapter = new FeishuConversationAdapter(
-      {} as ConversationService,
+      {} as ConversationUseCases,
       fixture.outbox,
       imagePort,
       () => ({
@@ -735,9 +811,9 @@ describe("Feishu conversation adapter", () => {
       },
     );
 
-    await adapter.handle({ ...message, text: "/feishu authorize" });
-    await adapter.handle({ ...message, text: "/feishu status" });
-    await adapter.handle({ ...message, text: "/feishu revoke" });
+    await adapter.handle({ ...message, text: "/fs authorize" });
+    await adapter.handle({ ...message, text: "/fs status" });
+    await adapter.handle({ ...message, text: "/fs revoke" });
     await fixture.outbox.close();
 
     expect(beginAuthorization).not.toHaveBeenCalled();
@@ -761,7 +837,7 @@ describe("Feishu conversation adapter", () => {
   it("renders an in-progress Feishu user authorization", async () => {
     const fixture = createOutbox();
     const adapter = new FeishuConversationAdapter(
-      {} as ConversationService,
+      {} as ConversationUseCases,
       fixture.outbox,
       imagePort,
       () => ({
@@ -776,7 +852,7 @@ describe("Feishu conversation adapter", () => {
       },
     );
 
-    await adapter.handle({ ...message, text: "/feishu status" });
+    await adapter.handle({ ...message, text: "/fs status" });
     await fixture.outbox.close();
 
     expect(fixture.sent[0]?.text).toContain("当前用户 OAuth：授权进行中");
@@ -785,12 +861,12 @@ describe("Feishu conversation adapter", () => {
   it("fails closed when permission runtime status is not composed", async () => {
     const fixture = createOutbox();
     const adapter = new FeishuConversationAdapter(
-      {} as ConversationService,
+      {} as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
 
-    await adapter.handle({ ...message, text: "/feishu status" });
+    await adapter.handle({ ...message, text: "/fs status" });
     await fixture.outbox.close();
 
     expect(fixture.sent).toHaveLength(1);
@@ -802,12 +878,18 @@ describe("Feishu conversation adapter", () => {
     const fixture = createOutbox();
     const submit = vi.fn();
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationService,
+      { submit } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
 
-    for (const text of ["/unknown", "/unknown-command", "/STATUS", "/"]) {
+    for (const text of [
+      "/unknown",
+      "/unknown-command",
+      "/feishu status",
+      "/STATUS",
+      "/",
+    ]) {
       await expect(
         adapter.handle({ ...message, text }),
       ).rejects.toMatchObject({ code: "command.unsupported" });
@@ -815,7 +897,7 @@ describe("Feishu conversation adapter", () => {
     await fixture.outbox.close();
 
     expect(submit).not.toHaveBeenCalled();
-    expect(fixture.sent).toEqual(Array.from({ length: 4 }, () => ({
+    expect(fixture.sent).toEqual(Array.from({ length: 5 }, () => ({
       chatId: "oc_chat",
       text: "操作失败：不支持该飞书命令，请发送 /help 查看可用命令。",
     })));
@@ -844,7 +926,7 @@ describe("Feishu conversation adapter", () => {
       collaborationModePending: false,
     }));
     const adapter = new FeishuConversationAdapter(
-      { submit, status } as unknown as ConversationService,
+      { submit, status } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
@@ -866,6 +948,7 @@ describe("Feishu conversation adapter", () => {
         "工作目录：/workspace",
         "Git 分支：未检测到",
         "模型：gpt-test",
+        "提供商：OpenAI",
         "思考强度：medium",
         "Fast 模式：开启",
         "协作模式：Default",
@@ -883,7 +966,7 @@ describe("Feishu conversation adapter", () => {
       position: 2,
     }));
     const adapter = new FeishuConversationAdapter(
-      { submit, queueFollowUp } as unknown as ConversationService,
+      { submit, queueFollowUp } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
@@ -906,7 +989,7 @@ describe("Feishu conversation adapter", () => {
     const newSession = vi.fn(async () => undefined);
     const notifyText = vi.fn(() => false);
     const adapter = new FeishuConversationAdapter(
-      { newSession } as unknown as ConversationService,
+      { newSession } as unknown as ConversationUseCases,
       { notifyText } as unknown as FeishuOutbox,
       imagePort,
     );
@@ -927,7 +1010,7 @@ describe("Feishu conversation adapter", () => {
       steered: false,
     }));
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationService,
+      { submit } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
@@ -948,7 +1031,7 @@ describe("Feishu conversation adapter", () => {
     }));
     const readQuotedText = vi.fn(async () => "原始消息");
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationService,
+      { submit } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
       undefined,
@@ -986,7 +1069,7 @@ describe("Feishu conversation adapter", () => {
     const error = new Error("private upstream detail");
     const onQuotedTextError = vi.fn();
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationService,
+      { submit } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
       undefined,
@@ -1031,7 +1114,7 @@ describe("Feishu conversation adapter", () => {
       bytes: 8,
     }));
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationService,
+      { submit } as unknown as ConversationUseCases,
       fixture.outbox,
       { download },
     );
@@ -1065,7 +1148,7 @@ describe("Feishu conversation adapter", () => {
       })),
     };
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationService,
+      { submit } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
       undefined,
@@ -1107,7 +1190,7 @@ describe("Feishu conversation adapter", () => {
       })),
     };
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationService,
+      { submit } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
       undefined,
@@ -1138,7 +1221,7 @@ describe("Feishu conversation adapter", () => {
       steered: false,
     }));
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationService,
+      { submit } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
       undefined,
@@ -1182,7 +1265,7 @@ describe("Feishu conversation adapter", () => {
     const submit = vi.fn();
     const download = vi.fn();
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationService,
+      { submit } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
       undefined,
@@ -1220,7 +1303,7 @@ describe("Feishu conversation adapter", () => {
       bytes: 8,
     }));
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationService,
+      { submit } as unknown as ConversationUseCases,
       fixture.outbox,
       { download },
     );
@@ -1260,7 +1343,7 @@ describe("Feishu conversation adapter", () => {
         bytes: 9,
       });
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationService,
+      { submit } as unknown as ConversationUseCases,
       fixture.outbox,
       { download },
     );
@@ -1290,6 +1373,57 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent).toEqual([]);
   });
 
+  it("automatically submits a sized collection from adjacent Feishu images", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const download = vi.fn()
+      .mockResolvedValueOnce({
+        path: "/private/uploads/feishu/first.png",
+        mimeType: "image/png" as const,
+        bytes: 8,
+      })
+      .mockResolvedValueOnce({
+        path: "/private/uploads/feishu/second.jpg",
+        mimeType: "image/jpeg" as const,
+        bytes: 9,
+      });
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationUseCases,
+      fixture.outbox,
+      { download },
+    );
+
+    await adapter.handle({ ...message, text: "/vision 2 比较这些图片" });
+    await adapter.handleImageBatch([
+      createImageMessage({
+        messageId: "om_first",
+        imageKeys: ["img_v2_first"],
+      }),
+      createImageMessage({
+        eventId: "event-2",
+        messageId: "om_second",
+        imageKeys: ["img_v2_second"],
+      }),
+    ]);
+    await fixture.outbox.close();
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledWith(message.target, {
+      text: "比较这些图片",
+      localImages: [
+        { path: "/private/uploads/feishu/first.png" },
+        { path: "/private/uploads/feishu/second.jpg" },
+      ],
+    });
+    expect(fixture.sent.some((entry) =>
+      entry.text.includes("图片已收齐")
+    )).toBe(true);
+  });
+
   it("submits multiple images from one rich post in their original order", async () => {
     const fixture = createOutbox();
     const submit = vi.fn(async () => ({
@@ -1309,7 +1443,7 @@ describe("Feishu conversation adapter", () => {
         bytes: 9,
       });
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationService,
+      { submit } as unknown as ConversationUseCases,
       fixture.outbox,
       { download },
     );
@@ -1338,7 +1472,7 @@ describe("Feishu conversation adapter", () => {
     const fixture = createOutbox();
     const download = vi.fn();
     const adapter = new FeishuConversationAdapter(
-      { submit: vi.fn() } as unknown as ConversationService,
+      { submit: vi.fn() } as unknown as ConversationUseCases,
       fixture.outbox,
       { download },
     );
@@ -1368,7 +1502,7 @@ describe("Feishu conversation adapter", () => {
           turnId: "turn-1",
           steered: true,
         }),
-      } as unknown as ConversationService,
+      } as unknown as ConversationUseCases,
       fixture.outbox,
       {
         download: async () => ({
@@ -1399,7 +1533,7 @@ describe("Feishu conversation adapter", () => {
           turnId: "turn-1",
           steered: true,
         }),
-      } as unknown as ConversationService,
+      } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
@@ -1424,7 +1558,7 @@ describe("Feishu conversation adapter", () => {
         submit: async () => {
           throw failure;
         },
-      } as unknown as ConversationService,
+      } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
@@ -1447,7 +1581,7 @@ describe("Feishu conversation adapter", () => {
         submit: async () => {
           throw failure;
         },
-      } as unknown as ConversationService,
+      } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );

@@ -5,7 +5,22 @@
 ## 配置与 Workspace
 
 - `runtime-config.mjs`：解析用户数据目录和运行时路径，并初始化 `.codex-connect`。
-- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并从“通讯渠道”把流程委派给具体适配器。
+- `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
+  升级到 v4；不自动迁移未知版本。
+- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“通讯渠道”和“模型渠道”流程
+  委派给具体适配器；模型渠道下继续区分 DeepSeek 与图片识别。
+- `vision-setup.mjs`：为双 Provider 与仅 DeepSeek 模式统一配置外部 Responses 视觉接口；API Key
+  写入独立私有凭据文件，不进入主配置或输出。
+- `deepseek-setup.mjs`：复用共享的非敏感 DeepSeek Provider 定义，提供 OpenAI/DeepSeek 切换和
+  仅 DeepSeek 两种安装模式；只下载、不执行
+  DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小、JSON 与 Flash 模型后写入用户
+  `CODEX_HOME`。切换模式保持基础配置不变，按 Codex 新版独立 Profile 文件格式把模型、Provider
+  与 API Key 写入 CLI 使用的 `deepseek.config.toml`，并写入不含凭据的 Gateway 管理标记；
+  首次修改前记录原配置和同名 Profile 是否存在并备份原文，固定模式显式
+  确认后才覆盖默认 Provider，恢复选项可精确还原首次安装状态，并在保留的审计备份中记录已恢复
+  生命周期。重复安装基于当前配置更新，不从首次备份回滚后续修改；退出固定模式时只还原 Setup
+  管理的字段，恢复后新增的同名用户 Provider 不会被误判为旧版托管配置。
+- `deepseek-setup.d.mts`：声明 DeepSeek Setup 的公开脚本类型。
 - `terminal-prompter.mjs`：为各通讯渠道 Setup 提供最小的终端文本、确认和可见凭据输入接口。
 - `telegram-setup.mjs`：独立完成 Telegram Bot Token 验证、一次性私聊配对、用户 ID 获取和用户配置写入；
   复用统一 TOML、环境变量和系统代理解析；交互输入的 Token 在当前终端明文显示，但验证错误
@@ -27,8 +42,9 @@
 
 ## 开发与协议
 
-- `dev-all.mjs`：开发模式下复用或启动 App Server，再启动 Gateway。
-- `codex-remote.mjs`：为原生 `codex --remote` 选择 Socket 和工作目录。
+- `dev-all.mjs`：开发模式下复用或启动主 App Server 与已配置的隔离 Provider App Server，再启动 Gateway。
+- `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下规范化
+  `--profile deepseek`，既选择隔离实例，也保留 Profile 供 Remote TUI 完成第三方 Provider 认证。
 - `prepare-codex-upgrade.mjs`：在干净工作区校验精确目标 CLI，调用现有协议生成和版本同步，
   完成基础一致性检查后把差异交给 Codex 审查。
 - `codex-release-api.mjs`：为稳定版和 Alpha 解析器调用 GitHub Release API；请求或响应正文
@@ -45,11 +61,13 @@
 - `write-upgrade-report.mjs`：把 CI 中生成的升级工作树写成 Markdown 摘要、文件清单、统计和
   二进制安全 Patch，并比较 `HEAD` 生成协议的 RPC 名称和顶层字段结构，合并逐阶段结果；生成
   或验证失败且没有差异时仍会输出报告。
+- `check-upgrade-pr-description.mjs`：正式升级 PR 转为 Ready 后，检查描述已把自动占位内容
+  替换为本项目的收益、采用项、不采用项及风险与验证；Draft 和普通 PR 跳过。
 - `protocol-schema.mjs`：在同一文件系统按指定稳定/实验模式临时生成、逐文件比较并安全替换协议类型目录。
 - `generate-protocol.mjs`：先在临时目录调用当前 Codex CLI 的 `generate-ts --experimental`，
   成功后替换协议类型、记录版本与实验状态并同步 npm/Gateway 版本；实验生成只服务于受控 Plan 边界。
 - `check-protocol.mjs`：校验本机 Codex CLI 版本，并按记录的实验状态重新生成到临时目录确认类型逐文件一致。
-- `weixin-qr-contract-probe.mjs`：阶段 0 隔离二维码合同探针；默认离线显示帮助，只有显式
+- `weixin-qr-contract-probe.mjs`：隔离二维码合同探针；默认离线显示帮助，只有显式
   `qr --live` 并再次确认连接替换风险后才访问固定微信端点，严格裁剪状态、限制官方重定向域名
   并有限取消；不注册 Surface、不写配置或凭据，也不属于公开 `codexc` 命令。
 - `weixin-updates-contract-probe.mjs`：从已验证的微信安全凭据执行一次显式 `once --live`
@@ -102,18 +120,22 @@
   全局安装命令会完成构建并生成 `codexc` 入口。
 - `smoke-package.mjs`：生成实际 tarball，在隔离目录安装并执行公开的 `codexc` 入口与配置预检。
 - `check-release-tag.mjs`：要求 Git Tag 与 `package.json` 版本严格一致，防止发布错版。
+- `sync-published-readme.mjs`：把受控的 README 正式版本与安装命令渲染为已发布版本；拒绝
+  预发布、降级、高于开发基线和缺少受控标记的文档。
 - `sync-gateway-version.mjs`：以锁定的 Codex CLI 协议版本同步 `package.json`、锁文件和 Gateway 运行时版本；不维护独立版本号。
 - `doctor.mjs`：检查 npm 包、Node、Codex CLI、当前 TOML 配置、Workspace、飞书凭据/Bot 身份、
   微信配置与 Bot 凭据、消息游标检查点、允许用户的加密回复上下文覆盖数和最近保存时间，
   以及微信运行时启用状态；Doctor 不调用 `getupdates`，不显示 Token、`context_token` 或游标；
-  Unix WebSocket、`initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，不输出
-  完整 User-Agent、飞书上游响应或敏感配置内容。
+  主 Unix WebSocket、已配置 Provider 的切换或固定配置、实际模型目录、Provider Socket、
+  `initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，不输出完整 User-Agent、飞书
+  上游响应或敏感配置内容。
 - `install-launchd.mjs`：渲染并安装 launchd plist；代理由 CLI 服务入口在每次启动时解析。
 - `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载两个 launchd 服务；启停、
-  重启、状态和日志支持 `gateway`、`app-server`、`all` 目标，日常重启默认只更新 Gateway；
+  重启、状态和日志支持 `gateway`、`app-server`、`all` 目标，日常重启默认只更新 Gateway；模板为
+  App Server 与 Gateway 注入各自服务角色，公开 CLI 据此拒绝 App Server 内的自重启；
   检测到不支持的旧标签时明确拒绝启动。
 - `install-systemd.mjs`：渲染并安装 Linux systemd 用户服务 unit；代理由 CLI 服务入口在每次启动时解析。
 - `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载两个 systemd 用户服务；
-  与 launchd 使用相同的目标和默认值，用户数据始终保留。
+  与 launchd 使用相同的目标、服务角色和默认值，用户数据始终保留。
 
 脚本不得把凭据写入 npm 安装目录；用户配置、SQLite、配置事件队列、Socket 和日志必须留在用户级 `.codex-connect`。

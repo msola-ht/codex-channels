@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 
 // @ts-expect-error JavaScript upgrade helper intentionally has no declaration file.
 import * as upgradeHelpers from "../scripts/prepare-codex-upgrade.mjs";
+// @ts-expect-error JavaScript PR description helper intentionally has no declaration file.
+import * as prDescriptionHelpers from "../scripts/check-upgrade-pr-description.mjs";
 
 const {
   assertCleanWorktree,
@@ -13,6 +15,7 @@ const {
   parseUpgradeArguments,
   upgradeReviewChecklist,
 } = upgradeHelpers;
+const { checkUpgradePullRequestDescription } = prDescriptionHelpers;
 
 describe("Codex CLI upgrade preparation", () => {
   it("accepts one exact target version and optional dry-run", () => {
@@ -70,5 +73,54 @@ describe("Codex CLI upgrade preparation", () => {
     expect(proposal).toContain("--draft");
     expect(workflow).not.toContain("gh pr merge");
     expect(workflow).not.toContain("npm publish");
+  });
+
+  it("requires project benefits and tradeoffs before an upgrade PR is ready", () => {
+    const draft = {
+      pull_request: {
+        draft: true,
+        title: "升级 Codex CLI 至 0.147.0",
+        body: "待 Codex 填写",
+      },
+    };
+    expect(checkUpgradePullRequestDescription(draft)).toEqual({ checked: false });
+
+    const ready = {
+      pull_request: {
+        draft: false,
+        title: "升级 Codex CLI 至 0.147.0",
+        body: [
+          "## 对本项目的收益",
+          "现有共享 App Server 路径获得明确的稳定性收益。",
+          "## 本次采用",
+          "适配现有业务使用的协议变化，并说明本地入口。",
+          "## 本次不采用",
+          "不导出没有当前需求的新 RPC，避免扩大支持边界。",
+          "## 风险与验证",
+          "覆盖定向测试、真实合同和完整提交门禁。",
+        ].join("\n\n"),
+      },
+    };
+    expect(checkUpgradePullRequestDescription(ready)).toEqual({ checked: true });
+    expect(() => checkUpgradePullRequestDescription({
+      ...ready,
+      pull_request: {
+        ...ready.pull_request,
+        body: ready.pull_request.body.replace(
+          "现有共享 App Server 路径获得明确的稳定性收益。",
+          "待 Codex 填写",
+        ),
+      },
+    })).toThrow("对本项目的收益");
+    expect(() => checkUpgradePullRequestDescription({
+      ...ready,
+      pull_request: {
+        ...ready.pull_request,
+        body: ready.pull_request.body.replace(
+          "不导出没有当前需求的新 RPC，避免扩大支持边界。",
+          "无",
+        ),
+      },
+    })).toThrow("本次不采用");
   });
 });

@@ -5,6 +5,10 @@ import { dirname, isAbsolute, join } from "node:path";
 
 import WebSocket from "ws";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import {
+  loadManagedProviderAppServer,
+  providerAppServerSocketPath,
+} from "../runtime/model-provider-runtime.mjs";
 import { packageDir, resolveConfiguredPath, runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
@@ -28,19 +32,22 @@ const gatewayEntry = process.env.CODEX_CONNECT_GATEWAY_ENTRY === "dist"
 mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
 chmodSync(runtimeDir, 0o700);
 
-let appServer;
-let ownsAppServer = false;
-if (await socketAcceptsWebSocket(socketPath)) {
-  console.log(`检测到现有 App Server Socket，将直接复用：${socketPath}`);
-} else {
-  preserveStaleSocket(socketPath, runtimeDir);
-  ownsAppServer = true;
-  appServer = spawn(codexBinary, ["app-server", "--listen", `unix://${socketPath}`], {
-    cwd: workdir,
-    stdio: "inherit",
-  });
-  await waitForSocket(appServer, socketPath, 10_000);
-  console.log(`Codex App Server 已启动：${socketPath}`);
+const appServers = [];
+try {
+  await ensureAppServer(socketPath, []);
+  const managedProvider = loadManagedProviderAppServer();
+  if (managedProvider) {
+    await ensureAppServer(
+      providerAppServerSocketPath(socketPath, managedProvider.provider),
+      managedProvider.arguments,
+      { ...process.env, ...managedProvider.childEnvironment },
+    );
+  }
+} catch (error) {
+  for (const appServer of appServers) {
+    if (appServer.exitCode === null) appServer.kill("SIGTERM");
+  }
+  throw error;
 }
 
 let stopping = false;
@@ -53,14 +60,16 @@ const stop = () => {
   if (gateway?.exitCode === null) {
     gateway.kill("SIGTERM");
   }
-  if (ownsAppServer && appServer?.exitCode === null) {
-    appServer.kill("SIGTERM");
+  for (const appServer of appServers) {
+    if (appServer.exitCode === null) {
+      appServer.kill("SIGTERM");
+    }
   }
 };
 process.once("SIGINT", stop);
 process.once("SIGTERM", stop);
 
-if (appServer) {
+for (const appServer of appServers) {
   appServer.once("exit", (code, signal) => {
     if (!stopping) {
       console.error(`Codex App Server 意外退出：code=${code} signal=${signal}`);
@@ -119,6 +128,22 @@ function table(value) {
 
 function stringValue(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+async function ensureAppServer(path, prefixArguments, environment = process.env) {
+  if (await socketAcceptsWebSocket(path)) {
+    console.log(`检测到现有 App Server Socket，将直接复用：${path}`);
+    return;
+  }
+  preserveStaleSocket(path, runtimeDir);
+  const child = spawn(
+    codexBinary,
+    [...prefixArguments, "app-server", "--listen", `unix://${path}`],
+    { cwd: workdir, stdio: "inherit", env: environment },
+  );
+  appServers.push(child);
+  await waitForSocket(child, path, 10_000);
+  console.log(`Codex App Server 已启动：${path}`);
 }
 
 async function waitForSocket(child, path, timeoutMs) {

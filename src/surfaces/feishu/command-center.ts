@@ -39,6 +39,8 @@ const directStateChangingActions = new Set<FeishuCommandCenterAction>([
   "new",
   "stop",
   "archive",
+  "pin",
+  "unpin",
   "compact",
   "fork",
   "plan",
@@ -423,6 +425,7 @@ function renderFeishuCommandFormCard(
   form: FeishuCommandCenterForm,
 ): FeishuCardDocument {
   return {
+    schema: "2.0",
     config: {
       update_multi: true,
       wide_screen_mode: true,
@@ -434,62 +437,60 @@ function renderFeishuCommandFormCard(
         content: form.title,
       },
     },
-    elements: [
-      ...(form.description
-        ? [{
-            tag: "div",
-            text: {
-              tag: "plain_text",
+    body: {
+      elements: [
+        ...(form.description
+          ? [{
+              tag: "markdown",
               content: form.description,
+            }]
+          : []),
+        {
+          tag: "form",
+          name: "codexc_command_form",
+          elements: [
+            {
+              tag: "input",
+              name: "input",
+              required: true,
+              input_type: "multiline_text",
+              rows: form.multiline ? 3 : 1,
+              auto_resize: true,
+              max_rows: form.multiline ? 8 : 1,
+              max_length: 1_000,
+              width: "fill",
+              label: {
+                tag: "plain_text",
+                content: form.fieldLabel,
+              },
+              label_position: "top",
+              ...(form.placeholder
+                ? {
+                    placeholder: {
+                      tag: "plain_text",
+                      content: form.placeholder,
+                    },
+                  }
+                : {}),
             },
-          }]
-        : []),
-      {
-        tag: "form",
-        name: "codexc_command_form",
-        elements: [
-          {
-            tag: "input",
-            name: "input",
-            required: true,
-            input_type: "multiline_text",
-            rows: form.multiline ? 3 : 1,
-            auto_resize: true,
-            max_rows: form.multiline ? 8 : 1,
-            max_length: 1_000,
-            width: "fill",
-            label: {
-              tag: "plain_text",
-              content: form.fieldLabel,
+            {
+              tag: "button",
+              type: "primary",
+              text: {
+                tag: "plain_text",
+                content: "确认",
+              },
+              name: "codexc_command_submit",
+              form_action_type: "submit",
+              value: {
+                codexc_command_token: token,
+                codexc_command: form.action,
+              },
             },
-            label_position: "top",
-            ...(form.placeholder
-              ? {
-                  placeholder: {
-                    tag: "plain_text",
-                    content: form.placeholder,
-                  },
-                }
-              : {}),
-          },
-          {
-            tag: "button",
-            type: "primary",
-            text: {
-              tag: "plain_text",
-              content: "确认",
-            },
-            name: "codexc_command_submit",
-            complex_interaction: true,
-            action_type: "form_submit",
-            value: {
-              codexc_command_token: token,
-              codexc_command: form.action,
-            },
-          },
-        ],
-      },
-    ],
+          ],
+        },
+      ],
+    },
   };
 }
 
@@ -525,9 +526,13 @@ function renderFeishuCategorizedCommandsCard(
         ["重命名", "rename", "default"],
         ["追加下一轮", "queue", "default"],
       ]),
+      actionRow(token, [
+        ["固定会话", "pin", "default"],
+        ["取消固定", "unpin", "default"],
+      ]),
       sectionTitle("能力与集成"),
       actionRow(token, [
-        ["Skills", "skills", "default"],
+        ["Skills", "skill", "default"],
         ["MCP", "mcp", "default"],
         ["Plugins", "plugins", "default"],
       ]),

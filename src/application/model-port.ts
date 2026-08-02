@@ -6,6 +6,9 @@ export interface ReasoningEffortOption {
 export type ModelInputModality = "text" | "image" | "audio";
 
 export interface ModelOption {
+  provider?: string;
+  available?: boolean;
+  unavailableReason?: string;
   id: string;
   model: string;
   displayName: string;
@@ -23,4 +26,5 @@ export interface ModelOption {
 export interface ModelSelectionPort {
   listModels(): Promise<ModelOption[]>;
   writeDefaultFastMode(enabled: boolean): Promise<void>;
+  readDefaultServiceTier(cwd: string, modelProvider?: string): Promise<string | null>;
 }

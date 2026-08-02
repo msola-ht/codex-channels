@@ -9,10 +9,21 @@
   共享的 TOML 配置。
 - `gateway-config.d.mts`：声明共享 TOML 配置模块的 TypeScript 接口。
 - `network-proxy.mjs`：按 TOML、标准环境变量和受支持系统代理的顺序解析统一代理环境，只返回
-  实际解析出的大小写代理变量，并集中选择、校验 HTTP(S) 客户端代理。
+  实际解析出的大小写代理变量；集中按目标协议选择、校验 HTTP(S) 客户端代理并匹配
+  `NO_PROXY`。渠道显式代理优先于共享代理和 `NO_PROXY`。
 - `network-proxy.d.mts`：声明共享代理解析模块的 TypeScript 接口。
+- `model-provider-definitions.mjs` / `model-provider-definitions.d.mts`：集中保存编译期内置模型
+  Provider 的非敏感固定定义，供 Setup、CLI、Runtime 与 Bootstrap 复用；不包含 API Key。
+- `model-provider-runtime.mjs`：通过编译期受控 Provider 描述读取 Setup 管理标记和私有 Profile；
+  判定切换/固定模式的主 Provider、派生私有 Provider Socket，并向 DeepSeek 账户适配器提供同源
+  凭据；读取并校验用户已有的 OpenAI 上游地址，并为 App Server 提供本机统计代理地址的参数替换。
+  切换模式为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，并只在子进程环境提供
+  Key；固定模式从基础配置读取。
+- `model-provider-runtime.d.mts`：声明受控模型 Provider 运行时接口。
 - `project-rules.mjs`：生成并检查项目级 Codex 命令规则；Gateway 使用精确 Workspace 根目录，
   并拒绝通过符号链接把写入转移到 Workspace 外。
 - `project-rules.d.mts`：声明共享项目规则模块的 TypeScript 接口。
+- `vision-credential.mjs` / `vision-credential.d.mts`：供 Setup 与 Gateway 共享外部视觉 API Key
+  的固定私有路径和严格读写；目录、文件所有者、权限与符号链接异常均失败关闭。
 
 这里的模块同时被 `bin/`、`scripts/`、`src/config` 和 `src/bootstrap` 使用，必须保持无平台 SDK 依赖，并随 npm 包发布。
