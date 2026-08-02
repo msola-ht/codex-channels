@@ -1,3 +1,14 @@
+import { spawnSync } from "node:child_process";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 // @ts-expect-error JavaScript release helper intentionally has no declaration file.
@@ -20,6 +31,36 @@ npm install -g @hegenai/codexc@0.145.0
 `;
 
 describe("published README synchronization", () => {
+  it("validates a release tag without installed dependencies", () => {
+    const fixture = mkdtempSync(join(tmpdir(), "codexc-release-tag-"));
+    const scriptsDirectory = join(fixture, "scripts");
+    mkdirSync(scriptsDirectory);
+    try {
+      for (const name of ["check-release-tag.mjs", "package-path.mjs"]) {
+        copyFileSync(resolve("scripts", name), join(scriptsDirectory, name));
+      }
+      writeFileSync(
+        join(fixture, "package.json"),
+        JSON.stringify({ version: "0.146.0" }),
+      );
+
+      const result = spawnSync(
+        process.execPath,
+        [join(scriptsDirectory, "check-release-tag.mjs"), "v0.146.0"],
+        {
+          cwd: fixture,
+          encoding: "utf8",
+          env: { ...process.env, GITHUB_REF_NAME: "" },
+        },
+      );
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain("发布版本匹配：v0.146.0");
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
   it("updates only the published version and remains idempotent", () => {
     const updated = renderPublishedReadme(readme, "0.146.0");
 

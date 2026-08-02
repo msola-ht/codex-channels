@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { packageDir } from "./runtime-config.mjs";
+import { packageDir } from "./package-path.mjs";
 
 const tag = process.env.GITHUB_REF_NAME?.trim() || process.argv[2]?.trim();
 if (!tag) {
