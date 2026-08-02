@@ -231,6 +231,7 @@ export class WeixinConversationAdapter {
             formatVisionImagesCollected(
               result.imageCount,
               result.maximumImages,
+              result.automatic,
             ),
           );
           return;

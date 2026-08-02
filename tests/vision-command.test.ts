@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ConversationTarget } from "../src/conversation-core/index.js";
-import { executeVisionCommand } from "../src/surfaces/vision-command.js";
+import {
+  executeVisionCommand,
+  formatVisionImagesCollected,
+} from "../src/surfaces/vision-command.js";
 
 const target: ConversationTarget = {
   surface: "telegram",
@@ -60,6 +63,28 @@ describe("executeVisionCommand", () => {
       .resolves.toBe("已提交 2 张图片。");
   });
 
+  it("starts a sized collection that will submit automatically", async () => {
+    const inputs = {
+      beginVisionCollection: vi.fn(() => ({ replacedPrompt: false })),
+      cancelVisionPrompt: vi.fn(),
+      completeVisionCollection: vi.fn(),
+      setVisionPrompt: vi.fn(),
+    };
+
+    await expect(executeVisionCommand(
+      inputs,
+      target,
+      "actor",
+      "3 比较这些图片",
+    )).resolves.toContain("发送 3 张图片，收齐后自动提交");
+    expect(inputs.beginVisionCollection).toHaveBeenCalledWith(
+      target,
+      "actor",
+      "比较这些图片",
+      3,
+    );
+  });
+
   it("rejects incomplete or malformed commands", async () => {
     const inputs = {
       beginVisionCollection: vi.fn(),
@@ -73,5 +98,14 @@ describe("executeVisionCommand", () => {
       .rejects.toThrow("请使用 /vision");
     await expect(executeVisionCommand(inputs, target, "actor", "done now"))
       .rejects.toThrow("请使用 /vision");
+    await expect(executeVisionCommand(inputs, target, "actor", "2"))
+      .rejects.toThrow("请使用 /vision");
+  });
+
+  it("distinguishes automatic and manual collection progress", () => {
+    expect(formatVisionImagesCollected(1, 3, true))
+      .toContain("收齐后自动提交");
+    expect(formatVisionImagesCollected(1, 4))
+      .toContain("完成：/vision done");
   });
 });

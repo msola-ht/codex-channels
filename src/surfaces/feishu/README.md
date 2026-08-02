@@ -230,8 +230,9 @@ StateStore 中已有绑定且仍有授权 Actor 的精确 Chat 生成消息；Su
 提交中传入，没有说明文字时才使用稳定图片提示。对已知平台无关命令调用
 `ConversationCommandService.execute()`；手动输入的 `/h`、`/work`、`/r` 分别规范化为
 `/help`、`/workspace`、`/resume`，不重复加入命令中心菜单。`/start`、`/help` 打开同一命令中心卡片，
-`/vision <要求>` 在当前 Actor 与私聊内预设下一批图片的识别要求；也可使用
-`/vision begin <要求>` 逐条收集最多四张图片，再用 `/vision done` 一次提交，`/vision cancel` 取消；
+`/vision <要求>` 在当前 Actor 与私聊内预设下一批图片的识别要求；多图使用
+`/vision <2–4> <要求>` 声明数量并在收齐后自动提交；兼容的 `/vision begin <要求>`、
+`/vision done` 保留给数量未知的收集，`/vision cancel` 取消；
 `/stop` 优先停止当前 Actor 在本私聊中的最新待处理交互，没有待处理交互时调用共享 Turn
 停止命令；`/whoami` 和
 `/fs <status|doctor|revoke>` 留在飞书边界。`status` 展示当前进程实际观测到的

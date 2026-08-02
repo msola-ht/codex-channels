@@ -247,6 +247,7 @@ describe("SurfaceInputCoalescer", () => {
       kind: "collected",
       imageCount: 1,
       maximumImages: 4,
+      automatic: false,
     });
     await expect(coalescer.enqueue({
       target,
@@ -258,6 +259,7 @@ describe("SurfaceInputCoalescer", () => {
       kind: "collected",
       imageCount: 2,
       maximumImages: 4,
+      automatic: false,
     });
     expect(submit).not.toHaveBeenCalled();
 
@@ -270,6 +272,80 @@ describe("SurfaceInputCoalescer", () => {
         { path: "/private/second.png" },
       ],
     });
+  });
+
+  it("submits a sized vision collection as soon as the requested images arrive", async () => {
+    const submit = vi.fn(async () => ({
+      threadId: "thread",
+      turnId: "turn",
+      steered: false,
+    }));
+    const coalescer = new SurfaceInputCoalescer(submit, {
+      quietWindowMs: 0,
+    });
+
+    coalescer.beginVisionCollection(target, "actor-1", "比较两张截图", 2);
+    await expect(coalescer.enqueue({
+      target,
+      actorId: "actor-1",
+      sequence: 2,
+      text: "第二张",
+      localImages: [{ path: "/private/second.png", bytes: 20 }],
+    })).resolves.toEqual({
+      kind: "collected",
+      imageCount: 1,
+      maximumImages: 2,
+      automatic: true,
+    });
+    await expect(coalescer.enqueue({
+      target,
+      actorId: "actor-1",
+      sequence: 1,
+      text: "第一张",
+      localImages: [{ path: "/private/first.png", bytes: 10 }],
+    })).resolves.toMatchObject({ submission: { turnId: "turn" } });
+
+    expect(submit).toHaveBeenCalledOnce();
+    expect(submit).toHaveBeenCalledWith(target, {
+      text: "比较两张截图\n\n第一张\n\n第二张",
+      localImages: [
+        { path: "/private/first.png" },
+        { path: "/private/second.png" },
+      ],
+    });
+    await expect(coalescer.completeVisionCollection(target, "actor-1"))
+      .rejects.toThrow("当前没有进行中的多图收集");
+  });
+
+  it("rejects sized collections outside the configured image limit", () => {
+    const coalescer = new SurfaceInputCoalescer(vi.fn(), {
+      maximumImages: 4,
+    });
+    expect(() => coalescer.beginVisionCollection(target, "actor-1", "one", 1))
+      .toThrow("多图数量必须为 2 至 4");
+    expect(() => coalescer.beginVisionCollection(target, "actor-1", "five", 5))
+      .toThrow("多图数量必须为 2 至 4");
+  });
+
+  it("keeps a sized collection when one message exceeds its remaining count", async () => {
+    const coalescer = new SurfaceInputCoalescer(vi.fn(), {
+      maximumImages: 4,
+      quietWindowMs: 0,
+    });
+    coalescer.beginVisionCollection(target, "actor-1", "compare", 2);
+
+    await expect(coalescer.enqueue({
+      target,
+      actorId: "actor-1",
+      sequence: 1,
+      localImages: [
+        { path: "/private/first.png" },
+        { path: "/private/second.png" },
+        { path: "/private/third.png" },
+      ],
+    })).rejects.toMatchObject({ code: "vision.collection.count.exceeded" });
+    await expect(coalescer.completeVisionCollection(target, "actor-1"))
+      .rejects.toThrow("请先发送至少一张图片");
   });
 
   it("keeps manual vision collections isolated and discards them on cancel", async () => {

@@ -616,24 +616,22 @@ export class FeishuConversationAdapter {
       throw error;
     }
     const collected = results.filter((result) => result.kind === "collected");
-    if (collected.length > 0) {
+    const submitted = results.filter((result) => result.kind !== "collected");
+    if (collected.length > 0 && submitted.length === 0) {
       this.outbox.discardPendingTurnReplyTarget?.(
         replyMessage.target.conversationId,
       );
-      if (collected.length !== results.length) {
-        throw new Error("同一图片批次不能同时收集和提交");
-      }
       const imageCount = Math.max(...collected.map((result) => result.imageCount));
       this.notifyText(
         replyMessage.target.conversationId,
         formatVisionImagesCollected(
           imageCount,
           collected[0]!.maximumImages,
+          collected[0]!.automatic,
         ),
       );
       return;
     }
-    const submitted = results.filter((result) => result.kind !== "collected");
     const tail = submitted.find((result) => result.tail);
     if (tail?.submission.steered) {
       this.outbox.discardPendingTurnReplyTarget?.(

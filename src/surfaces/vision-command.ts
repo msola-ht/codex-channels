@@ -20,11 +20,26 @@ export async function executeVisionCommand(
   if (!value) {
     throw new UserFacingError(
       "vision.command.usage",
-      "请使用 /vision <要求>、/vision begin <要求>、/vision done 或 /vision cancel",
+      "请使用 /vision <要求>、/vision <2–4> <要求> 或 /vision cancel",
     );
   }
   const [operation = "", ...rest] = value.split(/\s+/u);
   const argumentsValue = rest.join(" ").trim();
+  if (/^\d+$/u.test(operation)) {
+    if (!argumentsValue) throw visionCommandUsageError();
+    const expectedImages = Number(operation);
+    const { replacedPrompt } = inputs.beginVisionCollection(
+      target,
+      actorId,
+      argumentsValue,
+      expectedImages,
+    );
+    return [
+      replacedPrompt ? "已将原图片识别要求改为定量多图收集。" : "已开始定量多图收集。",
+      `请在 5 分钟内发送 ${expectedImages} 张图片，收齐后自动提交。`,
+      "取消：/vision cancel",
+    ].join("\n");
+  }
   switch (operation.toLowerCase()) {
     case "cancel":
       if (argumentsValue) throw visionCommandUsageError();
@@ -63,16 +78,19 @@ export async function executeVisionCommand(
 export function formatVisionImagesCollected(
   imageCount: number,
   maximumImages: number,
+  automatic = false,
 ): string {
   return [
     `已收集 ${imageCount}/${maximumImages} 张图片。`,
-    "继续发送图片，完成：/vision done；取消：/vision cancel",
+    automatic
+      ? "继续发送图片，收齐后自动提交；取消：/vision cancel"
+      : "继续发送图片，完成：/vision done；取消：/vision cancel",
   ].join("\n");
 }
 
 function visionCommandUsageError(): UserFacingError {
   return new UserFacingError(
     "vision.command.usage",
-    "请使用 /vision <要求>、/vision begin <要求>、/vision done 或 /vision cancel",
+    "请使用 /vision <要求>、/vision <2–4> <要求> 或 /vision cancel",
   );
 }

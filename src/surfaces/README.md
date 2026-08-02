@@ -62,8 +62,8 @@ Telegram 和飞书在交互消息创建成功或失败时
 `surface-input-coalescer.ts` 是已授权 Surface 输入门面，组合两个独立状态边界：
 `surface-input-batcher.ts` 只合并 Surface 明确标识的原生图片批次，普通文字、单图和无批次标识的
 消息立即提交；`vision-input-session.ts` 按完整 Conversation 与 Actor 在内存保存五分钟有效的
-下一批要求，以及显式 `/vision begin <要求>` 开始、`/vision done` 提交、`/vision cancel` 丢弃的
-最多四张手动图片收集。停止时原生批次排空，尚未提交的手动收集直接清除；二者都不根据消息间隔
+下一批要求，以及 `/vision <2–4> <要求>` 定量收集并在收齐后自动提交的最多四张图片；兼容的
+`begin/done/cancel` 保留给数量未知的手动收集。停止时原生批次排空，尚未提交的手动收集直接清除；二者都不根据消息间隔
 猜测独立消息关系。`vision-command.ts` 统一三个 Surface 的命令和确认文案。
 `turn-reply-targets.ts` 只在 Surface 内存中把待提交输入的精确平台消息 ID 绑定到实际
 Thread 与 Turn，允许 `turn.started` 早于提交响应时仍原生回复正确输入；不保存消息正文，

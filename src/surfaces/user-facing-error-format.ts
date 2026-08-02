@@ -27,7 +27,7 @@ export function formatSurfaceUserFacingError(
     case "vision.failed":
       return "图片识别失败，请稍后重试或切换支持图片的模型";
     case "vision.command.usage":
-      return "用法：/vision <要求>；多图：/vision begin <要求>、/vision done；取消：/vision cancel";
+      return "用法：/vision <要求>；多图：/vision <2–4> <要求>；取消：/vision cancel";
     case "vision.prompt.invalid":
       return "图片识别要求必须为 1 至 4000 个字符";
     case "vision.prompt.capacity":
@@ -38,6 +38,10 @@ export function formatSurfaceUserFacingError(
       return "当前没有进行中的多图收集，请先使用 /vision begin <要求>";
     case "vision.collection.empty":
       return "请先发送至少一张图片，再使用 /vision done";
+    case "vision.collection.count.invalid":
+      return `多图数量必须为 2 至 ${detail(error, "maximumImages", "4")}`;
+    case "vision.collection.count.exceeded":
+      return `本次只需 ${detail(error, "expectedImages", "指定数量")} 张图片`;
     case "audio.path.invalid":
       return "本地音频路径必须是绝对路径";
     case "audio.duration-missing":

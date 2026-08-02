@@ -1373,6 +1373,54 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent).toEqual([]);
   });
 
+  it("automatically submits a sized collection from adjacent Feishu images", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const download = vi.fn()
+      .mockResolvedValueOnce({
+        path: "/private/uploads/feishu/first.png",
+        mimeType: "image/png" as const,
+        bytes: 8,
+      })
+      .mockResolvedValueOnce({
+        path: "/private/uploads/feishu/second.jpg",
+        mimeType: "image/jpeg" as const,
+        bytes: 9,
+      });
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationUseCases,
+      fixture.outbox,
+      { download },
+    );
+
+    await adapter.handle({ ...message, text: "/vision 2 比较这些图片" });
+    await adapter.handleImageBatch([
+      createImageMessage({
+        messageId: "om_first",
+        imageKeys: ["img_v2_first"],
+      }),
+      createImageMessage({
+        eventId: "event-2",
+        messageId: "om_second",
+        imageKeys: ["img_v2_second"],
+      }),
+    ]);
+    await fixture.outbox.close();
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledWith(message.target, {
+      text: "比较这些图片",
+      localImages: [
+        { path: "/private/uploads/feishu/first.png" },
+        { path: "/private/uploads/feishu/second.jpg" },
+      ],
+    });
+  });
+
   it("submits multiple images from one rich post in their original order", async () => {
     const fixture = createOutbox();
     const submit = vi.fn(async () => ({

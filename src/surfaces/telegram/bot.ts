@@ -286,7 +286,7 @@ export class TelegramSurface {
           "",
           ...conversationCommandHelpLines,
           "Telegram：",
-          "- /vision <要求> · /vision begin <要求> · /vision done · /vision cancel",
+          "- /vision <要求> · /vision <2–4> <要求> · /vision cancel",
           "- /whoami",
           "- /start · /help · /h",
         ].join("\n"),
@@ -573,6 +573,7 @@ export class TelegramSurface {
       await context.reply(formatVisionImagesCollected(
         result.imageCount,
         result.maximumImages,
+        result.automatic,
       ), {
         disable_notification: true,
         reply_parameters: {

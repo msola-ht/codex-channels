@@ -19,7 +19,7 @@
   外部视觉模型只做客观观察和文字提取，原 Thread 默认不额外搜索、核实或调用工具；
   三渠道只在外部请求发起后发送一次包含图片数量与本条要求的视觉 API 识别提示；`/vision`
   下一批图片要求的 Actor/Conversation 隔离、替换、取消、五分钟过期和一次消费，以及显式
-  `begin/done/cancel` 手动多图收集的顺序、容量、隔离和停止清理。
+  定量多图收齐自动提交，以及兼容的 `begin/done/cancel` 手动收集顺序、容量、隔离和停止清理。
 - 官方 Turn、Item、Diff、Plan、Goal、Token、账户、额度、MCP 和 warning Notification 到稳定 Core
   输入事件的映射，畸形与未知通知隔离；Conversation Core 状态归约、严格 Turn 完成状态、
   官方 `Turn.durationMs` 校验、三渠道统一结束汇报耗时字段、可重试错误隔离、Thread/全局警告路由，

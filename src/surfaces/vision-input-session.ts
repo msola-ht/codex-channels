@@ -29,6 +29,7 @@ interface PendingCollection extends TimedVisionState {
   kind: "collection";
   target: ConversationTarget;
   actorId: string;
+  expectedImages?: number;
   parts: CollectedPart[];
 }
 
@@ -37,7 +38,12 @@ type PendingVisionState = PendingPrompt | PendingCollection;
 export type VisionInputDecision =
   | { kind: "pass" }
   | { kind: "submit"; input: SurfaceInputPart }
-  | { kind: "collected"; imageCount: number; maximumImages: number };
+  | {
+      kind: "collected";
+      imageCount: number;
+      maximumImages: number;
+      automatic: boolean;
+    };
 
 export interface CompletedVisionCollection {
   input: SurfaceInputPart;
@@ -91,9 +97,24 @@ export class VisionInputSession {
     target: ConversationTarget,
     actorId: string,
     value: string,
+    expectedImages?: number,
   ): { replacedPrompt: boolean } {
     this.requireOpen();
     const prompt = validatedPrompt(value);
+    if (
+      expectedImages !== undefined
+      && (
+        !Number.isSafeInteger(expectedImages)
+        || expectedImages < 2
+        || expectedImages > this.options.maximumImages
+      )
+    ) {
+      throw new UserFacingError(
+        "vision.collection.count.invalid",
+        `多图数量必须为 2 至 ${this.options.maximumImages}`,
+        { maximumImages: String(this.options.maximumImages) },
+      );
+    }
     const key = surfaceActorKey(target, actorId);
     const previous = this.states.get(key);
     if (previous?.kind === "collection") {
@@ -106,6 +127,7 @@ export class VisionInputSession {
       prompt,
       target,
       actorId,
+      ...(expectedImages === undefined ? {} : { expectedImages }),
       parts: [],
       timer: undefined as never,
     };
@@ -145,14 +167,28 @@ export class VisionInputSession {
       this.options.maximumImageBytes,
     );
     if (limitError !== undefined) throw limitError;
+    if (state.expectedImages !== undefined && images.length > state.expectedImages) {
+      throw new UserFacingError(
+        "vision.collection.count.exceeded",
+        `本次只需 ${state.expectedImages} 张图片`,
+        { expectedImages: String(state.expectedImages) },
+      );
+    }
     state.parts.push({ ...input, order: this.nextOrder });
     this.nextOrder += 1;
     clearTimeout(state.timer);
+    if (state.expectedImages !== undefined && images.length === state.expectedImages) {
+      return {
+        kind: "submit",
+        input: this.finishCollection(key, state).input,
+      };
+    }
     state.timer = this.expiryTimer(key, state);
     return {
       kind: "collected",
       imageCount: images.length,
-      maximumImages: this.options.maximumImages,
+      maximumImages: state.expectedImages ?? this.options.maximumImages,
+      automatic: state.expectedImages !== undefined,
     };
   }
 
@@ -175,6 +211,13 @@ export class VisionInputSession {
         "请先发送至少一张图片",
       );
     }
+    return this.finishCollection(key, state);
+  }
+
+  private finishCollection(
+    key: string,
+    state: PendingCollection,
+  ): CompletedVisionCollection {
     clearTimeout(state.timer);
     this.states.delete(key);
     const parts = [...state.parts].sort(

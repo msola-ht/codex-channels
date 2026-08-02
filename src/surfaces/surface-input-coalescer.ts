@@ -14,6 +14,7 @@ export interface SurfaceInputCollectedResult {
   kind: "collected";
   imageCount: number;
   maximumImages: number;
+  automatic: boolean;
 }
 
 export type SurfaceInputBatchResult =
@@ -63,8 +64,9 @@ export class SurfaceInputCoalescer {
     target: ConversationTarget,
     actorId: string,
     value: string,
+    expectedImages?: number,
   ): { replacedPrompt: boolean } {
-    return this.vision.beginCollection(target, actorId, value);
+    return this.vision.beginCollection(target, actorId, value, expectedImages);
   }
 
   cancelVisionPrompt(target: ConversationTarget, actorId: string): boolean {

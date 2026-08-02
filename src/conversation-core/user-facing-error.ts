@@ -14,6 +14,8 @@ export type UserFacingErrorCode =
   | "vision.collection.active"
   | "vision.collection.missing"
   | "vision.collection.empty"
+  | "vision.collection.count.invalid"
+  | "vision.collection.count.exceeded"
   | "audio.path.invalid"
   | "audio.duration-missing"
   | "audio.too-large"
