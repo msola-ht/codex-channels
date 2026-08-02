@@ -2,7 +2,7 @@ import {
   UserFacingError,
   type ConversationTarget,
 } from "../conversation-core/index.js";
-import type { ConversationService } from "./conversation-service.js";
+import type { ConversationUseCases } from "./conversation-service.js";
 import type { ReviewTarget, ThreadGoal } from "./turn-port.js";
 
 export const conversationCommandNames = [
@@ -48,34 +48,34 @@ export type ConversationCommandResult =
   | { kind: "outcome"; outcome: ConversationCommandOutcome }
   | {
       kind: "sessions";
-      sessions: Awaited<ReturnType<ConversationService["listSessions"]>>;
+      sessions: Awaited<ReturnType<ConversationUseCases["listSessions"]>>;
       currentThreadId?: string;
       archived: boolean;
       searchTerm?: string;
     }
-  | { kind: "status"; status: ReturnType<ConversationService["status"]> }
+  | { kind: "status"; status: ReturnType<ConversationUseCases["status"]> }
   | {
       kind: "workspaces";
-      workspaces: ReturnType<ConversationService["listWorkspaces"]>;
+      workspaces: ReturnType<ConversationUseCases["listWorkspaces"]>;
       currentWorkspaceId: string;
     }
   | {
       kind: "models";
       view: "model" | "effort" | "fast";
-      state: Awaited<ReturnType<ConversationService["modelState"]>>;
+      state: Awaited<ReturnType<ConversationUseCases["modelState"]>>;
     }
   | {
       kind: "collaboration-mode";
-      state: Awaited<ReturnType<ConversationService["togglePlanMode"]>>;
+      state: Awaited<ReturnType<ConversationUseCases["togglePlanMode"]>>;
     }
-  | { kind: "skills"; entries: Awaited<ReturnType<ConversationService["listSkills"]>> }
-  | { kind: "mcp"; servers: Awaited<ReturnType<ConversationService["listMcpServers"]>> }
-  | { kind: "plugins"; result: Awaited<ReturnType<ConversationService["listPlugins"]>> }
-  | { kind: "usage"; result: Awaited<ReturnType<ConversationService["providerAccountUsage"]>> }
-  | { kind: "limits"; result: Awaited<ReturnType<ConversationService["providerAccountLimits"]>> }
+  | { kind: "skills"; entries: Awaited<ReturnType<ConversationUseCases["listSkills"]>> }
+  | { kind: "mcp"; servers: Awaited<ReturnType<ConversationUseCases["listMcpServers"]>> }
+  | { kind: "plugins"; result: Awaited<ReturnType<ConversationUseCases["listPlugins"]>> }
+  | { kind: "usage"; result: Awaited<ReturnType<ConversationUseCases["providerAccountUsage"]>> }
+  | { kind: "limits"; result: Awaited<ReturnType<ConversationUseCases["providerAccountLimits"]>> }
   | {
       kind: "permissions";
-      profiles: Awaited<ReturnType<ConversationService["listPermissionProfiles"]>>;
+      profiles: Awaited<ReturnType<ConversationUseCases["listPermissionProfiles"]>>;
     }
   | {
       kind: "project-rules";
@@ -86,7 +86,7 @@ export type ConversationCommandResult =
   | {
       kind: "artifacts";
       view: "diff";
-      artifacts: ReturnType<ConversationService["artifacts"]>;
+      artifacts: ReturnType<ConversationUseCases["artifacts"]>;
     }
   | { kind: "goal"; goal: ThreadGoal | null };
 
@@ -98,7 +98,7 @@ export type ConversationCommandOutcome =
   | { type: "thread.pin-updated"; pinned: boolean }
   | {
       type: "workspace.selected";
-      workspace: Awaited<ReturnType<ConversationService["selectWorkspace"]>>;
+      workspace: Awaited<ReturnType<ConversationUseCases["selectWorkspace"]>>;
     }
   | { type: "turn.stop-requested"; stopped: boolean }
   | { type: "turn.follow-up-queued"; position: number }
@@ -120,7 +120,7 @@ export type ConversationCommandOutcome =
     };
 
 export class ConversationCommandService {
-  constructor(private readonly conversations: ConversationService) {}
+  constructor(private readonly conversations: ConversationUseCases) {}
 
   async execute(
     target: ConversationTarget,

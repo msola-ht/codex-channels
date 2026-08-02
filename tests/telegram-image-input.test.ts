@@ -6,7 +6,7 @@ import { join } from "node:path";
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ConversationService } from "../src/application/conversation-service.js";
+import type { ConversationUseCases } from "../src/application/conversation-service.js";
 import { UserFacingError, type OutputEvent } from "../src/conversation-core/index.js";
 import { EventBus } from "../src/event-bus/event-bus.js";
 import { TelegramAccessPolicy } from "../src/policy/telegram-access.js";
@@ -819,7 +819,7 @@ function createSurface(
   const surface = new TelegramSurface(
     "123:token",
     undefined,
-    { submit, ...serviceOverrides } as unknown as ConversationService,
+    { submit, ...serviceOverrides } as unknown as ConversationUseCases,
     new TelegramAccessPolicy(new Set([123]), "default"),
     new Set(),
     [{ id: "main", name: "Main", cwd: "/workspace" }],

@@ -1,6 +1,6 @@
 import type { Logger } from "pino";
 
-import type { ConversationService } from "../../application/index.js";
+import type { ConversationUseCases } from "../../application/index.js";
 import type {
   ConversationTarget,
 } from "../../conversation-core/index.js";
@@ -57,7 +57,7 @@ export interface WeixinSurfaceOptions {
   typingClient?: WeixinTypingProtocolClient;
   lifecycleClient?: WeixinLifecycleProtocolClient;
   cursorStore: WeixinUpdatesCursorStore;
-  service: ConversationService;
+  service: ConversationUseCases;
   access: SurfaceAccessPolicy;
   logger: Logger;
   onFatal: (error: WeixinInputFatalError) => void;

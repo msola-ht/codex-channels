@@ -1,7 +1,7 @@
 import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 
-import type { ConversationService } from "../src/application/index.js";
+import type { ConversationUseCases } from "../src/application/index.js";
 import type {
   OutputEvent,
 } from "../src/conversation-core/index.js";
@@ -436,7 +436,7 @@ describe("WeixinSurface", () => {
     const service = {
       submit,
       stop,
-    } as unknown as ConversationService;
+    } as unknown as ConversationUseCases;
     const sendText = vi.fn<WeixinProtocolClient["sendText"]>(async () => {});
     let pollCount = 0;
     const client: WeixinProtocolClient = {
@@ -862,7 +862,7 @@ function cursorStoreFixture(): WeixinUpdatesCursorStore & {
   };
 }
 
-function serviceFixture(): ConversationService & {
+function serviceFixture(): ConversationUseCases & {
   submit: ReturnType<typeof vi.fn>;
 } {
   return {
@@ -871,7 +871,7 @@ function serviceFixture(): ConversationService & {
       turnId: "turn",
       steered: false,
     })),
-  } as unknown as ConversationService & {
+  } as unknown as ConversationUseCases & {
     submit: ReturnType<typeof vi.fn>;
   };
 }

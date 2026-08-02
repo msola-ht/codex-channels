@@ -1,6 +1,6 @@
 import type { Logger } from "pino";
 
-import type { ConversationService } from "../../application/index.js";
+import type { ConversationUseCases } from "../../application/index.js";
 import type {
   ConversationActorRegistry,
   SurfaceAccessPolicy,
@@ -21,7 +21,7 @@ import { FileWeixinUpdatesCursorStore } from "./updates-cursor-store.js";
 
 export interface CreateWeixinSurfaceOptions {
   accountId: string;
-  service: ConversationService;
+  service: ConversationUseCases;
   access: SurfaceAccessPolicy;
   actorRegistry: ConversationActorRegistry;
   credentialDirectory: string;

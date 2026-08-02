@@ -132,7 +132,62 @@ export interface ConversationStatus {
   weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>;
 }
 
-export class ConversationService {
+/** Stable application boundary consumed by commands and external Surfaces. */
+export interface ConversationUseCases {
+  submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission>;
+  invokeSkill(
+    target: ConversationTarget,
+    selector: string,
+    task: string,
+  ): Promise<Submission & { skillName: string }>;
+  queueFollowUp(target: ConversationTarget, value: string): Promise<{ position: number }>;
+  handleTurnCompleted(
+    target: ConversationTarget,
+    threadId: string,
+  ): Promise<Submission | undefined>;
+  listSessions(
+    target: ConversationTarget,
+    options?: { archived?: boolean; searchTerm?: string },
+  ): Promise<ConversationSession[]>;
+  resume(target: ConversationTarget, selector: string): Promise<ConversationResumeResult>;
+  newSession(target: ConversationTarget): Promise<void>;
+  archive(target: ConversationTarget): Promise<string>;
+  unarchive(target: ConversationTarget, selector: string): Promise<string>;
+  artifacts(target: ConversationTarget): TurnArtifacts | undefined;
+  listWorkspaces(): Workspace[];
+  selectWorkspace(target: ConversationTarget, selector: string): Promise<Workspace>;
+  stop(target: ConversationTarget): Promise<boolean>;
+  rename(target: ConversationTarget, name: string): Promise<void>;
+  setPinned(target: ConversationTarget, pinned: boolean): Promise<void>;
+  compact(target: ConversationTarget): Promise<void>;
+  fork(target: ConversationTarget): Promise<string>;
+  togglePlanMode(target: ConversationTarget): Promise<CollaborationModeState>;
+  startPlan(target: ConversationTarget, prompt: string): Promise<Submission>;
+  review(target: ConversationTarget, reviewTarget: ReviewTarget): Promise<Submission>;
+  modelState(target: ConversationTarget): Promise<ModelSelectionState>;
+  selectModel(target: ConversationTarget, selector: string): Promise<ModelSelectionState>;
+  selectEffort(target: ConversationTarget, selector: string): Promise<ModelSelectionState>;
+  selectFastMode(target: ConversationTarget, selector: string): Promise<ModelSelectionState>;
+  listSkills(target: ConversationTarget): Promise<InstalledSkill[]>;
+  listMcpServers(target: ConversationTarget): Promise<McpServerSummary[]>;
+  listPlugins(target: ConversationTarget): Promise<InstalledPlugin[]>;
+  accountUsage(): Promise<AccountUsage>;
+  accountRateLimits(): Promise<AccountRateLimits>;
+  providerAccountUsage(target: ConversationTarget): Promise<ProviderAccountUsage>;
+  providerAccountLimits(target: ConversationTarget): Promise<ProviderAccountLimits>;
+  listPermissionProfiles(target: ConversationTarget): Promise<PermissionProfileOption[]>;
+  initializeProjectRules(target: ConversationTarget): Promise<ProjectRulesResult>;
+  checkProjectRules(target: ConversationTarget): Promise<ProjectRulesResult>;
+  getGoal(target: ConversationTarget): Promise<ThreadGoal | null>;
+  setGoal(target: ConversationTarget, objective: string): Promise<ThreadGoal>;
+  clearGoal(target: ConversationTarget): Promise<void>;
+  status(
+    target: ConversationTarget,
+    options?: { includeGitBranch?: boolean },
+  ): ConversationStatus;
+}
+
+export class ConversationService implements ConversationUseCases {
   private readonly locks = new Map<string, Promise<void>>();
   private readonly queuedFollowUps = new Map<string, QueuedFollowUp[]>();
 

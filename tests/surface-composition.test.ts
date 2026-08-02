@@ -5,7 +5,7 @@ import { join } from "node:path";
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ConversationService } from "../src/application/index.js";
+import type { ConversationUseCases } from "../src/application/index.js";
 import type { InteractionPort } from "../src/approval/index.js";
 import {
   createFeishuRuntimeModule,
@@ -504,7 +504,7 @@ function options(
 ) {
   return {
     config: runtimeConfig,
-    service: {} as ConversationService,
+    service: {} as ConversationUseCases,
     bindings,
     logger: pino({ level: "silent" }),
     gatewayVersion: "0.146.0",

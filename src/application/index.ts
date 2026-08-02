@@ -43,6 +43,7 @@ export {
   type ConversationSession,
   type ConversationStatus,
   type ConversationTransferPort,
+  type ConversationUseCases,
   type ProjectRulesPort,
   type ProjectRulesResult,
   type Submission,

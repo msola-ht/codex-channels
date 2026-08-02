@@ -1,7 +1,7 @@
 import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 
-import type { ConversationService } from "../src/application/index.js";
+import type { ConversationUseCases } from "../src/application/index.js";
 import {
   feishuCardElements,
   FeishuEventConnection,
@@ -480,7 +480,7 @@ describe("Feishu Surface", () => {
 });
 
 function createFixture(
-  service: Partial<ConversationService> | undefined = undefined,
+  service: Partial<ConversationUseCases> | undefined = undefined,
   configurationRecipients?: () => readonly string[],
   startupNotification?: {
     messages(): ReadonlyArray<{ chatId: string; text: string }>;
@@ -511,7 +511,7 @@ function createFixture(
       steered: false,
     }),
     ...service,
-  }) as ConversationService;
+  }) as ConversationUseCases;
   let readyCallback: (() => void) | undefined;
   let reconnectingCallback: (() => void) | undefined;
   let reconnectedCallback: (() => void) | undefined;

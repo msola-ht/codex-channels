@@ -4,7 +4,7 @@ import {
   isConversationCommandName,
   isFastServiceTier,
   type ConversationCommandResult,
-  type ConversationService,
+  type ConversationUseCases,
 } from "../../application/index.js";
 import {
   UserFacingError,
@@ -65,7 +65,7 @@ export class FeishuConversationAdapter {
   private nextInputSequence = 0;
 
   constructor(
-    private readonly conversations: ConversationService,
+    private readonly conversations: ConversationUseCases,
     private readonly outbox:
       & Pick<FeishuOutbox, "notifyMarkdown" | "notifyText">
       & Partial<Pick<

@@ -4,7 +4,7 @@ import {
   ConversationCommandService,
   conversationCommandNames,
   isConversationCommandName,
-  type ConversationService,
+  type ConversationUseCases,
 } from "../src/application/index.js";
 import type { ConversationTarget } from "../src/conversation-core/index.js";
 import { TelegramAccessPolicy } from "../src/policy/index.js";
@@ -37,7 +37,7 @@ describe("ConversationCommandService", () => {
     const commands = new ConversationCommandService({
       initializeProjectRules,
       checkProjectRules,
-    } as unknown as ConversationService);
+    } as unknown as ConversationUseCases);
 
     await expect(commands.execute(target, "rules", "init")).resolves.toEqual({
       kind: "project-rules",
@@ -61,7 +61,7 @@ describe("ConversationCommandService", () => {
     const conversations = {
       listSessions,
       status: () => ({ threadId: "thread-1" }),
-    } as unknown as ConversationService;
+    } as unknown as ConversationUseCases;
     const commands = new ConversationCommandService(conversations);
 
     await expect(commands.execute(target, "sessions", " fix ")).resolves.toEqual({
@@ -80,7 +80,7 @@ describe("ConversationCommandService", () => {
         threadId: "thread-shared",
         transferredFrom: "weixin",
       })),
-    } as unknown as ConversationService);
+    } as unknown as ConversationUseCases);
 
     await expect(commands.execute(target, "resume", "thread-shared"))
       .resolves.toEqual({
@@ -101,7 +101,7 @@ describe("ConversationCommandService", () => {
     }));
     const commands = new ConversationCommandService({
       review,
-    } as unknown as ConversationService);
+    } as unknown as ConversationUseCases);
 
     await expect(commands.execute(target, "review", "branch main")).resolves.toEqual({
       kind: "outcome",
@@ -142,7 +142,7 @@ describe("ConversationCommandService", () => {
     const commands = new ConversationCommandService({
       togglePlanMode,
       startPlan,
-    } as unknown as ConversationService);
+    } as unknown as ConversationUseCases);
 
     await expect(commands.execute(target, "plan")).resolves.toEqual({
       kind: "collaboration-mode",
@@ -168,7 +168,7 @@ describe("ConversationCommandService", () => {
     }));
     const commands = new ConversationCommandService({
       setGoal,
-    } as unknown as ConversationService);
+    } as unknown as ConversationUseCases);
 
     await expect(commands.execute(target, "goal", " set ship it ")).resolves.toEqual({
       kind: "outcome",
@@ -181,7 +181,7 @@ describe("ConversationCommandService", () => {
     const queueFollowUp = vi.fn(async () => ({ position: 2 }));
     const commands = new ConversationCommandService({
       queueFollowUp,
-    } as unknown as ConversationService);
+    } as unknown as ConversationUseCases);
 
     await expect(commands.execute(target, "queue", " 下一轮检查测试 "))
       .resolves.toEqual({
@@ -195,7 +195,7 @@ describe("ConversationCommandService", () => {
     const queueFollowUp = vi.fn();
     const commands = new ConversationCommandService({
       queueFollowUp,
-    } as unknown as ConversationService);
+    } as unknown as ConversationUseCases);
 
     await expect(commands.execute(target, "queue", " "))
       .rejects.toMatchObject({ code: "queue.usage" });
@@ -225,7 +225,7 @@ describe("ConversationCommandService", () => {
       providerAccountUsage,
       providerAccountLimits,
       listPermissionProfiles,
-    } as unknown as ConversationService);
+    } as unknown as ConversationUseCases);
 
     await expect(commands.execute(target, "model", "gpt-test")).resolves.toMatchObject({
       kind: "models",
@@ -280,7 +280,7 @@ describe("ConversationCommandService", () => {
     }));
     const commands = new ConversationCommandService({
       invokeSkill,
-    } as unknown as ConversationService);
+    } as unknown as ConversationUseCases);
 
     await expect(commands.execute(
       target,
@@ -304,7 +304,7 @@ describe("ConversationCommandService", () => {
 
   it("rejects /skill without both selector and task", async () => {
     const commands = new ConversationCommandService(
-      {} as ConversationService,
+      {} as ConversationUseCases,
     );
     await expect(commands.execute(target, "skill", "systematic-debugging"))
       .rejects.toMatchObject({ code: "skill.usage" });
@@ -360,7 +360,7 @@ describe("ConversationCommandService", () => {
       setGoal: vi.fn(async () => goal),
     };
     const commands = new ConversationCommandService(
-      service as unknown as ConversationService,
+      service as unknown as ConversationUseCases,
     );
     const cases = [
       ["resume", "thread-1", "resume"],
@@ -413,7 +413,7 @@ describe("ConversationCommandService", () => {
     const commands = new ConversationCommandService({
       getGoal,
       clearGoal,
-    } as unknown as ConversationService);
+    } as unknown as ConversationUseCases);
 
     await expect(commands.execute(target, "goal")).resolves.toEqual({
       kind: "goal",
@@ -429,7 +429,7 @@ describe("ConversationCommandService", () => {
     const getGoal = vi.fn(async () => null);
     const commands = new ConversationCommandService({
       getGoal,
-    } as unknown as ConversationService);
+    } as unknown as ConversationUseCases);
 
     for (const input of ["set", "clear extra", "unknown"]) {
       await expect(commands.execute(target, "goal", input)).rejects.toMatchObject({

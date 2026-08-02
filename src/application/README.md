@@ -6,7 +6,8 @@
 
 - `index.ts`：本模块的公开导出入口。
 - `conversation-command-service.ts`：定义平台无关的会话命令名称，解析参数并返回结构化结果；不包含平台文案或消息布局。
-- `conversation-service.ts`：新建、恢复、切换、归档、固定和查询 Thread，提交、steer 或将纯文本
+- `conversation-service.ts`：通过稳定的 `ConversationUseCases` 公开 Surface 和命令层所需用例，
+  具体 `ConversationService` 负责新建、恢复、切换、归档、固定和查询 Thread，提交、steer 或将纯文本
   排到下一 Turn，公开 Conversation 状态与最近 Turn 产物，并通过注入端口把项目规则操作限制
   到当前授权 Workspace；Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，
   并通过组合根注入的只读端口取得当前 Workspace Git 分支；
@@ -49,7 +50,8 @@
   显式 Skill 调用同时发送 `$<skill-name>` 文本标记和内部 Skill 引用。Application 不构造官方 `UserInput`，
   也不接收完整官方 Turn 响应。
 
-Surface 应通过这里的用例接口驱动会话，不应直接拼装 JSON-RPC。Thread 的权威状态仍来自 App Server，本模块只编排请求和必要的本地选择。
+Surface 应依赖 `ConversationUseCases` 驱动会话，不依赖具体服务类，也不应直接拼装 JSON-RPC。
+Thread 的权威状态仍来自 App Server，本模块只编排请求和必要的本地选择。
 下一 Turn 队列按 Conversation 隔离、每个会话最多 10 条且只保存在内存中；`turn.completed`
 后一次启动一条，Thread 变化或启动失败时清空，不能把消息正文写入 StateStore。
 扩展查询也保持平台无关：Skill 只向 Surface 返回当前用户或 Workspace 直接安装且已启用项的

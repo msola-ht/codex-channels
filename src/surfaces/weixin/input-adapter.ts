@@ -1,4 +1,4 @@
-import type { ConversationService } from "../../application/index.js";
+import type { ConversationUseCases } from "../../application/index.js";
 import {
   conversationTargetKey,
   type ConversationTarget,
@@ -56,7 +56,7 @@ export interface WeixinInputAdapterOptions {
   accountId: string;
   client: WeixinProtocolClient;
   cursorStore: WeixinUpdatesCursorStore;
-  service: ConversationService;
+  service: ConversationUseCases;
   outbox: Pick<WeixinOutbox, "notifyText">;
   access: SurfaceAccessPolicy;
   replyContexts: WeixinReplyContextStore;

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   conversationCommandNames,
-  type ConversationService,
+  type ConversationUseCases,
 } from "../src/application/index.js";
 import type { ConversationTarget } from "../src/conversation-core/index.js";
 import {
@@ -772,7 +772,7 @@ describe("WeixinConversationAdapter", () => {
 });
 
 function serviceFixture(
-  methods: Partial<Record<keyof ConversationService, unknown>>,
-): ConversationService {
-  return methods as unknown as ConversationService;
+  methods: Partial<Record<keyof ConversationUseCases, unknown>>,
+): ConversationUseCases {
+  return methods as ConversationUseCases;
 }

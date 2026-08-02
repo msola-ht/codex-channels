@@ -1,6 +1,6 @@
 import type { Logger } from "pino";
 
-import type { ConversationService } from "../../application/index.js";
+import type { ConversationUseCases } from "../../application/index.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
 import type {
   ConversationActorRegistry,
@@ -90,7 +90,7 @@ export interface FeishuStartupNotification {
 export interface FeishuSurfaceOptions {
   appId: string;
   appSecret: string;
-  service: ConversationService;
+  service: ConversationUseCases;
   access: SurfaceAccessPolicy;
   logger: Logger;
   uploadsDirectory: string;

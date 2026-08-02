@@ -8,7 +8,7 @@ import {
   ConversationCommandService,
   conversationCommandNames,
   type ConversationCommandName,
-  type ConversationService,
+  type ConversationUseCases,
 } from "../../application/index.js";
 import {
   UserFacingError,
@@ -104,7 +104,7 @@ export interface TelegramSurfaceOptions {
 export interface CreateTelegramSurfaceOptions extends TelegramSurfaceOptions {
   token: string;
   proxyUrl?: string;
-  service: ConversationService;
+  service: ConversationUseCases;
   access: SurfaceAccessPolicy;
   startupRecipients: ReadonlySet<number>;
   workspaces: Workspace[];
@@ -148,7 +148,7 @@ export class TelegramSurface {
   constructor(
     token: string,
     proxyUrl: string | undefined,
-    private readonly service: ConversationService,
+    private readonly service: ConversationUseCases,
     private readonly access: SurfaceAccessPolicy,
     startupRecipients: ReadonlySet<number>,
     workspaces: Workspace[],

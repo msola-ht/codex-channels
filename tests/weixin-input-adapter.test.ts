@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { ConversationService } from "../src/application/index.js";
+import type { ConversationUseCases } from "../src/application/index.js";
 import type { ConversationTarget } from "../src/conversation-core/index.js";
 import type {
   ConversationActorRegistry,
@@ -216,7 +216,7 @@ describe("WeixinInputAdapter", () => {
         collaborationMode: "default",
         collaborationModePending: false,
       })),
-    } as unknown as ConversationService;
+    } as unknown as ConversationUseCases;
     const adapter = new WeixinInputAdapter({
       accountId,
       client,
@@ -1084,17 +1084,17 @@ function serviceFixture(
   implementation: (
     target: ConversationTarget,
     text: string,
-  ) => ReturnType<ConversationService["submit"]> = async () => ({
+  ) => ReturnType<ConversationUseCases["submit"]> = async () => ({
     threadId: "thread",
     turnId: "turn",
     steered: false,
   }),
-): ConversationService & {
+): ConversationUseCases & {
   submit: ReturnType<typeof vi.fn>;
 } {
   return {
     submit: vi.fn(implementation),
-  } as unknown as ConversationService & {
+  } as unknown as ConversationUseCases & {
     submit: ReturnType<typeof vi.fn>;
   };
 }
