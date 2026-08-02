@@ -37,7 +37,11 @@ type PendingVisionState = PendingPrompt | PendingCollection;
 
 export type VisionInputDecision =
   | { kind: "pass" }
-  | { kind: "submit"; input: SurfaceInputPart }
+  | {
+      kind: "submit";
+      input: SurfaceInputPart;
+      automaticCollection?: { imageCount: number; maximumImages: number };
+    }
   | {
       kind: "collected";
       imageCount: number;
@@ -181,6 +185,10 @@ export class VisionInputSession {
       return {
         kind: "submit",
         input: this.finishCollection(key, state).input,
+        automaticCollection: {
+          imageCount: images.length,
+          maximumImages: state.expectedImages,
+        },
       };
     }
     state.timer = this.expiryTimer(key, state);

@@ -38,6 +38,7 @@ export function createResponsesVisionAdapter(
       const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
       timer.unref();
       let response: Response;
+      const requestStartedAt = Date.now();
       try {
         const pendingResponse = options.fetchImpl(options.endpoint, {
           method: "POST",
@@ -79,11 +80,18 @@ export function createResponsesVisionAdapter(
         throw new Error(`视觉 API 请求失败：HTTP ${response.status}`);
       }
       const raw = await readLimitedResponseText(response);
+      const parsed = parseVisionResponse(raw);
+      const upstreamResponseId = safeUpstreamResponseId(parsed.id)
+        ?? safeUpstreamResponseId(response.headers.get("x-request-id"));
+      const usage = parseTokenUsage(parsed.usage);
       return {
         provider: "外部视觉 API",
         model: options.model,
+        ...(upstreamResponseId ? { upstreamResponseId } : {}),
+        elapsedMs: Math.max(0, Date.now() - requestStartedAt),
+        ...(usage ? { usage } : {}),
         images: parseVisionRecognitionPayload(
-          extractOutputText(raw),
+          parsed.outputText,
           request.images.length,
         ),
       };
@@ -137,7 +145,11 @@ async function readLimitedResponseText(response: Response): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-function extractOutputText(raw: string): string {
+function parseVisionResponse(raw: string): {
+  id?: unknown;
+  usage?: unknown;
+  outputText: string;
+} {
   let response: unknown;
   try {
     response = JSON.parse(raw);
@@ -152,11 +164,49 @@ function extractOutputText(raw: string): string {
     for (const part of content) {
       const candidate = asRecord(part);
       if (candidate?.type === "output_text" && typeof candidate.text === "string") {
-        return candidate.text;
+        return {
+          id: record?.id,
+          usage: record?.usage,
+          outputText: candidate.text,
+        };
       }
     }
   }
   throw new Error("视觉 API 响应缺少输出文字");
+}
+
+function parseTokenUsage(value: unknown): VisionRecognitionResult["usage"] {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const inputTokens = nonNegativeSafeInteger(record.input_tokens);
+  const outputTokens = nonNegativeSafeInteger(record.output_tokens);
+  const totalTokens = nonNegativeSafeInteger(record.total_tokens);
+  if (
+    inputTokens === undefined
+    && outputTokens === undefined
+    && totalTokens === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    ...(inputTokens === undefined ? {} : { inputTokens }),
+    ...(outputTokens === undefined ? {} : { outputTokens }),
+    ...(totalTokens === undefined ? {} : { totalTokens }),
+  };
+}
+
+function nonNegativeSafeInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+function safeUpstreamResponseId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/u.test(normalized)
+    ? normalized
+    : undefined;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

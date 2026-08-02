@@ -215,6 +215,40 @@ describe("TelegramOutbox", () => {
     ]);
   });
 
+  it("reports visual recognition heartbeats and the safe upstream ID", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      type: "vision.progress",
+      target,
+      elapsedSeconds: 30,
+    });
+    outbox.handle({
+      type: "vision.completed",
+      target,
+      recognitionId: "resp_vision_123",
+      elapsedMs: 31_000,
+      usage: {
+        inputTokens: 1_234,
+        outputTokens: 56,
+        totalTokens: 1_290,
+      },
+    });
+    await outbox.close();
+
+    expect(api.sent).toEqual([
+      "<b>图片仍在识别，已等待 30 秒。</b>",
+      [
+        "<b>图片识别完成。</b>",
+        "<b>上游识别 ID：</b>resp_vision_123",
+        "<b>视觉 API 耗时：</b>31秒",
+        "<b>Token 用量：</b>输入 1,234 · 输出 56 · 总计 1,290",
+        "正在交给当前模型处理。",
+      ].join("\n"),
+    ]);
+  });
+
   it("queues a Workspace notification with direct switch buttons", async () => {
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);

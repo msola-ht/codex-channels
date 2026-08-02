@@ -17,6 +17,7 @@ import { formatQuotedInput } from "../quoted-input.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import {
   executeVisionCommand,
+  formatVisionCollectionReady,
   formatVisionImagesCollected,
 } from "../vision-command.js";
 import {
@@ -105,7 +106,18 @@ export class WeixinConversationAdapter {
     this.commands = new ConversationCommandService(conversations);
     this.inputs = new SurfaceInputCoalescer(
       (target, input) => conversations.submit(target, input),
-      inputOptions,
+      {
+        ...inputOptions,
+        onVisionCollectionReady: (target, imageCount, maximumImages) => {
+          this.outbox.notifyText(
+            target,
+            formatWeixinCommandText(
+              formatVisionCollectionReady(imageCount, maximumImages),
+              { structuredFields: true },
+            ),
+          );
+        },
+      },
     );
   }
 

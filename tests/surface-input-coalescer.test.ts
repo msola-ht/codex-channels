@@ -275,6 +275,7 @@ describe("SurfaceInputCoalescer", () => {
   });
 
   it("submits a sized vision collection as soon as the requested images arrive", async () => {
+    const onVisionCollectionReady = vi.fn();
     const submit = vi.fn(async () => ({
       threadId: "thread",
       turnId: "turn",
@@ -282,6 +283,7 @@ describe("SurfaceInputCoalescer", () => {
     }));
     const coalescer = new SurfaceInputCoalescer(submit, {
       quietWindowMs: 0,
+      onVisionCollectionReady,
     });
 
     coalescer.beginVisionCollection(target, "actor-1", "比较两张截图", 2);
@@ -306,6 +308,10 @@ describe("SurfaceInputCoalescer", () => {
     })).resolves.toMatchObject({ submission: { turnId: "turn" } });
 
     expect(submit).toHaveBeenCalledOnce();
+    expect(onVisionCollectionReady).toHaveBeenCalledWith(target, 2, 2);
+    expect(onVisionCollectionReady.mock.invocationCallOrder[0]).toBeLessThan(
+      submit.mock.invocationCallOrder[0]!,
+    );
     expect(submit).toHaveBeenCalledWith(target, {
       text: "比较两张截图\n\n第一张\n\n第二张",
       localImages: [

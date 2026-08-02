@@ -885,13 +885,24 @@ describe("ConversationService model selection", () => {
   });
 
   it("replaces unsupported local images with bounded vision context", async () => {
+    vi.useFakeTimers();
     const startTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
     const visionStarted = vi.fn();
+    const visionProgress = vi.fn();
+    const visionCompleted = vi.fn();
     const recognize = vi.fn(async (request: { onRequestStarted(): void }) => {
       request.onRequestStarted();
+      await new Promise((resolve) => setTimeout(resolve, 31_000));
       return {
         provider: "OpenAI",
         model: "vision-model",
+        upstreamResponseId: "resp_vision_123",
+        elapsedMs: 31_000,
+        usage: {
+          inputTokens: 1_234,
+          outputTokens: 56,
+          totalTokens: 1_290,
+        },
         images: [{
           index: 1,
           description: "一张终端错误截图",
@@ -910,6 +921,8 @@ describe("ConversationService model selection", () => {
         activeTurn: () => undefined,
         markTurnStarted: vi.fn(),
         visionStarted,
+        visionProgress,
+        visionCompleted,
       } as unknown as ConversationCore,
       {
         requireInputModality: vi.fn().mockRejectedValue(new UserFacingError(
@@ -933,10 +946,21 @@ describe("ConversationService model selection", () => {
       { recognize },
     );
 
-    await service.submit(target, {
+    const submission = service.submit(target, {
       text: "解释错误",
       localImages: [{ path: "/private/uploads/screenshot.png" }],
     });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(visionProgress).toHaveBeenLastCalledWith(target, {
+      elapsedSeconds: 10,
+    });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(visionProgress).toHaveBeenLastCalledWith(target, {
+      elapsedSeconds: 30,
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await submission;
+    vi.useRealTimers();
 
     expect(recognize).toHaveBeenCalledWith({
       images: [{ path: "/private/uploads/screenshot.png" }],
@@ -945,6 +969,15 @@ describe("ConversationService model selection", () => {
     });
     expect(visionStarted).toHaveBeenCalledWith(target, {
       imageCount: 1,
+    });
+    expect(visionCompleted).toHaveBeenCalledWith(target, {
+      recognitionId: "resp_vision_123",
+      elapsedMs: 31_000,
+      usage: {
+        inputTokens: 1_234,
+        outputTokens: 56,
+        totalTokens: 1_290,
+      },
     });
     expect(visionStarted.mock.invocationCallOrder[0]).toBeLessThan(
       startTurn.mock.invocationCallOrder[0]!,

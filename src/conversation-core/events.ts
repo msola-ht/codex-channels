@@ -174,8 +174,22 @@ export interface TurnArtifacts {
   };
 }
 
+export interface VisionTokenUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+}
+
 export type OutputEvent =
   | { type: "vision.started"; target: ConversationTarget; imageCount: number }
+  | { type: "vision.progress"; target: ConversationTarget; elapsedSeconds: number }
+  | {
+      type: "vision.completed";
+      target: ConversationTarget;
+      recognitionId?: string;
+      elapsedMs?: number;
+      usage?: VisionTokenUsage;
+    }
   | { type: "turn.started"; target: ConversationTarget; threadId: string; turnId: string }
   | { type: "user.message"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string }
   | { type: "text.delta"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null }
@@ -193,6 +207,7 @@ export type OutputEvent =
 export function isCriticalOutputEvent(event: OutputEvent): boolean {
   return event.type !== "text.delta" && event.type !== "turn.started" &&
     event.type !== "vision.started" &&
+    event.type !== "vision.progress" &&
     event.type !== "plan.updated" &&
     !(event.type === "operation.updated" && event.operation.status === "running");
 }

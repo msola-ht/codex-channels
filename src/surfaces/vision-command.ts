@@ -88,6 +88,13 @@ export function formatVisionImagesCollected(
   ].join("\n");
 }
 
+export function formatVisionCollectionReady(
+  imageCount: number,
+  maximumImages: number,
+): string {
+  return `已收齐 ${imageCount}/${maximumImages} 张图片，正在自动提交。`;
+}
+
 function visionCommandUsageError(): UserFacingError {
   return new UserFacingError(
     "vision.command.usage",

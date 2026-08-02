@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { VisionTokenUsage } from "../conversation-core/index.js";
 import type { TurnInput } from "./turn-port.js";
 
 const maximumVisionTextLength = 8_000;
@@ -38,6 +39,9 @@ export interface VisionRecognitionImage {
 export interface VisionRecognitionResult {
   provider: string;
   model: string;
+  upstreamResponseId?: string;
+  elapsedMs?: number;
+  usage?: VisionTokenUsage;
   images: readonly VisionRecognitionImage[];
 }
 

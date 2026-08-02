@@ -28,6 +28,11 @@ Codex Thread，也不区分双 Provider 或仅 DeepSeek 模式。外部请求发
 ```
 
 随后逐张发送指定的 2–4 张图片，渠道会逐张确认进度，收齐后自动提交，不需要完成命令。
+收齐时先显示“正在自动提交”；外部请求发起后立即显示“正在识别”。请求超过 10 秒时发送首次
+识别心跳，之后每 20 秒报告一次已等待时间；识别完成后显示上游 Responses 正文 `id`，若正文
+未提供则使用安全的 `x-request-id` 响应头，两者都不存在或格式不安全时明确显示“未提供识别 ID”。
+完成消息同时显示 Gateway 实测的视觉 API 往返耗时；上游响应提供标准 `usage.input_tokens`、
+`usage.output_tokens` 或 `usage.total_tokens` 时按实际字段显示 Token 用量，缺失字段不估算。
 `/vision cancel` 会丢弃尚未提交的收集。旧的 `/vision begin <要求>` 与 `/vision done` 继续兼容，
 用于无法预先确定图片数量的场景。手动收集同样按 Actor 与 Conversation 隔离，仅保存在
 内存中，五分钟无新图片即过期，Gateway 重启或 Surface 停止时直接丢弃。Telegram 原生相册和
@@ -54,6 +59,10 @@ model = "视觉模型"
 
 - 三渠道继续沿用最多四张、单张 10 MiB、整批 20 MiB、PNG/JPEG 签名和私有临时文件限制。
 - 图片、API Key、上游响应正文和识别结果不写入 SQLite 或结构化日志。
+- 上游识别 ID 只接受最多 128 个安全 ASCII 标识字符，只发送到发起请求的 Conversation，
+  不写入 SQLite 或结构化日志；心跳只保存在当前请求计时器中，完成、失败或进程停止时取消。
+- 识别耗时是 Gateway 从发起 HTTP 请求到读取并解析响应的本地观测值，不冒充上游内部处理时长；
+  Token 用量只裁剪响应体中非负安全整数，不根据图片大小或文本长度推算。
 - `/vision` 待处理要求和手动多图收集不写入 SQLite、配置或日志，不跨 Actor、Conversation 或
   Gateway 重启恢复。
 - 外部 API Key 的目录和文件分别限制为 `0700`、`0600`，符号链接、错误所有者或开放权限失败关闭；

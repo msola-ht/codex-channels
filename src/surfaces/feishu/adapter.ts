@@ -21,6 +21,7 @@ import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import { formatQuotedInput } from "../quoted-input.js";
 import {
   executeVisionCommand,
+  formatVisionCollectionReady,
   formatVisionImagesCollected,
 } from "../vision-command.js";
 
@@ -101,7 +102,15 @@ export class FeishuConversationAdapter {
     this.commands = new ConversationCommandService(conversations);
     this.inputs = new SurfaceInputCoalescer(
       (target, input) => conversations.submit(target, input),
-      inputOptions,
+      {
+        ...inputOptions,
+        onVisionCollectionReady: (target, imageCount, maximumImages) => {
+          this.outbox.notifyText(
+            target.conversationId,
+            formatVisionCollectionReady(imageCount, maximumImages),
+          );
+        },
+      },
     );
   }
 

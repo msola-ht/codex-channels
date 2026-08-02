@@ -24,6 +24,11 @@ export type SurfaceInputBatchResult =
 export interface SurfaceInputCoalescerOptions extends SurfaceInputBatcherOptions {
   visionPromptTtlMs?: number;
   maximumPendingVisionPrompts?: number;
+  onVisionCollectionReady?(
+    target: ConversationTarget,
+    imageCount: number,
+    maximumImages: number,
+  ): void;
 }
 
 export interface CompletedVisionCollectionResult {
@@ -37,7 +42,7 @@ export class SurfaceInputCoalescer {
 
   constructor(
     submit: ConstructorParameters<typeof SurfaceInputBatcher>[0],
-    options: SurfaceInputCoalescerOptions = {},
+    private readonly options: SurfaceInputCoalescerOptions = {},
   ) {
     this.batcher = new SurfaceInputBatcher(submit, options);
     this.vision = new VisionInputSession({
@@ -96,6 +101,13 @@ export class SurfaceInputCoalescer {
     }
     if (decision.kind === "collected") {
       return Promise.resolve(decision);
+    }
+    if (decision.kind === "submit" && decision.automaticCollection) {
+      this.options.onVisionCollectionReady?.(
+        input.target,
+        decision.automaticCollection.imageCount,
+        decision.automaticCollection.maximumImages,
+      );
     }
     return this.batcher.enqueue(
       decision.kind === "submit" ? decision.input : input,

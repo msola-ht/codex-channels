@@ -10,6 +10,7 @@ import {
   type ThreadTokenUsage,
   type TurnOutputTiming,
   type TurnArtifacts,
+  type VisionTokenUsage,
   isCriticalOutputEvent,
   usesOpenAiAccount,
 } from "./events.js";
@@ -79,6 +80,24 @@ export class ConversationCore {
     details: { imageCount: number },
   ): void {
     this.publish({ type: "vision.started", target, ...details });
+  }
+
+  visionProgress(
+    target: ConversationTarget,
+    details: { elapsedSeconds: number },
+  ): void {
+    this.publish({ type: "vision.progress", target, ...details });
+  }
+
+  visionCompleted(
+    target: ConversationTarget,
+    details: {
+      recognitionId?: string;
+      elapsedMs?: number;
+      usage?: VisionTokenUsage;
+    },
+  ): void {
+    this.publish({ type: "vision.completed", target, ...details });
   }
 
   activeTurn(target: ConversationTarget): ActiveTurn | undefined {

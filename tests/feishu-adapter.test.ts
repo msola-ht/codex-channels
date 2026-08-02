@@ -1419,6 +1419,9 @@ describe("Feishu conversation adapter", () => {
         { path: "/private/uploads/feishu/second.jpg" },
       ],
     });
+    expect(fixture.sent.some((entry) =>
+      entry.text.includes("已收齐 2/2 张图片，正在自动提交")
+    )).toBe(true);
   });
 
   it("submits multiple images from one rich post in their original order", async () => {

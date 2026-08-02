@@ -36,7 +36,11 @@ import {
   type LifecyclePresentation,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
-import { formatVisionStarted } from "../input-copy.js";
+import {
+  formatVisionCompleted,
+  formatVisionProgress,
+  formatVisionStarted,
+} from "../input-copy.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
 import {
   formatCodexWarning,
@@ -155,6 +159,10 @@ export function renderFeishuOutput(event: OutputEvent): string | null {
   switch (event.type) {
     case "vision.started":
       return formatVisionStarted(event.imageCount);
+    case "vision.progress":
+      return formatVisionProgress(event.elapsedSeconds);
+    case "vision.completed":
+      return formatVisionCompleted(event);
     case "turn.started":
       return renderFeishuLifecyclePresentation(
         createTurnStartedPresentation(),

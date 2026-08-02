@@ -35,6 +35,7 @@ import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import { formatQuotedInput } from "../quoted-input.js";
 import {
   executeVisionCommand,
+  formatVisionCollectionReady,
   formatVisionImagesCollected,
 } from "../vision-command.js";
 import { surfaceCommandAliases } from "../slash-command.js";
@@ -168,12 +169,6 @@ export class TelegramSurface {
     this.actorRegistry = options.actorRegistry;
     this.notificationRecipients = new Set(startupRecipients);
     this.commands = new ConversationCommandService(service);
-    this.inputs = new SurfaceInputCoalescer(
-      (inputTarget, input) => service.submit(inputTarget, input),
-      {
-        quietWindowMs: options.inputQuietWindowMs ?? 1_000,
-      },
-    );
     const apiExecutor = new TelegramApiExecutor(logger);
     this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor, {
       ...(options.finalMessageFormat
@@ -187,6 +182,18 @@ export class TelegramSurface {
         : {}),
     });
     this.output = this.outbox;
+    this.inputs = new SurfaceInputCoalescer(
+      (inputTarget, input) => service.submit(inputTarget, input),
+      {
+        quietWindowMs: options.inputQuietWindowMs ?? 1_000,
+        onVisionCollectionReady: (inputTarget, imageCount, maximumImages) => {
+          this.outbox.notifyPanel(
+            inputTarget.conversationId,
+            formatVisionCollectionReady(imageCount, maximumImages),
+          );
+        },
+      },
+    );
     this.interactions = new TelegramInteractionPort(this.bot, logger, apiExecutor, this.outbox);
     this.imageStore = options.imageStore ?? new TelegramImageStore(uploadsDirectory, token, proxyUrl, logger);
     this.audioStore = options.audioStore

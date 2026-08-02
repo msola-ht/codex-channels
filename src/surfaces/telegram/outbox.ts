@@ -19,7 +19,11 @@ import {
   createTurnCompletedPresentation,
   createTurnStartedPresentation,
 } from "../lifecycle-presentation.js";
-import { formatVisionStarted } from "../input-copy.js";
+import {
+  formatVisionCompleted,
+  formatVisionProgress,
+  formatVisionStarted,
+} from "../input-copy.js";
 import {
   cliInputTitle,
   contentTruncatedText,
@@ -172,6 +176,12 @@ export class TelegramOutbox {
           ).then(() => undefined),
           false,
         );
+        return;
+      case "vision.progress":
+        this.notifyPanel(chatId, formatVisionProgress(event.elapsedSeconds));
+        return;
+      case "vision.completed":
+        this.notifyPanel(chatId, formatVisionCompleted(event));
         return;
       case "turn.started":
         this.replyTargets.bindPending(

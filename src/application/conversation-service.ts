@@ -109,6 +109,8 @@ interface QueuedFollowUp {
 }
 
 const maximumQueuedFollowUpsPerConversation = 10;
+const visionHeartbeatInitialDelayMs = 10_000;
+const visionHeartbeatIntervalMs = 20_000;
 
 export interface ConversationStatus {
   threadId?: string;
@@ -290,16 +292,32 @@ export class ConversationService implements ConversationUseCases {
           item.type === "localImage" ? [{ path: item.path }] : []
         );
         let result;
+        let stopHeartbeat = (): void => {};
+        let requestStarted = false;
         try {
           result = await this.vision.recognize({
             images,
             userPrompt: visionUserPrompt(input),
             onRequestStarted: () => {
+              if (requestStarted) return;
+              requestStarted = true;
               this.core.visionStarted(target, { imageCount: images.length });
+              stopHeartbeat = this.startVisionHeartbeat(target);
             },
+          });
+          this.core.visionCompleted(target, {
+            ...(result.upstreamResponseId
+              ? { recognitionId: result.upstreamResponseId }
+              : {}),
+            ...(result.elapsedMs === undefined
+              ? {}
+              : { elapsedMs: result.elapsedMs }),
+            ...(result.usage === undefined ? {} : { usage: result.usage }),
           });
         } catch {
           throw new UserFacingError("vision.failed", "图片识别失败");
+        } finally {
+          stopHeartbeat();
         }
         input = replaceLocalImagesWithVisionContext(input, result);
       }
@@ -892,6 +910,26 @@ export class ConversationService implements ConversationUseCases {
     if (this.core.activeTurn(target)) {
       throw new UserFacingError("conversation.busy", "当前任务运行中，请先停止当前任务");
     }
+  }
+
+  private startVisionHeartbeat(target: ConversationTarget): () => void {
+    const startedAt = Date.now();
+    let interval: NodeJS.Timeout | undefined;
+    const publish = (): void => {
+      this.core.visionProgress(target, {
+        elapsedSeconds: Math.max(1, Math.round((Date.now() - startedAt) / 1_000)),
+      });
+    };
+    const initial = setTimeout(() => {
+      publish();
+      interval = setInterval(publish, visionHeartbeatIntervalMs);
+      interval.unref();
+    }, visionHeartbeatInitialDelayMs);
+    initial.unref();
+    return () => {
+      clearTimeout(initial);
+      if (interval) clearInterval(interval);
+    };
   }
 
   private async locked<T>(
