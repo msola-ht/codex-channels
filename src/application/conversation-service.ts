@@ -306,9 +306,7 @@ export class ConversationService implements ConversationUseCases {
             },
           });
           this.core.visionCompleted(target, {
-            ...(result.upstreamResponseId
-              ? { recognitionId: result.upstreamResponseId }
-              : {}),
+            model: result.model,
             ...(result.elapsedMs === undefined
               ? {}
               : { elapsedMs: result.elapsedMs }),

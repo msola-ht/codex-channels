@@ -170,7 +170,7 @@ describe("Feishu conversation adapter", () => {
       localImages: [{ path: "/private/feishu/error.png" }],
     });
     expect(fixture.sent.some((entry) =>
-      entry.text.includes("已记录图片识别要求")
+      entry.text.includes("图片识别要求已记录")
     )).toBe(true);
   });
 
@@ -1420,7 +1420,7 @@ describe("Feishu conversation adapter", () => {
       ],
     });
     expect(fixture.sent.some((entry) =>
-      entry.text.includes("已收齐 2/2 张图片，正在自动提交")
+      entry.text.includes("图片已收齐")
     )).toBe(true);
   });
 

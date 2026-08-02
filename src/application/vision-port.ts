@@ -39,7 +39,6 @@ export interface VisionRecognitionImage {
 export interface VisionRecognitionResult {
   provider: string;
   model: string;
-  upstreamResponseId?: string;
   elapsedMs?: number;
   usage?: VisionTokenUsage;
   images: readonly VisionRecognitionImage[];

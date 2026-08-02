@@ -674,6 +674,27 @@ describe("Feishu output renderer", () => {
     expect(renderFeishuOutput(event)).toBe("Codex 返回了空消息。");
   });
 
+  it("renders structured visual completion details with the recognition model", () => {
+    expect(renderFeishuOutput({
+      type: "vision.completed",
+      target,
+      model: "gpt-5.6-luna",
+      elapsedMs: 18_000,
+      usage: {
+        inputTokens: 9_433,
+        outputTokens: 483,
+        totalTokens: 9_916,
+      },
+    })).toBe([
+      "图片识别完成",
+      "- 识别模型：gpt-5.6-luna",
+      "- 视觉 API 耗时：18秒",
+      "- Token 用量：输入 9,433 · 输出 483 · 总计 9,916",
+      "",
+      "正在交给当前模型处理。",
+    ].join("\n"));
+  });
+
   it("renders every critical output event and ignores non-critical progress", () => {
     const criticalEvents: OutputEvent[] = [
       {
@@ -800,7 +821,7 @@ describe("Feishu output renderer", () => {
     expect(renderFeishuOutput(criticalEvents[2]!)).toBeNull();
     expect(progressEvents.some(isCriticalOutputEvent)).toBe(false);
     expect(progressEvents.map(renderFeishuOutput)).toEqual([
-      "2 张图片和本条要求已发送到视觉 API，正在识别。",
+      "视觉识别中\n- 图片：2 张\n- 状态：已发送至视觉 API",
       "**已开始处理。**",
       null,
       null,

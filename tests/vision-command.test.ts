@@ -28,9 +28,9 @@ describe("executeVisionCommand", () => {
     };
 
     await expect(executeVisionCommand(inputs, target, "actor", "检查报错"))
-      .resolves.toContain("已记录图片识别要求");
+      .resolves.toContain("图片识别要求已记录");
     await expect(executeVisionCommand(inputs, target, "actor", "重新检查"))
-      .resolves.toContain("已替换图片识别要求");
+      .resolves.toContain("图片识别要求已更新");
     await expect(executeVisionCommand(inputs, target, "actor", "cancel"))
       .resolves.toBe("已取消待处理的图片识别要求。");
     await expect(executeVisionCommand(inputs, target, "actor", "CANCEL"))
@@ -53,14 +53,14 @@ describe("executeVisionCommand", () => {
       target,
       "actor",
       "begin 比较两张图片",
-    )).resolves.toContain("已开始多图收集");
+    )).resolves.toContain("图片收集已开始");
     expect(inputs.beginVisionCollection).toHaveBeenCalledWith(
       target,
       "actor",
       "比较两张图片",
     );
     await expect(executeVisionCommand(inputs, target, "actor", "done"))
-      .resolves.toBe("已提交 2 张图片。");
+      .resolves.toContain("- 状态：已进入处理队列");
   });
 
   it("starts a sized collection that will submit automatically", async () => {
@@ -76,7 +76,7 @@ describe("executeVisionCommand", () => {
       target,
       "actor",
       "3 比较这些图片",
-    )).resolves.toContain("发送 3 张图片，收齐后自动提交");
+    )).resolves.toContain("- 目标：3 张图片");
     expect(inputs.beginVisionCollection).toHaveBeenCalledWith(
       target,
       "actor",
@@ -106,6 +106,6 @@ describe("executeVisionCommand", () => {
     expect(formatVisionImagesCollected(1, 3, true))
       .toContain("收齐后自动提交");
     expect(formatVisionImagesCollected(1, 4))
-      .toContain("完成：/vision done");
+      .toContain("提交：/vision done");
   });
 });

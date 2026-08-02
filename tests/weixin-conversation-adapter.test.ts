@@ -185,7 +185,7 @@ describe("WeixinConversationAdapter", () => {
       localImages: [{ path: "/private/weixin/error.jpg" }],
     });
     expect(notifyText.mock.calls.some(([, text]) =>
-      text.includes("已记录图片识别要求")
+      text.includes("图片识别要求已记录")
     )).toBe(true);
   });
 
@@ -232,7 +232,7 @@ describe("WeixinConversationAdapter", () => {
 
     expect(submit).not.toHaveBeenCalled();
     expect(notifyText.mock.calls.some(([, text]) =>
-      text.includes("已收集 2/4 张图片")
+      text.includes("进度：2/4 张")
     )).toBe(true);
 
     await adapter.handle({ ...message, text: "/vision done" });
@@ -246,7 +246,7 @@ describe("WeixinConversationAdapter", () => {
       ],
     });
     expect(notifyText.mock.calls.some(([, text]) =>
-      text === "已提交 2 张图片。"
+      text.includes("图片已提交") && text.includes("数量：2 张")
     )).toBe(true);
   });
 

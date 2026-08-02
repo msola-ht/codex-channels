@@ -92,7 +92,7 @@ export class ConversationCore {
   visionCompleted(
     target: ConversationTarget,
     details: {
-      recognitionId?: string;
+      model: string;
       elapsedMs?: number;
       usage?: VisionTokenUsage;
     },

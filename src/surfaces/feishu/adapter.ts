@@ -105,7 +105,7 @@ export class FeishuConversationAdapter {
       {
         ...inputOptions,
         onVisionCollectionReady: (target, imageCount, maximumImages) => {
-          this.outbox.notifyText(
+          this.outbox.notifyMarkdown(
             target.conversationId,
             formatVisionCollectionReady(imageCount, maximumImages),
           );
@@ -169,7 +169,7 @@ export class FeishuConversationAdapter {
         }
         if (command.name === "vision") {
           await this.inputs.flushPending(message.target, message.actorId);
-          this.notifyText(
+          this.notifyMarkdown(
             message.target.conversationId,
             await executeVisionCommand(
               this.inputs,
@@ -631,7 +631,7 @@ export class FeishuConversationAdapter {
         replyMessage.target.conversationId,
       );
       const imageCount = Math.max(...collected.map((result) => result.imageCount));
-      this.notifyText(
+      this.notifyMarkdown(
         replyMessage.target.conversationId,
         formatVisionImagesCollected(
           imageCount,

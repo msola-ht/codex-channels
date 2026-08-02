@@ -81,13 +81,10 @@ export function createResponsesVisionAdapter(
       }
       const raw = await readLimitedResponseText(response);
       const parsed = parseVisionResponse(raw);
-      const upstreamResponseId = safeUpstreamResponseId(parsed.id)
-        ?? safeUpstreamResponseId(response.headers.get("x-request-id"));
       const usage = parseTokenUsage(parsed.usage);
       return {
         provider: "外部视觉 API",
         model: options.model,
-        ...(upstreamResponseId ? { upstreamResponseId } : {}),
         elapsedMs: Math.max(0, Date.now() - requestStartedAt),
         ...(usage ? { usage } : {}),
         images: parseVisionRecognitionPayload(
@@ -146,7 +143,6 @@ async function readLimitedResponseText(response: Response): Promise<string> {
 }
 
 function parseVisionResponse(raw: string): {
-  id?: unknown;
   usage?: unknown;
   outputText: string;
 } {
@@ -165,7 +161,6 @@ function parseVisionResponse(raw: string): {
       const candidate = asRecord(part);
       if (candidate?.type === "output_text" && typeof candidate.text === "string") {
         return {
-          id: record?.id,
           usage: record?.usage,
           outputText: candidate.text,
         };
@@ -198,14 +193,6 @@ function parseTokenUsage(value: unknown): VisionRecognitionResult["usage"] {
 function nonNegativeSafeInteger(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? value
-    : undefined;
-}
-
-function safeUpstreamResponseId(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.trim();
-  return /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/u.test(normalized)
-    ? normalized
     : undefined;
 }
 

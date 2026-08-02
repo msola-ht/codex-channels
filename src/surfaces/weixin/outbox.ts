@@ -313,14 +313,17 @@ export class WeixinOutbox implements SurfaceOutputPort {
       case "vision.started":
         return formatWeixinCommandText(
           formatVisionStarted(event.imageCount),
+          { structuredFields: true },
         );
       case "vision.progress":
         return formatWeixinCommandText(
           formatVisionProgress(event.elapsedSeconds),
+          { structuredFields: true },
         );
       case "vision.completed":
         return formatWeixinCommandText(
           formatVisionCompleted(event),
+          { structuredFields: true },
         );
       case "user.message":
         return formatCliInput(event.text);

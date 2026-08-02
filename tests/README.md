@@ -20,8 +20,8 @@
   三渠道只在外部请求发起后发送一次包含图片数量与本条要求的视觉 API 识别提示；`/vision`
   下一批图片要求的 Actor/Conversation 隔离、替换、取消、五分钟过期和一次消费，以及显式
   定量多图收齐自动提交，以及兼容的 `begin/done/cancel` 手动收集顺序、容量、隔离和停止清理。
-  外部视觉请求还覆盖 10 秒首次心跳、20 秒后续心跳的完成清理，以及安全 Responses ID/
-  `x-request-id`、API 往返耗时和实际 Token 用量的裁剪与三渠道呈现。
+  外部视觉请求还覆盖 10 秒首次心跳、20 秒后续心跳的完成清理，以及实际视觉模型 ID、API 往返
+  耗时、实际 Token 用量和统一结构化消息的三渠道呈现。
 - 官方 Turn、Item、Diff、Plan、Goal、Token、账户、额度、MCP 和 warning Notification 到稳定 Core
   输入事件的映射，畸形与未知通知隔离；Conversation Core 状态归约、严格 Turn 完成状态、
   官方 `Turn.durationMs` 校验、三渠道统一结束汇报耗时字段、可重试错误隔离、Thread/全局警告路由，

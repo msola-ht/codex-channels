@@ -97,7 +97,39 @@ describe("WeixinOutbox", () => {
     await outbox.close();
 
     expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
-      text: "2 张图片和本条要求已发送到视觉 API，正在识别。",
+      text: [
+        "**视觉识别中**",
+        "- 图片：2 张",
+        "- 状态：已发送至视觉 API",
+      ].join("\n"),
+    }));
+  });
+
+  it("reports structured visual completion details with the recognition model", async () => {
+    const { outbox, sendText } = outboxFixture();
+
+    outbox.handle({
+      type: "vision.completed",
+      target,
+      model: "gpt-5.6-luna",
+      elapsedMs: 18_000,
+      usage: {
+        inputTokens: 9_433,
+        outputTokens: 483,
+        totalTokens: 9_916,
+      },
+    });
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
+      text: [
+        "**图片识别完成**",
+        "- 识别模型：gpt-5.6-luna",
+        "- 视觉 API 耗时：18秒",
+        "- Token 用量：输入 9,433 · 输出 483 · 总计 9,916",
+        "",
+        "正在交给当前模型处理。",
+      ].join("\n"),
     }));
   });
 

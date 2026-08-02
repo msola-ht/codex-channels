@@ -47,6 +47,7 @@ import {
   renderTelegramCommandResult,
   replyTelegramPanel,
 } from "./command-renderer.js";
+import { formatTelegramPanelHtml } from "./html-format.js";
 import { TelegramInteractionPort } from "./interactions.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import { telegramDefaultAccountId } from "./constants.js";
@@ -313,7 +314,7 @@ export class TelegramSurface {
         target(context),
         String(context.from?.id ?? ""),
       );
-      await context.reply(await executeVisionCommand(
+      await replyTelegramPanel(context, await executeVisionCommand(
         this.inputs,
         target(context),
         String(context.from?.id ?? ""),
@@ -577,11 +578,12 @@ export class TelegramSurface {
     }
     if (result.kind === "collected") {
       this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
-      await context.reply(formatVisionImagesCollected(
+      await context.reply(formatTelegramPanelHtml(formatVisionImagesCollected(
         result.imageCount,
         result.maximumImages,
         result.automatic,
-      ), {
+      )), {
+        parse_mode: "HTML",
         disable_notification: true,
         reply_parameters: {
           message_id: context.message.message_id,

@@ -896,7 +896,6 @@ describe("ConversationService model selection", () => {
       return {
         provider: "OpenAI",
         model: "vision-model",
-        upstreamResponseId: "resp_vision_123",
         elapsedMs: 31_000,
         usage: {
           inputTokens: 1_234,
@@ -971,7 +970,7 @@ describe("ConversationService model selection", () => {
       imageCount: 1,
     });
     expect(visionCompleted).toHaveBeenCalledWith(target, {
-      recognitionId: "resp_vision_123",
+      model: "vision-model",
       elapsedMs: 31_000,
       usage: {
         inputTokens: 1_234,

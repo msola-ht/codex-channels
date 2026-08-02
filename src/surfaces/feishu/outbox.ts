@@ -298,7 +298,11 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     this.delivery.enqueue(
       event.target.conversationId,
-      () => event.type === "turn.started"
+      () => event.type === "vision.started"
+          || event.type === "vision.progress"
+          || event.type === "vision.completed"
+        ? this.sendMarkdown(event.target.conversationId, rendered)
+        : event.type === "turn.started"
           || event.type === "text.completed"
           || event.type === "turn.completed"
         ? this.sendTurnMarkdown(event, rendered)

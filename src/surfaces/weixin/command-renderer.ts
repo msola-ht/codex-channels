@@ -159,7 +159,7 @@ export function formatWeixinCommandText(
       if (
         index === 0
         && line.length > 0
-        && parseWeixinCommandField(lines[index + 1]) !== null
+        && isWeixinStructuredField(lines[index + 1])
       ) {
         return `**${line}**`;
       }
@@ -186,6 +186,11 @@ export function formatWeixinCommandText(
 function isMarkdownBlockLine(line: string): boolean {
   return /^\s*(?:[-+*]\s+|\d+\.\s+|>|#{1,6}\s+|\||-{3,}\s*$)/u
     .test(line);
+}
+
+function isWeixinStructuredField(line: string | undefined): boolean {
+  return parseWeixinCommandField(line) !== null
+    || (line !== undefined && /^\s*[-+*]\s+[^：\n]{1,40}：\s*.+$/u.test(line));
 }
 
 function parseWeixinCommandField(

@@ -66,8 +66,8 @@ Telegram 和飞书在交互消息创建成功或失败时
 `begin/done/cancel` 保留给数量未知的手动收集。停止时原生批次排空，尚未提交的手动收集直接清除；二者都不根据消息间隔
 猜测独立消息关系。`vision-command.ts` 统一三个 Surface 的命令和确认文案。
 定量收齐确认在调用 Application 前同步入队；外部视觉请求发起、10 秒后的有界心跳及完成后的
-安全上游识别 ID、本地实测 API 耗时和上游实际 Token 用量由 Core 作为平台无关事件发布，三个
-渠道只负责各自格式与顺序投递。
+视觉模型 ID、本地实测 API 耗时和上游实际 Token 用量由 Core 作为平台无关事件发布。图片收集、
+转发、心跳和完成消息统一使用标题与字段列表，三个渠道只负责转换 Markdown/HTML/富文本并按序投递。
 `turn-reply-targets.ts` 只在 Surface 内存中把待提交输入的精确平台消息 ID 绑定到实际
 Thread 与 Turn，允许 `turn.started` 早于提交响应时仍原生回复正确输入；不保存消息正文，
 Turn、Thread 或 Surface 关闭时清理。

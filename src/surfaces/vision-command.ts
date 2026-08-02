@@ -35,9 +35,11 @@ export async function executeVisionCommand(
       expectedImages,
     );
     return [
-      replacedPrompt ? "已将原图片识别要求改为定量多图收集。" : "已开始定量多图收集。",
-      `请在 5 分钟内发送 ${expectedImages} 张图片，收齐后自动提交。`,
-      "取消：/vision cancel",
+      replacedPrompt ? "图片收集要求已更新" : "图片收集已开始",
+      `- 目标：${expectedImages} 张图片`,
+      "- 时限：5 分钟",
+      "- 提交：收齐后自动提交",
+      "- 取消：/vision cancel",
     ].join("\n");
   }
   switch (operation.toLowerCase()) {
@@ -49,9 +51,11 @@ export async function executeVisionCommand(
     case "done": {
       if (argumentsValue) throw visionCommandUsageError();
       const result = await inputs.completeVisionCollection(target, actorId);
-      return result.submission.steered
-        ? `已将 ${result.imageCount} 张图片追加到当前 Turn。`
-        : `已提交 ${result.imageCount} 张图片。`;
+      return [
+        "图片已提交",
+        `- 数量：${result.imageCount} 张`,
+        `- 状态：${result.submission.steered ? "已追加到当前 Turn" : "已进入处理队列"}`,
+      ].join("\n");
     }
     case "begin": {
       if (!argumentsValue) throw visionCommandUsageError();
@@ -61,17 +65,20 @@ export async function executeVisionCommand(
         argumentsValue,
       );
       return [
-        replacedPrompt ? "已将原图片识别要求改为多图收集。" : "已开始多图收集。",
-        "请在 5 分钟内逐张发送最多 4 张图片。",
-        "完成：/vision done；取消：/vision cancel",
+        replacedPrompt ? "图片收集要求已更新" : "图片收集已开始",
+        "- 上限：4 张图片",
+        "- 时限：5 分钟",
+        "- 提交：/vision done",
+        "- 取消：/vision cancel",
       ].join("\n");
     }
   }
   const { replaced } = inputs.setVisionPrompt(target, actorId, value);
   return [
-    replaced ? "已替换图片识别要求。" : "已记录图片识别要求。",
-    "请在 5 分钟内发送图片；要求只用于下一批图片。",
-    "取消：/vision cancel",
+    replaced ? "图片识别要求已更新" : "图片识别要求已记录",
+    "- 范围：下一批图片",
+    "- 时限：5 分钟",
+    "- 取消：/vision cancel",
   ].join("\n");
 }
 
@@ -81,10 +88,10 @@ export function formatVisionImagesCollected(
   automatic = false,
 ): string {
   return [
-    `已收集 ${imageCount}/${maximumImages} 张图片。`,
-    automatic
-      ? "继续发送图片，收齐后自动提交；取消：/vision cancel"
-      : "继续发送图片，完成：/vision done；取消：/vision cancel",
+    "图片收集中",
+    `- 进度：${imageCount}/${maximumImages} 张`,
+    `- 提交：${automatic ? "收齐后自动提交" : "/vision done"}`,
+    "- 取消：/vision cancel",
   ].join("\n");
 }
 
@@ -92,7 +99,11 @@ export function formatVisionCollectionReady(
   imageCount: number,
   maximumImages: number,
 ): string {
-  return `已收齐 ${imageCount}/${maximumImages} 张图片，正在自动提交。`;
+  return [
+    "图片已收齐",
+    `- 进度：${imageCount}/${maximumImages} 张`,
+    "- 状态：正在自动提交",
+  ].join("\n");
 }
 
 function visionCommandUsageError(): UserFacingError {

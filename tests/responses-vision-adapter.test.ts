@@ -20,7 +20,6 @@ describe("Responses vision adapter", () => {
       void input;
       void init;
       return new Response(JSON.stringify({
-        id: "resp_vision_123",
         usage: {
           input_tokens: 1_234,
           output_tokens: 56,
@@ -57,7 +56,6 @@ describe("Responses vision adapter", () => {
     })).resolves.toEqual({
       provider: "外部视觉 API",
       model: "vision-model",
-      upstreamResponseId: "resp_vision_123",
       elapsedMs: expect.any(Number),
       usage: {
         inputTokens: 1_234,
@@ -99,80 +97,6 @@ describe("Responses vision adapter", () => {
     expect(fetchImpl.mock.invocationCallOrder[0]).toBeLessThan(
       onRequestStarted.mock.invocationCallOrder[0]!,
     );
-  });
-
-  it("omits unsafe upstream response identifiers", async () => {
-    const root = mkdtempSync(join(tmpdir(), "codexc-vision-"));
-    const imagePath = join(root, "image.png");
-    writeFileSync(imagePath, Buffer.from([
-      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00,
-    ]));
-    const adapter = createResponsesVisionAdapter({
-      endpoint: "https://vision.example/v1/responses",
-      model: "vision-model",
-      loadApiKey: () => "private-key",
-      fetchImpl: async () => new Response(JSON.stringify({
-        id: "unsafe\nidentifier",
-        output: [{
-          content: [{
-            type: "output_text",
-            text: JSON.stringify({
-              images: [{
-                index: 1,
-                description: "图片描述",
-                extractedText: null,
-                uncertainty: null,
-              }],
-            }),
-          }],
-        }],
-      }), { status: 200 }),
-    });
-
-    await expect(adapter.recognize({
-      images: [{ path: imagePath }],
-      userPrompt: "识别图片",
-      onRequestStarted: vi.fn(),
-    })).resolves.not.toHaveProperty("upstreamResponseId");
-  });
-
-  it("uses a safe request header when the response body has no identifier", async () => {
-    const root = mkdtempSync(join(tmpdir(), "codexc-vision-"));
-    const imagePath = join(root, "image.png");
-    writeFileSync(imagePath, Buffer.from([
-      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00,
-    ]));
-    const adapter = createResponsesVisionAdapter({
-      endpoint: "https://vision.example/v1/responses",
-      model: "vision-model",
-      loadApiKey: () => "private-key",
-      fetchImpl: async () => new Response(JSON.stringify({
-        output: [{
-          content: [{
-            type: "output_text",
-            text: JSON.stringify({
-              images: [{
-                index: 1,
-                description: "图片描述",
-                extractedText: null,
-                uncertainty: null,
-              }],
-            }),
-          }],
-        }],
-      }), {
-        status: 200,
-        headers: { "x-request-id": "req_vision_456" },
-      }),
-    });
-
-    await expect(adapter.recognize({
-      images: [{ path: imagePath }],
-      userPrompt: "识别图片",
-      onRequestStarted: vi.fn(),
-    })).resolves.toMatchObject({
-      upstreamResponseId: "req_vision_456",
-    });
   });
 
   it("does not send a request when the stored key is absent", async () => {

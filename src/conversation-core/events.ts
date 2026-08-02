@@ -186,7 +186,7 @@ export type OutputEvent =
   | {
       type: "vision.completed";
       target: ConversationTarget;
-      recognitionId?: string;
+      model: string;
       elapsedMs?: number;
       usage?: VisionTokenUsage;
     }

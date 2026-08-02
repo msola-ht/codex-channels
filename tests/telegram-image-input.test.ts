@@ -150,7 +150,7 @@ describe("Telegram image input", () => {
       },
     });
 
-    expect(sentTexts.some((text) => text.includes("已记录图片识别要求"))).toBe(true);
+    expect(sentTexts.some((text) => text.includes("图片识别要求已记录"))).toBe(true);
     expect(submit).toHaveBeenCalledWith(
       { surface: "telegram", accountId: "default", conversationId: "100" },
       {
