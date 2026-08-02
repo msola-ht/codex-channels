@@ -123,9 +123,11 @@ Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类
 
 会话命令统一映射到 Application 的 `ConversationCommandService`；Surface 负责提取命令名和参数，
 并渲染类型化结果。普通文本、图片下载、平台帮助、身份查询和交互取消保留在平台边界。PNG/JPEG
-的大小限制、内容签名校验、私有暂存和过期清理由 `managed-image-store.ts` 在 Surface 内复用；
+的大小限制与内容签名校验由 `managed-image-store.ts` 在 Surface 内复用；
 一次性音频的 20 MiB、WAV/MP3/M4A/WebM/OGG 内容签名、`0700/0600` 私有暂存和一小时清理由
-`managed-audio-store.ts` 复用，Application 只接收绝对本地路径；
+`managed-audio-store.ts` 复用。两者通过内部 `managed-media-store.ts` 统一私有目录生命周期、
+有界流落盘、临时文件清理和过期清理；各自的格式白名单、限制、保留时间和公开接口保持独立。
+Application 只接收绝对本地路径；
 平台仍各自负责取得受信下载流。所有输入在调用 Application 前必须构造
 `SurfaceAccessContext` 并通过对应访问策略。
 
