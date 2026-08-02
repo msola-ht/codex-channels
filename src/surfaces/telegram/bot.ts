@@ -36,6 +36,7 @@ import { formatQuotedInput } from "../quoted-input.js";
 import {
   executeVisionCommand,
   formatVisionCollectionReady,
+  formatVisionCommandTiming,
   formatVisionImagesCollected,
 } from "../vision-command.js";
 import { surfaceCommandAliases } from "../slash-command.js";
@@ -101,6 +102,7 @@ export interface TelegramSurfaceOptions {
   planUpdatesEnabled?: boolean;
   codexUpstreamUserAgent?: () => string | undefined;
   inputQuietWindowMs?: number;
+  now?: () => number;
 }
 
 export interface CreateTelegramSurfaceOptions extends TelegramSurfaceOptions {
@@ -144,6 +146,7 @@ export class TelegramSurface {
   private readonly actorRegistry: ConversationActorRegistry | undefined;
   private readonly commands: ConversationCommandService;
   private readonly inputs: SurfaceInputCoalescer;
+  private readonly now: () => number;
   private nextInputSequence = 0;
   private notificationRecipients: ReadonlySet<number>;
 
@@ -168,6 +171,7 @@ export class TelegramSurface {
     });
     this.bot.use((context, next) => this.authorize(context, next));
     this.actorRegistry = options.actorRegistry;
+    this.now = options.now ?? Date.now;
     this.notificationRecipients = new Set(startupRecipients);
     this.commands = new ConversationCommandService(service);
     const apiExecutor = new TelegramApiExecutor(logger);
@@ -310,16 +314,22 @@ export class TelegramSurface {
     this.bot.command("r", (context) =>
       this.executeCommand(context, surfaceCommandAliases.r));
     this.bot.command("vision", async (context) => {
+      const receivedAtMs = this.now();
       await this.inputs.flushPending(
         target(context),
         String(context.from?.id ?? ""),
       );
-      await replyTelegramPanel(context, await executeVisionCommand(
+      const rendered = await executeVisionCommand(
         this.inputs,
         target(context),
         String(context.from?.id ?? ""),
         commandArguments(context),
-      ));
+      );
+      await replyTelegramPanel(context, formatVisionCommandTiming(rendered, {
+        createdAtMs: (context.message?.date ?? 0) * 1_000,
+        receivedAtMs,
+        respondedAtMs: this.now(),
+      }));
     });
     this.bot.command("stop", async (context) => {
       if (this.interactions.stopForChat(String(context.chat.id))) {

@@ -4,6 +4,12 @@ import {
 } from "../conversation-core/index.js";
 import type { SurfaceInputCoalescer } from "./surface-input-coalescer.js";
 
+export interface VisionCommandTiming {
+  createdAtMs?: number;
+  receivedAtMs: number;
+  respondedAtMs: number;
+}
+
 export async function executeVisionCommand(
   inputs: Pick<
     SurfaceInputCoalescer,
@@ -106,9 +112,45 @@ export function formatVisionCollectionReady(
   ].join("\n");
 }
 
+export function formatVisionCommandTiming(
+  value: string,
+  timing: VisionCommandTiming,
+): string {
+  const processingMs = elapsedMilliseconds(
+    timing.respondedAtMs,
+    timing.receivedAtMs,
+  );
+  const deliveryMs = timing.createdAtMs === undefined
+    ? undefined
+    : elapsedMilliseconds(timing.receivedAtMs, timing.createdAtMs);
+  return [
+    value,
+    ...(deliveryMs === undefined
+      ? []
+      : [`- 接收延迟：${deliveryMs}毫秒`]),
+    ...(processingMs === undefined
+      ? []
+      : [`- Gateway 处理：${processingMs}毫秒`]),
+  ].join("\n");
+}
+
 function visionCommandUsageError(): UserFacingError {
   return new UserFacingError(
     "vision.command.usage",
     "请使用 /vision <要求>、/vision <2–4> <要求> 或 /vision cancel",
   );
+}
+
+function elapsedMilliseconds(
+  later: number,
+  earlier: number,
+): number | undefined {
+  if (
+    !Number.isSafeInteger(later)
+    || !Number.isSafeInteger(earlier)
+    || later < earlier
+  ) {
+    return undefined;
+  }
+  return later - earlier;
 }

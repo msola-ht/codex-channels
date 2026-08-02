@@ -23,6 +23,35 @@ const message = {
 };
 
 describe("WeixinConversationAdapter", () => {
+  it("shows /vision delivery and Gateway handling latency", async () => {
+    const notifyText = vi.fn<(
+      target: ConversationTarget,
+      text: string,
+    ) => boolean>(() => true);
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({}),
+      { notifyText },
+      undefined,
+      { quietWindowMs: 0, now: () => 1_450 },
+    );
+
+    await adapter.handle({
+      ...message,
+      text: "/vision 2 比较两张图片",
+      createdAtMs: 1_000,
+      receivedAtMs: 1_200,
+    });
+
+    expect(notifyText).toHaveBeenCalledWith(
+      target,
+      expect.stringContaining("接收延迟：200毫秒"),
+    );
+    expect(notifyText).toHaveBeenCalledWith(
+      target,
+      expect.stringContaining("Gateway 处理：250毫秒"),
+    );
+  });
+
   it("keeps ordinary text on the shared conversation submission path", async () => {
     const submit = vi.fn(async () => ({
       threadId: "thread",

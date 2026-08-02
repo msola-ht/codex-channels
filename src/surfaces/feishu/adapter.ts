@@ -21,6 +21,7 @@ import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import { formatQuotedInput } from "../quoted-input.js";
 import {
   executeVisionCommand,
+  formatVisionCommandTiming,
   formatVisionCollectionReady,
   formatVisionImagesCollected,
 } from "../vision-command.js";
@@ -97,6 +98,7 @@ export class FeishuConversationAdapter {
       audios?: Pick<FeishuAudioPort, "download">;
       readQuotedText?(messageId: string): Promise<string | undefined>;
       onQuotedTextError?(error: unknown): void;
+      now?: () => number;
     } = { quietWindowMs: 0 },
   ) {
     this.commands = new ConversationCommandService(conversations);
@@ -168,15 +170,22 @@ export class FeishuConversationAdapter {
           return;
         }
         if (command.name === "vision") {
+          const now = this.inputOptions.now ?? Date.now;
+          const receivedAtMs = message.receivedAtMs ?? now();
           await this.inputs.flushPending(message.target, message.actorId);
+          const rendered = await executeVisionCommand(
+            this.inputs,
+            message.target,
+            message.actorId,
+            command.argumentsText,
+          );
           this.notifyMarkdown(
             message.target.conversationId,
-            await executeVisionCommand(
-              this.inputs,
-              message.target,
-              message.actorId,
-              command.argumentsText,
-            ),
+            formatVisionCommandTiming(rendered, {
+              createdAtMs: message.createdAtMs,
+              receivedAtMs,
+              respondedAtMs: now(),
+            }),
           );
           return;
         }

@@ -240,6 +240,62 @@ describe("WeixinInputAdapter", () => {
     await adapter.stop();
   });
 
+  it("includes pre-command persistence time in /vision diagnostics", async () => {
+    let delivered = false;
+    const client: WeixinProtocolClient = {
+      getUpdates: vi.fn(async (_cursor, signal) => {
+        if (!delivered) {
+          delivered = true;
+          return {
+            cursor: "cursor-vision-timing",
+            messages: [{
+              kind: "text" as const,
+              messageId: "vision-timing-1",
+              actorId,
+              conversationId: actorId,
+              contextToken: "context-vision-timing",
+              text: "/vision 2 比较两张图片",
+              createdAt: 1_000,
+            }],
+          };
+        }
+        return await waitForAbort(signal);
+      }),
+      sendText: vi.fn(async () => {}),
+    };
+    const outbox = outboxFixture();
+    const now = vi.fn()
+      .mockReturnValueOnce(1_200)
+      .mockReturnValueOnce(1_450);
+    const options = {
+      accountId,
+      client,
+      cursorStore: cursorStoreFixture(),
+      service: serviceFixture(),
+      outbox,
+      access: accessFixture(true),
+      replyContexts: new WeixinReplyContextStore(accountId),
+      persistReplyContext: vi.fn(async () => {}),
+      onFatal: vi.fn(),
+      now,
+    };
+    const adapter = new WeixinInputAdapter(options);
+
+    await adapter.start();
+    await vi.waitFor(() => {
+      expect(outbox.notifyText).toHaveBeenCalledWith(
+        target,
+        expect.stringContaining("接收延迟：200毫秒"),
+      );
+    });
+    await adapter.stop();
+
+    expect(outbox.notifyText).toHaveBeenCalledWith(
+      target,
+      expect.stringContaining("Gateway 处理：250毫秒"),
+    );
+  });
+
   it("resolves an authorized user quote from the bounded process cache", async () => {
     let delivered = false;
     const client: WeixinProtocolClient = {

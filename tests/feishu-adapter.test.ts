@@ -72,6 +72,33 @@ function createAudioMessage(): Extract<FeishuInboxMessage, { kind: "audio" }> {
 }
 
 describe("Feishu conversation adapter", () => {
+  it("shows /vision delivery and Gateway handling latency", async () => {
+    const fixture = createOutbox();
+    const inputOptions = { quietWindowMs: 0, now: () => 1_450 };
+    const adapter = new FeishuConversationAdapter(
+      {} as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      inputOptions,
+    );
+
+    await adapter.handle({
+      ...message,
+      text: "/vision 2 比较两张图片",
+      createdAtMs: 1_000,
+      receivedAtMs: 1_200,
+    });
+    await fixture.outbox.close();
+
+    expect(fixture.sent[0]?.text).toContain("接收延迟：200毫秒");
+    expect(fixture.sent[0]?.text).toContain("Gateway 处理：250毫秒");
+  });
+
   it("uses rich posts for command results but keeps failures as plain text", async () => {
     const notifyMarkdown = vi.fn(() => true);
     const notifyText = vi.fn(() => true);

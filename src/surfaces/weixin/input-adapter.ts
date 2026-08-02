@@ -79,12 +79,14 @@ export interface WeixinInputAdapterOptions {
   onRetry?(event: WeixinUpdatesRetryEvent): void;
   onStopTimeout?(): void;
   closeTimeoutMs?: number;
+  now?: () => number;
 }
 
 export class WeixinInputAdapter {
   readonly accountId: string;
 
   private readonly closeTimeoutMs: number;
+  private readonly now: () => number;
   private readonly health = new WeixinPollingHealth();
   private readonly monitor;
   private readonly conversations: WeixinConversationAdapter;
@@ -101,6 +103,7 @@ export class WeixinInputAdapter {
       options.closeTimeoutMs ?? 5_000,
       "微信输入关闭超时时间无效",
     );
+    this.now = options.now ?? Date.now;
     this.conversations = new WeixinConversationAdapter(
       options.service,
       options.outbox,
@@ -108,6 +111,7 @@ export class WeixinInputAdapter {
       {
         quietWindowMs: 0,
         pollingHealth: this.health,
+        now: this.now,
         ...(options.doctor === undefined
           ? {}
           : {
@@ -169,6 +173,7 @@ export class WeixinInputAdapter {
   }
 
   private async handle(message: WeixinSupportedMessage): Promise<void> {
+    const receivedAtMs = this.now();
     const target: ConversationTarget = {
       surface: "weixin",
       accountId: this.accountId,
@@ -220,6 +225,10 @@ export class WeixinInputAdapter {
             actorId: message.actorId,
             kind: "text" as const,
             text: message.text,
+            ...(message.createdAt === undefined
+              ? {}
+              : { createdAtMs: message.createdAt }),
+            receivedAtMs,
             ...(quotedText === undefined ? {} : { quotedText }),
           }
         : message.kind === "image"

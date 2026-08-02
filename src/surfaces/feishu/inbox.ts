@@ -29,6 +29,7 @@ interface FeishuInboxMessageBase {
   eventId: string | undefined;
   messageId: string;
   createdAtMs: number;
+  receivedAtMs?: number;
   parentId?: string;
 }
 
@@ -206,6 +207,7 @@ export class FeishuInbox {
       eventId: event.eventId,
       messageId: event.messageId,
       createdAtMs,
+      receivedAtMs: now,
       ...(event.parentId === undefined ? {} : { parentId: event.parentId }),
       ...content,
     };
