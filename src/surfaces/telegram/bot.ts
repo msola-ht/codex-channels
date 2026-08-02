@@ -33,7 +33,10 @@ import {
 import { formatTextFileTooLarge } from "../text-file-copy.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import { formatQuotedInput } from "../quoted-input.js";
-import { executeVisionCommand } from "../vision-command.js";
+import {
+  executeVisionCommand,
+  formatVisionImagesCollected,
+} from "../vision-command.js";
 import { surfaceCommandAliases } from "../slash-command.js";
 import {
   formatConfigurationChange,
@@ -283,7 +286,7 @@ export class TelegramSurface {
           "",
           ...conversationCommandHelpLines,
           "Telegram：",
-          "- /vision <图片识别要求> · /vision cancel",
+          "- /vision <要求> · /vision begin <要求> · /vision done · /vision cancel",
           "- /whoami",
           "- /start · /help · /h",
         ].join("\n"),
@@ -303,7 +306,7 @@ export class TelegramSurface {
         target(context),
         String(context.from?.id ?? ""),
       );
-      await context.reply(executeVisionCommand(
+      await context.reply(await executeVisionCommand(
         this.inputs,
         target(context),
         String(context.from?.id ?? ""),
@@ -358,6 +361,10 @@ export class TelegramSurface {
       } catch (error) {
         this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
         throw error;
+      }
+      if (result.kind === "collected") {
+        this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+        throw new Error("纯文本不能进入图片收集");
       }
       if (result.tail && result.submission.steered) {
         this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
@@ -483,6 +490,10 @@ export class TelegramSurface {
       this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
       throw error;
     }
+    if (result.kind === "collected") {
+      this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+      throw new Error("文本文件不能进入图片收集");
+    }
     if (result.tail && result.submission.steered) {
       this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
     } else if (result.tail) {
@@ -556,6 +567,20 @@ export class TelegramSurface {
     } catch (error) {
       this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
       throw error;
+    }
+    if (result.kind === "collected") {
+      this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+      await context.reply(formatVisionImagesCollected(
+        result.imageCount,
+        result.maximumImages,
+      ), {
+        disable_notification: true,
+        reply_parameters: {
+          message_id: context.message.message_id,
+          allow_sending_without_reply: true,
+        },
+      });
+      return;
     }
     if (result.tail && result.submission.steered) {
       this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);

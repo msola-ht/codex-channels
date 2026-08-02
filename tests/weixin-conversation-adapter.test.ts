@@ -189,6 +189,67 @@ describe("WeixinConversationAdapter", () => {
     )).toBe(true);
   });
 
+  it("collects separate Weixin image messages after /vision begin", async () => {
+    const submit = vi.fn(async () => ({
+      threadId: "thread",
+      turnId: "turn",
+      steered: false,
+    }));
+    const notifyText = vi.fn<(
+      target: ConversationTarget,
+      text: string,
+    ) => boolean>(() => true);
+    const download = vi.fn()
+      .mockResolvedValueOnce({
+        path: "/private/weixin/first.jpg",
+        mimeType: "image/jpeg" as const,
+        bytes: 9,
+      })
+      .mockResolvedValueOnce({
+        path: "/private/weixin/second.jpg",
+        mimeType: "image/jpeg" as const,
+        bytes: 10,
+      });
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({ submit }),
+      { notifyText },
+      { download },
+    );
+
+    await adapter.handle({ ...message, text: "/vision begin 比较两张图片" });
+    await adapter.handle({
+      target,
+      actorId: message.actorId,
+      kind: "image",
+      images: [{ encryptedQueryParam: "first-private-query" }],
+    });
+    await adapter.handle({
+      target,
+      actorId: message.actorId,
+      kind: "image",
+      images: [{ encryptedQueryParam: "second-private-query" }],
+    });
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(notifyText.mock.calls.some(([, text]) =>
+      text.includes("已收集 2/4 张图片")
+    )).toBe(true);
+
+    await adapter.handle({ ...message, text: "/vision done" });
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledWith(target, {
+      text: "比较两张图片",
+      localImages: [
+        { path: "/private/weixin/first.jpg" },
+        { path: "/private/weixin/second.jpg" },
+      ],
+    });
+    expect(notifyText.mock.calls.some(([, text]) =>
+      text === "已提交 2 张图片。"
+    )).toBe(true);
+  });
+
   it("submits separate Weixin image messages without a quiet-window delay", async () => {
     vi.useFakeTimers();
     const submit = vi.fn(async () => ({

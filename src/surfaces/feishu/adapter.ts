@@ -19,7 +19,10 @@ import {
 } from "../output-copy.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import { formatQuotedInput } from "../quoted-input.js";
-import { executeVisionCommand } from "../vision-command.js";
+import {
+  executeVisionCommand,
+  formatVisionImagesCollected,
+} from "../vision-command.js";
 
 import type {
   FeishuCommandCenter,
@@ -159,7 +162,7 @@ export class FeishuConversationAdapter {
           await this.inputs.flushPending(message.target, message.actorId);
           this.notifyText(
             message.target.conversationId,
-            executeVisionCommand(
+            await executeVisionCommand(
               this.inputs,
               message.target,
               message.actorId,
@@ -466,6 +469,12 @@ export class FeishuConversationAdapter {
       );
       throw error;
     }
+    if (result.kind === "collected") {
+      this.outbox.discardPendingTurnReplyTarget?.(
+        message.target.conversationId,
+      );
+      throw new Error("文本输入不能进入图片收集");
+    }
     if (!result.tail) {
       return;
     }
@@ -606,7 +615,26 @@ export class FeishuConversationAdapter {
       );
       throw error;
     }
-    const tail = results.find((result) => result.tail);
+    const collected = results.filter((result) => result.kind === "collected");
+    if (collected.length > 0) {
+      this.outbox.discardPendingTurnReplyTarget?.(
+        replyMessage.target.conversationId,
+      );
+      if (collected.length !== results.length) {
+        throw new Error("同一图片批次不能同时收集和提交");
+      }
+      const imageCount = Math.max(...collected.map((result) => result.imageCount));
+      this.notifyText(
+        replyMessage.target.conversationId,
+        formatVisionImagesCollected(
+          imageCount,
+          collected[0]!.maximumImages,
+        ),
+      );
+      return;
+    }
+    const submitted = results.filter((result) => result.kind !== "collected");
+    const tail = submitted.find((result) => result.tail);
     if (tail?.submission.steered) {
       this.outbox.discardPendingTurnReplyTarget?.(
         replyMessage.target.conversationId,

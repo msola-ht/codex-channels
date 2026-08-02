@@ -14,7 +14,7 @@ const commands = [
     command: name,
     description: conversationCommandDescriptions[name],
   })),
-  { command: "vision", description: "设置下一批图片识别要求" },
+  { command: "vision", description: "设置要求或收集多张图片" },
   { command: "whoami", description: "显示 Telegram 用户 ID" },
 ];
 
