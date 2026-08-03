@@ -332,6 +332,8 @@ export class ProviderProxy {
           "websocket",
           "response",
         );
+        activeMetrics.model = sanitized.model ?? null;
+        activeMetrics.serviceTier = sanitized.serviceTier ?? null;
       }
       if (upstream.readyState === WebSocket.OPEN) {
         upstream.send(sanitized.data, { binary: isBinary });
@@ -599,6 +601,8 @@ function sanitizeClientWebSocketMessage(
   data: RawData | string;
   metadata?: TurnMetadata;
   requestStartedAtMs?: number;
+  model?: string;
+  serviceTier?: string;
 } {
   if (isBinary) return { data };
   const parsed = parseJsonPayload(rawDataText(data));
@@ -606,11 +610,19 @@ function sanitizeClientWebSocketMessage(
   const clientMetadata = asRecord(parsed.client_metadata);
   const rawMetadata = clientMetadata?.["x-codex-turn-metadata"];
   const requestStartedAtMs = requestStartTimestamp(clientMetadata);
+  const model = boundedString(parsed.model) ?? undefined;
+  const serviceTier = boundedString(parsed.service_tier) ?? undefined;
   const metadata = typeof rawMetadata === "string"
     ? parseTurnMetadata(rawMetadata)
     : parseTurnMetadataObject(rawMetadata);
   if (!clientMetadata || rawMetadata === undefined) {
-    return { data, metadata, ...(requestStartedAtMs ? { requestStartedAtMs } : {}) };
+    return {
+      data,
+      metadata,
+      ...(requestStartedAtMs ? { requestStartedAtMs } : {}),
+      ...(model ? { model } : {}),
+      ...(serviceTier ? { serviceTier } : {}),
+    };
   }
   const sanitizedMetadata = { ...clientMetadata };
   delete sanitizedMetadata["x-codex-turn-metadata"];
@@ -618,6 +630,8 @@ function sanitizeClientWebSocketMessage(
     data: JSON.stringify({ ...parsed, client_metadata: sanitizedMetadata }),
     metadata,
     ...(requestStartedAtMs ? { requestStartedAtMs } : {}),
+    ...(model ? { model } : {}),
+    ...(serviceTier ? { serviceTier } : {}),
   };
 }
 
