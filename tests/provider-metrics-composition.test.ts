@@ -51,7 +51,11 @@ describe("ProviderMetricsComposition", () => {
 
     expect(record).not.toHaveBeenCalled();
     await vi.waitFor(() => {
-      expect(record).toHaveBeenCalledWith({ provider: "deepseek", ...metrics() });
+      expect(record).toHaveBeenCalledWith({
+        provider: "deepseek",
+        ...metrics(),
+        pricing: null,
+      });
     });
     expect(timings).toEqual([expect.objectContaining({
       type: "turn.modelTiming.updated",
@@ -91,9 +95,61 @@ describe("ProviderMetricsComposition", () => {
     await sendProviderProxyMetrics(socketPath, unassociated);
 
     await vi.waitFor(() => {
-      expect(record).toHaveBeenCalledWith({ provider: "openai", ...unassociated });
+      expect(record).toHaveBeenCalledWith({
+        provider: "openai",
+        ...unassociated,
+        pricing: null,
+      });
     });
     expect(onModelTiming).not.toHaveBeenCalled();
+    await composition.close();
+  });
+
+  it("attaches an injected pricing snapshot without coupling the proxy to prices", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-metrics-pricing-"));
+    temporaryDirectories.push(directory);
+    const socketPath = join(directory, "deepseek.sock");
+    const record = vi.fn<ModelRequestMetricsStore["record"]>();
+    const pricing = {
+      billingMode: "api" as const,
+      currency: "USD",
+      source: "future-setup",
+      effectiveAtMs: 1_700_000_000_000,
+      uncachedInputPricePerMillionNanos: 2_000_000_000,
+      cachedInputPricePerMillionNanos: 1_000_000_000,
+      outputPricePerMillionNanos: 3_000_000_000,
+    };
+    const resolve = vi.fn(() => pricing);
+    const composition = new ProviderMetricsComposition({
+      providers: ["deepseek"],
+      socketPath: () => socketPath,
+      writer: new BufferedModelRequestMetricsWriter({
+        record,
+        close: () => undefined,
+        count: () => 0,
+        recent: () => [],
+      }),
+      pricingResolver: { resolve },
+      onModelTiming: () => undefined,
+      logger: pino({ level: "silent" }),
+    });
+    await composition.start();
+
+    await sendProviderProxyMetrics(socketPath, metrics());
+
+    await vi.waitFor(() => {
+      expect(record).toHaveBeenCalledWith({
+        provider: "deepseek",
+        ...metrics(),
+        pricing,
+      });
+    });
+    expect(resolve).toHaveBeenCalledWith({
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+      serviceTier: "default",
+      atMs: 1_900,
+    });
     await composition.close();
   });
 });

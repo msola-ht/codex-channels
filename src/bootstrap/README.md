@@ -16,7 +16,8 @@
 - `provider-metrics-composition.ts`：组合 Provider 私有指标 Socket、Observability 独立存储和 Core
   既有计时端口。所有脱敏请求样本都会持久化；只有具备 Thread、Turn 与 Token 窗口的样本才归约
   到完成卡片；持久化通过 Observability 有界 Writer 延迟分片执行，单项写入失败不会阻断指标确认或
-  既有 Core 计时。
+  既有 Core 计时。可选 `ModelPricingResolver` 只在组合边界为新请求附加当次价格快照；代理、Core
+  和数据库 View 都不读取设置或内置模型价格。
 - `surface-plugin.ts`：定义编译期内置 Surface 插件、插件上下文和运行时模块契约，并校验插件 ID、
   实际 Surface ID 与账号实例唯一性。
 - `surface-composition.ts`：显式注册 Telegram、飞书和微信内置插件，并保留各平台访问策略、

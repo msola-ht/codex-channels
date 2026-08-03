@@ -2,9 +2,32 @@ export type ModelRequestTransport = "http" | "websocket";
 export type ModelResponseFormat = "sse" | "json" | "websocket" | "unknown";
 export type ModelRequestOperation = "response" | "compact";
 export type ModelRequestStatus = "completed" | "failed" | "incomplete" | "unknown";
+export type ModelBillingMode = "api" | "subscription" | "unknown";
+
+export interface ModelRequestPricingSnapshot {
+  billingMode: ModelBillingMode;
+  currency: string | null;
+  source: string;
+  effectiveAtMs: number;
+  uncachedInputPricePerMillionNanos: number | null;
+  cachedInputPricePerMillionNanos: number | null;
+  outputPricePerMillionNanos: number | null;
+}
+
+export interface ModelPricingLookup {
+  provider: string;
+  model: string | null;
+  serviceTier: string | null;
+  atMs: number;
+}
+
+export interface ModelPricingResolver {
+  resolve(lookup: ModelPricingLookup): ModelRequestPricingSnapshot | null;
+}
 
 export interface ModelRequestMetricSample {
   provider: string;
+  pricing: ModelRequestPricingSnapshot | null;
   transport: ModelRequestTransport;
   responseFormat: ModelResponseFormat;
   operation: ModelRequestOperation;
@@ -36,6 +59,23 @@ export interface ModelRequestMetricSample {
 export interface StoredModelRequestMetric extends ModelRequestMetricSample {
   id: number;
   recordedAtMs: number;
+  requestDurationMs: number | null;
+  ttftMs: number | null;
+  thinkingDurationMs: number | null;
+  outputDurationMs: number | null;
+  generationDurationMs: number | null;
+  completionGapMs: number | null;
+  upstreamDurationMs: number | null;
+  uncachedInputTokens: number | null;
+  nonReasoningOutputTokens: number | null;
+  cacheHitRate: number | null;
+  thinkingTokensPerSecond: number | null;
+  outputTokensPerSecond: number | null;
+  generationTokensPerSecond: number | null;
+  uncachedInputCostNanos: number | null;
+  cachedInputCostNanos: number | null;
+  outputCostNanos: number | null;
+  totalCostNanos: number | null;
 }
 
 export interface ModelRequestMetricsStore {

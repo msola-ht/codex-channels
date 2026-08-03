@@ -1,7 +1,10 @@
 import type { Logger } from "pino";
 
 import type { ConversationInputEvent } from "../conversation-core/index.js";
-import type { ModelRequestMetricsWriter } from "../observability/index.js";
+import type {
+  ModelPricingResolver,
+  ModelRequestMetricsWriter,
+} from "../observability/index.js";
 import {
   ProviderProxyMetricsServer,
   type ProviderProxyMetrics,
@@ -16,6 +19,7 @@ export interface ProviderMetricsCompositionOptions {
   providers: readonly string[];
   socketPath: (provider: string) => string;
   writer: ModelRequestMetricsWriter;
+  pricingResolver?: ModelPricingResolver;
   onModelTiming: (event: ModelTimingEvent) => void;
   logger: Logger;
 }
@@ -63,7 +67,13 @@ export class ProviderMetricsComposition {
 
   private handle(provider: string, metrics: ProviderProxyMetrics): void {
     try {
-      this.options.writer.enqueue({ provider, ...metrics });
+      const pricing = this.options.pricingResolver?.resolve({
+        provider,
+        model: metrics.model,
+        serviceTier: metrics.serviceTier,
+        atMs: metrics.responseCompletedAtMs,
+      }) ?? null;
+      this.options.writer.enqueue({ provider, ...metrics, pricing });
     } catch (error) {
       this.options.logger.warn({ err: error, provider }, "模型请求指标持久化失败");
     }

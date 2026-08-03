@@ -38,7 +38,11 @@ describe("SqliteModelRequestMetricsStore", () => {
     expect(path).toBe(join(directory, "request-metrics.sqlite3"));
     expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(store.count()).toBe(1);
-    expect(store.recent(1)[0]).toMatchObject(sample());
+    expect(store.recent(1)[0]).toMatchObject({
+      ...sample(),
+      requestDurationMs: 650,
+      totalCostNanos: null,
+    });
     store.close();
     const inspection = new DatabaseSync(path, { readOnly: true });
     const columns = inspection.prepare("PRAGMA table_info(model_request_metrics)")
@@ -47,6 +51,75 @@ describe("SqliteModelRequestMetricsStore", () => {
     expect(columns.map((column) => column.name).filter((name) =>
       /body|content|prompt|message|image|authorization/iu.test(name)
     )).toEqual([]);
+  });
+
+  it("exposes derived timing, throughput, cache and snapshotted cost metrics", () => {
+    const directory = temporaryDirectory();
+    const path = join(directory, "request-metrics.sqlite3");
+    const store = new SqliteModelRequestMetricsStore(path);
+    store.record({
+      ...sample(),
+      pricing: {
+        billingMode: "api",
+        currency: "USD",
+        source: "test-catalog",
+        effectiveAtMs: 1_700_000_000_000,
+        uncachedInputPricePerMillionNanos: 2_000_000_000,
+        cachedInputPricePerMillionNanos: 1_000_000_000,
+        outputPricePerMillionNanos: 3_000_000_000,
+      },
+    });
+    store.close();
+
+    const inspection = new DatabaseSync(path, { readOnly: true });
+    const derived = inspection.prepare(`
+      SELECT * FROM model_request_metrics_enriched ORDER BY id DESC LIMIT 1
+    `).get() as Record<string, unknown>;
+    inspection.close();
+
+    expect(derived).toMatchObject({
+      billing_mode: "api",
+      pricing_currency: "USD",
+      pricing_source: "test-catalog",
+      request_duration_ms: 650,
+      ttft_ms: 100,
+      thinking_duration_ms: 200,
+      output_duration_ms: 200,
+      generation_duration_ms: 500,
+      completion_gap_ms: 50,
+      upstream_duration_ms: 1_000,
+      uncached_input_tokens: 100,
+      non_reasoning_output_tokens: 60,
+      cache_hit_rate: 0.9,
+      thinking_tokens_per_second: 200,
+      output_tokens_per_second: 300,
+      generation_tokens_per_second: 200,
+      uncached_input_cost_nanos: 200_000,
+      cached_input_cost_nanos: 900_000,
+      output_cost_nanos: 300_000,
+      total_cost_nanos: 1_400_000,
+    });
+  });
+
+  it("rejects priced snapshots without a currency", () => {
+    const directory = temporaryDirectory();
+    const path = join(directory, "request-metrics.sqlite3");
+    const store = new SqliteModelRequestMetricsStore(path);
+
+    expect(() => store.record({
+      ...sample(),
+      pricing: {
+        billingMode: "api",
+        currency: null,
+        source: "test-catalog",
+        effectiveAtMs: 1_700_000_000_000,
+        uncachedInputPricePerMillionNanos: 2_000_000_000,
+        cachedInputPricePerMillionNanos: null,
+        outputPricePerMillionNanos: null,
+      },
+    })).toThrow(/constraint/iu);
+
+    store.close();
   });
 
   it("removes records older than thirty days when reopened", () => {
@@ -175,6 +248,7 @@ function temporaryDirectory(): string {
 function sample(): ModelRequestMetricSample {
   return {
     provider: "deepseek",
+    pricing: null,
     transport: "http",
     responseFormat: "sse",
     operation: "response",
