@@ -109,7 +109,11 @@
   与只读 `/models` 路径、HTTP/SSE 与 WebSocket、上游
   状态/Header、私有元数据剥离、流式转发、统一代理 Agent、OpenAI 自定义上游保留、App Server
   服务独立生命周期、响应完成前的指标确认、启动失败清理，以及 `0600` Unix Socket 指标投递和
-  Gateway 缺席时无损模型请求。
+  Gateway 缺席时无损模型请求。代理还覆盖完成/失败/不完整状态、HTTP 错误、超时、断线、真实
+  模型/服务层级与完整 Usage 的脱敏采集；Bootstrap 组合测试验证所有样本进入独立 Observability
+  Store、缺少 Turn 关联时不伪造 Core 事件；独立 SQLite 指标库覆盖 `0600` 权限、严格 Schema、
+  30 天清理和有界内部读取。回归测试还覆盖 WebSocket 完成后立即关闭不重复、指标确认不等待后台
+  SQLite 写入，以及 1 MiB 内非流式 JSON 响应的元数据裁剪与正文隔离。
 - Skill 查询按授权 Workspace 发送精确 CWD，Client 只映射启用的用户与项目直接安装项，排除
   系统和插件缓存并在缺少显示字段时失败关闭；显式调用重新解析精确名称、校验绝对路径，并同时
   发送 `$Skill` 文本标记与结构化 Skill 输入；三个渠道统一覆盖无参数 `/skill` 编号列表与

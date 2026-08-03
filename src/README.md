@@ -12,7 +12,7 @@
 - [`config/`](config/README.md)：统一 TOML 配置解析和边界验证。
 - [`conversation-core/`](conversation-core/README.md)：Thread、Turn、Item 状态归约和输出事件。
 - [`event-bus/`](event-bus/README.md)：有界异步队列和消费者隔离。
-- [`observability/`](observability/README.md)：结构化日志与脱敏。
+- [`observability/`](observability/README.md)：结构化日志与脱敏模型请求指标库。
 - [`policy/`](policy/README.md)：Surface Actor 与 Workspace 授权边界。
 - [`provider-proxy/`](provider-proxy/README.md)：模型 Provider 本地回环转发代理与流式计时。
 - [`session-routing/`](session-routing/README.md)：外部 Conversation、Workspace 与 Codex Thread 路由。

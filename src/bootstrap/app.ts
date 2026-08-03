@@ -17,7 +17,6 @@ import {
 } from "../../runtime/model-provider-runtime.mjs";
 import { readVisionApiKey } from "../../runtime/vision-credential.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
-import { ProviderProxyMetricsServer } from "../provider-proxy/index.js";
 import {
   CodexAppServerClient,
   ProviderRoutingClient,
@@ -52,6 +51,11 @@ import {
   type OutputEvent,
 } from "../conversation-core/index.js";
 import { EventBus } from "../event-bus/index.js";
+import {
+  BufferedModelRequestMetricsWriter,
+  modelRequestMetricsDatabasePath,
+  SqliteModelRequestMetricsStore,
+} from "../observability/index.js";
 import { WorkspaceRegistry } from "../policy/index.js";
 import {
   SessionRouter,
@@ -67,6 +71,7 @@ import { SurfaceManager } from "./surface-manager.js";
 import { createDeepseekAccountAdapter } from "./deepseek-account-adapter.js";
 import { createProxyFetch } from "./proxy-fetch.js";
 import { createResponsesVisionAdapter } from "./responses-vision-adapter.js";
+import { ProviderMetricsComposition } from "./provider-metrics-composition.js";
 
 export class GatewayApplication {
   private readonly transport: UnixWebSocketTransport;
@@ -82,7 +87,7 @@ export class GatewayApplication {
   private readonly router: SessionRouter;
   private readonly threadState: ThreadStateSynchronizer;
   private readonly core: ConversationCore;
-  private readonly providerMetricsServers: ProviderProxyMetricsServer[];
+  private readonly providerMetrics: ProviderMetricsComposition;
   private readonly bindings: SqliteBindingStore;
   private readonly workspaces: WorkspaceRegistry;
   private removeRpcNotification: (() => void) | undefined;
@@ -143,72 +148,22 @@ export class GatewayApplication {
     );
     this.threadState = new ThreadStateSynchronizer(this.router);
     this.core = new ConversationCore(this.router, this.output);
-    this.providerMetricsServers = [...new Set([
-      primaryProvider,
-      ...(managedProvider ? [managedProvider.provider] : []),
-    ])].map((provider) => new ProviderProxyMetricsServer(
+    this.providerMetrics = new ProviderMetricsComposition({
+      providers: [
+        primaryProvider,
+        ...(managedProvider ? [managedProvider.provider] : []),
+      ],
+      socketPath: (provider) =>
         providerMetricsSocketPath(config.codexSocketPath, provider),
-        (metrics) => {
-          const firstTokenAtMs = metrics.firstTokenAtMs;
-          const hasTurnMetadata = metrics.threadId !== null
-            && metrics.turnId !== null;
-          const hasTokenWindow = firstTokenAtMs !== null;
-          if (metrics.threadId === null || metrics.turnId === null || !hasTokenWindow) {
-            this.logger.debug(
-              { provider, hasTurnMetadata, hasTokenWindow },
-              "模型统计代理指标缺少 Turn 关联或 Token 窗口，已跳过",
-            );
-            return;
-          }
-          const lastTokenAtMs = Math.max(
-            metrics.lastReasoningDeltaAtMs ?? firstTokenAtMs,
-            metrics.lastOutputDeltaAtMs ?? firstTokenAtMs,
-          );
-          const thinkingDurationMs = metrics.firstReasoningDeltaAtMs === null
-            || metrics.lastReasoningDeltaAtMs === null
-            ? undefined
-            : metrics.lastReasoningDeltaAtMs - metrics.firstReasoningDeltaAtMs;
-          const outputDurationMs = metrics.firstOutputDeltaAtMs === null
-            || metrics.lastOutputDeltaAtMs === null
-            ? undefined
-            : metrics.lastOutputDeltaAtMs - metrics.firstOutputDeltaAtMs;
-          const generationDurationMs = lastTokenAtMs - firstTokenAtMs;
-          this.core.handle({
-            type: "turn.modelTiming.updated",
-            threadId: metrics.threadId,
-            turnId: metrics.turnId,
-            requestStartedAtMs: metrics.requestStartedAtMs,
-            ttftMs: Math.max(
-              0,
-              firstTokenAtMs - metrics.requestStartedAtMs,
-            ),
-            ...(thinkingDurationMs !== undefined && thinkingDurationMs > 0
-              ? { thinkingDurationMs }
-              : {}),
-            ...(outputDurationMs !== undefined && outputDurationMs > 0
-              ? { outputDurationMs }
-              : {}),
-            ...(generationDurationMs > 0 ? { generationDurationMs } : {}),
-          });
-          this.logger.debug(
-            {
-              provider,
-              ttftMs: Math.max(0, firstTokenAtMs - metrics.requestStartedAtMs),
-              ...(thinkingDurationMs === undefined
-                ? {}
-                : { thinkingDurationMs }),
-              ...(outputDurationMs === undefined
-                ? {}
-                : { outputDurationMs }),
-              ...(generationDurationMs > 0 ? { generationDurationMs } : {}),
-            },
-            "模型统计代理指标已关联到 Turn",
-          );
-        },
-        (error) => {
-          this.logger.warn({ err: error, provider }, "模型统计代理指标接收失败");
-        },
-      ));
+      writer: new BufferedModelRequestMetricsWriter(
+        new SqliteModelRequestMetricsStore(
+          modelRequestMetricsDatabasePath(config.stateDatabasePath),
+        ),
+        (error) => logger.warn({ err: error }, "模型请求指标后台写入失败"),
+      ),
+      onModelTiming: (event) => this.core.handle(event),
+      logger,
+    });
     this.interactions = new InteractionRouter(logger);
     const models = new ModelSelectionService(
       this.codex,
@@ -444,11 +399,7 @@ export class GatewayApplication {
   private async startInternal(): Promise<void> {
     try {
       this.requireRunning();
-      await Promise.all(this.providerMetricsServers.map((server) => server.start()));
-      this.logger.info(
-        { providerCount: this.providerMetricsServers.length },
-        "模型统计代理指标接收已启动",
-      );
+      await this.providerMetrics.start();
       this.removeRpcNotification = this.codex.onNotification((notification) => {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
       });
@@ -515,12 +466,7 @@ export class GatewayApplication {
     const failures: unknown[] = [];
     for (const [component, close] of [
       ["Surface", () => this.surfaceManager.stop()],
-      [
-        "Provider Proxy Metrics",
-        () => Promise.all(
-          this.providerMetricsServers.map((server) => server.close()),
-        ).then(() => undefined),
-      ],
+      ["Provider Proxy Metrics", () => this.providerMetrics.close()],
       ["Inbound Event Bus", () => this.inbound.close()],
       ["Output Event Bus", () => this.output.close()],
       ["Codex Client", () => this.codex.close()],
