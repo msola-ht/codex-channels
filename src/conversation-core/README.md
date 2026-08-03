@@ -8,8 +8,8 @@
 - `core.ts`：维护活动 Turn、Token、当前 Goal、上下文压缩 Item ID、最近 Diff/Plan 和事件去重状态，
   把稳定输入事件归约为文本、操作、状态和完成事件；Turn 完成事件原样携带 Client 已校验的官方
   `durationMs` 与 Router 已确认的 `modelProvider`；模型代理提供时，Core 按 Thread/Turn 聚合全部
-  已关联请求的次数、累计耗时、Usage 与流式时间窗，不读取 SQLite；综合非推理输出速度使用各请求
-  非推理输出 Token 总和除以输出时间窗总和。OpenAI 不展示隐藏推理计时，DeepSeek 才展示最后请求
+  已关联请求的次数、累计耗时、Usage 与流式时间窗，不读取 SQLite；不含推理的综合输出速度使用各请求
+  不含推理的输出 Token 总和除以输出时间窗总和。OpenAI 不展示隐藏推理计时，DeepSeek 才展示最后请求
   首字延时以及整轮综合思考与生成速度，未知 Provider 默认关闭这些详细指标；代理缺席时仍由 Client
   通知边界时间戳和 App Server 最近 Usage 提供有限回退；
   Thread Token 指标对所有 Provider 保持通用，OpenAI 账户周限只附加到 OpenAI Thread；可重试错误

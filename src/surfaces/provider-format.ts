@@ -4,3 +4,9 @@ export function formatProviderLabel(provider: string): string {
   const normalized = provider.replace(/\s+/gu, " ").trim();
   return normalized ? normalized.slice(0, 64) : "未知提供商";
 }
+
+export function formatCodexProviderLabel(provider?: string): string {
+  return provider === undefined || provider === "openai"
+    ? "OpenAI 官方"
+    : formatProviderLabel(provider);
+}

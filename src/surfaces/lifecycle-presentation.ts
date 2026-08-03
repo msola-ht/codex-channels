@@ -16,7 +16,7 @@ import {
   formatElapsedDuration,
   formatTokensPerSecond,
 } from "./elapsed-duration.js";
-import { formatProviderLabel } from "./provider-format.js";
+import { formatCodexProviderLabel } from "./provider-format.js";
 
 export interface LifecyclePresentation {
   title: string;
@@ -115,7 +115,7 @@ export function createStartupPresentation(
           },
           {
             label: "提供商",
-            value: formatProviderLabel(status.modelProvider ?? "openai"),
+            value: formatCodexProviderLabel(status.modelProvider),
           },
           {
             label: "思考强度",
@@ -133,14 +133,17 @@ export function createStartupPresentation(
             label: "协作模式",
             value: `${status.collaborationMode === "plan" ? "Plan" : "Default"}${pendingSuffix(status.collaborationModePending)}`,
           },
-          ...(usesOpenAiAccount(status.modelProvider) && status.weeklyLimit
-            ? [{
-                label: "周限",
-                value: formatWeeklyLimit(status.weeklyLimit),
-              }]
-            : []),
         ],
       },
+      ...(usesOpenAiAccount(status.modelProvider) && status.weeklyLimit
+        ? [{
+            title: "账户状态",
+            fields: [{
+              label: "周限",
+              value: formatWeeklyLimit(status.weeklyLimit),
+            }],
+          }]
+        : []),
     ],
   };
 }
@@ -159,9 +162,14 @@ export function createTurnStartedPresentation(
 export function createTurnCompletedPresentation(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
 ): LifecyclePresentation {
-  const fields: LifecyclePresentationField[] = [];
+  const sessionFields: LifecyclePresentationField[] = event.background
+    ? [{ label: "Thread", value: event.threadId }]
+    : [];
+  const runFields: LifecyclePresentationField[] = [];
+  const accountFields: LifecyclePresentationField[] = [];
+  let fallbackCacheField: LifecyclePresentationField | undefined;
   if (event.error) {
-    fields.push({
+    runFields.push({
       label: "错误",
       value: event.error.replaceAll("[REDACTED]", "[已隐藏]"),
     });
@@ -169,7 +177,7 @@ export function createTurnCompletedPresentation(
   if (event.tokenUsage) {
     const current = event.tokenUsage.last.totalTokens;
     const capacity = event.tokenUsage.modelContextWindow;
-    fields.push(
+    sessionFields.push(
       {
         label: "上下文",
         value: capacity === null || capacity <= 0
@@ -181,53 +189,56 @@ export function createTurnCompletedPresentation(
       event.timing?.requestInputTokens === undefined
       || event.timing.requestCachedInputTokens === undefined
     ) {
-      fields.push({
+      fallbackCacheField = {
         label: "最后模型请求缓存命中",
         value: formatCacheHitRate(
           event.tokenUsage.last.inputTokens,
           event.tokenUsage.last.cachedInputTokens,
         ),
-      });
+      };
     }
   }
   if (event.model) {
-    fields.push({
+    runFields.push({
       label: "模型",
       value: usesOpenAiAccount(event.modelProvider)
         ? `${event.model} · ${event.effort ?? "模型默认"} · Fast ${isFastServiceTier(event.serviceTier ?? null) ? "开启" : "关闭"}`
         : `${event.model} · ${event.effort ?? "模型默认"}`,
     });
-    fields.push({
+    runFields.push({
       label: "提供商",
-      value: formatProviderLabel(event.modelProvider ?? "openai"),
+      value: formatCodexProviderLabel(event.modelProvider),
     });
   }
+  if (fallbackCacheField) {
+    runFields.push(fallbackCacheField);
+  }
   if (event.contextCompactionCount !== undefined) {
-    fields.push({
+    sessionFields.push({
       label: "上下文压缩",
       value: `${event.contextCompactionCount} 次`,
     });
   }
   if (usesOpenAiAccount(event.modelProvider) && event.weeklyLimit) {
-    fields.push({
+    accountFields.push({
       label: "周限",
       value: formatWeeklyLimit(event.weeklyLimit),
     });
   }
   if (event.goal) {
-    fields.push({
+    sessionFields.push({
       label: "Goal",
       value: `${goalStatusLabel(event.goal.status)} · ${formatGoalTokens(event.goal)}`,
     });
   }
   if (event.timing?.modelRequestCount !== undefined) {
-    fields.push({
+    runFields.push({
       label: "模型请求",
       value: `${event.timing.modelRequestCount} 次`,
     });
   }
   if (event.timing?.modelRequestDurationMs !== undefined) {
-    fields.push({
+    runFields.push({
       label: "模型请求累计耗时",
       value: formatElapsedDuration(event.timing.modelRequestDurationMs),
     });
@@ -236,8 +247,8 @@ export function createTurnCompletedPresentation(
     event.timing?.requestInputTokens !== undefined
     && event.timing.requestCachedInputTokens !== undefined
   ) {
-    fields.push({
-      label: "本次模型请求缓存命中",
+    runFields.push({
+      label: "缓存命中",
       value: formatCacheHitRate(
         event.timing.requestInputTokens,
         event.timing.requestCachedInputTokens ?? 0,
@@ -245,21 +256,21 @@ export function createTurnCompletedPresentation(
     });
   }
   if (event.timing?.ttftMs !== undefined) {
-    fields.push({
+    runFields.push({
       label: "最后请求首字延时",
       value: formatElapsedDuration(event.timing.ttftMs),
     });
   }
   if (event.timing?.outputTokensPerSecond !== undefined) {
-    fields.push({
+    runFields.push({
       label: event.timing.modelRequestCount === undefined
         ? "输出速度"
         : "综合输出速度",
-      value: `${formatTokensPerSecond(event.timing.outputTokensPerSecond)}（非推理）`,
+      value: `${formatTokensPerSecond(event.timing.outputTokensPerSecond)}（不含推理）`,
     });
   }
   if (event.timing?.thinkingTokensPerSecond !== undefined) {
-    fields.push({
+    runFields.push({
       label: event.timing.modelRequestCount === undefined
         ? "思考速度"
         : "综合思考速度",
@@ -267,7 +278,7 @@ export function createTurnCompletedPresentation(
     });
   }
   if (event.timing?.generationTokensPerSecond !== undefined) {
-    fields.push({
+    runFields.push({
       label: event.timing.modelRequestCount === undefined
         ? "生成速度"
         : "综合生成速度",
@@ -275,22 +286,32 @@ export function createTurnCompletedPresentation(
     });
   }
   if (Object.hasOwn(event, "gitBranch")) {
-    fields.push({
+    sessionFields.push({
       label: "Git 分支",
       value: event.gitBranch ?? "未检测到",
     });
   }
   if (event.durationMs !== undefined) {
-    fields.push({
-      label: "耗时",
+    runFields.push({
+      label: "总耗时",
       value: formatElapsedDuration(event.durationMs),
     });
   }
+  const sections = [
+    ...(runFields.length > 0
+      ? [{ title: "本次运行", fields: runFields }]
+      : []),
+    ...(sessionFields.length > 0
+      ? [{ title: "当前会话", fields: sessionFields }]
+      : []),
+    ...(accountFields.length > 0
+      ? [{ title: "账户状态", fields: accountFields }]
+      : []),
+  ];
   return {
     title: `${event.background ? "后台任务" : "本次运行"} · ${turnStatusLabel(event.status)}`,
-    fields: event.background
-      ? [{ label: "Thread", value: event.threadId }, ...fields]
-      : fields,
+    fields: sections.length === 1 ? sections[0]!.fields : [],
+    ...(sections.length > 1 ? { sections } : {}),
   };
 }
 

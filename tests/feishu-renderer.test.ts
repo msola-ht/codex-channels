@@ -82,10 +82,12 @@ describe("Feishu output renderer", () => {
       "- **Thread：** thread-1",
       "- **Git 分支：** feature/weixin-surface",
       "- **模型：** gpt-test",
-      "- **提供商：** OpenAI",
+      "- **提供商：** OpenAI 官方",
       "- **思考强度：** medium",
       "- **Fast 模式：** 开启",
       "- **协作模式：** Default",
+      "",
+      "**账户状态**",
       "- **周限：** 剩余 63%",
     ].join("\n"));
     expect(rendered).not.toContain("build-secret");
@@ -383,14 +385,19 @@ describe("Feishu output renderer", () => {
     expect(rendered).toBe([
       "**本次运行 · 已完成**",
       "",
-      "- **上下文：** 100 / 200（50%）",
-      "- **最后模型请求缓存命中：** 50.00%",
+      "**本次运行**",
       "- **模型：** gpt-test · medium · Fast 开启",
-      "- **提供商：** OpenAI",
+      "- **提供商：** OpenAI 官方",
+      "- **最后模型请求缓存命中：** 50.00%",
+      "- **总耗时：** 1分5秒",
+      "",
+      "**当前会话**",
+      "- **上下文：** 100 / 200（50%）",
       "- **上下文压缩：** 2 次",
-      "- **周限：** 剩余 63%",
       "- **Git 分支：** feature/weixin-surface",
-      "- **耗时：** 1分5秒",
+      "",
+      "**账户状态**",
+      "- **周限：** 剩余 63%",
     ].join("\n"));
   });
 

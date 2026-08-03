@@ -81,9 +81,10 @@ Turn、Thread 或 Surface 关闭时清理。
 `quoted-input.ts` 把各平台已验证的回复/引用正文转换为有界、明确标记且与当前消息分离的上下文；
 引用获取仍由各 Surface 负责，不能读取 Gateway 私有历史或让引用内容参与命令解析。
 `lifecycle-presentation.ts` 统一 Telegram、飞书与微信的 Gateway 上线、Turn 开始确认和 Turn
-结束汇报信息模型、字段顺序与中文状态词；它显示当前 Provider，按 Turn 聚合统计代理捕获的全部
-模型请求，并保留 Provider 通用的 Thread
-Token/上下文指标，并只在 OpenAI Thread 显示 Fast 与 OpenAI 周限；各 Surface 只保留 HTML、
+结束汇报信息模型、字段顺序与中文状态词；结束汇报把本次运行、当前会话和账户状态依次分区，按 Turn
+聚合统计代理捕获的全部模型请求，并保留 Provider 通用的 Thread Token/上下文指标。原生 OpenAI
+鉴权的 Codex Provider 统一显示为“OpenAI 官方”，且只在该类 Thread 显示 Fast 与 OpenAI 周限；
+直接 API 的自定义提供商继续使用自身名称；各 Surface 只保留 HTML、
 CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Thread 的文本、审批和完成汇报均标注
 短 Thread ID，并继续进入原 Conversation 的有界顺序队列。
 `elapsed-duration.ts` 只把已确认的 Turn、首字延时等毫秒值或账户用量秒数格式化为三个 Surface

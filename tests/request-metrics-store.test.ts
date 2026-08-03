@@ -169,6 +169,20 @@ describe("SqliteModelRequestMetricsStore", () => {
       requestStartedAtMs: 3_000,
       responseCompletedAtMs: 4_000,
     });
+    store.record({
+      ...sample(),
+      provider: "openai",
+      transport: "websocket",
+      responseFormat: "websocket",
+      turnId: null,
+      model: "gpt-5.6-sol",
+      httpStatus: null,
+      outputTokens: 0,
+      reasoningOutputTokens: 0,
+      totalTokens: 1_000,
+      requestStartedAtMs: 5_000,
+      responseCompletedAtMs: 5_500,
+    });
 
     expect(store.threadSummary("thread-1")).toMatchObject({
       threadId: "thread-1",

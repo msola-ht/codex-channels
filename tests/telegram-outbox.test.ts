@@ -1163,14 +1163,19 @@ describe("TelegramOutbox", () => {
       [
         turnCompletedPanel,
         "",
-        "• <b>上下文：</b>24.6 K / 258 K（9.5%）",
-        "• <b>最后模型请求缓存命中：</b>2.07%",
+        "<b>本次运行：</b>",
         "• <b>模型：</b>gpt-5.6-sol · medium · Fast 开启",
-        "• <b>提供商：</b>OpenAI",
+        "• <b>提供商：</b>OpenAI 官方",
+        "• <b>最后模型请求缓存命中：</b>2.07%",
+        "",
+        "<b>当前会话：</b>",
+        "• <b>上下文：</b>24.6 K / 258 K（9.5%）",
         "• <b>上下文压缩：</b>2 次",
-        "• <b>周限：</b>剩余 58%",
         "• <b>Goal：</b>进行中 · 12.5 K / 100 K",
         "• <b>Git 分支：</b>feature/weixin-surface",
+        "",
+        "<b>账户状态：</b>",
+        "• <b>周限：</b>剩余 58%",
       ].join("\n"),
     ]);
     expect(api.sendOptions[1]).toEqual({

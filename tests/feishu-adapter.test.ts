@@ -1005,7 +1005,7 @@ describe("Feishu conversation adapter", () => {
         "工作目录：/workspace",
         "Git 分支：未检测到",
         "模型：gpt-test",
-        "提供商：OpenAI",
+        "提供商：OpenAI 官方",
         "思考强度：medium",
         "Fast 模式：开启",
         "协作模式：Default",

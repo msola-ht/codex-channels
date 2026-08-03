@@ -60,10 +60,12 @@ describe("shared Surface lifecycle presentation", () => {
       "Thread：thread-1",
       "Git 分支：feature/lifecycle",
       "模型：gpt-test",
-      "提供商：OpenAI",
+      "提供商：OpenAI 官方",
       "思考强度：medium",
       "Fast 模式：开启",
       "协作模式：Default",
+      "",
+      "账户状态：",
       "周限：剩余 63%",
     ].join("\n"));
   });
@@ -118,16 +120,21 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toBe([
       "本次运行 · 失败",
       "",
+      "本次运行：",
       "错误：失败：[已隐藏]",
-      "上下文：10 K / 100 K（10%）",
-      "最后模型请求缓存命中：75.00%",
       "模型：gpt-test · medium · Fast 开启",
-      "提供商：OpenAI",
+      "提供商：OpenAI 官方",
+      "最后模型请求缓存命中：75.00%",
+      "总耗时：1分5秒",
+      "",
+      "当前会话：",
+      "上下文：10 K / 100 K（10%）",
       "上下文压缩：2 次",
-      "周限：剩余 63%",
       "Goal：进行中 · 12.5 K / 100 K",
       "Git 分支：feature/lifecycle",
-      "耗时：1分5秒",
+      "",
+      "账户状态：",
+      "周限：剩余 63%",
     ].join("\n"));
   });
 
@@ -193,9 +200,9 @@ describe("shared Surface lifecycle presentation", () => {
 
     expect(rendered).toContain("模型请求：2 次");
     expect(rendered).toContain("模型请求累计耗时：12秒");
-    expect(rendered).toContain("本次模型请求缓存命中：75.00%");
+    expect(rendered).toContain("缓存命中：75.00%");
     expect(rendered).toContain("最后请求首字延时：640毫秒");
-    expect(rendered).toContain("综合输出速度：2.1 token/s（非推理）");
+    expect(rendered).toContain("综合输出速度：2.1 token/s（不含推理）");
     expect(rendered).toContain("综合思考速度：20 token/s（推理）");
     expect(rendered).toContain("综合生成速度：120 token/s（含推理）");
     expect(rendered).not.toContain("思考时长");
@@ -222,7 +229,7 @@ describe("shared Surface lifecycle presentation", () => {
       }),
     );
 
-    expect(rendered).toContain("输出速度：96 token/s（非推理）");
+    expect(rendered).toContain("输出速度：96 token/s（不含推理）");
     expect(rendered).not.toContain("首字延时");
     expect(rendered).not.toContain("推理输出");
     expect(rendered).not.toContain("思考速度");

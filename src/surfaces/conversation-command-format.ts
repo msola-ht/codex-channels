@@ -24,7 +24,10 @@ import {
   formatElapsedSeconds,
   formatTokensPerSecond,
 } from "./elapsed-duration.js";
-import { formatProviderLabel } from "./provider-format.js";
+import {
+  formatCodexProviderLabel,
+  formatProviderLabel,
+} from "./provider-format.js";
 
 const maximumSessionEntries = 20;
 const maximumSessionLabelCharacters = 48;
@@ -386,11 +389,11 @@ export function formatConversationUsage(
   result: Extract<ConversationCommandResult, { kind: "usage" }>,
 ): string {
   if (result.result.kind === "unsupported") {
-    return `${formatProviderLabel(result.result.provider)} 暂不支持账户用量查询。当前 Thread 的 Token 与上下文仍可通过 /status 查看。`;
+    return `${formatCodexProviderLabel(result.result.provider)} 暂不支持账户用量查询。当前 Thread 的 Token 与上下文仍可通过 /status 查看。`;
   }
   if (result.result.kind === "balance") {
     return [
-      `${formatProviderLabel(result.result.provider)} 账户余额：`,
+      `${formatCodexProviderLabel(result.result.provider)} 账户余额：`,
       `API 可用：${result.result.available ? "是" : "否"}`,
       ...(result.result.balances.length === 0
         ? ["暂无余额信息"]
@@ -427,7 +430,7 @@ export function formatConversationLimits(
   result: Extract<ConversationCommandResult, { kind: "limits" }>,
 ): string {
   if (result.result.kind === "unsupported") {
-    return `${formatProviderLabel(result.result.provider)} 暂不支持账户限额查询。可使用 /usage 查看该提供商已接入的账户信息。`;
+    return `${formatCodexProviderLabel(result.result.provider)} 暂不支持账户限额查询。可使用 /usage 查看该提供商已接入的账户信息。`;
   }
   const planType = result.result.limits.limits.find(
     (limit) => limit.planType,
@@ -476,7 +479,7 @@ export function formatConversationStatus(status: ConversationStatus): string {
     `工作目录：${status.cwd}`,
     `Git 分支：${status.gitBranch ?? "未检测到"}`,
     `模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
-    `提供商：${formatProviderLabel(status.modelProvider ?? "openai")}`,
+    `提供商：${formatCodexProviderLabel(status.modelProvider)}`,
     `思考强度：${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
     ...(usesOpenAiAccount(status.modelProvider)
       ? [`Fast 模式：${status.threadId ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭") : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`]
@@ -552,7 +555,7 @@ export function formatConversationMetrics(
         : []),
       ...(turn.outputTokensPerSecond === null
         ? []
-        : [`综合输出速度：${formatTokensPerSecond(turn.outputTokensPerSecond)}（非推理）`]),
+        : [`综合输出速度：${formatTokensPerSecond(turn.outputTokensPerSecond)}（不含推理）`]),
     );
   } else {
     lines.push("", "最近 Turn：暂无已记录请求");

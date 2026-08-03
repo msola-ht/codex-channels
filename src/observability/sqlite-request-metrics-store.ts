@@ -241,7 +241,11 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     const latestDirectApi = this.database.prepare(`
       SELECT *
       FROM model_request_metrics_enriched
-      WHERE thread_id = ? AND turn_id IS NULL AND operation = 'response'
+      WHERE thread_id = ?
+        AND turn_id IS NULL
+        AND operation = 'response'
+        AND transport = 'http'
+        AND response_format = 'json'
       ORDER BY id DESC
       LIMIT 1
     `).get(threadId) as MetricRow | undefined;

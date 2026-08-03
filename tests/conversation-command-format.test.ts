@@ -141,7 +141,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("模型请求：3 次（异常 1 次）");
     expect(rendered).toContain("模型请求累计耗时：1分5秒");
     expect(rendered).toContain("缓存命中率：80.00%");
-    expect(rendered).toContain("综合输出速度：60 token/s（非推理）");
+    expect(rendered).toContain("综合输出速度：60 token/s（不含推理）");
     expect(rendered).toContain("最近直接 API：");
     expect(rendered).toContain("提供商：bltcy");
     expect(rendered).toContain("状态：已完成 · HTTP 200");

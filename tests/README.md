@@ -104,8 +104,9 @@
   Schema 裁剪、响应上限和错误脱敏；Thread Token/上下文对 Provider 通用，OpenAI Fast 与周限
   不进入 DeepSeek 状态或完成卡片。
 - 全 Provider 同一 Turn 多次模型响应的请求次数、累计模型耗时、缓存与文本/函数/自定义工具参数
-  综合非推理输出速度；DeepSeek 最后请求首字延时和整轮综合思考/生成速度，以及 OpenAI 即使收到
-  推理摘要计时也只保留非推理输出指标；当前 Thread `/metrics` 的最近 Turn 聚合和最近直接 API
+  不含推理的综合输出速度；DeepSeek 最后请求首字延时和整轮综合思考/生成速度，以及 OpenAI 即使收到
+  推理摘要计时也只保留不含推理的输出指标；当前 Thread `/metrics` 的最近 Turn 聚合、只选择 HTTP
+  JSON 调用记录的最近直接 API
   分栏查询；自动回环
   代理的精确 `/responses`、`/responses/compact`
   与只读 `/models` 路径、HTTP/SSE 与 WebSocket、上游

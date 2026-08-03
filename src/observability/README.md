@@ -18,11 +18,13 @@
   运行中或并发重建均失败关闭。
 - `sqlite-request-metrics-store.ts`：把脱敏后的 Provider、模型、状态、HTTP/传输格式、Usage、上游
   时间戳与本机流式阶段时间戳
-  写入独立 `request-metrics.sqlite3`。数据库使用严格 Schema v2、`0600` 文件权限，只接受当前
+  写入独立 `request-metrics.sqlite3`。当前 Thread 的独立 API 查询只选择调用适配器产生的
+  HTTP JSON 记录，不能把缺少 Turn 元数据的 Codex WebSocket/SSE 代理请求误分类。数据库使用
+  严格 Schema v2、`0600` 文件权限，只接受当前
   Schema；首次初始化在单一事务内完成；使用 WAL 允许后续只读查询与采集并行，锁等待限制为
   10 ms；记录保留 30 天，以 100,000 条为清理目标，每 100 次写入分批清理，两个清理周期之间
   最多短暂超出 99 条。`model_request_metrics_enriched` View 统一派生总耗时、TTFT、推理/输出/生成
-  阶段耗时、收尾间隔、缓存与非推理 Token、缓存命中率、三类生成速度，以及按当次价格快照计算的
+  阶段耗时、收尾间隔、缓存与不含推理的 Token、缓存命中率、三类生成速度，以及按当次价格快照计算的
   输入/缓存/输出和总费用。价格以每百万 Token 的十亿分之一币种单位保存，费用同样使用十亿分之一
   币种单位，避免浮点金额落库和历史价格回算。内部读取限制为每次最多 500 条；精确 Thread 查询
   只返回最近 Turn 聚合与最近一条无 Turn 的直接 API 请求，由 Bootstrap 映射到 Application 的
