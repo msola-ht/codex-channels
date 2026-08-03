@@ -190,7 +190,7 @@ export function createTurnCompletedPresentation(
       || event.timing.requestCachedInputTokens === undefined
     ) {
       fallbackCacheField = {
-        label: "最后模型请求缓存命中",
+        label: "最近请求缓存命中率",
         value: formatCacheHitRate(
           event.tokenUsage.last.inputTokens,
           event.tokenUsage.last.cachedInputTokens,
@@ -248,7 +248,7 @@ export function createTurnCompletedPresentation(
     && event.timing.requestCachedInputTokens !== undefined
   ) {
     runFields.push({
-      label: "缓存命中",
+      label: "本次请求缓存命中率",
       value: formatCacheHitRate(
         event.timing.requestInputTokens,
         event.timing.requestCachedInputTokens ?? 0,

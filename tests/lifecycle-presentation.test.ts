@@ -124,7 +124,7 @@ describe("shared Surface lifecycle presentation", () => {
       "错误：失败：[已隐藏]",
       "模型：gpt-test · medium · Fast 开启",
       "提供商：OpenAI 官方",
-      "最后模型请求缓存命中：75.00%",
+      "最近请求缓存命中率：75.00%",
       "总耗时：1分5秒",
       "",
       "当前会话：",
@@ -200,7 +200,7 @@ describe("shared Surface lifecycle presentation", () => {
 
     expect(rendered).toContain("模型请求：2 次");
     expect(rendered).toContain("模型请求累计耗时：12秒");
-    expect(rendered).toContain("缓存命中：75.00%");
+    expect(rendered).toContain("本次请求缓存命中率：75.00%");
     expect(rendered).toContain("最后请求首字延时：640毫秒");
     expect(rendered).toContain("综合输出速度：2.1 token/s（不含推理）");
     expect(rendered).toContain("综合思考速度：20 token/s（推理）");

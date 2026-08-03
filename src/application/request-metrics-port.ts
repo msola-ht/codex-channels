@@ -12,6 +12,7 @@ export interface TurnRequestMetricsSummary {
 
 export interface DirectApiRequestMetricsSummary {
   provider: string;
+  providerName?: string;
   model: string | null;
   status: "completed" | "failed" | "incomplete" | "unknown";
   httpStatus: number | null;

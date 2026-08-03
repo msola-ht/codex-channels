@@ -565,8 +565,8 @@ export function formatConversationMetrics(
     lines.push(
       "",
       "最近直接 API：",
-      `提供商：${formatProviderLabel(direct.provider)}`,
-      `模型：${direct.model ?? "未知"}`,
+      `API 提供商：${formatProviderLabel(direct.providerName ?? direct.provider)}`,
+      `调用模型：${direct.model ?? "未知"}`,
       `状态：${formatRequestStatus(direct.status)}${direct.httpStatus === null ? "" : ` · HTTP ${direct.httpStatus}`}`,
       ...(direct.requestDurationMs === null
         ? []

@@ -126,7 +126,7 @@ describe("WeixinOutbox", () => {
       text: [
         "**图片识别完成**",
         "- API 提供商：BLTCY",
-        "- 识别模型：gpt-5.6-luna",
+        "- 调用模型：gpt-5.6-luna",
         "- 视觉 API 耗时：18秒",
         "- Token 用量：输入 9,433 · 输出 483 · 总计 9,916",
         "",

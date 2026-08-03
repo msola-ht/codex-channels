@@ -252,6 +252,11 @@ export class GatewayApplication {
         forThread: (threadId) => {
           const summary = metricsStore.threadSummary(threadId);
           const direct = summary.latestDirectApi;
+          const providerName = direct === null
+            ? undefined
+            : config.apiProviders.find(
+                (candidate) => candidate.id === direct.provider,
+              )?.name;
           return {
             threadId: summary.threadId,
             latestTurn: summary.latestTurn,
@@ -259,6 +264,7 @@ export class GatewayApplication {
               ? null
               : {
                   provider: direct.provider,
+                  ...(providerName === undefined ? {} : { providerName }),
                   model: direct.model,
                   status: direct.status,
                   httpStatus: direct.httpStatus,

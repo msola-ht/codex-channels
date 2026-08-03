@@ -47,7 +47,7 @@ export function formatVisionCompleted(details: {
   return [
     "图片识别完成",
     `- API 提供商：${details.provider}`,
-    `- 识别模型：${details.model}`,
+    `- 调用模型：${details.model}`,
     ...(details.elapsedMs === undefined
       ? []
       : [`- 视觉 API 耗时：${formatElapsedDuration(details.elapsedMs)}`]),

@@ -125,6 +125,7 @@ describe("provider-aware conversation command formatting", () => {
         },
         latestDirectApi: {
           provider: "bltcy",
+          providerName: "BLTCY",
           model: "gpt-5.6-luna",
           status: "completed",
           httpStatus: 200,
@@ -143,7 +144,8 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("缓存命中率：80.00%");
     expect(rendered).toContain("综合输出速度：60 token/s（不含推理）");
     expect(rendered).toContain("最近直接 API：");
-    expect(rendered).toContain("提供商：bltcy");
+    expect(rendered).toContain("API 提供商：BLTCY");
+    expect(rendered).toContain("调用模型：gpt-5.6-luna");
     expect(rendered).toContain("状态：已完成 · HTTP 200");
   });
 });
