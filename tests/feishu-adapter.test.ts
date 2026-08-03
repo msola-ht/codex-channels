@@ -1079,6 +1079,74 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent).toEqual([]);
   });
 
+  it("rejects copied Feishu message links before reading replies or starting a Turn", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn();
+    const readQuotedText = vi.fn();
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { quietWindowMs: 0, readQuotedText },
+    );
+
+    await adapter.handle({
+      ...message,
+      parentId: "om_parent",
+      text: [
+        "看看这条消息：",
+        "https://applink.feishu.cn/client/message/link/open?token=sensitive-token",
+      ].join("\n"),
+    });
+    await fixture.outbox.close();
+
+    expect(readQuotedText).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+    expect(fixture.sent).toEqual([{
+      chatId: "oc_chat",
+      text: [
+        "暂不支持通过飞书复制的消息链接读取内容。",
+        "请直接回复目标消息，再发送你的要求。",
+      ].join("\n"),
+    }]);
+    expect(fixture.sent[0]?.text).not.toContain("sensitive-token");
+  });
+
+  it("does not reject other Feishu AppLinks or lookalike hosts", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+    );
+    const inputs = [
+      "https://applink.feishu.cn/client/web_url/open?url=https%3A%2F%2Fexample.com",
+      "https://applink.feishu.cn.example.com/client/message/link/open?token=value",
+      "https://applink.feishu.cn/client/message/link/open",
+    ];
+
+    for (const text of inputs) {
+      await adapter.handle({ ...message, text });
+    }
+    await fixture.outbox.close();
+
+    expect(submit).toHaveBeenCalledTimes(inputs.length);
+    for (const text of inputs) {
+      expect(submit).toHaveBeenCalledWith(message.target, text);
+    }
+    expect(fixture.sent).toEqual([]);
+  });
+
   it("resolves a Feishu reply parent as separated quoted context", async () => {
     const fixture = createOutbox();
     const submit = vi.fn(async () => ({

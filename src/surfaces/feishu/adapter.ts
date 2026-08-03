@@ -60,6 +60,10 @@ import {
 } from "./renderer.js";
 
 const maximumInboundImages = 4;
+const unsupportedMessageLinkText = [
+  "暂不支持通过飞书复制的消息链接读取内容。",
+  "请直接回复目标消息，再发送你的要求。",
+].join("\n");
 
 export class FeishuConversationAdapter {
   private readonly commands: ConversationCommandService;
@@ -206,6 +210,13 @@ export class FeishuConversationAdapter {
         this.notifyMarkdown(
           message.target.conversationId,
           renderFeishuCommandResult(result),
+        );
+        return;
+      }
+      if (containsFeishuCopiedMessageLink(message.text)) {
+        this.notifyText(
+          message.target.conversationId,
+          unsupportedMessageLinkText,
         );
         return;
       }
@@ -704,6 +715,20 @@ export class FeishuConversationAdapter {
       throw new FeishuOutputQueueError();
     }
   }
+}
+
+function containsFeishuCopiedMessageLink(text: string): boolean {
+  const candidates = text.match(/https:\/\/[^\s<>"'`]+/giu) ?? [];
+  return candidates.some((candidate) => {
+    try {
+      const url = new URL(candidate);
+      return url.hostname === "applink.feishu.cn"
+        && url.pathname === "/client/message/link/open"
+        && url.searchParams.has("token");
+    } catch {
+      return false;
+    }
+  });
 }
 
 function renderCommandCenterInitialChoices(
