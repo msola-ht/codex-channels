@@ -82,6 +82,12 @@ export {
   type PermissionQueryPort,
 } from "./permission-port.js";
 export {
+  type DirectApiRequestMetricsSummary,
+  type RequestMetricsQueryPort,
+  type ThreadRequestMetricsSummary,
+  type TurnRequestMetricsSummary,
+} from "./request-metrics-port.js";
+export {
   type GoalStatus,
   type ReviewStarted,
   type ReviewTarget,

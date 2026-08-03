@@ -52,6 +52,7 @@ export const feishuCommandCenterActions = [
   "status",
   "fast",
   "usage",
+  "metrics",
   "limits",
   "model",
   "effort",
@@ -592,6 +593,7 @@ export function renderFeishuCommandCenterCard(
       actionRow(token, [
         ["Fast", "fast", "primary"],
         ["账户用量", "usage", "default"],
+        ["请求指标", "metrics", "default"],
         ["额度", "limits", "default"],
       ]),
       sectionTitle("模型与工作区"),

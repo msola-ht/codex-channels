@@ -1058,6 +1058,11 @@ describe("ConversationCore", () => {
       threadId: "thread-1",
       turnId: "turn-1",
       requestStartedAtMs: 1_100,
+      requestDurationMs: 2_000,
+      inputTokens: 100,
+      cachedInputTokens: 80,
+      outputTokens: 30,
+      reasoningOutputTokens: 10,
       ttftMs: 300,
       thinkingDurationMs: 600,
       outputDurationMs: 800,
@@ -1068,6 +1073,11 @@ describe("ConversationCore", () => {
       threadId: "thread-1",
       turnId: "turn-1",
       requestStartedAtMs: 1_200,
+      requestDurationMs: 1_000,
+      inputTokens: 200,
+      cachedInputTokens: 160,
+      outputTokens: 60,
+      reasoningOutputTokens: 40,
       ttftMs: 250,
       thinkingDurationMs: 400,
       outputDurationMs: 500,
@@ -1104,16 +1114,21 @@ describe("ConversationCore", () => {
     ) as Extract<OutputEvent, { type: "turn.completed" }> | undefined;
     expect(completed).toMatchObject({
       timing: {
+        modelRequestCount: 2,
+        modelRequestDurationMs: 3_000,
+        requestInputTokens: 300,
+        requestCachedInputTokens: 240,
+        requestOutputTokens: 90,
         ttftMs: 250,
-        outputDurationMs: 500,
-        thinkingDurationMs: 400,
-        nonReasoningOutputTokens: 20,
-        reasoningTokens: 40,
+        outputDurationMs: 1_300,
+        thinkingDurationMs: 1_000,
+        nonReasoningOutputTokens: 40,
+        reasoningTokens: 50,
       },
     });
-    expect(completed?.timing?.outputTokensPerSecond).toBeCloseTo(40);
-    expect(completed?.timing?.thinkingTokensPerSecond).toBeCloseTo(100);
-    expect(completed?.timing?.generationTokensPerSecond).toBeCloseTo(60 / 0.9);
+    expect(completed?.timing?.outputTokensPerSecond).toBeCloseTo(40 / 1.3);
+    expect(completed?.timing?.thinkingTokensPerSecond).toBeCloseTo(50);
+    expect(completed?.timing?.generationTokensPerSecond).toBeCloseTo(90 / 2.3);
   });
 
   it("keeps only non-reasoning output timing for OpenAI", async () => {
@@ -1174,6 +1189,9 @@ describe("ConversationCore", () => {
       threadId: "thread-openai",
       turnId: "turn-openai",
       requestStartedAtMs: 1_100,
+      requestDurationMs: 2_000,
+      outputTokens: 30,
+      reasoningOutputTokens: 10,
       ttftMs: 200,
       thinkingDurationMs: 500,
       outputDurationMs: 1_000,
@@ -1184,6 +1202,9 @@ describe("ConversationCore", () => {
       threadId: "thread-openai",
       turnId: "turn-openai",
       requestStartedAtMs: 1_200,
+      requestDurationMs: 1_500,
+      outputTokens: 60,
+      reasoningOutputTokens: 40,
       ttftMs: 300,
       thinkingDurationMs: 400,
       outputDurationMs: 1_000,
@@ -1218,7 +1239,10 @@ describe("ConversationCore", () => {
       (event) => event.type === "turn.completed",
     ) as Extract<OutputEvent, { type: "turn.completed" }> | undefined;
     expect(completed?.timing).toMatchObject({
-      nonReasoningOutputTokens: 20,
+      modelRequestCount: 2,
+      modelRequestDurationMs: 3_500,
+      requestOutputTokens: 90,
+      nonReasoningOutputTokens: 40,
       outputTokensPerSecond: 20,
     });
     expect(completed?.timing?.ttftMs).toBeUndefined();

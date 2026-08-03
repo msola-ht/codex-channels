@@ -13,6 +13,7 @@ import {
   formatConversationCommandOutcome,
   formatConversationGoal,
   formatConversationLimits,
+  formatConversationMetrics,
   formatConversationMcp,
   formatConversationModels,
   formatConversationPermissions,
@@ -130,6 +131,8 @@ export function renderFeishuCommandResult(
       return formatConversationPlugins(result);
     case "usage":
       return formatConversationUsage(result);
+    case "metrics":
+      return formatConversationMetrics(result);
     case "limits":
       return formatConversationLimits(result);
     case "permissions":

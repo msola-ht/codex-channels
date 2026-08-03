@@ -176,14 +176,19 @@ export function createTurnCompletedPresentation(
           ? formatTokenCount(current)
           : `${formatTokenCount(current)} / ${formatTokenCount(capacity)}（${formatPercent(Math.max(0, current / capacity * 100))}）`,
       },
-      {
-        label: "最近请求缓存命中",
+    );
+    if (
+      event.timing?.requestInputTokens === undefined
+      || event.timing.requestCachedInputTokens === undefined
+    ) {
+      fields.push({
+        label: "最后模型请求缓存命中",
         value: formatCacheHitRate(
           event.tokenUsage.last.inputTokens,
           event.tokenUsage.last.cachedInputTokens,
         ),
-      },
-    );
+      });
+    }
   }
   if (event.model) {
     fields.push({
@@ -215,27 +220,57 @@ export function createTurnCompletedPresentation(
       value: `${goalStatusLabel(event.goal.status)} · ${formatGoalTokens(event.goal)}`,
     });
   }
+  if (event.timing?.modelRequestCount !== undefined) {
+    fields.push({
+      label: "模型请求",
+      value: `${event.timing.modelRequestCount} 次`,
+    });
+  }
+  if (event.timing?.modelRequestDurationMs !== undefined) {
+    fields.push({
+      label: "模型请求累计耗时",
+      value: formatElapsedDuration(event.timing.modelRequestDurationMs),
+    });
+  }
+  if (
+    event.timing?.requestInputTokens !== undefined
+    && event.timing.requestCachedInputTokens !== undefined
+  ) {
+    fields.push({
+      label: "本次模型请求缓存命中",
+      value: formatCacheHitRate(
+        event.timing.requestInputTokens,
+        event.timing.requestCachedInputTokens ?? 0,
+      ),
+    });
+  }
   if (event.timing?.ttftMs !== undefined) {
     fields.push({
-      label: "首字延时",
+      label: "最后请求首字延时",
       value: formatElapsedDuration(event.timing.ttftMs),
     });
   }
   if (event.timing?.outputTokensPerSecond !== undefined) {
     fields.push({
-      label: "输出速度",
+      label: event.timing.modelRequestCount === undefined
+        ? "输出速度"
+        : "综合输出速度",
       value: `${formatTokensPerSecond(event.timing.outputTokensPerSecond)}（非推理）`,
     });
   }
   if (event.timing?.thinkingTokensPerSecond !== undefined) {
     fields.push({
-      label: "思考速度",
+      label: event.timing.modelRequestCount === undefined
+        ? "思考速度"
+        : "综合思考速度",
       value: `${formatTokensPerSecond(event.timing.thinkingTokensPerSecond)}（推理）`,
     });
   }
   if (event.timing?.generationTokensPerSecond !== undefined) {
     fields.push({
-      label: "生成速度",
+      label: event.timing.modelRequestCount === undefined
+        ? "生成速度"
+        : "综合生成速度",
       value: `${formatTokensPerSecond(event.timing.generationTokensPerSecond)}（含推理）`,
     });
   }

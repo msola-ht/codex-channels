@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatConversationLimits,
+  formatConversationMetrics,
   formatConversationModels,
   formatConversationStatus,
   formatConversationUsage,
@@ -104,6 +105,46 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("Codex 有效上下文窗口：1.05 M");
     expect(rendered).not.toContain("Fast 模式");
     expect(rendered).not.toContain("周限");
+  });
+
+  it("renders latest Turn aggregation and direct API metrics separately", () => {
+    const rendered = formatConversationMetrics({
+      kind: "metrics",
+      summary: {
+        threadId: "thread-1",
+        latestTurn: {
+          turnId: "turn-1",
+          requestCount: 3,
+          unsuccessfulRequestCount: 1,
+          requestDurationMs: 65_000,
+          inputTokens: 30_000,
+          cachedInputTokens: 24_000,
+          outputTokens: 900,
+          reasoningOutputTokens: 300,
+          outputTokensPerSecond: 60.25,
+        },
+        latestDirectApi: {
+          provider: "bltcy",
+          model: "gpt-5.6-luna",
+          status: "completed",
+          httpStatus: 200,
+          requestDurationMs: 11_590,
+          inputTokens: 10_034,
+          cachedInputTokens: 0,
+          outputTokens: 343,
+          reasoningOutputTokens: 55,
+          totalTokens: 10_377,
+        },
+      },
+    });
+
+    expect(rendered).toContain("模型请求：3 次（异常 1 次）");
+    expect(rendered).toContain("模型请求累计耗时：1分5秒");
+    expect(rendered).toContain("缓存命中率：80.00%");
+    expect(rendered).toContain("综合输出速度：60 token/s（非推理）");
+    expect(rendered).toContain("最近直接 API：");
+    expect(rendered).toContain("提供商：bltcy");
+    expect(rendered).toContain("状态：已完成 · HTTP 200");
   });
 });
 

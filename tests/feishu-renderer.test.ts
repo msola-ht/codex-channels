@@ -384,7 +384,7 @@ describe("Feishu output renderer", () => {
       "**本次运行 · 已完成**",
       "",
       "- **上下文：** 100 / 200（50%）",
-      "- **最近请求缓存命中：** 50.00%",
+      "- **最后模型请求缓存命中：** 50.00%",
       "- **模型：** gpt-test · medium · Fast 开启",
       "- **提供商：** OpenAI",
       "- **上下文压缩：** 2 次",
@@ -679,6 +679,7 @@ describe("Feishu output renderer", () => {
     expect(renderFeishuOutput({
       type: "vision.completed",
       target,
+      provider: "BLTCY",
       model: "gpt-5.6-luna",
       elapsedMs: 18_000,
       usage: {
@@ -688,6 +689,7 @@ describe("Feishu output renderer", () => {
       },
     })).toBe([
       "图片识别完成",
+      "- API 提供商：BLTCY",
       "- 识别模型：gpt-5.6-luna",
       "- 视觉 API 耗时：18秒",
       "- Token 用量：输入 9,433 · 输出 483 · 总计 9,916",

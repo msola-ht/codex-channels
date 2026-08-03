@@ -72,6 +72,11 @@ export interface ThreadGoal {
 }
 
 export interface TurnOutputTiming {
+  modelRequestCount?: number;
+  modelRequestDurationMs?: number;
+  requestInputTokens?: number;
+  requestCachedInputTokens?: number;
+  requestOutputTokens?: number;
   ttftMs?: number;
   outputDurationMs?: number;
   thinkingDurationMs?: number;
@@ -189,6 +194,7 @@ export type OutputEvent =
   | {
       type: "vision.completed";
       target: ConversationTarget;
+      provider: string;
       model: string;
       elapsedMs?: number;
       upstreamDurationMs?: number;

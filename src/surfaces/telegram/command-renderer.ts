@@ -10,6 +10,7 @@ import {
   formatConversationCommandOutcome,
   formatConversationGoal,
   formatConversationLimits,
+  formatConversationMetrics,
   formatConversationMcp,
   formatConversationModels,
   formatConversationPermissions,
@@ -77,6 +78,9 @@ export async function renderTelegramCommandResult(
       return;
     case "usage":
       await replyTelegramPanel(context, formatConversationUsage(result));
+      return;
+    case "metrics":
+      await replyTelegramPanel(context, formatConversationMetrics(result));
       return;
     case "limits":
       await replyTelegramPanel(context, formatConversationLimits(result));

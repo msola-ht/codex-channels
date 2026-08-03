@@ -55,6 +55,7 @@ describe("Feishu command center", () => {
       "status",
       "fast",
       "usage",
+      "metrics",
       "limits",
       "model",
       "effort",

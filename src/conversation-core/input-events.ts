@@ -56,6 +56,11 @@ export type ConversationInputEvent =
       threadId: string;
       turnId: string;
       requestStartedAtMs: number;
+      requestDurationMs: number;
+      inputTokens?: number;
+      cachedInputTokens?: number;
+      outputTokens?: number;
+      reasoningOutputTokens?: number;
       ttftMs?: number;
       thinkingDurationMs?: number;
       outputDurationMs?: number;

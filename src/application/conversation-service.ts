@@ -41,6 +41,10 @@ import type {
   CollaborationModeSelectionService,
   CollaborationModeState,
 } from "./collaboration-mode-service.js";
+import type {
+  RequestMetricsQueryPort,
+  ThreadRequestMetricsSummary,
+} from "./request-metrics-port.js";
 import {
   replaceLocalImagesWithVisionContext,
   visionUserPrompt,
@@ -181,6 +185,7 @@ export interface ConversationUseCases {
   accountRateLimits(): Promise<AccountRateLimits>;
   providerAccountUsage(target: ConversationTarget): Promise<ProviderAccountUsage>;
   providerAccountLimits(target: ConversationTarget): Promise<ProviderAccountLimits>;
+  requestMetrics(target: ConversationTarget): ThreadRequestMetricsSummary | null;
   listPermissionProfiles(target: ConversationTarget): Promise<PermissionProfileOption[]>;
   initializeProjectRules(target: ConversationTarget): Promise<ProjectRulesResult>;
   checkProjectRules(target: ConversationTarget): Promise<ProjectRulesResult>;
@@ -210,7 +215,14 @@ export class ConversationService implements ConversationUseCases {
     private readonly transfers?: ConversationTransferPort,
     private readonly providerAccounts?: ProviderAccountQueryPort,
     private readonly vision?: VisionRecognitionPort,
+    private readonly requestMetricsQuery?: RequestMetricsQueryPort,
   ) {}
+
+  requestMetrics(target: ConversationTarget): ThreadRequestMetricsSummary | null {
+    const threadId = this.router.current(target)?.threadId;
+    if (!threadId || !this.requestMetricsQuery) return null;
+    return this.requestMetricsQuery.forThread(threadId);
+  }
 
   submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission> {
     let input: TurnInput[];
@@ -313,6 +325,7 @@ export class ConversationService implements ConversationUseCases {
             },
           });
           this.core.visionCompleted(target, {
+            provider: result.provider,
             model: result.model,
             ...(result.elapsedMs === undefined
               ? {}

@@ -148,10 +148,11 @@ export class GatewayApplication {
     );
     this.threadState = new ThreadStateSynchronizer(this.router);
     this.core = new ConversationCore(this.router, this.output);
+    const metricsStore = new SqliteModelRequestMetricsStore(
+      modelRequestMetricsDatabasePath(config.stateDatabasePath),
+    );
     const metricsWriter = new BufferedModelRequestMetricsWriter(
-      new SqliteModelRequestMetricsStore(
-        modelRequestMetricsDatabasePath(config.stateDatabasePath),
-      ),
+      metricsStore,
       (error) => logger.warn({ err: error }, "模型请求指标后台写入失败"),
     );
     this.providerMetrics = new ProviderMetricsComposition({
@@ -247,6 +248,30 @@ export class GatewayApplication {
       },
       providerAccounts,
       vision,
+      {
+        forThread: (threadId) => {
+          const summary = metricsStore.threadSummary(threadId);
+          const direct = summary.latestDirectApi;
+          return {
+            threadId: summary.threadId,
+            latestTurn: summary.latestTurn,
+            latestDirectApi: direct === null
+              ? null
+              : {
+                  provider: direct.provider,
+                  model: direct.model,
+                  status: direct.status,
+                  httpStatus: direct.httpStatus,
+                  requestDurationMs: direct.requestDurationMs,
+                  inputTokens: direct.inputTokens,
+                  cachedInputTokens: direct.cachedInputTokens,
+                  outputTokens: direct.outputTokens,
+                  reasoningOutputTokens: direct.reasoningOutputTokens,
+                  totalTokens: direct.totalTokens,
+                },
+          };
+        },
+      },
     );
     this.output.subscribe("conversation-follow-up", async (event) => {
       if (event.type !== "turn.completed") {

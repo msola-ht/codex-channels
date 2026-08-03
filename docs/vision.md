@@ -41,6 +41,8 @@ Telegram 转成兼容 HTML、微信转成富文本。收齐时先显示“正在
 `usage.input_tokens`、`usage.output_tokens` 或 `usage.total_tokens` 时按实际字段显示 Token 用量，
 缺失字段不估算。同一份脱敏请求指标会写入独立模型指标库；已有 Thread 时关联该 Thread，视觉调用
 发生在 Codex Turn 创建之前，因此不伪造 `turn_id`。
+完成消息同时显示所选第三方 API 提供商名称；`/metrics` 会把最近一次视觉调用单独列为“直接 API”，
+不混入最近 Turn 的模型请求累计。
 
 外部视觉识别失败后，可以在五分钟内发送 `/vision retry`，复用当前渠道、Conversation 和 Actor
 最近一次失败任务的原要求与临时图片，不需要重新上传。重试开始时即消费该记录；如果上游再次失败，

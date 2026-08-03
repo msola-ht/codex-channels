@@ -70,12 +70,15 @@ App Server 服务会共同重建受监管实例。
 ## 用量与运行统计
 
 - `/status` 的 Token、有效上下文窗口、缓存和压缩次数来自当前 Thread，不代表账户余额。
-- Turn 完成摘要始终可按实际响应展示非推理输出速度；DeepSeek 额外展示可观测的首字延时、思考
-  速度和含推理生成速度。文本、函数调用参数和自定义工具参数增量都计入非推理输出时间窗。
+- Turn 完成摘要按同一 Turn 的全部模型请求聚合请求次数、累计模型耗时、缓存命中与非推理输出
+  速度；DeepSeek 额外展示最后一次请求的可观测首字延时，以及整轮综合思考速度和含推理生成速度。
+  文本、函数调用参数和自定义工具参数增量都计入非推理输出时间窗。
 - OpenAI 的隐藏推理没有可靠计时流，因此不展示首字延时、推理 Token、思考速度或含推理生成
   速度；这些字段也不会通过推理摘要时间进行估算。
 - OpenAI Fast 和周限不会显示在 DeepSeek Thread 上。
 - `/usage` 在 OpenAI Thread 中显示 Codex Token 汇总，在 DeepSeek Thread 中调用官方余额接口。
+- `/metrics` 从独立指标库读取当前 Thread 最近 Turn 的请求累计和最近一次直接 API 请求；输入量是
+  多次请求的累计值，不表示当前上下文占用。
 - `/limits` 当前只支持 OpenAI；DeepSeek 不会回退显示 OpenAI 限额。
 - DeepSeek 不支持 Fast，执行 `/fast on` 或 `/fast off` 会明确拒绝。
 

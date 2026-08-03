@@ -35,6 +35,14 @@ interface TurnTimingState {
   modelGenerationDurationMs?: number;
   modelTtftMs?: number;
   modelRequestStartedAtMs?: number;
+  modelRequestCount: number;
+  modelRequestDurationMs: number;
+  modelInputTokens?: number;
+  modelCachedInputTokens?: number;
+  modelInputUsageCount: number;
+  modelCachedInputUsageCount: number;
+  modelOutputTokens?: number;
+  modelReasoningOutputTokens?: number;
   finalItemDeltas: Map<string, { firstAtMs: number; lastAtMs: number }>;
 }
 
@@ -98,6 +106,7 @@ export class ConversationCore {
   visionCompleted(
     target: ConversationTarget,
     details: {
+      provider: string;
       model: string;
       elapsedMs?: number;
       upstreamDurationMs?: number;
@@ -225,6 +234,10 @@ export class ConversationCore {
       case "turn.started": {
         this.timingByThread.set(event.threadId, {
           turnId: event.turnId,
+          modelRequestCount: 0,
+          modelRequestDurationMs: 0,
+          modelInputUsageCount: 0,
+          modelCachedInputUsageCount: 0,
           finalItemDeltas: new Map(),
           ...(event.receivedAtMs === undefined
             ? {}
@@ -313,6 +326,38 @@ export class ConversationCore {
       }
       case "turn.modelTiming.updated": {
         const timing = this.timingByThread.get(event.threadId);
+        if (timing && timing.turnId === event.turnId) {
+          timing.modelRequestCount += 1;
+          timing.modelRequestDurationMs += event.requestDurationMs;
+          if (event.inputTokens !== undefined) {
+            timing.modelInputTokens = (timing.modelInputTokens ?? 0) + event.inputTokens;
+            timing.modelInputUsageCount += 1;
+          }
+          if (event.cachedInputTokens !== undefined) {
+            timing.modelCachedInputTokens =
+              (timing.modelCachedInputTokens ?? 0) + event.cachedInputTokens;
+            timing.modelCachedInputUsageCount += 1;
+          }
+          if (event.outputTokens !== undefined) {
+            timing.modelOutputTokens = (timing.modelOutputTokens ?? 0) + event.outputTokens;
+          }
+          if (event.reasoningOutputTokens !== undefined) {
+            timing.modelReasoningOutputTokens =
+              (timing.modelReasoningOutputTokens ?? 0) + event.reasoningOutputTokens;
+          }
+          if (event.thinkingDurationMs !== undefined) {
+            timing.thinkingDurationMs =
+              (timing.thinkingDurationMs ?? 0) + event.thinkingDurationMs;
+          }
+          if (event.outputDurationMs !== undefined) {
+            timing.modelOutputDurationMs =
+              (timing.modelOutputDurationMs ?? 0) + event.outputDurationMs;
+          }
+          if (event.generationDurationMs !== undefined) {
+            timing.modelGenerationDurationMs =
+              (timing.modelGenerationDurationMs ?? 0) + event.generationDurationMs;
+          }
+        }
         if (
           timing
           && timing.turnId === event.turnId
@@ -323,19 +368,7 @@ export class ConversationCore {
         ) {
           timing.modelRequestStartedAtMs = event.requestStartedAtMs;
           delete timing.modelTtftMs;
-          delete timing.thinkingDurationMs;
-          delete timing.modelOutputDurationMs;
-          delete timing.modelGenerationDurationMs;
           if (event.ttftMs !== undefined) timing.modelTtftMs = event.ttftMs;
-          if (event.thinkingDurationMs !== undefined) {
-            timing.thinkingDurationMs = event.thinkingDurationMs;
-          }
-          if (event.outputDurationMs !== undefined) {
-            timing.modelOutputDurationMs = event.outputDurationMs;
-          }
-          if (event.generationDurationMs !== undefined) {
-            timing.modelGenerationDurationMs = event.generationDurationMs;
-          }
         }
         return;
       }
@@ -607,6 +640,23 @@ export class ConversationCore {
       return undefined;
     }
     const result: TurnOutputTiming = {};
+    if (timing.modelRequestCount > 0) {
+      result.modelRequestCount = timing.modelRequestCount;
+      result.modelRequestDurationMs = timing.modelRequestDurationMs;
+      if (timing.modelInputTokens !== undefined) {
+        result.requestInputTokens = timing.modelInputTokens;
+      }
+      if (
+        timing.modelCachedInputTokens !== undefined
+        && timing.modelInputUsageCount > 0
+        && timing.modelCachedInputUsageCount === timing.modelInputUsageCount
+      ) {
+        result.requestCachedInputTokens = timing.modelCachedInputTokens;
+      }
+      if (timing.modelOutputTokens !== undefined) {
+        result.requestOutputTokens = timing.modelOutputTokens;
+      }
+    }
     if (detailedTiming && timing.modelTtftMs !== undefined) {
       result.ttftMs = timing.modelTtftMs;
     }
@@ -644,7 +694,13 @@ export class ConversationCore {
     }
     let nonReasoningOutputTokens: number | undefined;
     let reasoningTokens: number | undefined;
-    if (this.usageTurnByThread.get(threadId) === turnId) {
+    if (timing.modelOutputTokens !== undefined) {
+      reasoningTokens = Math.max(0, timing.modelReasoningOutputTokens ?? 0);
+      nonReasoningOutputTokens = Math.max(
+        0,
+        timing.modelOutputTokens - reasoningTokens,
+      );
+    } else if (this.usageTurnByThread.get(threadId) === turnId) {
       const current = this.usageByThread.get(threadId);
       if (current) {
         nonReasoningOutputTokens = Math.max(
@@ -700,7 +756,8 @@ export class ConversationCore {
       }
     }
     if (
-      result.ttftMs === undefined
+      result.modelRequestCount === undefined
+      && result.ttftMs === undefined
       && result.outputDurationMs === undefined
       && result.thinkingDurationMs === undefined
     ) {

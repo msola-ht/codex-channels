@@ -129,6 +129,71 @@ describe("SqliteModelRequestMetricsStore", () => {
     });
   });
 
+  it("summarizes the latest Turn and latest direct API request for one Thread", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    store.record(sample());
+    store.record({
+      ...sample(),
+      inputTokens: 2_000,
+      cachedInputTokens: 1_600,
+      outputTokens: 200,
+      reasoningOutputTokens: 50,
+      totalTokens: 2_200,
+      requestStartedAtMs: 2_000,
+      firstTokenAtMs: 2_100,
+      firstReasoningDeltaAtMs: 2_100,
+      lastReasoningDeltaAtMs: 2_200,
+      firstOutputDeltaAtMs: 2_300,
+      lastOutputDeltaAtMs: 2_600,
+      responseCompletedAtMs: 2_700,
+    });
+    store.record({
+      ...sample(),
+      provider: "bltcy",
+      turnId: null,
+      model: "gpt-5.6-luna",
+      responseFormat: "json",
+      inputTokens: 10_000,
+      cachedInputTokens: 0,
+      outputTokens: 300,
+      reasoningOutputTokens: 50,
+      totalTokens: 10_300,
+      firstTokenAtMs: null,
+      firstReasoningDeltaAtMs: null,
+      lastReasoningDeltaAtMs: null,
+      firstOutputDeltaAtMs: null,
+      lastOutputDeltaAtMs: null,
+      requestStartedAtMs: 3_000,
+      responseCompletedAtMs: 4_000,
+    });
+
+    expect(store.threadSummary("thread-1")).toMatchObject({
+      threadId: "thread-1",
+      latestTurn: {
+        turnId: "turn-1",
+        requestCount: 2,
+        unsuccessfulRequestCount: 0,
+        requestDurationMs: 1_350,
+        inputTokens: 3_000,
+        cachedInputTokens: 2_500,
+        outputTokens: 300,
+        reasoningOutputTokens: 90,
+      },
+      latestDirectApi: {
+        provider: "bltcy",
+        model: "gpt-5.6-luna",
+        requestDurationMs: 1_000,
+        totalTokens: 10_300,
+      },
+    });
+    expect(store.threadSummary("thread-1").latestTurn?.outputTokensPerSecond)
+      .toBeCloseTo(210 / 0.5);
+    store.close();
+  });
+
   it("rejects priced snapshots without a currency", () => {
     const directory = temporaryDirectory();
     const path = join(directory, "request-metrics.sqlite3");

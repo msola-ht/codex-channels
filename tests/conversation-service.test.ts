@@ -982,6 +982,7 @@ describe("ConversationService model selection", () => {
       imageCount: 1,
     });
     expect(visionCompleted).toHaveBeenCalledWith(target, {
+      provider: "OpenAI",
       model: "vision-model",
       elapsedMs: 31_000,
       upstreamDurationMs: 30_000,

@@ -29,6 +29,7 @@ export const conversationCommandNames = [
   "mcp",
   "plugins",
   "usage",
+  "metrics",
   "limits",
   "permissions",
   "rules",
@@ -73,6 +74,7 @@ export type ConversationCommandResult =
   | { kind: "mcp"; servers: Awaited<ReturnType<ConversationUseCases["listMcpServers"]>> }
   | { kind: "plugins"; result: Awaited<ReturnType<ConversationUseCases["listPlugins"]>> }
   | { kind: "usage"; result: Awaited<ReturnType<ConversationUseCases["providerAccountUsage"]>> }
+  | { kind: "metrics"; summary: ReturnType<ConversationUseCases["requestMetrics"]> }
   | { kind: "limits"; result: Awaited<ReturnType<ConversationUseCases["providerAccountLimits"]>> }
   | {
       kind: "permissions";
@@ -347,6 +349,11 @@ export class ConversationCommandService {
         return {
           kind: "usage",
           result: await this.conversations.providerAccountUsage(target),
+        };
+      case "metrics":
+        return {
+          kind: "metrics",
+          summary: this.conversations.requestMetrics(target),
         };
       case "limits":
         return {

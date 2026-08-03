@@ -14,6 +14,8 @@ import type {
   ModelRequestMetricsStore,
   ModelRequestPricingSnapshot,
   StoredModelRequestMetric,
+  StoredThreadRequestMetricsSummary,
+  StoredTurnRequestMetricsSummary,
 } from "./request-metrics.js";
 
 const schemaVersion = modelRequestMetricsSchemaVersion;
@@ -75,6 +77,21 @@ interface MetricRow {
   cached_input_cost_nanos: number | null;
   output_cost_nanos: number | null;
   total_cost_nanos: number | null;
+}
+
+interface TurnSummaryRow {
+  turn_id: string;
+  request_count: number;
+  unsuccessful_request_count: number;
+  request_duration_ms: number | null;
+  input_tokens: number | null;
+  cached_input_tokens: number | null;
+  input_token_count: number;
+  cached_input_token_count: number;
+  output_tokens: number | null;
+  reasoning_output_tokens: number | null;
+  non_reasoning_output_tokens: number | null;
+  output_duration_ms: number | null;
 }
 
 export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore {
@@ -186,6 +203,55 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       SELECT * FROM model_request_metrics_enriched ORDER BY id DESC LIMIT ?
     `).all(limit) as unknown as MetricRow[];
     return rows.map(toStoredMetric);
+  }
+
+  threadSummary(threadId: string): StoredThreadRequestMetricsSummary {
+    this.requireOpen();
+    if (!threadId.trim() || threadId.length > 128) {
+      throw new Error("Thread ID 无效");
+    }
+    const latestTurn = this.database.prepare(`
+      SELECT turn_id
+      FROM model_request_metrics
+      WHERE thread_id = ? AND turn_id IS NOT NULL AND operation = 'response'
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(threadId) as { turn_id: string } | undefined;
+    const turn = latestTurn === undefined
+      ? undefined
+      : this.database.prepare(`
+          SELECT
+            turn_id,
+            COUNT(*) AS request_count,
+            SUM(CASE WHEN status = 'completed' THEN 0 ELSE 1 END)
+              AS unsuccessful_request_count,
+            SUM(request_duration_ms) AS request_duration_ms,
+            SUM(input_tokens) AS input_tokens,
+            SUM(cached_input_tokens) AS cached_input_tokens,
+            COUNT(input_tokens) AS input_token_count,
+            COUNT(cached_input_tokens) AS cached_input_token_count,
+            SUM(output_tokens) AS output_tokens,
+            SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+            SUM(non_reasoning_output_tokens) AS non_reasoning_output_tokens,
+            SUM(output_duration_ms) AS output_duration_ms
+          FROM model_request_metrics_enriched
+          WHERE thread_id = ? AND turn_id = ? AND operation = 'response'
+          GROUP BY turn_id
+        `).get(threadId, latestTurn.turn_id) as TurnSummaryRow | undefined;
+    const latestDirectApi = this.database.prepare(`
+      SELECT *
+      FROM model_request_metrics_enriched
+      WHERE thread_id = ? AND turn_id IS NULL AND operation = 'response'
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(threadId) as MetricRow | undefined;
+    return {
+      threadId,
+      latestTurn: turn === undefined ? null : toStoredTurnSummary(turn),
+      latestDirectApi: latestDirectApi === undefined
+        ? null
+        : toStoredMetric(latestDirectApi),
+    };
   }
 
   count(): number {
@@ -511,6 +577,27 @@ function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     cachedInputCostNanos: row.cached_input_cost_nanos,
     outputCostNanos: row.output_cost_nanos,
     totalCostNanos: row.total_cost_nanos,
+  };
+}
+
+function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetricsSummary {
+  const outputDurationMs = row.output_duration_ms ?? 0;
+  const nonReasoningOutputTokens = row.non_reasoning_output_tokens ?? 0;
+  return {
+    turnId: row.turn_id,
+    requestCount: row.request_count,
+    unsuccessfulRequestCount: row.unsuccessful_request_count,
+    requestDurationMs: row.request_duration_ms ?? 0,
+    inputTokens: row.input_tokens ?? 0,
+    cachedInputTokens: row.input_token_count > 0
+      && row.cached_input_token_count === row.input_token_count
+      ? row.cached_input_tokens ?? 0
+      : null,
+    outputTokens: row.output_tokens ?? 0,
+    reasoningOutputTokens: row.reasoning_output_tokens ?? 0,
+    outputTokensPerSecond: outputDurationMs > 0 && nonReasoningOutputTokens > 0
+      ? nonReasoningOutputTokens / (outputDurationMs / 1_000)
+      : null,
   };
 }
 

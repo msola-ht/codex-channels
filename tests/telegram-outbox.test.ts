@@ -231,6 +231,7 @@ describe("TelegramOutbox", () => {
     outbox.handle({
       type: "vision.completed",
       target,
+      provider: "BLTCY",
       model: "gpt-5.6-luna",
       elapsedMs: 31_000,
       usage: {
@@ -249,6 +250,7 @@ describe("TelegramOutbox", () => {
       ].join("\n"),
       [
         "<b>图片识别完成</b>",
+        "• <b>API 提供商：</b>BLTCY",
         "• <b>识别模型：</b>gpt-5.6-luna",
         "• <b>视觉 API 耗时：</b>31秒",
         "• <b>Token 用量：</b>输入 1,234 · 输出 56 · 总计 1,290",
@@ -1162,7 +1164,7 @@ describe("TelegramOutbox", () => {
         turnCompletedPanel,
         "",
         "• <b>上下文：</b>24.6 K / 258 K（9.5%）",
-        "• <b>最近请求缓存命中：</b>2.07%",
+        "• <b>最后模型请求缓存命中：</b>2.07%",
         "• <b>模型：</b>gpt-5.6-sol · medium · Fast 开启",
         "• <b>提供商：</b>OpenAI",
         "• <b>上下文压缩：</b>2 次",

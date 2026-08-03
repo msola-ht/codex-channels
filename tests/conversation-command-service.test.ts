@@ -20,6 +20,7 @@ describe("ConversationCommandService", () => {
     expect(new Set(conversationCommandNames).size).toBe(conversationCommandNames.length);
     expect(conversationCommandNames).toContain("resume");
     expect(conversationCommandNames).toContain("fast");
+    expect(conversationCommandNames).toContain("metrics");
     expect(conversationCommandNames).toContain("goal");
     expect(conversationCommandNames).toContain("pin");
     expect(conversationCommandNames).toContain("rules");
@@ -349,6 +350,7 @@ describe("ConversationCommandService", () => {
       listMcpServers: vi.fn(async () => []),
       listPlugins: vi.fn(async () => ({})),
       providerAccountUsage: vi.fn(async () => ({})),
+      requestMetrics: vi.fn(() => null),
       providerAccountLimits: vi.fn(async () => ({})),
       listPermissionProfiles: vi.fn(async () => []),
       initializeProjectRules: vi.fn(async () => ({
@@ -386,6 +388,7 @@ describe("ConversationCommandService", () => {
       ["mcp", "", "listMcpServers"],
       ["plugins", "", "listPlugins"],
       ["usage", "", "providerAccountUsage"],
+      ["metrics", "", "requestMetrics"],
       ["limits", "", "providerAccountLimits"],
       ["permissions", "", "listPermissionProfiles"],
       ["rules", "init", "initializeProjectRules"],

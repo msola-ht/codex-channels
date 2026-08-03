@@ -113,9 +113,32 @@ export function toModelTimingEvent(
   metrics: ProviderProxyMetrics,
 ): ModelTimingEvent | undefined {
   const firstTokenAtMs = metrics.firstTokenAtMs;
-  if (metrics.threadId === null || metrics.turnId === null || firstTokenAtMs === null) {
+  if (
+    metrics.operation !== "response"
+    || metrics.threadId === null
+    || metrics.turnId === null
+  ) {
     return undefined;
   }
+  const common = {
+    type: "turn.modelTiming.updated" as const,
+    threadId: metrics.threadId,
+    turnId: metrics.turnId,
+    requestStartedAtMs: metrics.requestStartedAtMs,
+    requestDurationMs: Math.max(
+      0,
+      metrics.responseCompletedAtMs - metrics.requestStartedAtMs,
+    ),
+    ...(metrics.inputTokens === null ? {} : { inputTokens: metrics.inputTokens }),
+    ...(metrics.cachedInputTokens === null
+      ? {}
+      : { cachedInputTokens: metrics.cachedInputTokens }),
+    ...(metrics.outputTokens === null ? {} : { outputTokens: metrics.outputTokens }),
+    ...(metrics.reasoningOutputTokens === null
+      ? {}
+      : { reasoningOutputTokens: metrics.reasoningOutputTokens }),
+  };
+  if (firstTokenAtMs === null) return common;
   const lastTokenAtMs = Math.max(
     metrics.lastReasoningDeltaAtMs ?? firstTokenAtMs,
     metrics.lastOutputDeltaAtMs ?? firstTokenAtMs,
@@ -130,10 +153,7 @@ export function toModelTimingEvent(
   );
   const generationDurationMs = lastTokenAtMs - firstTokenAtMs;
   return {
-    type: "turn.modelTiming.updated",
-    threadId: metrics.threadId,
-    turnId: metrics.turnId,
-    requestStartedAtMs: metrics.requestStartedAtMs,
+    ...common,
     ttftMs: Math.max(0, firstTokenAtMs - metrics.requestStartedAtMs),
     ...(thinkingDurationMs !== undefined && thinkingDurationMs > 0
       ? { thinkingDurationMs }

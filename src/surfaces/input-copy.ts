@@ -20,6 +20,7 @@ export function formatVisionProgress(elapsedSeconds: number): string {
 }
 
 export function formatVisionCompleted(details: {
+  provider: string;
   model: string;
   elapsedMs?: number;
   usage?: VisionTokenUsage;
@@ -30,15 +31,22 @@ export function formatVisionCompleted(details: {
         ...(details.usage.inputTokens === undefined
           ? []
           : [`输入 ${formatInteger(details.usage.inputTokens)}`]),
+        ...(details.usage.cachedInputTokens === undefined
+          ? []
+          : [`缓存输入 ${formatInteger(details.usage.cachedInputTokens)}`]),
         ...(details.usage.outputTokens === undefined
           ? []
           : [`输出 ${formatInteger(details.usage.outputTokens)}`]),
+        ...(details.usage.reasoningOutputTokens === undefined
+          ? []
+          : [`推理输出 ${formatInteger(details.usage.reasoningOutputTokens)}`]),
         ...(details.usage.totalTokens === undefined
           ? []
           : [`总计 ${formatInteger(details.usage.totalTokens)}`]),
       ];
   return [
     "图片识别完成",
+    `- API 提供商：${details.provider}`,
     `- 识别模型：${details.model}`,
     ...(details.elapsedMs === undefined
       ? []

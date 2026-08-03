@@ -78,6 +78,24 @@ export interface StoredModelRequestMetric extends ModelRequestMetricSample {
   totalCostNanos: number | null;
 }
 
+export interface StoredTurnRequestMetricsSummary {
+  turnId: string;
+  requestCount: number;
+  unsuccessfulRequestCount: number;
+  requestDurationMs: number;
+  inputTokens: number;
+  cachedInputTokens: number | null;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  outputTokensPerSecond: number | null;
+}
+
+export interface StoredThreadRequestMetricsSummary {
+  threadId: string;
+  latestTurn: StoredTurnRequestMetricsSummary | null;
+  latestDirectApi: StoredModelRequestMetric | null;
+}
+
 export interface ModelRequestMetricsStore {
   record(sample: ModelRequestMetricSample): void;
   recent(limit: number): StoredModelRequestMetric[];

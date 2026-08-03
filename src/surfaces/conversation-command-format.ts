@@ -19,7 +19,11 @@ import {
   formatRateLimitWindow,
   formatResetTime,
 } from "./account-format.js";
-import { formatElapsedSeconds } from "./elapsed-duration.js";
+import {
+  formatElapsedDuration,
+  formatElapsedSeconds,
+  formatTokensPerSecond,
+} from "./elapsed-duration.js";
 import { formatProviderLabel } from "./provider-format.js";
 
 const maximumSessionEntries = 20;
@@ -49,6 +53,7 @@ export const conversationCommandDescriptions = {
   mcp: "列出 MCP Servers",
   plugins: "列出 Plugins",
   usage: "查看账号用量",
+  metrics: "查看当前会话请求指标",
   limits: "查看套餐与额度",
   permissions: "查看权限配置",
   rules: "生成或检查项目规则",
@@ -85,7 +90,7 @@ export const conversationCommandHelpSections = [
       "/effort [序号|档位] · /fast [on|off|status]",
       "/skill [名称或序号 任务]",
       "/mcp · /plugins",
-      "/usage · /limits · /permissions",
+      "/usage · /metrics · /limits · /permissions",
     ],
   },
   {
@@ -515,6 +520,68 @@ export function formatConversationStatus(status: ConversationStatus): string {
   return lines.join("\n");
 }
 
+export function formatConversationMetrics(
+  result: Extract<ConversationCommandResult, { kind: "metrics" }>,
+): string {
+  const summary = result.summary;
+  if (summary === null) {
+    return "当前会话尚未绑定 Thread，暂无请求指标。";
+  }
+  const lines = [
+    "请求指标",
+    `Thread：${summary.threadId}`,
+  ];
+  if (summary.latestTurn) {
+    const turn = summary.latestTurn;
+    lines.push(
+      "",
+      "最近 Turn：",
+      `模型请求：${turn.requestCount} 次${turn.unsuccessfulRequestCount > 0 ? `（异常 ${turn.unsuccessfulRequestCount} 次）` : ""}`,
+      `模型请求累计耗时：${formatElapsedDuration(turn.requestDurationMs)}`,
+      `输入：${formatTokenCount(turn.inputTokens)}`,
+      ...(turn.cachedInputTokens === null
+        ? ["缓存：上游未提供完整数据"]
+        : [
+            `命中缓存：${formatTokenCount(turn.cachedInputTokens)}`,
+            `未命中缓存：${formatTokenCount(Math.max(0, turn.inputTokens - turn.cachedInputTokens))}`,
+            `缓存命中率：${formatCacheHitRate(turn.inputTokens, turn.cachedInputTokens)}`,
+          ]),
+      `输出：${formatTokenCount(turn.outputTokens)}`,
+      ...(turn.reasoningOutputTokens > 0
+        ? [`其中推理输出：${formatTokenCount(turn.reasoningOutputTokens)}`]
+        : []),
+      ...(turn.outputTokensPerSecond === null
+        ? []
+        : [`综合输出速度：${formatTokensPerSecond(turn.outputTokensPerSecond)}（非推理）`]),
+    );
+  } else {
+    lines.push("", "最近 Turn：暂无已记录请求");
+  }
+  if (summary.latestDirectApi) {
+    const direct = summary.latestDirectApi;
+    lines.push(
+      "",
+      "最近直接 API：",
+      `提供商：${formatProviderLabel(direct.provider)}`,
+      `模型：${direct.model ?? "未知"}`,
+      `状态：${formatRequestStatus(direct.status)}${direct.httpStatus === null ? "" : ` · HTTP ${direct.httpStatus}`}`,
+      ...(direct.requestDurationMs === null
+        ? []
+        : [`耗时：${formatElapsedDuration(direct.requestDurationMs)}`]),
+      ...(direct.inputTokens === null ? [] : [`输入：${formatTokenCount(direct.inputTokens)}`]),
+      ...(direct.cachedInputTokens === null
+        ? []
+        : [`命中缓存：${formatTokenCount(direct.cachedInputTokens)}`]),
+      ...(direct.outputTokens === null ? [] : [`输出：${formatTokenCount(direct.outputTokens)}`]),
+      ...(direct.reasoningOutputTokens === null || direct.reasoningOutputTokens === 0
+        ? []
+        : [`其中推理输出：${formatTokenCount(direct.reasoningOutputTokens)}`]),
+      ...(direct.totalTokens === null ? [] : [`总计：${formatTokenCount(direct.totalTokens)}`]),
+    );
+  }
+  return lines.join("\n");
+}
+
 function formatSessionLabel(value: string): string {
   const normalized = value.replace(/\s+/gu, " ").trim();
   if (!normalized) {
@@ -539,6 +606,17 @@ function formatGoalStatus(status: ThreadGoal["status"]): string {
       return "预算已用尽";
     case "complete":
       return "已完成";
+  }
+}
+
+function formatRequestStatus(
+  status: "completed" | "failed" | "incomplete" | "unknown",
+): string {
+  switch (status) {
+    case "completed": return "已完成";
+    case "failed": return "失败";
+    case "incomplete": return "未完成";
+    case "unknown": return "未知";
   }
 }
 

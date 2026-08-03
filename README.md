@@ -101,8 +101,10 @@ codexc service restart gateway
 调试日志只记录受约束的类型、阶段、耗时和结果，不记录消息正文、请求参数、上游响应、凭据或
 审批内容。分享日志前仍需人工检查。
 
-每次 Turn 完成后会按实际可用数据展示耗时、上下文、缓存、非推理输出速度和提供商账户状态；
-DeepSeek 还会展示可观测的首字延时、思考速度与含推理生成速度。
+每次 Turn 完成后会展示完整运行耗时，并把统计代理捕获到的本 Turn 全部模型请求聚合为请求次数、
+累计模型耗时、缓存命中和综合非推理输出速度；DeepSeek 还会展示最后一次请求的可观测首字延时，
+以及整轮综合思考速度与含推理生成速度。`/metrics` 可查看当前 Thread 最近 Turn 的请求用量及最近
+一次视觉等直接 API 请求；它不会替代 `/status` 的 App Server 上下文统计。
 
 ### DeepSeek
 
@@ -191,7 +193,7 @@ codexc service start gateway
 - Workspace：`/workspace`
 - 运行：`/status`、`/stop`、`/queue <描述>`、`/compact`、`/fork`、`/review`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
-- 状态：`/diff`、`/usage`、`/limits`、`/permissions`、`/goal`
+- 状态：`/diff`、`/usage`、`/metrics`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/skill [名称或序号 任务]`、`/mcp`、`/plugins`、`/rules`
 - 图片：`/vision <下一批要求>`；多图：`/vision <2–4> <要求>`，收齐自动提交；失败重试：`/vision retry`；取消：`/vision cancel`
 - 帮助：`/help`、`/whoami`

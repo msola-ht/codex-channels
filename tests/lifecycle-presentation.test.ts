@@ -120,7 +120,7 @@ describe("shared Surface lifecycle presentation", () => {
       "",
       "错误：失败：[已隐藏]",
       "上下文：10 K / 100 K（10%）",
-      "最近请求缓存命中：75.00%",
+      "最后模型请求缓存命中：75.00%",
       "模型：gpt-test · medium · Fast 开启",
       "提供商：OpenAI",
       "上下文压缩：2 次",
@@ -177,6 +177,10 @@ describe("shared Surface lifecycle presentation", () => {
         status: "completed",
         modelProvider: "deepseek",
         timing: {
+          modelRequestCount: 2,
+          modelRequestDurationMs: 12_400,
+          requestInputTokens: 20_000,
+          requestCachedInputTokens: 15_000,
           ttftMs: 640,
           nonReasoningOutputTokens: 42,
           outputTokensPerSecond: 2.1,
@@ -187,10 +191,13 @@ describe("shared Surface lifecycle presentation", () => {
       }),
     );
 
-    expect(rendered).toContain("首字延时：640毫秒");
-    expect(rendered).toContain("输出速度：2.1 token/s（非推理）");
-    expect(rendered).toContain("思考速度：20 token/s（推理）");
-    expect(rendered).toContain("生成速度：120 token/s（含推理）");
+    expect(rendered).toContain("模型请求：2 次");
+    expect(rendered).toContain("模型请求累计耗时：12秒");
+    expect(rendered).toContain("本次模型请求缓存命中：75.00%");
+    expect(rendered).toContain("最后请求首字延时：640毫秒");
+    expect(rendered).toContain("综合输出速度：2.1 token/s（非推理）");
+    expect(rendered).toContain("综合思考速度：20 token/s（推理）");
+    expect(rendered).toContain("综合生成速度：120 token/s（含推理）");
     expect(rendered).not.toContain("思考时长");
     expect(rendered).not.toContain("输出时长");
   });
