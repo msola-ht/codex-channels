@@ -13,6 +13,9 @@
   请求完成时间返回当次价格快照；当前不内置模型价格，未注入解析器时计价字段保持 `NULL`。
 - `request-metrics-writer.ts`：提供 10,000 条上限的有界延迟写入队列；指标 Socket 只负责入队，
   每 10 ms 最多同步写入 1 条，关闭时排空，避免 SQLite 位于模型响应确认路径并限制单轮事件循环阻塞。
+- `request-metrics-database.ts`：集中保存指标 Schema、固定路径和进程级独占锁；Gateway 与 reset
+  共用同一把锁。锁内容完整写入后才原子发布，失效 PID 锁和超过保护期的残缺锁可清理，近期残缺锁、
+  运行中或并发重建均失败关闭。
 - `sqlite-request-metrics-store.ts`：把脱敏后的 Provider、模型、状态、HTTP/传输格式、Usage、上游
   时间戳与本机流式阶段时间戳
   写入独立 `request-metrics.sqlite3`。数据库使用严格 Schema v2、`0600` 文件权限，只接受当前
@@ -32,6 +35,8 @@
 
 模型指标库不属于会话 `StateStore`，不保存消息、请求/响应正文、图片、工具参数、凭据或上游响应
 ID。`provider-proxy` 只生成脱敏样本，`bootstrap` 负责把样本装配到本模块；本模块不依赖代理、
-App Server 协议、Surface 或业务 Storage。当前没有公开 HTTP API 或 WebUI。
+App Server 协议、Surface 或业务 Storage。当前没有公开 HTTP API 或 WebUI。Schema 不兼容时
+Gateway 失败关闭并提示 `codexc metrics reset`；该命令要求 Gateway 已停止，先检查点回写并备份
+旧库，再由下次启动创建当前 Schema，不执行隐式迁移。
 指标采集始终开启，不受全局调试模式影响；`debug` / `trace` 只增加脱敏的关联诊断，写入失败仍按
 `warn` 输出，避免关闭调试后形成历史数据断档或隐藏采集故障。

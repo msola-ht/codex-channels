@@ -4,9 +4,14 @@
 
 ## 配置与 Workspace
 
-- `runtime-config.mjs`：解析用户数据目录和运行时路径，并初始化 `.codex-connect`。
+- `runtime-config.mjs`：解析用户数据目录和运行时路径，并初始化 `.codex-connect`；为只读诊断提供
+  不修改配置权限的路径定位，启动与写入流程仍显式收紧目录和配置文件权限。
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
   升级到 v4；不自动迁移未知版本。
+- `metrics-database.mjs` / `metrics-database.d.mts`：实现并声明只读 `codexc metrics status`，以及
+  要求 Gateway 停止、检查点回写、`0600` 备份后移除旧库的 `codexc metrics reset`；不迁移或
+  覆盖原指标记录。服务状态无法确认、处于非停止状态或前台 Gateway 指标 Socket 仍可连接时均拒绝
+  reset；无监听的陈旧 Socket 路径不会误阻塞数据库运维。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型渠道”“通讯渠道”和
   “系统设置”流程委派给具体适配器；模型渠道下继续区分 DeepSeek 与图片识别，系统设置提供
   全局调试模式入口。

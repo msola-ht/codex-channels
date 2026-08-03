@@ -16,6 +16,8 @@
 - `remote`：连接共享 App Server 并启动原生 Codex TUI；切换模式可用 `--profile deepseek` 选择隔离实例。
 - `ws`：列出或注册 Workspace。
 - `rules`：为当前 Git/Node 项目生成或检查 `.codex/rules/default.rules`，不修改 Workspace Registry。
+- `state`：在 Gateway 停止后显式备份并升级业务状态数据库。
+- `metrics`：只读检查独立模型指标库，或在 Gateway 停止后备份并重建不兼容的指标库。
 - `service`：完整校验配置后安装整套后台服务；启停、重启、状态和日志命令使用
   `gateway`、`app-server` 或 `all` 明确目标，日常 `restart` 默认只操作 Gateway。
 

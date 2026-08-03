@@ -171,6 +171,17 @@ codexc service logs -f             # 持续跟踪 Gateway 日志
 执行 `codexc service restart app-server` 或 `codexc service restart all` 会被拒绝。需要重启 App
 Server 时必须从本机终端执行。
 
+模型请求指标使用独立数据库。查看状态或处理版本不兼容：
+
+```bash
+codexc metrics status
+codexc service stop gateway
+codexc metrics reset              # 先保留 0600 旧库备份，再重建
+codexc service start gateway
+```
+
+`metrics reset` 不修改会话状态库；Gateway 运行时会拒绝执行，旧指标不会隐式迁移。
+
 ### 常用聊天命令
 
 - 会话：`/new`、`/resume`、`/sessions`、`/archive`、`/unarchive`、`/pin`、`/unpin`

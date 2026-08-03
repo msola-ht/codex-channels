@@ -88,6 +88,16 @@ export function initializeUserData({ environment = process.env, cwd = process.cw
 }
 
 export function requireUserConfig(environment = process.env) {
+  const result = locateUserConfig(environment);
+  const explicitConfigFile = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
+  if (!explicitConfigFile) {
+    chmodSync(result.dataDir, 0o700);
+  }
+  chmodSync(result.configPath, 0o600);
+  return result;
+}
+
+export function locateUserConfig(environment = process.env) {
   const explicitConfigFile = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
   const home = userDataDir(environment);
   const configPath = explicitConfigFile ? resolve(explicitConfigFile) : join(home, "config.toml");
@@ -95,10 +105,6 @@ export function requireUserConfig(environment = process.env) {
   if (!existsSync(configPath)) {
     throw new Error(`尚未初始化，请先运行 codexc init\n配置目录：${dataDir}`);
   }
-  if (!explicitConfigFile) {
-    chmodSync(dataDir, 0o700);
-  }
-  chmodSync(configPath, 0o600);
   return { configPath, dataDir };
 }
 

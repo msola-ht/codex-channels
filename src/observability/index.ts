@@ -19,6 +19,14 @@ export type {
 } from "./request-metrics.js";
 export { BufferedModelRequestMetricsWriter } from "./request-metrics-writer.js";
 export {
+  acquireRequestMetricsDatabaseLock,
+  modelRequestMetricsSchemaVersion,
+  ModelRequestMetricsDatabaseLockedError,
+  requestMetricsDatabasePath,
+  type RequestMetricsDatabaseLock,
+} from "./request-metrics-database.js";
+export {
+  ModelRequestMetricsSchemaError,
   modelRequestMetricsDatabasePath,
   SqliteModelRequestMetricsStore,
 } from "./sqlite-request-metrics-store.js";

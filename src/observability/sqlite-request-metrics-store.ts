@@ -1,6 +1,13 @@
 import { chmodSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
+
+import {
+  acquireRequestMetricsDatabaseLock,
+  modelRequestMetricsSchemaVersion,
+  requestMetricsDatabasePath,
+  type RequestMetricsDatabaseLock,
+} from "./request-metrics-database.js";
 
 import type {
   ModelRequestMetricSample,
@@ -9,7 +16,7 @@ import type {
   StoredModelRequestMetric,
 } from "./request-metrics.js";
 
-const schemaVersion = 2;
+const schemaVersion = modelRequestMetricsSchemaVersion;
 const retentionMs = 30 * 24 * 60 * 60 * 1_000;
 const maximumRows = 100_000;
 const cleanupInterval = 100;
@@ -73,6 +80,7 @@ interface MetricRow {
 export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore {
   private readonly database: DatabaseSync;
   private readonly insert: StatementSync;
+  private readonly lock: RequestMetricsDatabaseLock;
   private closed = false;
   private rowCount = 0;
   private recordsSinceCleanup = 0;
@@ -81,8 +89,11 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     const parent = dirname(path);
     mkdirSync(parent, { recursive: true, mode: 0o700 });
     chmodSync(parent, 0o700);
-    this.database = new DatabaseSync(path);
+    this.lock = acquireRequestMetricsDatabaseLock(path);
+    let database: DatabaseSync | undefined;
     try {
+      database = new DatabaseSync(path);
+      this.database = database;
       chmodSync(path, 0o600);
       this.database.exec(`
         PRAGMA busy_timeout = 10;
@@ -110,7 +121,11 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       `);
       this.cleanup(nowMs);
     } catch (error) {
-      this.database.close();
+      try {
+        database?.close();
+      } finally {
+        this.lock.release();
+      }
       throw error;
     }
   }
@@ -188,7 +203,11 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    this.database.close();
+    try {
+      this.database.close();
+    } finally {
+      this.lock.release();
+    }
   }
 
   private initializeSchema(): void {
@@ -204,7 +223,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         SELECT value FROM schema_metadata WHERE name = 'schema_version'
       `).get() as { value: number } | undefined;
       if (version && version.value !== schemaVersion) {
-        throw new Error(`模型请求指标数据库 Schema 不受支持：${version.value}`);
+        throw new ModelRequestMetricsSchemaError(version.value, schemaVersion);
       }
       if (!version) {
         this.database.exec(`
@@ -428,7 +447,19 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
 }
 
 export function modelRequestMetricsDatabasePath(stateDatabasePath: string): string {
-  return join(dirname(stateDatabasePath), "request-metrics.sqlite3");
+  return requestMetricsDatabasePath(stateDatabasePath);
+}
+
+export class ModelRequestMetricsSchemaError extends Error {
+  readonly code = "METRICS_SCHEMA_UNSUPPORTED";
+
+  constructor(readonly actualVersion: number, readonly expectedVersion: number) {
+    super(
+      `模型请求指标数据库版本不兼容：当前 ${actualVersion}，Gateway 需要 ${expectedVersion}。`
+      + "请停止 Gateway 后运行 codexc metrics reset",
+    );
+    this.name = "ModelRequestMetricsSchemaError";
+  }
 }
 
 function toStoredMetric(row: MetricRow): StoredModelRequestMetric {

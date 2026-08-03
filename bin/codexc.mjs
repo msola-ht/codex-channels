@@ -56,6 +56,8 @@ const helpText = {
   rules init                   生成项目 Codex 命令预设
   rules check                  检查项目 Codex 命令预设
   state upgrade               显式升级 Gateway 状态数据库
+  metrics status              查看模型请求指标数据库状态
+  metrics reset               备份并重建模型请求指标数据库
 
 后台服务：
   start                        前台启动 App Server 与 Gateway
@@ -140,6 +142,15 @@ const helpText = {
   "state.upgrade": `用法：codexc state upgrade
 
 停止 Gateway 后，备份并显式升级状态数据库。`,
+  metrics: `用法：codexc metrics <status|reset>
+
+查看指标数据库状态，或在 Gateway 停止后备份并重建指标数据库。`,
+  "metrics.status": `用法：codexc metrics status
+
+只读显示指标数据库路径、Schema 兼容性和记录数量。`,
+  "metrics.reset": `用法：codexc metrics reset
+
+要求 Gateway 已停止；先备份现有指标库，再让下次启动创建当前 Schema。`,
   version: "用法：codexc version",
   gateway: `用法：codexc gateway
 
@@ -227,6 +238,9 @@ try {
       break;
     case "state":
       state(args);
+      break;
+    case "metrics":
+      metrics(args);
       break;
     default:
       throw new Error(`未知命令：${command}\n运行 codexc --help 查看用法`);
@@ -674,6 +688,32 @@ function state(args) {
     throw new Error("用法：codexc state upgrade");
   }
   runScript("scripts/upgrade-state.mjs", []);
+}
+
+function metrics(args) {
+  if (showRequestedHelp(args, "metrics") ||
+    showSubcommandHelp(args, "status", "metrics.status") ||
+    showSubcommandHelp(args, "reset", "metrics.reset")) {
+    return;
+  }
+  const [subcommand, ...rest] = args;
+  if (subcommand === undefined) {
+    console.log(helpText.metrics);
+    return;
+  }
+  if ((subcommand !== "status" && subcommand !== "reset") || rest.length > 0) {
+    throw new Error("用法：codexc metrics <status|reset>");
+  }
+  if (subcommand === "status") {
+    run(
+      process.execPath,
+      [join(packageDir, "scripts/metrics-database.mjs"), subcommand],
+      process.env,
+      process.cwd(),
+    );
+    return;
+  }
+  runScript("scripts/metrics-database.mjs", [subcommand]);
 }
 
 function configuredEnvironment() {

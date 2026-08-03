@@ -1,7 +1,10 @@
 import {
+  existsSync,
   mkdtempSync,
   rmSync,
   statSync,
+  utimesSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +13,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  acquireRequestMetricsDatabaseLock,
   BufferedModelRequestMetricsWriter,
   modelRequestMetricsDatabasePath,
   SqliteModelRequestMetricsStore,
@@ -27,6 +31,30 @@ afterEach(() => {
 });
 
 describe("SqliteModelRequestMetricsStore", () => {
+  it("recovers an old incomplete metrics database lock", () => {
+    const directory = temporaryDirectory();
+    const path = join(directory, "request-metrics.sqlite3");
+    const lockPath = `${path}.lock`;
+    writeFileSync(lockPath, "{", { mode: 0o600 });
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(lockPath, old, old);
+
+    const lock = acquireRequestMetricsDatabaseLock(path);
+    lock.release();
+
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it("keeps a recent incomplete metrics database lock fail-closed", () => {
+    const directory = temporaryDirectory();
+    const path = join(directory, "request-metrics.sqlite3");
+    const lockPath = `${path}.lock`;
+    writeFileSync(lockPath, "{", { mode: 0o600 });
+
+    expect(() => acquireRequestMetricsDatabaseLock(path)).toThrow(/正在使用/u);
+    expect(existsSync(lockPath)).toBe(true);
+  });
+
   it("persists complete sanitized request metrics in a private standalone database", () => {
     const directory = temporaryDirectory();
     const statePath = join(directory, "gateway.sqlite3");
@@ -150,7 +178,7 @@ describe("SqliteModelRequestMetricsStore", () => {
     database.close();
 
     expect(() => new SqliteModelRequestMetricsStore(path)).toThrow(
-      /Schema 不受支持/u,
+      /codexc metrics reset/u,
     );
   });
 
