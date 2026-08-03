@@ -56,7 +56,7 @@ export const conversationCommandDescriptions = {
   mcp: "列出 MCP Servers",
   plugins: "列出 Plugins",
   usage: "查看账号用量",
-  metrics: "查看当前会话请求指标",
+  metrics: "查看会话、全局、提供商或模型请求指标",
   limits: "查看套餐与额度",
   permissions: "查看权限配置",
   rules: "生成或检查项目规则",
@@ -93,7 +93,8 @@ export const conversationCommandHelpSections = [
       "/effort [序号|档位] · /fast [on|off|status]",
       "/skill [名称或序号 任务]",
       "/mcp · /plugins",
-      "/usage · /metrics · /limits · /permissions",
+      "/usage · /metrics [session|global|providers|models] [24h|7d|30d]",
+      "/limits · /permissions",
     ],
   },
   {
@@ -530,6 +531,9 @@ export function formatConversationMetrics(
   if (summary === null) {
     return "当前会话尚未绑定 Thread，暂无请求指标。";
   }
+  if ("view" in summary) {
+    return formatAggregateMetricsReport(summary);
+  }
   const lines = [
     "请求指标",
     `Thread：${summary.threadId}`,
@@ -616,6 +620,137 @@ export function formatConversationMetrics(
     );
   }
   return lines.join("\n");
+}
+
+function formatAggregateMetricsReport(
+  report: Extract<NonNullable<Extract<
+    ConversationCommandResult,
+    { kind: "metrics" }
+  >["summary"]>, { view: string }>,
+): string {
+  const viewName = {
+    global: "全局",
+    providers: "按提供商",
+    models: "按模型",
+  }[report.view];
+  const lines = [
+    `请求指标 · ${viewName}`,
+    `范围：最近 ${formatMetricsRange(report.range)}`,
+  ];
+  if (report.aggregate === null) {
+    lines.push("", "本时间范围暂无已记录请求。");
+    return lines.join("\n");
+  }
+  lines.push(
+    "",
+    "本时间范围累计：",
+    ...formatMetricsAggregate(report.aggregate),
+  );
+  if (report.view !== "global" && report.groups.length > 0) {
+    const groupView = report.view === "providers" ? "providers" : "models";
+    lines.push(
+      "",
+      groupView === "providers" ? "提供商明细：" : "模型明细：",
+      ...report.groups.map((group, index) => formatMetricsGroup(
+        group,
+        index,
+        groupView,
+      )),
+    );
+    const hidden = report.totalGroupCount - report.groups.length;
+    if (hidden > 0) {
+      lines.push(`仅显示请求量最高的 ${report.groups.length} 项，另有 ${hidden} 项。`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function formatMetricsAggregate(aggregate: {
+  requestCount: number;
+  unsuccessfulRequestCount: number;
+  requestDurationMs: number;
+  inputTokens: number;
+  cachedInputTokens: number | null;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  outputTokensPerSecond: number | null;
+  outputSpeedSampleCount: number;
+  outputSpeedTimedCount: number;
+  ttftAverageMs: number | null;
+  ttftP50Ms: number | null;
+  ttftP95Ms: number | null;
+  ttftSampleCount: number;
+}): string[] {
+  return [
+    `模型请求：${aggregate.requestCount} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${aggregate.unsuccessfulRequestCount} 次）` : ""}`,
+    `模型请求累计耗时：${formatElapsedDuration(aggregate.requestDurationMs)}`,
+    `输入：${formatTokenCount(aggregate.inputTokens)}`,
+    ...(aggregate.cachedInputTokens === null
+      ? ["缓存：上游未提供完整数据"]
+      : [
+          `命中缓存：${formatTokenCount(aggregate.cachedInputTokens)}`,
+          `未命中缓存：${formatTokenCount(Math.max(0, aggregate.inputTokens - aggregate.cachedInputTokens))}`,
+          `缓存命中率：${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}`,
+        ]),
+    `输出：${formatTokenCount(aggregate.outputTokens)}`,
+    ...(aggregate.reasoningOutputTokens > 0
+      ? [`其中推理输出：${formatTokenCount(aggregate.reasoningOutputTokens)}`]
+      : []),
+    ...(aggregate.outputTokensPerSecond === null
+      ? []
+      : [formatAggregateOutputSpeed(
+          aggregate.outputTokensPerSecond,
+          aggregate.outputSpeedTimedCount,
+          aggregate.outputSpeedSampleCount,
+        )]),
+    ...(aggregate.ttftAverageMs === null || aggregate.ttftP50Ms === null || aggregate.ttftP95Ms === null
+      ? []
+      : [
+          `首段回复延迟：平均 ${formatMetricLatency(aggregate.ttftAverageMs)} · P50 ${formatMetricLatency(aggregate.ttftP50Ms)} · P95 ${formatMetricLatency(aggregate.ttftP95Ms)}（覆盖 ${aggregate.ttftSampleCount}/${aggregate.requestCount} 次请求）`,
+        ]),
+  ];
+}
+
+function formatMetricsGroup(
+  group: {
+    provider: string | null;
+    providerName?: string;
+    model: string | null;
+    aggregate: Parameters<typeof formatMetricsAggregate>[0];
+  },
+  index: number,
+  view: "providers" | "models",
+): string {
+  const provider = group.providerName
+    ? formatProviderLabel(group.providerName)
+    : group.provider === null
+      ? "未知提供商"
+      : formatCodexProviderLabel(group.provider);
+  const label = view === "models"
+    ? `${provider} / ${group.model ?? "未知模型"}`
+    : provider;
+  const aggregate = group.aggregate;
+  const cache = aggregate.cachedInputTokens === null
+    ? "缓存未知"
+    : `缓存 ${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}`;
+  const speed = aggregate.outputTokensPerSecond === null
+    ? "速度未知"
+    : `${formatTokensPerSecond(aggregate.outputTokensPerSecond)}`;
+  const latency = aggregate.ttftP50Ms === null || aggregate.ttftP95Ms === null
+    ? "首段延迟未知"
+    : `首段 P50/P95 ${formatMetricLatency(aggregate.ttftP50Ms)}/${formatMetricLatency(aggregate.ttftP95Ms)}`;
+  return `${index + 1}. ${label} · ${aggregate.requestCount} 次 · 输入 ${formatTokenCount(aggregate.inputTokens)} · 输出 ${formatTokenCount(aggregate.outputTokens)} · ${cache} · ${speed} · ${latency}`;
+}
+
+function formatMetricsRange(range: "24h" | "7d" | "30d"): string {
+  return { "24h": "24 小时", "7d": "7 天", "30d": "30 天" }[range];
+}
+
+function formatMetricLatency(value: number): string {
+  const rounded = Math.round(value);
+  return rounded < 1_000
+    ? `${rounded}毫秒`
+    : formatElapsedDuration(rounded);
 }
 
 function formatAggregateOutputSpeed(

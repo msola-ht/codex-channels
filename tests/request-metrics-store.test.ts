@@ -276,6 +276,100 @@ describe("SqliteModelRequestMetricsStore", () => {
     store.close();
   });
 
+  it("aggregates all request sources uniformly by provider and model within a time range", () => {
+    vi.useFakeTimers();
+    const now = new Date("2026-08-03T12:00:00.000Z");
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+      now.getTime(),
+    );
+    vi.setSystemTime(new Date(now.getTime() - 8 * 24 * 60 * 60 * 1_000));
+    store.record({ ...sample(), provider: "old", model: "old-model" });
+    vi.setSystemTime(now);
+    store.record(sample());
+    store.record({
+      ...sample(),
+      provider: "deepseek",
+      turnId: null,
+      model: "deepseek-v4-flash",
+      status: "failed",
+      firstTokenAtMs: 1_300,
+      firstReasoningDeltaAtMs: 1_300,
+      lastReasoningDeltaAtMs: 1_400,
+      firstOutputDeltaAtMs: 1_500,
+      lastOutputDeltaAtMs: 1_700,
+      responseCompletedAtMs: 1_750,
+    });
+    store.record({
+      ...sample(),
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      firstTokenAtMs: 1_900,
+      firstReasoningDeltaAtMs: 1_900,
+      lastReasoningDeltaAtMs: 2_000,
+      firstOutputDeltaAtMs: 2_100,
+      lastOutputDeltaAtMs: 2_300,
+      responseCompletedAtMs: 2_350,
+    });
+
+    const range = {
+      startAtMs: now.getTime() - 7 * 24 * 60 * 60 * 1_000,
+      endAtMs: now.getTime() + 1,
+    };
+    const global = store.aggregate({ dimension: "global", ...range });
+    expect(global.aggregate).toMatchObject({
+      requestCount: 3,
+      unsuccessfulRequestCount: 1,
+      inputTokens: 3_000,
+      cachedInputTokens: 2_700,
+      outputTokens: 300,
+      reasoningOutputTokens: 120,
+      outputSpeedSampleCount: 3,
+      outputSpeedTimedCount: 3,
+      ttftP50Ms: 300,
+      ttftP95Ms: 900,
+      ttftSampleCount: 3,
+    });
+    expect(global.aggregate?.ttftAverageMs).toBeCloseTo(433.333, 2);
+
+    const providers = store.aggregate({ dimension: "provider", ...range });
+    expect(providers.totalGroupCount).toBe(2);
+    expect(providers.groups).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        provider: "deepseek",
+        model: null,
+        aggregate: expect.objectContaining({ requestCount: 2 }),
+      }),
+      expect.objectContaining({
+        provider: "openai",
+        model: null,
+        aggregate: expect.objectContaining({ requestCount: 1 }),
+      }),
+    ]));
+
+    const models = store.aggregate({ dimension: "model", ...range });
+    expect(models.totalGroupCount).toBe(2);
+    expect(models.groups).toEqual(expect.arrayContaining([
+      expect.objectContaining({ provider: "deepseek", model: "deepseek-v4-flash" }),
+      expect.objectContaining({ provider: "openai", model: "gpt-5.6-sol" }),
+    ]));
+    store.close();
+  });
+
+  it("rejects invalid aggregation ranges", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    expect(() => store.aggregate({
+      dimension: "global",
+      startAtMs: 2,
+      endAtMs: 1,
+    })).toThrow(/时间范围无效/u);
+    store.close();
+  });
+
   it("rejects priced snapshots without a currency", () => {
     const directory = temporaryDirectory();
     const path = join(directory, "request-metrics.sqlite3");
@@ -375,6 +469,7 @@ describe("BufferedModelRequestMetricsWriter", () => {
     const writer = new BufferedModelRequestMetricsWriter({
       record,
       recent: () => [],
+      aggregate: () => emptyMetricsReport(),
       count: () => 0,
       close: () => undefined,
     });
@@ -399,6 +494,7 @@ describe("BufferedModelRequestMetricsWriter", () => {
     const writer = new BufferedModelRequestMetricsWriter({
       record,
       recent: () => [],
+      aggregate: () => emptyMetricsReport(),
       count: () => 0,
       close: () => {
         calls.push("close");
@@ -418,6 +514,17 @@ function temporaryDirectory(): string {
   const directory = mkdtempSync(join(tmpdir(), "codexc-request-metrics-"));
   temporaryDirectories.push(directory);
   return directory;
+}
+
+function emptyMetricsReport() {
+  return {
+    dimension: "global" as const,
+    startAtMs: 0,
+    endAtMs: 1,
+    aggregate: null,
+    groups: [],
+    totalGroupCount: 0,
+  };
 }
 
 function sample(): ModelRequestMetricSample {

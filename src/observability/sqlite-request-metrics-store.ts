@@ -11,9 +11,14 @@ import {
 
 import type {
   ModelRequestMetricSample,
+  ModelRequestMetricsAggregationDimension,
+  ModelRequestMetricsAggregationQuery,
   ModelRequestMetricsStore,
   ModelRequestPricingSnapshot,
   StoredModelRequestMetric,
+  StoredModelRequestMetricsAggregate,
+  StoredModelRequestMetricsGroup,
+  StoredModelRequestMetricsReport,
   StoredThreadRequestMetricsSummary,
   StoredTurnRequestMetricsSummary,
   StoredThreadRequestMetricsAggregate,
@@ -23,6 +28,7 @@ const schemaVersion = modelRequestMetricsSchemaVersion;
 const retentionMs = 30 * 24 * 60 * 60 * 1_000;
 const maximumRows = 100_000;
 const cleanupInterval = 100;
+const maximumAggregationGroups = 20;
 
 interface MetricRow {
   id: number;
@@ -96,6 +102,16 @@ interface TurnSummaryRow {
   output_duration_ms: number | null;
   output_speed_sample_count: number;
   output_speed_timed_count: number;
+}
+
+interface AggregateRow extends Omit<TurnSummaryRow, "turn_id" | "turn_count"> {
+  provider: string | null;
+  model: string | null;
+  ttft_average_ms: number | null;
+  ttft_p50_ms: number | null;
+  ttft_p95_ms: number | null;
+  ttft_sample_count: number;
+  total_group_count: number;
 }
 
 export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore {
@@ -209,6 +225,32 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     return rows.map(toStoredMetric);
   }
 
+  aggregate(
+    query: ModelRequestMetricsAggregationQuery,
+  ): StoredModelRequestMetricsReport {
+    this.requireOpen();
+    validateAggregationQuery(query);
+    const globalRows = this.queryAggregationRows("global", query);
+    const aggregate = globalRows[0] === undefined
+      ? null
+      : toStoredMetricsAggregate(globalRows[0]);
+    if (query.dimension === "global") {
+      return {
+        ...query,
+        aggregate,
+        groups: [],
+        totalGroupCount: aggregate === null ? 0 : 1,
+      };
+    }
+    const rows = this.queryAggregationRows(query.dimension, query);
+    return {
+      ...query,
+      aggregate,
+      groups: rows.map(toStoredMetricsGroup),
+      totalGroupCount: rows[0]?.total_group_count ?? 0,
+    };
+  }
+
   threadSummary(threadId: string): StoredThreadRequestMetricsSummary {
     this.requireOpen();
     if (!threadId.trim() || threadId.length > 128) {
@@ -317,6 +359,95 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       SELECT COUNT(*) AS count FROM model_request_metrics
     `).get() as { count: number };
     return row.count;
+  }
+
+  private queryAggregationRows(
+    dimension: ModelRequestMetricsAggregationDimension,
+    query: ModelRequestMetricsAggregationQuery,
+  ): AggregateRow[] {
+    const grouping = aggregationGrouping(dimension);
+    const limit = dimension === "global" ? 1 : maximumAggregationGroups;
+    return this.database.prepare(`
+      WITH filtered AS (
+        SELECT
+          metric.*,
+          ${grouping.provider} AS group_provider,
+          ${grouping.model} AS group_model
+        FROM model_request_metrics_enriched AS metric
+        WHERE recorded_at_ms >= ?
+          AND recorded_at_ms < ?
+          AND operation = 'response'
+      ), aggregate_rows AS (
+        SELECT
+          group_provider AS provider,
+          group_model AS model,
+          COUNT(*) AS request_count,
+          SUM(CASE WHEN status = 'completed' THEN 0 ELSE 1 END)
+            AS unsuccessful_request_count,
+          SUM(request_duration_ms) AS request_duration_ms,
+          SUM(input_tokens) AS input_tokens,
+          SUM(cached_input_tokens) AS cached_input_tokens,
+          COUNT(input_tokens) AS input_token_count,
+          COUNT(cached_input_tokens) AS cached_input_token_count,
+          SUM(output_tokens) AS output_tokens,
+          SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+          SUM(CASE WHEN non_reasoning_output_tokens > 0
+                AND output_duration_ms > 0
+              THEN non_reasoning_output_tokens ELSE 0 END)
+            AS non_reasoning_output_tokens,
+          SUM(CASE WHEN non_reasoning_output_tokens > 0
+                AND output_duration_ms > 0
+              THEN output_duration_ms ELSE 0 END)
+            AS output_duration_ms,
+          SUM(CASE WHEN non_reasoning_output_tokens > 0 THEN 1 ELSE 0 END)
+            AS output_speed_sample_count,
+          SUM(CASE WHEN non_reasoning_output_tokens > 0
+                AND output_duration_ms > 0 THEN 1 ELSE 0 END)
+            AS output_speed_timed_count
+        FROM filtered
+        GROUP BY group_provider, group_model
+      ), ttft_ranked AS (
+        SELECT
+          group_provider AS provider,
+          group_model AS model,
+          ttft_ms,
+          ROW_NUMBER() OVER (
+            PARTITION BY group_provider, group_model ORDER BY ttft_ms
+          ) AS ttft_rank,
+          COUNT(*) OVER (
+            PARTITION BY group_provider, group_model
+          ) AS ttft_count
+        FROM filtered
+        WHERE ttft_ms IS NOT NULL
+      ), ttft_rows AS (
+        SELECT
+          provider,
+          model,
+          AVG(ttft_ms) AS ttft_average_ms,
+          MAX(CASE WHEN ttft_rank = CAST((ttft_count * 50 + 99) / 100 AS INTEGER)
+            THEN ttft_ms END) AS ttft_p50_ms,
+          MAX(CASE WHEN ttft_rank = CAST((ttft_count * 95 + 99) / 100 AS INTEGER)
+            THEN ttft_ms END) AS ttft_p95_ms,
+          COUNT(*) AS ttft_sample_count
+        FROM ttft_ranked
+        GROUP BY provider, model
+      ), combined AS (
+        SELECT
+          aggregate_rows.*,
+          ttft_rows.ttft_average_ms,
+          ttft_rows.ttft_p50_ms,
+          ttft_rows.ttft_p95_ms,
+          COALESCE(ttft_rows.ttft_sample_count, 0) AS ttft_sample_count,
+          COUNT(*) OVER () AS total_group_count
+        FROM aggregate_rows
+        LEFT JOIN ttft_rows
+          ON aggregate_rows.provider IS ttft_rows.provider
+          AND aggregate_rows.model IS ttft_rows.model
+      )
+      SELECT * FROM combined
+      ORDER BY request_count DESC, provider ASC, model ASC
+      LIMIT ?
+    `).all(query.startAtMs, query.endAtMs, limit) as unknown as AggregateRow[];
   }
 
   close(): void {
@@ -675,6 +806,67 @@ function toStoredThreadAggregate(
     outputTokensPerSecond: summary.outputTokensPerSecond,
     outputSpeedSampleCount: summary.outputSpeedSampleCount,
     outputSpeedTimedCount: summary.outputSpeedTimedCount,
+  };
+}
+
+function validateAggregationQuery(query: ModelRequestMetricsAggregationQuery): void {
+  if (
+    !Number.isSafeInteger(query.startAtMs)
+    || !Number.isSafeInteger(query.endAtMs)
+    || query.startAtMs < 0
+    || query.endAtMs <= query.startAtMs
+  ) {
+    throw new Error("模型请求指标时间范围无效");
+  }
+  if (!(["global", "provider", "model"] as const).includes(query.dimension)) {
+    throw new Error("模型请求指标聚合维度无效");
+  }
+}
+
+function aggregationGrouping(
+  dimension: ModelRequestMetricsAggregationDimension,
+): { provider: string; model: string } {
+  switch (dimension) {
+    case "global":
+      return { provider: "NULL", model: "NULL" };
+    case "provider":
+      return { provider: "provider", model: "NULL" };
+    case "model":
+      return { provider: "provider", model: "model" };
+  }
+}
+
+function toStoredMetricsGroup(row: AggregateRow): StoredModelRequestMetricsGroup {
+  return {
+    provider: row.provider,
+    model: row.model,
+    aggregate: toStoredMetricsAggregate(row),
+  };
+}
+
+function toStoredMetricsAggregate(row: AggregateRow): StoredModelRequestMetricsAggregate {
+  const outputDurationMs = row.output_duration_ms ?? 0;
+  const nonReasoningOutputTokens = row.non_reasoning_output_tokens ?? 0;
+  return {
+    requestCount: row.request_count,
+    unsuccessfulRequestCount: row.unsuccessful_request_count,
+    requestDurationMs: row.request_duration_ms ?? 0,
+    inputTokens: row.input_tokens ?? 0,
+    cachedInputTokens: row.input_token_count > 0
+      && row.cached_input_token_count === row.input_token_count
+      ? row.cached_input_tokens ?? 0
+      : null,
+    outputTokens: row.output_tokens ?? 0,
+    reasoningOutputTokens: row.reasoning_output_tokens ?? 0,
+    outputTokensPerSecond: outputDurationMs > 0 && nonReasoningOutputTokens > 0
+      ? nonReasoningOutputTokens / (outputDurationMs / 1_000)
+      : null,
+    outputSpeedSampleCount: row.output_speed_sample_count,
+    outputSpeedTimedCount: row.output_speed_timed_count,
+    ttftAverageMs: row.ttft_average_ms,
+    ttftP50Ms: row.ttft_p50_ms,
+    ttftP95Ms: row.ttft_p95_ms,
+    ttftSampleCount: row.ttft_sample_count,
   };
 }
 

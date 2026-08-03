@@ -5,6 +5,8 @@ export {
 } from "./logger.js";
 export type {
   ModelRequestMetricSample,
+  ModelRequestMetricsAggregationDimension,
+  ModelRequestMetricsAggregationQuery,
   ModelRequestMetricsStore,
   ModelRequestMetricsWriter,
   ModelBillingMode,
@@ -16,6 +18,9 @@ export type {
   ModelRequestStatus,
   ModelRequestTransport,
   StoredModelRequestMetric,
+  StoredModelRequestMetricsAggregate,
+  StoredModelRequestMetricsGroup,
+  StoredModelRequestMetricsReport,
   StoredThreadRequestMetricsSummary,
   StoredTurnRequestMetricsSummary,
   StoredThreadRequestMetricsAggregate,

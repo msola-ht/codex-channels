@@ -278,6 +278,44 @@ export class GatewayApplication {
                 },
           };
         },
+        aggregate: (view, range) => {
+          const endAtMs = Date.now();
+          const rangeMs = {
+            "24h": 24 * 60 * 60 * 1_000,
+            "7d": 7 * 24 * 60 * 60 * 1_000,
+            "30d": 30 * 24 * 60 * 60 * 1_000,
+          }[range];
+          const report = metricsStore.aggregate({
+            dimension: view === "providers"
+              ? "provider"
+              : view === "models"
+                ? "model"
+                : "global",
+            startAtMs: endAtMs - rangeMs,
+            endAtMs,
+          });
+          return {
+            view,
+            range,
+            startAtMs: report.startAtMs,
+            endAtMs: report.endAtMs,
+            aggregate: report.aggregate,
+            groups: report.groups.map((group) => {
+              const providerName = group.provider === null
+                ? undefined
+                : config.apiProviders.find(
+                    (candidate) => candidate.id === group.provider,
+                  )?.name;
+              return {
+                provider: group.provider,
+                ...(providerName === undefined ? {} : { providerName }),
+                model: group.model,
+                aggregate: group.aggregate,
+              };
+            }),
+            totalGroupCount: report.totalGroupCount,
+          };
+        },
       },
     );
     this.output.subscribe("conversation-follow-up", async (event) => {

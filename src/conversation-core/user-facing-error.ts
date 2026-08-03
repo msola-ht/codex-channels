@@ -37,6 +37,7 @@ export type UserFacingErrorCode =
   | "goal.empty"
   | "goal.usage"
   | "queue.usage"
+  | "metrics.usage"
   | "queue.inactive"
   | "queue.full"
   | "queue.thread-changed"

@@ -75,6 +75,38 @@ describe("ConversationCommandService", () => {
     expect(listSessions).toHaveBeenCalledWith(target, { searchTerm: "fix" });
   });
 
+  it("parses canonical metrics scopes and bounded time ranges", async () => {
+    const requestMetrics = vi.fn(() => null);
+    const commands = new ConversationCommandService({
+      requestMetrics,
+    } as unknown as ConversationUseCases);
+
+    await commands.execute(target, "metrics");
+    await commands.execute(target, "metrics", "session");
+    await commands.execute(target, "metrics", "global 7d");
+    await commands.execute(target, "metrics", "providers");
+    await commands.execute(target, "metrics", "models 30d");
+
+    expect(requestMetrics).toHaveBeenNthCalledWith(1, target, { view: "session" });
+    expect(requestMetrics).toHaveBeenNthCalledWith(2, target, { view: "session" });
+    expect(requestMetrics).toHaveBeenNthCalledWith(3, target, {
+      view: "global",
+      range: "7d",
+    });
+    expect(requestMetrics).toHaveBeenNthCalledWith(4, target, {
+      view: "providers",
+      range: "24h",
+    });
+    expect(requestMetrics).toHaveBeenNthCalledWith(5, target, {
+      view: "models",
+      range: "30d",
+    });
+    await expect(commands.execute(target, "metrics", "provider 7d"))
+      .rejects.toMatchObject({ code: "metrics.usage" });
+    await expect(commands.execute(target, "metrics", "global 1y"))
+      .rejects.toMatchObject({ code: "metrics.usage" });
+  });
+
   it("preserves automatic takeover details in the shared resume outcome", async () => {
     const commands = new ConversationCommandService({
       resume: vi.fn(async () => ({

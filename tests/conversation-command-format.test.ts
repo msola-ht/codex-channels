@@ -168,6 +168,53 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("调用模型：gpt-5.6-luna");
     expect(rendered).toContain("状态：已完成 · HTTP 200");
   });
+
+  it("renders unified provider and model aggregates with latency coverage", () => {
+    const aggregate = {
+      requestCount: 12,
+      unsuccessfulRequestCount: 1,
+      requestDurationMs: 60_000,
+      inputTokens: 120_000,
+      cachedInputTokens: 96_000,
+      outputTokens: 2_400,
+      reasoningOutputTokens: 600,
+      outputTokensPerSecond: 75,
+      outputSpeedSampleCount: 12,
+      outputSpeedTimedCount: 10,
+      ttftAverageMs: 1_200,
+      ttftP50Ms: 800,
+      ttftP95Ms: 2_500,
+      ttftSampleCount: 9,
+    };
+    const rendered = formatConversationMetrics({
+      kind: "metrics",
+      summary: {
+        view: "models",
+        range: "7d",
+        startAtMs: 1,
+        endAtMs: 2,
+        aggregate,
+        groups: [{
+          provider: "openai",
+          model: "gpt-5.6-sol",
+          aggregate,
+        }, {
+          provider: "custom",
+          providerName: "第三方中转",
+          model: "gpt-5.6-luna",
+          aggregate: { ...aggregate, requestCount: 3 },
+        }],
+        totalGroupCount: 2,
+      },
+    });
+
+    expect(rendered).toContain("请求指标 · 按模型");
+    expect(rendered).toContain("范围：最近 7 天");
+    expect(rendered).toContain("首段回复延迟：平均 1秒");
+    expect(rendered).toContain("P50 800毫秒 · P95 3秒（覆盖 9/12 次请求）");
+    expect(rendered).toContain("OpenAI 官方 / gpt-5.6-sol");
+    expect(rendered).toContain("第三方中转 / gpt-5.6-luna");
+  });
 });
 
 function breakdown(totalTokens: number) {

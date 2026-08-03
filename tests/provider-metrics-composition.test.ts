@@ -41,6 +41,7 @@ describe("ProviderMetricsComposition", () => {
         close,
         count: () => 0,
         recent: () => [],
+        aggregate: () => emptyMetricsReport(),
       }),
       onModelTiming: (event) => timings.push(event),
       logger: pino({ level: "silent" }),
@@ -85,6 +86,7 @@ describe("ProviderMetricsComposition", () => {
         close: () => undefined,
         count: () => 0,
         recent: () => [],
+        aggregate: () => emptyMetricsReport(),
       }),
       onModelTiming,
       logger: pino({ level: "silent" }),
@@ -128,6 +130,7 @@ describe("ProviderMetricsComposition", () => {
         close: () => undefined,
         count: () => 0,
         recent: () => [],
+        aggregate: () => emptyMetricsReport(),
       }),
       pricingResolver: { resolve },
       onModelTiming: () => undefined,
@@ -182,5 +185,16 @@ function metrics(): ProviderProxyMetrics {
     firstOutputDeltaAtMs: 1_600,
     lastOutputDeltaAtMs: 1_800,
     responseCompletedAtMs: 1_900,
+  };
+}
+
+function emptyMetricsReport() {
+  return {
+    dimension: "global" as const,
+    startAtMs: 0,
+    endAtMs: 1,
+    aggregate: null,
+    groups: [],
+    totalGroupCount: 0,
   };
 }

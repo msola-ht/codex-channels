@@ -83,7 +83,14 @@ export {
 } from "./permission-port.js";
 export {
   type DirectApiRequestMetricsSummary,
+  type RequestMetricsAggregate,
+  type RequestMetricsAggregateReport,
+  type RequestMetricsAggregateView,
+  type RequestMetricsCommandQuery,
+  type RequestMetricsGroup,
   type RequestMetricsQueryPort,
+  type RequestMetricsResult,
+  type RequestMetricsTimeRange,
   type ThreadRequestMetricsAggregate,
   type ThreadRequestMetricsSummary,
   type TurnRequestMetricsSummary,

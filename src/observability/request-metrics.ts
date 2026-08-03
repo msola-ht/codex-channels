@@ -113,9 +113,55 @@ export interface StoredThreadRequestMetricsSummary {
   latestDirectApi: StoredModelRequestMetric | null;
 }
 
+export type ModelRequestMetricsAggregationDimension =
+  | "global"
+  | "provider"
+  | "model";
+
+export interface ModelRequestMetricsAggregationQuery {
+  dimension: ModelRequestMetricsAggregationDimension;
+  startAtMs: number;
+  endAtMs: number;
+}
+
+export interface StoredModelRequestMetricsAggregate {
+  requestCount: number;
+  unsuccessfulRequestCount: number;
+  requestDurationMs: number;
+  inputTokens: number;
+  cachedInputTokens: number | null;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  outputTokensPerSecond: number | null;
+  outputSpeedSampleCount: number;
+  outputSpeedTimedCount: number;
+  ttftAverageMs: number | null;
+  ttftP50Ms: number | null;
+  ttftP95Ms: number | null;
+  ttftSampleCount: number;
+}
+
+export interface StoredModelRequestMetricsGroup {
+  provider: string | null;
+  model: string | null;
+  aggregate: StoredModelRequestMetricsAggregate;
+}
+
+export interface StoredModelRequestMetricsReport {
+  dimension: ModelRequestMetricsAggregationDimension;
+  startAtMs: number;
+  endAtMs: number;
+  aggregate: StoredModelRequestMetricsAggregate | null;
+  groups: StoredModelRequestMetricsGroup[];
+  totalGroupCount: number;
+}
+
 export interface ModelRequestMetricsStore {
   record(sample: ModelRequestMetricSample): void;
   recent(limit: number): StoredModelRequestMetric[];
+  aggregate(
+    query: ModelRequestMetricsAggregationQuery,
+  ): StoredModelRequestMetricsReport;
   count(): number;
   close(): void;
 }

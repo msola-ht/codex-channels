@@ -3,6 +3,10 @@ import {
   type ConversationTarget,
 } from "../conversation-core/index.js";
 import type { ConversationUseCases } from "./conversation-service.js";
+import type {
+  RequestMetricsCommandQuery,
+  RequestMetricsTimeRange,
+} from "./request-metrics-port.js";
 import type { ReviewTarget, ThreadGoal } from "./turn-port.js";
 
 export const conversationCommandNames = [
@@ -353,7 +357,10 @@ export class ConversationCommandService {
       case "metrics":
         return {
           kind: "metrics",
-          summary: this.conversations.requestMetrics(target),
+          summary: this.conversations.requestMetrics(
+            target,
+            parseMetricsCommand(argumentsText),
+          ),
         };
       case "limits":
         return {
@@ -431,6 +438,37 @@ export class ConversationCommandService {
     const goal = await this.conversations.getGoal(target);
     return { kind: "goal", goal };
   }
+}
+
+const requestMetricsTimeRanges = new Set<RequestMetricsTimeRange>([
+  "24h",
+  "7d",
+  "30d",
+]);
+
+function parseMetricsCommand(input: string): RequestMetricsCommandQuery {
+  if (!input) return { view: "session" };
+  const parts = input.split(/\s+/u);
+  if (parts.length === 1 && parts[0] === "session") {
+    return { view: "session" };
+  }
+  const [view, range = "24h"] = parts;
+  if (
+    parts.length > 2
+    || !(["global", "providers", "models"] as const).includes(
+      view as "global" | "providers" | "models",
+    )
+    || !requestMetricsTimeRanges.has(range as RequestMetricsTimeRange)
+  ) {
+    throw new UserFacingError(
+      "metrics.usage",
+      "Metrics 参数无效；使用 /metrics [session|global|providers|models] [24h|7d|30d]",
+    );
+  }
+  return {
+    view: view as "global" | "providers" | "models",
+    range: range as RequestMetricsTimeRange,
+  };
 }
 
 function parseSkillInvocation(input: string): {

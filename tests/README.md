@@ -107,8 +107,8 @@
   不含推理的综合输出速度及时间窗覆盖率；DeepSeek 最后请求首事件延迟、全 Provider 首段回复延迟和
   整轮综合思考/生成速度，以及 OpenAI 即使收到推理摘要计时也只保留不含推理的输出指标；当前 Thread
   `/metrics` 的最近 Turn 运行聚合、指标库保留范围内的 Thread 会话累计、只选择 HTTP
-  JSON 调用记录的最近直接 API
-  分栏查询；自动回环
+  JSON 调用记录的最近直接 API 分栏查询，以及全局/提供商/模型的 24 小时、7 天、30 天 SQL
+  聚合、TTFT 平均与 P50/P95、缓存和速度样本覆盖；自动回环
   代理的精确 `/responses`、`/responses/compact`
   与只读 `/models` 路径、HTTP/SSE 与 WebSocket、上游
   状态/Header、私有元数据剥离、流式转发、统一代理 Agent、OpenAI 自定义上游保留、App Server

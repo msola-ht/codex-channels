@@ -43,7 +43,8 @@ import type {
 } from "./collaboration-mode-service.js";
 import type {
   RequestMetricsQueryPort,
-  ThreadRequestMetricsSummary,
+  RequestMetricsCommandQuery,
+  RequestMetricsResult,
 } from "./request-metrics-port.js";
 import {
   replaceLocalImagesWithVisionContext,
@@ -185,7 +186,10 @@ export interface ConversationUseCases {
   accountRateLimits(): Promise<AccountRateLimits>;
   providerAccountUsage(target: ConversationTarget): Promise<ProviderAccountUsage>;
   providerAccountLimits(target: ConversationTarget): Promise<ProviderAccountLimits>;
-  requestMetrics(target: ConversationTarget): ThreadRequestMetricsSummary | null;
+  requestMetrics(
+    target: ConversationTarget,
+    query?: RequestMetricsCommandQuery,
+  ): RequestMetricsResult | null;
   listPermissionProfiles(target: ConversationTarget): Promise<PermissionProfileOption[]>;
   initializeProjectRules(target: ConversationTarget): Promise<ProjectRulesResult>;
   checkProjectRules(target: ConversationTarget): Promise<ProjectRulesResult>;
@@ -218,10 +222,19 @@ export class ConversationService implements ConversationUseCases {
     private readonly requestMetricsQuery?: RequestMetricsQueryPort,
   ) {}
 
-  requestMetrics(target: ConversationTarget): ThreadRequestMetricsSummary | null {
+  requestMetrics(
+    target: ConversationTarget,
+    query: RequestMetricsCommandQuery = { view: "session" },
+  ): RequestMetricsResult | null {
+    if (!this.requestMetricsQuery) return null;
+    if (query.view !== "session") {
+      return this.requestMetricsQuery.aggregate(
+        query.view,
+        query.range ?? "24h",
+      );
+    }
     const threadId = this.router.current(target)?.threadId;
-    if (!threadId || !this.requestMetricsQuery) return null;
-    return this.requestMetricsQuery.forThread(threadId);
+    return threadId ? this.requestMetricsQuery.forThread(threadId) : null;
   }
 
   submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission> {

@@ -7,6 +7,7 @@ import {
 } from "../src/application/conversation-service.js";
 import type { ModelSelectionService } from "../src/application/model-selection-service.js";
 import type { CollaborationModeSelectionService } from "../src/application/collaboration-mode-service.js";
+import type { RequestMetricsQueryPort } from "../src/application/request-metrics-port.js";
 import type { TurnExecutionPort } from "../src/application/turn-port.js";
 import {
   ConversationCore,
@@ -57,6 +58,42 @@ function queryPort(overrides: Partial<ConversationQueryPort> = {}): Conversation
 }
 
 describe("ConversationService model selection", () => {
+  it("queries global metrics without requiring a current Thread", () => {
+    const report = {
+      view: "global" as const,
+      range: "7d" as const,
+      startAtMs: 1,
+      endAtMs: 2,
+      aggregate: null,
+      groups: [],
+      totalGroupCount: 0,
+    };
+    const metrics = {
+      forThread: vi.fn(),
+      aggregate: vi.fn(() => report),
+    } satisfies RequestMetricsQueryPort;
+    const service = new ConversationService(
+      turnPort(),
+      { current: () => undefined } as unknown as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      metrics,
+    );
+
+    expect(service.requestMetrics(target, { view: "session" })).toBeNull();
+    expect(service.requestMetrics(target, { view: "global", range: "7d" }))
+      .toEqual(report);
+    expect(metrics.aggregate).toHaveBeenCalledWith("global", "7d");
+    expect(metrics.forThread).not.toHaveBeenCalled();
+  });
+
   it("reflects confirmed Goal set and clear results in status immediately", async () => {
     const goal = {
       threadId: "thread-1",
