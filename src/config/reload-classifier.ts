@@ -85,6 +85,11 @@ function restartRequiredReasons(
     ],
     [configChange("observability.log-level"), current.logLevel, next.logLevel],
     [
+      configChange("api.providers"),
+      JSON.stringify(current.apiProviders),
+      JSON.stringify(next.apiProviders),
+    ],
+    [
       configChange("vision.provider"),
       JSON.stringify(current.vision),
       JSON.stringify(next.vision),

@@ -39,7 +39,7 @@ describe("Codex Connect setup", () => {
       options: [{
         value: "models",
         label: "模型渠道",
-        hint: "配置 OpenAI 与 DeepSeek",
+        hint: "配置 DeepSeek、第三方 API 与图片识别",
       }, {
         value: "channels",
         label: "通讯渠道",
@@ -212,6 +212,30 @@ describe("Codex Connect setup", () => {
     })).resolves.toBe("vision-configured");
 
     expect(visionSetup).toHaveBeenCalledWith({ input: {}, output: {}, prompts });
+  });
+
+  it("selects third-party API management without entering DeepSeek setup", async () => {
+    const apiProviderSetup = vi.fn(async () => "api-provider-configured");
+    const deepseekSetup = vi.fn();
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("models")
+        .mockResolvedValueOnce("api_provider"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    await expect(runSetup({
+      input: {},
+      output: {},
+      prompts,
+      deepseekSetup,
+      apiProviderSetup,
+    })).resolves.toBe("api-provider-configured");
+
+    expect(apiProviderSetup).toHaveBeenCalledWith({ input: {}, output: {}, prompts });
+    expect(deepseekSetup).not.toHaveBeenCalled();
   });
 
   it("returns from the channel menu and can cancel at the category menu", async () => {

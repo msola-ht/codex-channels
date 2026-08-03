@@ -95,6 +95,7 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "approval.timeout": "审批超时",
     "display.operation-updates": "操作过程显示",
     "display.plan-updates": "自动计划显示",
+    "api.providers": "第三方 API 提供商",
     "vision.provider": "视觉识别服务",
     "observability.log-level": "日志级别",
     "workspace.default": "默认 Workspace",

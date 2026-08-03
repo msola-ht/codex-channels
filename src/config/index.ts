@@ -63,10 +63,17 @@ export interface GatewayConfig {
   codexSandbox: "read-only" | "workspace-write";
   operationUpdateDisplay: OperationUpdateDisplay;
   planUpdatesEnabled: boolean;
+  apiProviders: ReadonlyArray<{
+    id: string;
+    name: string;
+    protocol: "responses";
+    endpoint: string;
+  }>;
   vision:
     | { mode: "disabled" }
     | {
         mode: "responses_api";
+        provider: string;
         endpoint: string;
         model: string;
       };
@@ -243,7 +250,8 @@ function loadValidatedConfigDocument(
     codexSandbox: raw.codex.sandbox,
     operationUpdateDisplay: raw.display.operation_updates,
     planUpdatesEnabled: raw.display.plan_updates,
-    vision: toVisionConfig(raw.vision),
+    apiProviders: raw.api_providers.map(toApiProviderConfig),
+    vision: toVisionConfig(raw.vision, raw.api_providers),
     credentialsDirectory: resolve(baseDirectory, "credentials"),
     stateDatabasePath: resolveConfiguredPath(raw.storage.database_path, baseDirectory),
     approvalTimeoutMs: raw.approval.timeout_seconds * 1000,
@@ -251,28 +259,49 @@ function loadValidatedConfigDocument(
   };
 }
 
-function toVisionConfig(raw: GatewayConfigDocument["vision"]): GatewayConfig["vision"] {
+function toApiProviderConfig(
+  raw: GatewayConfigDocument["api_providers"][number],
+): GatewayConfig["apiProviders"][number] {
+  return {
+    ...raw,
+    endpoint: validateApiEndpoint(raw.endpoint, `api_providers.${raw.id}.endpoint`),
+  };
+}
+
+function toVisionConfig(
+  raw: GatewayConfigDocument["vision"],
+  providers: GatewayConfigDocument["api_providers"],
+): GatewayConfig["vision"] {
   if (raw.mode === "disabled") return raw;
+  const provider = providers.find((candidate) => candidate.id === raw.provider);
+  if (!provider) {
+    throw new ConfigurationError(`vision.provider 不存在：${raw.provider}`);
+  }
+  return {
+    mode: raw.mode,
+    provider: provider.id,
+    endpoint: validateApiEndpoint(provider.endpoint, `api_providers.${provider.id}.endpoint`),
+    model: raw.model,
+  };
+}
+
+function validateApiEndpoint(value: string, field: string): string {
   let endpoint: URL;
   try {
-    endpoint = new URL(raw.endpoint);
+    endpoint = new URL(value);
   } catch {
-    throw new ConfigurationError("vision.endpoint 必须是有效 URL");
+    throw new ConfigurationError(`${field} 必须是有效 URL`);
   }
   const loopback = endpoint.hostname === "localhost"
     || endpoint.hostname === "127.0.0.1"
     || endpoint.hostname === "[::1]";
   if (endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && loopback)) {
-    throw new ConfigurationError("vision.endpoint 必须使用 HTTPS；本机回环地址可以使用 HTTP");
+    throw new ConfigurationError(`${field} 必须使用 HTTPS；本机回环地址可以使用 HTTP`);
   }
-  if (endpoint.username || endpoint.password || endpoint.hash) {
-    throw new ConfigurationError("vision.endpoint 不能包含凭据或 URL Fragment");
+  if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+    throw new ConfigurationError(`${field} 不能包含凭据、Query 或 URL Fragment`);
   }
-  return {
-    mode: raw.mode,
-    endpoint: endpoint.toString(),
-    model: raw.model,
-  };
+  return endpoint.toString();
 }
 
 function validateWorkspaces(

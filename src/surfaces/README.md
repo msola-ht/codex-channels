@@ -63,7 +63,9 @@ Telegram 和飞书在交互消息创建成功或失败时
 `surface-input-batcher.ts` 只合并 Surface 明确标识的原生图片批次，普通文字、单图和无批次标识的
 消息立即提交；`vision-input-session.ts` 按完整 Conversation 与 Actor 在内存保存五分钟有效的
 下一批要求，以及 `/vision <2–4> <要求>` 定量收集并在收齐后自动提交的最多四张图片；兼容的
-`begin/done/cancel` 保留给数量未知的手动收集。停止时原生批次排空，尚未提交的手动收集直接清除；二者都不根据消息间隔
+`begin/done/cancel` 保留给数量未知的手动收集。外部识别失败后，共用输入门面还会按完整
+Conversation 与 Actor 在内存保留五分钟有效的一次重试输入，`/vision retry` 复用原要求与临时图片；
+成功、新图片任务、取消、过期或停止会清除记录。停止时原生批次排空，尚未提交的手动收集直接清除；这些状态都不根据消息间隔
 猜测独立消息关系。`vision-command.ts` 统一三个 Surface 的命令和确认文案。
 定量收齐确认在调用 Application 前同步入队；外部视觉请求发起、10 秒后的有界心跳及完成后的
 视觉模型 ID、本地实测 API 耗时和上游实际 Token 用量由 Core 作为平台无关事件发布。图片收集、

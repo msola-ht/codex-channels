@@ -33,9 +33,11 @@
 上下文，但不得输出完整认证请求。逐 Token 文本增量以及未处理的 `delta`、`outputDelta` 和
 `progress` 通知不逐条记录，避免调试模式造成无界日志放大；对应完成态、路由结果与请求耗时仍保留。
 
-模型指标库不属于会话 `StateStore`，不保存消息、请求/响应正文、图片、工具参数、凭据或上游响应
-ID。`provider-proxy` 只生成脱敏样本，`bootstrap` 负责把样本装配到本模块；本模块不依赖代理、
-App Server 协议、Surface 或业务 Storage。当前没有公开 HTTP API 或 WebUI。Schema 不兼容时
+模型指标库不属于会话 `StateStore`，不保存消息、提示词、请求/响应正文、图片、识别结果、工具
+参数、凭据或上游响应 ID。`provider-proxy` 生成 Codex Provider 脱敏样本，Bootstrap 的外部视觉
+适配器生成直接 API 脱敏样本，两者复用同一有界 Writer；已有 Thread 的视觉请求保存
+`thread_id`，因调用发生在 Codex Turn 之前而保持 `turn_id = NULL`。本模块不依赖代理、App Server
+协议、Surface 或业务 Storage。当前没有公开 HTTP API 或 WebUI。Schema 不兼容时
 Gateway 失败关闭并提示 `codexc metrics reset`；该命令要求 Gateway 已停止，先检查点回写并备份
 旧库，再由下次启动创建当前 Schema，不执行隐式迁移。
 指标采集始终开启，不受全局调试模式影响；`debug` / `trace` 只增加脱敏的关联诊断，写入失败仍按

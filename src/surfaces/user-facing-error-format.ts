@@ -31,9 +31,11 @@ export function formatSurfaceUserFacingError(
     case "vision.busy":
       return "视觉识别任务繁忙，请稍后重试";
     case "vision.failed":
-      return "图片识别失败，请稍后重试或切换支持图片的模型";
+      return "图片识别失败，可在 5 分钟内发送 /vision retry 重试，或切换支持图片的模型";
+    case "vision.retry.missing":
+      return "当前没有可重试的图片识别任务";
     case "vision.command.usage":
-      return "用法：/vision <要求>；多图：/vision <2–4> <要求>；取消：/vision cancel";
+      return "用法：/vision <要求>；多图：/vision <2–4> <要求>；重试：/vision retry；取消：/vision cancel";
     case "vision.prompt.invalid":
       return "图片识别要求必须为 1 至 4000 个字符";
     case "vision.prompt.capacity":

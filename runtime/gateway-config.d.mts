@@ -42,11 +42,17 @@ export interface GatewayConfigDocument {
     operation_updates: "full" | "compact" | "hidden";
     plan_updates: boolean;
   };
+  api_providers: Array<{
+    id: string;
+    name: string;
+    protocol: "responses";
+    endpoint: string;
+  }>;
   vision:
     | { mode: "disabled" }
     | {
         mode: "responses_api";
-        endpoint: string;
+        provider: string;
         model: string;
       };
   storage: { database_path: string };

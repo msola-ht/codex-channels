@@ -317,7 +317,7 @@ export class TelegramSurface {
           "",
           ...conversationCommandHelpLines,
           "Telegram：",
-          "- /vision <要求> · /vision <2–4> <要求> · /vision cancel",
+          "- /vision <要求> · /vision <2–4> <要求> · /vision retry · /vision cancel",
           "- /whoami",
           "- /start · /help · /h",
         ].join("\n"),

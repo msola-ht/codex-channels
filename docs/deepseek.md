@@ -82,7 +82,7 @@ App Server 服务会共同重建受监管实例。
 ## 图片识别
 
 DeepSeek 模型目录当前只声明文字输入。Gateway 默认继续在 Turn 前拒绝图片；如需识图，可按
-[`图片识别代理`](vision.md) 配置统一的外部 Responses 视觉接口。识别结果作为标明来源的不可信
+[`图片识别代理`](vision.md) 从独立第三方 API 注册表选择 Responses 接口。识别结果作为标明来源的不可信
 文字资料进入当前 DeepSeek Thread。
 
 App Server 服务会为每个启用的 Provider 启动独立的本机回环统计代理。代理支持项目当前使用的

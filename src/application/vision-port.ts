@@ -27,6 +27,7 @@ export interface VisionRecognitionRequest {
   images: ReadonlyArray<{ path: string }>;
   userPrompt: string;
   onRequestStarted(): void;
+  threadId?: string | null;
 }
 
 export interface VisionRecognitionImage {

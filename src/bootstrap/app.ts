@@ -15,7 +15,7 @@ import {
   providerAppServerSocketPath,
   providerMetricsSocketPath,
 } from "../../runtime/model-provider-runtime.mjs";
-import { readVisionApiKey } from "../../runtime/vision-credential.mjs";
+import { readApiProviderKey } from "../../runtime/api-provider-credential.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
 import {
   CodexAppServerClient,
@@ -148,6 +148,12 @@ export class GatewayApplication {
     );
     this.threadState = new ThreadStateSynchronizer(this.router);
     this.core = new ConversationCore(this.router, this.output);
+    const metricsWriter = new BufferedModelRequestMetricsWriter(
+      new SqliteModelRequestMetricsStore(
+        modelRequestMetricsDatabasePath(config.stateDatabasePath),
+      ),
+      (error) => logger.warn({ err: error }, "模型请求指标后台写入失败"),
+    );
     this.providerMetrics = new ProviderMetricsComposition({
       providers: [
         primaryProvider,
@@ -155,12 +161,7 @@ export class GatewayApplication {
       ],
       socketPath: (provider) =>
         providerMetricsSocketPath(config.codexSocketPath, provider),
-      writer: new BufferedModelRequestMetricsWriter(
-        new SqliteModelRequestMetricsStore(
-          modelRequestMetricsDatabasePath(config.stateDatabasePath),
-        ),
-        (error) => logger.warn({ err: error }, "模型请求指标后台写入失败"),
-      ),
+      writer: metricsWriter,
       onModelTiming: (event) => this.core.handle(event),
       logger,
     });
@@ -182,13 +183,33 @@ export class GatewayApplication {
         fetchImpl: createProxyFetch(config.networkProxy),
       }),
     ]);
-    const vision = config.vision.mode === "disabled"
+    const visionConfig = config.vision;
+    const visionProviderName = visionConfig.mode === "disabled"
+      ? undefined
+      : config.apiProviders.find(
+          (candidate) => candidate.id === visionConfig.provider,
+        )?.name;
+    const vision = visionConfig.mode === "disabled"
       ? undefined
       : createResponsesVisionAdapter({
-          endpoint: config.vision.endpoint,
-          model: config.vision.model,
-          loadApiKey: () => readVisionApiKey(config.credentialsDirectory),
+          provider: visionConfig.provider,
+          ...(visionProviderName === undefined
+            ? {}
+            : { providerName: visionProviderName }),
+          endpoint: visionConfig.endpoint,
+          model: visionConfig.model,
+          loadApiKey: () => readApiProviderKey(
+            config.credentialsDirectory,
+            visionConfig.provider,
+          ),
           fetchImpl: createProxyFetch(config.networkProxy),
+          onMetric: (metric) => {
+            try {
+              metricsWriter.enqueue(metric);
+            } catch (error) {
+              logger.warn({ err: error }, "视觉 API 指标持久化失败");
+            }
+          },
         });
     const service = new ConversationService(
       this.codex,

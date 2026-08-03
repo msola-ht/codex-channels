@@ -84,7 +84,8 @@ Telegram 手动命令注册显式接入三个渠道共享的 `/h`、`/work`、`/
 调用统一使用 `/skill <名称或序号> <任务>`，不维护渠道私有选择状态。
 `/vision <要求>` 预设当前用户与聊天的下一批图片识别要求；多图使用
 `/vision <2–4> <要求>` 声明数量，收齐后自动提交；兼容的 `/vision begin <要求>`、
-`/vision done` 保留给数量未知的收集，`/vision cancel` 取消；该入口加入 Bot 命令菜单，但不进入 Application 会话命令目录。
+`/vision done` 保留给数量未知的收集，失败后可在五分钟内用 `/vision retry` 复用原图片和要求，
+`/vision cancel` 取消；该入口加入 Bot 命令菜单，但不进入 Application 会话命令目录。
 审批请求晚于操作日志发送时，Outbox 必须撤回已经发送的命令消息，不能只清理内存状态。
 账户额度和 MCP 状态通知也必须进入每聊天有界输出队列；不得从 App Server Reader 直接等待 Telegram 网络发送。
 结构化用户错误由 `bot.ts` 转换为 Telegram 专属文案；App Server Turn、warning 和 MCP 错误会

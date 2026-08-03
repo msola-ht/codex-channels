@@ -1,7 +1,11 @@
 import type { Submission } from "../application/index.js";
-import type { ConversationTarget } from "../conversation-core/index.js";
+import {
+  UserFacingError,
+  type ConversationTarget,
+} from "../conversation-core/index.js";
 import {
   SurfaceInputBatcher,
+  surfaceActorKey,
   type SurfaceInputBatcherOptions,
   type SurfaceInputPart,
   type SurfaceInputSubmissionResult,
@@ -36,15 +40,37 @@ export interface CompletedVisionCollectionResult {
   imageCount: number;
 }
 
+interface VisionRetryState {
+  input: SurfaceInputPart;
+  timer: NodeJS.Timeout;
+}
+
 export class SurfaceInputCoalescer {
   private readonly batcher: SurfaceInputBatcher;
   private readonly vision: VisionInputSession;
+  private readonly visionRetryTtlMs: number;
+  private readonly maximumVisionRetries: number;
+  private readonly visionRetries = new Map<string, VisionRetryState>();
+  private closed = false;
 
   constructor(
     submit: ConstructorParameters<typeof SurfaceInputBatcher>[0],
     private readonly options: SurfaceInputCoalescerOptions = {},
   ) {
-    this.batcher = new SurfaceInputBatcher(submit, options);
+    this.visionRetryTtlMs = options.visionPromptTtlMs ?? 5 * 60 * 1_000;
+    this.maximumVisionRetries = options.maximumPendingVisionPrompts ?? 1_000;
+    this.batcher = new SurfaceInputBatcher(submit, {
+      ...options,
+      onSubmissionFailure: (input, error) => {
+        if (
+          error instanceof UserFacingError
+          && error.code === "vision.failed"
+          && (input.localImages?.length ?? 0) > 0
+        ) {
+          this.rememberVisionRetry(input);
+        }
+      },
+    });
     this.vision = new VisionInputSession({
       maximumImages: this.batcher.maximumImages,
       maximumImageBytes: this.batcher.maximumImageBytes,
@@ -62,7 +88,9 @@ export class SurfaceInputCoalescer {
     actorId: string,
     value: string,
   ): { replaced: boolean } {
-    return this.vision.setPrompt(target, actorId, value);
+    const result = this.vision.setPrompt(target, actorId, value);
+    this.clearVisionRetry(target, actorId);
+    return result;
   }
 
   beginVisionCollection(
@@ -71,11 +99,41 @@ export class SurfaceInputCoalescer {
     value: string,
     expectedImages?: number,
   ): { replacedPrompt: boolean } {
-    return this.vision.beginCollection(target, actorId, value, expectedImages);
+    const result = this.vision.beginCollection(
+      target,
+      actorId,
+      value,
+      expectedImages,
+    );
+    this.clearVisionRetry(target, actorId);
+    return result;
   }
 
   cancelVisionPrompt(target: ConversationTarget, actorId: string): boolean {
-    return this.vision.cancel(target, actorId);
+    const pendingCancelled = this.vision.cancel(target, actorId);
+    const retryCancelled = this.clearVisionRetry(target, actorId);
+    return pendingCancelled || retryCancelled;
+  }
+
+  async retryVision(
+    target: ConversationTarget,
+    actorId: string,
+  ): Promise<CompletedVisionCollectionResult> {
+    const key = surfaceActorKey(target, actorId);
+    const retry = this.visionRetries.get(key);
+    if (retry === undefined) {
+      throw new UserFacingError(
+        "vision.retry.missing",
+        "当前没有可重试的图片识别任务",
+      );
+    }
+    clearTimeout(retry.timer);
+    this.visionRetries.delete(key);
+    const result = await this.batcher.enqueue(retry.input);
+    return {
+      submission: result.submission,
+      imageCount: retry.input.localImages?.length ?? 0,
+    };
   }
 
   async completeVisionCollection(
@@ -102,6 +160,10 @@ export class SurfaceInputCoalescer {
     if (decision.kind === "collected") {
       return Promise.resolve(decision);
     }
+    const submissionInput = decision.kind === "submit" ? decision.input : input;
+    if ((submissionInput.localImages?.length ?? 0) > 0) {
+      this.clearVisionRetry(input.target, input.actorId);
+    }
     if (decision.kind === "submit" && decision.automaticCollection) {
       this.options.onVisionCollectionReady?.(
         input.target,
@@ -109,9 +171,7 @@ export class SurfaceInputCoalescer {
         decision.automaticCollection.maximumImages,
       );
     }
-    return this.batcher.enqueue(
-      decision.kind === "submit" ? decision.input : input,
-    );
+    return this.batcher.enqueue(submissionInput);
   }
 
   flushPending(
@@ -122,7 +182,46 @@ export class SurfaceInputCoalescer {
   }
 
   async close(): Promise<void> {
+    this.closed = true;
     this.vision.close();
+    for (const retry of this.visionRetries.values()) clearTimeout(retry.timer);
+    this.visionRetries.clear();
     await this.batcher.close();
+  }
+
+  private rememberVisionRetry(input: SurfaceInputPart): void {
+    if (this.closed) return;
+    const key = surfaceActorKey(input.target, input.actorId);
+    const previous = this.visionRetries.get(key);
+    if (previous !== undefined) clearTimeout(previous.timer);
+    if (previous === undefined && this.visionRetries.size >= this.maximumVisionRetries) {
+      return;
+    }
+    const retry: VisionRetryState = {
+      input: {
+        ...input,
+        ...(input.localImages === undefined
+          ? {}
+          : { localImages: [...input.localImages] }),
+      },
+      timer: undefined as never,
+    };
+    retry.timer = setTimeout(() => {
+      if (this.visionRetries.get(key) === retry) this.visionRetries.delete(key);
+    }, this.visionRetryTtlMs);
+    retry.timer.unref();
+    this.visionRetries.set(key, retry);
+  }
+
+  private clearVisionRetry(
+    target: ConversationTarget,
+    actorId: string,
+  ): boolean {
+    const key = surfaceActorKey(target, actorId);
+    const retry = this.visionRetries.get(key);
+    if (retry === undefined) return false;
+    clearTimeout(retry.timer);
+    this.visionRetries.delete(key);
+    return true;
   }
 }

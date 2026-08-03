@@ -30,9 +30,11 @@
   DeepSeek Key，
   通过共享代理调用官方余额接口，并在有界响应和严格 Schema 校验后只返回稳定余额；Key、响应正文
   和解析异常不进入日志或业务事件。
-- `responses-vision-adapter.ts`：模型不支持图片时可选的外部 Responses 图片识别实现；从私有凭据
-  文件按请求读取 Key、复用统一代理、限制响应大小，并把用户原始提示和图片交给视觉接口后只返回
-  Application 的稳定识别结果。
+- `responses-vision-adapter.ts`：模型不支持图片时可选的外部 Responses 图片识别实现；组合根按
+  `vision.provider` 从第三方 API 注册表解析显示名称、精确 Endpoint 和隔离凭据，适配器复用统一
+  代理、限制响应大小，并把用户原始提示和图片交给视觉接口后只返回 Application 的稳定识别结果；
+  成功、失败与不完整响应的脱敏请求指标复用 Observability Writer，已有 Thread 时关联 Thread，
+  不保存图片、提示词、响应正文或识别结果。
 - `config-lifecycle.ts`：管理配置监听、防抖重载、持久配置事件投递、信号与进程退出。
 - `surface-manager.ts`：按 `surface + accountId` 向已启动 Surface 集中路由 Core 输出，并为
   `turn.completed` 注入当前授权 Workspace 的 Git 分支；并行完成各 Surface 的首次启动，

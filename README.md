@@ -123,8 +123,10 @@ codexc service restart all
 跨提供商切换行为、TUI 使用方式和账户指标说明见
 [`DeepSeek 使用说明`](docs/deepseek.md)。
 
-需要让不支持图片的模型处理图片时，在 `codexc setup` 的“模型渠道 → 图片识别”中配置外部
-Responses 视觉接口、模型 ID 和独立 API Key。双 Provider 与仅 DeepSeek 模式使用同一条代理链路：
+需要让不支持图片的模型处理图片时，先在 `codexc setup` 的“模型渠道 → 第三方 API”中添加一个
+Responses 中转接口和独立 API Key，再到“图片识别”中选择该提供商与模型 ID。可保存多个中转并
+显式切换；这些中转只供图片识别等直接 API 功能使用，不会加入 `/model` 或 Codex App Server。
+双 Provider 与仅 DeepSeek 模式使用同一条代理链路：
 视觉模型识别后把受控结果交给原会话回答。默认不开启，配置与安全边界见
 [`图片识别代理`](docs/vision.md)。
 
@@ -171,7 +173,8 @@ codexc service logs -f             # 持续跟踪 Gateway 日志
 执行 `codexc service restart app-server` 或 `codexc service restart all` 会被拒绝。需要重启 App
 Server 时必须从本机终端执行。
 
-模型请求指标使用独立数据库。查看状态或处理版本不兼容：
+Codex Provider 请求和外部视觉 API 请求的脱敏指标使用同一个独立数据库。视觉指标只保存提供商、
+模型、状态、HTTP 状态、耗时与 Token；不保存图片、提示词或识别正文。查看状态或处理版本不兼容：
 
 ```bash
 codexc metrics status
@@ -190,7 +193,7 @@ codexc service start gateway
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
 - 状态：`/diff`、`/usage`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/skill [名称或序号 任务]`、`/mcp`、`/plugins`、`/rules`
-- 图片：`/vision <下一批要求>`；多图：`/vision <2–4> <要求>`，收齐自动提交；取消：`/vision cancel`
+- 图片：`/vision <下一批要求>`；多图：`/vision <2–4> <要求>`，收齐自动提交；失败重试：`/vision retry`；取消：`/vision cancel`
 - 帮助：`/help`、`/whoami`
 
 任务运行中也可以使用 `/resume` 或 `/new` 切换会话：原任务会继续在后台运行，结果和审批仍返回

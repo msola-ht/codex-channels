@@ -123,6 +123,7 @@ describe("Gateway config.toml", () => {
     expect(runtime.config.telegramMessageFormat).toBe("rich");
     expect(runtime.config.operationUpdateDisplay).toBe("compact");
     expect(runtime.config.planUpdatesEnabled).toBe(true);
+    expect(runtime.config.apiProviders).toEqual([]);
     expect(runtime.config.vision).toEqual({ mode: "disabled" });
     expect(runtime.config.credentialsDirectory).toBe(join(fixture.root, "credentials"));
     expect(runtime.config.codexSocketPath).toBe(join(fixture.root, "runtime/app-server.sock"));
@@ -143,9 +144,15 @@ describe("Gateway config.toml", () => {
 
   it("loads external vision settings without reading API key contents into config", () => {
     const external = createFixture({
+      api_providers: [{
+        id: "vision-relay",
+        name: "视觉中转",
+        protocol: "responses",
+        endpoint: "https://vision.example/v1/responses",
+      }],
       vision: {
         mode: "responses_api",
-        endpoint: "https://vision.example/v1/responses",
+        provider: "vision-relay",
         model: "vision-model",
       },
     });
@@ -153,6 +160,7 @@ describe("Gateway config.toml", () => {
       CODEX_CONNECT_CONFIG_FILE: external.configPath,
     }).config.vision).toEqual({
       mode: "responses_api",
+      provider: "vision-relay",
       endpoint: "https://vision.example/v1/responses",
       model: "vision-model",
     });
@@ -160,9 +168,15 @@ describe("Gateway config.toml", () => {
 
   it("rejects insecure remote vision endpoints", () => {
     const fixture = createFixture({
+      api_providers: [{
+        id: "vision-relay",
+        name: "视觉中转",
+        protocol: "responses",
+        endpoint: "http://vision.example/v1/responses",
+      }],
       vision: {
         mode: "responses_api",
-        endpoint: "http://vision.example/v1/responses",
+        provider: "vision-relay",
         model: "vision-model",
       },
     });
@@ -170,6 +184,20 @@ describe("Gateway config.toml", () => {
     expect(() => loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
     })).toThrow("必须使用 HTTPS");
+  });
+
+  it("rejects a vision provider that is not registered", () => {
+    const fixture = createFixture({
+      vision: {
+        mode: "responses_api",
+        provider: "missing",
+        model: "vision-model",
+      },
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow("vision.provider 不存在");
   });
 
   it("rejects the removed manual DeepSeek proxy setting", () => {

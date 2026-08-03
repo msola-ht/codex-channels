@@ -91,7 +91,7 @@ export function renderFeishuHelp(): string {
     "飞书：",
     "- /whoami · /fs <status|doctor|revoke>",
     "- /start · /help · /h",
-    "- /vision <要求> · /vision <2–4> <要求> · /vision cancel",
+    "- /vision <要求> · /vision <2–4> <要求> · /vision retry · /vision cancel",
   ].join("\n");
 }
 

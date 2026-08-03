@@ -24,6 +24,7 @@ describe("executeVisionCommand", () => {
       beginVisionCollection: vi.fn(),
       cancelVisionPrompt,
       completeVisionCollection: vi.fn(),
+      retryVision: vi.fn(),
       setVisionPrompt,
     };
 
@@ -45,6 +46,7 @@ describe("executeVisionCommand", () => {
         imageCount: 2,
         submission: { threadId: "thread", turnId: "turn", steered: false },
       })),
+      retryVision: vi.fn(),
       setVisionPrompt: vi.fn(),
     };
 
@@ -68,6 +70,7 @@ describe("executeVisionCommand", () => {
       beginVisionCollection: vi.fn(() => ({ replacedPrompt: false })),
       cancelVisionPrompt: vi.fn(),
       completeVisionCollection: vi.fn(),
+      retryVision: vi.fn(),
       setVisionPrompt: vi.fn(),
     };
 
@@ -85,11 +88,32 @@ describe("executeVisionCommand", () => {
     );
   });
 
+  it("retries the latest failed vision submission", async () => {
+    const retryVision = vi.fn(async () => ({
+      imageCount: 2,
+      submission: { threadId: "thread", turnId: "turn", steered: false },
+    }));
+    const inputs = {
+      beginVisionCollection: vi.fn(),
+      cancelVisionPrompt: vi.fn(),
+      completeVisionCollection: vi.fn(),
+      retryVision,
+      setVisionPrompt: vi.fn(),
+    };
+
+    await expect(executeVisionCommand(inputs, target, "actor", "retry"))
+      .resolves.toContain("图片识别已重新提交");
+    expect(retryVision).toHaveBeenCalledWith(target, "actor");
+    await expect(executeVisionCommand(inputs, target, "actor", "retry now"))
+      .rejects.toThrow("请使用 /vision");
+  });
+
   it("rejects incomplete or malformed commands", async () => {
     const inputs = {
       beginVisionCollection: vi.fn(),
       cancelVisionPrompt: vi.fn(),
       completeVisionCollection: vi.fn(),
+      retryVision: vi.fn(),
       setVisionPrompt: vi.fn(),
     };
     await expect(executeVisionCommand(inputs, target, "actor", " "))

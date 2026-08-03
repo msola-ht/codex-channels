@@ -42,9 +42,11 @@
 模型统计代理由 App Server 服务按已启用 Provider 自动装配，不属于用户配置；其上游网络请求继续
 复用 `network` 与标准代理环境变量。
 
-`vision.mode` 默认为 `disabled`；`responses_api` 在当前模型不支持图片时使用精确 HTTPS Endpoint
-和模型，API Key 由 Setup 保存到独立私有凭据文件。
-视觉配置变化需要重启 Gateway；配置文件不保存视觉 API Key。
+`api_providers` 保存多个直接 API 调用使用的 Responses 提供商 ID、名称和精确 HTTPS Endpoint；
+API Key 由 Setup 按提供商保存到独立私有凭据文件。它们不属于 Codex `modelProvider`，不接入
+App Server 或 `/model`。`vision.mode` 默认为 `disabled`；`responses_api` 只保存提供商引用和
+视觉模型，引用不存在时配置失败关闭。提供商或视觉配置变化需要重启 Gateway，不需要重启
+App Server；配置文件不保存 API Key。
 
 飞书配置表当前只定义私聊 Surface 所需的 `enabled`、`app_id`、`app_secret` 和
 `allowed_open_ids`。整表缺失或 `enabled = false` 时运行配置不包含飞书账号；启用时四项必须

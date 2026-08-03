@@ -918,6 +918,12 @@ describe("ConversationService model selection", () => {
     const service = new ConversationService(
       turnPort({ startTurn }),
       {
+        current: () => ({
+          target,
+          workspaceId: "main",
+          threadId: "thread-1",
+          sessionId: "session-1",
+        }),
         ensure: async () => ({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }),
         workspace: () => main,
       } as unknown as SessionRouter,
@@ -970,6 +976,7 @@ describe("ConversationService model selection", () => {
       images: [{ path: "/private/uploads/screenshot.png" }],
       userPrompt: "解释错误",
       onRequestStarted: expect.any(Function),
+      threadId: "thread-1",
     });
     expect(visionStarted).toHaveBeenCalledWith(target, {
       imageCount: 1,
@@ -1024,6 +1031,7 @@ describe("ConversationService model selection", () => {
     const service = new ConversationService(
       turnPort({ startTurn: vi.fn().mockResolvedValue({ turnId: "turn-1" }) }),
       {
+        current: () => undefined,
         ensure: async (currentTarget: typeof target) => ({
           target: currentTarget,
           workspaceId: "main",

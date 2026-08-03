@@ -11,6 +11,7 @@ export type UserFacingErrorCode =
   | "image.unsupported"
   | "vision.busy"
   | "vision.failed"
+  | "vision.retry.missing"
   | "vision.command.usage"
   | "vision.prompt.invalid"
   | "vision.prompt.capacity"

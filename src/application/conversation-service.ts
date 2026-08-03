@@ -304,6 +304,7 @@ export class ConversationService implements ConversationUseCases {
           result = await this.vision.recognize({
             images,
             userPrompt: visionUserPrompt(input),
+            threadId: this.router.current(target)?.threadId ?? null,
             onRequestStarted: () => {
               if (requestStarted) return;
               requestStarted = true;

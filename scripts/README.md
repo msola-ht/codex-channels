@@ -13,12 +13,15 @@
   覆盖原指标记录。服务状态无法确认、处于非停止状态或前台 Gateway 指标 Socket 仍可连接时均拒绝
   reset；无监听的陈旧 Socket 路径不会误阻塞数据库运维。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型渠道”“通讯渠道”和
-  “系统设置”流程委派给具体适配器；模型渠道下继续区分 DeepSeek 与图片识别，系统设置提供
-  全局调试模式入口。
+  “系统设置”流程委派给具体适配器；模型渠道下区分 DeepSeek、第三方 API 与图片识别，系统设置
+  提供全局调试模式入口。
 - `debug-setup.mjs`：在严格配置中原子切换 `logging.level` 的 `debug` / `info`，控制全局脱敏
   调试日志和渠道技术字段，不改写显示设置或凭据。
-- `vision-setup.mjs`：为双 Provider 与仅 DeepSeek 模式统一配置外部 Responses 视觉接口；API Key
-  写入独立私有凭据文件，不进入主配置或输出。
+- `api-provider-setup.mjs` / `api-provider-setup.d.mts`：增改或删除多个 Responses 兼容第三方 API
+  提供商，非敏感元数据写入主配置，API Key 按提供商隔离；拒绝删除仍被调用方引用的提供商，
+  并可经确认显式转换旧单视觉配置。
+- `vision-setup.mjs` / `vision-setup.d.mts`：为双 Provider 与仅 DeepSeek 模式选择已登记的第三方
+  API 提供商和视觉模型；不复制 Endpoint 或 API Key，禁用视觉不删除共享提供商。
 - `deepseek-setup.mjs`：复用共享的非敏感 DeepSeek Provider 定义，提供 OpenAI/DeepSeek 切换和
   仅 DeepSeek 两种安装模式；只下载、不执行
   DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小、JSON 与 Flash 模型后写入用户
