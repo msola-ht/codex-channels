@@ -56,7 +56,7 @@ export const conversationCommandDescriptions = {
   mcp: "列出 MCP Servers",
   plugins: "列出 Plugins",
   usage: "查看账号用量",
-  metrics: "查看会话、全局、提供商或模型请求指标",
+  metrics: "查看会话、聚合或异常请求指标",
   limits: "查看套餐与额度",
   permissions: "查看权限配置",
   rules: "生成或检查项目规则",
@@ -93,7 +93,7 @@ export const conversationCommandHelpSections = [
       "/effort [序号|档位] · /fast [on|off|status]",
       "/skill [名称或序号 任务]",
       "/mcp · /plugins",
-      "/usage · /metrics [session|global|providers|models] [24h|7d|30d]",
+      "/usage · /metrics [session|global|providers|models|errors] [24h|7d|30d]",
       "/limits · /permissions",
     ],
   },
@@ -532,6 +532,9 @@ export function formatConversationMetrics(
     return "当前会话尚未绑定 Thread，暂无请求指标。";
   }
   if ("view" in summary) {
+    if (summary.view === "errors") {
+      return formatErrorMetricsReport(summary);
+    }
     return formatAggregateMetricsReport(summary);
   }
   const lines = [
@@ -622,11 +625,80 @@ export function formatConversationMetrics(
   return lines.join("\n");
 }
 
+function formatErrorMetricsReport(
+  report: Extract<NonNullable<Extract<
+    ConversationCommandResult,
+    { kind: "metrics" }
+  >["summary"]>, { view: "errors" }>,
+): string {
+  const failureRate = report.requestCount === 0
+    ? 0
+    : report.unsuccessfulRequestCount / report.requestCount * 100;
+  const lines = [
+    "请求指标 · 异常请求",
+    `范围：最近 ${formatMetricsRange(report.range)}`,
+    "",
+    `模型请求：${report.requestCount} 次`,
+    `异常请求：${report.unsuccessfulRequestCount} 次`,
+    `异常率：${formatPercent(failureRate)}`,
+  ];
+  if (report.groups.length === 0) {
+    lines.push("", "本时间范围未记录异常请求。");
+    return lines.join("\n");
+  }
+  lines.push(
+    "",
+    "异常明细：",
+    ...report.groups.map((group, index) => {
+      const provider = group.providerName
+        ? formatProviderLabel(group.providerName)
+        : formatCodexProviderLabel(group.provider);
+      const status = formatRequestStatus(group.status);
+      const httpStatus = group.httpStatus === null
+        ? ""
+        : ` · HTTP ${group.httpStatus}`;
+      return `${index + 1}. ${provider} / ${group.model ?? "未知模型"} · ${formatMetricsErrorType(group.errorType)} · ${status}${httpStatus} · ${group.requestCount} 次 · 最近发生：${formatMetricOccurredAt(group.lastOccurredAtMs)}`;
+    }),
+  );
+  const hidden = report.totalGroupCount - report.groups.length;
+  if (hidden > 0) {
+    lines.push(`仅显示出现次数最高的 ${report.groups.length} 项，另有 ${hidden} 项。`);
+  }
+  return lines.join("\n");
+}
+
+function formatMetricsErrorType(value: string | null): string {
+  if (value === null) return "未提供错误类型";
+  const knownLabel = {
+    websocket_closed: "WebSocket 提前关闭",
+    upstream_request_error: "上游请求失败",
+    upstream_response_error: "上游响应失败",
+    client_request_error: "客户端请求失败",
+    client_disconnected: "客户端提前断开",
+    http_error: "HTTP 请求失败",
+  }[value];
+  if (knownLabel !== undefined) return knownLabel;
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value)
+    ? value
+    : "其他错误";
+}
+
+function formatMetricOccurredAt(value: number): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(new Date(value));
+}
+
 function formatAggregateMetricsReport(
   report: Extract<NonNullable<Extract<
     ConversationCommandResult,
     { kind: "metrics" }
-  >["summary"]>, { view: string }>,
+  >["summary"]>, { view: "global" | "providers" | "models" }>,
 ): string {
   const viewName = {
     global: "全局",

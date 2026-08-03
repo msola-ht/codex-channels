@@ -85,7 +85,7 @@ export function formatSurfaceUserFacingError(
     case "queue.usage":
       return "用法：/queue <描述>";
     case "metrics.usage":
-      return "用法：/metrics [session|global|providers|models] [24h|7d|30d]";
+      return "用法：/metrics [session|global|providers|models|errors] [24h|7d|30d]";
     case "queue.inactive":
       return "当前没有运行中的任务，请直接发送普通消息";
     case "queue.full":

@@ -49,9 +49,10 @@ export interface ThreadRequestMetricsSummary {
 
 export type RequestMetricsTimeRange = "24h" | "7d" | "30d";
 export type RequestMetricsAggregateView = "global" | "providers" | "models";
+export type RequestMetricsView = RequestMetricsAggregateView | "errors";
 
 export interface RequestMetricsCommandQuery {
-  view: "session" | RequestMetricsAggregateView;
+  view: "session" | RequestMetricsView;
   range?: RequestMetricsTimeRange;
 }
 
@@ -89,9 +90,32 @@ export interface RequestMetricsAggregateReport {
   totalGroupCount: number;
 }
 
+export interface RequestMetricsErrorGroup {
+  provider: string;
+  providerName?: string;
+  model: string | null;
+  status: "failed" | "incomplete" | "unknown";
+  httpStatus: number | null;
+  errorType: string | null;
+  requestCount: number;
+  lastOccurredAtMs: number;
+}
+
+export interface RequestMetricsErrorReport {
+  view: "errors";
+  range: RequestMetricsTimeRange;
+  startAtMs: number;
+  endAtMs: number;
+  requestCount: number;
+  unsuccessfulRequestCount: number;
+  groups: RequestMetricsErrorGroup[];
+  totalGroupCount: number;
+}
+
 export type RequestMetricsResult =
   | ThreadRequestMetricsSummary
-  | RequestMetricsAggregateReport;
+  | RequestMetricsAggregateReport
+  | RequestMetricsErrorReport;
 
 export interface RequestMetricsQueryPort {
   forThread(threadId: string): ThreadRequestMetricsSummary;
@@ -99,4 +123,5 @@ export interface RequestMetricsQueryPort {
     view: RequestMetricsAggregateView,
     range: RequestMetricsTimeRange,
   ): RequestMetricsAggregateReport;
+  errors(range: RequestMetricsTimeRange): RequestMetricsErrorReport;
 }

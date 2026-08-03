@@ -316,6 +316,42 @@ export class GatewayApplication {
             totalGroupCount: report.totalGroupCount,
           };
         },
+        errors: (range) => {
+          const endAtMs = Date.now();
+          const rangeMs = {
+            "24h": 24 * 60 * 60 * 1_000,
+            "7d": 7 * 24 * 60 * 60 * 1_000,
+            "30d": 30 * 24 * 60 * 60 * 1_000,
+          }[range];
+          const report = metricsStore.errors({
+            startAtMs: endAtMs - rangeMs,
+            endAtMs,
+          });
+          return {
+            view: "errors",
+            range,
+            startAtMs: report.startAtMs,
+            endAtMs: report.endAtMs,
+            requestCount: report.requestCount,
+            unsuccessfulRequestCount: report.unsuccessfulRequestCount,
+            groups: report.groups.map((group) => {
+              const providerName = config.apiProviders.find(
+                (candidate) => candidate.id === group.provider,
+              )?.name;
+              return {
+                provider: group.provider,
+                ...(providerName === undefined ? {} : { providerName }),
+                model: group.model,
+                status: group.status,
+                httpStatus: group.httpStatus,
+                errorType: group.errorType,
+                requestCount: group.requestCount,
+                lastOccurredAtMs: group.lastOccurredAtMs,
+              };
+            }),
+            totalGroupCount: report.totalGroupCount,
+          };
+        },
       },
     );
     this.output.subscribe("conversation-follow-up", async (event) => {

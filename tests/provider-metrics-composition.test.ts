@@ -42,6 +42,7 @@ describe("ProviderMetricsComposition", () => {
         count: () => 0,
         recent: () => [],
         aggregate: () => emptyMetricsReport(),
+        errors: () => emptyErrorReport(),
       }),
       onModelTiming: (event) => timings.push(event),
       logger: pino({ level: "silent" }),
@@ -87,6 +88,7 @@ describe("ProviderMetricsComposition", () => {
         count: () => 0,
         recent: () => [],
         aggregate: () => emptyMetricsReport(),
+        errors: () => emptyErrorReport(),
       }),
       onModelTiming,
       logger: pino({ level: "silent" }),
@@ -131,6 +133,7 @@ describe("ProviderMetricsComposition", () => {
         count: () => 0,
         recent: () => [],
         aggregate: () => emptyMetricsReport(),
+        errors: () => emptyErrorReport(),
       }),
       pricingResolver: { resolve },
       onModelTiming: () => undefined,
@@ -194,6 +197,17 @@ function emptyMetricsReport() {
     startAtMs: 0,
     endAtMs: 1,
     aggregate: null,
+    groups: [],
+    totalGroupCount: 0,
+  };
+}
+
+function emptyErrorReport() {
+  return {
+    startAtMs: 0,
+    endAtMs: 1,
+    requestCount: 0,
+    unsuccessfulRequestCount: 0,
     groups: [],
     totalGroupCount: 0,
   };

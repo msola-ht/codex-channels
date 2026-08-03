@@ -370,6 +370,92 @@ describe("SqliteModelRequestMetricsStore", () => {
     store.close();
   });
 
+  it("summarizes unsuccessful requests by provider, model and error", () => {
+    vi.useFakeTimers();
+    const now = new Date("2026-08-03T12:00:00.000Z");
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+      now.getTime(),
+    );
+    vi.setSystemTime(new Date(now.getTime() - 8 * 24 * 60 * 60 * 1_000));
+    store.record({
+      ...sample(),
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      status: "failed",
+      errorType: "old_error",
+    });
+    vi.setSystemTime(new Date(now.getTime() - 2 * 60 * 60 * 1_000));
+    store.record(sample());
+    store.record({
+      ...sample(),
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      status: "failed",
+      httpStatus: null,
+      errorType: "websocket_closed",
+      inputTokens: null,
+      cachedInputTokens: null,
+      outputTokens: null,
+      reasoningOutputTokens: null,
+      totalTokens: null,
+    });
+    vi.setSystemTime(new Date(now.getTime() - 60 * 60 * 1_000));
+    store.record({
+      ...sample(),
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      status: "failed",
+      httpStatus: null,
+      errorType: "websocket_closed",
+      inputTokens: null,
+      cachedInputTokens: null,
+      outputTokens: null,
+      reasoningOutputTokens: null,
+      totalTokens: null,
+    });
+    store.record({
+      ...sample(),
+      provider: "bltcy",
+      model: "gpt-5.6-luna",
+      status: "incomplete",
+      httpStatus: 429,
+      errorType: "rate_limit_error",
+    });
+
+    const report = store.errors({
+      startAtMs: now.getTime() - 7 * 24 * 60 * 60 * 1_000,
+      endAtMs: now.getTime() + 1,
+    });
+    expect(report).toMatchObject({
+      requestCount: 4,
+      unsuccessfulRequestCount: 3,
+      totalGroupCount: 2,
+    });
+    expect(report.groups).toEqual([
+      {
+        provider: "openai",
+        model: "gpt-5.6-sol",
+        status: "failed",
+        httpStatus: null,
+        errorType: "websocket_closed",
+        requestCount: 2,
+        lastOccurredAtMs: now.getTime() - 60 * 60 * 1_000,
+      },
+      {
+        provider: "bltcy",
+        model: "gpt-5.6-luna",
+        status: "incomplete",
+        httpStatus: 429,
+        errorType: "rate_limit_error",
+        requestCount: 1,
+        lastOccurredAtMs: now.getTime() - 60 * 60 * 1_000,
+      },
+    ]);
+    store.close();
+  });
+
   it("rejects priced snapshots without a currency", () => {
     const directory = temporaryDirectory();
     const path = join(directory, "request-metrics.sqlite3");
@@ -470,6 +556,7 @@ describe("BufferedModelRequestMetricsWriter", () => {
       record,
       recent: () => [],
       aggregate: () => emptyMetricsReport(),
+      errors: () => emptyErrorReport(),
       count: () => 0,
       close: () => undefined,
     });
@@ -495,6 +582,7 @@ describe("BufferedModelRequestMetricsWriter", () => {
       record,
       recent: () => [],
       aggregate: () => emptyMetricsReport(),
+      errors: () => emptyErrorReport(),
       count: () => 0,
       close: () => {
         calls.push("close");
@@ -522,6 +610,17 @@ function emptyMetricsReport() {
     startAtMs: 0,
     endAtMs: 1,
     aggregate: null,
+    groups: [],
+    totalGroupCount: 0,
+  };
+}
+
+function emptyErrorReport() {
+  return {
+    startAtMs: 0,
+    endAtMs: 1,
+    requestCount: 0,
+    unsuccessfulRequestCount: 0,
     groups: [],
     totalGroupCount: 0,
   };

@@ -455,18 +455,18 @@ function parseMetricsCommand(input: string): RequestMetricsCommandQuery {
   const [view, range = "24h"] = parts;
   if (
     parts.length > 2
-    || !(["global", "providers", "models"] as const).includes(
-      view as "global" | "providers" | "models",
+    || !(["global", "providers", "models", "errors"] as const).includes(
+      view as "global" | "providers" | "models" | "errors",
     )
     || !requestMetricsTimeRanges.has(range as RequestMetricsTimeRange)
   ) {
     throw new UserFacingError(
       "metrics.usage",
-      "Metrics 参数无效；使用 /metrics [session|global|providers|models] [24h|7d|30d]",
+      "Metrics 参数无效；使用 /metrics [session|global|providers|models|errors] [24h|7d|30d]",
     );
   }
   return {
-    view: view as "global" | "providers" | "models",
+    view: view as "global" | "providers" | "models" | "errors",
     range: range as RequestMetricsTimeRange,
   };
 }

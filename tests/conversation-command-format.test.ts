@@ -215,6 +215,75 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("OpenAI 官方 / gpt-5.6-sol");
     expect(rendered).toContain("第三方中转 / gpt-5.6-luna");
   });
+
+  it("renders unsuccessful request groups and failure rate", () => {
+    const rendered = formatConversationMetrics({
+      kind: "metrics",
+      summary: {
+        view: "errors",
+        range: "24h",
+        startAtMs: 1,
+        endAtMs: 2,
+        requestCount: 100,
+        unsuccessfulRequestCount: 3,
+        groups: [{
+          provider: "openai",
+          model: "gpt-5.6-sol",
+          status: "failed",
+          httpStatus: null,
+          errorType: "websocket_closed",
+          requestCount: 2,
+          lastOccurredAtMs: 1_785_640_800_000,
+        }, {
+          provider: "custom",
+          providerName: "第三方中转",
+          model: "gpt-5.6-luna",
+          status: "incomplete",
+          httpStatus: 429,
+          errorType: "rate_limit_error",
+          requestCount: 1,
+          lastOccurredAtMs: 1_785_640_700_000,
+        }],
+        totalGroupCount: 2,
+      },
+    });
+
+    expect(rendered).toContain("请求指标 · 异常请求");
+    expect(rendered).toContain("异常率：3%");
+    expect(rendered).toContain("OpenAI 官方 / gpt-5.6-sol");
+    expect(rendered).toContain("WebSocket 提前关闭 · 失败 · 2 次");
+    expect(rendered).toContain("第三方中转 / gpt-5.6-luna");
+    expect(rendered).toContain("rate_limit_error · 未完成 · HTTP 429 · 1 次");
+    expect(rendered).toContain("最近发生：");
+  });
+
+  it("does not render untrusted error types as channel markdown", () => {
+    const rendered = formatConversationMetrics({
+      kind: "metrics",
+      summary: {
+        view: "errors",
+        range: "24h",
+        startAtMs: 1,
+        endAtMs: 2,
+        requestCount: 1,
+        unsuccessfulRequestCount: 1,
+        groups: [{
+          provider: "openai",
+          model: "gpt-5.6-sol",
+          status: "failed",
+          httpStatus: 500,
+          errorType: "upstream_error\n**伪造字段**",
+          requestCount: 1,
+          lastOccurredAtMs: 1_785_640_800_000,
+        }],
+        totalGroupCount: 1,
+      },
+    });
+
+    expect(rendered).toContain("其他错误 · 失败 · HTTP 500");
+    expect(rendered).not.toContain("伪造字段");
+    expect(rendered).not.toContain("**");
+  });
 });
 
 function breakdown(totalTokens: number) {

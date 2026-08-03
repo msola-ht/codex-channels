@@ -33,7 +33,8 @@
 - `provider-account-service.ts`：维护编译期显式 Provider 账户适配器注册表；OpenAI 适配器复用
   App Server 账户查询，未知 Provider 默认返回不支持，不回退到 OpenAI。
 - `request-metrics-port.ts`：定义 `/metrics` 使用的当前 Thread 最近 Turn 运行聚合、整个 Thread
-  指标累计、最近直接 API 请求，以及最近 24 小时、7 天或 30 天的全局/提供商/模型聚合只读摘要；
+  指标累计、最近直接 API 请求，以及最近 24 小时、7 天或 30 天的全局/提供商/模型聚合和异常请求
+  只读摘要；
   直接 API 保留稳定提供商 ID，并可携带配置中的显示名称；不向 Application 暴露 SQLite、价格快照
   或请求正文。
 - `vision-port.ts`：定义模型无原生图片能力时使用的稳定识别端口、严格结果 Schema 和已完成但
@@ -79,9 +80,9 @@ OpenAI 原生账户查询只依赖 `AccountQueryPort`；当前 Thread 的 `/usag
 `ProviderAccountAdapter` 并在 Bootstrap 登记；未提供的账户能力保持不支持。Application 和
 Surface 不解析 `account/usage/read`、`account/rateLimits/read` 或第三方完整响应。
 `/metrics` 只依赖 `RequestMetricsQueryPort`；无参数或 `session` 查询当前 Thread，`global`、
-`providers` 和 `models` 使用严格的 `24h`、`7d`、`30d` 时间范围。Bootstrap 把独立指标库映射为
-稳定摘要，Application 不读取数据库。该请求流水不能替代 App Server 提供的 Thread 上下文和累计
-Token 状态。
+`providers`、`models` 和 `errors` 使用严格的 `24h`、`7d`、`30d` 时间范围；`errors` 只展示
+脱敏后的状态、HTTP 状态、错误类型、次数和最近发生时间。Bootstrap 把独立指标库映射为稳定摘要，
+Application 不读取数据库。该请求流水不能替代 App Server 提供的 Thread 上下文和累计 Token 状态。
 Skill 查询与显式调用只依赖 `SkillQueryPort`；用户和项目直接安装项的筛选、调用名称与绝对路径
 校验由 Client 适配器在协议边界完成。
 MCP 查询只依赖 `McpQueryPort`；分页、Thread 配置上下文与官方清单裁剪由 Client 适配器处理。

@@ -227,6 +227,9 @@ export class ConversationService implements ConversationUseCases {
     query: RequestMetricsCommandQuery = { view: "session" },
   ): RequestMetricsResult | null {
     if (!this.requestMetricsQuery) return null;
+    if (query.view === "errors") {
+      return this.requestMetricsQuery.errors(query.range ?? "24h");
+    }
     if (query.view !== "session") {
       return this.requestMetricsQuery.aggregate(
         query.view,

@@ -13,10 +13,12 @@ import type {
   ModelRequestMetricSample,
   ModelRequestMetricsAggregationDimension,
   ModelRequestMetricsAggregationQuery,
+  ModelRequestMetricsErrorQuery,
   ModelRequestMetricsStore,
   ModelRequestPricingSnapshot,
   StoredModelRequestMetric,
   StoredModelRequestMetricsAggregate,
+  StoredModelRequestMetricsErrorReport,
   StoredModelRequestMetricsGroup,
   StoredModelRequestMetricsReport,
   StoredThreadRequestMetricsSummary,
@@ -111,6 +113,22 @@ interface AggregateRow extends Omit<TurnSummaryRow, "turn_id" | "turn_count"> {
   ttft_p50_ms: number | null;
   ttft_p95_ms: number | null;
   ttft_sample_count: number;
+  total_group_count: number;
+}
+
+interface ErrorSummaryRow {
+  request_count: number;
+  unsuccessful_request_count: number;
+}
+
+interface ErrorGroupRow {
+  provider: string;
+  model: string | null;
+  status: "failed" | "incomplete" | "unknown";
+  http_status: number | null;
+  error_type: string | null;
+  request_count: number;
+  last_occurred_at_ms: number;
   total_group_count: number;
 }
 
@@ -247,6 +265,62 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       ...query,
       aggregate,
       groups: rows.map(toStoredMetricsGroup),
+      totalGroupCount: rows[0]?.total_group_count ?? 0,
+    };
+  }
+
+  errors(
+    query: ModelRequestMetricsErrorQuery,
+  ): StoredModelRequestMetricsErrorReport {
+    this.requireOpen();
+    validateMetricsTimeRange(query);
+    const summary = this.database.prepare(`
+      SELECT
+        COUNT(*) AS request_count,
+        SUM(CASE WHEN status = 'completed' THEN 0 ELSE 1 END)
+          AS unsuccessful_request_count
+      FROM model_request_metrics
+      WHERE recorded_at_ms >= ?
+        AND recorded_at_ms < ?
+        AND operation = 'response'
+    `).get(query.startAtMs, query.endAtMs) as unknown as ErrorSummaryRow;
+    const rows = this.database.prepare(`
+      SELECT
+        provider,
+        model,
+        status,
+        http_status,
+        error_type,
+        COUNT(*) AS request_count,
+        MAX(recorded_at_ms) AS last_occurred_at_ms,
+        COUNT(*) OVER () AS total_group_count
+      FROM model_request_metrics
+      WHERE recorded_at_ms >= ?
+        AND recorded_at_ms < ?
+        AND operation = 'response'
+        AND status <> 'completed'
+      GROUP BY provider, model, status, http_status, error_type
+      ORDER BY request_count DESC, last_occurred_at_ms DESC,
+        provider ASC, model ASC
+      LIMIT ?
+    `).all(
+      query.startAtMs,
+      query.endAtMs,
+      maximumAggregationGroups,
+    ) as unknown as ErrorGroupRow[];
+    return {
+      ...query,
+      requestCount: summary.request_count,
+      unsuccessfulRequestCount: summary.unsuccessful_request_count ?? 0,
+      groups: rows.map((row) => ({
+        provider: row.provider,
+        model: row.model,
+        status: row.status,
+        httpStatus: row.http_status,
+        errorType: row.error_type,
+        requestCount: row.request_count,
+        lastOccurredAtMs: row.last_occurred_at_ms,
+      })),
       totalGroupCount: rows[0]?.total_group_count ?? 0,
     };
   }
@@ -810,6 +884,15 @@ function toStoredThreadAggregate(
 }
 
 function validateAggregationQuery(query: ModelRequestMetricsAggregationQuery): void {
+  validateMetricsTimeRange(query);
+  if (!(["global", "provider", "model"] as const).includes(query.dimension)) {
+    throw new Error("模型请求指标聚合维度无效");
+  }
+}
+
+function validateMetricsTimeRange(
+  query: { startAtMs: number; endAtMs: number },
+): void {
   if (
     !Number.isSafeInteger(query.startAtMs)
     || !Number.isSafeInteger(query.endAtMs)
@@ -817,9 +900,6 @@ function validateAggregationQuery(query: ModelRequestMetricsAggregationQuery): v
     || query.endAtMs <= query.startAtMs
   ) {
     throw new Error("模型请求指标时间范围无效");
-  }
-  if (!(["global", "provider", "model"] as const).includes(query.dimension)) {
-    throw new Error("模型请求指标聚合维度无效");
   }
 }
 

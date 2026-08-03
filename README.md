@@ -109,7 +109,9 @@ Goal 与 Git 分支。所有 Provider 都展示 Gateway 实际观察到的首段
 Codex Provider 明确显示为“OpenAI 官方”，与直接 API 的自定义提供商区分。`/metrics` 可查看当前 Thread 最近
 Turn 的运行聚合、指标库保留范围内的 Thread 会话累计及最近一次视觉等直接 API 请求；
 `/metrics global|providers|models 24h|7d|30d` 把 Codex Provider 与直接 API 请求按同一口径汇总，
-并显示缓存、输出速度及首段回复延迟的有效样本覆盖率。它不会替代 `/status` 的 App Server 上下文统计。
+并显示缓存、输出速度及首段回复延迟的有效样本覆盖率；`/metrics errors` 按提供商、模型、状态、
+HTTP 状态和错误类型汇总异常请求，显示异常率与最近发生时间。它不会替代 `/status` 的 App Server
+上下文统计。
 
 ### DeepSeek
 
@@ -198,7 +200,7 @@ codexc service start gateway
 - Workspace：`/workspace`
 - 运行：`/status`、`/stop`、`/queue <描述>`、`/compact`、`/fork`、`/review`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
-- 状态：`/diff`、`/usage`、`/metrics [session|global|providers|models] [24h|7d|30d]`、`/limits`、`/permissions`、`/goal`
+- 状态：`/diff`、`/usage`、`/metrics [session|global|providers|models|errors] [24h|7d|30d]`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/skill [名称或序号 任务]`、`/mcp`、`/plugins`、`/rules`
 - 图片：`/vision <下一批要求>`；多图：`/vision <2–4> <要求>`，收齐自动提交；失败重试：`/vision retry`；取消：`/vision cancel`
 - 帮助：`/help`、`/whoami`

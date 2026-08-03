@@ -156,12 +156,39 @@ export interface StoredModelRequestMetricsReport {
   totalGroupCount: number;
 }
 
+export interface ModelRequestMetricsErrorQuery {
+  startAtMs: number;
+  endAtMs: number;
+}
+
+export interface StoredModelRequestMetricsErrorGroup {
+  provider: string;
+  model: string | null;
+  status: Exclude<ModelRequestStatus, "completed">;
+  httpStatus: number | null;
+  errorType: string | null;
+  requestCount: number;
+  lastOccurredAtMs: number;
+}
+
+export interface StoredModelRequestMetricsErrorReport {
+  startAtMs: number;
+  endAtMs: number;
+  requestCount: number;
+  unsuccessfulRequestCount: number;
+  groups: StoredModelRequestMetricsErrorGroup[];
+  totalGroupCount: number;
+}
+
 export interface ModelRequestMetricsStore {
   record(sample: ModelRequestMetricSample): void;
   recent(limit: number): StoredModelRequestMetric[];
   aggregate(
     query: ModelRequestMetricsAggregationQuery,
   ): StoredModelRequestMetricsReport;
+  errors(
+    query: ModelRequestMetricsErrorQuery,
+  ): StoredModelRequestMetricsErrorReport;
   count(): number;
   close(): void;
 }

@@ -68,9 +68,20 @@ describe("ConversationService model selection", () => {
       groups: [],
       totalGroupCount: 0,
     };
+    const errorReport = {
+      view: "errors" as const,
+      range: "24h" as const,
+      startAtMs: 1,
+      endAtMs: 2,
+      requestCount: 3,
+      unsuccessfulRequestCount: 1,
+      groups: [],
+      totalGroupCount: 0,
+    };
     const metrics = {
       forThread: vi.fn(),
       aggregate: vi.fn(() => report),
+      errors: vi.fn(() => errorReport),
     } satisfies RequestMetricsQueryPort;
     const service = new ConversationService(
       turnPort(),
@@ -91,6 +102,9 @@ describe("ConversationService model selection", () => {
     expect(service.requestMetrics(target, { view: "global", range: "7d" }))
       .toEqual(report);
     expect(metrics.aggregate).toHaveBeenCalledWith("global", "7d");
+    expect(service.requestMetrics(target, { view: "errors", range: "24h" }))
+      .toEqual(errorReport);
+    expect(metrics.errors).toHaveBeenCalledWith("24h");
     expect(metrics.forThread).not.toHaveBeenCalled();
   });
 
