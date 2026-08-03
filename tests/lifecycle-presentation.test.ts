@@ -127,7 +127,7 @@ describe("shared Surface lifecycle presentation", () => {
       "最近请求缓存命中率：75.00%",
       "总耗时：1分5秒",
       "",
-      "当前会话：",
+      "当前会话累计：",
       "上下文：10 K / 100 K（10%）",
       "上下文压缩：2 次",
       "Goal：进行中 · 12.5 K / 100 K",
@@ -189,22 +189,30 @@ describe("shared Surface lifecycle presentation", () => {
           requestInputTokens: 20_000,
           requestCachedInputTokens: 15_000,
           ttftMs: 640,
+          firstResponseLatencyMs: 920,
           nonReasoningOutputTokens: 42,
           outputTokensPerSecond: 2.1,
+          outputSpeedSampleCount: 2,
+          outputSpeedTimedCount: 2,
           reasoningTokens: 80,
           thinkingTokensPerSecond: 20,
+          thinkingSpeedSampleCount: 2,
+          thinkingSpeedTimedCount: 2,
           generationTokensPerSecond: 120,
+          generationSpeedSampleCount: 2,
+          generationSpeedTimedCount: 2,
         },
       }),
     );
 
     expect(rendered).toContain("模型请求：2 次");
-    expect(rendered).toContain("模型请求累计耗时：12秒");
+    expect(rendered).toContain("模型请求聚合耗时：12秒");
     expect(rendered).toContain("本次请求缓存命中率：75.00%");
-    expect(rendered).toContain("最后请求首字延时：640毫秒");
-    expect(rendered).toContain("综合输出速度：2.1 token/s（不含推理）");
-    expect(rendered).toContain("综合思考速度：20 token/s（推理）");
-    expect(rendered).toContain("综合生成速度：120 token/s（含推理）");
+    expect(rendered).toContain("最后请求首事件延迟：640毫秒");
+    expect(rendered).toContain("首段回复延迟：920毫秒");
+    expect(rendered).toContain("综合输出速度：2.1 token/s（不含推理 · 覆盖 2/2 次请求）");
+    expect(rendered).toContain("综合思考速度：20 token/s（推理 · 覆盖 2/2 次请求）");
+    expect(rendered).toContain("综合生成速度：120 token/s（含推理 · 覆盖 2/2 次请求）");
     expect(rendered).not.toContain("思考时长");
     expect(rendered).not.toContain("输出时长");
   });

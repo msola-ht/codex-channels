@@ -18,6 +18,7 @@ export type {
   StoredModelRequestMetric,
   StoredThreadRequestMetricsSummary,
   StoredTurnRequestMetricsSummary,
+  StoredThreadRequestMetricsAggregate,
 } from "./request-metrics.js";
 export { BufferedModelRequestMetricsWriter } from "./request-metrics-writer.js";
 export {

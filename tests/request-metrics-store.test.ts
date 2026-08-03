@@ -195,6 +195,19 @@ describe("SqliteModelRequestMetricsStore", () => {
         cachedInputTokens: 2_500,
         outputTokens: 300,
         reasoningOutputTokens: 90,
+        outputSpeedSampleCount: 2,
+        outputSpeedTimedCount: 2,
+      },
+      threadAggregate: {
+        turnCount: 1,
+        requestCount: 2,
+        unsuccessfulRequestCount: 0,
+        inputTokens: 3_000,
+        cachedInputTokens: 2_500,
+        outputTokens: 300,
+        reasoningOutputTokens: 90,
+        outputSpeedSampleCount: 2,
+        outputSpeedTimedCount: 2,
       },
       latestDirectApi: {
         provider: "bltcy",
@@ -205,6 +218,61 @@ describe("SqliteModelRequestMetricsStore", () => {
     });
     expect(store.threadSummary("thread-1").latestTurn?.outputTokensPerSecond)
       .toBeCloseTo(210 / 0.5);
+    store.close();
+  });
+
+  it("excludes requests without a matching output window from aggregate speed", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    store.record(sample());
+    store.record({
+      ...sample(),
+      outputTokens: 200,
+      reasoningOutputTokens: 50,
+      firstOutputDeltaAtMs: null,
+      lastOutputDeltaAtMs: null,
+      requestStartedAtMs: 2_000,
+      responseCompletedAtMs: 2_500,
+    });
+
+    const summary = store.threadSummary("thread-1");
+    expect(summary.latestTurn).toMatchObject({
+      outputSpeedSampleCount: 2,
+      outputSpeedTimedCount: 1,
+    });
+    expect(summary.latestTurn?.outputTokensPerSecond).toBeCloseTo(60 / 0.2);
+    expect(summary.threadAggregate).toMatchObject({
+      turnCount: 1,
+      outputSpeedSampleCount: 2,
+      outputSpeedTimedCount: 1,
+    });
+    expect(summary.threadAggregate?.outputTokensPerSecond).toBeCloseTo(60 / 0.2);
+    store.close();
+  });
+
+  it("separates the latest Turn aggregate from the whole Thread aggregate", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    store.record(sample());
+    store.record({
+      ...sample(),
+      turnId: "turn-2",
+      requestStartedAtMs: 2_000,
+      firstTokenAtMs: 2_100,
+      firstReasoningDeltaAtMs: 2_100,
+      lastReasoningDeltaAtMs: 2_300,
+      firstOutputDeltaAtMs: 2_400,
+      lastOutputDeltaAtMs: 2_600,
+      responseCompletedAtMs: 2_650,
+    });
+
+    const summary = store.threadSummary("thread-1");
+    expect(summary.latestTurn).toMatchObject({ turnId: "turn-2", requestCount: 1 });
+    expect(summary.threadAggregate).toMatchObject({ turnCount: 2, requestCount: 2 });
     store.close();
   });
 

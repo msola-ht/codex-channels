@@ -78,13 +78,20 @@ export interface TurnOutputTiming {
   requestCachedInputTokens?: number;
   requestOutputTokens?: number;
   ttftMs?: number;
+  firstResponseLatencyMs?: number;
   outputDurationMs?: number;
   thinkingDurationMs?: number;
   nonReasoningOutputTokens?: number;
   reasoningTokens?: number;
   outputTokensPerSecond?: number;
+  outputSpeedSampleCount?: number;
+  outputSpeedTimedCount?: number;
   thinkingTokensPerSecond?: number;
+  thinkingSpeedSampleCount?: number;
+  thinkingSpeedTimedCount?: number;
   generationTokensPerSecond?: number;
+  generationSpeedSampleCount?: number;
+  generationSpeedTimedCount?: number;
 }
 
 export interface RateLimitWindow {

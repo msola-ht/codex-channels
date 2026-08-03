@@ -16,6 +16,7 @@ import type {
   StoredModelRequestMetric,
   StoredThreadRequestMetricsSummary,
   StoredTurnRequestMetricsSummary,
+  StoredThreadRequestMetricsAggregate,
 } from "./request-metrics.js";
 
 const schemaVersion = modelRequestMetricsSchemaVersion;
@@ -80,7 +81,8 @@ interface MetricRow {
 }
 
 interface TurnSummaryRow {
-  turn_id: string;
+  turn_id: string | null;
+  turn_count: number;
   request_count: number;
   unsuccessful_request_count: number;
   request_duration_ms: number | null;
@@ -92,6 +94,8 @@ interface TurnSummaryRow {
   reasoning_output_tokens: number | null;
   non_reasoning_output_tokens: number | null;
   output_duration_ms: number | null;
+  output_speed_sample_count: number;
+  output_speed_timed_count: number;
 }
 
 export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore {
@@ -222,6 +226,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       : this.database.prepare(`
           SELECT
             turn_id,
+            COUNT(DISTINCT turn_id) AS turn_count,
             COUNT(*) AS request_count,
             SUM(CASE WHEN status = 'completed' THEN 0 ELSE 1 END)
               AS unsuccessful_request_count,
@@ -232,12 +237,53 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
             COUNT(cached_input_tokens) AS cached_input_token_count,
             SUM(output_tokens) AS output_tokens,
             SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-            SUM(non_reasoning_output_tokens) AS non_reasoning_output_tokens,
-            SUM(output_duration_ms) AS output_duration_ms
+            SUM(CASE WHEN non_reasoning_output_tokens > 0
+                  AND output_duration_ms > 0
+                THEN non_reasoning_output_tokens ELSE 0 END)
+              AS non_reasoning_output_tokens,
+            SUM(CASE WHEN non_reasoning_output_tokens > 0
+                  AND output_duration_ms > 0
+                THEN output_duration_ms ELSE 0 END)
+              AS output_duration_ms,
+            SUM(CASE WHEN non_reasoning_output_tokens > 0 THEN 1 ELSE 0 END)
+              AS output_speed_sample_count,
+            SUM(CASE WHEN non_reasoning_output_tokens > 0
+                  AND output_duration_ms > 0 THEN 1 ELSE 0 END)
+              AS output_speed_timed_count
           FROM model_request_metrics_enriched
           WHERE thread_id = ? AND turn_id = ? AND operation = 'response'
           GROUP BY turn_id
         `).get(threadId, latestTurn.turn_id) as TurnSummaryRow | undefined;
+    const threadAggregate = this.database.prepare(`
+      SELECT
+        NULL AS turn_id,
+        COUNT(DISTINCT turn_id) AS turn_count,
+        COUNT(*) AS request_count,
+        SUM(CASE WHEN status = 'completed' THEN 0 ELSE 1 END)
+          AS unsuccessful_request_count,
+        SUM(request_duration_ms) AS request_duration_ms,
+        SUM(input_tokens) AS input_tokens,
+        SUM(cached_input_tokens) AS cached_input_tokens,
+        COUNT(input_tokens) AS input_token_count,
+        COUNT(cached_input_tokens) AS cached_input_token_count,
+        SUM(output_tokens) AS output_tokens,
+        SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+        SUM(CASE WHEN non_reasoning_output_tokens > 0
+              AND output_duration_ms > 0
+            THEN non_reasoning_output_tokens ELSE 0 END)
+          AS non_reasoning_output_tokens,
+        SUM(CASE WHEN non_reasoning_output_tokens > 0
+              AND output_duration_ms > 0
+            THEN output_duration_ms ELSE 0 END)
+          AS output_duration_ms,
+        SUM(CASE WHEN non_reasoning_output_tokens > 0 THEN 1 ELSE 0 END)
+          AS output_speed_sample_count,
+        SUM(CASE WHEN non_reasoning_output_tokens > 0
+              AND output_duration_ms > 0 THEN 1 ELSE 0 END)
+          AS output_speed_timed_count
+      FROM model_request_metrics_enriched
+      WHERE thread_id = ? AND turn_id IS NOT NULL AND operation = 'response'
+    `).get(threadId) as unknown as TurnSummaryRow;
     const latestDirectApi = this.database.prepare(`
       SELECT *
       FROM model_request_metrics_enriched
@@ -252,6 +298,9 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     return {
       threadId,
       latestTurn: turn === undefined ? null : toStoredTurnSummary(turn),
+      threadAggregate: threadAggregate.request_count === 0
+        ? null
+        : toStoredThreadAggregate(threadAggregate),
       latestDirectApi: latestDirectApi === undefined
         ? null
         : toStoredMetric(latestDirectApi),
@@ -588,7 +637,7 @@ function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetricsSumma
   const outputDurationMs = row.output_duration_ms ?? 0;
   const nonReasoningOutputTokens = row.non_reasoning_output_tokens ?? 0;
   return {
-    turnId: row.turn_id,
+    turnId: row.turn_id!,
     requestCount: row.request_count,
     unsuccessfulRequestCount: row.unsuccessful_request_count,
     requestDurationMs: row.request_duration_ms ?? 0,
@@ -602,6 +651,30 @@ function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetricsSumma
     outputTokensPerSecond: outputDurationMs > 0 && nonReasoningOutputTokens > 0
       ? nonReasoningOutputTokens / (outputDurationMs / 1_000)
       : null,
+    outputSpeedSampleCount: row.output_speed_sample_count,
+    outputSpeedTimedCount: row.output_speed_timed_count,
+  };
+}
+
+function toStoredThreadAggregate(
+  row: TurnSummaryRow,
+): StoredThreadRequestMetricsAggregate {
+  const summary = toStoredTurnSummary({
+    ...row,
+    turn_id: "aggregate",
+  });
+  return {
+    turnCount: row.turn_count,
+    requestCount: summary.requestCount,
+    unsuccessfulRequestCount: summary.unsuccessfulRequestCount,
+    requestDurationMs: summary.requestDurationMs,
+    inputTokens: summary.inputTokens,
+    cachedInputTokens: summary.cachedInputTokens,
+    outputTokens: summary.outputTokens,
+    reasoningOutputTokens: summary.reasoningOutputTokens,
+    outputTokensPerSecond: summary.outputTokensPerSecond,
+    outputSpeedSampleCount: summary.outputSpeedSampleCount,
+    outputSpeedTimedCount: summary.outputSpeedTimedCount,
   };
 }
 

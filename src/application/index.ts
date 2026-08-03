@@ -84,6 +84,7 @@ export {
 export {
   type DirectApiRequestMetricsSummary,
   type RequestMetricsQueryPort,
+  type ThreadRequestMetricsAggregate,
   type ThreadRequestMetricsSummary,
   type TurnRequestMetricsSummary,
 } from "./request-metrics-port.js";

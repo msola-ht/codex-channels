@@ -8,6 +8,22 @@ export interface TurnRequestMetricsSummary {
   outputTokens: number;
   reasoningOutputTokens: number;
   outputTokensPerSecond: number | null;
+  outputSpeedSampleCount: number;
+  outputSpeedTimedCount: number;
+}
+
+export interface ThreadRequestMetricsAggregate {
+  turnCount: number;
+  requestCount: number;
+  unsuccessfulRequestCount: number;
+  requestDurationMs: number;
+  inputTokens: number;
+  cachedInputTokens: number | null;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  outputTokensPerSecond: number | null;
+  outputSpeedSampleCount: number;
+  outputSpeedTimedCount: number;
 }
 
 export interface DirectApiRequestMetricsSummary {
@@ -27,6 +43,7 @@ export interface DirectApiRequestMetricsSummary {
 export interface ThreadRequestMetricsSummary {
   threadId: string;
   latestTurn: TurnRequestMetricsSummary | null;
+  threadAggregate: ThreadRequestMetricsAggregate | null;
   latestDirectApi: DirectApiRequestMetricsSummary | null;
 }
 

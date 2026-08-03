@@ -43,6 +43,18 @@ interface TurnTimingState {
   modelCachedInputUsageCount: number;
   modelOutputTokens?: number;
   modelReasoningOutputTokens?: number;
+  timedNonReasoningOutputTokens: number;
+  timedOutputDurationMs: number;
+  outputSpeedSampleCount: number;
+  outputSpeedTimedCount: number;
+  timedReasoningOutputTokens: number;
+  timedThinkingDurationMs: number;
+  thinkingSpeedSampleCount: number;
+  thinkingSpeedTimedCount: number;
+  timedGenerationOutputTokens: number;
+  timedGenerationDurationMs: number;
+  generationSpeedSampleCount: number;
+  generationSpeedTimedCount: number;
   finalItemDeltas: Map<string, { firstAtMs: number; lastAtMs: number }>;
 }
 
@@ -238,6 +250,18 @@ export class ConversationCore {
           modelRequestDurationMs: 0,
           modelInputUsageCount: 0,
           modelCachedInputUsageCount: 0,
+          timedNonReasoningOutputTokens: 0,
+          timedOutputDurationMs: 0,
+          outputSpeedSampleCount: 0,
+          outputSpeedTimedCount: 0,
+          timedReasoningOutputTokens: 0,
+          timedThinkingDurationMs: 0,
+          thinkingSpeedSampleCount: 0,
+          thinkingSpeedTimedCount: 0,
+          timedGenerationOutputTokens: 0,
+          timedGenerationDurationMs: 0,
+          generationSpeedSampleCount: 0,
+          generationSpeedTimedCount: 0,
           finalItemDeltas: new Map(),
           ...(event.receivedAtMs === undefined
             ? {}
@@ -344,6 +368,42 @@ export class ConversationCore {
           if (event.reasoningOutputTokens !== undefined) {
             timing.modelReasoningOutputTokens =
               (timing.modelReasoningOutputTokens ?? 0) + event.reasoningOutputTokens;
+          }
+          if (event.outputTokens !== undefined) {
+            const nonReasoningOutputTokens = Math.max(
+              0,
+              event.outputTokens - (event.reasoningOutputTokens ?? 0),
+            );
+            if (nonReasoningOutputTokens > 0) {
+              timing.outputSpeedSampleCount += 1;
+              if (event.outputDurationMs !== undefined && event.outputDurationMs > 0) {
+                timing.outputSpeedTimedCount += 1;
+                timing.timedNonReasoningOutputTokens += nonReasoningOutputTokens;
+                timing.timedOutputDurationMs += event.outputDurationMs;
+              }
+            }
+            if (event.outputTokens > 0) {
+              timing.generationSpeedSampleCount += 1;
+              if (
+                event.generationDurationMs !== undefined
+                && event.generationDurationMs > 0
+              ) {
+                timing.generationSpeedTimedCount += 1;
+                timing.timedGenerationOutputTokens += event.outputTokens;
+                timing.timedGenerationDurationMs += event.generationDurationMs;
+              }
+            }
+          }
+          if (
+            event.reasoningOutputTokens !== undefined
+            && event.reasoningOutputTokens > 0
+          ) {
+            timing.thinkingSpeedSampleCount += 1;
+            if (event.thinkingDurationMs !== undefined && event.thinkingDurationMs > 0) {
+              timing.thinkingSpeedTimedCount += 1;
+              timing.timedReasoningOutputTokens += event.reasoningOutputTokens;
+              timing.timedThinkingDurationMs += event.thinkingDurationMs;
+            }
           }
           if (event.thinkingDurationMs !== undefined) {
             timing.thinkingDurationMs =
@@ -660,18 +720,13 @@ export class ConversationCore {
     if (detailedTiming && timing.modelTtftMs !== undefined) {
       result.ttftMs = timing.modelTtftMs;
     }
-    const firstDeltaAtMs = timing.firstFinalDeltaAtMs ?? timing.firstAnyDeltaAtMs;
     if (
-      detailedTiming
-      && result.ttftMs === undefined
-      && firstDeltaAtMs !== undefined
+      timing.turnStartedAtMs !== undefined
+      && timing.firstAnyDeltaAtMs !== undefined
+      && timing.firstAnyDeltaAtMs >= timing.turnStartedAtMs
     ) {
-      if (
-        timing.turnStartedAtMs !== undefined
-        && firstDeltaAtMs >= timing.turnStartedAtMs
-      ) {
-        result.ttftMs = firstDeltaAtMs - timing.turnStartedAtMs;
-      }
+      result.firstResponseLatencyMs =
+        timing.firstAnyDeltaAtMs - timing.turnStartedAtMs;
     }
     if (timing.modelOutputDurationMs !== undefined) {
       result.outputDurationMs = timing.modelOutputDurationMs;
@@ -711,13 +766,26 @@ export class ConversationCore {
       }
     }
     if (
-      nonReasoningOutputTokens !== undefined
+      timing.outputSpeedTimedCount > 0
+      && timing.timedNonReasoningOutputTokens > 0
+      && timing.timedOutputDurationMs > 0
+    ) {
+      result.outputTokensPerSecond =
+        timing.timedNonReasoningOutputTokens
+        / (timing.timedOutputDurationMs / 1_000);
+      result.outputSpeedSampleCount = timing.outputSpeedSampleCount;
+      result.outputSpeedTimedCount = timing.outputSpeedTimedCount;
+    } else if (
+      timing.modelRequestCount === 0
+      && nonReasoningOutputTokens !== undefined
       && nonReasoningOutputTokens > 0
       && result.outputDurationMs !== undefined
       && result.outputDurationMs > 0
     ) {
       result.outputTokensPerSecond =
         nonReasoningOutputTokens / (result.outputDurationMs / 1_000);
+    }
+    if (nonReasoningOutputTokens !== undefined && nonReasoningOutputTokens > 0) {
       result.nonReasoningOutputTokens = nonReasoningOutputTokens;
     }
     if (
@@ -729,35 +797,31 @@ export class ConversationCore {
     }
     if (
       detailedTiming
-      && reasoningTokens !== undefined
-      && reasoningTokens > 0
-      && timing.thinkingDurationMs !== undefined
-      && timing.thinkingDurationMs > 0
+      && timing.thinkingSpeedTimedCount > 0
+      && timing.timedReasoningOutputTokens > 0
+      && timing.timedThinkingDurationMs > 0
     ) {
       result.thinkingTokensPerSecond =
-        reasoningTokens / (timing.thinkingDurationMs / 1_000);
-      result.thinkingDurationMs = timing.thinkingDurationMs;
+        timing.timedReasoningOutputTokens / (timing.timedThinkingDurationMs / 1_000);
+      result.thinkingDurationMs = timing.timedThinkingDurationMs;
+      result.thinkingSpeedSampleCount = timing.thinkingSpeedSampleCount;
+      result.thinkingSpeedTimedCount = timing.thinkingSpeedTimedCount;
     }
-    const totalOutputTokens = (nonReasoningOutputTokens ?? 0) + (reasoningTokens ?? 0);
     if (
       detailedTiming
-      && reasoningTokens !== undefined
-      && reasoningTokens > 0
-      && timing.thinkingDurationMs !== undefined
-      && timing.thinkingDurationMs > 0
-      && result.outputDurationMs !== undefined
-      && result.outputDurationMs > 0
+      && timing.generationSpeedTimedCount > 0
+      && timing.timedGenerationOutputTokens > 0
+      && timing.timedGenerationDurationMs > 0
     ) {
-      const totalStreamMs = timing.modelGenerationDurationMs
-        ?? timing.thinkingDurationMs + result.outputDurationMs;
-      if (totalStreamMs > 0) {
-        result.generationTokensPerSecond =
-          totalOutputTokens / (totalStreamMs / 1_000);
-      }
+      result.generationTokensPerSecond =
+        timing.timedGenerationOutputTokens
+        / (timing.timedGenerationDurationMs / 1_000);
+      result.generationSpeedSampleCount = timing.generationSpeedSampleCount;
+      result.generationSpeedTimedCount = timing.generationSpeedTimedCount;
     }
     if (
       result.modelRequestCount === undefined
-      && result.ttftMs === undefined
+      && result.firstResponseLatencyMs === undefined
       && result.outputDurationMs === undefined
       && result.thinkingDurationMs === undefined
     ) {

@@ -239,7 +239,7 @@ export function createTurnCompletedPresentation(
   }
   if (event.timing?.modelRequestDurationMs !== undefined) {
     runFields.push({
-      label: "模型请求累计耗时",
+      label: "模型请求聚合耗时",
       value: formatElapsedDuration(event.timing.modelRequestDurationMs),
     });
   }
@@ -257,32 +257,50 @@ export function createTurnCompletedPresentation(
   }
   if (event.timing?.ttftMs !== undefined) {
     runFields.push({
-      label: "最后请求首字延时",
+      label: "最后请求首事件延迟",
       value: formatElapsedDuration(event.timing.ttftMs),
     });
   }
+  if (event.timing?.firstResponseLatencyMs !== undefined) {
+    runFields.push({
+      label: "首段回复延迟",
+      value: formatElapsedDuration(event.timing.firstResponseLatencyMs),
+    });
+  }
   if (event.timing?.outputTokensPerSecond !== undefined) {
+    const speedCoverage = formatSpeedCoverage(
+      event.timing.outputSpeedTimedCount,
+      event.timing.outputSpeedSampleCount,
+    );
     runFields.push({
       label: event.timing.modelRequestCount === undefined
         ? "输出速度"
         : "综合输出速度",
-      value: `${formatTokensPerSecond(event.timing.outputTokensPerSecond)}（不含推理）`,
+      value: `${formatTokensPerSecond(event.timing.outputTokensPerSecond)}（不含推理${speedCoverage}）`,
     });
   }
   if (event.timing?.thinkingTokensPerSecond !== undefined) {
+    const speedCoverage = formatSpeedCoverage(
+      event.timing.thinkingSpeedTimedCount,
+      event.timing.thinkingSpeedSampleCount,
+    );
     runFields.push({
       label: event.timing.modelRequestCount === undefined
         ? "思考速度"
         : "综合思考速度",
-      value: `${formatTokensPerSecond(event.timing.thinkingTokensPerSecond)}（推理）`,
+      value: `${formatTokensPerSecond(event.timing.thinkingTokensPerSecond)}（推理${speedCoverage}）`,
     });
   }
   if (event.timing?.generationTokensPerSecond !== undefined) {
+    const speedCoverage = formatSpeedCoverage(
+      event.timing.generationSpeedTimedCount,
+      event.timing.generationSpeedSampleCount,
+    );
     runFields.push({
       label: event.timing.modelRequestCount === undefined
         ? "生成速度"
         : "综合生成速度",
-      value: `${formatTokensPerSecond(event.timing.generationTokensPerSecond)}（含推理）`,
+      value: `${formatTokensPerSecond(event.timing.generationTokensPerSecond)}（含推理${speedCoverage}）`,
     });
   }
   if (Object.hasOwn(event, "gitBranch")) {
@@ -302,7 +320,7 @@ export function createTurnCompletedPresentation(
       ? [{ title: "本次运行", fields: runFields }]
       : []),
     ...(sessionFields.length > 0
-      ? [{ title: "当前会话", fields: sessionFields }]
+      ? [{ title: "当前会话累计", fields: sessionFields }]
       : []),
     ...(accountFields.length > 0
       ? [{ title: "账户状态", fields: accountFields }]
@@ -333,6 +351,15 @@ export function renderPlainLifecyclePresentation(
 
 function formatField(field: LifecyclePresentationField): string {
   return `${field.label}：${field.value}`;
+}
+
+function formatSpeedCoverage(
+  timedCount: number | undefined,
+  sampleCount: number | undefined,
+): string {
+  return timedCount === undefined || sampleCount === undefined
+    ? ""
+    : ` · 覆盖 ${timedCount}/${sampleCount} 次请求`;
 }
 
 function pendingSuffix(pending: boolean): string {

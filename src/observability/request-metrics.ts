@@ -88,11 +88,28 @@ export interface StoredTurnRequestMetricsSummary {
   outputTokens: number;
   reasoningOutputTokens: number;
   outputTokensPerSecond: number | null;
+  outputSpeedSampleCount: number;
+  outputSpeedTimedCount: number;
+}
+
+export interface StoredThreadRequestMetricsAggregate {
+  turnCount: number;
+  requestCount: number;
+  unsuccessfulRequestCount: number;
+  requestDurationMs: number;
+  inputTokens: number;
+  cachedInputTokens: number | null;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  outputTokensPerSecond: number | null;
+  outputSpeedSampleCount: number;
+  outputSpeedTimedCount: number;
 }
 
 export interface StoredThreadRequestMetricsSummary {
   threadId: string;
   latestTurn: StoredTurnRequestMetricsSummary | null;
+  threadAggregate: StoredThreadRequestMetricsAggregate | null;
   latestDirectApi: StoredModelRequestMetric | null;
 }
 

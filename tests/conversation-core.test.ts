@@ -1083,6 +1083,24 @@ describe("ConversationCore", () => {
       outputDurationMs: 500,
       generationDurationMs: 900,
     });
+    core.handle({
+      type: "turn.modelTiming.updated",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      requestStartedAtMs: 1_300,
+      requestDurationMs: 500,
+      outputTokens: 50,
+      reasoningOutputTokens: 0,
+    });
+    core.handle({
+      type: "turn.modelTiming.updated",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      requestStartedAtMs: 1_400,
+      requestDurationMs: 500,
+      thinkingDurationMs: 800,
+      generationDurationMs: 900,
+    });
     handleNotification(core, {
       method: "thread/tokenUsage/updated",
       params: {
@@ -1114,16 +1132,22 @@ describe("ConversationCore", () => {
     ) as Extract<OutputEvent, { type: "turn.completed" }> | undefined;
     expect(completed).toMatchObject({
       timing: {
-        modelRequestCount: 2,
-        modelRequestDurationMs: 3_000,
+        modelRequestCount: 4,
+        modelRequestDurationMs: 4_000,
         requestInputTokens: 300,
         requestCachedInputTokens: 240,
-        requestOutputTokens: 90,
-        ttftMs: 250,
+        requestOutputTokens: 140,
+        firstResponseLatencyMs: 500,
         outputDurationMs: 1_300,
         thinkingDurationMs: 1_000,
-        nonReasoningOutputTokens: 40,
+        nonReasoningOutputTokens: 90,
         reasoningTokens: 50,
+        outputSpeedSampleCount: 3,
+        outputSpeedTimedCount: 2,
+        thinkingSpeedSampleCount: 2,
+        thinkingSpeedTimedCount: 2,
+        generationSpeedSampleCount: 3,
+        generationSpeedTimedCount: 2,
       },
     });
     expect(completed?.timing?.outputTokensPerSecond).toBeCloseTo(40 / 1.3);
@@ -1244,6 +1268,9 @@ describe("ConversationCore", () => {
       requestOutputTokens: 90,
       nonReasoningOutputTokens: 40,
       outputTokensPerSecond: 20,
+      outputSpeedSampleCount: 2,
+      outputSpeedTimedCount: 2,
+      firstResponseLatencyMs: 1_000,
     });
     expect(completed?.timing?.ttftMs).toBeUndefined();
     expect(completed?.timing?.reasoningTokens).toBeUndefined();

@@ -67,8 +67,8 @@ Telegram 和飞书在交互消息创建成功或失败时
 Conversation 与 Actor 在内存保留五分钟有效的一次重试输入，`/vision retry` 复用原要求与临时图片；
 成功、新图片任务、取消、过期或停止会清除记录。停止时原生批次排空，尚未提交的手动收集直接清除；这些状态都不根据消息间隔
 猜测独立消息关系。`vision-command.ts` 统一三个 Surface 的命令和确认文案。
-三渠道共享的 `/metrics` 展示当前 Thread 最近 Turn 的聚合请求次数、累计模型耗时、缓存与综合
-输出速度，并单独列出最近视觉等直接 API 请求；不把请求累计输入误写成上下文占用。
+三渠道共享的 `/metrics` 分开展示当前 Thread 最近 Turn 的运行聚合、指标库保留范围内的会话累计，
+并单独列出最近视觉等直接 API 请求；综合速度附带有效计时覆盖率，不把请求累计输入误写成上下文占用。
 定量收齐确认在调用 Application 前同步入队；外部视觉请求发起、10 秒后的有界心跳及完成后的
 视觉模型 ID、本地实测 API 耗时和上游实际 Token 用量由 Core 作为平台无关事件发布。图片收集、
 转发、心跳和完成消息统一使用标题与字段列表，三个渠道只负责转换 Markdown/HTML/富文本并按序投递。
@@ -81,13 +81,13 @@ Turn、Thread 或 Surface 关闭时清理。
 `quoted-input.ts` 把各平台已验证的回复/引用正文转换为有界、明确标记且与当前消息分离的上下文；
 引用获取仍由各 Surface 负责，不能读取 Gateway 私有历史或让引用内容参与命令解析。
 `lifecycle-presentation.ts` 统一 Telegram、飞书与微信的 Gateway 上线、Turn 开始确认和 Turn
-结束汇报信息模型、字段顺序与中文状态词；结束汇报把本次运行、当前会话和账户状态依次分区，按 Turn
-聚合统计代理捕获的全部模型请求，并保留 Provider 通用的 Thread Token/上下文指标。原生 OpenAI
+结束汇报信息模型、字段顺序与中文状态词；结束汇报把本次运行、当前会话累计和账户状态依次分区，按 Turn
+聚合统计代理捕获的全部模型请求，并保留 Provider 通用的 Thread Token/上下文累计指标。原生 OpenAI
 鉴权的 Codex Provider 统一显示为“OpenAI 官方”，且只在该类 Thread 显示 Fast 与 OpenAI 周限；
 直接 API 的自定义提供商继续使用自身名称；各 Surface 只保留 HTML、
 CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Thread 的文本、审批和完成汇报均标注
 短 Thread ID，并继续进入原 Conversation 的有界顺序队列。
-`elapsed-duration.ts` 只把已确认的 Turn、首字延时等毫秒值或账户用量秒数格式化为三个 Surface
+`elapsed-duration.ts` 只把已确认的 Turn、首事件/首段回复延迟等毫秒值或账户用量秒数格式化为三个 Surface
 共用的中文短文本，不负责计时、状态或持久化。
 `account-format.ts` 统一套餐名称、额度状态、百分比、周期与重置时间格式，供命令结果、运行时通知
 和生命周期汇报复用。

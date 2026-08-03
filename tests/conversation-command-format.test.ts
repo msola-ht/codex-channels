@@ -122,6 +122,21 @@ describe("provider-aware conversation command formatting", () => {
           outputTokens: 900,
           reasoningOutputTokens: 300,
           outputTokensPerSecond: 60.25,
+          outputSpeedSampleCount: 3,
+          outputSpeedTimedCount: 2,
+        },
+        threadAggregate: {
+          turnCount: 8,
+          requestCount: 21,
+          unsuccessfulRequestCount: 2,
+          requestDurationMs: 142_000,
+          inputTokens: 180_000,
+          cachedInputTokens: 174_000,
+          outputTokens: 4_200,
+          reasoningOutputTokens: 1_800,
+          outputTokensPerSecond: 58,
+          outputSpeedSampleCount: 21,
+          outputSpeedTimedCount: 20,
         },
         latestDirectApi: {
           provider: "bltcy",
@@ -140,9 +155,14 @@ describe("provider-aware conversation command formatting", () => {
     });
 
     expect(rendered).toContain("模型请求：3 次（异常 1 次）");
-    expect(rendered).toContain("模型请求累计耗时：1分5秒");
+    expect(rendered).toContain("模型请求聚合耗时：1分5秒");
+    expect(rendered).toContain("模型请求累计耗时：2分22秒");
     expect(rendered).toContain("缓存命中率：80.00%");
-    expect(rendered).toContain("综合输出速度：60 token/s（不含推理）");
+    expect(rendered).toContain("最近运行聚合：");
+    expect(rendered).toContain("综合输出速度：60 token/s（不含推理 · 覆盖 2/3 次请求）");
+    expect(rendered).toContain("当前会话指标累计：");
+    expect(rendered).toContain("Turn：8 次");
+    expect(rendered).toContain("综合输出速度：58 token/s（不含推理 · 覆盖 20/21 次请求）");
     expect(rendered).toContain("最近直接 API：");
     expect(rendered).toContain("API 提供商：BLTCY");
     expect(rendered).toContain("调用模型：gpt-5.6-luna");

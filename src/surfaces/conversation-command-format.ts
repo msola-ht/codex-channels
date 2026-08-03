@@ -538,9 +538,9 @@ export function formatConversationMetrics(
     const turn = summary.latestTurn;
     lines.push(
       "",
-      "最近 Turn：",
+      "最近运行聚合：",
       `模型请求：${turn.requestCount} 次${turn.unsuccessfulRequestCount > 0 ? `（异常 ${turn.unsuccessfulRequestCount} 次）` : ""}`,
-      `模型请求累计耗时：${formatElapsedDuration(turn.requestDurationMs)}`,
+      `模型请求聚合耗时：${formatElapsedDuration(turn.requestDurationMs)}`,
       `输入：${formatTokenCount(turn.inputTokens)}`,
       ...(turn.cachedInputTokens === null
         ? ["缓存：上游未提供完整数据"]
@@ -555,10 +555,43 @@ export function formatConversationMetrics(
         : []),
       ...(turn.outputTokensPerSecond === null
         ? []
-        : [`综合输出速度：${formatTokensPerSecond(turn.outputTokensPerSecond)}（不含推理）`]),
+        : [formatAggregateOutputSpeed(
+            turn.outputTokensPerSecond,
+            turn.outputSpeedTimedCount,
+            turn.outputSpeedSampleCount,
+          )]),
     );
   } else {
-    lines.push("", "最近 Turn：暂无已记录请求");
+    lines.push("", "最近运行聚合：暂无已记录请求");
+  }
+  if (summary.threadAggregate) {
+    const aggregate = summary.threadAggregate;
+    lines.push(
+      "",
+      "当前会话指标累计：",
+      `Turn：${aggregate.turnCount} 次`,
+      `模型请求：${aggregate.requestCount} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${aggregate.unsuccessfulRequestCount} 次）` : ""}`,
+      `模型请求累计耗时：${formatElapsedDuration(aggregate.requestDurationMs)}`,
+      `输入：${formatTokenCount(aggregate.inputTokens)}`,
+      ...(aggregate.cachedInputTokens === null
+        ? ["缓存：上游未提供完整数据"]
+        : [
+            `命中缓存：${formatTokenCount(aggregate.cachedInputTokens)}`,
+            `未命中缓存：${formatTokenCount(Math.max(0, aggregate.inputTokens - aggregate.cachedInputTokens))}`,
+            `缓存命中率：${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}`,
+          ]),
+      `输出：${formatTokenCount(aggregate.outputTokens)}`,
+      ...(aggregate.reasoningOutputTokens > 0
+        ? [`其中推理输出：${formatTokenCount(aggregate.reasoningOutputTokens)}`]
+        : []),
+      ...(aggregate.outputTokensPerSecond === null
+        ? []
+        : [formatAggregateOutputSpeed(
+            aggregate.outputTokensPerSecond,
+            aggregate.outputSpeedTimedCount,
+            aggregate.outputSpeedSampleCount,
+          )]),
+    );
   }
   if (summary.latestDirectApi) {
     const direct = summary.latestDirectApi;
@@ -583,6 +616,14 @@ export function formatConversationMetrics(
     );
   }
   return lines.join("\n");
+}
+
+function formatAggregateOutputSpeed(
+  outputTokensPerSecond: number,
+  timedCount: number,
+  sampleCount: number,
+): string {
+  return `综合输出速度：${formatTokensPerSecond(outputTokensPerSecond)}（不含推理 · 覆盖 ${timedCount}/${sampleCount} 次请求）`;
 }
 
 function formatSessionLabel(value: string): string {

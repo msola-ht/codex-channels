@@ -8,16 +8,17 @@
 - `core.ts`：维护活动 Turn、Token、当前 Goal、上下文压缩 Item ID、最近 Diff/Plan 和事件去重状态，
   把稳定输入事件归约为文本、操作、状态和完成事件；Turn 完成事件原样携带 Client 已校验的官方
   `durationMs` 与 Router 已确认的 `modelProvider`；模型代理提供时，Core 按 Thread/Turn 聚合全部
-  已关联请求的次数、累计耗时、Usage 与流式时间窗，不读取 SQLite；不含推理的综合输出速度使用各请求
-  不含推理的输出 Token 总和除以输出时间窗总和。OpenAI 不展示隐藏推理计时，DeepSeek 才展示最后请求
-  首字延时以及整轮综合思考与生成速度，未知 Provider 默认关闭这些详细指标；代理缺席时仍由 Client
+  已关联请求的次数、累计耗时、Usage 与流式时间窗，不读取 SQLite；三类综合速度只聚合同时具有对应
+  Token 和流式时间窗的请求，并携带已计时请求数与可计速请求数，避免缺失时间窗时虚高。OpenAI 不展示
+  隐藏推理计时，DeepSeek 才展示最后请求首事件延迟以及整轮综合思考与生成速度；所有 Provider 使用
+  App Server 增量展示首段回复延迟。代理缺席时仍由 Client
   通知边界时间戳和 App Server 最近 Usage 提供有限回退；
   Thread Token 指标对所有 Provider 保持通用，OpenAI 账户周限只附加到 OpenAI Thread；可重试错误
   不污染最终完成状态，Thread 与全局 warning 分开路由。
 - `input-events.ts`：定义 Client 可投递给 Core 的平台无关可辨识输入联合，不含 RPC method、
   未知 params 或生成协议类型；其中 `turn.modelTiming.updated` 由 Bootstrap 把模型代理的
   模型流与 Usage 指标转换为稳定输入，Core 按 Thread/Turn 累计每个已确认请求，并单独保留请求时间
-  最新一次的首字延时；根据 Provider 能力计算通用或详细聚合计时。
+  最新一次的首事件延迟；根据 Provider 能力计算通用或详细聚合计时。
 - `events.ts`：定义 Conversation 目标、稳定 Token、Plan、Goal、Turn、额度、账户和 MCP 类型，以及
   输出事件、Turn 产物、操作状态、OpenAI 账户归属判定和关键事件判定；外部视觉 API 请求发起后
   使用不含路径、提示正文或凭据的非关键 `vision.started` 事件通知对应渠道。

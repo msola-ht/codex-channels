@@ -260,6 +260,7 @@ export class GatewayApplication {
           return {
             threadId: summary.threadId,
             latestTurn: summary.latestTurn,
+            threadAggregate: summary.threadAggregate,
             latestDirectApi: direct === null
               ? null
               : {

@@ -32,9 +32,9 @@
   以及 Provider 账户适配器与查询窄端口；不同来源不得共用含义不一致的字段。
 - `provider-account-service.ts`：维护编译期显式 Provider 账户适配器注册表；OpenAI 适配器复用
   App Server 账户查询，未知 Provider 默认返回不支持，不回退到 OpenAI。
-- `request-metrics-port.ts`：定义 `/metrics` 使用的当前 Thread 最近 Turn 聚合和最近直接 API
-  请求只读摘要；直接 API 保留稳定提供商 ID，并可携带配置中的显示名称；不向 Application 暴露
-  SQLite、价格快照或请求正文。
+- `request-metrics-port.ts`：定义 `/metrics` 使用的当前 Thread 最近 Turn 运行聚合、整个 Thread
+  指标累计和最近直接 API 请求只读摘要；直接 API 保留稳定提供商 ID，并可携带配置中的显示名称；
+  不向 Application 暴露 SQLite、价格快照或请求正文。
 - `vision-port.ts`：定义模型无原生图片能力时使用的稳定识别端口、严格结果 Schema 和已完成但
   不可信的图片资料格式；`conversation-service.ts` 只在模型目录明确拒绝图片且组合根注入适配器时
   传递当前提示并替换 `localImage`，未配置时保持原有失败关闭行为；外部识图全局最多两个在途

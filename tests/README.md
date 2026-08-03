@@ -103,9 +103,10 @@
   到稳定 Application 摘要的映射、重置券数量，以及 DeepSeek 私有配置读取、统一代理、官方余额
   Schema 裁剪、响应上限和错误脱敏；Thread Token/上下文对 Provider 通用，OpenAI Fast 与周限
   不进入 DeepSeek 状态或完成卡片。
-- 全 Provider 同一 Turn 多次模型响应的请求次数、累计模型耗时、缓存与文本/函数/自定义工具参数
-  不含推理的综合输出速度；DeepSeek 最后请求首字延时和整轮综合思考/生成速度，以及 OpenAI 即使收到
-  推理摘要计时也只保留不含推理的输出指标；当前 Thread `/metrics` 的最近 Turn 聚合、只选择 HTTP
+- 全 Provider 同一 Turn 多次模型响应的请求次数、聚合模型耗时、缓存与文本/函数/自定义工具参数
+  不含推理的综合输出速度及时间窗覆盖率；DeepSeek 最后请求首事件延迟、全 Provider 首段回复延迟和
+  整轮综合思考/生成速度，以及 OpenAI 即使收到推理摘要计时也只保留不含推理的输出指标；当前 Thread
+  `/metrics` 的最近 Turn 运行聚合、指标库保留范围内的 Thread 会话累计、只选择 HTTP
   JSON 调用记录的最近直接 API
   分栏查询；自动回环
   代理的精确 `/responses`、`/responses/compact`
