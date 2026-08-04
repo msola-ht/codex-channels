@@ -1,6 +1,7 @@
 import {
   type ConversationCommandResult,
   type ConversationStatus,
+  type ExchangeRateSnapshot,
 } from "../../application/index.js";
 import type {
   OutputEvent,
@@ -89,14 +90,16 @@ export function renderWeixinIdentity(message: {
 
 export function renderWeixinTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
+  exchangeRate?: ExchangeRateSnapshot | null,
 ): string {
   return renderWeixinLifecyclePresentation(
-    createTurnCompletedPresentation(event),
+    createTurnCompletedPresentation(event, exchangeRate),
   );
 }
 
 export function renderWeixinCommandResult(
   result: ConversationCommandResult,
+  exchangeRate?: ExchangeRateSnapshot | null,
 ): string {
   switch (result.kind) {
     case "outcome":
@@ -120,7 +123,7 @@ export function renderWeixinCommandResult(
     case "usage":
       return formatConversationUsage(result);
     case "metrics":
-      return formatConversationMetrics(result);
+      return formatConversationMetrics(result, exchangeRate);
     case "limits":
       return formatConversationLimits(result);
     case "permissions":

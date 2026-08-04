@@ -74,6 +74,7 @@ import { createProxyFetch } from "./proxy-fetch.js";
 import { createResponsesVisionAdapter } from "./responses-vision-adapter.js";
 import { ProviderMetricsComposition } from "./provider-metrics-composition.js";
 import { RemoteModelPricingCatalog } from "./model-pricing-catalog.js";
+import { RemoteExchangeRate } from "./exchange-rate.js";
 import { mergeSessionReferenceCost } from "./reference-cost-summary.js";
 
 export class GatewayApplication {
@@ -92,6 +93,7 @@ export class GatewayApplication {
   private readonly core: ConversationCore;
   private readonly providerMetrics: ProviderMetricsComposition;
   private readonly modelPricing: RemoteModelPricingCatalog;
+  private readonly exchangeRate: RemoteExchangeRate;
   private readonly bindings: SqliteBindingStore;
   private readonly workspaces: WorkspaceRegistry;
   private removeRpcNotification: (() => void) | undefined;
@@ -161,6 +163,11 @@ export class GatewayApplication {
     );
     this.modelPricing = new RemoteModelPricingCatalog({
       cachePath: join(dirname(config.stateDatabasePath), "model-pricing.json"),
+      fetchImpl: createProxyFetch(config.networkProxy),
+      logger,
+    });
+    this.exchangeRate = new RemoteExchangeRate({
+      cachePath: join(dirname(config.stateDatabasePath), "exchange-rate.json"),
       fetchImpl: createProxyFetch(config.networkProxy),
       logger,
     });
@@ -437,6 +444,9 @@ export class GatewayApplication {
         accountId,
         error,
       ),
+      exchangeRate: () => this.config.referenceCostCny
+        ? this.exchangeRate.resolve()
+        : null,
     });
     this.surfaces = this.surfaceModules.map((module) => module.adapter);
     this.surfaceManager = new SurfaceManager(
@@ -558,6 +568,9 @@ export class GatewayApplication {
     try {
       this.requireRunning();
       this.modelPricing.start();
+      if (this.config.referenceCostCny) {
+        this.exchangeRate.start();
+      }
       await this.providerMetrics.start();
       this.removeRpcNotification = this.codex.onNotification((notification) => {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
@@ -627,6 +640,7 @@ export class GatewayApplication {
       ["Surface", () => this.surfaceManager.stop()],
       ["Provider Proxy Metrics", () => this.providerMetrics.close()],
       ["Model Pricing", () => this.modelPricing.close()],
+      ["Exchange Rate", () => this.exchangeRate.close()],
       ["Inbound Event Bus", () => this.inbound.close()],
       ["Output Event Bus", () => this.output.close()],
       ["Codex Client", () => this.codex.close()],

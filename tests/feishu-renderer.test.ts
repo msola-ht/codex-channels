@@ -211,7 +211,7 @@ describe("Feishu output renderer", () => {
       "artifacts",
       "goal",
     ]);
-    expect(results.map(renderFeishuCommandResult)).toEqual([
+    expect(results.map((result) => renderFeishuCommandResult(result))).toEqual([
       "当前没有运行中的任务。",
       "当前 Workspace 没有匹配的可恢复会话。",
       expect.stringContaining("Thread：尚未绑定"),
@@ -826,11 +826,11 @@ describe("Feishu output renderer", () => {
     expect(criticalEvents.every(isCriticalOutputEvent)).toBe(true);
     expect(criticalEvents
       .filter((event) => event.type !== "operation.updated")
-      .map(renderFeishuOutput)
+      .map((event) => renderFeishuOutput(event))
       .every((text) => Boolean(text?.trim()))).toBe(true);
     expect(renderFeishuOutput(criticalEvents[2]!)).toBeNull();
     expect(progressEvents.some(isCriticalOutputEvent)).toBe(false);
-    expect(progressEvents.map(renderFeishuOutput)).toEqual([
+    expect(progressEvents.map((event) => renderFeishuOutput(event))).toEqual([
       "视觉识别中\n- 图片：2 张\n- 状态：已发送至视觉 API",
       "**已开始处理。**",
       null,
@@ -870,7 +870,7 @@ describe("Feishu output renderer", () => {
       },
     ];
 
-    const rendered = events.map(renderFeishuOutput).join("\n");
+    const rendered = events.map((event) => renderFeishuOutput(event)).join("\n");
     expect(rendered).toContain("模型请求失败，token=[已隐藏]");
     expect(rendered).toContain("Codex App Server 连接已断开，正在恢复连接");
     expect(rendered).toContain("登录失败，cookie=[已隐藏]");

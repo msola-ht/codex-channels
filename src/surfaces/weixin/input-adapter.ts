@@ -1,6 +1,9 @@
 import type { Logger } from "pino";
 
-import type { ConversationUseCases } from "../../application/index.js";
+import type {
+  ConversationUseCases,
+  ExchangeRateSnapshot,
+} from "../../application/index.js";
 import {
   conversationTargetKey,
   type ConversationTarget,
@@ -82,6 +85,7 @@ export interface WeixinInputAdapterOptions {
   closeTimeoutMs?: number;
   now?: () => number;
   debugEnabled?: boolean;
+  exchangeRate?: () => ExchangeRateSnapshot | null;
   logger?: Pick<Logger, "debug">;
 }
 
@@ -116,6 +120,9 @@ export class WeixinInputAdapter {
         pollingHealth: this.health,
         now: this.now,
         debugEnabled: options.debugEnabled ?? false,
+        ...(options.exchangeRate === undefined
+          ? {}
+          : { exchangeRate: options.exchangeRate }),
         ...(options.doctor === undefined
           ? {}
           : {

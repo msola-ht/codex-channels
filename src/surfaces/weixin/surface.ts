@@ -1,6 +1,7 @@
 import type { Logger } from "pino";
 
 import type { ConversationUseCases } from "../../application/index.js";
+import type { ExchangeRateSnapshot } from "../../application/index.js";
 import type {
   ConversationTarget,
 } from "../../conversation-core/index.js";
@@ -71,6 +72,7 @@ export interface WeixinSurfaceOptions {
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
   debugEnabled?: boolean;
+  exchangeRate?: () => ExchangeRateSnapshot | null;
   inputCloseTimeoutMs?: number;
   outbox?: WeixinOutboxOptions;
 }
@@ -198,6 +200,9 @@ export class WeixinSurface implements SurfaceAdapter {
         : { actorRegistry: options.actorRegistry }),
       onFatal: options.onFatal,
       debugEnabled: options.debugEnabled ?? false,
+      ...(options.exchangeRate === undefined
+        ? {}
+        : { exchangeRate: options.exchangeRate }),
       logger: options.logger,
       onRetry: (event) => {
         logUpdatesRetry(

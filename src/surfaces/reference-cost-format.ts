@@ -1,3 +1,5 @@
+import type { ExchangeRateSnapshot } from "../application/index.js";
+
 export interface ReferenceCostDisplay {
   currency: string | null;
   totalCostNanos: number | null;
@@ -53,4 +55,34 @@ export function formatCurrencyNanos(currency: string, value: number): string {
     minimumFractionDigits: amount < 0.01 ? 6 : 2,
     maximumFractionDigits: 6,
   }).format(amount);
+}
+
+export function formatReferenceCostCnyValue(
+  value: ReferenceCostDisplay,
+  exchangeRate: ExchangeRateSnapshot,
+): string | null {
+  if (
+    value.currency !== "USD"
+    || value.totalCostNanos === null
+    || value.pricedRequestCount === 0
+  ) {
+    return null;
+  }
+  const converted = Math.round(value.totalCostNanos * exchangeRate.usdToCny);
+  if (!Number.isSafeInteger(converted)) return null;
+  return `约 ${formatCurrencyNanos("CNY", converted)}（1 USD ≈ ${formatExchangeRate(exchangeRate.usdToCny)} CNY）`;
+}
+
+export function formatExchangeRateLine(exchangeRate: ExchangeRateSnapshot): string {
+  return `汇率：1 USD ≈ ${formatExchangeRate(exchangeRate.usdToCny)} CNY（${exchangeRate.source} · ${new Intl.DateTimeFormat("zh-CN", {
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(exchangeRate.effectiveAtMs))}）`;
+}
+
+function formatExchangeRate(value: number): string {
+  return value.toFixed(4);
 }

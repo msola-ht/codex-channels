@@ -69,6 +69,9 @@ describe("GatewayApplication startup cleanup", () => {
           start: () => calls.push("start:model-pricing"),
           close: () => calls.push("close:model-pricing"),
         },
+        exchangeRate: {
+          close: () => undefined,
+        },
         stopping: false,
         reconnecting: undefined,
         codex: {
@@ -182,6 +185,9 @@ describe("GatewayApplication startup cleanup", () => {
         start: () => undefined,
         close: () => undefined,
       },
+      exchangeRate: {
+        close: () => undefined,
+      },
       stopping: false,
       disconnectedProviders: new Set<string>(),
       codex: {
@@ -271,6 +277,9 @@ describe("GatewayApplication startup cleanup", () => {
       },
       modelPricing: {
         start: () => undefined,
+        close: () => undefined,
+      },
+      exchangeRate: {
         close: () => undefined,
       },
       stopping: false,

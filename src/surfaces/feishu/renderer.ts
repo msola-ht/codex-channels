@@ -1,6 +1,7 @@
 import type {
   ConversationCommandResult,
   ConversationStatus,
+  ExchangeRateSnapshot,
 } from "../../application/index.js";
 import type {
   OutputEvent,
@@ -109,6 +110,7 @@ export function renderFeishuIdentity(
 
 export function renderFeishuCommandResult(
   result: ConversationCommandResult,
+  exchangeRate?: ExchangeRateSnapshot | null,
 ): string {
   switch (result.kind) {
     case "outcome":
@@ -132,7 +134,7 @@ export function renderFeishuCommandResult(
     case "usage":
       return formatConversationUsage(result);
     case "metrics":
-      return formatConversationMetrics(result);
+      return formatConversationMetrics(result, exchangeRate);
     case "limits":
       return formatConversationLimits(result);
     case "permissions":
@@ -158,7 +160,10 @@ export function renderFeishuUserFacingError(
   return formatSurfaceUserFacingError(error, "飞书");
 }
 
-export function renderFeishuOutput(event: OutputEvent): string | null {
+export function renderFeishuOutput(
+  event: OutputEvent,
+  exchangeRate?: ExchangeRateSnapshot | null,
+): string | null {
   switch (event.type) {
     case "vision.started":
       return formatVisionStarted(event.imageCount);
@@ -182,7 +187,7 @@ export function renderFeishuOutput(event: OutputEvent): string | null {
     case "plan.updated":
       return null;
     case "turn.completed":
-      return renderFeishuTurnCompleted(event);
+      return renderFeishuTurnCompleted(event, exchangeRate);
     case "thread.status":
       return `Thread 状态：${threadStatusLabel(event.status)}`;
     case "connection.lost":
@@ -200,9 +205,10 @@ export function renderFeishuOutput(event: OutputEvent): string | null {
 
 function renderFeishuTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
+  exchangeRate?: ExchangeRateSnapshot | null,
 ): string {
   return renderFeishuLifecyclePresentation(
-    createTurnCompletedPresentation(event),
+    createTurnCompletedPresentation(event, exchangeRate),
   );
 }
 

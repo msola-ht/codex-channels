@@ -28,6 +28,7 @@ import {
   renderWeixinIdentity,
   renderWeixinUserFacingError,
 } from "./command-renderer.js";
+import type { ExchangeRateSnapshot } from "../../application/index.js";
 import {
   WeixinFileInputError,
   type WeixinFilePort,
@@ -103,6 +104,7 @@ export class WeixinConversationAdapter {
       doctor?: WeixinDoctor;
       now?: () => number;
       debugEnabled?: boolean;
+      exchangeRate?: () => ExchangeRateSnapshot | null;
     } = { quietWindowMs: 0 },
     private readonly files?: Pick<WeixinFilePort, "download">,
     private readonly audios?: Pick<WeixinAudioPort, "download">,
@@ -326,7 +328,10 @@ export class WeixinConversationAdapter {
         command.name,
         command.argumentsText,
       );
-      const rendered = renderWeixinCommandResult(result);
+      const rendered = renderWeixinCommandResult(
+        result,
+        this.inputOptions.exchangeRate?.() ?? null,
+      );
       this.notifyCommand(
         message.target,
         result.kind === "status" && this.inputOptions.pollingHealth

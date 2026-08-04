@@ -5,6 +5,7 @@ import {
   type OutputEvent,
 } from "../../conversation-core/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
+import type { ExchangeRateSnapshot } from "../../application/index.js";
 import { readGeneratedImage } from "../generated-image.js";
 import {
   OperationUpdateBuffer,
@@ -117,6 +118,7 @@ export interface FeishuOutboxOptions {
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
   readGeneratedImage?: typeof readGeneratedImage;
+  exchangeRate?: () => ExchangeRateSnapshot | null;
 }
 
 export class FeishuOutbox implements SurfaceOutputPort {
@@ -276,7 +278,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
         event.target.conversationId,
         turnKey(event.threadId, event.turnId),
       );
-      const completion = renderFeishuOutput(event);
+      const completion = renderFeishuOutput(
+        event,
+        this.options.exchangeRate?.() ?? null,
+      );
       if (
         completion !== null
         && this.finishStreamsForTurn(event.threadId, event.turnId, completion)
@@ -292,7 +297,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
       );
       return;
     }
-    const rendered = renderFeishuOutput(event);
+    const rendered = renderFeishuOutput(
+      event,
+      this.options.exchangeRate?.() ?? null,
+    );
     if (rendered === null) {
       return;
     }

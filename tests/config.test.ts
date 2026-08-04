@@ -287,6 +287,7 @@ describe("Gateway config.toml", () => {
     expect(persisted.display).toEqual({
       operation_updates: "compact",
       plan_updates: true,
+      reference_cost_cny: false,
     });
     expect(persisted.storage).toEqual({
       database_path: "data/gateway.sqlite3",
@@ -384,6 +385,20 @@ describe("Gateway config.toml", () => {
     expect(loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
     }).config.planUpdatesEnabled).toBe(false);
+  });
+
+  it("preserves an explicit reference cost CNY display opt-in", () => {
+    const fixture = createFixture({
+      display: {
+        operation_updates: "compact",
+        plan_updates: true,
+        reference_cost_cny: true,
+      },
+    });
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.referenceCostCny).toBe(true);
   });
 
   it("rejects the removed boolean operation update setting", () => {

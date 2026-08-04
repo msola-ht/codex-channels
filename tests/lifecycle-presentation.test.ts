@@ -305,6 +305,43 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain(
       "参考总价：$0.000915（已计价 1/1 个成功请求）",
     );
+    expect(rendered).not.toContain("折合人民币");
+  });
+
+  it("converts the run reference cost with the provided exchange rate", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "weixin",
+          accountId: "default",
+          conversationId: "100",
+        },
+        threadId: "thread-deepseek",
+        turnId: "turn-deepseek",
+        status: "completed",
+        timing: {
+          modelRequestCount: 1,
+          completedModelRequestCount: 1,
+          referenceCost: {
+            currency: "USD",
+            totalCostNanos: 1_000_000_000,
+            pricedRequestCount: 1,
+            requestCount: 1,
+            uncachedInputPricePerMillionNanos: 140_000_000,
+            cachedInputPricePerMillionNanos: 2_800_000,
+            outputPricePerMillionNanos: 280_000_000,
+            hasMixedPrices: false,
+          },
+        },
+      }, {
+        usdToCny: 7.2,
+        effectiveAtMs: 1_700_000_000_000,
+        source: "ecb",
+      }),
+    );
+
+    expect(rendered).toContain("折合人民币：约 ¥7.20（1 USD ≈ 7.2000 CNY）");
   });
 
   it("keeps a non-retryable model failure visible after a completed request", () => {

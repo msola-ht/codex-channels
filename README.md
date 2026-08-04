@@ -82,10 +82,15 @@ codexc service reload
 [display]
 operation_updates = "compact"
 plan_updates = true
+reference_cost_cny = false
 ```
 
 - `operation_updates`：`full` 显示完整操作详情，`compact` 显示摘要，`hidden` 隐藏操作过程。
 - `plan_updates`：是否显示 Codex 计划，默认开启。
+- `reference_cost_cny`：是否获取 USD/CNY 汇率并把参考总价折合为人民币展示（默认关闭，关闭时不
+  发起汇率请求）。开启后 `/metrics` 各视图和完成卡片会显示汇率与折合金额；汇率每 6 小时刷新，
+  优先使用 `open.er-api.com`，失败回退 ECB（`frankfurter.app`），离线沿用最近一次缓存，不可用时
+  只显示 USD 参考价。换算按最近一次汇率近似，不按历史汇率回算。
 
 ### 调试模式
 

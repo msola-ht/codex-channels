@@ -1,6 +1,7 @@
 import type { Logger } from "pino";
 
 import type { ConversationUseCases } from "../../application/index.js";
+import type { ExchangeRateSnapshot } from "../../application/index.js";
 import type {
   ConversationActorRegistry,
   SurfaceAccessPolicy,
@@ -32,6 +33,7 @@ export interface CreateWeixinSurfaceOptions {
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
   debugEnabled?: boolean;
+  exchangeRate?: () => ExchangeRateSnapshot | null;
   fetchImpl?: typeof fetch;
   logger: Logger;
   onFatal(error: WeixinInputFatalError): void;
@@ -84,6 +86,9 @@ export function createWeixinSurface(
     ...(options.debugEnabled === undefined
       ? {}
       : { debugEnabled: options.debugEnabled }),
+    ...(options.exchangeRate === undefined
+      ? {}
+      : { exchangeRate: options.exchangeRate }),
     logger: options.logger,
     onFatal: (error) => options.onFatal(error),
   });

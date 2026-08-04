@@ -1,5 +1,6 @@
 import type { Logger } from "pino";
 
+import type { ExchangeRateSnapshot } from "../../application/index.js";
 import {
   isCriticalOutputEvent,
   type ConversationTarget,
@@ -87,6 +88,7 @@ export interface WeixinOutboxOptions {
   closeTimeoutMs?: number;
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
+  exchangeRate?: () => ExchangeRateSnapshot | null;
   onReplyContextInvalidated?: (target: ConversationTarget) => Promise<void>;
   imageClient?: Pick<WeixinImageSendProtocolClient, "sendImage">;
   fileClient?: Pick<WeixinFileSendProtocolClient, "sendFile">;
@@ -337,7 +339,12 @@ export class WeixinOutbox implements SurfaceOutputPort {
               `${event.background ? `后台任务 · ${event.threadId.slice(0, 12)}\n\n` : ""}${event.text}`,
             );
       case "turn.completed": {
-        return formatWeixinCommandText(renderWeixinTurnCompleted(event));
+        return formatWeixinCommandText(
+          renderWeixinTurnCompleted(
+            event,
+            this.options.exchangeRate?.() ?? null,
+          ),
+        );
       }
       case "connection.lost":
         return formatConnectionLost(visibleMessage(event.message));

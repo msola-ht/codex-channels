@@ -45,6 +45,7 @@ import {
   type FeishuAudioPort,
 } from "./audio.js";
 import type { FeishuOutbox } from "./outbox.js";
+import type { ExchangeRateSnapshot } from "../../application/index.js";
 import type { FeishuOAuthControllerPort } from "./oauth.js";
 import {
   renderFeishuDoctor,
@@ -104,6 +105,7 @@ export class FeishuConversationAdapter {
       onQuotedTextError?(error: unknown): void;
       now?: () => number;
       debugEnabled?: boolean;
+      exchangeRate?: () => ExchangeRateSnapshot | null;
     } = { quietWindowMs: 0 },
   ) {
     this.commands = new ConversationCommandService(conversations);
@@ -209,7 +211,10 @@ export class FeishuConversationAdapter {
         );
         this.notifyMarkdown(
           message.target.conversationId,
-          renderFeishuCommandResult(result),
+          renderFeishuCommandResult(
+            result,
+            this.inputOptions.exchangeRate?.() ?? null,
+          ),
         );
         return;
       }
@@ -376,7 +381,10 @@ export class FeishuConversationAdapter {
       }
       this.notifyMarkdown(
         target.conversationId,
-        renderFeishuCommandResult(result),
+        renderFeishuCommandResult(
+          result,
+          this.inputOptions.exchangeRate?.() ?? null,
+        ),
       );
     } catch (error) {
       if (error instanceof FeishuOutputQueueError) {

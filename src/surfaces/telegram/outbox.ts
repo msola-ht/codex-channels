@@ -19,6 +19,7 @@ import {
   createTurnCompletedPresentation,
   createTurnStartedPresentation,
 } from "../lifecycle-presentation.js";
+import type { ExchangeRateSnapshot } from "../../application/index.js";
 import {
   formatVisionCompleted,
   formatVisionProgress,
@@ -97,6 +98,7 @@ export interface TelegramOutboxOptions {
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
   readGeneratedImage?: typeof readGeneratedImage;
+  exchangeRate?: () => ExchangeRateSnapshot | null;
 }
 
 export class TelegramOutbox {
@@ -404,7 +406,10 @@ export class TelegramOutbox {
           await this.sendPanel(
             chatId,
             renderTelegramLifecyclePresentation(
-              createTurnCompletedPresentation(event),
+              createTurnCompletedPresentation(
+                event,
+                this.options.exchangeRate?.() ?? null,
+              ),
             ),
             replyTo,
             true,

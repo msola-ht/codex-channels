@@ -41,6 +41,7 @@ export interface GatewayConfigDocument {
   display: {
     operation_updates: "full" | "compact" | "hidden";
     plan_updates: boolean;
+    reference_cost_cny: boolean;
   };
   api_providers: Array<{
     id: string;

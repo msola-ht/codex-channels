@@ -82,6 +82,10 @@ export {
   type PermissionQueryPort,
 } from "./permission-port.js";
 export {
+  type ExchangeRatePort,
+  type ExchangeRateSnapshot,
+} from "./exchange-rate-port.js";
+export {
   type DirectApiRequestMetricsSummary,
   type RequestMetricsAggregate,
   type RequestMetricsAggregateReport,

@@ -103,7 +103,12 @@ const gatewayDocumentSchema = z.strictObject({
   display: z.strictObject({
     operation_updates: z.enum(["full", "compact", "hidden"]).default("compact"),
     plan_updates: z.boolean().default(true),
-  }).default({ operation_updates: "compact", plan_updates: true }),
+    reference_cost_cny: z.boolean().default(false),
+  }).default({
+    operation_updates: "compact",
+    plan_updates: true,
+    reference_cost_cny: false,
+  }),
   api_providers: z.array(apiProviderSchema).refine(
     (providers) => new Set(providers.map((provider) => provider.id)).size === providers.length,
     "api_providers 不能包含重复 ID",

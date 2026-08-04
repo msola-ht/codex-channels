@@ -193,6 +193,46 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("参考总价：$0.000988（已计价 1/1 次请求）");
   });
 
+  it("shows the exchange rate and converts USD totals when enabled", () => {
+    const rendered = formatConversationMetrics({
+      kind: "metrics",
+      summary: {
+        threadId: "thread-1",
+        latestTurn: {
+          turnId: "turn-1",
+          requestCount: 1,
+          unsuccessfulRequestCount: 0,
+          requestDurationMs: 1_000,
+          inputTokens: 100,
+          cachedInputTokens: 0,
+          outputTokens: 10,
+          reasoningOutputTokens: 0,
+          outputTokensPerSecond: null,
+          outputSpeedSampleCount: 0,
+          outputSpeedTimedCount: 0,
+          pricingCurrency: "USD",
+          pricedRequestCount: 1,
+          totalCostNanos: 1_000_000_000,
+          uncachedInputPricePerMillionNanos: 140_000_000,
+          cachedInputPricePerMillionNanos: 2_800_000,
+          outputPricePerMillionNanos: 280_000_000,
+          hasMixedPrices: false,
+        },
+        threadAggregate: null,
+        latestDirectApi: null,
+      },
+    }, {
+      usdToCny: 7.2,
+      effectiveAtMs: 1_700_000_000_000,
+      source: "open-er-api",
+    });
+
+    expect(rendered).toContain("汇率：1 USD ≈ 7.2000 CNY（open-er-api");
+    expect(rendered).toContain(
+      "折合人民币：约 ¥7.20（1 USD ≈ 7.2000 CNY）",
+    );
+  });
+
   it("renders unified provider and model aggregates with latency coverage", () => {
     const aggregate = {
       requestCount: 12,

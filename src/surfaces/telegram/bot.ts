@@ -9,6 +9,7 @@ import {
   conversationCommandNames,
   type ConversationCommandName,
   type ConversationUseCases,
+  type ExchangeRateSnapshot,
 } from "../../application/index.js";
 import {
   UserFacingError,
@@ -104,6 +105,7 @@ export interface TelegramSurfaceOptions {
   inputQuietWindowMs?: number;
   now?: () => number;
   debugEnabled?: boolean;
+  exchangeRate?: () => ExchangeRateSnapshot | null;
 }
 
 export interface CreateTelegramSurfaceOptions extends TelegramSurfaceOptions {
@@ -149,6 +151,7 @@ export class TelegramSurface {
   private readonly inputs: SurfaceInputCoalescer;
   private readonly now: () => number;
   private readonly debugEnabled: boolean;
+  private readonly exchangeRate: (() => ExchangeRateSnapshot | null) | undefined;
   private nextInputSequence = 0;
   private notificationRecipients: ReadonlySet<number>;
 
@@ -190,6 +193,7 @@ export class TelegramSurface {
     this.actorRegistry = options.actorRegistry;
     this.now = options.now ?? Date.now;
     this.debugEnabled = options.debugEnabled ?? false;
+    this.exchangeRate = options.exchangeRate;
     this.notificationRecipients = new Set(startupRecipients);
     this.commands = new ConversationCommandService(service);
     const apiExecutor = new TelegramApiExecutor(logger);
@@ -203,6 +207,9 @@ export class TelegramSurface {
       ...(options.planUpdatesEnabled !== undefined
         ? { planUpdatesEnabled: options.planUpdatesEnabled }
         : {}),
+      ...(options.exchangeRate === undefined
+        ? {}
+        : { exchangeRate: options.exchangeRate }),
     });
     this.output = this.outbox;
     this.inputs = new SurfaceInputCoalescer(
@@ -378,7 +385,11 @@ export class TelegramSurface {
         workspace.id,
       );
       await context.answerCallbackQuery({ text: `已切换到 ${workspace.id}` });
-      await renderTelegramCommandResult(context, result);
+      await renderTelegramCommandResult(
+        context,
+        result,
+        this.exchangeRate?.() ?? null,
+      );
     });
     this.bot.on("message:text", async (context) => {
       if (await this.interactions.handleText(context)) {
@@ -719,7 +730,11 @@ export class TelegramSurface {
       command,
       commandArguments(context),
     );
-    await renderTelegramCommandResult(context, result);
+    await renderTelegramCommandResult(
+      context,
+      result,
+      this.exchangeRate?.() ?? null,
+    );
   }
 
   private async authorize(context: Context, next: () => Promise<void>): Promise<void> {

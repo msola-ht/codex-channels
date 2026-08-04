@@ -5,6 +5,7 @@ import {
   type ConversationCommandOutcome,
   type ConversationCommandResult,
   type ConversationStatus,
+  type ExchangeRateSnapshot,
 } from "../application/index.js";
 import {
   usesOpenAiAccount,
@@ -29,6 +30,8 @@ import {
   formatProviderLabel,
 } from "./provider-format.js";
 import {
+  formatExchangeRateLine,
+  formatReferenceCostCnyValue,
   formatReferenceCostTotal,
   formatReferenceUnitPrices,
   type ReferenceCostDisplay,
@@ -531,6 +534,7 @@ export function formatConversationStatus(status: ConversationStatus): string {
 
 export function formatConversationMetrics(
   result: Extract<ConversationCommandResult, { kind: "metrics" }>,
+  exchangeRate?: ExchangeRateSnapshot | null,
 ): string {
   const summary = result.summary;
   if (summary === null) {
@@ -545,6 +549,7 @@ export function formatConversationMetrics(
   const lines = [
     "请求指标",
     `Thread：${summary.threadId}`,
+    ...(exchangeRate ? [formatExchangeRateLine(exchangeRate)] : []),
   ];
   if (summary.latestTurn) {
     const turn = summary.latestTurn;
@@ -583,7 +588,7 @@ export function formatConversationMetrics(
           turn.cachedInputPricePerMillionNanos,
         outputPricePerMillionNanos: turn.outputPricePerMillionNanos,
         hasMixedPrices: turn.hasMixedPrices,
-      }),
+      }, exchangeRate),
     );
   } else {
     lines.push("", "最近运行聚合：暂无已记录请求");
@@ -615,7 +620,7 @@ export function formatConversationMetrics(
             aggregate.outputSpeedTimedCount,
             aggregate.outputSpeedSampleCount,
           )]),
-      ...formatReferenceCost(toReferenceCostDisplay(aggregate)),
+      ...formatReferenceCost(toReferenceCostDisplay(aggregate), exchangeRate),
     );
   }
   if (summary.latestDirectApi) {
@@ -651,7 +656,7 @@ export function formatConversationMetrics(
               direct.cachedInputPricePerMillionNanos,
             outputPricePerMillionNanos: direct.outputPricePerMillionNanos,
             hasMixedPrices: false,
-          })),
+          }, exchangeRate)),
     );
   }
   return lines.join("\n");
@@ -732,6 +737,7 @@ function formatAggregateMetricsReport(
     ConversationCommandResult,
     { kind: "metrics" }
   >["summary"]>, { view: "global" | "providers" | "models" }>,
+  exchangeRate?: ExchangeRateSnapshot | null,
 ): string {
   const viewName = {
     global: "全局",
@@ -741,6 +747,7 @@ function formatAggregateMetricsReport(
   const lines = [
     `请求指标 · ${viewName}`,
     `范围：最近 ${formatMetricsRange(report.range)}`,
+    ...(exchangeRate ? [formatExchangeRateLine(exchangeRate)] : []),
   ];
   if (report.aggregate === null) {
     lines.push("", "本时间范围暂无已记录请求。");
@@ -749,7 +756,7 @@ function formatAggregateMetricsReport(
   lines.push(
     "",
     "本时间范围累计：",
-    ...formatMetricsAggregate(report.aggregate),
+    ...formatMetricsAggregate(report.aggregate, exchangeRate),
   );
   if (report.view !== "global" && report.groups.length > 0) {
     const groupView = report.view === "providers" ? "providers" : "models";
@@ -770,7 +777,8 @@ function formatAggregateMetricsReport(
   return lines.join("\n");
 }
 
-function formatMetricsAggregate(aggregate: {
+function formatMetricsAggregate(
+  aggregate: {
   requestCount: number;
   unsuccessfulRequestCount: number;
   requestDurationMs: number;
@@ -792,7 +800,9 @@ function formatMetricsAggregate(aggregate: {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
-}): string[] {
+  },
+  exchangeRate?: ExchangeRateSnapshot | null,
+): string[] {
   return [
     `模型请求：${aggregate.requestCount} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${aggregate.unsuccessfulRequestCount} 次）` : ""}`,
     `模型请求累计耗时：${formatElapsedDuration(aggregate.requestDurationMs)}`,
@@ -820,7 +830,7 @@ function formatMetricsAggregate(aggregate: {
       : [
           `首段回复延迟：平均 ${formatMetricLatency(aggregate.ttftAverageMs)} · P50 ${formatMetricLatency(aggregate.ttftP50Ms)} · P95 ${formatMetricLatency(aggregate.ttftP95Ms)}（覆盖 ${aggregate.ttftSampleCount}/${aggregate.requestCount} 次请求）`,
         ]),
-    ...formatReferenceCost(toReferenceCostDisplay(aggregate)),
+    ...formatReferenceCost(toReferenceCostDisplay(aggregate), exchangeRate),
   ];
 }
 
@@ -862,10 +872,19 @@ function formatMetricsGroup(
   ].join("\n");
 }
 
-function formatReferenceCost(value: ReferenceCostDisplay): string[] {
+function formatReferenceCost(
+  value: ReferenceCostDisplay,
+  exchangeRate?: ExchangeRateSnapshot | null,
+): string[] {
   return [
     `参考总价：${formatReferenceCostTotal(value)}`,
     ...formatReferenceUnitPrices(value),
+    ...(exchangeRate
+      ? (() => {
+          const converted = formatReferenceCostCnyValue(value, exchangeRate);
+          return converted === null ? [] : [`折合人民币：${converted}`];
+        })()
+      : []),
   ];
 }
 

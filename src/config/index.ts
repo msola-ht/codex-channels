@@ -63,6 +63,7 @@ export interface GatewayConfig {
   codexSandbox: "read-only" | "workspace-write";
   operationUpdateDisplay: OperationUpdateDisplay;
   planUpdatesEnabled: boolean;
+  referenceCostCny: boolean;
   apiProviders: ReadonlyArray<{
     id: string;
     name: string;
@@ -250,6 +251,7 @@ function loadValidatedConfigDocument(
     codexSandbox: raw.codex.sandbox,
     operationUpdateDisplay: raw.display.operation_updates,
     planUpdatesEnabled: raw.display.plan_updates,
+    referenceCostCny: raw.display.reference_cost_cny,
     apiProviders: raw.api_providers.map(toApiProviderConfig),
     vision: toVisionConfig(raw.vision, raw.api_providers),
     credentialsDirectory: resolve(baseDirectory, "credentials"),

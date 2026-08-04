@@ -1,6 +1,9 @@
 import type { Logger } from "pino";
 
-import type { ConversationUseCases } from "../application/index.js";
+import type {
+  ConversationUseCases,
+  ExchangeRateSnapshot,
+} from "../application/index.js";
 import type { ConfigChange, GatewayConfig } from "../config/index.js";
 import type { BindingStore } from "../storage/index.js";
 import type { SurfaceAdapter } from "../surfaces/index.js";
@@ -19,6 +22,7 @@ export interface SurfacePluginContext {
   gatewayVersion: string;
   codexUpstreamUserAgent: () => string | undefined;
   onFatal(surface: string, accountId: string, error: Error): void;
+  exchangeRate: () => ExchangeRateSnapshot | null;
 }
 
 export interface BuiltInSurfacePlugin {

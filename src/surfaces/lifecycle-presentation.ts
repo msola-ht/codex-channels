@@ -1,6 +1,7 @@
 import {
   isFastServiceTier,
   type ConversationStatus,
+  type ExchangeRateSnapshot,
 } from "../application/index.js";
 import type {
   OutputEvent,
@@ -17,7 +18,10 @@ import {
   formatTokensPerSecond,
 } from "./elapsed-duration.js";
 import { formatCodexProviderLabel } from "./provider-format.js";
-import { formatReferenceCostTotal } from "./reference-cost-format.js";
+import {
+  formatReferenceCostCnyValue,
+  formatReferenceCostTotal,
+} from "./reference-cost-format.js";
 
 export interface LifecyclePresentation {
   title: string;
@@ -162,6 +166,7 @@ export function createTurnStartedPresentation(
 
 export function createTurnCompletedPresentation(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
+  exchangeRate?: ExchangeRateSnapshot | null,
 ): LifecyclePresentation {
   const sessionFields: LifecyclePresentationField[] = event.background
     ? [{ label: "Thread", value: event.threadId }]
@@ -284,6 +289,18 @@ export function createTurnCompletedPresentation(
           }, "个成功请求")
         : formatReferenceCostTotal(event.timing.referenceCost),
     });
+    if (exchangeRate) {
+      const converted = formatReferenceCostCnyValue(
+        event.timing.referenceCost,
+        exchangeRate,
+      );
+      if (converted !== null) {
+        runFields.push({
+          label: "折合人民币",
+          value: converted,
+        });
+      }
+    }
   }
   if (
     event.timing?.requestInputTokens !== undefined

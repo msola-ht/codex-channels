@@ -489,6 +489,7 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     codexSandbox: "workspace-write",
     operationUpdateDisplay: "full",
     planUpdatesEnabled: false,
+    referenceCostCny: false,
     apiProviders: [],
     vision: { mode: "disabled" },
     credentialsDirectory: "/tmp/credentials",
@@ -511,5 +512,6 @@ function options(
     gatewayVersion: "0.146.0",
     codexUpstreamUserAgent: () => undefined,
     onFatal: vi.fn(),
+    exchangeRate: () => null,
   };
 }

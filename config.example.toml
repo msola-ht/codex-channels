@@ -41,6 +41,8 @@ timeout_seconds = 300
 operation_updates = "compact"
 # 是否在渠道显示 App Server 的自动任务计划更新。
 plan_updates = true
+# 是否获取 USD/CNY 汇率并把参考总价折合为人民币展示；关闭时不发起汇率请求。
+reference_cost_cny = false
 
 [vision]
 # disabled：不代理识图；responses_api：当前模型不支持图片时调用外部视觉接口。
