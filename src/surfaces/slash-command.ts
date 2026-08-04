@@ -7,6 +7,7 @@ export interface ParsedSlashCommand {
 
 export const surfaceCommandAliases = {
   h: "help",
+  skills: "skill",
   work: "workspace",
   r: "resume",
 } as const;
@@ -16,7 +17,7 @@ export function parseSlashCommand(text: string): ParsedSlashCommand | null {
   if (!normalized.startsWith("/")) {
     return null;
   }
-  const match = /^\/([a-z]+)(?:\s+([\s\S]*))?$/u.exec(normalized);
+  const match = /^\/([a-z][a-z0-9-]*)(?:\s+([\s\S]*))?$/u.exec(normalized);
   if (match === null) {
     throw new UserFacingError(
       "command.unsupported",

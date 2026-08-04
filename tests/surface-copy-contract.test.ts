@@ -205,6 +205,14 @@ describe("shared surface copy contract", () => {
       name: "resume",
       argumentsText: "thread-1",
     });
+    expect(parseSlashCommand("/skills 5 初始化检查")).toEqual({
+      name: "skill",
+      argumentsText: "5 初始化检查",
+    });
+    expect(parseSlashCommand("/workspace-perm sandbox read-only")).toEqual({
+      name: "workspace-perm",
+      argumentsText: "sandbox read-only",
+    });
   });
 
   it("keeps bounded session lists identical across all surfaces", () => {
