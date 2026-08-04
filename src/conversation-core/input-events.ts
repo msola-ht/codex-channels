@@ -58,6 +58,7 @@ export type ConversationInputEvent =
       requestStartedAtMs: number;
       requestDurationMs: number;
       outcome?: "completed" | "interrupted" | "incomplete" | "failed";
+      retryableFailure?: boolean;
       inputTokens?: number;
       cachedInputTokens?: number;
       outputTokens?: number;

@@ -109,6 +109,8 @@ Goal 与 Git 分支。所有 Provider 都展示 Gateway 实际观察到的首段
 最后一次请求的可观测首事件延迟，以及整轮综合思考速度与含推理生成速度。原生 OpenAI 账户对应的
 Codex Provider 明确显示为“OpenAI 官方”，与直接 API 的自定义提供商区分。`/metrics` 可查看当前 Thread 最近
 Turn 的运行聚合、指标库保留范围内的 Thread 会话累计及最近一次视觉等直接 API 请求；
+同一 Turn 中模型请求遇到 `429/5xx` 后由 Codex 重试并最终完成时，完成卡片显示“自动重试、最终
+成功”，本轮计价覆盖率只以成功请求为分母；真实失败尝试仍保留在指标库与异常报告中。
 `/metrics global|providers|models 24h|7d|30d` 把 Codex Provider 与直接 API 请求按同一口径汇总，
 并显示缓存、输出速度及首段回复延迟的有效样本覆盖率；`/metrics errors` 按提供商、模型、状态、
 HTTP 状态和错误类型汇总异常请求，显示异常率与最近发生时间。它不会替代 `/status` 的 App Server

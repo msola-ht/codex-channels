@@ -233,11 +233,23 @@ export function createTurnCompletedPresentation(
     });
   }
   if (event.timing?.modelRequestCount !== undefined) {
+    const recoveredFailureCount = event.status === "completed"
+      && (event.timing.completedModelRequestCount ?? 0) > 0
+      ? event.timing.retryableFailureModelRequestCount ?? 0
+      : 0;
+    const unrecoveredFailureCount = Math.max(
+      0,
+      (event.timing.failedModelRequestCount ?? 0) - recoveredFailureCount,
+    );
     const details = [
       ["完成", event.timing.completedModelRequestCount],
       ["中断", event.timing.interruptedModelRequestCount],
       ["未完整观测", event.timing.incompleteModelRequestCount],
-      ["失败", event.timing.failedModelRequestCount],
+      [
+        "自动重试",
+        recoveredFailureCount,
+      ],
+      ["失败", unrecoveredFailureCount],
     ]
       .filter((entry): entry is [string, number] =>
         typeof entry[1] === "number" && entry[1] > 0
@@ -246,7 +258,7 @@ export function createTurnCompletedPresentation(
       .join(" · ");
     runFields.push({
       label: "模型请求",
-      value: `${event.timing.modelRequestCount} 次${details ? `（${details}）` : ""}`,
+      value: `${event.timing.modelRequestCount} 次${details ? `（${details}${recoveredFailureCount > 0 ? "，最终成功" : ""}）` : ""}`,
     });
   }
   if (event.timing?.reasoningRequestCount !== undefined) {
@@ -262,9 +274,15 @@ export function createTurnCompletedPresentation(
     });
   }
   if (event.timing?.referenceCost) {
+    const successfulRequestCount = event.timing.completedModelRequestCount;
     runFields.push({
       label: "参考总价",
-      value: formatReferenceCostTotal(event.timing.referenceCost),
+      value: successfulRequestCount !== undefined && successfulRequestCount > 0
+        ? formatReferenceCostTotal({
+            ...event.timing.referenceCost,
+            requestCount: successfulRequestCount,
+          }, "个成功请求")
+        : formatReferenceCostTotal(event.timing.referenceCost),
     });
   }
   if (

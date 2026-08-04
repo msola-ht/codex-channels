@@ -77,6 +77,7 @@ export interface TurnOutputTiming {
   interruptedModelRequestCount?: number;
   incompleteModelRequestCount?: number;
   failedModelRequestCount?: number;
+  retryableFailureModelRequestCount?: number;
   reasoningRequestCount?: number;
   modelRequestDurationMs?: number;
   requestInputTokens?: number;

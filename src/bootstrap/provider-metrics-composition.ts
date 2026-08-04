@@ -142,6 +142,7 @@ export function toModelTimingEvent(
         : metrics.status === "incomplete" || metrics.status === "unknown"
           ? "incomplete" as const
           : "failed" as const,
+    ...(isRetryableFailure(metrics) ? { retryableFailure: true } : {}),
     ...(metrics.inputTokens === null ? {} : { inputTokens: metrics.inputTokens }),
     ...(metrics.cachedInputTokens === null
       ? {}
@@ -202,6 +203,15 @@ export function toModelTimingEvent(
       : {}),
     ...(generationDurationMs > 0 ? { generationDurationMs } : {}),
   };
+}
+
+function isRetryableFailure(metrics: ProviderProxyMetrics): boolean {
+  return metrics.status === "failed"
+    && metrics.httpStatus !== null
+    && (
+      metrics.httpStatus === 429
+      || (metrics.httpStatus >= 500 && metrics.httpStatus <= 599)
+    );
 }
 
 function durationBetween(start: number | null, end: number | null): number | undefined {

@@ -9,14 +9,17 @@ export interface ReferenceCostDisplay {
   hasMixedPrices: boolean;
 }
 
-export function formatReferenceCostTotal(value: ReferenceCostDisplay): string {
+export function formatReferenceCostTotal(
+  value: ReferenceCostDisplay,
+  requestLabel: "次请求" | "个成功请求" = "次请求",
+): string {
   if (value.pricedRequestCount === 0) {
-    return `暂无价格快照（已计价 0/${value.requestCount} 次请求）`;
+    return `暂无价格快照（已计价 0/${value.requestCount} ${requestLabel}）`;
   }
   if (value.currency === null || value.totalCostNanos === null) {
-    return `无法合计（已计价 ${value.pricedRequestCount}/${value.requestCount} 次请求）`;
+    return `无法合计（已计价 ${value.pricedRequestCount}/${value.requestCount} ${requestLabel}）`;
   }
-  return `${formatCurrencyNanos(value.currency, value.totalCostNanos)}（已计价 ${value.pricedRequestCount}/${value.requestCount} 次请求）`;
+  return `${formatCurrencyNanos(value.currency, value.totalCostNanos)}（已计价 ${value.pricedRequestCount}/${value.requestCount} ${requestLabel}）`;
 }
 
 export function formatReferenceUnitPrices(

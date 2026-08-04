@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ProviderMetricsComposition,
+  toModelTimingEvent,
 } from "../src/bootstrap/provider-metrics-composition.js";
 import {
   BufferedModelRequestMetricsWriter,
@@ -167,6 +168,34 @@ describe("ProviderMetricsComposition", () => {
       outputPricePerMillionNanos: 3_000_000_000,
     }));
     await composition.close();
+  });
+
+  it("marks an upstream 503 as a retryable model failure", async () => {
+    const failed = {
+      ...metrics(),
+      model: null,
+      status: "failed" as const,
+      httpStatus: 503,
+      errorType: "http_error",
+      inputTokens: null,
+      cachedInputTokens: null,
+      outputTokens: null,
+      reasoningOutputTokens: null,
+      totalTokens: null,
+      firstTokenAtMs: null,
+      firstReasoningDeltaAtMs: null,
+      lastReasoningDeltaAtMs: null,
+      firstOutputDeltaAtMs: null,
+      lastOutputDeltaAtMs: null,
+    };
+
+    expect(toModelTimingEvent(failed)).toMatchObject({
+      outcome: "failed",
+      retryableFailure: true,
+    });
+    expect(toModelTimingEvent({ ...failed, httpStatus: 400 })).not.toHaveProperty(
+      "retryableFailure",
+    );
   });
 });
 

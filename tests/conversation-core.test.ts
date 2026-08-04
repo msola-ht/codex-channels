@@ -1113,6 +1113,15 @@ describe("ConversationCore", () => {
       thinkingDurationMs: 800,
       generationDurationMs: 900,
     });
+    core.handle({
+      type: "turn.modelTiming.updated",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      requestStartedAtMs: 1_500,
+      requestDurationMs: 500,
+      outcome: "failed",
+      retryableFailure: true,
+    });
     handleNotification(core, {
       method: "thread/tokenUsage/updated",
       params: {
@@ -1144,13 +1153,14 @@ describe("ConversationCore", () => {
     ) as Extract<OutputEvent, { type: "turn.completed" }> | undefined;
     expect(completed).toMatchObject({
       timing: {
-        modelRequestCount: 4,
+        modelRequestCount: 5,
         completedModelRequestCount: 2,
         interruptedModelRequestCount: 1,
         incompleteModelRequestCount: 1,
-        failedModelRequestCount: 0,
+        failedModelRequestCount: 1,
+        retryableFailureModelRequestCount: 1,
         reasoningRequestCount: 2,
-        modelRequestDurationMs: 4_000,
+        modelRequestDurationMs: 4_500,
         requestInputTokens: 300,
         requestCachedInputTokens: 240,
         requestOutputTokens: 140,
@@ -1169,7 +1179,7 @@ describe("ConversationCore", () => {
           currency: "USD",
           totalCostNanos: 300_000,
           pricedRequestCount: 2,
-          requestCount: 4,
+          requestCount: 5,
           uncachedInputPricePerMillionNanos: 140_000_000,
           cachedInputPricePerMillionNanos: 2_800_000,
           outputPricePerMillionNanos: 280_000_000,

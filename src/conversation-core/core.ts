@@ -40,6 +40,7 @@ interface TurnTimingState {
   interruptedModelRequestCount: number;
   incompleteModelRequestCount: number;
   failedModelRequestCount: number;
+  retryableFailureModelRequestCount: number;
   reasoningRequestCount: number;
   reasoningUsageCount: number;
   modelRequestDurationMs: number;
@@ -266,6 +267,7 @@ export class ConversationCore {
           interruptedModelRequestCount: 0,
           incompleteModelRequestCount: 0,
           failedModelRequestCount: 0,
+          retryableFailureModelRequestCount: 0,
           reasoningRequestCount: 0,
           reasoningUsageCount: 0,
           modelRequestDurationMs: 0,
@@ -389,6 +391,9 @@ export class ConversationCore {
               break;
             case "failed":
               timing.failedModelRequestCount += 1;
+              if (event.retryableFailure) {
+                timing.retryableFailureModelRequestCount += 1;
+              }
               break;
           }
           timing.modelRequestDurationMs += event.requestDurationMs;
@@ -792,6 +797,8 @@ export class ConversationCore {
         result.interruptedModelRequestCount = timing.interruptedModelRequestCount;
         result.incompleteModelRequestCount = timing.incompleteModelRequestCount;
         result.failedModelRequestCount = timing.failedModelRequestCount;
+        result.retryableFailureModelRequestCount =
+          timing.retryableFailureModelRequestCount;
       }
       if (timing.reasoningUsageCount > 0) {
         result.reasoningRequestCount = timing.reasoningRequestCount;

@@ -266,6 +266,74 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("模型请求：62 次（完成 20 · 中断 42）");
   });
 
+  it("shows a recovered model failure as an automatic retry", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "weixin",
+          accountId: "default",
+          conversationId: "100",
+        },
+        threadId: "thread-deepseek",
+        turnId: "turn-deepseek",
+        status: "completed",
+        timing: {
+          modelRequestCount: 2,
+          completedModelRequestCount: 1,
+          interruptedModelRequestCount: 0,
+          incompleteModelRequestCount: 0,
+          failedModelRequestCount: 1,
+          retryableFailureModelRequestCount: 1,
+          referenceCost: {
+            currency: "USD",
+            totalCostNanos: 915_000,
+            pricedRequestCount: 1,
+            requestCount: 2,
+            uncachedInputPricePerMillionNanos: 140_000_000,
+            cachedInputPricePerMillionNanos: 2_800_000,
+            outputPricePerMillionNanos: 280_000_000,
+            hasMixedPrices: false,
+          },
+        },
+      }),
+    );
+
+    expect(rendered).toContain(
+      "模型请求：2 次（完成 1 · 自动重试 1，最终成功）",
+    );
+    expect(rendered).toContain(
+      "参考总价：$0.000915（已计价 1/1 个成功请求）",
+    );
+  });
+
+  it("keeps a non-retryable model failure visible after a completed request", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "telegram",
+          accountId: "default",
+          conversationId: "100",
+        },
+        threadId: "thread-1",
+        turnId: "turn-1",
+        status: "completed",
+        timing: {
+          modelRequestCount: 2,
+          completedModelRequestCount: 1,
+          interruptedModelRequestCount: 0,
+          incompleteModelRequestCount: 0,
+          failedModelRequestCount: 1,
+          retryableFailureModelRequestCount: 0,
+        },
+      }),
+    );
+
+    expect(rendered).toContain("模型请求：2 次（完成 1 · 失败 1）");
+    expect(rendered).not.toContain("自动重试");
+  });
+
   it("omits reasoning metrics when the provider does not expose a timing stream", () => {
     const rendered = renderPlainLifecyclePresentation(
       createTurnCompletedPresentation({
