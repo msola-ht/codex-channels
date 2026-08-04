@@ -310,23 +310,21 @@ export function createTurnCompletedPresentation(
         {
           label: "输入",
           value: formatTokenCount(inputTokens),
-          subfields: [{
-            label: "命中缓存",
-            value: formatTokenCount(cachedInputTokens),
-          }],
+        },
+        {
+          label: "命中缓存",
+          value: formatTokenCount(cachedInputTokens),
         },
         {
           label: "输出",
           value: formatTokenCount(outputTokens),
-          ...(reasoningOutputTokens > 0
-            ? {
-                subfields: [{
-                  label: "其中推理输出",
-                  value: formatTokenCount(reasoningOutputTokens),
-                }],
-              }
-            : {}),
         },
+        ...(reasoningOutputTokens > 0
+          ? [{
+              label: "其中推理输出",
+              value: formatTokenCount(reasoningOutputTokens),
+            }]
+          : []),
         {
           label: "缓存命中率",
           value: formatCacheHitRate(inputTokens, cachedInputTokens),
@@ -499,7 +497,7 @@ function formatStructuredField(field: LifecyclePresentationField): string {
   return [
     `- ${field.label}：${field.value}`,
     ...(field.subfields ?? []).map((subfield) =>
-      `    - ${subfield.label}：${subfield.value}`),
+      `  - ${subfield.label}：${subfield.value}`),
   ].join("\n");
 }
 
@@ -514,7 +512,7 @@ function formatField(field: LifecyclePresentationField): string {
   return [
     `${field.label}：${field.value}`,
     ...(field.subfields ?? []).map((subfield) =>
-      `    ${subfield.label}：${subfield.value}`),
+      `  ${subfield.label}：${subfield.value}`),
   ].join("\n");
 }
 
