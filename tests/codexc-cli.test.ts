@@ -284,10 +284,12 @@ describe("codexc CLI", () => {
     expect(statSync(configPath).mode & 0o777).toBe(0o600);
   });
 
-  it("creates an interactive Workspace under the user directory", () => {
-    const root = mkdtempSync(join(tmpdir(), "codexc-cli-ws-new-"));
+  it("registers the current directory with an explicit Workspace name", () => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-cli-ws-add-name-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
+    const project = join(root, "Data Analysis");
+    mkdirSync(project);
     const environment = {
       ...process.env,
       CODEX_CONNECT_HOME: home,
@@ -295,7 +297,7 @@ describe("codexc CLI", () => {
     };
 
     execFileSync(process.execPath, [cli, "init"], {
-      cwd: root,
+      cwd: project,
       env: environment,
       encoding: "utf8",
     });
@@ -303,7 +305,7 @@ describe("codexc CLI", () => {
       process.execPath,
       [cli, "work", "add", "--name", "Data Analysis"],
       {
-        cwd: root,
+        cwd: project,
         env: environment,
         encoding: "utf8",
       },
@@ -313,11 +315,9 @@ describe("codexc CLI", () => {
     const eventQueuePath = configEventQueuePath(home);
     const parsed = readGatewayConfig(configPath);
     const config = readWorkspaceConfig(parsed);
-    const directory = realpathSync(join(home, "workspaces", "data-analysis"));
-    expect(created).toContain("Workspace 已新增");
+    const directory = realpathSync(project);
+    expect(created).toContain("Workspace 已添加");
     expect(created).toContain("data-analysis");
-    expect(existsSync(directory)).toBe(true);
-    expect(statSync(directory).mode & 0o777).toBe(0o700);
     expect(config.workspaces.some((workspace: { id: string; name: string; cwd: string }) =>
       workspace.id === "data-analysis"
       && workspace.name === "Data Analysis"
