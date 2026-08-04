@@ -313,6 +313,21 @@ describe("Gateway config reload", () => {
     });
   });
 
+  it("hot reloads when only workspace entitlements change", () => {
+    const current = config();
+
+    expect(classifyConfigReload(current, config({
+      workspaces: [{
+        ...mainWorkspace,
+        sandbox: "read-only",
+        approvalPolicy: "never",
+      }],
+    }))).toEqual({
+      action: "reload",
+      changes: [{ code: "workspace.registry", scope: "global" }],
+    });
+  });
+
   it("does nothing when the configuration is unchanged", () => {
     expect(classifyConfigReload(config(), config())).toEqual({ action: "reload", changes: [] });
   });

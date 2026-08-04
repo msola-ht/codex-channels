@@ -43,6 +43,20 @@ export class SessionRouter {
     private readonly workspaces: WorkspaceRegistry,
   ) {}
 
+  private workspaceEntitlements(workspace: Workspace): ThreadStartOptions {
+    return {
+      ...(workspace.sandbox === undefined
+        ? {}
+        : { sandbox: workspace.sandbox }),
+      ...(workspace.approvalPolicy === undefined
+        ? {}
+        : { approvalPolicy: workspace.approvalPolicy }),
+      ...(workspace.permissions === undefined
+        ? {}
+        : { permissions: workspace.permissions }),
+    };
+  }
+
   workspace(target: ConversationTarget): Workspace {
     const workspaceId = this.bindings.getWorkspace(target) ?? this.workspaces.defaultWorkspaceId;
     const workspace = this.workspaces.get(workspaceId) ?? this.workspaces.default();
@@ -138,7 +152,11 @@ export class SessionRouter {
       const wasBackground = this.bindings.isBackground(binding.threadId);
       try {
         const workspace = this.workspaces.require(binding.workspaceId);
-        const resumed = await this.codex.resumeThread(binding.threadId, workspace.cwd);
+        const resumed = await this.codex.resumeThread(
+          binding.threadId,
+          workspace.cwd,
+          this.workspaceEntitlements(workspace),
+        );
         this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier);
         this.contextCompactionItemIdsByThread.set(
           resumed.thread.id,
@@ -219,7 +237,11 @@ export class SessionRouter {
           thread.status.type !== "active" && !this.bindings.getByThread(thread.id),
       );
       if (candidate) {
-        const resumed = await this.codex.resumeThread(candidate.id, workspace.cwd);
+        const resumed = await this.codex.resumeThread(
+          candidate.id,
+          workspace.cwd,
+          this.workspaceEntitlements(workspace),
+        );
         this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier);
         this.contextCompactionItemIdsByThread.set(
           resumed.thread.id,
@@ -231,7 +253,10 @@ export class SessionRouter {
       }
     }
 
-    const started = await this.codex.startThread(workspace.cwd, startOptions);
+    const started = await this.codex.startThread(workspace.cwd, {
+      ...this.workspaceEntitlements(workspace),
+      ...startOptions,
+    });
     this.captureModelSettings(started.thread.id, started.model, started.modelProvider, started.reasoningEffort, started.serviceTier);
     this.contextCompactionItemIdsByThread.set(
       started.thread.id,
@@ -253,7 +278,11 @@ export class SessionRouter {
       throw new UserFacingError("thread.bound", "该 Codex Thread 已绑定到其他会话");
     }
     const workspace = this.workspace(target);
-    const resumed = await this.codex.resumeThread(threadId, workspace.cwd);
+    const resumed = await this.codex.resumeThread(
+      threadId,
+      workspace.cwd,
+      this.workspaceEntitlements(workspace),
+    );
     const current = this.bindings.get(target);
     if (current && current.threadId !== resumed.thread.id && !preserveCurrent) {
       await this.detach(target);
@@ -318,7 +347,11 @@ export class SessionRouter {
     } catch (error) {
       if (replaced && replaced.threadId !== threadId) {
         try {
-          await this.codex.resumeThread(replaced.threadId, workspace.cwd);
+          await this.codex.resumeThread(
+            replaced.threadId,
+            workspace.cwd,
+            this.workspaceEntitlements(workspace),
+          );
         } catch (restoreError) {
           throw new AggregateError(
             [error, restoreError],

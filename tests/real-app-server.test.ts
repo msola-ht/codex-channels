@@ -545,6 +545,22 @@ contractSuite("isolated Codex App Server state contract", () => {
       && typeof profile.allowed === "boolean")).toBe(true);
   });
 
+  it("accepts per-workspace sandbox, approval and permission profile overrides", async () => {
+    const sandboxed = await ownerClient.startThread(workdir, {
+      sandbox: "read-only",
+      approvalPolicy: "untrusted",
+    });
+    const profiled = await ownerClient.startThread(workdir, {
+      permissions: ":read-only",
+    });
+
+    expect(sandboxed.thread.id).not.toBe(profiled.thread.id);
+    await ownerClient.unsubscribeThread(sandboxed.thread.id).catch(() => undefined);
+    await ownerClient.unsubscribeThread(profiled.thread.id).catch(() => undefined);
+    await ownerClient.deleteThread(sandboxed.thread.id).catch(() => undefined);
+    await ownerClient.deleteThread(profiled.thread.id).catch(() => undefined);
+  });
+
   it("lists the locked App Server collaboration presets", async () => {
     const modes = await ownerClient.listCollaborationModes();
 

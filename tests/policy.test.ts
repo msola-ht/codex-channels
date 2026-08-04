@@ -38,6 +38,30 @@ describe("WorkspaceRegistry", () => {
     });
   });
 
+  it("keeps workspace entitlements in frozen snapshots", () => {
+    const registry = new WorkspaceRegistry([{
+      id: "main",
+      name: "Main",
+      cwd: "/workspace",
+      sandbox: "danger-full-access",
+      approvalPolicy: "never",
+      permissions: ":custom",
+    }], "main");
+
+    expect(registry.require("main")).toEqual({
+      id: "main",
+      name: "Main",
+      cwd: "/workspace",
+      sandbox: "danger-full-access",
+      approvalPolicy: "never",
+      permissions: ":custom",
+    });
+    expect(() => {
+      Object.assign(registry.require("main"), { sandbox: "read-only" });
+    }).toThrow(TypeError);
+    expect(registry.require("main").sandbox).toBe("danger-full-access");
+  });
+
   it("rejects ambiguous Workspace names without widening authorization", () => {
     const registry = new WorkspaceRegistry(
       [

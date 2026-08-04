@@ -56,7 +56,7 @@ export interface GatewayConfig {
     all?: string;
     no?: string;
   };
-  workspaces: GatewayConfigDocument["workspaces"];
+  workspaces: ConfiguredWorkspace[];
   defaultWorkspaceId: string;
   codexSocketPath: string;
   codexModel?: string;
@@ -84,6 +84,15 @@ export interface GatewayConfig {
   stateDatabasePath: string;
   approvalTimeoutMs: number;
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace";
+}
+
+export interface ConfiguredWorkspace {
+  id: string;
+  name: string;
+  cwd: string;
+  sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+  approvalPolicy?: "untrusted" | "on-request" | "never";
+  permissions?: string;
 }
 
 export type OperationUpdateDisplay = "full" | "compact" | "hidden";
@@ -332,7 +341,7 @@ function validateApiEndpoint(value: string, field: string): string {
 
 function validateWorkspaces(
   parsedWorkspaces: GatewayConfigDocument["workspaces"],
-): GatewayConfigDocument["workspaces"] {
+): ConfiguredWorkspace[] {
   const workspaceIds = new Set<string>();
   return parsedWorkspaces.map((workspace) => {
     if (workspaceIds.has(workspace.id)) {
@@ -349,7 +358,20 @@ function validateWorkspaces(
     if (!statSync(cwd).isDirectory()) {
       throw new ConfigurationError(`Workspace ${workspace.id} 的 cwd 必须是目录`);
     }
-    return { ...workspace, cwd };
+    return {
+      id: workspace.id,
+      name: workspace.name,
+      cwd,
+      ...(workspace.sandbox === undefined
+        ? {}
+        : { sandbox: workspace.sandbox }),
+      ...(workspace.approval_policy === undefined
+        ? {}
+        : { approvalPolicy: workspace.approval_policy }),
+      ...(workspace.permissions === undefined
+        ? {}
+        : { permissions: workspace.permissions }),
+    };
   });
 }
 

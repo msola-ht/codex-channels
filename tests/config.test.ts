@@ -133,6 +133,54 @@ describe("Gateway config.toml", () => {
     ]);
   });
 
+  it("loads per-workspace entitlements and maps approval_policy to camelCase", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
+    const workspace = join(root, "workspace");
+    mkdirSync(workspace, { recursive: true });
+    const fixture = createFixture({
+      root,
+      workspaces: [{
+        id: "main",
+        name: "Main",
+        cwd: workspace,
+        sandbox: "danger-full-access",
+        approval_policy: "never",
+      }],
+    });
+
+    const runtime = loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    });
+
+    expect(runtime.config.workspaces).toEqual([{
+      id: "main",
+      name: "Main",
+      cwd: realpathSync(workspace),
+      sandbox: "danger-full-access",
+      approvalPolicy: "never",
+    }]);
+  });
+
+  it("rejects a workspace that combines sandbox with a permission profile", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
+    const workspace = join(root, "workspace");
+    mkdirSync(workspace, { recursive: true });
+    const fixture = createFixture({
+      root,
+      workspaces: [{
+        id: "main",
+        name: "Main",
+        cwd: workspace,
+        sandbox: "workspace-write",
+        permissions: ":workspace",
+      }],
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow(/permissions 与 sandbox 不能同时设置/u);
+  });
+
   it("rejects the removed App Server vision mode", () => {
     const appServer = createFixture({
       vision: { mode: "openai_app_server", model: "gpt-vision" },

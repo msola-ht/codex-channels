@@ -6,4 +6,10 @@ export {
   type SurfaceAccessContext,
   type SurfaceAccessPolicy,
 } from "./surface-access.js";
-export { WorkspaceRegistry, type Workspace } from "./workspace-registry.js";
+export {
+  WorkspaceRegistry,
+  type Workspace,
+  type WorkspaceApprovalPolicy,
+  type WorkspaceEntitlements,
+  type WorkspaceSandboxMode,
+} from "./workspace-registry.js";

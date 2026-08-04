@@ -279,10 +279,47 @@ export function formatConversationWorkspaces(
     ...result.workspaces.flatMap((workspace, index) => [
       `${index + 1}. ${workspace.name} · ${workspace.id}${workspace.id === result.currentWorkspaceId ? " ← 当前" : ""}`,
       workspace.cwd,
+      ...workspaceEntitlementLines(workspace),
     ]),
     "",
     "切换：/workspace <序号、ID 或名称>",
   ].join("\n"));
+}
+
+function workspaceEntitlementLines(
+  workspace: Extract<ConversationCommandResult, { kind: "workspaces" }>["workspaces"][number],
+): string[] {
+  const lines: string[] = [];
+  if (workspace.sandbox !== undefined) {
+    lines.push(`  - 沙箱：${workspaceSandboxLabel(workspace.sandbox)}`);
+  }
+  if (workspace.approvalPolicy !== undefined) {
+    lines.push(`  - 审批：${workspaceApprovalPolicyLabel(workspace.approvalPolicy)}`);
+  }
+  if (workspace.permissions !== undefined) {
+    lines.push(`  - 权限 Profile：${workspace.permissions}`);
+  }
+  return lines;
+}
+
+function workspaceSandboxLabel(
+  sandbox: "read-only" | "workspace-write" | "danger-full-access",
+): string {
+  return ({
+    "read-only": "只读",
+    "workspace-write": "工作区写",
+    "danger-full-access": "完全访问",
+  } as const)[sandbox];
+}
+
+function workspaceApprovalPolicyLabel(
+  policy: "untrusted" | "on-request" | "never",
+): string {
+  return ({
+    untrusted: "不信任",
+    "on-request": "按需审批",
+    never: "免审批",
+  } as const)[policy];
 }
 
 export function formatConversationSkills(

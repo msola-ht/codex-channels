@@ -9,7 +9,8 @@
   稳定快照；固定状态以 `isPinned` 表示，运行中 Turn 以 `activeTurnId` 表示，恢复会话另携带
   模型 Provider、
   压缩 Item ID，不向业务层暴露完整官方 Turn。
-- `router.ts`：选择、搜索、绑定、恢复、归档和解绑 Thread，协调持久化映射、订阅恢复、Provider/模型设置、
+- `router.ts`：选择、搜索、绑定、恢复、归档和解绑 Thread，把 Workspace 权益（沙箱、审批策略、
+  权限 Profile）作为启动参数传给新建或恢复的 Thread，协调持久化映射、订阅恢复、Provider/模型设置、
   压缩 Item ID 及 `thread/unsubscribe`；切换目标恢复成功后才解除当前绑定，启动恢复只有在 Thread 明确不存在、
   已删除或已归档时才移除持久化绑定；订阅恢复时把稳定 Thread 快照交回组合根。跨渠道接管只允许
   当前 Thread 与目标 Conversation 原 Thread 都由 App Server 报告为空闲时执行；保留被接管

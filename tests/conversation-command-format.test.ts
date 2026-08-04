@@ -6,10 +6,38 @@ import {
   formatConversationModels,
   formatConversationStatus,
   formatConversationUsage,
+  formatConversationWorkspaces,
 } from "../src/surfaces/conversation-command-format.js";
 import { formatCurrencyNanos } from "../src/surfaces/reference-cost-format.js";
 
 describe("provider-aware conversation command formatting", () => {
+  it("shows configured workspace entitlements in the workspace list", () => {
+    const rendered = formatConversationWorkspaces({
+      kind: "workspaces",
+      workspaces: [
+        {
+          id: "main",
+          name: "Main",
+          cwd: "/workspace",
+          sandbox: "danger-full-access",
+          approvalPolicy: "never",
+        },
+        {
+          id: "docs",
+          name: "Docs",
+          cwd: "/docs",
+          permissions: ":read-only",
+        },
+      ],
+      currentWorkspaceId: "main",
+    });
+
+    expect(rendered).toContain("1. Main · main ← 当前");
+    expect(rendered).toContain("- 沙箱：完全访问");
+    expect(rendered).toContain("- 审批：免审批");
+    expect(rendered).toContain("- 权限 Profile：:read-only");
+  });
+
   it("warns that a pending Provider switch starts a new recoverable Thread", () => {
     const rendered = formatConversationModels({
       kind: "models",

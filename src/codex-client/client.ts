@@ -188,9 +188,11 @@ export class CodexAppServerClient implements
       method: "thread/start",
       params: {
         cwd,
-        sandbox: this.defaults.sandbox,
-        approvalPolicy: "on-request",
+        approvalPolicy: options.approvalPolicy ?? "on-request",
         serviceName: "codex_connect_gateway",
+        ...(options.permissions !== undefined
+          ? { permissions: options.permissions }
+          : { sandbox: options.sandbox ?? this.defaults.sandbox }),
         ...(options.model
           ? { model: options.model }
           : this.defaults.model ? { model: this.defaults.model } : {}),
@@ -200,14 +202,20 @@ export class CodexAppServerClient implements
     return toThreadSession(response);
   }
 
-  async resumeThread(threadId: string, cwd: string): Promise<ThreadSession> {
+  async resumeThread(
+    threadId: string,
+    cwd: string,
+    options: ThreadStartOptions = {},
+  ): Promise<ThreadSession> {
     const response = await this.rpc.request<ThreadResumeResponse>({
       method: "thread/resume",
       params: {
         threadId,
         cwd,
-        sandbox: this.defaults.sandbox,
-        approvalPolicy: "on-request",
+        approvalPolicy: options.approvalPolicy ?? "on-request",
+        ...(options.permissions !== undefined
+          ? { permissions: options.permissions }
+          : { sandbox: options.sandbox ?? this.defaults.sandbox }),
       },
     }, { retryOverload: false });
     return toThreadSession(response);

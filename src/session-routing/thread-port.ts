@@ -31,6 +31,9 @@ export interface ThreadSession {
 export interface ThreadStartOptions {
   model?: string;
   modelProvider?: string;
+  sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+  approvalPolicy?: "untrusted" | "on-request" | "never";
+  permissions?: string;
 }
 
 export interface ThreadQueryOptions {
@@ -43,7 +46,11 @@ export interface ThreadLifecyclePort {
   listThreads(cwd: string, options?: ThreadQueryOptions): Promise<ThreadSnapshot[]>;
   readThread(threadId: string): Promise<ThreadSnapshot>;
   startThread(cwd: string, options?: ThreadStartOptions): Promise<ThreadSession>;
-  resumeThread(threadId: string, cwd: string): Promise<ThreadSession>;
+  resumeThread(
+    threadId: string,
+    cwd: string,
+    options?: ThreadStartOptions,
+  ): Promise<ThreadSession>;
   forkThread(
     threadId: string,
     cwd: string,

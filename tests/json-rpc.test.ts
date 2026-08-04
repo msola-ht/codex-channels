@@ -1492,6 +1492,62 @@ describe("JsonRpcClient", () => {
       });
   });
 
+  it("starts a new thread with workspace entitlements", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await client.startThread("/tmp/project", {
+      sandbox: "danger-full-access",
+      approvalPolicy: "never",
+    });
+
+    expect(transport.sent.find((message) => message.method === "thread/start")?.params)
+      .toMatchObject({
+        sandbox: "danger-full-access",
+        approvalPolicy: "never",
+      });
+  });
+
+  it("prefers a permission profile over sandbox when starting a thread", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await client.startThread("/tmp/project", {
+      permissions: ":read-only",
+      sandbox: "workspace-write",
+    });
+
+    const params = transport.sent
+      .find((message) => message.method === "thread/start")?.params;
+    expect(params).toMatchObject({ permissions: ":read-only" });
+    expect(params).not.toHaveProperty("sandbox");
+  });
+
+  it("resumes a thread with workspace entitlements", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await client.resumeThread("thread-1", "/tmp/project", {
+      sandbox: "read-only",
+      approvalPolicy: "untrusted",
+    });
+
+    expect(transport.sent.find((message) => message.method === "thread/resume")?.params)
+      .toMatchObject({
+        sandbox: "read-only",
+        approvalPolicy: "untrusted",
+      });
+  });
+
   it("forks a thread with an explicit model provider", async () => {
     const transport = new FakeTransport();
     const client = new CodexAppServerClient(new JsonRpcClient(transport), {

@@ -15,6 +15,17 @@ const workspaceSchema = z.strictObject({
   id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
   name: z.string().trim().min(1).max(64),
   cwd: z.string().trim().min(1),
+  sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional(),
+  approval_policy: z.enum(["untrusted", "on-request", "never"]).optional(),
+  permissions: z.string().trim().min(1).max(128).optional(),
+}).superRefine((workspace, context) => {
+  if (workspace.sandbox !== undefined && workspace.permissions !== undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["permissions"],
+      message: "workspace 的 permissions 与 sandbox 不能同时设置",
+    });
+  }
 });
 
 const feishuSchema = z.strictObject({

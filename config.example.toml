@@ -67,3 +67,11 @@ level = "info"
 id = "main"
 name = "Main Project"
 cwd = "/absolute/path/to/project"
+# 工作区权益（可选，不配置时使用全局默认）：
+# 沙箱：read-only / workspace-write / danger-full-access
+sandbox = "workspace-write"
+# 审批：untrusted / on-request / never
+approval_policy = "on-request"
+# 权限 Profile（App Server 命名 profile，例如 :read-only、:workspace、:danger-full-access 或项目自定义）。
+# 设置了 permissions 后不能再设置 sandbox。
+# permissions = ":workspace"

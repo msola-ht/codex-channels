@@ -60,7 +60,14 @@ export interface GatewayConfigDocument {
       };
   storage: { database_path: string };
   logging: { level: "fatal" | "error" | "warn" | "info" | "debug" | "trace" };
-  workspaces: Array<{ id: string; name: string; cwd: string }>;
+  workspaces: Array<{
+    id: string;
+    name: string;
+    cwd: string;
+    sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+    approval_policy?: "untrusted" | "on-request" | "never";
+    permissions?: string;
+  }>;
 }
 
 export function parseGatewayConfig(content: string, source?: string): TomlTable;
