@@ -223,9 +223,9 @@ describe("Feishu application setup controller", () => {
     );
 
     const rendered = JSON.stringify(fixture.cards[0]?.card);
-    expect(rendered).toContain("✅ 长连接");
-    expect(rendered).toContain("✅ 消息接收");
-    expect(rendered).toContain("✅ 卡片交互");
+    expect(rendered).toContain("- 长连接：已就绪");
+    expect(rendered).toContain("- 消息接收：已验证");
+    expect(rendered).toContain("- 卡片交互：已验证");
     expect(rendered).toContain("自定义菜单：已启用，事件待确认");
     expect(rendered).not.toContain("消息事件：待配置");
     expect(rendered).not.toContain("当前 Surface 对话必需能力");
@@ -267,8 +267,8 @@ describe("Feishu application setup controller", () => {
 
     const card = fixture.cards[0]?.card;
     expect(card?.header.template).toBe("green");
-    expect(JSON.stringify(card)).toContain("✅ 卡片交互");
-    expect(JSON.stringify(card)).toContain("✅ 自定义菜单");
+    expect(JSON.stringify(card)).toContain("- 卡片交互：已验证");
+    expect(JSON.stringify(card)).toContain("- 自定义菜单：已验证");
     expect(JSON.stringify(card)).not.toContain("打开当前飞书应用");
     expect(JSON.stringify(card)).not.toContain("codexc_feishu_setup_token");
     await fixture.controller.close();

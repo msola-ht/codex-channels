@@ -4,6 +4,8 @@ export interface FeishuPermissionRuntimeStatus {
   menuEventObserved: boolean;
 }
 
+import { toStructuredMarkdownList } from "../conversation-command-format.js";
+
 export type FeishuUserAuthorizationStatus =
   | "pending"
   | "missing"
@@ -26,11 +28,11 @@ export function renderFeishuPermissionStatus(
   status: FeishuPermissionRuntimeStatus,
   userAuthorization: FeishuUserAuthorizationStatus,
 ): string {
-  return [
+  return toStructuredMarkdownList([
     "飞书 Surface 状态",
     `App ID：${appId}`,
     `长连接：${status.connectionReady ? "已就绪" : "未就绪"}`,
-    `私聊消息事件：已验证（当前命令已收到）`,
+    "私聊消息事件：已验证（当前命令已收到）",
     `卡片动作回调：${
       status.cardActionObserved
         ? "已验证（当前 Gateway 进程已收到）"
@@ -44,30 +46,27 @@ export function renderFeishuPermissionStatus(
     `当前用户 OAuth：${userAuthorizationLabels[userAuthorization]}`,
     "",
     "运行状态来自当前 Gateway 的实际观测；OAuth 只读取安全凭据后端中的状态，不显示 Token。",
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function renderFeishuDoctor(
   status: FeishuPermissionRuntimeStatus,
 ): string {
-  return [
-    status.connectionReady ? "✅ 长连接" : "❌ 长连接：未就绪",
-    "✅ 消息接收",
-    status.cardActionObserved
-      ? "✅ 卡片交互"
-      : "◯ 卡片交互：待使用验证",
-    status.menuEventObserved
-      ? "✅ 自定义菜单"
-      : "◯ 自定义菜单：待点击验证",
-  ].join("\n");
+  return toStructuredMarkdownList([
+    "飞书 Doctor",
+    `长连接：${status.connectionReady ? "已就绪" : "未就绪"}`,
+    "消息接收：已验证",
+    `卡片交互：${status.cardActionObserved ? "已验证" : "待使用验证"}`,
+    `自定义菜单：${status.menuEventObserved ? "已验证" : "待点击验证"}`,
+  ].join("\n"));
 }
 
 export function renderFeishuPermissionHelp(): string {
-  return [
+  return toStructuredMarkdownList([
     "飞书权限中心",
     "/fs status · 查看当前运行观测",
     "/fs doctor · 检查必要能力并给出修复入口",
     "/fs revoke · 清除当前账号的本地授权",
     "用户权限会在使用相关飞书能力时按需申请。",
-  ].join("\n");
+  ].join("\n"));
 }

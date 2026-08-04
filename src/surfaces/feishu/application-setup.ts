@@ -506,8 +506,8 @@ function renderDoctorSummary(
   snapshot: FeishuApplicationSnapshot | undefined,
 ): string {
   return [
-    runtime.connectionReady ? "✅ 长连接" : "❌ 长连接：未就绪",
-    "✅ 消息接收",
+    `- 长连接：${runtime.connectionReady ? "已就绪" : "未就绪"}`,
+    "- 消息接收：已验证",
     renderCardActionStatus(runtime, snapshot),
     renderMenuStatus(runtime, snapshot),
   ].join("\n");
@@ -518,11 +518,11 @@ function renderCardActionStatus(
   snapshot: FeishuApplicationSnapshot | undefined,
 ): string {
   if (runtime.cardActionObserved) {
-    return "✅ 卡片交互";
+    return "- 卡片交互：已验证";
   }
   return snapshot?.cardCallbackConfigured
-    ? "◯ 卡片交互：已配置，待使用验证"
-    : "⚠️ 卡片交互：回调待确认";
+    ? "- 卡片交互：已配置，待使用验证"
+    : "- 卡片交互：回调待确认";
 }
 
 function renderMenuStatus(
@@ -530,20 +530,20 @@ function renderMenuStatus(
   snapshot: FeishuApplicationSnapshot | undefined,
 ): string {
   if (runtime.menuEventObserved) {
-    return "✅ 自定义菜单";
+    return "- 自定义菜单：已验证";
   }
   if (snapshot?.menuConfigured && snapshot.menuEventConfigured) {
-    return "◯ 自定义菜单：已配置，待点击验证";
+    return "- 自定义菜单：已配置，待点击验证";
   }
   if (snapshot?.menuConfigured) {
-    return "⚠️ 自定义菜单：已启用，事件待确认";
+    return "- 自定义菜单：已启用，事件待确认";
   }
   if (snapshot && hasCodexcMenu(snapshot)) {
-    return "⚠️ 自定义菜单：已添加，尚未启用";
+    return "- 自定义菜单：已添加，尚未启用";
   }
   return snapshot
-    ? "⚠️ 自定义菜单：尚未添加"
-    : "◯ 自定义菜单：配置状态暂不可读";
+    ? "- 自定义菜单：尚未添加"
+    : "- 自定义菜单：配置状态暂不可读";
 }
 
 function hasCodexcMenu(snapshot: FeishuApplicationSnapshot): boolean {

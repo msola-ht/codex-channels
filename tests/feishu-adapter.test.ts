@@ -339,13 +339,13 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent[0]?.text).toContain("/fs doctor");
     expect(fixture.sent[1]?.text).toContain("长连接：已就绪");
     expect(fixture.sent[1]?.text).toContain("卡片动作回调：尚未验证");
-    expect(fixture.sent[2]?.text).toContain("✅ 长连接");
-    expect(fixture.sent[2]?.text).toContain("✅ 消息接收");
+    expect(fixture.sent[2]?.text).toContain("长连接：已就绪");
+    expect(fixture.sent[2]?.text).toContain("消息接收：已验证");
     expect(fixture.sent[2]?.text).toContain(
-      "◯ 卡片交互：待使用验证",
+      "卡片交互：待使用验证",
     );
     expect(fixture.sent[2]?.text).toContain(
-      "◯ 自定义菜单：待点击验证",
+      "自定义菜单：待点击验证",
     );
     expect(fixture.sent[2]?.text).not.toContain("OAuth");
     expect(fixture.sent[2]?.text).not.toContain("token");

@@ -55,11 +55,11 @@ describe("WeixinPollingHealth", () => {
       lastSuccessfulPollAtMs: null,
       resumeAtMs: 3_601_000,
     }, 1_000)).toBe([
-      "微信链路：Token 失效暂停",
-      "连续失败：0 次",
-      "上次后台轮询：尚无",
-      "预计恢复：1小时后",
-      "处理建议：重新运行 codexc setup",
+      "- 微信链路：Token 失效暂停",
+      "- 连续失败：0 次",
+      "- 上次后台轮询：尚无",
+      "- 预计恢复：1小时后",
+      "- 处理建议：重新运行 codexc setup",
     ].join("\n"));
   });
 

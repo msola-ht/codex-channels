@@ -1,4 +1,5 @@
 import type { ConversationTarget } from "../../conversation-core/index.js";
+import { toStructuredMarkdownList } from "../conversation-command-format.js";
 
 import type { WeixinCredentialStore } from "./credential-store.js";
 import {
@@ -64,14 +65,14 @@ export function renderWeixinDoctor(
   snapshot: WeixinDoctorSnapshot,
   nowMs = Date.now(),
 ): string {
-  return [
+  return toStructuredMarkdownList([
     "微信 Doctor",
     `Bot 凭据：${recordStatusLabel(snapshot.credential)}`,
     `回复上下文：${recordStatusLabel(snapshot.replyContext)}`,
     `后台游标：${recordStatusLabel(snapshot.cursor)}`,
     `Token 状态：${tokenStatusLabel(snapshot)}`,
     renderWeixinPollingHealth(snapshot.polling, nowMs),
-  ].join("\n");
+  ].join("\n"));
 }
 
 async function inspectRecord(
