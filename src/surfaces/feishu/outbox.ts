@@ -320,6 +320,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
       () => event.type === "vision.started"
           || event.type === "vision.progress"
           || event.type === "vision.completed"
+          || event.type === "account.updated"
+          || event.type === "account.rateLimits.updated"
+          || event.type === "mcp.status.updated"
         ? this.sendMarkdown(event.target.conversationId, rendered)
         : event.type === "turn.started"
           || event.type === "text.completed"
@@ -409,6 +412,13 @@ export class FeishuOutbox implements SurfaceOutputPort {
     return this.delivery.runOrdered(
       chatId,
       () => this.sendText(chatId, text),
+    );
+  }
+
+  deliverMarkdown(chatId: string, markdown: string): Promise<void> {
+    return this.delivery.runOrdered(
+      chatId,
+      () => this.sendMarkdown(chatId, markdown),
     );
   }
 

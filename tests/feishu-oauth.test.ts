@@ -97,7 +97,7 @@ describe("Feishu OAuth controller", () => {
       ["task:task:read"],
     );
     await vi.waitFor(() => {
-      expect(fixture.deliverText).toHaveBeenCalledWith(
+      expect(fixture.deliverMarkdown).toHaveBeenCalledWith(
         "oc_chat",
         expect.stringContaining("task:task:read"),
       );
@@ -730,6 +730,9 @@ function createController({
   const deliverText = vi.fn<
     (chatId: string, text: string) => Promise<void>
   >(async () => {});
+  const deliverMarkdown = vi.fn<
+    (chatId: string, markdown: string) => Promise<void>
+  >(async () => {});
   const readAuthorizedUser = vi.fn(async () => authorizedUser);
   const listGrantedUserScopes = vi.fn(
     listScopes ?? (async () => ["drive:file:download"]),
@@ -768,6 +771,7 @@ function createController({
       deliverCard,
       updateCard,
       deliverText,
+      deliverMarkdown,
     },
     pino({ level: "silent" }),
     closeTimeoutMs,
@@ -783,6 +787,7 @@ function createController({
     deliverCard,
     updateCard,
     deliverText,
+    deliverMarkdown,
     async finished() {
       await vi.waitFor(() => {
         expect(

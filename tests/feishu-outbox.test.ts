@@ -115,6 +115,69 @@ describe("Feishu outbox", () => {
     }]);
   });
 
+  it("renders runtime status updates as Markdown cards", async () => {
+    const markdownCards: string[] = [];
+    const texts: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async (_chatId, text) => {
+          texts.push(text);
+        },
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle({
+      type: "mcp.status.updated",
+      target,
+      threadId: null,
+      name: "codex_apps",
+      status: "ready",
+      error: null,
+      failureReason: null,
+    });
+    outbox.handle({
+      type: "account.updated",
+      target,
+      authMode: "apikey",
+      planType: "pro",
+    });
+    await outbox.close();
+
+    expect(texts).toEqual([]);
+    expect(markdownCards).toEqual([
+      "## MCP Server\n- 名称：codex_apps\n- 状态：已就绪",
+      "## Codex 账户状态已更新\n- 认证：apikey\n- 套餐：Pro",
+    ]);
+  });
+
+  it("delivers Markdown through the ordered queue as a Markdown card", async () => {
+    const markdownCards: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    await outbox.deliverMarkdown("oc_chat", "## 测试\n- 名称：x");
+    await outbox.close();
+
+    expect(markdownCards).toEqual(["## 测试\n- 名称：x"]);
+  });
+
   it("sends completed generated images even when operation summaries are hidden", async () => {
     const sentImages: Array<{ chatId: string; image: Buffer }> = [];
     const image = Buffer.from("validated-image");

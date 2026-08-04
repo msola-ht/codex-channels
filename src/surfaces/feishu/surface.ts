@@ -498,7 +498,7 @@ export class FeishuSurface implements SurfaceAdapter {
     }
     const text = renderFeishuConfigurationChange(change);
     for (const chatId of this.safeConfigurationRecipients()) {
-      if (!this.output.notifyText(chatId, text)) {
+      if (!this.output.notifyMarkdown(chatId, text)) {
         this.logger.warn(
           { accountId: this.accountId, conversationId: chatId },
           "飞书配置通知未进入输出队列",
@@ -518,7 +518,7 @@ export class FeishuSurface implements SurfaceAdapter {
     const text = renderFeishuConfigurationChange(change);
     return Promise.all(
       this.safeConfigurationRecipients().map(
-        (chatId) => this.output.deliverText(chatId, text),
+        (chatId) => this.output.deliverMarkdown(chatId, text),
       ),
     ).then(() => undefined);
   }
