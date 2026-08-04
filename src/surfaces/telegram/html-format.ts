@@ -103,9 +103,16 @@ export function formatTelegramPanelHtml(
     const bullet = line.match(/^(\s*)-\s+(.+)$/);
     if (bullet) {
       const field = bullet[2]!.match(/^([^：\n]{1,32}：)(.*)$/);
-      output.push(field
-        ? `${bullet[1]}• <b>${escapeTelegramHtml(field[1]!)}</b>${escapeTelegramHtml(field[2]!)}`
-        : `${bullet[1]}• ${escapeTelegramHtml(bullet[2]!)}`);
+      if (field && !field[1]!.includes("**")) {
+        output.push(
+          `${bullet[1]}• <b>${escapeTelegramHtml(field[1]!)}</b>${escapeTelegramHtml(field[2]!)}`,
+        );
+      } else {
+        output.push(
+          `${bullet[1]}• ${escapeTelegramHtml(bullet[2]!)
+            .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")}`,
+        );
+      }
       continue;
     }
 

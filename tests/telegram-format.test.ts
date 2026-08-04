@@ -382,7 +382,7 @@ describe("formatStatus", () => {
       },
     });
 
-    expect(text).toContain("累计：1.25 M");
+    expect(text).toContain("**Token**：1.25 M");
     expect(text).toContain("最近模型请求：12.5 K");
     expect(text).toContain("输入命中缓存：750 K");
     expect(text).toContain("输入未命中缓存：250 K");

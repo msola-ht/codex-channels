@@ -559,8 +559,7 @@ export function formatConversationStatus(status: ConversationStatus): string {
     lines.push(
       "",
       "当前 Thread 用量：",
-      "- **Token**",
-      `  - 累计：${formatTokenCount(total.totalTokens)}`,
+      `- **Token**：${formatTokenCount(total.totalTokens)}`,
       `  - 最近模型请求：${formatTokenCount(last.totalTokens)}`,
       `  - 输入命中缓存：${formatTokenCount(total.cachedInputTokens)}`,
       `  - 输入未命中缓存：${formatTokenCount(Math.max(0, total.inputTokens - total.cachedInputTokens))}`,
@@ -570,7 +569,6 @@ export function formatConversationStatus(status: ConversationStatus): string {
         : []),
       `  - 输出：${formatTokenCount(total.outputTokens)}`,
       `  - 其中推理输出：${formatTokenCount(total.reasoningOutputTokens)}`,
-      `  - 合计：${formatTokenCount(total.inputTokens + total.outputTokens)}`,
       `  - Codex 有效上下文窗口：${modelContextWindow === null ? "未知" : formatTokenCount(modelContextWindow)}`,
     );
   } else if (status.threadId) {
@@ -691,15 +689,27 @@ export function formatConversationMetrics(
       ...(direct.requestDurationMs === null
         ? []
         : [`耗时：${formatElapsedDuration(direct.requestDurationMs)}`]),
-      ...(direct.inputTokens === null ? [] : [`输入：${formatTokenCount(direct.inputTokens)}`]),
-      ...(direct.cachedInputTokens === null
+      ...(direct.inputTokens === null && direct.outputTokens === null
         ? []
-        : [`  - 命中缓存：${formatTokenCount(direct.cachedInputTokens)}`]),
-      ...(direct.outputTokens === null ? [] : [`输出：${formatTokenCount(direct.outputTokens)}`]),
-      ...(direct.reasoningOutputTokens === null || direct.reasoningOutputTokens === 0
-        ? []
-        : [`  - 其中推理输出：${formatTokenCount(direct.reasoningOutputTokens)}`]),
-      ...(direct.totalTokens === null ? [] : [`总计：${formatTokenCount(direct.totalTokens)}`]),
+        : [
+            `- **Token**：${formatTokenCount(
+              direct.totalTokens ?? (direct.inputTokens ?? 0) + (direct.outputTokens ?? 0),
+            )}`,
+            ...(direct.cachedInputTokens === null
+              ? direct.inputTokens === null
+                ? []
+                : [`  - 输入：${formatTokenCount(direct.inputTokens)}`]
+              : [
+                  `  - 输入命中缓存：${formatTokenCount(direct.cachedInputTokens)}`,
+                  `  - 输入未命中缓存：${formatTokenCount(Math.max(0, (direct.inputTokens ?? 0) - direct.cachedInputTokens))}`,
+                ]),
+            ...(direct.outputTokens === null
+              ? []
+              : [`  - 输出：${formatTokenCount(direct.outputTokens)}`]),
+            ...(direct.reasoningOutputTokens === null || direct.reasoningOutputTokens === 0
+              ? []
+              : [`  - 其中推理输出：${formatTokenCount(direct.reasoningOutputTokens)}`]),
+          ]),
       ...(direct.totalCostNanos === null
         ? []
         : [
@@ -990,9 +1000,6 @@ function formatMetricsGroup(
     ? `${provider} / ${group.model ?? "未知模型"}`
     : provider;
   const aggregate = group.aggregate;
-  const cache = aggregate.cachedInputTokens === null
-    ? "（缓存未知）"
-    : `（命中 ${formatTokenCount(aggregate.cachedInputTokens)} · 未命中 ${formatTokenCount(Math.max(0, aggregate.inputTokens - aggregate.cachedInputTokens))} · ${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}）`;
   const speed = aggregate.outputTokensPerSecond === null
     ? "速度未知"
     : `${formatTokensPerSecond(aggregate.outputTokensPerSecond)}`;
@@ -1000,26 +1007,34 @@ function formatMetricsGroup(
     ? "首段延迟未知"
     : `首段 P50/P95 ${formatMetricLatency(aggregate.ttftP50Ms)}/${formatMetricLatency(aggregate.ttftP95Ms)}`;
   const reasoning = aggregate.reasoningOutputTokens > 0
-    ? `（其中推理 ${formatTokenCount(aggregate.reasoningOutputTokens)}）`
+    ? `  - 其中推理输出：${formatTokenCount(aggregate.reasoningOutputTokens)}`
     : "";
   const referenceCost = toReferenceCostDisplay(aggregate);
+  const referenceCostDisplay = toDisplayReferenceCost(
+    referenceCost,
+    currency,
+    exchangeRate ?? null,
+  );
+  const costBreakdown = formatReferenceCostBreakdown(referenceCostDisplay);
   const cost = aggregate.pricedRequestCount === 0
-    ? "参考总价未知"
-    : `参考总价：${formatReferenceCostTotal(
-        toDisplayReferenceCost(referenceCost, currency, exchangeRate ?? null),
-      )}`;
+    ? "  - **费用**：参考总价未知"
+    : `  - **费用**：${formatReferenceCostTotal(referenceCostDisplay)}${costBreakdown.length === 0 ? "" : `（${costBreakdown.join(" · ")}）`}`;
   return [
     `${index + 1}. ${label}`,
     `  - 请求：${aggregate.requestCount} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${aggregate.unsuccessfulRequestCount} 次）` : ""}`,
-    `  - 输入：${formatTokenCount(aggregate.inputTokens)} ${cache}`,
-    `  - 输出：${formatTokenCount(aggregate.outputTokens)}${reasoning}`,
+    ...(aggregate.cachedInputTokens === null
+      ? []
+      : [
+          `  - 输入命中缓存：${formatTokenCount(aggregate.cachedInputTokens)}`,
+          `  - 输入未命中缓存：${formatTokenCount(Math.max(0, aggregate.inputTokens - aggregate.cachedInputTokens))}`,
+          `  - 缓存命中率：${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}`,
+        ]),
+    `  - 输出：${formatTokenCount(aggregate.outputTokens)}`,
+    ...(reasoning === "" ? [] : [reasoning]),
     `  - 合计：${formatTokenCount(aggregate.inputTokens + aggregate.outputTokens)}`,
     `  - 速度：${speed}`,
     `  - ${latency}`,
-    `  - ${cost}`,
-    ...formatReferenceCostBreakdown(
-      toDisplayReferenceCost(referenceCost, currency, exchangeRate ?? null),
-    ).map((line) => `    - ${line}`),
+    cost,
   ].join("\n");
 }
 

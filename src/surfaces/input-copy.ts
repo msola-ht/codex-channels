@@ -25,25 +25,28 @@ export function formatVisionCompleted(details: {
   elapsedMs?: number;
   usage?: VisionTokenUsage;
 }): string {
-  const tokenParts = details.usage === undefined
+  const usage = details.usage;
+  const tokenParts = usage === undefined
     ? []
     : [
-        ...(details.usage.inputTokens === undefined
+        ...(usage.cachedInputTokens === undefined
           ? []
-          : [`  - 输入：${formatInteger(details.usage.inputTokens)}`]),
-        ...(details.usage.cachedInputTokens === undefined
+          : [
+              `  - 输入命中缓存：${formatInteger(usage.cachedInputTokens)}`,
+              ...(usage.inputTokens === undefined
+                ? []
+                : [`  - 输入未命中缓存：${formatInteger(Math.max(0, usage.inputTokens - usage.cachedInputTokens))}`]),
+            ]),
+        ...(usage.outputTokens === undefined
           ? []
-          : [`  - 缓存输入：${formatInteger(details.usage.cachedInputTokens)}`]),
-        ...(details.usage.outputTokens === undefined
+          : [`  - 输出：${formatInteger(usage.outputTokens)}`]),
+        ...(usage.reasoningOutputTokens === undefined
           ? []
-          : [`  - 输出：${formatInteger(details.usage.outputTokens)}`]),
-        ...(details.usage.reasoningOutputTokens === undefined
-          ? []
-          : [`  - 推理输出：${formatInteger(details.usage.reasoningOutputTokens)}`]),
-        ...(details.usage.totalTokens === undefined
-          ? []
-          : [`  - 总计：${formatInteger(details.usage.totalTokens)}`]),
+          : [`  - 其中推理输出：${formatInteger(usage.reasoningOutputTokens)}`]),
       ];
+  const totalTokens = usage === undefined
+    ? undefined
+    : usage.totalTokens ?? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
   return [
     "## 图片识别完成",
     `- API 提供商：${details.provider}`,
@@ -51,7 +54,9 @@ export function formatVisionCompleted(details: {
     ...(details.elapsedMs === undefined
       ? []
       : [`- 视觉 API 耗时：${formatElapsedDuration(details.elapsedMs)}`]),
-    ...(tokenParts.length === 0 ? [] : ["- Token 用量", ...tokenParts]),
+    ...(tokenParts.length === 0 || totalTokens === undefined
+      ? []
+      : [`- **Token**：${formatInteger(totalTokens)}`, ...tokenParts]),
     "",
     "- 正在交给当前模型处理。",
   ].join("\n");
