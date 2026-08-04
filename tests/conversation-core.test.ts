@@ -1099,6 +1099,7 @@ describe("ConversationCore", () => {
       turnId: "turn-1",
       requestStartedAtMs: 1_300,
       requestDurationMs: 500,
+      outcome: "interrupted",
       outputTokens: 50,
       reasoningOutputTokens: 0,
     });
@@ -1108,6 +1109,7 @@ describe("ConversationCore", () => {
       turnId: "turn-1",
       requestStartedAtMs: 1_400,
       requestDurationMs: 500,
+      outcome: "incomplete",
       thinkingDurationMs: 800,
       generationDurationMs: 900,
     });
@@ -1143,6 +1145,10 @@ describe("ConversationCore", () => {
     expect(completed).toMatchObject({
       timing: {
         modelRequestCount: 4,
+        completedModelRequestCount: 2,
+        interruptedModelRequestCount: 1,
+        incompleteModelRequestCount: 1,
+        failedModelRequestCount: 0,
         reasoningRequestCount: 2,
         modelRequestDurationMs: 4_000,
         requestInputTokens: 300,

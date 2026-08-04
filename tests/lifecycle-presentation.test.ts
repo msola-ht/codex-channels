@@ -241,6 +241,31 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).not.toContain("输出时长");
   });
 
+  it("separates completed, interrupted and unobservable model attempts", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "telegram",
+          accountId: "default",
+          conversationId: "100",
+        },
+        threadId: "thread-1",
+        turnId: "turn-1",
+        status: "completed",
+        timing: {
+          modelRequestCount: 62,
+          completedModelRequestCount: 20,
+          interruptedModelRequestCount: 42,
+          incompleteModelRequestCount: 0,
+          failedModelRequestCount: 0,
+        },
+      }),
+    );
+
+    expect(rendered).toContain("模型请求：62 次（完成 20 · 中断 42）");
+  });
+
   it("omits reasoning metrics when the provider does not expose a timing stream", () => {
     const rendered = renderPlainLifecyclePresentation(
       createTurnCompletedPresentation({

@@ -36,6 +36,10 @@ interface TurnTimingState {
   modelTtftMs?: number;
   modelRequestStartedAtMs?: number;
   modelRequestCount: number;
+  completedModelRequestCount: number;
+  interruptedModelRequestCount: number;
+  incompleteModelRequestCount: number;
+  failedModelRequestCount: number;
   reasoningRequestCount: number;
   reasoningUsageCount: number;
   modelRequestDurationMs: number;
@@ -258,6 +262,10 @@ export class ConversationCore {
         this.timingByThread.set(event.threadId, {
           turnId: event.turnId,
           modelRequestCount: 0,
+          completedModelRequestCount: 0,
+          interruptedModelRequestCount: 0,
+          incompleteModelRequestCount: 0,
+          failedModelRequestCount: 0,
           reasoningRequestCount: 0,
           reasoningUsageCount: 0,
           modelRequestDurationMs: 0,
@@ -369,6 +377,20 @@ export class ConversationCore {
         const timing = this.timingByThread.get(event.threadId);
         if (timing && timing.turnId === event.turnId) {
           timing.modelRequestCount += 1;
+          switch (event.outcome ?? "completed") {
+            case "completed":
+              timing.completedModelRequestCount += 1;
+              break;
+            case "interrupted":
+              timing.interruptedModelRequestCount += 1;
+              break;
+            case "incomplete":
+              timing.incompleteModelRequestCount += 1;
+              break;
+            case "failed":
+              timing.failedModelRequestCount += 1;
+              break;
+          }
           timing.modelRequestDurationMs += event.requestDurationMs;
           if (event.inputTokens !== undefined) {
             timing.modelInputTokens = (timing.modelInputTokens ?? 0) + event.inputTokens;
@@ -761,6 +783,16 @@ export class ConversationCore {
     const result: TurnOutputTiming = {};
     if (timing.modelRequestCount > 0) {
       result.modelRequestCount = timing.modelRequestCount;
+      if (
+        timing.interruptedModelRequestCount > 0
+        || timing.incompleteModelRequestCount > 0
+        || timing.failedModelRequestCount > 0
+      ) {
+        result.completedModelRequestCount = timing.completedModelRequestCount;
+        result.interruptedModelRequestCount = timing.interruptedModelRequestCount;
+        result.incompleteModelRequestCount = timing.incompleteModelRequestCount;
+        result.failedModelRequestCount = timing.failedModelRequestCount;
+      }
       if (timing.reasoningUsageCount > 0) {
         result.reasoningRequestCount = timing.reasoningRequestCount;
       }

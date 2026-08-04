@@ -89,7 +89,8 @@ Turn、Thread 或 Surface 关闭时清理。
 `lifecycle-presentation.ts` 统一 Telegram、飞书与微信的 Gateway 上线、Turn 开始确认和 Turn
 结束汇报信息模型、字段顺序与中文状态词；结束汇报把本次运行、当前会话累计和账户状态依次分区，按 Turn
 聚合统计代理捕获的全部模型请求、实际产生推理输出的思考次数及当前 Turn 参考总价，并保留 Provider
-通用的 Thread Token/上下文与参考总价累计指标。`reference-cost-format.ts` 统一总价、计价覆盖率及
+通用的 Thread Token/上下文与参考总价累计指标；本轮存在非正常模型尝试时，请求总数会进一步拆分为
+完成、中断、未完整观测和失败数量。`reference-cost-format.ts` 统一总价、计价覆盖率及
 `/M Token` 单价格式。
 原生 OpenAI
 鉴权的 Codex Provider 统一显示为“OpenAI 官方”，且只在该类 Thread 显示 Fast 与 OpenAI 周限；

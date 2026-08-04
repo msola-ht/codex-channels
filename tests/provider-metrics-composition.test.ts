@@ -63,6 +63,7 @@ describe("ProviderMetricsComposition", () => {
       type: "turn.modelTiming.updated",
       threadId: "thread-1",
       turnId: "turn-1",
+      outcome: "completed",
       ttftMs: 200,
       thinkingDurationMs: 300,
       outputDurationMs: 200,

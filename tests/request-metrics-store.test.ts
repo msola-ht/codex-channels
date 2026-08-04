@@ -523,6 +523,85 @@ describe("SqliteModelRequestMetricsStore", () => {
     store.close();
   });
 
+  it("normalizes historical unobservable HTTP successes as incomplete", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    store.record({
+      ...sample(),
+      responseFormat: "unknown",
+      model: null,
+      serviceTier: null,
+      inputTokens: null,
+      cachedInputTokens: null,
+      outputTokens: null,
+      reasoningOutputTokens: null,
+      totalTokens: null,
+    });
+
+    expect(store.recent(1)[0]).toMatchObject({
+      status: "incomplete",
+      incompleteReason: "response_not_observed",
+    });
+    expect(store.threadSummary("thread-1").latestTurn).toMatchObject({
+      requestCount: 1,
+      unsuccessfulRequestCount: 1,
+      pricedRequestCount: 0,
+    });
+    expect(store.aggregate({
+      dimension: "global",
+      startAtMs: 0,
+      endAtMs: Date.now() + 1,
+    }).aggregate).toMatchObject({
+      requestCount: 1,
+      unsuccessfulRequestCount: 1,
+      pricedRequestCount: 0,
+    });
+    expect(store.errors({
+      startAtMs: 0,
+      endAtMs: Date.now() + 1,
+    })).toMatchObject({
+      requestCount: 1,
+      unsuccessfulRequestCount: 1,
+      groups: [{
+        provider: "deepseek",
+        model: null,
+        status: "incomplete",
+        httpStatus: 200,
+        errorType: "response_not_observed",
+        requestCount: 1,
+      }],
+    });
+    store.close();
+  });
+
+  it("keeps successful compact operations completed without model usage", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    store.record({
+      ...sample(),
+      operation: "compact",
+      responseFormat: "unknown",
+      model: null,
+      serviceTier: null,
+      inputTokens: null,
+      cachedInputTokens: null,
+      outputTokens: null,
+      reasoningOutputTokens: null,
+      totalTokens: null,
+    });
+
+    expect(store.recent(1)[0]).toMatchObject({
+      operation: "compact",
+      status: "completed",
+      incompleteReason: null,
+    });
+    store.close();
+  });
+
   it("rejects priced snapshots without a currency", () => {
     const directory = temporaryDirectory();
     const path = join(directory, "request-metrics.sqlite3");
@@ -612,6 +691,41 @@ describe("SqliteModelRequestMetricsStore", () => {
     expect(() => store.recent(0)).toThrow(/1 到 500/u);
     expect(() => store.recent(501)).toThrow(/1 到 500/u);
     store.close();
+  });
+
+  it("opens the live database read-only and pages sanitized records", () => {
+    const directory = temporaryDirectory();
+    const path = join(directory, "request-metrics.sqlite3");
+    const writer = new SqliteModelRequestMetricsStore(path);
+    writer.record(sample());
+    writer.record({
+      ...sample(),
+      requestStartedAtMs: 2_000,
+      responseCompletedAtMs: 2_650,
+    });
+
+    const reader = new SqliteModelRequestMetricsStore(path, Date.now(), {
+      readOnly: true,
+    });
+    const first = reader.page({
+      startAtMs: 0,
+      endAtMs: Date.now() + 1,
+      limit: 1,
+    });
+    expect(first.records).toHaveLength(1);
+    expect(first.nextAfterId).toBe(first.records[0]?.id);
+    const second = reader.page({
+      startAtMs: 0,
+      endAtMs: Date.now() + 1,
+      ...(first.nextAfterId === null ? {} : { afterId: first.nextAfterId }),
+      limit: 1,
+    });
+    expect(second.records).toHaveLength(1);
+    expect(second.records[0]?.id).not.toBe(first.records[0]?.id);
+    expect(second.nextAfterId).toBeNull();
+    expect(() => reader.record(sample())).toThrow(/只读/u);
+    reader.close();
+    writer.close();
   });
 });
 

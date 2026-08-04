@@ -135,6 +135,13 @@ export function toModelTimingEvent(
       0,
       metrics.responseCompletedAtMs - metrics.requestStartedAtMs,
     ),
+    outcome: metrics.status === "completed"
+      ? "completed" as const
+      : metrics.errorType === "client_disconnected"
+        ? "interrupted" as const
+        : metrics.status === "incomplete" || metrics.status === "unknown"
+          ? "incomplete" as const
+          : "failed" as const,
     ...(metrics.inputTokens === null ? {} : { inputTokens: metrics.inputTokens }),
     ...(metrics.cachedInputTokens === null
       ? {}

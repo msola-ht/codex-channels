@@ -102,7 +102,8 @@ codexc service restart gateway
 审批内容。分享日志前仍需人工检查。
 
 每次 Turn 完成后按“本次运行”“当前会话累计”和可选的“账户状态”分开展示：运行区把统计代理捕获到
-的本 Turn 全部模型请求聚合为请求次数、聚合模型耗时、缓存命中、完整运行耗时和不含推理的综合输出
+的本 Turn 全部模型请求聚合为请求次数，并在存在异常尝试时拆分完成、中断、未完整观测和失败数量，
+同时展示聚合模型耗时、缓存命中、完整运行耗时和不含推理的综合输出
 速度，并显示具有完整 Token 与流式时间窗的请求覆盖率；会话区保留 Thread 累计上下文、压缩次数、
 Goal 与 Git 分支。所有 Provider 都展示 Gateway 实际观察到的首段回复延迟；DeepSeek 还会展示
 最后一次请求的可观测首事件延迟，以及整轮综合思考速度与含推理生成速度。原生 OpenAI 账户对应的
@@ -111,7 +112,9 @@ Turn 的运行聚合、指标库保留范围内的 Thread 会话累计及最近�
 `/metrics global|providers|models 24h|7d|30d` 把 Codex Provider 与直接 API 请求按同一口径汇总，
 并显示缓存、输出速度及首段回复延迟的有效样本覆盖率；`/metrics errors` 按提供商、模型、状态、
 HTTP 状态和错误类型汇总异常请求，显示异常率与最近发生时间。它不会替代 `/status` 的 App Server
-上下文统计。新请求会按发生时保存的模型价格快照估算参考总价，并同时显示计价覆盖率；本次
+上下文统计。客户端提前断开的请求计为中断；HTTP 200 但没有模型、Usage 或完成事件的响应计为
+“未完整观测”，两者都不冒充成功请求或参与计价；缺少 `Content-Type` 但正文包含合法 Responses
+SSE 事件时仍按正文受限识别，不会误丢成功请求。新请求会按发生时保存的模型价格快照估算参考总价，并同时显示计价覆盖率；本次
 运行卡片展示本轮实际产生推理输出的思考次数，并分别展示当前 Turn 与当前 Thread 累计总价；
 `/metrics` 还展示输入、缓存输入和输出的
 `/M Token` 单价；聚合范围存在多档单价时只明确标记，不伪造一个统一价格。历史
@@ -194,11 +197,15 @@ Codex Provider 请求和外部视觉 API 请求的脱敏指标使用同一个独
 
 ```bash
 codexc metrics status
+codexc metrics report --range 30d --group models       # Markdown 汇报到标准输出
+codexc metrics export --range 30d --format json        # 脱敏明细导出，也支持 csv
 codexc service stop gateway
 codexc metrics reset              # 先保留 0600 旧库备份，再重建
 codexc service start gateway
 ```
 
+`report` 与 `export` 使用只读连接，可在 Gateway 运行时执行；支持 `24h`、`7d`、`30d`，导出
+包含固定格式版本、时间范围和脱敏请求字段，不包含提示词、消息、图片、响应正文、凭据或上游响应 ID。
 `metrics reset` 不修改会话状态库；Gateway 运行时会拒绝执行，旧指标不会隐式迁移。
 
 ### 常用聊天命令

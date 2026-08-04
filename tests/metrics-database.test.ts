@@ -16,12 +16,15 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   inspectMetricsDatabase,
+  readMetricsExport,
+  readMetricsReport,
   resetMetricsDatabase,
 } from "../scripts/metrics-database.mjs";
 import {
   modelRequestMetricsSchemaVersion,
   requestMetricsDatabasePath,
   SqliteModelRequestMetricsStore,
+  type ModelRequestMetricSample,
 } from "../src/observability/index.js";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { initializeUserData } from "../scripts/runtime-config.mjs";
@@ -59,6 +62,65 @@ describe("model request metrics database operations", () => {
       exists: true,
       schemaVersion: modelRequestMetricsSchemaVersion,
     });
+  });
+
+  it("reads a reusable aggregate report and paged sanitized export", () => {
+    const { environment, databasePath } = fixture();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    store.record(metricSample());
+    store.record({
+      ...metricSample(),
+      responseFormat: "unknown",
+      model: null,
+      status: "completed",
+      inputTokens: null,
+      cachedInputTokens: null,
+      outputTokens: null,
+      reasoningOutputTokens: null,
+      totalTokens: null,
+      firstTokenAtMs: null,
+      firstReasoningDeltaAtMs: null,
+      lastReasoningDeltaAtMs: null,
+      firstOutputDeltaAtMs: null,
+      lastOutputDeltaAtMs: null,
+    });
+    store.close();
+    const nowMs = Date.now() + 1;
+
+    const report = readMetricsReport(environment, {
+      range: "24h",
+      group: "models",
+      nowMs,
+    });
+    expect(report).toMatchObject({
+      format: "codex-connect-request-metrics-report",
+      version: 1,
+      report: {
+        aggregate: {
+          requestCount: 2,
+          unsuccessfulRequestCount: 1,
+        },
+      },
+      errors: {
+        requestCount: 2,
+        unsuccessfulRequestCount: 1,
+        groups: [{
+          status: "incomplete",
+          errorType: "response_not_observed",
+        }],
+      },
+    });
+    const exported = readMetricsExport(environment, { range: "24h", nowMs });
+    expect(exported).toMatchObject({
+      format: "codex-connect-request-metrics-export",
+      version: 1,
+    });
+    expect(exported.records).toHaveLength(2);
+    expect(exported.records[1]).toMatchObject({
+      status: "incomplete",
+      incompleteReason: "response_not_observed",
+    });
+    expect(JSON.stringify(exported)).not.toMatch(/prompt|message|authorization/iu);
   });
 
   it("refuses to reset while Gateway is running", () => {
@@ -235,4 +297,37 @@ function createMetricsDatabase(path: string, schemaVersion: number, count: numbe
   const insert = database.prepare("INSERT INTO model_request_metrics DEFAULT VALUES");
   for (let index = 0; index < count; index += 1) insert.run();
   database.close();
+}
+
+function metricSample(): ModelRequestMetricSample {
+  return {
+    provider: "deepseek",
+    pricing: null,
+    transport: "http",
+    responseFormat: "sse",
+    operation: "response",
+    threadId: "thread-1",
+    turnId: "turn-1",
+    model: "deepseek-v4-flash",
+    serviceTier: "default",
+    status: "completed",
+    httpStatus: 200,
+    errorType: null,
+    errorCode: null,
+    incompleteReason: null,
+    inputTokens: 1_000,
+    cachedInputTokens: 900,
+    outputTokens: 100,
+    reasoningOutputTokens: 40,
+    totalTokens: 1_100,
+    upstreamCreatedAt: 1_785_640_800,
+    upstreamCompletedAt: 1_785_640_801,
+    requestStartedAtMs: 1_000,
+    firstTokenAtMs: 1_100,
+    firstReasoningDeltaAtMs: 1_100,
+    lastReasoningDeltaAtMs: 1_300,
+    firstOutputDeltaAtMs: 1_400,
+    lastOutputDeltaAtMs: 1_600,
+    responseCompletedAtMs: 1_650,
+  };
 }

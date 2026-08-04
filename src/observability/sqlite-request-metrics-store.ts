@@ -14,12 +14,14 @@ import type {
   ModelRequestMetricsAggregationDimension,
   ModelRequestMetricsAggregationQuery,
   ModelRequestMetricsErrorQuery,
+  ModelRequestMetricsPageQuery,
   ModelRequestMetricsStore,
   ModelRequestPricingSnapshot,
   StoredModelRequestMetric,
   StoredModelRequestMetricsAggregate,
   StoredModelRequestMetricsErrorReport,
   StoredModelRequestMetricsGroup,
+  StoredModelRequestMetricsPage,
   StoredModelRequestMetricsReport,
   StoredThreadRequestMetricsSummary,
   StoredTurnRequestMetricsSummary,
@@ -31,6 +33,26 @@ const retentionMs = 30 * 24 * 60 * 60 * 1_000;
 const maximumRows = 100_000;
 const cleanupInterval = 100;
 const maximumAggregationGroups = 20;
+const observableCompletionSql = `
+  status = 'completed'
+  AND NOT (
+    response_format = 'unknown'
+    AND model IS NULL
+    AND input_tokens IS NULL
+    AND output_tokens IS NULL
+  )
+`;
+const normalizedStatusSql = `
+  CASE
+    WHEN status = 'completed'
+      AND response_format = 'unknown'
+      AND model IS NULL
+      AND input_tokens IS NULL
+      AND output_tokens IS NULL
+      THEN 'incomplete'
+    ELSE status
+  END
+`;
 
 interface MetricRow {
   id: number;
@@ -144,13 +166,30 @@ interface ErrorGroupRow {
 
 export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore {
   private readonly database: DatabaseSync;
-  private readonly insert: StatementSync;
-  private readonly lock: RequestMetricsDatabaseLock;
+  private readonly insert?: StatementSync;
+  private readonly lock?: RequestMetricsDatabaseLock;
   private closed = false;
   private rowCount = 0;
   private recordsSinceCleanup = 0;
 
-  constructor(readonly path: string, nowMs: number = Date.now()) {
+  constructor(
+    readonly path: string,
+    nowMs: number = Date.now(),
+    options: { readOnly?: boolean } = {},
+  ) {
+    if (options.readOnly) {
+      const database = new DatabaseSync(path, { readOnly: true });
+      this.database = database;
+      try {
+        this.database.exec("PRAGMA busy_timeout = 1000; PRAGMA query_only = ON;");
+        this.requireCurrentSchema();
+        this.rowCount = this.currentCount();
+      } catch (error) {
+        database.close();
+        throw error;
+      }
+      return;
+    }
     const parent = dirname(path);
     mkdirSync(parent, { recursive: true, mode: 0o700 });
     chmodSync(parent, 0o700);
@@ -197,6 +236,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
 
   record(sample: ModelRequestMetricSample): void {
     this.requireOpen();
+    if (!this.insert) throw new Error("只读模型请求指标数据库不能写入");
     const recordedAtMs = Date.now();
     this.insert.run(
       sample.provider,
@@ -253,6 +293,40 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     return rows.map(toStoredMetric);
   }
 
+  page(query: ModelRequestMetricsPageQuery): StoredModelRequestMetricsPage {
+    this.requireOpen();
+    validateMetricsTimeRange(query);
+    if (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > 500) {
+      throw new Error("模型请求指标分页数量必须在 1 到 500 之间");
+    }
+    const afterId = query.afterId ?? 0;
+    if (!Number.isSafeInteger(afterId) || afterId < 0) {
+      throw new Error("模型请求指标分页游标无效");
+    }
+    const rows = this.database.prepare(`
+      SELECT *
+      FROM model_request_metrics_enriched
+      WHERE recorded_at_ms >= ?
+        AND recorded_at_ms < ?
+        AND id > ?
+      ORDER BY id ASC
+      LIMIT ?
+    `).all(
+      query.startAtMs,
+      query.endAtMs,
+      afterId,
+      query.limit + 1,
+    ) as unknown as MetricRow[];
+    const hasMore = rows.length > query.limit;
+    const pageRows = hasMore ? rows.slice(0, query.limit) : rows;
+    return {
+      startAtMs: query.startAtMs,
+      endAtMs: query.endAtMs,
+      records: pageRows.map(toStoredMetric),
+      nextAfterId: hasMore ? pageRows.at(-1)?.id ?? null : null,
+    };
+  }
+
   aggregate(
     query: ModelRequestMetricsAggregationQuery,
   ): StoredModelRequestMetricsReport {
@@ -287,7 +361,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     const summary = this.database.prepare(`
       SELECT
         COUNT(*) AS request_count,
-        SUM(CASE WHEN status = 'completed' THEN 0 ELSE 1 END)
+        SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
           AS unsuccessful_request_count
       FROM model_request_metrics
       WHERE recorded_at_ms >= ?
@@ -295,21 +369,37 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         AND operation = 'response'
     `).get(query.startAtMs, query.endAtMs) as unknown as ErrorSummaryRow;
     const rows = this.database.prepare(`
+      WITH normalized AS (
+        SELECT
+          *,
+          ${normalizedStatusSql} AS normalized_status,
+          CASE
+            WHEN ${normalizedStatusSql} = 'incomplete'
+              AND error_type IS NULL
+              AND incomplete_reason IS NULL
+              THEN 'response_not_observed'
+            WHEN incomplete_reason = 'response_not_observed'
+              AND error_type IS NULL
+              THEN 'response_not_observed'
+            ELSE error_type
+          END AS normalized_error_type
+        FROM model_request_metrics
+      )
       SELECT
         provider,
         model,
-        status,
+        normalized_status AS status,
         http_status,
-        error_type,
+        normalized_error_type AS error_type,
         COUNT(*) AS request_count,
         MAX(recorded_at_ms) AS last_occurred_at_ms,
         COUNT(*) OVER () AS total_group_count
-      FROM model_request_metrics
+      FROM normalized
       WHERE recorded_at_ms >= ?
         AND recorded_at_ms < ?
         AND operation = 'response'
-        AND status <> 'completed'
-      GROUP BY provider, model, status, http_status, error_type
+        AND normalized_status <> 'completed'
+      GROUP BY provider, model, normalized_status, http_status, normalized_error_type
       ORDER BY request_count DESC, last_occurred_at_ms DESC,
         provider ASC, model ASC
       LIMIT ?
@@ -354,7 +444,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
             turn_id,
             COUNT(DISTINCT turn_id) AS turn_count,
             COUNT(*) AS request_count,
-            SUM(CASE WHEN status = 'completed' THEN 0 ELSE 1 END)
+            SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
               AS unsuccessful_request_count,
             SUM(request_duration_ms) AS request_duration_ms,
             SUM(input_tokens) AS input_tokens,
@@ -409,7 +499,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         NULL AS turn_id,
         COUNT(DISTINCT turn_id) AS turn_count,
         COUNT(*) AS request_count,
-        SUM(CASE WHEN status = 'completed' THEN 0 ELSE 1 END)
+        SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
           AS unsuccessful_request_count,
         SUM(request_duration_ms) AS request_duration_ms,
         SUM(input_tokens) AS input_tokens,
@@ -514,7 +604,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           group_provider AS provider,
           group_model AS model,
           COUNT(*) AS request_count,
-          SUM(CASE WHEN status = 'completed' THEN 0 ELSE 1 END)
+          SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
             AS unsuccessful_request_count,
           SUM(request_duration_ms) AS request_duration_ms,
           SUM(input_tokens) AS input_tokens,
@@ -612,7 +702,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     try {
       this.database.close();
     } finally {
-      this.lock.release();
+      this.lock?.release();
     }
   }
 
@@ -825,6 +915,20 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     }
   }
 
+  private requireCurrentSchema(): void {
+    let value: number | undefined;
+    try {
+      value = (this.database.prepare(`
+        SELECT value FROM schema_metadata WHERE name = 'schema_version'
+      `).get() as { value: number } | undefined)?.value;
+    } catch {
+      throw new ModelRequestMetricsSchemaError(0, schemaVersion);
+    }
+    if (value !== schemaVersion) {
+      throw new ModelRequestMetricsSchemaError(value ?? 0, schemaVersion);
+    }
+  }
+
   private cleanup(nowMs: number): void {
     this.requireOpen();
     this.database.exec("BEGIN IMMEDIATE");
@@ -869,6 +973,12 @@ export class ModelRequestMetricsSchemaError extends Error {
 }
 
 function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
+  const responseNotObserved = row.operation === "response"
+    && row.status === "completed"
+    && row.response_format === "unknown"
+    && row.model === null
+    && row.input_tokens === null
+    && row.output_tokens === null;
   return {
     id: row.id,
     provider: row.provider,
@@ -880,11 +990,13 @@ function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     turnId: row.turn_id,
     model: row.model,
     serviceTier: row.service_tier,
-    status: row.status,
+    status: responseNotObserved ? "incomplete" : row.status,
     httpStatus: row.http_status,
     errorType: row.error_type,
     errorCode: row.error_code,
-    incompleteReason: row.incomplete_reason,
+    incompleteReason: responseNotObserved
+      ? "response_not_observed"
+      : row.incomplete_reason,
     inputTokens: row.input_tokens,
     cachedInputTokens: row.cached_input_tokens,
     outputTokens: row.output_tokens,

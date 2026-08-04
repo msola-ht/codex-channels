@@ -229,6 +229,20 @@ export interface ModelRequestMetricsErrorQuery {
   endAtMs: number;
 }
 
+export interface ModelRequestMetricsPageQuery {
+  startAtMs: number;
+  endAtMs: number;
+  afterId?: number;
+  limit: number;
+}
+
+export interface StoredModelRequestMetricsPage {
+  startAtMs: number;
+  endAtMs: number;
+  records: StoredModelRequestMetric[];
+  nextAfterId: number | null;
+}
+
 export interface StoredModelRequestMetricsErrorGroup {
   provider: string;
   model: string | null;

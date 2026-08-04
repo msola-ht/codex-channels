@@ -55,6 +55,8 @@ try {
     || !help.includes("service logs")
     || !help.includes("rules init")
     || !help.includes("metrics status")
+    || !help.includes("metrics report")
+    || !help.includes("metrics export")
     || !help.includes("metrics reset")
   ) {
     throw new Error("CLI 帮助缺少公开命令");

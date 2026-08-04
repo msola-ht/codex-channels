@@ -22,7 +22,9 @@
   HTTP JSON 记录，不能把缺少 Turn 元数据的 Codex WebSocket/SSE 代理请求误分类。数据库使用
   严格 Schema v2、`0600` 文件权限，只接受当前
   Schema；首次初始化在单一事务内完成；使用 WAL 允许后续只读查询与采集并行，锁等待限制为
-  10 ms；记录保留 30 天，以 100,000 条为清理目标，每 100 次写入分批清理，两个清理周期之间
+  10 ms；同一 Store 还提供不获取写锁、不初始化或清理 Schema 的显式只读模式，以及每页最多
+  500 条的稳定 ID 游标分页，供 CLI 报表、导出和后续本地 WebUI 复用。记录保留 30 天，以
+  100,000 条为清理目标，每 100 次写入分批清理，两个清理周期之间
   最多短暂超出 99 条。`model_request_metrics_enriched` View 统一派生总耗时、TTFT、推理/输出/生成
   阶段耗时、收尾间隔、缓存与不含推理的 Token、缓存命中率、三类生成速度，以及按当次价格快照计算的
   输入/缓存/输出和总费用。价格以每百万 Token 的十亿分之一币种单位保存，费用同样使用十亿分之一
@@ -34,7 +36,8 @@
   首段回复延迟只使用有效 TTFT 样本，并返回平均、P50、P95 和覆盖计数。所有合计仍在 SQLite 内完成，
   费用也按同币种快照求和并返回已计价请求数；只有聚合范围内三类每百万 Token 单价分别一致时才
   返回统一单价，否则标记为多档价格，不把缺失价格、计时或缓存字段当成零；不同币种不强行合计。
-  异常查询以同一时间范围内全部响应请求作为失败率分母，只把
+  查询时还会把旧库中 HTTP 200、响应格式未知且没有模型或 Usage 的历史“完成”记录归一为
+  `incomplete/response_not_observed`；客户端提前断开仍保持独立失败类型。异常查询以同一时间范围内全部响应请求作为失败率分母，只把
   非完成状态按提供商、模型、状态、HTTP 状态和错误类型分组，返回出现次数、最近发生时间及总分组数，
   最多展示出现次数最高的 20 组。
 
@@ -48,7 +51,8 @@
 参数、凭据或上游响应 ID。`provider-proxy` 生成 Codex Provider 脱敏样本，Bootstrap 的外部视觉
 适配器生成直接 API 脱敏样本，两者复用同一有界 Writer；已有 Thread 的视觉请求保存
 `thread_id`，因调用发生在 Codex Turn 之前而保持 `turn_id = NULL`。本模块不依赖代理、App Server
-协议、Surface 或业务 Storage。当前没有公开 HTTP API 或 WebUI。Schema 不兼容时
+协议、Surface 或业务 Storage。当前没有公开 HTTP API 或 WebUI；`codexc metrics report` 与
+`export` 只通过本地只读连接输出 Markdown 或带固定格式版本的 JSON/CSV。Schema 不兼容时
 Gateway 失败关闭并提示 `codexc metrics reset`；该命令要求 Gateway 已停止，先检查点回写并备份
 旧库，再由下次启动创建当前 Schema，不执行隐式迁移。
 指标采集始终开启，不受全局调试模式影响；`debug` / `trace` 只增加脱敏的关联诊断，写入失败仍按

@@ -707,6 +707,7 @@ function formatMetricsErrorType(value: string | null): string {
     upstream_response_error: "上游响应失败",
     client_request_error: "客户端请求失败",
     client_disconnected: "客户端提前断开",
+    response_not_observed: "响应结果未完整观测",
     http_error: "HTTP 请求失败",
   }[value];
   if (knownLabel !== undefined) return knownLabel;

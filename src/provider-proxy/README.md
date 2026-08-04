@@ -13,7 +13,10 @@
   首尾时间；WebSocket 从出站 `response.create` 提前记录有界的模型与服务层级，完成事件再刷新
   最终模型、服务层级、状态、上游时间戳及输入/缓存/输出/推理 Token Usage，因此提前断线的失败
   指标仍可归入请求模型；HTTP
-  状态、超时、上游错误、客户端断开和 WebSocket 提前关闭同样产生受控失败指标，不保留错误正文。
+  状态、超时、上游错误、客户端断开和 WebSocket 提前关闭同样产生受控失败指标，不保留错误正文；
+  上游缺少 `Content-Type` 时只对合法 `response.*` SSE 事件进行正文识别，以恢复完成事件、模型和
+  Usage；HTTP 2xx 仍未观察到这些信息时标为 `incomplete/response_not_observed`，不能污染成功率
+  或计价覆盖率。HTTP 压缩操作以自身成功状态为准，不要求模型 Usage。
   指标在响应完成事件前完成投递确认；从
   `x-codex-turn-metadata` 提取 `thread_id` / `turn_id` 用于按 Turn 关联。
   非流式 JSON Responses 使用 1 MiB 临时上限解析相同元数据，正文和响应 ID 不进入指标；超限或

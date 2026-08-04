@@ -57,6 +57,7 @@ export type ConversationInputEvent =
       turnId: string;
       requestStartedAtMs: number;
       requestDurationMs: number;
+      outcome?: "completed" | "interrupted" | "incomplete" | "failed";
       inputTokens?: number;
       cachedInputTokens?: number;
       outputTokens?: number;

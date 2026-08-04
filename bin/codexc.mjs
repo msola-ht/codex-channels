@@ -57,6 +57,8 @@ const helpText = {
   rules check                  检查项目 Codex 命令预设
   state upgrade               显式升级 Gateway 状态数据库
   metrics status              查看模型请求指标数据库状态
+  metrics report              输出模型请求 Markdown 汇报
+  metrics export              导出脱敏模型请求 JSON 或 CSV
   metrics reset               备份并重建模型请求指标数据库
 
 后台服务：
@@ -142,15 +144,21 @@ const helpText = {
   "state.upgrade": `用法：codexc state upgrade
 
 停止 Gateway 后，备份并显式升级状态数据库。`,
-  metrics: `用法：codexc metrics <status|reset>
+  metrics: `用法：codexc metrics <status|reset|report|export>
 
-查看指标数据库状态，或在 Gateway 停止后备份并重建指标数据库。`,
+查看指标数据库状态、生成报表、导出脱敏记录，或在 Gateway 停止后重建指标库。`,
   "metrics.status": `用法：codexc metrics status
 
 只读显示指标数据库路径、Schema 兼容性和记录数量。`,
   "metrics.reset": `用法：codexc metrics reset
 
 要求 Gateway 已停止；先备份现有指标库，再让下次启动创建当前 Schema。`,
+  "metrics.report": `用法：codexc metrics report [--range <24h|7d|30d>] [--group <global|providers|models>]
+
+只读输出 Markdown 汇报；默认最近 30 天并按模型分组。`,
+  "metrics.export": `用法：codexc metrics export [--range <24h|7d|30d>] [--format <json|csv>]
+
+只读导出脱敏请求记录到标准输出；默认最近 30 天、JSON 格式。`,
   version: "用法：codexc version",
   gateway: `用法：codexc gateway
 
@@ -693,7 +701,9 @@ function state(args) {
 function metrics(args) {
   if (showRequestedHelp(args, "metrics") ||
     showSubcommandHelp(args, "status", "metrics.status") ||
-    showSubcommandHelp(args, "reset", "metrics.reset")) {
+    showSubcommandHelp(args, "reset", "metrics.reset") ||
+    showSubcommandHelp(args, "report", "metrics.report") ||
+    showSubcommandHelp(args, "export", "metrics.export")) {
     return;
   }
   const [subcommand, ...rest] = args;
@@ -701,10 +711,10 @@ function metrics(args) {
     console.log(helpText.metrics);
     return;
   }
-  if ((subcommand !== "status" && subcommand !== "reset") || rest.length > 0) {
-    throw new Error("用法：codexc metrics <status|reset>");
+  if (!new Set(["status", "reset", "report", "export"]).has(subcommand)) {
+    throw new Error("用法：codexc metrics <status|reset|report|export>");
   }
-  if (subcommand === "status") {
+  if (subcommand === "status" && rest.length === 0) {
     run(
       process.execPath,
       [join(packageDir, "scripts/metrics-database.mjs"), subcommand],
@@ -713,7 +723,10 @@ function metrics(args) {
     );
     return;
   }
-  runScript("scripts/metrics-database.mjs", [subcommand]);
+  if (subcommand === "reset" && rest.length > 0) {
+    throw new Error("用法：codexc metrics reset");
+  }
+  runScript("scripts/metrics-database.mjs", [subcommand, ...rest]);
 }
 
 function configuredEnvironment() {

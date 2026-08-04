@@ -233,9 +233,20 @@ export function createTurnCompletedPresentation(
     });
   }
   if (event.timing?.modelRequestCount !== undefined) {
+    const details = [
+      ["完成", event.timing.completedModelRequestCount],
+      ["中断", event.timing.interruptedModelRequestCount],
+      ["未完整观测", event.timing.incompleteModelRequestCount],
+      ["失败", event.timing.failedModelRequestCount],
+    ]
+      .filter((entry): entry is [string, number] =>
+        typeof entry[1] === "number" && entry[1] > 0
+      )
+      .map(([label, count]) => `${label} ${count}`)
+      .join(" · ");
     runFields.push({
       label: "模型请求",
-      value: `${event.timing.modelRequestCount} 次`,
+      value: `${event.timing.modelRequestCount} 次${details ? `（${details}）` : ""}`,
     });
   }
   if (event.timing?.reasoningRequestCount !== undefined) {

@@ -224,6 +224,132 @@ describe("ProviderProxy", () => {
     })]);
   });
 
+  it("does not mark an unobservable HTTP 200 response as completed", async () => {
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200);
+        response.end();
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstream.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push({
+      close: () => new Promise<void>((resolveClose) => {
+        upstream.close(() => resolveClose());
+      }),
+    });
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    const proxyPort = Number(proxy.address().split(":")[1]);
+    const status = await new Promise<number>((resolveStatus, rejectStatus) => {
+      const request = httpRequest({
+        hostname: "127.0.0.1",
+        port: proxyPort,
+        path: "/responses",
+        method: "POST",
+      }, (response) => {
+        response.resume();
+        response.on("end", () => resolveStatus(response.statusCode ?? 0));
+        response.on("error", rejectStatus);
+      });
+      request.on("error", rejectStatus);
+      request.end("{}");
+    });
+
+    expect(status).toBe(200);
+    expect(metrics).toEqual([expect.objectContaining({
+      status: "incomplete",
+      httpStatus: 200,
+      responseFormat: "unknown",
+      incompleteReason: "response_not_observed",
+      model: null,
+      inputTokens: null,
+      outputTokens: null,
+    })]);
+  });
+
+  it("recognizes SSE metadata when the upstream omits Content-Type", async () => {
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200);
+        response.end(sse("response.completed", {
+          type: "response.completed",
+          response: {
+            model: "gpt-5.6-sol",
+            status: "completed",
+            usage: {
+              input_tokens: 120,
+              input_tokens_details: { cached_tokens: 100 },
+              output_tokens: 30,
+              output_tokens_details: { reasoning_tokens: 10 },
+              total_tokens: 150,
+            },
+          },
+        }));
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstream.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push({
+      close: () => new Promise<void>((resolveClose) => {
+        upstream.close(() => resolveClose());
+      }),
+    });
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    const proxyPort = Number(proxy.address().split(":")[1]);
+    await new Promise<void>((resolveResponse, rejectResponse) => {
+      const request = httpRequest({
+        hostname: "127.0.0.1",
+        port: proxyPort,
+        path: "/responses",
+        method: "POST",
+      }, (response) => {
+        response.resume();
+        response.on("end", resolveResponse);
+        response.on("error", rejectResponse);
+      });
+      request.on("error", rejectResponse);
+      request.end("{}");
+    });
+
+    expect(metrics).toEqual([expect.objectContaining({
+      status: "completed",
+      responseFormat: "sse",
+      model: "gpt-5.6-sol",
+      inputTokens: 120,
+      cachedInputTokens: 100,
+      outputTokens: 30,
+      reasoningOutputTokens: 10,
+    })]);
+  });
+
   it("forwards requests with a rewritten host and records reasoning/output timing", async () => {
     const received: Array<{
       host: string;
@@ -967,6 +1093,7 @@ describe("ProviderProxy", () => {
 
   it("forwards HTTP compaction requests through the configured upstream base path", async () => {
     let receivedPath = "";
+    const metrics: ProviderProxyMetrics[] = [];
     const upstream = createServer((request, response) => {
       receivedPath = request.url ?? "";
       request.resume();
@@ -989,6 +1116,9 @@ describe("ProviderProxy", () => {
       upstreamPort: upstreamAddress.port,
       upstreamProtocol: "http",
       upstreamBasePath: "/v1/",
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
     });
     await proxy.start();
     openServers.push(proxy);
@@ -1011,6 +1141,12 @@ describe("ProviderProxy", () => {
 
     expect(status).toBe(200);
     expect(receivedPath).toBe("/v1/responses/compact?mode=test");
+    expect(metrics).toEqual([expect.objectContaining({
+      operation: "compact",
+      responseFormat: "json",
+      status: "completed",
+      httpStatus: 200,
+    })]);
   });
 
   it("forwards the Codex model catalog request through the configured upstream base path", async () => {

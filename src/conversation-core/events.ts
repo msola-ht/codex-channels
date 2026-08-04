@@ -73,6 +73,10 @@ export interface ThreadGoal {
 
 export interface TurnOutputTiming {
   modelRequestCount?: number;
+  completedModelRequestCount?: number;
+  interruptedModelRequestCount?: number;
+  incompleteModelRequestCount?: number;
+  failedModelRequestCount?: number;
   reasoningRequestCount?: number;
   modelRequestDurationMs?: number;
   requestInputTokens?: number;

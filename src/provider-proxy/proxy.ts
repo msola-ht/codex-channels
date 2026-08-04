@@ -202,6 +202,9 @@ export class ProviderProxy {
         if (!payload || payload === "[DONE]") return false;
         const parsed = parseJsonPayload(payload);
         const type = typeof parsed?.type === "string" ? parsed.type : currentEvent;
+        if (metrics.responseFormat === "unknown" && type.startsWith("response.")) {
+          metrics.responseFormat = "sse";
+        }
         return observeResponseEvent(metrics, type, parsed, receivedAtMs);
       };
       const processText = (text: string, receivedAtMs: number): boolean => {
@@ -212,6 +215,7 @@ export class ProviderProxy {
       };
       upstreamResponse.on("data", (chunk: Buffer) => {
         const completed = metrics.responseFormat === "sse"
+          || metrics.responseFormat === "unknown"
           ? processText(decoder.write(chunk), Date.now())
           : false;
         if (metrics.responseFormat === "json" && !jsonOverflow) {
@@ -236,6 +240,7 @@ export class ProviderProxy {
       upstreamResponse.on("end", () => {
         const endedAtMs = Date.now();
         const completed = metrics.responseFormat === "sse"
+          || metrics.responseFormat === "unknown"
           ? processText(decoder.end(), endedAtMs)
             || (pending ? processLine(pending.trimEnd(), endedAtMs) : false)
           : metrics.responseFormat === "json" && !jsonOverflow
@@ -539,10 +544,17 @@ function observeJsonResponse(
 function finalizeHttpStatus(metrics: MetricsState, completedAtMs: number): void {
   if (metrics.status !== "unknown") return;
   metrics.responseCompletedAtMs = completedAtMs;
-  metrics.status = metrics.httpStatus !== null && metrics.httpStatus >= 400
-    ? "failed"
-    : "completed";
-  if (metrics.status === "failed") metrics.errorType ??= "http_error";
+  if (metrics.httpStatus !== null && metrics.httpStatus >= 400) {
+    metrics.status = "failed";
+    metrics.errorType ??= "http_error";
+    return;
+  }
+  if (metrics.operation === "compact") {
+    metrics.status = "completed";
+    return;
+  }
+  metrics.status = "incomplete";
+  metrics.incompleteReason ??= "response_not_observed";
 }
 
 function markMetricsFailed(
