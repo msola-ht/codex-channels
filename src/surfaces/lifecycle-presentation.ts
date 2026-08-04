@@ -42,6 +42,7 @@ export type LifecyclePresentationField =
   | LifecyclePresentationLeafField
   | {
       title: string;
+      value?: string;
       fields: readonly LifecyclePresentationField[];
     };
 
@@ -290,14 +291,6 @@ export function createTurnCompletedPresentation(
       value: formatElapsedDuration(event.timing.modelRequestDurationMs),
     });
   }
-  if (event.timing?.requestInputTokens !== undefined) {
-    const outputTokens = (event.timing.nonReasoningOutputTokens ?? 0)
-      + (event.timing.reasoningTokens ?? 0);
-    runFields.push({
-      label: "总 Token",
-      value: formatTokenCount(event.timing.requestInputTokens + outputTokens),
-    });
-  }
   if (fallbackCacheField) {
     runFields.push(fallbackCacheField);
   }
@@ -312,6 +305,7 @@ export function createTurnCompletedPresentation(
       + reasoningOutputTokens;
     runFields.push({
       title: "Token",
+      value: formatTokenCount(inputTokens + outputTokens),
       fields: [
         {
           label: "输入",
@@ -349,28 +343,23 @@ export function createTurnCompletedPresentation(
     );
     runFields.push({
       title: "费用",
-      fields: [{
-        label: "参考总价",
-        value: successfulRequestCount !== undefined && successfulRequestCount > 0
-          ? formatReferenceCostTotal({
-              ...displayCost,
-              requestCount: successfulRequestCount,
-            }, "个成功请求")
-          : formatReferenceCostTotal(displayCost),
-        ...(displayCost.currency === null
-          ? {}
-          : {
-              subfields: ([
-                ["输入价格", displayCost.inputCostNanos],
-                ["缓存价格", displayCost.cachedInputCostNanos],
-                ["输出价格", displayCost.outputCostNanos],
-              ] as const).flatMap(([label, costNanos]) =>
-                costNanos === null
-                  ? []
-                  : [{ label, value: formatCurrencyNanos(displayCost.currency!, costNanos) }],
-              ),
-            }),
-      }],
+      value: successfulRequestCount !== undefined && successfulRequestCount > 0
+        ? formatReferenceCostTotal({
+            ...displayCost,
+            requestCount: successfulRequestCount,
+          }, "个成功请求")
+        : formatReferenceCostTotal(displayCost),
+      fields: displayCost.currency === null
+        ? []
+        : ([
+            ["输入价格", displayCost.inputCostNanos],
+            ["缓存价格", displayCost.cachedInputCostNanos],
+            ["输出价格", displayCost.outputCostNanos],
+          ] as const).flatMap(([label, costNanos]) =>
+            costNanos === null
+              ? []
+              : [{ label, value: formatCurrencyNanos(displayCost.currency!, costNanos) }],
+          ),
     });
   }
   const performanceFields: LifecyclePresentationField[] = [];
@@ -502,7 +491,7 @@ export function renderStructuredLifecyclePresentation(
 function formatStructuredField(field: LifecyclePresentationField): string {
   if ("title" in field) {
     return [
-      `- **${field.title}**`,
+      `- **${field.title}**${field.value === undefined ? "" : `：${field.value}`}`,
       ...field.fields.flatMap((subfield) =>
         formatStructuredField(subfield).split("\n").map((line) => `  ${line}`)),
     ].join("\n");
@@ -510,14 +499,14 @@ function formatStructuredField(field: LifecyclePresentationField): string {
   return [
     `- ${field.label}：${field.value}`,
     ...(field.subfields ?? []).map((subfield) =>
-      `  - ${subfield.label}：${subfield.value}`),
+      `    - ${subfield.label}：${subfield.value}`),
   ].join("\n");
 }
 
 function formatField(field: LifecyclePresentationField): string {
   if ("title" in field) {
     return [
-      field.title,
+      `${field.title}${field.value === undefined ? "" : `：${field.value}`}`,
       ...field.fields.flatMap((subfield) =>
         formatField(subfield).split("\n").map((line) => `  ${line}`)),
     ].join("\n");
@@ -525,7 +514,7 @@ function formatField(field: LifecyclePresentationField): string {
   return [
     `${field.label}：${field.value}`,
     ...(field.subfields ?? []).map((subfield) =>
-      `  ${subfield.label}：${subfield.value}`),
+      `    ${subfield.label}：${subfield.value}`),
   ].join("\n");
 }
 

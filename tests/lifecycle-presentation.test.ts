@@ -237,8 +237,8 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("模型请求：2 次");
     expect(rendered).toContain("思考次数：2 次");
     expect(rendered).toContain("模型请求聚合耗时：12秒");
-    expect(rendered).toContain("总 Token：20.12 K");
-    expect(rendered).toContain("参考总价：$0.000350（已计价 2/2 次请求）");
+    expect(rendered).toContain("Token：20.12 K");
+    expect(rendered).toContain("费用：$0.000350（已计价 2/2 次请求）");
     expect(rendered).toContain("参考总价：$0.001250（已计价 8/9 次请求）");
     expect(rendered).toContain("缓存命中率：75.00%");
     expect(rendered).toContain("最后请求首事件延迟：640毫秒");
@@ -315,7 +315,7 @@ describe("shared Surface lifecycle presentation", () => {
       "模型请求：2 次（完成 1 · 自动重试 1，最终成功）",
     );
     expect(rendered).toContain(
-      "参考总价：$0.000915（已计价 1/1 个成功请求）",
+      "费用：$0.000915（已计价 1/1 个成功请求）",
     );
     expect(rendered).not.toContain("折合人民币");
   });
@@ -370,7 +370,7 @@ describe("shared Surface lifecycle presentation", () => {
       }),
     );
 
-    expect(rendered).toContain("参考总价：¥7.200000（已计价 1/1 个成功请求）");
+    expect(rendered).toContain("费用：¥7.200000（已计价 1/1 个成功请求）");
     expect(rendered).toContain("参考总价：¥14.400000（已计价 2/2 次请求）");
     expect(rendered).not.toContain("折合人民币");
     expect(rendered).not.toContain("$");
@@ -414,7 +414,7 @@ describe("shared Surface lifecycle presentation", () => {
     );
 
     expect(rendered).toContain(
-      "- 参考总价：¥7.200000（已计价 1/1 个成功请求）",
+      "- **费用**：¥7.200000（已计价 1/1 个成功请求）",
     );
     expect(rendered).toContain("  - 输入价格：¥4.320000");
     expect(rendered).toContain("  - 缓存价格：¥0.720000");
