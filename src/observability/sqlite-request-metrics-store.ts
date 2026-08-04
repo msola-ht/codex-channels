@@ -40,6 +40,7 @@ const observableCompletionSql = `
     AND model IS NULL
     AND input_tokens IS NULL
     AND output_tokens IS NULL
+    AND total_tokens IS NULL
   )
 `;
 const normalizedStatusSql = `
@@ -49,6 +50,7 @@ const normalizedStatusSql = `
       AND model IS NULL
       AND input_tokens IS NULL
       AND output_tokens IS NULL
+      AND total_tokens IS NULL
       THEN 'incomplete'
     ELSE status
   END
@@ -978,7 +980,8 @@ function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     && row.response_format === "unknown"
     && row.model === null
     && row.input_tokens === null
-    && row.output_tokens === null;
+    && row.output_tokens === null
+    && row.total_tokens === null;
   return {
     id: row.id,
     provider: row.provider,

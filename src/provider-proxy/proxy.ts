@@ -379,19 +379,31 @@ export class ProviderProxy {
       }
       else if (peer.readyState === WebSocket.CONNECTING) peer.terminate();
     };
-    client.on("close", (code, reason) => closePeer(upstream, code, reason));
-    upstream.on("close", (code, reason) => closePeer(client, code, reason));
-    upstream.on("close", () => {
+    let failureType: "websocket_closed" | "client_disconnected" | undefined;
+    const noteFailureType = (
+      type: "websocket_closed" | "client_disconnected",
+    ): void => {
+      failureType ??= type;
+    };
+    client.on("close", (code, reason) => {
+      noteFailureType("client_disconnected");
+      closePeer(upstream, code, reason);
+    });
+    upstream.on("close", (code, reason) => {
+      noteFailureType("websocket_closed");
+      closePeer(client, code, reason);
       if (!activeMetrics) return;
-      markMetricsFailed(activeMetrics, "websocket_closed");
+      markMetricsFailed(activeMetrics, failureType ?? "websocket_closed");
       void this.deliverMetrics(activeMetrics);
       activeMetrics = undefined;
     });
     client.on("error", (error) => {
+      noteFailureType("client_disconnected");
       this.onError?.(asError(error));
       upstream.terminate();
     });
     upstream.on("error", (error) => {
+      noteFailureType("websocket_closed");
       this.onError?.(asError(error));
       client.terminate();
     });

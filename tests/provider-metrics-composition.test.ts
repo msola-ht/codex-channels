@@ -197,6 +197,46 @@ describe("ProviderMetricsComposition", () => {
       "retryableFailure",
     );
   });
+
+  it("marks an upstream WebSocket close as retryable but keeps a client disconnect interrupted", async () => {
+    const failed = {
+      ...metrics(),
+      model: null,
+      status: "failed" as const,
+      httpStatus: null,
+      inputTokens: null,
+      cachedInputTokens: null,
+      outputTokens: null,
+      reasoningOutputTokens: null,
+      totalTokens: null,
+      firstTokenAtMs: null,
+      firstReasoningDeltaAtMs: null,
+      lastReasoningDeltaAtMs: null,
+      firstOutputDeltaAtMs: null,
+      lastOutputDeltaAtMs: null,
+    };
+
+    expect(toModelTimingEvent({
+      ...failed,
+      responseFormat: "websocket",
+      errorType: "websocket_closed",
+    })).toMatchObject({
+      outcome: "failed",
+      retryableFailure: true,
+    });
+    expect(toModelTimingEvent({
+      ...failed,
+      responseFormat: "websocket",
+      errorType: "client_disconnected",
+    })).toMatchObject({
+      outcome: "interrupted",
+    });
+    expect(toModelTimingEvent({
+      ...failed,
+      responseFormat: "websocket",
+      errorType: "client_disconnected",
+    })).not.toHaveProperty("retryableFailure");
+  });
 });
 
 function metrics(): ProviderProxyMetrics {

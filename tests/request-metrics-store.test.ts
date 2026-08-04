@@ -576,6 +576,51 @@ describe("SqliteModelRequestMetricsStore", () => {
     store.close();
   });
 
+  it("keeps a historical completed record with only total tokens observable", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    store.record({
+      ...sample(),
+      responseFormat: "unknown",
+      model: null,
+      serviceTier: null,
+      inputTokens: null,
+      cachedInputTokens: null,
+      outputTokens: null,
+      reasoningOutputTokens: null,
+      totalTokens: 120,
+    });
+
+    expect(store.recent(1)[0]).toMatchObject({
+      status: "completed",
+      incompleteReason: null,
+      totalTokens: 120,
+    });
+    expect(store.threadSummary("thread-1").latestTurn).toMatchObject({
+      requestCount: 1,
+      unsuccessfulRequestCount: 0,
+    });
+    expect(store.aggregate({
+      dimension: "global",
+      startAtMs: 0,
+      endAtMs: Date.now() + 1,
+    }).aggregate).toMatchObject({
+      requestCount: 1,
+      unsuccessfulRequestCount: 0,
+    });
+    expect(store.errors({
+      startAtMs: 0,
+      endAtMs: Date.now() + 1,
+    })).toMatchObject({
+      requestCount: 1,
+      unsuccessfulRequestCount: 0,
+      groups: [],
+    });
+    store.close();
+  });
+
   it("keeps successful compact operations completed without model usage", () => {
     const directory = temporaryDirectory();
     const store = new SqliteModelRequestMetricsStore(

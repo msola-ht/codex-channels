@@ -16,7 +16,8 @@
   状态、超时、上游错误、客户端断开和 WebSocket 提前关闭同样产生受控失败指标，不保留错误正文；
   上游缺少 `Content-Type` 时只对合法 `response.*` SSE 事件进行正文识别，以恢复完成事件、模型和
   Usage；HTTP 2xx 仍未观察到这些信息时标为 `incomplete/response_not_observed`，不能污染成功率
-  或计价覆盖率。HTTP 压缩操作以自身成功状态为准，不要求模型 Usage。
+  或计价覆盖率。HTTP 压缩操作以自身成功状态为准，不要求模型 Usage；压缩请求只保留在指标库，
+  不进入 `/metrics` 汇总、异常报告或会话指标。
   指标在响应完成事件前完成投递确认；从
   `x-codex-turn-metadata` 提取 `thread_id` / `turn_id` 用于按 Turn 关联。
   非流式 JSON Responses 使用 1 MiB 临时上限解析相同元数据，正文和响应 ID 不进入指标；超限或

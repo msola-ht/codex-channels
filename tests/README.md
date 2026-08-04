@@ -115,7 +115,8 @@
   状态/Header、私有元数据剥离、流式转发、统一代理 Agent、OpenAI 自定义上游保留、App Server
   服务独立生命周期、响应完成前的指标确认、启动失败清理，以及 `0600` Unix Socket 指标投递和
   Gateway 缺席时无损模型请求。代理还覆盖完成/失败/不完整状态、HTTP 错误、超时、断线、真实
-  模型/服务层级与完整 Usage 的脱敏采集；Bootstrap 组合测试验证所有样本进入独立 Observability
+  模型/服务层级与完整 Usage 的脱敏采集，其中 WebSocket 客户端断开归为中断、上游断流归为可重试；
+  Bootstrap 组合测试验证所有样本进入独立 Observability
   Store、缺少 Turn 关联时不伪造 Core 事件，以及可选计价解析器只在组合边界附加价格快照；独立
   价格目录测试覆盖 LiteLLM 主源、Sub2API 价格镜像回退、私有缓存重载、缓存输入、Priority 和
   长上下文价格选择；`reference-cost-summary.test.ts` 覆盖当前 Turn 延迟写入时的 Thread 总价去重及

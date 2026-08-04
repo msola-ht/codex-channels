@@ -1083,6 +1083,58 @@ describe("ProviderProxy", () => {
     client.terminate();
   });
 
+  it("marks a client-initiated WebSocket close as a client disconnect", async () => {
+    const upstreamServer = createServer();
+    const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });
+    upstreamWebSocket.on("connection", () => {
+      // 保持连接打开，等待代理客户端主动关闭。
+    });
+    await new Promise<void>((resolveListen) => {
+      upstreamServer.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstreamServer.address() as AddressInfo;
+    openServers.push({
+      close: async () => {
+        for (const client of upstreamWebSocket.clients) client.terminate();
+        await new Promise<void>((resolveClose) => upstreamWebSocket.close(() => resolveClose()));
+        await new Promise<void>((resolveClose) => upstreamServer.close(() => resolveClose()));
+      },
+    });
+
+    let resolveMetric: (metric: ProviderProxyMetrics) => void = () => undefined;
+    const metric = new Promise<ProviderProxyMetrics>((resolve) => {
+      resolveMetric = resolve;
+    });
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      onMetrics: (value) => resolveMetric(value),
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    client.on("open", () => {
+      client.send(JSON.stringify({
+        type: "response.create",
+        client_metadata: {
+          "x-codex-turn-metadata": JSON.stringify({
+            thread_id: "thread-client-close",
+            turn_id: "turn-client-close",
+          }),
+        },
+      }));
+      setImmediate(() => client.close(1_000, "client stopped"));
+    });
+
+    await expect(metric).resolves.toMatchObject({
+      status: "failed",
+      errorType: "client_disconnected",
+      threadId: "thread-client-close",
+      turnId: "turn-client-close",
+    });
+  });
+
   it("rejects a non-loopback listen address", async () => {
     const proxy = new ProviderProxy("0.0.0.0:1234", {
       upstreamHost: "api.deepseek.com",

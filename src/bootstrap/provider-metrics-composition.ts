@@ -207,10 +207,15 @@ export function toModelTimingEvent(
 
 function isRetryableFailure(metrics: ProviderProxyMetrics): boolean {
   return metrics.status === "failed"
-    && metrics.httpStatus !== null
     && (
-      metrics.httpStatus === 429
-      || (metrics.httpStatus >= 500 && metrics.httpStatus <= 599)
+      (
+        metrics.httpStatus !== null
+        && (
+          metrics.httpStatus === 429
+          || (metrics.httpStatus >= 500 && metrics.httpStatus <= 599)
+        )
+      )
+      || metrics.errorType === "websocket_closed"
     );
 }
 
