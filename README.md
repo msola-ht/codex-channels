@@ -151,6 +151,9 @@ SSE 事件时仍按正文受限识别，不会误丢成功请求。新请求会�
   `codexc remote --profile deepseek` 连接共享的 DeepSeek App Server。
 - 仅 DeepSeek 固定模式：让原生 Codex、IDE 和 Gateway 默认使用 DeepSeek。
 - 恢复安装前配置：撤销 Setup 管理的 DeepSeek 配置。
+- 修改自动压缩阈值：按上下文窗口百分比（10–95%，默认 60%）设置或关闭 DeepSeek 的自动压缩，
+  写入 `model_auto_compact_token_limit` 与 `model_auto_compact_token_limit_scope = "total"`；
+  安装流程也会在填写 API Key 后询问该设置。修改后需要重启 App Server 生效。
 
 配置或恢复后运行：
 

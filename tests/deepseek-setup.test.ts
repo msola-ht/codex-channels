@@ -22,7 +22,7 @@ import {
 
 const script = `#!/bin/sh
 cat > "$TMP_MODELS" <<'CODEX_MODELS_JSON'
-{"models":[{"slug":"deepseek-v4-flash"},{"slug":"deepseek-v4-pro"}]}
+{"models":[{"slug":"deepseek-v4-flash","context_window":1048576},{"slug":"deepseek-v4-pro","context_window":1048576}]}
 CODEX_MODELS_JSON
 `;
 
@@ -35,7 +35,7 @@ describe("DeepSeek setup", () => {
   it("returns to the parent setup without reading a key or changing files", async () => {
     const fixture = setupFixture('model = "gpt-5.4"\n');
     const fetchImpl = vi.fn();
-    const prompt = prompter(["4"], []);
+    const prompt = prompter(["5"], []);
 
     await expect(runDeepseekSetup({
       allowBack: true,
@@ -51,7 +51,7 @@ describe("DeepSeek setup", () => {
   });
 
   it("shows a return option in the model channel menu", async () => {
-    const select = vi.fn(async () => "4");
+    const select = vi.fn(async () => "5");
 
     await expect(runDeepseekSetup({
       allowBack: true,
@@ -70,7 +70,8 @@ describe("DeepSeek setup", () => {
         { value: "1", label: "OpenAI + DeepSeek 切换模式" },
         { value: "2", label: "仅 DeepSeek 固定模式" },
         { value: "3", label: "恢复安装前配置" },
-        { value: "4", label: "返回上一级" },
+        { value: "4", label: "修改自动压缩阈值" },
+        { value: "5", label: "返回上一级" },
       ],
     });
   });
@@ -123,7 +124,7 @@ describe("DeepSeek setup", () => {
       environment: { CODEX_HOME: fixture.home },
       output: fixture.output,
       fetchImpl: successfulFetch,
-      prompter: prompter(["1"], ["sk-secret"]),
+      prompter: prompter(["1", "2"], ["sk-secret"]),
     });
     const config = parse(readFileSync(join(fixture.home, "config.toml"), "utf8"));
     expect(result?.mode).toBe("switching");
@@ -138,6 +139,8 @@ describe("DeepSeek setup", () => {
     const profile = parse(readFileSync(join(fixture.home, "deepseek.config.toml"), "utf8"));
     expect(profile.model).toBe("deepseek-v4-flash");
     expect(profile.model_provider).toBe("deepseek");
+    expect(profile.model_auto_compact_token_limit).toBe(629_146);
+    expect(profile.model_auto_compact_token_limit_scope).toBe("total");
     expect(profile.preferred_auth_method).toBeUndefined();
     expect(profile.forced_login_method).toBeUndefined();
     expect(record(record(profile.model_providers).deepseek)).toMatchObject({
@@ -169,7 +172,7 @@ describe("DeepSeek setup", () => {
       environment: { CODEX_HOME: fixture.home },
       output: fixture.output,
       fetchImpl: successfulFetch,
-      prompter: prompter(["1"], ["sk-first"]),
+      prompter: prompter(["1", "2"], ["sk-first"]),
     });
     const current = 'model = "gpt-5.6-sol"\ncustom_after = true\n';
     writeFileSync(join(fixture.home, "config.toml"), current, { mode: 0o600 });
@@ -178,7 +181,7 @@ describe("DeepSeek setup", () => {
       environment: { CODEX_HOME: fixture.home },
       output: fixture.output,
       fetchImpl: successfulFetch,
-      prompter: prompter(["1"], ["sk-second"]),
+      prompter: prompter(["1", "2"], ["sk-second"]),
     });
 
     expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(current);
@@ -191,7 +194,7 @@ describe("DeepSeek setup", () => {
       environment: { CODEX_HOME: fixture.home },
       output: fixture.output,
       fetchImpl: successfulFetch,
-      prompter: prompter(["2"], ["sk-fixed"], true),
+      prompter: prompter(["2", "2"], ["sk-fixed"], true),
     });
     const config = parse(readFileSync(join(fixture.home, "config.toml"), "utf8"));
     expect(config.model).toBe("deepseek-v4-flash");
@@ -216,7 +219,7 @@ describe("DeepSeek setup", () => {
       environment: { CODEX_HOME: fixture.home },
       output: fixture.output,
       fetchImpl: vi.fn(async () => new Response("failed", { status: 404 })),
-      prompter: prompter(["1"], ["sk-secret"]),
+      prompter: prompter(["1", "2"], ["sk-secret"]),
     })).rejects.toThrow("HTTP 404");
     expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(original);
   });
@@ -228,13 +231,13 @@ describe("DeepSeek setup", () => {
       environment: { CODEX_HOME: home },
       output: fixture.output,
       fetchImpl: successfulFetch,
-      prompter: prompter(["2"], ["sk-fixed"], true),
+      prompter: prompter(["2", "2"], ["sk-fixed"], true),
     });
     await runDeepseekSetup({
       environment: { CODEX_HOME: home },
       output: fixture.output,
       fetchImpl: successfulFetch,
-      prompter: prompter(["1"], ["sk-switching"]),
+      prompter: prompter(["1", "2"], ["sk-switching"]),
     });
     expect(existsSync(join(home, "config.toml"))).toBe(false);
     const profile = parse(readFileSync(join(home, "deepseek.config.toml"), "utf8"));
@@ -250,7 +253,7 @@ describe("DeepSeek setup", () => {
       environment: { CODEX_HOME: fixture.home },
       output: fixture.output,
       fetchImpl: successfulFetch,
-      prompter: prompter(["2"], ["sk-fixed"], true),
+      prompter: prompter(["2", "2"], ["sk-fixed"], true),
     });
     const exclusive = readFileSync(join(fixture.home, "config.toml"), "utf8");
     writeFileSync(
@@ -263,7 +266,7 @@ describe("DeepSeek setup", () => {
       environment: { CODEX_HOME: fixture.home },
       output: fixture.output,
       fetchImpl: successfulFetch,
-      prompter: prompter(["1"], ["sk-switching"]),
+      prompter: prompter(["1", "2"], ["sk-switching"]),
     });
 
     const config = parse(readFileSync(join(fixture.home, "config.toml"), "utf8"));
@@ -291,7 +294,7 @@ describe("DeepSeek setup", () => {
       environment: { CODEX_HOME: fixture.home },
       output: fixture.output,
       fetchImpl: successfulFetch,
-      prompter: prompter(["1"], ["sk-migrated"]),
+      prompter: prompter(["1", "2"], ["sk-migrated"]),
     });
 
     const config = parse(readFileSync(join(fixture.home, "config.toml"), "utf8"));
@@ -331,7 +334,7 @@ describe("DeepSeek setup", () => {
       environment: { CODEX_HOME: fixture.home },
       output: fixture.output,
       fetchImpl: successfulFetch,
-      prompter: prompter(["1"], ["sk-repaired"]),
+      prompter: prompter(["1", "2"], ["sk-repaired"]),
     });
 
     expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(original);
@@ -348,7 +351,7 @@ describe("DeepSeek setup", () => {
       environment: { CODEX_HOME: fixture.home },
       output: fixture.output,
       fetchImpl: successfulFetch,
-      prompter: prompter(["2"], ["sk-fixed"], true),
+      prompter: prompter(["2", "2"], ["sk-fixed"], true),
     });
     const result = await runDeepseekSetup({
       environment: { CODEX_HOME: fixture.home },
@@ -368,7 +371,7 @@ describe("DeepSeek setup", () => {
       environment: { CODEX_HOME: fixture.home },
       output: fixture.output,
       fetchImpl: successfulFetch,
-      prompter: prompter(["2"], ["sk-fixed"], true),
+      prompter: prompter(["2", "2"], ["sk-fixed"], true),
     });
     await runDeepseekSetup({
       environment: { CODEX_HOME: fixture.home },
@@ -383,7 +386,7 @@ describe("DeepSeek setup", () => {
       environment: { CODEX_HOME: fixture.home },
       output: fixture.output,
       fetchImpl: successfulFetch,
-      prompter: prompter(["1"], ["sk-second"]),
+      prompter: prompter(["1", "2"], ["sk-second"]),
     })).rejects.toThrow("已存在 deepseek Provider");
     expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(userConfig);
   });
@@ -404,7 +407,7 @@ describe("DeepSeek setup", () => {
       environment: { CODEX_HOME: fixture.home },
       output: fixture.output,
       fetchImpl: successfulFetch,
-      prompter: prompter(["1"], ["sk-secret"]),
+      prompter: prompter(["1", "2"], ["sk-secret"]),
     });
     await runDeepseekSetup({
       environment: { CODEX_HOME: fixture.home },
@@ -418,6 +421,38 @@ describe("DeepSeek setup", () => {
       .toBe(originalProfile);
     expect(readFileSync(join(fixture.home, "codex-connect-deepseek.config.toml"), "utf8"))
       .toBe(originalGatewayProfile);
+  });
+
+  it("modifies and disables the auto-compact threshold of an existing profile", async () => {
+    const home = mkdtempSync(join(tmpdir(), "codexc-deepseek-auto-compact-"));
+    const fixture = outputFixture(home);
+    await runDeepseekSetup({
+      environment: { CODEX_HOME: home },
+      output: fixture.output,
+      fetchImpl: successfulFetch,
+      prompter: prompter(["1", "2"], ["sk-secret"]),
+    });
+
+    const updated = await runDeepseekSetup({
+      environment: { CODEX_HOME: home },
+      output: fixture.output,
+      fetchImpl: vi.fn(),
+      prompter: prompter(["4", "3", "70"], []),
+    });
+    expect(updated).toMatchObject({ action: "auto-compact", autoCompactPercent: 70 });
+    const profile = parse(readFileSync(join(home, "deepseek.config.toml"), "utf8"));
+    expect(profile.model_auto_compact_token_limit).toBe(734_003);
+    expect(profile.model_auto_compact_token_limit_scope).toBe("total");
+
+    await runDeepseekSetup({
+      environment: { CODEX_HOME: home },
+      output: fixture.output,
+      fetchImpl: vi.fn(),
+      prompter: prompter(["4", "1"], []),
+    });
+    const disabled = parse(readFileSync(join(home, "deepseek.config.toml"), "utf8"));
+    expect(disabled.model_auto_compact_token_limit).toBeUndefined();
+    expect(disabled.model_auto_compact_token_limit_scope).toBeUndefined();
   });
 });
 
@@ -443,6 +478,7 @@ function successfulFetch() {
 function prompter(answers: string[], secrets: string[], confirmation = false) {
   return {
     ask: vi.fn(async () => answers.shift() ?? ""),
+    text: vi.fn(async () => answers.shift() ?? ""),
     secret: vi.fn(async () => secrets.shift() ?? ""),
     confirm: vi.fn(async () => confirmation),
     close: vi.fn(),

@@ -15,6 +15,9 @@ const supportedModel = deepseekProviderDefinition.defaultModel;
 const maximumScriptBytes = 2 * 1024 * 1024;
 const defaultDownloadAttempts = 3;
 const defaultDownloadTimeoutMs = 30_000;
+const defaultAutoCompactPercent = 60;
+const minimumAutoCompactPercent = 10;
+const maximumAutoCompactPercent = 95;
 
 export async function runDeepseekSetup({
   allowBack = false,
@@ -30,13 +33,14 @@ export async function runDeepseekSetup({
     output.write("1. OpenAI + DeepSeek 切换模式（保留 OpenAI 默认）\n");
     output.write("2. 仅 DeepSeek 固定模式（原生 Codex 也默认使用 DeepSeek）\n");
     output.write("3. 恢复安装前的 Codex 配置\n");
-    if (allowBack) output.write("4. 返回上一级\n");
+    output.write("4. 修改自动压缩阈值\n");
+    if (allowBack) output.write("5. 返回上一级\n");
     const choice = await askChoice(
       prompt,
-      allowBack ? "请选择 [1-4]" : "请选择 [1-3]",
-      allowBack ? 4 : 3,
+      allowBack ? "请选择 [1-5]" : "请选择 [1-4]",
+      allowBack ? 5 : 4,
     );
-    if (choice === "4") return { action: "back" };
+    if (choice === "5") return { action: "back" };
     const codexHome = resolve(environment.CODEX_HOME?.trim() || join(homedir(), ".codex"));
     const configPath = join(codexHome, "config.toml");
     const profilePath = join(codexHome, deepseekProviderDefinition.profileFileName);
@@ -79,6 +83,16 @@ export async function runDeepseekSetup({
         output,
       });
     }
+    if (choice === "4") {
+      return runAutoCompactSetting({
+        codexHome,
+        configPath,
+        profilePath,
+        gatewayProfilePath,
+        output,
+        prompt,
+      });
+    }
     const mode = choice === "1" ? "switching" : "exclusive";
     if (mode === "switching") {
       output.write(
@@ -93,8 +107,18 @@ export async function runDeepseekSetup({
       }
     }
     const apiKey = await askApiKey(prompt);
+    const autoCompactPercent = await askAutoCompact(prompt);
 
     const downloaded = await downloadDeepseekCatalog(fetchImpl);
+    const contextWindow = downloaded.catalog.models?.find(
+      (model) => model?.slug === supportedModel,
+    )?.context_window;
+    if (
+      autoCompactPercent !== undefined
+      && (!Number.isSafeInteger(contextWindow) || contextWindow <= 0)
+    ) {
+      throw new Error("DeepSeek 模型目录缺少上下文窗口，未修改配置");
+    }
     await mkdir(codexHome, { recursive: true, mode: 0o700 });
     await preserveInitialConfig({
       configPath,
@@ -114,6 +138,8 @@ export async function runDeepseekSetup({
       catalogPath,
       apiKey,
       mode,
+      autoCompactPercent,
+      contextWindow,
     });
     await atomicWrite(catalogPath, `${JSON.stringify(downloaded.catalog, null, 2)}\n`);
     await atomicWrite(manifestPath, `${JSON.stringify({
@@ -281,6 +307,8 @@ async function buildCodexConfig({
   catalogPath,
   apiKey,
   mode,
+  autoCompactPercent,
+  contextWindow,
 }) {
   let initialDocument = {};
   let originalContent;
@@ -328,6 +356,7 @@ async function buildCodexConfig({
     model_provider: providerId,
     model_reasoning_effort: deepseekProviderDefinition.defaultReasoningEffort,
     model_catalog_json: catalogPath,
+    ...autoCompactFields(autoCompactPercent, contextWindow),
     ...providerLayer,
   };
   if (mode === "switching") {
@@ -376,6 +405,7 @@ async function buildCodexConfig({
     model_provider: providerId,
     model_reasoning_effort: deepseekProviderDefinition.defaultReasoningEffort,
     model_catalog_json: catalogPath,
+    ...autoCompactFields(autoCompactPercent, contextWindow),
   });
   delete document.preferred_auth_method;
   delete document.forced_login_method;
@@ -441,6 +471,8 @@ function restoreManagedBaseConfig(current, initial) {
     "model_provider",
     "model_reasoning_effort",
     "model_catalog_json",
+    "model_auto_compact_token_limit",
+    "model_auto_compact_token_limit_scope",
     "profile",
     "preferred_auth_method",
     "forced_login_method",
@@ -625,26 +657,133 @@ async function askApiKey(prompt) {
   }
 }
 
+async function askAutoCompact(prompt) {
+  const choice = await askChoice(
+    prompt,
+    "自动压缩阈值：1 关闭 · 2 60% · 3 自定义",
+    3,
+  );
+  if (choice === "1") return undefined;
+  if (choice === "2") return defaultAutoCompactPercent;
+  while (true) {
+    const value = await prompt.text(
+      `自定义自动压缩百分比 [${minimumAutoCompactPercent}-${maximumAutoCompactPercent}]`,
+    );
+    if (!/^\d+$/u.test(value)) continue;
+    const parsed = Number(value);
+    if (
+      Number.isInteger(parsed)
+      && parsed >= minimumAutoCompactPercent
+      && parsed <= maximumAutoCompactPercent
+    ) {
+      return parsed;
+    }
+  }
+}
+
+function autoCompactFields(autoCompactPercent, contextWindow) {
+  if (autoCompactPercent === undefined) return {};
+  return {
+    model_auto_compact_token_limit: Math.round(
+      contextWindow * autoCompactPercent / 100,
+    ),
+    model_auto_compact_token_limit_scope: "total",
+  };
+}
+
+async function readContextWindow(codexHome) {
+  try {
+    const catalog = JSON.parse(await readFile(
+      join(codexHome, deepseekProviderDefinition.catalogFileName),
+      "utf8",
+    ));
+    const window = catalog.models?.find(
+      (model) => model?.slug === supportedModel,
+    )?.context_window;
+    return Number.isSafeInteger(window) && window > 0 ? window : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function runAutoCompactSetting({
+  codexHome,
+  configPath,
+  profilePath,
+  gatewayProfilePath,
+  output,
+  prompt,
+}) {
+  let managedMode;
+  try {
+    const marker = parse(await readFile(gatewayProfilePath, "utf8"));
+    managedMode = marker.mode === "exclusive" ? "exclusive" : "switching";
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      // 原管理标记可能包含用户私有配置，不能把解析内容作为 cause 暴露。
+      // eslint-disable-next-line preserve-caught-error
+      throw new Error("Codex Connect DeepSeek 管理标记无效，未修改配置");
+    }
+    managedMode = undefined;
+  }
+  const targetPath = managedMode === "exclusive" ? configPath : profilePath;
+  const { document } = await readCurrentConfig(targetPath);
+  if (document.model_provider !== providerId) {
+    output.write("未找到 DeepSeek 配置，请先完成 DeepSeek 安装。\n");
+    return { action: "auto-compact" };
+  }
+  const autoCompactPercent = await askAutoCompact(prompt);
+  const contextWindow = await readContextWindow(codexHome);
+  if (autoCompactPercent !== undefined && contextWindow === undefined) {
+    throw new Error("DeepSeek 模型目录缺少上下文窗口，未修改配置");
+  }
+  if (autoCompactPercent === undefined) {
+    delete document.model_auto_compact_token_limit;
+    delete document.model_auto_compact_token_limit_scope;
+  } else {
+    Object.assign(document, autoCompactFields(autoCompactPercent, contextWindow));
+  }
+  await atomicWrite(targetPath, stringify(document));
+  output.write(autoCompactPercent === undefined
+    ? "已关闭自动压缩。请重启 App Server 生效。\n"
+    : `自动压缩阈值已设为 ${autoCompactPercent}%（约 ${
+        Math.round(contextWindow * autoCompactPercent / 100)
+      } tokens）。请重启 App Server 生效。\n`);
+  return { action: "auto-compact", autoCompactPercent };
+}
+
 function table(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
 function createHiddenPrompter(prompts, { allowBack }) {
+  const autoCompactOptions = [
+    { value: "1", label: "关闭自动压缩" },
+    { value: "2", label: `按 ${defaultAutoCompactPercent}% 上下文窗口压缩` },
+    { value: "3", label: "自定义百分比" },
+  ];
+  const installOptions = [
+    { value: "1", label: "OpenAI + DeepSeek 切换模式" },
+    { value: "2", label: "仅 DeepSeek 固定模式" },
+    { value: "3", label: "恢复安装前配置" },
+    { value: "4", label: "修改自动压缩阈值" },
+    ...(allowBack ? [{ value: "5", label: "返回上一级" }] : []),
+  ];
   return {
-    ask: async () => {
+    ask: async (label) => {
+      const autoCompact = typeof label === "string" && label.startsWith("自动压缩");
       const value = await prompts.select({
-        message: "选择 DeepSeek 安装模式",
-        options: [
-          { value: "1", label: "OpenAI + DeepSeek 切换模式" },
-          { value: "2", label: "仅 DeepSeek 固定模式" },
-          { value: "3", label: "恢复安装前配置" },
-          ...(allowBack ? [{ value: "4", label: "返回上一级" }] : []),
-        ],
+        message: autoCompact ? "设置自动压缩阈值" : "选择 DeepSeek 安装模式",
+        options: autoCompact ? autoCompactOptions : installOptions,
       });
       return prompts.isCancel(value) && allowBack
-        ? "4"
+        ? (autoCompact ? "1" : "5")
         : requirePromptValue(prompts, value);
     },
+    text: async (label) => requirePromptValue(
+      prompts,
+      await prompts.text({ message: label }),
+    ),
     secret: async (label) => requirePromptValue(
       prompts,
       await prompts.password({ message: label }),

@@ -29,6 +29,13 @@ DeepSeek 配置写入 `~/.codex`，不写入 Gateway 的 `~/.codex-connect/confi
 Setup 不强制改变 Codex 登录方式。切换模式不会覆盖 OpenAI 登录信息；固定模式直接使用配置中的
 DeepSeek Provider。
 
+### 自动压缩阈值
+
+安装流程在填写 API Key 后会询问自动压缩阈值，也可以在 Setup 菜单中选择“修改自动压缩阈值”
+随时调整。支持按上下文窗口百分比（10–95%，默认 60%）设置，或选择关闭；Setup 会按当前模型
+上下文窗口换算成 token 数，写入 `model_auto_compact_token_limit` 与
+`model_auto_compact_token_limit_scope = "total"`。修改后需要重启 App Server 生效。
+
 ## 管理的文件
 
 | 文件 | 用途 |
