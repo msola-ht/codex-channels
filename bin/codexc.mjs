@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
 import { spawn, spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+
+import * as clackPrompts from "@clack/prompts";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
 
@@ -49,9 +51,9 @@ const helpText = {
 
 项目与会话：
   remote [参数]                启动共享 App Server 的 Codex TUI
-  ws                           列出 Workspace
-  ws add                       注册当前目录
-  ws remove <目标>             删除 Workspace 注册
+  work                         列出 Workspace（别名 ws）
+  work add                     交互式在用户目录下新建工作区，或 --cwd 注册已有目录
+  work remove <目标>           删除 Workspace 注册
   rules init                   生成项目 Codex 命令预设
   rules check                  检查项目 Codex 命令预设
   state upgrade               显式升级 Gateway 状态数据库
@@ -88,15 +90,23 @@ const helpText = {
 
 连接共享 App Server，并把其余参数传给原生 Codex CLI。
 切换模式下使用 --profile deepseek 连接隔离的 DeepSeek App Server。`,
-  ws: `用法：codexc ws
+  work: `用法：codexc work
 
 其他用法：
-  codexc ws add [--id ID] [--name 名称] [--prune-missing]
-  codexc ws remove <序号|ID|名称>`,
-  "ws.add": `用法：codexc ws add [--id ID] [--name 名称] [--prune-missing]
+  codexc work list
+  codexc work add [--name 名称] [--cwd 目录] [--id ID] [--prune-missing]
+  codexc work remove <序号|ID|名称>`,
+  ws: `用法：codexc work（别名：codexc ws）
 
-把当前目录注册为 Workspace。`,
-  "ws.remove": `用法：codexc ws remove <序号|ID|名称>
+管理 Workspace；使用 codexc work --help 查看完整用法。`,
+  "work.add": `用法：codexc work add [--name 名称] [--cwd 目录] [--id ID] [--prune-missing]
+
+不带 --cwd 时，在用户目录的 workspaces/ 下新建工作区目录并注册到配置（未提供 --name 时
+交互询问）；带 --cwd 时注册指定已有目录。`,
+  "work.list": `用法：codexc work list
+
+列出全部 Workspace 与当前默认项。`,
+  "work.remove": `用法：codexc work remove <序号|ID|名称>
 
 删除 Workspace 注册，不删除磁盘目录。`,
   service: `用法：codexc service <命令>
@@ -223,8 +233,9 @@ try {
       }
       runScript("scripts/codex-remote.mjs", args, {}, process.cwd());
       break;
+    case "work":
     case "ws":
-      workspace(args);
+      await workspace(args);
       break;
     case "service":
       service(args);
@@ -472,11 +483,15 @@ async function runServiceAppServer(args) {
   });
 }
 
-function workspace(args) {
-  if (showRequestedHelp(args, "ws")) {
+async function workspace(args) {
+  if (showRequestedHelp(args, "work") || showRequestedHelp(args, "ws")) {
     return;
   }
-  if (showSubcommandHelp(args, "add", "ws.add") || showSubcommandHelp(args, "remove", "ws.remove")) {
+  if (
+    showSubcommandHelp(args, "list", "work.list")
+    || showSubcommandHelp(args, "add", "work.add")
+    || showSubcommandHelp(args, "remove", "work.remove")
+  ) {
     return;
   }
   const runtime = requireUserConfig();
@@ -488,33 +503,82 @@ function workspace(args) {
   };
   if (args[0] === "add") {
     const options = parseWorkspaceAddOptions(args.slice(1));
+    if (options.cwd) {
+      const result = addWorkspaceToConfig({
+        configPath: runtime.configPath,
+        cwd: options.cwd,
+        ...(options.id ? { id: options.id } : {}),
+        ...(options.name ? { name: options.name } : {}),
+        ...(options.pruneMissing ? { pruneMissing: true } : {}),
+        fallbackDefaultWorkspace,
+        eventQueuePath,
+      });
+      console.log(result.added ? "Workspace 已添加。" : "Workspace 已存在。");
+      console.log(`${result.workspace.name} (${result.workspace.id})`);
+      console.log(result.workspace.cwd);
+      for (const removed of result.removedWorkspaces) {
+        console.log(`已清理失效 Workspace：${removed.name} (${removed.id})`);
+        console.log(removed.cwd);
+      }
+      if (result.defaultChanged) {
+        console.log(`默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
+      }
+      if (result.added || result.removedWorkspaces.length > 0 || result.defaultChanged) {
+        console.log("运行中的 Gateway 会自动热加载配置，必要时重启。");
+      }
+      return;
+    }
+    let name = options.name;
+    if (!name) {
+      if (!process.stdout.isTTY) {
+        throw new Error("非交互环境请使用：codexc work add --name <名称>");
+      }
+      clackPrompts.intro("新增 Workspace");
+      const entered = await clackPrompts.text({
+        message: "工作区名称",
+        placeholder: "例如：数据分析",
+        validate: (value) => {
+          const trimmed = String(value ?? "").trim();
+          if (!trimmed) {
+            return "名称不能为空";
+          }
+          if ([...trimmed].length > 64) {
+            return "名称最长 64 个字符";
+          }
+        },
+      });
+      if (clackPrompts.isCancel(entered)) {
+        clackPrompts.cancel("已取消");
+        return;
+      }
+      name = String(entered).trim();
+    }
+    const id = slugifyWorkspaceName(name);
+    const directory = join(runtime.dataDir, "workspaces", id);
+    if (existsSync(directory)) {
+      throw new Error(`工作区目录已存在：${directory}`);
+    }
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
     const result = addWorkspaceToConfig({
       configPath: runtime.configPath,
-      cwd: process.cwd(),
-      ...(options.id ? { id: options.id } : {}),
-      ...(options.name ? { name: options.name } : {}),
-      ...(options.pruneMissing ? { pruneMissing: true } : {}),
+      cwd: directory,
+      id,
+      name,
       fallbackDefaultWorkspace,
       eventQueuePath,
     });
-    console.log(result.added ? "Workspace 已添加。" : "Workspace 已存在。");
+    console.log("Workspace 已新增。");
     console.log(`${result.workspace.name} (${result.workspace.id})`);
     console.log(result.workspace.cwd);
-    for (const removed of result.removedWorkspaces) {
-      console.log(`已清理失效 Workspace：${removed.name} (${removed.id})`);
-      console.log(removed.cwd);
-    }
     if (result.defaultChanged) {
       console.log(`默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
     }
-    if (result.added || result.removedWorkspaces.length > 0 || result.defaultChanged) {
-      console.log("运行中的 Gateway 会自动热加载配置，必要时重启。");
-    }
+    console.log("运行中的 Gateway 会自动热加载配置，必要时重启。");
     return;
   }
   if (args[0] === "remove") {
     if (args.length !== 2) {
-      throw new Error("用法：codexc ws remove <序号|ID|名称>");
+      throw new Error("用法：codexc work remove <序号|ID|名称>");
     }
     const result = removeWorkspaceFromConfig({
       configPath: runtime.configPath,
@@ -531,12 +595,13 @@ function workspace(args) {
     console.log("运行中的 Gateway 会自动重新加载配置，必要时重启。");
     return;
   }
-  if (args.length > 0) {
+  if (args.length > 0 && args[0] !== "list") {
     throw new Error([
       "用法：",
-      "  codexc ws",
-      "  codexc ws add [--id ID] [--name 名称] [--prune-missing]",
-      "  codexc ws remove <序号|ID|名称>",
+      "  codexc work",
+      "  codexc work list",
+      "  codexc work add [--name 名称] [--cwd 目录] [--id ID] [--prune-missing]",
+      "  codexc work remove <序号|ID|名称>",
     ].join("\n"));
   }
   const document = readGatewayConfig(runtime.configPath);
@@ -823,7 +888,7 @@ function parseWorkspaceAddOptions(args) {
       result.pruneMissing = true;
       continue;
     }
-    if (!new Set(["--id", "--name"]).has(option)) {
+    if (!new Set(["--cwd", "--id", "--name"]).has(option)) {
       throw new Error(`未知参数：${option}`);
     }
     const value = args[index + 1];
@@ -834,6 +899,19 @@ function parseWorkspaceAddOptions(args) {
     index += 1;
   }
   return result;
+}
+
+function slugifyWorkspaceName(name) {
+  const slug = String(name)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .replace(/-{2,}/gu, "-")
+    .slice(0, 63);
+  return /^[a-z0-9][a-z0-9_-]{0,63}$/u.test(slug)
+    ? slug
+    : "workspace";
 }
 
 function parseServiceLogOptions(args) {

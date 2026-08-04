@@ -41,9 +41,12 @@ describe("codexc CLI", () => {
       [["setup", "--help"], "用法：codexc setup"],
       [["start", "-h"], "用法：codexc start"],
       [["remote", "-h"], "用法：codexc remote"],
-      [["ws", "-h"], "用法：codexc ws"],
-      [["ws", "add", "-h"], "用法：codexc ws add"],
-      [["ws", "remove", "--help"], "用法：codexc ws remove"],
+      [["work", "-h"], "用法：codexc work"],
+      [["ws", "-h"], "用法：codexc work"],
+      [["work", "list", "--help"], "用法：codexc work list"],
+      [["work", "add", "-h"], "用法：codexc work add"],
+      [["ws", "add", "--help"], "用法：codexc work add"],
+      [["work", "remove", "--help"], "用法：codexc work remove"],
       [["service", "-h"], "用法：codexc service"],
       [["service", "install", "-h"], "用法：codexc service install"],
       [["service", "uninstall", "--help"], "用法：codexc service uninstall"],
@@ -237,17 +240,17 @@ describe("codexc CLI", () => {
       env: environment,
       encoding: "utf8",
     });
-    const firstAdded = execFileSync(process.execPath, [cli, "ws", "add"], {
+    const firstAdded = execFileSync(process.execPath, [cli, "work", "add", "--cwd", first], {
       cwd: first,
       env: environment,
       encoding: "utf8",
     });
-    const added = execFileSync(process.execPath, [cli, "ws", "add"], {
+    const added = execFileSync(process.execPath, [cli, "work", "add", "--cwd", second], {
       cwd: second,
       env: environment,
       encoding: "utf8",
     });
-    const listed = execFileSync(process.execPath, [cli, "ws"], {
+    const listed = execFileSync(process.execPath, [cli, "work"], {
       cwd: root,
       env: environment,
       encoding: "utf8",
@@ -281,6 +284,49 @@ describe("codexc CLI", () => {
     expect(statSync(configPath).mode & 0o777).toBe(0o600);
   });
 
+  it("creates an interactive Workspace under the user directory", () => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-cli-ws-new-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+
+    execFileSync(process.execPath, [cli, "init"], {
+      cwd: root,
+      env: environment,
+      encoding: "utf8",
+    });
+    const created = execFileSync(
+      process.execPath,
+      [cli, "work", "add", "--name", "Data Analysis"],
+      {
+        cwd: root,
+        env: environment,
+        encoding: "utf8",
+      },
+    );
+
+    const configPath = join(home, "config.toml");
+    const eventQueuePath = configEventQueuePath(home);
+    const parsed = readGatewayConfig(configPath);
+    const config = readWorkspaceConfig(parsed);
+    const directory = realpathSync(join(home, "workspaces", "data-analysis"));
+    expect(created).toContain("Workspace 已新增");
+    expect(created).toContain("data-analysis");
+    expect(existsSync(directory)).toBe(true);
+    expect(statSync(directory).mode & 0o777).toBe(0o700);
+    expect(config.workspaces.some((workspace: { id: string; name: string; cwd: string }) =>
+      workspace.id === "data-analysis"
+      && workspace.name === "Data Analysis"
+      && workspace.cwd === directory)).toBe(true);
+    expect(readConfigEvents(eventQueuePath)).toMatchObject([
+      { workspace: { id: "data-analysis", cwd: directory } },
+    ]);
+  });
+
   it("recovers from a missing default Workspace only with explicit pruning", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-"));
     temporaryDirectories.push(root);
@@ -298,18 +344,18 @@ describe("codexc CLI", () => {
     });
     rmSync(join(home, "workspace"), { recursive: true });
 
-    const rejected = spawnSync(process.execPath, [cli, "ws", "add"], {
+    const rejected = spawnSync(process.execPath, [cli, "work", "add", "--cwd", current], {
       cwd: current,
       env: environment,
       encoding: "utf8",
     });
     expect(rejected.status).toBe(1);
-    expect(rejected.stderr).toContain("codexc ws add --prune-missing");
+    expect(rejected.stderr).toContain("codexc work add --prune-missing");
     expect(rejected.stderr).not.toContain("ENOENT");
 
     const repaired = execFileSync(
       process.execPath,
-      [cli, "ws", "add", "--prune-missing"],
+      [cli, "work", "add", "--cwd", current, "--prune-missing"],
       {
         cwd: current,
         env: environment,
@@ -344,7 +390,7 @@ describe("codexc CLI", () => {
       CODEX_CONNECT_CONFIG_FILE: "",
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: root, env: environment });
-    execFileSync(process.execPath, [cli, "ws", "add"], { cwd: project, env: environment });
+    execFileSync(process.execPath, [cli, "work", "add", "--cwd", project], { cwd: project, env: environment });
     rmSync(project, { recursive: true });
 
     const listed = execFileSync(process.execPath, [cli, "ws"], {
@@ -389,7 +435,7 @@ describe("codexc CLI", () => {
       CODEX_CONNECT_CONFIG_FILE: "",
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: root, env: environment });
-    execFileSync(process.execPath, [cli, "ws", "add"], { cwd: project, env: environment });
+    execFileSync(process.execPath, [cli, "work", "add", "--cwd", project], { cwd: project, env: environment });
     const queuePath = configEventQueuePath(home);
     acknowledgeConfigEvents(
       queuePath,
@@ -401,7 +447,7 @@ describe("codexc CLI", () => {
       cwd: root,
       env: environment,
     });
-    execFileSync(process.execPath, [cli, "ws", "add"], {
+    execFileSync(process.execPath, [cli, "work", "add", "--cwd", project], {
       cwd: project,
       env: environment,
     });
@@ -436,12 +482,12 @@ describe("codexc CLI", () => {
       CODEX_CONNECT_CONFIG_FILE: "",
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: first, env: environment });
-    execFileSync(process.execPath, [cli, "ws", "add"], { cwd: first, env: environment });
+    execFileSync(process.execPath, [cli, "work", "add", "--cwd", first], { cwd: first, env: environment });
     const configPath = join(home, "config.toml");
     updateGatewayConfig(configPath, (document) => {
       table(document.codex).binary = fakeCodex;
     });
-    execFileSync(process.execPath, [cli, "ws", "add"], { cwd: second, env: environment });
+    execFileSync(process.execPath, [cli, "work", "add", "--cwd", second], { cwd: second, env: environment });
 
     const currentCapture = join(root, "current.json");
     execFileSync(process.execPath, [cli, "remote", "resume"], {

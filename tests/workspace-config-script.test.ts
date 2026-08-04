@@ -83,7 +83,7 @@ describe("workspace:add script", () => {
     );
 
     expect(() => addWorkspaceToConfig({ configPath, cwd: current })).toThrow(
-      "codexc ws add --prune-missing",
+      "codexc work add --prune-missing",
     );
 
     const result = addWorkspaceToConfig({

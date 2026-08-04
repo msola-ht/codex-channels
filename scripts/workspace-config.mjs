@@ -70,7 +70,7 @@ export function addWorkspaceToConfig({
   ) {
     throw new Error([
       `default_workspace 不存在：${parsed.defaultWorkspaceId}`,
-      "确认配置需要修复后，运行 codexc ws add --prune-missing。",
+      "确认配置需要修复后，运行 codexc work add --prune-missing。",
     ].join("\n"));
   }
   const resolvedCwd = realpathSync(cwd);
@@ -89,7 +89,7 @@ export function addWorkspaceToConfig({
     if (!pruneMissing) {
       throw new Error([
         `Workspace ${workspace.id} 的目录不存在或不是目录：${workspace.cwd}`,
-        "确认这些目录不再使用后，运行 codexc ws add --prune-missing 清理失效项并添加当前目录。",
+        "确认这些目录不再使用后，运行 codexc work add --prune-missing 清理失效项并添加当前目录。",
       ].join("\n"));
     }
     removedWorkspaces.push(workspace);

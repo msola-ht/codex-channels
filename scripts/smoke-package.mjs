@@ -63,7 +63,7 @@ try {
     throw new Error("CLI 帮助缺少公开命令");
   }
   if (
-    !workspaceHelp.includes("用法：codexc ws")
+    !workspaceHelp.includes("用法：codexc work")
     || !rulesHelp.includes("用法：codexc rules init")
     || !serviceHelp.includes("gateway|app-server|all")
   ) {

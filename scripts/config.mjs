@@ -603,7 +603,7 @@ async function runDefaultWorkspace({
   const document = readGatewayConfig(configPath);
   const workspaces = Array.isArray(document.workspaces) ? document.workspaces : [];
   if (workspaces.length === 0) {
-    output.write("配置中没有已注册的 Workspace；请使用 codexc ws add 注册后重试。\n");
+    output.write("配置中没有已注册的 Workspace；请使用 codexc work add 注册后重试。\n");
     return { action: "back" };
   }
   const current = typeof document.default_workspace === "string"

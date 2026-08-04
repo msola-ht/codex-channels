@@ -40,7 +40,7 @@ codexc setup
 
 ```bash
 cd /absolute/path/to/project
-codexc ws add
+codexc work add --cwd .
 ```
 
 安装后台服务并检查：
@@ -177,9 +177,10 @@ Responses 中转接口和独立 API Key，再到“图片识别”中选择该�
 ### 管理项目
 
 ```bash
-codexc ws                           # 列出 Workspace
-codexc ws add                       # 注册当前目录
-codexc ws remove <序号|ID|名称>      # 删除注册，不删除项目文件
+codexc work                         # 列出 Workspace（别名：codexc ws）
+codexc work add [--name 名称]       # 交互式在用户目录下新建工作区（~/.codex-connect/workspaces/<id>）
+codexc work add --cwd <目录>        # 注册已有目录
+codexc work remove <序号|ID|名称>    # 删除注册，不删除项目文件
 ```
 
 聊天客户端只能选择已经注册的 Workspace，不能提交任意本机目录。
