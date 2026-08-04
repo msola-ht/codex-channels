@@ -76,7 +76,7 @@ describe("Feishu outbox", () => {
     expect(updated).toHaveLength(1);
     expect(updated[0]?.header.title.content).toBe("任务计划 · 1/2");
     expect(statusCardText(updated[0]!)).toBe(
-      "✓ 检查实现\n◐ 补充测试",
+      "- ✓ 检查实现\n- ◐ 补充测试",
     );
   });
 

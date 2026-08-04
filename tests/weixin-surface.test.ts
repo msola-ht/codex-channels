@@ -660,14 +660,14 @@ describe("WeixinSurface", () => {
       actorId,
       contextToken: "restored-context",
       text: [
-        "Workspace 已添加",
+        "**Workspace 已添加**",
         "",
-        "│ Docs · docs  ",
-        "│ /workspace/docs",
+        "- Docs · docs",
+        "- 工作目录：/workspace/docs",
         "",
-        "发送 /workspace 可查看并切换 Workspace。",
+        "- 发送 /workspace 可查看并切换 Workspace。",
         "",
-        "已生效：Workspace",
+        "- 已生效：Workspace",
       ].join("\n"),
     });
   });
@@ -712,10 +712,9 @@ describe("WeixinSurface", () => {
       actorId,
       contextToken: "restored-context",
       text: [
-        "Gateway 配置需要重启",
-        "",
-        "变更：默认模型  ",
-        "当前 Gateway 将退出；若由系统服务托管，将自动重新启动。",
+        "**Gateway 配置需要重启**",
+        "- 变更：默认模型",
+        "- 当前 Gateway 将退出；若由系统服务托管，将自动重新启动。",
       ].join("\n"),
     });
   });

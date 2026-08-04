@@ -205,7 +205,10 @@ export class WeixinOutbox implements SurfaceOutputPort {
       for (const presentation of tracker.accept(event)) {
         this.delivery.enqueue(
           event.target.conversationId,
-          () => this.send(event.target, presentation.text),
+          () => this.send(
+            event.target,
+            formatWeixinCommandText(presentation.text, { structuredFields: true }),
+          ),
           true,
         );
       }

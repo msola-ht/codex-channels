@@ -214,14 +214,14 @@ describe("Feishu Surface", () => {
     expect(fixture.sent).toEqual([{
       chatId: "oc_chat",
       text: [
-        "Workspace 已添加",
+        "## Workspace 已添加",
         "",
-        "│ Docs · docs",
-        "│ /workspace/docs",
+        "- Docs · docs",
+        "- 工作目录：/workspace/docs",
         "",
-        "发送 /workspace 可查看并切换 Workspace。",
+        "- 发送 /workspace 可查看并切换 Workspace。",
         "",
-        "已生效：Workspace",
+        "- 已生效：Workspace",
       ].join("\n"),
     }]);
     await fixture.surface.stop();

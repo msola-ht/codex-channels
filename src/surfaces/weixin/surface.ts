@@ -260,6 +260,7 @@ export class WeixinSurface implements SurfaceAdapter {
     }
     const text = formatWeixinCommandText(
       formatSurfaceConfigurationChange(change, "weixin"),
+      { structuredFields: true },
     );
     for (const target of this.safeConfigurationTargets()) {
       if (!this.output.notifyText(target, text)) {
@@ -283,6 +284,7 @@ export class WeixinSurface implements SurfaceAdapter {
     }
     const text = formatWeixinCommandText(
       formatSurfaceConfigurationChange(change, "weixin"),
+      { structuredFields: true },
     );
     return Promise.all(
       this.safeConfigurationTargets().map(

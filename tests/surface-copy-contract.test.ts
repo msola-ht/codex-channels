@@ -152,14 +152,14 @@ describe("shared surface copy contract", () => {
     expect(interactionProcessedTitle).toBe("Codex 交互已处理");
     expect(interactionCancelledTitle).toBe("Codex 交互已取消");
     expect(formatProcessedInteractionOutcome(interactionOutcome.answered))
-      .toBe("Codex 交互已处理：已提交回答。");
+      .toBe("## Codex 交互已处理\n- 结果：已提交回答。");
     expect(formatProcessedInteractionOutcome(interactionOutcome.formSubmitted))
-      .toBe("Codex 交互已处理：已提交表单。");
+      .toBe("## Codex 交互已处理\n- 结果：已提交表单。");
     expect(formatProcessedInteractionOutcome(interactionOutcome.resolvedElsewhere))
-      .toBe("Codex 交互已处理：已在其他客户端处理。");
-    expect(formatCancelledInteraction()).toBe("Codex 交互已取消。");
+      .toBe("## Codex 交互已处理\n- 结果：已在其他客户端处理。");
+    expect(formatCancelledInteraction()).toBe("## Codex 交互已取消");
     expect(formatCancelledInteraction("Gateway 已停止"))
-      .toBe("Codex 交互已取消：Gateway 已停止。");
+      .toBe("## Codex 交互已取消\n- 原因：Gateway 已停止。");
   });
 
   it("keeps text-file error semantics aligned while naming the platform", () => {

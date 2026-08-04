@@ -1,3 +1,5 @@
+import { toStructuredMarkdownList } from "./conversation-command-format.js";
+
 export const interactionProcessedTitle = "Codex 交互已处理";
 export const interactionCancelledTitle = "Codex 交互已取消";
 
@@ -15,11 +17,15 @@ export const interactionOutcome = {
 } as const;
 
 export function formatProcessedInteractionOutcome(outcome: string): string {
-  return `${interactionProcessedTitle}：${outcome}。`;
+  return toStructuredMarkdownList([
+    interactionProcessedTitle,
+    `结果：${outcome}。`,
+  ].join("\n"));
 }
 
 export function formatCancelledInteraction(reason?: string): string {
-  return reason
-    ? `${interactionCancelledTitle}：${reason}。`
-    : `${interactionCancelledTitle}。`;
+  return toStructuredMarkdownList([
+    interactionCancelledTitle,
+    ...(reason ? [`原因：${reason}。`] : []),
+  ].join("\n"));
 }
