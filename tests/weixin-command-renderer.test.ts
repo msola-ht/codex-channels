@@ -194,7 +194,7 @@ describe("Weixin command renderer", () => {
     ];
 
     expect(results.map((result) => renderWeixinCommandResult(result))).toEqual([
-      "当前没有运行中的任务。",
+      "## 当前没有运行中的任务。",
       "当前 Workspace 没有匹配的可恢复会话。",
       expect.stringContaining("Thread：尚未绑定"),
       expect.stringContaining("Main · main ← 当前"),

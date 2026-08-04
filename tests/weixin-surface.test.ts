@@ -471,7 +471,7 @@ describe("WeixinSurface", () => {
     expect(sendText).toHaveBeenCalledWith({
       actorId,
       contextToken: "context-secret",
-      text: "已请求停止当前任务。",
+      text: "**已请求停止当前任务。**",
     });
   });
 

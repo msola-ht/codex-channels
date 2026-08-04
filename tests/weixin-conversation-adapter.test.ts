@@ -632,12 +632,12 @@ describe("WeixinConversationAdapter", () => {
     expect(notifyText).toHaveBeenNthCalledWith(
       2,
       target,
-      "已退出当前会话，下一条普通消息将创建新的 Codex Thread。",
+      "**已退出当前会话，下一条普通消息将创建新的 Codex Thread。**",
     );
     expect(notifyText).toHaveBeenNthCalledWith(
       3,
       target,
-      "已请求停止当前任务。",
+      "**已请求停止当前任务。**",
     );
   });
 

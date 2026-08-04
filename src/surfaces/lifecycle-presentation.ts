@@ -14,6 +14,7 @@ import {
   formatPercent,
   formatRemainingRateLimitWindow,
 } from "./account-format.js";
+import { toStructuredMarkdownList } from "./conversation-command-format.js";
 import {
   formatElapsedDuration,
   formatTokensPerSecond,
@@ -436,17 +437,17 @@ export function renderPlainLifecyclePresentation(
 export function renderStructuredLifecyclePresentation(
   presentation: LifecyclePresentation,
 ): string {
-  return [
-    `## ${presentation.title}`,
+  return toStructuredMarkdownList([
+    presentation.title,
     ...(presentation.fields.length > 0
       ? ["", ...presentation.fields.map(formatStructuredField)]
       : []),
     ...(presentation.sections ?? []).flatMap((section) => [
       "",
-      `### ${section.title}`,
+      `${section.title}：`,
       ...section.fields.map(formatStructuredField),
     ]),
-  ].join("\n");
+  ].join("\n"));
 }
 
 function formatStructuredField(field: LifecyclePresentationField): string {

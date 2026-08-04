@@ -275,7 +275,7 @@ describe("Feishu conversation adapter", () => {
 
     expect(stopForActor).toHaveBeenCalledWith(message.target, message.actorId);
     expect(stop).toHaveBeenCalledWith(message.target);
-    expect(fixture.sent[0]?.text).toBe("已请求停止当前任务。");
+    expect(fixture.sent[0]?.text).toBe("## 已请求停止当前任务。");
   });
 
   it("opens the composed command center for start and help", async () => {
@@ -1038,7 +1038,7 @@ describe("Feishu conversation adapter", () => {
     );
     expect(fixture.sent).toEqual([{
       chatId: "oc_chat",
-      text: "已排到下一 Turn，当前第 2 条。队列仅保存在内存，Gateway 重启会清空。",
+      text: "## 已排到下一 Turn，当前第 2 条。队列仅保存在内存，Gateway 重启会清空。",
     }]);
   });
 

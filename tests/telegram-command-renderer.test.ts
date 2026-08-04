@@ -54,7 +54,7 @@ describe("Telegram command renderer", () => {
       },
     );
 
-    expect(reply).toHaveBeenCalledWith("已请求停止当前任务。");
+    expect(reply).toHaveBeenCalledWith("## 已请求停止当前任务。");
   });
 
   it("confirms queued follow-ups and explains their in-memory lifetime", async () => {
@@ -69,7 +69,7 @@ describe("Telegram command renderer", () => {
     );
 
     expect(reply).toHaveBeenCalledWith(
-      "已排到下一 Turn，当前第 2 条。队列仅保存在内存，Gateway 重启会清空。",
+      "## 已排到下一 Turn，当前第 2 条。队列仅保存在内存，Gateway 重启会清空。",
     );
   });
 

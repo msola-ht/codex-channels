@@ -160,50 +160,98 @@ export function formatConversationCommandOutcome(
   switch (outcome.type) {
     case "thread.resumed":
       return outcome.transferredFrom
-        ? `${formatTakeoverSource(outcome.transferredFrom)}\nThread：${outcome.threadId}`
-        : [
+        ? toStructuredMarkdownList([
+            formatTakeoverSource(outcome.transferredFrom),
+            `Thread：${outcome.threadId}`,
+          ].join("\n"))
+        : toStructuredMarkdownList([
             "已恢复 Codex Thread",
             `Thread：${outcome.threadId}`,
             ...(outcome.backgroundedThreadId
               ? [`原任务已转入后台：${outcome.backgroundedThreadId}`]
               : []),
-          ].join("\n");
+          ].join("\n"));
     case "session.new":
       return outcome.backgroundedThreadId
-        ? `已切换到新会话，原任务继续在后台运行。\n后台 Thread：${outcome.backgroundedThreadId}\n下一条普通消息将创建新的 Codex Thread。`
-        : "已退出当前会话，下一条普通消息将创建新的 Codex Thread。";
+        ? toStructuredMarkdownList([
+            "已切换到新会话，原任务继续在后台运行。",
+            `后台 Thread：${outcome.backgroundedThreadId}`,
+            "下一条普通消息将创建新的 Codex Thread。",
+          ].join("\n"))
+        : toStructuredMarkdownList([
+            "已退出当前会话，下一条普通消息将创建新的 Codex Thread。",
+          ].join("\n"));
     case "thread.archived":
-      return `已归档 Codex Thread\nThread：${outcome.threadId}\n下一条普通消息将创建新会话。`;
+      return toStructuredMarkdownList([
+        "已归档 Codex Thread",
+        `Thread：${outcome.threadId}`,
+        "下一条普通消息将创建新会话。",
+      ].join("\n"));
     case "thread.unarchived":
-      return `已取消归档并切换会话\nThread：${outcome.threadId}`;
+      return toStructuredMarkdownList([
+        "已取消归档并切换会话",
+        `Thread：${outcome.threadId}`,
+      ].join("\n"));
     case "thread.pin-updated":
-      return outcome.pinned ? "已固定当前会话。" : "已取消固定当前会话。";
+      return toStructuredMarkdownList([
+        outcome.pinned ? "已固定当前会话。" : "已取消固定当前会话。",
+      ].join("\n"));
     case "workspace.selected":
-      return `已切换 Workspace\nWorkspace：${outcome.workspace.name}\n工作目录：${outcome.workspace.cwd}`;
+      return toStructuredMarkdownList([
+        "已切换 Workspace",
+        `Workspace：${outcome.workspace.name}`,
+        `工作目录：${outcome.workspace.cwd}`,
+      ].join("\n"));
     case "turn.stop-requested":
       return outcome.stopped
-        ? "已请求停止当前任务。"
-        : "当前没有运行中的任务。";
+        ? toStructuredMarkdownList(["已请求停止当前任务。"].join("\n"))
+        : toStructuredMarkdownList(["当前没有运行中的任务。"].join("\n"));
     case "turn.follow-up-queued":
-      return `已排到下一 Turn，当前第 ${outcome.position} 条。队列仅保存在内存，Gateway 重启会清空。`;
+      return toStructuredMarkdownList([
+        `已排到下一 Turn，当前第 ${outcome.position} 条。队列仅保存在内存，Gateway 重启会清空。`,
+      ].join("\n"));
     case "thread.renamed":
-      return `会话已重命名\n名称：${outcome.name}`;
+      return toStructuredMarkdownList([
+        "会话已重命名",
+        `名称：${outcome.name}`,
+      ].join("\n"));
     case "thread.compaction-requested":
-      return "已请求压缩当前 Codex Thread。进度将通过标准事件返回。";
+      return toStructuredMarkdownList([
+        "已请求压缩当前 Codex Thread。进度将通过标准事件返回。",
+      ].join("\n"));
     case "thread.forked":
-      return `已分叉并切换到新会话\nThread：${outcome.threadId}`;
+      return toStructuredMarkdownList([
+        "已分叉并切换到新会话",
+        `Thread：${outcome.threadId}`,
+      ].join("\n"));
     case "review.started":
-      return `已启动 Codex Review\nTurn：${outcome.turnId}`;
+      return toStructuredMarkdownList([
+        "已启动 Codex Review",
+        `Turn：${outcome.turnId}`,
+      ].join("\n"));
     case "plan.started":
-      return `已进入 Plan 模式并开始规划\nTurn：${outcome.turnId}`;
+      return toStructuredMarkdownList([
+        "已进入 Plan 模式并开始规划",
+        `Turn：${outcome.turnId}`,
+      ].join("\n"));
     case "skill.started":
       return outcome.steered
-        ? `已把 Skill 追加到当前任务\nSkill：${outcome.skillName}`
-        : `已使用 Skill 开始任务\nSkill：${outcome.skillName}\nTurn：${outcome.turnId}`;
+        ? toStructuredMarkdownList([
+            "已把 Skill 追加到当前任务",
+            `Skill：${outcome.skillName}`,
+          ].join("\n"))
+        : toStructuredMarkdownList([
+            "已使用 Skill 开始任务",
+            `Skill：${outcome.skillName}`,
+            `Turn：${outcome.turnId}`,
+          ].join("\n"));
     case "goal.cleared":
-      return "已清除当前 Thread Goal。";
+      return toStructuredMarkdownList(["已清除当前 Thread Goal。"].join("\n"));
     case "goal.updated":
-      return `Goal 已设置\n目标：${outcome.goal.objective}`;
+      return toStructuredMarkdownList([
+        "Goal 已设置",
+        `目标：${outcome.goal.objective}`,
+      ].join("\n"));
   }
 }
 

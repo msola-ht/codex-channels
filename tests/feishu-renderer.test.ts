@@ -212,7 +212,7 @@ describe("Feishu output renderer", () => {
       "goal",
     ]);
     expect(results.map((result) => renderFeishuCommandResult(result))).toEqual([
-      "当前没有运行中的任务。",
+      "## 当前没有运行中的任务。",
       "当前 Workspace 没有匹配的可恢复会话。",
       expect.stringContaining("Thread：尚未绑定"),
       expect.stringContaining("Main · main ← 当前"),
