@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -10,7 +9,7 @@ import {
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import { runDebugSetup } from "./debug-setup.mjs";
-import { packageDir, requireUserConfig } from "./runtime-config.mjs";
+import { requireUserConfig } from "./runtime-config.mjs";
 
 export async function runConfig({
   environment = process.env,
@@ -19,8 +18,6 @@ export async function runConfig({
   prompts = clackPrompts,
   writeConfig = writeGatewayConfig,
   debugSetup = runDebugSetup,
-  doctor = runDoctor,
-  metricsStatus = runMetricsStatus,
 } = {}) {
   if (!prompts) throw new Error("Config 菜单缺少交互实现");
   const { configPath, dataDir } = resolveConfigPaths(environment);
@@ -57,16 +54,6 @@ export async function runConfig({
           value: "paths",
           label: "查看配置路径",
           hint: "显示用户目录与配置文件位置",
-        },
-        {
-          value: "metrics",
-          label: "指标库状态",
-          hint: "查看模型请求指标数据库",
-        },
-        {
-          value: "doctor",
-          label: "运行 Doctor",
-          hint: "检查安装、配置、Codex 与服务",
         },
         {
           value: "cancel",
@@ -114,12 +101,6 @@ export async function runConfig({
       }
       case "paths":
         output.write(`用户目录：${dataDir}\n配置文件：${configPath}\n`);
-        continue;
-      case "metrics":
-        metricsStatus({ environment, output });
-        continue;
-      case "doctor":
-        doctor({ environment, output });
         continue;
       default:
         throw new Error(`未知 Config 类别：${String(section)}`);
@@ -561,26 +542,6 @@ async function runTelegramMessageFormat({
   output.write(`Telegram 消息格式已设为 ${selected}：${configPath}\n`);
   output.write("配置将在重启 Gateway 后生效；不需要重启 App Server。\n");
   return { messageFormat: selected, configPath };
-}
-
-function runDoctor({ environment }) {
-  const result = spawnSync(
-    process.execPath,
-    [join(packageDir, "scripts", "doctor.mjs")],
-    { env: environment, stdio: "inherit" },
-  );
-  if (result.error) throw result.error;
-  if (result.signal) process.kill(process.pid, result.signal);
-}
-
-function runMetricsStatus({ environment }) {
-  const result = spawnSync(
-    process.execPath,
-    [join(packageDir, "scripts", "metrics-database.mjs"), "status"],
-    { env: environment, stdio: "inherit" },
-  );
-  if (result.error) throw result.error;
-  if (result.signal) process.kill(process.pid, result.signal);
 }
 
 function resolveConfigPaths(environment) {

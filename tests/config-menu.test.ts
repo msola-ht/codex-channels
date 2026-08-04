@@ -299,18 +299,15 @@ describe("Codex Connect config menu", () => {
     });
   });
 
-  it("prints paths and runs doctor and metrics entries without leaving the menu", async () => {
+  it("prints config paths and keeps the menu focused on settings", async () => {
     const fixture = createFixture();
     const output: string[] = [];
-    const doctor = vi.fn();
-    const metricsStatus = vi.fn();
+    const select = vi.fn()
+      .mockResolvedValueOnce("paths")
+      .mockResolvedValueOnce("cancel");
     const prompts = {
       intro: vi.fn(),
-      select: vi.fn()
-        .mockResolvedValueOnce("paths")
-        .mockResolvedValueOnce("doctor")
-        .mockResolvedValueOnce("metrics")
-        .mockResolvedValueOnce("cancel"),
+      select,
       isCancel: () => false,
       cancel: vi.fn(),
     };
@@ -319,13 +316,14 @@ describe("Codex Connect config menu", () => {
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts,
-      doctor,
-      metricsStatus,
     });
 
     expect(output.join("")).toContain(`配置文件：${fixture.configPath}`);
-    expect(doctor).toHaveBeenCalledTimes(1);
-    expect(metricsStatus).toHaveBeenCalledTimes(1);
+    const options = select.mock.calls[0]?.[0]?.options ?? [];
+    const values = options.map((option: { value: string }) => option.value);
+    expect(values).toContain("paths");
+    expect(values).not.toContain("metrics");
+    expect(values).not.toContain("doctor");
   });
 });
 
