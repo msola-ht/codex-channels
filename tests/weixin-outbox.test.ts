@@ -128,9 +128,12 @@ describe("WeixinOutbox", () => {
         "- API 提供商：BLTCY",
         "- 调用模型：gpt-5.6-luna",
         "- 视觉 API 耗时：18秒",
-        "- Token 用量：输入 9,433 · 输出 483 · 总计 9,916",
+        "- Token 用量",
+        "  - 输入：9,433",
+        "  - 输出：483",
+        "  - 总计：9,916",
         "",
-        "正在交给当前模型处理。",
+        "- 正在交给当前模型处理。",
       ].join("\n"),
     }));
   });
@@ -374,16 +377,9 @@ describe("WeixinOutbox", () => {
     await outbox.close();
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      "Codex 账户状态已更新：认证=chatgpt · 套餐=Pro",
-      [
-        "周限 额度提醒",
-        "主窗口：已使用 12% · 周期 7 天",
-        "状态：正常",
-      ].join("  \n"),
-      [
-        "MCP Server：docs · 启动失败",
-        "原因：认证失败，TOKEN=[已隐藏]",
-      ].join("  \n"),
+      "**Codex 账户状态已更新**\n- 认证：chatgpt\n- 套餐：Pro",
+      "**周限 额度提醒**\n- 主窗口：已使用 12% · 周期 7 天\n- 状态：正常",
+      "**MCP Server**\n- 名称：docs\n- 状态：启动失败\n- 原因：认证失败，TOKEN=[已隐藏]",
     ]);
   });
 

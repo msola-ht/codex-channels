@@ -26,6 +26,7 @@ import {
   formatConversationStatus,
   formatConversationUsage,
   formatConversationWorkspaces,
+  toStructuredMarkdownList,
 } from "../conversation-command-format.js";
 import {
   emptyCodexResponseText,
@@ -86,7 +87,7 @@ export function renderFeishuStartupNotification(
 }
 
 export function renderFeishuHelp(): string {
-  return [
+  return toStructuredMarkdownList([
     "飞书 Codex 命令",
     "",
     "普通文本会发送到当前 Codex Thread。",
@@ -96,18 +97,18 @@ export function renderFeishuHelp(): string {
     "- /whoami · /fs <status|doctor|revoke>",
     "- /start · /help · /h",
     "- /vision <要求> · /vision <2–4> <要求> · /vision retry · /vision cancel",
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function renderFeishuIdentity(
   message: Pick<FeishuInboxMessage, "actorId" | "target">,
 ): string {
-  return [
+  return toStructuredMarkdownList([
     "飞书身份",
     `用户 Open ID：${message.actorId}`,
     `Chat ID：${message.target.conversationId}`,
     `App ID：${message.target.accountId}`,
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function renderFeishuCommandResult(

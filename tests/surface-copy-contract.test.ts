@@ -178,11 +178,14 @@ describe("shared surface copy contract", () => {
 
   it("keeps the shared command directory in Feishu and Weixin help", () => {
     for (const line of conversationCommandHelpLines) {
-      expect(renderFeishuHelp()).toContain(line);
-      expect(renderWeixinHelp()).toContain(line);
+      const expected = line.endsWith("：")
+        ? `### ${line.slice(0, -1)}`
+        : line;
+      expect(renderFeishuHelp()).toContain(expected);
+      expect(renderWeixinHelp()).toContain(expected);
     }
     for (const help of [renderFeishuHelp(), renderWeixinHelp()]) {
-      expect(help).toContain("快捷命令：");
+      expect(help).toContain("### 快捷命令");
       expect(help).toContain("- /h → /help");
       expect(help).toContain("- /work → /workspace");
       expect(help).toContain("- /r → /resume");

@@ -361,14 +361,17 @@ export class WeixinOutbox implements SurfaceOutputPort {
       case "account.updated":
         return formatWeixinCommandText(
           formatRuntimeAccountUpdate(event.authMode, event.planType),
+          { structuredFields: true },
         );
       case "account.rateLimits.updated":
         return formatWeixinCommandText(
           formatRuntimeRateLimitUpdate(event.rateLimits),
+          { structuredFields: true },
         );
       case "mcp.status.updated":
         return formatWeixinCommandText(
           formatRuntimeMcpStatusUpdate(event),
+          { structuredFields: true },
         );
       case "plan.updated":
         return null;

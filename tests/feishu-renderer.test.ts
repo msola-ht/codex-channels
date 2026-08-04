@@ -695,13 +695,16 @@ describe("Feishu output renderer", () => {
         totalTokens: 9_916,
       },
     })).toBe([
-      "图片识别完成",
+      "## 图片识别完成",
       "- API 提供商：BLTCY",
       "- 调用模型：gpt-5.6-luna",
       "- 视觉 API 耗时：18秒",
-      "- Token 用量：输入 9,433 · 输出 483 · 总计 9,916",
+      "- Token 用量",
+      "  - 输入：9,433",
+      "  - 输出：483",
+      "  - 总计：9,916",
       "",
-      "正在交给当前模型处理。",
+      "- 正在交给当前模型处理。",
     ].join("\n"));
   });
 
@@ -831,7 +834,7 @@ describe("Feishu output renderer", () => {
     expect(renderFeishuOutput(criticalEvents[2]!)).toBeNull();
     expect(progressEvents.some(isCriticalOutputEvent)).toBe(false);
     expect(progressEvents.map((event) => renderFeishuOutput(event))).toEqual([
-      "视觉识别中\n- 图片：2 张\n- 状态：已发送至视觉 API",
+      "## 视觉识别中\n- 图片：2 张\n- 状态：已发送至视觉 API",
       "## 已开始处理。",
       null,
       null,

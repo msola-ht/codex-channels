@@ -5,7 +5,7 @@ export type AppendedInputKind = "text" | "file" | "image" | "audio";
 
 export function formatVisionStarted(imageCount: number): string {
   return [
-    "视觉识别中",
+    "## 视觉识别中",
     `- 图片：${imageCount} 张`,
     "- 状态：已发送至视觉 API",
   ].join("\n");
@@ -13,7 +13,7 @@ export function formatVisionStarted(imageCount: number): string {
 
 export function formatVisionProgress(elapsedSeconds: number): string {
   return [
-    "视觉识别中",
+    "## 视觉识别中",
     `- 已等待：${elapsedSeconds} 秒`,
     "- 状态：上游仍在处理",
   ].join("\n");
@@ -30,30 +30,30 @@ export function formatVisionCompleted(details: {
     : [
         ...(details.usage.inputTokens === undefined
           ? []
-          : [`输入 ${formatInteger(details.usage.inputTokens)}`]),
+          : [`  - 输入：${formatInteger(details.usage.inputTokens)}`]),
         ...(details.usage.cachedInputTokens === undefined
           ? []
-          : [`缓存输入 ${formatInteger(details.usage.cachedInputTokens)}`]),
+          : [`  - 缓存输入：${formatInteger(details.usage.cachedInputTokens)}`]),
         ...(details.usage.outputTokens === undefined
           ? []
-          : [`输出 ${formatInteger(details.usage.outputTokens)}`]),
+          : [`  - 输出：${formatInteger(details.usage.outputTokens)}`]),
         ...(details.usage.reasoningOutputTokens === undefined
           ? []
-          : [`推理输出 ${formatInteger(details.usage.reasoningOutputTokens)}`]),
+          : [`  - 推理输出：${formatInteger(details.usage.reasoningOutputTokens)}`]),
         ...(details.usage.totalTokens === undefined
           ? []
-          : [`总计 ${formatInteger(details.usage.totalTokens)}`]),
+          : [`  - 总计：${formatInteger(details.usage.totalTokens)}`]),
       ];
   return [
-    "图片识别完成",
+    "## 图片识别完成",
     `- API 提供商：${details.provider}`,
     `- 调用模型：${details.model}`,
     ...(details.elapsedMs === undefined
       ? []
       : [`- 视觉 API 耗时：${formatElapsedDuration(details.elapsedMs)}`]),
-    ...(tokenParts.length === 0 ? [] : [`- Token 用量：${tokenParts.join(" · ")}`]),
+    ...(tokenParts.length === 0 ? [] : ["- Token 用量", ...tokenParts]),
     "",
-    "正在交给当前模型处理。",
+    "- 正在交给当前模型处理。",
   ].join("\n");
 }
 

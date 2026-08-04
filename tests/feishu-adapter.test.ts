@@ -193,10 +193,10 @@ describe("Feishu conversation adapter", () => {
     )).toBe(true);
     expect(fixture.sent[1]?.text).toBe(fixture.sent[0]?.text);
     expect(fixture.sent[2]?.text).toBe([
-      "飞书身份",
-      "用户 Open ID：ou_actor",
-      "Chat ID：oc_chat",
-      "App ID：cli_0123456789abcdef",
+      "## 飞书身份",
+      "- 用户 Open ID：ou_actor",
+      "- Chat ID：oc_chat",
+      "- App ID：cli_0123456789abcdef",
     ].join("\n"));
   });
 

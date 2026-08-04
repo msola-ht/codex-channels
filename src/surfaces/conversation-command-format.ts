@@ -722,7 +722,7 @@ function formatErrorMetricsReport(
   return toStructuredMarkdownList(lines.join("\n"));
 }
 
-function toStructuredMarkdownList(text: string): string {
+export function toStructuredMarkdownList(text: string): string {
   const output: string[] = [];
   let firstContent = true;
   let fenced = false;

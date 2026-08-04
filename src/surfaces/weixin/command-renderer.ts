@@ -26,6 +26,7 @@ import {
   formatConversationStatus,
   formatConversationUsage,
   formatConversationWorkspaces,
+  toStructuredMarkdownList,
 } from "../conversation-command-format.js";
 import {
   createStartupPresentation,
@@ -64,7 +65,7 @@ export function renderWeixinStartupNotification(
 }
 
 export function renderWeixinHelp(): string {
-  return [
+  return toStructuredMarkdownList([
     "微信 Codex 命令",
     "普通文本会发送到当前 Codex Thread。",
     ...conversationCommandHelpLines,
@@ -72,7 +73,7 @@ export function renderWeixinHelp(): string {
     "- /whoami · /wx doctor",
     "- /start · /help · /h",
     "- /vision <要求> · /vision <2–4> <要求> · /vision retry · /vision cancel",
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function renderWeixinIdentity(message: {
@@ -82,12 +83,12 @@ export function renderWeixinIdentity(message: {
     conversationId: string;
   };
 }): string {
-  return [
+  return toStructuredMarkdownList([
     "微信身份",
     `用户 ID：${message.actorId}`,
     `会话 ID：${message.target.conversationId}`,
     `账号 ID：${message.target.accountId}`,
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function renderWeixinTurnCompleted(
