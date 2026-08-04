@@ -8,13 +8,28 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import {
+  readGatewayConfig,
+  writeGatewayConfig,
+} from "../runtime/gateway-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { runConfig } from "../scripts/config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 
 const roots: string[] = [];
+
+interface WorkspaceTable {
+  id: string;
+  name: string;
+  sandbox?: string;
+  approval_policy?: string;
+  permissions?: string;
+}
+
+interface ConfigWithWorkspaces {
+  workspaces: WorkspaceTable[];
+}
 
 afterEach(() => {
   for (const root of roots.splice(0)) {
@@ -202,6 +217,102 @@ describe("Codex Connect config menu", () => {
     expect(readGatewayConfig(fixture.configPath).approval).toEqual({
       timeout_seconds: 120,
     });
+  });
+
+  it("sets workspace sandbox and approval policy through the menu", async () => {
+    const fixture = createFixture();
+    const output: string[] = [];
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("workspaces")
+        .mockResolvedValueOnce("sandbox")
+        .mockResolvedValueOnce("danger-full-access"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    const result = await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts,
+    });
+
+    expect(result).toEqual({
+      workspaceId: "codex-connect",
+      sandbox: "danger-full-access",
+      approvalPolicy: undefined,
+      permissions: undefined,
+      configPath: fixture.configPath,
+    });
+    expect((readGatewayConfig(fixture.configPath) as unknown as ConfigWithWorkspaces).workspaces[0])
+      .toMatchObject({ sandbox: "danger-full-access" });
+    expect(output.join("")).toContain("已更新");
+    expect(output.join("")).toContain("权益热加载");
+  });
+
+  it("sets a workspace approval policy through the menu", async () => {
+    const fixture = createFixture();
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("workspaces")
+        .mockResolvedValueOnce("approval_policy")
+        .mockResolvedValueOnce("never"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    const result = await runConfig({
+      environment: fixture.environment,
+      output: { write: () => {}, isTTY: true },
+      prompts,
+    });
+
+    expect(result).toEqual({
+      workspaceId: "codex-connect",
+      sandbox: undefined,
+      approvalPolicy: "never",
+      permissions: undefined,
+      configPath: fixture.configPath,
+    });
+    expect((readGatewayConfig(fixture.configPath) as unknown as ConfigWithWorkspaces).workspaces[0])
+      .toMatchObject({ approval_policy: "never" });
+  });
+
+  it("rejects a permission profile when workspace sandbox is configured", async () => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath) as unknown as ConfigWithWorkspaces;
+    if (!Array.isArray(document.workspaces) || document.workspaces.length === 0) {
+      throw new Error("测试配置缺少 Workspace");
+    }
+    document.workspaces[0]!.sandbox = "workspace-write";
+    writeGatewayConfig(
+      fixture.configPath,
+      document as unknown as ReturnType<typeof readGatewayConfig>,
+    );
+    const output: string[] = [];
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("workspaces")
+        .mockResolvedValueOnce("permissions")
+        .mockResolvedValueOnce("back")
+        .mockResolvedValueOnce("cancel"),
+      text: vi.fn(async () => ":read-only"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts,
+    });
+
+    expect(output.join("")).toContain("permissions 与 sandbox 互斥");
+    expect((readGatewayConfig(fixture.configPath) as unknown as ConfigWithWorkspaces).workspaces[0])
+      .not.toHaveProperty("permissions");
   });
 
   it("sets the Codex sandbox mode through the system settings", async () => {

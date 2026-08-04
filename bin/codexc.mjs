@@ -44,7 +44,7 @@ const helpText = {
 初始化与诊断：
   init                         初始化用户目录和配置
   setup                        选择并配置 Gateway 模块
-  config                       打开配置与设置菜单（显示、系统、消息格式）
+  config                       打开配置与设置菜单（显示、系统、工作区、消息格式）
   doctor                       检查安装、配置、Codex 与服务
 
 项目与会话：
