@@ -367,8 +367,8 @@ describe("shared Surface lifecycle presentation", () => {
       }),
     );
 
-    expect(rendered).toContain("参考总价：¥7.20（已计价 1/1 个成功请求）");
-    expect(rendered).toContain("参考总价：¥14.40（已计价 2/2 次请求）");
+    expect(rendered).toContain("参考总价：¥7.200000（已计价 1/1 个成功请求）");
+    expect(rendered).toContain("参考总价：¥14.400000（已计价 2/2 次请求）");
     expect(rendered).not.toContain("折合人民币");
     expect(rendered).not.toContain("$");
   });

@@ -200,7 +200,7 @@ describe("Weixin command renderer", () => {
       expect.stringContaining("Main · main ← 当前"),
       expect.stringContaining("Fast 模式：开启"),
       "当前没有已启用的 Skills。",
-      "MCP Servers（0）：",
+      "## MCP Servers（0）",
       "当前没有已安装 Plugins。",
       expect.stringContaining("OpenAI Codex 账户用量摘要"),
       expect.stringContaining("Codex 额度"),

@@ -55,7 +55,7 @@ export function formatCurrencyNanos(currency: string, value: number): string {
     style: "currency",
     currency,
     currencyDisplay: "narrowSymbol",
-    minimumFractionDigits: amount < 0.01 ? 6 : 2,
+    minimumFractionDigits: 6,
     maximumFractionDigits: 6,
   }).format(amount);
 }
@@ -97,14 +97,17 @@ export function toDisplayReferenceCost(
   };
 }
 
-export function formatExchangeRateLine(exchangeRate: ExchangeRateSnapshot): string {
-  return `汇率：1 USD ≈ ${formatExchangeRate(exchangeRate.usdToCny)} CNY（${exchangeRate.source} · ${new Intl.DateTimeFormat("zh-CN", {
+export function formatExchangeRateLine(exchangeRate: ExchangeRateSnapshot): string[] {
+  return [
+    `汇率：1 USD ≈ ${formatExchangeRate(exchangeRate.usdToCny)} CNY`,
+    `  - 来源：${exchangeRate.source} · ${new Intl.DateTimeFormat("zh-CN", {
     month: "long",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
-  }).format(new Date(exchangeRate.effectiveAtMs))}）`;
+  }).format(new Date(exchangeRate.effectiveAtMs))}`,
+  ];
 }
 
 export function formatExchangeRate(value: number): string {

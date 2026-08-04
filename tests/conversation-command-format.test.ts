@@ -245,13 +245,13 @@ describe("provider-aware conversation command formatting", () => {
       source: "open-er-api",
     });
 
-    expect(rendered).toContain("汇率：1 USD ≈ 7.2000 CNY（open-er-api");
     expect(rendered).toContain("- 汇率：1 USD ≈ 7.2000 CNY");
-    expect(rendered).toContain("- 参考总价：¥7.20（已计价 1/1 次请求）");
-    expect(rendered).toContain("参考总价：¥7.20（已计价 1/1 次请求）");
-    expect(rendered).toContain("输入价格：¥4.32");
-    expect(rendered).toContain("缓存价格：¥0.72");
-    expect(rendered).toContain("输出价格：¥2.16");
+    expect(rendered).toContain("  - 来源：open-er-api");
+    expect(rendered).toContain("- 参考总价：¥7.200000（已计价 1/1 次请求）");
+    expect(rendered).toContain("参考总价：¥7.200000（已计价 1/1 次请求）");
+    expect(rendered).toContain("输入价格：¥4.320000");
+    expect(rendered).toContain("缓存价格：¥0.720000");
+    expect(rendered).toContain("输出价格：¥2.160000");
     expect(rendered).not.toContain("$1.00");
     expect(rendered).not.toContain("折合人民币");
   });
@@ -312,8 +312,8 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("OpenAI 官方 / gpt-5.6-sol");
     expect(rendered).toContain("第三方中转 / gpt-5.6-luna");
     expect(rendered).toContain("参考总价：$0.123457（已计价 10/12 次请求）");
-    expect(rendered).toContain("输入价格：$0.04");
-    expect(rendered).toContain("缓存价格：$0.02");
+    expect(rendered).toContain("输入价格：$0.040000");
+    expect(rendered).toContain("缓存价格：$0.020000");
     expect(rendered).toContain("输出价格：$0.063457");
   });
 

@@ -135,7 +135,7 @@ export function formatConversationSessions(
   const hiddenCount = result.sessions.length - visibleSessions.length;
   const searchCommand = result.archived ? "archived" : "sessions";
   const backgroundThreadIds = new Set(result.backgroundThreadIds ?? []);
-  return [
+  return toStructuredMarkdownList([
     `${result.archived ? "已归档会话" : "历史会话"}（${result.sessions.length}）${result.searchTerm ? ` · 搜索：${result.searchTerm}` : ""}：`,
     ...visibleSessions.map(
       (session, index) =>
@@ -151,7 +151,7 @@ export function formatConversationSessions(
     result.archived
       ? "恢复归档：/unarchive <序号、名称或 Thread ID>"
       : "恢复：/resume <序号、名称或 Thread ID>",
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function formatConversationCommandOutcome(
@@ -223,7 +223,7 @@ function formatTakeoverSource(surface: string): string {
 export function formatConversationWorkspaces(
   result: Extract<ConversationCommandResult, { kind: "workspaces" }>,
 ): string {
-  return [
+  return toStructuredMarkdownList([
     `Workspace（${result.workspaces.length}）：`,
     ...result.workspaces.flatMap((workspace, index) => [
       `${index + 1}. ${workspace.name} · ${workspace.id}${workspace.id === result.currentWorkspaceId ? " ← 当前" : ""}`,
@@ -231,7 +231,7 @@ export function formatConversationWorkspaces(
     ]),
     "",
     "切换：/workspace <序号、ID 或名称>",
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function formatConversationSkills(
@@ -239,26 +239,26 @@ export function formatConversationSkills(
 ): string {
   return result.entries.length === 0
     ? "当前没有已启用的 Skills。"
-    : [
+    : toStructuredMarkdownList([
         `已安装 Skills（${result.entries.length}）：`,
         ...result.entries.map(
           (skill, index) => `${index + 1}. ${skill.name}：${skill.description}`,
         ),
         "",
         "使用：/skill <名称或序号> <任务>",
-      ].join("\n");
+      ].join("\n"));
 }
 
 export function formatConversationMcp(
   result: Extract<ConversationCommandResult, { kind: "mcp" }>,
 ): string {
-  return [
+  return toStructuredMarkdownList([
     `MCP Servers（${result.servers.length}）：`,
     ...result.servers.map(
       (server) =>
         `- ${server.name} · auth=${server.authStatus} · tools=${server.toolCount}`,
     ),
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function formatConversationPlugins(
@@ -266,32 +266,32 @@ export function formatConversationPlugins(
 ): string {
   return result.result.length === 0
     ? "当前没有已安装 Plugins。"
-    : [
+    : toStructuredMarkdownList([
         `已安装 Plugins（${result.result.length}）：`,
         ...result.result.map(
           (plugin) =>
             `- ${plugin.name} · ${plugin.enabled ? "已启用" : "未启用"}`,
         ),
-      ].join("\n");
+      ].join("\n"));
 }
 
 export function formatConversationPermissions(
   result: Extract<ConversationCommandResult, { kind: "permissions" }>,
 ): string {
-  return [
+  return toStructuredMarkdownList([
     "当前 Gateway 固定使用配置中的 read-only 或 workspace-write。",
     "可用 Permission Profiles：",
     ...result.profiles.map(
       (profile) =>
         `- ${profile.id} · ${profile.allowed ? "允许" : "受策略禁止"}${profile.description ? ` · ${profile.description}` : ""}`,
     ),
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function formatConversationProjectRules(
   result: Extract<ConversationCommandResult, { kind: "project-rules" }>,
 ): string {
-  return [
+  return toStructuredMarkdownList([
     result.action === "initialized"
       ? "项目规则已生成并检查通过"
       : "项目规则检查通过",
@@ -300,7 +300,7 @@ export function formatConversationProjectRules(
     ...(result.action === "initialized"
       ? ["重启 Codex/App Server 后生效；Gateway 无需重启。"]
       : []),
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function formatConversationArtifacts(
@@ -319,25 +319,25 @@ export function formatConversationCollaborationMode(
   result: Extract<ConversationCommandResult, { kind: "collaboration-mode" }>,
 ): string {
   const label = result.state.mode === "plan" ? "Plan" : "Default";
-  return [
+  return toStructuredMarkdownList([
     `协作模式：${label}${result.state.pending ? "（下一次 Turn 生效）" : ""}`,
     "",
     result.state.mode === "plan"
       ? "下一条普通消息将按 Plan 模式处理；再次发送 /plan 可切回 Default。"
       : "下一条普通消息将按 Default 模式处理；发送 /plan 可切换到 Plan。",
     "也可发送 /plan <规划需求>，直接进入 Plan 并开始规划。",
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function formatConversationGoal(
   result: Extract<ConversationCommandResult, { kind: "goal" }>,
 ): string {
   return result.goal
-    ? [
+    ? toStructuredMarkdownList([
         `当前 Goal：${result.goal.objective}`,
         `状态：${formatGoalStatus(result.goal.status)}`,
         `Tokens：${formatGoalTokens(result.goal)}`,
-      ].join("\n")
+      ].join("\n"))
     : "当前 Thread 没有 Goal。使用 /goal set <目标> 设置。";
 }
 
@@ -351,16 +351,16 @@ export function formatConversationModels(
     ? ["提供商切换将在下一条消息中创建新 Thread；当前 Thread 会保留，可通过 /resume 恢复。", ""]
     : [];
   if (result.view === "fast") {
-    return [
+    return toStructuredMarkdownList([
       `当前模型：${state.model}${state.modelPending ? "（下一次 Turn 生效）" : ""}`,
       `Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
       `模型支持：${current && fastServiceTierId(current) ? "支持 Fast" : "不支持 Fast"}`,
       "",
       "切换：/fast [on|off|status]",
-    ].join("\n");
+    ].join("\n"));
   }
   if (result.view === "effort") {
-    return [
+    return toStructuredMarkdownList([
       `当前模型：${state.model}`,
       `当前思考强度：${state.effort ?? current?.defaultReasoningEffort ?? "模型默认"}${state.effortPending ? "（下一次 Turn 生效）" : ""}`,
       ...(current && fastServiceTierId(current)
@@ -375,9 +375,9 @@ export function formatConversationModels(
       ),
       "",
       "切换：/effort <序号或档位>",
-    ].join("\n");
+    ].join("\n"));
   }
-  return [
+  return toStructuredMarkdownList([
     `当前模型：${state.model}${state.modelPending ? "（下一次 Turn 生效）" : ""}`,
     `思考强度：${state.effort ?? "模型默认"}`,
     ...(current && fastServiceTierId(current)
@@ -392,7 +392,7 @@ export function formatConversationModels(
     ),
     "",
     "切换：/model <序号、模型 ID 或名称>",
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function formatConversationUsage(
@@ -402,7 +402,7 @@ export function formatConversationUsage(
     return `${formatCodexProviderLabel(result.result.provider)} 暂不支持账户用量查询。当前 Thread 的 Token 与上下文仍可通过 /status 查看。`;
   }
   if (result.result.kind === "balance") {
-    return [
+    return toStructuredMarkdownList([
       `${formatCodexProviderLabel(result.result.provider)} 账户余额：`,
       `API 可用：${result.result.available ? "是" : "否"}`,
       ...(result.result.balances.length === 0
@@ -414,12 +414,12 @@ export function formatConversationUsage(
             `赠金余额：${balance.grantedBalance}`,
             `充值余额：${balance.toppedUpBalance}`,
           ])),
-    ].join("\n");
+    ].join("\n"));
   }
   const daily = [...result.result.usage.daily]
     .sort((left, right) => right.startDate.localeCompare(left.startDate))
     .slice(0, 7);
-  return [
+  return toStructuredMarkdownList([
     "OpenAI Codex 账户用量摘要：",
     `累计 Tokens：${formatMillions(result.result.usage.summary.lifetimeTokens)}`,
     `单日峰值：${formatMillions(result.result.usage.summary.peakDailyTokens)}`,
@@ -433,7 +433,7 @@ export function formatConversationUsage(
       : daily.map(
           (entry) => `- ${entry.startDate}：${formatMillions(entry.tokens)}`,
         )),
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function formatConversationLimits(
@@ -445,7 +445,7 @@ export function formatConversationLimits(
   const planType = result.result.limits.limits.find(
     (limit) => limit.planType,
   )?.planType;
-  return [
+  return toStructuredMarkdownList([
     "OpenAI Codex 额度：",
     `套餐：${planType ? formatPlanType(planType) : "未知"}`,
     ...result.result.limits.limits.flatMap((limit) => [
@@ -477,7 +477,7 @@ export function formatConversationLimits(
     ...(result.result.limits.resetCreditsAvailable === null
       ? []
       : ["", `可用额度重置券：${result.result.limits.resetCreditsAvailable}`]),
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function formatConversationStatus(status: ConversationStatus): string {
@@ -530,7 +530,7 @@ export function formatConversationStatus(status: ConversationStatus): string {
   if (usesOpenAiAccount(status.modelProvider) && status.weeklyLimit) {
     lines.push(`周限：${formatRemainingRateLimitWindow(status.weeklyLimit)}`);
   }
-  return lines.join("\n");
+  return toStructuredMarkdownList(lines.join("\n"));
 }
 
 export function formatConversationMetrics(
@@ -553,8 +553,8 @@ export function formatConversationMetrics(
   const currency = priceCurrency?.(summary.modelProvider) ?? "usd";
   const lines = [
     "## 请求指标",
-    `Thread：${summary.threadId}`,
-    ...(exchangeRate ? [formatExchangeRateLine(exchangeRate)] : []),
+    `Thread：${formatThreadId(summary.threadId)}`,
+    ...(exchangeRate ? formatExchangeRateLine(exchangeRate) : []),
   ];
   if (summary.latestTurn) {
     const turn = summary.latestTurn;
@@ -677,7 +677,7 @@ export function formatConversationMetrics(
           ]),
     );
   }
-  return toMetricsMarkdownList(lines.join("\n"));
+  return toStructuredMarkdownList(lines.join("\n"));
 }
 
 function formatErrorMetricsReport(
@@ -699,11 +699,11 @@ function formatErrorMetricsReport(
   ];
   if (report.groups.length === 0) {
     lines.push("", "本时间范围未记录异常请求。");
-    return toMetricsMarkdownList(lines.join("\n"));
+    return toStructuredMarkdownList(lines.join("\n"));
   }
   lines.push(
     "",
-    "异常明细：",
+    "### 异常明细",
     ...report.groups.map((group, index) => {
       const provider = group.providerName
         ? formatProviderLabel(group.providerName)
@@ -719,24 +719,67 @@ function formatErrorMetricsReport(
   if (hidden > 0) {
     lines.push(`仅显示出现次数最高的 ${report.groups.length} 项，另有 ${hidden} 项。`);
   }
-  return toMetricsMarkdownList(lines.join("\n"));
+  return toStructuredMarkdownList(lines.join("\n"));
 }
 
-function toMetricsMarkdownList(text: string): string {
-  return text.split("\n").map((line) => {
+function toStructuredMarkdownList(text: string): string {
+  const output: string[] = [];
+  let firstContent = true;
+  let fenced = false;
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trimEnd();
     const trimmed = line.trim();
-    if (!trimmed) return "";
-    if (/^#{1,6}\s+/u.test(trimmed)) return trimmed;
-    if (/^\s{2,}[-*+]\s+/u.test(line)) return line;
-    if (
-      trimmed === "请求指标"
-      || trimmed.startsWith("请求指标 · ")
-      || trimmed.endsWith("：")
-    ) {
-      return trimmed;
+    if (!trimmed) {
+      output.push("");
+      continue;
     }
-    return `- ${trimmed}`;
-  }).join("\n");
+    if (/^```/u.test(trimmed)) {
+      fenced = !fenced;
+      output.push(line);
+      continue;
+    }
+    if (fenced) {
+      output.push(line);
+      continue;
+    }
+    if (firstContent) {
+      firstContent = false;
+      if (/^#{1,6}\s+/u.test(trimmed)) {
+        output.push(trimmed);
+        continue;
+      }
+      output.push(`## ${stripTrailingColon(trimmed)}`);
+      continue;
+    }
+    if (/^#{1,6}\s+/u.test(trimmed)) {
+      output.push(trimmed);
+      continue;
+    }
+    if (/^\s{2,}[-*+]\s+/u.test(line)) {
+      output.push(line);
+      continue;
+    }
+    if (/^\s*[-*+]\s+/u.test(line) || /^\s*\d+[.)]\s+/u.test(line)) {
+      output.push(line);
+      continue;
+    }
+    if (trimmed.endsWith("：")) {
+      output.push(`### ${stripTrailingColon(trimmed)}`);
+      continue;
+    }
+    output.push(`- ${trimmed}`);
+  }
+  return output.join("\n");
+}
+
+function stripTrailingColon(value: string): string {
+  return value.endsWith("：") ? value.slice(0, -1) : value;
+}
+
+function formatThreadId(threadId: string): string {
+  return threadId.length > 12
+    ? `${threadId.slice(0, 12)}…`
+    : threadId;
 }
 
 function formatMetricsErrorType(value: string | null): string {
@@ -785,11 +828,11 @@ function formatAggregateMetricsReport(
   const lines = [
     `## 请求指标 · ${viewName}`,
     `范围：最近 ${formatMetricsRange(report.range)}`,
-    ...(exchangeRate ? [formatExchangeRateLine(exchangeRate)] : []),
+    ...(exchangeRate ? formatExchangeRateLine(exchangeRate) : []),
   ];
   if (report.aggregate === null) {
     lines.push("", "本时间范围暂无已记录请求。");
-    return toMetricsMarkdownList(lines.join("\n"));
+    return toStructuredMarkdownList(lines.join("\n"));
   }
   lines.push(
     "",
@@ -804,7 +847,7 @@ function formatAggregateMetricsReport(
     const groupView = report.view === "providers" ? "providers" : "models";
     lines.push(
       "",
-      groupView === "providers" ? "提供商明细：" : "模型明细：",
+      groupView === "providers" ? "### 提供商明细" : "### 模型明细",
       ...report.groups.map((group, index) => formatMetricsGroup(
         group,
         index,
@@ -818,7 +861,7 @@ function formatAggregateMetricsReport(
       lines.push(`仅显示请求量最高的 ${report.groups.length} 项，另有 ${hidden} 项。`);
     }
   }
-  return toMetricsMarkdownList(lines.join("\n"));
+  return toStructuredMarkdownList(lines.join("\n"));
 }
 
 function formatMetricsAggregate(
@@ -906,25 +949,34 @@ function formatMetricsGroup(
     : provider;
   const aggregate = group.aggregate;
   const cache = aggregate.cachedInputTokens === null
-    ? "缓存未知"
-    : `缓存 ${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}`;
+    ? "（缓存未知）"
+    : `（命中 ${formatTokenCount(aggregate.cachedInputTokens)} · 未命中 ${formatTokenCount(Math.max(0, aggregate.inputTokens - aggregate.cachedInputTokens))} · ${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}）`;
   const speed = aggregate.outputTokensPerSecond === null
     ? "速度未知"
     : `${formatTokensPerSecond(aggregate.outputTokensPerSecond)}`;
   const latency = aggregate.ttftP50Ms === null || aggregate.ttftP95Ms === null
     ? "首段延迟未知"
     : `首段 P50/P95 ${formatMetricLatency(aggregate.ttftP50Ms)}/${formatMetricLatency(aggregate.ttftP95Ms)}`;
+  const reasoning = aggregate.reasoningOutputTokens > 0
+    ? `（其中推理 ${formatTokenCount(aggregate.reasoningOutputTokens)}）`
+    : "";
   const referenceCost = toReferenceCostDisplay(aggregate);
   const cost = aggregate.pricedRequestCount === 0
     ? "参考总价未知"
-    : `参考总价 ${formatReferenceCostTotal(
+    : `参考总价：${formatReferenceCostTotal(
         toDisplayReferenceCost(referenceCost, currency, exchangeRate ?? null),
       )}`;
   return [
-    `${index + 1}. ${label} · ${aggregate.requestCount} 次 · 输入 ${formatTokenCount(aggregate.inputTokens)} · 输出 ${formatTokenCount(aggregate.outputTokens)} · ${cache} · ${speed} · ${latency} · ${cost}`,
+    `${index + 1}. ${label}`,
+    `  - 请求：${aggregate.requestCount} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${aggregate.unsuccessfulRequestCount} 次）` : ""}`,
+    `  - 输入：${formatTokenCount(aggregate.inputTokens)} ${cache}`,
+    `  - 输出：${formatTokenCount(aggregate.outputTokens)}${reasoning}`,
+    `  - 速度：${speed}`,
+    `  - ${latency}`,
+    `  - ${cost}`,
     ...formatReferenceCostBreakdown(
       toDisplayReferenceCost(referenceCost, currency, exchangeRate ?? null),
-    ).map((line) => `  - ${line}`),
+    ).map((line) => `    - ${line}`),
   ].join("\n");
 }
 
