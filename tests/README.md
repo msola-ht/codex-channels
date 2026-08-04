@@ -103,7 +103,8 @@
   到稳定 Application 摘要的映射、重置券数量，以及 DeepSeek 私有配置读取、统一代理、官方余额
   Schema 裁剪、响应上限和错误脱敏；Thread Token/上下文对 Provider 通用，OpenAI Fast 与周限
   不进入 DeepSeek 状态或完成卡片。
-- 全 Provider 同一 Turn 多次模型响应的请求次数、聚合模型耗时、缓存与文本/函数/自定义工具参数
+- 全 Provider 同一 Turn 多次模型响应的请求次数、实际产生推理输出的思考次数、聚合模型耗时、
+  缓存与文本/函数/自定义工具参数
   不含推理的综合输出速度及时间窗覆盖率；DeepSeek 最后请求首事件延迟、全 Provider 首段回复延迟和
   整轮综合思考/生成速度，以及 OpenAI 即使收到推理摘要计时也只保留不含推理的输出指标；当前 Thread
   `/metrics` 的最近 Turn 运行聚合、指标库保留范围内的 Thread 会话累计、只选择 HTTP
@@ -120,7 +121,7 @@
   长上下文价格选择；`reference-cost-summary.test.ts` 覆盖当前 Turn 延迟写入时的 Thread 总价去重及
   跨价格档位聚合；独立 SQLite 指标库覆盖 `0600` 权限、严格 Schema、原子初始化、30 天清理、
   有界内部读取，以及
-  Schema v2 enriched View 的耗时、速度、缓存、费用计算和每百万 Token 单价一致性。回归测试还覆盖 WebSocket 完成后立即
+  Schema v2 enriched View 的耗时、速度、缓存、费用计算和 `/M Token` 单价一致性。回归测试还覆盖 WebSocket 完成后立即
   关闭不重复、指标确认不等待延迟分片 SQLite 写入，以及 1 MiB 内非流式 JSON 响应的元数据裁剪
   与正文隔离；指标库运维测试覆盖在线只读状态、运行中拒绝重置、离线检查点、`0600` 备份和重复
   reset 无副作用，以及 systemd 异常状态、前台 Gateway Socket 和残缺锁的失败关闭与恢复。

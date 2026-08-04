@@ -24,7 +24,7 @@ export function formatReferenceUnitPrices(
 ): string[] {
   if (value.pricedRequestCount === 0) return [];
   if (value.hasMixedPrices) {
-    return ["单价（每百万 Token）：存在多档价格"];
+    return ["单价（/M Token）：存在多档价格"];
   }
   if (
     value.currency === null
@@ -32,12 +32,12 @@ export function formatReferenceUnitPrices(
     || value.cachedInputPricePerMillionNanos === null
     || value.outputPricePerMillionNanos === null
   ) {
-    return ["单价（每百万 Token）：未知"];
+    return ["单价（/M Token）：未知"];
   }
   return [
-    `输入单价：${formatCurrencyNanos(value.currency, value.uncachedInputPricePerMillionNanos)} / 百万 Token`,
-    `缓存输入单价：${formatCurrencyNanos(value.currency, value.cachedInputPricePerMillionNanos)} / 百万 Token`,
-    `输出单价：${formatCurrencyNanos(value.currency, value.outputPricePerMillionNanos)} / 百万 Token`,
+    `输入单价：${formatCurrencyNanos(value.currency, value.uncachedInputPricePerMillionNanos)}/M Token`,
+    `缓存输入单价：${formatCurrencyNanos(value.currency, value.cachedInputPricePerMillionNanos)}/M Token`,
+    `输出单价：${formatCurrencyNanos(value.currency, value.outputPricePerMillionNanos)}/M Token`,
   ];
 }
 

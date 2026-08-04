@@ -1143,6 +1143,7 @@ describe("ConversationCore", () => {
     expect(completed).toMatchObject({
       timing: {
         modelRequestCount: 4,
+        reasoningRequestCount: 2,
         modelRequestDurationMs: 4_000,
         requestInputTokens: 300,
         requestCachedInputTokens: 240,

@@ -863,7 +863,7 @@ function formatMetricsGroup(
 
 function formatReferenceCost(value: ReferenceCostDisplay): string[] {
   return [
-    `API 参考总价：${formatReferenceCostTotal(value)}`,
+    `参考总价：${formatReferenceCostTotal(value)}`,
     ...formatReferenceUnitPrices(value),
   ];
 }

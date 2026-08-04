@@ -45,8 +45,8 @@ DeepSeek Provider。
 在官方支持前不能选择。
 
 当前 Responses API 只支持文字输入。DeepSeek 会把收到的图片替换成占位文本而不是报错，因此
-Gateway 会在创建或追加 Turn 前明确拒绝图片，并提示先切换到支持图片的模型，避免产生“模型已经
-看图”的误解。
+Gateway 会在创建或追加 Turn 前检查模型能力：未启用外部图片识别时明确拒绝图片并提示切换到
+支持图片的模型；启用后则先走独立视觉代理，避免产生“DeepSeek 已经原生看图”的误解。
 
 ## App Server 与 Thread
 
@@ -79,13 +79,15 @@ App Server 服务会共同重建受监管实例。
 - `/usage` 在 OpenAI Thread 中显示 Codex Token 汇总，在 DeepSeek Thread 中调用官方余额接口。
 - `/metrics` 从独立指标库读取当前 Thread 最近 Turn 的请求累计和最近一次直接 API 请求；输入量是
   多次请求的累计值，不表示当前上下文占用。`/metrics providers|models|errors 24h|7d|30d` 与
-  OpenAI 官方及第三方直接 API 使用相同统计口径，不为 DeepSeek 建立专属统计表。
+  OpenAI 官方及第三方直接 API 使用相同统计口径，不为 DeepSeek 建立专属统计表。新请求按当次
+  价格快照估算 API 参考费用，单价统一按 `/M Token` 展示；历史记录不按新价格回算。
 - `/limits` 当前只支持 OpenAI；DeepSeek 不会回退显示 OpenAI 限额。
 - DeepSeek 不支持 Fast，执行 `/fast on` 或 `/fast off` 会明确拒绝。
 
 ## 图片识别
 
-DeepSeek 模型目录当前只声明文字输入。Gateway 默认继续在 Turn 前拒绝图片；如需识图，可按
+DeepSeek 模型目录当前只声明文字输入。未启用外部图片识别时，Gateway 继续在 Turn 前拒绝图片；
+如需识图，可按
 [`图片识别代理`](vision.md) 从独立第三方 API 注册表选择 Responses 接口。识别结果作为标明来源的不可信
 文字资料进入当前 DeepSeek Thread。
 

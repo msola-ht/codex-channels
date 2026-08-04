@@ -238,6 +238,12 @@ export function createTurnCompletedPresentation(
       value: `${event.timing.modelRequestCount} 次`,
     });
   }
+  if (event.timing?.reasoningRequestCount !== undefined) {
+    runFields.push({
+      label: "思考次数",
+      value: `${event.timing.reasoningRequestCount} 次`,
+    });
+  }
   if (event.timing?.modelRequestDurationMs !== undefined) {
     runFields.push({
       label: "模型请求聚合耗时",
@@ -246,7 +252,7 @@ export function createTurnCompletedPresentation(
   }
   if (event.timing?.referenceCost) {
     runFields.push({
-      label: "API 参考总价",
+      label: "参考总价",
       value: formatReferenceCostTotal(event.timing.referenceCost),
     });
   }
@@ -318,7 +324,7 @@ export function createTurnCompletedPresentation(
   }
   if (event.sessionReferenceCost) {
     sessionFields.push({
-      label: "API 参考总价",
+      label: "参考总价",
       value: formatReferenceCostTotal(event.sessionReferenceCost),
     });
   }

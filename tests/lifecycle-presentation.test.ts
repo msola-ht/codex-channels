@@ -185,6 +185,7 @@ describe("shared Surface lifecycle presentation", () => {
         modelProvider: "deepseek",
         timing: {
           modelRequestCount: 2,
+          reasoningRequestCount: 2,
           modelRequestDurationMs: 12_400,
           requestInputTokens: 20_000,
           requestCachedInputTokens: 15_000,
@@ -226,9 +227,10 @@ describe("shared Surface lifecycle presentation", () => {
     );
 
     expect(rendered).toContain("模型请求：2 次");
+    expect(rendered).toContain("思考次数：2 次");
     expect(rendered).toContain("模型请求聚合耗时：12秒");
-    expect(rendered).toContain("API 参考总价：$0.000350（已计价 2/2 次请求）");
-    expect(rendered).toContain("API 参考总价：$0.001250（已计价 8/9 次请求）");
+    expect(rendered).toContain("参考总价：$0.000350（已计价 2/2 次请求）");
+    expect(rendered).toContain("参考总价：$0.001250（已计价 8/9 次请求）");
     expect(rendered).toContain("本次请求缓存命中率：75.00%");
     expect(rendered).toContain("最后请求首事件延迟：640毫秒");
     expect(rendered).toContain("首段回复延迟：920毫秒");

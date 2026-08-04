@@ -179,10 +179,10 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("缓存命中率：80.00%");
     expect(rendered).toContain("最近运行聚合：");
     expect(rendered).toContain("综合输出速度：60 token/s（不含推理 · 覆盖 2/3 次请求）");
-    expect(rendered).toContain("API 参考总价：$0.001235（已计价 2/3 次请求）");
-    expect(rendered).toContain("输入单价：$0.14 / 百万 Token");
-    expect(rendered).toContain("缓存输入单价：$0.002800 / 百万 Token");
-    expect(rendered).toContain("输出单价：$0.28 / 百万 Token");
+    expect(rendered).toContain("参考总价：$0.001235（已计价 2/3 次请求）");
+    expect(rendered).toContain("输入单价：$0.14/M Token");
+    expect(rendered).toContain("缓存输入单价：$0.002800/M Token");
+    expect(rendered).toContain("输出单价：$0.28/M Token");
     expect(rendered).toContain("当前会话指标累计：");
     expect(rendered).toContain("Turn：8 次");
     expect(rendered).toContain("综合输出速度：58 token/s（不含推理 · 覆盖 20/21 次请求）");
@@ -190,7 +190,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("API 提供商：BLTCY");
     expect(rendered).toContain("调用模型：gpt-5.6-luna");
     expect(rendered).toContain("状态：已完成 · HTTP 200");
-    expect(rendered).toContain("API 参考总价：$0.000988（已计价 1/1 次请求）");
+    expect(rendered).toContain("参考总价：$0.000988（已计价 1/1 次请求）");
   });
 
   it("renders unified provider and model aggregates with latency coverage", () => {
@@ -245,10 +245,10 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("P50 800毫秒 · P95 3秒（覆盖 9/12 次请求）");
     expect(rendered).toContain("OpenAI 官方 / gpt-5.6-sol");
     expect(rendered).toContain("第三方中转 / gpt-5.6-luna");
-    expect(rendered).toContain("API 参考总价：$0.123457（已计价 10/12 次请求）");
-    expect(rendered).toContain("输入单价：$0.14 / 百万 Token");
-    expect(rendered).toContain("缓存输入单价：$0.002800 / 百万 Token");
-    expect(rendered).toContain("输出单价：$0.28 / 百万 Token");
+    expect(rendered).toContain("参考总价：$0.123457（已计价 10/12 次请求）");
+    expect(rendered).toContain("输入单价：$0.14/M Token");
+    expect(rendered).toContain("缓存输入单价：$0.002800/M Token");
+    expect(rendered).toContain("输出单价：$0.28/M Token");
   });
 
   it("does not invent one unit price when an aggregate spans multiple rates", () => {
@@ -288,8 +288,8 @@ describe("provider-aware conversation command formatting", () => {
       },
     });
 
-    expect(rendered).toContain("API 参考总价：$0.000500（已计价 2/2 次请求）");
-    expect(rendered).toContain("单价（每百万 Token）：存在多档价格");
+    expect(rendered).toContain("参考总价：$0.000500（已计价 2/2 次请求）");
+    expect(rendered).toContain("单价（/M Token）：存在多档价格");
     expect(rendered).not.toContain("输入单价：");
   });
 

@@ -36,6 +36,8 @@ interface TurnTimingState {
   modelTtftMs?: number;
   modelRequestStartedAtMs?: number;
   modelRequestCount: number;
+  reasoningRequestCount: number;
+  reasoningUsageCount: number;
   modelRequestDurationMs: number;
   modelInputTokens?: number;
   modelCachedInputTokens?: number;
@@ -256,6 +258,8 @@ export class ConversationCore {
         this.timingByThread.set(event.threadId, {
           turnId: event.turnId,
           modelRequestCount: 0,
+          reasoningRequestCount: 0,
+          reasoningUsageCount: 0,
           modelRequestDurationMs: 0,
           modelInputUsageCount: 0,
           modelCachedInputUsageCount: 0,
@@ -379,8 +383,12 @@ export class ConversationCore {
             timing.modelOutputTokens = (timing.modelOutputTokens ?? 0) + event.outputTokens;
           }
           if (event.reasoningOutputTokens !== undefined) {
+            timing.reasoningUsageCount += 1;
             timing.modelReasoningOutputTokens =
               (timing.modelReasoningOutputTokens ?? 0) + event.reasoningOutputTokens;
+            if (event.reasoningOutputTokens > 0) {
+              timing.reasoningRequestCount += 1;
+            }
           }
           if (
             event.pricingCurrency !== undefined
@@ -753,6 +761,9 @@ export class ConversationCore {
     const result: TurnOutputTiming = {};
     if (timing.modelRequestCount > 0) {
       result.modelRequestCount = timing.modelRequestCount;
+      if (timing.reasoningUsageCount > 0) {
+        result.reasoningRequestCount = timing.reasoningRequestCount;
+      }
       result.modelRequestDurationMs = timing.modelRequestDurationMs;
       if (timing.modelInputTokens !== undefined) {
         result.requestInputTokens = timing.modelInputTokens;
