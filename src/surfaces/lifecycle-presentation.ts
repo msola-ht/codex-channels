@@ -308,12 +308,12 @@ export function createTurnCompletedPresentation(
       value: formatTokenCount(inputTokens + outputTokens),
       fields: [
         {
-          label: "输入",
-          value: formatTokenCount(inputTokens),
+          label: "输入命中缓存",
+          value: formatTokenCount(cachedInputTokens),
         },
         {
-          label: "命中缓存",
-          value: formatTokenCount(cachedInputTokens),
+          label: "输入未命中缓存",
+          value: formatTokenCount(Math.max(0, inputTokens - cachedInputTokens)),
         },
         {
           label: "输出",

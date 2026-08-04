@@ -562,15 +562,14 @@ export function formatConversationStatus(status: ConversationStatus): string {
       "- **Token**",
       `  - 累计：${formatTokenCount(total.totalTokens)}`,
       `  - 最近模型请求：${formatTokenCount(last.totalTokens)}`,
-      `  - 输入：${formatTokenCount(total.inputTokens)}`,
-      `    - 命中缓存：${formatTokenCount(total.cachedInputTokens)}`,
-      `    - 未命中缓存：${formatTokenCount(Math.max(0, total.inputTokens - total.cachedInputTokens))}`,
+      `  - 输入命中缓存：${formatTokenCount(total.cachedInputTokens)}`,
+      `  - 输入未命中缓存：${formatTokenCount(Math.max(0, total.inputTokens - total.cachedInputTokens))}`,
       `  - 缓存命中率：${formatCacheHitRate(total.inputTokens, total.cachedInputTokens)}`,
       ...(total.cacheWriteInputTokens > 0
         ? [`  - 缓存写入：${formatTokenCount(total.cacheWriteInputTokens)}`]
         : []),
       `  - 输出：${formatTokenCount(total.outputTokens)}`,
-      `    - 其中推理输出：${formatTokenCount(total.reasoningOutputTokens)}`,
+      `  - 其中推理输出：${formatTokenCount(total.reasoningOutputTokens)}`,
       `  - 合计：${formatTokenCount(total.inputTokens + total.outputTokens)}`,
       `  - Codex 有效上下文窗口：${modelContextWindow === null ? "未知" : formatTokenCount(modelContextWindow)}`,
     );
@@ -613,28 +612,25 @@ export function formatConversationMetrics(
       "### 最近运行聚合",
       `模型请求：${turn.requestCount} 次${turn.unsuccessfulRequestCount > 0 ? `（异常 ${turn.unsuccessfulRequestCount} 次）` : ""}`,
       `模型请求聚合耗时：${formatElapsedDuration(turn.requestDurationMs)}`,
-      "#### Token",
-      `输入：${formatTokenCount(turn.inputTokens)}`,
+      `- **Token**：${formatTokenCount(turn.inputTokens + turn.outputTokens)}`,
       ...(turn.cachedInputTokens === null
-        ? ["缓存：上游未提供完整数据"]
+        ? ["  - 缓存：上游未提供完整数据"]
         : [
-            `  - 命中缓存：${formatTokenCount(turn.cachedInputTokens)}`,
-            `  - 未命中缓存：${formatTokenCount(Math.max(0, turn.inputTokens - turn.cachedInputTokens))}`,
-            `缓存命中率：${formatCacheHitRate(turn.inputTokens, turn.cachedInputTokens)}`,
+            `  - 输入命中缓存：${formatTokenCount(turn.cachedInputTokens)}`,
+            `  - 输入未命中缓存：${formatTokenCount(Math.max(0, turn.inputTokens - turn.cachedInputTokens))}`,
+            `  - 缓存命中率：${formatCacheHitRate(turn.inputTokens, turn.cachedInputTokens)}`,
           ]),
-      `输出：${formatTokenCount(turn.outputTokens)}`,
+      `  - 输出：${formatTokenCount(turn.outputTokens)}`,
       ...(turn.reasoningOutputTokens > 0
         ? [`  - 其中推理输出：${formatTokenCount(turn.reasoningOutputTokens)}`]
         : []),
-      `合计：${formatTokenCount(turn.inputTokens + turn.outputTokens)}`,
       ...(turn.outputTokensPerSecond === null
         ? []
-        : [formatAggregateOutputSpeed(
+        : [`  - ${formatAggregateOutputSpeed(
             turn.outputTokensPerSecond,
             turn.outputSpeedTimedCount,
             turn.outputSpeedSampleCount,
-          )]),
-      "#### 费用",
+          )}`]),
       ...formatReferenceCost({
         currency: turn.pricingCurrency,
         totalCostNanos: turn.totalCostNanos,
@@ -662,28 +658,25 @@ export function formatConversationMetrics(
       `Turn：${aggregate.turnCount} 次`,
       `模型请求：${aggregate.requestCount} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${aggregate.unsuccessfulRequestCount} 次）` : ""}`,
       `模型请求累计耗时：${formatElapsedDuration(aggregate.requestDurationMs)}`,
-      "#### Token",
-      `输入：${formatTokenCount(aggregate.inputTokens)}`,
+      `- **Token**：${formatTokenCount(aggregate.inputTokens + aggregate.outputTokens)}`,
       ...(aggregate.cachedInputTokens === null
-        ? ["缓存：上游未提供完整数据"]
+        ? ["  - 缓存：上游未提供完整数据"]
         : [
-            `  - 命中缓存：${formatTokenCount(aggregate.cachedInputTokens)}`,
-            `  - 未命中缓存：${formatTokenCount(Math.max(0, aggregate.inputTokens - aggregate.cachedInputTokens))}`,
-            `缓存命中率：${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}`,
+            `  - 输入命中缓存：${formatTokenCount(aggregate.cachedInputTokens)}`,
+            `  - 输入未命中缓存：${formatTokenCount(Math.max(0, aggregate.inputTokens - aggregate.cachedInputTokens))}`,
+            `  - 缓存命中率：${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}`,
           ]),
-      `输出：${formatTokenCount(aggregate.outputTokens)}`,
+      `  - 输出：${formatTokenCount(aggregate.outputTokens)}`,
       ...(aggregate.reasoningOutputTokens > 0
         ? [`  - 其中推理输出：${formatTokenCount(aggregate.reasoningOutputTokens)}`]
         : []),
-      `合计：${formatTokenCount(aggregate.inputTokens + aggregate.outputTokens)}`,
       ...(aggregate.outputTokensPerSecond === null
         ? []
-        : [formatAggregateOutputSpeed(
+        : [`  - ${formatAggregateOutputSpeed(
             aggregate.outputTokensPerSecond,
             aggregate.outputSpeedTimedCount,
             aggregate.outputSpeedSampleCount,
-          )]),
-      "#### 费用",
+          )}`]),
       ...formatReferenceCost(toReferenceCostDisplay(aggregate), currency, exchangeRate),
     );
   }
@@ -710,7 +703,6 @@ export function formatConversationMetrics(
       ...(direct.totalCostNanos === null
         ? []
         : [
-            "#### 费用",
             ...formatReferenceCost({
               currency: direct.pricingCurrency,
               totalCostNanos: direct.totalCostNanos,
@@ -949,32 +941,30 @@ function formatMetricsAggregate(
   return [
     `模型请求：${aggregate.requestCount} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${aggregate.unsuccessfulRequestCount} 次）` : ""}`,
     `模型请求累计耗时：${formatElapsedDuration(aggregate.requestDurationMs)}`,
-    "#### Token",
-    `输入：${formatTokenCount(aggregate.inputTokens)}`,
+    `- **Token**：${formatTokenCount(aggregate.inputTokens + aggregate.outputTokens)}`,
     ...(aggregate.cachedInputTokens === null
-      ? ["缓存：上游未提供完整数据"]
+      ? ["  - 缓存：上游未提供完整数据"]
       : [
-          `  - 命中缓存：${formatTokenCount(aggregate.cachedInputTokens)}`,
-          `  - 未命中缓存：${formatTokenCount(Math.max(0, aggregate.inputTokens - aggregate.cachedInputTokens))}`,
-          `缓存命中率：${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}`,
+          `  - 输入命中缓存：${formatTokenCount(aggregate.cachedInputTokens)}`,
+          `  - 输入未命中缓存：${formatTokenCount(Math.max(0, aggregate.inputTokens - aggregate.cachedInputTokens))}`,
+          `  - 缓存命中率：${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}`,
         ]),
-    `输出：${formatTokenCount(aggregate.outputTokens)}`,
+    `  - 输出：${formatTokenCount(aggregate.outputTokens)}`,
     ...(aggregate.reasoningOutputTokens > 0
       ? [`  - 其中推理输出：${formatTokenCount(aggregate.reasoningOutputTokens)}`]
       : []),
     ...(aggregate.outputTokensPerSecond === null
       ? []
-      : [formatAggregateOutputSpeed(
+      : [`  - ${formatAggregateOutputSpeed(
           aggregate.outputTokensPerSecond,
           aggregate.outputSpeedTimedCount,
           aggregate.outputSpeedSampleCount,
-        )]),
+        )}`]),
     ...(aggregate.ttftAverageMs === null || aggregate.ttftP50Ms === null || aggregate.ttftP95Ms === null
       ? []
       : [
-          `首段回复延迟：平均 ${formatMetricLatency(aggregate.ttftAverageMs)} · P50 ${formatMetricLatency(aggregate.ttftP50Ms)} · P95 ${formatMetricLatency(aggregate.ttftP95Ms)}（覆盖 ${aggregate.ttftSampleCount}/${aggregate.requestCount} 次请求）`,
+          `  - 首段回复延迟：平均 ${formatMetricLatency(aggregate.ttftAverageMs)} · P50 ${formatMetricLatency(aggregate.ttftP50Ms)} · P95 ${formatMetricLatency(aggregate.ttftP95Ms)}（覆盖 ${aggregate.ttftSampleCount}/${aggregate.requestCount} 次请求）`,
         ]),
-    "#### 费用",
     ...formatReferenceCost(toReferenceCostDisplay(aggregate), currency, exchangeRate),
   ];
 }
@@ -1040,7 +1030,7 @@ function formatReferenceCost(
 ): string[] {
   const display = toDisplayReferenceCost(value, currency, exchangeRate ?? null);
   return [
-    `参考总价：${formatReferenceCostTotal(display)}`,
+    `- **费用**：${formatReferenceCostTotal(display)}`,
     ...formatReferenceCostBreakdown(display).map((line) => `  - ${line}`),
   ];
 }

@@ -273,9 +273,8 @@ describe("Feishu output renderer", () => {
         },
       },
     });
-    expect(status).toContain("输入：800");
-    expect(status).toContain("命中缓存：600");
-    expect(status).toContain("未命中缓存：200");
+    expect(status).toContain("输入命中缓存：600");
+    expect(status).toContain("输入未命中缓存：200");
     expect(status).toContain("缓存命中率：75.00%");
     expect(status).toContain("缓存写入：50");
     expect(status).toContain("Git 分支：feature/weixin-surface");

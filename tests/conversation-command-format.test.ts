@@ -189,14 +189,13 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("模型请求累计耗时：2分22秒");
     expect(rendered).toContain("缓存命中率：80.00%");
     expect(rendered).toContain("### 最近运行聚合");
-    expect(rendered).toContain("#### Token");
-    expect(rendered).toContain("  - 命中缓存：24 K");
-    expect(rendered).toContain("合计：30.9 K");
-    expect(rendered).toContain("合计：184.2 K");
-    expect(rendered).toContain("#### 费用");
+    expect(rendered).toContain("**Token**：30.9 K");
+    expect(rendered).toContain("  - 输入命中缓存：24 K");
+    expect(rendered).toContain("**Token**：184.2 K");
+    expect(rendered).toContain("**费用**：$0.001235（已计价 2/3 次请求）");
     expect(rendered).toContain("  - 输入价格：$0.000400");
     expect(rendered).toContain("综合输出速度：60 token/s（不含推理 · 覆盖 2/3 次请求）");
-    expect(rendered).toContain("参考总价：$0.001235（已计价 2/3 次请求）");
+    expect(rendered).toContain("**费用**：$0.001235（已计价 2/3 次请求）");
     expect(rendered).toContain("输入价格：$0.000400");
     expect(rendered).toContain("缓存价格：$0.000200");
     expect(rendered).toContain("输出价格：$0.000635");
@@ -207,7 +206,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("API 提供商：BLTCY");
     expect(rendered).toContain("调用模型：gpt-5.6-luna");
     expect(rendered).toContain("状态：已完成 · HTTP 200");
-    expect(rendered).toContain("参考总价：$0.000988（已计价 1/1 次请求）");
+    expect(rendered).toContain("**费用**：$0.000988（已计价 1/1 次请求）");
   });
 
   it("switches currency amounts to the 亿 unit at large values", () => {
@@ -257,8 +256,7 @@ describe("provider-aware conversation command formatting", () => {
 
     expect(rendered).toContain("- 汇率：1 USD ≈ 7.2000 CNY");
     expect(rendered).toContain("  - 来源：open-er-api");
-    expect(rendered).toContain("- 参考总价：¥7.200000（已计价 1/1 次请求）");
-    expect(rendered).toContain("参考总价：¥7.200000（已计价 1/1 次请求）");
+    expect(rendered).toContain("- **费用**：¥7.200000（已计价 1/1 次请求）");
     expect(rendered).toContain("输入价格：¥4.320000");
     expect(rendered).toContain("缓存价格：¥0.720000");
     expect(rendered).toContain("输出价格：¥2.160000");
@@ -367,7 +365,7 @@ describe("provider-aware conversation command formatting", () => {
       },
     });
 
-    expect(rendered).toContain("参考总价：$0.000500（已计价 2/2 次请求）");
+    expect(rendered).toContain("**费用**：$0.000500（已计价 2/2 次请求）");
     expect(rendered).not.toContain("输入价格：");
   });
 
