@@ -116,8 +116,11 @@
   Gateway 缺席时无损模型请求。代理还覆盖完成/失败/不完整状态、HTTP 错误、超时、断线、真实
   模型/服务层级与完整 Usage 的脱敏采集；Bootstrap 组合测试验证所有样本进入独立 Observability
   Store、缺少 Turn 关联时不伪造 Core 事件，以及可选计价解析器只在组合边界附加价格快照；独立
-  SQLite 指标库覆盖 `0600` 权限、严格 Schema、原子初始化、30 天清理、有界内部读取，以及
-  Schema v2 enriched View 的耗时、速度、缓存与费用计算。回归测试还覆盖 WebSocket 完成后立即
+  价格目录测试覆盖 LiteLLM 主源、Sub2API 价格镜像回退、私有缓存重载、缓存输入、Priority 和
+  长上下文价格选择；`reference-cost-summary.test.ts` 覆盖当前 Turn 延迟写入时的 Thread 总价去重及
+  跨价格档位聚合；独立 SQLite 指标库覆盖 `0600` 权限、严格 Schema、原子初始化、30 天清理、
+  有界内部读取，以及
+  Schema v2 enriched View 的耗时、速度、缓存、费用计算和每百万 Token 单价一致性。回归测试还覆盖 WebSocket 完成后立即
   关闭不重复、指标确认不等待延迟分片 SQLite 写入，以及 1 MiB 内非流式 JSON 响应的元数据裁剪
   与正文隔离；指标库运维测试覆盖在线只读状态、运行中拒绝重置、离线检查点、`0600` 备份和重复
   reset 无副作用，以及 systemd 异常状态、前台 Gateway Socket 和残缺锁的失败关闭与恢复。

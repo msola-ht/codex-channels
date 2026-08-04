@@ -43,6 +43,15 @@ interface TurnTimingState {
   modelCachedInputUsageCount: number;
   modelOutputTokens?: number;
   modelReasoningOutputTokens?: number;
+  pricingCurrency?: string;
+  pricingCurrencyConflict: boolean;
+  uncachedInputPricePerMillionNanos?: number;
+  cachedInputPricePerMillionNanos?: number;
+  outputPricePerMillionNanos?: number;
+  pricingRateSignature?: string;
+  pricingRateConflict: boolean;
+  pricedRequestCount: number;
+  totalCostNanos: number;
   timedNonReasoningOutputTokens: number;
   timedOutputDurationMs: number;
   outputSpeedSampleCount: number;
@@ -250,6 +259,10 @@ export class ConversationCore {
           modelRequestDurationMs: 0,
           modelInputUsageCount: 0,
           modelCachedInputUsageCount: 0,
+          pricingCurrencyConflict: false,
+          pricingRateConflict: false,
+          pricedRequestCount: 0,
+          totalCostNanos: 0,
           timedNonReasoningOutputTokens: 0,
           timedOutputDurationMs: 0,
           outputSpeedSampleCount: 0,
@@ -368,6 +381,44 @@ export class ConversationCore {
           if (event.reasoningOutputTokens !== undefined) {
             timing.modelReasoningOutputTokens =
               (timing.modelReasoningOutputTokens ?? 0) + event.reasoningOutputTokens;
+          }
+          if (
+            event.pricingCurrency !== undefined
+            && event.totalCostNanos !== undefined
+          ) {
+            const pricingRateSignature = [
+              event.uncachedInputPricePerMillionNanos ?? "missing",
+              event.cachedInputPricePerMillionNanos ?? "missing",
+              event.outputPricePerMillionNanos ?? "missing",
+            ].join(":");
+            if (
+              timing.pricingCurrency !== undefined
+              && timing.pricingCurrency !== event.pricingCurrency
+            ) {
+              timing.pricingCurrencyConflict = true;
+            }
+            timing.pricingCurrency ??= event.pricingCurrency;
+            if (
+              timing.pricingRateSignature !== undefined
+              && timing.pricingRateSignature !== pricingRateSignature
+            ) {
+              timing.pricingRateConflict = true;
+            }
+            timing.pricingRateSignature ??= pricingRateSignature;
+            if (event.uncachedInputPricePerMillionNanos !== undefined) {
+              timing.uncachedInputPricePerMillionNanos ??=
+                event.uncachedInputPricePerMillionNanos;
+            }
+            if (event.cachedInputPricePerMillionNanos !== undefined) {
+              timing.cachedInputPricePerMillionNanos ??=
+                event.cachedInputPricePerMillionNanos;
+            }
+            if (event.outputPricePerMillionNanos !== undefined) {
+              timing.outputPricePerMillionNanos ??=
+                event.outputPricePerMillionNanos;
+            }
+            timing.pricedRequestCount += 1;
+            timing.totalCostNanos += event.totalCostNanos;
           }
           if (event.outputTokens !== undefined) {
             const nonReasoningOutputTokens = Math.max(
@@ -716,6 +767,28 @@ export class ConversationCore {
       if (timing.modelOutputTokens !== undefined) {
         result.requestOutputTokens = timing.modelOutputTokens;
       }
+      result.referenceCost = {
+        currency: timing.pricingCurrencyConflict
+          ? null
+          : timing.pricingCurrency ?? null,
+        totalCostNanos: timing.pricingCurrencyConflict
+          || timing.pricedRequestCount === 0
+          ? null
+          : timing.totalCostNanos,
+        pricedRequestCount: timing.pricedRequestCount,
+        requestCount: timing.modelRequestCount,
+        uncachedInputPricePerMillionNanos: timing.pricingRateConflict
+          ? null
+          : timing.uncachedInputPricePerMillionNanos ?? null,
+        cachedInputPricePerMillionNanos: timing.pricingRateConflict
+          ? null
+          : timing.cachedInputPricePerMillionNanos ?? null,
+        outputPricePerMillionNanos: timing.pricingRateConflict
+          ? null
+          : timing.outputPricePerMillionNanos ?? null,
+        hasMixedPrices: timing.pricingCurrencyConflict
+          || timing.pricingRateConflict,
+      };
     }
     if (detailedTiming && timing.modelTtftMs !== undefined) {
       result.ttftMs = timing.modelTtftMs;

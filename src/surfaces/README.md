@@ -71,7 +71,8 @@ Conversation 与 Actor 在内存保留五分钟有效的一次重试输入，`/v
 并单独列出最近视觉等直接 API 请求；`global/providers/models` 以 24 小时、7 天或 30 天为范围，
 把 Codex Provider 和直接 API 按同一请求口径聚合，最多展示请求量最高的 20 组；`errors` 用同一
 范围展示异常率及按提供商、模型、状态、HTTP 状态和错误类型形成的前 20 组异常，附带最近发生时间。
-综合速度和首段回复延迟附带有效样本覆盖率，不把请求累计输入误写成上下文占用。
+综合速度和首段回复延迟附带有效样本覆盖率，不把请求累计输入误写成上下文占用；API 参考总价附带
+计价覆盖率，输入、缓存输入和输出价格统一按每百万 Token 展示，聚合存在多档价格时不显示伪统一单价。
 定量收齐确认在调用 Application 前同步入队；外部视觉请求发起、10 秒后的有界心跳及完成后的
 视觉模型 ID、本地实测 API 耗时和上游实际 Token 用量由 Core 作为平台无关事件发布。图片收集、
 转发、心跳和完成消息统一使用标题与字段列表，三个渠道只负责转换 Markdown/HTML/富文本并按序投递。
@@ -85,7 +86,9 @@ Turn、Thread 或 Surface 关闭时清理。
 引用获取仍由各 Surface 负责，不能读取 Gateway 私有历史或让引用内容参与命令解析。
 `lifecycle-presentation.ts` 统一 Telegram、飞书与微信的 Gateway 上线、Turn 开始确认和 Turn
 结束汇报信息模型、字段顺序与中文状态词；结束汇报把本次运行、当前会话累计和账户状态依次分区，按 Turn
-聚合统计代理捕获的全部模型请求，并保留 Provider 通用的 Thread Token/上下文累计指标。原生 OpenAI
+聚合统计代理捕获的全部模型请求及当前 Turn API 参考总价，并保留 Provider 通用的 Thread Token/上下文
+与 API 参考总价累计指标。`reference-cost-format.ts` 统一总价、计价覆盖率及每百万 Token 单价格式。
+原生 OpenAI
 鉴权的 Codex Provider 统一显示为“OpenAI 官方”，且只在该类 Thread 显示 Fast 与 OpenAI 周限；
 直接 API 的自定义提供商继续使用自身名称；各 Surface 只保留 HTML、
 CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Thread 的文本、审批和完成汇报均标注

@@ -97,6 +97,35 @@ describe("SqliteModelRequestMetricsStore", () => {
         outputPricePerMillionNanos: 3_000_000_000,
       },
     });
+    expect(store.threadSummary("thread-1")).toMatchObject({
+      latestTurn: {
+        pricingCurrency: "USD",
+        pricedRequestCount: 1,
+        totalCostNanos: 1_400_000,
+        uncachedInputPricePerMillionNanos: 2_000_000_000,
+        cachedInputPricePerMillionNanos: 1_000_000_000,
+        outputPricePerMillionNanos: 3_000_000_000,
+        hasMixedPrices: false,
+      },
+      threadAggregate: {
+        pricingCurrency: "USD",
+        pricedRequestCount: 1,
+        totalCostNanos: 1_400_000,
+      },
+    });
+    expect(store.aggregate({
+      dimension: "global",
+      startAtMs: 0,
+      endAtMs: Date.now() + 1,
+    }).aggregate).toMatchObject({
+      pricingCurrency: "USD",
+      pricedRequestCount: 1,
+      totalCostNanos: 1_400_000,
+      uncachedInputPricePerMillionNanos: 2_000_000_000,
+      cachedInputPricePerMillionNanos: 1_000_000_000,
+      outputPricePerMillionNanos: 3_000_000_000,
+      hasMixedPrices: false,
+    });
     store.close();
 
     const inspection = new DatabaseSync(path, { readOnly: true });
@@ -127,6 +156,44 @@ describe("SqliteModelRequestMetricsStore", () => {
       output_cost_nanos: 300_000,
       total_cost_nanos: 1_400_000,
     });
+  });
+
+  it("does not report one unit price for aggregates containing multiple rates", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    const pricing = {
+      billingMode: "api" as const,
+      currency: "USD",
+      source: "test-catalog",
+      effectiveAtMs: 1_700_000_000_000,
+      uncachedInputPricePerMillionNanos: 2_000_000_000,
+      cachedInputPricePerMillionNanos: 1_000_000_000,
+      outputPricePerMillionNanos: 3_000_000_000,
+    };
+    store.record({ ...sample(), pricing });
+    store.record({
+      ...sample(),
+      pricing: {
+        ...pricing,
+        effectiveAtMs: 1_700_000_001_000,
+        cachedInputPricePerMillionNanos: null,
+      },
+      cachedInputTokens: 0,
+      requestStartedAtMs: 2_000,
+      responseCompletedAtMs: 2_650,
+    });
+
+    expect(store.threadSummary("thread-1").latestTurn).toMatchObject({
+      pricedRequestCount: 2,
+      pricingCurrency: "USD",
+      hasMixedPrices: true,
+      uncachedInputPricePerMillionNanos: null,
+      cachedInputPricePerMillionNanos: null,
+      outputPricePerMillionNanos: null,
+    });
+    store.close();
   });
 
   it("summarizes the latest Turn and latest direct API request for one Thread", () => {

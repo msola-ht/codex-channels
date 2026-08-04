@@ -104,6 +104,16 @@ interface TurnSummaryRow {
   output_duration_ms: number | null;
   output_speed_sample_count: number;
   output_speed_timed_count: number;
+  pricing_currency: string | null;
+  pricing_currency_count: number;
+  priced_request_count: number;
+  total_cost_nanos: number | null;
+  uncached_input_price_per_million_nanos: number | null;
+  uncached_input_price_count: number;
+  cached_input_price_per_million_nanos: number | null;
+  cached_input_price_count: number;
+  output_price_per_million_nanos: number | null;
+  output_price_count: number;
 }
 
 interface AggregateRow extends Omit<TurnSummaryRow, "turn_id" | "turn_count"> {
@@ -365,7 +375,31 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
               AS output_speed_sample_count,
             SUM(CASE WHEN non_reasoning_output_tokens > 0
                   AND output_duration_ms > 0 THEN 1 ELSE 0 END)
-              AS output_speed_timed_count
+              AS output_speed_timed_count,
+            MIN(CASE WHEN total_cost_nanos IS NOT NULL
+              THEN pricing_currency END) AS pricing_currency,
+            COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL
+              THEN pricing_currency END) AS pricing_currency_count,
+            COUNT(total_cost_nanos) AS priced_request_count,
+            SUM(total_cost_nanos) AS total_cost_nanos,
+            MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
+              uncached_input_price_per_million_nanos END)
+              AS uncached_input_price_per_million_nanos,
+            COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
+              COALESCE(uncached_input_price_per_million_nanos, -1) END)
+              AS uncached_input_price_count,
+            MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
+              cached_input_price_per_million_nanos END)
+              AS cached_input_price_per_million_nanos,
+            COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
+              COALESCE(cached_input_price_per_million_nanos, -1) END)
+              AS cached_input_price_count,
+            MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
+              output_price_per_million_nanos END)
+              AS output_price_per_million_nanos,
+            COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
+              COALESCE(output_price_per_million_nanos, -1) END)
+              AS output_price_count
           FROM model_request_metrics_enriched
           WHERE thread_id = ? AND turn_id = ? AND operation = 'response'
           GROUP BY turn_id
@@ -396,7 +430,31 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           AS output_speed_sample_count,
         SUM(CASE WHEN non_reasoning_output_tokens > 0
               AND output_duration_ms > 0 THEN 1 ELSE 0 END)
-          AS output_speed_timed_count
+          AS output_speed_timed_count,
+        MIN(CASE WHEN total_cost_nanos IS NOT NULL
+          THEN pricing_currency END) AS pricing_currency,
+        COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL
+          THEN pricing_currency END) AS pricing_currency_count,
+        COUNT(total_cost_nanos) AS priced_request_count,
+        SUM(total_cost_nanos) AS total_cost_nanos,
+        MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
+          uncached_input_price_per_million_nanos END)
+          AS uncached_input_price_per_million_nanos,
+        COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
+          COALESCE(uncached_input_price_per_million_nanos, -1) END)
+          AS uncached_input_price_count,
+        MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
+          cached_input_price_per_million_nanos END)
+          AS cached_input_price_per_million_nanos,
+        COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
+          COALESCE(cached_input_price_per_million_nanos, -1) END)
+          AS cached_input_price_count,
+        MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
+          output_price_per_million_nanos END)
+          AS output_price_per_million_nanos,
+        COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
+          COALESCE(output_price_per_million_nanos, -1) END)
+          AS output_price_count
       FROM model_request_metrics_enriched
       WHERE thread_id = ? AND turn_id IS NOT NULL AND operation = 'response'
     `).get(threadId) as unknown as TurnSummaryRow;
@@ -477,7 +535,31 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
             AS output_speed_sample_count,
           SUM(CASE WHEN non_reasoning_output_tokens > 0
                 AND output_duration_ms > 0 THEN 1 ELSE 0 END)
-            AS output_speed_timed_count
+            AS output_speed_timed_count,
+          MIN(CASE WHEN total_cost_nanos IS NOT NULL
+            THEN pricing_currency END) AS pricing_currency,
+          COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL
+            THEN pricing_currency END) AS pricing_currency_count,
+          COUNT(total_cost_nanos) AS priced_request_count,
+          SUM(total_cost_nanos) AS total_cost_nanos,
+          MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
+            uncached_input_price_per_million_nanos END)
+            AS uncached_input_price_per_million_nanos,
+          COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
+            COALESCE(uncached_input_price_per_million_nanos, -1) END)
+            AS uncached_input_price_count,
+          MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
+            cached_input_price_per_million_nanos END)
+            AS cached_input_price_per_million_nanos,
+          COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
+            COALESCE(cached_input_price_per_million_nanos, -1) END)
+            AS cached_input_price_count,
+          MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
+            output_price_per_million_nanos END)
+            AS output_price_per_million_nanos,
+          COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
+            COALESCE(output_price_per_million_nanos, -1) END)
+            AS output_price_count
         FROM filtered
         GROUP BY group_provider, group_model
       ), ttft_ranked AS (
@@ -841,6 +923,7 @@ function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
 function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetricsSummary {
   const outputDurationMs = row.output_duration_ms ?? 0;
   const nonReasoningOutputTokens = row.non_reasoning_output_tokens ?? 0;
+  const pricing = toStoredAggregatePricing(row);
   return {
     turnId: row.turn_id!,
     requestCount: row.request_count,
@@ -858,6 +941,7 @@ function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetricsSumma
       : null,
     outputSpeedSampleCount: row.output_speed_sample_count,
     outputSpeedTimedCount: row.output_speed_timed_count,
+    ...pricing,
   };
 }
 
@@ -880,6 +964,15 @@ function toStoredThreadAggregate(
     outputTokensPerSecond: summary.outputTokensPerSecond,
     outputSpeedSampleCount: summary.outputSpeedSampleCount,
     outputSpeedTimedCount: summary.outputSpeedTimedCount,
+    pricingCurrency: summary.pricingCurrency,
+    pricedRequestCount: summary.pricedRequestCount,
+    totalCostNanos: summary.totalCostNanos,
+    uncachedInputPricePerMillionNanos:
+      summary.uncachedInputPricePerMillionNanos,
+    cachedInputPricePerMillionNanos:
+      summary.cachedInputPricePerMillionNanos,
+    outputPricePerMillionNanos: summary.outputPricePerMillionNanos,
+    hasMixedPrices: summary.hasMixedPrices,
   };
 }
 
@@ -927,6 +1020,7 @@ function toStoredMetricsGroup(row: AggregateRow): StoredModelRequestMetricsGroup
 function toStoredMetricsAggregate(row: AggregateRow): StoredModelRequestMetricsAggregate {
   const outputDurationMs = row.output_duration_ms ?? 0;
   const nonReasoningOutputTokens = row.non_reasoning_output_tokens ?? 0;
+  const pricing = toStoredAggregatePricing(row);
   return {
     requestCount: row.request_count,
     unsuccessfulRequestCount: row.unsuccessful_request_count,
@@ -947,6 +1041,43 @@ function toStoredMetricsAggregate(row: AggregateRow): StoredModelRequestMetricsA
     ttftP50Ms: row.ttft_p50_ms,
     ttftP95Ms: row.ttft_p95_ms,
     ttftSampleCount: row.ttft_sample_count,
+    ...pricing,
+  };
+}
+
+function toStoredAggregatePricing(row: TurnSummaryRow | AggregateRow): Pick<
+  StoredModelRequestMetricsAggregate,
+  | "pricingCurrency"
+  | "pricedRequestCount"
+  | "totalCostNanos"
+  | "uncachedInputPricePerMillionNanos"
+  | "cachedInputPricePerMillionNanos"
+  | "outputPricePerMillionNanos"
+  | "hasMixedPrices"
+> {
+  const hasMixedPrices = row.pricing_currency_count > 1
+    || row.uncached_input_price_count > 1
+    || row.cached_input_price_count > 1
+    || row.output_price_count > 1;
+  const hasSinglePrice = row.pricing_currency_count === 1 && !hasMixedPrices;
+  return {
+    pricingCurrency: row.pricing_currency_count === 1
+      ? row.pricing_currency
+      : null,
+    pricedRequestCount: row.priced_request_count,
+    totalCostNanos: row.pricing_currency_count === 1
+      ? row.total_cost_nanos
+      : null,
+    uncachedInputPricePerMillionNanos: hasSinglePrice
+      ? row.uncached_input_price_per_million_nanos
+      : null,
+    cachedInputPricePerMillionNanos: hasSinglePrice
+      ? row.cached_input_price_per_million_nanos
+      : null,
+    outputPricePerMillionNanos: hasSinglePrice
+      ? row.output_price_per_million_nanos
+      : null,
+    hasMixedPrices,
   };
 }
 

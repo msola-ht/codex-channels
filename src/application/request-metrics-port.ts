@@ -10,6 +10,13 @@ export interface TurnRequestMetricsSummary {
   outputTokensPerSecond: number | null;
   outputSpeedSampleCount: number;
   outputSpeedTimedCount: number;
+  pricingCurrency: string | null;
+  pricedRequestCount: number;
+  totalCostNanos: number | null;
+  uncachedInputPricePerMillionNanos: number | null;
+  cachedInputPricePerMillionNanos: number | null;
+  outputPricePerMillionNanos: number | null;
+  hasMixedPrices: boolean;
 }
 
 export interface ThreadRequestMetricsAggregate {
@@ -24,6 +31,13 @@ export interface ThreadRequestMetricsAggregate {
   outputTokensPerSecond: number | null;
   outputSpeedSampleCount: number;
   outputSpeedTimedCount: number;
+  pricingCurrency: string | null;
+  pricedRequestCount: number;
+  totalCostNanos: number | null;
+  uncachedInputPricePerMillionNanos: number | null;
+  cachedInputPricePerMillionNanos: number | null;
+  outputPricePerMillionNanos: number | null;
+  hasMixedPrices: boolean;
 }
 
 export interface DirectApiRequestMetricsSummary {
@@ -38,6 +52,11 @@ export interface DirectApiRequestMetricsSummary {
   outputTokens: number | null;
   reasoningOutputTokens: number | null;
   totalTokens: number | null;
+  pricingCurrency: string | null;
+  totalCostNanos: number | null;
+  uncachedInputPricePerMillionNanos: number | null;
+  cachedInputPricePerMillionNanos: number | null;
+  outputPricePerMillionNanos: number | null;
 }
 
 export interface ThreadRequestMetricsSummary {
@@ -71,6 +90,13 @@ export interface RequestMetricsAggregate {
   ttftP50Ms: number | null;
   ttftP95Ms: number | null;
   ttftSampleCount: number;
+  pricingCurrency: string | null;
+  pricedRequestCount: number;
+  totalCostNanos: number | null;
+  uncachedInputPricePerMillionNanos: number | null;
+  cachedInputPricePerMillionNanos: number | null;
+  outputPricePerMillionNanos: number | null;
+  hasMixedPrices: boolean;
 }
 
 export interface RequestMetricsGroup {

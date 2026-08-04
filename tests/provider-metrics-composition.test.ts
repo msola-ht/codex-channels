@@ -124,6 +124,7 @@ describe("ProviderMetricsComposition", () => {
       outputPricePerMillionNanos: 3_000_000_000,
     };
     const resolve = vi.fn(() => pricing);
+    const onModelTiming = vi.fn();
     const composition = new ProviderMetricsComposition({
       providers: ["deepseek"],
       socketPath: () => socketPath,
@@ -136,7 +137,7 @@ describe("ProviderMetricsComposition", () => {
         errors: () => emptyErrorReport(),
       }),
       pricingResolver: { resolve },
-      onModelTiming: () => undefined,
+      onModelTiming,
       logger: pino({ level: "silent" }),
     });
     await composition.start();
@@ -154,8 +155,16 @@ describe("ProviderMetricsComposition", () => {
       provider: "deepseek",
       model: "deepseek-v4-flash",
       serviceTier: "default",
+      inputTokens: 100,
       atMs: 1_900,
     });
+    expect(onModelTiming).toHaveBeenCalledWith(expect.objectContaining({
+      pricingCurrency: "USD",
+      totalCostNanos: 180_000,
+      uncachedInputPricePerMillionNanos: 2_000_000_000,
+      cachedInputPricePerMillionNanos: 1_000_000_000,
+      outputPricePerMillionNanos: 3_000_000_000,
+    }));
     await composition.close();
   });
 });

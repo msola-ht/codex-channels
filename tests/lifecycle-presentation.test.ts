@@ -201,12 +201,34 @@ describe("shared Surface lifecycle presentation", () => {
           generationTokensPerSecond: 120,
           generationSpeedSampleCount: 2,
           generationSpeedTimedCount: 2,
+          referenceCost: {
+            currency: "USD",
+            totalCostNanos: 350_000,
+            pricedRequestCount: 2,
+            requestCount: 2,
+            uncachedInputPricePerMillionNanos: 140_000_000,
+            cachedInputPricePerMillionNanos: 2_800_000,
+            outputPricePerMillionNanos: 280_000_000,
+            hasMixedPrices: false,
+          },
+        },
+        sessionReferenceCost: {
+          currency: "USD",
+          totalCostNanos: 1_250_000,
+          pricedRequestCount: 8,
+          requestCount: 9,
+          uncachedInputPricePerMillionNanos: null,
+          cachedInputPricePerMillionNanos: null,
+          outputPricePerMillionNanos: null,
+          hasMixedPrices: true,
         },
       }),
     );
 
     expect(rendered).toContain("模型请求：2 次");
     expect(rendered).toContain("模型请求聚合耗时：12秒");
+    expect(rendered).toContain("API 参考总价：$0.000350（已计价 2/2 次请求）");
+    expect(rendered).toContain("API 参考总价：$0.001250（已计价 8/9 次请求）");
     expect(rendered).toContain("本次请求缓存命中率：75.00%");
     expect(rendered).toContain("最后请求首事件延迟：640毫秒");
     expect(rendered).toContain("首段回复延迟：920毫秒");

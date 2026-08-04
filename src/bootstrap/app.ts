@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { dirname, join } from "node:path";
 
 import type { Logger } from "pino";
 
@@ -72,6 +73,8 @@ import { createDeepseekAccountAdapter } from "./deepseek-account-adapter.js";
 import { createProxyFetch } from "./proxy-fetch.js";
 import { createResponsesVisionAdapter } from "./responses-vision-adapter.js";
 import { ProviderMetricsComposition } from "./provider-metrics-composition.js";
+import { RemoteModelPricingCatalog } from "./model-pricing-catalog.js";
+import { mergeSessionReferenceCost } from "./reference-cost-summary.js";
 
 export class GatewayApplication {
   private readonly transport: UnixWebSocketTransport;
@@ -88,6 +91,7 @@ export class GatewayApplication {
   private readonly threadState: ThreadStateSynchronizer;
   private readonly core: ConversationCore;
   private readonly providerMetrics: ProviderMetricsComposition;
+  private readonly modelPricing: RemoteModelPricingCatalog;
   private readonly bindings: SqliteBindingStore;
   private readonly workspaces: WorkspaceRegistry;
   private removeRpcNotification: (() => void) | undefined;
@@ -155,6 +159,11 @@ export class GatewayApplication {
       metricsStore,
       (error) => logger.warn({ err: error }, "模型请求指标后台写入失败"),
     );
+    this.modelPricing = new RemoteModelPricingCatalog({
+      cachePath: join(dirname(config.stateDatabasePath), "model-pricing.json"),
+      fetchImpl: createProxyFetch(config.networkProxy),
+      logger,
+    });
     this.providerMetrics = new ProviderMetricsComposition({
       providers: [
         primaryProvider,
@@ -163,6 +172,7 @@ export class GatewayApplication {
       socketPath: (provider) =>
         providerMetricsSocketPath(config.codexSocketPath, provider),
       writer: metricsWriter,
+      pricingResolver: this.modelPricing,
       onModelTiming: (event) => this.core.handle(event),
       logger,
     });
@@ -206,7 +216,14 @@ export class GatewayApplication {
           fetchImpl: createProxyFetch(config.networkProxy),
           onMetric: (metric) => {
             try {
-              metricsWriter.enqueue(metric);
+              const pricing = this.modelPricing.resolve({
+                provider: metric.provider,
+                model: metric.model,
+                serviceTier: metric.serviceTier,
+                inputTokens: metric.inputTokens,
+                atMs: metric.responseCompletedAtMs,
+              });
+              metricsWriter.enqueue({ ...metric, pricing });
             } catch (error) {
               logger.warn({ err: error }, "视觉 API 指标持久化失败");
             }
@@ -275,6 +292,14 @@ export class GatewayApplication {
                   outputTokens: direct.outputTokens,
                   reasoningOutputTokens: direct.reasoningOutputTokens,
                   totalTokens: direct.totalTokens,
+                  pricingCurrency: direct.pricing?.currency ?? null,
+                  totalCostNanos: direct.totalCostNanos,
+                  uncachedInputPricePerMillionNanos:
+                    direct.pricing?.uncachedInputPricePerMillionNanos ?? null,
+                  cachedInputPricePerMillionNanos:
+                    direct.pricing?.cachedInputPricePerMillionNanos ?? null,
+                  outputPricePerMillionNanos:
+                    direct.pricing?.outputPricePerMillionNanos ?? null,
                 },
           };
         },
@@ -431,6 +456,12 @@ export class GatewayApplication {
           available,
           outcome,
         ),
+        sessionReferenceCost: (threadId, turnId, current) =>
+          mergeSessionReferenceCost(
+            metricsStore.threadSummary(threadId),
+            turnId,
+            current,
+          ),
       },
     );
     for (const surface of this.surfaces) {
@@ -526,6 +557,7 @@ export class GatewayApplication {
   private async startInternal(): Promise<void> {
     try {
       this.requireRunning();
+      this.modelPricing.start();
       await this.providerMetrics.start();
       this.removeRpcNotification = this.codex.onNotification((notification) => {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
@@ -594,6 +626,7 @@ export class GatewayApplication {
     for (const [component, close] of [
       ["Surface", () => this.surfaceManager.stop()],
       ["Provider Proxy Metrics", () => this.providerMetrics.close()],
+      ["Model Pricing", () => this.modelPricing.close()],
       ["Inbound Event Bus", () => this.inbound.close()],
       ["Output Event Bus", () => this.output.close()],
       ["Codex Client", () => this.codex.close()],

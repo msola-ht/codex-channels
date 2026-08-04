@@ -92,6 +92,18 @@ export interface TurnOutputTiming {
   generationTokensPerSecond?: number;
   generationSpeedSampleCount?: number;
   generationSpeedTimedCount?: number;
+  referenceCost?: ReferenceCostSummary;
+}
+
+export interface ReferenceCostSummary {
+  currency: string | null;
+  totalCostNanos: number | null;
+  pricedRequestCount: number;
+  requestCount: number;
+  uncachedInputPricePerMillionNanos: number | null;
+  cachedInputPricePerMillionNanos: number | null;
+  outputPricePerMillionNanos: number | null;
+  hasMixedPrices: boolean;
 }
 
 export interface RateLimitWindow {
@@ -214,7 +226,7 @@ export type OutputEvent =
   | { type: "text.completed"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null; background?: boolean }
   | { type: "operation.updated"; target: ConversationTarget; threadId: string; turnId: string; operation: OperationUpdate; background?: boolean }
   | { type: "plan.updated"; target: ConversationTarget; threadId: string; turnId: string; explanation: string | null; steps: TurnPlanStep[]; background?: boolean }
-  | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: TurnStatus; error?: string; durationMs?: number; timing?: TurnOutputTiming; tokenUsage?: ThreadTokenUsage; model?: string; modelProvider?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; goal?: ThreadGoal; contextCompactionCount?: number; gitBranch?: string | undefined; background?: boolean }
+  | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: TurnStatus; error?: string; durationMs?: number; timing?: TurnOutputTiming; tokenUsage?: ThreadTokenUsage; model?: string; modelProvider?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; goal?: ThreadGoal; contextCompactionCount?: number; sessionReferenceCost?: ReferenceCostSummary; gitBranch?: string | undefined; background?: boolean }
   | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string; background?: boolean }
   | { type: "connection.lost"; target: ConversationTarget; threadId: string; message: string; background?: boolean }
   | ({ type: "account.updated"; target: ConversationTarget } & AccountStatus)

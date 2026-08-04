@@ -4,6 +4,7 @@ import {
   isCriticalOutputEvent,
   surfaceAccountKey,
   type OutputEvent,
+  type ReferenceCostSummary,
 } from "../conversation-core/index.js";
 import type { EventBus } from "../event-bus/index.js";
 import type {
@@ -29,6 +30,11 @@ export interface SurfaceManagerOptions {
     available: boolean,
     outcome?: string,
   ): void;
+  sessionReferenceCost?(
+    threadId: string,
+    turnId: string,
+    current: ReferenceCostSummary | undefined,
+  ): ReferenceCostSummary | undefined;
 }
 
 export class SurfaceManager {
@@ -235,12 +241,19 @@ export class SurfaceManager {
       );
       return;
     }
-    const routedEvent = event.type === "turn.completed"
-      ? {
-          ...event,
-          gitBranch: this.currentGitBranch?.(event.target),
-        }
-      : event;
+    let routedEvent = event;
+    if (event.type === "turn.completed") {
+      const sessionReferenceCost = this.options.sessionReferenceCost?.(
+        event.threadId,
+        event.turnId,
+        event.timing?.referenceCost,
+      );
+      routedEvent = {
+        ...event,
+        gitBranch: this.currentGitBranch?.(event.target),
+        ...(sessionReferenceCost === undefined ? {} : { sessionReferenceCost }),
+      };
+    }
     if (!this.active.has(surface)) {
       const runtime = this.requireRuntime(surface);
       if (isCriticalOutputEvent(routedEvent)) {

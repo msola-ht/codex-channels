@@ -65,6 +65,10 @@ describe("GatewayApplication startup cleanup", () => {
           start: async () => undefined,
           close: async () => undefined,
         },
+        modelPricing: {
+          start: () => calls.push("start:model-pricing"),
+          close: () => calls.push("close:model-pricing"),
+        },
         stopping: false,
         reconnecting: undefined,
         codex: {
@@ -134,6 +138,7 @@ describe("GatewayApplication startup cleanup", () => {
     ).rejects.toThrow("surface start failed");
 
     expect(calls).toEqual([
+      "start:model-pricing",
       "listen:notification",
       "listen:disconnect",
       "connect:codex",
@@ -141,6 +146,7 @@ describe("GatewayApplication startup cleanup", () => {
       "remove:notification",
       "remove:disconnect",
       "close:surface",
+      "close:model-pricing",
       "close:inbound",
       "close:output",
       "close:codex",
@@ -171,6 +177,10 @@ describe("GatewayApplication startup cleanup", () => {
       providerMetrics: {
         start: async () => undefined,
         close: async () => undefined,
+      },
+      modelPricing: {
+        start: () => undefined,
+        close: () => undefined,
       },
       stopping: false,
       disconnectedProviders: new Set<string>(),
@@ -258,6 +268,10 @@ describe("GatewayApplication startup cleanup", () => {
       providerMetrics: {
         start: async () => undefined,
         close: async () => undefined,
+      },
+      modelPricing: {
+        start: () => undefined,
+        close: () => undefined,
       },
       stopping: false,
       disconnectedProviders: new Set<string>(),

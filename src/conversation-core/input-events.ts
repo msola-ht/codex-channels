@@ -65,6 +65,11 @@ export type ConversationInputEvent =
       thinkingDurationMs?: number;
       outputDurationMs?: number;
       generationDurationMs?: number;
+      pricingCurrency?: string;
+      totalCostNanos?: number;
+      uncachedInputPricePerMillionNanos?: number;
+      cachedInputPricePerMillionNanos?: number;
+      outputPricePerMillionNanos?: number;
     }
   | {
       type: "item.userMessage";

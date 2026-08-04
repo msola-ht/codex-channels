@@ -17,6 +17,7 @@ import {
   formatTokensPerSecond,
 } from "./elapsed-duration.js";
 import { formatCodexProviderLabel } from "./provider-format.js";
+import { formatReferenceCostTotal } from "./reference-cost-format.js";
 
 export interface LifecyclePresentation {
   title: string;
@@ -243,6 +244,12 @@ export function createTurnCompletedPresentation(
       value: formatElapsedDuration(event.timing.modelRequestDurationMs),
     });
   }
+  if (event.timing?.referenceCost) {
+    runFields.push({
+      label: "API 参考总价",
+      value: formatReferenceCostTotal(event.timing.referenceCost),
+    });
+  }
   if (
     event.timing?.requestInputTokens !== undefined
     && event.timing.requestCachedInputTokens !== undefined
@@ -307,6 +314,12 @@ export function createTurnCompletedPresentation(
     sessionFields.push({
       label: "Git 分支",
       value: event.gitBranch ?? "未检测到",
+    });
+  }
+  if (event.sessionReferenceCost) {
+    sessionFields.push({
+      label: "API 参考总价",
+      value: formatReferenceCostTotal(event.sessionReferenceCost),
     });
   }
   if (event.durationMs !== undefined) {

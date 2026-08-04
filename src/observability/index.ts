@@ -1,4 +1,7 @@
 export {
+  calculateModelRequestCostNanos,
+} from "./request-metrics.js";
+export {
   createLogger,
   safeErrorMetadata,
   type SafeErrorMetadata,

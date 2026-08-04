@@ -18,11 +18,58 @@ export interface ModelPricingLookup {
   provider: string;
   model: string | null;
   serviceTier: string | null;
+  inputTokens: number | null;
   atMs: number;
 }
 
 export interface ModelPricingResolver {
   resolve(lookup: ModelPricingLookup): ModelRequestPricingSnapshot | null;
+}
+
+export function calculateModelRequestCostNanos(
+  usage: Pick<
+    ModelRequestMetricSample,
+    "inputTokens" | "cachedInputTokens" | "outputTokens"
+  >,
+  pricing: ModelRequestPricingSnapshot | null,
+): number | null {
+  if (!pricing || pricing.currency === null) return null;
+  const uncachedInputTokens = usage.inputTokens !== null
+    && usage.cachedInputTokens !== null
+    && usage.inputTokens >= usage.cachedInputTokens
+    ? usage.inputTokens - usage.cachedInputTokens
+    : null;
+  const uncachedInputCost = componentCost(
+    uncachedInputTokens,
+    pricing.uncachedInputPricePerMillionNanos,
+  );
+  const cachedInputCost = componentCost(
+    usage.cachedInputTokens,
+    pricing.cachedInputPricePerMillionNanos,
+  );
+  const outputCost = componentCost(
+    usage.outputTokens,
+    pricing.outputPricePerMillionNanos,
+  );
+  if (
+    uncachedInputCost === null
+    || cachedInputCost === null
+    || outputCost === null
+  ) {
+    return null;
+  }
+  const total = uncachedInputCost + cachedInputCost + outputCost;
+  return Number.isSafeInteger(total) ? total : null;
+}
+
+function componentCost(
+  tokens: number | null,
+  pricePerMillionNanos: number | null,
+): number | null {
+  if (tokens === 0) return 0;
+  if (tokens === null || pricePerMillionNanos === null) return null;
+  const cost = Math.round(tokens * pricePerMillionNanos / 1_000_000);
+  return Number.isSafeInteger(cost) ? cost : null;
 }
 
 export interface ModelRequestMetricSample {
@@ -90,6 +137,13 @@ export interface StoredTurnRequestMetricsSummary {
   outputTokensPerSecond: number | null;
   outputSpeedSampleCount: number;
   outputSpeedTimedCount: number;
+  pricingCurrency: string | null;
+  pricedRequestCount: number;
+  totalCostNanos: number | null;
+  uncachedInputPricePerMillionNanos: number | null;
+  cachedInputPricePerMillionNanos: number | null;
+  outputPricePerMillionNanos: number | null;
+  hasMixedPrices: boolean;
 }
 
 export interface StoredThreadRequestMetricsAggregate {
@@ -104,6 +158,13 @@ export interface StoredThreadRequestMetricsAggregate {
   outputTokensPerSecond: number | null;
   outputSpeedSampleCount: number;
   outputSpeedTimedCount: number;
+  pricingCurrency: string | null;
+  pricedRequestCount: number;
+  totalCostNanos: number | null;
+  uncachedInputPricePerMillionNanos: number | null;
+  cachedInputPricePerMillionNanos: number | null;
+  outputPricePerMillionNanos: number | null;
+  hasMixedPrices: boolean;
 }
 
 export interface StoredThreadRequestMetricsSummary {
@@ -139,6 +200,13 @@ export interface StoredModelRequestMetricsAggregate {
   ttftP50Ms: number | null;
   ttftP95Ms: number | null;
   ttftSampleCount: number;
+  pricingCurrency: string | null;
+  pricedRequestCount: number;
+  totalCostNanos: number | null;
+  uncachedInputPricePerMillionNanos: number | null;
+  cachedInputPricePerMillionNanos: number | null;
+  outputPricePerMillionNanos: number | null;
+  hasMixedPrices: boolean;
 }
 
 export interface StoredModelRequestMetricsGroup {

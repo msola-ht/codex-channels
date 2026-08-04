@@ -3,8 +3,10 @@ import type { Logger } from "pino";
 import type { ConversationInputEvent } from "../conversation-core/index.js";
 import type {
   ModelPricingResolver,
+  ModelRequestPricingSnapshot,
   ModelRequestMetricsWriter,
 } from "../observability/index.js";
+import { calculateModelRequestCostNanos } from "../observability/index.js";
 import {
   ProviderProxyMetricsServer,
   type ProviderProxyMetrics,
@@ -66,18 +68,20 @@ export class ProviderMetricsComposition {
   }
 
   private handle(provider: string, metrics: ProviderProxyMetrics): void {
+    let pricing: ModelRequestPricingSnapshot | null = null;
     try {
-      const pricing = this.options.pricingResolver?.resolve({
+      pricing = this.options.pricingResolver?.resolve({
         provider,
         model: metrics.model,
         serviceTier: metrics.serviceTier,
+        inputTokens: metrics.inputTokens,
         atMs: metrics.responseCompletedAtMs,
       }) ?? null;
       this.options.writer.enqueue({ provider, ...metrics, pricing });
     } catch (error) {
       this.options.logger.warn({ err: error, provider }, "模型请求指标持久化失败");
     }
-    const event = toModelTimingEvent(metrics);
+    const event = toModelTimingEvent(metrics, pricing);
     if (!event) {
       this.options.logger.debug(
         {
@@ -111,6 +115,7 @@ export class ProviderMetricsComposition {
 
 export function toModelTimingEvent(
   metrics: ProviderProxyMetrics,
+  pricing: ModelRequestPricingSnapshot | null = null,
 ): ModelTimingEvent | undefined {
   const firstTokenAtMs = metrics.firstTokenAtMs;
   if (
@@ -120,6 +125,7 @@ export function toModelTimingEvent(
   ) {
     return undefined;
   }
+  const totalCostNanos = calculateModelRequestCostNanos(metrics, pricing);
   const common = {
     type: "turn.modelTiming.updated" as const,
     threadId: metrics.threadId,
@@ -137,6 +143,32 @@ export function toModelTimingEvent(
     ...(metrics.reasoningOutputTokens === null
       ? {}
       : { reasoningOutputTokens: metrics.reasoningOutputTokens }),
+    ...(pricing?.currency === null
+      || pricing?.currency === undefined
+      || totalCostNanos === null
+      ? {}
+      : {
+          pricingCurrency: pricing.currency,
+          totalCostNanos,
+          ...(pricing.uncachedInputPricePerMillionNanos === null
+            ? {}
+            : {
+                uncachedInputPricePerMillionNanos:
+                  pricing.uncachedInputPricePerMillionNanos,
+              }),
+          ...(pricing.cachedInputPricePerMillionNanos === null
+            ? {}
+            : {
+                cachedInputPricePerMillionNanos:
+                  pricing.cachedInputPricePerMillionNanos,
+              }),
+          ...(pricing.outputPricePerMillionNanos === null
+            ? {}
+            : {
+                outputPricePerMillionNanos:
+                  pricing.outputPricePerMillionNanos,
+              }),
+        }),
   };
   if (firstTokenAtMs === null) return common;
   const lastTokenAtMs = Math.max(

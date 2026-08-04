@@ -28,6 +28,11 @@ import {
   formatCodexProviderLabel,
   formatProviderLabel,
 } from "./provider-format.js";
+import {
+  formatReferenceCostTotal,
+  formatReferenceUnitPrices,
+  type ReferenceCostDisplay,
+} from "./reference-cost-format.js";
 
 const maximumSessionEntries = 20;
 const maximumSessionLabelCharacters = 48;
@@ -567,6 +572,18 @@ export function formatConversationMetrics(
             turn.outputSpeedTimedCount,
             turn.outputSpeedSampleCount,
           )]),
+      ...formatReferenceCost({
+        currency: turn.pricingCurrency,
+        totalCostNanos: turn.totalCostNanos,
+        pricedRequestCount: turn.pricedRequestCount,
+        requestCount: turn.requestCount,
+        uncachedInputPricePerMillionNanos:
+          turn.uncachedInputPricePerMillionNanos,
+        cachedInputPricePerMillionNanos:
+          turn.cachedInputPricePerMillionNanos,
+        outputPricePerMillionNanos: turn.outputPricePerMillionNanos,
+        hasMixedPrices: turn.hasMixedPrices,
+      }),
     );
   } else {
     lines.push("", "最近运行聚合：暂无已记录请求");
@@ -598,6 +615,7 @@ export function formatConversationMetrics(
             aggregate.outputSpeedTimedCount,
             aggregate.outputSpeedSampleCount,
           )]),
+      ...formatReferenceCost(toReferenceCostDisplay(aggregate)),
     );
   }
   if (summary.latestDirectApi) {
@@ -620,6 +638,20 @@ export function formatConversationMetrics(
         ? []
         : [`其中推理输出：${formatTokenCount(direct.reasoningOutputTokens)}`]),
       ...(direct.totalTokens === null ? [] : [`总计：${formatTokenCount(direct.totalTokens)}`]),
+      ...(direct.totalCostNanos === null
+        ? []
+        : formatReferenceCost({
+            currency: direct.pricingCurrency,
+            totalCostNanos: direct.totalCostNanos,
+            pricedRequestCount: 1,
+            requestCount: 1,
+            uncachedInputPricePerMillionNanos:
+              direct.uncachedInputPricePerMillionNanos,
+            cachedInputPricePerMillionNanos:
+              direct.cachedInputPricePerMillionNanos,
+            outputPricePerMillionNanos: direct.outputPricePerMillionNanos,
+            hasMixedPrices: false,
+          })),
     );
   }
   return lines.join("\n");
@@ -752,6 +784,13 @@ function formatMetricsAggregate(aggregate: {
   ttftP50Ms: number | null;
   ttftP95Ms: number | null;
   ttftSampleCount: number;
+  pricingCurrency: string | null;
+  pricedRequestCount: number;
+  totalCostNanos: number | null;
+  uncachedInputPricePerMillionNanos: number | null;
+  cachedInputPricePerMillionNanos: number | null;
+  outputPricePerMillionNanos: number | null;
+  hasMixedPrices: boolean;
 }): string[] {
   return [
     `模型请求：${aggregate.requestCount} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${aggregate.unsuccessfulRequestCount} 次）` : ""}`,
@@ -780,6 +819,7 @@ function formatMetricsAggregate(aggregate: {
       : [
           `首段回复延迟：平均 ${formatMetricLatency(aggregate.ttftAverageMs)} · P50 ${formatMetricLatency(aggregate.ttftP50Ms)} · P95 ${formatMetricLatency(aggregate.ttftP95Ms)}（覆盖 ${aggregate.ttftSampleCount}/${aggregate.requestCount} 次请求）`,
         ]),
+    ...formatReferenceCost(toReferenceCostDisplay(aggregate)),
   ];
 }
 
@@ -811,7 +851,45 @@ function formatMetricsGroup(
   const latency = aggregate.ttftP50Ms === null || aggregate.ttftP95Ms === null
     ? "首段延迟未知"
     : `首段 P50/P95 ${formatMetricLatency(aggregate.ttftP50Ms)}/${formatMetricLatency(aggregate.ttftP95Ms)}`;
-  return `${index + 1}. ${label} · ${aggregate.requestCount} 次 · 输入 ${formatTokenCount(aggregate.inputTokens)} · 输出 ${formatTokenCount(aggregate.outputTokens)} · ${cache} · ${speed} · ${latency}`;
+  const referenceCost = toReferenceCostDisplay(aggregate);
+  const cost = aggregate.pricedRequestCount === 0
+    ? "参考总价未知"
+    : `参考总价 ${formatReferenceCostTotal(referenceCost)}`;
+  return [
+    `${index + 1}. ${label} · ${aggregate.requestCount} 次 · 输入 ${formatTokenCount(aggregate.inputTokens)} · 输出 ${formatTokenCount(aggregate.outputTokens)} · ${cache} · ${speed} · ${latency} · ${cost}`,
+    ...formatReferenceUnitPrices(referenceCost).map((line) => `   ${line}`),
+  ].join("\n");
+}
+
+function formatReferenceCost(value: ReferenceCostDisplay): string[] {
+  return [
+    `API 参考总价：${formatReferenceCostTotal(value)}`,
+    ...formatReferenceUnitPrices(value),
+  ];
+}
+
+function toReferenceCostDisplay(value: {
+  requestCount: number;
+  pricingCurrency: string | null;
+  pricedRequestCount: number;
+  totalCostNanos: number | null;
+  uncachedInputPricePerMillionNanos: number | null;
+  cachedInputPricePerMillionNanos: number | null;
+  outputPricePerMillionNanos: number | null;
+  hasMixedPrices: boolean;
+}): ReferenceCostDisplay {
+  return {
+    currency: value.pricingCurrency,
+    totalCostNanos: value.totalCostNanos,
+    pricedRequestCount: value.pricedRequestCount,
+    requestCount: value.requestCount,
+    uncachedInputPricePerMillionNanos:
+      value.uncachedInputPricePerMillionNanos,
+    cachedInputPricePerMillionNanos:
+      value.cachedInputPricePerMillionNanos,
+    outputPricePerMillionNanos: value.outputPricePerMillionNanos,
+    hasMixedPrices: value.hasMixedPrices,
+  };
 }
 
 function formatMetricsRange(range: "24h" | "7d" | "30d"): string {

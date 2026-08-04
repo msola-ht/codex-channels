@@ -1067,6 +1067,11 @@ describe("ConversationCore", () => {
       thinkingDurationMs: 600,
       outputDurationMs: 800,
       generationDurationMs: 1_400,
+      pricingCurrency: "USD",
+      totalCostNanos: 100_000,
+      uncachedInputPricePerMillionNanos: 140_000_000,
+      cachedInputPricePerMillionNanos: 2_800_000,
+      outputPricePerMillionNanos: 280_000_000,
     });
     core.handle({
       type: "turn.modelTiming.updated",
@@ -1082,6 +1087,11 @@ describe("ConversationCore", () => {
       thinkingDurationMs: 400,
       outputDurationMs: 500,
       generationDurationMs: 900,
+      pricingCurrency: "USD",
+      totalCostNanos: 200_000,
+      uncachedInputPricePerMillionNanos: 140_000_000,
+      cachedInputPricePerMillionNanos: 2_800_000,
+      outputPricePerMillionNanos: 280_000_000,
     });
     core.handle({
       type: "turn.modelTiming.updated",
@@ -1148,6 +1158,16 @@ describe("ConversationCore", () => {
         thinkingSpeedTimedCount: 2,
         generationSpeedSampleCount: 3,
         generationSpeedTimedCount: 2,
+        referenceCost: {
+          currency: "USD",
+          totalCostNanos: 300_000,
+          pricedRequestCount: 2,
+          requestCount: 4,
+          uncachedInputPricePerMillionNanos: 140_000_000,
+          cachedInputPricePerMillionNanos: 2_800_000,
+          outputPricePerMillionNanos: 280_000_000,
+          hasMixedPrices: false,
+        },
       },
     });
     expect(completed?.timing?.outputTokensPerSecond).toBeCloseTo(40 / 1.3);

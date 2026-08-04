@@ -18,6 +18,12 @@
   到完成卡片；持久化通过 Observability 有界 Writer 延迟分片执行，单项写入失败不会阻断指标确认或
   既有 Core 计时。可选 `ModelPricingResolver` 只在组合边界为新请求附加当次价格快照；代理、Core
   和数据库 View 都不读取设置或内置模型价格。
+- `model-pricing-catalog.ts`：实现组合根注入的远程价格目录。启动时先读取 Gateway 数据目录下的
+  `0600` 可丢弃缓存，再异步刷新；固定优先读取 LiteLLM 目录，失败时回退到 Sub2API 使用的
+  `Wei-Shaw/model-price-repo` 镜像，每 6 小时条件请求一次。解析器只为新请求生成不可变 USD API
+  参考价格快照，支持缓存输入、Priority 与已声明的长上下文价格，不把网络刷新放入请求路径。
+- `reference-cost-summary.ts`：在 Turn 完成时把指标库中的 Thread 历史计价与当前实时 Turn 计价
+  合并；若当前 Turn 已部分延迟写入，先扣除该部分再加入完整实时值，避免累计总价重复或遗漏。
 - `surface-plugin.ts`：定义编译期内置 Surface 插件、插件上下文和运行时模块契约，并校验插件 ID、
   实际 Surface ID 与账号实例唯一性。
 - `surface-composition.ts`：显式注册 Telegram、飞书和微信内置插件，并保留各平台访问策略、
@@ -37,7 +43,7 @@
   不保存图片、提示词、响应正文或识别结果。
 - `config-lifecycle.ts`：管理配置监听、防抖重载、持久配置事件投递、信号与进程退出。
 - `surface-manager.ts`：按 `surface + accountId` 向已启动 Surface 集中路由 Core 输出，并为
-  `turn.completed` 注入当前授权 Workspace 的 Git 分支；并行完成各 Surface 的首次启动，
+  `turn.completed` 注入当前授权 Workspace 的 Git 分支和 Thread 累计 API 参考总价；并行完成各 Surface 的首次启动，
   单个渠道启动或运行失败时只取消该渠道交互并独立退避恢复，不停止 Gateway 或其他渠道。
   首次启动和故障恢复期间只在有界内存队列中保留关键输出，就绪后按序补投；流式增量不积压。
   渠道未就绪时对应账号的新审批、用户输入与 MCP 交互立即失败关闭。

@@ -12,6 +12,7 @@ export type {
   RateLimitReachedType,
   RateLimitSnapshot,
   RateLimitWindow,
+  ReferenceCostSummary,
   ThreadGoal,
   ThreadTokenUsage,
   TokenUsageBreakdown,
