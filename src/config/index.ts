@@ -63,7 +63,8 @@ export interface GatewayConfig {
   codexSandbox: "read-only" | "workspace-write";
   operationUpdateDisplay: OperationUpdateDisplay;
   planUpdatesEnabled: boolean;
-  referenceCostCny: boolean;
+  priceCurrency: "auto" | "cny" | "usd";
+  priceCurrencyByProvider: Readonly<Record<string, "auto" | "cny" | "usd">>;
   apiProviders: ReadonlyArray<{
     id: string;
     name: string;
@@ -85,6 +86,24 @@ export interface GatewayConfig {
 }
 
 export type OperationUpdateDisplay = "full" | "compact" | "hidden";
+
+export function priceCurrencyForProvider(
+  config: Pick<GatewayConfig, "priceCurrency" | "priceCurrencyByProvider">,
+  provider: string | null | undefined,
+): "auto" | "cny" | "usd" {
+  return provider === null || provider === undefined
+    ? config.priceCurrency
+    : config.priceCurrencyByProvider[provider] ?? config.priceCurrency;
+}
+
+export function priceDisplayNeedsExchangeRate(
+  config: Pick<GatewayConfig, "priceCurrency" | "priceCurrencyByProvider">,
+): boolean {
+  if (config.priceCurrency !== "usd") return true;
+  return Object.values(config.priceCurrencyByProvider).some(
+    (mode) => mode !== "usd",
+  );
+}
 
 export function isDebugLogLevel(
   level: GatewayConfig["logLevel"],
@@ -251,7 +270,10 @@ function loadValidatedConfigDocument(
     codexSandbox: raw.codex.sandbox,
     operationUpdateDisplay: raw.display.operation_updates,
     planUpdatesEnabled: raw.display.plan_updates,
-    referenceCostCny: raw.display.reference_cost_cny,
+    priceCurrency: raw.display.price_currency,
+    priceCurrencyByProvider: {
+      ...(raw.display.price_currency_by_provider ?? {}),
+    },
     apiProviders: raw.api_providers.map(toApiProviderConfig),
     vision: toVisionConfig(raw.vision, raw.api_providers),
     credentialsDirectory: resolve(baseDirectory, "credentials"),

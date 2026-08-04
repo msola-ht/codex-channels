@@ -205,6 +205,9 @@ describe("shared Surface lifecycle presentation", () => {
           referenceCost: {
             currency: "USD",
             totalCostNanos: 350_000,
+            inputCostNanos: 150_000,
+            cachedInputCostNanos: 50_000,
+            outputCostNanos: 150_000,
             pricedRequestCount: 2,
             requestCount: 2,
             uncachedInputPricePerMillionNanos: 140_000_000,
@@ -216,6 +219,9 @@ describe("shared Surface lifecycle presentation", () => {
         sessionReferenceCost: {
           currency: "USD",
           totalCostNanos: 1_250_000,
+          inputCostNanos: 500_000,
+          cachedInputCostNanos: 200_000,
+          outputCostNanos: 550_000,
           pricedRequestCount: 8,
           requestCount: 9,
           uncachedInputPricePerMillionNanos: null,
@@ -288,6 +294,9 @@ describe("shared Surface lifecycle presentation", () => {
           referenceCost: {
             currency: "USD",
             totalCostNanos: 915_000,
+            inputCostNanos: 300_000,
+            cachedInputCostNanos: 100_000,
+            outputCostNanos: 515_000,
             pricedRequestCount: 1,
             requestCount: 2,
             uncachedInputPricePerMillionNanos: 140_000_000,
@@ -320,12 +329,16 @@ describe("shared Surface lifecycle presentation", () => {
         threadId: "thread-deepseek",
         turnId: "turn-deepseek",
         status: "completed",
+        modelProvider: "deepseek",
         timing: {
           modelRequestCount: 1,
           completedModelRequestCount: 1,
           referenceCost: {
             currency: "USD",
             totalCostNanos: 1_000_000_000,
+            inputCostNanos: 600_000_000,
+            cachedInputCostNanos: 100_000_000,
+            outputCostNanos: 300_000_000,
             pricedRequestCount: 1,
             requestCount: 1,
             uncachedInputPricePerMillionNanos: 140_000_000,
@@ -334,14 +347,30 @@ describe("shared Surface lifecycle presentation", () => {
             hasMixedPrices: false,
           },
         },
-      }, {
+        sessionReferenceCost: {
+          currency: "USD",
+          totalCostNanos: 2_000_000_000,
+          inputCostNanos: 1_200_000_000,
+          cachedInputCostNanos: 200_000_000,
+          outputCostNanos: 600_000_000,
+          pricedRequestCount: 2,
+          requestCount: 2,
+          uncachedInputPricePerMillionNanos: 140_000_000,
+          cachedInputPricePerMillionNanos: 2_800_000,
+          outputPricePerMillionNanos: 280_000_000,
+          hasMixedPrices: false,
+        },
+      }, (provider) => provider === "deepseek" ? "cny" : "usd", {
         usdToCny: 7.2,
         effectiveAtMs: 1_700_000_000_000,
         source: "ecb",
       }),
     );
 
-    expect(rendered).toContain("折合人民币：约 ¥7.20（1 USD ≈ 7.2000 CNY）");
+    expect(rendered).toContain("参考总价：¥7.20（已计价 1/1 个成功请求）");
+    expect(rendered).toContain("参考总价：¥14.40（已计价 2/2 次请求）");
+    expect(rendered).not.toContain("折合人民币");
+    expect(rendered).not.toContain("$");
   });
 
   it("keeps a non-retryable model failure visible after a completed request", () => {

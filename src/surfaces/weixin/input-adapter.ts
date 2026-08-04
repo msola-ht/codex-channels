@@ -2,6 +2,7 @@ import type { Logger } from "pino";
 
 import type {
   ConversationUseCases,
+  DisplayPriceCurrency,
   ExchangeRateSnapshot,
 } from "../../application/index.js";
 import {
@@ -86,6 +87,9 @@ export interface WeixinInputAdapterOptions {
   now?: () => number;
   debugEnabled?: boolean;
   exchangeRate?: () => ExchangeRateSnapshot | null;
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency;
   logger?: Pick<Logger, "debug">;
 }
 
@@ -123,6 +127,9 @@ export class WeixinInputAdapter {
         ...(options.exchangeRate === undefined
           ? {}
           : { exchangeRate: options.exchangeRate }),
+        ...(options.priceCurrency === undefined
+          ? {}
+          : { priceCurrency: options.priceCurrency }),
         ...(options.doctor === undefined
           ? {}
           : {

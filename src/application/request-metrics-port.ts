@@ -13,6 +13,9 @@ export interface TurnRequestMetricsSummary {
   pricingCurrency: string | null;
   pricedRequestCount: number;
   totalCostNanos: number | null;
+  inputCostNanos: number | null;
+  cachedInputCostNanos: number | null;
+  outputCostNanos: number | null;
   uncachedInputPricePerMillionNanos: number | null;
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
@@ -34,6 +37,9 @@ export interface ThreadRequestMetricsAggregate {
   pricingCurrency: string | null;
   pricedRequestCount: number;
   totalCostNanos: number | null;
+  inputCostNanos: number | null;
+  cachedInputCostNanos: number | null;
+  outputCostNanos: number | null;
   uncachedInputPricePerMillionNanos: number | null;
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
@@ -54,6 +60,9 @@ export interface DirectApiRequestMetricsSummary {
   totalTokens: number | null;
   pricingCurrency: string | null;
   totalCostNanos: number | null;
+  inputCostNanos: number | null;
+  cachedInputCostNanos: number | null;
+  outputCostNanos: number | null;
   uncachedInputPricePerMillionNanos: number | null;
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
@@ -61,6 +70,7 @@ export interface DirectApiRequestMetricsSummary {
 
 export interface ThreadRequestMetricsSummary {
   threadId: string;
+  modelProvider: string;
   latestTurn: TurnRequestMetricsSummary | null;
   threadAggregate: ThreadRequestMetricsAggregate | null;
   latestDirectApi: DirectApiRequestMetricsSummary | null;
@@ -93,6 +103,9 @@ export interface RequestMetricsAggregate {
   pricingCurrency: string | null;
   pricedRequestCount: number;
   totalCostNanos: number | null;
+  inputCostNanos: number | null;
+  cachedInputCostNanos: number | null;
+  outputCostNanos: number | null;
   uncachedInputPricePerMillionNanos: number | null;
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;

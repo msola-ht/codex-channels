@@ -1,4 +1,5 @@
 export {
+  calculateModelRequestCostComponents,
   calculateModelRequestCostNanos,
 } from "./request-metrics.js";
 export {

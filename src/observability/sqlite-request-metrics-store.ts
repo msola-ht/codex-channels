@@ -132,6 +132,9 @@ interface TurnSummaryRow {
   pricing_currency_count: number;
   priced_request_count: number;
   total_cost_nanos: number | null;
+  uncached_input_cost_nanos: number | null;
+  cached_input_cost_nanos: number | null;
+  output_cost_nanos: number | null;
   uncached_input_price_per_million_nanos: number | null;
   uncached_input_price_count: number;
   cached_input_price_per_million_nanos: number | null;
@@ -474,6 +477,9 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
               THEN pricing_currency END) AS pricing_currency_count,
             COUNT(total_cost_nanos) AS priced_request_count,
             SUM(total_cost_nanos) AS total_cost_nanos,
+            SUM(uncached_input_cost_nanos) AS uncached_input_cost_nanos,
+            SUM(cached_input_cost_nanos) AS cached_input_cost_nanos,
+            SUM(output_cost_nanos) AS output_cost_nanos,
             MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
               uncached_input_price_per_million_nanos END)
               AS uncached_input_price_per_million_nanos,
@@ -529,6 +535,9 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           THEN pricing_currency END) AS pricing_currency_count,
         COUNT(total_cost_nanos) AS priced_request_count,
         SUM(total_cost_nanos) AS total_cost_nanos,
+        SUM(uncached_input_cost_nanos) AS uncached_input_cost_nanos,
+        SUM(cached_input_cost_nanos) AS cached_input_cost_nanos,
+        SUM(output_cost_nanos) AS output_cost_nanos,
         MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
           uncached_input_price_per_million_nanos END)
           AS uncached_input_price_per_million_nanos,
@@ -634,6 +643,9 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
             THEN pricing_currency END) AS pricing_currency_count,
           COUNT(total_cost_nanos) AS priced_request_count,
           SUM(total_cost_nanos) AS total_cost_nanos,
+          SUM(uncached_input_cost_nanos) AS uncached_input_cost_nanos,
+          SUM(cached_input_cost_nanos) AS cached_input_cost_nanos,
+          SUM(output_cost_nanos) AS output_cost_nanos,
           MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
             uncached_input_price_per_million_nanos END)
             AS uncached_input_price_per_million_nanos,
@@ -1082,6 +1094,9 @@ function toStoredThreadAggregate(
     pricingCurrency: summary.pricingCurrency,
     pricedRequestCount: summary.pricedRequestCount,
     totalCostNanos: summary.totalCostNanos,
+    inputCostNanos: summary.inputCostNanos,
+    cachedInputCostNanos: summary.cachedInputCostNanos,
+    outputCostNanos: summary.outputCostNanos,
     uncachedInputPricePerMillionNanos:
       summary.uncachedInputPricePerMillionNanos,
     cachedInputPricePerMillionNanos:
@@ -1165,6 +1180,9 @@ function toStoredAggregatePricing(row: TurnSummaryRow | AggregateRow): Pick<
   | "pricingCurrency"
   | "pricedRequestCount"
   | "totalCostNanos"
+  | "inputCostNanos"
+  | "cachedInputCostNanos"
+  | "outputCostNanos"
   | "uncachedInputPricePerMillionNanos"
   | "cachedInputPricePerMillionNanos"
   | "outputPricePerMillionNanos"
@@ -1182,6 +1200,15 @@ function toStoredAggregatePricing(row: TurnSummaryRow | AggregateRow): Pick<
     pricedRequestCount: row.priced_request_count,
     totalCostNanos: row.pricing_currency_count === 1
       ? row.total_cost_nanos
+      : null,
+    inputCostNanos: row.pricing_currency_count === 1
+      ? row.uncached_input_cost_nanos
+      : null,
+    cachedInputCostNanos: row.pricing_currency_count === 1
+      ? row.cached_input_cost_nanos
+      : null,
+    outputCostNanos: row.pricing_currency_count === 1
+      ? row.output_cost_nanos
       : null,
     uncachedInputPricePerMillionNanos: hasSinglePrice
       ? row.uncached_input_price_per_million_nanos

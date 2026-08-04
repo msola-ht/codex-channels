@@ -16,6 +16,10 @@
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型渠道”“通讯渠道”和
   “系统设置”流程委派给具体适配器；模型渠道下区分 DeepSeek、第三方 API 与图片识别，系统设置
   提供全局调试模式入口。
+- `config.mjs`：`codexc config` 的交互式配置与设置菜单，覆盖配置文件中可安全编辑的参数：
+  显示设置（操作详情、计划更新、按提供商的价格显示方式）、系统设置（调试模式、审批超时、
+  Sandbox、默认工作区与模型）和 Telegram 消息格式，并提供配置路径、Doctor 检查与指标库状态入口；
+  非交互终端直接输出用户目录与配置文件路径。
 - `debug-setup.mjs`：在严格配置中原子切换 `logging.level` 的 `debug` / `info`，控制全局脱敏
   调试日志和渠道技术字段，不改写显示设置或凭据。
 - `api-provider-setup.mjs` / `api-provider-setup.d.mts`：增改或删除多个 Responses 兼容第三方 API

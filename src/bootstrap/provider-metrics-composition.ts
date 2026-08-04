@@ -6,7 +6,7 @@ import type {
   ModelRequestPricingSnapshot,
   ModelRequestMetricsWriter,
 } from "../observability/index.js";
-import { calculateModelRequestCostNanos } from "../observability/index.js";
+import { calculateModelRequestCostComponents } from "../observability/index.js";
 import {
   ProviderProxyMetricsServer,
   type ProviderProxyMetrics,
@@ -125,7 +125,7 @@ export function toModelTimingEvent(
   ) {
     return undefined;
   }
-  const totalCostNanos = calculateModelRequestCostNanos(metrics, pricing);
+  const costComponents = calculateModelRequestCostComponents(metrics, pricing);
   const common = {
     type: "turn.modelTiming.updated" as const,
     threadId: metrics.threadId,
@@ -153,11 +153,14 @@ export function toModelTimingEvent(
       : { reasoningOutputTokens: metrics.reasoningOutputTokens }),
     ...(pricing?.currency === null
       || pricing?.currency === undefined
-      || totalCostNanos === null
+      || costComponents === null
       ? {}
       : {
           pricingCurrency: pricing.currency,
-          totalCostNanos,
+          totalCostNanos: costComponents.totalCostNanos,
+          uncachedInputCostNanos: costComponents.uncachedInputCostNanos,
+          cachedInputCostNanos: costComponents.cachedInputCostNanos,
+          outputCostNanos: costComponents.outputCostNanos,
           ...(pricing.uncachedInputPricePerMillionNanos === null
             ? {}
             : {

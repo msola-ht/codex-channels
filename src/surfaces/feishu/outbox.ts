@@ -5,7 +5,10 @@ import {
   type OutputEvent,
 } from "../../conversation-core/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
-import type { ExchangeRateSnapshot } from "../../application/index.js";
+import type {
+  DisplayPriceCurrency,
+  ExchangeRateSnapshot,
+} from "../../application/index.js";
 import { readGeneratedImage } from "../generated-image.js";
 import {
   OperationUpdateBuffer,
@@ -119,6 +122,9 @@ export interface FeishuOutboxOptions {
   planUpdatesEnabled?: boolean;
   readGeneratedImage?: typeof readGeneratedImage;
   exchangeRate?: () => ExchangeRateSnapshot | null;
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency;
 }
 
 export class FeishuOutbox implements SurfaceOutputPort {
@@ -280,6 +286,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       );
       const completion = renderFeishuOutput(
         event,
+        this.options.priceCurrency,
         this.options.exchangeRate?.() ?? null,
       );
       if (
@@ -299,6 +306,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     const rendered = renderFeishuOutput(
       event,
+      this.options.priceCurrency,
       this.options.exchangeRate?.() ?? null,
     );
     if (rendered === null) {

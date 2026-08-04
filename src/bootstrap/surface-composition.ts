@@ -159,6 +159,7 @@ function createWeixinModule(
     planUpdatesEnabled: options.config.planUpdatesEnabled,
     debugEnabled: isDebugLogLevel(options.config.logLevel),
     exchangeRate: options.exchangeRate,
+    priceCurrency: options.priceCurrency,
     fetchImpl: createProxyFetch(options.config.networkProxy),
     logger: options.logger,
     onFatal: (error) => options.onFatal("weixin", config.accountId, error),
@@ -214,6 +215,7 @@ function createFeishuModule(
     planUpdatesEnabled: options.config.planUpdatesEnabled,
     debugEnabled: isDebugLogLevel(options.config.logLevel),
     exchangeRate: options.exchangeRate,
+    priceCurrency: options.priceCurrency,
     ...(openApiAgent
       ? {
           openApiAgent,
@@ -321,6 +323,7 @@ function createTelegramModule(
     planUpdatesEnabled: config.planUpdatesEnabled,
     debugEnabled: isDebugLogLevel(config.logLevel),
     exchangeRate: options.exchangeRate,
+    priceCurrency: options.priceCurrency,
     gatewayVersion: options.gatewayVersion,
     codexUpstreamUserAgent: options.codexUpstreamUserAgent,
   });

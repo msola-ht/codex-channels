@@ -1,6 +1,7 @@
 import type {
   ConversationCommandResult,
   ConversationStatus,
+  DisplayPriceCurrency,
   ExchangeRateSnapshot,
 } from "../../application/index.js";
 import type {
@@ -110,6 +111,9 @@ export function renderFeishuIdentity(
 
 export function renderFeishuCommandResult(
   result: ConversationCommandResult,
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
 ): string {
   switch (result.kind) {
@@ -134,7 +138,7 @@ export function renderFeishuCommandResult(
     case "usage":
       return formatConversationUsage(result);
     case "metrics":
-      return formatConversationMetrics(result, exchangeRate);
+      return formatConversationMetrics(result, priceCurrency, exchangeRate);
     case "limits":
       return formatConversationLimits(result);
     case "permissions":
@@ -162,6 +166,9 @@ export function renderFeishuUserFacingError(
 
 export function renderFeishuOutput(
   event: OutputEvent,
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
 ): string | null {
   switch (event.type) {
@@ -187,7 +194,7 @@ export function renderFeishuOutput(
     case "plan.updated":
       return null;
     case "turn.completed":
-      return renderFeishuTurnCompleted(event, exchangeRate);
+      return renderFeishuTurnCompleted(event, priceCurrency, exchangeRate);
     case "thread.status":
       return `Thread 状态：${threadStatusLabel(event.status)}`;
     case "connection.lost":
@@ -205,10 +212,13 @@ export function renderFeishuOutput(
 
 function renderFeishuTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
 ): string {
   return renderFeishuLifecyclePresentation(
-    createTurnCompletedPresentation(event, exchangeRate),
+    createTurnCompletedPresentation(event, priceCurrency, exchangeRate),
   );
 }
 

@@ -35,6 +35,8 @@ import {
   classifyConfigReload,
   configChange,
   includesConfigChange,
+  priceCurrencyForProvider,
+  priceDisplayNeedsExchangeRate,
   type ConfigChange,
   type ConfigReloadResult,
   type GatewayConfig,
@@ -45,6 +47,7 @@ import {
   ModelSelectionService,
   ProviderAccountService,
   createOpenAiAccountAdapter,
+  resolvePriceCurrency,
 } from "../application/index.js";
 import {
   ConversationCore,
@@ -283,6 +286,8 @@ export class GatewayApplication {
               )?.name;
           return {
             threadId: summary.threadId,
+            modelProvider: this.router.modelSettingsForThread(threadId)
+              ?.modelProvider ?? "openai",
             latestTurn: summary.latestTurn,
             threadAggregate: summary.threadAggregate,
             latestDirectApi: direct === null
@@ -301,6 +306,9 @@ export class GatewayApplication {
                   totalTokens: direct.totalTokens,
                   pricingCurrency: direct.pricing?.currency ?? null,
                   totalCostNanos: direct.totalCostNanos,
+                  inputCostNanos: direct.uncachedInputCostNanos,
+                  cachedInputCostNanos: direct.cachedInputCostNanos,
+                  outputCostNanos: direct.outputCostNanos,
                   uncachedInputPricePerMillionNanos:
                     direct.pricing?.uncachedInputPricePerMillionNanos ?? null,
                   cachedInputPricePerMillionNanos:
@@ -444,9 +452,11 @@ export class GatewayApplication {
         accountId,
         error,
       ),
-      exchangeRate: () => this.config.referenceCostCny
-        ? this.exchangeRate.resolve()
-        : null,
+      exchangeRate: () => this.exchangeRate.resolve(),
+      priceCurrency: (provider) => resolvePriceCurrency(
+        priceCurrencyForProvider(this.config, provider),
+        provider,
+      ),
     });
     this.surfaces = this.surfaceModules.map((module) => module.adapter);
     this.surfaceManager = new SurfaceManager(
@@ -568,7 +578,7 @@ export class GatewayApplication {
     try {
       this.requireRunning();
       this.modelPricing.start();
-      if (this.config.referenceCostCny) {
+      if (priceDisplayNeedsExchangeRate(this.config)) {
         this.exchangeRate.start();
       }
       await this.providerMetrics.start();

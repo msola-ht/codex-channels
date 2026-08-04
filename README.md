@@ -31,6 +31,11 @@ codexc init
 codexc setup
 ```
 
+`codexc config` 提供交互式配置与设置菜单，覆盖配置文件中可安全编辑的参数：显示设置（操作
+详情、计划更新、参考价人民币换算）、系统设置（调试模式、审批超时、Sandbox、默认工作区与
+模型）、Telegram 消息格式，以及配置路径、Doctor 检查与指标库状态。在脚本或管道中运行时会
+直接输出用户目录与配置文件路径。
+
 注册需要让 Codex 操作的项目：
 
 ```bash
@@ -82,15 +87,17 @@ codexc service reload
 [display]
 operation_updates = "compact"
 plan_updates = true
-reference_cost_cny = false
+price_currency = "auto"
 ```
 
 - `operation_updates`：`full` 显示完整操作详情，`compact` 显示摘要，`hidden` 隐藏操作过程。
 - `plan_updates`：是否显示 Codex 计划，默认开启。
-- `reference_cost_cny`：是否获取 USD/CNY 汇率并把参考总价折合为人民币展示（默认关闭，关闭时不
-  发起汇率请求）。开启后 `/metrics` 各视图和完成卡片会显示汇率与折合金额；汇率每 6 小时刷新，
-  优先使用 `open.er-api.com`，失败回退 ECB（`frankfurter.app`），离线沿用最近一次缓存，不可用时
-  只显示 USD 参考价。换算按最近一次汇率近似，不按历史汇率回算。
+- `price_currency`：模型价格显示币种（`auto` / `cny` / `usd`，默认 `auto`）。`auto` 时 DeepSeek
+  官方提供商按人民币显示、OpenAI 官方按美元显示，第三方直接 API 按美元显示；`cny` 或 `usd`
+  统一强制对应币种。同一位置只显示一种币种，不再同时显示 USD 与折合人民币。可按提供商覆盖：
+  `[display.price_currency_by_provider]` 下写 `deepseek = "cny"` 等。需要人民币时才会获取
+  USD/CNY 汇率（每 6 小时刷新，优先 `open.er-api.com`，失败回退 ECB，离线沿用缓存；汇率不可用
+  时回退显示 USD）。换算按最近一次汇率近似，不按历史汇率回算。
 
 ### 调试模式
 

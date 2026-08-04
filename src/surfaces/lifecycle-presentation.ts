@@ -1,6 +1,7 @@
 import {
   isFastServiceTier,
   type ConversationStatus,
+  type DisplayPriceCurrency,
   type ExchangeRateSnapshot,
 } from "../application/index.js";
 import type {
@@ -19,8 +20,9 @@ import {
 } from "./elapsed-duration.js";
 import { formatCodexProviderLabel } from "./provider-format.js";
 import {
-  formatReferenceCostCnyValue,
+  formatCurrencyNanos,
   formatReferenceCostTotal,
+  toDisplayReferenceCost,
 } from "./reference-cost-format.js";
 
 export interface LifecyclePresentation {
@@ -166,8 +168,12 @@ export function createTurnStartedPresentation(
 
 export function createTurnCompletedPresentation(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
 ): LifecyclePresentation {
+  const currency = priceCurrency?.(event.modelProvider) ?? "usd";
   const sessionFields: LifecyclePresentationField[] = event.background
     ? [{ label: "Thread", value: event.threadId }]
     : [];
@@ -280,25 +286,32 @@ export function createTurnCompletedPresentation(
   }
   if (event.timing?.referenceCost) {
     const successfulRequestCount = event.timing.completedModelRequestCount;
+    const displayCost = toDisplayReferenceCost(
+      event.timing.referenceCost,
+      currency,
+      exchangeRate ?? null,
+    );
     runFields.push({
       label: "参考总价",
       value: successfulRequestCount !== undefined && successfulRequestCount > 0
         ? formatReferenceCostTotal({
-            ...event.timing.referenceCost,
+            ...displayCost,
             requestCount: successfulRequestCount,
           }, "个成功请求")
-        : formatReferenceCostTotal(event.timing.referenceCost),
+        : formatReferenceCostTotal(displayCost),
     });
-    if (exchangeRate) {
-      const converted = formatReferenceCostCnyValue(
-        event.timing.referenceCost,
-        exchangeRate,
-      );
-      if (converted !== null) {
-        runFields.push({
-          label: "折合人民币",
-          value: converted,
-        });
+    if (displayCost.currency !== null) {
+      for (const [label, costNanos] of [
+        ["输入价格", displayCost.inputCostNanos],
+        ["缓存价格", displayCost.cachedInputCostNanos],
+        ["输出价格", displayCost.outputCostNanos],
+      ] as const) {
+        if (costNanos !== null) {
+          runFields.push({
+            label,
+            value: formatCurrencyNanos(displayCost.currency, costNanos),
+          });
+        }
       }
     }
   }
@@ -371,7 +384,13 @@ export function createTurnCompletedPresentation(
   if (event.sessionReferenceCost) {
     sessionFields.push({
       label: "参考总价",
-      value: formatReferenceCostTotal(event.sessionReferenceCost),
+      value: formatReferenceCostTotal(
+        toDisplayReferenceCost(
+          event.sessionReferenceCost,
+          currency,
+          exchangeRate ?? null,
+        ),
+      ),
     });
   }
   if (event.durationMs !== undefined) {

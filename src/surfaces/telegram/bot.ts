@@ -9,6 +9,7 @@ import {
   conversationCommandNames,
   type ConversationCommandName,
   type ConversationUseCases,
+  type DisplayPriceCurrency,
   type ExchangeRateSnapshot,
 } from "../../application/index.js";
 import {
@@ -106,6 +107,9 @@ export interface TelegramSurfaceOptions {
   now?: () => number;
   debugEnabled?: boolean;
   exchangeRate?: () => ExchangeRateSnapshot | null;
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency;
 }
 
 export interface CreateTelegramSurfaceOptions extends TelegramSurfaceOptions {
@@ -152,6 +156,9 @@ export class TelegramSurface {
   private readonly now: () => number;
   private readonly debugEnabled: boolean;
   private readonly exchangeRate: (() => ExchangeRateSnapshot | null) | undefined;
+  private readonly priceCurrency:
+    | ((provider: string | null | undefined) => DisplayPriceCurrency)
+    | undefined;
   private nextInputSequence = 0;
   private notificationRecipients: ReadonlySet<number>;
 
@@ -194,6 +201,7 @@ export class TelegramSurface {
     this.now = options.now ?? Date.now;
     this.debugEnabled = options.debugEnabled ?? false;
     this.exchangeRate = options.exchangeRate;
+    this.priceCurrency = options.priceCurrency;
     this.notificationRecipients = new Set(startupRecipients);
     this.commands = new ConversationCommandService(service);
     const apiExecutor = new TelegramApiExecutor(logger);
@@ -207,9 +215,12 @@ export class TelegramSurface {
       ...(options.planUpdatesEnabled !== undefined
         ? { planUpdatesEnabled: options.planUpdatesEnabled }
         : {}),
-      ...(options.exchangeRate === undefined
-        ? {}
-        : { exchangeRate: options.exchangeRate }),
+        ...(options.exchangeRate === undefined
+          ? {}
+          : { exchangeRate: options.exchangeRate }),
+        ...(options.priceCurrency === undefined
+          ? {}
+          : { priceCurrency: options.priceCurrency }),
     });
     this.output = this.outbox;
     this.inputs = new SurfaceInputCoalescer(
@@ -388,6 +399,7 @@ export class TelegramSurface {
       await renderTelegramCommandResult(
         context,
         result,
+        this.priceCurrency,
         this.exchangeRate?.() ?? null,
       );
     });
@@ -733,6 +745,7 @@ export class TelegramSurface {
     await renderTelegramCommandResult(
       context,
       result,
+      this.priceCurrency,
       this.exchangeRate?.() ?? null,
     );
   }

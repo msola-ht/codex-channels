@@ -49,6 +49,7 @@ try {
   }
   if (
     !help.includes("setup ")
+    || !help.includes("config ")
     || !help.includes("doctor ")
     || !help.includes("service install")
     || !help.includes("service reload")

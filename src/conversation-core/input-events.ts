@@ -69,6 +69,9 @@ export type ConversationInputEvent =
       generationDurationMs?: number;
       pricingCurrency?: string;
       totalCostNanos?: number;
+      uncachedInputCostNanos?: number;
+      cachedInputCostNanos?: number;
+      outputCostNanos?: number;
       uncachedInputPricePerMillionNanos?: number;
       cachedInputPricePerMillionNanos?: number;
       outputPricePerMillionNanos?: number;

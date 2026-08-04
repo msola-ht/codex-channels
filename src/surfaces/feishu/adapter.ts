@@ -45,7 +45,10 @@ import {
   type FeishuAudioPort,
 } from "./audio.js";
 import type { FeishuOutbox } from "./outbox.js";
-import type { ExchangeRateSnapshot } from "../../application/index.js";
+import type {
+  DisplayPriceCurrency,
+  ExchangeRateSnapshot,
+} from "../../application/index.js";
 import type { FeishuOAuthControllerPort } from "./oauth.js";
 import {
   renderFeishuDoctor,
@@ -106,6 +109,9 @@ export class FeishuConversationAdapter {
       now?: () => number;
       debugEnabled?: boolean;
       exchangeRate?: () => ExchangeRateSnapshot | null;
+      priceCurrency?: (
+        provider: string | null | undefined,
+      ) => DisplayPriceCurrency;
     } = { quietWindowMs: 0 },
   ) {
     this.commands = new ConversationCommandService(conversations);
@@ -213,6 +219,7 @@ export class FeishuConversationAdapter {
           message.target.conversationId,
           renderFeishuCommandResult(
             result,
+            this.inputOptions.priceCurrency,
             this.inputOptions.exchangeRate?.() ?? null,
           ),
         );
@@ -383,6 +390,7 @@ export class FeishuConversationAdapter {
         target.conversationId,
         renderFeishuCommandResult(
           result,
+          this.inputOptions.priceCurrency,
           this.inputOptions.exchangeRate?.() ?? null,
         ),
       );

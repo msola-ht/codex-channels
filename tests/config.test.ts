@@ -287,7 +287,7 @@ describe("Gateway config.toml", () => {
     expect(persisted.display).toEqual({
       operation_updates: "compact",
       plan_updates: true,
-      reference_cost_cny: false,
+      price_currency: "auto",
     });
     expect(persisted.storage).toEqual({
       database_path: "data/gateway.sqlite3",
@@ -387,18 +387,28 @@ describe("Gateway config.toml", () => {
     }).config.planUpdatesEnabled).toBe(false);
   });
 
-  it("preserves an explicit reference cost CNY display opt-in", () => {
+  it("preserves explicit price currency and per-provider overrides", () => {
     const fixture = createFixture({
       display: {
         operation_updates: "compact",
         plan_updates: true,
-        reference_cost_cny: true,
+        price_currency: "cny",
+        price_currency_by_provider: {
+          deepseek: "cny",
+          openai: "usd",
+        },
       },
     });
 
     expect(loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    }).config.referenceCostCny).toBe(true);
+    }).config.priceCurrency).toBe("cny");
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.priceCurrencyByProvider).toEqual({
+      deepseek: "cny",
+      openai: "usd",
+    });
   });
 
   it("rejects the removed boolean operation update setting", () => {

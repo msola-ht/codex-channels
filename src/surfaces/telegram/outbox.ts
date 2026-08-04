@@ -19,7 +19,10 @@ import {
   createTurnCompletedPresentation,
   createTurnStartedPresentation,
 } from "../lifecycle-presentation.js";
-import type { ExchangeRateSnapshot } from "../../application/index.js";
+import type {
+  DisplayPriceCurrency,
+  ExchangeRateSnapshot,
+} from "../../application/index.js";
 import {
   formatVisionCompleted,
   formatVisionProgress,
@@ -99,6 +102,9 @@ export interface TelegramOutboxOptions {
   planUpdatesEnabled?: boolean;
   readGeneratedImage?: typeof readGeneratedImage;
   exchangeRate?: () => ExchangeRateSnapshot | null;
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency;
 }
 
 export class TelegramOutbox {
@@ -408,6 +414,7 @@ export class TelegramOutbox {
             renderTelegramLifecyclePresentation(
               createTurnCompletedPresentation(
                 event,
+                this.options.priceCurrency,
                 this.options.exchangeRate?.() ?? null,
               ),
             ),

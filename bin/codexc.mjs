@@ -27,8 +27,6 @@ import {
   packageDir,
   requireUserConfig,
   resolveConfiguredPath,
-  runtimeConfig,
-  userDataDir,
 } from "../scripts/runtime-config.mjs";
 import { checkProjectRules, initializeProjectRules } from "../scripts/codex-rules.mjs";
 import {
@@ -46,6 +44,7 @@ const helpText = {
 初始化与诊断：
   init                         初始化用户目录和配置
   setup                        选择并配置 Gateway 模块
+  config                       打开配置与设置菜单（显示、诊断、指标）
   doctor                       检查安装、配置、Codex 与服务
 
 项目与会话：
@@ -73,7 +72,6 @@ const helpText = {
   service logs [目标]          查看后台服务日志
 
 信息：
-  config                       显示用户配置路径
   version                      显示版本
 
 运行 codexc <命令> -h 查看命令用法。`,
@@ -123,7 +121,9 @@ const helpText = {
   "service.logs": `用法：codexc service logs [gateway|app-server|all] [-f|--follow] [-n|--lines 行数]`,
   config: `用法：codexc config
 
-显示当前用户数据目录和配置文件路径。`,
+打开交互式配置与设置菜单：显示设置（操作详情、计划更新、按提供商的价格显示方式）、系统设置
+（调试模式、审批超时、Sandbox、默认工作区与模型）、Telegram 消息格式、配置路径、Doctor
+检查与指标库状态。非交互终端（脚本或管道）直接显示用户目录与配置文件路径。`,
   doctor: `用法：codexc doctor
 
 只诊断当前安装、配置和服务状态，不修改配置。`,
@@ -233,7 +233,13 @@ try {
       if (showRequestedHelp(args, "config")) {
         break;
       }
-      showConfig(args);
+      requireNoArguments(args, "用法：codexc config");
+      run(
+        process.execPath,
+        [join(packageDir, "scripts/config.mjs")],
+        process.env,
+        process.cwd(),
+      );
       break;
     case "doctor":
       if (showRequestedHelp(args, "doctor")) {
@@ -606,16 +612,6 @@ function rejectAppServerSelfRestart(action, serviceArgs, environment) {
       + `codexc service restart ${target}。渠道内只能运行 codexc service restart gateway。`,
     );
   }
-}
-
-function showConfig(args) {
-  requireNoArguments(args, "用法：codexc config");
-  const explicitConfigFile = process.env.CODEX_CONNECT_CONFIG_FILE?.trim();
-  const runtime = explicitConfigFile
-    ? runtimeConfig()
-    : { dataDir: userDataDir(), configPath: join(userDataDir(), "config.toml") };
-  console.log(`用户目录：${runtime.dataDir}`);
-  console.log(`配置文件：${runtime.configPath}`);
 }
 
 function runDoctor(args) {

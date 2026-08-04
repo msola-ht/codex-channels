@@ -28,7 +28,10 @@ import {
   renderWeixinIdentity,
   renderWeixinUserFacingError,
 } from "./command-renderer.js";
-import type { ExchangeRateSnapshot } from "../../application/index.js";
+import type {
+  DisplayPriceCurrency,
+  ExchangeRateSnapshot,
+} from "../../application/index.js";
 import {
   WeixinFileInputError,
   type WeixinFilePort,
@@ -105,6 +108,9 @@ export class WeixinConversationAdapter {
       now?: () => number;
       debugEnabled?: boolean;
       exchangeRate?: () => ExchangeRateSnapshot | null;
+      priceCurrency?: (
+        provider: string | null | undefined,
+      ) => DisplayPriceCurrency;
     } = { quietWindowMs: 0 },
     private readonly files?: Pick<WeixinFilePort, "download">,
     private readonly audios?: Pick<WeixinAudioPort, "download">,
@@ -330,6 +336,7 @@ export class WeixinConversationAdapter {
       );
       const rendered = renderWeixinCommandResult(
         result,
+        this.inputOptions.priceCurrency,
         this.inputOptions.exchangeRate?.() ?? null,
       );
       this.notifyCommand(

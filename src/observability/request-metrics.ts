@@ -33,6 +33,21 @@ export function calculateModelRequestCostNanos(
   >,
   pricing: ModelRequestPricingSnapshot | null,
 ): number | null {
+  return calculateModelRequestCostComponents(usage, pricing)?.totalCostNanos ?? null;
+}
+
+export function calculateModelRequestCostComponents(
+  usage: Pick<
+    ModelRequestMetricSample,
+    "inputTokens" | "cachedInputTokens" | "outputTokens"
+  >,
+  pricing: ModelRequestPricingSnapshot | null,
+): {
+  uncachedInputCostNanos: number;
+  cachedInputCostNanos: number;
+  outputCostNanos: number;
+  totalCostNanos: number;
+} | null {
   if (!pricing || pricing.currency === null) return null;
   const uncachedInputTokens = usage.inputTokens !== null
     && usage.cachedInputTokens !== null
@@ -59,7 +74,13 @@ export function calculateModelRequestCostNanos(
     return null;
   }
   const total = uncachedInputCost + cachedInputCost + outputCost;
-  return Number.isSafeInteger(total) ? total : null;
+  if (!Number.isSafeInteger(total)) return null;
+  return {
+    uncachedInputCostNanos: uncachedInputCost,
+    cachedInputCostNanos: cachedInputCost,
+    outputCostNanos: outputCost,
+    totalCostNanos: total,
+  };
 }
 
 function componentCost(
@@ -140,6 +161,9 @@ export interface StoredTurnRequestMetricsSummary {
   pricingCurrency: string | null;
   pricedRequestCount: number;
   totalCostNanos: number | null;
+  inputCostNanos: number | null;
+  cachedInputCostNanos: number | null;
+  outputCostNanos: number | null;
   uncachedInputPricePerMillionNanos: number | null;
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
@@ -161,6 +185,9 @@ export interface StoredThreadRequestMetricsAggregate {
   pricingCurrency: string | null;
   pricedRequestCount: number;
   totalCostNanos: number | null;
+  inputCostNanos: number | null;
+  cachedInputCostNanos: number | null;
+  outputCostNanos: number | null;
   uncachedInputPricePerMillionNanos: number | null;
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
@@ -203,6 +230,9 @@ export interface StoredModelRequestMetricsAggregate {
   pricingCurrency: string | null;
   pricedRequestCount: number;
   totalCostNanos: number | null;
+  inputCostNanos: number | null;
+  cachedInputCostNanos: number | null;
+  outputCostNanos: number | null;
   uncachedInputPricePerMillionNanos: number | null;
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;

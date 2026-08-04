@@ -2,6 +2,7 @@ import type { Logger } from "pino";
 
 import type {
   ConversationUseCases,
+  DisplayPriceCurrency,
   ExchangeRateSnapshot,
 } from "../../application/index.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
@@ -108,6 +109,9 @@ export interface FeishuSurfaceOptions {
   planUpdatesEnabled?: boolean;
   debugEnabled?: boolean;
   exchangeRate?: () => ExchangeRateSnapshot | null;
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency;
   configurationRecipients?: () => readonly string[];
   startupNotification?: FeishuStartupNotification;
 }
@@ -197,6 +201,9 @@ export class FeishuSurface implements SurfaceAdapter {
         ...(options.exchangeRate === undefined
           ? {}
           : { exchangeRate: options.exchangeRate }),
+        ...(options.priceCurrency === undefined
+          ? {}
+          : { priceCurrency: options.priceCurrency }),
       },
     );
     this.interactions = new FeishuInteractionPort(
@@ -259,6 +266,9 @@ export class FeishuSurface implements SurfaceAdapter {
         ...(options.exchangeRate === undefined
           ? {}
           : { exchangeRate: options.exchangeRate }),
+        ...(options.priceCurrency === undefined
+          ? {}
+          : { priceCurrency: options.priceCurrency }),
         ...(files === undefined ? {} : { files }),
         audios: this.audios,
         ...(quotedMessages === undefined

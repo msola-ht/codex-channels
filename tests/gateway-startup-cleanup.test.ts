@@ -70,6 +70,7 @@ describe("GatewayApplication startup cleanup", () => {
           close: () => calls.push("close:model-pricing"),
         },
         exchangeRate: {
+          start: () => undefined,
           close: () => undefined,
         },
         stopping: false,
@@ -186,6 +187,7 @@ describe("GatewayApplication startup cleanup", () => {
         close: () => undefined,
       },
       exchangeRate: {
+        start: () => undefined,
         close: () => undefined,
       },
       stopping: false,
@@ -280,6 +282,7 @@ describe("GatewayApplication startup cleanup", () => {
         close: () => undefined,
       },
       exchangeRate: {
+        start: () => undefined,
         close: () => undefined,
       },
       stopping: false,

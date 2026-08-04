@@ -12,11 +12,17 @@ describe("mergeSessionReferenceCost", () => {
       requestCount: 1,
       pricedRequestCount: 1,
       totalCostNanos: 100_000,
+      inputCostNanos: 40_000,
+      cachedInputCostNanos: 20_000,
+      outputCostNanos: 40_000,
     });
     const threadAggregate = threadSummary({
       requestCount: 5,
       pricedRequestCount: 4,
       totalCostNanos: 500_000,
+      inputCostNanos: 200_000,
+      cachedInputCostNanos: 100_000,
+      outputCostNanos: 200_000,
     });
 
     expect(mergeSessionReferenceCost({
@@ -29,6 +35,9 @@ describe("mergeSessionReferenceCost", () => {
       requestCount: 2,
       pricedRequestCount: 2,
       totalCostNanos: 250_000,
+      inputCostNanos: 100_000,
+      cachedInputCostNanos: 50_000,
+      outputCostNanos: 100_000,
       ...rates,
       hasMixedPrices: false,
     })).toEqual({
@@ -36,6 +45,9 @@ describe("mergeSessionReferenceCost", () => {
       requestCount: 6,
       pricedRequestCount: 5,
       totalCostNanos: 650_000,
+      inputCostNanos: 260_000,
+      cachedInputCostNanos: 130_000,
+      outputCostNanos: 260_000,
       ...rates,
       hasMixedPrices: false,
     });
@@ -46,6 +58,9 @@ describe("mergeSessionReferenceCost", () => {
       requestCount: 4,
       pricedRequestCount: 4,
       totalCostNanos: 400_000,
+      inputCostNanos: 160_000,
+      cachedInputCostNanos: 80_000,
+      outputCostNanos: 160_000,
     });
     expect(mergeSessionReferenceCost({
       threadId: "thread-1",
@@ -57,6 +72,9 @@ describe("mergeSessionReferenceCost", () => {
       requestCount: 1,
       pricedRequestCount: 1,
       totalCostNanos: 200_000,
+      inputCostNanos: 80_000,
+      cachedInputCostNanos: 40_000,
+      outputCostNanos: 80_000,
       ...rates,
       outputPricePerMillionNanos: 300_000_000,
       hasMixedPrices: false,
@@ -65,6 +83,9 @@ describe("mergeSessionReferenceCost", () => {
       requestCount: 5,
       pricedRequestCount: 5,
       totalCostNanos: 600_000,
+      inputCostNanos: 240_000,
+      cachedInputCostNanos: 120_000,
+      outputCostNanos: 240_000,
       uncachedInputPricePerMillionNanos: null,
       cachedInputPricePerMillionNanos: null,
       outputPricePerMillionNanos: null,
@@ -78,6 +99,9 @@ describe("mergeSessionReferenceCost", () => {
       pricedRequestCount: 0,
       pricingCurrency: null,
       totalCostNanos: null,
+      inputCostNanos: null,
+      cachedInputCostNanos: null,
+      outputCostNanos: null,
       uncachedInputPricePerMillionNanos: null,
       cachedInputPricePerMillionNanos: null,
       outputPricePerMillionNanos: null,
@@ -86,6 +110,9 @@ describe("mergeSessionReferenceCost", () => {
       requestCount: 5,
       pricedRequestCount: 4,
       totalCostNanos: 500_000,
+      inputCostNanos: 200_000,
+      cachedInputCostNanos: 100_000,
+      outputCostNanos: 200_000,
     });
 
     expect(mergeSessionReferenceCost({
@@ -98,6 +125,9 @@ describe("mergeSessionReferenceCost", () => {
       requestCount: 1,
       pricedRequestCount: 1,
       totalCostNanos: 150_000,
+      inputCostNanos: 60_000,
+      cachedInputCostNanos: 30_000,
+      outputCostNanos: 60_000,
       ...rates,
       hasMixedPrices: false,
     })).toEqual({
@@ -105,6 +135,9 @@ describe("mergeSessionReferenceCost", () => {
       requestCount: 5,
       pricedRequestCount: 5,
       totalCostNanos: 650_000,
+      inputCostNanos: 260_000,
+      cachedInputCostNanos: 130_000,
+      outputCostNanos: 260_000,
       ...rates,
       hasMixedPrices: false,
     });
@@ -135,6 +168,9 @@ function turnSummary(
     pricingCurrency: "USD",
     pricedRequestCount: 0,
     totalCostNanos: null,
+    inputCostNanos: null,
+    cachedInputCostNanos: null,
+    outputCostNanos: null,
     ...rates,
     hasMixedPrices: false,
     ...overrides,

@@ -1,6 +1,9 @@
 import type { Logger } from "pino";
 
-import type { ExchangeRateSnapshot } from "../../application/index.js";
+import type {
+  DisplayPriceCurrency,
+  ExchangeRateSnapshot,
+} from "../../application/index.js";
 import {
   isCriticalOutputEvent,
   type ConversationTarget,
@@ -89,6 +92,9 @@ export interface WeixinOutboxOptions {
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
   exchangeRate?: () => ExchangeRateSnapshot | null;
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency;
   onReplyContextInvalidated?: (target: ConversationTarget) => Promise<void>;
   imageClient?: Pick<WeixinImageSendProtocolClient, "sendImage">;
   fileClient?: Pick<WeixinFileSendProtocolClient, "sendFile">;
@@ -342,6 +348,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
         return formatWeixinCommandText(
           renderWeixinTurnCompleted(
             event,
+            this.options.priceCurrency,
             this.options.exchangeRate?.() ?? null,
           ),
         );

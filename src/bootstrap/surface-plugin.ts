@@ -2,6 +2,7 @@ import type { Logger } from "pino";
 
 import type {
   ConversationUseCases,
+  DisplayPriceCurrency,
   ExchangeRateSnapshot,
 } from "../application/index.js";
 import type { ConfigChange, GatewayConfig } from "../config/index.js";
@@ -23,6 +24,9 @@ export interface SurfacePluginContext {
   codexUpstreamUserAgent: () => string | undefined;
   onFatal(surface: string, accountId: string, error: Error): void;
   exchangeRate: () => ExchangeRateSnapshot | null;
+  priceCurrency: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency;
 }
 
 export interface BuiltInSurfacePlugin {

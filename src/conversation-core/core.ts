@@ -59,6 +59,9 @@ interface TurnTimingState {
   pricingRateConflict: boolean;
   pricedRequestCount: number;
   totalCostNanos: number;
+  uncachedInputCostNanos: number;
+  cachedInputCostNanos: number;
+  outputCostNanos: number;
   timedNonReasoningOutputTokens: number;
   timedOutputDurationMs: number;
   outputSpeedSampleCount: number;
@@ -277,6 +280,9 @@ export class ConversationCore {
           pricingRateConflict: false,
           pricedRequestCount: 0,
           totalCostNanos: 0,
+          uncachedInputCostNanos: 0,
+          cachedInputCostNanos: 0,
+          outputCostNanos: 0,
           timedNonReasoningOutputTokens: 0,
           timedOutputDurationMs: 0,
           outputSpeedSampleCount: 0,
@@ -454,6 +460,9 @@ export class ConversationCore {
             }
             timing.pricedRequestCount += 1;
             timing.totalCostNanos += event.totalCostNanos;
+            timing.uncachedInputCostNanos += event.uncachedInputCostNanos ?? 0;
+            timing.cachedInputCostNanos += event.cachedInputCostNanos ?? 0;
+            timing.outputCostNanos += event.outputCostNanos ?? 0;
           }
           if (event.outputTokens !== undefined) {
             const nonReasoningOutputTokens = Math.max(
@@ -825,6 +834,18 @@ export class ConversationCore {
           || timing.pricedRequestCount === 0
           ? null
           : timing.totalCostNanos,
+        inputCostNanos: timing.pricingCurrencyConflict
+          || timing.pricedRequestCount === 0
+          ? null
+          : timing.uncachedInputCostNanos,
+        cachedInputCostNanos: timing.pricingCurrencyConflict
+          || timing.pricedRequestCount === 0
+          ? null
+          : timing.cachedInputCostNanos,
+        outputCostNanos: timing.pricingCurrencyConflict
+          || timing.pricedRequestCount === 0
+          ? null
+          : timing.outputCostNanos,
         pricedRequestCount: timing.pricedRequestCount,
         requestCount: timing.modelRequestCount,
         uncachedInputPricePerMillionNanos: timing.pricingRateConflict

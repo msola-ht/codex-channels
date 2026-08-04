@@ -1,8 +1,14 @@
-import type { ExchangeRateSnapshot } from "../application/index.js";
+import type {
+  DisplayPriceCurrency,
+  ExchangeRateSnapshot,
+} from "../application/index.js";
 
 export interface ReferenceCostDisplay {
   currency: string | null;
   totalCostNanos: number | null;
+  inputCostNanos: number | null;
+  cachedInputCostNanos: number | null;
+  outputCostNanos: number | null;
   pricedRequestCount: number;
   requestCount: number;
   uncachedInputPricePerMillionNanos: number | null;
@@ -24,26 +30,23 @@ export function formatReferenceCostTotal(
   return `${formatCurrencyNanos(value.currency, value.totalCostNanos)}（已计价 ${value.pricedRequestCount}/${value.requestCount} ${requestLabel}）`;
 }
 
-export function formatReferenceUnitPrices(
+export function formatReferenceCostBreakdown(
   value: ReferenceCostDisplay,
 ): string[] {
-  if (value.pricedRequestCount === 0) return [];
-  if (value.hasMixedPrices) {
-    return ["单价（/M Token）：存在多档价格"];
+  if (value.currency === null || value.pricedRequestCount === 0) return [];
+  const lines: string[] = [];
+  if (value.inputCostNanos !== null) {
+    lines.push(`输入价格：${formatCurrencyNanos(value.currency, value.inputCostNanos)}`);
   }
-  if (
-    value.currency === null
-    || value.uncachedInputPricePerMillionNanos === null
-    || value.cachedInputPricePerMillionNanos === null
-    || value.outputPricePerMillionNanos === null
-  ) {
-    return ["单价（/M Token）：未知"];
+  if (value.cachedInputCostNanos !== null) {
+    lines.push(
+      `缓存价格：${formatCurrencyNanos(value.currency, value.cachedInputCostNanos)}`,
+    );
   }
-  return [
-    `输入单价：${formatCurrencyNanos(value.currency, value.uncachedInputPricePerMillionNanos)}/M Token`,
-    `缓存输入单价：${formatCurrencyNanos(value.currency, value.cachedInputPricePerMillionNanos)}/M Token`,
-    `输出单价：${formatCurrencyNanos(value.currency, value.outputPricePerMillionNanos)}/M Token`,
-  ];
+  if (value.outputCostNanos !== null) {
+    lines.push(`输出价格：${formatCurrencyNanos(value.currency, value.outputCostNanos)}`);
+  }
+  return lines;
 }
 
 export function formatCurrencyNanos(currency: string, value: number): string {
@@ -57,20 +60,41 @@ export function formatCurrencyNanos(currency: string, value: number): string {
   }).format(amount);
 }
 
-export function formatReferenceCostCnyValue(
+export function toDisplayReferenceCost(
   value: ReferenceCostDisplay,
-  exchangeRate: ExchangeRateSnapshot,
-): string | null {
+  currency: DisplayPriceCurrency,
+  exchangeRate: ExchangeRateSnapshot | null,
+): ReferenceCostDisplay {
   if (
-    value.currency !== "USD"
-    || value.totalCostNanos === null
-    || value.pricedRequestCount === 0
+    currency !== "cny"
+    || exchangeRate === null
+    || value.currency !== "USD"
   ) {
-    return null;
+    return value;
   }
-  const converted = Math.round(value.totalCostNanos * exchangeRate.usdToCny);
-  if (!Number.isSafeInteger(converted)) return null;
-  return `约 ${formatCurrencyNanos("CNY", converted)}（1 USD ≈ ${formatExchangeRate(exchangeRate.usdToCny)} CNY）`;
+  const rate = exchangeRate.usdToCny;
+  const convertedNanos = (input: number | null): number | null => {
+    if (input === null) return null;
+    const converted = Math.round(input * rate);
+    return Number.isSafeInteger(converted) ? converted : null;
+  };
+  return {
+    ...value,
+    currency: "CNY",
+    totalCostNanos: convertedNanos(value.totalCostNanos),
+    inputCostNanos: convertedNanos(value.inputCostNanos),
+    cachedInputCostNanos: convertedNanos(value.cachedInputCostNanos),
+    outputCostNanos: convertedNanos(value.outputCostNanos),
+    uncachedInputPricePerMillionNanos: convertedNanos(
+      value.uncachedInputPricePerMillionNanos,
+    ),
+    cachedInputPricePerMillionNanos: convertedNanos(
+      value.cachedInputPricePerMillionNanos,
+    ),
+    outputPricePerMillionNanos: convertedNanos(
+      value.outputPricePerMillionNanos,
+    ),
+  };
 }
 
 export function formatExchangeRateLine(exchangeRate: ExchangeRateSnapshot): string {
@@ -83,6 +107,6 @@ export function formatExchangeRateLine(exchangeRate: ExchangeRateSnapshot): stri
   }).format(new Date(exchangeRate.effectiveAtMs))}）`;
 }
 
-function formatExchangeRate(value: number): string {
+export function formatExchangeRate(value: number): string {
   return value.toFixed(4);
 }
