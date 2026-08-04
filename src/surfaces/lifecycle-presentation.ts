@@ -91,28 +91,26 @@ export function createStartupPresentation(
     title: "Codex Connect 已上线",
     fields: [{ label: "App Server", value: "已连接" }],
     sections: [
-      {
-        title: "运行环境",
-        fields: [
-          {
-            label: "系统",
-            value: `${platformLabel(runtime.platform)} · ${runtime.architecture}`,
-          },
-          {
-            label: "版本",
-            value: `Codex Connect ${runtime.gatewayVersion} · Node.js ${runtime.nodeVersion}`,
-          },
-          { label: "连接", value: runtime.transport },
-          {
-            label: "App Server UA",
-            value: formatUpstreamUserAgent(runtime.codexUpstreamUserAgent),
-          },
-          {
-            label: "调试模式",
-            value: runtime.debugEnabled ? "开启" : "关闭",
-          },
-        ],
-      },
+      ...(runtime.debugEnabled === true
+        ? [{
+            title: "运行环境",
+            fields: [
+              {
+                label: "系统",
+                value: `${platformLabel(runtime.platform)} · ${runtime.architecture}`,
+              },
+              {
+                label: "版本",
+                value: `Codex Connect ${runtime.gatewayVersion} · Node.js ${runtime.nodeVersion}`,
+              },
+              { label: "连接", value: runtime.transport },
+              {
+                label: "App Server UA",
+                value: formatUpstreamUserAgent(runtime.codexUpstreamUserAgent),
+              },
+            ],
+          }]
+        : []),
       {
         title: "当前会话",
         fields: [
@@ -182,6 +180,7 @@ export function createTurnCompletedPresentation(
     provider: string | null | undefined,
   ) => DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
+  debug = false,
 ): LifecyclePresentation {
   const currency = priceCurrency?.(event.modelProvider) ?? "usd";
   const sessionFields: LifecyclePresentationField[] = event.background
@@ -361,7 +360,7 @@ export function createTurnCompletedPresentation(
     });
   }
   const performanceFields: LifecyclePresentationField[] = [];
-  if (event.timing?.ttftMs !== undefined) {
+  if (debug && event.timing?.ttftMs !== undefined) {
     performanceFields.push({
       label: "最后请求首事件延迟",
       value: formatElapsedDuration(event.timing.ttftMs),

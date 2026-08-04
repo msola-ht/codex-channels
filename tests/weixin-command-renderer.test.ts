@@ -235,6 +235,7 @@ describe("Weixin command renderer", () => {
         transport: "Unix WebSocket",
         codexUpstreamUserAgent:
           "codex_connect_gateway/0.146.0 (Linux; x64) private-build-token (codex_connect_gateway; 0.146.0)",
+        debugEnabled: true,
       },
     );
     expect(startup).toContain("Codex Connect 已上线");

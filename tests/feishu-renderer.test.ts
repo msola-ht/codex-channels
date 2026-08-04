@@ -61,6 +61,7 @@ describe("Feishu output renderer", () => {
         transport: "Unix WebSocket",
         codexUpstreamUserAgent:
           "codex-cli/0.146.0 (macOS 15.0) build-secret (arm64)",
+        debugEnabled: true,
       },
     );
 
@@ -74,7 +75,6 @@ describe("Feishu output renderer", () => {
       "- 版本：Codex Connect 0.146.0 · Node.js v24.0.0",
       "- 连接：Unix WebSocket",
       "- App Server UA：codex-cli/0.146.0 (macOS 15.0) (arm64)",
-      "- 调试模式：关闭",
       "",
       "### 当前会话",
       "- Workspace：Main (main)",
@@ -694,7 +694,7 @@ describe("Feishu output renderer", () => {
         outputTokens: 483,
         totalTokens: 9_916,
       },
-    })).toBe([
+    }, undefined, undefined, true)).toBe([
       "## 图片识别完成",
       "- API 提供商：BLTCY",
       "- 调用模型：gpt-5.6-luna",

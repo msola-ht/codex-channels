@@ -95,6 +95,7 @@ export interface WeixinOutboxOptions {
   priceCurrency?: (
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
+  debugEnabled?: boolean;
   onReplyContextInvalidated?: (target: ConversationTarget) => Promise<void>;
   imageClient?: Pick<WeixinImageSendProtocolClient, "sendImage">;
   fileClient?: Pick<WeixinFileSendProtocolClient, "sendFile">;
@@ -330,7 +331,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
         );
       case "vision.completed":
         return formatWeixinCommandText(
-          formatVisionCompleted(event),
+          formatVisionCompleted(event, this.options.debugEnabled ?? false),
           { structuredFields: true },
         );
       case "user.message":
@@ -350,6 +351,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
             event,
             this.options.priceCurrency,
             this.options.exchangeRate?.() ?? null,
+            this.options.debugEnabled ?? false,
           ),
           { structuredFields: true },
         );

@@ -218,9 +218,10 @@ export class TelegramSurface {
         ...(options.exchangeRate === undefined
           ? {}
           : { exchangeRate: options.exchangeRate }),
-        ...(options.priceCurrency === undefined
-          ? {}
-          : { priceCurrency: options.priceCurrency }),
+      ...(options.priceCurrency === undefined
+        ? {}
+        : { priceCurrency: options.priceCurrency }),
+      debugEnabled: this.debugEnabled,
     });
     this.output = this.outbox;
     this.inputs = new SurfaceInputCoalescer(

@@ -97,9 +97,10 @@ export function renderWeixinTurnCompleted(
     provider: string | null | undefined,
   ) => DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
+  debug = false,
 ): string {
   return renderWeixinLifecyclePresentation(
-    createTurnCompletedPresentation(event, priceCurrency, exchangeRate),
+    createTurnCompletedPresentation(event, priceCurrency, exchangeRate, debug),
   );
 }
 

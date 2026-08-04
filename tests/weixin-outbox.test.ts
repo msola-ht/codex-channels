@@ -106,7 +106,10 @@ describe("WeixinOutbox", () => {
   });
 
   it("reports structured visual completion details with the recognition model", async () => {
-    const { outbox, sendText } = outboxFixture();
+    const { outbox, sendText } = outboxFixture(
+      undefined,
+      { debugEnabled: true },
+    );
 
     outbox.handle({
       type: "vision.completed",

@@ -172,6 +172,7 @@ export function renderFeishuOutput(
     provider: string | null | undefined,
   ) => DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
+  debug = false,
 ): string | null {
   switch (event.type) {
     case "vision.started":
@@ -179,7 +180,7 @@ export function renderFeishuOutput(
     case "vision.progress":
       return formatVisionProgress(event.elapsedSeconds);
     case "vision.completed":
-      return formatVisionCompleted(event);
+      return formatVisionCompleted(event, debug);
     case "turn.started":
       return renderFeishuLifecyclePresentation(
         createTurnStartedPresentation(event.background ? event.threadId : undefined),
@@ -196,7 +197,7 @@ export function renderFeishuOutput(
     case "plan.updated":
       return null;
     case "turn.completed":
-      return renderFeishuTurnCompleted(event, priceCurrency, exchangeRate);
+      return renderFeishuTurnCompleted(event, priceCurrency, exchangeRate, debug);
     case "thread.status":
       return `Thread 状态：${threadStatusLabel(event.status)}`;
     case "connection.lost":
@@ -218,9 +219,10 @@ function renderFeishuTurnCompleted(
     provider: string | null | undefined,
   ) => DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
+  debug = false,
 ): string {
   return renderFeishuLifecyclePresentation(
-    createTurnCompletedPresentation(event, priceCurrency, exchangeRate),
+    createTurnCompletedPresentation(event, priceCurrency, exchangeRate, debug),
   );
 }
 

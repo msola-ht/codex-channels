@@ -201,6 +201,7 @@ describe("formatStartupNotification", () => {
         nodeVersion: "v24.18.0",
         transport: "Unix WebSocket",
         codexUpstreamUserAgent: "codex_connect_gateway/0.146.0 (Mac OS 15.7.7; arm64) dumb (codex_connect_gateway; 0.146.0)",
+        debugEnabled: true,
       },
     );
 
@@ -247,6 +248,7 @@ describe("formatStartupNotification", () => {
         nodeVersion: "v22.13.0",
         transport: "Unix WebSocket",
         codexUpstreamUserAgent: null,
+        debugEnabled: true,
       },
     );
 

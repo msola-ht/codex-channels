@@ -204,6 +204,7 @@ export class FeishuSurface implements SurfaceAdapter {
         ...(options.priceCurrency === undefined
           ? {}
           : { priceCurrency: options.priceCurrency }),
+        debugEnabled: options.debugEnabled ?? false,
       },
     );
     this.interactions = new FeishuInteractionPort(

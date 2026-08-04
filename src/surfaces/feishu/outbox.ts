@@ -125,6 +125,7 @@ export interface FeishuOutboxOptions {
   priceCurrency?: (
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
+  debugEnabled?: boolean;
 }
 
 export class FeishuOutbox implements SurfaceOutputPort {
@@ -288,6 +289,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         event,
         this.options.priceCurrency,
         this.options.exchangeRate?.() ?? null,
+        this.options.debugEnabled ?? false,
       );
       if (
         completion !== null
@@ -308,6 +310,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       event,
       this.options.priceCurrency,
       this.options.exchangeRate?.() ?? null,
+      this.options.debugEnabled ?? false,
     );
     if (rendered === null) {
       return;

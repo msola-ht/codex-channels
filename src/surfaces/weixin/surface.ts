@@ -160,6 +160,7 @@ export class WeixinSurface implements SurfaceAdapter {
         ...(options.priceCurrency === undefined
           ? {}
           : { priceCurrency: options.priceCurrency }),
+        debugEnabled: options.debugEnabled ?? false,
         ...(options.replyContextPersistence === undefined
           ? {}
           : {

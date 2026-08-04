@@ -39,6 +39,7 @@ describe("shared Surface lifecycle presentation", () => {
           transport: "Unix WebSocket",
           codexUpstreamUserAgent:
             "codex/0.146.0 (Linux; x64) private-build (gateway; 0.146.0)",
+          debugEnabled: true,
         },
       ),
     );
@@ -53,7 +54,6 @@ describe("shared Surface lifecycle presentation", () => {
       "版本：Codex Connect 0.146.0 · Node.js v22.23.1",
       "连接：Unix WebSocket",
       "App Server UA：codex/0.146.0 (Linux; x64) (gateway; 0.146.0)",
-      "调试模式：关闭",
       "",
       "当前会话：",
       "Workspace：Main (main)",
@@ -231,7 +231,7 @@ describe("shared Surface lifecycle presentation", () => {
           outputPricePerMillionNanos: null,
           hasMixedPrices: true,
         },
-      }),
+      }, undefined, undefined, true),
     );
 
     expect(rendered).toContain("模型请求：2 次");

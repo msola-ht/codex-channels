@@ -221,7 +221,7 @@ describe("TelegramOutbox", () => {
 
   it("reports visual recognition heartbeats and structured completion details", async () => {
     const api = new FakeTelegramApi();
-    const outbox = createOutbox(api);
+    const outbox = createOutbox(api, "html", true);
 
     outbox.handle({
       type: "vision.progress",
@@ -1343,12 +1343,13 @@ describe("TelegramOutbox", () => {
 function createOutbox(
   api: FakeTelegramApi,
   finalMessageFormat: "html" | "rich" = "html",
+  debugEnabled = false,
 ): TelegramOutbox {
   return new TelegramOutbox(
     api as unknown as Api,
     pino({ level: "silent" }),
     undefined,
-    { finalMessageFormat },
+    { finalMessageFormat, ...(debugEnabled ? { debugEnabled: true } : {}) },
   );
 }
 

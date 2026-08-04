@@ -103,8 +103,9 @@ price_currency = "auto"
 
 在 `codexc setup` 中选择“系统设置 → 调试模式”可全局开启或关闭脱敏调试信息。开启后会把
 `[logging].level` 设为 `debug`，同时启用 Gateway 各模块的脱敏调试日志，并在渠道中显示
-`/vision` 的接收延迟与 Gateway 处理耗时；关闭后恢复为 `info`，隐藏这些技术字段。修改后只需
-重启 Gateway：
+`/vision` 的接收延迟与 Gateway 处理耗时、启动通知的“运行环境”小节、完成通知的“最后请求
+首事件延迟”以及视觉完成卡片的“视觉 API 耗时”；关闭后恢复为 `info`，隐藏这些技术字段。
+修改后只需重启 Gateway：
 
 ```bash
 codexc service restart gateway

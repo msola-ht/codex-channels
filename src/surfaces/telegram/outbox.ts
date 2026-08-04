@@ -105,6 +105,7 @@ export interface TelegramOutboxOptions {
   priceCurrency?: (
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
+  debugEnabled?: boolean;
 }
 
 export class TelegramOutbox {
@@ -189,7 +190,10 @@ export class TelegramOutbox {
         this.notifyPanel(chatId, formatVisionProgress(event.elapsedSeconds));
         return;
       case "vision.completed":
-        this.notifyPanel(chatId, formatVisionCompleted(event));
+        this.notifyPanel(
+          chatId,
+          formatVisionCompleted(event, this.options.debugEnabled ?? false),
+        );
         return;
       case "turn.started":
         this.replyTargets.bindPending(
@@ -416,6 +420,7 @@ export class TelegramOutbox {
                 event,
                 this.options.priceCurrency,
                 this.options.exchangeRate?.() ?? null,
+                this.options.debugEnabled ?? false,
               ),
             ),
             replyTo,

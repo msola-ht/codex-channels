@@ -24,7 +24,7 @@ export function formatVisionCompleted(details: {
   model: string;
   elapsedMs?: number;
   usage?: VisionTokenUsage;
-}): string {
+}, debug = false): string {
   const usage = details.usage;
   const tokenParts = usage === undefined
     ? []
@@ -51,7 +51,7 @@ export function formatVisionCompleted(details: {
     "## 图片识别完成",
     `- API 提供商：${details.provider}`,
     `- 调用模型：${details.model}`,
-    ...(details.elapsedMs === undefined
+    ...(!debug || details.elapsedMs === undefined
       ? []
       : [`- 视觉 API 耗时：${formatElapsedDuration(details.elapsedMs)}`]),
     ...(tokenParts.length === 0 || totalTokens === undefined
