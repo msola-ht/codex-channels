@@ -24,6 +24,7 @@ const feishuLocalCommandActions = [
   "feishu-status",
   "feishu-doctor",
   "goal-set",
+  "workspace-perm-profile",
   "review-branch",
   "review-commit",
   "review-custom",
@@ -539,7 +540,7 @@ function renderFeishuCategorizedCommandsCard(
       ]),
       sectionTitle("当前内容"),
       actionRow(token, [
-        ["工作区权益", "workspace-perm", "default"],
+        ["工作区权限", "workspace-perm", "default"],
         ["权限", "permissions", "default"],
         ["Diff", "diff", "default"],
         ["项目规则", "rules", "default"],

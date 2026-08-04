@@ -67,7 +67,7 @@ level = "info"
 id = "main"
 name = "Main Project"
 cwd = "/absolute/path/to/project"
-# 工作区权益（可选，不配置时使用全局默认）：
+# 工作区权限（可选，不配置时使用全局默认）：
 # 沙箱：read-only / workspace-write / danger-full-access
 sandbox = "workspace-write"
 # 审批：untrusted / on-request / never

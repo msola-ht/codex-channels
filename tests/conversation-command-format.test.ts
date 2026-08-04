@@ -51,7 +51,7 @@ describe("provider-aware conversation command formatting", () => {
       },
     });
 
-    expect(rendered).toContain("工作区权益（Main · main）");
+    expect(rendered).toContain("工作区权限（Main · main）");
     expect(rendered).toContain("- 沙箱：只读");
     expect(rendered).toContain("/workspace-perm approval");
     expect(rendered).toContain("/workspace-perm profile");
@@ -68,7 +68,7 @@ describe("provider-aware conversation command formatting", () => {
       },
     });
 
-    expect(rendered).toContain("已更新工作区权益");
+    expect(rendered).toContain("已更新工作区权限");
     expect(rendered).toContain("- 审批：免审批");
     expect(rendered).toContain("对新建或恢复的 Thread 生效");
   });

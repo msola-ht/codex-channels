@@ -43,7 +43,7 @@ export const conversationCommandDescriptions = {
   unpin: "取消固定当前会话",
   status: "查看当前状态",
   workspace: "列出或切换 Workspace",
-  "workspace-perm": "查看或修改当前工作区权益",
+  "workspace-perm": "查看或修改当前工作区权限",
   stop: "停止当前任务",
   queue: "排到下一 Turn",
   rename: "命名当前会话",
@@ -208,7 +208,7 @@ export function formatConversationCommandOutcome(
       ].join("\n"));
     case "workspace.entitlements-updated":
       return toStructuredMarkdownList([
-        "已更新工作区权益",
+        "已更新工作区权限",
         `Workspace：${outcome.workspace.name}`,
         ...workspaceEntitlementLines(outcome.workspace),
         "",
@@ -303,7 +303,7 @@ export function formatConversationWorkspaceEntitlements(
 ): string {
   const entitlementLines = workspaceEntitlementLines(result.workspace);
   return toStructuredMarkdownList([
-    `工作区权益（${result.workspace.name} · ${result.workspace.id}）：`,
+    `工作区权限（${result.workspace.name} · ${result.workspace.id}）：`,
     ...(entitlementLines.length > 0
       ? entitlementLines
       : ["未配置（使用全局默认）"]),

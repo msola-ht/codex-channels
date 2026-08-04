@@ -186,8 +186,8 @@ codexc ws remove <序号|ID|名称>      # 删除注册，不删除项目文件
 
 每个 Workspace 还可以在 `config.toml` 中配置独立权益：`sandbox`（只读 / 工作区写 / 完全访问）、
 `approval_policy`（按需审批 / 不信任 / 免审批）和权限 Profile `permissions`（与 `sandbox` 互斥）。
-不配置时使用全局默认；`/workspace` 会显示当前配置的权益，已授权用户还可在渠道内用
-`/workspace-perm` 查看或修改当前工作区权益（沙箱、审批策略、权限 Profile），写回后热加载，
+不配置时使用全局默认；`/workspace` 会显示当前配置的权限，已授权用户还可在渠道内用
+`/workspace-perm` 查看或修改当前工作区权限（沙箱、审批策略、权限 Profile），写回后热加载，
 对新建或恢复的 Thread 生效。
 
 ### 在终端继续会话

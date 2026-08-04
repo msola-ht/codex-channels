@@ -353,6 +353,19 @@ export class FeishuConversationAdapter {
       if (initialChoices) {
         return initialChoices;
       }
+      if (action === "workspace-perm" && isWorkspacePermissionField(input)) {
+        return renderWorkspacePermissionFieldChoices(input);
+      }
+      if (action === "workspace-perm-profile") {
+        return {
+          kind: "form",
+          title: "权限 Profile",
+          action: "workspace-perm",
+          fieldLabel: "Profile ID",
+          placeholder: ":read-only、:workspace、:danger-full-access 或自定义",
+          inputPrefix: "profile ",
+        };
+      }
       const form = input === "" ? renderCommandCenterForm(action) : undefined;
       if (form) {
         return form;
@@ -938,6 +951,38 @@ function renderCommandCenterChoices(
       })),
     };
   }
+  if (
+    action === "workspace-perm"
+    && result.kind === "workspace-entitlements"
+  ) {
+    return {
+      title: "工作区权限",
+      description: `当前：${workspacePermissionSummary(result.workspace)}`,
+      choices: [
+        {
+          label: `沙箱：${workspacePermissionLabel(
+            "sandbox",
+            result.workspace.sandbox,
+          )}`,
+          action: "workspace-perm",
+          input: "sandbox",
+        },
+        {
+          label: `审批：${workspacePermissionLabel(
+            "approval",
+            result.workspace.approvalPolicy,
+          )}`,
+          action: "workspace-perm",
+          input: "approval",
+        },
+        {
+          label: `权限 Profile：${result.workspace.permissions ?? "未配置"}`,
+          action: "workspace-perm-profile",
+          input: "",
+        },
+      ],
+    };
+  }
   if (result.kind !== "models") {
     return undefined;
   }
@@ -998,6 +1043,103 @@ function renderCommandCenterChoices(
     };
   }
   return undefined;
+}
+
+function isWorkspacePermissionField(
+  value: string,
+): value is "sandbox" | "approval" {
+  return value === "sandbox" || value === "approval";
+}
+
+function renderWorkspacePermissionFieldChoices(
+  field: "sandbox" | "approval",
+): FeishuCommandCenterChoices {
+  if (field === "sandbox") {
+    return {
+      title: "选择沙箱模式",
+      choices: [
+        {
+          label: "只读",
+          action: "workspace-perm",
+          input: "sandbox read-only",
+        },
+        {
+          label: "工作区可写",
+          action: "workspace-perm",
+          input: "sandbox workspace-write",
+        },
+        {
+          label: "完全访问",
+          action: "workspace-perm",
+          input: "sandbox danger-full-access",
+        },
+        {
+          label: "清除（使用全局）",
+          action: "workspace-perm",
+          input: "sandbox clear",
+        },
+      ],
+    };
+  }
+  return {
+    title: "选择审批策略",
+    choices: [
+      {
+        label: "不信任",
+        action: "workspace-perm",
+        input: "approval untrusted",
+      },
+      {
+        label: "按需审批",
+        action: "workspace-perm",
+        input: "approval on-request",
+      },
+      {
+        label: "免审批",
+        action: "workspace-perm",
+        input: "approval never",
+      },
+      {
+        label: "清除（使用默认）",
+        action: "workspace-perm",
+        input: "approval clear",
+      },
+    ],
+  };
+}
+
+function workspacePermissionSummary(
+  workspace: Extract<
+    ConversationCommandResult,
+    { kind: "workspace-entitlements" }
+  >["workspace"],
+): string {
+  return [
+    `沙箱：${workspacePermissionLabel("sandbox", workspace.sandbox)}`,
+    `审批：${workspacePermissionLabel("approval", workspace.approvalPolicy)}`,
+    `Profile：${workspace.permissions ?? "未配置"}`,
+  ].join(" · ");
+}
+
+function workspacePermissionLabel(
+  field: "sandbox" | "approval",
+  value: string | undefined,
+): string {
+  if (value === undefined) {
+    return "未配置";
+  }
+  const labels = field === "sandbox"
+    ? ({
+        "read-only": "只读",
+        "workspace-write": "工作区可写",
+        "danger-full-access": "完全访问",
+      } as const)
+    : ({
+        untrusted: "不信任",
+        "on-request": "按需审批",
+        never: "免审批",
+      } as const);
+  return (labels as Record<string, string>)[value] ?? value;
 }
 
 class FeishuOutputQueueError extends Error {

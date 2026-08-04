@@ -508,6 +508,84 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent[1]?.text).toContain("已使用 Skill 开始任务");
   });
 
+  it("turns workspace permission updates into clickable card choices", async () => {
+    const fixture = createOutbox();
+    const updateWorkspaceEntitlements = vi.fn(async () => ({
+      id: "codex-connect",
+      name: "Workspace",
+      cwd: "/workspace",
+      approvalPolicy: "never",
+    }));
+    const adapter = new FeishuConversationAdapter(
+      {
+        status: () => ({ workspaceId: "codex-connect" }),
+        listWorkspaces: () => [{
+          id: "codex-connect",
+          name: "Workspace",
+          cwd: "/workspace",
+          sandbox: "read-only",
+        }],
+        updateWorkspaceEntitlements,
+      } as unknown as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+    );
+
+    const first = await adapter.handleCommandCenterAction(
+      message.target,
+      "workspace-perm",
+      message.actorId,
+      "",
+    );
+    expect(first).toMatchObject({
+      title: "工作区权限",
+      choices: [
+        expect.objectContaining({ input: "sandbox" }),
+        expect.objectContaining({ input: "approval" }),
+        expect.objectContaining({ action: "workspace-perm-profile" }),
+      ],
+    });
+
+    const second = await adapter.handleCommandCenterAction(
+      message.target,
+      "workspace-perm",
+      message.actorId,
+      "sandbox",
+    );
+    expect(second).toMatchObject({
+      title: "选择沙箱模式",
+      choices: expect.arrayContaining([
+        expect.objectContaining({ input: "sandbox read-only" }),
+        expect.objectContaining({ input: "sandbox danger-full-access" }),
+      ]),
+    });
+
+    const profileForm = await adapter.handleCommandCenterAction(
+      message.target,
+      "workspace-perm-profile",
+      message.actorId,
+      "",
+    );
+    expect(profileForm).toMatchObject({
+      kind: "form",
+      action: "workspace-perm",
+      inputPrefix: "profile ",
+    });
+
+    await adapter.handleCommandCenterAction(
+      message.target,
+      "workspace-perm",
+      message.actorId,
+      "approval never",
+    );
+    await fixture.outbox.close();
+    expect(updateWorkspaceEntitlements).toHaveBeenCalledWith(message.target, {
+      kind: "approval",
+      value: "never",
+    });
+    expect(fixture.sent[0]?.text).toContain("已更新工作区权限");
+  });
+
   it("turns active and archived session results into exact card choices", async () => {
     const fixture = createOutbox();
     const sessions = [{
