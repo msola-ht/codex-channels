@@ -32,10 +32,18 @@ export interface LifecyclePresentation {
   sections?: readonly LifecyclePresentationSection[];
 }
 
-export interface LifecyclePresentationField {
+export interface LifecyclePresentationLeafField {
   label: string;
   value: string;
+  subfields?: readonly LifecyclePresentationLeafField[];
 }
+
+export type LifecyclePresentationField =
+  | LifecyclePresentationLeafField
+  | {
+      title: string;
+      fields: readonly LifecyclePresentationField[];
+    };
 
 export interface LifecyclePresentationSection {
   title: string;
@@ -223,9 +231,6 @@ export function createTurnCompletedPresentation(
       value: formatCodexProviderLabel(event.modelProvider),
     });
   }
-  if (fallbackCacheField) {
-    runFields.push(fallbackCacheField);
-  }
   if (event.contextCompactionCount !== undefined) {
     sessionFields.push({
       label: "上下文压缩",
@@ -285,6 +290,56 @@ export function createTurnCompletedPresentation(
       value: formatElapsedDuration(event.timing.modelRequestDurationMs),
     });
   }
+  if (event.timing?.requestInputTokens !== undefined) {
+    const outputTokens = (event.timing.nonReasoningOutputTokens ?? 0)
+      + (event.timing.reasoningTokens ?? 0);
+    runFields.push({
+      label: "总 Token",
+      value: formatTokenCount(event.timing.requestInputTokens + outputTokens),
+    });
+  }
+  if (fallbackCacheField) {
+    runFields.push(fallbackCacheField);
+  }
+  if (
+    event.timing?.requestInputTokens !== undefined
+    && event.timing.requestCachedInputTokens !== undefined
+  ) {
+    const inputTokens = event.timing.requestInputTokens;
+    const cachedInputTokens = event.timing.requestCachedInputTokens;
+    const reasoningOutputTokens = event.timing.reasoningTokens ?? 0;
+    const outputTokens = (event.timing.nonReasoningOutputTokens ?? 0)
+      + reasoningOutputTokens;
+    runFields.push({
+      title: "Token",
+      fields: [
+        {
+          label: "输入",
+          value: formatTokenCount(inputTokens),
+          subfields: [{
+            label: "命中缓存",
+            value: formatTokenCount(cachedInputTokens),
+          }],
+        },
+        {
+          label: "输出",
+          value: formatTokenCount(outputTokens),
+          ...(reasoningOutputTokens > 0
+            ? {
+                subfields: [{
+                  label: "其中推理输出",
+                  value: formatTokenCount(reasoningOutputTokens),
+                }],
+              }
+            : {}),
+        },
+        {
+          label: "缓存命中率",
+          value: formatCacheHitRate(inputTokens, cachedInputTokens),
+        },
+      ],
+    });
+  }
   if (event.timing?.referenceCost) {
     const successfulRequestCount = event.timing.completedModelRequestCount;
     const displayCost = toDisplayReferenceCost(
@@ -293,49 +348,40 @@ export function createTurnCompletedPresentation(
       exchangeRate ?? null,
     );
     runFields.push({
-      label: "参考总价",
-      value: successfulRequestCount !== undefined && successfulRequestCount > 0
-        ? formatReferenceCostTotal({
-            ...displayCost,
-            requestCount: successfulRequestCount,
-          }, "个成功请求")
-        : formatReferenceCostTotal(displayCost),
-    });
-    if (displayCost.currency !== null) {
-      for (const [label, costNanos] of [
-        ["输入价格", displayCost.inputCostNanos],
-        ["缓存价格", displayCost.cachedInputCostNanos],
-        ["输出价格", displayCost.outputCostNanos],
-      ] as const) {
-        if (costNanos !== null) {
-          runFields.push({
-            label,
-            value: formatCurrencyNanos(displayCost.currency, costNanos),
-          });
-        }
-      }
-    }
-  }
-  if (
-    event.timing?.requestInputTokens !== undefined
-    && event.timing.requestCachedInputTokens !== undefined
-  ) {
-    runFields.push({
-      label: "本次请求缓存命中率",
-      value: formatCacheHitRate(
-        event.timing.requestInputTokens,
-        event.timing.requestCachedInputTokens ?? 0,
-      ),
+      title: "费用",
+      fields: [{
+        label: "参考总价",
+        value: successfulRequestCount !== undefined && successfulRequestCount > 0
+          ? formatReferenceCostTotal({
+              ...displayCost,
+              requestCount: successfulRequestCount,
+            }, "个成功请求")
+          : formatReferenceCostTotal(displayCost),
+        ...(displayCost.currency === null
+          ? {}
+          : {
+              subfields: ([
+                ["输入价格", displayCost.inputCostNanos],
+                ["缓存价格", displayCost.cachedInputCostNanos],
+                ["输出价格", displayCost.outputCostNanos],
+              ] as const).flatMap(([label, costNanos]) =>
+                costNanos === null
+                  ? []
+                  : [{ label, value: formatCurrencyNanos(displayCost.currency!, costNanos) }],
+              ),
+            }),
+      }],
     });
   }
+  const performanceFields: LifecyclePresentationField[] = [];
   if (event.timing?.ttftMs !== undefined) {
-    runFields.push({
+    performanceFields.push({
       label: "最后请求首事件延迟",
       value: formatElapsedDuration(event.timing.ttftMs),
     });
   }
   if (event.timing?.firstResponseLatencyMs !== undefined) {
-    runFields.push({
+    performanceFields.push({
       label: "首段回复延迟",
       value: formatElapsedDuration(event.timing.firstResponseLatencyMs),
     });
@@ -345,7 +391,7 @@ export function createTurnCompletedPresentation(
       event.timing.outputSpeedTimedCount,
       event.timing.outputSpeedSampleCount,
     );
-    runFields.push({
+    performanceFields.push({
       label: event.timing.modelRequestCount === undefined
         ? "输出速度"
         : "综合输出速度",
@@ -357,7 +403,7 @@ export function createTurnCompletedPresentation(
       event.timing.thinkingSpeedTimedCount,
       event.timing.thinkingSpeedSampleCount,
     );
-    runFields.push({
+    performanceFields.push({
       label: event.timing.modelRequestCount === undefined
         ? "思考速度"
         : "综合思考速度",
@@ -369,12 +415,21 @@ export function createTurnCompletedPresentation(
       event.timing.generationSpeedTimedCount,
       event.timing.generationSpeedSampleCount,
     );
-    runFields.push({
+    performanceFields.push({
       label: event.timing.modelRequestCount === undefined
         ? "生成速度"
         : "综合生成速度",
       value: `${formatTokensPerSecond(event.timing.generationTokensPerSecond)}（含推理${speedCoverage}）`,
     });
+  }
+  if (event.durationMs !== undefined) {
+    performanceFields.push({
+      label: "总耗时",
+      value: formatElapsedDuration(event.durationMs),
+    });
+  }
+  if (performanceFields.length > 0) {
+    runFields.push({ title: "性能", fields: performanceFields });
   }
   if (Object.hasOwn(event, "gitBranch")) {
     sessionFields.push({
@@ -392,12 +447,6 @@ export function createTurnCompletedPresentation(
           exchangeRate ?? null,
         ),
       ),
-    });
-  }
-  if (event.durationMs !== undefined) {
-    runFields.push({
-      label: "总耗时",
-      value: formatElapsedDuration(event.durationMs),
     });
   }
   const sections = [
@@ -451,11 +500,33 @@ export function renderStructuredLifecyclePresentation(
 }
 
 function formatStructuredField(field: LifecyclePresentationField): string {
-  return `- ${field.label}：${field.value}`;
+  if ("title" in field) {
+    return [
+      `- **${field.title}**`,
+      ...field.fields.flatMap((subfield) =>
+        formatStructuredField(subfield).split("\n").map((line) => `  ${line}`)),
+    ].join("\n");
+  }
+  return [
+    `- ${field.label}：${field.value}`,
+    ...(field.subfields ?? []).map((subfield) =>
+      `  - ${subfield.label}：${subfield.value}`),
+  ].join("\n");
 }
 
 function formatField(field: LifecyclePresentationField): string {
-  return `${field.label}：${field.value}`;
+  if ("title" in field) {
+    return [
+      field.title,
+      ...field.fields.flatMap((subfield) =>
+        formatField(subfield).split("\n").map((line) => `  ${line}`)),
+    ].join("\n");
+  }
+  return [
+    `${field.label}：${field.value}`,
+    ...(field.subfields ?? []).map((subfield) =>
+      `  ${subfield.label}：${subfield.value}`),
+  ].join("\n");
 }
 
 function formatSpeedCoverage(

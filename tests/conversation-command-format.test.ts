@@ -7,6 +7,7 @@ import {
   formatConversationStatus,
   formatConversationUsage,
 } from "../src/surfaces/conversation-command-format.js";
+import { formatCurrencyNanos } from "../src/surfaces/reference-cost-format.js";
 
 describe("provider-aware conversation command formatting", () => {
   it("warns that a pending Provider switch starts a new recoverable Thread", () => {
@@ -190,6 +191,8 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("### 最近运行聚合");
     expect(rendered).toContain("#### Token");
     expect(rendered).toContain("  - 命中缓存：24 K");
+    expect(rendered).toContain("合计：30.9 K");
+    expect(rendered).toContain("合计：184.2 K");
     expect(rendered).toContain("#### 费用");
     expect(rendered).toContain("  - 输入价格：$0.000400");
     expect(rendered).toContain("综合输出速度：60 token/s（不含推理 · 覆盖 2/3 次请求）");
@@ -205,6 +208,13 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("调用模型：gpt-5.6-luna");
     expect(rendered).toContain("状态：已完成 · HTTP 200");
     expect(rendered).toContain("参考总价：$0.000988（已计价 1/1 次请求）");
+  });
+
+  it("switches currency amounts to the 亿 unit at large values", () => {
+    expect(formatCurrencyNanos("CNY", 123_000_000 * 1_000_000_000)).toBe(
+      "¥1.23 亿",
+    );
+    expect(formatCurrencyNanos("CNY", 1_234_567_890)).toBe("¥1.234568");
   });
 
   it("shows a single provider-resolved currency with the exchange rate", () => {

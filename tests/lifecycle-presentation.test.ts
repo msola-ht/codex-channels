@@ -5,6 +5,7 @@ import {
   createTurnCompletedPresentation,
   createTurnStartedPresentation,
   renderPlainLifecyclePresentation,
+  renderStructuredLifecyclePresentation,
 } from "../src/surfaces/lifecycle-presentation.js";
 
 describe("shared Surface lifecycle presentation", () => {
@@ -125,7 +126,8 @@ describe("shared Surface lifecycle presentation", () => {
       "模型：gpt-test · medium · Fast 开启",
       "提供商：OpenAI 官方",
       "最近请求缓存命中率：75.00%",
-      "总耗时：1分5秒",
+      "性能",
+      "  总耗时：1分5秒",
       "",
       "当前会话累计：",
       "上下文：10 K / 100 K（10%）",
@@ -235,9 +237,10 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("模型请求：2 次");
     expect(rendered).toContain("思考次数：2 次");
     expect(rendered).toContain("模型请求聚合耗时：12秒");
+    expect(rendered).toContain("总 Token：20.12 K");
     expect(rendered).toContain("参考总价：$0.000350（已计价 2/2 次请求）");
     expect(rendered).toContain("参考总价：$0.001250（已计价 8/9 次请求）");
-    expect(rendered).toContain("本次请求缓存命中率：75.00%");
+    expect(rendered).toContain("缓存命中率：75.00%");
     expect(rendered).toContain("最后请求首事件延迟：640毫秒");
     expect(rendered).toContain("首段回复延迟：920毫秒");
     expect(rendered).toContain("综合输出速度：2.1 token/s（不含推理 · 覆盖 2/2 次请求）");
@@ -371,6 +374,51 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("参考总价：¥14.400000（已计价 2/2 次请求）");
     expect(rendered).not.toContain("折合人民币");
     expect(rendered).not.toContain("$");
+  });
+
+  it("renders run cost details as indented subfields", () => {
+    const rendered = renderStructuredLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "feishu",
+          accountId: "default",
+          conversationId: "chat",
+        },
+        threadId: "thread-deepseek",
+        turnId: "turn-deepseek",
+        status: "completed",
+        modelProvider: "deepseek",
+        timing: {
+          modelRequestCount: 1,
+          completedModelRequestCount: 1,
+          referenceCost: {
+            currency: "USD",
+            totalCostNanos: 1_000_000_000,
+            inputCostNanos: 600_000_000,
+            cachedInputCostNanos: 100_000_000,
+            outputCostNanos: 300_000_000,
+            pricedRequestCount: 1,
+            requestCount: 1,
+            uncachedInputPricePerMillionNanos: 140_000_000,
+            cachedInputPricePerMillionNanos: 2_800_000,
+            outputPricePerMillionNanos: 280_000_000,
+            hasMixedPrices: false,
+          },
+        },
+      }, (provider) => provider === "deepseek" ? "cny" : "usd", {
+        usdToCny: 7.2,
+        effectiveAtMs: 1_700_000_000_000,
+        source: "ecb",
+      }),
+    );
+
+    expect(rendered).toContain(
+      "- 参考总价：¥7.200000（已计价 1/1 个成功请求）",
+    );
+    expect(rendered).toContain("  - 输入价格：¥4.320000");
+    expect(rendered).toContain("  - 缓存价格：¥0.720000");
+    expect(rendered).toContain("  - 输出价格：¥2.160000");
   });
 
   it("keeps a non-retryable model failure visible after a completed request", () => {

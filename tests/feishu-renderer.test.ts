@@ -273,7 +273,7 @@ describe("Feishu output renderer", () => {
         },
       },
     });
-    expect(status).toContain("输入总计：800");
+    expect(status).toContain("输入：800");
     expect(status).toContain("命中缓存：600");
     expect(status).toContain("未命中缓存：200");
     expect(status).toContain("缓存命中率：75.00%");
@@ -389,7 +389,8 @@ describe("Feishu output renderer", () => {
       "- 模型：gpt-test · medium · Fast 开启",
       "- 提供商：OpenAI 官方",
       "- 最近请求缓存命中率：50.00%",
-      "- 总耗时：1分5秒",
+      "- **性能**",
+      "  - 总耗时：1分5秒",
       "",
       "### 当前会话累计",
       "- 上下文：100 / 200（50%）",

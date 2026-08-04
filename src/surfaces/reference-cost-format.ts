@@ -51,6 +51,11 @@ export function formatReferenceCostBreakdown(
 
 export function formatCurrencyNanos(currency: string, value: number): string {
   const amount = value / 1_000_000_000;
+  if (Math.abs(amount) >= 100_000_000) {
+    return `${currencySymbol(currency)}${(amount / 100_000_000).toLocaleString("zh-CN", {
+      maximumFractionDigits: 2,
+    })} 亿`;
+  }
   return new Intl.NumberFormat("zh-CN", {
     style: "currency",
     currency,
@@ -58,6 +63,15 @@ export function formatCurrencyNanos(currency: string, value: number): string {
     minimumFractionDigits: 6,
     maximumFractionDigits: 6,
   }).format(amount);
+}
+
+function currencySymbol(currency: string): string {
+  const symbol = new Intl.NumberFormat("zh-CN", {
+    style: "currency",
+    currency,
+    currencyDisplay: "narrowSymbol",
+  }).formatToParts(0).find((part) => part.type === "currency")?.value;
+  return symbol ?? `${currency} `;
 }
 
 export function toDisplayReferenceCost(

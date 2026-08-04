@@ -559,18 +559,20 @@ export function formatConversationStatus(status: ConversationStatus): string {
     lines.push(
       "",
       "当前 Thread 用量：",
-      `累计：${formatTokenCount(total.totalTokens)}`,
-      `最近模型请求：${formatTokenCount(last.totalTokens)}`,
-      `输入总计：${formatTokenCount(total.inputTokens)}`,
-      `命中缓存：${formatTokenCount(total.cachedInputTokens)}`,
-      `未命中缓存：${formatTokenCount(Math.max(0, total.inputTokens - total.cachedInputTokens))}`,
-      `缓存命中率：${formatCacheHitRate(total.inputTokens, total.cachedInputTokens)}`,
+      "- **Token**",
+      `  - 累计：${formatTokenCount(total.totalTokens)}`,
+      `  - 最近模型请求：${formatTokenCount(last.totalTokens)}`,
+      `  - 输入：${formatTokenCount(total.inputTokens)}`,
+      `    - 命中缓存：${formatTokenCount(total.cachedInputTokens)}`,
+      `    - 未命中缓存：${formatTokenCount(Math.max(0, total.inputTokens - total.cachedInputTokens))}`,
+      `  - 缓存命中率：${formatCacheHitRate(total.inputTokens, total.cachedInputTokens)}`,
       ...(total.cacheWriteInputTokens > 0
-        ? [`缓存写入：${formatTokenCount(total.cacheWriteInputTokens)}`]
+        ? [`  - 缓存写入：${formatTokenCount(total.cacheWriteInputTokens)}`]
         : []),
-      `输出：${formatTokenCount(total.outputTokens)}`,
-      `其中推理输出：${formatTokenCount(total.reasoningOutputTokens)}`,
-      `Codex 有效上下文窗口：${modelContextWindow === null ? "未知" : formatTokenCount(modelContextWindow)}`,
+      `  - 输出：${formatTokenCount(total.outputTokens)}`,
+      `    - 其中推理输出：${formatTokenCount(total.reasoningOutputTokens)}`,
+      `  - 合计：${formatTokenCount(total.inputTokens + total.outputTokens)}`,
+      `  - Codex 有效上下文窗口：${modelContextWindow === null ? "未知" : formatTokenCount(modelContextWindow)}`,
     );
   } else if (status.threadId) {
     lines.push("", "当前 Thread 用量：等待 App Server 推送统计");
@@ -624,6 +626,7 @@ export function formatConversationMetrics(
       ...(turn.reasoningOutputTokens > 0
         ? [`  - 其中推理输出：${formatTokenCount(turn.reasoningOutputTokens)}`]
         : []),
+      `合计：${formatTokenCount(turn.inputTokens + turn.outputTokens)}`,
       ...(turn.outputTokensPerSecond === null
         ? []
         : [formatAggregateOutputSpeed(
@@ -672,6 +675,7 @@ export function formatConversationMetrics(
       ...(aggregate.reasoningOutputTokens > 0
         ? [`  - 其中推理输出：${formatTokenCount(aggregate.reasoningOutputTokens)}`]
         : []),
+      `合计：${formatTokenCount(aggregate.inputTokens + aggregate.outputTokens)}`,
       ...(aggregate.outputTokensPerSecond === null
         ? []
         : [formatAggregateOutputSpeed(
@@ -1019,6 +1023,7 @@ function formatMetricsGroup(
     `  - 请求：${aggregate.requestCount} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${aggregate.unsuccessfulRequestCount} 次）` : ""}`,
     `  - 输入：${formatTokenCount(aggregate.inputTokens)} ${cache}`,
     `  - 输出：${formatTokenCount(aggregate.outputTokens)}${reasoning}`,
+    `  - 合计：${formatTokenCount(aggregate.inputTokens + aggregate.outputTokens)}`,
     `  - 速度：${speed}`,
     `  - ${latency}`,
     `  - ${cost}`,
