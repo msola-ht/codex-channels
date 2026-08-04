@@ -433,6 +433,26 @@ export function renderPlainLifecyclePresentation(
   ].join("\n");
 }
 
+export function renderStructuredLifecyclePresentation(
+  presentation: LifecyclePresentation,
+): string {
+  return [
+    `## ${presentation.title}`,
+    ...(presentation.fields.length > 0
+      ? ["", ...presentation.fields.map(formatStructuredField)]
+      : []),
+    ...(presentation.sections ?? []).flatMap((section) => [
+      "",
+      `### ${section.title}`,
+      ...section.fields.map(formatStructuredField),
+    ]),
+  ].join("\n");
+}
+
+function formatStructuredField(field: LifecyclePresentationField): string {
+  return `- ${field.label}：${field.value}`;
+}
+
 function formatField(field: LifecyclePresentationField): string {
   return `${field.label}：${field.value}`;
 }

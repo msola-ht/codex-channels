@@ -82,7 +82,7 @@ describe("WeixinOutbox", () => {
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
       "已开始处理。",
       "final reply",
-      "本次运行 · 已完成",
+      "**本次运行 · 已完成**",
     ]);
   });
 
@@ -314,7 +314,7 @@ describe("WeixinOutbox", () => {
     expect(sendText).toHaveBeenCalledWith({
       actorId,
       contextToken: "context-secret",
-      text: "本次运行 · 已完成",
+      text: "**本次运行 · 已完成**",
     });
   });
 
@@ -329,8 +329,8 @@ describe("WeixinOutbox", () => {
     await outbox.close();
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      "本次运行 · 已停止",
-      "本次运行 · 失败  \n- 错误：受控错误",
+      "**本次运行 · 已停止**",
+      "**本次运行 · 失败**\n\n- 错误：受控错误",
     ]);
   });
 
@@ -400,7 +400,7 @@ describe("WeixinOutbox", () => {
       + "具体内容：\n\n"
       + "git status --short\n\n"
       + "耗时：125毫秒",
-      "本次运行 · 已完成",
+      "**本次运行 · 已完成**",
     ]);
   });
 
@@ -495,7 +495,7 @@ describe("WeixinOutbox", () => {
     await outbox.close();
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      "本次运行 · 已完成",
+      "**本次运行 · 已完成**",
     ]);
   });
 
@@ -534,7 +534,7 @@ describe("WeixinOutbox", () => {
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
       "工具查询 · 已完成\n\nMCP 工具：1 次\n动态工具：1 次\n\n总耗时：250毫秒",
-      "本次运行 · 已完成",
+      "**本次运行 · 已完成**",
     ]);
   });
 

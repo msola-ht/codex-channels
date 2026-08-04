@@ -351,6 +351,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
             this.options.priceCurrency,
             this.options.exchangeRate?.() ?? null,
           ),
+          { structuredFields: true },
         );
       }
       case "connection.lost":

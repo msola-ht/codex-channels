@@ -206,14 +206,14 @@ describe("formatStartupNotification", () => {
 
     expect(text).toContain("Codex Connect 已上线");
     expect(text).toContain("- App Server：已连接");
-    expect(text).toContain("运行环境：");
+    expect(text).toContain("### 运行环境");
     expect(text).toContain("- 系统：macOS · arm64");
     expect(text).toContain("版本：Codex Connect 0.146.0 · Node.js v24.18.0");
     expect(text).toContain(
       "App Server UA：codex_connect_gateway/0.146.0 (Mac OS 15.7.7; arm64) (codex_connect_gateway; 0.146.0)",
     );
     expect(text).toContain("连接：Unix WebSocket");
-    expect(text).toContain("当前会话：");
+    expect(text).toContain("### 当前会话");
     expect(text).toContain("- Workspace：Main (main)");
     expect(text).toContain("工作目录：/workspace/main");
     expect(text).toContain("Thread：019f8951-eb3");

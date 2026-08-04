@@ -36,6 +36,7 @@ import {
   createStartupPresentation,
   createTurnCompletedPresentation,
   createTurnStartedPresentation,
+  renderStructuredLifecyclePresentation,
   type LifecyclePresentation,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
@@ -225,24 +226,7 @@ function renderFeishuTurnCompleted(
 function renderFeishuLifecyclePresentation(
   presentation: LifecyclePresentation,
 ): string {
-  return [
-    `**${presentation.title}**`,
-    ...(presentation.fields.length > 0
-      ? [
-          "",
-          ...presentation.fields.map(
-            ({ label, value }) => `- **${label}：** ${value}`,
-          ),
-        ]
-      : []),
-    ...(presentation.sections ?? []).flatMap((section) => [
-      "",
-      `**${section.title}**`,
-      ...section.fields.map(
-        ({ label, value }) => `- **${label}：** ${value}`,
-      ),
-    ]),
-  ].join("\n");
+  return renderStructuredLifecyclePresentation(presentation);
 }
 
 function visibleUpstreamMessage(message: string): string {

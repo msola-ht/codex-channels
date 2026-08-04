@@ -65,30 +65,30 @@ describe("Feishu output renderer", () => {
     );
 
     expect(rendered).toBe([
-      "**Codex Connect 已上线**",
+      "## Codex Connect 已上线",
       "",
-      "- **App Server：** 已连接",
+      "- App Server：已连接",
       "",
-      "**运行环境**",
-      "- **系统：** macOS · arm64",
-      "- **版本：** Codex Connect 0.146.0 · Node.js v24.0.0",
-      "- **连接：** Unix WebSocket",
-      "- **App Server UA：** codex-cli/0.146.0 (macOS 15.0) (arm64)",
-      "- **调试模式：** 关闭",
+      "### 运行环境",
+      "- 系统：macOS · arm64",
+      "- 版本：Codex Connect 0.146.0 · Node.js v24.0.0",
+      "- 连接：Unix WebSocket",
+      "- App Server UA：codex-cli/0.146.0 (macOS 15.0) (arm64)",
+      "- 调试模式：关闭",
       "",
-      "**当前会话**",
-      "- **Workspace：** Main (main)",
-      "- **工作目录：** /workspace",
-      "- **Thread：** thread-1",
-      "- **Git 分支：** feature/weixin-surface",
-      "- **模型：** gpt-test",
-      "- **提供商：** OpenAI 官方",
-      "- **思考强度：** medium",
-      "- **Fast 模式：** 开启",
-      "- **协作模式：** Default",
+      "### 当前会话",
+      "- Workspace：Main (main)",
+      "- 工作目录：/workspace",
+      "- Thread：thread-1",
+      "- Git 分支：feature/weixin-surface",
+      "- 模型：gpt-test",
+      "- 提供商：OpenAI 官方",
+      "- 思考强度：medium",
+      "- Fast 模式：开启",
+      "- 协作模式：Default",
       "",
-      "**账户状态**",
-      "- **周限：** 剩余 63%",
+      "### 账户状态",
+      "- 周限：剩余 63%",
     ].join("\n"));
     expect(rendered).not.toContain("build-secret");
   });
@@ -383,21 +383,21 @@ describe("Feishu output renderer", () => {
     });
 
     expect(rendered).toBe([
-      "**本次运行 · 已完成**",
+      "## 本次运行 · 已完成",
       "",
-      "**本次运行**",
-      "- **模型：** gpt-test · medium · Fast 开启",
-      "- **提供商：** OpenAI 官方",
-      "- **最近请求缓存命中率：** 50.00%",
-      "- **总耗时：** 1分5秒",
+      "### 本次运行",
+      "- 模型：gpt-test · medium · Fast 开启",
+      "- 提供商：OpenAI 官方",
+      "- 最近请求缓存命中率：50.00%",
+      "- 总耗时：1分5秒",
       "",
-      "**当前会话累计**",
-      "- **上下文：** 100 / 200（50%）",
-      "- **上下文压缩：** 2 次",
-      "- **Git 分支：** feature/weixin-surface",
+      "### 当前会话累计",
+      "- 上下文：100 / 200（50%）",
+      "- 上下文压缩：2 次",
+      "- Git 分支：feature/weixin-surface",
       "",
-      "**账户状态**",
-      "- **周限：** 剩余 63%",
+      "### 账户状态",
+      "- 周限：剩余 63%",
     ].join("\n"));
   });
 
@@ -832,7 +832,7 @@ describe("Feishu output renderer", () => {
     expect(progressEvents.some(isCriticalOutputEvent)).toBe(false);
     expect(progressEvents.map((event) => renderFeishuOutput(event))).toEqual([
       "视觉识别中\n- 图片：2 张\n- 状态：已发送至视觉 API",
-      "**已开始处理。**",
+      "## 已开始处理。",
       null,
       null,
     ]);

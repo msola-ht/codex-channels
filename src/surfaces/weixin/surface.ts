@@ -344,7 +344,7 @@ export class WeixinSurface implements SurfaceAdapter {
         if (text) {
           await this.output.deliverText(
             target,
-            formatWeixinCommandText(text),
+            formatWeixinCommandText(text, { structuredFields: true }),
           );
         }
       } catch (error) {

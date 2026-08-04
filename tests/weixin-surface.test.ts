@@ -80,7 +80,7 @@ describe("WeixinSurface", () => {
     );
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
       "final reply",
-      "本次运行 · 已完成",
+      "**本次运行 · 已完成**",
     ]);
     expect(onFatal).not.toHaveBeenCalled();
   });
@@ -213,7 +213,7 @@ describe("WeixinSurface", () => {
     expect(sendText).toHaveBeenCalledWith({
       actorId,
       contextToken: "restored-context",
-      text: "Codex Connect 已上线  \nApp Server：已连接",
+      text: "**Codex Connect 已上线**\n- App Server：已连接",
     });
   });
 

@@ -30,6 +30,7 @@ import {
 import {
   createStartupPresentation,
   createTurnCompletedPresentation,
+  renderStructuredLifecyclePresentation,
   type LifecyclePresentation,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
@@ -225,19 +226,5 @@ function parseWeixinCommandField(
 function renderWeixinLifecyclePresentation(
   presentation: LifecyclePresentation,
 ): string {
-  return [
-    presentation.title,
-    ...presentation.fields.map(formatLifecycleField),
-    ...(presentation.sections ?? []).flatMap((section) => [
-      "",
-      section.title,
-      ...section.fields.map(formatLifecycleField),
-    ]),
-  ].join("\n");
-}
-
-function formatLifecycleField(
-  field: LifecyclePresentation["fields"][number],
-): string {
-  return `- ${field.label}：${field.value}`;
+  return renderStructuredLifecyclePresentation(presentation);
 }

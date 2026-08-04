@@ -86,6 +86,12 @@ export function formatTelegramPanelHtml(
     }
 
     const escaped = escapeTelegramHtml(line);
+    const heading = line.match(/^#{1,6}\s+(.+)$/);
+    if (heading) {
+      output.push(`<b>${escapeTelegramHtml(heading[1]!)}</b>`);
+      firstContentLine = false;
+      continue;
+    }
     if (firstContentLine) {
       firstContentLine = false;
       if (emphasizeFirstLine) {
