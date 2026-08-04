@@ -169,9 +169,8 @@ Turn 开始确认和 `turn.completed` 结束统计由 Outbox 作为静态 CardKi
 使用纯文本；`operation.updated` 由 Outbox 按 Turn 合并，不再逐条渲染普通文本。App Server
 Turn、warning 和 MCP 错误会显示 Client 边界已经统一脱敏并限长的详情；连接错误只显示 Gateway
 生成的稳定状态文案，未知异常和原始响应正文不会进入平台消息，
-未知 Thread 状态不会原样显示。`turn.completed` 使用共享标题、字段顺序和合并后的模型设置行，把事件
-提供的官方 Turn 对话耗时放在统一字段末尾，并只展开最近模型请求的上下文、缓存命中率、模型
-设置、压缩次数、周限和 Goal，不查询第二状态源。
+未知 Thread 状态不会原样显示。`turn.completed` 使用共享标题、字段顺序和合并后的模型设置行，按 Token、费用、性能分组展开
+最近模型请求的上下文、Token 与费用明细、模型设置、压缩次数、周限和 Goal，不查询第二状态源。
 共享配置 `display.operation_updates` 为 `full` 时发送包含完整详情、状态和退出码的
 操作终态卡片，为 `compact` 时发送一行状态、元数据和最多 160 个字符的详情摘要；两种模式都完整
 显示本机路径，并把操作耗时单独放在分隔线后的底栏。网页搜索

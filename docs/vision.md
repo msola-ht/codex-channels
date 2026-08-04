@@ -37,8 +37,8 @@ Codex Thread，也不区分双 Provider 或仅 DeepSeek 模式。外部请求发
 收集、收齐、提交、识别和完成消息使用统一的“标题 + 字段列表”结构，由飞书渲染为 Markdown、
 Telegram 转成兼容 HTML、微信转成富文本。收齐时先显示“正在自动提交”；外部请求发起后立即显示
 “正在识别”。请求超过 10 秒时发送首次识别心跳，之后每 20 秒报告一次已等待时间。完成消息显示
-实际发给 Responses API 的视觉模型 ID 和 Gateway 实测的 API 往返耗时；上游响应提供标准
-`usage.input_tokens`、`usage.output_tokens` 或 `usage.total_tokens` 时按实际字段显示 Token 用量，
+实际发给 Responses API 的视觉模型 ID；Gateway 实测的 API 往返耗时仅在调试模式开启时显示。上游响应提供标准
+`usage.input_tokens`、`usage.output_tokens` 或 `usage.total_tokens` 时以 `**Token**：总计` 列表块显示 Token 用量，
 缺失字段不估算。同一份脱敏请求指标会写入独立模型指标库；已有 Thread 时关联该 Thread，视觉调用
 发生在 Codex Turn 创建之前，因此不伪造 `turn_id`。组合根按响应中的实际模型解析当次价格快照，
 `/metrics` 只据此显示 API 参考费用，不把它冒充第三方中转的实际账单。

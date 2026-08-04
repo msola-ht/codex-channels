@@ -11,7 +11,7 @@
   已关联请求的次数、实际产生推理输出的思考次数、累计耗时、Usage 与流式时间窗，不读取 SQLite；
   三类综合速度只聚合同时具有对应
   Token 和流式时间窗的请求，并携带已计时请求数与可计速请求数，避免缺失时间窗时虚高。OpenAI 不展示
-  隐藏推理计时，DeepSeek 才展示最后请求首事件延迟以及整轮综合思考与生成速度；所有 Provider 使用
+  隐藏推理计时，DeepSeek 才提供最后请求首事件延迟（渠道在调试模式开启时展示）以及整轮综合思考与生成速度；所有 Provider 使用
   App Server 增量展示首段回复延迟。代理缺席时仍由 Client
   通知边界时间戳和 App Server 最近 Usage 提供有限回退；
   Thread Token 指标对所有 Provider 保持通用，OpenAI 账户周限只附加到 OpenAI Thread；可重试错误
