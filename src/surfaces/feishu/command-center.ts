@@ -539,6 +539,7 @@ function renderFeishuCategorizedCommandsCard(
       ]),
       sectionTitle("当前内容"),
       actionRow(token, [
+        ["工作区权益", "workspace-perm", "default"],
         ["权限", "permissions", "default"],
         ["Diff", "diff", "default"],
         ["项目规则", "rules", "default"],

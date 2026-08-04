@@ -100,6 +100,12 @@ export function formatSurfaceUserFacingError(
       return "Workspace 选择不唯一";
     case "workspace.selector.not-found":
       return "找不到指定 Workspace";
+    case "workspace.entitlement.usage":
+      return "用法：/workspace-perm [sandbox <read-only|workspace-write|danger-full-access|clear>|approval <untrusted|on-request|never|clear>|profile <Profile ID|clear>]";
+    case "workspace.entitlement.conflict":
+      return "permissions 与 sandbox 互斥，不能同时配置；请先清除其中一项";
+    case "workspace.entitlement.unavailable":
+      return "当前 Gateway 不支持修改工作区权益";
     case "model.current.missing":
       return `当前模型不在可用模型列表中：${detail(error, "model", "未知")}`;
     case "model.unavailable":

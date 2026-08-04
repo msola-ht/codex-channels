@@ -75,6 +75,52 @@ describe("ConversationCommandService", () => {
     expect(listSessions).toHaveBeenCalledWith(target, { searchTerm: "fix" });
   });
 
+  it("shows and updates workspace entitlements through /workspace-perm", async () => {
+    const workspace = {
+      id: "main",
+      name: "Main",
+      cwd: "/workspace",
+      sandbox: "workspace-write",
+    };
+    const updateWorkspaceEntitlements = vi.fn(async () => ({
+      ...workspace,
+      approvalPolicy: "never",
+    }));
+    const commands = new ConversationCommandService({
+      status: () => ({ workspaceId: "main" }),
+      listWorkspaces: () => [workspace],
+      updateWorkspaceEntitlements,
+    } as unknown as ConversationUseCases);
+
+    await expect(commands.execute(target, "workspace-perm")).resolves.toEqual({
+      kind: "workspace-entitlements",
+      workspace,
+    });
+    await expect(
+      commands.execute(target, "workspace-perm", "approval never"),
+    ).resolves.toEqual({
+      kind: "outcome",
+      outcome: {
+        type: "workspace.entitlements-updated",
+        workspace: { ...workspace, approvalPolicy: "never" },
+      },
+    });
+    expect(updateWorkspaceEntitlements).toHaveBeenCalledWith(target, {
+      kind: "approval",
+      value: "never",
+    });
+  });
+
+  it("rejects invalid workspace entitlement values", async () => {
+    const commands = new ConversationCommandService({
+      status: () => ({ workspaceId: "main" }),
+      listWorkspaces: () => [{ id: "main", name: "Main", cwd: "/workspace" }],
+    } as unknown as ConversationUseCases);
+
+    await expect(commands.execute(target, "workspace-perm", "sandbox root"))
+      .rejects.toMatchObject({ code: "workspace.entitlement.usage" });
+  });
+
   it("parses canonical metrics scopes and bounded time ranges", async () => {
     const requestMetrics = vi.fn(() => null);
     const commands = new ConversationCommandService({
@@ -368,6 +414,11 @@ describe("ConversationCommandService", () => {
       setPinned: vi.fn(async () => undefined),
       selectWorkspace: vi.fn(async () => ({ id: "main", name: "Main", cwd: "/workspace" })),
       listWorkspaces: vi.fn(() => [{ id: "main", name: "Main", cwd: "/workspace" }]),
+      updateWorkspaceEntitlements: vi.fn(async () => ({
+        id: "main",
+        name: "Main",
+        cwd: "/workspace",
+      })),
       stop: vi.fn(async () => true),
       queueFollowUp: vi.fn(async () => ({ position: 1 })),
       rename: vi.fn(async () => undefined),
@@ -412,6 +463,7 @@ describe("ConversationCommandService", () => {
       ["unpin", "", "setPinned"],
       ["status", "", "status"],
       ["workspace", "main", "selectWorkspace"],
+      ["workspace-perm", "approval never", "updateWorkspaceEntitlements"],
       ["stop", "", "stop"],
       ["queue", "follow up", "queueFollowUp"],
       ["rename", "name", "rename"],

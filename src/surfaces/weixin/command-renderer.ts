@@ -25,6 +25,7 @@ import {
   formatConversationSkills,
   formatConversationStatus,
   formatConversationUsage,
+  formatConversationWorkspaceEntitlements,
   formatConversationWorkspaces,
   toStructuredMarkdownList,
 } from "../conversation-command-format.js";
@@ -120,6 +121,8 @@ export function renderWeixinCommandResult(
       return formatConversationStatus(result.status);
     case "workspaces":
       return formatConversationWorkspaces(result);
+    case "workspace-entitlements":
+      return formatConversationWorkspaceEntitlements(result);
     case "models":
       return formatConversationModels(result);
     case "collaboration-mode":

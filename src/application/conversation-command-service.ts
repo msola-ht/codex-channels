@@ -8,6 +8,7 @@ import type {
   RequestMetricsTimeRange,
 } from "./request-metrics-port.js";
 import type { ReviewTarget, ThreadGoal } from "./turn-port.js";
+import type { WorkspaceEntitlementUpdate } from "./workspace-entitlement-port.js";
 
 export const conversationCommandNames = [
   "resume",
@@ -20,6 +21,7 @@ export const conversationCommandNames = [
   "unpin",
   "status",
   "workspace",
+  "workspace-perm",
   "stop",
   "queue",
   "rename",
@@ -66,6 +68,10 @@ export type ConversationCommandResult =
       currentWorkspaceId: string;
     }
   | {
+      kind: "workspace-entitlements";
+      workspace: ReturnType<ConversationUseCases["listWorkspaces"]>[number];
+    }
+  | {
       kind: "models";
       view: "model" | "effort" | "fast";
       state: Awaited<ReturnType<ConversationUseCases["modelState"]>>;
@@ -106,6 +112,10 @@ export type ConversationCommandOutcome =
   | {
       type: "workspace.selected";
       workspace: Awaited<ReturnType<ConversationUseCases["selectWorkspace"]>>;
+    }
+  | {
+      type: "workspace.entitlements-updated";
+      workspace: Awaited<ReturnType<ConversationUseCases["updateWorkspaceEntitlements"]>>;
     }
   | { type: "turn.stop-requested"; stopped: boolean }
   | { type: "turn.follow-up-queued"; position: number }
@@ -246,6 +256,24 @@ export class ConversationCommandService {
           kind: "workspaces",
           workspaces: this.conversations.listWorkspaces(),
           currentWorkspaceId: this.conversations.status(target).workspaceId,
+        };
+      }
+      case "workspace-perm": {
+        const current = this.conversations.status(target).workspaceId;
+        const workspace = this.conversations.listWorkspaces().find(
+          (entry) => entry.id === current,
+        )!;
+        const update = parseWorkspaceEntitlementCommand(argumentsText);
+        if (update === null) {
+          return { kind: "workspace-entitlements", workspace };
+        }
+        const updated = await this.conversations.updateWorkspaceEntitlements(
+          target,
+          update,
+        );
+        return {
+          kind: "outcome",
+          outcome: { type: "workspace.entitlements-updated", workspace: updated },
         };
       }
       case "stop": {
@@ -506,5 +534,48 @@ function parseReviewTarget(input: string): ReviewTarget {
   throw new UserFacingError(
     "review.usage",
     "Review 参数无效",
+  );
+}
+
+function parseWorkspaceEntitlementCommand(
+  input: string,
+): WorkspaceEntitlementUpdate | null {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const [field, ...rest] = trimmed.split(/\s+/u);
+  const value = rest.join(" ").trim();
+  if (field === "sandbox") {
+    if (value === "clear") {
+      return { kind: "sandbox", value: null };
+    }
+    if (
+      value === "read-only"
+      || value === "workspace-write"
+      || value === "danger-full-access"
+    ) {
+      return { kind: "sandbox", value };
+    }
+  }
+  if (field === "approval") {
+    if (value === "clear") {
+      return { kind: "approval", value: null };
+    }
+    if (value === "untrusted" || value === "on-request" || value === "never") {
+      return { kind: "approval", value };
+    }
+  }
+  if (field === "profile") {
+    if (value === "clear") {
+      return { kind: "permissions", value: null };
+    }
+    if (value.length > 0 && value.length <= 128) {
+      return { kind: "permissions", value };
+    }
+  }
+  throw new UserFacingError(
+    "workspace.entitlement.usage",
+    "用法：/workspace-perm [sandbox <read-only|workspace-write|danger-full-access|clear>|approval <untrusted|on-request|never|clear>|profile <Profile ID|clear>]",
   );
 }

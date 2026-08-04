@@ -43,6 +43,7 @@ export const conversationCommandDescriptions = {
   unpin: "取消固定当前会话",
   status: "查看当前状态",
   workspace: "列出或切换 Workspace",
+  "workspace-perm": "查看或修改当前工作区权益",
   stop: "停止当前任务",
   queue: "排到下一 Turn",
   rename: "命名当前会话",
@@ -79,7 +80,7 @@ export const conversationCommandHelpSections = [
   {
     title: "运行与项目：",
     lines: [
-      "/status · /workspace [序号|ID|名称]",
+      "/status · /workspace [序号|ID|名称] · /workspace-perm",
       "/stop · /queue <描述>",
       "/review [branch <分支>|commit <SHA>|custom <说明>]",
       "/rules <init|check> · /diff",
@@ -205,6 +206,14 @@ export function formatConversationCommandOutcome(
         `Workspace：${outcome.workspace.name}`,
         `工作目录：${outcome.workspace.cwd}`,
       ].join("\n"));
+    case "workspace.entitlements-updated":
+      return toStructuredMarkdownList([
+        "已更新工作区权益",
+        `Workspace：${outcome.workspace.name}`,
+        ...workspaceEntitlementLines(outcome.workspace),
+        "",
+        "权益已热加载；对新建或恢复的 Thread 生效，不改变已绑定 Thread。",
+      ].join("\n"));
     case "turn.stop-requested":
       return outcome.stopped
         ? toStructuredMarkdownList(["已请求停止当前任务。"].join("\n"))
@@ -283,6 +292,27 @@ export function formatConversationWorkspaces(
     ]),
     "",
     "切换：/workspace <序号、ID 或名称>",
+  ].join("\n"));
+}
+
+export function formatConversationWorkspaceEntitlements(
+  result: Extract<
+    ConversationCommandResult,
+    { kind: "workspace-entitlements" }
+  >,
+): string {
+  const entitlementLines = workspaceEntitlementLines(result.workspace);
+  return toStructuredMarkdownList([
+    `工作区权益（${result.workspace.name} · ${result.workspace.id}）：`,
+    ...(entitlementLines.length > 0
+      ? entitlementLines
+      : ["未配置（使用全局默认）"]),
+    "",
+    "修改：",
+    "- /workspace-perm sandbox <read-only|workspace-write|danger-full-access|clear>",
+    "- /workspace-perm approval <untrusted|on-request|never|clear>",
+    "- /workspace-perm profile <Profile ID|clear>",
+    "权益热加载后对新建或恢复的 Thread 生效，不改变已绑定 Thread。",
   ].join("\n"));
 }
 

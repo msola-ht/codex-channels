@@ -20,6 +20,7 @@ import {
   formatConversationProjectRules,
   formatConversationSkills,
   formatConversationUsage,
+  formatConversationWorkspaceEntitlements,
   formatConversationWorkspaces,
 } from "../conversation-command-format.js";
 import {
@@ -62,6 +63,12 @@ export async function renderTelegramCommandResult(
       await replyTelegramPanel(
         context,
         formatConversationWorkspaces(result),
+      );
+      return;
+    case "workspace-entitlements":
+      await replyTelegramPanel(
+        context,
+        formatConversationWorkspaceEntitlements(result),
       );
       return;
     case "models":

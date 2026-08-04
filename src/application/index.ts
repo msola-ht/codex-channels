@@ -69,6 +69,10 @@ export {
   type SkillQueryPort,
 } from "./skill-port.js";
 export {
+  type WorkspaceEntitlementPort,
+  type WorkspaceEntitlementUpdate,
+} from "./workspace-entitlement-port.js";
+export {
   type McpAuthStatus,
   type McpQueryPort,
   type McpServerSummary,

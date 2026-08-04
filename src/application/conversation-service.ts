@@ -18,6 +18,10 @@ import type {
 } from "./permission-port.js";
 import type { SessionRouter } from "../session-routing/index.js";
 import type { Workspace } from "../policy/index.js";
+import type {
+  WorkspaceEntitlementPort,
+  WorkspaceEntitlementUpdate,
+} from "./workspace-entitlement-port.js";
 import {
   ConversationCore,
   UserFacingError,
@@ -167,6 +171,10 @@ export interface ConversationUseCases {
   artifacts(target: ConversationTarget): TurnArtifacts | undefined;
   listWorkspaces(): Workspace[];
   selectWorkspace(target: ConversationTarget, selector: string): Promise<Workspace>;
+  updateWorkspaceEntitlements(
+    target: ConversationTarget,
+    update: WorkspaceEntitlementUpdate,
+  ): Promise<Workspace>;
   stop(target: ConversationTarget): Promise<boolean>;
   rename(target: ConversationTarget, name: string): Promise<void>;
   setPinned(target: ConversationTarget, pinned: boolean): Promise<void>;
@@ -220,6 +228,7 @@ export class ConversationService implements ConversationUseCases {
     private readonly providerAccounts?: ProviderAccountQueryPort,
     private readonly vision?: VisionRecognitionPort,
     private readonly requestMetricsQuery?: RequestMetricsQueryPort,
+    private readonly workspaceEntitlements?: WorkspaceEntitlementPort,
   ) {}
 
   requestMetrics(
@@ -674,6 +683,25 @@ export class ConversationService implements ConversationUseCases {
         this.clearPendingSelections(target);
       }
       return workspace;
+    });
+  }
+
+  updateWorkspaceEntitlements(
+    target: ConversationTarget,
+    update: WorkspaceEntitlementUpdate,
+  ): Promise<Workspace> {
+    if (!this.workspaceEntitlements) {
+      throw new UserFacingError(
+        "workspace.entitlement.unavailable",
+        "当前 Gateway 不支持修改工作区权益",
+      );
+    }
+    return this.locked(target, () => {
+      const workspaceId = this.router.workspace(target).id;
+      return this.workspaceEntitlements!.updateWorkspaceEntitlements(
+        workspaceId,
+        update,
+      );
     });
   }
 

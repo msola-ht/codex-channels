@@ -79,6 +79,7 @@ import { ProviderMetricsComposition } from "./provider-metrics-composition.js";
 import { RemoteModelPricingCatalog } from "./model-pricing-catalog.js";
 import { RemoteExchangeRate } from "./exchange-rate.js";
 import { mergeSessionReferenceCost } from "./reference-cost-summary.js";
+import { TomlWorkspaceEntitlementWriter } from "./workspace-entitlement-writer.js";
 
 export class GatewayApplication {
   private readonly transport: UnixWebSocketTransport;
@@ -99,6 +100,7 @@ export class GatewayApplication {
   private readonly exchangeRate: RemoteExchangeRate;
   private readonly bindings: SqliteBindingStore;
   private readonly workspaces: WorkspaceRegistry;
+  private readonly workspaceEntitlements: TomlWorkspaceEntitlementWriter | undefined;
   private removeRpcNotification: (() => void) | undefined;
   private removeRpcDisconnect: (() => void) | undefined;
   private startTask: Promise<void> | undefined;
@@ -114,8 +116,12 @@ export class GatewayApplication {
   constructor(
     private config: GatewayConfig,
     private readonly logger: Logger,
+    configPath?: string,
   ) {
     verifyCodexVersion(config);
+    this.workspaceEntitlements = configPath === undefined
+      ? undefined
+      : new TomlWorkspaceEntitlementWriter(configPath);
     const primaryProvider = loadPrimaryModelProvider();
     const managedProvider = loadManagedModelProvider();
     const supplementaryModels = loadDeepseekModelOptions(
@@ -395,6 +401,7 @@ export class GatewayApplication {
           };
         },
       },
+      this.workspaceEntitlements,
     );
     this.output.subscribe("conversation-follow-up", async (event) => {
       if (event.type !== "turn.completed") {

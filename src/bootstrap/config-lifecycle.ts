@@ -20,7 +20,11 @@ export async function runGatewayProcess(): Promise<void> {
   const eventQueuePath = configEventQueuePath(dirname(runtime.configPath));
   const watchedPaths = [runtime.configPath, eventQueuePath];
   const logger = createLogger(config);
-  const application = new GatewayApplication(config, logger);
+  const application = new GatewayApplication(
+    config,
+    logger,
+    runtime.configPath,
+  );
   let stopping = false;
   let started = false;
   let reloading = false;

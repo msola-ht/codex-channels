@@ -49,6 +49,9 @@
   本机路径、版本、安装策略或完整官方响应。
 - `permission-port.ts`：定义 Permission Profile 的稳定 ID、说明和策略可选状态查询；只表示
   当前 Workspace 可见目录，不授予权限，也不承载审批决定。
+- `workspace-entitlement-port.ts`：定义渠道 `/workspace-perm` 使用的工作区权益写入窄端口；
+  Application 只按当前 Conversation 绑定的 Workspace 传递沙箱、审批策略或权限 Profile 更新，
+  不接触配置文件。
 - `turn-port.ts`：定义项目拥有的 Turn 输入、设置覆盖、Review 目标与执行窄端口，并复用 Core
   统一的 Goal 稳定状态类型；
   输入只允许文本、绝对本地图片路径、绝对本地音频路径和已由 Client 从当前 Workspace

@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  formatConversationCommandOutcome,
   formatConversationLimits,
   formatConversationMetrics,
   formatConversationModels,
   formatConversationStatus,
   formatConversationUsage,
+  formatConversationWorkspaceEntitlements,
   formatConversationWorkspaces,
 } from "../src/surfaces/conversation-command-format.js";
 import { formatCurrencyNanos } from "../src/surfaces/reference-cost-format.js";
@@ -36,6 +38,39 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("- 沙箱：完全访问");
     expect(rendered).toContain("- 审批：免审批");
     expect(rendered).toContain("- 权限 Profile：:read-only");
+  });
+
+  it("shows workspace entitlement usage and current values", () => {
+    const rendered = formatConversationWorkspaceEntitlements({
+      kind: "workspace-entitlements",
+      workspace: {
+        id: "main",
+        name: "Main",
+        cwd: "/workspace",
+        sandbox: "read-only",
+      },
+    });
+
+    expect(rendered).toContain("工作区权益（Main · main）");
+    expect(rendered).toContain("- 沙箱：只读");
+    expect(rendered).toContain("/workspace-perm approval");
+    expect(rendered).toContain("/workspace-perm profile");
+  });
+
+  it("renders updated workspace entitlements with the hot reload notice", () => {
+    const rendered = formatConversationCommandOutcome({
+      type: "workspace.entitlements-updated",
+      workspace: {
+        id: "main",
+        name: "Main",
+        cwd: "/workspace",
+        approvalPolicy: "never",
+      },
+    });
+
+    expect(rendered).toContain("已更新工作区权益");
+    expect(rendered).toContain("- 审批：免审批");
+    expect(rendered).toContain("对新建或恢复的 Thread 生效");
   });
 
   it("warns that a pending Provider switch starts a new recoverable Thread", () => {
