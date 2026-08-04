@@ -6,6 +6,7 @@
 - [`config.example.toml`](config.example.toml)：Gateway 配置示例。
 - [`docs/deepseek.md`](docs/deepseek.md)：DeepSeek 配置模式、终端使用、Provider 切换与运行统计。
 - [`docs/vision.md`](docs/vision.md)：双 Provider 与仅 DeepSeek 的图片识别代理配置和安全边界。
+- [`docs/errors.md`](docs/errors.md)：错误码字典、日志字段约定与排查示例。
 
 ## 协议与设计
 

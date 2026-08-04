@@ -1107,7 +1107,10 @@ function projectRulesUserError(error: unknown, operation: "init" | "check"): Err
     default:
       return error instanceof UserFacingError
         ? error
-        : new Error(`项目规则${operation === "init" ? "生成" : "检查"}失败`);
+        : new Error(
+            `项目规则${operation === "init" ? "生成" : "检查"}失败`,
+            { cause: error },
+          );
   }
 }
 

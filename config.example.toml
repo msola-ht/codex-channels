@@ -54,6 +54,7 @@ price_currency = "auto"
 mode = "disabled"
 # model = "视觉模型"
 # endpoint = "https://example.com/v1/responses"
+# timeout_seconds = 120  # 视觉请求超时，范围 30–600 秒，默认 120 秒
 # API Key 通过 codexc setup 保存到独立私有凭据文件，不写入本配置。
 
 [storage]

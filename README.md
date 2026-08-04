@@ -268,6 +268,7 @@ codexc service logs -n 100
 - 只需重启 Gateway：运行 `codexc service restart`，共享 App Server 和活动 Thread 会保留。
 - Codex CLI 版本不一致：重新安装精确版本 `@openai/codex@0.146.0`。
 - 飞书收不到消息或菜单不完整：在飞书私聊发送 `/fs doctor`。
+- 需要根据日志定位错误：错误码与日志字段约定见 [`docs/errors.md`](docs/errors.md)。
 - 需要查看参数：运行 `codexc -h` 或 `codexc <命令> -h`。
 
 分享日志前请人工检查内容。Gateway 会脱敏已知凭据，但 App Server 原始日志可能包含命令、工作内容

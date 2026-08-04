@@ -112,4 +112,6 @@ API Key 单独保存到 `credentials/api-providers/<ID>/api-key`，不写入 Gat
 - 外部响应最大 1 MiB，识别等待有明确超时；错误不会把上游正文发送给渠道。
 - 超时覆盖建立连接、等待响应头和读取完整响应正文；同一 Gateway 最多同时执行两个外部识图
   请求，超出后直接提示繁忙，不建立无界等待队列。
+- 视觉请求超时默认为 120 秒，可通过 `[vision] timeout_seconds` 在 30–600 秒范围内调整；
+  超时和失败会在日志中记录 `errorType`、`httpStatus` 与受控说明，渠道只显示稳定重试文案。
 - `mode = "disabled"` 是默认值；此时不支持图片的模型继续在创建 Turn 前明确拒绝。

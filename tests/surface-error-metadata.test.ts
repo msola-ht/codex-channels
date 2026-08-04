@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { JsonRpcError } from "../src/codex-client/index.js";
+import { UserFacingError } from "../src/conversation-core/index.js";
 import { surfaceErrorMetadata } from "../src/surfaces/index.js";
 
 describe("surfaceErrorMetadata", () => {
@@ -57,5 +58,24 @@ describe("surfaceErrorMetadata", () => {
     expect(JSON.stringify(surfaceErrorMetadata(unknown))).not.toContain(
       "Bearer",
     );
+  });
+
+  it("keeps the constrained code and user-facing message for surfaced errors", () => {
+    expect(surfaceErrorMetadata(new UserFacingError(
+      "vision.failed",
+      "图片识别失败",
+    ))).toEqual({
+      errorType: "UserFacingError",
+      errorCode: "vision.failed",
+      errorMessage: "图片识别失败",
+    });
+    expect(surfaceErrorMetadata(new UserFacingError(
+      "model.input.image.unsupported",
+      "当前模型 deepseek-v4-flash 不支持图片输入",
+    ))).toEqual({
+      errorType: "UserFacingError",
+      errorCode: "model.input.image.unsupported",
+      errorMessage: "当前模型 deepseek-v4-flash 不支持图片输入",
+    });
   });
 });

@@ -253,12 +253,14 @@ describe("Responses vision adapter", () => {
     ]));
     let requestSignal: AbortSignal | undefined;
     let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const warn = vi.fn();
     const adapter = createResponsesVisionAdapter({
       provider: "测试中转",
       endpoint: "https://vision.example/v1/responses",
       model: "vision-model",
       loadApiKey: () => "private-key",
       requestTimeoutMs: 10,
+      logger: { warn } as never,
       fetchImpl: async (_input, init) => {
         requestSignal = init?.signal ?? undefined;
         const body = new ReadableStream<Uint8Array>({
@@ -284,5 +286,13 @@ describe("Responses vision adapter", () => {
     if (!aborted) bodyController?.error(new Error("test cleanup"));
     await recognition;
     expect(aborted).toBe(true);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        errorType: "vision_timeout",
+        timeoutMs: 10,
+        errorMessage: "视觉 API 请求超时（10 毫秒）",
+      }),
+      "视觉识别请求失败",
+    );
   });
 });

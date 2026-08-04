@@ -78,6 +78,7 @@ export interface GatewayConfig {
         provider: string;
         endpoint: string;
         model: string;
+        timeoutMs: number;
       };
   credentialsDirectory: string;
   stateDatabasePath: string;
@@ -306,6 +307,7 @@ function toVisionConfig(
     provider: provider.id,
     endpoint: validateApiEndpoint(provider.endpoint, `api_providers.${provider.id}.endpoint`),
     model: raw.model,
+    timeoutMs: raw.timeout_seconds * 1000,
   };
 }
 

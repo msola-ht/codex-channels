@@ -1,5 +1,7 @@
 import { readFile } from "node:fs/promises";
 
+import type { Logger } from "pino";
+
 import {
   parseVisionRecognitionPayload,
   visionRecognitionJsonSchema,
@@ -9,7 +11,7 @@ import {
 import type { ModelRequestMetricSample } from "../observability/index.js";
 
 const maximumResponseBytes = 1_048_576;
-const requestTimeoutMs = 60_000;
+const requestTimeoutMs = 120_000;
 
 export interface ResponsesVisionAdapterOptions {
   provider: string;
@@ -20,6 +22,7 @@ export interface ResponsesVisionAdapterOptions {
   fetchImpl: typeof fetch;
   requestTimeoutMs?: number;
   onMetric?: (metric: ModelRequestMetricSample) => void;
+  logger?: Logger;
 }
 
 export function createResponsesVisionAdapter(
@@ -129,6 +132,19 @@ export function createResponsesVisionAdapter(
         const responseCompletedAtMs = Date.now();
         const parsedStatus = safeIdentifier(parsed?.status, 32);
         const usage = parseTokenUsage(parsed?.usage);
+        options.logger?.warn({
+          errorType: visionMetricErrorType(response, controller.signal, parsedStatus),
+          httpStatus: response?.status ?? null,
+          ...(parsed?.incompleteReason === undefined
+            ? {}
+            : { incompleteReason: safeIdentifier(parsed.incompleteReason, 128) }),
+          timeoutMs,
+          errorMessage: controller.signal.aborted
+            ? `视觉 API 请求超时（${timeoutMs} 毫秒）`
+            : error instanceof Error
+              ? error.message
+              : String(error),
+        }, "视觉识别请求失败");
         emitMetric(options, createVisionMetric({
           request,
           model: safeIdentifier(parsed?.model, 128)

@@ -1,7 +1,10 @@
+import { UserFacingError } from "../conversation-core/index.js";
+
 export interface SurfaceErrorMetadata extends Record<string, unknown> {
   errorType: string;
   errorCode?: string | number;
   errorReason?: SurfaceErrorReason;
+  errorMessage?: string;
 }
 
 export type SurfaceErrorReason =
@@ -12,6 +15,13 @@ export type SurfaceErrorReason =
   | "empty-input";
 
 export function surfaceErrorMetadata(error: unknown): SurfaceErrorMetadata {
+  if (error instanceof UserFacingError) {
+    return {
+      errorType: "UserFacingError",
+      errorCode: error.code,
+      errorMessage: error.message,
+    };
+  }
   const constructorName = error instanceof Error
     ? error.constructor.name
     : undefined;

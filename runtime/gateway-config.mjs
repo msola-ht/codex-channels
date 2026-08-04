@@ -71,6 +71,7 @@ const visionSchema = z.discriminatedUnion("mode", [
     mode: z.literal("responses_api"),
     provider: apiProviderIdSchema,
     model: z.string().trim().min(1),
+    timeout_seconds: z.number().int().min(30).max(600).default(120),
   }),
 ]);
 

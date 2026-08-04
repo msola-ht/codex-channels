@@ -30,8 +30,11 @@ export function loadDeepseekModelOptions(
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(catalogPath, "utf8"));
-  } catch {
-    throw new Error(`DeepSeek 模型目录无效，请重新运行 codexc setup：${catalogPath}`);
+  } catch (error) {
+    throw new Error(
+      `DeepSeek 模型目录无效，请重新运行 codexc setup：${catalogPath}`,
+      { cause: error },
+    );
   }
   const models = record(parsed).models;
   if (!Array.isArray(models)) {

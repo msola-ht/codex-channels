@@ -219,11 +219,13 @@ export class GatewayApplication {
             : { providerName: visionProviderName }),
           endpoint: visionConfig.endpoint,
           model: visionConfig.model,
+          requestTimeoutMs: visionConfig.timeoutMs,
           loadApiKey: () => readApiProviderKey(
             config.credentialsDirectory,
             visionConfig.provider,
           ),
           fetchImpl: createProxyFetch(config.networkProxy),
+          logger,
           onMetric: (metric) => {
             try {
               const pricing = this.modelPricing.resolve({

@@ -146,7 +146,7 @@ function formatVisionContext(result: VisionRecognitionResult): string {
 function parseJson(value: string): unknown {
   try {
     return JSON.parse(value);
-  } catch {
-    throw new Error("视觉识别结果不是有效 JSON");
+  } catch (error) {
+    throw new Error("视觉识别结果不是有效 JSON", { cause: error });
   }
 }

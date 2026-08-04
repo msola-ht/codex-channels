@@ -323,6 +323,9 @@ export class FeishuSurface implements SurfaceAdapter {
             ...(error.errorCode === undefined
               ? {}
               : { errorCode: error.errorCode }),
+            ...(error.errorMessage === undefined
+              ? {}
+              : { errorMessage: error.errorMessage }),
             ...(error.errorReason === undefined
               ? {}
               : { errorReason: error.errorReason }),

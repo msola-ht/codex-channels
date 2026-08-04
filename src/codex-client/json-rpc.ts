@@ -317,6 +317,10 @@ export class JsonRpcClient {
       }
       result = await this.serverRequestHandler(request);
     } catch (error) {
+      this.logger?.warn(
+        { err: error, method: request.method },
+        "Codex Server Request 处理失败",
+      );
       rpcError =
         error instanceof JsonRpcError
           ? error
