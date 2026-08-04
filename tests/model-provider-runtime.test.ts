@@ -81,6 +81,10 @@ describe("model provider runtime topology", () => {
     expect(managed.arguments).toContain(
       "model_providers.deepseek.base_url=\"https://api.deepseek.com/\"",
     );
+    expect(managed.arguments).toContain("model_auto_compact_token_limit=629146");
+    expect(managed.arguments).toContain(
+      'model_auto_compact_token_limit_scope="total"',
+    );
 
     const overridden = withProviderBaseUrl(
       managed.arguments,
@@ -171,6 +175,8 @@ function providerProfile(codexHome: string): string {
     'model_provider = "deepseek"',
     'model_reasoning_effort = "high"',
     `model_catalog_json = ${JSON.stringify(join(codexHome, "deepseek.models.json"))}`,
+    "model_auto_compact_token_limit = 629146",
+    'model_auto_compact_token_limit_scope = "total"',
     "[model_providers.deepseek]",
     'name = "deepseek"',
     'base_url = "https://api.deepseek.com/"',
