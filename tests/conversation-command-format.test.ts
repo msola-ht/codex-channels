@@ -187,16 +187,20 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("模型请求聚合耗时：1分5秒");
     expect(rendered).toContain("模型请求累计耗时：2分22秒");
     expect(rendered).toContain("缓存命中率：80.00%");
-    expect(rendered).toContain("最近运行聚合：");
+    expect(rendered).toContain("### 最近运行聚合");
+    expect(rendered).toContain("#### Token");
+    expect(rendered).toContain("  - 命中缓存：24 K");
+    expect(rendered).toContain("#### 费用");
+    expect(rendered).toContain("  - 输入价格：$0.000400");
     expect(rendered).toContain("综合输出速度：60 token/s（不含推理 · 覆盖 2/3 次请求）");
     expect(rendered).toContain("参考总价：$0.001235（已计价 2/3 次请求）");
     expect(rendered).toContain("输入价格：$0.000400");
     expect(rendered).toContain("缓存价格：$0.000200");
     expect(rendered).toContain("输出价格：$0.000635");
-    expect(rendered).toContain("当前会话指标累计：");
+    expect(rendered).toContain("### 当前会话指标累计");
     expect(rendered).toContain("Turn：8 次");
     expect(rendered).toContain("综合输出速度：58 token/s（不含推理 · 覆盖 20/21 次请求）");
-    expect(rendered).toContain("最近直接 API：");
+    expect(rendered).toContain("### 最近直接 API");
     expect(rendered).toContain("API 提供商：BLTCY");
     expect(rendered).toContain("调用模型：gpt-5.6-luna");
     expect(rendered).toContain("状态：已完成 · HTTP 200");
@@ -389,7 +393,7 @@ describe("provider-aware conversation command formatting", () => {
       },
     });
 
-    expect(rendered).toContain("请求指标 · 异常请求");
+    expect(rendered).toContain("## 请求指标 · 异常请求");
     expect(rendered).toContain("异常率：3%");
     expect(rendered).toContain("OpenAI 官方 / gpt-5.6-sol");
     expect(rendered).toContain("WebSocket 提前关闭 · 失败 · 2 次");

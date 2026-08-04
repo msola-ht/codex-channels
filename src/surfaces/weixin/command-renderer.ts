@@ -165,6 +165,10 @@ export function formatWeixinCommandText(
       return line;
     }
     if (!fenced && options.structuredFields === true) {
+      const heading = /^#{1,6}\s+(.+)$/u.exec(line);
+      if (heading) {
+        return `**${heading[1]}**`;
+      }
       const section = /^([^：\n]{1,64})：\s*$/u.exec(line);
       if (section) {
         return `**${section[1]}**`;
