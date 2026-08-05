@@ -16,8 +16,9 @@
 - `provider-metrics-composition.ts`：组合 Provider 私有指标 Socket、Observability 独立存储和 Core
   既有计时端口。所有脱敏请求样本都会持久化；具备 Thread、Turn 与 Token 窗口的样本按 Turn 聚合
   到完成卡片；持久化通过 Observability 有界 Writer 延迟分片执行，单项写入失败不会阻断指标确认或
-  既有 Core 计时。可选 `ModelPricingResolver` 只在组合边界为新请求附加当次价格快照；代理、Core
-  和数据库 View 都不读取设置或内置模型价格。
+  既有 Core 计时。可选 `ModelPricingResolver` 只在组合边界为新请求附加当次价格快照，可选
+  `resolveModelSettings` 按 Thread 关联补齐路由层维护的思考等级；代理、Core 和数据库 View
+  都不读取设置或内置模型价格。
 - `model-pricing-catalog.ts`：实现组合根注入的远程价格目录。启动时先读取 Gateway 数据目录下的
   `0600` 可丢弃缓存，再异步刷新；固定优先读取 LiteLLM 目录，失败时回退到 Sub2API 使用的
   `Wei-Shaw/model-price-repo` 镜像，每 6 小时条件请求一次。解析器只为新请求生成不可变 USD API

@@ -49,11 +49,18 @@ price_currency = "auto"
 # deepseek = "cny"
 # openai = "usd"
 
+# 直接 API 提供商（图片识别等第三方 Responses 中转）：
+# [[api_providers]]
+# id = "vision-relay"
+# name = "视觉中转"
+# protocol = "responses"
+# endpoint = "https://example.com/v1/responses"
+
 [vision]
 # disabled：不代理识图；responses_api：当前模型不支持图片时调用外部视觉接口。
 mode = "disabled"
+# provider = "vision-relay"   # 必须引用上方 api_providers 的 id
 # model = "视觉模型"
-# endpoint = "https://example.com/v1/responses"
 # timeout_seconds = 120  # 视觉请求超时，范围 30–600 秒，默认 120 秒
 # API Key 通过 codexc setup 保存到独立私有凭据文件，不写入本配置。
 

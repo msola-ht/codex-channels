@@ -33,8 +33,8 @@ codexc setup
 
 `codexc config` 提供交互式配置与设置菜单，覆盖配置文件中可安全编辑的参数：显示设置（操作
 详情、计划更新、参考价人民币换算）、系统设置（调试模式、审批超时、Sandbox、默认工作区与
-模型）、Telegram 消息格式，以及配置路径查看。在脚本或管道中运行时会直接输出用户目录与
-配置文件路径。
+模型）、工作区设置（沙箱、审批策略、权限 Profile）、Telegram 消息格式，以及配置路径查看。
+在脚本或管道中运行时会直接输出用户目录与配置文件路径。
 
 注册需要让 Codex 操作的项目：
 
@@ -206,6 +206,7 @@ codexc remote --profile deepseek resume
 ### 管理后台服务
 
 ```bash
+codexc start                         # 前台启动 App Server 与 Gateway（调试用）
 codexc service status              # 查看全部服务
 codexc service reload              # 重新读取配置
 codexc service restart             # 只重启 Gateway
@@ -250,7 +251,7 @@ Markdown 报表的费用按 `display.price_currency` / `price_currency_by_provid
 
 ### 常用聊天命令
 
-- 会话：`/new`、`/resume`、`/sessions`、`/archive`、`/unarchive`、`/pin`、`/unpin`
+- 会话：`/new`、`/resume`、`/sessions`、`/archived`、`/rename`、`/archive`、`/unarchive`、`/pin`、`/unpin`
 - Workspace：`/workspace`、`/workspace-perm`
 - 运行：`/status`、`/stop`、`/queue <描述>`、`/compact`、`/fork`、`/review`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
@@ -349,6 +350,14 @@ npm run install:global
 ```
 
 完整项目文档见 [`index.md`](index.md)。
+
+## 联系方式
+
+微信扫码联系：
+
+![微信二维码](assets/wechat-qr.png)
+
+二维码图片存放在 [`assets/wechat-qr.png`](assets/wechat-qr.png)，替换该文件即可更新。
 
 ## License
 

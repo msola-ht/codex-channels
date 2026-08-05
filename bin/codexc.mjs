@@ -63,7 +63,7 @@ const helpText = {
   work [list|add|remove]       管理 Workspace（别名 ws；无子命令进入交互菜单）
   rules <init|check>           生成或检查项目 Codex 命令预设
   state upgrade               显式升级 Gateway 状态数据库
-  metrics <run|report|export|status|reset>   模型请求指标：本次运行、汇报、明细导出、状态、重建
+  metrics <run|turns|threads|report|export|status|reset>   模型请求指标：本次运行、会话明细、会话归纳、汇报、导出、状态、重建
 
 后台服务：
   start                        前台启动 App Server 与 Gateway

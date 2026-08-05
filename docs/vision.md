@@ -93,8 +93,9 @@ API Key 单独保存到 `credentials/api-providers/<ID>/api-key`，不写入 Gat
 - 三渠道继续沿用最多四张、单张 10 MiB、整批 20 MiB、PNG/JPEG 签名和私有临时文件限制。
 - 图片、提示词、API Key、上游响应正文、响应 ID 和识别结果不写入 SQLite 或结构化日志。
 - 识别进度只发送到发起请求的 Conversation；心跳只保存在当前请求计时器中，完成、失败或进程
-  停止时取消。指标库只接收脱敏的提供商 ID、模型、状态、HTTP 状态、耗时、上游时间戳、Token
-  和当次价格快照；
+  停止时取消。指标库只接收脱敏的提供商 ID、模型、思考等级、状态、HTTP 状态、耗时、上游时间戳、
+  Token 和当次价格快照；视觉请求继承当前 Thread 的思考等级并在支持时透传
+  `reasoning.effort`，没有 Thread 关联或未设置时记为空；
   已有 Thread 时保存 `thread_id`，视觉调用先于 Codex Turn，因此 `turn_id` 为 `NULL`。
 - 识别耗时是 Gateway 从发起 HTTP 请求到读取并解析响应的本地观测值，不冒充上游内部处理时长；
   上游时间戳差值仅作为内部观测。Token 用量只裁剪响应体中非负安全整数，不根据图片大小或文本

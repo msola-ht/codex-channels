@@ -56,8 +56,9 @@
 参数、凭据或上游响应 ID。`provider-proxy` 生成 Codex Provider 脱敏样本，Bootstrap 的外部视觉
 适配器生成直接 API 脱敏样本，两者复用同一有界 Writer；已有 Thread 的视觉请求保存
 `thread_id`，因调用发生在 Codex Turn 之前而保持 `turn_id = NULL`。本模块不依赖代理、App Server
-协议、Surface 或业务 Storage。当前没有公开 HTTP API 或 WebUI；`codexc metrics report` 与
-`export` 只通过本地只读连接输出 Markdown 或带固定格式版本的 JSON/CSV。Schema 不兼容时
+协议、Surface 或业务 Storage。当前没有公开 HTTP API 或 WebUI；`codexc metrics` 的
+`report`、`export`、`run`、`turns`、`threads` 只通过本地只读连接输出 Markdown、JSON 或 CSV。
+Schema 不兼容时
 Gateway 失败关闭并提示 `codexc metrics reset`；该命令要求 Gateway 已停止，先检查点回写并备份
 旧库，再由下次启动创建当前 Schema，不执行隐式迁移。
 指标采集始终开启，不受全局调试模式影响；`debug` / `trace` 只增加脱敏的关联诊断，写入失败仍按
