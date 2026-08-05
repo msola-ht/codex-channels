@@ -123,6 +123,43 @@ export interface ModelRequestMetricSample {
   firstOutputDeltaAtMs: number | null;
   lastOutputDeltaAtMs: number | null;
   responseCompletedAtMs: number;
+  weeklyQuota: {
+    limitId: "codex";
+    usedPercentMillionths: number;
+    resetsAt: number;
+  } | null;
+}
+
+export interface WeeklyQuotaEstimateQuery {
+  provider: string;
+  limitId: string;
+  resetsAt: number;
+  nowMs: number;
+}
+
+export interface StoredWeeklyQuotaEstimate {
+  limitId: string;
+  resetsAt: number;
+  firstObservedAtMs: number;
+  lastObservedAtMs: number;
+  latestUsedPercentMillionths: number;
+  observedDeltaPercentMillionths: number;
+  intervalCount: number;
+  requestCount: number;
+  unsuccessfulRequestCount: number;
+  pricedRequestCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  pricingCurrency: string | null;
+  totalCostNanos: number | null;
+}
+
+export interface StoredWeeklyQuotaWindow {
+  limitId: string;
+  usedPercentMillionths: number;
+  resetsAt: number;
+  observedAtMs: number;
 }
 
 export interface StoredModelRequestMetric extends ModelRequestMetricSample {

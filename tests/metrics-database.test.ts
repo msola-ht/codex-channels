@@ -22,6 +22,8 @@ import {
   readMetricsThreads,
   readMetricsTurns,
   resetMetricsDatabase,
+  upgradeMetricsDatabase,
+  upgradeMetricsDatabaseWithGatewayRestart,
 } from "../scripts/metrics-database.mjs";
 import {
   modelRequestMetricsSchemaVersion,
@@ -70,7 +72,15 @@ describe("model request metrics database operations", () => {
   it("reads a reusable aggregate report and paged sanitized export", () => {
     const { environment, databasePath } = fixture();
     const store = new SqliteModelRequestMetricsStore(databasePath);
-    store.record(metricSample());
+    store.record({
+      ...metricSample(),
+      provider: "openai",
+      weeklyQuota: {
+        limitId: "codex",
+        usedPercentMillionths: 12_500_000,
+        resetsAt: Math.floor(Date.now() / 1_000) + 24 * 60 * 60,
+      },
+    });
     store.record({
       ...metricSample(),
       responseFormat: "unknown",
@@ -97,7 +107,13 @@ describe("model request metrics database operations", () => {
     });
     expect(report).toMatchObject({
       format: "codex-connect-request-metrics-report",
-      version: 1,
+      version: 2,
+      weeklyQuota: {
+        limitId: "codex",
+        usedPercent: 12.5,
+        remainingPercent: 87.5,
+        estimate: null,
+      },
       report: {
         aggregate: {
           requestCount: 2,
@@ -116,7 +132,11 @@ describe("model request metrics database operations", () => {
     const exported = readMetricsExport(environment, { range: "24h", nowMs });
     expect(exported).toMatchObject({
       format: "codex-connect-request-metrics-export",
-      version: 1,
+      version: 2,
+      weeklyQuota: {
+        limitId: "codex",
+        usedPercent: 12.5,
+      },
     });
     expect(exported.records).toHaveLength(2);
     expect(exported.records[1]).toMatchObject({
@@ -317,6 +337,93 @@ describe("model request metrics database operations", () => {
     backup.close();
   });
 
+  it("backs up and explicitly upgrades a v3 metrics database in place", () => {
+    const { environment, databasePath } = fixture();
+    createMetricsDatabase(databasePath, 3, 2);
+
+    const result = upgradeMetricsDatabase(environment, {
+      gatewayRunning: () => false,
+      now: () => new Date("2026-08-05T12:34:56.789Z"),
+    });
+
+    expect(result).toMatchObject({
+      changed: true,
+      databasePath,
+      previousSchemaVersion: 3,
+      schemaVersion: 4,
+    });
+    expect(result.backupPath).toContain(".v3.2026-08-05T12-34-56-789Z.bak");
+    expect(existsSync(result.backupPath!)).toBe(true);
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    expect(database.prepare(
+      "SELECT value FROM schema_metadata WHERE name = 'schema_version'",
+    ).get()).toEqual({ value: 4 });
+    const columns = database.prepare("PRAGMA table_info(model_request_metrics)")
+      .all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
+      "weekly_quota_limit_id",
+      "weekly_used_percent_millionths",
+      "weekly_resets_at",
+    ]));
+    expect(database.prepare("SELECT COUNT(*) AS count FROM model_request_metrics").get())
+      .toEqual({ count: 2 });
+    database.close();
+  });
+
+  it("refuses metrics upgrades while Gateway is running", () => {
+    const { environment, databasePath } = fixture();
+    createMetricsDatabase(databasePath, 3, 1);
+
+    expect(() => upgradeMetricsDatabase(environment, {
+      gatewayRunning: () => true,
+    })).toThrow(/codexc service stop gateway/u);
+    expect(inspectMetricsDatabase(environment).schemaVersion).toBe(3);
+  });
+
+  it("fails closed instead of guessing an unsupported metrics upgrade", () => {
+    const { environment, databasePath } = fixture();
+    createMetricsDatabase(databasePath, 2, 1);
+
+    expect(() => upgradeMetricsDatabase(environment, {
+      gatewayRunning: () => false,
+    })).toThrow(/仅支持 v3 升级到 v4/u);
+    expect(inspectMetricsDatabase(environment).schemaVersion).toBe(2);
+  });
+
+  it("stops, upgrades and restarts Gateway in order", () => {
+    const calls: string[] = [];
+    const result = upgradeMetricsDatabaseWithGatewayRestart(process.env, {
+      stopGateway: () => calls.push("stop"),
+      upgrade: () => {
+        calls.push("upgrade");
+        return {
+          backupPath: "/tmp/metrics-v3.bak",
+          changed: true,
+          databasePath: "/tmp/metrics.sqlite3",
+          previousSchemaVersion: 3,
+          schemaVersion: 4,
+        };
+      },
+      startGateway: () => calls.push("start"),
+    });
+
+    expect(calls).toEqual(["stop", "upgrade", "start"]);
+    expect(result.schemaVersion).toBe(4);
+  });
+
+  it("still restarts Gateway when the upgrade fails", () => {
+    const calls: string[] = [];
+    expect(() => upgradeMetricsDatabaseWithGatewayRestart(process.env, {
+      stopGateway: () => calls.push("stop"),
+      upgrade: () => {
+        calls.push("upgrade");
+        throw new Error("upgrade failed");
+      },
+      startGateway: () => calls.push("start"),
+    })).toThrow(/upgrade failed/u);
+    expect(calls).toEqual(["stop", "upgrade", "start"]);
+  });
+
   it("refuses to reset when an unmanaged Gateway still owns the metrics database", () => {
     const { environment, databasePath } = fixture();
     const active = new SqliteModelRequestMetricsStore(databasePath);
@@ -406,5 +513,6 @@ function metricSample(): ModelRequestMetricSample {
     firstOutputDeltaAtMs: 1_400,
     lastOutputDeltaAtMs: 1_600,
     responseCompletedAtMs: 1_650,
+    weeklyQuota: null,
   };
 }

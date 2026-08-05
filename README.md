@@ -118,6 +118,10 @@ codexc service restart gateway
 `global|providers|models|errors` 的时间范围汇总。展示与统计口径见
 [`docs/display.md`](docs/display.md)。
 
+OpenAI `/limits` 会在存在完整周窗口且统计代理观测到相邻额度增长时，按增长区间内的请求
+Token 与价格快照估算每 1% 周额度对应的 Token、API 参考费用及剩余额度可用量。估算只覆盖
+本机代理捕获的请求，其他客户端在两次快照之间的用量可能造成偏差，也不代表订阅实际扣款。
+
 信息类聊天指令输出统一为 Markdown 列表：`##` 标题、`###` 小节、`-` 字段列表、明细缩进嵌套；
 `/metrics` 用 `**Token**：总计` 与 `**费用**：总价` 列表块分节，费用先出总计、再列出明细；
 `/diff` 与操作结果保持原文。三渠道分别用飞书卡片 Markdown、Telegram HTML 和微信结构化字段渲染。
@@ -214,6 +218,7 @@ codexc metrics run <Thread ID>                    # 本次运行汇总（最近�
 codexc metrics report --range 30d --group models  # 聚合汇报
 codexc metrics export --range 30d --format json   # 脱敏明细导出；--thread 可按 Thread 过滤
 codexc service stop gateway
+codexc metrics upgrade --restart-gateway          # 自动停 Gateway、备份升级并重新启动
 codexc metrics reset                              # 先保留 0600 旧库备份，再重建
 codexc service start gateway
 ```
@@ -223,13 +228,16 @@ json，其余默认 markdown），默认写入 `~/.codex-connect/output/<日期>
 `<命令>[-短ThreadID]-<YYYYMMDD-HHmmss>[-序号].<格式>`，同一秒重名时保留两份并追加序号；
 加 `--stdout` 输出到标准输出。导出使用只读
 连接，可在 Gateway 运行时执行；支持 `24h`、`7d`、`30d`，包含固定格式版本、时间范围和脱敏请求
-字段，不包含提示词、消息、图片、响应正文、凭据或上游响应 ID。
+字段，不包含提示词、消息、图片、响应正文、凭据或上游响应 ID。`report` 与 `export` 的
+Markdown、JSON、CSV 还包含统计代理最后观测到的当前周额度区间和每 1% 采样状态；JSON 格式版本为 v2。
 Markdown 报表的费用按 `display.price_currency` / `price_currency_by_provider` 换算显示
 （如 DeepSeek 默认人民币，依赖汇率缓存），时间显示为服务器本地时区；JSON 与 CSV 保留原始
 币种、nanos 与 ISO 时间，并按相同配置附加 `*CostCnyNanos` 换算列（如 `totalCostCnyNanos`），
 便于统计和直接查看人民币金额；报告 CSV 同时保留 Provider、模型及异常分组，文本单元格会中和
 电子表格公式前缀。
-`metrics reset` 不修改会话状态库；Gateway 运行时会拒绝执行，旧指标不会隐式迁移。
+`metrics upgrade` 只支持把现有指标库从 Schema v3 显式升级到 v4 并保留旧记录；Gateway 已停止时
+可直接运行，不便单独管理服务时可加 `--restart-gateway` 自动完成停止、升级和重新启动。`metrics reset`
+用于归档并重建不支持的版本。两者都不修改会话状态库，Gateway 运行时会拒绝执行。
 
 ### 常用聊天命令
 

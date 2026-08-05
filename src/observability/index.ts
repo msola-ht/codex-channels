@@ -34,6 +34,9 @@ export type {
   StoredThreadListItem,
   StoredThreadTurnSummary,
   StoredTurnRequestMetricsSummary,
+  StoredWeeklyQuotaEstimate,
+  StoredWeeklyQuotaWindow,
+  WeeklyQuotaEstimateQuery,
   StoredThreadRequestMetricsAggregate,
 } from "./request-metrics.js";
 export { BufferedModelRequestMetricsWriter } from "./request-metrics-writer.js";

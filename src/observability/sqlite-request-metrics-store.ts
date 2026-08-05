@@ -28,10 +28,14 @@ import type {
   StoredThreadListItem,
   StoredThreadTurnSummary,
   StoredTurnRequestMetricsSummary,
+  StoredWeeklyQuotaEstimate,
+  StoredWeeklyQuotaWindow,
+  WeeklyQuotaEstimateQuery,
 } from "./request-metrics.js";
 
 const schemaVersion = modelRequestMetricsSchemaVersion;
 const retentionMs = 30 * 24 * 60 * 60 * 1_000;
+const weeklyWindowMs = 7 * 24 * 60 * 60 * 1_000;
 const maximumRows = 100_000;
 const cleanupInterval = 100;
 const maximumAggregationGroups = 20;
@@ -134,6 +138,9 @@ interface MetricRow {
   last_output_delta_at_ms: number | null;
   response_completed_at_ms: number;
   recorded_at_ms: number;
+  weekly_quota_limit_id: "codex" | null;
+  weekly_used_percent_millionths: number | null;
+  weekly_resets_at: number | null;
   request_duration_ms: number | null;
   ttft_ms: number | null;
   thinking_duration_ms: number | null;
@@ -266,10 +273,11 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           request_started_at_ms, first_token_at_ms,
           first_reasoning_delta_at_ms, last_reasoning_delta_at_ms,
           first_output_delta_at_ms, last_output_delta_at_ms,
-          response_completed_at_ms, recorded_at_ms
+          response_completed_at_ms, recorded_at_ms,
+          weekly_quota_limit_id, weekly_used_percent_millionths, weekly_resets_at
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
       `);
       this.cleanup(nowMs);
@@ -324,6 +332,9 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       sample.lastOutputDeltaAtMs,
       sample.responseCompletedAtMs,
       recordedAtMs,
+      sample.weeklyQuota?.limitId ?? null,
+      sample.weeklyQuota?.usedPercentMillionths ?? null,
+      sample.weeklyQuota?.resetsAt ?? null,
     );
     this.rowCount += 1;
     this.recordsSinceCleanup += 1;
@@ -341,6 +352,60 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       SELECT * FROM model_request_metrics_enriched ORDER BY id DESC LIMIT ?
     `).all(limit) as unknown as MetricRow[];
     return rows.map(toStoredMetric);
+  }
+
+  weeklyQuotaEstimate(
+    query: WeeklyQuotaEstimateQuery,
+  ): StoredWeeklyQuotaEstimate | null {
+    this.requireOpen();
+    validateWeeklyQuotaEstimateQuery(query);
+    const startAtMs = query.resetsAt * 1_000 - weeklyWindowMs;
+    const rows = this.database.prepare(`
+      SELECT * FROM model_request_metrics_enriched
+      WHERE provider = ?
+        AND operation = 'response'
+        AND recorded_at_ms >= ?
+        AND recorded_at_ms <= ?
+      ORDER BY id ASC
+    `).all(query.provider, startAtMs, query.nowMs) as unknown as MetricRow[];
+    return estimateWeeklyQuotaRows(rows, query);
+  }
+
+  latestWeeklyQuota(
+    provider: string,
+    nowMs: number = Date.now(),
+  ): StoredWeeklyQuotaWindow | null {
+    this.requireOpen();
+    if (
+      provider.length === 0
+      || provider.length > 128
+      || !Number.isSafeInteger(nowMs)
+      || nowMs < 0
+    ) throw new Error("最新周额度查询无效");
+    const row = this.database.prepare(`
+      SELECT weekly_quota_limit_id, weekly_used_percent_millionths,
+        weekly_resets_at, recorded_at_ms
+      FROM model_request_metrics
+      WHERE provider = ?
+        AND weekly_quota_limit_id IS NOT NULL
+        AND weekly_resets_at * 1000 > ?
+        AND recorded_at_ms <= ?
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(provider, nowMs, nowMs) as {
+      weekly_quota_limit_id: string;
+      weekly_used_percent_millionths: number;
+      weekly_resets_at: number;
+      recorded_at_ms: number;
+    } | undefined;
+    return row
+      ? {
+          limitId: row.weekly_quota_limit_id,
+          usedPercentMillionths: row.weekly_used_percent_millionths,
+          resetsAt: row.weekly_resets_at,
+          observedAtMs: row.recorded_at_ms,
+        }
+      : null;
   }
 
   page(query: ModelRequestMetricsPageQuery): StoredModelRequestMetricsPage {
@@ -967,6 +1032,24 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
             last_output_delta_at_ms INTEGER,
             response_completed_at_ms INTEGER NOT NULL,
             recorded_at_ms INTEGER NOT NULL,
+            weekly_quota_limit_id TEXT CHECK (
+              weekly_quota_limit_id IS NULL OR weekly_quota_limit_id = 'codex'
+            ),
+            weekly_used_percent_millionths INTEGER CHECK (
+              weekly_used_percent_millionths IS NULL
+              OR weekly_used_percent_millionths BETWEEN 0 AND 100000000
+            ),
+            weekly_resets_at INTEGER CHECK (
+              weekly_resets_at IS NULL OR weekly_resets_at >= 0
+            ),
+            CHECK (
+              (weekly_quota_limit_id IS NULL
+                AND weekly_used_percent_millionths IS NULL
+                AND weekly_resets_at IS NULL)
+              OR (weekly_quota_limit_id IS NOT NULL
+                AND weekly_used_percent_millionths IS NOT NULL
+                AND weekly_resets_at IS NOT NULL)
+            ),
             CHECK (
               (
                 billing_mode IS NULL
@@ -1160,7 +1243,9 @@ export class ModelRequestMetricsSchemaError extends Error {
   constructor(readonly actualVersion: number, readonly expectedVersion: number) {
     super(
       `模型请求指标数据库版本不兼容：当前 ${actualVersion}，Gateway 需要 ${expectedVersion}。`
-      + "请停止 Gateway 后运行 codexc metrics reset",
+      + (actualVersion === 3 && expectedVersion === 4
+        ? "请停止 Gateway 后运行 codexc metrics upgrade"
+        : "请停止 Gateway 后运行 codexc metrics reset"),
     );
     this.name = "ModelRequestMetricsSchemaError";
   }
@@ -1207,6 +1292,15 @@ function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     firstOutputDeltaAtMs: row.first_output_delta_at_ms,
     lastOutputDeltaAtMs: row.last_output_delta_at_ms,
     responseCompletedAtMs: row.response_completed_at_ms,
+    weeklyQuota: row.weekly_quota_limit_id === null
+      || row.weekly_used_percent_millionths === null
+      || row.weekly_resets_at === null
+      ? null
+      : {
+          limitId: row.weekly_quota_limit_id,
+          usedPercentMillionths: row.weekly_used_percent_millionths,
+          resetsAt: row.weekly_resets_at,
+        },
     recordedAtMs: row.recorded_at_ms,
     requestDurationMs: row.request_duration_ms,
     ttftMs: row.ttft_ms,
@@ -1296,6 +1390,146 @@ function validateAggregationQuery(query: ModelRequestMetricsAggregationQuery): v
   if (!(["global", "provider", "model"] as const).includes(query.dimension)) {
     throw new Error("模型请求指标聚合维度无效");
   }
+}
+
+function validateWeeklyQuotaEstimateQuery(query: WeeklyQuotaEstimateQuery): void {
+  if (
+    query.provider.length === 0
+    || query.provider.length > 128
+    || query.limitId !== "codex"
+    || !Number.isSafeInteger(query.resetsAt)
+    || query.resetsAt < 0
+    || !Number.isSafeInteger(query.nowMs)
+    || query.nowMs < 0
+  ) throw new Error("周额度估算查询无效");
+}
+
+function estimateWeeklyQuotaRows(
+  rows: MetricRow[],
+  query: WeeklyQuotaEstimateQuery,
+): StoredWeeklyQuotaEstimate | null {
+  let baseline: number | null = null;
+  let firstObservedAtMs: number | null = null;
+  let lastObservedAtMs: number | null = null;
+  let latestUsedPercentMillionths: number | null = null;
+  let pending = emptyWeeklyInterval();
+  let observedDeltaPercentMillionths = 0;
+  let intervalCount = 0;
+  const total = emptyWeeklyInterval();
+  const currencies = new Set<string>();
+
+  for (const row of rows) {
+    const matching = row.weekly_quota_limit_id === query.limitId
+      && row.weekly_resets_at === query.resetsAt
+      && row.weekly_used_percent_millionths !== null;
+    const hasOtherSnapshot = row.weekly_quota_limit_id !== null && !matching;
+    if (hasOtherSnapshot) {
+      baseline = null;
+      pending = emptyWeeklyInterval();
+      continue;
+    }
+    if (baseline === null) {
+      if (!matching) continue;
+      baseline = row.weekly_used_percent_millionths!;
+      latestUsedPercentMillionths = baseline;
+      firstObservedAtMs ??= row.recorded_at_ms;
+      lastObservedAtMs = row.recorded_at_ms;
+      continue;
+    }
+
+    addWeeklyIntervalRow(pending, row);
+    if (!matching) continue;
+    const current = row.weekly_used_percent_millionths!;
+    latestUsedPercentMillionths = current;
+    lastObservedAtMs = row.recorded_at_ms;
+    const delta = current - baseline;
+    if (delta < 0) {
+      baseline = current;
+      pending = emptyWeeklyInterval();
+      continue;
+    }
+    if (delta === 0) continue;
+    observedDeltaPercentMillionths += delta;
+    intervalCount += 1;
+    mergeWeeklyInterval(total, pending);
+    for (const currency of pending.currencies) currencies.add(currency);
+    baseline = current;
+    pending = emptyWeeklyInterval();
+  }
+
+  if (
+    observedDeltaPercentMillionths <= 0
+    || firstObservedAtMs === null
+    || lastObservedAtMs === null
+    || latestUsedPercentMillionths === null
+  ) return null;
+  return {
+    limitId: query.limitId,
+    resetsAt: query.resetsAt,
+    firstObservedAtMs,
+    lastObservedAtMs,
+    latestUsedPercentMillionths,
+    observedDeltaPercentMillionths,
+    intervalCount,
+    requestCount: total.requestCount,
+    unsuccessfulRequestCount: total.unsuccessfulRequestCount,
+    pricedRequestCount: total.pricedRequestCount,
+    inputTokens: total.inputTokens,
+    outputTokens: total.outputTokens,
+    totalTokens: total.inputTokens + total.outputTokens,
+    pricingCurrency: currencies.size === 1 ? [...currencies][0]! : null,
+    totalCostNanos: currencies.size === 1 ? total.totalCostNanos : null,
+  };
+}
+
+interface WeeklyIntervalAccumulator {
+  requestCount: number;
+  unsuccessfulRequestCount: number;
+  pricedRequestCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalCostNanos: number;
+  currencies: Set<string>;
+}
+
+function emptyWeeklyInterval(): WeeklyIntervalAccumulator {
+  return {
+    requestCount: 0,
+    unsuccessfulRequestCount: 0,
+    pricedRequestCount: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalCostNanos: 0,
+    currencies: new Set(),
+  };
+}
+
+function addWeeklyIntervalRow(target: WeeklyIntervalAccumulator, row: MetricRow): void {
+  target.requestCount += 1;
+  if (row.status !== "completed") target.unsuccessfulRequestCount += 1;
+  target.inputTokens += row.input_tokens ?? 0;
+  target.outputTokens += row.output_tokens ?? 0;
+  if (
+    row.status === "completed"
+    && row.total_cost_nanos !== null
+    && row.pricing_currency !== null
+  ) {
+    target.pricedRequestCount += 1;
+    target.totalCostNanos += row.total_cost_nanos;
+    target.currencies.add(row.pricing_currency);
+  }
+}
+
+function mergeWeeklyInterval(
+  target: WeeklyIntervalAccumulator,
+  source: WeeklyIntervalAccumulator,
+): void {
+  target.requestCount += source.requestCount;
+  target.unsuccessfulRequestCount += source.unsuccessfulRequestCount;
+  target.pricedRequestCount += source.pricedRequestCount;
+  target.inputTokens += source.inputTokens;
+  target.outputTokens += source.outputTokens;
+  target.totalCostNanos += source.totalCostNanos;
 }
 
 function validateMetricsTimeRange(

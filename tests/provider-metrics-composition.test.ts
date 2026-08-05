@@ -339,6 +339,7 @@ function metrics(): ProviderProxyMetrics {
     firstOutputDeltaAtMs: 1_600,
     lastOutputDeltaAtMs: 1_800,
     responseCompletedAtMs: 1_900,
+    weeklyQuota: null,
   };
 }
 

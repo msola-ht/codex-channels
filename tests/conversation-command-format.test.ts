@@ -138,6 +138,56 @@ describe("provider-aware conversation command formatting", () => {
     })).toContain("可使用 /usage 查看该提供商已接入的账户信息");
   });
 
+  it("renders weekly allowance estimates as local rounded samples", () => {
+    const rendered = formatConversationLimits({
+      kind: "limits",
+      result: {
+        kind: "rate-limits",
+        provider: "openai",
+        limits: {
+          limits: [{
+            limitId: "codex",
+            limitName: "Codex",
+            primary: { usedPercent: 30, windowDurationMins: 300, resetsAt: 2_000_000 },
+            secondary: { usedPercent: 20, windowDurationMins: 10_080, resetsAt: 2_000_000 },
+            credits: null,
+            individualLimit: null,
+            spendControlReached: false,
+            planType: "plus",
+            rateLimitReachedType: null,
+          }],
+          resetCreditsAvailable: null,
+        },
+        weeklyEstimates: [{
+          limitId: "codex",
+          startAtMs: 1_000,
+          endAtMs: 2_000,
+          usedPercent: 20,
+          remainingPercent: 80,
+          observedDeltaPercent: 2,
+          intervalCount: 2,
+          requestCount: 40,
+          unsuccessfulRequestCount: 2,
+          pricedRequestCount: 38,
+          inputTokensPerPercent: 90_000,
+          outputTokensPerPercent: 10_000,
+          totalTokensPerPercent: 100_000,
+          remainingTokens: 8_000_000,
+          pricingCurrency: "USD",
+          costPerPercentNanos: 200_000_000,
+          remainingCostNanos: 16_000_000_000,
+        }],
+      },
+    });
+
+    expect(rendered).toContain("周限估算（本机代理样本）");
+    expect(rendered).toContain("观测变化 2%（2 个区间）");
+    expect(rendered).toContain("每 1%：约 100 K Token");
+    expect(rendered).toContain("API 参考费用：约 $0.200000");
+    expect(rendered).toContain("剩余 80%：约 8 M Token");
+    expect(rendered).toContain("费用不是订阅实际扣款");
+  });
+
   it("keeps Thread metrics and hides OpenAI-only state for DeepSeek", () => {
     const rendered = formatConversationStatus({
       threadId: "thread-deepseek",

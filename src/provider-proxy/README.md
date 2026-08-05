@@ -18,6 +18,9 @@
   Usage；HTTP 2xx 仍未观察到这些信息时标为 `incomplete/response_not_observed`，不能污染成功率
   或计价覆盖率。HTTP 压缩操作以自身成功状态为准，不要求模型 Usage；压缩请求只保留在指标库，
   不进入 `/metrics` 汇总、异常报告或会话指标。
+  OpenAI HTTP/SSE 只从明确的 `x-codex-primary/secondary-*` 白名单响应头提取 10,080 分钟周窗口，
+  Responses WebSocket 只从 `codex.rate_limits` 事件提取同一窗口；百分比转换为定点整数并随当前
+  请求指标投递，不保存完整 Header、事件正文或其他额度桶。
   指标在响应完成事件前完成投递确认；从
   `x-codex-turn-metadata` 提取 `thread_id` / `turn_id` 用于按 Turn 关联。
   SSE 单行使用 1,048,576 字符上限，非流式 JSON Responses 使用 1 MiB 临时上限解析相同元数据，

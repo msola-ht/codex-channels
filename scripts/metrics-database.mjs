@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   renameSync,
 } from "node:fs";
@@ -118,6 +119,131 @@ export function resetMetricsDatabase(
   }
 }
 
+export function upgradeMetricsDatabase(
+  environment = process.env,
+  options = {},
+) {
+  const runtime = resolveMetricsRuntime(environment);
+  const gatewayRunning = options.gatewayRunning ?? (() => isGatewayRunning(environment));
+  if (
+    gatewayRunning()
+    || runtime.metricsSocketPaths.some(metricsSocketIsActive)
+  ) {
+    throw new Error("Gateway 仍在运行；请先执行 codexc service stop gateway，再重试");
+  }
+  if (!existsSync(runtime.databasePath)) {
+    return {
+      backupPath: null,
+      changed: false,
+      databasePath: runtime.databasePath,
+      previousSchemaVersion: null,
+      schemaVersion: null,
+    };
+  }
+  const lock = acquireRequestMetricsDatabaseLock(runtime.databasePath);
+  try {
+    const status = inspectMetricsDatabase(environment);
+    if (status.schemaVersion === modelRequestMetricsSchemaVersion) {
+      return {
+        backupPath: null,
+        changed: false,
+        databasePath: status.databasePath,
+        previousSchemaVersion: status.schemaVersion,
+        schemaVersion: status.schemaVersion,
+      };
+    }
+    if (status.schemaVersion !== 3 || modelRequestMetricsSchemaVersion !== 4) {
+      throw new Error(
+        `指标数据库无法升级：当前 Schema ${status.schemaVersion ?? "unknown"}，`
+        + `仅支持 v3 升级到 v${modelRequestMetricsSchemaVersion}`,
+      );
+    }
+    checkpoint(status.databasePath);
+    const now = options.now ?? (() => new Date());
+    const backupPath = `${status.databasePath}.v3.${backupTimestamp(now())}.bak`;
+    if (existsSync(backupPath)) throw new Error(`指标数据库备份已存在：${backupPath}`);
+    copyFileSync(status.databasePath, backupPath);
+    chmodSync(backupPath, 0o600);
+    const database = new DatabaseSync(status.databasePath);
+    try {
+      database.exec(`
+        BEGIN IMMEDIATE;
+        ALTER TABLE model_request_metrics ADD COLUMN weekly_quota_limit_id TEXT
+          CHECK (weekly_quota_limit_id IS NULL OR weekly_quota_limit_id = 'codex');
+        ALTER TABLE model_request_metrics ADD COLUMN weekly_used_percent_millionths INTEGER
+          CHECK (weekly_used_percent_millionths IS NULL
+            OR weekly_used_percent_millionths BETWEEN 0 AND 100000000);
+        ALTER TABLE model_request_metrics ADD COLUMN weekly_resets_at INTEGER
+          CHECK (weekly_resets_at IS NULL OR weekly_resets_at >= 0);
+        UPDATE schema_metadata SET value = 4 WHERE name = 'schema_version';
+        COMMIT;
+      `);
+    } catch (error) {
+      try { database.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      throw error;
+    } finally {
+      database.close();
+    }
+    return {
+      backupPath,
+      changed: true,
+      databasePath: status.databasePath,
+      previousSchemaVersion: 3,
+      schemaVersion: 4,
+    };
+  } finally {
+    lock.release();
+  }
+}
+
+export function upgradeMetricsDatabaseWithGatewayRestart(
+  environment = process.env,
+  options = {},
+) {
+  const stopGateway = options.stopGateway
+    ?? (() => runGatewayServiceAction("stop", environment));
+  const startGateway = options.startGateway
+    ?? (() => runGatewayServiceAction("start", environment));
+  const upgrade = options.upgrade
+    ?? (() => upgradeMetricsDatabase(environment));
+  stopGateway();
+  let result;
+  let upgradeError;
+  try {
+    result = upgrade();
+  } catch (error) {
+    upgradeError = error;
+  }
+  let startError;
+  try {
+    startGateway();
+  } catch (error) {
+    startError = error;
+  }
+  if (upgradeError && startError) {
+    throw new AggregateError(
+      [upgradeError, startError],
+      "指标库升级失败，且 Gateway 未能重新启动",
+    );
+  }
+  if (upgradeError) throw upgradeError;
+  if (startError) throw startError;
+  return result;
+}
+
+function runGatewayServiceAction(action, environment) {
+  const cli = resolve(import.meta.dirname, "../bin/codexc.mjs");
+  const result = spawnSync(
+    process.execPath,
+    [cli, "service", action, "gateway"],
+    { env: environment, stdio: "inherit" },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`Gateway ${action === "stop" ? "停止" : "启动"}失败`);
+  }
+}
+
 export function readMetricsReport(environment = process.env, options = {}) {
   const range = metricsRange(options.range ?? "30d", options.nowMs ?? Date.now());
   const dimension = metricsDimension(options.group ?? "models");
@@ -130,9 +256,10 @@ export function readMetricsReport(environment = process.env, options = {}) {
   try {
     return {
       format: "codex-connect-request-metrics-report",
-      version: 1,
+      version: 2,
       generatedAt: new Date(range.endAtMs).toISOString(),
       range,
+      weeklyQuota: readWeeklyQuota(store, range.endAtMs),
       report: store.aggregate({
         dimension,
         startAtMs: range.startAtMs,
@@ -176,14 +303,64 @@ export function readMetricsExport(environment = process.env, options = {}) {
     } while (afterId !== undefined);
     return {
       format: "codex-connect-request-metrics-export",
-      version: 1,
+      version: 2,
       generatedAt: new Date(range.endAtMs).toISOString(),
       range,
+      weeklyQuota: readWeeklyQuota(store, range.endAtMs),
       records,
     };
   } finally {
     store.close();
   }
+}
+
+function readWeeklyQuota(store, nowMs) {
+  const window = store.latestWeeklyQuota("openai", nowMs);
+  if (window === null) return null;
+  const estimate = store.weeklyQuotaEstimate({
+    provider: "openai",
+    limitId: window.limitId,
+    resetsAt: window.resetsAt,
+    nowMs,
+  });
+  const usedPercent = window.usedPercentMillionths / 1_000_000;
+  return {
+    limitId: window.limitId,
+    usedPercent,
+    remainingPercent: Math.max(0, 100 - usedPercent),
+    resetsAt: window.resetsAt,
+    observedAtMs: window.observedAtMs,
+    estimate: estimate === null ? null : {
+      observedDeltaPercent: estimate.observedDeltaPercentMillionths / 1_000_000,
+      intervalCount: estimate.intervalCount,
+      requestCount: estimate.requestCount,
+      unsuccessfulRequestCount: estimate.unsuccessfulRequestCount,
+      pricedRequestCount: estimate.pricedRequestCount,
+      inputTokensPerPercent: perQuotaPercent(
+        estimate.inputTokens,
+        estimate.observedDeltaPercentMillionths,
+      ),
+      outputTokensPerPercent: perQuotaPercent(
+        estimate.outputTokens,
+        estimate.observedDeltaPercentMillionths,
+      ),
+      totalTokensPerPercent: perQuotaPercent(
+        estimate.totalTokens,
+        estimate.observedDeltaPercentMillionths,
+      ),
+      pricingCurrency: estimate.pricingCurrency,
+      costPerPercentNanos: estimate.totalCostNanos === null
+        ? null
+        : perQuotaPercent(
+            estimate.totalCostNanos,
+            estimate.observedDeltaPercentMillionths,
+          ),
+    },
+  };
+}
+
+function perQuotaPercent(value, deltaMillionths) {
+  return Math.round(value / (deltaMillionths / 1_000_000));
 }
 
 export function readMetricsRun(environment = process.env, threadId) {
@@ -252,7 +429,9 @@ function requireReadableMetricsDatabase(environment) {
   const status = inspectMetricsDatabase(environment);
   if (!status.exists) throw new Error(`指标数据库尚未创建：${status.databasePath}`);
   if (!status.compatible) {
-    throw new Error("模型请求指标数据库版本不兼容；请停止 Gateway 后运行 codexc metrics reset");
+    throw new Error(status.schemaVersion === 3
+      ? "模型请求指标数据库版本不兼容；请停止 Gateway 后运行 codexc metrics upgrade"
+      : "模型请求指标数据库版本不兼容；请停止 Gateway 后运行 codexc metrics reset");
   }
   return status.databasePath;
 }
@@ -388,7 +567,9 @@ function printStatus(result) {
   console.log(`兼容：${result.compatible ? "是" : "否"}`);
   console.log(`记录：${result.count ?? "无法读取"}`);
   if (!result.compatible) {
-    console.log("处理：停止 Gateway 后运行 codexc metrics reset");
+    console.log(result.schemaVersion === 3
+      ? "处理：停止 Gateway 后运行 codexc metrics upgrade"
+      : "处理：停止 Gateway 后运行 codexc metrics reset");
   }
 }
 
@@ -438,6 +619,7 @@ function printMetricsReport(result, format, display = null) {
       ["outputCostCnyNanos", (row) => row.outputCostCnyNanos],
       ["ttftP50Ms", (row) => row.ttftP50Ms],
       ["ttftP95Ms", (row) => row.ttftP95Ms],
+      ...weeklyQuotaCsvColumns(),
     ];
     console.log(columns.map(([heading]) => csvCell(heading)).join(","));
     const rows = [
@@ -476,6 +658,9 @@ function printMetricsReport(result, format, display = null) {
         lastOccurredAtMs: group.lastOccurredAtMs,
         requestCount: group.requestCount,
       })),
+      ...(result.weeklyQuota === null
+        ? []
+        : [{ type: "weekly_quota", ...flattenWeeklyQuota(result.weeklyQuota) }]),
     ];
     for (const row of rows) {
       console.log(
@@ -493,6 +678,7 @@ function printMetricsReport(result, format, display = null) {
   console.log(`- 时间范围：${result.range.name}`);
   console.log(`- 起始时间：${new Date(result.range.startAtMs).toISOString()}`);
   console.log(`- 截止时间：${new Date(result.range.endAtMs).toISOString()}`);
+  printWeeklyQuotaMarkdown(result.weeklyQuota);
   console.log("");
   console.log("## 汇总");
   console.log("");
@@ -558,17 +744,18 @@ function printMetricsExport(result, format, display = null) {
     return;
   }
   if (format === "markdown") {
-    if (result.records.length === 0) {
-      console.log("本时间范围没有请求记录。");
-      return;
-    }
     console.log("# Codex Connect 请求明细");
     console.log("");
     const rateLine = exchangeRateLine(display);
     if (rateLine) console.log(`- ${rateLine}`);
     console.log(`- 生成时间：${result.generatedAt}`);
     console.log(`- 时间范围：${result.range.name}`);
+    printWeeklyQuotaMarkdown(result.weeklyQuota);
     console.log("");
+    if (result.records.length === 0) {
+      console.log("本时间范围没有请求记录。");
+      return;
+    }
     console.log("| 时间 | 提供商 | 模型 | 思考等级 | 状态 | 耗时 | 输入 | 缓存输入 | 输出 | 参考价 |");
     console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
     for (const record of result.records) {
@@ -593,12 +780,78 @@ function printMetricsExport(result, format, display = null) {
     }
     return;
   }
-  const columns = csvColumns();
-  const records = result.records.map((record) => enrichCosts(record, display));
+  const columns = [...csvColumns(), ...weeklyQuotaCsvColumns()];
+  const quota = flattenWeeklyQuota(result.weeklyQuota);
+  const records = result.records.map((record) => ({
+    ...enrichCosts(record, display),
+    ...quota,
+  }));
   console.log(columns.map(([heading]) => csvCell(heading)).join(","));
   for (const record of records) {
     console.log(columns.map(([, read]) => csvCell(read(record))).join(","));
   }
+}
+
+function printWeeklyQuotaMarkdown(quota) {
+  console.log("");
+  console.log("## 当前周额度区间");
+  console.log("");
+  if (quota === null) {
+    console.log("暂无统计代理捕获的周额度快照。");
+    return;
+  }
+  console.log(`- 已用：${quota.usedPercent}%`);
+  console.log(`- 剩余：${quota.remainingPercent}%`);
+  console.log(`- 重置时间：${new Date(quota.resetsAt * 1_000).toISOString()}`);
+  console.log(`- 观测时间：${new Date(quota.observedAtMs).toISOString()}`);
+  if (quota.estimate === null) {
+    console.log("- 每 1% 估算：正在采样，尚未观测到额度增长");
+    return;
+  }
+  console.log(`- 观测变化：${quota.estimate.observedDeltaPercent}%（${quota.estimate.intervalCount} 个区间）`);
+  console.log(`- 每 1%：约 ${quota.estimate.totalTokensPerPercent} Token`);
+  console.log(`- 每 1% API 参考费用：${quota.estimate.costPerPercentNanos === null
+    || quota.estimate.pricingCurrency === null
+    ? "暂无完整价格样本"
+    : formatCurrencyNanos(
+        quota.estimate.costPerPercentNanos,
+        quota.estimate.pricingCurrency,
+        null,
+        "openai",
+      )}`);
+}
+
+function flattenWeeklyQuota(quota) {
+  if (quota === null) return {};
+  return {
+    weeklyQuotaLimitId: quota.limitId,
+    weeklyQuotaUsedPercent: quota.usedPercent,
+    weeklyQuotaRemainingPercent: quota.remainingPercent,
+    weeklyQuotaResetsAt: quota.resetsAt,
+    weeklyQuotaObservedAtMs: quota.observedAtMs,
+    weeklyQuotaObservedDeltaPercent: quota.estimate?.observedDeltaPercent,
+    weeklyQuotaIntervalCount: quota.estimate?.intervalCount,
+    weeklyQuotaRequestCount: quota.estimate?.requestCount,
+    weeklyQuotaTotalTokensPerPercent: quota.estimate?.totalTokensPerPercent,
+    weeklyQuotaPricingCurrency: quota.estimate?.pricingCurrency,
+    weeklyQuotaCostPerPercentNanos: quota.estimate?.costPerPercentNanos,
+  };
+}
+
+function weeklyQuotaCsvColumns() {
+  return [
+    ["weeklyQuotaLimitId", (row) => row.weeklyQuotaLimitId],
+    ["weeklyQuotaUsedPercent", (row) => row.weeklyQuotaUsedPercent],
+    ["weeklyQuotaRemainingPercent", (row) => row.weeklyQuotaRemainingPercent],
+    ["weeklyQuotaResetsAt", (row) => row.weeklyQuotaResetsAt],
+    ["weeklyQuotaObservedAtMs", (row) => row.weeklyQuotaObservedAtMs],
+    ["weeklyQuotaObservedDeltaPercent", (row) => row.weeklyQuotaObservedDeltaPercent],
+    ["weeklyQuotaIntervalCount", (row) => row.weeklyQuotaIntervalCount],
+    ["weeklyQuotaRequestCount", (row) => row.weeklyQuotaRequestCount],
+    ["weeklyQuotaTotalTokensPerPercent", (row) => row.weeklyQuotaTotalTokensPerPercent],
+    ["weeklyQuotaPricingCurrency", (row) => row.weeklyQuotaPricingCurrency],
+    ["weeklyQuotaCostPerPercentNanos", (row) => row.weeklyQuotaCostPerPercentNanos],
+  ];
 }
 
 function printMetricsRun(result, format, display = null) {
@@ -1012,6 +1265,27 @@ if (
         console.log(`旧库备份：${result.backupPath}`);
         console.log("启动 Gateway 后将自动创建当前 Schema。");
       }
+    } else if (command === "upgrade" && process.argv.length === 3) {
+      const result = upgradeMetricsDatabase();
+      if (!result.changed) {
+        console.log(result.schemaVersion === null
+          ? `指标数据库尚未创建：${result.databasePath}`
+          : `指标数据库已经是 Schema v${result.schemaVersion}。`);
+      } else {
+        console.log(`指标数据库已升级到 Schema v${result.schemaVersion}：${result.databasePath}`);
+        console.log(`升级前备份：${result.backupPath}`);
+      }
+    } else if (command === "upgrade-restart" && process.argv.length === 3) {
+      const result = upgradeMetricsDatabaseWithGatewayRestart();
+      if (!result.changed) {
+        console.log(result.schemaVersion === null
+          ? `指标数据库尚未创建：${result.databasePath}`
+          : `指标数据库已经是 Schema v${result.schemaVersion}。`);
+      } else {
+        console.log(`指标数据库已升级到 Schema v${result.schemaVersion}：${result.databasePath}`);
+        console.log(`升级前备份：${result.backupPath}`);
+      }
+      console.log("Gateway 已重新启动。");
     } else if (command === "report") {
       const options = parseMetricsOptions(
         process.argv.slice(3),
@@ -1062,7 +1336,7 @@ if (
         loadDisplayContext(process.env),
       );
     } else {
-      throw new Error("用法：codexc metrics <status|run|threads|turns|report|export|reset>");
+      throw new Error("用法：codexc metrics <status|run|threads|turns|report|export|upgrade|reset>");
     }
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

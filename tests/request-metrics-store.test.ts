@@ -158,6 +158,96 @@ describe("SqliteModelRequestMetricsStore", () => {
     });
   });
 
+  it("estimates one percent from adjacent weekly quota changes", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    const resetsAt = Math.floor(Date.now() / 1_000) + 24 * 60 * 60;
+    store.record({
+      ...sample(),
+      provider: "openai",
+      weeklyQuota: {
+        limitId: "codex",
+        usedPercentMillionths: 10_000_000,
+        resetsAt,
+      },
+    });
+    store.record({
+      ...sample(),
+      provider: "openai",
+      inputTokens: 900,
+      outputTokens: 100,
+      totalTokens: 1_000,
+      weeklyQuota: {
+        limitId: "codex",
+        usedPercentMillionths: 10_000_000,
+        resetsAt,
+      },
+    });
+    store.record({
+      ...sample(),
+      provider: "openai",
+      inputTokens: 1_800,
+      outputTokens: 200,
+      totalTokens: 2_000,
+      weeklyQuota: {
+        limitId: "codex",
+        usedPercentMillionths: 10_500_000,
+        resetsAt,
+      },
+    });
+
+    expect(store.weeklyQuotaEstimate({
+      provider: "openai",
+      limitId: "codex",
+      resetsAt,
+      nowMs: Date.now() + 1,
+    })).toMatchObject({
+      intervalCount: 1,
+      observedDeltaPercentMillionths: 500_000,
+      requestCount: 2,
+      inputTokens: 2_700,
+      outputTokens: 300,
+      totalTokens: 3_000,
+    });
+    store.close();
+  });
+
+  it("breaks a weekly estimate interval when the percentage moves backwards", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    const resetsAt = Math.floor(Date.now() / 1_000) + 24 * 60 * 60;
+    for (const [usedPercentMillionths, inputTokens] of [
+      [10_000_000, 10_000],
+      [9_000_000, 9_000],
+      [10_000_000, 1_000],
+    ] as const) {
+      store.record({
+        ...sample(),
+        provider: "openai",
+        inputTokens,
+        outputTokens: 0,
+        totalTokens: inputTokens,
+        weeklyQuota: { limitId: "codex", usedPercentMillionths, resetsAt },
+      });
+    }
+
+    expect(store.weeklyQuotaEstimate({
+      provider: "openai",
+      limitId: "codex",
+      resetsAt,
+      nowMs: Date.now() + 1,
+    })).toMatchObject({
+      observedDeltaPercentMillionths: 1_000_000,
+      requestCount: 1,
+      totalTokens: 1_000,
+    });
+    store.close();
+  });
+
   it("keeps unsuccessful request prices in raw records but excludes them from cost summaries", () => {
     const directory = temporaryDirectory();
     const store = new SqliteModelRequestMetricsStore(
@@ -955,5 +1045,6 @@ function sample(): ModelRequestMetricSample {
     firstOutputDeltaAtMs: 1_400,
     lastOutputDeltaAtMs: 1_600,
     responseCompletedAtMs: 1_650,
+    weeklyQuota: null,
   };
 }

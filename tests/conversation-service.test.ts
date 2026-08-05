@@ -7,7 +7,10 @@ import {
 } from "../src/application/conversation-service.js";
 import type { ModelSelectionService } from "../src/application/model-selection-service.js";
 import type { CollaborationModeSelectionService } from "../src/application/collaboration-mode-service.js";
-import type { RequestMetricsQueryPort } from "../src/application/request-metrics-port.js";
+import {
+  estimateWeeklyLimit,
+  type RequestMetricsQueryPort,
+} from "../src/application/request-metrics-port.js";
 import type { TurnExecutionPort } from "../src/application/turn-port.js";
 import {
   ConversationCore,
@@ -82,6 +85,7 @@ describe("ConversationService model selection", () => {
       forThread: vi.fn(),
       aggregate: vi.fn(() => report),
       errors: vi.fn(() => errorReport),
+      weeklyQuotaEstimate: vi.fn(() => null),
     } satisfies RequestMetricsQueryPort;
     const service = new ConversationService(
       turnPort(),
@@ -106,6 +110,162 @@ describe("ConversationService model selection", () => {
       .toEqual(errorReport);
     expect(metrics.errors).toHaveBeenCalledWith("24h");
     expect(metrics.forThread).not.toHaveBeenCalled();
+  });
+
+  it("estimates one percent and remaining weekly allowance from proxy metrics", () => {
+    const estimate = estimateWeeklyLimit({
+      limitId: "codex",
+      limitName: null,
+      primary: { usedPercent: 30, windowDurationMins: 300, resetsAt: 2_000_000 },
+      secondary: { usedPercent: 20, windowDurationMins: 10_080, resetsAt: 2_000_000 },
+      credits: null,
+      individualLimit: null,
+      spendControlReached: null,
+      planType: "plus",
+      rateLimitReachedType: null,
+    }, {
+      limitId: "codex",
+      resetsAt: 2_000_000,
+      firstObservedAtMs: 1_900_000_000,
+      lastObservedAtMs: 1_999_000_000,
+      latestUsedPercentMillionths: 20_000_000,
+      observedDeltaPercentMillionths: 2_000_000,
+      intervalCount: 2,
+      requestCount: 40,
+      unsuccessfulRequestCount: 2,
+      inputTokens: 180_000,
+      outputTokens: 20_000,
+      totalTokens: 200_000,
+      pricingCurrency: "USD",
+      pricedRequestCount: 38,
+      totalCostNanos: 400_000_000,
+    });
+
+    expect(estimate).toMatchObject({
+      usedPercent: 20,
+      remainingPercent: 80,
+      requestCount: 40,
+      inputTokensPerPercent: 90_000,
+      outputTokensPerPercent: 10_000,
+      totalTokensPerPercent: 100_000,
+      remainingTokens: 8_000_000,
+      pricingCurrency: "USD",
+      costPerPercentNanos: 200_000_000,
+      remainingCostNanos: 16_000_000_000,
+    });
+  });
+
+  it("does not estimate without an aligned weekly window or proxy samples", () => {
+    const limit = {
+      limitId: "codex",
+      limitName: null,
+      primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: 2_000_000 },
+      secondary: null,
+      credits: null,
+      individualLimit: null,
+      spendControlReached: null,
+      planType: "plus" as const,
+      rateLimitReachedType: null,
+    };
+    expect(estimateWeeklyLimit(limit, null)).toBeNull();
+  });
+
+  it("enriches OpenAI limits with the matching local provider window", async () => {
+    const nowMs = 1_999_000_000;
+    const now = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+    const weeklyQuotaEstimate = vi.fn(() => ({
+      limitId: "codex",
+      resetsAt: 2_000_000,
+      firstObservedAtMs: 1_900_000_000,
+      lastObservedAtMs: nowMs,
+      latestUsedPercentMillionths: 10_000_000,
+      observedDeltaPercentMillionths: 10_000_000,
+      intervalCount: 1,
+      requestCount: 2,
+      unsuccessfulRequestCount: 0,
+      inputTokens: 18_000,
+      outputTokens: 2_000,
+      totalTokens: 20_000,
+      pricingCurrency: "USD",
+      pricedRequestCount: 2,
+      totalCostNanos: 40_000_000,
+    }));
+    const service = new ConversationService(
+      turnPort(),
+      {} as SessionRouter,
+      {} as ConversationCore,
+      { status: () => ({ modelProvider: "openai" }) } as unknown as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        accountUsage: vi.fn(),
+        accountLimits: vi.fn(async () => ({
+          kind: "rate-limits" as const,
+          provider: "openai" as const,
+          limits: {
+            limits: [{
+              limitId: "codex",
+              limitName: null,
+              primary: null,
+              secondary: {
+                usedPercent: 10,
+                windowDurationMins: 10_080,
+                resetsAt: 2_000_000,
+              },
+              credits: null,
+              individualLimit: null,
+              spendControlReached: null,
+              planType: "plus" as const,
+              rateLimitReachedType: null,
+            }, {
+              limitId: "codex-other",
+              limitName: "Other",
+              primary: null,
+              secondary: {
+                usedPercent: 5,
+                windowDurationMins: 10_080,
+                resetsAt: 2_000_000,
+              },
+              credits: null,
+              individualLimit: null,
+              spendControlReached: null,
+              planType: null,
+              rateLimitReachedType: null,
+            }],
+            resetCreditsAvailable: null,
+          },
+        })),
+      },
+      undefined,
+      {
+        forThread: vi.fn(),
+        aggregate: vi.fn(),
+        errors: vi.fn(),
+        weeklyQuotaEstimate,
+      },
+    );
+
+    try {
+      await expect(service.providerAccountLimits(target)).resolves.toMatchObject({
+        weeklyEstimates: [{
+          limitId: "codex",
+          totalTokensPerPercent: 2_000,
+          costPerPercentNanos: 4_000_000,
+        }],
+      });
+      expect(weeklyQuotaEstimate).toHaveBeenCalledWith(
+        "openai",
+        "codex",
+        2_000_000,
+        nowMs,
+      );
+      expect(weeklyQuotaEstimate).toHaveBeenCalledTimes(1);
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it("reflects confirmed Goal set and clear results in status immediately", async () => {

@@ -88,7 +88,10 @@ Surface 不解析 `account/usage/read`、`account/rateLimits/read` 或第三方�
 `/metrics` 只依赖 `RequestMetricsQueryPort`；无参数或 `session` 查询当前 Thread，`global`、
 `providers`、`models` 和 `errors` 使用严格的 `24h`、`7d`、`30d` 时间范围；`errors` 只展示
 脱敏后的状态、HTTP 状态、错误类型、次数和最近发生时间。Bootstrap 把独立指标库映射为稳定摘要，
-Application 不读取数据库。该请求流水不能替代 App Server 提供的 Thread 上下文和累计 Token 状态。
+Application 不读取数据库。OpenAI `/limits` 还通过该端口按周窗口查询统计代理已经按相邻额度
+快照归约的增量样本，估算每 1% 的 Token 与 API 参考费用；没有完整周窗口、有效重置时间或正向
+额度变化区间时不产生估算。该请求流水
+不能替代 App Server 提供的 Thread 上下文、账户额度或累计 Token 状态。
 Skill 查询与显式调用只依赖 `SkillQueryPort`；用户和项目直接安装项的筛选、调用名称与绝对路径
 校验由 Client 适配器在协议边界完成。
 MCP 查询只依赖 `McpQueryPort`；分页、Thread 配置上下文与官方清单裁剪由 Client 适配器处理。

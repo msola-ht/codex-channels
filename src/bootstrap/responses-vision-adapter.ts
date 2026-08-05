@@ -299,6 +299,7 @@ function createVisionMetric(options: {
     firstOutputDeltaAtMs: null,
     lastOutputDeltaAtMs: null,
     responseCompletedAtMs: options.responseCompletedAtMs,
+    weeklyQuota: null,
   };
 }
 

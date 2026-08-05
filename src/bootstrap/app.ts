@@ -372,6 +372,8 @@ export class GatewayApplication {
             totalGroupCount: report.totalGroupCount,
           };
         },
+        weeklyQuotaEstimate: (provider, limitId, resetsAt, nowMs) =>
+          metricsStore.weeklyQuotaEstimate({ provider, limitId, resetsAt, nowMs }),
         errors: (range) => {
           const endAtMs = Date.now();
           const rangeMs = {

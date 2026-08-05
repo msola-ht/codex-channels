@@ -13,21 +13,27 @@ export interface MetricsDatabaseResetResult {
   previousSchemaVersion: number | null;
 }
 
+export interface MetricsDatabaseUpgradeResult extends MetricsDatabaseResetResult {
+  schemaVersion: number | null;
+}
+
 export interface MetricsReportDocument {
   format: "codex-connect-request-metrics-report";
-  version: 1;
+  version: 2;
   generatedAt: string;
   range: { name: string; startAtMs: number; endAtMs: number };
   report: unknown;
   errors: unknown;
+  weeklyQuota: unknown;
 }
 
 export interface MetricsExportDocument {
   format: "codex-connect-request-metrics-export";
-  version: 1;
+  version: 2;
   generatedAt: string;
   range: { name: string; startAtMs: number; endAtMs: number };
   records: unknown[];
+  weeklyQuota: unknown;
 }
 
 export interface MetricsRunDocument {
@@ -80,6 +86,23 @@ export function resetMetricsDatabase(
     now?: () => Date;
   },
 ): MetricsDatabaseResetResult;
+
+export function upgradeMetricsDatabase(
+  environment?: NodeJS.ProcessEnv,
+  options?: {
+    gatewayRunning?: () => boolean;
+    now?: () => Date;
+  },
+): MetricsDatabaseUpgradeResult;
+
+export function upgradeMetricsDatabaseWithGatewayRestart(
+  environment?: NodeJS.ProcessEnv,
+  options?: {
+    stopGateway?: () => void;
+    startGateway?: () => void;
+    upgrade?: () => MetricsDatabaseUpgradeResult;
+  },
+): MetricsDatabaseUpgradeResult;
 
 export function readMetricsReport(
   environment?: NodeJS.ProcessEnv,

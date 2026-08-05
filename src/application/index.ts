@@ -7,6 +7,7 @@ export {
   type AccountRateLimits,
   type AccountRateLimitWindow,
   type AccountUsage,
+  type AccountWeeklyLimitEstimate,
   type ProviderAccountAdapter,
   type ProviderAccountLimits,
   type ProviderAccountQueryPort,
@@ -94,6 +95,7 @@ export {
   resolvePriceCurrency,
 } from "./exchange-rate-port.js";
 export {
+  estimateWeeklyLimit,
   type DirectApiRequestMetricsSummary,
   type RequestMetricsAggregate,
   type RequestMetricsAggregateReport,
@@ -105,6 +107,7 @@ export {
   type RequestMetricsQueryPort,
   type RequestMetricsResult,
   type RequestMetricsTimeRange,
+  type WeeklyQuotaMetricsObservation,
   type RequestMetricsView,
   type ThreadRequestMetricsAggregate,
   type ThreadRequestMetricsSummary,

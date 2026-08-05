@@ -228,7 +228,11 @@ describe("ProviderProxy", () => {
     const upstream = createServer((request, response) => {
       request.resume();
       request.on("end", () => {
-        response.writeHead(200);
+        response.writeHead(200, {
+          "x-codex-primary-used-percent": "15.25",
+          "x-codex-primary-window-minutes": "10080",
+          "x-codex-primary-reset-at": "1786233600",
+        });
         response.end();
       });
     });
@@ -278,6 +282,11 @@ describe("ProviderProxy", () => {
       model: null,
       inputTokens: null,
       outputTokens: null,
+      weeklyQuota: {
+        limitId: "codex",
+        usedPercentMillionths: 15_250_000,
+        resetsAt: 1_786_233_600,
+      },
     })]);
   });
 
@@ -1004,6 +1013,17 @@ describe("ProviderProxy", () => {
       socket.on("message", (data) => {
         upstreamMessage = JSON.parse(data.toString("utf8")) as Record<string, unknown>;
         socket.send(JSON.stringify({
+          type: "codex.rate_limits",
+          rate_limits: {
+            primary: null,
+            secondary: {
+              used_percent: 27.125,
+              window_minutes: 10080,
+              reset_at: 1786233600,
+            },
+          },
+        }));
+        socket.send(JSON.stringify({
           type: "response.reasoning_summary_text.delta",
           delta: "thinking",
         }));
@@ -1074,6 +1094,11 @@ describe("ProviderProxy", () => {
       threadId: "thread-ws",
       turnId: "turn-ws",
       requestStartedAtMs,
+      weeklyQuota: {
+        limitId: "codex",
+        usedPercentMillionths: 27_125_000,
+        resetsAt: 1_786_233_600,
+      },
     });
     expect(metrics[0]?.firstTokenAtMs).not.toBeNull();
     expect(metrics[0]?.firstReasoningDeltaAtMs).not.toBeNull();

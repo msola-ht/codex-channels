@@ -9,8 +9,9 @@
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
   升级到 v4；不自动迁移未知版本。
 - `metrics-database.mjs` / `metrics-database.d.mts`：实现并声明只读 `codexc metrics` 的
-  `status`、`run`、`turns`、`threads`、`report`、`export` 与 `reset`；查询复用 Observability
-  只读端口，渲染复用 `metrics-export-format.mjs`；reset 要求 Gateway 停止、检查点回写、`0600`
+  `status`、`run`、`turns`、`threads`、`report`、`export`、`upgrade` 与 `reset`；查询复用 Observability
+  只读端口，渲染复用 `metrics-export-format.mjs`；upgrade 要求 Gateway 停止并把 Schema v3 备份后
+  事务升级到 v4，reset 要求 Gateway 停止、检查点回写、`0600`
   备份后移除旧库，不迁移或覆盖原指标记录。服务状态无法确认、处于非停止状态或前台 Gateway
   指标 Socket 仍可连接时均拒绝 reset。
 - `metrics-export-format.mjs` / `metrics-export-format.d.mts`：指标导出的显示上下文（配置与

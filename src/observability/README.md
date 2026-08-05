@@ -20,7 +20,7 @@
   时间戳与本机流式阶段时间戳
   写入独立 `request-metrics.sqlite3`。当前 Thread 的独立 API 查询只选择调用适配器产生的
   HTTP JSON 记录，不能把缺少 Turn 元数据的 Codex WebSocket/SSE 代理请求误分类。数据库使用
-  严格 Schema v3、`0600` 文件权限，只接受当前
+  严格 Schema v4、`0600` 文件权限，只接受当前
   Schema；首次初始化在单一事务内完成；使用 WAL 允许后续只读查询与采集并行，锁等待限制为
   10 ms；同一 Store 还提供不获取写锁、不初始化或清理 Schema 的显式只读模式，以及每页最多
   500 条的稳定 ID 游标分页，供 CLI 报表、导出和后续本地 WebUI 复用。记录保留 30 天，以
@@ -36,7 +36,9 @@
   与每次对话明细查询由 `threadList()`、`threadTurnSummaries()` 提供，供 `codexc metrics threads`
   和 `turns` 导出复用。时间范围聚合统一覆盖 Codex Provider 与
   直接 API，可按全局、提供商或“提供商 + 模型”分组；固定支持最近 24 小时、7 天和 30 天，最多
-  返回请求量最高的 20 组。所有汇总与异常报告只计入 `operation = 'response'` 的模型请求；
+  返回请求量最高的 20 组。OpenAI 请求还可保存统计代理归一化的周额度定点快照；同一重置周期内
+  从首个基线开始累计请求，只在后续快照正向增长时形成加权估算区间，重置或倒退会断开区间。
+  所有汇总与异常报告只计入 `operation = 'response'` 的模型请求；
   `/responses/compact` 压缩请求只落库保留，不参与汇总、异常报告或会话指标。综合输出速度只使用同时具有非推理输出 Token 与输出时间窗的请求；
   首段回复延迟只使用有效 TTFT 样本，并返回平均、P50、P95 和覆盖计数。所有合计仍在 SQLite 内完成，
   费用也按同币种快照求和并返回已计价请求数；只有聚合范围内三类每百万 Token 单价分别一致时才
@@ -57,9 +59,9 @@
 适配器生成直接 API 脱敏样本，两者复用同一有界 Writer；已有 Thread 的视觉请求保存
 `thread_id`，因调用发生在 Codex Turn 之前而保持 `turn_id = NULL`。本模块不依赖代理、App Server
 协议、Surface 或业务 Storage。当前没有公开 HTTP API 或 WebUI；`codexc metrics` 的
-`report`、`export`、`run`、`turns`、`threads` 只通过本地只读连接输出 Markdown、JSON 或 CSV。
-Schema 不兼容时
-Gateway 失败关闭并提示 `codexc metrics reset`；该命令要求 Gateway 已停止，先检查点回写并备份
-旧库，再由下次启动创建当前 Schema，不执行隐式迁移。
+`report`、`export`、`run`、`turns`、`threads` 只通过本地只读连接输出 Markdown、JSON 或 CSV；
+`report` 与 `export` 同时输出未过期的最后周额度区间。Schema v3 可在停止 Gateway 后用
+`codexc metrics upgrade` 先创建 `0600` 备份再事务升级到 v4并保留原记录；未知版本继续失败关闭，
+使用 `codexc metrics reset` 归档后重建，不执行隐式迁移。
 指标采集始终开启，不受全局调试模式影响；`debug` / `trace` 只增加脱敏的关联诊断，写入失败仍按
 `warn` 输出，避免关闭调试后形成历史数据断档或隐藏采集故障。
