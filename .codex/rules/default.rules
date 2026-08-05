@@ -6,14 +6,34 @@ prefix_rule(
     decision = "allow",
     justification = "Read-only Git inspection is safe in this repository",
     match = [
+        "git status",
+        "git status -s",
         "git status -sb",
+        "git diff",
+        "git diff --stat",
+        "git diff --cached",
+        "git diff --cached --check",
         "git diff --check",
+        "git log",
+        "git log --oneline",
         "git log -1 --oneline",
+        "git log -3 --oneline",
     ],
     not_match = [
         "git add AGENTS.md",
         "git commit -m test",
         "git push",
+    ],
+)
+
+prefix_rule(
+    pattern = ["git", ["branch", "remote"]],
+    decision = "allow",
+    justification = "Read-only branch and remote inspection is safe in this repository",
+    match = [
+        "git branch --list",
+        "git branch -a",
+        "git remote -v",
     ],
 )
 

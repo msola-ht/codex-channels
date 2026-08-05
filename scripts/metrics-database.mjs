@@ -323,6 +323,40 @@ function resolveDisplayCurrency(mode, provider) {
   return provider === "deepseek" ? "cny" : "usd";
 }
 
+function convertCostToCny(nanos, currency, provider, display) {
+  if (
+    display == null
+    || nanos === null
+    || nanos === undefined
+    || currency !== "USD"
+    || !display.exchangeRate
+  ) {
+    return null;
+  }
+  const mode = display.priceCurrencyByProvider[provider]
+    ?? display.priceCurrency
+    ?? "auto";
+  if (resolveDisplayCurrency(mode, provider) !== "cny") return null;
+  const converted = Math.round(nanos * display.exchangeRate.usdToCny);
+  return Number.isSafeInteger(converted) ? converted : null;
+}
+
+function enrichCosts(value, display) {
+  if (value === null || value === undefined) return value;
+  const currency = value.pricingCurrency
+    ?? value.pricing?.currency
+    ?? null;
+  const provider = value.provider ?? null;
+  const toCny = (nanos) => convertCostToCny(nanos, currency, provider, display);
+  return {
+    ...value,
+    totalCostCnyNanos: toCny(value.totalCostNanos),
+    inputCostCnyNanos: toCny(value.inputCostNanos),
+    cachedInputCostCnyNanos: toCny(value.cachedInputCostNanos),
+    outputCostCnyNanos: toCny(value.outputCostNanos),
+  };
+}
+
 function readSchemaVersion(database) {
   if (!hasTable(database, "schema_metadata")) return null;
   const row = database.prepare(`
@@ -542,7 +576,10 @@ function printMetricsReport(result, format, display = null) {
 
 function printMetricsExport(result, format, display = null) {
   if (format === "json") {
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify({
+      ...result,
+      records: result.records.map((record) => enrichCosts(record, display)),
+    }, null, 2));
     return;
   }
   if (format === "markdown") {
@@ -582,25 +619,30 @@ function printMetricsExport(result, format, display = null) {
     return;
   }
   const columns = csvColumns();
+  const records = result.records.map((record) => enrichCosts(record, display));
   console.log(columns.map(([heading]) => csvCell(heading)).join(","));
-  for (const record of result.records) {
+  for (const record of records) {
     console.log(columns.map(([, read]) => csvCell(read(record))).join(","));
   }
 }
 
 function printMetricsRun(result, format, display = null) {
   if (format === "json") {
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify({
+      ...result,
+      latestTurn: enrichCosts(result.latestTurn, display),
+      threadAggregate: enrichCosts(result.threadAggregate, display),
+    }, null, 2));
     return;
   }
   if (format === "csv") {
     const rows = [
       ...(result.latestTurn === null
         ? []
-        : [{ type: "latest", ...result.latestTurn }]),
+        : [{ type: "latest", ...enrichCosts(result.latestTurn, display) }]),
       ...(result.threadAggregate === null
         ? []
-        : [{ type: "thread", ...result.threadAggregate }]),
+        : [{ type: "thread", ...enrichCosts(result.threadAggregate, display) }]),
     ];
     printTurnSummaryCsv(rows);
     return;
@@ -652,6 +694,10 @@ function printTurnSummaryCsv(rows) {
     ["inputCostNanos", (row) => row.inputCostNanos],
     ["cachedInputCostNanos", (row) => row.cachedInputCostNanos],
     ["outputCostNanos", (row) => row.outputCostNanos],
+    ["totalCostCnyNanos", (row) => row.totalCostCnyNanos],
+    ["inputCostCnyNanos", (row) => row.inputCostCnyNanos],
+    ["cachedInputCostCnyNanos", (row) => row.cachedInputCostCnyNanos],
+    ["outputCostCnyNanos", (row) => row.outputCostCnyNanos],
   ];
   console.log(columns.map(([heading]) => csvCell(heading)).join(","));
   for (const row of rows) {
@@ -661,13 +707,16 @@ function printTurnSummaryCsv(rows) {
 
 function printMetricsTurns(result, format, display = null) {
   if (format === "json") {
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify({
+      ...result,
+      turns: result.turns.map((turn) => enrichCosts(turn, display)),
+    }, null, 2));
     return;
   }
   if (format === "csv") {
     printTurnSummaryCsv(result.turns.map((turn) => ({
       type: "turn",
-      ...turn,
+      ...enrichCosts(turn, display),
     })));
     return;
   }
@@ -712,7 +761,10 @@ function printMetricsTurns(result, format, display = null) {
 
 function printMetricsThreads(result, format, display = null) {
   if (format === "json") {
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify({
+      ...result,
+      threads: result.threads.map((thread) => enrichCosts(thread, display)),
+    }, null, 2));
     return;
   }
   if (format === "csv") {
@@ -728,10 +780,11 @@ function printMetricsThreads(result, format, display = null) {
       ["pricingCurrency", (thread) => thread.pricingCurrency],
       ["pricedRequestCount", (thread) => thread.pricedRequestCount],
       ["totalCostNanos", (thread) => thread.totalCostNanos],
+      ["totalCostCnyNanos", (thread) => thread.totalCostCnyNanos],
       ["lastRecordedAtMs", (thread) => thread.lastRecordedAtMs],
     ];
     console.log(columns.map(([heading]) => csvCell(heading)).join(","));
-    for (const thread of result.threads) {
+    for (const thread of result.threads.map((item) => enrichCosts(item, display))) {
       console.log(columns.map(([, read]) => csvCell(read(thread))).join(","));
     }
     return;

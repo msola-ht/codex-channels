@@ -102,9 +102,8 @@ price_currency = "auto"
 ### 调试模式
 
 在 `codexc setup` 中选择“系统设置 → 调试模式”可全局开启或关闭脱敏调试信息。开启后会把
-`[logging].level` 设为 `debug`，同时启用 Gateway 各模块的脱敏调试日志，并在渠道中显示
-`/vision` 的接收延迟与 Gateway 处理耗时、启动通知的“运行环境”小节、完成通知的“最后请求
-首事件延迟”以及视觉完成卡片的“视觉 API 耗时”；关闭后恢复为 `info`，隐藏这些技术字段。
+`[logging].level` 设为 `debug`，在渠道中展示 `/vision` 接收延迟、启动通知的“运行环境”、
+完成通知的“最后请求首事件延迟”和视觉“视觉 API 耗时”等技术字段；关闭后恢复为 `info`。
 修改后只需重启 Gateway：
 
 ```bash
@@ -112,35 +111,15 @@ codexc service restart gateway
 ```
 
 调试日志只记录受约束的类型、阶段、耗时和结果，不记录消息正文、请求参数、上游响应、凭据或
-审批内容。分享日志前仍需人工检查。
+审批内容。完整展示口径见 [`docs/display.md`](docs/display.md)。
 
-每次 Turn 完成后按“本次运行”“当前会话累计”和可选的“账户状态”分开展示：运行区把统计代理捕获到
-的本 Turn 全部模型请求聚合为请求次数，并在存在异常尝试时拆分完成、中断、未完整观测和失败数量，
-同时展示聚合模型耗时、缓存命中、完整运行耗时和不含推理的综合输出
-速度，并显示具有完整 Token 与流式时间窗的请求覆盖率；会话区保留 Thread 累计上下文、压缩次数、
-Goal 与 Git 分支。所有 Provider 都展示 Gateway 实际观察到的首段回复延迟；DeepSeek 还会展示
-最后一次请求的可观测首事件延迟（调试模式开启时），以及整轮综合思考速度与含推理生成速度。原生 OpenAI 账户对应的
-Codex Provider 明确显示为“OpenAI 官方”，与直接 API 的自定义提供商区分。`/metrics` 可查看当前 Thread 最近
-Turn 的运行聚合、指标库保留范围内的 Thread 会话累计及最近一次视觉等直接 API 请求；
-同一 Turn 中模型请求遇到 `429/5xx` 或上游 WebSocket 断流后由 Codex 重试并最终完成时，完成卡片
-显示“自动重试、最终成功”，本轮计价覆盖率只以成功请求为分母；真实失败尝试仍保留在指标库与异常
-报告中。
-`/metrics global|providers|models 24h|7d|30d` 把 Codex Provider 与直接 API 请求按同一口径汇总，
-并显示缓存、输出速度及首段回复延迟的有效样本覆盖率；`/metrics errors` 按提供商、模型、状态、
-HTTP 状态和错误类型汇总异常请求，显示异常率与最近发生时间。它不会替代 `/status` 的 App Server
-上下文统计。HTTP 与 WebSocket 客户端提前断开都计为中断；上游 WebSocket 断流按可重试失败保留，
-在 Turn 完成时归入“自动重试”。HTTP 200 但没有模型、Usage 或完成事件的响应计为“未完整观测”，
-中断与未完整观测都不冒充成功请求或参与计价；缺少 `Content-Type` 但正文包含合法 Responses
-SSE 事件时仍按正文受限识别，不会误丢成功请求。新请求会按发生时保存的模型价格快照估算参考总价，并同时显示计价覆盖率；本次
-运行卡片展示本轮实际产生推理输出的思考次数，并分别展示当前 Turn 与当前 Thread 累计总价；
-参考总价按提供商币种显示（`auto` 时 DeepSeek 官方为人民币、OpenAI 官方为美元），并先出总计、
-再列出输入、缓存、输出三项价格明细，不再显示 `/M Token` 单价。历史
-记录不会按新价格回算，OpenAI ChatGPT 订阅请求的参考费用也不代表实际账单或额外扣费。价格目录
-每 6 小时后台刷新，优先使用 LiteLLM，失败时回退到 Sub2API 使用的公开价格镜像；离线时沿用最后
-一次有效的本地缓存，刷新不会阻塞模型请求。
+每次 Turn 完成后按“本次运行”“当前会话累计”和可选的“账户状态”分开展示请求次数、Token、
+缓存命中、速度、思考次数与参考总价；`/metrics` 可查看当前 Thread 最近运行聚合以及
+`global|providers|models|errors` 的时间范围汇总。展示与统计口径见
+[`docs/display.md`](docs/display.md)。
 
 信息类聊天指令输出统一为 Markdown 列表：`##` 标题、`###` 小节、`-` 字段列表、明细缩进嵌套；
-`/metrics` 用 `**Token**：总计` 与 `**费用**：总价` 列表块分节，费用先出总计、再缩进列出输入/缓存/输出明细；
+`/metrics` 用 `**Token**：总计` 与 `**费用**：总价` 列表块分节，费用先出总计、再列出明细；
 `/diff` 与操作结果保持原文。三渠道分别用飞书卡片 Markdown、Telegram HTML 和微信结构化字段渲染。
 
 ### DeepSeek
@@ -168,8 +147,8 @@ codexc service restart all
 需要让不支持图片的模型处理图片时，先在 `codexc setup` 的“模型渠道 → 第三方 API”中添加一个
 Responses 中转接口和独立 API Key，再到“图片识别”中选择该提供商与模型 ID。可保存多个中转并
 显式切换；这些中转只供图片识别等直接 API 功能使用，不会加入 `/model` 或 Codex App Server。
-双 Provider 与仅 DeepSeek 模式使用同一条代理链路：
-视觉模型识别后把受控结果交给原会话回答。默认不开启，配置与安全边界见
+双 Provider 与仅 DeepSeek 模式使用同一条模型统计代理链路。视觉模型识别后把受控结果交给原
+会话回答。默认不开启，配置与安全边界见
 [`图片识别代理`](docs/vision.md)。
 
 ## 日常使用
@@ -177,9 +156,9 @@ Responses 中转接口和独立 API Key，再到“图片识别”中选择该�
 ### 管理项目
 
 ```bash
-codexc work                         # 交互式管理 Workspace（别名：codexc ws）：列出/新增/删除/权限；新增创建在 ~/.codex-connect/<id>-work 且不影响默认
-codexc work add                     # 注册当前目录
-codexc work list                    # 列出 Workspace
+codexc work                          # 交互式管理 Workspace（别名：codexc ws）：列出/新增/删除/权限；新增创建在 ~/.codex-connect/<id>-work 且不影响默认
+codexc work add                      # 注册当前目录
+codexc work list                     # 列出 Workspace
 codexc work remove <序号|ID|名称>    # 删除注册，不删除项目文件
 ```
 
@@ -206,14 +185,14 @@ codexc remote --profile deepseek resume
 ### 管理后台服务
 
 ```bash
-codexc start                         # 前台启动 App Server 与 Gateway（调试用）
-codexc service status              # 查看全部服务
-codexc service reload              # 重新读取配置
-codexc service restart             # 只重启 Gateway
-codexc service restart all         # 重启 Gateway 和 App Server
-codexc service logs                # 查看 Gateway 日志
-codexc service logs all -n 200     # 查看全部服务最近 200 行日志
-codexc service logs -f             # 持续跟踪 Gateway 日志
+codexc start                          # 前台启动 App Server 与 Gateway（调试用）
+codexc service status                 # 查看全部服务
+codexc service reload                 # 重新读取配置
+codexc service restart                # 只重启 Gateway
+codexc service restart all            # 重启 Gateway 和 App Server
+codexc service logs                   # 查看 Gateway 日志
+codexc service logs all -n 200        # 查看全部服务最近 200 行日志
+codexc service logs -f                # 持续跟踪 Gateway 日志
 ```
 
 `start`、`stop` 和 `status` 默认操作全部服务；`restart` 和 `logs` 默认只操作 Gateway。运行
@@ -235,7 +214,7 @@ codexc metrics run <Thread ID>                    # 本次运行汇总（最近�
 codexc metrics report --range 30d --group models  # 聚合汇报
 codexc metrics export --range 30d --format json   # 脱敏明细导出；--thread 可按 Thread 过滤
 codexc service stop gateway
-codexc metrics reset              # 先保留 0600 旧库备份，再重建
+codexc metrics reset                              # 先保留 0600 旧库备份，再重建
 codexc service start gateway
 ```
 
@@ -246,7 +225,8 @@ json，其余默认 markdown），默认写入 `~/.codex-connect/output/<日期>
 字段，不包含提示词、消息、图片、响应正文、凭据或上游响应 ID。
 Markdown 报表的费用按 `display.price_currency` / `price_currency_by_provider` 换算显示
 （如 DeepSeek 默认人民币，依赖汇率缓存），时间显示为服务器本地时区；JSON 与 CSV 保留原始
-币种、nanos 与 ISO 时间，便于统计。
+币种、nanos 与 ISO 时间，并按相同配置附加 `*CostCnyNanos` 换算列（如 `totalCostCnyNanos`），
+便于统计和直接查看人民币金额。
 `metrics reset` 不修改会话状态库；Gateway 运行时会拒绝执行，旧指标不会隐式迁移。
 
 ### 常用聊天命令
@@ -304,7 +284,8 @@ codexc service install
 codexc doctor
 ```
 
-如果升级后提示状态数据库仍是 Schema 3，先只停止 Gateway，再显式备份升级并重新启动：
+如果升级后提示状态数据库版本不兼容（当前为 Schema v4），先只停止 Gateway，再显式备份升级并
+重新启动：
 
 ```bash
 codexc service stop gateway

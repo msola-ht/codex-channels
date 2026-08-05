@@ -56,6 +56,7 @@ export interface MetricsThreadsDocument {
     pricingCurrency: string | null;
     pricedRequestCount: number;
     totalCostNanos: number | null;
+    totalCostCnyNanos: number | null;
     lastRecordedAtMs: number;
   }>;
 }
