@@ -54,16 +54,10 @@ const helpText = {
 
 项目与会话：
   remote [参数]                启动共享 App Server 的 Codex TUI
-  work                         交互式管理 Workspace（别名 ws）
-  work add                     注册当前目录为 Workspace
-  work remove <目标>           删除 Workspace 注册
-  rules init                   生成项目 Codex 命令预设
-  rules check                  检查项目 Codex 命令预设
+  work [list|add|remove]       管理 Workspace（别名 ws；无子命令进入交互菜单）
+  rules <init|check>           生成或检查项目 Codex 命令预设
   state upgrade               显式升级 Gateway 状态数据库
-  metrics status              查看模型请求指标数据库状态
-  metrics report              输出模型请求 Markdown 汇报
-  metrics export              导出脱敏模型请求 JSON 或 CSV
-  metrics reset               备份并重建模型请求指标数据库
+  metrics <run|report|export|status|reset>   模型请求指标：本次运行、汇报、明细导出、状态、重建
 
 后台服务：
   start                        前台启动 App Server 与 Gateway
@@ -95,8 +89,10 @@ const helpText = {
 切换模式下使用 --profile deepseek 连接隔离的 DeepSeek App Server。`,
   work: `用法：codexc work
 
+无子命令时进入交互菜单：列出、新增、删除、权限；新增创建在
+~/.codex-connect/<id>-work，不更改默认工作区。
+
 其他用法：
-  codexc work                   交互式管理（列出/新增/删除/权限）；新增创建在 ~/.codex-connect/<id>-work，不更改默认
   codexc work list
   codexc work add [--id ID] [--name 名称] [--cwd 目录] [--prune-missing]
   codexc work remove <序号|ID|名称>`,
@@ -135,7 +131,8 @@ const helpText = {
   config: `用法：codexc config
 
 打开交互式配置与设置菜单：显示设置（操作详情、计划更新、按提供商的价格显示方式）、系统设置
-（调试模式、审批超时、Sandbox、默认工作区与模型）、Telegram 消息格式与配置路径查看。
+（调试模式、审批超时、Sandbox、默认工作区与模型）、工作区设置（沙箱、审批策略、权限 Profile）、
+Telegram 消息格式与配置路径查看。
 非交互终端（脚本或管道）直接显示用户目录与配置文件路径。`,
   doctor: `用法：codexc doctor
 
@@ -157,21 +154,30 @@ const helpText = {
   "state.upgrade": `用法：codexc state upgrade
 
 停止 Gateway 后，备份并显式升级状态数据库。`,
-  metrics: `用法：codexc metrics <status|reset|report|export>
+  metrics: `用法：codexc metrics
 
-查看指标数据库状态、生成报表、导出脱敏记录，或在 Gateway 停止后重建指标库。`,
+无参数时进入交互菜单。查看与导出模型请求指标：
+  codexc metrics run <Thread ID> [--format json|markdown]   本次运行汇总（最近 Turn + 会话累计）
+  codexc metrics report [--range 24h|7d|30d] [--group global|providers|models]   聚合汇报
+  codexc metrics export [--range 24h|7d|30d] [--format json|csv] [--thread Thread ID]   请求明细导出
+  codexc metrics status   指标数据库状态
+  codexc metrics reset    备份并重建指标库（需 Gateway 停止）`,
   "metrics.status": `用法：codexc metrics status
 
 只读显示指标数据库路径、Schema 兼容性和记录数量。`,
+  "metrics.run": `用法：codexc metrics run <Thread ID> [--format json|markdown]
+
+导出指定 Thread 的本次运行汇总：最近 Turn 的请求数、Token、缓存命中率、速度、费用与耗时，
+以及当前会话累计；默认输出 Markdown。`,
   "metrics.reset": `用法：codexc metrics reset
 
 要求 Gateway 已停止；先备份现有指标库，再让下次启动创建当前 Schema。`,
   "metrics.report": `用法：codexc metrics report [--range <24h|7d|30d>] [--group <global|providers|models>]
 
 只读输出 Markdown 汇报；默认最近 30 天并按模型分组。`,
-  "metrics.export": `用法：codexc metrics export [--range <24h|7d|30d>] [--format <json|csv>]
+  "metrics.export": `用法：codexc metrics export [--range <24h|7d|30d>] [--format <json|csv>] [--thread <Thread ID>]
 
-只读导出脱敏请求记录到标准输出；默认最近 30 天、JSON 格式。`,
+只读导出脱敏请求记录到标准输出；默认最近 30 天、JSON 格式。--thread 只导出指定 Thread。`,
   version: "用法：codexc version",
   gateway: `用法：codexc gateway
 
@@ -268,7 +274,7 @@ try {
       state(args);
       break;
     case "metrics":
-      metrics(args);
+      await metrics(args);
       break;
     default:
       throw new Error(`未知命令：${command}\n运行 codexc --help 查看用法`);
@@ -1013,8 +1019,9 @@ function state(args) {
   runScript("scripts/upgrade-state.mjs", []);
 }
 
-function metrics(args) {
+async function metrics(args) {
   if (showRequestedHelp(args, "metrics") ||
+    showSubcommandHelp(args, "run", "metrics.run") ||
     showSubcommandHelp(args, "status", "metrics.status") ||
     showSubcommandHelp(args, "reset", "metrics.reset") ||
     showSubcommandHelp(args, "report", "metrics.report") ||
@@ -1023,11 +1030,15 @@ function metrics(args) {
   }
   const [subcommand, ...rest] = args;
   if (subcommand === undefined) {
-    console.log(helpText.metrics);
+    if (!process.stdout.isTTY) {
+      console.log(helpText.metrics);
+      return;
+    }
+    await runMetricsMenu();
     return;
   }
-  if (!new Set(["status", "reset", "report", "export"]).has(subcommand)) {
-    throw new Error("用法：codexc metrics <status|reset|report|export>");
+  if (!new Set(["run", "status", "reset", "report", "export"]).has(subcommand)) {
+    throw new Error("用法：codexc metrics <run|status|reset|report|export>");
   }
   if (subcommand === "status" && rest.length === 0) {
     run(
@@ -1042,6 +1053,168 @@ function metrics(args) {
     throw new Error("用法：codexc metrics reset");
   }
   runScript("scripts/metrics-database.mjs", [subcommand, ...rest]);
+}
+
+async function runMetricsMenu() {
+  clackPrompts.intro("Codex Connect Metrics");
+  const action = await clackPrompts.select({
+    message: "选择指标操作",
+    showInstructions: false,
+    options: [
+      {
+        value: "run",
+        label: "本次运行导出",
+        hint: "指定 Thread 输出最近运行与累计汇总",
+      },
+      {
+        value: "report",
+        label: "聚合汇报",
+        hint: "按时间范围与分组输出 Markdown",
+      },
+      {
+        value: "export",
+        label: "明细导出",
+        hint: "导出脱敏请求记录 JSON/CSV",
+      },
+      {
+        value: "status",
+        label: "数据库状态",
+        hint: "查看指标库路径、Schema 与记录数",
+      },
+      {
+        value: "reset",
+        label: "重置指标库",
+        hint: "备份并重建（需 Gateway 停止）",
+      },
+      { value: "cancel", label: "取消" },
+    ],
+  });
+  if (clackPrompts.isCancel(action) || action === "cancel") {
+    clackPrompts.cancel("已取消");
+    return;
+  }
+  if (action === "status") {
+    run(
+      process.execPath,
+      [join(packageDir, "scripts/metrics-database.mjs"), "status"],
+      process.env,
+      process.cwd(),
+    );
+    return;
+  }
+  if (action === "reset") {
+    const confirmed = await clackPrompts.confirm({
+      message: "重置会先备份现有指标库，确认继续？",
+      initialValue: false,
+    });
+    if (clackPrompts.isCancel(confirmed) || confirmed !== true) {
+      clackPrompts.cancel("已取消");
+      return;
+    }
+    runScript("scripts/metrics-database.mjs", ["reset"]);
+    return;
+  }
+  if (action === "run") {
+    const threadId = await clackPrompts.text({
+      message: "Thread ID",
+      placeholder: "例如：019fcb00-c0e1-7222-995d-a9e9f8f35443",
+      validate: (value) => {
+        const trimmed = String(value ?? "").trim();
+        return trimmed ? undefined : "Thread ID 不能为空";
+      },
+    });
+    if (clackPrompts.isCancel(threadId)) {
+      clackPrompts.cancel("已取消");
+      return;
+    }
+    runScript(
+      "scripts/metrics-database.mjs",
+      ["run", String(threadId).trim()],
+    );
+    return;
+  }
+  if (action === "report") {
+    const range = await clackPrompts.select({
+      message: "时间范围",
+      showInstructions: false,
+      options: [
+        { value: "24h", label: "最近 24 小时" },
+        { value: "7d", label: "最近 7 天" },
+        { value: "30d", label: "最近 30 天" },
+      ],
+    });
+    if (clackPrompts.isCancel(range)) {
+      clackPrompts.cancel("已取消");
+      return;
+    }
+    const group = await clackPrompts.select({
+      message: "分组方式",
+      showInstructions: false,
+      options: [
+        { value: "global", label: "全局汇总" },
+        { value: "providers", label: "按提供商" },
+        { value: "models", label: "按模型" },
+      ],
+    });
+    if (clackPrompts.isCancel(group)) {
+      clackPrompts.cancel("已取消");
+      return;
+    }
+    runScript(
+      "scripts/metrics-database.mjs",
+      ["report", "--range", String(range), "--group", String(group)],
+    );
+    return;
+  }
+  if (action === "export") {
+    const range = await clackPrompts.select({
+      message: "时间范围",
+      showInstructions: false,
+      options: [
+        { value: "24h", label: "最近 24 小时" },
+        { value: "7d", label: "最近 7 天" },
+        { value: "30d", label: "最近 30 天" },
+      ],
+    });
+    if (clackPrompts.isCancel(range)) {
+      clackPrompts.cancel("已取消");
+      return;
+    }
+    const format = await clackPrompts.select({
+      message: "导出格式",
+      showInstructions: false,
+      options: [
+        { value: "json", label: "JSON" },
+        { value: "csv", label: "CSV" },
+      ],
+    });
+    if (clackPrompts.isCancel(format)) {
+      clackPrompts.cancel("已取消");
+      return;
+    }
+    const threadId = await clackPrompts.text({
+      message: "Thread ID（留空导出全部）",
+      initialValue: "",
+    });
+    if (clackPrompts.isCancel(threadId)) {
+      clackPrompts.cancel("已取消");
+      return;
+    }
+    const trimmedThreadId = String(threadId).trim();
+    runScript(
+      "scripts/metrics-database.mjs",
+      [
+        "export",
+        "--range",
+        String(range),
+        "--format",
+        String(format),
+        ...(trimmedThreadId ? ["--thread", trimmedThreadId] : []),
+      ],
+    );
+    return;
+  }
+  throw new Error(`未知指标操作：${String(action)}`);
 }
 
 function configuredEnvironment() {

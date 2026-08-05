@@ -54,11 +54,8 @@ try {
     || !help.includes("service install")
     || !help.includes("service reload")
     || !help.includes("service logs")
-    || !help.includes("rules init")
-    || !help.includes("metrics status")
-    || !help.includes("metrics report")
-    || !help.includes("metrics export")
-    || !help.includes("metrics reset")
+    || !help.includes("rules <init|check>")
+    || !help.includes("metrics <run|report|export|status|reset>")
   ) {
     throw new Error("CLI 帮助缺少公开命令");
   }

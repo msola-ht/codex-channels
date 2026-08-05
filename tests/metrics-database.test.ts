@@ -18,6 +18,7 @@ import {
   inspectMetricsDatabase,
   readMetricsExport,
   readMetricsReport,
+  readMetricsRun,
   resetMetricsDatabase,
 } from "../scripts/metrics-database.mjs";
 import {
@@ -131,6 +132,47 @@ describe("model request metrics database operations", () => {
       gatewayRunning: () => true,
     })).toThrow(/codexc service stop gateway/u);
     expect(existsSync(databasePath)).toBe(true);
+  });
+
+  it("exports a single Thread run summary and filters export by Thread", () => {
+    const { environment, databasePath } = fixture();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    store.record(metricSample());
+    store.record({
+      ...metricSample(),
+      threadId: "thread-2",
+      turnId: "turn-2",
+      inputTokens: 200,
+      cachedInputTokens: 100,
+      outputTokens: 50,
+    });
+    store.close();
+    const nowMs = Date.now() + 1;
+
+    const run = readMetricsRun(environment, "thread-1");
+    expect(run).toMatchObject({
+      format: "codex-connect-request-metrics-run",
+      version: 1,
+      threadId: "thread-1",
+      latestTurn: {
+        turnId: "turn-1",
+        requestCount: 1,
+        inputTokens: 1_000,
+      },
+      threadAggregate: {
+        turnCount: 1,
+        requestCount: 1,
+      },
+    });
+
+    const filtered = readMetricsExport(environment, {
+      range: "24h",
+      nowMs,
+      threadId: "thread-2",
+    });
+    expect(filtered.records).toHaveLength(1);
+    expect((filtered.records[0] as { threadId?: string } | undefined)?.threadId)
+      .toBe("thread-2");
   });
 
   it.runIf(process.platform === "linux")(

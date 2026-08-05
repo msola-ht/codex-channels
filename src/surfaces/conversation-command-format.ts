@@ -94,8 +94,9 @@ export const conversationCommandHelpSections = [
       "/effort [序号|档位] · /fast [on|off|status]",
       "/skill · /skills [名称或序号 任务]",
       "/mcp · /plugins",
-      "/usage · /metrics [session|global|providers|models|errors] [24h|7d|30d]",
-      "/limits · /permissions",
+      "/usage · /limits · /permissions",
+      "/metrics session",
+      "/metrics <global|providers|models|errors> [24h|7d|30d]",
     ],
   },
   {

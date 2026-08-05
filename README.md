@@ -228,8 +228,9 @@ Codex Provider 请求和外部视觉 API 请求的脱敏指标使用同一个独
 
 ```bash
 codexc metrics status
+codexc metrics run 019fcb00-...                  # 本次运行汇总（Markdown；--format json 输出 JSON）
 codexc metrics report --range 30d --group models       # Markdown 汇报到标准输出
-codexc metrics export --range 30d --format json        # 脱敏明细导出，也支持 csv
+codexc metrics export --range 30d --format json        # 脱敏明细导出，也支持 csv；--thread 可按 Thread 过滤
 codexc service stop gateway
 codexc metrics reset              # 先保留 0600 旧库备份，再重建
 codexc service start gateway

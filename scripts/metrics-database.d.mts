@@ -30,6 +30,16 @@ export interface MetricsExportDocument {
   records: unknown[];
 }
 
+export interface MetricsRunDocument {
+  format: "codex-connect-request-metrics-run";
+  version: 1;
+  generatedAt: string;
+  threadId: string;
+  latestTurn: unknown;
+  threadAggregate: unknown;
+  latestDirectApi: unknown;
+}
+
 export function inspectMetricsDatabase(
   environment?: NodeJS.ProcessEnv,
 ): MetricsDatabaseStatus;
@@ -49,5 +59,10 @@ export function readMetricsReport(
 
 export function readMetricsExport(
   environment?: NodeJS.ProcessEnv,
-  options?: { range?: "24h" | "7d" | "30d"; nowMs?: number },
+  options?: { range?: "24h" | "7d" | "30d"; nowMs?: number; threadId?: string },
 ): MetricsExportDocument;
+
+export function readMetricsRun(
+  environment?: NodeJS.ProcessEnv,
+  threadId?: string,
+): MetricsRunDocument;

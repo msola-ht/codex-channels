@@ -137,6 +137,7 @@ export function readMetricsReport(environment = process.env, options = {}) {
 
 export function readMetricsExport(environment = process.env, options = {}) {
   const range = metricsRange(options.range ?? "30d", options.nowMs ?? Date.now());
+  const threadId = options.threadId;
   const databasePath = requireReadableMetricsDatabase(environment);
   const store = new SqliteModelRequestMetricsStore(
     databasePath,
@@ -153,7 +154,11 @@ export function readMetricsExport(environment = process.env, options = {}) {
         ...(afterId === undefined ? {} : { afterId }),
         limit: 500,
       });
-      records.push(...page.records);
+      records.push(
+        ...(threadId === undefined
+          ? page.records
+          : page.records.filter((record) => record.threadId === threadId)),
+      );
       afterId = page.nextAfterId ?? undefined;
     } while (afterId !== undefined);
     return {
@@ -162,6 +167,29 @@ export function readMetricsExport(environment = process.env, options = {}) {
       generatedAt: new Date(range.endAtMs).toISOString(),
       range,
       records,
+    };
+  } finally {
+    store.close();
+  }
+}
+
+export function readMetricsRun(environment = process.env, threadId) {
+  const databasePath = requireReadableMetricsDatabase(environment);
+  const store = new SqliteModelRequestMetricsStore(
+    databasePath,
+    undefined,
+    { readOnly: true },
+  );
+  try {
+    const summary = store.threadSummary(threadId);
+    return {
+      format: "codex-connect-request-metrics-run",
+      version: 1,
+      generatedAt: new Date().toISOString(),
+      threadId,
+      latestTurn: summary.latestTurn,
+      threadAggregate: summary.threadAggregate,
+      latestDirectApi: summary.latestDirectApi,
     };
   } finally {
     store.close();
@@ -379,6 +407,97 @@ function printMetricsExport(result, format) {
   }
 }
 
+function printMetricsRun(result, format) {
+  if (format === "json") {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  const { latestTurn, threadAggregate } = result;
+  console.log("# Codex Connect 本次运行统计");
+  console.log("");
+  console.log(`- Thread：${result.threadId}`);
+  console.log(`- 生成时间：${result.generatedAt}`);
+  console.log("");
+  console.log("## 最近运行聚合");
+  console.log("");
+  if (latestTurn === null) {
+    console.log("该 Thread 暂无已记录请求。");
+  } else {
+    printTurnSummary(latestTurn);
+  }
+  console.log("");
+  console.log("## 当前会话指标累计");
+  console.log("");
+  if (threadAggregate === null) {
+    console.log("该 Thread 暂无累计记录。");
+  } else {
+    printTurnSummary(threadAggregate, true);
+  }
+}
+
+function printTurnSummary(summary, aggregate = false) {
+  const totalTokens = summary.inputTokens + summary.outputTokens;
+  console.log(
+    `- 模型请求：${summary.requestCount} 次${summary.unsuccessfulRequestCount > 0 ? `（异常 ${summary.unsuccessfulRequestCount} 次）` : ""}`,
+  );
+  console.log(
+    `- ${aggregate ? "模型请求累计耗时" : "模型请求聚合耗时"}：${formatDuration(summary.requestDurationMs)}`,
+  );
+  console.log(`- 总 Token：${formatTokenCount(totalTokens)}`);
+  if (summary.cachedInputTokens === null) {
+    console.log("  - 缓存：上游未提供完整数据");
+  } else {
+    console.log(`  - 输入命中缓存：${formatTokenCount(summary.cachedInputTokens)}`);
+    console.log(
+      `  - 输入未命中缓存：${formatTokenCount(Math.max(0, summary.inputTokens - summary.cachedInputTokens))}`,
+    );
+    console.log(
+      `  - 缓存命中率：${summary.inputTokens === 0 ? "0%" : `${((summary.cachedInputTokens / summary.inputTokens) * 100).toFixed(2)}%`}`,
+    );
+  }
+  console.log(`  - 输出：${formatTokenCount(summary.outputTokens)}`);
+  if (summary.reasoningOutputTokens > 0) {
+    console.log(`    - 其中推理输出：${formatTokenCount(summary.reasoningOutputTokens)}`);
+  }
+  if (
+    summary.outputTokensPerSecond !== null
+    && summary.outputSpeedTimedCount > 0
+  ) {
+    console.log(
+      `  - 综合输出速度：${summary.outputTokensPerSecond.toFixed(0)} token/s（覆盖 ${summary.outputSpeedTimedCount}/${summary.outputSpeedSampleCount} 次请求）`,
+    );
+  }
+  if (summary.totalCostNanos !== null && summary.pricingCurrency !== null) {
+    console.log(
+      `- 参考总价：${formatCost(summary)}（已计价 ${summary.pricedRequestCount}/${summary.requestCount} 次请求）`,
+    );
+    if (summary.inputCostNanos !== null) {
+      console.log(`  - 输入价格：${formatCurrencyNanos(summary.inputCostNanos, summary.pricingCurrency)}`);
+    }
+    if (summary.cachedInputCostNanos !== null) {
+      console.log(`  - 缓存价格：${formatCurrencyNanos(summary.cachedInputCostNanos, summary.pricingCurrency)}`);
+    }
+    if (summary.outputCostNanos !== null) {
+      console.log(`  - 输出价格：${formatCurrencyNanos(summary.outputCostNanos, summary.pricingCurrency)}`);
+    }
+  }
+}
+
+function formatTokenCount(value) {
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(2)} M`;
+  }
+  if (value >= 1_000) {
+    return `${(value / 1_000).toFixed(2)} K`;
+  }
+  return String(value);
+}
+
+function formatCurrencyNanos(value, currency) {
+  const amount = (value / 1_000_000_000).toFixed(6);
+  return currency === "USD" ? `$${amount}` : `${amount} ${currency}`;
+}
+
 function metricsRange(name, nowMs) {
   const duration = {
     "24h": 24 * 60 * 60 * 1_000,
@@ -406,6 +525,37 @@ function parseMetricsOptions(args, allowed) {
     index += 1;
   }
   return result;
+}
+
+function parseMetricsRunArgs(args) {
+  let threadId;
+  let format = "markdown";
+  for (let index = 0; index < args.length; index += 1) {
+    const option = args[index];
+    if (option === "--format") {
+      const value = args[index + 1];
+      if (!value || value.startsWith("--")) {
+        throw new Error("--format 缺少值");
+      }
+      format = value;
+      index += 1;
+      continue;
+    }
+    if (option.startsWith("--")) {
+      throw new Error(`未知参数：${option}`);
+    }
+    if (threadId !== undefined) {
+      throw new Error("只能指定一个 Thread ID");
+    }
+    threadId = option;
+  }
+  if (!threadId) {
+    throw new Error("用法：codexc metrics run <Thread ID> [--format json|markdown]");
+  }
+  if (format !== "json" && format !== "markdown") {
+    throw new Error("--format 只支持 json 或 markdown");
+  }
+  return { threadId, format };
 }
 
 function formatCost(aggregate) {
@@ -486,15 +636,27 @@ if (
     } else if (command === "export") {
       const options = parseMetricsOptions(
         process.argv.slice(3),
-        new Set(["--range", "--format"]),
+        new Set(["--range", "--format", "--thread"]),
       );
       const format = options.format ?? "json";
       if (format !== "json" && format !== "csv") {
         throw new Error("--format 只支持 json 或 csv");
       }
-      printMetricsExport(readMetricsExport(process.env, options), format);
+      printMetricsExport(
+        readMetricsExport(process.env, {
+          ...options,
+          ...(options.thread ? { threadId: options.thread } : {}),
+        }),
+        format,
+      );
+    } else if (command === "run") {
+      const options = parseMetricsRunArgs(process.argv.slice(3));
+      printMetricsRun(
+        readMetricsRun(process.env, options.threadId),
+        options.format,
+      );
     } else {
-      throw new Error("用法：codexc metrics <status|reset|report|export>");
+      throw new Error("用法：codexc metrics <status|run|report|export|reset>");
     }
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
