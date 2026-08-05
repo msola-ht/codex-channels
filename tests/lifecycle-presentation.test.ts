@@ -217,6 +217,18 @@ describe("shared Surface lifecycle presentation", () => {
             outputPricePerMillionNanos: 280_000_000,
             hasMixedPrices: false,
           },
+          compact: {
+            model: "gpt-5.6-sol",
+            hasMixedModels: false,
+            requestCount: 1,
+            unsuccessfulRequestCount: 0,
+            inputTokens: 10_000,
+            cachedInputTokens: 9_000,
+            outputTokens: 500,
+            pricingCurrency: "USD",
+            pricedRequestCount: 1,
+            totalCostNanos: 142_102_000,
+          },
         },
         sessionReferenceCost: {
           currency: "USD",
@@ -239,6 +251,7 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("模型请求聚合耗时：12秒");
     expect(rendered).toContain("Token：20.12 K");
     expect(rendered).toContain("费用：$0.000350（已计价 2/2 次请求）");
+    expect(rendered).toContain("远程压缩：1 次 · gpt-5.6-sol · 10.5 K Token · $0.142102");
     expect(rendered).toContain("参考总价：$0.001250（已计价 8/9 次请求）");
     expect(rendered).toContain("缓存命中率：75.00%");
     expect(rendered).toContain("最后请求首事件延迟：640毫秒");

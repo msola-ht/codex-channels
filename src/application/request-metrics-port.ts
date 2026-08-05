@@ -3,6 +3,19 @@ import type {
   AccountWeeklyLimitEstimate,
 } from "./account-port.js";
 
+export interface CompactRequestMetricsSummary {
+  model: string | null;
+  hasMixedModels: boolean;
+  requestCount: number;
+  unsuccessfulRequestCount: number;
+  inputTokens: number;
+  cachedInputTokens: number | null;
+  outputTokens: number;
+  pricingCurrency: string | null;
+  pricedRequestCount: number;
+  totalCostNanos: number | null;
+}
+
 export interface TurnRequestMetricsSummary {
   turnId: string;
   requestCount: number;
@@ -25,6 +38,7 @@ export interface TurnRequestMetricsSummary {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  compact?: CompactRequestMetricsSummary | null;
 }
 
 export interface ThreadRequestMetricsAggregate {
@@ -49,6 +63,7 @@ export interface ThreadRequestMetricsAggregate {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  compact?: CompactRequestMetricsSummary | null;
 }
 
 export interface DirectApiRequestMetricsSummary {
@@ -115,6 +130,7 @@ export interface RequestMetricsAggregate {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  compact?: CompactRequestMetricsSummary | null;
 }
 
 export interface RequestMetricsGroup {

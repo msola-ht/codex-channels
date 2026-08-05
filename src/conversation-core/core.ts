@@ -62,6 +62,19 @@ interface TurnTimingState {
   uncachedInputCostNanos: number;
   cachedInputCostNanos: number;
   outputCostNanos: number;
+  compactModel?: string;
+  compactModelConflict: boolean;
+  compactRequestCount: number;
+  compactUnsuccessfulRequestCount: number;
+  compactInputTokens: number;
+  compactCachedInputTokens: number;
+  compactInputUsageCount: number;
+  compactCachedInputUsageCount: number;
+  compactOutputTokens: number;
+  compactPricingCurrency?: string;
+  compactPricingCurrencyConflict: boolean;
+  compactPricedRequestCount: number;
+  compactTotalCostNanos: number;
   timedNonReasoningOutputTokens: number;
   timedOutputDurationMs: number;
   outputSpeedSampleCount: number;
@@ -283,6 +296,17 @@ export class ConversationCore {
           uncachedInputCostNanos: 0,
           cachedInputCostNanos: 0,
           outputCostNanos: 0,
+          compactModelConflict: false,
+          compactRequestCount: 0,
+          compactUnsuccessfulRequestCount: 0,
+          compactInputTokens: 0,
+          compactCachedInputTokens: 0,
+          compactInputUsageCount: 0,
+          compactCachedInputUsageCount: 0,
+          compactOutputTokens: 0,
+          compactPricingCurrencyConflict: false,
+          compactPricedRequestCount: 0,
+          compactTotalCostNanos: 0,
           timedNonReasoningOutputTokens: 0,
           timedOutputDurationMs: 0,
           outputSpeedSampleCount: 0,
@@ -463,6 +487,46 @@ export class ConversationCore {
             timing.uncachedInputCostNanos += event.uncachedInputCostNanos ?? 0;
             timing.cachedInputCostNanos += event.cachedInputCostNanos ?? 0;
             timing.outputCostNanos += event.outputCostNanos ?? 0;
+          }
+          if (event.operation === "compact") {
+            timing.compactRequestCount += 1;
+            if ((event.outcome ?? "completed") !== "completed") {
+              timing.compactUnsuccessfulRequestCount += 1;
+            }
+            if (event.model !== undefined) {
+              if (
+                timing.compactModel !== undefined
+                && timing.compactModel !== event.model
+              ) {
+                timing.compactModelConflict = true;
+              }
+              timing.compactModel ??= event.model;
+            }
+            if (event.inputTokens !== undefined) {
+              timing.compactInputTokens += event.inputTokens;
+              timing.compactInputUsageCount += 1;
+            }
+            if (event.cachedInputTokens !== undefined) {
+              timing.compactCachedInputTokens += event.cachedInputTokens;
+              timing.compactCachedInputUsageCount += 1;
+            }
+            if (event.outputTokens !== undefined) {
+              timing.compactOutputTokens += event.outputTokens;
+            }
+            if (
+              event.pricingCurrency !== undefined
+              && event.totalCostNanos !== undefined
+            ) {
+              if (
+                timing.compactPricingCurrency !== undefined
+                && timing.compactPricingCurrency !== event.pricingCurrency
+              ) {
+                timing.compactPricingCurrencyConflict = true;
+              }
+              timing.compactPricingCurrency ??= event.pricingCurrency;
+              timing.compactPricedRequestCount += 1;
+              timing.compactTotalCostNanos += event.totalCostNanos;
+            }
           }
           if (event.outputTokens !== undefined) {
             const nonReasoningOutputTokens = Math.max(
@@ -860,6 +924,31 @@ export class ConversationCore {
         hasMixedPrices: timing.pricingCurrencyConflict
           || timing.pricingRateConflict,
       };
+      if (timing.compactRequestCount > 0) {
+        result.compact = {
+          model: timing.compactModelConflict
+            ? null
+            : timing.compactModel ?? null,
+          hasMixedModels: timing.compactModelConflict,
+          requestCount: timing.compactRequestCount,
+          unsuccessfulRequestCount: timing.compactUnsuccessfulRequestCount,
+          inputTokens: timing.compactInputTokens,
+          cachedInputTokens: timing.compactInputUsageCount > 0
+            && timing.compactCachedInputUsageCount
+              === timing.compactInputUsageCount
+            ? timing.compactCachedInputTokens
+            : null,
+          outputTokens: timing.compactOutputTokens,
+          pricingCurrency: timing.compactPricingCurrencyConflict
+            ? null
+            : timing.compactPricingCurrency ?? null,
+          pricedRequestCount: timing.compactPricedRequestCount,
+          totalCostNanos: timing.compactPricingCurrencyConflict
+            || timing.compactPricedRequestCount === 0
+            ? null
+            : timing.compactTotalCostNanos,
+        };
+      }
     }
     if (detailedTiming && timing.modelTtftMs !== undefined) {
       result.ttftMs = timing.modelTtftMs;

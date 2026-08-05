@@ -17,6 +17,7 @@ import type {
   ModelRequestMetricsPageQuery,
   ModelRequestMetricsStore,
   ModelRequestPricingSnapshot,
+  StoredCompactRequestMetricsSummary,
   StoredModelRequestMetric,
   StoredModelRequestMetricsAggregate,
   StoredModelRequestMetricsErrorReport,
@@ -86,6 +87,34 @@ const successfulCostAggregateSql = `
       AND total_cost_nanos IS NOT NULL
     THEN COALESCE(output_price_per_million_nanos, -1) END)
     AS output_price_count
+`;
+const compactAggregateSql = `
+  COUNT(CASE WHEN operation = 'compact' THEN 1 END) AS compact_request_count,
+  SUM(CASE WHEN operation = 'compact' AND NOT (${observableCompletionSql})
+    THEN 1 ELSE 0 END) AS compact_unsuccessful_request_count,
+  MIN(CASE WHEN operation = 'compact' THEN model END) AS compact_model,
+  COUNT(DISTINCT CASE WHEN operation = 'compact' THEN model END)
+    AS compact_model_count,
+  SUM(CASE WHEN operation = 'compact' THEN input_tokens END)
+    AS compact_input_tokens,
+  SUM(CASE WHEN operation = 'compact' THEN cached_input_tokens END)
+    AS compact_cached_input_tokens,
+  COUNT(CASE WHEN operation = 'compact' THEN input_tokens END)
+    AS compact_input_token_count,
+  COUNT(CASE WHEN operation = 'compact' THEN cached_input_tokens END)
+    AS compact_cached_input_token_count,
+  SUM(CASE WHEN operation = 'compact' THEN output_tokens END)
+    AS compact_output_tokens,
+  MIN(CASE WHEN operation = 'compact' AND ${observableCompletionSql}
+      AND total_cost_nanos IS NOT NULL THEN pricing_currency END)
+    AS compact_pricing_currency,
+  COUNT(DISTINCT CASE WHEN operation = 'compact' AND ${observableCompletionSql}
+      AND total_cost_nanos IS NOT NULL THEN pricing_currency END)
+    AS compact_pricing_currency_count,
+  COUNT(CASE WHEN operation = 'compact' AND ${observableCompletionSql}
+    THEN total_cost_nanos END) AS compact_priced_request_count,
+  SUM(CASE WHEN operation = 'compact' AND ${observableCompletionSql}
+    THEN total_cost_nanos END) AS compact_total_cost_nanos
 `;
 const normalizedStatusSql = `
   CASE
@@ -160,7 +189,23 @@ interface MetricRow {
   total_cost_nanos: number | null;
 }
 
-interface TurnSummaryRow {
+interface CompactSummaryRow {
+  compact_request_count: number;
+  compact_unsuccessful_request_count: number;
+  compact_model: string | null;
+  compact_model_count: number;
+  compact_input_tokens: number | null;
+  compact_cached_input_tokens: number | null;
+  compact_input_token_count: number;
+  compact_cached_input_token_count: number;
+  compact_output_tokens: number | null;
+  compact_pricing_currency: string | null;
+  compact_pricing_currency_count: number;
+  compact_priced_request_count: number;
+  compact_total_cost_nanos: number | null;
+}
+
+interface TurnSummaryRow extends CompactSummaryRow {
   provider?: string | null;
   model?: string | null;
   reasoning_effort?: string | null;
@@ -611,7 +656,8 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
             SUM(CASE WHEN non_reasoning_output_tokens > 0
                   AND output_duration_ms > 0 THEN 1 ELSE 0 END)
               AS output_speed_timed_count,
-            ${successfulCostAggregateSql}
+            ${successfulCostAggregateSql},
+            ${compactAggregateSql}
           FROM model_request_metrics_enriched
           WHERE thread_id = ? AND turn_id = ?
           GROUP BY turn_id
@@ -653,7 +699,8 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         SUM(CASE WHEN non_reasoning_output_tokens > 0
               AND output_duration_ms > 0 THEN 1 ELSE 0 END)
           AS output_speed_timed_count,
-        ${successfulCostAggregateSql}
+        ${successfulCostAggregateSql},
+        ${compactAggregateSql}
       FROM model_request_metrics_enriched
       WHERE thread_id = ? AND turn_id IS NOT NULL
     `).get(threadId) as unknown as TurnSummaryRow;
@@ -743,6 +790,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
               AND output_duration_ms > 0 THEN 1 ELSE 0 END)
           AS output_speed_timed_count,
         ${successfulCostAggregateSql},
+        ${compactAggregateSql},
         MAX(recorded_at_ms) AS recorded_at_ms
       FROM model_request_metrics_enriched
       WHERE thread_id = ? AND turn_id IS NOT NULL
@@ -803,13 +851,14 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           AS priced_request_count,
         SUM(CASE WHEN ${observableCompletionSql} THEN total_cost_nanos END)
           AS total_cost_nanos,
+        ${compactAggregateSql},
         MAX(recorded_at_ms) AS recorded_at_ms
       FROM model_request_metrics_enriched
       WHERE thread_id IS NOT NULL
         AND turn_id IS NOT NULL
       GROUP BY thread_id
       ORDER BY MAX(id) DESC
-    `).all() as unknown as Array<{
+    `).all() as unknown as Array<CompactSummaryRow & {
       thread_id: string;
       provider: string | null;
       model: string | null;
@@ -838,6 +887,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         : null,
       pricedRequestCount: row.priced_request_count,
       totalCostNanos: row.total_cost_nanos ?? null,
+      compact: toStoredCompactSummary(row),
       lastRecordedAtMs: row.recorded_at_ms,
     }));
   }
@@ -896,7 +946,8 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           SUM(CASE WHEN non_reasoning_output_tokens > 0
                 AND output_duration_ms > 0 THEN 1 ELSE 0 END)
             AS output_speed_timed_count,
-          ${successfulCostAggregateSql}
+          ${successfulCostAggregateSql},
+          ${compactAggregateSql}
         FROM filtered
         GROUP BY group_provider, group_model
       ), ttft_ranked AS (
@@ -1336,6 +1387,7 @@ function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetricsSumma
     outputSpeedSampleCount: row.output_speed_sample_count,
     outputSpeedTimedCount: row.output_speed_timed_count,
     ...pricing,
+    compact: toStoredCompactSummary(row),
   };
 }
 
@@ -1371,6 +1423,7 @@ function toStoredThreadAggregate(
       summary.cachedInputPricePerMillionNanos,
     outputPricePerMillionNanos: summary.outputPricePerMillionNanos,
     hasMixedPrices: summary.hasMixedPrices,
+    compact: summary.compact,
   };
 }
 
@@ -1580,6 +1633,32 @@ function toStoredMetricsAggregate(row: AggregateRow): StoredModelRequestMetricsA
     ttftP95Ms: row.ttft_p95_ms,
     ttftSampleCount: row.ttft_sample_count,
     ...pricing,
+    compact: toStoredCompactSummary(row),
+  };
+}
+
+function toStoredCompactSummary(
+  row: CompactSummaryRow,
+): StoredCompactRequestMetricsSummary | null {
+  if (row.compact_request_count === 0) return null;
+  return {
+    model: row.compact_model_count === 1 ? row.compact_model : null,
+    hasMixedModels: row.compact_model_count > 1,
+    requestCount: row.compact_request_count,
+    unsuccessfulRequestCount: row.compact_unsuccessful_request_count,
+    inputTokens: row.compact_input_tokens ?? 0,
+    cachedInputTokens: row.compact_input_token_count > 0
+      && row.compact_cached_input_token_count === row.compact_input_token_count
+      ? row.compact_cached_input_tokens ?? 0
+      : null,
+    outputTokens: row.compact_output_tokens ?? 0,
+    pricingCurrency: row.compact_pricing_currency_count === 1
+      ? row.compact_pricing_currency
+      : null,
+    pricedRequestCount: row.compact_priced_request_count,
+    totalCostNanos: row.compact_pricing_currency_count === 1
+      ? row.compact_total_cost_nanos
+      : null,
   };
 }
 

@@ -25,6 +25,7 @@ import {
   formatReferenceCostTotal,
   toDisplayReferenceCost,
 } from "./reference-cost-format.js";
+import { formatCompactMetricsValue } from "./metrics-format.js";
 import {
   formatCacheHitRate,
   formatTokenCount,
@@ -361,6 +362,16 @@ export function createTurnCompletedPresentation(
               ? []
               : [{ label, value: formatCurrencyNanos(displayCost.currency!, costNanos) }],
           ),
+    });
+  }
+  if (event.timing?.compact) {
+    runFields.push({
+      label: "远程压缩",
+      value: formatCompactMetricsValue(
+        event.timing.compact,
+        currency,
+        exchangeRate,
+      ),
     });
   }
   const performanceFields: LifecyclePresentationField[] = [];

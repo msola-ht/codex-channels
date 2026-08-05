@@ -10,7 +10,8 @@
   升级到 v4；不自动迁移未知版本。
 - `metrics-database.mjs` / `metrics-database.d.mts`：实现并声明只读 `codexc metrics` 的
   `status`、`run`、`turns`、`threads`、`report`、`export`、`upgrade` 与 `reset`；查询复用 Observability
-  只读端口，渲染复用 `metrics-export-format.mjs`；`export` CSV 用独立类型行区分请求历史额度快照
+  只读端口，渲染复用 `metrics-export-format.mjs`；运行、会话与聚合输出从现有 `compact` 明细
+  派生远程压缩模型、请求数、Token 和费用摘要，JSON/CSV 同时保留可视化字段；`export` CSV 用独立类型行区分请求历史额度快照
   与当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3 备份后
   事务升级到 v4，reset 要求 Gateway 停止、检查点回写、`0600`
   备份后移除旧库，不迁移或覆盖原指标记录。服务状态无法确认、处于非停止状态或前台 Gateway

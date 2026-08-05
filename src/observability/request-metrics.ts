@@ -184,6 +184,19 @@ export interface StoredModelRequestMetric extends ModelRequestMetricSample {
   totalCostNanos: number | null;
 }
 
+export interface StoredCompactRequestMetricsSummary {
+  model: string | null;
+  hasMixedModels: boolean;
+  requestCount: number;
+  unsuccessfulRequestCount: number;
+  inputTokens: number;
+  cachedInputTokens: number | null;
+  outputTokens: number;
+  pricingCurrency: string | null;
+  pricedRequestCount: number;
+  totalCostNanos: number | null;
+}
+
 export interface StoredTurnRequestMetricsSummary {
   provider: string | null;
   model: string | null;
@@ -209,6 +222,7 @@ export interface StoredTurnRequestMetricsSummary {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  compact: StoredCompactRequestMetricsSummary | null;
 }
 
 export interface StoredThreadRequestMetricsAggregate {
@@ -234,6 +248,7 @@ export interface StoredThreadRequestMetricsAggregate {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  compact: StoredCompactRequestMetricsSummary | null;
 }
 
 export interface StoredThreadRequestMetricsSummary {
@@ -259,6 +274,7 @@ export interface StoredThreadListItem {
   pricingCurrency: string | null;
   pricedRequestCount: number;
   totalCostNanos: number | null;
+  compact: StoredCompactRequestMetricsSummary | null;
   lastRecordedAtMs: number;
 }
 
@@ -298,6 +314,7 @@ export interface StoredModelRequestMetricsAggregate {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  compact: StoredCompactRequestMetricsSummary | null;
 }
 
 export interface StoredModelRequestMetricsGroup {

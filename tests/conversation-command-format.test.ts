@@ -249,6 +249,18 @@ describe("provider-aware conversation command formatting", () => {
           cachedInputPricePerMillionNanos: 2_800_000,
           outputPricePerMillionNanos: 280_000_000,
           hasMixedPrices: false,
+          compact: {
+            model: "gpt-5.6-sol",
+            hasMixedModels: false,
+            requestCount: 1,
+            unsuccessfulRequestCount: 0,
+            inputTokens: 10_000,
+            cachedInputTokens: 9_000,
+            outputTokens: 500,
+            pricingCurrency: "USD",
+            pricedRequestCount: 1,
+            totalCostNanos: 142_102_000,
+          },
         },
         threadAggregate: {
           turnCount: 8,
@@ -272,6 +284,18 @@ describe("provider-aware conversation command formatting", () => {
           cachedInputPricePerMillionNanos: 2_800_000,
           outputPricePerMillionNanos: 280_000_000,
           hasMixedPrices: false,
+          compact: {
+            model: "gpt-5.6-sol",
+            hasMixedModels: false,
+            requestCount: 2,
+            unsuccessfulRequestCount: 0,
+            inputTokens: 20_000,
+            cachedInputTokens: 18_000,
+            outputTokens: 1_000,
+            pricingCurrency: "USD",
+            pricedRequestCount: 2,
+            totalCostNanos: 284_204_000,
+          },
         },
         latestDirectApi: {
           provider: "bltcy",
@@ -308,12 +332,14 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("**费用**：$0.001235（已计价 2/3 次请求）");
     expect(rendered).toContain("  - 输入价格：$0.000400");
     expect(rendered).toContain("综合输出速度：60 token/s（不含推理 · 覆盖 2/3 次请求）");
+    expect(rendered).toContain("远程压缩：1 次 · gpt-5.6-sol · 10.5 K Token · $0.142102");
     expect(rendered).toContain("**费用**：$0.001235（已计价 2/3 次请求）");
     expect(rendered).toContain("输入价格：$0.000400");
     expect(rendered).toContain("缓存价格：$0.000200");
     expect(rendered).toContain("输出价格：$0.000635");
     expect(rendered).toContain("### 当前会话指标累计");
     expect(rendered).toContain("Turn：8 次");
+    expect(rendered).toContain("远程压缩：2 次 · gpt-5.6-sol · 21 K Token · $0.284204");
     expect(rendered).toContain("综合输出速度：58 token/s（不含推理 · 覆盖 20/21 次请求）");
     expect(rendered).toContain("### 最近直接 API");
     expect(rendered).toContain("API 提供商：BLTCY");
@@ -403,6 +429,18 @@ describe("provider-aware conversation command formatting", () => {
       cachedInputPricePerMillionNanos: 2_800_000,
       outputPricePerMillionNanos: 280_000_000,
       hasMixedPrices: false,
+      compact: {
+        model: "gpt-5.6-sol",
+        hasMixedModels: false,
+        requestCount: 2,
+        unsuccessfulRequestCount: 0,
+        inputTokens: 20_000,
+        cachedInputTokens: 18_000,
+        outputTokens: 1_000,
+        pricingCurrency: "USD",
+        pricedRequestCount: 2,
+        totalCostNanos: 284_204_000,
+      },
     };
     const rendered = formatConversationMetrics({
       kind: "metrics",
@@ -436,6 +474,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("输入价格：$0.040000");
     expect(rendered).toContain("缓存价格：$0.020000");
     expect(rendered).toContain("输出价格：$0.063457");
+    expect(rendered).toContain("远程压缩：2 次 · gpt-5.6-sol · 21 K Token · $0.284204");
   });
 
   it("does not invent one unit price when an aggregate spans multiple rates", () => {

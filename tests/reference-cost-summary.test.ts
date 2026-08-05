@@ -177,6 +177,7 @@ function turnSummary(
     ...rates,
     hasMixedPrices: false,
     ...overrides,
+    compact: overrides.compact ?? null,
   };
 }
 

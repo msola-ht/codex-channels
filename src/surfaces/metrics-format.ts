@@ -17,6 +17,7 @@ import {
   formatProviderLabel,
 } from "./provider-format.js";
 import {
+  formatCurrencyNanos,
   formatExchangeRateLine,
   formatReferenceCostBreakdown,
   formatReferenceCostTotal,
@@ -91,6 +92,9 @@ export function formatConversationMetrics(
         outputPricePerMillionNanos: turn.outputPricePerMillionNanos,
         hasMixedPrices: turn.hasMixedPrices,
       }, currency, exchangeRate),
+      ...(turn.compact
+        ? [formatCompactMetrics(turn.compact, currency, exchangeRate)]
+        : []),
     );
   } else {
     lines.push("", "### 最近运行聚合", "暂无已记录请求");
@@ -123,6 +127,9 @@ export function formatConversationMetrics(
             aggregate.outputSpeedSampleCount,
           )}`]),
       ...formatReferenceCost(toReferenceCostDisplay(aggregate), currency, exchangeRate),
+      ...(aggregate.compact
+        ? [formatCompactMetrics(aggregate.compact, currency, exchangeRate)]
+        : []),
     );
   }
   if (summary.latestDirectApi) {
@@ -337,6 +344,7 @@ function formatMetricsAggregate(
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  compact?: Parameters<typeof formatCompactMetricsValue>[0] | null;
   },
   currency: DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
@@ -369,6 +377,9 @@ function formatMetricsAggregate(
           `  - 首段回复延迟：平均 ${formatMetricLatency(aggregate.ttftAverageMs)} · P50 ${formatMetricLatency(aggregate.ttftP50Ms)} · P95 ${formatMetricLatency(aggregate.ttftP95Ms)}（覆盖 ${aggregate.ttftSampleCount}/${aggregate.requestCount} 次请求）`,
         ]),
     ...formatReferenceCost(toReferenceCostDisplay(aggregate), currency, exchangeRate),
+    ...(aggregate.compact
+      ? [formatCompactMetrics(aggregate.compact, currency, exchangeRate)]
+      : []),
   ];
 }
 
@@ -428,7 +439,61 @@ function formatMetricsGroup(
     `  - 速度：${speed}`,
     `  - ${latency}`,
     cost,
+    ...(aggregate.compact
+      ? [`  - ${formatCompactMetrics(aggregate.compact, currency, exchangeRate)}`]
+      : []),
   ].join("\n");
+}
+
+function formatCompactMetrics(
+  compact: Parameters<typeof formatCompactMetricsValue>[0],
+  currency: DisplayPriceCurrency,
+  exchangeRate?: ExchangeRateSnapshot | null,
+): string {
+  return `远程压缩：${formatCompactMetricsValue(compact, currency, exchangeRate)}`;
+}
+
+export function formatCompactMetricsValue(
+  compact: {
+    model: string | null;
+    hasMixedModels: boolean;
+    requestCount: number;
+    unsuccessfulRequestCount: number;
+    inputTokens: number;
+    outputTokens: number;
+    pricingCurrency: string | null;
+    pricedRequestCount: number;
+    totalCostNanos: number | null;
+  },
+  currency: DisplayPriceCurrency,
+  exchangeRate?: ExchangeRateSnapshot | null,
+): string {
+  const model = compact.hasMixedModels
+    ? "混合模型"
+    : compact.model ?? "模型未知";
+  const display = toDisplayReferenceCost({
+    currency: compact.pricingCurrency,
+    totalCostNanos: compact.totalCostNanos,
+    inputCostNanos: null,
+    cachedInputCostNanos: null,
+    outputCostNanos: null,
+    pricedRequestCount: compact.pricedRequestCount,
+    requestCount: compact.requestCount,
+    uncachedInputPricePerMillionNanos: null,
+    cachedInputPricePerMillionNanos: null,
+    outputPricePerMillionNanos: null,
+    hasMixedPrices: false,
+  }, currency, exchangeRate ?? null);
+  const cost = display.currency === null || display.totalCostNanos === null
+    ? compact.pricedRequestCount === 0 ? "参考费用未知" : "参考费用无法合计"
+    : formatCurrencyNanos(display.currency, display.totalCostNanos);
+  const coverage = compact.pricedRequestCount === compact.requestCount
+    ? ""
+    : `（已计价 ${compact.pricedRequestCount}/${compact.requestCount} 次）`;
+  const failures = compact.unsuccessfulRequestCount === 0
+    ? ""
+    : `（异常 ${compact.unsuccessfulRequestCount} 次）`;
+  return `${compact.requestCount} 次${failures} · ${model} · ${formatTokenCount(compact.inputTokens + compact.outputTokens)} Token · ${cost}${coverage}`;
 }
 
 function formatReferenceCost(

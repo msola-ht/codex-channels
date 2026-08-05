@@ -141,6 +141,8 @@ export function toModelTimingEvent(
     type: "turn.modelTiming.updated" as const,
     threadId: metrics.threadId,
     turnId: metrics.turnId,
+    operation: metrics.operation,
+    ...(metrics.model === null ? {} : { model: metrics.model }),
     requestStartedAtMs: metrics.requestStartedAtMs,
     requestDurationMs: Math.max(
       0,

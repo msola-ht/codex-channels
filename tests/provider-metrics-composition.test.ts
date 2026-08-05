@@ -218,6 +218,8 @@ describe("ProviderMetricsComposition", () => {
     }, pricing)).toMatchObject({
       threadId: "thread-1",
       turnId: "turn-1",
+      operation: "compact",
+      model: "deepseek-v4-flash",
       inputTokens: 100,
       cachedInputTokens: 80,
       outputTokens: 20,

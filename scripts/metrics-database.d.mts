@@ -17,12 +17,25 @@ export interface MetricsDatabaseUpgradeResult extends MetricsDatabaseResetResult
   schemaVersion: number | null;
 }
 
+export interface MetricsCompactSummary {
+  model: string | null;
+  hasMixedModels: boolean;
+  requestCount: number;
+  unsuccessfulRequestCount: number;
+  inputTokens: number;
+  cachedInputTokens: number | null;
+  outputTokens: number;
+  pricingCurrency: string | null;
+  pricedRequestCount: number;
+  totalCostNanos: number | null;
+}
+
 export interface MetricsReportDocument {
   format: "codex-connect-request-metrics-report";
   version: 2;
   generatedAt: string;
   range: { name: string; startAtMs: number; endAtMs: number };
-  report: unknown;
+  report: { aggregate: unknown };
   errors: unknown;
   weeklyQuota: unknown;
 }
@@ -63,6 +76,7 @@ export interface MetricsThreadsDocument {
     pricedRequestCount: number;
     totalCostNanos: number | null;
     totalCostCnyNanos: number | null;
+    compact: MetricsCompactSummary | null;
     lastRecordedAtMs: number;
   }>;
 }

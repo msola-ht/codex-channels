@@ -207,6 +207,91 @@ describe("model request metrics database operations", () => {
     ]);
   });
 
+  it("shows compact model, tokens, and reference cost in reports and exports", () => {
+    const { environment, databasePath } = fixture();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    const pricing = {
+      billingMode: "api" as const,
+      currency: "USD",
+      source: "test-catalog",
+      effectiveAtMs: 1_700_000_000_000,
+      uncachedInputPricePerMillionNanos: 2_000_000_000,
+      cachedInputPricePerMillionNanos: 1_000_000_000,
+      outputPricePerMillionNanos: 3_000_000_000,
+    };
+    store.record({ ...metricSample(), pricing });
+    store.record({ ...metricSample(), operation: "compact", pricing });
+    store.close();
+
+    expect(readMetricsReport(environment, {
+      range: "24h",
+      group: "global",
+      nowMs: Date.now() + 1,
+    }).report.aggregate).toMatchObject({
+      compact: {
+        model: "deepseek-v4-flash",
+        requestCount: 1,
+        inputTokens: 1_000,
+        outputTokens: 100,
+        pricingCurrency: "USD",
+        totalCostNanos: 1_400_000,
+      },
+    });
+
+    const reportMarkdown = spawnSync(
+      process.execPath,
+      [
+        join(process.cwd(), "scripts", "metrics-database.mjs"),
+        "report",
+        "--range",
+        "24h",
+        "--group",
+        "global",
+        "--format",
+        "markdown",
+      ],
+      { encoding: "utf8", env: environment },
+    );
+    expect(reportMarkdown.status, reportMarkdown.stderr).toBe(0);
+    expect(reportMarkdown.stdout).toContain(
+      "远程压缩：1 次 · deepseek-v4-flash · 1.1 K Token · $0.0014",
+    );
+
+    const exportMarkdown = spawnSync(
+      process.execPath,
+      [
+        join(process.cwd(), "scripts", "metrics-database.mjs"),
+        "export",
+        "--range",
+        "24h",
+        "--format",
+        "markdown",
+      ],
+      { encoding: "utf8", env: environment },
+    );
+    expect(exportMarkdown.status, exportMarkdown.stderr).toBe(0);
+    expect(exportMarkdown.stdout).toContain("| 操作 |");
+    expect(exportMarkdown.stdout).toContain("| compact |");
+
+    const reportCsv = spawnSync(
+      process.execPath,
+      [
+        join(process.cwd(), "scripts", "metrics-database.mjs"),
+        "report",
+        "--range",
+        "24h",
+        "--group",
+        "global",
+        "--format",
+        "csv",
+      ],
+      { encoding: "utf8", env: environment },
+    );
+    expect(reportCsv.status, reportCsv.stderr).toBe(0);
+    expect(reportCsv.stdout).toContain("compactRequestCount");
+    expect(reportCsv.stdout).toContain("compactTotalCostNanos");
+  });
+
   it("refuses to reset while Gateway is running", () => {
     const { environment, databasePath } = fixture();
     createMetricsDatabase(databasePath, 1, 1);

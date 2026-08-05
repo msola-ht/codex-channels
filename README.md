@@ -117,6 +117,8 @@ codexc service restart gateway
 缓存命中、速度、思考次数与参考总价；`/metrics` 可查看当前 Thread 最近运行聚合以及
 `global|providers|models|errors` 的时间范围汇总。展示与统计口径见
 [`docs/display.md`](docs/display.md)。
+统计代理识别到的远程压缩仍计入这些总计，并另外显示压缩次数、实际请求模型、Token 与参考费用，
+方便区分普通回复和压缩开销。
 
 OpenAI `/limits` 会在存在完整周窗口且统计代理观测到相邻额度增长时，按增长区间内的请求
 Token 与价格快照估算每 1% 周额度对应的 Token、API 参考费用及剩余额度可用量。估算只覆盖
@@ -230,6 +232,8 @@ json，其余默认 markdown），默认写入 `~/.codex-connect/output/<日期>
 连接，可在 Gateway 运行时执行；支持 `24h`、`7d`、`30d`，包含固定格式版本、时间范围和脱敏请求
 字段，不包含提示词、消息、图片、响应正文、凭据或上游响应 ID。`report` 与 `export` 的
 Markdown、JSON、CSV 还包含统计代理最后观测到的当前周额度区间和每 1% 采样状态；JSON 格式版本为 v2。
+`run`、`turns`、`threads` 和 `report` 会单列远程压缩模型、请求数、Token 与参考费用；`export`
+JSON/CSV 明细保留 `operation=compact`，Markdown 明细也显示操作类型。
 `export` CSV 使用 `type=request|weekly_quota_summary` 区分请求与当前额度摘要：请求行只携带该次
 请求实际捕获的历史额度快照，当前额度和每 1% 估算只写入一条独立摘要行，避免可视化重复计数。
 Markdown 报表的费用按 `display.price_currency` / `price_currency_by_provider` 换算显示

@@ -840,6 +840,18 @@ describe("SqliteModelRequestMetricsStore", () => {
         outputTokens: 200,
         pricedRequestCount: 2,
         totalCostNanos: 2_800_000,
+        compact: {
+          model: "deepseek-v4-flash",
+          hasMixedModels: false,
+          requestCount: 1,
+          unsuccessfulRequestCount: 0,
+          inputTokens: 1_000,
+          cachedInputTokens: 900,
+          outputTokens: 100,
+          pricingCurrency: "USD",
+          pricedRequestCount: 1,
+          totalCostNanos: 1_400_000,
+        },
       },
       threadAggregate: {
         requestCount: 2,
@@ -847,6 +859,18 @@ describe("SqliteModelRequestMetricsStore", () => {
         outputTokens: 200,
         pricedRequestCount: 2,
         totalCostNanos: 2_800_000,
+        compact: {
+          model: "deepseek-v4-flash",
+          hasMixedModels: false,
+          requestCount: 1,
+          unsuccessfulRequestCount: 0,
+          inputTokens: 1_000,
+          cachedInputTokens: 900,
+          outputTokens: 100,
+          pricingCurrency: "USD",
+          pricedRequestCount: 1,
+          totalCostNanos: 1_400_000,
+        },
       },
     });
     expect(store.aggregate({
@@ -859,6 +883,18 @@ describe("SqliteModelRequestMetricsStore", () => {
       outputTokens: 200,
       pricedRequestCount: 2,
       totalCostNanos: 2_800_000,
+      compact: {
+        model: "deepseek-v4-flash",
+        hasMixedModels: false,
+        requestCount: 1,
+        unsuccessfulRequestCount: 0,
+        inputTokens: 1_000,
+        cachedInputTokens: 900,
+        outputTokens: 100,
+        pricingCurrency: "USD",
+        pricedRequestCount: 1,
+        totalCostNanos: 1_400_000,
+      },
     });
     expect(store.errors({
       startAtMs: 0,
@@ -873,6 +909,18 @@ describe("SqliteModelRequestMetricsStore", () => {
       outputTokens: 200,
       pricedRequestCount: 2,
       totalCostNanos: 2_800_000,
+      compact: {
+        model: "deepseek-v4-flash",
+        hasMixedModels: false,
+        requestCount: 1,
+        unsuccessfulRequestCount: 0,
+        inputTokens: 1_000,
+        cachedInputTokens: 900,
+        outputTokens: 100,
+        pricingCurrency: "USD",
+        pricedRequestCount: 1,
+        totalCostNanos: 1_400_000,
+      },
     });
     expect(store.threadList()[0]).toMatchObject({
       requestCount: 2,
@@ -880,6 +928,18 @@ describe("SqliteModelRequestMetricsStore", () => {
       outputTokens: 200,
       pricedRequestCount: 2,
       totalCostNanos: 2_800_000,
+      compact: {
+        model: "deepseek-v4-flash",
+        hasMixedModels: false,
+        requestCount: 1,
+        unsuccessfulRequestCount: 0,
+        inputTokens: 1_000,
+        cachedInputTokens: 900,
+        outputTokens: 100,
+        pricingCurrency: "USD",
+        pricedRequestCount: 1,
+        totalCostNanos: 1_400_000,
+      },
     });
     store.close();
   });
