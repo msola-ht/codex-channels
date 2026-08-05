@@ -9,7 +9,10 @@ import * as clackPrompts from "@clack/prompts";
 import { HttpsProxyAgent } from "https-proxy-agent";
 
 import { configEventQueuePath } from "../runtime/config-event-queue.mjs";
-import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import {
+  readGatewayConfig,
+  writeGatewayConfig,
+} from "../runtime/gateway-config.mjs";
 import {
   resolveProxyEnvironment,
   selectHttpProxyUrl,
@@ -93,7 +96,7 @@ const helpText = {
   work: `用法：codexc work
 
 其他用法：
-  codexc work                   交互式管理（列出/新增/删除）
+  codexc work                   交互式管理（列出/新增/删除/权限）；新增创建在 ~/.codex-connect/<id>-work，不更改默认
   codexc work list
   codexc work add [--id ID] [--name 名称] [--cwd 目录] [--prune-missing]
   codexc work remove <序号|ID|名称>`,
@@ -584,12 +587,17 @@ async function runWorkspaceMenu({
       {
         value: "create",
         label: "新增工作区",
-        hint: "在用户目录下新建并注册",
+        hint: "在 ~/.codex-connect/<id>-work 下新建并注册",
       },
       {
         value: "remove",
         label: "删除工作区",
         hint: "删除注册，不删除目录",
+      },
+      {
+        value: "permissions",
+        label: "工作区权限",
+        hint: "沙箱、审批策略、权限 Profile",
       },
       { value: "cancel", label: "取消" },
     ],
@@ -616,6 +624,10 @@ async function runWorkspaceMenu({
       eventQueuePath,
       fallbackDefaultWorkspace,
     });
+    return;
+  }
+  if (action === "permissions") {
+    await runWorkspacePermissionsMenu(runtime);
     return;
   }
   throw new Error(`未知 Workspace 操作：${String(action)}`);
@@ -645,9 +657,17 @@ async function createWorkspaceInteractively({
   }
   const name = String(entered).trim();
   const id = slugifyWorkspaceName(name);
-  const directory = join(runtime.dataDir, "workspaces", id);
+  const directory = join(runtime.dataDir, `${id}-work`);
   if (existsSync(directory)) {
     throw new Error(`工作区目录已存在：${directory}`);
+  }
+  const confirmed = await clackPrompts.confirm({
+    message: `将在 ${directory} 创建并注册（不会更改默认工作区），继续？`,
+    initialValue: true,
+  });
+  if (clackPrompts.isCancel(confirmed) || confirmed === false) {
+    clackPrompts.cancel("已取消");
+    return;
   }
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const result = addWorkspaceToConfig({
@@ -704,6 +724,137 @@ async function removeWorkspaceInteractively({
     console.log(`默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
   }
   console.log("运行中的 Gateway 会自动重新加载配置，必要时重启。");
+}
+
+async function runWorkspacePermissionsMenu(runtime) {
+  const document = readGatewayConfig(runtime.configPath);
+  const workspaces = Array.isArray(document.workspaces)
+    ? document.workspaces
+    : [];
+  if (workspaces.length === 0) {
+    console.log("当前没有已配置的 Workspace。");
+    return;
+  }
+  const entries = workspaces.map((workspace) => table(workspace));
+  const selectedId = entries.length === 1
+    ? String(entries[0].id)
+    : await clackPrompts.select({
+        message: "选择要设置的 Workspace",
+        showInstructions: false,
+        options: entries.map((workspace) => ({
+          value: String(workspace.id),
+          label: String(workspace.name || workspace.id),
+          hint: String(workspace.cwd),
+        })),
+      });
+  if (clackPrompts.isCancel(selectedId)) {
+    clackPrompts.cancel("已取消");
+    return;
+  }
+  const entry = entries.find((workspace) => workspace.id === selectedId);
+  if (!entry) {
+    throw new Error(`未知 Workspace：${String(selectedId)}`);
+  }
+  const field = await clackPrompts.select({
+    message: `选择 ${entry.name ?? entry.id} 的权限项`,
+    showInstructions: false,
+    options: [
+      {
+        value: "sandbox",
+        label: "沙箱",
+        hint: `当前：${entry.sandbox ?? "未配置（使用全局）"}`,
+      },
+      {
+        value: "approval_policy",
+        label: "审批策略",
+        hint: `当前：${entry.approval_policy ?? "未配置（使用默认）"}`,
+      },
+      {
+        value: "permissions",
+        label: "权限 Profile",
+        hint: `当前：${entry.permissions ?? "未配置"}`,
+      },
+      { value: "cancel", label: "取消" },
+    ],
+  });
+  if (clackPrompts.isCancel(field) || field === "cancel") {
+    clackPrompts.cancel("已取消");
+    return;
+  }
+  if (field === "sandbox") {
+    const selected = await clackPrompts.select({
+      message: "沙箱模式",
+      showInstructions: false,
+      initialValue: entry.sandbox ?? "workspace-write",
+      options: [
+        { value: "read-only", label: "只读", hint: "禁止写文件" },
+        { value: "workspace-write", label: "工作区可写", hint: "允许修改授权 Workspace" },
+        { value: "danger-full-access", label: "完全访问", hint: "不启用文件系统沙箱" },
+        { value: "clear", label: "清除（使用全局）", hint: "回退 codex.sandbox" },
+      ],
+    });
+    if (clackPrompts.isCancel(selected)) {
+      clackPrompts.cancel("已取消");
+      return;
+    }
+    if (selected === "clear") {
+      delete entry.sandbox;
+    } else {
+      if (entry.permissions !== undefined) {
+        console.log("permissions 与 sandbox 互斥，请先清除权限 Profile。");
+        return;
+      }
+      entry.sandbox = selected;
+    }
+  } else if (field === "approval_policy") {
+    const selected = await clackPrompts.select({
+      message: "审批策略",
+      showInstructions: false,
+      initialValue: entry.approval_policy ?? "on-request",
+      options: [
+        { value: "untrusted", label: "不信任", hint: "更严格地要求审批" },
+        { value: "on-request", label: "按需审批", hint: "需要时请求审批" },
+        { value: "never", label: "免审批", hint: "不再请求审批" },
+        { value: "clear", label: "清除（使用默认）", hint: "回退 on-request" },
+      ],
+    });
+    if (clackPrompts.isCancel(selected)) {
+      clackPrompts.cancel("已取消");
+      return;
+    }
+    if (selected === "clear") {
+      delete entry.approval_policy;
+    } else {
+      entry.approval_policy = selected;
+    }
+  } else if (field === "permissions") {
+    const entered = await clackPrompts.text({
+      message: "权限 Profile（留空清除；例如 :read-only、:workspace、:danger-full-access）",
+      initialValue: entry.permissions ?? "",
+    });
+    if (clackPrompts.isCancel(entered)) {
+      clackPrompts.cancel("已取消");
+      return;
+    }
+    const trimmed = String(entered).trim();
+    if (trimmed.length > 0 && entry.sandbox !== undefined) {
+      console.log("permissions 与 sandbox 互斥，请先清除沙箱。");
+      return;
+    }
+    if (trimmed.length === 0) {
+      delete entry.permissions;
+    } else {
+      entry.permissions = trimmed;
+    }
+  } else {
+    throw new Error(`未知工作区权限项：${String(field)}`);
+  }
+  writeGatewayConfig(runtime.configPath, document);
+  console.log("已更新工作区权限。");
+  console.log(
+    `沙箱：${entry.sandbox ?? "未配置"} · 审批：${entry.approval_policy ?? "未配置"} · 权限 Profile：${entry.permissions ?? "未配置"}`,
+  );
+  console.log("运行中的 Gateway 会自动热加载，对新建或恢复的 Thread 生效。");
 }
 
 function listWorkspaces(configPath) {

@@ -177,7 +177,7 @@ Responses 中转接口和独立 API Key，再到“图片识别”中选择该�
 ### 管理项目
 
 ```bash
-codexc work                         # 交互式管理 Workspace（别名：codexc ws）
+codexc work                         # 交互式管理 Workspace（别名：codexc ws）：列出/新增/删除/权限；新增创建在 ~/.codex-connect/<id>-work 且不影响默认
 codexc work add                     # 注册当前目录
 codexc work list                    # 列出 Workspace
 codexc work remove <序号|ID|名称>    # 删除注册，不删除项目文件
