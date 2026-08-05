@@ -9,6 +9,8 @@ import {
   conversationCommandNames,
   type ConversationCommandName,
   type ConversationUseCases,
+  type DisplayPriceCurrency,
+  type ExchangeRateSnapshot,
 } from "../../application/index.js";
 import {
   UserFacingError,
@@ -36,6 +38,7 @@ import { formatQuotedInput } from "../quoted-input.js";
 import {
   executeVisionCommand,
   formatVisionCollectionReady,
+  formatVisionCommandTiming,
   formatVisionImagesCollected,
 } from "../vision-command.js";
 import { surfaceCommandAliases } from "../slash-command.js";
@@ -46,6 +49,8 @@ import {
 import {
   renderTelegramCommandResult,
   replyTelegramPanel,
+  workspacePermissionFieldKeyboard,
+  workspacePermissionPrompt,
 } from "./command-renderer.js";
 import { formatTelegramPanelHtml } from "./html-format.js";
 import { TelegramInteractionPort } from "./interactions.js";
@@ -101,6 +106,12 @@ export interface TelegramSurfaceOptions {
   planUpdatesEnabled?: boolean;
   codexUpstreamUserAgent?: () => string | undefined;
   inputQuietWindowMs?: number;
+  now?: () => number;
+  debugEnabled?: boolean;
+  exchangeRate?: () => ExchangeRateSnapshot | null;
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency;
 }
 
 export interface CreateTelegramSurfaceOptions extends TelegramSurfaceOptions {
@@ -144,6 +155,12 @@ export class TelegramSurface {
   private readonly actorRegistry: ConversationActorRegistry | undefined;
   private readonly commands: ConversationCommandService;
   private readonly inputs: SurfaceInputCoalescer;
+  private readonly now: () => number;
+  private readonly debugEnabled: boolean;
+  private readonly exchangeRate: (() => ExchangeRateSnapshot | null) | undefined;
+  private readonly priceCurrency:
+    | ((provider: string | null | undefined) => DisplayPriceCurrency)
+    | undefined;
   private nextInputSequence = 0;
   private notificationRecipients: ReadonlySet<number>;
 
@@ -166,8 +183,27 @@ export class TelegramSurface {
           : {}),
       },
     });
+    this.bot.use((context, next) => {
+      logger.debug(
+        {
+          surface: "telegram",
+          updateType: context.message
+            ? "message"
+            : context.callbackQuery
+              ? "callback-query"
+              : "other",
+          messageType: telegramMessageType(context),
+        },
+        "Telegram 输入已到达 Gateway",
+      );
+      return next();
+    });
     this.bot.use((context, next) => this.authorize(context, next));
     this.actorRegistry = options.actorRegistry;
+    this.now = options.now ?? Date.now;
+    this.debugEnabled = options.debugEnabled ?? false;
+    this.exchangeRate = options.exchangeRate;
+    this.priceCurrency = options.priceCurrency;
     this.notificationRecipients = new Set(startupRecipients);
     this.commands = new ConversationCommandService(service);
     const apiExecutor = new TelegramApiExecutor(logger);
@@ -181,6 +217,13 @@ export class TelegramSurface {
       ...(options.planUpdatesEnabled !== undefined
         ? { planUpdatesEnabled: options.planUpdatesEnabled }
         : {}),
+        ...(options.exchangeRate === undefined
+          ? {}
+          : { exchangeRate: options.exchangeRate }),
+      ...(options.priceCurrency === undefined
+        ? {}
+        : { priceCurrency: options.priceCurrency }),
+      debugEnabled: this.debugEnabled,
     });
     this.output = this.outbox;
     this.inputs = new SurfaceInputCoalescer(
@@ -223,6 +266,7 @@ export class TelegramSurface {
               nodeVersion: process.version,
               transport: "Unix WebSocket",
               codexUpstreamUserAgent: options.codexUpstreamUserAgent?.() ?? null,
+              debugEnabled: this.debugEnabled,
             }),
           };
         }),
@@ -294,7 +338,7 @@ export class TelegramSurface {
           "",
           ...conversationCommandHelpLines,
           "Telegram：",
-          "- /vision <要求> · /vision <2–4> <要求> · /vision cancel",
+          "- /vision <要求> · /vision <2–4> <要求> · /vision retry · /vision cancel",
           "- /whoami",
           "- /start · /help · /h",
         ].join("\n"),
@@ -310,16 +354,27 @@ export class TelegramSurface {
     this.bot.command("r", (context) =>
       this.executeCommand(context, surfaceCommandAliases.r));
     this.bot.command("vision", async (context) => {
+      const receivedAtMs = this.now();
       await this.inputs.flushPending(
         target(context),
         String(context.from?.id ?? ""),
       );
-      await replyTelegramPanel(context, await executeVisionCommand(
+      const rendered = await executeVisionCommand(
         this.inputs,
         target(context),
         String(context.from?.id ?? ""),
         commandArguments(context),
-      ));
+      );
+      await replyTelegramPanel(
+        context,
+        this.debugEnabled
+          ? formatVisionCommandTiming(rendered, {
+              createdAtMs: (context.message?.date ?? 0) * 1_000,
+              receivedAtMs,
+              respondedAtMs: this.now(),
+            })
+          : rendered,
+      );
     });
     this.bot.command("stop", async (context) => {
       if (this.interactions.stopForChat(String(context.chat.id))) {
@@ -344,7 +399,58 @@ export class TelegramSurface {
         workspace.id,
       );
       await context.answerCallbackQuery({ text: `已切换到 ${workspace.id}` });
-      await renderTelegramCommandResult(context, result);
+      await renderTelegramCommandResult(
+        context,
+        result,
+        this.priceCurrency,
+        this.exchangeRate?.() ?? null,
+      );
+    });
+    this.bot.callbackQuery(
+      /^wp:(sandbox|approval)$/,
+      async (context) => {
+        const field = context.match[1] === "sandbox"
+          ? "sandbox"
+          : "approval";
+        await context.editMessageText(
+          workspacePermissionPrompt(field),
+          {
+            parse_mode: "HTML",
+            reply_markup: workspacePermissionFieldKeyboard(field),
+          },
+        );
+        await context.answerCallbackQuery();
+      },
+    );
+    this.bot.callbackQuery(
+      /^wp:(sandbox|approval):([a-z-]+)$/,
+      async (context) => {
+        const field = context.match[1] === "sandbox"
+          ? "sandbox"
+          : "approval";
+        const value = context.match[2]!;
+        const result = await this.commands.execute(
+          target(context),
+          "workspace-perm",
+          `${field} ${value}`,
+        );
+        await context.answerCallbackQuery({ text: "已更新工作区权限" });
+        await context.editMessageText("已更新工作区权限。");
+        await renderTelegramCommandResult(
+          context,
+          result,
+          this.priceCurrency,
+          this.exchangeRate?.() ?? null,
+        );
+      },
+    );
+    this.bot.callbackQuery(/^wp:profile$/, async (context) => {
+      await context.answerCallbackQuery({
+        text: "请输入权限 Profile 命令",
+      });
+      await context.editMessageText(
+        "请输入权限 Profile，例如发送：\n/workspace-perm profile :read-only",
+      );
     });
     this.bot.on("message:text", async (context) => {
       if (await this.interactions.handleText(context)) {
@@ -685,7 +791,12 @@ export class TelegramSurface {
       command,
       commandArguments(context),
     );
-    await renderTelegramCommandResult(context, result);
+    await renderTelegramCommandResult(
+      context,
+      result,
+      this.priceCurrency,
+      this.exchangeRate?.() ?? null,
+    );
   }
 
   private async authorize(context: Context, next: () => Promise<void>): Promise<void> {
@@ -739,6 +850,17 @@ function telegramQuotedText(
 ): string | undefined {
   const text = message?.text?.trim() || message?.caption?.trim();
   return text || undefined;
+}
+
+function telegramMessageType(context: Context): string | undefined {
+  const message = context.message;
+  if (!message) return undefined;
+  if (message.text !== undefined) return "text";
+  if (message.photo !== undefined) return "photo";
+  if (message.document !== undefined) return "document";
+  if (message.voice !== undefined) return "voice";
+  if (message.audio !== undefined) return "audio";
+  return "other";
 }
 
 function isSupportedImageDocument(mimeType: string | undefined, fileName: string | undefined): boolean {

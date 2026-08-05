@@ -18,6 +18,10 @@ import type {
 } from "./permission-port.js";
 import type { SessionRouter } from "../session-routing/index.js";
 import type { Workspace } from "../policy/index.js";
+import type {
+  WorkspacePermissionPort,
+  WorkspacePermissionUpdate,
+} from "./workspace-permission-port.js";
 import {
   ConversationCore,
   UserFacingError,
@@ -41,6 +45,11 @@ import type {
   CollaborationModeSelectionService,
   CollaborationModeState,
 } from "./collaboration-mode-service.js";
+import type {
+  RequestMetricsQueryPort,
+  RequestMetricsCommandQuery,
+  RequestMetricsResult,
+} from "./request-metrics-port.js";
 import {
   replaceLocalImagesWithVisionContext,
   visionUserPrompt,
@@ -162,6 +171,10 @@ export interface ConversationUseCases {
   artifacts(target: ConversationTarget): TurnArtifacts | undefined;
   listWorkspaces(): Workspace[];
   selectWorkspace(target: ConversationTarget, selector: string): Promise<Workspace>;
+  updateWorkspacePermissions(
+    target: ConversationTarget,
+    update: WorkspacePermissionUpdate,
+  ): Promise<Workspace>;
   stop(target: ConversationTarget): Promise<boolean>;
   rename(target: ConversationTarget, name: string): Promise<void>;
   setPinned(target: ConversationTarget, pinned: boolean): Promise<void>;
@@ -181,6 +194,10 @@ export interface ConversationUseCases {
   accountRateLimits(): Promise<AccountRateLimits>;
   providerAccountUsage(target: ConversationTarget): Promise<ProviderAccountUsage>;
   providerAccountLimits(target: ConversationTarget): Promise<ProviderAccountLimits>;
+  requestMetrics(
+    target: ConversationTarget,
+    query?: RequestMetricsCommandQuery,
+  ): RequestMetricsResult | null;
   listPermissionProfiles(target: ConversationTarget): Promise<PermissionProfileOption[]>;
   initializeProjectRules(target: ConversationTarget): Promise<ProjectRulesResult>;
   checkProjectRules(target: ConversationTarget): Promise<ProjectRulesResult>;
@@ -210,7 +227,27 @@ export class ConversationService implements ConversationUseCases {
     private readonly transfers?: ConversationTransferPort,
     private readonly providerAccounts?: ProviderAccountQueryPort,
     private readonly vision?: VisionRecognitionPort,
+    private readonly requestMetricsQuery?: RequestMetricsQueryPort,
+    private readonly workspacePermissions?: WorkspacePermissionPort,
   ) {}
+
+  requestMetrics(
+    target: ConversationTarget,
+    query: RequestMetricsCommandQuery = { view: "session" },
+  ): RequestMetricsResult | null {
+    if (!this.requestMetricsQuery) return null;
+    if (query.view === "errors") {
+      return this.requestMetricsQuery.errors(query.range ?? "24h");
+    }
+    if (query.view !== "session") {
+      return this.requestMetricsQuery.aggregate(
+        query.view,
+        query.range ?? "24h",
+      );
+    }
+    const threadId = this.router.current(target)?.threadId;
+    return threadId ? this.requestMetricsQuery.forThread(threadId) : null;
+  }
 
   submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission> {
     let input: TurnInput[];
@@ -301,9 +338,14 @@ export class ConversationService implements ConversationUseCases {
         let stopHeartbeat = (): void => {};
         let requestStarted = false;
         try {
+          const threadId = this.router.current(target)?.threadId ?? null;
           result = await this.vision.recognize({
             images,
             userPrompt: visionUserPrompt(input),
+            threadId,
+            reasoningEffort: threadId === null
+              ? null
+              : this.router.modelSettingsForThread(threadId)?.effort ?? null,
             onRequestStarted: () => {
               if (requestStarted) return;
               requestStarted = true;
@@ -312,6 +354,7 @@ export class ConversationService implements ConversationUseCases {
             },
           });
           this.core.visionCompleted(target, {
+            provider: result.provider,
             model: result.model,
             ...(result.elapsedMs === undefined
               ? {}
@@ -644,6 +687,25 @@ export class ConversationService implements ConversationUseCases {
         this.clearPendingSelections(target);
       }
       return workspace;
+    });
+  }
+
+  updateWorkspacePermissions(
+    target: ConversationTarget,
+    update: WorkspacePermissionUpdate,
+  ): Promise<Workspace> {
+    if (!this.workspacePermissions) {
+      throw new UserFacingError(
+        "workspace.permission.unavailable",
+        "当前 Gateway 不支持修改工作区权限",
+      );
+    }
+    return this.locked(target, () => {
+      const workspaceId = this.router.workspace(target).id;
+      return this.workspacePermissions!.updateWorkspacePermissions(
+        workspaceId,
+        update,
+      );
     });
   }
 
@@ -1077,7 +1139,10 @@ function projectRulesUserError(error: unknown, operation: "init" | "check"): Err
     default:
       return error instanceof UserFacingError
         ? error
-        : new Error(`项目规则${operation === "init" ? "生成" : "检查"}失败`);
+        : new Error(
+            `项目规则${operation === "init" ? "生成" : "检查"}失败`,
+            { cause: error },
+          );
   }
 }
 

@@ -31,9 +31,11 @@ export function formatSurfaceUserFacingError(
     case "vision.busy":
       return "视觉识别任务繁忙，请稍后重试";
     case "vision.failed":
-      return "图片识别失败，请稍后重试或切换支持图片的模型";
+      return "图片识别失败，可在 5 分钟内发送 /vision retry 重试，或切换支持图片的模型";
+    case "vision.retry.missing":
+      return "当前没有可重试的图片识别任务";
     case "vision.command.usage":
-      return "用法：/vision <要求>；多图：/vision <2–4> <要求>；取消：/vision cancel";
+      return "用法：/vision <要求>；多图：/vision <2–4> <要求>；重试：/vision retry；取消：/vision cancel";
     case "vision.prompt.invalid":
       return "图片识别要求必须为 1 至 4000 个字符";
     case "vision.prompt.capacity":
@@ -82,6 +84,8 @@ export function formatSurfaceUserFacingError(
       return "用法：/goal [set <目标>|clear]";
     case "queue.usage":
       return "用法：/queue <描述>";
+    case "metrics.usage":
+      return "用法：/metrics [session|global|providers|models|errors] [24h|7d|30d]";
     case "queue.inactive":
       return "当前没有运行中的任务，请直接发送普通消息";
     case "queue.full":
@@ -96,6 +100,12 @@ export function formatSurfaceUserFacingError(
       return "Workspace 选择不唯一";
     case "workspace.selector.not-found":
       return "找不到指定 Workspace";
+    case "workspace.permission.usage":
+      return "用法：/workspace-perm [sandbox <read-only|workspace-write|danger-full-access|clear>|approval <untrusted|on-request|never|clear>|profile <Profile ID|clear>]";
+    case "workspace.permission.conflict":
+      return "permissions 与 sandbox 互斥，不能同时配置；请先清除其中一项";
+    case "workspace.permission.unavailable":
+      return "当前 Gateway 不支持修改工作区权限";
     case "model.current.missing":
       return `当前模型不在可用模型列表中：${detail(error, "model", "未知")}`;
     case "model.unavailable":
@@ -108,7 +118,7 @@ export function formatSurfaceUserFacingError(
       return "找不到指定模型";
     case "effort.unsupported": {
       const options = error.details.options;
-      return `当前模型不支持该思考强度，可选：${Array.isArray(options) ? options.join("、") : "无"}`;
+      return `当前模型不支持该思考等级，可选：${Array.isArray(options) ? options.join("、") : "无"}`;
     }
     case "fast.usage":
       return "用法：/fast [on|off|status]";

@@ -3,6 +3,8 @@ import type { InlineKeyboardMarkup } from "grammy/types";
 
 import type {
   ConversationCommandResult,
+  DisplayPriceCurrency,
+  ExchangeRateSnapshot,
 } from "../../application/index.js";
 import {
   formatConversationArtifacts,
@@ -10,6 +12,7 @@ import {
   formatConversationCommandOutcome,
   formatConversationGoal,
   formatConversationLimits,
+  formatConversationMetrics,
   formatConversationMcp,
   formatConversationModels,
   formatConversationPermissions,
@@ -17,6 +20,7 @@ import {
   formatConversationProjectRules,
   formatConversationSkills,
   formatConversationUsage,
+  formatConversationWorkspacePermissions,
   formatConversationWorkspaces,
 } from "../conversation-command-format.js";
 import {
@@ -28,6 +32,10 @@ import { formatTelegramDiffChunks, formatTelegramPanelChunks } from "./html-form
 export async function renderTelegramCommandResult(
   context: Context,
   result: ConversationCommandResult,
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency,
+  exchangeRate?: ExchangeRateSnapshot | null,
 ): Promise<void> {
   switch (result.kind) {
     case "outcome": {
@@ -57,6 +65,13 @@ export async function renderTelegramCommandResult(
         formatConversationWorkspaces(result),
       );
       return;
+    case "workspace-permissions":
+      await replyTelegramPanel(
+        context,
+        formatConversationWorkspacePermissions(result),
+        workspacePermissionKeyboard(),
+      );
+      return;
     case "models":
       await replyTelegramPanel(context, formatConversationModels(result));
       return;
@@ -77,6 +92,12 @@ export async function renderTelegramCommandResult(
       return;
     case "usage":
       await replyTelegramPanel(context, formatConversationUsage(result));
+      return;
+    case "metrics":
+      await replyTelegramPanel(
+        context,
+        formatConversationMetrics(result, priceCurrency, exchangeRate),
+      );
       return;
     case "limits":
       await replyTelegramPanel(context, formatConversationLimits(result));
@@ -104,6 +125,48 @@ export async function renderTelegramCommandResult(
       await replyTelegramPanel(context, formatConversationGoal(result));
       return;
   }
+}
+
+export function workspacePermissionKeyboard(): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [[
+      { text: "沙箱", callback_data: "wp:sandbox" },
+      { text: "审批", callback_data: "wp:approval" },
+      { text: "权限 Profile", callback_data: "wp:profile" },
+    ]],
+  };
+}
+
+export function workspacePermissionFieldKeyboard(
+  field: "sandbox" | "approval",
+): InlineKeyboardMarkup {
+  const options: ReadonlyArray<readonly [string, string]> = field === "sandbox"
+    ? [
+        ["只读", "read-only"],
+        ["工作区可写", "workspace-write"],
+        ["完全访问", "danger-full-access"],
+        ["清除（使用全局）", "clear"],
+      ]
+    : [
+        ["不信任", "untrusted"],
+        ["按需审批", "on-request"],
+        ["免审批", "never"],
+        ["清除（使用默认）", "clear"],
+      ];
+  return {
+    inline_keyboard: options.map(([label, value]) => [{
+      text: label,
+      callback_data: `wp:${field}:${value}`,
+    }]),
+  };
+}
+
+export function workspacePermissionPrompt(
+  field: "sandbox" | "approval",
+): string {
+  return field === "sandbox"
+    ? "选择沙箱模式："
+    : "选择审批策略：";
 }
 
 function renderOutcome(

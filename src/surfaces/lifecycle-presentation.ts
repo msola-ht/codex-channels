@@ -1,6 +1,8 @@
 import {
   isFastServiceTier,
   type ConversationStatus,
+  type DisplayPriceCurrency,
+  type ExchangeRateSnapshot,
 } from "../application/index.js";
 import type {
   OutputEvent,
@@ -12,11 +14,21 @@ import {
   formatPercent,
   formatRemainingRateLimitWindow,
 } from "./account-format.js";
+import { toStructuredMarkdownList } from "./conversation-command-format.js";
 import {
   formatElapsedDuration,
   formatTokensPerSecond,
 } from "./elapsed-duration.js";
-import { formatProviderLabel } from "./provider-format.js";
+import { formatCodexProviderLabel } from "./provider-format.js";
+import {
+  formatCurrencyNanos,
+  formatReferenceCostTotal,
+  toDisplayReferenceCost,
+} from "./reference-cost-format.js";
+import {
+  formatCacheHitRate,
+  formatTokenCount,
+} from "./token-format.js";
 
 export interface LifecyclePresentation {
   title: string;
@@ -24,10 +36,19 @@ export interface LifecyclePresentation {
   sections?: readonly LifecyclePresentationSection[];
 }
 
-export interface LifecyclePresentationField {
+export interface LifecyclePresentationLeafField {
   label: string;
   value: string;
+  subfields?: readonly LifecyclePresentationLeafField[];
 }
+
+export type LifecyclePresentationField =
+  | LifecyclePresentationLeafField
+  | {
+      title: string;
+      value?: string;
+      fields: readonly LifecyclePresentationField[];
+    };
 
 export interface LifecyclePresentationSection {
   title: string;
@@ -41,6 +62,7 @@ export interface StartupRuntimeInfo {
   nodeVersion: string;
   transport: string;
   codexUpstreamUserAgent: string | null;
+  debugEnabled?: boolean;
 }
 
 type StartupStatus = Pick<
@@ -73,24 +95,26 @@ export function createStartupPresentation(
     title: "Codex Connect 已上线",
     fields: [{ label: "App Server", value: "已连接" }],
     sections: [
-      {
-        title: "运行环境",
-        fields: [
-          {
-            label: "系统",
-            value: `${platformLabel(runtime.platform)} · ${runtime.architecture}`,
-          },
-          {
-            label: "版本",
-            value: `Codex Connect ${runtime.gatewayVersion} · Node.js ${runtime.nodeVersion}`,
-          },
-          { label: "连接", value: runtime.transport },
-          {
-            label: "App Server UA",
-            value: formatUpstreamUserAgent(runtime.codexUpstreamUserAgent),
-          },
-        ],
-      },
+      ...(runtime.debugEnabled === true
+        ? [{
+            title: "运行环境",
+            fields: [
+              {
+                label: "系统",
+                value: `${platformLabel(runtime.platform)} · ${runtime.architecture}`,
+              },
+              {
+                label: "版本",
+                value: `Codex Connect ${runtime.gatewayVersion} · Node.js ${runtime.nodeVersion}`,
+              },
+              { label: "连接", value: runtime.transport },
+              {
+                label: "App Server UA",
+                value: formatUpstreamUserAgent(runtime.codexUpstreamUserAgent),
+              },
+            ],
+          }]
+        : []),
       {
         title: "当前会话",
         fields: [
@@ -110,10 +134,10 @@ export function createStartupPresentation(
           },
           {
             label: "提供商",
-            value: formatProviderLabel(status.modelProvider ?? "openai"),
+            value: formatCodexProviderLabel(status.modelProvider),
           },
           {
-            label: "思考强度",
+            label: "思考等级",
             value: `${status.effort ?? "模型默认"}${pendingSuffix(status.effortPending)}`,
           },
           ...(usesOpenAiAccount(status.modelProvider)
@@ -128,14 +152,17 @@ export function createStartupPresentation(
             label: "协作模式",
             value: `${status.collaborationMode === "plan" ? "Plan" : "Default"}${pendingSuffix(status.collaborationModePending)}`,
           },
-          ...(usesOpenAiAccount(status.modelProvider) && status.weeklyLimit
-            ? [{
-                label: "周限",
-                value: formatWeeklyLimit(status.weeklyLimit),
-              }]
-            : []),
         ],
       },
+      ...(usesOpenAiAccount(status.modelProvider) && status.weeklyLimit
+        ? [{
+            title: "账户状态",
+            fields: [{
+              label: "周限",
+              value: formatWeeklyLimit(status.weeklyLimit),
+            }],
+          }]
+        : []),
     ],
   };
 }
@@ -153,10 +180,21 @@ export function createTurnStartedPresentation(
 
 export function createTurnCompletedPresentation(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency,
+  exchangeRate?: ExchangeRateSnapshot | null,
+  debug = false,
 ): LifecyclePresentation {
-  const fields: LifecyclePresentationField[] = [];
+  const currency = priceCurrency?.(event.modelProvider) ?? "usd";
+  const sessionFields: LifecyclePresentationField[] = event.background
+    ? [{ label: "Thread", value: event.threadId }]
+    : [];
+  const runFields: LifecyclePresentationField[] = [];
+  const accountFields: LifecyclePresentationField[] = [];
+  let fallbackCacheField: LifecyclePresentationField | undefined;
   if (event.error) {
-    fields.push({
+    runFields.push({
       label: "错误",
       value: event.error.replaceAll("[REDACTED]", "[已隐藏]"),
     });
@@ -164,93 +202,258 @@ export function createTurnCompletedPresentation(
   if (event.tokenUsage) {
     const current = event.tokenUsage.last.totalTokens;
     const capacity = event.tokenUsage.modelContextWindow;
-    fields.push(
+    sessionFields.push(
       {
         label: "上下文",
         value: capacity === null || capacity <= 0
           ? formatTokenCount(current)
           : `${formatTokenCount(current)} / ${formatTokenCount(capacity)}（${formatPercent(Math.max(0, current / capacity * 100))}）`,
       },
-      {
-        label: "最近请求缓存命中",
+    );
+    if (
+      event.timing?.requestInputTokens === undefined
+      || event.timing.requestCachedInputTokens === undefined
+    ) {
+      fallbackCacheField = {
+        label: "最近请求缓存命中率",
         value: formatCacheHitRate(
           event.tokenUsage.last.inputTokens,
           event.tokenUsage.last.cachedInputTokens,
         ),
-      },
-    );
+      };
+    }
   }
   if (event.model) {
-    fields.push({
+    runFields.push({
       label: "模型",
       value: usesOpenAiAccount(event.modelProvider)
         ? `${event.model} · ${event.effort ?? "模型默认"} · Fast ${isFastServiceTier(event.serviceTier ?? null) ? "开启" : "关闭"}`
         : `${event.model} · ${event.effort ?? "模型默认"}`,
     });
-    fields.push({
+    runFields.push({
       label: "提供商",
-      value: formatProviderLabel(event.modelProvider ?? "openai"),
+      value: formatCodexProviderLabel(event.modelProvider),
     });
   }
   if (event.contextCompactionCount !== undefined) {
-    fields.push({
+    sessionFields.push({
       label: "上下文压缩",
       value: `${event.contextCompactionCount} 次`,
     });
   }
   if (usesOpenAiAccount(event.modelProvider) && event.weeklyLimit) {
-    fields.push({
+    accountFields.push({
       label: "周限",
       value: formatWeeklyLimit(event.weeklyLimit),
     });
   }
   if (event.goal) {
-    fields.push({
+    sessionFields.push({
       label: "Goal",
       value: `${goalStatusLabel(event.goal.status)} · ${formatGoalTokens(event.goal)}`,
     });
   }
-  if (event.timing?.ttftMs !== undefined) {
-    fields.push({
-      label: "首字延时",
+  if (event.timing?.modelRequestCount !== undefined) {
+    const recoveredFailureCount = event.status === "completed"
+      && (event.timing.completedModelRequestCount ?? 0) > 0
+      ? event.timing.retryableFailureModelRequestCount ?? 0
+      : 0;
+    const unrecoveredFailureCount = Math.max(
+      0,
+      (event.timing.failedModelRequestCount ?? 0) - recoveredFailureCount,
+    );
+    const details = [
+      ["完成", event.timing.completedModelRequestCount],
+      ["中断", event.timing.interruptedModelRequestCount],
+      ["未完整观测", event.timing.incompleteModelRequestCount],
+      [
+        "自动重试",
+        recoveredFailureCount,
+      ],
+      ["失败", unrecoveredFailureCount],
+    ]
+      .filter((entry): entry is [string, number] =>
+        typeof entry[1] === "number" && entry[1] > 0
+      )
+      .map(([label, count]) => `${label} ${count}`)
+      .join(" · ");
+    runFields.push({
+      label: "模型请求",
+      value: `${event.timing.modelRequestCount} 次${details ? `（${details}${recoveredFailureCount > 0 ? "，最终成功" : ""}）` : ""}`,
+    });
+  }
+  if (event.timing?.reasoningRequestCount !== undefined) {
+    runFields.push({
+      label: "思考次数",
+      value: `${event.timing.reasoningRequestCount} 次`,
+    });
+  }
+  if (event.timing?.modelRequestDurationMs !== undefined) {
+    runFields.push({
+      label: "模型请求聚合耗时",
+      value: formatElapsedDuration(event.timing.modelRequestDurationMs),
+    });
+  }
+  if (fallbackCacheField) {
+    runFields.push(fallbackCacheField);
+  }
+  if (
+    event.timing?.requestInputTokens !== undefined
+    && event.timing.requestCachedInputTokens !== undefined
+  ) {
+    const inputTokens = event.timing.requestInputTokens;
+    const cachedInputTokens = event.timing.requestCachedInputTokens;
+    const reasoningOutputTokens = event.timing.reasoningTokens ?? 0;
+    const outputTokens = (event.timing.nonReasoningOutputTokens ?? 0)
+      + reasoningOutputTokens;
+    runFields.push({
+      title: "Token",
+      value: formatTokenCount(inputTokens + outputTokens),
+      fields: [
+        {
+          label: "输入命中缓存",
+          value: formatTokenCount(cachedInputTokens),
+        },
+        {
+          label: "输入未命中缓存",
+          value: formatTokenCount(Math.max(0, inputTokens - cachedInputTokens)),
+        },
+        {
+          label: "输出",
+          value: formatTokenCount(outputTokens),
+        },
+        ...(reasoningOutputTokens > 0
+          ? [{
+              label: "其中推理输出",
+              value: formatTokenCount(reasoningOutputTokens),
+            }]
+          : []),
+        {
+          label: "缓存命中率",
+          value: formatCacheHitRate(inputTokens, cachedInputTokens),
+        },
+      ],
+    });
+  }
+  if (event.timing?.referenceCost) {
+    const successfulRequestCount = event.timing.completedModelRequestCount;
+    const displayCost = toDisplayReferenceCost(
+      event.timing.referenceCost,
+      currency,
+      exchangeRate ?? null,
+    );
+    runFields.push({
+      title: "费用",
+      value: successfulRequestCount !== undefined && successfulRequestCount > 0
+        ? formatReferenceCostTotal({
+            ...displayCost,
+            requestCount: successfulRequestCount,
+          }, "个成功请求")
+        : formatReferenceCostTotal(displayCost),
+      fields: displayCost.currency === null
+        ? []
+        : ([
+            ["输入价格", displayCost.inputCostNanos],
+            ["缓存价格", displayCost.cachedInputCostNanos],
+            ["输出价格", displayCost.outputCostNanos],
+          ] as const).flatMap(([label, costNanos]) =>
+            costNanos === null
+              ? []
+              : [{ label, value: formatCurrencyNanos(displayCost.currency!, costNanos) }],
+          ),
+    });
+  }
+  const performanceFields: LifecyclePresentationField[] = [];
+  if (debug && event.timing?.ttftMs !== undefined) {
+    performanceFields.push({
+      label: "最后请求首事件延迟",
       value: formatElapsedDuration(event.timing.ttftMs),
     });
   }
+  if (event.timing?.firstResponseLatencyMs !== undefined) {
+    performanceFields.push({
+      label: "首段回复延迟",
+      value: formatElapsedDuration(event.timing.firstResponseLatencyMs),
+    });
+  }
   if (event.timing?.outputTokensPerSecond !== undefined) {
-    fields.push({
-      label: "输出速度",
-      value: `${formatTokensPerSecond(event.timing.outputTokensPerSecond)}（非推理）`,
+    const speedCoverage = formatSpeedCoverage(
+      event.timing.outputSpeedTimedCount,
+      event.timing.outputSpeedSampleCount,
+    );
+    performanceFields.push({
+      label: event.timing.modelRequestCount === undefined
+        ? "输出速度"
+        : "综合输出速度",
+      value: `${formatTokensPerSecond(event.timing.outputTokensPerSecond)}（不含推理${speedCoverage}）`,
     });
   }
   if (event.timing?.thinkingTokensPerSecond !== undefined) {
-    fields.push({
-      label: "思考速度",
-      value: `${formatTokensPerSecond(event.timing.thinkingTokensPerSecond)}（推理）`,
+    const speedCoverage = formatSpeedCoverage(
+      event.timing.thinkingSpeedTimedCount,
+      event.timing.thinkingSpeedSampleCount,
+    );
+    performanceFields.push({
+      label: event.timing.modelRequestCount === undefined
+        ? "思考速度"
+        : "综合思考速度",
+      value: `${formatTokensPerSecond(event.timing.thinkingTokensPerSecond)}（推理${speedCoverage}）`,
     });
   }
   if (event.timing?.generationTokensPerSecond !== undefined) {
-    fields.push({
-      label: "生成速度",
-      value: `${formatTokensPerSecond(event.timing.generationTokensPerSecond)}（含推理）`,
+    const speedCoverage = formatSpeedCoverage(
+      event.timing.generationSpeedTimedCount,
+      event.timing.generationSpeedSampleCount,
+    );
+    performanceFields.push({
+      label: event.timing.modelRequestCount === undefined
+        ? "生成速度"
+        : "综合生成速度",
+      value: `${formatTokensPerSecond(event.timing.generationTokensPerSecond)}（含推理${speedCoverage}）`,
     });
   }
+  if (event.durationMs !== undefined) {
+    performanceFields.push({
+      label: "总耗时",
+      value: formatElapsedDuration(event.durationMs),
+    });
+  }
+  if (performanceFields.length > 0) {
+    runFields.push({ title: "性能", fields: performanceFields });
+  }
   if (Object.hasOwn(event, "gitBranch")) {
-    fields.push({
+    sessionFields.push({
       label: "Git 分支",
       value: event.gitBranch ?? "未检测到",
     });
   }
-  if (event.durationMs !== undefined) {
-    fields.push({
-      label: "耗时",
-      value: formatElapsedDuration(event.durationMs),
+  if (event.sessionReferenceCost) {
+    sessionFields.push({
+      label: "参考总价",
+      value: formatReferenceCostTotal(
+        toDisplayReferenceCost(
+          event.sessionReferenceCost,
+          currency,
+          exchangeRate ?? null,
+        ),
+      ),
     });
   }
+  const sections = [
+    ...(runFields.length > 0
+      ? [{ title: "本次运行", fields: runFields }]
+      : []),
+    ...(sessionFields.length > 0
+      ? [{ title: "当前会话累计", fields: sessionFields }]
+      : []),
+    ...(accountFields.length > 0
+      ? [{ title: "账户状态", fields: accountFields }]
+      : []),
+  ];
   return {
     title: `${event.background ? "后台任务" : "本次运行"} · ${turnStatusLabel(event.status)}`,
-    fields: event.background
-      ? [{ label: "Thread", value: event.threadId }, ...fields]
-      : fields,
+    fields: sections.length === 1 ? sections[0]!.fields : [],
+    ...(sections.length > 1 ? { sections } : {}),
   };
 }
 
@@ -270,8 +473,59 @@ export function renderPlainLifecyclePresentation(
   ].join("\n");
 }
 
+export function renderStructuredLifecyclePresentation(
+  presentation: LifecyclePresentation,
+): string {
+  return toStructuredMarkdownList([
+    presentation.title,
+    ...(presentation.fields.length > 0
+      ? ["", ...presentation.fields.map(formatStructuredField)]
+      : []),
+    ...(presentation.sections ?? []).flatMap((section) => [
+      "",
+      `${section.title}：`,
+      ...section.fields.map(formatStructuredField),
+    ]),
+  ].join("\n"));
+}
+
+function formatStructuredField(field: LifecyclePresentationField): string {
+  if ("title" in field) {
+    return [
+      `- **${field.title}**${field.value === undefined ? "" : `：${field.value}`}`,
+      ...field.fields.flatMap((subfield) =>
+        formatStructuredField(subfield).split("\n").map((line) => `  ${line}`)),
+    ].join("\n");
+  }
+  return [
+    `- ${field.label}：${field.value}`,
+    ...(field.subfields ?? []).map((subfield) =>
+      `  - ${subfield.label}：${subfield.value}`),
+  ].join("\n");
+}
+
 function formatField(field: LifecyclePresentationField): string {
-  return `${field.label}：${field.value}`;
+  if ("title" in field) {
+    return [
+      `${field.title}${field.value === undefined ? "" : `：${field.value}`}`,
+      ...field.fields.flatMap((subfield) =>
+        formatField(subfield).split("\n").map((line) => `  ${line}`)),
+    ].join("\n");
+  }
+  return [
+    `${field.label}：${field.value}`,
+    ...(field.subfields ?? []).map((subfield) =>
+      `  ${subfield.label}：${subfield.value}`),
+  ].join("\n");
+}
+
+function formatSpeedCoverage(
+  timedCount: number | undefined,
+  sampleCount: number | undefined,
+): string {
+  return timedCount === undefined || sampleCount === undefined
+    ? ""
+    : ` · 覆盖 ${timedCount}/${sampleCount} 次请求`;
 }
 
 function pendingSuffix(pending: boolean): string {
@@ -301,35 +555,6 @@ function formatWeeklyLimit(
   window: NonNullable<StartupStatus["weeklyLimit"]>,
 ): string {
   return formatRemainingRateLimitWindow(window, { includeDuration: false });
-}
-
-function formatTokenCount(value: number): string {
-  if (Math.abs(value) >= 1_000_000) {
-    return `${(value / 1_000_000).toLocaleString("zh-CN", {
-      maximumFractionDigits: 2,
-    })} M`;
-  }
-  if (Math.abs(value) >= 1_000) {
-    return `${(value / 1_000).toLocaleString("zh-CN", {
-      maximumFractionDigits: 2,
-    })} K`;
-  }
-  return value.toLocaleString("zh-CN");
-}
-
-function formatCacheHitRate(
-  inputTokens: number,
-  cachedInputTokens: number,
-): string {
-  return inputTokens > 0
-    ? `${Math.max(
-        0,
-        cachedInputTokens / inputTokens * 100,
-      ).toLocaleString("zh-CN", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      })}%`
-    : "未知";
 }
 
 function goalStatusLabel(status: ThreadGoal["status"]): string {

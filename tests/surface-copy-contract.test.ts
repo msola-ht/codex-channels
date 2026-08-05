@@ -152,14 +152,14 @@ describe("shared surface copy contract", () => {
     expect(interactionProcessedTitle).toBe("Codex 交互已处理");
     expect(interactionCancelledTitle).toBe("Codex 交互已取消");
     expect(formatProcessedInteractionOutcome(interactionOutcome.answered))
-      .toBe("Codex 交互已处理：已提交回答。");
+      .toBe("## Codex 交互已处理\n- 结果：已提交回答。");
     expect(formatProcessedInteractionOutcome(interactionOutcome.formSubmitted))
-      .toBe("Codex 交互已处理：已提交表单。");
+      .toBe("## Codex 交互已处理\n- 结果：已提交表单。");
     expect(formatProcessedInteractionOutcome(interactionOutcome.resolvedElsewhere))
-      .toBe("Codex 交互已处理：已在其他客户端处理。");
-    expect(formatCancelledInteraction()).toBe("Codex 交互已取消。");
+      .toBe("## Codex 交互已处理\n- 结果：已在其他客户端处理。");
+    expect(formatCancelledInteraction()).toBe("## Codex 交互已取消");
     expect(formatCancelledInteraction("Gateway 已停止"))
-      .toBe("Codex 交互已取消：Gateway 已停止。");
+      .toBe("## Codex 交互已取消\n- 原因：Gateway 已停止。");
   });
 
   it("keeps text-file error semantics aligned while naming the platform", () => {
@@ -178,11 +178,14 @@ describe("shared surface copy contract", () => {
 
   it("keeps the shared command directory in Feishu and Weixin help", () => {
     for (const line of conversationCommandHelpLines) {
-      expect(renderFeishuHelp()).toContain(line);
-      expect(renderWeixinHelp()).toContain(line);
+      const expected = line.endsWith("：")
+        ? `### ${line.slice(0, -1)}`
+        : line;
+      expect(renderFeishuHelp()).toContain(expected);
+      expect(renderWeixinHelp()).toContain(expected);
     }
     for (const help of [renderFeishuHelp(), renderWeixinHelp()]) {
-      expect(help).toContain("快捷命令：");
+      expect(help).toContain("### 快捷命令");
       expect(help).toContain("- /h → /help");
       expect(help).toContain("- /work → /workspace");
       expect(help).toContain("- /r → /resume");
@@ -201,6 +204,14 @@ describe("shared surface copy contract", () => {
     expect(parseSlashCommand("/r thread-1")).toEqual({
       name: "resume",
       argumentsText: "thread-1",
+    });
+    expect(parseSlashCommand("/skills 5 初始化检查")).toEqual({
+      name: "skill",
+      argumentsText: "5 初始化检查",
+    });
+    expect(parseSlashCommand("/workspace-perm sandbox read-only")).toEqual({
+      name: "workspace-perm",
+      argumentsText: "sandbox read-only",
     });
   });
 

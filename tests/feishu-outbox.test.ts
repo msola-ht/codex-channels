@@ -76,7 +76,7 @@ describe("Feishu outbox", () => {
     expect(updated).toHaveLength(1);
     expect(updated[0]?.header.title.content).toBe("任务计划 · 1/2");
     expect(statusCardText(updated[0]!)).toBe(
-      "✓ 检查实现\n◐ 补充测试",
+      "- ✓ 检查实现\n- ◐ 补充测试",
     );
   });
 
@@ -111,8 +111,71 @@ describe("Feishu outbox", () => {
     expect(markdownCards).toEqual([]);
     expect(replies).toEqual([{
       messageId: "om_origin",
-      markdown: "**已开始处理。**",
+      markdown: "## 已开始处理。",
     }]);
+  });
+
+  it("renders runtime status updates as Markdown cards", async () => {
+    const markdownCards: string[] = [];
+    const texts: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async (_chatId, text) => {
+          texts.push(text);
+        },
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle({
+      type: "mcp.status.updated",
+      target,
+      threadId: null,
+      name: "codex_apps",
+      status: "ready",
+      error: null,
+      failureReason: null,
+    });
+    outbox.handle({
+      type: "account.updated",
+      target,
+      authMode: "apikey",
+      planType: "pro",
+    });
+    await outbox.close();
+
+    expect(texts).toEqual([]);
+    expect(markdownCards).toEqual([
+      "## MCP Server\n- 名称：codex_apps\n- 状态：已就绪",
+      "## Codex 账户状态已更新\n- 认证：apikey\n- 套餐：Pro",
+    ]);
+  });
+
+  it("delivers Markdown through the ordered queue as a Markdown card", async () => {
+    const markdownCards: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    await outbox.deliverMarkdown("oc_chat", "## 测试\n- 名称：x");
+    await outbox.close();
+
+    expect(markdownCards).toEqual(["## 测试\n- 名称：x"]);
   });
 
   it("sends completed generated images even when operation summaries are hidden", async () => {
@@ -329,7 +392,7 @@ describe("Feishu outbox", () => {
     await outbox.close();
 
     expect(finished).toEqual([{ summary: "处理中" }]);
-    expect(staticCards).toEqual(["**本次运行 · 已完成**"]);
+    expect(staticCards).toEqual(["## 本次运行 · 已完成"]);
   });
 
   it("streams coalesced deltas through one native CardKit card", async () => {
@@ -468,7 +531,7 @@ describe("Feishu outbox", () => {
     expect(created).toEqual(["正在处理"]);
     expect(updated).toEqual(["正在处理。"]);
     expect(finished).toEqual([
-      "正在处理。|**本次运行 · 已完成**",
+      "正在处理。|## 本次运行 · 已完成",
     ]);
     expect(markdownCards[0]).not.toContain("工作中");
     expect(markdownCards.at(-1)).toContain("**运行命令 · 已完成**");
@@ -1038,7 +1101,7 @@ describe("Feishu outbox", () => {
     expect(operations).toEqual([
       "create:部分正文",
       "finish:部分正文|",
-      "finish:部分正文|**本次运行 · 已完成**",
+      "finish:部分正文|## 本次运行 · 已完成",
     ]);
   });
 
@@ -1067,7 +1130,7 @@ describe("Feishu outbox", () => {
     outbox.handle(turnCompleted());
     await outbox.close();
 
-    expect(markdownCards).toEqual(["**本次运行 · 已完成**"]);
+    expect(markdownCards).toEqual(["## 本次运行 · 已完成"]);
     expect(streamCount(outbox)).toBe(0);
   });
 
@@ -1097,7 +1160,7 @@ describe("Feishu outbox", () => {
 
     expect(operations).toEqual([
       "static:部分正文",
-      "static:**本次运行 · 已完成**",
+      "static:## 本次运行 · 已完成",
     ]);
   });
 
@@ -1132,7 +1195,7 @@ describe("Feishu outbox", () => {
     expect(operations[1]).toContain("static:**运行命令 · 已完成**");
     expect(operations[1]).toContain("git status --short");
     expect(operations[2]).toBe("static:工具执行结果");
-    expect(operations[3]).toBe("static:**本次运行 · 已完成**");
+    expect(operations[3]).toBe("static:## 本次运行 · 已完成");
   });
 
   it("ignores running operation frames and sends one static terminal card", async () => {
@@ -1159,7 +1222,7 @@ describe("Feishu outbox", () => {
     expect(markdownCards[0]).not.toContain("**执行进度**");
     expect(markdownCards[0]).toContain("git status --short");
     expect(markdownCards[0]).toContain("已完成");
-    expect(markdownCards[1]).toBe("**本次运行 · 已完成**");
+    expect(markdownCards[1]).toBe("## 本次运行 · 已完成");
   });
 
   it("does not send operation updates in hidden mode", async () => {
@@ -1187,7 +1250,7 @@ describe("Feishu outbox", () => {
     outbox.handle(turnCompleted());
     await outbox.close();
 
-    expect(markdownCards).toEqual(["**本次运行 · 已完成**"]);
+    expect(markdownCards).toEqual(["## 本次运行 · 已完成"]);
   });
 
   it("sends a compact operation body with a duration footer", async () => {
@@ -1243,7 +1306,7 @@ describe("Feishu outbox", () => {
     expect(markdownCards).toEqual([
       "**工具查询 · 已完成**\n- MCP 工具：2 次\n\n"
       + "---\n**耗时：** 250毫秒",
-      "**本次运行 · 已完成**",
+      "## 本次运行 · 已完成",
     ]);
   });
 
@@ -1739,7 +1802,7 @@ describe("Feishu outbox", () => {
 
     expect(replies).toHaveLength(1);
     expect(replies[0]).toMatch(/\[内容预览，完整回复见附件\]$/u);
-    expect(ordinaryCards.at(-1)).toBe("**本次运行 · 已完成**");
+    expect(ordinaryCards.at(-1)).toBe("## 本次运行 · 已完成");
   });
 
   it("does not upload a final answer beyond the bounded file limit", async () => {

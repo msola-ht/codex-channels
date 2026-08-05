@@ -1058,20 +1058,69 @@ describe("ConversationCore", () => {
       threadId: "thread-1",
       turnId: "turn-1",
       requestStartedAtMs: 1_100,
+      requestDurationMs: 2_000,
+      inputTokens: 100,
+      cachedInputTokens: 80,
+      outputTokens: 30,
+      reasoningOutputTokens: 10,
       ttftMs: 300,
       thinkingDurationMs: 600,
       outputDurationMs: 800,
       generationDurationMs: 1_400,
+      pricingCurrency: "USD",
+      totalCostNanos: 100_000,
+      uncachedInputPricePerMillionNanos: 140_000_000,
+      cachedInputPricePerMillionNanos: 2_800_000,
+      outputPricePerMillionNanos: 280_000_000,
     });
     core.handle({
       type: "turn.modelTiming.updated",
       threadId: "thread-1",
       turnId: "turn-1",
       requestStartedAtMs: 1_200,
+      requestDurationMs: 1_000,
+      inputTokens: 200,
+      cachedInputTokens: 160,
+      outputTokens: 60,
+      reasoningOutputTokens: 40,
       ttftMs: 250,
       thinkingDurationMs: 400,
       outputDurationMs: 500,
       generationDurationMs: 900,
+      pricingCurrency: "USD",
+      totalCostNanos: 200_000,
+      uncachedInputPricePerMillionNanos: 140_000_000,
+      cachedInputPricePerMillionNanos: 2_800_000,
+      outputPricePerMillionNanos: 280_000_000,
+    });
+    core.handle({
+      type: "turn.modelTiming.updated",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      requestStartedAtMs: 1_300,
+      requestDurationMs: 500,
+      outcome: "interrupted",
+      outputTokens: 50,
+      reasoningOutputTokens: 0,
+    });
+    core.handle({
+      type: "turn.modelTiming.updated",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      requestStartedAtMs: 1_400,
+      requestDurationMs: 500,
+      outcome: "incomplete",
+      thinkingDurationMs: 800,
+      generationDurationMs: 900,
+    });
+    core.handle({
+      type: "turn.modelTiming.updated",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      requestStartedAtMs: 1_500,
+      requestDurationMs: 500,
+      outcome: "failed",
+      retryableFailure: true,
     });
     handleNotification(core, {
       method: "thread/tokenUsage/updated",
@@ -1104,16 +1153,43 @@ describe("ConversationCore", () => {
     ) as Extract<OutputEvent, { type: "turn.completed" }> | undefined;
     expect(completed).toMatchObject({
       timing: {
-        ttftMs: 250,
-        outputDurationMs: 500,
-        thinkingDurationMs: 400,
-        nonReasoningOutputTokens: 20,
-        reasoningTokens: 40,
+        modelRequestCount: 5,
+        completedModelRequestCount: 2,
+        interruptedModelRequestCount: 1,
+        incompleteModelRequestCount: 1,
+        failedModelRequestCount: 1,
+        retryableFailureModelRequestCount: 1,
+        reasoningRequestCount: 2,
+        modelRequestDurationMs: 4_500,
+        requestInputTokens: 300,
+        requestCachedInputTokens: 240,
+        requestOutputTokens: 140,
+        firstResponseLatencyMs: 500,
+        outputDurationMs: 1_300,
+        thinkingDurationMs: 1_000,
+        nonReasoningOutputTokens: 90,
+        reasoningTokens: 50,
+        outputSpeedSampleCount: 3,
+        outputSpeedTimedCount: 2,
+        thinkingSpeedSampleCount: 2,
+        thinkingSpeedTimedCount: 2,
+        generationSpeedSampleCount: 3,
+        generationSpeedTimedCount: 2,
+        referenceCost: {
+          currency: "USD",
+          totalCostNanos: 300_000,
+          pricedRequestCount: 2,
+          requestCount: 5,
+          uncachedInputPricePerMillionNanos: 140_000_000,
+          cachedInputPricePerMillionNanos: 2_800_000,
+          outputPricePerMillionNanos: 280_000_000,
+          hasMixedPrices: false,
+        },
       },
     });
-    expect(completed?.timing?.outputTokensPerSecond).toBeCloseTo(40);
-    expect(completed?.timing?.thinkingTokensPerSecond).toBeCloseTo(100);
-    expect(completed?.timing?.generationTokensPerSecond).toBeCloseTo(60 / 0.9);
+    expect(completed?.timing?.outputTokensPerSecond).toBeCloseTo(40 / 1.3);
+    expect(completed?.timing?.thinkingTokensPerSecond).toBeCloseTo(50);
+    expect(completed?.timing?.generationTokensPerSecond).toBeCloseTo(90 / 2.3);
   });
 
   it("keeps only non-reasoning output timing for OpenAI", async () => {
@@ -1174,6 +1250,9 @@ describe("ConversationCore", () => {
       threadId: "thread-openai",
       turnId: "turn-openai",
       requestStartedAtMs: 1_100,
+      requestDurationMs: 2_000,
+      outputTokens: 30,
+      reasoningOutputTokens: 10,
       ttftMs: 200,
       thinkingDurationMs: 500,
       outputDurationMs: 1_000,
@@ -1184,6 +1263,9 @@ describe("ConversationCore", () => {
       threadId: "thread-openai",
       turnId: "turn-openai",
       requestStartedAtMs: 1_200,
+      requestDurationMs: 1_500,
+      outputTokens: 60,
+      reasoningOutputTokens: 40,
       ttftMs: 300,
       thinkingDurationMs: 400,
       outputDurationMs: 1_000,
@@ -1218,8 +1300,14 @@ describe("ConversationCore", () => {
       (event) => event.type === "turn.completed",
     ) as Extract<OutputEvent, { type: "turn.completed" }> | undefined;
     expect(completed?.timing).toMatchObject({
-      nonReasoningOutputTokens: 20,
+      modelRequestCount: 2,
+      modelRequestDurationMs: 3_500,
+      requestOutputTokens: 90,
+      nonReasoningOutputTokens: 40,
       outputTokensPerSecond: 20,
+      outputSpeedSampleCount: 2,
+      outputSpeedTimedCount: 2,
+      firstResponseLatencyMs: 1_000,
     });
     expect(completed?.timing?.ttftMs).toBeUndefined();
     expect(completed?.timing?.reasoningTokens).toBeUndefined();

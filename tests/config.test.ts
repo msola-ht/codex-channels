@@ -21,6 +21,7 @@ import {
 } from "../runtime/gateway-config.mjs";
 import {
   ConfigurationError,
+  isDebugLogLevel,
   loadConfigDocument,
   loadRuntimeConfig,
 } from "../src/config/index.js";
@@ -34,6 +35,13 @@ afterEach(() => {
 });
 
 describe("Gateway config.toml", () => {
+  it("derives global debug mode from debug and trace log levels", () => {
+    expect(isDebugLogLevel("debug")).toBe(true);
+    expect(isDebugLogLevel("trace")).toBe(true);
+    expect(isDebugLogLevel("info")).toBe(false);
+    expect(isDebugLogLevel("warn")).toBe(false);
+  });
+
   it("preserves comments when updating an existing configuration", () => {
     const fixture = createFixture();
     const commented = readFixture(fixture.configPath)
@@ -115,6 +123,7 @@ describe("Gateway config.toml", () => {
     expect(runtime.config.telegramMessageFormat).toBe("rich");
     expect(runtime.config.operationUpdateDisplay).toBe("compact");
     expect(runtime.config.planUpdatesEnabled).toBe(true);
+    expect(runtime.config.apiProviders).toEqual([]);
     expect(runtime.config.vision).toEqual({ mode: "disabled" });
     expect(runtime.config.credentialsDirectory).toBe(join(fixture.root, "credentials"));
     expect(runtime.config.codexSocketPath).toBe(join(fixture.root, "runtime/app-server.sock"));
@@ -122,6 +131,54 @@ describe("Gateway config.toml", () => {
     expect(runtime.config.workspaces).toEqual([
       { id: "main", name: "Main", cwd: realpathSync(fixture.workspace) },
     ]);
+  });
+
+  it("loads per-workspace permissions and maps approval_policy to camelCase", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
+    const workspace = join(root, "workspace");
+    mkdirSync(workspace, { recursive: true });
+    const fixture = createFixture({
+      root,
+      workspaces: [{
+        id: "main",
+        name: "Main",
+        cwd: workspace,
+        sandbox: "danger-full-access",
+        approval_policy: "never",
+      }],
+    });
+
+    const runtime = loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    });
+
+    expect(runtime.config.workspaces).toEqual([{
+      id: "main",
+      name: "Main",
+      cwd: realpathSync(workspace),
+      sandbox: "danger-full-access",
+      approvalPolicy: "never",
+    }]);
+  });
+
+  it("rejects a workspace that combines sandbox with a permission profile", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
+    const workspace = join(root, "workspace");
+    mkdirSync(workspace, { recursive: true });
+    const fixture = createFixture({
+      root,
+      workspaces: [{
+        id: "main",
+        name: "Main",
+        cwd: workspace,
+        sandbox: "workspace-write",
+        permissions: ":workspace",
+      }],
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow(/permissions 与 sandbox 不能同时设置/u);
   });
 
   it("rejects the removed App Server vision mode", () => {
@@ -135,9 +192,15 @@ describe("Gateway config.toml", () => {
 
   it("loads external vision settings without reading API key contents into config", () => {
     const external = createFixture({
+      api_providers: [{
+        id: "vision-relay",
+        name: "视觉中转",
+        protocol: "responses",
+        endpoint: "https://vision.example/v1/responses",
+      }],
       vision: {
         mode: "responses_api",
-        endpoint: "https://vision.example/v1/responses",
+        provider: "vision-relay",
         model: "vision-model",
       },
     });
@@ -145,16 +208,64 @@ describe("Gateway config.toml", () => {
       CODEX_CONNECT_CONFIG_FILE: external.configPath,
     }).config.vision).toEqual({
       mode: "responses_api",
+      provider: "vision-relay",
       endpoint: "https://vision.example/v1/responses",
       model: "vision-model",
+      timeoutMs: 120_000,
     });
+  });
+
+  it("accepts a custom vision timeout and rejects values outside the supported range", () => {
+    const custom = createFixture({
+      api_providers: [{
+        id: "vision-relay",
+        name: "视觉中转",
+        protocol: "responses",
+        endpoint: "https://vision.example/v1/responses",
+      }],
+      vision: {
+        mode: "responses_api",
+        provider: "vision-relay",
+        model: "vision-model",
+        timeout_seconds: 300,
+      },
+    });
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: custom.configPath,
+    }).config.vision).toEqual(expect.objectContaining({
+      timeoutMs: 300_000,
+    }));
+
+    const invalid = createFixture({
+      api_providers: [{
+        id: "vision-relay",
+        name: "视觉中转",
+        protocol: "responses",
+        endpoint: "https://vision.example/v1/responses",
+      }],
+      vision: {
+        mode: "responses_api",
+        provider: "vision-relay",
+        model: "vision-model",
+        timeout_seconds: 20,
+      },
+    });
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: invalid.configPath,
+    })).toThrow();
   });
 
   it("rejects insecure remote vision endpoints", () => {
     const fixture = createFixture({
+      api_providers: [{
+        id: "vision-relay",
+        name: "视觉中转",
+        protocol: "responses",
+        endpoint: "http://vision.example/v1/responses",
+      }],
       vision: {
         mode: "responses_api",
-        endpoint: "http://vision.example/v1/responses",
+        provider: "vision-relay",
         model: "vision-model",
       },
     });
@@ -162,6 +273,20 @@ describe("Gateway config.toml", () => {
     expect(() => loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
     })).toThrow("必须使用 HTTPS");
+  });
+
+  it("rejects a vision provider that is not registered", () => {
+    const fixture = createFixture({
+      vision: {
+        mode: "responses_api",
+        provider: "missing",
+        model: "vision-model",
+      },
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow("vision.provider 不存在");
   });
 
   it("rejects the removed manual DeepSeek proxy setting", () => {
@@ -251,6 +376,7 @@ describe("Gateway config.toml", () => {
     expect(persisted.display).toEqual({
       operation_updates: "compact",
       plan_updates: true,
+      price_currency: "auto",
     });
     expect(persisted.storage).toEqual({
       database_path: "data/gateway.sqlite3",
@@ -348,6 +474,30 @@ describe("Gateway config.toml", () => {
     expect(loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
     }).config.planUpdatesEnabled).toBe(false);
+  });
+
+  it("preserves explicit price currency and per-provider overrides", () => {
+    const fixture = createFixture({
+      display: {
+        operation_updates: "compact",
+        plan_updates: true,
+        price_currency: "cny",
+        price_currency_by_provider: {
+          deepseek: "cny",
+          openai: "usd",
+        },
+      },
+    });
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.priceCurrency).toBe("cny");
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.priceCurrencyByProvider).toEqual({
+      deepseek: "cny",
+      openai: "usd",
+    });
   });
 
   it("rejects the removed boolean operation update setting", () => {

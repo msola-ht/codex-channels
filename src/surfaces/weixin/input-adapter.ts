@@ -1,4 +1,10 @@
-import type { ConversationUseCases } from "../../application/index.js";
+import type { Logger } from "pino";
+
+import type {
+  ConversationUseCases,
+  DisplayPriceCurrency,
+  ExchangeRateSnapshot,
+} from "../../application/index.js";
 import {
   conversationTargetKey,
   type ConversationTarget,
@@ -7,7 +13,6 @@ import type {
   ConversationActorRegistry,
   SurfaceAccessPolicy,
 } from "../../policy/index.js";
-
 import { truncateQuotedText } from "../quoted-input.js";
 import {
   WeixinProtocolError,
@@ -79,12 +84,20 @@ export interface WeixinInputAdapterOptions {
   onRetry?(event: WeixinUpdatesRetryEvent): void;
   onStopTimeout?(): void;
   closeTimeoutMs?: number;
+  now?: () => number;
+  debugEnabled?: boolean;
+  exchangeRate?: () => ExchangeRateSnapshot | null;
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency;
+  logger?: Pick<Logger, "debug">;
 }
 
 export class WeixinInputAdapter {
   readonly accountId: string;
 
   private readonly closeTimeoutMs: number;
+  private readonly now: () => number;
   private readonly health = new WeixinPollingHealth();
   private readonly monitor;
   private readonly conversations: WeixinConversationAdapter;
@@ -101,6 +114,7 @@ export class WeixinInputAdapter {
       options.closeTimeoutMs ?? 5_000,
       "微信输入关闭超时时间无效",
     );
+    this.now = options.now ?? Date.now;
     this.conversations = new WeixinConversationAdapter(
       options.service,
       options.outbox,
@@ -108,6 +122,14 @@ export class WeixinInputAdapter {
       {
         quietWindowMs: 0,
         pollingHealth: this.health,
+        now: this.now,
+        debugEnabled: options.debugEnabled ?? false,
+        ...(options.exchangeRate === undefined
+          ? {}
+          : { exchangeRate: options.exchangeRate }),
+        ...(options.priceCurrency === undefined
+          ? {}
+          : { priceCurrency: options.priceCurrency }),
         ...(options.doctor === undefined
           ? {}
           : {
@@ -169,6 +191,15 @@ export class WeixinInputAdapter {
   }
 
   private async handle(message: WeixinSupportedMessage): Promise<void> {
+    const receivedAtMs = this.now();
+    this.options.logger?.debug(
+      {
+        surface: "weixin",
+        accountId: this.accountId,
+        messageType: message.kind,
+      },
+      "微信输入已到达 Gateway",
+    );
     const target: ConversationTarget = {
       surface: "weixin",
       accountId: this.accountId,
@@ -220,6 +251,10 @@ export class WeixinInputAdapter {
             actorId: message.actorId,
             kind: "text" as const,
             text: message.text,
+            ...(message.createdAt === undefined
+              ? {}
+              : { createdAtMs: message.createdAt }),
+            receivedAtMs,
             ...(quotedText === undefined ? {} : { quotedText }),
           }
         : message.kind === "image"

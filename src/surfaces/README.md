@@ -63,22 +63,48 @@ Telegram 和飞书在交互消息创建成功或失败时
 `surface-input-batcher.ts` 只合并 Surface 明确标识的原生图片批次，普通文字、单图和无批次标识的
 消息立即提交；`vision-input-session.ts` 按完整 Conversation 与 Actor 在内存保存五分钟有效的
 下一批要求，以及 `/vision <2–4> <要求>` 定量收集并在收齐后自动提交的最多四张图片；兼容的
-`begin/done/cancel` 保留给数量未知的手动收集。停止时原生批次排空，尚未提交的手动收集直接清除；二者都不根据消息间隔
+`begin/done/cancel` 保留给数量未知的手动收集。外部识别失败后，共用输入门面还会按完整
+Conversation 与 Actor 在内存保留五分钟有效的一次重试输入，`/vision retry` 复用原要求与临时图片；
+成功、新图片任务、取消、过期或停止会清除记录。停止时原生批次排空，尚未提交的手动收集直接清除；这些状态都不根据消息间隔
 猜测独立消息关系。`vision-command.ts` 统一三个 Surface 的命令和确认文案。
+三渠道共享的 `/metrics` 分开展示当前 Thread 最近 Turn 的运行聚合、指标库保留范围内的会话累计，
+并单独列出最近视觉等直接 API 请求；`global/providers/models` 以 24 小时、7 天或 30 天为范围，
+把 Codex Provider 和直接 API 按同一请求口径聚合，最多展示请求量最高的 20 组；`errors` 用同一
+范围展示异常率及按提供商、模型、状态、HTTP 状态和错误类型形成的前 20 组异常，附带最近发生时间。
+综合速度和首段回复延迟附带有效样本覆盖率，不把请求累计输入误写成上下文占用；参考总价附带
+计价覆盖率，并按提供商币种先出总计、再列出输入、缓存、输出三项价格明细，不显示 `/M Token`
+单价；聚合存在多档价格时只标记多档、不显示伪统一单价。信息类聊天指令（`/status`、`/usage`、
+`/limits`、`/models`、`/sessions`、`/skills`、`/mcp`、`/plugins`、`/permissions`、`/goal`、
+`/project-rules`、`/metrics` 等）输出统一为 Markdown 列表：首行为 `##` 标题、小节为 `###`
+标题、字段为 `-` 列表项、明细缩进嵌套；`/diff` 与操作结果保持原文。三个渠道分别用飞书卡片
+Markdown、Telegram HTML、微信结构化字段渲染列表。
 定量收齐确认在调用 Application 前同步入队；外部视觉请求发起、10 秒后的有界心跳及完成后的
-视觉模型 ID、本地实测 API 耗时和上游实际 Token 用量由 Core 作为平台无关事件发布。图片收集、
+视觉模型 ID、本地实测 API 耗时和上游实际 Token 用量由 Core 作为平台无关事件发布（本地实测 API
+耗时仅在调试模式开启时展示）。图片收集、
 转发、心跳和完成消息统一使用标题与字段列表，三个渠道只负责转换 Markdown/HTML/富文本并按序投递。
+`vision-command.ts` 还在全局调试模式开启时统一呈现平台消息到 Gateway 的接收延迟，以及截至回复入队的
+Gateway 处理耗时；各 Surface 只传入已验证的平台创建时间、接收时间和当前毫秒时间。接收延迟是
+跨平台时钟差值，部署环境必须保持 NTP 同步，不能把未同步主机上的结果直接解释为渠道投递耗时。
 `turn-reply-targets.ts` 只在 Surface 内存中把待提交输入的精确平台消息 ID 绑定到实际
 Thread 与 Turn，允许 `turn.started` 早于提交响应时仍原生回复正确输入；不保存消息正文，
 Turn、Thread 或 Surface 关闭时清理。
 `quoted-input.ts` 把各平台已验证的回复/引用正文转换为有界、明确标记且与当前消息分离的上下文；
 引用获取仍由各 Surface 负责，不能读取 Gateway 私有历史或让引用内容参与命令解析。
+`plan-presentation.ts` 统一完整计划与新增完成步骤的有界展示、状态符号和去重指纹；各渠道只决定
+完整计划是原地更新还是追加紧凑进度。
 `lifecycle-presentation.ts` 统一 Telegram、飞书与微信的 Gateway 上线、Turn 开始确认和 Turn
-结束汇报信息模型、字段顺序与中文状态词；它显示当前 Provider，保留 Provider 通用的 Thread
-Token/上下文指标，并只在 OpenAI Thread 显示 Fast 与 OpenAI 周限；各 Surface 只保留 HTML、
+结束汇报把本次运行、当前会话累计和账户状态依次分区，并按 Token、费用、性能分组；按 Turn
+聚合统计代理捕获的全部模型请求、实际产生推理输出的思考次数及当前 Turn 参考总价，并保留 Provider
+通用的 Thread Token/上下文与参考总价累计指标；本轮存在非正常模型尝试时，请求总数会进一步拆分为
+完成、中断、未完整观测和失败数量；`429/5xx` 瞬时失败后存在成功请求时显示为“自动重试、最终
+成功”，本轮计价覆盖只统计成功请求，底层异常记录仍完整保留。`reference-cost-format.ts` 统一总价、计价覆盖率及
+输入/缓存/输出价格明细格式（先总价后明细，按提供商币种换算）。
+原生 OpenAI
+鉴权的 Codex Provider 统一显示为“OpenAI 官方”，且只在该类 Thread 显示 Fast 与 OpenAI 周限；
+直接 API 的自定义提供商继续使用自身名称；各 Surface 只保留 HTML、
 CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Thread 的文本、审批和完成汇报均标注
 短 Thread ID，并继续进入原 Conversation 的有界顺序队列。
-`elapsed-duration.ts` 只把已确认的 Turn、首字延时等毫秒值或账户用量秒数格式化为三个 Surface
+`elapsed-duration.ts` 只把已确认的 Turn、首事件/首段回复延迟等毫秒值或账户用量秒数格式化为三个 Surface
 共用的中文短文本，不负责计时、状态或持久化。
 `account-format.ts` 统一套餐名称、额度状态、百分比、周期与重置时间格式，供命令结果、运行时通知
 和生命周期汇报复用。

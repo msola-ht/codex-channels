@@ -489,6 +489,9 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     codexSandbox: "workspace-write",
     operationUpdateDisplay: "full",
     planUpdatesEnabled: false,
+    priceCurrency: "auto",
+    priceCurrencyByProvider: {},
+    apiProviders: [],
     vision: { mode: "disabled" },
     credentialsDirectory: "/tmp/credentials",
     stateDatabasePath: "/tmp/gateway.sqlite3",
@@ -510,5 +513,7 @@ function options(
     gatewayVersion: "0.146.0",
     codexUpstreamUserAgent: () => undefined,
     onFatal: vi.fn(),
+    exchangeRate: () => null,
+    priceCurrency: () => "usd" as const,
   };
 }

@@ -193,14 +193,14 @@ describe("Weixin command renderer", () => {
       { kind: "goal", goal: null },
     ];
 
-    expect(results.map(renderWeixinCommandResult)).toEqual([
-      "当前没有运行中的任务。",
+    expect(results.map((result) => renderWeixinCommandResult(result))).toEqual([
+      "## 当前没有运行中的任务。",
       "当前 Workspace 没有匹配的可恢复会话。",
       expect.stringContaining("Thread：尚未绑定"),
       expect.stringContaining("Main · main ← 当前"),
       expect.stringContaining("Fast 模式：开启"),
       "当前没有已启用的 Skills。",
-      "MCP Servers（0）：",
+      "## MCP Servers（0）",
       "当前没有已安装 Plugins。",
       expect.stringContaining("OpenAI Codex 账户用量摘要"),
       expect.stringContaining("Codex 额度"),
@@ -235,6 +235,7 @@ describe("Weixin command renderer", () => {
         transport: "Unix WebSocket",
         codexUpstreamUserAgent:
           "codex_connect_gateway/0.146.0 (Linux; x64) private-build-token (codex_connect_gateway; 0.146.0)",
+        debugEnabled: true,
       },
     );
     expect(startup).toContain("Codex Connect 已上线");
@@ -281,7 +282,7 @@ describe("Weixin command renderer", () => {
 
     expect(rendered).toContain("本次运行 · 已完成");
     expect(rendered).toContain("- 上下文：10 K / 100 K（10%）");
-    expect(rendered).toContain("最近请求缓存命中：75.00%");
+    expect(rendered).toContain("最近请求缓存命中率：75.00%");
     expect(rendered).toContain("模型：gpt-test · medium · Fast 开启");
     expect(rendered).toContain("上下文压缩：2 次");
     expect(rendered).toContain("Git 分支：feature/weixin-surface");

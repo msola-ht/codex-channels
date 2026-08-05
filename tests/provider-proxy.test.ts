@@ -165,10 +165,14 @@ describe("ProviderProxy", () => {
       }),
     });
 
+    const metrics: ProviderProxyMetrics[] = [];
     const proxy = new ProviderProxy("127.0.0.1:0", {
       upstreamHost: "127.0.0.1",
       upstreamPort: upstreamAddress.port,
       upstreamProtocol: "http",
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
     });
     await proxy.start();
     openServers.push(proxy);
@@ -213,6 +217,197 @@ describe("ProviderProxy", () => {
       status: 429,
     });
     expect(forwardedMetadata).toBeUndefined();
+    expect(metrics).toEqual([expect.objectContaining({
+      status: "failed",
+      httpStatus: 429,
+      errorType: "rate_limit",
+    })]);
+  });
+
+  it("does not mark an unobservable HTTP 200 response as completed", async () => {
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200);
+        response.end();
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstream.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push({
+      close: () => new Promise<void>((resolveClose) => {
+        upstream.close(() => resolveClose());
+      }),
+    });
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    const proxyPort = Number(proxy.address().split(":")[1]);
+    const status = await new Promise<number>((resolveStatus, rejectStatus) => {
+      const request = httpRequest({
+        hostname: "127.0.0.1",
+        port: proxyPort,
+        path: "/responses",
+        method: "POST",
+      }, (response) => {
+        response.resume();
+        response.on("end", () => resolveStatus(response.statusCode ?? 0));
+        response.on("error", rejectStatus);
+      });
+      request.on("error", rejectStatus);
+      request.end("{}");
+    });
+
+    expect(status).toBe(200);
+    expect(metrics).toEqual([expect.objectContaining({
+      status: "incomplete",
+      httpStatus: 200,
+      responseFormat: "unknown",
+      incompleteReason: "response_not_observed",
+      model: null,
+      inputTokens: null,
+      outputTokens: null,
+    })]);
+  });
+
+  it("recognizes SSE metadata when the upstream omits Content-Type", async () => {
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200);
+        response.end(sse("response.completed", {
+          type: "response.completed",
+          response: {
+            model: "gpt-5.6-sol",
+            status: "completed",
+            usage: {
+              input_tokens: 120,
+              input_tokens_details: { cached_tokens: 100 },
+              output_tokens: 30,
+              output_tokens_details: { reasoning_tokens: 10 },
+              total_tokens: 150,
+            },
+          },
+        }));
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstream.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push({
+      close: () => new Promise<void>((resolveClose) => {
+        upstream.close(() => resolveClose());
+      }),
+    });
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    const proxyPort = Number(proxy.address().split(":")[1]);
+    await new Promise<void>((resolveResponse, rejectResponse) => {
+      const request = httpRequest({
+        hostname: "127.0.0.1",
+        port: proxyPort,
+        path: "/responses",
+        method: "POST",
+      }, (response) => {
+        response.resume();
+        response.on("end", resolveResponse);
+        response.on("error", rejectResponse);
+      });
+      request.on("error", rejectResponse);
+      request.end("{}");
+    });
+
+    expect(metrics).toEqual([expect.objectContaining({
+      status: "completed",
+      responseFormat: "sse",
+      model: "gpt-5.6-sol",
+      inputTokens: 120,
+      cachedInputTokens: 100,
+      outputTokens: 30,
+      reasoningOutputTokens: 10,
+    })]);
+  });
+
+  it("stops parsing oversized SSE metadata lines without truncating the response", async () => {
+    const oversizedEvent = sse("response.completed", {
+      type: "response.completed",
+      response: {
+        status: "completed",
+        padding: "x".repeat(1_048_576),
+      },
+    });
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.end(oversizedEvent);
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstream.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push({
+      close: () => new Promise<void>((resolveClose) => {
+        upstream.close(() => resolveClose());
+      }),
+    });
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    const proxyPort = Number(proxy.address().split(":")[1]);
+    const body = await new Promise<string>((resolveResponse, rejectResponse) => {
+      const request = httpRequest({
+        hostname: "127.0.0.1",
+        port: proxyPort,
+        path: "/responses",
+        method: "POST",
+      }, (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () => resolveResponse(Buffer.concat(chunks).toString("utf8")));
+        response.on("error", rejectResponse);
+      });
+      request.on("error", rejectResponse);
+      request.end("{}");
+    });
+
+    expect(body).toBe(oversizedEvent);
+    expect(metrics).toEqual([expect.objectContaining({
+      status: "incomplete",
+      incompleteReason: "response_not_observed",
+    })]);
   });
 
   it("forwards requests with a rewritten host and records reasoning/output timing", async () => {
@@ -250,7 +445,21 @@ describe("ProviderProxy", () => {
           }));
           response.write(sse("response.completed", {
             type: "response.completed",
-            response: { id: "r1", usage: null },
+            response: {
+              id: "r1",
+              model: "deepseek-v4-flash",
+              service_tier: "default",
+              status: "completed",
+              created_at: 1_785_640_800,
+              completed_at: 1_785_640_801,
+              usage: {
+                input_tokens: 120,
+                input_tokens_details: { cached_tokens: 100 },
+                output_tokens: 30,
+                output_tokens_details: { reasoning_tokens: 10 },
+                total_tokens: 150,
+              },
+            },
           }));
           response.end();
         }, 30);
@@ -310,8 +519,24 @@ describe("ProviderProxy", () => {
     expect(responseBody).toContain("OK");
     expect(metrics).toHaveLength(1);
     const metric = metrics[0]!;
-    expect(metric.threadId).toBe("thread-1");
-    expect(metric.turnId).toBe("turn-1");
+    expect(metric).toMatchObject({
+      transport: "http",
+      responseFormat: "sse",
+      operation: "response",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      model: "deepseek-v4-flash",
+      serviceTier: "default",
+      status: "completed",
+      httpStatus: 200,
+      inputTokens: 120,
+      cachedInputTokens: 100,
+      outputTokens: 30,
+      reasoningOutputTokens: 10,
+      totalTokens: 150,
+      upstreamCreatedAt: 1_785_640_800,
+      upstreamCompletedAt: 1_785_640_801,
+    });
     if (
       metric.firstTokenAtMs === null
       || metric.firstReasoningDeltaAtMs === null
@@ -332,6 +557,143 @@ describe("ProviderProxy", () => {
     expect(received[0]?.host).toBe(`127.0.0.1:${upstreamAddress.port}`);
     expect(received[0]?.authorization).toBe("Bearer sk-test1234");
     expect(received[0]?.body).toContain("deepseek-v4-flash");
+  });
+
+  it("collects bounded metadata and Usage from a non-streaming JSON response", async () => {
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          id: "response-private-id",
+          model: "gpt-5.6-sol",
+          service_tier: "default",
+          status: "completed",
+          created_at: 1_785_640_800,
+          completed_at: 1_785_640_802,
+          output: [{ type: "message", content: [{ text: "不得进入指标" }] }],
+          usage: {
+            input_tokens: 500,
+            input_tokens_details: { cached_tokens: 450 },
+            output_tokens: 50,
+            output_tokens_details: { reasoning_tokens: 20 },
+            total_tokens: 550,
+          },
+        }));
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstream.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push({
+      close: () => new Promise<void>((resolveClose) => {
+        upstream.close(() => resolveClose());
+      }),
+    });
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    await new Promise<void>((resolveResponse, rejectResponse) => {
+      const request = httpRequest({
+        hostname: "127.0.0.1",
+        port: Number(proxy.address().split(":")[1]),
+        path: "/responses",
+        method: "POST",
+      }, (response) => {
+        response.resume();
+        response.on("end", resolveResponse);
+        response.on("error", rejectResponse);
+      });
+      request.on("error", rejectResponse);
+      request.end("{}");
+    });
+
+    expect(metrics).toEqual([expect.objectContaining({
+      responseFormat: "json",
+      model: "gpt-5.6-sol",
+      serviceTier: "default",
+      status: "completed",
+      inputTokens: 500,
+      cachedInputTokens: 450,
+      outputTokens: 50,
+      reasoningOutputTokens: 20,
+      totalTokens: 550,
+      upstreamCreatedAt: 1_785_640_800,
+      upstreamCompletedAt: 1_785_640_802,
+    })]);
+    expect(JSON.stringify(metrics)).not.toContain("不得进入指标");
+    expect(JSON.stringify(metrics)).not.toContain("response-private-id");
+  });
+
+  it("rejects control characters in upstream metric identifiers", async () => {
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          model: "gpt-5\nforged",
+          service_tier: "\u001b[31mpremium",
+          status: "failed",
+          error: {
+            type: "rate_limit\rforged",
+            code: "bad\u0000code",
+          },
+        }));
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstream.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push({
+      close: () => new Promise<void>((resolveClose) => {
+        upstream.close(() => resolveClose());
+      }),
+    });
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    await new Promise<void>((resolveResponse, rejectResponse) => {
+      const request = httpRequest({
+        hostname: "127.0.0.1",
+        port: Number(proxy.address().split(":")[1]),
+        path: "/responses",
+        method: "POST",
+      }, (response) => {
+        response.resume();
+        response.on("end", resolveResponse);
+        response.on("error", rejectResponse);
+      });
+      request.on("error", rejectResponse);
+      request.end("{}");
+    });
+
+    expect(metrics).toEqual([expect.objectContaining({
+      status: "failed",
+      model: null,
+      serviceTier: null,
+      errorType: null,
+      errorCode: null,
+    })]);
   });
 
   it("records function call argument deltas as model output timing", async () => {
@@ -718,6 +1080,182 @@ describe("ProviderProxy", () => {
     expect(metrics[0]?.firstOutputDeltaAtMs).not.toBeNull();
   });
 
+  it("emits one completed metric when a WebSocket closes during delivery", async () => {
+    const upstreamServer = createServer();
+    const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });
+    let resolveUpstreamClosed: () => void = () => undefined;
+    const upstreamClosed = new Promise<void>((resolve) => {
+      resolveUpstreamClosed = resolve;
+    });
+    upstreamWebSocket.on("connection", (socket) => {
+      socket.on("close", resolveUpstreamClosed);
+      socket.on("message", () => {
+        socket.send(JSON.stringify({
+          type: "response.completed",
+          response: { model: "gpt-5.6-sol", status: "completed" },
+        }), () => socket.close());
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstreamServer.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstreamServer.address() as AddressInfo;
+    openServers.push({
+      close: async () => {
+        for (const client of upstreamWebSocket.clients) client.terminate();
+        await new Promise<void>((resolveClose) => upstreamWebSocket.close(() => resolveClose()));
+        await new Promise<void>((resolveClose) => upstreamServer.close(() => resolveClose()));
+      },
+    });
+    const metrics: ProviderProxyMetrics[] = [];
+    const releases: Array<() => void> = [];
+    let resolveFirstMetric: () => void = () => undefined;
+    const firstMetric = new Promise<void>((resolve) => {
+      resolveFirstMetric = resolve;
+    });
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      onMetrics: (metric) => {
+        metrics.push(metric);
+        resolveFirstMetric();
+        return new Promise<void>((resolve) => releases.push(resolve));
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    client.on("open", () => {
+      client.send(JSON.stringify({
+        type: "response.create",
+        client_metadata: {
+          "x-codex-turn-metadata": JSON.stringify({
+            thread_id: "thread-close",
+            turn_id: "turn-close",
+          }),
+        },
+      }));
+    });
+
+    await firstMetric;
+    await upstreamClosed;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    for (const release of releases) release();
+
+    expect(metrics).toEqual([expect.objectContaining({
+      status: "completed",
+      model: "gpt-5.6-sol",
+    })]);
+    client.terminate();
+  });
+
+  it("keeps the request model when a WebSocket closes before completion", async () => {
+    const upstreamServer = createServer();
+    const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });
+    upstreamWebSocket.on("connection", (socket) => {
+      socket.on("message", () => socket.close());
+    });
+    await new Promise<void>((resolveListen) => {
+      upstreamServer.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstreamServer.address() as AddressInfo;
+    openServers.push({
+      close: async () => {
+        for (const client of upstreamWebSocket.clients) client.terminate();
+        await new Promise<void>((resolveClose) => upstreamWebSocket.close(() => resolveClose()));
+        await new Promise<void>((resolveClose) => upstreamServer.close(() => resolveClose()));
+      },
+    });
+
+    let resolveMetric: (metric: ProviderProxyMetrics) => void = () => undefined;
+    const metric = new Promise<ProviderProxyMetrics>((resolve) => {
+      resolveMetric = resolve;
+    });
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      onMetrics: (value) => resolveMetric(value),
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    client.on("open", () => {
+      client.send(JSON.stringify({
+        type: "response.create",
+        model: "gpt-5.6-sol",
+        service_tier: "priority",
+        client_metadata: {
+          "x-codex-turn-metadata": JSON.stringify({
+            thread_id: "thread-interrupted",
+            turn_id: "turn-interrupted",
+          }),
+        },
+      }));
+    });
+
+    await expect(metric).resolves.toMatchObject({
+      status: "failed",
+      errorType: "websocket_closed",
+      model: "gpt-5.6-sol",
+      serviceTier: "priority",
+    });
+    client.terminate();
+  });
+
+  it("marks a client-initiated WebSocket close as a client disconnect", async () => {
+    const upstreamServer = createServer();
+    const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });
+    upstreamWebSocket.on("connection", () => {
+      // 保持连接打开，等待代理客户端主动关闭。
+    });
+    await new Promise<void>((resolveListen) => {
+      upstreamServer.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstreamServer.address() as AddressInfo;
+    openServers.push({
+      close: async () => {
+        for (const client of upstreamWebSocket.clients) client.terminate();
+        await new Promise<void>((resolveClose) => upstreamWebSocket.close(() => resolveClose()));
+        await new Promise<void>((resolveClose) => upstreamServer.close(() => resolveClose()));
+      },
+    });
+
+    let resolveMetric: (metric: ProviderProxyMetrics) => void = () => undefined;
+    const metric = new Promise<ProviderProxyMetrics>((resolve) => {
+      resolveMetric = resolve;
+    });
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      onMetrics: (value) => resolveMetric(value),
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    client.on("open", () => {
+      client.send(JSON.stringify({
+        type: "response.create",
+        client_metadata: {
+          "x-codex-turn-metadata": JSON.stringify({
+            thread_id: "thread-client-close",
+            turn_id: "turn-client-close",
+          }),
+        },
+      }));
+      setImmediate(() => client.close(1_000, "client stopped"));
+    });
+
+    await expect(metric).resolves.toMatchObject({
+      status: "failed",
+      errorType: "client_disconnected",
+      threadId: "thread-client-close",
+      turnId: "turn-client-close",
+    });
+  });
+
   it("rejects a non-loopback listen address", async () => {
     const proxy = new ProviderProxy("0.0.0.0:1234", {
       upstreamHost: "api.deepseek.com",
@@ -728,6 +1266,7 @@ describe("ProviderProxy", () => {
 
   it("forwards HTTP compaction requests through the configured upstream base path", async () => {
     let receivedPath = "";
+    const metrics: ProviderProxyMetrics[] = [];
     const upstream = createServer((request, response) => {
       receivedPath = request.url ?? "";
       request.resume();
@@ -750,6 +1289,9 @@ describe("ProviderProxy", () => {
       upstreamPort: upstreamAddress.port,
       upstreamProtocol: "http",
       upstreamBasePath: "/v1/",
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
     });
     await proxy.start();
     openServers.push(proxy);
@@ -772,6 +1314,12 @@ describe("ProviderProxy", () => {
 
     expect(status).toBe(200);
     expect(receivedPath).toBe("/v1/responses/compact?mode=test");
+    expect(metrics).toEqual([expect.objectContaining({
+      operation: "compact",
+      responseFormat: "json",
+      status: "completed",
+      httpStatus: 200,
+    })]);
   });
 
   it("forwards the Codex model catalog request through the configured upstream base path", async () => {
@@ -928,12 +1476,16 @@ describe("ProviderProxy", () => {
     });
 
     const errors: Error[] = [];
+    const metrics: ProviderProxyMetrics[] = [];
     const proxy = new ProviderProxy("127.0.0.1:0", {
       upstreamHost: "127.0.0.1",
       upstreamPort: upstreamAddress.port,
       upstreamProtocol: "http",
       timeoutMs: 150,
       onError: (error) => errors.push(error),
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
     });
     await proxy.start();
     openServers.push(proxy);
@@ -958,5 +1510,9 @@ describe("ProviderProxy", () => {
     expect(status).toBe(502);
     expect(errors.length).toBeGreaterThan(0);
     expect(errors[0]?.message).toContain("超时");
+    expect(metrics).toEqual([expect.objectContaining({
+      status: "failed",
+      errorType: "upstream_request_error",
+    })]);
   });
 });

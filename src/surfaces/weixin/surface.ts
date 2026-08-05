@@ -2,6 +2,10 @@ import type { Logger } from "pino";
 
 import type { ConversationUseCases } from "../../application/index.js";
 import type {
+  DisplayPriceCurrency,
+  ExchangeRateSnapshot,
+} from "../../application/index.js";
+import type {
   ConversationTarget,
 } from "../../conversation-core/index.js";
 import type {
@@ -70,6 +74,11 @@ export interface WeixinSurfaceOptions {
   startupNotification?: WeixinStartupNotification;
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
+  debugEnabled?: boolean;
+  exchangeRate?: () => ExchangeRateSnapshot | null;
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency;
   inputCloseTimeoutMs?: number;
   outbox?: WeixinOutboxOptions;
 }
@@ -145,6 +154,13 @@ export class WeixinSurface implements SurfaceAdapter {
           : {
               planUpdatesEnabled: options.planUpdatesEnabled,
             }),
+        ...(options.exchangeRate === undefined
+          ? {}
+          : { exchangeRate: options.exchangeRate }),
+        ...(options.priceCurrency === undefined
+          ? {}
+          : { priceCurrency: options.priceCurrency }),
+        debugEnabled: options.debugEnabled ?? false,
         ...(options.replyContextPersistence === undefined
           ? {}
           : {
@@ -196,6 +212,14 @@ export class WeixinSurface implements SurfaceAdapter {
         ? {}
         : { actorRegistry: options.actorRegistry }),
       onFatal: options.onFatal,
+      debugEnabled: options.debugEnabled ?? false,
+      ...(options.exchangeRate === undefined
+        ? {}
+        : { exchangeRate: options.exchangeRate }),
+      ...(options.priceCurrency === undefined
+        ? {}
+        : { priceCurrency: options.priceCurrency }),
+      logger: options.logger,
       onRetry: (event) => {
         logUpdatesRetry(
           options.logger,
@@ -236,6 +260,7 @@ export class WeixinSurface implements SurfaceAdapter {
     }
     const text = formatWeixinCommandText(
       formatSurfaceConfigurationChange(change, "weixin"),
+      { structuredFields: true },
     );
     for (const target of this.safeConfigurationTargets()) {
       if (!this.output.notifyText(target, text)) {
@@ -259,6 +284,7 @@ export class WeixinSurface implements SurfaceAdapter {
     }
     const text = formatWeixinCommandText(
       formatSurfaceConfigurationChange(change, "weixin"),
+      { structuredFields: true },
     );
     return Promise.all(
       this.safeConfigurationTargets().map(
@@ -321,7 +347,7 @@ export class WeixinSurface implements SurfaceAdapter {
         if (text) {
           await this.output.deliverText(
             target,
-            formatWeixinCommandText(text),
+            formatWeixinCommandText(text, { structuredFields: true }),
           );
         }
       } catch (error) {

@@ -16,9 +16,29 @@ import WebSocket, {
   type RawData,
 } from "ws";
 
+const maximumJsonMetadataBytes = 1_048_576;
+const maximumSseMetadataLineCharacters = 1_048_576;
+
 export interface ProviderProxyMetrics {
+  transport: "http" | "websocket";
+  responseFormat: "sse" | "json" | "websocket" | "unknown";
+  operation: "response" | "compact";
   threadId: string | null;
   turnId: string | null;
+  model: string | null;
+  serviceTier: string | null;
+  status: "completed" | "failed" | "incomplete" | "unknown";
+  httpStatus: number | null;
+  errorType: string | null;
+  errorCode: string | null;
+  incompleteReason: string | null;
+  inputTokens: number | null;
+  cachedInputTokens: number | null;
+  outputTokens: number | null;
+  reasoningOutputTokens: number | null;
+  totalTokens: number | null;
+  upstreamCreatedAt: number | null;
+  upstreamCompletedAt: number | null;
   requestStartedAtMs: number;
   firstTokenAtMs: number | null;
   firstReasoningDeltaAtMs: number | null;
@@ -139,6 +159,8 @@ export class ProviderProxy {
     const metrics = createMetricsState(
       parseTurnMetadata(request.headers["x-codex-turn-metadata"]),
       Date.now(),
+      "http",
+      responseOperation(request.url),
     );
     let metricsDelivery: Promise<void> | undefined;
     const emitMetrics = (): Promise<void> => {
@@ -161,10 +183,16 @@ export class ProviderProxy {
         upstreamTarget.port,
       ),
     }, (upstreamResponse) => {
+      metrics.httpStatus = upstreamResponse.statusCode ?? null;
+      metrics.responseFormat = httpResponseFormat(upstreamResponse.headers["content-type"]);
       writeUpstreamHead(response, upstreamResponse);
       const decoder = new StringDecoder("utf8");
       let pending = "";
       let currentEvent = "";
+      let sseMetadataOverflow = false;
+      let jsonBytes = 0;
+      let jsonOverflow = false;
+      const jsonChunks: Buffer[] = [];
       let forwarding = Promise.resolve();
       const processLine = (line: string, receivedAtMs: number): boolean => {
         if (line.startsWith("event:")) {
@@ -176,16 +204,40 @@ export class ProviderProxy {
         if (!payload || payload === "[DONE]") return false;
         const parsed = parseJsonPayload(payload);
         const type = typeof parsed?.type === "string" ? parsed.type : currentEvent;
-        return observeResponseEvent(metrics, type, receivedAtMs);
+        if (metrics.responseFormat === "unknown" && type.startsWith("response.")) {
+          metrics.responseFormat = "sse";
+        }
+        return observeResponseEvent(metrics, type, parsed, receivedAtMs);
       };
       const processText = (text: string, receivedAtMs: number): boolean => {
+        if (sseMetadataOverflow) return false;
         pending += text;
         const lines = pending.split(/\r?\n/);
         pending = lines.pop() ?? "";
+        if (
+          pending.length > maximumSseMetadataLineCharacters
+          || lines.some((line) => line.length > maximumSseMetadataLineCharacters)
+        ) {
+          sseMetadataOverflow = true;
+          pending = "";
+          currentEvent = "";
+          return false;
+        }
         return lines.some((line) => processLine(line, receivedAtMs));
       };
       upstreamResponse.on("data", (chunk: Buffer) => {
-        const completed = processText(decoder.write(chunk), Date.now());
+        const completed = metrics.responseFormat === "sse"
+          || metrics.responseFormat === "unknown"
+          ? processText(decoder.write(chunk), Date.now())
+          : false;
+        if (metrics.responseFormat === "json" && !jsonOverflow) {
+          jsonBytes += chunk.length;
+          if (jsonBytes <= maximumJsonMetadataBytes) jsonChunks.push(chunk);
+          else {
+            jsonOverflow = true;
+            jsonChunks.length = 0;
+          }
+        }
         upstreamResponse.pause();
         forwarding = forwarding.then(async () => {
           if (completed) await emitMetrics();
@@ -199,10 +251,20 @@ export class ProviderProxy {
       });
       upstreamResponse.on("end", () => {
         const endedAtMs = Date.now();
-        const completed = processText(decoder.end(), endedAtMs)
-          || (pending ? processLine(pending.trimEnd(), endedAtMs) : false);
+        const completed = metrics.responseFormat === "sse"
+          || metrics.responseFormat === "unknown"
+          ? processText(decoder.end(), endedAtMs)
+            || (pending ? processLine(pending.trimEnd(), endedAtMs) : false)
+          : metrics.responseFormat === "json" && !jsonOverflow
+            ? observeJsonResponse(
+                metrics,
+                parseJsonPayload(Buffer.concat(jsonChunks).toString("utf8")),
+                endedAtMs,
+              )
+            : false;
+        finalizeHttpStatus(metrics, endedAtMs);
         forwarding = forwarding.then(async () => {
-          if (completed || isResponsesPath(request.url)) await emitMetrics();
+          if (completed || isResponsesRequestPath(request.url)) await emitMetrics();
           response.end();
         }).catch((error) => {
           this.onError?.(asError(error));
@@ -210,6 +272,8 @@ export class ProviderProxy {
         });
       });
       upstreamResponse.on("error", (error) => {
+        markMetricsFailed(metrics, "upstream_response_error", error);
+        void emitMetrics();
         response.destroy();
         this.onError?.(asError(error));
       });
@@ -218,6 +282,8 @@ export class ProviderProxy {
       upstream.destroy(new Error(`模型上游响应超时：${this.timeoutMs}ms`));
     });
     upstream.on("error", (error) => {
+      markMetricsFailed(metrics, "upstream_request_error", error);
+      void emitMetrics();
       if (!response.headersSent) {
         response.writeHead(502, { "content-type": "application/json" });
         response.end(JSON.stringify({ error: { type: "provider_proxy_upstream_error" } }));
@@ -227,12 +293,18 @@ export class ProviderProxy {
       this.onError?.(asError(error));
     });
     request.on("error", (error) => {
+      markMetricsFailed(metrics, "client_request_error", error);
+      void emitMetrics();
       upstream.destroy();
       this.onError?.(asError(error));
       response.destroy();
     });
     response.on("close", () => {
-      if (!response.writableEnded) upstream.destroy();
+      if (!response.writableEnded) {
+        markMetricsFailed(metrics, "client_disconnected");
+        void emitMetrics();
+        upstream.destroy();
+      }
     });
     request.pipe(upstream);
   }
@@ -274,7 +346,11 @@ export class ProviderProxy {
         activeMetrics = createMetricsState(
           sanitized.metadata,
           sanitized.requestStartedAtMs ?? Date.now(),
+          "websocket",
+          "response",
         );
+        activeMetrics.model = sanitized.model ?? null;
+        activeMetrics.serviceTier = sanitized.serviceTier ?? null;
       }
       if (upstream.readyState === WebSocket.OPEN) {
         upstream.send(sanitized.data, { binary: isBinary });
@@ -291,11 +367,12 @@ export class ProviderProxy {
       const receivedAtMs = Date.now();
       forwarding = forwarding.then(async () => {
         if (!isBinary && activeMetrics) {
+          const currentMetrics = activeMetrics;
           const parsed = parseJsonPayload(rawDataText(data));
           const type = typeof parsed?.type === "string" ? parsed.type : "";
-          if (observeResponseEvent(activeMetrics, type, receivedAtMs)) {
-            await this.deliverMetrics(activeMetrics);
+          if (observeResponseEvent(currentMetrics, type, parsed, receivedAtMs)) {
             activeMetrics = undefined;
+            await this.deliverMetrics(currentMetrics);
           }
         }
         if (client.readyState === WebSocket.OPEN) {
@@ -314,13 +391,31 @@ export class ProviderProxy {
       }
       else if (peer.readyState === WebSocket.CONNECTING) peer.terminate();
     };
-    client.on("close", (code, reason) => closePeer(upstream, code, reason));
-    upstream.on("close", (code, reason) => closePeer(client, code, reason));
+    let failureType: "websocket_closed" | "client_disconnected" | undefined;
+    const noteFailureType = (
+      type: "websocket_closed" | "client_disconnected",
+    ): void => {
+      failureType ??= type;
+    };
+    client.on("close", (code, reason) => {
+      noteFailureType("client_disconnected");
+      closePeer(upstream, code, reason);
+    });
+    upstream.on("close", (code, reason) => {
+      noteFailureType("websocket_closed");
+      closePeer(client, code, reason);
+      if (!activeMetrics) return;
+      markMetricsFailed(activeMetrics, failureType ?? "websocket_closed");
+      void this.deliverMetrics(activeMetrics);
+      activeMetrics = undefined;
+    });
     client.on("error", (error) => {
+      noteFailureType("client_disconnected");
       this.onError?.(asError(error));
       upstream.terminate();
     });
     upstream.on("error", (error) => {
+      noteFailureType("websocket_closed");
       this.onError?.(asError(error));
       client.terminate();
     });
@@ -342,9 +437,31 @@ export class ProviderProxy {
   }
 }
 
-function createMetricsState(metadata: TurnMetadata, startedAtMs: number): MetricsState {
+function createMetricsState(
+  metadata: TurnMetadata,
+  startedAtMs: number,
+  transport: ProviderProxyMetrics["transport"],
+  operation: ProviderProxyMetrics["operation"],
+): MetricsState {
   return {
     ...metadata,
+    transport,
+    responseFormat: transport === "websocket" ? "websocket" : "unknown",
+    operation,
+    model: null,
+    serviceTier: null,
+    status: "unknown",
+    httpStatus: null,
+    errorType: null,
+    errorCode: null,
+    incompleteReason: null,
+    inputTokens: null,
+    cachedInputTokens: null,
+    outputTokens: null,
+    reasoningOutputTokens: null,
+    totalTokens: null,
+    upstreamCreatedAt: null,
+    upstreamCompletedAt: null,
     requestStartedAtMs: startedAtMs,
     firstTokenAtMs: null,
     firstReasoningDeltaAtMs: null,
@@ -358,6 +475,7 @@ function createMetricsState(metadata: TurnMetadata, startedAtMs: number): Metric
 function observeResponseEvent(
   metrics: MetricsState,
   type: string,
+  event: Record<string, unknown> | undefined,
   receivedAtMs: number,
 ): boolean {
   const isReasoningDelta = type.includes("reasoning") && type.includes(".delta");
@@ -378,10 +496,140 @@ function observeResponseEvent(
     || type === "response.failed"
     || type === "response.incomplete"
   ) {
+    observeResponseCompletion(metrics, type, event);
     metrics.responseCompletedAtMs = receivedAtMs;
     return true;
   }
   return false;
+}
+
+function observeResponseCompletion(
+  metrics: MetricsState,
+  eventType: string,
+  event: Record<string, unknown> | undefined,
+): void {
+  const response = asRecord(event?.response);
+  metrics.status = eventType === "response.completed"
+    ? "completed"
+    : eventType === "response.failed"
+      ? "failed"
+      : "incomplete";
+  observeResponseFields(metrics, response, event);
+}
+
+function observeResponseFields(
+  metrics: MetricsState,
+  response: Record<string, unknown> | undefined,
+  event: Record<string, unknown> | undefined,
+): void {
+  metrics.model = boundedString(response?.model);
+  metrics.serviceTier = boundedString(response?.service_tier);
+  const usage = asRecord(response?.usage);
+  const inputDetails = asRecord(usage?.input_tokens_details);
+  const outputDetails = asRecord(usage?.output_tokens_details);
+  metrics.inputTokens = tokenCount(usage?.input_tokens);
+  metrics.cachedInputTokens = tokenCount(inputDetails?.cached_tokens);
+  metrics.outputTokens = tokenCount(usage?.output_tokens);
+  metrics.reasoningOutputTokens = tokenCount(outputDetails?.reasoning_tokens);
+  metrics.totalTokens = tokenCount(usage?.total_tokens);
+  metrics.upstreamCreatedAt = upstreamTimestamp(response?.created_at);
+  metrics.upstreamCompletedAt = upstreamTimestamp(response?.completed_at);
+  const error = asRecord(response?.error) ?? asRecord(event?.error);
+  metrics.errorType = boundedString(error?.type);
+  metrics.errorCode = boundedString(error?.code);
+  metrics.incompleteReason = boundedString(
+    asRecord(response?.incomplete_details)?.reason,
+  );
+}
+
+function observeJsonResponse(
+  metrics: MetricsState,
+  response: Record<string, unknown> | undefined,
+  receivedAtMs: number,
+): boolean {
+  if (!response) return false;
+  const status = response.status;
+  const eventType = status === "completed"
+    ? "response.completed"
+    : status === "failed"
+      ? "response.failed"
+      : status === "incomplete"
+        ? "response.incomplete"
+        : undefined;
+  if (!eventType) {
+    observeResponseFields(metrics, response, { response });
+    return false;
+  }
+  observeResponseCompletion(metrics, eventType, { response });
+  metrics.responseCompletedAtMs = receivedAtMs;
+  return true;
+}
+
+function finalizeHttpStatus(metrics: MetricsState, completedAtMs: number): void {
+  if (metrics.status !== "unknown") return;
+  metrics.responseCompletedAtMs = completedAtMs;
+  if (metrics.httpStatus !== null && metrics.httpStatus >= 400) {
+    metrics.status = "failed";
+    metrics.errorType ??= "http_error";
+    return;
+  }
+  if (metrics.operation === "compact") {
+    metrics.status = "completed";
+    return;
+  }
+  metrics.status = "incomplete";
+  metrics.incompleteReason ??= "response_not_observed";
+}
+
+function markMetricsFailed(
+  metrics: MetricsState,
+  errorType: string,
+  error?: unknown,
+): void {
+  if (metrics.status === "completed") return;
+  metrics.status = "failed";
+  metrics.errorType = errorType;
+  metrics.errorCode = nodeErrorCode(error);
+  metrics.responseCompletedAtMs = Math.max(metrics.responseCompletedAtMs, Date.now());
+}
+
+function nodeErrorCode(error: unknown): string | null {
+  if (typeof error !== "object" || error === null) return null;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && /^[A-Z][A-Z0-9_]{1,40}$/u.test(code)
+    ? code
+    : null;
+}
+
+function tokenCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
+}
+
+function upstreamTimestamp(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
+}
+
+function httpResponseFormat(
+  contentType: string | string[] | undefined,
+): ProviderProxyMetrics["responseFormat"] {
+  const value = Array.isArray(contentType) ? contentType[0] : contentType;
+  if (typeof value !== "string") return "unknown";
+  const mediaType = value.split(";", 1)[0]?.trim().toLowerCase();
+  if (mediaType === "text/event-stream") return "sse";
+  if (mediaType === "application/json") return "json";
+  return "unknown";
+}
+
+function boundedString(value: unknown): string | null {
+  return typeof value === "string"
+    && value.length <= 128
+    && /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/u.test(value)
+    ? value
+    : null;
 }
 
 function sanitizeClientWebSocketMessage(
@@ -391,6 +639,8 @@ function sanitizeClientWebSocketMessage(
   data: RawData | string;
   metadata?: TurnMetadata;
   requestStartedAtMs?: number;
+  model?: string;
+  serviceTier?: string;
 } {
   if (isBinary) return { data };
   const parsed = parseJsonPayload(rawDataText(data));
@@ -398,11 +648,19 @@ function sanitizeClientWebSocketMessage(
   const clientMetadata = asRecord(parsed.client_metadata);
   const rawMetadata = clientMetadata?.["x-codex-turn-metadata"];
   const requestStartedAtMs = requestStartTimestamp(clientMetadata);
+  const model = boundedString(parsed.model) ?? undefined;
+  const serviceTier = boundedString(parsed.service_tier) ?? undefined;
   const metadata = typeof rawMetadata === "string"
     ? parseTurnMetadata(rawMetadata)
     : parseTurnMetadataObject(rawMetadata);
   if (!clientMetadata || rawMetadata === undefined) {
-    return { data, metadata, ...(requestStartedAtMs ? { requestStartedAtMs } : {}) };
+    return {
+      data,
+      metadata,
+      ...(requestStartedAtMs ? { requestStartedAtMs } : {}),
+      ...(model ? { model } : {}),
+      ...(serviceTier ? { serviceTier } : {}),
+    };
   }
   const sanitizedMetadata = { ...clientMetadata };
   delete sanitizedMetadata["x-codex-turn-metadata"];
@@ -410,6 +668,8 @@ function sanitizeClientWebSocketMessage(
     data: JSON.stringify({ ...parsed, client_metadata: sanitizedMetadata }),
     metadata,
     ...(requestStartedAtMs ? { requestStartedAtMs } : {}),
+    ...(model ? { model } : {}),
+    ...(serviceTier ? { serviceTier } : {}),
   };
 }
 
@@ -488,6 +748,29 @@ function isResponsesPath(value: string | undefined): boolean {
     return new URL(value, "http://127.0.0.1").pathname === "/responses";
   } catch {
     return false;
+  }
+}
+
+function isResponsesRequestPath(value: string | undefined): boolean {
+  if (!value) return false;
+  try {
+    const path = new URL(value, "http://127.0.0.1").pathname;
+    return path === "/responses" || path === "/responses/compact";
+  } catch {
+    return false;
+  }
+}
+
+function responseOperation(
+  value: string | undefined,
+): ProviderProxyMetrics["operation"] {
+  if (!value) return "response";
+  try {
+    return new URL(value, "http://127.0.0.1").pathname === "/responses/compact"
+      ? "compact"
+      : "response";
+  } catch {
+    return "response";
   }
 }
 

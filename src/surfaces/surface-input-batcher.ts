@@ -31,6 +31,7 @@ export interface SurfaceInputBatcherOptions {
   quietWindowMs?: number;
   maximumImages?: number;
   maximumImageBytes?: number;
+  onSubmissionFailure?(input: SurfaceInputPart, error: unknown): void;
 }
 
 type SubmitConversationInput = (
@@ -63,7 +64,7 @@ export class SurfaceInputBatcher {
 
   constructor(
     private readonly submit: SubmitConversationInput,
-    options: SurfaceInputBatcherOptions = {},
+    private readonly options: SurfaceInputBatcherOptions = {},
   ) {
     this.quietWindowMs = nonNegativeInteger(
       options.quietWindowMs ?? DEFAULT_QUIET_WINDOW_MS,
@@ -247,6 +248,13 @@ export class SurfaceInputBatcher {
         });
       });
     } catch (error) {
+      this.options.onSubmissionFailure?.({
+        target: batch.target,
+        actorId: parts[0]!.actorId,
+        sequence: parts[0]!.sequence,
+        text,
+        ...(localImages.length === 0 ? {} : { localImages }),
+      }, error);
       for (const part of parts) {
         part.reject(error);
       }

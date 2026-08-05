@@ -14,8 +14,17 @@ export interface DeepseekSetupBackResult {
   mode?: never;
 }
 
+export interface DeepseekSetupAutoCompactResult {
+  action: "auto-compact";
+  autoCompactPercent: number | undefined;
+  mode?: never;
+}
+
 export function runDeepseekSetup(options?: Record<string, unknown>): Promise<
-  DeepseekSetupResult | DeepseekSetupBackResult | undefined
+  | DeepseekSetupResult
+  | DeepseekSetupBackResult
+  | DeepseekSetupAutoCompactResult
+  | undefined
 >;
 export function downloadDeepseekCatalog(
   fetchImplementation: typeof fetch,

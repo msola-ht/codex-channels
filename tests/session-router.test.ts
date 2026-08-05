@@ -67,6 +67,76 @@ function threadPort(overrides: Partial<ThreadLifecyclePort> = {}): ThreadLifecyc
 }
 
 describe("SessionRouter", () => {
+  it("passes workspace permissions to startThread and resumeThread", async () => {
+    const store = new MemoryBindingStore();
+    const entitledRegistry = new WorkspaceRegistry([
+      {
+        id: "main",
+        name: "Main",
+        cwd: "/workspace",
+        sandbox: "workspace-write",
+        approvalPolicy: "never",
+      },
+      { id: "other", name: "Other", cwd: "/other" },
+    ], "main");
+    const started: unknown[] = [];
+    const resumed: unknown[] = [];
+    const client = threadPort({
+      listThreads: async () => [],
+      startThread: async (cwd, options) => {
+        started.push({ cwd, options });
+        return session(thread("new", { type: "idle" }));
+      },
+      resumeThread: async (threadId, cwd, options) => {
+        resumed.push({ threadId, cwd, options });
+        return session(thread(threadId, { type: "idle" }));
+      },
+      unsubscribeThread: async () => {},
+    });
+    const router = new SessionRouter(client, store, entitledRegistry);
+
+    await router.ensure(target);
+    await router.resume(target, "existing");
+
+    expect(started).toEqual([{
+      cwd: "/workspace",
+      options: { sandbox: "workspace-write", approvalPolicy: "never" },
+    }]);
+    expect(resumed).toEqual([{
+      threadId: "existing",
+      cwd: "/workspace",
+      options: { sandbox: "workspace-write", approvalPolicy: "never" },
+    }]);
+  });
+
+  it("passes a configured permission profile instead of sandbox", async () => {
+    const store = new MemoryBindingStore();
+    const entitledRegistry = new WorkspaceRegistry([
+      {
+        id: "main",
+        name: "Main",
+        cwd: "/workspace",
+        permissions: ":read-only",
+      },
+    ], "main");
+    const started: unknown[] = [];
+    const client = threadPort({
+      listThreads: async () => [],
+      startThread: async (cwd, options) => {
+        started.push({ cwd, options });
+        return session(thread("new", { type: "idle" }));
+      },
+    });
+    const router = new SessionRouter(client, store, entitledRegistry);
+
+    await router.ensure(target);
+
+    expect(started).toEqual([{
+      cwd: "/workspace",
+      options: { permissions: ":read-only" },
+    }]);
+  });
+
   it("forks the current Thread with provider options before replacing its binding", async () => {
     const store = new MemoryBindingStore();
     store.bind({ target, workspaceId: "main", threadId: "original", sessionId: "original" });

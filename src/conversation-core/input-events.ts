@@ -56,10 +56,25 @@ export type ConversationInputEvent =
       threadId: string;
       turnId: string;
       requestStartedAtMs: number;
+      requestDurationMs: number;
+      outcome?: "completed" | "interrupted" | "incomplete" | "failed";
+      retryableFailure?: boolean;
+      inputTokens?: number;
+      cachedInputTokens?: number;
+      outputTokens?: number;
+      reasoningOutputTokens?: number;
       ttftMs?: number;
       thinkingDurationMs?: number;
       outputDurationMs?: number;
       generationDurationMs?: number;
+      pricingCurrency?: string;
+      totalCostNanos?: number;
+      uncachedInputCostNanos?: number;
+      cachedInputCostNanos?: number;
+      outputCostNanos?: number;
+      uncachedInputPricePerMillionNanos?: number;
+      cachedInputPricePerMillionNanos?: number;
+      outputPricePerMillionNanos?: number;
     }
   | {
       type: "item.userMessage";

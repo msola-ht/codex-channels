@@ -19,8 +19,15 @@ import {
   formatRateLimitWindow,
   formatResetTime,
 } from "./account-format.js";
-import { formatElapsedSeconds } from "./elapsed-duration.js";
-import { formatProviderLabel } from "./provider-format.js";
+import {
+  formatElapsedSeconds,
+} from "./elapsed-duration.js";
+import { toStructuredMarkdownList } from "./markdown-list.js";
+import { formatCodexProviderLabel } from "./provider-format.js";
+import {
+  formatCacheHitRate,
+  formatTokenCount,
+} from "./token-format.js";
 
 const maximumSessionEntries = 20;
 const maximumSessionLabelCharacters = 48;
@@ -36,6 +43,7 @@ export const conversationCommandDescriptions = {
   unpin: "取消固定当前会话",
   status: "查看当前状态",
   workspace: "列出或切换 Workspace",
+  "workspace-perm": "查看或修改当前工作区权限",
   stop: "停止当前任务",
   queue: "排到下一 Turn",
   rename: "命名当前会话",
@@ -43,12 +51,13 @@ export const conversationCommandDescriptions = {
   fork: "分叉当前会话",
   review: "启动代码审查",
   model: "查看或切换模型",
-  effort: "查看或切换思考强度",
+  effort: "查看或切换思考等级",
   fast: "查看或切换 Fast 模式",
   skill: "查看或调用 Skill",
   mcp: "列出 MCP Servers",
   plugins: "列出 Plugins",
   usage: "查看账号用量",
+  metrics: "查看会话、聚合或异常请求指标",
   limits: "查看套餐与额度",
   permissions: "查看权限配置",
   rules: "生成或检查项目规则",
@@ -71,7 +80,7 @@ export const conversationCommandHelpSections = [
   {
     title: "运行与项目：",
     lines: [
-      "/status · /workspace [序号|ID|名称]",
+      "/status · /workspace [序号|ID|名称] · /workspace-perm",
       "/stop · /queue <描述>",
       "/review [branch <分支>|commit <SHA>|custom <说明>]",
       "/rules <init|check> · /diff",
@@ -83,9 +92,11 @@ export const conversationCommandHelpSections = [
     lines: [
       "/model [序号|模型 ID|名称]",
       "/effort [序号|档位] · /fast [on|off|status]",
-      "/skill [名称或序号 任务]",
+      "/skill · /skills [名称或序号 任务]",
       "/mcp · /plugins",
       "/usage · /limits · /permissions",
+      "/metrics session",
+      "/metrics <global|providers|models|errors> [24h|7d|30d]",
     ],
   },
   {
@@ -105,6 +116,8 @@ export const conversationCommandHelpLines = conversationCommandHelpSections
     "",
   ]);
 
+export { toStructuredMarkdownList } from "./markdown-list.js";
+
 export function formatConversationSessions(
   result: Extract<ConversationCommandResult, { kind: "sessions" }>,
 ): string {
@@ -117,7 +130,7 @@ export function formatConversationSessions(
   const hiddenCount = result.sessions.length - visibleSessions.length;
   const searchCommand = result.archived ? "archived" : "sessions";
   const backgroundThreadIds = new Set(result.backgroundThreadIds ?? []);
-  return [
+  return toStructuredMarkdownList([
     `${result.archived ? "已归档会话" : "历史会话"}（${result.sessions.length}）${result.searchTerm ? ` · 搜索：${result.searchTerm}` : ""}：`,
     ...visibleSessions.map(
       (session, index) =>
@@ -133,7 +146,17 @@ export function formatConversationSessions(
     result.archived
       ? "恢复归档：/unarchive <序号、名称或 Thread ID>"
       : "恢复：/resume <序号、名称或 Thread ID>",
-  ].join("\n");
+  ].join("\n"));
+}
+
+function formatSessionLabel(value: string): string {
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  if (!normalized) {
+    return "未命名";
+  }
+  return normalized.length > maximumSessionLabelCharacters
+    ? `${normalized.slice(0, maximumSessionLabelCharacters - 1)}…`
+    : normalized;
 }
 
 export function formatConversationCommandOutcome(
@@ -142,50 +165,106 @@ export function formatConversationCommandOutcome(
   switch (outcome.type) {
     case "thread.resumed":
       return outcome.transferredFrom
-        ? `${formatTakeoverSource(outcome.transferredFrom)}\nThread：${outcome.threadId}`
-        : [
+        ? toStructuredMarkdownList([
+            formatTakeoverSource(outcome.transferredFrom),
+            `Thread：${outcome.threadId}`,
+          ].join("\n"))
+        : toStructuredMarkdownList([
             "已恢复 Codex Thread",
             `Thread：${outcome.threadId}`,
             ...(outcome.backgroundedThreadId
               ? [`原任务已转入后台：${outcome.backgroundedThreadId}`]
               : []),
-          ].join("\n");
+          ].join("\n"));
     case "session.new":
       return outcome.backgroundedThreadId
-        ? `已切换到新会话，原任务继续在后台运行。\n后台 Thread：${outcome.backgroundedThreadId}\n下一条普通消息将创建新的 Codex Thread。`
-        : "已退出当前会话，下一条普通消息将创建新的 Codex Thread。";
+        ? toStructuredMarkdownList([
+            "已切换到新会话，原任务继续在后台运行。",
+            `后台 Thread：${outcome.backgroundedThreadId}`,
+            "下一条普通消息将创建新的 Codex Thread。",
+          ].join("\n"))
+        : toStructuredMarkdownList([
+            "已退出当前会话，下一条普通消息将创建新的 Codex Thread。",
+          ].join("\n"));
     case "thread.archived":
-      return `已归档 Codex Thread\nThread：${outcome.threadId}\n下一条普通消息将创建新会话。`;
+      return toStructuredMarkdownList([
+        "已归档 Codex Thread",
+        `Thread：${outcome.threadId}`,
+        "下一条普通消息将创建新会话。",
+      ].join("\n"));
     case "thread.unarchived":
-      return `已取消归档并切换会话\nThread：${outcome.threadId}`;
+      return toStructuredMarkdownList([
+        "已取消归档并切换会话",
+        `Thread：${outcome.threadId}`,
+      ].join("\n"));
     case "thread.pin-updated":
-      return outcome.pinned ? "已固定当前会话。" : "已取消固定当前会话。";
+      return toStructuredMarkdownList([
+        outcome.pinned ? "已固定当前会话。" : "已取消固定当前会话。",
+      ].join("\n"));
     case "workspace.selected":
-      return `已切换 Workspace\nWorkspace：${outcome.workspace.name}\n工作目录：${outcome.workspace.cwd}`;
+      return toStructuredMarkdownList([
+        "已切换 Workspace",
+        `Workspace：${outcome.workspace.name}`,
+        `工作目录：${outcome.workspace.cwd}`,
+      ].join("\n"));
+    case "workspace.permissions-updated":
+      return toStructuredMarkdownList([
+        "已更新工作区权限",
+        `Workspace：${outcome.workspace.name}`,
+        ...workspacePermissionLines(outcome.workspace),
+        "",
+        "权限已热加载；对新建或恢复的 Thread 生效，不改变已绑定 Thread。",
+      ].join("\n"));
     case "turn.stop-requested":
       return outcome.stopped
-        ? "已请求停止当前任务。"
-        : "当前没有运行中的任务。";
+        ? toStructuredMarkdownList(["已请求停止当前任务。"].join("\n"))
+        : toStructuredMarkdownList(["当前没有运行中的任务。"].join("\n"));
     case "turn.follow-up-queued":
-      return `已排到下一 Turn，当前第 ${outcome.position} 条。队列仅保存在内存，Gateway 重启会清空。`;
+      return toStructuredMarkdownList([
+        `已排到下一 Turn，当前第 ${outcome.position} 条。队列仅保存在内存，Gateway 重启会清空。`,
+      ].join("\n"));
     case "thread.renamed":
-      return `会话已重命名\n名称：${outcome.name}`;
+      return toStructuredMarkdownList([
+        "会话已重命名",
+        `名称：${outcome.name}`,
+      ].join("\n"));
     case "thread.compaction-requested":
-      return "已请求压缩当前 Codex Thread。进度将通过标准事件返回。";
+      return toStructuredMarkdownList([
+        "已请求压缩当前 Codex Thread。进度将通过标准事件返回。",
+      ].join("\n"));
     case "thread.forked":
-      return `已分叉并切换到新会话\nThread：${outcome.threadId}`;
+      return toStructuredMarkdownList([
+        "已分叉并切换到新会话",
+        `Thread：${outcome.threadId}`,
+      ].join("\n"));
     case "review.started":
-      return `已启动 Codex Review\nTurn：${outcome.turnId}`;
+      return toStructuredMarkdownList([
+        "已启动 Codex Review",
+        `Turn：${outcome.turnId}`,
+      ].join("\n"));
     case "plan.started":
-      return `已进入 Plan 模式并开始规划\nTurn：${outcome.turnId}`;
+      return toStructuredMarkdownList([
+        "已进入 Plan 模式并开始规划",
+        `Turn：${outcome.turnId}`,
+      ].join("\n"));
     case "skill.started":
       return outcome.steered
-        ? `已把 Skill 追加到当前任务\nSkill：${outcome.skillName}`
-        : `已使用 Skill 开始任务\nSkill：${outcome.skillName}\nTurn：${outcome.turnId}`;
+        ? toStructuredMarkdownList([
+            "已把 Skill 追加到当前任务",
+            `Skill：${outcome.skillName}`,
+          ].join("\n"))
+        : toStructuredMarkdownList([
+            "已使用 Skill 开始任务",
+            `Skill：${outcome.skillName}`,
+            `Turn：${outcome.turnId}`,
+          ].join("\n"));
     case "goal.cleared":
-      return "已清除当前 Thread Goal。";
+      return toStructuredMarkdownList(["已清除当前 Thread Goal。"].join("\n"));
     case "goal.updated":
-      return `Goal 已设置\n目标：${outcome.goal.objective}`;
+      return toStructuredMarkdownList([
+        "Goal 已设置",
+        `目标：${outcome.goal.objective}`,
+      ].join("\n"));
   }
 }
 
@@ -205,15 +284,73 @@ function formatTakeoverSource(surface: string): string {
 export function formatConversationWorkspaces(
   result: Extract<ConversationCommandResult, { kind: "workspaces" }>,
 ): string {
-  return [
+  return toStructuredMarkdownList([
     `Workspace（${result.workspaces.length}）：`,
     ...result.workspaces.flatMap((workspace, index) => [
       `${index + 1}. ${workspace.name} · ${workspace.id}${workspace.id === result.currentWorkspaceId ? " ← 当前" : ""}`,
       workspace.cwd,
+      ...workspacePermissionLines(workspace),
     ]),
     "",
     "切换：/workspace <序号、ID 或名称>",
-  ].join("\n");
+  ].join("\n"));
+}
+
+export function formatConversationWorkspacePermissions(
+  result: Extract<
+    ConversationCommandResult,
+    { kind: "workspace-permissions" }
+  >,
+): string {
+  const permissionLines = workspacePermissionLines(result.workspace);
+  return toStructuredMarkdownList([
+    `工作区权限（${result.workspace.name} · ${result.workspace.id}）：`,
+    ...(permissionLines.length > 0
+      ? permissionLines
+      : ["未配置（使用全局默认）"]),
+    "",
+    "修改：",
+    "- /workspace-perm sandbox <read-only|workspace-write|danger-full-access|clear>",
+    "- /workspace-perm approval <untrusted|on-request|never|clear>",
+    "- /workspace-perm profile <Profile ID|clear>",
+    "权限热加载后对新建或恢复的 Thread 生效，不改变已绑定 Thread。",
+  ].join("\n"));
+}
+
+function workspacePermissionLines(
+  workspace: Extract<ConversationCommandResult, { kind: "workspaces" }>["workspaces"][number],
+): string[] {
+  const lines: string[] = [];
+  if (workspace.sandbox !== undefined) {
+    lines.push(`  - 沙箱：${workspaceSandboxLabel(workspace.sandbox)}`);
+  }
+  if (workspace.approvalPolicy !== undefined) {
+    lines.push(`  - 审批：${workspaceApprovalPolicyLabel(workspace.approvalPolicy)}`);
+  }
+  if (workspace.permissions !== undefined) {
+    lines.push(`  - 权限 Profile：${workspace.permissions}`);
+  }
+  return lines;
+}
+
+function workspaceSandboxLabel(
+  sandbox: "read-only" | "workspace-write" | "danger-full-access",
+): string {
+  return ({
+    "read-only": "只读",
+    "workspace-write": "工作区写",
+    "danger-full-access": "完全访问",
+  } as const)[sandbox];
+}
+
+function workspaceApprovalPolicyLabel(
+  policy: "untrusted" | "on-request" | "never",
+): string {
+  return ({
+    untrusted: "不信任",
+    "on-request": "按需审批",
+    never: "免审批",
+  } as const)[policy];
 }
 
 export function formatConversationSkills(
@@ -221,26 +358,26 @@ export function formatConversationSkills(
 ): string {
   return result.entries.length === 0
     ? "当前没有已启用的 Skills。"
-    : [
+    : toStructuredMarkdownList([
         `已安装 Skills（${result.entries.length}）：`,
         ...result.entries.map(
           (skill, index) => `${index + 1}. ${skill.name}：${skill.description}`,
         ),
         "",
         "使用：/skill <名称或序号> <任务>",
-      ].join("\n");
+      ].join("\n"));
 }
 
 export function formatConversationMcp(
   result: Extract<ConversationCommandResult, { kind: "mcp" }>,
 ): string {
-  return [
+  return toStructuredMarkdownList([
     `MCP Servers（${result.servers.length}）：`,
     ...result.servers.map(
       (server) =>
         `- ${server.name} · auth=${server.authStatus} · tools=${server.toolCount}`,
     ),
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function formatConversationPlugins(
@@ -248,32 +385,32 @@ export function formatConversationPlugins(
 ): string {
   return result.result.length === 0
     ? "当前没有已安装 Plugins。"
-    : [
+    : toStructuredMarkdownList([
         `已安装 Plugins（${result.result.length}）：`,
         ...result.result.map(
           (plugin) =>
             `- ${plugin.name} · ${plugin.enabled ? "已启用" : "未启用"}`,
         ),
-      ].join("\n");
+      ].join("\n"));
 }
 
 export function formatConversationPermissions(
   result: Extract<ConversationCommandResult, { kind: "permissions" }>,
 ): string {
-  return [
+  return toStructuredMarkdownList([
     "当前 Gateway 固定使用配置中的 read-only 或 workspace-write。",
     "可用 Permission Profiles：",
     ...result.profiles.map(
       (profile) =>
         `- ${profile.id} · ${profile.allowed ? "允许" : "受策略禁止"}${profile.description ? ` · ${profile.description}` : ""}`,
     ),
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function formatConversationProjectRules(
   result: Extract<ConversationCommandResult, { kind: "project-rules" }>,
 ): string {
-  return [
+  return toStructuredMarkdownList([
     result.action === "initialized"
       ? "项目规则已生成并检查通过"
       : "项目规则检查通过",
@@ -282,7 +419,7 @@ export function formatConversationProjectRules(
     ...(result.action === "initialized"
       ? ["重启 Codex/App Server 后生效；Gateway 无需重启。"]
       : []),
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function formatConversationArtifacts(
@@ -301,25 +438,25 @@ export function formatConversationCollaborationMode(
   result: Extract<ConversationCommandResult, { kind: "collaboration-mode" }>,
 ): string {
   const label = result.state.mode === "plan" ? "Plan" : "Default";
-  return [
+  return toStructuredMarkdownList([
     `协作模式：${label}${result.state.pending ? "（下一次 Turn 生效）" : ""}`,
     "",
     result.state.mode === "plan"
       ? "下一条普通消息将按 Plan 模式处理；再次发送 /plan 可切回 Default。"
       : "下一条普通消息将按 Default 模式处理；发送 /plan 可切换到 Plan。",
     "也可发送 /plan <规划需求>，直接进入 Plan 并开始规划。",
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function formatConversationGoal(
   result: Extract<ConversationCommandResult, { kind: "goal" }>,
 ): string {
   return result.goal
-    ? [
+    ? toStructuredMarkdownList([
         `当前 Goal：${result.goal.objective}`,
         `状态：${formatGoalStatus(result.goal.status)}`,
         `Tokens：${formatGoalTokens(result.goal)}`,
-      ].join("\n")
+      ].join("\n"))
     : "当前 Thread 没有 Goal。使用 /goal set <目标> 设置。";
 }
 
@@ -333,35 +470,35 @@ export function formatConversationModels(
     ? ["提供商切换将在下一条消息中创建新 Thread；当前 Thread 会保留，可通过 /resume 恢复。", ""]
     : [];
   if (result.view === "fast") {
-    return [
+    return toStructuredMarkdownList([
       `当前模型：${state.model}${state.modelPending ? "（下一次 Turn 生效）" : ""}`,
       `Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
       `模型支持：${current && fastServiceTierId(current) ? "支持 Fast" : "不支持 Fast"}`,
       "",
       "切换：/fast [on|off|status]",
-    ].join("\n");
+    ].join("\n"));
   }
   if (result.view === "effort") {
-    return [
+    return toStructuredMarkdownList([
       `当前模型：${state.model}`,
-      `当前思考强度：${state.effort ?? current?.defaultReasoningEffort ?? "模型默认"}${state.effortPending ? "（下一次 Turn 生效）" : ""}`,
+      `当前思考等级：${state.effort ?? current?.defaultReasoningEffort ?? "模型默认"}${state.effortPending ? "（下一次 Turn 生效）" : ""}`,
       ...(current && fastServiceTierId(current)
         ? [`Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
         : []),
       "",
       ...providerSwitchNotice,
-      "可用思考强度：",
+      "可用思考等级：",
       ...(current?.supportedReasoningEfforts ?? []).map(
         (option, index) =>
           `${index + 1}. ${option.effort}${option.effort === state.effort ? " ← 当前" : ""} · ${option.description}`,
       ),
       "",
       "切换：/effort <序号或档位>",
-    ].join("\n");
+    ].join("\n"));
   }
-  return [
+  return toStructuredMarkdownList([
     `当前模型：${state.model}${state.modelPending ? "（下一次 Turn 生效）" : ""}`,
-    `思考强度：${state.effort ?? "模型默认"}`,
+    `思考等级：${state.effort ?? "模型默认"}`,
     ...(current && fastServiceTierId(current)
       ? [`Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
       : []),
@@ -374,18 +511,18 @@ export function formatConversationModels(
     ),
     "",
     "切换：/model <序号、模型 ID 或名称>",
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function formatConversationUsage(
   result: Extract<ConversationCommandResult, { kind: "usage" }>,
 ): string {
   if (result.result.kind === "unsupported") {
-    return `${formatProviderLabel(result.result.provider)} 暂不支持账户用量查询。当前 Thread 的 Token 与上下文仍可通过 /status 查看。`;
+    return `${formatCodexProviderLabel(result.result.provider)} 暂不支持账户用量查询。当前 Thread 的 Token 与上下文仍可通过 /status 查看。`;
   }
   if (result.result.kind === "balance") {
-    return [
-      `${formatProviderLabel(result.result.provider)} 账户余额：`,
+    return toStructuredMarkdownList([
+      `${formatCodexProviderLabel(result.result.provider)} 账户余额：`,
       `API 可用：${result.result.available ? "是" : "否"}`,
       ...(result.result.balances.length === 0
         ? ["暂无余额信息"]
@@ -396,12 +533,12 @@ export function formatConversationUsage(
             `赠金余额：${balance.grantedBalance}`,
             `充值余额：${balance.toppedUpBalance}`,
           ])),
-    ].join("\n");
+    ].join("\n"));
   }
   const daily = [...result.result.usage.daily]
     .sort((left, right) => right.startDate.localeCompare(left.startDate))
     .slice(0, 7);
-  return [
+  return toStructuredMarkdownList([
     "OpenAI Codex 账户用量摘要：",
     `累计 Tokens：${formatMillions(result.result.usage.summary.lifetimeTokens)}`,
     `单日峰值：${formatMillions(result.result.usage.summary.peakDailyTokens)}`,
@@ -415,19 +552,19 @@ export function formatConversationUsage(
       : daily.map(
           (entry) => `- ${entry.startDate}：${formatMillions(entry.tokens)}`,
         )),
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function formatConversationLimits(
   result: Extract<ConversationCommandResult, { kind: "limits" }>,
 ): string {
   if (result.result.kind === "unsupported") {
-    return `${formatProviderLabel(result.result.provider)} 暂不支持账户限额查询。可使用 /usage 查看该提供商已接入的账户信息。`;
+    return `${formatCodexProviderLabel(result.result.provider)} 暂不支持账户限额查询。可使用 /usage 查看该提供商已接入的账户信息。`;
   }
   const planType = result.result.limits.limits.find(
     (limit) => limit.planType,
   )?.planType;
-  return [
+  return toStructuredMarkdownList([
     "OpenAI Codex 额度：",
     `套餐：${planType ? formatPlanType(planType) : "未知"}`,
     ...result.result.limits.limits.flatMap((limit) => [
@@ -459,7 +596,7 @@ export function formatConversationLimits(
     ...(result.result.limits.resetCreditsAvailable === null
       ? []
       : ["", `可用额度重置券：${result.result.limits.resetCreditsAvailable}`]),
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function formatConversationStatus(status: ConversationStatus): string {
@@ -471,8 +608,8 @@ export function formatConversationStatus(status: ConversationStatus): string {
     `工作目录：${status.cwd}`,
     `Git 分支：${status.gitBranch ?? "未检测到"}`,
     `模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
-    `提供商：${formatProviderLabel(status.modelProvider ?? "openai")}`,
-    `思考强度：${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
+    `提供商：${formatCodexProviderLabel(status.modelProvider)}`,
+    `思考等级：${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
     ...(usesOpenAiAccount(status.modelProvider)
       ? [`Fast 模式：${status.threadId ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭") : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`]
       : []),
@@ -493,18 +630,17 @@ export function formatConversationStatus(status: ConversationStatus): string {
     lines.push(
       "",
       "当前 Thread 用量：",
-      `累计：${formatTokenCount(total.totalTokens)}`,
-      `最近模型请求：${formatTokenCount(last.totalTokens)}`,
-      `输入总计：${formatTokenCount(total.inputTokens)}`,
-      `命中缓存：${formatTokenCount(total.cachedInputTokens)}`,
-      `未命中缓存：${formatTokenCount(Math.max(0, total.inputTokens - total.cachedInputTokens))}`,
-      `缓存命中率：${formatCacheHitRate(total.inputTokens, total.cachedInputTokens)}`,
+      `- **Token**：${formatTokenCount(total.totalTokens)}`,
+      `  - 最近模型请求：${formatTokenCount(last.totalTokens)}`,
+      `  - 输入命中缓存：${formatTokenCount(total.cachedInputTokens)}`,
+      `  - 输入未命中缓存：${formatTokenCount(Math.max(0, total.inputTokens - total.cachedInputTokens))}`,
+      `  - 缓存命中率：${formatCacheHitRate(total.inputTokens, total.cachedInputTokens)}`,
       ...(total.cacheWriteInputTokens > 0
-        ? [`缓存写入：${formatTokenCount(total.cacheWriteInputTokens)}`]
+        ? [`  - 缓存写入：${formatTokenCount(total.cacheWriteInputTokens)}`]
         : []),
-      `输出：${formatTokenCount(total.outputTokens)}`,
-      `其中推理输出：${formatTokenCount(total.reasoningOutputTokens)}`,
-      `Codex 有效上下文窗口：${modelContextWindow === null ? "未知" : formatTokenCount(modelContextWindow)}`,
+      `  - 输出：${formatTokenCount(total.outputTokens)}`,
+      `  - 其中推理输出：${formatTokenCount(total.reasoningOutputTokens)}`,
+      `  - Codex 有效上下文窗口：${modelContextWindow === null ? "未知" : formatTokenCount(modelContextWindow)}`,
     );
   } else if (status.threadId) {
     lines.push("", "当前 Thread 用量：等待 App Server 推送统计");
@@ -512,18 +648,10 @@ export function formatConversationStatus(status: ConversationStatus): string {
   if (usesOpenAiAccount(status.modelProvider) && status.weeklyLimit) {
     lines.push(`周限：${formatRemainingRateLimitWindow(status.weeklyLimit)}`);
   }
-  return lines.join("\n");
+  return toStructuredMarkdownList(lines.join("\n"));
 }
 
-function formatSessionLabel(value: string): string {
-  const normalized = value.replace(/\s+/gu, " ").trim();
-  if (!normalized) {
-    return "未命名";
-  }
-  return normalized.length > maximumSessionLabelCharacters
-    ? `${normalized.slice(0, maximumSessionLabelCharacters - 1)}…`
-    : normalized;
-}
+export { formatConversationMetrics } from "./metrics-format.js";
 
 function formatGoalStatus(status: ThreadGoal["status"]): string {
   switch (status) {
@@ -567,35 +695,6 @@ function formatDuration(seconds: number): string {
       ? [`${remainder}秒`]
       : []),
   ].join("");
-}
-
-function formatTokenCount(value: number): string {
-  if (Math.abs(value) >= 1_000_000) {
-    return `${(value / 1_000_000).toLocaleString("zh-CN", {
-      maximumFractionDigits: 2,
-    })} M`;
-  }
-  if (Math.abs(value) >= 1_000) {
-    return `${(value / 1_000).toLocaleString("zh-CN", {
-      maximumFractionDigits: 2,
-    })} K`;
-  }
-  return value.toLocaleString("zh-CN");
-}
-
-function formatCacheHitRate(
-  inputTokens: number,
-  cachedInputTokens: number,
-): string {
-  return inputTokens > 0
-    ? `${Math.max(
-        0,
-        cachedInputTokens / inputTokens * 100,
-      ).toLocaleString("zh-CN", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      })}%`
-    : "未知";
 }
 
 function formatAccountLimitWindow(

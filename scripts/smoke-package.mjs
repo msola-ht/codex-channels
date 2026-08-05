@@ -49,16 +49,18 @@ try {
   }
   if (
     !help.includes("setup ")
+    || !help.includes("config ")
     || !help.includes("doctor ")
     || !help.includes("service install")
     || !help.includes("service reload")
     || !help.includes("service logs")
-    || !help.includes("rules init")
+    || !help.includes("rules <init|check>")
+    || !help.includes("metrics <run|turns|threads|report|export|status|reset>")
   ) {
     throw new Error("CLI 帮助缺少公开命令");
   }
   if (
-    !workspaceHelp.includes("用法：codexc ws")
+    !workspaceHelp.includes("用法：codexc work")
     || !rulesHelp.includes("用法：codexc rules init")
     || !serviceHelp.includes("gateway|app-server|all")
   ) {
@@ -77,6 +79,7 @@ try {
     "systemd/codex-connect-app-server.service.template",
     "systemd/codex-connect-gateway.service.template",
     "scripts/install-systemd.mjs",
+    "scripts/metrics-database.mjs",
     "scripts/systemd-control.sh",
   ]) {
     if (!existsSync(join(installedPackage, requiredFile))) {
@@ -109,6 +112,16 @@ try {
   };
   const validator = join(installedPackage, "scripts", "validate-config.mjs");
   run(process.execPath, [validator], temporaryDirectory, configEnvironment, true);
+  const metricsStatus = run(
+    command,
+    ["metrics", "status"],
+    temporaryDirectory,
+    configEnvironment,
+    true,
+  ).stdout;
+  if (!metricsStatus.includes("状态：尚未创建")) {
+    throw new Error("tarball 安装后的 metrics status 不可用");
+  }
   writeFileSync(
     configPath,
     `legacy_setting = true\n${readFileSync(configPath, "utf8")}`,

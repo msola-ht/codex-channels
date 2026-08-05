@@ -7,6 +7,7 @@ import {
 } from "../src/application/conversation-service.js";
 import type { ModelSelectionService } from "../src/application/model-selection-service.js";
 import type { CollaborationModeSelectionService } from "../src/application/collaboration-mode-service.js";
+import type { RequestMetricsQueryPort } from "../src/application/request-metrics-port.js";
 import type { TurnExecutionPort } from "../src/application/turn-port.js";
 import {
   ConversationCore,
@@ -57,6 +58,56 @@ function queryPort(overrides: Partial<ConversationQueryPort> = {}): Conversation
 }
 
 describe("ConversationService model selection", () => {
+  it("queries global metrics without requiring a current Thread", () => {
+    const report = {
+      view: "global" as const,
+      range: "7d" as const,
+      startAtMs: 1,
+      endAtMs: 2,
+      aggregate: null,
+      groups: [],
+      totalGroupCount: 0,
+    };
+    const errorReport = {
+      view: "errors" as const,
+      range: "24h" as const,
+      startAtMs: 1,
+      endAtMs: 2,
+      requestCount: 3,
+      unsuccessfulRequestCount: 1,
+      groups: [],
+      totalGroupCount: 0,
+    };
+    const metrics = {
+      forThread: vi.fn(),
+      aggregate: vi.fn(() => report),
+      errors: vi.fn(() => errorReport),
+    } satisfies RequestMetricsQueryPort;
+    const service = new ConversationService(
+      turnPort(),
+      { current: () => undefined } as unknown as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      metrics,
+    );
+
+    expect(service.requestMetrics(target, { view: "session" })).toBeNull();
+    expect(service.requestMetrics(target, { view: "global", range: "7d" }))
+      .toEqual(report);
+    expect(metrics.aggregate).toHaveBeenCalledWith("global", "7d");
+    expect(service.requestMetrics(target, { view: "errors", range: "24h" }))
+      .toEqual(errorReport);
+    expect(metrics.errors).toHaveBeenCalledWith("24h");
+    expect(metrics.forThread).not.toHaveBeenCalled();
+  });
+
   it("reflects confirmed Goal set and clear results in status immediately", async () => {
     const goal = {
       threadId: "thread-1",
@@ -794,6 +845,13 @@ describe("ConversationService model selection", () => {
       {
         ensure: async () => ({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }),
         workspace: () => main,
+        modelSettingsForThread: () => ({
+          model: "deepseek-v4-flash",
+          modelProvider: "deepseek",
+          effort: "high",
+          serviceTier: null,
+          collaborationMode: "default",
+        }),
       } as unknown as SessionRouter,
       { activeTurn: () => undefined, markTurnStarted: vi.fn() } as unknown as ConversationCore,
       {
@@ -918,8 +976,21 @@ describe("ConversationService model selection", () => {
     const service = new ConversationService(
       turnPort({ startTurn }),
       {
+        current: () => ({
+          target,
+          workspaceId: "main",
+          threadId: "thread-1",
+          sessionId: "session-1",
+        }),
         ensure: async () => ({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }),
         workspace: () => main,
+        modelSettingsForThread: () => ({
+          model: "deepseek-v4-flash",
+          modelProvider: "deepseek",
+          effort: "high",
+          serviceTier: null,
+          collaborationMode: "default",
+        }),
       } as unknown as SessionRouter,
       {
         activeTurn: () => undefined,
@@ -970,11 +1041,14 @@ describe("ConversationService model selection", () => {
       images: [{ path: "/private/uploads/screenshot.png" }],
       userPrompt: "解释错误",
       onRequestStarted: expect.any(Function),
+      threadId: "thread-1",
+      reasoningEffort: "high",
     });
     expect(visionStarted).toHaveBeenCalledWith(target, {
       imageCount: 1,
     });
     expect(visionCompleted).toHaveBeenCalledWith(target, {
+      provider: "OpenAI",
       model: "vision-model",
       elapsedMs: 31_000,
       upstreamDurationMs: 30_000,
@@ -1024,6 +1098,7 @@ describe("ConversationService model selection", () => {
     const service = new ConversationService(
       turnPort({ startTurn: vi.fn().mockResolvedValue({ turnId: "turn-1" }) }),
       {
+        current: () => undefined,
         ensure: async (currentTarget: typeof target) => ({
           target: currentTarget,
           workspaceId: "main",

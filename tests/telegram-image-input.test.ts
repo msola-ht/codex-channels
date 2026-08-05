@@ -151,6 +151,7 @@ describe("Telegram image input", () => {
     });
 
     expect(sentTexts.some((text) => text.includes("图片识别要求已记录"))).toBe(true);
+    expect(sentTexts.some((text) => text.includes("Gateway 处理"))).toBe(false);
     expect(submit).toHaveBeenCalledWith(
       { surface: "telegram", accountId: "default", conversationId: "100" },
       {
@@ -158,6 +159,38 @@ describe("Telegram image input", () => {
         localImages: [{ path: "/private/uploads/error.jpg" }],
       },
     );
+    await surface.stop();
+    await output.close();
+  });
+
+  it("shows /vision delivery and Gateway handling latency", async () => {
+    const now = vi.fn()
+      .mockReturnValueOnce(1_200)
+      .mockReturnValueOnce(1_450);
+    const { surface, output, sentTexts } = createSurface(
+      vi.fn(),
+      vi.fn(),
+      {},
+      vi.fn(),
+      vi.fn(),
+      now,
+      true,
+    );
+
+    await surface.bot.handleUpdate({
+      update_id: 103,
+      message: {
+        message_id: 103,
+        date: 1,
+        from: telegramUser(),
+        chat: telegramChat(),
+        text: "/vision 2 比较两张图片",
+        entities: [{ offset: 0, length: 7, type: "bot_command" }],
+      },
+    });
+
+    expect(sentTexts[0]).toContain("接收延迟：</b>200毫秒");
+    expect(sentTexts[0]).toContain("Gateway 处理：</b>250毫秒");
     await surface.stop();
     await output.close();
   });
@@ -788,6 +821,8 @@ function createSurface(
   serviceOverrides: Record<string, unknown> = {},
   downloadTextFile: ReturnType<typeof vi.fn> = vi.fn(),
   downloadAudio: ReturnType<typeof vi.fn> = vi.fn(),
+  now?: () => number,
+  debugEnabled = false,
 ): {
   surface: TelegramSurface;
   output: EventBus<OutputEvent>;
@@ -816,6 +851,21 @@ function createSurface(
   const directory = mkdtempSync(join(tmpdir(), "codex-telegram-surface-"));
   const rememberActor = vi.fn();
   directories.push(directory);
+  const surfaceOptions = {
+    gatewayVersion: "0.146.0",
+    inputQuietWindowMs: 0,
+    imageStore,
+    audioStore,
+    textFileInput: {
+      download: downloadTextFile as unknown as TelegramTextFilePort["download"],
+    },
+    actorRegistry: {
+      actors: () => [],
+      rememberActor,
+    },
+    ...(now === undefined ? {} : { now }),
+    debugEnabled,
+  };
   const surface = new TelegramSurface(
     "123:token",
     undefined,
@@ -825,19 +875,7 @@ function createSurface(
     [{ id: "main", name: "Main", cwd: "/workspace" }],
     directory,
     pino({ level: "silent" }),
-    {
-      gatewayVersion: "0.146.0",
-      inputQuietWindowMs: 0,
-      imageStore,
-      audioStore,
-      textFileInput: {
-        download: downloadTextFile as unknown as TelegramTextFilePort["download"],
-      },
-      actorRegistry: {
-        actors: () => [],
-        rememberActor,
-      },
-    },
+    surfaceOptions,
   );
   output.subscribe("telegram-test-output", (event) => {
     surface.output.handle(event);

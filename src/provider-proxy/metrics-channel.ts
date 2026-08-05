@@ -189,8 +189,25 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
   }
   const record = parsed as Record<string, unknown>;
   if (
-    !nullableString(record.threadId)
+    !oneOf(record.transport, ["http", "websocket"])
+    || !oneOf(record.responseFormat, ["sse", "json", "websocket", "unknown"])
+    || !oneOf(record.operation, ["response", "compact"])
+    || !nullableString(record.threadId)
     || !nullableString(record.turnId)
+    || !nullableString(record.model)
+    || !nullableString(record.serviceTier)
+    || !oneOf(record.status, ["completed", "failed", "incomplete", "unknown"])
+    || !nullableHttpStatus(record.httpStatus)
+    || !nullableString(record.errorType)
+    || !nullableString(record.errorCode)
+    || !nullableString(record.incompleteReason)
+    || !nullableTokenCount(record.inputTokens)
+    || !nullableTokenCount(record.cachedInputTokens)
+    || !nullableTokenCount(record.outputTokens)
+    || !nullableTokenCount(record.reasoningOutputTokens)
+    || !nullableTokenCount(record.totalTokens)
+    || !nullableFiniteNumber(record.upstreamCreatedAt)
+    || !nullableFiniteNumber(record.upstreamCompletedAt)
     || !finiteNumber(record.requestStartedAtMs)
     || !nullableFiniteNumber(record.firstTokenAtMs)
     || !nullableFiniteNumber(record.firstReasoningDeltaAtMs)
@@ -204,6 +221,10 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
   return record as unknown as ProviderProxyMetrics;
 }
 
+function oneOf(value: unknown, allowed: readonly string[]): boolean {
+  return typeof value === "string" && allowed.includes(value);
+}
+
 function nullableString(value: unknown): boolean {
   return value === null || (typeof value === "string" && value.length <= 128);
 }
@@ -214,6 +235,16 @@ function finiteNumber(value: unknown): boolean {
 
 function nullableFiniteNumber(value: unknown): boolean {
   return value === null || finiteNumber(value);
+}
+
+function nullableTokenCount(value: unknown): boolean {
+  return value === null
+    || (typeof value === "number" && Number.isSafeInteger(value) && value >= 0);
+}
+
+function nullableHttpStatus(value: unknown): boolean {
+  return value === null
+    || (typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599);
 }
 
 function asError(error: unknown): Error {

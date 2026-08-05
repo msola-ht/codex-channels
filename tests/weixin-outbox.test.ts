@@ -82,7 +82,7 @@ describe("WeixinOutbox", () => {
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
       "已开始处理。",
       "final reply",
-      "本次运行 · 已完成",
+      "**本次运行 · 已完成**",
     ]);
   });
 
@@ -106,11 +106,15 @@ describe("WeixinOutbox", () => {
   });
 
   it("reports structured visual completion details with the recognition model", async () => {
-    const { outbox, sendText } = outboxFixture();
+    const { outbox, sendText } = outboxFixture(
+      undefined,
+      { debugEnabled: true },
+    );
 
     outbox.handle({
       type: "vision.completed",
       target,
+      provider: "BLTCY",
       model: "gpt-5.6-luna",
       elapsedMs: 18_000,
       usage: {
@@ -124,11 +128,13 @@ describe("WeixinOutbox", () => {
     expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
       text: [
         "**图片识别完成**",
-        "- 识别模型：gpt-5.6-luna",
+        "- API 提供商：BLTCY",
+        "- 调用模型：gpt-5.6-luna",
         "- 视觉 API 耗时：18秒",
-        "- Token 用量：输入 9,433 · 输出 483 · 总计 9,916",
+        "- **Token**：9,916",
+        "  - 输出：483",
         "",
-        "正在交给当前模型处理。",
+        "- 正在交给当前模型处理。",
       ].join("\n"),
     }));
   });
@@ -312,7 +318,7 @@ describe("WeixinOutbox", () => {
     expect(sendText).toHaveBeenCalledWith({
       actorId,
       contextToken: "context-secret",
-      text: "本次运行 · 已完成",
+      text: "**本次运行 · 已完成**",
     });
   });
 
@@ -327,8 +333,8 @@ describe("WeixinOutbox", () => {
     await outbox.close();
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      "本次运行 · 已停止",
-      "本次运行 · 失败  \n- 错误：受控错误",
+      "**本次运行 · 已停止**",
+      "**本次运行 · 失败**\n\n- 错误：受控错误",
     ]);
   });
 
@@ -372,16 +378,9 @@ describe("WeixinOutbox", () => {
     await outbox.close();
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      "Codex 账户状态已更新：认证=chatgpt · 套餐=Pro",
-      [
-        "周限 额度提醒",
-        "主窗口：已使用 12% · 周期 7 天",
-        "状态：正常",
-      ].join("  \n"),
-      [
-        "MCP Server：docs · 启动失败",
-        "原因：认证失败，TOKEN=[已隐藏]",
-      ].join("  \n"),
+      "**Codex 账户状态已更新**\n- 认证：chatgpt\n- 套餐：Pro",
+      "**周限 额度提醒**\n- 主窗口：已使用 12% · 周期 7 天\n- 状态：正常",
+      "**MCP Server**\n- 名称：docs\n- 状态：启动失败\n- 原因：认证失败，TOKEN=[已隐藏]",
     ]);
   });
 
@@ -398,7 +397,7 @@ describe("WeixinOutbox", () => {
       + "具体内容：\n\n"
       + "git status --short\n\n"
       + "耗时：125毫秒",
-      "本次运行 · 已完成",
+      "**本次运行 · 已完成**",
     ]);
   });
 
@@ -493,7 +492,7 @@ describe("WeixinOutbox", () => {
     await outbox.close();
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      "本次运行 · 已完成",
+      "**本次运行 · 已完成**",
     ]);
   });
 
@@ -532,7 +531,7 @@ describe("WeixinOutbox", () => {
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
       "工具查询 · 已完成\n\nMCP 工具：1 次\n动态工具：1 次\n\n总耗时：250毫秒",
-      "本次运行 · 已完成",
+      "**本次运行 · 已完成**",
     ]);
   });
 

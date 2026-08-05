@@ -80,7 +80,7 @@ describe("WeixinSurface", () => {
     );
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
       "final reply",
-      "本次运行 · 已完成",
+      "**本次运行 · 已完成**",
     ]);
     expect(onFatal).not.toHaveBeenCalled();
   });
@@ -213,7 +213,7 @@ describe("WeixinSurface", () => {
     expect(sendText).toHaveBeenCalledWith({
       actorId,
       contextToken: "restored-context",
-      text: "Codex Connect 已上线  \nApp Server：已连接",
+      text: "**Codex Connect 已上线**\n- App Server：已连接",
     });
   });
 
@@ -471,7 +471,7 @@ describe("WeixinSurface", () => {
     expect(sendText).toHaveBeenCalledWith({
       actorId,
       contextToken: "context-secret",
-      text: "已请求停止当前任务。",
+      text: "**已请求停止当前任务。**",
     });
   });
 
@@ -660,14 +660,14 @@ describe("WeixinSurface", () => {
       actorId,
       contextToken: "restored-context",
       text: [
-        "Workspace 已添加",
+        "**Workspace 已添加**",
         "",
-        "│ Docs · docs  ",
-        "│ /workspace/docs",
+        "- Docs · docs",
+        "- 工作目录：/workspace/docs",
         "",
-        "发送 /workspace 可查看并切换 Workspace。",
+        "- 发送 /workspace 可查看并切换 Workspace。",
         "",
-        "已生效：Workspace",
+        "- 已生效：Workspace",
       ].join("\n"),
     });
   });
@@ -712,10 +712,9 @@ describe("WeixinSurface", () => {
       actorId,
       contextToken: "restored-context",
       text: [
-        "Gateway 配置需要重启",
-        "",
-        "变更：默认模型  ",
-        "当前 Gateway 将退出；若由系统服务托管，将自动重新启动。",
+        "**Gateway 配置需要重启**",
+        "- 变更：默认模型",
+        "- 当前 Gateway 将退出；若由系统服务托管，将自动重新启动。",
       ].join("\n"),
     });
   });

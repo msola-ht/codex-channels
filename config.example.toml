@@ -41,12 +41,27 @@ timeout_seconds = 300
 operation_updates = "compact"
 # 是否在渠道显示 App Server 的自动任务计划更新。
 plan_updates = true
+# 模型价格显示币种：auto 跟随提供商（DeepSeek 官方人民币、OpenAI 官方美元），也可统一为
+# cny 或 usd；需要人民币时才请求汇率。
+price_currency = "auto"
+# 按提供商覆盖示例：
+# [display.price_currency_by_provider]
+# deepseek = "cny"
+# openai = "usd"
+
+# 直接 API 提供商（图片识别等第三方 Responses 中转）：
+# [[api_providers]]
+# id = "vision-relay"
+# name = "视觉中转"
+# protocol = "responses"
+# endpoint = "https://example.com/v1/responses"
 
 [vision]
 # disabled：不代理识图；responses_api：当前模型不支持图片时调用外部视觉接口。
 mode = "disabled"
+# provider = "vision-relay"   # 必须引用上方 api_providers 的 id
 # model = "视觉模型"
-# endpoint = "https://example.com/v1/responses"
+# timeout_seconds = 120  # 视觉请求超时，范围 30–600 秒，默认 120 秒
 # API Key 通过 codexc setup 保存到独立私有凭据文件，不写入本配置。
 
 [storage]
@@ -59,3 +74,11 @@ level = "info"
 id = "main"
 name = "Main Project"
 cwd = "/absolute/path/to/project"
+# 工作区权限（可选，不配置时使用全局默认）：
+# 沙箱：read-only / workspace-write / danger-full-access
+sandbox = "workspace-write"
+# 审批：untrusted / on-request / never
+approval_policy = "on-request"
+# 权限 Profile（App Server 命名 profile，例如 :read-only、:workspace、:danger-full-access 或项目自定义）。
+# 设置了 permissions 后不能再设置 sandbox。
+# permissions = ":workspace"

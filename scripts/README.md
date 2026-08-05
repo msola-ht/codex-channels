@@ -4,13 +4,32 @@
 
 ## 配置与 Workspace
 
-- `runtime-config.mjs`：解析用户数据目录和运行时路径，并初始化 `.codex-connect`。
+- `runtime-config.mjs`：解析用户数据目录和运行时路径，并初始化 `.codex-connect`；为只读诊断提供
+  不修改配置权限的路径定位，启动与写入流程仍显式收紧目录和配置文件权限。
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
   升级到 v4；不自动迁移未知版本。
-- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“通讯渠道”和“模型渠道”流程
-  委派给具体适配器；模型渠道下继续区分 DeepSeek 与图片识别。
-- `vision-setup.mjs`：为双 Provider 与仅 DeepSeek 模式统一配置外部 Responses 视觉接口；API Key
-  写入独立私有凭据文件，不进入主配置或输出。
+- `metrics-database.mjs` / `metrics-database.d.mts`：实现并声明只读 `codexc metrics` 的
+  `status`、`run`、`turns`、`threads`、`report`、`export` 与 `reset`；查询复用 Observability
+  只读端口，渲染复用 `metrics-export-format.mjs`；reset 要求 Gateway 停止、检查点回写、`0600`
+  备份后移除旧库，不迁移或覆盖原指标记录。服务状态无法确认、处于非停止状态或前台 Gateway
+  指标 Socket 仍可连接时均拒绝 reset。
+- `metrics-export-format.mjs` / `metrics-export-format.d.mts`：指标导出的显示上下文（配置与
+  汇率缓存）、币种换算、Token/费用/时间格式化与 Markdown/CSV 转义；币种模式解析与 Token
+  格式复用 Application/Surface 导出，换算逻辑集中在 `convertCostToCny`。
+- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型渠道”“通讯渠道”和
+  “系统设置”流程委派给具体适配器；模型渠道下区分 DeepSeek、第三方 API 与图片识别，系统设置
+  提供全局调试模式入口。
+- `config.mjs`：`codexc config` 的交互式配置与设置菜单，覆盖配置文件中可安全编辑的参数：
+  显示设置（操作详情、计划更新、按提供商的价格显示方式）、系统设置（调试模式、审批超时、
+  Sandbox、默认工作区与模型）、Telegram 消息格式和配置路径查看；非交互终端直接输出用户目录
+  与配置文件路径。
+- `debug-setup.mjs`：在严格配置中原子切换 `logging.level` 的 `debug` / `info`，控制全局脱敏
+  调试日志和渠道技术字段，不改写显示设置或凭据。
+- `api-provider-setup.mjs` / `api-provider-setup.d.mts`：增改或删除多个 Responses 兼容第三方 API
+  提供商，非敏感元数据写入主配置，API Key 按提供商隔离；拒绝删除仍被调用方引用的提供商，
+  并可经确认显式转换旧单视觉配置。
+- `vision-setup.mjs` / `vision-setup.d.mts`：为双 Provider 与仅 DeepSeek 模式选择已登记的第三方
+  API 提供商和视觉模型；不复制 Endpoint 或 API Key，禁用视觉不删除共享提供商。
 - `deepseek-setup.mjs`：复用共享的非敏感 DeepSeek Provider 定义，提供 OpenAI/DeepSeek 切换和
   仅 DeepSeek 两种安装模式；只下载、不执行
   DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小、JSON 与 Flash 模型后写入用户
@@ -19,7 +38,9 @@
   首次修改前记录原配置和同名 Profile 是否存在并备份原文，固定模式显式
   确认后才覆盖默认 Provider，恢复选项可精确还原首次安装状态，并在保留的审计备份中记录已恢复
   生命周期。重复安装基于当前配置更新，不从首次备份回滚后续修改；退出固定模式时只还原 Setup
-  管理的字段，恢复后新增的同名用户 Provider 不会被误判为旧版托管配置。
+  管理的字段（含自动压缩阈值），恢复后新增的同名用户 Provider 不会被误判为旧版托管配置；
+  安装与“修改自动压缩阈值”入口支持按上下文窗口百分比（10–95%，默认 60%）写入
+  `model_auto_compact_token_limit` 或关闭自动压缩。
 - `deepseek-setup.d.mts`：声明 DeepSeek Setup 的公开脚本类型。
 - `terminal-prompter.mjs`：为各通讯渠道 Setup 提供最小的终端文本、确认和可见凭据输入接口。
 - `telegram-setup.mjs`：独立完成 Telegram Bot Token 验证、一次性私聊配对、用户 ID 获取和用户配置写入；

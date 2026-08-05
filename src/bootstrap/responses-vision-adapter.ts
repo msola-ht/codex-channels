@@ -1,21 +1,28 @@
 import { readFile } from "node:fs/promises";
 
+import type { Logger } from "pino";
+
 import {
   parseVisionRecognitionPayload,
   visionRecognitionJsonSchema,
   type VisionRecognitionPort,
   type VisionRecognitionResult,
 } from "../application/index.js";
+import type { ModelRequestMetricSample } from "../observability/index.js";
 
 const maximumResponseBytes = 1_048_576;
-const requestTimeoutMs = 60_000;
+const requestTimeoutMs = 120_000;
 
 export interface ResponsesVisionAdapterOptions {
+  provider: string;
+  providerName?: string;
   endpoint: string;
   model: string;
   loadApiKey: () => string | Promise<string>;
   fetchImpl: typeof fetch;
   requestTimeoutMs?: number;
+  onMetric?: (metric: ModelRequestMetricSample) => void;
+  logger?: Logger;
 }
 
 export function createResponsesVisionAdapter(
@@ -40,6 +47,8 @@ export function createResponsesVisionAdapter(
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       timer.unref();
       const requestStartedAt = Date.now();
+      let response: Response | undefined;
+      let parsed: ReturnType<typeof parseVisionResponse> | undefined;
       try {
         const pendingResponse = options.fetchImpl(options.endpoint, {
           method: "POST",
@@ -49,6 +58,9 @@ export function createResponsesVisionAdapter(
           },
           body: JSON.stringify({
             model: options.model,
+            ...(request.reasoningEffort
+              ? { reasoning: { effort: request.reasoningEffort } }
+              : {}),
             input: [{
               role: "user",
               content: [
@@ -72,13 +84,13 @@ export function createResponsesVisionAdapter(
           signal: controller.signal,
         });
         request.onRequestStarted();
-        const response = await pendingResponse;
+        response = await pendingResponse;
         if (!response.ok) {
           await response.body?.cancel().catch(() => undefined);
           throw new Error(`视觉 API 请求失败：HTTP ${response.status}`);
         }
         const raw = await readLimitedResponseText(response);
-        const parsed = parseVisionResponse(raw);
+        parsed = parseVisionResponse(raw);
         if (parsed.status !== undefined && parsed.status !== "completed") {
           throw new Error("视觉 API 响应尚未完成");
         }
@@ -88,20 +100,70 @@ export function createResponsesVisionAdapter(
           parsed.completedAt,
         );
         const serviceTier = safeIdentifier(parsed.serviceTier, 64);
-        return {
-          provider: "外部视觉 API",
-          model: safeIdentifier(parsed.model, 128)
+        const model = safeIdentifier(parsed.model, 128)
             ?? safeIdentifier(options.model, 128)
-            ?? "未提供",
-          elapsedMs: Math.max(0, Date.now() - requestStartedAt),
+            ?? "未提供";
+        const images = parseVisionRecognitionPayload(
+          parsed.outputText,
+          request.images.length,
+        );
+        const responseCompletedAtMs = Date.now();
+        emitMetric(options, createVisionMetric({
+          request,
+          model,
+          serviceTier,
+          status: "completed",
+          httpStatus: response.status,
+          errorType: null,
+          incompleteReason: safeIdentifier(parsed.incompleteReason, 128),
+          usage,
+          parsed,
+          requestStartedAt,
+          responseCompletedAtMs,
+        }));
+        return {
+          provider: safeDisplayName(options.providerName ?? options.provider)
+            ?? "第三方 API",
+          model,
+          elapsedMs: Math.max(0, responseCompletedAtMs - requestStartedAt),
           ...(upstreamDurationMs === undefined ? {} : { upstreamDurationMs }),
           ...(serviceTier === undefined ? {} : { serviceTier }),
           ...(usage ? { usage } : {}),
-          images: parseVisionRecognitionPayload(
-            parsed.outputText,
-            request.images.length,
-          ),
+          images,
         };
+      } catch (error) {
+        const responseCompletedAtMs = Date.now();
+        const parsedStatus = safeIdentifier(parsed?.status, 32);
+        const usage = parseTokenUsage(parsed?.usage);
+        options.logger?.warn({
+          errorType: visionMetricErrorType(response, controller.signal, parsedStatus),
+          httpStatus: response?.status ?? null,
+          ...(parsed?.incompleteReason === undefined
+            ? {}
+            : { incompleteReason: safeIdentifier(parsed.incompleteReason, 128) }),
+          timeoutMs,
+          errorMessage: controller.signal.aborted
+            ? `视觉 API 请求超时（${timeoutMs} 毫秒）`
+            : error instanceof Error
+              ? error.message
+              : String(error),
+        }, "视觉识别请求失败");
+        emitMetric(options, createVisionMetric({
+          request,
+          model: safeIdentifier(parsed?.model, 128)
+            ?? safeIdentifier(options.model, 128)
+            ?? null,
+          serviceTier: safeIdentifier(parsed?.serviceTier, 64),
+          status: parsedStatus === "incomplete" ? "incomplete" : "failed",
+          httpStatus: response?.status ?? null,
+          errorType: visionMetricErrorType(response, controller.signal, parsedStatus),
+          incompleteReason: safeIdentifier(parsed?.incompleteReason, 128),
+          usage,
+          parsed,
+          requestStartedAt,
+          responseCompletedAtMs,
+        }));
+        throw error;
       } finally {
         clearTimeout(timer);
       }
@@ -162,6 +224,7 @@ function parseVisionResponse(raw: string): {
   completedAt?: unknown;
   serviceTier?: unknown;
   usage?: unknown;
+  incompleteReason?: unknown;
   outputText: string;
 } {
   let response: unknown;
@@ -185,12 +248,80 @@ function parseVisionResponse(raw: string): {
           completedAt: record?.completed_at,
           serviceTier: record?.service_tier,
           usage: record?.usage,
+          incompleteReason: asRecord(record?.incomplete_details)?.reason,
           outputText: candidate.text,
         };
       }
     }
   }
   throw new Error("视觉 API 响应缺少输出文字");
+}
+
+function createVisionMetric(options: {
+  request: Parameters<VisionRecognitionPort["recognize"]>[0];
+  model: string | null;
+  serviceTier: string | undefined;
+  status: ModelRequestMetricSample["status"];
+  httpStatus: number | null;
+  errorType: string | null;
+  incompleteReason: string | undefined;
+  usage: VisionRecognitionResult["usage"];
+  parsed: ReturnType<typeof parseVisionResponse> | undefined;
+  requestStartedAt: number;
+  responseCompletedAtMs: number;
+}): Omit<ModelRequestMetricSample, "provider"> {
+  return {
+    pricing: null,
+    transport: "http",
+    responseFormat: "json",
+    operation: "response",
+    threadId: options.request.threadId ?? null,
+    turnId: null,
+    model: options.model,
+    serviceTier: options.serviceTier ?? null,
+    reasoningEffort: options.request.reasoningEffort ?? null,
+    status: options.status,
+    httpStatus: options.httpStatus,
+    errorType: options.errorType,
+    errorCode: null,
+    incompleteReason: options.incompleteReason ?? null,
+    inputTokens: options.usage?.inputTokens ?? null,
+    cachedInputTokens: options.usage?.cachedInputTokens ?? null,
+    outputTokens: options.usage?.outputTokens ?? null,
+    reasoningOutputTokens: options.usage?.reasoningOutputTokens ?? null,
+    totalTokens: options.usage?.totalTokens ?? null,
+    upstreamCreatedAt: upstreamTimestamp(options.parsed?.createdAt),
+    upstreamCompletedAt: upstreamTimestamp(options.parsed?.completedAt),
+    requestStartedAtMs: options.requestStartedAt,
+    firstTokenAtMs: null,
+    firstReasoningDeltaAtMs: null,
+    lastReasoningDeltaAtMs: null,
+    firstOutputDeltaAtMs: null,
+    lastOutputDeltaAtMs: null,
+    responseCompletedAtMs: options.responseCompletedAtMs,
+  };
+}
+
+function emitMetric(
+  options: ResponsesVisionAdapterOptions,
+  metric: Omit<ModelRequestMetricSample, "provider">,
+): void {
+  try {
+    options.onMetric?.({ provider: options.provider, ...metric });
+  } catch {
+    // 指标不能改变视觉请求结果；组合根负责记录写入器错误。
+  }
+}
+
+function visionMetricErrorType(
+  response: Response | undefined,
+  signal: AbortSignal,
+  parsedStatus: string | undefined,
+): string {
+  if (signal.aborted) return "vision_timeout";
+  if (response !== undefined && !response.ok) return "vision_http_error";
+  if (parsedStatus === "incomplete") return "vision_incomplete";
+  return response === undefined ? "vision_network_error" : "vision_response_error";
 }
 
 function parseTokenUsage(value: unknown): VisionRecognitionResult["usage"] {
@@ -241,11 +372,29 @@ function parseUpstreamDurationMs(
   return Number.isSafeInteger(durationMs) ? durationMs : undefined;
 }
 
+function upstreamTimestamp(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
+}
+
 function safeIdentifier(value: unknown, maximumLength: number): string | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.trim();
   return normalized.length <= maximumLength
       && /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/u.test(normalized)
+    ? normalized
+    : undefined;
+}
+
+function safeDisplayName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized.length > 0 && normalized.length <= 64
+    && ![...normalized].some((character) => {
+      const code = character.codePointAt(0);
+      return code !== undefined && (code <= 0x1f || code === 0x7f);
+    })
     ? normalized
     : undefined;
 }

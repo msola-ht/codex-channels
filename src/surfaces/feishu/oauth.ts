@@ -47,7 +47,7 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
     private readonly tokens: FeishuUserTokenStore,
     private readonly outbox: Pick<
       FeishuOutbox,
-      "deliverCard" | "deliverText" | "updateCard"
+      "deliverCard" | "deliverMarkdown" | "deliverText" | "updateCard"
     >,
     private readonly logger: Logger,
     private readonly closeTimeoutMs = defaultCloseTimeoutMs,
@@ -182,7 +182,7 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
       (scope) => !grantedByApp.has(scope),
     );
     if (unavailableScopes.length > 0) {
-      await this.outbox.deliverText(
+      await this.outbox.deliverMarkdown(
         chatId,
         [
           "当前飞书应用尚未开通此能力需要的用户权限：",

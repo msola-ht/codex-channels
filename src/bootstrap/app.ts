@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { dirname, join } from "node:path";
 
 import type { Logger } from "pino";
 
@@ -15,9 +16,8 @@ import {
   providerAppServerSocketPath,
   providerMetricsSocketPath,
 } from "../../runtime/model-provider-runtime.mjs";
-import { readVisionApiKey } from "../../runtime/vision-credential.mjs";
+import { readApiProviderKey } from "../../runtime/api-provider-credential.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
-import { ProviderProxyMetricsServer } from "../provider-proxy/index.js";
 import {
   CodexAppServerClient,
   ProviderRoutingClient,
@@ -35,6 +35,7 @@ import {
   classifyConfigReload,
   configChange,
   includesConfigChange,
+  priceCurrencyForProvider,
   type ConfigChange,
   type ConfigReloadResult,
   type GatewayConfig,
@@ -45,6 +46,8 @@ import {
   ModelSelectionService,
   ProviderAccountService,
   createOpenAiAccountAdapter,
+  priceDisplayNeedsExchangeRate,
+  resolvePriceCurrency,
 } from "../application/index.js";
 import {
   ConversationCore,
@@ -52,6 +55,11 @@ import {
   type OutputEvent,
 } from "../conversation-core/index.js";
 import { EventBus } from "../event-bus/index.js";
+import {
+  BufferedModelRequestMetricsWriter,
+  modelRequestMetricsDatabasePath,
+  SqliteModelRequestMetricsStore,
+} from "../observability/index.js";
 import { WorkspaceRegistry } from "../policy/index.js";
 import {
   SessionRouter,
@@ -67,11 +75,17 @@ import { SurfaceManager } from "./surface-manager.js";
 import { createDeepseekAccountAdapter } from "./deepseek-account-adapter.js";
 import { createProxyFetch } from "./proxy-fetch.js";
 import { createResponsesVisionAdapter } from "./responses-vision-adapter.js";
+import { ProviderMetricsComposition } from "./provider-metrics-composition.js";
+import { RemoteModelPricingCatalog } from "./model-pricing-catalog.js";
+import { RemoteExchangeRate } from "./exchange-rate.js";
+import { mergeSessionReferenceCost } from "./reference-cost-summary.js";
+import { TomlWorkspacePermissionWriter } from "./workspace-permission-writer.js";
 
 export class GatewayApplication {
   private readonly transport: UnixWebSocketTransport;
   private readonly codex: ProviderRoutingClient;
   private readonly primaryProvider: string;
+  private readonly activeCostProviders: readonly string[];
   private readonly inbound: EventBus<RpcNotification>;
   private readonly output: EventBus<OutputEvent>;
   private readonly surfaceModules: SurfaceRuntimeModule[];
@@ -82,9 +96,12 @@ export class GatewayApplication {
   private readonly router: SessionRouter;
   private readonly threadState: ThreadStateSynchronizer;
   private readonly core: ConversationCore;
-  private readonly providerMetricsServers: ProviderProxyMetricsServer[];
+  private readonly providerMetrics: ProviderMetricsComposition;
+  private readonly modelPricing: RemoteModelPricingCatalog;
+  private readonly exchangeRate: RemoteExchangeRate;
   private readonly bindings: SqliteBindingStore;
   private readonly workspaces: WorkspaceRegistry;
+  private readonly workspacePermissions: TomlWorkspacePermissionWriter | undefined;
   private removeRpcNotification: (() => void) | undefined;
   private removeRpcDisconnect: (() => void) | undefined;
   private startTask: Promise<void> | undefined;
@@ -100,8 +117,12 @@ export class GatewayApplication {
   constructor(
     private config: GatewayConfig,
     private readonly logger: Logger,
+    configPath?: string,
   ) {
     verifyCodexVersion(config);
+    this.workspacePermissions = configPath === undefined
+      ? undefined
+      : new TomlWorkspacePermissionWriter(configPath);
     const primaryProvider = loadPrimaryModelProvider();
     const managedProvider = loadManagedModelProvider();
     const supplementaryModels = loadDeepseekModelOptions(
@@ -112,6 +133,11 @@ export class GatewayApplication {
     );
     this.transport = new UnixWebSocketTransport(config.codexSocketPath);
     this.primaryProvider = primaryProvider;
+    this.activeCostProviders = [...new Set([
+      primaryProvider,
+      ...(managedProvider ? [managedProvider.provider] : []),
+      ...(config.vision.mode === "disabled" ? [] : [config.vision.provider]),
+    ])];
     const clients = new Map<string, CodexAppServerClient>();
     clients.set(primaryProvider, new CodexAppServerClient(
       new JsonRpcClient(this.transport, 60_000, logger),
@@ -143,58 +169,37 @@ export class GatewayApplication {
     );
     this.threadState = new ThreadStateSynchronizer(this.router);
     this.core = new ConversationCore(this.router, this.output);
-    this.providerMetricsServers = [...new Set([
-      primaryProvider,
-      ...(managedProvider ? [managedProvider.provider] : []),
-    ])].map((provider) => new ProviderProxyMetricsServer(
+    const metricsStore = new SqliteModelRequestMetricsStore(
+      modelRequestMetricsDatabasePath(config.stateDatabasePath),
+    );
+    const metricsWriter = new BufferedModelRequestMetricsWriter(
+      metricsStore,
+      (error) => logger.warn({ err: error }, "模型请求指标后台写入失败"),
+    );
+    this.modelPricing = new RemoteModelPricingCatalog({
+      cachePath: join(dirname(config.stateDatabasePath), "model-pricing.json"),
+      fetchImpl: createProxyFetch(config.networkProxy),
+      logger,
+    });
+    this.exchangeRate = new RemoteExchangeRate({
+      cachePath: join(dirname(config.stateDatabasePath), "exchange-rate.json"),
+      fetchImpl: createProxyFetch(config.networkProxy),
+      logger,
+    });
+    this.providerMetrics = new ProviderMetricsComposition({
+      providers: [
+        primaryProvider,
+        ...(managedProvider ? [managedProvider.provider] : []),
+      ],
+      socketPath: (provider) =>
         providerMetricsSocketPath(config.codexSocketPath, provider),
-        (metrics) => {
-          const firstTokenAtMs = metrics.firstTokenAtMs;
-          const hasTurnMetadata = metrics.threadId !== null
-            && metrics.turnId !== null;
-          const hasTokenWindow = firstTokenAtMs !== null;
-          if (metrics.threadId === null || metrics.turnId === null || !hasTokenWindow) {
-            this.logger.debug(
-              { provider, hasTurnMetadata, hasTokenWindow },
-              "模型统计代理指标缺少 Turn 关联或 Token 窗口，已跳过",
-            );
-            return;
-          }
-          const lastTokenAtMs = Math.max(
-            metrics.lastReasoningDeltaAtMs ?? firstTokenAtMs,
-            metrics.lastOutputDeltaAtMs ?? firstTokenAtMs,
-          );
-          const thinkingDurationMs = metrics.firstReasoningDeltaAtMs === null
-            || metrics.lastReasoningDeltaAtMs === null
-            ? undefined
-            : metrics.lastReasoningDeltaAtMs - metrics.firstReasoningDeltaAtMs;
-          const outputDurationMs = metrics.firstOutputDeltaAtMs === null
-            || metrics.lastOutputDeltaAtMs === null
-            ? undefined
-            : metrics.lastOutputDeltaAtMs - metrics.firstOutputDeltaAtMs;
-          const generationDurationMs = lastTokenAtMs - firstTokenAtMs;
-          this.core.handle({
-            type: "turn.modelTiming.updated",
-            threadId: metrics.threadId,
-            turnId: metrics.turnId,
-            requestStartedAtMs: metrics.requestStartedAtMs,
-            ttftMs: Math.max(
-              0,
-              firstTokenAtMs - metrics.requestStartedAtMs,
-            ),
-            ...(thinkingDurationMs !== undefined && thinkingDurationMs > 0
-              ? { thinkingDurationMs }
-              : {}),
-            ...(outputDurationMs !== undefined && outputDurationMs > 0
-              ? { outputDurationMs }
-              : {}),
-            ...(generationDurationMs > 0 ? { generationDurationMs } : {}),
-          });
-        },
-        (error) => {
-          this.logger.warn({ err: error, provider }, "模型统计代理指标接收失败");
-        },
-      ));
+      writer: metricsWriter,
+      pricingResolver: this.modelPricing,
+      resolveModelSettings: (threadId) =>
+        this.router.modelSettingsForThread(threadId),
+      onModelTiming: (event) => this.core.handle(event),
+      logger,
+    });
     this.interactions = new InteractionRouter(logger);
     const models = new ModelSelectionService(
       this.codex,
@@ -213,13 +218,42 @@ export class GatewayApplication {
         fetchImpl: createProxyFetch(config.networkProxy),
       }),
     ]);
-    const vision = config.vision.mode === "disabled"
+    const visionConfig = config.vision;
+    const visionProviderName = visionConfig.mode === "disabled"
+      ? undefined
+      : config.apiProviders.find(
+          (candidate) => candidate.id === visionConfig.provider,
+        )?.name;
+    const vision = visionConfig.mode === "disabled"
       ? undefined
       : createResponsesVisionAdapter({
-          endpoint: config.vision.endpoint,
-          model: config.vision.model,
-          loadApiKey: () => readVisionApiKey(config.credentialsDirectory),
+          provider: visionConfig.provider,
+          ...(visionProviderName === undefined
+            ? {}
+            : { providerName: visionProviderName }),
+          endpoint: visionConfig.endpoint,
+          model: visionConfig.model,
+          requestTimeoutMs: visionConfig.timeoutMs,
+          loadApiKey: () => readApiProviderKey(
+            config.credentialsDirectory,
+            visionConfig.provider,
+          ),
           fetchImpl: createProxyFetch(config.networkProxy),
+          logger,
+          onMetric: (metric) => {
+            try {
+              const pricing = this.modelPricing.resolve({
+                provider: metric.provider,
+                model: metric.model,
+                serviceTier: metric.serviceTier,
+                inputTokens: metric.inputTokens,
+                atMs: metric.responseCompletedAtMs,
+              });
+              metricsWriter.enqueue({ ...metric, pricing });
+            } catch (error) {
+              logger.warn({ err: error }, "视觉 API 指标持久化失败");
+            }
+          },
         });
     const service = new ConversationService(
       this.codex,
@@ -257,6 +291,125 @@ export class GatewayApplication {
       },
       providerAccounts,
       vision,
+      {
+        forThread: (threadId) => {
+          const summary = metricsStore.threadSummary(threadId);
+          const direct = summary.latestDirectApi;
+          const providerName = direct === null
+            ? undefined
+            : config.apiProviders.find(
+                (candidate) => candidate.id === direct.provider,
+              )?.name;
+          return {
+            threadId: summary.threadId,
+            modelProvider: this.router.modelSettingsForThread(threadId)
+              ?.modelProvider ?? "openai",
+            latestTurn: summary.latestTurn,
+            threadAggregate: summary.threadAggregate,
+            latestDirectApi: direct === null
+              ? null
+              : {
+                  provider: direct.provider,
+                  ...(providerName === undefined ? {} : { providerName }),
+                  model: direct.model,
+                  status: direct.status,
+                  httpStatus: direct.httpStatus,
+                  requestDurationMs: direct.requestDurationMs,
+                  inputTokens: direct.inputTokens,
+                  cachedInputTokens: direct.cachedInputTokens,
+                  outputTokens: direct.outputTokens,
+                  reasoningOutputTokens: direct.reasoningOutputTokens,
+                  totalTokens: direct.totalTokens,
+                  pricingCurrency: direct.pricing?.currency ?? null,
+                  totalCostNanos: direct.totalCostNanos,
+                  inputCostNanos: direct.uncachedInputCostNanos,
+                  cachedInputCostNanos: direct.cachedInputCostNanos,
+                  outputCostNanos: direct.outputCostNanos,
+                  uncachedInputPricePerMillionNanos:
+                    direct.pricing?.uncachedInputPricePerMillionNanos ?? null,
+                  cachedInputPricePerMillionNanos:
+                    direct.pricing?.cachedInputPricePerMillionNanos ?? null,
+                  outputPricePerMillionNanos:
+                    direct.pricing?.outputPricePerMillionNanos ?? null,
+                },
+          };
+        },
+        aggregate: (view, range) => {
+          const endAtMs = Date.now();
+          const rangeMs = {
+            "24h": 24 * 60 * 60 * 1_000,
+            "7d": 7 * 24 * 60 * 60 * 1_000,
+            "30d": 30 * 24 * 60 * 60 * 1_000,
+          }[range];
+          const report = metricsStore.aggregate({
+            dimension: view === "providers"
+              ? "provider"
+              : view === "models"
+                ? "model"
+                : "global",
+            startAtMs: endAtMs - rangeMs,
+            endAtMs,
+          });
+          return {
+            view,
+            range,
+            startAtMs: report.startAtMs,
+            endAtMs: report.endAtMs,
+            aggregate: report.aggregate,
+            groups: report.groups.map((group) => {
+              const providerName = group.provider === null
+                ? undefined
+                : config.apiProviders.find(
+                    (candidate) => candidate.id === group.provider,
+                  )?.name;
+              return {
+                provider: group.provider,
+                ...(providerName === undefined ? {} : { providerName }),
+                model: group.model,
+                aggregate: group.aggregate,
+              };
+            }),
+            totalGroupCount: report.totalGroupCount,
+          };
+        },
+        errors: (range) => {
+          const endAtMs = Date.now();
+          const rangeMs = {
+            "24h": 24 * 60 * 60 * 1_000,
+            "7d": 7 * 24 * 60 * 60 * 1_000,
+            "30d": 30 * 24 * 60 * 60 * 1_000,
+          }[range];
+          const report = metricsStore.errors({
+            startAtMs: endAtMs - rangeMs,
+            endAtMs,
+          });
+          return {
+            view: "errors",
+            range,
+            startAtMs: report.startAtMs,
+            endAtMs: report.endAtMs,
+            requestCount: report.requestCount,
+            unsuccessfulRequestCount: report.unsuccessfulRequestCount,
+            groups: report.groups.map((group) => {
+              const providerName = config.apiProviders.find(
+                (candidate) => candidate.id === group.provider,
+              )?.name;
+              return {
+                provider: group.provider,
+                ...(providerName === undefined ? {} : { providerName }),
+                model: group.model,
+                status: group.status,
+                httpStatus: group.httpStatus,
+                errorType: group.errorType,
+                requestCount: group.requestCount,
+                lastOccurredAtMs: group.lastOccurredAtMs,
+              };
+            }),
+            totalGroupCount: report.totalGroupCount,
+          };
+        },
+      },
+      this.workspacePermissions,
     );
     this.output.subscribe("conversation-follow-up", async (event) => {
       if (event.type !== "turn.completed") {
@@ -316,6 +469,11 @@ export class GatewayApplication {
         accountId,
         error,
       ),
+      exchangeRate: () => this.exchangeRate.resolve(),
+      priceCurrency: (provider) => resolvePriceCurrency(
+        priceCurrencyForProvider(this.config, provider),
+        provider,
+      ),
     });
     this.surfaces = this.surfaceModules.map((module) => module.adapter);
     this.surfaceManager = new SurfaceManager(
@@ -335,6 +493,12 @@ export class GatewayApplication {
           available,
           outcome,
         ),
+        sessionReferenceCost: (threadId, turnId, current) =>
+          mergeSessionReferenceCost(
+            metricsStore.threadSummary(threadId),
+            turnId,
+            current,
+          ),
       },
     );
     for (const surface of this.surfaces) {
@@ -360,6 +524,7 @@ export class GatewayApplication {
         !coreEvent
         && !threadStateEvent
         && notification.method !== "serverRequest/resolved"
+        && !isHighFrequencyNotification(notification.method)
       ) {
         this.logger.debug(
           { method: notification.method },
@@ -429,11 +594,11 @@ export class GatewayApplication {
   private async startInternal(): Promise<void> {
     try {
       this.requireRunning();
-      await Promise.all(this.providerMetricsServers.map((server) => server.start()));
-      this.logger.info(
-        { providerCount: this.providerMetricsServers.length },
-        "模型统计代理指标接收已启动",
-      );
+      this.modelPricing.start();
+      if (priceDisplayNeedsExchangeRate(this.config, this.activeCostProviders)) {
+        this.exchangeRate.start();
+      }
+      await this.providerMetrics.start();
       this.removeRpcNotification = this.codex.onNotification((notification) => {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
       });
@@ -500,12 +665,9 @@ export class GatewayApplication {
     const failures: unknown[] = [];
     for (const [component, close] of [
       ["Surface", () => this.surfaceManager.stop()],
-      [
-        "Provider Proxy Metrics",
-        () => Promise.all(
-          this.providerMetricsServers.map((server) => server.close()),
-        ).then(() => undefined),
-      ],
+      ["Provider Proxy Metrics", () => this.providerMetrics.close()],
+      ["Model Pricing", () => this.modelPricing.close()],
+      ["Exchange Rate", () => this.exchangeRate.close()],
       ["Inbound Event Bus", () => this.inbound.close()],
       ["Output Event Bus", () => this.output.close()],
       ["Codex Client", () => this.codex.close()],
@@ -793,6 +955,10 @@ export class GatewayApplication {
     }
     return failures.every((failure) => failure.bindingRemoved);
   }
+}
+
+function isHighFrequencyNotification(method: string): boolean {
+  return /\/(?:delta|outputDelta|progress)$/u.test(method);
 }
 
 function surfaceLabel(surface: string): string {

@@ -5,7 +5,7 @@ export type AppendedInputKind = "text" | "file" | "image" | "audio";
 
 export function formatVisionStarted(imageCount: number): string {
   return [
-    "视觉识别中",
+    "## 视觉识别中",
     `- 图片：${imageCount} 张`,
     "- 状态：已发送至视觉 API",
   ].join("\n");
@@ -13,39 +13,52 @@ export function formatVisionStarted(imageCount: number): string {
 
 export function formatVisionProgress(elapsedSeconds: number): string {
   return [
-    "视觉识别中",
+    "## 视觉识别中",
     `- 已等待：${elapsedSeconds} 秒`,
     "- 状态：上游仍在处理",
   ].join("\n");
 }
 
 export function formatVisionCompleted(details: {
+  provider: string;
   model: string;
   elapsedMs?: number;
   usage?: VisionTokenUsage;
-}): string {
-  const tokenParts = details.usage === undefined
+}, debug = false): string {
+  const usage = details.usage;
+  const tokenParts = usage === undefined
     ? []
     : [
-        ...(details.usage.inputTokens === undefined
+        ...(usage.cachedInputTokens === undefined
           ? []
-          : [`输入 ${formatInteger(details.usage.inputTokens)}`]),
-        ...(details.usage.outputTokens === undefined
+          : [
+              `  - 输入命中缓存：${formatInteger(usage.cachedInputTokens)}`,
+              ...(usage.inputTokens === undefined
+                ? []
+                : [`  - 输入未命中缓存：${formatInteger(Math.max(0, usage.inputTokens - usage.cachedInputTokens))}`]),
+            ]),
+        ...(usage.outputTokens === undefined
           ? []
-          : [`输出 ${formatInteger(details.usage.outputTokens)}`]),
-        ...(details.usage.totalTokens === undefined
+          : [`  - 输出：${formatInteger(usage.outputTokens)}`]),
+        ...(usage.reasoningOutputTokens === undefined
           ? []
-          : [`总计 ${formatInteger(details.usage.totalTokens)}`]),
+          : [`  - 其中推理输出：${formatInteger(usage.reasoningOutputTokens)}`]),
       ];
+  const totalTokens = usage === undefined
+    ? undefined
+    : usage.totalTokens ?? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
   return [
-    "图片识别完成",
-    `- 识别模型：${details.model}`,
-    ...(details.elapsedMs === undefined
+    "## 图片识别完成",
+    `- API 提供商：${details.provider}`,
+    `- 调用模型：${details.model}`,
+    ...(!debug || details.elapsedMs === undefined
       ? []
       : [`- 视觉 API 耗时：${formatElapsedDuration(details.elapsedMs)}`]),
-    ...(tokenParts.length === 0 ? [] : [`- Token 用量：${tokenParts.join(" · ")}`]),
+    ...(tokenParts.length === 0 || totalTokens === undefined
+      ? []
+      : [`- **Token**：${formatInteger(totalTokens)}`, ...tokenParts]),
     "",
-    "正在交给当前模型处理。",
+    "- 正在交给当前模型处理。",
   ].join("\n");
 }
 

@@ -117,8 +117,8 @@ function validateUnixSocket(socketPath: string): void {
   let socketStatus: ReturnType<typeof lstatSync>;
   try {
     parentStatus = lstatSync(dirname(socketPath));
-  } catch {
-    throw new Error("Codex Unix Socket 父目录不可用");
+  } catch (error) {
+    throw new Error("Codex Unix Socket 父目录不可用", { cause: error });
   }
   const currentUserId = process.getuid?.();
   if (
@@ -130,8 +130,8 @@ function validateUnixSocket(socketPath: string): void {
   }
   try {
     socketStatus = lstatSync(socketPath);
-  } catch {
-    throw new Error("Codex Unix Socket 不可用");
+  } catch (error) {
+    throw new Error("Codex Unix Socket 不可用", { cause: error });
   }
   if (
     !socketStatus.isSocket()

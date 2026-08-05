@@ -23,6 +23,64 @@ const message = {
 };
 
 describe("WeixinConversationAdapter", () => {
+  it("shows /vision delivery and Gateway handling latency", async () => {
+    const notifyText = vi.fn<(
+      target: ConversationTarget,
+      text: string,
+    ) => boolean>(() => true);
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({}),
+      { notifyText },
+      undefined,
+      { quietWindowMs: 0, now: () => 1_450, debugEnabled: true },
+    );
+
+    await adapter.handle({
+      ...message,
+      text: "/vision 2 比较两张图片",
+      createdAtMs: 1_000,
+      receivedAtMs: 1_200,
+    });
+
+    expect(notifyText).toHaveBeenCalledWith(
+      target,
+      expect.stringContaining("接收延迟：200毫秒"),
+    );
+    expect(notifyText).toHaveBeenCalledWith(
+      target,
+      expect.stringContaining("Gateway 处理：250毫秒"),
+    );
+  });
+
+  it("hides /vision technical timing outside debug mode", async () => {
+    const notifyText = vi.fn<(
+      target: ConversationTarget,
+      text: string,
+    ) => boolean>(() => true);
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({}),
+      { notifyText },
+      undefined,
+      { quietWindowMs: 0, now: () => 1_450 },
+    );
+
+    await adapter.handle({
+      ...message,
+      text: "/vision 2 比较两张图片",
+      createdAtMs: 1_000,
+      receivedAtMs: 1_200,
+    });
+
+    expect(notifyText).not.toHaveBeenCalledWith(
+      target,
+      expect.stringContaining("接收延迟"),
+    );
+    expect(notifyText).not.toHaveBeenCalledWith(
+      target,
+      expect.stringContaining("Gateway 处理"),
+    );
+  });
+
   it("keeps ordinary text on the shared conversation submission path", async () => {
     const submit = vi.fn(async () => ({
       threadId: "thread",
@@ -574,12 +632,12 @@ describe("WeixinConversationAdapter", () => {
     expect(notifyText).toHaveBeenNthCalledWith(
       2,
       target,
-      "已退出当前会话，下一条普通消息将创建新的 Codex Thread。",
+      "**已退出当前会话，下一条普通消息将创建新的 Codex Thread。**",
     );
     expect(notifyText).toHaveBeenNthCalledWith(
       3,
       target,
-      "已请求停止当前任务。",
+      "**已请求停止当前任务。**",
     );
   });
 

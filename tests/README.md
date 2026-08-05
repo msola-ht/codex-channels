@@ -94,7 +94,7 @@
   Store 契约和 Linux 原子密文替换与私有权限。
 - Skill 用户与 Workspace 安装过滤、结构化显式调用、已安装 Plugin 稳定摘要及远端市场隔离。
 - 官方模型目录到稳定 Application 模型选项的映射、不可见项过滤、必需字段失败关闭，模型、
-  思考强度和 Fast 的 Thread 覆盖、Codex 用户级 Fast 默认值持久化、共享客户端完整或残缺设置
+  思考等级和 Fast 的 Thread 覆盖、Codex 用户级 Fast 默认值持久化、共享客户端完整或残缺设置
   通知、Thread 失效通知及 Gateway/CLI 连接恢复；DeepSeek 官方脚本目录提取、两种 Setup 模式、
   API Key 输出隔离、下载失败不修改、Flash 可选与 Pro 可见但不可选，以及跨 Provider 新建
   Thread、原 Thread 可恢复、精确 Provider 路由、设置通知不覆盖不可变 Provider，以及在文本模型
@@ -103,13 +103,31 @@
   到稳定 Application 摘要的映射、重置券数量，以及 DeepSeek 私有配置读取、统一代理、官方余额
   Schema 裁剪、响应上限和错误脱敏；Thread Token/上下文对 Provider 通用，OpenAI Fast 与周限
   不进入 DeepSeek 状态或完成卡片。
-- 全 Provider 最后一次模型响应的文本与函数/自定义工具参数非推理输出速度；DeepSeek 可观测的
-  首字延时、思考/生成速度，以及 OpenAI 即使收到推理摘要计时也只保留非推理输出指标；自动回环
+- 全 Provider 同一 Turn 多次模型响应的请求次数、实际产生推理输出的思考次数、聚合模型耗时、
+  缓存与文本/函数/自定义工具参数
+  不含推理的综合输出速度及时间窗覆盖率；DeepSeek 最后请求首事件延迟、全 Provider 首段回复延迟和
+  整轮综合思考/生成速度，以及 OpenAI 即使收到推理摘要计时也只保留不含推理的输出指标；当前 Thread
+  `/metrics` 的最近 Turn 运行聚合、指标库保留范围内的 Thread 会话累计、只选择 HTTP
+  JSON 调用记录的最近直接 API 分栏查询，以及全局/提供商/模型和异常请求的 24 小时、7 天、30 天
+  SQL 聚合、失败率分母、错误分组与最近发生时间、TTFT 平均与 P50/P95、缓存和速度样本覆盖；自动回环
   代理的精确 `/responses`、`/responses/compact`
   与只读 `/models` 路径、HTTP/SSE 与 WebSocket、上游
   状态/Header、私有元数据剥离、流式转发、统一代理 Agent、OpenAI 自定义上游保留、App Server
   服务独立生命周期、响应完成前的指标确认、启动失败清理，以及 `0600` Unix Socket 指标投递和
-  Gateway 缺席时无损模型请求。
+  Gateway 缺席时无损模型请求。代理还覆盖完成/失败/不完整状态、HTTP 错误、超时、断线、真实
+  模型/服务层级与完整 Usage 的脱敏采集，其中 WebSocket 客户端断开归为中断、上游断流归为可重试；
+  Bootstrap 组合测试验证所有样本进入独立 Observability
+  Store、缺少 Turn 关联时不伪造 Core 事件，以及可选计价解析器只在组合边界附加价格快照；独立
+  价格目录测试覆盖 LiteLLM 主源、Sub2API 价格镜像回退、私有缓存重载、缓存输入、Priority 和
+  长上下文价格选择；独立汇率测试覆盖 open.er-api 主源、ECB 回退、私有缓存重载和无效汇率拒绝；
+  `reference-cost-summary.test.ts` 覆盖当前 Turn 延迟写入时的 Thread 总价去重及
+  跨价格档位聚合；失败和未完整请求保留原始价格快照但不进入费用汇总，CSV 导出统一中和
+  电子表格公式前缀；独立 SQLite 指标库覆盖 `0600` 权限、严格 Schema、原子初始化、30 天清理、
+  有界内部读取，以及
+  Schema v2 enriched View 的耗时、速度、缓存、费用计算和 `/M Token` 单价一致性。回归测试还覆盖 WebSocket 完成后立即
+  关闭不重复、指标确认不等待延迟分片 SQLite 写入，以及 1 MiB 内非流式 JSON 响应的元数据裁剪
+  与正文隔离；指标库运维测试覆盖在线只读状态、运行中拒绝重置、离线检查点、`0600` 备份和重复
+  reset 无副作用，以及 systemd 异常状态、前台 Gateway Socket 和残缺锁的失败关闭与恢复。
 - Skill 查询按授权 Workspace 发送精确 CWD，Client 只映射启用的用户与项目直接安装项，排除
   系统和插件缓存并在缺少显示字段时失败关闭；显式调用重新解析精确名称、校验绝对路径，并同时
   发送 `$Skill` 文本标记与结构化 Skill 输入；三个渠道统一覆盖无参数 `/skill` 编号列表与
@@ -125,7 +143,9 @@
   `/status` 继续复用共享 Conversation 状态，非 Git 目录安全回退。
 - SQLite 前台与后台最小绑定恢复、Schema v3 显式备份升级到 v4、当前版本 Schema 缺失失败关闭、配置文件类型/所有者/权限和父目录
   写权限失败关闭、配置热加载与自动重启分类、Setup
-  类别与通讯渠道菜单、Telegram Setup、飞书手动输入与扫码注册的消息和 CardKit 最小权限、卡片动作回调
+  类别、通讯渠道菜单、全局调试模式的原子启停、`codexc config` 菜单（操作详情/计划更新/按提供商
+  的价格显示方式、审批超时、Sandbox、默认工作区与模型、Telegram 消息格式、非交互路径输出、
+  Doctor 与指标库入口委派）、Telegram Setup、飞书手动输入与扫码注册的消息和 CardKit 最小权限、卡片动作回调
   声明、应用选择、Bot 身份验证、扫码后自动发布悬浮菜单、发布失败保留连接配置并安全提示 Doctor
   恢复、授权域名约束、允许名单确认、原子保存和错误脱敏、
   CLI 项目规则生成/检查、launchd、systemd、Unix WebSocket 私有目录/真实 Socket 校验和请求头、
@@ -253,7 +273,7 @@ RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
 App Server 不依赖 CLI Profile 即可初始化，并验证 MCP 工具审批元数据及
 `_meta.persist` 通过真实 App Server 往返；同时验证一个 Client 写入的 Fast 用户默认值能被另一个 Client
 读取，之后新建 Thread 的运行时 `serviceTier` 按 `default → priority → default` 变化，并验证
-第二个 Client 修改共享 Thread 的模型、思考强度和 Fast 设置时，订阅方收到完整的
+第二个 Client 修改共享 Thread 的模型、思考等级和 Fast 设置时，订阅方收到完整的
 `thread/settings/updated`；第二个 Client 重连后再次修改仍会广播。合同还会启动并立即清理一个
 不等待模型结果的 Plan Turn，验证 Default/Plan 预设、Plan 设置通知、稳定 Turn ID、中断后的
 官方非负 `durationMs`、Skill、MCP、Plugin

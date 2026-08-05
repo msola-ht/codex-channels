@@ -2,6 +2,7 @@ import type {
   OutputEvent,
   TurnPlanStep,
 } from "../conversation-core/index.js";
+import { toStructuredMarkdownList } from "./conversation-command-format.js";
 
 const maximumPlanSteps = 12;
 const maximumStepCharacters = 240;
@@ -59,15 +60,15 @@ export function createPlanPresentation(
     event.explanation?.trim() ?? "",
     maximumExplanationCharacters,
   );
-  const lines = steps.map(formatStep);
+  const lines = steps.map((step) => `- ${formatStep(step)}`);
   if (event.steps.length > steps.length) {
-    lines.push(`… 其余 ${event.steps.length - steps.length} 项未显示`);
+    lines.push(`- … 其余 ${event.steps.length - steps.length} 项未显示`);
   }
-  const text = [
+  const text = toStructuredMarkdownList([
     title,
     ...(explanation ? ["", explanation] : []),
     ...(lines.length > 0 ? ["", ...lines] : ["", "暂无步骤"]),
-  ].join("\n");
+  ].join("\n"));
   return {
     title,
     text,

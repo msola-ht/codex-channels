@@ -33,12 +33,28 @@
 `turn/plan/updated` 的平台展示，不影响 Core 保存最新计划，也不切换 `/plan` 协作模式。
 变化需要重启 Gateway，不需要重启 App Server。
 
+`logging.level` 是全局日志级别；`debug` 与 `trace` 同时启用全局调试模式，`info`、`warn`、
+`error` 和 `fatal` 关闭调试模式。调试模式允许各模块记录受约束的类型、阶段、耗时和结果，并在
+渠道中展示 `/vision` 接收与 Gateway 处理耗时；消息正文、请求参数、上游响应、凭据和审批内容
+仍不得进入日志。可通过 Setup 的“系统设置 → 调试模式”在 `debug` 与 `info` 间切换，变化需要
+重启 Gateway，不需要重启 App Server。
+
+`[[workspaces]]` 除 `id`、`name`、`cwd` 外支持可选的工作区权限：`sandbox`（
+`read-only` / `workspace-write` / `danger-full-access`）、`approval_policy`（
+`untrusted` / `on-request` / `never`）和 `permissions`（App Server 命名权限 Profile）。
+`permissions` 与 `sandbox` 必须互斥，同时配置时失败关闭。权限只作用于该 Workspace 新建或
+恢复的 Thread 启动参数，不影响已绑定 Thread；权限变化按 `workspace.registry` 热加载，不要求
+重启 Gateway。`danger-full-access` 和 `never` 是显式放开的完全权限选项，仅应在明确可信的
+Workspace 上配置。
+
 模型统计代理由 App Server 服务按已启用 Provider 自动装配，不属于用户配置；其上游网络请求继续
 复用 `network` 与标准代理环境变量。
 
-`vision.mode` 默认为 `disabled`；`responses_api` 在当前模型不支持图片时使用精确 HTTPS Endpoint
-和模型，API Key 由 Setup 保存到独立私有凭据文件。
-视觉配置变化需要重启 Gateway；配置文件不保存视觉 API Key。
+`api_providers` 保存多个直接 API 调用使用的 Responses 提供商 ID、名称和精确 HTTPS Endpoint；
+API Key 由 Setup 按提供商保存到独立私有凭据文件。它们不属于 Codex `modelProvider`，不接入
+App Server 或 `/model`。`vision.mode` 默认为 `disabled`；`responses_api` 只保存提供商引用和
+视觉模型，引用不存在时配置失败关闭。提供商或视觉配置变化需要重启 Gateway，不需要重启
+App Server；配置文件不保存 API Key。
 
 飞书配置表当前只定义私聊 Surface 所需的 `enabled`、`app_id`、`app_secret` 和
 `allowed_open_ids`。整表缺失或 `enabled = false` 时运行配置不包含飞书账号；启用时四项必须

@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ConversationTarget } from "../src/conversation-core/index.js";
+import {
+  UserFacingError,
+  type ConversationTarget,
+} from "../src/conversation-core/index.js";
 import { SurfaceInputCoalescer } from "../src/surfaces/surface-input-coalescer.js";
 
 const target: ConversationTarget = {
@@ -14,6 +17,99 @@ afterEach(() => {
 });
 
 describe("SurfaceInputCoalescer", () => {
+  it("retries the latest failed vision submission once without re-uploading", async () => {
+    const submit = vi.fn()
+      .mockRejectedValueOnce(new UserFacingError("vision.failed", "识别失败"))
+      .mockResolvedValueOnce({
+        threadId: "thread",
+        turnId: "turn",
+        steered: false,
+      });
+    const coalescer = new SurfaceInputCoalescer(submit, { quietWindowMs: 0 });
+
+    await expect(coalescer.enqueue({
+      target,
+      actorId: "actor-1",
+      sequence: 1,
+      text: "比较图片",
+      localImages: [
+        { path: "/private/first.png", bytes: 10 },
+        { path: "/private/second.png", bytes: 20 },
+      ],
+    })).rejects.toMatchObject({ code: "vision.failed" });
+
+    await expect(coalescer.retryVision(target, "actor-1")).resolves.toEqual({
+      imageCount: 2,
+      submission: { threadId: "thread", turnId: "turn", steered: false },
+    });
+    expect(submit).toHaveBeenNthCalledWith(2, target, {
+      text: "比较图片",
+      localImages: [
+        { path: "/private/first.png" },
+        { path: "/private/second.png" },
+      ],
+    });
+    await expect(coalescer.retryVision(target, "actor-1"))
+      .rejects.toMatchObject({ code: "vision.retry.missing" });
+  });
+
+  it("expires and cancels failed vision retries per actor", async () => {
+    vi.useFakeTimers();
+    const submit = vi.fn(async () => {
+      throw new UserFacingError("vision.failed", "识别失败");
+    });
+    const coalescer = new SurfaceInputCoalescer(submit, {
+      quietWindowMs: 0,
+      visionPromptTtlMs: 1_000,
+    });
+    await expect(coalescer.enqueue({
+      target,
+      actorId: "actor-1",
+      sequence: 1,
+      localImages: [{ path: "/private/first.png", bytes: 10 }],
+    })).rejects.toMatchObject({ code: "vision.failed" });
+    await expect(coalescer.retryVision(target, "actor-2"))
+      .rejects.toMatchObject({ code: "vision.retry.missing" });
+    expect(coalescer.cancelVisionPrompt(target, "actor-1")).toBe(true);
+    await expect(coalescer.retryVision(target, "actor-1"))
+      .rejects.toMatchObject({ code: "vision.retry.missing" });
+
+    await expect(coalescer.enqueue({
+      target,
+      actorId: "actor-1",
+      sequence: 2,
+      localImages: [{ path: "/private/second.png", bytes: 10 }],
+    })).rejects.toMatchObject({ code: "vision.failed" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(coalescer.retryVision(target, "actor-1"))
+      .rejects.toMatchObject({ code: "vision.retry.missing" });
+  });
+
+  it("does not retain an in-flight vision failure while closing", async () => {
+    let rejectSubmit: ((error: unknown) => void) | undefined;
+    const submit = vi.fn(() => new Promise<{
+      threadId: string;
+      turnId: string;
+      steered: boolean;
+    }>((_resolve, reject) => {
+      rejectSubmit = reject;
+    }));
+    const coalescer = new SurfaceInputCoalescer(submit, { quietWindowMs: 0 });
+    const submission = coalescer.enqueue({
+      target,
+      actorId: "actor-1",
+      sequence: 1,
+      localImages: [{ path: "/private/first.png", bytes: 10 }],
+    });
+    const closing = coalescer.close();
+    rejectSubmit?.(new UserFacingError("vision.failed", "识别失败"));
+
+    await expect(submission).rejects.toMatchObject({ code: "vision.failed" });
+    await closing;
+    await expect(coalescer.retryVision(target, "actor-1"))
+      .rejects.toMatchObject({ code: "vision.retry.missing" });
+  });
+
   it("submits a complete explicitly sized platform batch without waiting", async () => {
     const submit = vi.fn<(
       target: ConversationTarget,

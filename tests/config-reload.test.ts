@@ -313,6 +313,21 @@ describe("Gateway config reload", () => {
     });
   });
 
+  it("hot reloads when only workspace permissions change", () => {
+    const current = config();
+
+    expect(classifyConfigReload(current, config({
+      workspaces: [{
+        ...mainWorkspace,
+        sandbox: "read-only",
+        approvalPolicy: "never",
+      }],
+    }))).toEqual({
+      action: "reload",
+      changes: [{ code: "workspace.registry", scope: "global" }],
+    });
+  });
+
   it("does nothing when the configuration is unchanged", () => {
     expect(classifyConfigReload(config(), config())).toEqual({ action: "reload", changes: [] });
   });
@@ -416,6 +431,9 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     codexSandbox: "workspace-write",
     operationUpdateDisplay: "full",
     planUpdatesEnabled: false,
+    priceCurrency: "auto",
+    priceCurrencyByProvider: {},
+    apiProviders: [],
     vision: { mode: "disabled" },
     credentialsDirectory: "/tmp/credentials",
     stateDatabasePath: "/tmp/gateway.sqlite3",

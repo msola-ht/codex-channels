@@ -29,6 +29,13 @@ DeepSeek 配置写入 `~/.codex`，不写入 Gateway 的 `~/.codex-connect/confi
 Setup 不强制改变 Codex 登录方式。切换模式不会覆盖 OpenAI 登录信息；固定模式直接使用配置中的
 DeepSeek Provider。
 
+### 自动压缩阈值
+
+安装流程在填写 API Key 后会询问自动压缩阈值，也可以在 Setup 菜单中选择“修改自动压缩阈值”
+随时调整。支持按上下文窗口百分比（10–95%，默认 60%）设置，或选择关闭；Setup 会按当前模型
+上下文窗口换算成 token 数，写入 `model_auto_compact_token_limit` 与
+`model_auto_compact_token_limit_scope = "total"`。修改后需要重启 App Server 生效。
+
 ## 管理的文件
 
 | 文件 | 用途 |
@@ -45,8 +52,8 @@ DeepSeek Provider。
 在官方支持前不能选择。
 
 当前 Responses API 只支持文字输入。DeepSeek 会把收到的图片替换成占位文本而不是报错，因此
-Gateway 会在创建或追加 Turn 前明确拒绝图片，并提示先切换到支持图片的模型，避免产生“模型已经
-看图”的误解。
+Gateway 会在创建或追加 Turn 前检查模型能力：未启用外部图片识别时明确拒绝图片并提示切换到
+支持图片的模型；启用后则先走独立视觉代理，避免产生“DeepSeek 已经原生看图”的误解。
 
 ## App Server 与 Thread
 
@@ -62,7 +69,7 @@ Gateway 根据 Thread 的 `modelProvider` 路由新建、恢复、Turn、Review�
 3. 不复制可能包含 Provider 专属 reasoning、工具结果或加密内容的历史。
 
 旧 Thread 仍可通过 `/resume` 恢复。同一 Provider 内切换模型时不新建 Thread，选择在下一次 Turn
-生效。跨 Provider 新建 Thread 使用目标模型目录的默认思考强度；当前 DeepSeek 默认是 `high`。
+生效。跨 Provider 新建 Thread 使用目标模型目录的默认思考等级；当前 DeepSeek 默认是 `high`。
 
 任一 Provider 连接断开时，Gateway 只重连并恢复该侧绑定。任一受监管 App Server 子进程退出时，
 App Server 服务会共同重建受监管实例。
@@ -70,19 +77,26 @@ App Server 服务会共同重建受监管实例。
 ## 用量与运行统计
 
 - `/status` 的 Token、有效上下文窗口、缓存和压缩次数来自当前 Thread，不代表账户余额。
-- Turn 完成摘要始终可按实际响应展示非推理输出速度；DeepSeek 额外展示可观测的首字延时、思考
-  速度和含推理生成速度。文本、函数调用参数和自定义工具参数增量都计入非推理输出时间窗。
+- Turn 完成摘要按同一 Turn 的全部模型请求聚合请求次数、累计模型耗时、缓存命中与不含推理的输出
+  速度；DeepSeek 额外展示最后一次请求的可观测首字延时，以及整轮综合思考速度和含推理生成速度。
+  文本、函数调用参数和自定义工具参数增量都计入不含推理的输出时间窗。
 - OpenAI 的隐藏推理没有可靠计时流，因此不展示首字延时、推理 Token、思考速度或含推理生成
   速度；这些字段也不会通过推理摘要时间进行估算。
 - OpenAI Fast 和周限不会显示在 DeepSeek Thread 上。
 - `/usage` 在 OpenAI Thread 中显示 Codex Token 汇总，在 DeepSeek Thread 中调用官方余额接口。
+- `/metrics` 从独立指标库读取当前 Thread 最近 Turn 的请求累计和最近一次直接 API 请求；输入量是
+  多次请求的累计值，不表示当前上下文占用。`/metrics providers|models|errors 24h|7d|30d` 与
+  OpenAI 官方及第三方直接 API 使用相同统计口径，不为 DeepSeek 建立专属统计表。新请求按当次
+  价格快照估算 API 参考费用，参考总价默认按人民币展示（`[display].price_currency` 可切换），
+  先出总计、再列出输入、缓存、输出三项价格明细，不显示 `/M Token` 单价；历史记录不按新价格回算。
 - `/limits` 当前只支持 OpenAI；DeepSeek 不会回退显示 OpenAI 限额。
 - DeepSeek 不支持 Fast，执行 `/fast on` 或 `/fast off` 会明确拒绝。
 
 ## 图片识别
 
-DeepSeek 模型目录当前只声明文字输入。Gateway 默认继续在 Turn 前拒绝图片；如需识图，可按
-[`图片识别代理`](vision.md) 配置统一的外部 Responses 视觉接口。识别结果作为标明来源的不可信
+DeepSeek 模型目录当前只声明文字输入。未启用外部图片识别时，Gateway 继续在 Turn 前拒绝图片；
+如需识图，可按
+[`图片识别代理`](vision.md) 从独立第三方 API 注册表选择 Responses 接口。识别结果作为标明来源的不可信
 文字资料进入当前 DeepSeek Thread。
 
 App Server 服务会为每个启用的 Provider 启动独立的本机回环统计代理。代理支持项目当前使用的

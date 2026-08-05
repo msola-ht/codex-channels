@@ -20,6 +20,7 @@ describe("ConversationCommandService", () => {
     expect(new Set(conversationCommandNames).size).toBe(conversationCommandNames.length);
     expect(conversationCommandNames).toContain("resume");
     expect(conversationCommandNames).toContain("fast");
+    expect(conversationCommandNames).toContain("metrics");
     expect(conversationCommandNames).toContain("goal");
     expect(conversationCommandNames).toContain("pin");
     expect(conversationCommandNames).toContain("rules");
@@ -72,6 +73,89 @@ describe("ConversationCommandService", () => {
       searchTerm: "fix",
     });
     expect(listSessions).toHaveBeenCalledWith(target, { searchTerm: "fix" });
+  });
+
+  it("shows and updates workspace permissions through /workspace-perm", async () => {
+    const workspace = {
+      id: "main",
+      name: "Main",
+      cwd: "/workspace",
+      sandbox: "workspace-write",
+    };
+    const updateWorkspacePermissions = vi.fn(async () => ({
+      ...workspace,
+      approvalPolicy: "never",
+    }));
+    const commands = new ConversationCommandService({
+      status: () => ({ workspaceId: "main" }),
+      listWorkspaces: () => [workspace],
+      updateWorkspacePermissions,
+    } as unknown as ConversationUseCases);
+
+    await expect(commands.execute(target, "workspace-perm")).resolves.toEqual({
+      kind: "workspace-permissions",
+      workspace,
+    });
+    await expect(
+      commands.execute(target, "workspace-perm", "approval never"),
+    ).resolves.toEqual({
+      kind: "outcome",
+      outcome: {
+        type: "workspace.permissions-updated",
+        workspace: { ...workspace, approvalPolicy: "never" },
+      },
+    });
+    expect(updateWorkspacePermissions).toHaveBeenCalledWith(target, {
+      kind: "approval",
+      value: "never",
+    });
+  });
+
+  it("rejects invalid workspace permission values", async () => {
+    const commands = new ConversationCommandService({
+      status: () => ({ workspaceId: "main" }),
+      listWorkspaces: () => [{ id: "main", name: "Main", cwd: "/workspace" }],
+    } as unknown as ConversationUseCases);
+
+    await expect(commands.execute(target, "workspace-perm", "sandbox root"))
+      .rejects.toMatchObject({ code: "workspace.permission.usage" });
+  });
+
+  it("parses canonical metrics scopes and bounded time ranges", async () => {
+    const requestMetrics = vi.fn(() => null);
+    const commands = new ConversationCommandService({
+      requestMetrics,
+    } as unknown as ConversationUseCases);
+
+    await commands.execute(target, "metrics");
+    await commands.execute(target, "metrics", "session");
+    await commands.execute(target, "metrics", "global 7d");
+    await commands.execute(target, "metrics", "providers");
+    await commands.execute(target, "metrics", "models 30d");
+    await commands.execute(target, "metrics", "errors 7d");
+
+    expect(requestMetrics).toHaveBeenNthCalledWith(1, target, { view: "session" });
+    expect(requestMetrics).toHaveBeenNthCalledWith(2, target, { view: "session" });
+    expect(requestMetrics).toHaveBeenNthCalledWith(3, target, {
+      view: "global",
+      range: "7d",
+    });
+    expect(requestMetrics).toHaveBeenNthCalledWith(4, target, {
+      view: "providers",
+      range: "24h",
+    });
+    expect(requestMetrics).toHaveBeenNthCalledWith(5, target, {
+      view: "models",
+      range: "30d",
+    });
+    expect(requestMetrics).toHaveBeenNthCalledWith(6, target, {
+      view: "errors",
+      range: "7d",
+    });
+    await expect(commands.execute(target, "metrics", "provider 7d"))
+      .rejects.toMatchObject({ code: "metrics.usage" });
+    await expect(commands.execute(target, "metrics", "global 1y"))
+      .rejects.toMatchObject({ code: "metrics.usage" });
   });
 
   it("preserves automatic takeover details in the shared resume outcome", async () => {
@@ -330,6 +414,11 @@ describe("ConversationCommandService", () => {
       setPinned: vi.fn(async () => undefined),
       selectWorkspace: vi.fn(async () => ({ id: "main", name: "Main", cwd: "/workspace" })),
       listWorkspaces: vi.fn(() => [{ id: "main", name: "Main", cwd: "/workspace" }]),
+      updateWorkspacePermissions: vi.fn(async () => ({
+        id: "main",
+        name: "Main",
+        cwd: "/workspace",
+      })),
       stop: vi.fn(async () => true),
       queueFollowUp: vi.fn(async () => ({ position: 1 })),
       rename: vi.fn(async () => undefined),
@@ -349,6 +438,7 @@ describe("ConversationCommandService", () => {
       listMcpServers: vi.fn(async () => []),
       listPlugins: vi.fn(async () => ({})),
       providerAccountUsage: vi.fn(async () => ({})),
+      requestMetrics: vi.fn(() => null),
       providerAccountLimits: vi.fn(async () => ({})),
       listPermissionProfiles: vi.fn(async () => []),
       initializeProjectRules: vi.fn(async () => ({
@@ -373,6 +463,7 @@ describe("ConversationCommandService", () => {
       ["unpin", "", "setPinned"],
       ["status", "", "status"],
       ["workspace", "main", "selectWorkspace"],
+      ["workspace-perm", "approval never", "updateWorkspacePermissions"],
       ["stop", "", "stop"],
       ["queue", "follow up", "queueFollowUp"],
       ["rename", "name", "rename"],
@@ -386,6 +477,7 @@ describe("ConversationCommandService", () => {
       ["mcp", "", "listMcpServers"],
       ["plugins", "", "listPlugins"],
       ["usage", "", "providerAccountUsage"],
+      ["metrics", "", "requestMetrics"],
       ["limits", "", "providerAccountLimits"],
       ["permissions", "", "listPermissionProfiles"],
       ["rules", "init", "initializeProjectRules"],

@@ -84,21 +84,21 @@ export function renderWeixinPollingHealth(
   nowMs = Date.now(),
 ): string {
   const lines = [
-    `微信链路：${phaseLabel(snapshot.phase)}`,
-    `连续失败：${snapshot.consecutiveFailures} 次`,
-    `上次后台轮询：${snapshot.lastSuccessfulPollAtMs === null
+    `- 微信链路：${phaseLabel(snapshot.phase)}`,
+    `- 连续失败：${snapshot.consecutiveFailures} 次`,
+    `- 上次后台轮询：${snapshot.lastSuccessfulPollAtMs === null
       ? "尚无"
       : formatLocalTimestamp(snapshot.lastSuccessfulPollAtMs)}`,
   ];
   if (snapshot.resumeAtMs !== null) {
     lines.push(
-      `预计恢复：${snapshot.resumeAtMs <= nowMs
+      `- 预计恢复：${snapshot.resumeAtMs <= nowMs
         ? "即将重试"
         : `${formatElapsedDuration(snapshot.resumeAtMs - nowMs)}后`}`,
     );
   }
   if (snapshot.phase === "credential-pause") {
-    lines.push("处理建议：重新运行 codexc setup");
+    lines.push("- 处理建议：重新运行 codexc setup");
   }
   return lines.join("\n");
 }

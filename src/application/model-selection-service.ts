@@ -357,7 +357,7 @@ export function resolveEffort(options: string[], selector: string): string {
   }
   throw new UserFacingError(
     "effort.unsupported",
-    `当前模型不支持该思考强度，可选：${options.join("、")}`,
+    `当前模型不支持该思考等级，可选：${options.join("、")}`,
     { options },
   );
 }

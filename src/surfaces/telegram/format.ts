@@ -11,6 +11,7 @@ import {
 } from "../configuration-change-format.js";
 import {
   createStartupPresentation,
+  renderStructuredLifecyclePresentation,
   type LifecyclePresentation,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
@@ -116,23 +117,7 @@ export function formatStartupNotification(
 export function renderTelegramLifecyclePresentation(
   presentation: LifecyclePresentation,
 ): string {
-  return [
-    presentation.title,
-    ...(presentation.fields.length > 0
-      ? ["", ...presentation.fields.map(formatLifecycleListField)]
-      : []),
-    ...(presentation.sections ?? []).flatMap((section) => [
-      "",
-      `${section.title}：`,
-      ...section.fields.map(formatLifecycleListField),
-    ]),
-  ].join("\n");
+  return renderStructuredLifecyclePresentation(presentation);
 }
 
 export type StartupRuntimeInfo = LifecycleStartupRuntimeInfo;
-
-function formatLifecycleListField(
-  field: LifecyclePresentation["fields"][number],
-): string {
-  return `- ${field.label}：${field.value}`;
-}

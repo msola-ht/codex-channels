@@ -1,6 +1,10 @@
 import type { Logger } from "pino";
 
-import type { ConversationUseCases } from "../../application/index.js";
+import type {
+  ConversationUseCases,
+  DisplayPriceCurrency,
+  ExchangeRateSnapshot,
+} from "../../application/index.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
 import type {
   ConversationActorRegistry,
@@ -103,6 +107,11 @@ export interface FeishuSurfaceOptions {
   disableEnvironmentProxy?: boolean;
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
+  debugEnabled?: boolean;
+  exchangeRate?: () => ExchangeRateSnapshot | null;
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency;
   configurationRecipients?: () => readonly string[];
   startupNotification?: FeishuStartupNotification;
 }
@@ -189,6 +198,13 @@ export class FeishuSurface implements SurfaceAdapter {
         ...(options.planUpdatesEnabled !== undefined
           ? { planUpdatesEnabled: options.planUpdatesEnabled }
           : {}),
+        ...(options.exchangeRate === undefined
+          ? {}
+          : { exchangeRate: options.exchangeRate }),
+        ...(options.priceCurrency === undefined
+          ? {}
+          : { priceCurrency: options.priceCurrency }),
+        debugEnabled: options.debugEnabled ?? false,
       },
     );
     this.interactions = new FeishuInteractionPort(
@@ -247,6 +263,13 @@ export class FeishuSurface implements SurfaceAdapter {
       this.interactions,
       {
         quietWindowMs: 0,
+        debugEnabled: options.debugEnabled ?? false,
+        ...(options.exchangeRate === undefined
+          ? {}
+          : { exchangeRate: options.exchangeRate }),
+        ...(options.priceCurrency === undefined
+          ? {}
+          : { priceCurrency: options.priceCurrency }),
         ...(files === undefined ? {} : { files }),
         audios: this.audios,
         ...(quotedMessages === undefined
@@ -301,6 +324,9 @@ export class FeishuSurface implements SurfaceAdapter {
             ...(error.errorCode === undefined
               ? {}
               : { errorCode: error.errorCode }),
+            ...(error.errorMessage === undefined
+              ? {}
+              : { errorMessage: error.errorMessage }),
             ...(error.errorReason === undefined
               ? {}
               : { errorReason: error.errorReason }),
@@ -323,6 +349,16 @@ export class FeishuSurface implements SurfaceAdapter {
         : {}),
       onMessage: (event) => {
         const result = this.inbox.receive(event);
+        options.logger.debug(
+          {
+            surface: "feishu",
+            accountId: options.appId,
+            messageType: event.messageType,
+            outcome: result.status,
+            ...(result.status === "accepted" ? {} : { reason: result.reason }),
+          },
+          "飞书输入已到达 Gateway",
+        );
         if (result.status === "accepted") {
           this.overloadNotifiedChats.delete(event.chatId);
         } else if (
@@ -462,7 +498,7 @@ export class FeishuSurface implements SurfaceAdapter {
     }
     const text = renderFeishuConfigurationChange(change);
     for (const chatId of this.safeConfigurationRecipients()) {
-      if (!this.output.notifyText(chatId, text)) {
+      if (!this.output.notifyMarkdown(chatId, text)) {
         this.logger.warn(
           { accountId: this.accountId, conversationId: chatId },
           "飞书配置通知未进入输出队列",
@@ -482,7 +518,7 @@ export class FeishuSurface implements SurfaceAdapter {
     const text = renderFeishuConfigurationChange(change);
     return Promise.all(
       this.safeConfigurationRecipients().map(
-        (chatId) => this.output.deliverText(chatId, text),
+        (chatId) => this.output.deliverMarkdown(chatId, text),
       ),
     ).then(() => undefined);
   }

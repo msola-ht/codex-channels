@@ -1,5 +1,9 @@
 import type { Logger } from "pino";
 
+import type {
+  DisplayPriceCurrency,
+  ExchangeRateSnapshot,
+} from "../../application/index.js";
 import {
   isCriticalOutputEvent,
   type ConversationTarget,
@@ -87,6 +91,11 @@ export interface WeixinOutboxOptions {
   closeTimeoutMs?: number;
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
+  exchangeRate?: () => ExchangeRateSnapshot | null;
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency;
+  debugEnabled?: boolean;
   onReplyContextInvalidated?: (target: ConversationTarget) => Promise<void>;
   imageClient?: Pick<WeixinImageSendProtocolClient, "sendImage">;
   fileClient?: Pick<WeixinFileSendProtocolClient, "sendFile">;
@@ -196,7 +205,10 @@ export class WeixinOutbox implements SurfaceOutputPort {
       for (const presentation of tracker.accept(event)) {
         this.delivery.enqueue(
           event.target.conversationId,
-          () => this.send(event.target, presentation.text),
+          () => this.send(
+            event.target,
+            formatWeixinCommandText(presentation.text, { structuredFields: true }),
+          ),
           true,
         );
       }
@@ -322,7 +334,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
         );
       case "vision.completed":
         return formatWeixinCommandText(
-          formatVisionCompleted(event),
+          formatVisionCompleted(event, this.options.debugEnabled ?? false),
           { structuredFields: true },
         );
       case "user.message":
@@ -337,7 +349,15 @@ export class WeixinOutbox implements SurfaceOutputPort {
               `${event.background ? `后台任务 · ${event.threadId.slice(0, 12)}\n\n` : ""}${event.text}`,
             );
       case "turn.completed": {
-        return formatWeixinCommandText(renderWeixinTurnCompleted(event));
+        return formatWeixinCommandText(
+          renderWeixinTurnCompleted(
+            event,
+            this.options.priceCurrency,
+            this.options.exchangeRate?.() ?? null,
+            this.options.debugEnabled ?? false,
+          ),
+          { structuredFields: true },
+        );
       }
       case "connection.lost":
         return formatConnectionLost(visibleMessage(event.message));
@@ -346,14 +366,17 @@ export class WeixinOutbox implements SurfaceOutputPort {
       case "account.updated":
         return formatWeixinCommandText(
           formatRuntimeAccountUpdate(event.authMode, event.planType),
+          { structuredFields: true },
         );
       case "account.rateLimits.updated":
         return formatWeixinCommandText(
           formatRuntimeRateLimitUpdate(event.rateLimits),
+          { structuredFields: true },
         );
       case "mcp.status.updated":
         return formatWeixinCommandText(
           formatRuntimeMcpStatusUpdate(event),
+          { structuredFields: true },
         );
       case "plan.updated":
         return null;

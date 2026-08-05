@@ -201,25 +201,26 @@ describe("formatStartupNotification", () => {
         nodeVersion: "v24.18.0",
         transport: "Unix WebSocket",
         codexUpstreamUserAgent: "codex_connect_gateway/0.146.0 (Mac OS 15.7.7; arm64) dumb (codex_connect_gateway; 0.146.0)",
+        debugEnabled: true,
       },
     );
 
     expect(text).toContain("Codex Connect 已上线");
     expect(text).toContain("- App Server：已连接");
-    expect(text).toContain("运行环境：");
+    expect(text).toContain("### 运行环境");
     expect(text).toContain("- 系统：macOS · arm64");
     expect(text).toContain("版本：Codex Connect 0.146.0 · Node.js v24.18.0");
     expect(text).toContain(
       "App Server UA：codex_connect_gateway/0.146.0 (Mac OS 15.7.7; arm64) (codex_connect_gateway; 0.146.0)",
     );
     expect(text).toContain("连接：Unix WebSocket");
-    expect(text).toContain("当前会话：");
+    expect(text).toContain("### 当前会话");
     expect(text).toContain("- Workspace：Main (main)");
     expect(text).toContain("工作目录：/workspace/main");
     expect(text).toContain("Thread：019f8951-eb3");
     expect(text).toContain("Git 分支：feature/weixin-surface");
     expect(text).toContain("模型：gpt-main");
-    expect(text).toContain("思考强度：high");
+    expect(text).toContain("思考等级：high");
     expect(text).toContain("周限：剩余 58%");
     expect(text).not.toContain("本地握手");
     expect(text).not.toContain("本地未发送请求头");
@@ -247,6 +248,7 @@ describe("formatStartupNotification", () => {
         nodeVersion: "v22.13.0",
         transport: "Unix WebSocket",
         codexUpstreamUserAgent: null,
+        debugEnabled: true,
       },
     );
 
@@ -382,15 +384,14 @@ describe("formatStatus", () => {
       },
     });
 
-    expect(text).toContain("累计：1.25 M");
+    expect(text).toContain("**Token**：1.25 M");
     expect(text).toContain("最近模型请求：12.5 K");
-    expect(text).toContain("输入总计：1 M");
-    expect(text).toContain("命中缓存：750 K");
-    expect(text).toContain("未命中缓存：250 K");
+    expect(text).toContain("输入命中缓存：750 K");
+    expect(text).toContain("输入未命中缓存：250 K");
     expect(text).toContain("缓存命中率：75.00%");
     expect(text).toContain("Codex 有效上下文窗口：200 K");
     expect(text).toContain("模型：gpt-main");
-    expect(text).toContain("思考强度：high");
+    expect(text).toContain("思考等级：high");
     expect(text).toContain("Fast 模式：开启");
     expect(text).toContain("Git 分支：feature/weixin-surface");
     expect(text).toContain("上下文压缩：2 次");

@@ -7,17 +7,19 @@
 - `index.ts`：本模块的公开导出入口。
 - `core.ts`：维护活动 Turn、Token、当前 Goal、上下文压缩 Item ID、最近 Diff/Plan 和事件去重状态，
   把稳定输入事件归约为文本、操作、状态和完成事件；Turn 完成事件原样携带 Client 已校验的官方
-  `durationMs` 与 Router 已确认的 `modelProvider`；输出速度由 Client 在通知边界打接收时间戳、
-  Core 按 Thread 归约最后一次模型响应的非推理 Token 与最终回答流式时长（不新建协议计时器，
-  也不消费新协议字段）；模型代理提供时优先使用最后一次请求的首 Token、推理和输出时间窗，
-  非推理输出 Token 始终采用官方用量；OpenAI 只归约非推理输出速度，DeepSeek 才使用可观测推理流
-  归约首字延时、推理 Token、思考速度与含推理生成速度，未知 Provider 默认关闭这些详细指标；
+  `durationMs` 与 Router 已确认的 `modelProvider`；模型代理提供时，Core 按 Thread/Turn 聚合全部
+  已关联请求的次数、实际产生推理输出的思考次数、累计耗时、Usage 与流式时间窗，不读取 SQLite；
+  三类综合速度只聚合同时具有对应
+  Token 和流式时间窗的请求，并携带已计时请求数与可计速请求数，避免缺失时间窗时虚高。OpenAI 不展示
+  隐藏推理计时，DeepSeek 才提供最后请求首事件延迟（渠道在调试模式开启时展示）以及整轮综合思考与生成速度；所有 Provider 使用
+  App Server 增量展示首段回复延迟。代理缺席时仍由 Client
+  通知边界时间戳和 App Server 最近 Usage 提供有限回退；
   Thread Token 指标对所有 Provider 保持通用，OpenAI 账户周限只附加到 OpenAI Thread；可重试错误
   不污染最终完成状态，Thread 与全局 warning 分开路由。
 - `input-events.ts`：定义 Client 可投递给 Core 的平台无关可辨识输入联合，不含 RPC method、
   未知 params 或生成协议类型；其中 `turn.modelTiming.updated` 由 Bootstrap 把模型代理的
-  模型流指标转换为稳定输入，Core 按 Thread/Turn 保留请求时间最新的一次指标并根据 Provider 能力
-  计算输出或详细计时，避免重试累计重复计时。
+  模型流与 Usage 指标转换为稳定输入，Core 按 Thread/Turn 累计每个已确认请求，并单独保留请求时间
+  最新一次的首事件延迟；根据 Provider 能力计算通用或详细聚合计时。
 - `events.ts`：定义 Conversation 目标、稳定 Token、Plan、Goal、Turn、额度、账户和 MCP 类型，以及
   输出事件、Turn 产物、操作状态、OpenAI 账户归属判定和关键事件判定；外部视觉 API 请求发起后
   使用不含路径、提示正文或凭据的非关键 `vision.started` 事件通知对应渠道。

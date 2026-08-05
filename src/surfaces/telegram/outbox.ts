@@ -19,6 +19,10 @@ import {
   createTurnCompletedPresentation,
   createTurnStartedPresentation,
 } from "../lifecycle-presentation.js";
+import type {
+  DisplayPriceCurrency,
+  ExchangeRateSnapshot,
+} from "../../application/index.js";
 import {
   formatVisionCompleted,
   formatVisionProgress,
@@ -97,6 +101,11 @@ export interface TelegramOutboxOptions {
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
   readGeneratedImage?: typeof readGeneratedImage;
+  exchangeRate?: () => ExchangeRateSnapshot | null;
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency;
+  debugEnabled?: boolean;
 }
 
 export class TelegramOutbox {
@@ -181,7 +190,10 @@ export class TelegramOutbox {
         this.notifyPanel(chatId, formatVisionProgress(event.elapsedSeconds));
         return;
       case "vision.completed":
-        this.notifyPanel(chatId, formatVisionCompleted(event));
+        this.notifyPanel(
+          chatId,
+          formatVisionCompleted(event, this.options.debugEnabled ?? false),
+        );
         return;
       case "turn.started":
         this.replyTargets.bindPending(
@@ -404,7 +416,12 @@ export class TelegramOutbox {
           await this.sendPanel(
             chatId,
             renderTelegramLifecyclePresentation(
-              createTurnCompletedPresentation(event),
+              createTurnCompletedPresentation(
+                event,
+                this.options.priceCurrency,
+                this.options.exchangeRate?.() ?? null,
+                this.options.debugEnabled ?? false,
+              ),
             ),
             replyTo,
             true,

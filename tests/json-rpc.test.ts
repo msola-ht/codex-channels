@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
@@ -470,6 +470,28 @@ class FakeTransport extends BaseTransport {
 }
 
 describe("JsonRpcClient", () => {
+  it("logs sanitized request timing at debug level", async () => {
+    const transport = new FakeTransport();
+    const debug = vi.fn();
+    const client = new JsonRpcClient(transport, 60_000, {
+      warn: vi.fn(),
+      debug,
+    });
+
+    await client.connect();
+
+    expect(debug).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "initialize",
+        requestId: 1,
+        durationMs: expect.any(Number),
+        outcome: "success",
+      }),
+      "Codex JSON-RPC 请求完成",
+    );
+    expect(JSON.stringify(debug.mock.calls)).not.toContain("clientInfo");
+  });
+
   it("initializes once and routes notifications", async () => {
     const transport = new FakeTransport();
     const client = new JsonRpcClient(transport);
@@ -1467,6 +1489,62 @@ describe("JsonRpcClient", () => {
       .toMatchObject({
         model: "deepseek-v4-flash",
         modelProvider: "deepseek",
+      });
+  });
+
+  it("starts a new thread with workspace permissions", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await client.startThread("/tmp/project", {
+      sandbox: "danger-full-access",
+      approvalPolicy: "never",
+    });
+
+    expect(transport.sent.find((message) => message.method === "thread/start")?.params)
+      .toMatchObject({
+        sandbox: "danger-full-access",
+        approvalPolicy: "never",
+      });
+  });
+
+  it("prefers a permission profile over sandbox when starting a thread", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await client.startThread("/tmp/project", {
+      permissions: ":read-only",
+      sandbox: "workspace-write",
+    });
+
+    const params = transport.sent
+      .find((message) => message.method === "thread/start")?.params;
+    expect(params).toMatchObject({ permissions: ":read-only" });
+    expect(params).not.toHaveProperty("sandbox");
+  });
+
+  it("resumes a thread with workspace permissions", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await client.resumeThread("thread-1", "/tmp/project", {
+      sandbox: "read-only",
+      approvalPolicy: "untrusted",
+    });
+
+    expect(transport.sent.find((message) => message.method === "thread/resume")?.params)
+      .toMatchObject({
+        sandbox: "read-only",
+        approvalPolicy: "untrusted",
       });
   });
 

@@ -1,6 +1,6 @@
 # Observability
 
-本目录提供 Gateway 的结构化日志入口。
+本目录提供 Gateway 的结构化日志和模型请求指标持久化入口。
 
 ## 文件
 
@@ -8,5 +8,58 @@
 - `logger.ts`：根据配置创建 Pino Logger，并对 Token、App Secret、Authorization、Cookie、密码等
   字段进行脱敏；`err` 和进程边界复用 `safeErrorMetadata`，只保留受约束的异常类型和机器错误码，
   不保留 message、stack 或附加响应对象。
+- `request-metrics.ts`：定义与 Provider 实现无关的单次模型请求指标、存储端口、内部查询结果，以及
+  窄 `ModelPricingResolver` 端口。计价解析器按 Provider、模型、服务层级、输入规模和请求完成
+  时间返回当次价格快照；远程目录与缓存实现留在 Bootstrap，未匹配价格时计价字段保持 `NULL`。
+- `request-metrics-writer.ts`：提供 10,000 条上限的有界延迟写入队列；指标 Socket 只负责入队，
+  每 10 ms 最多同步写入 1 条，关闭时排空，避免 SQLite 位于模型响应确认路径并限制单轮事件循环阻塞。
+- `request-metrics-database.ts`：集中保存指标 Schema、固定路径和进程级独占锁；Gateway 与 reset
+  共用同一把锁。锁内容完整写入后才原子发布，失效 PID 锁和超过保护期的残缺锁可清理，近期残缺锁、
+  运行中或并发重建均失败关闭。
+- `sqlite-request-metrics-store.ts`：把脱敏后的 Provider、模型、状态、HTTP/传输格式、Usage、上游
+  时间戳与本机流式阶段时间戳
+  写入独立 `request-metrics.sqlite3`。当前 Thread 的独立 API 查询只选择调用适配器产生的
+  HTTP JSON 记录，不能把缺少 Turn 元数据的 Codex WebSocket/SSE 代理请求误分类。数据库使用
+  严格 Schema v3、`0600` 文件权限，只接受当前
+  Schema；首次初始化在单一事务内完成；使用 WAL 允许后续只读查询与采集并行，锁等待限制为
+  10 ms；同一 Store 还提供不获取写锁、不初始化或清理 Schema 的显式只读模式，以及每页最多
+  500 条的稳定 ID 游标分页，供 CLI 报表、导出和后续本地 WebUI 复用。记录保留 30 天，以
+  100,000 条为清理目标，每 100 次写入分批清理，两个清理周期之间
+  最多短暂超出 99 条。每条记录保存提供商、模型、思考等级、服务层级、状态与错误类型；路由层在
+  Thread 启动、恢复、切换或模型设置更新时维护思考等级，指标采集按 Thread 关联补齐。
+  `model_request_metrics_enriched` View 统一派生总耗时、TTFT、推理/输出/生成
+  阶段耗时、收尾间隔、缓存与不含推理的 Token、缓存命中率、三类生成速度，以及按当次价格快照计算的
+  输入/缓存/输出和总费用。价格以每百万 Token 的十亿分之一币种单位保存，费用同样使用十亿分之一
+  币种单位，避免浮点金额落库和历史价格回算。内部读取限制为每次最多 500 条；精确 Thread 查询把
+  最近 Turn 的运行聚合、指标库保留范围内的 Thread 会话累计和最近一条无 Turn 的直接 API 请求分开返回，由
+  Bootstrap 映射到 Application 的 `/metrics` 只读端口；会话归纳（模型、思考等级、Token 与费用）
+  与每次对话明细查询由 `threadList()`、`threadTurnSummaries()` 提供，供 `codexc metrics threads`
+  和 `turns` 导出复用。时间范围聚合统一覆盖 Codex Provider 与
+  直接 API，可按全局、提供商或“提供商 + 模型”分组；固定支持最近 24 小时、7 天和 30 天，最多
+  返回请求量最高的 20 组。所有汇总与异常报告只计入 `operation = 'response'` 的模型请求；
+  `/responses/compact` 压缩请求只落库保留，不参与汇总、异常报告或会话指标。综合输出速度只使用同时具有非推理输出 Token 与输出时间窗的请求；
+  首段回复延迟只使用有效 TTFT 样本，并返回平均、P50、P95 和覆盖计数。所有合计仍在 SQLite 内完成，
+  费用也按同币种快照求和并返回已计价请求数；只有聚合范围内三类每百万 Token 单价分别一致时才
+  返回统一单价，否则标记为多档价格，不把缺失价格、计时或缓存字段当成零；不同币种不强行合计。
+  查询时还会把旧库中 HTTP 200、响应格式未知且没有模型或 Usage 的历史“完成”记录归一为
+  `incomplete/response_not_observed`；客户端提前断开仍保持独立失败类型。异常查询以同一时间范围内全部响应请求作为失败率分母，只把
+  非完成状态按提供商、模型、状态、HTTP 状态和错误类型分组，返回出现次数、最近发生时间及总分组数，
+  最多展示出现次数最高的 20 组。
 
-其他模块应注入并复用该 Logger，不应自行创建不受控日志通道。异常日志可以保留操作上下文，但不得输出凭据、敏感表单或完整认证请求。
+其他模块应注入并复用该 Logger，不应自行创建不受控日志通道。`logging.level = "debug"` 或
+`"trace"` 启用全局调试模式；调试日志只记录受约束的模块、类型、阶段、耗时与结果，不记录消息
+正文、JSON-RPC 参数或结果、上游响应、凭据、敏感表单或审批内容。异常日志可以保留受约束的操作
+上下文，但不得输出完整认证请求。逐 Token 文本增量以及未处理的 `delta`、`outputDelta` 和
+`progress` 通知不逐条记录，避免调试模式造成无界日志放大；对应完成态、路由结果与请求耗时仍保留。
+
+模型指标库不属于会话 `StateStore`，不保存消息、提示词、请求/响应正文、图片、识别结果、工具
+参数、凭据或上游响应 ID。`provider-proxy` 生成 Codex Provider 脱敏样本，Bootstrap 的外部视觉
+适配器生成直接 API 脱敏样本，两者复用同一有界 Writer；已有 Thread 的视觉请求保存
+`thread_id`，因调用发生在 Codex Turn 之前而保持 `turn_id = NULL`。本模块不依赖代理、App Server
+协议、Surface 或业务 Storage。当前没有公开 HTTP API 或 WebUI；`codexc metrics` 的
+`report`、`export`、`run`、`turns`、`threads` 只通过本地只读连接输出 Markdown、JSON 或 CSV。
+Schema 不兼容时
+Gateway 失败关闭并提示 `codexc metrics reset`；该命令要求 Gateway 已停止，先检查点回写并备份
+旧库，再由下次启动创建当前 Schema，不执行隐式迁移。
+指标采集始终开启，不受全局调试模式影响；`debug` / `trace` 只增加脱敏的关联诊断，写入失败仍按
+`warn` 输出，避免关闭调试后形成历史数据断档或隐藏采集故障。

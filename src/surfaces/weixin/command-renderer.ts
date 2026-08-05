@@ -1,6 +1,8 @@
 import {
   type ConversationCommandResult,
   type ConversationStatus,
+  type DisplayPriceCurrency,
+  type ExchangeRateSnapshot,
 } from "../../application/index.js";
 import type {
   OutputEvent,
@@ -13,6 +15,7 @@ import {
   formatConversationCommandOutcome,
   formatConversationGoal,
   formatConversationLimits,
+  formatConversationMetrics,
   formatConversationMcp,
   formatConversationModels,
   formatConversationPermissions,
@@ -22,11 +25,14 @@ import {
   formatConversationSkills,
   formatConversationStatus,
   formatConversationUsage,
+  formatConversationWorkspacePermissions,
   formatConversationWorkspaces,
+  toStructuredMarkdownList,
 } from "../conversation-command-format.js";
 import {
   createStartupPresentation,
   createTurnCompletedPresentation,
+  renderStructuredLifecyclePresentation,
   type LifecyclePresentation,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
@@ -60,15 +66,15 @@ export function renderWeixinStartupNotification(
 }
 
 export function renderWeixinHelp(): string {
-  return [
+  return toStructuredMarkdownList([
     "微信 Codex 命令",
     "普通文本会发送到当前 Codex Thread。",
     ...conversationCommandHelpLines,
     "微信：",
     "- /whoami · /wx doctor",
     "- /start · /help · /h",
-    "- /vision <要求> · /vision <2–4> <要求> · /vision cancel",
-  ].join("\n");
+    "- /vision <要求> · /vision <2–4> <要求> · /vision retry · /vision cancel",
+  ].join("\n"));
 }
 
 export function renderWeixinIdentity(message: {
@@ -78,24 +84,33 @@ export function renderWeixinIdentity(message: {
     conversationId: string;
   };
 }): string {
-  return [
+  return toStructuredMarkdownList([
     "微信身份",
     `用户 ID：${message.actorId}`,
     `会话 ID：${message.target.conversationId}`,
     `账号 ID：${message.target.accountId}`,
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function renderWeixinTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency,
+  exchangeRate?: ExchangeRateSnapshot | null,
+  debug = false,
 ): string {
   return renderWeixinLifecyclePresentation(
-    createTurnCompletedPresentation(event),
+    createTurnCompletedPresentation(event, priceCurrency, exchangeRate, debug),
   );
 }
 
 export function renderWeixinCommandResult(
   result: ConversationCommandResult,
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency,
+  exchangeRate?: ExchangeRateSnapshot | null,
 ): string {
   switch (result.kind) {
     case "outcome":
@@ -106,6 +121,8 @@ export function renderWeixinCommandResult(
       return formatConversationStatus(result.status);
     case "workspaces":
       return formatConversationWorkspaces(result);
+    case "workspace-permissions":
+      return formatConversationWorkspacePermissions(result);
     case "models":
       return formatConversationModels(result);
     case "collaboration-mode":
@@ -118,6 +135,8 @@ export function renderWeixinCommandResult(
       return formatConversationPlugins(result);
     case "usage":
       return formatConversationUsage(result);
+    case "metrics":
+      return formatConversationMetrics(result, priceCurrency, exchangeRate);
     case "limits":
       return formatConversationLimits(result);
     case "permissions":
@@ -152,6 +171,10 @@ export function formatWeixinCommandText(
       return line;
     }
     if (!fenced && options.structuredFields === true) {
+      const heading = /^#{1,6}\s+(.+)$/u.exec(line);
+      if (heading) {
+        return `**${heading[1]}**`;
+      }
       const section = /^([^：\n]{1,64})：\s*$/u.exec(line);
       if (section) {
         return `**${section[1]}**`;
@@ -208,19 +231,5 @@ function parseWeixinCommandField(
 function renderWeixinLifecyclePresentation(
   presentation: LifecyclePresentation,
 ): string {
-  return [
-    presentation.title,
-    ...presentation.fields.map(formatLifecycleField),
-    ...(presentation.sections ?? []).flatMap((section) => [
-      "",
-      section.title,
-      ...section.fields.map(formatLifecycleField),
-    ]),
-  ].join("\n");
-}
-
-function formatLifecycleField(
-  field: LifecyclePresentation["fields"][number],
-): string {
-  return `- ${field.label}：${field.value}`;
+  return renderStructuredLifecyclePresentation(presentation);
 }

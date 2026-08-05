@@ -30,8 +30,11 @@ export function loadDeepseekModelOptions(
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(catalogPath, "utf8"));
-  } catch {
-    throw new Error(`DeepSeek 模型目录无效，请重新运行 codexc setup：${catalogPath}`);
+  } catch (error) {
+    throw new Error(
+      `DeepSeek 模型目录无效，请重新运行 codexc setup：${catalogPath}`,
+      { cause: error },
+    );
   }
   const models = record(parsed).models;
   if (!Array.isArray(models)) {
@@ -52,7 +55,7 @@ export function loadDeepseekModelOptions(
         : [];
     });
     if (efforts.length === 0) {
-      throw new Error(`DeepSeek 模型目录缺少推理强度：${catalogPath}`);
+      throw new Error(`DeepSeek 模型目录缺少思考等级：${catalogPath}`);
     }
     return [{
       provider: definition.id,

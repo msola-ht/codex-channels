@@ -16,3 +16,7 @@ Surface 输入不能提交任意绝对工作目录；所有 Thread、Turn、Shel
 具体 Surface 必须先通过自身的 `SurfaceAccessPolicy`，再记录 Actor 并调用 Application 命令或提交消息。
 Registry 会复制并冻结已经通过配置边界验证的 Workspace；构造参数、列表结果或单项查询都不能
 在注册后改写授权路径。热加载替换必须整体有效，失败时保留上一份 Registry。
+
+Workspace 可携带可选的权限字段：`sandbox`、`approvalPolicy` 和 `permissions`。它们只描述该
+Workspace 新建或恢复 Thread 时的 App Server 启动参数，不扩大 Registry 允许的工作目录范围；
+`sandbox` 与 `permissions` 互斥由配置边界校验，Registry 只透传配置结果。

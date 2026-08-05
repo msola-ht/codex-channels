@@ -149,7 +149,7 @@ function readPackageScripts(projectRoot) {
 }
 
 function renderRules(packageScripts) {
-  const sections = [renderGitRule()];
+  const sections = [renderGitRule(), renderGitInspectionRule()];
   if (typeof packageScripts.test === "string") {
     sections.push(renderNpmTestRule());
   }
@@ -172,14 +172,36 @@ function renderGitRule() {
     decision = "allow",
     justification = "Read-only Git inspection is safe in this project",
     match = [
+        "git status",
+        "git status -s",
         "git status -sb",
+        "git diff",
+        "git diff --stat",
+        "git diff --cached",
+        "git diff --cached --check",
         "git diff --check",
+        "git log",
+        "git log --oneline",
         "git log -1 --oneline",
+        "git log -3 --oneline",
     ],
     not_match = [
         "git add README.md",
         "git commit -m test",
         "git push",
+    ],
+)`;
+}
+
+function renderGitInspectionRule() {
+  return `prefix_rule(
+    pattern = ["git", ["branch", "remote"]],
+    decision = "allow",
+    justification = "Read-only branch and remote inspection is safe in this project",
+    match = [
+        "git branch --list",
+        "git branch -a",
+        "git remote -v",
     ],
 )`;
 }

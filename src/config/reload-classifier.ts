@@ -85,6 +85,11 @@ function restartRequiredReasons(
     ],
     [configChange("observability.log-level"), current.logLevel, next.logLevel],
     [
+      configChange("api.providers"),
+      JSON.stringify(current.apiProviders),
+      JSON.stringify(next.apiProviders),
+    ],
+    [
       configChange("vision.provider"),
       JSON.stringify(current.vision),
       JSON.stringify(next.vision),
@@ -197,7 +202,10 @@ function sameWorkspaces(
     const candidate = next[index];
     return candidate?.id === workspace.id
       && candidate.name === workspace.name
-      && candidate.cwd === workspace.cwd;
+      && candidate.cwd === workspace.cwd
+      && candidate.sandbox === workspace.sandbox
+      && candidate.approvalPolicy === workspace.approvalPolicy
+      && candidate.permissions === workspace.permissions;
   });
 }
 

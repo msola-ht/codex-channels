@@ -214,14 +214,27 @@ describe("Feishu Surface", () => {
     expect(fixture.sent).toEqual([{
       chatId: "oc_chat",
       text: [
-        "Workspace 已添加",
+        "## Workspace 已添加",
         "",
-        "│ Docs · docs",
-        "│ /workspace/docs",
+        "- Docs · docs",
+        "- 工作目录：/workspace/docs",
         "",
-        "发送 /workspace 可查看并切换 Workspace。",
+        "- 发送 /workspace 可查看并切换 Workspace。",
         "",
-        "已生效：Workspace",
+        "- 已生效：Workspace",
+      ].join("\n"),
+    }]);
+    expect(fixture.markdowns).toEqual([{
+      chatId: "oc_chat",
+      text: [
+        "## Workspace 已添加",
+        "",
+        "- Docs · docs",
+        "- 工作目录：/workspace/docs",
+        "",
+        "- 发送 /workspace 可查看并切换 Workspace。",
+        "",
+        "- 已生效：Workspace",
       ].join("\n"),
     }]);
     await fixture.surface.stop();
@@ -519,6 +532,7 @@ function createFixture(
   let cardActionHandler: ((event: unknown) => void) | undefined;
   let menuEventHandler: ((event: unknown) => void) | undefined;
   const sent: Array<{ chatId: string; text: string }> = [];
+  const markdowns: Array<{ chatId: string; text: string }> = [];
   const cards: Array<{
     chatId: string;
     messageId: string;
@@ -600,6 +614,7 @@ function createFixture(
       },
       sendMarkdownCard: async (chatId, text) => {
         sent.push({ chatId, text });
+        markdowns.push({ chatId, text });
       },
       createStreamingCard: async () => ({
         cardId: "735537276613415731",
@@ -660,6 +675,7 @@ function createFixture(
   return {
     surface,
     sent,
+    markdowns,
     cards,
     updatedCards,
     logs,

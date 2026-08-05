@@ -3,7 +3,12 @@ import {
   type ConversationTarget,
 } from "../conversation-core/index.js";
 import type { ConversationUseCases } from "./conversation-service.js";
+import type {
+  RequestMetricsCommandQuery,
+  RequestMetricsTimeRange,
+} from "./request-metrics-port.js";
 import type { ReviewTarget, ThreadGoal } from "./turn-port.js";
+import type { WorkspacePermissionUpdate } from "./workspace-permission-port.js";
 
 export const conversationCommandNames = [
   "resume",
@@ -16,6 +21,7 @@ export const conversationCommandNames = [
   "unpin",
   "status",
   "workspace",
+  "workspace-perm",
   "stop",
   "queue",
   "rename",
@@ -29,6 +35,7 @@ export const conversationCommandNames = [
   "mcp",
   "plugins",
   "usage",
+  "metrics",
   "limits",
   "permissions",
   "rules",
@@ -61,6 +68,10 @@ export type ConversationCommandResult =
       currentWorkspaceId: string;
     }
   | {
+      kind: "workspace-permissions";
+      workspace: ReturnType<ConversationUseCases["listWorkspaces"]>[number];
+    }
+  | {
       kind: "models";
       view: "model" | "effort" | "fast";
       state: Awaited<ReturnType<ConversationUseCases["modelState"]>>;
@@ -73,6 +84,7 @@ export type ConversationCommandResult =
   | { kind: "mcp"; servers: Awaited<ReturnType<ConversationUseCases["listMcpServers"]>> }
   | { kind: "plugins"; result: Awaited<ReturnType<ConversationUseCases["listPlugins"]>> }
   | { kind: "usage"; result: Awaited<ReturnType<ConversationUseCases["providerAccountUsage"]>> }
+  | { kind: "metrics"; summary: ReturnType<ConversationUseCases["requestMetrics"]> }
   | { kind: "limits"; result: Awaited<ReturnType<ConversationUseCases["providerAccountLimits"]>> }
   | {
       kind: "permissions";
@@ -100,6 +112,10 @@ export type ConversationCommandOutcome =
   | {
       type: "workspace.selected";
       workspace: Awaited<ReturnType<ConversationUseCases["selectWorkspace"]>>;
+    }
+  | {
+      type: "workspace.permissions-updated";
+      workspace: Awaited<ReturnType<ConversationUseCases["updateWorkspacePermissions"]>>;
     }
   | { type: "turn.stop-requested"; stopped: boolean }
   | { type: "turn.follow-up-queued"; position: number }
@@ -242,6 +258,24 @@ export class ConversationCommandService {
           currentWorkspaceId: this.conversations.status(target).workspaceId,
         };
       }
+      case "workspace-perm": {
+        const current = this.conversations.status(target).workspaceId;
+        const workspace = this.conversations.listWorkspaces().find(
+          (entry) => entry.id === current,
+        )!;
+        const update = parseWorkspacePermissionCommand(argumentsText);
+        if (update === null) {
+          return { kind: "workspace-permissions", workspace };
+        }
+        const updated = await this.conversations.updateWorkspacePermissions(
+          target,
+          update,
+        );
+        return {
+          kind: "outcome",
+          outcome: { type: "workspace.permissions-updated", workspace: updated },
+        };
+      }
       case "stop": {
         const stopped = await this.conversations.stop(target);
         return {
@@ -348,6 +382,14 @@ export class ConversationCommandService {
           kind: "usage",
           result: await this.conversations.providerAccountUsage(target),
         };
+      case "metrics":
+        return {
+          kind: "metrics",
+          summary: this.conversations.requestMetrics(
+            target,
+            parseMetricsCommand(argumentsText),
+          ),
+        };
       case "limits":
         return {
           kind: "limits",
@@ -426,6 +468,37 @@ export class ConversationCommandService {
   }
 }
 
+const requestMetricsTimeRanges = new Set<RequestMetricsTimeRange>([
+  "24h",
+  "7d",
+  "30d",
+]);
+
+function parseMetricsCommand(input: string): RequestMetricsCommandQuery {
+  if (!input) return { view: "session" };
+  const parts = input.split(/\s+/u);
+  if (parts.length === 1 && parts[0] === "session") {
+    return { view: "session" };
+  }
+  const [view, range = "24h"] = parts;
+  if (
+    parts.length > 2
+    || !(["global", "providers", "models", "errors"] as const).includes(
+      view as "global" | "providers" | "models" | "errors",
+    )
+    || !requestMetricsTimeRanges.has(range as RequestMetricsTimeRange)
+  ) {
+    throw new UserFacingError(
+      "metrics.usage",
+      "Metrics 参数无效；使用 /metrics [session|global|providers|models|errors] [24h|7d|30d]",
+    );
+  }
+  return {
+    view: view as "global" | "providers" | "models" | "errors",
+    range: range as RequestMetricsTimeRange,
+  };
+}
+
 function parseSkillInvocation(input: string): {
   selector: string;
   task: string;
@@ -461,5 +534,48 @@ function parseReviewTarget(input: string): ReviewTarget {
   throw new UserFacingError(
     "review.usage",
     "Review 参数无效",
+  );
+}
+
+function parseWorkspacePermissionCommand(
+  input: string,
+): WorkspacePermissionUpdate | null {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const [field, ...rest] = trimmed.split(/\s+/u);
+  const value = rest.join(" ").trim();
+  if (field === "sandbox") {
+    if (value === "clear") {
+      return { kind: "sandbox", value: null };
+    }
+    if (
+      value === "read-only"
+      || value === "workspace-write"
+      || value === "danger-full-access"
+    ) {
+      return { kind: "sandbox", value };
+    }
+  }
+  if (field === "approval") {
+    if (value === "clear") {
+      return { kind: "approval", value: null };
+    }
+    if (value === "untrusted" || value === "on-request" || value === "never") {
+      return { kind: "approval", value };
+    }
+  }
+  if (field === "profile") {
+    if (value === "clear") {
+      return { kind: "permissions", value: null };
+    }
+    if (value.length > 0 && value.length <= 128) {
+      return { kind: "permissions", value };
+    }
+  }
+  throw new UserFacingError(
+    "workspace.permission.usage",
+    "用法：/workspace-perm [sandbox <read-only|workspace-write|danger-full-access|clear>|approval <untrusted|on-request|never|clear>|profile <Profile ID|clear>]",
   );
 }

@@ -70,7 +70,7 @@ export function addWorkspaceToConfig({
   ) {
     throw new Error([
       `default_workspace 不存在：${parsed.defaultWorkspaceId}`,
-      "确认配置需要修复后，运行 codexc ws add --prune-missing。",
+      "确认配置需要修复后，运行 codexc work add --prune-missing。",
     ].join("\n"));
   }
   const resolvedCwd = realpathSync(cwd);
@@ -89,7 +89,7 @@ export function addWorkspaceToConfig({
     if (!pruneMissing) {
       throw new Error([
         `Workspace ${workspace.id} 的目录不存在或不是目录：${workspace.cwd}`,
-        "确认这些目录不再使用后，运行 codexc ws add --prune-missing 清理失效项并添加当前目录。",
+        "确认这些目录不再使用后，运行 codexc work add --prune-missing 清理失效项并添加当前目录。",
       ].join("\n"));
     }
     removedWorkspaces.push(workspace);
@@ -192,16 +192,24 @@ export function removeWorkspaceFromConfig({
   };
 }
 
-function appendWorkspace(workspaces, { cwd, id, name }) {
-  const workspaceName = normalizedName(name ?? basename(cwd));
-  const baseId = normalizedId(id ?? workspaceName);
+export function chooseWorkspaceId(name, unavailableIds = []) {
+  const baseId = normalizedId(name);
+  const unavailable = new Set(unavailableIds);
   let workspaceId = baseId;
   let suffix = 2;
-  const usedIds = new Set(workspaces.map((workspace) => workspace.id));
-  while (usedIds.has(workspaceId)) {
+  while (unavailable.has(workspaceId)) {
     workspaceId = `${baseId.slice(0, Math.max(1, 63 - String(suffix).length - 1))}-${suffix}`;
     suffix += 1;
   }
+  return workspaceId;
+}
+
+function appendWorkspace(workspaces, { cwd, id, name }) {
+  const workspaceName = normalizedName(name ?? basename(cwd));
+  const workspaceId = chooseWorkspaceId(
+    id ?? workspaceName,
+    workspaces.map((workspace) => workspace.id),
+  );
   const workspace = { id: workspaceId, name: workspaceName, cwd };
   workspaces.push(workspace);
   return workspace;

@@ -221,7 +221,7 @@ describe("TelegramOutbox", () => {
 
   it("reports visual recognition heartbeats and structured completion details", async () => {
     const api = new FakeTelegramApi();
-    const outbox = createOutbox(api);
+    const outbox = createOutbox(api, "html", true);
 
     outbox.handle({
       type: "vision.progress",
@@ -231,6 +231,7 @@ describe("TelegramOutbox", () => {
     outbox.handle({
       type: "vision.completed",
       target,
+      provider: "BLTCY",
       model: "gpt-5.6-luna",
       elapsedMs: 31_000,
       usage: {
@@ -249,11 +250,13 @@ describe("TelegramOutbox", () => {
       ].join("\n"),
       [
         "<b>图片识别完成</b>",
-        "• <b>识别模型：</b>gpt-5.6-luna",
+        "• <b>API 提供商：</b>BLTCY",
+        "• <b>调用模型：</b>gpt-5.6-luna",
         "• <b>视觉 API 耗时：</b>31秒",
-        "• <b>Token 用量：</b>输入 1,234 · 输出 56 · 总计 1,290",
+        "• <b>Token</b>：1,290",
+        "  • <b>输出：</b>56",
         "",
-        "正在交给当前模型处理。",
+        "• 正在交给当前模型处理。",
       ].join("\n"),
     ]);
   });
@@ -1161,14 +1164,19 @@ describe("TelegramOutbox", () => {
       [
         turnCompletedPanel,
         "",
-        "• <b>上下文：</b>24.6 K / 258 K（9.5%）",
-        "• <b>最近请求缓存命中：</b>2.07%",
+        "<b>本次运行</b>",
         "• <b>模型：</b>gpt-5.6-sol · medium · Fast 开启",
-        "• <b>提供商：</b>OpenAI",
+        "• <b>提供商：</b>OpenAI 官方",
+        "• <b>最近请求缓存命中率：</b>2.07%",
+        "",
+        "<b>当前会话累计</b>",
+        "• <b>上下文：</b>24.6 K / 258 K（9.5%）",
         "• <b>上下文压缩：</b>2 次",
-        "• <b>周限：</b>剩余 58%",
         "• <b>Goal：</b>进行中 · 12.5 K / 100 K",
         "• <b>Git 分支：</b>feature/weixin-surface",
+        "",
+        "<b>账户状态</b>",
+        "• <b>周限：</b>剩余 58%",
       ].join("\n"),
     ]);
     expect(api.sendOptions[1]).toEqual({
@@ -1335,12 +1343,13 @@ describe("TelegramOutbox", () => {
 function createOutbox(
   api: FakeTelegramApi,
   finalMessageFormat: "html" | "rich" = "html",
+  debugEnabled = false,
 ): TelegramOutbox {
   return new TelegramOutbox(
     api as unknown as Api,
     pino({ level: "silent" }),
     undefined,
-    { finalMessageFormat },
+    { finalMessageFormat, ...(debugEnabled ? { debugEnabled: true } : {}) },
   );
 }
 

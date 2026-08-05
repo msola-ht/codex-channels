@@ -5,6 +5,10 @@ import {
   type OutputEvent,
 } from "../../conversation-core/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
+import type {
+  DisplayPriceCurrency,
+  ExchangeRateSnapshot,
+} from "../../application/index.js";
 import { readGeneratedImage } from "../generated-image.js";
 import {
   OperationUpdateBuffer,
@@ -117,6 +121,11 @@ export interface FeishuOutboxOptions {
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
   readGeneratedImage?: typeof readGeneratedImage;
+  exchangeRate?: () => ExchangeRateSnapshot | null;
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency;
+  debugEnabled?: boolean;
 }
 
 export class FeishuOutbox implements SurfaceOutputPort {
@@ -276,7 +285,12 @@ export class FeishuOutbox implements SurfaceOutputPort {
         event.target.conversationId,
         turnKey(event.threadId, event.turnId),
       );
-      const completion = renderFeishuOutput(event);
+      const completion = renderFeishuOutput(
+        event,
+        this.options.priceCurrency,
+        this.options.exchangeRate?.() ?? null,
+        this.options.debugEnabled ?? false,
+      );
       if (
         completion !== null
         && this.finishStreamsForTurn(event.threadId, event.turnId, completion)
@@ -292,7 +306,12 @@ export class FeishuOutbox implements SurfaceOutputPort {
       );
       return;
     }
-    const rendered = renderFeishuOutput(event);
+    const rendered = renderFeishuOutput(
+      event,
+      this.options.priceCurrency,
+      this.options.exchangeRate?.() ?? null,
+      this.options.debugEnabled ?? false,
+    );
     if (rendered === null) {
       return;
     }
@@ -301,6 +320,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
       () => event.type === "vision.started"
           || event.type === "vision.progress"
           || event.type === "vision.completed"
+          || event.type === "account.updated"
+          || event.type === "account.rateLimits.updated"
+          || event.type === "mcp.status.updated"
         ? this.sendMarkdown(event.target.conversationId, rendered)
         : event.type === "turn.started"
           || event.type === "text.completed"
@@ -390,6 +412,13 @@ export class FeishuOutbox implements SurfaceOutputPort {
     return this.delivery.runOrdered(
       chatId,
       () => this.sendText(chatId, text),
+    );
+  }
+
+  deliverMarkdown(chatId: string, markdown: string): Promise<void> {
+    return this.delivery.runOrdered(
+      chatId,
+      () => this.sendMarkdown(chatId, markdown),
     );
   }
 

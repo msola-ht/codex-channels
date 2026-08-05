@@ -72,6 +72,63 @@ function createAudioMessage(): Extract<FeishuInboxMessage, { kind: "audio" }> {
 }
 
 describe("Feishu conversation adapter", () => {
+  it("shows /vision delivery and Gateway handling latency", async () => {
+    const fixture = createOutbox();
+    const inputOptions = {
+      quietWindowMs: 0,
+      now: () => 1_450,
+      debugEnabled: true,
+    };
+    const adapter = new FeishuConversationAdapter(
+      {} as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      inputOptions,
+    );
+
+    await adapter.handle({
+      ...message,
+      text: "/vision 2 比较两张图片",
+      createdAtMs: 1_000,
+      receivedAtMs: 1_200,
+    });
+    await fixture.outbox.close();
+
+    expect(fixture.sent[0]?.text).toContain("接收延迟：200毫秒");
+    expect(fixture.sent[0]?.text).toContain("Gateway 处理：250毫秒");
+  });
+
+  it("hides /vision technical timing outside debug mode", async () => {
+    const fixture = createOutbox();
+    const adapter = new FeishuConversationAdapter(
+      {} as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { quietWindowMs: 0, now: () => 1_450 },
+    );
+
+    await adapter.handle({
+      ...message,
+      text: "/vision 2 比较两张图片",
+      createdAtMs: 1_000,
+      receivedAtMs: 1_200,
+    });
+    await fixture.outbox.close();
+
+    expect(fixture.sent[0]?.text).not.toContain("接收延迟");
+    expect(fixture.sent[0]?.text).not.toContain("Gateway 处理");
+  });
+
   it("uses rich posts for command results but keeps failures as plain text", async () => {
     const notifyMarkdown = vi.fn(() => true);
     const notifyText = vi.fn(() => true);
@@ -136,10 +193,10 @@ describe("Feishu conversation adapter", () => {
     )).toBe(true);
     expect(fixture.sent[1]?.text).toBe(fixture.sent[0]?.text);
     expect(fixture.sent[2]?.text).toBe([
-      "飞书身份",
-      "用户 Open ID：ou_actor",
-      "Chat ID：oc_chat",
-      "App ID：cli_0123456789abcdef",
+      "## 飞书身份",
+      "- 用户 Open ID：ou_actor",
+      "- Chat ID：oc_chat",
+      "- App ID：cli_0123456789abcdef",
     ].join("\n"));
   });
 
@@ -218,7 +275,7 @@ describe("Feishu conversation adapter", () => {
 
     expect(stopForActor).toHaveBeenCalledWith(message.target, message.actorId);
     expect(stop).toHaveBeenCalledWith(message.target);
-    expect(fixture.sent[0]?.text).toBe("已请求停止当前任务。");
+    expect(fixture.sent[0]?.text).toBe("## 已请求停止当前任务。");
   });
 
   it("opens the composed command center for start and help", async () => {
@@ -282,13 +339,13 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent[0]?.text).toContain("/fs doctor");
     expect(fixture.sent[1]?.text).toContain("长连接：已就绪");
     expect(fixture.sent[1]?.text).toContain("卡片动作回调：尚未验证");
-    expect(fixture.sent[2]?.text).toContain("✅ 长连接");
-    expect(fixture.sent[2]?.text).toContain("✅ 消息接收");
+    expect(fixture.sent[2]?.text).toContain("长连接：已就绪");
+    expect(fixture.sent[2]?.text).toContain("消息接收：已验证");
     expect(fixture.sent[2]?.text).toContain(
-      "◯ 卡片交互：待使用验证",
+      "卡片交互：待使用验证",
     );
     expect(fixture.sent[2]?.text).toContain(
-      "◯ 自定义菜单：待点击验证",
+      "自定义菜单：待点击验证",
     );
     expect(fixture.sent[2]?.text).not.toContain("OAuth");
     expect(fixture.sent[2]?.text).not.toContain("token");
@@ -389,7 +446,7 @@ describe("Feishu conversation adapter", () => {
       "",
     );
     expect(choices).toMatchObject({
-      title: "选择思考强度",
+      title: "选择思考等级",
       choices: [
         expect.objectContaining({ input: "medium" }),
         expect.objectContaining({ input: "high" }),
@@ -405,7 +462,7 @@ describe("Feishu conversation adapter", () => {
     );
     await fixture.outbox.close();
     expect(selectEffort).toHaveBeenCalledWith(message.target, "high");
-    expect(fixture.sent[0]?.text).toContain("当前思考强度：high");
+    expect(fixture.sent[0]?.text).toContain("当前思考等级：high");
   });
 
   it("uses the shared Skill list and explicit invocation commands", async () => {
@@ -449,6 +506,84 @@ describe("Feishu conversation adapter", () => {
     );
     expect(fixture.sent[0]?.text).toContain("1. systematic-debugging");
     expect(fixture.sent[1]?.text).toContain("已使用 Skill 开始任务");
+  });
+
+  it("turns workspace permission updates into clickable card choices", async () => {
+    const fixture = createOutbox();
+    const updateWorkspacePermissions = vi.fn(async () => ({
+      id: "codex-connect",
+      name: "Workspace",
+      cwd: "/workspace",
+      approvalPolicy: "never",
+    }));
+    const adapter = new FeishuConversationAdapter(
+      {
+        status: () => ({ workspaceId: "codex-connect" }),
+        listWorkspaces: () => [{
+          id: "codex-connect",
+          name: "Workspace",
+          cwd: "/workspace",
+          sandbox: "read-only",
+        }],
+        updateWorkspacePermissions,
+      } as unknown as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+    );
+
+    const first = await adapter.handleCommandCenterAction(
+      message.target,
+      "workspace-perm",
+      message.actorId,
+      "",
+    );
+    expect(first).toMatchObject({
+      title: "工作区权限",
+      choices: [
+        expect.objectContaining({ input: "sandbox" }),
+        expect.objectContaining({ input: "approval" }),
+        expect.objectContaining({ action: "workspace-perm-profile" }),
+      ],
+    });
+
+    const second = await adapter.handleCommandCenterAction(
+      message.target,
+      "workspace-perm",
+      message.actorId,
+      "sandbox",
+    );
+    expect(second).toMatchObject({
+      title: "选择沙箱模式",
+      choices: expect.arrayContaining([
+        expect.objectContaining({ input: "sandbox read-only" }),
+        expect.objectContaining({ input: "sandbox danger-full-access" }),
+      ]),
+    });
+
+    const profileForm = await adapter.handleCommandCenterAction(
+      message.target,
+      "workspace-perm-profile",
+      message.actorId,
+      "",
+    );
+    expect(profileForm).toMatchObject({
+      kind: "form",
+      action: "workspace-perm",
+      inputPrefix: "profile ",
+    });
+
+    await adapter.handleCommandCenterAction(
+      message.target,
+      "workspace-perm",
+      message.actorId,
+      "approval never",
+    );
+    await fixture.outbox.close();
+    expect(updateWorkspacePermissions).toHaveBeenCalledWith(message.target, {
+      kind: "approval",
+      value: "never",
+    });
+    expect(fixture.sent[0]?.text).toContain("已更新工作区权限");
   });
 
   it("turns active and archived session results into exact card choices", async () => {
@@ -941,19 +1076,19 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent).toEqual([{
       chatId: "oc_chat",
       text: [
-        "Codex 状态",
-        "Workspace：Main (main)",
-        "Thread：thread-1",
-        "Turn：turn-1",
-        "工作目录：/workspace",
-        "Git 分支：未检测到",
-        "模型：gpt-test",
-        "提供商：OpenAI",
-        "思考强度：medium",
-        "Fast 模式：开启",
-        "协作模式：Default",
+        "## Codex 状态",
+        "- Workspace：Main (main)",
+        "- Thread：thread-1",
+        "- Turn：turn-1",
+        "- 工作目录：/workspace",
+        "- Git 分支：未检测到",
+        "- 模型：gpt-test",
+        "- 提供商：OpenAI 官方",
+        "- 思考等级：medium",
+        "- Fast 模式：开启",
+        "- 协作模式：Default",
         "",
-        "当前 Thread 用量：等待 App Server 推送统计",
+        "- 当前 Thread 用量：等待 App Server 推送统计",
       ].join("\n"),
     }]);
   });
@@ -981,7 +1116,7 @@ describe("Feishu conversation adapter", () => {
     );
     expect(fixture.sent).toEqual([{
       chatId: "oc_chat",
-      text: "已排到下一 Turn，当前第 2 条。队列仅保存在内存，Gateway 重启会清空。",
+      text: "## 已排到下一 Turn，当前第 2 条。队列仅保存在内存，Gateway 重启会清空。",
     }]);
   });
 
@@ -1019,6 +1154,74 @@ describe("Feishu conversation adapter", () => {
     await fixture.outbox.close();
 
     expect(submit).toHaveBeenCalledWith(message.target, "继续开发");
+    expect(fixture.sent).toEqual([]);
+  });
+
+  it("rejects copied Feishu message links before reading replies or starting a Turn", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn();
+    const readQuotedText = vi.fn();
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { quietWindowMs: 0, readQuotedText },
+    );
+
+    await adapter.handle({
+      ...message,
+      parentId: "om_parent",
+      text: [
+        "看看这条消息：",
+        "https://applink.feishu.cn/client/message/link/open?token=sensitive-token",
+      ].join("\n"),
+    });
+    await fixture.outbox.close();
+
+    expect(readQuotedText).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+    expect(fixture.sent).toEqual([{
+      chatId: "oc_chat",
+      text: [
+        "暂不支持通过飞书复制的消息链接读取内容。",
+        "请直接回复目标消息，再发送你的要求。",
+      ].join("\n"),
+    }]);
+    expect(fixture.sent[0]?.text).not.toContain("sensitive-token");
+  });
+
+  it("does not reject other Feishu AppLinks or lookalike hosts", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const adapter = new FeishuConversationAdapter(
+      { submit } as unknown as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+    );
+    const inputs = [
+      "https://applink.feishu.cn/client/web_url/open?url=https%3A%2F%2Fexample.com",
+      "https://applink.feishu.cn.example.com/client/message/link/open?token=value",
+      "https://applink.feishu.cn/client/message/link/open",
+    ];
+
+    for (const text of inputs) {
+      await adapter.handle({ ...message, text });
+    }
+    await fixture.outbox.close();
+
+    expect(submit).toHaveBeenCalledTimes(inputs.length);
+    for (const text of inputs) {
+      expect(submit).toHaveBeenCalledWith(message.target, text);
+    }
     expect(fixture.sent).toEqual([]);
   });
 

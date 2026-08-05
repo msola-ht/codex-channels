@@ -7,6 +7,8 @@ import { runDeepseekSetup } from "./deepseek-setup.mjs";
 import { runTelegramSetup } from "./telegram-setup.mjs";
 import { runWeixinSetup } from "./weixin-setup.mjs";
 import { runVisionSetup } from "./vision-setup.mjs";
+import { runDebugSetup } from "./debug-setup.mjs";
+import { runApiProviderSetup } from "./api-provider-setup.mjs";
 
 export async function runSetup({
   input = process.stdin,
@@ -17,6 +19,8 @@ export async function runSetup({
   telegramSetup = runTelegramSetup,
   weixinSetup = runWeixinSetup,
   visionSetup = runVisionSetup,
+  debugSetup = runDebugSetup,
+  apiProviderSetup = runApiProviderSetup,
 } = {}) {
   prompts.intro("Codex Connect Setup");
   while (true) {
@@ -27,12 +31,17 @@ export async function runSetup({
         {
           value: "models",
           label: "模型渠道",
-          hint: "配置 OpenAI 与 DeepSeek",
+          hint: "配置 DeepSeek、第三方 API 与图片识别",
         },
         {
           value: "channels",
           label: "通讯渠道",
           hint: "配置外部消息入口",
+        },
+        {
+          value: "system",
+          label: "系统设置",
+          hint: "配置全局调试模式",
         },
         {
           value: "cancel",
@@ -64,7 +73,18 @@ export async function runSetup({
           output,
           prompts,
           deepseekSetup,
+          apiProviderSetup,
           visionSetup,
+        });
+        if (isBackResult(result)) continue;
+        return result;
+      }
+      case "system": {
+        const result = await runSystemSetup({
+          input,
+          output,
+          prompts,
+          debugSetup,
         });
         if (isBackResult(result)) continue;
         return result;
@@ -75,12 +95,42 @@ export async function runSetup({
   }
 }
 
-async function runModelSetup({ input, output, prompts, deepseekSetup, visionSetup }) {
+async function runSystemSetup({ input, output, prompts, debugSetup }) {
+  const module = await prompts.select({
+    message: "选择系统设置",
+    showInstructions: false,
+    options: [
+      {
+        value: "debug",
+        label: "调试模式",
+        hint: "控制全局脱敏调试日志和渠道技术字段",
+      },
+      { value: "back", label: "返回", hint: "返回设置类别" },
+    ],
+  });
+  if (prompts.isCancel(module) || module === "back") return { action: "back" };
+  if (module === "debug") return debugSetup({ input, output, prompts });
+  throw new Error(`未知系统设置：${String(module)}`);
+}
+
+async function runModelSetup({
+  input,
+  output,
+  prompts,
+  deepseekSetup,
+  apiProviderSetup,
+  visionSetup,
+}) {
   const module = await prompts.select({
     message: "选择模型渠道设置",
     showInstructions: false,
     options: [
       { value: "deepseek", label: "DeepSeek", hint: "安装、切换或恢复模型提供商" },
+      {
+        value: "api_provider",
+        label: "第三方 API",
+        hint: "管理供图片识别等功能使用的 Responses 中转接口",
+      },
       { value: "vision", label: "图片识别", hint: "为不支持图片的模型配置视觉代理" },
       { value: "back", label: "返回", hint: "返回设置类别" },
     ],
@@ -88,6 +138,9 @@ async function runModelSetup({ input, output, prompts, deepseekSetup, visionSetu
   if (prompts.isCancel(module) || module === "back") return { action: "back" };
   if (module === "deepseek") {
     return deepseekSetup({ input, output, prompts, allowBack: true });
+  }
+  if (module === "api_provider") {
+    return apiProviderSetup({ input, output, prompts });
   }
   if (module === "vision") return visionSetup({ input, output, prompts });
   throw new Error(`未知模型渠道设置：${String(module)}`);

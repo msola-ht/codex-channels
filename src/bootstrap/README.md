@@ -11,8 +11,22 @@
   高权限请求明确拒绝；受支持版本通过 Client 运行时信息读取，并把显示版本注入 Surface；
   对当前授权 Workspace 执行有时限的只读 Git 分支查询并注入 Application 状态；按 Setup 管理
   标记装配主 Client 与可选 Provider Client，并通过 Provider 路由复用其余业务模块；按已启用
-  Provider 监听私有计时指标 Socket，不持有模型转发数据通路；Core 根据编译期 Provider 能力决定
-  哪些详细计时可以进入完成事件。
+  Provider 装配模型指标组件，不持有模型转发数据通路；把同一指标库的精确 Thread 查询映射为
+  Application `/metrics` 窄端口；Core 根据编译期 Provider 能力决定哪些详细计时可以进入完成事件。
+- `provider-metrics-composition.ts`：组合 Provider 私有指标 Socket、Observability 独立存储和 Core
+  既有计时端口。所有脱敏请求样本都会持久化；具备 Thread、Turn 与 Token 窗口的样本按 Turn 聚合
+  到完成卡片；持久化通过 Observability 有界 Writer 延迟分片执行，单项写入失败不会阻断指标确认或
+  既有 Core 计时。可选 `ModelPricingResolver` 只在组合边界为新请求附加当次价格快照，可选
+  `resolveModelSettings` 按 Thread 关联补齐路由层维护的思考等级；代理、Core 和数据库 View
+  都不读取设置或内置模型价格。
+- `model-pricing-catalog.ts`：实现组合根注入的远程价格目录。启动时先读取 Gateway 数据目录下的
+  `0600` 可丢弃缓存，再异步刷新；固定优先读取 LiteLLM 目录，失败时回退到 Sub2API 使用的
+  `Wei-Shaw/model-price-repo` 镜像，每 6 小时条件请求一次。解析器只为新请求生成不可变 USD API
+  参考价格快照，支持缓存输入、Priority 与已声明的长上下文价格，不把网络刷新放入请求路径。
+- `reference-cost-summary.ts`：在 Turn 完成时把指标库中的 Thread 历史计价与当前实时 Turn 计价
+  合并；若当前 Turn 已部分延迟写入，先扣除该部分再加入完整实时值，避免累计总价重复或遗漏。
+- `workspace-permission-writer.ts`：把渠道 `/workspace-perm` 的工作区权限更新写回
+  `config.toml` 并校验 `permissions` 与 `sandbox` 互斥；文件变化由配置监听热加载。
 - `surface-plugin.ts`：定义编译期内置 Surface 插件、插件上下文和运行时模块契约，并校验插件 ID、
   实际 Surface ID 与账号实例唯一性。
 - `surface-composition.ts`：显式注册 Telegram、飞书和微信内置插件，并保留各平台访问策略、
@@ -25,12 +39,14 @@
   DeepSeek Key，
   通过共享代理调用官方余额接口，并在有界响应和严格 Schema 校验后只返回稳定余额；Key、响应正文
   和解析异常不进入日志或业务事件。
-- `responses-vision-adapter.ts`：模型不支持图片时可选的外部 Responses 图片识别实现；从私有凭据
-  文件按请求读取 Key、复用统一代理、限制响应大小，并把用户原始提示和图片交给视觉接口后只返回
-  Application 的稳定识别结果。
+- `responses-vision-adapter.ts`：模型不支持图片时可选的外部 Responses 图片识别实现；组合根按
+  `vision.provider` 从第三方 API 注册表解析显示名称、精确 Endpoint 和隔离凭据，适配器复用统一
+  代理、限制响应大小，并把用户原始提示和图片交给视觉接口后只返回 Application 的稳定识别结果；
+  成功、失败与不完整响应的脱敏请求指标复用 Observability Writer，已有 Thread 时关联 Thread，
+  组合根按实际响应模型附加当次价格快照，不保存图片、提示词、响应正文或识别结果。
 - `config-lifecycle.ts`：管理配置监听、防抖重载、持久配置事件投递、信号与进程退出。
 - `surface-manager.ts`：按 `surface + accountId` 向已启动 Surface 集中路由 Core 输出，并为
-  `turn.completed` 注入当前授权 Workspace 的 Git 分支；并行完成各 Surface 的首次启动，
+  `turn.completed` 注入当前授权 Workspace 的 Git 分支和 Thread 累计参考总价；并行完成各 Surface 的首次启动，
   单个渠道启动或运行失败时只取消该渠道交互并独立退避恢复，不停止 Gateway 或其他渠道。
   首次启动和故障恢复期间只在有界内存队列中保留关键输出，就绪后按序补投；流式增量不积压。
   渠道未就绪时对应账号的新审批、用户输入与 MCP 交互立即失败关闭。

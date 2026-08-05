@@ -1,6 +1,8 @@
 import type {
   ConversationCommandResult,
   ConversationStatus,
+  DisplayPriceCurrency,
+  ExchangeRateSnapshot,
 } from "../../application/index.js";
 import type {
   OutputEvent,
@@ -13,6 +15,7 @@ import {
   formatConversationCommandOutcome,
   formatConversationGoal,
   formatConversationLimits,
+  formatConversationMetrics,
   formatConversationMcp,
   formatConversationModels,
   formatConversationPermissions,
@@ -22,7 +25,9 @@ import {
   formatConversationSkills,
   formatConversationStatus,
   formatConversationUsage,
+  formatConversationWorkspacePermissions,
   formatConversationWorkspaces,
+  toStructuredMarkdownList,
 } from "../conversation-command-format.js";
 import {
   emptyCodexResponseText,
@@ -33,6 +38,7 @@ import {
   createStartupPresentation,
   createTurnCompletedPresentation,
   createTurnStartedPresentation,
+  renderStructuredLifecyclePresentation,
   type LifecyclePresentation,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
@@ -82,7 +88,7 @@ export function renderFeishuStartupNotification(
 }
 
 export function renderFeishuHelp(): string {
-  return [
+  return toStructuredMarkdownList([
     "飞书 Codex 命令",
     "",
     "普通文本会发送到当前 Codex Thread。",
@@ -91,23 +97,27 @@ export function renderFeishuHelp(): string {
     "飞书：",
     "- /whoami · /fs <status|doctor|revoke>",
     "- /start · /help · /h",
-    "- /vision <要求> · /vision <2–4> <要求> · /vision cancel",
-  ].join("\n");
+    "- /vision <要求> · /vision <2–4> <要求> · /vision retry · /vision cancel",
+  ].join("\n"));
 }
 
 export function renderFeishuIdentity(
   message: Pick<FeishuInboxMessage, "actorId" | "target">,
 ): string {
-  return [
+  return toStructuredMarkdownList([
     "飞书身份",
     `用户 Open ID：${message.actorId}`,
     `Chat ID：${message.target.conversationId}`,
     `App ID：${message.target.accountId}`,
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function renderFeishuCommandResult(
   result: ConversationCommandResult,
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency,
+  exchangeRate?: ExchangeRateSnapshot | null,
 ): string {
   switch (result.kind) {
     case "outcome":
@@ -118,6 +128,8 @@ export function renderFeishuCommandResult(
       return formatConversationStatus(result.status);
     case "workspaces":
       return formatConversationWorkspaces(result);
+    case "workspace-permissions":
+      return formatConversationWorkspacePermissions(result);
     case "models":
       return formatConversationModels(result);
     case "collaboration-mode":
@@ -130,6 +142,8 @@ export function renderFeishuCommandResult(
       return formatConversationPlugins(result);
     case "usage":
       return formatConversationUsage(result);
+    case "metrics":
+      return formatConversationMetrics(result, priceCurrency, exchangeRate);
     case "limits":
       return formatConversationLimits(result);
     case "permissions":
@@ -155,14 +169,21 @@ export function renderFeishuUserFacingError(
   return formatSurfaceUserFacingError(error, "飞书");
 }
 
-export function renderFeishuOutput(event: OutputEvent): string | null {
+export function renderFeishuOutput(
+  event: OutputEvent,
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency,
+  exchangeRate?: ExchangeRateSnapshot | null,
+  debug = false,
+): string | null {
   switch (event.type) {
     case "vision.started":
       return formatVisionStarted(event.imageCount);
     case "vision.progress":
       return formatVisionProgress(event.elapsedSeconds);
     case "vision.completed":
-      return formatVisionCompleted(event);
+      return formatVisionCompleted(event, debug);
     case "turn.started":
       return renderFeishuLifecyclePresentation(
         createTurnStartedPresentation(event.background ? event.threadId : undefined),
@@ -179,7 +200,7 @@ export function renderFeishuOutput(event: OutputEvent): string | null {
     case "plan.updated":
       return null;
     case "turn.completed":
-      return renderFeishuTurnCompleted(event);
+      return renderFeishuTurnCompleted(event, priceCurrency, exchangeRate, debug);
     case "thread.status":
       return `Thread 状态：${threadStatusLabel(event.status)}`;
     case "connection.lost":
@@ -197,33 +218,21 @@ export function renderFeishuOutput(event: OutputEvent): string | null {
 
 function renderFeishuTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency,
+  exchangeRate?: ExchangeRateSnapshot | null,
+  debug = false,
 ): string {
   return renderFeishuLifecyclePresentation(
-    createTurnCompletedPresentation(event),
+    createTurnCompletedPresentation(event, priceCurrency, exchangeRate, debug),
   );
 }
 
 function renderFeishuLifecyclePresentation(
   presentation: LifecyclePresentation,
 ): string {
-  return [
-    `**${presentation.title}**`,
-    ...(presentation.fields.length > 0
-      ? [
-          "",
-          ...presentation.fields.map(
-            ({ label, value }) => `- **${label}：** ${value}`,
-          ),
-        ]
-      : []),
-    ...(presentation.sections ?? []).flatMap((section) => [
-      "",
-      `**${section.title}**`,
-      ...section.fields.map(
-        ({ label, value }) => `- **${label}：** ${value}`,
-      ),
-    ]),
-  ].join("\n");
+  return renderStructuredLifecyclePresentation(presentation);
 }
 
 function visibleUpstreamMessage(message: string): string {

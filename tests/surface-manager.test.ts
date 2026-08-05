@@ -1,4 +1,4 @@
-import pino from "pino";
+import pino, { type Logger } from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { InteractionPort } from "../src/approval/index.js";
@@ -380,6 +380,58 @@ describe("SurfaceManager", () => {
     expect(received).toEqual(["feishu:thread.status"]);
     await manager.stop();
     await output.close();
+  });
+
+  it("does not amplify per-token text deltas in debug logs", async () => {
+    const debug = vi.fn();
+    const diagnosticLogger = {
+      debug,
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    } as unknown as Logger;
+    const telegram = surface("telegram", "default", []);
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = new SurfaceManager(
+      [telegram],
+      output,
+      diagnosticLogger,
+    );
+    await manager.start();
+
+    output.publish({
+      type: "text.delta",
+      target: {
+        surface: "telegram",
+        accountId: "default",
+        conversationId: "chat-1",
+      },
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      text: "不应进入日志",
+    });
+    output.publish({
+      type: "thread.status",
+      target: {
+        surface: "telegram",
+        accountId: "default",
+        conversationId: "chat-1",
+      },
+      threadId: "thread-1",
+      status: "idle",
+    });
+    await output.close();
+
+    expect(debug).toHaveBeenCalledTimes(1);
+    expect(debug).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "thread.status" }),
+      "输出事件已提交到 Surface 队列",
+    );
+    expect(JSON.stringify(debug.mock.calls)).not.toContain("text.delta");
+    expect(JSON.stringify(debug.mock.calls)).not.toContain("不应进入日志");
+
+    await manager.stop();
   });
 
   it("buffers critical output before startup and stops routing after shutdown", async () => {

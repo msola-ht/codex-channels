@@ -69,6 +69,10 @@ export {
   type SkillQueryPort,
 } from "./skill-port.js";
 export {
+  type WorkspacePermissionPort,
+  type WorkspacePermissionUpdate,
+} from "./workspace-permission-port.js";
+export {
   type McpAuthStatus,
   type McpQueryPort,
   type McpServerSummary,
@@ -81,6 +85,31 @@ export {
   type PermissionProfileOption,
   type PermissionQueryPort,
 } from "./permission-port.js";
+export {
+  type DisplayPriceCurrency,
+  type ExchangeRatePort,
+  type ExchangeRateSnapshot,
+  type PriceCurrencyMode,
+  priceDisplayNeedsExchangeRate,
+  resolvePriceCurrency,
+} from "./exchange-rate-port.js";
+export {
+  type DirectApiRequestMetricsSummary,
+  type RequestMetricsAggregate,
+  type RequestMetricsAggregateReport,
+  type RequestMetricsAggregateView,
+  type RequestMetricsCommandQuery,
+  type RequestMetricsErrorGroup,
+  type RequestMetricsErrorReport,
+  type RequestMetricsGroup,
+  type RequestMetricsQueryPort,
+  type RequestMetricsResult,
+  type RequestMetricsTimeRange,
+  type RequestMetricsView,
+  type ThreadRequestMetricsAggregate,
+  type ThreadRequestMetricsSummary,
+  type TurnRequestMetricsSummary,
+} from "./request-metrics-port.js";
 export {
   type GoalStatus,
   type ReviewStarted,

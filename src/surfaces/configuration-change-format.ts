@@ -4,27 +4,27 @@ import type {
   ConfigChangeScope,
 } from "../config/index.js";
 import type { Workspace } from "../policy/index.js";
+import { toStructuredMarkdownList } from "./conversation-command-format.js";
 import type { SurfaceConfigurationChange } from "./types.js";
 
 export function formatWorkspacesAdded(
   workspaces: readonly Workspace[],
   hasSwitchButtons = false,
 ): string {
-  return [
+  return toStructuredMarkdownList([
     workspaces.length === 1
       ? "Workspace 已添加"
       : `Workspace 已添加（${workspaces.length}）`,
     "",
-    ...workspaces.flatMap((workspace, index) => [
-      `│ ${workspace.name} · ${workspace.id}`,
-      `│ ${workspace.cwd}`,
-      ...(index + 1 < workspaces.length ? [""] : []),
+    ...workspaces.flatMap((workspace) => [
+      `${workspace.name} · ${workspace.id}`,
+      `工作目录：${workspace.cwd}`,
+      "",
     ]),
-    "",
     hasSwitchButtons
       ? "点击下方按钮可直接切换；发送 /workspace 可查看全部 Workspace。"
       : "发送 /workspace 可查看并切换 Workspace。",
-  ].join("\n");
+  ].join("\n"));
 }
 
 export function formatSurfaceConfigurationChange(
@@ -36,39 +36,39 @@ export function formatSurfaceConfigurationChange(
   switch (change.action) {
     case "reloaded":
       if (change.addedWorkspaces.length > 0) {
-        return [
+        return toStructuredMarkdownList([
           formatWorkspacesAdded(
             change.addedWorkspaces,
             hasWorkspaceSwitchButtons,
           ),
           "",
           `已生效：${changes}`,
-        ].join("\n");
+        ].join("\n"));
       }
       return [
-        "Gateway 配置已热加载",
-        "",
-        `已生效：${changes}`,
+        toStructuredMarkdownList([
+          "Gateway 配置已热加载",
+          ...(changes ? [`已生效：${changes}`] : []),
+        ].join("\n")),
       ].join("\n");
     case "restarting":
-      return [
+      return toStructuredMarkdownList([
         "Gateway 配置需要重启",
-        ...(changes ? ["", `变更：${changes}`] : []),
+        ...(changes ? [`变更：${changes}`] : []),
         "当前 Gateway 将退出；若由系统服务托管，将自动重新启动。",
-      ].join("\n");
+      ].join("\n"));
     case "reinstall-required":
-      return [
+      return toStructuredMarkdownList([
         "Gateway 配置尚未应用",
-        ...(changes ? ["", `需要重装服务：${changes}`] : []),
+        ...(changes ? [`需要重装服务：${changes}`] : []),
         "请在本机执行：",
-        "  codexc service install",
-      ].join("\n");
+        "- codexc service install",
+      ].join("\n"));
     case "reload-failed":
-      return [
+      return toStructuredMarkdownList([
         "Gateway 配置热加载失败",
-        "",
         "当前有效配置继续运行。请检查配置后再次保存。",
-      ].join("\n");
+      ].join("\n"));
   }
 }
 
@@ -95,6 +95,7 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "approval.timeout": "审批超时",
     "display.operation-updates": "操作过程显示",
     "display.plan-updates": "自动计划显示",
+    "api.providers": "第三方 API 提供商",
     "vision.provider": "视觉识别服务",
     "observability.log-level": "日志级别",
     "workspace.default": "默认 Workspace",

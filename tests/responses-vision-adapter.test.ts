@@ -53,11 +53,15 @@ describe("Responses vision adapter", () => {
         }],
       }), { status: 200 });
     });
+    const enqueueMetric = vi.fn();
     const adapter = createResponsesVisionAdapter({
+      provider: "vision-relay",
+      providerName: "测试中转",
       endpoint: "https://vision.example/v1/responses",
       model: "vision-model",
       loadApiKey: () => "private-key",
       fetchImpl,
+      onMetric: enqueueMetric,
     });
     const onRequestStarted = vi.fn();
 
@@ -65,8 +69,10 @@ describe("Responses vision adapter", () => {
       images: [{ path: imagePath }],
       userPrompt: "解释截图里的错误",
       onRequestStarted,
+      threadId: "thread-vision",
+      reasoningEffort: "max",
     })).resolves.toEqual({
-      provider: "外部视觉 API",
+      provider: "测试中转",
       model: "gpt-5.6-luna",
       elapsedMs: expect.any(Number),
       upstreamDurationMs: 14_000,
@@ -93,6 +99,7 @@ describe("Responses vision adapter", () => {
     }));
     expect(JSON.parse(String(init?.body))).toMatchObject({
       model: "vision-model",
+      reasoning: { effort: "max" },
       input: [{
         content: [
           expect.objectContaining({ type: "input_text" }),
@@ -114,6 +121,25 @@ describe("Responses vision adapter", () => {
     expect(fetchImpl.mock.invocationCallOrder[0]).toBeLessThan(
       onRequestStarted.mock.invocationCallOrder[0]!,
     );
+    expect(enqueueMetric).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "vision-relay",
+      pricing: null,
+      transport: "http",
+      responseFormat: "json",
+      operation: "response",
+      threadId: "thread-vision",
+      turnId: null,
+      model: "gpt-5.6-luna",
+      serviceTier: "default",
+      reasoningEffort: "max",
+      status: "completed",
+      httpStatus: 200,
+      inputTokens: 1_234,
+      cachedInputTokens: 120,
+      outputTokens: 56,
+      reasoningOutputTokens: 12,
+      totalTokens: 1_290,
+    }));
   });
 
   it("rejects a successful HTTP response whose upstream status is incomplete", async () => {
@@ -122,7 +148,10 @@ describe("Responses vision adapter", () => {
     writeFileSync(imagePath, Buffer.from([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00,
     ]));
+    const onMetric = vi.fn();
     const adapter = createResponsesVisionAdapter({
+      provider: "vision-relay",
+      providerName: "测试中转",
       endpoint: "https://vision.example/v1/responses",
       model: "vision-model",
       loadApiKey: () => "private-key",
@@ -143,6 +172,7 @@ describe("Responses vision adapter", () => {
           }],
         }],
       }), { status: 200 }),
+      onMetric,
     });
 
     await expect(adapter.recognize({
@@ -150,12 +180,58 @@ describe("Responses vision adapter", () => {
       userPrompt: "识别图片",
       onRequestStarted: vi.fn(),
     })).rejects.toThrow("响应尚未完成");
+    expect(onMetric).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "vision-relay",
+      model: "gpt-5.6-luna",
+      status: "incomplete",
+      httpStatus: 200,
+      errorType: "vision_incomplete",
+    }));
+  });
+
+  it("records a sanitized failed metric when the upstream rejects the request", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-vision-"));
+    const imagePath = join(root, "image.png");
+    writeFileSync(imagePath, Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00,
+    ]));
+    const onMetric = vi.fn();
+    const adapter = createResponsesVisionAdapter({
+      provider: "vision-relay",
+      providerName: "测试中转",
+      endpoint: "https://vision.example/v1/responses",
+      model: "vision-model",
+      loadApiKey: () => "private-key",
+      fetchImpl: async () => new Response("private upstream error", { status: 503 }),
+      onMetric,
+    });
+
+    await expect(adapter.recognize({
+      images: [{ path: imagePath }],
+      userPrompt: "识别图片",
+      onRequestStarted: vi.fn(),
+      threadId: "thread-vision",
+    })).rejects.toThrow("HTTP 503");
+    expect(onMetric).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "vision-relay",
+      threadId: "thread-vision",
+      turnId: null,
+      model: "vision-model",
+      status: "failed",
+      httpStatus: 503,
+      errorType: "vision_http_error",
+      inputTokens: null,
+      outputTokens: null,
+      totalTokens: null,
+    }));
+    expect(JSON.stringify(onMetric.mock.calls)).not.toContain("private upstream error");
   });
 
   it("does not send a request when the stored key is absent", async () => {
     const fetchImpl = vi.fn();
     const onRequestStarted = vi.fn();
     const adapter = createResponsesVisionAdapter({
+      provider: "测试中转",
       endpoint: "https://vision.example/v1/responses",
       model: "vision-model",
       loadApiKey: () => "",
@@ -180,11 +256,14 @@ describe("Responses vision adapter", () => {
     ]));
     let requestSignal: AbortSignal | undefined;
     let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const warn = vi.fn();
     const adapter = createResponsesVisionAdapter({
+      provider: "测试中转",
       endpoint: "https://vision.example/v1/responses",
       model: "vision-model",
       loadApiKey: () => "private-key",
       requestTimeoutMs: 10,
+      logger: { warn } as never,
       fetchImpl: async (_input, init) => {
         requestSignal = init?.signal ?? undefined;
         const body = new ReadableStream<Uint8Array>({
@@ -210,5 +289,13 @@ describe("Responses vision adapter", () => {
     if (!aborted) bodyController?.error(new Error("test cleanup"));
     await recognition;
     expect(aborted).toBe(true);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        errorType: "vision_timeout",
+        timeoutMs: 10,
+        errorMessage: "视觉 API 请求超时（10 毫秒）",
+      }),
+      "视觉识别请求失败",
+    );
   });
 });

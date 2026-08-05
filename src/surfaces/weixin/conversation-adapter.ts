@@ -17,6 +17,7 @@ import { formatQuotedInput } from "../quoted-input.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import {
   executeVisionCommand,
+  formatVisionCommandTiming,
   formatVisionCollectionReady,
   formatVisionImagesCollected,
 } from "../vision-command.js";
@@ -27,6 +28,10 @@ import {
   renderWeixinIdentity,
   renderWeixinUserFacingError,
 } from "./command-renderer.js";
+import type {
+  DisplayPriceCurrency,
+  ExchangeRateSnapshot,
+} from "../../application/index.js";
 import {
   WeixinFileInputError,
   type WeixinFilePort,
@@ -60,6 +65,8 @@ export type WeixinConversationMessage =
       kind: "text";
       text: string;
       quotedText?: string;
+      createdAtMs?: number;
+      receivedAtMs?: number;
     }
   | {
       target: ConversationTarget;
@@ -99,6 +106,11 @@ export class WeixinConversationAdapter {
       pollingHealth?: { snapshot(): WeixinPollingHealthSnapshot };
       doctor?: WeixinDoctor;
       now?: () => number;
+      debugEnabled?: boolean;
+      exchangeRate?: () => ExchangeRateSnapshot | null;
+      priceCurrency?: (
+        provider: string | null | undefined,
+      ) => DisplayPriceCurrency;
     } = { quietWindowMs: 0 },
     private readonly files?: Pick<WeixinFilePort, "download">,
     private readonly audios?: Pick<WeixinAudioPort, "download">,
@@ -287,15 +299,26 @@ export class WeixinConversationAdapter {
         return;
       }
       if (command.name === "vision") {
+        const now = this.inputOptions.now ?? Date.now;
+        const receivedAtMs = message.receivedAtMs ?? now();
         await this.inputs.flushPending(message.target, message.actorId);
+        const rendered = await executeVisionCommand(
+          this.inputs,
+          message.target,
+          message.actorId,
+          command.argumentsText,
+        );
         this.notifyCommand(
           message.target,
-          await executeVisionCommand(
-            this.inputs,
-            message.target,
-            message.actorId,
-            command.argumentsText,
-          ),
+          this.inputOptions.debugEnabled
+            ? formatVisionCommandTiming(rendered, {
+                ...(message.createdAtMs === undefined
+                  ? {}
+                  : { createdAtMs: message.createdAtMs }),
+                receivedAtMs,
+                respondedAtMs: now(),
+              })
+            : rendered,
         );
         return;
       }
@@ -311,7 +334,11 @@ export class WeixinConversationAdapter {
         command.name,
         command.argumentsText,
       );
-      const rendered = renderWeixinCommandResult(result);
+      const rendered = renderWeixinCommandResult(
+        result,
+        this.inputOptions.priceCurrency,
+        this.inputOptions.exchangeRate?.() ?? null,
+      );
       this.notifyCommand(
         message.target,
         result.kind === "status" && this.inputOptions.pollingHealth

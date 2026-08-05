@@ -18,6 +18,11 @@ import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { readWorkspaceConfig } from "../scripts/workspace-config.mjs";
 import {
+  requestMetricsDatabasePath,
+  SqliteModelRequestMetricsStore,
+  type ModelRequestMetricSample,
+} from "../src/observability/index.js";
+import {
   EncryptedFileWeixinCredentialStore,
   EncryptedFileWeixinReplyContextPersistence,
   FileWeixinUpdatesCursorStore,
@@ -41,9 +46,12 @@ describe("codexc CLI", () => {
       [["setup", "--help"], "用法：codexc setup"],
       [["start", "-h"], "用法：codexc start"],
       [["remote", "-h"], "用法：codexc remote"],
-      [["ws", "-h"], "用法：codexc ws"],
-      [["ws", "add", "-h"], "用法：codexc ws add"],
-      [["ws", "remove", "--help"], "用法：codexc ws remove"],
+      [["work", "-h"], "用法：codexc work"],
+      [["ws", "-h"], "用法：codexc work"],
+      [["work", "list", "--help"], "用法：codexc work list"],
+      [["work", "add", "-h"], "用法：codexc work add"],
+      [["ws", "add", "--help"], "用法：codexc work add"],
+      [["work", "remove", "--help"], "用法：codexc work remove"],
       [["service", "-h"], "用法：codexc service"],
       [["service", "install", "-h"], "用法：codexc service install"],
       [["service", "uninstall", "--help"], "用法：codexc service uninstall"],
@@ -60,6 +68,14 @@ describe("codexc CLI", () => {
       [["rules", "check", "--help"], "用法：codexc rules check"],
       [["state", "-h"], "用法：codexc state upgrade"],
       [["state", "upgrade", "--help"], "用法：codexc state upgrade"],
+      [["metrics", "-h"], "用法：codexc metrics"],
+      [["metrics", "status", "--help"], "用法：codexc metrics status"],
+      [["metrics", "run", "--help"], "用法：codexc metrics run"],
+      [["metrics", "turns", "--help"], "用法：codexc metrics turns"],
+      [["metrics", "threads", "--help"], "用法：codexc metrics threads"],
+      [["metrics", "reset", "-h"], "用法：codexc metrics reset"],
+      [["metrics", "report", "-h"], "用法：codexc metrics report"],
+      [["metrics", "export", "--help"], "用法：codexc metrics export"],
       [["version", "-h"], "用法：codexc version"],
       [["gateway", "-h"], "用法：codexc gateway"],
       [["service-app-server", "--help"], "用法：codexc service-app-server"],
@@ -72,6 +88,247 @@ describe("codexc CLI", () => {
       expect(result.stderr).toBe("");
     }
   }, 15_000);
+
+  it("writes large metrics exports completely without overwriting same-second files", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-metrics-export-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    mkdirSync(workspace);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], {
+      cwd: workspace,
+      env: environment,
+    });
+    const store = new SqliteModelRequestMetricsStore(
+      requestMetricsDatabasePath(join(home, "data", "gateway.sqlite3")),
+    );
+    for (let index = 0; index < 1_800; index += 1) {
+      store.record(metricsSample(index));
+    }
+    store.close();
+
+    const first = spawnSync(process.execPath, [
+      cli,
+      "metrics",
+      "export",
+      "--range",
+      "24h",
+      "--format",
+      "json",
+    ], { cwd: workspace, env: environment, encoding: "utf8" });
+    expect(first.status, first.stderr).toBe(0);
+    const firstPath = exportedMetricsPath(first.stdout);
+    expect(statSync(firstPath).size).toBeGreaterThan(1_048_576);
+    expect(JSON.parse(readFileSync(firstPath, "utf8")).records).toHaveLength(1_800);
+
+    const second = spawnSync(process.execPath, [
+      cli,
+      "metrics",
+      "export",
+      "--range",
+      "24h",
+      "--format",
+      "json",
+    ], { cwd: workspace, env: environment, encoding: "utf8" });
+    expect(second.status, second.stderr).toBe(0);
+    const secondPath = exportedMetricsPath(second.stdout);
+    expect(secondPath).not.toBe(firstPath);
+    expect(existsSync(firstPath)).toBe(true);
+    expect(existsSync(secondPath)).toBe(true);
+  }, 20_000);
+
+  it("preserves provider, errors, and CNY costs in machine-readable reports", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-metrics-report-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    mkdirSync(workspace);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], {
+      cwd: workspace,
+      env: environment,
+    });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.display).price_currency = "cny";
+    });
+    writeFileSync(join(home, "data", "exchange-rate.json"), JSON.stringify({
+      version: 1,
+      source: "open-er-api",
+      effectiveAtMs: Date.now(),
+      usdToCny: 7,
+    }));
+    const store = new SqliteModelRequestMetricsStore(
+      requestMetricsDatabasePath(join(home, "data", "gateway.sqlite3")),
+    );
+    const pricing = {
+      billingMode: "api" as const,
+      currency: "USD",
+      source: "test-catalog",
+      effectiveAtMs: Date.now(),
+      uncachedInputPricePerMillionNanos: 2_000_000_000,
+      cachedInputPricePerMillionNanos: 1_000_000_000,
+      outputPricePerMillionNanos: 3_000_000_000,
+    };
+    store.record({
+      ...metricsSample(1),
+      provider: "openai",
+      model: "shared-model",
+      pricing,
+    });
+    store.record({
+      ...metricsSample(2),
+      provider: "deepseek",
+      model: "shared-model",
+      pricing,
+    });
+    store.record({
+      ...metricsSample(3),
+      provider: "deepseek",
+      model: "shared-model",
+      status: "failed",
+      httpStatus: 429,
+      errorType: "rate_limit",
+      pricing,
+    });
+    store.close();
+
+    const jsonOutput = execFileSync(process.execPath, [
+      cli,
+      "metrics",
+      "report",
+      "--range",
+      "24h",
+      "--group",
+      "models",
+      "--format",
+      "json",
+      "--stdout",
+    ], { cwd: workspace, env: environment, encoding: "utf8" });
+    const report = JSON.parse(jsonOutput);
+    expect(report.report.aggregate.totalCostCnyNanos).toBeGreaterThan(0);
+    expect(report.report.groups).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        provider: "deepseek",
+        model: "shared-model",
+        aggregate: expect.objectContaining({ totalCostCnyNanos: expect.any(Number) }),
+      }),
+      expect.objectContaining({
+        provider: "openai",
+        model: "shared-model",
+        aggregate: expect.objectContaining({ totalCostCnyNanos: expect.any(Number) }),
+      }),
+    ]));
+    expect(report.errors.groups).toEqual([
+      expect.objectContaining({ provider: "deepseek", errorType: "rate_limit" }),
+    ]);
+
+    const csvOutput = execFileSync(process.execPath, [
+      cli,
+      "metrics",
+      "report",
+      "--range",
+      "24h",
+      "--group",
+      "models",
+      "--format",
+      "csv",
+      "--stdout",
+    ], { cwd: workspace, env: environment, encoding: "utf8" });
+    const [header, ...rows] = csvOutput.trim().split("\n");
+    expect(header).toContain("type,provider,model");
+    expect(header).toContain("totalCostCnyNanos");
+    expect(header).toContain("errorType");
+    expect(header).toContain("lastOccurredAtMs");
+    expect(rows).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^group,deepseek,shared-model,/u),
+      expect.stringMatching(/^group,openai,shared-model,/u),
+      expect.stringMatching(/^error,deepseek,shared-model,/u),
+    ]));
+  });
+
+  it("does not infer one aggregate provider from truncated report groups", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-metrics-groups-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    mkdirSync(workspace);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], {
+      cwd: workspace,
+      env: environment,
+    });
+    writeFileSync(join(home, "data", "exchange-rate.json"), JSON.stringify({
+      version: 1,
+      source: "open-er-api",
+      effectiveAtMs: Date.now(),
+      usdToCny: 7,
+    }));
+    const store = new SqliteModelRequestMetricsStore(
+      requestMetricsDatabasePath(join(home, "data", "gateway.sqlite3")),
+    );
+    const pricing = {
+      billingMode: "api" as const,
+      currency: "USD",
+      source: "test-catalog",
+      effectiveAtMs: Date.now(),
+      uncachedInputPricePerMillionNanos: 2_000_000_000,
+      cachedInputPricePerMillionNanos: 1_000_000_000,
+      outputPricePerMillionNanos: 3_000_000_000,
+    };
+    for (let model = 0; model < 20; model += 1) {
+      store.record({
+        ...metricsSample(model * 2),
+        model: `deepseek-model-${model}`,
+        pricing,
+      });
+      store.record({
+        ...metricsSample((model * 2) + 1),
+        model: `deepseek-model-${model}`,
+        pricing,
+      });
+    }
+    store.record({
+      ...metricsSample(100),
+      provider: "openai",
+      model: "openai-hidden-model",
+      pricing,
+    });
+    store.close();
+
+    const output = execFileSync(process.execPath, [
+      cli,
+      "metrics",
+      "report",
+      "--range",
+      "24h",
+      "--group",
+      "models",
+      "--format",
+      "json",
+      "--stdout",
+    ], { cwd: workspace, env: environment, encoding: "utf8" });
+    const report = JSON.parse(output).report;
+
+    expect(report.totalGroupCount).toBe(21);
+    expect(report.groups).toHaveLength(20);
+    expect(report.groups.every((group: { provider: string }) =>
+      group.provider === "deepseek"
+    )).toBe(true);
+    expect(report.aggregate.totalCostCnyNanos).toBeNull();
+  });
 
   it("generates conservative Codex rules for the current project", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-rules-"));
@@ -232,17 +489,17 @@ describe("codexc CLI", () => {
       env: environment,
       encoding: "utf8",
     });
-    const firstAdded = execFileSync(process.execPath, [cli, "ws", "add"], {
+    const firstAdded = execFileSync(process.execPath, [cli, "work", "add", "--cwd", first], {
       cwd: first,
       env: environment,
       encoding: "utf8",
     });
-    const added = execFileSync(process.execPath, [cli, "ws", "add"], {
+    const added = execFileSync(process.execPath, [cli, "work", "add", "--cwd", second], {
       cwd: second,
       env: environment,
       encoding: "utf8",
     });
-    const listed = execFileSync(process.execPath, [cli, "ws"], {
+    const listed = execFileSync(process.execPath, [cli, "work"], {
       cwd: root,
       env: environment,
       encoding: "utf8",
@@ -276,6 +533,49 @@ describe("codexc CLI", () => {
     expect(statSync(configPath).mode & 0o777).toBe(0o600);
   });
 
+  it("registers the current directory with an explicit Workspace name", () => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-cli-ws-add-name-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const project = join(root, "Data Analysis");
+    mkdirSync(project);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+
+    execFileSync(process.execPath, [cli, "init"], {
+      cwd: project,
+      env: environment,
+      encoding: "utf8",
+    });
+    const created = execFileSync(
+      process.execPath,
+      [cli, "work", "add", "--name", "Data Analysis"],
+      {
+        cwd: project,
+        env: environment,
+        encoding: "utf8",
+      },
+    );
+
+    const configPath = join(home, "config.toml");
+    const eventQueuePath = configEventQueuePath(home);
+    const parsed = readGatewayConfig(configPath);
+    const config = readWorkspaceConfig(parsed);
+    const directory = realpathSync(project);
+    expect(created).toContain("Workspace 已添加");
+    expect(created).toContain("data-analysis");
+    expect(config.workspaces.some((workspace: { id: string; name: string; cwd: string }) =>
+      workspace.id === "data-analysis"
+      && workspace.name === "Data Analysis"
+      && workspace.cwd === directory)).toBe(true);
+    expect(readConfigEvents(eventQueuePath)).toMatchObject([
+      { workspace: { id: "data-analysis", cwd: directory } },
+    ]);
+  });
+
   it("recovers from a missing default Workspace only with explicit pruning", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-"));
     temporaryDirectories.push(root);
@@ -293,18 +593,18 @@ describe("codexc CLI", () => {
     });
     rmSync(join(home, "workspace"), { recursive: true });
 
-    const rejected = spawnSync(process.execPath, [cli, "ws", "add"], {
+    const rejected = spawnSync(process.execPath, [cli, "work", "add", "--cwd", current], {
       cwd: current,
       env: environment,
       encoding: "utf8",
     });
     expect(rejected.status).toBe(1);
-    expect(rejected.stderr).toContain("codexc ws add --prune-missing");
+    expect(rejected.stderr).toContain("codexc work add --prune-missing");
     expect(rejected.stderr).not.toContain("ENOENT");
 
     const repaired = execFileSync(
       process.execPath,
-      [cli, "ws", "add", "--prune-missing"],
+      [cli, "work", "add", "--cwd", current, "--prune-missing"],
       {
         cwd: current,
         env: environment,
@@ -339,7 +639,7 @@ describe("codexc CLI", () => {
       CODEX_CONNECT_CONFIG_FILE: "",
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: root, env: environment });
-    execFileSync(process.execPath, [cli, "ws", "add"], { cwd: project, env: environment });
+    execFileSync(process.execPath, [cli, "work", "add", "--cwd", project], { cwd: project, env: environment });
     rmSync(project, { recursive: true });
 
     const listed = execFileSync(process.execPath, [cli, "ws"], {
@@ -384,7 +684,7 @@ describe("codexc CLI", () => {
       CODEX_CONNECT_CONFIG_FILE: "",
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: root, env: environment });
-    execFileSync(process.execPath, [cli, "ws", "add"], { cwd: project, env: environment });
+    execFileSync(process.execPath, [cli, "work", "add", "--cwd", project], { cwd: project, env: environment });
     const queuePath = configEventQueuePath(home);
     acknowledgeConfigEvents(
       queuePath,
@@ -396,7 +696,7 @@ describe("codexc CLI", () => {
       cwd: root,
       env: environment,
     });
-    execFileSync(process.execPath, [cli, "ws", "add"], {
+    execFileSync(process.execPath, [cli, "work", "add", "--cwd", project], {
       cwd: project,
       env: environment,
     });
@@ -431,12 +731,12 @@ describe("codexc CLI", () => {
       CODEX_CONNECT_CONFIG_FILE: "",
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: first, env: environment });
-    execFileSync(process.execPath, [cli, "ws", "add"], { cwd: first, env: environment });
+    execFileSync(process.execPath, [cli, "work", "add", "--cwd", first], { cwd: first, env: environment });
     const configPath = join(home, "config.toml");
     updateGatewayConfig(configPath, (document) => {
       table(document.codex).binary = fakeCodex;
     });
-    execFileSync(process.execPath, [cli, "ws", "add"], { cwd: second, env: environment });
+    execFileSync(process.execPath, [cli, "work", "add", "--cwd", second], { cwd: second, env: environment });
 
     const currentCapture = join(root, "current.json");
     execFileSync(process.execPath, [cli, "remote", "resume"], {
@@ -1321,4 +1621,45 @@ function table(value: unknown): Record<string, unknown> {
     throw new Error("测试配置表无效");
   }
   return value as Record<string, unknown>;
+}
+
+function exportedMetricsPath(output: string): string {
+  const match = /^已导出：(.+)$/mu.exec(output);
+  if (!match?.[1]) throw new Error(`未找到导出路径：${output}`);
+  return match[1];
+}
+
+function metricsSample(index: number): ModelRequestMetricSample {
+  const now = Date.now();
+  return {
+    provider: "deepseek",
+    pricing: null,
+    transport: "http",
+    responseFormat: "sse",
+    operation: "response",
+    threadId: `thread-${index}`,
+    turnId: `turn-${index}`,
+    model: "deepseek-v4-flash",
+    serviceTier: "default",
+    reasoningEffort: "max",
+    status: "completed",
+    httpStatus: 200,
+    errorType: null,
+    errorCode: null,
+    incompleteReason: null,
+    inputTokens: 1_000,
+    cachedInputTokens: 900,
+    outputTokens: 100,
+    reasoningOutputTokens: 40,
+    totalTokens: 1_100,
+    upstreamCreatedAt: null,
+    upstreamCompletedAt: null,
+    requestStartedAtMs: now - 200,
+    firstTokenAtMs: now - 150,
+    firstReasoningDeltaAtMs: now - 150,
+    lastReasoningDeltaAtMs: now - 100,
+    firstOutputDeltaAtMs: now - 90,
+    lastOutputDeltaAtMs: now - 50,
+    responseCompletedAtMs: now,
+  };
 }

@@ -9,7 +9,8 @@
   稳定快照；固定状态以 `isPinned` 表示，运行中 Turn 以 `activeTurnId` 表示，恢复会话另携带
   模型 Provider、
   压缩 Item ID，不向业务层暴露完整官方 Turn。
-- `router.ts`：选择、搜索、绑定、恢复、归档和解绑 Thread，协调持久化映射、订阅恢复、Provider/模型设置、
+- `router.ts`：选择、搜索、绑定、恢复、归档和解绑 Thread，把 Workspace 权限（沙箱、审批策略、
+  权限 Profile）作为启动参数传给新建或恢复的 Thread，协调持久化映射、订阅恢复、Provider/模型设置、
   压缩 Item ID 及 `thread/unsubscribe`；切换目标恢复成功后才解除当前绑定，启动恢复只有在 Thread 明确不存在、
   已删除或已归档时才移除持久化绑定；订阅恢复时把稳定 Thread 快照交回组合根。跨渠道接管只允许
   当前 Thread 与目标 Conversation 原 Thread 都由 App Server 报告为空闲时执行；保留被接管
@@ -21,7 +22,7 @@
 Conversation 归属；新输入只路由到前台 Thread。后台 Turn 完成并投递完成事件后取消订阅并移除
 后台绑定，Thread 历史仍由 App Server 保存。Gateway 恢复时同时恢复前台与后台订阅；若后台
 Thread 已在离线期间结束，只提示通过 `/resume` 查看，不伪造或重放完成事件。
-- `thread-state-sync.ts`：定义并消费不含协议信封的稳定 Thread 路由事件，同步模型、思考强度和
+- `thread-state-sync.ts`：定义并消费不含协议信封的稳定 Thread 路由事件，同步模型、思考等级和
   服务层级，并在官方通知未携带不可变 Provider 时保留 Router 已确认的值；归档或删除事件会清理对应绑定，关闭事件只表示无订阅者的空闲 Thread 已从
   App Server 内存卸载，保留可恢复的持久化绑定。官方通知的校验和转换由 `codex-client` 完成。
 

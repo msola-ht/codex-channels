@@ -26,7 +26,7 @@
   可见操作结果或生成图片入队前会先刷新同一 Turn 仍在合并窗口内的正文，避免过程通知越过说明文字；
   活动非终态流最多保留 100 个，单流正文最多保留 1,000,000 个 Unicode 字符并明确标记截断；
   每个 Turn 开始时发送共享确认；每轮状态卡复用共享生命周期字段，显示当前 Workspace Git
-  分支、官方 Turn 对话耗时、最近模型请求缓存命中率、当前 Goal、上下文压缩总次数和用量；最终回复默认使用兼容 HTML，也可选择
+  分支、官方 Turn 对话耗时、按 Token/费用/性能分组的统计、当前 Goal、上下文压缩总次数和用量；最终回复默认使用兼容 HTML，也可选择
   Telegram 原生 Rich Markdown，超长或渲染失败时回退纯文本；完成的原生 `imageGeneration`
   PNG/JPEG 经过共享安全读取边界后使用 `sendPhoto` 静默发送，且不受操作过程显示档位影响。
 - `approval-operation-coordinator.ts`：隔离审批请求与操作日志之间的等待、拒绝抑制和 Turn 清理状态。
@@ -84,7 +84,8 @@ Telegram 手动命令注册显式接入三个渠道共享的 `/h`、`/work`、`/
 调用统一使用 `/skill <名称或序号> <任务>`，不维护渠道私有选择状态。
 `/vision <要求>` 预设当前用户与聊天的下一批图片识别要求；多图使用
 `/vision <2–4> <要求>` 声明数量，收齐后自动提交；兼容的 `/vision begin <要求>`、
-`/vision done` 保留给数量未知的收集，`/vision cancel` 取消；该入口加入 Bot 命令菜单，但不进入 Application 会话命令目录。
+`/vision done` 保留给数量未知的收集，失败后可在五分钟内用 `/vision retry` 复用原图片和要求，
+`/vision cancel` 取消；该入口加入 Bot 命令菜单，但不进入 Application 会话命令目录。
 审批请求晚于操作日志发送时，Outbox 必须撤回已经发送的命令消息，不能只清理内存状态。
 账户额度和 MCP 状态通知也必须进入每聊天有界输出队列；不得从 App Server Reader 直接等待 Telegram 网络发送。
 结构化用户错误由 `bot.ts` 转换为 Telegram 专属文案；App Server Turn、warning 和 MCP 错误会

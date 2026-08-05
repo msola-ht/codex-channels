@@ -21,6 +21,7 @@ import {
   interactionOutcome,
 } from "../interaction-copy.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
+import { formatWeixinCommandText } from "./command-renderer.js";
 import { PendingInteractionRegistry } from "../pending-interaction-registry.js";
 import { sanitizeWeixinMarkdownText } from "./operation-format.js";
 
@@ -475,7 +476,10 @@ export class WeixinInteractionPort implements InteractionPort {
     text: string,
   ): Promise<void> {
     try {
-      await this.delivery?.deliverText(target, text);
+      await this.delivery?.deliverText(
+        target,
+        formatWeixinCommandText(text, { structuredFields: true }),
+      );
     } catch (error) {
       this.logger?.warn(
         {

@@ -4,12 +4,19 @@ import {
 } from "../conversation-core/index.js";
 import type { SurfaceInputCoalescer } from "./surface-input-coalescer.js";
 
+export interface VisionCommandTiming {
+  createdAtMs?: number;
+  receivedAtMs: number;
+  respondedAtMs: number;
+}
+
 export async function executeVisionCommand(
   inputs: Pick<
     SurfaceInputCoalescer,
     | "beginVisionCollection"
     | "cancelVisionPrompt"
     | "completeVisionCollection"
+    | "retryVision"
     | "setVisionPrompt"
   >,
   target: ConversationTarget,
@@ -20,7 +27,7 @@ export async function executeVisionCommand(
   if (!value) {
     throw new UserFacingError(
       "vision.command.usage",
-      "请使用 /vision <要求>、/vision <2–4> <要求> 或 /vision cancel",
+      "请使用 /vision <要求>、/vision <2–4> <要求>、/vision retry 或 /vision cancel",
     );
   }
   const [operation = "", ...rest] = value.split(/\s+/u);
@@ -54,6 +61,15 @@ export async function executeVisionCommand(
       return [
         "图片已提交",
         `- 数量：${result.imageCount} 张`,
+        `- 状态：${result.submission.steered ? "已追加到当前 Turn" : "已进入处理队列"}`,
+      ].join("\n");
+    }
+    case "retry": {
+      if (argumentsValue) throw visionCommandUsageError();
+      const result = await inputs.retryVision(target, actorId);
+      return [
+        "图片识别已重新提交",
+        `- 图片：${result.imageCount} 张`,
         `- 状态：${result.submission.steered ? "已追加到当前 Turn" : "已进入处理队列"}`,
       ].join("\n");
     }
@@ -106,9 +122,45 @@ export function formatVisionCollectionReady(
   ].join("\n");
 }
 
+export function formatVisionCommandTiming(
+  value: string,
+  timing: VisionCommandTiming,
+): string {
+  const processingMs = elapsedMilliseconds(
+    timing.respondedAtMs,
+    timing.receivedAtMs,
+  );
+  const deliveryMs = timing.createdAtMs === undefined
+    ? undefined
+    : elapsedMilliseconds(timing.receivedAtMs, timing.createdAtMs);
+  return [
+    value,
+    ...(deliveryMs === undefined
+      ? []
+      : [`- 接收延迟：${deliveryMs}毫秒`]),
+    ...(processingMs === undefined
+      ? []
+      : [`- Gateway 处理：${processingMs}毫秒`]),
+  ].join("\n");
+}
+
 function visionCommandUsageError(): UserFacingError {
   return new UserFacingError(
     "vision.command.usage",
-    "请使用 /vision <要求>、/vision <2–4> <要求> 或 /vision cancel",
+    "请使用 /vision <要求>、/vision <2–4> <要求>、/vision retry 或 /vision cancel",
   );
+}
+
+function elapsedMilliseconds(
+  later: number,
+  earlier: number,
+): number | undefined {
+  if (
+    !Number.isSafeInteger(later)
+    || !Number.isSafeInteger(earlier)
+    || later < earlier
+  ) {
+    return undefined;
+  }
+  return later - earlier;
 }

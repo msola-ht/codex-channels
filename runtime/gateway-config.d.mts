@@ -41,17 +41,33 @@ export interface GatewayConfigDocument {
   display: {
     operation_updates: "full" | "compact" | "hidden";
     plan_updates: boolean;
+    price_currency: "auto" | "cny" | "usd";
+    price_currency_by_provider?: Record<string, "auto" | "cny" | "usd">;
   };
+  api_providers: Array<{
+    id: string;
+    name: string;
+    protocol: "responses";
+    endpoint: string;
+  }>;
   vision:
     | { mode: "disabled" }
     | {
         mode: "responses_api";
-        endpoint: string;
+        provider: string;
         model: string;
+        timeout_seconds: number;
       };
   storage: { database_path: string };
   logging: { level: "fatal" | "error" | "warn" | "info" | "debug" | "trace" };
-  workspaces: Array<{ id: string; name: string; cwd: string }>;
+  workspaces: Array<{
+    id: string;
+    name: string;
+    cwd: string;
+    sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+    approval_policy?: "untrusted" | "on-request" | "never";
+    permissions?: string;
+  }>;
 }
 
 export function parseGatewayConfig(content: string, source?: string): TomlTable;

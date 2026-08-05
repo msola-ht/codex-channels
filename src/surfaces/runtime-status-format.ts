@@ -13,7 +13,11 @@ export function formatRuntimeAccountUpdate(
   authMode: string | null,
   planType: string | null,
 ): string {
-  return `Codex 账户状态已更新：认证=${authMode ?? "未登录"} · 套餐=${planType ? formatPlanType(planType) : "未知"}`;
+  return [
+    "## Codex 账户状态已更新",
+    `- 认证：${authMode ?? "未登录"}`,
+    `- 套餐：${planType ? formatPlanType(planType) : "未知"}`,
+  ].join("\n");
 }
 
 export function formatRuntimeRateLimitUpdate(
@@ -21,12 +25,12 @@ export function formatRuntimeRateLimitUpdate(
 ): string {
   const label = snapshot.limitName ?? snapshot.limitId ?? "Codex";
   return [
-    `${label} 额度提醒`,
-    `主窗口：${formatRateLimitWindow(snapshot.primary)}`,
+    `## ${label} 额度提醒`,
+    `- 主窗口：${formatRateLimitWindow(snapshot.primary)}`,
     ...(snapshot.secondary
-      ? [`次窗口：${formatRateLimitWindow(snapshot.secondary)}`]
+      ? [`- 次窗口：${formatRateLimitWindow(snapshot.secondary)}`]
       : []),
-    `状态：${formatRateLimitState(snapshot.rateLimitReachedType)}`,
+    `- 状态：${formatRateLimitState(snapshot.rateLimitReachedType)}`,
   ].join("\n");
 }
 
@@ -40,9 +44,11 @@ export function formatRuntimeMcpStatusUpdate(
     cancelled: "已取消",
   } as const;
   return [
-    `MCP Server：${update.name} · ${labels[update.status]}`,
+    "## MCP Server",
+    `- 名称：${update.name}`,
+    `- 状态：${labels[update.status]}`,
     ...(update.error
-      ? [`原因：${visibleRuntimeMessage(update.error)}`]
+      ? [`- 原因：${visibleRuntimeMessage(update.error)}`]
       : []),
   ].join("\n");
 }

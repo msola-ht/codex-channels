@@ -46,6 +46,14 @@ export function loadManagedProviderAppServer(environment = process.env) {
       "-c", `model_providers.${profile.provider}.wire_api=${JSON.stringify(profile.wireApi)}`,
       "-c", `model_providers.${profile.provider}.env_key=${JSON.stringify(deepseekApiKeyEnvironmentKey)}`,
       "-c", `model_providers.${profile.provider}.requires_openai_auth=false`,
+      ...(profile.autoCompactLimit === undefined
+        ? []
+        : [
+            "-c", `model_auto_compact_token_limit=${JSON.stringify(profile.autoCompactLimit)}`,
+            "-c", `model_auto_compact_token_limit_scope=${JSON.stringify(
+              profile.autoCompactScope ?? "total",
+            )}`,
+          ]),
     ],
     childEnvironment: {
       [deepseekApiKeyEnvironmentKey]: profile.apiKey,
@@ -215,7 +223,7 @@ function readProviderProfile(
       || document.model_catalog_json !== expectedCatalogPath
     )
   ) {
-    throw new Error("Codex DeepSeek Profile 模型目录或推理强度无效");
+    throw new Error("Codex DeepSeek Profile 模型目录或思考等级无效");
   }
   const provider = record(record(document.model_providers)[descriptor.id]);
   if (
@@ -235,6 +243,17 @@ function readProviderProfile(
   ) {
     throw new Error("Codex DeepSeek API Key 缺失或无效");
   }
+  const autoCompactLimit = document.model_auto_compact_token_limit;
+  if (
+    autoCompactLimit !== undefined
+    && (
+      !Number.isSafeInteger(autoCompactLimit)
+      || autoCompactLimit <= 0
+      || autoCompactLimit > 4_000_000_000
+    )
+  ) {
+    throw new Error("Codex DeepSeek 自动压缩阈值无效");
+  }
   return {
     provider: descriptor.id,
     model: document.model,
@@ -244,6 +263,14 @@ function readProviderProfile(
     baseUrl: descriptor.baseUrl,
     wireApi: descriptor.wireApi,
     apiKey,
+    ...(autoCompactLimit === undefined
+      ? {}
+      : {
+          autoCompactLimit,
+          autoCompactScope: document.model_auto_compact_token_limit_scope === "body_after_prefix"
+            ? "body_after_prefix"
+            : "total",
+        }),
   };
 }
 

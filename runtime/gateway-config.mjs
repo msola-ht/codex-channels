@@ -15,6 +15,17 @@ const workspaceSchema = z.strictObject({
   id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
   name: z.string().trim().min(1).max(64),
   cwd: z.string().trim().min(1),
+  sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional(),
+  approval_policy: z.enum(["untrusted", "on-request", "never"]).optional(),
+  permissions: z.string().trim().min(1).max(128).optional(),
+}).superRefine((workspace, context) => {
+  if (workspace.sandbox !== undefined && workspace.permissions !== undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["permissions"],
+      message: "workspace 的 permissions 与 sandbox 不能同时设置",
+    });
+  }
 });
 
 const feishuSchema = z.strictObject({
@@ -56,14 +67,26 @@ const weixinSetupSchema = z.strictObject({
   ),
 });
 
+const apiProviderIdSchema = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/u);
+
+const apiProviderSchema = z.strictObject({
+  id: apiProviderIdSchema,
+  name: z.string().trim().min(1).max(64),
+  protocol: z.literal("responses"),
+  endpoint: z.url(),
+});
+
 const visionSchema = z.discriminatedUnion("mode", [
   z.strictObject({ mode: z.literal("disabled") }),
   z.strictObject({
     mode: z.literal("responses_api"),
-    endpoint: z.url(),
+    provider: apiProviderIdSchema,
     model: z.string().trim().min(1),
+    timeout_seconds: z.number().int().min(30).max(600).default(120),
   }),
 ]);
+
+const priceCurrencySchema = z.enum(["auto", "cny", "usd"]).default("auto");
 
 const gatewayDocumentSchema = z.strictObject({
   version: z.literal(1),
@@ -94,7 +117,17 @@ const gatewayDocumentSchema = z.strictObject({
   display: z.strictObject({
     operation_updates: z.enum(["full", "compact", "hidden"]).default("compact"),
     plan_updates: z.boolean().default(true),
-  }).default({ operation_updates: "compact", plan_updates: true }),
+    price_currency: priceCurrencySchema,
+    price_currency_by_provider: z.record(priceCurrencySchema).optional(),
+  }).default({
+    operation_updates: "compact",
+    plan_updates: true,
+    price_currency: "auto",
+  }),
+  api_providers: z.array(apiProviderSchema).refine(
+    (providers) => new Set(providers.map((provider) => provider.id)).size === providers.length,
+    "api_providers 不能包含重复 ID",
+  ).default([]),
   vision: visionSchema.default({ mode: "disabled" }),
   storage: z.strictObject({
     database_path: z.string().min(1).default("data/gateway.sqlite3"),

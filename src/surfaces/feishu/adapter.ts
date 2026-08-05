@@ -21,6 +21,7 @@ import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import { formatQuotedInput } from "../quoted-input.js";
 import {
   executeVisionCommand,
+  formatVisionCommandTiming,
   formatVisionCollectionReady,
   formatVisionImagesCollected,
 } from "../vision-command.js";
@@ -44,6 +45,10 @@ import {
   type FeishuAudioPort,
 } from "./audio.js";
 import type { FeishuOutbox } from "./outbox.js";
+import type {
+  DisplayPriceCurrency,
+  ExchangeRateSnapshot,
+} from "../../application/index.js";
 import type { FeishuOAuthControllerPort } from "./oauth.js";
 import {
   renderFeishuDoctor,
@@ -59,6 +64,10 @@ import {
 } from "./renderer.js";
 
 const maximumInboundImages = 4;
+const unsupportedMessageLinkText = [
+  "暂不支持通过飞书复制的消息链接读取内容。",
+  "请直接回复目标消息，再发送你的要求。",
+].join("\n");
 
 export class FeishuConversationAdapter {
   private readonly commands: ConversationCommandService;
@@ -97,6 +106,12 @@ export class FeishuConversationAdapter {
       audios?: Pick<FeishuAudioPort, "download">;
       readQuotedText?(messageId: string): Promise<string | undefined>;
       onQuotedTextError?(error: unknown): void;
+      now?: () => number;
+      debugEnabled?: boolean;
+      exchangeRate?: () => ExchangeRateSnapshot | null;
+      priceCurrency?: (
+        provider: string | null | undefined,
+      ) => DisplayPriceCurrency;
     } = { quietWindowMs: 0 },
   ) {
     this.commands = new ConversationCommandService(conversations);
@@ -168,15 +183,24 @@ export class FeishuConversationAdapter {
           return;
         }
         if (command.name === "vision") {
+          const now = this.inputOptions.now ?? Date.now;
+          const receivedAtMs = message.receivedAtMs ?? now();
           await this.inputs.flushPending(message.target, message.actorId);
+          const rendered = await executeVisionCommand(
+            this.inputs,
+            message.target,
+            message.actorId,
+            command.argumentsText,
+          );
           this.notifyMarkdown(
             message.target.conversationId,
-            await executeVisionCommand(
-              this.inputs,
-              message.target,
-              message.actorId,
-              command.argumentsText,
-            ),
+            this.inputOptions.debugEnabled
+              ? formatVisionCommandTiming(rendered, {
+                  createdAtMs: message.createdAtMs,
+                  receivedAtMs,
+                  respondedAtMs: now(),
+                })
+              : rendered,
           );
           return;
         }
@@ -193,7 +217,18 @@ export class FeishuConversationAdapter {
         );
         this.notifyMarkdown(
           message.target.conversationId,
-          renderFeishuCommandResult(result),
+          renderFeishuCommandResult(
+            result,
+            this.inputOptions.priceCurrency,
+            this.inputOptions.exchangeRate?.() ?? null,
+          ),
+        );
+        return;
+      }
+      if (containsFeishuCopiedMessageLink(message.text)) {
+        this.notifyText(
+          message.target.conversationId,
+          unsupportedMessageLinkText,
         );
         return;
       }
@@ -318,6 +353,19 @@ export class FeishuConversationAdapter {
       if (initialChoices) {
         return initialChoices;
       }
+      if (action === "workspace-perm" && isWorkspacePermissionField(input)) {
+        return renderWorkspacePermissionFieldChoices(input);
+      }
+      if (action === "workspace-perm-profile") {
+        return {
+          kind: "form",
+          title: "权限 Profile",
+          action: "workspace-perm",
+          fieldLabel: "Profile ID",
+          placeholder: ":read-only、:workspace、:danger-full-access 或自定义",
+          inputPrefix: "profile ",
+        };
+      }
       const form = input === "" ? renderCommandCenterForm(action) : undefined;
       if (form) {
         return form;
@@ -353,7 +401,11 @@ export class FeishuConversationAdapter {
       }
       this.notifyMarkdown(
         target.conversationId,
-        renderFeishuCommandResult(result),
+        renderFeishuCommandResult(
+          result,
+          this.inputOptions.priceCurrency,
+          this.inputOptions.exchangeRate?.() ?? null,
+        ),
       );
     } catch (error) {
       if (error instanceof FeishuOutputQueueError) {
@@ -694,6 +746,20 @@ export class FeishuConversationAdapter {
   }
 }
 
+function containsFeishuCopiedMessageLink(text: string): boolean {
+  const candidates = text.match(/https:\/\/[^\s<>"'`]+/giu) ?? [];
+  return candidates.some((candidate) => {
+    try {
+      const url = new URL(candidate);
+      return url.hostname === "applink.feishu.cn"
+        && url.pathname === "/client/message/link/open"
+        && url.searchParams.has("token");
+    } catch {
+      return false;
+    }
+  });
+}
+
 function renderCommandCenterInitialChoices(
   action: FeishuCommandCenterAction,
 ): FeishuCommandCenterChoices | undefined {
@@ -885,6 +951,38 @@ function renderCommandCenterChoices(
       })),
     };
   }
+  if (
+    action === "workspace-perm"
+    && result.kind === "workspace-permissions"
+  ) {
+    return {
+      title: "工作区权限",
+      description: `当前：${workspacePermissionSummary(result.workspace)}`,
+      choices: [
+        {
+          label: `沙箱：${workspacePermissionLabel(
+            "sandbox",
+            result.workspace.sandbox,
+          )}`,
+          action: "workspace-perm",
+          input: "sandbox",
+        },
+        {
+          label: `审批：${workspacePermissionLabel(
+            "approval",
+            result.workspace.approvalPolicy,
+          )}`,
+          action: "workspace-perm",
+          input: "approval",
+        },
+        {
+          label: `权限 Profile：${result.workspace.permissions ?? "未配置"}`,
+          action: "workspace-perm-profile",
+          input: "",
+        },
+      ],
+    };
+  }
   if (result.kind !== "models") {
     return undefined;
   }
@@ -911,7 +1009,7 @@ function renderCommandCenterChoices(
       return undefined;
     }
     return {
-      title: "选择思考强度",
+      title: "选择思考等级",
       description: `当前：${result.state.effort ?? currentModel?.defaultReasoningEffort ?? "模型默认"}`,
       choices: efforts.map(
         (option) => ({
@@ -945,6 +1043,103 @@ function renderCommandCenterChoices(
     };
   }
   return undefined;
+}
+
+function isWorkspacePermissionField(
+  value: string,
+): value is "sandbox" | "approval" {
+  return value === "sandbox" || value === "approval";
+}
+
+function renderWorkspacePermissionFieldChoices(
+  field: "sandbox" | "approval",
+): FeishuCommandCenterChoices {
+  if (field === "sandbox") {
+    return {
+      title: "选择沙箱模式",
+      choices: [
+        {
+          label: "只读",
+          action: "workspace-perm",
+          input: "sandbox read-only",
+        },
+        {
+          label: "工作区可写",
+          action: "workspace-perm",
+          input: "sandbox workspace-write",
+        },
+        {
+          label: "完全访问",
+          action: "workspace-perm",
+          input: "sandbox danger-full-access",
+        },
+        {
+          label: "清除（使用全局）",
+          action: "workspace-perm",
+          input: "sandbox clear",
+        },
+      ],
+    };
+  }
+  return {
+    title: "选择审批策略",
+    choices: [
+      {
+        label: "不信任",
+        action: "workspace-perm",
+        input: "approval untrusted",
+      },
+      {
+        label: "按需审批",
+        action: "workspace-perm",
+        input: "approval on-request",
+      },
+      {
+        label: "免审批",
+        action: "workspace-perm",
+        input: "approval never",
+      },
+      {
+        label: "清除（使用默认）",
+        action: "workspace-perm",
+        input: "approval clear",
+      },
+    ],
+  };
+}
+
+function workspacePermissionSummary(
+  workspace: Extract<
+    ConversationCommandResult,
+    { kind: "workspace-permissions" }
+  >["workspace"],
+): string {
+  return [
+    `沙箱：${workspacePermissionLabel("sandbox", workspace.sandbox)}`,
+    `审批：${workspacePermissionLabel("approval", workspace.approvalPolicy)}`,
+    `Profile：${workspace.permissions ?? "未配置"}`,
+  ].join(" · ");
+}
+
+function workspacePermissionLabel(
+  field: "sandbox" | "approval",
+  value: string | undefined,
+): string {
+  if (value === undefined) {
+    return "未配置";
+  }
+  const labels = field === "sandbox"
+    ? ({
+        "read-only": "只读",
+        "workspace-write": "工作区可写",
+        "danger-full-access": "完全访问",
+      } as const)
+    : ({
+        untrusted: "不信任",
+        "on-request": "按需审批",
+        never: "免审批",
+      } as const);
+  return (labels as Record<string, string>)[value] ?? value;
 }
 
 class FeishuOutputQueueError extends Error {

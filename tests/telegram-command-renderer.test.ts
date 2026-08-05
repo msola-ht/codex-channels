@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Context } from "grammy";
 
-import { renderTelegramCommandResult } from "../src/surfaces/telegram/command-renderer.js";
+import {
+  renderTelegramCommandResult,
+  workspacePermissionFieldKeyboard,
+  workspacePermissionKeyboard,
+} from "../src/surfaces/telegram/command-renderer.js";
 import { formatRuntimeMcpStatusUpdate } from "../src/surfaces/runtime-status-format.js";
 
 describe("Telegram command renderer", () => {
@@ -54,7 +58,7 @@ describe("Telegram command renderer", () => {
       },
     );
 
-    expect(reply).toHaveBeenCalledWith("已请求停止当前任务。");
+    expect(reply).toHaveBeenCalledWith("## 已请求停止当前任务。");
   });
 
   it("confirms queued follow-ups and explains their in-memory lifetime", async () => {
@@ -69,7 +73,7 @@ describe("Telegram command renderer", () => {
     );
 
     expect(reply).toHaveBeenCalledWith(
-      "已排到下一 Turn，当前第 2 条。队列仅保存在内存，Gateway 重启会清空。",
+      "## 已排到下一 Turn，当前第 2 条。队列仅保存在内存，Gateway 重启会清空。",
     );
   });
 
@@ -158,5 +162,27 @@ describe("Telegram command renderer", () => {
     });
 
     expect(text).toContain("原因：认证失败，TOKEN=[已隐藏]");
+  });
+
+  it("builds clickable workspace permission keyboards", () => {
+    const first = workspacePermissionKeyboard();
+    expect(first.inline_keyboard[0]?.map((button) =>
+      (button as { callback_data: string }).callback_data))
+      .toEqual(["wp:sandbox", "wp:approval", "wp:profile"]);
+
+    const sandbox = workspacePermissionFieldKeyboard("sandbox");
+    expect(sandbox.inline_keyboard.flatMap((row) =>
+      row.map((button) => (button as { callback_data: string }).callback_data)))
+      .toEqual([
+        "wp:sandbox:read-only",
+        "wp:sandbox:workspace-write",
+        "wp:sandbox:danger-full-access",
+        "wp:sandbox:clear",
+      ]);
+
+    const approval = workspacePermissionFieldKeyboard("approval");
+    expect(approval.inline_keyboard.flatMap((row) =>
+      row.map((button) => (button as { callback_data: string }).callback_data)))
+      .toContain("wp:approval:never");
   });
 });

@@ -56,19 +56,29 @@ export interface GatewayConfig {
     all?: string;
     no?: string;
   };
-  workspaces: GatewayConfigDocument["workspaces"];
+  workspaces: ConfiguredWorkspace[];
   defaultWorkspaceId: string;
   codexSocketPath: string;
   codexModel?: string;
   codexSandbox: "read-only" | "workspace-write";
   operationUpdateDisplay: OperationUpdateDisplay;
   planUpdatesEnabled: boolean;
+  priceCurrency: "auto" | "cny" | "usd";
+  priceCurrencyByProvider: Readonly<Record<string, "auto" | "cny" | "usd">>;
+  apiProviders: ReadonlyArray<{
+    id: string;
+    name: string;
+    protocol: "responses";
+    endpoint: string;
+  }>;
   vision:
     | { mode: "disabled" }
     | {
         mode: "responses_api";
+        provider: string;
         endpoint: string;
         model: string;
+        timeoutMs: number;
       };
   credentialsDirectory: string;
   stateDatabasePath: string;
@@ -76,7 +86,31 @@ export interface GatewayConfig {
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace";
 }
 
+export interface ConfiguredWorkspace {
+  id: string;
+  name: string;
+  cwd: string;
+  sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+  approvalPolicy?: "untrusted" | "on-request" | "never";
+  permissions?: string;
+}
+
 export type OperationUpdateDisplay = "full" | "compact" | "hidden";
+
+export function priceCurrencyForProvider(
+  config: Pick<GatewayConfig, "priceCurrency" | "priceCurrencyByProvider">,
+  provider: string | null | undefined,
+): "auto" | "cny" | "usd" {
+  return provider === null || provider === undefined
+    ? config.priceCurrency
+    : config.priceCurrencyByProvider[provider] ?? config.priceCurrency;
+}
+
+export function isDebugLogLevel(
+  level: GatewayConfig["logLevel"],
+): boolean {
+  return level === "debug" || level === "trace";
+}
 
 export class ConfigurationError extends Error {}
 
@@ -237,7 +271,12 @@ function loadValidatedConfigDocument(
     codexSandbox: raw.codex.sandbox,
     operationUpdateDisplay: raw.display.operation_updates,
     planUpdatesEnabled: raw.display.plan_updates,
-    vision: toVisionConfig(raw.vision),
+    priceCurrency: raw.display.price_currency,
+    priceCurrencyByProvider: {
+      ...(raw.display.price_currency_by_provider ?? {}),
+    },
+    apiProviders: raw.api_providers.map(toApiProviderConfig),
+    vision: toVisionConfig(raw.vision, raw.api_providers),
     credentialsDirectory: resolve(baseDirectory, "credentials"),
     stateDatabasePath: resolveConfiguredPath(raw.storage.database_path, baseDirectory),
     approvalTimeoutMs: raw.approval.timeout_seconds * 1000,
@@ -245,33 +284,55 @@ function loadValidatedConfigDocument(
   };
 }
 
-function toVisionConfig(raw: GatewayConfigDocument["vision"]): GatewayConfig["vision"] {
+function toApiProviderConfig(
+  raw: GatewayConfigDocument["api_providers"][number],
+): GatewayConfig["apiProviders"][number] {
+  return {
+    ...raw,
+    endpoint: validateApiEndpoint(raw.endpoint, `api_providers.${raw.id}.endpoint`),
+  };
+}
+
+function toVisionConfig(
+  raw: GatewayConfigDocument["vision"],
+  providers: GatewayConfigDocument["api_providers"],
+): GatewayConfig["vision"] {
   if (raw.mode === "disabled") return raw;
+  const provider = providers.find((candidate) => candidate.id === raw.provider);
+  if (!provider) {
+    throw new ConfigurationError(`vision.provider 不存在：${raw.provider}`);
+  }
+  return {
+    mode: raw.mode,
+    provider: provider.id,
+    endpoint: validateApiEndpoint(provider.endpoint, `api_providers.${provider.id}.endpoint`),
+    model: raw.model,
+    timeoutMs: raw.timeout_seconds * 1000,
+  };
+}
+
+function validateApiEndpoint(value: string, field: string): string {
   let endpoint: URL;
   try {
-    endpoint = new URL(raw.endpoint);
+    endpoint = new URL(value);
   } catch {
-    throw new ConfigurationError("vision.endpoint 必须是有效 URL");
+    throw new ConfigurationError(`${field} 必须是有效 URL`);
   }
   const loopback = endpoint.hostname === "localhost"
     || endpoint.hostname === "127.0.0.1"
     || endpoint.hostname === "[::1]";
   if (endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && loopback)) {
-    throw new ConfigurationError("vision.endpoint 必须使用 HTTPS；本机回环地址可以使用 HTTP");
+    throw new ConfigurationError(`${field} 必须使用 HTTPS；本机回环地址可以使用 HTTP`);
   }
-  if (endpoint.username || endpoint.password || endpoint.hash) {
-    throw new ConfigurationError("vision.endpoint 不能包含凭据或 URL Fragment");
+  if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+    throw new ConfigurationError(`${field} 不能包含凭据、Query 或 URL Fragment`);
   }
-  return {
-    mode: raw.mode,
-    endpoint: endpoint.toString(),
-    model: raw.model,
-  };
+  return endpoint.toString();
 }
 
 function validateWorkspaces(
   parsedWorkspaces: GatewayConfigDocument["workspaces"],
-): GatewayConfigDocument["workspaces"] {
+): ConfiguredWorkspace[] {
   const workspaceIds = new Set<string>();
   return parsedWorkspaces.map((workspace) => {
     if (workspaceIds.has(workspace.id)) {
@@ -288,7 +349,20 @@ function validateWorkspaces(
     if (!statSync(cwd).isDirectory()) {
       throw new ConfigurationError(`Workspace ${workspace.id} 的 cwd 必须是目录`);
     }
-    return { ...workspace, cwd };
+    return {
+      id: workspace.id,
+      name: workspace.name,
+      cwd,
+      ...(workspace.sandbox === undefined
+        ? {}
+        : { sandbox: workspace.sandbox }),
+      ...(workspace.approval_policy === undefined
+        ? {}
+        : { approvalPolicy: workspace.approval_policy }),
+      ...(workspace.permissions === undefined
+        ? {}
+        : { permissions: workspace.permissions }),
+    };
   });
 }
 
