@@ -154,6 +154,9 @@ function turnSummary(
   overrides: Partial<StoredTurnRequestMetricsSummary>,
 ): StoredTurnRequestMetricsSummary {
   return {
+    provider: null,
+    model: null,
+    reasoningEffort: null,
     turnId: "turn-1",
     requestCount: 0,
     unsuccessfulRequestCount: 0,

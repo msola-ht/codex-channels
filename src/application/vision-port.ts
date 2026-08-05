@@ -28,6 +28,7 @@ export interface VisionRecognitionRequest {
   userPrompt: string;
   onRequestStarted(): void;
   threadId?: string | null;
+  reasoningEffort?: string | null;
 }
 
 export interface VisionRecognitionImage {

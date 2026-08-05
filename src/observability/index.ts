@@ -31,6 +31,8 @@ export type {
   StoredModelRequestMetricsGroup,
   StoredModelRequestMetricsReport,
   StoredThreadRequestMetricsSummary,
+  StoredThreadListItem,
+  StoredThreadTurnSummary,
   StoredTurnRequestMetricsSummary,
   StoredThreadRequestMetricsAggregate,
 } from "./request-metrics.js";

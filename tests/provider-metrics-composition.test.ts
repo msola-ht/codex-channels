@@ -58,6 +58,7 @@ describe("ProviderMetricsComposition", () => {
         provider: "deepseek",
         ...metrics(),
         pricing: null,
+        reasoningEffort: null,
       });
     });
     expect(timings).toEqual([expect.objectContaining({
@@ -105,6 +106,7 @@ describe("ProviderMetricsComposition", () => {
         provider: "openai",
         ...unassociated,
         pricing: null,
+        reasoningEffort: null,
       });
     });
     expect(onModelTiming).not.toHaveBeenCalled();
@@ -151,6 +153,7 @@ describe("ProviderMetricsComposition", () => {
         provider: "deepseek",
         ...metrics(),
         pricing,
+        reasoningEffort: null,
       });
     });
     expect(resolve).toHaveBeenCalledWith({
@@ -167,6 +170,47 @@ describe("ProviderMetricsComposition", () => {
       cachedInputPricePerMillionNanos: 1_000_000_000,
       outputPricePerMillionNanos: 3_000_000_000,
     }));
+    await composition.close();
+  });
+
+  it("carries the bound Thread reasoning effort into recorded metrics", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-metrics-effort-"));
+    temporaryDirectories.push(directory);
+    const socketPath = join(directory, "deepseek.sock");
+    const record = vi.fn<ModelRequestMetricsStore["record"]>();
+    const composition = new ProviderMetricsComposition({
+      providers: ["deepseek"],
+      socketPath: () => socketPath,
+      writer: new BufferedModelRequestMetricsWriter({
+        record,
+        close: () => undefined,
+        count: () => 0,
+        recent: () => [],
+        aggregate: () => emptyMetricsReport(),
+        errors: () => emptyErrorReport(),
+      }),
+      resolveModelSettings: (threadId) => threadId === "thread-1"
+        ? {
+            model: "deepseek-v4-flash",
+            modelProvider: "deepseek",
+            effort: "max",
+            serviceTier: "default",
+            collaborationMode: "default",
+          }
+        : undefined,
+      onModelTiming: vi.fn(),
+      logger: pino({ level: "silent" }),
+    });
+    await composition.start();
+
+    await sendProviderProxyMetrics(socketPath, metrics());
+
+    await vi.waitFor(() => {
+      expect(record).toHaveBeenCalledWith(expect.objectContaining({
+        provider: "deepseek",
+        reasoningEffort: "max",
+      }));
+    });
     await composition.close();
   });
 

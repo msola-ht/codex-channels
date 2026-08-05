@@ -845,6 +845,13 @@ describe("ConversationService model selection", () => {
       {
         ensure: async () => ({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }),
         workspace: () => main,
+        modelSettingsForThread: () => ({
+          model: "deepseek-v4-flash",
+          modelProvider: "deepseek",
+          effort: "high",
+          serviceTier: null,
+          collaborationMode: "default",
+        }),
       } as unknown as SessionRouter,
       { activeTurn: () => undefined, markTurnStarted: vi.fn() } as unknown as ConversationCore,
       {
@@ -977,6 +984,13 @@ describe("ConversationService model selection", () => {
         }),
         ensure: async () => ({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }),
         workspace: () => main,
+        modelSettingsForThread: () => ({
+          model: "deepseek-v4-flash",
+          modelProvider: "deepseek",
+          effort: "high",
+          serviceTier: null,
+          collaborationMode: "default",
+        }),
       } as unknown as SessionRouter,
       {
         activeTurn: () => undefined,
@@ -1028,6 +1042,7 @@ describe("ConversationService model selection", () => {
       userPrompt: "解释错误",
       onRequestStarted: expect.any(Function),
       threadId: "thread-1",
+      reasoningEffort: "high",
     });
     expect(visionStarted).toHaveBeenCalledWith(target, {
       imageCount: 1,

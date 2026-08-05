@@ -2,9 +2,10 @@ import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
+  readFileSync,
   renameSync,
 } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
@@ -196,6 +197,45 @@ export function readMetricsRun(environment = process.env, threadId) {
   }
 }
 
+export function readMetricsThreads(environment = process.env) {
+  const databasePath = requireReadableMetricsDatabase(environment);
+  const store = new SqliteModelRequestMetricsStore(
+    databasePath,
+    undefined,
+    { readOnly: true },
+  );
+  try {
+    return {
+      format: "codex-connect-request-metrics-threads",
+      version: 1,
+      generatedAt: new Date().toISOString(),
+      threads: store.threadList(),
+    };
+  } finally {
+    store.close();
+  }
+}
+
+export function readMetricsTurns(environment = process.env, threadId) {
+  const databasePath = requireReadableMetricsDatabase(environment);
+  const store = new SqliteModelRequestMetricsStore(
+    databasePath,
+    undefined,
+    { readOnly: true },
+  );
+  try {
+    return {
+      format: "codex-connect-request-metrics-turns",
+      version: 1,
+      generatedAt: new Date().toISOString(),
+      threadId,
+      turns: store.threadTurnSummaries(threadId),
+    };
+  } finally {
+    store.close();
+  }
+}
+
 function requireReadableMetricsDatabase(environment) {
   const status = inspectMetricsDatabase(environment);
   if (!status.exists) throw new Error(`指标数据库尚未创建：${status.databasePath}`);
@@ -230,6 +270,57 @@ function resolveMetricsRuntime(environment) {
       providerMetricsSocketPath(appServerSocketPath, provider)
     ),
   };
+}
+
+function loadDisplayContext(environment) {
+  const { configPath, dataDir } = locateUserConfig(environment);
+  const document = readGatewayConfig(configPath);
+  const display = isRecord(document.display) ? document.display : {};
+  const storage = isRecord(document.storage) ? document.storage : {};
+  const stateDatabasePath = resolveConfiguredPath(
+    typeof storage.database_path === "string" ? storage.database_path : undefined,
+    dataDir,
+    "data/gateway.sqlite3",
+  );
+  return {
+    priceCurrency: display.price_currency ?? "auto",
+    priceCurrencyByProvider: isRecord(display.price_currency_by_provider)
+      ? display.price_currency_by_provider
+      : {},
+    exchangeRate: loadExchangeRate(dirname(stateDatabasePath)),
+  };
+}
+
+function loadExchangeRate(directory) {
+  try {
+    const parsed = JSON.parse(
+      readFileSync(join(directory, "exchange-rate.json"), "utf8"),
+    );
+    if (
+      !isRecord(parsed)
+      || parsed.version !== 1
+      || !["open-er-api", "ecb", "cache"].includes(parsed.source)
+      || !Number.isSafeInteger(parsed.effectiveAtMs)
+      || parsed.effectiveAtMs <= 0
+    ) {
+      return null;
+    }
+    const rate = Number(parsed.usdToCny);
+    if (!Number.isFinite(rate) || rate <= 0) return null;
+    return {
+      usdToCny: rate,
+      effectiveAtMs: parsed.effectiveAtMs,
+      source: parsed.source,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function resolveDisplayCurrency(mode, provider) {
+  if (mode === "cny") return "cny";
+  if (mode === "usd") return "usd";
+  return provider === "deepseek" ? "cny" : "usd";
 }
 
 function readSchemaVersion(database) {
@@ -344,10 +435,61 @@ function printStatus(result) {
   }
 }
 
-function printMetricsReport(result) {
+function printMetricsReport(result, format, display = null) {
+  if (format === "json") {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  if (format === "csv") {
+    const columns = [
+      ["type", () => ""],
+      ["group", () => ""],
+      ["requestCount", (value) => value.requestCount],
+      ["unsuccessfulRequestCount", (value) => value.unsuccessfulRequestCount],
+      ["requestDurationMs", (value) => value.requestDurationMs],
+      ["inputTokens", (value) => value.inputTokens],
+      ["cachedInputTokens", (value) => value.cachedInputTokens],
+      ["outputTokens", (value) => value.outputTokens],
+      ["reasoningOutputTokens", (value) => value.reasoningOutputTokens],
+      ["outputTokensPerSecond", (value) => value.outputTokensPerSecond],
+      ["pricingCurrency", (value) => value.pricingCurrency],
+      ["pricedRequestCount", (value) => value.pricedRequestCount],
+      ["totalCostNanos", (value) => value.totalCostNanos],
+      ["inputCostNanos", (value) => value.inputCostNanos],
+      ["cachedInputCostNanos", (value) => value.cachedInputCostNanos],
+      ["outputCostNanos", (value) => value.outputCostNanos],
+      ["ttftP50Ms", (value) => value.ttftP50Ms],
+      ["ttftP95Ms", (value) => value.ttftP95Ms],
+    ];
+    console.log(columns.map(([heading]) => csvCell(heading)).join(","));
+    const rows = [
+      ...(result.report.aggregate === null
+        ? []
+        : [{ type: "aggregate", group: "global", value: result.report.aggregate }]),
+      ...result.report.groups.map((group) => ({
+        type: "group",
+        group: group.model ?? group.provider ?? "全部",
+        value: group.aggregate,
+      })),
+    ];
+    for (const row of rows) {
+      console.log(
+        columns.map(([heading, read], index) =>
+          index < 2
+            ? csvCell(heading === "type" ? row.type : row.group)
+            : csvCell(read(row.value))).join(","),
+      );
+    }
+    return;
+  }
   const aggregate = result.report.aggregate;
+  const aggregateProvider = result.report.groups.length === 1
+    ? result.report.groups[0]?.provider ?? null
+    : null;
   console.log("# Codex Connect 请求指标报告");
   console.log("");
+  const rateLine = exchangeRateLine(display);
+  if (rateLine) console.log(`- ${rateLine}`);
   console.log(`- 生成时间：${result.generatedAt}`);
   console.log(`- 时间范围：${result.range.name}`);
   console.log(`- 起始时间：${new Date(result.range.startAtMs).toISOString()}`);
@@ -366,7 +508,10 @@ function printMetricsReport(result) {
   console.log(`- 输出 Token：${aggregate.outputTokens}`);
   console.log(`- 推理输出 Token：${aggregate.reasoningOutputTokens}`);
   console.log(`- 计价覆盖：${aggregate.pricedRequestCount}/${aggregate.requestCount}`);
-  console.log(`- 参考总价：${formatCost(aggregate)}`);
+  console.log(`- 参考总价：${formatCost(
+    { ...aggregate, provider: aggregateProvider },
+    display,
+  )}`);
   console.log(`- 首段延迟 P50/P95：${formatDuration(aggregate.ttftP50Ms)}/${formatDuration(aggregate.ttftP95Ms)}`);
   if (result.report.groups.length > 0) {
     console.log("");
@@ -376,7 +521,7 @@ function printMetricsReport(result) {
     console.log("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |");
     for (const group of result.report.groups) {
       const value = group.aggregate;
-      console.log(`| ${markdownCell(group.provider ?? "全部")} | ${markdownCell(group.model ?? "全部/未观测")} | ${value.requestCount} | ${value.unsuccessfulRequestCount} | ${value.inputTokens} | ${value.cachedInputTokens ?? "未知"} | ${value.outputTokens} | ${formatCost(value)} |`);
+      console.log(`| ${markdownCell(group.provider ?? "全部")} | ${markdownCell(group.model ?? "全部/未观测")} | ${value.requestCount} | ${value.unsuccessfulRequestCount} | ${value.inputTokens} | ${value.cachedInputTokens ?? "未知"} | ${value.outputTokens} | ${formatCost({ ...value, provider: group.provider ?? null }, display)} |`);
     }
     const hidden = result.report.totalGroupCount - result.report.groups.length;
     if (hidden > 0) console.log(`\n仅显示请求量最高的 ${result.report.groups.length} 组，另有 ${hidden} 组。`);
@@ -395,9 +540,45 @@ function printMetricsReport(result) {
   }
 }
 
-function printMetricsExport(result, format) {
+function printMetricsExport(result, format, display = null) {
   if (format === "json") {
     console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  if (format === "markdown") {
+    if (result.records.length === 0) {
+      console.log("本时间范围没有请求记录。");
+      return;
+    }
+    console.log("# Codex Connect 请求明细");
+    console.log("");
+    const rateLine = exchangeRateLine(display);
+    if (rateLine) console.log(`- ${rateLine}`);
+    console.log(`- 生成时间：${result.generatedAt}`);
+    console.log(`- 时间范围：${result.range.name}`);
+    console.log("");
+    console.log("| 时间 | 提供商 | 模型 | 思考等级 | 状态 | 耗时 | 输入 | 缓存输入 | 输出 | 参考价 |");
+    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    for (const record of result.records) {
+      const pricingCurrency = record.pricing?.currency ?? null;
+      const cost = record.totalCostNanos === null || pricingCurrency === null
+        ? "未知"
+        : formatCost({ ...record, pricingCurrency }, display);
+      console.log(
+        [
+          markdownCell(formatLocalTime(record.recordedAtMs)),
+          markdownCell(record.provider ?? ""),
+          markdownCell(record.model ?? ""),
+          markdownCell(record.reasoningEffort ?? "模型默认"),
+          markdownCell(record.status ?? ""),
+          markdownCell(formatDuration(record.requestDurationMs)),
+          markdownCell(formatTokenCount(record.inputTokens ?? 0)),
+          markdownCell(formatTokenCount(record.cachedInputTokens ?? 0)),
+          markdownCell(formatTokenCount(record.outputTokens ?? 0)),
+          markdownCell(cost),
+        ].join(" | "),
+      );
+    }
     return;
   }
   const columns = csvColumns();
@@ -407,14 +588,28 @@ function printMetricsExport(result, format) {
   }
 }
 
-function printMetricsRun(result, format) {
+function printMetricsRun(result, format, display = null) {
   if (format === "json") {
     console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  if (format === "csv") {
+    const rows = [
+      ...(result.latestTurn === null
+        ? []
+        : [{ type: "latest", ...result.latestTurn }]),
+      ...(result.threadAggregate === null
+        ? []
+        : [{ type: "thread", ...result.threadAggregate }]),
+    ];
+    printTurnSummaryCsv(rows);
     return;
   }
   const { latestTurn, threadAggregate } = result;
   console.log("# Codex Connect 本次运行统计");
   console.log("");
+  const rateLine = exchangeRateLine(display);
+  if (rateLine) console.log(`- ${rateLine}`);
   console.log(`- Thread：${result.threadId}`);
   console.log(`- 生成时间：${result.generatedAt}`);
   console.log("");
@@ -423,7 +618,7 @@ function printMetricsRun(result, format) {
   if (latestTurn === null) {
     console.log("该 Thread 暂无已记录请求。");
   } else {
-    printTurnSummary(latestTurn);
+    printTurnSummary(latestTurn, false, display);
   }
   console.log("");
   console.log("## 当前会话指标累计");
@@ -431,12 +626,156 @@ function printMetricsRun(result, format) {
   if (threadAggregate === null) {
     console.log("该 Thread 暂无累计记录。");
   } else {
-    printTurnSummary(threadAggregate, true);
+    printTurnSummary(threadAggregate, true, display);
   }
 }
 
-function printTurnSummary(summary, aggregate = false) {
+function printTurnSummaryCsv(rows) {
+  const columns = [
+    ["type", (row) => row.type],
+    ["provider", (row) => row.provider],
+    ["model", (row) => row.model],
+    ["reasoningEffort", (row) => row.reasoningEffort],
+    ["recordedAt", (row) => row.recordedAtMs === undefined ? "" : new Date(row.recordedAtMs).toISOString()],
+    ["turnId", (row) => row.turnId],
+    ["requestCount", (row) => row.requestCount],
+    ["unsuccessfulRequestCount", (row) => row.unsuccessfulRequestCount],
+    ["requestDurationMs", (row) => row.requestDurationMs],
+    ["inputTokens", (row) => row.inputTokens],
+    ["cachedInputTokens", (row) => row.cachedInputTokens],
+    ["outputTokens", (row) => row.outputTokens],
+    ["reasoningOutputTokens", (row) => row.reasoningOutputTokens],
+    ["outputTokensPerSecond", (row) => row.outputTokensPerSecond],
+    ["pricingCurrency", (row) => row.pricingCurrency],
+    ["pricedRequestCount", (row) => row.pricedRequestCount],
+    ["totalCostNanos", (row) => row.totalCostNanos],
+    ["inputCostNanos", (row) => row.inputCostNanos],
+    ["cachedInputCostNanos", (row) => row.cachedInputCostNanos],
+    ["outputCostNanos", (row) => row.outputCostNanos],
+  ];
+  console.log(columns.map(([heading]) => csvCell(heading)).join(","));
+  for (const row of rows) {
+    console.log(columns.map(([, read]) => csvCell(read(row))).join(","));
+  }
+}
+
+function printMetricsTurns(result, format, display = null) {
+  if (format === "json") {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  if (format === "csv") {
+    printTurnSummaryCsv(result.turns.map((turn) => ({
+      type: "turn",
+      ...turn,
+    })));
+    return;
+  }
+  console.log(`# 会话对话明细 · ${result.threadId}`);
+  console.log("");
+  const rateLine = exchangeRateLine(display);
+  if (rateLine) console.log(`- ${rateLine}`);
+  if (result.turns.length === 0) {
+    console.log("该会话暂无可导出的对话记录。");
+    return;
+  }
+  console.log("| # | 对话 ID | 时间 | 模型 | 思考等级 | 请求 | 异常 | 耗时 | 总 Token | 缓存率 | 速度 | 参考总价 |");
+  console.log("| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+  for (const [index, turn] of result.turns.entries()) {
+    const cacheRate = turn.cachedInputTokens === null || turn.inputTokens === 0
+      ? "未知"
+      : `${((turn.cachedInputTokens / turn.inputTokens) * 100).toFixed(2)}%`;
+    const speed = turn.outputTokensPerSecond === null
+      ? "未知"
+      : `${turn.outputTokensPerSecond.toFixed(0)} t/s`;
+    const cost = turn.totalCostNanos === null || turn.pricingCurrency === null
+      ? "未知"
+      : formatCost(turn, display);
+    console.log(
+      [
+        String(result.turns.length - index),
+        markdownCell(turn.turnId),
+        markdownCell(formatLocalTime(turn.recordedAtMs)),
+        markdownCell(turn.model ?? "未观测"),
+        markdownCell(turn.reasoningEffort ?? "模型默认"),
+        String(turn.requestCount),
+        String(turn.unsuccessfulRequestCount),
+        markdownCell(formatDuration(turn.requestDurationMs)),
+        formatTokenCount(turn.inputTokens + turn.outputTokens),
+        cacheRate,
+        speed,
+        cost,
+      ].join(" | "),
+    );
+  }
+}
+
+function printMetricsThreads(result, format, display = null) {
+  if (format === "json") {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  if (format === "csv") {
+    const columns = [
+      ["threadId", (thread) => thread.threadId],
+      ["provider", (thread) => thread.provider],
+      ["model", (thread) => thread.model],
+      ["reasoningEffort", (thread) => thread.reasoningEffort],
+      ["turnCount", (thread) => thread.turnCount],
+      ["requestCount", (thread) => thread.requestCount],
+      ["inputTokens", (thread) => thread.inputTokens],
+      ["outputTokens", (thread) => thread.outputTokens],
+      ["pricingCurrency", (thread) => thread.pricingCurrency],
+      ["pricedRequestCount", (thread) => thread.pricedRequestCount],
+      ["totalCostNanos", (thread) => thread.totalCostNanos],
+      ["lastRecordedAtMs", (thread) => thread.lastRecordedAtMs],
+    ];
+    console.log(columns.map(([heading]) => csvCell(heading)).join(","));
+    for (const thread of result.threads) {
+      console.log(columns.map(([, read]) => csvCell(read(thread))).join(","));
+    }
+    return;
+  }
+  if (result.threads.length === 0) {
+    console.log("指标库中暂无可导出的会话记录。");
+    return;
+  }
+  console.log(`# 指标会话列表（${result.threads.length}）`);
+  console.log("");
+  const rateLine = exchangeRateLine(display);
+  if (rateLine) console.log(`- ${rateLine}`);
+  console.log("| # | Thread | 模型 | 思考等级 | 对话数 | 请求数 | 总 Token | 参考总价 | 最近记录 |");
+  console.log("| --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- |");
+  for (const [index, thread] of result.threads.entries()) {
+    const cost = thread.totalCostNanos === null || thread.pricingCurrency === null
+      ? "未知"
+      : formatCost(thread, display);
+    console.log(
+      [
+        String(index + 1),
+        markdownCell(thread.threadId),
+        markdownCell(thread.model ?? "未观测"),
+        markdownCell(thread.reasoningEffort ?? "模型默认"),
+        String(thread.turnCount),
+        String(thread.requestCount),
+        formatTokenCount(thread.inputTokens + thread.outputTokens),
+        cost,
+        markdownCell(formatLocalTime(thread.lastRecordedAtMs)),
+      ].join(" | "),
+    );
+  }
+  console.log("");
+  console.log("导出某会话每次对话：codexc metrics turns <Thread ID>");
+}
+
+function printTurnSummary(summary, aggregate = false, display = null) {
   const totalTokens = summary.inputTokens + summary.outputTokens;
+  if (summary.model !== undefined && summary.model !== null) {
+    console.log(`- 模型：${summary.model}`);
+  }
+  if (summary.reasoningEffort !== undefined && summary.reasoningEffort !== null) {
+    console.log(`- 思考等级：${summary.reasoningEffort}`);
+  }
   console.log(
     `- 模型请求：${summary.requestCount} 次${summary.unsuccessfulRequestCount > 0 ? `（异常 ${summary.unsuccessfulRequestCount} 次）` : ""}`,
   );
@@ -469,16 +808,16 @@ function printTurnSummary(summary, aggregate = false) {
   }
   if (summary.totalCostNanos !== null && summary.pricingCurrency !== null) {
     console.log(
-      `- 参考总价：${formatCost(summary)}（已计价 ${summary.pricedRequestCount}/${summary.requestCount} 次请求）`,
+      `- 参考总价：${formatCost(summary, display)}（已计价 ${summary.pricedRequestCount}/${summary.requestCount} 次请求）`,
     );
     if (summary.inputCostNanos !== null) {
-      console.log(`  - 输入价格：${formatCurrencyNanos(summary.inputCostNanos, summary.pricingCurrency)}`);
+      console.log(`  - 输入价格：${formatCurrencyNanos(summary.inputCostNanos, summary.pricingCurrency, display, summary.provider)}`);
     }
     if (summary.cachedInputCostNanos !== null) {
-      console.log(`  - 缓存价格：${formatCurrencyNanos(summary.cachedInputCostNanos, summary.pricingCurrency)}`);
+      console.log(`  - 缓存价格：${formatCurrencyNanos(summary.cachedInputCostNanos, summary.pricingCurrency, display, summary.provider)}`);
     }
     if (summary.outputCostNanos !== null) {
-      console.log(`  - 输出价格：${formatCurrencyNanos(summary.outputCostNanos, summary.pricingCurrency)}`);
+      console.log(`  - 输出价格：${formatCurrencyNanos(summary.outputCostNanos, summary.pricingCurrency, display, summary.provider)}`);
     }
   }
 }
@@ -493,9 +832,30 @@ function formatTokenCount(value) {
   return String(value);
 }
 
-function formatCurrencyNanos(value, currency) {
-  const amount = (value / 1_000_000_000).toFixed(6);
-  return currency === "USD" ? `$${amount}` : `${amount} ${currency}`;
+function formatCurrencyNanos(value, currency, display = null, provider = null) {
+  let nanos = value;
+  let target = currency;
+  if (display) {
+    const mode = display.priceCurrencyByProvider[provider]
+      ?? display.priceCurrency
+      ?? "auto";
+    if (
+      resolveDisplayCurrency(mode, provider) === "cny"
+      && currency === "USD"
+      && display.exchangeRate
+    ) {
+      const converted = Math.round(nanos * display.exchangeRate.usdToCny);
+      if (Number.isSafeInteger(converted)) {
+        nanos = converted;
+        target = "CNY";
+      }
+    }
+  }
+  const amount = (nanos / 1_000_000_000).toFixed(6)
+    .replace(/0+$/u, "")
+    .replace(/\.$/u, "");
+  const symbol = target === "CNY" ? "¥" : target === "USD" ? "$" : `${target} `;
+  return `${symbol}${amount}`;
 }
 
 function metricsRange(name, nowMs) {
@@ -550,18 +910,116 @@ function parseMetricsRunArgs(args) {
     threadId = option;
   }
   if (!threadId) {
-    throw new Error("用法：codexc metrics run <Thread ID> [--format json|markdown]");
+    throw new Error("用法：codexc metrics run <Thread ID> [--format markdown|json|csv]");
   }
-  if (format !== "json" && format !== "markdown") {
-    throw new Error("--format 只支持 json 或 markdown");
-  }
+  assertExportFormat(format, ["markdown", "json", "csv"]);
   return { threadId, format };
 }
 
-function formatCost(aggregate) {
-  if (aggregate.totalCostNanos === null || aggregate.pricingCurrency === null) return "未知";
-  const amount = (aggregate.totalCostNanos / 1_000_000_000).toFixed(2);
-  return aggregate.pricingCurrency === "USD" ? `$${amount}` : `${amount} ${aggregate.pricingCurrency}`;
+function parseMetricsTurnsArgs(args) {
+  let threadId;
+  let format = "markdown";
+  for (let index = 0; index < args.length; index += 1) {
+    const option = args[index];
+    if (option === "--format") {
+      const value = args[index + 1];
+      if (!value || value.startsWith("--")) {
+        throw new Error("--format 缺少值");
+      }
+      format = value;
+      index += 1;
+      continue;
+    }
+    if (option.startsWith("--")) {
+      throw new Error(`未知参数：${option}`);
+    }
+    if (threadId !== undefined) {
+      throw new Error("只能指定一个 Thread ID");
+    }
+    threadId = option;
+  }
+  if (!threadId) {
+    throw new Error("用法：codexc metrics turns <Thread ID> [--format markdown|json|csv]");
+  }
+  assertExportFormat(format, ["markdown", "json", "csv"]);
+  return { threadId, format };
+}
+
+function parseMetricsThreadsArgs(args) {
+  let format = "markdown";
+  for (let index = 0; index < args.length; index += 1) {
+    const option = args[index];
+    if (option === "--format") {
+      const value = args[index + 1];
+      if (!value || value.startsWith("--")) {
+        throw new Error("--format 缺少值");
+      }
+      format = value;
+      index += 1;
+      continue;
+    }
+    throw new Error(`未知参数：${option}`);
+  }
+  assertExportFormat(format, ["markdown", "json", "csv"]);
+  return { format };
+}
+
+function assertExportFormat(value, allowed) {
+  if (!allowed.includes(value)) {
+    throw new Error(`--format 只支持 ${allowed.join("、")}`);
+  }
+}
+
+function formatCost(aggregate, display = null) {
+  if (
+    aggregate.totalCostNanos === null
+    || aggregate.pricingCurrency === null
+    || aggregate.pricingCurrency === undefined
+  ) {
+    return "未知";
+  }
+  let nanos = aggregate.totalCostNanos;
+  let currency = aggregate.pricingCurrency;
+  if (display) {
+    const mode = display.priceCurrencyByProvider[aggregate.provider]
+      ?? display.priceCurrency
+      ?? "auto";
+    if (
+      resolveDisplayCurrency(mode, aggregate.provider) === "cny"
+      && currency === "USD"
+      && display.exchangeRate
+    ) {
+      const converted = Math.round(nanos * display.exchangeRate.usdToCny);
+      if (Number.isSafeInteger(converted)) {
+        nanos = converted;
+        currency = "CNY";
+      }
+    }
+  }
+  const amount = nanos / 1_000_000_000;
+  const symbol = currency === "CNY"
+    ? "¥"
+    : currency === "USD"
+      ? "$"
+      : `${currency} `;
+  return `${symbol}${amount.toFixed(6).replace(/0+$/u, "").replace(/\.$/u, "")}`;
+}
+
+function exchangeRateLine(display) {
+  if (!display?.exchangeRate || display.exchangeRate.source === "cache") {
+    return null;
+  }
+  const rate = display.exchangeRate;
+  return `汇率：1 USD ≈ ${rate.usdToCny.toFixed(4)} CNY（${rate.source} · ${formatLocalTime(rate.effectiveAtMs)}）`;
+}
+
+function formatLocalTime(ms) {
+  const date = new Date(ms);
+  const pad = (value) => String(value).padStart(2, "0");
+  return [
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`,
+  ].join(" ");
 }
 
 function formatDuration(value) {
@@ -585,6 +1043,7 @@ function csvColumns() {
     ["provider", (record) => record.provider],
     ["model", (record) => record.model],
     ["serviceTier", (record) => record.serviceTier],
+    ["reasoningEffort", (record) => record.reasoningEffort],
     ["status", (record) => record.status],
     ["errorType", (record) => record.errorType],
     ["incompleteReason", (record) => record.incompleteReason],
@@ -630,33 +1089,54 @@ if (
     } else if (command === "report") {
       const options = parseMetricsOptions(
         process.argv.slice(3),
-        new Set(["--range", "--group"]),
+        new Set(["--range", "--group", "--format"]),
       );
-      printMetricsReport(readMetricsReport(process.env, options));
+      const format = options.format ?? "markdown";
+      assertExportFormat(format, ["markdown", "json", "csv"]);
+      printMetricsReport(
+        readMetricsReport(process.env, options),
+        format,
+        loadDisplayContext(process.env),
+      );
     } else if (command === "export") {
       const options = parseMetricsOptions(
         process.argv.slice(3),
         new Set(["--range", "--format", "--thread"]),
       );
       const format = options.format ?? "json";
-      if (format !== "json" && format !== "csv") {
-        throw new Error("--format 只支持 json 或 csv");
-      }
+      assertExportFormat(format, ["json", "csv", "markdown"]);
+      const display = loadDisplayContext(process.env);
       printMetricsExport(
         readMetricsExport(process.env, {
           ...options,
           ...(options.thread ? { threadId: options.thread } : {}),
         }),
         format,
+        display,
       );
     } else if (command === "run") {
       const options = parseMetricsRunArgs(process.argv.slice(3));
       printMetricsRun(
         readMetricsRun(process.env, options.threadId),
         options.format,
+        loadDisplayContext(process.env),
+      );
+    } else if (command === "threads") {
+      const options = parseMetricsThreadsArgs(process.argv.slice(3));
+      printMetricsThreads(
+        readMetricsThreads(process.env),
+        options.format,
+        loadDisplayContext(process.env),
+      );
+    } else if (command === "turns") {
+      const options = parseMetricsTurnsArgs(process.argv.slice(3));
+      printMetricsTurns(
+        readMetricsTurns(process.env, options.threadId),
+        options.format,
+        loadDisplayContext(process.env),
       );
     } else {
-      throw new Error("用法：codexc metrics <status|run|report|export|reset>");
+      throw new Error("用法：codexc metrics <status|run|threads|turns|report|export|reset>");
     }
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

@@ -7,6 +7,7 @@ import type {
   ModelRequestMetricsWriter,
 } from "../observability/index.js";
 import { calculateModelRequestCostComponents } from "../observability/index.js";
+import type { ThreadModelSettings } from "../session-routing/index.js";
 import {
   ProviderProxyMetricsServer,
   type ProviderProxyMetrics,
@@ -22,6 +23,7 @@ export interface ProviderMetricsCompositionOptions {
   socketPath: (provider: string) => string;
   writer: ModelRequestMetricsWriter;
   pricingResolver?: ModelPricingResolver;
+  resolveModelSettings?: (threadId: string) => ThreadModelSettings | undefined;
   onModelTiming: (event: ModelTimingEvent) => void;
   logger: Logger;
 }
@@ -77,7 +79,15 @@ export class ProviderMetricsComposition {
         inputTokens: metrics.inputTokens,
         atMs: metrics.responseCompletedAtMs,
       }) ?? null;
-      this.options.writer.enqueue({ provider, ...metrics, pricing });
+      this.options.writer.enqueue({
+        provider,
+        ...metrics,
+        pricing,
+        reasoningEffort:
+          metrics.threadId === null
+            ? null
+            : this.options.resolveModelSettings?.(metrics.threadId)?.effort ?? null,
+      });
     } catch (error) {
       this.options.logger.warn({ err: error, provider }, "模型请求指标持久化失败");
     }

@@ -19,6 +19,8 @@ import {
   readMetricsExport,
   readMetricsReport,
   readMetricsRun,
+  readMetricsThreads,
+  readMetricsTurns,
   resetMetricsDatabase,
 } from "../scripts/metrics-database.mjs";
 import {
@@ -156,6 +158,8 @@ describe("model request metrics database operations", () => {
       threadId: "thread-1",
       latestTurn: {
         turnId: "turn-1",
+        model: "deepseek-v4-flash",
+        reasoningEffort: "max",
         requestCount: 1,
         inputTokens: 1_000,
       },
@@ -173,6 +177,36 @@ describe("model request metrics database operations", () => {
     expect(filtered.records).toHaveLength(1);
     expect((filtered.records[0] as { threadId?: string } | undefined)?.threadId)
       .toBe("thread-2");
+
+    const threads = readMetricsThreads(environment);
+    expect(threads.threads).toEqual([
+      expect.objectContaining({
+        threadId: "thread-2",
+        turnCount: 1,
+        model: "deepseek-v4-flash",
+        reasoningEffort: "max",
+      }),
+      expect.objectContaining({
+        threadId: "thread-1",
+        turnCount: 1,
+        model: "deepseek-v4-flash",
+        reasoningEffort: "max",
+      }),
+    ]);
+
+    const turns = readMetricsTurns(environment, "thread-1");
+    expect(turns).toMatchObject({
+      format: "codex-connect-request-metrics-turns",
+      version: 1,
+      threadId: "thread-1",
+      turns: [{
+        turnId: "turn-1",
+        model: "deepseek-v4-flash",
+        reasoningEffort: "max",
+        requestCount: 1,
+        inputTokens: 1_000,
+      }],
+    });
   });
 
   it.runIf(process.platform === "linux")(
@@ -352,6 +386,7 @@ function metricSample(): ModelRequestMetricSample {
     turnId: "turn-1",
     model: "deepseek-v4-flash",
     serviceTier: "default",
+    reasoningEffort: "max",
     status: "completed",
     httpStatus: 200,
     errorType: null,

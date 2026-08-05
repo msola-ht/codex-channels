@@ -189,6 +189,8 @@ export class GatewayApplication {
         providerMetricsSocketPath(config.codexSocketPath, provider),
       writer: metricsWriter,
       pricingResolver: this.modelPricing,
+      resolveModelSettings: (threadId) =>
+        this.router.modelSettingsForThread(threadId),
       onModelTiming: (event) => this.core.handle(event),
       logger,
     });

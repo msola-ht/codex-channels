@@ -863,6 +863,7 @@ function sample(): ModelRequestMetricSample {
     turnId: "turn-1",
     model: "deepseek-v4-flash",
     serviceTier: "default",
+    reasoningEffort: "max",
     status: "completed",
     httpStatus: 200,
     errorType: null,

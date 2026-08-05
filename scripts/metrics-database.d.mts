@@ -40,6 +40,34 @@ export interface MetricsRunDocument {
   latestDirectApi: unknown;
 }
 
+export interface MetricsThreadsDocument {
+  format: "codex-connect-request-metrics-threads";
+  version: 1;
+  generatedAt: string;
+  threads: Array<{
+    threadId: string;
+    provider: string | null;
+    model: string | null;
+    reasoningEffort: string | null;
+    turnCount: number;
+    requestCount: number;
+    inputTokens: number;
+    outputTokens: number;
+    pricingCurrency: string | null;
+    pricedRequestCount: number;
+    totalCostNanos: number | null;
+    lastRecordedAtMs: number;
+  }>;
+}
+
+export interface MetricsTurnsDocument {
+  format: "codex-connect-request-metrics-turns";
+  version: 1;
+  generatedAt: string;
+  threadId: string;
+  turns: Array<Record<string, unknown> & { recordedAtMs: number }>;
+}
+
 export function inspectMetricsDatabase(
   environment?: NodeJS.ProcessEnv,
 ): MetricsDatabaseStatus;
@@ -66,3 +94,12 @@ export function readMetricsRun(
   environment?: NodeJS.ProcessEnv,
   threadId?: string,
 ): MetricsRunDocument;
+
+export function readMetricsThreads(
+  environment?: NodeJS.ProcessEnv,
+): MetricsThreadsDocument;
+
+export function readMetricsTurns(
+  environment?: NodeJS.ProcessEnv,
+  threadId?: string,
+): MetricsTurnsDocument;

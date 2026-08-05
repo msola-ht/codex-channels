@@ -58,6 +58,9 @@ export function createResponsesVisionAdapter(
           },
           body: JSON.stringify({
             model: options.model,
+            ...(request.reasoningEffort
+              ? { reasoning: { effort: request.reasoningEffort } }
+              : {}),
             input: [{
               role: "user",
               content: [
@@ -276,6 +279,7 @@ function createVisionMetric(options: {
     turnId: null,
     model: options.model,
     serviceTier: options.serviceTier ?? null,
+    reasoningEffort: options.request.reasoningEffort ?? null,
     status: options.status,
     httpStatus: options.httpStatus,
     errorType: options.errorType,

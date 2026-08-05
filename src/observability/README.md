@@ -20,17 +20,21 @@
   时间戳与本机流式阶段时间戳
   写入独立 `request-metrics.sqlite3`。当前 Thread 的独立 API 查询只选择调用适配器产生的
   HTTP JSON 记录，不能把缺少 Turn 元数据的 Codex WebSocket/SSE 代理请求误分类。数据库使用
-  严格 Schema v2、`0600` 文件权限，只接受当前
+  严格 Schema v3、`0600` 文件权限，只接受当前
   Schema；首次初始化在单一事务内完成；使用 WAL 允许后续只读查询与采集并行，锁等待限制为
   10 ms；同一 Store 还提供不获取写锁、不初始化或清理 Schema 的显式只读模式，以及每页最多
   500 条的稳定 ID 游标分页，供 CLI 报表、导出和后续本地 WebUI 复用。记录保留 30 天，以
   100,000 条为清理目标，每 100 次写入分批清理，两个清理周期之间
-  最多短暂超出 99 条。`model_request_metrics_enriched` View 统一派生总耗时、TTFT、推理/输出/生成
+  最多短暂超出 99 条。每条记录保存提供商、模型、思考等级、服务层级、状态与错误类型；路由层在
+  Thread 启动、恢复、切换或模型设置更新时维护思考等级，指标采集按 Thread 关联补齐。
+  `model_request_metrics_enriched` View 统一派生总耗时、TTFT、推理/输出/生成
   阶段耗时、收尾间隔、缓存与不含推理的 Token、缓存命中率、三类生成速度，以及按当次价格快照计算的
   输入/缓存/输出和总费用。价格以每百万 Token 的十亿分之一币种单位保存，费用同样使用十亿分之一
   币种单位，避免浮点金额落库和历史价格回算。内部读取限制为每次最多 500 条；精确 Thread 查询把
   最近 Turn 的运行聚合、指标库保留范围内的 Thread 会话累计和最近一条无 Turn 的直接 API 请求分开返回，由
-  Bootstrap 映射到 Application 的 `/metrics` 只读端口。时间范围聚合统一覆盖 Codex Provider 与
+  Bootstrap 映射到 Application 的 `/metrics` 只读端口；会话归纳（模型、思考等级、Token 与费用）
+  与每次对话明细查询由 `threadList()`、`threadTurnSummaries()` 提供，供 `codexc metrics threads`
+  和 `turns` 导出复用。时间范围聚合统一覆盖 Codex Provider 与
   直接 API，可按全局、提供商或“提供商 + 模型”分组；固定支持最近 24 小时、7 天和 30 天，最多
   返回请求量最高的 20 组。所有汇总与异常报告只计入 `operation = 'response'` 的模型请求；
   `/responses/compact` 压缩请求只落库保留，不参与汇总、异常报告或会话指标。综合输出速度只使用同时具有非推理输出 Token 与输出时间窗的请求；

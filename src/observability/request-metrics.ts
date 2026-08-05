@@ -103,6 +103,7 @@ export interface ModelRequestMetricSample {
   turnId: string | null;
   model: string | null;
   serviceTier: string | null;
+  reasoningEffort: string | null;
   status: ModelRequestStatus;
   httpStatus: number | null;
   errorType: string | null;
@@ -147,6 +148,9 @@ export interface StoredModelRequestMetric extends ModelRequestMetricSample {
 }
 
 export interface StoredTurnRequestMetricsSummary {
+  provider: string | null;
+  model: string | null;
+  reasoningEffort: string | null;
   turnId: string;
   requestCount: number;
   unsuccessfulRequestCount: number;
@@ -171,6 +175,7 @@ export interface StoredTurnRequestMetricsSummary {
 }
 
 export interface StoredThreadRequestMetricsAggregate {
+  provider: string | null;
   turnCount: number;
   requestCount: number;
   unsuccessfulRequestCount: number;
@@ -199,6 +204,25 @@ export interface StoredThreadRequestMetricsSummary {
   latestTurn: StoredTurnRequestMetricsSummary | null;
   threadAggregate: StoredThreadRequestMetricsAggregate | null;
   latestDirectApi: StoredModelRequestMetric | null;
+}
+
+export interface StoredThreadTurnSummary extends StoredTurnRequestMetricsSummary {
+  recordedAtMs: number;
+}
+
+export interface StoredThreadListItem {
+  threadId: string;
+  provider: string | null;
+  model: string | null;
+  reasoningEffort: string | null;
+  turnCount: number;
+  requestCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  pricingCurrency: string | null;
+  pricedRequestCount: number;
+  totalCostNanos: number | null;
+  lastRecordedAtMs: number;
 }
 
 export type ModelRequestMetricsAggregationDimension =

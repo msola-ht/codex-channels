@@ -70,6 +70,7 @@ describe("Responses vision adapter", () => {
       userPrompt: "解释截图里的错误",
       onRequestStarted,
       threadId: "thread-vision",
+      reasoningEffort: "max",
     })).resolves.toEqual({
       provider: "测试中转",
       model: "gpt-5.6-luna",
@@ -98,6 +99,7 @@ describe("Responses vision adapter", () => {
     }));
     expect(JSON.parse(String(init?.body))).toMatchObject({
       model: "vision-model",
+      reasoning: { effort: "max" },
       input: [{
         content: [
           expect.objectContaining({ type: "input_text" }),
@@ -129,6 +131,7 @@ describe("Responses vision adapter", () => {
       turnId: null,
       model: "gpt-5.6-luna",
       serviceTier: "default",
+      reasoningEffort: "max",
       status: "completed",
       httpStatus: 200,
       inputTokens: 1_234,

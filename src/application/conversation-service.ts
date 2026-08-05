@@ -338,10 +338,14 @@ export class ConversationService implements ConversationUseCases {
         let stopHeartbeat = (): void => {};
         let requestStarted = false;
         try {
+          const threadId = this.router.current(target)?.threadId ?? null;
           result = await this.vision.recognize({
             images,
             userPrompt: visionUserPrompt(input),
-            threadId: this.router.current(target)?.threadId ?? null,
+            threadId,
+            reasoningEffort: threadId === null
+              ? null
+              : this.router.modelSettingsForThread(threadId)?.effort ?? null,
             onRequestStarted: () => {
               if (requestStarted) return;
               requestStarted = true;

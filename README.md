@@ -223,21 +223,29 @@ codexc service logs -f             # 持续跟踪 Gateway 日志
 Server 时必须从本机终端执行。
 
 Codex Provider 请求和外部视觉 API 请求的脱敏指标使用同一个独立数据库。视觉指标只保存提供商、
-模型、状态、HTTP 状态、耗时、Token 与当次价格快照；不保存图片、提示词或识别正文。查看状态或
+模型、思考等级、状态、HTTP 状态、耗时、Token 与当次价格快照；不保存图片、提示词或识别正文。查看状态或
 处理版本不兼容：
 
 ```bash
 codexc metrics status
-codexc metrics run 019fcb00-...                  # 本次运行汇总（Markdown；--format json 输出 JSON）
-codexc metrics report --range 30d --group models       # Markdown 汇报到标准输出
-codexc metrics export --range 30d --format json        # 脱敏明细导出，也支持 csv；--thread 可按 Thread 过滤
+codexc metrics threads                            # 会话归纳总览（模型、Token、费用）
+codexc metrics turns <Thread ID>                  # 导出会话每次对话汇总
+codexc metrics run <Thread ID>                    # 本次运行汇总（最近运行 + 会话累计）
+codexc metrics report --range 30d --group models  # 聚合汇报
+codexc metrics export --range 30d --format json   # 脱敏明细导出；--thread 可按 Thread 过滤
 codexc service stop gateway
 codexc metrics reset              # 先保留 0600 旧库备份，再重建
 codexc service start gateway
 ```
 
-`report` 与 `export` 使用只读连接，可在 Gateway 运行时执行；支持 `24h`、`7d`、`30d`，导出
-包含固定格式版本、时间范围和脱敏请求字段，不包含提示词、消息、图片、响应正文、凭据或上游响应 ID。
+`run`、`turns`、`threads`、`report`、`export` 都支持 `--format markdown|json|csv`（export 默认
+json，其余默认 markdown），默认写入 `~/.codex-connect/output/<日期>/`，文件名统一为
+`<命令>[-短ThreadID]-<YYYYMMDD-HHmmss>.<格式>`；加 `--stdout` 输出到标准输出。导出使用只读
+连接，可在 Gateway 运行时执行；支持 `24h`、`7d`、`30d`，包含固定格式版本、时间范围和脱敏请求
+字段，不包含提示词、消息、图片、响应正文、凭据或上游响应 ID。
+Markdown 报表的费用按 `display.price_currency` / `price_currency_by_provider` 换算显示
+（如 DeepSeek 默认人民币，依赖汇率缓存），时间显示为服务器本地时区；JSON 与 CSV 保留原始
+币种、nanos 与 ISO 时间，便于统计。
 `metrics reset` 不修改会话状态库；Gateway 运行时会拒绝执行，旧指标不会隐式迁移。
 
 ### 常用聊天命令

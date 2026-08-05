@@ -24,8 +24,10 @@ import type {
   StoredModelRequestMetricsPage,
   StoredModelRequestMetricsReport,
   StoredThreadRequestMetricsSummary,
-  StoredTurnRequestMetricsSummary,
   StoredThreadRequestMetricsAggregate,
+  StoredThreadListItem,
+  StoredThreadTurnSummary,
+  StoredTurnRequestMetricsSummary,
 } from "./request-metrics.js";
 
 const schemaVersion = modelRequestMetricsSchemaVersion;
@@ -73,6 +75,7 @@ interface MetricRow {
   turn_id: string | null;
   model: string | null;
   service_tier: string | null;
+  reasoning_effort: string | null;
   status: "completed" | "failed" | "incomplete" | "unknown";
   http_status: number | null;
   error_type: string | null;
@@ -113,6 +116,9 @@ interface MetricRow {
 }
 
 interface TurnSummaryRow {
+  provider?: string | null;
+  model?: string | null;
+  reasoning_effort?: string | null;
   turn_id: string | null;
   turn_count: number;
   request_count: number;
@@ -216,7 +222,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           uncached_input_price_per_million_nanos,
           cached_input_price_per_million_nanos, output_price_per_million_nanos,
           transport, response_format, operation, thread_id, turn_id, model, service_tier,
-          status, http_status, error_type, error_code, incomplete_reason,
+          reasoning_effort, status, http_status, error_type, error_code, incomplete_reason,
           input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens,
           total_tokens, upstream_created_at, upstream_completed_at,
           request_started_at_ms, first_token_at_ms,
@@ -225,7 +231,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           response_completed_at_ms, recorded_at_ms
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?, ?, ?
         )
       `);
       this.cleanup(nowMs);
@@ -259,6 +265,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       sample.turnId,
       sample.model,
       sample.serviceTier,
+      sample.reasoningEffort,
       sample.status,
       sample.httpStatus,
       sample.errorType,
@@ -446,6 +453,39 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       ? undefined
       : this.database.prepare(`
           SELECT
+            (
+              SELECT provider
+              FROM model_request_metrics_enriched AS latest_provider
+              WHERE latest_provider.thread_id
+                  = model_request_metrics_enriched.thread_id
+                AND latest_provider.turn_id
+                  = model_request_metrics_enriched.turn_id
+                AND latest_provider.operation = 'response'
+              ORDER BY latest_provider.id DESC
+              LIMIT 1
+            ) AS provider,
+            (
+              SELECT model
+              FROM model_request_metrics_enriched AS latest_model
+              WHERE latest_model.thread_id
+                  = model_request_metrics_enriched.thread_id
+                AND latest_model.turn_id
+                  = model_request_metrics_enriched.turn_id
+                AND latest_model.operation = 'response'
+              ORDER BY latest_model.id DESC
+              LIMIT 1
+            ) AS model,
+            (
+              SELECT reasoning_effort
+              FROM model_request_metrics_enriched AS latest_effort
+              WHERE latest_effort.thread_id
+                  = model_request_metrics_enriched.thread_id
+                AND latest_effort.turn_id
+                  = model_request_metrics_enriched.turn_id
+                AND latest_effort.operation = 'response'
+              ORDER BY latest_effort.id DESC
+              LIMIT 1
+            ) AS reasoning_effort,
             turn_id,
             COUNT(DISTINCT turn_id) AS turn_count,
             COUNT(*) AS request_count,
@@ -504,6 +544,16 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         `).get(threadId, latestTurn.turn_id) as TurnSummaryRow | undefined;
     const threadAggregate = this.database.prepare(`
       SELECT
+        (
+          SELECT provider
+          FROM model_request_metrics_enriched AS latest_provider
+          WHERE latest_provider.thread_id
+              = model_request_metrics_enriched.thread_id
+            AND latest_provider.turn_id IS NOT NULL
+            AND latest_provider.operation = 'response'
+          ORDER BY latest_provider.id DESC
+          LIMIT 1
+        ) AS provider,
         NULL AS turn_id,
         COUNT(DISTINCT turn_id) AS turn_count,
         COUNT(*) AS request_count,
@@ -580,6 +630,197 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         ? null
         : toStoredMetric(latestDirectApi),
     };
+  }
+
+  threadTurnSummaries(threadId: string): StoredThreadTurnSummary[] {
+    this.requireOpen();
+    if (!threadId.trim() || threadId.length > 128) {
+      throw new Error("Thread ID 无效");
+    }
+    const rows = this.database.prepare(`
+      SELECT
+        (
+          SELECT provider
+          FROM model_request_metrics_enriched AS latest_provider
+          WHERE latest_provider.thread_id
+              = model_request_metrics_enriched.thread_id
+            AND latest_provider.turn_id
+              = model_request_metrics_enriched.turn_id
+            AND latest_provider.operation = 'response'
+          ORDER BY latest_provider.id DESC
+          LIMIT 1
+        ) AS provider,
+        (
+          SELECT model
+          FROM model_request_metrics_enriched AS latest_model
+          WHERE latest_model.thread_id
+              = model_request_metrics_enriched.thread_id
+            AND latest_model.turn_id
+              = model_request_metrics_enriched.turn_id
+            AND latest_model.operation = 'response'
+          ORDER BY latest_model.id DESC
+          LIMIT 1
+        ) AS model,
+        (
+          SELECT reasoning_effort
+          FROM model_request_metrics_enriched AS latest_effort
+          WHERE latest_effort.thread_id
+              = model_request_metrics_enriched.thread_id
+            AND latest_effort.turn_id
+              = model_request_metrics_enriched.turn_id
+            AND latest_effort.operation = 'response'
+          ORDER BY latest_effort.id DESC
+          LIMIT 1
+        ) AS reasoning_effort,
+        turn_id,
+        COUNT(DISTINCT turn_id) AS turn_count,
+        COUNT(*) AS request_count,
+        SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
+          AS unsuccessful_request_count,
+        SUM(request_duration_ms) AS request_duration_ms,
+        SUM(input_tokens) AS input_tokens,
+        SUM(cached_input_tokens) AS cached_input_tokens,
+        COUNT(input_tokens) AS input_token_count,
+        COUNT(cached_input_tokens) AS cached_input_token_count,
+        SUM(output_tokens) AS output_tokens,
+        SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+        SUM(CASE WHEN non_reasoning_output_tokens > 0
+              AND output_duration_ms > 0
+            THEN non_reasoning_output_tokens ELSE 0 END)
+          AS non_reasoning_output_tokens,
+        SUM(CASE WHEN non_reasoning_output_tokens > 0
+              AND output_duration_ms > 0
+            THEN output_duration_ms ELSE 0 END)
+          AS output_duration_ms,
+        SUM(CASE WHEN non_reasoning_output_tokens > 0 THEN 1 ELSE 0 END)
+          AS output_speed_sample_count,
+        SUM(CASE WHEN non_reasoning_output_tokens > 0
+              AND output_duration_ms > 0 THEN 1 ELSE 0 END)
+          AS output_speed_timed_count,
+        MIN(CASE WHEN total_cost_nanos IS NOT NULL
+          THEN pricing_currency END) AS pricing_currency,
+        COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL
+          THEN pricing_currency END) AS pricing_currency_count,
+        COUNT(total_cost_nanos) AS priced_request_count,
+        SUM(total_cost_nanos) AS total_cost_nanos,
+        SUM(uncached_input_cost_nanos) AS uncached_input_cost_nanos,
+        SUM(cached_input_cost_nanos) AS cached_input_cost_nanos,
+        SUM(output_cost_nanos) AS output_cost_nanos,
+        MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
+          uncached_input_price_per_million_nanos END)
+          AS uncached_input_price_per_million_nanos,
+        COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
+          COALESCE(uncached_input_price_per_million_nanos, -1) END)
+          AS uncached_input_price_count,
+        MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
+          cached_input_price_per_million_nanos END)
+          AS cached_input_price_per_million_nanos,
+        COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
+          COALESCE(cached_input_price_per_million_nanos, -1) END)
+          AS cached_input_price_count,
+        MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
+          output_price_per_million_nanos END)
+          AS output_price_per_million_nanos,
+        COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
+          COALESCE(output_price_per_million_nanos, -1) END)
+          AS output_price_count,
+        MAX(recorded_at_ms) AS recorded_at_ms
+      FROM model_request_metrics_enriched
+      WHERE thread_id = ? AND turn_id IS NOT NULL AND operation = 'response'
+      GROUP BY turn_id
+      ORDER BY MAX(id) DESC
+    `).all(threadId) as unknown as Array<
+      TurnSummaryRow & { recorded_at_ms: number }
+    >;
+    return rows.map((row) => ({
+      ...toStoredTurnSummary(row),
+      recordedAtMs: row.recorded_at_ms,
+    }));
+  }
+
+  threadList(): StoredThreadListItem[] {
+    this.requireOpen();
+    const rows = this.database.prepare(`
+      SELECT
+        thread_id,
+        (
+          SELECT provider
+          FROM model_request_metrics_enriched AS latest_provider
+          WHERE latest_provider.thread_id
+              = model_request_metrics_enriched.thread_id
+            AND latest_provider.turn_id IS NOT NULL
+            AND latest_provider.operation = 'response'
+          ORDER BY latest_provider.id DESC
+          LIMIT 1
+        ) AS provider,
+        (
+          SELECT model
+          FROM model_request_metrics_enriched AS latest_model
+          WHERE latest_model.thread_id
+              = model_request_metrics_enriched.thread_id
+            AND latest_model.turn_id IS NOT NULL
+            AND latest_model.operation = 'response'
+          ORDER BY latest_model.id DESC
+          LIMIT 1
+        ) AS model,
+        (
+          SELECT reasoning_effort
+          FROM model_request_metrics_enriched AS latest_effort
+          WHERE latest_effort.thread_id
+              = model_request_metrics_enriched.thread_id
+            AND latest_effort.turn_id IS NOT NULL
+            AND latest_effort.operation = 'response'
+          ORDER BY latest_effort.id DESC
+          LIMIT 1
+        ) AS reasoning_effort,
+        COUNT(DISTINCT turn_id) AS turn_count,
+        COUNT(*) AS request_count,
+        SUM(input_tokens) AS input_tokens,
+        SUM(output_tokens) AS output_tokens,
+        MIN(CASE WHEN total_cost_nanos IS NOT NULL
+          THEN pricing_currency END) AS pricing_currency,
+        COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL
+          THEN pricing_currency END) AS pricing_currency_count,
+        COUNT(total_cost_nanos) AS priced_request_count,
+        SUM(total_cost_nanos) AS total_cost_nanos,
+        MAX(recorded_at_ms) AS recorded_at_ms
+      FROM model_request_metrics_enriched
+      WHERE thread_id IS NOT NULL
+        AND turn_id IS NOT NULL
+        AND operation = 'response'
+      GROUP BY thread_id
+      ORDER BY MAX(id) DESC
+    `).all() as unknown as Array<{
+      thread_id: string;
+      provider: string | null;
+      model: string | null;
+      reasoning_effort: string | null;
+      turn_count: number;
+      request_count: number;
+      input_tokens: number | null;
+      output_tokens: number | null;
+      pricing_currency: string | null;
+      pricing_currency_count: number;
+      priced_request_count: number;
+      total_cost_nanos: number | null;
+      recorded_at_ms: number;
+    }>;
+    return rows.map((row) => ({
+      threadId: row.thread_id,
+      provider: row.provider ?? null,
+      model: row.model ?? null,
+      reasoningEffort: row.reasoning_effort ?? null,
+      turnCount: row.turn_count,
+      requestCount: row.request_count,
+      inputTokens: row.input_tokens ?? 0,
+      outputTokens: row.output_tokens ?? 0,
+      pricingCurrency: row.pricing_currency_count === 1
+        ? row.pricing_currency
+        : null,
+      pricedRequestCount: row.priced_request_count,
+      totalCostNanos: row.total_cost_nanos ?? null,
+      lastRecordedAtMs: row.recorded_at_ms,
+    }));
   }
 
   count(): number {
@@ -767,6 +1008,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
             turn_id TEXT,
             model TEXT,
             service_tier TEXT,
+            reasoning_effort TEXT,
             status TEXT NOT NULL CHECK (status IN ('completed', 'failed', 'incomplete', 'unknown')),
             http_status INTEGER,
             error_type TEXT,
@@ -1005,6 +1247,7 @@ function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     turnId: row.turn_id,
     model: row.model,
     serviceTier: row.service_tier,
+    reasoningEffort: row.reasoning_effort,
     status: responseNotObserved ? "incomplete" : row.status,
     httpStatus: row.http_status,
     errorType: row.error_type,
@@ -1052,6 +1295,9 @@ function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetricsSumma
   const nonReasoningOutputTokens = row.non_reasoning_output_tokens ?? 0;
   const pricing = toStoredAggregatePricing(row);
   return {
+    provider: row.provider ?? null,
+    model: row.model ?? null,
+    reasoningEffort: row.reasoning_effort ?? null,
     turnId: row.turn_id!,
     requestCount: row.request_count,
     unsuccessfulRequestCount: row.unsuccessful_request_count,
@@ -1080,6 +1326,7 @@ function toStoredThreadAggregate(
     turn_id: "aggregate",
   });
   return {
+    provider: summary.provider,
     turnCount: row.turn_count,
     requestCount: summary.requestCount,
     unsuccessfulRequestCount: summary.unsuccessfulRequestCount,

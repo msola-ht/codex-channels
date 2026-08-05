@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
 import * as clackPrompts from "@clack/prompts";
@@ -157,27 +163,36 @@ Telegram 消息格式与配置路径查看。
   metrics: `用法：codexc metrics
 
 无参数时进入交互菜单。查看与导出模型请求指标：
-  codexc metrics run <Thread ID> [--format json|markdown]   本次运行汇总（最近 Turn + 会话累计）
-  codexc metrics report [--range 24h|7d|30d] [--group global|providers|models]   聚合汇报
-  codexc metrics export [--range 24h|7d|30d] [--format json|csv] [--thread Thread ID]   请求明细导出
+  codexc metrics run <Thread ID> [--format markdown|json|csv]   本次运行汇总（最近 Turn + 会话累计）
+  codexc metrics turns <Thread ID> [--format markdown|json|csv]   会话每次对话明细
+  codexc metrics threads [--format markdown|json|csv]   列出有指标的会话
+  codexc metrics report [--range 24h|7d|30d] [--group global|providers|models] [--format markdown|json|csv]   聚合汇报
+  codexc metrics export [--range 24h|7d|30d] [--format json|csv|markdown] [--thread Thread ID]   请求明细导出
   codexc metrics status   指标数据库状态
   codexc metrics reset    备份并重建指标库（需 Gateway 停止）`,
   "metrics.status": `用法：codexc metrics status
 
 只读显示指标数据库路径、Schema 兼容性和记录数量。`,
-  "metrics.run": `用法：codexc metrics run <Thread ID> [--format json|markdown]
+  "metrics.run": `用法：codexc metrics run <Thread ID> [--format markdown|json|csv]
 
 导出指定 Thread 的本次运行汇总：最近 Turn 的请求数、Token、缓存命中率、速度、费用与耗时，
-以及当前会话累计；默认输出 Markdown。`,
+以及当前会话累计；默认输出 Markdown 并写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。`,
+  "metrics.turns": `用法：codexc metrics turns <Thread ID> [--format markdown|json|csv]
+
+导出指定会话每一次对话的汇总（请求次数、Token、费用、速度、耗时）；默认写入
+~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。`,
+  "metrics.threads": `用法：codexc metrics threads [--format markdown|json|csv]
+
+列出指标库中有记录的所有会话及其对话数、请求数；默认写入 ~/.codex-connect/output/<日期>/。`,
   "metrics.reset": `用法：codexc metrics reset
 
 要求 Gateway 已停止；先备份现有指标库，再让下次启动创建当前 Schema。`,
-  "metrics.report": `用法：codexc metrics report [--range <24h|7d|30d>] [--group <global|providers|models>]
+  "metrics.report": `用法：codexc metrics report [--range <24h|7d|30d>] [--group <global|providers|models>] [--format markdown|json|csv]
 
-只读输出 Markdown 汇报；默认最近 30 天并按模型分组。`,
-  "metrics.export": `用法：codexc metrics export [--range <24h|7d|30d>] [--format <json|csv>] [--thread <Thread ID>]
+只读输出汇报；默认最近 30 天并按模型分组，写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。`,
+  "metrics.export": `用法：codexc metrics export [--range <24h|7d|30d>] [--format <json|csv|markdown>] [--thread <Thread ID>]
 
-只读导出脱敏请求记录到标准输出；默认最近 30 天、JSON 格式。--thread 只导出指定 Thread。`,
+只读导出脱敏请求记录；默认最近 30 天、JSON 格式并写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。--thread 只导出指定 Thread。`,
   version: "用法：codexc version",
   gateway: `用法：codexc gateway
 
@@ -1022,6 +1037,8 @@ function state(args) {
 async function metrics(args) {
   if (showRequestedHelp(args, "metrics") ||
     showSubcommandHelp(args, "run", "metrics.run") ||
+    showSubcommandHelp(args, "turns", "metrics.turns") ||
+    showSubcommandHelp(args, "threads", "metrics.threads") ||
     showSubcommandHelp(args, "status", "metrics.status") ||
     showSubcommandHelp(args, "reset", "metrics.reset") ||
     showSubcommandHelp(args, "report", "metrics.report") ||
@@ -1037,8 +1054,11 @@ async function metrics(args) {
     await runMetricsMenu();
     return;
   }
-  if (!new Set(["run", "status", "reset", "report", "export"]).has(subcommand)) {
-    throw new Error("用法：codexc metrics <run|status|reset|report|export>");
+  if (
+    !new Set(["run", "turns", "threads", "status", "reset", "report", "export"])
+      .has(subcommand)
+  ) {
+    throw new Error("用法：codexc metrics <run|turns|threads|status|reset|report|export>");
   }
   if (subcommand === "status" && rest.length === 0) {
     run(
@@ -1052,7 +1072,92 @@ async function metrics(args) {
   if (subcommand === "reset" && rest.length > 0) {
     throw new Error("用法：codexc metrics reset");
   }
+  if (new Set(["run", "turns", "threads", "report", "export"]).has(subcommand)) {
+    runMetricsCommand([subcommand, ...rest]);
+    return;
+  }
   runScript("scripts/metrics-database.mjs", [subcommand, ...rest]);
+}
+
+function runMetricsCommand(args) {
+  const withoutStdout = args.filter((argument) => argument !== "--stdout");
+  const writeFile = withoutStdout.length === args.length;
+  if (!writeFile) {
+    runScript("scripts/metrics-database.mjs", withoutStdout);
+    return;
+  }
+  const result = spawnSync(
+    process.execPath,
+    [join(packageDir, "scripts/metrics-database.mjs"), ...withoutStdout],
+    { encoding: "utf8" },
+  );
+  if (result.status !== 0) {
+    process.stderr.write(result.stderr ?? "");
+    process.exitCode = result.status ?? 1;
+    return;
+  }
+  const content = result.stdout ?? "";
+  writeMetricsExportFile(
+    content,
+    withoutStdout[0] ?? "metrics",
+    withoutStdout,
+  );
+}
+
+function writeMetricsExportFile(content, subcommand, args) {
+  const { dataDir } = requireUserConfig();
+  const dateDirectory = new Date().toLocaleDateString("en-CA");
+  const directory = join(dataDir, "output", dateDirectory);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  chmodSync(directory, 0o700);
+  const formatOption = args.findIndex((argument) => argument === "--format");
+  const format = formatOption >= 0
+    ? args[formatOption + 1] ?? "markdown"
+    : subcommand === "export"
+      ? "json"
+      : "markdown";
+  const extension = format === "markdown" ? "md" : format;
+  const positional = metricsPositionalIdentifier(subcommand, args);
+  const identifier = positional === undefined
+    ? ""
+    : `-${positional.replace(/[^a-zA-Z0-9_-]/gu, "").slice(0, 12)}`;
+  const timestamp = metricsTimestamp();
+  const file = join(
+    directory,
+    `${subcommand}${identifier}-${timestamp}.${extension}`,
+  );
+  writeFileSync(file, content, { mode: 0o600 });
+  chmodSync(file, 0o600);
+  console.log(`已导出：${file}`);
+}
+
+function metricsPositionalIdentifier(subcommand, args) {
+  if (subcommand !== "run" && subcommand !== "turns" && subcommand !== "export") {
+    return undefined;
+  }
+  const valueOptions = new Set(["--range", "--group", "--format"]);
+  for (let index = 1; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "--thread") {
+      return args[index + 1];
+    }
+    if (valueOptions.has(argument)) {
+      index += 1;
+      continue;
+    }
+    if (!argument.startsWith("--")) {
+      return argument;
+    }
+  }
+  return undefined;
+}
+
+function metricsTimestamp(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return [
+    `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`,
+    `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`,
+  ].join("-");
 }
 
 async function runMetricsMenu() {
@@ -1064,17 +1169,22 @@ async function runMetricsMenu() {
       {
         value: "run",
         label: "本次运行导出",
-        hint: "指定 Thread 输出最近运行与累计汇总",
+        hint: "指定 Thread 输出最近运行与累计汇总（写入 output 目录）",
+      },
+      {
+        value: "turns",
+        label: "会话明细导出",
+        hint: "选择会话后导出每次对话汇总（写入 output 目录）",
       },
       {
         value: "report",
         label: "聚合汇报",
-        hint: "按时间范围与分组输出 Markdown",
+        hint: "按时间范围与分组输出汇报（写入 output 目录）",
       },
       {
         value: "export",
         label: "明细导出",
-        hint: "导出脱敏请求记录 JSON/CSV",
+        hint: "导出脱敏请求记录（写入 output 目录）",
       },
       {
         value: "status",
@@ -1127,10 +1237,58 @@ async function runMetricsMenu() {
       clackPrompts.cancel("已取消");
       return;
     }
-    runScript(
-      "scripts/metrics-database.mjs",
-      ["run", String(threadId).trim()],
-    );
+    const format = await selectExportFormat();
+    if (clackPrompts.isCancel(format)) {
+      clackPrompts.cancel("已取消");
+      return;
+    }
+    runMetricsCommand([
+      "run",
+      String(threadId).trim(),
+      "--format",
+      String(format),
+    ]);
+    return;
+  }
+  if (action === "turns") {
+    let threads;
+    try {
+      const { readMetricsThreads } = await import(
+        "../scripts/metrics-database.mjs"
+      );
+      threads = readMetricsThreads().threads;
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      return;
+    }
+    if (threads.length === 0) {
+      console.log("指标库中暂无可导出的会话记录。");
+      return;
+    }
+    const selected = await clackPrompts.select({
+      message: "选择会话",
+      showInstructions: false,
+      options: threads.map((thread) => ({
+        value: thread.threadId,
+        label: `${thread.threadId.slice(0, 12)}… · ${thread.turnCount} 次对话 · ${thread.requestCount} 次请求`,
+        hint: new Date(thread.lastRecordedAtMs).toISOString(),
+      })),
+    });
+    if (clackPrompts.isCancel(selected)) {
+      clackPrompts.cancel("已取消");
+      return;
+    }
+    const format = await selectExportFormat();
+    if (clackPrompts.isCancel(format)) {
+      clackPrompts.cancel("已取消");
+      return;
+    }
+    runMetricsCommand([
+      "turns",
+      String(selected),
+      "--format",
+      String(format),
+    ]);
     return;
   }
   if (action === "report") {
@@ -1160,10 +1318,20 @@ async function runMetricsMenu() {
       clackPrompts.cancel("已取消");
       return;
     }
-    runScript(
-      "scripts/metrics-database.mjs",
-      ["report", "--range", String(range), "--group", String(group)],
-    );
+    const format = await selectExportFormat();
+    if (clackPrompts.isCancel(format)) {
+      clackPrompts.cancel("已取消");
+      return;
+    }
+    runMetricsCommand([
+      "report",
+      "--range",
+      String(range),
+      "--group",
+      String(group),
+      "--format",
+      String(format),
+    ]);
     return;
   }
   if (action === "export") {
@@ -1180,14 +1348,7 @@ async function runMetricsMenu() {
       clackPrompts.cancel("已取消");
       return;
     }
-    const format = await clackPrompts.select({
-      message: "导出格式",
-      showInstructions: false,
-      options: [
-        { value: "json", label: "JSON" },
-        { value: "csv", label: "CSV" },
-      ],
-    });
+    const format = await selectExportFormat();
     if (clackPrompts.isCancel(format)) {
       clackPrompts.cancel("已取消");
       return;
@@ -1201,20 +1362,29 @@ async function runMetricsMenu() {
       return;
     }
     const trimmedThreadId = String(threadId).trim();
-    runScript(
-      "scripts/metrics-database.mjs",
-      [
-        "export",
-        "--range",
-        String(range),
-        "--format",
-        String(format),
-        ...(trimmedThreadId ? ["--thread", trimmedThreadId] : []),
-      ],
-    );
+    runMetricsCommand([
+      "export",
+      "--range",
+      String(range),
+      "--format",
+      String(format),
+      ...(trimmedThreadId ? ["--thread", trimmedThreadId] : []),
+    ]);
     return;
   }
   throw new Error(`未知指标操作：${String(action)}`);
+}
+
+async function selectExportFormat() {
+  return clackPrompts.select({
+    message: "导出格式",
+    showInstructions: false,
+    options: [
+      { value: "markdown", label: "Markdown" },
+      { value: "json", label: "JSON" },
+      { value: "csv", label: "CSV" },
+    ],
+  });
 }
 
 function configuredEnvironment() {
