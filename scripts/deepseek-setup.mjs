@@ -19,6 +19,8 @@ const defaultAutoCompactPercent = 60;
 const minimumAutoCompactPercent = 10;
 const maximumAutoCompactPercent = 95;
 
+class DeepseekSetupCancelled extends Error {}
+
 export async function runDeepseekSetup({
   allowBack = false,
   environment = process.env,
@@ -170,6 +172,11 @@ export async function runDeepseekSetup({
       catalogPath,
       backupPath,
     };
+  } catch (error) {
+    if (allowBack && error instanceof DeepseekSetupCancelled) {
+      return { action: "back" };
+    }
+    throw error;
   } finally {
     prompt.close();
   }
@@ -399,6 +406,10 @@ async function buildCodexConfig({
     delete document.profiles;
   } else {
     document.profiles = profiles;
+  }
+  if (autoCompactPercent === undefined) {
+    delete document.model_auto_compact_token_limit;
+    delete document.model_auto_compact_token_limit_scope;
   }
   Object.assign(document, {
     model: supportedModel,
@@ -776,9 +787,7 @@ function createHiddenPrompter(prompts, { allowBack }) {
         message: autoCompact ? "设置自动压缩阈值" : "选择 DeepSeek 安装模式",
         options: autoCompact ? autoCompactOptions : installOptions,
       });
-      return prompts.isCancel(value) && allowBack
-        ? (autoCompact ? "1" : "5")
-        : requirePromptValue(prompts, value);
+      return requirePromptValue(prompts, value);
     },
     text: async (label) => requirePromptValue(
       prompts,
@@ -798,7 +807,7 @@ function createHiddenPrompter(prompts, { allowBack }) {
 
 function requirePromptValue(prompts, value) {
   if (prompts.isCancel(value)) {
-    throw new Error("DeepSeek Setup 已取消");
+    throw new DeepseekSetupCancelled("DeepSeek Setup 已取消");
   }
   return value;
 }

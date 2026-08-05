@@ -350,6 +350,66 @@ describe("ProviderProxy", () => {
     })]);
   });
 
+  it("stops parsing oversized SSE metadata lines without truncating the response", async () => {
+    const oversizedEvent = sse("response.completed", {
+      type: "response.completed",
+      response: {
+        status: "completed",
+        padding: "x".repeat(1_048_576),
+      },
+    });
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.end(oversizedEvent);
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstream.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push({
+      close: () => new Promise<void>((resolveClose) => {
+        upstream.close(() => resolveClose());
+      }),
+    });
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    const proxyPort = Number(proxy.address().split(":")[1]);
+    const body = await new Promise<string>((resolveResponse, rejectResponse) => {
+      const request = httpRequest({
+        hostname: "127.0.0.1",
+        port: proxyPort,
+        path: "/responses",
+        method: "POST",
+      }, (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () => resolveResponse(Buffer.concat(chunks).toString("utf8")));
+        response.on("error", rejectResponse);
+      });
+      request.on("error", rejectResponse);
+      request.end("{}");
+    });
+
+    expect(body).toBe(oversizedEvent);
+    expect(metrics).toEqual([expect.objectContaining({
+      status: "incomplete",
+      incompleteReason: "response_not_observed",
+    })]);
+  });
+
   it("forwards requests with a rewritten host and records reasoning/output timing", async () => {
     const received: Array<{
       host: string;
@@ -573,6 +633,67 @@ describe("ProviderProxy", () => {
     })]);
     expect(JSON.stringify(metrics)).not.toContain("不得进入指标");
     expect(JSON.stringify(metrics)).not.toContain("response-private-id");
+  });
+
+  it("rejects control characters in upstream metric identifiers", async () => {
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          model: "gpt-5\nforged",
+          service_tier: "\u001b[31mpremium",
+          status: "failed",
+          error: {
+            type: "rate_limit\rforged",
+            code: "bad\u0000code",
+          },
+        }));
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstream.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push({
+      close: () => new Promise<void>((resolveClose) => {
+        upstream.close(() => resolveClose());
+      }),
+    });
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    await new Promise<void>((resolveResponse, rejectResponse) => {
+      const request = httpRequest({
+        hostname: "127.0.0.1",
+        port: Number(proxy.address().split(":")[1]),
+        path: "/responses",
+        method: "POST",
+      }, (response) => {
+        response.resume();
+        response.on("end", resolveResponse);
+        response.on("error", rejectResponse);
+      });
+      request.on("error", rejectResponse);
+      request.end("{}");
+    });
+
+    expect(metrics).toEqual([expect.objectContaining({
+      status: "failed",
+      model: null,
+      serviceTier: null,
+      errorType: null,
+      errorCode: null,
+    })]);
   });
 
   it("records function call argument deltas as model output timing", async () => {

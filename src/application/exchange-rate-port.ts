@@ -19,3 +19,16 @@ export function resolvePriceCurrency(
   if (mode === "usd") return "usd";
   return provider === "deepseek" ? "cny" : "usd";
 }
+
+export function priceDisplayNeedsExchangeRate(
+  config: {
+    priceCurrency: PriceCurrencyMode;
+    priceCurrencyByProvider: Readonly<Record<string, PriceCurrencyMode>>;
+  },
+  activeProviders: readonly string[],
+): boolean {
+  return activeProviders.some((provider) => resolvePriceCurrency(
+    config.priceCurrencyByProvider[provider] ?? config.priceCurrency,
+    provider,
+  ) === "cny");
+}

@@ -121,7 +121,8 @@
   价格目录测试覆盖 LiteLLM 主源、Sub2API 价格镜像回退、私有缓存重载、缓存输入、Priority 和
   长上下文价格选择；独立汇率测试覆盖 open.er-api 主源、ECB 回退、私有缓存重载和无效汇率拒绝；
   `reference-cost-summary.test.ts` 覆盖当前 Turn 延迟写入时的 Thread 总价去重及
-  跨价格档位聚合；独立 SQLite 指标库覆盖 `0600` 权限、严格 Schema、原子初始化、30 天清理、
+  跨价格档位聚合；失败和未完整请求保留原始价格快照但不进入费用汇总，CSV 导出统一中和
+  电子表格公式前缀；独立 SQLite 指标库覆盖 `0600` 权限、严格 Schema、原子初始化、30 天清理、
   有界内部读取，以及
   Schema v2 enriched View 的耗时、速度、缓存、费用计算和 `/M Token` 单价一致性。回归测试还覆盖 WebSocket 完成后立即
   关闭不重复、指标确认不等待延迟分片 SQLite 写入，以及 1 MiB 内非流式 JSON 响应的元数据裁剪

@@ -192,16 +192,24 @@ export function removeWorkspaceFromConfig({
   };
 }
 
-function appendWorkspace(workspaces, { cwd, id, name }) {
-  const workspaceName = normalizedName(name ?? basename(cwd));
-  const baseId = normalizedId(id ?? workspaceName);
+export function chooseWorkspaceId(name, unavailableIds = []) {
+  const baseId = normalizedId(name);
+  const unavailable = new Set(unavailableIds);
   let workspaceId = baseId;
   let suffix = 2;
-  const usedIds = new Set(workspaces.map((workspace) => workspace.id));
-  while (usedIds.has(workspaceId)) {
+  while (unavailable.has(workspaceId)) {
     workspaceId = `${baseId.slice(0, Math.max(1, 63 - String(suffix).length - 1))}-${suffix}`;
     suffix += 1;
   }
+  return workspaceId;
+}
+
+function appendWorkspace(workspaces, { cwd, id, name }) {
+  const workspaceName = normalizedName(name ?? basename(cwd));
+  const workspaceId = chooseWorkspaceId(
+    id ?? workspaceName,
+    workspaces.map((workspace) => workspace.id),
+  );
   const workspace = { id: workspaceId, name: workspaceName, cwd };
   workspaces.push(workspace);
   return workspace;

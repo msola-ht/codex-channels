@@ -3,10 +3,12 @@
 import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
-  writeFileSync,
+  rmSync,
 } from "node:fs";
 import { join } from "node:path";
 
@@ -42,6 +44,7 @@ import {
 import { checkProjectRules, initializeProjectRules } from "../scripts/codex-rules.mjs";
 import {
   addWorkspaceToConfig,
+  chooseWorkspaceId,
   inspectWorkspaceConfig,
   readWorkspaceConfig,
   removeWorkspaceFromConfig,
@@ -677,11 +680,16 @@ async function createWorkspaceInteractively({
     return;
   }
   const name = String(entered).trim();
-  const id = slugifyWorkspaceName(name);
-  const directory = join(runtime.dataDir, `${id}-work`);
-  if (existsSync(directory)) {
-    throw new Error(`工作区目录已存在：${directory}`);
-  }
+  const unavailableIds = inspectWorkspaceConfig(
+    readGatewayConfig(runtime.configPath),
+  ).workspaces.map((workspace) => workspace.id);
+  let id;
+  let directory;
+  do {
+    id = chooseWorkspaceId(name, unavailableIds);
+    directory = join(runtime.dataDir, `${id}-work`);
+    unavailableIds.push(id);
+  } while (existsSync(directory));
   const confirmed = await clackPrompts.confirm({
     message: `将在 ${directory} 创建并注册（不会更改默认工作区），继续？`,
     initialValue: true,
@@ -1086,25 +1094,31 @@ function runMetricsCommand(args) {
     runScript("scripts/metrics-database.mjs", withoutStdout);
     return;
   }
-  const result = spawnSync(
-    process.execPath,
-    [join(packageDir, "scripts/metrics-database.mjs"), ...withoutStdout],
-    { encoding: "utf8" },
-  );
-  if (result.status !== 0) {
-    process.stderr.write(result.stderr ?? "");
-    process.exitCode = result.status ?? 1;
-    return;
-  }
-  const content = result.stdout ?? "";
-  writeMetricsExportFile(
-    content,
+  const output = openMetricsExportFile(
     withoutStdout[0] ?? "metrics",
     withoutStdout,
   );
+  let result;
+  try {
+    result = spawnSync(
+      process.execPath,
+      [join(packageDir, "scripts/metrics-database.mjs"), ...withoutStdout],
+      { stdio: ["inherit", output.fileDescriptor, "inherit"] },
+    );
+  } finally {
+    closeSync(output.fileDescriptor);
+  }
+  if (result.error || result.status !== 0) {
+    rmSync(output.file, { force: true });
+    if (result.error) console.error(`指标导出失败：${result.error.message}`);
+    process.exitCode = result.status ?? 1;
+    return;
+  }
+  chmodSync(output.file, 0o600);
+  console.log(`已导出：${output.file}`);
 }
 
-function writeMetricsExportFile(content, subcommand, args) {
+function openMetricsExportFile(subcommand, args) {
   const { dataDir } = requireUserConfig();
   const dateDirectory = new Date().toLocaleDateString("en-CA");
   const directory = join(dataDir, "output", dateDirectory);
@@ -1122,13 +1136,19 @@ function writeMetricsExportFile(content, subcommand, args) {
     ? ""
     : `-${positional.replace(/[^a-zA-Z0-9_-]/gu, "").slice(0, 12)}`;
   const timestamp = metricsTimestamp();
-  const file = join(
-    directory,
-    `${subcommand}${identifier}-${timestamp}.${extension}`,
-  );
-  writeFileSync(file, content, { mode: 0o600 });
-  chmodSync(file, 0o600);
-  console.log(`已导出：${file}`);
+  const baseName = `${subcommand}${identifier}-${timestamp}`;
+  for (let suffix = 1; ; suffix += 1) {
+    const uniqueSuffix = suffix === 1 ? "" : `-${suffix}`;
+    const file = join(directory, `${baseName}${uniqueSuffix}.${extension}`);
+    try {
+      return {
+        file,
+        fileDescriptor: openSync(file, "wx", 0o600),
+      };
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+    }
+  }
 }
 
 function metricsPositionalIdentifier(subcommand, args) {
@@ -1496,19 +1516,6 @@ function parseWorkspaceAddOptions(args) {
     index += 1;
   }
   return result;
-}
-
-function slugifyWorkspaceName(name) {
-  const slug = String(name)
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/gu, "-")
-    .replace(/^-+|-+$/gu, "")
-    .replace(/-{2,}/gu, "-")
-    .slice(0, 63);
-  return /^[a-z0-9][a-z0-9_-]{0,63}$/u.test(slug)
-    ? slug
-    : "workspace";
 }
 
 function parseServiceLogOptions(args) {

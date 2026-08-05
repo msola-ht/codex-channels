@@ -71,18 +71,24 @@ export async function runApiProviderSetup({
     validate: validateEndpoint,
   });
   if (prompts.isCancel(endpoint)) return { action: "back" };
-  const existingKey = optionalProviderKey(credentialsDirectory, providerId)
-    ?? (legacyVision ? optionalVisionKey(credentialsDirectory) : undefined);
+  const existingProviderKey = optionalProviderKey(credentialsDirectory, providerId);
+  const migrateLegacyVision = legacyVision !== undefined
+    && await prompts.confirm(
+      "检测到旧的单视觉 API 配置，是否同时改为使用这个提供商？",
+      true,
+    );
+  const retainedKey = existingProviderKey
+    ?? (migrateLegacyVision ? optionalVisionKey(credentialsDirectory) : undefined);
   const apiKey = await prompts.password({
-    message: existingKey
+    message: retainedKey
       ? "API Key（留空保留当前 Key）"
       : "API Key",
-    validate: (value) => existingKey || stringValue(value)
+    validate: (value) => retainedKey || stringValue(value)
       ? undefined
       : "API Key 不能为空",
   });
   if (prompts.isCancel(apiKey)) return { action: "back" };
-  const nextKey = stringValue(apiKey) || existingKey;
+  const nextKey = stringValue(apiKey) || retainedKey;
   if (!nextKey) throw new Error("API Key 不能为空");
   const nextProvider = {
     id: providerId,
@@ -91,11 +97,6 @@ export async function runApiProviderSetup({
     endpoint: normalizedEndpoint(endpoint),
   };
   const previousProviders = document.api_providers;
-  const migrateLegacyVision = legacyVision !== undefined
-    && await prompts.confirm(
-      "检测到旧的单视觉 API 配置，是否同时改为使用这个提供商？",
-      true,
-    );
   const nextProviders = existing
     ? providers.map((provider) => provider.id === providerId ? nextProvider : provider)
     : [...providers, nextProvider];
@@ -112,7 +113,9 @@ export async function runApiProviderSetup({
     writeConfig(configPath, document);
   } catch (error) {
     document.api_providers = previousProviders;
-    if (existingKey) writeApiProviderKey(credentialsDirectory, providerId, existingKey);
+    if (existingProviderKey) {
+      writeApiProviderKey(credentialsDirectory, providerId, existingProviderKey);
+    }
     else removeApiProviderKey(credentialsDirectory, providerId);
     throw error;
   }

@@ -143,6 +143,60 @@ describe("Third-party API provider setup", () => {
     expect(() => readVisionApiKey(fixture.credentialsDirectory)).toThrow();
   });
 
+  it("does not reuse the legacy vision key when migration is declined", async () => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    document.vision = {
+      mode: "responses_api",
+      endpoint: "https://legacy.example/v1/responses",
+      model: "legacy-vision",
+    };
+    writeGatewayConfig(fixture.configPath, document);
+    writeVisionApiKey(fixture.credentialsDirectory, "legacy-key");
+
+    await expect(runApiProviderSetup({
+      environment: fixture.environment,
+      output: fixture.output as unknown as NodeJS.WritableStream,
+      prompts: promptFixture({
+        selections: ["upsert"],
+        texts: ["new-relay", "新中转", "https://new.example/v1/responses"],
+        passwords: [""],
+        confirmations: [false],
+      }),
+    })).rejects.toThrow("API Key 不能为空");
+
+    expect(() => readApiProviderKey(fixture.credentialsDirectory, "new-relay")).toThrow();
+    expect(readVisionApiKey(fixture.credentialsDirectory)).toBe("legacy-key");
+    expect(readGatewayConfig(fixture.configPath).api_providers).toBeUndefined();
+  });
+
+  it("does not leave a migrated provider key behind when config saving fails", async () => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    document.vision = {
+      mode: "responses_api",
+      endpoint: "https://legacy.example/v1/responses",
+      model: "legacy-vision",
+    };
+    writeGatewayConfig(fixture.configPath, document);
+    writeVisionApiKey(fixture.credentialsDirectory, "legacy-key");
+
+    await expect(runApiProviderSetup({
+      environment: fixture.environment,
+      output: fixture.output as unknown as NodeJS.WritableStream,
+      writeConfig: () => { throw new Error("配置写入失败"); },
+      prompts: promptFixture({
+        selections: ["upsert"],
+        texts: ["legacy-relay", "旧视觉中转", "https://legacy.example/v1/responses"],
+        passwords: [""],
+        confirmations: [true],
+      }),
+    })).rejects.toThrow("配置写入失败");
+
+    expect(() => readApiProviderKey(fixture.credentialsDirectory, "legacy-relay")).toThrow();
+    expect(readVisionApiKey(fixture.credentialsDirectory)).toBe("legacy-key");
+  });
+
   it("rejects a symbolic-link provider credential directory", () => {
     const fixture = createFixture();
     const redirected = join(fixture.credentialsDirectory, "redirected");
@@ -201,16 +255,18 @@ function promptFixture({
   selections = [],
   texts = [],
   passwords = [],
+  confirmations = [],
 }: {
   selections?: string[];
   texts?: string[];
   passwords?: string[];
+  confirmations?: boolean[];
 } = {}) {
   return {
     select: vi.fn(async () => selections.shift()),
     text: vi.fn(async () => texts.shift() ?? ""),
     password: vi.fn(async () => passwords.shift() ?? ""),
-    confirm: vi.fn(async () => true),
+    confirm: vi.fn(async () => confirmations.shift() ?? true),
     isCancel: () => false,
   };
 }

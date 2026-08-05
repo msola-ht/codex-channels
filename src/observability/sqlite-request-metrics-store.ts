@@ -45,6 +45,44 @@ const observableCompletionSql = `
     AND total_tokens IS NULL
   )
 `;
+const successfulCostAggregateSql = `
+  MIN(CASE WHEN ${observableCompletionSql} AND total_cost_nanos IS NOT NULL
+    THEN pricing_currency END) AS pricing_currency,
+  COUNT(DISTINCT CASE WHEN ${observableCompletionSql}
+      AND total_cost_nanos IS NOT NULL
+    THEN pricing_currency END) AS pricing_currency_count,
+  COUNT(CASE WHEN ${observableCompletionSql} THEN total_cost_nanos END)
+    AS priced_request_count,
+  SUM(CASE WHEN ${observableCompletionSql} THEN total_cost_nanos END)
+    AS total_cost_nanos,
+  SUM(CASE WHEN ${observableCompletionSql} THEN uncached_input_cost_nanos END)
+    AS uncached_input_cost_nanos,
+  SUM(CASE WHEN ${observableCompletionSql} THEN cached_input_cost_nanos END)
+    AS cached_input_cost_nanos,
+  SUM(CASE WHEN ${observableCompletionSql} THEN output_cost_nanos END)
+    AS output_cost_nanos,
+  MIN(CASE WHEN ${observableCompletionSql} AND total_cost_nanos IS NOT NULL
+    THEN uncached_input_price_per_million_nanos END)
+    AS uncached_input_price_per_million_nanos,
+  COUNT(DISTINCT CASE WHEN ${observableCompletionSql}
+      AND total_cost_nanos IS NOT NULL
+    THEN COALESCE(uncached_input_price_per_million_nanos, -1) END)
+    AS uncached_input_price_count,
+  MIN(CASE WHEN ${observableCompletionSql} AND total_cost_nanos IS NOT NULL
+    THEN cached_input_price_per_million_nanos END)
+    AS cached_input_price_per_million_nanos,
+  COUNT(DISTINCT CASE WHEN ${observableCompletionSql}
+      AND total_cost_nanos IS NOT NULL
+    THEN COALESCE(cached_input_price_per_million_nanos, -1) END)
+    AS cached_input_price_count,
+  MIN(CASE WHEN ${observableCompletionSql} AND total_cost_nanos IS NOT NULL
+    THEN output_price_per_million_nanos END)
+    AS output_price_per_million_nanos,
+  COUNT(DISTINCT CASE WHEN ${observableCompletionSql}
+      AND total_cost_nanos IS NOT NULL
+    THEN COALESCE(output_price_per_million_nanos, -1) END)
+    AS output_price_count
+`;
 const normalizedStatusSql = `
   CASE
     WHEN status = 'completed'
@@ -511,33 +549,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
             SUM(CASE WHEN non_reasoning_output_tokens > 0
                   AND output_duration_ms > 0 THEN 1 ELSE 0 END)
               AS output_speed_timed_count,
-            MIN(CASE WHEN total_cost_nanos IS NOT NULL
-              THEN pricing_currency END) AS pricing_currency,
-            COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL
-              THEN pricing_currency END) AS pricing_currency_count,
-            COUNT(total_cost_nanos) AS priced_request_count,
-            SUM(total_cost_nanos) AS total_cost_nanos,
-            SUM(uncached_input_cost_nanos) AS uncached_input_cost_nanos,
-            SUM(cached_input_cost_nanos) AS cached_input_cost_nanos,
-            SUM(output_cost_nanos) AS output_cost_nanos,
-            MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
-              uncached_input_price_per_million_nanos END)
-              AS uncached_input_price_per_million_nanos,
-            COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
-              COALESCE(uncached_input_price_per_million_nanos, -1) END)
-              AS uncached_input_price_count,
-            MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
-              cached_input_price_per_million_nanos END)
-              AS cached_input_price_per_million_nanos,
-            COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
-              COALESCE(cached_input_price_per_million_nanos, -1) END)
-              AS cached_input_price_count,
-            MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
-              output_price_per_million_nanos END)
-              AS output_price_per_million_nanos,
-            COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
-              COALESCE(output_price_per_million_nanos, -1) END)
-              AS output_price_count
+            ${successfulCostAggregateSql}
           FROM model_request_metrics_enriched
           WHERE thread_id = ? AND turn_id = ? AND operation = 'response'
           GROUP BY turn_id
@@ -579,33 +591,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         SUM(CASE WHEN non_reasoning_output_tokens > 0
               AND output_duration_ms > 0 THEN 1 ELSE 0 END)
           AS output_speed_timed_count,
-        MIN(CASE WHEN total_cost_nanos IS NOT NULL
-          THEN pricing_currency END) AS pricing_currency,
-        COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL
-          THEN pricing_currency END) AS pricing_currency_count,
-        COUNT(total_cost_nanos) AS priced_request_count,
-        SUM(total_cost_nanos) AS total_cost_nanos,
-        SUM(uncached_input_cost_nanos) AS uncached_input_cost_nanos,
-        SUM(cached_input_cost_nanos) AS cached_input_cost_nanos,
-        SUM(output_cost_nanos) AS output_cost_nanos,
-        MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
-          uncached_input_price_per_million_nanos END)
-          AS uncached_input_price_per_million_nanos,
-        COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
-          COALESCE(uncached_input_price_per_million_nanos, -1) END)
-          AS uncached_input_price_count,
-        MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
-          cached_input_price_per_million_nanos END)
-          AS cached_input_price_per_million_nanos,
-        COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
-          COALESCE(cached_input_price_per_million_nanos, -1) END)
-          AS cached_input_price_count,
-        MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
-          output_price_per_million_nanos END)
-          AS output_price_per_million_nanos,
-        COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
-          COALESCE(output_price_per_million_nanos, -1) END)
-          AS output_price_count
+        ${successfulCostAggregateSql}
       FROM model_request_metrics_enriched
       WHERE thread_id = ? AND turn_id IS NOT NULL AND operation = 'response'
     `).get(threadId) as unknown as TurnSummaryRow;
@@ -697,33 +683,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         SUM(CASE WHEN non_reasoning_output_tokens > 0
               AND output_duration_ms > 0 THEN 1 ELSE 0 END)
           AS output_speed_timed_count,
-        MIN(CASE WHEN total_cost_nanos IS NOT NULL
-          THEN pricing_currency END) AS pricing_currency,
-        COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL
-          THEN pricing_currency END) AS pricing_currency_count,
-        COUNT(total_cost_nanos) AS priced_request_count,
-        SUM(total_cost_nanos) AS total_cost_nanos,
-        SUM(uncached_input_cost_nanos) AS uncached_input_cost_nanos,
-        SUM(cached_input_cost_nanos) AS cached_input_cost_nanos,
-        SUM(output_cost_nanos) AS output_cost_nanos,
-        MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
-          uncached_input_price_per_million_nanos END)
-          AS uncached_input_price_per_million_nanos,
-        COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
-          COALESCE(uncached_input_price_per_million_nanos, -1) END)
-          AS uncached_input_price_count,
-        MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
-          cached_input_price_per_million_nanos END)
-          AS cached_input_price_per_million_nanos,
-        COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
-          COALESCE(cached_input_price_per_million_nanos, -1) END)
-          AS cached_input_price_count,
-        MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
-          output_price_per_million_nanos END)
-          AS output_price_per_million_nanos,
-        COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
-          COALESCE(output_price_per_million_nanos, -1) END)
-          AS output_price_count,
+        ${successfulCostAggregateSql},
         MAX(recorded_at_ms) AS recorded_at_ms
       FROM model_request_metrics_enriched
       WHERE thread_id = ? AND turn_id IS NOT NULL AND operation = 'response'
@@ -777,12 +737,16 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         COUNT(*) AS request_count,
         SUM(input_tokens) AS input_tokens,
         SUM(output_tokens) AS output_tokens,
-        MIN(CASE WHEN total_cost_nanos IS NOT NULL
+        MIN(CASE WHEN ${observableCompletionSql}
+            AND total_cost_nanos IS NOT NULL
           THEN pricing_currency END) AS pricing_currency,
-        COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL
+        COUNT(DISTINCT CASE WHEN ${observableCompletionSql}
+            AND total_cost_nanos IS NOT NULL
           THEN pricing_currency END) AS pricing_currency_count,
-        COUNT(total_cost_nanos) AS priced_request_count,
-        SUM(total_cost_nanos) AS total_cost_nanos,
+        COUNT(CASE WHEN ${observableCompletionSql} THEN total_cost_nanos END)
+          AS priced_request_count,
+        SUM(CASE WHEN ${observableCompletionSql} THEN total_cost_nanos END)
+          AS total_cost_nanos,
         MAX(recorded_at_ms) AS recorded_at_ms
       FROM model_request_metrics_enriched
       WHERE thread_id IS NOT NULL
@@ -878,33 +842,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           SUM(CASE WHEN non_reasoning_output_tokens > 0
                 AND output_duration_ms > 0 THEN 1 ELSE 0 END)
             AS output_speed_timed_count,
-          MIN(CASE WHEN total_cost_nanos IS NOT NULL
-            THEN pricing_currency END) AS pricing_currency,
-          COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL
-            THEN pricing_currency END) AS pricing_currency_count,
-          COUNT(total_cost_nanos) AS priced_request_count,
-          SUM(total_cost_nanos) AS total_cost_nanos,
-          SUM(uncached_input_cost_nanos) AS uncached_input_cost_nanos,
-          SUM(cached_input_cost_nanos) AS cached_input_cost_nanos,
-          SUM(output_cost_nanos) AS output_cost_nanos,
-          MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
-            uncached_input_price_per_million_nanos END)
-            AS uncached_input_price_per_million_nanos,
-          COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
-            COALESCE(uncached_input_price_per_million_nanos, -1) END)
-            AS uncached_input_price_count,
-          MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
-            cached_input_price_per_million_nanos END)
-            AS cached_input_price_per_million_nanos,
-          COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
-            COALESCE(cached_input_price_per_million_nanos, -1) END)
-            AS cached_input_price_count,
-          MIN(CASE WHEN total_cost_nanos IS NOT NULL THEN
-            output_price_per_million_nanos END)
-            AS output_price_per_million_nanos,
-          COUNT(DISTINCT CASE WHEN total_cost_nanos IS NOT NULL THEN
-            COALESCE(output_price_per_million_nanos, -1) END)
-            AS output_price_count
+          ${successfulCostAggregateSql}
         FROM filtered
         GROUP BY group_provider, group_model
       ), ttft_ranked AS (

@@ -106,15 +106,6 @@ export function priceCurrencyForProvider(
     : config.priceCurrencyByProvider[provider] ?? config.priceCurrency;
 }
 
-export function priceDisplayNeedsExchangeRate(
-  config: Pick<GatewayConfig, "priceCurrency" | "priceCurrencyByProvider">,
-): boolean {
-  if (config.priceCurrency !== "usd") return true;
-  return Object.values(config.priceCurrencyByProvider).some(
-    (mode) => mode !== "usd",
-  );
-}
-
 export function isDebugLogLevel(
   level: GatewayConfig["logLevel"],
 ): boolean {

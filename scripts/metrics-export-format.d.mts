@@ -30,6 +30,7 @@ export function convertCostToCny(
 export function enrichCosts<T extends Record<string, unknown>>(
   value: T | null | undefined,
   display: MetricsDisplayContext | null | undefined,
+  providerOverride?: string | null,
 ): T & {
   totalCostCnyNanos: number | null;
   inputCostCnyNanos: number | null;

@@ -393,56 +393,98 @@ function printStatus(result) {
 }
 
 function printMetricsReport(result, format, display = null) {
+  const aggregateProvider = singleReportProvider(result.report);
   if (format === "json") {
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify({
+      ...result,
+      report: {
+        ...result.report,
+        aggregate: enrichCosts(result.report.aggregate, display, aggregateProvider),
+        groups: result.report.groups.map((group) => ({
+          ...group,
+          aggregate: enrichCosts(group.aggregate, display, group.provider ?? null),
+        })),
+      },
+    }, null, 2));
     return;
   }
   if (format === "csv") {
     const columns = [
-      ["type", () => ""],
-      ["group", () => ""],
-      ["requestCount", (value) => value.requestCount],
-      ["unsuccessfulRequestCount", (value) => value.unsuccessfulRequestCount],
-      ["requestDurationMs", (value) => value.requestDurationMs],
-      ["inputTokens", (value) => value.inputTokens],
-      ["cachedInputTokens", (value) => value.cachedInputTokens],
-      ["outputTokens", (value) => value.outputTokens],
-      ["reasoningOutputTokens", (value) => value.reasoningOutputTokens],
-      ["outputTokensPerSecond", (value) => value.outputTokensPerSecond],
-      ["pricingCurrency", (value) => value.pricingCurrency],
-      ["pricedRequestCount", (value) => value.pricedRequestCount],
-      ["totalCostNanos", (value) => value.totalCostNanos],
-      ["inputCostNanos", (value) => value.inputCostNanos],
-      ["cachedInputCostNanos", (value) => value.cachedInputCostNanos],
-      ["outputCostNanos", (value) => value.outputCostNanos],
-      ["ttftP50Ms", (value) => value.ttftP50Ms],
-      ["ttftP95Ms", (value) => value.ttftP95Ms],
+      ["type", (row) => row.type],
+      ["provider", (row) => row.provider],
+      ["model", (row) => row.model],
+      ["group", (row) => row.group],
+      ["status", (row) => row.status],
+      ["errorType", (row) => row.errorType],
+      ["httpStatus", (row) => row.httpStatus],
+      ["lastOccurredAtMs", (row) => row.lastOccurredAtMs],
+      ["requestCount", (row) => row.requestCount],
+      ["unsuccessfulRequestCount", (row) => row.unsuccessfulRequestCount],
+      ["requestDurationMs", (row) => row.requestDurationMs],
+      ["inputTokens", (row) => row.inputTokens],
+      ["cachedInputTokens", (row) => row.cachedInputTokens],
+      ["outputTokens", (row) => row.outputTokens],
+      ["reasoningOutputTokens", (row) => row.reasoningOutputTokens],
+      ["outputTokensPerSecond", (row) => row.outputTokensPerSecond],
+      ["pricingCurrency", (row) => row.pricingCurrency],
+      ["pricedRequestCount", (row) => row.pricedRequestCount],
+      ["totalCostNanos", (row) => row.totalCostNanos],
+      ["inputCostNanos", (row) => row.inputCostNanos],
+      ["cachedInputCostNanos", (row) => row.cachedInputCostNanos],
+      ["outputCostNanos", (row) => row.outputCostNanos],
+      ["totalCostCnyNanos", (row) => row.totalCostCnyNanos],
+      ["inputCostCnyNanos", (row) => row.inputCostCnyNanos],
+      ["cachedInputCostCnyNanos", (row) => row.cachedInputCostCnyNanos],
+      ["outputCostCnyNanos", (row) => row.outputCostCnyNanos],
+      ["ttftP50Ms", (row) => row.ttftP50Ms],
+      ["ttftP95Ms", (row) => row.ttftP95Ms],
     ];
     console.log(columns.map(([heading]) => csvCell(heading)).join(","));
     const rows = [
       ...(result.report.aggregate === null
         ? []
-        : [{ type: "aggregate", group: "global", value: result.report.aggregate }]),
+        : [{
+            type: "aggregate",
+            provider: aggregateProvider,
+            model: null,
+            group: "global",
+            ...enrichCosts(result.report.aggregate, display, aggregateProvider),
+          }]),
       ...result.report.groups.map((group) => ({
         type: "group",
+        provider: group.provider,
+        model: group.model,
         group: group.model ?? group.provider ?? "全部",
-        value: group.aggregate,
+        ...enrichCosts(group.aggregate, display, group.provider ?? null),
+      })),
+      {
+        type: "error_summary",
+        provider: null,
+        model: null,
+        group: "global",
+        requestCount: result.errors.requestCount,
+        unsuccessfulRequestCount: result.errors.unsuccessfulRequestCount,
+      },
+      ...result.errors.groups.map((group) => ({
+        type: "error",
+        provider: group.provider,
+        model: group.model,
+        group: group.model ?? group.provider ?? "全部",
+        status: group.status,
+        errorType: group.errorType,
+        httpStatus: group.httpStatus,
+        lastOccurredAtMs: group.lastOccurredAtMs,
+        requestCount: group.requestCount,
       })),
     ];
     for (const row of rows) {
       console.log(
-        columns.map(([heading, read], index) =>
-          index < 2
-            ? csvCell(heading === "type" ? row.type : row.group)
-            : csvCell(read(row.value))).join(","),
+        columns.map(([, read]) => csvCell(read(row))).join(","),
       );
     }
     return;
   }
   const aggregate = result.report.aggregate;
-  const aggregateProvider = result.report.groups.length === 1
-    ? result.report.groups[0]?.provider ?? null
-    : null;
   console.log("# Codex Connect 请求指标报告");
   console.log("");
   const rateLine = exchangeRateLine(display);
@@ -495,6 +537,16 @@ function printMetricsReport(result, format, display = null) {
   for (const group of result.errors.groups) {
     console.log(`| ${markdownCell(group.provider)} | ${markdownCell(group.model ?? "未观测")} | ${group.status} | ${markdownCell(group.errorType ?? "未提供")} | ${group.httpStatus ?? ""} | ${group.requestCount} |`);
   }
+}
+
+function singleReportProvider(report) {
+  if (report.totalGroupCount !== report.groups.length) return null;
+  const providers = new Set(
+    report.groups
+      .map((group) => group.provider)
+      .filter((provider) => provider != null),
+  );
+  return providers.size === 1 ? providers.values().next().value : null;
 }
 
 function printMetricsExport(result, format, display = null) {

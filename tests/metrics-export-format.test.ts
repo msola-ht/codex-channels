@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   convertCostToCny,
+  csvCell,
   enrichCosts,
   formatCost,
   formatCurrencyNanos,
@@ -111,5 +112,26 @@ describe("metrics export display helpers", () => {
     expect(isRecord({ a: 1 })).toBe(true);
     expect(isRecord(null)).toBe(false);
     expect(isRecord([])).toBe(false);
+  });
+
+  it("exports formula-like text as literal CSV cells without changing numbers", () => {
+    expect([
+      csvCell("=HYPERLINK(\"https://example.com\")"),
+      csvCell("+SUM(1,2)"),
+      csvCell("-2+3"),
+      csvCell("@SUM(1,2)"),
+      csvCell("\t=1+1"),
+      csvCell("\r=1+1"),
+      csvCell("\n=1+1"),
+    ]).toEqual([
+      "\"'=HYPERLINK(\"\"https://example.com\"\")\"",
+      "\"'+SUM(1,2)\"",
+      "'-2+3",
+      "\"'@SUM(1,2)\"",
+      "'\t=1+1",
+      "\"'\r=1+1\"",
+      "\"'\n=1+1\"",
+    ]);
+    expect(csvCell(-2)).toBe("-2");
   });
 });

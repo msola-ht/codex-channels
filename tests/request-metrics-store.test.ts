@@ -158,6 +158,78 @@ describe("SqliteModelRequestMetricsStore", () => {
     });
   });
 
+  it("keeps unsuccessful request prices in raw records but excludes them from cost summaries", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    const pricing = {
+      billingMode: "api" as const,
+      currency: "USD",
+      source: "test-catalog",
+      effectiveAtMs: 1_700_000_000_000,
+      uncachedInputPricePerMillionNanos: 2_000_000_000,
+      cachedInputPricePerMillionNanos: 1_000_000_000,
+      outputPricePerMillionNanos: 3_000_000_000,
+    };
+    store.record({ ...sample(), pricing });
+    store.record({
+      ...sample(),
+      pricing,
+      status: "failed",
+      errorType: "http_error",
+      requestStartedAtMs: 2_000,
+      responseCompletedAtMs: 2_650,
+    });
+    store.record({
+      ...sample(),
+      pricing,
+      status: "incomplete",
+      incompleteReason: "max_output_tokens",
+      requestStartedAtMs: 3_000,
+      responseCompletedAtMs: 3_650,
+    });
+
+    expect(store.recent(3).map((record) => record.totalCostNanos))
+      .toEqual([1_400_000, 1_400_000, 1_400_000]);
+    expect(store.threadSummary("thread-1")).toMatchObject({
+      latestTurn: {
+        requestCount: 3,
+        unsuccessfulRequestCount: 2,
+        pricedRequestCount: 1,
+        totalCostNanos: 1_400_000,
+      },
+      threadAggregate: {
+        requestCount: 3,
+        unsuccessfulRequestCount: 2,
+        pricedRequestCount: 1,
+        totalCostNanos: 1_400_000,
+      },
+    });
+    expect(store.aggregate({
+      dimension: "global",
+      startAtMs: 0,
+      endAtMs: Date.now() + 1,
+    }).aggregate).toMatchObject({
+      requestCount: 3,
+      unsuccessfulRequestCount: 2,
+      pricedRequestCount: 1,
+      totalCostNanos: 1_400_000,
+    });
+    expect(store.threadTurnSummaries("thread-1")[0]).toMatchObject({
+      requestCount: 3,
+      unsuccessfulRequestCount: 2,
+      pricedRequestCount: 1,
+      totalCostNanos: 1_400_000,
+    });
+    expect(store.threadList()[0]).toMatchObject({
+      requestCount: 3,
+      pricedRequestCount: 1,
+      totalCostNanos: 1_400_000,
+    });
+    store.close();
+  });
+
   it("does not report one unit price for aggregates containing multiple rates", () => {
     const directory = temporaryDirectory();
     const store = new SqliteModelRequestMetricsStore(

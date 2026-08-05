@@ -135,7 +135,9 @@ export function toModelTimingEvent(
   ) {
     return undefined;
   }
-  const costComponents = calculateModelRequestCostComponents(metrics, pricing);
+  const costComponents = metrics.status === "completed"
+    ? calculateModelRequestCostComponents(metrics, pricing)
+    : null;
   const common = {
     type: "turn.modelTiming.updated" as const,
     threadId: metrics.threadId,

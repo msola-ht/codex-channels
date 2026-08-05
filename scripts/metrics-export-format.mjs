@@ -78,12 +78,12 @@ export function convertCostToCny(nanos, currency, provider, display) {
   return Number.isSafeInteger(converted) ? converted : null;
 }
 
-export function enrichCosts(value, display) {
+export function enrichCosts(value, display, providerOverride = undefined) {
   if (value === null || value === undefined) return value;
   const currency = value.pricingCurrency
     ?? value.pricing?.currency
     ?? null;
-  const provider = value.provider ?? null;
+  const provider = providerOverride ?? value.provider ?? null;
   const toCny = (nanos) => convertCostToCny(nanos, currency, provider, display);
   return {
     ...value,
@@ -162,6 +162,8 @@ export function markdownCell(value) {
 
 export function csvCell(value) {
   if (value === null || value === undefined) return "";
-  const text = String(value);
+  const text = typeof value === "string" && /^[=+\-@\t\r\n]/u.test(value)
+    ? `'${value}`
+    : String(value);
   return /[",\r\n]/u.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }

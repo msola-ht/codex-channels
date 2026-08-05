@@ -36,7 +36,6 @@ import {
   configChange,
   includesConfigChange,
   priceCurrencyForProvider,
-  priceDisplayNeedsExchangeRate,
   type ConfigChange,
   type ConfigReloadResult,
   type GatewayConfig,
@@ -47,6 +46,7 @@ import {
   ModelSelectionService,
   ProviderAccountService,
   createOpenAiAccountAdapter,
+  priceDisplayNeedsExchangeRate,
   resolvePriceCurrency,
 } from "../application/index.js";
 import {
@@ -85,6 +85,7 @@ export class GatewayApplication {
   private readonly transport: UnixWebSocketTransport;
   private readonly codex: ProviderRoutingClient;
   private readonly primaryProvider: string;
+  private readonly activeCostProviders: readonly string[];
   private readonly inbound: EventBus<RpcNotification>;
   private readonly output: EventBus<OutputEvent>;
   private readonly surfaceModules: SurfaceRuntimeModule[];
@@ -132,6 +133,11 @@ export class GatewayApplication {
     );
     this.transport = new UnixWebSocketTransport(config.codexSocketPath);
     this.primaryProvider = primaryProvider;
+    this.activeCostProviders = [...new Set([
+      primaryProvider,
+      ...(managedProvider ? [managedProvider.provider] : []),
+      ...(config.vision.mode === "disabled" ? [] : [config.vision.provider]),
+    ])];
     const clients = new Map<string, CodexAppServerClient>();
     clients.set(primaryProvider, new CodexAppServerClient(
       new JsonRpcClient(this.transport, 60_000, logger),
@@ -589,7 +595,7 @@ export class GatewayApplication {
     try {
       this.requireRunning();
       this.modelPricing.start();
-      if (priceDisplayNeedsExchangeRate(this.config)) {
+      if (priceDisplayNeedsExchangeRate(this.config, this.activeCostProviders)) {
         this.exchangeRate.start();
       }
       await this.providerMetrics.start();

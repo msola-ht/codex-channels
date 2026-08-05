@@ -90,6 +90,7 @@ export {
   type ExchangeRatePort,
   type ExchangeRateSnapshot,
   type PriceCurrencyMode,
+  priceDisplayNeedsExchangeRate,
   resolvePriceCurrency,
 } from "./exchange-rate-port.js";
 export {

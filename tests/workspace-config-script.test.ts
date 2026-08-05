@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { configEventQueuePath, readConfigEvents } from "../runtime/config-event-queue.mjs";
 import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
-import { addWorkspaceToConfig, inspectWorkspaceConfig, readWorkspaceConfig, removeWorkspaceFromConfig } from "../scripts/workspace-config.mjs";
+import { addWorkspaceToConfig, chooseWorkspaceId, inspectWorkspaceConfig, readWorkspaceConfig, removeWorkspaceFromConfig } from "../scripts/workspace-config.mjs";
 
 const temporaryDirectories: string[] = [];
 
@@ -18,6 +18,14 @@ afterEach(() => {
 });
 
 describe("workspace:add script", () => {
+  it("allocates distinct fallback IDs for multiple non-ASCII names", () => {
+    const first = chooseWorkspaceId("数据分析");
+    const second = chooseWorkspaceId("客户支持", [first]);
+
+    expect(first).toBe("workspace");
+    expect(second).toBe("workspace-2");
+  });
+
   it("registers the invocation directory once and preserves the default workspace", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-workspace-add-"));
     temporaryDirectories.push(root);

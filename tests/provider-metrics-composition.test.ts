@@ -173,6 +173,34 @@ describe("ProviderMetricsComposition", () => {
     await composition.close();
   });
 
+  it("keeps failed request usage without adding it to reference cost", () => {
+    const pricing = {
+      billingMode: "api" as const,
+      currency: "USD",
+      source: "test-catalog",
+      effectiveAtMs: 1_700_000_000_000,
+      uncachedInputPricePerMillionNanos: 2_000_000_000,
+      cachedInputPricePerMillionNanos: 1_000_000_000,
+      outputPricePerMillionNanos: 3_000_000_000,
+    };
+
+    const event = toModelTimingEvent({
+      ...metrics(),
+      status: "failed",
+      httpStatus: 503,
+      errorType: "http_error",
+    }, pricing);
+
+    expect(event).toMatchObject({
+      outcome: "failed",
+      inputTokens: 100,
+      cachedInputTokens: 80,
+      outputTokens: 20,
+    });
+    expect(event).not.toHaveProperty("pricingCurrency");
+    expect(event).not.toHaveProperty("totalCostNanos");
+  });
+
   it("carries the bound Thread reasoning effort into recorded metrics", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-metrics-effort-"));
     temporaryDirectories.push(directory);

@@ -58,6 +58,7 @@ describe("GatewayApplication startup cleanup", () => {
       GatewayApplication.prototype,
     ) as unknown as Record<string, unknown>;
     Object.assign(application, {
+        activeCostProviders: [],
         config: { codexSocketPath: "/tmp/codex.sock" },
         logger: pino({ level: "silent" }),
         transport: { kind: "unix-websocket" },
@@ -175,6 +176,7 @@ describe("GatewayApplication startup cleanup", () => {
       GatewayApplication.prototype,
     ) as unknown as Record<string, unknown>;
     Object.assign(application, {
+      activeCostProviders: [],
       config: { codexSocketPath: "/tmp/codex.sock" },
       logger: pino({ level: "silent" }),
       transport: { kind: "unix-websocket" },
@@ -270,6 +272,7 @@ describe("GatewayApplication startup cleanup", () => {
       GatewayApplication.prototype,
     ) as unknown as Record<string, unknown>;
     Object.assign(application, {
+      activeCostProviders: [],
       config: { codexSocketPath: "/tmp/codex.sock" },
       logger: pino({ level: "silent" }),
       transport: { kind: "unix-websocket" },

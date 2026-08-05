@@ -220,13 +220,15 @@ codexc service start gateway
 
 `run`、`turns`、`threads`、`report`、`export` 都支持 `--format markdown|json|csv`（export 默认
 json，其余默认 markdown），默认写入 `~/.codex-connect/output/<日期>/`，文件名统一为
-`<命令>[-短ThreadID]-<YYYYMMDD-HHmmss>.<格式>`；加 `--stdout` 输出到标准输出。导出使用只读
+`<命令>[-短ThreadID]-<YYYYMMDD-HHmmss>[-序号].<格式>`，同一秒重名时保留两份并追加序号；
+加 `--stdout` 输出到标准输出。导出使用只读
 连接，可在 Gateway 运行时执行；支持 `24h`、`7d`、`30d`，包含固定格式版本、时间范围和脱敏请求
 字段，不包含提示词、消息、图片、响应正文、凭据或上游响应 ID。
 Markdown 报表的费用按 `display.price_currency` / `price_currency_by_provider` 换算显示
 （如 DeepSeek 默认人民币，依赖汇率缓存），时间显示为服务器本地时区；JSON 与 CSV 保留原始
 币种、nanos 与 ISO 时间，并按相同配置附加 `*CostCnyNanos` 换算列（如 `totalCostCnyNanos`），
-便于统计和直接查看人民币金额。
+便于统计和直接查看人民币金额；报告 CSV 同时保留 Provider、模型及异常分组，文本单元格会中和
+电子表格公式前缀。
 `metrics reset` 不修改会话状态库；Gateway 运行时会拒绝执行，旧指标不会隐式迁移。
 
 ### 常用聊天命令

@@ -17,6 +17,7 @@ import WebSocket, {
 } from "ws";
 
 const maximumJsonMetadataBytes = 1_048_576;
+const maximumSseMetadataLineCharacters = 1_048_576;
 
 export interface ProviderProxyMetrics {
   transport: "http" | "websocket";
@@ -188,6 +189,7 @@ export class ProviderProxy {
       const decoder = new StringDecoder("utf8");
       let pending = "";
       let currentEvent = "";
+      let sseMetadataOverflow = false;
       let jsonBytes = 0;
       let jsonOverflow = false;
       const jsonChunks: Buffer[] = [];
@@ -208,9 +210,19 @@ export class ProviderProxy {
         return observeResponseEvent(metrics, type, parsed, receivedAtMs);
       };
       const processText = (text: string, receivedAtMs: number): boolean => {
+        if (sseMetadataOverflow) return false;
         pending += text;
         const lines = pending.split(/\r?\n/);
         pending = lines.pop() ?? "";
+        if (
+          pending.length > maximumSseMetadataLineCharacters
+          || lines.some((line) => line.length > maximumSseMetadataLineCharacters)
+        ) {
+          sseMetadataOverflow = true;
+          pending = "";
+          currentEvent = "";
+          return false;
+        }
         return lines.some((line) => processLine(line, receivedAtMs));
       };
       upstreamResponse.on("data", (chunk: Buffer) => {
@@ -613,7 +625,9 @@ function httpResponseFormat(
 }
 
 function boundedString(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 && value.length <= 128
+  return typeof value === "string"
+    && value.length <= 128
+    && /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/u.test(value)
     ? value
     : null;
 }

@@ -76,6 +76,33 @@ describe("DeepSeek setup", () => {
     });
   });
 
+  it("returns to the parent setup when a nested auto-compact prompt is cancelled", async () => {
+    const fixture = setupFixture('model = "gpt-5.4"\n');
+    const cancelled = Symbol("cancelled");
+    const select = vi.fn()
+      .mockResolvedValueOnce("1")
+      .mockResolvedValueOnce(cancelled);
+    const fetchImpl = vi.fn();
+
+    await expect(runDeepseekSetup({
+      allowBack: true,
+      environment: { CODEX_HOME: fixture.home },
+      output: fixture.output,
+      fetchImpl,
+      prompts: {
+        select,
+        password: vi.fn(async () => "sk-secret"),
+        text: vi.fn(),
+        confirm: vi.fn(),
+        isCancel: (value: unknown) => value === cancelled,
+      },
+    })).resolves.toEqual({ action: "back" });
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(readFileSync(join(fixture.home, "config.toml"), "utf8"))
+      .toBe('model = "gpt-5.4"\n');
+  });
+
   it("retries retryable download failures and passes an abort signal", async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(new Response("busy", { status: 503 }))
@@ -210,6 +237,26 @@ describe("DeepSeek setup", () => {
       join(fixture.home, "backup-codex-connect-deepseek", "config.toml"),
       "utf8",
     )).toBe(original);
+  });
+
+  it("removes stale auto-compact fields when exclusive mode is reinstalled disabled", async () => {
+    const fixture = setupFixture('model = "gpt-5.4"\n');
+    await runDeepseekSetup({
+      environment: { CODEX_HOME: fixture.home },
+      output: fixture.output,
+      fetchImpl: successfulFetch,
+      prompter: prompter(["2", "2"], ["sk-first"], true),
+    });
+    await runDeepseekSetup({
+      environment: { CODEX_HOME: fixture.home },
+      output: fixture.output,
+      fetchImpl: successfulFetch,
+      prompter: prompter(["2", "1"], ["sk-second"], true),
+    });
+
+    const config = parse(readFileSync(join(fixture.home, "config.toml"), "utf8"));
+    expect(config.model_auto_compact_token_limit).toBeUndefined();
+    expect(config.model_auto_compact_token_limit_scope).toBeUndefined();
   });
 
   it("does not modify Codex files when the download fails", async () => {
