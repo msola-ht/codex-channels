@@ -49,6 +49,8 @@ import {
 import {
   renderTelegramCommandResult,
   replyTelegramPanel,
+  workspacePermissionFieldKeyboard,
+  workspacePermissionPrompt,
 } from "./command-renderer.js";
 import { formatTelegramPanelHtml } from "./html-format.js";
 import { TelegramInteractionPort } from "./interactions.js";
@@ -402,6 +404,52 @@ export class TelegramSurface {
         result,
         this.priceCurrency,
         this.exchangeRate?.() ?? null,
+      );
+    });
+    this.bot.callbackQuery(
+      /^wp:(sandbox|approval)$/,
+      async (context) => {
+        const field = context.match[1] === "sandbox"
+          ? "sandbox"
+          : "approval";
+        await context.editMessageText(
+          workspacePermissionPrompt(field),
+          {
+            parse_mode: "HTML",
+            reply_markup: workspacePermissionFieldKeyboard(field),
+          },
+        );
+        await context.answerCallbackQuery();
+      },
+    );
+    this.bot.callbackQuery(
+      /^wp:(sandbox|approval):([a-z-]+)$/,
+      async (context) => {
+        const field = context.match[1] === "sandbox"
+          ? "sandbox"
+          : "approval";
+        const value = context.match[2]!;
+        const result = await this.commands.execute(
+          target(context),
+          "workspace-perm",
+          `${field} ${value}`,
+        );
+        await context.answerCallbackQuery({ text: "已更新工作区权限" });
+        await context.editMessageText("已更新工作区权限。");
+        await renderTelegramCommandResult(
+          context,
+          result,
+          this.priceCurrency,
+          this.exchangeRate?.() ?? null,
+        );
+      },
+    );
+    this.bot.callbackQuery(/^wp:profile$/, async (context) => {
+      await context.answerCallbackQuery({
+        text: "请输入权限 Profile 命令",
+      });
+      await context.editMessageText(
+        "请输入权限 Profile，例如发送：\n/workspace-perm profile :read-only",
       );
     });
     this.bot.on("message:text", async (context) => {

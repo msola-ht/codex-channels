@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Context } from "grammy";
 
-import { renderTelegramCommandResult } from "../src/surfaces/telegram/command-renderer.js";
+import {
+  renderTelegramCommandResult,
+  workspacePermissionFieldKeyboard,
+  workspacePermissionKeyboard,
+} from "../src/surfaces/telegram/command-renderer.js";
 import { formatRuntimeMcpStatusUpdate } from "../src/surfaces/runtime-status-format.js";
 
 describe("Telegram command renderer", () => {
@@ -158,5 +162,27 @@ describe("Telegram command renderer", () => {
     });
 
     expect(text).toContain("原因：认证失败，TOKEN=[已隐藏]");
+  });
+
+  it("builds clickable workspace permission keyboards", () => {
+    const first = workspacePermissionKeyboard();
+    expect(first.inline_keyboard[0]?.map((button) =>
+      (button as { callback_data: string }).callback_data))
+      .toEqual(["wp:sandbox", "wp:approval", "wp:profile"]);
+
+    const sandbox = workspacePermissionFieldKeyboard("sandbox");
+    expect(sandbox.inline_keyboard.flatMap((row) =>
+      row.map((button) => (button as { callback_data: string }).callback_data)))
+      .toEqual([
+        "wp:sandbox:read-only",
+        "wp:sandbox:workspace-write",
+        "wp:sandbox:danger-full-access",
+        "wp:sandbox:clear",
+      ]);
+
+    const approval = workspacePermissionFieldKeyboard("approval");
+    expect(approval.inline_keyboard.flatMap((row) =>
+      row.map((button) => (button as { callback_data: string }).callback_data)))
+      .toContain("wp:approval:never");
   });
 });

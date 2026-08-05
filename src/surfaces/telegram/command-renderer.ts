@@ -69,6 +69,7 @@ export async function renderTelegramCommandResult(
       await replyTelegramPanel(
         context,
         formatConversationWorkspaceEntitlements(result),
+        workspacePermissionKeyboard(),
       );
       return;
     case "models":
@@ -124,6 +125,48 @@ export async function renderTelegramCommandResult(
       await replyTelegramPanel(context, formatConversationGoal(result));
       return;
   }
+}
+
+export function workspacePermissionKeyboard(): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [[
+      { text: "沙箱", callback_data: "wp:sandbox" },
+      { text: "审批", callback_data: "wp:approval" },
+      { text: "权限 Profile", callback_data: "wp:profile" },
+    ]],
+  };
+}
+
+export function workspacePermissionFieldKeyboard(
+  field: "sandbox" | "approval",
+): InlineKeyboardMarkup {
+  const options: ReadonlyArray<readonly [string, string]> = field === "sandbox"
+    ? [
+        ["只读", "read-only"],
+        ["工作区可写", "workspace-write"],
+        ["完全访问", "danger-full-access"],
+        ["清除（使用全局）", "clear"],
+      ]
+    : [
+        ["不信任", "untrusted"],
+        ["按需审批", "on-request"],
+        ["免审批", "never"],
+        ["清除（使用默认）", "clear"],
+      ];
+  return {
+    inline_keyboard: options.map(([label, value]) => [{
+      text: label,
+      callback_data: `wp:${field}:${value}`,
+    }]),
+  };
+}
+
+export function workspacePermissionPrompt(
+  field: "sandbox" | "approval",
+): string {
+  return field === "sandbox"
+    ? "选择沙箱模式："
+    : "选择审批策略：";
 }
 
 function renderOutcome(
