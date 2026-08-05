@@ -383,7 +383,7 @@ export function createTurnCompletedPresentation(
     }, currency, exchangeRate);
     if (averagePrice !== null) {
       runFields.push({
-        label: "每 1 亿 Token 实际均价",
+        label: "实际均价",
         value: averagePrice,
       });
     }

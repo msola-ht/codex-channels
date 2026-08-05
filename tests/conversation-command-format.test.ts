@@ -442,7 +442,7 @@ describe("provider-aware conversation command formatting", () => {
     });
 
     expect(rendered).toContain(
-      "每 1 亿 Token 实际均价：约 ¥3,600,000.000000（已计价 2/3 次请求）",
+      "实际均价：约 ¥3,600,000.00/100M（已计价 2/3 次请求）",
     );
   });
 
@@ -484,7 +484,7 @@ describe("provider-aware conversation command formatting", () => {
       source: "open-er-api",
     });
 
-    expect(rendered).not.toContain("每 1 亿 Token 实际均价");
+    expect(rendered).not.toContain("实际均价");
   });
 
   it("renders unified provider and model aggregates with latency coverage", () => {

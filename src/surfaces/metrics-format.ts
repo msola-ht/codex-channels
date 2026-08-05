@@ -95,6 +95,7 @@ export function formatConversationMetrics(
       ...(summary.modelProvider === "deepseek"
         ? [formatDeepseekAveragePriceValue(turn, currency, exchangeRate)]
           .filter((value): value is string => value !== null)
+          .map((value) => `实际均价：${value}`)
         : []),
       ...(turn.compact
         ? [formatCompactMetrics(turn.compact, currency, exchangeRate)]
@@ -134,6 +135,7 @@ export function formatConversationMetrics(
       ...(summary.modelProvider === "deepseek"
         ? [formatDeepseekAveragePriceValue(aggregate, currency, exchangeRate)]
           .filter((value): value is string => value !== null)
+          .map((value) => `实际均价：${value}`)
         : []),
       ...(aggregate.compact
         ? [formatCompactMetrics(aggregate.compact, currency, exchangeRate)]
@@ -497,7 +499,14 @@ export function formatDeepseekAveragePriceValue(
   const coverage = value.pricedRequestCount === value.requestCount
     ? ""
     : `（已计价 ${value.pricedRequestCount}/${value.requestCount} 次请求）`;
-  return `每 1 亿 Token 实际均价：约 ${formatCurrencyNanos(displayCurrency, nanos)}${coverage}`;
+  const amount = new Intl.NumberFormat("zh-CN", {
+    style: "currency",
+    currency: displayCurrency,
+    currencyDisplay: "narrowSymbol",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(nanos / 1_000_000_000);
+  return `约 ${amount}/100M${coverage}`;
 }
 
 export function formatCompactMetricsValue(

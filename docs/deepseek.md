@@ -89,7 +89,7 @@ App Server 服务会共同重建受监管实例。
   OpenAI 官方及第三方直接 API 使用相同统计口径，不为 DeepSeek 建立专属统计表。新请求按当次
   价格快照估算 API 参考费用，参考总价默认按人民币展示（`[display].price_currency` 可切换），
   先出总计、再列出输入、缓存、输出三项价格明细，不显示目录静态单价，但会按本机实际用量折算
-  并展示每 1 亿 Token 平均参考价（人民币）；历史记录不按新价格回算。
+  并展示平均参考价（元/100M，人民币）；历史记录不按新价格回算。
 - `/limits` 当前只支持 OpenAI；DeepSeek 不会回退显示 OpenAI 限额。
 - DeepSeek 不支持 Fast，执行 `/fast on` 或 `/fast off` 会明确拒绝。
 

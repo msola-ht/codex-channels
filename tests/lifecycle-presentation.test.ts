@@ -430,7 +430,7 @@ describe("shared Surface lifecycle presentation", () => {
       }),
     );
 
-    expect(rendered).toContain("每 1 亿 Token 实际均价：约 ¥3,600,000.000000");
+    expect(rendered).toContain("实际均价：约 ¥3,600,000.00/100M");
   });
 
   it("omits the DeepSeek average price when pricing samples are incomplete", () => {
@@ -473,7 +473,7 @@ describe("shared Surface lifecycle presentation", () => {
       }),
     );
 
-    expect(rendered).not.toContain("每 1 亿 Token 实际均价");
+    expect(rendered).not.toContain("实际均价");
   });
 
   it("renders run cost details as indented subfields", () => {
