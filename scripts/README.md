@@ -8,11 +8,14 @@
   不修改配置权限的路径定位，启动与写入流程仍显式收紧目录和配置文件权限。
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
   升级到 v4；不自动迁移未知版本。
-- `metrics-database.mjs` / `metrics-database.d.mts`：实现并声明只读 `codexc metrics status`、
-  复用 Observability 查询端口的 Markdown `report` 与脱敏 JSON/CSV `export`，以及要求 Gateway
-  停止、检查点回写、`0600` 备份后移除旧库的 `codexc metrics reset`；报表和导出允许与采集并行，
-  不迁移或覆盖原指标记录。服务状态无法确认、处于非停止状态或前台 Gateway 指标 Socket 仍可连接时
-  均拒绝 reset；无监听的陈旧 Socket 路径不会误阻塞数据库运维。
+- `metrics-database.mjs` / `metrics-database.d.mts`：实现并声明只读 `codexc metrics` 的
+  `status`、`run`、`turns`、`threads`、`report`、`export` 与 `reset`；查询复用 Observability
+  只读端口，渲染复用 `metrics-export-format.mjs`；reset 要求 Gateway 停止、检查点回写、`0600`
+  备份后移除旧库，不迁移或覆盖原指标记录。服务状态无法确认、处于非停止状态或前台 Gateway
+  指标 Socket 仍可连接时均拒绝 reset。
+- `metrics-export-format.mjs` / `metrics-export-format.d.mts`：指标导出的显示上下文（配置与
+  汇率缓存）、币种换算、Token/费用/时间格式化与 Markdown/CSV 转义；币种模式解析与 Token
+  格式复用 Application/Surface 导出，换算逻辑集中在 `convertCostToCny`。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型渠道”“通讯渠道”和
   “系统设置”流程委派给具体适配器；模型渠道下区分 DeepSeek、第三方 API 与图片识别，系统设置
   提供全局调试模式入口。
