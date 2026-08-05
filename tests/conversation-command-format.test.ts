@@ -403,6 +403,90 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).not.toContain("折合人民币");
   });
 
+  it("shows the DeepSeek average price per 100M tokens from actual usage", () => {
+    const rendered = formatConversationMetrics({
+      kind: "metrics",
+      summary: {
+        threadId: "thread-1",
+        modelProvider: "deepseek",
+        latestTurn: {
+          turnId: "turn-1",
+          requestCount: 3,
+          unsuccessfulRequestCount: 1,
+          requestDurationMs: 1_000,
+          inputTokens: 150,
+          cachedInputTokens: 100,
+          outputTokens: 50,
+          reasoningOutputTokens: 0,
+          outputTokensPerSecond: null,
+          outputSpeedSampleCount: 0,
+          outputSpeedTimedCount: 0,
+          pricingCurrency: "USD",
+          pricedRequestCount: 2,
+          totalCostNanos: 1_000_000_000,
+          inputCostNanos: 600_000_000,
+          cachedInputCostNanos: 100_000_000,
+          outputCostNanos: 300_000_000,
+          uncachedInputPricePerMillionNanos: 140_000_000,
+          cachedInputPricePerMillionNanos: 2_800_000,
+          outputPricePerMillionNanos: 280_000_000,
+          hasMixedPrices: false,
+        },
+        threadAggregate: null,
+        latestDirectApi: null,
+      },
+    }, (provider) => provider === "deepseek" ? "cny" : "usd", {
+      usdToCny: 7.2,
+      effectiveAtMs: 1_700_000_000_000,
+      source: "open-er-api",
+    });
+
+    expect(rendered).toContain(
+      "每 1 亿 Token 实际均价：约 ¥3,600,000.000000（已计价 2/3 次请求）",
+    );
+  });
+
+  it("omits the average price for non-DeepSeek providers", () => {
+    const rendered = formatConversationMetrics({
+      kind: "metrics",
+      summary: {
+        threadId: "thread-1",
+        modelProvider: "openai",
+        latestTurn: {
+          turnId: "turn-1",
+          requestCount: 1,
+          unsuccessfulRequestCount: 0,
+          requestDurationMs: 1_000,
+          inputTokens: 150,
+          cachedInputTokens: 100,
+          outputTokens: 50,
+          reasoningOutputTokens: 0,
+          outputTokensPerSecond: null,
+          outputSpeedSampleCount: 0,
+          outputSpeedTimedCount: 0,
+          pricingCurrency: "USD",
+          pricedRequestCount: 1,
+          totalCostNanos: 1_000_000_000,
+          inputCostNanos: 600_000_000,
+          cachedInputCostNanos: 100_000_000,
+          outputCostNanos: 300_000_000,
+          uncachedInputPricePerMillionNanos: 140_000_000,
+          cachedInputPricePerMillionNanos: 2_800_000,
+          outputPricePerMillionNanos: 280_000_000,
+          hasMixedPrices: false,
+        },
+        threadAggregate: null,
+        latestDirectApi: null,
+      },
+    }, (provider) => provider === "deepseek" ? "cny" : "usd", {
+      usdToCny: 7.2,
+      effectiveAtMs: 1_700_000_000_000,
+      source: "open-er-api",
+    });
+
+    expect(rendered).not.toContain("每 1 亿 Token 实际均价");
+  });
+
   it("renders unified provider and model aggregates with latency coverage", () => {
     const aggregate = {
       requestCount: 12,

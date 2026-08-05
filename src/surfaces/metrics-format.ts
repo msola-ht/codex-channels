@@ -92,6 +92,10 @@ export function formatConversationMetrics(
         outputPricePerMillionNanos: turn.outputPricePerMillionNanos,
         hasMixedPrices: turn.hasMixedPrices,
       }, currency, exchangeRate),
+      ...(summary.modelProvider === "deepseek"
+        ? [formatDeepseekAveragePriceValue(turn, currency, exchangeRate)]
+          .filter((value): value is string => value !== null)
+        : []),
       ...(turn.compact
         ? [formatCompactMetrics(turn.compact, currency, exchangeRate)]
         : []),
@@ -127,6 +131,10 @@ export function formatConversationMetrics(
             aggregate.outputSpeedSampleCount,
           )}`]),
       ...formatReferenceCost(toReferenceCostDisplay(aggregate), currency, exchangeRate),
+      ...(summary.modelProvider === "deepseek"
+        ? [formatDeepseekAveragePriceValue(aggregate, currency, exchangeRate)]
+          .filter((value): value is string => value !== null)
+        : []),
       ...(aggregate.compact
         ? [formatCompactMetrics(aggregate.compact, currency, exchangeRate)]
         : []),
@@ -451,6 +459,45 @@ function formatCompactMetrics(
   exchangeRate?: ExchangeRateSnapshot | null,
 ): string {
   return `远程压缩：${formatCompactMetricsValue(compact, currency, exchangeRate)}`;
+}
+
+export function formatDeepseekAveragePriceValue(
+  value: {
+    pricingCurrency: string | null;
+    totalCostNanos: number | null;
+    pricedRequestCount: number;
+    requestCount: number;
+    inputTokens: number;
+    outputTokens: number;
+  },
+  currency: DisplayPriceCurrency,
+  exchangeRate?: ExchangeRateSnapshot | null,
+): string | null {
+  if (
+    value.pricingCurrency !== "USD"
+    || value.totalCostNanos === null
+    || value.pricedRequestCount === 0
+    || value.requestCount === 0
+  ) {
+    return null;
+  }
+  const totalTokens = value.inputTokens + value.outputTokens;
+  if (totalTokens <= 0) return null;
+  const usdNanosPerHundredMillion =
+    value.totalCostNanos / totalTokens * 100_000_000;
+  let nanos = usdNanosPerHundredMillion;
+  let displayCurrency = "USD";
+  if (currency === "cny" && exchangeRate) {
+    const converted = Math.round(usdNanosPerHundredMillion * exchangeRate.usdToCny);
+    if (Number.isSafeInteger(converted)) {
+      nanos = converted;
+      displayCurrency = "CNY";
+    }
+  }
+  const coverage = value.pricedRequestCount === value.requestCount
+    ? ""
+    : `（已计价 ${value.pricedRequestCount}/${value.requestCount} 次请求）`;
+  return `每 1 亿 Token 实际均价：约 ${formatCurrencyNanos(displayCurrency, nanos)}${coverage}`;
 }
 
 export function formatCompactMetricsValue(

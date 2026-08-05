@@ -25,7 +25,10 @@ import {
   formatReferenceCostTotal,
   toDisplayReferenceCost,
 } from "./reference-cost-format.js";
-import { formatCompactMetricsValue } from "./metrics-format.js";
+import {
+  formatCompactMetricsValue,
+  formatDeepseekAveragePriceValue,
+} from "./metrics-format.js";
 import {
   formatCacheHitRate,
   formatTokenCount,
@@ -363,6 +366,27 @@ export function createTurnCompletedPresentation(
               : [{ label, value: formatCurrencyNanos(displayCost.currency!, costNanos) }],
           ),
     });
+  }
+  if (
+    event.modelProvider === "deepseek"
+    && event.timing?.referenceCost
+    && event.timing.requestInputTokens !== undefined
+  ) {
+    const averagePrice = formatDeepseekAveragePriceValue({
+      pricingCurrency: event.timing.referenceCost.currency,
+      totalCostNanos: event.timing.referenceCost.totalCostNanos,
+      pricedRequestCount: event.timing.referenceCost.pricedRequestCount,
+      requestCount: event.timing.referenceCost.requestCount,
+      inputTokens: event.timing.requestInputTokens,
+      outputTokens: (event.timing.nonReasoningOutputTokens ?? 0)
+        + (event.timing.reasoningTokens ?? 0),
+    }, currency, exchangeRate);
+    if (averagePrice !== null) {
+      runFields.push({
+        label: "每 1 亿 Token 实际均价",
+        value: averagePrice,
+      });
+    }
   }
   if (event.timing?.compact) {
     runFields.push({

@@ -389,6 +389,93 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).not.toContain("$");
   });
 
+  it("shows the DeepSeek average price per 100M tokens on the completion card", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "feishu",
+          accountId: "default",
+          conversationId: "100",
+        },
+        threadId: "thread-deepseek",
+        turnId: "turn-deepseek",
+        status: "completed",
+        modelProvider: "deepseek",
+        timing: {
+          modelRequestCount: 1,
+          completedModelRequestCount: 1,
+          requestInputTokens: 150,
+          requestCachedInputTokens: 100,
+          nonReasoningOutputTokens: 40,
+          reasoningTokens: 10,
+          referenceCost: {
+            currency: "USD",
+            totalCostNanos: 1_000_000_000,
+            inputCostNanos: 600_000_000,
+            cachedInputCostNanos: 100_000_000,
+            outputCostNanos: 300_000_000,
+            pricedRequestCount: 1,
+            requestCount: 1,
+            uncachedInputPricePerMillionNanos: 140_000_000,
+            cachedInputPricePerMillionNanos: 2_800_000,
+            outputPricePerMillionNanos: 280_000_000,
+            hasMixedPrices: false,
+          },
+        },
+      }, (provider) => provider === "deepseek" ? "cny" : "usd", {
+        usdToCny: 7.2,
+        effectiveAtMs: 1_700_000_000_000,
+        source: "ecb",
+      }),
+    );
+
+    expect(rendered).toContain("每 1 亿 Token 实际均价：约 ¥3,600,000.000000");
+  });
+
+  it("omits the DeepSeek average price when pricing samples are incomplete", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "feishu",
+          accountId: "default",
+          conversationId: "100",
+        },
+        threadId: "thread-deepseek",
+        turnId: "turn-deepseek",
+        status: "completed",
+        modelProvider: "deepseek",
+        timing: {
+          modelRequestCount: 1,
+          completedModelRequestCount: 1,
+          requestInputTokens: 150,
+          nonReasoningOutputTokens: 40,
+          reasoningTokens: 10,
+          referenceCost: {
+            currency: "USD",
+            totalCostNanos: null,
+            inputCostNanos: null,
+            cachedInputCostNanos: null,
+            outputCostNanos: null,
+            pricedRequestCount: 0,
+            requestCount: 1,
+            uncachedInputPricePerMillionNanos: null,
+            cachedInputPricePerMillionNanos: null,
+            outputPricePerMillionNanos: null,
+            hasMixedPrices: false,
+          },
+        },
+      }, (provider) => provider === "deepseek" ? "cny" : "usd", {
+        usdToCny: 7.2,
+        effectiveAtMs: 1_700_000_000_000,
+        source: "ecb",
+      }),
+    );
+
+    expect(rendered).not.toContain("每 1 亿 Token 实际均价");
+  });
+
   it("renders run cost details as indented subfields", () => {
     const rendered = renderStructuredLifecyclePresentation(
       createTurnCompletedPresentation({
