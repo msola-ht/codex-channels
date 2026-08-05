@@ -431,7 +431,7 @@ export class TelegramSurface {
         const value = context.match[2]!;
         const result = await this.commands.execute(
           target(context),
-          "workspace-perm",
+          "workspaceperm",
           `${field} ${value}`,
         );
         await context.answerCallbackQuery({ text: "已更新工作区权限" });
@@ -449,7 +449,7 @@ export class TelegramSurface {
         text: "请输入权限 Profile 命令",
       });
       await context.editMessageText(
-        "请输入权限 Profile，例如发送：\n/workspace-perm profile :read-only",
+        "请输入权限 Profile，例如发送：\n/workspaceperm profile :read-only",
       );
     });
     this.bot.on("message:text", async (context) => {

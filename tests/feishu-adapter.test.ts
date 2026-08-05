@@ -533,7 +533,7 @@ describe("Feishu conversation adapter", () => {
 
     const first = await adapter.handleCommandCenterAction(
       message.target,
-      "workspace-perm",
+      "workspaceperm",
       message.actorId,
       "",
     );
@@ -548,7 +548,7 @@ describe("Feishu conversation adapter", () => {
 
     const second = await adapter.handleCommandCenterAction(
       message.target,
-      "workspace-perm",
+      "workspaceperm",
       message.actorId,
       "sandbox",
     );
@@ -568,13 +568,13 @@ describe("Feishu conversation adapter", () => {
     );
     expect(profileForm).toMatchObject({
       kind: "form",
-      action: "workspace-perm",
+      action: "workspaceperm",
       inputPrefix: "profile ",
     });
 
     await adapter.handleCommandCenterAction(
       message.target,
-      "workspace-perm",
+      "workspaceperm",
       message.actorId,
       "approval never",
     );

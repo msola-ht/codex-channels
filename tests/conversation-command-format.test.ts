@@ -53,8 +53,8 @@ describe("provider-aware conversation command formatting", () => {
 
     expect(rendered).toContain("工作区权限（Main · main）");
     expect(rendered).toContain("- 沙箱：只读");
-    expect(rendered).toContain("/workspace-perm approval");
-    expect(rendered).toContain("/workspace-perm profile");
+    expect(rendered).toContain("/workspaceperm approval");
+    expect(rendered).toContain("/workspaceperm profile");
   });
 
   it("renders updated workspace permissions with the hot reload notice", () => {

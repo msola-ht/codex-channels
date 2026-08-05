@@ -21,7 +21,7 @@ export const conversationCommandNames = [
   "unpin",
   "status",
   "workspace",
-  "workspace-perm",
+  "workspaceperm",
   "stop",
   "queue",
   "rename",
@@ -258,7 +258,7 @@ export class ConversationCommandService {
           currentWorkspaceId: this.conversations.status(target).workspaceId,
         };
       }
-      case "workspace-perm": {
+      case "workspaceperm": {
         const current = this.conversations.status(target).workspaceId;
         const workspace = this.conversations.listWorkspaces().find(
           (entry) => entry.id === current,
@@ -576,6 +576,6 @@ function parseWorkspacePermissionCommand(
   }
   throw new UserFacingError(
     "workspace.permission.usage",
-    "用法：/workspace-perm [sandbox <read-only|workspace-write|danger-full-access|clear>|approval <untrusted|on-request|never|clear>|profile <Profile ID|clear>]",
+    "用法：/workspaceperm [sandbox <read-only|workspace-write|danger-full-access|clear>|approval <untrusted|on-request|never|clear>|profile <Profile ID|clear>]",
   );
 }

@@ -44,7 +44,7 @@ export const conversationCommandDescriptions = {
   unpin: "取消固定当前会话",
   status: "查看当前状态",
   workspace: "列出或切换 Workspace",
-  "workspace-perm": "查看或修改当前工作区权限",
+  workspaceperm: "查看或修改当前工作区权限",
   stop: "停止当前任务",
   queue: "排到下一 Turn",
   rename: "命名当前会话",
@@ -81,7 +81,7 @@ export const conversationCommandHelpSections = [
   {
     title: "运行与项目：",
     lines: [
-      "/status · /workspace [序号|ID|名称] · /workspace-perm",
+      "/status · /workspace [序号|ID|名称] · /workspaceperm",
       "/stop · /queue <描述>",
       "/review [branch <分支>|commit <SHA>|custom <说明>]",
       "/rules <init|check> · /diff",
@@ -311,9 +311,9 @@ export function formatConversationWorkspacePermissions(
       : ["未配置（使用全局默认）"]),
     "",
     "修改：",
-    "- /workspace-perm sandbox <read-only|workspace-write|danger-full-access|clear>",
-    "- /workspace-perm approval <untrusted|on-request|never|clear>",
-    "- /workspace-perm profile <Profile ID|clear>",
+    "- /workspaceperm sandbox <read-only|workspace-write|danger-full-access|clear>",
+    "- /workspaceperm approval <untrusted|on-request|never|clear>",
+    "- /workspaceperm profile <Profile ID|clear>",
     "权限热加载后对新建或恢复的 Thread 生效，不改变已绑定 Thread。",
   ].join("\n"));
 }
