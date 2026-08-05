@@ -780,15 +780,27 @@ function printMetricsExport(result, format, display = null) {
     }
     return;
   }
-  const columns = [...csvColumns(), ...weeklyQuotaCsvColumns()];
-  const quota = flattenWeeklyQuota(result.weeklyQuota);
-  const records = result.records.map((record) => ({
-    ...enrichCosts(record, display),
-    ...quota,
-  }));
+  const columns = [
+    ["type", (row) => row.type],
+    ...csvColumns(),
+    ...weeklyQuotaCsvColumns(),
+  ];
+  const rows = [
+    ...result.records.map((record) => ({
+      type: "request",
+      ...enrichCosts(record, display),
+      ...flattenRecordedWeeklyQuota(record),
+    })),
+    ...(result.weeklyQuota === null
+      ? []
+      : [{
+          type: "weekly_quota_summary",
+          ...flattenWeeklyQuota(result.weeklyQuota),
+        }]),
+  ];
   console.log(columns.map(([heading]) => csvCell(heading)).join(","));
-  for (const record of records) {
-    console.log(columns.map(([, read]) => csvCell(read(record))).join(","));
+  for (const row of rows) {
+    console.log(columns.map(([, read]) => csvCell(read(row))).join(","));
   }
 }
 
@@ -835,6 +847,19 @@ function flattenWeeklyQuota(quota) {
     weeklyQuotaTotalTokensPerPercent: quota.estimate?.totalTokensPerPercent,
     weeklyQuotaPricingCurrency: quota.estimate?.pricingCurrency,
     weeklyQuotaCostPerPercentNanos: quota.estimate?.costPerPercentNanos,
+  };
+}
+
+function flattenRecordedWeeklyQuota(record) {
+  const quota = record.weeklyQuota;
+  if (quota === null) return {};
+  const usedPercent = quota.usedPercentMillionths / 1_000_000;
+  return {
+    weeklyQuotaLimitId: quota.limitId,
+    weeklyQuotaUsedPercent: usedPercent,
+    weeklyQuotaRemainingPercent: Math.max(0, 100 - usedPercent),
+    weeklyQuotaResetsAt: quota.resetsAt,
+    weeklyQuotaObservedAtMs: record.recordedAtMs,
   };
 }
 
@@ -1218,7 +1243,9 @@ function assertExportFormat(value, allowed) {
 function csvColumns() {
   return [
     ["id", (record) => record.id],
-    ["recordedAt", (record) => new Date(record.recordedAtMs).toISOString()],
+    ["recordedAt", (record) => record.recordedAtMs === undefined
+      ? ""
+      : new Date(record.recordedAtMs).toISOString()],
     ["provider", (record) => record.provider],
     ["model", (record) => record.model],
     ["serviceTier", (record) => record.serviceTier],

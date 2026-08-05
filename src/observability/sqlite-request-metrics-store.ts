@@ -363,7 +363,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     const rows = this.database.prepare(`
       SELECT * FROM model_request_metrics_enriched
       WHERE provider = ?
-        AND operation = 'response'
         AND recorded_at_ms >= ?
         AND recorded_at_ms <= ?
       ORDER BY id ASC
@@ -481,7 +480,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       FROM model_request_metrics
       WHERE recorded_at_ms >= ?
         AND recorded_at_ms < ?
-        AND operation = 'response'
     `).get(query.startAtMs, query.endAtMs) as unknown as ErrorSummaryRow;
     const rows = this.database.prepare(`
       WITH normalized AS (
@@ -512,7 +510,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       FROM normalized
       WHERE recorded_at_ms >= ?
         AND recorded_at_ms < ?
-        AND operation = 'response'
         AND normalized_status <> 'completed'
       GROUP BY provider, model, normalized_status, http_status, normalized_error_type
       ORDER BY request_count DESC, last_occurred_at_ms DESC,
@@ -616,7 +613,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
               AS output_speed_timed_count,
             ${successfulCostAggregateSql}
           FROM model_request_metrics_enriched
-          WHERE thread_id = ? AND turn_id = ? AND operation = 'response'
+          WHERE thread_id = ? AND turn_id = ?
           GROUP BY turn_id
         `).get(threadId, latestTurn.turn_id) as TurnSummaryRow | undefined;
     const threadAggregate = this.database.prepare(`
@@ -658,7 +655,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           AS output_speed_timed_count,
         ${successfulCostAggregateSql}
       FROM model_request_metrics_enriched
-      WHERE thread_id = ? AND turn_id IS NOT NULL AND operation = 'response'
+      WHERE thread_id = ? AND turn_id IS NOT NULL
     `).get(threadId) as unknown as TurnSummaryRow;
     const latestDirectApi = this.database.prepare(`
       SELECT *
@@ -697,7 +694,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
               = model_request_metrics_enriched.thread_id
             AND latest_provider.turn_id
               = model_request_metrics_enriched.turn_id
-            AND latest_provider.operation = 'response'
           ORDER BY latest_provider.id DESC
           LIMIT 1
         ) AS provider,
@@ -708,7 +704,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
               = model_request_metrics_enriched.thread_id
             AND latest_model.turn_id
               = model_request_metrics_enriched.turn_id
-            AND latest_model.operation = 'response'
           ORDER BY latest_model.id DESC
           LIMIT 1
         ) AS model,
@@ -719,7 +714,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
               = model_request_metrics_enriched.thread_id
             AND latest_effort.turn_id
               = model_request_metrics_enriched.turn_id
-            AND latest_effort.operation = 'response'
           ORDER BY latest_effort.id DESC
           LIMIT 1
         ) AS reasoning_effort,
@@ -751,7 +745,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         ${successfulCostAggregateSql},
         MAX(recorded_at_ms) AS recorded_at_ms
       FROM model_request_metrics_enriched
-      WHERE thread_id = ? AND turn_id IS NOT NULL AND operation = 'response'
+      WHERE thread_id = ? AND turn_id IS NOT NULL
       GROUP BY turn_id
       ORDER BY MAX(id) DESC
     `).all(threadId) as unknown as Array<
@@ -774,7 +768,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           WHERE latest_provider.thread_id
               = model_request_metrics_enriched.thread_id
             AND latest_provider.turn_id IS NOT NULL
-            AND latest_provider.operation = 'response'
           ORDER BY latest_provider.id DESC
           LIMIT 1
         ) AS provider,
@@ -784,7 +777,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           WHERE latest_model.thread_id
               = model_request_metrics_enriched.thread_id
             AND latest_model.turn_id IS NOT NULL
-            AND latest_model.operation = 'response'
           ORDER BY latest_model.id DESC
           LIMIT 1
         ) AS model,
@@ -794,7 +786,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           WHERE latest_effort.thread_id
               = model_request_metrics_enriched.thread_id
             AND latest_effort.turn_id IS NOT NULL
-            AND latest_effort.operation = 'response'
           ORDER BY latest_effort.id DESC
           LIMIT 1
         ) AS reasoning_effort,
@@ -816,7 +807,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       FROM model_request_metrics_enriched
       WHERE thread_id IS NOT NULL
         AND turn_id IS NOT NULL
-        AND operation = 'response'
       GROUP BY thread_id
       ORDER BY MAX(id) DESC
     `).all() as unknown as Array<{
@@ -879,7 +869,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         FROM model_request_metrics_enriched AS metric
         WHERE recorded_at_ms >= ?
           AND recorded_at_ms < ?
-          AND operation = 'response'
       ), aggregate_rows AS (
         SELECT
           group_provider AS provider,

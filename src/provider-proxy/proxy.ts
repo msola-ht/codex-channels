@@ -80,6 +80,7 @@ export interface ProviderProxyOptions {
 interface TurnMetadata {
   threadId: string | null;
   turnId: string | null;
+  operation: ProviderProxyMetrics["operation"];
 }
 
 interface MetricsState extends ProviderProxyMetrics {
@@ -165,11 +166,14 @@ export class ProviderProxy {
       return;
     }
     const upstreamTarget = this.upstreamFor(request.headers);
+    const turnMetadata = parseTurnMetadata(
+      request.headers["x-codex-turn-metadata"],
+    );
     const metrics = createMetricsState(
-      parseTurnMetadata(request.headers["x-codex-turn-metadata"]),
+      turnMetadata,
       Date.now(),
       "http",
-      responseOperation(request.url),
+      responseOperation(request.url, turnMetadata.operation),
     );
     let metricsDelivery: Promise<void> | undefined;
     const emitMetrics = (): Promise<void> => {
@@ -357,7 +361,7 @@ export class ProviderProxy {
           sanitized.metadata,
           sanitized.requestStartedAtMs ?? Date.now(),
           "websocket",
-          "response",
+          sanitized.metadata.operation,
         );
         activeMetrics.model = sanitized.model ?? null;
         activeMetrics.serviceTier = sanitized.serviceTier ?? null;
@@ -839,14 +843,15 @@ function isResponsesRequestPath(value: string | undefined): boolean {
 
 function responseOperation(
   value: string | undefined,
+  metadataOperation: ProviderProxyMetrics["operation"],
 ): ProviderProxyMetrics["operation"] {
-  if (!value) return "response";
+  if (!value) return metadataOperation;
   try {
     return new URL(value, "http://127.0.0.1").pathname === "/responses/compact"
       ? "compact"
-      : "response";
+      : metadataOperation;
   } catch {
-    return "response";
+    return metadataOperation;
   }
 }
 
@@ -900,7 +905,7 @@ function endToEndHeaders(headers: IncomingHttpHeaders): IncomingHttpHeaders {
 function parseTurnMetadata(value: string | string[] | undefined): TurnMetadata {
   return typeof value === "string"
     ? parseTurnMetadataObject(parseJsonPayload(value))
-    : { threadId: null, turnId: null };
+    : { threadId: null, turnId: null, operation: "response" };
 }
 
 function parseTurnMetadataObject(value: unknown): TurnMetadata {
@@ -908,6 +913,7 @@ function parseTurnMetadataObject(value: unknown): TurnMetadata {
   return {
     threadId: nonEmptyString(parsed?.thread_id),
     turnId: nonEmptyString(parsed?.turn_id),
+    operation: parsed?.request_kind === "compaction" ? "compact" : "response",
   };
 }
 

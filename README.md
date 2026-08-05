@@ -230,6 +230,8 @@ json，其余默认 markdown），默认写入 `~/.codex-connect/output/<日期>
 连接，可在 Gateway 运行时执行；支持 `24h`、`7d`、`30d`，包含固定格式版本、时间范围和脱敏请求
 字段，不包含提示词、消息、图片、响应正文、凭据或上游响应 ID。`report` 与 `export` 的
 Markdown、JSON、CSV 还包含统计代理最后观测到的当前周额度区间和每 1% 采样状态；JSON 格式版本为 v2。
+`export` CSV 使用 `type=request|weekly_quota_summary` 区分请求与当前额度摘要：请求行只携带该次
+请求实际捕获的历史额度快照，当前额度和每 1% 估算只写入一条独立摘要行，避免可视化重复计数。
 Markdown 报表的费用按 `display.price_currency` / `price_currency_by_provider` 换算显示
 （如 DeepSeek 默认人民币，依赖汇率缓存），时间显示为服务器本地时区；JSON 与 CSV 保留原始
 币种、nanos 与 ISO 时间，并按相同配置附加 `*CostCnyNanos` 换算列（如 `totalCostCnyNanos`），

@@ -129,8 +129,7 @@ export function toModelTimingEvent(
 ): ModelTimingEvent | undefined {
   const firstTokenAtMs = metrics.firstTokenAtMs;
   if (
-    metrics.operation !== "response"
-    || metrics.threadId === null
+    metrics.threadId === null
     || metrics.turnId === null
   ) {
     return undefined;

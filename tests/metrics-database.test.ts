@@ -7,6 +7,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -144,6 +145,66 @@ describe("model request metrics database operations", () => {
       incompleteReason: "response_not_observed",
     });
     expect(JSON.stringify(exported)).not.toMatch(/prompt|message|authorization/iu);
+  });
+
+  it("exports request quota snapshots separately from the current quota summary", () => {
+    const { environment, databasePath } = fixture();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    const resetsAt = Math.floor(Date.now() / 1_000) + 24 * 60 * 60;
+    store.record({
+      ...metricSample(),
+      provider: "openai",
+      weeklyQuota: {
+        limitId: "codex",
+        usedPercentMillionths: 12_500_000,
+        resetsAt,
+      },
+    });
+    store.record({
+      ...metricSample(),
+      provider: "openai",
+      threadId: "thread-2",
+      turnId: "turn-2",
+    });
+    store.close();
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        join(process.cwd(), "scripts", "metrics-database.mjs"),
+        "export",
+        "--range",
+        "24h",
+        "--format",
+        "csv",
+      ],
+      { encoding: "utf8", env: environment },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    const [headings = [], ...values] = result.stdout.trim().split("\n")
+      .map((line) => line.split(","));
+    const rows = values.map((cells) => Object.fromEntries(
+      headings.map((heading, index) => [heading, cells[index] ?? ""]),
+    ));
+    expect(rows).toHaveLength(3);
+    expect(rows).toEqual([
+      expect.objectContaining({
+        type: "request",
+        id: "1",
+        weeklyQuotaUsedPercent: "12.5",
+      }),
+      expect.objectContaining({
+        type: "request",
+        id: "2",
+        weeklyQuotaUsedPercent: "",
+      }),
+      expect.objectContaining({
+        type: "weekly_quota_summary",
+        id: "",
+        weeklyQuotaUsedPercent: "12.5",
+      }),
+    ]);
   });
 
   it("refuses to reset while Gateway is running", () => {

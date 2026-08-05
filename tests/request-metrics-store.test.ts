@@ -188,6 +188,7 @@ describe("SqliteModelRequestMetricsStore", () => {
     store.record({
       ...sample(),
       provider: "openai",
+      operation: "compact",
       inputTokens: 1_800,
       outputTokens: 200,
       totalTokens: 2_000,
@@ -805,6 +806,80 @@ describe("SqliteModelRequestMetricsStore", () => {
       operation: "compact",
       status: "completed",
       incompleteReason: null,
+    });
+    store.close();
+  });
+
+  it("includes compact usage and cost in request summaries", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    const pricing = {
+      billingMode: "api" as const,
+      currency: "USD",
+      source: "test-catalog",
+      effectiveAtMs: 1_700_000_000_000,
+      uncachedInputPricePerMillionNanos: 2_000_000_000,
+      cachedInputPricePerMillionNanos: 1_000_000_000,
+      outputPricePerMillionNanos: 3_000_000_000,
+    };
+    store.record({ ...sample(), pricing });
+    store.record({
+      ...sample(),
+      operation: "compact",
+      pricing,
+      requestStartedAtMs: 2_000,
+      responseCompletedAtMs: 2_650,
+    });
+
+    expect(store.threadSummary("thread-1")).toMatchObject({
+      latestTurn: {
+        requestCount: 2,
+        inputTokens: 2_000,
+        outputTokens: 200,
+        pricedRequestCount: 2,
+        totalCostNanos: 2_800_000,
+      },
+      threadAggregate: {
+        requestCount: 2,
+        inputTokens: 2_000,
+        outputTokens: 200,
+        pricedRequestCount: 2,
+        totalCostNanos: 2_800_000,
+      },
+    });
+    expect(store.aggregate({
+      dimension: "global",
+      startAtMs: 0,
+      endAtMs: Date.now() + 1,
+    }).aggregate).toMatchObject({
+      requestCount: 2,
+      inputTokens: 2_000,
+      outputTokens: 200,
+      pricedRequestCount: 2,
+      totalCostNanos: 2_800_000,
+    });
+    expect(store.errors({
+      startAtMs: 0,
+      endAtMs: Date.now() + 1,
+    })).toMatchObject({
+      requestCount: 2,
+      unsuccessfulRequestCount: 0,
+    });
+    expect(store.threadTurnSummaries("thread-1")[0]).toMatchObject({
+      requestCount: 2,
+      inputTokens: 2_000,
+      outputTokens: 200,
+      pricedRequestCount: 2,
+      totalCostNanos: 2_800_000,
+    });
+    expect(store.threadList()[0]).toMatchObject({
+      requestCount: 2,
+      inputTokens: 2_000,
+      outputTokens: 200,
+      pricedRequestCount: 2,
+      totalCostNanos: 2_800_000,
     });
     store.close();
   });

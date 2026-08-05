@@ -1003,7 +1003,7 @@ describe("ProviderProxy", () => {
     expect(metrics[0]?.turnId).toBeNull();
   });
 
-  it("proxies Responses WebSocket traffic and strips private turn metadata", async () => {
+  it("classifies remote compaction v2 WebSocket traffic and strips private metadata", async () => {
     const upstreamServer = createServer();
     const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });
     let upstreamMessage: Record<string, unknown> | undefined;
@@ -1064,6 +1064,7 @@ describe("ProviderProxy", () => {
           type: "response.create",
           client_metadata: {
             "x-codex-turn-metadata": JSON.stringify({
+              request_kind: "compaction",
               thread_id: "thread-ws",
               turn_id: "turn-ws",
             }),
@@ -1091,6 +1092,7 @@ describe("ProviderProxy", () => {
     expect(upstreamPath).toBe("/backend-api/codex/responses");
     expect(metrics).toHaveLength(1);
     expect(metrics[0]).toMatchObject({
+      operation: "compact",
       threadId: "thread-ws",
       turnId: "turn-ws",
       requestStartedAtMs,
@@ -1341,6 +1343,73 @@ describe("ProviderProxy", () => {
     expect(receivedPath).toBe("/v1/responses/compact?mode=test");
     expect(metrics).toEqual([expect.objectContaining({
       operation: "compact",
+      responseFormat: "json",
+      status: "completed",
+      httpStatus: 200,
+    })]);
+  });
+
+  it("classifies remote compaction v2 metadata on the Responses path", async () => {
+    let receivedPath = "";
+    const metrics: ProviderProxyMetrics[] = [];
+    const upstream = createServer((request, response) => {
+      receivedPath = request.url ?? "";
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end('{"output":[]}');
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstream.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push({
+      close: () => new Promise<void>((resolveClose) => {
+        upstream.close(() => resolveClose());
+      }),
+    });
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      upstreamBasePath: "/v1/",
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    const proxyPort = Number(proxy.address().split(":")[1]);
+    const status = await new Promise<number>((resolveStatus, rejectStatus) => {
+      const request = httpRequest({
+        hostname: "127.0.0.1",
+        port: proxyPort,
+        path: "/responses",
+        method: "POST",
+        headers: {
+          "x-codex-turn-metadata": JSON.stringify({
+            request_kind: "compaction",
+            thread_id: "thread-compact-v2",
+            turn_id: "turn-compact-v2",
+          }),
+        },
+      }, (response) => {
+        response.resume();
+        response.on("end", () => resolveStatus(response.statusCode ?? 0));
+        response.on("error", rejectStatus);
+      });
+      request.on("error", rejectStatus);
+      request.end("{}");
+    });
+
+    expect(status).toBe(200);
+    expect(receivedPath).toBe("/v1/responses");
+    expect(metrics).toEqual([expect.objectContaining({
+      operation: "compact",
+      threadId: "thread-compact-v2",
+      turnId: "turn-compact-v2",
       responseFormat: "json",
       status: "completed",
       httpStatus: 200,

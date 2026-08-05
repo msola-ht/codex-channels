@@ -201,6 +201,31 @@ describe("ProviderMetricsComposition", () => {
     expect(event).not.toHaveProperty("totalCostNanos");
   });
 
+  it("includes compact usage and reference cost in the bound Turn", () => {
+    const pricing = {
+      billingMode: "api" as const,
+      currency: "USD",
+      source: "test-catalog",
+      effectiveAtMs: 1_700_000_000_000,
+      uncachedInputPricePerMillionNanos: 2_000_000_000,
+      cachedInputPricePerMillionNanos: 1_000_000_000,
+      outputPricePerMillionNanos: 3_000_000_000,
+    };
+
+    expect(toModelTimingEvent({
+      ...metrics(),
+      operation: "compact",
+    }, pricing)).toMatchObject({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      inputTokens: 100,
+      cachedInputTokens: 80,
+      outputTokens: 20,
+      pricingCurrency: "USD",
+      totalCostNanos: 180_000,
+    });
+  });
+
   it("carries the bound Thread reasoning effort into recorded metrics", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-metrics-effort-"));
     temporaryDirectories.push(directory);
