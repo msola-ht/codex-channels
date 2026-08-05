@@ -100,12 +100,12 @@ export function formatSurfaceUserFacingError(
       return "Workspace 选择不唯一";
     case "workspace.selector.not-found":
       return "找不到指定 Workspace";
-    case "workspace.entitlement.usage":
+    case "workspace.permission.usage":
       return "用法：/workspace-perm [sandbox <read-only|workspace-write|danger-full-access|clear>|approval <untrusted|on-request|never|clear>|profile <Profile ID|clear>]";
-    case "workspace.entitlement.conflict":
+    case "workspace.permission.conflict":
       return "permissions 与 sandbox 互斥，不能同时配置；请先清除其中一项";
-    case "workspace.entitlement.unavailable":
-      return "当前 Gateway 不支持修改工作区权益";
+    case "workspace.permission.unavailable":
+      return "当前 Gateway 不支持修改工作区权限";
     case "model.current.missing":
       return `当前模型不在可用模型列表中：${detail(error, "model", "未知")}`;
     case "model.unavailable":
@@ -118,7 +118,7 @@ export function formatSurfaceUserFacingError(
       return "找不到指定模型";
     case "effort.unsupported": {
       const options = error.details.options;
-      return `当前模型不支持该思考强度，可选：${Array.isArray(options) ? options.join("、") : "无"}`;
+      return `当前模型不支持该思考等级，可选：${Array.isArray(options) ? options.join("、") : "无"}`;
     }
     case "fast.usage":
       return "用法：/fast [on|off|status]";

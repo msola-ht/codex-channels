@@ -7,13 +7,13 @@ import {
   formatConversationModels,
   formatConversationStatus,
   formatConversationUsage,
-  formatConversationWorkspaceEntitlements,
+  formatConversationWorkspacePermissions,
   formatConversationWorkspaces,
 } from "../src/surfaces/conversation-command-format.js";
 import { formatCurrencyNanos } from "../src/surfaces/reference-cost-format.js";
 
 describe("provider-aware conversation command formatting", () => {
-  it("shows configured workspace entitlements in the workspace list", () => {
+  it("shows configured workspace permissions in the workspace list", () => {
     const rendered = formatConversationWorkspaces({
       kind: "workspaces",
       workspaces: [
@@ -40,9 +40,9 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("- 权限 Profile：:read-only");
   });
 
-  it("shows workspace entitlement usage and current values", () => {
-    const rendered = formatConversationWorkspaceEntitlements({
-      kind: "workspace-entitlements",
+  it("shows workspace permission usage and current values", () => {
+    const rendered = formatConversationWorkspacePermissions({
+      kind: "workspace-permissions",
       workspace: {
         id: "main",
         name: "Main",
@@ -57,9 +57,9 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("/workspace-perm profile");
   });
 
-  it("renders updated workspace entitlements with the hot reload notice", () => {
+  it("renders updated workspace permissions with the hot reload notice", () => {
     const rendered = formatConversationCommandOutcome({
-      type: "workspace.entitlements-updated",
+      type: "workspace.permissions-updated",
       workspace: {
         id: "main",
         name: "Main",

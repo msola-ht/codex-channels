@@ -39,11 +39,11 @@
 仍不得进入日志。可通过 Setup 的“系统设置 → 调试模式”在 `debug` 与 `info` 间切换，变化需要
 重启 Gateway，不需要重启 App Server。
 
-`[[workspaces]]` 除 `id`、`name`、`cwd` 外支持可选的工作区权益：`sandbox`（
+`[[workspaces]]` 除 `id`、`name`、`cwd` 外支持可选的工作区权限：`sandbox`（
 `read-only` / `workspace-write` / `danger-full-access`）、`approval_policy`（
 `untrusted` / `on-request` / `never`）和 `permissions`（App Server 命名权限 Profile）。
-`permissions` 与 `sandbox` 必须互斥，同时配置时失败关闭。权益只作用于该 Workspace 新建或
-恢复的 Thread 启动参数，不影响已绑定 Thread；权益变化按 `workspace.registry` 热加载，不要求
+`permissions` 与 `sandbox` 必须互斥，同时配置时失败关闭。权限只作用于该 Workspace 新建或
+恢复的 Thread 启动参数，不影响已绑定 Thread；权限变化按 `workspace.registry` 热加载，不要求
 重启 Gateway。`danger-full-access` 和 `never` 是显式放开的完全权限选项，仅应在明确可信的
 Workspace 上配置。
 

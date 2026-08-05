@@ -83,7 +83,7 @@ describe("Feishu output renderer", () => {
       "- Git 分支：feature/weixin-surface",
       "- 模型：gpt-test",
       "- 提供商：OpenAI 官方",
-      "- 思考强度：medium",
+      "- 思考等级：medium",
       "- Fast 模式：开启",
       "- 协作模式：Default",
       "",
@@ -570,7 +570,7 @@ describe("Feishu output renderer", () => {
     };
     for (const [view, expected] of [
       ["model", "模型列表（1）"],
-      ["effort", "可用思考强度"],
+      ["effort", "可用思考等级"],
       ["fast", "模型支持：支持 Fast"],
     ] as const) {
       expect(renderFeishuCommandResult({

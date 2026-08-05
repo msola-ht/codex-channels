@@ -248,7 +248,7 @@ describe("Codex Connect config menu", () => {
     expect((readGatewayConfig(fixture.configPath) as unknown as ConfigWithWorkspaces).workspaces[0])
       .toMatchObject({ sandbox: "danger-full-access" });
     expect(output.join("")).toContain("已更新");
-    expect(output.join("")).toContain("权益热加载");
+    expect(output.join("")).toContain("权限热加载");
   });
 
   it("sets a workspace approval policy through the menu", async () => {

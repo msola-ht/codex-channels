@@ -67,7 +67,7 @@ function threadPort(overrides: Partial<ThreadLifecyclePort> = {}): ThreadLifecyc
 }
 
 describe("SessionRouter", () => {
-  it("passes workspace entitlements to startThread and resumeThread", async () => {
+  it("passes workspace permissions to startThread and resumeThread", async () => {
     const store = new MemoryBindingStore();
     const entitledRegistry = new WorkspaceRegistry([
       {

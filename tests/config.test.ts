@@ -133,7 +133,7 @@ describe("Gateway config.toml", () => {
     ]);
   });
 
-  it("loads per-workspace entitlements and maps approval_policy to camelCase", () => {
+  it("loads per-workspace permissions and maps approval_policy to camelCase", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
     const workspace = join(root, "workspace");
     mkdirSync(workspace, { recursive: true });

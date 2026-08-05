@@ -220,7 +220,7 @@ describe("formatStartupNotification", () => {
     expect(text).toContain("Thread：019f8951-eb3");
     expect(text).toContain("Git 分支：feature/weixin-surface");
     expect(text).toContain("模型：gpt-main");
-    expect(text).toContain("思考强度：high");
+    expect(text).toContain("思考等级：high");
     expect(text).toContain("周限：剩余 58%");
     expect(text).not.toContain("本地握手");
     expect(text).not.toContain("本地未发送请求头");
@@ -391,7 +391,7 @@ describe("formatStatus", () => {
     expect(text).toContain("缓存命中率：75.00%");
     expect(text).toContain("Codex 有效上下文窗口：200 K");
     expect(text).toContain("模型：gpt-main");
-    expect(text).toContain("思考强度：high");
+    expect(text).toContain("思考等级：high");
     expect(text).toContain("Fast 模式：开启");
     expect(text).toContain("Git 分支：feature/weixin-surface");
     expect(text).toContain("上下文压缩：2 次");

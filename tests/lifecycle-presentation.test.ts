@@ -62,7 +62,7 @@ describe("shared Surface lifecycle presentation", () => {
       "Git 分支：feature/lifecycle",
       "模型：gpt-test",
       "提供商：OpenAI 官方",
-      "思考强度：medium",
+      "思考等级：medium",
       "Fast 模式：开启",
       "协作模式：Default",
       "",

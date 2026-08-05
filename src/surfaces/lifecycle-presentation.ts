@@ -137,7 +137,7 @@ export function createStartupPresentation(
             value: formatCodexProviderLabel(status.modelProvider),
           },
           {
-            label: "思考强度",
+            label: "思考等级",
             value: `${status.effort ?? "模型默认"}${pendingSuffix(status.effortPending)}`,
           },
           ...(usesOpenAiAccount(status.modelProvider)

@@ -223,7 +223,7 @@ function readProviderProfile(
       || document.model_catalog_json !== expectedCatalogPath
     )
   ) {
-    throw new Error("Codex DeepSeek Profile 模型目录或推理强度无效");
+    throw new Error("Codex DeepSeek Profile 模型目录或思考等级无效");
   }
   const provider = record(record(document.model_providers)[descriptor.id]);
   if (

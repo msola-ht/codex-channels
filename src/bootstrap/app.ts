@@ -79,7 +79,7 @@ import { ProviderMetricsComposition } from "./provider-metrics-composition.js";
 import { RemoteModelPricingCatalog } from "./model-pricing-catalog.js";
 import { RemoteExchangeRate } from "./exchange-rate.js";
 import { mergeSessionReferenceCost } from "./reference-cost-summary.js";
-import { TomlWorkspaceEntitlementWriter } from "./workspace-entitlement-writer.js";
+import { TomlWorkspacePermissionWriter } from "./workspace-permission-writer.js";
 
 export class GatewayApplication {
   private readonly transport: UnixWebSocketTransport;
@@ -100,7 +100,7 @@ export class GatewayApplication {
   private readonly exchangeRate: RemoteExchangeRate;
   private readonly bindings: SqliteBindingStore;
   private readonly workspaces: WorkspaceRegistry;
-  private readonly workspaceEntitlements: TomlWorkspaceEntitlementWriter | undefined;
+  private readonly workspacePermissions: TomlWorkspacePermissionWriter | undefined;
   private removeRpcNotification: (() => void) | undefined;
   private removeRpcDisconnect: (() => void) | undefined;
   private startTask: Promise<void> | undefined;
@@ -119,9 +119,9 @@ export class GatewayApplication {
     configPath?: string,
   ) {
     verifyCodexVersion(config);
-    this.workspaceEntitlements = configPath === undefined
+    this.workspacePermissions = configPath === undefined
       ? undefined
-      : new TomlWorkspaceEntitlementWriter(configPath);
+      : new TomlWorkspacePermissionWriter(configPath);
     const primaryProvider = loadPrimaryModelProvider();
     const managedProvider = loadManagedModelProvider();
     const supplementaryModels = loadDeepseekModelOptions(
@@ -403,7 +403,7 @@ export class GatewayApplication {
           };
         },
       },
-      this.workspaceEntitlements,
+      this.workspacePermissions,
     );
     this.output.subscribe("conversation-follow-up", async (event) => {
       if (event.type !== "turn.completed") {

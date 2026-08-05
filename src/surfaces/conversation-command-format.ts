@@ -51,7 +51,7 @@ export const conversationCommandDescriptions = {
   fork: "分叉当前会话",
   review: "启动代码审查",
   model: "查看或切换模型",
-  effort: "查看或切换思考强度",
+  effort: "查看或切换思考等级",
   fast: "查看或切换 Fast 模式",
   skill: "查看或调用 Skill",
   mcp: "列出 MCP Servers",
@@ -207,13 +207,13 @@ export function formatConversationCommandOutcome(
         `Workspace：${outcome.workspace.name}`,
         `工作目录：${outcome.workspace.cwd}`,
       ].join("\n"));
-    case "workspace.entitlements-updated":
+    case "workspace.permissions-updated":
       return toStructuredMarkdownList([
         "已更新工作区权限",
         `Workspace：${outcome.workspace.name}`,
-        ...workspaceEntitlementLines(outcome.workspace),
+        ...workspacePermissionLines(outcome.workspace),
         "",
-        "权益已热加载；对新建或恢复的 Thread 生效，不改变已绑定 Thread。",
+        "权限已热加载；对新建或恢复的 Thread 生效，不改变已绑定 Thread。",
       ].join("\n"));
     case "turn.stop-requested":
       return outcome.stopped
@@ -289,35 +289,35 @@ export function formatConversationWorkspaces(
     ...result.workspaces.flatMap((workspace, index) => [
       `${index + 1}. ${workspace.name} · ${workspace.id}${workspace.id === result.currentWorkspaceId ? " ← 当前" : ""}`,
       workspace.cwd,
-      ...workspaceEntitlementLines(workspace),
+      ...workspacePermissionLines(workspace),
     ]),
     "",
     "切换：/workspace <序号、ID 或名称>",
   ].join("\n"));
 }
 
-export function formatConversationWorkspaceEntitlements(
+export function formatConversationWorkspacePermissions(
   result: Extract<
     ConversationCommandResult,
-    { kind: "workspace-entitlements" }
+    { kind: "workspace-permissions" }
   >,
 ): string {
-  const entitlementLines = workspaceEntitlementLines(result.workspace);
+  const permissionLines = workspacePermissionLines(result.workspace);
   return toStructuredMarkdownList([
     `工作区权限（${result.workspace.name} · ${result.workspace.id}）：`,
-    ...(entitlementLines.length > 0
-      ? entitlementLines
+    ...(permissionLines.length > 0
+      ? permissionLines
       : ["未配置（使用全局默认）"]),
     "",
     "修改：",
     "- /workspace-perm sandbox <read-only|workspace-write|danger-full-access|clear>",
     "- /workspace-perm approval <untrusted|on-request|never|clear>",
     "- /workspace-perm profile <Profile ID|clear>",
-    "权益热加载后对新建或恢复的 Thread 生效，不改变已绑定 Thread。",
+    "权限热加载后对新建或恢复的 Thread 生效，不改变已绑定 Thread。",
   ].join("\n"));
 }
 
-function workspaceEntitlementLines(
+function workspacePermissionLines(
   workspace: Extract<ConversationCommandResult, { kind: "workspaces" }>["workspaces"][number],
 ): string[] {
   const lines: string[] = [];
@@ -481,13 +481,13 @@ export function formatConversationModels(
   if (result.view === "effort") {
     return toStructuredMarkdownList([
       `当前模型：${state.model}`,
-      `当前思考强度：${state.effort ?? current?.defaultReasoningEffort ?? "模型默认"}${state.effortPending ? "（下一次 Turn 生效）" : ""}`,
+      `当前思考等级：${state.effort ?? current?.defaultReasoningEffort ?? "模型默认"}${state.effortPending ? "（下一次 Turn 生效）" : ""}`,
       ...(current && fastServiceTierId(current)
         ? [`Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
         : []),
       "",
       ...providerSwitchNotice,
-      "可用思考强度：",
+      "可用思考等级：",
       ...(current?.supportedReasoningEfforts ?? []).map(
         (option, index) =>
           `${index + 1}. ${option.effort}${option.effort === state.effort ? " ← 当前" : ""} · ${option.description}`,
@@ -498,7 +498,7 @@ export function formatConversationModels(
   }
   return toStructuredMarkdownList([
     `当前模型：${state.model}${state.modelPending ? "（下一次 Turn 生效）" : ""}`,
-    `思考强度：${state.effort ?? "模型默认"}`,
+    `思考等级：${state.effort ?? "模型默认"}`,
     ...(current && fastServiceTierId(current)
       ? [`Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
       : []),
@@ -609,7 +609,7 @@ export function formatConversationStatus(status: ConversationStatus): string {
     `Git 分支：${status.gitBranch ?? "未检测到"}`,
     `模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
     `提供商：${formatCodexProviderLabel(status.modelProvider)}`,
-    `思考强度：${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
+    `思考等级：${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
     ...(usesOpenAiAccount(status.modelProvider)
       ? [`Fast 模式：${status.threadId ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭") : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`]
       : []),

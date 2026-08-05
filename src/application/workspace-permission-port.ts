@@ -4,14 +4,14 @@ import type {
   WorkspaceSandboxMode,
 } from "../policy/index.js";
 
-export type WorkspaceEntitlementUpdate =
+export type WorkspacePermissionUpdate =
   | { kind: "sandbox"; value: WorkspaceSandboxMode | null }
   | { kind: "approval"; value: WorkspaceApprovalPolicy | null }
   | { kind: "permissions"; value: string | null };
 
-export interface WorkspaceEntitlementPort {
-  updateWorkspaceEntitlements(
+export interface WorkspacePermissionPort {
+  updateWorkspacePermissions(
     workspaceId: string,
-    update: WorkspaceEntitlementUpdate,
+    update: WorkspacePermissionUpdate,
   ): Promise<Workspace>;
 }

@@ -131,7 +131,7 @@ describe("ModelSelectionService", () => {
     const service = createService({ model: "gpt-deep", effort: "high", serviceTier: "default" });
 
     await expect(service.selectEffort(target, "low"))
-      .rejects.toThrow("当前模型不支持该思考强度");
+      .rejects.toThrow("当前模型不支持该思考等级");
   });
 
   it("toggles Fast mode and sends the explicit Standard tier when turning it off", async () => {

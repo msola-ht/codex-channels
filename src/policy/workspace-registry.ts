@@ -10,13 +10,13 @@ export type WorkspaceApprovalPolicy =
   | "on-request"
   | "never";
 
-export interface WorkspaceEntitlements {
+export interface WorkspacePermissions {
   readonly sandbox?: WorkspaceSandboxMode;
   readonly approvalPolicy?: WorkspaceApprovalPolicy;
   readonly permissions?: string;
 }
 
-export interface Workspace extends WorkspaceEntitlements {
+export interface Workspace extends WorkspacePermissions {
   readonly id: string;
   readonly name: string;
   readonly cwd: string;

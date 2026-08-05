@@ -38,7 +38,7 @@ describe("WorkspaceRegistry", () => {
     });
   });
 
-  it("keeps workspace entitlements in frozen snapshots", () => {
+  it("keeps workspace permissions in frozen snapshots", () => {
     const registry = new WorkspaceRegistry([{
       id: "main",
       name: "Main",

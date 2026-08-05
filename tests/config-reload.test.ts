@@ -313,7 +313,7 @@ describe("Gateway config reload", () => {
     });
   });
 
-  it("hot reloads when only workspace entitlements change", () => {
+  it("hot reloads when only workspace permissions change", () => {
     const current = config();
 
     expect(classifyConfigReload(current, config({

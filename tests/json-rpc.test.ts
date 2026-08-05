@@ -1492,7 +1492,7 @@ describe("JsonRpcClient", () => {
       });
   });
 
-  it("starts a new thread with workspace entitlements", async () => {
+  it("starts a new thread with workspace permissions", async () => {
     const transport = new FakeTransport();
     const client = new CodexAppServerClient(new JsonRpcClient(transport), {
       sandbox: "workspace-write",
@@ -1529,7 +1529,7 @@ describe("JsonRpcClient", () => {
     expect(params).not.toHaveProperty("sandbox");
   });
 
-  it("resumes a thread with workspace entitlements", async () => {
+  it("resumes a thread with workspace permissions", async () => {
     const transport = new FakeTransport();
     const client = new CodexAppServerClient(new JsonRpcClient(transport), {
       sandbox: "workspace-write",

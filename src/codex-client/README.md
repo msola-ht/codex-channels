@@ -72,7 +72,7 @@ Notification 适配只返回当前支持的稳定事件；未知或畸形通知�
 Server Request 适配只把已校验的稳定请求交给 Approval；Approval 不接触生成协议或 RPC 信封，
 响应类型与请求不一致时失败关闭。
 当前精确协议基线要求 initialize 协商实验 API，App Server 才会发送已生成并受控导出的
-`thread/settings/updated`；该通知用于同步共享 Thread 的模型、思考强度、服务层级和
+`thread/settings/updated`；该通知用于同步共享 Thread 的模型、思考等级、服务层级和
 Default/Plan 协作模式。Client 只额外调用 `collaborationMode/list` 并把受控的
 `turn/start.collaborationMode` 映射到 Application 窄类型；其他实验请求不属于业务入口。启用该能力
 同时出现的实验审批字段必须在 `approval` 边界显式展示或默认拒绝，不能静默扩大授权。

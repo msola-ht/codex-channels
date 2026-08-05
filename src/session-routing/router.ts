@@ -43,7 +43,7 @@ export class SessionRouter {
     private readonly workspaces: WorkspaceRegistry,
   ) {}
 
-  private workspaceEntitlements(workspace: Workspace): ThreadStartOptions {
+  private workspacePermissions(workspace: Workspace): ThreadStartOptions {
     return {
       ...(workspace.sandbox === undefined
         ? {}
@@ -155,7 +155,7 @@ export class SessionRouter {
         const resumed = await this.codex.resumeThread(
           binding.threadId,
           workspace.cwd,
-          this.workspaceEntitlements(workspace),
+          this.workspacePermissions(workspace),
         );
         this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier);
         this.contextCompactionItemIdsByThread.set(
@@ -240,7 +240,7 @@ export class SessionRouter {
         const resumed = await this.codex.resumeThread(
           candidate.id,
           workspace.cwd,
-          this.workspaceEntitlements(workspace),
+          this.workspacePermissions(workspace),
         );
         this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier);
         this.contextCompactionItemIdsByThread.set(
@@ -254,7 +254,7 @@ export class SessionRouter {
     }
 
     const started = await this.codex.startThread(workspace.cwd, {
-      ...this.workspaceEntitlements(workspace),
+      ...this.workspacePermissions(workspace),
       ...startOptions,
     });
     this.captureModelSettings(started.thread.id, started.model, started.modelProvider, started.reasoningEffort, started.serviceTier);
@@ -281,7 +281,7 @@ export class SessionRouter {
     const resumed = await this.codex.resumeThread(
       threadId,
       workspace.cwd,
-      this.workspaceEntitlements(workspace),
+      this.workspacePermissions(workspace),
     );
     const current = this.bindings.get(target);
     if (current && current.threadId !== resumed.thread.id && !preserveCurrent) {
@@ -350,7 +350,7 @@ export class SessionRouter {
           await this.codex.resumeThread(
             replaced.threadId,
             workspace.cwd,
-            this.workspaceEntitlements(workspace),
+            this.workspacePermissions(workspace),
           );
         } catch (restoreError) {
           throw new AggregateError(

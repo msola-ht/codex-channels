@@ -6,8 +6,8 @@ import {
   UserFacingError,
 } from "../conversation-core/index.js";
 import type {
-  WorkspaceEntitlementPort,
-  WorkspaceEntitlementUpdate,
+  WorkspacePermissionPort,
+  WorkspacePermissionUpdate,
 } from "../application/index.js";
 import type {
   Workspace,
@@ -28,14 +28,14 @@ interface ConfigToml {
   workspaces: WorkspaceToml[];
 }
 
-export class TomlWorkspaceEntitlementWriter
-  implements WorkspaceEntitlementPort
+export class TomlWorkspacePermissionWriter
+  implements WorkspacePermissionPort
 {
   constructor(private readonly configPath: string) {}
 
-  updateWorkspaceEntitlements(
+  updateWorkspacePermissions(
     workspaceId: string,
-    update: WorkspaceEntitlementUpdate,
+    update: WorkspacePermissionUpdate,
   ): Promise<Workspace> {
     try {
       const document = readGatewayConfig(
@@ -116,7 +116,7 @@ export class TomlWorkspaceEntitlementWriter
 
 function conflictError(): UserFacingError {
   return new UserFacingError(
-    "workspace.entitlement.conflict",
+    "workspace.permission.conflict",
     "permissions 与 sandbox 互斥，不能同时配置；请先清除其中一项",
   );
 }

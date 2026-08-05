@@ -601,7 +601,7 @@ export function renderFeishuCommandCenterCard(
       sectionTitle("模型与工作区"),
       actionRow(token, [
         ["模型设置", "model", "default"],
-        ["思考强度", "effort", "default"],
+        ["思考等级", "effort", "default"],
         ["工作区", "workspace", "default"],
       ]),
       actionRow(token, [

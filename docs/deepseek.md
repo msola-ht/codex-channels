@@ -69,7 +69,7 @@ Gateway 根据 Thread 的 `modelProvider` 路由新建、恢复、Turn、Review�
 3. 不复制可能包含 Provider 专属 reasoning、工具结果或加密内容的历史。
 
 旧 Thread 仍可通过 `/resume` 恢复。同一 Provider 内切换模型时不新建 Thread，选择在下一次 Turn
-生效。跨 Provider 新建 Thread 使用目标模型目录的默认思考强度；当前 DeepSeek 默认是 `high`。
+生效。跨 Provider 新建 Thread 使用目标模型目录的默认思考等级；当前 DeepSeek 默认是 `high`。
 
 任一 Provider 连接断开时，Gateway 只重连并恢复该侧绑定。任一受监管 App Server 子进程退出时，
 App Server 服务会共同重建受监管实例。

@@ -115,7 +115,7 @@ describe("model provider runtime topology", () => {
 
     expect(loadManagedModelProvider(environment)).toMatchObject({ provider: "deepseek" });
     expect(() => loadManagedProviderAppServer(environment))
-      .toThrow("模型目录或推理强度无效");
+      .toThrow("模型目录或思考等级无效");
   });
 
   it("validates both switching and exclusive managed configurations", async () => {
@@ -147,7 +147,7 @@ describe("model provider runtime topology", () => {
     );
 
     expect(() => validateConfiguredModelProvider({ CODEX_HOME: codexHome }))
-      .toThrow("模型目录或推理强度无效");
+      .toThrow("模型目录或思考等级无效");
   });
 });
 

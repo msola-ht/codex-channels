@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
-import { TomlWorkspaceEntitlementWriter } from "../src/bootstrap/workspace-entitlement-writer.js";
+import { TomlWorkspacePermissionWriter } from "../src/bootstrap/workspace-permission-writer.js";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 
@@ -21,12 +21,12 @@ afterEach(() => {
   }
 });
 
-describe("TomlWorkspaceEntitlementWriter", () => {
+describe("TomlWorkspacePermissionWriter", () => {
   it("writes sandbox and approval policy back to the configuration", async () => {
     const fixture = createFixture();
-    const writer = new TomlWorkspaceEntitlementWriter(fixture.configPath);
+    const writer = new TomlWorkspacePermissionWriter(fixture.configPath);
 
-    const updated = await writer.updateWorkspaceEntitlements(
+    const updated = await writer.updateWorkspacePermissions(
       "codex-connect",
       { kind: "sandbox", value: "danger-full-access" },
     );
@@ -35,7 +35,7 @@ describe("TomlWorkspaceEntitlementWriter", () => {
     const entry = workspaceEntry(fixture.configPath);
     expect(entry).toMatchObject({ sandbox: "danger-full-access" });
 
-    await writer.updateWorkspaceEntitlements(
+    await writer.updateWorkspacePermissions(
       "codex-connect",
       { kind: "approval", value: "never" },
     );
@@ -45,36 +45,36 @@ describe("TomlWorkspaceEntitlementWriter", () => {
 
   it("rejects a permission profile while sandbox is configured", async () => {
     const fixture = createFixture();
-    const writer = new TomlWorkspaceEntitlementWriter(fixture.configPath);
-    await writer.updateWorkspaceEntitlements(
+    const writer = new TomlWorkspacePermissionWriter(fixture.configPath);
+    await writer.updateWorkspacePermissions(
       "codex-connect",
       { kind: "sandbox", value: "workspace-write" },
     );
 
-    await expect(writer.updateWorkspaceEntitlements(
+    await expect(writer.updateWorkspacePermissions(
       "codex-connect",
       { kind: "permissions", value: ":read-only" },
-    )).rejects.toMatchObject({ code: "workspace.entitlement.conflict" });
+    )).rejects.toMatchObject({ code: "workspace.permission.conflict" });
     expect(workspaceEntry(fixture.configPath)).not.toHaveProperty("permissions");
   });
 
-  it("clears configured entitlements with null values", async () => {
+  it("clears configured permissions with null values", async () => {
     const fixture = createFixture();
-    const writer = new TomlWorkspaceEntitlementWriter(fixture.configPath);
-    await writer.updateWorkspaceEntitlements(
+    const writer = new TomlWorkspacePermissionWriter(fixture.configPath);
+    await writer.updateWorkspacePermissions(
       "codex-connect",
       { kind: "sandbox", value: "read-only" },
     );
-    await writer.updateWorkspaceEntitlements(
+    await writer.updateWorkspacePermissions(
       "codex-connect",
       { kind: "approval", value: "untrusted" },
     );
 
-    await writer.updateWorkspaceEntitlements(
+    await writer.updateWorkspacePermissions(
       "codex-connect",
       { kind: "sandbox", value: null },
     );
-    await writer.updateWorkspaceEntitlements(
+    await writer.updateWorkspacePermissions(
       "codex-connect",
       { kind: "approval", value: null },
     );
@@ -86,7 +86,7 @@ describe("TomlWorkspaceEntitlementWriter", () => {
 });
 
 function createFixture(): { configPath: string; environment: NodeJS.ProcessEnv } {
-  const root = mkdtempSync(join(tmpdir(), "codexc-entitlement-writer-"));
+  const root = mkdtempSync(join(tmpdir(), "codexc-permission-writer-"));
   roots.push(root);
   const home = join(root, ".codex-connect");
   const workspace = join(root, "workspace");

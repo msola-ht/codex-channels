@@ -19,9 +19,9 @@ import type {
 import type { SessionRouter } from "../session-routing/index.js";
 import type { Workspace } from "../policy/index.js";
 import type {
-  WorkspaceEntitlementPort,
-  WorkspaceEntitlementUpdate,
-} from "./workspace-entitlement-port.js";
+  WorkspacePermissionPort,
+  WorkspacePermissionUpdate,
+} from "./workspace-permission-port.js";
 import {
   ConversationCore,
   UserFacingError,
@@ -171,9 +171,9 @@ export interface ConversationUseCases {
   artifacts(target: ConversationTarget): TurnArtifacts | undefined;
   listWorkspaces(): Workspace[];
   selectWorkspace(target: ConversationTarget, selector: string): Promise<Workspace>;
-  updateWorkspaceEntitlements(
+  updateWorkspacePermissions(
     target: ConversationTarget,
-    update: WorkspaceEntitlementUpdate,
+    update: WorkspacePermissionUpdate,
   ): Promise<Workspace>;
   stop(target: ConversationTarget): Promise<boolean>;
   rename(target: ConversationTarget, name: string): Promise<void>;
@@ -228,7 +228,7 @@ export class ConversationService implements ConversationUseCases {
     private readonly providerAccounts?: ProviderAccountQueryPort,
     private readonly vision?: VisionRecognitionPort,
     private readonly requestMetricsQuery?: RequestMetricsQueryPort,
-    private readonly workspaceEntitlements?: WorkspaceEntitlementPort,
+    private readonly workspacePermissions?: WorkspacePermissionPort,
   ) {}
 
   requestMetrics(
@@ -690,19 +690,19 @@ export class ConversationService implements ConversationUseCases {
     });
   }
 
-  updateWorkspaceEntitlements(
+  updateWorkspacePermissions(
     target: ConversationTarget,
-    update: WorkspaceEntitlementUpdate,
+    update: WorkspacePermissionUpdate,
   ): Promise<Workspace> {
-    if (!this.workspaceEntitlements) {
+    if (!this.workspacePermissions) {
       throw new UserFacingError(
-        "workspace.entitlement.unavailable",
-        "当前 Gateway 不支持修改工作区权益",
+        "workspace.permission.unavailable",
+        "当前 Gateway 不支持修改工作区权限",
       );
     }
     return this.locked(target, () => {
       const workspaceId = this.router.workspace(target).id;
-      return this.workspaceEntitlements!.updateWorkspaceEntitlements(
+      return this.workspacePermissions!.updateWorkspacePermissions(
         workspaceId,
         update,
       );

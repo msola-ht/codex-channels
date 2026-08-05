@@ -15,9 +15,9 @@
   排队消息或待处理交互后调用路由层原子转移，并向原渠道发布关键解绑通知；
   扩展查询通过 `ConversationQueryPort` 组合窄端口，Skill、MCP 与
   Plugin 和 Permission Profile 均使用稳定结果。
-- `model-selection-service.ts`：查询模型、输入能力与思考强度，保存按 Conversation 生效的 Turn 覆盖设置；
+- `model-selection-service.ts`：查询模型、输入能力与思考等级，保存按 Conversation 生效的 Turn 覆盖设置；
   选择不同 Provider 时保留并解绑当前 Thread，为下一 Turn 在对应 App Server 新建带精确
-  `modelProvider` 的 Thread，并采用目标模型目录的默认思考强度，避免把原 Provider 的设置或专属
+  `modelProvider` 的 Thread，并采用目标模型目录的默认思考等级，避免把原 Provider 的设置或专属
   历史发送到不兼容的 API；旧 Thread 保持可恢复；
   含本地图片或音频的输入在创建或追加 Turn 前必须分别通过当前模型的 `image` 或 `audio` 能力检查；
   Fast 只允许当前模型目录明确声明支持时切换，并通过模型窄端口保存用户级默认层级；第三方模型
@@ -26,7 +26,7 @@
   暴露完整实验协议。
 - `collaboration-mode-service.ts`：把官方预设与当前模型设置组合为下一 Turn 的协作模式覆盖；
   模式按 Thread 同步，只在内存保存尚未生效的选择。
-- `model-port.ts`：定义项目拥有的 Provider、`text/image/audio` 输入能力、思考强度、服务层级与 Fast 默认值写入窄端口；
+- `model-port.ts`：定义项目拥有的 Provider、`text/image/audio` 输入能力、思考等级、服务层级与 Fast 默认值写入窄端口；
   Application 和 Surface 不接收完整官方模型对象。
 - `account-port.ts`：分别定义 OpenAI 账户 Token/额度、第三方余额和未支持状态的可辨识结果，
   以及 Provider 账户适配器与查询窄端口；不同来源不得共用含义不一致的字段。
@@ -50,7 +50,7 @@
   本机路径、版本、安装策略或完整官方响应。
 - `permission-port.ts`：定义 Permission Profile 的稳定 ID、说明和策略可选状态查询；只表示
   当前 Workspace 可见目录，不授予权限，也不承载审批决定。
-- `workspace-entitlement-port.ts`：定义渠道 `/workspace-perm` 使用的工作区权益写入窄端口；
+- `workspace-permission-port.ts`：定义渠道 `/workspace-perm` 使用的工作区权限写入窄端口；
   Application 只按当前 Conversation 绑定的 Workspace 传递沙箱、审批策略或权限 Profile 更新，
   不接触配置文件。
 - `turn-port.ts`：定义项目拥有的 Turn 输入、设置覆盖、Review 目标与执行窄端口，并复用 Core
@@ -71,7 +71,7 @@ Turn 队列。
 名称与说明；显式调用时由 Client 再按精确名称解析绝对路径，排除系统和插件缓存内容。MCP 只返回
 展示所需的稳定摘要，并按当前 Thread 读取项目级配置；Plugin 只返回已安装项的稳定摘要，不触发
 `plugin/list` 市场目录查询。
-成功启动 Turn 后，模型、思考强度、服务层级和协作模式以 App Server 的 Thread 设置为准；
+成功启动 Turn 后，模型、思考等级、服务层级和协作模式以 App Server 的 Thread 设置为准；
 Gateway 重启时通过恢复 Thread 和设置通知重新取得这些设置。`/plan` 无参数切换
 Default/Plan，带参数时在空闲边界内直接启动 Plan Turn；活动 Turn 不允许中途切换。
 Turn、steer、停止、重命名、固定、压缩、Review 和 Goal 只依赖 `TurnExecutionPort`；当前版本官方字段由

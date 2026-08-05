@@ -953,7 +953,7 @@ function renderCommandCenterChoices(
   }
   if (
     action === "workspace-perm"
-    && result.kind === "workspace-entitlements"
+    && result.kind === "workspace-permissions"
   ) {
     return {
       title: "工作区权限",
@@ -1009,7 +1009,7 @@ function renderCommandCenterChoices(
       return undefined;
     }
     return {
-      title: "选择思考强度",
+      title: "选择思考等级",
       description: `当前：${result.state.effort ?? currentModel?.defaultReasoningEffort ?? "模型默认"}`,
       choices: efforts.map(
         (option) => ({
@@ -1111,7 +1111,7 @@ function renderWorkspacePermissionFieldChoices(
 function workspacePermissionSummary(
   workspace: Extract<
     ConversationCommandResult,
-    { kind: "workspace-entitlements" }
+    { kind: "workspace-permissions" }
   >["workspace"],
 ): string {
   return [

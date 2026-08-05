@@ -446,7 +446,7 @@ describe("Feishu conversation adapter", () => {
       "",
     );
     expect(choices).toMatchObject({
-      title: "选择思考强度",
+      title: "选择思考等级",
       choices: [
         expect.objectContaining({ input: "medium" }),
         expect.objectContaining({ input: "high" }),
@@ -462,7 +462,7 @@ describe("Feishu conversation adapter", () => {
     );
     await fixture.outbox.close();
     expect(selectEffort).toHaveBeenCalledWith(message.target, "high");
-    expect(fixture.sent[0]?.text).toContain("当前思考强度：high");
+    expect(fixture.sent[0]?.text).toContain("当前思考等级：high");
   });
 
   it("uses the shared Skill list and explicit invocation commands", async () => {
@@ -510,7 +510,7 @@ describe("Feishu conversation adapter", () => {
 
   it("turns workspace permission updates into clickable card choices", async () => {
     const fixture = createOutbox();
-    const updateWorkspaceEntitlements = vi.fn(async () => ({
+    const updateWorkspacePermissions = vi.fn(async () => ({
       id: "codex-connect",
       name: "Workspace",
       cwd: "/workspace",
@@ -525,7 +525,7 @@ describe("Feishu conversation adapter", () => {
           cwd: "/workspace",
           sandbox: "read-only",
         }],
-        updateWorkspaceEntitlements,
+        updateWorkspacePermissions,
       } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
@@ -579,7 +579,7 @@ describe("Feishu conversation adapter", () => {
       "approval never",
     );
     await fixture.outbox.close();
-    expect(updateWorkspaceEntitlements).toHaveBeenCalledWith(message.target, {
+    expect(updateWorkspacePermissions).toHaveBeenCalledWith(message.target, {
       kind: "approval",
       value: "never",
     });
@@ -1084,7 +1084,7 @@ describe("Feishu conversation adapter", () => {
         "- Git 分支：未检测到",
         "- 模型：gpt-test",
         "- 提供商：OpenAI 官方",
-        "- 思考强度：medium",
+        "- 思考等级：medium",
         "- Fast 模式：开启",
         "- 协作模式：Default",
         "",

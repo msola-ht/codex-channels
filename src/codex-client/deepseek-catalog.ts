@@ -55,7 +55,7 @@ export function loadDeepseekModelOptions(
         : [];
     });
     if (efforts.length === 0) {
-      throw new Error(`DeepSeek 模型目录缺少推理强度：${catalogPath}`);
+      throw new Error(`DeepSeek 模型目录缺少思考等级：${catalogPath}`);
     }
     return [{
       provider: definition.id,

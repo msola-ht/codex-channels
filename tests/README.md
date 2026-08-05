@@ -94,7 +94,7 @@
   Store 契约和 Linux 原子密文替换与私有权限。
 - Skill 用户与 Workspace 安装过滤、结构化显式调用、已安装 Plugin 稳定摘要及远端市场隔离。
 - 官方模型目录到稳定 Application 模型选项的映射、不可见项过滤、必需字段失败关闭，模型、
-  思考强度和 Fast 的 Thread 覆盖、Codex 用户级 Fast 默认值持久化、共享客户端完整或残缺设置
+  思考等级和 Fast 的 Thread 覆盖、Codex 用户级 Fast 默认值持久化、共享客户端完整或残缺设置
   通知、Thread 失效通知及 Gateway/CLI 连接恢复；DeepSeek 官方脚本目录提取、两种 Setup 模式、
   API Key 输出隔离、下载失败不修改、Flash 可选与 Pro 可见但不可选，以及跨 Provider 新建
   Thread、原 Thread 可恢复、精确 Provider 路由、设置通知不覆盖不可变 Provider，以及在文本模型
@@ -272,7 +272,7 @@ RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
 App Server 不依赖 CLI Profile 即可初始化，并验证 MCP 工具审批元数据及
 `_meta.persist` 通过真实 App Server 往返；同时验证一个 Client 写入的 Fast 用户默认值能被另一个 Client
 读取，之后新建 Thread 的运行时 `serviceTier` 按 `default → priority → default` 变化，并验证
-第二个 Client 修改共享 Thread 的模型、思考强度和 Fast 设置时，订阅方收到完整的
+第二个 Client 修改共享 Thread 的模型、思考等级和 Fast 设置时，订阅方收到完整的
 `thread/settings/updated`；第二个 Client 重连后再次修改仍会广播。合同还会启动并立即清理一个
 不等待模型结果的 Plan Turn，验证 Default/Plan 预设、Plan 设置通知、稳定 Turn ID、中断后的
 官方非负 `durationMs`、Skill、MCP、Plugin

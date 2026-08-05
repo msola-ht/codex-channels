@@ -25,7 +25,7 @@ import {
   formatConversationSkills,
   formatConversationStatus,
   formatConversationUsage,
-  formatConversationWorkspaceEntitlements,
+  formatConversationWorkspacePermissions,
   formatConversationWorkspaces,
   toStructuredMarkdownList,
 } from "../conversation-command-format.js";
@@ -128,8 +128,8 @@ export function renderFeishuCommandResult(
       return formatConversationStatus(result.status);
     case "workspaces":
       return formatConversationWorkspaces(result);
-    case "workspace-entitlements":
-      return formatConversationWorkspaceEntitlements(result);
+    case "workspace-permissions":
+      return formatConversationWorkspacePermissions(result);
     case "models":
       return formatConversationModels(result);
     case "collaboration-mode":

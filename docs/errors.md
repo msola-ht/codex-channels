@@ -76,7 +76,7 @@
 | `model.input.image.unsupported` | 当前模型不支持图片输入 | 模型无图片模态且未启用视觉代理 |
 | `model.input.audio.unsupported` | 当前模型不支持语音输入 | 模型无音频模态 |
 | `model.input.unsupported` | 当前模型不支持该输入类型 | 其他输入模态不支持 |
-| `effort.unsupported` | 当前模型不支持该思考强度并附可选值 | 思考强度与模型不匹配 |
+| `effort.unsupported` | 当前模型不支持该思考等级并附可选值 | 思考等级与模型不匹配 |
 | `fast.usage` | /fast 用法提示 | 参数格式错误 |
 | `fast.unsupported` | 当前模型不支持 Fast 模式 | Fast 与模型不兼容 |
 

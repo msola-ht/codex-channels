@@ -265,7 +265,7 @@ async function runWorkspaceSettings({
   const entry = workspaceEntries[index];
   while (true) {
     const field = await prompts.select({
-      message: `选择 ${entry.name ?? entry.id} 的权益项`,
+      message: `选择 ${entry.name ?? entry.id} 的权限项`,
       showInstructions: false,
       options: [
         {
@@ -354,13 +354,13 @@ async function runWorkspaceSettings({
         entry.permissions = trimmed;
       }
     } else {
-      throw new Error(`未知工作区权益项：${String(field)}`);
+      throw new Error(`未知工作区权限项：${String(field)}`);
     }
     document.workspaces = workspaces;
     writeConfig(configPath, document);
     output.write(
-      `已更新 ${entry.name ?? entry.id} 的权益：${configPath}\n`
-        + "权益热加载后对新建或恢复的 Thread 生效，不改变已绑定 Thread。\n",
+      `已更新 ${entry.name ?? entry.id} 的权限：${configPath}\n`
+        + "权限热加载后对新建或恢复的 Thread 生效，不改变已绑定 Thread。\n",
     );
     return {
       workspaceId: String(entry.id),
