@@ -231,7 +231,7 @@ json，其余默认 markdown），默认写入 `~/.codex-connect/output/<日期>
 加 `--stdout` 输出到标准输出。导出使用只读
 连接，可在 Gateway 运行时执行；支持 `24h`、`7d`、`30d`，包含固定格式版本、时间范围和脱敏请求
 字段，不包含提示词、消息、图片、响应正文、凭据或上游响应 ID。`report` 与 `export` 的
-Markdown、JSON、CSV 还包含统计代理最后观测到的当前周额度区间和每 1% 采样状态；JSON 格式版本为 v2。
+Markdown、JSON、CSV 还包含 OpenAI 统计代理最后观测到的当前周额度区间和每 1% 采样状态；JSON 格式版本为 v2。
 `run`、`turns`、`threads` 和 `report` 会单列远程压缩模型、请求数、Token 与参考费用；`export`
 JSON/CSV 明细保留 `operation=compact`，Markdown 明细也显示操作类型。
 `export` CSV 使用 `type=request|weekly_quota_summary` 区分请求与当前额度摘要：请求行只携带该次

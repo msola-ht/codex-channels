@@ -206,7 +206,12 @@ export function upgradeMetricsDatabaseWithGatewayRestart(
     ?? (() => runGatewayServiceAction("start", environment));
   const upgrade = options.upgrade
     ?? (() => upgradeMetricsDatabase(environment));
-  stopGateway();
+  let stopError;
+  try {
+    stopGateway();
+  } catch (error) {
+    stopError = error;
+  }
   let result;
   let upgradeError;
   try {
@@ -220,6 +225,13 @@ export function upgradeMetricsDatabaseWithGatewayRestart(
   } catch (error) {
     startError = error;
   }
+  if (stopError && startError) {
+    throw new AggregateError(
+      [stopError, startError],
+      "指标库升级前停止 Gateway 失败，且 Gateway 未能重新启动",
+    );
+  }
+  if (stopError) throw stopError;
   if (upgradeError && startError) {
     throw new AggregateError(
       [upgradeError, startError],

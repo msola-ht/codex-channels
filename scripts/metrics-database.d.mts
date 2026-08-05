@@ -35,7 +35,14 @@ export interface MetricsReportDocument {
   version: 2;
   generatedAt: string;
   range: { name: string; startAtMs: number; endAtMs: number };
-  report: { aggregate: unknown };
+  report: {
+    dimension: unknown;
+    startAtMs: number;
+    endAtMs: number;
+    aggregate: unknown;
+    groups: unknown[];
+    totalGroupCount: number;
+  };
   errors: unknown;
   weeklyQuota: unknown;
 }

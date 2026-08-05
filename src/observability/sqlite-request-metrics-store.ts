@@ -1083,14 +1083,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
               weekly_resets_at IS NULL OR weekly_resets_at >= 0
             ),
             CHECK (
-              (weekly_quota_limit_id IS NULL
-                AND weekly_used_percent_millionths IS NULL
-                AND weekly_resets_at IS NULL)
-              OR (weekly_quota_limit_id IS NOT NULL
-                AND weekly_used_percent_millionths IS NOT NULL
-                AND weekly_resets_at IS NOT NULL)
-            ),
-            CHECK (
               (
                 billing_mode IS NULL
                 AND pricing_currency IS NULL
