@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { timingSafeEqual } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -10,6 +10,11 @@ import {
   readWeeklyQuota,
 } from "./metrics-database.mjs";
 import { enrichCosts, loadDisplayContext } from "./metrics-export-format.mjs";
+import { userDataDir } from "./runtime-config.mjs";
+import {
+  readGatewayConfig,
+  validateWebuiConfigDocument,
+} from "../runtime/gateway-config.mjs";
 import { SqliteModelRequestMetricsStore } from "../dist/observability/index.js";
 
 const DEFAULT_HOST = "127.0.0.1";
@@ -44,10 +49,36 @@ export function createWebuiServer({
   if (!["127.0.0.1", "::1", "0.0.0.0"].includes(host)) {
     throw new Error("WebUI host 只允许 127.0.0.1、::1 或 0.0.0.0");
   }
+  if (host === "0.0.0.0" && token === null) {
+    throw new Error(
+      "WebUI 绑定非回环地址时必须提供访问令牌（--token 或配置 [webui] token）",
+    );
+  }
   const server = createServer((request, response) => {
     handleRequest(environment, staticDir, host, token, request, response);
   });
   return { host, server, staticDir, token };
+}
+
+export function resolveWebuiSettings({
+  args = [],
+  environment = process.env,
+} = {}) {
+  const cli = parseCliArgs(args);
+  const explicitConfigFile = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
+  const configPath = explicitConfigFile
+    ? resolve(explicitConfigFile)
+    : join(userDataDir(environment), "config.toml");
+  let configured = {};
+  if (existsSync(configPath)) {
+    configured = validateWebuiConfigDocument(readGatewayConfig(configPath));
+  }
+  return {
+    host: cli.host ?? configured.host ?? DEFAULT_HOST,
+    port: cli.port ?? configured.port ?? DEFAULT_PORT,
+    token: cli.token !== undefined ? cli.token : configured.token ?? null,
+    configPath,
+  };
 }
 
 function handleRequest(environment, staticDir, host, token, request, response) {
@@ -372,43 +403,43 @@ function sendJson(response, status, payload) {
 }
 
 function main() {
-  const parsed = parseCliArgs(process.argv.slice(2));
-  const { host, server } = createWebuiServer({
-    environment: process.env,
-    host: parsed.host,
-    token: parsed.token,
-  });
-  server.on("error", (error) => {
-    console.error(`WebUI 启动失败：${error instanceof Error ? error.message : String(error)}`);
-    process.exitCode = 1;
-  });
-  server.listen(parsed.port, host, () => {
-    if (host === "0.0.0.0") {
-      if (parsed.token === null) {
-        console.log(`Codex WebUI 已监听 0.0.0.0:${parsed.port}（未启用访问令牌）`);
-        console.log(`请通过服务器实际 IP 访问 http://<服务器IP>:${parsed.port}/`);
-        console.warn("警告：未启用访问令牌，指标数据对网络公开，仅供测试。");
+  try {
+    const settings = resolveWebuiSettings({ args: process.argv.slice(2) });
+    const { host, server } = createWebuiServer({
+      environment: process.env,
+      host: settings.host,
+      token: settings.token,
+    });
+    server.on("error", (error) => {
+      console.error(`WebUI 启动失败：${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    });
+    server.listen(settings.port, host, () => {
+      const configNote = existsSync(settings.configPath)
+        ? `（配置 [webui]：${settings.configPath}，CLI 参数优先）`
+        : "";
+      if (host === "0.0.0.0") {
+        console.log(`Codex WebUI 已监听 0.0.0.0:${settings.port}（访问令牌保护）${configNote}`);
+        console.log(`请通过服务器实际 IP 访问 http://<服务器IP>:${settings.port}/`);
+        console.log("API 请求需要请求头 Authorization: Bearer <令牌>，或使用 ?token=<令牌> 打开。");
       } else {
-        console.log(`Codex WebUI 已监听 0.0.0.0:${parsed.port}（访问令牌保护）`);
-        console.log(`请通过服务器实际 IP 访问 http://<服务器IP>:${parsed.port}/`);
-        console.log("API 请求需要请求头 Authorization: Bearer <令牌>。");
+        console.log(`Codex WebUI: http://${host}:${settings.port}/${configNote}`);
       }
-    } else {
-      console.log(`Codex WebUI: http://${host}:${parsed.port}/`);
-    }
-    console.log("按 Ctrl+C 停止。");
-  });
-  const shutdown = () => {
-    server.close(() => process.exit(0));
-  };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+      console.log("按 Ctrl+C 停止。");
+    });
+    const shutdown = () => {
+      server.close(() => process.exit(0));
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  }
 }
 
 function parseCliArgs(args) {
-  let host = DEFAULT_HOST;
-  let port = DEFAULT_PORT;
-  let token = null;
+  const settings = {};
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--port") {
@@ -416,10 +447,11 @@ function parseCliArgs(args) {
       if (raw === undefined || !/^[0-9]+$/u.test(raw)) {
         throw new Error("用法：codexc webui [--host 地址] [--port 端口] [--token 令牌]");
       }
-      port = Number(raw);
+      const port = Number(raw);
       if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
         throw new Error("端口必须在 1 到 65535 之间");
       }
+      settings.port = port;
       index += 1;
       continue;
     }
@@ -428,7 +460,7 @@ function parseCliArgs(args) {
       if (raw === undefined) {
         throw new Error("用法：codexc webui [--host 地址] [--port 端口] [--token 令牌]");
       }
-      host = raw;
+      settings.host = raw;
       index += 1;
       continue;
     }
@@ -437,7 +469,7 @@ function parseCliArgs(args) {
       if (raw === undefined || raw === "") {
         throw new Error("用法：codexc webui [--host 地址] [--port 端口] [--token 令牌]");
       }
-      token = raw;
+      settings.token = raw;
       index += 1;
       continue;
     }
@@ -445,7 +477,7 @@ function parseCliArgs(args) {
       `未知参数：${argument}\n用法：codexc webui [--host 地址] [--port 端口] [--token 令牌]`,
     );
   }
-  return { host, port, token };
+  return settings;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

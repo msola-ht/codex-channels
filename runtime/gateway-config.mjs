@@ -88,6 +88,20 @@ const visionSchema = z.discriminatedUnion("mode", [
 
 const priceCurrencySchema = z.enum(["auto", "cny", "usd"]).default("auto");
 
+const webuiSchema = z.strictObject({
+  host: z.enum(["127.0.0.1", "::1", "0.0.0.0"]).default("127.0.0.1"),
+  port: z.number().int().min(1).max(65535).default(8787),
+  token: z.string().min(1).optional(),
+}).superRefine((value, context) => {
+  if (value.host === "0.0.0.0" && value.token === undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["token"],
+      message: "绑定非回环地址时必须设置 token",
+    });
+  }
+});
+
 const gatewayDocumentSchema = z.strictObject({
   version: z.literal(1),
   default_workspace: z.string().trim().min(1),
@@ -135,6 +149,7 @@ const gatewayDocumentSchema = z.strictObject({
   logging: z.strictObject({
     level: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
   }).default({ level: "info" }),
+  webui: webuiSchema.optional(),
   workspaces: z.array(workspaceSchema).min(1),
 });
 
@@ -164,6 +179,18 @@ export function validateGatewayConfigDocument(document) {
   const parsed = gatewayDocumentSchema.safeParse(document);
   if (!parsed.success) {
     throw new Error(z.prettifyError(parsed.error));
+  }
+  return parsed.data;
+}
+
+export function validateWebuiConfigDocument(document) {
+  const parsed = webuiSchema.safeParse(
+    document !== null && typeof document === "object"
+      ? document.webui ?? {}
+      : {},
+  );
+  if (!parsed.success) {
+    throw new Error(`config.toml 的 [webui] 配置无效：\n${z.prettifyError(parsed.error)}`);
   }
   return parsed.data;
 }

@@ -219,6 +219,78 @@ describe("Codex Connect config menu", () => {
     });
   });
 
+  it("sets webui host and requires a token for non-loopback", async () => {
+    const fixture = createFixture();
+    const output: string[] = [];
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("webui")
+        .mockResolvedValueOnce("host")
+        .mockResolvedValueOnce("0.0.0.0"),
+      password: vi.fn(async () => "webui-token"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    const result = await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts,
+    });
+
+    expect(result).toEqual({
+      webui: { host: "0.0.0.0", token: "webui-token" },
+      configPath: fixture.configPath,
+    });
+    expect(readGatewayConfig(fixture.configPath).webui).toEqual({
+      host: "0.0.0.0",
+      token: "webui-token",
+    });
+    expect(output.join("")).toContain("WebUI 设置已更新");
+  });
+
+  it("sets webui port and token through the menu", async () => {
+    const fixture = createFixture();
+    const output: string[] = [];
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("webui")
+        .mockResolvedValueOnce("port"),
+      text: vi.fn(async () => "9000"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts,
+    });
+    expect(readGatewayConfig(fixture.configPath).webui).toEqual({ port: 9000 });
+
+    const tokenPrompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("webui")
+        .mockResolvedValueOnce("token")
+        .mockResolvedValueOnce("set"),
+      password: vi.fn(async () => "webui-token"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+    await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts: tokenPrompts,
+    });
+    expect(readGatewayConfig(fixture.configPath).webui).toEqual({
+      port: 9000,
+      token: "webui-token",
+    });
+  });
+
   it("sets workspace sandbox and approval policy through the menu", async () => {
     const fixture = createFixture();
     const output: string[] = [];

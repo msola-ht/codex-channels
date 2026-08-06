@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
-import { createWebuiServer } from "../scripts/webui-server.mjs";
+import { createWebuiServer, resolveWebuiSettings } from "../scripts/webui-server.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 import {
@@ -313,14 +313,67 @@ describe("webui server", () => {
     expect(ok.status).toBe(200);
   });
 
-  it("allows non-loopback hosts without a token", async () => {
+  it("rejects non-loopback hosts without a token", () => {
     const fixture = createFixture();
-    recordSample(fixture.databasePath, metricSample());
-    const { origin } = await startServer(fixture.environment, undefined, {
+    expect(() => createWebuiServer({
+      environment: fixture.environment,
       host: "0.0.0.0",
+    })).toThrow("必须提供访问令牌");
+  });
+
+  it("resolves default webui settings without a config file", () => {
+    const home = mkdtempSync(join(tmpdir(), "codexc-webui-settings-"));
+    temporaryDirectories.push(home);
+    const settings = resolveWebuiSettings({
+      environment: {
+        ...process.env,
+        CODEX_CONNECT_HOME: home,
+        CODEX_CONNECT_CONFIG_FILE: "",
+      },
     });
-    const response = await fetch(`${origin}/api/v1/threads`);
-    expect(response.status).toBe(200);
+    expect(settings).toMatchObject({ host: "127.0.0.1", port: 8787, token: null });
+  });
+
+  it("reads webui settings from config and lets CLI args override", () => {
+    const fixture = createFixture();
+    const configPath = join(fixture.home, "config.toml");
+    writeFileSync(
+      configPath,
+      `${readFileSync(configPath, "utf8")}\n`
+        + "[webui]\n"
+        + 'host = "0.0.0.0"\n'
+        + "port = 9000\n"
+        + 'token = "cfg-token"\n',
+    );
+
+    expect(resolveWebuiSettings({ environment: fixture.environment })).toMatchObject({
+      host: "0.0.0.0",
+      port: 9000,
+      token: "cfg-token",
+    });
+
+    expect(resolveWebuiSettings({
+      environment: fixture.environment,
+      args: ["--host", "127.0.0.1", "--port", "8788"],
+    })).toMatchObject({
+      host: "127.0.0.1",
+      port: 8788,
+      token: "cfg-token",
+    });
+  });
+
+  it("rejects non-loopback webui config without a token", () => {
+    const fixture = createFixture();
+    const configPath = join(fixture.home, "config.toml");
+    writeFileSync(
+      configPath,
+      `${readFileSync(configPath, "utf8")}\n`
+        + "[webui]\n"
+        + 'host = "0.0.0.0"\n',
+    );
+
+    expect(() => resolveWebuiSettings({ environment: fixture.environment }))
+      .toThrow(/绑定非回环地址时必须设置 token/u);
   });
 
   it("still applies the token when configured", () => {

@@ -84,6 +84,11 @@ export interface GatewayConfig {
   stateDatabasePath: string;
   approvalTimeoutMs: number;
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace";
+  webui?: {
+    host: "127.0.0.1" | "::1" | "0.0.0.0";
+    port: number;
+    token?: string;
+  };
 }
 
 export interface ConfiguredWorkspace {
@@ -281,6 +286,7 @@ function loadValidatedConfigDocument(
     stateDatabasePath: resolveConfiguredPath(raw.storage.database_path, baseDirectory),
     approvalTimeoutMs: raw.approval.timeout_seconds * 1000,
     logLevel: raw.logging.level,
+    ...(raw.webui ? { webui: raw.webui } : {}),
   };
 }
 

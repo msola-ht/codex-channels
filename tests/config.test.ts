@@ -510,6 +510,65 @@ describe("Gateway config.toml", () => {
     })).toThrow(/show_operation_updates/u);
   });
 
+  it("loads optional webui host, port and token", () => {
+    const fixture = createFixture({
+      webui: {
+        host: "0.0.0.0",
+        port: 9000,
+        token: "webui-token",
+      },
+    });
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.webui).toEqual({
+      host: "0.0.0.0",
+      port: 9000,
+      token: "webui-token",
+    });
+  });
+
+  it("keeps webui out of runtime config when the section is absent", () => {
+    const fixture = createFixture();
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.webui).toBeUndefined();
+  });
+
+  it("rejects invalid webui host, port or unknown keys", () => {
+    const invalidHost = createFixture({
+      webui: { host: "0.0.0.1" },
+    });
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: invalidHost.configPath,
+    })).toThrow(/webui/u);
+
+    const invalidPort = createFixture({
+      webui: { port: 0 },
+    });
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: invalidPort.configPath,
+    })).toThrow(/webui/u);
+
+    const unknownKey = createFixture({
+      webui: { bind: "127.0.0.1" },
+    });
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: unknownKey.configPath,
+    })).toThrow(/webui/u);
+  });
+
+  it("rejects non-loopback webui without a token", () => {
+    const fixture = createFixture({
+      webui: { host: "0.0.0.0" },
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow(/绑定非回环地址时必须设置 token/u);
+  });
+
   it("loads an explicitly enabled Feishu account", () => {
     const fixture = createFixture({
       feishu: {

@@ -22,15 +22,16 @@
 - `webui-server.mjs` / `webui-api.ts`：`codexc webui` 的只读 HTTP 服务与共享 API 类型。
   默认回环监听并托管 `webui/dist` 静态前端；提供 `/api/v1/overview`、`/api/v1/threads`、
   `/api/v1/threads/:id/run|turns`、`/api/v1/requests`、`/api/v1/errors` 只读 JSON 接口；
-  `webui-api.ts` 声明接口响应类型，前端统一从该文件导入；绑定非回环地址时建议提供
-  `--token` 访问令牌，API 以 `Authorization: Bearer` 校验并采用常数时间比较。
+  `webui-api.ts` 声明接口响应类型，前端统一从该文件导入；监听参数优先取命令行，其次
+  `config.toml` 的 `[webui]` 段，默认回环无令牌；绑定非回环地址（`0.0.0.0`）时必须设置
+  `--token` 或配置 `token`，API 以 `Authorization: Bearer` 校验并采用常数时间比较。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型渠道”“通讯渠道”和
   “系统设置”流程委派给具体适配器；模型渠道下区分 DeepSeek、第三方 API 与图片识别，系统设置
   提供全局调试模式入口。
 - `config.mjs`：`codexc config` 的交互式配置与设置菜单，覆盖配置文件中可安全编辑的参数：
   显示设置（操作详情、计划更新、按提供商的价格显示方式）、系统设置（调试模式、审批超时、
-  Sandbox、默认工作区与模型）、Telegram 消息格式和配置路径查看；非交互终端直接输出用户目录
-  与配置文件路径。
+  Sandbox、默认工作区与模型）、WebUI 设置（监听地址、端口、访问令牌）、Telegram 消息格式
+  和配置路径查看；非交互终端直接输出用户目录与配置文件路径。
 - `debug-setup.mjs`：在严格配置中原子切换 `logging.level` 的 `debug` / `info`，控制全局脱敏
   调试日志和渠道技术字段，不改写显示设置或凭据。
 - `api-provider-setup.mjs` / `api-provider-setup.d.mts`：增改或删除多个 Responses 兼容第三方 API

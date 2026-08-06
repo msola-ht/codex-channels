@@ -60,6 +60,11 @@ export interface GatewayConfigDocument {
       };
   storage: { database_path: string };
   logging: { level: "fatal" | "error" | "warn" | "info" | "debug" | "trace" };
+  webui?: {
+    host: "127.0.0.1" | "::1" | "0.0.0.0";
+    port: number;
+    token?: string;
+  };
   workspaces: Array<{
     id: string;
     name: string;
@@ -73,6 +78,13 @@ export interface GatewayConfigDocument {
 export function parseGatewayConfig(content: string, source?: string): TomlTable;
 export function tomlErrorSummary(error: unknown): string;
 export function validateGatewayConfigDocument(document: unknown): GatewayConfigDocument;
+export function validateWebuiConfigDocument(
+  document: unknown,
+): {
+  host: "127.0.0.1" | "::1" | "0.0.0.0";
+  port: number;
+  token?: string;
+};
 export function readGatewayConfig(configPath: string): TomlTable;
 export function materializeGatewayConfigDefaults(
   configPath: string,

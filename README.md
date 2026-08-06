@@ -197,7 +197,9 @@ codexc webui --host 0.0.0.0 --token 令牌  # 绑定非回环地址（必须提�
 ```
 
 WebUI 只读指标数据库，提供概览、会话、请求明细与错误页面；默认只监听回环地址，
-绑定非回环地址时建议提供 `--token` 访问令牌，未提供时启动会打印公开警告。
+绑定非回环地址（`0.0.0.0`）时必须提供 `--token`，否则拒绝启动。监听地址、端口与令牌
+也可通过 `codexc config` 的「WebUI 设置」或 `config.toml` 的 `[webui]` 段配置，
+命令行参数优先。SSH 隧道、反向代理与 Cloudflare Tunnel 走回环地址可保持无令牌。
 详细说明见 [`docs/webui.md`](docs/webui.md)。
 
 ### 管理后台服务

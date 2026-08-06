@@ -178,9 +178,11 @@ Telegram 消息格式与配置路径查看。
   webui: `用法：codexc webui [--host 地址] [--port 端口] [--token 令牌]
 
 启动本地只读指标 WebUI（默认 http://127.0.0.1:8787/）。
+参数优先级：命令行 > config.toml 的 [webui] 段 > 默认值。
 --host 指定监听地址（127.0.0.1、::1 或 0.0.0.0），默认回环；
 --port 指定监听端口，范围 1-65535；
---token 设置访问令牌，绑定非回环地址时建议提供。
+--token 设置访问令牌，绑定非回环地址（0.0.0.0）时必须提供。
+也可以使用 codexc config 的 WebUI 设置，或手工编辑 [webui] 段。
 页面与 JSON API 均来自指标数据库，不提供任何写接口。`,
   "metrics.status": `用法：codexc metrics status
 

@@ -70,6 +70,14 @@ database_path = "data/gateway.sqlite3"
 [logging]
 level = "info"
 
+[webui]
+# codexc webui 的监听地址与访问令牌；不配置时默认 127.0.0.1:8787。
+# host 只允许 127.0.0.1、::1（仅本机）或 0.0.0.0（所有网卡）；
+# 绑定 0.0.0.0 时 token 必填，CLI 参数（--host/--port/--token）优先于本段。
+# host = "127.0.0.1"
+# port = 8787
+# token = "你的_WebUI_访问令牌"
+
 [[workspaces]]
 id = "main"
 name = "Main Project"
