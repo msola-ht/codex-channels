@@ -25,6 +25,7 @@ export class ApiClientError extends Error {
 }
 
 const TOKEN_KEY = "codex-webui:token"
+export const API_PREFIX = "/api/v1"
 let unauthorizedHandler: (() => void) | null = null
 
 export function getToken(): string | null {
@@ -52,12 +53,16 @@ export function onUnauthorized(handler: () => void): () => void {
 
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const token = getToken()
+  const timeoutSignal = AbortSignal.timeout(30_000)
+  const effectiveSignal = signal === undefined
+    ? timeoutSignal
+    : AbortSignal.any([signal, timeoutSignal])
   const response = await fetch(path, {
     headers: {
       accept: "application/json",
       ...(token === null ? {} : { authorization: `Bearer ${token}` }),
     },
-    ...(signal === undefined ? {} : { signal }),
+    signal: effectiveSignal,
   })
   if (response.status === 401) {
     unauthorizedHandler?.()
@@ -83,11 +88,11 @@ export function fetchOverview(
   range: RangeName,
   signal?: AbortSignal,
 ): Promise<OverviewResponse> {
-  return getJson<OverviewResponse>(`/api/overview?range=${range}`, signal)
+  return getJson<OverviewResponse>(`${API_PREFIX}/overview?range=${range}`, signal)
 }
 
 export function fetchThreads(signal?: AbortSignal): Promise<ThreadsResponse> {
-  return getJson<ThreadsResponse>("/api/threads", signal)
+  return getJson<ThreadsResponse>(`${API_PREFIX}/threads`, signal)
 }
 
 export function fetchThreadRun(
@@ -95,7 +100,7 @@ export function fetchThreadRun(
   signal?: AbortSignal,
 ): Promise<ThreadRunResponse> {
   return getJson<ThreadRunResponse>(
-    `/api/threads/${encodeURIComponent(threadId)}/run`,
+    `${API_PREFIX}/threads/${encodeURIComponent(threadId)}/run`,
     signal,
   )
 }
@@ -105,7 +110,7 @@ export function fetchThreadTurns(
   signal?: AbortSignal,
 ): Promise<ThreadTurnsResponse> {
   return getJson<ThreadTurnsResponse>(
-    `/api/threads/${encodeURIComponent(threadId)}/turns`,
+    `${API_PREFIX}/threads/${encodeURIComponent(threadId)}/turns`,
     signal,
   )
 }
@@ -118,12 +123,12 @@ export function fetchRequests(
 ): Promise<RequestsResponse> {
   const params = new URLSearchParams({ range, limit: String(limit) })
   if (afterId !== null) params.set("afterId", String(afterId))
-  return getJson<RequestsResponse>(`/api/requests?${params.toString()}`, signal)
+  return getJson<RequestsResponse>(`${API_PREFIX}/requests?${params.toString()}`, signal)
 }
 
 export function fetchErrors(
   range: RangeName,
   signal?: AbortSignal,
 ): Promise<ErrorsResponse> {
-  return getJson<ErrorsResponse>(`/api/errors?range=${range}`, signal)
+  return getJson<ErrorsResponse>(`${API_PREFIX}/errors?range=${range}`, signal)
 }

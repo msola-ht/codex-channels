@@ -11,7 +11,7 @@
 - `metrics-database.mjs` / `metrics-database.d.mts`：实现并声明只读 `codexc metrics` 的
   `status`、`run`、`turns`、`threads`、`report`、`export`、`upgrade` 与 `reset`；查询复用 Observability
   只读端口，渲染复用 `metrics-export-format.mjs`；运行、会话与聚合输出从现有 `compact` 明细
-  派生远程压缩模型、请求数、Token 和费用摘要，JSON/CSV 同时保留可视化字段；`export` CSV 用独立类型行区分请求历史额度快照
+  派生上下文压缩模型、请求数、Token 和费用摘要，JSON/CSV 同时保留可视化字段；`export` CSV 用独立类型行区分请求历史额度快照
   与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3 备份后
   事务升级到 v4，reset 要求 Gateway 停止、检查点回写、`0600`
   备份后移除旧库，不迁移或覆盖原指标记录。服务状态无法确认、处于非停止状态或前台 Gateway
@@ -19,10 +19,11 @@
 - `metrics-export-format.mjs` / `metrics-export-format.d.mts`：指标导出的显示上下文（配置与
   汇率缓存）、币种换算、Token/费用/时间格式化与 Markdown/CSV 转义；币种模式解析与 Token
   格式复用 Application/Surface 导出，换算逻辑集中在 `convertCostToCny`。
-- `webui-server.mjs`：`codexc webui` 的只读 HTTP 服务。默认回环监听并托管 `webui/dist`
-  静态前端；提供 `/api/overview`、`/api/threads`、`/api/threads/:id/run|turns`、
-  `/api/requests`、`/api/errors` 只读 JSON 接口；绑定非回环地址必须提供 `--token`
-  访问令牌，API 以 `Authorization: Bearer` 校验并采用常数时间比较。
+- `webui-server.mjs` / `webui-api.ts`：`codexc webui` 的只读 HTTP 服务与共享 API 类型。
+  默认回环监听并托管 `webui/dist` 静态前端；提供 `/api/v1/overview`、`/api/v1/threads`、
+  `/api/v1/threads/:id/run|turns`、`/api/v1/requests`、`/api/v1/errors` 只读 JSON 接口；
+  `webui-api.ts` 声明接口响应类型，前端统一从该文件导入；绑定非回环地址时建议提供
+  `--token` 访问令牌，API 以 `Authorization: Bearer` 校验并采用常数时间比较。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型渠道”“通讯渠道”和
   “系统设置”流程委派给具体适配器；模型渠道下区分 DeepSeek、第三方 API 与图片识别，系统设置
   提供全局调试模式入口。

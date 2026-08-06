@@ -8,7 +8,7 @@
 - [`docs/deepseek.md`](docs/deepseek.md)：DeepSeek 配置模式、终端使用、Provider 切换与运行统计。
 - [`docs/vision.md`](docs/vision.md)：双 Provider 与仅 DeepSeek 的图片识别代理配置和安全边界。
 - [`docs/errors.md`](docs/errors.md)：错误码字典、日志字段约定与排查示例。
-- [`docs/webui.md`](docs/webui.md)：本地只读指标 WebUI 的命令、页面、API 与安全边界。
+- [`docs/webui.md`](docs/webui.md)：本地只读指标 WebUI 的命令、架构、页面、API、边界与安全。
 
 ## 协议与设计
 

@@ -716,7 +716,7 @@ function printMetricsReport(result, format, display = null) {
     console.log("");
     console.log("## 明细");
     console.log("");
-    console.log("| 提供商 | 模型 | 请求 | 异常/未完整 | 输入 | 缓存输入 | 输出 | 参考总价 | 远程压缩 |");
+    console.log("| 提供商 | 模型 | 请求 | 异常/未完整 | 输入 | 缓存输入 | 输出 | 参考总价 | 上下文压缩 |");
     console.log("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
     for (const group of result.report.groups) {
       const value = group.aggregate;
@@ -929,7 +929,7 @@ function enrichSummaryCosts(value, display, provider = null) {
 function printCompactSummary(compact, display, provider = null) {
   const summary = formatCompactSummary(compact, display, provider);
   if (summary === null) return;
-  console.log(`- 远程压缩：${summary}`);
+  console.log(`- 上下文压缩：${summary}`);
 }
 
 function formatCompactSummary(compact, display, provider = null) {
@@ -1050,7 +1050,7 @@ function printMetricsTurns(result, format, display = null) {
     console.log("该会话暂无可导出的对话记录。");
     return;
   }
-  console.log("| # | 对话 ID | 时间 | 模型 | 思考等级 | 请求 | 异常 | 耗时 | 总 Token | 缓存率 | 速度 | 参考总价 | 远程压缩 |");
+  console.log("| # | 对话 ID | 时间 | 模型 | 思考等级 | 请求 | 异常 | 耗时 | 总 Token | 缓存率 | 速度 | 参考总价 | 上下文压缩 |");
   console.log("| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
   for (const [index, turn] of result.turns.entries()) {
     const cacheRate = turn.cachedInputTokens === null || turn.inputTokens === 0
@@ -1122,7 +1122,7 @@ function printMetricsThreads(result, format, display = null) {
   console.log("");
   const rateLine = exchangeRateLine(display);
   if (rateLine) console.log(`- ${rateLine}`);
-  console.log("| # | Thread | 模型 | 思考等级 | 对话数 | 请求数 | 总 Token | 参考总价 | 远程压缩 | 最近记录 |");
+  console.log("| # | Thread | 模型 | 思考等级 | 对话数 | 请求数 | 总 Token | 参考总价 | 上下文压缩 | 最近记录 |");
   console.log("| --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- |");
   for (const [index, thread] of result.threads.entries()) {
     const cost = thread.totalCostNanos === null || thread.pricingCurrency === null

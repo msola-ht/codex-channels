@@ -67,7 +67,7 @@ describe("webui server", () => {
     });
     const { origin } = await startServer(fixture.environment);
 
-    const response = await fetch(`${origin}/api/overview?range=24h`);
+    const response = await fetch(`${origin}/api/v1/overview?range=24h`);
     expect(response.status).toBe(200);
     const body = await response.json() as {
       global: {
@@ -131,7 +131,7 @@ describe("webui server", () => {
     });
     const { origin } = await startServer(fixture.environment);
 
-    const threads = await fetch(`${origin}/api/threads`);
+    const threads = await fetch(`${origin}/api/v1/threads`);
     expect(threads.status).toBe(200);
     const threadsBody = await threads.json() as {
       threads: Array<{
@@ -149,7 +149,7 @@ describe("webui server", () => {
     });
     expect(threadsBody.threads[0]!.totalCostCnyNanos).toBeGreaterThan(0);
 
-    const run = await fetch(`${origin}/api/threads/thread-1/run`);
+    const run = await fetch(`${origin}/api/v1/threads/thread-1/run`);
     expect(run.status).toBe(200);
     const runBody = await run.json() as {
       latestTurn: { turnId: string; compact: { requestCount: number } | null };
@@ -158,7 +158,7 @@ describe("webui server", () => {
     expect(runBody.latestTurn?.turnId).toBe("turn-2");
     expect(runBody.threadAggregate?.turnCount).toBe(2);
 
-    const turns = await fetch(`${origin}/api/threads/thread-1/turns`);
+    const turns = await fetch(`${origin}/api/v1/threads/thread-1/turns`);
     expect(turns.status).toBe(200);
     const turnsBody = await turns.json() as {
       turns: Array<{ turnId: string }>;
@@ -178,7 +178,7 @@ describe("webui server", () => {
     }
     const { origin } = await startServer(fixture.environment);
 
-    const first = await fetch(`${origin}/api/requests?range=24h&limit=2`);
+    const first = await fetch(`${origin}/api/v1/requests?range=24h&limit=2`);
     expect(first.status).toBe(200);
     const firstBody = await first.json() as {
       records: Array<{ id: number }>;
@@ -188,7 +188,7 @@ describe("webui server", () => {
     expect(firstBody.nextAfterId).toBe(firstBody.records[1]!.id);
 
     const second = await fetch(
-      `${origin}/api/requests?range=24h&limit=2&afterId=${firstBody.nextAfterId}`,
+      `${origin}/api/v1/requests?range=24h&limit=2&afterId=${firstBody.nextAfterId}`,
     );
     const secondBody = await second.json() as {
       records: Array<{ id: number }>;
@@ -197,7 +197,7 @@ describe("webui server", () => {
     expect(secondBody.records).toHaveLength(1);
     expect(secondBody.nextAfterId).toBeNull();
 
-    const errors = await fetch(`${origin}/api/errors?range=7d`);
+    const errors = await fetch(`${origin}/api/v1/errors?range=7d`);
     expect(errors.status).toBe(200);
     const errorsBody = await errors.json() as {
       errors: {
@@ -219,26 +219,26 @@ describe("webui server", () => {
     const fixture = createFixture();
     const { origin } = await startServer(fixture.environment);
 
-    const invalidRange = await fetch(`${origin}/api/overview?range=1h`);
+    const invalidRange = await fetch(`${origin}/api/v1/overview?range=1h`);
     expect(invalidRange.status).toBe(400);
     expect(await invalidRange.json()).toMatchObject({
       error: { code: "invalid_range" },
     });
 
-    const invalidLimit = await fetch(`${origin}/api/requests?limit=501`);
+    const invalidLimit = await fetch(`${origin}/api/v1/requests?limit=501`);
     expect(invalidLimit.status).toBe(400);
     expect(await invalidLimit.json()).toMatchObject({
       error: { code: "invalid_limit" },
     });
 
-    const invalidAfterId = await fetch(`${origin}/api/requests?afterId=-1`);
+    const invalidAfterId = await fetch(`${origin}/api/v1/requests?afterId=-1`);
     expect(invalidAfterId.status).toBe(400);
     expect(await invalidAfterId.json()).toMatchObject({
       error: { code: "invalid_afterId" },
     });
 
     const invalidThread = await fetch(
-      `${origin}/api/threads/${"x".repeat(129)}/run`,
+      `${origin}/api/v1/threads/${"x".repeat(129)}/run`,
     );
     expect(invalidThread.status).toBe(400);
     expect(await invalidThread.json()).toMatchObject({
@@ -257,7 +257,7 @@ describe("webui server", () => {
     initializeUserData({ environment, cwd: home });
     const { origin } = await startServer(environment);
 
-    const response = await fetch(`${origin}/api/overview`);
+    const response = await fetch(`${origin}/api/v1/overview`);
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({
       error: { code: "metrics_database_unavailable" },
@@ -268,15 +268,21 @@ describe("webui server", () => {
     const fixture = createFixture();
     const { origin } = await startServer(fixture.environment);
 
-    const post = await fetch(`${origin}/api/overview`, { method: "POST" });
+    const post = await fetch(`${origin}/api/v1/overview`, { method: "POST" });
     expect(post.status).toBe(405);
     expect(await post.json()).toMatchObject({
       error: { code: "method_not_allowed" },
     });
 
-    const unknown = await fetch(`${origin}/api/unknown`);
+    const unknown = await fetch(`${origin}/api/v1/unknown`);
     expect(unknown.status).toBe(404);
     expect(await unknown.json()).toMatchObject({
+      error: { code: "not_found" },
+    });
+
+    const withoutVersion = await fetch(`${origin}/api/unknown`);
+    expect(withoutVersion.status).toBe(404);
+    expect(await withoutVersion.json()).toMatchObject({
       error: { code: "not_found" },
     });
   });
@@ -290,18 +296,18 @@ describe("webui server", () => {
       { token: "secret-token" },
     );
 
-    const missing = await fetch(`${origin}/api/overview`);
+    const missing = await fetch(`${origin}/api/v1/overview`);
     expect(missing.status).toBe(401);
     expect(await missing.json()).toMatchObject({
       error: { code: "unauthorized" },
     });
 
-    const wrong = await fetch(`${origin}/api/overview`, {
+    const wrong = await fetch(`${origin}/api/v1/overview`, {
       headers: { authorization: "Bearer wrong-token" },
     });
     expect(wrong.status).toBe(401);
 
-    const ok = await fetch(`${origin}/api/overview`, {
+    const ok = await fetch(`${origin}/api/v1/overview`, {
       headers: { authorization: "Bearer secret-token" },
     });
     expect(ok.status).toBe(200);
@@ -313,7 +319,7 @@ describe("webui server", () => {
     const { origin } = await startServer(fixture.environment, undefined, {
       host: "0.0.0.0",
     });
-    const response = await fetch(`${origin}/api/threads`);
+    const response = await fetch(`${origin}/api/v1/threads`);
     expect(response.status).toBe(200);
   });
 
@@ -333,7 +339,7 @@ describe("webui server", () => {
       undefined,
       { host: "0.0.0.0", token: "secret-token" },
     );
-    const response = await fetch(`${origin}/api/threads`, {
+    const response = await fetch(`${origin}/api/v1/threads`, {
       headers: { authorization: "Bearer secret-token" },
     });
     expect(response.status).toBe(200);

@@ -19,7 +19,7 @@
 - `input-events.ts`：定义 Client 可投递给 Core 的平台无关可辨识输入联合，不含 RPC method、
   未知 params 或生成协议类型；其中 `turn.modelTiming.updated` 由 Bootstrap 把模型代理的
   模型流与 Usage 指标转换为稳定输入，Core 按 Thread/Turn 累计每个已确认请求，并单独保留请求时间
-  最新一次的首事件延迟；远程压缩还按操作类型归约模型、Token 与参考费用摘要，供完成卡片单列；
+  最新一次的首事件延迟；上下文压缩还按操作类型归约模型、Token 与参考费用摘要，供完成卡片单列；
   根据 Provider 能力计算通用或详细聚合计时。
 - `events.ts`：定义 Conversation 目标、稳定 Token、Plan、Goal、Turn、额度、账户和 MCP 类型，以及
   输出事件、Turn 产物、操作状态、OpenAI 账户归属判定和关键事件判定；外部视觉 API 请求发起后

@@ -14,6 +14,7 @@ import { SqliteModelRequestMetricsStore } from "../dist/observability/index.js";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8787;
+const API_PREFIX = "/api/v1";
 const PACKAGE_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 
 const contentTypes = {
@@ -95,28 +96,32 @@ function authorized(request, token) {
 
 function routeApi(environment, url, response) {
   const path = url.pathname;
-  if (path === "/api/overview") {
+  if (!path.startsWith(`${API_PREFIX}/`)) {
+    throw new ApiError(404, "not_found", `未知 API：${path}`);
+  }
+  const apiPath = path.slice(API_PREFIX.length);
+  if (apiPath === "/overview") {
     handleOverview(environment, url, response);
     return;
   }
-  if (path === "/api/threads") {
+  if (apiPath === "/threads") {
     handleThreads(environment, response);
     return;
   }
-  const threadMatch = path.match(/^\/api\/threads\/([^/]+)\/(run|turns)$/u);
+  const threadMatch = apiPath.match(/^\/threads\/([^/]+)\/(run|turns)$/u);
   if (threadMatch) {
     handleThreadDetail(environment, threadMatch[1], threadMatch[2], response);
     return;
   }
-  if (path === "/api/requests") {
+  if (apiPath === "/requests") {
     handleRequests(environment, url, response);
     return;
   }
-  if (path === "/api/errors") {
+  if (apiPath === "/errors") {
     handleErrors(environment, url, response);
     return;
   }
-  throw new ApiError(404, "not_found", `未知 API：${path}`);
+  throw new ApiError(404, "not_found", `未知 API：${apiPath}`);
 }
 
 function openMetricsStore(environment, endAtMs = Date.now()) {
@@ -348,7 +353,7 @@ function serveStatic(staticDir, pathname, response) {
       response.end(
         "<!doctype html><meta charset=\"utf-8\"><title>Codex WebUI</title>"
         + "<p>WebUI 前端尚未构建。请先运行 <code>npm run build</code>（webui 目录），"
-        + "或直接使用 <a href=\"/api/overview\">/api/overview</a> 等只读 JSON 接口。</p>",
+        + `或直接使用 <a href="${API_PREFIX}/overview">${API_PREFIX}/overview</a> 等只读 JSON 接口。</p>`,
       );
       return;
     }

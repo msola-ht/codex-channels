@@ -460,7 +460,7 @@ function formatCompactMetrics(
   currency: DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
 ): string {
-  return `远程压缩：${formatCompactMetricsValue(compact, currency, exchangeRate)}`;
+  return `上下文压缩：${formatCompactMetricsValue(compact, currency, exchangeRate)}`;
 }
 
 export function formatDeepseekAveragePriceValue(

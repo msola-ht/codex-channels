@@ -11,11 +11,13 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { onUnauthorized, setToken } from "@/lib/api"
+import { API_PREFIX, onUnauthorized, setToken } from "@/lib/api"
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const [unauthorized, setUnauthorized] = useState(false)
   const [token, setTokenValue] = useState("")
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => onUnauthorized(() => setUnauthorized(true)), [])
 
@@ -44,14 +46,35 @@ export function AuthGate({ children }: { children: ReactNode }) {
             onChange={(event) => setTokenValue(event.target.value)}
             placeholder="访问令牌"
           />
+          {error === null ? null : (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
           <Button
-            disabled={token.trim() === ""}
-            onClick={() => {
-              setToken(token.trim())
-              window.location.reload()
+            disabled={token.trim() === "" || submitting}
+            onClick={async () => {
+              const candidate = token.trim()
+              setSubmitting(true)
+              setError(null)
+              try {
+                const response = await fetch(`${API_PREFIX}/threads`, {
+                  headers: { authorization: `Bearer ${candidate}` },
+                })
+                if (!response.ok) {
+                  setError("令牌无效，请检查后重试")
+                  return
+                }
+                setToken(candidate)
+                window.location.reload()
+              } catch {
+                setError("无法连接服务，请稍后重试")
+              } finally {
+                setSubmitting(false)
+              }
             }}
           >
-            进入
+            {submitting ? "验证中…" : "进入"}
           </Button>
         </CardContent>
       </Card>

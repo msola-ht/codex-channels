@@ -390,7 +390,7 @@ export function createTurnCompletedPresentation(
   }
   if (event.timing?.compact) {
     runFields.push({
-      label: "远程压缩",
+      label: "上下文压缩",
       value: formatCompactMetricsValue(
         event.timing.compact,
         currency,

@@ -332,14 +332,14 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("**费用**：$0.001235（已计价 2/3 次请求）");
     expect(rendered).toContain("  - 输入价格：$0.000400");
     expect(rendered).toContain("综合输出速度：60 token/s（不含推理 · 覆盖 2/3 次请求）");
-    expect(rendered).toContain("远程压缩：1 次 · gpt-5.6-sol · 10.5 K Token · $0.142102");
+    expect(rendered).toContain("上下文压缩：1 次 · gpt-5.6-sol · 10.5 K Token · $0.142102");
     expect(rendered).toContain("**费用**：$0.001235（已计价 2/3 次请求）");
     expect(rendered).toContain("输入价格：$0.000400");
     expect(rendered).toContain("缓存价格：$0.000200");
     expect(rendered).toContain("输出价格：$0.000635");
     expect(rendered).toContain("### 当前会话指标累计");
     expect(rendered).toContain("Turn：8 次");
-    expect(rendered).toContain("远程压缩：2 次 · gpt-5.6-sol · 21 K Token · $0.284204");
+    expect(rendered).toContain("上下文压缩：2 次 · gpt-5.6-sol · 21 K Token · $0.284204");
     expect(rendered).toContain("综合输出速度：58 token/s（不含推理 · 覆盖 20/21 次请求）");
     expect(rendered).toContain("### 最近直接 API");
     expect(rendered).toContain("API 提供商：BLTCY");
@@ -558,7 +558,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("输入价格：$0.040000");
     expect(rendered).toContain("缓存价格：$0.020000");
     expect(rendered).toContain("输出价格：$0.063457");
-    expect(rendered).toContain("远程压缩：2 次 · gpt-5.6-sol · 21 K Token · $0.284204");
+    expect(rendered).toContain("上下文压缩：2 次 · gpt-5.6-sol · 21 K Token · $0.284204");
   });
 
   it("does not invent one unit price when an aggregate spans multiple rates", () => {
