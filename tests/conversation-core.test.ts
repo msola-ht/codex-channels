@@ -1206,7 +1206,7 @@ describe("ConversationCore", () => {
     expect(completed?.timing?.generationTokensPerSecond).toBeCloseTo(90 / 2.3);
   });
 
-  it("keeps only non-reasoning output timing for OpenAI", async () => {
+  it("keeps the reasoning token count but omits timing-stream fields for OpenAI", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const events: OutputEvent[] = [];
     output.subscribe("test", (event) => {
@@ -1324,7 +1324,7 @@ describe("ConversationCore", () => {
       firstResponseLatencyMs: 1_000,
     });
     expect(completed?.timing?.ttftMs).toBeUndefined();
-    expect(completed?.timing?.reasoningTokens).toBeUndefined();
+    expect(completed?.timing?.reasoningTokens).toBe(50);
     expect(completed?.timing?.thinkingTokensPerSecond).toBeUndefined();
     expect(completed?.timing?.generationTokensPerSecond).toBeUndefined();
   });

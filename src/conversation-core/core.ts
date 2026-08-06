@@ -1021,11 +1021,7 @@ export class ConversationCore {
     if (nonReasoningOutputTokens !== undefined && nonReasoningOutputTokens > 0) {
       result.nonReasoningOutputTokens = nonReasoningOutputTokens;
     }
-    if (
-      detailedTiming
-      && reasoningTokens !== undefined
-      && reasoningTokens > 0
-    ) {
+    if (reasoningTokens !== undefined && reasoningTokens > 0) {
       result.reasoningTokens = reasoningTokens;
     }
     if (

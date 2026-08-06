@@ -548,7 +548,7 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).not.toContain("自动重试");
   });
 
-  it("omits reasoning metrics when the provider does not expose a timing stream", () => {
+  it("shows the reasoning token count but omits timing-stream fields for OpenAI", () => {
     const rendered = renderPlainLifecyclePresentation(
       createTurnCompletedPresentation({
         type: "turn.completed",
@@ -562,15 +562,17 @@ describe("shared Surface lifecycle presentation", () => {
         status: "completed",
         modelProvider: "openai",
         timing: {
+          requestInputTokens: 1_000,
+          requestCachedInputTokens: 800,
           reasoningTokens: 40,
           outputTokensPerSecond: 96,
         },
       }),
     );
 
+    expect(rendered).toContain("其中推理输出：40");
     expect(rendered).toContain("输出速度：96 token/s（不含推理）");
     expect(rendered).not.toContain("首字延时");
-    expect(rendered).not.toContain("推理输出");
     expect(rendered).not.toContain("思考速度");
     expect(rendered).not.toContain("生成速度");
   });

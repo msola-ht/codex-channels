@@ -13,6 +13,8 @@
 - 会话区保留 Thread 累计上下文、压缩次数、Goal 与 Git 分支。
 - 所有 Provider 都展示 Gateway 实际观察到的首段回复延迟；DeepSeek 还会展示最后一次请求的
   可观测首事件延迟（调试模式开启时），以及整轮综合思考速度与含推理生成速度。
+- 推理 Token 计数对所有 Provider 展示；OpenAI 官方只返回计数与用量，不返回推理内容或可靠
+  计时流，因此思考/生成速度等计时字段仍只在 DeepSeek 展示。
 - 原生 OpenAI 账户对应的 Codex Provider 明确显示为“OpenAI 官方”，与直接 API 的自定义提供商
   区分。
 - 同一 Turn 中模型请求遇到 `429/5xx` 或上游 WebSocket 断流后由 Codex 重试并最终完成时，完成

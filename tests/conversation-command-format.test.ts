@@ -351,7 +351,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("**费用**：$0.000988（已计价 1/1 次请求）");
   });
 
-  it("hides reasoning token details for OpenAI official metrics", () => {
+  it("shows reasoning token details for OpenAI official metrics", () => {
     const rendered = formatConversationMetrics({
       kind: "metrics",
       summary: {
@@ -409,7 +409,8 @@ describe("provider-aware conversation command formatting", () => {
       },
     });
 
-    expect(rendered).not.toContain("其中推理输出");
+    expect(rendered).toContain("其中推理输出：300");
+    expect(rendered).toContain("其中推理输出：1.8 K");
   });
 
   it("switches currency amounts to the 亿 unit at large values", () => {

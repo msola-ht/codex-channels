@@ -704,9 +704,7 @@ function printMetricsReport(result, format, display = null) {
   console.log(`- 输入 Token：${aggregate.inputTokens}`);
   console.log(`- 缓存输入 Token：${aggregate.cachedInputTokens ?? "未知"}`);
   console.log(`- 输出 Token：${aggregate.outputTokens}`);
-  if (aggregateProvider && aggregateProvider !== "openai") {
-    console.log(`- 推理输出 Token：${aggregate.reasoningOutputTokens}`);
-  }
+  console.log(`- 推理输出 Token：${aggregate.reasoningOutputTokens}`);
   console.log(`- 计价覆盖：${aggregate.pricedRequestCount}/${aggregate.requestCount}`);
   console.log(`- 参考总价：${formatCost(
     { ...aggregate, provider: aggregateProvider },
@@ -983,7 +981,7 @@ function printMetricsRun(result, format, display = null) {
   if (latestTurn === null) {
     console.log("该 Thread 暂无已记录请求。");
   } else {
-    printTurnSummary(latestTurn, false, display, latestTurn.provider ?? null);
+    printTurnSummary(latestTurn, false, display);
   }
   console.log("");
   console.log("## 当前会话指标累计");
@@ -991,12 +989,7 @@ function printMetricsRun(result, format, display = null) {
   if (threadAggregate === null) {
     console.log("该 Thread 暂无累计记录。");
   } else {
-    printTurnSummary(
-      threadAggregate,
-      true,
-      display,
-      latestTurn?.provider ?? null,
-    );
+    printTurnSummary(threadAggregate, true, display);
   }
 }
 
@@ -1154,7 +1147,7 @@ function printMetricsThreads(result, format, display = null) {
   console.log("导出某会话每次对话：codexc metrics turns <Thread ID>");
 }
 
-function printTurnSummary(summary, aggregate = false, display = null, provider = null) {
+function printTurnSummary(summary, aggregate = false, display = null) {
   const totalTokens = summary.inputTokens + summary.outputTokens;
   if (summary.model !== undefined && summary.model !== null) {
     console.log(`- 模型：${summary.model}`);
@@ -1181,7 +1174,7 @@ function printTurnSummary(summary, aggregate = false, display = null, provider =
     );
   }
   console.log(`  - 输出：${formatTokenCount(summary.outputTokens)}`);
-  if (provider === "deepseek" && summary.reasoningOutputTokens > 0) {
+  if (summary.reasoningOutputTokens > 0) {
     console.log(`    - 其中推理输出：${formatTokenCount(summary.reasoningOutputTokens)}`);
   }
   if (
