@@ -256,6 +256,7 @@ describe("model request metrics database operations", () => {
     expect(reportMarkdown.stdout).toContain(
       "上下文压缩：1 次 · deepseek-v4-flash · 1.1 K Token · $0.0014",
     );
+    expect(reportMarkdown.stdout).not.toContain("推理输出 Token");
 
     const exportMarkdown = spawnSync(
       process.execPath,

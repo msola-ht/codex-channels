@@ -325,6 +325,9 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("模型请求聚合耗时：1分5秒");
     expect(rendered).toContain("模型请求累计耗时：2分22秒");
     expect(rendered).toContain("缓存命中率：80.00%");
+    expect(rendered).toContain("其中推理输出：300");
+    expect(rendered).toContain("其中推理输出：1.8 K");
+    expect(rendered).toContain("其中推理输出：55");
     expect(rendered).toContain("### 最近运行聚合");
     expect(rendered).toContain("**Token**：30.9 K");
     expect(rendered).toContain("  - 输入命中缓存：24 K");
@@ -346,6 +349,67 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("调用模型：gpt-5.6-luna");
     expect(rendered).toContain("状态：已完成 · HTTP 200");
     expect(rendered).toContain("**费用**：$0.000988（已计价 1/1 次请求）");
+  });
+
+  it("hides reasoning token details for OpenAI official metrics", () => {
+    const rendered = formatConversationMetrics({
+      kind: "metrics",
+      summary: {
+        threadId: "thread-openai",
+        modelProvider: "openai",
+        latestTurn: {
+          turnId: "turn-1",
+          requestCount: 3,
+          unsuccessfulRequestCount: 1,
+          requestDurationMs: 65_000,
+          inputTokens: 30_000,
+          cachedInputTokens: 24_000,
+          outputTokens: 900,
+          reasoningOutputTokens: 300,
+          outputTokensPerSecond: 60.25,
+          outputSpeedSampleCount: 3,
+          outputSpeedTimedCount: 2,
+          pricingCurrency: "USD",
+          pricedRequestCount: 2,
+          totalCostNanos: 1_234_567,
+          inputCostNanos: 400_000,
+          cachedInputCostNanos: 200_000,
+          outputCostNanos: 634_567,
+          uncachedInputPricePerMillionNanos: 140_000_000,
+          cachedInputPricePerMillionNanos: 2_800_000,
+          outputPricePerMillionNanos: 280_000_000,
+          hasMixedPrices: false,
+          compact: null,
+        },
+        threadAggregate: {
+          turnCount: 8,
+          requestCount: 21,
+          unsuccessfulRequestCount: 2,
+          requestDurationMs: 142_000,
+          inputTokens: 180_000,
+          cachedInputTokens: 174_000,
+          outputTokens: 4_200,
+          reasoningOutputTokens: 1_800,
+          outputTokensPerSecond: 58,
+          outputSpeedSampleCount: 21,
+          outputSpeedTimedCount: 20,
+          pricingCurrency: "USD",
+          pricedRequestCount: 20,
+          totalCostNanos: 12_345_678,
+          inputCostNanos: 4_000_000,
+          cachedInputCostNanos: 2_000_000,
+          outputCostNanos: 6_345_678,
+          uncachedInputPricePerMillionNanos: 140_000_000,
+          cachedInputPricePerMillionNanos: 2_800_000,
+          outputPricePerMillionNanos: 280_000_000,
+          hasMixedPrices: false,
+          compact: null,
+        },
+        latestDirectApi: null,
+      },
+    });
+
+    expect(rendered).not.toContain("其中推理输出");
   });
 
   it("switches currency amounts to the 亿 unit at large values", () => {

@@ -294,6 +294,7 @@ describe("shared surface copy contract", () => {
       "周限：剩余 88% · 周期 7 天",
     );
     expect(rendered).not.toContain("缓存写入");
+    expect(rendered).not.toContain("其中推理输出");
   });
 
   it("keeps platform-neutral command results identical in Feishu and Weixin", () => {

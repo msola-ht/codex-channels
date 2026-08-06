@@ -675,7 +675,9 @@ export function formatConversationStatus(status: ConversationStatus): string {
         ? [`  - 缓存写入：${formatTokenCount(total.cacheWriteInputTokens)}`]
         : []),
       `  - 输出：${formatTokenCount(total.outputTokens)}`,
-      `  - 其中推理输出：${formatTokenCount(total.reasoningOutputTokens)}`,
+      ...(status.modelProvider === "deepseek" && total.reasoningOutputTokens > 0
+        ? [`  - 其中推理输出：${formatTokenCount(total.reasoningOutputTokens)}`]
+        : []),
       `  - Codex 有效上下文窗口：${modelContextWindow === null ? "未知" : formatTokenCount(modelContextWindow)}`,
     );
   } else if (status.threadId) {

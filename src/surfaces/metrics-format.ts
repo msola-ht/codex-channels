@@ -67,7 +67,7 @@ export function formatConversationMetrics(
             `  - 缓存命中率：${formatCacheHitRate(turn.inputTokens, turn.cachedInputTokens)}`,
           ]),
       `  - 输出：${formatTokenCount(turn.outputTokens)}`,
-      ...(turn.reasoningOutputTokens > 0
+      ...(summary.modelProvider === "deepseek" && turn.reasoningOutputTokens > 0
         ? [`  - 其中推理输出：${formatTokenCount(turn.reasoningOutputTokens)}`]
         : []),
       ...(turn.outputTokensPerSecond === null
@@ -121,7 +121,7 @@ export function formatConversationMetrics(
             `  - 缓存命中率：${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}`,
           ]),
       `  - 输出：${formatTokenCount(aggregate.outputTokens)}`,
-      ...(aggregate.reasoningOutputTokens > 0
+      ...(summary.modelProvider === "deepseek" && aggregate.reasoningOutputTokens > 0
         ? [`  - 其中推理输出：${formatTokenCount(aggregate.reasoningOutputTokens)}`]
         : []),
       ...(aggregate.outputTokensPerSecond === null
@@ -170,9 +170,11 @@ export function formatConversationMetrics(
             ...(direct.outputTokens === null
               ? []
               : [`  - 输出：${formatTokenCount(direct.outputTokens)}`]),
-            ...(direct.reasoningOutputTokens === null || direct.reasoningOutputTokens === 0
-              ? []
-              : [`  - 其中推理输出：${formatTokenCount(direct.reasoningOutputTokens)}`]),
+            ...(direct.provider !== "openai"
+              && direct.reasoningOutputTokens !== null
+              && direct.reasoningOutputTokens > 0
+              ? [`  - 其中推理输出：${formatTokenCount(direct.reasoningOutputTokens)}`]
+              : []),
           ]),
       ...(direct.totalCostNanos === null
         ? []
@@ -371,9 +373,6 @@ function formatMetricsAggregate(
           `  - 缓存命中率：${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}`,
         ]),
     `  - 输出：${formatTokenCount(aggregate.outputTokens)}`,
-    ...(aggregate.reasoningOutputTokens > 0
-      ? [`  - 其中推理输出：${formatTokenCount(aggregate.reasoningOutputTokens)}`]
-      : []),
     ...(aggregate.outputTokensPerSecond === null
       ? []
       : [`  - ${formatAggregateOutputSpeed(
@@ -420,7 +419,9 @@ function formatMetricsGroup(
   const latency = aggregate.ttftP50Ms === null || aggregate.ttftP95Ms === null
     ? "首段延迟未知"
     : `首段 P50/P95 ${formatMetricLatency(aggregate.ttftP50Ms)}/${formatMetricLatency(aggregate.ttftP95Ms)}`;
-  const reasoning = aggregate.reasoningOutputTokens > 0
+  const reasoning = group.provider !== "openai"
+    && group.provider !== null
+    && aggregate.reasoningOutputTokens > 0
     ? `  - 其中推理输出：${formatTokenCount(aggregate.reasoningOutputTokens)}`
     : "";
   const referenceCost = toReferenceCostDisplay(aggregate);
