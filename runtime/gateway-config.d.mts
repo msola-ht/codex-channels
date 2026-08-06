@@ -41,8 +41,7 @@ export interface GatewayConfigDocument {
   display: {
     operation_updates: "full" | "compact" | "hidden";
     plan_updates: boolean;
-    price_currency: "auto" | "cny" | "usd";
-    price_currency_by_provider?: Record<string, "auto" | "cny" | "usd">;
+    price_currency: "cny" | "usd";
   };
   api_providers: Array<{
     id: string;

@@ -1,3 +1,4 @@
+import { useEffect } from "react"
 import { HashRouter, Link, Route, Routes, useLocation } from "react-router"
 
 import { AuthGate } from "@/components/layout/auth-gate"
@@ -17,6 +18,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { CurrencyProvider } from "@/hooks/currency-provider"
 import { useCurrency } from "@/hooks/currency-context"
+import { fetchSettings } from "@/lib/api"
 import { ErrorsPage } from "@/pages/errors-page"
 import { OverviewPage } from "@/pages/overview-page"
 import { RequestsPage } from "@/pages/requests-page"
@@ -34,6 +36,21 @@ function pageTitle(pathname: string): string {
 function Layout() {
   const { pathname } = useLocation()
   const { currency, setCurrency } = useCurrency()
+
+  useEffect(() => {
+    if (currency !== null) return
+    const controller = new AbortController()
+    fetchSettings(controller.signal)
+      .then((settings) => {
+        if (!controller.signal.aborted) {
+          setCurrency(settings.currency)
+        }
+      })
+      .catch(() => {
+        // 初始化失败时保持跟随服务端配置，不阻塞页面
+      })
+    return () => controller.abort()
+  }, [currency, setCurrency])
 
   return (
     <SidebarProvider>

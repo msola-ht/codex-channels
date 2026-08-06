@@ -19,7 +19,7 @@ export function CurrencyToggle({
   value,
   onChange,
 }: {
-  value: DisplayCurrency
+  value: DisplayCurrency | null
   onChange: (value: DisplayCurrency) => void
 }) {
   const current = options.find((option) => option.value === value) ?? options[1]

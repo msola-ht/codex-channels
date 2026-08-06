@@ -329,7 +329,7 @@ describe("codexc CLI", () => {
     expect(report.groups.every((group: { provider: string }) =>
       group.provider === "deepseek"
     )).toBe(true);
-    expect(report.aggregate.totalCostCnyNanos).toBeNull();
+    expect(report.aggregate.totalCostCnyNanos).not.toBeNull();
   });
 
   it("generates conservative Codex rules for the current project", () => {

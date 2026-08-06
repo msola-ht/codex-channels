@@ -10,6 +10,7 @@ export type {
   RangeName,
   RequestRecord,
   RequestsResponse,
+  SettingsResponse,
   ThreadListItem,
   ThreadRunResponse,
   ThreadsResponse,

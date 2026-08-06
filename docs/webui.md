@@ -54,11 +54,14 @@ token = "你的_访问令牌"
 | Thread 详情 | `#/threads/:id` | `GET /api/v1/threads/:id/run`、`GET /api/v1/threads/:id/turns` |
 | 请求明细 | `#/requests` | `GET /api/v1/requests?range=&afterId=&limit=` |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=` |
+| 设置 | — | `GET /api/v1/settings`（当前全局币种与汇率） |
 
 所有接口只接受 GET；`range` 只支持 `24h`、`7d`、`30d`；请求分页 `limit` 1–500。
+所有费用接口支持 `currency=cny|usd`（缺省跟随 `config.toml` 的 `display.price_currency`），
+服务端按请求币种统一换算，OpenAI 与 DeepSeek 不再混合显示。
 全局费用支持人民币/美元切换（顶部导航右侧，作用于所有页面），Threads、Thread 详情、
 请求明细等所有金额显示统一跟随，选择保存在浏览器 `localStorage`
-（键 `codex-webui:currency`）。
+（键 `codex-webui:currency`）；未选择时跟随服务端配置。
 全局深色/浅色主题默认深色，顶部导航右侧按钮切换，选择持久化，刷新后保持。
 
 API 响应类型由 `scripts/webui-api.ts` 声明，前端从该共享类型导入，不再单独手写镜像。
@@ -88,9 +91,10 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
 
 ## 价格口径
 
-- Provider 分组按 `price_currency` 配置换算：DeepSeek 默认人民币，OpenAI 默认美元；
-- 全局费用为混合 Provider 参考价，人民币显示使用统一汇率换算
-  （`data/exchange-rate.json`），无汇率时保持原币种；
+- 全局费用按 `price_currency` 统一币种：`cny` 时所有 Provider 按统一汇率换算为人民币，
+  `usd` 时全部保持美元，不再按 Provider 混合显示；
+- 人民币显示使用持久化汇率（`data/exchange-rate.json`，每 6 小时刷新，拉取失败沿用最后一次
+  成功缓存），无任何可用汇率时回退显示美元并在概览页提示；
 - 均价按“总费用 ÷ 总 Token（输入 + 输出，含压缩）× 1 亿”展示为 `/100M`。
 
 ## 边界与安全

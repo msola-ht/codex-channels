@@ -86,7 +86,7 @@ const visionSchema = z.discriminatedUnion("mode", [
   }),
 ]);
 
-const priceCurrencySchema = z.enum(["auto", "cny", "usd"]).default("auto");
+const priceCurrencySchema = z.enum(["cny", "usd"]).default("cny");
 
 const webuiSchema = z.strictObject({
   host: z.enum(["127.0.0.1", "::1", "0.0.0.0"]).default("127.0.0.1"),
@@ -132,11 +132,10 @@ const gatewayDocumentSchema = z.strictObject({
     operation_updates: z.enum(["full", "compact", "hidden"]).default("compact"),
     plan_updates: z.boolean().default(true),
     price_currency: priceCurrencySchema,
-    price_currency_by_provider: z.record(priceCurrencySchema).optional(),
   }).default({
     operation_updates: "compact",
     plan_updates: true,
-    price_currency: "auto",
+    price_currency: "cny",
   }),
   api_providers: z.array(apiProviderSchema).refine(
     (providers) => new Set(providers.map((provider) => provider.id)).size === providers.length,

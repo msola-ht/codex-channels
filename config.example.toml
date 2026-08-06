@@ -41,13 +41,9 @@ timeout_seconds = 300
 operation_updates = "compact"
 # 是否在渠道显示 App Server 的自动任务计划更新。
 plan_updates = true
-# 模型价格显示币种：auto 跟随提供商（DeepSeek 官方人民币、OpenAI 官方美元），也可统一为
-# cny 或 usd；需要人民币时才请求汇率。
-price_currency = "auto"
-# 按提供商覆盖示例：
-# [display.price_currency_by_provider]
-# deepseek = "cny"
-# openai = "usd"
+# 模型价格显示币种：全局统一为 cny（人民币）或 usd（美元）；
+# 选择 cny 时 Gateway 会刷新并持久化汇率，拉取失败时继续使用最后一次缓存。
+price_currency = "cny"
 
 # 直接 API 提供商（图片识别等第三方 Responses 中转）：
 # [[api_providers]]

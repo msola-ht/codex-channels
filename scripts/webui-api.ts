@@ -77,6 +77,7 @@ export interface WeeklyQuota {
   limitId: string
   usedPercent: number
   remainingPercent: number
+  /** 下次重置时间（毫秒 Unix 时间戳） */
   resetsAt: number
   observedAtMs: number
   estimate: {
@@ -204,4 +205,14 @@ export interface ErrorsResponse {
   range: Range
   generatedAt: string
   errors: ErrorsReport
+}
+
+export interface SettingsResponse {
+  /** 当前全局显示币种（跟随 config.toml 的 display.price_currency） */
+  currency: "cny" | "usd"
+  exchangeRate: {
+    usdToCny: number
+    effectiveAtMs: number
+    source: "open-er-api" | "ecb" | "cache"
+  } | null
 }

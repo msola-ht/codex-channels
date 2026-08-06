@@ -136,12 +136,18 @@ function routeApi(environment, url, response) {
     return;
   }
   if (apiPath === "/threads") {
-    handleThreads(environment, response);
+    handleThreads(environment, url, response);
     return;
   }
   const threadMatch = apiPath.match(/^\/threads\/([^/]+)\/(run|turns)$/u);
   if (threadMatch) {
-    handleThreadDetail(environment, threadMatch[1], threadMatch[2], response);
+    handleThreadDetail(
+      environment,
+      threadMatch[1],
+      threadMatch[2],
+      url,
+      response,
+    );
     return;
   }
   if (apiPath === "/requests") {
@@ -150,6 +156,10 @@ function routeApi(environment, url, response) {
   }
   if (apiPath === "/errors") {
     handleErrors(environment, url, response);
+    return;
+  }
+  if (apiPath === "/settings") {
+    handleSettings(environment, response);
     return;
   }
   throw new ApiError(404, "not_found", `未知 API：${apiPath}`);
@@ -178,7 +188,10 @@ function openMetricsStore(environment, endAtMs = Date.now()) {
 
 function handleOverview(environment, url, response) {
   const range = parseRange(url);
-  const display = loadDisplayContext(environment);
+  const display = displayForCurrency(
+    loadDisplayContext(environment),
+    parseCurrency(url),
+  );
   const store = openMetricsStore(environment, range.endAtMs);
   try {
     const global = store.aggregate({
@@ -207,7 +220,7 @@ function handleOverview(environment, url, response) {
         aggregate: enrichCosts(group.aggregate, display, group.provider),
       })),
       errors,
-      weeklyQuota: readWeeklyQuota(store, range.endAtMs),
+      weeklyQuota: toWebuiWeeklyQuota(readWeeklyQuota(store, range.endAtMs)),
     });
   } finally {
     store.close();
@@ -217,6 +230,7 @@ function handleOverview(environment, url, response) {
 function enrichGlobalCosts(aggregate, display) {
   if (
     aggregate === null
+    || display.priceCurrency !== "cny"
     || aggregate.totalCostNanos === null
     || aggregate.pricingCurrency !== "USD"
     || !display.exchangeRate
@@ -229,8 +243,11 @@ function enrichGlobalCosts(aggregate, display) {
     : aggregate;
 }
 
-function handleThreads(environment, response) {
-  const display = loadDisplayContext(environment);
+function handleThreads(environment, url, response) {
+  const display = displayForCurrency(
+    loadDisplayContext(environment),
+    parseCurrency(url),
+  );
   const store = openMetricsStore(environment);
   try {
     sendJson(response, 200, {
@@ -243,9 +260,12 @@ function handleThreads(environment, response) {
   }
 }
 
-function handleThreadDetail(environment, rawThreadId, view, response) {
+function handleThreadDetail(environment, rawThreadId, view, url, response) {
   const threadId = parseThreadId(rawThreadId);
-  const display = loadDisplayContext(environment);
+  const display = displayForCurrency(
+    loadDisplayContext(environment),
+    parseCurrency(url),
+  );
   const store = openMetricsStore(environment);
   try {
     if (view === "run") {
@@ -277,7 +297,10 @@ function handleThreadDetail(environment, rawThreadId, view, response) {
 
 function handleRequests(environment, url, response) {
   const range = parseRange(url);
-  const display = loadDisplayContext(environment);
+  const display = displayForCurrency(
+    loadDisplayContext(environment),
+    parseCurrency(url),
+  );
   const afterId = parseBoundedInt(url.searchParams.get("afterId"), "afterId", 0, null, 0);
   const limit = parseBoundedInt(
     url.searchParams.get("limit"),
@@ -321,6 +344,40 @@ function handleErrors(environment, url, response) {
   } finally {
     store.close();
   }
+}
+
+function handleSettings(environment, response) {
+  const display = loadDisplayContext(environment);
+  sendJson(response, 200, {
+    currency: display.priceCurrency,
+    exchangeRate: display.exchangeRate,
+  });
+}
+
+function parseCurrency(url) {
+  const value = url.searchParams.get("currency");
+  if (value === null) return null;
+  if (value !== "cny" && value !== "usd") {
+    throw new ApiError(400, "invalid_currency", "currency 只支持 cny 或 usd");
+  }
+  return value;
+}
+
+function displayForCurrency(display, currency) {
+  if (currency === null) return display;
+  return {
+    ...display,
+    priceCurrency: currency,
+  };
+}
+
+function toWebuiWeeklyQuota(quota) {
+  if (quota === null) return null;
+  return {
+    ...quota,
+    // 指标库保存的是秒级重置时间，WebUI 统一使用毫秒时间戳。
+    resetsAt: quota.resetsAt === null ? null : quota.resetsAt * 1000,
+  };
 }
 
 function parseRange(url) {

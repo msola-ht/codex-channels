@@ -13,8 +13,7 @@ import {
 } from "../scripts/metrics-export-format.mjs";
 
 const displayContext: MetricsDisplayContext = {
-  priceCurrency: "auto",
-  priceCurrencyByProvider: {},
+  priceCurrency: "cny",
   exchangeRate: {
     usdToCny: 6.7629,
     effectiveAtMs: 1_785_900_000_000,
@@ -23,11 +22,15 @@ const displayContext: MetricsDisplayContext = {
 };
 
 describe("metrics export display helpers", () => {
-  it("converts USD cost to CNY only for CNY-displayed providers with a rate", () => {
+  it("converts USD cost to CNY only when the global currency is CNY with a rate", () => {
     expect(convertCostToCny(1_000_000_000, "USD", "deepseek", displayContext))
       .toBe(6_762_900_000);
     expect(convertCostToCny(1_000_000_000, "USD", "openai", displayContext))
-      .toBe(null);
+      .toBe(6_762_900_000);
+    expect(convertCostToCny(1_000_000_000, "USD", "deepseek", {
+      ...displayContext,
+      priceCurrency: "usd",
+    })).toBe(null);
     expect(convertCostToCny(1_000_000_000, "USD", "deepseek", {
       ...displayContext,
       exchangeRate: null,
@@ -82,7 +85,12 @@ describe("metrics export display helpers", () => {
       provider: "openai",
       pricingCurrency: "USD",
       totalCostNanos: 1_478_557,
-    }, displayContext)).toBe("$0.001479");
+    }, displayContext)).toBe("¥0.009999");
+    expect(formatCost({
+      provider: "openai",
+      pricingCurrency: "USD",
+      totalCostNanos: 1_478_557,
+    }, { ...displayContext, priceCurrency: "usd" })).toBe("$0.001479");
     expect(formatCost({
       provider: "deepseek",
       pricingCurrency: null,

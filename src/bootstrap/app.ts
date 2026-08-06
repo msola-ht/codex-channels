@@ -35,7 +35,6 @@ import {
   classifyConfigReload,
   configChange,
   includesConfigChange,
-  priceCurrencyForProvider,
   type ConfigChange,
   type ConfigReloadResult,
   type GatewayConfig,
@@ -47,7 +46,6 @@ import {
   ProviderAccountService,
   createOpenAiAccountAdapter,
   priceDisplayNeedsExchangeRate,
-  resolvePriceCurrency,
 } from "../application/index.js";
 import {
   ConversationCore,
@@ -85,7 +83,6 @@ export class GatewayApplication {
   private readonly transport: UnixWebSocketTransport;
   private readonly codex: ProviderRoutingClient;
   private readonly primaryProvider: string;
-  private readonly activeCostProviders: readonly string[];
   private readonly inbound: EventBus<RpcNotification>;
   private readonly output: EventBus<OutputEvent>;
   private readonly surfaceModules: SurfaceRuntimeModule[];
@@ -133,11 +130,6 @@ export class GatewayApplication {
     );
     this.transport = new UnixWebSocketTransport(config.codexSocketPath);
     this.primaryProvider = primaryProvider;
-    this.activeCostProviders = [...new Set([
-      primaryProvider,
-      ...(managedProvider ? [managedProvider.provider] : []),
-      ...(config.vision.mode === "disabled" ? [] : [config.vision.provider]),
-    ])];
     const clients = new Map<string, CodexAppServerClient>();
     clients.set(primaryProvider, new CodexAppServerClient(
       new JsonRpcClient(this.transport, 60_000, logger),
@@ -472,10 +464,7 @@ export class GatewayApplication {
         error,
       ),
       exchangeRate: () => this.exchangeRate.resolve(),
-      priceCurrency: (provider) => resolvePriceCurrency(
-        priceCurrencyForProvider(this.config, provider),
-        provider,
-      ),
+      priceCurrency: () => this.config.priceCurrency,
     });
     this.surfaces = this.surfaceModules.map((module) => module.adapter);
     this.surfaceManager = new SurfaceManager(
@@ -597,7 +586,7 @@ export class GatewayApplication {
     try {
       this.requireRunning();
       this.modelPricing.start();
-      if (priceDisplayNeedsExchangeRate(this.config, this.activeCostProviders)) {
+      if (priceDisplayNeedsExchangeRate(this.config)) {
         this.exchangeRate.start();
       }
       await this.providerMetrics.start();

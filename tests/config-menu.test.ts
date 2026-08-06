@@ -68,7 +68,6 @@ describe("Codex Connect config menu", () => {
       select: vi.fn()
         .mockResolvedValueOnce("display")
         .mockResolvedValueOnce("price_currency")
-        .mockResolvedValueOnce("global")
         .mockResolvedValueOnce("cny"),
       isCancel: () => false,
       cancel: vi.fn(),
@@ -81,8 +80,7 @@ describe("Codex Connect config menu", () => {
     });
 
     expect(result).toEqual({
-      scope: "global",
-      mode: "cny",
+      priceCurrency: "cny",
       configPath: fixture.configPath,
     });
     expect(readGatewayConfig(fixture.configPath).display).toMatchObject({
@@ -92,7 +90,7 @@ describe("Codex Connect config menu", () => {
     expect(output.join("")).toContain("重启 Gateway 后生效");
   });
 
-  it("sets a per-provider price currency override", async () => {
+  it("sets the global price currency to USD through the menu", async () => {
     const fixture = createFixture();
     const output: string[] = [];
     const prompts = {
@@ -100,8 +98,7 @@ describe("Codex Connect config menu", () => {
       select: vi.fn()
         .mockResolvedValueOnce("display")
         .mockResolvedValueOnce("price_currency")
-        .mockResolvedValueOnce("deepseek")
-        .mockResolvedValueOnce("cny"),
+        .mockResolvedValueOnce("usd"),
       isCancel: () => false,
       cancel: vi.fn(),
     };
@@ -113,7 +110,7 @@ describe("Codex Connect config menu", () => {
     });
 
     expect(readGatewayConfig(fixture.configPath).display).toMatchObject({
-      price_currency_by_provider: { deepseek: "cny" },
+      price_currency: "usd",
     });
   });
 

@@ -67,7 +67,7 @@ describe("webui server", () => {
     });
     const { origin } = await startServer(fixture.environment);
 
-    const response = await fetch(`${origin}/api/v1/overview?range=24h`);
+    const response = await fetch(`${origin}/api/v1/overview?range=24h&currency=cny`);
     expect(response.status).toBe(200);
     const body = await response.json() as {
       global: {
@@ -80,7 +80,11 @@ describe("webui server", () => {
         aggregate: { requestCount: number; totalCostCnyNanos: number | null };
       }>;
       errors: { requestCount: number; unsuccessfulRequestCount: number };
-      weeklyQuota: { limitId: string; usedPercent: number };
+      weeklyQuota: {
+        limitId: string;
+        usedPercent: number;
+        resetsAt: number;
+      };
     };
     expect(body.global.requestCount).toBe(2);
     expect(body.global.unsuccessfulRequestCount).toBe(1);
@@ -99,6 +103,71 @@ describe("webui server", () => {
     expect(body.weeklyQuota).toMatchObject({
       limitId: "codex",
       usedPercent: 12.5,
+    });
+    expect(body.weeklyQuota.resetsAt).toBeGreaterThan(1_000_000_000_000);
+  });
+
+  it("converts every provider to the requested currency", async () => {
+    const fixture = createFixture();
+    recordSample(fixture.databasePath, {
+      ...metricSample(),
+      provider: "openai",
+      pricing: pricingSnapshot(),
+    });
+    recordSample(fixture.databasePath, {
+      ...metricSample(),
+      pricing: pricingSnapshot(),
+    });
+    const { origin } = await startServer(fixture.environment);
+
+    const cnyResponse = await fetch(`${origin}/api/v1/overview?range=24h&currency=cny`);
+    const cnyBody = await cnyResponse.json() as {
+      providers: Array<{
+        provider: string;
+        aggregate: { totalCostCnyNanos: number | null };
+      }>;
+    };
+    for (const group of cnyBody.providers) {
+      expect(group.aggregate.totalCostCnyNanos).not.toBeNull();
+    }
+
+    const usdResponse = await fetch(`${origin}/api/v1/overview?range=24h&currency=usd`);
+    const usdBody = await usdResponse.json() as {
+      providers: Array<{
+        provider: string;
+        aggregate: { totalCostCnyNanos: number | null };
+      }>;
+    };
+    for (const group of usdBody.providers) {
+      expect(group.aggregate.totalCostCnyNanos).toBeNull();
+    }
+  });
+
+  it("rejects invalid currency values", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(fixture.environment);
+
+    const response = await fetch(`${origin}/api/v1/overview?range=24h&currency=eur`);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { code: "invalid_currency" },
+    });
+  });
+
+  it("returns the configured global currency and persisted exchange rate", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(fixture.environment);
+
+    const response = await fetch(`${origin}/api/v1/settings`);
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      currency: string;
+      exchangeRate: { usdToCny: number; source: string } | null;
+    };
+    expect(body.currency).toBe("cny");
+    expect(body.exchangeRate).toMatchObject({
+      usdToCny: 7.2,
+      source: "cache",
     });
   });
 

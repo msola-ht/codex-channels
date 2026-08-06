@@ -376,7 +376,7 @@ describe("Gateway config.toml", () => {
     expect(persisted.display).toEqual({
       operation_updates: "compact",
       plan_updates: true,
-      price_currency: "auto",
+      price_currency: "cny",
     });
     expect(persisted.storage).toEqual({
       database_path: "data/gateway.sqlite3",
@@ -476,28 +476,37 @@ describe("Gateway config.toml", () => {
     }).config.planUpdatesEnabled).toBe(false);
   });
 
-  it("preserves explicit price currency and per-provider overrides", () => {
+  it("preserves the explicit global price currency", () => {
     const fixture = createFixture({
       display: {
         operation_updates: "compact",
         plan_updates: true,
         price_currency: "cny",
-        price_currency_by_provider: {
-          deepseek: "cny",
-          openai: "usd",
-        },
       },
     });
 
     expect(loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
     }).config.priceCurrency).toBe("cny");
-    expect(loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    }).config.priceCurrencyByProvider).toEqual({
-      deepseek: "cny",
-      openai: "usd",
+  });
+
+  it("rejects the removed automatic price currency and per-provider overrides", () => {
+    const automatic = createFixture({
+      display: { price_currency: "auto" },
     });
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: automatic.configPath,
+    })).toThrow(/price_currency/u);
+
+    const perProvider = createFixture({
+      display: {
+        price_currency: "cny",
+        price_currency_by_provider: { openai: "usd" },
+      },
+    });
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: perProvider.configPath,
+    })).toThrow(/price_currency_by_provider/u);
   });
 
   it("rejects the removed boolean operation update setting", () => {

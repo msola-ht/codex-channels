@@ -161,7 +161,7 @@ async function runDisplaySettings({
       {
         value: "price_currency",
         label: "价格显示方式",
-        hint: "按提供商选择人民币或美元（DeepSeek 默认人民币）",
+        hint: "全局统一人民币或美元",
       },
       { value: "back", label: "返回", hint: "返回配置菜单" },
     ],
@@ -590,56 +590,20 @@ async function runPriceCurrency({
   const { configPath } = requireUserConfig(environment);
   const document = readGatewayConfig(configPath);
   const display = table(document.display);
-  const scope = await prompts.select({
-    message: "价格显示方式 · 选择提供商",
-    showInstructions: false,
-    options: [
-      {
-        value: "global",
-        label: "全局默认",
-        hint: "跟随提供商：DeepSeek 人民币、OpenAI 官方美元",
-      },
-      {
-        value: "deepseek",
-        label: "DeepSeek 官方",
-        hint: "覆盖 DeepSeek 提供商的价格显示",
-      },
-      {
-        value: "openai",
-        label: "OpenAI 官方",
-        hint: "覆盖 OpenAI 官方提供商的价格显示",
-      },
-      { value: "back", label: "返回上一级" },
-    ],
-  });
-  if (prompts.isCancel(scope) || scope === "back") {
-    return { action: "back" };
-  }
-  if (scope !== "global" && scope !== "deepseek" && scope !== "openai") {
-    throw new Error(`未知价格显示提供商：${String(scope)}`);
-  }
-  const current = scope === "global"
-    ? display.price_currency
-    : table(display.price_currency_by_provider)[scope];
   const mode = await prompts.select({
-    message: "价格显示方式 · 选择币种",
+    message: "全局价格显示方式",
     showInstructions: false,
-    initialValue: current === "cny" || current === "usd" ? current : "auto",
+    initialValue: display.price_currency === "usd" ? "usd" : "cny",
     options: [
-      {
-        value: "auto",
-        label: "跟随提供商默认",
-        hint: "DeepSeek 人民币、OpenAI 官方美元、其他美元",
-      },
       {
         value: "cny",
         label: "人民币",
-        hint: "统一按人民币显示（需要汇率）",
+        hint: "全局统一人民币（需要汇率缓存）",
       },
       {
         value: "usd",
         label: "美元",
-        hint: "统一按美元显示",
+        hint: "全局统一美元",
       },
       { value: "back", label: "返回上一级" },
     ],
@@ -647,25 +611,16 @@ async function runPriceCurrency({
   if (prompts.isCancel(mode) || mode === "back") {
     return { action: "back" };
   }
-  if (mode !== "auto" && mode !== "cny" && mode !== "usd") {
+  if (mode !== "cny" && mode !== "usd") {
     throw new Error(`未知价格显示方式：${String(mode)}`);
   }
-  if (scope === "global") {
-    display.price_currency = mode;
-  } else {
-    const overrides = table(display.price_currency_by_provider);
-    overrides[scope] = mode;
-    display.price_currency_by_provider = overrides;
-  }
+  display.price_currency = mode;
+  delete display.price_currency_by_provider;
   document.display = display;
   writeConfig(configPath, document);
-  output.write(
-    scope === "global"
-      ? `全局价格显示方式已设为 ${mode}：${configPath}\n`
-      : `${scope} 价格显示方式已设为 ${mode}：${configPath}\n`,
-  );
+  output.write(`全局价格显示方式已设为 ${mode}：${configPath}\n`);
   output.write("配置将在重启 Gateway 后生效；不需要重启 App Server。\n");
-  return { scope, mode, configPath };
+  return { priceCurrency: mode, configPath };
 }
 
 async function runApprovalTimeout({

@@ -7,20 +7,22 @@ import type { DisplayCurrency } from "@/lib/format"
 const STORAGE_KEY = "codex-webui:currency"
 
 export function CurrencyProvider({ children }: { children: ReactNode }) {
-  const [currency, setCurrencyState] = useState<DisplayCurrency>(() => {
+  const [currency, setCurrencyState] = useState<DisplayCurrency | null>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY)
-      return stored === "cny" || stored === "usd" ? stored : "usd"
+      return stored === "cny" || stored === "usd" ? stored : null
     } catch {
-      return "usd"
+      return null
     }
   })
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, currency)
-    } catch {
-      // 存储不可用时仅本次会话内保留
+    if (currency !== null) {
+      try {
+        localStorage.setItem(STORAGE_KEY, currency)
+      } catch {
+        // 存储不可用时仅本次会话内保留
+      }
     }
   }, [currency])
 

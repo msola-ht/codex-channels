@@ -3,7 +3,7 @@ import { createContext, useContext } from "react"
 import type { DisplayCurrency } from "@/lib/format"
 
 export const CurrencyContext = createContext<{
-  currency: DisplayCurrency
+  currency: DisplayCurrency | null
   setCurrency: (currency: DisplayCurrency) => void
 } | null>(null)
 

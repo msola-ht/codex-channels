@@ -15,13 +15,20 @@ function money(nanos: number, currency: string): string {
 
 export function formatCost(
   value: CostFields,
-  currency?: DisplayCurrency,
+  currency?: DisplayCurrency | null,
 ): string {
   if (currency === "cny" && value.totalCostCnyNanos !== null && value.totalCostCnyNanos !== undefined) {
     return money(value.totalCostCnyNanos, "CNY")
   }
   if (currency === "usd" && value.totalCostNanos !== null && value.pricingCurrency === "USD") {
     return money(value.totalCostNanos, "USD")
+  }
+  if (currency === "cny") {
+    return value.totalCostCnyNanos !== null && value.totalCostCnyNanos !== undefined
+      ? money(value.totalCostCnyNanos, "CNY")
+      : value.totalCostNanos === null || value.pricingCurrency === null
+        ? "—"
+        : money(value.totalCostNanos, value.pricingCurrency)
   }
   if (value.totalCostCnyNanos !== null && value.totalCostCnyNanos !== undefined) {
     return money(value.totalCostCnyNanos, "CNY")
@@ -34,12 +41,13 @@ export function formatCost(
 
 export function formatAvgPer100M(
   value: CostFields & { inputTokens: number | null; outputTokens: number },
-  currency?: DisplayCurrency,
+  currency?: DisplayCurrency | null,
 ): string {
   const totalTokens = (value.inputTokens ?? 0) + value.outputTokens
   if (totalTokens <= 0 || value.totalCostNanos === null) return "—"
   const autoCny = value.totalCostCnyNanos !== null && value.totalCostCnyNanos !== undefined
-  const targetCny = currency === "cny" || (currency === undefined && autoCny)
+  const targetCny = currency === "cny"
+    || ((currency === undefined || currency === null) && autoCny)
   const cnyNanos = targetCny ? value.totalCostCnyNanos ?? null : null
   const targetCurrency = cnyNanos !== null
     ? "CNY"

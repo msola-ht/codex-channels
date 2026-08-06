@@ -35,7 +35,7 @@ export function GlobalCards({
   currency,
 }: {
   global: Aggregate | null
-  currency: DisplayCurrency
+  currency: DisplayCurrency | null
 }) {
   if (global === null) {
     return (
