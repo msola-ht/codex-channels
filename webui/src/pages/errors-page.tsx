@@ -1,6 +1,5 @@
 import { useState } from "react"
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   Card,
   CardContent,
@@ -8,7 +7,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
   TableBody,
@@ -17,6 +15,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { ErrorBanner } from "@/components/metrics/error-banner"
+import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { RangeSelector } from "@/components/metrics/range-selector"
 import { StatCard } from "@/components/metrics/stat-card"
@@ -39,14 +39,9 @@ export function ErrorsPage() {
         <RangeSelector value={range} onChange={setRange} />
       </div>
 
-      {error === null ? null : (
-        <Alert variant="destructive">
-          <AlertTitle>加载失败</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+      <ErrorBanner error={error} />
 
-      {loading || data === null ? <ErrorsSkeleton /> : (
+      {loading || data === null ? <PageSkeleton rows={5} /> : (
         <>
           <div className="grid gap-4 sm:grid-cols-2">
             <StatCard
@@ -109,18 +104,5 @@ export function ErrorsPage() {
         </>
       )}
     </div>
-  )
-}
-
-function ErrorsSkeleton() {
-  return (
-    <Card>
-      <CardHeader><Skeleton className="h-5 w-32" /></CardHeader>
-      <CardContent>
-        <div className="flex flex-col gap-3">
-          {Array.from({ length: 5 }, (_, index) => <Skeleton key={index} className="h-9 w-full" />)}
-        </div>
-      </CardContent>
-    </Card>
   )
 }

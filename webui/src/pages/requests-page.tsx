@@ -1,6 +1,5 @@
 import { useState } from "react"
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   Card,
   CardContent,
@@ -15,7 +14,6 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination"
-import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
   TableBody,
@@ -24,6 +22,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { ErrorBanner } from "@/components/metrics/error-banner"
+import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { RangeSelector } from "@/components/metrics/range-selector"
 import { StatusBadge } from "@/components/metrics/status-badge"
@@ -39,6 +39,7 @@ import type { RangeName } from "@/lib/types"
 export function RequestsPage() {
   const [range, setRange] = useState<RangeName>("24h")
   const [afterId, setAfterId] = useState<number | null>(null)
+  const [history, setHistory] = useState<number[]>([])
   const { data, loading, error } = useRequests(range, afterId, 100)
 
   return (
@@ -53,24 +54,20 @@ export function RequestsPage() {
           onChange={(next) => {
             setRange(next)
             setAfterId(null)
+            setHistory([])
           }}
         />
       </div>
 
-      {error === null ? null : (
-        <Alert variant="destructive">
-          <AlertTitle>加载失败</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+      <ErrorBanner error={error} />
 
-      {loading || data === null ? <RequestsSkeleton /> : (
+      {loading || data === null ? <PageSkeleton rows={8} /> : (
         <Card>
           <CardHeader>
             <CardTitle>记录</CardTitle>
             <CardDescription>
               当前页 {data.records.length} 条
-              {afterId === null ? "" : " · 第 2+ 页"}
+              {afterId === null ? "" : ` · 第 ${history.length + 1} 页`}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
@@ -125,10 +122,12 @@ export function RequestsPage() {
               <PaginationContent>
                 <PaginationItem>
                   <PaginationPrevious
-                    aria-disabled={afterId === null}
+                    aria-disabled={history.length === 0}
                     onClick={(event) => {
                       event.preventDefault()
-                      if (afterId !== null) setAfterId(null)
+                      if (history.length === 0) return
+                      setAfterId(history[history.length - 1]!)
+                      setHistory(history.slice(0, -1))
                     }}
                   />
                 </PaginationItem>
@@ -137,7 +136,10 @@ export function RequestsPage() {
                     aria-disabled={data.nextAfterId === null}
                     onClick={(event) => {
                       event.preventDefault()
-                      if (data.nextAfterId !== null) setAfterId(data.nextAfterId)
+                      if (data.nextAfterId !== null) {
+                        if (afterId !== null) setHistory([...history, afterId])
+                        setAfterId(data.nextAfterId)
+                      }
                     }}
                   />
                 </PaginationItem>
@@ -147,18 +149,5 @@ export function RequestsPage() {
         </Card>
       )}
     </div>
-  )
-}
-
-function RequestsSkeleton() {
-  return (
-    <Card>
-      <CardHeader><Skeleton className="h-5 w-32" /></CardHeader>
-      <CardContent>
-        <div className="flex flex-col gap-3">
-          {Array.from({ length: 8 }, (_, index) => <Skeleton key={index} className="h-9 w-full" />)}
-        </div>
-      </CardContent>
-    </Card>
   )
 }
