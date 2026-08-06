@@ -62,7 +62,7 @@
 `thread_id`，因调用发生在 Codex Turn 之前而保持 `turn_id = NULL`。本模块不依赖代理、App Server
 协议、Surface 或业务 Storage。当前没有公开 HTTP API 或 WebUI；`codexc metrics` 的
 `report`、`export`、`run`、`turns`、`threads` 只通过本地只读连接输出 Markdown、JSON 或 CSV；
-`report` 与 `export` 同时输出未过期的最后周额度区间。Schema v3 可在停止 Gateway 后用
+`report` 与 `export` 同时输出未过期的最后 OpenAI 周额度区间。Schema v3 可在停止 Gateway 后用
 `codexc metrics upgrade` 先创建 `0600` 备份再事务升级到 v4并保留原记录；未知版本继续失败关闭，
 使用 `codexc metrics reset` 归档后重建，不执行隐式迁移。
 指标采集始终开启，不受全局调试模式影响；`debug` / `trace` 只增加脱敏的关联诊断，写入失败仍按
