@@ -29,7 +29,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
         <CardHeader>
           <CardTitle>需要访问令牌</CardTitle>
           <CardDescription>
-            请输入启动 codexc webui 时设置的 --token
+            请输入访问令牌（codexc config 的 WebUI 设置或 --token 配置）
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
