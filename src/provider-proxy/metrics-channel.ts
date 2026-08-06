@@ -215,10 +215,28 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     || !nullableFiniteNumber(record.firstOutputDeltaAtMs)
     || !nullableFiniteNumber(record.lastOutputDeltaAtMs)
     || !finiteNumber(record.responseCompletedAtMs)
+    || (record.weeklyQuota !== undefined && !nullableWeeklyQuota(record.weeklyQuota))
   ) {
     return undefined;
   }
-  return record as unknown as ProviderProxyMetrics;
+  return {
+    ...record,
+    weeklyQuota: record.weeklyQuota ?? null,
+  } as unknown as ProviderProxyMetrics;
+}
+
+function nullableWeeklyQuota(value: unknown): boolean {
+  if (value === null) return true;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const quota = value as Record<string, unknown>;
+  return quota.limitId === "codex"
+    && typeof quota.usedPercentMillionths === "number"
+    && Number.isSafeInteger(quota.usedPercentMillionths)
+    && quota.usedPercentMillionths >= 0
+    && quota.usedPercentMillionths <= 100_000_000
+    && typeof quota.resetsAt === "number"
+    && Number.isSafeInteger(quota.resetsAt)
+    && quota.resetsAt >= 0;
 }
 
 function oneOf(value: unknown, allowed: readonly string[]): boolean {

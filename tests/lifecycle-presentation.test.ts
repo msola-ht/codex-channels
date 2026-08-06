@@ -217,6 +217,18 @@ describe("shared Surface lifecycle presentation", () => {
             outputPricePerMillionNanos: 280_000_000,
             hasMixedPrices: false,
           },
+          compact: {
+            model: "gpt-5.6-sol",
+            hasMixedModels: false,
+            requestCount: 1,
+            unsuccessfulRequestCount: 0,
+            inputTokens: 10_000,
+            cachedInputTokens: 9_000,
+            outputTokens: 500,
+            pricingCurrency: "USD",
+            pricedRequestCount: 1,
+            totalCostNanos: 142_102_000,
+          },
         },
         sessionReferenceCost: {
           currency: "USD",
@@ -239,6 +251,7 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("模型请求聚合耗时：12秒");
     expect(rendered).toContain("Token：20.12 K");
     expect(rendered).toContain("费用：$0.000350（已计价 2/2 次请求）");
+    expect(rendered).toContain("远程压缩：1 次 · gpt-5.6-sol · 10.5 K Token · $0.142102");
     expect(rendered).toContain("参考总价：$0.001250（已计价 8/9 次请求）");
     expect(rendered).toContain("缓存命中率：75.00%");
     expect(rendered).toContain("最后请求首事件延迟：640毫秒");
@@ -374,6 +387,93 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("参考总价：¥14.400000（已计价 2/2 次请求）");
     expect(rendered).not.toContain("折合人民币");
     expect(rendered).not.toContain("$");
+  });
+
+  it("shows the DeepSeek average price per 100M tokens on the completion card", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "feishu",
+          accountId: "default",
+          conversationId: "100",
+        },
+        threadId: "thread-deepseek",
+        turnId: "turn-deepseek",
+        status: "completed",
+        modelProvider: "deepseek",
+        timing: {
+          modelRequestCount: 1,
+          completedModelRequestCount: 1,
+          requestInputTokens: 150,
+          requestCachedInputTokens: 100,
+          nonReasoningOutputTokens: 40,
+          reasoningTokens: 10,
+          referenceCost: {
+            currency: "USD",
+            totalCostNanos: 1_000_000_000,
+            inputCostNanos: 600_000_000,
+            cachedInputCostNanos: 100_000_000,
+            outputCostNanos: 300_000_000,
+            pricedRequestCount: 1,
+            requestCount: 1,
+            uncachedInputPricePerMillionNanos: 140_000_000,
+            cachedInputPricePerMillionNanos: 2_800_000,
+            outputPricePerMillionNanos: 280_000_000,
+            hasMixedPrices: false,
+          },
+        },
+      }, (provider) => provider === "deepseek" ? "cny" : "usd", {
+        usdToCny: 7.2,
+        effectiveAtMs: 1_700_000_000_000,
+        source: "ecb",
+      }),
+    );
+
+    expect(rendered).toContain("实际均价：约 ¥3,600,000.00/100M");
+  });
+
+  it("omits the DeepSeek average price when pricing samples are incomplete", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "feishu",
+          accountId: "default",
+          conversationId: "100",
+        },
+        threadId: "thread-deepseek",
+        turnId: "turn-deepseek",
+        status: "completed",
+        modelProvider: "deepseek",
+        timing: {
+          modelRequestCount: 1,
+          completedModelRequestCount: 1,
+          requestInputTokens: 150,
+          nonReasoningOutputTokens: 40,
+          reasoningTokens: 10,
+          referenceCost: {
+            currency: "USD",
+            totalCostNanos: null,
+            inputCostNanos: null,
+            cachedInputCostNanos: null,
+            outputCostNanos: null,
+            pricedRequestCount: 0,
+            requestCount: 1,
+            uncachedInputPricePerMillionNanos: null,
+            cachedInputPricePerMillionNanos: null,
+            outputPricePerMillionNanos: null,
+            hasMixedPrices: false,
+          },
+        },
+      }, (provider) => provider === "deepseek" ? "cny" : "usd", {
+        usdToCny: 7.2,
+        effectiveAtMs: 1_700_000_000_000,
+        source: "ecb",
+      }),
+    );
+
+    expect(rendered).not.toContain("实际均价");
   });
 
   it("renders run cost details as indented subfields", () => {

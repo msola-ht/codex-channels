@@ -55,6 +55,8 @@ export type ConversationInputEvent =
       type: "turn.modelTiming.updated";
       threadId: string;
       turnId: string;
+      operation?: "response" | "compact";
+      model?: string;
       requestStartedAtMs: number;
       requestDurationMs: number;
       outcome?: "completed" | "interrupted" | "incomplete" | "failed";

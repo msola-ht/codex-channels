@@ -209,8 +209,8 @@ describe("shared surface copy contract", () => {
       name: "skill",
       argumentsText: "5 初始化检查",
     });
-    expect(parseSlashCommand("/workspace-perm sandbox read-only")).toEqual({
-      name: "workspace-perm",
+    expect(parseSlashCommand("/workspaceperm sandbox read-only")).toEqual({
+      name: "workspaceperm",
       argumentsText: "sandbox read-only",
     });
   });

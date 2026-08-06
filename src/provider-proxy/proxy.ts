@@ -18,6 +18,14 @@ import WebSocket, {
 
 const maximumJsonMetadataBytes = 1_048_576;
 const maximumSseMetadataLineCharacters = 1_048_576;
+const weeklyWindowMinutes = 7 * 24 * 60;
+const percentScale = 1_000_000;
+
+export interface ProviderWeeklyQuotaSnapshot {
+  limitId: "codex";
+  usedPercentMillionths: number;
+  resetsAt: number;
+}
 
 export interface ProviderProxyMetrics {
   transport: "http" | "websocket";
@@ -46,6 +54,7 @@ export interface ProviderProxyMetrics {
   firstOutputDeltaAtMs: number | null;
   lastOutputDeltaAtMs: number | null;
   responseCompletedAtMs: number;
+  weeklyQuota: ProviderWeeklyQuotaSnapshot | null;
 }
 
 export interface ProviderProxyUpstream {
@@ -71,6 +80,7 @@ export interface ProviderProxyOptions {
 interface TurnMetadata {
   threadId: string | null;
   turnId: string | null;
+  operation: ProviderProxyMetrics["operation"];
 }
 
 interface MetricsState extends ProviderProxyMetrics {
@@ -156,11 +166,14 @@ export class ProviderProxy {
       return;
     }
     const upstreamTarget = this.upstreamFor(request.headers);
+    const turnMetadata = parseTurnMetadata(
+      request.headers["x-codex-turn-metadata"],
+    );
     const metrics = createMetricsState(
-      parseTurnMetadata(request.headers["x-codex-turn-metadata"]),
+      turnMetadata,
       Date.now(),
       "http",
-      responseOperation(request.url),
+      responseOperation(request.url, turnMetadata.operation),
     );
     let metricsDelivery: Promise<void> | undefined;
     const emitMetrics = (): Promise<void> => {
@@ -185,6 +198,7 @@ export class ProviderProxy {
     }, (upstreamResponse) => {
       metrics.httpStatus = upstreamResponse.statusCode ?? null;
       metrics.responseFormat = httpResponseFormat(upstreamResponse.headers["content-type"]);
+      metrics.weeklyQuota = weeklyQuotaFromHeaders(upstreamResponse.headers);
       writeUpstreamHead(response, upstreamResponse);
       const decoder = new StringDecoder("utf8");
       let pending = "";
@@ -347,7 +361,7 @@ export class ProviderProxy {
           sanitized.metadata,
           sanitized.requestStartedAtMs ?? Date.now(),
           "websocket",
-          "response",
+          sanitized.metadata.operation,
         );
         activeMetrics.model = sanitized.model ?? null;
         activeMetrics.serviceTier = sanitized.serviceTier ?? null;
@@ -370,6 +384,9 @@ export class ProviderProxy {
           const currentMetrics = activeMetrics;
           const parsed = parseJsonPayload(rawDataText(data));
           const type = typeof parsed?.type === "string" ? parsed.type : "";
+          if (type === "codex.rate_limits") {
+            currentMetrics.weeklyQuota = weeklyQuotaFromEvent(parsed);
+          }
           if (observeResponseEvent(currentMetrics, type, parsed, receivedAtMs)) {
             activeMetrics = undefined;
             await this.deliverMetrics(currentMetrics);
@@ -469,7 +486,70 @@ function createMetricsState(
     firstOutputDeltaAtMs: null,
     lastOutputDeltaAtMs: null,
     responseCompletedAtMs: startedAtMs,
+    weeklyQuota: null,
   };
+}
+
+function weeklyQuotaFromHeaders(
+  headers: IncomingHttpHeaders,
+): ProviderWeeklyQuotaSnapshot | null {
+  for (const window of ["primary", "secondary"] as const) {
+    const snapshot = weeklyQuotaSnapshot(
+      headerNumber(headers[`x-codex-${window}-used-percent`]),
+      headerNumber(headers[`x-codex-${window}-window-minutes`]),
+      headerNumber(headers[`x-codex-${window}-reset-at`]),
+    );
+    if (snapshot) return snapshot;
+  }
+  return null;
+}
+
+function weeklyQuotaFromEvent(
+  event: Record<string, unknown> | undefined,
+): ProviderWeeklyQuotaSnapshot | null {
+  const limitId = event?.metered_limit_name ?? event?.limit_name;
+  if (limitId !== undefined && limitId !== "codex") return null;
+  const rateLimits = asRecord(event?.rate_limits);
+  for (const key of ["primary", "secondary"] as const) {
+    const window = asRecord(rateLimits?.[key]);
+    const snapshot = weeklyQuotaSnapshot(
+      finiteNonNegativeNumber(window?.used_percent),
+      finiteNonNegativeNumber(window?.window_minutes),
+      finiteNonNegativeNumber(window?.reset_at),
+    );
+    if (snapshot) return snapshot;
+  }
+  return null;
+}
+
+function weeklyQuotaSnapshot(
+  usedPercent: number | null,
+  windowMinutes: number | null,
+  resetsAt: number | null,
+): ProviderWeeklyQuotaSnapshot | null {
+  if (
+    usedPercent === null
+    || usedPercent < 0
+    || usedPercent > 100
+    || windowMinutes !== weeklyWindowMinutes
+    || resetsAt === null
+    || !Number.isSafeInteger(resetsAt)
+  ) return null;
+  const usedPercentMillionths = Math.round(usedPercent * percentScale);
+  return Number.isSafeInteger(usedPercentMillionths)
+    ? { limitId: "codex", usedPercentMillionths, resetsAt }
+    : null;
+}
+
+function headerNumber(value: string | string[] | undefined): number | null {
+  if (typeof value !== "string" || value.trim() === "") return null;
+  return finiteNonNegativeNumber(Number(value));
+}
+
+function finiteNonNegativeNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
 }
 
 function observeResponseEvent(
@@ -763,14 +843,15 @@ function isResponsesRequestPath(value: string | undefined): boolean {
 
 function responseOperation(
   value: string | undefined,
+  metadataOperation: ProviderProxyMetrics["operation"],
 ): ProviderProxyMetrics["operation"] {
-  if (!value) return "response";
+  if (!value) return metadataOperation;
   try {
     return new URL(value, "http://127.0.0.1").pathname === "/responses/compact"
       ? "compact"
-      : "response";
+      : metadataOperation;
   } catch {
-    return "response";
+    return metadataOperation;
   }
 }
 
@@ -824,7 +905,7 @@ function endToEndHeaders(headers: IncomingHttpHeaders): IncomingHttpHeaders {
 function parseTurnMetadata(value: string | string[] | undefined): TurnMetadata {
   return typeof value === "string"
     ? parseTurnMetadataObject(parseJsonPayload(value))
-    : { threadId: null, turnId: null };
+    : { threadId: null, turnId: null, operation: "response" };
 }
 
 function parseTurnMetadataObject(value: unknown): TurnMetadata {
@@ -832,6 +913,7 @@ function parseTurnMetadataObject(value: unknown): TurnMetadata {
   return {
     threadId: nonEmptyString(parsed?.thread_id),
     turnId: nonEmptyString(parsed?.turn_id),
+    operation: parsed?.request_kind === "compaction" ? "compact" : "response",
   };
 }
 

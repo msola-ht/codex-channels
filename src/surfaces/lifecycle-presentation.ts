@@ -26,6 +26,10 @@ import {
   toDisplayReferenceCost,
 } from "./reference-cost-format.js";
 import {
+  formatCompactMetricsValue,
+  formatDeepseekAveragePriceValue,
+} from "./metrics-format.js";
+import {
   formatCacheHitRate,
   formatTokenCount,
 } from "./token-format.js";
@@ -361,6 +365,37 @@ export function createTurnCompletedPresentation(
               ? []
               : [{ label, value: formatCurrencyNanos(displayCost.currency!, costNanos) }],
           ),
+    });
+  }
+  if (
+    event.modelProvider === "deepseek"
+    && event.timing?.referenceCost
+    && event.timing.requestInputTokens !== undefined
+  ) {
+    const averagePrice = formatDeepseekAveragePriceValue({
+      pricingCurrency: event.timing.referenceCost.currency,
+      totalCostNanos: event.timing.referenceCost.totalCostNanos,
+      pricedRequestCount: event.timing.referenceCost.pricedRequestCount,
+      requestCount: event.timing.referenceCost.requestCount,
+      inputTokens: event.timing.requestInputTokens,
+      outputTokens: (event.timing.nonReasoningOutputTokens ?? 0)
+        + (event.timing.reasoningTokens ?? 0),
+    }, currency, exchangeRate);
+    if (averagePrice !== null) {
+      runFields.push({
+        label: "实际均价",
+        value: averagePrice,
+      });
+    }
+  }
+  if (event.timing?.compact) {
+    runFields.push({
+      label: "远程压缩",
+      value: formatCompactMetricsValue(
+        event.timing.compact,
+        currency,
+        exchangeRate,
+      ),
     });
   }
   const performanceFields: LifecyclePresentationField[] = [];

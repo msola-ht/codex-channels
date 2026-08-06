@@ -7,6 +7,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -22,6 +23,8 @@ import {
   readMetricsThreads,
   readMetricsTurns,
   resetMetricsDatabase,
+  upgradeMetricsDatabase,
+  upgradeMetricsDatabaseWithGatewayRestart,
 } from "../scripts/metrics-database.mjs";
 import {
   modelRequestMetricsSchemaVersion,
@@ -70,7 +73,15 @@ describe("model request metrics database operations", () => {
   it("reads a reusable aggregate report and paged sanitized export", () => {
     const { environment, databasePath } = fixture();
     const store = new SqliteModelRequestMetricsStore(databasePath);
-    store.record(metricSample());
+    store.record({
+      ...metricSample(),
+      provider: "openai",
+      weeklyQuota: {
+        limitId: "codex",
+        usedPercentMillionths: 12_500_000,
+        resetsAt: Math.floor(Date.now() / 1_000) + 24 * 60 * 60,
+      },
+    });
     store.record({
       ...metricSample(),
       responseFormat: "unknown",
@@ -97,7 +108,13 @@ describe("model request metrics database operations", () => {
     });
     expect(report).toMatchObject({
       format: "codex-connect-request-metrics-report",
-      version: 1,
+      version: 2,
+      weeklyQuota: {
+        limitId: "codex",
+        usedPercent: 12.5,
+        remainingPercent: 87.5,
+        estimate: null,
+      },
       report: {
         aggregate: {
           requestCount: 2,
@@ -116,7 +133,11 @@ describe("model request metrics database operations", () => {
     const exported = readMetricsExport(environment, { range: "24h", nowMs });
     expect(exported).toMatchObject({
       format: "codex-connect-request-metrics-export",
-      version: 1,
+      version: 2,
+      weeklyQuota: {
+        limitId: "codex",
+        usedPercent: 12.5,
+      },
     });
     expect(exported.records).toHaveLength(2);
     expect(exported.records[1]).toMatchObject({
@@ -124,6 +145,151 @@ describe("model request metrics database operations", () => {
       incompleteReason: "response_not_observed",
     });
     expect(JSON.stringify(exported)).not.toMatch(/prompt|message|authorization/iu);
+  });
+
+  it("exports request quota snapshots separately from the current quota summary", () => {
+    const { environment, databasePath } = fixture();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    const resetsAt = Math.floor(Date.now() / 1_000) + 24 * 60 * 60;
+    store.record({
+      ...metricSample(),
+      provider: "openai",
+      weeklyQuota: {
+        limitId: "codex",
+        usedPercentMillionths: 12_500_000,
+        resetsAt,
+      },
+    });
+    store.record({
+      ...metricSample(),
+      provider: "openai",
+      threadId: "thread-2",
+      turnId: "turn-2",
+    });
+    store.close();
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        join(process.cwd(), "scripts", "metrics-database.mjs"),
+        "export",
+        "--range",
+        "24h",
+        "--format",
+        "csv",
+      ],
+      { encoding: "utf8", env: environment },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    const [headings = [], ...values] = result.stdout.trim().split("\n")
+      .map((line) => line.split(","));
+    const rows = values.map((cells) => Object.fromEntries(
+      headings.map((heading, index) => [heading, cells[index] ?? ""]),
+    ));
+    expect(rows).toHaveLength(3);
+    expect(rows).toEqual([
+      expect.objectContaining({
+        type: "request",
+        id: "1",
+        weeklyQuotaUsedPercent: "12.5",
+      }),
+      expect.objectContaining({
+        type: "request",
+        id: "2",
+        weeklyQuotaUsedPercent: "",
+      }),
+      expect.objectContaining({
+        type: "weekly_quota_summary",
+        id: "",
+        weeklyQuotaUsedPercent: "12.5",
+      }),
+    ]);
+  });
+
+  it("shows compact model, tokens, and reference cost in reports and exports", () => {
+    const { environment, databasePath } = fixture();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    const pricing = {
+      billingMode: "api" as const,
+      currency: "USD",
+      source: "test-catalog",
+      effectiveAtMs: 1_700_000_000_000,
+      uncachedInputPricePerMillionNanos: 2_000_000_000,
+      cachedInputPricePerMillionNanos: 1_000_000_000,
+      outputPricePerMillionNanos: 3_000_000_000,
+    };
+    store.record({ ...metricSample(), pricing });
+    store.record({ ...metricSample(), operation: "compact", pricing });
+    store.close();
+
+    expect(readMetricsReport(environment, {
+      range: "24h",
+      group: "global",
+      nowMs: Date.now() + 1,
+    }).report.aggregate).toMatchObject({
+      compact: {
+        model: "deepseek-v4-flash",
+        requestCount: 1,
+        inputTokens: 1_000,
+        outputTokens: 100,
+        pricingCurrency: "USD",
+        totalCostNanos: 1_400_000,
+      },
+    });
+
+    const reportMarkdown = spawnSync(
+      process.execPath,
+      [
+        join(process.cwd(), "scripts", "metrics-database.mjs"),
+        "report",
+        "--range",
+        "24h",
+        "--group",
+        "global",
+        "--format",
+        "markdown",
+      ],
+      { encoding: "utf8", env: environment },
+    );
+    expect(reportMarkdown.status, reportMarkdown.stderr).toBe(0);
+    expect(reportMarkdown.stdout).toContain(
+      "远程压缩：1 次 · deepseek-v4-flash · 1.1 K Token · $0.0014",
+    );
+
+    const exportMarkdown = spawnSync(
+      process.execPath,
+      [
+        join(process.cwd(), "scripts", "metrics-database.mjs"),
+        "export",
+        "--range",
+        "24h",
+        "--format",
+        "markdown",
+      ],
+      { encoding: "utf8", env: environment },
+    );
+    expect(exportMarkdown.status, exportMarkdown.stderr).toBe(0);
+    expect(exportMarkdown.stdout).toContain("| 操作 |");
+    expect(exportMarkdown.stdout).toContain("| compact |");
+
+    const reportCsv = spawnSync(
+      process.execPath,
+      [
+        join(process.cwd(), "scripts", "metrics-database.mjs"),
+        "report",
+        "--range",
+        "24h",
+        "--group",
+        "global",
+        "--format",
+        "csv",
+      ],
+      { encoding: "utf8", env: environment },
+    );
+    expect(reportCsv.status, reportCsv.stderr).toBe(0);
+    expect(reportCsv.stdout).toContain("compactRequestCount");
+    expect(reportCsv.stdout).toContain("compactTotalCostNanos");
   });
 
   it("refuses to reset while Gateway is running", () => {
@@ -317,6 +483,132 @@ describe("model request metrics database operations", () => {
     backup.close();
   });
 
+  it("backs up and explicitly upgrades a v3 metrics database in place", () => {
+    const { environment, databasePath } = fixture();
+    createLegacyV3Database(databasePath, 2);
+
+    const result = upgradeMetricsDatabase(environment, {
+      gatewayRunning: () => false,
+      now: () => new Date("2026-08-05T12:34:56.789Z"),
+    });
+
+    expect(result).toMatchObject({
+      changed: true,
+      databasePath,
+      previousSchemaVersion: 3,
+      schemaVersion: 4,
+    });
+    expect(result.backupPath).toContain(".v3.2026-08-05T12-34-56-789Z.bak");
+    expect(existsSync(result.backupPath!)).toBe(true);
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    expect(database.prepare(
+      "SELECT value FROM schema_metadata WHERE name = 'schema_version'",
+    ).get()).toEqual({ value: 4 });
+    const columns = database.prepare("PRAGMA table_info(model_request_metrics)")
+      .all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
+      "weekly_quota_limit_id",
+      "weekly_used_percent_millionths",
+      "weekly_resets_at",
+    ]));
+    expect(database.prepare("SELECT COUNT(*) AS count FROM model_request_metrics").get())
+      .toEqual({ count: 2 });
+    database.close();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    expect(store.count()).toBe(2);
+    store.close();
+  });
+
+  it("refuses metrics upgrades while Gateway is running", () => {
+    const { environment, databasePath } = fixture();
+    createMetricsDatabase(databasePath, 3, 1);
+
+    expect(() => upgradeMetricsDatabase(environment, {
+      gatewayRunning: () => true,
+    })).toThrow(/codexc service stop gateway/u);
+    expect(inspectMetricsDatabase(environment).schemaVersion).toBe(3);
+  });
+
+  it("fails closed instead of guessing an unsupported metrics upgrade", () => {
+    const { environment, databasePath } = fixture();
+    createMetricsDatabase(databasePath, 2, 1);
+
+    expect(() => upgradeMetricsDatabase(environment, {
+      gatewayRunning: () => false,
+    })).toThrow(/仅支持 v3 升级到 v4/u);
+    expect(inspectMetricsDatabase(environment).schemaVersion).toBe(2);
+  });
+
+  it("stops, upgrades and restarts Gateway in order", () => {
+    const calls: string[] = [];
+    const result = upgradeMetricsDatabaseWithGatewayRestart(process.env, {
+      stopGateway: () => calls.push("stop"),
+      upgrade: () => {
+        calls.push("upgrade");
+        return {
+          backupPath: "/tmp/metrics-v3.bak",
+          changed: true,
+          databasePath: "/tmp/metrics.sqlite3",
+          previousSchemaVersion: 3,
+          schemaVersion: 4,
+        };
+      },
+      startGateway: () => calls.push("start"),
+    });
+
+    expect(calls).toEqual(["stop", "upgrade", "start"]);
+    expect(result.schemaVersion).toBe(4);
+  });
+
+  it("still restarts Gateway when the upgrade fails", () => {
+    const calls: string[] = [];
+    expect(() => upgradeMetricsDatabaseWithGatewayRestart(process.env, {
+      stopGateway: () => calls.push("stop"),
+      upgrade: () => {
+        calls.push("upgrade");
+        throw new Error("upgrade failed");
+      },
+      startGateway: () => calls.push("start"),
+    })).toThrow(/upgrade failed/u);
+    expect(calls).toEqual(["stop", "upgrade", "start"]);
+  });
+
+  it("still attempts upgrade and restart when stopping Gateway fails", () => {
+    const calls: string[] = [];
+    expect(() => upgradeMetricsDatabaseWithGatewayRestart(process.env, {
+      stopGateway: () => {
+        calls.push("stop");
+        throw new Error("stop failed");
+      },
+      upgrade: () => {
+        calls.push("upgrade");
+        return {
+          backupPath: "/tmp/metrics-v3.bak",
+          changed: true,
+          databasePath: "/tmp/metrics.sqlite3",
+          previousSchemaVersion: 3,
+          schemaVersion: 4,
+        };
+      },
+      startGateway: () => calls.push("start"),
+    })).toThrow(/stop failed/u);
+    expect(calls).toEqual(["stop", "upgrade", "start"]);
+  });
+
+  it("combines stop and start failures after a failed upgrade", () => {
+    expect(() => upgradeMetricsDatabaseWithGatewayRestart(process.env, {
+      stopGateway: () => {
+        throw new Error("stop failed");
+      },
+      upgrade: () => {
+        throw new Error("upgrade failed");
+      },
+      startGateway: () => {
+        throw new Error("start failed");
+      },
+    })).toThrow(AggregateError);
+  });
+
   it("refuses to reset when an unmanaged Gateway still owns the metrics database", () => {
     const { environment, databasePath } = fixture();
     const active = new SqliteModelRequestMetricsStore(databasePath);
@@ -375,6 +667,106 @@ function createMetricsDatabase(path: string, schemaVersion: number, count: numbe
   database.close();
 }
 
+function createLegacyV3Database(path: string, count: number) {
+  mkdirSync(dirname(path), { recursive: true });
+  const database = new DatabaseSync(path);
+  database.exec(`
+    CREATE TABLE schema_metadata (name TEXT PRIMARY KEY, value INTEGER NOT NULL);
+    INSERT INTO schema_metadata (name, value) VALUES ('schema_version', 3);
+    CREATE TABLE model_request_metrics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL,
+      billing_mode TEXT CHECK (
+        billing_mode IS NULL OR billing_mode IN ('api', 'subscription', 'unknown')
+      ),
+      pricing_currency TEXT,
+      pricing_source TEXT,
+      pricing_effective_at_ms INTEGER,
+      uncached_input_price_per_million_nanos INTEGER CHECK (
+        uncached_input_price_per_million_nanos IS NULL
+        OR uncached_input_price_per_million_nanos >= 0
+      ),
+      cached_input_price_per_million_nanos INTEGER CHECK (
+        cached_input_price_per_million_nanos IS NULL
+        OR cached_input_price_per_million_nanos >= 0
+      ),
+      output_price_per_million_nanos INTEGER CHECK (
+        output_price_per_million_nanos IS NULL
+        OR output_price_per_million_nanos >= 0
+      ),
+      transport TEXT NOT NULL CHECK (transport IN ('http', 'websocket')),
+      response_format TEXT NOT NULL CHECK (
+        response_format IN ('sse', 'json', 'websocket', 'unknown')
+      ),
+      operation TEXT NOT NULL CHECK (operation IN ('response', 'compact')),
+      thread_id TEXT,
+      turn_id TEXT,
+      model TEXT,
+      service_tier TEXT,
+      reasoning_effort TEXT,
+      status TEXT NOT NULL CHECK (status IN ('completed', 'failed', 'incomplete', 'unknown')),
+      http_status INTEGER,
+      error_type TEXT,
+      error_code TEXT,
+      incomplete_reason TEXT,
+      input_tokens INTEGER,
+      cached_input_tokens INTEGER,
+      output_tokens INTEGER,
+      reasoning_output_tokens INTEGER,
+      total_tokens INTEGER,
+      upstream_created_at REAL,
+      upstream_completed_at REAL,
+      request_started_at_ms INTEGER NOT NULL,
+      first_token_at_ms INTEGER,
+      first_reasoning_delta_at_ms INTEGER,
+      last_reasoning_delta_at_ms INTEGER,
+      first_output_delta_at_ms INTEGER,
+      last_output_delta_at_ms INTEGER,
+      response_completed_at_ms INTEGER NOT NULL,
+      recorded_at_ms INTEGER NOT NULL,
+      CHECK (
+        (
+          billing_mode IS NULL
+          AND pricing_currency IS NULL
+          AND pricing_source IS NULL
+          AND pricing_effective_at_ms IS NULL
+          AND uncached_input_price_per_million_nanos IS NULL
+          AND cached_input_price_per_million_nanos IS NULL
+          AND output_price_per_million_nanos IS NULL
+        ) OR (
+          billing_mode IS NOT NULL
+          AND pricing_source IS NOT NULL
+          AND pricing_effective_at_ms IS NOT NULL
+          AND (
+            (
+              uncached_input_price_per_million_nanos IS NULL
+              AND cached_input_price_per_million_nanos IS NULL
+              AND output_price_per_million_nanos IS NULL
+            ) OR pricing_currency IS NOT NULL
+          )
+        )
+      )
+    );
+    CREATE INDEX model_request_metrics_recorded_at
+      ON model_request_metrics (recorded_at_ms);
+    CREATE INDEX model_request_metrics_thread_turn
+      ON model_request_metrics (thread_id, turn_id, id);
+    CREATE INDEX model_request_metrics_provider_model
+      ON model_request_metrics (provider, model, id);
+  `);
+  const insert = database.prepare(`
+    INSERT INTO model_request_metrics (
+      provider, transport, response_format, operation, status,
+      request_started_at_ms, response_completed_at_ms, recorded_at_ms
+    ) VALUES (?, 'http', 'sse', 'response', 'completed', ?, ?, ?)
+  `);
+  const nowMs = Date.now();
+  for (let index = 0; index < count; index += 1) {
+    insert.run("openai", nowMs, nowMs + 1, nowMs + 2);
+  }
+  database.close();
+}
+
 function metricSample(): ModelRequestMetricSample {
   return {
     provider: "deepseek",
@@ -406,5 +798,6 @@ function metricSample(): ModelRequestMetricSample {
     firstOutputDeltaAtMs: 1_400,
     lastOutputDeltaAtMs: 1_600,
     responseCompletedAtMs: 1_650,
+    weeklyQuota: null,
   };
 }

@@ -71,6 +71,19 @@ export interface ThreadGoal {
   updatedAt: number;
 }
 
+export interface CompactRequestMetricsSummary {
+  model: string | null;
+  hasMixedModels: boolean;
+  requestCount: number;
+  unsuccessfulRequestCount: number;
+  inputTokens: number;
+  cachedInputTokens: number | null;
+  outputTokens: number;
+  pricingCurrency: string | null;
+  pricedRequestCount: number;
+  totalCostNanos: number | null;
+}
+
 export interface TurnOutputTiming {
   modelRequestCount?: number;
   completedModelRequestCount?: number;
@@ -99,6 +112,7 @@ export interface TurnOutputTiming {
   generationSpeedSampleCount?: number;
   generationSpeedTimedCount?: number;
   referenceCost?: ReferenceCostSummary;
+  compact?: CompactRequestMetricsSummary;
 }
 
 export interface ReferenceCostSummary {

@@ -55,6 +55,25 @@ describe("Provider proxy metrics channel", () => {
     )).resolves.toBeUndefined();
   });
 
+  it("accepts rolling-upgrade metrics without a weekly quota snapshot", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-provider-metrics-legacy-"));
+    temporaryDirectories.push(directory);
+    const socketPath = join(directory, "metrics.sock");
+    let resolveMetrics: (metrics: ProviderProxyMetrics) => void = () => undefined;
+    const received = new Promise<ProviderProxyMetrics>((resolve) => {
+      resolveMetrics = resolve;
+    });
+    const server = new ProviderProxyMetricsServer(socketPath, resolveMetrics);
+    await server.start();
+    const legacy = { ...metrics() } as Partial<ProviderProxyMetrics>;
+    delete legacy.weeklyQuota;
+
+    await sendProviderProxyMetrics(socketPath, legacy as ProviderProxyMetrics);
+
+    await expect(received).resolves.toMatchObject({ weeklyQuota: null });
+    await server.close();
+  });
+
   it("closes an active listener even when startup did not reach the started state", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-provider-metrics-cleanup-"));
     temporaryDirectories.push(directory);
@@ -113,5 +132,6 @@ function metrics(): ProviderProxyMetrics {
     firstOutputDeltaAtMs: 1_600,
     lastOutputDeltaAtMs: 1_800,
     responseCompletedAtMs: 1_900,
+    weeklyQuota: null,
   };
 }

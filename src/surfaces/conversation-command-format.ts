@@ -24,6 +24,7 @@ import {
 } from "./elapsed-duration.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 import { formatCodexProviderLabel } from "./provider-format.js";
+import { formatCurrencyNanos } from "./reference-cost-format.js";
 import {
   formatCacheHitRate,
   formatTokenCount,
@@ -43,7 +44,7 @@ export const conversationCommandDescriptions = {
   unpin: "取消固定当前会话",
   status: "查看当前状态",
   workspace: "列出或切换 Workspace",
-  "workspace-perm": "查看或修改当前工作区权限",
+  workspaceperm: "查看或修改当前工作区权限",
   stop: "停止当前任务",
   queue: "排到下一 Turn",
   rename: "命名当前会话",
@@ -80,7 +81,7 @@ export const conversationCommandHelpSections = [
   {
     title: "运行与项目：",
     lines: [
-      "/status · /workspace [序号|ID|名称] · /workspace-perm",
+      "/status · /workspace [序号|ID|名称] · /workspaceperm",
       "/stop · /queue <描述>",
       "/review [branch <分支>|commit <SHA>|custom <说明>]",
       "/rules <init|check> · /diff",
@@ -310,9 +311,9 @@ export function formatConversationWorkspacePermissions(
       : ["未配置（使用全局默认）"]),
     "",
     "修改：",
-    "- /workspace-perm sandbox <read-only|workspace-write|danger-full-access|clear>",
-    "- /workspace-perm approval <untrusted|on-request|never|clear>",
-    "- /workspace-perm profile <Profile ID|clear>",
+    "- /workspaceperm sandbox <read-only|workspace-write|danger-full-access|clear>",
+    "- /workspaceperm approval <untrusted|on-request|never|clear>",
+    "- /workspaceperm profile <Profile ID|clear>",
     "权限热加载后对新建或恢复的 Thread 生效，不改变已绑定 Thread。",
   ].join("\n"));
 }
@@ -564,6 +565,11 @@ export function formatConversationLimits(
   const planType = result.result.limits.limits.find(
     (limit) => limit.planType,
   )?.planType;
+  const weeklyEstimates = result.result.weeklyEstimates ?? [];
+  const hasWeeklyWindow = result.result.limits.limits.some((limit) =>
+    [limit.primary, limit.secondary].some(
+      (window) => window?.windowDurationMins === 10_080,
+    ));
   return toStructuredMarkdownList([
     "OpenAI Codex 额度：",
     `套餐：${planType ? formatPlanType(planType) : "未知"}`,
@@ -596,7 +602,37 @@ export function formatConversationLimits(
     ...(result.result.limits.resetCreditsAvailable === null
       ? []
       : ["", `可用额度重置券：${result.result.limits.resetCreditsAvailable}`]),
+    ...(hasWeeklyWindow
+      ? [
+          "",
+          "周限估算（本机代理样本）：",
+          ...(weeklyEstimates.length === 0
+            ? ["正在采样；需要同一周窗口内至少出现一次可观测的额度增长。"]
+            : weeklyEstimates.flatMap((estimate) => [
+                `${estimate.limitId}：已使用 ${formatPercent(estimate.usedPercent)} · 观测变化 ${formatPercent(estimate.observedDeltaPercent)}（${estimate.intervalCount} 个区间）`,
+                `样本：${estimate.requestCount} 次请求${estimate.unsuccessfulRequestCount > 0 ? ` · ${estimate.unsuccessfulRequestCount} 次未成功` : ""}`,
+                `每 1%：约 ${formatTokenCount(estimate.totalTokensPerPercent)} Token`,
+                `  - 输入：约 ${formatTokenCount(estimate.inputTokensPerPercent)}`,
+                `  - 输出：约 ${formatTokenCount(estimate.outputTokensPerPercent)}`,
+                `  - API 参考费用：${formatEstimatedLimitCost(estimate.pricingCurrency, estimate.costPerPercentNanos)}（已计价 ${estimate.pricedRequestCount}/${Math.max(0, estimate.requestCount - estimate.unsuccessfulRequestCount)} 个成功请求）`,
+                `剩余 ${formatPercent(estimate.remainingPercent)}：约 ${formatTokenCount(estimate.remainingTokens)} Token · API 参考费用 ${formatEstimatedLimitCost(estimate.pricingCurrency, estimate.remainingCostNanos)}`,
+                ...(estimate.observedDeltaPercent < 1
+                  ? ["提示：观测到的额度变化不足 1%，估算波动可能较大。"]
+                  : []),
+              ])),
+          "口径：按统计代理相邻额度快照的增量折算；其他客户端在快照间的用量可能造成偏差，费用不是订阅实际扣款。",
+        ]
+      : []),
   ].join("\n"));
+}
+
+function formatEstimatedLimitCost(
+  currency: string | null,
+  nanos: number | null,
+): string {
+  return currency === null || nanos === null
+    ? "暂无完整价格样本"
+    : `约 ${formatCurrencyNanos(currency, nanos)}`;
 }
 
 export function formatConversationStatus(status: ConversationStatus): string {

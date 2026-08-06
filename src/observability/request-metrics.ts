@@ -123,6 +123,43 @@ export interface ModelRequestMetricSample {
   firstOutputDeltaAtMs: number | null;
   lastOutputDeltaAtMs: number | null;
   responseCompletedAtMs: number;
+  weeklyQuota: {
+    limitId: "codex";
+    usedPercentMillionths: number;
+    resetsAt: number;
+  } | null;
+}
+
+export interface WeeklyQuotaEstimateQuery {
+  provider: string;
+  limitId: string;
+  resetsAt: number;
+  nowMs: number;
+}
+
+export interface StoredWeeklyQuotaEstimate {
+  limitId: string;
+  resetsAt: number;
+  firstObservedAtMs: number;
+  lastObservedAtMs: number;
+  latestUsedPercentMillionths: number;
+  observedDeltaPercentMillionths: number;
+  intervalCount: number;
+  requestCount: number;
+  unsuccessfulRequestCount: number;
+  pricedRequestCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  pricingCurrency: string | null;
+  totalCostNanos: number | null;
+}
+
+export interface StoredWeeklyQuotaWindow {
+  limitId: string;
+  usedPercentMillionths: number;
+  resetsAt: number;
+  observedAtMs: number;
 }
 
 export interface StoredModelRequestMetric extends ModelRequestMetricSample {
@@ -144,6 +181,19 @@ export interface StoredModelRequestMetric extends ModelRequestMetricSample {
   uncachedInputCostNanos: number | null;
   cachedInputCostNanos: number | null;
   outputCostNanos: number | null;
+  totalCostNanos: number | null;
+}
+
+export interface StoredCompactRequestMetricsSummary {
+  model: string | null;
+  hasMixedModels: boolean;
+  requestCount: number;
+  unsuccessfulRequestCount: number;
+  inputTokens: number;
+  cachedInputTokens: number | null;
+  outputTokens: number;
+  pricingCurrency: string | null;
+  pricedRequestCount: number;
   totalCostNanos: number | null;
 }
 
@@ -172,6 +222,7 @@ export interface StoredTurnRequestMetricsSummary {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  compact: StoredCompactRequestMetricsSummary | null;
 }
 
 export interface StoredThreadRequestMetricsAggregate {
@@ -197,6 +248,7 @@ export interface StoredThreadRequestMetricsAggregate {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  compact: StoredCompactRequestMetricsSummary | null;
 }
 
 export interface StoredThreadRequestMetricsSummary {
@@ -222,6 +274,7 @@ export interface StoredThreadListItem {
   pricingCurrency: string | null;
   pricedRequestCount: number;
   totalCostNanos: number | null;
+  compact: StoredCompactRequestMetricsSummary | null;
   lastRecordedAtMs: number;
 }
 
@@ -261,6 +314,7 @@ export interface StoredModelRequestMetricsAggregate {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  compact: StoredCompactRequestMetricsSummary | null;
 }
 
 export interface StoredModelRequestMetricsGroup {

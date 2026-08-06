@@ -66,6 +66,26 @@ export interface AccountRateLimits {
   resetCreditsAvailable: AccountMetric | null;
 }
 
+export interface AccountWeeklyLimitEstimate {
+  limitId: string;
+  startAtMs: number;
+  endAtMs: number;
+  usedPercent: number;
+  remainingPercent: number;
+  observedDeltaPercent: number;
+  intervalCount: number;
+  requestCount: number;
+  unsuccessfulRequestCount: number;
+  pricedRequestCount: number;
+  inputTokensPerPercent: number;
+  outputTokensPerPercent: number;
+  totalTokensPerPercent: number;
+  remainingTokens: number;
+  pricingCurrency: string | null;
+  costPerPercentNanos: number | null;
+  remainingCostNanos: number | null;
+}
+
 export interface AccountQueryPort {
   accountUsage(): Promise<AccountUsage>;
   accountRateLimits(): Promise<AccountRateLimits>;
@@ -84,7 +104,12 @@ export type ProviderAccountUsage =
   | { kind: "unsupported"; provider: string };
 
 export type ProviderAccountLimits =
-  | { kind: "rate-limits"; provider: "openai"; limits: AccountRateLimits }
+  | {
+      kind: "rate-limits";
+      provider: "openai";
+      limits: AccountRateLimits;
+      weeklyEstimates?: AccountWeeklyLimitEstimate[];
+    }
   | { kind: "unsupported"; provider: string };
 
 export interface ProviderAccountAdapter {

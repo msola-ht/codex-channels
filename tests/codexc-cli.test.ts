@@ -70,6 +70,7 @@ describe("codexc CLI", () => {
       [["state", "upgrade", "--help"], "用法：codexc state upgrade"],
       [["metrics", "-h"], "用法：codexc metrics"],
       [["metrics", "status", "--help"], "用法：codexc metrics status"],
+      [["metrics", "upgrade", "--help"], "用法：codexc metrics upgrade"],
       [["metrics", "run", "--help"], "用法：codexc metrics run"],
       [["metrics", "turns", "--help"], "用法：codexc metrics turns"],
       [["metrics", "threads", "--help"], "用法：codexc metrics threads"],
@@ -1661,5 +1662,6 @@ function metricsSample(index: number): ModelRequestMetricSample {
     firstOutputDeltaAtMs: now - 90,
     lastOutputDeltaAtMs: now - 50,
     responseCompletedAtMs: now,
+    weeklyQuota: null,
   };
 }

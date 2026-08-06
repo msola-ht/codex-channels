@@ -353,14 +353,14 @@ export class FeishuConversationAdapter {
       if (initialChoices) {
         return initialChoices;
       }
-      if (action === "workspace-perm" && isWorkspacePermissionField(input)) {
+      if (action === "workspaceperm" && isWorkspacePermissionField(input)) {
         return renderWorkspacePermissionFieldChoices(input);
       }
       if (action === "workspace-perm-profile") {
         return {
           kind: "form",
           title: "权限 Profile",
-          action: "workspace-perm",
+          action: "workspaceperm",
           fieldLabel: "Profile ID",
           placeholder: ":read-only、:workspace、:danger-full-access 或自定义",
           inputPrefix: "profile ",
@@ -952,7 +952,7 @@ function renderCommandCenterChoices(
     };
   }
   if (
-    action === "workspace-perm"
+    action === "workspaceperm"
     && result.kind === "workspace-permissions"
   ) {
     return {
@@ -964,7 +964,7 @@ function renderCommandCenterChoices(
             "sandbox",
             result.workspace.sandbox,
           )}`,
-          action: "workspace-perm",
+          action: "workspaceperm",
           input: "sandbox",
         },
         {
@@ -972,7 +972,7 @@ function renderCommandCenterChoices(
             "approval",
             result.workspace.approvalPolicy,
           )}`,
-          action: "workspace-perm",
+          action: "workspaceperm",
           input: "approval",
         },
         {
@@ -1060,22 +1060,22 @@ function renderWorkspacePermissionFieldChoices(
       choices: [
         {
           label: "只读",
-          action: "workspace-perm",
+          action: "workspaceperm",
           input: "sandbox read-only",
         },
         {
           label: "工作区可写",
-          action: "workspace-perm",
+          action: "workspaceperm",
           input: "sandbox workspace-write",
         },
         {
           label: "完全访问",
-          action: "workspace-perm",
+          action: "workspaceperm",
           input: "sandbox danger-full-access",
         },
         {
           label: "清除（使用全局）",
-          action: "workspace-perm",
+          action: "workspaceperm",
           input: "sandbox clear",
         },
       ],
@@ -1086,22 +1086,22 @@ function renderWorkspacePermissionFieldChoices(
     choices: [
       {
         label: "不信任",
-        action: "workspace-perm",
+        action: "workspaceperm",
         input: "approval untrusted",
       },
       {
         label: "按需审批",
-        action: "workspace-perm",
+        action: "workspaceperm",
         input: "approval on-request",
       },
       {
         label: "免审批",
-        action: "workspace-perm",
+        action: "workspaceperm",
         input: "approval never",
       },
       {
         label: "清除（使用默认）",
-        action: "workspace-perm",
+        action: "workspaceperm",
         input: "approval clear",
       },
     ],

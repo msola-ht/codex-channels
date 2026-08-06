@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
 
+import {
+  estimateWeeklyLimit,
+  type RequestMetricsQueryPort,
+  type RequestMetricsCommandQuery,
+  type RequestMetricsResult,
+} from "./request-metrics-port.js";
 import type {
   AccountQueryPort,
   AccountRateLimits,
@@ -45,11 +51,6 @@ import type {
   CollaborationModeSelectionService,
   CollaborationModeState,
 } from "./collaboration-mode-service.js";
-import type {
-  RequestMetricsQueryPort,
-  RequestMetricsCommandQuery,
-  RequestMetricsResult,
-} from "./request-metrics-port.js";
 import {
   replaceLocalImagesWithVisionContext,
   visionUserPrompt,
@@ -871,11 +872,33 @@ export class ConversationService implements ConversationUseCases {
       : Promise.resolve({ kind: "unsupported", provider });
   }
 
-  providerAccountLimits(target: ConversationTarget): Promise<ProviderAccountLimits> {
+  async providerAccountLimits(target: ConversationTarget): Promise<ProviderAccountLimits> {
     const provider = this.models.status(target).modelProvider ?? "openai";
-    return this.providerAccounts
-      ? this.providerAccounts.accountLimits(provider)
-      : Promise.resolve({ kind: "unsupported", provider });
+    const resolved: ProviderAccountLimits = this.providerAccounts
+      ? await this.providerAccounts.accountLimits(provider)
+      : { kind: "unsupported", provider };
+    if (resolved.kind !== "rate-limits" || !this.requestMetricsQuery) {
+      return resolved;
+    }
+    const nowMs = Date.now();
+    const weeklyEstimates = resolved.limits.limits.flatMap((limit) => {
+      if (limit.limitId !== "codex") return [];
+      const window = [limit.primary, limit.secondary].find(
+        (candidate) => candidate?.windowDurationMins === 10_080,
+      );
+      if (!window || window.resetsAt === null) return [];
+      const observation = this.requestMetricsQuery?.weeklyQuotaEstimate(
+        "openai",
+        limit.limitId,
+        window.resetsAt,
+        nowMs,
+      ) ?? null;
+      const estimate = estimateWeeklyLimit(limit, observation);
+      return estimate === null ? [] : [estimate];
+    });
+    return weeklyEstimates.length === 0
+      ? resolved
+      : { ...resolved, weeklyEstimates };
   }
 
   listPermissionProfiles(target: ConversationTarget): Promise<PermissionProfileOption[]> {

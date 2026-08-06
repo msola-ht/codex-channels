@@ -36,7 +36,7 @@
   需要启动 USD/CNY 汇率刷新；Application 不执行网络请求或读取汇率缓存。
 - `request-metrics-port.ts`：定义 `/metrics` 使用的当前 Thread 最近 Turn 运行聚合、整个 Thread
   指标累计、最近直接 API 请求，以及最近 24 小时、7 天或 30 天的全局/提供商/模型聚合和异常请求
-  只读摘要；
+  只读摘要；聚合中的远程压缩摘要单列实际请求模型、请求数、Token 与参考费用；
   直接 API 保留稳定提供商 ID，并可携带配置中的显示名称；不向 Application 暴露 SQLite、价格快照
   或请求正文。
 - `vision-port.ts`：定义模型无原生图片能力时使用的稳定识别端口、严格结果 Schema 和已完成但
@@ -52,7 +52,7 @@
   本机路径、版本、安装策略或完整官方响应。
 - `permission-port.ts`：定义 Permission Profile 的稳定 ID、说明和策略可选状态查询；只表示
   当前 Workspace 可见目录，不授予权限，也不承载审批决定。
-- `workspace-permission-port.ts`：定义渠道 `/workspace-perm` 使用的工作区权限写入窄端口；
+- `workspace-permission-port.ts`：定义渠道 `/workspaceperm` 使用的工作区权限写入窄端口；
   Application 只按当前 Conversation 绑定的 Workspace 传递沙箱、审批策略或权限 Profile 更新，
   不接触配置文件。
 - `turn-port.ts`：定义项目拥有的 Turn 输入、设置覆盖、Review 目标与执行窄端口，并复用 Core
@@ -88,7 +88,10 @@ Surface 不解析 `account/usage/read`、`account/rateLimits/read` 或第三方�
 `/metrics` 只依赖 `RequestMetricsQueryPort`；无参数或 `session` 查询当前 Thread，`global`、
 `providers`、`models` 和 `errors` 使用严格的 `24h`、`7d`、`30d` 时间范围；`errors` 只展示
 脱敏后的状态、HTTP 状态、错误类型、次数和最近发生时间。Bootstrap 把独立指标库映射为稳定摘要，
-Application 不读取数据库。该请求流水不能替代 App Server 提供的 Thread 上下文和累计 Token 状态。
+Application 不读取数据库。OpenAI `/limits` 还通过该端口按周窗口查询统计代理已经按相邻额度
+快照归约的增量样本，估算每 1% 的 Token 与 API 参考费用；没有完整周窗口、有效重置时间或正向
+额度变化区间时不产生估算。该请求流水
+不能替代 App Server 提供的 Thread 上下文、账户额度或累计 Token 状态。
 Skill 查询与显式调用只依赖 `SkillQueryPort`；用户和项目直接安装项的筛选、调用名称与绝对路径
 校验由 Client 适配器在协议边界完成。
 MCP 查询只依赖 `McpQueryPort`；分页、Thread 配置上下文与官方清单裁剪由 Client 适配器处理。

@@ -1,3 +1,21 @@
+import type {
+  AccountRateLimit,
+  AccountWeeklyLimitEstimate,
+} from "./account-port.js";
+
+export interface CompactRequestMetricsSummary {
+  model: string | null;
+  hasMixedModels: boolean;
+  requestCount: number;
+  unsuccessfulRequestCount: number;
+  inputTokens: number;
+  cachedInputTokens: number | null;
+  outputTokens: number;
+  pricingCurrency: string | null;
+  pricedRequestCount: number;
+  totalCostNanos: number | null;
+}
+
 export interface TurnRequestMetricsSummary {
   turnId: string;
   requestCount: number;
@@ -20,6 +38,7 @@ export interface TurnRequestMetricsSummary {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  compact?: CompactRequestMetricsSummary | null;
 }
 
 export interface ThreadRequestMetricsAggregate {
@@ -44,6 +63,7 @@ export interface ThreadRequestMetricsAggregate {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  compact?: CompactRequestMetricsSummary | null;
 }
 
 export interface DirectApiRequestMetricsSummary {
@@ -110,6 +130,7 @@ export interface RequestMetricsAggregate {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  compact?: CompactRequestMetricsSummary | null;
 }
 
 export interface RequestMetricsGroup {
@@ -163,4 +184,79 @@ export interface RequestMetricsQueryPort {
     range: RequestMetricsTimeRange,
   ): RequestMetricsAggregateReport;
   errors(range: RequestMetricsTimeRange): RequestMetricsErrorReport;
+  weeklyQuotaEstimate(
+    provider: string,
+    limitId: string,
+    resetsAt: number,
+    nowMs: number,
+  ): WeeklyQuotaMetricsObservation | null;
+}
+
+const weeklyWindowDurationMins = 7 * 24 * 60;
+
+export interface WeeklyQuotaMetricsObservation {
+  limitId: string;
+  resetsAt: number;
+  firstObservedAtMs: number;
+  lastObservedAtMs: number;
+  latestUsedPercentMillionths: number;
+  observedDeltaPercentMillionths: number;
+  intervalCount: number;
+  requestCount: number;
+  unsuccessfulRequestCount: number;
+  pricedRequestCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  pricingCurrency: string | null;
+  totalCostNanos: number | null;
+}
+
+export function estimateWeeklyLimit(
+  limit: AccountRateLimit,
+  observation: WeeklyQuotaMetricsObservation | null,
+): AccountWeeklyLimitEstimate | null {
+  const window = [limit.primary, limit.secondary].find(
+    (candidate) => candidate?.windowDurationMins === weeklyWindowDurationMins,
+  );
+  if (
+    !window
+    || window.resetsAt === null
+    || observation === null
+    || observation.limitId !== limit.limitId
+    || observation.resetsAt !== window.resetsAt
+    || observation.observedDeltaPercentMillionths <= 0
+    || observation.requestCount === 0
+  ) {
+    return null;
+  }
+  const deltaPercent = observation.observedDeltaPercentMillionths / 1_000_000;
+  const remainingPercent = Math.max(0, 100 - window.usedPercent);
+  const perPercent = (value: number): number => Math.round(value / deltaPercent);
+  const remaining = (value: number): number => Math.round(
+    value / deltaPercent * remainingPercent,
+  );
+  return {
+    limitId: limit.limitId,
+    startAtMs: observation.firstObservedAtMs,
+    endAtMs: observation.lastObservedAtMs,
+    usedPercent: window.usedPercent,
+    remainingPercent,
+    observedDeltaPercent: deltaPercent,
+    intervalCount: observation.intervalCount,
+    requestCount: observation.requestCount,
+    unsuccessfulRequestCount: observation.unsuccessfulRequestCount,
+    pricedRequestCount: observation.pricedRequestCount,
+    inputTokensPerPercent: perPercent(observation.inputTokens),
+    outputTokensPerPercent: perPercent(observation.outputTokens),
+    totalTokensPerPercent: perPercent(observation.totalTokens),
+    remainingTokens: remaining(observation.totalTokens),
+    pricingCurrency: observation.pricingCurrency,
+    costPerPercentNanos: observation.totalCostNanos === null
+      ? null
+      : perPercent(observation.totalCostNanos),
+    remainingCostNanos: observation.totalCostNanos === null
+      ? null
+      : remaining(observation.totalCostNanos),
+  };
 }

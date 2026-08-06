@@ -172,6 +172,7 @@ Telegram 消息格式与配置路径查看。
   codexc metrics report [--range 24h|7d|30d] [--group global|providers|models] [--format markdown|json|csv]   聚合汇报
   codexc metrics export [--range 24h|7d|30d] [--format json|csv|markdown] [--thread Thread ID]   请求明细导出
   codexc metrics status   指标数据库状态
+  codexc metrics upgrade  备份并升级指标库（需 Gateway 停止）
   codexc metrics reset    备份并重建指标库（需 Gateway 停止）`,
   "metrics.status": `用法：codexc metrics status
 
@@ -190,6 +191,9 @@ Telegram 消息格式与配置路径查看。
   "metrics.reset": `用法：codexc metrics reset
 
 要求 Gateway 已停止；先备份现有指标库，再让下次启动创建当前 Schema。`,
+  "metrics.upgrade": `用法：codexc metrics upgrade [--restart-gateway]
+
+默认要求 Gateway 已停止；加 --restart-gateway 时自动停止 Gateway、备份升级并重新启动。`,
   "metrics.report": `用法：codexc metrics report [--range <24h|7d|30d>] [--group <global|providers|models>] [--format markdown|json|csv]
 
 只读输出汇报；默认最近 30 天并按模型分组，写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。`,
@@ -1048,6 +1052,7 @@ async function metrics(args) {
     showSubcommandHelp(args, "turns", "metrics.turns") ||
     showSubcommandHelp(args, "threads", "metrics.threads") ||
     showSubcommandHelp(args, "status", "metrics.status") ||
+    showSubcommandHelp(args, "upgrade", "metrics.upgrade") ||
     showSubcommandHelp(args, "reset", "metrics.reset") ||
     showSubcommandHelp(args, "report", "metrics.report") ||
     showSubcommandHelp(args, "export", "metrics.export")) {
@@ -1063,10 +1068,10 @@ async function metrics(args) {
     return;
   }
   if (
-    !new Set(["run", "turns", "threads", "status", "reset", "report", "export"])
+    !new Set(["run", "turns", "threads", "status", "upgrade", "reset", "report", "export"])
       .has(subcommand)
   ) {
-    throw new Error("用法：codexc metrics <run|turns|threads|status|reset|report|export>");
+    throw new Error("用法：codexc metrics <run|turns|threads|status|upgrade|reset|report|export>");
   }
   if (subcommand === "status" && rest.length === 0) {
     run(
@@ -1077,8 +1082,12 @@ async function metrics(args) {
     );
     return;
   }
-  if (subcommand === "reset" && rest.length > 0) {
-    throw new Error("用法：codexc metrics reset");
+  if (subcommand === "upgrade" && rest.length === 1 && rest[0] === "--restart-gateway") {
+    runScript("scripts/metrics-database.mjs", ["upgrade-restart"]);
+    return;
+  }
+  if (new Set(["upgrade", "reset"]).has(subcommand) && rest.length > 0) {
+    throw new Error(`用法：codexc metrics ${subcommand}`);
   }
   if (new Set(["run", "turns", "threads", "report", "export"]).has(subcommand)) {
     runMetricsCommand([subcommand, ...rest]);

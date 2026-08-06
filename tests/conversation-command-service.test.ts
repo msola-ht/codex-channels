@@ -75,7 +75,7 @@ describe("ConversationCommandService", () => {
     expect(listSessions).toHaveBeenCalledWith(target, { searchTerm: "fix" });
   });
 
-  it("shows and updates workspace permissions through /workspace-perm", async () => {
+  it("shows and updates workspace permissions through /workspaceperm", async () => {
     const workspace = {
       id: "main",
       name: "Main",
@@ -92,12 +92,12 @@ describe("ConversationCommandService", () => {
       updateWorkspacePermissions,
     } as unknown as ConversationUseCases);
 
-    await expect(commands.execute(target, "workspace-perm")).resolves.toEqual({
+    await expect(commands.execute(target, "workspaceperm")).resolves.toEqual({
       kind: "workspace-permissions",
       workspace,
     });
     await expect(
-      commands.execute(target, "workspace-perm", "approval never"),
+      commands.execute(target, "workspaceperm", "approval never"),
     ).resolves.toEqual({
       kind: "outcome",
       outcome: {
@@ -117,7 +117,7 @@ describe("ConversationCommandService", () => {
       listWorkspaces: () => [{ id: "main", name: "Main", cwd: "/workspace" }],
     } as unknown as ConversationUseCases);
 
-    await expect(commands.execute(target, "workspace-perm", "sandbox root"))
+    await expect(commands.execute(target, "workspaceperm", "sandbox root"))
       .rejects.toMatchObject({ code: "workspace.permission.usage" });
   });
 
@@ -463,7 +463,7 @@ describe("ConversationCommandService", () => {
       ["unpin", "", "setPinned"],
       ["status", "", "status"],
       ["workspace", "main", "selectWorkspace"],
-      ["workspace-perm", "approval never", "updateWorkspacePermissions"],
+      ["workspaceperm", "approval never", "updateWorkspacePermissions"],
       ["stop", "", "stop"],
       ["queue", "follow up", "queueFollowUp"],
       ["rename", "name", "rename"],

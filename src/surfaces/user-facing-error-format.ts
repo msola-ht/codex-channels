@@ -101,7 +101,7 @@ export function formatSurfaceUserFacingError(
     case "workspace.selector.not-found":
       return "找不到指定 Workspace";
     case "workspace.permission.usage":
-      return "用法：/workspace-perm [sandbox <read-only|workspace-write|danger-full-access|clear>|approval <untrusted|on-request|never|clear>|profile <Profile ID|clear>]";
+      return "用法：/workspaceperm [sandbox <read-only|workspace-write|danger-full-access|clear>|approval <untrusted|on-request|never|clear>|profile <Profile ID|clear>]";
     case "workspace.permission.conflict":
       return "permissions 与 sandbox 互斥，不能同时配置；请先清除其中一项";
     case "workspace.permission.unavailable":

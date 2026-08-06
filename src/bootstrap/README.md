@@ -12,7 +12,8 @@
   对当前授权 Workspace 执行有时限的只读 Git 分支查询并注入 Application 状态；按 Setup 管理
   标记装配主 Client 与可选 Provider Client，并通过 Provider 路由复用其余业务模块；按已启用
   Provider 装配模型指标组件，不持有模型转发数据通路；把同一指标库的精确 Thread 查询映射为
-  Application `/metrics` 窄端口；Core 根据编译期 Provider 能力决定哪些详细计时可以进入完成事件。
+  Application `/metrics` 窄端口，并为 OpenAI `/limits` 提供当前周窗口的精确 Provider 聚合；
+  Core 根据编译期 Provider 能力决定哪些详细计时可以进入完成事件。
 - `provider-metrics-composition.ts`：组合 Provider 私有指标 Socket、Observability 独立存储和 Core
   既有计时端口。所有脱敏请求样本都会持久化；具备 Thread、Turn 与 Token 窗口的样本按 Turn 聚合
   到完成卡片；持久化通过 Observability 有界 Writer 延迟分片执行，单项写入失败不会阻断指标确认或
@@ -25,7 +26,7 @@
   参考价格快照，支持缓存输入、Priority 与已声明的长上下文价格，不把网络刷新放入请求路径。
 - `reference-cost-summary.ts`：在 Turn 完成时把指标库中的 Thread 历史计价与当前实时 Turn 计价
   合并；若当前 Turn 已部分延迟写入，先扣除该部分再加入完整实时值，避免累计总价重复或遗漏。
-- `workspace-permission-writer.ts`：把渠道 `/workspace-perm` 的工作区权限更新写回
+- `workspace-permission-writer.ts`：把渠道 `/workspaceperm` 的工作区权限更新写回
   `config.toml` 并校验 `permissions` 与 `sandbox` 互斥；文件变化由配置监听热加载。
 - `surface-plugin.ts`：定义编译期内置 Surface 插件、插件上下文和运行时模块契约，并校验插件 ID、
   实际 Surface ID 与账号实例唯一性。

@@ -17,6 +17,7 @@ import type {
   ModelRequestMetricsPageQuery,
   ModelRequestMetricsStore,
   ModelRequestPricingSnapshot,
+  StoredCompactRequestMetricsSummary,
   StoredModelRequestMetric,
   StoredModelRequestMetricsAggregate,
   StoredModelRequestMetricsErrorReport,
@@ -28,10 +29,14 @@ import type {
   StoredThreadListItem,
   StoredThreadTurnSummary,
   StoredTurnRequestMetricsSummary,
+  StoredWeeklyQuotaEstimate,
+  StoredWeeklyQuotaWindow,
+  WeeklyQuotaEstimateQuery,
 } from "./request-metrics.js";
 
 const schemaVersion = modelRequestMetricsSchemaVersion;
 const retentionMs = 30 * 24 * 60 * 60 * 1_000;
+const weeklyWindowMs = 7 * 24 * 60 * 60 * 1_000;
 const maximumRows = 100_000;
 const cleanupInterval = 100;
 const maximumAggregationGroups = 20;
@@ -82,6 +87,34 @@ const successfulCostAggregateSql = `
       AND total_cost_nanos IS NOT NULL
     THEN COALESCE(output_price_per_million_nanos, -1) END)
     AS output_price_count
+`;
+const compactAggregateSql = `
+  COUNT(CASE WHEN operation = 'compact' THEN 1 END) AS compact_request_count,
+  SUM(CASE WHEN operation = 'compact' AND NOT (${observableCompletionSql})
+    THEN 1 ELSE 0 END) AS compact_unsuccessful_request_count,
+  MIN(CASE WHEN operation = 'compact' THEN model END) AS compact_model,
+  COUNT(DISTINCT CASE WHEN operation = 'compact' THEN model END)
+    AS compact_model_count,
+  SUM(CASE WHEN operation = 'compact' THEN input_tokens END)
+    AS compact_input_tokens,
+  SUM(CASE WHEN operation = 'compact' THEN cached_input_tokens END)
+    AS compact_cached_input_tokens,
+  COUNT(CASE WHEN operation = 'compact' THEN input_tokens END)
+    AS compact_input_token_count,
+  COUNT(CASE WHEN operation = 'compact' THEN cached_input_tokens END)
+    AS compact_cached_input_token_count,
+  SUM(CASE WHEN operation = 'compact' THEN output_tokens END)
+    AS compact_output_tokens,
+  MIN(CASE WHEN operation = 'compact' AND ${observableCompletionSql}
+      AND total_cost_nanos IS NOT NULL THEN pricing_currency END)
+    AS compact_pricing_currency,
+  COUNT(DISTINCT CASE WHEN operation = 'compact' AND ${observableCompletionSql}
+      AND total_cost_nanos IS NOT NULL THEN pricing_currency END)
+    AS compact_pricing_currency_count,
+  COUNT(CASE WHEN operation = 'compact' AND ${observableCompletionSql}
+    THEN total_cost_nanos END) AS compact_priced_request_count,
+  SUM(CASE WHEN operation = 'compact' AND ${observableCompletionSql}
+    THEN total_cost_nanos END) AS compact_total_cost_nanos
 `;
 const normalizedStatusSql = `
   CASE
@@ -134,6 +167,9 @@ interface MetricRow {
   last_output_delta_at_ms: number | null;
   response_completed_at_ms: number;
   recorded_at_ms: number;
+  weekly_quota_limit_id: "codex" | null;
+  weekly_used_percent_millionths: number | null;
+  weekly_resets_at: number | null;
   request_duration_ms: number | null;
   ttft_ms: number | null;
   thinking_duration_ms: number | null;
@@ -153,7 +189,23 @@ interface MetricRow {
   total_cost_nanos: number | null;
 }
 
-interface TurnSummaryRow {
+interface CompactSummaryRow {
+  compact_request_count: number;
+  compact_unsuccessful_request_count: number;
+  compact_model: string | null;
+  compact_model_count: number;
+  compact_input_tokens: number | null;
+  compact_cached_input_tokens: number | null;
+  compact_input_token_count: number;
+  compact_cached_input_token_count: number;
+  compact_output_tokens: number | null;
+  compact_pricing_currency: string | null;
+  compact_pricing_currency_count: number;
+  compact_priced_request_count: number;
+  compact_total_cost_nanos: number | null;
+}
+
+interface TurnSummaryRow extends CompactSummaryRow {
   provider?: string | null;
   model?: string | null;
   reasoning_effort?: string | null;
@@ -266,10 +318,11 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           request_started_at_ms, first_token_at_ms,
           first_reasoning_delta_at_ms, last_reasoning_delta_at_ms,
           first_output_delta_at_ms, last_output_delta_at_ms,
-          response_completed_at_ms, recorded_at_ms
+          response_completed_at_ms, recorded_at_ms,
+          weekly_quota_limit_id, weekly_used_percent_millionths, weekly_resets_at
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
       `);
       this.cleanup(nowMs);
@@ -324,6 +377,9 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       sample.lastOutputDeltaAtMs,
       sample.responseCompletedAtMs,
       recordedAtMs,
+      sample.weeklyQuota?.limitId ?? null,
+      sample.weeklyQuota?.usedPercentMillionths ?? null,
+      sample.weeklyQuota?.resetsAt ?? null,
     );
     this.rowCount += 1;
     this.recordsSinceCleanup += 1;
@@ -341,6 +397,59 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       SELECT * FROM model_request_metrics_enriched ORDER BY id DESC LIMIT ?
     `).all(limit) as unknown as MetricRow[];
     return rows.map(toStoredMetric);
+  }
+
+  weeklyQuotaEstimate(
+    query: WeeklyQuotaEstimateQuery,
+  ): StoredWeeklyQuotaEstimate | null {
+    this.requireOpen();
+    validateWeeklyQuotaEstimateQuery(query);
+    const startAtMs = query.resetsAt * 1_000 - weeklyWindowMs;
+    const rows = this.database.prepare(`
+      SELECT * FROM model_request_metrics_enriched
+      WHERE provider = ?
+        AND recorded_at_ms >= ?
+        AND recorded_at_ms <= ?
+      ORDER BY id ASC
+    `).all(query.provider, startAtMs, query.nowMs) as unknown as MetricRow[];
+    return estimateWeeklyQuotaRows(rows, query);
+  }
+
+  latestWeeklyQuota(
+    provider: string,
+    nowMs: number = Date.now(),
+  ): StoredWeeklyQuotaWindow | null {
+    this.requireOpen();
+    if (
+      provider.length === 0
+      || provider.length > 128
+      || !Number.isSafeInteger(nowMs)
+      || nowMs < 0
+    ) throw new Error("最新周额度查询无效");
+    const row = this.database.prepare(`
+      SELECT weekly_quota_limit_id, weekly_used_percent_millionths,
+        weekly_resets_at, recorded_at_ms
+      FROM model_request_metrics
+      WHERE provider = ?
+        AND weekly_quota_limit_id IS NOT NULL
+        AND weekly_resets_at * 1000 > ?
+        AND recorded_at_ms <= ?
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(provider, nowMs, nowMs) as {
+      weekly_quota_limit_id: string;
+      weekly_used_percent_millionths: number;
+      weekly_resets_at: number;
+      recorded_at_ms: number;
+    } | undefined;
+    return row
+      ? {
+          limitId: row.weekly_quota_limit_id,
+          usedPercentMillionths: row.weekly_used_percent_millionths,
+          resetsAt: row.weekly_resets_at,
+          observedAtMs: row.recorded_at_ms,
+        }
+      : null;
   }
 
   page(query: ModelRequestMetricsPageQuery): StoredModelRequestMetricsPage {
@@ -416,7 +525,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       FROM model_request_metrics
       WHERE recorded_at_ms >= ?
         AND recorded_at_ms < ?
-        AND operation = 'response'
     `).get(query.startAtMs, query.endAtMs) as unknown as ErrorSummaryRow;
     const rows = this.database.prepare(`
       WITH normalized AS (
@@ -447,7 +555,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       FROM normalized
       WHERE recorded_at_ms >= ?
         AND recorded_at_ms < ?
-        AND operation = 'response'
         AND normalized_status <> 'completed'
       GROUP BY provider, model, normalized_status, http_status, normalized_error_type
       ORDER BY request_count DESC, last_occurred_at_ms DESC,
@@ -549,9 +656,10 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
             SUM(CASE WHEN non_reasoning_output_tokens > 0
                   AND output_duration_ms > 0 THEN 1 ELSE 0 END)
               AS output_speed_timed_count,
-            ${successfulCostAggregateSql}
+            ${successfulCostAggregateSql},
+            ${compactAggregateSql}
           FROM model_request_metrics_enriched
-          WHERE thread_id = ? AND turn_id = ? AND operation = 'response'
+          WHERE thread_id = ? AND turn_id = ?
           GROUP BY turn_id
         `).get(threadId, latestTurn.turn_id) as TurnSummaryRow | undefined;
     const threadAggregate = this.database.prepare(`
@@ -591,9 +699,10 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         SUM(CASE WHEN non_reasoning_output_tokens > 0
               AND output_duration_ms > 0 THEN 1 ELSE 0 END)
           AS output_speed_timed_count,
-        ${successfulCostAggregateSql}
+        ${successfulCostAggregateSql},
+        ${compactAggregateSql}
       FROM model_request_metrics_enriched
-      WHERE thread_id = ? AND turn_id IS NOT NULL AND operation = 'response'
+      WHERE thread_id = ? AND turn_id IS NOT NULL
     `).get(threadId) as unknown as TurnSummaryRow;
     const latestDirectApi = this.database.prepare(`
       SELECT *
@@ -632,7 +741,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
               = model_request_metrics_enriched.thread_id
             AND latest_provider.turn_id
               = model_request_metrics_enriched.turn_id
-            AND latest_provider.operation = 'response'
           ORDER BY latest_provider.id DESC
           LIMIT 1
         ) AS provider,
@@ -643,7 +751,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
               = model_request_metrics_enriched.thread_id
             AND latest_model.turn_id
               = model_request_metrics_enriched.turn_id
-            AND latest_model.operation = 'response'
           ORDER BY latest_model.id DESC
           LIMIT 1
         ) AS model,
@@ -654,7 +761,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
               = model_request_metrics_enriched.thread_id
             AND latest_effort.turn_id
               = model_request_metrics_enriched.turn_id
-            AND latest_effort.operation = 'response'
           ORDER BY latest_effort.id DESC
           LIMIT 1
         ) AS reasoning_effort,
@@ -684,9 +790,10 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
               AND output_duration_ms > 0 THEN 1 ELSE 0 END)
           AS output_speed_timed_count,
         ${successfulCostAggregateSql},
+        ${compactAggregateSql},
         MAX(recorded_at_ms) AS recorded_at_ms
       FROM model_request_metrics_enriched
-      WHERE thread_id = ? AND turn_id IS NOT NULL AND operation = 'response'
+      WHERE thread_id = ? AND turn_id IS NOT NULL
       GROUP BY turn_id
       ORDER BY MAX(id) DESC
     `).all(threadId) as unknown as Array<
@@ -709,7 +816,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           WHERE latest_provider.thread_id
               = model_request_metrics_enriched.thread_id
             AND latest_provider.turn_id IS NOT NULL
-            AND latest_provider.operation = 'response'
           ORDER BY latest_provider.id DESC
           LIMIT 1
         ) AS provider,
@@ -719,7 +825,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           WHERE latest_model.thread_id
               = model_request_metrics_enriched.thread_id
             AND latest_model.turn_id IS NOT NULL
-            AND latest_model.operation = 'response'
           ORDER BY latest_model.id DESC
           LIMIT 1
         ) AS model,
@@ -729,7 +834,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           WHERE latest_effort.thread_id
               = model_request_metrics_enriched.thread_id
             AND latest_effort.turn_id IS NOT NULL
-            AND latest_effort.operation = 'response'
           ORDER BY latest_effort.id DESC
           LIMIT 1
         ) AS reasoning_effort,
@@ -747,14 +851,14 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           AS priced_request_count,
         SUM(CASE WHEN ${observableCompletionSql} THEN total_cost_nanos END)
           AS total_cost_nanos,
+        ${compactAggregateSql},
         MAX(recorded_at_ms) AS recorded_at_ms
       FROM model_request_metrics_enriched
       WHERE thread_id IS NOT NULL
         AND turn_id IS NOT NULL
-        AND operation = 'response'
       GROUP BY thread_id
       ORDER BY MAX(id) DESC
-    `).all() as unknown as Array<{
+    `).all() as unknown as Array<CompactSummaryRow & {
       thread_id: string;
       provider: string | null;
       model: string | null;
@@ -783,6 +887,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         : null,
       pricedRequestCount: row.priced_request_count,
       totalCostNanos: row.total_cost_nanos ?? null,
+      compact: toStoredCompactSummary(row),
       lastRecordedAtMs: row.recorded_at_ms,
     }));
   }
@@ -814,7 +919,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         FROM model_request_metrics_enriched AS metric
         WHERE recorded_at_ms >= ?
           AND recorded_at_ms < ?
-          AND operation = 'response'
       ), aggregate_rows AS (
         SELECT
           group_provider AS provider,
@@ -842,7 +946,8 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           SUM(CASE WHEN non_reasoning_output_tokens > 0
                 AND output_duration_ms > 0 THEN 1 ELSE 0 END)
             AS output_speed_timed_count,
-          ${successfulCostAggregateSql}
+          ${successfulCostAggregateSql},
+          ${compactAggregateSql}
         FROM filtered
         GROUP BY group_provider, group_model
       ), ttft_ranked AS (
@@ -967,6 +1072,16 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
             last_output_delta_at_ms INTEGER,
             response_completed_at_ms INTEGER NOT NULL,
             recorded_at_ms INTEGER NOT NULL,
+            weekly_quota_limit_id TEXT CHECK (
+              weekly_quota_limit_id IS NULL OR weekly_quota_limit_id = 'codex'
+            ),
+            weekly_used_percent_millionths INTEGER CHECK (
+              weekly_used_percent_millionths IS NULL
+              OR weekly_used_percent_millionths BETWEEN 0 AND 100000000
+            ),
+            weekly_resets_at INTEGER CHECK (
+              weekly_resets_at IS NULL OR weekly_resets_at >= 0
+            ),
             CHECK (
               (
                 billing_mode IS NULL
@@ -1160,7 +1275,9 @@ export class ModelRequestMetricsSchemaError extends Error {
   constructor(readonly actualVersion: number, readonly expectedVersion: number) {
     super(
       `模型请求指标数据库版本不兼容：当前 ${actualVersion}，Gateway 需要 ${expectedVersion}。`
-      + "请停止 Gateway 后运行 codexc metrics reset",
+      + (actualVersion === 3 && expectedVersion === 4
+        ? "请停止 Gateway 后运行 codexc metrics upgrade"
+        : "请停止 Gateway 后运行 codexc metrics reset"),
     );
     this.name = "ModelRequestMetricsSchemaError";
   }
@@ -1207,6 +1324,15 @@ function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     firstOutputDeltaAtMs: row.first_output_delta_at_ms,
     lastOutputDeltaAtMs: row.last_output_delta_at_ms,
     responseCompletedAtMs: row.response_completed_at_ms,
+    weeklyQuota: row.weekly_quota_limit_id === null
+      || row.weekly_used_percent_millionths === null
+      || row.weekly_resets_at === null
+      ? null
+      : {
+          limitId: row.weekly_quota_limit_id,
+          usedPercentMillionths: row.weekly_used_percent_millionths,
+          resetsAt: row.weekly_resets_at,
+        },
     recordedAtMs: row.recorded_at_ms,
     requestDurationMs: row.request_duration_ms,
     ttftMs: row.ttft_ms,
@@ -1253,6 +1379,7 @@ function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetricsSumma
     outputSpeedSampleCount: row.output_speed_sample_count,
     outputSpeedTimedCount: row.output_speed_timed_count,
     ...pricing,
+    compact: toStoredCompactSummary(row),
   };
 }
 
@@ -1288,6 +1415,7 @@ function toStoredThreadAggregate(
       summary.cachedInputPricePerMillionNanos,
     outputPricePerMillionNanos: summary.outputPricePerMillionNanos,
     hasMixedPrices: summary.hasMixedPrices,
+    compact: summary.compact,
   };
 }
 
@@ -1296,6 +1424,146 @@ function validateAggregationQuery(query: ModelRequestMetricsAggregationQuery): v
   if (!(["global", "provider", "model"] as const).includes(query.dimension)) {
     throw new Error("模型请求指标聚合维度无效");
   }
+}
+
+function validateWeeklyQuotaEstimateQuery(query: WeeklyQuotaEstimateQuery): void {
+  if (
+    query.provider.length === 0
+    || query.provider.length > 128
+    || query.limitId !== "codex"
+    || !Number.isSafeInteger(query.resetsAt)
+    || query.resetsAt < 0
+    || !Number.isSafeInteger(query.nowMs)
+    || query.nowMs < 0
+  ) throw new Error("周额度估算查询无效");
+}
+
+function estimateWeeklyQuotaRows(
+  rows: MetricRow[],
+  query: WeeklyQuotaEstimateQuery,
+): StoredWeeklyQuotaEstimate | null {
+  let baseline: number | null = null;
+  let firstObservedAtMs: number | null = null;
+  let lastObservedAtMs: number | null = null;
+  let latestUsedPercentMillionths: number | null = null;
+  let pending = emptyWeeklyInterval();
+  let observedDeltaPercentMillionths = 0;
+  let intervalCount = 0;
+  const total = emptyWeeklyInterval();
+  const currencies = new Set<string>();
+
+  for (const row of rows) {
+    const matching = row.weekly_quota_limit_id === query.limitId
+      && row.weekly_resets_at === query.resetsAt
+      && row.weekly_used_percent_millionths !== null;
+    const hasOtherSnapshot = row.weekly_quota_limit_id !== null && !matching;
+    if (hasOtherSnapshot) {
+      baseline = null;
+      pending = emptyWeeklyInterval();
+      continue;
+    }
+    if (baseline === null) {
+      if (!matching) continue;
+      baseline = row.weekly_used_percent_millionths!;
+      latestUsedPercentMillionths = baseline;
+      firstObservedAtMs ??= row.recorded_at_ms;
+      lastObservedAtMs = row.recorded_at_ms;
+      continue;
+    }
+
+    addWeeklyIntervalRow(pending, row);
+    if (!matching) continue;
+    const current = row.weekly_used_percent_millionths!;
+    latestUsedPercentMillionths = current;
+    lastObservedAtMs = row.recorded_at_ms;
+    const delta = current - baseline;
+    if (delta < 0) {
+      baseline = current;
+      pending = emptyWeeklyInterval();
+      continue;
+    }
+    if (delta === 0) continue;
+    observedDeltaPercentMillionths += delta;
+    intervalCount += 1;
+    mergeWeeklyInterval(total, pending);
+    for (const currency of pending.currencies) currencies.add(currency);
+    baseline = current;
+    pending = emptyWeeklyInterval();
+  }
+
+  if (
+    observedDeltaPercentMillionths <= 0
+    || firstObservedAtMs === null
+    || lastObservedAtMs === null
+    || latestUsedPercentMillionths === null
+  ) return null;
+  return {
+    limitId: query.limitId,
+    resetsAt: query.resetsAt,
+    firstObservedAtMs,
+    lastObservedAtMs,
+    latestUsedPercentMillionths,
+    observedDeltaPercentMillionths,
+    intervalCount,
+    requestCount: total.requestCount,
+    unsuccessfulRequestCount: total.unsuccessfulRequestCount,
+    pricedRequestCount: total.pricedRequestCount,
+    inputTokens: total.inputTokens,
+    outputTokens: total.outputTokens,
+    totalTokens: total.inputTokens + total.outputTokens,
+    pricingCurrency: currencies.size === 1 ? [...currencies][0]! : null,
+    totalCostNanos: currencies.size === 1 ? total.totalCostNanos : null,
+  };
+}
+
+interface WeeklyIntervalAccumulator {
+  requestCount: number;
+  unsuccessfulRequestCount: number;
+  pricedRequestCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalCostNanos: number;
+  currencies: Set<string>;
+}
+
+function emptyWeeklyInterval(): WeeklyIntervalAccumulator {
+  return {
+    requestCount: 0,
+    unsuccessfulRequestCount: 0,
+    pricedRequestCount: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalCostNanos: 0,
+    currencies: new Set(),
+  };
+}
+
+function addWeeklyIntervalRow(target: WeeklyIntervalAccumulator, row: MetricRow): void {
+  target.requestCount += 1;
+  if (row.status !== "completed") target.unsuccessfulRequestCount += 1;
+  target.inputTokens += row.input_tokens ?? 0;
+  target.outputTokens += row.output_tokens ?? 0;
+  if (
+    row.status === "completed"
+    && row.total_cost_nanos !== null
+    && row.pricing_currency !== null
+  ) {
+    target.pricedRequestCount += 1;
+    target.totalCostNanos += row.total_cost_nanos;
+    target.currencies.add(row.pricing_currency);
+  }
+}
+
+function mergeWeeklyInterval(
+  target: WeeklyIntervalAccumulator,
+  source: WeeklyIntervalAccumulator,
+): void {
+  target.requestCount += source.requestCount;
+  target.unsuccessfulRequestCount += source.unsuccessfulRequestCount;
+  target.pricedRequestCount += source.pricedRequestCount;
+  target.inputTokens += source.inputTokens;
+  target.outputTokens += source.outputTokens;
+  target.totalCostNanos += source.totalCostNanos;
 }
 
 function validateMetricsTimeRange(
@@ -1357,6 +1625,32 @@ function toStoredMetricsAggregate(row: AggregateRow): StoredModelRequestMetricsA
     ttftP95Ms: row.ttft_p95_ms,
     ttftSampleCount: row.ttft_sample_count,
     ...pricing,
+    compact: toStoredCompactSummary(row),
+  };
+}
+
+function toStoredCompactSummary(
+  row: CompactSummaryRow,
+): StoredCompactRequestMetricsSummary | null {
+  if (row.compact_request_count === 0) return null;
+  return {
+    model: row.compact_model_count === 1 ? row.compact_model : null,
+    hasMixedModels: row.compact_model_count > 1,
+    requestCount: row.compact_request_count,
+    unsuccessfulRequestCount: row.compact_unsuccessful_request_count,
+    inputTokens: row.compact_input_tokens ?? 0,
+    cachedInputTokens: row.compact_input_token_count > 0
+      && row.compact_cached_input_token_count === row.compact_input_token_count
+      ? row.compact_cached_input_tokens ?? 0
+      : null,
+    outputTokens: row.compact_output_tokens ?? 0,
+    pricingCurrency: row.compact_pricing_currency_count === 1
+      ? row.compact_pricing_currency
+      : null,
+    pricedRequestCount: row.compact_priced_request_count,
+    totalCostNanos: row.compact_pricing_currency_count === 1
+      ? row.compact_total_cost_nanos
+      : null,
   };
 }
 

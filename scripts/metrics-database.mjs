@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   renameSync,
 } from "node:fs";
@@ -118,6 +119,143 @@ export function resetMetricsDatabase(
   }
 }
 
+export function upgradeMetricsDatabase(
+  environment = process.env,
+  options = {},
+) {
+  const runtime = resolveMetricsRuntime(environment);
+  const gatewayRunning = options.gatewayRunning ?? (() => isGatewayRunning(environment));
+  if (
+    gatewayRunning()
+    || runtime.metricsSocketPaths.some(metricsSocketIsActive)
+  ) {
+    throw new Error("Gateway 仍在运行；请先执行 codexc service stop gateway，再重试");
+  }
+  if (!existsSync(runtime.databasePath)) {
+    return {
+      backupPath: null,
+      changed: false,
+      databasePath: runtime.databasePath,
+      previousSchemaVersion: null,
+      schemaVersion: null,
+    };
+  }
+  const lock = acquireRequestMetricsDatabaseLock(runtime.databasePath);
+  try {
+    const status = inspectMetricsDatabase(environment);
+    if (status.schemaVersion === modelRequestMetricsSchemaVersion) {
+      return {
+        backupPath: null,
+        changed: false,
+        databasePath: status.databasePath,
+        previousSchemaVersion: status.schemaVersion,
+        schemaVersion: status.schemaVersion,
+      };
+    }
+    if (status.schemaVersion !== 3 || modelRequestMetricsSchemaVersion !== 4) {
+      throw new Error(
+        `指标数据库无法升级：当前 Schema ${status.schemaVersion ?? "unknown"}，`
+        + `仅支持 v3 升级到 v${modelRequestMetricsSchemaVersion}`,
+      );
+    }
+    checkpoint(status.databasePath);
+    const now = options.now ?? (() => new Date());
+    const backupPath = `${status.databasePath}.v3.${backupTimestamp(now())}.bak`;
+    if (existsSync(backupPath)) throw new Error(`指标数据库备份已存在：${backupPath}`);
+    copyFileSync(status.databasePath, backupPath);
+    chmodSync(backupPath, 0o600);
+    const database = new DatabaseSync(status.databasePath);
+    try {
+      database.exec(`
+        BEGIN IMMEDIATE;
+        ALTER TABLE model_request_metrics ADD COLUMN weekly_quota_limit_id TEXT
+          CHECK (weekly_quota_limit_id IS NULL OR weekly_quota_limit_id = 'codex');
+        ALTER TABLE model_request_metrics ADD COLUMN weekly_used_percent_millionths INTEGER
+          CHECK (weekly_used_percent_millionths IS NULL
+            OR weekly_used_percent_millionths BETWEEN 0 AND 100000000);
+        ALTER TABLE model_request_metrics ADD COLUMN weekly_resets_at INTEGER
+          CHECK (weekly_resets_at IS NULL OR weekly_resets_at >= 0);
+        UPDATE schema_metadata SET value = 4 WHERE name = 'schema_version';
+        COMMIT;
+      `);
+    } catch (error) {
+      try { database.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      throw error;
+    } finally {
+      database.close();
+    }
+    return {
+      backupPath,
+      changed: true,
+      databasePath: status.databasePath,
+      previousSchemaVersion: 3,
+      schemaVersion: 4,
+    };
+  } finally {
+    lock.release();
+  }
+}
+
+export function upgradeMetricsDatabaseWithGatewayRestart(
+  environment = process.env,
+  options = {},
+) {
+  const stopGateway = options.stopGateway
+    ?? (() => runGatewayServiceAction("stop", environment));
+  const startGateway = options.startGateway
+    ?? (() => runGatewayServiceAction("start", environment));
+  const upgrade = options.upgrade
+    ?? (() => upgradeMetricsDatabase(environment));
+  let stopError;
+  try {
+    stopGateway();
+  } catch (error) {
+    stopError = error;
+  }
+  let result;
+  let upgradeError;
+  try {
+    result = upgrade();
+  } catch (error) {
+    upgradeError = error;
+  }
+  let startError;
+  try {
+    startGateway();
+  } catch (error) {
+    startError = error;
+  }
+  if (stopError && startError) {
+    throw new AggregateError(
+      [stopError, startError],
+      "指标库升级前停止 Gateway 失败，且 Gateway 未能重新启动",
+    );
+  }
+  if (stopError) throw stopError;
+  if (upgradeError && startError) {
+    throw new AggregateError(
+      [upgradeError, startError],
+      "指标库升级失败，且 Gateway 未能重新启动",
+    );
+  }
+  if (upgradeError) throw upgradeError;
+  if (startError) throw startError;
+  return result;
+}
+
+function runGatewayServiceAction(action, environment) {
+  const cli = resolve(import.meta.dirname, "../bin/codexc.mjs");
+  const result = spawnSync(
+    process.execPath,
+    [cli, "service", action, "gateway"],
+    { env: environment, stdio: "inherit" },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`Gateway ${action === "stop" ? "停止" : "启动"}失败`);
+  }
+}
+
 export function readMetricsReport(environment = process.env, options = {}) {
   const range = metricsRange(options.range ?? "30d", options.nowMs ?? Date.now());
   const dimension = metricsDimension(options.group ?? "models");
@@ -130,9 +268,10 @@ export function readMetricsReport(environment = process.env, options = {}) {
   try {
     return {
       format: "codex-connect-request-metrics-report",
-      version: 1,
+      version: 2,
       generatedAt: new Date(range.endAtMs).toISOString(),
       range,
+      weeklyQuota: readWeeklyQuota(store, range.endAtMs),
       report: store.aggregate({
         dimension,
         startAtMs: range.startAtMs,
@@ -176,14 +315,64 @@ export function readMetricsExport(environment = process.env, options = {}) {
     } while (afterId !== undefined);
     return {
       format: "codex-connect-request-metrics-export",
-      version: 1,
+      version: 2,
       generatedAt: new Date(range.endAtMs).toISOString(),
       range,
+      weeklyQuota: readWeeklyQuota(store, range.endAtMs),
       records,
     };
   } finally {
     store.close();
   }
+}
+
+function readWeeklyQuota(store, nowMs) {
+  const window = store.latestWeeklyQuota("openai", nowMs);
+  if (window === null) return null;
+  const estimate = store.weeklyQuotaEstimate({
+    provider: "openai",
+    limitId: window.limitId,
+    resetsAt: window.resetsAt,
+    nowMs,
+  });
+  const usedPercent = window.usedPercentMillionths / 1_000_000;
+  return {
+    limitId: window.limitId,
+    usedPercent,
+    remainingPercent: Math.max(0, 100 - usedPercent),
+    resetsAt: window.resetsAt,
+    observedAtMs: window.observedAtMs,
+    estimate: estimate === null ? null : {
+      observedDeltaPercent: estimate.observedDeltaPercentMillionths / 1_000_000,
+      intervalCount: estimate.intervalCount,
+      requestCount: estimate.requestCount,
+      unsuccessfulRequestCount: estimate.unsuccessfulRequestCount,
+      pricedRequestCount: estimate.pricedRequestCount,
+      inputTokensPerPercent: perQuotaPercent(
+        estimate.inputTokens,
+        estimate.observedDeltaPercentMillionths,
+      ),
+      outputTokensPerPercent: perQuotaPercent(
+        estimate.outputTokens,
+        estimate.observedDeltaPercentMillionths,
+      ),
+      totalTokensPerPercent: perQuotaPercent(
+        estimate.totalTokens,
+        estimate.observedDeltaPercentMillionths,
+      ),
+      pricingCurrency: estimate.pricingCurrency,
+      costPerPercentNanos: estimate.totalCostNanos === null
+        ? null
+        : perQuotaPercent(
+            estimate.totalCostNanos,
+            estimate.observedDeltaPercentMillionths,
+          ),
+    },
+  };
+}
+
+function perQuotaPercent(value, deltaMillionths) {
+  return Math.round(value / (deltaMillionths / 1_000_000));
 }
 
 export function readMetricsRun(environment = process.env, threadId) {
@@ -252,7 +441,9 @@ function requireReadableMetricsDatabase(environment) {
   const status = inspectMetricsDatabase(environment);
   if (!status.exists) throw new Error(`指标数据库尚未创建：${status.databasePath}`);
   if (!status.compatible) {
-    throw new Error("模型请求指标数据库版本不兼容；请停止 Gateway 后运行 codexc metrics reset");
+    throw new Error(status.schemaVersion === 3
+      ? "模型请求指标数据库版本不兼容；请停止 Gateway 后运行 codexc metrics upgrade"
+      : "模型请求指标数据库版本不兼容；请停止 Gateway 后运行 codexc metrics reset");
   }
   return status.databasePath;
 }
@@ -388,7 +579,9 @@ function printStatus(result) {
   console.log(`兼容：${result.compatible ? "是" : "否"}`);
   console.log(`记录：${result.count ?? "无法读取"}`);
   if (!result.compatible) {
-    console.log("处理：停止 Gateway 后运行 codexc metrics reset");
+    console.log(result.schemaVersion === 3
+      ? "处理：停止 Gateway 后运行 codexc metrics upgrade"
+      : "处理：停止 Gateway 后运行 codexc metrics reset");
   }
 }
 
@@ -399,10 +592,10 @@ function printMetricsReport(result, format, display = null) {
       ...result,
       report: {
         ...result.report,
-        aggregate: enrichCosts(result.report.aggregate, display, aggregateProvider),
+        aggregate: enrichSummaryCosts(result.report.aggregate, display, aggregateProvider),
         groups: result.report.groups.map((group) => ({
           ...group,
-          aggregate: enrichCosts(group.aggregate, display, group.provider ?? null),
+          aggregate: enrichSummaryCosts(group.aggregate, display, group.provider ?? null),
         })),
       },
     }, null, 2));
@@ -436,8 +629,10 @@ function printMetricsReport(result, format, display = null) {
       ["inputCostCnyNanos", (row) => row.inputCostCnyNanos],
       ["cachedInputCostCnyNanos", (row) => row.cachedInputCostCnyNanos],
       ["outputCostCnyNanos", (row) => row.outputCostCnyNanos],
+      ...compactCsvColumns(),
       ["ttftP50Ms", (row) => row.ttftP50Ms],
       ["ttftP95Ms", (row) => row.ttftP95Ms],
+      ...weeklyQuotaCsvColumns(),
     ];
     console.log(columns.map(([heading]) => csvCell(heading)).join(","));
     const rows = [
@@ -448,14 +643,14 @@ function printMetricsReport(result, format, display = null) {
             provider: aggregateProvider,
             model: null,
             group: "global",
-            ...enrichCosts(result.report.aggregate, display, aggregateProvider),
+            ...enrichSummaryCosts(result.report.aggregate, display, aggregateProvider),
           }]),
       ...result.report.groups.map((group) => ({
         type: "group",
         provider: group.provider,
         model: group.model,
         group: group.model ?? group.provider ?? "全部",
-        ...enrichCosts(group.aggregate, display, group.provider ?? null),
+        ...enrichSummaryCosts(group.aggregate, display, group.provider ?? null),
       })),
       {
         type: "error_summary",
@@ -476,6 +671,9 @@ function printMetricsReport(result, format, display = null) {
         lastOccurredAtMs: group.lastOccurredAtMs,
         requestCount: group.requestCount,
       })),
+      ...(result.weeklyQuota === null
+        ? []
+        : [{ type: "weekly_quota", ...flattenWeeklyQuota(result.weeklyQuota) }]),
     ];
     for (const row of rows) {
       console.log(
@@ -493,6 +691,7 @@ function printMetricsReport(result, format, display = null) {
   console.log(`- 时间范围：${result.range.name}`);
   console.log(`- 起始时间：${new Date(result.range.startAtMs).toISOString()}`);
   console.log(`- 截止时间：${new Date(result.range.endAtMs).toISOString()}`);
+  printWeeklyQuotaMarkdown(result.weeklyQuota);
   console.log("");
   console.log("## 汇总");
   console.log("");
@@ -511,16 +710,17 @@ function printMetricsReport(result, format, display = null) {
     { ...aggregate, provider: aggregateProvider },
     display,
   )}`);
+  printCompactSummary(aggregate.compact, display, aggregateProvider);
   console.log(`- 首段延迟 P50/P95：${formatDuration(aggregate.ttftP50Ms)}/${formatDuration(aggregate.ttftP95Ms)}`);
   if (result.report.groups.length > 0) {
     console.log("");
     console.log("## 明细");
     console.log("");
-    console.log("| 提供商 | 模型 | 请求 | 异常/未完整 | 输入 | 缓存输入 | 输出 | 参考总价 |");
-    console.log("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |");
+    console.log("| 提供商 | 模型 | 请求 | 异常/未完整 | 输入 | 缓存输入 | 输出 | 参考总价 | 远程压缩 |");
+    console.log("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
     for (const group of result.report.groups) {
       const value = group.aggregate;
-      console.log(`| ${markdownCell(group.provider ?? "全部")} | ${markdownCell(group.model ?? "全部/未观测")} | ${value.requestCount} | ${value.unsuccessfulRequestCount} | ${value.inputTokens} | ${value.cachedInputTokens ?? "未知"} | ${value.outputTokens} | ${formatCost({ ...value, provider: group.provider ?? null }, display)} |`);
+      console.log(`| ${markdownCell(group.provider ?? "全部")} | ${markdownCell(group.model ?? "全部/未观测")} | ${value.requestCount} | ${value.unsuccessfulRequestCount} | ${value.inputTokens} | ${value.cachedInputTokens ?? "未知"} | ${value.outputTokens} | ${formatCost({ ...value, provider: group.provider ?? null }, display)} | ${markdownCell(formatCompactSummary(value.compact, display, group.provider ?? null) ?? "无")} |`);
     }
     const hidden = result.report.totalGroupCount - result.report.groups.length;
     if (hidden > 0) console.log(`\n仅显示请求量最高的 ${result.report.groups.length} 组，另有 ${hidden} 组。`);
@@ -558,19 +758,20 @@ function printMetricsExport(result, format, display = null) {
     return;
   }
   if (format === "markdown") {
-    if (result.records.length === 0) {
-      console.log("本时间范围没有请求记录。");
-      return;
-    }
     console.log("# Codex Connect 请求明细");
     console.log("");
     const rateLine = exchangeRateLine(display);
     if (rateLine) console.log(`- ${rateLine}`);
     console.log(`- 生成时间：${result.generatedAt}`);
     console.log(`- 时间范围：${result.range.name}`);
+    printWeeklyQuotaMarkdown(result.weeklyQuota);
     console.log("");
-    console.log("| 时间 | 提供商 | 模型 | 思考等级 | 状态 | 耗时 | 输入 | 缓存输入 | 输出 | 参考价 |");
-    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    if (result.records.length === 0) {
+      console.log("本时间范围没有请求记录。");
+      return;
+    }
+    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 耗时 | 输入 | 缓存输入 | 输出 | 参考价 |");
+    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
     for (const record of result.records) {
       const pricingCurrency = record.pricing?.currency ?? null;
       const cost = record.totalCostNanos === null || pricingCurrency === null
@@ -581,6 +782,7 @@ function printMetricsExport(result, format, display = null) {
           markdownCell(formatLocalTime(record.recordedAtMs)),
           markdownCell(record.provider ?? ""),
           markdownCell(record.model ?? ""),
+          markdownCell(record.operation),
           markdownCell(record.reasoningEffort ?? "模型默认"),
           markdownCell(record.status ?? ""),
           markdownCell(formatDuration(record.requestDurationMs)),
@@ -593,20 +795,164 @@ function printMetricsExport(result, format, display = null) {
     }
     return;
   }
-  const columns = csvColumns();
-  const records = result.records.map((record) => enrichCosts(record, display));
+  const columns = [
+    ["type", (row) => row.type],
+    ...csvColumns(),
+    ...weeklyQuotaCsvColumns(),
+  ];
+  const rows = [
+    ...result.records.map((record) => ({
+      type: "request",
+      ...enrichCosts(record, display),
+      ...flattenRecordedWeeklyQuota(record),
+    })),
+    ...(result.weeklyQuota === null
+      ? []
+      : [{
+          type: "weekly_quota_summary",
+          ...flattenWeeklyQuota(result.weeklyQuota),
+        }]),
+  ];
   console.log(columns.map(([heading]) => csvCell(heading)).join(","));
-  for (const record of records) {
-    console.log(columns.map(([, read]) => csvCell(read(record))).join(","));
+  for (const row of rows) {
+    console.log(columns.map(([, read]) => csvCell(read(row))).join(","));
   }
+}
+
+function printWeeklyQuotaMarkdown(quota) {
+  console.log("");
+  console.log("## 当前周额度区间");
+  console.log("");
+  if (quota === null) {
+    console.log("暂无统计代理捕获的周额度快照。");
+    return;
+  }
+  console.log(`- 已用：${quota.usedPercent}%`);
+  console.log(`- 剩余：${quota.remainingPercent}%`);
+  console.log(`- 重置时间：${new Date(quota.resetsAt * 1_000).toISOString()}`);
+  console.log(`- 观测时间：${new Date(quota.observedAtMs).toISOString()}`);
+  if (quota.estimate === null) {
+    console.log("- 每 1% 估算：正在采样，尚未观测到额度增长");
+    return;
+  }
+  console.log(`- 观测变化：${quota.estimate.observedDeltaPercent}%（${quota.estimate.intervalCount} 个区间）`);
+  console.log(`- 每 1%：约 ${quota.estimate.totalTokensPerPercent} Token`);
+  console.log(`- 每 1% API 参考费用：${quota.estimate.costPerPercentNanos === null
+    || quota.estimate.pricingCurrency === null
+    ? "暂无完整价格样本"
+    : formatCurrencyNanos(
+        quota.estimate.costPerPercentNanos,
+        quota.estimate.pricingCurrency,
+        null,
+        "openai",
+      )}`);
+}
+
+function flattenWeeklyQuota(quota) {
+  if (quota === null) return {};
+  return {
+    weeklyQuotaLimitId: quota.limitId,
+    weeklyQuotaUsedPercent: quota.usedPercent,
+    weeklyQuotaRemainingPercent: quota.remainingPercent,
+    weeklyQuotaResetsAt: quota.resetsAt,
+    weeklyQuotaObservedAtMs: quota.observedAtMs,
+    weeklyQuotaObservedDeltaPercent: quota.estimate?.observedDeltaPercent,
+    weeklyQuotaIntervalCount: quota.estimate?.intervalCount,
+    weeklyQuotaRequestCount: quota.estimate?.requestCount,
+    weeklyQuotaTotalTokensPerPercent: quota.estimate?.totalTokensPerPercent,
+    weeklyQuotaPricingCurrency: quota.estimate?.pricingCurrency,
+    weeklyQuotaCostPerPercentNanos: quota.estimate?.costPerPercentNanos,
+  };
+}
+
+function flattenRecordedWeeklyQuota(record) {
+  const quota = record.weeklyQuota;
+  if (quota === null) return {};
+  const usedPercent = quota.usedPercentMillionths / 1_000_000;
+  return {
+    weeklyQuotaLimitId: quota.limitId,
+    weeklyQuotaUsedPercent: usedPercent,
+    weeklyQuotaRemainingPercent: Math.max(0, 100 - usedPercent),
+    weeklyQuotaResetsAt: quota.resetsAt,
+    weeklyQuotaObservedAtMs: record.recordedAtMs,
+  };
+}
+
+function weeklyQuotaCsvColumns() {
+  return [
+    ["weeklyQuotaLimitId", (row) => row.weeklyQuotaLimitId],
+    ["weeklyQuotaUsedPercent", (row) => row.weeklyQuotaUsedPercent],
+    ["weeklyQuotaRemainingPercent", (row) => row.weeklyQuotaRemainingPercent],
+    ["weeklyQuotaResetsAt", (row) => row.weeklyQuotaResetsAt],
+    ["weeklyQuotaObservedAtMs", (row) => row.weeklyQuotaObservedAtMs],
+    ["weeklyQuotaObservedDeltaPercent", (row) => row.weeklyQuotaObservedDeltaPercent],
+    ["weeklyQuotaIntervalCount", (row) => row.weeklyQuotaIntervalCount],
+    ["weeklyQuotaRequestCount", (row) => row.weeklyQuotaRequestCount],
+    ["weeklyQuotaTotalTokensPerPercent", (row) => row.weeklyQuotaTotalTokensPerPercent],
+    ["weeklyQuotaPricingCurrency", (row) => row.weeklyQuotaPricingCurrency],
+    ["weeklyQuotaCostPerPercentNanos", (row) => row.weeklyQuotaCostPerPercentNanos],
+  ];
+}
+
+function compactCsvColumns() {
+  return [
+    ["compactModel", (row) => row.compact?.model],
+    ["compactHasMixedModels", (row) => row.compact?.hasMixedModels],
+    ["compactRequestCount", (row) => row.compact?.requestCount],
+    ["compactUnsuccessfulRequestCount", (row) =>
+      row.compact?.unsuccessfulRequestCount],
+    ["compactInputTokens", (row) => row.compact?.inputTokens],
+    ["compactCachedInputTokens", (row) => row.compact?.cachedInputTokens],
+    ["compactOutputTokens", (row) => row.compact?.outputTokens],
+    ["compactPricingCurrency", (row) => row.compact?.pricingCurrency],
+    ["compactPricedRequestCount", (row) => row.compact?.pricedRequestCount],
+    ["compactTotalCostNanos", (row) => row.compact?.totalCostNanos],
+    ["compactTotalCostCnyNanos", (row) => row.compact?.totalCostCnyNanos],
+  ];
+}
+
+function enrichSummaryCosts(value, display, provider = null) {
+  const enriched = enrichCosts(value, display, provider);
+  if (enriched === null || enriched === undefined || value.compact == null) {
+    return enriched;
+  }
+  const compactCost = enrichCosts(value.compact, display, provider);
+  return {
+    ...enriched,
+    compact: {
+      ...value.compact,
+      totalCostCnyNanos: compactCost.totalCostCnyNanos,
+    },
+  };
+}
+
+function printCompactSummary(compact, display, provider = null) {
+  const summary = formatCompactSummary(compact, display, provider);
+  if (summary === null) return;
+  console.log(`- 远程压缩：${summary}`);
+}
+
+function formatCompactSummary(compact, display, provider = null) {
+  if (compact == null) return null;
+  const model = compact.hasMixedModels
+    ? "混合模型"
+    : compact.model ?? "模型未知";
+  const failures = compact.unsuccessfulRequestCount > 0
+    ? `（异常 ${compact.unsuccessfulRequestCount} 次）`
+    : "";
+  const cost = formatCost({ ...compact, provider }, display);
+  const coverage = compact.pricedRequestCount === compact.requestCount
+    ? ""
+    : `（已计价 ${compact.pricedRequestCount}/${compact.requestCount} 次）`;
+  return `${compact.requestCount} 次${failures} · ${model} · ${formatTokenCount(compact.inputTokens + compact.outputTokens)} Token · ${cost}${coverage}`;
 }
 
 function printMetricsRun(result, format, display = null) {
   if (format === "json") {
     console.log(JSON.stringify({
       ...result,
-      latestTurn: enrichCosts(result.latestTurn, display),
-      threadAggregate: enrichCosts(result.threadAggregate, display),
+      latestTurn: enrichSummaryCosts(result.latestTurn, display),
+      threadAggregate: enrichSummaryCosts(result.threadAggregate, display),
     }, null, 2));
     return;
   }
@@ -614,10 +960,10 @@ function printMetricsRun(result, format, display = null) {
     const rows = [
       ...(result.latestTurn === null
         ? []
-        : [{ type: "latest", ...enrichCosts(result.latestTurn, display) }]),
+        : [{ type: "latest", ...enrichSummaryCosts(result.latestTurn, display) }]),
       ...(result.threadAggregate === null
         ? []
-        : [{ type: "thread", ...enrichCosts(result.threadAggregate, display) }]),
+        : [{ type: "thread", ...enrichSummaryCosts(result.threadAggregate, display) }]),
     ];
     printTurnSummaryCsv(rows);
     return;
@@ -673,6 +1019,7 @@ function printTurnSummaryCsv(rows) {
     ["inputCostCnyNanos", (row) => row.inputCostCnyNanos],
     ["cachedInputCostCnyNanos", (row) => row.cachedInputCostCnyNanos],
     ["outputCostCnyNanos", (row) => row.outputCostCnyNanos],
+    ...compactCsvColumns(),
   ];
   console.log(columns.map(([heading]) => csvCell(heading)).join(","));
   for (const row of rows) {
@@ -684,14 +1031,14 @@ function printMetricsTurns(result, format, display = null) {
   if (format === "json") {
     console.log(JSON.stringify({
       ...result,
-      turns: result.turns.map((turn) => enrichCosts(turn, display)),
+      turns: result.turns.map((turn) => enrichSummaryCosts(turn, display)),
     }, null, 2));
     return;
   }
   if (format === "csv") {
     printTurnSummaryCsv(result.turns.map((turn) => ({
       type: "turn",
-      ...enrichCosts(turn, display),
+      ...enrichSummaryCosts(turn, display),
     })));
     return;
   }
@@ -703,8 +1050,8 @@ function printMetricsTurns(result, format, display = null) {
     console.log("该会话暂无可导出的对话记录。");
     return;
   }
-  console.log("| # | 对话 ID | 时间 | 模型 | 思考等级 | 请求 | 异常 | 耗时 | 总 Token | 缓存率 | 速度 | 参考总价 |");
-  console.log("| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+  console.log("| # | 对话 ID | 时间 | 模型 | 思考等级 | 请求 | 异常 | 耗时 | 总 Token | 缓存率 | 速度 | 参考总价 | 远程压缩 |");
+  console.log("| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
   for (const [index, turn] of result.turns.entries()) {
     const cacheRate = turn.cachedInputTokens === null || turn.inputTokens === 0
       ? "未知"
@@ -729,6 +1076,7 @@ function printMetricsTurns(result, format, display = null) {
         cacheRate,
         speed,
         cost,
+        markdownCell(formatCompactSummary(turn.compact, display, turn.provider) ?? "无"),
       ].join(" | "),
     );
   }
@@ -738,7 +1086,7 @@ function printMetricsThreads(result, format, display = null) {
   if (format === "json") {
     console.log(JSON.stringify({
       ...result,
-      threads: result.threads.map((thread) => enrichCosts(thread, display)),
+      threads: result.threads.map((thread) => enrichSummaryCosts(thread, display)),
     }, null, 2));
     return;
   }
@@ -756,10 +1104,12 @@ function printMetricsThreads(result, format, display = null) {
       ["pricedRequestCount", (thread) => thread.pricedRequestCount],
       ["totalCostNanos", (thread) => thread.totalCostNanos],
       ["totalCostCnyNanos", (thread) => thread.totalCostCnyNanos],
+      ...compactCsvColumns(),
       ["lastRecordedAtMs", (thread) => thread.lastRecordedAtMs],
     ];
     console.log(columns.map(([heading]) => csvCell(heading)).join(","));
-    for (const thread of result.threads.map((item) => enrichCosts(item, display))) {
+    for (const thread of result.threads.map((item) =>
+      enrichSummaryCosts(item, display))) {
       console.log(columns.map(([, read]) => csvCell(read(thread))).join(","));
     }
     return;
@@ -772,8 +1122,8 @@ function printMetricsThreads(result, format, display = null) {
   console.log("");
   const rateLine = exchangeRateLine(display);
   if (rateLine) console.log(`- ${rateLine}`);
-  console.log("| # | Thread | 模型 | 思考等级 | 对话数 | 请求数 | 总 Token | 参考总价 | 最近记录 |");
-  console.log("| --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- |");
+  console.log("| # | Thread | 模型 | 思考等级 | 对话数 | 请求数 | 总 Token | 参考总价 | 远程压缩 | 最近记录 |");
+  console.log("| --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- |");
   for (const [index, thread] of result.threads.entries()) {
     const cost = thread.totalCostNanos === null || thread.pricingCurrency === null
       ? "未知"
@@ -788,6 +1138,7 @@ function printMetricsThreads(result, format, display = null) {
         String(thread.requestCount),
         formatTokenCount(thread.inputTokens + thread.outputTokens),
         cost,
+        markdownCell(formatCompactSummary(thread.compact, display, thread.provider) ?? "无"),
         markdownCell(formatLocalTime(thread.lastRecordedAtMs)),
       ].join(" | "),
     );
@@ -848,6 +1199,7 @@ function printTurnSummary(summary, aggregate = false, display = null) {
       console.log(`  - 输出价格：${formatCurrencyNanos(summary.outputCostNanos, summary.pricingCurrency, display, summary.provider)}`);
     }
   }
+  printCompactSummary(summary.compact, display, summary.provider ?? null);
 }
 
 function metricsRange(name, nowMs) {
@@ -965,7 +1317,9 @@ function assertExportFormat(value, allowed) {
 function csvColumns() {
   return [
     ["id", (record) => record.id],
-    ["recordedAt", (record) => new Date(record.recordedAtMs).toISOString()],
+    ["recordedAt", (record) => record.recordedAtMs === undefined
+      ? ""
+      : new Date(record.recordedAtMs).toISOString()],
     ["provider", (record) => record.provider],
     ["model", (record) => record.model],
     ["serviceTier", (record) => record.serviceTier],
@@ -1012,6 +1366,27 @@ if (
         console.log(`旧库备份：${result.backupPath}`);
         console.log("启动 Gateway 后将自动创建当前 Schema。");
       }
+    } else if (command === "upgrade" && process.argv.length === 3) {
+      const result = upgradeMetricsDatabase();
+      if (!result.changed) {
+        console.log(result.schemaVersion === null
+          ? `指标数据库尚未创建：${result.databasePath}`
+          : `指标数据库已经是 Schema v${result.schemaVersion}。`);
+      } else {
+        console.log(`指标数据库已升级到 Schema v${result.schemaVersion}：${result.databasePath}`);
+        console.log(`升级前备份：${result.backupPath}`);
+      }
+    } else if (command === "upgrade-restart" && process.argv.length === 3) {
+      const result = upgradeMetricsDatabaseWithGatewayRestart();
+      if (!result.changed) {
+        console.log(result.schemaVersion === null
+          ? `指标数据库尚未创建：${result.databasePath}`
+          : `指标数据库已经是 Schema v${result.schemaVersion}。`);
+      } else {
+        console.log(`指标数据库已升级到 Schema v${result.schemaVersion}：${result.databasePath}`);
+        console.log(`升级前备份：${result.backupPath}`);
+      }
+      console.log("Gateway 已重新启动。");
     } else if (command === "report") {
       const options = parseMetricsOptions(
         process.argv.slice(3),
@@ -1062,7 +1437,7 @@ if (
         loadDisplayContext(process.env),
       );
     } else {
-      throw new Error("用法：codexc metrics <status|run|threads|turns|report|export|reset>");
+      throw new Error("用法：codexc metrics <status|run|threads|turns|report|export|upgrade|reset>");
     }
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
