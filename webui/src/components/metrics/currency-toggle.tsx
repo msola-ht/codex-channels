@@ -1,8 +1,19 @@
+import { Check, ChevronsUpDown } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
 import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@/components/ui/toggle-group"
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { cn } from "@/lib/utils"
 import type { DisplayCurrency } from "@/lib/format"
+
+const options: Array<{ value: DisplayCurrency; label: string }> = [
+  { value: "cny", label: "¥ 人民币" },
+  { value: "usd", label: "$ 美元" },
+]
 
 export function CurrencyToggle({
   value,
@@ -11,18 +22,39 @@ export function CurrencyToggle({
   value: DisplayCurrency
   onChange: (value: DisplayCurrency) => void
 }) {
+  const current = options.find((option) => option.value === value) ?? options[1]
+
   return (
-    <ToggleGroup
-      type="single"
-      value={value}
-      onValueChange={(next) => {
-        if (next === "cny" || next === "usd") onChange(next)
-      }}
-      variant="outline"
-      size="sm"
-    >
-      <ToggleGroupItem value="cny" className="font-normal">¥ 人民币</ToggleGroupItem>
-      <ToggleGroupItem value="usd" className="font-normal">$ 美元</ToggleGroupItem>
-    </ToggleGroup>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="gap-2"
+          aria-label="切换显示货币"
+        >
+          {current.label}
+          <ChevronsUpDown className="size-3.5 opacity-50" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-36">
+        {options.map((option) => (
+          <DropdownMenuItem
+            key={option.value}
+            onClick={() => onChange(option.value)}
+            className="gap-2"
+          >
+            <Check
+              className={cn(
+                "size-4",
+                option.value === value ? "opacity-100" : "opacity-0",
+              )}
+            />
+            {option.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

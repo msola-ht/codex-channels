@@ -1,6 +1,5 @@
 import { useState } from "react"
 
-import { CurrencyToggle } from "@/components/metrics/currency-toggle"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { RangeSelector } from "@/components/metrics/range-selector"
@@ -16,7 +15,7 @@ import type { RangeName } from "@/lib/types"
 
 export function OverviewPage() {
   const [range, setRange] = useState<RangeName>("24h")
-  const { currency, setCurrency } = useCurrency()
+  const { currency } = useCurrency()
   const { data, loading, error } = useOverview(range)
 
   return (
@@ -27,7 +26,6 @@ export function OverviewPage() {
           <p className="text-sm text-muted-foreground">全局模型请求指标与参考费用</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <CurrencyToggle value={currency} onChange={setCurrency} />
           <RangeSelector value={range} onChange={setRange} />
         </div>
       </div>

@@ -3,6 +3,7 @@ import { HashRouter, Link, Route, Routes, useLocation } from "react-router"
 import { AuthGate } from "@/components/layout/auth-gate"
 import { AppSidebar } from "@/components/layout/app-sidebar"
 import { ModeToggle } from "@/components/layout/mode-toggle"
+import { CurrencyToggle } from "@/components/metrics/currency-toggle"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -15,6 +16,7 @@ import { Separator } from "@/components/ui/separator"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { CurrencyProvider } from "@/hooks/currency-provider"
+import { useCurrency } from "@/hooks/currency-context"
 import { ErrorsPage } from "@/pages/errors-page"
 import { OverviewPage } from "@/pages/overview-page"
 import { RequestsPage } from "@/pages/requests-page"
@@ -31,6 +33,7 @@ function pageTitle(pathname: string): string {
 
 function Layout() {
   const { pathname } = useLocation()
+  const { currency, setCurrency } = useCurrency()
 
   return (
     <SidebarProvider>
@@ -53,6 +56,7 @@ function Layout() {
             </BreadcrumbList>
           </Breadcrumb>
           <div className="ml-auto flex items-center gap-1">
+            <CurrencyToggle value={currency} onChange={setCurrency} />
             <ModeToggle />
           </div>
         </header>

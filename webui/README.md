@@ -25,7 +25,7 @@ src/
 
 令牌登录：服务端配置 `--token` 时，API 返回 401 会显示令牌输入页；令牌存入
 `sessionStorage`，也可用 `?token=` 查询参数打开页面自动登录。全局费用的人民币/美元
-切换（概览页右上角）作用于所有页面，存入 `localStorage`（`codex-webui:currency`）。
+切换（顶部导航右侧）作用于所有页面，存入 `localStorage`（`codex-webui:currency`）。
 
 全局深色/浅色主题默认深色，右上角按钮切换，选择存入浏览器 `localStorage`
 （`next-themes`），刷新后保持。
