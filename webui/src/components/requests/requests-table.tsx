@@ -41,7 +41,6 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
@@ -62,6 +61,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { StatusBadge } from "@/components/metrics/status-badge"
@@ -86,8 +90,6 @@ const COLUMN_LABELS: Record<string, string> = {
   http: "HTTP",
   error: "错误",
   input: "输入 Token",
-  cachedInput: "缓存输入",
-  cacheRate: "缓存命中率",
   output: "输出 Token",
   reasoningOutput: "推理输出",
   speed: "输出速度",
@@ -96,7 +98,16 @@ const COLUMN_LABELS: Record<string, string> = {
   cost: "费用",
 }
 
-const TABLE_STATE_KEY = "codex-webui:requests-table-state"
+const TABLE_STATE_KEY = "codex-webui:requests-table-state-v2"
+
+const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
+  operation: false,
+  http: false,
+  error: false,
+  reasoningOutput: false,
+  ttft: false,
+  duration: false,
+}
 
 function usePersistentTableState<T>(
   key: string,
@@ -190,7 +201,7 @@ function RequestsTable({
   const [sorting, setSorting] =
     usePersistentTableState<SortingState>("sorting", [])
   const [columnVisibility, setColumnVisibility] =
-    usePersistentTableState<ColumnVisibilityState>("columns", {})
+    usePersistentTableState<ColumnVisibilityState>("columns", DEFAULT_VISIBLE_COLUMNS)
   const [globalFilter, setGlobalFilter] =
     usePersistentTableState<string>("filters", "")
   const [rowSelection, setRowSelection] = React.useState({})
@@ -293,39 +304,38 @@ function RequestsTable({
       header: ({ column }) => (
         <SortableHeader column={column}>输入 Token</SortableHeader>
       ),
-      cell: ({ row }) => (
-        <span className="tabular-nums">
-          {formatTokens(row.original.inputTokens)}
-        </span>
-      ),
-    },
-    {
-      id: "cachedInput",
-      accessorFn: (record) =>
-        record.cachedInputTokens ?? Number.NEGATIVE_INFINITY,
-      header: ({ column }) => (
-        <SortableHeader column={column}>缓存输入</SortableHeader>
-      ),
-      cell: ({ row }) => (
-        <span className="tabular-nums">
-          {formatTokens(row.original.cachedInputTokens)}
-        </span>
-      ),
-    },
-    {
-      id: "cacheRate",
-      accessorFn: (record) =>
-        record.cacheHitRate ?? Number.NEGATIVE_INFINITY,
-      header: ({ column }) => (
-        <SortableHeader column={column}>缓存命中率</SortableHeader>
-      ),
-      cell: ({ row }) => (
-        <span className="tabular-nums">
-          {row.original.cacheHitRate === null
-            ? "—"
-            : `${(row.original.cacheHitRate * 100).toFixed(1)}%`}
-        </span>
-      ),
+      cell: ({ row }) => {
+        const record = row.original
+        const uncached =
+          record.inputTokens === null || record.cachedInputTokens === null
+            ? null
+            : Math.max(0, record.inputTokens - record.cachedInputTokens)
+        return (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2">
+                {formatTokens(record.inputTokens)}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="right" align="start">
+              <ul className="flex flex-col gap-1">
+                <li className="whitespace-nowrap">
+                  命中缓存：{formatTokens(record.cachedInputTokens)}
+                </li>
+                <li className="whitespace-nowrap">
+                  未命中缓存：{uncached === null ? "—" : formatTokens(uncached)}
+                </li>
+                <li className="whitespace-nowrap">
+                  命中率：
+                  {record.cacheHitRate === null
+                    ? "—"
+                    : `${(record.cacheHitRate * 100).toFixed(1)}%`}
+                </li>
+              </ul>
+            </TooltipContent>
+          </Tooltip>
+        )
+      },
     },
     {
       id: "output",
@@ -423,7 +433,7 @@ function RequestsTable({
 
   const queryValue =
     (table.state.globalFilter as string | undefined) ?? ""
-  const filteredRows = table.getFilteredRowModel().rows
+  const filteredRows = table.getSortedRowModel().rows
 
   return (
     <Card>
@@ -460,8 +470,8 @@ function RequestsTable({
                 列
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-40">
-              <DropdownMenuGroup>
+            <DropdownMenuContent align="end" className="w-64">
+              <div className="grid grid-cols-2 gap-0.5">
                 {table
                   .getAllLeafColumns()
                   .filter((column) => column.getCanHide())
@@ -474,12 +484,15 @@ function RequestsTable({
                       {COLUMN_LABELS[column.id] ?? column.id}
                     </DropdownMenuCheckboxItem>
                   ))}
-              </DropdownMenuGroup>
+              </div>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
 
-        <div className="overflow-x-auto">
+        <div
+          className="overflow-x-auto"
+          style={{ scrollbarWidth: "thin" }}
+        >
           <Table>
             <TableHeader>
               {table.getHeaderGroups().map((headerGroup) => (

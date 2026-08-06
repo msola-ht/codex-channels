@@ -22,6 +22,7 @@ import {
 import { formatCodexProviderLabel } from "./provider-format.js";
 import {
   formatCurrencyNanos,
+  formatCnyEquivalent,
   formatReferenceCostTotal,
   toDisplayReferenceCost,
 } from "./reference-cost-format.js";
@@ -352,8 +353,8 @@ export function createTurnCompletedPresentation(
         ? formatReferenceCostTotal({
             ...displayCost,
             requestCount: successfulRequestCount,
-          })
-        : formatReferenceCostTotal(displayCost),
+          }, exchangeRate ?? null)
+        : formatReferenceCostTotal(displayCost, exchangeRate ?? null),
       fields: displayCost.currency === null
         ? []
         : ([
@@ -363,7 +364,10 @@ export function createTurnCompletedPresentation(
           ] as const).flatMap(([label, costNanos]) =>
             costNanos === null
               ? []
-              : [{ label, value: formatCurrencyNanos(displayCost.currency!, costNanos) }],
+              : [{
+                  label,
+                  value: formatCostFieldValue(displayCost, costNanos, exchangeRate),
+                }],
           ),
     });
   }
@@ -471,6 +475,7 @@ export function createTurnCompletedPresentation(
           currency,
           exchangeRate ?? null,
         ),
+        exchangeRate ?? null,
       ),
     });
   }
@@ -641,4 +646,16 @@ function turnStatusLabel(
     inProgress: "运行中",
   } as const;
   return labels[status];
+}
+
+function formatCostFieldValue(
+  displayCost: { currency: string | null },
+  costNanos: number,
+  exchangeRate?: ExchangeRateSnapshot | null,
+): string {
+  const formatted = formatCurrencyNanos(displayCost.currency!, costNanos);
+  const equivalent = displayCost.currency === "USD" && exchangeRate
+    ? formatCnyEquivalent(costNanos, exchangeRate)
+    : null;
+  return equivalent === null ? formatted : `${formatted}（${equivalent}）`;
 }

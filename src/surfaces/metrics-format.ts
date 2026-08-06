@@ -432,7 +432,7 @@ function formatMetricsGroup(
   const costBreakdown = formatReferenceCostBreakdown(referenceCostDisplay);
   const cost = aggregate.pricedRequestCount === 0
     ? "  - **费用**：总价未知"
-    : `  - **费用**：${formatReferenceCostTotal(referenceCostDisplay)}${costBreakdown.length === 0 ? "" : `（${costBreakdown.join(" · ")}）`}`;
+    : `  - **费用**：${formatReferenceCostTotal(referenceCostDisplay, exchangeRate ?? null)}${costBreakdown.length === 0 ? "" : `（${costBreakdown.join(" · ")}）`}`;
   return [
     `${index + 1}. ${label}`,
     `  - 请求：${aggregate.requestCount} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${aggregate.unsuccessfulRequestCount} 次）` : ""}`,
@@ -506,7 +506,31 @@ export function formatDeepseekAveragePriceValue(
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(nanos / 1_000_000_000);
-  return `约 ${amount}/100M${coverage}`;
+  const cnyEquivalent = displayCurrency === "USD" && exchangeRate
+    ? formatCnyEquivalentPerHundredMillion(
+        usdNanosPerHundredMillion,
+        exchangeRate,
+      )
+    : null;
+  return `约 ${amount}/100M`
+    + `${cnyEquivalent === null ? "" : `（${cnyEquivalent}/100M）`}${coverage}`;
+}
+
+function formatCnyEquivalentPerHundredMillion(
+  usdNanosPerHundredMillion: number,
+  exchangeRate: ExchangeRateSnapshot,
+): string | null {
+  const converted = Math.round(
+    usdNanosPerHundredMillion * exchangeRate.usdToCny,
+  );
+  if (!Number.isSafeInteger(converted)) return null;
+  return `≈ ${new Intl.NumberFormat("zh-CN", {
+    style: "currency",
+    currency: "CNY",
+    currencyDisplay: "narrowSymbol",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(converted / 1_000_000_000)}`;
 }
 
 export function formatCompactMetricsValue(
@@ -559,8 +583,9 @@ function formatReferenceCost(
 ): string[] {
   const display = toDisplayReferenceCost(value, currency, exchangeRate ?? null);
   return [
-    `- **费用**：${formatReferenceCostTotal(display)}`,
-    ...formatReferenceCostBreakdown(display).map((line) => `  - ${line}`),
+    `- **费用**：${formatReferenceCostTotal(display, exchangeRate ?? null)}`,
+    ...formatReferenceCostBreakdown(display, exchangeRate ?? null)
+      .map((line) => `  - ${line}`),
   ];
 }
 

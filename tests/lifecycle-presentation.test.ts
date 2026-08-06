@@ -7,8 +7,31 @@ import {
   renderPlainLifecyclePresentation,
   renderStructuredLifecyclePresentation,
 } from "../src/surfaces/lifecycle-presentation.js";
+import {
+  formatReferenceCostTotal,
+} from "../src/surfaces/reference-cost-format.js";
 
 describe("shared Surface lifecycle presentation", () => {
+  it("appends a CNY equivalent when USD costs are rendered with a rate", () => {
+    expect(formatReferenceCostTotal({
+      currency: "USD",
+      totalCostNanos: 1_000_000_000,
+      inputCostNanos: null,
+      cachedInputCostNanos: null,
+      outputCostNanos: null,
+      pricedRequestCount: 1,
+      requestCount: 1,
+      uncachedInputPricePerMillionNanos: null,
+      cachedInputPricePerMillionNanos: null,
+      outputPricePerMillionNanos: null,
+      hasMixedPrices: false,
+    }, {
+      usdToCny: 7.2,
+      effectiveAtMs: 1_700_000_000_000,
+      source: "ecb",
+    })).toBe("$1.000000（≈ ¥7.200000）");
+  });
+
   it("uses one startup field order for every Surface renderer", () => {
     const rendered = renderPlainLifecyclePresentation(
       createStartupPresentation(
