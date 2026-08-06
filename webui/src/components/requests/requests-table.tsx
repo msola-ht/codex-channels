@@ -16,6 +16,8 @@ import {
   useTable,
   type Column,
   type ColumnDef,
+  type ColumnVisibilityState,
+  type SortingState,
 } from "@tanstack/react-table"
 import {
   ArrowDownIcon,
@@ -67,6 +69,7 @@ import { useCurrency } from "@/hooks/currency-context"
 import {
   formatCost,
   formatDuration,
+  formatSpeed,
   formatTime,
   formatTokens,
 } from "@/lib/format"
@@ -83,10 +86,38 @@ const COLUMN_LABELS: Record<string, string> = {
   http: "HTTP",
   error: "错误",
   input: "输入 Token",
+  cachedInput: "缓存输入",
+  cacheRate: "缓存命中率",
   output: "输出 Token",
+  reasoningOutput: "推理输出",
+  speed: "输出速度",
   ttft: "TTFT",
   duration: "耗时",
   cost: "费用",
+}
+
+const TABLE_STATE_KEY = "codex-webui:requests-table-state"
+
+function usePersistentTableState<T>(
+  key: string,
+  fallback: T,
+): [T, React.Dispatch<React.SetStateAction<T>>] {
+  const [value, setValue] = React.useState<T>(() => {
+    try {
+      const raw = localStorage.getItem(`${TABLE_STATE_KEY}:${key}`)
+      return raw === null ? fallback : JSON.parse(raw) as T
+    } catch {
+      return fallback
+    }
+  })
+  React.useEffect(() => {
+    try {
+      localStorage.setItem(`${TABLE_STATE_KEY}:${key}`, JSON.stringify(value))
+    } catch {
+      // 存储不可用时仅在本次会话内保留
+    }
+  }, [key, value])
+  return [value, setValue]
 }
 
 const features = tableFeatures({
@@ -155,6 +186,14 @@ function RequestsTable({
   onPageSizeChange: (pageSize: number) => void
 }) {
   const { currency } = useCurrency()
+
+  const [sorting, setSorting] =
+    usePersistentTableState<SortingState>("sorting", [])
+  const [columnVisibility, setColumnVisibility] =
+    usePersistentTableState<ColumnVisibilityState>("columns", {})
+  const [globalFilter, setGlobalFilter] =
+    usePersistentTableState<string>("filters", "")
+  const [rowSelection, setRowSelection] = React.useState({})
 
   const columns = React.useMemo<ColumnDef<typeof features, RequestRecord>[]>(() => [
     {
@@ -261,6 +300,34 @@ function RequestsTable({
       ),
     },
     {
+      id: "cachedInput",
+      accessorFn: (record) =>
+        record.cachedInputTokens ?? Number.NEGATIVE_INFINITY,
+      header: ({ column }) => (
+        <SortableHeader column={column}>缓存输入</SortableHeader>
+      ),
+      cell: ({ row }) => (
+        <span className="tabular-nums">
+          {formatTokens(row.original.cachedInputTokens)}
+        </span>
+      ),
+    },
+    {
+      id: "cacheRate",
+      accessorFn: (record) =>
+        record.cacheHitRate ?? Number.NEGATIVE_INFINITY,
+      header: ({ column }) => (
+        <SortableHeader column={column}>缓存命中率</SortableHeader>
+      ),
+      cell: ({ row }) => (
+        <span className="tabular-nums">
+          {row.original.cacheHitRate === null
+            ? "—"
+            : `${(row.original.cacheHitRate * 100).toFixed(1)}%`}
+        </span>
+      ),
+    },
+    {
       id: "output",
       accessorFn: (record) => record.outputTokens ?? Number.NEGATIVE_INFINITY,
       header: ({ column }) => (
@@ -269,6 +336,32 @@ function RequestsTable({
       cell: ({ row }) => (
         <span className="tabular-nums">
           {formatTokens(row.original.outputTokens)}
+        </span>
+      ),
+    },
+    {
+      id: "reasoningOutput",
+      accessorFn: (record) =>
+        record.reasoningOutputTokens ?? Number.NEGATIVE_INFINITY,
+      header: ({ column }) => (
+        <SortableHeader column={column}>推理输出</SortableHeader>
+      ),
+      cell: ({ row }) => (
+        <span className="tabular-nums">
+          {formatTokens(row.original.reasoningOutputTokens)}
+        </span>
+      ),
+    },
+    {
+      id: "speed",
+      accessorFn: (record) =>
+        record.outputTokensPerSecond ?? Number.NEGATIVE_INFINITY,
+      header: ({ column }) => (
+        <SortableHeader column={column}>输出速度</SortableHeader>
+      ),
+      cell: ({ row }) => (
+        <span className="tabular-nums">
+          {formatSpeed(row.original.outputTokensPerSecond)}
         </span>
       ),
     },
@@ -316,6 +409,16 @@ function RequestsTable({
     features,
     columns,
     data: records,
+    state: {
+      sorting,
+      columnVisibility,
+      globalFilter,
+      rowSelection,
+    },
+    onSortingChange: setSorting,
+    onColumnVisibilityChange: setColumnVisibility,
+    onGlobalFilterChange: setGlobalFilter,
+    onRowSelectionChange: setRowSelection,
   })
 
   const queryValue =

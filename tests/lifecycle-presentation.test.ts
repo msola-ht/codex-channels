@@ -250,9 +250,9 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("思考次数：2 次");
     expect(rendered).toContain("模型请求聚合耗时：12秒");
     expect(rendered).toContain("Token：20.12 K");
-    expect(rendered).toContain("费用：$0.000350（已计价 2/2 次请求）");
+    expect(rendered).toContain("费用：$0.000350");
     expect(rendered).toContain("上下文压缩：1 次 · gpt-5.6-sol · 10.5 K Token · $0.142102");
-    expect(rendered).toContain("参考总价：$0.001250（已计价 8/9 次请求）");
+    expect(rendered).toContain("总价：$0.001250（计价 8/9）");
     expect(rendered).toContain("缓存命中率：75.00%");
     expect(rendered).toContain("最后请求首事件延迟：640毫秒");
     expect(rendered).toContain("首段回复延迟：920毫秒");
@@ -327,9 +327,7 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain(
       "模型请求：2 次（完成 1 · 自动重试 1，最终成功）",
     );
-    expect(rendered).toContain(
-      "费用：$0.000915（已计价 1/1 个成功请求）",
-    );
+    expect(rendered).toContain("费用：$0.000915");
     expect(rendered).not.toContain("折合人民币");
   });
 
@@ -383,8 +381,8 @@ describe("shared Surface lifecycle presentation", () => {
       }),
     );
 
-    expect(rendered).toContain("费用：¥7.200000（已计价 1/1 个成功请求）");
-    expect(rendered).toContain("参考总价：¥14.400000（已计价 2/2 次请求）");
+    expect(rendered).toContain("费用：¥7.200000");
+    expect(rendered).toContain("总价：¥14.400000");
     expect(rendered).not.toContain("折合人民币");
     expect(rendered).not.toContain("$");
   });
@@ -423,6 +421,21 @@ describe("shared Surface lifecycle presentation", () => {
             hasMixedPrices: false,
           },
         },
+        sessionReferenceCost: {
+          currency: "USD",
+          totalCostNanos: 2_000_000_000,
+          inputTokens: 300,
+          outputTokens: 100,
+          inputCostNanos: 1_200_000_000,
+          cachedInputCostNanos: 200_000_000,
+          outputCostNanos: 600_000_000,
+          pricedRequestCount: 2,
+          requestCount: 2,
+          uncachedInputPricePerMillionNanos: 140_000_000,
+          cachedInputPricePerMillionNanos: 2_800_000,
+          outputPricePerMillionNanos: 280_000_000,
+          hasMixedPrices: false,
+        },
       }, (provider) => provider === "deepseek" ? "cny" : "usd", {
         usdToCny: 7.2,
         effectiveAtMs: 1_700_000_000_000,
@@ -430,7 +443,7 @@ describe("shared Surface lifecycle presentation", () => {
       }),
     );
 
-    expect(rendered).toContain("实际均价：约 ¥3,600,000.00/100M");
+    expect(rendered.match(/均价：约 ¥3,600,000\.00\/100M/g)?.length).toBe(2);
   });
 
   it("omits the DeepSeek average price when pricing samples are incomplete", () => {
@@ -473,7 +486,7 @@ describe("shared Surface lifecycle presentation", () => {
       }),
     );
 
-    expect(rendered).not.toContain("实际均价");
+    expect(rendered).not.toContain("均价");
   });
 
   it("renders run cost details as indented subfields", () => {
@@ -513,9 +526,7 @@ describe("shared Surface lifecycle presentation", () => {
       }),
     );
 
-    expect(rendered).toContain(
-      "- **费用**：¥7.200000（已计价 1/1 个成功请求）",
-    );
+    expect(rendered).toContain("- **费用**：¥7.200000");
     expect(rendered).toContain("  - 输入价格：¥4.320000");
     expect(rendered).toContain("  - 缓存价格：¥0.720000");
     expect(rendered).toContain("  - 输出价格：¥2.160000");

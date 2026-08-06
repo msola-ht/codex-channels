@@ -352,7 +352,7 @@ export function createTurnCompletedPresentation(
         ? formatReferenceCostTotal({
             ...displayCost,
             requestCount: successfulRequestCount,
-          }, "个成功请求")
+          })
         : formatReferenceCostTotal(displayCost),
       fields: displayCost.currency === null
         ? []
@@ -383,7 +383,7 @@ export function createTurnCompletedPresentation(
     }, currency, exchangeRate);
     if (averagePrice !== null) {
       runFields.push({
-        label: "实际均价",
+        label: "均价",
         value: averagePrice,
       });
     }
@@ -464,7 +464,7 @@ export function createTurnCompletedPresentation(
   }
   if (event.sessionReferenceCost) {
     sessionFields.push({
-      label: "参考总价",
+      label: "总价",
       value: formatReferenceCostTotal(
         toDisplayReferenceCost(
           event.sessionReferenceCost,
@@ -473,6 +473,27 @@ export function createTurnCompletedPresentation(
         ),
       ),
     });
+  }
+  if (
+    event.modelProvider === "deepseek"
+    && event.sessionReferenceCost
+    && event.sessionReferenceCost.inputTokens !== undefined
+    && event.sessionReferenceCost.outputTokens !== undefined
+  ) {
+    const averagePrice = formatDeepseekAveragePriceValue({
+      pricingCurrency: event.sessionReferenceCost.currency,
+      totalCostNanos: event.sessionReferenceCost.totalCostNanos,
+      pricedRequestCount: event.sessionReferenceCost.pricedRequestCount,
+      requestCount: event.sessionReferenceCost.requestCount,
+      inputTokens: event.sessionReferenceCost.inputTokens,
+      outputTokens: event.sessionReferenceCost.outputTokens,
+    }, currency, exchangeRate);
+    if (averagePrice !== null) {
+      sessionFields.push({
+        label: "均价",
+        value: averagePrice,
+      });
+    }
   }
   const sections = [
     ...(runFields.length > 0

@@ -608,18 +608,24 @@ export function formatConversationLimits(
           "周限估算（本机代理样本）：",
           ...(weeklyEstimates.length === 0
             ? ["正在采样；需要同一周窗口内至少出现一次可观测的额度增长。"]
-            : weeklyEstimates.flatMap((estimate) => [
+            : weeklyEstimates.flatMap((estimate) => {
+                const pricedSuccesses = Math.max(
+                  0,
+                  estimate.requestCount - estimate.unsuccessfulRequestCount,
+                );
+                return [
                 `${estimate.limitId}：已使用 ${formatPercent(estimate.usedPercent)} · 观测变化 ${formatPercent(estimate.observedDeltaPercent)}（${estimate.intervalCount} 个区间）`,
                 `样本：${estimate.requestCount} 次请求${estimate.unsuccessfulRequestCount > 0 ? ` · ${estimate.unsuccessfulRequestCount} 次未成功` : ""}`,
                 `每 1%：约 ${formatTokenCount(estimate.totalTokensPerPercent)} Token`,
                 `  - 输入：约 ${formatTokenCount(estimate.inputTokensPerPercent)}`,
                 `  - 输出：约 ${formatTokenCount(estimate.outputTokensPerPercent)}`,
-                `  - API 参考费用：${formatEstimatedLimitCost(estimate.pricingCurrency, estimate.costPerPercentNanos)}（已计价 ${estimate.pricedRequestCount}/${Math.max(0, estimate.requestCount - estimate.unsuccessfulRequestCount)} 个成功请求）`,
+                `  - API 参考费用：${formatEstimatedLimitCost(estimate.pricingCurrency, estimate.costPerPercentNanos)}${estimate.pricedRequestCount === pricedSuccesses ? "" : `（计价 ${estimate.pricedRequestCount}/${pricedSuccesses}）`}`,
                 `剩余 ${formatPercent(estimate.remainingPercent)}：约 ${formatTokenCount(estimate.remainingTokens)} Token · API 参考费用 ${formatEstimatedLimitCost(estimate.pricingCurrency, estimate.remainingCostNanos)}`,
                 ...(estimate.observedDeltaPercent < 1
                   ? ["提示：观测到的额度变化不足 1%，估算波动可能较大。"]
                   : []),
-              ])),
+                ];
+              })),
           "口径：按统计代理相邻额度快照的增量折算；其他客户端在快照间的用量可能造成偏差，费用不是订阅实际扣款。",
         ]
       : []),

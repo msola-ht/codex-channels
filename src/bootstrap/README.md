@@ -47,7 +47,7 @@
   组合根按实际响应模型附加当次价格快照，不保存图片、提示词、响应正文或识别结果。
 - `config-lifecycle.ts`：管理配置监听、防抖重载、持久配置事件投递、信号与进程退出。
 - `surface-manager.ts`：按 `surface + accountId` 向已启动 Surface 集中路由 Core 输出，并为
-  `turn.completed` 注入当前授权 Workspace 的 Git 分支和 Thread 累计参考总价；并行完成各 Surface 的首次启动，
+  `turn.completed` 注入当前授权 Workspace 的 Git 分支和 Thread 累计总价；并行完成各 Surface 的首次启动，
   单个渠道启动或运行失败时只取消该渠道交互并独立退避恢复，不停止 Gateway 或其他渠道。
   首次启动和故障恢复期间只在有界内存队列中保留关键输出，就绪后按序补投；流式增量不积压。
   渠道未就绪时对应账号的新审批、用户输入与 MCP 交互立即失败关闭。

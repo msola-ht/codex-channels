@@ -19,15 +19,17 @@ export interface ReferenceCostDisplay {
 
 export function formatReferenceCostTotal(
   value: ReferenceCostDisplay,
-  requestLabel: "次请求" | "个成功请求" = "次请求",
 ): string {
   if (value.pricedRequestCount === 0) {
-    return `暂无价格快照（已计价 0/${value.requestCount} ${requestLabel}）`;
+    return `暂无价格快照（计价 0/${value.requestCount}）`;
   }
   if (value.currency === null || value.totalCostNanos === null) {
-    return `无法合计（已计价 ${value.pricedRequestCount}/${value.requestCount} ${requestLabel}）`;
+    return `无法合计（计价 ${value.pricedRequestCount}/${value.requestCount}）`;
   }
-  return `${formatCurrencyNanos(value.currency, value.totalCostNanos)}（已计价 ${value.pricedRequestCount}/${value.requestCount} ${requestLabel}）`;
+  const coverage = value.pricedRequestCount === value.requestCount
+    ? ""
+    : `（计价 ${value.pricedRequestCount}/${value.requestCount}）`;
+  return `${formatCurrencyNanos(value.currency, value.totalCostNanos)}${coverage}`;
 }
 
 export function formatReferenceCostBreakdown(

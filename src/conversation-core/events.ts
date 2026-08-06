@@ -118,6 +118,8 @@ export interface TurnOutputTiming {
 export interface ReferenceCostSummary {
   currency: string | null;
   totalCostNanos: number | null;
+  inputTokens?: number;
+  outputTokens?: number;
   inputCostNanos: number | null;
   cachedInputCostNanos: number | null;
   outputCostNanos: number | null;

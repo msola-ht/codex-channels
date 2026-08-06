@@ -114,7 +114,7 @@ codexc service restart gateway
 审批内容。完整展示口径见 [`docs/display.md`](docs/display.md)。
 
 每次 Turn 完成后按“本次运行”“当前会话累计”和可选的“账户状态”分开展示请求次数、Token、
-缓存命中、速度、思考次数与参考总价；`/metrics` 可查看当前 Thread 最近运行聚合以及
+缓存命中、速度、思考次数与总价；`/metrics` 可查看当前 Thread 最近运行聚合以及
 `global|providers|models|errors` 的时间范围汇总。展示与统计口径见
 [`docs/display.md`](docs/display.md)。
 统计代理识别到的上下文压缩仍计入这些总计，并另外显示压缩次数、实际请求模型、Token 与参考费用，

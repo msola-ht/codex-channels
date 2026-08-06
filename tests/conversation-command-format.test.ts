@@ -332,11 +332,11 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("**Token**：30.9 K");
     expect(rendered).toContain("  - 输入命中缓存：24 K");
     expect(rendered).toContain("**Token**：184.2 K");
-    expect(rendered).toContain("**费用**：$0.001235（已计价 2/3 次请求）");
+    expect(rendered).toContain("**费用**：$0.001235（计价 2/3）");
     expect(rendered).toContain("  - 输入价格：$0.000400");
     expect(rendered).toContain("综合输出速度：60 token/s（不含推理 · 覆盖 2/3 次请求）");
     expect(rendered).toContain("上下文压缩：1 次 · gpt-5.6-sol · 10.5 K Token · $0.142102");
-    expect(rendered).toContain("**费用**：$0.001235（已计价 2/3 次请求）");
+    expect(rendered).toContain("**费用**：$0.001235（计价 2/3）");
     expect(rendered).toContain("输入价格：$0.000400");
     expect(rendered).toContain("缓存价格：$0.000200");
     expect(rendered).toContain("输出价格：$0.000635");
@@ -348,7 +348,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("API 提供商：BLTCY");
     expect(rendered).toContain("调用模型：gpt-5.6-luna");
     expect(rendered).toContain("状态：已完成 · HTTP 200");
-    expect(rendered).toContain("**费用**：$0.000988（已计价 1/1 次请求）");
+    expect(rendered).toContain("**费用**：$0.000988");
   });
 
   it("shows reasoning token details for OpenAI official metrics", () => {
@@ -460,7 +460,7 @@ describe("provider-aware conversation command formatting", () => {
 
     expect(rendered).toContain("- 汇率：1 USD ≈ 7.2000 CNY");
     expect(rendered).toContain("  - 来源：open-er-api");
-    expect(rendered).toContain("- **费用**：¥7.200000（已计价 1/1 次请求）");
+    expect(rendered).toContain("- **费用**：¥7.200000");
     expect(rendered).toContain("输入价格：¥4.320000");
     expect(rendered).toContain("缓存价格：¥0.720000");
     expect(rendered).toContain("输出价格：¥2.160000");
@@ -507,7 +507,7 @@ describe("provider-aware conversation command formatting", () => {
     });
 
     expect(rendered).toContain(
-      "实际均价：约 ¥3,600,000.00/100M（已计价 2/3 次请求）",
+      "均价：约 ¥3,600,000.00/100M（计价 2/3）",
     );
   });
 
@@ -549,7 +549,7 @@ describe("provider-aware conversation command formatting", () => {
       source: "open-er-api",
     });
 
-    expect(rendered).not.toContain("实际均价");
+    expect(rendered).not.toContain("均价");
   });
 
   it("renders unified provider and model aggregates with latency coverage", () => {
@@ -619,7 +619,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("P50 800毫秒 · P95 3秒（覆盖 9/12 次请求）");
     expect(rendered).toContain("OpenAI 官方 / gpt-5.6-sol");
     expect(rendered).toContain("第三方中转 / gpt-5.6-luna");
-    expect(rendered).toContain("**费用**：$0.123457（已计价 10/12 次请求）");
+    expect(rendered).toContain("**费用**：$0.123457（计价 10/12）");
     expect(rendered).toContain("输入价格：$0.040000");
     expect(rendered).toContain("缓存价格：$0.020000");
     expect(rendered).toContain("输出价格：$0.063457");
@@ -666,7 +666,7 @@ describe("provider-aware conversation command formatting", () => {
       },
     });
 
-    expect(rendered).toContain("**费用**：$0.000500（已计价 2/2 次请求）");
+    expect(rendered).toContain("**费用**：$0.000500");
     expect(rendered).not.toContain("输入价格：");
   });
 

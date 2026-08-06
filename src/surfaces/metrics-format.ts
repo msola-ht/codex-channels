@@ -95,7 +95,7 @@ export function formatConversationMetrics(
       ...(summary.modelProvider === "deepseek"
         ? [formatDeepseekAveragePriceValue(turn, currency, exchangeRate)]
           .filter((value): value is string => value !== null)
-          .map((value) => `实际均价：${value}`)
+          .map((value) => `均价：${value}`)
         : []),
       ...(turn.compact
         ? [formatCompactMetrics(turn.compact, currency, exchangeRate)]
@@ -135,7 +135,7 @@ export function formatConversationMetrics(
       ...(summary.modelProvider === "deepseek"
         ? [formatDeepseekAveragePriceValue(aggregate, currency, exchangeRate)]
           .filter((value): value is string => value !== null)
-          .map((value) => `实际均价：${value}`)
+          .map((value) => `均价：${value}`)
         : []),
       ...(aggregate.compact
         ? [formatCompactMetrics(aggregate.compact, currency, exchangeRate)]
@@ -431,7 +431,7 @@ function formatMetricsGroup(
   );
   const costBreakdown = formatReferenceCostBreakdown(referenceCostDisplay);
   const cost = aggregate.pricedRequestCount === 0
-    ? "  - **费用**：参考总价未知"
+    ? "  - **费用**：总价未知"
     : `  - **费用**：${formatReferenceCostTotal(referenceCostDisplay)}${costBreakdown.length === 0 ? "" : `（${costBreakdown.join(" · ")}）`}`;
   return [
     `${index + 1}. ${label}`,
@@ -498,7 +498,7 @@ export function formatDeepseekAveragePriceValue(
   }
   const coverage = value.pricedRequestCount === value.requestCount
     ? ""
-    : `（已计价 ${value.pricedRequestCount}/${value.requestCount} 次请求）`;
+    : `（计价 ${value.pricedRequestCount}/${value.requestCount}）`;
   const amount = new Intl.NumberFormat("zh-CN", {
     style: "currency",
     currency: displayCurrency,
@@ -545,7 +545,7 @@ export function formatCompactMetricsValue(
     : formatCurrencyNanos(display.currency, display.totalCostNanos);
   const coverage = compact.pricedRequestCount === compact.requestCount
     ? ""
-    : `（已计价 ${compact.pricedRequestCount}/${compact.requestCount} 次）`;
+    : `（计价 ${compact.pricedRequestCount}/${compact.requestCount}）`;
   const failures = compact.unsuccessfulRequestCount === 0
     ? ""
     : `（异常 ${compact.unsuccessfulRequestCount} 次）`;

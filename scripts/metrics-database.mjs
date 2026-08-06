@@ -706,7 +706,7 @@ function printMetricsReport(result, format, display = null) {
   console.log(`- 输出 Token：${aggregate.outputTokens}`);
   console.log(`- 推理输出 Token：${aggregate.reasoningOutputTokens}`);
   console.log(`- 计价覆盖：${aggregate.pricedRequestCount}/${aggregate.requestCount}`);
-  console.log(`- 参考总价：${formatCost(
+  console.log(`- 总价：${formatCost(
     { ...aggregate, provider: aggregateProvider },
     display,
   )}`);
@@ -716,7 +716,7 @@ function printMetricsReport(result, format, display = null) {
     console.log("");
     console.log("## 明细");
     console.log("");
-    console.log("| 提供商 | 模型 | 请求 | 异常/未完整 | 输入 | 缓存输入 | 输出 | 参考总价 | 上下文压缩 |");
+    console.log("| 提供商 | 模型 | 请求 | 异常/未完整 | 输入 | 缓存输入 | 输出 | 总价 | 上下文压缩 |");
     console.log("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
     for (const group of result.report.groups) {
       const value = group.aggregate;
@@ -943,7 +943,7 @@ function formatCompactSummary(compact, display, provider = null) {
   const cost = formatCost({ ...compact, provider }, display);
   const coverage = compact.pricedRequestCount === compact.requestCount
     ? ""
-    : `（已计价 ${compact.pricedRequestCount}/${compact.requestCount} 次）`;
+    : `（计价 ${compact.pricedRequestCount}/${compact.requestCount}）`;
   return `${compact.requestCount} 次${failures} · ${model} · ${formatTokenCount(compact.inputTokens + compact.outputTokens)} Token · ${cost}${coverage}`;
 }
 
@@ -1050,7 +1050,7 @@ function printMetricsTurns(result, format, display = null) {
     console.log("该会话暂无可导出的对话记录。");
     return;
   }
-  console.log("| # | 对话 ID | 时间 | 模型 | 思考等级 | 请求 | 异常 | 耗时 | 总 Token | 缓存率 | 速度 | 参考总价 | 上下文压缩 |");
+  console.log("| # | 对话 ID | 时间 | 模型 | 思考等级 | 请求 | 异常 | 耗时 | 总 Token | 缓存率 | 速度 | 总价 | 上下文压缩 |");
   console.log("| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
   for (const [index, turn] of result.turns.entries()) {
     const cacheRate = turn.cachedInputTokens === null || turn.inputTokens === 0
@@ -1122,7 +1122,7 @@ function printMetricsThreads(result, format, display = null) {
   console.log("");
   const rateLine = exchangeRateLine(display);
   if (rateLine) console.log(`- ${rateLine}`);
-  console.log("| # | Thread | 模型 | 思考等级 | 对话数 | 请求数 | 总 Token | 参考总价 | 上下文压缩 | 最近记录 |");
+  console.log("| # | Thread | 模型 | 思考等级 | 对话数 | 请求数 | 总 Token | 总价 | 上下文压缩 | 最近记录 |");
   console.log("| --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- |");
   for (const [index, thread] of result.threads.entries()) {
     const cost = thread.totalCostNanos === null || thread.pricingCurrency === null
@@ -1186,8 +1186,11 @@ function printTurnSummary(summary, aggregate = false, display = null) {
     );
   }
   if (summary.totalCostNanos !== null && summary.pricingCurrency !== null) {
+    const coverage = summary.pricedRequestCount === summary.requestCount
+      ? ""
+      : `（计价 ${summary.pricedRequestCount}/${summary.requestCount}）`;
     console.log(
-      `- 参考总价：${formatCost(summary, display)}（已计价 ${summary.pricedRequestCount}/${summary.requestCount} 次请求）`,
+      `- 总价：${formatCost(summary, display)}${coverage}`,
     );
     if (summary.inputCostNanos !== null) {
       console.log(`  - 输入价格：${formatCurrencyNanos(summary.inputCostNanos, summary.pricingCurrency, display, summary.provider)}`);
