@@ -18,7 +18,7 @@ npm run lint       # oxlint
 src/
   lib/         API 客户端、共享类型转出与格式化
   hooks/       数据 hook（useApi 统一 loading/error/refetch）与全局货币上下文
-  components/  layout（Sidebar）、metrics（指标区块）
+  components/  layout（Sidebar）、metrics（指标区块）、requests（请求明细数据表格）
   pages/       概览、Threads、Thread 详情、请求、错误
   App.tsx      路由布局与令牌登录（AuthGate）
 ```
@@ -39,7 +39,7 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
   不手写基础组件（按钮、卡片、表格、弹层等）；
 - 业务组件按领域分目录组合：`components/layout/`（布局与鉴权）、
   `components/overview/`、`components/threads/`、`components/metrics/`（指标区块），
-  只做组件组合与数据编排，不直接发请求；
+  `components/requests/`（请求明细数据表格），只做组件组合与数据编排，不直接发请求；
 - 数据获取统一走 `hooks/`（`useApi` 系列，集中 loading/error/refetch），组件不直接
   `fetch`；API 路径统一从 `src/lib/api.ts` 的 `API_PREFIX` 拼接；
 - 类型从 `src/lib/types.ts` 转出，格式化（价格/Token/耗时）放 `src/lib/format.ts`；

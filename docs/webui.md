@@ -48,7 +48,7 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
               webui/（Vite + React 前端）
                 ├─ lib/  API 客户端、格式化
                 ├─ hooks/ 数据 hook
-                ├─ components/ 布局与指标区块
+                ├─ components/ 布局、指标区块与请求明细数据表格
                 └─ pages/ 页面组合
 ```
 
@@ -86,8 +86,11 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
 webui/src/
   lib/         API 客户端、共享类型转出与格式化（价格/Token/耗时）
   hooks/       资源数据 hook（统一 loading/error/refetch）与全局货币上下文
-  components/  Sidebar 布局与指标区块组件
+  components/  Sidebar 布局、指标区块与请求明细数据表格组件
   pages/       概览、Threads、Thread 详情、请求、错误
 ```
+
+请求明细表格基于 TanStack Table v9 组合 shadcn 基础组件实现，支持当前已加载页的
+搜索筛选、列排序、列显隐、行选择，以及每页条数（10–500）与服务端游标分页。
 
 构建：`cd webui && npm run build`，产物 `webui/dist/` 由 `codexc webui` 托管并随 npm 包发布。
