@@ -16,6 +16,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
+import { useCurrency } from "@/hooks/currency-context"
 import {
   formatCost,
   formatTime,
@@ -25,6 +26,7 @@ import {
 import type { ThreadListItem } from "@/lib/types"
 
 export function ThreadTable({ threads }: { threads: ThreadListItem[] }) {
+  const { currency } = useCurrency()
   return (
     <Card>
       <CardHeader>
@@ -65,7 +67,7 @@ export function ThreadTable({ threads }: { threads: ThreadListItem[] }) {
                 <TableCell className="tabular-nums">{thread.requestCount}</TableCell>
                 <TableCell className="tabular-nums">{formatTokens(thread.inputTokens)}</TableCell>
                 <TableCell className="tabular-nums">{formatTokens(thread.outputTokens)}</TableCell>
-                <TableCell className="tabular-nums">{formatCost(thread)}</TableCell>
+                <TableCell className="tabular-nums">{formatCost(thread, currency)}</TableCell>
                 <TableCell className="tabular-nums">
                   {thread.compact === null ? "—" : `${thread.compact.requestCount} 次`}
                 </TableCell>

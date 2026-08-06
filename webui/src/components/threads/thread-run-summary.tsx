@@ -1,5 +1,6 @@
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { StatCard } from "@/components/metrics/stat-card"
+import { useCurrency } from "@/hooks/currency-context"
 import {
   formatAvgPer100M,
   formatCost,
@@ -14,6 +15,7 @@ export function ThreadRunSummary({
   latestTurn: TurnSummary | null
   threadAggregate: (Aggregate & { turnCount: number }) | null
 }) {
+  const { currency } = useCurrency()
   if (threadAggregate === null) {
     return (
       <Alert>
@@ -41,8 +43,8 @@ export function ThreadRunSummary({
       />
       <StatCard
         title="费用"
-        value={formatCost(threadAggregate)}
-        description={`均价 ${formatAvgPer100M(threadAggregate)}`}
+        value={formatCost(threadAggregate, currency)}
+        description={`均价 ${formatAvgPer100M(threadAggregate, currency)}`}
       />
     </div>
   )

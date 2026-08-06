@@ -11,16 +11,12 @@ import {
   WeeklyQuotaCard,
 } from "@/components/overview/overview-sections"
 import { useOverview } from "@/hooks/use-overview"
-import { usePersistentState } from "@/hooks/use-persistent-state"
-import type { DisplayCurrency } from "@/lib/format"
+import { useCurrency } from "@/hooks/currency-context"
 import type { RangeName } from "@/lib/types"
 
 export function OverviewPage() {
   const [range, setRange] = useState<RangeName>("24h")
-  const [currency, setCurrency] = usePersistentState<DisplayCurrency>(
-    "codex-webui:currency",
-    "usd",
-  )
+  const { currency, setCurrency } = useCurrency()
   const { data, loading, error } = useOverview(range)
 
   return (

@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/table"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
+import { useCurrency } from "@/hooks/currency-context"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { RangeSelector } from "@/components/metrics/range-selector"
 import { StatusBadge } from "@/components/metrics/status-badge"
@@ -37,6 +38,7 @@ import {
 import type { RangeName } from "@/lib/types"
 
 export function RequestsPage() {
+  const { currency } = useCurrency()
   const [range, setRange] = useState<RangeName>("24h")
   const [afterId, setAfterId] = useState<number | null>(null)
   const [history, setHistory] = useState<number[]>([])
@@ -106,7 +108,7 @@ export function RequestsPage() {
                     <TableCell className="tabular-nums">{formatTokens(record.outputTokens)}</TableCell>
                     <TableCell className="tabular-nums">{formatDuration(record.ttftMs)}</TableCell>
                     <TableCell className="tabular-nums">{formatDuration(record.requestDurationMs)}</TableCell>
-                    <TableCell className="tabular-nums">{formatCost(record)}</TableCell>
+                    <TableCell className="tabular-nums">{formatCost(record, currency)}</TableCell>
                   </TableRow>
                 ))}
                 {data.records.length === 0 ? (

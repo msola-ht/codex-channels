@@ -13,10 +13,14 @@ import {
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
+  SidebarFooter,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarRail,
 } from "@/components/ui/sidebar"
+import { SidebarFooterNav } from "@/components/layout/sidebar-footer"
+import { SidebarSwitcher } from "@/components/layout/sidebar-switcher"
 
 const menuItems = [
   { to: "/", label: "概览", icon: Gauge },
@@ -30,10 +34,7 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <div className="flex h-14 items-center gap-2 px-4">
-          <Gauge className="size-5" />
-          <span className="truncate text-sm font-medium">Codex WebUI</span>
-        </div>
+        <SidebarSwitcher />
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
@@ -62,6 +63,10 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter>
+        <SidebarFooterNav />
+      </SidebarFooter>
+      <SidebarRail />
     </Sidebar>
   )
 }

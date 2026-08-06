@@ -14,6 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
+import { useCurrency } from "@/hooks/currency-context"
 import {
   formatCost,
   formatSpeed,
@@ -23,6 +24,7 @@ import {
 import type { TurnSummary } from "@/lib/types"
 
 export function TurnTable({ turns }: { turns: TurnSummary[] }) {
+  const { currency } = useCurrency()
   return (
     <Card>
       <CardHeader>
@@ -58,7 +60,7 @@ export function TurnTable({ turns }: { turns: TurnSummary[] }) {
                 <TableCell className="tabular-nums">{formatTokens(turn.inputTokens)}</TableCell>
                 <TableCell className="tabular-nums">{formatTokens(turn.outputTokens)}</TableCell>
                 <TableCell className="tabular-nums">{formatSpeed(turn.outputTokensPerSecond)}</TableCell>
-                <TableCell className="tabular-nums">{formatCost(turn)}</TableCell>
+                <TableCell className="tabular-nums">{formatCost(turn, currency)}</TableCell>
                 <TableCell className="tabular-nums">
                   {turn.compact === null ? "—" : `${turn.compact.requestCount} 次`}
                 </TableCell>

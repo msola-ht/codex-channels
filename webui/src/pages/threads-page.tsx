@@ -8,7 +8,7 @@ export function ThreadsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">Threads</h1>
         <p className="text-sm text-muted-foreground">指标库中有记录的全部会话</p>
       </div>

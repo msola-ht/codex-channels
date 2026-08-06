@@ -17,15 +17,18 @@ npm run lint       # oxlint
 ```text
 src/
   lib/         API 客户端、共享类型转出与格式化
-  hooks/       数据 hook（useApi 统一 loading/error/refetch）
+  hooks/       数据 hook（useApi 统一 loading/error/refetch）与全局货币上下文
   components/  layout（Sidebar）、metrics（指标区块）
   pages/       概览、Threads、Thread 详情、请求、错误
   App.tsx      路由布局与令牌登录（AuthGate）
 ```
 
 令牌登录：服务端配置 `--token` 时，API 返回 401 会显示令牌输入页；令牌存入
-`sessionStorage`，也可用 `?token=` 查询参数打开页面自动登录。概览全局费用
-的人民币/美元选择存入 `localStorage`（`codex-webui:currency`）。
+`sessionStorage`，也可用 `?token=` 查询参数打开页面自动登录。全局费用的人民币/美元
+切换（概览页右上角）作用于所有页面，存入 `localStorage`（`codex-webui:currency`）。
+
+全局深色/浅色主题默认深色，右上角按钮切换，选择存入浏览器 `localStorage`
+（`next-themes`），刷新后保持。
 
 API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 `scripts/webui-api.ts` 的共享声明，服务端与前端使用同一份类型。

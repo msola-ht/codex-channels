@@ -27,8 +27,9 @@ codexc webui [--host 127.0.0.1|::1|0.0.0.0] [--port 端口] [--token 令牌]
 | 错误 | `#/errors` | `GET /api/v1/errors?range=` |
 
 所有接口只接受 GET；`range` 只支持 `24h`、`7d`、`30d`；请求分页 `limit` 1–500。
-概览全局费用支持人民币/美元切换，选择保存在浏览器 `localStorage`
-（键 `codex-webui:currency`）。
+全局费用支持人民币/美元切换（概览页右上角），Threads、Thread 详情、请求明细等所有
+金额显示统一跟随，选择保存在浏览器 `localStorage`（键 `codex-webui:currency`）。
+全局深色/浅色主题默认深色，顶部导航右侧按钮切换，选择持久化，刷新后保持。
 
 API 响应类型由 `scripts/webui-api.ts` 声明，前端从该共享类型导入，不再单独手写镜像。
 
@@ -83,7 +84,7 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
 ```text
 webui/src/
   lib/         API 客户端、共享类型转出与格式化（价格/Token/耗时）
-  hooks/       资源数据 hook（统一 loading/error/refetch）
+  hooks/       资源数据 hook（统一 loading/error/refetch）与全局货币上下文
   components/  Sidebar 布局与指标区块组件
   pages/       概览、Threads、Thread 详情、请求、错误
 ```
