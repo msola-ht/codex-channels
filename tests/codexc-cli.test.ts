@@ -77,6 +77,7 @@ describe("codexc CLI", () => {
       [["metrics", "reset", "-h"], "用法：codexc metrics reset"],
       [["metrics", "report", "-h"], "用法：codexc metrics report"],
       [["metrics", "export", "--help"], "用法：codexc metrics export"],
+      [["webui", "-h"], "用法：codexc webui"],
       [["version", "-h"], "用法：codexc version"],
       [["gateway", "-h"], "用法：codexc gateway"],
       [["service-app-server", "--help"], "用法：codexc service-app-server"],

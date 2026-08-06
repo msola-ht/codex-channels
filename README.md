@@ -188,6 +188,18 @@ codexc remote --profile deepseek resume
 `codexc remote` 连接 Gateway 使用的 App Server。直接运行 `codex` 或 `codex --profile deepseek`
 会启动独立 TUI，不共享 Gateway Thread。
 
+### 查看指标 WebUI
+
+```bash
+codexc webui                          # 启动本地只读指标 WebUI（默认 http://127.0.0.1:8787/）
+codexc webui --port 8788              # 指定端口
+codexc webui --host 0.0.0.0 --token 令牌  # 绑定非回环地址（必须提供访问令牌）
+```
+
+WebUI 只读指标数据库，提供概览、会话、请求明细与错误页面；默认只监听回环地址，
+绑定非回环地址时建议提供 `--token` 访问令牌，未提供时启动会打印公开警告。
+详细说明见 [`docs/webui.md`](docs/webui.md)。
+
 ### 管理后台服务
 
 ```bash

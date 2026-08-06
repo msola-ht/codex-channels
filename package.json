@@ -33,6 +33,7 @@
     "runtime/",
     "systemd/",
     "scripts/",
+    "webui/dist/",
     "config.example.toml",
     "index.md",
     "LICENSE",

@@ -67,6 +67,7 @@ const helpText = {
   rules <init|check>           生成或检查项目 Codex 命令预设
   state upgrade               显式升级 Gateway 状态数据库
   metrics <run|turns|threads|report|export|status|reset>   模型请求指标：本次运行、会话明细、会话归纳、汇报、导出、状态、重建
+  webui                        启动本地只读指标 WebUI（回环地址）
 
 后台服务：
   start                        前台启动 App Server 与 Gateway
@@ -174,6 +175,11 @@ Telegram 消息格式与配置路径查看。
   codexc metrics status   指标数据库状态
   codexc metrics upgrade  备份并升级指标库（需 Gateway 停止）
   codexc metrics reset    备份并重建指标库（需 Gateway 停止）`,
+  webui: `用法：codexc webui [--port 端口]
+
+启动本地只读指标 WebUI（默认 http://127.0.0.1:8787/）。
+只监听回环地址，不提供任何写接口；页面与 JSON API 均来自指标数据库。
+--port 指定监听端口，范围 1-65535。`,
   "metrics.status": `用法：codexc metrics status
 
 只读显示指标数据库路径、Schema 兼容性和记录数量。`,
@@ -297,6 +303,12 @@ try {
       break;
     case "metrics":
       await metrics(args);
+      break;
+    case "webui":
+      if (showRequestedHelp(args, "webui")) {
+        break;
+      }
+      runScript("scripts/webui-server.mjs", args);
       break;
     default:
       throw new Error(`未知命令：${command}\n运行 codexc --help 查看用法`);

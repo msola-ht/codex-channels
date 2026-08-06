@@ -326,7 +326,7 @@ export function readMetricsExport(environment = process.env, options = {}) {
   }
 }
 
-function readWeeklyQuota(store, nowMs) {
+export function readWeeklyQuota(store, nowMs) {
   const window = store.latestWeeklyQuota("openai", nowMs);
   if (window === null) return null;
   const estimate = store.weeklyQuotaEstimate({
@@ -1202,7 +1202,7 @@ function printTurnSummary(summary, aggregate = false, display = null) {
   printCompactSummary(summary.compact, display, summary.provider ?? null);
 }
 
-function metricsRange(name, nowMs) {
+export function metricsRange(name, nowMs) {
   const duration = {
     "24h": 24 * 60 * 60 * 1_000,
     "7d": 7 * 24 * 60 * 60 * 1_000,

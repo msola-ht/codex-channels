@@ -19,6 +19,10 @@
 - `metrics-export-format.mjs` / `metrics-export-format.d.mts`：指标导出的显示上下文（配置与
   汇率缓存）、币种换算、Token/费用/时间格式化与 Markdown/CSV 转义；币种模式解析与 Token
   格式复用 Application/Surface 导出，换算逻辑集中在 `convertCostToCny`。
+- `webui-server.mjs`：`codexc webui` 的只读 HTTP 服务。默认回环监听并托管 `webui/dist`
+  静态前端；提供 `/api/overview`、`/api/threads`、`/api/threads/:id/run|turns`、
+  `/api/requests`、`/api/errors` 只读 JSON 接口；绑定非回环地址必须提供 `--token`
+  访问令牌，API 以 `Authorization: Bearer` 校验并采用常数时间比较。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型渠道”“通讯渠道”和
   “系统设置”流程委派给具体适配器；模型渠道下区分 DeepSeek、第三方 API 与图片识别，系统设置
   提供全局调试模式入口。

@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { join } from "node:path";
 
 const checks = [
   {
@@ -8,6 +9,18 @@ const checks = [
   },
   { name: "类型与版本", command: "npm", args: ["run", "check"] },
   { name: "Lint", command: "npm", args: ["run", "lint"] },
+  {
+    name: "WebUI 构建",
+    command: "npm",
+    args: ["run", "build"],
+    cwd: "webui",
+  },
+  {
+    name: "WebUI Lint",
+    command: "npm",
+    args: ["run", "lint"],
+    cwd: "webui",
+  },
   { name: "文档与索引", command: "npm", args: ["run", "docs:check"] },
   { name: "完整测试", command: "npm", args: ["test"] },
   { name: "Shell 语法", command: "bash", args: [
@@ -33,7 +46,7 @@ if (process.platform === "darwin") {
 for (const check of checks) {
   console.log(`\n[提交检查] ${check.name}`);
   const result = spawnSync(check.command, check.args, {
-    cwd: process.cwd(),
+    cwd: check.cwd === undefined ? process.cwd() : join(process.cwd(), check.cwd),
     env: process.env,
     stdio: "inherit",
   });
