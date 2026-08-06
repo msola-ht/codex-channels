@@ -93,4 +93,10 @@ webui/src/
 请求明细表格基于 TanStack Table v9 组合 shadcn 基础组件实现，支持当前已加载页的
 搜索筛选、列排序、列显隐、行选择，以及每页条数（10–500）与服务端游标分页。
 
-构建：`cd webui && npm run build`，产物 `webui/dist/` 由 `codexc webui` 托管并随 npm 包发布。
+部署：仓库根目录 `npm run install:global` 会自动安装 webui 依赖并构建
+`webui/dist/`，产物随 npm 包发布，由 `codexc webui` 托管。
+
+开发：仓库根目录 `npm run webui:dev` 一键并行启动 `codexc webui`
+（API，默认 `127.0.0.1:8787`）与 Vite dev server（热更新，默认 `5173`，
+`/api` 代理到 `8787`）；也可以手动先运行 `codexc webui`，再
+`cd webui && npm run dev`。

@@ -358,6 +358,9 @@ npm run verify:commit
 npm run install:global
 ```
 
+该命令会同时构建 Gateway 与 WebUI 前端（`webui/dist`），之后
+`codexc webui` 可直接启动。
+
 完整项目文档见 [`index.md`](index.md)。
 
 ## 联系方式

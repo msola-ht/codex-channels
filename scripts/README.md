@@ -141,7 +141,10 @@
 
 - `clean-dist.mjs`：构建前清理 `dist/`。
 - `install-global-source.mjs`：显式准备干净源码并通过禁用隐式生命周期脚本的 npm 全局安装
-  完成开发入口链接，避免 npm 12 脚本策略跳过构建。
+  完成开发入口链接，避免 npm 12 脚本策略跳过构建，并自动执行 webui 子项目依赖安装与
+  前端构建（`webui/dist`）。
+- `webui-dev.mjs`：仓库根目录 `npm run webui:dev` 的一键开发入口，并行启动
+  `codexc webui`（API）与 Vite dev server，任一子进程退出时统一清理另一个进程。
 - `package-path.mjs`：提供不依赖第三方包的 npm 包根目录解析。
 - `prepare-package.mjs`：源码仓库安装或 npm 打包前按 lockfile 补齐缺失的本地构建依赖、
   启用仓库 Git hooks、构建源码，并验证已安装包包含运行入口。
