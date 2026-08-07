@@ -102,7 +102,8 @@ price_currency = "cny"
 每台设备可把本地脱敏指标增量上报到中心汇总。配置 `[metrics.sync]` 的 `endpoint`、
 `device_token` 与 `enabled = true` 后，Gateway 定时按水位上报请求记录和子代理标注，
 失败自动退避重试；中心侧 Worker 校验令牌并写入汇总库。详细配置与载荷见
-[`docs/metrics-sync.md`](docs/metrics-sync.md)。
+[`docs/metrics-sync.md`](docs/metrics-sync.md)，中心侧部署见
+[`cloudflare/README.md`](cloudflare/README.md)。
 
 ### 调试模式
 

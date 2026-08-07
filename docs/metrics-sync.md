@@ -6,7 +6,10 @@
 ## 当前状态
 
 - 本地设备侧（本仓库）：已实现增量读取、批量上报、水位持久化和失败退避。
-- 中心侧（Cloudflare Worker + D1 + Pages 前端）：尚未实现，属于后续独立任务。
+- 中心侧（Cloudflare Worker + D1 + Pages 前端）：已部署上线，包含 Worker
+  `codex-metrics-sync`、D1 数据库 `codex-metrics` 和 Pages 查看页
+  `codex-metrics-viewer`；仓库骨架与部署步骤见
+  [`cloudflare/README.md`](../cloudflare/README.md)。
 - 校验：`device_token` 只由中心 Worker 校验，不做前端登录页；本机只负责携带
   `Authorization: Bearer <device_token>` 上报。
 
