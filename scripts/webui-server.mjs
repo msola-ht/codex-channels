@@ -313,9 +313,12 @@ function handleThreadDetail(environment, rawThreadId, view, url, response) {
     if (view === "run") {
       const summary = store.threadSummary(threadId);
       const provider = summary.latestTurn?.provider ?? null;
+      const subagent = store.subagentThread(threadId);
       sendJson(response, 200, {
         generatedAt: new Date().toISOString(),
         threadId,
+        agentPath: subagent.agentPath,
+        parentThreadId: subagent.parentThreadId,
         latestTurn: enrichCosts(summary.latestTurn, display, provider),
         threadAggregate: enrichCosts(summary.threadAggregate, display, provider),
         latestDirectApi: enrichCosts(

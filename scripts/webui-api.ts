@@ -112,6 +112,7 @@ export interface ThreadListItem {
   model: string | null
   reasoningEffort: string | null
   agentPath: string | null
+  parentThreadId: string | null
   turnCount: number
   requestCount: number
   inputTokens: number
@@ -164,6 +165,8 @@ export interface TurnSummary {
 export interface ThreadRunResponse {
   generatedAt: string
   threadId: string
+  agentPath: string | null
+  parentThreadId: string | null
   latestTurn: TurnSummary | null
   threadAggregate: (Aggregate & { turnCount: number }) | null
   latestDirectApi: RequestRecord | null

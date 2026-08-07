@@ -271,6 +271,7 @@ export interface StoredThreadListItem {
   model: string | null;
   reasoningEffort: string | null;
   agentPath: string | null;
+  parentThreadId: string | null;
   turnCount: number;
   requestCount: number;
   inputTokens: number;

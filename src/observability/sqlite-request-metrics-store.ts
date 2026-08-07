@@ -962,7 +962,8 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         ${compactAggregateSql},
         MIN(request_started_at_ms) AS first_request_started_at_ms,
         MAX(model_request_metrics_enriched.recorded_at_ms) AS recorded_at_ms,
-        subagent.agent_path AS agent_path
+        subagent.agent_path AS agent_path,
+        subagent.parent_thread_id AS parent_thread_id
       FROM model_request_metrics_enriched
       LEFT JOIN subagent_threads AS subagent
         ON subagent.thread_id = model_request_metrics_enriched.thread_id
@@ -986,6 +987,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       first_request_started_at_ms: number;
       recorded_at_ms: number;
       agent_path: string | null;
+      parent_thread_id: string | null;
     }>;
     return rows.map((row) => ({
       threadId: row.thread_id,
@@ -993,6 +995,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       model: row.model ?? null,
       reasoningEffort: row.reasoning_effort ?? null,
       agentPath: row.agent_path ?? null,
+      parentThreadId: row.parent_thread_id ?? null,
       turnCount: row.turn_count,
       requestCount: row.request_count,
       inputTokens: row.input_tokens ?? 0,
@@ -1006,6 +1009,28 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       firstRequestStartedAtMs: row.first_request_started_at_ms,
       lastRecordedAtMs: row.recorded_at_ms,
     }));
+  }
+
+  subagentThread(threadId: string): {
+    agentPath: string | null;
+    parentThreadId: string | null;
+  } {
+    this.requireOpen();
+    if (!threadId.trim() || threadId.length > 128) {
+      throw new Error("Thread ID 无效");
+    }
+    const row = this.database.prepare(`
+      SELECT agent_path, parent_thread_id
+      FROM subagent_threads
+      WHERE thread_id = ?
+    `).get(threadId) as {
+      agent_path: string;
+      parent_thread_id: string;
+    } | undefined;
+    return {
+      agentPath: row?.agent_path ?? null,
+      parentThreadId: row?.parent_thread_id ?? null,
+    };
   }
 
   count(): number {

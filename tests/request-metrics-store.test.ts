@@ -391,6 +391,15 @@ describe("SqliteModelRequestMetricsStore", () => {
     expect(store.threadList()[0]).toMatchObject({
       threadId: "subagent-thread-1",
       agentPath: "/root/ds_probe",
+      parentThreadId: "parent-thread-1",
+    });
+    expect(store.subagentThread("subagent-thread-1")).toEqual({
+      agentPath: "/root/ds_probe",
+      parentThreadId: "parent-thread-1",
+    });
+    expect(store.subagentThread("unknown-thread")).toEqual({
+      agentPath: null,
+      parentThreadId: null,
     });
 
     expect(() => store.recordSubagentThread({
