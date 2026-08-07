@@ -55,6 +55,25 @@ DeepSeek Provider。
 Gateway 会在创建或追加 Turn 前检查模型能力：未启用外部图片识别时明确拒绝图片并提示切换到
 支持图片的模型；启用后则先走独立视觉代理，避免产生“DeepSeek 已经原生看图”的误解。
 
+## 网页搜索
+
+DeepSeek（当前 `deepseek-v4-flash` + Codex 0.146.0）支持网页搜索，且不依赖 OpenAI：
+
+- DeepSeek API 会向模型提供名为 `search` 的搜索工具；Codex 侧统一以 `web_search` item
+  回传（`query`、`action` 和结构化 `results`）。实测能返回带标题、URL、摘要和发布日期的
+  真实网页结果。
+- 该搜索是 DeepSeek API 自身的能力，不调用 OpenAI 的 `/v1/alpha/search`；本机是否存在
+  OpenAI 登录不影响 DeepSeek 搜索。Codex 的独立搜索扩展 `web.run` 不适用于 DeepSeek
+  （DeepSeek 没有 `/alpha/search` 端点，也未声明 `supports_standalone_web_search`）。
+- 网关链路无需额外配置：搜索请求包含在 `/responses` 模型请求内，经本地 Provider 代理
+  原样透传；会话事件里出现 `web_search` item 即表示模型真的调用了搜索。
+- 计费与统计：搜索是模型请求的一部分，按 DeepSeek API 用量计费，计入请求次数、Token
+  与费用统计；不消耗 OpenAI 额度。
+- 验证方式：直接让 DeepSeek 会话执行搜索任务，观察事件日志；或运行
+  `codex exec -p deepseek -C <工作目录> --skip-git-repo-check "请搜索……"` 直连测试。
+- 失效边界：若 DeepSeek API 对该模型关闭搜索、上游工具名称或响应结构变化，或网关代理
+  不再透传搜索工具，则搜索不可用；当前不支持把 DeepSeek 搜索路由到 OpenAI 官方搜索。
+
 ## App Server 与 Thread
 
 切换模式由同一个后台服务监管 OpenAI 主 App Server 和隔离的 DeepSeek App Server。服务入口读取并
