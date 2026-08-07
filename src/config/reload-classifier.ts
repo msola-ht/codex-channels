@@ -94,6 +94,11 @@ function restartRequiredReasons(
       JSON.stringify(current.vision),
       JSON.stringify(next.vision),
     ],
+    [
+      configChange("metrics.sync"),
+      JSON.stringify(current.metricsSync),
+      JSON.stringify(next.metricsSync),
+    ],
     [configChange("workspace.default"), current.defaultWorkspaceId, next.defaultWorkspaceId],
   ];
   for (const [change, before, after] of fields) {

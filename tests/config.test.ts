@@ -334,6 +334,7 @@ describe("Gateway config.toml", () => {
     delete document.display;
     delete document.storage;
     delete document.logging;
+    delete document.metrics;
     const telegram = document.telegram;
     const codex = document.codex;
     if (
@@ -382,6 +383,13 @@ describe("Gateway config.toml", () => {
       database_path: "data/gateway.sqlite3",
     });
     expect(persisted.logging).toEqual({ level: "info" });
+    expect(persisted.metrics).toEqual({
+      sync: {
+        enabled: false,
+        batch_size: 200,
+        interval_seconds: 60,
+      },
+    });
     expect(persisted.feishu).toBeUndefined();
     expect(persisted.weixin).toBeUndefined();
     expect(readFixture(fixture.configPath)).toContain(
@@ -576,6 +584,76 @@ describe("Gateway config.toml", () => {
     expect(() => loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
     })).toThrow(/绑定非回环地址时必须设置 token/u);
+  });
+
+  it("loads metrics sync defaults when the section is absent", () => {
+    const fixture = createFixture();
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.metricsSync).toEqual({
+      enabled: false,
+      batchSize: 200,
+      intervalSeconds: 60,
+    });
+  });
+
+  it("loads an enabled metrics sync section", () => {
+    const fixture = createFixture({
+      metrics: {
+        sync: {
+          enabled: true,
+          endpoint: "https://worker.example.com/api/ingest",
+          device_token: "device-token",
+          device_id: "node-a",
+          batch_size: 100,
+          interval_seconds: 120,
+        },
+      },
+    });
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.metricsSync).toEqual({
+      enabled: true,
+      endpoint: "https://worker.example.com/api/ingest",
+      deviceToken: "device-token",
+      deviceId: "node-a",
+      batchSize: 100,
+      intervalSeconds: 120,
+    });
+  });
+
+  it("rejects enabled metrics sync without endpoint or token", () => {
+    const noEndpoint = createFixture({
+      metrics: { sync: { enabled: true, device_token: "token" } },
+    });
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: noEndpoint.configPath,
+    })).toThrow(/metrics\.sync/u);
+
+    const noToken = createFixture({
+      metrics: { sync: { enabled: true, endpoint: "https://worker.example.com/api/ingest" } },
+    });
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: noToken.configPath,
+    })).toThrow(/metrics\.sync/u);
+  });
+
+  it("rejects non-https metrics sync endpoint", () => {
+    const fixture = createFixture({
+      metrics: {
+        sync: {
+          enabled: true,
+          endpoint: "http://worker.example.com/api/ingest",
+          device_token: "token",
+        },
+      },
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow(/HTTPS/u);
   });
 
   it("loads an explicitly enabled Feishu account", () => {

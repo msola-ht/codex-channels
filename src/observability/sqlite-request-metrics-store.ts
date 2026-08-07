@@ -28,6 +28,7 @@ import type {
   StoredThreadRequestMetricsAggregate,
   StoredThreadListItem,
   StoredThreadTurnSummary,
+  StoredSubagentThreadRecord,
   StoredTurnRequestMetricsSummary,
   StoredWeeklyQuotaEstimate,
   StoredWeeklyQuotaWindow,
@@ -1031,6 +1032,57 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       agentPath: row?.agent_path ?? null,
       parentThreadId: row?.parent_thread_id ?? null,
     };
+  }
+
+  requestRowsAfter(
+    afterLocalId: number,
+    limit: number,
+  ): StoredModelRequestMetric[] {
+    this.requireOpen();
+    if (!Number.isInteger(afterLocalId) || afterLocalId < 0) {
+      throw new Error("同步水位必须是大于等于 0 的整数");
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+      throw new Error("同步批量大小必须在 1 到 500 之间");
+    }
+    const rows = this.database.prepare(`
+      SELECT * FROM model_request_metrics_enriched
+      WHERE id > ?
+      ORDER BY id ASC
+      LIMIT ?
+    `).all(afterLocalId, limit) as unknown as MetricRow[];
+    return rows.map(toStoredMetric);
+  }
+
+  subagentThreadsAfter(
+    recordedAtMs: number,
+    afterThreadId?: string,
+  ): StoredSubagentThreadRecord[] {
+    this.requireOpen();
+    if (!Number.isInteger(recordedAtMs) || recordedAtMs < 0) {
+      throw new Error("子代理同步水位必须是大于等于 0 的整数");
+    }
+    if (afterThreadId !== undefined && afterThreadId.length === 0) {
+      throw new Error("子代理同步游标 Thread ID 不能为空");
+    }
+    const rows = this.database.prepare(`
+      SELECT thread_id, parent_thread_id, agent_path, recorded_at_ms
+      FROM subagent_threads
+      WHERE recorded_at_ms > ? OR (recorded_at_ms = ? AND thread_id > ?)
+      ORDER BY recorded_at_ms ASC, thread_id ASC
+      LIMIT 1000
+    `).all(recordedAtMs, recordedAtMs, afterThreadId ?? "") as unknown as Array<{
+      thread_id: string;
+      parent_thread_id: string;
+      agent_path: string;
+      recorded_at_ms: number;
+    }>;
+    return rows.map((row) => ({
+      threadId: row.thread_id,
+      parentThreadId: row.parent_thread_id,
+      agentPath: row.agent_path,
+      recordedAtMs: row.recorded_at_ms,
+    }));
   }
 
   count(): number {

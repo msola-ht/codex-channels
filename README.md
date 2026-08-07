@@ -97,6 +97,13 @@ price_currency = "cny"
   `open.er-api.com`，失败回退 ECB；拉取失败时继续使用最后一次成功缓存，缓存也不可用时才回退
   显示 USD）。换算按最近一次汇率近似，不按历史汇率回算。
 
+### 多设备指标同步
+
+每台设备可把本地脱敏指标增量上报到中心汇总。配置 `[metrics.sync]` 的 `endpoint`、
+`device_token` 与 `enabled = true` 后，Gateway 定时按水位上报请求记录和子代理标注，
+失败自动退避重试；中心侧 Worker 校验令牌并写入汇总库。详细配置与载荷见
+[`docs/metrics-sync.md`](docs/metrics-sync.md)。
+
 ### 调试模式
 
 在 `codexc setup` 中选择“系统设置 → 调试模式”可全局开启或关闭脱敏调试信息。开启后会把

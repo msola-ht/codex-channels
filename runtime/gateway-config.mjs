@@ -102,6 +102,43 @@ const webuiSchema = z.strictObject({
   }
 });
 
+const metricsSyncSchema = z.strictObject({
+  enabled: z.boolean().default(false),
+  endpoint: z.url().optional(),
+  device_token: z.string().min(1).optional(),
+  device_id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/u).optional(),
+  batch_size: z.number().int().min(1).max(500).default(200),
+  interval_seconds: z.number().int().min(10).max(86400).default(60),
+}).superRefine((value, context) => {
+  if (!value.enabled) {
+    return;
+  }
+  for (const field of ["endpoint", "device_token"]) {
+    if (value[field] === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: [field],
+        message: `metrics.sync 启用时必须配置 ${field}`,
+      });
+    }
+  }
+  if (value.endpoint !== undefined) {
+    let url;
+    try {
+      url = new URL(value.endpoint);
+    } catch {
+      return;
+    }
+    if (url.protocol !== "https:") {
+      context.addIssue({
+        code: "custom",
+        path: ["endpoint"],
+        message: "metrics.sync.endpoint 必须使用 HTTPS",
+      });
+    }
+  }
+});
+
 const gatewayDocumentSchema = z.strictObject({
   version: z.literal(1),
   default_workspace: z.string().trim().min(1),
@@ -149,6 +186,19 @@ const gatewayDocumentSchema = z.strictObject({
     level: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
   }).default({ level: "info" }),
   webui: webuiSchema.optional(),
+  metrics: z.strictObject({
+    sync: metricsSyncSchema.default({
+      enabled: false,
+      batch_size: 200,
+      interval_seconds: 60,
+    }),
+  }).default({
+    sync: {
+      enabled: false,
+      batch_size: 200,
+      interval_seconds: 60,
+    },
+  }),
   workspaces: z.array(workspaceSchema).min(1),
 });
 

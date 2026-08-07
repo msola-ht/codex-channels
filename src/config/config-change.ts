@@ -10,6 +10,7 @@ export type GlobalConfigChangeCode =
   | "display.plan-updates"
   | "api.providers"
   | "vision.provider"
+  | "metrics.sync"
   | "observability.log-level"
   | "workspace.default"
   | "workspace.registry";

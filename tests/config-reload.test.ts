@@ -114,6 +114,15 @@ describe("Gateway config reload", () => {
     ["display.operation-updates", "global", { operationUpdateDisplay: "compact" }],
     ["display.plan-updates", "global", { planUpdatesEnabled: true }],
     ["codex.default-model", "global", { codexModel: "other-model" }],
+    ["metrics.sync", "global", {
+      metricsSync: {
+        enabled: true,
+        endpoint: "https://worker.example.com/ingest",
+        deviceToken: "token",
+        batchSize: 200,
+        intervalSeconds: 60,
+      },
+    }],
   ] as const)("restarts for %s changes", (code, scope, change) => {
     expect(classifyConfigReload(config(), config(change))).toEqual({
       action: "restart",

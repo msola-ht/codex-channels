@@ -64,6 +64,16 @@ export interface GatewayConfigDocument {
     port: number;
     token?: string;
   };
+  metrics: {
+    sync: {
+      enabled: boolean;
+      endpoint?: string;
+      device_token?: string;
+      device_id?: string;
+      batch_size: number;
+      interval_seconds: number;
+    };
+  };
   workspaces: Array<{
     id: string;
     name: string;

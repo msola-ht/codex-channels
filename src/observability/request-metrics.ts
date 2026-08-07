@@ -284,6 +284,13 @@ export interface StoredThreadListItem {
   lastRecordedAtMs: number;
 }
 
+export interface StoredSubagentThreadRecord {
+  threadId: string;
+  parentThreadId: string;
+  agentPath: string;
+  recordedAtMs: number;
+}
+
 export type ModelRequestMetricsAggregationDimension =
   | "global"
   | "provider"
@@ -404,6 +411,11 @@ export interface ModelRequestMetricsStore {
     parentThreadId: string;
     agentPath: string;
   }): void;
+  requestRowsAfter(afterLocalId: number, limit: number): StoredModelRequestMetric[];
+  subagentThreadsAfter(
+    recordedAtMs: number,
+    afterThreadId?: string,
+  ): StoredSubagentThreadRecord[];
   recent(limit: number): StoredModelRequestMetric[];
   aggregate(
     query: ModelRequestMetricsAggregationQuery,

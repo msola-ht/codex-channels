@@ -74,6 +74,9 @@ describe("GatewayApplication startup cleanup", () => {
           start: () => undefined,
           close: () => undefined,
         },
+        metricsSync: {
+          close: async () => undefined,
+        },
         stopping: false,
         reconnecting: undefined,
         codex: {
@@ -192,6 +195,9 @@ describe("GatewayApplication startup cleanup", () => {
         start: () => undefined,
         close: () => undefined,
       },
+      metricsSync: {
+        close: async () => undefined,
+      },
       stopping: false,
       disconnectedProviders: new Set<string>(),
       codex: {
@@ -287,6 +293,9 @@ describe("GatewayApplication startup cleanup", () => {
       exchangeRate: {
         start: () => undefined,
         close: () => undefined,
+      },
+      metricsSync: {
+        close: async () => undefined,
       },
       stopping: false,
       disconnectedProviders: new Set<string>(),

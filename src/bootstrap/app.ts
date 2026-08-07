@@ -58,6 +58,7 @@ import {
 import { EventBus } from "../event-bus/index.js";
 import {
   BufferedModelRequestMetricsWriter,
+  MetricsSync,
   modelRequestMetricsDatabasePath,
   SqliteModelRequestMetricsStore,
 } from "../observability/index.js";
@@ -100,6 +101,7 @@ export class GatewayApplication {
   private readonly providerMetrics: ProviderMetricsComposition;
   private readonly modelPricing: RemoteModelPricingCatalog;
   private readonly exchangeRate: RemoteExchangeRate;
+  private readonly metricsSync: MetricsSync;
   private readonly bindings: SqliteBindingStore;
   private readonly workspaces: WorkspaceRegistry;
   private readonly workspacePermissions: TomlWorkspacePermissionWriter | undefined;
@@ -179,6 +181,17 @@ export class GatewayApplication {
       metricsStore,
       (error) => logger.warn({ err: error }, "模型请求指标后台写入失败"),
     );
+    this.metricsSync = new MetricsSync({
+      config: config.metricsSync ?? {
+        enabled: false,
+        batchSize: 200,
+        intervalSeconds: 60,
+      },
+      store: metricsStore,
+      statePath: join(dirname(config.stateDatabasePath), "metrics-sync-state.json"),
+      fetchImpl: createProxyFetch(config.networkProxy),
+      logger,
+    });
     const recordTurnErrorMetric = (
       provider: string,
       model: string | null,
@@ -759,6 +772,9 @@ export class GatewayApplication {
       if (priceDisplayNeedsExchangeRate(this.config)) {
         this.exchangeRate.start();
       }
+      if (this.config.metricsSync?.enabled) {
+        this.metricsSync.start();
+      }
       await this.providerMetrics.start();
       this.removeRpcNotification = this.codex.onNotification((notification) => {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
@@ -832,6 +848,7 @@ export class GatewayApplication {
     const failures: unknown[] = [];
     for (const [component, close] of [
       ["Surface", () => this.surfaceManager.stop()],
+      ["Metrics Sync", () => this.metricsSync.close()],
       ["Provider Proxy Metrics", () => this.providerMetrics.close()],
       ["Model Pricing", () => this.modelPricing.close()],
       ["Exchange Rate", () => this.exchangeRate.close()],

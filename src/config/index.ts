@@ -88,6 +88,14 @@ export interface GatewayConfig {
     port: number;
     token?: string;
   };
+  metricsSync?: {
+    enabled: boolean;
+    endpoint?: string;
+    deviceToken?: string;
+    deviceId?: string;
+    batchSize: number;
+    intervalSeconds: number;
+  };
 }
 
 export interface ConfiguredWorkspace {
@@ -274,6 +282,20 @@ function loadValidatedConfigDocument(
     approvalTimeoutMs: raw.approval.timeout_seconds * 1000,
     logLevel: raw.logging.level,
     ...(raw.webui ? { webui: raw.webui } : {}),
+    metricsSync: {
+      enabled: raw.metrics.sync.enabled,
+      ...(raw.metrics.sync.endpoint
+        ? { endpoint: raw.metrics.sync.endpoint }
+        : {}),
+      ...(raw.metrics.sync.device_token
+        ? { deviceToken: raw.metrics.sync.device_token }
+        : {}),
+      ...(raw.metrics.sync.device_id
+        ? { deviceId: raw.metrics.sync.device_id }
+        : {}),
+      batchSize: raw.metrics.sync.batch_size ?? 200,
+      intervalSeconds: raw.metrics.sync.interval_seconds ?? 60,
+    },
   };
 }
 

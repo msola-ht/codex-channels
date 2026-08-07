@@ -410,6 +410,98 @@ describe("SqliteModelRequestMetricsStore", () => {
     store.close();
   });
 
+  it("returns request rows incrementally after a local id", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    store.record(sample());
+    store.record({ ...sample(), inputTokens: 2_000, cachedInputTokens: 1_800 });
+    store.record({ ...sample(), inputTokens: 3_000, cachedInputTokens: 2_700 });
+
+    const first = store.requestRowsAfter(0, 2);
+    expect(first.map((row) => row.id)).toEqual([1, 2]);
+    expect(first[0]).toMatchObject({
+      provider: "deepseek",
+      inputTokens: 1_000,
+    });
+
+    const rest = store.requestRowsAfter(2, 2);
+    expect(rest.map((row) => row.id)).toEqual([3]);
+
+    expect(() => store.requestRowsAfter(-1, 10)).toThrow(/水位/u);
+    expect(() => store.requestRowsAfter(0, 0)).toThrow(/批量/u);
+    store.close();
+  });
+
+  it("returns subagent thread records incrementally after recorded time", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    store.recordSubagentThread({
+      agentThreadId: "subagent-1",
+      parentThreadId: "parent-1",
+      agentPath: "/root/probe-a",
+    });
+    store.recordSubagentThread({
+      agentThreadId: "subagent-2",
+      parentThreadId: "parent-1",
+      agentPath: "/root/probe-b",
+    });
+
+    const first = store.subagentThreadsAfter(0);
+    expect(first.map((row) => row.threadId).sort()).toEqual([
+      "subagent-1",
+      "subagent-2",
+    ]);
+    expect(first[0]).toMatchObject({
+      parentThreadId: "parent-1",
+      agentPath: "/root/probe-a",
+    });
+
+    const last = first[first.length - 1]!;
+    expect(store.subagentThreadsAfter(last.recordedAtMs, last.threadId)).toEqual([]);
+    expect(() => store.subagentThreadsAfter(-1)).toThrow(/水位/u);
+    store.close();
+  });
+
+  it("advances the subagent cursor within the same recorded millisecond", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    vi.setSystemTime(new Date(1_700_000_000_000));
+    store.recordSubagentThread({
+      agentThreadId: "subagent-a",
+      parentThreadId: "parent-1",
+      agentPath: "/root/probe-a",
+    });
+    vi.setSystemTime(new Date(1_700_000_000_001));
+    store.recordSubagentThread({
+      agentThreadId: "subagent-b",
+      parentThreadId: "parent-1",
+      agentPath: "/root/probe-b",
+    });
+
+    const first = store.subagentThreadsAfter(0);
+    expect(first.map((row) => row.threadId)).toEqual([
+      "subagent-a",
+      "subagent-b",
+    ]);
+
+    const remaining = store.subagentThreadsAfter(
+      first[0]!.recordedAtMs,
+      first[0]!.threadId,
+    );
+    expect(remaining.map((row) => row.threadId)).toEqual(["subagent-b"]);
+    expect(store.subagentThreadsAfter(
+      remaining[0]!.recordedAtMs,
+      remaining[0]!.threadId,
+    )).toEqual([]);
+    store.close();
+  });
+
   it("summarizes the latest Turn and latest direct API request for one Thread", () => {
     const directory = temporaryDirectory();
     const store = new SqliteModelRequestMetricsStore(
@@ -1199,6 +1291,8 @@ describe("BufferedModelRequestMetricsWriter", () => {
     const writer = new BufferedModelRequestMetricsWriter({
       record,
       recordSubagentThread: () => undefined,
+      requestRowsAfter: () => [],
+      subagentThreadsAfter: () => [],
       recent: () => [],
       aggregate: () => emptyMetricsReport(),
       errors: () => emptyErrorReport(),
@@ -1226,6 +1320,8 @@ describe("BufferedModelRequestMetricsWriter", () => {
     const writer = new BufferedModelRequestMetricsWriter({
       record,
       recordSubagentThread: () => undefined,
+      requestRowsAfter: () => [],
+      subagentThreadsAfter: () => [],
       recent: () => [],
       aggregate: () => emptyMetricsReport(),
       errors: () => emptyErrorReport(),
