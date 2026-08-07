@@ -116,6 +116,7 @@ export interface ThreadListItem {
   pricedRequestCount: number
   totalCostNanos: number | null
   compact: CompactSummary | null
+  firstRequestStartedAtMs: number
   lastRecordedAtMs: number
   totalCostCnyNanos?: number | null
 }
@@ -194,11 +195,29 @@ export interface RequestRecord {
   recordedAtMs: number
 }
 
+export type RequestSortKey =
+  | "time"
+  | "provider"
+  | "model"
+  | "operation"
+  | "status"
+  | "http"
+  | "error"
+  | "input"
+  | "output"
+  | "reasoningOutput"
+  | "speed"
+  | "ttft"
+  | "duration"
+  | "cost"
+
+export type RequestSortDirection = "asc" | "desc"
+
 export interface RequestsResponse {
   range: Range
   generatedAt: string
   records: RequestRecord[]
-  nextAfterId: number | null
+  nextOffset: number | null
 }
 
 export interface ErrorsResponse {

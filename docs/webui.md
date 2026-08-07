@@ -50,13 +50,16 @@ token = "你的_访问令牌"
 | 页面 | 路由 | API |
 | --- | --- | --- |
 | 概览 | `#/` | `GET /api/v1/overview?range=24h\|7d\|30d` |
-| Threads | `#/threads` | `GET /api/v1/threads` |
+| Threads | `#/threads` | `GET /api/v1/threads`（包含指标库首个请求开始时间） |
 | Thread 详情 | `#/threads/:id` | `GET /api/v1/threads/:id/run`、`GET /api/v1/threads/:id/turns` |
-| 请求明细 | `#/requests` | `GET /api/v1/requests?range=&afterId=&limit=` |
+| 请求明细 | `#/requests` | `GET /api/v1/requests?range=&offset=&limit=&sort=&direction=` |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=` |
 | 设置 | — | `GET /api/v1/settings`（当前全局币种与汇率） |
 
-所有接口只接受 GET；`range` 只支持 `24h`、`7d`、`30d`；请求分页 `limit` 1–500。
+所有接口只接受 GET；`range` 只支持 `24h`、`7d`、`30d`；请求分页 `offset` 从 0 开始，
+`limit` 为 1–500。请求排序 `direction` 支持 `asc|desc`，`sort` 支持 `time`、`provider`、
+`model`、`operation`、`status`、`http`、`error`、`input`、`output`、`reasoningOutput`、
+`speed`、`ttft`、`duration`、`cost`，默认按 `time desc` 查询整个时间范围后再分页。
 所有费用接口支持 `currency=cny|usd`（缺省跟随 `config.toml` 的 `display.price_currency`），
 服务端按请求币种统一换算，OpenAI 与 DeepSeek 不再混合显示。
 全局费用支持人民币/美元切换（顶部导航右侧，作用于所有页面），Threads、Thread 详情、
@@ -124,7 +127,9 @@ webui/src/
 ```
 
 请求明细表格基于 TanStack Table v9 组合 shadcn 基础组件实现，支持当前已加载页的
-搜索筛选、列排序、列显隐、行选择，以及每页条数（10–500）与服务端游标分页。
+搜索筛选、列显隐和行选择；列排序作用于所选时间范围的全部记录，再由服务端偏移分页，
+每页条数支持 10–500。Threads 的“开始时间”表示指标库中该 Thread 首个请求的开始时间，
+不等同于 App Server 中 Thread 对象的创建时间。
 
 部署：仓库根目录 `npm run install:global` 会自动安装 webui 依赖并构建
 `webui/dist/`，产物随 npm 包发布，由 `codexc webui` 托管。

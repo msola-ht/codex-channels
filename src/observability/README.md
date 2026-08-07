@@ -23,7 +23,7 @@
   严格 Schema v4、`0600` 文件权限，只接受当前
   Schema；首次初始化在单一事务内完成；使用 WAL 允许后续只读查询与采集并行，锁等待限制为
   10 ms；同一 Store 还提供不获取写锁、不初始化或清理 Schema 的显式只读模式，以及每页最多
-  500 条的稳定 ID 游标分页，供 CLI 报表、导出和后续本地 WebUI 复用。记录保留 30 天，以
+  500 条、按受控字段与方向排序的偏移分页，供 CLI 报表、导出和本地 WebUI 复用。记录保留 30 天，以
   100,000 条为清理目标，每 100 次写入分批清理，两个清理周期之间
   最多短暂超出 99 条。每条记录保存提供商、模型、思考等级、服务层级、状态与错误类型；路由层在
   Thread 启动、恢复、切换或模型设置更新时维护思考等级，指标采集按 Thread 关联补齐。
@@ -60,9 +60,10 @@
 参数、凭据或上游响应 ID。`provider-proxy` 生成 Codex Provider 脱敏样本，Bootstrap 的外部视觉
 适配器生成直接 API 脱敏样本，两者复用同一有界 Writer；已有 Thread 的视觉请求保存
 `thread_id`，因调用发生在 Codex Turn 之前而保持 `turn_id = NULL`。本模块不依赖代理、App Server
-协议、Surface 或业务 Storage。当前没有公开 HTTP API 或 WebUI；`codexc metrics` 的
+协议、Surface 或业务 Storage。本模块不直接暴露 HTTP API；`codexc metrics` 的
 `report`、`export`、`run`、`turns`、`threads` 只通过本地只读连接输出 Markdown、JSON 或 CSV；
-`report` 与 `export` 同时输出未过期的最后 OpenAI 周额度区间。Schema v3 可在停止 Gateway 后用
+`report` 与 `export` 同时输出未过期的最后 OpenAI 周额度区间；`codexc webui` 的服务端通过只读
+HTTP API 复用相同查询，不向本模块写入状态。Schema v3 可在停止 Gateway 后用
 `codexc metrics upgrade` 先创建 `0600` 备份再事务升级到 v4并保留原记录；未知版本继续失败关闭，
 使用 `codexc metrics reset` 归档后重建，不执行隐式迁移。
 指标采集始终开启，不受全局调试模式影响；`debug` / `trace` 只增加脱敏的关联诊断，写入失败仍按

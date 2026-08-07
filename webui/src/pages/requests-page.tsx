@@ -5,19 +5,23 @@ import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { RangeSelector } from "@/components/metrics/range-selector"
 import { RequestsTable } from "@/components/requests/requests-table"
 import { useRequests } from "@/hooks/use-requests"
+import { useRequestSorting } from "@/hooks/use-request-sorting"
 import type { RangeName } from "@/lib/types"
 
 export function RequestsPage() {
   const [range, setRange] = useState<RangeName>("24h")
-  const [afterId, setAfterId] = useState<number | null>(null)
-  const [history, setHistory] = useState<(number | null)[]>([])
+  const [offset, setOffset] = useState(0)
   const [pageSize, setPageSize] = useState(100)
   const [pageNumber, setPageNumber] = useState(1)
-  const { data, loading, error } = useRequests(range, afterId, pageSize)
-  const records = useMemo(
-    () => (data === null ? [] : [...data.records].reverse()),
-    [data],
+  const { sorting, setSorting, sort, direction } = useRequestSorting()
+  const { data, loading, error } = useRequests(
+    range,
+    offset,
+    pageSize,
+    sort,
+    direction,
   )
+  const records = useMemo(() => data?.records ?? [], [data])
 
   return (
     <div className="flex flex-col gap-6">
@@ -30,8 +34,7 @@ export function RequestsPage() {
           value={range}
           onChange={(next) => {
             setRange(next)
-            setAfterId(null)
-            setHistory([])
+            setOffset(0)
             setPageNumber(1)
           }}
         />
@@ -43,26 +46,29 @@ export function RequestsPage() {
         <RequestsTable
           records={records}
           pageNumber={pageNumber}
-          hasPrevious={history.length > 0}
-          hasNext={data.nextAfterId !== null}
+          hasPrevious={offset > 0}
+          hasNext={data.nextOffset !== null}
           onPrevious={() => {
-            if (history.length === 0) return
-            setAfterId(history[history.length - 1] ?? null)
-            setHistory(history.slice(0, -1))
+            if (offset === 0) return
+            setOffset(Math.max(0, offset - pageSize))
             setPageNumber((current) => current - 1)
           }}
           onNext={() => {
-            if (data.nextAfterId !== null) {
-              setHistory([...history, afterId])
-              setAfterId(data.nextAfterId)
+            if (data.nextOffset !== null) {
+              setOffset(data.nextOffset)
               setPageNumber((current) => current + 1)
             }
           }}
           pageSize={pageSize}
           onPageSizeChange={(next) => {
             setPageSize(next)
-            setAfterId(null)
-            setHistory([])
+            setOffset(0)
+            setPageNumber(1)
+          }}
+          sorting={sorting}
+          onSortingChange={(next) => {
+            setSorting(next)
+            setOffset(0)
             setPageNumber(1)
           }}
         />

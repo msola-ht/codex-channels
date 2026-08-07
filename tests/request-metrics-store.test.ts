@@ -1053,18 +1053,20 @@ describe("SqliteModelRequestMetricsStore", () => {
       startAtMs: 0,
       endAtMs: Date.now() + 1,
       limit: 1,
+      sortDirection: "asc",
     });
     expect(first.records).toHaveLength(1);
-    expect(first.nextAfterId).toBe(first.records[0]?.id);
+    expect(first.nextOffset).toBe(1);
     const second = reader.page({
       startAtMs: 0,
       endAtMs: Date.now() + 1,
-      ...(first.nextAfterId === null ? {} : { afterId: first.nextAfterId }),
+      offset: first.nextOffset ?? 0,
       limit: 1,
+      sortDirection: "asc",
     });
     expect(second.records).toHaveLength(1);
     expect(second.records[0]?.id).not.toBe(first.records[0]?.id);
-    expect(second.nextAfterId).toBeNull();
+    expect(second.nextOffset).toBeNull();
     expect(() => reader.record(sample())).toThrow(/只读/u);
     reader.close();
     writer.close();

@@ -20,6 +20,22 @@ import { SqliteModelRequestMetricsStore } from "../dist/observability/index.js";
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8787;
 const API_PREFIX = "/api/v1";
+const requestSortKeys = {
+  time: "recordedAtMs",
+  provider: "provider",
+  model: "model",
+  operation: "operation",
+  status: "status",
+  http: "httpStatus",
+  error: "error",
+  input: "inputTokens",
+  output: "outputTokens",
+  reasoningOutput: "reasoningOutputTokens",
+  speed: "outputTokensPerSecond",
+  ttft: "ttftMs",
+  duration: "requestDurationMs",
+  cost: "totalCostNanos",
+};
 const PACKAGE_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 
 const contentTypes = {
@@ -296,12 +312,20 @@ function handleThreadDetail(environment, rawThreadId, view, url, response) {
 }
 
 function handleRequests(environment, url, response) {
+  if (url.searchParams.has("afterId")) {
+    throw new ApiError(
+      400,
+      "unsupported_parameter",
+      "afterId 不受支持，请使用 offset",
+    );
+  }
   const range = parseRange(url);
   const display = displayForCurrency(
     loadDisplayContext(environment),
     parseCurrency(url),
   );
-  const afterId = parseBoundedInt(url.searchParams.get("afterId"), "afterId", 0, null, 0);
+  const offset = parseBoundedInt(url.searchParams.get("offset"), "offset", 0, null, 0);
+  const sort = parseRequestSort(url);
   const limit = parseBoundedInt(
     url.searchParams.get("limit"),
     "limit",
@@ -314,15 +338,17 @@ function handleRequests(environment, url, response) {
     const page = store.page({
       startAtMs: range.startAtMs,
       endAtMs: range.endAtMs,
-      afterId,
+      offset,
       limit,
+      sortKey: sort.key,
+      sortDirection: sort.direction,
     });
     sendJson(response, 200, {
       range,
       generatedAt: new Date(range.endAtMs).toISOString(),
       records: page.records.map((record) =>
         enrichCosts(record, display, record.provider)),
-      nextAfterId: page.nextAfterId,
+      nextOffset: page.nextOffset,
     });
   } finally {
     store.close();
@@ -387,6 +413,19 @@ function parseRange(url) {
   } catch {
     throw new ApiError(400, "invalid_range", "range 只支持 24h、7d 或 30d");
   }
+}
+
+function parseRequestSort(url) {
+  const sort = url.searchParams.get("sort") ?? "time";
+  const direction = url.searchParams.get("direction") ?? "desc";
+  const key = requestSortKeys[sort];
+  if (key === undefined) {
+    throw new ApiError(400, "invalid_sort", "sort 不支持该请求字段");
+  }
+  if (direction !== "asc" && direction !== "desc") {
+    throw new ApiError(400, "invalid_direction", "direction 只支持 asc 或 desc");
+  }
+  return { key, direction };
 }
 
 function parseBoundedInt(rawValue, name, minimum, maximum, fallback) {

@@ -3,15 +3,10 @@ import {
   columnFilteringFeature,
   columnVisibilityFeature,
   createFilteredRowModel,
-  createSortedRowModel,
   filterFn_includesString,
   globalFilteringFeature,
   rowSelectionFeature,
   rowSortingFeature,
-  sortFn_alphanumeric,
-  sortFn_basic,
-  sortFn_datetime,
-  sortFn_text,
   tableFeatures,
   useTable,
   type Column,
@@ -138,15 +133,8 @@ const features = tableFeatures({
   rowSelectionFeature,
   rowSortingFeature,
   filteredRowModel: createFilteredRowModel(),
-  sortedRowModel: createSortedRowModel(),
   filterFns: {
     includesString: filterFn_includesString,
-  },
-  sortFns: {
-    alphanumeric: sortFn_alphanumeric,
-    basic: sortFn_basic,
-    datetime: sortFn_datetime,
-    text: sortFn_text,
   },
 })
 
@@ -186,6 +174,8 @@ function RequestsTable({
   onNext,
   pageSize,
   onPageSizeChange,
+  sorting,
+  onSortingChange,
 }: {
   records: RequestRecord[]
   pageNumber: number
@@ -195,11 +185,11 @@ function RequestsTable({
   onNext: () => void
   pageSize: number
   onPageSizeChange: (pageSize: number) => void
+  sorting: SortingState
+  onSortingChange: (sorting: SortingState) => void
 }) {
   const { currency } = useCurrency()
 
-  const [sorting, setSorting] =
-    usePersistentTableState<SortingState>("sorting", [])
   const [columnVisibility, setColumnVisibility] =
     usePersistentTableState<ColumnVisibilityState>("columns", DEFAULT_VISIBLE_COLUMNS)
   const [globalFilter, setGlobalFilter] =
@@ -425,7 +415,11 @@ function RequestsTable({
       globalFilter,
       rowSelection,
     },
-    onSortingChange: setSorting,
+    manualSorting: true,
+    onSortingChange: (updater) => {
+      const next = typeof updater === "function" ? updater(sorting) : updater
+      onSortingChange(next.length === 0 ? [{ id: "time", desc: true }] : next.slice(-1))
+    },
     onColumnVisibilityChange: setColumnVisibility,
     onGlobalFilterChange: setGlobalFilter,
     onRowSelectionChange: setRowSelection,
@@ -433,14 +427,14 @@ function RequestsTable({
 
   const queryValue =
     (table.state.globalFilter as string | undefined) ?? ""
-  const filteredRows = table.getSortedRowModel().rows
+  const filteredRows = table.getFilteredRowModel().rows
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>记录</CardTitle>
         <CardDescription>
-          当前页 {records.length} 条 · 第 {pageNumber} 页
+          当前页 {records.length} 条 · 第 {pageNumber} 页 · 排序作用于全部记录
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
@@ -489,53 +483,48 @@ function RequestsTable({
           </DropdownMenu>
         </div>
 
-        <div
-          className="overflow-x-auto"
-          style={{ scrollbarWidth: "thin" }}
-        >
-          <Table>
-            <TableHeader>
-              {table.getHeaderGroups().map((headerGroup) => (
-                <TableRow key={headerGroup.id}>
-                  {headerGroup.headers.map((header) => (
-                    <TableHead key={header.id} colSpan={header.colSpan}>
-                      {header.isPlaceholder ? null : (
-                        <table.FlexRender header={header} />
-                      )}
-                    </TableHead>
+        <Table>
+          <TableHeader>
+            {table.getHeaderGroups().map((headerGroup) => (
+              <TableRow key={headerGroup.id}>
+                {headerGroup.headers.map((header) => (
+                  <TableHead key={header.id} colSpan={header.colSpan}>
+                    {header.isPlaceholder ? null : (
+                      <table.FlexRender header={header} />
+                    )}
+                  </TableHead>
+                ))}
+              </TableRow>
+            ))}
+          </TableHeader>
+          <TableBody>
+            {filteredRows.length > 0 ? (
+              filteredRows.map((row) => (
+                <TableRow
+                  key={row.id}
+                  data-state={row.getIsSelected() && "selected"}
+                >
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell key={cell.id}>
+                      <table.FlexRender cell={cell} />
+                    </TableCell>
                   ))}
                 </TableRow>
-              ))}
-            </TableHeader>
-            <TableBody>
-              {filteredRows.length > 0 ? (
-                filteredRows.map((row) => (
-                  <TableRow
-                    key={row.id}
-                    data-state={row.getIsSelected() && "selected"}
-                  >
-                    {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id}>
-                        <table.FlexRender cell={cell} />
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell
-                    colSpan={columns.length}
-                    className="h-16 text-center text-muted-foreground"
-                  >
-                    {records.length === 0
-                      ? "暂无记录"
-                      : "当前页无匹配记录"}
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell
+                  colSpan={columns.length}
+                  className="h-16 text-center text-muted-foreground"
+                >
+                  {records.length === 0
+                    ? "暂无记录"
+                    : "当前页无匹配记录"}
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
 
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <p className="text-sm text-muted-foreground">

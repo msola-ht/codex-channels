@@ -298,21 +298,23 @@ export function readMetricsExport(environment = process.env, options = {}) {
   );
   try {
     const records = [];
-    let afterId;
+    let offset = 0;
     do {
       const page = store.page({
         startAtMs: range.startAtMs,
         endAtMs: range.endAtMs,
-        ...(afterId === undefined ? {} : { afterId }),
+        offset,
         limit: 500,
+        sortKey: "recordedAtMs",
+        sortDirection: "asc",
       });
       records.push(
         ...(threadId === undefined
           ? page.records
           : page.records.filter((record) => record.threadId === threadId)),
       );
-      afterId = page.nextAfterId ?? undefined;
-    } while (afterId !== undefined);
+      offset = page.nextOffset ?? -1;
+    } while (offset >= 0);
     return {
       format: "codex-connect-request-metrics-export",
       version: 2,

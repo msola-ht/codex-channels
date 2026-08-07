@@ -275,6 +275,7 @@ export interface StoredThreadListItem {
   pricedRequestCount: number;
   totalCostNanos: number | null;
   compact: StoredCompactRequestMetricsSummary | null;
+  firstRequestStartedAtMs: number;
   lastRecordedAtMs: number;
 }
 
@@ -340,15 +341,33 @@ export interface ModelRequestMetricsErrorQuery {
 export interface ModelRequestMetricsPageQuery {
   startAtMs: number;
   endAtMs: number;
-  afterId?: number;
+  offset?: number;
   limit: number;
+  sortKey?: ModelRequestMetricsSortKey;
+  sortDirection?: "asc" | "desc";
 }
+
+export type ModelRequestMetricsSortKey =
+  | "recordedAtMs"
+  | "provider"
+  | "model"
+  | "operation"
+  | "status"
+  | "httpStatus"
+  | "error"
+  | "inputTokens"
+  | "outputTokens"
+  | "reasoningOutputTokens"
+  | "outputTokensPerSecond"
+  | "ttftMs"
+  | "requestDurationMs"
+  | "totalCostNanos";
 
 export interface StoredModelRequestMetricsPage {
   startAtMs: number;
   endAtMs: number;
   records: StoredModelRequestMetric[];
-  nextAfterId: number | null;
+  nextOffset: number | null;
 }
 
 export interface StoredModelRequestMetricsErrorGroup {

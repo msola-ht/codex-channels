@@ -40,6 +40,22 @@ const weeklyWindowMs = 7 * 24 * 60 * 60 * 1_000;
 const maximumRows = 100_000;
 const cleanupInterval = 100;
 const maximumAggregationGroups = 20;
+const pageSortSql = {
+  recordedAtMs: "recorded_at_ms",
+  provider: "provider",
+  model: "model",
+  operation: "operation",
+  status: "status",
+  httpStatus: "http_status",
+  error: "COALESCE(error_type, error_code, '')",
+  inputTokens: "input_tokens",
+  outputTokens: "output_tokens",
+  reasoningOutputTokens: "reasoning_output_tokens",
+  outputTokensPerSecond: "output_tokens_per_second",
+  ttftMs: "ttft_ms",
+  requestDurationMs: "request_duration_ms",
+  totalCostNanos: "total_cost_nanos",
+} as const;
 const observableCompletionSql = `
   status = 'completed'
   AND NOT (
@@ -458,23 +474,29 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     if (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > 500) {
       throw new Error("模型请求指标分页数量必须在 1 到 500 之间");
     }
-    const afterId = query.afterId ?? 0;
-    if (!Number.isSafeInteger(afterId) || afterId < 0) {
-      throw new Error("模型请求指标分页游标无效");
+    const offset = query.offset ?? 0;
+    if (!Number.isSafeInteger(offset) || offset < 0) {
+      throw new Error("模型请求指标分页偏移无效");
     }
+    const sortKey = query.sortKey ?? "recordedAtMs";
+    const sortDirection = query.sortDirection ?? "desc";
+    const sortExpression = pageSortSql[sortKey];
+    if (sortExpression === undefined || !["asc", "desc"].includes(sortDirection)) {
+      throw new Error("模型请求指标排序无效");
+    }
+    const order = sortDirection.toUpperCase();
     const rows = this.database.prepare(`
       SELECT *
       FROM model_request_metrics_enriched
       WHERE recorded_at_ms >= ?
         AND recorded_at_ms < ?
-        AND id > ?
-      ORDER BY id ASC
-      LIMIT ?
+      ORDER BY ${sortExpression} ${order}, id ${order}
+      LIMIT ? OFFSET ?
     `).all(
       query.startAtMs,
       query.endAtMs,
-      afterId,
       query.limit + 1,
+      offset,
     ) as unknown as MetricRow[];
     const hasMore = rows.length > query.limit;
     const pageRows = hasMore ? rows.slice(0, query.limit) : rows;
@@ -482,7 +504,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       startAtMs: query.startAtMs,
       endAtMs: query.endAtMs,
       records: pageRows.map(toStoredMetric),
-      nextAfterId: hasMore ? pageRows.at(-1)?.id ?? null : null,
+      nextOffset: hasMore ? offset + query.limit : null,
     };
   }
 
@@ -852,6 +874,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         SUM(CASE WHEN ${observableCompletionSql} THEN total_cost_nanos END)
           AS total_cost_nanos,
         ${compactAggregateSql},
+        MIN(request_started_at_ms) AS first_request_started_at_ms,
         MAX(recorded_at_ms) AS recorded_at_ms
       FROM model_request_metrics_enriched
       WHERE thread_id IS NOT NULL
@@ -871,6 +894,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       pricing_currency_count: number;
       priced_request_count: number;
       total_cost_nanos: number | null;
+      first_request_started_at_ms: number;
       recorded_at_ms: number;
     }>;
     return rows.map((row) => ({
@@ -888,6 +912,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       pricedRequestCount: row.priced_request_count,
       totalCostNanos: row.total_cost_nanos ?? null,
       compact: toStoredCompactSummary(row),
+      firstRequestStartedAtMs: row.first_request_started_at_ms,
       lastRecordedAtMs: row.recorded_at_ms,
     }));
   }

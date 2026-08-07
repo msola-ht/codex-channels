@@ -53,9 +53,9 @@ function Layout() {
   }, [currency, setCurrency])
 
   return (
-    <SidebarProvider>
+    <SidebarProvider className="min-h-0 min-w-0">
       <AppSidebar />
-      <SidebarInset>
+      <SidebarInset className="min-w-0">
         <header className="flex h-16 shrink-0 items-center gap-2 border-b px-3">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="h-5" />
@@ -77,7 +77,7 @@ function Layout() {
             <ModeToggle />
           </div>
         </header>
-        <main className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto p-3">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto p-3">
           <Routes>
             <Route path="/" element={<OverviewPage />} />
             <Route path="/threads" element={<ThreadsPage />} />
@@ -85,7 +85,7 @@ function Layout() {
             <Route path="/requests" element={<RequestsPage />} />
             <Route path="/errors" element={<ErrorsPage />} />
           </Routes>
-        </main>
+        </div>
       </SidebarInset>
     </SidebarProvider>
   )

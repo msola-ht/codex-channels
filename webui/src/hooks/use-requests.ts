@@ -1,16 +1,30 @@
 import { useApi } from "@/hooks/use-api"
 import { useCurrency } from "@/hooks/currency-context"
 import { fetchRequests } from "@/lib/api"
-import type { RangeName } from "@/lib/types"
+import type {
+  RangeName,
+  RequestSortDirection,
+  RequestSortKey,
+} from "@/lib/types"
 
 export function useRequests(
   range: RangeName,
-  afterId: number | null,
+  offset: number,
   limit: number,
+  sort: RequestSortKey,
+  direction: RequestSortDirection,
 ) {
   const { currency } = useCurrency()
   return useApi(
-    (signal) => fetchRequests(range, afterId, limit, currency, signal),
-    [range, afterId, limit, currency],
+    (signal) => fetchRequests(
+      range,
+      offset,
+      limit,
+      sort,
+      direction,
+      currency,
+      signal,
+    ),
+    [range, offset, limit, sort, direction, currency],
   )
 }

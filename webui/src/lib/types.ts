@@ -9,6 +9,8 @@ export type {
   Range,
   RangeName,
   RequestRecord,
+  RequestSortDirection,
+  RequestSortKey,
   RequestsResponse,
   SettingsResponse,
   ThreadListItem,

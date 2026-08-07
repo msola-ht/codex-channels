@@ -46,6 +46,7 @@ export function ThreadTable({ threads }: { threads: ThreadListItem[] }) {
               <TableHead>输出 Token</TableHead>
               <TableHead>费用</TableHead>
               <TableHead>压缩</TableHead>
+              <TableHead>开始时间</TableHead>
               <TableHead>最后记录</TableHead>
             </TableRow>
           </TableHeader>
@@ -72,13 +73,16 @@ export function ThreadTable({ threads }: { threads: ThreadListItem[] }) {
                   {thread.compact === null ? "—" : `${thread.compact.requestCount} 次`}
                 </TableCell>
                 <TableCell className="tabular-nums text-muted-foreground">
+                  {formatTime(thread.firstRequestStartedAtMs)}
+                </TableCell>
+                <TableCell className="tabular-nums text-muted-foreground">
                   {formatTime(thread.lastRecordedAtMs)}
                 </TableCell>
               </TableRow>
             ))}
             {threads.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="h-16 text-center text-muted-foreground">
+                <TableCell colSpan={11} className="h-16 text-center text-muted-foreground">
                   暂无会话记录
                 </TableCell>
               </TableRow>

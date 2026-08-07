@@ -13,6 +13,7 @@ export type {
   ModelRequestMetricsAggregationQuery,
   ModelRequestMetricsErrorQuery,
   ModelRequestMetricsPageQuery,
+  ModelRequestMetricsSortKey,
   ModelRequestMetricsStore,
   ModelRequestMetricsWriter,
   ModelBillingMode,

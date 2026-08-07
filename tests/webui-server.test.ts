@@ -180,6 +180,7 @@ describe("webui server", () => {
       threadId: "thread-1",
       turnId: "turn-1",
       operation: "compact",
+      requestStartedAtMs: 1_000,
     });
     recordSample(fixture.databasePath, {
       ...metricSample(),
@@ -187,6 +188,7 @@ describe("webui server", () => {
       pricing: pricingSnapshot(),
       threadId: "thread-1",
       turnId: "turn-1",
+      requestStartedAtMs: 2_000,
     });
     recordSample(fixture.databasePath, {
       ...metricSample(),
@@ -194,6 +196,7 @@ describe("webui server", () => {
       pricing: pricingSnapshot(),
       threadId: "thread-1",
       turnId: "turn-2",
+      requestStartedAtMs: 3_000,
       status: "failed",
       httpStatus: 429,
       errorType: "http_error",
@@ -207,6 +210,7 @@ describe("webui server", () => {
         threadId: string;
         turnCount: number;
         compact: { requestCount: number };
+        firstRequestStartedAtMs: number;
         totalCostCnyNanos: number | null;
       }>;
     };
@@ -215,6 +219,7 @@ describe("webui server", () => {
       threadId: "thread-1",
       turnCount: 2,
       compact: { requestCount: 1 },
+      firstRequestStartedAtMs: 1_000,
     });
     expect(threadsBody.threads[0]!.totalCostCnyNanos).toBeGreaterThan(0);
 
@@ -235,11 +240,12 @@ describe("webui server", () => {
     expect(turnsBody.turns).toHaveLength(2);
   });
 
-  it("pages request records and aggregates errors", async () => {
+  it("sorts request records across server pages and aggregates errors", async () => {
     const fixture = createFixture();
     for (let index = 0; index < 3; index += 1) {
       recordSample(fixture.databasePath, {
         ...metricSample(),
+        outputTokens: [100, 300, 200][index]!,
         status: index === 2 ? "failed" : "completed",
         httpStatus: index === 2 ? 500 : 200,
         errorType: index === 2 ? "http_error" : null,
@@ -247,24 +253,26 @@ describe("webui server", () => {
     }
     const { origin } = await startServer(fixture.environment);
 
-    const first = await fetch(`${origin}/api/v1/requests?range=24h&limit=2`);
+    const first = await fetch(
+      `${origin}/api/v1/requests?range=24h&limit=2&sort=output&direction=desc&offset=0`,
+    );
     expect(first.status).toBe(200);
     const firstBody = await first.json() as {
-      records: Array<{ id: number }>;
-      nextAfterId: number | null;
+      records: Array<{ outputTokens: number }>;
+      nextOffset: number | null;
     };
-    expect(firstBody.records).toHaveLength(2);
-    expect(firstBody.nextAfterId).toBe(firstBody.records[1]!.id);
+    expect(firstBody.records.map((record) => record.outputTokens)).toEqual([300, 200]);
+    expect(firstBody.nextOffset).toBe(2);
 
     const second = await fetch(
-      `${origin}/api/v1/requests?range=24h&limit=2&afterId=${firstBody.nextAfterId}`,
+      `${origin}/api/v1/requests?range=24h&limit=2&sort=output&direction=desc&offset=${firstBody.nextOffset}`,
     );
     const secondBody = await second.json() as {
-      records: Array<{ id: number }>;
-      nextAfterId: number | null;
+      records: Array<{ outputTokens: number }>;
+      nextOffset: number | null;
     };
-    expect(secondBody.records).toHaveLength(1);
-    expect(secondBody.nextAfterId).toBeNull();
+    expect(secondBody.records.map((record) => record.outputTokens)).toEqual([100]);
+    expect(secondBody.nextOffset).toBeNull();
 
     const errors = await fetch(`${origin}/api/v1/errors?range=7d`);
     expect(errors.status).toBe(200);
@@ -300,10 +308,28 @@ describe("webui server", () => {
       error: { code: "invalid_limit" },
     });
 
-    const invalidAfterId = await fetch(`${origin}/api/v1/requests?afterId=-1`);
-    expect(invalidAfterId.status).toBe(400);
-    expect(await invalidAfterId.json()).toMatchObject({
-      error: { code: "invalid_afterId" },
+    const invalidOffset = await fetch(`${origin}/api/v1/requests?offset=-1`);
+    expect(invalidOffset.status).toBe(400);
+    expect(await invalidOffset.json()).toMatchObject({
+      error: { code: "invalid_offset" },
+    });
+
+    const invalidSort = await fetch(`${origin}/api/v1/requests?sort=unknown`);
+    expect(invalidSort.status).toBe(400);
+    expect(await invalidSort.json()).toMatchObject({
+      error: { code: "invalid_sort" },
+    });
+
+    const invalidDirection = await fetch(`${origin}/api/v1/requests?direction=newest`);
+    expect(invalidDirection.status).toBe(400);
+    expect(await invalidDirection.json()).toMatchObject({
+      error: { code: "invalid_direction" },
+    });
+
+    const removedCursor = await fetch(`${origin}/api/v1/requests?afterId=1`);
+    expect(removedCursor.status).toBe(400);
+    expect(await removedCursor.json()).toMatchObject({
+      error: { code: "unsupported_parameter" },
     });
 
     const invalidThread = await fetch(

@@ -2,6 +2,8 @@ import type {
   ErrorsResponse,
   OverviewResponse,
   RangeName,
+  RequestSortDirection,
+  RequestSortKey,
   RequestsResponse,
   SettingsResponse,
   ThreadRunResponse,
@@ -135,14 +137,21 @@ export function fetchThreadTurns(
 
 export function fetchRequests(
   range: RangeName,
-  afterId: number | null,
+  offset: number,
   limit: number,
+  sort: RequestSortKey,
+  direction: RequestSortDirection,
   currency: DisplayCurrency | null,
   signal?: AbortSignal,
 ): Promise<RequestsResponse> {
-  const params = new URLSearchParams({ range, limit: String(limit) })
+  const params = new URLSearchParams({
+    range,
+    offset: String(offset),
+    limit: String(limit),
+    sort,
+    direction,
+  })
   if (currency !== null) params.set("currency", currency)
-  if (afterId !== null) params.set("afterId", String(afterId))
   return getJson<RequestsResponse>(`${API_PREFIX}/requests?${params.toString()}`, signal)
 }
 
