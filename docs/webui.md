@@ -122,14 +122,15 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
 webui/src/
   lib/         API 客户端、共享类型转出与格式化（价格/Token/耗时）
   hooks/       资源数据 hook（统一 loading/error/refetch）与全局货币上下文
-  components/  Sidebar 布局、指标区块与请求明细数据表格组件
+  components/  Sidebar 布局、指标区块与共享数据表格组件
   pages/       概览、Threads、Thread 详情、请求、错误
 ```
 
-请求明细表格基于 TanStack Table v9 组合 shadcn 基础组件实现，支持当前已加载页的
-搜索筛选、列显隐和行选择；列排序作用于所选时间范围的全部记录，再由服务端偏移分页，
-每页条数支持 10–500。Threads 的“开始时间”表示指标库中该 Thread 首个请求的开始时间，
-不等同于 App Server 中 Thread 对象的创建时间。
+请求明细与每轮明细共用共享数据表格组件（TanStack Table v9 组合 shadcn 基础组件），
+支持当前已加载页的搜索筛选、列显隐和行选择，表格在视口内内部滚动，输入、输出与
+费用列悬浮显示明细；请求明细的列排序作用于所选时间范围的全部记录，再由服务端偏移
+分页，每页条数支持 10–500。Threads 的“开始时间”表示指标库中该 Thread 首个请求的
+开始时间，不等同于 App Server 中 Thread 对象的创建时间。
 
 部署：仓库根目录 `npm run install:global` 会自动安装 webui 依赖并构建
 `webui/dist/`，产物随 npm 包发布，由 `codexc webui` 托管。

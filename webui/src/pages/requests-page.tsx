@@ -24,8 +24,8 @@ export function RequestsPage() {
   const records = useMemo(() => data?.records ?? [], [data])
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-6">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">请求明细</h1>
           <p className="text-sm text-muted-foreground">模型请求记录，按记录时间倒序分页</p>
@@ -40,7 +40,9 @@ export function RequestsPage() {
         />
       </div>
 
-      <ErrorBanner error={error} />
+      <div className="shrink-0">
+        <ErrorBanner error={error} />
+      </div>
 
       {loading || data === null ? <PageSkeleton rows={8} /> : (
         <RequestsTable
@@ -68,6 +70,10 @@ export function RequestsPage() {
           sorting={sorting}
           onSortingChange={(next) => {
             setSorting(next)
+            setOffset(0)
+            setPageNumber(1)
+          }}
+          onFilterChange={() => {
             setOffset(0)
             setPageNumber(1)
           }}

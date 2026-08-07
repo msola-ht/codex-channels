@@ -18,7 +18,7 @@ npm run lint       # oxlint
 src/
   lib/         API 客户端、共享类型转出与格式化
   hooks/       数据 hook（useApi 统一 loading/error/refetch）、请求排序状态与全局货币上下文
-  components/  layout（Sidebar）、metrics（指标区块）、requests（请求明细数据表格）
+  components/  layout（Sidebar）、metrics（指标区块与共享数据表格）、requests（请求明细数据表格）
   pages/       概览、Threads、Thread 详情、请求、错误
   App.tsx      路由布局与令牌登录（AuthGate）
 ```

@@ -23,31 +23,37 @@ export function ThreadDetailPage() {
   const loading = run.loading || run.data === null || turns.loading || turns.data === null
 
   return (
-    <div className="flex flex-col gap-6">
-      <Breadcrumb>
-        <BreadcrumbList>
-          <BreadcrumbItem>
-            <BreadcrumbLink asChild>
-              <Link to="/threads">Threads</Link>
-            </BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbPage className="max-w-56 truncate">{id}</BreadcrumbPage>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
+    <div className="flex min-h-0 flex-1 flex-col gap-6">
+      <div className="shrink-0">
+        <Breadcrumb>
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <BreadcrumbLink asChild>
+                <Link to="/threads">Threads</Link>
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbPage className="max-w-56 truncate">{id}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
+      </div>
 
-      <ErrorBanner error={error} />
+      <div className="shrink-0">
+        <ErrorBanner error={error} />
+      </div>
 
       {loading
         ? <PageSkeleton rows={4} />
         : (
           <>
-            <ThreadRunSummary
-              latestTurn={run.data!.latestTurn}
-              threadAggregate={run.data!.threadAggregate}
-            />
+            <div className="shrink-0">
+              <ThreadRunSummary
+                latestTurn={run.data!.latestTurn}
+                threadAggregate={run.data!.threadAggregate}
+              />
+            </div>
             <TurnTable turns={turns.data!.turns} />
           </>
         )}

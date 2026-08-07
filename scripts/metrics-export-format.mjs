@@ -80,8 +80,9 @@ export function enrichCosts(value, display, providerOverride = undefined) {
   const toCny = (nanos) => convertCostToCny(nanos, currency, provider, display);
   return {
     ...value,
+    pricingCurrency: currency,
     totalCostCnyNanos: toCny(value.totalCostNanos),
-    inputCostCnyNanos: toCny(value.inputCostNanos),
+    inputCostCnyNanos: toCny(value.inputCostNanos ?? value.uncachedInputCostNanos),
     cachedInputCostCnyNanos: toCny(value.cachedInputCostNanos),
     outputCostCnyNanos: toCny(value.outputCostNanos),
   };

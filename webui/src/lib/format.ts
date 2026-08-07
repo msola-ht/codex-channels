@@ -2,6 +2,7 @@ interface CostFields {
   totalCostNanos: number | null
   totalCostCnyNanos?: number | null
   pricingCurrency: string | null
+  pricing?: { currency?: string | null } | null
 }
 
 export type DisplayCurrency = "cny" | "usd"
@@ -17,26 +18,67 @@ export function formatCost(
   value: CostFields,
   currency?: DisplayCurrency | null,
 ): string {
+  const pricingCurrency = value.pricingCurrency ?? value.pricing?.currency ?? null
   if (currency === "cny" && value.totalCostCnyNanos !== null && value.totalCostCnyNanos !== undefined) {
     return money(value.totalCostCnyNanos, "CNY")
   }
-  if (currency === "usd" && value.totalCostNanos !== null && value.pricingCurrency === "USD") {
+  if (currency === "usd" && value.totalCostNanos !== null && pricingCurrency === "USD") {
     return money(value.totalCostNanos, "USD")
   }
   if (currency === "cny") {
     return value.totalCostCnyNanos !== null && value.totalCostCnyNanos !== undefined
       ? money(value.totalCostCnyNanos, "CNY")
-      : value.totalCostNanos === null || value.pricingCurrency === null
+      : value.totalCostNanos === null || pricingCurrency === null
         ? "—"
-        : money(value.totalCostNanos, value.pricingCurrency)
+        : money(value.totalCostNanos, pricingCurrency)
   }
   if (value.totalCostCnyNanos !== null && value.totalCostCnyNanos !== undefined) {
     return money(value.totalCostCnyNanos, "CNY")
   }
-  if (value.totalCostNanos === null || value.pricingCurrency === null) {
+  if (value.totalCostNanos === null || pricingCurrency === null) {
     return "—"
   }
-  return money(value.totalCostNanos, value.pricingCurrency)
+  return money(value.totalCostNanos, pricingCurrency)
+}
+
+export interface CostDetailFields {
+  pricingCurrency: string | null
+  pricing?: { currency?: string | null } | null
+  inputCostNanos?: number | null
+  uncachedInputCostNanos?: number | null
+  cachedInputCostNanos: number | null
+  outputCostNanos: number | null
+  inputCostCnyNanos?: number | null
+  cachedInputCostCnyNanos?: number | null
+  outputCostCnyNanos?: number | null
+}
+
+export function formatCostDetail(
+  value: CostDetailFields,
+  currency?: DisplayCurrency | null,
+): { label: string; value: string }[] {
+  const pricingCurrency = value.pricingCurrency ?? value.pricing?.currency ?? null
+  const pick = (
+    nanos: number | null | undefined,
+    cnyNanos: number | null | undefined,
+  ): string => {
+    if (nanos === null || nanos === undefined) return "—"
+    if (currency === "cny" && cnyNanos !== null && cnyNanos !== undefined) {
+      return money(cnyNanos, "CNY")
+    }
+    return pricingCurrency === null
+      ? "—"
+      : money(nanos, pricingCurrency)
+  }
+  const inputNanos = value.inputCostNanos ?? value.uncachedInputCostNanos ?? null
+  return [
+    { label: "输入", value: pick(inputNanos, value.inputCostCnyNanos) },
+    {
+      label: "缓存",
+      value: pick(value.cachedInputCostNanos, value.cachedInputCostCnyNanos),
+    },
+    { label: "输出", value: pick(value.outputCostNanos, value.outputCostCnyNanos) },
+  ]
 }
 
 export function formatAvgPer100M(

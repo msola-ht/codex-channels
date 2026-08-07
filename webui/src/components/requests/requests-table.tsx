@@ -1,72 +1,23 @@
 import * as React from "react"
-import {
-  columnFilteringFeature,
-  columnVisibilityFeature,
-  createFilteredRowModel,
-  filterFn_includesString,
-  globalFilteringFeature,
-  rowSelectionFeature,
-  rowSortingFeature,
-  tableFeatures,
-  useTable,
-  type Column,
-  type ColumnDef,
-  type ColumnVisibilityState,
-  type SortingState,
-} from "@tanstack/react-table"
-import {
-  ArrowDownIcon,
-  ArrowUpIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  ChevronsUpDownIcon,
-  Columns3Icon,
-  SearchIcon,
-} from "lucide-react"
+import type { SortingState } from "@tanstack/react-table"
 
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import { Checkbox } from "@/components/ui/checkbox"
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { StatusBadge } from "@/components/metrics/status-badge"
+import {
+  DataTable,
+  SortableHeader,
+  type DataTableColumn,
+} from "@/components/metrics/data-table"
 import { useCurrency } from "@/hooks/currency-context"
 import {
   formatCost,
+  formatCostDetail,
   formatDuration,
   formatSpeed,
   formatTime,
@@ -74,7 +25,7 @@ import {
 } from "@/lib/format"
 import type { RequestRecord } from "@/lib/types"
 
-const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 200, 500]
+const TABLE_STATE_KEY = "codex-webui:requests-table-state-v2"
 
 const COLUMN_LABELS: Record<string, string> = {
   time: "时间",
@@ -93,8 +44,6 @@ const COLUMN_LABELS: Record<string, string> = {
   cost: "费用",
 }
 
-const TABLE_STATE_KEY = "codex-webui:requests-table-state-v2"
-
 const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
   operation: false,
   http: false,
@@ -104,68 +53,9 @@ const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
   duration: false,
 }
 
-function usePersistentTableState<T>(
-  key: string,
-  fallback: T,
-): [T, React.Dispatch<React.SetStateAction<T>>] {
-  const [value, setValue] = React.useState<T>(() => {
-    try {
-      const raw = localStorage.getItem(`${TABLE_STATE_KEY}:${key}`)
-      return raw === null ? fallback : JSON.parse(raw) as T
-    } catch {
-      return fallback
-    }
-  })
-  React.useEffect(() => {
-    try {
-      localStorage.setItem(`${TABLE_STATE_KEY}:${key}`, JSON.stringify(value))
-    } catch {
-      // 存储不可用时仅在本次会话内保留
-    }
-  }, [key, value])
-  return [value, setValue]
-}
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 200, 500]
 
-const features = tableFeatures({
-  columnFilteringFeature,
-  columnVisibilityFeature,
-  globalFilteringFeature,
-  rowSelectionFeature,
-  rowSortingFeature,
-  filteredRowModel: createFilteredRowModel(),
-  filterFns: {
-    includesString: filterFn_includesString,
-  },
-})
-
-function SortableHeader({
-  column,
-  children,
-}: {
-  column: Column<typeof features, RequestRecord>
-  children: React.ReactNode
-}) {
-  const sorted = column.getIsSorted()
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="-ml-2 h-7 gap-1 px-1.5 text-muted-foreground hover:text-foreground"
-      onClick={column.getToggleSortingHandler()}
-    >
-      {children}
-      {sorted === "asc" ? (
-        <ArrowUpIcon data-icon="inline-end" />
-      ) : sorted === "desc" ? (
-        <ArrowDownIcon data-icon="inline-end" />
-      ) : (
-        <ChevronsUpDownIcon data-icon="inline-end" />
-      )}
-    </Button>
-  )
-}
-
-function RequestsTable({
+export function RequestsTable({
   records,
   pageNumber,
   hasPrevious,
@@ -176,6 +66,7 @@ function RequestsTable({
   onPageSizeChange,
   sorting,
   onSortingChange,
+  onFilterChange,
 }: {
   records: RequestRecord[]
   pageNumber: number
@@ -187,16 +78,11 @@ function RequestsTable({
   onPageSizeChange: (pageSize: number) => void
   sorting: SortingState
   onSortingChange: (sorting: SortingState) => void
+  onFilterChange?: () => void
 }) {
   const { currency } = useCurrency()
 
-  const [columnVisibility, setColumnVisibility] =
-    usePersistentTableState<ColumnVisibilityState>("columns", DEFAULT_VISIBLE_COLUMNS)
-  const [globalFilter, setGlobalFilter] =
-    usePersistentTableState<string>("filters", "")
-  const [rowSelection, setRowSelection] = React.useState({})
-
-  const columns = React.useMemo<ColumnDef<typeof features, RequestRecord>[]>(() => [
+  const columns = React.useMemo<DataTableColumn<RequestRecord>[]>(() => [
     {
       id: "select",
       header: ({ table }) => (
@@ -333,11 +219,32 @@ function RequestsTable({
       header: ({ column }) => (
         <SortableHeader column={column}>输出 Token</SortableHeader>
       ),
-      cell: ({ row }) => (
-        <span className="tabular-nums">
-          {formatTokens(row.original.outputTokens)}
-        </span>
-      ),
+      cell: ({ row }) => {
+        const record = row.original
+        const nonReasoning =
+          record.outputTokens === null || record.reasoningOutputTokens === null
+            ? null
+            : Math.max(0, record.outputTokens - record.reasoningOutputTokens)
+        return (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2">
+                {formatTokens(record.outputTokens)}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="right" align="start">
+              <ul className="flex flex-col gap-1">
+                <li className="whitespace-nowrap">
+                  推理输出：{formatTokens(record.reasoningOutputTokens)}
+                </li>
+                <li className="whitespace-nowrap">
+                  非推理输出：{nonReasoning === null ? "—" : formatTokens(nonReasoning)}
+                </li>
+              </ul>
+            </TooltipContent>
+          </Tooltip>
+        )
+      },
     },
     {
       id: "reasoningOutput",
@@ -397,192 +304,59 @@ function RequestsTable({
       header: ({ column }) => (
         <SortableHeader column={column}>费用</SortableHeader>
       ),
-      cell: ({ row }) => (
-        <span className="tabular-nums">
-          {formatCost(row.original, currency)}
-        </span>
-      ),
+      cell: ({ row }) => {
+        const record = row.original
+        return (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2">
+                {formatCost(record, currency)}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="right" align="start">
+              <ul className="flex flex-col gap-1">
+                {formatCostDetail(record, currency).map((item) => (
+                  <li key={item.label} className="whitespace-nowrap">
+                    {item.label}：{item.value}
+                  </li>
+                ))}
+              </ul>
+            </TooltipContent>
+          </Tooltip>
+        )
+      },
     },
   ], [currency])
 
-  const table = useTable({
-    features,
-    columns,
-    data: records,
-    state: {
-      sorting,
-      columnVisibility,
-      globalFilter,
-      rowSelection,
-    },
-    manualSorting: true,
-    onSortingChange: (updater) => {
-      const next = typeof updater === "function" ? updater(sorting) : updater
-      onSortingChange(next.length === 0 ? [{ id: "time", desc: true }] : next.slice(-1))
-    },
-    onColumnVisibilityChange: setColumnVisibility,
-    onGlobalFilterChange: setGlobalFilter,
-    onRowSelectionChange: setRowSelection,
-  })
-
-  const queryValue =
-    (table.state.globalFilter as string | undefined) ?? ""
-  const filteredRows = table.getFilteredRowModel().rows
-
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>记录</CardTitle>
-        <CardDescription>
-          当前页 {records.length} 条 · 第 {pageNumber} 页 · 排序作用于全部记录
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Label htmlFor="requests-search" className="sr-only">
-              筛选记录
-            </Label>
-            <Input
-              id="requests-search"
-              value={queryValue}
-              onChange={(event) =>
-                table.setGlobalFilter(event.target.value)
-              }
-              placeholder="筛选 Provider / 模型 / 状态 / 错误"
-              className="w-72"
-            />
-            <SearchIcon className="size-4 text-muted-foreground" />
-            <span className="text-xs text-muted-foreground">
-              仅当前已加载页
-            </span>
-          </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Columns3Icon data-icon="inline-start" />
-                列
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
-              <div className="grid grid-cols-2 gap-0.5">
-                {table
-                  .getAllLeafColumns()
-                  .filter((column) => column.getCanHide())
-                  .map((column) => (
-                    <DropdownMenuCheckboxItem
-                      key={column.id}
-                      checked={column.getIsVisible()}
-                      onCheckedChange={() => column.toggleVisibility()}
-                    >
-                      {COLUMN_LABELS[column.id] ?? column.id}
-                    </DropdownMenuCheckboxItem>
-                  ))}
-              </div>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-
-        <Table>
-          <TableHeader>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id} colSpan={header.colSpan}>
-                    {header.isPlaceholder ? null : (
-                      <table.FlexRender header={header} />
-                    )}
-                  </TableHead>
-                ))}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {filteredRows.length > 0 ? (
-              filteredRows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  data-state={row.getIsSelected() && "selected"}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      <table.FlexRender cell={cell} />
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell
-                  colSpan={columns.length}
-                  className="h-16 text-center text-muted-foreground"
-                >
-                  {records.length === 0
-                    ? "暂无记录"
-                    : "当前页无匹配记录"}
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <p className="text-sm text-muted-foreground">
-            已选 {table.getFilteredSelectedRowModel().rows.length} 条 · 匹配{" "}
-            {filteredRows.length} 条
-          </p>
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="flex items-center gap-2">
-              <Label htmlFor="requests-page-size" className="text-sm">
-                每页
-              </Label>
-              <Select
-                value={String(pageSize)}
-                onValueChange={(value) => onPageSizeChange(Number(value))}
-              >
-                <SelectTrigger id="requests-page-size" size="sm" className="w-20">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent side="top">
-                  <SelectGroup>
-                    {PAGE_SIZE_OPTIONS.map((size) => (
-                      <SelectItem key={size} value={String(size)}>
-                        {size}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              <span className="text-sm text-muted-foreground">条</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="icon"
-                disabled={!hasPrevious}
-                onClick={onPrevious}
-                aria-label="上一页"
-              >
-                <ChevronLeftIcon />
-              </Button>
-              <span className="min-w-14 text-center text-sm font-medium">
-                第 {pageNumber} 页
-              </span>
-              <Button
-                variant="outline"
-                size="icon"
-                disabled={!hasNext}
-                onClick={onNext}
-                aria-label="下一页"
-              >
-                <ChevronRightIcon />
-              </Button>
-            </div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+    <DataTable
+      title="记录"
+      description={({ pageNumber: currentPage }) =>
+        `当前页 ${records.length} 条 · 第 ${currentPage} 页 · 排序作用于全部记录`
+      }
+      columns={columns}
+      data={records}
+      storageKey={TABLE_STATE_KEY}
+      columnLabels={COLUMN_LABELS}
+      defaultColumnVisibility={DEFAULT_VISIBLE_COLUMNS}
+      filterPlaceholder="筛选 Provider / 模型 / 状态 / 错误"
+      filterHint="仅当前已加载页"
+      emptyText="暂无记录"
+      noMatchText="当前页无匹配记录"
+      pagination={{
+        mode: "server",
+        pageNumber,
+        pageSize,
+        hasPrevious,
+        hasNext,
+        onPrevious,
+        onNext,
+        onPageSizeChange,
+        pageSizeOptions: PAGE_SIZE_OPTIONS,
+        sorting,
+        onSortingChange,
+        onFilterChange,
+      }}
+    />
   )
 }
-
-export { RequestsTable }

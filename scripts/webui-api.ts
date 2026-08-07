@@ -142,7 +142,17 @@ export interface TurnSummary {
   pricingCurrency: string | null
   pricedRequestCount: number
   totalCostNanos: number | null
+  inputCostNanos: number | null
+  cachedInputCostNanos: number | null
+  outputCostNanos: number | null
+  uncachedInputPricePerMillionNanos: number | null
+  cachedInputPricePerMillionNanos: number | null
+  outputPricePerMillionNanos: number | null
+  hasMixedPrices: boolean
   totalCostCnyNanos?: number | null
+  inputCostCnyNanos?: number | null
+  cachedInputCostCnyNanos?: number | null
+  outputCostCnyNanos?: number | null
   compact: CompactSummary | null
   recordedAtMs?: number
 }
@@ -165,6 +175,15 @@ export interface RequestRecord {
   id: number
   provider: string | null
   model: string | null
+  pricing?: {
+    billingMode: string | null
+    currency: string | null
+    source: string | null
+    effectiveAtMs: number | null
+    uncachedInputPricePerMillionNanos: number | null
+    cachedInputPricePerMillionNanos: number | null
+    outputPricePerMillionNanos: number | null
+  } | null
   operation: "response" | "compact"
   status: string
   httpStatus: number | null
@@ -192,6 +211,12 @@ export interface RequestRecord {
   pricedRequestCount?: number
   totalCostNanos: number | null
   totalCostCnyNanos?: number | null
+  uncachedInputCostNanos: number | null
+  cachedInputCostNanos: number | null
+  outputCostNanos: number | null
+  inputCostCnyNanos?: number | null
+  cachedInputCostCnyNanos?: number | null
+  outputCostCnyNanos?: number | null
   recordedAtMs: number
 }
 
