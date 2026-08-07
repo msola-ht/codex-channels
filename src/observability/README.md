@@ -41,7 +41,7 @@
   从首个基线开始累计请求，只在后续快照正向增长时形成加权估算区间，重置或倒退会断开区间。
   WebSocket 上游握手失败、WS 内包装错误事件（如 429 usage_limit_reached）与 Gateway 层未发起
   上游请求的 Turn 级失败（如用量上限）也以 failed 记录落库：前者保留 HTTP 状态，后者无 Token
-  与费用；失败记录还保存受限长度的错误消息，供 WebUI 与导出展示详情。
+  与费用；失败记录还保存提供商、模型与受限长度的错误消息，供 WebUI 与导出展示详情。
   旧版 `/responses/compact` 与普通 `/responses` 上由受控元数据标记的 remote compaction v2
   都以 `operation = 'compact'` 独立分类，但其请求、Usage、费用与额度快照仍参与汇总、异常报告、
   会话指标和周额度估算；Turn、Thread 及时间范围聚合还从相同明细派生独立压缩摘要，不新增或

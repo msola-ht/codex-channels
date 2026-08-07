@@ -103,6 +103,7 @@ export type TurnErrorPhase = "start" | "steer" | "notification";
 
 export interface TurnErrorRecord {
   provider: string;
+  model: string | null;
   threadId: string | null;
   turnId: string | null;
   phase: TurnErrorPhase;

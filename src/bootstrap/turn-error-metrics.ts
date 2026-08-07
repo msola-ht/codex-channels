@@ -14,6 +14,7 @@ export interface TurnErrorMetricWriter {
 export function enqueueTurnErrorMetric(
   writer: TurnErrorMetricWriter,
   provider: string,
+  model: string | null,
   threadId: string | null,
   turnId: string | null,
   phase: Parameters<typeof turnErrorType>[1],
@@ -28,7 +29,7 @@ export function enqueueTurnErrorMetric(
     operation: "response",
     threadId,
     turnId,
-    model: null,
+    model,
     serviceTier: null,
     reasoningEffort: null,
     status: "failed",

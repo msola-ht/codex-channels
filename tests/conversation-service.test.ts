@@ -715,7 +715,7 @@ describe("ConversationService model selection", () => {
       } as unknown as SessionRouter,
       { activeTurn: () => undefined } as unknown as ConversationCore,
       {
-        status: () => ({ modelProvider: "openai" }),
+        status: () => ({ modelProvider: "openai", model: "gpt-5.6-sol" }),
         turnOverrides: () => ({}),
         markApplied: vi.fn(),
       } as unknown as ModelSelectionService,
@@ -735,6 +735,7 @@ describe("ConversationService model selection", () => {
       .rejects.toThrow("usage limit");
     expect(recorder.recordTurnError).toHaveBeenCalledWith(expect.objectContaining({
       provider: "openai",
+      model: "gpt-5.6-sol",
       phase: "start",
       threadId: "thread-1",
       turnId: null,

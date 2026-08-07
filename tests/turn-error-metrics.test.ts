@@ -9,6 +9,7 @@ describe("enqueueTurnErrorMetric", () => {
     enqueueTurnErrorMetric(
       { enqueue: (metric) => metrics.push(metric) },
       "openai",
+      "gpt-5.6-sol",
       "thread-1",
       "turn-1",
       "notification",
@@ -18,6 +19,7 @@ describe("enqueueTurnErrorMetric", () => {
     expect(metrics).toHaveLength(1);
     expect(metrics[0]).toMatchObject({
       provider: "openai",
+      model: "gpt-5.6-sol",
       threadId: "thread-1",
       turnId: "turn-1",
       operation: "response",
@@ -26,7 +28,6 @@ describe("enqueueTurnErrorMetric", () => {
       errorType: "usage_limit_reached",
       errorCode: null,
       errorMessage: "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage",
-      model: null,
       weeklyQuota: null,
     });
   });
@@ -38,6 +39,7 @@ describe("enqueueTurnErrorMetric", () => {
     enqueueTurnErrorMetric(
       { enqueue: (metric) => metrics.push(metric) },
       "deepseek",
+      "deepseek-v4-flash",
       "thread-2",
       null,
       "start",
@@ -46,6 +48,7 @@ describe("enqueueTurnErrorMetric", () => {
 
     expect(metrics[0]).toMatchObject({
       provider: "deepseek",
+      model: "deepseek-v4-flash",
       threadId: "thread-2",
       turnId: null,
       status: "failed",

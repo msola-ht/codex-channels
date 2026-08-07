@@ -599,7 +599,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         COUNT(*) OVER () AS total_group_count
       FROM ranked
       GROUP BY provider, model, normalized_status, http_status, normalized_error_type
-      ORDER BY request_count DESC, last_occurred_at_ms DESC,
+      ORDER BY last_occurred_at_ms DESC, request_count DESC,
         provider ASC, model ASC
       LIMIT ?
     `).all(

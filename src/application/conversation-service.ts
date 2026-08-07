@@ -1053,8 +1053,11 @@ export class ConversationService implements ConversationUseCases {
     turnId: string | null,
     error: unknown,
   ): void {
-    this.turnErrorRecorder?.recordTurnError({
-      provider: this.models.status(target).modelProvider ?? "openai",
+    if (!this.turnErrorRecorder) return;
+    const status = this.models.status(target);
+    this.turnErrorRecorder.recordTurnError({
+      provider: status.modelProvider ?? "openai",
+      model: status.model ?? null,
       threadId,
       turnId,
       phase,

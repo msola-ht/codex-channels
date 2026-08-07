@@ -171,6 +171,7 @@ export class GatewayApplication {
     );
     const recordTurnErrorMetric = (
       provider: string,
+      model: string | null,
       threadId: string | null,
       turnId: string | null,
       phase: "start" | "steer" | "notification",
@@ -180,6 +181,7 @@ export class GatewayApplication {
         enqueueTurnErrorMetric(
           metricsWriter,
           provider,
+          model,
           threadId,
           turnId,
           phase,
@@ -434,6 +436,7 @@ export class GatewayApplication {
           }
           recordTurnErrorMetric(
             record.provider,
+            record.model,
             record.threadId,
             record.turnId,
             record.phase,
@@ -544,10 +547,10 @@ export class GatewayApplication {
       if (coreEvent) {
         this.core.handle(coreEvent);
         if (coreEvent.type === "turn.error" && !coreEvent.willRetry) {
-          const provider = this.router.modelSettingsForThread(coreEvent.threadId)
-            ?.modelProvider ?? "openai";
+          const modelSettings = this.router.modelSettingsForThread(coreEvent.threadId);
           recordTurnErrorMetric(
-            provider,
+            modelSettings?.modelProvider ?? "openai",
+            modelSettings?.model ?? null,
             coreEvent.threadId,
             coreEvent.turnId,
             "notification",

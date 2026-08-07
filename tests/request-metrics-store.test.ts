@@ -654,6 +654,7 @@ describe("SqliteModelRequestMetricsStore", () => {
       reasoningOutputTokens: null,
       totalTokens: null,
     });
+    vi.setSystemTime(new Date(now.getTime() - 30 * 60 * 1_000));
     store.record({
       ...sample(),
       provider: "bltcy",
@@ -674,16 +675,6 @@ describe("SqliteModelRequestMetricsStore", () => {
     });
     expect(report.groups).toEqual([
       {
-        provider: "openai",
-        model: "gpt-5.6-sol",
-        status: "failed",
-        httpStatus: null,
-        errorType: "websocket_closed",
-        lastErrorMessage: null,
-        requestCount: 2,
-        lastOccurredAtMs: now.getTime() - 60 * 60 * 1_000,
-      },
-      {
         provider: "bltcy",
         model: "gpt-5.6-luna",
         status: "incomplete",
@@ -691,6 +682,16 @@ describe("SqliteModelRequestMetricsStore", () => {
         errorType: "rate_limit_error",
         lastErrorMessage: null,
         requestCount: 1,
+        lastOccurredAtMs: now.getTime() - 30 * 60 * 1_000,
+      },
+      {
+        provider: "openai",
+        model: "gpt-5.6-sol",
+        status: "failed",
+        httpStatus: null,
+        errorType: "websocket_closed",
+        lastErrorMessage: null,
+        requestCount: 2,
         lastOccurredAtMs: now.getTime() - 60 * 60 * 1_000,
       },
     ]);
