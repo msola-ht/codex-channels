@@ -122,22 +122,22 @@ const helpText = {
 
   install                      安装并启动整套后台服务
   uninstall                    卸载整套后台服务并保留用户数据
-  start [目标]                 启动 gateway、app-server 或 all
-  stop [目标]                  停止 gateway、app-server 或 all
+  start [目标]                 启动 gateway、app-server、webui 或 all
+  stop [目标]                  停止 gateway、app-server、webui 或 all
   reload                       通知 Gateway 重新读取配置
-  restart [目标]               重启 gateway、app-server 或 all
-  status [目标]                查看 gateway、app-server 或 all
+  restart [目标]               重启 gateway、app-server、webui 或 all
+  status [目标]                查看 gateway、app-server、webui 或 all
   logs [目标] [-f] [-n 行数]   查看后台日志
 
 目标默认值：start/stop/status 为 all，restart/logs 为 gateway。`,
   "service.install": "用法：codexc service install",
   "service.uninstall": "用法：codexc service uninstall",
-  "service.start": "用法：codexc service start [gateway|app-server|all]",
-  "service.stop": "用法：codexc service stop [gateway|app-server|all]",
+  "service.start": "用法：codexc service start [gateway|app-server|webui|all]",
+  "service.stop": "用法：codexc service stop [gateway|app-server|webui|all]",
   "service.reload": "用法：codexc service reload",
-  "service.restart": "用法：codexc service restart [gateway|app-server|all]",
-  "service.status": "用法：codexc service status [gateway|app-server|all]",
-  "service.logs": `用法：codexc service logs [gateway|app-server|all] [-f|--follow] [-n|--lines 行数]`,
+  "service.restart": "用法：codexc service restart [gateway|app-server|webui|all]",
+  "service.status": "用法：codexc service status [gateway|app-server|webui|all]",
+  "service.logs": `用法：codexc service logs [gateway|app-server|webui|all] [-f|--follow] [-n|--lines 行数]`,
   config: `用法：codexc config
 
 打开交互式配置与设置菜单：显示设置（操作详情、计划更新、按提供商的价格显示方式）、系统设置
@@ -1593,8 +1593,8 @@ function parseServiceArguments(action, args) {
 }
 
 function parseServiceTarget(value) {
-  if (!["gateway", "app-server", "all"].includes(value)) {
-    throw new Error(`服务目标必须是 gateway、app-server 或 all：${value}`);
+  if (!["gateway", "app-server", "webui", "all"].includes(value)) {
+    throw new Error(`服务目标必须是 gateway、app-server、webui 或 all：${value}`);
   }
   return value;
 }

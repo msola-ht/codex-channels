@@ -1,6 +1,8 @@
 export type {
   Aggregate,
   CompactSummary,
+  DeepseekBalance,
+  DeepseekBalanceResponse,
   ErrorGroup,
   ErrorsReport,
   ErrorsResponse,

@@ -38,6 +38,9 @@ export {
 export {
   ConversationService,
   resolveThread,
+  turnErrorCode,
+  turnErrorMessage,
+  turnErrorType,
   type ConversationInput,
   type ConversationQueryPort,
   type ConversationResumeResult,

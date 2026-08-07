@@ -208,13 +208,18 @@ codexc service status                 # 查看全部服务
 codexc service reload                 # 重新读取配置
 codexc service restart                # 只重启 Gateway
 codexc service restart all            # 重启 Gateway 和 App Server
+codexc service start webui            # 启动 WebUI 后台服务
 codexc service logs                   # 查看 Gateway 日志
 codexc service logs all -n 200        # 查看全部服务最近 200 行日志
 codexc service logs -f                # 持续跟踪 Gateway 日志
+codexc service logs webui             # 查看 WebUI 日志
 ```
 
 `start`、`stop` 和 `status` 默认操作全部服务；`restart` 和 `logs` 默认只操作 Gateway。运行
-`codexc service -h` 查看完整用法。
+`codexc service -h` 查看完整用法。WebUI 是独立后台服务，不并入 `all`：`codexc service install`
+只生成 WebUI 服务单元并启动 App Server 与 Gateway，需要时用 `codexc service start webui`
+单独启动。WebUI 服务读取 `[webui]` 配置，要求指标数据库为当前 Schema（升级后先执行
+`codexc metrics upgrade`）。
 
 服务重启建议从本机终端执行。聊天 Turn 内重启 Gateway 可能使过程或完成消息落在重连窗口；渠道内
 执行 `codexc service restart app-server` 或 `codexc service restart all` 会被拒绝。需要重启 App
@@ -253,7 +258,7 @@ Markdown 报表的费用按 `display.price_currency` 统一换算显示（人民
 币种、nanos 与 ISO 时间，并按相同配置附加 `*CostCnyNanos` 换算列（如 `totalCostCnyNanos`），
 便于统计和直接查看人民币金额；报告 CSV 同时保留 Provider、模型及异常分组，文本单元格会中和
 电子表格公式前缀。
-`metrics upgrade` 只支持把现有指标库从 Schema v3 显式升级到 v4 并保留旧记录；Gateway 已停止时
+`metrics upgrade` 支持把现有指标库从 Schema v3/v4/v5 显式升级到 v6 并保留旧记录；Gateway 已停止时
 可直接运行，不便单独管理服务时可加 `--restart-gateway` 自动完成停止、升级和重新启动。`metrics reset`
 用于归档并重建不支持的版本。两者都不修改会话状态库，Gateway 运行时会拒绝执行。
 

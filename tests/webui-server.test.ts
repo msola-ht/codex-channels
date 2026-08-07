@@ -57,9 +57,11 @@ describe("webui server", () => {
       totalTokens: null,
       weeklyQuota: {
         limitId: "codex",
+        planType: "plus",
         usedPercentMillionths: 12_500_000,
         resetsAt: Math.floor(Date.now() / 1_000) + 24 * 60 * 60,
       },
+      errorMessage: "You've hit your usage limit",
     });
     recordSample(fixture.databasePath, {
       ...metricSample(),
@@ -82,6 +84,7 @@ describe("webui server", () => {
       errors: { requestCount: number; unsuccessfulRequestCount: number };
       weeklyQuota: {
         limitId: string;
+        planType: string | null;
         usedPercent: number;
         resetsAt: number;
       };
@@ -99,9 +102,15 @@ describe("webui server", () => {
     expect(body.errors).toMatchObject({
       requestCount: 2,
       unsuccessfulRequestCount: 1,
+      groups: [{
+        status: "incomplete",
+        errorType: "response_not_observed",
+        lastErrorMessage: "You've hit your usage limit",
+      }],
     });
     expect(body.weeklyQuota).toMatchObject({
       limitId: "codex",
+      planType: "plus",
       usedPercent: 12.5,
     });
     expect(body.weeklyQuota.resetsAt).toBeGreaterThan(1_000_000_000_000);
@@ -169,6 +178,20 @@ describe("webui server", () => {
       usdToCny: 7.2,
       source: "cache",
     });
+  });
+
+  it("reports deepseek balance as unavailable without credentials", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(fixture.environment);
+
+    const response = await fetch(`${origin}/api/v1/deepseek-balance`);
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      available: boolean;
+      balances: unknown[];
+    };
+    expect(body.available).toBe(false);
+    expect(body.balances).toEqual([]);
   });
 
   it("lists threads and returns run and turns details", async () => {
@@ -499,6 +522,7 @@ function createFixture() {
   temporaryDirectories.push(home);
   const environment = {
     ...process.env,
+    CODEX_HOME: home,
     CODEX_CONNECT_HOME: home,
     CODEX_CONNECT_CONFIG_FILE: "",
   };
@@ -588,6 +612,7 @@ function metricSample(): ModelRequestMetricSample {
     httpStatus: 200,
     errorType: null,
     errorCode: null,
+    errorMessage: null,
     incompleteReason: null,
     inputTokens: 1_000,
     cachedInputTokens: 900,

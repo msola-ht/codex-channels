@@ -16,6 +16,7 @@ import {
   validateWebuiConfigDocument,
 } from "../runtime/gateway-config.mjs";
 import { SqliteModelRequestMetricsStore } from "../dist/observability/index.js";
+import { createDeepseekAccountAdapter } from "../dist/bootstrap/deepseek-account-adapter.js";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8787;
@@ -97,7 +98,7 @@ export function resolveWebuiSettings({
   };
 }
 
-function handleRequest(environment, staticDir, host, token, request, response) {
+async function handleRequest(environment, staticDir, host, token, request, response) {
   try {
     if (request.method !== "GET") {
       sendJson(response, 405, {
@@ -114,7 +115,7 @@ function handleRequest(environment, staticDir, host, token, request, response) {
         });
         return;
       }
-      routeApi(environment, url, response);
+      await routeApi(environment, url, response);
       return;
     }
     serveStatic(staticDir, url.pathname, response);
@@ -141,7 +142,7 @@ function authorized(request, token) {
     && timingSafeEqual(provided, expected);
 }
 
-function routeApi(environment, url, response) {
+async function routeApi(environment, url, response) {
   const path = url.pathname;
   if (!path.startsWith(`${API_PREFIX}/`)) {
     throw new ApiError(404, "not_found", `未知 API：${path}`);
@@ -178,7 +179,32 @@ function routeApi(environment, url, response) {
     handleSettings(environment, response);
     return;
   }
+  if (apiPath === "/deepseek-balance") {
+    await handleDeepseekBalance(environment, response);
+    return;
+  }
   throw new ApiError(404, "not_found", `未知 API：${apiPath}`);
+}
+
+async function handleDeepseekBalance(environment, response) {
+  const adapter = createDeepseekAccountAdapter({ environment });
+  try {
+    const usage = await adapter.accountUsage();
+    sendJson(response, 200, {
+      available: usage.available,
+      balances: usage.balances.map((balance) => ({
+        currency: balance.currency,
+        totalBalance: balance.totalBalance,
+        grantedBalance: balance.grantedBalance,
+        toppedUpBalance: balance.toppedUpBalance,
+      })),
+    });
+  } catch {
+    sendJson(response, 200, {
+      available: false,
+      balances: [],
+    });
+  }
 }
 
 function openMetricsStore(environment, endAtMs = Date.now()) {

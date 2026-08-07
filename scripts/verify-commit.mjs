@@ -39,6 +39,7 @@ if (process.platform === "darwin") {
       "-lint",
       "launchd/com.hegenai.codex-app-server.plist.template",
       "launchd/com.hegenai.codex-gateway.plist.template",
+      "launchd/com.hegenai.codex-webui.plist.template",
     ],
   });
 }

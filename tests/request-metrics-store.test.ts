@@ -77,7 +77,8 @@ describe("SqliteModelRequestMetricsStore", () => {
       .all() as Array<{ name: string }>;
     inspection.close();
     expect(columns.map((column) => column.name).filter((name) =>
-      /body|content|prompt|message|image|authorization/iu.test(name)
+      name !== "error_message"
+      && /body|content|prompt|message|image|authorization/iu.test(name)
     )).toEqual([]);
   });
 
@@ -171,6 +172,7 @@ describe("SqliteModelRequestMetricsStore", () => {
         limitId: "codex",
         usedPercentMillionths: 10_000_000,
         resetsAt,
+        planType: "plus",
       },
     });
     store.record({
@@ -183,6 +185,7 @@ describe("SqliteModelRequestMetricsStore", () => {
         limitId: "codex",
         usedPercentMillionths: 10_000_000,
         resetsAt,
+        planType: "plus",
       },
     });
     store.record({
@@ -196,6 +199,7 @@ describe("SqliteModelRequestMetricsStore", () => {
         limitId: "codex",
         usedPercentMillionths: 10_500_000,
         resetsAt,
+        planType: "plus",
       },
     });
 
@@ -232,7 +236,12 @@ describe("SqliteModelRequestMetricsStore", () => {
         inputTokens,
         outputTokens: 0,
         totalTokens: inputTokens,
-        weeklyQuota: { limitId: "codex", usedPercentMillionths, resetsAt },
+        weeklyQuota: {
+          limitId: "codex",
+          usedPercentMillionths,
+          resetsAt,
+          planType: null,
+        },
       });
     }
 
@@ -670,6 +679,7 @@ describe("SqliteModelRequestMetricsStore", () => {
         status: "failed",
         httpStatus: null,
         errorType: "websocket_closed",
+        lastErrorMessage: null,
         requestCount: 2,
         lastOccurredAtMs: now.getTime() - 60 * 60 * 1_000,
       },
@@ -679,6 +689,7 @@ describe("SqliteModelRequestMetricsStore", () => {
         status: "incomplete",
         httpStatus: 429,
         errorType: "rate_limit_error",
+        lastErrorMessage: null,
         requestCount: 1,
         lastOccurredAtMs: now.getTime() - 60 * 60 * 1_000,
       },
@@ -1167,6 +1178,7 @@ function sample(): ModelRequestMetricSample {
     httpStatus: 200,
     errorType: null,
     errorCode: null,
+    errorMessage: null,
     incompleteReason: null,
     inputTokens: 1_000,
     cachedInputTokens: 900,

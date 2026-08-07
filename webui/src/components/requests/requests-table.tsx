@@ -15,10 +15,12 @@ import {
   type DataTableColumn,
 } from "@/components/metrics/data-table"
 import { useCurrency } from "@/hooks/currency-context"
+import { useLanguage } from "@/hooks/language-context"
 import {
   formatCost,
   formatCostDetail,
   formatDuration,
+  formatErrorType,
   formatSpeed,
   formatTime,
   formatTokens,
@@ -81,6 +83,7 @@ export function RequestsTable({
   onFilterChange?: () => void
 }) {
   const { currency } = useCurrency()
+  const { language } = useLanguage()
 
   const columns = React.useMemo<DataTableColumn<RequestRecord>[]>(() => [
     {
@@ -168,11 +171,31 @@ export function RequestsTable({
       header: ({ column }) => (
         <SortableHeader column={column}>错误</SortableHeader>
       ),
-      cell: ({ row }) => (
-        <span className="max-w-40 truncate">
-          {row.original.errorType ?? row.original.errorCode ?? "—"}
-        </span>
-      ),
+      cell: ({ row }) => {
+        const label = formatErrorType(
+          row.original.errorType ?? row.original.errorCode ?? null,
+          language,
+        )
+        const message = row.original.errorMessage
+        if (!message) {
+          return <span className="max-w-40 truncate">{label}</span>
+        }
+        return (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="max-w-40 truncate">{label}</span>
+            </TooltipTrigger>
+            <TooltipContent side="right" className="max-w-md">
+              <p className="break-words text-xs">{message}</p>
+              {row.original.errorCode ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  错误码：{row.original.errorCode}
+                </p>
+              ) : null}
+            </TooltipContent>
+          </Tooltip>
+        )
+      },
     },
     {
       id: "input",
@@ -326,7 +349,7 @@ export function RequestsTable({
         )
       },
     },
-  ], [currency])
+  ], [currency, language])
 
   return (
     <DataTable

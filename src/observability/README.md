@@ -20,7 +20,7 @@
   时间戳与本机流式阶段时间戳
   写入独立 `request-metrics.sqlite3`。当前 Thread 的独立 API 查询只选择调用适配器产生的
   HTTP JSON 记录，不能把缺少 Turn 元数据的 Codex WebSocket/SSE 代理请求误分类。数据库使用
-  严格 Schema v4、`0600` 文件权限，只接受当前
+  严格 Schema v6、`0600` 文件权限，只接受当前
   Schema；首次初始化在单一事务内完成；使用 WAL 允许后续只读查询与采集并行，锁等待限制为
   10 ms；同一 Store 还提供不获取写锁、不初始化或清理 Schema 的显式只读模式，以及每页最多
   500 条、按受控字段与方向排序的偏移分页，供 CLI 报表、导出和本地 WebUI 复用。记录保留 30 天，以
@@ -36,8 +36,12 @@
   与每次对话明细查询由 `threadList()`、`threadTurnSummaries()` 提供，供 `codexc metrics threads`
   和 `turns` 导出复用。时间范围聚合统一覆盖 Codex Provider 与
   直接 API，可按全局、提供商或“提供商 + 模型”分组；固定支持最近 24 小时、7 天和 30 天，最多
-  返回请求量最高的 20 组。OpenAI 请求还可保存统计代理归一化的周额度定点快照；同一重置周期内
+  返回请求量最高的 20 组。OpenAI 请求还可保存统计代理归一化的周额度定点快照与账户套餐等级；
+  同一重置周期内
   从首个基线开始累计请求，只在后续快照正向增长时形成加权估算区间，重置或倒退会断开区间。
+  WebSocket 上游握手失败、WS 内包装错误事件（如 429 usage_limit_reached）与 Gateway 层未发起
+  上游请求的 Turn 级失败（如用量上限）也以 failed 记录落库：前者保留 HTTP 状态，后者无 Token
+  与费用；失败记录还保存受限长度的错误消息，供 WebUI 与导出展示详情。
   旧版 `/responses/compact` 与普通 `/responses` 上由受控元数据标记的 remote compaction v2
   都以 `operation = 'compact'` 独立分类，但其请求、Usage、费用与额度快照仍参与汇总、异常报告、
   会话指标和周额度估算；Turn、Thread 及时间范围聚合还从相同明细派生独立压缩摘要，不新增或

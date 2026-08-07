@@ -54,7 +54,11 @@ const values = {
 };
 const agentsDir = join(homedir(), "Library", "LaunchAgents");
 mkdirSync(agentsDir, { recursive: true });
-for (const name of ["com.hegenai.codex-app-server", "com.hegenai.codex-gateway"]) {
+for (const name of [
+  "com.hegenai.codex-app-server",
+  "com.hegenai.codex-gateway",
+  "com.hegenai.codex-webui",
+]) {
   const template = readFileSync(join(projectDir, "launchd", `${name}.plist.template`), "utf8");
   const rendered = Object.entries(values).reduce(
     (content, [key, value]) => content.replaceAll(`__${key}__`, xmlEscape(value)),

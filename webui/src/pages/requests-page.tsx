@@ -11,7 +11,7 @@ import type { RangeName } from "@/lib/types"
 export function RequestsPage() {
   const [range, setRange] = useState<RangeName>("24h")
   const [offset, setOffset] = useState(0)
-  const [pageSize, setPageSize] = useState(100)
+  const [pageSize, setPageSize] = useState(50)
   const [pageNumber, setPageNumber] = useState(1)
   const { sorting, setSorting, sort, direction } = useRequestSorting()
   const { data, loading, error } = useRequests(

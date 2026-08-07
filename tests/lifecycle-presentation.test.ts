@@ -10,8 +10,23 @@ import {
 import {
   formatReferenceCostTotal,
 } from "../src/surfaces/reference-cost-format.js";
+import { formatOpenAiErrorMessage } from "../src/surfaces/account-format.js";
 
 describe("shared Surface lifecycle presentation", () => {
+  it("translates known OpenAI usage-limit errors to Chinese", () => {
+    expect(formatOpenAiErrorMessage(
+      "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage "
+      + "to purchase more credits or try again at Aug 7th, 2026 11:37 PM.",
+    )).toBe(
+      "OpenAI 用量上限已到达；可访问 https://chatgpt.com/codex/settings/usage "
+      + "购买更多额度；可在 Aug 7th, 2026 11:37 PM 后重试。",
+    );
+    expect(formatOpenAiErrorMessage(
+      "Your workspace is out of credits. Add credits to continue.",
+    )).toBe("工作区额度已用完，请充值后继续。");
+    expect(formatOpenAiErrorMessage("未知错误：foo")).toBe("未知错误：foo");
+  });
+
   it("appends a CNY equivalent when USD costs are rendered with a rate", () => {
     expect(formatReferenceCostTotal({
       currency: "USD",

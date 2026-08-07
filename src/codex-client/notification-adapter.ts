@@ -352,11 +352,12 @@ function toItemEvent(
 
 function toTurnErrorEvent(value: unknown): ConversationInputEvent | undefined {
   const params = asRecord(value);
+  const threadId = nonEmptyString(params?.threadId);
   const turnId = nonEmptyString(params?.turnId);
   const error = parseTurnError(params?.error);
   const willRetry = params?.willRetry;
-  return turnId && error.valid && error.value && typeof willRetry === "boolean"
-    ? { type: "turn.error", turnId, message: error.value, willRetry }
+  return threadId && turnId && error.valid && error.value && typeof willRetry === "boolean"
+    ? { type: "turn.error", threadId, turnId, message: error.value, willRetry }
     : undefined;
 }
 

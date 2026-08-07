@@ -63,7 +63,11 @@ const configHome = process.env.XDG_CONFIG_HOME?.trim()
 const unitsDir = join(configHome, "systemd", "user");
 mkdirSync(unitsDir, { recursive: true, mode: 0o700 });
 
-for (const name of ["codex-connect-app-server", "codex-connect-gateway"]) {
+for (const name of [
+  "codex-connect-app-server",
+  "codex-connect-gateway",
+  "codex-connect-webui",
+]) {
   const template = readFileSync(join(packageDir, "systemd", `${name}.service.template`), "utf8");
   let rendered = Object.entries(argumentValues).reduce(
     (content, [key, value]) => content.replaceAll(`__${key}__`, systemdArgument(value)),

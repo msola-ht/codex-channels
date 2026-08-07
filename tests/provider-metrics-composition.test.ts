@@ -351,6 +351,7 @@ function metrics(): ProviderProxyMetrics {
     httpStatus: 200,
     errorType: null,
     errorCode: null,
+    errorMessage: null,
     incompleteReason: null,
     inputTokens: 100,
     cachedInputTokens: 80,

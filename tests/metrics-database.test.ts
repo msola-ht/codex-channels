@@ -78,6 +78,7 @@ describe("model request metrics database operations", () => {
       provider: "openai",
       weeklyQuota: {
         limitId: "codex",
+        planType: "plus",
         usedPercentMillionths: 12_500_000,
         resetsAt: Math.floor(Date.now() / 1_000) + 24 * 60 * 60,
       },
@@ -111,6 +112,7 @@ describe("model request metrics database operations", () => {
       version: 2,
       weeklyQuota: {
         limitId: "codex",
+        planType: "plus",
         usedPercent: 12.5,
         remainingPercent: 87.5,
         estimate: null,
@@ -136,6 +138,7 @@ describe("model request metrics database operations", () => {
       version: 2,
       weeklyQuota: {
         limitId: "codex",
+        planType: "plus",
         usedPercent: 12.5,
       },
     });
@@ -144,7 +147,7 @@ describe("model request metrics database operations", () => {
       status: "incomplete",
       incompleteReason: "response_not_observed",
     });
-    expect(JSON.stringify(exported)).not.toMatch(/prompt|message|authorization/iu);
+    expect(JSON.stringify(exported)).not.toMatch(/prompt|authorization|"message":/iu);
   });
 
   it("exports request quota snapshots separately from the current quota summary", () => {
@@ -156,6 +159,7 @@ describe("model request metrics database operations", () => {
       provider: "openai",
       weeklyQuota: {
         limitId: "codex",
+        planType: "plus",
         usedPercentMillionths: 12_500_000,
         resetsAt,
       },
@@ -192,6 +196,7 @@ describe("model request metrics database operations", () => {
       expect.objectContaining({
         type: "request",
         id: "1",
+        weeklyQuotaPlanType: "plus",
         weeklyQuotaUsedPercent: "12.5",
       }),
       expect.objectContaining({
@@ -202,6 +207,7 @@ describe("model request metrics database operations", () => {
       expect.objectContaining({
         type: "weekly_quota_summary",
         id: "",
+        weeklyQuotaPlanType: "plus",
         weeklyQuotaUsedPercent: "12.5",
       }),
     ]);
@@ -497,20 +503,22 @@ describe("model request metrics database operations", () => {
       changed: true,
       databasePath,
       previousSchemaVersion: 3,
-      schemaVersion: 4,
+      schemaVersion: 6,
     });
     expect(result.backupPath).toContain(".v3.2026-08-05T12-34-56-789Z.bak");
     expect(existsSync(result.backupPath!)).toBe(true);
     const database = new DatabaseSync(databasePath, { readOnly: true });
     expect(database.prepare(
       "SELECT value FROM schema_metadata WHERE name = 'schema_version'",
-    ).get()).toEqual({ value: 4 });
+    ).get()).toEqual({ value: 6 });
     const columns = database.prepare("PRAGMA table_info(model_request_metrics)")
       .all() as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
       "weekly_quota_limit_id",
       "weekly_used_percent_millionths",
       "weekly_resets_at",
+      "weekly_quota_plan_type",
+      "error_message",
     ]));
     expect(database.prepare("SELECT COUNT(*) AS count FROM model_request_metrics").get())
       .toEqual({ count: 2 });
@@ -518,6 +526,67 @@ describe("model request metrics database operations", () => {
     const store = new SqliteModelRequestMetricsStore(databasePath);
     expect(store.count()).toBe(2);
     store.close();
+  });
+
+  it("backs up and explicitly upgrades a v4 metrics database in place", () => {
+    const { environment, databasePath } = fixture();
+    createLegacyV4Database(databasePath, 2);
+
+    const result = upgradeMetricsDatabase(environment, {
+      gatewayRunning: () => false,
+      now: () => new Date("2026-08-05T12:34:56.789Z"),
+    });
+
+    expect(result).toMatchObject({
+      changed: true,
+      databasePath,
+      previousSchemaVersion: 4,
+      schemaVersion: 6,
+    });
+    expect(result.backupPath).toContain(".v4.2026-08-05T12-34-56-789Z.bak");
+    expect(existsSync(result.backupPath!)).toBe(true);
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    expect(database.prepare(
+      "SELECT value FROM schema_metadata WHERE name = 'schema_version'",
+    ).get()).toEqual({ value: 6 });
+    const columns = database.prepare("PRAGMA table_info(model_request_metrics)")
+      .all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
+      "weekly_quota_plan_type",
+      "error_message",
+    ]));
+    database.close();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    expect(store.count()).toBe(2);
+    store.close();
+  });
+
+  it("backs up and explicitly upgrades a v5 metrics database in place", () => {
+    const { environment, databasePath } = fixture();
+    createLegacyV5Database(databasePath, 2);
+
+    const result = upgradeMetricsDatabase(environment, {
+      gatewayRunning: () => false,
+      now: () => new Date("2026-08-05T12:34:56.789Z"),
+    });
+
+    expect(result).toMatchObject({
+      changed: true,
+      databasePath,
+      previousSchemaVersion: 5,
+      schemaVersion: 6,
+    });
+    expect(result.backupPath).toContain(".v5.2026-08-05T12-34-56-789Z.bak");
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    expect(database.prepare(
+      "SELECT value FROM schema_metadata WHERE name = 'schema_version'",
+    ).get()).toEqual({ value: 6 });
+    const columns = database.prepare("PRAGMA table_info(model_request_metrics)")
+      .all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
+      "error_message",
+    ]));
+    database.close();
   });
 
   it("refuses metrics upgrades while Gateway is running", () => {
@@ -536,7 +605,7 @@ describe("model request metrics database operations", () => {
 
     expect(() => upgradeMetricsDatabase(environment, {
       gatewayRunning: () => false,
-    })).toThrow(/仅支持 v3 升级到 v4/u);
+    })).toThrow(/仅支持 v3\/v4\/v5 升级到 v6/u);
     expect(inspectMetricsDatabase(environment).schemaVersion).toBe(2);
   });
 
@@ -768,6 +837,32 @@ function createLegacyV3Database(path: string, count: number) {
   database.close();
 }
 
+function createLegacyV4Database(path: string, count: number) {
+  createLegacyV3Database(path, count);
+  const database = new DatabaseSync(path);
+  database.exec(`
+    ALTER TABLE model_request_metrics ADD COLUMN weekly_quota_limit_id TEXT
+      CHECK (weekly_quota_limit_id IS NULL OR weekly_quota_limit_id = 'codex');
+    ALTER TABLE model_request_metrics ADD COLUMN weekly_used_percent_millionths INTEGER
+      CHECK (weekly_used_percent_millionths IS NULL
+        OR weekly_used_percent_millionths BETWEEN 0 AND 100000000);
+    ALTER TABLE model_request_metrics ADD COLUMN weekly_resets_at INTEGER
+      CHECK (weekly_resets_at IS NULL OR weekly_resets_at >= 0);
+    UPDATE schema_metadata SET value = 4 WHERE name = 'schema_version';
+  `);
+  database.close();
+}
+
+function createLegacyV5Database(path: string, count: number) {
+  createLegacyV4Database(path, count);
+  const database = new DatabaseSync(path);
+  database.exec(`
+    ALTER TABLE model_request_metrics ADD COLUMN weekly_quota_plan_type TEXT;
+    UPDATE schema_metadata SET value = 5 WHERE name = 'schema_version';
+  `);
+  database.close();
+}
+
 function metricSample(): ModelRequestMetricSample {
   return {
     provider: "deepseek",
@@ -784,6 +879,7 @@ function metricSample(): ModelRequestMetricSample {
     httpStatus: 200,
     errorType: null,
     errorCode: null,
+    errorMessage: null,
     incompleteReason: null,
     inputTokens: 1_000,
     cachedInputTokens: 900,

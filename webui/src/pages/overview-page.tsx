@@ -9,6 +9,7 @@ import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { RangeSelector } from "@/components/metrics/range-selector"
 import {
+  DeepseekBalanceCard,
   ErrorsSummary,
   GlobalCards,
   ProviderTable,
@@ -17,8 +18,7 @@ import {
 import { useOverview } from "@/hooks/use-overview"
 import { useCurrency } from "@/hooks/currency-context"
 import { useApi } from "@/hooks/use-api"
-import { fetchSettings } from "@/lib/api"
-import { formatTime } from "@/lib/format"
+import { fetchDeepseekBalance, fetchSettings } from "@/lib/api"
 import type { RangeName } from "@/lib/types"
 
 export function OverviewPage() {
@@ -26,6 +26,7 @@ export function OverviewPage() {
   const { currency } = useCurrency()
   const { data, loading, error } = useOverview(range)
   const settings = useApi((signal) => fetchSettings(signal), [])
+  const balance = useApi((signal) => fetchDeepseekBalance(signal), [])
 
   return (
     <div className="flex flex-col gap-6">
@@ -48,11 +49,6 @@ export function OverviewPage() {
             人民币显示需要汇率，当前没有可用汇率缓存，费用暂时按美元显示。
           </AlertDescription>
         </Alert>
-      ) : settings.data?.exchangeRate ? (
-        <p className="text-xs text-muted-foreground">
-          汇率：1 USD ≈ {settings.data.exchangeRate.usdToCny.toFixed(4)} CNY
-          （{settings.data.exchangeRate.source} · {formatTime(settings.data.exchangeRate.effectiveAtMs)}）
-        </p>
       ) : null}
 
       {loading || data === null
@@ -65,6 +61,11 @@ export function OverviewPage() {
               <WeeklyQuotaCard
                 usedPercent={data.weeklyQuota?.usedPercent ?? null}
                 resetsAt={data.weeklyQuota?.resetsAt ?? null}
+                planType={data.weeklyQuota?.planType ?? null}
+              />
+              <DeepseekBalanceCard
+                available={balance.data?.available ?? false}
+                balances={balance.data?.balances ?? []}
               />
               <ErrorsSummary errors={data.errors} />
             </div>

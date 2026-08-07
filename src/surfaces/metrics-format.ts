@@ -250,12 +250,19 @@ function formatMetricsErrorType(value: string | null): string {
   if (value === null) return "未提供错误类型";
   const knownLabel = {
     websocket_closed: "WebSocket 提前关闭",
+    upstream_handshake_error: "上游握手失败",
     upstream_request_error: "上游请求失败",
     upstream_response_error: "上游响应失败",
+    upstream_error: "上游错误",
     client_request_error: "客户端请求失败",
     client_disconnected: "客户端提前断开",
     response_not_observed: "响应结果未完整观测",
     http_error: "HTTP 请求失败",
+    usage_limit_reached: "OpenAI 用量上限",
+    rate_limit_reached: "速率限制",
+    turn_start_error: "Turn 启动失败",
+    turn_steer_error: "Turn 追加失败",
+    turn_notification_error: "Turn 运行失败",
   }[value];
   if (knownLabel !== undefined) return knownLabel;
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value)

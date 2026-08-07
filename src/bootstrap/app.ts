@@ -74,6 +74,7 @@ import { createDeepseekAccountAdapter } from "./deepseek-account-adapter.js";
 import { createProxyFetch } from "./proxy-fetch.js";
 import { createResponsesVisionAdapter } from "./responses-vision-adapter.js";
 import { ProviderMetricsComposition } from "./provider-metrics-composition.js";
+import { enqueueTurnErrorMetric } from "./turn-error-metrics.js";
 import { RemoteModelPricingCatalog } from "./model-pricing-catalog.js";
 import { RemoteExchangeRate } from "./exchange-rate.js";
 import { mergeSessionReferenceCost } from "./reference-cost-summary.js";
@@ -168,6 +169,26 @@ export class GatewayApplication {
       metricsStore,
       (error) => logger.warn({ err: error }, "模型请求指标后台写入失败"),
     );
+    const recordTurnErrorMetric = (
+      provider: string,
+      threadId: string | null,
+      turnId: string | null,
+      phase: "start" | "steer" | "notification",
+      error: unknown,
+    ): void => {
+      try {
+        enqueueTurnErrorMetric(
+          metricsWriter,
+          provider,
+          threadId,
+          turnId,
+          phase,
+          error,
+        );
+      } catch (cause) {
+        logger.warn({ err: cause }, "Turn 级错误指标写入失败");
+      }
+    };
     this.modelPricing = new RemoteModelPricingCatalog({
       cachePath: join(dirname(config.stateDatabasePath), "model-pricing.json"),
       fetchImpl: createProxyFetch(config.networkProxy),
@@ -395,6 +416,7 @@ export class GatewayApplication {
                 status: group.status,
                 httpStatus: group.httpStatus,
                 errorType: group.errorType,
+                lastErrorMessage: group.lastErrorMessage,
                 requestCount: group.requestCount,
                 lastOccurredAtMs: group.lastOccurredAtMs,
               };
@@ -404,6 +426,21 @@ export class GatewayApplication {
         },
       },
       this.workspacePermissions,
+      {
+        recordTurnError: (record) => {
+          const error = new Error(record.message ?? "Turn 错误");
+          if (record.errorCode !== null) {
+            (error as { code?: unknown }).code = record.errorCode;
+          }
+          recordTurnErrorMetric(
+            record.provider,
+            record.threadId,
+            record.turnId,
+            record.phase,
+            error,
+          );
+        },
+      },
     );
     this.output.subscribe("conversation-follow-up", async (event) => {
       if (event.type !== "turn.completed") {
@@ -506,6 +543,17 @@ export class GatewayApplication {
       const coreEvent = toConversationInputEvent(notification);
       if (coreEvent) {
         this.core.handle(coreEvent);
+        if (coreEvent.type === "turn.error" && !coreEvent.willRetry) {
+          const provider = this.router.modelSettingsForThread(coreEvent.threadId)
+            ?.modelProvider ?? "openai";
+          recordTurnErrorMetric(
+            provider,
+            coreEvent.threadId,
+            coreEvent.turnId,
+            "notification",
+            new Error(coreEvent.message),
+          );
+        }
       }
       const threadStateEvent = toThreadStateEvent(notification);
       if (threadStateEvent) {

@@ -45,6 +45,24 @@ token = "你的_访问令牌"
 - 只有直接绑定 `0.0.0.0`（局域网、公网、Tailscale IP 直连）才必须设置令牌；
 - 所有入口共用一个实例与端口，配置一次 `[webui]` 后各方式同时生效。
 
+## 后台服务
+
+WebUI 是独立后台服务，不并入 `all`：`codexc service install` 只生成服务单元并启动 App Server
+与 Gateway，需要后台常驻时单独管理：
+
+```bash
+codexc service start webui       # 启动
+codexc service status webui      # 查看状态
+codexc service logs webui -n 100 # 查看日志
+codexc service restart webui     # 重启
+codexc service stop webui        # 停止
+```
+
+- Linux 使用 systemd 用户服务 `codex-connect-webui.service`，macOS 使用 launchd
+  `com.hegenai.codex-webui`；`codexc service uninstall` 会一并卸载；
+- 服务单元固定运行 `codexc webui`，host/port/token 全部来自 `config.toml` 的 `[webui]` 段；
+- 指标库升级到新 Schema 后先运行 `codexc metrics upgrade` 再启动，否则 API 会因版本不兼容报错。
+
 ## 页面与 API
 
 | 页面 | 路由 | API |
@@ -55,16 +73,23 @@ token = "你的_访问令牌"
 | 请求明细 | `#/requests` | `GET /api/v1/requests?range=&offset=&limit=&sort=&direction=` |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=` |
 | 设置 | — | `GET /api/v1/settings`（当前全局币种与汇率） |
+| DS 余额 | — | `GET /api/v1/deepseek-balance`（DeepSeek 官方账户余额；未配置凭据或查询失败时返回不可用） |
 
 所有接口只接受 GET；`range` 只支持 `24h`、`7d`、`30d`；请求分页 `offset` 从 0 开始，
 `limit` 为 1–500。请求排序 `direction` 支持 `asc|desc`，`sort` 支持 `time`、`provider`、
 `model`、`operation`、`status`、`http`、`error`、`input`、`output`、`reasoningOutput`、
 `speed`、`ttft`、`duration`、`cost`，默认按 `time desc` 查询整个时间范围后再分页。
+错误统计同时包含代理观测到的失败模型请求和未发起上游请求的 Turn 级失败（例如 OpenAI 用量上限），
+后者显示为无 Token/费用的 failed 记录；失败记录保存受限长度的错误消息，请求明细悬浮和错误页
+“最近错误”列可查看详情。
 所有费用接口支持 `currency=cny|usd`（缺省跟随 `config.toml` 的 `display.price_currency`），
 服务端按请求币种统一换算，OpenAI 与 DeepSeek 不再混合显示。
 全局费用支持人民币/美元切换（顶部导航右侧，作用于所有页面），Threads、Thread 详情、
 请求明细等所有金额显示统一跟随，选择保存在浏览器 `localStorage`
 （键 `codex-webui:currency`）；未选择时跟随服务端配置。
+全局显示语言支持中文/English 切换（顶部导航右侧，默认中文，选择保存在浏览器
+`localStorage` 键 `codex-webui:language`），错误类型等英文原始值会按语言显示；聊天卡片中的
+已知 OpenAI 用量上限/额度类错误消息默认以中文展示。
 全局深色/浅色主题默认深色，顶部导航右侧按钮切换，选择持久化，刷新后保持。
 
 API 响应类型由 `scripts/webui-api.ts` 声明，前端从该共享类型导入，不再单独手写镜像。

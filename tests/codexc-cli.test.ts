@@ -1252,6 +1252,51 @@ describe("codexc CLI", () => {
     );
   });
 
+  linuxIt("manages WebUI as an independent service target outside all", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-service-webui-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    const systemctlLog = join(root, "systemctl.log");
+    const fakeSystemctl = join(root, "systemctl");
+    mkdirSync(workspace);
+    writeFileSync(
+      fakeSystemctl,
+      "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SYSTEMCTL_LOG\"\n",
+    );
+    chmodSync(fakeSystemctl, 0o755);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      SYSTEMCTL_BINARY: fakeSystemctl,
+      SYSTEMCTL_LOG: systemctlLog,
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+
+    const start = spawnSync(
+      process.execPath,
+      [cli, "service", "start", "webui"],
+      { env: environment, encoding: "utf8" },
+    );
+    expect(start.status).toBe(0);
+    expect(readFileSync(systemctlLog, "utf8")).toContain(
+      "--user start codex-connect-webui.service",
+    );
+
+    writeFileSync(systemctlLog, "");
+    const all = spawnSync(
+      process.execPath,
+      [cli, "service", "start", "all"],
+      { env: environment, encoding: "utf8" },
+    );
+    expect(all.status).toBe(0);
+    const log = readFileSync(systemctlLog, "utf8");
+    expect(log).toContain("codex-connect-app-server.service");
+    expect(log).toContain("codex-connect-gateway.service");
+    expect(log).not.toContain("codex-connect-webui.service");
+  });
+
   it("rejects the removed workspace command alias", () => {
     const result = spawnSync(process.execPath, [cli, "workspace"], { encoding: "utf8" });
 
@@ -1648,6 +1693,7 @@ function metricsSample(index: number): ModelRequestMetricSample {
     httpStatus: 200,
     errorType: null,
     errorCode: null,
+    errorMessage: null,
     incompleteReason: null,
     inputTokens: 1_000,
     cachedInputTokens: 900,

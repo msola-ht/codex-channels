@@ -108,6 +108,7 @@ export interface ModelRequestMetricSample {
   httpStatus: number | null;
   errorType: string | null;
   errorCode: string | null;
+  errorMessage: string | null;
   incompleteReason: string | null;
   inputTokens: number | null;
   cachedInputTokens: number | null;
@@ -127,6 +128,7 @@ export interface ModelRequestMetricSample {
     limitId: "codex";
     usedPercentMillionths: number;
     resetsAt: number;
+    planType: string | null;
   } | null;
 }
 
@@ -160,6 +162,7 @@ export interface StoredWeeklyQuotaWindow {
   usedPercentMillionths: number;
   resetsAt: number;
   observedAtMs: number;
+  planType: string | null;
 }
 
 export interface StoredModelRequestMetric extends ModelRequestMetricSample {
@@ -376,6 +379,7 @@ export interface StoredModelRequestMetricsErrorGroup {
   status: Exclude<ModelRequestStatus, "completed">;
   httpStatus: number | null;
   errorType: string | null;
+  lastErrorMessage: string | null;
   requestCount: number;
   lastOccurredAtMs: number;
 }

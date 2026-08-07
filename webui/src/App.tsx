@@ -5,6 +5,7 @@ import { AuthGate } from "@/components/layout/auth-gate"
 import { AppSidebar } from "@/components/layout/app-sidebar"
 import { ModeToggle } from "@/components/layout/mode-toggle"
 import { CurrencyToggle } from "@/components/metrics/currency-toggle"
+import { LanguageToggle } from "@/components/metrics/language-toggle"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -13,11 +14,12 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
-import { Separator } from "@/components/ui/separator"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { CurrencyProvider } from "@/hooks/currency-provider"
 import { useCurrency } from "@/hooks/currency-context"
+import { LanguageProvider } from "@/hooks/language-provider"
+import { useLanguage } from "@/hooks/language-context"
 import { fetchSettings } from "@/lib/api"
 import { ErrorsPage } from "@/pages/errors-page"
 import { OverviewPage } from "@/pages/overview-page"
@@ -33,9 +35,36 @@ function pageTitle(pathname: string): string {
   return "概览"
 }
 
+function BreadcrumbTrail({ pathname }: { pathname: string }) {
+  if (pathname.startsWith("/threads/")) {
+    const threadId = decodeURIComponent(pathname.slice("/threads/".length))
+    return (
+      <>
+        <BreadcrumbItem className="hidden md:block">
+          <BreadcrumbLink asChild>
+            <Link to="/threads">Threads</Link>
+          </BreadcrumbLink>
+        </BreadcrumbItem>
+        <BreadcrumbSeparator className="hidden md:block" />
+        <BreadcrumbItem>
+          <BreadcrumbPage className="max-w-56 truncate" title={threadId}>
+            {threadId}
+          </BreadcrumbPage>
+        </BreadcrumbItem>
+      </>
+    )
+  }
+  return (
+    <BreadcrumbItem>
+      <BreadcrumbPage>{pageTitle(pathname)}</BreadcrumbPage>
+    </BreadcrumbItem>
+  )
+}
+
 function Layout() {
   const { pathname } = useLocation()
   const { currency, setCurrency } = useCurrency()
+  const { language, setLanguage } = useLanguage()
 
   useEffect(() => {
     if (currency !== null) return
@@ -58,7 +87,6 @@ function Layout() {
       <SidebarInset className="min-w-0">
         <header className="flex h-16 shrink-0 items-center gap-2 border-b px-3">
           <SidebarTrigger className="-ml-1" />
-          <Separator orientation="vertical" className="h-5" />
           <Breadcrumb>
             <BreadcrumbList>
               <BreadcrumbItem className="hidden md:block">
@@ -67,12 +95,11 @@ function Layout() {
                 </BreadcrumbLink>
               </BreadcrumbItem>
               <BreadcrumbSeparator className="hidden md:block" />
-              <BreadcrumbItem>
-                <BreadcrumbPage>{pageTitle(pathname)}</BreadcrumbPage>
-              </BreadcrumbItem>
+              <BreadcrumbTrail pathname={pathname} />
             </BreadcrumbList>
           </Breadcrumb>
           <div className="ml-auto flex items-center gap-1">
+            <LanguageToggle value={language} onChange={setLanguage} />
             <CurrencyToggle value={currency} onChange={setCurrency} />
             <ModeToggle />
           </div>
@@ -94,13 +121,15 @@ function Layout() {
 export default function App() {
   return (
     <TooltipProvider>
-      <CurrencyProvider>
-        <AuthGate>
-          <HashRouter>
-            <Layout />
-          </HashRouter>
-        </AuthGate>
-      </CurrencyProvider>
+      <LanguageProvider>
+        <CurrencyProvider>
+          <AuthGate>
+            <HashRouter>
+              <Layout />
+            </HashRouter>
+          </AuthGate>
+        </CurrencyProvider>
+      </LanguageProvider>
     </TooltipProvider>
   )
 }

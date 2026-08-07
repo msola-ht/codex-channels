@@ -152,32 +152,52 @@ export function upgradeMetricsDatabase(
         schemaVersion: status.schemaVersion,
       };
     }
-    if (status.schemaVersion !== 3 || modelRequestMetricsSchemaVersion !== 4) {
+    if (![3, 4, 5].includes(status.schemaVersion)) {
       throw new Error(
         `指标数据库无法升级：当前 Schema ${status.schemaVersion ?? "unknown"}，`
-        + `仅支持 v3 升级到 v${modelRequestMetricsSchemaVersion}`,
+        + `仅支持 v3/v4/v5 升级到 v${modelRequestMetricsSchemaVersion}`,
       );
+    }
+    if (modelRequestMetricsSchemaVersion !== 6) {
+      throw new Error("指标数据库迁移脚本与 Schema 版本不一致，请检查版本常量");
     }
     checkpoint(status.databasePath);
     const now = options.now ?? (() => new Date());
-    const backupPath = `${status.databasePath}.v3.${backupTimestamp(now())}.bak`;
+    const previousSchemaVersion = status.schemaVersion;
+    const backupPath = `${status.databasePath}.v${previousSchemaVersion}.${backupTimestamp(now())}.bak`;
     if (existsSync(backupPath)) throw new Error(`指标数据库备份已存在：${backupPath}`);
     copyFileSync(status.databasePath, backupPath);
     chmodSync(backupPath, 0o600);
     const database = new DatabaseSync(status.databasePath);
     try {
-      database.exec(`
-        BEGIN IMMEDIATE;
-        ALTER TABLE model_request_metrics ADD COLUMN weekly_quota_limit_id TEXT
-          CHECK (weekly_quota_limit_id IS NULL OR weekly_quota_limit_id = 'codex');
-        ALTER TABLE model_request_metrics ADD COLUMN weekly_used_percent_millionths INTEGER
-          CHECK (weekly_used_percent_millionths IS NULL
-            OR weekly_used_percent_millionths BETWEEN 0 AND 100000000);
-        ALTER TABLE model_request_metrics ADD COLUMN weekly_resets_at INTEGER
-          CHECK (weekly_resets_at IS NULL OR weekly_resets_at >= 0);
-        UPDATE schema_metadata SET value = 4 WHERE name = 'schema_version';
+      const statements = ["BEGIN IMMEDIATE;"];
+      if (previousSchemaVersion === 3) {
+        statements.push(`
+          ALTER TABLE model_request_metrics ADD COLUMN weekly_quota_limit_id TEXT
+            CHECK (weekly_quota_limit_id IS NULL OR weekly_quota_limit_id = 'codex');
+          ALTER TABLE model_request_metrics ADD COLUMN weekly_used_percent_millionths INTEGER
+            CHECK (weekly_used_percent_millionths IS NULL
+              OR weekly_used_percent_millionths BETWEEN 0 AND 100000000);
+          ALTER TABLE model_request_metrics ADD COLUMN weekly_resets_at INTEGER
+            CHECK (weekly_resets_at IS NULL OR weekly_resets_at >= 0);
+        `);
+      }
+      if (previousSchemaVersion < 5) {
+        statements.push(`
+          ALTER TABLE model_request_metrics ADD COLUMN weekly_quota_plan_type TEXT;
+        `);
+      }
+      if (previousSchemaVersion < 6) {
+        statements.push(`
+          ALTER TABLE model_request_metrics ADD COLUMN error_message TEXT;
+        `);
+      }
+      statements.push(`
+        UPDATE schema_metadata SET value = ${modelRequestMetricsSchemaVersion}
+          WHERE name = 'schema_version';
         COMMIT;
       `);
+      database.exec(statements.join("\n"));
     } catch (error) {
       try { database.exec("ROLLBACK"); } catch { /* transaction already closed */ }
       throw error;
@@ -188,8 +208,8 @@ export function upgradeMetricsDatabase(
       backupPath,
       changed: true,
       databasePath: status.databasePath,
-      previousSchemaVersion: 3,
-      schemaVersion: 4,
+      previousSchemaVersion,
+      schemaVersion: modelRequestMetricsSchemaVersion,
     };
   } finally {
     lock.release();
@@ -340,6 +360,7 @@ export function readWeeklyQuota(store, nowMs) {
   const usedPercent = window.usedPercentMillionths / 1_000_000;
   return {
     limitId: window.limitId,
+    planType: window.planType,
     usedPercent,
     remainingPercent: Math.max(0, 100 - usedPercent),
     resetsAt: window.resetsAt,
@@ -611,6 +632,7 @@ function printMetricsReport(result, format, display = null) {
       ["group", (row) => row.group],
       ["status", (row) => row.status],
       ["errorType", (row) => row.errorType],
+      ["lastErrorMessage", (row) => row.lastErrorMessage],
       ["httpStatus", (row) => row.httpStatus],
       ["lastOccurredAtMs", (row) => row.lastOccurredAtMs],
       ["requestCount", (row) => row.requestCount],
@@ -854,6 +876,7 @@ function flattenWeeklyQuota(quota) {
   if (quota === null) return {};
   return {
     weeklyQuotaLimitId: quota.limitId,
+    weeklyQuotaPlanType: quota.planType,
     weeklyQuotaUsedPercent: quota.usedPercent,
     weeklyQuotaRemainingPercent: quota.remainingPercent,
     weeklyQuotaResetsAt: quota.resetsAt,
@@ -873,6 +896,7 @@ function flattenRecordedWeeklyQuota(record) {
   const usedPercent = quota.usedPercentMillionths / 1_000_000;
   return {
     weeklyQuotaLimitId: quota.limitId,
+    weeklyQuotaPlanType: quota.planType,
     weeklyQuotaUsedPercent: usedPercent,
     weeklyQuotaRemainingPercent: Math.max(0, 100 - usedPercent),
     weeklyQuotaResetsAt: quota.resetsAt,
@@ -883,6 +907,7 @@ function flattenRecordedWeeklyQuota(record) {
 function weeklyQuotaCsvColumns() {
   return [
     ["weeklyQuotaLimitId", (row) => row.weeklyQuotaLimitId],
+    ["weeklyQuotaPlanType", (row) => row.weeklyQuotaPlanType],
     ["weeklyQuotaUsedPercent", (row) => row.weeklyQuotaUsedPercent],
     ["weeklyQuotaRemainingPercent", (row) => row.weeklyQuotaRemainingPercent],
     ["weeklyQuotaResetsAt", (row) => row.weeklyQuotaResetsAt],
@@ -1331,6 +1356,7 @@ function csvColumns() {
     ["reasoningEffort", (record) => record.reasoningEffort],
     ["status", (record) => record.status],
     ["errorType", (record) => record.errorType],
+    ["errorMessage", (record) => record.errorMessage],
     ["incompleteReason", (record) => record.incompleteReason],
     ["httpStatus", (record) => record.httpStatus],
     ["transport", (record) => record.transport],

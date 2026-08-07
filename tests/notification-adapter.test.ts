@@ -263,6 +263,7 @@ describe("Notification adapter", () => {
       },
     })).toEqual({
       type: "turn.error",
+      threadId: "thread-1",
       turnId: "turn-1",
       message: "命令执行失败，API_KEY=[REDACTED]",
       willRetry: false,

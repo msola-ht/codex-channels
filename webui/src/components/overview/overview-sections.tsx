@@ -15,20 +15,34 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { CostDisplay } from "@/components/metrics/cost-display"
+import { Badge } from "@/components/ui/badge"
+import { CostTooltip } from "@/components/metrics/cost-tooltip"
+import {
+  InputTokenTooltip,
+  OutputTokenTooltip,
+} from "@/components/metrics/token-tooltip"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { StatCard } from "@/components/metrics/stat-card"
+import { useCurrency } from "@/hooks/currency-context"
+import { useLanguage } from "@/hooks/language-context"
 import {
   formatAvgPer100M,
   formatCost,
   formatDuration,
+  formatErrorType,
+  formatPlanType,
   formatSpeed,
   formatSuccessRate,
   formatTime,
   formatTokens,
   type DisplayCurrency,
 } from "@/lib/format"
-import type { Aggregate, ErrorsReport, ProviderGroup } from "@/lib/types"
+import type {
+  Aggregate,
+  DeepseekBalance,
+  ErrorsReport,
+  ProviderGroup,
+} from "@/lib/types"
 
 export function GlobalCards({
   global,
@@ -72,6 +86,7 @@ export function GlobalCards({
 }
 
 export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
+  const { currency } = useCurrency()
   return (
     <Card>
       <CardHeader>
@@ -86,7 +101,8 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
               <TableHead>请求</TableHead>
               <TableHead>输入 Token</TableHead>
               <TableHead>输出 Token</TableHead>
-              <TableHead>费用 / 均价</TableHead>
+              <TableHead>费用</TableHead>
+              <TableHead>均价</TableHead>
               <TableHead>TTFT</TableHead>
               <TableHead>输出速度</TableHead>
               <TableHead>压缩</TableHead>
@@ -97,9 +113,24 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
               <TableRow key={group.provider ?? "unknown"}>
                 <TableCell><ProviderBadge provider={group.provider} /></TableCell>
                 <TableCell className="tabular-nums">{group.aggregate.requestCount.toLocaleString("zh-CN")}</TableCell>
-                <TableCell className="tabular-nums">{formatTokens(group.aggregate.inputTokens)}</TableCell>
-                <TableCell className="tabular-nums">{formatTokens(group.aggregate.outputTokens)}</TableCell>
-                <TableCell><CostDisplay value={group.aggregate} /></TableCell>
+                <TableCell className="tabular-nums">
+                  <InputTokenTooltip
+                    inputTokens={group.aggregate.inputTokens}
+                    cachedInputTokens={group.aggregate.cachedInputTokens}
+                  />
+                </TableCell>
+                <TableCell className="tabular-nums">
+                  <OutputTokenTooltip
+                    outputTokens={group.aggregate.outputTokens}
+                    reasoningOutputTokens={group.aggregate.reasoningOutputTokens}
+                  />
+                </TableCell>
+                <TableCell>
+                  <CostTooltip value={group.aggregate} currency={currency} />
+                </TableCell>
+                <TableCell className="tabular-nums">
+                  {formatAvgPer100M(group.aggregate, currency)}
+                </TableCell>
                 <TableCell className="tabular-nums">{formatDuration(group.aggregate.ttftAverageMs)}</TableCell>
                 <TableCell className="tabular-nums">{formatSpeed(group.aggregate.outputTokensPerSecond)}</TableCell>
                 <TableCell className="tabular-nums">
@@ -111,7 +142,7 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
             ))}
             {providers.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="h-16 text-center text-muted-foreground">
+                <TableCell colSpan={9} className="h-16 text-center text-muted-foreground">
                   暂无数据
                 </TableCell>
               </TableRow>
@@ -126,14 +157,21 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
 export function WeeklyQuotaCard({
   usedPercent,
   resetsAt,
+  planType,
 }: {
   usedPercent: number | null
   resetsAt: number | null
+  planType: string | null
 }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>OpenAI 周额度</CardTitle>
+        <CardTitle className="flex items-center gap-2">
+          OpenAI 周额度
+          {planType === null ? null : (
+            <Badge variant="outline">{formatPlanType(planType)}</Badge>
+          )}
+        </CardTitle>
         <CardDescription>
           {resetsAt === null ? "暂无限额快照" : `下次重置 ${formatTime(resetsAt)}`}
         </CardDescription>
@@ -154,7 +192,67 @@ export function WeeklyQuotaCard({
   )
 }
 
+export function DeepseekBalanceCard({
+  available,
+  balances,
+}: {
+  available: boolean
+  balances: DeepseekBalance[]
+}) {
+  if (!available || balances.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>DS 剩余费用</CardTitle>
+          <CardDescription>DeepSeek 账户余额暂不可用</CardDescription>
+        </CardHeader>
+      </Card>
+    )
+  }
+  const primary = balances[0]!
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>DS 剩余费用</CardTitle>
+        <CardDescription>DeepSeek 账户余额</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-1">
+        <div className="flex flex-wrap items-baseline gap-2">
+          <span className="text-2xl font-semibold tabular-nums">
+            {formatDeepseekAmount(primary.totalBalance, primary.currency)}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            赠金 {formatDeepseekAmount(primary.grantedBalance, primary.currency)}
+            {" · "}
+            充值 {formatDeepseekAmount(primary.toppedUpBalance, primary.currency)}
+          </span>
+        </div>
+        {balances.length > 1 ? (
+          <p className="text-xs text-muted-foreground">
+            {balances.slice(1)
+              .map((balance) =>
+                formatDeepseekAmount(balance.totalBalance, balance.currency))
+              .join(" · ")}
+          </p>
+        ) : null}
+      </CardContent>
+    </Card>
+  )
+}
+
+function formatDeepseekAmount(value: string, currency: string): string {
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return value
+  const symbol = currency === "CNY"
+    ? "¥"
+    : currency === "USD"
+      ? "$"
+      : `${currency} `
+  return `${symbol}${amount.toFixed(2)}`
+}
+
 export function ErrorsSummary({ errors }: { errors: ErrorsReport }) {
+  const { language } = useLanguage()
   return (
     <Card>
       <CardHeader>
@@ -172,7 +270,10 @@ export function ErrorsSummary({ errors }: { errors: ErrorsReport }) {
               <li key={`${group.provider}-${group.model}-${group.status}-${group.errorType}`}>
                 <div className="flex items-center justify-between gap-2 text-sm">
                   <span className="truncate">
-                    {group.provider ?? "未知"} · {group.errorType ?? group.status}
+                    {group.provider ?? "未知"} ·{" "}
+                    {group.errorType === null
+                      ? group.status
+                      : formatErrorType(group.errorType, language)}
                   </span>
                   <span className="tabular-nums text-muted-foreground">
                     {group.requestCount} 次 · {formatTime(group.lastOccurredAtMs)}

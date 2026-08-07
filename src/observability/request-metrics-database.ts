@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 
-export const modelRequestMetricsSchemaVersion = 4;
+export const modelRequestMetricsSchemaVersion = 6;
 const incompleteLockGraceMs = 30_000;
 
 export interface RequestMetricsDatabaseLock {

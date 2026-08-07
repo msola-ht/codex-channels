@@ -696,6 +696,53 @@ describe("ConversationService model selection", () => {
       .resolves.toEqual({ position: 1 });
   });
 
+  it("records a Turn start RPC failure as a model request error", async () => {
+    const startTurn = vi.fn().mockRejectedValue(Object.assign(
+      new Error("You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage"),
+      { code: -32603 },
+    ));
+    const recorder = { recordTurnError: vi.fn() };
+    const service = new ConversationService(
+      turnPort({ startTurn }),
+      {
+        ensure: async () => ({
+          target,
+          workspaceId: "main",
+          threadId: "thread-1",
+          sessionId: "session-1",
+        }),
+        workspace: () => main,
+      } as unknown as SessionRouter,
+      { activeTurn: () => undefined } as unknown as ConversationCore,
+      {
+        status: () => ({ modelProvider: "openai" }),
+        turnOverrides: () => ({}),
+        markApplied: vi.fn(),
+      } as unknown as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      recorder,
+    );
+
+    await expect(service.submit(target, "hello"))
+      .rejects.toThrow("usage limit");
+    expect(recorder.recordTurnError).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "openai",
+      phase: "start",
+      threadId: "thread-1",
+      turnId: null,
+      errorType: "usage_limit_reached",
+      errorCode: "rpc:-32603",
+    }));
+  });
+
   it("cancels queued follow-ups instead of running them in a different Thread", async () => {
     let active = { threadId: "thread-1", turnId: "turn-1" } as
       | { threadId: string; turnId: string }

@@ -60,6 +60,7 @@ export interface ErrorGroup {
   status: string
   httpStatus: number | null
   errorType: string | null
+  lastErrorMessage: string | null
   requestCount: number
   lastOccurredAtMs: number
 }
@@ -75,6 +76,8 @@ export interface ErrorsReport {
 
 export interface WeeklyQuota {
   limitId: string
+  /** ChatGPT 账户套餐等级（free/plus/pro/team 等），来自上游 plan_type */
+  planType: string | null
   usedPercent: number
   remainingPercent: number
   /** 下次重置时间（毫秒 Unix 时间戳） */
@@ -189,6 +192,7 @@ export interface RequestRecord {
   httpStatus: number | null
   errorType: string | null
   errorCode: string | null
+  errorMessage: string | null
   transport: string
   responseFormat: string
   serviceTier: string | null
@@ -259,4 +263,16 @@ export interface SettingsResponse {
     effectiveAtMs: number
     source: "open-er-api" | "ecb" | "cache"
   } | null
+}
+
+export interface DeepseekBalance {
+  currency: string
+  totalBalance: string
+  grantedBalance: string
+  toppedUpBalance: string
+}
+
+export interface DeepseekBalanceResponse {
+  available: boolean
+  balances: DeepseekBalance[]
 }

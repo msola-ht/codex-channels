@@ -94,6 +94,7 @@ export type ConversationInputEvent =
     }
   | {
       type: "turn.error";
+      threadId: string;
       turnId: string;
       message: string;
       willRetry: boolean;

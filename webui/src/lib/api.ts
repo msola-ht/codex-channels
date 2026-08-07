@@ -1,4 +1,5 @@
 import type {
+  DeepseekBalanceResponse,
   ErrorsResponse,
   OverviewResponse,
   RangeName,
@@ -171,4 +172,13 @@ export function fetchSettings(
   signal?: AbortSignal,
 ): Promise<SettingsResponse> {
   return getJson<SettingsResponse>(`${API_PREFIX}/settings`, signal)
+}
+
+export function fetchDeepseekBalance(
+  signal?: AbortSignal,
+): Promise<DeepseekBalanceResponse> {
+  return getJson<DeepseekBalanceResponse>(
+    `${API_PREFIX}/deepseek-balance`,
+    signal,
+  )
 }

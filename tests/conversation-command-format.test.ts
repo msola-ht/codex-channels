@@ -686,6 +686,7 @@ describe("provider-aware conversation command formatting", () => {
           status: "failed",
           httpStatus: null,
           errorType: "websocket_closed",
+          lastErrorMessage: null,
           requestCount: 2,
           lastOccurredAtMs: 1_785_640_800_000,
         }, {
@@ -695,6 +696,7 @@ describe("provider-aware conversation command formatting", () => {
           status: "incomplete",
           httpStatus: 429,
           errorType: "rate_limit_error",
+          lastErrorMessage: null,
           requestCount: 1,
           lastOccurredAtMs: 1_785_640_700_000,
         }],
@@ -727,6 +729,7 @@ describe("provider-aware conversation command formatting", () => {
           status: "failed",
           httpStatus: 500,
           errorType: "upstream_error\n**伪造字段**",
+          lastErrorMessage: null,
           requestCount: 1,
           lastOccurredAtMs: 1_785_640_800_000,
         }],

@@ -6,6 +6,8 @@ import {
   type RequestMetricsQueryPort,
   type RequestMetricsCommandQuery,
   type RequestMetricsResult,
+  type TurnErrorPhase,
+  type TurnErrorRecorder,
 } from "./request-metrics-port.js";
 import type {
   AccountQueryPort,
@@ -230,6 +232,7 @@ export class ConversationService implements ConversationUseCases {
     private readonly vision?: VisionRecognitionPort,
     private readonly requestMetricsQuery?: RequestMetricsQueryPort,
     private readonly workspacePermissions?: WorkspacePermissionPort,
+    private readonly turnErrorRecorder?: TurnErrorRecorder,
   ) {}
 
   requestMetrics(
@@ -383,7 +386,12 @@ export class ConversationService implements ConversationUseCases {
     const active = this.core.activeTurn(target);
     const clientUserMessageId = `${gatewayUserMessageClientIdPrefix}${randomUUID()}`;
     if (active) {
-      await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId);
+      try {
+        await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId);
+      } catch (error) {
+        this.recordTurnError("steer", target, active.threadId, active.turnId, error);
+        throw error;
+      }
       return { threadId: active.threadId, turnId: active.turnId, steered: true };
     }
     return this.startNewTurn(target, input, clientUserMessageId);
@@ -467,6 +475,7 @@ export class ConversationService implements ConversationUseCases {
           overrides,
         );
       } catch (error) {
+        this.recordTurnError("start", target, threadId, null, error);
         this.queuedFollowUps.delete(key);
         throw error;
       }
@@ -1018,17 +1027,42 @@ export class ConversationService implements ConversationUseCases {
       ? await this.router.ensure(target, threadStartOptions)
       : await this.router.ensure(target);
     const workspace = this.router.workspace(target);
-    const result = await this.codex.startTurn(
-      binding.threadId,
-      input,
-      clientUserMessageId,
-      workspace.cwd,
-      this.turnOverrides(target),
-    );
+    let result;
+    try {
+      result = await this.codex.startTurn(
+        binding.threadId,
+        input,
+        clientUserMessageId,
+        workspace.cwd,
+        this.turnOverrides(target),
+      );
+    } catch (error) {
+      this.recordTurnError("start", target, binding.threadId, null, error);
+      throw error;
+    }
     this.models.markApplied(target);
     this.collaborationModes?.markApplied(target);
     this.core.markTurnStarted(target, binding.threadId, result.turnId);
     return { threadId: binding.threadId, turnId: result.turnId, steered: false };
+  }
+
+  private recordTurnError(
+    phase: TurnErrorPhase,
+    target: ConversationTarget,
+    threadId: string | null,
+    turnId: string | null,
+    error: unknown,
+  ): void {
+    this.turnErrorRecorder?.recordTurnError({
+      provider: this.models.status(target).modelProvider ?? "openai",
+      threadId,
+      turnId,
+      phase,
+      errorType: turnErrorType(error, phase),
+      errorCode: turnErrorCode(error),
+      message: turnErrorMessage(error),
+      recordedAtMs: Date.now(),
+    });
   }
 
   private turnOverrides(target: ConversationTarget) {
@@ -1230,4 +1264,32 @@ function pinnedFirst<T extends { isPinned: boolean }>(
 ): T[] {
   return sessions.toSorted((left, right) =>
     Number(right.isPinned) - Number(left.isPinned));
+}
+
+export function turnErrorType(error: unknown, phase: TurnErrorPhase): string {
+  const message = error instanceof Error ? error.message : "";
+  if (message.startsWith("You've hit your usage limit")) {
+    return "usage_limit_reached";
+  }
+  if (phase === "start") return "turn_start_error";
+  if (phase === "steer") return "turn_steer_error";
+  return "turn_notification_error";
+}
+
+export function turnErrorCode(error: unknown): string | null {
+  if (typeof error !== "object" || error === null) return null;
+  const code = (error as { code?: unknown }).code;
+  if (typeof code === "number" && Number.isSafeInteger(code)) {
+    return `rpc:${code}`;
+  }
+  return typeof code === "string" && code.length > 0 && code.length <= 64
+    ? code
+    : null;
+}
+
+export function turnErrorMessage(error: unknown): string | null {
+  if (!(error instanceof Error)) return null;
+  const message = error.message.replace(/\s+/gu, " ").trim();
+  if (message.length === 0) return null;
+  return message.length <= 500 ? message : `${message.slice(0, 500)}…`;
 }

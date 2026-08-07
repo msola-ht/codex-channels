@@ -164,12 +164,13 @@
   `initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，不输出完整 User-Agent、飞书
   上游响应或敏感配置内容。
 - `install-launchd.mjs`：渲染并安装 launchd plist；代理由 CLI 服务入口在每次启动时解析。
-- `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载两个 launchd 服务；启停、
-  重启、状态和日志支持 `gateway`、`app-server`、`all` 目标，日常重启默认只更新 Gateway；模板为
-  App Server 与 Gateway 注入各自服务角色，公开 CLI 据此拒绝 App Server 内的自重启；
+- `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载三个 launchd 服务；启停、
+  重启、状态和日志支持 `gateway`、`app-server`、`webui`、`all` 目标，WebUI 独立不并入 `all`，
+  日常重启默认只更新 Gateway；模板为 App Server 与 Gateway 注入各自服务角色，公开 CLI 据此
+  拒绝 App Server 内的自重启；
   检测到不支持的旧标签时明确拒绝启动。
 - `install-systemd.mjs`：渲染并安装 Linux systemd 用户服务 unit；代理由 CLI 服务入口在每次启动时解析。
-- `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载两个 systemd 用户服务；
-  与 launchd 使用相同的目标、服务角色和默认值，用户数据始终保留。
+- `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载三个 systemd 用户服务；
+  与 launchd 使用相同的目标、服务角色和默认值，WebUI 独立不并入 `all`，用户数据始终保留。
 
 脚本不得把凭据写入 npm 安装目录；用户配置、SQLite、配置事件队列、Socket 和日志必须留在用户级 `.codex-connect`。

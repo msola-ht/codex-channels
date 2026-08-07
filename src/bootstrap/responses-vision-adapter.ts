@@ -283,6 +283,7 @@ function createVisionMetric(options: {
     status: options.status,
     httpStatus: options.httpStatus,
     errorType: options.errorType,
+    errorMessage: null,
     errorCode: null,
     incompleteReason: options.incompleteReason ?? null,
     inputTokens: options.usage?.inputTokens ?? null,

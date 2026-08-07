@@ -11,6 +11,7 @@ import type {
 import { usesOpenAiAccount } from "../conversation-core/index.js";
 
 import {
+  formatOpenAiErrorMessage,
   formatPercent,
   formatRemainingRateLimitWindow,
 } from "./account-format.js";
@@ -201,7 +202,7 @@ export function createTurnCompletedPresentation(
   if (event.error) {
     runFields.push({
       label: "错误",
-      value: event.error.replaceAll("[REDACTED]", "[已隐藏]"),
+      value: formatOpenAiErrorMessage(event.error),
     });
   }
   if (event.tokenUsage) {

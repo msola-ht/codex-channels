@@ -37,6 +37,8 @@
 直接 API 请求按同一口径汇总，并显示缓存、输出速度及首段回复延迟的有效样本覆盖率；
 `/metrics errors` 按提供商、模型、状态、HTTP 状态和错误类型汇总异常请求，显示异常率与最近
 发生时间。它不会替代 `/status` 的 App Server 上下文统计。
+未发起上游请求的 Turn 级失败（例如 OpenAI 用量上限拒绝 turn/start）同样作为无 Token/费用的
+failed 请求计入异常记录，避免这类错误完全不可见。
 
 统计代理把上下文压缩（旧版 `/responses/compact` 与 remote compaction v2）保留为
 `compact` 操作：其请求、Token 与参考费用继续计入总计，同时在完成卡片、会话指标和全局/提供商/

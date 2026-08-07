@@ -6,6 +6,7 @@ interface CostFields {
 }
 
 export type DisplayCurrency = "cny" | "usd"
+export type DisplayLanguage = "zh" | "en"
 
 function money(nanos: number, currency: string): string {
   const amount = nanos / 1_000_000_000
@@ -134,6 +135,52 @@ export function formatTime(value: number | null | undefined): string {
   const pad = (part: number) => String(part).padStart(2, "0")
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} `
     + `${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+const planTypeNames: Record<string, string> = {
+  free: "Free",
+  go: "Go",
+  plus: "Plus",
+  pro: "Pro",
+  prolite: "Pro Lite",
+  team: "Team",
+  self_serve_business_usage_based: "Business（按量）",
+  business: "Business",
+  ent26: "Enterprise",
+  enterprise_cbp_usage_based: "Enterprise（按量）",
+  enterprise: "Enterprise",
+  edu: "Edu",
+  unknown: "未知",
+}
+
+export function formatPlanType(value: string | null): string {
+  return value === null ? "未知" : (planTypeNames[value] ?? value)
+}
+
+const errorTypeNames: Record<string, { zh: string; en: string }> = {
+  usage_limit_reached: { zh: "用量上限", en: "Usage limit" },
+  rate_limit_reached: { zh: "速率限制", en: "Rate limit" },
+  upstream_handshake_error: { zh: "上游握手失败", en: "Upstream handshake failed" },
+  upstream_error: { zh: "上游错误", en: "Upstream error" },
+  upstream_request_error: { zh: "上游请求失败", en: "Upstream request failed" },
+  upstream_response_error: { zh: "上游响应失败", en: "Upstream response failed" },
+  client_request_error: { zh: "客户端请求失败", en: "Client request failed" },
+  client_disconnected: { zh: "客户端断开", en: "Client disconnected" },
+  websocket_closed: { zh: "WebSocket 关闭", en: "WebSocket closed" },
+  http_error: { zh: "HTTP 请求失败", en: "HTTP request failed" },
+  response_not_observed: { zh: "响应未完整观测", en: "Response not fully observed" },
+  turn_start_error: { zh: "Turn 启动失败", en: "Turn start failed" },
+  turn_steer_error: { zh: "Turn 追加失败", en: "Turn steer failed" },
+  turn_notification_error: { zh: "Turn 运行失败", en: "Turn failed" },
+}
+
+export function formatErrorType(
+  value: string | null,
+  language: DisplayLanguage,
+): string {
+  if (value === null) return "—"
+  const label = errorTypeNames[value]
+  return label ? label[language] : value
 }
 
 export function formatSuccessRate(requestCount: number, unsuccessful: number): string {

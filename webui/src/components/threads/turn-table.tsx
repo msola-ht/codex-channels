@@ -264,7 +264,7 @@ export function TurnTable({ turns }: { turns: TurnSummary[] }) {
       noMatchText="无匹配记录"
       pagination={{
         mode: "client",
-        defaultPageSize: 10,
+        defaultPageSize: 50,
         pageSizeOptions: PAGE_SIZE_OPTIONS,
         defaultSorting: [{ id: "time", desc: true }],
       }}

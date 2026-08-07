@@ -167,6 +167,7 @@ interface MetricRow {
   http_status: number | null;
   error_type: string | null;
   error_code: string | null;
+  error_message: string | null;
   incomplete_reason: string | null;
   input_tokens: number | null;
   cached_input_tokens: number | null;
@@ -186,6 +187,7 @@ interface MetricRow {
   weekly_quota_limit_id: "codex" | null;
   weekly_used_percent_millionths: number | null;
   weekly_resets_at: number | null;
+  weekly_quota_plan_type: string | null;
   request_duration_ms: number | null;
   ttft_ms: number | null;
   thinking_duration_ms: number | null;
@@ -276,6 +278,7 @@ interface ErrorGroupRow {
   status: "failed" | "incomplete" | "unknown";
   http_status: number | null;
   error_type: string | null;
+  last_error_message: string | null;
   request_count: number;
   last_occurred_at_ms: number;
   total_group_count: number;
@@ -328,17 +331,19 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           uncached_input_price_per_million_nanos,
           cached_input_price_per_million_nanos, output_price_per_million_nanos,
           transport, response_format, operation, thread_id, turn_id, model, service_tier,
-          reasoning_effort, status, http_status, error_type, error_code, incomplete_reason,
+          reasoning_effort, status, http_status, error_type, error_code, error_message,
+          incomplete_reason,
           input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens,
           total_tokens, upstream_created_at, upstream_completed_at,
           request_started_at_ms, first_token_at_ms,
           first_reasoning_delta_at_ms, last_reasoning_delta_at_ms,
           first_output_delta_at_ms, last_output_delta_at_ms,
           response_completed_at_ms, recorded_at_ms,
-          weekly_quota_limit_id, weekly_used_percent_millionths, weekly_resets_at
+          weekly_quota_limit_id, weekly_used_percent_millionths, weekly_resets_at,
+          weekly_quota_plan_type
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
       `);
       this.cleanup(nowMs);
@@ -377,6 +382,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       sample.httpStatus,
       sample.errorType,
       sample.errorCode,
+      sample.errorMessage,
       sample.incompleteReason,
       sample.inputTokens,
       sample.cachedInputTokens,
@@ -396,6 +402,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       sample.weeklyQuota?.limitId ?? null,
       sample.weeklyQuota?.usedPercentMillionths ?? null,
       sample.weeklyQuota?.resetsAt ?? null,
+      sample.weeklyQuota?.planType ?? null,
     );
     this.rowCount += 1;
     this.recordsSinceCleanup += 1;
@@ -444,7 +451,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     ) throw new Error("最新周额度查询无效");
     const row = this.database.prepare(`
       SELECT weekly_quota_limit_id, weekly_used_percent_millionths,
-        weekly_resets_at, recorded_at_ms
+        weekly_resets_at, weekly_quota_plan_type, recorded_at_ms
       FROM model_request_metrics
       WHERE provider = ?
         AND weekly_quota_limit_id IS NOT NULL
@@ -456,6 +463,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       weekly_quota_limit_id: string;
       weekly_used_percent_millionths: number;
       weekly_resets_at: number;
+      weekly_quota_plan_type: string | null;
       recorded_at_ms: number;
     } | undefined;
     return row
@@ -464,6 +472,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           usedPercentMillionths: row.weekly_used_percent_millionths,
           resetsAt: row.weekly_resets_at,
           observedAtMs: row.recorded_at_ms,
+          planType: row.weekly_quota_plan_type,
         }
       : null;
   }
@@ -564,6 +573,19 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
             ELSE error_type
           END AS normalized_error_type
         FROM model_request_metrics
+        WHERE recorded_at_ms >= ?
+          AND recorded_at_ms < ?
+      ),
+      ranked AS (
+        SELECT
+          *,
+          ROW_NUMBER() OVER (
+            PARTITION BY provider, model, normalized_status, http_status,
+              normalized_error_type
+            ORDER BY recorded_at_ms DESC
+          ) AS last_row
+        FROM normalized
+        WHERE normalized_status <> 'completed'
       )
       SELECT
         provider,
@@ -571,13 +593,11 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         normalized_status AS status,
         http_status,
         normalized_error_type AS error_type,
+        MAX(error_message) FILTER (WHERE last_row = 1) AS last_error_message,
         COUNT(*) AS request_count,
         MAX(recorded_at_ms) AS last_occurred_at_ms,
         COUNT(*) OVER () AS total_group_count
-      FROM normalized
-      WHERE recorded_at_ms >= ?
-        AND recorded_at_ms < ?
-        AND normalized_status <> 'completed'
+      FROM ranked
       GROUP BY provider, model, normalized_status, http_status, normalized_error_type
       ORDER BY request_count DESC, last_occurred_at_ms DESC,
         provider ASC, model ASC
@@ -597,6 +617,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         status: row.status,
         httpStatus: row.http_status,
         errorType: row.error_type,
+        lastErrorMessage: row.last_error_message,
         requestCount: row.request_count,
         lastOccurredAtMs: row.last_occurred_at_ms,
       })),
@@ -1081,6 +1102,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
             http_status INTEGER,
             error_type TEXT,
             error_code TEXT,
+            error_message TEXT,
             incomplete_reason TEXT,
             input_tokens INTEGER,
             cached_input_tokens INTEGER,
@@ -1107,6 +1129,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
             weekly_resets_at INTEGER CHECK (
               weekly_resets_at IS NULL OR weekly_resets_at >= 0
             ),
+            weekly_quota_plan_type TEXT,
             CHECK (
               (
                 billing_mode IS NULL
@@ -1332,6 +1355,7 @@ function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     httpStatus: row.http_status,
     errorType: row.error_type,
     errorCode: row.error_code,
+    errorMessage: row.error_message,
     incompleteReason: responseNotObserved
       ? "response_not_observed"
       : row.incomplete_reason,
@@ -1357,6 +1381,7 @@ function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
           limitId: row.weekly_quota_limit_id,
           usedPercentMillionths: row.weekly_used_percent_millionths,
           resetsAt: row.weekly_resets_at,
+          planType: row.weekly_quota_plan_type,
         },
     recordedAtMs: row.recorded_at_ms,
     requestDurationMs: row.request_duration_ms,

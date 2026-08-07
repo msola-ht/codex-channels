@@ -14,6 +14,10 @@
   最终模型、服务层级、状态、上游时间戳及输入/缓存/输出/推理 Token Usage，因此提前断线的失败
   指标仍可归入请求模型；HTTP
   状态、超时、上游错误、客户端断开和 WebSocket 提前关闭同样产生受控失败指标，不保留错误正文；
+  WebSocket 上游握手失败（如 429）也会生成 failed 指标并保留 HTTP 状态；即使尚未收到出站
+  元数据，也会降级记录为空 Thread 的失败，避免这类错误完全不可见；
+  后端在 WS 内返回的包装 error 事件（`status` + `error.type`）与关闭原因（usage limit /
+  rate limit）同样归类为失败指标，用量上限这类错误不再落成笼统的断开记录；
   上游缺少 `Content-Type` 时只对合法 `response.*` SSE 事件进行正文识别，以恢复完成事件、模型和
   Usage；HTTP 2xx 仍未观察到这些信息时标为 `incomplete/response_not_observed`，不能污染成功率
   或计价覆盖率。旧版 HTTP `/responses/compact` 以及 Codex 0.146 默认通过普通 HTTP/WebSocket
