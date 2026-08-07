@@ -9,11 +9,11 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 
 import { parse } from "smol-toml";
 
+import { codexHomePath } from "./codex-home.mjs";
 import { deepseekProviderDefinition } from "./model-provider-definitions.mjs";
 
 const maximumConfigBytes = 1_048_576;
@@ -410,10 +410,6 @@ function readManagedMarker(codexHome) {
     provider: marker.provider,
     mode: marker.mode ?? "switching",
   };
-}
-
-function codexHomePath(environment) {
-  return resolve(environment.CODEX_HOME?.trim() || join(homedir(), ".codex"));
 }
 
 function tomlString(value) {

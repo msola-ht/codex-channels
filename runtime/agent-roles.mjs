@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
 import { parse } from "smol-toml";
+
+import { codexHomePath } from "./codex-home.mjs";
 
 const nonRoleAgentKeys = new Set([
   "enabled",
@@ -37,10 +38,6 @@ export function listConfiguredAgentRoles(environment = process.env) {
         ? record(value).description
         : null,
     }));
-}
-
-function codexHomePath(environment) {
-  return resolve(environment.CODEX_HOME?.trim() || join(homedir(), ".codex"));
 }
 
 function record(value) {

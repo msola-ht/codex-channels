@@ -4,11 +4,10 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
 
 import { parse } from "smol-toml";
 
+import { agentRolesConfigPath } from "../runtime/agent-roles.mjs";
 import { loadManagedModelProvider } from "../runtime/model-provider-runtime.mjs";
 import { managedModelProviderRoleConfigPath } from "../runtime/model-provider-runtime.mjs";
 
@@ -16,13 +15,8 @@ const featureTableHeader = "[features.multi_agent_v2]";
 const featureHeader = "[features]";
 const roleHeader = "[agents.ds]";
 
-export function agentsConfigPath(environment = process.env) {
-  const codexHome = resolve(environment.CODEX_HOME?.trim() || join(homedir(), ".codex"));
-  return join(codexHome, "config.toml");
-}
-
 export function agentsStatus(environment = process.env) {
-  const configPath = agentsConfigPath(environment);
+  const configPath = agentRolesConfigPath(environment);
   const roleConfigPath = managedModelProviderRoleConfigPath(environment);
   let multiAgentV2Enabled = false;
   let dsRoleConfigured = false;
@@ -50,7 +44,7 @@ export function enableDeepseekRole(environment = process.env) {
       "DeepSeek 切换模式未配置；请先运行 codexc setup 选择 OpenAI + DeepSeek 切换模式",
     );
   }
-  const configPath = agentsConfigPath(environment);
+  const configPath = agentRolesConfigPath(environment);
   const roleConfigPath = managedModelProviderRoleConfigPath(environment);
   const lines = readConfigLines(configPath);
   setMultiAgentV2(lines, true);
@@ -59,7 +53,7 @@ export function enableDeepseekRole(environment = process.env) {
 }
 
 export function disableDeepseekRole(environment = process.env) {
-  const configPath = agentsConfigPath(environment);
+  const configPath = agentRolesConfigPath(environment);
   if (!existsSync(configPath)) return;
   const lines = readConfigLines(configPath);
   removeDsRole(lines);

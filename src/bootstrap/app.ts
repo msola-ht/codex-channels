@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 
 import type { Logger } from "pino";
 
+import { codexHomePath } from "../../runtime/codex-home.mjs";
 import {
   checkProjectRulesAtRoot,
   initializeProjectRulesAtRoot,
@@ -133,7 +134,7 @@ export class GatewayApplication {
     const primaryProvider = loadPrimaryModelProvider();
     const managedProvider = loadManagedModelProvider();
     const supplementaryModels = loadDeepseekModelOptions(
-      process.env,
+      codexHomePath(process.env),
       primaryProvider === deepseekProviderDefinition.id
         || managedProvider?.provider === deepseekProviderDefinition.id,
       deepseekProviderDefinition,
