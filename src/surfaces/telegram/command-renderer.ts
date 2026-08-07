@@ -7,6 +7,7 @@ import type {
   ExchangeRateSnapshot,
 } from "../../application/index.js";
 import {
+  formatConversationAgents,
   formatConversationArtifacts,
   formatConversationCollaborationMode,
   formatConversationCommandOutcome,
@@ -83,6 +84,9 @@ export async function renderTelegramCommandResult(
       return;
     case "skills":
       await replyTelegramPanel(context, formatConversationSkills(result));
+      return;
+    case "agents":
+      await replyTelegramPanel(context, formatConversationAgents(result));
       return;
     case "mcp":
       await replyTelegramPanel(context, formatConversationMcp(result));

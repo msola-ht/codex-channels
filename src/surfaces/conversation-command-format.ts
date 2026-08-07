@@ -65,6 +65,7 @@ export const conversationCommandDescriptions = {
   diff: "查看当前 Turn Diff",
   plan: "切换 Plan 模式或直接开始规划",
   goal: "查看或管理 Goal",
+  agents: "查看或调用子代理",
 } satisfies Record<ConversationCommandName, string>;
 
 export const conversationCommandHelpSections = [
@@ -94,6 +95,7 @@ export const conversationCommandHelpSections = [
       "/model [序号|模型 ID|名称]",
       "/effort [序号|档位] · /fast [on|off|status]",
       "/skill · /skills [名称或序号 任务]",
+      "/agents [角色名称或序号 任务]",
       "/mcp · /plugins",
       "/usage · /limits · /permissions",
       "/metrics session",
@@ -259,6 +261,17 @@ export function formatConversationCommandOutcome(
             `Skill：${outcome.skillName}`,
             `Turn：${outcome.turnId}`,
           ].join("\n"));
+    case "agents.started":
+      return outcome.steered
+        ? toStructuredMarkdownList([
+            "已把子代理任务追加到当前任务",
+            `角色：${outcome.roleName}`,
+          ].join("\n"))
+        : toStructuredMarkdownList([
+            "已使用子代理开始任务",
+            `角色：${outcome.roleName}`,
+            `Turn：${outcome.turnId}`,
+          ].join("\n"));
     case "goal.cleared":
       return toStructuredMarkdownList(["已清除当前 Thread Goal。"].join("\n"));
     case "goal.updated":
@@ -366,6 +379,22 @@ export function formatConversationSkills(
         ),
         "",
         "使用：/skill <名称或序号> <任务>",
+      ].join("\n"));
+}
+
+export function formatConversationAgents(
+  result: Extract<ConversationCommandResult, { kind: "agents" }>,
+): string {
+  return result.roles.length === 0
+    ? "当前没有可用的子代理角色。"
+    : toStructuredMarkdownList([
+        `子代理角色（${result.roles.length}）：`,
+        ...result.roles.map(
+          (role, index) =>
+            `${index + 1}. ${role.name}${role.description ? `：${role.description}` : ""}`,
+        ),
+        "",
+        "使用：/agents <角色名称或序号> <任务>",
       ].join("\n"));
 }
 

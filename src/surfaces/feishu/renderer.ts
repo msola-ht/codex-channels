@@ -10,6 +10,7 @@ import type {
 } from "../../conversation-core/index.js";
 import {
   conversationCommandHelpLines,
+  formatConversationAgents,
   formatConversationArtifacts,
   formatConversationCollaborationMode,
   formatConversationCommandOutcome,
@@ -137,6 +138,8 @@ export function renderFeishuCommandResult(
       return formatConversationCollaborationMode(result);
     case "skills":
       return formatConversationSkills(result);
+    case "agents":
+      return formatConversationAgents(result);
     case "mcp":
       return formatConversationMcp(result);
     case "plugins":

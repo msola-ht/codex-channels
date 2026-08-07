@@ -534,6 +534,7 @@ function renderFeishuCategorizedCommandsCard(
       ]),
       sectionTitle("能力与集成"),
       actionRow(token, [
+        ["子代理", "agents", "default"],
         ["Skills", "skill", "default"],
         ["MCP", "mcp", "default"],
         ["Plugins", "plugins", "default"],

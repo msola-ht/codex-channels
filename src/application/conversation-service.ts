@@ -116,6 +116,21 @@ export type ConversationQueryPort =
   & PluginQueryPort
   & PermissionQueryPort;
 
+export interface AgentRoleEntry {
+  name: string;
+  description: string | null;
+}
+
+export interface AgentRolePort {
+  listAgentRoles(): AgentRoleEntry[];
+}
+
+const builtInAgentRoles: AgentRoleEntry[] = [
+  { name: "default", description: "默认角色，继承当前模型与配置" },
+  { name: "explorer", description: "代码库探查：快速回答具体的代码库问题" },
+  { name: "worker", description: "执行与实现：完成归属明确的实现、修复或测试任务" },
+];
+
 interface QueuedFollowUp {
   threadId: string;
   input: TurnInput[];
@@ -157,6 +172,12 @@ export interface ConversationUseCases {
     selector: string,
     task: string,
   ): Promise<Submission & { skillName: string }>;
+  listAgentRoles(): AgentRoleEntry[];
+  invokeAgent(
+    target: ConversationTarget,
+    selector: string,
+    task: string,
+  ): Promise<Submission & { roleName: string }>;
   queueFollowUp(target: ConversationTarget, value: string): Promise<{ position: number }>;
   handleTurnCompleted(
     target: ConversationTarget,
@@ -233,6 +254,7 @@ export class ConversationService implements ConversationUseCases {
     private readonly requestMetricsQuery?: RequestMetricsQueryPort,
     private readonly workspacePermissions?: WorkspacePermissionPort,
     private readonly turnErrorRecorder?: TurnErrorRecorder,
+    private readonly agentRoles?: AgentRolePort,
   ) {}
 
   requestMetrics(
@@ -307,6 +329,62 @@ export class ConversationService implements ConversationUseCases {
       ]);
       return { ...submission, skillName: skill.name };
     });
+  }
+
+  listAgentRoles(): AgentRoleEntry[] {
+    let configured: AgentRoleEntry[];
+    try {
+      configured = this.agentRoles?.listAgentRoles() ?? [];
+    } catch {
+      throw new UserFacingError(
+        "agents.config-unreadable",
+        "Codex 子代理角色配置无法安全读取；请检查 ~/.codex/config.toml",
+      );
+    }
+    const configuredByName = new Map(
+      configured.map((role) => [role.name.toLowerCase(), role]),
+    );
+    const builtIn = builtInAgentRoles.map(
+      (role) => configuredByName.get(role.name.toLowerCase()) ?? role,
+    );
+    return [
+      ...builtIn,
+      ...configured.filter(
+        (role) => !builtInAgentRoles.some(
+          (candidate) => candidate.name.toLowerCase() === role.name.toLowerCase(),
+        ),
+      ),
+    ];
+  }
+
+  async invokeAgent(
+    target: ConversationTarget,
+    selector: string,
+    task: string,
+  ): Promise<Submission & { roleName: string }> {
+    const normalizedSelector = selector.trim();
+    const normalizedTask = task.trim();
+    if (!normalizedSelector || !normalizedTask) {
+      throw new UserFacingError(
+        "agents.usage",
+        "需要提供子代理角色名称或序号及任务内容",
+      );
+    }
+    const roles = this.listAgentRoles();
+    const role = resolveAgentRole(roles, normalizedSelector);
+    if (!role) {
+      throw new UserFacingError(
+        "agents.not-found",
+        "指定的子代理角色不存在；使用 /agents 查看可用角色",
+      );
+    }
+    const submission = await this.submitInput(target, [
+      {
+        type: "text",
+        text: `请使用 agent_type="${role.name}" 的子代理执行以下任务，子代理完成后把最终结果回复给我：\n\n${normalizedTask}`,
+      },
+    ]);
+    return { ...submission, roleName: role.name };
   }
 
   private submitInput(
@@ -1267,6 +1345,20 @@ function pinnedFirst<T extends { isPinned: boolean }>(
 ): T[] {
   return sessions.toSorted((left, right) =>
     Number(right.isPinned) - Number(left.isPinned));
+}
+
+function resolveAgentRole(
+  roles: readonly AgentRoleEntry[],
+  selector: string,
+): AgentRoleEntry | undefined {
+  const normalized = selector.trim().toLowerCase();
+  const exact = roles.find((role) => role.name.toLowerCase() === normalized);
+  if (exact) return exact;
+  if (/^\d+$/u.test(normalized)) {
+    const index = Number(normalized) - 1;
+    return roles[index];
+  }
+  return undefined;
 }
 
 export function turnErrorType(error: unknown, phase: TurnErrorPhase): string {

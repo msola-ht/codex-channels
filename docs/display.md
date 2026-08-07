@@ -75,6 +75,10 @@ OpenAI `/limits` 在额度响应包含 10,080 分钟周窗口和有效重置时�
 `/diff` 与操作结果保持原文。三渠道分别用飞书卡片 Markdown、Telegram
 HTML 和微信结构化字段渲染。
 
+`/agents` 无参数时列出内置角色（default/explorer/worker）与 `~/.codex/config.toml` 中
+配置的角色（如 `agents.ds`）；`/agents <角色名称或序号> <任务>` 以包含官方 `agent_type`
+角色名的文本指示子代理执行任务，调用结果与普通 Turn 启动一致。
+
 `codexc metrics threads` 的会话列表增加“类型”列：Gateway 在绑定线程中观测到
 `subAgentActivity` 通知时，会把子代理线程 ID、父线程和代理路径写入指标库；被标注的线程
 显示“子代理 · <代理路径>”（如 `/root/ds_probe`），其余显示“主会话”。该标注持久化在

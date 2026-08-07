@@ -23,6 +23,9 @@
 - `project-rules.mjs`：生成并检查项目级 Codex 命令规则；Gateway 使用精确 Workspace 根目录，
   并拒绝通过符号链接把写入转移到 Workspace 外。
 - `project-rules.d.mts`：声明共享项目规则模块的 TypeScript 接口。
+- `agent-roles.mjs`：读取 `~/.codex/config.toml` 的 `[agents]` 配置，返回带描述的子代理角色
+  列表，供渠道 `/agents` 命令展示与调用；不含任何角色实现。
+- `agent-roles.d.mts`：声明共享子代理角色配置模块的 TypeScript 接口。
 - `api-provider-credential.mjs` / `api-provider-credential.d.mts`：按第三方 API 提供商 ID 隔离
   API Key，并严格校验私有目录、文件所有者、权限与符号链接。
 - `vision-credential.mjs` / `vision-credential.d.mts`：只供 Setup 显式转换旧单视觉凭据；新的

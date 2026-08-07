@@ -41,6 +41,8 @@ export {
   turnErrorCode,
   turnErrorMessage,
   turnErrorType,
+  type AgentRoleEntry,
+  type AgentRolePort,
   type ConversationInput,
   type ConversationQueryPort,
   type ConversationResumeResult,

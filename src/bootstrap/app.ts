@@ -16,6 +16,7 @@ import {
   providerAppServerSocketPath,
   providerMetricsSocketPath,
 } from "../../runtime/model-provider-runtime.mjs";
+import { listConfiguredAgentRoles } from "../../runtime/agent-roles.mjs";
 import { readApiProviderKey } from "../../runtime/api-provider-credential.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
 import {
@@ -557,6 +558,9 @@ export class GatewayApplication {
             error,
           );
         },
+      },
+      {
+        listAgentRoles: () => listConfiguredAgentRoles(process.env),
       },
     );
     this.output.subscribe("conversation-follow-up", async (event) => {

@@ -281,7 +281,7 @@ Markdown 报表的费用按 `display.price_currency` 统一换算显示（人民
 - 运行：`/status`、`/stop`、`/queue <描述>`、`/compact`、`/fork`、`/review`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
 - 状态：`/diff`、`/usage`、`/metrics [session|global|providers|models|errors] [24h|7d|30d]`、`/limits`、`/permissions`、`/goal`
-- 扩展：`/skill [名称或序号 任务]`、`/mcp`、`/plugins`、`/rules`
+- 扩展：`/agents [角色名称或序号 任务]`、`/skill [名称或序号 任务]`、`/mcp`、`/plugins`、`/rules`
 - 图片：`/vision <下一批要求>`；多图：`/vision <2–4> <要求>`，收齐自动提交；失败重试：`/vision retry`；取消：`/vision cancel`
 - 帮助：`/help`、`/whoami`
 
