@@ -91,7 +91,7 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
     <Card>
       <CardHeader>
         <CardTitle>按 Provider</CardTitle>
-        <CardDescription>每组包含请求、Token、费用与均价（元/100M）</CardDescription>
+        <CardDescription>每组包含请求、Token、费用与均价（按当前币种 /100M）</CardDescription>
       </CardHeader>
       <CardContent>
         <Table>

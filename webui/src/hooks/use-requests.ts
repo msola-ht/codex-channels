@@ -13,6 +13,7 @@ export function useRequests(
   limit: number,
   sort: RequestSortKey,
   direction: RequestSortDirection,
+  filter: string,
 ) {
   const { currency } = useCurrency()
   return useApi(
@@ -22,9 +23,10 @@ export function useRequests(
       limit,
       sort,
       direction,
+      filter,
       currency,
       signal,
     ),
-    [range, offset, limit, sort, direction, currency],
+    [range, offset, limit, sort, direction, filter, currency],
   )
 }

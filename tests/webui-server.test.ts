@@ -297,6 +297,22 @@ describe("webui server", () => {
     expect(secondBody.records.map((record) => record.outputTokens)).toEqual([100]);
     expect(secondBody.nextOffset).toBeNull();
 
+    const filtered = await fetch(
+      `${origin}/api/v1/requests?range=24h&limit=10&filter=http_error`,
+    );
+    expect(filtered.status).toBe(200);
+    const filteredBody = await filtered.json() as {
+      records: Array<{ errorType: string | null }>;
+      total: number;
+    };
+    expect(filteredBody.total).toBe(1);
+    expect(filteredBody.records[0]?.errorType).toBe("http_error");
+
+    const invalidFilter = await fetch(
+      `${origin}/api/v1/requests?range=24h&filter=${"x".repeat(129)}`,
+    );
+    expect(invalidFilter.status).toBe(400);
+
     const errors = await fetch(`${origin}/api/v1/errors?range=7d`);
     expect(errors.status).toBe(200);
     const errorsBody = await errors.json() as {

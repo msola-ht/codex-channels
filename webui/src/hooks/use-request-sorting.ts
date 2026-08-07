@@ -3,7 +3,7 @@ import type { SortingState } from "@tanstack/react-table"
 
 import type { RequestSortDirection, RequestSortKey } from "@/lib/types"
 
-const STORAGE_KEY = "codex-webui:requests-table-state-v2:sorting"
+const STORAGE_KEY = "codex-webui:requests-table-state-v3:sorting"
 const DEFAULT_SORTING: SortingState = [{ id: "time", desc: true }]
 const SORT_KEYS = new Set<RequestSortKey>([
   "time",

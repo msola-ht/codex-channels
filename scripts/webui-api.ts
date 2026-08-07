@@ -247,6 +247,8 @@ export interface RequestsResponse {
   generatedAt: string
   records: RequestRecord[]
   nextOffset: number | null
+  /** 当前筛选条件下匹配的记录总数（未筛选时等于时间范围内全部记录数） */
+  total: number
 }
 
 export interface ErrorsResponse {

@@ -78,7 +78,9 @@ codexc service stop webui        # 停止
 所有接口只接受 GET；`range` 只支持 `24h`、`7d`、`30d`；请求分页 `offset` 从 0 开始，
 `limit` 为 1–500。请求排序 `direction` 支持 `asc|desc`，`sort` 支持 `time`、`provider`、
 `model`、`operation`、`status`、`http`、`error`、`input`、`output`、`reasoningOutput`、
-`speed`、`ttft`、`duration`、`cost`，默认按 `time desc` 查询整个时间范围后再分页。
+`speed`、`ttft`、`duration`、`cost`，默认按 `time desc` 查询整个时间范围后再分页。请求接口
+还支持 `filter` 关键字（最多 128 字符），在 Provider、模型、操作、状态、错误类型、错误码与
+错误消息中全库匹配后再分页，响应 `total` 为筛选后的匹配总数。
 错误统计同时包含代理观测到的失败模型请求和未发起上游请求的 Turn 级失败（例如 OpenAI 用量上限），
 后者显示为无 Token/费用的 failed 记录；失败记录保存受限长度的错误消息，请求明细悬浮和错误页
 “最近错误”列可查看详情。

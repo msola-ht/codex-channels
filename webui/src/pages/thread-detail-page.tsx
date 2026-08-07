@@ -12,7 +12,8 @@ export function ThreadDetailPage() {
   const turns = useThreadTurns(id)
 
   const error = run.error ?? turns.error
-  const loading = run.loading || run.data === null || turns.loading || turns.data === null
+  const loading = error === null
+    && (run.loading || turns.loading || run.data === null || turns.data === null)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-6">
@@ -22,17 +23,17 @@ export function ThreadDetailPage() {
 
       {loading
         ? <PageSkeleton rows={4} />
-        : (
+        : run.data !== null && turns.data !== null ? (
           <>
             <div className="shrink-0">
               <ThreadRunSummary
-                latestTurn={run.data!.latestTurn}
-                threadAggregate={run.data!.threadAggregate}
+                latestTurn={run.data.latestTurn}
+                threadAggregate={run.data.threadAggregate}
               />
             </div>
-            <TurnTable turns={turns.data!.turns} />
+            <TurnTable turns={turns.data.turns} />
           </>
-        )}
+        ) : null}
     </div>
   )
 }

@@ -41,7 +41,8 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
   `components/overview/`、`components/threads/`、`components/metrics/`（指标区块），
   `components/requests/`（请求明细数据表格），只做组件组合与数据编排，不直接发请求；
 - 数据获取统一走 `hooks/`（`useApi` 系列，集中 loading/error/refetch），组件不直接
-  `fetch`；API 路径统一从 `src/lib/api.ts` 的 `API_PREFIX` 拼接；
+  `fetch`（唯一例外：`AuthGate` 在提交令牌前用原始请求验证一次）；API 路径统一从
+  `src/lib/api.ts` 的 `API_PREFIX` 拼接；
 - 类型从 `src/lib/types.ts` 转出，格式化（价格/Token/耗时）放 `src/lib/format.ts`；
 - 页面（`pages/`）只负责组合区块与路由参数，业务规则不写进页面；
 - 遵守 oxlint 规则：Hooks 必须在组件顶层调用，文件默认只导出组件

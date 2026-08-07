@@ -359,6 +359,7 @@ function handleRequests(environment, url, response) {
     500,
     100,
   );
+  const filter = parseRequestFilter(url);
   const store = openMetricsStore(environment, range.endAtMs);
   try {
     const page = store.page({
@@ -368,6 +369,7 @@ function handleRequests(environment, url, response) {
       limit,
       sortKey: sort.key,
       sortDirection: sort.direction,
+      filter,
     });
     sendJson(response, 200, {
       range,
@@ -375,6 +377,7 @@ function handleRequests(environment, url, response) {
       records: page.records.map((record) =>
         enrichCosts(record, display, record.provider)),
       nextOffset: page.nextOffset,
+      total: page.matchedTotal,
     });
   } finally {
     store.close();
@@ -452,6 +455,16 @@ function parseRequestSort(url) {
     throw new ApiError(400, "invalid_direction", "direction 只支持 asc 或 desc");
   }
   return { key, direction };
+}
+
+function parseRequestFilter(url) {
+  const raw = url.searchParams.get("filter");
+  if (raw === null) return "";
+  const value = raw.trim();
+  if (value.length > 128) {
+    throw new ApiError(400, "invalid_filter", "filter 最多 128 个字符");
+  }
+  return value;
 }
 
 function parseBoundedInt(rawValue, name, minimum, maximum, fallback) {

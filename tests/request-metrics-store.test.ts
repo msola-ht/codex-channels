@@ -1083,6 +1083,71 @@ describe("SqliteModelRequestMetricsStore", () => {
     reader.close();
     writer.close();
   });
+
+  it("filters request pages across the whole range", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    store.record({
+      ...sample(),
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      status: "failed",
+      errorType: "usage_limit_reached",
+      errorMessage: "You've hit your usage limit",
+    });
+    store.record({
+      ...sample(),
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+      status: "completed",
+    });
+    store.record({
+      ...sample(),
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      status: "completed",
+    });
+
+    const byError = store.page({
+      startAtMs: 0,
+      endAtMs: Date.now() + 1,
+      limit: 10,
+      filter: "usage limit",
+    });
+    expect(byError.matchedTotal).toBe(1);
+    expect(byError.records).toHaveLength(1);
+    expect(byError.records[0]).toMatchObject({
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      errorType: "usage_limit_reached",
+    });
+
+    const byModel = store.page({
+      startAtMs: 0,
+      endAtMs: Date.now() + 1,
+      limit: 10,
+      filter: "deepseek",
+    });
+    expect(byModel.matchedTotal).toBe(1);
+    expect(byModel.records[0]?.provider).toBe("deepseek");
+
+    const literalWildcard = store.page({
+      startAtMs: 0,
+      endAtMs: Date.now() + 1,
+      limit: 10,
+      filter: "%",
+    });
+    expect(literalWildcard.matchedTotal).toBe(0);
+    expect(() => store.page({
+      startAtMs: 0,
+      endAtMs: Date.now() + 1,
+      limit: 10,
+      filter: "x".repeat(129),
+    })).toThrow(/最多 128/u);
+    store.close();
+  });
 });
 
 describe("BufferedModelRequestMetricsWriter", () => {

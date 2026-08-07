@@ -1,10 +1,4 @@
-import {
-  Activity,
-  ChevronsUpDownIcon,
-  Gauge,
-  MessagesSquare,
-  TriangleAlert,
-} from "lucide-react"
+import { ChevronsUpDownIcon, Gauge } from "lucide-react"
 import { useNavigate } from "react-router"
 
 import {
@@ -21,13 +15,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
-
-const switcherItems = [
-  { to: "/", label: "概览", icon: Gauge },
-  { to: "/threads", label: "Threads", icon: MessagesSquare },
-  { to: "/requests", label: "请求", icon: Activity },
-  { to: "/errors", label: "错误", icon: TriangleAlert },
-]
+import { navItems } from "@/lib/navigation"
 
 export function SidebarSwitcher() {
   const { isMobile } = useSidebar()
@@ -61,7 +49,7 @@ export function SidebarSwitcher() {
             <DropdownMenuLabel className="text-xs text-muted-foreground">
               页面
             </DropdownMenuLabel>
-            {switcherItems.map((item) => (
+            {navItems.map((item) => (
               <DropdownMenuItem
                 key={item.to}
                 onClick={() => navigate(item.to)}

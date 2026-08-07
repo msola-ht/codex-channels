@@ -27,7 +27,7 @@ import {
 } from "@/lib/format"
 import type { RequestRecord } from "@/lib/types"
 
-const TABLE_STATE_KEY = "codex-webui:requests-table-state-v2"
+const TABLE_STATE_KEY = "codex-webui:requests-table-state-v3"
 
 const COLUMN_LABELS: Record<string, string> = {
   time: "时间",
@@ -49,7 +49,6 @@ const COLUMN_LABELS: Record<string, string> = {
 const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
   operation: false,
   http: false,
-  error: false,
   reasoningOutput: false,
   ttft: false,
   duration: false,
@@ -69,6 +68,8 @@ export function RequestsTable({
   sorting,
   onSortingChange,
   onFilterChange,
+  filter,
+  total,
 }: {
   records: RequestRecord[]
   pageNumber: number
@@ -80,7 +81,9 @@ export function RequestsTable({
   onPageSizeChange: (pageSize: number) => void
   sorting: SortingState
   onSortingChange: (sorting: SortingState) => void
-  onFilterChange?: () => void
+  onFilterChange?: (filter: string) => void
+  filter: string
+  total: number
 }) {
   const { currency } = useCurrency()
   const { language } = useLanguage()
@@ -355,7 +358,7 @@ export function RequestsTable({
     <DataTable
       title="记录"
       description={({ pageNumber: currentPage }) =>
-        `当前页 ${records.length} 条 · 第 ${currentPage} 页 · 排序作用于全部记录`
+        `共 ${total} 条匹配 · 当前页 ${records.length} 条 · 第 ${currentPage} 页`
       }
       columns={columns}
       data={records}
@@ -363,9 +366,9 @@ export function RequestsTable({
       columnLabels={COLUMN_LABELS}
       defaultColumnVisibility={DEFAULT_VISIBLE_COLUMNS}
       filterPlaceholder="筛选 Provider / 模型 / 状态 / 错误"
-      filterHint="仅当前已加载页"
-      emptyText="暂无记录"
-      noMatchText="当前页无匹配记录"
+      filterHint="全库筛选"
+      emptyText={filter.trim() === "" ? "暂无记录" : "无匹配记录"}
+      noMatchText="无匹配记录"
       pagination={{
         mode: "server",
         pageNumber,
@@ -379,6 +382,7 @@ export function RequestsTable({
         sorting,
         onSortingChange,
         onFilterChange,
+        serverTotal: total,
       }}
     />
   )

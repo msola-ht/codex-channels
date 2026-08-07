@@ -348,6 +348,7 @@ export interface ModelRequestMetricsPageQuery {
   limit: number;
   sortKey?: ModelRequestMetricsSortKey;
   sortDirection?: "asc" | "desc";
+  filter?: string;
 }
 
 export type ModelRequestMetricsSortKey =
@@ -371,6 +372,7 @@ export interface StoredModelRequestMetricsPage {
   endAtMs: number;
   records: StoredModelRequestMetric[];
   nextOffset: number | null;
+  matchedTotal: number;
 }
 
 export interface StoredModelRequestMetricsErrorGroup {

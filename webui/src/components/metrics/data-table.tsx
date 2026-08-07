@@ -147,6 +147,7 @@ export interface DataTableDescriptionInfo {
   matched: number
   pageSize: number
   pageNumber: number | null
+  serverTotal?: number
 }
 
 type DataTablePagination =
@@ -168,7 +169,8 @@ type DataTablePagination =
       pageSizeOptions?: number[]
       sorting: SortingState
       onSortingChange: (sorting: SortingState) => void
-      onFilterChange?: () => void
+      onFilterChange?: (filter: string) => void
+      serverTotal?: number
     }
 
 export interface DataTableProps<TData extends RowData> {
@@ -201,9 +203,7 @@ export function DataTable<TData extends RowData>({
   pagination,
 }: DataTableProps<TData>) {
   const server = pagination.mode === "server"
-  const pageSizeOptions = pagination.mode === "server"
-    ? pagination.pageSizeOptions ?? DEFAULT_PAGE_SIZE_OPTIONS
-    : pagination.pageSizeOptions ?? DEFAULT_PAGE_SIZE_OPTIONS
+  const pageSizeOptions = pagination.pageSizeOptions ?? DEFAULT_PAGE_SIZE_OPTIONS
   const [columnVisibility, setColumnVisibility] =
     usePersistentTableState<ColumnVisibilityState>(
       storageKey,
@@ -229,6 +229,12 @@ export function DataTable<TData extends RowData>({
   )
 
   const sorting = server ? pagination.sorting : clientSorting
+  const onFilterChangeRef = React.useRef<((filter: string) => void) | undefined>(
+    undefined,
+  )
+  onFilterChangeRef.current = pagination.mode === "server"
+    ? pagination.onFilterChange
+    : undefined
   const table = useTable({
     features: dataTableFeatures,
     columns,
@@ -266,8 +272,21 @@ export function DataTable<TData extends RowData>({
   const queryValue =
     (table.state.globalFilter as string | undefined) ?? ""
   const filteredRows = server
-    ? table.getFilteredRowModel().rows
+    ? table.getCoreRowModel().rows
     : table.getSortedRowModel().rows
+  const matched = server
+    ? pagination.serverTotal ?? filteredRows.length
+    : filteredRows.length
+  const total = server
+    ? pagination.serverTotal ?? data.length
+    : data.length
+
+  React.useEffect(() => {
+    // 挂载时把持久化的筛选同步到服务端，保证刷新后仍按上次条件全库筛选。
+    onFilterChangeRef.current?.(queryValue)
+    // 仅挂载时同步一次；后续变更由 handleFilterChange 通知。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const pageSize = server ? pagination.pageSize : clientPageSize
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize))
@@ -284,7 +303,7 @@ export function DataTable<TData extends RowData>({
   const handleFilterChange = (value: string) => {
     setGlobalFilter(value)
     if (server) {
-      pagination.onFilterChange?.()
+      pagination.onFilterChange?.(value)
     } else {
       setClientPage(0)
     }
@@ -296,10 +315,11 @@ export function DataTable<TData extends RowData>({
         <CardTitle>{title}</CardTitle>
         <CardDescription>
           {description({
-            total: data.length,
-            matched: filteredRows.length,
+            total,
+            matched,
             pageSize,
             pageNumber: server ? pagination.pageNumber : currentPage + 1,
+            serverTotal: server ? pagination.serverTotal : undefined,
           })}
         </CardDescription>
       </CardHeader>
@@ -398,7 +418,7 @@ export function DataTable<TData extends RowData>({
         <div className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <p className="text-sm text-muted-foreground">
             已选 {table.getFilteredSelectedRowModel().rows.length} 条 · 匹配{" "}
-            {filteredRows.length} 条
+            {matched} 条
           </p>
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">

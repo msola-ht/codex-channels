@@ -494,16 +494,49 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       throw new Error("模型请求指标排序无效");
     }
     const order = sortDirection.toUpperCase();
+    const filter = query.filter?.trim() ?? "";
+    if (filter.length > 128) {
+      throw new Error("模型请求指标筛选关键字最多 128 个字符");
+    }
+    const pattern = filter.length === 0
+      ? ""
+      : `%${filter.replace(/[\\%_]/gu, (character) => `\\${character}`)}%`;
+    const filterSql = pattern.length === 0
+      ? ""
+      : ` AND (
+          provider LIKE ? ESCAPE '\\'
+          OR model LIKE ? ESCAPE '\\'
+          OR operation LIKE ? ESCAPE '\\'
+          OR status LIKE ? ESCAPE '\\'
+          OR error_type LIKE ? ESCAPE '\\'
+          OR error_code LIKE ? ESCAPE '\\'
+          OR error_message LIKE ? ESCAPE '\\'
+        )`;
+    const filterParams = pattern.length === 0
+      ? []
+      : Array.from({ length: 7 }, () => pattern);
+    const matchedTotal = (this.database.prepare(`
+      SELECT COUNT(*) AS n
+      FROM model_request_metrics_enriched
+      WHERE recorded_at_ms >= ?
+        AND recorded_at_ms < ?${filterSql}
+    `).get(
+      query.startAtMs,
+      query.endAtMs,
+      ...filterParams,
+    ) as { n: number }).n;
     const rows = this.database.prepare(`
       SELECT *
       FROM model_request_metrics_enriched
       WHERE recorded_at_ms >= ?
         AND recorded_at_ms < ?
+        ${filterSql}
       ORDER BY ${sortExpression} ${order}, id ${order}
       LIMIT ? OFFSET ?
     `).all(
       query.startAtMs,
       query.endAtMs,
+      ...filterParams,
       query.limit + 1,
       offset,
     ) as unknown as MetricRow[];
@@ -514,6 +547,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       endAtMs: query.endAtMs,
       records: pageRows.map(toStoredMetric),
       nextOffset: hasMore ? offset + query.limit : null,
+      matchedTotal,
     };
   }
 

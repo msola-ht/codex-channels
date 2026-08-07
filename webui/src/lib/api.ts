@@ -142,6 +142,7 @@ export function fetchRequests(
   limit: number,
   sort: RequestSortKey,
   direction: RequestSortDirection,
+  filter: string,
   currency: DisplayCurrency | null,
   signal?: AbortSignal,
 ): Promise<RequestsResponse> {
@@ -152,6 +153,7 @@ export function fetchRequests(
     sort,
     direction,
   })
+  if (filter.trim() !== "") params.set("filter", filter.trim())
   if (currency !== null) params.set("currency", currency)
   return getJson<RequestsResponse>(`${API_PREFIX}/requests?${params.toString()}`, signal)
 }

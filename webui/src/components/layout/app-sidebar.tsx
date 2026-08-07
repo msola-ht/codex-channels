@@ -1,9 +1,3 @@
-import {
-  Activity,
-  Gauge,
-  MessagesSquare,
-  TriangleAlert,
-} from "lucide-react"
 import { NavLink, useLocation } from "react-router"
 
 import {
@@ -21,13 +15,7 @@ import {
 } from "@/components/ui/sidebar"
 import { SidebarFooterNav } from "@/components/layout/sidebar-footer"
 import { SidebarSwitcher } from "@/components/layout/sidebar-switcher"
-
-const menuItems = [
-  { to: "/", label: "概览", icon: Gauge },
-  { to: "/threads", label: "Threads", icon: MessagesSquare },
-  { to: "/requests", label: "请求", icon: Activity },
-  { to: "/errors", label: "错误", icon: TriangleAlert },
-]
+import { navItems } from "@/lib/navigation"
 
 export function AppSidebar() {
   const { pathname } = useLocation()
@@ -41,7 +29,7 @@ export function AppSidebar() {
           <SidebarGroupLabel>指标</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {menuItems.map((item) => (
+              {navItems.map((item) => (
                 <SidebarMenuItem key={item.to}>
                   <SidebarMenuButton
                     asChild

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
@@ -13,13 +13,20 @@ export function RequestsPage() {
   const [offset, setOffset] = useState(0)
   const [pageSize, setPageSize] = useState(50)
   const [pageNumber, setPageNumber] = useState(1)
+  const [filterText, setFilterText] = useState("")
+  const [filter, setFilter] = useState("")
   const { sorting, setSorting, sort, direction } = useRequestSorting()
+  useEffect(() => {
+    const timer = setTimeout(() => setFilter(filterText), 300)
+    return () => clearTimeout(timer)
+  }, [filterText])
   const { data, loading, error } = useRequests(
     range,
     offset,
     pageSize,
     sort,
     direction,
+    filter,
   )
   const records = useMemo(() => data?.records ?? [], [data])
 
@@ -73,10 +80,13 @@ export function RequestsPage() {
             setOffset(0)
             setPageNumber(1)
           }}
-          onFilterChange={() => {
+          onFilterChange={(value) => {
+            setFilterText(value)
             setOffset(0)
             setPageNumber(1)
           }}
+          filter={filter}
+          total={data.total}
         />
       )}
     </div>
