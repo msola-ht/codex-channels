@@ -58,6 +58,7 @@ import {
 import { WeixinReplyContextStore } from "./reply-context-store.js";
 import {
   formatWeixinCommandText,
+  renderWeixinSubagentCompleted,
   renderWeixinTurnCompleted,
 } from "./command-renderer.js";
 import { formatWeixinFinalText } from "./final-text-format.js";
@@ -380,6 +381,17 @@ export class WeixinOutbox implements SurfaceOutputPort {
         );
       case "plan.updated":
         return null;
+      case "subagent.spawned":
+        return null;
+      case "subagent.completed":
+        return formatWeixinCommandText(
+          renderWeixinSubagentCompleted(
+            event,
+            this.options.priceCurrency,
+            this.options.exchangeRate?.() ?? null,
+          ),
+          { structuredFields: true },
+        );
       default:
         return null;
     }

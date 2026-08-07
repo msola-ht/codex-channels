@@ -31,6 +31,7 @@ import {
 } from "../conversation-command-format.js";
 import {
   createStartupPresentation,
+  createSubagentCompletedPresentation,
   createTurnCompletedPresentation,
   renderStructuredLifecyclePresentation,
   type LifecyclePresentation,
@@ -102,6 +103,18 @@ export function renderWeixinTurnCompleted(
 ): string {
   return renderWeixinLifecyclePresentation(
     createTurnCompletedPresentation(event, priceCurrency, exchangeRate, debug),
+  );
+}
+
+export function renderWeixinSubagentCompleted(
+  event: Extract<OutputEvent, { type: "subagent.completed" }>,
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency,
+  exchangeRate?: ExchangeRateSnapshot | null,
+): string {
+  return renderWeixinLifecyclePresentation(
+    createSubagentCompletedPresentation(event, priceCurrency, exchangeRate),
   );
 }
 

@@ -157,7 +157,9 @@ webui/src/
 支持当前已加载页的搜索筛选、列显隐和行选择，表格在视口内内部滚动，输入、输出与
 费用列悬浮显示明细；请求明细的列排序作用于所选时间范围的全部记录，再由服务端偏移
 分页，每页条数支持 10–500。Threads 的“开始时间”表示指标库中该 Thread 首个请求的
-开始时间，不等同于 App Server 中 Thread 对象的创建时间。
+开始时间，不等同于 App Server 中 Thread 对象的创建时间；Threads 的“类型”列把已由
+Gateway 捕获到 `subAgentActivity` 通知的线程标注为“子代理”，其余显示“主会话”，
+子代理标记与请求和费用统计一同持久化在指标库中。
 
 部署：仓库根目录 `npm run install:global` 会自动安装 webui 依赖并构建
 `webui/dist/`，产物随 npm 包发布，由 `codexc webui` 托管。

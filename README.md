@@ -148,6 +148,18 @@ codexc service restart all
 拒绝，此时应先切换到支持图片的模型。配置文件、跨提供商切换行为、TUI 使用方式和账户指标说明见
 [`DeepSeek 使用说明`](docs/deepseek.md)。
 
+切换模式还可以把 DeepSeek 注册为 Codex 子代理角色，让 multi_agent_v2 子代理请求自动计入
+模型指标与费用统计：
+
+```bash
+codexc agents enable-deepseek    # 开启 multi_agent_v2 并注册 agents.ds 角色
+codexc agents status             # 查看当前状态
+codexc agents disable-deepseek   # 移除角色并关闭 multi_agent_v2
+```
+
+角色文件由 App Server 服务启动时生成、退出时清理，不写 API Key；详见
+[`DeepSeek 使用说明`](docs/deepseek.md)。
+
 需要让不支持图片的模型处理图片时，先在 `codexc setup` 的“模型渠道 → 第三方 API”中添加一个
 Responses 中转接口和独立 API Key，再到“图片识别”中选择该提供商与模型 ID。可保存多个中转并
 显式切换；这些中转只供图片识别等直接 API 功能使用，不会加入 `/model` 或 Codex App Server。

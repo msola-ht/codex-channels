@@ -40,6 +40,7 @@ describe("ProviderMetricsComposition", () => {
       writer: new BufferedModelRequestMetricsWriter({
         record,
         close,
+        recordSubagentThread: () => undefined,
         count: () => 0,
         recent: () => [],
         aggregate: () => emptyMetricsReport(),
@@ -88,6 +89,7 @@ describe("ProviderMetricsComposition", () => {
       writer: new BufferedModelRequestMetricsWriter({
         record,
         close: () => undefined,
+        recordSubagentThread: () => undefined,
         count: () => 0,
         recent: () => [],
         aggregate: () => emptyMetricsReport(),
@@ -135,6 +137,7 @@ describe("ProviderMetricsComposition", () => {
       writer: new BufferedModelRequestMetricsWriter({
         record,
         close: () => undefined,
+        recordSubagentThread: () => undefined,
         count: () => 0,
         recent: () => [],
         aggregate: () => emptyMetricsReport(),
@@ -239,6 +242,7 @@ describe("ProviderMetricsComposition", () => {
       writer: new BufferedModelRequestMetricsWriter({
         record,
         close: () => undefined,
+        recordSubagentThread: () => undefined,
         count: () => 0,
         recent: () => [],
         aggregate: () => emptyMetricsReport(),

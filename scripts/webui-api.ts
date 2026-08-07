@@ -111,6 +111,7 @@ export interface ThreadListItem {
   provider: string | null
   model: string | null
   reasoningEffort: string | null
+  agentPath: string | null
   turnCount: number
   requestCount: number
   inputTokens: number

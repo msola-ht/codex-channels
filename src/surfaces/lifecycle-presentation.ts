@@ -184,6 +184,79 @@ export function createTurnStartedPresentation(
   };
 }
 
+export function createSubagentCompletedPresentation(
+  event: Extract<OutputEvent, { type: "subagent.completed" }>,
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency,
+  exchangeRate?: ExchangeRateSnapshot | null,
+): LifecyclePresentation {
+  const currency = priceCurrency?.(event.modelProvider) ?? "usd";
+  const fields: LifecyclePresentationField[] = [];
+  const cost = formatSubagentCost(
+    event,
+    currency,
+    exchangeRate ?? null,
+  );
+  if (event.model) {
+    fields.push({ label: "模型", value: event.model });
+  }
+  if (event.modelProvider) {
+    fields.push({
+      label: "提供商",
+      value: formatCodexProviderLabel(event.modelProvider),
+    });
+  }
+  fields.push({ label: "模型请求", value: `${event.requestCount} 次` });
+  fields.push({
+    title: "Token",
+    value: formatTokenCount(event.inputTokens + event.outputTokens),
+    fields: [
+      { label: "输入", value: formatTokenCount(event.inputTokens) },
+      { label: "输出", value: formatTokenCount(event.outputTokens) },
+    ],
+  });
+  if (event.durationMs > 0) {
+    fields.push({ label: "耗时", value: formatElapsedDuration(event.durationMs) });
+  }
+  if (cost !== null) {
+    fields.push({ label: "费用", value: cost });
+  }
+  return {
+    title: event.status === "failed"
+      ? `子代理失败 · ${subagentTaskName(event.agentPath)}`
+      : `子代理完成 · ${subagentTaskName(event.agentPath)}`,
+    fields,
+  };
+}
+
+function subagentTaskName(agentPath: string): string {
+  const normalized = agentPath.replace(/\/+$/u, "");
+  const separator = Math.max(normalized.lastIndexOf("/"), normalized.lastIndexOf("\\"));
+  return separator >= 0 ? normalized.slice(separator + 1) : normalized;
+}
+
+function formatSubagentCost(
+  event: Extract<OutputEvent, { type: "subagent.completed" }>,
+  currency: DisplayPriceCurrency,
+  exchangeRate: ExchangeRateSnapshot | null,
+): string | null {
+  if (event.totalCostNanos === null || event.pricingCurrency === null) {
+    return event.requestCount === 0 ? null : `暂无价格快照（计价 0/${event.requestCount}）`;
+  }
+  if (currency === "cny" && event.pricingCurrency === "USD" && exchangeRate) {
+    const converted = Math.round(event.totalCostNanos * exchangeRate.usdToCny);
+    return Number.isSafeInteger(converted)
+      ? formatCurrencyNanos("CNY", converted)
+      : formatCurrencyNanos(event.pricingCurrency, event.totalCostNanos);
+  }
+  const equivalent = event.pricingCurrency === "USD" && exchangeRate
+    ? formatCnyEquivalent(event.totalCostNanos, exchangeRate)
+    : null;
+  return `${formatCurrencyNanos(event.pricingCurrency, event.totalCostNanos)}`
+    + `${equivalent === null ? "" : `（${equivalent}）`}`;
+}
+
 export function createTurnCompletedPresentation(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
   priceCurrency?: (

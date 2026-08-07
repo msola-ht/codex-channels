@@ -306,6 +306,46 @@ describe("ConversationCore", () => {
       .toHaveProperty("contextCompactionCount", 2);
   });
 
+  it("publishes subagent spawn activity for a bound parent thread", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+    const core = new ConversationCore({
+      allBindings: () => [],
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+
+    handleNotification(core, {
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "subAgentActivity",
+          id: "item-1",
+          kind: "started",
+          agentThreadId: "subagent-thread-1",
+          agentPath: "/root/ds_probe",
+        },
+      },
+    });
+    await output.close();
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "subagent.spawned",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      agentThreadId: "subagent-thread-1",
+      agentPath: "/root/ds_probe",
+    }));
+  });
+
   it("does not invent a successful completion for a malformed turn status", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const events: OutputEvent[] = [];

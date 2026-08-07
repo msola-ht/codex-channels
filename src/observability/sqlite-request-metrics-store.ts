@@ -287,6 +287,7 @@ interface ErrorGroupRow {
 export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore {
   private readonly database: DatabaseSync;
   private readonly insert?: StatementSync;
+  private readonly insertSubagentThread?: StatementSync;
   private readonly lock?: RequestMetricsDatabaseLock;
   private closed = false;
   private rowCount = 0;
@@ -345,6 +346,14 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
+      `);
+      this.insertSubagentThread = this.database.prepare(`
+        INSERT INTO subagent_threads (thread_id, parent_thread_id, agent_path, recorded_at_ms)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(thread_id) DO UPDATE SET
+          parent_thread_id = excluded.parent_thread_id,
+          agent_path = excluded.agent_path,
+          recorded_at_ms = excluded.recorded_at_ms
       `);
       this.cleanup(nowMs);
     } catch (error) {
@@ -409,6 +418,28 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     if (this.recordsSinceCleanup >= cleanupInterval) {
       this.cleanup(recordedAtMs);
     }
+  }
+
+  recordSubagentThread(details: {
+    agentThreadId: string;
+    parentThreadId: string;
+    agentPath: string;
+  }): void {
+    const { agentThreadId, parentThreadId, agentPath } = details;
+    this.requireOpen();
+    if (!this.insertSubagentThread) {
+      throw new Error("只读模型请求指标数据库不能写入");
+    }
+    if (!agentThreadId.trim() || agentThreadId.length > 128) {
+      throw new Error("子代理 Thread ID 无效");
+    }
+    if (!parentThreadId.trim() || parentThreadId.length > 128) {
+      throw new Error("子代理父 Thread ID 无效");
+    }
+    if (!agentPath.trim() || agentPath.length > 512) {
+      throw new Error("子代理路径无效");
+    }
+    this.insertSubagentThread.run(agentThreadId, parentThreadId, agentPath, Date.now());
   }
 
   recent(limit: number): StoredModelRequestMetric[] {
@@ -886,7 +917,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     this.requireOpen();
     const rows = this.database.prepare(`
       SELECT
-        thread_id,
+        model_request_metrics_enriched.thread_id AS thread_id,
         (
           SELECT provider
           FROM model_request_metrics_enriched AS latest_provider
@@ -930,11 +961,14 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           AS total_cost_nanos,
         ${compactAggregateSql},
         MIN(request_started_at_ms) AS first_request_started_at_ms,
-        MAX(recorded_at_ms) AS recorded_at_ms
+        MAX(model_request_metrics_enriched.recorded_at_ms) AS recorded_at_ms,
+        subagent.agent_path AS agent_path
       FROM model_request_metrics_enriched
-      WHERE thread_id IS NOT NULL
+      LEFT JOIN subagent_threads AS subagent
+        ON subagent.thread_id = model_request_metrics_enriched.thread_id
+      WHERE model_request_metrics_enriched.thread_id IS NOT NULL
         AND turn_id IS NOT NULL
-      GROUP BY thread_id
+      GROUP BY model_request_metrics_enriched.thread_id
       ORDER BY MAX(id) DESC
     `).all() as unknown as Array<CompactSummaryRow & {
       thread_id: string;
@@ -951,12 +985,14 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       total_cost_nanos: number | null;
       first_request_started_at_ms: number;
       recorded_at_ms: number;
+      agent_path: string | null;
     }>;
     return rows.map((row) => ({
       threadId: row.thread_id,
       provider: row.provider ?? null,
       model: row.model ?? null,
       reasoningEffort: row.reasoning_effort ?? null,
+      agentPath: row.agent_path ?? null,
       turnCount: row.turn_count,
       requestCount: row.request_count,
       inputTokens: row.input_tokens ?? 0,
@@ -1101,6 +1137,12 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       }
       if (!version) {
         this.database.exec(`
+          CREATE TABLE subagent_threads (
+            thread_id TEXT PRIMARY KEY,
+            parent_thread_id TEXT NOT NULL,
+            agent_path TEXT NOT NULL,
+            recorded_at_ms INTEGER NOT NULL
+          );
           CREATE TABLE model_request_metrics (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             provider TEXT NOT NULL,

@@ -368,6 +368,39 @@ describe("SqliteModelRequestMetricsStore", () => {
     store.close();
   });
 
+  it("annotates subagent threads in the thread list", () => {
+    const directory = temporaryDirectory();
+    const path = join(directory, "request-metrics.sqlite3");
+    const store = new SqliteModelRequestMetricsStore(path);
+    store.record({
+      ...sample(),
+      threadId: "subagent-thread-1",
+      turnId: "turn-1",
+      model: "deepseek-v4-flash",
+    });
+    expect(store.threadList()[0]).toMatchObject({
+      threadId: "subagent-thread-1",
+      agentPath: null,
+    });
+
+    store.recordSubagentThread({
+      agentThreadId: "subagent-thread-1",
+      parentThreadId: "parent-thread-1",
+      agentPath: "/root/ds_probe",
+    });
+    expect(store.threadList()[0]).toMatchObject({
+      threadId: "subagent-thread-1",
+      agentPath: "/root/ds_probe",
+    });
+
+    expect(() => store.recordSubagentThread({
+      agentThreadId: "",
+      parentThreadId: "parent-thread-1",
+      agentPath: "/root/ds_probe",
+    })).toThrow("Thread ID 无效");
+    store.close();
+  });
+
   it("summarizes the latest Turn and latest direct API request for one Thread", () => {
     const directory = temporaryDirectory();
     const store = new SqliteModelRequestMetricsStore(
@@ -1156,6 +1189,7 @@ describe("BufferedModelRequestMetricsWriter", () => {
     const record = vi.fn<ModelRequestMetricsStore["record"]>();
     const writer = new BufferedModelRequestMetricsWriter({
       record,
+      recordSubagentThread: () => undefined,
       recent: () => [],
       aggregate: () => emptyMetricsReport(),
       errors: () => emptyErrorReport(),
@@ -1182,6 +1216,7 @@ describe("BufferedModelRequestMetricsWriter", () => {
     });
     const writer = new BufferedModelRequestMetricsWriter({
       record,
+      recordSubagentThread: () => undefined,
       recent: () => [],
       aggregate: () => emptyMetricsReport(),
       errors: () => emptyErrorReport(),

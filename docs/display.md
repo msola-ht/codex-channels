@@ -75,6 +75,15 @@ OpenAI `/limits` 在额度响应包含 10,080 分钟周窗口和有效重置时�
 `/diff` 与操作结果保持原文。三渠道分别用飞书卡片 Markdown、Telegram
 HTML 和微信结构化字段渲染。
 
+`codexc metrics threads` 的会话列表增加“类型”列：Gateway 在绑定线程中观测到
+`subAgentActivity` 通知时，会把子代理线程 ID、父线程和代理路径写入指标库；被标注的线程
+显示“子代理 · <代理路径>”（如 `/root/ds_probe`），其余显示“主会话”。该标注持久化在
+指标库 `subagent_threads` 表中，`/metrics threads` 与 WebUI Threads 页面共用同一份数据。
+
+渠道完成通知：子代理线程结束（最后模型请求后约 5 秒无新请求）时，Gateway 向父会话推送
+“子代理完成”卡片，展示任务名、模型、请求次数、Token、耗时与费用；费用跟随全局价格显示，
+价格快照缺失时显示计价覆盖。
+
 ## 调试模式
 
 在 `codexc setup` 中选择“系统设置 → 调试模式”可全局开启或关闭脱敏调试信息。开启后会把

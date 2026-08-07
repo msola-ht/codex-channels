@@ -123,6 +123,27 @@ describe("Notification adapter", () => {
       phase: "final_answer",
     });
     expect(toConversationInputEvent({
+      method: "item/started",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "subAgentActivity",
+          id: "item-2",
+          kind: "started",
+          agentThreadId: "subagent-thread-1",
+          agentPath: "/root/ds_probe",
+        },
+      },
+    })).toEqual({
+      type: "item.subagentActivity",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-2",
+      agentThreadId: "subagent-thread-1",
+      agentPath: "/root/ds_probe",
+    });
+    expect(toConversationInputEvent({
       method: "thread/status/changed",
       params: {
         threadId: "thread-1",

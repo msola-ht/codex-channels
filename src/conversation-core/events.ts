@@ -251,6 +251,8 @@ export type OutputEvent =
   | { type: "text.completed"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null; background?: boolean }
   | { type: "operation.updated"; target: ConversationTarget; threadId: string; turnId: string; operation: OperationUpdate; background?: boolean }
   | { type: "plan.updated"; target: ConversationTarget; threadId: string; turnId: string; explanation: string | null; steps: TurnPlanStep[]; background?: boolean }
+  | { type: "subagent.spawned"; target: ConversationTarget; threadId: string; turnId: string; agentThreadId: string; agentPath: string; background?: boolean }
+  | { type: "subagent.completed"; target: ConversationTarget; parentThreadId: string; agentThreadId: string; agentPath: string; model: string | null; modelProvider: string | null; status: "completed" | "failed"; requestCount: number; inputTokens: number; outputTokens: number; totalCostNanos: number | null; pricingCurrency: string | null; durationMs: number }
   | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: TurnStatus; error?: string; durationMs?: number; timing?: TurnOutputTiming; tokenUsage?: ThreadTokenUsage; model?: string; modelProvider?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; goal?: ThreadGoal; contextCompactionCount?: number; sessionReferenceCost?: ReferenceCostSummary; gitBranch?: string | undefined; background?: boolean }
   | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string; background?: boolean }
   | { type: "connection.lost"; target: ConversationTarget; threadId: string; message: string; background?: boolean }
@@ -264,6 +266,7 @@ export function isCriticalOutputEvent(event: OutputEvent): boolean {
     event.type !== "vision.started" &&
     event.type !== "vision.progress" &&
     event.type !== "plan.updated" &&
+    event.type !== "subagent.spawned" &&
     !(event.type === "operation.updated" && event.operation.status === "running");
 }
 

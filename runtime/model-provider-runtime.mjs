@@ -1,10 +1,13 @@
 import {
   closeSync,
   constants,
+  existsSync,
   fstatSync,
   openSync,
   readFileSync,
   realpathSync,
+  unlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
@@ -162,6 +165,61 @@ export function loadDeepseekAccountCredential(environment = process.env) {
   if (managed !== undefined) return managed.apiKey;
   const configPath = join(codexHomePath(environment), "config.toml");
   return readProviderProfile(configPath, deepseekProvider, { requireSelection: false }).apiKey;
+}
+
+export function managedModelProviderRoleConfigPath(environment = process.env) {
+  return join(codexHomePath(environment), "codex-connect-ds-subagent.config.toml");
+}
+
+export function writeManagedModelProviderRoleConfig(
+  environment = process.env,
+  { baseUrl } = {},
+) {
+  const profile = loadManagedProviderProfile(environment, { requireLaunchConfig: true });
+  if (profile === undefined) {
+    throw new Error("DeepSeek 切换模式配置不存在，无法生成子代理角色");
+  }
+  let url;
+  try {
+    url = new URL(baseUrl ?? profile.baseUrl);
+  } catch {
+    throw new Error("DeepSeek 子代理 base_url 无效");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("DeepSeek 子代理 base_url 只支持 HTTP(S)");
+  }
+  const lines = [
+    `model = ${tomlString(profile.model)}`,
+    `model_provider = ${tomlString(profile.provider)}`,
+    `model_reasoning_effort = ${tomlString(profile.reasoningEffort)}`,
+    `model_catalog_json = ${tomlString(profile.catalogPath)}`,
+    ...(profile.autoCompactLimit === undefined
+      ? []
+      : [
+          `model_auto_compact_token_limit = ${profile.autoCompactLimit}`,
+          `model_auto_compact_token_limit_scope = ${tomlString(
+            profile.autoCompactScope ?? "total",
+          )}`,
+        ]),
+    "",
+    "[model_providers.deepseek]",
+    `name = ${tomlString(profile.name)}`,
+    `base_url = ${tomlString(url.toString())}`,
+    `wire_api = ${tomlString(profile.wireApi)}`,
+    `env_key = ${tomlString(deepseekApiKeyEnvironmentKey)}`,
+    "requires_openai_auth = false",
+    "",
+  ].join("\n");
+  writeFileSync(managedModelProviderRoleConfigPath(environment), lines, { mode: 0o600 });
+}
+
+export function removeManagedModelProviderRoleConfig(environment = process.env) {
+  const path = managedModelProviderRoleConfigPath(environment);
+  try {
+    if (existsSync(path)) unlinkSync(path);
+  } catch {
+    // 角色文件是辅助产物，清理失败不阻断服务退出。
+  }
 }
 
 function loadManagedProviderProfile(environment, { requireLaunchConfig = false } = {}) {
@@ -356,6 +414,10 @@ function readManagedMarker(codexHome) {
 
 function codexHomePath(environment) {
   return resolve(environment.CODEX_HOME?.trim() || join(homedir(), ".codex"));
+}
+
+function tomlString(value) {
+  return JSON.stringify(String(value));
 }
 
 function record(value) {

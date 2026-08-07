@@ -48,6 +48,7 @@ import { telegramErrorMetadata } from "./error-metadata.js";
 import { telegramDefaultAccountId } from "./constants.js";
 import {
   renderTelegramLifecyclePresentation,
+  renderTelegramSubagentCompleted,
   splitTelegramText,
 } from "./format.js";
 import { formatMarkdownAsTelegramHtml } from "./markdown-format.js";
@@ -394,6 +395,24 @@ export class TelegramOutbox {
         }
         return;
       }
+      case "subagent.spawned":
+        return;
+      case "subagent.completed":
+        this.enqueue(
+          chatId,
+          () => this.sendPanel(
+            chatId,
+            renderTelegramSubagentCompleted(
+              event,
+              this.options.priceCurrency,
+              this.options.exchangeRate?.() ?? null,
+            ),
+            undefined,
+            true,
+          ).then(() => undefined),
+          false,
+        );
+        return;
       case "turn.completed": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
         this.planMessages.delete(turnKey);

@@ -50,6 +50,7 @@ import {
 import {
   ConversationCore,
   surfaceAccountKey,
+  type ConversationTarget,
   type OutputEvent,
 } from "../conversation-core/index.js";
 import { EventBus } from "../event-bus/index.js";
@@ -100,6 +101,13 @@ export class GatewayApplication {
   private readonly bindings: SqliteBindingStore;
   private readonly workspaces: WorkspaceRegistry;
   private readonly workspacePermissions: TomlWorkspacePermissionWriter | undefined;
+  private readonly activeSubagents = new Map<string, {
+    target: ConversationTarget;
+    parentThreadId: string;
+    agentPath: string;
+    timer: NodeJS.Timeout | undefined;
+    reported: boolean;
+  }>();
   private removeRpcNotification: (() => void) | undefined;
   private removeRpcDisconnect: (() => void) | undefined;
   private startTask: Promise<void> | undefined;
@@ -208,12 +216,118 @@ export class GatewayApplication {
       ],
       socketPath: (provider) =>
         providerMetricsSocketPath(config.codexSocketPath, provider),
-      writer: metricsWriter,
+      writer: {
+        enqueue: (sample) => {
+          metricsWriter.enqueue(sample);
+          if (sample.threadId) {
+            scheduleSubagentCompletion(sample.threadId);
+          }
+        },
+        close: () => metricsWriter.close(),
+      },
       pricingResolver: this.modelPricing,
       resolveModelSettings: (threadId) =>
         this.router.modelSettingsForThread(threadId),
       onModelTiming: (event) => this.core.handle(event),
       logger,
+    });
+    const subagentCompletionDelayMs = 5_000;
+    const scheduleSubagentCompletion = (agentThreadId: string): void => {
+      const entry = this.activeSubagents.get(agentThreadId);
+      if (!entry || entry.reported) {
+        return;
+      }
+      if (entry.timer) {
+        clearTimeout(entry.timer);
+      }
+      entry.timer = setTimeout(() => {
+        entry.timer = undefined;
+        if (entry.reported) {
+          return;
+        }
+        let summary;
+        try {
+          summary = metricsStore.threadSummary(agentThreadId);
+        } catch (error) {
+          logger.warn(
+            { err: error, agentThreadId },
+            "子代理完成统计读取失败",
+          );
+          return;
+        }
+        const aggregate = summary.threadAggregate;
+        const latest = summary.latestTurn;
+        if (!aggregate || aggregate.requestCount === 0) {
+          return;
+        }
+        entry.reported = true;
+        this.activeSubagents.delete(agentThreadId);
+        logger.info(
+          {
+            agentThreadId,
+            agentPath: entry.agentPath,
+            requestCount: aggregate.requestCount,
+          },
+          "子代理完成卡片已生成",
+        );
+        this.output.publish({
+          type: "subagent.completed",
+          target: entry.target,
+          parentThreadId: entry.parentThreadId,
+          agentThreadId,
+          agentPath: entry.agentPath,
+          model: latest?.model ?? null,
+          modelProvider: latest?.provider ?? null,
+          status: (latest?.unsuccessfulRequestCount ?? 0) > 0
+            ? "failed"
+            : "completed",
+          requestCount: aggregate.requestCount,
+          inputTokens: aggregate.inputTokens,
+          outputTokens: aggregate.outputTokens,
+          totalCostNanos: aggregate.totalCostNanos,
+          pricingCurrency: aggregate.pricingCurrency,
+          durationMs: aggregate.requestDurationMs,
+        });
+      }, subagentCompletionDelayMs);
+      entry.timer.unref?.();
+    };
+    this.output.subscribe("subagent-metrics", (event) => {
+      if (event.type !== "subagent.spawned") {
+        return;
+      }
+      try {
+        metricsStore.recordSubagentThread({
+          agentThreadId: event.agentThreadId,
+          parentThreadId: event.threadId,
+          agentPath: event.agentPath,
+        });
+      } catch (error) {
+        logger.warn(
+          {
+            err: error,
+            threadId: event.threadId,
+            agentThreadId: event.agentThreadId,
+          },
+          "子代理指标标注写入失败",
+        );
+      }
+      if (!this.activeSubagents.has(event.agentThreadId)) {
+        this.activeSubagents.set(event.agentThreadId, {
+          target: event.target,
+          parentThreadId: event.threadId,
+          agentPath: event.agentPath,
+          timer: undefined,
+          reported: false,
+        });
+        logger.info(
+          { agentThreadId: event.agentThreadId, agentPath: event.agentPath },
+          "子代理活动已登记，等待完成卡片",
+        );
+      }
+      const entry = this.activeSubagents.get(event.agentThreadId);
+      if (entry && !entry.reported) {
+        scheduleSubagentCompletion(event.agentThreadId);
+      }
     });
     this.interactions = new InteractionRouter(logger);
     const models = new ModelSelectionService(
@@ -704,6 +818,12 @@ export class GatewayApplication {
     this.removeRpcNotification = undefined;
     this.removeRpcDisconnect?.();
     this.removeRpcDisconnect = undefined;
+    for (const entry of this.activeSubagents?.values() ?? []) {
+      if (entry.timer) {
+        clearTimeout(entry.timer);
+      }
+    }
+    this.activeSubagents?.clear();
     const failures: unknown[] = [];
     for (const [component, close] of [
       ["Surface", () => this.surfaceManager.stop()],

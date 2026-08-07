@@ -622,6 +622,15 @@ export class ConversationCore {
           operation: event.operation,
         });
         return;
+      case "item.subagentActivity":
+        this.publishForThread(event.threadId, {
+          type: "subagent.spawned",
+          threadId: event.threadId,
+          turnId: event.turnId,
+          agentThreadId: event.agentThreadId,
+          agentPath: event.agentPath,
+        });
+        return;
       case "turn.error":
         if (!event.willRetry) {
           this.errorsByTurn.set(event.turnId, event.message);

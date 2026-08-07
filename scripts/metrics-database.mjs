@@ -152,13 +152,13 @@ export function upgradeMetricsDatabase(
         schemaVersion: status.schemaVersion,
       };
     }
-    if (![3, 4, 5].includes(status.schemaVersion)) {
+    if (![3, 4, 5, 6].includes(status.schemaVersion)) {
       throw new Error(
         `指标数据库无法升级：当前 Schema ${status.schemaVersion ?? "unknown"}，`
-        + `仅支持 v3/v4/v5 升级到 v${modelRequestMetricsSchemaVersion}`,
+        + `仅支持 v3/v4/v5/v6 升级到 v${modelRequestMetricsSchemaVersion}`,
       );
     }
-    if (modelRequestMetricsSchemaVersion !== 6) {
+    if (modelRequestMetricsSchemaVersion !== 7) {
       throw new Error("指标数据库迁移脚本与 Schema 版本不一致，请检查版本常量");
     }
     checkpoint(status.databasePath);
@@ -192,6 +192,14 @@ export function upgradeMetricsDatabase(
           ALTER TABLE model_request_metrics ADD COLUMN error_message TEXT;
         `);
       }
+      statements.push(`
+        CREATE TABLE IF NOT EXISTS subagent_threads (
+          thread_id TEXT PRIMARY KEY,
+          parent_thread_id TEXT NOT NULL,
+          agent_path TEXT NOT NULL,
+          recorded_at_ms INTEGER NOT NULL
+        );
+      `);
       statements.push(`
         UPDATE schema_metadata SET value = ${modelRequestMetricsSchemaVersion}
           WHERE name = 'schema_version';
@@ -1123,6 +1131,7 @@ function printMetricsThreads(result, format, display = null) {
       ["provider", (thread) => thread.provider],
       ["model", (thread) => thread.model],
       ["reasoningEffort", (thread) => thread.reasoningEffort],
+      ["agentPath", (thread) => thread.agentPath],
       ["turnCount", (thread) => thread.turnCount],
       ["requestCount", (thread) => thread.requestCount],
       ["inputTokens", (thread) => thread.inputTokens],
@@ -1149,8 +1158,8 @@ function printMetricsThreads(result, format, display = null) {
   console.log("");
   const rateLine = exchangeRateLine(display);
   if (rateLine) console.log(`- ${rateLine}`);
-  console.log("| # | Thread | 模型 | 思考等级 | 对话数 | 请求数 | 总 Token | 总价 | 上下文压缩 | 最近记录 |");
-  console.log("| --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- |");
+  console.log("| # | Thread | 模型 | 思考等级 | 类型 | 对话数 | 请求数 | 总 Token | 总价 | 上下文压缩 | 最近记录 |");
+  console.log("| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- |");
   for (const [index, thread] of result.threads.entries()) {
     const cost = thread.totalCostNanos === null || thread.pricingCurrency === null
       ? "未知"
@@ -1161,6 +1170,9 @@ function printMetricsThreads(result, format, display = null) {
         markdownCell(thread.threadId),
         markdownCell(thread.model ?? "未观测"),
         markdownCell(thread.reasoningEffort ?? "模型默认"),
+        markdownCell(thread.agentPath === null
+          ? "主会话"
+          : `子代理 · ${thread.agentPath}`),
         String(thread.turnCount),
         String(thread.requestCount),
         formatTokenCount(thread.inputTokens + thread.outputTokens),

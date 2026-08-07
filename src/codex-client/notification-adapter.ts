@@ -344,6 +344,20 @@ function toItemEvent(
         }
       : undefined;
   }
+  if (item.type === "subAgentActivity") {
+    const agentThreadId = nonEmptyString(item.agentThreadId);
+    const agentPath = nonEmptyString(item.agentPath);
+    return agentThreadId && agentPath
+      ? {
+          type: "item.subagentActivity",
+          threadId,
+          turnId,
+          itemId,
+          agentThreadId,
+          agentPath,
+        }
+      : undefined;
+  }
   const operation = toOperationUpdate(item, phase);
   return operation
     ? { type: "item.operation.updated", threadId, turnId, operation }

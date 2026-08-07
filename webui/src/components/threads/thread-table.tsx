@@ -16,6 +16,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
+import { Badge } from "@/components/ui/badge"
 import { useCurrency } from "@/hooks/currency-context"
 import {
   formatCost,
@@ -40,6 +41,7 @@ export function ThreadTable({ threads }: { threads: ThreadListItem[] }) {
               <TableHead>Thread</TableHead>
               <TableHead>Provider</TableHead>
               <TableHead>模型</TableHead>
+              <TableHead>类型</TableHead>
               <TableHead>Turn</TableHead>
               <TableHead>请求</TableHead>
               <TableHead>输入 Token</TableHead>
@@ -64,6 +66,19 @@ export function ThreadTable({ threads }: { threads: ThreadListItem[] }) {
                 </TableCell>
                 <TableCell><ProviderBadge provider={thread.provider} /></TableCell>
                 <TableCell className="max-w-48 truncate">{thread.model ?? "—"}</TableCell>
+                <TableCell>
+                  {thread.agentPath === null ? (
+                    <span className="text-muted-foreground">主会话</span>
+                  ) : (
+                    <Badge
+                      variant="secondary"
+                      className="max-w-56"
+                      title={thread.agentPath}
+                    >
+                      子代理
+                    </Badge>
+                  )}
+                </TableCell>
                 <TableCell className="tabular-nums">{thread.turnCount}</TableCell>
                 <TableCell className="tabular-nums">{thread.requestCount}</TableCell>
                 <TableCell className="tabular-nums">{formatTokens(thread.inputTokens)}</TableCell>
@@ -82,7 +97,7 @@ export function ThreadTable({ threads }: { threads: ThreadListItem[] }) {
             ))}
             {threads.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={11} className="h-16 text-center text-muted-foreground">
+                <TableCell colSpan={12} className="h-16 text-center text-muted-foreground">
                   暂无会话记录
                 </TableCell>
               </TableRow>

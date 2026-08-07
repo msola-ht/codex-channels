@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createStartupPresentation,
+  createSubagentCompletedPresentation,
   createTurnCompletedPresentation,
   createTurnStartedPresentation,
   renderPlainLifecyclePresentation,
@@ -107,6 +108,62 @@ describe("shared Surface lifecycle presentation", () => {
       "账户状态：",
       "周限：剩余 63%",
     ].join("\n"));
+  });
+
+  it("renders a compact subagent completion card with metrics", () => {
+    const presentation = createSubagentCompletedPresentation({
+      type: "subagent.completed",
+      target: {
+        surface: "telegram" as const,
+        accountId: "default",
+        conversationId: "100",
+      },
+      parentThreadId: "thread-1",
+      agentThreadId: "subagent-thread-1",
+      agentPath: "/root/ds_annotate_probe",
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+      status: "completed",
+      requestCount: 1,
+      inputTokens: 20_000,
+      outputTokens: 3_000,
+      totalCostNanos: 237_000,
+      pricingCurrency: "USD",
+      durationMs: 5_558,
+    }, () => "usd", null);
+    const rendered = renderPlainLifecyclePresentation(presentation);
+
+    expect(rendered).toContain("子代理完成 · ds_annotate_probe");
+    expect(rendered).toContain("deepseek-v4-flash");
+    expect(rendered).toContain("模型请求：1 次");
+    expect(rendered).toContain("$0.000237");
+    expect(rendered).toContain("耗时：6秒");
+  });
+
+  it("converts the subagent completion cost to CNY when required", () => {
+    const presentation = createSubagentCompletedPresentation({
+      type: "subagent.completed",
+      target: {
+        surface: "weixin" as const,
+        accountId: "default",
+        conversationId: "100",
+      },
+      parentThreadId: "thread-1",
+      agentThreadId: "subagent-thread-1",
+      agentPath: "/root/ds_annotate_probe",
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+      status: "completed",
+      requestCount: 1,
+      inputTokens: 20_000,
+      outputTokens: 3_000,
+      totalCostNanos: 1_000_000_000,
+      pricingCurrency: "USD",
+      durationMs: 0,
+    }, () => "cny", { usdToCny: 7.2, effectiveAtMs: 1_700_000_000_000, source: "ecb" });
+    const rendered = renderPlainLifecyclePresentation(presentation);
+
+    expect(rendered).toContain("¥7.200000");
   });
 
   it("uses one Turn start and completion field order", () => {

@@ -106,6 +106,35 @@ HTTP/SSE、Responses WebSocket、压缩和模型目录请求，复用统一网�
 `openai_base_url` 上游。认证 Header、请求正文和响应正文只做内存转发，不写入指标或日志。
 Gateway 停止或重启时计时指标可能丢失，但模型请求不会因此中断。
 
+## 子代理角色
+
+切换模式可在 Codex 的 multi_agent_v2 中把 DeepSeek 作为子代理使用，并让子代理请求自动计入
+模型指标。启用后运行 `codexc service restart all` 生效：
+
+```bash
+codexc agents enable-deepseek
+codexc agents status
+codexc agents disable-deepseek
+```
+
+`enable-deepseek` 在 `~/.codex/config.toml` 中开启 `features.multi_agent_v2`，并注册名为 `ds`
+的 `agents.ds` 角色。角色文件 `~/.codex/codex-connect-ds-subagent.config.toml` 由 App Server
+服务启动时动态生成，指向本机 DeepSeek 统计代理，因此子代理请求会进入与直接 API 相同的指标、
+压缩和费用统计链路；服务退出时角色文件会被删除。角色文件只写模型、Provider 和 `env_key`
+引用，不写 API Key，认证密钥仍只进入 App Server 子进程环境。
+
+`disable-deepseek` 移除 `agents.ds` 角色并关闭 `multi_agent_v2`，角色文件由服务在退出或重启时
+清理。需要子代理时，主模型调用 `spawn_agent` 并选择角色 `ds`。
+
+子代理统计会在指标库中标注：Gateway 捕获父线程里的 `subAgentActivity` 通知后，把子代理
+线程 ID 和代理路径写入 `subagent_threads` 表，`codexc metrics threads` 与 WebUI Threads
+页面显示“子代理 · <代理路径>”。该标注需要指标库 Schema v7；升级前先停止 Gateway，再运行
+`codexc metrics upgrade`（自动备份，可回滚）。
+
+子代理完成后，Gateway 会在其线程最后模型请求结束后约 5 秒没有新请求时，向父会话推送一张
+“子代理完成”卡片，展示任务名、模型、请求次数、Token、耗时与费用（跟随全局价格显示）。
+卡片基于指标库数据生成，不依赖 App Server 订阅子代理线程。
+
 ## 应用配置
 
 完成安装、更新 API Key、切换模式或恢复后，从本机终端运行：

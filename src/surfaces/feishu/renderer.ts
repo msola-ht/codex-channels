@@ -36,6 +36,7 @@ import {
 import { formatSurfaceConfigurationChange } from "../configuration-change-format.js";
 import {
   createStartupPresentation,
+  createSubagentCompletedPresentation,
   createTurnCompletedPresentation,
   createTurnStartedPresentation,
   renderStructuredLifecyclePresentation,
@@ -198,7 +199,10 @@ export function renderFeishuOutput(
         : emptyCodexResponseText;
     case "operation.updated":
     case "plan.updated":
+    case "subagent.spawned":
       return null;
+    case "subagent.completed":
+      return renderFeishuSubagentCompleted(event, priceCurrency, exchangeRate);
     case "turn.completed":
       return renderFeishuTurnCompleted(event, priceCurrency, exchangeRate, debug);
     case "thread.status":
@@ -214,6 +218,18 @@ export function renderFeishuOutput(
     case "warning":
       return formatCodexWarning(visibleUpstreamMessage(event.message));
   }
+}
+
+function renderFeishuSubagentCompleted(
+  event: Extract<OutputEvent, { type: "subagent.completed" }>,
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency,
+  exchangeRate?: ExchangeRateSnapshot | null,
+): string {
+  return renderFeishuLifecyclePresentation(
+    createSubagentCompletedPresentation(event, priceCurrency, exchangeRate),
+  );
 }
 
 function renderFeishuTurnCompleted(

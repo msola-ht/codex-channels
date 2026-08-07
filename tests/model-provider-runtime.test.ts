@@ -1,4 +1,11 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtemp } from "node:fs/promises";
@@ -10,11 +17,14 @@ import {
   loadManagedProviderAppServer,
   loadOpenAiBaseUrl,
   loadPrimaryModelProvider,
+  managedModelProviderRoleConfigPath,
   providerAppServerSocketPath,
   providerMetricsSocketPath,
+  removeManagedModelProviderRoleConfig,
   validateConfiguredModelProvider,
   withProviderBaseUrl,
   withOpenAiBaseUrl,
+  writeManagedModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 
 describe("model provider runtime topology", () => {
@@ -116,6 +126,33 @@ describe("model provider runtime topology", () => {
     expect(loadManagedModelProvider(environment)).toMatchObject({ provider: "deepseek" });
     expect(() => loadManagedProviderAppServer(environment))
       .toThrow("模型目录或思考等级无效");
+  });
+
+  it("writes and removes the DeepSeek subagent role configuration without the API key", async () => {
+    const codexHome = await configuredHome("switching");
+    const environment = { CODEX_HOME: codexHome };
+    const rolePath = managedModelProviderRoleConfigPath(environment);
+
+    writeManagedModelProviderRoleConfig(environment, {
+      baseUrl: "http://127.0.0.1:39491/",
+    });
+
+    const content = readFileSync(rolePath, "utf8");
+    expect(content).toContain('model = "deepseek-v4-flash"');
+    expect(content).toContain('model_provider = "deepseek"');
+    expect(content).toContain('base_url = "http://127.0.0.1:39491/"');
+    expect(content).toContain('env_key = "CODEX_CONNECT_DEEPSEEK_API_KEY"');
+    expect(content).toContain("model_auto_compact_token_limit = 629146");
+    expect(content).not.toContain("experimental_bearer_token");
+    expect(content).not.toContain("sk-test-secret");
+
+    expect(statSync(rolePath).mode & 0o777).toBe(0o600);
+    expect(() => writeManagedModelProviderRoleConfig(environment, {
+      baseUrl: "not-a-url",
+    })).toThrow("base_url 无效");
+
+    removeManagedModelProviderRoleConfig(environment);
+    expect(existsSync(rolePath)).toBe(false);
   });
 
   it("validates both switching and exclusive managed configurations", async () => {

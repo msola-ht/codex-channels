@@ -31,8 +31,10 @@ import {
   loadPrimaryModelProvider,
   providerAppServerSocketPath,
   providerMetricsSocketPath,
+  removeManagedModelProviderRoleConfig,
   withOpenAiBaseUrl,
   withProviderBaseUrl,
+  writeManagedModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import {
@@ -65,6 +67,7 @@ const helpText = {
   remote [参数]                启动共享 App Server 的 Codex TUI
   work [list|add|remove]       管理 Workspace（别名 ws；无子命令进入交互菜单）
   rules <init|check>           生成或检查项目 Codex 命令预设
+  agents <enable-deepseek|disable-deepseek|status>   配置 multi_agent_v2 的 DeepSeek 子代理角色
   state upgrade               显式升级 Gateway 状态数据库
   metrics <run|turns|threads|report|export|status|reset>   模型请求指标：本次运行、会话明细、会话归纳、汇报、导出、状态、重建
   webui                        启动本地只读指标 WebUI（默认回环地址）
@@ -152,6 +155,21 @@ Telegram 消息格式与配置路径查看。
 具体用法：
   codexc rules init [--force]
   codexc rules check`,
+  agents: `用法：codexc agents <enable-deepseek|disable-deepseek|status>
+
+  enable-deepseek   启用 multi_agent_v2 并在 ~/.codex/config.toml 注册 agents.ds 角色
+  disable-deepseek  移除 agents.ds 角色并关闭 multi_agent_v2
+  status            查看当前状态`,
+  "agents.enable-deepseek": `用法：codexc agents enable-deepseek
+
+启用 multi_agent_v2 并在 ~/.codex/config.toml 注册 agents.ds 角色；
+角色配置文件指向 codexc 服务启动时生成的 DeepSeek 子代理配置。`,
+  "agents.disable-deepseek": `用法：codexc agents disable-deepseek
+
+移除 agents.ds 角色并关闭 multi_agent_v2。`,
+  "agents.status": `用法：codexc agents status
+
+查看 multi_agent_v2 与 agents.ds 角色配置状态。`,
   "rules.init": `用法：codexc rules init [--force]
 
 为当前项目生成安全命令预设；已有文件默认不覆盖。`,
@@ -301,6 +319,9 @@ try {
       break;
     case "rules":
       projectRules(args);
+      break;
+    case "agents":
+      agents(args);
       break;
     case "state":
       state(args);
@@ -488,6 +509,15 @@ async function runServiceAppServer(args) {
         managedProvider.provider,
         proxyOptionsForUrl(deepseekUrl),
       );
+      try {
+        writeManagedModelProviderRoleConfig(runtime.environment, {
+          baseUrl: localBaseUrl,
+        });
+      } catch (error) {
+        console.error(
+          `DeepSeek 子代理角色配置生成失败：${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       managedArguments = withProviderBaseUrl(
         managedProvider.arguments,
         managedProvider.provider,
@@ -506,7 +536,10 @@ async function runServiceAppServer(args) {
     `unix://${socketPath}`,
   ], {
     stdio: "inherit",
-    env: runtime.environment,
+    env: {
+      ...runtime.environment,
+      ...(managedProvider ? managedProvider.childEnvironment : {}),
+    },
     cwd: defaultWorkspace.cwd,
   })];
   if (managedProvider && managedArguments) {
@@ -525,6 +558,7 @@ async function runServiceAppServer(args) {
     }));
   }
   forwardChildrenLifecycle(children, async () => {
+    removeManagedModelProviderRoleConfig(runtime.environment);
     await Promise.all(providerProxies.map((proxy) => proxy.close()));
     for (const agent of upstreamAgents) agent.destroy();
   });
@@ -1029,6 +1063,18 @@ function projectRules(args) {
   checkProjectRules({ cwd: result.projectRoot });
   console.log("项目 Codex 规则检查通过。");
   console.log("重启 Codex 后生效；项目必须处于受信任状态。");
+}
+
+function agents(args) {
+  if (showRequestedHelp(args, "agents")) {
+    return;
+  }
+  if (showSubcommandHelp(args, "status", "agents.status") ||
+    showSubcommandHelp(args, "enable-deepseek", "agents.enable-deepseek") ||
+    showSubcommandHelp(args, "disable-deepseek", "agents.disable-deepseek")) {
+    return;
+  }
+  runScript("scripts/agents.mjs", args);
 }
 
 function runSetup() {

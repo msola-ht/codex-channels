@@ -270,6 +270,7 @@ export interface StoredThreadListItem {
   provider: string | null;
   model: string | null;
   reasoningEffort: string | null;
+  agentPath: string | null;
   turnCount: number;
   requestCount: number;
   inputTokens: number;
@@ -397,6 +398,11 @@ export interface StoredModelRequestMetricsErrorReport {
 
 export interface ModelRequestMetricsStore {
   record(sample: ModelRequestMetricSample): void;
+  recordSubagentThread(details: {
+    agentThreadId: string;
+    parentThreadId: string;
+    agentPath: string;
+  }): void;
   recent(limit: number): StoredModelRequestMetric[];
   aggregate(
     query: ModelRequestMetricsAggregationQuery,
