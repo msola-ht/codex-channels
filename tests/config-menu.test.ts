@@ -517,7 +517,9 @@ describe("Codex Connect config menu", () => {
       text: vi.fn()
         .mockResolvedValueOnce("http://127.0.0.1:8790")
         .mockResolvedValueOnce(""),
-      password: vi.fn(async () => "center-token"),
+      password: vi.fn()
+        .mockResolvedValueOnce("device-token")
+        .mockResolvedValueOnce("view-token"),
       isCancel: () => false,
       cancel: vi.fn(),
     };
@@ -540,12 +542,12 @@ describe("Codex Connect config menu", () => {
     expect(metrics.sync).toMatchObject({
       enabled: true,
       endpoint: "http://127.0.0.1:8790/api/ingest",
-      device_token: "center-token",
+      device_token: "device-token",
     });
     expect(metrics.view).toEqual({
       enabled: true,
       endpoint: "http://127.0.0.1:8790",
-      token: "center-token",
+      token: "view-token",
     });
     expect(output.join("")).toContain("已接入中心");
     expect(output.join("")).toContain("重启 Gateway 后开始上报");
@@ -558,7 +560,7 @@ describe("Codex Connect config menu", () => {
       sync: {
         enabled: true,
         endpoint: "http://127.0.0.1:8790/api/ingest",
-        device_token: "center-token",
+        device_token: "device-token",
         device_id: "device-a",
         batch_size: 200,
         interval_seconds: 60,
@@ -566,7 +568,7 @@ describe("Codex Connect config menu", () => {
       view: {
         enabled: true,
         endpoint: "http://127.0.0.1:8790",
-        token: "center-token",
+        token: "view-token",
       },
     };
     writeGatewayConfig(fixture.configPath, document);
@@ -593,7 +595,8 @@ describe("Codex Connect config menu", () => {
     expect(printed).toContain("上报端点：http://127.0.0.1:8790/api/ingest");
     expect(printed).toContain("设备 ID：device-a");
     expect(printed).toContain("WebUI 全局视图：已启用");
-    expect(printed).toContain("cent****oken");
+    expect(printed).toContain("devi****oken");
+    expect(printed).toContain("view****oken");
   });
 
   it("updates the metrics upload interval through the menu", async () => {
@@ -700,6 +703,35 @@ describe("Codex Connect config menu", () => {
       enabled: true,
     });
     expect(output.join("")).toContain("中心服务设置已更新");
+  });
+
+  it("configures separate metrics center view and device tokens", async () => {
+    const fixture = createFixture();
+    const output: string[] = [];
+    const writeToken = async (section: "token" | "device_token", value: string) =>
+      runCenterSettings({
+        environment: fixture.environment,
+        output: { write: (message: string) => output.push(message), isTTY: true },
+        prompts: {
+          select: vi.fn()
+            .mockResolvedValueOnce(section)
+            .mockResolvedValueOnce("set"),
+          password: vi.fn().mockResolvedValueOnce(value),
+          isCancel: () => false,
+        },
+        writeConfig: writeGatewayConfig,
+      });
+
+    await writeToken("token", "view-token");
+    await writeToken("device_token", "device-token");
+
+    const center = (readGatewayConfig(fixture.configPath).metrics as unknown as {
+      center?: { token?: string; device_token?: string };
+    }).center;
+    expect(center).toMatchObject({
+      token: "view-token",
+      device_token: "device-token",
+    });
   });
 });
 

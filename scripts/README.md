@@ -36,15 +36,19 @@
   `config.toml` 的 `[webui]` 段，默认回环无令牌；绑定非回环地址（`0.0.0.0`）时必须设置
   `--token` 或配置 `token`，API 以 `Authorization: Bearer` 校验并采用常数时间比较。
 - `metrics-center-server.mjs`：`codexc center` 的多设备指标中心 HTTP 服务。
-  接收各设备 Gateway 的增量上报（Bearer 令牌校验、载荷校验、按 `device_id + local_id`
+  接收各设备 Gateway 的增量上报（独立 Bearer 上报令牌校验、载荷校验、按 `device_id + local_id`
   upsert 覆盖写入），写入中心 SQLite（复用 `cloudflare/migrations/0001_init.sql` 表结构，
   WAL、`0600`），并提供 `/api/overview`、`/api/requests`、`/api/subagents`、
-  `/api/devices`、`/api/health`；WebUI 通过 `/api/v1/global/*` 服务端代理读取，令牌不进入前端。
+  `/api/devices`、`/api/health`；查询使用独立只读令牌，WebUI 通过 `/api/v1/global/*` 服务端代理读取，令牌不进入前端。
   子命令 `codexc center config` 交互设置 `[metrics.center]`、`codexc center info` 输出
-  中心地址（含设备上报端点）、令牌状态与运行状态；监听参数优先命令行，其次
+  中心地址（含设备上报端点）、双令牌状态与运行状态；监听参数优先命令行，其次
   `config.toml` 的 `[metrics.center]` 段，默认回环 `127.0.0.1:8790`。
 - `metrics-center-settings.mjs`：中心服务与指标脚本共用的轻量配置解析（命令行参数、
   `config.toml` 的 `[metrics.center]` 段与默认值），不依赖 Cloudflare 部署文件。
+- `metrics-center-payload.mjs` / `metrics-center-payload.d.mts`：中心服务与历史 Cloudflare
+  Worker 共用的上报载荷校验及类型声明。
+- `metrics-center-schema.sql`：npm 发布包内中心 SQLite 的规范初始化 Schema；历史 Cloudflare
+  D1 migration 保留部署参考，不作为生产中心运行时依赖。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型渠道”“通讯渠道”和
   “系统设置”流程委派给具体适配器；模型渠道下区分 DeepSeek、第三方 API 与图片识别，系统设置
   提供全局调试模式入口。

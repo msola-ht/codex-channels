@@ -78,6 +78,7 @@ export interface GatewayConfigDocument {
       host: "127.0.0.1" | "::1" | "0.0.0.0";
       port: number;
       token?: string;
+      device_token?: string;
       database_path: string;
     };
     view?: {
@@ -113,6 +114,7 @@ export function validateMetricsCenterConfigDocument(
   host: "127.0.0.1" | "::1" | "0.0.0.0";
   port: number;
   token?: string;
+  device_token?: string;
   database_path: string;
 };
 export function validateMetricsViewConfigDocument(

@@ -205,6 +205,45 @@ describe("MetricsSync", () => {
     expect(payload.deviceId).toBe("device-a");
     await second.close();
   });
+
+  it("显式 device_id 改变时重置水位并以新身份完整重放", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-metrics-sync-"));
+    temporaryDirectories.push(directory);
+    const statePath = join(directory, "metrics-sync-state.json");
+    const firstFetch = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+    const first = new MetricsSync(createOptions({
+      config: { ...enabledConfig(), deviceId: "device-a" },
+      statePath,
+      store: createStore({ rows: [storedRow(1)] }),
+      fetchImpl: firstFetch,
+    }));
+    first.start();
+    await vi.waitFor(() => expect(firstFetch).toHaveBeenCalledTimes(1));
+    await first.close();
+
+    const rows = [storedRow(1), storedRow(2)];
+    const replayStore = createStore({ rows });
+    replayStore.requestRowsAfter = vi.fn((afterId: number) =>
+      rows.filter((row) => row.id > afterId));
+    const secondFetch = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+    const second = new MetricsSync(createOptions({
+      config: { ...enabledConfig(), deviceId: "device-b" },
+      statePath,
+      store: replayStore,
+      fetchImpl: secondFetch,
+    }));
+    second.start();
+    await vi.waitFor(() => expect(secondFetch).toHaveBeenCalledTimes(1));
+    const [, init] = secondFetch.mock.calls[0]!;
+    const payload = JSON.parse(String((init as RequestInit).body)) as {
+      deviceId: string;
+      requestMetrics: Array<{ localId: number }>;
+    };
+    expect(payload.deviceId).toBe("device-b");
+    expect(payload.requestMetrics.map((row) => row.localId)).toEqual([1, 2]);
+    expect(replayStore.requestRowsAfter).toHaveBeenCalledWith(0, 200);
+    await second.close();
+  });
 });
 
 function createOptions(options: {

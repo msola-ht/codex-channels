@@ -16,7 +16,7 @@ import * as clackPrompts from "@clack/prompts";
 
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { runCenterSettings } from "./config.mjs";
-import { parseIngestPayload } from "../cloudflare/worker/src/payload.js";
+import { parseIngestPayload } from "./metrics-center-payload.mjs";
 import {
   DEFAULT_HOST,
   DEFAULT_PORT,
@@ -26,7 +26,7 @@ import {
 const maximumBodyBytes = 10 * 1024 * 1024;
 const maximumListLimit = 200;
 const PACKAGE_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
-const SCHEMA_PATH = join(PACKAGE_DIR, "cloudflare", "migrations", "0001_init.sql");
+const SCHEMA_PATH = join(PACKAGE_DIR, "scripts", "metrics-center-schema.sql");
 
 const insertRequestMetricSql = `
   INSERT INTO request_metrics
@@ -94,19 +94,23 @@ export function createMetricsCenterServer({
   host = DEFAULT_HOST,
   port = DEFAULT_PORT,
   token = null,
+  deviceToken = null,
   databasePath,
 } = {}) {
   if (!["127.0.0.1", "::1", "0.0.0.0"].includes(host)) {
     throw new Error("center host 只允许 127.0.0.1、::1 或 0.0.0.0");
   }
-  if (host === "0.0.0.0" && token === null) {
+  if (host === "0.0.0.0" && (token === null || deviceToken === null)) {
     throw new Error(
-      "center 绑定非回环地址时必须提供访问令牌（--token 或配置 [metrics.center] token）",
+      "center 绑定非回环地址时必须同时提供查看令牌和设备上报令牌",
     );
+  }
+  if (token !== null && deviceToken !== null && token === deviceToken) {
+    throw new Error("center 的查看令牌与设备上报令牌必须不同");
   }
   const database = openCentralDatabase(databasePath);
   const server = createServer((request, response) => {
-    handleRequest(token, database, request, response).catch((error) => {
+    handleRequest({ token, deviceToken }, database, request, response).catch((error) => {
       console.error(error);
       if (error instanceof ApiError) {
         sendJson(response, error.status, {
@@ -126,6 +130,7 @@ export function createMetricsCenterServer({
     port,
     server,
     token,
+    deviceToken,
     close: () => new Promise((resolve, reject) => {
       server.close((error) => {
         try {
@@ -168,17 +173,22 @@ export async function runCenterInfo({
   }
   output.write(`全局查看端点：http://${viewHost}:${settings.port}\n`);
   output.write(
-    `访问令牌：${settings.token === null
+    `查看令牌：${settings.token === null
       ? "未设置（绑定 0.0.0.0 时必须设置）"
       : `已设置（${maskToken(settings.token)}）`}\n`,
   );
+  output.write(
+    `设备上报令牌：${settings.deviceToken === null
+      ? "未设置（绑定 0.0.0.0 时必须设置）"
+      : `已设置（${maskToken(settings.deviceToken)}）`}\n`,
+  );
   output.write(`中心数据库：${settings.databasePath}\n`);
   output.write(`配置：${settings.configPath} 的 [metrics.center]\n`);
-  output.write("公网接入建议：host = \"0.0.0.0\" + token，并在 nginx/Caddy 上套 HTTPS。\n");
+  output.write("公网接入建议：host = \"0.0.0.0\" + 两类独立令牌，并在 nginx/Caddy 上套 HTTPS。\n");
   return settings;
 }
 
-async function handleRequest(token, database, request, response) {
+async function handleRequest({ token, deviceToken }, database, request, response) {
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
   if (request.method === "OPTIONS") {
     response.writeHead(204, corsHeaders({
@@ -196,7 +206,10 @@ async function handleRequest(token, database, request, response) {
     sendJson(response, 404, { error: { code: "not_found", message: "not found" } });
     return;
   }
-  if (token !== null && !authorized(request, token)) {
+  const requiredToken = request.method === "POST" && url.pathname === "/api/ingest"
+    ? deviceToken
+    : token;
+  if (requiredToken !== null && !authorized(request, requiredToken)) {
     sendJson(response, 401, { error: { code: "unauthorized", message: "需要有效的访问令牌" } });
     return;
   }
@@ -563,8 +576,8 @@ function main() {
       return;
     }
     if (args[0] === "--help" || args[0] === "-h") {
-      console.log("用法：codexc center [--host 地址] [--port 端口] [--token 令牌] [--database 路径]");
-      console.log("      codexc center info     查看中心地址、令牌与运行状态");
+      console.log("用法：codexc center [--host 地址] [--port 端口] [--token 查看令牌] [--device-token 上报令牌] [--database 路径]");
+      console.log("      codexc center info     查看中心地址、双令牌状态与运行状态");
       console.log("      codexc center config   交互配置 [metrics.center]");
       return;
     }
@@ -574,6 +587,7 @@ function main() {
       host: settings.host,
       port: settings.port,
       token: settings.token,
+      deviceToken: settings.deviceToken,
       databasePath: settings.databasePath,
     });
     server.on("error", (error) => {

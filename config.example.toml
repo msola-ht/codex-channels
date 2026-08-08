@@ -87,11 +87,12 @@ level = "info"
 
 [metrics.center]
 # 中心接收服务（只在汇总的 VPS 上启用）：接收设备上报并写入中心 SQLite。
-# 绑定非回环地址（0.0.0.0）时必须设置 token。
+# 绑定非回环地址（0.0.0.0）时必须设置两类不同令牌。
 # enabled = false
 # host = "127.0.0.1"
 # port = 8790
-# token = "中心访问令牌"
+# token = "中心只读查看令牌"
+# device_token = "设备上报令牌（必须与 token 不同）"
 # database_path = "data/central-metrics.sqlite3"
 
 [metrics.view]
@@ -99,7 +100,7 @@ level = "info"
 # 启用时必须配置 endpoint 和 token；endpoint 使用 HTTPS，或指向回环/私网地址的 HTTP。
 # enabled = false
 # endpoint = "http://127.0.0.1:8790"
-# token = "中心访问令牌"
+# token = "中心只读查看令牌"
 
 [[workspaces]]
 id = "main"

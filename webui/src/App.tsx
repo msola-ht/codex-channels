@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { lazy, Suspense, useEffect } from "react"
 import { HashRouter, Link, Route, Routes, useLocation } from "react-router"
 
 import { AuthGate } from "@/components/layout/auth-gate"
@@ -21,11 +21,17 @@ import { useCurrency } from "@/hooks/currency-context"
 import { LanguageProvider } from "@/hooks/language-provider"
 import { useLanguage } from "@/hooks/language-context"
 import { fetchSettings } from "@/lib/api"
-import { ConsolePage } from "@/pages/console-page"
-import { ErrorsPage } from "@/pages/errors-page"
-import { RequestsPage } from "@/pages/requests-page"
-import { ThreadDetailPage } from "@/pages/thread-detail-page"
-import { ThreadsPage } from "@/pages/threads-page"
+
+const ConsolePage = lazy(() =>
+  import("@/pages/console-page").then((module) => ({ default: module.ConsolePage })))
+const ErrorsPage = lazy(() =>
+  import("@/pages/errors-page").then((module) => ({ default: module.ErrorsPage })))
+const RequestsPage = lazy(() =>
+  import("@/pages/requests-page").then((module) => ({ default: module.RequestsPage })))
+const ThreadDetailPage = lazy(() =>
+  import("@/pages/thread-detail-page").then((module) => ({ default: module.ThreadDetailPage })))
+const ThreadsPage = lazy(() =>
+  import("@/pages/threads-page").then((module) => ({ default: module.ThreadsPage })))
 
 function pageTitle(pathname: string): string {
   if (pathname.startsWith("/threads/")) return "Thread 详情"
@@ -105,13 +111,15 @@ function Layout() {
           </div>
         </header>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto p-3">
-          <Routes>
-            <Route path="/" element={<ConsolePage />} />
-            <Route path="/threads" element={<ThreadsPage />} />
-            <Route path="/threads/:id" element={<ThreadDetailPage />} />
-            <Route path="/requests" element={<RequestsPage />} />
-            <Route path="/errors" element={<ErrorsPage />} />
-          </Routes>
+          <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">加载中…</div>}>
+            <Routes>
+              <Route path="/" element={<ConsolePage />} />
+              <Route path="/threads" element={<ThreadsPage />} />
+              <Route path="/threads/:id" element={<ThreadDetailPage />} />
+              <Route path="/requests" element={<RequestsPage />} />
+              <Route path="/errors" element={<ErrorsPage />} />
+            </Routes>
+          </Suspense>
         </div>
       </SidebarInset>
     </SidebarProvider>

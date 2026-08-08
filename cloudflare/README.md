@@ -13,7 +13,7 @@ Cloudflare Access 保护 Pages 与 Worker 域名，不在前端做登录页。
 - `migrations/0001_init.sql`：D1 表结构（请求指标、子代理标注、设备）。
 - `worker/src/index.js`：Worker 入口，`/api/ingest` 写入、`/api/overview`、
   `/api/requests`、`/api/subagents`、`/api/devices` 查询、`/api/health`。
-- `worker/src/payload.js`：上报载荷校验（可单测）。
+- `worker/src/payload.js`：兼容导出共享的 `scripts/metrics-center-payload.mjs` 上报载荷校验。
 - `pages/`：静态查看页（无构建步骤，直接部署）。
 
 ## 已部署实例

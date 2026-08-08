@@ -8,8 +8,8 @@
 - 本地设备侧（本仓库）：已实现增量读取、批量上报、水位持久化和失败退避。
 - 中心侧（VPS 自建）：本仓库提供 `codexc center` 中心服务，写入中心 SQLite，
   WebUI 通过 `/api/v1/global/*` 服务端代理查看所有设备累计。
-- 校验：`device_token` 只由中心服务校验，不做前端登录页；本机只负责携带
-  `Authorization: Bearer <device_token>` 上报。
+- 校验：中心服务用 `device_token` 校验设备上报、用独立 `token` 校验只读查询；本机分别在
+  上报请求和 WebUI 服务端代理中携带对应 Bearer 令牌，令牌不进入前端。
 
 ## 设备侧配置
 
@@ -33,7 +33,8 @@ interval_seconds = 60         # 上报间隔，10–86400，默认 60
 
 ### 本机接入设置
 
-运行 `codexc config`，选择「多设备指标 → 本机接入中心」，输入中心地址、访问令牌和可选
+运行 `codexc config`，选择「多设备指标 → 本机接入中心」，输入中心地址、设备上报令牌、
+全局查看令牌和可选
 设备 ID，即可同时写入 `[metrics.sync]` 与 `[metrics.view]`。菜单还提供「查看接入状态」
 「上报参数」（`interval_seconds` 与 `batch_size`）和「停用接入」（停用保留配置，可随时
 重新接入）。手工编辑 `config.toml` 效果相同；每次通过菜单修改都会先备份原配置。远程
@@ -63,17 +64,18 @@ token = "中心访问令牌"
 ```toml
 [metrics.center]
 enabled = true
-host = "127.0.0.1"            # 公网开放用 0.0.0.0，但必须设置 token
+host = "127.0.0.1"            # 公网开放用 0.0.0.0，但必须设置下面两类令牌
 port = 8790
-token = "中心访问令牌"
+token = "中心只读查看令牌"
+device_token = "设备上报令牌" # 必须与 token 不同
 database_path = "data/central-metrics.sqlite3"
 ```
 
 启动：
 
 ```bash
-codexc center config              # 远程端交互配置 [metrics.center]（监听、端口、令牌、数据库）
-codexc center info                # 查看中心地址、令牌与运行状态（获取设备上报地址）
+codexc center config              # 远程端交互配置 [metrics.center]（监听、端口、双令牌、数据库）
+codexc center info                # 查看中心地址、双令牌状态与运行状态（获取设备上报地址）
 codexc service install               # 生成 WebUI 与指标中心服务单元（首次）
 codexc service start center          # 启动指标中心后台服务
 ```
@@ -87,8 +89,8 @@ codexc service start center          # 启动指标中心后台服务
 - WebUI 控制台的「全部设备 / 单设备」范围通过 `/api/v1/global/*` 由 WebUI 服务端
   带令牌读取中心服务，前端不接触令牌；每台设备的 WebUI 都可以看到所有设备累计，
   明细页（Threads、请求、错误）保持只读本机指标库。
-- 公网暴露接收端口时，`device_token` 与 `token` 使用不同值，并建议用 nginx/Caddy
-  套 HTTPS。
+- `POST /api/ingest` 只接受 `device_token`；只读查询只接受 `token`，两者必须不同；绑定
+  `0.0.0.0` 时必须同时配置，并建议用 nginx/Caddy 套 HTTPS。
 
 ## Cloudflare 版本（已停用）
 

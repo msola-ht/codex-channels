@@ -33,6 +33,7 @@
     "runtime/",
     "systemd/",
     "scripts/",
+    ".codex/skills/channel-image/",
     "webui/dist/",
     "config.example.toml",
     "index.md",

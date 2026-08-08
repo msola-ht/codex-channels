@@ -79,13 +79,20 @@ export class MetricsSync {
   private consecutiveFailures = 0;
 
   constructor(private readonly options: MetricsSyncOptions) {
-    this.state = loadState(options.statePath, options.logger) ?? {
-      version: stateVersion,
-      deviceId: options.config.deviceId ?? randomUUID(),
-      lastRequestLocalId: 0,
-      lastSubagentRecordedAtMs: 0,
-      lastSubagentThreadId: null,
-    };
+    const persisted = loadState(options.statePath, options.logger);
+    this.state = persisted !== null
+      && (
+        options.config.deviceId === undefined
+        || options.config.deviceId === persisted.deviceId
+      )
+      ? persisted
+      : {
+          version: stateVersion,
+          deviceId: options.config.deviceId ?? randomUUID(),
+          lastRequestLocalId: 0,
+          lastSubagentRecordedAtMs: 0,
+          lastSubagentThreadId: null,
+        };
   }
 
   start(): void {

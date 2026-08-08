@@ -22,6 +22,43 @@ afterEach(async () => {
 });
 
 describe("metrics center server", () => {
+  it("uses separate bearer tokens for device ingest and read queries", async () => {
+    const { origin } = await startServer({
+      token: "view-token",
+      deviceToken: "device-token",
+    });
+    const payload = payloadBody([requestRow(1)], []);
+
+    const rejectedIngest = await fetch(`${origin}/api/ingest`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer view-token",
+      },
+      body: JSON.stringify(payload),
+    });
+    expect(rejectedIngest.status).toBe(401);
+
+    const acceptedIngest = await fetch(`${origin}/api/ingest`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer device-token",
+      },
+      body: JSON.stringify(payload),
+    });
+    expect(acceptedIngest.status).toBe(200);
+
+    const rejectedQuery = await fetch(`${origin}/api/overview`, {
+      headers: { authorization: "Bearer device-token" },
+    });
+    expect(rejectedQuery.status).toBe(401);
+    const acceptedQuery = await fetch(`${origin}/api/overview`, {
+      headers: { authorization: "Bearer view-token" },
+    });
+    expect(acceptedQuery.status).toBe(200);
+  });
+
   it("rejects ingest without a token and accepts a valid payload", async () => {
     const { origin } = await startServer();
     const payload = payloadBody([requestRow(1)], []);
@@ -37,7 +74,7 @@ describe("metrics center server", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: "Bearer center-token",
+        authorization: "Bearer device-token",
       },
       body: JSON.stringify(payload),
     });
@@ -108,7 +145,7 @@ describe("metrics center server", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: "Bearer center-token",
+        authorization: "Bearer device-token",
       },
       body: JSON.stringify(payloadBody([requestRow(2)], [], "device-b")),
     });
@@ -116,7 +153,7 @@ describe("metrics center server", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: "Bearer center-token",
+        authorization: "Bearer device-token",
       },
       body: JSON.stringify({
         ...payloadBody([requestRow(3)], [], "device-c"),
@@ -167,7 +204,7 @@ describe("metrics center server", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: "Bearer center-token",
+        authorization: "Bearer device-token",
       },
       body: JSON.stringify(payloadBody(
         [{ ...requestRow(2), provider: "openai" }],
@@ -229,7 +266,7 @@ describe("metrics center server", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: "Bearer center-token",
+        authorization: "Bearer device-token",
       },
       body: JSON.stringify(payloadBody(
         [{ ...requestRow(3), recordedAtMs: base + 2 * 86_400_000 }],
@@ -269,7 +306,7 @@ describe("metrics center server", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: "Bearer center-token",
+        authorization: "Bearer device-token",
       },
       body: JSON.stringify({ deviceId: "BAD ID", requestMetrics: [], subagentThreads: [] }),
     });
@@ -297,6 +334,7 @@ describe("metrics center server", () => {
         host: "0.0.0.0",
         port: 8790,
         token: "center-token",
+        device_token: "device-token",
         database_path: "data/central-metrics.sqlite3",
       },
     };
@@ -311,18 +349,29 @@ describe("metrics center server", () => {
     const printed = output.join("");
     expect(printed).toContain("监听地址：0.0.0.0:8790");
     expect(printed).toContain("/api/ingest");
+    expect(printed).toContain("查看令牌");
+    expect(printed).toContain("设备上报令牌");
     expect(printed).toContain("已设置（cent****oken）");
+    expect(printed).toContain("已设置（devi****oken）");
     expect(printed).toContain("中心数据库");
     expect(printed).not.toContain("center-token");
+    expect(printed).not.toContain("device-token");
   });
 });
 
-async function startServer() {
+async function startServer({
+  token = "center-token",
+  deviceToken = "device-token",
+}: {
+  token?: string;
+  deviceToken?: string;
+} = {}) {
   const directory = mkdtempSync(join(tmpdir(), "codexc-metrics-center-"));
   temporaryDirectories.push(directory);
   const instance = createMetricsCenterServer({
     host: "127.0.0.1",
-    token: "center-token",
+    token,
+    deviceToken,
     databasePath: join(directory, "central-metrics.sqlite3"),
   });
   await new Promise<void>((resolve) => {
@@ -338,7 +387,7 @@ async function ingest(origin: string, payload: unknown) {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: "Bearer center-token",
+      authorization: "Bearer device-token",
     },
     body: JSON.stringify(payload),
   });

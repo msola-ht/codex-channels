@@ -103,8 +103,8 @@ price_currency = "cny"
 每台设备可把本地脱敏指标增量上报到中心汇总。运行 `codexc config` 选择
 「多设备指标 → 本机接入中心」即可配置上报与 WebUI 全局视图（写入 `[metrics.sync]` 和
 `[metrics.view]`）；Gateway 定时按水位上报请求记录和子代理标注，失败自动退避重试。
-VPS 上用 `codexc center config` 配置 `[metrics.center]`、`codexc center info` 查看
-中心地址，再运行 `codexc center` 校验令牌并写入中心 SQLite；每台设备的 WebUI 控制台
+VPS 上用 `codexc center config` 配置 `[metrics.center]` 的独立设备上报令牌与只读查看令牌、
+`codexc center info` 查看中心地址，再运行 `codexc center` 校验令牌并写入中心 SQLite；每台设备的 WebUI 控制台
 通过 `[metrics.view]` 按设备范围查看累计用量。详细配置与载荷见
 [`docs/metrics-sync.md`](docs/metrics-sync.md)。
 
@@ -296,7 +296,7 @@ Markdown 报表的费用按 `display.price_currency` 统一换算显示（人民
 币种、nanos 与 ISO 时间，并按相同配置附加 `*CostCnyNanos` 换算列（如 `totalCostCnyNanos`），
 便于统计和直接查看人民币金额；报告 CSV 同时保留 Provider、模型及异常分组，文本单元格会中和
 电子表格公式前缀。
-`metrics upgrade` 支持把现有指标库从 Schema v3/v4/v5 显式升级到 v6 并保留旧记录；Gateway 已停止时
+`metrics upgrade` 支持把现有指标库从 Schema v3/v4/v5/v6 显式升级到 v7 并保留旧记录；Gateway 已停止时
 可直接运行，不便单独管理服务时可加 `--restart-gateway` 自动完成停止、升级和重新启动。`metrics reset`
 用于归档并重建不支持的版本。两者都不修改会话状态库，Gateway 运行时会拒绝执行。
 `metrics prune <provider>` 备份本地与中心指标库后，删除其中指定提供商（当前支持 openai、

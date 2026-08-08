@@ -688,6 +688,7 @@ describe("Gateway config.toml", () => {
           host: "127.0.0.1",
           port: 8790,
           token: "center-token",
+          device_token: "device-token",
           database_path: "data/central-metrics.sqlite3",
         },
       },
@@ -700,6 +701,7 @@ describe("Gateway config.toml", () => {
       host: "127.0.0.1",
       port: 8790,
       token: "center-token",
+      deviceToken: "device-token",
       databasePath: "data/central-metrics.sqlite3",
     });
   });
@@ -711,6 +713,7 @@ describe("Gateway config.toml", () => {
           enabled: true,
           host: "0.0.0.0",
           port: 8790,
+          token: "center-token",
         },
       },
     });
@@ -718,6 +721,24 @@ describe("Gateway config.toml", () => {
     expect(() => loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
     })).toThrow(/metrics\.center/u);
+  });
+
+  it("rejects identical metrics center ingest and view tokens", () => {
+    const fixture = createFixture({
+      metrics: {
+        center: {
+          enabled: true,
+          host: "127.0.0.1",
+          port: 8790,
+          token: "shared-token",
+          device_token: "shared-token",
+        },
+      },
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow(/必须不同/u);
   });
 
   it("loads an explicitly enabled Feishu account", () => {

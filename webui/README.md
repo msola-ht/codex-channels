@@ -20,7 +20,7 @@ src/
   hooks/       数据 hook（useApi 统一 loading/error/refetch）、请求排序状态与全局货币上下文
   components/  layout（Sidebar）、metrics（指标区块与共享数据表格）、requests（请求明细数据表格）
   pages/       概览、Threads、Thread 详情、请求、错误
-  App.tsx      路由布局与令牌登录（AuthGate）
+  App.tsx      路由布局与页面级懒加载（令牌登录由 AuthGate 与 main.tsx 启动入口协作）
 ```
 
 令牌登录：服务端配置 `--token` 时，API 返回 401 会显示令牌输入页；令牌存入

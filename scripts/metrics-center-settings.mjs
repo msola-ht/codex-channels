@@ -12,6 +12,7 @@ import {
 
 export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_PORT = 8790;
+const CENTER_USAGE = "用法：codexc center [--host 地址] [--port 端口] [--token 查看令牌] [--device-token 上报令牌] [--database 路径]";
 
 export function resolveMetricsCenterSettings({
   args = [],
@@ -31,6 +32,9 @@ export function resolveMetricsCenterSettings({
     host: cli.host ?? configured.host ?? DEFAULT_HOST,
     port: cli.port ?? configured.port ?? DEFAULT_PORT,
     token: cli.token !== undefined ? cli.token : configured.token ?? null,
+    deviceToken: cli.deviceToken !== undefined
+      ? cli.deviceToken
+      : configured.device_token ?? null,
     databasePath: cli.database
       ?? resolveConfiguredPath(
         configured.database_path ?? "data/central-metrics.sqlite3",
@@ -47,7 +51,7 @@ function parseCliArgs(args) {
     if (argument === "--host") {
       const raw = args[index + 1];
       if (raw === undefined) {
-        throw new Error("用法：codexc center [--host 地址] [--port 端口] [--token 令牌] [--database 路径]");
+        throw new Error(CENTER_USAGE);
       }
       settings.host = raw;
       index += 1;
@@ -56,7 +60,7 @@ function parseCliArgs(args) {
     if (argument === "--port") {
       const raw = args[index + 1];
       if (raw === undefined || !/^[0-9]+$/u.test(raw)) {
-        throw new Error("用法：codexc center [--host 地址] [--port 端口] [--token 令牌] [--database 路径]");
+        throw new Error(CENTER_USAGE);
       }
       const port = Number(raw);
       if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
@@ -69,23 +73,32 @@ function parseCliArgs(args) {
     if (argument === "--token") {
       const raw = args[index + 1];
       if (raw === undefined || raw === "") {
-        throw new Error("用法：codexc center [--host 地址] [--port 端口] [--token 令牌] [--database 路径]");
+        throw new Error(CENTER_USAGE);
       }
       settings.token = raw;
+      index += 1;
+      continue;
+    }
+    if (argument === "--device-token") {
+      const raw = args[index + 1];
+      if (raw === undefined || raw === "") {
+        throw new Error(CENTER_USAGE);
+      }
+      settings.deviceToken = raw;
       index += 1;
       continue;
     }
     if (argument === "--database") {
       const raw = args[index + 1];
       if (raw === undefined || raw === "") {
-        throw new Error("用法：codexc center [--host 地址] [--port 端口] [--token 令牌] [--database 路径]");
+        throw new Error(CENTER_USAGE);
       }
       settings.database = raw;
       index += 1;
       continue;
     }
     throw new Error(
-      `未知参数：${argument}\n用法：codexc center [--host 地址] [--port 端口] [--token 令牌] [--database 路径]`,
+      `未知参数：${argument}\n${CENTER_USAGE}`,
     );
   }
   return settings;

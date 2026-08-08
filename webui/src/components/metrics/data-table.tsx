@@ -63,7 +63,7 @@ import {
 } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 
-export const dataTableFeatures = tableFeatures({
+const dataTableFeatures = tableFeatures({
   columnFilteringFeature,
   columnVisibilityFeature,
   globalFilteringFeature,

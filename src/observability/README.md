@@ -25,8 +25,8 @@
   时间戳与本机流式阶段时间戳
   写入独立 `request-metrics.sqlite3`。当前 Thread 的独立 API 查询只选择调用适配器产生的
   HTTP JSON 记录，不能把缺少 Turn 元数据的 Codex WebSocket/SSE 代理请求误分类。数据库使用
-  严格 Schema v6、`0600` 文件权限，只接受当前
-  Schema；首次初始化在单一事务内完成；使用 WAL 允许后续只读查询与采集并行，锁等待限制为
+  严格 Schema v7、`0600` 文件权限，只接受当前
+Schema；首次初始化在单一事务内完成；使用 WAL 允许后续只读查询与采集并行，锁等待限制为
   10 ms；同一 Store 还提供不获取写锁、不初始化或清理 Schema 的显式只读模式，以及每页最多
   500 条、按受控字段与方向排序的偏移分页，供 CLI 报表、导出和本地 WebUI 复用。记录保留 30 天，以
   100,000 条为清理目标，每 100 次写入分批清理，两个清理周期之间
@@ -72,8 +72,8 @@
 协议、Surface 或业务 Storage。本模块不直接暴露 HTTP API；`codexc metrics` 的
 `report`、`export`、`run`、`turns`、`threads` 只通过本地只读连接输出 Markdown、JSON 或 CSV；
 `report` 与 `export` 同时输出未过期的最后 OpenAI 周额度区间；`codexc webui` 的服务端通过只读
-HTTP API 复用相同查询，不向本模块写入状态。Schema v3 可在停止 Gateway 后用
-`codexc metrics upgrade` 先创建 `0600` 备份再事务升级到 v4并保留原记录；未知版本继续失败关闭，
+HTTP API 复用相同查询，不向本模块写入状态。Schema v3/v4/v5/v6 可在停止 Gateway 后用
+`codexc metrics upgrade` 先创建 `0600` 备份再逐版本事务升级到 v7 并保留原记录；未知版本继续失败关闭，
 使用 `codexc metrics reset` 归档后重建，不执行隐式迁移。
 指标采集始终开启，不受全局调试模式影响；`debug` / `trace` 只增加脱敏的关联诊断，写入失败仍按
 `warn` 输出，避免关闭调试后形成历史数据断档或隐藏采集故障。

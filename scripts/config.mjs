@@ -251,13 +251,26 @@ async function runConnectToCenter({
   });
   if (prompts.isCancel(endpoint)) return { action: "back" };
   const base = normalizeEndpoint(String(endpoint).trim());
-  const token = await prompts.password({
-    message: "中心访问令牌（上报与全局视图共用）",
+  const deviceToken = await prompts.password({
+    message: "设备上报令牌",
   });
-  if (prompts.isCancel(token)) return { action: "back" };
-  const normalizedToken = String(token).trim();
-  if (normalizedToken.length === 0) {
-    output.write("访问令牌不能为空。\n");
+  if (prompts.isCancel(deviceToken)) return { action: "back" };
+  const normalizedDeviceToken = String(deviceToken).trim();
+  if (normalizedDeviceToken.length === 0) {
+    output.write("设备上报令牌不能为空。\n");
+    return { action: "back" };
+  }
+  const viewToken = await prompts.password({
+    message: "全局查看令牌（必须与设备上报令牌不同）",
+  });
+  if (prompts.isCancel(viewToken)) return { action: "back" };
+  const normalizedViewToken = String(viewToken).trim();
+  if (normalizedViewToken.length === 0) {
+    output.write("全局查看令牌不能为空。\n");
+    return { action: "back" };
+  }
+  if (normalizedViewToken === normalizedDeviceToken) {
+    output.write("设备上报令牌与全局查看令牌必须不同。\n");
     return { action: "back" };
   }
   const deviceId = await prompts.text({
@@ -279,7 +292,7 @@ async function runConnectToCenter({
   const sync = table(metrics.sync);
   sync.enabled = true;
   sync.endpoint = `${base}/api/ingest`;
-  sync.device_token = normalizedToken;
+  sync.device_token = normalizedDeviceToken;
   if (normalizedDeviceId.length > 0) {
     sync.device_id = normalizedDeviceId;
   }
@@ -287,7 +300,7 @@ async function runConnectToCenter({
   metrics.view = {
     enabled: true,
     endpoint: base,
-    token: normalizedToken,
+    token: normalizedViewToken,
   };
   document.metrics = metrics;
   writeConfig(configPath, document);
@@ -310,7 +323,8 @@ async function runMetricsStatus({ environment, output }) {
   output.write(`单批上限：${sync.batch_size ?? 200} 条\n`);
   output.write(`WebUI 全局视图：${view?.enabled === true ? "已启用" : "已停用"}\n`);
   output.write(`查看端点：${view?.endpoint ?? "未配置"}\n`);
-  output.write(`令牌：${maskToken(sync.device_token ?? view?.token)}\n`);
+  output.write(`设备上报令牌：${maskToken(sync.device_token)}\n`);
+  output.write(`全局查看令牌：${maskToken(view?.token)}\n`);
   return { action: "back" };
 }
 
@@ -442,8 +456,15 @@ export async function runCenterSettings({
         },
         {
           value: "token",
-          label: "访问令牌",
+          label: "查看令牌",
           hint: center.token === undefined
+            ? "未设置；绑定 0.0.0.0 时必须设置"
+            : "已设置（内容不显示）",
+        },
+        {
+          value: "device_token",
+          label: "设备上报令牌",
+          hint: center.device_token === undefined
             ? "未设置；绑定 0.0.0.0 时必须设置"
             : "已设置（内容不显示）",
         },
@@ -495,15 +516,24 @@ export async function runCenterSettings({
         }
         center.host = selected;
       }
-      if (center.host === "0.0.0.0" && center.token === undefined) {
-        const token = await prompts.password({
-          message: "绑定 0.0.0.0 必须设置访问令牌（留空取消）",
-        });
-        if (prompts.isCancel(token) || String(token).trim() === "") {
-          output.write("未设置访问令牌，监听地址未修改。\n");
-          continue;
+      if (center.host === "0.0.0.0") {
+        let missingToken = false;
+        for (const [field, label] of [
+          ["token", "查看令牌"],
+          ["device_token", "设备上报令牌"],
+        ]) {
+          if (center[field] !== undefined) continue;
+          const token = await prompts.password({
+            message: `绑定 0.0.0.0 必须设置${label}（留空取消）`,
+          });
+          if (prompts.isCancel(token) || String(token).trim() === "") {
+            output.write(`未设置${label}，监听地址未修改。\n`);
+            missingToken = true;
+            break;
+          }
+          center[field] = String(token).trim();
         }
-        center.token = String(token).trim();
+        if (missingToken) continue;
       }
     } else if (section === "port") {
       const value = await prompts.text({
@@ -517,19 +547,21 @@ export async function runCenterSettings({
         continue;
       }
       center.port = port;
-    } else if (section === "token") {
+    } else if (section === "token" || section === "device_token") {
+      const tokenField = section;
+      const tokenLabel = tokenField === "token" ? "查看令牌" : "设备上报令牌";
       const action = await prompts.select({
-        message: "访问令牌",
+        message: tokenLabel,
         showInstructions: false,
         options: [
           {
             value: "set",
-            label: center.token === undefined ? "设置令牌" : "重新设置令牌",
-            hint: center.token === undefined
+            label: center[tokenField] === undefined ? "设置令牌" : "重新设置令牌",
+            hint: center[tokenField] === undefined
               ? "绑定 0.0.0.0 时必须设置"
               : "替换现有令牌",
           },
-          ...(center.token === undefined
+          ...(center[tokenField] === undefined
             ? []
             : [{ value: "clear", label: "清除令牌", hint: "清除后不能再绑定 0.0.0.0" }]),
           { value: "back", label: "返回上一级" },
@@ -541,15 +573,15 @@ export async function runCenterSettings({
           output.write("绑定 0.0.0.0 时必须保留访问令牌，请先改回仅本机。\n");
           continue;
         }
-        delete center.token;
+        delete center[tokenField];
       } else if (action === "set") {
         const token = await prompts.password({
-          message: "输入访问令牌（留空取消）",
+          message: `输入${tokenLabel}（留空取消）`,
         });
         if (prompts.isCancel(token) || String(token).trim() === "") continue;
-        center.token = String(token).trim();
+        center[tokenField] = String(token).trim();
       } else {
-        throw new Error(`未知访问令牌操作：${String(action)}`);
+        throw new Error(`未知${tokenLabel}操作：${String(action)}`);
       }
     } else if (section === "database_path") {
       const value = await prompts.text({
@@ -565,6 +597,14 @@ export async function runCenterSettings({
       center.database_path = path;
     } else {
       throw new Error(`未知中心服务设置：${String(section)}`);
+    }
+    if (
+      center.token !== undefined
+      && center.device_token !== undefined
+      && center.token === center.device_token
+    ) {
+      output.write("查看令牌与设备上报令牌必须不同。\n");
+      continue;
     }
     const metrics = table(document.metrics);
     metrics.center = center;

@@ -101,6 +101,7 @@ export interface GatewayConfig {
     host: "127.0.0.1" | "::1" | "0.0.0.0";
     port: number;
     token?: string;
+    deviceToken?: string;
     databasePath: string;
   };
   metricsView?: {
@@ -316,6 +317,9 @@ function loadValidatedConfigDocument(
             port: raw.metrics.center.port,
             ...(raw.metrics.center.token
               ? { token: raw.metrics.center.token }
+              : {}),
+            ...(raw.metrics.center.device_token
+              ? { deviceToken: raw.metrics.center.device_token }
               : {}),
             databasePath: raw.metrics.center.database_path,
           },

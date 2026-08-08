@@ -215,8 +215,8 @@ const helpText = {
 --token 设置访问令牌，绑定非回环地址（0.0.0.0）时必须提供。
 也可以使用 codexc config 的 WebUI 设置，或手工编辑 [webui] 段。
 页面与 JSON API 均来自指标数据库，不提供任何写接口。`,
-  center: `用法：codexc center [--host 地址] [--port 端口] [--token 令牌] [--database 路径]
-      codexc center info      查看中心地址、令牌与运行状态
+  center: `用法：codexc center [--host 地址] [--port 端口] [--token 查看令牌] [--device-token 上报令牌] [--database 路径]
+      codexc center info      查看中心地址、双令牌状态与运行状态
       codexc center config    交互配置 [metrics.center]
 
 启动多设备指标中心服务：接收各设备 Gateway 的增量上报，写入中心 SQLite，
@@ -224,9 +224,10 @@ const helpText = {
 参数优先级：命令行 > config.toml 的 [metrics.center] 段 > 默认值。
 --host 指定监听地址（127.0.0.1、::1 或 0.0.0.0），默认回环；
 --port 指定监听端口，范围 1-65535，默认 8790；
---token 设置访问令牌，绑定非回环地址（0.0.0.0）时必须提供；
+--token 设置只读查询令牌；
+--device-token 设置设备上报令牌；绑定非回环地址（0.0.0.0）时两者必须提供且不同；
 --database 指定中心 SQLite 路径，默认 <配置目录>/data/central-metrics.sqlite3。
-上报接口：POST /api/ingest（Bearer 令牌）；查询接口：/api/overview、/api/requests、
+上报接口：POST /api/ingest（Bearer 上报令牌）；查询接口使用 Bearer 查看令牌：/api/overview、/api/requests、
 /api/subagents、/api/devices、/api/health。`,
   "metrics.status": `用法：codexc metrics status
 

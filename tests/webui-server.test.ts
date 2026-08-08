@@ -46,6 +46,7 @@ describe("webui server", () => {
     const center = createMetricsCenterServer({
       host: "127.0.0.1",
       token: "center-token",
+      deviceToken: "device-token",
       databasePath: join(fixture.home, "data", "central-metrics.sqlite3"),
     });
     await new Promise<void>((resolve) => {
@@ -70,7 +71,7 @@ describe("webui server", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: "Bearer center-token",
+        authorization: "Bearer device-token",
       },
       body: JSON.stringify({
         deviceId: "device-a",

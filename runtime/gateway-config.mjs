@@ -144,13 +144,29 @@ const metricsCenterSchema = z.strictObject({
   host: z.enum(["127.0.0.1", "::1", "0.0.0.0"]).default("127.0.0.1"),
   port: z.number().int().min(1).max(65535).default(8790),
   token: z.string().min(1).optional(),
+  device_token: z.string().min(1).optional(),
   database_path: z.string().min(1).default("data/central-metrics.sqlite3"),
 }).superRefine((value, context) => {
-  if (value.host === "0.0.0.0" && value.token === undefined) {
+  if (value.host === "0.0.0.0") {
+    for (const field of ["token", "device_token"]) {
+      if (value[field] === undefined) {
+        context.addIssue({
+          code: "custom",
+          path: [field],
+          message: `metrics.center 绑定非回环地址时必须设置 ${field}`,
+        });
+      }
+    }
+  }
+  if (
+    value.token !== undefined
+    && value.device_token !== undefined
+    && value.token === value.device_token
+  ) {
     context.addIssue({
       code: "custom",
-      path: ["token"],
-      message: "metrics.center 绑定非回环地址时必须设置 token",
+      path: ["device_token"],
+      message: "metrics.center 的 device_token 与 token 必须不同",
     });
   }
 });
