@@ -218,6 +218,46 @@ describe("metrics center server", () => {
     expect(desc.total).toBe(2);
   });
 
+  it("aggregates request metrics by day with device filtering", async () => {
+    const { origin } = await startServer();
+    const base = 1_785_640_800_000;
+    await ingest(origin, payloadBody([
+      requestRow(1),
+      { ...requestRow(2), recordedAtMs: base + 86_400_000 },
+    ], []));
+    await fetch(`${origin}/api/ingest`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer center-token",
+      },
+      body: JSON.stringify(payloadBody(
+        [{ ...requestRow(3), recordedAtMs: base + 2 * 86_400_000 }],
+        [],
+        "device-b",
+      )),
+    });
+
+    const all = await fetchJson<DailyResponse>(
+      `${origin}/api/daily?days=365`,
+    );
+    expect(all.daily).toHaveLength(3);
+    expect(all.daily[1]).toMatchObject({
+      request_count: 1,
+      total_tokens: 1_100,
+    });
+
+    const filtered = await fetchJson<DailyResponse>(
+      `${origin}/api/daily?days=365&device=device-a`,
+    );
+    expect(filtered.daily).toHaveLength(2);
+
+    const bounded = await fetchJson<DailyResponse>(
+      `${origin}/api/daily?days=1`,
+    );
+    expect(bounded.daily.length).toBeLessThanOrEqual(1);
+  });
+
   it("rejects invalid payloads and exposes public health", async () => {
     const { origin } = await startServer();
 
@@ -340,6 +380,19 @@ interface DevicesResponse {
 interface RequestsResponse {
   requests: Array<Record<string, unknown>>;
   total: number;
+}
+
+interface DailyResponse {
+  daily: Array<{
+    day: string;
+    request_count: number;
+    input_tokens: number;
+    cached_input_tokens: number;
+    output_tokens: number;
+    reasoning_output_tokens: number;
+    total_tokens: number;
+    total_cost_nanos: number;
+  }>;
 }
 
 interface SubagentsResponse {

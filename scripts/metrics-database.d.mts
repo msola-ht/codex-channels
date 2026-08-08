@@ -125,6 +125,29 @@ export function upgradeMetricsDatabaseWithGatewayRestart(
   },
 ): MetricsDatabaseUpgradeResult;
 
+export interface MetricsSyncResetResult {
+  backupPath: string | null;
+  changed: boolean;
+  statePath: string;
+  deviceId?: string;
+}
+
+export function resetMetricsSyncState(
+  environment?: NodeJS.ProcessEnv,
+  options?: {
+    gatewayRunning?: () => boolean;
+  },
+): MetricsSyncResetResult;
+
+export function resetMetricsSyncStateWithGatewayRestart(
+  environment?: NodeJS.ProcessEnv,
+  options?: {
+    stopGateway?: () => void;
+    startGateway?: () => void;
+    reset?: () => MetricsSyncResetResult;
+  },
+): MetricsSyncResetResult;
+
 export function readMetricsReport(
   environment?: NodeJS.ProcessEnv,
   options?: { range?: "24h" | "7d" | "30d"; group?: "global" | "providers" | "models"; nowMs?: number },

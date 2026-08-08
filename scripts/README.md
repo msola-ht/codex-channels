@@ -15,7 +15,9 @@
   与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3 备份后
   起逐版本备份后事务升级到 v7，reset 要求 Gateway 停止、检查点回写、`0600`
   备份后移除旧库，不迁移或覆盖原指标记录。服务状态无法确认、处于非停止状态或前台 Gateway
-  指标 Socket 仍可连接时均拒绝 reset。
+  指标 Socket 仍可连接时均拒绝 reset；`sync-reset` 备份并清零多端上报水位文件（保留
+  设备 ID），默认同样要求 Gateway 已停止，`--restart-gateway` 时自动停止并重新启动
+  Gateway，用于重放修复中心历史数据。
 - `metrics-export-format.mjs` / `metrics-export-format.d.mts`：指标导出的显示上下文（配置与
   汇率缓存）、币种换算、Token/费用/时间格式化与 Markdown/CSV 转义；币种模式解析与 Token
   格式复用 Application/Surface 导出，换算逻辑集中在 `convertCostToCny`。

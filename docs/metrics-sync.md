@@ -100,6 +100,10 @@ codexc service start center          # 启动指标中心后台服务
 - 启动后立即执行一次，之后按 `interval_seconds` 定时执行；失败时按
   `间隔 × 2^失败次数` 指数退避，最长 1 小时，成功后退避清零；429/5xx 且服务端返回
   `Retry-After` 时，按服务端要求的时间延后重试（不会早于该时间发起请求）。
+- 需要修复云端历史时，运行 `codexc metrics sync-reset [--restart-gateway]`：默认要求
+  Gateway 已停止，备份并清零本地上报水位（保留设备 ID），Gateway 重启后从第一条记录
+  重新上报；中心按 `(device_id, local_id)` 覆盖写入，重复记录用最新值覆盖而不是新增。
+  加 `--restart-gateway` 时自动停止并重新启动 Gateway。
 - 每次从本地指标库读取 `id > 上次水位` 的请求记录（最多 `batch_size` 条）和
   `recorded_at_ms > 上次水位` 的子代理标注（最多 1000 条；同一毫秒内用 `thread_id`
   复合游标继续推进，避免同毫秒落库的记录漏传）；两者都为空时不发请求。

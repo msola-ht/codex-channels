@@ -95,6 +95,13 @@ describe("webui server", () => {
     expect(overview.status).toBe(200);
     const body = await overview.json() as { totals: { request_count: number } };
     expect(body.totals.request_count).toBe(1);
+
+    const daily = await fetch(`${origin}/api/v1/global/daily?days=30`);
+    expect(daily.status).toBe(200);
+    const dailyBody = await daily.json() as {
+      daily: Array<{ request_count: number }>;
+    };
+    expect(dailyBody.daily.reduce((sum, row) => sum + row.request_count, 0)).toBe(1);
   });
 
   it("serves the static page and rejects unknown paths", async () => {

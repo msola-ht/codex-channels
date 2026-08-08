@@ -7,6 +7,8 @@ export type {
   ErrorsReport,
   ErrorsResponse,
   GlobalCostRow,
+  GlobalDailyResponse,
+  GlobalDailyRow,
   GlobalDeviceRow,
   GlobalDevicesResponse,
   GlobalOverviewResponse,

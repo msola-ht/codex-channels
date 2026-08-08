@@ -244,6 +244,10 @@ async function handleRequest(token, database, request, response) {
     handleOverview(url, database, response);
     return;
   }
+  if (url.pathname === "/api/daily") {
+    handleDaily(url, database, response);
+    return;
+  }
   if (url.pathname === "/api/requests") {
     handleRequests(url, database, response);
     return;
@@ -421,6 +425,33 @@ function handleRequests(url, database, response) {
   sendJson(response, 200, { requests: rows, total });
 }
 
+function handleDaily(url, database, response) {
+  const deviceId = url.searchParams.get("device") ?? "";
+  const days = clampDays(url.searchParams.get("days"), 30);
+  const sinceMs = Date.now() - days * 86_400_000;
+  const clauses = ["recorded_at_ms >= ?"];
+  const params = [sinceMs];
+  if (deviceId) {
+    clauses.push("device_id = ?");
+    params.push(deviceId);
+  }
+  const rows = database.prepare(`
+    SELECT date(recorded_at_ms / 1000, 'unixepoch') AS day,
+           COUNT(*) AS request_count,
+           COALESCE(SUM(input_tokens), 0) AS input_tokens,
+           COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
+           COALESCE(SUM(output_tokens), 0) AS output_tokens,
+           COALESCE(SUM(reasoning_output_tokens), 0) AS reasoning_output_tokens,
+           COALESCE(SUM(total_tokens), 0) AS total_tokens,
+           COALESCE(SUM(total_cost_nanos), 0) AS total_cost_nanos
+    FROM request_metrics
+    WHERE ${clauses.join(" AND ")}
+    GROUP BY day
+    ORDER BY day ASC
+  `).all(...params);
+  sendJson(response, 200, { daily: rows });
+}
+
 const requestSortColumns = {
   time: "recorded_at_ms",
   device: "device_id",
@@ -496,6 +527,12 @@ function clampLimit(raw, fallback) {
   const value = Number.parseInt(raw ?? "", 10);
   if (!Number.isInteger(value) || value < 1) return fallback;
   return Math.min(value, maximumListLimit);
+}
+
+function clampDays(raw, fallback) {
+  const value = Number.parseInt(raw ?? "", 10);
+  if (!Number.isInteger(value) || value < 1) return fallback;
+  return Math.min(value, 365);
 }
 
 function clampOffset(raw) {

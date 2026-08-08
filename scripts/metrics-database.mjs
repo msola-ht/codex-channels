@@ -3,9 +3,12 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  mkdirSync,
+  readFileSync,
   renameSync,
+  writeFileSync,
 } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
@@ -271,6 +274,108 @@ export function upgradeMetricsDatabaseWithGatewayRestart(
   return result;
 }
 
+export function resetMetricsSyncState(environment = process.env, options = {}) {
+  const runtime = resolveMetricsRuntime(environment);
+  const gatewayRunning = options.gatewayRunning ?? (() => isGatewayRunning(environment));
+  if (
+    gatewayRunning()
+    || runtime.metricsSocketPaths.some(metricsSocketIsActive)
+  ) {
+    throw new Error(
+      "Gateway 仍在运行；请先执行 codexc service stop gateway，或使用 --restart-gateway 自动停止并重启",
+    );
+  }
+  const statePath = metricsSyncStatePath(environment);
+  if (!existsSync(statePath)) {
+    return { backupPath: null, changed: false, statePath };
+  }
+  let deviceId;
+  try {
+    const parsed = JSON.parse(readFileSync(statePath, "utf8"));
+    deviceId = parsed.deviceId;
+  } catch {
+    deviceId = undefined;
+  }
+  if (typeof deviceId !== "string" || deviceId.length === 0) {
+    throw new Error(`指标同步状态文件缺少有效 deviceId：${statePath}`);
+  }
+  const backupPath = `${statePath}.bak-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+  copyFileSync(statePath, backupPath);
+  chmodSync(backupPath, 0o600);
+  const next = {
+    version: 1,
+    deviceId,
+    lastRequestLocalId: 0,
+    lastSubagentRecordedAtMs: 0,
+    lastSubagentThreadId: null,
+  };
+  const temporaryPath = `${statePath}.tmp`;
+  try {
+    mkdirSync(dirname(statePath), { recursive: true });
+    writeFileSync(temporaryPath, `${JSON.stringify(next, null, 2)}\n`, {
+      mode: 0o600,
+      flag: "wx",
+    });
+    chmodSync(temporaryPath, 0o600);
+    renameSync(temporaryPath, statePath);
+  } catch (error) {
+    try {
+      renameSync(temporaryPath, `${temporaryPath}.failed-${Date.now()}`);
+    } catch {
+      // 保留原始异常
+    }
+    throw error;
+  }
+  return { backupPath, changed: true, statePath, deviceId };
+}
+
+export function resetMetricsSyncStateWithGatewayRestart(
+  environment = process.env,
+  options = {},
+) {
+  const stopGateway = options.stopGateway
+    ?? (() => runGatewayServiceAction("stop", environment));
+  const startGateway = options.startGateway
+    ?? (() => runGatewayServiceAction("start", environment));
+  const reset = options.reset
+    ?? (() => resetMetricsSyncState(environment));
+  let stopError;
+  try {
+    stopGateway();
+  } catch (error) {
+    stopError = error;
+  }
+  let result;
+  let resetError;
+  try {
+    result = reset();
+  } catch (error) {
+    resetError = error;
+  }
+  let startError;
+  try {
+    startGateway();
+  } catch (error) {
+    startError = error;
+  }
+  if (stopError && startError) {
+    throw new AggregateError(
+      [stopError, startError],
+      "重置同步水位前停止 Gateway 失败，且 Gateway 未能重新启动",
+    );
+  }
+  if (stopError) throw stopError;
+  if (resetError && startError) {
+    throw new AggregateError(
+      [resetError, startError],
+      "重置同步水位失败，且 Gateway 未能重新启动",
+    );
+  }
+  if (resetError) throw resetError;
+  if (startError) throw startError;
+  return result;
+}
+
 function runGatewayServiceAction(action, environment) {
   const cli = resolve(import.meta.dirname, "../bin/codexc.mjs");
   const result = spawnSync(
@@ -504,6 +609,11 @@ function resolveMetricsRuntime(environment) {
       providerMetricsSocketPath(appServerSocketPath, provider)
     ),
   };
+}
+
+function metricsSyncStatePath(environment) {
+  const runtime = resolveMetricsRuntime(environment);
+  return join(dirname(runtime.databasePath), "metrics-sync-state.json");
 }
 
 function readSchemaVersion(database) {
@@ -1430,6 +1540,24 @@ if (
         console.log(`升级前备份：${result.backupPath}`);
       }
       console.log("Gateway 已重新启动。");
+    } else if (command === "sync-reset" && process.argv.length === 3) {
+      const result = resetMetricsSyncState();
+      if (!result.changed) {
+        console.log(`指标同步状态尚未创建，无需重置：${result.statePath}`);
+      } else {
+        console.log(`已重置指标同步水位（保留设备 ${result.deviceId}）：${result.statePath}`);
+        console.log(`重置前备份：${result.backupPath}`);
+        console.log("重启 Gateway 后将从第一条记录重新上报（中心按主键覆盖修复历史）。");
+      }
+    } else if (command === "sync-reset-restart" && process.argv.length === 3) {
+      const result = resetMetricsSyncStateWithGatewayRestart();
+      if (!result.changed) {
+        console.log(`指标同步状态尚未创建，无需重置：${result.statePath}`);
+      } else {
+        console.log(`已重置指标同步水位（保留设备 ${result.deviceId}）：${result.statePath}`);
+        console.log(`重置前备份：${result.backupPath}`);
+      }
+      console.log("Gateway 已重新启动，将从第一条记录重新上报。");
     } else if (command === "report") {
       const options = parseMetricsOptions(
         process.argv.slice(3),

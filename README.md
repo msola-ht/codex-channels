@@ -264,6 +264,7 @@ codexc metrics export --range 30d --format json   # 脱敏明细导出；--threa
 codexc service stop gateway
 codexc metrics upgrade --restart-gateway          # 自动停 Gateway、备份升级并重新启动
 codexc metrics reset                              # 先保留 0600 旧库备份，再重建
+codexc metrics sync-reset --restart-gateway       # 备份并清零多端上报水位，重放修复中心历史
 codexc service start gateway
 ```
 

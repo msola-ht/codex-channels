@@ -1,6 +1,7 @@
 import type {
   DeepseekBalanceResponse,
   ErrorsResponse,
+  GlobalDailyResponse,
   GlobalDevicesResponse,
   GlobalOverviewResponse,
   GlobalRequestsResponse,
@@ -204,6 +205,21 @@ export function fetchGlobalDevices(
 ): Promise<GlobalDevicesResponse> {
   return getJson<GlobalDevicesResponse>(
     `${API_PREFIX}/global/devices`,
+    signal,
+  )
+}
+
+export function fetchGlobalDaily(
+  device: string | null,
+  days: number,
+  signal?: AbortSignal,
+): Promise<GlobalDailyResponse> {
+  const query = [
+    `days=${days}`,
+    device === null ? null : `device=${encodeURIComponent(device)}`,
+  ].filter(Boolean).join("&")
+  return getJson<GlobalDailyResponse>(
+    `${API_PREFIX}/global/daily?${query}`,
     signal,
   )
 }

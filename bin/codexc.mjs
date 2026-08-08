@@ -193,7 +193,8 @@ const helpText = {
   codexc metrics export [--range 24h|7d|30d] [--format json|csv|markdown] [--thread Thread ID]   请求明细导出
   codexc metrics status   指标数据库状态
   codexc metrics upgrade  备份并升级指标库（需 Gateway 停止）
-  codexc metrics reset    备份并重建指标库（需 Gateway 停止）`,
+  codexc metrics reset    备份并重建指标库（需 Gateway 停止）
+  codexc metrics sync-reset   备份并清零多端上报水位，重放修复中心历史`,
   webui: `用法：codexc webui [--host 地址] [--port 端口] [--token 令牌]
 
 启动本地只读指标 WebUI（默认 http://127.0.0.1:8787/）。
@@ -236,6 +237,12 @@ const helpText = {
   "metrics.upgrade": `用法：codexc metrics upgrade [--restart-gateway]
 
 默认要求 Gateway 已停止；加 --restart-gateway 时自动停止 Gateway、备份升级并重新启动。`,
+  "metrics.sync_reset": `用法：codexc metrics sync-reset [--restart-gateway]
+
+默认要求 Gateway 已停止；备份 ~/.codex-connect/data/metrics-sync-state.json 后清零
+上报水位（保留设备 ID），重启 Gateway 后从第一条记录重新上报；中心按
+(device_id, local_id) 覆盖写入，可修复云端历史数据。加 --restart-gateway 时自动
+停止并重新启动 Gateway。`,
   "metrics.report": `用法：codexc metrics report [--range <24h|7d|30d>] [--group <global|providers|models>] [--format markdown|json|csv]
 
 只读输出汇报；默认最近 30 天并按模型分组，写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。`,
@@ -1136,6 +1143,7 @@ async function metrics(args) {
     showSubcommandHelp(args, "status", "metrics.status") ||
     showSubcommandHelp(args, "upgrade", "metrics.upgrade") ||
     showSubcommandHelp(args, "reset", "metrics.reset") ||
+    showSubcommandHelp(args, "sync-reset", "metrics.sync_reset") ||
     showSubcommandHelp(args, "report", "metrics.report") ||
     showSubcommandHelp(args, "export", "metrics.export")) {
     return;
@@ -1150,10 +1158,10 @@ async function metrics(args) {
     return;
   }
   if (
-    !new Set(["run", "turns", "threads", "status", "upgrade", "reset", "report", "export"])
+    !new Set(["run", "turns", "threads", "status", "upgrade", "reset", "sync-reset", "report", "export"])
       .has(subcommand)
   ) {
-    throw new Error("用法：codexc metrics <run|turns|threads|status|upgrade|reset|report|export>");
+    throw new Error("用法：codexc metrics <run|turns|threads|status|upgrade|reset|sync-reset|report|export>");
   }
   if (subcommand === "status" && rest.length === 0) {
     run(
@@ -1168,7 +1176,11 @@ async function metrics(args) {
     runScript("scripts/metrics-database.mjs", ["upgrade-restart"]);
     return;
   }
-  if (new Set(["upgrade", "reset"]).has(subcommand) && rest.length > 0) {
+  if (subcommand === "sync-reset" && rest.length === 1 && rest[0] === "--restart-gateway") {
+    runScript("scripts/metrics-database.mjs", ["sync-reset-restart"]);
+    return;
+  }
+  if (new Set(["upgrade", "reset", "sync-reset"]).has(subcommand) && rest.length > 0) {
     throw new Error(`用法：codexc metrics ${subcommand}`);
   }
   if (new Set(["run", "turns", "threads", "report", "export"]).has(subcommand)) {

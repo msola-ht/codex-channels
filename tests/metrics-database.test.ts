@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -23,6 +24,8 @@ import {
   readMetricsThreads,
   readMetricsTurns,
   resetMetricsDatabase,
+  resetMetricsSyncState,
+  resetMetricsSyncStateWithGatewayRestart,
   upgradeMetricsDatabase,
   upgradeMetricsDatabaseWithGatewayRestart,
 } from "../scripts/metrics-database.mjs";
@@ -710,6 +713,97 @@ describe("model request metrics database operations", () => {
         throw new Error("start failed");
       },
     })).toThrow(AggregateError);
+  });
+
+  it("resets the metrics sync watermark while keeping the device id", () => {
+    const { environment, home } = fixture();
+    const statePath = join(home, "data", "metrics-sync-state.json");
+    mkdirSync(dirname(statePath), { recursive: true });
+    writeFileSync(statePath, JSON.stringify({
+      version: 1,
+      deviceId: "main-server",
+      lastRequestLocalId: 42,
+      lastSubagentRecordedAtMs: 1_000,
+      lastSubagentThreadId: "sub-1",
+    }, null, 2) + "\n", { mode: 0o600 });
+
+    const result = resetMetricsSyncState(environment, {
+      gatewayRunning: () => false,
+    });
+
+    expect(result).toMatchObject({
+      changed: true,
+      statePath,
+      deviceId: "main-server",
+    });
+    expect(existsSync(result.backupPath ?? "")).toBe(true);
+    const next = JSON.parse(readFileSync(statePath, "utf8")) as {
+      version: number;
+      deviceId: string;
+      lastRequestLocalId: number;
+      lastSubagentRecordedAtMs: number;
+      lastSubagentThreadId: string | null;
+    };
+    expect(next).toEqual({
+      version: 1,
+      deviceId: "main-server",
+      lastRequestLocalId: 0,
+      lastSubagentRecordedAtMs: 0,
+      lastSubagentThreadId: null,
+    });
+    expect(statSync(statePath).mode & 0o777).toBe(0o600);
+  });
+
+  it("does nothing when the metrics sync state does not exist", () => {
+    const { environment, home } = fixture();
+
+    expect(resetMetricsSyncState(environment, {
+      gatewayRunning: () => false,
+    })).toEqual({
+      backupPath: null,
+      changed: false,
+      statePath: join(home, "data", "metrics-sync-state.json"),
+    });
+  });
+
+  it("refuses to reset the sync watermark while Gateway is running", () => {
+    const { environment, home } = fixture();
+    const statePath = join(home, "data", "metrics-sync-state.json");
+    mkdirSync(dirname(statePath), { recursive: true });
+    writeFileSync(statePath, JSON.stringify({
+      version: 1,
+      deviceId: "main-server",
+      lastRequestLocalId: 42,
+      lastSubagentRecordedAtMs: 0,
+      lastSubagentThreadId: null,
+    }), { mode: 0o600 });
+
+    expect(() => resetMetricsSyncState(environment, {
+      gatewayRunning: () => true,
+    })).toThrow(/Gateway 仍在运行/u);
+    expect(JSON.parse(readFileSync(statePath, "utf8"))).toMatchObject({
+      lastRequestLocalId: 42,
+    });
+  });
+
+  it("stops, resets and restarts Gateway in order", () => {
+    const calls: string[] = [];
+
+    resetMetricsSyncStateWithGatewayRestart(process.env, {
+      stopGateway: () => calls.push("stop"),
+      reset: () => {
+        calls.push("reset");
+        return {
+          backupPath: "/tmp/sync.bak",
+          changed: true,
+          statePath: "/tmp/sync-state.json",
+          deviceId: "main-server",
+        };
+      },
+      startGateway: () => calls.push("start"),
+    });
+
+    expect(calls).toEqual(["stop", "reset", "start"]);
   });
 
   it("refuses to reset when an unmanaged Gateway still owns the metrics database", () => {

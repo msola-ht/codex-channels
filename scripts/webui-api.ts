@@ -329,6 +329,21 @@ export interface GlobalDevicesResponse {
   devices: GlobalDeviceRow[]
 }
 
+export interface GlobalDailyRow {
+  day: string
+  request_count: number
+  input_tokens: number
+  cached_input_tokens: number
+  output_tokens: number
+  reasoning_output_tokens: number
+  total_tokens: number
+  total_cost_nanos: number
+}
+
+export interface GlobalDailyResponse {
+  daily: GlobalDailyRow[]
+}
+
 export interface GlobalRequestRow {
   device_id: string
   local_id: number

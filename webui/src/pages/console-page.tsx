@@ -20,6 +20,15 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts"
+import {
   Table,
   TableBody,
   TableCell,
@@ -43,6 +52,7 @@ import { useCurrency } from "@/hooks/currency-context"
 import { useOverview } from "@/hooks/use-overview"
 import {
   fetchDeepseekBalance,
+  fetchGlobalDaily,
   fetchGlobalDevices,
   fetchGlobalOverview,
   fetchSettings,
@@ -51,6 +61,7 @@ import { formatTime, formatTokens } from "@/lib/format"
 import type {
   DeepseekBalanceResponse,
   GlobalCostRow,
+  GlobalDailyRow,
   GlobalDeviceRow,
   GlobalOverviewResponse,
   GlobalProviderRow,
@@ -228,6 +239,10 @@ function GlobalDashboard({
     (signal) => fetchGlobalOverview(deviceId, signal),
     [deviceId],
   )
+  const daily = useApi(
+    (signal) => fetchGlobalDaily(deviceId, 90, signal),
+    [deviceId],
+  )
 
   return (
     <div className="flex flex-col gap-6">
@@ -238,6 +253,8 @@ function GlobalDashboard({
         : (
           <>
             <GlobalTotalsCards totals={overview.data.totals} />
+            <GlobalTrendCard rows={daily.data?.daily ?? []} loading={daily.loading} />
+            <GlobalHeatmapCard rows={daily.data?.daily ?? []} loading={daily.loading} />
             <GlobalCostTable rows={overview.data.costsByCurrency} />
             <GlobalProviderTable rows={overview.data.providers} />
           </>
@@ -283,6 +300,131 @@ function GlobalTotalsCards({ totals }: { totals: GlobalOverviewResponse["totals"
       />
     </div>
   )
+}
+
+const HEATMAP_COLORS = ["#ebedf0", "#a7f3d0", "#6ee7b7", "#34d399", "#10b981"]
+const TREND_COLORS = {
+  input: "#38bdf8",
+  cached: "#14b8a6",
+  output: "#a78bfa",
+  reasoning: "#fb7185",
+}
+
+function GlobalTrendCard({ rows, loading }: { rows: GlobalDailyRow[]; loading: boolean }) {
+  const cutoff = new Date(Date.now() - 29 * 86_400_000)
+  const cutoffKey = `${cutoff.getUTCFullYear()}-${String(cutoff.getUTCMonth() + 1).padStart(2, "0")}-${String(cutoff.getUTCDate()).padStart(2, "0")}`
+  const data = rows
+    .filter((row) => row.day >= cutoffKey)
+    .map((row) => ({
+      day: row.day.slice(5),
+      input: row.input_tokens,
+      cached: row.cached_input_tokens,
+      output: row.output_tokens,
+      reasoning: row.reasoning_output_tokens,
+    }))
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>用量趋势</CardTitle>
+        <CardDescription>最近 30 天，按输入 / 缓存 / 输出 / 推理堆叠</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {loading && data.length === 0 ? (
+          <PageSkeleton rows={3} />
+        ) : data.length === 0 ? (
+          <p className="text-sm text-muted-foreground">当前范围最近 90 天没有记录</p>
+        ) : (
+          <div className="h-56 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis
+                  dataKey="day"
+                  tick={{ fontSize: 11 }}
+                  tickLine={false}
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  tick={{ fontSize: 11 }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={48}
+                  tickFormatter={(value: number) => formatTokens(value)}
+                />
+                <Tooltip
+                  formatter={(value, name) => {
+                    const labels: Record<string, string> = {
+                      input: "输入",
+                      cached: "缓存输入",
+                      output: "输出",
+                      reasoning: "推理输出",
+                    }
+                    return [formatTokens(Number(value ?? 0)), labels[String(name)] ?? String(name)]
+                  }}
+                />
+                <Bar dataKey="reasoning" stackId="tokens" fill={TREND_COLORS.reasoning} />
+                <Bar dataKey="cached" stackId="tokens" fill={TREND_COLORS.cached} />
+                <Bar dataKey="output" stackId="tokens" fill={TREND_COLORS.output} />
+                <Bar dataKey="input" stackId="tokens" fill={TREND_COLORS.input} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function GlobalHeatmapCard({ rows, loading }: { rows: GlobalDailyRow[]; loading: boolean }) {
+  const byDay = new Map(rows.map((row) => [row.day, row.total_tokens]))
+  const days = 90
+  const today = new Date()
+  const cells: Array<{ date: string; value: number }> = []
+  for (let index = days - 1; index >= 0; index -= 1) {
+    const date = new Date(today.getTime() - index * 86_400_000)
+    const key = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`
+    cells.push({ date: key, value: byDay.get(key) ?? 0 })
+  }
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>活动热力图</CardTitle>
+        <CardDescription>最近 90 天每日 Token 量</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {loading && rows.length === 0 ? (
+          <PageSkeleton rows={3} />
+        ) : (
+          <div className="overflow-x-auto pb-1">
+            <div
+              className="grid w-max gap-[3px]"
+              style={{
+                gridAutoFlow: "column",
+                gridTemplateRows: "repeat(7, 12px)",
+              }}
+            >
+              {cells.map((cell) => (
+                <div
+                  key={cell.date}
+                  title={`${cell.date} · ${formatTokens(cell.value)}`}
+                  className="rounded-[3px]"
+                  style={{ backgroundColor: heatColor(cell.value), width: 12, height: 12 }}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function heatColor(value: number): string {
+  if (value <= 0) return HEATMAP_COLORS[0]!
+  if (value < 1_000_000) return HEATMAP_COLORS[1]!
+  if (value < 10_000_000) return HEATMAP_COLORS[2]!
+  if (value < 50_000_000) return HEATMAP_COLORS[3]!
+  return HEATMAP_COLORS[4]!
 }
 
 function GlobalCostTable({ rows }: { rows: GlobalCostRow[] }) {
