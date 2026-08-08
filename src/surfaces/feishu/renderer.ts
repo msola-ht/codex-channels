@@ -205,7 +205,7 @@ export function renderFeishuOutput(
     case "subagent.spawned":
       return null;
     case "subagent.completed":
-      return renderFeishuSubagentCompleted(event, priceCurrency, exchangeRate);
+      return renderFeishuSubagentCompleted(event, priceCurrency, exchangeRate, debug);
     case "turn.completed":
       return renderFeishuTurnCompleted(event, priceCurrency, exchangeRate, debug);
     case "thread.status":
@@ -229,9 +229,10 @@ function renderFeishuSubagentCompleted(
     provider: string | null | undefined,
   ) => DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
+  debug = false,
 ): string {
   return renderFeishuLifecyclePresentation(
-    createSubagentCompletedPresentation(event, priceCurrency, exchangeRate),
+    createSubagentCompletedPresentation(event, priceCurrency, exchangeRate, debug),
   );
 }
 

@@ -112,7 +112,9 @@ VPS 上用 `codexc center config` 配置 `[metrics.center]` 的独立设备上�
 
 在 `codexc setup` 中选择“系统设置 → 调试模式”可全局开启或关闭脱敏调试信息。开启后会把
 `[logging].level` 设为 `debug`，在渠道中展示 `/vision` 接收延迟、启动通知的“运行环境”、
-完成通知的“最后请求首事件延迟”和视觉“视觉 API 耗时”等技术字段；关闭后恢复为 `info`。
+Turn 与视觉完成通知的 Token 子项、Turn 完成通知的费用子项与货币换算对照、
+“模型请求聚合耗时”、“最后请求首事件延迟”和视觉“视觉 API 耗时”等技术字段；关闭后恢复为
+`info`，完成通知仍保留 Token 与费用总计。
 修改后只需重启 Gateway：
 
 ```bash

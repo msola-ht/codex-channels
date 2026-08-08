@@ -113,9 +113,10 @@ export function renderWeixinSubagentCompleted(
     provider: string | null | undefined,
   ) => DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
+  debug = false,
 ): string {
   return renderWeixinLifecyclePresentation(
-    createSubagentCompletedPresentation(event, priceCurrency, exchangeRate),
+    createSubagentCompletedPresentation(event, priceCurrency, exchangeRate, debug),
   );
 }
 

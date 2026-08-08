@@ -389,6 +389,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
             event,
             this.options.priceCurrency,
             this.options.exchangeRate?.() ?? null,
+            this.options.debugEnabled ?? false,
           ),
           { structuredFields: true },
         );

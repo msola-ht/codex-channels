@@ -166,6 +166,47 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("¥7.200000");
   });
 
+  it("shows subagent Token details and currency equivalents only in debug", () => {
+    const event = {
+      type: "subagent.completed" as const,
+      target: {
+        surface: "telegram" as const,
+        accountId: "default",
+        conversationId: "100",
+      },
+      parentThreadId: "thread-1",
+      agentThreadId: "subagent-thread-1",
+      agentPath: "/root/review",
+      model: "gpt-test",
+      modelProvider: "openai",
+      status: "completed" as const,
+      requestCount: 1,
+      inputTokens: 20_000,
+      outputTokens: 3_000,
+      totalCostNanos: 1_000_000_000,
+      pricingCurrency: "USD",
+      durationMs: 1_000,
+    };
+    const exchangeRate = {
+      usdToCny: 7.2,
+      effectiveAtMs: 1_700_000_000_000,
+      source: "ecb",
+    } as const;
+    const normal = renderPlainLifecyclePresentation(
+      createSubagentCompletedPresentation(event, () => "usd", exchangeRate),
+    );
+    const debug = renderPlainLifecyclePresentation(
+      createSubagentCompletedPresentation(event, () => "usd", exchangeRate, true),
+    );
+
+    expect(normal).toContain("Token：23 K");
+    expect(normal).not.toContain("输入：20 K");
+    expect(normal).not.toContain("≈ ¥");
+    expect(debug).toContain("输入：20 K");
+    expect(debug).toContain("输出：3 K");
+    expect(debug).toContain("费用：$1.000000（≈ ¥7.200000）");
+  });
+
   it("uses one Turn start and completion field order", () => {
     expect(renderPlainLifecyclePresentation(
       createTurnStartedPresentation(),
@@ -220,7 +261,6 @@ describe("shared Surface lifecycle presentation", () => {
       "错误：失败：[已隐藏]",
       "模型：gpt-test · medium · Fast 开启",
       "提供商：OpenAI 官方",
-      "最近请求缓存命中率：75.00%",
       "性能",
       "  总耗时：1分5秒",
       "",
@@ -599,6 +639,104 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered.match(/均价：约 ¥3,600,000\.00\/100M/g)?.length).toBe(2);
   });
 
+  it("shows currency equivalents only in debug completion cards", () => {
+    const event = {
+      type: "turn.completed" as const,
+      target: {
+        surface: "feishu" as const,
+        accountId: "default",
+        conversationId: "100",
+      },
+      threadId: "thread-openai",
+      turnId: "turn-openai",
+      status: "completed" as const,
+      modelProvider: "openai",
+      timing: {
+        modelRequestCount: 1,
+        completedModelRequestCount: 1,
+        modelRequestDurationMs: 1_000,
+        requestInputTokens: 150,
+        requestCachedInputTokens: 100,
+        nonReasoningOutputTokens: 50,
+        referenceCost: {
+          currency: "USD",
+          totalCostNanos: 1_000_000_000,
+          inputCostNanos: 600_000_000,
+          cachedInputCostNanos: 100_000_000,
+          outputCostNanos: 300_000_000,
+          pricedRequestCount: 1,
+          requestCount: 1,
+          uncachedInputPricePerMillionNanos: 140_000_000,
+          cachedInputPricePerMillionNanos: 2_800_000,
+          outputPricePerMillionNanos: 280_000_000,
+          hasMixedPrices: false,
+        },
+      },
+    };
+    const exchangeRate = {
+      usdToCny: 7.2,
+      effectiveAtMs: 1_700_000_000_000,
+      source: "ecb",
+    } as const;
+    const normal = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation(event, () => "usd", exchangeRate),
+    );
+    const debug = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation(event, () => "usd", exchangeRate, true),
+    );
+
+    expect(normal).toContain("费用：$1.000000");
+    expect(normal).toContain("Token：200");
+    expect(normal).toContain("均价：约 $500,000.00/100M");
+    expect(normal).not.toContain("输入命中缓存");
+    expect(normal).not.toContain("输入价格");
+    expect(normal).not.toContain("模型请求聚合耗时");
+    expect(normal).not.toContain("≈ ¥");
+    expect(debug).toContain("费用：$1.000000（≈ ¥7.200000）");
+    expect(debug).toContain("输入命中缓存：100");
+    expect(debug).toContain("输入价格：$0.600000（≈ ¥4.320000）");
+    expect(debug).toContain("模型请求聚合耗时：1秒");
+    expect(debug).toContain("均价：约 $500,000.00/100M（≈ ¥3,600,000.00/100M）");
+  });
+
+  it("keeps the Turn Token total when cache metrics are incomplete", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "telegram",
+          accountId: "default",
+          conversationId: "100",
+        },
+        threadId: "thread-openai",
+        turnId: "turn-openai",
+        status: "completed",
+        modelProvider: "openai",
+        timing: {
+          requestInputTokens: 1_000,
+          requestOutputTokens: 50,
+          referenceCost: {
+            currency: "USD",
+            totalCostNanos: 1_000_000_000,
+            inputCostNanos: 600_000_000,
+            cachedInputCostNanos: 100_000_000,
+            outputCostNanos: 300_000_000,
+            pricedRequestCount: 1,
+            requestCount: 1,
+            uncachedInputPricePerMillionNanos: null,
+            cachedInputPricePerMillionNanos: null,
+            outputPricePerMillionNanos: null,
+            hasMixedPrices: false,
+          },
+        },
+      }),
+    );
+
+    expect(rendered).toContain("Token：1.05 K");
+    expect(rendered).toContain("均价：约 $95,238.10/100M");
+    expect(rendered).not.toContain("缓存命中率");
+  });
+
   it("omits the DeepSeek average price when pricing samples are incomplete", () => {
     const rendered = renderPlainLifecyclePresentation(
       createTurnCompletedPresentation({
@@ -676,7 +814,7 @@ describe("shared Surface lifecycle presentation", () => {
         usdToCny: 7.2,
         effectiveAtMs: 1_700_000_000_000,
         source: "ecb",
-      }),
+      }, true),
     );
 
     expect(rendered).toContain("- **费用**：¥7.200000");
@@ -712,7 +850,7 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).not.toContain("自动重试");
   });
 
-  it("shows the reasoning token count but omits timing-stream fields for OpenAI", () => {
+  it("shows the reasoning token count in debug but omits unavailable timing fields for OpenAI", () => {
     const rendered = renderPlainLifecyclePresentation(
       createTurnCompletedPresentation({
         type: "turn.completed",
@@ -731,7 +869,7 @@ describe("shared Surface lifecycle presentation", () => {
           reasoningTokens: 40,
           outputTokensPerSecond: 96,
         },
-      }),
+      }, undefined, undefined, true),
     );
 
     expect(rendered).toContain("其中推理输出：40");

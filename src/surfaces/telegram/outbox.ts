@@ -406,6 +406,7 @@ export class TelegramOutbox {
               event,
               this.options.priceCurrency,
               this.options.exchangeRate?.() ?? null,
+              this.options.debugEnabled ?? false,
             ),
             undefined,
             true,

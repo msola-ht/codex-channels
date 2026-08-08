@@ -130,9 +130,10 @@ export function renderTelegramSubagentCompleted(
     provider: string | null | undefined,
   ) => DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
+  debug = false,
 ): string {
   return renderTelegramLifecyclePresentation(
-    createSubagentCompletedPresentation(event, priceCurrency, exchangeRate),
+    createSubagentCompletedPresentation(event, priceCurrency, exchangeRate, debug),
   );
 }
 

@@ -190,6 +190,7 @@ export function createSubagentCompletedPresentation(
     provider: string | null | undefined,
   ) => DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
+  debug = false,
 ): LifecyclePresentation {
   const currency = priceCurrency?.(event.modelProvider) ?? "usd";
   const fields: LifecyclePresentationField[] = [];
@@ -197,6 +198,7 @@ export function createSubagentCompletedPresentation(
     event,
     currency,
     exchangeRate ?? null,
+    debug,
   );
   if (event.model) {
     fields.push({ label: "模型", value: event.model });
@@ -211,10 +213,10 @@ export function createSubagentCompletedPresentation(
   fields.push({
     title: "Token",
     value: formatTokenCount(event.inputTokens + event.outputTokens),
-    fields: [
+    fields: debug ? [
       { label: "输入", value: formatTokenCount(event.inputTokens) },
       { label: "输出", value: formatTokenCount(event.outputTokens) },
-    ],
+    ] : [],
   });
   if (event.durationMs > 0) {
     fields.push({ label: "耗时", value: formatElapsedDuration(event.durationMs) });
@@ -240,6 +242,7 @@ function formatSubagentCost(
   event: Extract<OutputEvent, { type: "subagent.completed" }>,
   currency: DisplayPriceCurrency,
   exchangeRate: ExchangeRateSnapshot | null,
+  showEquivalent: boolean,
 ): string | null {
   if (event.totalCostNanos === null || event.pricingCurrency === null) {
     return event.requestCount === 0 ? null : `暂无价格快照（计价 0/${event.requestCount}）`;
@@ -250,7 +253,7 @@ function formatSubagentCost(
       ? formatCurrencyNanos("CNY", converted)
       : formatCurrencyNanos(event.pricingCurrency, event.totalCostNanos);
   }
-  const equivalent = event.pricingCurrency === "USD" && exchangeRate
+  const equivalent = showEquivalent && event.pricingCurrency === "USD" && exchangeRate
     ? formatCnyEquivalent(event.totalCostNanos, exchangeRate)
     : null;
   return `${formatCurrencyNanos(event.pricingCurrency, event.totalCostNanos)}`
@@ -367,36 +370,39 @@ export function createTurnCompletedPresentation(
       value: `${event.timing.reasoningRequestCount} 次`,
     });
   }
-  if (event.timing?.modelRequestDurationMs !== undefined) {
+  if (debug && event.timing?.modelRequestDurationMs !== undefined) {
     runFields.push({
       label: "模型请求聚合耗时",
       value: formatElapsedDuration(event.timing.modelRequestDurationMs),
     });
   }
-  if (fallbackCacheField) {
+  if (debug && fallbackCacheField) {
     runFields.push(fallbackCacheField);
   }
   if (
     event.timing?.requestInputTokens !== undefined
-    && event.timing.requestCachedInputTokens !== undefined
   ) {
     const inputTokens = event.timing.requestInputTokens;
     const cachedInputTokens = event.timing.requestCachedInputTokens;
     const reasoningOutputTokens = event.timing.reasoningTokens ?? 0;
-    const outputTokens = (event.timing.nonReasoningOutputTokens ?? 0)
-      + reasoningOutputTokens;
+    const outputTokens = event.timing.requestOutputTokens
+      ?? (event.timing.nonReasoningOutputTokens ?? 0) + reasoningOutputTokens;
     runFields.push({
       title: "Token",
       value: formatTokenCount(inputTokens + outputTokens),
-      fields: [
-        {
-          label: "输入命中缓存",
-          value: formatTokenCount(cachedInputTokens),
-        },
-        {
-          label: "输入未命中缓存",
-          value: formatTokenCount(Math.max(0, inputTokens - cachedInputTokens)),
-        },
+      fields: debug ? [
+        ...(cachedInputTokens === undefined
+          ? [{ label: "输入", value: formatTokenCount(inputTokens) }]
+          : [
+              {
+                label: "输入命中缓存",
+                value: formatTokenCount(cachedInputTokens),
+              },
+              {
+                label: "输入未命中缓存",
+                value: formatTokenCount(Math.max(0, inputTokens - cachedInputTokens)),
+              },
+            ]),
         {
           label: "输出",
           value: formatTokenCount(outputTokens),
@@ -407,11 +413,13 @@ export function createTurnCompletedPresentation(
               value: formatTokenCount(reasoningOutputTokens),
             }]
           : []),
-        {
-          label: "缓存命中率",
-          value: formatCacheHitRate(inputTokens, cachedInputTokens),
-        },
-      ],
+        ...(cachedInputTokens === undefined
+          ? []
+          : [{
+              label: "缓存命中率",
+              value: formatCacheHitRate(inputTokens, cachedInputTokens),
+            }]),
+      ] : [],
     });
   }
   if (event.timing?.referenceCost) {
@@ -427,9 +435,12 @@ export function createTurnCompletedPresentation(
         ? formatReferenceCostTotal({
             ...displayCost,
             requestCount: successfulRequestCount,
-          }, exchangeRate ?? null)
-        : formatReferenceCostTotal(displayCost, exchangeRate ?? null),
-      fields: displayCost.currency === null
+          }, debug ? exchangeRate ?? null : null)
+        : formatReferenceCostTotal(
+            displayCost,
+            debug ? exchangeRate ?? null : null,
+          ),
+      fields: !debug || displayCost.currency === null
         ? []
         : ([
             ["输入价格", displayCost.inputCostNanos],
@@ -455,9 +466,10 @@ export function createTurnCompletedPresentation(
       pricedRequestCount: event.timing.referenceCost.pricedRequestCount,
       requestCount: event.timing.referenceCost.requestCount,
       inputTokens: event.timing.requestInputTokens,
-      outputTokens: (event.timing.nonReasoningOutputTokens ?? 0)
-        + (event.timing.reasoningTokens ?? 0),
-    }, currency, exchangeRate);
+      outputTokens: event.timing.requestOutputTokens
+        ?? (event.timing.nonReasoningOutputTokens ?? 0)
+          + (event.timing.reasoningTokens ?? 0),
+    }, currency, currency === "cny" || debug ? exchangeRate : null);
     if (averagePrice !== null) {
       runFields.push({
         label: "均价",
@@ -548,7 +560,7 @@ export function createTurnCompletedPresentation(
           currency,
           exchangeRate ?? null,
         ),
-        exchangeRate ?? null,
+        debug ? exchangeRate ?? null : null,
       ),
     });
   }
@@ -564,7 +576,7 @@ export function createTurnCompletedPresentation(
       requestCount: event.sessionReferenceCost.requestCount,
       inputTokens: event.sessionReferenceCost.inputTokens,
       outputTokens: event.sessionReferenceCost.outputTokens,
-    }, currency, exchangeRate);
+    }, currency, currency === "cny" || debug ? exchangeRate : null);
     if (averagePrice !== null) {
       sessionFields.push({
         label: "均价",
