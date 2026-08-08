@@ -81,6 +81,8 @@ describe("codexc CLI", () => {
       [["metrics", "reset", "-h"], "用法：codexc metrics reset"],
       [["metrics", "report", "-h"], "用法：codexc metrics report"],
       [["metrics", "export", "--help"], "用法：codexc metrics export"],
+      [["channel", "-h"], "用法：codexc channel"],
+      [["channel", "send-image", "--help"], "用法：codexc channel send-image"],
       [["webui", "-h"], "用法：codexc webui"],
       [["version", "-h"], "用法：codexc version"],
       [["gateway", "-h"], "用法：codexc gateway"],

@@ -221,6 +221,37 @@ describe("Feishu outbox", () => {
     }]);
   });
 
+  it("sends a channel image through the ordered delivery queue", async () => {
+    const sentImages: Array<{ chatId: string; image: Buffer }> = [];
+    const image = Buffer.from("validated-image");
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendImage: async (chatId, value) => {
+          sentImages.push({ chatId, image: value });
+        },
+      },
+      pino({ level: "silent" }),
+      {
+        readGeneratedImage: vi.fn(async () => ({
+          bytes: image,
+          format: "png" as const,
+        })),
+      },
+    );
+
+    await outbox.sendChannelImage("oc_chat", "/private/generated/image.png");
+    await outbox.close();
+
+    expect(sentImages).toEqual([{
+      chatId: "oc_chat",
+      image,
+    }]);
+  });
+
   it("keeps the reply target through commentary for the final static reply", async () => {
     const markdownCards: string[] = [];
     const replies: Array<{ messageId: string; markdown: string }> = [];

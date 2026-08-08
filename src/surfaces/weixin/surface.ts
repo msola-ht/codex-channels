@@ -242,6 +242,17 @@ export class WeixinSurface implements SurfaceAdapter {
     });
   }
 
+  sendChannelImage(conversationId: string, imagePath: string): Promise<void> {
+    return this.output.sendChannelImage(
+      {
+        surface: "weixin",
+        accountId: this.accountId,
+        conversationId,
+      },
+      imagePath,
+    );
+  }
+
   start(): Promise<void> {
     this.startPromise ??= this.startOnce().finally(() => {
       this.startPromise = undefined;

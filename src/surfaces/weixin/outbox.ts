@@ -534,6 +534,16 @@ export class WeixinOutbox implements SurfaceOutputPort {
     });
   }
 
+  sendChannelImage(
+    target: ConversationTarget,
+    imagePath: string,
+  ): Promise<void> {
+    return this.delivery.runOrdered(
+      target.conversationId,
+      () => this.sendImage(target, imagePath),
+    );
+  }
+
   private async invalidateContext(
     target: ConversationTarget,
   ): Promise<void> {

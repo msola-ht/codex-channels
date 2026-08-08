@@ -364,6 +364,31 @@ describe("TelegramOutbox", () => {
     expect(api.sent).toEqual([]);
   });
 
+  it("sends a channel image through the ordered delivery queue", async () => {
+    const api = new FakeTelegramApi();
+    const image = Buffer.from("validated-image");
+    const outbox = new TelegramOutbox(
+      api as unknown as Api,
+      pino({ level: "silent" }),
+      undefined,
+      {
+        readGeneratedImage: vi.fn(async () => ({
+          bytes: image,
+          format: "png" as const,
+        })),
+      },
+    );
+
+    await outbox.sendChannelImage("100", "/private/generated/image.png");
+    await outbox.close();
+
+    expect(api.photos).toEqual([{
+      filename: "codex-generated-image.png",
+      options: { disable_notification: true },
+      content: image,
+    }]);
+  });
+
   it("keeps Telegram typing active while a turn is running and stops on completion", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();

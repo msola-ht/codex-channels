@@ -134,6 +134,14 @@ describe("GatewayApplication startup cleanup", () => {
             calls.push("close:surface");
           },
         },
+        channelImageSpool: {
+          start: async () => {
+            calls.push("start:channel-image-spool");
+          },
+          stop: async () => {
+            calls.push("close:channel-image-spool");
+          },
+        },
         bindings: {
           close: () => {
             calls.push("close:bindings");
@@ -153,6 +161,7 @@ describe("GatewayApplication startup cleanup", () => {
       "start:surface",
       "remove:notification",
       "remove:disconnect",
+      "close:channel-image-spool",
       "close:surface",
       "close:model-pricing",
       "close:inbound",
@@ -169,6 +178,7 @@ describe("GatewayApplication startup cleanup", () => {
     });
     const closes = {
       bindings: 0,
+      channelImageSpool: 0,
       codex: 0,
       inbound: 0,
       output: 0,
@@ -244,6 +254,12 @@ describe("GatewayApplication startup cleanup", () => {
           closes.surface += 1;
         },
       },
+      channelImageSpool: {
+        start: async () => undefined,
+        stop: async () => {
+          closes.channelImageSpool += 1;
+        },
+      },
       bindings: {
         close: () => {
           closes.bindings += 1;
@@ -262,6 +278,7 @@ describe("GatewayApplication startup cleanup", () => {
     expect(surfaceStarts).toBe(0);
     expect(closes).toEqual({
       bindings: 1,
+      channelImageSpool: 1,
       codex: 2,
       inbound: 1,
       output: 1,
@@ -344,6 +361,10 @@ describe("GatewayApplication startup cleanup", () => {
       },
       surfaces: [],
       surfaceManager: {
+        start: async () => undefined,
+        stop: async () => undefined,
+      },
+      channelImageSpool: {
         start: async () => undefined,
         stop: async () => undefined,
       },

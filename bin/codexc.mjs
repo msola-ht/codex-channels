@@ -70,6 +70,7 @@ const helpText = {
   agents <enable-deepseek|disable-deepseek|status>   配置 multi_agent_v2 的 DeepSeek 子代理角色
   state upgrade               显式升级 Gateway 状态数据库
   metrics <run|turns|threads|report|export|status|reset>   模型请求指标：本次运行、会话明细、会话归纳、汇报、导出、状态、重建
+  channel send-image          提交本地图片，由 Gateway 发送回当前渠道会话
   webui                        启动本地只读指标 WebUI（默认回环地址）
   center [config|info]          多设备指标中心：启动服务、交互配置或查看地址
 
@@ -195,6 +196,15 @@ const helpText = {
   codexc metrics upgrade  备份并升级指标库（需 Gateway 停止）
   codexc metrics reset    备份并重建指标库（需 Gateway 停止）
   codexc metrics sync-reset   备份并清零多端上报水位，重放修复中心历史`,
+  channel: `用法：codexc channel <send-image>
+
+渠道能力：由 Gateway 使用渠道机器人凭据发送图片等媒体。`,
+  "channel.send_image": `用法：codexc channel send-image <图片路径> [--thread <Thread ID>]
+
+把本地 PNG/JPEG 图片（最大 10 MiB）交给 Gateway，发送回该 Thread 绑定的
+飞书/微信/Telegram 会话。不指定 --thread 且存在多个绑定时会拒绝并提示指定。
+图片会被复制到 ~/.codex-connect/data/channel-outbox/pending/，由网关轮询发送；
+成功后归档到 done/，失败归档到 failed/ 并保留原因。`,
   webui: `用法：codexc webui [--host 地址] [--port 端口] [--token 令牌]
 
 启动本地只读指标 WebUI（默认 http://127.0.0.1:8787/）。
@@ -349,6 +359,9 @@ try {
       break;
     case "metrics":
       await metrics(args);
+      break;
+    case "channel":
+      await channel(args);
       break;
     case "webui":
       if (showRequestedHelp(args, "webui")) {
@@ -1188,6 +1201,20 @@ async function metrics(args) {
     return;
   }
   runScript("scripts/metrics-database.mjs", [subcommand, ...rest]);
+}
+
+async function channel(args) {
+  if (
+    showRequestedHelp(args, "channel")
+    || showSubcommandHelp(args, "send-image", "channel.send_image")
+  ) {
+    return;
+  }
+  const [subcommand, ...rest] = args;
+  if (subcommand !== "send-image") {
+    throw new Error("用法：codexc channel <send-image>");
+  }
+  runScript("scripts/channel-send-image.mjs", rest);
 }
 
 function runMetricsCommand(args) {

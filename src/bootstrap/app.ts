@@ -69,6 +69,7 @@ import {
 } from "../session-routing/index.js";
 import { SqliteBindingStore } from "../storage/index.js";
 import type { SurfaceAdapter } from "../surfaces/index.js";
+import { ChannelImageSpool } from "./channel-image-spool.js";
 import {
   createSurfaceModules,
 } from "./surface-composition.js";
@@ -93,6 +94,7 @@ export class GatewayApplication {
   private readonly surfaceModules: SurfaceRuntimeModule[];
   private readonly surfaces: SurfaceAdapter[];
   private readonly surfaceManager: SurfaceManager;
+  private readonly channelImageSpool: ChannelImageSpool;
   private readonly interactions: InteractionRouter;
   private readonly approval: ApprovalCoordinator;
   private readonly router: SessionRouter;
@@ -664,6 +666,13 @@ export class GatewayApplication {
           ),
       },
     );
+    this.channelImageSpool = new ChannelImageSpool({
+      directory: join(dirname(config.stateDatabasePath), "channel-outbox"),
+      resolveTarget: (threadId) => this.router.targetForThread(threadId),
+      sendImage: (target, imagePath) =>
+        this.surfaceManager.sendChannelImage(target, imagePath),
+      logger,
+    });
     for (const surface of this.surfaces) {
       this.interactions.register(surface.surface, surface.accountId, surface.interactions);
       this.interactions.setAvailable(surface.surface, surface.accountId, false);
@@ -818,6 +827,7 @@ export class GatewayApplication {
         "Codex App Server 已连接",
       );
       await this.surfaceManager.start();
+      await this.channelImageSpool.start();
       this.requireRunning();
     } catch (error) {
       this.stopping = true;
@@ -847,6 +857,7 @@ export class GatewayApplication {
     this.activeSubagents?.clear();
     const failures: unknown[] = [];
     for (const [component, close] of [
+      ["Channel Image Spool", () => this.channelImageSpool.stop()],
       ["Surface", () => this.surfaceManager.stop()],
       ["Metrics Sync", () => this.metricsSync.close()],
       ["Provider Proxy Metrics", () => this.providerMetrics.close()],

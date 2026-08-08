@@ -458,6 +458,22 @@ describe("WeixinOutbox", () => {
     expect(fixture.sendText).not.toHaveBeenCalled();
   });
 
+  it("sends a channel image for an explicit target", async () => {
+    const fixture = outboxFixture({ value: true });
+
+    await fixture.outbox.sendChannelImage(
+      target,
+      "/private/generated/image.png",
+    );
+    await fixture.outbox.close();
+
+    expect(fixture.sendImage).toHaveBeenCalledWith({
+      actorId,
+      contextToken: "context-secret",
+      image: Buffer.from("validated-image"),
+    });
+  });
+
   it("rechecks authorization after reading a generated image", async () => {
     const allowed = { value: true };
     const fixture = outboxFixture(

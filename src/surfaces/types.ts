@@ -23,6 +23,7 @@ export interface SurfaceAdapter {
   readonly accountId: string;
   readonly interactions: InteractionPort;
   readonly output: SurfaceOutputPort;
+  sendChannelImage?(conversationId: string, imagePath: string): Promise<void>;
   start(): Promise<void>;
   stop(): Promise<void>;
   configurationChanged?(change: SurfaceConfigurationChange): void;

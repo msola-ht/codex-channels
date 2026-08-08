@@ -147,6 +147,9 @@ Adapter 负责。
 `generated-image.ts` 只读取 App Server `imageGeneration.savedPath` 指向的绝对普通文件，
 拒绝符号链接、空文件、超过 10 MiB 的内容和非 PNG/JPEG 签名；Telegram、飞书与微信分别负责
 平台上传和发送，不读取 `imageView` 或用户上传图片路径。
+`SurfaceAdapter.sendChannelImage` 是可选的渠道图片发送入口，由 Gateway 的
+`channel-image-spool` 驱动，复用 `generated-image.ts` 的读取校验和各自平台上传发送；
+三个 Surface 都实现该入口，微信按目标 Conversation 复用其回复上下文与授权检查。
 Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类型引入 Conversation Core。
 
 会话命令统一映射到 Application 的 `ConversationCommandService`；Surface 负责提取命令名和参数，

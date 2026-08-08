@@ -223,6 +223,16 @@ WebUI 只读指标数据库，提供控制台（本机与多设备用量合并�
 命令行参数优先。SSH 隧道、反向代理与 Cloudflare Tunnel 走回环地址可保持无令牌。
 详细说明见 [`docs/webui.md`](docs/webui.md)。
 
+### 发送图片到渠道
+
+```bash
+codexc channel send-image /tmp/截图.png                   # 自动选择唯一绑定会话
+codexc channel send-image /tmp/截图.png --thread <Thread ID>  # 指定会话
+```
+
+把本地 PNG/JPEG 图片交给 Gateway，由当前飞书/微信/Telegram 会话的机器人凭据发送，
+不依赖 lark-cli 等外部工具。详细说明见 [`docs/channel-image.md`](docs/channel-image.md)。
+
 ### 管理后台服务
 
 ```bash

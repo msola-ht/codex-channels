@@ -323,7 +323,7 @@ export class TelegramOutbox {
           flushStreamBeforeOutput();
           this.enqueue(
             chatId,
-            () => this.sendGeneratedImage(chatId, imagePath),
+            () => this.sendImage(chatId, imagePath),
             true,
           );
         }
@@ -502,7 +502,7 @@ export class TelegramOutbox {
     }
   }
 
-  private async sendGeneratedImage(
+  private async sendImage(
     chatId: string,
     imagePath: string,
   ): Promise<void> {
@@ -523,6 +523,13 @@ export class TelegramOutbox {
         ),
         { disable_notification: true },
       ),
+    );
+  }
+
+  sendChannelImage(chatId: string, imagePath: string): Promise<void> {
+    return this.delivery.runOrdered(
+      chatId,
+      () => this.sendImage(chatId, imagePath),
     );
   }
 
