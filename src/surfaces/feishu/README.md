@@ -9,8 +9,9 @@ Office、压缩包和其他未列明的通用二进制输入不支持。展示�
 结果、操作过程与每轮结束统计统一使用 CardKit 2.0 Markdown，私聊 PNG/JPEG 图片复用
 Application 的本地图片输入，同一 Thread 的
 运行中与空闲状态已实现合并到一条可更新消息，上线通知与每轮上下文状态复用共享生命周期数据，
-持续模型增量使用 CardKit 2.0 原生流式卡片；Codex 原生 `imageGeneration` 完成后只读取经
-共享安全边界校验的 PNG/JPEG，通过官方图片上传和私聊图片消息接口顺序发送；
+持续模型增量使用 CardKit 2.0 原生流式卡片；Codex 原生 `imageGeneration` 完成以及
+`codexc channel send-image` 提交的图片都只读取经共享安全边界校验的 PNG/JPEG，
+通过官方图片上传和私聊图片消息接口顺序发送；
 这些路径均有对应实现与测试。真实平台验收状态统一见
 [`通讯渠道验收矩阵`](../../../docs/channel-acceptance-matrix.md)。
 
@@ -184,9 +185,10 @@ Turn、warning 和 MCP 错误会显示 Client 边界已经统一脱敏并限长�
 `ConversationDeliveryQueue`。同一 Chat 串行、不同 Chat 可并行；关闭后拒绝新输出并有限等待
 已接收发送。飞书 SDK 发送对象由 `FeishuMessageClient` 通过 `FeishuMessagePort`
 注入，Outbox 不持有完整 SDK Client。Adapter 的追加确认和错误提示也进入同一有界队列，不绕过
-平台输出顺序和关闭边界。生成图片只消费 App Server 明确给出的 `imageGeneration.savedPath`，
-并在共享读取边界验证绝对路径、无符号链接普通文件、10 MiB 与 PNG/JPEG 签名；`imageView`
-和用户上传图片不会自动外发。静态 CardKit Markdown 按单元素 5,000 个 Unicode 字符、最多 5 张卡片
+平台输出顺序和关闭边界。生成图片路径来自 App Server `imageGeneration.savedPath` 或
+渠道 spool（`codexc channel send-image`），两者都在共享读取边界验证绝对路径、无符号链接
+普通文件、10 MiB 与 PNG/JPEG 签名；`imageView` 和用户上传图片不会自动外发。
+静态 CardKit Markdown 按单元素 5,000 个 Unicode 字符、最多 5 张卡片
 分片；纯文本和 `post + md` 降级按 UTF-8 序列化后的 20,000 字节计量。每个逻辑结果
 最多发送 5 条，超出时明确标记截断，避免单个结果无限占用同一 Chat 的发送任务。消息创建失败
 不自动改发另一种格式，避免非幂等重发产生重复消息；卡片创建和更新进入相同 Chat 顺序边界，
