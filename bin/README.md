@@ -21,6 +21,8 @@
 - `agents`：启用或停用 Codex multi_agent_v2 的 DeepSeek 子代理角色（`agents.ds`），并查看当前状态。
 - `state`：在 Gateway 停止后显式备份并升级业务状态数据库。
 - `metrics`：只读检查独立模型指标库，或在 Gateway 停止后备份并重建不兼容的指标库。
+- `channel send-image`：把本地 PNG/JPEG 图片交给 Gateway，由当前飞书/微信/Telegram
+  会话的机器人凭据发送回绑定会话；见 `docs/channel-image.md`。
 - `service`：完整校验配置后安装整套后台服务；启停、重启、状态和日志命令使用
   `gateway`、`app-server` 或 `all` 明确目标，日常 `restart` 默认只操作 Gateway。
 
