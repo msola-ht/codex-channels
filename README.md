@@ -61,7 +61,8 @@ sudo loginctl enable-linger "$USER"
 
 ## 配置通讯渠道
 
-运行 `codexc setup`，按菜单配置模型渠道、通讯渠道和系统设置。Gateway 与通讯渠道配置保存在：
+运行 `codexc setup`，按菜单配置模型渠道、通讯渠道、系统设置和技能安装（把项目技能安装到
+`~/.agents/skills` 供当前 Codex 环境加载）。Gateway 与通讯渠道配置保存在：
 
 ```text
 ~/.codex-connect/config.toml

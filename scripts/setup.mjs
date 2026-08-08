@@ -9,6 +9,7 @@ import { runWeixinSetup } from "./weixin-setup.mjs";
 import { runVisionSetup } from "./vision-setup.mjs";
 import { runDebugSetup } from "./debug-setup.mjs";
 import { runApiProviderSetup } from "./api-provider-setup.mjs";
+import { runSkillSetup } from "./skill-setup.mjs";
 
 export async function runSetup({
   input = process.stdin,
@@ -21,6 +22,7 @@ export async function runSetup({
   visionSetup = runVisionSetup,
   debugSetup = runDebugSetup,
   apiProviderSetup = runApiProviderSetup,
+  skillSetup = runSkillSetup,
 } = {}) {
   prompts.intro("Codex Connect Setup");
   while (true) {
@@ -42,6 +44,11 @@ export async function runSetup({
           value: "system",
           label: "系统设置",
           hint: "配置全局调试模式",
+        },
+        {
+          value: "skills",
+          label: "技能",
+          hint: "安装或卸载项目技能到用户目录",
         },
         {
           value: "cancel",
@@ -85,6 +92,15 @@ export async function runSetup({
           output,
           prompts,
           debugSetup,
+        });
+        if (isBackResult(result)) continue;
+        return result;
+      }
+      case "skills": {
+        const result = await skillSetup({
+          input,
+          output,
+          prompts,
         });
         if (isBackResult(result)) continue;
         return result;

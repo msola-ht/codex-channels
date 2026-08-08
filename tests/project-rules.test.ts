@@ -2,6 +2,7 @@ import {
   existsSync,
   mkdtempSync,
   mkdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -40,6 +41,9 @@ describe("project rules runtime", () => {
       join(realpathSync(workspace), ".codex", "rules", "default.rules"),
     );
     expect(existsSync(result.rulesPath)).toBe(true);
+    const rules = readFileSync(result.rulesPath, "utf8");
+    expect(rules).toContain("codexc channel send-image");
+    expect(rules).toContain('pattern = ["codexc", "channel", "send-image"]');
     expect(existsSync(join(root, ".codex", "rules", "default.rules"))).toBe(false);
   });
 

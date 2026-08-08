@@ -43,6 +43,10 @@
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型渠道”“通讯渠道”和
   “系统设置”流程委派给具体适配器；模型渠道下区分 DeepSeek、第三方 API 与图片识别，系统设置
   提供全局调试模式入口。
+- `skill-setup.mjs` / `skill-setup.d.mts`：`codexc setup` 的“技能”类别；列出项目 `.codex/skills` 下带
+  `SKILL.md` 的技能，安装/覆盖到 `~/.agents/skills/<技能名>`（可用
+  `CODEX_AGENTS_SKILLS_DIR` 覆盖目标目录），支持卸载；只复制技能目录本身，不修改
+  hermes 运行时的 `.skill-lock.json`。
 - `config.mjs`：`codexc config` 的交互式配置与设置菜单，覆盖配置文件中可安全编辑的参数：
   显示设置（操作详情、计划更新、全局价格显示方式）、系统设置（调试模式、审批超时、
   Sandbox、默认工作区与模型）、WebUI 设置（监听地址、端口、访问令牌）、多设备指标
