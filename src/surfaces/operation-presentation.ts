@@ -1,5 +1,21 @@
 import type { OperationUpdate } from "../conversation-core/index.js";
 import { formatElapsedDuration } from "./elapsed-duration.js";
+import type { OperationUpdateDisplay } from "./types.js";
+
+export function shouldDisplayOperation(
+  record: OperationUpdate,
+  display: OperationUpdateDisplay,
+): boolean {
+  if (display === "hidden") {
+    return false;
+  }
+  if (display === "full" || record.kind !== "subagent") {
+    return true;
+  }
+  return record.status === "failed"
+    || record.status === "declined"
+    || (record.action === "spawnAgent" && record.status === "completed");
+}
 
 export function operationMetadata(record: OperationUpdate): string[] {
   return [

@@ -14,6 +14,7 @@ import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
+import { shouldDisplayOperation } from "../operation-presentation.js";
 import {
   createPlanPresentation,
   type PlanPresentation,
@@ -212,7 +213,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
           true,
         );
       }
-      if (this.options.operationUpdateDisplay === "hidden") {
+      if (!shouldDisplayOperation(
+        event.operation,
+        this.options.operationUpdateDisplay ?? "full",
+      )) {
         return;
       }
       if (

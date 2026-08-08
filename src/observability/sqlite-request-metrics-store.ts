@@ -75,6 +75,10 @@ const successfulCostAggregateSql = `
     THEN pricing_currency END) AS pricing_currency_count,
   COUNT(CASE WHEN ${observableCompletionSql} THEN total_cost_nanos END)
     AS priced_request_count,
+  SUM(CASE WHEN ${observableCompletionSql} AND total_cost_nanos IS NOT NULL
+    THEN input_tokens END) AS priced_input_tokens,
+  SUM(CASE WHEN ${observableCompletionSql} AND total_cost_nanos IS NOT NULL
+    THEN output_tokens END) AS priced_output_tokens,
   SUM(CASE WHEN ${observableCompletionSql} THEN total_cost_nanos END)
     AS total_cost_nanos,
   SUM(CASE WHEN ${observableCompletionSql} THEN uncached_input_cost_nanos END)
@@ -246,6 +250,8 @@ interface TurnSummaryRow extends CompactSummaryRow {
   pricing_currency: string | null;
   pricing_currency_count: number;
   priced_request_count: number;
+  priced_input_tokens: number | null;
+  priced_output_tokens: number | null;
   total_cost_nanos: number | null;
   uncached_input_cost_nanos: number | null;
   cached_input_cost_nanos: number | null;
@@ -1581,6 +1587,8 @@ function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetricsSumma
       : null,
     outputSpeedSampleCount: row.output_speed_sample_count,
     outputSpeedTimedCount: row.output_speed_timed_count,
+    pricedInputTokens: row.priced_input_tokens ?? 0,
+    pricedOutputTokens: row.priced_output_tokens ?? 0,
     ...pricing,
     compact: toStoredCompactSummary(row),
   };
@@ -1608,6 +1616,8 @@ function toStoredThreadAggregate(
     outputSpeedTimedCount: summary.outputSpeedTimedCount,
     pricingCurrency: summary.pricingCurrency,
     pricedRequestCount: summary.pricedRequestCount,
+    pricedInputTokens: summary.pricedInputTokens,
+    pricedOutputTokens: summary.pricedOutputTokens,
     totalCostNanos: summary.totalCostNanos,
     inputCostNanos: summary.inputCostNanos,
     cachedInputCostNanos: summary.cachedInputCostNanos,

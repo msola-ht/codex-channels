@@ -174,6 +174,8 @@ function turnSummary(
     outputSpeedTimedCount: 0,
     pricingCurrency: "USD",
     pricedRequestCount: 0,
+    pricedInputTokens: 0,
+    pricedOutputTokens: 0,
     totalCostNanos: null,
     inputCostNanos: null,
     cachedInputCostNanos: null,

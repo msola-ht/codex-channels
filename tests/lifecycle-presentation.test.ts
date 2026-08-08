@@ -124,10 +124,20 @@ describe("shared Surface lifecycle presentation", () => {
       model: "deepseek-v4-flash",
       modelProvider: "deepseek",
       status: "completed",
+      metricsStatus: "available",
       requestCount: 1,
+      unsuccessfulRequestCount: 0,
+      pricedRequestCount: 1,
       inputTokens: 20_000,
+      pricedInputTokens: 20_000,
+      cachedInputTokens: null,
       outputTokens: 3_000,
+      pricedOutputTokens: 3_000,
+      reasoningOutputTokens: 0,
       totalCostNanos: 237_000,
+      inputCostNanos: null,
+      cachedInputCostNanos: null,
+      outputCostNanos: null,
       pricingCurrency: "USD",
       durationMs: 5_558,
     }, () => "usd", null);
@@ -137,7 +147,7 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("deepseek-v4-flash");
     expect(rendered).toContain("模型请求：1 次");
     expect(rendered).toContain("$0.000237");
-    expect(rendered).toContain("耗时：6秒");
+    expect(rendered).not.toContain("耗时：6秒");
   });
 
   it("converts the subagent completion cost to CNY when required", () => {
@@ -154,10 +164,20 @@ describe("shared Surface lifecycle presentation", () => {
       model: "deepseek-v4-flash",
       modelProvider: "deepseek",
       status: "completed",
+      metricsStatus: "available",
       requestCount: 1,
+      unsuccessfulRequestCount: 0,
+      pricedRequestCount: 1,
       inputTokens: 20_000,
+      pricedInputTokens: 20_000,
+      cachedInputTokens: 15_000,
       outputTokens: 3_000,
+      pricedOutputTokens: 3_000,
+      reasoningOutputTokens: 500,
       totalCostNanos: 1_000_000_000,
+      inputCostNanos: 600_000_000,
+      cachedInputCostNanos: 100_000_000,
+      outputCostNanos: 300_000_000,
       pricingCurrency: "USD",
       durationMs: 0,
     }, () => "cny", { usdToCny: 7.2, effectiveAtMs: 1_700_000_000_000, source: "ecb" });
@@ -180,10 +200,20 @@ describe("shared Surface lifecycle presentation", () => {
       model: "gpt-test",
       modelProvider: "openai",
       status: "completed" as const,
+      metricsStatus: "available" as const,
       requestCount: 1,
+      unsuccessfulRequestCount: 0,
+      pricedRequestCount: 1,
       inputTokens: 20_000,
+      pricedInputTokens: 20_000,
+      cachedInputTokens: 15_000,
       outputTokens: 3_000,
+      pricedOutputTokens: 3_000,
+      reasoningOutputTokens: 500,
       totalCostNanos: 1_000_000_000,
+      inputCostNanos: 600_000_000,
+      cachedInputCostNanos: 100_000_000,
+      outputCostNanos: 300_000_000,
       pricingCurrency: "USD",
       durationMs: 1_000,
     };
@@ -200,11 +230,102 @@ describe("shared Surface lifecycle presentation", () => {
     );
 
     expect(normal).toContain("Token：23 K");
+    expect(normal).toContain("均价：约 $4,347.83/100M");
     expect(normal).not.toContain("输入：20 K");
+    expect(normal).not.toContain("输入命中缓存");
+    expect(normal).not.toContain("输入价格");
     expect(normal).not.toContain("≈ ¥");
-    expect(debug).toContain("输入：20 K");
+    expect(normal).not.toContain("模型请求聚合耗时");
+    expect(normal).not.toContain("耗时：1秒");
+    expect(debug).toContain("输入命中缓存：15 K");
+    expect(debug).toContain("输入未命中缓存：5 K");
     expect(debug).toContain("输出：3 K");
+    expect(debug).toContain("其中推理输出：500");
+    expect(debug).toContain("缓存命中率：75.00%");
+    expect(debug).toContain("模型请求聚合耗时：1秒");
     expect(debug).toContain("费用：$1.000000（≈ ¥7.200000）");
+    expect(debug).toContain("输入价格：$0.600000（≈ ¥4.320000）");
+    expect(debug).toContain("缓存价格：$0.100000（≈ ¥0.720000）");
+    expect(debug).toContain("输出价格：$0.300000（≈ ¥2.160000）");
+    expect(debug).toContain("均价：约 $4,347.83/100M（≈ ¥31,304.35/100M）");
+  });
+
+  it("uses successful priced requests and their tokens after a failed retry", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createSubagentCompletedPresentation({
+        type: "subagent.completed",
+        target: {
+          surface: "feishu",
+          accountId: "default",
+          conversationId: "chat-1",
+        },
+        parentThreadId: "thread-1",
+        agentThreadId: "subagent-thread-1",
+        agentPath: "/root/review",
+        model: "gpt-test",
+        modelProvider: "openai",
+        status: "completed",
+        metricsStatus: "available",
+        requestCount: 2,
+        unsuccessfulRequestCount: 1,
+        pricedRequestCount: 1,
+        inputTokens: 20_000,
+        pricedInputTokens: 10_000,
+        cachedInputTokens: null,
+        outputTokens: 3_000,
+        pricedOutputTokens: 1_000,
+        reasoningOutputTokens: 0,
+        totalCostNanos: 1_000_000_000,
+        inputCostNanos: null,
+        cachedInputCostNanos: null,
+        outputCostNanos: null,
+        pricingCurrency: "USD",
+        durationMs: 1_000,
+      }, () => "usd", null),
+    );
+
+    expect(rendered).toContain("费用：$1.000000");
+    expect(rendered).not.toContain("计价 1/2");
+    expect(rendered).toContain("均价：约 $9,090.91/100M");
+  });
+
+  it("shows unavailable subagent metrics without presenting unknown values as zero", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createSubagentCompletedPresentation({
+        type: "subagent.completed",
+        target: {
+          surface: "telegram",
+          accountId: "default",
+          conversationId: "100",
+        },
+        parentThreadId: "thread-1",
+        agentThreadId: "subagent-thread-1",
+        agentPath: "/root/review",
+        status: "completed",
+        metricsStatus: "unavailable",
+        model: null,
+        modelProvider: null,
+        requestCount: 0,
+        unsuccessfulRequestCount: 0,
+        pricedRequestCount: 0,
+        inputTokens: 0,
+        pricedInputTokens: 0,
+        cachedInputTokens: null,
+        outputTokens: 0,
+        pricedOutputTokens: 0,
+        reasoningOutputTokens: 0,
+        totalCostNanos: null,
+        inputCostNanos: null,
+        cachedInputCostNanos: null,
+        outputCostNanos: null,
+        pricingCurrency: null,
+        durationMs: 0,
+      }),
+    );
+
+    expect(rendered).toContain("统计：暂不可用");
+    expect(rendered).not.toContain("模型请求：0 次");
+    expect(rendered).not.toContain("Token：0");
   });
 
   it("uses one Turn start and completion field order", () => {

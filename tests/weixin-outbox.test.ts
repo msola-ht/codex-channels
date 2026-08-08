@@ -535,6 +535,32 @@ describe("WeixinOutbox", () => {
     });
   });
 
+  it("hides successful wait calls but keeps subagent failures in compact mode", async () => {
+    const { outbox, sendText } = outboxFixture(
+      { value: true },
+      { operationUpdateDisplay: "compact" },
+    );
+
+    outbox.handle({
+      ...operationUpdated("completed", "subagent", "wait-1"),
+      operation: {
+        ...operationUpdated("completed", "subagent", "wait-1").operation,
+        action: "wait",
+      },
+    });
+    outbox.handle({
+      ...operationUpdated("failed", "subagent", "wait-2"),
+      operation: {
+        ...operationUpdated("failed", "subagent", "wait-2").operation,
+        action: "wait",
+      },
+    });
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledTimes(1);
+    expect(sendText.mock.calls[0]?.[0].text).toContain("等待子代理 · 失败");
+  });
+
   it("summarizes repeated query operations once before Turn completion", async () => {
     const { outbox, sendText } = outboxFixture();
 

@@ -1311,6 +1311,50 @@ describe("Feishu outbox", () => {
     ]);
   });
 
+  it("hides successful wait calls but keeps subagent failures in compact mode", async () => {
+    const markdownCards: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+      },
+      pino({ level: "silent" }),
+      { operationUpdateDisplay: "compact" },
+    );
+
+    outbox.handle({
+      ...operationUpdated("completed", "subagent", "wait-1"),
+      operation: {
+        itemId: "wait-1",
+        kind: "subagent",
+        action: "wait",
+        status: "completed",
+        durationMs: 125,
+      },
+    });
+    outbox.handle({
+      ...operationUpdated("completed", "subagent", "wait-2"),
+      operation: {
+        itemId: "wait-2",
+        kind: "subagent",
+        action: "wait",
+        status: "failed",
+        durationMs: 125,
+      },
+    });
+    await outbox.close();
+
+    expect(markdownCards).toEqual([
+      "**等待子代理 · 失败**\n\n---\n"
+      + "**耗时：** 125毫秒",
+    ]);
+  });
+
   it("summarizes repeated query operations once before Turn completion", async () => {
     const markdownCards: string[] = [];
     const outbox = new FeishuOutbox(

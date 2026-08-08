@@ -1362,6 +1362,39 @@ describe("TelegramOutbox", () => {
       + " · <code>git status --short second line</code>",
     ]);
   });
+
+  it("hides successful wait calls but keeps subagent failures in compact mode", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = new TelegramOutbox(
+      api as unknown as Api,
+      pino({ level: "silent" }),
+      undefined,
+      { operationUpdateDisplay: "compact" },
+    );
+
+    outbox.handle({
+      ...operationUpdated("wait-1", "completed", "subagent"),
+      operation: {
+        ...operationUpdated("wait-1", "completed", "subagent").operation,
+        action: "wait",
+      },
+    });
+    outbox.handle({
+      ...operationUpdated("wait-2", "failed", "subagent"),
+      operation: {
+        ...operationUpdated("wait-2", "failed", "subagent").operation,
+        action: "wait",
+      },
+    });
+    await vi.advanceTimersByTimeAsync(750);
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toHaveLength(1);
+    expect(api.sent[0]).toContain("等待子代理 · 失败");
+    expect(api.sent[0]).not.toContain("等待子代理 · 已完成");
+  });
 });
 
 function createOutbox(

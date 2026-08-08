@@ -217,6 +217,8 @@ export interface StoredTurnRequestMetricsSummary {
   outputSpeedTimedCount: number;
   pricingCurrency: string | null;
   pricedRequestCount: number;
+  pricedInputTokens: number;
+  pricedOutputTokens: number;
   totalCostNanos: number | null;
   inputCostNanos: number | null;
   cachedInputCostNanos: number | null;
@@ -243,6 +245,8 @@ export interface StoredThreadRequestMetricsAggregate {
   outputSpeedTimedCount: number;
   pricingCurrency: string | null;
   pricedRequestCount: number;
+  pricedInputTokens: number;
+  pricedOutputTokens: number;
   totalCostNanos: number | null;
   inputCostNanos: number | null;
   cachedInputCostNanos: number | null;

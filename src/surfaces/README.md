@@ -102,7 +102,9 @@ Turn、Thread 或 Surface 关闭时清理。
 成功”，本轮计价覆盖只统计成功请求，底层异常记录仍完整保留。`reference-cost-format.ts` 统一总价、计价覆盖率及
 输入/缓存/输出价格明细格式（先总价后明细，按提供商币种换算）；完成卡片正式模式只保留
 Token 与费用总计及均价，调试模式才展示模型请求聚合耗时，并展开 Token/费用子项和附加货币
-换算对照。
+换算对照。子代理完成卡片复用同一价格、Token 和均价格式：正式模式保留总计，调试模式才展开
+缓存与推理 Token、缓存命中率、输入/缓存/输出费用、附加货币换算和模型请求聚合耗时；计价覆盖
+不全时显示覆盖比例并省略可能低估的均价，指标读取失败时只显示“统计暂不可用”。
 原生 OpenAI
 鉴权的 Codex Provider 统一显示为“OpenAI 官方”，且只在该类 Thread 显示 Fast 与 OpenAI 周限；
 直接 API 的自定义提供商继续使用自身名称；各 Surface 只保留 HTML、
@@ -172,8 +174,9 @@ warning 和 MCP 错误只使用 Client 边界已经统一脱敏并限长的稳�
 的响应正文不得带入聊天消息或日志。
 
 Bootstrap 把共享的 `display.operation_updates` 三档模式显式注入各 Surface Outbox。`full`
-显示完整操作，`compact` 显示单行摘要，`hidden` 忽略 `operation.updated`；Core 始终正常归约
-操作，审批与其他关键输出不受影响。Telegram 和微信把同一 Turn 的成功查询类操作延迟聚合；
+显示完整操作，`compact` 显示单行摘要，其中子代理只保留启动和失败、抑制成功的等待与交互操作，
+`hidden` 忽略 `operation.updated`；Core 始终正常归约操作，审批与其他关键输出不受影响。
+Telegram 和微信把同一 Turn 的成功查询类操作延迟聚合；
 飞书只聚合 MCP 与动态工具，网页搜索完成后立即发送。微信
 对其余操作仍仅发送终态，避免用普通气泡模拟持续更新；Surface 只实现平台格式，不各自定义
 第二套显示配置。

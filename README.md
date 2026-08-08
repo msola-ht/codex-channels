@@ -91,7 +91,8 @@ plan_updates = true
 price_currency = "cny"
 ```
 
-- `operation_updates`：`full` 显示完整操作详情，`compact` 显示摘要，`hidden` 隐藏操作过程。
+- `operation_updates`：`full` 显示完整操作详情，`compact` 显示摘要，并只保留子代理启动与失败、
+  隐藏成功的等待和交互操作，`hidden` 隐藏操作过程。
 - `plan_updates`：是否显示 Codex 计划，默认开启。
 - `price_currency`：模型价格显示币种，全局统一为 `cny`（人民币）或 `usd`（美元），默认 `cny`，
   不再按提供商混合显示。选择 `cny` 时获取并持久化 USD/CNY 汇率（每 6 小时刷新，优先

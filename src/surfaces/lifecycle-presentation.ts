@@ -194,11 +194,27 @@ export function createSubagentCompletedPresentation(
 ): LifecyclePresentation {
   const currency = priceCurrency?.(event.modelProvider) ?? "usd";
   const fields: LifecyclePresentationField[] = [];
-  const cost = formatSubagentCost(
-    event,
+  const successfulRequestCount = Math.max(
+    0,
+    event.requestCount - event.unsuccessfulRequestCount,
+  );
+  const displayCost = successfulRequestCount === 0
+    ? null
+    : toDisplayReferenceCost({
+        currency: event.pricingCurrency,
+        totalCostNanos: event.totalCostNanos,
+        inputCostNanos: event.inputCostNanos,
+        cachedInputCostNanos: event.cachedInputCostNanos,
+        outputCostNanos: event.outputCostNanos,
+        pricedRequestCount: event.pricedRequestCount,
+        requestCount: successfulRequestCount,
+        uncachedInputPricePerMillionNanos: null,
+        cachedInputPricePerMillionNanos: null,
+        outputPricePerMillionNanos: null,
+        hasMixedPrices: false,
+      },
     currency,
     exchangeRate ?? null,
-    debug,
   );
   if (event.model) {
     fields.push({ label: "模型", value: event.model });
@@ -209,55 +225,110 @@ export function createSubagentCompletedPresentation(
       value: formatCodexProviderLabel(event.modelProvider),
     });
   }
+  if (event.metricsStatus === "unavailable") {
+    fields.push({ label: "统计", value: "暂不可用" });
+    return {
+      title: `${subagentStatusLabel(event.status)} · ${subagentTaskName(event.agentPath)}`,
+      fields,
+    };
+  }
   fields.push({ label: "模型请求", value: `${event.requestCount} 次` });
+  const cachedInputTokens = event.cachedInputTokens;
   fields.push({
     title: "Token",
     value: formatTokenCount(event.inputTokens + event.outputTokens),
     fields: debug ? [
-      { label: "输入", value: formatTokenCount(event.inputTokens) },
+      ...(cachedInputTokens === null
+        ? [{ label: "输入", value: formatTokenCount(event.inputTokens) }]
+        : [
+            {
+              label: "输入命中缓存",
+              value: formatTokenCount(cachedInputTokens),
+            },
+            {
+              label: "输入未命中缓存",
+              value: formatTokenCount(Math.max(0, event.inputTokens - cachedInputTokens)),
+            },
+          ]),
       { label: "输出", value: formatTokenCount(event.outputTokens) },
+      ...(event.reasoningOutputTokens > 0
+        ? [{
+            label: "其中推理输出",
+            value: formatTokenCount(event.reasoningOutputTokens),
+          }]
+        : []),
+      ...(cachedInputTokens === null
+        ? []
+        : [{
+            label: "缓存命中率",
+            value: formatCacheHitRate(event.inputTokens, cachedInputTokens),
+          }]),
     ] : [],
   });
-  if (event.durationMs > 0) {
-    fields.push({ label: "耗时", value: formatElapsedDuration(event.durationMs) });
+  if (debug && event.durationMs > 0) {
+    fields.push({
+      label: "模型请求聚合耗时",
+      value: formatElapsedDuration(event.durationMs),
+    });
   }
-  if (cost !== null) {
-    fields.push({ label: "费用", value: cost });
+  if (displayCost !== null) {
+    fields.push({
+      title: "费用",
+      value: formatReferenceCostTotal(
+        displayCost,
+        debug ? exchangeRate ?? null : null,
+      ),
+      fields: !debug || displayCost.currency === null
+        ? []
+        : ([
+            ["输入价格", displayCost.inputCostNanos],
+            ["缓存价格", displayCost.cachedInputCostNanos],
+            ["输出价格", displayCost.outputCostNanos],
+          ] as const).flatMap(([label, costNanos]) =>
+            costNanos === null
+              ? []
+              : [{
+                  label,
+                  value: formatCostFieldValue(displayCost, costNanos, exchangeRate),
+                }]
+          ),
+    });
+  }
+  const averagePrice = event.pricedRequestCount === successfulRequestCount
+    ? formatAveragePriceValue({
+        pricingCurrency: event.pricingCurrency,
+        totalCostNanos: event.totalCostNanos,
+        pricedRequestCount: event.pricedRequestCount,
+        requestCount: successfulRequestCount,
+        inputTokens: event.pricedInputTokens,
+        outputTokens: event.pricedOutputTokens,
+      }, currency, currency === "cny" || debug ? exchangeRate ?? null : null)
+    : null;
+  if (averagePrice !== null) {
+    fields.push({ label: "均价", value: averagePrice });
   }
   return {
-    title: event.status === "failed"
-      ? `子代理失败 · ${subagentTaskName(event.agentPath)}`
-      : `子代理完成 · ${subagentTaskName(event.agentPath)}`,
+    title: `${subagentStatusLabel(event.status)} · ${subagentTaskName(event.agentPath)}`,
     fields,
   };
+}
+
+function subagentStatusLabel(
+  status: Extract<OutputEvent, { type: "subagent.completed" }>["status"],
+): string {
+  switch (status) {
+    case "completed": return "子代理完成";
+    case "errored": return "子代理失败";
+    case "interrupted": return "子代理中断";
+    case "shutdown": return "子代理已关闭";
+    case "notFound": return "子代理未找到";
+  }
 }
 
 function subagentTaskName(agentPath: string): string {
   const normalized = agentPath.replace(/\/+$/u, "");
   const separator = Math.max(normalized.lastIndexOf("/"), normalized.lastIndexOf("\\"));
   return separator >= 0 ? normalized.slice(separator + 1) : normalized;
-}
-
-function formatSubagentCost(
-  event: Extract<OutputEvent, { type: "subagent.completed" }>,
-  currency: DisplayPriceCurrency,
-  exchangeRate: ExchangeRateSnapshot | null,
-  showEquivalent: boolean,
-): string | null {
-  if (event.totalCostNanos === null || event.pricingCurrency === null) {
-    return event.requestCount === 0 ? null : `暂无价格快照（计价 0/${event.requestCount}）`;
-  }
-  if (currency === "cny" && event.pricingCurrency === "USD" && exchangeRate) {
-    const converted = Math.round(event.totalCostNanos * exchangeRate.usdToCny);
-    return Number.isSafeInteger(converted)
-      ? formatCurrencyNanos("CNY", converted)
-      : formatCurrencyNanos(event.pricingCurrency, event.totalCostNanos);
-  }
-  const equivalent = showEquivalent && event.pricingCurrency === "USD" && exchangeRate
-    ? formatCnyEquivalent(event.totalCostNanos, exchangeRate)
-    : null;
-  return `${formatCurrencyNanos(event.pricingCurrency, event.totalCostNanos)}`
-    + `${equivalent === null ? "" : `（${equivalent}）`}`;
 }
 
 export function createTurnCompletedPresentation(

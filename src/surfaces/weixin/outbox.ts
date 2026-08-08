@@ -16,6 +16,7 @@ import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
+import { shouldDisplayOperation } from "../operation-presentation.js";
 import type {
   OperationUpdateDisplay,
   SurfaceOutputPort,
@@ -169,8 +170,11 @@ export class WeixinOutbox implements SurfaceOutputPort {
         );
       }
       if (
-        this.options.operationUpdateDisplay === "hidden"
-        || event.operation.status === "running"
+        event.operation.status === "running"
+        || !shouldDisplayOperation(
+          event.operation,
+          this.options.operationUpdateDisplay ?? "full",
+        )
       ) {
         return;
       }

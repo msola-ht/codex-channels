@@ -102,6 +102,8 @@ describe("SqliteModelRequestMetricsStore", () => {
       latestTurn: {
         pricingCurrency: "USD",
         pricedRequestCount: 1,
+        pricedInputTokens: 1_000,
+        pricedOutputTokens: 100,
         totalCostNanos: 1_400_000,
         uncachedInputPricePerMillionNanos: 2_000_000_000,
         cachedInputPricePerMillionNanos: 1_000_000_000,
@@ -111,6 +113,8 @@ describe("SqliteModelRequestMetricsStore", () => {
       threadAggregate: {
         pricingCurrency: "USD",
         pricedRequestCount: 1,
+        pricedInputTokens: 1_000,
+        pricedOutputTokens: 100,
         totalCostNanos: 1_400_000,
       },
     });
@@ -297,12 +301,16 @@ describe("SqliteModelRequestMetricsStore", () => {
         requestCount: 3,
         unsuccessfulRequestCount: 2,
         pricedRequestCount: 1,
+        pricedInputTokens: 1_000,
+        pricedOutputTokens: 100,
         totalCostNanos: 1_400_000,
       },
       threadAggregate: {
         requestCount: 3,
         unsuccessfulRequestCount: 2,
         pricedRequestCount: 1,
+        pricedInputTokens: 1_000,
+        pricedOutputTokens: 100,
         totalCostNanos: 1_400_000,
       },
     });
@@ -320,6 +328,8 @@ describe("SqliteModelRequestMetricsStore", () => {
       requestCount: 3,
       unsuccessfulRequestCount: 2,
       pricedRequestCount: 1,
+      pricedInputTokens: 1_000,
+      pricedOutputTokens: 100,
       totalCostNanos: 1_400_000,
     });
     expect(store.threadList()[0]).toMatchObject({
@@ -1337,6 +1347,96 @@ describe("BufferedModelRequestMetricsWriter", () => {
 
     expect(record).toHaveBeenCalledWith(sample());
     expect(calls).toEqual(["record", "close"]);
+  });
+
+  it("resolves a persistence checkpoint after the writes already enqueued", async () => {
+    vi.useFakeTimers();
+    const record = vi.fn<ModelRequestMetricsStore["record"]>();
+    const writer = new BufferedModelRequestMetricsWriter({
+      record,
+      recordSubagentThread: () => undefined,
+      requestRowsAfter: () => [],
+      subagentThreadsAfter: () => [],
+      recent: () => [],
+      aggregate: () => emptyMetricsReport(),
+      errors: () => emptyErrorReport(),
+      count: () => 0,
+      close: () => undefined,
+    });
+    writer.enqueue(sample());
+    writer.enqueue(sample());
+    writer.enqueue(sample());
+    let checkpointResolved = false;
+    const persistenceCheckpoint = writer.waitForCurrentWrites();
+    const checkpoint = persistenceCheckpoint.then(() => {
+      checkpointResolved = true;
+    });
+    writer.enqueue(sample());
+
+    await vi.advanceTimersByTimeAsync(20);
+    expect(checkpointResolved).toBe(false);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(await persistenceCheckpoint).toBe(true);
+    await checkpoint;
+    expect(checkpointResolved).toBe(true);
+    expect(record).toHaveBeenCalledTimes(3);
+
+    await writer.close();
+    expect(record).toHaveBeenCalledTimes(4);
+    vi.useRealTimers();
+  });
+
+  it("reports a failed write through the matching thread checkpoint", async () => {
+    vi.useFakeTimers();
+    const record = vi.fn<ModelRequestMetricsStore["record"]>(() => {
+      throw new Error("disk full");
+    });
+    const writer = new BufferedModelRequestMetricsWriter({
+      record,
+      recordSubagentThread: () => undefined,
+      requestRowsAfter: () => [],
+      subagentThreadsAfter: () => [],
+      recent: () => [],
+      aggregate: () => emptyMetricsReport(),
+      errors: () => emptyErrorReport(),
+      count: () => 0,
+      close: () => undefined,
+    });
+    writer.enqueue(sample());
+
+    const checkpoint = writer.waitForCurrentWrites("thread-1");
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(checkpoint).resolves.toBe(false);
+    await writer.close();
+    vi.useRealTimers();
+  });
+
+  it("does not fail a thread checkpoint for another thread's write", async () => {
+    vi.useFakeTimers();
+    const record = vi.fn<ModelRequestMetricsStore["record"]>((metric) => {
+      if (metric.threadId === "thread-2") throw new Error("disk full");
+    });
+    const writer = new BufferedModelRequestMetricsWriter({
+      record,
+      recordSubagentThread: () => undefined,
+      requestRowsAfter: () => [],
+      subagentThreadsAfter: () => [],
+      recent: () => [],
+      aggregate: () => emptyMetricsReport(),
+      errors: () => emptyErrorReport(),
+      count: () => 0,
+      close: () => undefined,
+    });
+    writer.enqueue({ ...sample(), threadId: "thread-2" });
+    writer.enqueue(sample());
+
+    const checkpoint = writer.waitForCurrentWrites("thread-1");
+    await vi.advanceTimersByTimeAsync(20);
+
+    await expect(checkpoint).resolves.toBe(true);
+    await writer.close();
+    vi.useRealTimers();
   });
 });
 
