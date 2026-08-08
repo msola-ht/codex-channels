@@ -24,6 +24,7 @@ import {
   locateUserConfig,
   resolveConfiguredPath,
 } from "./runtime-config.mjs";
+import { resolveMetricsCenterSettings } from "./metrics-center-settings.mjs";
 import {
   csvCell,
   enrichCosts,
@@ -376,6 +377,178 @@ export function resetMetricsSyncStateWithGatewayRestart(
   return result;
 }
 
+export function pruneProviderMetrics(provider, environment = process.env, options = {}) {
+  assertPruneProvider(provider);
+  const localDatabasePath = options.localDatabasePath
+    ?? resolveMetricsRuntime(environment).databasePath;
+  const centerSettings = options.centerSettings
+    ?? resolveMetricsCenterSettings({ environment });
+  const configuredCenterPath = options.centerDatabasePath
+    ?? centerSettings.databasePath;
+  const centerDatabasePath = typeof configuredCenterPath === "string"
+    && existsSync(configuredCenterPath)
+    ? configuredCenterPath
+    : null;
+  const centerConfigured = centerDatabasePath !== null;
+  const stopGateway = options.stopGateway
+    ?? (() => runServiceAction("gateway", "stop", environment));
+  const startGateway = options.startGateway
+    ?? (() => runServiceAction("gateway", "start", environment));
+  const stopCenter = options.stopCenter
+    ?? (() => runServiceAction("center", "stop", environment));
+  const startCenter = options.startCenter
+    ?? (() => runServiceAction("center", "start", environment));
+
+  const warnings = [];
+  let gatewayStopped = false;
+  let centerStopped = false;
+  try {
+    stopGateway();
+    gatewayStopped = true;
+  } catch (error) {
+    warnings.push(`停止 Gateway 失败：${errorMessage(error)}`);
+  }
+  if (centerConfigured) {
+    try {
+      stopCenter();
+      centerStopped = true;
+    } catch (error) {
+      warnings.push(`停止中心服务失败：${errorMessage(error)}`);
+    }
+  }
+
+  let result;
+  let operationError;
+  try {
+    result = pruneProviderDatabases({
+      provider,
+      localDatabasePath,
+      centerDatabasePath,
+      allowVacuumLocal: gatewayStopped,
+      allowVacuumCenter: centerStopped,
+    });
+  } catch (error) {
+    operationError = error;
+  }
+
+  const startFailures = [];
+  if (centerConfigured) {
+    try {
+      startCenter();
+    } catch (error) {
+      startFailures.push(`中心服务启动失败：${errorMessage(error)}`);
+    }
+  }
+  try {
+    startGateway();
+  } catch (error) {
+    startFailures.push(`Gateway 启动失败：${errorMessage(error)}`);
+  }
+
+  if (operationError !== undefined && startFailures.length > 0) {
+    throw new AggregateError(
+      [operationError, ...startFailures.map((message) => new Error(message))],
+      `清理 ${provider} 请求指标失败，且服务未能全部重新启动`,
+    );
+  }
+  if (operationError !== undefined) throw operationError;
+  if (startFailures.length > 0) {
+    throw new Error(startFailures.join("；"));
+  }
+  return {
+    ...result,
+    warnings,
+  };
+}
+
+function pruneProviderDatabases({
+  provider,
+  localDatabasePath,
+  centerDatabasePath,
+  allowVacuumLocal,
+  allowVacuumCenter,
+}) {
+  const localBackupPath = backupMetricsDatabase(localDatabasePath, provider);
+  const localDeleted = deleteProviderRows(
+    localDatabasePath,
+    "model_request_metrics",
+    provider,
+    allowVacuumLocal,
+  );
+  if (centerDatabasePath === null) {
+    return {
+      provider,
+      local: {
+        databasePath: localDatabasePath,
+        backupPath: localBackupPath,
+        deleted: localDeleted,
+      },
+      center: { skipped: true },
+    };
+  }
+  const centerBackupPath = backupMetricsDatabase(centerDatabasePath, provider);
+  const centerDeleted = deleteProviderRows(
+    centerDatabasePath,
+    "request_metrics",
+    provider,
+    allowVacuumCenter,
+  );
+  return {
+    provider,
+    local: {
+      databasePath: localDatabasePath,
+      backupPath: localBackupPath,
+      deleted: localDeleted,
+    },
+    center: {
+      databasePath: centerDatabasePath,
+      backupPath: centerBackupPath,
+      deleted: centerDeleted,
+      skipped: false,
+    },
+  };
+}
+
+function backupMetricsDatabase(databasePath, provider) {
+  if (!existsSync(databasePath)) return null;
+  try {
+    checkpoint(databasePath);
+  } catch {
+    // 服务未能完全停止时跳过备份，仍继续尝试删除（带 busy_timeout）。
+    return null;
+  }
+  const backupPath = `${databasePath}.${provider}-prune-${backupTimestamp(new Date())}.bak`;
+  copyFileSync(databasePath, backupPath);
+  chmodSync(backupPath, 0o600);
+  return backupPath;
+}
+
+function deleteProviderRows(databasePath, table, provider, allowVacuum) {
+  const database = new DatabaseSync(databasePath);
+  try {
+    database.exec("PRAGMA busy_timeout = 10000;");
+    const info = database.prepare(
+      `DELETE FROM ${table} WHERE provider = ?`,
+    ).run(provider);
+    if (allowVacuum) {
+      database.exec("VACUUM");
+    }
+    return Number(info.changes ?? 0);
+  } finally {
+    database.close();
+  }
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function assertPruneProvider(provider) {
+  if (provider !== "openai" && provider !== "deepseek") {
+    throw new Error("用法：codexc metrics prune <openai|deepseek>");
+  }
+}
+
 function runGatewayServiceAction(action, environment) {
   const cli = resolve(import.meta.dirname, "../bin/codexc.mjs");
   const result = spawnSync(
@@ -386,6 +559,19 @@ function runGatewayServiceAction(action, environment) {
   if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error(`Gateway ${action === "stop" ? "停止" : "启动"}失败`);
+  }
+}
+
+function runServiceAction(target, action, environment) {
+  const cli = resolve(import.meta.dirname, "../bin/codexc.mjs");
+  const result = spawnSync(
+    process.execPath,
+    [cli, "service", action, target],
+    { env: environment, stdio: "inherit" },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`${target} 服务${action === "stop" ? "停止" : "启动"}失败`);
   }
 }
 
@@ -1558,6 +1744,29 @@ if (
         console.log(`重置前备份：${result.backupPath}`);
       }
       console.log("Gateway 已重新启动，将从第一条记录重新上报。");
+    } else if (command === "prune" && process.argv.length === 4) {
+      const provider = process.argv[3];
+      const result = pruneProviderMetrics(provider);
+      console.log(`已清理 ${result.provider} 请求指标：本地删除 ${result.local.deleted} 条`);
+      if (result.center.skipped) {
+        console.log("中心库未配置或不存在，已跳过。");
+      } else {
+        console.log(`中心删除 ${result.center.deleted} 条`);
+      }
+      if (result.local.backupPath !== null) {
+        console.log(`本地备份：${result.local.backupPath}`);
+      }
+      if (!result.center.skipped && result.center.backupPath !== null) {
+        console.log(`中心备份：${result.center.backupPath}`);
+      }
+      for (const warning of result.warnings) {
+        console.warn(`警告：${warning}`);
+      }
+      if (result.center.skipped) {
+        console.log("Gateway 已重新启动。");
+      } else {
+        console.log("Gateway 与中心服务已重新启动。");
+      }
     } else if (command === "report") {
       const options = parseMetricsOptions(
         process.argv.slice(3),

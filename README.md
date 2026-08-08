@@ -276,6 +276,7 @@ codexc service stop gateway
 codexc metrics upgrade --restart-gateway          # 自动停 Gateway、备份升级并重新启动
 codexc metrics reset                              # 先保留 0600 旧库备份，再重建
 codexc metrics sync-reset --restart-gateway       # 备份并清零多端上报水位，重放修复中心历史
+codexc metrics prune openai                       # 备份并清理指定提供商请求指标（自动重启 Gateway 与中心）
 codexc service start gateway
 ```
 
@@ -298,6 +299,8 @@ Markdown 报表的费用按 `display.price_currency` 统一换算显示（人民
 `metrics upgrade` 支持把现有指标库从 Schema v3/v4/v5 显式升级到 v6 并保留旧记录；Gateway 已停止时
 可直接运行，不便单独管理服务时可加 `--restart-gateway` 自动完成停止、升级和重新启动。`metrics reset`
 用于归档并重建不支持的版本。两者都不修改会话状态库，Gateway 运行时会拒绝执行。
+`metrics prune <provider>` 备份本地与中心指标库后，删除其中指定提供商（当前支持 openai、
+deepseek）的全部请求行并自动重启 Gateway 与中心服务，适合额度重置后重新开始统计。
 
 ### 常用聊天命令
 

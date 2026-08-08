@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   inspectMetricsDatabase,
+  pruneProviderMetrics,
   readMetricsExport,
   readMetricsReport,
   readMetricsRun,
@@ -47,6 +48,169 @@ afterEach(() => {
 });
 
 describe("model request metrics database operations", () => {
+  it("prunes OpenAI rows from local and center databases and restarts services", () => {
+    const { environment, databasePath } = fixture();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    store.record({ ...metricSample(), provider: "deepseek" });
+    store.record({ ...metricSample(), provider: "deepseek" });
+    store.record({ ...metricSample(), provider: "openai" });
+    store.close();
+
+    const centerPath = join(dirname(databasePath), "center.sqlite3");
+    const center = new DatabaseSync(centerPath);
+    center.exec(`
+      CREATE TABLE request_metrics (
+        id INTEGER PRIMARY KEY,
+        provider TEXT NOT NULL
+      )
+    `);
+    center.prepare("INSERT INTO request_metrics (provider) VALUES (?)")
+      .run("deepseek");
+    center.prepare("INSERT INTO request_metrics (provider) VALUES (?)")
+      .run("openai");
+    center.close();
+
+    const calls: string[] = [];
+    const result = pruneProviderMetrics("openai", environment, {
+      localDatabasePath: databasePath,
+      centerDatabasePath: centerPath,
+      stopGateway: () => calls.push("stop:gateway"),
+      startGateway: () => calls.push("start:gateway"),
+      stopCenter: () => calls.push("stop:center"),
+      startCenter: () => calls.push("start:center"),
+    });
+
+    expect(calls).toEqual([
+      "stop:gateway",
+      "stop:center",
+      "start:center",
+      "start:gateway",
+    ]);
+    expect(result.local.deleted).toBe(1);
+    expect(result.center).toMatchObject({ skipped: false, deleted: 1 });
+    expect(result.warnings).toEqual([]);
+
+    const local = new DatabaseSync(databasePath, { readOnly: true });
+    expect(local.prepare(`
+      SELECT COUNT(*) AS c FROM model_request_metrics WHERE provider = 'deepseek'
+    `).get()).toMatchObject({ c: 2 });
+    expect(local.prepare(`
+      SELECT COUNT(*) AS c FROM model_request_metrics WHERE provider = 'openai'
+    `).get()).toMatchObject({ c: 0 });
+    local.close();
+
+    const centerAfter = new DatabaseSync(centerPath, { readOnly: true });
+    expect(centerAfter.prepare(`
+      SELECT COUNT(*) AS c FROM request_metrics WHERE provider = 'openai'
+    `).get()).toMatchObject({ c: 0 });
+    centerAfter.close();
+
+    expect(existsSync(result.local.backupPath ?? "")).toBe(true);
+    expect(existsSync(result.center.backupPath ?? "")).toBe(true);
+  });
+
+  it("skips the center database when it is not configured", () => {
+    const { environment, databasePath } = fixture();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    store.record({ ...metricSample(), provider: "openai" });
+    store.close();
+    const calls: string[] = [];
+
+    const result = pruneProviderMetrics("openai", environment, {
+      localDatabasePath: databasePath,
+      centerDatabasePath: null,
+      stopGateway: () => calls.push("stop:gateway"),
+      startGateway: () => calls.push("start:gateway"),
+      stopCenter: () => calls.push("stop:center"),
+      startCenter: () => calls.push("start:center"),
+    });
+
+    expect(result.center.skipped).toBe(true);
+    expect(result.local.deleted).toBe(1);
+    expect(calls).toEqual(["stop:gateway", "start:gateway"]);
+  });
+
+  it("still restarts services when stopping the Gateway fails", () => {
+    const { environment, databasePath } = fixture();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    store.record({ ...metricSample(), provider: "openai" });
+    store.close();
+    const calls: string[] = [];
+
+    const result = pruneProviderMetrics("openai", environment, {
+      localDatabasePath: databasePath,
+      centerDatabasePath: null,
+      stopGateway: () => {
+        calls.push("stop:gateway");
+        throw new Error("stop failed");
+      },
+      startGateway: () => calls.push("start:gateway"),
+      stopCenter: () => calls.push("stop:center"),
+      startCenter: () => calls.push("start:center"),
+    });
+
+    expect(calls).toEqual(["stop:gateway", "start:gateway"]);
+    expect(result.warnings[0]).toContain("停止 Gateway 失败");
+    expect(result.local.deleted).toBe(1);
+  });
+
+  it("restarts services and surfaces the failure when the delete fails", () => {
+    const { environment, databasePath } = fixture();
+    const badPath = join(dirname(databasePath), "bad.sqlite3");
+    const bad = new DatabaseSync(badPath);
+    bad.exec("CREATE TABLE model_request_metrics (id INTEGER PRIMARY KEY)");
+    bad.close();
+    const calls: string[] = [];
+
+    expect(() => pruneProviderMetrics("openai", environment, {
+      localDatabasePath: badPath,
+      centerDatabasePath: null,
+      stopGateway: () => calls.push("stop:gateway"),
+      startGateway: () => calls.push("start:gateway"),
+      stopCenter: () => calls.push("stop:center"),
+      startCenter: () => calls.push("start:center"),
+    })).toThrow();
+    expect(calls).toEqual(["stop:gateway", "start:gateway"]);
+  });
+
+  it("prunes rows for the requested provider", () => {
+    const { environment, databasePath } = fixture();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    store.record({ ...metricSample(), provider: "deepseek" });
+    store.record({ ...metricSample(), provider: "openai" });
+    store.close();
+    const calls: string[] = [];
+
+    const result = pruneProviderMetrics("deepseek", environment, {
+      localDatabasePath: databasePath,
+      centerDatabasePath: null,
+      stopGateway: () => calls.push("stop:gateway"),
+      startGateway: () => calls.push("start:gateway"),
+      stopCenter: () => calls.push("stop:center"),
+      startCenter: () => calls.push("start:center"),
+    });
+
+    expect(result.provider).toBe("deepseek");
+    expect(result.local.deleted).toBe(1);
+    const local = new DatabaseSync(databasePath, { readOnly: true });
+    expect(local.prepare(`
+      SELECT COUNT(*) AS c FROM model_request_metrics WHERE provider = 'openai'
+    `).get()).toMatchObject({ c: 1 });
+    local.close();
+  });
+
+  it("rejects an unsupported provider", () => {
+    const { environment, databasePath } = fixture();
+    expect(() => pruneProviderMetrics("unknown", environment, {
+      localDatabasePath: databasePath,
+      centerDatabasePath: null,
+      stopGateway: () => undefined,
+      startGateway: () => undefined,
+      stopCenter: () => undefined,
+      startCenter: () => undefined,
+    })).toThrow("codexc metrics prune <openai|deepseek>");
+  });
+
   it("reports a missing database without creating it", () => {
     const { environment, databasePath } = fixture();
 

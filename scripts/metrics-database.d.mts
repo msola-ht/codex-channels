@@ -148,6 +148,38 @@ export function resetMetricsSyncStateWithGatewayRestart(
   },
 ): MetricsSyncResetResult;
 
+export interface MetricsProviderPruneResult {
+  provider: string;
+  local: {
+    databasePath: string;
+    backupPath: string | null;
+    deleted: number;
+  };
+  center: {
+    skipped: boolean;
+    databasePath?: string | null;
+    backupPath?: string | null;
+    deleted?: number;
+  };
+  warnings: string[];
+}
+
+export function pruneProviderMetrics(
+  provider: string,
+  environment?: NodeJS.ProcessEnv,
+  options?: {
+    localDatabasePath?: string;
+    centerDatabasePath?: string | null;
+    centerSettings?: {
+      databasePath?: string;
+    };
+    stopGateway?: () => void;
+    startGateway?: () => void;
+    stopCenter?: () => void;
+    startCenter?: () => void;
+  },
+): MetricsProviderPruneResult;
+
 export function readMetricsReport(
   environment?: NodeJS.ProcessEnv,
   options?: { range?: "24h" | "7d" | "30d"; group?: "global" | "providers" | "models"; nowMs?: number },

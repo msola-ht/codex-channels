@@ -195,7 +195,8 @@ const helpText = {
   codexc metrics status   指标数据库状态
   codexc metrics upgrade  备份并升级指标库（需 Gateway 停止）
   codexc metrics reset    备份并重建指标库（需 Gateway 停止）
-  codexc metrics sync-reset   备份并清零多端上报水位，重放修复中心历史`,
+  codexc metrics sync-reset   备份并清零多端上报水位，重放修复中心历史
+  codexc metrics prune <provider>   备份并清理指定提供商请求指标（自动重启 Gateway 与中心）`,
   channel: `用法：codexc channel <send-image>
 
 渠道能力：由 Gateway 使用渠道机器人凭据发送图片等媒体。`,
@@ -253,6 +254,11 @@ const helpText = {
 上报水位（保留设备 ID），重启 Gateway 后从第一条记录重新上报；中心按
 (device_id, local_id) 覆盖写入，可修复云端历史数据。加 --restart-gateway 时自动
 停止并重新启动 Gateway。`,
+  "metrics.prune": `用法：codexc metrics prune <provider>
+
+provider 当前支持 openai、deepseek。备份并删除本地与中心库中该提供商全部请求行，随后
+自动重启 Gateway 与中心服务（即使任一步骤失败也会尝试把服务拉起来）。OpenAI 额度重置
+后可用 openai 从零重新统计用量；备份保留在指标库同目录的 *.<provider>-prune-*.bak。`,
   "metrics.report": `用法：codexc metrics report [--range <24h|7d|30d>] [--group <global|providers|models>] [--format markdown|json|csv]
 
 只读输出汇报；默认最近 30 天并按模型分组，写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。`,
@@ -1157,6 +1163,7 @@ async function metrics(args) {
     showSubcommandHelp(args, "upgrade", "metrics.upgrade") ||
     showSubcommandHelp(args, "reset", "metrics.reset") ||
     showSubcommandHelp(args, "sync-reset", "metrics.sync_reset") ||
+    showSubcommandHelp(args, "prune", "metrics.prune") ||
     showSubcommandHelp(args, "report", "metrics.report") ||
     showSubcommandHelp(args, "export", "metrics.export")) {
     return;
@@ -1171,10 +1178,10 @@ async function metrics(args) {
     return;
   }
   if (
-    !new Set(["run", "turns", "threads", "status", "upgrade", "reset", "sync-reset", "report", "export"])
+    !new Set(["run", "turns", "threads", "status", "upgrade", "reset", "sync-reset", "prune", "report", "export"])
       .has(subcommand)
   ) {
-    throw new Error("用法：codexc metrics <run|turns|threads|status|upgrade|reset|sync-reset|report|export>");
+    throw new Error("用法：codexc metrics <run|turns|threads|status|upgrade|reset|sync-reset|prune|report|export>");
   }
   if (subcommand === "status" && rest.length === 0) {
     run(
@@ -1192,6 +1199,9 @@ async function metrics(args) {
   if (subcommand === "sync-reset" && rest.length === 1 && rest[0] === "--restart-gateway") {
     runScript("scripts/metrics-database.mjs", ["sync-reset-restart"]);
     return;
+  }
+  if (subcommand === "prune" && rest.length !== 1) {
+    throw new Error("用法：codexc metrics prune <openai|deepseek>");
   }
   if (new Set(["upgrade", "reset", "sync-reset"]).has(subcommand) && rest.length > 0) {
     throw new Error(`用法：codexc metrics ${subcommand}`);

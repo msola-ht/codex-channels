@@ -18,6 +18,9 @@
   指标 Socket 仍可连接时均拒绝 reset；`sync-reset` 备份并清零多端上报水位文件（保留
   设备 ID），默认同样要求 Gateway 已停止，`--restart-gateway` 时自动停止并重新启动
   Gateway，用于重放修复中心历史数据。
+  `prune <provider>` 备份后删除本地与中心库中指定提供商（openai、deepseek）的全部请求
+  行，并自动停止、重启 Gateway 与中心服务；任一步骤失败也会尝试把服务重新拉起，额度重置
+  后可用它从零重新统计用量。
 - `channel-send-image.mjs`：`codexc channel send-image` 的实现，把本地图片复制到
   `data/channel-outbox/pending/` 并写入 manifest；由 Gateway 轮询后按 Thread 绑定
   会话发送并归档，详见 `docs/channel-image.md`。
@@ -40,6 +43,8 @@
   子命令 `codexc center config` 交互设置 `[metrics.center]`、`codexc center info` 输出
   中心地址（含设备上报端点）、令牌状态与运行状态；监听参数优先命令行，其次
   `config.toml` 的 `[metrics.center]` 段，默认回环 `127.0.0.1:8790`。
+- `metrics-center-settings.mjs`：中心服务与指标脚本共用的轻量配置解析（命令行参数、
+  `config.toml` 的 `[metrics.center]` 段与默认值），不依赖 Cloudflare 部署文件。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型渠道”“通讯渠道”和
   “系统设置”流程委派给具体适配器；模型渠道下区分 DeepSeek、第三方 API 与图片识别，系统设置
   提供全局调试模式入口。
