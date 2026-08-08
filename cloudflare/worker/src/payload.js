@@ -6,9 +6,15 @@ export function parseIngestPayload(body) {
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
     return { ok: false, error: "请求体必须是 JSON 对象" };
   }
-  const { deviceId, requestMetrics, subagentThreads } = body;
+  const { deviceId, deviceName, requestMetrics, subagentThreads } = body;
   if (typeof deviceId !== "string" || !deviceIdPattern.test(deviceId)) {
     return { ok: false, error: "deviceId 无效" };
+  }
+  if (
+    deviceName !== undefined
+    && (typeof deviceName !== "string" || deviceName.length > 128)
+  ) {
+    return { ok: false, error: "deviceName 必须是 128 字符以内的字符串" };
   }
   if (!Array.isArray(requestMetrics) || !Array.isArray(subagentThreads)) {
     return { ok: false, error: "requestMetrics 与 subagentThreads 必须是数组" };
@@ -29,7 +35,15 @@ export function parseIngestPayload(body) {
       return { ok: false, error: "subagentThreads 包含无效记录" };
     }
   }
-  return { ok: true, deviceId, requestMetrics, subagentThreads };
+  return {
+    ok: true,
+    deviceId,
+    deviceName: typeof deviceName === "string" && deviceName.trim()
+      ? deviceName.trim()
+      : undefined,
+    requestMetrics,
+    subagentThreads,
+  };
 }
 
 function isRequestMetric(row) {

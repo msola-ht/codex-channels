@@ -129,11 +129,61 @@ const metricsSyncSchema = z.strictObject({
     } catch {
       return;
     }
-    if (url.protocol !== "https:") {
+    if (url.protocol !== "https:" && !isPrivateHttpEndpoint(url)) {
       context.addIssue({
         code: "custom",
         path: ["endpoint"],
-        message: "metrics.sync.endpoint 必须使用 HTTPS",
+        message: "metrics.sync.endpoint 必须使用 HTTPS，或回环/私网 HTTP",
+      });
+    }
+  }
+});
+
+const metricsCenterSchema = z.strictObject({
+  enabled: z.boolean().default(false),
+  host: z.enum(["127.0.0.1", "::1", "0.0.0.0"]).default("127.0.0.1"),
+  port: z.number().int().min(1).max(65535).default(8790),
+  token: z.string().min(1).optional(),
+  database_path: z.string().min(1).default("data/central-metrics.sqlite3"),
+}).superRefine((value, context) => {
+  if (value.host === "0.0.0.0" && value.token === undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["token"],
+      message: "metrics.center 绑定非回环地址时必须设置 token",
+    });
+  }
+});
+
+const metricsViewSchema = z.strictObject({
+  enabled: z.boolean().default(false),
+  endpoint: z.url().optional(),
+  token: z.string().min(1).optional(),
+}).superRefine((value, context) => {
+  if (!value.enabled) {
+    return;
+  }
+  for (const field of ["endpoint", "token"]) {
+    if (value[field] === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: [field],
+        message: `metrics.view 启用时必须配置 ${field}`,
+      });
+    }
+  }
+  if (value.endpoint !== undefined) {
+    let url;
+    try {
+      url = new URL(value.endpoint);
+    } catch {
+      return;
+    }
+    if (url.protocol !== "https:" && !isPrivateHttpEndpoint(url)) {
+      context.addIssue({
+        code: "custom",
+        path: ["endpoint"],
+        message: "metrics.view.endpoint 必须使用 HTTPS，或回环/私网 HTTP",
       });
     }
   }
@@ -192,6 +242,8 @@ const gatewayDocumentSchema = z.strictObject({
       batch_size: 200,
       interval_seconds: 60,
     }),
+    center: metricsCenterSchema.optional(),
+    view: metricsViewSchema.optional(),
   }).default({
     sync: {
       enabled: false,
@@ -242,6 +294,45 @@ export function validateWebuiConfigDocument(document) {
     throw new Error(`config.toml 的 [webui] 配置无效：\n${z.prettifyError(parsed.error)}`);
   }
   return parsed.data;
+}
+
+export function validateMetricsCenterConfigDocument(document) {
+  const parsed = metricsCenterSchema.safeParse(
+    document !== null && typeof document === "object"
+      ? document.metrics?.center ?? {}
+      : {},
+  );
+  if (!parsed.success) {
+    throw new Error(
+      `config.toml 的 [metrics.center] 配置无效：\n${z.prettifyError(parsed.error)}`,
+    );
+  }
+  return parsed.data;
+}
+
+export function validateMetricsViewConfigDocument(document) {
+  const parsed = metricsViewSchema.safeParse(
+    document !== null && typeof document === "object"
+      ? document.metrics?.view ?? {}
+      : {},
+  );
+  if (!parsed.success) {
+    throw new Error(
+      `config.toml 的 [metrics.view] 配置无效：\n${z.prettifyError(parsed.error)}`,
+    );
+  }
+  return parsed.data;
+}
+
+export function isPrivateHttpEndpoint(url) {
+  if (url.protocol !== "http:") return false;
+  const hostname = url.hostname.toLowerCase();
+  if (hostname === "localhost") return true;
+  const address = hostname.startsWith("[") ? hostname.slice(1, -1) : hostname;
+  if (address === "::1" || address.startsWith("127.")) return true;
+  if (address.startsWith("10.") || address.startsWith("192.168.")) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./u.test(address)) return true;
+  return false;
 }
 
 export function readGatewayConfig(configPath) {

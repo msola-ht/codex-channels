@@ -1,6 +1,9 @@
 import type {
   DeepseekBalanceResponse,
   ErrorsResponse,
+  GlobalDevicesResponse,
+  GlobalOverviewResponse,
+  GlobalRequestsResponse,
   OverviewResponse,
   RangeName,
   RequestSortDirection,
@@ -181,6 +184,47 @@ export function fetchDeepseekBalance(
 ): Promise<DeepseekBalanceResponse> {
   return getJson<DeepseekBalanceResponse>(
     `${API_PREFIX}/deepseek-balance`,
+    signal,
+  )
+}
+
+export function fetchGlobalOverview(
+  device: string | null,
+  signal?: AbortSignal,
+): Promise<GlobalOverviewResponse> {
+  const query = device === null ? "" : `?device=${encodeURIComponent(device)}`
+  return getJson<GlobalOverviewResponse>(
+    `${API_PREFIX}/global/overview${query}`,
+    signal,
+  )
+}
+
+export function fetchGlobalDevices(
+  signal?: AbortSignal,
+): Promise<GlobalDevicesResponse> {
+  return getJson<GlobalDevicesResponse>(
+    `${API_PREFIX}/global/devices`,
+    signal,
+  )
+}
+
+export function fetchGlobalRequests(
+  limit: number,
+  device: string | null,
+  offset: number,
+  sort: string,
+  direction: string,
+  signal?: AbortSignal,
+): Promise<GlobalRequestsResponse> {
+  const query = [
+    `limit=${limit}`,
+    device === null ? null : `device=${encodeURIComponent(device)}`,
+    offset > 0 ? `offset=${offset}` : null,
+    `sort=${encodeURIComponent(sort)}`,
+    `direction=${encodeURIComponent(direction)}`,
+  ].filter(Boolean).join("&")
+  return getJson<GlobalRequestsResponse>(
+    `${API_PREFIX}/global/requests?${query}`,
     signal,
   )
 }

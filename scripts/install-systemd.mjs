@@ -67,6 +67,7 @@ for (const name of [
   "codex-connect-app-server",
   "codex-connect-gateway",
   "codex-connect-webui",
+  "codex-connect-center",
 ]) {
   const template = readFileSync(join(packageDir, "systemd", `${name}.service.template`), "utf8");
   let rendered = Object.entries(argumentValues).reduce(

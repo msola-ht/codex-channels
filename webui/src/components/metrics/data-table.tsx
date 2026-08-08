@@ -213,14 +213,13 @@ export function DataTable<TData extends RowData>({
   const [globalFilter, setGlobalFilter] =
     usePersistentTableState<string>(storageKey, "filters", "")
   const [rowSelection, setRowSelection] = React.useState({})
-  const [clientSorting, setClientSorting] =
-    usePersistentTableState<SortingState>(
-      storageKey,
-      "sorting",
-      pagination.mode === "client"
-        ? pagination.defaultSorting ?? DEFAULT_SORTING
-        : DEFAULT_SORTING,
-    )
+  // 排序只在本次会话内有效，刷新后回到默认（最新时间倒序）；
+  // 持久化只保留列展示（columns）与筛选。
+  const [clientSorting, setClientSorting] = React.useState<SortingState>(
+    pagination.mode === "client"
+      ? pagination.defaultSorting ?? DEFAULT_SORTING
+      : DEFAULT_SORTING,
+  )
   const [clientPage, setClientPage] = React.useState(0)
   const [clientPageSize, setClientPageSize] = React.useState(
     pagination.mode === "client"
@@ -325,24 +324,26 @@ export function DataTable<TData extends RowData>({
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Label htmlFor={`${storageKey}-search`} className="sr-only">
-              筛选
-            </Label>
-            <Input
-              id={`${storageKey}-search`}
-              value={queryValue}
-              onChange={(event) => handleFilterChange(event.target.value)}
-              placeholder={filterPlaceholder}
-              className="w-72"
-            />
-            <SearchIcon className="size-4 text-muted-foreground" />
-            {filterHint === undefined ? null : (
-              <span className="text-xs text-muted-foreground">
-                {filterHint}
-              </span>
-            )}
-          </div>
+          {server && pagination.onFilterChange === undefined ? null : (
+            <div className="flex items-center gap-2">
+              <Label htmlFor={`${storageKey}-search`} className="sr-only">
+                筛选
+              </Label>
+              <Input
+                id={`${storageKey}-search`}
+                value={queryValue}
+                onChange={(event) => handleFilterChange(event.target.value)}
+                placeholder={filterPlaceholder}
+                className="w-72"
+              />
+              <SearchIcon className="size-4 text-muted-foreground" />
+              {filterHint === undefined ? null : (
+                <span className="text-xs text-muted-foreground">
+                  {filterHint}
+                </span>
+              )}
+            </div>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm">

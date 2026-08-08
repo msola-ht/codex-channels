@@ -282,3 +282,72 @@ export interface DeepseekBalanceResponse {
   available: boolean
   balances: DeepseekBalance[]
 }
+
+export interface GlobalTotals {
+  device_count: number
+  request_count: number
+  subagent_count: number
+  input_tokens: number
+  cached_input_tokens: number
+  output_tokens: number
+  reasoning_output_tokens: number
+  total_tokens: number
+  last_recorded_at_ms: number | null
+}
+
+export interface GlobalCostRow {
+  currency: string
+  request_count: number
+  total_cost_nanos: number
+}
+
+export interface GlobalProviderRow {
+  provider: string | null
+  request_count: number
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+}
+
+export interface GlobalOverviewResponse {
+  totals: GlobalTotals | null
+  costsByCurrency: GlobalCostRow[]
+  providers: GlobalProviderRow[]
+}
+
+export interface GlobalDeviceRow {
+  device_id: string
+  display_name: string
+  first_seen_at_ms: number
+  last_seen_at_ms: number
+  last_ingested_at_ms: number | null
+  request_count: number
+  subagent_count: number
+}
+
+export interface GlobalDevicesResponse {
+  devices: GlobalDeviceRow[]
+}
+
+export interface GlobalRequestRow {
+  device_id: string
+  local_id: number
+  recorded_at_ms: number
+  provider: string | null
+  model: string | null
+  status: string | null
+  operation: string | null
+  input_tokens: number | null
+  cached_input_tokens: number | null
+  output_tokens: number | null
+  reasoning_output_tokens: number | null
+  total_tokens: number | null
+  cache_hit_rate: number | null
+  pricing_currency: string | null
+  total_cost_nanos: number | null
+}
+
+export interface GlobalRequestsResponse {
+  requests: GlobalRequestRow[]
+  total: number
+}

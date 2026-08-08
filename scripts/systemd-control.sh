@@ -8,12 +8,13 @@ units_dir="$config_home/systemd/user"
 app_unit="codex-connect-app-server.service"
 gateway_unit="codex-connect-gateway.service"
 webui_unit="codex-connect-webui.service"
+metrics_center_unit="codex-connect-center.service"
 
 show_logs() {
   follow=0
   lines=100
   service=gateway
-  if [ "$#" -gt 0 ] && { [ "$1" = "gateway" ] || [ "$1" = "app-server" ] || [ "$1" = "webui" ] || [ "$1" = "all" ]; }; then
+  if [ "$#" -gt 0 ] && { [ "$1" = "gateway" ] || [ "$1" = "app-server" ] || [ "$1" = "webui" ] || [ "$1" = "center" ] || [ "$1" = "all" ]; }; then
     service=$1
     shift
   fi
@@ -44,6 +45,9 @@ show_logs() {
   if [ "$service" = "webui" ]; then
     set -- "$@" --user-unit="$webui_unit"
   fi
+  if [ "$service" = "center" ]; then
+    set -- "$@" --user-unit="$metrics_center_unit"
+  fi
   set -- "$@" --lines="$lines" --no-pager
   if [ "$follow" -eq 1 ]; then
     set -- "$@" --follow
@@ -57,10 +61,10 @@ systemctl_user() {
 
 require_target() {
   case "$1" in
-    gateway|app-server|webui|all)
+    gateway|app-server|webui|center|all)
       ;;
     *)
-      printf '%s\n' "服务目标必须是 gateway、app-server、webui 或 all：$1" >&2
+      printf '%s\n' "服务目标必须是 gateway、app-server、webui、center 或 all：$1" >&2
       return 2
       ;;
   esac
@@ -74,6 +78,7 @@ case "$action" in
     systemctl_user restart "$gateway_unit"
     printf '%s\n' "Codex App Server 与 Gateway systemd 用户服务已安装并启动。"
     printf '%s\n' "WebUI 服务已生成，可执行 codexc service start webui 启动。"
+    printf '%s\n' "指标中心服务已生成，可执行 codexc service start center 启动。"
     ;;
   start)
     target=${2:-all}
@@ -90,6 +95,10 @@ case "$action" in
       webui)
         systemctl_user start "$webui_unit"
         printf '%s\n' "WebUI 已启动。"
+        ;;
+      center)
+        systemctl_user start "$metrics_center_unit"
+        printf '%s\n' "指标中心已启动。"
         ;;
       all)
         systemctl_user start "$app_unit"
@@ -114,6 +123,10 @@ case "$action" in
         systemctl_user stop "$webui_unit"
         printf '%s\n' "WebUI 已停止。"
         ;;
+      center)
+        systemctl_user stop "$metrics_center_unit"
+        printf '%s\n' "指标中心已停止。"
+        ;;
       all)
         systemctl_user stop "$gateway_unit"
         systemctl_user stop "$app_unit"
@@ -137,6 +150,10 @@ case "$action" in
         systemctl_user restart "$webui_unit"
         printf '%s\n' "WebUI 已重启。"
         ;;
+      center)
+        systemctl_user restart "$metrics_center_unit"
+        printf '%s\n' "指标中心已重启。"
+        ;;
       all)
         systemctl_user restart "$app_unit"
         systemctl_user restart "$gateway_unit"
@@ -159,6 +176,7 @@ case "$action" in
       gateway) systemctl_user --no-pager status "$gateway_unit" || true ;;
       app-server) systemctl_user --no-pager status "$app_unit" || true ;;
       webui) systemctl_user --no-pager status "$webui_unit" || true ;;
+      center) systemctl_user --no-pager status "$metrics_center_unit" || true ;;
       all) systemctl_user --no-pager status "$app_unit" "$gateway_unit" || true ;;
     esac
     ;;
@@ -167,15 +185,15 @@ case "$action" in
     show_logs "$@"
     ;;
   uninstall)
-    systemctl_user disable --now "$gateway_unit" "$app_unit" "$webui_unit" 2>/dev/null || true
-    rm -f "$units_dir/$gateway_unit" "$units_dir/$app_unit" "$units_dir/$webui_unit"
+    systemctl_user disable --now "$gateway_unit" "$app_unit" "$webui_unit" "$metrics_center_unit" 2>/dev/null || true
+    rm -f "$units_dir/$gateway_unit" "$units_dir/$app_unit" "$units_dir/$webui_unit" "$units_dir/$metrics_center_unit"
     systemctl_user daemon-reload
-    systemctl_user reset-failed "$gateway_unit" "$app_unit" "$webui_unit" 2>/dev/null || true
-    printf '%s\n' "Codex App Server、Gateway 与 WebUI systemd 用户服务已卸载。"
+    systemctl_user reset-failed "$gateway_unit" "$app_unit" "$webui_unit" "$metrics_center_unit" 2>/dev/null || true
+    printf '%s\n' "Codex App Server、Gateway、WebUI 与指标中心 systemd 用户服务已卸载。"
     printf '%s\n' "用户配置与运行数据保留在 ~/.codex-connect。"
     ;;
   *)
-    printf '%s\n' "用法：$0 {install|uninstall|reload|start|stop|restart|status|logs} [gateway|app-server|webui|all]" >&2
+    printf '%s\n' "用法：$0 {install|uninstall|reload|start|stop|restart|status|logs} [gateway|app-server|webui|center|all]" >&2
     exit 2
     ;;
 esac

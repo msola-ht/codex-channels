@@ -15,9 +15,9 @@
   每 10 ms 最多同步写入 1 条，关闭时排空，避免 SQLite 位于模型响应确认路径并限制单轮事件循环阻塞。
 - `metrics-sync.ts`：把本地指标库的请求记录与子代理标注增量上报到中心服务。读取
   `MetricsSyncConfig`，自动生成或复用设备标识，持久化 `0600` 水位文件，按间隔与指数退避
-  定时上报；只有收到 HTTP 2xx 才推进水位。载荷只含脱敏指标，不上传 `errorMessage`，不
-  包含消息正文、提示词或审批内容；本模块不依赖代理、Surface 或业务 Storage，网络与状态
-  路径由 Bootstrap 注入。
+  定时上报，429/5xx 且服务端返回 `Retry-After` 时优先按服务端要求延后；只有收到
+  HTTP 2xx 才推进水位。载荷只含脱敏指标，不上传 `errorMessage`，不包含消息正文、提示词
+  或审批内容；本模块不依赖代理、Surface 或业务 Storage，网络与状态路径由 Bootstrap 注入。
 - `request-metrics-database.ts`：集中保存指标 Schema、固定路径和进程级独占锁；Gateway 与 reset
   共用同一把锁。锁内容完整写入后才原子发布，失效 PID 锁和超过保护期的残缺锁可清理，近期残缺锁、
   运行中或并发重建均失败关闭。

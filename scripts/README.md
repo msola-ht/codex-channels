@@ -22,17 +22,29 @@
 - `webui-server.mjs` / `webui-api.ts`：`codexc webui` 的只读 HTTP 服务与共享 API 类型。
   默认回环监听并托管 `webui/dist` 静态前端；提供 `/api/v1/overview`、`/api/v1/threads`、
   `/api/v1/threads/:id/run|turns`、`/api/v1/requests`、`/api/v1/errors` 只读 JSON 接口；
+  `/api/v1/global/*` 按 `[metrics.view]` 配置由服务端代理到中心服务（前端不接触令牌）；
   Threads 返回指标库首个请求开始时间，请求明细按受控字段在整个时间范围排序后偏移分页；
   `webui-api.ts` 声明接口响应类型，前端统一从该文件导入；监听参数优先取命令行，其次
   `config.toml` 的 `[webui]` 段，默认回环无令牌；绑定非回环地址（`0.0.0.0`）时必须设置
   `--token` 或配置 `token`，API 以 `Authorization: Bearer` 校验并采用常数时间比较。
+- `metrics-center-server.mjs`：`codexc center` 的多设备指标中心 HTTP 服务。
+  接收各设备 Gateway 的增量上报（Bearer 令牌校验、载荷校验、按 `device_id + local_id`
+  upsert 覆盖写入），写入中心 SQLite（复用 `cloudflare/migrations/0001_init.sql` 表结构，
+  WAL、`0600`），并提供 `/api/overview`、`/api/requests`、`/api/subagents`、
+  `/api/devices`、`/api/health`；WebUI 通过 `/api/v1/global/*` 服务端代理读取，令牌不进入前端。
+  子命令 `codexc center config` 交互设置 `[metrics.center]`、`codexc center info` 输出
+  中心地址（含设备上报端点）、令牌状态与运行状态；监听参数优先命令行，其次
+  `config.toml` 的 `[metrics.center]` 段，默认回环 `127.0.0.1:8790`。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型渠道”“通讯渠道”和
   “系统设置”流程委派给具体适配器；模型渠道下区分 DeepSeek、第三方 API 与图片识别，系统设置
   提供全局调试模式入口。
 - `config.mjs`：`codexc config` 的交互式配置与设置菜单，覆盖配置文件中可安全编辑的参数：
   显示设置（操作详情、计划更新、全局价格显示方式）、系统设置（调试模式、审批超时、
-  Sandbox、默认工作区与模型）、WebUI 设置（监听地址、端口、访问令牌）、Telegram 消息格式
-  和配置路径查看；非交互终端直接输出用户目录与配置文件路径。
+  Sandbox、默认工作区与模型）、WebUI 设置（监听地址、端口、访问令牌）、多设备指标
+  （本机接入中心并同时写入 `[metrics.sync]` 与 `[metrics.view]`、接入状态、上报参数
+  `interval_seconds` / `batch_size`、停用接入）、
+  Telegram 消息格式和配置路径查看；菜单修改前自动备份配置，非交互终端直接输出
+  用户目录与配置文件路径。
 - `debug-setup.mjs`：在严格配置中原子切换 `logging.level` 的 `debug` / `info`，控制全局脱敏
   调试日志和渠道技术字段，不改写显示设置或凭据。
 - `api-provider-setup.mjs` / `api-provider-setup.d.mts`：增改或删除多个 Responses 兼容第三方 API
@@ -167,13 +179,14 @@
   `initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，不输出完整 User-Agent、飞书
   上游响应或敏感配置内容。
 - `install-launchd.mjs`：渲染并安装 launchd plist；代理由 CLI 服务入口在每次启动时解析。
-- `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载三个 launchd 服务；启停、
-  重启、状态和日志支持 `gateway`、`app-server`、`webui`、`all` 目标，WebUI 独立不并入 `all`，
+- `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载四个 launchd 服务；启停、
+  重启、状态和日志支持 `gateway`、`app-server`、`webui`、`center`、`all` 目标，
+  WebUI 与指标中心独立不并入 `all`，
   日常重启默认只更新 Gateway；模板为 App Server 与 Gateway 注入各自服务角色，公开 CLI 据此
   拒绝 App Server 内的自重启；
   检测到不支持的旧标签时明确拒绝启动。
 - `install-systemd.mjs`：渲染并安装 Linux systemd 用户服务 unit；代理由 CLI 服务入口在每次启动时解析。
-- `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载三个 systemd 用户服务；
-  与 launchd 使用相同的目标、服务角色和默认值，WebUI 独立不并入 `all`，用户数据始终保留。
+- `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载四个 systemd 用户服务；
+  与 launchd 使用相同的目标、服务角色和默认值，WebUI 与指标中心独立不并入 `all`，用户数据始终保留。
 
 脚本不得把凭据写入 npm 安装目录；用户配置、SQLite、配置事件队列、Socket 和日志必须留在用户级 `.codex-connect`。

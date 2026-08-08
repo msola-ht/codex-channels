@@ -1,5 +1,8 @@
 # Cloudflare 中心侧（Worker + D1 + Pages）
 
+> 已停用：当前多设备汇总以 VPS 中心服务（`codexc center`）为准，
+> 本目录仅保留历史实现与部署参考，不再接收上报。
+
 接收各设备 Gateway 的增量指标上报，汇总到 D1，并提供只读 API 与静态查看页。
 令牌校验只发生在 Worker：`POST /api/ingest` 必须携带
 `Authorization: Bearer <INGEST_TOKEN>`。查看 API 默认公开只读，建议用

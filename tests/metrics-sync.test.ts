@@ -1,4 +1,5 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { hostname } from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -66,10 +67,12 @@ describe("MetricsSync", () => {
     });
     const payload = JSON.parse(String((init as RequestInit).body)) as {
       deviceId: string;
+      deviceName: string;
       requestMetrics: Array<{ localId: number; errorMessage?: unknown }>;
       subagentThreads: unknown[];
     };
     expect(payload.deviceId).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(payload.deviceName).toBe(hostname());
     expect(payload.requestMetrics.map((row) => row.localId)).toEqual([1, 2]);
     expect(payload.requestMetrics[0]).not.toHaveProperty("errorMessage");
     expect(payload.requestMetrics[0]).not.toHaveProperty("id");
@@ -137,6 +140,35 @@ describe("MetricsSync", () => {
     expect(persisted.lastRequestLocalId).toBe(1);
     await sync.close();
   });
+
+  it("429 返回 Retry-After 时按服务端要求延后重试", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-metrics-sync-"));
+    temporaryDirectories.push(directory);
+    const statePath = join(directory, "metrics-sync-state.json");
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      new Response(null, {
+        status: 429,
+        headers: { "retry-after": "3" },
+      }),
+    );
+    const sync = new MetricsSync(createOptions({
+      config: enabledConfig(),
+      statePath,
+      store: createStore({ rows: [storedRow(1)] }),
+      fetchImpl,
+    }));
+
+    sync.start();
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 1_800));
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    fetchImpl.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(2), {
+      timeout: 6_000,
+    });
+    await sync.close();
+  }, 10_000);
 
   it("配置了 device_id 时使用配置值，否则复用已持久化的设备标识", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-metrics-sync-"));

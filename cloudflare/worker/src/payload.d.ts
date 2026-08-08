@@ -14,6 +14,7 @@ export interface IngestSubagentThread {
 
 export interface IngestPayload {
   deviceId: string;
+  deviceName?: string;
   requestMetrics: IngestRequestMetric[];
   subagentThreads: IngestSubagentThread[];
 }

@@ -21,8 +21,8 @@ import { useCurrency } from "@/hooks/currency-context"
 import { LanguageProvider } from "@/hooks/language-provider"
 import { useLanguage } from "@/hooks/language-context"
 import { fetchSettings } from "@/lib/api"
+import { ConsolePage } from "@/pages/console-page"
 import { ErrorsPage } from "@/pages/errors-page"
-import { OverviewPage } from "@/pages/overview-page"
 import { RequestsPage } from "@/pages/requests-page"
 import { ThreadDetailPage } from "@/pages/thread-detail-page"
 import { ThreadsPage } from "@/pages/threads-page"
@@ -32,7 +32,7 @@ function pageTitle(pathname: string): string {
   if (pathname === "/threads") return "Threads"
   if (pathname === "/requests") return "请求"
   if (pathname === "/errors") return "错误"
-  return "概览"
+  return "控制台"
 }
 
 function BreadcrumbTrail({ pathname }: { pathname: string }) {
@@ -106,7 +106,7 @@ function Layout() {
         </header>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto p-3">
           <Routes>
-            <Route path="/" element={<OverviewPage />} />
+            <Route path="/" element={<ConsolePage />} />
             <Route path="/threads" element={<ThreadsPage />} />
             <Route path="/threads/:id" element={<ThreadDetailPage />} />
             <Route path="/requests" element={<RequestsPage />} />

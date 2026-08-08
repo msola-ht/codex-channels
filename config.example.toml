@@ -76,13 +76,30 @@ level = "info"
 
 [metrics.sync]
 # 多设备指标汇总：启用后本机把脱敏用量/费用增量上报到中心端点。
-# 启用时必须配置 endpoint（HTTPS）和 device_token。
+# 启用时必须配置 endpoint 和 device_token；endpoint 使用 HTTPS，
+# 或指向回环/私网地址的 HTTP（公网地址必须 HTTPS）。
 # enabled = false
-# endpoint = "https://你的-worker域名/api/ingest"
+# endpoint = "https://中心服务器/api/ingest"
 # device_token = "设备上报令牌"
 # device_id = "本设备标识（留空则首次启动自动生成）"
 # batch_size = 200
 # interval_seconds = 60
+
+[metrics.center]
+# 中心接收服务（只在汇总的 VPS 上启用）：接收设备上报并写入中心 SQLite。
+# 绑定非回环地址（0.0.0.0）时必须设置 token。
+# enabled = false
+# host = "127.0.0.1"
+# port = 8790
+# token = "中心访问令牌"
+# database_path = "data/central-metrics.sqlite3"
+
+[metrics.view]
+# WebUI 控制台的设备范围：本机不运行中心服务时，也用它连接中心查看全部设备累计。
+# 启用时必须配置 endpoint 和 token；endpoint 使用 HTTPS，或指向回环/私网地址的 HTTP。
+# enabled = false
+# endpoint = "http://127.0.0.1:8790"
+# token = "中心访问令牌"
 
 [[workspaces]]
 id = "main"

@@ -30,7 +30,7 @@
 - [`src/surfaces/README.md`](src/surfaces/README.md)：通讯渠道公共边界。
 - [`bin/README.md`](bin/README.md)：npm CLI 入口。
 - [`runtime/README.md`](runtime/README.md)：CLI 与 Gateway 共享运行时。
-- [`cloudflare/README.md`](cloudflare/README.md)：多设备指标中心侧 Worker、D1 与 Pages 查看页。
+- [`cloudflare/README.md`](cloudflare/README.md)：曾用的 Cloudflare Worker + D1 + Pages 中心方案（已停用，保留参考）。
 - [`scripts/README.md`](scripts/README.md)：配置、构建、验证和服务脚本。
 - [`tests/README.md`](tests/README.md)：测试范围与集成验证。
 - [`launchd/README.md`](launchd/README.md)：macOS 服务模板与控制。

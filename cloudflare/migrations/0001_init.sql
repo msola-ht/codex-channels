@@ -44,5 +44,6 @@ CREATE TABLE IF NOT EXISTS devices (
   device_id TEXT PRIMARY KEY,
   first_seen_at_ms INTEGER NOT NULL,
   last_seen_at_ms INTEGER NOT NULL,
-  last_ingested_at_ms INTEGER
+  last_ingested_at_ms INTEGER,
+  display_name TEXT
 );

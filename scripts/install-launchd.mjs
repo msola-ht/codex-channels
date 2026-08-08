@@ -58,6 +58,7 @@ for (const name of [
   "com.hegenai.codex-app-server",
   "com.hegenai.codex-gateway",
   "com.hegenai.codex-webui",
+  "com.hegenai.codex-center",
 ]) {
   const template = readFileSync(join(projectDir, "launchd", `${name}.plist.template`), "utf8");
   const rendered = Object.entries(values).reduce(

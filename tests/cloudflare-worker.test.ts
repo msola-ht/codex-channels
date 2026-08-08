@@ -6,6 +6,7 @@ describe("Cloudflare ingest payload validation", () => {
   it("accepts a valid payload", () => {
     const parsed = parseIngestPayload({
       deviceId: "device-a",
+      deviceName: "main-server",
       requestMetrics: [requestRow(1)],
       subagentThreads: [subagentRow("sub-1")],
     });
@@ -13,7 +14,37 @@ describe("Cloudflare ingest payload validation", () => {
     expect(parsed.ok).toBe(true);
     expect(parsed).toMatchObject({
       deviceId: "device-a",
+      deviceName: "main-server",
     });
+  });
+
+  it("accepts a missing or blank device name and rejects oversized names", () => {
+    const withoutName = parseIngestPayload({
+      deviceId: "device-a",
+      requestMetrics: [],
+      subagentThreads: [],
+    });
+    expect(withoutName.ok).toBe(true);
+
+    const blank = parseIngestPayload({
+      deviceId: "device-a",
+      deviceName: "   ",
+      requestMetrics: [],
+      subagentThreads: [],
+    });
+    expect(blank.ok).toBe(true);
+    if (!blank.ok) throw new Error("空白设备名应通过校验");
+    expect(blank.deviceName).toBeUndefined();
+
+    const oversized = parseIngestPayload({
+      deviceId: "device-a",
+      deviceName: "x".repeat(129),
+      requestMetrics: [],
+      subagentThreads: [],
+    });
+    expect(oversized.ok).toBe(false);
+    if (oversized.ok) throw new Error("超长设备名不应通过校验");
+    expect(oversized.error).toContain("deviceName");
   });
 
   it("rejects invalid device ids", () => {

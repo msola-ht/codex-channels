@@ -13,6 +13,7 @@ import { enrichCosts, loadDisplayContext } from "./metrics-export-format.mjs";
 import { userDataDir } from "./runtime-config.mjs";
 import {
   readGatewayConfig,
+  validateMetricsViewConfigDocument,
   validateWebuiConfigDocument,
 } from "../runtime/gateway-config.mjs";
 import { SqliteModelRequestMetricsStore } from "../dist/observability/index.js";
@@ -183,7 +184,67 @@ async function routeApi(environment, url, response) {
     await handleDeepseekBalance(environment, response);
     return;
   }
+  if (apiPath === "/global/overview") {
+    await proxyGlobalCenter(environment, url, response, "/api/overview");
+    return;
+  }
+  if (apiPath === "/global/requests") {
+    await proxyGlobalCenter(environment, url, response, "/api/requests");
+    return;
+  }
+  if (apiPath === "/global/devices") {
+    await proxyGlobalCenter(environment, url, response, "/api/devices");
+    return;
+  }
   throw new ApiError(404, "not_found", `未知 API：${apiPath}`);
+}
+
+async function proxyGlobalCenter(environment, url, response, upstreamPath) {
+  const settings = loadMetricsViewSettings(environment);
+  if (!settings.enabled) {
+    throw new ApiError(
+      503,
+      "metrics_view_unavailable",
+      "全局视图未启用：请通过 codexc config 配置 [metrics.view] 的中心地址与令牌",
+    );
+  }
+  const base = (settings.endpoint ?? "").replace(/\/+$/u, "");
+  const target = `${base}${upstreamPath}${url.search}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const upstream = await fetch(target, {
+      headers: settings.token === undefined
+        ? {}
+        : { authorization: `Bearer ${settings.token}` },
+      signal: controller.signal,
+    });
+    const body = await upstream.text();
+    response.writeHead(upstream.status, {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+    });
+    response.end(body);
+  } catch {
+    throw new ApiError(
+      502,
+      "metrics_view_unreachable",
+      `中心服务不可达：${settings.endpoint ?? "未配置"}`,
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function loadMetricsViewSettings(environment) {
+  const explicitConfigFile = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
+  const configPath = explicitConfigFile
+    ? resolve(explicitConfigFile)
+    : join(userDataDir(environment), "config.toml");
+  if (!existsSync(configPath)) {
+    return { enabled: false };
+  }
+  return validateMetricsViewConfigDocument(readGatewayConfig(configPath));
 }
 
 async function handleDeepseekBalance(environment, response) {

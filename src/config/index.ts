@@ -96,6 +96,18 @@ export interface GatewayConfig {
     batchSize: number;
     intervalSeconds: number;
   };
+  metricsCenter?: {
+    enabled: boolean;
+    host: "127.0.0.1" | "::1" | "0.0.0.0";
+    port: number;
+    token?: string;
+    databasePath: string;
+  };
+  metricsView?: {
+    enabled: boolean;
+    endpoint?: string;
+    token?: string;
+  };
 }
 
 export interface ConfiguredWorkspace {
@@ -296,6 +308,32 @@ function loadValidatedConfigDocument(
       batchSize: raw.metrics.sync.batch_size ?? 200,
       intervalSeconds: raw.metrics.sync.interval_seconds ?? 60,
     },
+    ...(raw.metrics.center
+      ? {
+          metricsCenter: {
+            enabled: raw.metrics.center.enabled,
+            host: raw.metrics.center.host,
+            port: raw.metrics.center.port,
+            ...(raw.metrics.center.token
+              ? { token: raw.metrics.center.token }
+              : {}),
+            databasePath: raw.metrics.center.database_path,
+          },
+        }
+      : {}),
+    ...(raw.metrics.view
+      ? {
+          metricsView: {
+            enabled: raw.metrics.view.enabled,
+            ...(raw.metrics.view.endpoint
+              ? { endpoint: raw.metrics.view.endpoint }
+              : {}),
+            ...(raw.metrics.view.token
+              ? { token: raw.metrics.view.token }
+              : {}),
+          },
+        }
+      : {}),
   };
 }
 

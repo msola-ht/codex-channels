@@ -99,11 +99,13 @@ price_currency = "cny"
 
 ### 多设备指标同步
 
-每台设备可把本地脱敏指标增量上报到中心汇总。配置 `[metrics.sync]` 的 `endpoint`、
-`device_token` 与 `enabled = true` 后，Gateway 定时按水位上报请求记录和子代理标注，
-失败自动退避重试；中心侧 Worker 校验令牌并写入汇总库。详细配置与载荷见
-[`docs/metrics-sync.md`](docs/metrics-sync.md)，中心侧部署见
-[`cloudflare/README.md`](cloudflare/README.md)。
+每台设备可把本地脱敏指标增量上报到中心汇总。运行 `codexc config` 选择
+「多设备指标 → 本机接入中心」即可配置上报与 WebUI 全局视图（写入 `[metrics.sync]` 和
+`[metrics.view]`）；Gateway 定时按水位上报请求记录和子代理标注，失败自动退避重试。
+VPS 上用 `codexc center config` 配置 `[metrics.center]`、`codexc center info` 查看
+中心地址，再运行 `codexc center` 校验令牌并写入中心 SQLite；每台设备的 WebUI 控制台
+通过 `[metrics.view]` 按设备范围查看累计用量。详细配置与载荷见
+[`docs/metrics-sync.md`](docs/metrics-sync.md)。
 
 ### 调试模式
 
@@ -214,7 +216,8 @@ codexc webui --port 8788              # 指定端口
 codexc webui --host 0.0.0.0 --token 令牌  # 绑定非回环地址（必须提供访问令牌）
 ```
 
-WebUI 只读指标数据库，提供概览、会话、请求明细与错误页面；默认只监听回环地址，
+WebUI 只读指标数据库，提供控制台（本机与多设备用量合并查看）、Threads、请求明细与
+错误页面；默认只监听回环地址，
 绑定非回环地址（`0.0.0.0`）时必须提供 `--token`，否则拒绝启动。监听地址、端口与令牌
 也可通过 `codexc config` 的「WebUI 设置」或 `config.toml` 的 `[webui]` 段配置，
 命令行参数优先。SSH 隧道、反向代理与 Cloudflare Tunnel 走回环地址可保持无令牌。
@@ -229,6 +232,7 @@ codexc service reload                 # 重新读取配置
 codexc service restart                # 只重启 Gateway
 codexc service restart all            # 重启 Gateway 和 App Server
 codexc service start webui            # 启动 WebUI 后台服务
+codexc service start center           # 启动指标中心后台服务
 codexc service logs                   # 查看 Gateway 日志
 codexc service logs all -n 200        # 查看全部服务最近 200 行日志
 codexc service logs -f                # 持续跟踪 Gateway 日志
@@ -236,10 +240,11 @@ codexc service logs webui             # 查看 WebUI 日志
 ```
 
 `start`、`stop` 和 `status` 默认操作全部服务；`restart` 和 `logs` 默认只操作 Gateway。运行
-`codexc service -h` 查看完整用法。WebUI 是独立后台服务，不并入 `all`：`codexc service install`
-只生成 WebUI 服务单元并启动 App Server 与 Gateway，需要时用 `codexc service start webui`
-单独启动。WebUI 服务读取 `[webui]` 配置，要求指标数据库为当前 Schema（升级后先执行
-`codexc metrics upgrade`）。
+`codexc service -h` 查看完整用法。WebUI 与指标中心是独立后台服务，不并入 `all`：
+`codexc service install` 只生成这两类服务单元并启动 App Server 与 Gateway，需要时用
+`codexc service start webui`、`codexc service start center` 单独启动。
+WebUI 服务读取 `[webui]` 配置，要求指标数据库为当前 Schema（升级后先执行
+`codexc metrics upgrade`）；指标中心读取 `[metrics.center]` 配置。
 
 服务重启建议从本机终端执行。聊天 Turn 内重启 Gateway 可能使过程或完成消息落在重连窗口；渠道内
 执行 `codexc service restart app-server` 或 `codexc service restart all` 会被拒绝。需要重启 App

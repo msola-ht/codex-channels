@@ -227,6 +227,7 @@ export function ThreadTable({ threads }: { threads: ThreadListItem[] }) {
         mode: "client",
         defaultPageSize: 50,
         pageSizeOptions: PAGE_SIZE_OPTIONS,
+        defaultSorting: [{ id: "last", desc: true }],
       }}
     />
   )

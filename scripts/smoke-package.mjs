@@ -62,7 +62,7 @@ try {
   if (
     !workspaceHelp.includes("用法：codexc work")
     || !rulesHelp.includes("用法：codexc rules init")
-    || !serviceHelp.includes("gateway|app-server|webui|all")
+    || !serviceHelp.includes("gateway|app-server|webui|center|all")
   ) {
     throw new Error("CLI 分级帮助不完整");
   }
@@ -79,7 +79,9 @@ try {
     "systemd/codex-connect-app-server.service.template",
     "systemd/codex-connect-gateway.service.template",
     "systemd/codex-connect-webui.service.template",
+    "systemd/codex-connect-center.service.template",
     "launchd/com.hegenai.codex-webui.plist.template",
+    "launchd/com.hegenai.codex-center.plist.template",
     "scripts/install-systemd.mjs",
     "scripts/metrics-database.mjs",
     "scripts/systemd-control.sh",

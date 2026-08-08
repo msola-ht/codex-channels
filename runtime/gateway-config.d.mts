@@ -73,6 +73,18 @@ export interface GatewayConfigDocument {
       batch_size: number;
       interval_seconds: number;
     };
+    center?: {
+      enabled: boolean;
+      host: "127.0.0.1" | "::1" | "0.0.0.0";
+      port: number;
+      token?: string;
+      database_path: string;
+    };
+    view?: {
+      enabled: boolean;
+      endpoint?: string;
+      token?: string;
+    };
   };
   workspaces: Array<{
     id: string;
@@ -94,6 +106,23 @@ export function validateWebuiConfigDocument(
   port: number;
   token?: string;
 };
+export function validateMetricsCenterConfigDocument(
+  document: unknown,
+): {
+  enabled: boolean;
+  host: "127.0.0.1" | "::1" | "0.0.0.0";
+  port: number;
+  token?: string;
+  database_path: string;
+};
+export function validateMetricsViewConfigDocument(
+  document: unknown,
+): {
+  enabled: boolean;
+  endpoint?: string;
+  token?: string;
+};
+export function isPrivateHttpEndpoint(url: URL): boolean;
 export function readGatewayConfig(configPath: string): TomlTable;
 export function materializeGatewayConfigDefaults(
   configPath: string,

@@ -60,7 +60,7 @@ const helpText = {
 初始化与诊断：
   init                         初始化用户目录和配置
   setup                        选择并配置 Gateway 模块
-  config                       打开配置与设置菜单（显示、系统、工作区、消息格式）
+  config                       打开配置与设置菜单（显示、系统、工作区、多设备指标、消息格式）
   doctor                       检查安装、配置、Codex 与服务
 
 项目与会话：
@@ -71,6 +71,7 @@ const helpText = {
   state upgrade               显式升级 Gateway 状态数据库
   metrics <run|turns|threads|report|export|status|reset>   模型请求指标：本次运行、会话明细、会话归纳、汇报、导出、状态、重建
   webui                        启动本地只读指标 WebUI（默认回环地址）
+  center [config|info]          多设备指标中心：启动服务、交互配置或查看地址
 
 后台服务：
   start                        前台启动 App Server 与 Gateway
@@ -125,27 +126,27 @@ const helpText = {
 
   install                      安装并启动整套后台服务
   uninstall                    卸载整套后台服务并保留用户数据
-  start [目标]                 启动 gateway、app-server、webui 或 all
-  stop [目标]                  停止 gateway、app-server、webui 或 all
+  start [目标]                 启动 gateway、app-server、webui、center 或 all
+  stop [目标]                  停止 gateway、app-server、webui、center 或 all
   reload                       通知 Gateway 重新读取配置
-  restart [目标]               重启 gateway、app-server、webui 或 all
-  status [目标]                查看 gateway、app-server、webui 或 all
+  restart [目标]               重启 gateway、app-server、webui、center 或 all
+  status [目标]                查看 gateway、app-server、webui、center 或 all
   logs [目标] [-f] [-n 行数]   查看后台日志
 
 目标默认值：start/stop/status 为 all，restart/logs 为 gateway。`,
   "service.install": "用法：codexc service install",
   "service.uninstall": "用法：codexc service uninstall",
-  "service.start": "用法：codexc service start [gateway|app-server|webui|all]",
-  "service.stop": "用法：codexc service stop [gateway|app-server|webui|all]",
+  "service.start": "用法：codexc service start [gateway|app-server|webui|center|all]",
+  "service.stop": "用法：codexc service stop [gateway|app-server|webui|center|all]",
   "service.reload": "用法：codexc service reload",
-  "service.restart": "用法：codexc service restart [gateway|app-server|webui|all]",
-  "service.status": "用法：codexc service status [gateway|app-server|webui|all]",
-  "service.logs": `用法：codexc service logs [gateway|app-server|webui|all] [-f|--follow] [-n|--lines 行数]`,
+  "service.restart": "用法：codexc service restart [gateway|app-server|webui|center|all]",
+  "service.status": "用法：codexc service status [gateway|app-server|webui|center|all]",
+  "service.logs": `用法：codexc service logs [gateway|app-server|webui|center|all] [-f|--follow] [-n|--lines 行数]`,
   config: `用法：codexc config
 
-打开交互式配置与设置菜单：显示设置（操作详情、计划更新、按提供商的价格显示方式）、系统设置
+打开交互式配置与设置菜单：显示设置（操作详情、计划更新、全局价格显示方式）、系统设置
 （调试模式、审批超时、Sandbox、默认工作区与模型）、工作区设置（沙箱、审批策略、权限 Profile）、
-Telegram 消息格式与配置路径查看。
+多设备指标（本机接入中心、接入状态、停用接入）、Telegram 消息格式与配置路径查看。
 非交互终端（脚本或管道）直接显示用户目录与配置文件路径。`,
   doctor: `用法：codexc doctor
 
@@ -202,6 +203,19 @@ Telegram 消息格式与配置路径查看。
 --token 设置访问令牌，绑定非回环地址（0.0.0.0）时必须提供。
 也可以使用 codexc config 的 WebUI 设置，或手工编辑 [webui] 段。
 页面与 JSON API 均来自指标数据库，不提供任何写接口。`,
+  center: `用法：codexc center [--host 地址] [--port 端口] [--token 令牌] [--database 路径]
+      codexc center info      查看中心地址、令牌与运行状态
+      codexc center config    交互配置 [metrics.center]
+
+启动多设备指标中心服务：接收各设备 Gateway 的增量上报，写入中心 SQLite，
+并提供全局查询 API。默认 http://127.0.0.1:8790/。
+参数优先级：命令行 > config.toml 的 [metrics.center] 段 > 默认值。
+--host 指定监听地址（127.0.0.1、::1 或 0.0.0.0），默认回环；
+--port 指定监听端口，范围 1-65535，默认 8790；
+--token 设置访问令牌，绑定非回环地址（0.0.0.0）时必须提供；
+--database 指定中心 SQLite 路径，默认 <配置目录>/data/central-metrics.sqlite3。
+上报接口：POST /api/ingest（Bearer 令牌）；查询接口：/api/overview、/api/requests、
+/api/subagents、/api/devices、/api/health。`,
   "metrics.status": `用法：codexc metrics status
 
 只读显示指标数据库路径、Schema 兼容性和记录数量。`,
@@ -334,6 +348,12 @@ try {
         break;
       }
       runScript("scripts/webui-server.mjs", args);
+      break;
+    case "center":
+      if (showRequestedHelp(args, "center")) {
+        break;
+      }
+      runScript("scripts/metrics-center-server.mjs", args);
       break;
     default:
       throw new Error(`未知命令：${command}\n运行 codexc --help 查看用法`);
@@ -1639,8 +1659,8 @@ function parseServiceArguments(action, args) {
 }
 
 function parseServiceTarget(value) {
-  if (!["gateway", "app-server", "webui", "all"].includes(value)) {
-    throw new Error(`服务目标必须是 gateway、app-server、webui 或 all：${value}`);
+  if (!["gateway", "app-server", "webui", "center", "all"].includes(value)) {
+    throw new Error(`服务目标必须是 gateway、app-server、webui、center 或 all：${value}`);
   }
   return value;
 }

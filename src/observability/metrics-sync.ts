@@ -6,6 +6,7 @@ import {
   readFileSync,
 } from "node:fs";
 import { rename, unlink, writeFile } from "node:fs/promises";
+import { hostname } from "node:os";
 import { dirname } from "node:path";
 
 import type { Logger } from "pino";
@@ -44,8 +45,21 @@ export interface SyncedRequestMetric
 
 export interface MetricsSyncPayload {
   deviceId: string;
+  deviceName: string;
   requestMetrics: SyncedRequestMetric[];
   subagentThreads: StoredSubagentThreadRecord[];
+}
+
+export class MetricsSyncHttpError extends Error {
+  readonly status: number;
+  readonly retryAfterMs: number | null;
+
+  constructor(message: string, status: number, retryAfterMs: number | null) {
+    super(message);
+    this.name = "MetricsSyncHttpError";
+    this.status = status;
+    this.retryAfterMs = retryAfterMs;
+  }
 }
 
 interface PersistedMetricsSyncState {
@@ -105,10 +119,24 @@ export class MetricsSync {
       this.consecutiveFailures = 0;
     } catch (error) {
       this.consecutiveFailures += 1;
+      const retryAfterMs = error instanceof MetricsSyncHttpError
+        ? error.retryAfterMs ?? 0
+        : 0;
       this.options.logger.warn(
-        { err: error, failures: this.consecutiveFailures },
+        {
+          err: error,
+          failures: this.consecutiveFailures,
+          retryAfterMs: retryAfterMs > 0 ? retryAfterMs : undefined,
+        },
         "指标同步失败，稍后重试",
       );
+      const baseDelayMs = this.options.config.intervalSeconds * 1_000;
+      const backoffMs = Math.min(
+        baseDelayMs * 2 ** Math.max(this.consecutiveFailures - 1, 0),
+        maximumBackoffMs,
+      );
+      this.schedule(Math.max(baseDelayMs, backoffMs, retryAfterMs));
+      return;
     }
     if (this.closed) return;
     const baseDelayMs = this.options.config.intervalSeconds * 1_000;
@@ -139,6 +167,7 @@ export class MetricsSync {
     }
     const payload: MetricsSyncPayload = {
       deviceId: this.state.deviceId,
+      deviceName: hostname(),
       requestMetrics: requestRows.map(toSyncedRequestMetric),
       subagentThreads: subagentRows,
     };
@@ -183,7 +212,11 @@ export class MetricsSync {
         signal: controller.signal,
       });
       if (!response.ok) {
-        throw new Error(`指标同步请求失败：HTTP ${response.status}`);
+        throw new MetricsSyncHttpError(
+          `指标同步请求失败：HTTP ${response.status}`,
+          response.status,
+          parseRetryAfterMs(response.headers.get("retry-after")),
+        );
       }
     } finally {
       clearTimeout(timeout);
@@ -192,6 +225,20 @@ export class MetricsSync {
       }
     }
   }
+}
+
+function parseRetryAfterMs(value: string | null, nowMs = Date.now()): number | null {
+  if (value === null || value.trim().length === 0) return null;
+  const trimmed = value.trim();
+  const seconds = Number(trimmed);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.floor(seconds * 1_000);
+  }
+  const parsed = Date.parse(trimmed);
+  if (!Number.isNaN(parsed)) {
+    return Math.max(0, parsed - nowMs);
+  }
+  return null;
 }
 
 function toSyncedRequestMetric(

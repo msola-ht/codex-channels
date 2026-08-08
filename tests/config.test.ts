@@ -596,6 +596,9 @@ describe("Gateway config.toml", () => {
       batchSize: 200,
       intervalSeconds: 60,
     });
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.metricsCenter).toBeUndefined();
   });
 
   it("loads an enabled metrics sync section", () => {
@@ -654,6 +657,67 @@ describe("Gateway config.toml", () => {
     expect(() => loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
     })).toThrow(/HTTPS/u);
+  });
+
+  it("allows loopback and private http metrics sync endpoints", () => {
+    for (const endpoint of [
+      "http://127.0.0.1:8790/api/ingest",
+      "http://192.168.1.10:8790/api/ingest",
+      "http://[::1]:8790/api/ingest",
+    ]) {
+      const fixture = createFixture({
+        metrics: {
+          sync: {
+            enabled: true,
+            endpoint,
+            device_token: "token",
+          },
+        },
+      });
+      expect(loadRuntimeConfig({
+        CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+      }).config.metricsSync).toMatchObject({ endpoint });
+    }
+  });
+
+  it("loads an enabled metrics center section", () => {
+    const fixture = createFixture({
+      metrics: {
+        center: {
+          enabled: true,
+          host: "127.0.0.1",
+          port: 8790,
+          token: "center-token",
+          database_path: "data/central-metrics.sqlite3",
+        },
+      },
+    });
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.metricsCenter).toEqual({
+      enabled: true,
+      host: "127.0.0.1",
+      port: 8790,
+      token: "center-token",
+      databasePath: "data/central-metrics.sqlite3",
+    });
+  });
+
+  it("rejects non-loopback metrics center without a token", () => {
+    const fixture = createFixture({
+      metrics: {
+        center: {
+          enabled: true,
+          host: "0.0.0.0",
+          port: 8790,
+        },
+      },
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow(/metrics\.center/u);
   });
 
   it("loads an explicitly enabled Feishu account", () => {

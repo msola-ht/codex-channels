@@ -9,6 +9,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createWebuiServer, resolveWebuiSettings } from "../scripts/webui-server.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { initializeUserData } from "../scripts/runtime-config.mjs";
+// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
+import { createMetricsCenterServer } from "../scripts/metrics-center-server.mjs";
+import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import {
   requestMetricsDatabasePath,
   SqliteModelRequestMetricsStore,
@@ -26,6 +29,74 @@ afterEach(async () => {
 });
 
 describe("webui server", () => {
+  it("returns 503 for global APIs when the center service is disabled", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(fixture.environment);
+
+    const response = await fetch(`${origin}/api/v1/global/overview`);
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: { code: "metrics_view_unavailable" },
+    });
+  });
+
+  it("proxies global metrics from the center service", async () => {
+    const fixture = createFixture();
+    const center = createMetricsCenterServer({
+      host: "127.0.0.1",
+      token: "center-token",
+      databasePath: join(fixture.home, "data", "central-metrics.sqlite3"),
+    });
+    await new Promise<void>((resolve) => {
+      center.server.listen(0, "127.0.0.1", resolve);
+    });
+    servers.push(center);
+    const { port } = center.server.address() as AddressInfo;
+
+    const configPath = join(fixture.home, "config.toml");
+    const document = readGatewayConfig(configPath);
+    document.metrics = {
+      sync: { enabled: false, batch_size: 200, interval_seconds: 60 },
+      view: {
+        enabled: true,
+        endpoint: `http://127.0.0.1:${port}`,
+        token: "center-token",
+      },
+    };
+    writeGatewayConfig(configPath, document);
+
+    const ingest = await fetch(`http://127.0.0.1:${port}/api/ingest`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer center-token",
+      },
+      body: JSON.stringify({
+        deviceId: "device-a",
+        requestMetrics: [{
+          localId: 1,
+          provider: "deepseek",
+          model: "deepseek-v4-flash",
+          status: "completed",
+          inputTokens: 1_000,
+          outputTokens: 100,
+          totalTokens: 1_100,
+          recordedAtMs: 1_785_640_800_000,
+        }],
+        subagentThreads: [],
+      }),
+    });
+    expect(ingest.status).toBe(200);
+
+    const { origin } = await startServer(fixture.environment);
+    const overview = await fetch(`${origin}/api/v1/global/overview`);
+
+    expect(overview.status).toBe(200);
+    const body = await overview.json() as { totals: { request_count: number } };
+    expect(body.totals.request_count).toBe(1);
+  });
+
   it("serves the static page and rejects unknown paths", async () => {
     const fixture = createFixture();
     const staticDir = createStaticDir("<h1>Codex WebUI</h1>");

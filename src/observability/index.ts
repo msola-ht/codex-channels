@@ -44,6 +44,7 @@ export type {
 export { BufferedModelRequestMetricsWriter } from "./request-metrics-writer.js";
 export {
   MetricsSync,
+  MetricsSyncHttpError,
   type MetricsSyncConfig,
   type MetricsSyncOptions,
   type MetricsSyncPayload,

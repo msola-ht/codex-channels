@@ -1,6 +1,6 @@
 import {
   Activity,
-  Gauge,
+  LayoutDashboard,
   MessagesSquare,
   TriangleAlert,
   type LucideIcon,
@@ -13,7 +13,7 @@ export interface NavItem {
 }
 
 export const navItems: NavItem[] = [
-  { to: "/", label: "概览", icon: Gauge },
+  { to: "/", label: "控制台", icon: LayoutDashboard },
   { to: "/threads", label: "Threads", icon: MessagesSquare },
   { to: "/requests", label: "请求", icon: Activity },
   { to: "/errors", label: "错误", icon: TriangleAlert },
