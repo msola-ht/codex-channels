@@ -92,11 +92,9 @@ export function formatConversationMetrics(
         outputPricePerMillionNanos: turn.outputPricePerMillionNanos,
         hasMixedPrices: turn.hasMixedPrices,
       }, currency, exchangeRate),
-      ...(summary.modelProvider === "deepseek"
-        ? [formatDeepseekAveragePriceValue(turn, currency, exchangeRate)]
-          .filter((value): value is string => value !== null)
-          .map((value) => `均价：${value}`)
-        : []),
+      ...[formatAveragePriceValue(turn, currency, exchangeRate)]
+        .filter((value): value is string => value !== null)
+        .map((value) => `均价：${value}`),
       ...(turn.compact
         ? [formatCompactMetrics(turn.compact, currency, exchangeRate)]
         : []),
@@ -132,11 +130,9 @@ export function formatConversationMetrics(
             aggregate.outputSpeedSampleCount,
           )}`]),
       ...formatReferenceCost(toReferenceCostDisplay(aggregate), currency, exchangeRate),
-      ...(summary.modelProvider === "deepseek"
-        ? [formatDeepseekAveragePriceValue(aggregate, currency, exchangeRate)]
-          .filter((value): value is string => value !== null)
-          .map((value) => `均价：${value}`)
-        : []),
+      ...[formatAveragePriceValue(aggregate, currency, exchangeRate)]
+        .filter((value): value is string => value !== null)
+        .map((value) => `均价：${value}`),
       ...(aggregate.compact
         ? [formatCompactMetrics(aggregate.compact, currency, exchangeRate)]
         : []),
@@ -470,7 +466,7 @@ function formatCompactMetrics(
   return `上下文压缩：${formatCompactMetricsValue(compact, currency, exchangeRate)}`;
 }
 
-export function formatDeepseekAveragePriceValue(
+export function formatAveragePriceValue(
   value: {
     pricingCurrency: string | null;
     totalCostNanos: number | null;

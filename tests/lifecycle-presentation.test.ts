@@ -541,6 +541,64 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered.match(/均价：约 ¥3,600,000\.00\/100M/g)?.length).toBe(2);
   });
 
+  it("shows the OpenAI average price on the completion card", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "feishu",
+          accountId: "default",
+          conversationId: "100",
+        },
+        threadId: "thread-openai",
+        turnId: "turn-openai",
+        status: "completed",
+        modelProvider: "openai",
+        timing: {
+          modelRequestCount: 1,
+          completedModelRequestCount: 1,
+          requestInputTokens: 150,
+          nonReasoningOutputTokens: 40,
+          reasoningTokens: 10,
+          referenceCost: {
+            currency: "USD",
+            totalCostNanos: 1_000_000_000,
+            inputCostNanos: 600_000_000,
+            cachedInputCostNanos: 100_000_000,
+            outputCostNanos: 300_000_000,
+            pricedRequestCount: 1,
+            requestCount: 1,
+            uncachedInputPricePerMillionNanos: 140_000_000,
+            cachedInputPricePerMillionNanos: 2_800_000,
+            outputPricePerMillionNanos: 280_000_000,
+            hasMixedPrices: false,
+          },
+        },
+        sessionReferenceCost: {
+          currency: "USD",
+          totalCostNanos: 2_000_000_000,
+          inputTokens: 300,
+          outputTokens: 100,
+          inputCostNanos: 1_200_000_000,
+          cachedInputCostNanos: 200_000_000,
+          outputCostNanos: 600_000_000,
+          pricedRequestCount: 2,
+          requestCount: 2,
+          uncachedInputPricePerMillionNanos: 140_000_000,
+          cachedInputPricePerMillionNanos: 2_800_000,
+          outputPricePerMillionNanos: 280_000_000,
+          hasMixedPrices: false,
+        },
+      }, () => "cny", {
+        usdToCny: 7.2,
+        effectiveAtMs: 1_700_000_000_000,
+        source: "ecb",
+      }),
+    );
+
+    expect(rendered.match(/均价：约 ¥3,600,000\.00\/100M/g)?.length).toBe(2);
+  });
+
   it("omits the DeepSeek average price when pricing samples are incomplete", () => {
     const rendered = renderPlainLifecyclePresentation(
       createTurnCompletedPresentation({

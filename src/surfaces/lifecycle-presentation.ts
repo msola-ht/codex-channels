@@ -28,8 +28,8 @@ import {
   toDisplayReferenceCost,
 } from "./reference-cost-format.js";
 import {
+  formatAveragePriceValue,
   formatCompactMetricsValue,
-  formatDeepseekAveragePriceValue,
 } from "./metrics-format.js";
 import {
   formatCacheHitRate,
@@ -446,11 +446,10 @@ export function createTurnCompletedPresentation(
     });
   }
   if (
-    event.modelProvider === "deepseek"
-    && event.timing?.referenceCost
+    event.timing?.referenceCost
     && event.timing.requestInputTokens !== undefined
   ) {
-    const averagePrice = formatDeepseekAveragePriceValue({
+    const averagePrice = formatAveragePriceValue({
       pricingCurrency: event.timing.referenceCost.currency,
       totalCostNanos: event.timing.referenceCost.totalCostNanos,
       pricedRequestCount: event.timing.referenceCost.pricedRequestCount,
@@ -554,12 +553,11 @@ export function createTurnCompletedPresentation(
     });
   }
   if (
-    event.modelProvider === "deepseek"
-    && event.sessionReferenceCost
+    event.sessionReferenceCost
     && event.sessionReferenceCost.inputTokens !== undefined
     && event.sessionReferenceCost.outputTokens !== undefined
   ) {
-    const averagePrice = formatDeepseekAveragePriceValue({
+    const averagePrice = formatAveragePriceValue({
       pricingCurrency: event.sessionReferenceCost.currency,
       totalCostNanos: event.sessionReferenceCost.totalCostNanos,
       pricedRequestCount: event.sessionReferenceCost.pricedRequestCount,

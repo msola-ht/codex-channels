@@ -548,7 +548,7 @@ describe("provider-aware conversation command formatting", () => {
     );
   });
 
-  it("omits the average price for non-DeepSeek providers", () => {
+  it("shows the average price for OpenAI providers", () => {
     const rendered = formatConversationMetrics({
       kind: "metrics",
       summary: {
@@ -586,7 +586,7 @@ describe("provider-aware conversation command formatting", () => {
       source: "open-er-api",
     });
 
-    expect(rendered).not.toContain("均价");
+    expect(rendered).toContain("均价：约 $500,000.00/100M");
   });
 
   it("renders unified provider and model aggregates with latency coverage", () => {
