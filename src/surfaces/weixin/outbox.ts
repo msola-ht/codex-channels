@@ -22,6 +22,7 @@ import type {
   SurfaceOutputPort,
 } from "../types.js";
 import {
+  createSubagentStartedPresentation,
   createTurnStartedPresentation,
   renderPlainLifecyclePresentation,
 } from "../lifecycle-presentation.js";
@@ -386,7 +387,12 @@ export class WeixinOutbox implements SurfaceOutputPort {
       case "plan.updated":
         return null;
       case "subagent.spawned":
-        return null;
+        return formatWeixinCommandText(
+          renderPlainLifecyclePresentation(
+            createSubagentStartedPresentation(event),
+          ),
+          { structuredFields: true },
+        );
       case "subagent.completed":
         return formatWeixinCommandText(
           renderWeixinSubagentCompleted(

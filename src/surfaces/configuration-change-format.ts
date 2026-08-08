@@ -101,6 +101,7 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "observability.log-level": "日志级别",
     "workspace.default": "默认 Workspace",
     "workspace.registry": "Workspace",
+    "surface.telegram.enabled": "Telegram 启用状态",
     "surface.telegram.token": "Telegram Bot Token",
     "surface.telegram.proxy": "Telegram 代理",
     "surface.telegram.message-format": "Telegram 消息格式",

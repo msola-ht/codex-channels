@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createStartupPresentation,
   createSubagentCompletedPresentation,
+  createSubagentStartedPresentation,
   createTurnCompletedPresentation,
   createTurnStartedPresentation,
   renderPlainLifecyclePresentation,
@@ -14,6 +15,26 @@ import {
 import { formatOpenAiErrorMessage } from "../src/surfaces/account-format.js";
 
 describe("shared Surface lifecycle presentation", () => {
+  it("renders a compact subagent start notice without internal IDs", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createSubagentStartedPresentation({
+        type: "subagent.spawned",
+        target: {
+          surface: "feishu",
+          accountId: "default",
+          conversationId: "conversation-1",
+        },
+        threadId: "parent-thread",
+        turnId: "parent-turn",
+        agentThreadId: "agent-thread-secret",
+        agentPath: "/root/review_task",
+      }),
+    );
+
+    expect(rendered).toBe("子代理开始 · review_task");
+    expect(rendered).not.toContain("agent-thread-secret");
+  });
+
   it("translates known OpenAI usage-limit errors to Chinese", () => {
     expect(formatOpenAiErrorMessage(
       "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage "

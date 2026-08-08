@@ -324,6 +324,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       () => event.type === "vision.started"
           || event.type === "vision.progress"
           || event.type === "vision.completed"
+          || event.type === "subagent.spawned"
           || event.type === "subagent.completed"
           || event.type === "account.updated"
           || event.type === "account.rateLimits.updated"

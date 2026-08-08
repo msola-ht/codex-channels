@@ -14,6 +14,8 @@ import { managedModelProviderRoleConfigPath } from "../runtime/model-provider-ru
 const featureTableHeader = "[features.multi_agent_v2]";
 const featureHeader = "[features]";
 const roleHeader = "[agents.ds]";
+const dsRoleDescription =
+  "DeepSeek 单次子代理；仅处理当前用户消息中的完整任务，必须使用 fork_turns=1，不能接收后续消息";
 
 export function agentsStatus(environment = process.env) {
   const configPath = agentRolesConfigPath(environment);
@@ -108,7 +110,7 @@ function replaceFeatureKey(lines, featuresIndex, enabled) {
 function upsertDsRole(lines, roleConfigPath) {
   const index = lines.findIndex((line) => line.trim() === roleHeader);
   if (index !== -1) {
-    setSectionValue(lines, roleHeader, "description", tomlString("DeepSeek 子代理"));
+    setSectionValue(lines, roleHeader, "description", tomlString(dsRoleDescription));
     setSectionValue(lines, roleHeader, "config_file", tomlString(roleConfigPath));
     setSectionValue(lines, roleHeader, "nickname_candidates", '["DeepSeek"]');
     return;
@@ -116,7 +118,7 @@ function upsertDsRole(lines, roleConfigPath) {
   lines.push(
     "",
     roleHeader,
-    `description = ${tomlString("DeepSeek 子代理")}`,
+    `description = ${tomlString(dsRoleDescription)}`,
     `config_file = ${tomlString(roleConfigPath)}`,
     'nickname_candidates = ["DeepSeek"]',
   );

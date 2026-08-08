@@ -1,4 +1,5 @@
 import type {
+  ConversationInputEvent,
   ConversationTarget,
   OutputEvent,
   SubagentStatus,
@@ -13,6 +14,7 @@ interface ActiveSubagent {
   agentPath: string;
   terminalStatus?: SubagentCompletedEvent["status"];
   metricsCheckpoint?: Promise<boolean>;
+  waitObservedAfterTerminal: boolean;
   timer: NodeJS.Timeout | undefined;
   revision: number;
 }
@@ -41,6 +43,11 @@ interface SubagentMetricsSummary {
   } | null;
 }
 
+interface PendingTerminal {
+  status: SubagentTerminalStatus;
+  expiresAtMs: number;
+}
+
 export interface SubagentCompletionTrackerOptions {
   readSummary: (agentThreadId: string) => SubagentMetricsSummary;
   waitForMetrics?: (agentThreadId: string) => Promise<boolean>;
@@ -52,9 +59,12 @@ export interface SubagentCompletionTrackerOptions {
 }
 
 const defaultSettleDelayMs = 5_000;
+const pendingTerminalTtlMs = 60_000;
+const maxPendingTerminals = 128;
 
 export class SubagentCompletionTracker {
   private readonly active = new Map<string, ActiveSubagent>();
+  private readonly pendingTerminals = new Map<string, PendingTerminal>();
   private closed = false;
 
   constructor(private readonly options: SubagentCompletionTrackerOptions) {}
@@ -63,13 +73,20 @@ export class SubagentCompletionTracker {
     if (this.closed) return;
     if (event.type === "subagent.spawned") {
       if (!this.active.has(event.agentThreadId)) {
-        this.active.set(event.agentThreadId, {
+        const entry: ActiveSubagent = {
           target: event.target,
           parentThreadId: event.threadId,
           agentPath: event.agentPath,
+          waitObservedAfterTerminal: false,
           timer: undefined,
           revision: 0,
-        });
+        };
+        this.active.set(event.agentThreadId, entry);
+        const pending = this.takePendingTerminal(event.agentThreadId);
+        if (pending) {
+          entry.terminalStatus = pending;
+          this.schedule(event.agentThreadId, entry);
+        }
       }
       return;
     }
@@ -81,6 +98,31 @@ export class SubagentCompletionTracker {
       if (!entry || entry.terminalStatus) continue;
       entry.terminalStatus = terminalStatus;
       this.schedule(state.threadId, entry);
+    }
+    if (
+      event.operation.kind === "subagent"
+      && event.operation.action === "wait"
+      && event.operation.status === "completed"
+    ) {
+      for (const [agentThreadId, entry] of this.active) {
+        if (entry.parentThreadId !== event.threadId || !entry.terminalStatus) continue;
+        entry.waitObservedAfterTerminal = true;
+        this.schedule(agentThreadId, entry);
+      }
+    }
+  }
+
+  handleInput(event: ConversationInputEvent): void {
+    if (this.closed) return;
+    if (event.type === "turn.completed") {
+      const status = turnCompletionStatus(event.status);
+      if (status) {
+        this.markTerminal(event.threadId, status, true);
+      }
+      return;
+    }
+    if (event.type === "item.subagentActivity" && event.kind === "interrupted") {
+      this.markTerminal(event.agentThreadId, "interrupted", false);
     }
   }
 
@@ -106,6 +148,49 @@ export class SubagentCompletionTracker {
       if (entry.timer) clearTimeout(entry.timer);
     }
     this.active.clear();
+    this.pendingTerminals.clear();
+  }
+
+  private markTerminal(
+    agentThreadId: string,
+    status: SubagentTerminalStatus,
+    retainIfMissing: boolean,
+  ): void {
+    const entry = this.active.get(agentThreadId);
+    if (entry) {
+      if (entry.terminalStatus) return;
+      entry.terminalStatus = status;
+      this.schedule(agentThreadId, entry);
+      return;
+    }
+    if (!retainIfMissing) return;
+    this.prunePendingTerminals();
+    this.pendingTerminals.delete(agentThreadId);
+    this.pendingTerminals.set(agentThreadId, {
+      status,
+      expiresAtMs: Date.now() + pendingTerminalTtlMs,
+    });
+    while (this.pendingTerminals.size > maxPendingTerminals) {
+      const oldest = this.pendingTerminals.keys().next().value;
+      if (!oldest) break;
+      this.pendingTerminals.delete(oldest);
+    }
+  }
+
+  private takePendingTerminal(agentThreadId: string): SubagentTerminalStatus | undefined {
+    this.prunePendingTerminals();
+    const pending = this.pendingTerminals.get(agentThreadId);
+    this.pendingTerminals.delete(agentThreadId);
+    return pending?.status;
+  }
+
+  private prunePendingTerminals(): void {
+    const now = Date.now();
+    for (const [threadId, pending] of this.pendingTerminals) {
+      if (pending.expiresAtMs <= now) {
+        this.pendingTerminals.delete(threadId);
+      }
+    }
   }
 
   private schedule(agentThreadId: string, entry: ActiveSubagent): void {
@@ -115,7 +200,9 @@ export class SubagentCompletionTracker {
     entry.timer = setTimeout(() => {
       entry.timer = undefined;
       void this.complete(agentThreadId, entry, revision);
-    }, this.options.settleDelayMs ?? defaultSettleDelayMs);
+    }, entry.metricsCheckpoint && entry.waitObservedAfterTerminal
+      ? 0
+      : this.options.settleDelayMs ?? defaultSettleDelayMs);
     entry.timer.unref?.();
   }
 
@@ -182,6 +269,13 @@ export class SubagentCompletionTracker {
     this.options.onCompleted?.(event);
   }
 
+}
+
+function turnCompletionStatus(
+  status: "completed" | "interrupted" | "failed" | "inProgress",
+): SubagentTerminalStatus | undefined {
+  if (status === "completed" || status === "interrupted") return status;
+  return status === "failed" ? "errored" : undefined;
 }
 
 function completionStatus(

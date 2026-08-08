@@ -101,8 +101,9 @@
 - `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。
 - `workspace-add.mjs`：把指定目录或命令调用目录注册为 Workspace，支持 `--prune-missing` 清理失效配置。
 - `agents.mjs`：`codexc agents` 的执行脚本，在 `~/.codex/config.toml` 中开启或关闭
-  `features.multi_agent_v2` 并注册 `agents.ds` 角色；角色文件由 App Server 服务启动时动态
-  生成并指向本机 DeepSeek 统计代理，服务退出时删除。
+  `features.multi_agent_v2` 并注册单次 `agents.ds` 角色；角色说明要求主模型以
+  `fork_turns=1` 传入当前用户消息，角色文件由 App Server 服务启动时动态生成并指向本机
+  DeepSeek 统计代理，同时写入禁止解析加密正文和等待后续消息的受控指令，服务退出时删除。
 
 ## 开发与协议
 

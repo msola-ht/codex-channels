@@ -633,6 +633,7 @@ export class GatewayApplication {
     this.inbound.subscribe("conversation-core", (notification) => {
       const coreEvent = toConversationInputEvent(notification);
       if (coreEvent) {
+        this.subagentCompletion.handleInput(coreEvent);
         this.core.handle(coreEvent);
         if (coreEvent.type === "turn.error" && !coreEvent.willRetry) {
           const modelSettings = this.router.modelSettingsForThread(coreEvent.threadId);

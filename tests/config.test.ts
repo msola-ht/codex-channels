@@ -133,6 +133,57 @@ describe("Gateway config.toml", () => {
     ]);
   });
 
+  it("allows an empty Telegram configuration when Feishu is enabled", () => {
+    const fixture = createFixture({
+      telegram: {
+        bot_token: "",
+        allowed_user_ids: [],
+        message_format: "html",
+      },
+      feishu: {
+        enabled: true,
+        app_id: "cli_0123456789abcdef",
+        app_secret: "secret",
+        allowed_open_ids: ["ou_actor"],
+      },
+    });
+
+    const runtime = loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config;
+
+    expect(runtime.telegramEnabled).toBe(false);
+    expect(runtime.feishu).toBeDefined();
+  });
+
+  it("rejects a configuration without any enabled channel", () => {
+    const fixture = createFixture({
+      telegram: {
+        bot_token: "",
+        allowed_user_ids: [],
+        message_format: "html",
+      },
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow("至少需要配置一个通讯渠道");
+  });
+
+  it("requires allowed users when a Telegram token is configured", () => {
+    const fixture = createFixture({
+      telegram: {
+        bot_token: "secret",
+        allowed_user_ids: [],
+        message_format: "html",
+      },
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow("Telegram 启用时必须配置 allowed_user_ids");
+  });
+
   it("loads per-workspace permissions and maps approval_policy to camelCase", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
     const workspace = join(root, "workspace");

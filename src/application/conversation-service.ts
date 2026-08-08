@@ -381,7 +381,7 @@ export class ConversationService implements ConversationUseCases {
     const submission = await this.submitInput(target, [
       {
         type: "text",
-        text: `请使用 agent_type="${role.name}" 的子代理执行以下任务，子代理完成后把最终结果回复给我：\n\n${normalizedTask}`,
+        text: `请使用 agent_type="${role.name}"、fork_turns="1" 的子代理执行以下任务，子代理完成后把最终结果回复给我：\n\n${normalizedTask}`,
       },
     ]);
     return { ...submission, roleName: role.name };

@@ -345,9 +345,13 @@ function toItemEvent(
       : undefined;
   }
   if (item.type === "subAgentActivity") {
+    if (phase !== "completed") {
+      return undefined;
+    }
     const agentThreadId = nonEmptyString(item.agentThreadId);
     const agentPath = nonEmptyString(item.agentPath);
-    return agentThreadId && agentPath
+    const kind = parseSubagentActivityKind(item.kind);
+    return agentThreadId && agentPath && kind
       ? {
           type: "item.subagentActivity",
           threadId,
@@ -355,12 +359,21 @@ function toItemEvent(
           itemId,
           agentThreadId,
           agentPath,
+          kind,
         }
       : undefined;
   }
   const operation = toOperationUpdate(item, phase);
   return operation
     ? { type: "item.operation.updated", threadId, turnId, operation }
+    : undefined;
+}
+
+function parseSubagentActivityKind(
+  value: unknown,
+): "started" | "interacted" | "interrupted" | undefined {
+  return value === "started" || value === "interacted" || value === "interrupted"
+    ? value
     : undefined;
 }
 

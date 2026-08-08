@@ -2,6 +2,7 @@ version = 1
 default_workspace = "main"
 
 [telegram]
+# 不使用 Telegram 时可删除本表，或将 bot_token 留空并把 allowed_user_ids 设为空数组。
 bot_token = "你的_Bot_Token"
 allowed_user_ids = [123456789]
 message_format = "html"

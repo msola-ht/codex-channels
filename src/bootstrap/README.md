@@ -26,18 +26,20 @@
   参考价格快照，支持缓存输入、Priority 与已声明的长上下文价格，不把网络刷新放入请求路径。
 - `reference-cost-summary.ts`：在 Turn 完成时把指标库中的 Thread 历史计价与当前实时 Turn 计价
   合并；若当前 Turn 已部分延迟写入，先扣除该部分再加入完整实时值，避免累计总价重复或遗漏。
-- `subagent-completion-tracker.ts`：登记 Core 发布的子代理线程，只在官方
-  `collabAgentToolCall.agentsStates` 到达完成、异常、中断、关闭或未找到终态后读取指标汇总并发布
-  一次完成事件；终态后的模型指标只重置有界收敛窗口，窗口结束后等待 Observability Writer 当前
-  水位落库，等待期间的新指标使旧结算失效；指标到达或静默本身不推断子代理结束。无指标发布
-  零统计终态，指标写入或读取失败发布“统计不可用”终态。
+- `subagent-completion-tracker.ts`：登记 Core 发布的子代理线程，以 App Server 自动订阅后发送的
+  子线程 `turn/completed` 作为正常终态，并接受官方中断活动与旧版
+  `collabAgentToolCall.agentsStates` 终态；极快子线程先完成后登记时只在有界短期缓存中保留终态。
+  已观察到模型指标且终态后出现父线程官方 `wait` Item 时，立即等待 Observability Writer 当前
+  水位落库并发布，保持该等待操作先于完成卡片；终态到达时尚无指标或之后未出现父线程等待时
+  保留有界收敛窗口，后续新指标使旧结算失效；指标到达或静默本身不推断子代理结束。无指标
+  发布零统计终态，指标写入或读取失败发布“统计不可用”终态。
 - `workspace-permission-writer.ts`：把渠道 `/workspaceperm` 的工作区权限更新写回
   `config.toml` 并校验 `permissions` 与 `sandbox` 互斥；文件变化由配置监听热加载。
 - `surface-plugin.ts`：定义编译期内置 Surface 插件、插件上下文和运行时模块契约，并校验插件 ID、
   实际 Surface ID 与账号实例唯一性。
 - `surface-composition.ts`：显式注册 Telegram、飞书和微信内置插件，并保留各平台访问策略、
-  热加载钩子和故障上报装配。Telegram 插件始终创建一个实例；飞书和微信插件只在严格运行配置
-  启用时创建实例。三个渠道按目标复用共享代理选择；微信协议 Client 在首次调用时从独立安全存储
+  热加载钩子和故障上报装配。三个插件都只在严格运行配置启用时创建实例；Telegram 由非空 Token
+  决定是否启用，飞书和微信使用显式开关。三个渠道按目标复用共享代理选择；微信协议 Client 在首次调用时从独立安全存储
   读取凭据，不把 Token 放入运行配置。
 - `proxy-fetch.ts`：把共享 HTTP(S) 代理选择适配到微信使用的 Fetch 接口；命中 `NO_PROXY`
   时使用直连 Fetch，否则通过按代理 URL 复用的 Undici Dispatcher 发出请求。

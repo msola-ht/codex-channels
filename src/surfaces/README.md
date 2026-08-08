@@ -94,8 +94,8 @@ Turn、Thread 或 Surface 关闭时清理。
 引用获取仍由各 Surface 负责，不能读取 Gateway 私有历史或让引用内容参与命令解析。
 `plan-presentation.ts` 统一完整计划与新增完成步骤的有界展示、状态符号和去重指纹；各渠道只决定
 完整计划是原地更新还是追加紧凑进度。
-`lifecycle-presentation.ts` 统一 Telegram、飞书与微信的 Gateway 上线、Turn 开始确认和 Turn
-结束汇报把本次运行、当前会话累计和账户状态依次分区，并按 Token、费用、性能分组；按 Turn
+`lifecycle-presentation.ts` 统一 Telegram、飞书与微信的 Gateway 上线、Turn 开始确认、子代理
+开始/完成通知和 Turn 结束汇报；Turn 完成把本次运行、当前会话累计和账户状态依次分区，并按 Token、费用、性能分组；按 Turn
 聚合统计代理捕获的全部模型请求、实际产生推理输出的思考次数及当前 Turn 总价，并保留 Provider
 通用的 Thread Token/上下文与总价累计指标；本轮存在非正常模型尝试时，请求总数会进一步拆分为
 完成、中断、未完整观测和失败数量；`429/5xx` 瞬时失败后存在成功请求时显示为“自动重试、最终

@@ -1362,6 +1362,38 @@ describe("codexc CLI", () => {
     expect(diagnosed.stdout).not.toContain("[失败] 配置目录权限");
   });
 
+  it("reports Telegram as disabled when another channel is enabled", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-channel-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    mkdirSync(workspace);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      document.weixin = {
+        enabled: true,
+        account_id: "bot-fixture@im.bot",
+        allowed_user_ids: ["actor-fixture@im.wechat"],
+      };
+    });
+
+    const diagnosed = spawnSync(process.execPath, [cli, "doctor"], {
+      cwd: workspace,
+      env: environment,
+      encoding: "utf8",
+    });
+
+    expect(diagnosed.stdout).toContain("[通过] 配置格式");
+    expect(diagnosed.stdout).toContain("[提示] Telegram：未配置");
+    expect(diagnosed.stdout).not.toContain("[失败] Telegram Token");
+    expect(diagnosed.stdout).not.toContain("[失败] Telegram 用户");
+  });
+
   linuxIt("reports safe Linux Weixin runtime readiness without exposing private values", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-weixin-"));
     temporaryDirectories.push(root);

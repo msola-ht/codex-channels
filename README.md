@@ -68,6 +68,10 @@ sudo loginctl enable-linger "$USER"
 ~/.codex-connect/config.toml
 ```
 
+Telegram、飞书和微信至少配置并启用一个即可启动 Gateway。Telegram 以非空 `bot_token` 表示启用；
+Token 缺失或留空时不创建 Telegram 连接，也不要求 `allowed_user_ids`。填入 Token 后必须同时配置
+至少一个允许用户，避免 Bot 在没有授权边界时启动。
+
 渠道准备事项：
 
 - Telegram：准备 BotFather 创建的 Bot Token；向导会生成配对入口以获取用户 ID。
@@ -166,11 +170,12 @@ codexc service restart all
 模型指标与费用统计：
 
 ```bash
-codexc agents enable-deepseek    # 开启 multi_agent_v2 并注册 agents.ds 角色
+codexc agents enable-deepseek    # 开启 multi_agent_v2 并注册单次 agents.ds 角色
 codexc agents status             # 查看当前状态
 codexc agents disable-deepseek   # 移除角色并关闭 multi_agent_v2
 ```
 
+DS 角色仅处理当前用户消息中的单次完整任务，调用使用 `fork_turns=1`，不支持补发或并行拆分。
 角色文件由 App Server 服务启动时生成、退出时清理，不写 API Key；详见
 [`DeepSeek 使用说明`](docs/deepseek.md)。
 

@@ -36,6 +36,7 @@ export {
 } from "./reload-classifier.js";
 
 export interface GatewayConfig {
+  telegramEnabled: boolean;
   telegramBotToken: string;
   telegramAllowedUserIds: ReadonlySet<number>;
   telegramProxyUrl?: string;
@@ -247,15 +248,16 @@ function loadValidatedConfigDocument(
   );
   let proxyUrl: string | undefined;
   try {
-    proxyUrl = resolveHttpProxyUrl(raw.telegram.proxy_url);
+    proxyUrl = resolveHttpProxyUrl(raw.telegram?.proxy_url);
   } catch (error) {
     throw new ConfigurationError(error instanceof Error ? error.message : String(error));
   }
   return {
-    telegramBotToken: raw.telegram.bot_token,
-    telegramAllowedUserIds: new Set(raw.telegram.allowed_user_ids),
+    telegramEnabled: Boolean(raw.telegram?.bot_token?.trim()),
+    telegramBotToken: raw.telegram?.bot_token ?? "",
+    telegramAllowedUserIds: new Set(raw.telegram?.allowed_user_ids ?? []),
     ...(proxyUrl ? { telegramProxyUrl: proxyUrl } : {}),
-    telegramMessageFormat: raw.telegram.message_format,
+    telegramMessageFormat: raw.telegram?.message_format ?? "html",
     ...(raw.feishu?.enabled
       ? {
           feishu: {

@@ -76,12 +76,16 @@ if (document) {
   const storage = table(document.storage);
   const tokenConfigured = Boolean(stringValue(telegram.bot_token));
   const allowedUsers = validAllowedUsers(telegram.allowed_user_ids);
-  record("Telegram Token", tokenConfigured, tokenConfigured ? "已配置（内容已隐藏）" : "未配置");
-  record(
-    "Telegram 用户",
-    allowedUsers,
-    allowedUsers ? "允许列表有效" : "telegram.allowed_user_ids 未配置或格式无效",
-  );
+  if (tokenConfigured) {
+    record("Telegram Token", true, "已配置（内容已隐藏）");
+    record(
+      "Telegram 用户",
+      allowedUsers,
+      allowedUsers ? "允许列表有效" : "telegram.allowed_user_ids 未配置或格式无效",
+    );
+  } else {
+    note("Telegram", "未配置");
+  }
   if (feishu.enabled === true) {
     const appId = stringValue(feishu.app_id);
     const appSecret = stringValue(feishu.app_secret);

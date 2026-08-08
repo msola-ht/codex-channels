@@ -1395,6 +1395,25 @@ describe("TelegramOutbox", () => {
     expect(api.sent[0]).toContain("等待子代理 · 失败");
     expect(api.sent[0]).not.toContain("等待子代理 · 已完成");
   });
+
+  it("sends one compact subagent start notice", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      type: "subagent.spawned",
+      target,
+      threadId: "parent-thread",
+      turnId: "parent-turn",
+      agentThreadId: "agent-thread-secret",
+      agentPath: "/root/review_task",
+    });
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual(["<b>子代理开始 · review_task</b>"]);
+    expect(api.sent[0]).not.toContain("agent-thread-secret");
+  });
 });
 
 function createOutbox(

@@ -205,15 +205,28 @@ const metricsViewSchema = z.strictObject({
   }
 });
 
+const telegramSchema = z.strictObject({
+  bot_token: z.string().optional(),
+  allowed_user_ids: z.array(z.number().int().positive()).optional(),
+  proxy_url: z.string().optional(),
+  message_format: z.enum(["html", "rich"]).default("html"),
+}).superRefine((value, context) => {
+  if (!value.bot_token?.trim()) {
+    return;
+  }
+  if (!value.allowed_user_ids?.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["allowed_user_ids"],
+      message: "Telegram 启用时必须配置 allowed_user_ids",
+    });
+  }
+});
+
 const gatewayDocumentSchema = z.strictObject({
   version: z.literal(1),
   default_workspace: z.string().trim().min(1),
-  telegram: z.strictObject({
-    bot_token: z.string().min(1),
-    allowed_user_ids: z.array(z.number().int().positive()).min(1),
-    proxy_url: z.string().optional(),
-    message_format: z.enum(["html", "rich"]).default("html"),
-  }),
+  telegram: telegramSchema.optional(),
   feishu: feishuSchema.optional(),
   weixin: weixinSetupSchema.optional(),
   network: z.strictObject({
@@ -268,6 +281,18 @@ const gatewayDocumentSchema = z.strictObject({
     },
   }),
   workspaces: z.array(workspaceSchema).min(1),
+}).superRefine((value, context) => {
+  if (
+    !value.telegram?.bot_token?.trim()
+    && value.feishu?.enabled !== true
+    && value.weixin?.enabled !== true
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["telegram", "bot_token"],
+      message: "至少需要配置一个通讯渠道：Telegram、飞书或微信",
+    });
+  }
 });
 
 export function parseGatewayConfig(content, source = "config.toml") {

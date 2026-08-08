@@ -184,6 +184,15 @@ export function createTurnStartedPresentation(
   };
 }
 
+export function createSubagentStartedPresentation(
+  event: Extract<OutputEvent, { type: "subagent.spawned" }>,
+): LifecyclePresentation {
+  return {
+    title: `子代理开始 · ${subagentTaskName(event.agentPath)}`,
+    fields: [],
+  };
+}
+
 export function createSubagentCompletedPresentation(
   event: Extract<OutputEvent, { type: "subagent.completed" }>,
   priceCurrency?: (

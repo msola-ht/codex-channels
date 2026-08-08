@@ -63,10 +63,18 @@ function restartRequiredReasons(
   next: GatewayConfig,
 ): ConfigChange[] {
   const reasons: ConfigChange[] = [];
+  const telegramEnabledChanged = current.telegramEnabled !== next.telegramEnabled;
+  if (telegramEnabledChanged) {
+    reasons.push(configChange("surface.telegram.enabled", "telegram"));
+  }
   const fields: Array<[ConfigChange, unknown, unknown]> = [
-    [configChange("surface.telegram.token", "telegram"), current.telegramBotToken, next.telegramBotToken],
-    [configChange("surface.telegram.proxy", "telegram"), current.telegramProxyUrl, next.telegramProxyUrl],
-    [configChange("surface.telegram.message-format", "telegram"), current.telegramMessageFormat, next.telegramMessageFormat],
+    ...(current.telegramEnabled && next.telegramEnabled
+      ? [
+          [configChange("surface.telegram.token", "telegram"), current.telegramBotToken, next.telegramBotToken],
+          [configChange("surface.telegram.proxy", "telegram"), current.telegramProxyUrl, next.telegramProxyUrl],
+          [configChange("surface.telegram.message-format", "telegram"), current.telegramMessageFormat, next.telegramMessageFormat],
+        ] as Array<[ConfigChange, unknown, unknown]>
+      : []),
     [configChange("surface.feishu.enabled", "feishu"), current.feishu !== undefined, next.feishu !== undefined],
     [configChange("surface.weixin.enabled", "weixin"), current.weixin !== undefined, next.weixin !== undefined],
     [configChange("codex.default-model"), current.codexModel, next.codexModel],
@@ -135,9 +143,13 @@ function restartRequiredReasons(
   if (!preservesExistingWorkspaces(current.workspaces, next.workspaces)) {
     reasons.push(configChange("workspace.registry"));
   }
-  if (![...current.telegramAllowedUserIds].every(
-    (userId) => next.telegramAllowedUserIds.has(userId),
-  )) {
+  if (
+    !telegramEnabledChanged
+    && current.telegramEnabled
+    && ![...current.telegramAllowedUserIds].every(
+      (userId) => next.telegramAllowedUserIds.has(userId),
+    )
+  ) {
     reasons.push(configChange("surface.telegram.allowed-users", "telegram"));
   }
   return reasons;
@@ -155,7 +167,9 @@ function hotReloadReasons(
     reasons.push(configChange("workspace.registry"));
   }
   if (
-    [...current.telegramAllowedUserIds].every(
+    current.telegramEnabled
+    && next.telegramEnabled
+    && [...current.telegramAllowedUserIds].every(
       (userId) => next.telegramAllowedUserIds.has(userId),
     )
     && !sameSet(current.telegramAllowedUserIds, next.telegramAllowedUserIds)

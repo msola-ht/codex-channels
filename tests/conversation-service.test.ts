@@ -1011,7 +1011,7 @@ describe("ConversationService model selection", () => {
     expect(startTurn.mock.calls[0]?.[1]).toEqual([
       {
         type: "text",
-        text: "请使用 agent_type=\"ds\" 的子代理执行以下任务，子代理完成后把最终结果回复给我：\n\n审查提交",
+        text: "请使用 agent_type=\"ds\"、fork_turns=\"1\" 的子代理执行以下任务，子代理完成后把最终结果回复给我：\n\n审查提交",
       },
     ]);
   });

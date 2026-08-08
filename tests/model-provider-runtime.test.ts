@@ -140,6 +140,12 @@ describe("model provider runtime topology", () => {
     const content = readFileSync(rolePath, "utf8");
     expect(content).toContain('model = "deepseek-v4-flash"');
     expect(content).toContain('model_provider = "deepseek"');
+    expect(content).toContain(
+      'developer_instructions = "你是 DeepSeek 单次子代理。',
+    );
+    expect(content).toContain("最后一条用户消息");
+    expect(content).toContain("不要尝试解析 encrypted_content");
+    expect(content).toContain("不等待或请求后续消息");
     expect(content).toContain('base_url = "http://127.0.0.1:39491/"');
     expect(content).toContain('env_key = "CODEX_CONNECT_DEEPSEEK_API_KEY"');
     expect(content).toContain("model_auto_compact_token_limit = 629146");

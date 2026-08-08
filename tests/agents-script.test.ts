@@ -46,6 +46,9 @@ describe("codexc agents script", () => {
       expect(enabledConfig).toContain("[features]");
       expect(enabledConfig).toContain("multi_agent_v2 = true");
       expect(enabledConfig).toContain("[agents.ds]");
+      expect(enabledConfig).toContain(
+        'description = "DeepSeek 单次子代理；仅处理当前用户消息中的完整任务，必须使用 fork_turns=1，不能接收后续消息"',
+      );
       expect(enabledConfig).toContain(`config_file = ${JSON.stringify(rolePath)}`);
       expect(enabledConfig).toContain('nickname_candidates = ["DeepSeek"]');
       expect(existsSync(rolePath)).toBe(false);

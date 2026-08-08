@@ -73,14 +73,17 @@ function summary() {
   };
 }
 
-function spawned(): OutputEvent {
+function spawned(
+  agentThreadId = "agent-1",
+  agentPath = "/root/review",
+): Extract<OutputEvent, { type: "subagent.spawned" }> {
   return {
     type: "subagent.spawned",
     target,
     threadId: "parent-1",
     turnId: "turn-1",
-    agentThreadId: "agent-1",
-    agentPath: "/root/review",
+    agentThreadId,
+    agentPath,
   };
 }
 
@@ -97,6 +100,23 @@ function state(status: "running" | "completed" | "errored"): OutputEvent {
       status: "completed",
       receiverThreadIds: ["agent-1"],
       subagentStates: [{ threadId: "agent-1", status }],
+    },
+  };
+}
+
+function waitCompleted(parentThreadId = "parent-1"): OutputEvent {
+  return {
+    type: "operation.updated",
+    target,
+    threadId: parentThreadId,
+    turnId: "turn-1",
+    operation: {
+      itemId: "wait-v2",
+      kind: "subagent",
+      action: "wait",
+      status: "completed",
+      receiverThreadIds: [],
+      subagentStates: [],
     },
   };
 }
@@ -136,6 +156,118 @@ describe("SubagentCompletionTracker", () => {
     vi.useRealTimers();
   });
 
+  it("settles from the subscribed child turn completion notification", async () => {
+    vi.useFakeTimers();
+    const publish = vi.fn();
+    const tracker = new SubagentCompletionTracker({
+      readSummary: () => summary(),
+      publish,
+      settleDelayMs: 20,
+    });
+
+    tracker.handle(spawned());
+    tracker.handleInput({
+      type: "turn.completed",
+      threadId: "agent-1",
+      turnId: "agent-turn-1",
+      status: "completed",
+      error: null,
+    });
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({
+      type: "subagent.completed",
+      agentThreadId: "agent-1",
+      status: "completed",
+    }));
+    tracker.close();
+    vi.useRealTimers();
+  });
+
+  it("retains an early child completion until the spawn activity is registered", async () => {
+    vi.useFakeTimers();
+    const publish = vi.fn();
+    const tracker = new SubagentCompletionTracker({
+      readSummary: () => summary(),
+      publish,
+      settleDelayMs: 20,
+    });
+
+    tracker.handleInput({
+      type: "turn.completed",
+      threadId: "agent-1",
+      turnId: "agent-turn-1",
+      status: "completed",
+      error: null,
+    });
+    tracker.handle(spawned());
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({
+      agentThreadId: "agent-1",
+      status: "completed",
+    }));
+    tracker.close();
+    vi.useRealTimers();
+  });
+
+  it.each([
+    ["interrupted", "interrupted"],
+    ["failed", "errored"],
+  ] as const)("maps a child %s turn to %s", async (turnStatus, expectedStatus) => {
+    vi.useFakeTimers();
+    const publish = vi.fn();
+    const tracker = new SubagentCompletionTracker({
+      readSummary: () => summary(),
+      publish,
+      settleDelayMs: 20,
+    });
+
+    tracker.handle(spawned());
+    tracker.handleInput({
+      type: "turn.completed",
+      threadId: "agent-1",
+      turnId: "agent-turn-1",
+      status: turnStatus,
+      error: turnStatus === "failed" ? "failed" : null,
+    });
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({
+      status: expectedStatus,
+    }));
+    tracker.close();
+    vi.useRealTimers();
+  });
+
+  it("accepts the official interrupted activity as a terminal signal", async () => {
+    vi.useFakeTimers();
+    const publish = vi.fn();
+    const tracker = new SubagentCompletionTracker({
+      readSummary: () => summary(),
+      publish,
+      settleDelayMs: 20,
+    });
+
+    tracker.handle(spawned());
+    tracker.handleInput({
+      type: "item.subagentActivity",
+      threadId: "parent-1",
+      turnId: "turn-1",
+      itemId: "interrupt-1",
+      agentThreadId: "agent-1",
+      agentPath: "/root/review",
+      kind: "interrupted",
+    });
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({
+      status: "interrupted",
+    }));
+    tracker.close();
+    vi.useRealTimers();
+  });
+
   it("maps official abnormal terminal states to a failed completion", async () => {
     vi.useFakeTimers();
     const publish = vi.fn();
@@ -157,7 +289,7 @@ describe("SubagentCompletionTracker", () => {
     vi.useRealTimers();
   });
 
-  it("settles after the last metric without treating metrics as a terminal state", async () => {
+  it("accelerates settlement when the first metric arrives after the terminal state", async () => {
     vi.useFakeTimers();
     const publish = vi.fn();
     const tracker = new SubagentCompletionTracker({
@@ -167,18 +299,106 @@ describe("SubagentCompletionTracker", () => {
     });
 
     tracker.handle(spawned());
-    tracker.metricsAvailable("agent-1");
-    await vi.advanceTimersByTimeAsync(20);
-    expect(publish).not.toHaveBeenCalled();
-
     tracker.handle(state("completed"));
     await vi.advanceTimersByTimeAsync(15);
-    tracker.metricsAvailable("agent-1");
-    await vi.advanceTimersByTimeAsync(19);
     expect(publish).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1);
+
+    tracker.metricsAvailable("agent-1");
+    await vi.advanceTimersByTimeAsync(0);
     expect(publish).toHaveBeenCalledTimes(1);
 
+    tracker.close();
+    vi.useRealTimers();
+  });
+
+  it("publishes immediately after an observed metric is persisted", async () => {
+    vi.useFakeTimers();
+    const publish = vi.fn();
+    const tracker = new SubagentCompletionTracker({
+      readSummary: () => summary(),
+      waitForMetrics: async () => true,
+      publish,
+      settleDelayMs: 20,
+    });
+
+    tracker.handle(spawned());
+    tracker.metricsAvailable("agent-1");
+    tracker.handleInput({
+      type: "turn.completed",
+      threadId: "agent-1",
+      turnId: "agent-turn-1",
+      status: "completed",
+      error: null,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(publish).not.toHaveBeenCalled();
+
+    tracker.handle(waitCompleted());
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(publish).toHaveBeenCalledTimes(1);
+    tracker.close();
+    vi.useRealTimers();
+  });
+
+  it("ignores an unrelated parent wait and falls back within the bounded delay", async () => {
+    vi.useFakeTimers();
+    const publish = vi.fn();
+    const tracker = new SubagentCompletionTracker({
+      readSummary: () => summary(),
+      waitForMetrics: async () => true,
+      publish,
+      settleDelayMs: 20,
+    });
+
+    tracker.handle(spawned());
+    tracker.metricsAvailable("agent-1");
+    tracker.handleInput({
+      type: "turn.completed",
+      threadId: "agent-1",
+      turnId: "agent-turn-1",
+      status: "completed",
+      error: null,
+    });
+    tracker.handle(waitCompleted("unrelated-parent"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(publish).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(20);
+    expect(publish).toHaveBeenCalledTimes(1);
+    tracker.close();
+    vi.useRealTimers();
+  });
+
+  it("does not reuse an earlier parent wait for a later parallel completion", async () => {
+    vi.useFakeTimers();
+    const publish = vi.fn();
+    const tracker = new SubagentCompletionTracker({
+      readSummary: () => summary(),
+      waitForMetrics: async () => true,
+      publish,
+      settleDelayMs: 20,
+    });
+
+    tracker.handle(spawned());
+    tracker.handle(spawned("agent-2", "/root/parallel"));
+    tracker.metricsAvailable("agent-2");
+    tracker.handle(waitCompleted());
+    tracker.handleInput({
+      type: "turn.completed",
+      threadId: "agent-2",
+      turnId: "agent-turn-2",
+      status: "completed",
+      error: null,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(publish).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(20);
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({
+      agentThreadId: "agent-2",
+      status: "completed",
+    }));
     tracker.close();
     vi.useRealTimers();
   });

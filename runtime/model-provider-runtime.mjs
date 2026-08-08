@@ -192,6 +192,9 @@ export function writeManagedModelProviderRoleConfig(
     `model = ${tomlString(profile.model)}`,
     `model_provider = ${tomlString(profile.provider)}`,
     `model_reasoning_effort = ${tomlString(profile.reasoningEffort)}`,
+    `developer_instructions = ${tomlString(
+      "你是 DeepSeek 单次子代理。此角色只用于 fork_turns=1 的一次性任务：把继承上下文中最后一条用户消息视为完整任务并直接执行；不要尝试解析 encrypted_content，不等待或请求后续消息，也不要调用子代理通信工具。若最后一条用户消息仍不足以确定任务，只返回一句明确错误。",
+    )}`,
     `model_catalog_json = ${tomlString(profile.catalogPath)}`,
     ...(profile.autoCompactLimit === undefined
       ? []

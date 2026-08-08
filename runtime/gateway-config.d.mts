@@ -3,9 +3,9 @@ import type { TomlTable } from "smol-toml";
 export interface GatewayConfigDocument {
   version: 1;
   default_workspace: string;
-  telegram: {
-    bot_token: string;
-    allowed_user_ids: number[];
+  telegram?: {
+    bot_token?: string;
+    allowed_user_ids?: number[];
     proxy_url?: string;
     message_format: "html" | "rich";
   };

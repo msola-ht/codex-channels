@@ -623,6 +623,9 @@ export class ConversationCore {
         });
         return;
       case "item.subagentActivity":
+        if (event.kind !== "started") {
+          return;
+        }
         this.publishForThread(event.threadId, {
           type: "subagent.spawned",
           threadId: event.threadId,

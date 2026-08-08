@@ -346,6 +346,38 @@ describe("ConversationCore", () => {
     }));
   });
 
+  it("does not present follow-up or interruption activity as a new subagent", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+    const core = new ConversationCore({
+      allBindings: () => [],
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+
+    for (const kind of ["interacted", "interrupted"] as const) {
+      core.handle({
+        type: "item.subagentActivity",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: `item-${kind}`,
+        kind,
+        agentThreadId: "subagent-thread-1",
+        agentPath: "/root/ds_probe",
+      });
+    }
+    await output.close();
+
+    expect(events).not.toContainEqual(expect.objectContaining({
+      type: "subagent.spawned",
+    }));
+  });
+
   it("does not invent a successful completion for a malformed turn status", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const events: OutputEvent[] = [];

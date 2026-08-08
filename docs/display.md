@@ -77,18 +77,25 @@ OpenAI `/limits` 在额度响应包含 10,080 分钟周窗口和有效重置时�
 HTML 和微信结构化字段渲染。
 
 `/agents` 无参数时列出内置角色（default/explorer/worker）与 `~/.codex/config.toml` 中
-配置的角色（如 `agents.ds`）；`/agents <角色名称或序号> <任务>` 以包含官方 `agent_type`
-角色名的文本指示子代理执行任务，调用结果与普通 Turn 启动一致。
+配置的角色（如 `agents.ds`）；`/agents <角色名称或序号> <任务>` 以包含官方 `agent_type` 和
+`fork_turns="1"` 的文本指示子代理执行任务，调用结果与普通 Turn 启动一致。
 
 `codexc metrics threads` 的会话列表增加“类型”列：Gateway 在绑定线程中观测到
 `subAgentActivity` 通知时，会把子代理线程 ID、父线程和代理路径写入指标库；被标注的线程
 显示“子代理 · <代理路径>”（如 `/root/ds_probe`），其余显示“主会话”。该标注持久化在
 指标库 `subagent_threads` 表中，`/metrics threads` 与 WebUI Threads 页面共用同一份数据。
 
-渠道完成通知：Gateway 只在父线程的官方 `collabAgentToolCall.agentsStates` 报告子代理终态后，
-向父会话推送“子代理完成”或其他精确终态卡片，不再根据模型请求静默时间猜测完成。官方终态后
-保留约 5 秒指标收敛窗口，期间的新指标会使旧结算失效；窗口结束后还会等待当前 Writer 水位
-实际落库再读取汇总。没有模型指标时仍发送零统计终态，指标写入或读取失败则明确显示“统计暂不可用”，
+渠道开始通知：Gateway 在官方 `subAgentActivity.started` Item 完成后向父会话发送一次简短的
+“子代理开始 · 任务名”，不展示子线程 ID；`interacted` 与 `interrupted` 不会重复显示为开始。
+
+渠道完成通知：Gateway 只在 App Server 已自动订阅的子线程发送 `turn/completed`、官方中断活动，
+或旧版 `collabAgentToolCall.agentsStates` 报告子代理终态后，向父会话推送“子代理完成”或其他精确
+终态卡片，不再根据模型请求静默时间猜测完成。同一 `subAgentActivity` 只在 Item 完成阶段归约一次，
+`interacted` 与 `interrupted` 不会被误显示为新建子代理。官方终态后
+若已经观察到模型指标且终态后出现父线程官方 `wait` Item，会立即等待当前 Writer 水位实际落库并
+读取汇总，使“等待子代理 · 已完成”稳定排在子代理完成卡片之前；终态到达时尚无指标或父线程没有
+等待时保留最多约 5 秒收敛窗口，后续新指标使旧结算失效。
+没有模型指标时仍发送零统计终态，指标写入或读取失败则明确显示“统计暂不可用”，
 不把未知值冒充零。卡片展示任务名、模型、请求次数、Token、费用与全量计价时的每 100M Token 均价；
 费用覆盖率以成功请求为分母，均价只使用成功且有价格快照请求的费用与 Token；
 费用跟随全局价格显示，价格快照缺失或覆盖不全时显示计价覆盖，覆盖不全时不展示可能低估的均价。

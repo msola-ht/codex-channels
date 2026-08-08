@@ -561,6 +561,24 @@ describe("WeixinOutbox", () => {
     expect(sendText.mock.calls[0]?.[0].text).toContain("等待子代理 · 失败");
   });
 
+  it("sends one compact subagent start notice", async () => {
+    const { outbox, sendText } = outboxFixture();
+
+    outbox.handle({
+      type: "subagent.spawned",
+      target,
+      threadId: "parent-thread",
+      turnId: "parent-turn",
+      agentThreadId: "agent-thread-secret",
+      agentPath: "/root/review_task",
+    });
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledTimes(1);
+    expect(sendText.mock.calls[0]?.[0].text).toBe("子代理开始 · review_task");
+    expect(sendText.mock.calls[0]?.[0].text).not.toContain("agent-thread-secret");
+  });
+
   it("summarizes repeated query operations once before Turn completion", async () => {
     const { outbox, sendText } = outboxFixture();
 

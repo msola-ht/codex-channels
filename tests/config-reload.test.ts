@@ -130,6 +130,23 @@ describe("Gateway config reload", () => {
     });
   });
 
+  it("restarts when Telegram is enabled or disabled", () => {
+    const disabled = config({
+      telegramEnabled: false,
+      telegramBotToken: "",
+      telegramAllowedUserIds: new Set(),
+    });
+
+    expect(classifyConfigReload(disabled, config())).toEqual({
+      action: "restart",
+      changes: [{ code: "surface.telegram.enabled", scope: "telegram" }],
+    });
+    expect(classifyConfigReload(config(), disabled)).toEqual({
+      action: "restart",
+      changes: [{ code: "surface.telegram.enabled", scope: "telegram" }],
+    });
+  });
+
   it("restarts when Feishu is enabled", () => {
     expect(classifyConfigReload(
       config(),
@@ -429,6 +446,7 @@ describe("Gateway config reload", () => {
 
 function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
   return {
+    telegramEnabled: true,
     telegramBotToken: "token",
     telegramAllowedUserIds: new Set([123]),
     telegramMessageFormat: "html",

@@ -16,6 +16,7 @@ export type GlobalConfigChangeCode =
   | "workspace.registry";
 
 export type TelegramConfigChangeCode =
+  | "surface.telegram.enabled"
   | "surface.telegram.token"
   | "surface.telegram.proxy"
   | "surface.telegram.message-format"

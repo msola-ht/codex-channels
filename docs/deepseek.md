@@ -145,6 +145,11 @@ codexc agents disable-deepseek
 `disable-deepseek` 移除 `agents.ds` 角色并关闭 `multi_agent_v2`，角色文件由服务在退出或重启时
 清理。需要子代理时，主模型调用 `spawn_agent` 并选择角色 `ds`。
 
+当前 DS 角色采用 V2 单次兼容模式：当前用户消息必须包含完整任务，主模型调用时必须传
+`agent_type="ds"` 和 `fork_turns="1"`。DS 从继承的最近一个 Turn 中读取最后一条用户消息，
+不解析 V2 的加密任务正文。该模式不支持 `followup_task`、`send_message`、多个 DS 并行拆分或
+依赖后续补充信息；这些场景应使用 OpenAI 官方子代理。
+
 子代理统计会在指标库中标注：Gateway 捕获父线程里的 `subAgentActivity` 通知后，把子代理
 线程 ID 和代理路径写入 `subagent_threads` 表，`codexc metrics threads` 与 WebUI Threads
 页面显示“子代理 · <代理路径>”。该标注需要指标库 Schema v7；升级前先停止 Gateway，再运行

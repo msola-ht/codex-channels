@@ -115,6 +115,38 @@ describe("Feishu outbox", () => {
     }]);
   });
 
+  it("sends the subagent start notice as a Markdown card instead of plain text", async () => {
+    const markdownCards: string[] = [];
+    const texts: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async (_chatId, text) => {
+          texts.push(text);
+        },
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle({
+      type: "subagent.spawned",
+      target,
+      threadId: "parent-thread",
+      turnId: "parent-turn",
+      agentThreadId: "agent-thread-secret",
+      agentPath: "/root/review_task",
+    });
+    await outbox.close();
+
+    expect(texts).toEqual([]);
+    expect(markdownCards).toEqual(["## 子代理开始 · review_task"]);
+  });
+
   it("renders runtime status updates as Markdown cards", async () => {
     const markdownCards: string[] = [];
     const texts: string[] = [];

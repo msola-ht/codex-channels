@@ -38,6 +38,7 @@ import { formatSurfaceConfigurationChange } from "../configuration-change-format
 import {
   createStartupPresentation,
   createSubagentCompletedPresentation,
+  createSubagentStartedPresentation,
   createTurnCompletedPresentation,
   createTurnStartedPresentation,
   renderStructuredLifecyclePresentation,
@@ -202,8 +203,11 @@ export function renderFeishuOutput(
         : emptyCodexResponseText;
     case "operation.updated":
     case "plan.updated":
-    case "subagent.spawned":
       return null;
+    case "subagent.spawned":
+      return renderFeishuLifecyclePresentation(
+        createSubagentStartedPresentation(event),
+      );
     case "subagent.completed":
       return renderFeishuSubagentCompleted(event, priceCurrency, exchangeRate, debug);
     case "turn.completed":
