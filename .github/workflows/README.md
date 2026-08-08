@@ -47,9 +47,9 @@ Checkout 不保留写入凭据。Draft PR Job 单独申请 `contents: write` 和
 `sync-published-readme.yml` 的最小写权限提交 `README.md`；默认工作流权限继续保持只读。
 自动提案与 README 同步都使用仓库 `GITHUB_TOKEN`，不保存长期 PAT。
 
-GitHub Actions 使用 `npm ci --ignore-scripts`，不会修改 Runner 的 Git hook 配置；随后直接调用
-`npm run verify:commit`。本地 `npm ci`、`npm install` 或 `npm run hooks:install` 则启用
-仓库内 `.githooks/pre-commit`，两端共享同一个检查入口。
+GitHub Actions 分别对根目录和 `webui` 使用 `npm ci --ignore-scripts`，不会修改 Runner 的 Git
+hook 配置；随后直接调用 `npm run verify:commit`。本地 `npm ci`、`npm install` 或
+`npm run hooks:install` 则启用仓库内 `.githooks/pre-commit`，两端共享同一个检查入口。
 
 项目不维护独立版本号；`@hegenai/codexc`、Gateway 和发布 Tag 均直接使用锁定的 Codex CLI
 正式发行版本。升级提案只认 `openai/codex` GitHub Release 中非 Draft、非 Pre-release 的
