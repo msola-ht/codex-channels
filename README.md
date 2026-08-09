@@ -376,8 +376,8 @@ codexc service start gateway
 
 `codexc state upgrade` 不会修改 Codex Thread，只新增后台绑定存储；命令会显示升级前数据库备份路径。
 
-npm 包与 Codex CLI 使用相同版本。正式 npm 包和 GitHub Release 均发布成功后，发布工作流会自动
-同步本页安装版本。
+npm 包与 Codex CLI 使用相同版本。正式发布时先在发布提交中同步本页版本与安装命令，通过
+`main` CI 后再创建 Tag、发布 npm 和 GitHub Release；Release 不会自动修改 README。
 
 ## 源码开发
 
