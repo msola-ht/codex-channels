@@ -40,6 +40,19 @@ record(
   versionAtLeast(process.versions.node, "22.13.0"),
   `${process.version}（要求 >=22.13.0）`,
 );
+if (process.platform === "linux") {
+  const bubblewrap = optionalExecutable("bwrap");
+  if (bubblewrap) {
+    record("Linux 沙箱", true, `bwrap 可用：${bubblewrap}`);
+  } else {
+    note(
+      "Linux 沙箱",
+      "PATH 中未找到 bwrap；Codex 将回退到内置 helper",
+      "Debian/Ubuntu：sudo apt install bubblewrap；"
+      + "Fedora/RHEL：sudo dnf install bubblewrap；安装后重新运行 codexc doctor",
+    );
+  }
+}
 
 const explicitConfigFile = process.env.CODEX_CONNECT_CONFIG_FILE?.trim();
 const runtime = explicitConfigFile
@@ -356,6 +369,9 @@ if (process.platform === "darwin") {
 
 for (const check of checks) {
   console.log(`${check.prefix} ${check.name}：${check.detail}`);
+  if (check.remediation) {
+    console.log(`[处理] ${check.name}：${check.remediation}`);
+  }
 }
 const failures = checks.filter((check) => check.kind === "failure").length;
 console.log(failures === 0 ? "\n诊断通过。" : `\n诊断发现 ${failures} 项问题。`);
@@ -365,8 +381,8 @@ function record(name, passed, detail) {
   checks.push({ kind: passed ? "success" : "failure", prefix: passed ? "[通过]" : "[失败]", name, detail });
 }
 
-function note(name, detail) {
-  checks.push({ kind: "note", prefix: "[提示]", name, detail });
+function note(name, detail, remediation) {
+  checks.push({ kind: "note", prefix: "[提示]", name, detail, remediation });
 }
 
 function checkMode(name, path, expected) {
@@ -411,6 +427,22 @@ function resolveExecutable(command) {
     return realpathSync(command);
   }
   return realpathSync(execFileSync("/usr/bin/which", [command], { encoding: "utf8" }).trim());
+}
+
+function optionalExecutable(command) {
+  try {
+    const result = spawnSync("/usr/bin/which", [command], {
+      encoding: "utf8",
+      timeout: 3_000,
+    });
+    if (result.status !== 0) {
+      return undefined;
+    }
+    const path = result.stdout.trim();
+    return path ? realpathSync(path) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function versionAtLeast(actual, minimum) {

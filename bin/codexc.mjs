@@ -61,7 +61,7 @@ const helpText = {
   init                         初始化用户目录和配置
   setup                        选择并配置 Gateway 模块
   config                       打开配置与设置菜单（显示、系统、工作区、多设备指标、消息格式）
-  doctor                       检查安装、配置、Codex 与服务
+  doctor                       检查安装、配置、Codex、Linux 沙箱与服务
 
 项目与会话：
   remote [参数]                启动共享 App Server 的 Codex TUI
@@ -151,7 +151,7 @@ const helpText = {
 非交互终端（脚本或管道）直接显示用户目录与配置文件路径。`,
   doctor: `用法：codexc doctor
 
-只诊断当前安装、配置和服务状态，不修改配置。`,
+只诊断当前安装、配置和服务状态，不修改配置；Linux 缺少 bubblewrap 时输出 [处理] 安装建议。`,
   rules: `用法：codexc rules <init|check>
 
 具体用法：

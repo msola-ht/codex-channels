@@ -13,7 +13,9 @@
   （操作详情、计划更新、按提供商的价格显示方式、调试模式、审批超时、Sandbox、默认工作区与
   模型、Telegram 消息格式等配置文件参数，以及配置路径）；`config` 在非交互终端仍直接显示
   用户级 `.codex-connect` 配置路径。
-- `doctor`：诊断当前 TOML 配置、安装、主 App Server 与已配置 Provider App Server 的实际版本和连通性，不改写配置。
+- `doctor`：诊断当前 TOML 配置、安装、Linux `bubblewrap` 沙箱前置条件、主 App Server 与已配置
+  Provider App Server 的实际版本和连通性；Linux 缺少 `bubblewrap` 时输出 `[处理]` 安装建议，
+  不改写配置。
 - `start`：在前台启动已构建的 Provider 隔离 App Server 与 Gateway。
 - `remote`：连接共享 App Server 并启动原生 Codex TUI；切换模式可用 `--profile deepseek` 选择隔离实例。
 - `ws`：列出或注册 Workspace。

@@ -343,6 +343,9 @@ codexc service status
 codexc service logs -n 100
 ```
 
+`codexc doctor` 保持只读；Linux 的 PATH 中缺少 `bubblewrap` 时会额外输出 `[处理]` 安装建议，
+但不会自动安装软件、修改 AppArmor 或重启服务。
+
 常见处理：
 
 - 修改配置后没有生效：运行 `codexc service reload`。

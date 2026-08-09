@@ -1394,6 +1394,32 @@ describe("codexc CLI", () => {
     expect(diagnosed.stdout).not.toContain("[失败] Telegram 用户");
   });
 
+  linuxIt("reports how to install bubblewrap when it is missing from PATH", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-bwrap-"));
+    temporaryDirectories.push(root);
+    const emptyPath = join(root, "bin");
+    mkdirSync(emptyPath);
+
+    const diagnosed = spawnSync(process.execPath, [cli, "doctor"], {
+      cwd: root,
+      env: {
+        ...process.env,
+        PATH: emptyPath,
+        CODEX_CONNECT_HOME: join(root, ".codex-connect"),
+        CODEX_CONNECT_CONFIG_FILE: "",
+      },
+      encoding: "utf8",
+    });
+
+    expect(diagnosed.stdout).toContain(
+      "[提示] Linux 沙箱：PATH 中未找到 bwrap；Codex 将回退到内置 helper",
+    );
+    expect(diagnosed.stdout).toContain(
+      "[处理] Linux 沙箱：Debian/Ubuntu：sudo apt install bubblewrap；"
+      + "Fedora/RHEL：sudo dnf install bubblewrap；安装后重新运行 codexc doctor",
+    );
+  });
+
   linuxIt("reports safe Linux Weixin runtime readiness without exposing private values", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-weixin-"));
     temporaryDirectories.push(root);

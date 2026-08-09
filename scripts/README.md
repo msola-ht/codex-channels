@@ -191,9 +191,11 @@
 - `sync-published-readme.mjs`：把受控的 README 正式版本与安装命令渲染为已发布版本；拒绝
   预发布、降级、高于开发基线和缺少受控标记的文档。
 - `sync-gateway-version.mjs`：以锁定的 Codex CLI 协议版本同步 `package.json`、锁文件和 Gateway 运行时版本；不维护独立版本号。
-- `doctor.mjs`：检查 npm 包、Node、Codex CLI、当前 TOML 配置、Workspace、飞书凭据/Bot 身份、
+- `doctor.mjs`：检查 npm 包、Node、Linux PATH 中的 `bubblewrap`、Codex CLI、当前 TOML 配置、
+  Workspace、飞书凭据/Bot 身份、
   微信配置与 Bot 凭据、消息游标检查点、允许用户的加密回复上下文覆盖数和最近保存时间，
-  以及微信运行时启用状态；Doctor 不调用 `getupdates`，不显示 Token、`context_token` 或游标；
+  以及微信运行时启用状态；缺少 `bubblewrap` 时说明内置 helper 回退并输出发行版安装命令，
+  Doctor 不自动安装或修改 AppArmor，不调用 `getupdates`，不显示 Token、`context_token` 或游标；
   主 Unix WebSocket、已配置 Provider 的切换或固定配置、实际模型目录、Provider Socket、
   `initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，不输出完整 User-Agent、飞书
   上游响应或敏感配置内容。
