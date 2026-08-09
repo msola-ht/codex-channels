@@ -10,6 +10,19 @@ export function signalChildProcesses(children, signal) {
   }
 }
 
+export function signalChildProcessGroup(child, signal) {
+  if (!childProcessIsRunning(child)) return;
+  if (process.platform !== "win32" && child.pid !== undefined) {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch (error) {
+      if (error?.code === "ESRCH") return;
+    }
+  }
+  child.kill(signal);
+}
+
 export function installProcessSignalHandlers(handlers, source = process) {
   const entries = Object.entries(handlers).filter((entry) =>
     typeof entry[1] === "function");

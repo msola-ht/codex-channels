@@ -8,6 +8,10 @@ export function signalChildProcesses(
   children: Array<Pick<ChildProcess, "exitCode" | "signalCode" | "kill">>,
   signal: NodeJS.Signals,
 ): void;
+export function signalChildProcessGroup(
+  child: Pick<ChildProcess, "pid" | "exitCode" | "signalCode" | "kill"> | undefined,
+  signal: NodeJS.Signals,
+): void;
 export function installProcessSignalHandlers(
   handlers: Partial<Record<NodeJS.Signals, () => void>>,
   source?: EventEmitter,

@@ -36,6 +36,7 @@ const temporaryDirectories: string[] = [];
 const cli = resolve("bin/codexc.mjs");
 const execFileAsync = promisify(execFile);
 const linuxIt = process.platform === "linux" ? it : it.skip;
+const unixSocketTmpdir = process.platform === "darwin" ? "/tmp" : tmpdir();
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -856,7 +857,7 @@ describe("codexc CLI", () => {
   });
 
   it("starts the App Server through the service entry with effective proxy settings", () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-service-entry-"));
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-entry-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
     const codexHome = join(root, ".codex");
@@ -919,7 +920,7 @@ describe("codexc CLI", () => {
   });
 
   it("starts isolated OpenAI and DeepSeek App Servers without exposing the key", () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-service-provider-"));
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-provider-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
     const codexHome = join(root, ".codex");
@@ -1033,7 +1034,7 @@ describe("codexc CLI", () => {
   });
 
   it("owns the automatic provider proxy in the App Server service without a running Gateway", async () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-service-proxy-"));
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-proxy-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
     const codexHome = join(root, ".codex");
@@ -1109,7 +1110,7 @@ describe("codexc CLI", () => {
   });
 
   it("starts the Gateway through the provider proxy with an exclusive DeepSeek App Server", async () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-start-exclusive-"));
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-start-exclusive-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
     const codexHome = join(root, ".codex");
@@ -1291,7 +1292,7 @@ describe("codexc CLI", () => {
   }, 15_000);
 
   it("rejects a partial App Server topology instead of bypassing a provider proxy", async () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-start-partial-"));
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-start-partial-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
     const codexHome = join(root, ".codex");
@@ -1369,7 +1370,7 @@ describe("codexc CLI", () => {
   });
 
   it("rejects an unmanaged App Server even when its complete topology is healthy", async () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-start-unmanaged-"));
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-start-unmanaged-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
     const codexHome = join(root, ".codex");
@@ -1441,7 +1442,7 @@ describe("codexc CLI", () => {
   });
 
   it("rejects an occupied App Server topology inside the shared supervisor entry", async () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-service-occupied-"));
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-occupied-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
     const workspace = join(root, "Workspace");
@@ -1490,7 +1491,7 @@ describe("codexc CLI", () => {
   });
 
   it("rejects a second shared App Server supervisor", async () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-service-owner-"));
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-owner-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
     const workspace = join(root, "Workspace");
@@ -1534,7 +1535,7 @@ describe("codexc CLI", () => {
   });
 
   it("rejects a direct duplicate Gateway independently of Provider metrics sockets", async () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-gateway-owner-entry-"));
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-gateway-owner-entry-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
     const workspace = join(root, "Workspace");
@@ -1567,7 +1568,7 @@ describe("codexc CLI", () => {
   });
 
   it("does not start the Gateway before the App Server passes a WebSocket health check", async () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-start-not-ready-"));
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-start-not-ready-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
     const workspace = join(root, "Workspace");
@@ -1609,7 +1610,7 @@ describe("codexc CLI", () => {
   });
 
   it("rejects the removed manual ds_proxy configuration", () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-service-proxy-mode-"));
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-proxy-mode-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
     const codexHome = join(root, ".codex");

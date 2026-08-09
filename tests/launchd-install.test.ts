@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
 
 const temporaryDirectories: string[] = [];
+const zshIt = existsSync("/bin/zsh") ? it : it.skip;
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -82,7 +83,7 @@ describe("launchd installer", () => {
     }
   });
 
-  it("uninstalls only launchd plists and preserves user data", () => {
+  zshIt("uninstalls only launchd plists and preserves user data", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-uninstall-"));
     temporaryDirectories.push(root);
     const agentsDir = join(root, "Library/LaunchAgents");
@@ -117,7 +118,7 @@ describe("launchd installer", () => {
     expect(readFileSync(userConfig, "utf8")).toBe("preserved=true\n");
   });
 
-  it("supports start, stop, and restart lifecycle actions", () => {
+  zshIt("supports start, stop, and restart lifecycle actions", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-service-"));
     temporaryDirectories.push(root);
     const agentsDir = join(root, "Library/LaunchAgents");
@@ -250,7 +251,7 @@ describe("launchd installer", () => {
     expect(allLogs).not.toContain("app-old");
   });
 
-  it("rejects unsupported launchd jobs without modifying them", () => {
+  zshIt("rejects unsupported launchd jobs without modifying them", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-unsupported-launchd-"));
     temporaryDirectories.push(root);
     const binDir = join(root, "bin");

@@ -11,6 +11,7 @@ import {
 } from "../runtime/gateway-owner.mjs";
 
 const temporaryDirectories: string[] = [];
+const unixSocketTmpdir = process.platform === "darwin" ? "/tmp" : tmpdir();
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -20,7 +21,7 @@ afterEach(() => {
 
 describe("Gateway owner", () => {
   it("allows only one Gateway for the same configuration regardless of Provider", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "codexc-gateway-owner-"));
+    const dataDir = mkdtempSync(join(unixSocketTmpdir, "codexc-gateway-owner-"));
     temporaryDirectories.push(dataDir);
     const configPath = join(dataDir, "config.toml");
     const first = new GatewayOwner(configPath);
@@ -38,7 +39,7 @@ describe("Gateway owner", () => {
   });
 
   it("makes concurrent close callers wait for the same Socket cleanup", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "codexc-gateway-owner-close-"));
+    const dataDir = mkdtempSync(join(unixSocketTmpdir, "codexc-gateway-owner-close-"));
     temporaryDirectories.push(dataDir);
     const configPath = join(dataDir, "config.toml");
     const owner = new GatewayOwner(configPath);

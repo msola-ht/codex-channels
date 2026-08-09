@@ -11,6 +11,7 @@ import {
 } from "../runtime/app-server-supervisor.mjs";
 
 const temporaryDirectories: string[] = [];
+const unixSocketTmpdir = process.platform === "darwin" ? "/tmp" : tmpdir();
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -20,7 +21,7 @@ afterEach(() => {
 
 describe("App Server supervisor", () => {
   it("closes promptly while a local client keeps its connection open", async () => {
-    const runtimeDir = mkdtempSync(join(tmpdir(), "codexc-supervisor-close-"));
+    const runtimeDir = mkdtempSync(join(unixSocketTmpdir, "codexc-supervisor-close-"));
     temporaryDirectories.push(runtimeDir);
     const primarySocketPath = join(runtimeDir, "codex-app-server.sock");
     const owner = new AppServerSupervisorOwner(primarySocketPath, {

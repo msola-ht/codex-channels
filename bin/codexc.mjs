@@ -45,6 +45,7 @@ import {
 import {
   childProcessIsRunning,
   installProcessSignalHandlers,
+  signalChildProcessGroup,
   signalChildProcesses,
 } from "../runtime/process-lifecycle.mjs";
 import {
@@ -1190,15 +1191,7 @@ async function runForegroundScript(
   let shutdownTimer;
   const forceStop = () => {
     if (!childProcessIsRunning(child)) return;
-    if (process.platform !== "win32" && child.pid !== undefined) {
-      try {
-        process.kill(-child.pid, "SIGKILL");
-        return;
-      } catch (error) {
-        if (error?.code === "ESRCH") return;
-      }
-    }
-    child.kill("SIGKILL");
+    signalChildProcessGroup(child, "SIGKILL");
   };
   const forwardSignal = (signal) => {
     if (forwardedSignal) {
@@ -1207,7 +1200,7 @@ async function runForegroundScript(
     }
     forwardedSignal = signal;
     if (childProcessIsRunning(child)) {
-      signalChildProcesses([child], signal);
+      signalChildProcessGroup(child, signal);
       shutdownTimer = setTimeout(forceStop, foregroundShutdownTimeoutMs);
       shutdownTimer.unref();
     }
