@@ -263,8 +263,8 @@ codexc service logs webui             # 查看 WebUI 日志
 证明 Provider 拓扑一致并完成真实 WebSocket 握手后才会复用；裸 App Server、部分拓扑、重复
 监管入口都会明确拒绝。Gateway 另以当前配置文件对应的私有所有权 Socket 全局互斥，不受
 Provider 或 `CODEX_HOME` 切换影响；重复启动会保留当前正在运行的进程。
-前台模式收到 `SIGINT` 或 `SIGTERM` 时先按所有权链路优雅停止，5 秒仍未退出才终止本次前台
-启动创建的进程组；已经由后台服务持有并被前台复用的 App Server 不会被终止。
+前台模式收到 `SIGINT` 或 `SIGTERM` 时先按所有权链路优雅停止，5 秒仍未退出才终止并等待本次
+前台启动创建的进程组退出；已经由后台服务持有并被前台复用的 App Server 不会被终止。
 
 `start`、`stop` 和 `status` 默认操作全部服务；`restart` 和 `logs` 默认只操作 Gateway。运行
 `codexc service -h` 查看完整用法。WebUI 与指标中心是独立后台服务，不并入 `all`：

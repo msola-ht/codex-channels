@@ -66,6 +66,7 @@ import {
 } from "../scripts/workspace-config.mjs";
 
 const foregroundShutdownTimeoutMs = 5_000;
+const foregroundProcessGroupExitTimeoutMs = 1_000;
 
 const helpText = {
   main: `Codex Connect CLI
@@ -1188,16 +1189,18 @@ async function runForegroundScript(
   );
   let forwardedSignal;
   let shutdownTimer;
+  let forcedProcessGroupStop = false;
   const forceStop = () => {
-    if (!childProcessIsRunning(child)) return;
     if (process.platform !== "win32" && child.pid !== undefined) {
       try {
         process.kill(-child.pid, "SIGKILL");
+        forcedProcessGroupStop = true;
         return;
       } catch (error) {
         if (error?.code === "ESRCH") return;
       }
     }
+    if (!childProcessIsRunning(child)) return;
     child.kill("SIGKILL");
   };
   const forwardSignal = (signal) => {
@@ -1230,18 +1233,45 @@ async function runForegroundScript(
     });
     child.once("exit", (code, signal) => {
       cleanup();
-      const resultingSignal = forwardedSignal ?? signal;
-      if (resultingSignal) {
-        process.kill(process.pid, resultingSignal);
-        return;
-      }
-      if (code !== 0) {
-        rejectChild(new Error(`子命令执行失败：exit=${code ?? 1}`));
-        return;
-      }
-      resolveChild();
+      void (async () => {
+        if (forcedProcessGroupStop && child.pid !== undefined) {
+          await waitForProcessGroupExit(
+            child.pid,
+            foregroundProcessGroupExitTimeoutMs,
+          );
+        }
+        const resultingSignal = forwardedSignal ?? signal;
+        if (resultingSignal) {
+          process.kill(process.pid, resultingSignal);
+          return;
+        }
+        if (code !== 0) {
+          rejectChild(new Error(`子命令执行失败：exit=${code ?? 1}`));
+          return;
+        }
+        resolveChild();
+      })().catch(rejectChild);
     });
   });
+}
+
+async function waitForProcessGroupExit(processGroupId, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (processGroupIsRunning(processGroupId)) {
+    if (Date.now() >= deadline) return;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+  }
+}
+
+function processGroupIsRunning(processGroupId) {
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === "ESRCH") return false;
+    if (error?.code === "EPERM") return true;
+    throw error;
+  }
 }
 
 function state(args) {
