@@ -107,7 +107,11 @@
 
 ## 开发与协议
 
-- `dev-all.mjs`：开发模式下复用或启动主 App Server 与已配置的隔离 Provider App Server，再启动 Gateway。
+- `dev-all.mjs`：开发模式下复用完整的现有 App Server 拓扑，或通过唯一的内部
+  `service-app-server` 入口启动主 App Server、已配置的隔离 Provider App Server 及对应统计代理，
+  再启动 Gateway；只复用私有监管身份、Provider 拓扑和真实 WebSocket 健康检查一致的实例，
+  Gateway 进程再通过与 Provider 无关的配置级所有权 Socket 拒绝所有入口的重复实例。部分拓扑或裸
+  App Server 失败关闭。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下规范化
   `--profile deepseek`，既选择隔离实例，也保留 Profile 供 Remote TUI 完成第三方 Provider 认证。
 - `prepare-codex-upgrade.mjs`：在干净工作区校验精确目标 CLI，调用现有协议生成和版本同步，
@@ -191,11 +195,16 @@
 - `sync-published-readme.mjs`：把受控的 README 正式版本与安装命令渲染为已发布版本；拒绝
   预发布、降级、高于开发基线和缺少受控标记的文档。
 - `sync-gateway-version.mjs`：以锁定的 Codex CLI 协议版本同步 `package.json`、锁文件和 Gateway 运行时版本；不维护独立版本号。
-- `doctor.mjs`：检查 npm 包、Node、Codex CLI、当前 TOML 配置、Workspace、飞书凭据/Bot 身份、
+- `doctor.mjs`：检查 npm 包、Node、Linux PATH 中的 `bubblewrap`、Codex CLI、当前 TOML 配置、
+  Workspace、飞书凭据/Bot 身份、
   微信配置与 Bot 凭据、消息游标检查点、允许用户的加密回复上下文覆盖数和最近保存时间，
-  以及微信运行时启用状态；Doctor 不调用 `getupdates`，不显示 Token、`context_token` 或游标；
+  以及微信运行时启用状态；缺少 `bubblewrap` 时说明内置 helper 回退并输出发行版安装命令，
+  完成全部检测后按诊断领域只输出失败、提示和处理建议，交互终端区分颜色并汇总各状态数量；
+  Doctor 不自动安装或修改 AppArmor，不调用
+  `getupdates`，不显示 Token、`context_token` 或游标；
   主 Unix WebSocket、已配置 Provider 的切换或固定配置、实际模型目录、Provider Socket、
-  `initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，不输出完整 User-Agent、飞书
+  监管身份与 Provider 拓扑、`initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，
+  不输出完整 User-Agent、飞书
   上游响应或敏感配置内容。
 - `install-launchd.mjs`：渲染并安装 launchd plist；代理由 CLI 服务入口在每次启动时解析。
 - `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载四个 launchd 服务；启停、
@@ -205,6 +214,10 @@
   拒绝 App Server 内的自重启；
   检测到不支持的旧标签时明确拒绝启动。
 - `install-systemd.mjs`：渲染并安装 Linux systemd 用户服务 unit；代理由 CLI 服务入口在每次启动时解析。
+- `service-target-query.mjs`：把共享服务目录中的 systemd unit 或 launchd label 逐行提供给平台
+  控制脚本，避免 Shell 维护第二份服务标识。
+- `cli-status.mjs`：让 systemd/launchd 控制脚本复用公开 CLI 的成功、失败、提示和处理状态前缀、
+  TTY 颜色及 `NO_COLOR` 规则；日志和数据内容不经过状态渲染。
 - `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载四个 systemd 用户服务；
   与 launchd 使用相同的目标、服务角色和默认值，WebUI 与指标中心独立不并入 `all`，用户数据始终保留。
 

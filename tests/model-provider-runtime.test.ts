@@ -13,6 +13,10 @@ import { mkdtemp } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 import {
+  resolveAppServerRuntime,
+  resolvePrimaryAppServerSocketPath,
+} from "../runtime/app-server-runtime.mjs";
+import {
   loadManagedModelProvider,
   loadManagedProviderAppServer,
   loadOpenAiBaseUrl,
@@ -28,6 +32,34 @@ import {
 } from "../runtime/model-provider-runtime.mjs";
 
 describe("model provider runtime topology", () => {
+  it("resolves the primary socket from one shared runtime descriptor", () => {
+    expect(resolvePrimaryAppServerSocketPath(
+      { codex: { socket_path: "runtime/custom.sock" } },
+      "/private/codexc",
+    )).toBe("/private/codexc/runtime/custom.sock");
+  });
+
+  it("describes the complete switching topology from one shared source", async () => {
+    const codexHome = await configuredHome("switching");
+    const descriptor = resolveAppServerRuntime(
+      { codex: { socket_path: "runtime/codex.sock" } },
+      "/private/codexc",
+      { CODEX_HOME: codexHome },
+    );
+
+    expect(descriptor.primaryProvider).toBe("openai");
+    expect(descriptor.managedProvider?.provider).toBe("deepseek");
+    expect(descriptor.socketPaths).toEqual([
+      "/private/codexc/runtime/codex.sock",
+      "/private/codexc/runtime/codex-deepseek.sock",
+    ]);
+    expect(descriptor.topology).toEqual({
+      primaryProvider: "openai",
+      managedProvider: "deepseek",
+      socketPaths: descriptor.socketPaths,
+    });
+  });
+
   it("uses OpenAI as primary and exposes DeepSeek as an auxiliary switching server", async () => {
     const codexHome = await configuredHome("switching");
     const environment = { CODEX_HOME: codexHome };

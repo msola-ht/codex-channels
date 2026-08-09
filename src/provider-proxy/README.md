@@ -48,5 +48,8 @@
 `bin/codexc.mjs` 把代理装配到 App Server 服务生命周期，`bootstrap` 只把收到的指标组合到
 `observability` 独立指标库和 `conversation-core` 的稳定计时输入事件。
 App Server 服务为主 Provider 和可选切换 Provider 自动创建独立代理，不暴露手工监听配置。
+服务通过共享运行时的私有监管 Socket 独占完整 App Server 拓扑；前台只能复用监管身份和
+Provider 拓扑匹配且已完成 WebSocket 握手的实例。Gateway 另以配置级所有权 Socket 全局互斥，
+不把 Provider 指标 Socket 当作进程锁；裸实例与重复 Gateway 均失败关闭。
 OpenAI 保留用户配置的 `openai_base_url`；没有显式上游时，按官方认证请求 Header 选择 ChatGPT
 或 API 上游。代理启动失败时 App Server 服务失败关闭，不以绕过统计代理的方式静默降级。

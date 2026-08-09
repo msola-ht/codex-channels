@@ -13,7 +13,9 @@ import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { providerMetricsSocketPath } from "../runtime/model-provider-runtime.mjs";
+import { serviceIdentifiers } from "../runtime/service-targets.mjs";
 import {
   acquireRequestMetricsDatabaseLock,
   modelRequestMetricsSchemaVersion,
@@ -838,9 +840,10 @@ function isGatewayRunning(environment) {
     return true;
   }
   if (process.platform === "linux") {
+    const gatewayUnit = serviceIdentifiers("systemd", "gateway")[0];
     const result = spawnSync(
       environment.SYSTEMCTL_BINARY || "systemctl",
-      ["--user", "show", "--property=ActiveState", "--value", "codex-connect-gateway.service"],
+      ["--user", "show", "--property=ActiveState", "--value", gatewayUnit],
       { encoding: "utf8", env: environment },
     );
     if (result.error) throw result.error;
@@ -852,9 +855,10 @@ function isGatewayRunning(environment) {
   }
   if (process.platform === "darwin") {
     const uid = typeof process.getuid === "function" ? process.getuid() : 0;
+    const gatewayLabel = serviceIdentifiers("launchd", "gateway")[0];
     const result = spawnSync(
       environment.LAUNCHCTL_BINARY || "launchctl",
-      ["print", `gui/${uid}/com.hegenai.codex-gateway`],
+      ["print", `gui/${uid}/${gatewayLabel}`],
       { stdio: "ignore", env: environment },
     );
     if (result.error) throw result.error;
@@ -1699,57 +1703,67 @@ if (
     } else if (command === "reset" && process.argv.length === 3) {
       const result = resetMetricsDatabase();
       if (!result.changed) {
-        console.log(`指标数据库尚未创建：${result.databasePath}`);
+        writeCliMessage("note", "指标数据库尚未创建，无需重置。");
+        console.log(`数据库：${result.databasePath}`);
       } else {
-        console.log(`指标数据库已归档并重置：${result.databasePath}`);
+        writeCliMessage("success", "指标数据库已归档并重置。");
+        console.log(`数据库：${result.databasePath}`);
         console.log(`旧库备份：${result.backupPath}`);
-        console.log("启动 Gateway 后将自动创建当前 Schema。");
+        writeCliMessage("remediation", "启动 Gateway 后将自动创建当前 Schema。");
       }
     } else if (command === "upgrade" && process.argv.length === 3) {
       const result = upgradeMetricsDatabase();
       if (!result.changed) {
-        console.log(result.schemaVersion === null
-          ? `指标数据库尚未创建：${result.databasePath}`
+        writeCliMessage("note", result.schemaVersion === null
+          ? "指标数据库尚未创建，无需升级。"
           : `指标数据库已经是 Schema v${result.schemaVersion}。`);
+        if (result.schemaVersion === null) console.log(`数据库：${result.databasePath}`);
       } else {
-        console.log(`指标数据库已升级到 Schema v${result.schemaVersion}：${result.databasePath}`);
+        writeCliMessage("success", `指标数据库已升级到 Schema v${result.schemaVersion}。`);
+        console.log(`数据库：${result.databasePath}`);
         console.log(`升级前备份：${result.backupPath}`);
       }
     } else if (command === "upgrade-restart" && process.argv.length === 3) {
       const result = upgradeMetricsDatabaseWithGatewayRestart();
       if (!result.changed) {
-        console.log(result.schemaVersion === null
-          ? `指标数据库尚未创建：${result.databasePath}`
+        writeCliMessage("note", result.schemaVersion === null
+          ? "指标数据库尚未创建，无需升级。"
           : `指标数据库已经是 Schema v${result.schemaVersion}。`);
+        if (result.schemaVersion === null) console.log(`数据库：${result.databasePath}`);
       } else {
-        console.log(`指标数据库已升级到 Schema v${result.schemaVersion}：${result.databasePath}`);
+        writeCliMessage("success", `指标数据库已升级到 Schema v${result.schemaVersion}。`);
+        console.log(`数据库：${result.databasePath}`);
         console.log(`升级前备份：${result.backupPath}`);
       }
-      console.log("Gateway 已重新启动。");
+      writeCliMessage("success", "Gateway 已重新启动。");
     } else if (command === "sync-reset" && process.argv.length === 3) {
       const result = resetMetricsSyncState();
       if (!result.changed) {
-        console.log(`指标同步状态尚未创建，无需重置：${result.statePath}`);
+        writeCliMessage("note", "指标同步状态尚未创建，无需重置。");
+        console.log(`同步状态：${result.statePath}`);
       } else {
-        console.log(`已重置指标同步水位（保留设备 ${result.deviceId}）：${result.statePath}`);
+        writeCliMessage("success", `已重置指标同步水位（保留设备 ${result.deviceId}）。`);
+        console.log(`同步状态：${result.statePath}`);
         console.log(`重置前备份：${result.backupPath}`);
-        console.log("重启 Gateway 后将从第一条记录重新上报（中心按主键覆盖修复历史）。");
+        writeCliMessage("remediation", "重启 Gateway 后将从第一条记录重新上报（中心按主键覆盖修复历史）。");
       }
     } else if (command === "sync-reset-restart" && process.argv.length === 3) {
       const result = resetMetricsSyncStateWithGatewayRestart();
       if (!result.changed) {
-        console.log(`指标同步状态尚未创建，无需重置：${result.statePath}`);
+        writeCliMessage("note", "指标同步状态尚未创建，无需重置。");
+        console.log(`同步状态：${result.statePath}`);
       } else {
-        console.log(`已重置指标同步水位（保留设备 ${result.deviceId}）：${result.statePath}`);
+        writeCliMessage("success", `已重置指标同步水位（保留设备 ${result.deviceId}）。`);
+        console.log(`同步状态：${result.statePath}`);
         console.log(`重置前备份：${result.backupPath}`);
       }
-      console.log("Gateway 已重新启动，将从第一条记录重新上报。");
+      writeCliMessage("success", "Gateway 已重新启动，将从第一条记录重新上报。");
     } else if (command === "prune" && process.argv.length === 4) {
       const provider = process.argv[3];
       const result = pruneProviderMetrics(provider);
-      console.log(`已清理 ${result.provider} 请求指标：本地删除 ${result.local.deleted} 条`);
+      writeCliMessage("success", `已清理 ${result.provider} 请求指标：本地删除 ${result.local.deleted} 条。`);
       if (result.center.skipped) {
-        console.log("中心库未配置或不存在，已跳过。");
+        writeCliMessage("note", "中心库未配置或不存在，已跳过。");
       } else {
         console.log(`中心删除 ${result.center.deleted} 条`);
       }
@@ -1760,12 +1774,12 @@ if (
         console.log(`中心备份：${result.center.backupPath}`);
       }
       for (const warning of result.warnings) {
-        console.warn(`警告：${warning}`);
+        writeCliMessage("note", `警告：${warning}`, { destination: "stderr" });
       }
       if (result.center.skipped) {
-        console.log("Gateway 已重新启动。");
+        writeCliMessage("success", "Gateway 已重新启动。");
       } else {
-        console.log("Gateway 与中心服务已重新启动。");
+        writeCliMessage("success", "Gateway 与中心服务已重新启动。");
       }
     } else if (command === "report") {
       const options = parseMetricsOptions(
@@ -1820,7 +1834,7 @@ if (
       throw new Error("用法：codexc metrics <status|run|threads|turns|report|export|upgrade|reset>");
     }
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
+    writeCliMessage("failure", error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   }
 }

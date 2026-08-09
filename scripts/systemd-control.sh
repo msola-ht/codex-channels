@@ -5,10 +5,15 @@ action="${1:-status}"
 systemctl_binary="${SYSTEMCTL_BINARY:-systemctl}"
 config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
 units_dir="$config_home/systemd/user"
-app_unit="codex-connect-app-server.service"
-gateway_unit="codex-connect-gateway.service"
-webui_unit="codex-connect-webui.service"
-metrics_center_unit="codex-connect-center.service"
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+service_ids() {
+  "${NODE_BINARY:-node}" "$script_dir/service-target-query.mjs" systemd "$1" "$2"
+}
+
+print_status() {
+  "${NODE_BINARY:-node}" "$script_dir/cli-status.mjs" "$1" "$2"
+}
 
 show_logs() {
   follow=0
@@ -29,24 +34,21 @@ show_logs() {
         shift 2
         ;;
       *)
-        printf '%s\n' "未知日志参数：$1" >&2
+        print_status failure "未知日志参数：$1"
         return 2
         ;;
     esac
   done
 
   set --
-  if [ "$service" = "gateway" ] || [ "$service" = "all" ]; then
-    set -- "$@" --user-unit="$gateway_unit"
-  fi
-  if [ "$service" = "app-server" ] || [ "$service" = "all" ]; then
-    set -- "$@" --user-unit="$app_unit"
-  fi
-  if [ "$service" = "webui" ]; then
-    set -- "$@" --user-unit="$webui_unit"
-  fi
-  if [ "$service" = "center" ]; then
-    set -- "$@" --user-unit="$metrics_center_unit"
+  if [ "$service" = "all" ]; then
+    resolved_units=$(service_ids all stop)
+    for unit in $resolved_units; do
+      set -- "$@" --user-unit="$unit"
+    done
+  else
+    unit=$(service_ids "$service" start)
+    set -- "$@" --user-unit="$unit"
   fi
   set -- "$@" --lines="$lines" --no-pager
   if [ "$follow" -eq 1 ]; then
@@ -64,7 +66,7 @@ require_target() {
     gateway|app-server|webui|center|all)
       ;;
     *)
-      printf '%s\n' "服务目标必须是 gateway、app-server、webui、center 或 all：$1" >&2
+      print_status failure "服务目标必须是 gateway、app-server、webui、center 或 all：$1"
       return 2
       ;;
   esac
@@ -73,127 +75,87 @@ require_target() {
 case "$action" in
   install)
     systemctl_user daemon-reload
-    systemctl_user enable "$app_unit" "$gateway_unit"
-    systemctl_user restart "$app_unit"
-    systemctl_user restart "$gateway_unit"
-    printf '%s\n' "Codex App Server 与 Gateway systemd 用户服务已安装并启动。"
-    printf '%s\n' "WebUI 服务已生成，可执行 codexc service start webui 启动。"
-    printf '%s\n' "指标中心服务已生成，可执行 codexc service start center 启动。"
+    resolved_units=$(service_ids all start)
+    set -- $resolved_units
+    systemctl_user enable "$@"
+    for unit in "$@"; do systemctl_user restart "$unit"; done
+    print_status success "Codex App Server 与 Gateway systemd 用户服务已安装并启动。"
+    print_status note "WebUI 服务已生成，可执行 codexc service start webui 启动。"
+    print_status note "指标中心服务已生成，可执行 codexc service start center 启动。"
     ;;
   start)
     target=${2:-all}
     require_target "$target"
+    resolved_units=$(service_ids "$target" start)
+    for unit in $resolved_units; do systemctl_user start "$unit"; done
     case "$target" in
-      gateway)
-        systemctl_user start "$gateway_unit"
-        printf '%s\n' "Gateway 已启动。"
-        ;;
-      app-server)
-        systemctl_user start "$app_unit"
-        printf '%s\n' "Codex App Server 已启动。"
-        ;;
-      webui)
-        systemctl_user start "$webui_unit"
-        printf '%s\n' "WebUI 已启动。"
-        ;;
-      center)
-        systemctl_user start "$metrics_center_unit"
-        printf '%s\n' "指标中心已启动。"
-        ;;
-      all)
-        systemctl_user start "$app_unit"
-        systemctl_user start "$gateway_unit"
-        printf '%s\n' "Codex App Server 与 Gateway 已启动。"
-        ;;
+      gateway) print_status success "Gateway 已启动。" ;;
+      app-server) print_status success "Codex App Server 已启动。" ;;
+      webui) print_status success "WebUI 已启动。" ;;
+      center) print_status success "指标中心已启动。" ;;
+      all) print_status success "Codex App Server 与 Gateway 已启动。" ;;
     esac
     ;;
   stop)
     target=${2:-all}
     require_target "$target"
+    resolved_units=$(service_ids "$target" stop)
+    for unit in $resolved_units; do systemctl_user stop "$unit"; done
     case "$target" in
-      gateway)
-        systemctl_user stop "$gateway_unit"
-        printf '%s\n' "Gateway 已停止。"
-        ;;
-      app-server)
-        systemctl_user stop "$app_unit"
-        printf '%s\n' "Codex App Server 已停止。"
-        ;;
-      webui)
-        systemctl_user stop "$webui_unit"
-        printf '%s\n' "WebUI 已停止。"
-        ;;
-      center)
-        systemctl_user stop "$metrics_center_unit"
-        printf '%s\n' "指标中心已停止。"
-        ;;
-      all)
-        systemctl_user stop "$gateway_unit"
-        systemctl_user stop "$app_unit"
-        printf '%s\n' "Codex App Server 与 Gateway 已停止。"
-        ;;
+      gateway) print_status success "Gateway 已停止。" ;;
+      app-server) print_status success "Codex App Server 已停止。" ;;
+      webui) print_status success "WebUI 已停止。" ;;
+      center) print_status success "指标中心已停止。" ;;
+      all) print_status success "Codex App Server 与 Gateway 已停止。" ;;
     esac
     ;;
   restart)
     target=${2:-gateway}
     require_target "$target"
+    resolved_units=$(service_ids "$target" start)
+    for unit in $resolved_units; do systemctl_user restart "$unit"; done
     case "$target" in
-      gateway)
-        systemctl_user restart "$gateway_unit"
-        printf '%s\n' "Gateway 已重启；Codex App Server 保持运行。"
-        ;;
-      app-server)
-        systemctl_user restart "$app_unit"
-        printf '%s\n' "Codex App Server 已重启；Gateway 将自动重连。"
-        ;;
-      webui)
-        systemctl_user restart "$webui_unit"
-        printf '%s\n' "WebUI 已重启。"
-        ;;
-      center)
-        systemctl_user restart "$metrics_center_unit"
-        printf '%s\n' "指标中心已重启。"
-        ;;
-      all)
-        systemctl_user restart "$app_unit"
-        systemctl_user restart "$gateway_unit"
-        printf '%s\n' "Codex App Server 与 Gateway 已重启。"
-        ;;
+      gateway) print_status success "Gateway 已重启；Codex App Server 保持运行。" ;;
+      app-server) print_status success "Codex App Server 已重启；Gateway 将自动重连。" ;;
+      webui) print_status success "WebUI 已重启。" ;;
+      center) print_status success "指标中心已重启。" ;;
+      all) print_status success "Codex App Server 与 Gateway 已重启。" ;;
     esac
     ;;
   reload)
+    gateway_unit=$(service_ids gateway start)
     if ! systemctl_user is-active --quiet "$gateway_unit"; then
-      printf '%s\n' "Gateway 尚未运行，请先执行 codexc service start。" >&2
+      print_status failure "Gateway 尚未运行，请先执行 codexc service start。"
       exit 1
     fi
     systemctl_user kill --kill-whom=main --signal=HUP "$gateway_unit"
-    printf '%s\n' "已通知 Gateway 重新读取配置；Gateway 连接变化会自动重启，App Server 配置变化需重新安装服务。"
+    print_status success "已通知 Gateway 重新读取配置；Gateway 连接变化会自动重启，App Server 配置变化需重新安装服务。"
     ;;
   status)
     target=${2:-all}
     require_target "$target"
-    case "$target" in
-      gateway) systemctl_user --no-pager status "$gateway_unit" || true ;;
-      app-server) systemctl_user --no-pager status "$app_unit" || true ;;
-      webui) systemctl_user --no-pager status "$webui_unit" || true ;;
-      center) systemctl_user --no-pager status "$metrics_center_unit" || true ;;
-      all) systemctl_user --no-pager status "$app_unit" "$gateway_unit" || true ;;
-    esac
+    resolved_units=$(service_ids "$target" start)
+    set -- $resolved_units
+    systemctl_user --no-pager status "$@" || true
     ;;
   logs)
     shift
     show_logs "$@"
     ;;
   uninstall)
-    systemctl_user disable --now "$gateway_unit" "$app_unit" "$webui_unit" "$metrics_center_unit" 2>/dev/null || true
-    rm -f "$units_dir/$gateway_unit" "$units_dir/$app_unit" "$units_dir/$webui_unit" "$units_dir/$metrics_center_unit"
+    resolved_units=$(service_ids all stop)
+    webui_unit=$(service_ids webui stop)
+    center_unit=$(service_ids center stop)
+    set -- $resolved_units "$webui_unit" "$center_unit"
+    systemctl_user disable --now "$@" 2>/dev/null || true
+    for unit in "$@"; do rm -f "$units_dir/$unit"; done
     systemctl_user daemon-reload
-    systemctl_user reset-failed "$gateway_unit" "$app_unit" "$webui_unit" "$metrics_center_unit" 2>/dev/null || true
-    printf '%s\n' "Codex App Server、Gateway、WebUI 与指标中心 systemd 用户服务已卸载。"
-    printf '%s\n' "用户配置与运行数据保留在 ~/.codex-connect。"
+    systemctl_user reset-failed "$@" 2>/dev/null || true
+    print_status success "Codex App Server、Gateway、WebUI 与指标中心 systemd 用户服务已卸载。"
+    print_status note "用户配置与运行数据保留在 ~/.codex-connect。"
     ;;
   *)
-    printf '%s\n' "用法：$0 {install|uninstall|reload|start|stop|restart|status|logs} [gateway|app-server|webui|center|all]" >&2
+    print_status failure "用法：$0 {install|uninstall|reload|start|stop|restart|status|logs} [gateway|app-server|webui|center|all]"
     exit 2
     ;;
 esac

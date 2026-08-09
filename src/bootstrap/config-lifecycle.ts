@@ -10,6 +10,7 @@ import {
   readConfigEvents,
   type WorkspaceAddedConfigEvent,
 } from "../../runtime/config-event-queue.mjs";
+import { GatewayOwner } from "../../runtime/gateway-owner.mjs";
 import { loadRuntimeConfig } from "../config/index.js";
 import { createLogger } from "../observability/index.js";
 import { GatewayApplication } from "./app.js";
@@ -17,14 +18,22 @@ import { GatewayApplication } from "./app.js";
 export async function runGatewayProcess(): Promise<void> {
   const runtime = loadRuntimeConfig();
   const config = runtime.config;
+  const gatewayOwner = new GatewayOwner(runtime.configPath);
+  await gatewayOwner.start();
   const eventQueuePath = configEventQueuePath(dirname(runtime.configPath));
   const watchedPaths = [runtime.configPath, eventQueuePath];
   const logger = createLogger(config);
-  const application = new GatewayApplication(
-    config,
-    logger,
-    runtime.configPath,
-  );
+  let application: GatewayApplication;
+  try {
+    application = new GatewayApplication(
+      config,
+      logger,
+      runtime.configPath,
+    );
+  } catch (error) {
+    await gatewayOwner.close();
+    throw error;
+  }
   let stopping = false;
   let started = false;
   let reloading = false;
@@ -50,7 +59,14 @@ export async function runGatewayProcess(): Promise<void> {
     void application
       .stop()
       .catch((error) => logger.error({ err: error }, "Gateway 停止失败"))
-      .finally(() => process.exit(exitCode));
+      .finally(async () => {
+        try {
+          await gatewayOwner.close();
+        } catch (error) {
+          logger.error({ err: error }, "Gateway 所有权 Socket 关闭失败");
+        }
+        process.exit(exitCode);
+      });
   };
   const reload = async (): Promise<void> => {
     if (stopping || reloading) {
@@ -77,7 +93,8 @@ export async function runGatewayProcess(): Promise<void> {
         return;
       }
       if (result.action === "restart") {
-        const supervised = process.env.CODEX_CONNECT_GATEWAY_SUPERVISED === "1";
+        const supervised = process.env.CODEX_CONNECT_GATEWAY_SUPERVISED === "1"
+          || process.env.CODEX_CONNECT_SERVICE_ROLE === "gateway";
         logger.info(
           { changes: result.changes.map((change) => change.code), supervised },
           supervised
@@ -140,7 +157,13 @@ export async function runGatewayProcess(): Promise<void> {
   process.once("SIGTERM", () => stop());
   process.on("SIGHUP", scheduleReload);
 
-  await application.start();
+  try {
+    await application.start();
+  } catch (error) {
+    stopWatching();
+    await gatewayOwner.close();
+    throw error;
+  }
   started = true;
   if (watchedPaths.length > 0) {
     for (const path of watchedPaths) {

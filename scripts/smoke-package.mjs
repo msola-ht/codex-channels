@@ -76,10 +76,18 @@ try {
   }
   const installedPackage = join(temporaryDirectory, "node_modules", "@hegenai", "codexc");
   for (const requiredFile of [
+    "runtime/app-server-runtime.mjs",
+    "runtime/app-server-supervisor.mjs",
+    "runtime/cli-presentation.mjs",
+    "runtime/gateway-owner.mjs",
     "runtime/network-proxy.mjs",
+    "runtime/process-lifecycle.mjs",
+    "runtime/service-targets.mjs",
     "scripts/feishu-application.mjs",
     "scripts/feishu-setup.mjs",
     "scripts/setup.mjs",
+    "scripts/cli-status.mjs",
+    "scripts/service-target-query.mjs",
     "scripts/codex-rules.mjs",
     "scripts/telegram-setup.mjs",
     "scripts/terminal-prompter.mjs",

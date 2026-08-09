@@ -7,7 +7,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Server } from "node:net";
+import { createServer, type Server } from "node:net";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -101,6 +101,24 @@ describe("Provider proxy metrics channel", () => {
 
     await expect(server.start()).rejects.toThrow(/不安全/u);
     expect(statSync(socketPath).isFile()).toBe(true);
+  });
+
+  it("reports an occupied metrics channel without treating it as the Gateway lock", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-provider-metrics-occupied-"));
+    temporaryDirectories.push(directory);
+    const socketPath = join(directory, "metrics.sock");
+    const occupied = createServer();
+    await new Promise<void>((resolveListen, rejectListen) => {
+      occupied.once("error", rejectListen);
+      occupied.listen(socketPath, resolveListen);
+    });
+    const server = new ProviderProxyMetricsServer(socketPath, () => undefined);
+
+    try {
+      await expect(server.start()).rejects.toThrow("模型代理指标 Socket 已被占用");
+    } finally {
+      await new Promise<void>((resolveClose) => occupied.close(() => resolveClose()));
+    }
   });
 });
 

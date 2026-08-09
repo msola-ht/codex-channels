@@ -3,8 +3,11 @@ import { chmodSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 
+import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
+import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
-import { packageDir, resolveConfiguredPath, runtimeConfig } from "./runtime-config.mjs";
+import { serviceDefinitions } from "../runtime/service-targets.mjs";
+import { packageDir, runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
 if (process.platform !== "linux") {
@@ -15,11 +18,7 @@ const runtime = runtimeConfig();
 const document = readGatewayConfig(runtime.configPath);
 const codex = table(document.codex);
 const { defaultWorkspace } = readWorkspaceConfig(document);
-const socketPath = resolveConfiguredPath(
-  stringValue(codex.socket_path),
-  runtime.dataDir,
-  join(runtime.dataDir, "runtime", "codex-app-server.sock"),
-);
+const socketPath = resolvePrimaryAppServerSocketPath(document, runtime.dataDir);
 if (!isAbsolute(socketPath)) {
   throw new Error("CODEX_SOCKET_PATH 必须是绝对路径");
 }
@@ -63,12 +62,8 @@ const configHome = process.env.XDG_CONFIG_HOME?.trim()
 const unitsDir = join(configHome, "systemd", "user");
 mkdirSync(unitsDir, { recursive: true, mode: 0o700 });
 
-for (const name of [
-  "codex-connect-app-server",
-  "codex-connect-gateway",
-  "codex-connect-webui",
-  "codex-connect-center",
-]) {
+for (const definition of serviceDefinitions) {
+  const name = definition.systemd.replace(/\.service$/u, "");
   const template = readFileSync(join(packageDir, "systemd", `${name}.service.template`), "utf8");
   let rendered = Object.entries(argumentValues).reduce(
     (content, [key, value]) => content.replaceAll(`__${key}__`, systemdArgument(value)),
@@ -84,9 +79,9 @@ for (const name of [
   );
   const destination = join(unitsDir, `${name}.service`);
   writeFileSync(destination, rendered, { mode: 0o600 });
-  console.log(`已生成 ${destination}`);
+  console.log(`生成：${destination}`);
 }
-console.log("systemd 用户服务配置已生成。");
+writeCliMessage("success", "systemd 用户服务配置已生成。");
 
 function resolveExecutable(command) {
   if (isAbsolute(command)) {

@@ -11,20 +11,32 @@ import { dirname, isAbsolute, join } from "node:path";
 import WebSocket from "ws";
 
 import {
+  colorizeCliText,
+  formatCliStatus,
+} from "../runtime/cli-presentation.mjs";
+import {
+  inspectAppServerSupervisor,
+  sameAppServerTopology,
+} from "../runtime/app-server-supervisor.mjs";
+import {
+  resolveAppServerRuntime,
+  resolvePrimaryAppServerSocketPath,
+} from "../runtime/app-server-runtime.mjs";
+import {
   readGatewayConfig,
   validateGatewayConfigDocument,
 } from "../runtime/gateway-config.mjs";
 import {
-  loadManagedProviderAppServer,
-  providerAppServerSocketPath,
   validateConfiguredModelProvider,
 } from "../runtime/model-provider-runtime.mjs";
 import { readApiProviderKey } from "../runtime/api-provider-credential.mjs";
+import { serviceIdentifiers } from "../runtime/service-targets.mjs";
 import { validateFeishuApplication } from "./feishu-application.mjs";
 import { packageDir, resolveConfiguredPath, runtimeConfig, userDataDir } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
 const checks = [];
+let checkSection = "基础环境";
 if (process.argv.length > 2) {
   throw new Error("用法：codexc doctor");
 }
@@ -40,6 +52,19 @@ record(
   versionAtLeast(process.versions.node, "22.13.0"),
   `${process.version}（要求 >=22.13.0）`,
 );
+if (process.platform === "linux") {
+  const bubblewrap = optionalExecutable("bwrap");
+  if (bubblewrap) {
+    record("Linux 沙箱", true, `bwrap 可用：${bubblewrap}`);
+  } else {
+    note(
+      "Linux 沙箱",
+      "PATH 中未找到 bwrap；Codex 将回退到内置 helper",
+      "Debian/Ubuntu：sudo apt install bubblewrap；"
+      + "Fedora/RHEL：sudo dnf install bubblewrap；安装后重新运行 codexc doctor",
+    );
+  }
+}
 
 const explicitConfigFile = process.env.CODEX_CONNECT_CONFIG_FILE?.trim();
 const runtime = explicitConfigFile
@@ -48,6 +73,7 @@ const runtime = explicitConfigFile
 const { configPath, dataDir } = runtime;
 let document;
 
+setSection("配置文件");
 if (!existsSync(configPath)) {
   record("用户配置", false, `不存在：${configPath}；请先运行 codexc init`);
 } else {
@@ -69,6 +95,7 @@ if (!existsSync(configPath)) {
 }
 
 if (document) {
+  setSection("通讯渠道");
   const telegram = table(document.telegram);
   const feishu = table(document.feishu);
   const weixin = table(document.weixin);
@@ -203,6 +230,7 @@ if (document) {
     note("微信", "未配置");
   }
 
+  setSection("扩展能力");
   const apiProviders = Array.isArray(document.api_providers)
     ? document.api_providers.map(table)
     : [];
@@ -229,6 +257,7 @@ if (document) {
     note("图片识别", "未启用");
   }
 
+  setSection("Workspace");
   try {
     const { workspaces, defaultWorkspace } = readWorkspaceConfig(document);
     record("Workspace", true, `${workspaces.length} 个，默认 ${defaultWorkspace.id}`);
@@ -236,6 +265,7 @@ if (document) {
     record("Workspace", false, errorMessage(error));
   }
 
+  setSection("Codex 与 App Server");
   const codexCommand = stringValue(codex.binary) || "codex";
   try {
     const codexBinary = resolveExecutable(codexCommand);
@@ -256,12 +286,9 @@ if (document) {
     record("Codex CLI", false, errorMessage(error));
   }
 
-  const socketPath = resolveConfiguredPath(
-    stringValue(codex.socket_path),
-    dataDir,
-    join(dataDir, "runtime", "codex-app-server.sock"),
-  );
-  await checkAppServer("Codex App Server", socketPath);
+  const socketPath = resolvePrimaryAppServerSocketPath(document, dataDir);
+  let appServerTopology;
+  let managedProvider;
   try {
     const configuredProvider = validateConfiguredModelProvider(process.env);
     if (configuredProvider) {
@@ -271,15 +298,45 @@ if (document) {
         `${configuredProvider.provider} ${configuredProvider.mode === "switching" ? "切换" : "固定"}模式有效`,
       );
     }
-    const managedProvider = loadManagedProviderAppServer(process.env);
-    if (managedProvider) {
-      await checkAppServer(
-        `${managedProvider.provider} App Server`,
-        providerAppServerSocketPath(socketPath, managedProvider.provider),
-      );
-    }
+    const descriptor = resolveAppServerRuntime(document, dataDir, process.env);
+    managedProvider = descriptor.managedProvider;
+    appServerTopology = descriptor.topology;
   } catch (error) {
     record("模型提供商配置", false, errorMessage(error));
+  }
+  if (appServerTopology) {
+    await checkAppServerSupervisor(socketPath, appServerTopology);
+  }
+  await checkAppServer("Codex App Server", socketPath);
+  if (managedProvider) {
+    await checkAppServer(
+      `${managedProvider.provider} App Server`,
+      appServerTopology.socketPaths[1],
+    );
+  }
+}
+
+async function checkAppServerSupervisor(socketPath, expectedTopology) {
+  try {
+    const actualTopology = await inspectAppServerSupervisor(socketPath);
+    const matches = sameAppServerTopology(actualTopology, expectedTopology);
+    record(
+      "App Server 监管",
+      matches,
+      matches
+        ? "监管身份有效，Provider 拓扑与当前配置一致"
+        : "监管身份缺失、无效或 Provider 拓扑与当前配置不一致",
+      matches
+        ? undefined
+        : "运行 codexc service restart all；如仍失败，先停止裸 App Server 后重试",
+    );
+  } catch (error) {
+    record(
+      "App Server 监管",
+      false,
+      errorMessage(error),
+      "运行 codexc service restart all；如仍失败，先停止裸 App Server 后重试",
+    );
   }
 }
 
@@ -302,10 +359,11 @@ async function checkAppServer(label, socketPath) {
   }
 }
 
+setSection("系统服务");
 if (process.platform === "darwin") {
   const uid = process.getuid?.();
   const domain = `gui/${uid}`;
-  const labels = ["com.hegenai.codex-app-server", "com.hegenai.codex-gateway"];
+  const labels = serviceIdentifiers("launchd");
   const unsupportedLabels = ["com.msola.codex-app-server", "com.msola.codex-gateway"];
   const loaded = labels.filter((label) =>
     spawnSync("launchctl", ["print", `${domain}/${label}`], { stdio: "ignore" }).status === 0,
@@ -327,7 +385,7 @@ if (process.platform === "darwin") {
       : `已加载 ${loaded.length}/${labels.length}；前台运行模式可忽略`,
   );
 } else if (process.platform === "linux") {
-  const units = ["codex-connect-app-server.service", "codex-connect-gateway.service"];
+  const units = serviceIdentifiers("systemd");
   const active = units.filter((unit) =>
     spawnSync("systemctl", ["--user", "is-active", "--quiet", unit], { stdio: "ignore", timeout: 3_000 }).status === 0,
   );
@@ -354,19 +412,44 @@ if (process.platform === "darwin") {
   note("系统服务", "当前平台尚未提供系统服务适配");
 }
 
-for (const check of checks) {
-  console.log(`${check.prefix} ${check.name}：${check.detail}`);
+const visibleChecks = checks.filter((check) => check.kind !== "success");
+console.log("Codex Connect Doctor");
+let renderedSection;
+for (const check of visibleChecks) {
+  if (check.section !== renderedSection) {
+    renderedSection = check.section;
+    console.log(`\n=== ${renderedSection} ===`);
+  }
+  console.log(formatCliStatus(check.kind, check.name, check.detail));
+  if (check.remediation) {
+    console.log(formatCliStatus("remediation", check.name, check.remediation));
+  }
 }
 const failures = checks.filter((check) => check.kind === "failure").length;
-console.log(failures === 0 ? "\n诊断通过。" : `\n诊断发现 ${failures} 项问题。`);
+const successes = checks.filter((check) => check.kind === "success").length;
+const notes = checks.filter((check) => check.kind === "note").length;
+const summary = failures === 0
+  ? `诊断通过：${successes} 项通过，${notes} 项提示。`
+  : `诊断发现 ${failures} 项问题：${successes} 项通过，${notes} 项提示。`;
+console.log(`\n${colorizeCliText(failures === 0 ? "success" : "failure", summary)}`);
 process.exitCode = failures === 0 ? 0 : 1;
 
-function record(name, passed, detail) {
-  checks.push({ kind: passed ? "success" : "failure", prefix: passed ? "[通过]" : "[失败]", name, detail });
+function setSection(section) {
+  checkSection = section;
 }
 
-function note(name, detail) {
-  checks.push({ kind: "note", prefix: "[提示]", name, detail });
+function record(name, passed, detail, remediation) {
+  checks.push({
+    section: checkSection,
+    kind: passed ? "success" : "failure",
+    name,
+    detail,
+    remediation,
+  });
+}
+
+function note(name, detail, remediation) {
+  checks.push({ section: checkSection, kind: "note", name, detail, remediation });
 }
 
 function checkMode(name, path, expected) {
@@ -411,6 +494,22 @@ function resolveExecutable(command) {
     return realpathSync(command);
   }
   return realpathSync(execFileSync("/usr/bin/which", [command], { encoding: "utf8" }).trim());
+}
+
+function optionalExecutable(command) {
+  try {
+    const result = spawnSync("/usr/bin/which", [command], {
+      encoding: "utf8",
+      timeout: 3_000,
+    });
+    if (result.status !== 0) {
+      return undefined;
+    }
+    const path = result.stdout.trim();
+    return path ? realpathSync(path) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function versionAtLeast(actual, minimum) {

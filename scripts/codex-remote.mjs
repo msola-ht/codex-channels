@@ -1,14 +1,15 @@
 import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute } from "node:path";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
 import {
   loadManagedModelProvider,
   providerAppServerSocketPath,
 } from "../runtime/model-provider-runtime.mjs";
 import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
-import { resolveConfiguredPath, runtimeConfig } from "./runtime-config.mjs";
+import { runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
 const runtime = runtimeConfig();
@@ -28,11 +29,7 @@ if (workspaceFlag !== -1) {
   passthrough.splice(workspaceFlag, 2);
 }
 const selectedProfile = removeDeepseekProfile(passthrough);
-const primarySocketPath = resolveConfiguredPath(
-  stringValue(codex.socket_path),
-  runtime.dataDir,
-  join(runtime.dataDir, "runtime", "codex-app-server.sock"),
-);
+const primarySocketPath = resolvePrimaryAppServerSocketPath(document, runtime.dataDir);
 let socketPath = primarySocketPath;
 if (selectedProfile === deepseekProviderDefinition.profileName) {
   const managedProvider = loadManagedModelProvider();

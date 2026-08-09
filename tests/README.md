@@ -229,7 +229,9 @@
 - TOML、热加载分类、标准环境变量、macOS 系统代理和 Linux GNOME 代理的优先级，以及 Telegram
   Setup 对同一解析结果的复用；无代理时不注入空环境变量；飞书启用/禁用、凭据和允许 Open ID
   的严格映射、畸形与未知字段拒绝，以及启用/凭据重启和允许名单热加载分类。
-- CLI Doctor 的严格 TOML Schema 校验、共享 App Server 握手与实际版本匹配、飞书凭据/Bot
+- CLI Doctor 只展示失败/提示/处理建议的分组输出、非交互无颜色与状态汇总、严格 TOML Schema
+  校验、Linux `bubblewrap` 缺失提示与安装处理方案、共享 App Server 监管身份、Provider 拓扑、握手与
+  实际版本匹配、飞书凭据/Bot
   身份有限探测、微信安全凭据只读校验、敏感错误清洗和只读诊断；微信 Doctor 的配置与允许人数、
   Bot 凭据、游标检查点、加密上线通知上下文覆盖数和最近保存时间摘要，以及 Token、
   `context_token` 和实际游标不进入输出；项目规则限定当前 Workspace、
@@ -237,6 +239,16 @@
   一级模块使用完整依赖允许列表并要求跨模块只导入公开入口；Session Routing 不得依赖具体
   Client 或生成协议，Conversation Turn 测试不得伪装成完整 Client；生产源码只有 Codex Client
   可以导入生成协议，业务模块不得依赖具体 Client。
+- App Server 运行描述统一派生主/Provider Socket 与监管拓扑；服务目录统一 systemd unit、launchd
+  label、核心服务范围、默认目标和启停顺序，平台脚本按规范目标查询标识而不依赖注册顺序；公共进程生命周期只向仍活动的子进程转发信号并成对
+  清理监听；CLI 成功、失败、提示和处理状态使用独立颜色，Doctor 检查项另用通过，并统一遵守
+  `NO_COLOR`；状态呈现不改变路径、标识符和其他机器可解析数据。
+- `codexc start` 在仅 DeepSeek 固定模式下复用 `service-app-server`，把主 App Server 的 Provider
+  地址指向本机统计代理；监管 Socket 覆盖裸 App Server、后台入口重复启动和 Provider 拓扑不一致
+  的失败关闭，配置级所有权 Socket 跨 Provider 覆盖直接入口和前台入口的重复 Gateway，真实
+  WebSocket 健康检查阻止仅创建 Socket 文件的未就绪实例提前启动 Gateway；监管入口关闭会主动
+  清理保持连接的本地客户端；公开前台入口在子进程忽略优雅停止信号时有界终止并等待自己创建的
+  进程组退出，异常强制退出残留的 Gateway 所有权 Socket 由下一所有者确认已失效后安全回收。
 - 仓库 Git hooks 自动安装与重复执行安全性、完整提交验证工作流先安装 WebUI 锁定依赖，以及
   无本地依赖时的源码安装准备。
 - 协议临时生成失败时保留现有类型目录、生成树逐文件比较和安全替换。
@@ -290,8 +302,9 @@ RUN_CODEX_INTEGRATION=1 npm test -- --run tests/real-app-server.test.ts
 ```
 
 默认真实测试会让两个 Client 连接同一个临时 Unix WebSocket App Server，验证一个连接创建的
-临时 Thread 会实时广播到另一个连接，并出现在共享的 loaded Thread 列表中；该流程不会启动
-模型 Turn。若还要验证两个连接依次读取和恢复同一个已有会话，可显式指定当前 Workspace 中
+临时 Thread 会实时广播到另一个连接，并出现在共享的 loaded Thread 列表中；还会在隔离的
+`CODEX_HOME` 下启动真实 `service-app-server`，确认 OpenAI 统计代理、私有监管拓扑和 App Server
+初始化属于同一条服务链路。该流程不会启动模型 Turn。若还要验证两个连接依次读取和恢复同一个已有会话，可显式指定当前 Workspace 中
 空闲且允许临时订阅的 fixture Thread：
 
 ```bash

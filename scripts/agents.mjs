@@ -8,6 +8,7 @@ import {
 import { parse } from "smol-toml";
 
 import { agentRolesConfigPath } from "../runtime/agent-roles.mjs";
+import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { loadManagedModelProvider } from "../runtime/model-provider-runtime.mjs";
 import { managedModelProviderRoleConfigPath } from "../runtime/model-provider-runtime.mjs";
 
@@ -183,17 +184,17 @@ if (command === undefined || command === "-h" || command === "--help") {
   process.exitCode = command === undefined ? 1 : 0;
 } else if (command === "enable-deepseek") {
   enableDeepseekRole(process.env);
-  console.log("已启用 multi_agent_v2 并注册 DS 子代理角色（agents.ds）。");
-  console.log("运行 codexc service restart all 后生效。");
+  writeCliMessage("success", "已启用 multi_agent_v2 并注册 DS 子代理角色（agents.ds）。");
+  writeCliMessage("remediation", "运行 codexc service restart all 后生效。");
   printStatus(process.env);
 } else if (command === "disable-deepseek") {
   disableDeepseekRole(process.env);
-  console.log("已移除 DS 子代理角色并关闭 multi_agent_v2。");
-  console.log("运行 codexc service restart all 后生效。");
+  writeCliMessage("success", "已移除 DS 子代理角色并关闭 multi_agent_v2。");
+  writeCliMessage("remediation", "运行 codexc service restart all 后生效。");
 } else if (command === "status") {
   printStatus(process.env);
 } else {
-  console.error(`未知子命令：${command}`);
+  writeCliMessage("failure", `未知子命令：${command}`);
   console.error(usage);
   process.exitCode = 1;
 }

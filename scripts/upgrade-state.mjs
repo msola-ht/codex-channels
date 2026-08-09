@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import {
   requireUserConfig,
   resolveConfiguredPath,
@@ -86,13 +87,15 @@ if (
   try {
     const result = upgradeStateDatabase();
     if (!result.changed) {
-      console.log(`状态数据库已是 Schema ${result.version}：${result.databasePath}`);
+      writeCliMessage("note", `状态数据库已是 Schema ${result.version}。`);
+      console.log(`数据库：${result.databasePath}`);
     } else {
-      console.log(`状态数据库已升级到 Schema ${result.version}：${result.databasePath}`);
+      writeCliMessage("success", `状态数据库已升级到 Schema ${result.version}。`);
+      console.log(`数据库：${result.databasePath}`);
       console.log(`升级前备份：${result.backupPath}`);
     }
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
+    writeCliMessage("failure", error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   }
 }

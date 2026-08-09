@@ -70,6 +70,7 @@ describe("systemd installer", () => {
     expect(gateway).toContain("codex-connect-app-server.service");
     expect(appServer).toContain('Environment="CODEX_CONNECT_SERVICE_ROLE=app-server"');
     expect(gateway).toContain('Environment="CODEX_CONNECT_SERVICE_ROLE=gateway"');
+    expect(gateway).toContain('Environment="CODEX_CONNECT_GATEWAY_SUPERVISED=1"');
     for (const unit of [appServer, gateway]) {
       expect(unit).toContain("UMask=0077");
       expect(unit).toContain("Restart=always");
@@ -83,6 +84,77 @@ describe("systemd installer", () => {
     if (!verified.error) {
       expect(verified.status, verified.stderr || verified.stdout).toBe(0);
     }
+  });
+
+  it("queries only the requested service identifier", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-systemd-query-"));
+    temporaryDirectories.push(root);
+    const binDir = join(root, "bin");
+    const nodeLog = join(root, "node.log");
+    mkdirSync(binDir);
+    const nodeWrapper = join(binDir, "node");
+    writeFileSync(
+      nodeWrapper,
+      "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$NODE_LOG\"\nexec \"$REAL_NODE\" \"$@\"\n",
+    );
+    chmodSync(nodeWrapper, 0o755);
+    const fakeSystemctl = join(binDir, "systemctl");
+    writeFileSync(fakeSystemctl, "#!/bin/sh\nexit 0\n");
+    chmodSync(fakeSystemctl, 0o755);
+
+    execFileSync("/bin/sh", [resolve("scripts/systemd-control.sh"), "status", "gateway"], {
+      env: {
+        ...process.env,
+        HOME: root,
+        NODE_BINARY: nodeWrapper,
+        NODE_LOG: nodeLog,
+        REAL_NODE: process.execPath,
+        SYSTEMCTL_BINARY: fakeSystemctl,
+      },
+    });
+
+    const queries = readFileSync(nodeLog, "utf8")
+      .trim()
+      .split("\n")
+      .filter((line) => line.includes("service-target-query.mjs"));
+    expect(queries).toHaveLength(1);
+    expect(queries[0]).toContain("systemd gateway start");
+  });
+
+  it("fails closed when the service catalog query fails", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-systemd-query-failure-"));
+    temporaryDirectories.push(root);
+    const binDir = join(root, "bin");
+    mkdirSync(binDir);
+    const nodeWrapper = join(binDir, "node");
+    writeFileSync(nodeWrapper, [
+      "#!/bin/sh",
+      "case \"$1\" in",
+      "  *service-target-query.mjs) exit 42 ;;",
+      "esac",
+      "exec \"$REAL_NODE\" \"$@\"",
+    ].join("\n"));
+    chmodSync(nodeWrapper, 0o755);
+    const fakeSystemctl = join(binDir, "systemctl");
+    writeFileSync(fakeSystemctl, "#!/bin/sh\nexit 0\n");
+    chmodSync(fakeSystemctl, 0o755);
+
+    const result = spawnSync(
+      "/bin/sh",
+      [resolve("scripts/systemd-control.sh"), "start", "gateway"],
+      {
+        env: {
+          ...process.env,
+          HOME: root,
+          NODE_BINARY: nodeWrapper,
+          REAL_NODE: process.execPath,
+          SYSTEMCTL_BINARY: fakeSystemctl,
+        },
+        encoding: "utf8",
+      },
+    );
+    expect(result.status).toBe(42);
+    expect(result.stdout).not.toContain("[成功]");
   });
 
   it("supports lifecycle actions and preserves user data on uninstall", () => {
@@ -189,9 +261,11 @@ describe("systemd installer", () => {
     expect(installCalls).toContain("--user restart codex-connect-app-server.service");
     expect(installCalls).toContain("--user restart codex-connect-gateway.service");
     expect(started).toContain("已启动");
+    expect(started).toContain("[成功]");
     expect(startCalls).toContain("--user start codex-connect-app-server.service");
     expect(startCalls).toContain("--user start codex-connect-gateway.service");
     expect(gatewayStarted).toContain("Gateway 已启动");
+    expect(gatewayStarted).toContain("[成功]");
     expect(gatewayStartCalls).toContain("codex-connect-gateway.service");
     expect(gatewayStartCalls).not.toContain("codex-connect-app-server.service");
     expect(stopped).toContain("已停止");

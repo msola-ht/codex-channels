@@ -20,6 +20,8 @@
     <string>__CONFIG_PATH__</string>
     <key>CODEX_CONNECT_SERVICE_ROLE</key>
     <string>gateway</string>
+    <key>CODEX_CONNECT_GATEWAY_SUPERVISED</key>
+    <string>1</string>
     <key>CODEX_BINARY</key>
     <string>__CODEX_BINARY__</string>
     <key>PATH</key>
