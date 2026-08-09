@@ -1,6 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
 import type { ModelOption } from "../application/index.js";
 
@@ -18,13 +17,12 @@ interface DeepseekCatalogDefinition {
 }
 
 export function loadDeepseekModelOptions(
-  environment: NodeJS.ProcessEnv,
+  codexHome: string,
   enabled: boolean,
   definition: DeepseekCatalogDefinition,
 ): ModelOption[] {
   if (!enabled) return [];
   const knownModels = new Map(definition.models.map((model) => [model.slug, model]));
-  const codexHome = resolve(environment.CODEX_HOME?.trim() || join(homedir(), ".codex"));
   const catalogPath = join(codexHome, definition.catalogFileName);
   if (!existsSync(catalogPath)) return [];
   let parsed: unknown;

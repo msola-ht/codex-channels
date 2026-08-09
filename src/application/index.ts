@@ -38,6 +38,11 @@ export {
 export {
   ConversationService,
   resolveThread,
+  turnErrorCode,
+  turnErrorMessage,
+  turnErrorType,
+  type AgentRoleEntry,
+  type AgentRolePort,
   type ConversationInput,
   type ConversationQueryPort,
   type ConversationResumeResult,
@@ -90,7 +95,6 @@ export {
   type DisplayPriceCurrency,
   type ExchangeRatePort,
   type ExchangeRateSnapshot,
-  type PriceCurrencyMode,
   priceDisplayNeedsExchangeRate,
   resolvePriceCurrency,
 } from "./exchange-rate-port.js";

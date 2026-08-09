@@ -42,6 +42,7 @@ export const conversationCommandNames = [
   "diff",
   "plan",
   "goal",
+  "agents",
 ] as const;
 
 export type ConversationCommandName = typeof conversationCommandNames[number];
@@ -101,7 +102,8 @@ export type ConversationCommandResult =
       view: "diff";
       artifacts: ReturnType<ConversationUseCases["artifacts"]>;
     }
-  | { kind: "goal"; goal: ThreadGoal | null };
+  | { kind: "goal"; goal: ThreadGoal | null }
+  | { kind: "agents"; roles: Awaited<ReturnType<ConversationUseCases["listAgentRoles"]>> };
 
 export type ConversationCommandOutcome =
   | { type: "thread.resumed"; threadId: string; backgroundedThreadId?: string; transferredFrom?: string }
@@ -127,6 +129,12 @@ export type ConversationCommandOutcome =
   | {
       type: "skill.started";
       skillName: string;
+      turnId: string;
+      steered: boolean;
+    }
+  | {
+      type: "agents.started";
+      roleName: string;
       turnId: string;
       steered: boolean;
     }
@@ -367,6 +375,29 @@ export class ConversationCommandService {
           },
         };
       }
+      case "agents": {
+        if (!argumentsText) {
+          return {
+            kind: "agents",
+            roles: this.conversations.listAgentRoles(),
+          };
+        }
+        const invocation = parseAgentInvocation(argumentsText);
+        const submission = await this.conversations.invokeAgent(
+          target,
+          invocation.selector,
+          invocation.task,
+        );
+        return {
+          kind: "outcome",
+          outcome: {
+            type: "agents.started",
+            roleName: submission.roleName,
+            turnId: submission.turnId,
+            steered: submission.steered,
+          },
+        };
+      }
       case "mcp":
         return {
           kind: "mcp",
@@ -508,6 +539,23 @@ function parseSkillInvocation(input: string): {
     throw new UserFacingError(
       "skill.usage",
       "用法：/skill <名称或序号> <任务>",
+    );
+  }
+  return {
+    selector: match[1],
+    task: match[2].trim(),
+  };
+}
+
+function parseAgentInvocation(input: string): {
+  selector: string;
+  task: string;
+} {
+  const match = /^(\S+)\s+([\s\S]+)$/u.exec(input.trim());
+  if (!match?.[1] || !match[2]?.trim()) {
+    throw new UserFacingError(
+      "agents.usage",
+      "用法：/agents <角色名称或序号> <任务>",
     );
   }
   return {

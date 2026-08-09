@@ -3,14 +3,18 @@ import {
   type AccountUsage,
   type ConversationSession,
   type ConversationStatus,
+  type DisplayPriceCurrency,
+  type ExchangeRateSnapshot,
   type ModelSelectionState,
 } from "../../application/index.js";
+import type { OutputEvent } from "../../conversation-core/index.js";
 import {
   formatSurfaceConfigurationChange,
   formatWorkspacesAdded as formatSharedWorkspacesAdded,
 } from "../configuration-change-format.js";
 import {
   createStartupPresentation,
+  createSubagentCompletedPresentation,
   renderStructuredLifecyclePresentation,
   type LifecyclePresentation,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
@@ -118,6 +122,19 @@ export function renderTelegramLifecyclePresentation(
   presentation: LifecyclePresentation,
 ): string {
   return renderStructuredLifecyclePresentation(presentation);
+}
+
+export function renderTelegramSubagentCompleted(
+  event: Extract<OutputEvent, { type: "subagent.completed" }>,
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency,
+  exchangeRate?: ExchangeRateSnapshot | null,
+  debug = false,
+): string {
+  return renderTelegramLifecyclePresentation(
+    createSubagentCompletedPresentation(event, priceCurrency, exchangeRate, debug),
+  );
 }
 
 export type StartupRuntimeInfo = LifecycleStartupRuntimeInfo;

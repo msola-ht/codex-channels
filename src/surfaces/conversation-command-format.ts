@@ -65,6 +65,7 @@ export const conversationCommandDescriptions = {
   diff: "查看当前 Turn Diff",
   plan: "切换 Plan 模式或直接开始规划",
   goal: "查看或管理 Goal",
+  agents: "查看或调用子代理",
 } satisfies Record<ConversationCommandName, string>;
 
 export const conversationCommandHelpSections = [
@@ -94,6 +95,7 @@ export const conversationCommandHelpSections = [
       "/model [序号|模型 ID|名称]",
       "/effort [序号|档位] · /fast [on|off|status]",
       "/skill · /skills [名称或序号 任务]",
+      "/agents [角色名称或序号 任务]",
       "/mcp · /plugins",
       "/usage · /limits · /permissions",
       "/metrics session",
@@ -259,6 +261,17 @@ export function formatConversationCommandOutcome(
             `Skill：${outcome.skillName}`,
             `Turn：${outcome.turnId}`,
           ].join("\n"));
+    case "agents.started":
+      return outcome.steered
+        ? toStructuredMarkdownList([
+            "已把子代理任务追加到当前任务",
+            `角色：${outcome.roleName}`,
+          ].join("\n"))
+        : toStructuredMarkdownList([
+            "已使用子代理开始任务",
+            `角色：${outcome.roleName}`,
+            `Turn：${outcome.turnId}`,
+          ].join("\n"));
     case "goal.cleared":
       return toStructuredMarkdownList(["已清除当前 Thread Goal。"].join("\n"));
     case "goal.updated":
@@ -366,6 +379,22 @@ export function formatConversationSkills(
         ),
         "",
         "使用：/skill <名称或序号> <任务>",
+      ].join("\n"));
+}
+
+export function formatConversationAgents(
+  result: Extract<ConversationCommandResult, { kind: "agents" }>,
+): string {
+  return result.roles.length === 0
+    ? "当前没有可用的子代理角色。"
+    : toStructuredMarkdownList([
+        `子代理角色（${result.roles.length}）：`,
+        ...result.roles.map(
+          (role, index) =>
+            `${index + 1}. ${role.name}${role.description ? `：${role.description}` : ""}`,
+        ),
+        "",
+        "使用：/agents <角色名称或序号> <任务>",
       ].join("\n"));
 }
 
@@ -608,18 +637,24 @@ export function formatConversationLimits(
           "周限估算（本机代理样本）：",
           ...(weeklyEstimates.length === 0
             ? ["正在采样；需要同一周窗口内至少出现一次可观测的额度增长。"]
-            : weeklyEstimates.flatMap((estimate) => [
+            : weeklyEstimates.flatMap((estimate) => {
+                const pricedSuccesses = Math.max(
+                  0,
+                  estimate.requestCount - estimate.unsuccessfulRequestCount,
+                );
+                return [
                 `${estimate.limitId}：已使用 ${formatPercent(estimate.usedPercent)} · 观测变化 ${formatPercent(estimate.observedDeltaPercent)}（${estimate.intervalCount} 个区间）`,
                 `样本：${estimate.requestCount} 次请求${estimate.unsuccessfulRequestCount > 0 ? ` · ${estimate.unsuccessfulRequestCount} 次未成功` : ""}`,
                 `每 1%：约 ${formatTokenCount(estimate.totalTokensPerPercent)} Token`,
                 `  - 输入：约 ${formatTokenCount(estimate.inputTokensPerPercent)}`,
                 `  - 输出：约 ${formatTokenCount(estimate.outputTokensPerPercent)}`,
-                `  - API 参考费用：${formatEstimatedLimitCost(estimate.pricingCurrency, estimate.costPerPercentNanos)}（已计价 ${estimate.pricedRequestCount}/${Math.max(0, estimate.requestCount - estimate.unsuccessfulRequestCount)} 个成功请求）`,
+                `  - API 参考费用：${formatEstimatedLimitCost(estimate.pricingCurrency, estimate.costPerPercentNanos)}${estimate.pricedRequestCount === pricedSuccesses ? "" : `（计价 ${estimate.pricedRequestCount}/${pricedSuccesses}）`}`,
                 `剩余 ${formatPercent(estimate.remainingPercent)}：约 ${formatTokenCount(estimate.remainingTokens)} Token · API 参考费用 ${formatEstimatedLimitCost(estimate.pricingCurrency, estimate.remainingCostNanos)}`,
                 ...(estimate.observedDeltaPercent < 1
                   ? ["提示：观测到的额度变化不足 1%，估算波动可能较大。"]
                   : []),
-              ])),
+                ];
+              })),
           "口径：按统计代理相邻额度快照的增量折算；其他客户端在快照间的用量可能造成偏差，费用不是订阅实际扣款。",
         ]
       : []),
@@ -675,7 +710,9 @@ export function formatConversationStatus(status: ConversationStatus): string {
         ? [`  - 缓存写入：${formatTokenCount(total.cacheWriteInputTokens)}`]
         : []),
       `  - 输出：${formatTokenCount(total.outputTokens)}`,
-      `  - 其中推理输出：${formatTokenCount(total.reasoningOutputTokens)}`,
+      ...(total.reasoningOutputTokens > 0
+        ? [`  - 其中推理输出：${formatTokenCount(total.reasoningOutputTokens)}`]
+        : []),
       `  - Codex 有效上下文窗口：${modelContextWindow === null ? "未知" : formatTokenCount(modelContextWindow)}`,
     );
   } else if (status.threadId) {

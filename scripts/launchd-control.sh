@@ -6,6 +6,8 @@ user_domain="gui/$(id -u)"
 agents_dir="$HOME/Library/LaunchAgents"
 app_label="com.hegenai.codex-app-server"
 gateway_label="com.hegenai.codex-gateway"
+webui_label="com.hegenai.codex-webui"
+metrics_center_label="com.hegenai.codex-center"
 unsupported_app_label="com.msola.codex-app-server"
 unsupported_gateway_label="com.msola.codex-gateway"
 
@@ -22,7 +24,7 @@ show_logs() {
   fi
   runtime_dir="${socket_path:h}"
 
-  if (( $# > 0 )) && [[ "$1" == "gateway" || "$1" == "app-server" || "$1" == "all" ]]; then
+  if (( $# > 0 )) && [[ "$1" == "gateway" || "$1" == "app-server" || "$1" == "webui" || "$1" == "center" || "$1" == "all" ]]; then
     service="$1"
     shift
   fi
@@ -58,6 +60,18 @@ show_logs() {
       || ! -f "$runtime_dir/codex-app-server.log"
       || "$runtime_dir/codex-app-server.error.log" -nt "$runtime_dir/codex-app-server.log" ]]; then
       [[ -f "$runtime_dir/codex-app-server.error.log" ]] && log_files+=("$runtime_dir/codex-app-server.error.log")
+    fi
+  fi
+  if [[ "$service" == "webui" ]]; then
+    [[ -f "$runtime_dir/webui.log" ]] && log_files+=("$runtime_dir/webui.log")
+    if [[ ! -f "$runtime_dir/webui.log" || "$runtime_dir/webui.error.log" -nt "$runtime_dir/webui.log" ]]; then
+      [[ -f "$runtime_dir/webui.error.log" ]] && log_files+=("$runtime_dir/webui.error.log")
+    fi
+  fi
+  if [[ "$service" == "center" ]]; then
+    [[ -f "$runtime_dir/center.log" ]] && log_files+=("$runtime_dir/center.log")
+    if [[ ! -f "$runtime_dir/center.log" || "$runtime_dir/center.error.log" -nt "$runtime_dir/center.log" ]]; then
+      [[ -f "$runtime_dir/center.error.log" ]] && log_files+=("$runtime_dir/center.error.log")
     fi
   fi
   if (( ${#log_files[@]} == 0 )); then
@@ -137,10 +151,10 @@ start_job() {
 
 require_target() {
   case "$1" in
-    gateway|app-server|all)
+    gateway|app-server|webui|center|all)
       ;;
     *)
-      print -u2 "服务目标必须是 gateway、app-server 或 all：$1"
+      print -u2 "服务目标必须是 gateway、app-server、webui、center 或 all：$1"
       return 2
       ;;
   esac
@@ -157,6 +171,8 @@ case "$action" in
     start_job "$app_label" "$agents_dir/$app_label.plist"
     start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
     print "Codex App Server 与 Gateway 已安装并启动。"
+    print "WebUI 服务已生成，可执行 codexc service start webui 启动。"
+    print "指标中心服务已生成，可执行 codexc service start center 启动。"
     ;;
   start)
     reject_unsupported_jobs
@@ -168,9 +184,17 @@ case "$action" in
     if [[ "$target" == "gateway" || "$target" == "all" ]]; then
       start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
     fi
+    if [[ "$target" == "webui" ]]; then
+      start_job "$webui_label" "$agents_dir/$webui_label.plist"
+    fi
+    if [[ "$target" == "center" ]]; then
+      start_job "$metrics_center_label" "$agents_dir/$metrics_center_label.plist"
+    fi
     case "$target" in
       gateway) print "Gateway 已启动。" ;;
       app-server) print "Codex App Server 已启动。" ;;
+      webui) print "WebUI 已启动。" ;;
+      center) print "指标中心已启动。" ;;
       all) print "Codex App Server 与 Gateway 已启动。" ;;
     esac
     ;;
@@ -183,17 +207,27 @@ case "$action" in
     if [[ "$target" == "app-server" || "$target" == "all" ]]; then
       stop_job "$app_label"
     fi
+    if [[ "$target" == "webui" ]]; then
+      stop_job "$webui_label"
+    fi
+    if [[ "$target" == "center" ]]; then
+      stop_job "$metrics_center_label"
+    fi
     case "$target" in
       gateway) print "Gateway 已停止。" ;;
       app-server) print "Codex App Server 已停止。" ;;
+      webui) print "WebUI 已停止。" ;;
+      center) print "指标中心已停止。" ;;
       all) print "Codex App Server 与 Gateway 已停止。" ;;
     esac
     ;;
   uninstall)
     stop_job "$gateway_label"
     stop_job "$app_label"
-    /bin/rm -f "$agents_dir/$gateway_label.plist" "$agents_dir/$app_label.plist"
-    print "Codex App Server 与 Gateway launchd 服务已卸载。"
+    stop_job "$webui_label"
+    stop_job "$metrics_center_label"
+    /bin/rm -f "$agents_dir/$gateway_label.plist" "$agents_dir/$app_label.plist" "$agents_dir/$webui_label.plist" "$agents_dir/$metrics_center_label.plist"
+    print "Codex App Server、Gateway、WebUI 与指标中心 launchd 服务已卸载。"
     print "用户配置与运行数据保留在 ~/.codex-connect。"
     ;;
   restart)
@@ -206,9 +240,17 @@ case "$action" in
     if [[ "$target" == "gateway" || "$target" == "all" ]]; then
       start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
     fi
+    if [[ "$target" == "webui" ]]; then
+      start_job "$webui_label" "$agents_dir/$webui_label.plist"
+    fi
+    if [[ "$target" == "center" ]]; then
+      start_job "$metrics_center_label" "$agents_dir/$metrics_center_label.plist"
+    fi
     case "$target" in
       gateway) print "Gateway 已重启；Codex App Server 保持运行。" ;;
       app-server) print "Codex App Server 已重启；Gateway 将自动重连。" ;;
+      webui) print "WebUI 已重启。" ;;
+      center) print "指标中心已重启。" ;;
       all) print "Codex App Server 与 Gateway 已重启。" ;;
     esac
     ;;
@@ -235,13 +277,19 @@ case "$action" in
     if [[ "$target" == "gateway" || "$target" == "all" ]]; then
       launchctl print "$user_domain/$gateway_label" 2>/dev/null || true
     fi
+    if [[ "$target" == "webui" ]]; then
+      launchctl print "$user_domain/$webui_label" 2>/dev/null || true
+    fi
+    if [[ "$target" == "center" ]]; then
+      launchctl print "$user_domain/$metrics_center_label" 2>/dev/null || true
+    fi
     ;;
   logs)
     shift
     show_logs "$@"
     ;;
   *)
-    print -u2 "用法：$0 {install|uninstall|reload|start|stop|restart|status|logs} [gateway|app-server|all]"
+    print -u2 "用法：$0 {install|uninstall|reload|start|stop|restart|status|logs} [gateway|app-server|webui|center|all]"
     exit 2
     ;;
 esac

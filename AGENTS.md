@@ -102,7 +102,7 @@ Surface -> Application/Core <- Codex Client
 - 仓库必须记录并校验生成类型对应的精确 Codex CLI 版本。
 - 升级协议时先审查生成差异，再更新 `codex-protocol` 的受控导出、实现和测试。
 - 稳定业务代码不得依赖实验生成参数才会出现的字段。唯一例外是当前锁定
-  `codex-cli 0.146.0` 的官方 Plan 模式：只允许使用
+  `codex-cli 0.146.1` 的官方 Plan 模式：只允许使用
   `collaborationMode/list` 和 `turn/start.collaborationMode`，必须通过
   `--experimental` 生成类型、从 `codex-protocol` 受控导出，并由真实 App Server
   合同测试覆盖；不得借此接入或暴露其他实验方法、字段或通知。
@@ -212,8 +212,10 @@ Surface -> Application/Core <- Codex Client
   隐式别名。`gateway` 与 `service-app-server` 仅作为服务模板内部入口，不列入公开帮助。
 - 后台进程统一由 `codexc service` 管理；启停、重启、状态和日志使用 `gateway`、
   `app-server`、`all` 目标。启停和状态默认 `all`，重启和日志默认 `gateway`。
-- 项目级 Codex 命令预设位于 `.codex/rules/default.rules`，只可免确认运行只读 Git 检查和仓库
-  已有验证脚本；不得放行 Git 暂存、提交、推送、依赖安装、发布、服务管理、任意 Shell 或破坏性命令。
+- 项目级 Codex 命令预设位于 `.codex/rules/default.rules`，只可免确认运行只读 Git 检查、仓库
+  已有验证脚本，以及已明确列入预设的 `codexc channel send-image`（把经共享校验的本地图片
+  发送到绑定渠道会话）；不得放行 Git 暂存、提交、推送、依赖安装、发布、服务管理、任意 Shell
+  或破坏性命令。
 - 使用 `codexc rules init` 从当前 Git/Node 项目根目录生成该文件，使用 `codexc rules check`
   调用 Codex CLI 校验；规则属于磁盘项目，不得写入或依赖 Workspace Registry。
 - Surface 的项目规则命令只能操作当前授权 Workspace 的精确根目录，只接受生成或检查，不得

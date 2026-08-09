@@ -44,9 +44,9 @@
   文本，验证后直接交给会话 Adapter；Gateway 不保存文件副本、不向 Codex 暴露工作区外路径，
   正文作为用户文本进入 App Server Thread。文件名、地址、查询参数、key、正文与底层异常
   不进入日志或下载错误。
-- `outbound-image.ts`：只读取 App Server `imageGeneration.savedPath` 映射出的绝对路径；
-  使用无符号链接文件句柄，限制为普通文件、10 MiB 和 PNG/JPEG 内容签名，不把路径或正文写入
-  日志。
+- `outbound-image.ts`：读取 App Server `imageGeneration.savedPath` 映射的绝对路径或
+  渠道 spool（`codexc channel send-image`）提交的图片；使用无符号链接文件句柄，限制为
+  普通文件、10 MiB 和 PNG/JPEG 内容签名，不把路径或正文写入日志。
 - `updates-monitor.ts`：组合协议 Client 与游标 Store；单批消息先按原始消息 ID 去重，只并发准备
   连续图片段，使平台拆开的图片可以进入同一聚合窗口；文本、命令和不同图片段仍保持原始顺序。
   连续图片段部分失败时先记住本次 Surface 生命周期内已经成功处理的消息 ID，渠道独立重试时

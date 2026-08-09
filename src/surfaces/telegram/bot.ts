@@ -276,6 +276,10 @@ export class TelegramSurface {
     this.registerHandlers();
   }
 
+  sendChannelImage(conversationId: string, imagePath: string): Promise<void> {
+    return this.output.sendChannelImage(conversationId, imagePath);
+  }
+
   async start(): Promise<void> {
     await Promise.all([
       this.imageStore.start(),

@@ -40,6 +40,9 @@ describe("ProviderMetricsComposition", () => {
       writer: new BufferedModelRequestMetricsWriter({
         record,
         close,
+        recordSubagentThread: () => undefined,
+        requestRowsAfter: () => [],
+        subagentThreadsAfter: () => [],
         count: () => 0,
         recent: () => [],
         aggregate: () => emptyMetricsReport(),
@@ -88,6 +91,9 @@ describe("ProviderMetricsComposition", () => {
       writer: new BufferedModelRequestMetricsWriter({
         record,
         close: () => undefined,
+        recordSubagentThread: () => undefined,
+        requestRowsAfter: () => [],
+        subagentThreadsAfter: () => [],
         count: () => 0,
         recent: () => [],
         aggregate: () => emptyMetricsReport(),
@@ -135,6 +141,9 @@ describe("ProviderMetricsComposition", () => {
       writer: new BufferedModelRequestMetricsWriter({
         record,
         close: () => undefined,
+        recordSubagentThread: () => undefined,
+        requestRowsAfter: () => [],
+        subagentThreadsAfter: () => [],
         count: () => 0,
         recent: () => [],
         aggregate: () => emptyMetricsReport(),
@@ -239,6 +248,9 @@ describe("ProviderMetricsComposition", () => {
       writer: new BufferedModelRequestMetricsWriter({
         record,
         close: () => undefined,
+        recordSubagentThread: () => undefined,
+        requestRowsAfter: () => [],
+        subagentThreadsAfter: () => [],
         count: () => 0,
         recent: () => [],
         aggregate: () => emptyMetricsReport(),
@@ -351,6 +363,7 @@ function metrics(): ProviderProxyMetrics {
     httpStatus: 200,
     errorType: null,
     errorCode: null,
+    errorMessage: null,
     incompleteReason: null,
     inputTokens: 100,
     cachedInputTokens: 80,

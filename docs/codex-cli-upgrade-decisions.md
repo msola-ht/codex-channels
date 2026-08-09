@@ -60,6 +60,30 @@
 - OpenAI 托管安装源、发布渠道元数据、macOS 辅助程序签名和公证属于 Codex CLI 分发流程，
   不改变本项目 npm 发布或服务部署边界。
 
+## 0.146.1
+
+- 官方 Release：[`rust-v0.146.1`](https://github.com/openai/codex/releases/tag/rust-v0.146.1)
+- 项目开发基线：Gateway、生成协议、真实 App Server 合同与固定源码索引锁定 `0.146.1`；
+  README 在 npm 与 GitHub Release 均成功前继续保留 `0.146.0` 为当前正式版
+- 评估范围：0.146.1 的安全修复及生成协议新增的模型目录字段
+
+### 已采用
+
+| 变化 | 它是做什么的 | 项目收益与处理 | 本地入口或验证 |
+| --- | --- | --- | --- |
+| 0.146.1 精确协议基线 | 让 Gateway 始终连接和验证同一正式版本的 Codex App Server | 重新生成协议并同步 Gateway、CI、固定源码与真实合同版本；不保留 0.146.0 兼容分支 | [`codex-protocol/`](../src/codex-protocol/README.md)、[`ci.yml`](../.github/workflows/ci.yml)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+
+### 明确不采用
+
+| 上游能力 | 它是做什么的 | 当前不采用原因 |
+| --- | --- | --- |
+| `Model.modelSpecialty` 业务展示 | 让客户端读取模型面向特定任务的专长标签 | 生成协议保留官方必填字段，但当前模型选择只依赖可见性、输入能力、思考等级和服务层级；没有明确的 Surface 展示或路由需求，因此不把该字段导出到 Application |
+
+### 纯上游变化
+
+- 网络安全能力模型的自动审核采用更安全的默认值，并在终端解释权限变化。Gateway 不启用
+  `--approve-for-me`，命令、文件、网络和额外权限仍走现有显式审批，因此不新增协议入口或自动批准路径。
+
 ## 后续使用
 
 处理下一个正式版本时：

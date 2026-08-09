@@ -25,6 +25,7 @@ export interface ProviderWeeklyQuotaSnapshot {
   limitId: "codex";
   usedPercentMillionths: number;
   resetsAt: number;
+  planType: string | null;
 }
 
 export interface ProviderProxyMetrics {
@@ -39,6 +40,7 @@ export interface ProviderProxyMetrics {
   httpStatus: number | null;
   errorType: string | null;
   errorCode: string | null;
+  errorMessage: string | null;
   incompleteReason: string | null;
   inputTokens: number | null;
   cachedInputTokens: number | null;
@@ -377,6 +379,31 @@ export class ProviderProxy {
         upstream.send(message.data, { binary: message.isBinary });
       }
     });
+    upstream.on("unexpected-response", (_request, response) => {
+      const receivedAtMs = Date.now();
+      const statusCode = response.statusCode ?? 502;
+      if (activeMetrics) {
+        activeMetrics.httpStatus = statusCode;
+        markMetricsFailed(activeMetrics, "upstream_handshake_error");
+        activeMetrics.responseCompletedAtMs = receivedAtMs;
+        void this.deliverMetrics(activeMetrics);
+        activeMetrics = undefined;
+      } else {
+        const fallback = createMetricsState(
+          { threadId: null, turnId: null, operation: "response" },
+          receivedAtMs,
+          "websocket",
+          "response",
+        );
+        fallback.httpStatus = statusCode;
+        markMetricsFailed(fallback, "upstream_handshake_error");
+        fallback.responseCompletedAtMs = receivedAtMs;
+        void this.deliverMetrics(fallback);
+      }
+      response.resume();
+      client.terminate();
+      upstream.terminate();
+    });
     upstream.on("message", (data, isBinary) => {
       const receivedAtMs = Date.now();
       forwarding = forwarding.then(async () => {
@@ -422,7 +449,14 @@ export class ProviderProxy {
       noteFailureType("websocket_closed");
       closePeer(client, code, reason);
       if (!activeMetrics) return;
-      markMetricsFailed(activeMetrics, failureType ?? "websocket_closed");
+      const reasonType = websocketCloseErrorType(reason);
+      if (reasonType) {
+        markMetricsFailed(activeMetrics, "websocket_closed");
+        activeMetrics.errorType = reasonType;
+        activeMetrics.errorMessage = boundedMessage(reason.toString("utf8"));
+      } else {
+        markMetricsFailed(activeMetrics, failureType ?? "websocket_closed");
+      }
       void this.deliverMetrics(activeMetrics);
       activeMetrics = undefined;
     });
@@ -471,6 +505,7 @@ function createMetricsState(
     httpStatus: null,
     errorType: null,
     errorCode: null,
+    errorMessage: null,
     incompleteReason: null,
     inputTokens: null,
     cachedInputTokens: null,
@@ -498,6 +533,7 @@ function weeklyQuotaFromHeaders(
       headerNumber(headers[`x-codex-${window}-used-percent`]),
       headerNumber(headers[`x-codex-${window}-window-minutes`]),
       headerNumber(headers[`x-codex-${window}-reset-at`]),
+      null,
     );
     if (snapshot) return snapshot;
   }
@@ -509,6 +545,9 @@ function weeklyQuotaFromEvent(
 ): ProviderWeeklyQuotaSnapshot | null {
   const limitId = event?.metered_limit_name ?? event?.limit_name;
   if (limitId !== undefined && limitId !== "codex") return null;
+  const planType = typeof event?.plan_type === "string" && event.plan_type.length > 0
+    ? event.plan_type
+    : null;
   const rateLimits = asRecord(event?.rate_limits);
   for (const key of ["primary", "secondary"] as const) {
     const window = asRecord(rateLimits?.[key]);
@@ -516,6 +555,7 @@ function weeklyQuotaFromEvent(
       finiteNonNegativeNumber(window?.used_percent),
       finiteNonNegativeNumber(window?.window_minutes),
       finiteNonNegativeNumber(window?.reset_at),
+      planType,
     );
     if (snapshot) return snapshot;
   }
@@ -526,6 +566,7 @@ function weeklyQuotaSnapshot(
   usedPercent: number | null,
   windowMinutes: number | null,
   resetsAt: number | null,
+  planType: string | null,
 ): ProviderWeeklyQuotaSnapshot | null {
   if (
     usedPercent === null
@@ -537,7 +578,7 @@ function weeklyQuotaSnapshot(
   ) return null;
   const usedPercentMillionths = Math.round(usedPercent * percentScale);
   return Number.isSafeInteger(usedPercentMillionths)
-    ? { limitId: "codex", usedPercentMillionths, resetsAt }
+    ? { limitId: "codex", usedPercentMillionths, resetsAt, planType }
     : null;
 }
 
@@ -580,7 +621,25 @@ function observeResponseEvent(
     metrics.responseCompletedAtMs = receivedAtMs;
     return true;
   }
+  if (type === "error") {
+    const error = asRecord(event?.error);
+    const errorType = boundedString(error?.type) ?? "upstream_error";
+    metrics.httpStatus = finiteNonNegativeNumber(event?.status);
+    metrics.errorType = errorType;
+    metrics.errorCode = boundedString(error?.code);
+    metrics.errorMessage = boundedMessage(error?.message);
+    markMetricsFailed(metrics, errorType);
+    metrics.responseCompletedAtMs = receivedAtMs;
+    return true;
+  }
   return false;
+}
+
+function websocketCloseErrorType(reason: Buffer | string): string | null {
+  const text = reason.toString("utf8").slice(0, 200).toLowerCase();
+  if (text.includes("usage limit")) return "usage_limit_reached";
+  if (text.includes("rate limit")) return "rate_limit_reached";
+  return null;
 }
 
 function observeResponseCompletion(
@@ -617,6 +676,7 @@ function observeResponseFields(
   const error = asRecord(response?.error) ?? asRecord(event?.error);
   metrics.errorType = boundedString(error?.type);
   metrics.errorCode = boundedString(error?.code);
+  metrics.errorMessage = boundedMessage(error?.message);
   metrics.incompleteReason = boundedString(
     asRecord(response?.incomplete_details)?.reason,
   );
@@ -710,6 +770,16 @@ function boundedString(value: unknown): string | null {
     && /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/u.test(value)
     ? value
     : null;
+}
+
+function boundedMessage(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const message = value
+    .replace(/\p{Cc}/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (message.length === 0) return null;
+  return message.length <= 500 ? message : `${message.slice(0, 500)}…`;
 }
 
 function sanitizeClientWebSocketMessage(

@@ -81,7 +81,9 @@ Feishu 有界输出队列
 - SQLite 只保存共享会话恢复所需的最小绑定；飞书 OAuth 使用独立安全凭据后端。
 - 操作详情、错误和平台响应在进入消息前必须经过现有脱敏边界；Token、Cookie、
   Authorization Header 和未经约束的上游正文不得显示。
-- 生成图片只读取 App Server 明确提供且通过共享文件边界验证的 PNG/JPEG。
+- 生成图片只读取 App Server 明确提供且通过共享文件边界验证的 PNG/JPEG；渠道 spool 图片
+  （`codexc channel send-image`）同样只接受通过共享文件边界验证的 PNG/JPEG，且只发送到
+  Thread 绑定会话。
 
 ## 未支持边界与停止条件
 

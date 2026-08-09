@@ -622,6 +622,18 @@ export class ConversationCore {
           operation: event.operation,
         });
         return;
+      case "item.subagentActivity":
+        if (event.kind !== "started") {
+          return;
+        }
+        this.publishForThread(event.threadId, {
+          type: "subagent.spawned",
+          threadId: event.threadId,
+          turnId: event.turnId,
+          agentThreadId: event.agentThreadId,
+          agentPath: event.agentPath,
+        });
+        return;
       case "turn.error":
         if (!event.willRetry) {
           this.errorsByTurn.set(event.turnId, event.message);
@@ -1021,11 +1033,7 @@ export class ConversationCore {
     if (nonReasoningOutputTokens !== undefined && nonReasoningOutputTokens > 0) {
       result.nonReasoningOutputTokens = nonReasoningOutputTokens;
     }
-    if (
-      detailedTiming
-      && reasoningTokens !== undefined
-      && reasoningTokens > 0
-    ) {
+    if (reasoningTokens !== undefined && reasoningTokens > 0) {
       result.reasoningTokens = reasoningTokens;
     }
     if (

@@ -33,6 +33,9 @@ export {
   type OperationStatus,
   type OperationUpdate,
   type OutputEvent,
+  type SubagentState,
+  type SubagentStatus,
+  type SubagentTerminalStatus,
   type SurfaceId,
 } from "./events.js";
 export {

@@ -1,0 +1,728 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
+
+// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
+import { createWebuiServer, resolveWebuiSettings } from "../scripts/webui-server.mjs";
+// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
+import { initializeUserData } from "../scripts/runtime-config.mjs";
+// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
+import { createMetricsCenterServer } from "../scripts/metrics-center-server.mjs";
+import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
+import {
+  requestMetricsDatabasePath,
+  SqliteModelRequestMetricsStore,
+  type ModelRequestMetricSample,
+} from "../src/observability/index.js";
+
+const temporaryDirectories: string[] = [];
+const servers: Array<{ close: () => Promise<void> }> = [];
+
+afterEach(async () => {
+  await Promise.all(servers.splice(0).map((server) => server.close()));
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+describe("webui server", () => {
+  it("returns 503 for global APIs when the center service is disabled", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(fixture.environment);
+
+    const response = await fetch(`${origin}/api/v1/global/overview`);
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: { code: "metrics_view_unavailable" },
+    });
+  });
+
+  it("proxies global metrics from the center service", async () => {
+    const fixture = createFixture();
+    const center = createMetricsCenterServer({
+      host: "127.0.0.1",
+      token: "center-token",
+      deviceToken: "device-token",
+      databasePath: join(fixture.home, "data", "central-metrics.sqlite3"),
+    });
+    await new Promise<void>((resolve) => {
+      center.server.listen(0, "127.0.0.1", resolve);
+    });
+    servers.push(center);
+    const { port } = center.server.address() as AddressInfo;
+
+    const configPath = join(fixture.home, "config.toml");
+    const document = readGatewayConfig(configPath);
+    document.metrics = {
+      sync: { enabled: false, batch_size: 200, interval_seconds: 60 },
+      view: {
+        enabled: true,
+        endpoint: `http://127.0.0.1:${port}`,
+        token: "center-token",
+      },
+    };
+    writeGatewayConfig(configPath, document);
+
+    const ingest = await fetch(`http://127.0.0.1:${port}/api/ingest`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer device-token",
+      },
+      body: JSON.stringify({
+        deviceId: "device-a",
+        requestMetrics: [{
+          localId: 1,
+          provider: "deepseek",
+          model: "deepseek-v4-flash",
+          status: "completed",
+          inputTokens: 1_000,
+          outputTokens: 100,
+          totalTokens: 1_100,
+          recordedAtMs: 1_785_640_800_000,
+        }],
+        subagentThreads: [],
+      }),
+    });
+    expect(ingest.status).toBe(200);
+
+    const { origin } = await startServer(fixture.environment);
+    const overview = await fetch(`${origin}/api/v1/global/overview`);
+
+    expect(overview.status).toBe(200);
+    const body = await overview.json() as { totals: { request_count: number } };
+    expect(body.totals.request_count).toBe(1);
+
+    const daily = await fetch(`${origin}/api/v1/global/daily?days=30`);
+    expect(daily.status).toBe(200);
+    const dailyBody = await daily.json() as {
+      daily: Array<{ request_count: number }>;
+    };
+    expect(dailyBody.daily.reduce((sum, row) => sum + row.request_count, 0)).toBe(1);
+  });
+
+  it("serves the static page and rejects unknown paths", async () => {
+    const fixture = createFixture();
+    const staticDir = createStaticDir("<h1>Codex WebUI</h1>");
+    const { origin } = await startServer(fixture.environment, staticDir);
+
+    const page = await fetch(`${origin}/`);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain("Codex WebUI");
+
+    const missing = await fetch(`${origin}/missing.js`);
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toMatchObject({
+      error: { code: "not_found" },
+    });
+  });
+
+  it("returns overview aggregates, errors and weekly quota", async () => {
+    const fixture = createFixture();
+    recordSample(fixture.databasePath, {
+      ...metricSample(),
+      provider: "openai",
+      pricing: pricingSnapshot(),
+      status: "incomplete",
+      incompleteReason: "response_not_observed",
+      inputTokens: null,
+      cachedInputTokens: null,
+      outputTokens: null,
+      reasoningOutputTokens: null,
+      totalTokens: null,
+      weeklyQuota: {
+        limitId: "codex",
+        planType: "plus",
+        usedPercentMillionths: 12_500_000,
+        resetsAt: Math.floor(Date.now() / 1_000) + 24 * 60 * 60,
+      },
+      errorMessage: "You've hit your usage limit",
+    });
+    recordSample(fixture.databasePath, {
+      ...metricSample(),
+      pricing: pricingSnapshot(),
+    });
+    const { origin } = await startServer(fixture.environment);
+
+    const response = await fetch(`${origin}/api/v1/overview?range=24h&currency=cny`);
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      global: {
+        requestCount: number;
+        unsuccessfulRequestCount: number;
+        totalCostCnyNanos: number | null;
+      };
+      providers: Array<{
+        provider: string;
+        aggregate: { requestCount: number; totalCostCnyNanos: number | null };
+      }>;
+      errors: { requestCount: number; unsuccessfulRequestCount: number };
+      weeklyQuota: {
+        limitId: string;
+        planType: string | null;
+        usedPercent: number;
+        resetsAt: number;
+      };
+    };
+    expect(body.global.requestCount).toBe(2);
+    expect(body.global.unsuccessfulRequestCount).toBe(1);
+    expect(body.global.totalCostCnyNanos).toBe(3_205_440);
+    expect(body.providers).toHaveLength(2);
+    const deepseek = body.providers.find((group) => group.provider === "deepseek");
+    const openai = body.providers.find((group) => group.provider === "openai");
+    expect(deepseek?.aggregate.requestCount).toBe(1);
+    expect(deepseek?.aggregate.totalCostCnyNanos).toBe(3_205_440);
+    expect(openai?.aggregate.requestCount).toBe(1);
+    expect(openai?.aggregate.totalCostCnyNanos).toBeNull();
+    expect(body.errors).toMatchObject({
+      requestCount: 2,
+      unsuccessfulRequestCount: 1,
+      groups: [{
+        status: "incomplete",
+        errorType: "response_not_observed",
+        lastErrorMessage: "You've hit your usage limit",
+      }],
+    });
+    expect(body.weeklyQuota).toMatchObject({
+      limitId: "codex",
+      planType: "plus",
+      usedPercent: 12.5,
+    });
+    expect(body.weeklyQuota.resetsAt).toBeGreaterThan(1_000_000_000_000);
+  });
+
+  it("converts every provider to the requested currency", async () => {
+    const fixture = createFixture();
+    recordSample(fixture.databasePath, {
+      ...metricSample(),
+      provider: "openai",
+      pricing: pricingSnapshot(),
+    });
+    recordSample(fixture.databasePath, {
+      ...metricSample(),
+      pricing: pricingSnapshot(),
+    });
+    const { origin } = await startServer(fixture.environment);
+
+    const cnyResponse = await fetch(`${origin}/api/v1/overview?range=24h&currency=cny`);
+    const cnyBody = await cnyResponse.json() as {
+      providers: Array<{
+        provider: string;
+        aggregate: { totalCostCnyNanos: number | null };
+      }>;
+    };
+    for (const group of cnyBody.providers) {
+      expect(group.aggregate.totalCostCnyNanos).not.toBeNull();
+    }
+
+    const usdResponse = await fetch(`${origin}/api/v1/overview?range=24h&currency=usd`);
+    const usdBody = await usdResponse.json() as {
+      providers: Array<{
+        provider: string;
+        aggregate: { totalCostCnyNanos: number | null };
+      }>;
+    };
+    for (const group of usdBody.providers) {
+      expect(group.aggregate.totalCostCnyNanos).toBeNull();
+    }
+  });
+
+  it("rejects invalid currency values", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(fixture.environment);
+
+    const response = await fetch(`${origin}/api/v1/overview?range=24h&currency=eur`);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { code: "invalid_currency" },
+    });
+  });
+
+  it("returns the configured global currency and persisted exchange rate", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(fixture.environment);
+
+    const response = await fetch(`${origin}/api/v1/settings`);
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      currency: string;
+      exchangeRate: { usdToCny: number; source: string } | null;
+    };
+    expect(body.currency).toBe("cny");
+    expect(body.exchangeRate).toMatchObject({
+      usdToCny: 7.2,
+      source: "cache",
+    });
+  });
+
+  it("reports deepseek balance as unavailable without credentials", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(fixture.environment);
+
+    const response = await fetch(`${origin}/api/v1/deepseek-balance`);
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      available: boolean;
+      balances: unknown[];
+    };
+    expect(body.available).toBe(false);
+    expect(body.balances).toEqual([]);
+  });
+
+  it("lists threads and returns run and turns details", async () => {
+    const fixture = createFixture();
+    recordSample(fixture.databasePath, {
+      ...metricSample(),
+      provider: "deepseek",
+      pricing: pricingSnapshot(),
+      threadId: "thread-1",
+      turnId: "turn-1",
+      operation: "compact",
+      requestStartedAtMs: 1_000,
+    });
+    recordSample(fixture.databasePath, {
+      ...metricSample(),
+      provider: "deepseek",
+      pricing: pricingSnapshot(),
+      threadId: "thread-1",
+      turnId: "turn-1",
+      requestStartedAtMs: 2_000,
+    });
+    recordSample(fixture.databasePath, {
+      ...metricSample(),
+      provider: "deepseek",
+      pricing: pricingSnapshot(),
+      threadId: "thread-1",
+      turnId: "turn-2",
+      requestStartedAtMs: 3_000,
+      status: "failed",
+      httpStatus: 429,
+      errorType: "http_error",
+    });
+    const { origin } = await startServer(fixture.environment);
+
+    const threads = await fetch(`${origin}/api/v1/threads`);
+    expect(threads.status).toBe(200);
+    const threadsBody = await threads.json() as {
+      threads: Array<{
+        threadId: string;
+        turnCount: number;
+        compact: { requestCount: number };
+        firstRequestStartedAtMs: number;
+        totalCostCnyNanos: number | null;
+      }>;
+    };
+    expect(threadsBody.threads).toHaveLength(1);
+    expect(threadsBody.threads[0]).toMatchObject({
+      threadId: "thread-1",
+      turnCount: 2,
+      compact: { requestCount: 1 },
+      firstRequestStartedAtMs: 1_000,
+    });
+    expect(threadsBody.threads[0]!.totalCostCnyNanos).toBeGreaterThan(0);
+
+    const run = await fetch(`${origin}/api/v1/threads/thread-1/run`);
+    expect(run.status).toBe(200);
+    const runBody = await run.json() as {
+      latestTurn: { turnId: string; compact: { requestCount: number } | null };
+      threadAggregate: { turnCount: number };
+    };
+    expect(runBody.latestTurn?.turnId).toBe("turn-2");
+    expect(runBody.threadAggregate?.turnCount).toBe(2);
+
+    const turns = await fetch(`${origin}/api/v1/threads/thread-1/turns`);
+    expect(turns.status).toBe(200);
+    const turnsBody = await turns.json() as {
+      turns: Array<{ turnId: string }>;
+    };
+    expect(turnsBody.turns).toHaveLength(2);
+  });
+
+  it("sorts request records across server pages and aggregates errors", async () => {
+    const fixture = createFixture();
+    for (let index = 0; index < 3; index += 1) {
+      recordSample(fixture.databasePath, {
+        ...metricSample(),
+        outputTokens: [100, 300, 200][index]!,
+        status: index === 2 ? "failed" : "completed",
+        httpStatus: index === 2 ? 500 : 200,
+        errorType: index === 2 ? "http_error" : null,
+      });
+    }
+    const { origin } = await startServer(fixture.environment);
+
+    const first = await fetch(
+      `${origin}/api/v1/requests?range=24h&limit=2&sort=output&direction=desc&offset=0`,
+    );
+    expect(first.status).toBe(200);
+    const firstBody = await first.json() as {
+      records: Array<{ outputTokens: number }>;
+      nextOffset: number | null;
+    };
+    expect(firstBody.records.map((record) => record.outputTokens)).toEqual([300, 200]);
+    expect(firstBody.nextOffset).toBe(2);
+
+    const second = await fetch(
+      `${origin}/api/v1/requests?range=24h&limit=2&sort=output&direction=desc&offset=${firstBody.nextOffset}`,
+    );
+    const secondBody = await second.json() as {
+      records: Array<{ outputTokens: number }>;
+      nextOffset: number | null;
+    };
+    expect(secondBody.records.map((record) => record.outputTokens)).toEqual([100]);
+    expect(secondBody.nextOffset).toBeNull();
+
+    const filtered = await fetch(
+      `${origin}/api/v1/requests?range=24h&limit=10&filter=http_error`,
+    );
+    expect(filtered.status).toBe(200);
+    const filteredBody = await filtered.json() as {
+      records: Array<{ errorType: string | null }>;
+      total: number;
+    };
+    expect(filteredBody.total).toBe(1);
+    expect(filteredBody.records[0]?.errorType).toBe("http_error");
+
+    const invalidFilter = await fetch(
+      `${origin}/api/v1/requests?range=24h&filter=${"x".repeat(129)}`,
+    );
+    expect(invalidFilter.status).toBe(400);
+
+    const errors = await fetch(`${origin}/api/v1/errors?range=7d`);
+    expect(errors.status).toBe(200);
+    const errorsBody = await errors.json() as {
+      errors: {
+        requestCount: number;
+        groups: Array<{ errorType: string; requestCount: number }>;
+      };
+    };
+    expect(errorsBody.errors).toMatchObject({
+      requestCount: 3,
+      unsuccessfulRequestCount: 1,
+    });
+    expect(errorsBody.errors.groups[0]).toMatchObject({
+      errorType: "http_error",
+      requestCount: 1,
+    });
+  });
+
+  it("validates query parameters and thread ids", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(fixture.environment);
+
+    const invalidRange = await fetch(`${origin}/api/v1/overview?range=1h`);
+    expect(invalidRange.status).toBe(400);
+    expect(await invalidRange.json()).toMatchObject({
+      error: { code: "invalid_range" },
+    });
+
+    const invalidLimit = await fetch(`${origin}/api/v1/requests?limit=501`);
+    expect(invalidLimit.status).toBe(400);
+    expect(await invalidLimit.json()).toMatchObject({
+      error: { code: "invalid_limit" },
+    });
+
+    const invalidOffset = await fetch(`${origin}/api/v1/requests?offset=-1`);
+    expect(invalidOffset.status).toBe(400);
+    expect(await invalidOffset.json()).toMatchObject({
+      error: { code: "invalid_offset" },
+    });
+
+    const invalidSort = await fetch(`${origin}/api/v1/requests?sort=unknown`);
+    expect(invalidSort.status).toBe(400);
+    expect(await invalidSort.json()).toMatchObject({
+      error: { code: "invalid_sort" },
+    });
+
+    const invalidDirection = await fetch(`${origin}/api/v1/requests?direction=newest`);
+    expect(invalidDirection.status).toBe(400);
+    expect(await invalidDirection.json()).toMatchObject({
+      error: { code: "invalid_direction" },
+    });
+
+    const removedCursor = await fetch(`${origin}/api/v1/requests?afterId=1`);
+    expect(removedCursor.status).toBe(400);
+    expect(await removedCursor.json()).toMatchObject({
+      error: { code: "unsupported_parameter" },
+    });
+
+    const invalidThread = await fetch(
+      `${origin}/api/v1/threads/${"x".repeat(129)}/run`,
+    );
+    expect(invalidThread.status).toBe(400);
+    expect(await invalidThread.json()).toMatchObject({
+      error: { code: "invalid_thread_id" },
+    });
+  });
+
+  it("returns 503 when the metrics database is unavailable", async () => {
+    const home = mkdtempSync(join(tmpdir(), "codexc-webui-missing-"));
+    temporaryDirectories.push(home);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+    initializeUserData({ environment, cwd: home });
+    const { origin } = await startServer(environment);
+
+    const response = await fetch(`${origin}/api/v1/overview`);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: { code: "metrics_database_unavailable" },
+    });
+  });
+
+  it("rejects non-GET methods and unknown API paths", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(fixture.environment);
+
+    const post = await fetch(`${origin}/api/v1/overview`, { method: "POST" });
+    expect(post.status).toBe(405);
+    expect(await post.json()).toMatchObject({
+      error: { code: "method_not_allowed" },
+    });
+
+    const unknown = await fetch(`${origin}/api/v1/unknown`);
+    expect(unknown.status).toBe(404);
+    expect(await unknown.json()).toMatchObject({
+      error: { code: "not_found" },
+    });
+
+    const withoutVersion = await fetch(`${origin}/api/unknown`);
+    expect(withoutVersion.status).toBe(404);
+    expect(await withoutVersion.json()).toMatchObject({
+      error: { code: "not_found" },
+    });
+  });
+
+  it("requires the access token for API requests when configured", async () => {
+    const fixture = createFixture();
+    recordSample(fixture.databasePath, metricSample());
+    const { origin } = await startServer(
+      fixture.environment,
+      undefined,
+      { token: "secret-token" },
+    );
+
+    const missing = await fetch(`${origin}/api/v1/overview`);
+    expect(missing.status).toBe(401);
+    expect(await missing.json()).toMatchObject({
+      error: { code: "unauthorized" },
+    });
+
+    const wrong = await fetch(`${origin}/api/v1/overview`, {
+      headers: { authorization: "Bearer wrong-token" },
+    });
+    expect(wrong.status).toBe(401);
+
+    const ok = await fetch(`${origin}/api/v1/overview`, {
+      headers: { authorization: "Bearer secret-token" },
+    });
+    expect(ok.status).toBe(200);
+  });
+
+  it("rejects non-loopback hosts without a token", () => {
+    const fixture = createFixture();
+    expect(() => createWebuiServer({
+      environment: fixture.environment,
+      host: "0.0.0.0",
+    })).toThrow("必须提供访问令牌");
+  });
+
+  it("resolves default webui settings without a config file", () => {
+    const home = mkdtempSync(join(tmpdir(), "codexc-webui-settings-"));
+    temporaryDirectories.push(home);
+    const settings = resolveWebuiSettings({
+      environment: {
+        ...process.env,
+        CODEX_CONNECT_HOME: home,
+        CODEX_CONNECT_CONFIG_FILE: "",
+      },
+    });
+    expect(settings).toMatchObject({ host: "127.0.0.1", port: 8787, token: null });
+  });
+
+  it("reads webui settings from config and lets CLI args override", () => {
+    const fixture = createFixture();
+    const configPath = join(fixture.home, "config.toml");
+    writeFileSync(
+      configPath,
+      `${readFileSync(configPath, "utf8")}\n`
+        + "[webui]\n"
+        + 'host = "0.0.0.0"\n'
+        + "port = 9000\n"
+        + 'token = "cfg-token"\n',
+    );
+
+    expect(resolveWebuiSettings({ environment: fixture.environment })).toMatchObject({
+      host: "0.0.0.0",
+      port: 9000,
+      token: "cfg-token",
+    });
+
+    expect(resolveWebuiSettings({
+      environment: fixture.environment,
+      args: ["--host", "127.0.0.1", "--port", "8788"],
+    })).toMatchObject({
+      host: "127.0.0.1",
+      port: 8788,
+      token: "cfg-token",
+    });
+  });
+
+  it("rejects non-loopback webui config without a token", () => {
+    const fixture = createFixture();
+    const configPath = join(fixture.home, "config.toml");
+    writeFileSync(
+      configPath,
+      `${readFileSync(configPath, "utf8")}\n`
+        + "[webui]\n"
+        + 'host = "0.0.0.0"\n',
+    );
+
+    expect(() => resolveWebuiSettings({ environment: fixture.environment }))
+      .toThrow(/绑定非回环地址时必须设置 token/u);
+  });
+
+  it("still applies the token when configured", () => {
+    const fixture = createFixture();
+    expect(() => createWebuiServer({
+      environment: fixture.environment,
+      token: "secret-token",
+    })).not.toThrow();
+  });
+
+  it("allows non-loopback hosts when a token is configured", async () => {
+    const fixture = createFixture();
+    recordSample(fixture.databasePath, metricSample());
+    const { origin } = await startServer(
+      fixture.environment,
+      undefined,
+      { host: "0.0.0.0", token: "secret-token" },
+    );
+    const response = await fetch(`${origin}/api/v1/threads`, {
+      headers: { authorization: "Bearer secret-token" },
+    });
+    expect(response.status).toBe(200);
+  });
+});
+
+function createFixture() {
+  const home = mkdtempSync(join(tmpdir(), "codexc-webui-"));
+  temporaryDirectories.push(home);
+  const environment = {
+    ...process.env,
+    CODEX_HOME: home,
+    CODEX_CONNECT_HOME: home,
+    CODEX_CONNECT_CONFIG_FILE: "",
+  };
+  initializeUserData({ environment, cwd: home });
+  writeFileSync(
+    join(home, "data", "exchange-rate.json"),
+    JSON.stringify({
+      version: 1,
+      source: "cache",
+      effectiveAtMs: Date.now(),
+      usdToCny: 7.2,
+    }),
+  );
+  return {
+    databasePath: requestMetricsDatabasePath(join(home, "data", "gateway.sqlite3")),
+    environment,
+    home,
+  };
+}
+
+function pricingSnapshot() {
+  return {
+    billingMode: "api" as const,
+    currency: "USD",
+    source: "test",
+    effectiveAtMs: Date.now(),
+    uncachedInputPricePerMillionNanos: 1_400_000_000,
+    cachedInputPricePerMillionNanos: 28_000_000,
+    outputPricePerMillionNanos: 2_800_000_000,
+  };
+}
+
+function createStaticDir(content: string) {
+  const directory = mkdtempSync(join(tmpdir(), "codexc-webui-static-"));
+  temporaryDirectories.push(directory);
+  writeFileSync(join(directory, "index.html"), content);
+  return directory;
+}
+
+async function startServer(
+  environment: NodeJS.ProcessEnv,
+  staticDir?: string,
+  options: {
+    host?: string
+    token?: string
+  } = {},
+) {
+  const { server } = createWebuiServer({
+    environment,
+    ...(staticDir === undefined ? {} : { staticDir }),
+    ...(options.host === undefined ? {} : { host: options.host }),
+    ...(options.token === undefined ? {} : { token: options.token }),
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(0, options.host ?? "127.0.0.1", resolve);
+  });
+  servers.push(server);
+  const { port } = server.address() as AddressInfo;
+  return {
+    origin: `http://127.0.0.1:${port}`,
+    server,
+  };
+}
+
+function recordSample(databasePath: string, sample: ModelRequestMetricSample) {
+  const store = new SqliteModelRequestMetricsStore(databasePath);
+  try {
+    store.record(sample);
+  } finally {
+    store.close();
+  }
+}
+
+function metricSample(): ModelRequestMetricSample {
+  return {
+    provider: "deepseek",
+    pricing: null,
+    transport: "http",
+    responseFormat: "sse",
+    operation: "response",
+    threadId: "thread-1",
+    turnId: "turn-1",
+    model: "deepseek-v4-flash",
+    serviceTier: "default",
+    reasoningEffort: "max",
+    status: "completed",
+    httpStatus: 200,
+    errorType: null,
+    errorCode: null,
+    errorMessage: null,
+    incompleteReason: null,
+    inputTokens: 1_000,
+    cachedInputTokens: 900,
+    outputTokens: 100,
+    reasoningOutputTokens: 40,
+    totalTokens: 1_100,
+    upstreamCreatedAt: 1_785_640_800,
+    upstreamCompletedAt: 1_785_640_801,
+    requestStartedAtMs: Date.now() - 60_000,
+    firstTokenAtMs: Date.now() - 59_000,
+    firstReasoningDeltaAtMs: Date.now() - 59_000,
+    lastReasoningDeltaAtMs: Date.now() - 58_000,
+    firstOutputDeltaAtMs: Date.now() - 57_000,
+    lastOutputDeltaAtMs: Date.now() - 56_000,
+    responseCompletedAtMs: Date.now() - 55_000,
+    weeklyQuota: null,
+  };
+}

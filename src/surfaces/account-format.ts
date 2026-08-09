@@ -64,6 +64,51 @@ export function formatPlanType(value: string): string {
   return names[value] ?? value;
 }
 
+export function formatOpenAiErrorMessage(value: string): string {
+  const message = value.replaceAll("[REDACTED]", "[已隐藏]");
+  if (message.includes("You've hit your usage limit")) {
+    const parts = ["OpenAI 用量上限已到达"];
+    if (message.includes("purchase more credits")) {
+      parts.push("可访问 https://chatgpt.com/codex/settings/usage 购买更多额度");
+    } else if (message.includes("Upgrade to Plus")) {
+      parts.push("可升级到 Plus 后继续使用 Codex");
+    } else if (message.includes("Upgrade to Pro")) {
+      parts.push("可升级到 Pro 后继续使用 Codex");
+    } else if (message.includes("send a request to your admin")) {
+      parts.push("请联系管理员增加额度");
+    } else if (message.includes("Switch to another model now")) {
+      parts.push("可先切换到其他模型");
+    }
+    const retry = openAiRetryHint(message);
+    if (retry !== null) parts.push(retry);
+    return `${parts.join("；")}。`;
+  }
+  if (message.includes("Your workspace is out of credits. Add credits to continue.")) {
+    return "工作区额度已用完，请充值后继续。";
+  }
+  if (message.includes("Ask your workspace owner to refill")) {
+    return "工作区额度已用完，请联系工作区所有者充值后继续。";
+  }
+  if (message.includes("You hit your spend cap set in your workspace")) {
+    return "已达到工作区消费上限，请提高消费上限后继续。";
+  }
+  if (message.includes("You hit your spend cap set by the owner")) {
+    return "已达到工作区所有者设置的消费上限，请联系所有者提高上限后继续。";
+  }
+  return message;
+}
+
+function openAiRetryHint(message: string): string | null {
+  const match = message.match(/(?:try again at|Try again at) ([^.]+)\./u);
+  if (match?.[1]) {
+    return `可在 ${match[1].trim()} 后重试`;
+  }
+  if (/try again later\.?/iu.test(message)) {
+    return "请稍后重试";
+  }
+  return null;
+}
+
 export function formatRateLimitState(value: string | null): string {
   const states: Record<string, string> = {
     rate_limit_reached: "已达到速率限制",

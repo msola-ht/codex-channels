@@ -149,7 +149,11 @@ function readPackageScripts(projectRoot) {
 }
 
 function renderRules(packageScripts) {
-  const sections = [renderGitRule(), renderGitInspectionRule()];
+  const sections = [
+    renderGitRule(),
+    renderGitInspectionRule(),
+    renderChannelImageRule(),
+  ];
   if (typeof packageScripts.test === "string") {
     sections.push(renderNpmTestRule());
   }
@@ -202,6 +206,20 @@ function renderGitInspectionRule() {
         "git branch --list",
         "git branch -a",
         "git remote -v",
+    ],
+)`;
+}
+
+function renderChannelImageRule() {
+  return `prefix_rule(
+    pattern = ["codexc", "channel", "send-image"],
+    decision = "allow",
+    justification = "Send a validated local image to the bound Feishu/WeChat/Telegram conversation through the gateway spool",
+    match = [
+        "codexc channel send-image",
+    ],
+    not_match = [
+        "codexc channel",
     ],
 )`;
 }

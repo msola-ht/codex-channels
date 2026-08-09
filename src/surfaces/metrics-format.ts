@@ -92,11 +92,9 @@ export function formatConversationMetrics(
         outputPricePerMillionNanos: turn.outputPricePerMillionNanos,
         hasMixedPrices: turn.hasMixedPrices,
       }, currency, exchangeRate),
-      ...(summary.modelProvider === "deepseek"
-        ? [formatDeepseekAveragePriceValue(turn, currency, exchangeRate)]
-          .filter((value): value is string => value !== null)
-          .map((value) => `实际均价：${value}`)
-        : []),
+      ...[formatAveragePriceValue(turn, currency, exchangeRate)]
+        .filter((value): value is string => value !== null)
+        .map((value) => `均价：${value}`),
       ...(turn.compact
         ? [formatCompactMetrics(turn.compact, currency, exchangeRate)]
         : []),
@@ -132,11 +130,9 @@ export function formatConversationMetrics(
             aggregate.outputSpeedSampleCount,
           )}`]),
       ...formatReferenceCost(toReferenceCostDisplay(aggregate), currency, exchangeRate),
-      ...(summary.modelProvider === "deepseek"
-        ? [formatDeepseekAveragePriceValue(aggregate, currency, exchangeRate)]
-          .filter((value): value is string => value !== null)
-          .map((value) => `实际均价：${value}`)
-        : []),
+      ...[formatAveragePriceValue(aggregate, currency, exchangeRate)]
+        .filter((value): value is string => value !== null)
+        .map((value) => `均价：${value}`),
       ...(aggregate.compact
         ? [formatCompactMetrics(aggregate.compact, currency, exchangeRate)]
         : []),
@@ -250,12 +246,19 @@ function formatMetricsErrorType(value: string | null): string {
   if (value === null) return "未提供错误类型";
   const knownLabel = {
     websocket_closed: "WebSocket 提前关闭",
+    upstream_handshake_error: "上游握手失败",
     upstream_request_error: "上游请求失败",
     upstream_response_error: "上游响应失败",
+    upstream_error: "上游错误",
     client_request_error: "客户端请求失败",
     client_disconnected: "客户端提前断开",
     response_not_observed: "响应结果未完整观测",
     http_error: "HTTP 请求失败",
+    usage_limit_reached: "OpenAI 用量上限",
+    rate_limit_reached: "速率限制",
+    turn_start_error: "Turn 启动失败",
+    turn_steer_error: "Turn 追加失败",
+    turn_notification_error: "Turn 运行失败",
   }[value];
   if (knownLabel !== undefined) return knownLabel;
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value)
@@ -431,8 +434,8 @@ function formatMetricsGroup(
   );
   const costBreakdown = formatReferenceCostBreakdown(referenceCostDisplay);
   const cost = aggregate.pricedRequestCount === 0
-    ? "  - **费用**：参考总价未知"
-    : `  - **费用**：${formatReferenceCostTotal(referenceCostDisplay)}${costBreakdown.length === 0 ? "" : `（${costBreakdown.join(" · ")}）`}`;
+    ? "  - **费用**：总价未知"
+    : `  - **费用**：${formatReferenceCostTotal(referenceCostDisplay, exchangeRate ?? null)}${costBreakdown.length === 0 ? "" : `（${costBreakdown.join(" · ")}）`}`;
   return [
     `${index + 1}. ${label}`,
     `  - 请求：${aggregate.requestCount} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${aggregate.unsuccessfulRequestCount} 次）` : ""}`,
@@ -460,10 +463,10 @@ function formatCompactMetrics(
   currency: DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
 ): string {
-  return `远程压缩：${formatCompactMetricsValue(compact, currency, exchangeRate)}`;
+  return `上下文压缩：${formatCompactMetricsValue(compact, currency, exchangeRate)}`;
 }
 
-export function formatDeepseekAveragePriceValue(
+export function formatAveragePriceValue(
   value: {
     pricingCurrency: string | null;
     totalCostNanos: number | null;
@@ -498,7 +501,7 @@ export function formatDeepseekAveragePriceValue(
   }
   const coverage = value.pricedRequestCount === value.requestCount
     ? ""
-    : `（已计价 ${value.pricedRequestCount}/${value.requestCount} 次请求）`;
+    : `（计价 ${value.pricedRequestCount}/${value.requestCount}）`;
   const amount = new Intl.NumberFormat("zh-CN", {
     style: "currency",
     currency: displayCurrency,
@@ -506,7 +509,31 @@ export function formatDeepseekAveragePriceValue(
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(nanos / 1_000_000_000);
-  return `约 ${amount}/100M${coverage}`;
+  const cnyEquivalent = displayCurrency === "USD" && exchangeRate
+    ? formatCnyEquivalentPerHundredMillion(
+        usdNanosPerHundredMillion,
+        exchangeRate,
+      )
+    : null;
+  return `约 ${amount}/100M`
+    + `${cnyEquivalent === null ? "" : `（${cnyEquivalent}/100M）`}${coverage}`;
+}
+
+function formatCnyEquivalentPerHundredMillion(
+  usdNanosPerHundredMillion: number,
+  exchangeRate: ExchangeRateSnapshot,
+): string | null {
+  const converted = Math.round(
+    usdNanosPerHundredMillion * exchangeRate.usdToCny,
+  );
+  if (!Number.isSafeInteger(converted)) return null;
+  return `≈ ${new Intl.NumberFormat("zh-CN", {
+    style: "currency",
+    currency: "CNY",
+    currencyDisplay: "narrowSymbol",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(converted / 1_000_000_000)}`;
 }
 
 export function formatCompactMetricsValue(
@@ -545,7 +572,7 @@ export function formatCompactMetricsValue(
     : formatCurrencyNanos(display.currency, display.totalCostNanos);
   const coverage = compact.pricedRequestCount === compact.requestCount
     ? ""
-    : `（已计价 ${compact.pricedRequestCount}/${compact.requestCount} 次）`;
+    : `（计价 ${compact.pricedRequestCount}/${compact.requestCount}）`;
   const failures = compact.unsuccessfulRequestCount === 0
     ? ""
     : `（异常 ${compact.unsuccessfulRequestCount} 次）`;
@@ -559,8 +586,9 @@ function formatReferenceCost(
 ): string[] {
   const display = toDisplayReferenceCost(value, currency, exchangeRate ?? null);
   return [
-    `- **费用**：${formatReferenceCostTotal(display)}`,
-    ...formatReferenceCostBreakdown(display).map((line) => `  - ${line}`),
+    `- **费用**：${formatReferenceCostTotal(display, exchangeRate ?? null)}`,
+    ...formatReferenceCostBreakdown(display, exchangeRate ?? null)
+      .map((line) => `  - ${line}`),
   ];
 }
 

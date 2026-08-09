@@ -69,7 +69,9 @@ export function createSurfaceModules(
 
 export const telegramSurfacePlugin: BuiltInSurfacePlugin = {
   id: "telegram",
-  create: (options) => [createTelegramModule(options)],
+  create: (options) => options.config.telegramEnabled
+    ? [createTelegramModule(options)]
+    : [],
 };
 
 export const feishuSurfacePlugin: BuiltInSurfacePlugin = {

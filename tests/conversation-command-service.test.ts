@@ -22,6 +22,7 @@ describe("ConversationCommandService", () => {
     expect(conversationCommandNames).toContain("fast");
     expect(conversationCommandNames).toContain("metrics");
     expect(conversationCommandNames).toContain("goal");
+    expect(conversationCommandNames).toContain("agents");
     expect(conversationCommandNames).toContain("pin");
     expect(conversationCommandNames).toContain("rules");
     expect(isConversationCommandName("status")).toBe(true);
@@ -394,6 +395,49 @@ describe("ConversationCommandService", () => {
       .rejects.toMatchObject({ code: "skill.usage" });
   });
 
+  it("lists and invokes agent roles through the shared command boundary", async () => {
+    const listAgentRoles = vi.fn(() => [
+      { name: "ds", description: "DeepSeek 子代理" },
+    ]);
+    const invokeAgent = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+      roleName: "ds",
+    }));
+    const commands = new ConversationCommandService({
+      listAgentRoles,
+      invokeAgent,
+    } as unknown as ConversationUseCases);
+
+    await expect(commands.execute(target, "agents")).resolves.toEqual({
+      kind: "agents",
+      roles: [{ name: "ds", description: "DeepSeek 子代理" }],
+    });
+    await expect(commands.execute(
+      target,
+      "agents",
+      "ds 审查提交",
+    )).resolves.toEqual({
+      kind: "outcome",
+      outcome: {
+        type: "agents.started",
+        roleName: "ds",
+        turnId: "turn-1",
+        steered: false,
+      },
+    });
+    expect(invokeAgent).toHaveBeenCalledWith(target, "ds", "审查提交");
+  });
+
+  it("rejects /agents without both role and task", async () => {
+    const commands = new ConversationCommandService(
+      {} as ConversationUseCases,
+    );
+    await expect(commands.execute(target, "agents", "ds"))
+      .rejects.toMatchObject({ code: "agents.usage" });
+  });
+
   it("covers every registered command through the shared dispatcher", async () => {
     const goal = {
       threadId: "thread-1",
@@ -435,6 +479,7 @@ describe("ConversationCommandService", () => {
         steered: false,
         skillName: "skill",
       })),
+      listAgentRoles: vi.fn(() => []),
       listMcpServers: vi.fn(async () => []),
       listPlugins: vi.fn(async () => ({})),
       providerAccountUsage: vi.fn(async () => ({})),
@@ -484,6 +529,7 @@ describe("ConversationCommandService", () => {
       ["diff", "", "artifacts"],
       ["plan", "", "togglePlanMode"],
       ["goal", "set ship", "setGoal"],
+      ["agents", "", "listAgentRoles"],
     ] as const;
 
     expect(cases.map(([command]) => command)).toEqual(conversationCommandNames);

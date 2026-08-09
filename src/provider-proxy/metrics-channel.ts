@@ -200,6 +200,7 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     || !nullableHttpStatus(record.httpStatus)
     || !nullableString(record.errorType)
     || !nullableString(record.errorCode)
+    || (record.errorMessage !== undefined && !nullableMessage(record.errorMessage))
     || !nullableString(record.incompleteReason)
     || !nullableTokenCount(record.inputTokens)
     || !nullableTokenCount(record.cachedInputTokens)
@@ -215,13 +216,22 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     || !nullableFiniteNumber(record.firstOutputDeltaAtMs)
     || !nullableFiniteNumber(record.lastOutputDeltaAtMs)
     || !finiteNumber(record.responseCompletedAtMs)
-    || (record.weeklyQuota !== undefined && !nullableWeeklyQuota(record.weeklyQuota))
   ) {
     return undefined;
   }
+  const weeklyQuota = record.weeklyQuota;
+  if (weeklyQuota !== undefined && !nullableWeeklyQuota(weeklyQuota)) {
+    return undefined;
+  }
+  const quota = weeklyQuota as Record<string, unknown> | null | undefined;
   return {
     ...record,
-    weeklyQuota: record.weeklyQuota ?? null,
+    errorMessage: typeof record.errorMessage === "string"
+      ? record.errorMessage
+      : null,
+    weeklyQuota: quota === null || quota === undefined
+      ? null
+      : { ...quota, planType: quota.planType ?? null },
   } as unknown as ProviderProxyMetrics;
 }
 
@@ -236,7 +246,16 @@ function nullableWeeklyQuota(value: unknown): boolean {
     && quota.usedPercentMillionths <= 100_000_000
     && typeof quota.resetsAt === "number"
     && Number.isSafeInteger(quota.resetsAt)
-    && quota.resetsAt >= 0;
+    && quota.resetsAt >= 0
+    && (
+      quota.planType === undefined
+      || quota.planType === null
+      || (
+        typeof quota.planType === "string"
+        && quota.planType.length > 0
+        && quota.planType.length <= 64
+      )
+    );
 }
 
 function oneOf(value: unknown, allowed: readonly string[]): boolean {
@@ -245,6 +264,11 @@ function oneOf(value: unknown, allowed: readonly string[]): boolean {
 
 function nullableString(value: unknown): boolean {
   return value === null || (typeof value === "string" && value.length <= 128);
+}
+
+function nullableMessage(value: unknown): boolean {
+  return value === null
+    || (typeof value === "string" && value.length > 0 && value.length <= 500);
 }
 
 function finiteNumber(value: unknown): boolean {

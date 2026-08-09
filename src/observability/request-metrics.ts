@@ -108,6 +108,7 @@ export interface ModelRequestMetricSample {
   httpStatus: number | null;
   errorType: string | null;
   errorCode: string | null;
+  errorMessage: string | null;
   incompleteReason: string | null;
   inputTokens: number | null;
   cachedInputTokens: number | null;
@@ -127,6 +128,7 @@ export interface ModelRequestMetricSample {
     limitId: "codex";
     usedPercentMillionths: number;
     resetsAt: number;
+    planType: string | null;
   } | null;
 }
 
@@ -160,6 +162,7 @@ export interface StoredWeeklyQuotaWindow {
   usedPercentMillionths: number;
   resetsAt: number;
   observedAtMs: number;
+  planType: string | null;
 }
 
 export interface StoredModelRequestMetric extends ModelRequestMetricSample {
@@ -214,6 +217,8 @@ export interface StoredTurnRequestMetricsSummary {
   outputSpeedTimedCount: number;
   pricingCurrency: string | null;
   pricedRequestCount: number;
+  pricedInputTokens: number;
+  pricedOutputTokens: number;
   totalCostNanos: number | null;
   inputCostNanos: number | null;
   cachedInputCostNanos: number | null;
@@ -240,6 +245,8 @@ export interface StoredThreadRequestMetricsAggregate {
   outputSpeedTimedCount: number;
   pricingCurrency: string | null;
   pricedRequestCount: number;
+  pricedInputTokens: number;
+  pricedOutputTokens: number;
   totalCostNanos: number | null;
   inputCostNanos: number | null;
   cachedInputCostNanos: number | null;
@@ -267,6 +274,8 @@ export interface StoredThreadListItem {
   provider: string | null;
   model: string | null;
   reasoningEffort: string | null;
+  agentPath: string | null;
+  parentThreadId: string | null;
   turnCount: number;
   requestCount: number;
   inputTokens: number;
@@ -275,7 +284,15 @@ export interface StoredThreadListItem {
   pricedRequestCount: number;
   totalCostNanos: number | null;
   compact: StoredCompactRequestMetricsSummary | null;
+  firstRequestStartedAtMs: number;
   lastRecordedAtMs: number;
+}
+
+export interface StoredSubagentThreadRecord {
+  threadId: string;
+  parentThreadId: string;
+  agentPath: string;
+  recordedAtMs: number;
 }
 
 export type ModelRequestMetricsAggregationDimension =
@@ -340,15 +357,35 @@ export interface ModelRequestMetricsErrorQuery {
 export interface ModelRequestMetricsPageQuery {
   startAtMs: number;
   endAtMs: number;
-  afterId?: number;
+  offset?: number;
   limit: number;
+  sortKey?: ModelRequestMetricsSortKey;
+  sortDirection?: "asc" | "desc";
+  filter?: string;
 }
+
+export type ModelRequestMetricsSortKey =
+  | "recordedAtMs"
+  | "provider"
+  | "model"
+  | "operation"
+  | "status"
+  | "httpStatus"
+  | "error"
+  | "inputTokens"
+  | "outputTokens"
+  | "reasoningOutputTokens"
+  | "outputTokensPerSecond"
+  | "ttftMs"
+  | "requestDurationMs"
+  | "totalCostNanos";
 
 export interface StoredModelRequestMetricsPage {
   startAtMs: number;
   endAtMs: number;
   records: StoredModelRequestMetric[];
-  nextAfterId: number | null;
+  nextOffset: number | null;
+  matchedTotal: number;
 }
 
 export interface StoredModelRequestMetricsErrorGroup {
@@ -357,6 +394,7 @@ export interface StoredModelRequestMetricsErrorGroup {
   status: Exclude<ModelRequestStatus, "completed">;
   httpStatus: number | null;
   errorType: string | null;
+  lastErrorMessage: string | null;
   requestCount: number;
   lastOccurredAtMs: number;
 }
@@ -372,6 +410,16 @@ export interface StoredModelRequestMetricsErrorReport {
 
 export interface ModelRequestMetricsStore {
   record(sample: ModelRequestMetricSample): void;
+  recordSubagentThread(details: {
+    agentThreadId: string;
+    parentThreadId: string;
+    agentPath: string;
+  }): void;
+  requestRowsAfter(afterLocalId: number, limit: number): StoredModelRequestMetric[];
+  subagentThreadsAfter(
+    recordedAtMs: number,
+    afterThreadId?: string,
+  ): StoredSubagentThreadRecord[];
   recent(limit: number): StoredModelRequestMetric[];
   aggregate(
     query: ModelRequestMetricsAggregationQuery,

@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 
 import type { Logger } from "pino";
 
+import { codexHomePath } from "../../runtime/codex-home.mjs";
 import {
   checkProjectRulesAtRoot,
   initializeProjectRulesAtRoot,
@@ -16,6 +17,7 @@ import {
   providerAppServerSocketPath,
   providerMetricsSocketPath,
 } from "../../runtime/model-provider-runtime.mjs";
+import { listConfiguredAgentRoles } from "../../runtime/agent-roles.mjs";
 import { readApiProviderKey } from "../../runtime/api-provider-credential.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
 import {
@@ -35,7 +37,6 @@ import {
   classifyConfigReload,
   configChange,
   includesConfigChange,
-  priceCurrencyForProvider,
   type ConfigChange,
   type ConfigReloadResult,
   type GatewayConfig,
@@ -47,16 +48,17 @@ import {
   ProviderAccountService,
   createOpenAiAccountAdapter,
   priceDisplayNeedsExchangeRate,
-  resolvePriceCurrency,
 } from "../application/index.js";
 import {
   ConversationCore,
+  isCriticalOutputEvent,
   surfaceAccountKey,
   type OutputEvent,
 } from "../conversation-core/index.js";
 import { EventBus } from "../event-bus/index.js";
 import {
   BufferedModelRequestMetricsWriter,
+  MetricsSync,
   modelRequestMetricsDatabasePath,
   SqliteModelRequestMetricsStore,
 } from "../observability/index.js";
@@ -67,6 +69,7 @@ import {
 } from "../session-routing/index.js";
 import { SqliteBindingStore } from "../storage/index.js";
 import type { SurfaceAdapter } from "../surfaces/index.js";
+import { ChannelImageSpool } from "./channel-image-spool.js";
 import {
   createSurfaceModules,
 } from "./surface-composition.js";
@@ -76,21 +79,23 @@ import { createDeepseekAccountAdapter } from "./deepseek-account-adapter.js";
 import { createProxyFetch } from "./proxy-fetch.js";
 import { createResponsesVisionAdapter } from "./responses-vision-adapter.js";
 import { ProviderMetricsComposition } from "./provider-metrics-composition.js";
+import { enqueueTurnErrorMetric } from "./turn-error-metrics.js";
 import { RemoteModelPricingCatalog } from "./model-pricing-catalog.js";
 import { RemoteExchangeRate } from "./exchange-rate.js";
 import { mergeSessionReferenceCost } from "./reference-cost-summary.js";
 import { TomlWorkspacePermissionWriter } from "./workspace-permission-writer.js";
+import { SubagentCompletionTracker } from "./subagent-completion-tracker.js";
 
 export class GatewayApplication {
   private readonly transport: UnixWebSocketTransport;
   private readonly codex: ProviderRoutingClient;
   private readonly primaryProvider: string;
-  private readonly activeCostProviders: readonly string[];
   private readonly inbound: EventBus<RpcNotification>;
   private readonly output: EventBus<OutputEvent>;
   private readonly surfaceModules: SurfaceRuntimeModule[];
   private readonly surfaces: SurfaceAdapter[];
   private readonly surfaceManager: SurfaceManager;
+  private readonly channelImageSpool: ChannelImageSpool;
   private readonly interactions: InteractionRouter;
   private readonly approval: ApprovalCoordinator;
   private readonly router: SessionRouter;
@@ -99,9 +104,11 @@ export class GatewayApplication {
   private readonly providerMetrics: ProviderMetricsComposition;
   private readonly modelPricing: RemoteModelPricingCatalog;
   private readonly exchangeRate: RemoteExchangeRate;
+  private readonly metricsSync: MetricsSync;
   private readonly bindings: SqliteBindingStore;
   private readonly workspaces: WorkspaceRegistry;
   private readonly workspacePermissions: TomlWorkspacePermissionWriter | undefined;
+  private readonly subagentCompletion: SubagentCompletionTracker;
   private removeRpcNotification: (() => void) | undefined;
   private removeRpcDisconnect: (() => void) | undefined;
   private startTask: Promise<void> | undefined;
@@ -126,18 +133,13 @@ export class GatewayApplication {
     const primaryProvider = loadPrimaryModelProvider();
     const managedProvider = loadManagedModelProvider();
     const supplementaryModels = loadDeepseekModelOptions(
-      process.env,
+      codexHomePath(process.env),
       primaryProvider === deepseekProviderDefinition.id
         || managedProvider?.provider === deepseekProviderDefinition.id,
       deepseekProviderDefinition,
     );
     this.transport = new UnixWebSocketTransport(config.codexSocketPath);
     this.primaryProvider = primaryProvider;
-    this.activeCostProviders = [...new Set([
-      primaryProvider,
-      ...(managedProvider ? [managedProvider.provider] : []),
-      ...(config.vision.mode === "disabled" ? [] : [config.vision.provider]),
-    ])];
     const clients = new Map<string, CodexAppServerClient>();
     clients.set(primaryProvider, new CodexAppServerClient(
       new JsonRpcClient(this.transport, 60_000, logger),
@@ -176,6 +178,39 @@ export class GatewayApplication {
       metricsStore,
       (error) => logger.warn({ err: error }, "模型请求指标后台写入失败"),
     );
+    this.metricsSync = new MetricsSync({
+      config: config.metricsSync ?? {
+        enabled: false,
+        batchSize: 200,
+        intervalSeconds: 60,
+      },
+      store: metricsStore,
+      statePath: join(dirname(config.stateDatabasePath), "metrics-sync-state.json"),
+      fetchImpl: createProxyFetch(config.networkProxy),
+      logger,
+    });
+    const recordTurnErrorMetric = (
+      provider: string,
+      model: string | null,
+      threadId: string | null,
+      turnId: string | null,
+      phase: "start" | "steer" | "notification",
+      error: unknown,
+    ): void => {
+      try {
+        enqueueTurnErrorMetric(
+          metricsWriter,
+          provider,
+          model,
+          threadId,
+          turnId,
+          phase,
+          error,
+        );
+      } catch (cause) {
+        logger.warn({ err: cause }, "Turn 级错误指标写入失败");
+      }
+    };
     this.modelPricing = new RemoteModelPricingCatalog({
       cachePath: join(dirname(config.stateDatabasePath), "model-pricing.json"),
       fetchImpl: createProxyFetch(config.networkProxy),
@@ -193,12 +228,70 @@ export class GatewayApplication {
       ],
       socketPath: (provider) =>
         providerMetricsSocketPath(config.codexSocketPath, provider),
-      writer: metricsWriter,
+      writer: {
+        enqueue: (sample) => {
+          metricsWriter.enqueue(sample);
+          if (sample.threadId) {
+            this.subagentCompletion?.metricsAvailable(sample.threadId);
+          }
+        },
+        close: () => metricsWriter.close(),
+      },
       pricingResolver: this.modelPricing,
       resolveModelSettings: (threadId) =>
         this.router.modelSettingsForThread(threadId),
       onModelTiming: (event) => this.core.handle(event),
       logger,
+    });
+    this.subagentCompletion = new SubagentCompletionTracker({
+      readSummary: (agentThreadId) => metricsStore.threadSummary(agentThreadId),
+      waitForMetrics: (agentThreadId) =>
+        metricsWriter.waitForCurrentWrites(agentThreadId),
+      publish: (event) => {
+        this.output.publish(event, isCriticalOutputEvent(event));
+      },
+      onReadError: (error, agentThreadId) => {
+        logger.warn({ err: error, agentThreadId }, "子代理完成统计读取失败");
+      },
+      onMissingMetrics: (agentThreadId) => {
+        logger.warn({ agentThreadId }, "子代理已结束但没有可用的模型指标");
+      },
+      onCompleted: (event) => {
+        logger.info(
+          {
+            agentThreadId: event.agentThreadId,
+            agentPath: event.agentPath,
+            requestCount: event.requestCount,
+            status: event.status,
+          },
+          "子代理完成卡片已生成",
+        );
+      },
+    });
+    this.output.subscribe("subagent-metrics", (event) => {
+      if (event.type === "subagent.spawned") {
+        try {
+          metricsStore.recordSubagentThread({
+            agentThreadId: event.agentThreadId,
+            parentThreadId: event.threadId,
+            agentPath: event.agentPath,
+          });
+        } catch (error) {
+          logger.warn(
+            {
+              err: error,
+              threadId: event.threadId,
+              agentThreadId: event.agentThreadId,
+            },
+            "子代理指标标注写入失败",
+          );
+        }
+        logger.info(
+          { agentThreadId: event.agentThreadId, agentPath: event.agentPath },
+          "子代理活动已登记，等待官方终态",
+        );
+      }
+      this.subagentCompletion.handle(event);
     });
     this.interactions = new InteractionRouter(logger);
     const models = new ModelSelectionService(
@@ -403,6 +496,7 @@ export class GatewayApplication {
                 status: group.status,
                 httpStatus: group.httpStatus,
                 errorType: group.errorType,
+                lastErrorMessage: group.lastErrorMessage,
                 requestCount: group.requestCount,
                 lastOccurredAtMs: group.lastOccurredAtMs,
               };
@@ -412,6 +506,25 @@ export class GatewayApplication {
         },
       },
       this.workspacePermissions,
+      {
+        recordTurnError: (record) => {
+          const error = new Error(record.message ?? "Turn 错误");
+          if (record.errorCode !== null) {
+            (error as { code?: unknown }).code = record.errorCode;
+          }
+          recordTurnErrorMetric(
+            record.provider,
+            record.model,
+            record.threadId,
+            record.turnId,
+            record.phase,
+            error,
+          );
+        },
+      },
+      {
+        listAgentRoles: () => listConfiguredAgentRoles(process.env),
+      },
     );
     this.output.subscribe("conversation-follow-up", async (event) => {
       if (event.type !== "turn.completed") {
@@ -472,10 +585,7 @@ export class GatewayApplication {
         error,
       ),
       exchangeRate: () => this.exchangeRate.resolve(),
-      priceCurrency: (provider) => resolvePriceCurrency(
-        priceCurrencyForProvider(this.config, provider),
-        provider,
-      ),
+      priceCurrency: () => this.config.priceCurrency,
     });
     this.surfaces = this.surfaceModules.map((module) => module.adapter);
     this.surfaceManager = new SurfaceManager(
@@ -503,6 +613,13 @@ export class GatewayApplication {
           ),
       },
     );
+    this.channelImageSpool = new ChannelImageSpool({
+      directory: join(dirname(config.stateDatabasePath), "channel-outbox"),
+      resolveTarget: (threadId) => this.router.targetForThread(threadId),
+      sendImage: (target, imagePath) =>
+        this.surfaceManager.sendChannelImage(target, imagePath),
+      logger,
+    });
     for (const surface of this.surfaces) {
       this.interactions.register(surface.surface, surface.accountId, surface.interactions);
       this.interactions.setAvailable(surface.surface, surface.accountId, false);
@@ -516,7 +633,19 @@ export class GatewayApplication {
     this.inbound.subscribe("conversation-core", (notification) => {
       const coreEvent = toConversationInputEvent(notification);
       if (coreEvent) {
+        this.subagentCompletion.handleInput(coreEvent);
         this.core.handle(coreEvent);
+        if (coreEvent.type === "turn.error" && !coreEvent.willRetry) {
+          const modelSettings = this.router.modelSettingsForThread(coreEvent.threadId);
+          recordTurnErrorMetric(
+            modelSettings?.modelProvider ?? "openai",
+            modelSettings?.model ?? null,
+            coreEvent.threadId,
+            coreEvent.turnId,
+            "notification",
+            new Error(coreEvent.message),
+          );
+        }
       }
       const threadStateEvent = toThreadStateEvent(notification);
       if (threadStateEvent) {
@@ -597,8 +726,11 @@ export class GatewayApplication {
     try {
       this.requireRunning();
       this.modelPricing.start();
-      if (priceDisplayNeedsExchangeRate(this.config, this.activeCostProviders)) {
+      if (priceDisplayNeedsExchangeRate(this.config)) {
         this.exchangeRate.start();
+      }
+      if (this.config.metricsSync?.enabled) {
+        this.metricsSync.start();
       }
       await this.providerMetrics.start();
       this.removeRpcNotification = this.codex.onNotification((notification) => {
@@ -643,6 +775,7 @@ export class GatewayApplication {
         "Codex App Server 已连接",
       );
       await this.surfaceManager.start();
+      await this.channelImageSpool.start();
       this.requireRunning();
     } catch (error) {
       this.stopping = true;
@@ -664,9 +797,12 @@ export class GatewayApplication {
     this.removeRpcNotification = undefined;
     this.removeRpcDisconnect?.();
     this.removeRpcDisconnect = undefined;
+    this.subagentCompletion?.close();
     const failures: unknown[] = [];
     for (const [component, close] of [
+      ["Channel Image Spool", () => this.channelImageSpool.stop()],
       ["Surface", () => this.surfaceManager.stop()],
+      ["Metrics Sync", () => this.metricsSync.close()],
       ["Provider Proxy Metrics", () => this.providerMetrics.close()],
       ["Model Pricing", () => this.modelPricing.close()],
       ["Exchange Rate", () => this.exchangeRate.close()],

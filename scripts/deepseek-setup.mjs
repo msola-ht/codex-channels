@@ -1,11 +1,11 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 
 import { parse, stringify } from "smol-toml";
 import * as clackPrompts from "@clack/prompts";
 
+import { codexHomePath } from "../runtime/codex-home.mjs";
 import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 
 export const deepseekSetupScriptUrl =
@@ -43,7 +43,7 @@ export async function runDeepseekSetup({
       allowBack ? 5 : 4,
     );
     if (choice === "5") return { action: "back" };
-    const codexHome = resolve(environment.CODEX_HOME?.trim() || join(homedir(), ".codex"));
+    const codexHome = codexHomePath(environment);
     const configPath = join(codexHome, "config.toml");
     const profilePath = join(codexHome, deepseekProviderDefinition.profileFileName);
     const gatewayProfilePath = join(

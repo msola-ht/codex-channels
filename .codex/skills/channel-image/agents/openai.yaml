@@ -1,0 +1,4 @@
+interface:
+  display_name: "渠道图片发送"
+  short_description: "把本地图片或截图通过 codexc channel send-image 发回当前飞书/微信/Telegram 会话"
+  default_prompt: "把这张截图发到当前会话"

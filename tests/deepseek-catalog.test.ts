@@ -19,7 +19,7 @@ describe("DeepSeek model catalog", () => {
     }));
 
     const models = loadDeepseekModelOptions(
-      { CODEX_HOME: codexHome },
+      codexHome,
       true,
       deepseekProviderDefinition,
     );
@@ -39,7 +39,7 @@ describe("DeepSeek model catalog", () => {
     writeFileSync(join(codexHome, "deepseek.models.json"), "not-json");
 
     expect(loadDeepseekModelOptions(
-      { CODEX_HOME: codexHome },
+      codexHome,
       false,
       deepseekProviderDefinition,
     )).toEqual([]);

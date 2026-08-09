@@ -17,7 +17,10 @@ import {
   formatRemainingRateLimitWindow,
   formatRateLimitWindow,
 } from "../src/surfaces/account-format.js";
-import { formatTurnInputAppended } from "../src/surfaces/input-copy.js";
+import {
+  formatTurnInputAppended,
+  formatVisionCompleted,
+} from "../src/surfaces/input-copy.js";
 import { formatSurfaceUserFacingError } from "../src/surfaces/user-facing-error-format.js";
 import {
   formatCancelledInteraction,
@@ -146,6 +149,34 @@ describe("shared surface copy contract", () => {
     expect(emptyCodexResponseText).toBe("Codex 返回了空消息。");
     expect(formatCliInput("继续处理"))
       .toBe("CLI 输入\n\n继续处理");
+  });
+
+  it("keeps visual completion details behind debug mode", () => {
+    const details = {
+      provider: "BLTCY",
+      model: "gpt-5.6-luna",
+      elapsedMs: 18_000,
+      usage: {
+        inputTokens: 9_433,
+        cachedInputTokens: 6_000,
+        outputTokens: 483,
+        reasoningOutputTokens: 120,
+        totalTokens: 9_916,
+      },
+    };
+
+    const normal = formatVisionCompleted(details);
+    const debug = formatVisionCompleted(details, true);
+
+    expect(normal).toContain("- **Token**：9,916");
+    expect(normal).not.toContain("输入命中缓存");
+    expect(normal).not.toContain("输出：483");
+    expect(normal).not.toContain("视觉 API 耗时");
+    expect(debug).toContain("- 视觉 API 耗时：18秒");
+    expect(debug).toContain("输入命中缓存：6,000");
+    expect(debug).toContain("输入未命中缓存：3,433");
+    expect(debug).toContain("输出：483");
+    expect(debug).toContain("其中推理输出：120");
   });
 
   it("keeps interaction outcomes platform-neutral", () => {
@@ -294,6 +325,7 @@ describe("shared surface copy contract", () => {
       "周限：剩余 88% · 周期 7 天",
     );
     expect(rendered).not.toContain("缓存写入");
+    expect(rendered).toContain("其中推理输出：100");
   });
 
   it("keeps platform-neutral command results identical in Feishu and Weixin", () => {

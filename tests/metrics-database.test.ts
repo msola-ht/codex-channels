@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -17,12 +18,15 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   inspectMetricsDatabase,
+  pruneProviderMetrics,
   readMetricsExport,
   readMetricsReport,
   readMetricsRun,
   readMetricsThreads,
   readMetricsTurns,
   resetMetricsDatabase,
+  resetMetricsSyncState,
+  resetMetricsSyncStateWithGatewayRestart,
   upgradeMetricsDatabase,
   upgradeMetricsDatabaseWithGatewayRestart,
 } from "../scripts/metrics-database.mjs";
@@ -44,6 +48,169 @@ afterEach(() => {
 });
 
 describe("model request metrics database operations", () => {
+  it("prunes OpenAI rows from local and center databases and restarts services", () => {
+    const { environment, databasePath } = fixture();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    store.record({ ...metricSample(), provider: "deepseek" });
+    store.record({ ...metricSample(), provider: "deepseek" });
+    store.record({ ...metricSample(), provider: "openai" });
+    store.close();
+
+    const centerPath = join(dirname(databasePath), "center.sqlite3");
+    const center = new DatabaseSync(centerPath);
+    center.exec(`
+      CREATE TABLE request_metrics (
+        id INTEGER PRIMARY KEY,
+        provider TEXT NOT NULL
+      )
+    `);
+    center.prepare("INSERT INTO request_metrics (provider) VALUES (?)")
+      .run("deepseek");
+    center.prepare("INSERT INTO request_metrics (provider) VALUES (?)")
+      .run("openai");
+    center.close();
+
+    const calls: string[] = [];
+    const result = pruneProviderMetrics("openai", environment, {
+      localDatabasePath: databasePath,
+      centerDatabasePath: centerPath,
+      stopGateway: () => calls.push("stop:gateway"),
+      startGateway: () => calls.push("start:gateway"),
+      stopCenter: () => calls.push("stop:center"),
+      startCenter: () => calls.push("start:center"),
+    });
+
+    expect(calls).toEqual([
+      "stop:gateway",
+      "stop:center",
+      "start:center",
+      "start:gateway",
+    ]);
+    expect(result.local.deleted).toBe(1);
+    expect(result.center).toMatchObject({ skipped: false, deleted: 1 });
+    expect(result.warnings).toEqual([]);
+
+    const local = new DatabaseSync(databasePath, { readOnly: true });
+    expect(local.prepare(`
+      SELECT COUNT(*) AS c FROM model_request_metrics WHERE provider = 'deepseek'
+    `).get()).toMatchObject({ c: 2 });
+    expect(local.prepare(`
+      SELECT COUNT(*) AS c FROM model_request_metrics WHERE provider = 'openai'
+    `).get()).toMatchObject({ c: 0 });
+    local.close();
+
+    const centerAfter = new DatabaseSync(centerPath, { readOnly: true });
+    expect(centerAfter.prepare(`
+      SELECT COUNT(*) AS c FROM request_metrics WHERE provider = 'openai'
+    `).get()).toMatchObject({ c: 0 });
+    centerAfter.close();
+
+    expect(existsSync(result.local.backupPath ?? "")).toBe(true);
+    expect(existsSync(result.center.backupPath ?? "")).toBe(true);
+  });
+
+  it("skips the center database when it is not configured", () => {
+    const { environment, databasePath } = fixture();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    store.record({ ...metricSample(), provider: "openai" });
+    store.close();
+    const calls: string[] = [];
+
+    const result = pruneProviderMetrics("openai", environment, {
+      localDatabasePath: databasePath,
+      centerDatabasePath: null,
+      stopGateway: () => calls.push("stop:gateway"),
+      startGateway: () => calls.push("start:gateway"),
+      stopCenter: () => calls.push("stop:center"),
+      startCenter: () => calls.push("start:center"),
+    });
+
+    expect(result.center.skipped).toBe(true);
+    expect(result.local.deleted).toBe(1);
+    expect(calls).toEqual(["stop:gateway", "start:gateway"]);
+  });
+
+  it("still restarts services when stopping the Gateway fails", () => {
+    const { environment, databasePath } = fixture();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    store.record({ ...metricSample(), provider: "openai" });
+    store.close();
+    const calls: string[] = [];
+
+    const result = pruneProviderMetrics("openai", environment, {
+      localDatabasePath: databasePath,
+      centerDatabasePath: null,
+      stopGateway: () => {
+        calls.push("stop:gateway");
+        throw new Error("stop failed");
+      },
+      startGateway: () => calls.push("start:gateway"),
+      stopCenter: () => calls.push("stop:center"),
+      startCenter: () => calls.push("start:center"),
+    });
+
+    expect(calls).toEqual(["stop:gateway", "start:gateway"]);
+    expect(result.warnings[0]).toContain("停止 Gateway 失败");
+    expect(result.local.deleted).toBe(1);
+  });
+
+  it("restarts services and surfaces the failure when the delete fails", () => {
+    const { environment, databasePath } = fixture();
+    const badPath = join(dirname(databasePath), "bad.sqlite3");
+    const bad = new DatabaseSync(badPath);
+    bad.exec("CREATE TABLE model_request_metrics (id INTEGER PRIMARY KEY)");
+    bad.close();
+    const calls: string[] = [];
+
+    expect(() => pruneProviderMetrics("openai", environment, {
+      localDatabasePath: badPath,
+      centerDatabasePath: null,
+      stopGateway: () => calls.push("stop:gateway"),
+      startGateway: () => calls.push("start:gateway"),
+      stopCenter: () => calls.push("stop:center"),
+      startCenter: () => calls.push("start:center"),
+    })).toThrow();
+    expect(calls).toEqual(["stop:gateway", "start:gateway"]);
+  });
+
+  it("prunes rows for the requested provider", () => {
+    const { environment, databasePath } = fixture();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    store.record({ ...metricSample(), provider: "deepseek" });
+    store.record({ ...metricSample(), provider: "openai" });
+    store.close();
+    const calls: string[] = [];
+
+    const result = pruneProviderMetrics("deepseek", environment, {
+      localDatabasePath: databasePath,
+      centerDatabasePath: null,
+      stopGateway: () => calls.push("stop:gateway"),
+      startGateway: () => calls.push("start:gateway"),
+      stopCenter: () => calls.push("stop:center"),
+      startCenter: () => calls.push("start:center"),
+    });
+
+    expect(result.provider).toBe("deepseek");
+    expect(result.local.deleted).toBe(1);
+    const local = new DatabaseSync(databasePath, { readOnly: true });
+    expect(local.prepare(`
+      SELECT COUNT(*) AS c FROM model_request_metrics WHERE provider = 'openai'
+    `).get()).toMatchObject({ c: 1 });
+    local.close();
+  });
+
+  it("rejects an unsupported provider", () => {
+    const { environment, databasePath } = fixture();
+    expect(() => pruneProviderMetrics("unknown", environment, {
+      localDatabasePath: databasePath,
+      centerDatabasePath: null,
+      stopGateway: () => undefined,
+      startGateway: () => undefined,
+      stopCenter: () => undefined,
+      startCenter: () => undefined,
+    })).toThrow("codexc metrics prune <openai|deepseek>");
+  });
+
   it("reports a missing database without creating it", () => {
     const { environment, databasePath } = fixture();
 
@@ -78,6 +245,7 @@ describe("model request metrics database operations", () => {
       provider: "openai",
       weeklyQuota: {
         limitId: "codex",
+        planType: "plus",
         usedPercentMillionths: 12_500_000,
         resetsAt: Math.floor(Date.now() / 1_000) + 24 * 60 * 60,
       },
@@ -111,6 +279,7 @@ describe("model request metrics database operations", () => {
       version: 2,
       weeklyQuota: {
         limitId: "codex",
+        planType: "plus",
         usedPercent: 12.5,
         remainingPercent: 87.5,
         estimate: null,
@@ -136,6 +305,7 @@ describe("model request metrics database operations", () => {
       version: 2,
       weeklyQuota: {
         limitId: "codex",
+        planType: "plus",
         usedPercent: 12.5,
       },
     });
@@ -144,7 +314,7 @@ describe("model request metrics database operations", () => {
       status: "incomplete",
       incompleteReason: "response_not_observed",
     });
-    expect(JSON.stringify(exported)).not.toMatch(/prompt|message|authorization/iu);
+    expect(JSON.stringify(exported)).not.toMatch(/prompt|authorization|"message":/iu);
   });
 
   it("exports request quota snapshots separately from the current quota summary", () => {
@@ -156,6 +326,7 @@ describe("model request metrics database operations", () => {
       provider: "openai",
       weeklyQuota: {
         limitId: "codex",
+        planType: "plus",
         usedPercentMillionths: 12_500_000,
         resetsAt,
       },
@@ -192,6 +363,7 @@ describe("model request metrics database operations", () => {
       expect.objectContaining({
         type: "request",
         id: "1",
+        weeklyQuotaPlanType: "plus",
         weeklyQuotaUsedPercent: "12.5",
       }),
       expect.objectContaining({
@@ -202,6 +374,7 @@ describe("model request metrics database operations", () => {
       expect.objectContaining({
         type: "weekly_quota_summary",
         id: "",
+        weeklyQuotaPlanType: "plus",
         weeklyQuotaUsedPercent: "12.5",
       }),
     ]);
@@ -254,8 +427,9 @@ describe("model request metrics database operations", () => {
     );
     expect(reportMarkdown.status, reportMarkdown.stderr).toBe(0);
     expect(reportMarkdown.stdout).toContain(
-      "远程压缩：1 次 · deepseek-v4-flash · 1.1 K Token · $0.0014",
+      "上下文压缩：1 次 · deepseek-v4-flash · 1.1 K Token · $0.0014",
     );
+    expect(reportMarkdown.stdout).toContain("推理输出 Token：");
 
     const exportMarkdown = spawnSync(
       process.execPath,
@@ -496,23 +670,119 @@ describe("model request metrics database operations", () => {
       changed: true,
       databasePath,
       previousSchemaVersion: 3,
-      schemaVersion: 4,
+      schemaVersion: 7,
     });
     expect(result.backupPath).toContain(".v3.2026-08-05T12-34-56-789Z.bak");
     expect(existsSync(result.backupPath!)).toBe(true);
     const database = new DatabaseSync(databasePath, { readOnly: true });
     expect(database.prepare(
       "SELECT value FROM schema_metadata WHERE name = 'schema_version'",
-    ).get()).toEqual({ value: 4 });
+    ).get()).toEqual({ value: 7 });
+    expect(database.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'subagent_threads'",
+    ).get()).toEqual({ name: "subagent_threads" });
     const columns = database.prepare("PRAGMA table_info(model_request_metrics)")
       .all() as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
       "weekly_quota_limit_id",
       "weekly_used_percent_millionths",
       "weekly_resets_at",
+      "weekly_quota_plan_type",
+      "error_message",
     ]));
     expect(database.prepare("SELECT COUNT(*) AS count FROM model_request_metrics").get())
       .toEqual({ count: 2 });
+    database.close();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    expect(store.count()).toBe(2);
+    store.close();
+  });
+
+  it("backs up and explicitly upgrades a v4 metrics database in place", () => {
+    const { environment, databasePath } = fixture();
+    createLegacyV4Database(databasePath, 2);
+
+    const result = upgradeMetricsDatabase(environment, {
+      gatewayRunning: () => false,
+      now: () => new Date("2026-08-05T12:34:56.789Z"),
+    });
+
+    expect(result).toMatchObject({
+      changed: true,
+      databasePath,
+      previousSchemaVersion: 4,
+      schemaVersion: 7,
+    });
+    expect(result.backupPath).toContain(".v4.2026-08-05T12-34-56-789Z.bak");
+    expect(existsSync(result.backupPath!)).toBe(true);
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    expect(database.prepare(
+      "SELECT value FROM schema_metadata WHERE name = 'schema_version'",
+    ).get()).toEqual({ value: 7 });
+    const columns = database.prepare("PRAGMA table_info(model_request_metrics)")
+      .all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
+      "weekly_quota_plan_type",
+      "error_message",
+    ]));
+    database.close();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    expect(store.count()).toBe(2);
+    store.close();
+  });
+
+  it("backs up and explicitly upgrades a v5 metrics database in place", () => {
+    const { environment, databasePath } = fixture();
+    createLegacyV5Database(databasePath, 2);
+
+    const result = upgradeMetricsDatabase(environment, {
+      gatewayRunning: () => false,
+      now: () => new Date("2026-08-05T12:34:56.789Z"),
+    });
+
+    expect(result).toMatchObject({
+      changed: true,
+      databasePath,
+      previousSchemaVersion: 5,
+      schemaVersion: 7,
+    });
+    expect(result.backupPath).toContain(".v5.2026-08-05T12-34-56-789Z.bak");
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    expect(database.prepare(
+      "SELECT value FROM schema_metadata WHERE name = 'schema_version'",
+    ).get()).toEqual({ value: 7 });
+    const columns = database.prepare("PRAGMA table_info(model_request_metrics)")
+      .all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
+      "error_message",
+    ]));
+    database.close();
+  });
+
+  it("backs up and explicitly upgrades a v6 metrics database in place", () => {
+    const { environment, databasePath } = fixture();
+    createLegacyV6Database(databasePath, 2);
+
+    const result = upgradeMetricsDatabase(environment, {
+      gatewayRunning: () => false,
+      now: () => new Date("2026-08-05T12:34:56.789Z"),
+    });
+
+    expect(result).toMatchObject({
+      changed: true,
+      databasePath,
+      previousSchemaVersion: 6,
+      schemaVersion: 7,
+    });
+    expect(result.backupPath).toContain(".v6.2026-08-05T12-34-56-789Z.bak");
+    expect(existsSync(result.backupPath!)).toBe(true);
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    expect(database.prepare(
+      "SELECT value FROM schema_metadata WHERE name = 'schema_version'",
+    ).get()).toEqual({ value: 7 });
+    expect(database.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'subagent_threads'",
+    ).get()).toEqual({ name: "subagent_threads" });
     database.close();
     const store = new SqliteModelRequestMetricsStore(databasePath);
     expect(store.count()).toBe(2);
@@ -535,7 +805,7 @@ describe("model request metrics database operations", () => {
 
     expect(() => upgradeMetricsDatabase(environment, {
       gatewayRunning: () => false,
-    })).toThrow(/仅支持 v3 升级到 v4/u);
+    })).toThrow(/仅支持 v3\/v4\/v5\/v6 升级到 v7/u);
     expect(inspectMetricsDatabase(environment).schemaVersion).toBe(2);
   });
 
@@ -607,6 +877,97 @@ describe("model request metrics database operations", () => {
         throw new Error("start failed");
       },
     })).toThrow(AggregateError);
+  });
+
+  it("resets the metrics sync watermark while keeping the device id", () => {
+    const { environment, home } = fixture();
+    const statePath = join(home, "data", "metrics-sync-state.json");
+    mkdirSync(dirname(statePath), { recursive: true });
+    writeFileSync(statePath, JSON.stringify({
+      version: 1,
+      deviceId: "main-server",
+      lastRequestLocalId: 42,
+      lastSubagentRecordedAtMs: 1_000,
+      lastSubagentThreadId: "sub-1",
+    }, null, 2) + "\n", { mode: 0o600 });
+
+    const result = resetMetricsSyncState(environment, {
+      gatewayRunning: () => false,
+    });
+
+    expect(result).toMatchObject({
+      changed: true,
+      statePath,
+      deviceId: "main-server",
+    });
+    expect(existsSync(result.backupPath ?? "")).toBe(true);
+    const next = JSON.parse(readFileSync(statePath, "utf8")) as {
+      version: number;
+      deviceId: string;
+      lastRequestLocalId: number;
+      lastSubagentRecordedAtMs: number;
+      lastSubagentThreadId: string | null;
+    };
+    expect(next).toEqual({
+      version: 1,
+      deviceId: "main-server",
+      lastRequestLocalId: 0,
+      lastSubagentRecordedAtMs: 0,
+      lastSubagentThreadId: null,
+    });
+    expect(statSync(statePath).mode & 0o777).toBe(0o600);
+  });
+
+  it("does nothing when the metrics sync state does not exist", () => {
+    const { environment, home } = fixture();
+
+    expect(resetMetricsSyncState(environment, {
+      gatewayRunning: () => false,
+    })).toEqual({
+      backupPath: null,
+      changed: false,
+      statePath: join(home, "data", "metrics-sync-state.json"),
+    });
+  });
+
+  it("refuses to reset the sync watermark while Gateway is running", () => {
+    const { environment, home } = fixture();
+    const statePath = join(home, "data", "metrics-sync-state.json");
+    mkdirSync(dirname(statePath), { recursive: true });
+    writeFileSync(statePath, JSON.stringify({
+      version: 1,
+      deviceId: "main-server",
+      lastRequestLocalId: 42,
+      lastSubagentRecordedAtMs: 0,
+      lastSubagentThreadId: null,
+    }), { mode: 0o600 });
+
+    expect(() => resetMetricsSyncState(environment, {
+      gatewayRunning: () => true,
+    })).toThrow(/Gateway 仍在运行/u);
+    expect(JSON.parse(readFileSync(statePath, "utf8"))).toMatchObject({
+      lastRequestLocalId: 42,
+    });
+  });
+
+  it("stops, resets and restarts Gateway in order", () => {
+    const calls: string[] = [];
+
+    resetMetricsSyncStateWithGatewayRestart(process.env, {
+      stopGateway: () => calls.push("stop"),
+      reset: () => {
+        calls.push("reset");
+        return {
+          backupPath: "/tmp/sync.bak",
+          changed: true,
+          statePath: "/tmp/sync-state.json",
+          deviceId: "main-server",
+        };
+      },
+      startGateway: () => calls.push("start"),
+    });
+
+    expect(calls).toEqual(["stop", "reset", "start"]);
   });
 
   it("refuses to reset when an unmanaged Gateway still owns the metrics database", () => {
@@ -767,6 +1128,42 @@ function createLegacyV3Database(path: string, count: number) {
   database.close();
 }
 
+function createLegacyV4Database(path: string, count: number) {
+  createLegacyV3Database(path, count);
+  const database = new DatabaseSync(path);
+  database.exec(`
+    ALTER TABLE model_request_metrics ADD COLUMN weekly_quota_limit_id TEXT
+      CHECK (weekly_quota_limit_id IS NULL OR weekly_quota_limit_id = 'codex');
+    ALTER TABLE model_request_metrics ADD COLUMN weekly_used_percent_millionths INTEGER
+      CHECK (weekly_used_percent_millionths IS NULL
+        OR weekly_used_percent_millionths BETWEEN 0 AND 100000000);
+    ALTER TABLE model_request_metrics ADD COLUMN weekly_resets_at INTEGER
+      CHECK (weekly_resets_at IS NULL OR weekly_resets_at >= 0);
+    UPDATE schema_metadata SET value = 4 WHERE name = 'schema_version';
+  `);
+  database.close();
+}
+
+function createLegacyV5Database(path: string, count: number) {
+  createLegacyV4Database(path, count);
+  const database = new DatabaseSync(path);
+  database.exec(`
+    ALTER TABLE model_request_metrics ADD COLUMN weekly_quota_plan_type TEXT;
+    UPDATE schema_metadata SET value = 5 WHERE name = 'schema_version';
+  `);
+  database.close();
+}
+
+function createLegacyV6Database(path: string, count: number) {
+  createLegacyV5Database(path, count);
+  const database = new DatabaseSync(path);
+  database.exec(`
+    ALTER TABLE model_request_metrics ADD COLUMN error_message TEXT;
+    UPDATE schema_metadata SET value = 6 WHERE name = 'schema_version';
+  `);
+  database.close();
+}
+
 function metricSample(): ModelRequestMetricSample {
   return {
     provider: "deepseek",
@@ -783,6 +1180,7 @@ function metricSample(): ModelRequestMetricSample {
     httpStatus: 200,
     errorType: null,
     errorCode: null,
+    errorMessage: null,
     incompleteReason: null,
     inputTokens: 1_000,
     cachedInputTokens: 900,

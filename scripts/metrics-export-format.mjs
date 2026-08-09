@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
-import { resolvePriceCurrency } from "../dist/application/index.js";
 import { formatTokenCount } from "../dist/surfaces/token-format.js";
 import {
   locateUserConfig,
@@ -26,10 +25,7 @@ export function loadDisplayContext(environment) {
     "data/gateway.sqlite3",
   );
   return {
-    priceCurrency: display.price_currency ?? "auto",
-    priceCurrencyByProvider: isRecord(display.price_currency_by_provider)
-      ? display.price_currency_by_provider
-      : {},
+    priceCurrency: display.price_currency ?? "cny",
     exchangeRate: loadExchangeRate(dirname(stateDatabasePath)),
   };
 }
@@ -70,10 +66,7 @@ export function convertCostToCny(nanos, currency, provider, display) {
   ) {
     return null;
   }
-  const mode = display.priceCurrencyByProvider[provider]
-    ?? display.priceCurrency
-    ?? "auto";
-  if (resolvePriceCurrency(mode, provider) !== "cny") return null;
+  if (display.priceCurrency !== "cny") return null;
   const converted = Math.round(nanos * display.exchangeRate.usdToCny);
   return Number.isSafeInteger(converted) ? converted : null;
 }
@@ -87,8 +80,9 @@ export function enrichCosts(value, display, providerOverride = undefined) {
   const toCny = (nanos) => convertCostToCny(nanos, currency, provider, display);
   return {
     ...value,
+    pricingCurrency: currency,
     totalCostCnyNanos: toCny(value.totalCostNanos),
-    inputCostCnyNanos: toCny(value.inputCostNanos),
+    inputCostCnyNanos: toCny(value.inputCostNanos ?? value.uncachedInputCostNanos),
     cachedInputCostCnyNanos: toCny(value.cachedInputCostNanos),
     outputCostCnyNanos: toCny(value.outputCostNanos),
   };

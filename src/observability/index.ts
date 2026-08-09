@@ -13,6 +13,7 @@ export type {
   ModelRequestMetricsAggregationQuery,
   ModelRequestMetricsErrorQuery,
   ModelRequestMetricsPageQuery,
+  ModelRequestMetricsSortKey,
   ModelRequestMetricsStore,
   ModelRequestMetricsWriter,
   ModelBillingMode,
@@ -30,6 +31,7 @@ export type {
   StoredModelRequestMetricsPage,
   StoredModelRequestMetricsGroup,
   StoredModelRequestMetricsReport,
+  StoredSubagentThreadRecord,
   StoredThreadRequestMetricsSummary,
   StoredThreadListItem,
   StoredThreadTurnSummary,
@@ -40,6 +42,14 @@ export type {
   StoredThreadRequestMetricsAggregate,
 } from "./request-metrics.js";
 export { BufferedModelRequestMetricsWriter } from "./request-metrics-writer.js";
+export {
+  MetricsSync,
+  MetricsSyncHttpError,
+  type MetricsSyncConfig,
+  type MetricsSyncOptions,
+  type MetricsSyncPayload,
+  type SyncedRequestMetric,
+} from "./metrics-sync.js";
 export {
   acquireRequestMetricsDatabaseLock,
   modelRequestMetricsSchemaVersion,

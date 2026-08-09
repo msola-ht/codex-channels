@@ -13,7 +13,7 @@ import {
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
-import { runConfig } from "../scripts/config.mjs";
+import { runCenterSettings, runConfig } from "../scripts/config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 
@@ -68,7 +68,6 @@ describe("Codex Connect config menu", () => {
       select: vi.fn()
         .mockResolvedValueOnce("display")
         .mockResolvedValueOnce("price_currency")
-        .mockResolvedValueOnce("global")
         .mockResolvedValueOnce("cny"),
       isCancel: () => false,
       cancel: vi.fn(),
@@ -81,8 +80,7 @@ describe("Codex Connect config menu", () => {
     });
 
     expect(result).toEqual({
-      scope: "global",
-      mode: "cny",
+      priceCurrency: "cny",
       configPath: fixture.configPath,
     });
     expect(readGatewayConfig(fixture.configPath).display).toMatchObject({
@@ -92,7 +90,7 @@ describe("Codex Connect config menu", () => {
     expect(output.join("")).toContain("重启 Gateway 后生效");
   });
 
-  it("sets a per-provider price currency override", async () => {
+  it("sets the global price currency to USD through the menu", async () => {
     const fixture = createFixture();
     const output: string[] = [];
     const prompts = {
@@ -100,8 +98,7 @@ describe("Codex Connect config menu", () => {
       select: vi.fn()
         .mockResolvedValueOnce("display")
         .mockResolvedValueOnce("price_currency")
-        .mockResolvedValueOnce("deepseek")
-        .mockResolvedValueOnce("cny"),
+        .mockResolvedValueOnce("usd"),
       isCancel: () => false,
       cancel: vi.fn(),
     };
@@ -113,7 +110,7 @@ describe("Codex Connect config menu", () => {
     });
 
     expect(readGatewayConfig(fixture.configPath).display).toMatchObject({
-      price_currency_by_provider: { deepseek: "cny" },
+      price_currency: "usd",
     });
   });
 
@@ -216,6 +213,78 @@ describe("Codex Connect config menu", () => {
     expect(result).toEqual({ timeoutSeconds: 120, configPath: fixture.configPath });
     expect(readGatewayConfig(fixture.configPath).approval).toEqual({
       timeout_seconds: 120,
+    });
+  });
+
+  it("sets webui host and requires a token for non-loopback", async () => {
+    const fixture = createFixture();
+    const output: string[] = [];
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("webui")
+        .mockResolvedValueOnce("host")
+        .mockResolvedValueOnce("0.0.0.0"),
+      password: vi.fn(async () => "webui-token"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    const result = await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts,
+    });
+
+    expect(result).toEqual({
+      webui: { host: "0.0.0.0", token: "webui-token" },
+      configPath: fixture.configPath,
+    });
+    expect(readGatewayConfig(fixture.configPath).webui).toEqual({
+      host: "0.0.0.0",
+      token: "webui-token",
+    });
+    expect(output.join("")).toContain("WebUI 设置已更新");
+  });
+
+  it("sets webui port and token through the menu", async () => {
+    const fixture = createFixture();
+    const output: string[] = [];
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("webui")
+        .mockResolvedValueOnce("port"),
+      text: vi.fn(async () => "9000"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts,
+    });
+    expect(readGatewayConfig(fixture.configPath).webui).toEqual({ port: 9000 });
+
+    const tokenPrompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("webui")
+        .mockResolvedValueOnce("token")
+        .mockResolvedValueOnce("set"),
+      password: vi.fn(async () => "webui-token"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+    await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts: tokenPrompts,
+    });
+    expect(readGatewayConfig(fixture.configPath).webui).toEqual({
+      port: 9000,
+      token: "webui-token",
     });
   });
 
@@ -433,8 +502,236 @@ describe("Codex Connect config menu", () => {
     const options = select.mock.calls[0]?.[0]?.options ?? [];
     const values = options.map((option: { value: string }) => option.value);
     expect(values).toContain("paths");
-    expect(values).not.toContain("metrics");
+    expect(values).toContain("metrics");
     expect(values).not.toContain("doctor");
+  });
+
+  it("connects the local machine to a metrics center through the menu", async () => {
+    const fixture = createFixture();
+    const output: string[] = [];
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("metrics")
+        .mockResolvedValueOnce("connect"),
+      text: vi.fn()
+        .mockResolvedValueOnce("http://127.0.0.1:8790")
+        .mockResolvedValueOnce(""),
+      password: vi.fn()
+        .mockResolvedValueOnce("device-token")
+        .mockResolvedValueOnce("view-token"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    const result = await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts,
+    });
+
+    expect(result).toEqual({
+      endpoint: "http://127.0.0.1:8790",
+      deviceId: null,
+      configPath: fixture.configPath,
+    });
+    const metrics = readGatewayConfig(fixture.configPath).metrics as unknown as {
+      sync: { enabled: boolean; endpoint?: string; device_token?: string };
+      view?: { enabled: boolean; endpoint?: string; token?: string };
+    };
+    expect(metrics.sync).toMatchObject({
+      enabled: true,
+      endpoint: "http://127.0.0.1:8790/api/ingest",
+      device_token: "device-token",
+    });
+    expect(metrics.view).toEqual({
+      enabled: true,
+      endpoint: "http://127.0.0.1:8790",
+      token: "view-token",
+    });
+    expect(output.join("")).toContain("已接入中心");
+    expect(output.join("")).toContain("重启 Gateway 后开始上报");
+  });
+
+  it("prints the metrics connection status through the menu", async () => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    document.metrics = {
+      sync: {
+        enabled: true,
+        endpoint: "http://127.0.0.1:8790/api/ingest",
+        device_token: "device-token",
+        device_id: "device-a",
+        batch_size: 200,
+        interval_seconds: 60,
+      },
+      view: {
+        enabled: true,
+        endpoint: "http://127.0.0.1:8790",
+        token: "view-token",
+      },
+    };
+    writeGatewayConfig(fixture.configPath, document);
+    const output: string[] = [];
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("metrics")
+        .mockResolvedValueOnce("status")
+        .mockResolvedValueOnce("back")
+        .mockResolvedValueOnce("cancel"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts,
+    });
+
+    const printed = output.join("");
+    expect(printed).toContain("上报：已启用");
+    expect(printed).toContain("上报端点：http://127.0.0.1:8790/api/ingest");
+    expect(printed).toContain("设备 ID：device-a");
+    expect(printed).toContain("WebUI 全局视图：已启用");
+    expect(printed).toContain("devi****oken");
+    expect(printed).toContain("view****oken");
+  });
+
+  it("updates the metrics upload interval through the menu", async () => {
+    const fixture = createFixture();
+    const output: string[] = [];
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("metrics")
+        .mockResolvedValueOnce("sync_params")
+        .mockResolvedValueOnce("interval_seconds"),
+      text: vi.fn(async () => "120"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    const result = await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts,
+    });
+
+    expect(result).toEqual({
+      sync: { interval_seconds: 120 },
+      configPath: fixture.configPath,
+    });
+    const metrics = readGatewayConfig(fixture.configPath).metrics as unknown as {
+      sync?: { interval_seconds: number; batch_size: number };
+    };
+    expect(metrics.sync).toMatchObject({
+      interval_seconds: 120,
+    });
+    expect(output.join("")).toContain("上报参数已更新");
+  });
+
+  it("disables the metrics connection through the menu", async () => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    document.metrics = {
+      sync: {
+        enabled: true,
+        endpoint: "http://127.0.0.1:8790/api/ingest",
+        device_token: "center-token",
+        batch_size: 200,
+        interval_seconds: 60,
+      },
+      view: {
+        enabled: true,
+        endpoint: "http://127.0.0.1:8790",
+        token: "center-token",
+      },
+    };
+    writeGatewayConfig(fixture.configPath, document);
+    const output: string[] = [];
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("metrics")
+        .mockResolvedValueOnce("disable"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts,
+    });
+
+    const metrics = readGatewayConfig(fixture.configPath).metrics as unknown as {
+      sync: { enabled: boolean };
+      view?: { enabled: boolean };
+    };
+    expect(metrics.sync.enabled).toBe(false);
+    expect(metrics.view?.enabled).toBe(false);
+    expect(output.join("")).toContain("已停用中心接入");
+  });
+
+  it("configures the metrics center service through the shared settings function", async () => {
+    const fixture = createFixture();
+    const output: string[] = [];
+    const prompts = {
+      select: vi.fn()
+        .mockResolvedValueOnce("enabled")
+        .mockResolvedValueOnce("enabled"),
+      isCancel: () => false,
+    };
+
+    const result = await runCenterSettings({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts,
+      writeConfig: writeGatewayConfig,
+    });
+
+    expect(result).toEqual({
+      center: { enabled: true },
+      configPath: fixture.configPath,
+    });
+    const center = readGatewayConfig(fixture.configPath).metrics as unknown as {
+      center?: { enabled: boolean };
+    };
+    expect(center.center).toEqual({
+      enabled: true,
+    });
+    expect(output.join("")).toContain("中心服务设置已更新");
+  });
+
+  it("configures separate metrics center view and device tokens", async () => {
+    const fixture = createFixture();
+    const output: string[] = [];
+    const writeToken = async (section: "token" | "device_token", value: string) =>
+      runCenterSettings({
+        environment: fixture.environment,
+        output: { write: (message: string) => output.push(message), isTTY: true },
+        prompts: {
+          select: vi.fn()
+            .mockResolvedValueOnce(section)
+            .mockResolvedValueOnce("set"),
+          password: vi.fn().mockResolvedValueOnce(value),
+          isCancel: () => false,
+        },
+        writeConfig: writeGatewayConfig,
+      });
+
+    await writeToken("token", "view-token");
+    await writeToken("device_token", "device-token");
+
+    const center = (readGatewayConfig(fixture.configPath).metrics as unknown as {
+      center?: { token?: string; device_token?: string };
+    }).center;
+    expect(center).toMatchObject({
+      token: "view-token",
+      device_token: "device-token",
+    });
   });
 });
 

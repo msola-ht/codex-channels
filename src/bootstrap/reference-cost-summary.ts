@@ -18,6 +18,8 @@ export function mergeSessionReferenceCost(
 
 function toReferenceCost(value: {
   requestCount: number;
+  inputTokens: number;
+  outputTokens: number;
   pricingCurrency: string | null;
   pricedRequestCount: number;
   totalCostNanos: number | null;
@@ -32,6 +34,8 @@ function toReferenceCost(value: {
   return {
     currency: value.pricingCurrency,
     totalCostNanos: value.totalCostNanos,
+    inputTokens: value.inputTokens,
+    outputTokens: value.outputTokens,
     inputCostNanos: value.inputCostNanos,
     cachedInputCostNanos: value.cachedInputCostNanos,
     outputCostNanos: value.outputCostNanos,
@@ -92,6 +96,8 @@ function subtractReferenceCost(
       ? aggregate.currency
       : null,
     totalCostNanos: pricedRequestCount > 0 ? totalCostNanos : null,
+    inputTokens: Math.max(0, (aggregate.inputTokens ?? 0) - (currentStored.inputTokens ?? 0)),
+    outputTokens: Math.max(0, (aggregate.outputTokens ?? 0) - (currentStored.outputTokens ?? 0)),
     inputCostNanos: pricedRequestCount > 0 ? inputCostNanos : null,
     cachedInputCostNanos: pricedRequestCount > 0 ? cachedInputCostNanos : null,
     outputCostNanos: pricedRequestCount > 0 ? outputCostNanos : null,
@@ -142,6 +148,8 @@ function combineReferenceCosts(
       && right.totalCostNanos !== null
       ? left.totalCostNanos + right.totalCostNanos
       : null,
+    inputTokens: (left.inputTokens ?? 0) + (right.inputTokens ?? 0),
+    outputTokens: (left.outputTokens ?? 0) + (right.outputTokens ?? 0),
     inputCostNanos: sameCurrency
       && left.inputCostNanos !== null
       && right.inputCostNanos !== null

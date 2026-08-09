@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.hegenai.codex-webui</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE_BINARY__</string>
+    <string>__CLI_ENTRY__</string>
+    <string>webui</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__CONFIG_DIR__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>CODEX_CONNECT_HOME</key>
+    <string>__CONFIG_DIR__</string>
+    <key>CODEX_CONNECT_CONFIG_FILE</key>
+    <string>__CONFIG_PATH__</string>
+    <key>PATH</key>
+    <string>__LAUNCHD_PATH__</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+  <key>StandardOutPath</key>
+  <string>__RUNTIME_DIR__/webui.log</string>
+  <key>StandardErrorPath</key>
+  <string>__RUNTIME_DIR__/webui.error.log</string>
+</dict>
+</plist>

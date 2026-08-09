@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { analyzeProtocolDiff } from "./analyze-upgrade-protocol.mjs";
 
 const root = resolve(import.meta.dirname, "..");
+const gitOutputBufferBytes = 16 * 1024 * 1024;
 
 export function renderUpgradeSummary(
   version,
@@ -246,6 +247,7 @@ function git(repositoryRoot, args, extraEnvironment = {}) {
   return execFileSync("git", args, {
     cwd: repositoryRoot,
     encoding: "utf8",
+    maxBuffer: gitOutputBufferBytes,
     env: { ...process.env, ...extraEnvironment },
   });
 }

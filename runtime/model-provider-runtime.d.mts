@@ -48,3 +48,16 @@ export function withProviderBaseUrl(
   baseUrl: string,
 ): string[];
 export function withOpenAiBaseUrl(argumentsList: string[], baseUrl: string): string[];
+
+export function managedModelProviderRoleConfigPath(
+  environment?: NodeJS.ProcessEnv,
+): string;
+
+export function writeManagedModelProviderRoleConfig(
+  environment?: NodeJS.ProcessEnv,
+  options?: { baseUrl?: string },
+): void;
+
+export function removeManagedModelProviderRoleConfig(
+  environment?: NodeJS.ProcessEnv,
+): void;

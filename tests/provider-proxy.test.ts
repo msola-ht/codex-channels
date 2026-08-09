@@ -286,6 +286,7 @@ describe("ProviderProxy", () => {
         limitId: "codex",
         usedPercentMillionths: 15_250_000,
         resetsAt: 1_786_233_600,
+        planType: null,
       },
     })]);
   });
@@ -702,6 +703,7 @@ describe("ProviderProxy", () => {
       serviceTier: null,
       errorType: null,
       errorCode: null,
+      errorMessage: null,
     })]);
   });
 
@@ -1014,6 +1016,7 @@ describe("ProviderProxy", () => {
         upstreamMessage = JSON.parse(data.toString("utf8")) as Record<string, unknown>;
         socket.send(JSON.stringify({
           type: "codex.rate_limits",
+          plan_type: "plus",
           rate_limits: {
             primary: null,
             secondary: {
@@ -1100,11 +1103,212 @@ describe("ProviderProxy", () => {
         limitId: "codex",
         usedPercentMillionths: 27_125_000,
         resetsAt: 1_786_233_600,
+        planType: "plus",
       },
     });
     expect(metrics[0]?.firstTokenAtMs).not.toBeNull();
     expect(metrics[0]?.firstReasoningDeltaAtMs).not.toBeNull();
     expect(metrics[0]?.firstOutputDeltaAtMs).not.toBeNull();
+  });
+
+  it("records a failed WebSocket handshake without turn metadata", async () => {
+    const upstreamServer = createServer();
+    upstreamServer.on("upgrade", (_request, socket) => {
+      socket.write(
+        "HTTP/1.1 429 Too Many Requests\r\n"
+        + "Content-Type: application/json\r\n"
+        + "Content-Length: 0\r\n"
+        + "Connection: close\r\n\r\n",
+      );
+      socket.end();
+    });
+    await new Promise<void>((resolveListen) => {
+      upstreamServer.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstreamServer.address() as AddressInfo;
+    openServers.push({
+      close: () => new Promise<void>((resolveClose) => {
+        upstreamServer.close(() => resolveClose());
+      }),
+    });
+
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error("等待 WebSocket 握手失败超时")),
+        3_000,
+      );
+      client.on("close", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      client.on("error", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+
+    expect(metrics).toHaveLength(1);
+    expect(metrics[0]).toMatchObject({
+      transport: "websocket",
+      responseFormat: "websocket",
+      operation: "response",
+      status: "failed",
+      httpStatus: 429,
+      errorType: "upstream_handshake_error",
+      errorMessage: null,
+      threadId: null,
+      turnId: null,
+    });
+  });
+
+  it("classifies a wrapped WebSocket error event as a failed metric", async () => {
+    const upstreamServer = createServer();
+    const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });
+    upstreamWebSocket.on("connection", (socket) => {
+      socket.on("message", () => {
+        socket.send(JSON.stringify({
+          type: "error",
+          status: 429,
+          error: {
+            type: "usage_limit_reached",
+            message: "You've hit your usage limit.",
+          },
+        }));
+        socket.close(1008, "usage limit");
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstreamServer.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstreamServer.address() as AddressInfo;
+    openServers.push({
+      close: async () => {
+        for (const client of upstreamWebSocket.clients) client.terminate();
+        await new Promise<void>((resolveClose) => upstreamWebSocket.close(() => resolveClose()));
+        await new Promise<void>((resolveClose) => upstreamServer.close(() => resolveClose()));
+      },
+    });
+
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    await new Promise<void>((resolve, reject) => {
+      client.on("open", () => {
+        client.send(JSON.stringify({
+          type: "response.create",
+          client_metadata: {
+            "x-codex-turn-metadata": JSON.stringify({
+              thread_id: "thread-err",
+              turn_id: "turn-err",
+            }),
+          },
+        }));
+      });
+      client.on("message", (data) => {
+        const message = JSON.parse(data.toString("utf8")) as {
+          type?: string;
+          status?: number;
+        };
+        if (message.type === "error") resolve();
+      });
+      client.on("error", reject);
+    });
+    client.close();
+
+    expect(metrics).toHaveLength(1);
+    expect(metrics[0]).toMatchObject({
+      transport: "websocket",
+      status: "failed",
+      httpStatus: 429,
+      errorType: "usage_limit_reached",
+      errorMessage: "You've hit your usage limit.",
+      threadId: "thread-err",
+      turnId: "turn-err",
+    });
+  });
+
+  it("classifies a WebSocket close reason as a failed metric", async () => {
+    const upstreamServer = createServer();
+    const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });
+    upstreamWebSocket.on("connection", (socket) => {
+      socket.on("message", () => {
+        socket.close(1008, "You've hit your usage limit");
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstreamServer.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstreamServer.address() as AddressInfo;
+    openServers.push({
+      close: async () => {
+        for (const client of upstreamWebSocket.clients) client.terminate();
+        await new Promise<void>((resolveClose) => upstreamWebSocket.close(() => resolveClose()));
+        await new Promise<void>((resolveClose) => upstreamServer.close(() => resolveClose()));
+      },
+    });
+
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    await new Promise<void>((resolve, reject) => {
+      client.on("open", () => {
+        client.send(JSON.stringify({
+          type: "response.create",
+          client_metadata: {
+            "x-codex-turn-metadata": JSON.stringify({
+              thread_id: "thread-close",
+              turn_id: "turn-close",
+            }),
+          },
+        }));
+      });
+      client.on("close", () => resolve());
+      client.on("error", reject);
+    });
+
+    expect(metrics).toHaveLength(1);
+    expect(metrics[0]).toMatchObject({
+      transport: "websocket",
+      status: "failed",
+      httpStatus: null,
+      errorType: "usage_limit_reached",
+      errorMessage: "You've hit your usage limit",
+      threadId: "thread-close",
+      turnId: "turn-close",
+    });
   });
 
   it("emits one completed metric when a WebSocket closes during delivery", async () => {

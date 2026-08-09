@@ -11,21 +11,58 @@
 - `metrics-database.mjs` / `metrics-database.d.mts`：实现并声明只读 `codexc metrics` 的
   `status`、`run`、`turns`、`threads`、`report`、`export`、`upgrade` 与 `reset`；查询复用 Observability
   只读端口，渲染复用 `metrics-export-format.mjs`；运行、会话与聚合输出从现有 `compact` 明细
-  派生远程压缩模型、请求数、Token 和费用摘要，JSON/CSV 同时保留可视化字段；`export` CSV 用独立类型行区分请求历史额度快照
+  派生上下文压缩模型、请求数、Token 和费用摘要，JSON/CSV 同时保留可视化字段；`export` CSV 用独立类型行区分请求历史额度快照
   与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3 备份后
-  事务升级到 v4，reset 要求 Gateway 停止、检查点回写、`0600`
+  起逐版本备份后事务升级到 v7，reset 要求 Gateway 停止、检查点回写、`0600`
   备份后移除旧库，不迁移或覆盖原指标记录。服务状态无法确认、处于非停止状态或前台 Gateway
-  指标 Socket 仍可连接时均拒绝 reset。
+  指标 Socket 仍可连接时均拒绝 reset；`sync-reset` 备份并清零多端上报水位文件（保留
+  设备 ID），默认同样要求 Gateway 已停止，`--restart-gateway` 时自动停止并重新启动
+  Gateway，用于重放修复中心历史数据。
+  `prune <provider>` 备份后删除本地与中心库中指定提供商（openai、deepseek）的全部请求
+  行，并自动停止、重启 Gateway 与中心服务；任一步骤失败也会尝试把服务重新拉起，额度重置
+  后可用它从零重新统计用量。
+- `channel-send-image.mjs`：`codexc channel send-image` 的实现，把本地图片复制到
+  `data/channel-outbox/pending/` 并写入 manifest；由 Gateway 轮询后按 Thread 绑定
+  会话发送并归档，详见 `docs/channel-image.md`。
 - `metrics-export-format.mjs` / `metrics-export-format.d.mts`：指标导出的显示上下文（配置与
   汇率缓存）、币种换算、Token/费用/时间格式化与 Markdown/CSV 转义；币种模式解析与 Token
   格式复用 Application/Surface 导出，换算逻辑集中在 `convertCostToCny`。
+- `webui-server.mjs` / `webui-api.ts`：`codexc webui` 的只读 HTTP 服务与共享 API 类型。
+  默认回环监听并托管 `webui/dist` 静态前端；提供 `/api/v1/overview`、`/api/v1/threads`、
+  `/api/v1/threads/:id/run|turns`、`/api/v1/requests`、`/api/v1/errors` 只读 JSON 接口；
+  `/api/v1/global/*` 按 `[metrics.view]` 配置由服务端代理到中心服务（前端不接触令牌）；
+  Threads 返回指标库首个请求开始时间，请求明细按受控字段在整个时间范围排序后偏移分页；
+  `webui-api.ts` 声明接口响应类型，前端统一从该文件导入；监听参数优先取命令行，其次
+  `config.toml` 的 `[webui]` 段，默认回环无令牌；绑定非回环地址（`0.0.0.0`）时必须设置
+  `--token` 或配置 `token`，API 以 `Authorization: Bearer` 校验并采用常数时间比较。
+- `metrics-center-server.mjs`：`codexc center` 的多设备指标中心 HTTP 服务。
+  接收各设备 Gateway 的增量上报（独立 Bearer 上报令牌校验、载荷校验、按 `device_id + local_id`
+  upsert 覆盖写入），写入中心 SQLite（复用 `cloudflare/migrations/0001_init.sql` 表结构，
+  WAL、`0600`），并提供 `/api/overview`、`/api/requests`、`/api/subagents`、
+  `/api/devices`、`/api/health`；查询使用独立只读令牌，WebUI 通过 `/api/v1/global/*` 服务端代理读取，令牌不进入前端。
+  子命令 `codexc center config` 交互设置 `[metrics.center]`、`codexc center info` 输出
+  中心地址（含设备上报端点）、双令牌状态与运行状态；监听参数优先命令行，其次
+  `config.toml` 的 `[metrics.center]` 段，默认回环 `127.0.0.1:8790`。
+- `metrics-center-settings.mjs`：中心服务与指标脚本共用的轻量配置解析（命令行参数、
+  `config.toml` 的 `[metrics.center]` 段与默认值），不依赖 Cloudflare 部署文件。
+- `metrics-center-payload.mjs` / `metrics-center-payload.d.mts`：中心服务与历史 Cloudflare
+  Worker 共用的上报载荷校验及类型声明。
+- `metrics-center-schema.sql`：npm 发布包内中心 SQLite 的规范初始化 Schema；历史 Cloudflare
+  D1 migration 保留部署参考，不作为生产中心运行时依赖。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型渠道”“通讯渠道”和
   “系统设置”流程委派给具体适配器；模型渠道下区分 DeepSeek、第三方 API 与图片识别，系统设置
   提供全局调试模式入口。
+- `skill-setup.mjs` / `skill-setup.d.mts`：`codexc setup` 的“技能”类别；列出项目 `.codex/skills` 下带
+  `SKILL.md` 的技能，安装/覆盖到 `~/.agents/skills/<技能名>`（可用
+  `CODEX_AGENTS_SKILLS_DIR` 覆盖目标目录），支持卸载；只复制技能目录本身，不修改
+  hermes 运行时的 `.skill-lock.json`。
 - `config.mjs`：`codexc config` 的交互式配置与设置菜单，覆盖配置文件中可安全编辑的参数：
-  显示设置（操作详情、计划更新、按提供商的价格显示方式）、系统设置（调试模式、审批超时、
-  Sandbox、默认工作区与模型）、Telegram 消息格式和配置路径查看；非交互终端直接输出用户目录
-  与配置文件路径。
+  显示设置（操作详情、计划更新、全局价格显示方式）、系统设置（调试模式、审批超时、
+  Sandbox、默认工作区与模型）、WebUI 设置（监听地址、端口、访问令牌）、多设备指标
+  （本机接入中心并同时写入 `[metrics.sync]` 与 `[metrics.view]`、接入状态、上报参数
+  `interval_seconds` / `batch_size`、停用接入）、
+  Telegram 消息格式和配置路径查看；菜单修改前自动备份配置，非交互终端直接输出
+  用户目录与配置文件路径。
 - `debug-setup.mjs`：在严格配置中原子切换 `logging.level` 的 `debug` / `info`，控制全局脱敏
   调试日志和渠道技术字段，不改写显示设置或凭据。
 - `api-provider-setup.mjs` / `api-provider-setup.d.mts`：增改或删除多个 Responses 兼容第三方 API
@@ -63,6 +100,10 @@
   不建立消息长连接，并把 SDK 错误和残缺响应收敛为不含敏感详情的稳定错误。
 - `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。
 - `workspace-add.mjs`：把指定目录或命令调用目录注册为 Workspace，支持 `--prune-missing` 清理失效配置。
+- `agents.mjs`：`codexc agents` 的执行脚本，在 `~/.codex/config.toml` 中开启或关闭
+  `features.multi_agent_v2` 并注册单次 `agents.ds` 角色；角色说明要求主模型以
+  `fork_turns=1` 传入当前用户消息，角色文件由 App Server 服务启动时动态生成并指向本机
+  DeepSeek 统计代理，同时写入禁止解析加密正文和等待后续消息的受控指令，服务退出时删除。
 
 ## 开发与协议
 
@@ -136,7 +177,10 @@
 
 - `clean-dist.mjs`：构建前清理 `dist/`。
 - `install-global-source.mjs`：显式准备干净源码并通过禁用隐式生命周期脚本的 npm 全局安装
-  完成开发入口链接，避免 npm 12 脚本策略跳过构建。
+  完成开发入口链接，避免 npm 12 脚本策略跳过构建，并自动执行 webui 子项目依赖安装与
+  前端构建（`webui/dist`）。
+- `webui-dev.mjs`：仓库根目录 `npm run webui:dev` 的一键开发入口，并行启动
+  `codexc webui`（API）与 Vite dev server，任一子进程退出时统一清理另一个进程。
 - `package-path.mjs`：提供不依赖第三方包的 npm 包根目录解析。
 - `prepare-package.mjs`：源码仓库安装或 npm 打包前按 lockfile 补齐缺失的本地构建依赖、
   启用仓库 Git hooks、构建源码，并验证已安装包包含运行入口。
@@ -154,12 +198,14 @@
   `initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，不输出完整 User-Agent、飞书
   上游响应或敏感配置内容。
 - `install-launchd.mjs`：渲染并安装 launchd plist；代理由 CLI 服务入口在每次启动时解析。
-- `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载两个 launchd 服务；启停、
-  重启、状态和日志支持 `gateway`、`app-server`、`all` 目标，日常重启默认只更新 Gateway；模板为
-  App Server 与 Gateway 注入各自服务角色，公开 CLI 据此拒绝 App Server 内的自重启；
+- `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载四个 launchd 服务；启停、
+  重启、状态和日志支持 `gateway`、`app-server`、`webui`、`center`、`all` 目标，
+  WebUI 与指标中心独立不并入 `all`，
+  日常重启默认只更新 Gateway；模板为 App Server 与 Gateway 注入各自服务角色，公开 CLI 据此
+  拒绝 App Server 内的自重启；
   检测到不支持的旧标签时明确拒绝启动。
 - `install-systemd.mjs`：渲染并安装 Linux systemd 用户服务 unit；代理由 CLI 服务入口在每次启动时解析。
-- `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载两个 systemd 用户服务；
-  与 launchd 使用相同的目标、服务角色和默认值，用户数据始终保留。
+- `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载四个 systemd 用户服务；
+  与 launchd 使用相同的目标、服务角色和默认值，WebUI 与指标中心独立不并入 `all`，用户数据始终保留。
 
 脚本不得把凭据写入 npm 安装目录；用户配置、SQLite、配置事件队列、Socket 和日志必须留在用户级 `.codex-connect`。

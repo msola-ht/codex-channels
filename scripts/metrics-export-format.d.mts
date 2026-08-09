@@ -3,8 +3,7 @@ export function formatTokenCount(value: number): string;
 export function isRecord(value: unknown): value is Record<string, unknown>;
 
 export interface MetricsDisplayContext {
-  priceCurrency: string;
-  priceCurrencyByProvider: Record<string, string>;
+  priceCurrency: "cny" | "usd";
   exchangeRate: {
     usdToCny: number;
     effectiveAtMs: number;

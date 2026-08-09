@@ -107,7 +107,7 @@ export function createWeixinSendContractClient({
             },
             base_info: {
               channel_version: "2.4.6",
-              bot_agent: "CodexConnect/0.146.0",
+              bot_agent: "CodexConnect/0.146.1",
             },
           }),
           signal: controller.signal,

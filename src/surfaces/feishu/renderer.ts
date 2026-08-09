@@ -10,6 +10,7 @@ import type {
 } from "../../conversation-core/index.js";
 import {
   conversationCommandHelpLines,
+  formatConversationAgents,
   formatConversationArtifacts,
   formatConversationCollaborationMode,
   formatConversationCommandOutcome,
@@ -36,6 +37,8 @@ import {
 import { formatSurfaceConfigurationChange } from "../configuration-change-format.js";
 import {
   createStartupPresentation,
+  createSubagentCompletedPresentation,
+  createSubagentStartedPresentation,
   createTurnCompletedPresentation,
   createTurnStartedPresentation,
   renderStructuredLifecyclePresentation,
@@ -136,6 +139,8 @@ export function renderFeishuCommandResult(
       return formatConversationCollaborationMode(result);
     case "skills":
       return formatConversationSkills(result);
+    case "agents":
+      return formatConversationAgents(result);
     case "mcp":
       return formatConversationMcp(result);
     case "plugins":
@@ -199,6 +204,12 @@ export function renderFeishuOutput(
     case "operation.updated":
     case "plan.updated":
       return null;
+    case "subagent.spawned":
+      return renderFeishuLifecyclePresentation(
+        createSubagentStartedPresentation(event),
+      );
+    case "subagent.completed":
+      return renderFeishuSubagentCompleted(event, priceCurrency, exchangeRate, debug);
     case "turn.completed":
       return renderFeishuTurnCompleted(event, priceCurrency, exchangeRate, debug);
     case "thread.status":
@@ -214,6 +225,19 @@ export function renderFeishuOutput(
     case "warning":
       return formatCodexWarning(visibleUpstreamMessage(event.message));
   }
+}
+
+function renderFeishuSubagentCompleted(
+  event: Extract<OutputEvent, { type: "subagent.completed" }>,
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency,
+  exchangeRate?: ExchangeRateSnapshot | null,
+  debug = false,
+): string {
+  return renderFeishuLifecyclePresentation(
+    createSubagentCompletedPresentation(event, priceCurrency, exchangeRate, debug),
+  );
 }
 
 function renderFeishuTurnCompleted(

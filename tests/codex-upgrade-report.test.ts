@@ -351,7 +351,7 @@ describe("Codex release upgrade preview", () => {
     git(repository, ["commit", "--quiet", "-m", "initial"]);
 
     writeFileSync(join(repository, "tracked.txt"), "after\n");
-    writeFileSync(join(repository, "new.txt"), "new\n");
+    writeFileSync(join(repository, "new.txt"), `${"x".repeat(1_100_000)}\n`);
     const diff = collectGitDiff(repository);
 
     expect(diff.nameStatus).toContain("M\ttracked.txt");

@@ -19,34 +19,63 @@ export interface ReferenceCostDisplay {
 
 export function formatReferenceCostTotal(
   value: ReferenceCostDisplay,
-  requestLabel: "次请求" | "个成功请求" = "次请求",
+  exchangeRate?: ExchangeRateSnapshot | null,
 ): string {
   if (value.pricedRequestCount === 0) {
-    return `暂无价格快照（已计价 0/${value.requestCount} ${requestLabel}）`;
+    return `暂无价格快照（计价 0/${value.requestCount}）`;
   }
   if (value.currency === null || value.totalCostNanos === null) {
-    return `无法合计（已计价 ${value.pricedRequestCount}/${value.requestCount} ${requestLabel}）`;
+    return `无法合计（计价 ${value.pricedRequestCount}/${value.requestCount}）`;
   }
-  return `${formatCurrencyNanos(value.currency, value.totalCostNanos)}（已计价 ${value.pricedRequestCount}/${value.requestCount} ${requestLabel}）`;
+  const coverage = value.pricedRequestCount === value.requestCount
+    ? ""
+    : `（计价 ${value.pricedRequestCount}/${value.requestCount}）`;
+  const equivalent = value.currency === "USD" && exchangeRate
+    ? formatCnyEquivalent(value.totalCostNanos, exchangeRate)
+    : null;
+  return `${formatCurrencyNanos(value.currency, value.totalCostNanos)}`
+    + `${equivalent === null ? "" : `（${equivalent}）`}${coverage}`;
 }
 
 export function formatReferenceCostBreakdown(
   value: ReferenceCostDisplay,
+  exchangeRate?: ExchangeRateSnapshot | null,
 ): string[] {
   if (value.currency === null || value.pricedRequestCount === 0) return [];
   const lines: string[] = [];
   if (value.inputCostNanos !== null) {
-    lines.push(`输入价格：${formatCurrencyNanos(value.currency, value.inputCostNanos)}`);
+    lines.push(formatCostLine("输入价格", value, value.inputCostNanos, exchangeRate));
   }
   if (value.cachedInputCostNanos !== null) {
-    lines.push(
-      `缓存价格：${formatCurrencyNanos(value.currency, value.cachedInputCostNanos)}`,
-    );
+    lines.push(formatCostLine("缓存价格", value, value.cachedInputCostNanos, exchangeRate));
   }
   if (value.outputCostNanos !== null) {
-    lines.push(`输出价格：${formatCurrencyNanos(value.currency, value.outputCostNanos)}`);
+    lines.push(formatCostLine("输出价格", value, value.outputCostNanos, exchangeRate));
   }
   return lines;
+}
+
+function formatCostLine(
+  label: string,
+  value: ReferenceCostDisplay,
+  nanos: number,
+  exchangeRate?: ExchangeRateSnapshot | null,
+): string {
+  const equivalent = value.currency === "USD" && exchangeRate
+    ? formatCnyEquivalent(nanos, exchangeRate)
+    : null;
+  return `${label}：${formatCurrencyNanos(value.currency!, nanos)}`
+    + `${equivalent === null ? "" : `（${equivalent}）`}`;
+}
+
+export function formatCnyEquivalent(
+  usdNanos: number,
+  exchangeRate: ExchangeRateSnapshot,
+): string | null {
+  if (!Number.isFinite(usdNanos) || usdNanos < 0) return null;
+  const converted = Math.round(usdNanos * exchangeRate.usdToCny);
+  if (!Number.isSafeInteger(converted)) return null;
+  return `≈ ${formatCurrencyNanos("CNY", converted)}`;
 }
 
 export function formatCurrencyNanos(currency: string, value: number): string {

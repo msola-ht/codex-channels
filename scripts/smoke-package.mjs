@@ -44,6 +44,13 @@ try {
     environment,
     true,
   ).stdout;
+  const centerHelp = run(
+    command,
+    ["center", "-h"],
+    temporaryDirectory,
+    environment,
+    true,
+  ).stdout;
   if (version !== packageReport.version) {
     throw new Error(`CLI 版本不匹配：实际 ${version}，期望 ${packageReport.version}`);
   }
@@ -62,7 +69,8 @@ try {
   if (
     !workspaceHelp.includes("用法：codexc work")
     || !rulesHelp.includes("用法：codexc rules init")
-    || !serviceHelp.includes("gateway|app-server|all")
+    || !serviceHelp.includes("gateway|app-server|webui|center|all")
+    || !centerHelp.includes("用法：codexc center")
   ) {
     throw new Error("CLI 分级帮助不完整");
   }
@@ -78,9 +86,16 @@ try {
     "scripts/validate-config.mjs",
     "systemd/codex-connect-app-server.service.template",
     "systemd/codex-connect-gateway.service.template",
+    "systemd/codex-connect-webui.service.template",
+    "systemd/codex-connect-center.service.template",
+    "launchd/com.hegenai.codex-webui.plist.template",
+    "launchd/com.hegenai.codex-center.plist.template",
     "scripts/install-systemd.mjs",
     "scripts/metrics-database.mjs",
+    "scripts/metrics-center-payload.mjs",
+    "scripts/metrics-center-schema.sql",
     "scripts/systemd-control.sh",
+    ".codex/skills/channel-image/SKILL.md",
   ]) {
     if (!existsSync(join(installedPackage, requiredFile))) {
       throw new Error(`tarball 安装后缺少发布文件：${requiredFile}`);

@@ -14,6 +14,7 @@ import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
+import { shouldDisplayOperation } from "../operation-presentation.js";
 import {
   createPlanPresentation,
   type PlanPresentation,
@@ -205,14 +206,17 @@ export class FeishuOutbox implements SurfaceOutputPort {
         flushStreamBeforeOutput();
         this.delivery.enqueue(
           event.target.conversationId,
-          () => this.sendGeneratedImage(
+          () => this.sendImage(
             event.target.conversationId,
             imagePath,
           ),
           true,
         );
       }
-      if (this.options.operationUpdateDisplay === "hidden") {
+      if (!shouldDisplayOperation(
+        event.operation,
+        this.options.operationUpdateDisplay ?? "full",
+      )) {
         return;
       }
       if (
@@ -320,6 +324,8 @@ export class FeishuOutbox implements SurfaceOutputPort {
       () => event.type === "vision.started"
           || event.type === "vision.progress"
           || event.type === "vision.completed"
+          || event.type === "subagent.spawned"
+          || event.type === "subagent.completed"
           || event.type === "account.updated"
           || event.type === "account.rateLimits.updated"
           || event.type === "mcp.status.updated"
@@ -350,7 +356,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     state.fingerprint = presentation.fingerprint;
   }
 
-  private async sendGeneratedImage(
+  private async sendImage(
     chatId: string,
     imagePath: string,
   ): Promise<void> {
@@ -364,6 +370,13 @@ export class FeishuOutbox implements SurfaceOutputPort {
       this.options.readGeneratedImage ?? readGeneratedImage
     )(imagePath);
     await this.messagePort.sendImage(chatId, image.bytes);
+  }
+
+  sendChannelImage(chatId: string, imagePath: string): Promise<void> {
+    return this.delivery.runOrdered(
+      chatId,
+      () => this.sendImage(chatId, imagePath),
+    );
   }
 
   prepareTurnReplyTarget(chatId: string, messageId: string): void {

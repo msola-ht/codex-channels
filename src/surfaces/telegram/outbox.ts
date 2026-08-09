@@ -14,8 +14,10 @@ import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
+import { shouldDisplayOperation } from "../operation-presentation.js";
 import { TurnReplyTargets } from "../turn-reply-targets.js";
 import {
+  createSubagentStartedPresentation,
   createTurnCompletedPresentation,
   createTurnStartedPresentation,
 } from "../lifecycle-presentation.js";
@@ -48,6 +50,7 @@ import { telegramErrorMetadata } from "./error-metadata.js";
 import { telegramDefaultAccountId } from "./constants.js";
 import {
   renderTelegramLifecyclePresentation,
+  renderTelegramSubagentCompleted,
   splitTelegramText,
 } from "./format.js";
 import { formatMarkdownAsTelegramHtml } from "./markdown-format.js";
@@ -322,11 +325,14 @@ export class TelegramOutbox {
           flushStreamBeforeOutput();
           this.enqueue(
             chatId,
-            () => this.sendGeneratedImage(chatId, imagePath),
+            () => this.sendImage(chatId, imagePath),
             true,
           );
         }
-        if (this.options.operationUpdateDisplay === "hidden") {
+        if (!shouldDisplayOperation(
+          event.operation,
+          this.options.operationUpdateDisplay ?? "full",
+        )) {
           return;
         }
         const operationKey = this.operationKey(turnKey, event.operation.itemId);
@@ -394,6 +400,41 @@ export class TelegramOutbox {
         }
         return;
       }
+      case "subagent.spawned":
+        this.flushStreamsBeforeVisibleOutput(
+          chatId,
+          this.turnKey(event.threadId, event.turnId),
+        );
+        this.enqueue(
+          chatId,
+          () => this.sendPanel(
+            chatId,
+            renderTelegramLifecyclePresentation(
+              createSubagentStartedPresentation(event),
+            ),
+            undefined,
+            true,
+          ).then(() => undefined),
+          false,
+        );
+        return;
+      case "subagent.completed":
+        this.enqueue(
+          chatId,
+          () => this.sendPanel(
+            chatId,
+            renderTelegramSubagentCompleted(
+              event,
+              this.options.priceCurrency,
+              this.options.exchangeRate?.() ?? null,
+              this.options.debugEnabled ?? false,
+            ),
+            undefined,
+            true,
+          ).then(() => undefined),
+          false,
+        );
+        return;
       case "turn.completed": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
         this.planMessages.delete(turnKey);
@@ -483,7 +524,7 @@ export class TelegramOutbox {
     }
   }
 
-  private async sendGeneratedImage(
+  private async sendImage(
     chatId: string,
     imagePath: string,
   ): Promise<void> {
@@ -504,6 +545,13 @@ export class TelegramOutbox {
         ),
         { disable_notification: true },
       ),
+    );
+  }
+
+  sendChannelImage(chatId: string, imagePath: string): Promise<void> {
+    return this.delivery.runOrdered(
+      chatId,
+      () => this.sendImage(chatId, imagePath),
     );
   }
 
