@@ -38,6 +38,10 @@ import {
 } from "../runtime/model-provider-runtime.mjs";
 import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import {
+  AppServerSupervisorOwner,
+  prepareAppServerSocketPaths,
+} from "../runtime/app-server-supervisor.mjs";
+import {
   initializeUserData,
   packageDir,
   requireUserConfig,
@@ -51,6 +55,8 @@ import {
   readWorkspaceConfig,
   removeWorkspaceFromConfig,
 } from "../scripts/workspace-config.mjs";
+
+const foregroundShutdownTimeoutMs = 5_000;
 
 const helpText = {
   main: `Codex Connect CLI
@@ -310,7 +316,11 @@ try {
         break;
       }
       requireNoArguments(args, "用法：codexc start");
-      runScript("scripts/dev-all.mjs", args, { CODEX_CONNECT_GATEWAY_ENTRY: "dist" });
+      await runForegroundScript(
+        "scripts/dev-all.mjs",
+        args,
+        { CODEX_CONNECT_GATEWAY_ENTRY: "dist" },
+      );
       break;
     case "gateway":
       if (showRequestedHelp(args, "gateway")) {
@@ -470,6 +480,24 @@ async function runServiceAppServer(args) {
   } = await import("../dist/provider-proxy/index.js");
   const providerProxies = [];
   const upstreamAgents = new Set();
+  const providerSocketPath = managedProvider
+    ? providerAppServerSocketPath(socketPath, managedProvider.provider)
+    : undefined;
+  const supervisorOwner = new AppServerSupervisorOwner(socketPath, {
+    primaryProvider,
+    managedProvider: managedProvider?.provider,
+    socketPaths: [socketPath, ...(providerSocketPath ? [providerSocketPath] : [])],
+  });
+  await supervisorOwner.start();
+  try {
+    await prepareAppServerSocketPaths([
+      socketPath,
+      ...(providerSocketPath ? [providerSocketPath] : []),
+    ]);
+  } catch (error) {
+    await supervisorOwner.close();
+    throw error;
+  }
   const upstreamAgentFor = (upstreamUrl) => {
     const proxyUrl = selectHttpProxyUrl({
       http: runtime.environment.HTTP_PROXY,
@@ -574,6 +602,7 @@ async function runServiceAppServer(args) {
   } catch (error) {
     await Promise.all(providerProxies.map((proxy) => proxy.close()));
     for (const agent of upstreamAgents) agent.destroy();
+    await supervisorOwner.close();
     throw error;
   }
   const children = [spawn(runtime.environment.CODEX_BINARY, [
@@ -594,7 +623,7 @@ async function runServiceAppServer(args) {
       ...managedArguments,
       "app-server",
       "--listen",
-      `unix://${providerAppServerSocketPath(socketPath, managedProvider.provider)}`,
+      `unix://${providerSocketPath}`,
     ], {
       stdio: "inherit",
       env: {
@@ -608,6 +637,7 @@ async function runServiceAppServer(args) {
     removeManagedModelProviderRoleConfig(runtime.environment);
     await Promise.all(providerProxies.map((proxy) => proxy.close()));
     for (const agent of upstreamAgents) agent.destroy();
+    await supervisorOwner.close();
   });
 }
 
@@ -1137,6 +1167,80 @@ function runScript(relativePath, args, additionalEnvironment = {}, workingDirect
     { ...runtime.environment, ...additionalEnvironment },
     workingDirectory ?? runtime.dataDir,
   );
+}
+
+async function runForegroundScript(
+  relativePath,
+  args,
+  additionalEnvironment = {},
+  workingDirectory,
+) {
+  const runtime = configuredEnvironment();
+  const child = spawn(
+    process.execPath,
+    [join(packageDir, relativePath), ...args],
+    {
+      stdio: "inherit",
+      env: { ...runtime.environment, ...additionalEnvironment },
+      cwd: workingDirectory ?? runtime.dataDir,
+      detached: process.platform !== "win32",
+    },
+  );
+  let forwardedSignal;
+  let shutdownTimer;
+  const forceStop = () => {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    if (process.platform !== "win32" && child.pid !== undefined) {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+        return;
+      } catch (error) {
+        if (error?.code === "ESRCH") return;
+      }
+    }
+    child.kill("SIGKILL");
+  };
+  const forwardSignal = (signal) => {
+    if (forwardedSignal) {
+      forceStop();
+      return;
+    }
+    forwardedSignal = signal;
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill(signal);
+      shutdownTimer = setTimeout(forceStop, foregroundShutdownTimeoutMs);
+      shutdownTimer.unref();
+    }
+  };
+  const forwardTerminate = () => forwardSignal("SIGTERM");
+  const forwardInterrupt = () => forwardSignal("SIGINT");
+  const cleanup = () => {
+    if (shutdownTimer) clearTimeout(shutdownTimer);
+    process.off("SIGTERM", forwardTerminate);
+    process.off("SIGINT", forwardInterrupt);
+  };
+
+  await new Promise((resolveChild, rejectChild) => {
+    process.on("SIGTERM", forwardTerminate);
+    process.on("SIGINT", forwardInterrupt);
+    child.once("error", (error) => {
+      cleanup();
+      rejectChild(error);
+    });
+    child.once("exit", (code, signal) => {
+      cleanup();
+      const resultingSignal = forwardedSignal ?? signal;
+      if (resultingSignal) {
+        process.kill(process.pid, resultingSignal);
+        return;
+      }
+      if (code !== 0) {
+        rejectChild(new Error(`子命令执行失败：exit=${code ?? 1}`));
+        return;
+      }
+      resolveChild();
+    });
+  });
 }
 
 function state(args) {

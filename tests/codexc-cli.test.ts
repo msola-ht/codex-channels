@@ -1,13 +1,17 @@
-import { execFile, execFileSync, spawnSync } from "node:child_process";
+import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 
+import { AppServerSupervisorOwner } from "../runtime/app-server-supervisor.mjs";
+import { GatewayOwner } from "../runtime/gateway-owner.mjs";
 import {
   acknowledgeConfigEvents,
   configEventQueuePath,
@@ -1101,6 +1105,506 @@ describe("codexc CLI", () => {
     expect(captured.status).toBe(404);
   });
 
+  it("starts the Gateway through the provider proxy with an exclusive DeepSeek App Server", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-start-exclusive-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const codexHome = join(root, ".codex");
+    const workspace = join(root, "Workspace");
+    const capturePath = join(root, "capture.json");
+    const fakeCodex = join(root, "fake-codex.mjs");
+    const expectedAppServerVersion = (
+      JSON.parse(readFileSync(resolve("package.json"), "utf8")) as { version: string }
+    ).version;
+    mkdirSync(workspace);
+    mkdirSync(codexHome);
+    writeFileSync(fakeCodex, [
+      "#!/usr/bin/env node",
+      "import { createServer } from 'node:http';",
+      "import { writeFileSync } from 'node:fs';",
+      `const { WebSocketServer } = await import(${JSON.stringify(pathToFileURL(resolve("node_modules/ws/wrapper.mjs")).href)});`,
+      "const args = process.argv.slice(2);",
+      `if (args[0] === '--version') { process.stdout.write('codex-cli ${expectedAppServerVersion}\\n'); process.exit(0); }`,
+      "const baseUrlArg = args.find((value) => value.startsWith('model_providers.deepseek.base_url='));",
+      "const listenUrl = args.at(-1);",
+      "const socketPath = listenUrl?.startsWith('unix://') ? listenUrl.slice('unix://'.length) : undefined;",
+      "const capture = { baseUrlArg, initialized: false };",
+      "writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify(capture));",
+      "if (!socketPath) process.exit(2);",
+      "const server = createServer();",
+      "const webSocketServer = new WebSocketServer({ server });",
+      "webSocketServer.on('connection', (client) => client.on('message', (data) => {",
+      "  const message = JSON.parse(data.toString());",
+      "  if (message.method === 'initialize') {",
+      "    capture.initialized = true;",
+      "    writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify(capture));",
+      "    client.send(JSON.stringify({",
+      "    jsonrpc: '2.0', id: message.id, result: {",
+      `      userAgent: 'codex_cli_rs/${expectedAppServerVersion} (test; test)',`,
+      "      codexHome: process.env.CODEX_HOME, platformFamily: 'unix', platformOs: 'linux',",
+      "    },",
+      "    }));",
+      "  }",
+      "}));",
+      "server.listen(socketPath);",
+      "const stop = () => {",
+      "  if (process.env.CODEX_TEST_IGNORE_SIGTERM === '1') return;",
+      "  for (const client of webSocketServer.clients) client.terminate();",
+      "  webSocketServer.close(() => server.close(() => process.exit(0)));",
+      "};",
+      "process.once('SIGTERM', stop);",
+      "process.once('SIGINT', stop);",
+    ].join("\n"));
+    chmodSync(fakeCodex, 0o700);
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      [
+        'model = "deepseek-v4-flash"',
+        'model_provider = "deepseek"',
+        'model_reasoning_effort = "high"',
+        `model_catalog_json = ${JSON.stringify(join(codexHome, "deepseek.models.json"))}`,
+        "[model_providers.deepseek]",
+        'name = "deepseek"',
+        'base_url = "https://api.deepseek.com/"',
+        'wire_api = "responses"',
+        "requires_openai_auth = false",
+        'experimental_bearer_token = "sk-start-secret"',
+        "",
+      ].join("\n"),
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "codex-connect-deepseek.config.toml"),
+      'version = 1\nprovider = "deepseek"\nmode = "exclusive"\n',
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "deepseek.models.json"),
+      JSON.stringify({
+        models: [{
+          slug: "deepseek-v4-flash",
+          display_name: "DeepSeek-V4-Flash",
+          default_reasoning_level: "high",
+          supported_reasoning_levels: [{ effort: "high", description: "High" }],
+        }],
+      }),
+      { mode: 0o600 },
+    );
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_HOME: codexHome,
+      CODEX_TEST_CAPTURE: capturePath,
+      CODEX_TEST_IGNORE_SIGTERM: "1",
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.codex).binary = fakeCodex;
+      table(document.telegram).bot_token = "123456:test-token";
+      table(document.telegram).allowed_user_ids = [123456];
+    });
+
+    const child = spawn(process.execPath, [cli, "start"], {
+      cwd: root,
+      env: environment,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
+    });
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+      (resolveExit) => child.once("exit", (code, signal) => resolveExit({ code, signal })),
+    );
+
+    let ownerReleasedByPublicCommand = false;
+    let publicCommandExitedWithinLimit: boolean;
+    try {
+      await waitForCondition(
+        () => existsSync(join(home, "runtime", "gateway-owner.sock"))
+          && readCapturedInitialization(capturePath)
+          && stdout.includes("Codex App Server 已连接"),
+        10_000,
+        () => child.exitCode === null
+          ? undefined
+          : new Error(
+            `前台 Gateway 提前退出：\nstdout:\n${stdout}\nstderr:\n${stderr}`
+            + `\ncapture:\n${existsSync(capturePath) ? readFileSync(capturePath, "utf8") : "missing"}`,
+          ),
+      );
+      expect(stdout).toContain("Codex App Server 与模型统计代理已启动");
+      expect(stdout).toContain("Codex App Server 已连接");
+      expect(stderr).not.toContain("WebSocket 就绪前退出");
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+      publicCommandExitedWithinLimit = await Promise.race([
+        exited.then(() => true),
+        new Promise<false>((resolveTimeout) => {
+          setTimeout(() => resolveTimeout(false), 7_000);
+        }),
+      ]);
+      if (!publicCommandExitedWithinLimit) {
+        if (process.platform !== "win32" && child.pid !== undefined) {
+          signalTestProcessGroup(child.pid, "SIGKILL");
+        } else if (child.exitCode === null && child.signalCode === null) {
+          child.kill("SIGKILL");
+        }
+        await exited;
+      }
+      try {
+        await waitForCondition(
+          () => !existsSync(join(home, "runtime", "gateway-owner.sock")),
+          1_000,
+        );
+        ownerReleasedByPublicCommand = true;
+      } catch {
+        if (process.platform !== "win32" && child.pid !== undefined) {
+          signalTestProcessGroup(child.pid, "SIGTERM");
+        }
+        await waitForCondition(
+          () => !existsSync(join(home, "runtime", "gateway-owner.sock")),
+          2_000,
+        );
+      }
+    }
+    expect(publicCommandExitedWithinLimit).toBe(true);
+    expect(ownerReleasedByPublicCommand).toBe(true);
+    const captured = JSON.parse(readFileSync(capturePath, "utf8")) as {
+      baseUrlArg?: string;
+      initialized?: boolean;
+    };
+    expect(captured.initialized).toBe(true);
+    expect(captured.baseUrlArg).toMatch(
+      /^model_providers\.deepseek\.base_url="http:\/\/127\.0\.0\.1:\d+"$/u,
+    );
+  }, 15_000);
+
+  it("rejects a partial App Server topology instead of bypassing a provider proxy", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-start-partial-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const codexHome = join(root, ".codex");
+    const workspace = join(root, "Workspace");
+    const fakeCodex = join(root, "fake-codex.mjs");
+    mkdirSync(workspace);
+    mkdirSync(codexHome);
+    writeFileSync(fakeCodex, "#!/usr/bin/env node\nprocess.exit(0);\n");
+    chmodSync(fakeCodex, 0o700);
+    writeFileSync(
+      join(codexHome, "deepseek.config.toml"),
+      [
+        'model = "deepseek-v4-flash"',
+        'model_provider = "deepseek"',
+        'model_reasoning_effort = "high"',
+        `model_catalog_json = ${JSON.stringify(join(codexHome, "deepseek.models.json"))}`,
+        "[model_providers.deepseek]",
+        'name = "deepseek"',
+        'base_url = "https://api.deepseek.com/"',
+        'wire_api = "responses"',
+        "requires_openai_auth = false",
+        'experimental_bearer_token = "sk-start-secret"',
+        "",
+      ].join("\n"),
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "codex-connect-deepseek.config.toml"),
+      'version = 1\nprovider = "deepseek"\nmode = "switching"\n',
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "deepseek.models.json"),
+      '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
+      { mode: 0o600 },
+    );
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_HOME: codexHome,
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.codex).binary = fakeCodex;
+    });
+
+    const socketPath = join(home, "runtime", "codex-app-server.sock");
+    const server = createServer();
+    const webSocketServer = new WebSocketServer({ server });
+    await new Promise<void>((resolveListen, rejectListen) => {
+      server.once("error", rejectListen);
+      server.listen(socketPath, resolveListen);
+    });
+
+    try {
+      const failure = await execFileAsync(
+        process.execPath,
+        [cli, "start"],
+        { cwd: root, env: environment, encoding: "utf8" },
+      ).then(
+        () => undefined,
+        (error: Error & { stderr?: string }) => error,
+      );
+      expect(failure?.stderr).toContain(
+        "检测到部分 App Server 正在运行，无法安全补启动完整统计代理链路",
+      );
+    } finally {
+      for (const client of webSocketServer.clients) {
+        client.terminate();
+      }
+      await new Promise<void>((resolveClose) => webSocketServer.close(() => resolveClose()));
+      await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+    }
+  });
+
+  it("rejects an unmanaged App Server even when its complete topology is healthy", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-start-unmanaged-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const codexHome = join(root, ".codex");
+    const workspace = join(root, "Workspace");
+    mkdirSync(workspace);
+    mkdirSync(codexHome);
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      [
+        'model = "deepseek-v4-flash"',
+        'model_provider = "deepseek"',
+        'model_reasoning_effort = "high"',
+        `model_catalog_json = ${JSON.stringify(join(codexHome, "deepseek.models.json"))}`,
+        "[model_providers.deepseek]",
+        'name = "deepseek"',
+        'base_url = "https://api.deepseek.com/"',
+        'wire_api = "responses"',
+        "requires_openai_auth = false",
+        'experimental_bearer_token = "sk-start-secret"',
+        "",
+      ].join("\n"),
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "codex-connect-deepseek.config.toml"),
+      'version = 1\nprovider = "deepseek"\nmode = "exclusive"\n',
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "deepseek.models.json"),
+      '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
+      { mode: 0o600 },
+    );
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_HOME: codexHome,
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+
+    const socketPath = join(home, "runtime", "codex-app-server.sock");
+    const appServer = createServer();
+    const webSocketServer = new WebSocketServer({ server: appServer });
+    await new Promise<void>((resolveListen, rejectListen) => {
+      appServer.once("error", rejectListen);
+      appServer.listen(socketPath, resolveListen);
+    });
+
+    try {
+      const failure = await execFileAsync(
+        process.execPath,
+        [cli, "start"],
+        { cwd: root, env: environment, encoding: "utf8" },
+      ).then(
+        () => undefined,
+        (error: Error & { stderr?: string }) => error,
+      );
+      expect(failure?.stderr).toContain(
+        "现有 App Server 不属于 codexc 统一监管入口",
+      );
+    } finally {
+      for (const client of webSocketServer.clients) {
+        client.terminate();
+      }
+      await new Promise<void>((resolveClose) => webSocketServer.close(() => resolveClose()));
+      await new Promise<void>((resolveClose) => appServer.close(() => resolveClose()));
+    }
+  });
+
+  it("rejects an occupied App Server topology inside the shared supervisor entry", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-service-occupied-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    const fakeCodex = join(root, "fake-codex.mjs");
+    mkdirSync(workspace);
+    writeFileSync(fakeCodex, "#!/usr/bin/env node\nprocess.exit(0);\n");
+    chmodSync(fakeCodex, 0o700);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_HOME: join(root, ".codex"),
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.codex).binary = fakeCodex;
+    });
+
+    const socketPath = join(home, "runtime", "codex-app-server.sock");
+    const appServer = createServer();
+    const webSocketServer = new WebSocketServer({ server: appServer });
+    await new Promise<void>((resolveListen, rejectListen) => {
+      appServer.once("error", rejectListen);
+      appServer.listen(socketPath, resolveListen);
+    });
+
+    try {
+      const failure = await execFileAsync(
+        process.execPath,
+        [cli, "service-app-server"],
+        { cwd: root, env: environment, encoding: "utf8" },
+      ).then(
+        () => undefined,
+        (error: Error & { stderr?: string }) => error,
+      );
+      expect(failure?.stderr).toContain(
+        "App Server Socket 已被未受监管的进程占用",
+      );
+    } finally {
+      for (const client of webSocketServer.clients) {
+        client.terminate();
+      }
+      await new Promise<void>((resolveClose) => webSocketServer.close(() => resolveClose()));
+      await new Promise<void>((resolveClose) => appServer.close(() => resolveClose()));
+    }
+  });
+
+  it("rejects a second shared App Server supervisor", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-service-owner-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    const fakeCodex = join(root, "fake-codex.mjs");
+    mkdirSync(workspace);
+    writeFileSync(fakeCodex, "#!/usr/bin/env node\nprocess.exit(0);\n");
+    chmodSync(fakeCodex, 0o700);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_HOME: join(root, ".codex"),
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.codex).binary = fakeCodex;
+    });
+
+    const ownerSocketPath = join(home, "runtime", "codex-app-server-supervisor.sock");
+    const ownerServer = createNetServer((socket) => socket.end());
+    await new Promise<void>((resolveListen, rejectListen) => {
+      ownerServer.once("error", rejectListen);
+      ownerServer.listen(ownerSocketPath, resolveListen);
+    });
+
+    try {
+      const failure = await execFileAsync(
+        process.execPath,
+        [cli, "service-app-server"],
+        { cwd: root, env: environment, encoding: "utf8" },
+      ).then(
+        () => undefined,
+        (error: Error & { stderr?: string }) => error,
+      );
+      expect(failure?.stderr).toContain(
+        "Codex App Server 统一监管入口已在运行",
+      );
+    } finally {
+      await new Promise<void>((resolveClose) => ownerServer.close(() => resolveClose()));
+    }
+  });
+
+  it("rejects a direct duplicate Gateway independently of Provider metrics sockets", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-gateway-owner-entry-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    mkdirSync(workspace);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_HOME: join(root, ".different-codex-home"),
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.telegram).bot_token = "123456:test-token";
+      table(document.telegram).allowed_user_ids = [123456];
+    });
+    const owner = new GatewayOwner(join(home, "config.toml"));
+    await owner.start();
+
+    try {
+      const duplicate = spawnSync(process.execPath, [cli, "gateway"], {
+        cwd: root,
+        env: environment,
+        encoding: "utf8",
+      });
+      expect(duplicate.status).toBe(1);
+      expect(duplicate.stderr).toContain("Gateway 已在运行，不能重复启动");
+    } finally {
+      await owner.close();
+    }
+  });
+
+  it("does not start the Gateway before the App Server passes a WebSocket health check", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-start-not-ready-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    const fakeCodex = join(root, "fake-codex.mjs");
+    mkdirSync(workspace);
+    writeFileSync(fakeCodex, [
+      "#!/usr/bin/env node",
+      "import { createServer } from 'node:net';",
+      "const listenUrl = process.argv.at(-1);",
+      "const socketPath = listenUrl?.startsWith('unix://') ? listenUrl.slice('unix://'.length) : undefined;",
+      "if (!socketPath) process.exit(2);",
+      "const server = createServer();",
+      "server.listen(socketPath, () => setTimeout(() => server.close(() => process.exit(0)), 500));",
+    ].join("\n"));
+    chmodSync(fakeCodex, 0o700);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_HOME: join(root, ".codex"),
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.codex).binary = fakeCodex;
+    });
+
+    const failure = await execFileAsync(
+      process.execPath,
+      [cli, "start"],
+      { cwd: root, env: environment, encoding: "utf8", timeout: 10_000 },
+    ).then(
+      () => undefined,
+      (error: Error & { stderr?: string }) => error,
+    );
+    expect(failure?.stderr).toContain(
+      "App Server 在 WebSocket 就绪前退出",
+    );
+    expect(failure?.stderr).not.toContain("至少需要配置一个通讯渠道");
+  });
+
   it("rejects the removed manual ds_proxy configuration", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-service-proxy-mode-"));
     temporaryDirectories.push(root);
@@ -1598,8 +2102,28 @@ describe("codexc CLI", () => {
       server.once("error", rejectListen);
       server.listen(socketPath, resolveListen);
     });
+    const supervisorOwner = new AppServerSupervisorOwner(socketPath, {
+      primaryProvider: "openai",
+      socketPaths: [socketPath],
+    });
 
     try {
+      const unmanaged = await execFileAsync(
+        process.execPath,
+        [cli, "doctor"],
+        { cwd: workspace, env: environment, encoding: "utf8" },
+      ).then(
+        ({ stdout }) => ({ status: 0, stdout }),
+        (error: Error & { code?: number; stdout?: string }) => ({
+          status: error.code,
+          stdout: error.stdout ?? "",
+        }),
+      );
+      expect(unmanaged.status).toBe(1);
+      expect(unmanaged.stdout).toContain("[失败] App Server 监管");
+      expect(unmanaged.stdout).toContain("codexc service restart all");
+
+      await supervisorOwner.start();
       const { stdout } = await execFileAsync(
         process.execPath,
         [cli, "doctor"],
@@ -1643,6 +2167,7 @@ describe("codexc CLI", () => {
         `[失败] App Server 版本：0.0.0（要求 ${expectedAppServerVersion}）`,
       );
     } finally {
+      await supervisorOwner.close();
       for (const client of webSocketServer.clients) {
         client.terminate();
       }
@@ -1750,6 +2275,41 @@ function exportedMetricsPath(output: string): string {
   const match = /^已导出：(.+)$/mu.exec(output);
   if (!match?.[1]) throw new Error(`未找到导出路径：${output}`);
   return match[1];
+}
+
+async function waitForCondition(
+  condition: () => boolean,
+  timeoutMs: number,
+  failure: () => Error | undefined = () => undefined,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (!condition()) {
+    const error = failure();
+    if (error) throw error;
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error(`等待测试条件超时（${timeoutMs} ms）`);
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+  }
+}
+
+function readCapturedInitialization(path: string): boolean {
+  if (!existsSync(path)) return false;
+  try {
+    return JSON.parse(readFileSync(path, "utf8")).initialized === true;
+  } catch {
+    return false;
+  }
+}
+
+function signalTestProcessGroup(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-pid, signal);
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) {
+      throw error;
+    }
+  }
 }
 
 function metricsSample(index: number): ModelRequestMetricSample {

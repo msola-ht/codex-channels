@@ -1,30 +1,30 @@
-import { execFileSync, spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, realpathSync, renameSync } from "node:fs";
-import { createConnection } from "node:net";
-import { dirname, isAbsolute, join } from "node:path";
+import { spawn } from "node:child_process";
+import { chmodSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 
-import WebSocket from "ws";
+import {
+  appServerSocketAcceptsWebSocket,
+  inspectAppServerSupervisor,
+  sameAppServerTopology,
+} from "../runtime/app-server-supervisor.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import {
   loadManagedProviderAppServer,
+  loadPrimaryModelProvider,
   providerAppServerSocketPath,
 } from "../runtime/model-provider-runtime.mjs";
 import { packageDir, resolveConfiguredPath, runtimeConfig } from "./runtime-config.mjs";
-import { readWorkspaceConfig } from "./workspace-config.mjs";
 
 const projectDir = packageDir;
 const runtime = runtimeConfig();
 const document = readGatewayConfig(runtime.configPath);
 const codex = table(document.codex);
-const { defaultWorkspace } = readWorkspaceConfig(document);
-const workdir = defaultWorkspace.cwd;
 const socketPath = resolveConfiguredPath(
   stringValue(codex.socket_path),
   runtime.dataDir,
   join(runtime.dataDir, "runtime", "codex-app-server.sock"),
 );
 const runtimeDir = dirname(socketPath);
-const codexBinary = resolveExecutable(stringValue(codex.binary) || "codex");
 const gatewayEntry = process.env.CODEX_CONNECT_GATEWAY_ENTRY === "dist"
   ? [join(projectDir, "dist/main.js")]
   : [join(projectDir, "node_modules", "tsx", "dist", "cli.mjs"), "src/main.ts"];
@@ -32,20 +32,23 @@ const gatewayEntry = process.env.CODEX_CONNECT_GATEWAY_ENTRY === "dist"
 mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
 chmodSync(runtimeDir, 0o700);
 
-const appServers = [];
+const appServerSupervisors = [];
 try {
-  await ensureAppServer(socketPath, []);
   const managedProvider = loadManagedProviderAppServer();
-  if (managedProvider) {
-    await ensureAppServer(
-      providerAppServerSocketPath(socketPath, managedProvider.provider),
-      managedProvider.arguments,
-      { ...process.env, ...managedProvider.childEnvironment },
-    );
-  }
+  const topology = {
+    primaryProvider: loadPrimaryModelProvider(),
+    managedProvider: managedProvider?.provider,
+    socketPaths: [
+      socketPath,
+      ...(managedProvider
+        ? [providerAppServerSocketPath(socketPath, managedProvider.provider)]
+      : []),
+    ],
+  };
+  await ensureAppServerTopology(topology);
 } catch (error) {
-  for (const appServer of appServers) {
-    if (appServer.exitCode === null) appServer.kill("SIGTERM");
+  for (const supervisor of appServerSupervisors) {
+    if (supervisor.exitCode === null) supervisor.kill("SIGTERM");
   }
   throw error;
 }
@@ -60,17 +63,17 @@ const stop = () => {
   if (gateway?.exitCode === null) {
     gateway.kill("SIGTERM");
   }
-  for (const appServer of appServers) {
-    if (appServer.exitCode === null) {
-      appServer.kill("SIGTERM");
+  for (const supervisor of appServerSupervisors) {
+    if (supervisor.exitCode === null) {
+      supervisor.kill("SIGTERM");
     }
   }
 };
 process.once("SIGINT", stop);
 process.once("SIGTERM", stop);
 
-for (const appServer of appServers) {
-  appServer.once("exit", (code, signal) => {
+for (const supervisor of appServerSupervisors) {
+  supervisor.once("exit", (code, signal) => {
     if (!stopping) {
       console.error(`Codex App Server 意外退出：code=${code} signal=${signal}`);
       stop();
@@ -87,6 +90,7 @@ while (!stopping) {
       ...process.env,
       CODEX_CONNECT_CONFIG_FILE: runtime.configPath,
       CODEX_CONNECT_GATEWAY_SUPERVISED: "1",
+      CODEX_CONNECT_SERVICE_ROLE: "gateway",
     },
   });
   const result = await waitForGateway(gateway);
@@ -115,13 +119,6 @@ function waitForGateway(child) {
   });
 }
 
-function resolveExecutable(command) {
-  if (isAbsolute(command)) {
-    return realpathSync(command);
-  }
-  return execFileSync("/usr/bin/which", [command], { encoding: "utf8" }).trim();
-}
-
 function table(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -130,77 +127,67 @@ function stringValue(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-async function ensureAppServer(path, prefixArguments, environment = process.env) {
-  if (await socketAcceptsWebSocket(path)) {
-    console.log(`检测到现有 App Server Socket，将直接复用：${path}`);
+async function ensureAppServerTopology(topology) {
+  const paths = topology.socketPaths;
+  const existingSupervisor = await inspectAppServerSupervisor(socketPath);
+  if (existingSupervisor) {
+    if (!sameAppServerTopology(existingSupervisor, topology)) {
+      throw new Error(
+        "现有 App Server Provider 拓扑与当前配置不一致；"
+        + "请先运行 codexc service stop all，再重试",
+      );
+    }
+    for (const path of paths) {
+      await waitForSocket(undefined, path, 10_000);
+      console.log(`检测到现有 App Server Socket，将直接复用：${path}`);
+    }
     return;
   }
-  preserveStaleSocket(path, runtimeDir);
-  const child = spawn(
-    codexBinary,
-    [...prefixArguments, "app-server", "--listen", `unix://${path}`],
-    { cwd: workdir, stdio: "inherit", env: environment },
+  const healthy = await Promise.all(paths.map((path) => appServerSocketAcceptsWebSocket(path)));
+  if (healthy.every(Boolean)) {
+    throw new Error(
+      "现有 App Server 不属于 codexc 统一监管入口；请先停止现有 App Server 后重试",
+    );
+  }
+  if (healthy.some(Boolean)) {
+    throw new Error(
+      "检测到部分 App Server 正在运行，无法安全补启动完整统计代理链路；"
+      + "请先停止现有 App Server 后重试",
+    );
+  }
+  const supervisor = spawn(
+    process.execPath,
+    [join(projectDir, "bin", "codexc.mjs"), "service-app-server"],
+    {
+      cwd: runtime.dataDir,
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        CODEX_CONNECT_CONFIG_FILE: runtime.configPath,
+      },
+    },
   );
-  appServers.push(child);
-  await waitForSocket(child, path, 10_000);
-  console.log(`Codex App Server 已启动：${path}`);
+  appServerSupervisors.push(supervisor);
+  for (const path of paths) {
+    await waitForSocket(supervisor, path, 10_000);
+  }
+  console.log("Codex App Server 与模型统计代理已启动。");
 }
 
 async function waitForSocket(child, path, timeoutMs) {
   const startedAt = Date.now();
-  while (!existsSync(path)) {
-    if (child.exitCode !== null) {
-      throw new Error(`Codex App Server 启动失败：exit=${child.exitCode}`);
+  while (!(await appServerSocketAcceptsWebSocket(path))) {
+    if (child && (child.exitCode !== null || child.signalCode !== null)) {
+      throw new Error(
+        `App Server 在 WebSocket 就绪前退出：exit=${child.exitCode} signal=${child.signalCode}`,
+      );
     }
     if (Date.now() - startedAt >= timeoutMs) {
-      child.kill("SIGTERM");
-      throw new Error(`等待 Codex App Server Socket 超时：${path}`);
+      if (child?.exitCode === null && child.signalCode === null) {
+        child.kill("SIGTERM");
+      }
+      throw new Error(`等待 Codex App Server WebSocket 就绪超时：${path}`);
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
-  }
-}
-
-async function socketAcceptsWebSocket(path) {
-  if (!existsSync(path)) {
-    return false;
-  }
-  return new Promise((resolveCheck) => {
-    const socket = new WebSocket("ws://localhost/", {
-      perMessageDeflate: false,
-      createConnection: () => createConnection(path),
-    });
-    let settled = false;
-    const finish = (healthy) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      socket.removeAllListeners();
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.close();
-      } else {
-        socket.terminate();
-      }
-      resolveCheck(healthy);
-    };
-    const timer = setTimeout(() => finish(false), 1_500);
-    socket.once("open", () => finish(true));
-    socket.once("error", () => finish(false));
-  });
-}
-
-function preserveStaleSocket(path, directory) {
-  if (!existsSync(path)) {
-    return;
-  }
-  try {
-    const preserved = join(directory, `codex-app-server.stale-${Date.now()}.sock`);
-    renameSync(path, preserved);
-    console.warn(`检测到无效 Socket，已保留为：${preserved}`);
-  } catch (error) {
-    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
-      throw error;
-    }
   }
 }

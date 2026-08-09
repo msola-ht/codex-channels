@@ -72,6 +72,9 @@ describe("launchd installer", () => {
     expect(gateway).toContain(
       "<key>CODEX_CONNECT_SERVICE_ROLE</key>\n    <string>gateway</string>",
     );
+    expect(gateway).toContain(
+      "<key>CODEX_CONNECT_GATEWAY_SUPERVISED</key>\n    <string>1</string>",
+    );
     for (const plist of [appServer, gateway]) {
       expect(plist).not.toContain("<key>HTTP_PROXY</key>");
       expect(plist).not.toContain("<key>HTTPS_PROXY</key>");

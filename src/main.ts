@@ -1,4 +1,7 @@
-import { runGatewayProcess } from "./bootstrap/index.js";
+import {
+  GatewayOwnershipError,
+  runGatewayProcess,
+} from "./bootstrap/index.js";
 import { ConfigurationError } from "./config/index.js";
 import {
   ModelRequestMetricsSchemaError,
@@ -8,6 +11,8 @@ import {
 runGatewayProcess().catch((error) => {
   if (error instanceof ConfigurationError) {
     console.error(`配置错误：${error.message}`);
+  } else if (error instanceof GatewayOwnershipError) {
+    console.error(error.message);
   } else if (error instanceof ModelRequestMetricsSchemaError) {
     console.error(error.message);
   } else {

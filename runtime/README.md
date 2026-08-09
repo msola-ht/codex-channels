@@ -20,6 +20,13 @@
   切换模式为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，并只在子进程环境提供
   Key；固定模式从基础配置读取。
 - `model-provider-runtime.d.mts`：声明受控模型 Provider 运行时接口。
+- `app-server-supervisor.mjs`：以当前用户私有 Unix Socket 持有 App Server 监管入口互斥锁，
+  对前台启动器公开有界、版本化的 Provider 拓扑身份；集中检查真实 WebSocket 健康状态，拒绝
+  未受监管的活动 App Server，并安全保留失效 Socket；关闭时主动清理已接入连接，不因本地客户端
+  保持连接而阻塞服务退出。
+- `app-server-supervisor.d.mts`：声明 App Server 监管拓扑与健康检查接口。
+- `gateway-owner.mjs` / `gateway-owner.d.mts`：按当前配置文件持有独立于 Provider 和指标通道的
+  私有 Gateway 所有权 Socket，保证同一配置只能运行一个 Gateway，并安全清理失效入口。
 - `project-rules.mjs`：生成并检查项目级 Codex 命令规则；Gateway 使用精确 Workspace 根目录，
   并拒绝通过符号链接把写入转移到 Workspace 外。
 - `project-rules.d.mts`：声明共享项目规则模块的 TypeScript 接口。

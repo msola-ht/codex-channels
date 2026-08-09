@@ -258,6 +258,14 @@ codexc service logs -f                # 持续跟踪 Gateway 日志
 codexc service logs webui             # 查看 WebUI 日志
 ```
 
+`codexc start` 的前台模式与后台服务复用同一个 App Server 监管入口，因此 OpenAI、切换模式和
+仅 DeepSeek 固定模式都会经过对应的本机统计代理。现有 App Server 只有通过私有监管 Socket
+证明 Provider 拓扑一致并完成真实 WebSocket 握手后才会复用；裸 App Server、部分拓扑、重复
+监管入口都会明确拒绝。Gateway 另以当前配置文件对应的私有所有权 Socket 全局互斥，不受
+Provider 或 `CODEX_HOME` 切换影响；重复启动会保留当前正在运行的进程。
+前台模式收到 `SIGINT` 或 `SIGTERM` 时先按所有权链路优雅停止，5 秒仍未退出才终止本次前台
+启动创建的进程组；已经由后台服务持有并被前台复用的 App Server 不会被终止。
+
 `start`、`stop` 和 `status` 默认操作全部服务；`restart` 和 `logs` 默认只操作 Gateway。运行
 `codexc service -h` 查看完整用法。WebUI 与指标中心是独立后台服务，不并入 `all`：
 `codexc service install` 只生成这两类服务单元并启动 App Server 与 Gateway，需要时用
@@ -347,7 +355,8 @@ codexc service logs -n 100
 App Server 和系统服务分组，只展示失败、提示与处理建议；成功项只计入结尾汇总。交互终端中
 失败、提示和处理建议使用不同颜色，管道或日志输出不包含 ANSI 颜色。Doctor 保持只读；Linux
 的 PATH 中缺少 `bubblewrap` 时会额外输出 `[处理]` 安装建议，但不会自动安装软件、修改
-AppArmor 或重启服务。
+AppArmor 或重启服务。App Server 检查同时验证监管身份和当前 Provider 拓扑；裸实例或拓扑不一致
+会提示重启整套服务，不再只因 `initialize` 握手成功而显示健康。
 
 常见处理：
 

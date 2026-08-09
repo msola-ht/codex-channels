@@ -13,7 +13,8 @@
 模板由 `scripts/install-systemd.mjs` 渲染到 `~/.config/systemd/user`（或 `$XDG_CONFIG_HOME/systemd/user`）。
 服务都通过 CLI 服务入口启动，并在每次启动时按 TOML、systemd 用户管理器继承的标准
 代理环境变量和 GNOME 手动代理的顺序解析代理，不把自动发现的地址固化到 unit。安装、启停和
-卸载由 `scripts/systemd-control.sh` 完成；Gateway 的日常重启不会停止共享 App Server。
+卸载由 `scripts/systemd-control.sh` 完成；Gateway unit 显式标记为受监管进程，配置要求重启时
+由 systemd 自动拉起。Gateway 的日常重启不会停止共享 App Server。
 启停、重启、状态和日志可选择 `gateway`、`app-server`、`webui`、`center` 或 `all`；
 WebUI 与指标中心独立于 `all`，安装时只生成 unit 不自动启动。不写目标时，启停和状态默认
 `all`，重启和日志默认 `gateway`。

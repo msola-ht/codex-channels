@@ -4,7 +4,7 @@
 
 ## 文件
 
-- `index.ts`：向进程入口公开 `GatewayApplication`。
+- `index.ts`：向进程入口公开 `GatewayApplication`、进程生命周期入口和安全的 Gateway 所有权错误。
 - `app.ts`：校验 Codex 版本，装配 Transport、Client、Core、Router 和 Storage；处理启动、重连、
   订阅恢复与关闭，并通过 Client 适配器把稳定事件分别转交 Core 与 `session-routing`、把
   Server Request 转交 Approval；未知或畸形 Notification 只记录 method 后忽略，未知或畸形
@@ -54,7 +54,8 @@
   组合根按实际响应模型附加当次价格快照，不保存图片、提示词、响应正文或识别结果。
 - `turn-error-metrics.ts`：把同步 RPC 与异步 `turn.error` 通知的 Turn 级失败统一转换为脱敏的
   模型请求失败样本，保存错误原文与分类，不携带任何平台上下文或敏感凭据。
-- `config-lifecycle.ts`：管理配置监听、防抖重载、持久配置事件投递、信号与进程退出。
+- `config-lifecycle.ts`：在任何 Surface 或指标组件启动前获取配置级 Gateway 所有权，随后管理配置
+  监听、防抖重载、持久配置事件投递、信号、所有权释放与进程退出。
 - `surface-manager.ts`：按 `surface + accountId` 向已启动 Surface 集中路由 Core 输出，并为
   `turn.completed` 注入当前授权 Workspace 的 Git 分支和 Thread 累计总价；并行完成各 Surface 的首次启动，
   单个渠道启动或运行失败时只取消该渠道交互并独立退避恢复，不停止 Gateway 或其他渠道。

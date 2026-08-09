@@ -1,0 +1,114 @@
+import { chmodSync, lstatSync, mkdirSync, unlinkSync } from "node:fs";
+import { createConnection, createServer } from "node:net";
+import { dirname, join } from "node:path";
+
+const connectionTimeoutMs = 1_000;
+
+export class GatewayOwnershipError extends Error {}
+
+export class GatewayOwner {
+  #identity;
+  #server;
+  #socketPath;
+  #sockets = new Set();
+  #closePromise;
+
+  constructor(configPath) {
+    this.#socketPath = gatewayOwnerSocketPath(configPath);
+    this.#server = createServer({ allowHalfOpen: true }, (socket) => {
+      this.#sockets.add(socket);
+      socket.on("error", () => undefined);
+      socket.on("close", () => this.#sockets.delete(socket));
+      socket.setTimeout(connectionTimeoutMs, () => socket.destroy());
+      socket.end(`${JSON.stringify({ version: 1, pid: process.pid })}\n`);
+    });
+  }
+
+  async start() {
+    mkdirSync(dirname(this.#socketPath), { recursive: true, mode: 0o700 });
+    chmodSync(dirname(this.#socketPath), 0o700);
+    await removeStaleGatewaySocket(this.#socketPath);
+    await new Promise((resolveListen, rejectListen) => {
+      const onError = (error) => {
+        this.#server.removeListener("listening", onListening);
+        rejectListen(error);
+      };
+      const onListening = () => {
+        this.#server.removeListener("error", onError);
+        resolveListen();
+      };
+      this.#server.once("error", onError);
+      this.#server.once("listening", onListening);
+      this.#server.listen(this.#socketPath);
+    }).catch((error) => {
+      if (error?.code === "EADDRINUSE") {
+        throw new GatewayOwnershipError("Gateway 已在运行，不能重复启动");
+      }
+      throw error;
+    });
+    try {
+      const status = lstatSync(this.#socketPath);
+      this.#identity = { dev: status.dev, ino: status.ino };
+      chmodSync(this.#socketPath, 0o600);
+    } catch (error) {
+      await this.close();
+      throw error;
+    }
+  }
+
+  close() {
+    this.#closePromise ??= this.#closeInternal();
+    return this.#closePromise;
+  }
+
+  async #closeInternal() {
+    for (const socket of this.#sockets) socket.destroy();
+    if (this.#server.listening) {
+      await new Promise((resolveClose) => this.#server.close(() => resolveClose()));
+    }
+    unlinkOwnedSocket(this.#socketPath, this.#identity);
+  }
+}
+
+export function gatewayOwnerSocketPath(configPath) {
+  return join(dirname(configPath), "runtime", "gateway-owner.sock");
+}
+
+async function removeStaleGatewaySocket(socketPath) {
+  const status = lstatSync(socketPath, { throwIfNoEntry: false });
+  if (!status) return;
+  if (!status.isSocket() || status.uid !== process.getuid?.()) {
+    throw new Error(`Gateway 所有权 Socket 路径不安全：${socketPath}`);
+  }
+  if (await socketAcceptsConnections(socketPath)) {
+    throw new GatewayOwnershipError("Gateway 已在运行，不能重复启动");
+  }
+  const current = lstatSync(socketPath, { throwIfNoEntry: false });
+  if (current?.dev === status.dev && current.ino === status.ino) {
+    unlinkSync(socketPath);
+  }
+}
+
+function socketAcceptsConnections(socketPath) {
+  return new Promise((resolveCheck) => {
+    const socket = createConnection(socketPath);
+    let settled = false;
+    const finish = (active) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolveCheck(active);
+    };
+    socket.setTimeout(connectionTimeoutMs, () => finish(false));
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+  });
+}
+
+function unlinkOwnedSocket(socketPath, identity) {
+  if (!identity) return;
+  const status = lstatSync(socketPath, { throwIfNoEntry: false });
+  if (status?.isSocket() && status.dev === identity.dev && status.ino === identity.ino) {
+    unlinkSync(socketPath);
+  }
+}

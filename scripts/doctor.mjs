@@ -11,11 +11,16 @@ import { dirname, isAbsolute, join } from "node:path";
 import WebSocket from "ws";
 
 import {
+  inspectAppServerSupervisor,
+  sameAppServerTopology,
+} from "../runtime/app-server-supervisor.mjs";
+import {
   readGatewayConfig,
   validateGatewayConfigDocument,
 } from "../runtime/gateway-config.mjs";
 import {
   loadManagedProviderAppServer,
+  loadPrimaryModelProvider,
   providerAppServerSocketPath,
   validateConfiguredModelProvider,
 } from "../runtime/model-provider-runtime.mjs";
@@ -280,7 +285,8 @@ if (document) {
     dataDir,
     join(dataDir, "runtime", "codex-app-server.sock"),
   );
-  await checkAppServer("Codex App Server", socketPath);
+  let appServerTopology;
+  let managedProvider;
   try {
     const configuredProvider = validateConfiguredModelProvider(process.env);
     if (configuredProvider) {
@@ -290,15 +296,51 @@ if (document) {
         `${configuredProvider.provider} ${configuredProvider.mode === "switching" ? "切换" : "固定"}模式有效`,
       );
     }
-    const managedProvider = loadManagedProviderAppServer(process.env);
-    if (managedProvider) {
-      await checkAppServer(
-        `${managedProvider.provider} App Server`,
-        providerAppServerSocketPath(socketPath, managedProvider.provider),
-      );
-    }
+    managedProvider = loadManagedProviderAppServer(process.env);
+    const providerSocketPath = managedProvider
+      ? providerAppServerSocketPath(socketPath, managedProvider.provider)
+      : undefined;
+    appServerTopology = {
+      primaryProvider: loadPrimaryModelProvider(process.env),
+      managedProvider: managedProvider?.provider,
+      socketPaths: [socketPath, ...(providerSocketPath ? [providerSocketPath] : [])],
+    };
   } catch (error) {
     record("模型提供商配置", false, errorMessage(error));
+  }
+  if (appServerTopology) {
+    await checkAppServerSupervisor(socketPath, appServerTopology);
+  }
+  await checkAppServer("Codex App Server", socketPath);
+  if (managedProvider) {
+    await checkAppServer(
+      `${managedProvider.provider} App Server`,
+      providerAppServerSocketPath(socketPath, managedProvider.provider),
+    );
+  }
+}
+
+async function checkAppServerSupervisor(socketPath, expectedTopology) {
+  try {
+    const actualTopology = await inspectAppServerSupervisor(socketPath);
+    const matches = sameAppServerTopology(actualTopology, expectedTopology);
+    record(
+      "App Server 监管",
+      matches,
+      matches
+        ? "监管身份有效，Provider 拓扑与当前配置一致"
+        : "监管身份缺失、无效或 Provider 拓扑与当前配置不一致",
+      matches
+        ? undefined
+        : "运行 codexc service restart all；如仍失败，先停止裸 App Server 后重试",
+    );
+  } catch (error) {
+    record(
+      "App Server 监管",
+      false,
+      errorMessage(error),
+      "运行 codexc service restart all；如仍失败，先停止裸 App Server 后重试",
+    );
   }
 }
 
@@ -410,13 +452,14 @@ function colorize(value, color) {
   return colorsEnabled ? `\u001b[${color}m${value}\u001b[0m` : value;
 }
 
-function record(name, passed, detail) {
+function record(name, passed, detail, remediation) {
   checks.push({
     section: checkSection,
     kind: passed ? "success" : "failure",
     prefix: passed ? "[通过]" : "[失败]",
     name,
     detail,
+    remediation,
   });
 }
 

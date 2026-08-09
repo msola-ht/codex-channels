@@ -12,6 +12,12 @@ import { join, resolve } from "node:path";
 import pino from "pino";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import {
+  appServerSupervisorSocketPath,
+  inspectAppServerSupervisor,
+  sameAppServerTopology,
+} from "../runtime/app-server-supervisor.mjs";
+import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import type { ApprovalRequest } from "../src/approval/index.js";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import {
@@ -239,6 +245,101 @@ suite("real Codex App Server over Unix WebSocket", () => {
       }
     }
   });
+});
+
+suite("real supervised App Server service", () => {
+  it("starts the OpenAI metrics proxy and exposes the matching supervised App Server", async () => {
+    const runtimeRoot = resolve(".runtime");
+    mkdirSync(runtimeRoot, { recursive: true });
+    const testRuntime = mkdtempSync(join(runtimeRoot, "service-integration-"));
+    const codexHome = join(testRuntime, "codex-home");
+    const workspace = join(testRuntime, "workspace");
+    const configPath = join(testRuntime, "config.toml");
+    const socketPath = join(testRuntime, "codex-app-server.sock");
+    const supervisorSocketPath = appServerSupervisorSocketPath(socketPath);
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    mkdirSync(workspace, { recursive: true, mode: 0o700 });
+    writeGatewayConfig(configPath, {
+      version: 1,
+      default_workspace: "integration",
+      telegram: {
+        bot_token: "integration-token",
+        allowed_user_ids: [123],
+        message_format: "html",
+      },
+      network: {},
+      codex: {
+        binary: process.env.CODEX_BINARY ?? "codex",
+        socket_path: socketPath,
+        sandbox: "workspace-write",
+      },
+      approval: { timeout_seconds: 300 },
+      storage: { database_path: join(testRuntime, "gateway.sqlite3") },
+      logging: { level: "info" },
+      workspaces: [{ id: "integration", name: "Integration", cwd: workspace }],
+    });
+
+    let stdout = "";
+    let stderr = "";
+    let client: CodexAppServerClient | undefined;
+    const service = spawn(
+      process.execPath,
+      [resolve("bin/codexc.mjs"), "service-app-server"],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          CODEX_CONNECT_HOME: testRuntime,
+          CODEX_CONNECT_CONFIG_FILE: configPath,
+          CODEX_HOME: codexHome,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: process.platform !== "win32",
+      },
+    );
+    service.stdout?.setEncoding("utf8");
+    service.stderr?.setEncoding("utf8");
+    service.stdout?.on("data", (chunk: string) => {
+      stdout = appendDiagnostic(stdout, chunk);
+    });
+    service.stderr?.on("data", (chunk: string) => {
+      stderr = appendDiagnostic(stderr, chunk);
+    });
+
+    try {
+      await waitFor(
+        () => existsSync(socketPath) && stdout.includes("openai 模型统计代理已启动"),
+        15_000,
+        () => service.exitCode === null && service.signalCode === null
+          ? undefined
+          : new Error(appServerFailure(
+              "service-app-server 在真实 App Server 就绪前退出",
+              `${stdout}\n${stderr}`,
+            )),
+      );
+
+      const topology = await inspectAppServerSupervisor(socketPath);
+      expect(sameAppServerTopology(topology, {
+        primaryProvider: "openai",
+        socketPaths: [socketPath],
+      })).toBe(true);
+
+      client = new CodexAppServerClient(
+        new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
+        { sandbox: "read-only" },
+      );
+      const initialized = await client.connect();
+      expect(initialized.userAgent).toContain("codex_connect_gateway/");
+    } finally {
+      try {
+        await client?.close().catch(() => undefined);
+        await stopTestProcess(service, 10_000);
+        await waitFor(() => !existsSync(supervisorSocketPath), 2_000);
+      } finally {
+        rmSync(testRuntime, { recursive: true, force: true });
+      }
+    }
+  }, 30_000);
 });
 
 suite("real Codex App Server over stdio", () => {
@@ -988,6 +1089,34 @@ async function waitFor(
       throw new Error("等待 Codex App Server Unix Socket 超时；请检查 App Server stderr");
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+async function stopTestProcess(child: ChildProcess, timeoutMs: number): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  child.kill("SIGTERM");
+  try {
+    await waitFor(
+      () => child.exitCode !== null || child.signalCode !== null,
+      timeoutMs,
+    );
+  } catch (error) {
+    if (process.platform !== "win32" && child.pid !== undefined) {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch (killError) {
+        if (!(killError instanceof Error && "code" in killError && killError.code === "ESRCH")) {
+          throw killError;
+        }
+      }
+    } else {
+      child.kill("SIGKILL");
+    }
+    await waitFor(
+      () => child.exitCode !== null || child.signalCode !== null,
+      2_000,
+    );
+    throw error;
   }
 }
 

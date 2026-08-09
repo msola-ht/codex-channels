@@ -76,6 +76,8 @@ try {
   }
   const installedPackage = join(temporaryDirectory, "node_modules", "@hegenai", "codexc");
   for (const requiredFile of [
+    "runtime/app-server-supervisor.mjs",
+    "runtime/gateway-owner.mjs",
     "runtime/network-proxy.mjs",
     "scripts/feishu-application.mjs",
     "scripts/feishu-setup.mjs",
