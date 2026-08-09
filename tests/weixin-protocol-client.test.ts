@@ -115,7 +115,7 @@ describe("WeixinProtocolClient", () => {
         body: {
           base_info: {
             channel_version: "2.4.6",
-            bot_agent: "CodexConnect/0.146.1",
+            bot_agent: "CodexConnect/0.147.0",
           },
         },
       },
@@ -124,7 +124,7 @@ describe("WeixinProtocolClient", () => {
         body: {
           base_info: {
             channel_version: "2.4.6",
-            bot_agent: "CodexConnect/0.146.1",
+            bot_agent: "CodexConnect/0.147.0",
           },
         },
       },
@@ -208,7 +208,7 @@ describe("WeixinProtocolClient", () => {
           get_updates_buf: "current-cursor",
           base_info: {
             channel_version: "2.4.6",
-            bot_agent: "CodexConnect/0.146.1",
+            bot_agent: "CodexConnect/0.147.0",
           },
         }),
         signal: expect.any(AbortSignal),
@@ -735,7 +735,7 @@ describe("WeixinProtocolClient", () => {
       },
       base_info: {
         channel_version: "2.4.6",
-        bot_agent: "CodexConnect/0.146.1",
+        bot_agent: "CodexConnect/0.147.0",
       },
     });
   });
@@ -822,7 +822,7 @@ describe("WeixinProtocolClient", () => {
       aeskey: aesKey.toString("hex"),
       base_info: {
         channel_version: "2.4.6",
-        bot_agent: "CodexConnect/0.146.1",
+        bot_agent: "CodexConnect/0.147.0",
       },
     });
 
@@ -869,7 +869,7 @@ describe("WeixinProtocolClient", () => {
       },
       base_info: {
         channel_version: "2.4.6",
-        bot_agent: "CodexConnect/0.146.1",
+        bot_agent: "CodexConnect/0.147.0",
       },
     });
   });
@@ -959,7 +959,7 @@ describe("WeixinProtocolClient", () => {
       },
       base_info: {
         channel_version: "2.4.6",
-        bot_agent: "CodexConnect/0.146.1",
+        bot_agent: "CodexConnect/0.147.0",
       },
     });
   });
@@ -1152,7 +1152,7 @@ describe("WeixinProtocolClient", () => {
       context_token: "context-secret",
       base_info: {
         channel_version: "2.4.6",
-        bot_agent: "CodexConnect/0.146.1",
+        bot_agent: "CodexConnect/0.147.0",
       },
     });
     expect(

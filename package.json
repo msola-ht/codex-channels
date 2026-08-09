@@ -1,6 +1,6 @@
 {
   "name": "@hegenai/codexc",
-  "version": "0.146.1",
+  "version": "0.147.0",
   "description": "Chat surface gateway for a shared Codex App Server",
   "keywords": [
     "codex",

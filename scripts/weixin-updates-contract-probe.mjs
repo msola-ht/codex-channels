@@ -71,7 +71,7 @@ export function createWeixinUpdatesContractClient({
             get_updates_buf: safeCursor,
             base_info: {
               channel_version: "2.4.6",
-              bot_agent: "CodexConnect/0.146.1",
+              bot_agent: "CodexConnect/0.147.0",
             },
           }),
           signal: controller.signal,

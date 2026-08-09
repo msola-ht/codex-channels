@@ -84,6 +84,47 @@
 - 网络安全能力模型的自动审核采用更安全的默认值，并在终端解释权限变化。Gateway 不启用
   `--approve-for-me`，命令、文件、网络和额外权限仍走现有显式审批，因此不新增协议入口或自动批准路径。
 
+## 0.147.0
+
+- 官方 Release：[`rust-v0.147.0`](https://github.com/openai/codex/releases/tag/rust-v0.147.0)
+- 项目开发基线：Gateway、生成协议、真实 App Server 合同与固定源码索引锁定 `0.147.0`；
+  README 在 npm 与 GitHub Release 均成功前继续保留 `0.146.1` 为当前正式版
+- 评估范围：Thread 分区迁移、MCP 扩展与鉴权状态、Plugin 搜索和安装、审批模式、外部会话导入，
+  以及安全、终端与运行时修复
+
+### 已采用
+
+| 变化 | 它是做什么的 | 项目收益与处理 | 本地入口或验证 |
+| --- | --- | --- | --- |
+| 0.147.0 精确协议基线 | 让 Gateway、App Server 和生成类型保持在同一正式版本 | 重新生成协议并同步 Gateway、CI、固定源码与真实合同版本；不保留 0.146.1 兼容分支 | [`codex-protocol/`](../src/codex-protocol/README.md)、[`ci.yml`](../.github/workflows/ci.yml)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+| 内置 Pinned 分区 | 用持久分区统一承载旧版的会话置顶状态，并支持服务端排序 | `/pin`、`/unpin` 的公开行为不变；Gateway 原样回写当前 Git SHA，无损协调刚创建的加载中 Thread，再用官方固定 ID 移入或移出内置 Pinned 分区，并从 `Thread.section` 投影稳定 `isPinned`，不增加本地状态或写请求重试 | [`client.ts`](../src/codex-client/client.ts)、[`thread-adapter.ts`](../src/codex-client/thread-adapter.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+| MCP 鉴权未知状态 | 在 App Server 尚不能确定 MCP 服务的认证方式时明确显示未知，而不是把整个响应当成错误 | `/mcp` 保留官方 `unknown` 状态并继续拒绝协议之外的值，避免一个未完成探测的服务阻断整页状态 | [`mcp-port.ts`](../src/application/mcp-port.ts)、[`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
+| MCP 扩展协商 | 客户端在连接时明确告诉 App Server 自己能处理哪些扩展表单 | 初始化使用 `extensions["openai/form"]` 声明现有三渠道已实现的扩展表单处理，替代依赖旧式隐含或兼容协商 | [`json-rpc.ts`](../src/codex-client/json-rpc.ts)、[`server-request-adapter.ts`](../src/codex-client/server-request-adapter.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
+
+### 待评估
+
+| 候选能力 | 它是做什么的 | 对项目可能有什么用 | 实施边界与重新评估条件 |
+| --- | --- | --- | --- |
+| 自定义 Thread 分区 | 把会话按工作、个人或其他名称分组，并手工排序 | 长期会话较多时比单一置顶列表更容易整理 | 需要先设计三个 Surface 一致的创建、改名、删除、移动和分页交互；在有明确渠道需求前只采用内置 Pinned 分区，不导出通用分区端口 |
+| MCP 2026-07-28 客户端能力 | 支持分页发现、多轮请求和非阻塞服务器启动 | 大型 MCP 工具目录和启动较慢的服务可能更稳定 | 当前 Gateway 通过 App Server 查询和调用，不直接实现 MCP Client；只有生成协议新增必须协调的状态或 Server Request，或真实合同暴露差异时再扩展稳定边界 |
+
+### 明确不采用
+
+| 上游能力 | 它是做什么的 | 当前不采用原因 |
+| --- | --- | --- |
+| Agent Plugin 搜索、安装和远端目录 | 从本地、个人、Workspace 或远端目录发现并安装可移植 Plugin | 当前只查询已安装 Plugin；搜索和安装会扩大网络访问、供应链与 Workspace 授权边界，生成的 `plugin/search` 类型不构成项目支持 |
+| `--approve-for-me` 自动审核 | 让另一个模型代替用户判断部分审批 | Gateway 的命令、文件、网络和权限审批必须由当前 Surface Actor 显式决定，不能把一次批准静默升级为自动授权 |
+| Cursor、Claude 会话与技能导入 | 把其他客户端管理的会话或技能迁入 Codex 并持续同步 | App Server 是 Thread 和历史的唯一事实来源；Gateway 不读取、复制或同步其他客户端的会话数据 |
+
+### 纯上游变化
+
+- 命令与历史中的密钥、完整 Bearer Token 脱敏，项目可信目录校验、Plugin 隔离和网络策略失败关闭
+  随锁定 App Server 获得；Gateway 保留自身输入授权、日志脱敏和失败关闭边界。
+- 终端输入、日文、Emoji、超链接、视口和 Ghostty 修复由原生 Codex TUI 获得，Gateway 不复制
+  终端渲染。
+- Windows 进程与路径修复、Bedrock 缓存搜索和远端压缩、依赖升级、macOS 公证及发布归档调整
+  不改变当前 Gateway 的公开接口或 npm 分发流程。
+
 ## 后续使用
 
 处理下一个正式版本时：

@@ -257,7 +257,7 @@ function expectedHeaders() {
 function expectedBaseInfo() {
   return {
     channel_version: "2.4.6",
-    bot_agent: "CodexConnect/0.146.1",
+    bot_agent: "CodexConnect/0.147.0",
   };
 }
 

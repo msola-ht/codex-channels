@@ -7,6 +7,7 @@ export interface McpServerSummaryPage {
 }
 
 const mcpAuthStatuses = new Set<McpServerSummary["authStatus"]>([
+  "unknown",
   "unsupported",
   "notLoggedIn",
   "bearerToken",
