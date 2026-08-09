@@ -111,8 +111,8 @@
   `service-app-server` 入口启动主 App Server、已配置的隔离 Provider App Server 及对应统计代理，
   再启动 Gateway；只复用私有监管身份、Provider 拓扑和真实 WebSocket 健康检查一致的实例，
   Gateway 进程再通过与 Provider 无关的配置级所有权 Socket 拒绝所有入口的重复实例。部分拓扑或裸
-  App Server 失败关闭；整体停止时先转发优雅信号，宽限期后再次通知 App Server 监管入口升级清理
-  仍未退出的自有子进程，不抢占 Gateway 的资源释放。
+  App Server 失败关闭；整体停止时先转发优雅信号，收到前台控制器的再次停止后只通知 App Server
+  监管入口升级清理仍未退出的自有子进程，不抢占 Gateway 的资源释放。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下规范化
   `--profile deepseek`，既选择隔离实例，也保留 Profile 供 Remote TUI 完成第三方 Provider 认证。
 - `prepare-codex-upgrade.mjs`：在干净工作区校验精确目标 CLI，调用现有协议生成和版本同步，

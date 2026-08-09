@@ -65,7 +65,8 @@ import {
   removeWorkspaceFromConfig,
 } from "../scripts/workspace-config.mjs";
 
-const foregroundShutdownTimeoutMs = 5_000;
+const foregroundEscalationDelayMs = 2_000;
+const foregroundForceDelayMs = 3_000;
 
 const helpText = {
   main: `Codex Connect CLI
@@ -1187,6 +1188,7 @@ async function runForegroundScript(
     },
   );
   let forwardedSignal;
+  let escalationTimer;
   let shutdownTimer;
   const forceStop = () => {
     if (!childProcessIsRunning(child)) return;
@@ -1208,8 +1210,12 @@ async function runForegroundScript(
     forwardedSignal = signal;
     if (childProcessIsRunning(child)) {
       signalChildProcesses([child], signal);
-      shutdownTimer = setTimeout(forceStop, foregroundShutdownTimeoutMs);
-      shutdownTimer.unref();
+      escalationTimer = setTimeout(() => {
+        if (childProcessIsRunning(child)) signalChildProcesses([child], signal);
+        shutdownTimer = setTimeout(forceStop, foregroundForceDelayMs);
+        shutdownTimer.unref();
+      }, foregroundEscalationDelayMs);
+      escalationTimer.unref();
     }
   };
   const forwardTerminate = () => forwardSignal("SIGTERM");
@@ -1219,6 +1225,7 @@ async function runForegroundScript(
     SIGINT: forwardInterrupt,
   });
   const cleanup = () => {
+    if (escalationTimer) clearTimeout(escalationTimer);
     if (shutdownTimer) clearTimeout(shutdownTimer);
     cleanupSignals();
   };
