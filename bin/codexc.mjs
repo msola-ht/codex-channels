@@ -45,7 +45,6 @@ import {
 import {
   childProcessIsRunning,
   installProcessSignalHandlers,
-  signalChildProcessGroup,
   signalChildProcesses,
 } from "../runtime/process-lifecycle.mjs";
 import {
@@ -1191,7 +1190,15 @@ async function runForegroundScript(
   let shutdownTimer;
   const forceStop = () => {
     if (!childProcessIsRunning(child)) return;
-    signalChildProcessGroup(child, "SIGKILL");
+    if (process.platform !== "win32" && child.pid !== undefined) {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+        return;
+      } catch (error) {
+        if (error?.code === "ESRCH") return;
+      }
+    }
+    child.kill("SIGKILL");
   };
   const forwardSignal = (signal) => {
     if (forwardedSignal) {
@@ -1200,7 +1207,7 @@ async function runForegroundScript(
     }
     forwardedSignal = signal;
     if (childProcessIsRunning(child)) {
-      signalChildProcessGroup(child, signal);
+      signalChildProcesses([child], signal);
       shutdownTimer = setTimeout(forceStop, foregroundShutdownTimeoutMs);
       shutdownTimer.unref();
     }
@@ -1669,9 +1676,14 @@ function configuredEnvironment() {
 
 function forwardChildrenLifecycle(children, closeResources = async () => undefined) {
   let settled = false;
+  let terminating = false;
   const forward = (signal) => signalChildProcesses(children, signal);
-  const terminate = () => forward("SIGTERM");
-  const interrupt = () => forward("SIGINT");
+  const requestStop = (signal) => {
+    forward(terminating ? "SIGKILL" : signal);
+    terminating = true;
+  };
+  const terminate = () => requestStop("SIGTERM");
+  const interrupt = () => requestStop("SIGINT");
   const cleanup = installProcessSignalHandlers({
     SIGTERM: terminate,
     SIGINT: interrupt,

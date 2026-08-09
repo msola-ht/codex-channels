@@ -35,7 +35,8 @@
 Provider 的独立回环统计代理；任一受监管组件退出都会共同重建。代理指标通过私有 Unix Socket
 发送给 Gateway，Gateway 生命周期不再控制模型数据通路。入口持有独立 `0600` 监管 Socket，
 用于跨进程互斥和向前台启动器证明精确 Provider 拓扑；它同时集中拒绝已被裸进程占用的 App
-Server Socket。
+Server Socket。入口首次停止时向自有子进程转发优雅信号，再次停止时升级为强制终止，避免顽固
+子进程阻塞监管 Socket 与前台进程组清理。
 
 所有公开命令和子命令都支持 `-h` / `--help`；`gateway` 与 `service-app-server` 仅作为服务模板的
 内部进程入口，不出现在公开命令列表。CLI 只负责参数校验、环境装配和进程分发，不保存

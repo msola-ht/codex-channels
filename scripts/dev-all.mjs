@@ -17,6 +17,7 @@ import {
 import { packageDir, runtimeConfig } from "./runtime-config.mjs";
 
 const projectDir = packageDir;
+const appServerShutdownGraceMs = 2_000;
 const runtime = runtimeConfig();
 const document = readGatewayConfig(runtime.configPath);
 const appServerRuntime = resolveAppServerRuntime(document, runtime.dataDir);
@@ -48,6 +49,10 @@ const stop = () => {
     [...(gateway ? [gateway] : []), ...appServerSupervisors],
     "SIGTERM",
   );
+  const appServerShutdownTimer = setTimeout(() => {
+    signalChildProcesses(appServerSupervisors, "SIGTERM");
+  }, appServerShutdownGraceMs);
+  appServerShutdownTimer.unref();
 };
 installProcessSignalHandlers({ SIGINT: stop, SIGTERM: stop });
 
