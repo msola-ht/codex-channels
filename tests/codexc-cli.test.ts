@@ -1388,23 +1388,25 @@ describe("codexc CLI", () => {
       encoding: "utf8",
     });
 
-    expect(diagnosed.stdout).toContain("[通过] 配置格式");
+    expect(diagnosed.stdout).not.toContain("[通过] 配置格式");
     expect(diagnosed.stdout).toContain("[提示] Telegram：未配置");
     expect(diagnosed.stdout).not.toContain("[失败] Telegram Token");
     expect(diagnosed.stdout).not.toContain("[失败] Telegram 用户");
-    const sections = [
-      "=== 基础环境 ===",
-      "=== 配置文件 ===",
+    expect(diagnosed.stdout).not.toContain("[通过]");
+    const visibleSections = [
       "=== 通讯渠道 ===",
       "=== 扩展能力 ===",
-      "=== Workspace ===",
       "=== Codex 与 App Server ===",
       "=== 系统服务 ===",
     ];
-    expect(sections.every((section) => diagnosed.stdout.includes(section))).toBe(true);
-    expect(sections.map((section) => diagnosed.stdout.indexOf(section))).toEqual(
-      [...sections].map((section) => diagnosed.stdout.indexOf(section)).sort((left, right) => left - right),
+    expect(visibleSections.every((section) => diagnosed.stdout.includes(section))).toBe(true);
+    expect(visibleSections.map((section) => diagnosed.stdout.indexOf(section))).toEqual(
+      [...visibleSections]
+        .map((section) => diagnosed.stdout.indexOf(section))
+        .sort((left, right) => left - right),
     );
+    expect(diagnosed.stdout).not.toContain("=== Workspace ===");
+    expect(diagnosed.stdout).not.toContain(`${String.fromCharCode(27)}[`);
     expect(diagnosed.stdout).toMatch(/诊断发现 \d+ 项问题：\d+ 项通过，\d+ 项提示。/u);
   });
 
@@ -1498,12 +1500,8 @@ describe("codexc CLI", () => {
     expect(enabled.stdout).toContain(
       "[提示] 微信运行时：配置已启用",
     );
-    expect(enabled.stdout).toContain(
-      "[通过] 微信配置：已启用，允许 1 个用户",
-    );
-    expect(enabled.stdout).toContain(
-      "[通过] 微信连接：安全凭据存在且载荷有效",
-    );
+    expect(enabled.stdout).not.toContain("[失败] 微信配置");
+    expect(enabled.stdout).not.toContain("[失败] 微信连接");
     expect(enabled.stdout).toContain(
       "[提示] 微信消息游标：检查点存在且载荷有效",
     );
@@ -1616,11 +1614,10 @@ describe("codexc CLI", () => {
           { cause: error },
         );
       });
-      expect(stdout).toContain(`[通过] Codex CLI：${expectedCodexCliVersion}`);
-      expect(stdout).toContain("[通过] Codex App Server：initialize 握手通过");
-      expect(stdout).toContain(
-        `[通过] App Server 版本：${expectedAppServerVersion}（要求 ${expectedAppServerVersion}）`,
-      );
+      expect(stdout).not.toContain("[失败] Codex CLI");
+      expect(stdout).not.toContain("[失败] Codex App Server");
+      expect(stdout).not.toContain("[失败] App Server 版本");
+      expect(stdout).not.toContain("[通过]");
       expect(stdout).toContain("诊断通过");
       expect(stdout).not.toContain(secret);
       expect(initializedReceived).toBe(true);

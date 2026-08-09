@@ -374,16 +374,18 @@ if (process.platform === "darwin") {
   note("系统服务", "当前平台尚未提供系统服务适配");
 }
 
+const visibleChecks = checks.filter((check) => check.kind !== "success");
+const colorsEnabled = process.stdout.isTTY === true && process.env.NO_COLOR === undefined;
 console.log("Codex Connect Doctor");
 let renderedSection;
-for (const check of checks) {
+for (const check of visibleChecks) {
   if (check.section !== renderedSection) {
     renderedSection = check.section;
     console.log(`\n=== ${renderedSection} ===`);
   }
-  console.log(`${check.prefix} ${check.name}：${check.detail}`);
+  console.log(`${coloredPrefix(check)} ${check.name}：${check.detail}`);
   if (check.remediation) {
-    console.log(`[处理] ${check.name}：${check.remediation}`);
+    console.log(`${colorize("[处理]", 36)} ${check.name}：${check.remediation}`);
   }
 }
 const failures = checks.filter((check) => check.kind === "failure").length;
@@ -398,6 +400,14 @@ process.exitCode = failures === 0 ? 0 : 1;
 
 function setSection(section) {
   checkSection = section;
+}
+
+function coloredPrefix(check) {
+  return colorize(check.prefix, check.kind === "failure" ? 31 : 33);
+}
+
+function colorize(value, color) {
+  return colorsEnabled ? `\u001b[${color}m${value}\u001b[0m` : value;
 }
 
 function record(name, passed, detail) {

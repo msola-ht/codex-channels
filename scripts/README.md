@@ -195,7 +195,8 @@
   Workspace、飞书凭据/Bot 身份、
   微信配置与 Bot 凭据、消息游标检查点、允许用户的加密回复上下文覆盖数和最近保存时间，
   以及微信运行时启用状态；缺少 `bubblewrap` 时说明内置 helper 回退并输出发行版安装命令，
-  输出按诊断领域分组并汇总各状态数量；Doctor 不自动安装或修改 AppArmor，不调用
+  完成全部检测后按诊断领域只输出失败、提示和处理建议，交互终端区分颜色并汇总各状态数量；
+  Doctor 不自动安装或修改 AppArmor，不调用
   `getupdates`，不显示 Token、`context_token` 或游标；
   主 Unix WebSocket、已配置 Provider 的切换或固定配置、实际模型目录、Provider Socket、
   `initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，不输出完整 User-Agent、飞书

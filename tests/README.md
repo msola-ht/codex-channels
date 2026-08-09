@@ -229,8 +229,8 @@
 - TOML、热加载分类、标准环境变量、macOS 系统代理和 Linux GNOME 代理的优先级，以及 Telegram
   Setup 对同一解析结果的复用；无代理时不注入空环境变量；飞书启用/禁用、凭据和允许 Open ID
   的严格映射、畸形与未知字段拒绝，以及启用/凭据重启和允许名单热加载分类。
-- CLI Doctor 的分组输出与状态汇总、严格 TOML Schema 校验、Linux `bubblewrap` 缺失提示与安装
-  处理方案、共享 App Server 握手与实际版本匹配、飞书凭据/Bot
+- CLI Doctor 只展示失败/提示/处理建议的分组输出、非交互无颜色与状态汇总、严格 TOML Schema
+  校验、Linux `bubblewrap` 缺失提示与安装处理方案、共享 App Server 握手与实际版本匹配、飞书凭据/Bot
   身份有限探测、微信安全凭据只读校验、敏感错误清洗和只读诊断；微信 Doctor 的配置与允许人数、
   Bot 凭据、游标检查点、加密上线通知上下文覆盖数和最近保存时间摘要，以及 Token、
   `context_token` 和实际游标不进入输出；项目规则限定当前 Workspace、
