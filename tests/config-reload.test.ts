@@ -463,6 +463,7 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     vision: { mode: "disabled" },
     credentialsDirectory: "/tmp/credentials",
     stateDatabasePath: "/tmp/gateway.sqlite3",
+    metricsStorage: { retentionDays: 365, maxRows: 1_000_000 },
     approvalTimeoutMs: 300_000,
     logLevel: "info",
     ...overrides,

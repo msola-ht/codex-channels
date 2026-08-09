@@ -67,7 +67,7 @@ codexc service stop webui        # 停止
 
 | 页面 | 路由 | API |
 | --- | --- | --- |
-| 概览 | `#/` | `GET /api/v1/overview?range=24h\|7d\|30d` |
+| 概览 | `#/` | `GET /api/v1/overview?range=<范围>` |
 | Threads | `#/threads` | `GET /api/v1/threads`（包含指标库首个请求开始时间） |
 | Thread 详情 | `#/threads/:id` | `GET /api/v1/threads/:id/run`、`GET /api/v1/threads/:id/turns` |
 | 请求明细 | `#/requests` | `GET /api/v1/requests?range=&offset=&limit=&sort=&direction=` |
@@ -75,7 +75,9 @@ codexc service stop webui        # 停止
 | 设置 | — | `GET /api/v1/settings`（当前全局币种与汇率） |
 | DS 余额 | — | `GET /api/v1/deepseek-balance`（DeepSeek 官方账户余额；未配置凭据或查询失败时返回不可用） |
 
-所有接口只接受 GET；`range` 只支持 `24h`、`7d`、`30d`；请求分页 `offset` 从 0 开始，
+所有接口只接受 GET；`range` 支持 `today`、`yesterday`、`this-week`、`last-week`、
+`this-month`、`last-month`、`24h`、`7d`、`30d`、`90d`、`365d`、`all`；自然范围按
+WebUI 服务所在主机的本地时区计算。请求分页 `offset` 从 0 开始，
 `limit` 为 1–500。请求排序 `direction` 支持 `asc|desc`，`sort` 支持 `time`、`provider`、
 `model`、`operation`、`status`、`http`、`error`、`input`、`output`、`reasoningOutput`、
 `speed`、`ttft`、`duration`、`cost`，默认按 `time desc` 查询整个时间范围后再分页。请求接口

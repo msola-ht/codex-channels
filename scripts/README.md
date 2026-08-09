@@ -17,7 +17,8 @@
   备份后移除旧库，不迁移或覆盖原指标记录。服务状态无法确认、处于非停止状态或前台 Gateway
   指标 Socket 仍可连接时均拒绝 reset；`sync-reset` 备份并清零多端上报水位文件（保留
   设备 ID），默认同样要求 Gateway 已停止，`--restart-gateway` 时自动停止并重新启动
-  Gateway，用于重放修复中心历史数据。
+  Gateway，用于重放修复中心历史数据。`cleanup` 按 `[metrics.storage]` 或命令行覆盖值创建私有
+  备份后清理最旧请求记录，可选 `--vacuum` 立即回收 SQLite 文件空间。
   `prune <provider>` 备份后删除本地与中心库中指定提供商（openai、deepseek）的全部请求
   行，并自动停止、重启 Gateway 与中心服务；任一步骤失败也会尝试把服务重新拉起，额度重置
   后可用它从零重新统计用量。
@@ -58,8 +59,8 @@
   hermes 运行时的 `.skill-lock.json`。
 - `config.mjs`：`codexc config` 的交互式配置与设置菜单，覆盖配置文件中可安全编辑的参数：
   显示设置（操作详情、计划更新、全局价格显示方式）、系统设置（调试模式、审批超时、
-  Sandbox、默认工作区与模型）、WebUI 设置（监听地址、端口、访问令牌）、多设备指标
-  （本机接入中心并同时写入 `[metrics.sync]` 与 `[metrics.view]`、接入状态、上报参数
+  Sandbox、默认工作区与模型）、WebUI 设置（监听地址、端口、访问令牌）、指标设置
+  （本地保留策略、本机接入中心并同时写入 `[metrics.sync]` 与 `[metrics.view]`、接入状态、上报参数
   `interval_seconds` / `batch_size`、停用接入）、
   Telegram 消息格式和配置路径查看；菜单修改前自动备份配置，非交互终端直接输出
   用户目录与配置文件路径。

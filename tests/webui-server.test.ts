@@ -412,6 +412,7 @@ describe("webui server", () => {
 
   it("validates query parameters and thread ids", async () => {
     const fixture = createFixture();
+    recordSample(fixture.databasePath, metricSample());
     const { origin } = await startServer(fixture.environment);
 
     const invalidRange = await fetch(`${origin}/api/v1/overview?range=1h`);
@@ -419,6 +420,12 @@ describe("webui server", () => {
     expect(await invalidRange.json()).toMatchObject({
       error: { code: "invalid_range" },
     });
+
+    const calendarRange = await fetch(`${origin}/api/v1/overview?range=yesterday`);
+    expect(calendarRange.status).toBe(200);
+
+    const longRange = await fetch(`${origin}/api/v1/overview?range=365d`);
+    expect(longRange.status).toBe(200);
 
     const invalidLimit = await fetch(`${origin}/api/v1/requests?limit=501`);
     expect(invalidLimit.status).toBe(400);

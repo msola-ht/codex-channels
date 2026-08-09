@@ -98,6 +98,7 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "api.providers": "第三方 API 提供商",
     "vision.provider": "视觉识别服务",
     "metrics.sync": "多设备指标同步",
+    "metrics.storage": "指标保留策略",
     "observability.log-level": "日志级别",
     "workspace.default": "默认 Workspace",
     "workspace.registry": "Workspace",

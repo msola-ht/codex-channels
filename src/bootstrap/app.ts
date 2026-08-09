@@ -48,6 +48,7 @@ import {
   ProviderAccountService,
   createOpenAiAccountAdapter,
   priceDisplayNeedsExchangeRate,
+  type RequestMetricsTimeRange,
 } from "../application/index.js";
 import {
   ConversationCore,
@@ -173,6 +174,11 @@ export class GatewayApplication {
     this.core = new ConversationCore(this.router, this.output);
     const metricsStore = new SqliteModelRequestMetricsStore(
       modelRequestMetricsDatabasePath(config.stateDatabasePath),
+      undefined,
+      {
+        retentionDays: config.metricsStorage.retentionDays,
+        maximumRows: config.metricsStorage.maxRows,
+      },
     );
     const metricsWriter = new BufferedModelRequestMetricsWriter(
       metricsStore,
@@ -428,20 +434,15 @@ export class GatewayApplication {
           };
         },
         aggregate: (view, range) => {
-          const endAtMs = Date.now();
-          const rangeMs = {
-            "24h": 24 * 60 * 60 * 1_000,
-            "7d": 7 * 24 * 60 * 60 * 1_000,
-            "30d": 30 * 24 * 60 * 60 * 1_000,
-          }[range];
+          const resolvedRange = resolveRequestMetricsRange(range);
           const report = metricsStore.aggregate({
             dimension: view === "providers"
               ? "provider"
               : view === "models"
                 ? "model"
                 : "global",
-            startAtMs: endAtMs - rangeMs,
-            endAtMs,
+            startAtMs: resolvedRange.startAtMs,
+            endAtMs: resolvedRange.endAtMs,
           });
           return {
             view,
@@ -468,15 +469,10 @@ export class GatewayApplication {
         weeklyQuotaEstimate: (provider, limitId, resetsAt, nowMs) =>
           metricsStore.weeklyQuotaEstimate({ provider, limitId, resetsAt, nowMs }),
         errors: (range) => {
-          const endAtMs = Date.now();
-          const rangeMs = {
-            "24h": 24 * 60 * 60 * 1_000,
-            "7d": 7 * 24 * 60 * 60 * 1_000,
-            "30d": 30 * 24 * 60 * 60 * 1_000,
-          }[range];
+          const resolvedRange = resolveRequestMetricsRange(range);
           const report = metricsStore.errors({
-            startAtMs: endAtMs - rangeMs,
-            endAtMs,
+            startAtMs: resolvedRange.startAtMs,
+            endAtMs: resolvedRange.endAtMs,
           });
           return {
             view: "errors",
@@ -1097,6 +1093,45 @@ export class GatewayApplication {
 
 function isHighFrequencyNotification(method: string): boolean {
   return /\/(?:delta|outputDelta|progress)$/u.test(method);
+}
+
+function resolveRequestMetricsRange(
+  range: RequestMetricsTimeRange,
+  nowMs = Date.now(),
+): { startAtMs: number; endAtMs: number } {
+  const durations: Partial<Record<RequestMetricsTimeRange, number>> = {
+    "24h": 24 * 60 * 60 * 1_000,
+    "7d": 7 * 24 * 60 * 60 * 1_000,
+    "30d": 30 * 24 * 60 * 60 * 1_000,
+    "90d": 90 * 24 * 60 * 60 * 1_000,
+    "365d": 365 * 24 * 60 * 60 * 1_000,
+  };
+  const duration = durations[range];
+  if (duration !== undefined) {
+    return { startAtMs: Math.max(0, nowMs - duration), endAtMs: nowMs };
+  }
+  if (range === "all") return { startAtMs: 0, endAtMs: nowMs };
+  const day = new Date(nowMs);
+  day.setHours(0, 0, 0, 0);
+  const today = day.getTime();
+  if (range === "today") return { startAtMs: today, endAtMs: nowMs };
+  if (range === "yesterday") {
+    day.setDate(day.getDate() - 1);
+    return { startAtMs: day.getTime(), endAtMs: today };
+  }
+  const month = new Date(day.getFullYear(), day.getMonth(), 1);
+  if (range === "this-month") return { startAtMs: month.getTime(), endAtMs: nowMs };
+  if (range === "last-month") {
+    return {
+      startAtMs: new Date(day.getFullYear(), day.getMonth() - 1, 1).getTime(),
+      endAtMs: month.getTime(),
+    };
+  }
+  day.setDate(day.getDate() - ((day.getDay() + 6) % 7));
+  const week = day.getTime();
+  if (range === "this-week") return { startAtMs: week, endAtMs: nowMs };
+  day.setDate(day.getDate() - 7);
+  return { startAtMs: day.getTime(), endAtMs: week };
 }
 
 function surfaceLabel(surface: string): string {

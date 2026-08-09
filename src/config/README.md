@@ -54,6 +54,11 @@ Workspace 上配置。
 模型统计代理由 App Server 服务按已启用 Provider 自动装配，不属于用户配置；其上游网络请求继续
 复用 `network` 与标准代理环境变量。
 
+`metrics.storage.retention_days` 与 `metrics.storage.max_rows` 控制独立请求指标库的自动清理，
+默认分别为 365 天和 1,000,000 行，允许范围为 1–3650 天、1,000–10,000,000 行；达到任一上限
+后删除最旧记录。变化需要重启 Gateway，不改变 SQLite Schema；手工立即清理使用
+`codexc metrics cleanup`，该命令先创建私有备份。
+
 `api_providers` 保存多个直接 API 调用使用的 Responses 提供商 ID、名称和精确 HTTPS Endpoint；
 API Key 由 Setup 按提供商保存到独立私有凭据文件。它们不属于 Codex `modelProvider`，不接入
 App Server 或 `/model`。`vision.mode` 默认为 `disabled`；`responses_api` 只保存提供商引用和

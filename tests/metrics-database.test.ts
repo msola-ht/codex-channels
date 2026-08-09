@@ -17,7 +17,10 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  cleanupMetricsDatabase,
+  cleanupMetricsDatabaseWithGatewayRestart,
   inspectMetricsDatabase,
+  metricsRange,
   pruneProviderMetrics,
   readMetricsExport,
   readMetricsReport,
@@ -48,6 +51,86 @@ afterEach(() => {
 });
 
 describe("model request metrics database operations", () => {
+  it("resolves rolling and local calendar ranges", () => {
+    const now = new Date(2026, 7, 9, 11, 30).getTime();
+    expect(metricsRange("yesterday", now)).toEqual({
+      name: "yesterday",
+      startAtMs: new Date(2026, 7, 8).getTime(),
+      endAtMs: new Date(2026, 7, 9).getTime(),
+    });
+    expect(metricsRange("this-month", now).startAtMs)
+      .toBe(new Date(2026, 7, 1).getTime());
+    expect(metricsRange("90d", now).startAtMs).toBe(now - 90 * 86_400_000);
+    expect(metricsRange("all", now)).toEqual({ name: "all", startAtMs: 0, endAtMs: now });
+  });
+
+  it("backs up and manually cleans metrics using caller limits", () => {
+    const { environment, databasePath } = fixture();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    store.record(metricSample());
+    store.record({ ...metricSample(), threadId: "thread-2", turnId: "turn-2" });
+    store.close();
+
+    const result = cleanupMetricsDatabase(environment, {
+      before: "2999-01-01",
+      maxRows: 1_000_000,
+      gatewayRunning: () => false,
+    });
+
+    expect(result).toMatchObject({ deleted: 2, remaining: 0, vacuumed: false });
+    expect(existsSync(result.backupPath)).toBe(true);
+  });
+
+  it.runIf(process.platform === "linux")(
+    "runs manual cleanup through the CLI entry point",
+    () => {
+      const { environment, databasePath, home } = fixture();
+      const store = new SqliteModelRequestMetricsStore(databasePath);
+      store.record(metricSample());
+      store.close();
+      const systemctl = join(home, "systemctl");
+      writeFileSync(systemctl, "#!/bin/sh\nprintf 'inactive\\n'\n", { mode: 0o700 });
+      chmodSync(systemctl, 0o700);
+
+      const result = spawnSync(
+        process.execPath,
+        [
+          join(process.cwd(), "scripts", "metrics-database.mjs"),
+          "cleanup",
+          "--before",
+          "2999-01-01",
+          "--max-rows",
+          "1000000",
+        ],
+        {
+          encoding: "utf8",
+          env: {
+            ...environment,
+            NODE_NO_WARNINGS: "1",
+            SYSTEMCTL_BINARY: systemctl,
+          },
+        },
+      );
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain("已清理 1 条指标，剩余 0 条");
+      expect(result.stdout).toContain("备份：");
+      expect(result.stderr).toBe("");
+    },
+  );
+
+  it("rejects invalid cleanup policy before restarting the Gateway", () => {
+    const { environment } = fixture();
+    const calls: string[] = [];
+
+    expect(() => cleanupMetricsDatabaseWithGatewayRestart(environment, {
+      before: "not-a-date",
+      stopGateway: () => calls.push("stop"),
+      startGateway: () => calls.push("start"),
+    })).toThrow(/YYYY-MM-DD/u);
+    expect(calls).toEqual([]);
+  });
+
   it("prunes OpenAI rows from local and center databases and restarts services", () => {
     const { environment, databasePath } = fixture();
     const store = new SqliteModelRequestMetricsStore(databasePath);

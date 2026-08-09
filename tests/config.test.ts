@@ -435,6 +435,10 @@ describe("Gateway config.toml", () => {
     });
     expect(persisted.logging).toEqual({ level: "info" });
     expect(persisted.metrics).toEqual({
+      storage: {
+        retention_days: 365,
+        max_rows: 1_000_000,
+      },
       sync: {
         enabled: false,
         batch_size: 200,
@@ -649,7 +653,28 @@ describe("Gateway config.toml", () => {
     });
     expect(loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.metricsStorage).toEqual({
+      retentionDays: 365,
+      maxRows: 1_000_000,
+    });
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
     }).config.metricsCenter).toBeUndefined();
+  });
+
+  it("loads a configurable metrics retention policy", () => {
+    const fixture = createFixture({
+      metrics: {
+        storage: { retention_days: 90, max_rows: 250_000 },
+      },
+    });
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.metricsStorage).toEqual({
+      retentionDays: 90,
+      maxRows: 250_000,
+    });
   });
 
   it("loads an enabled metrics sync section", () => {

@@ -108,7 +108,7 @@
   不含推理的综合输出速度及时间窗覆盖率；DeepSeek 最后请求首事件延迟、全 Provider 首段回复延迟和
   整轮综合思考/生成速度，以及 OpenAI 即使收到推理摘要计时也只保留不含推理的输出指标；当前 Thread
   `/metrics` 的最近 Turn 运行聚合、指标库保留范围内的 Thread 会话累计、只选择 HTTP
-  JSON 调用记录的最近直接 API 分栏查询，以及全局/提供商/模型和异常请求的 24 小时、7 天、30 天
+  JSON 调用记录的最近直接 API 分栏查询，以及全局/提供商/模型和异常请求的自然日/周/月、滚动窗口与全部历史
   SQL 聚合、失败率分母、错误分组与最近发生时间、TTFT 平均与 P50/P95、缓存和速度样本覆盖；自动回环
   代理的精确 `/responses`、`/responses/compact`
   与只读 `/models` 路径、HTTP/SSE 与 WebSocket、旧版路径及 `request_kind=compaction` 标记的
@@ -123,7 +123,7 @@
   长上下文价格选择；独立汇率测试覆盖 open.er-api 主源、ECB 回退、私有缓存重载和无效汇率拒绝；
   `reference-cost-summary.test.ts` 覆盖当前 Turn 延迟写入时的 Thread 总价去重及
   跨价格档位聚合；失败和未完整请求保留原始价格快照但不进入费用汇总，CSV 导出统一中和
-  电子表格公式前缀；独立 SQLite 指标库覆盖 `0600` 权限、严格 Schema、原子初始化、30 天清理、
+  电子表格公式前缀；独立 SQLite 指标库覆盖 `0600` 权限、严格 Schema、原子初始化、可配置保留策略与备份清理、
   有界内部读取，以及
   Schema v2 enriched View 的耗时、速度、缓存、费用计算和 `/M Token` 单价一致性。回归测试还覆盖 WebSocket 完成后立即
   关闭不重复、指标确认不等待延迟分片 SQLite 写入，以及 1 MiB 内非流式 JSON 响应的元数据裁剪

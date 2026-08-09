@@ -463,6 +463,94 @@ export function pruneProviderMetrics(provider, environment = process.env, option
   };
 }
 
+export function cleanupMetricsDatabase(environment = process.env, options = {}) {
+  const { runtime, keepDays, maxRows, beforeMs } = resolveCleanupPolicy(
+    environment,
+    options,
+  );
+  const gatewayRunning = options.gatewayRunning ?? (() => isGatewayRunning(environment));
+  if (gatewayRunning() || runtime.metricsSocketPaths.some(metricsSocketIsActive)) {
+    throw new Error(
+      "Gateway 仍在运行；请先执行 codexc service stop gateway，或使用 --restart-gateway 自动停止并重启",
+    );
+  }
+  const databasePath = requireReadableMetricsDatabase(environment);
+  checkpoint(databasePath);
+  const backupPath = `${databasePath}.cleanup-${backupTimestamp(new Date())}.bak`;
+  copyFileSync(databasePath, backupPath);
+  chmodSync(backupPath, 0o600);
+  const database = new DatabaseSync(databasePath);
+  let deletedByAge;
+  let deletedByLimit;
+  try {
+    database.exec("BEGIN IMMEDIATE");
+    deletedByAge = Number(database.prepare(`
+      DELETE FROM model_request_metrics WHERE recorded_at_ms < ?
+    `).run(Math.max(0, beforeMs)).changes);
+    deletedByLimit = Number(database.prepare(`
+      DELETE FROM model_request_metrics
+      WHERE id <= COALESCE((
+        SELECT id FROM model_request_metrics ORDER BY id DESC LIMIT 1 OFFSET ?
+      ), 0)
+    `).run(maxRows).changes);
+    database.exec("COMMIT");
+    if (options.vacuum === true) database.exec("VACUUM");
+    const remaining = Number(database.prepare(
+      "SELECT COUNT(*) AS count FROM model_request_metrics",
+    ).get()?.count ?? 0);
+    return {
+      backupPath,
+      databasePath,
+      deleted: deletedByAge + deletedByLimit,
+      deletedByAge,
+      deletedByLimit,
+      keepDays,
+      maxRows,
+      remaining,
+      vacuumed: options.vacuum === true,
+    };
+  } catch (error) {
+    try {
+      database.exec("ROLLBACK");
+    } catch {
+      // 保留原始异常
+    }
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+
+export function cleanupMetricsDatabaseWithGatewayRestart(
+  environment = process.env,
+  options = {},
+) {
+  resolveCleanupPolicy(environment, options);
+  const stopGateway = options.stopGateway
+    ?? (() => runGatewayServiceAction("stop", environment));
+  const startGateway = options.startGateway
+    ?? (() => runGatewayServiceAction("start", environment));
+  stopGateway();
+  try {
+    return cleanupMetricsDatabase(environment, options);
+  } finally {
+    startGateway();
+  }
+}
+
+function resolveCleanupPolicy(environment, options) {
+  if (options.before !== undefined && options.keepDays !== undefined) {
+    throw new Error("--before 与 --keep-days 不能同时使用");
+  }
+  const runtime = resolveMetricsRuntime(environment);
+  const keepDays = positiveInteger(options.keepDays ?? runtime.retentionDays, "--keep-days");
+  const maxRows = positiveInteger(options.maxRows ?? runtime.maxRows, "--max-rows");
+  const beforeMs = options.before === undefined
+    ? Date.now() - keepDays * 24 * 60 * 60 * 1_000
+    : parseLocalDate(options.before);
+  return { runtime, keepDays, maxRows, beforeMs };
+}
+
 function pruneProviderDatabases({
   provider,
   localDatabasePath,
@@ -578,7 +666,7 @@ function runServiceAction(target, action, environment) {
 }
 
 export function readMetricsReport(environment = process.env, options = {}) {
-  const range = metricsRange(options.range ?? "30d", options.nowMs ?? Date.now());
+  const range = metricsRangeOptions(options, options.nowMs ?? Date.now());
   const dimension = metricsDimension(options.group ?? "models");
   const databasePath = requireReadableMetricsDatabase(environment);
   const store = new SqliteModelRequestMetricsStore(
@@ -609,7 +697,7 @@ export function readMetricsReport(environment = process.env, options = {}) {
 }
 
 export function readMetricsExport(environment = process.env, options = {}) {
-  const range = metricsRange(options.range ?? "30d", options.nowMs ?? Date.now());
+  const range = metricsRangeOptions(options, options.nowMs ?? Date.now());
   const threadId = options.threadId;
   const databasePath = requireReadableMetricsDatabase(environment);
   const store = new SqliteModelRequestMetricsStore(
@@ -781,6 +869,8 @@ function resolveMetricsRuntime(environment) {
   const document = readGatewayConfig(configPath);
   const storage = isRecord(document.storage) ? document.storage : {};
   const codex = isRecord(document.codex) ? document.codex : {};
+  const metrics = isRecord(document.metrics) ? document.metrics : {};
+  const metricsStorage = isRecord(metrics.storage) ? metrics.storage : {};
   const stateDatabasePath = resolveConfiguredPath(
     typeof storage.database_path === "string" ? storage.database_path : undefined,
     dataDir,
@@ -793,6 +883,16 @@ function resolveMetricsRuntime(environment) {
   );
   return {
     databasePath: requestMetricsDatabasePath(stateDatabasePath),
+    retentionDays: positiveInteger(
+      typeof metricsStorage.retention_days === "number"
+        ? metricsStorage.retention_days
+        : 365,
+      "metrics.storage.retention_days",
+    ),
+    maxRows: positiveInteger(
+      typeof metricsStorage.max_rows === "number" ? metricsStorage.max_rows : 1_000_000,
+      "metrics.storage.max_rows",
+    ),
     metricsSocketPaths: ["openai", "deepseek"].map((provider) =>
       providerMetricsSocketPath(appServerSocketPath, provider)
     ),
@@ -1549,9 +1649,95 @@ export function metricsRange(name, nowMs) {
     "24h": 24 * 60 * 60 * 1_000,
     "7d": 7 * 24 * 60 * 60 * 1_000,
     "30d": 30 * 24 * 60 * 60 * 1_000,
+    "90d": 90 * 24 * 60 * 60 * 1_000,
+    "365d": 365 * 24 * 60 * 60 * 1_000,
   }[name];
-  if (duration === undefined) throw new Error("--range 只支持 24h、7d 或 30d");
-  return { name, startAtMs: Math.max(0, nowMs - duration), endAtMs: nowMs };
+  if (duration !== undefined) {
+    return { name, startAtMs: Math.max(0, nowMs - duration), endAtMs: nowMs };
+  }
+  if (name === "all") return { name, startAtMs: 0, endAtMs: nowMs };
+  const today = startOfLocalDay(nowMs);
+  if (name === "today") return { name, startAtMs: today, endAtMs: nowMs };
+  if (name === "yesterday") {
+    return { name, startAtMs: addLocalDays(today, -1), endAtMs: today };
+  }
+  const thisWeek = startOfLocalWeek(nowMs);
+  if (name === "this-week") return { name, startAtMs: thisWeek, endAtMs: nowMs };
+  if (name === "last-week") {
+    return { name, startAtMs: addLocalDays(thisWeek, -7), endAtMs: thisWeek };
+  }
+  const thisMonth = startOfLocalMonth(nowMs);
+  if (name === "this-month") return { name, startAtMs: thisMonth, endAtMs: nowMs };
+  if (name === "last-month") {
+    const startAtMs = previousLocalMonth(thisMonth);
+    return { name, startAtMs, endAtMs: thisMonth };
+  }
+  throw new Error(
+    "--range 只支持 today、yesterday、this-week、last-week、this-month、last-month、24h、7d、30d、90d、365d 或 all",
+  );
+}
+
+function metricsRangeOptions(options, nowMs) {
+  if (options.from === undefined && options.to === undefined) {
+    return metricsRange(options.range ?? "30d", nowMs);
+  }
+  if (options.range !== undefined || options.from === undefined || options.to === undefined) {
+    throw new Error("自定义日期必须同时使用 --from 和 --to，且不能与 --range 同时使用");
+  }
+  const startAtMs = parseLocalDate(options.from);
+  const requestedEndAtMs = addLocalDays(parseLocalDate(options.to), 1);
+  const endAtMs = Math.min(requestedEndAtMs, nowMs);
+  if (startAtMs >= endAtMs) throw new Error("自定义日期范围无效");
+  return {
+    name: `${options.from}..${options.to}`,
+    startAtMs,
+    endAtMs,
+  };
+}
+
+function parseLocalDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
+  if (!match) throw new Error("日期必须使用 YYYY-MM-DD 格式");
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+  if (
+    date.getFullYear() !== year
+    || date.getMonth() !== month - 1
+    || date.getDate() !== day
+  ) {
+    throw new Error(`日期无效：${value}`);
+  }
+  return date.getTime();
+}
+
+function startOfLocalDay(nowMs) {
+  const date = new Date(nowMs);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function addLocalDays(timestamp, days) {
+  const date = new Date(timestamp);
+  date.setDate(date.getDate() + days);
+  return date.getTime();
+}
+
+function startOfLocalWeek(nowMs) {
+  const date = new Date(startOfLocalDay(nowMs));
+  date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+  return date.getTime();
+}
+
+function startOfLocalMonth(nowMs) {
+  const date = new Date(nowMs);
+  return new Date(date.getFullYear(), date.getMonth(), 1).getTime();
+}
+
+function previousLocalMonth(timestamp) {
+  const date = new Date(timestamp);
+  return new Date(date.getFullYear(), date.getMonth() - 1, 1).getTime();
 }
 
 function metricsDimension(value) {
@@ -1571,6 +1757,35 @@ function parseMetricsOptions(args, allowed) {
     index += 1;
   }
   return result;
+}
+
+function parseCleanupOptions(args) {
+  const options = {};
+  for (let index = 0; index < args.length; index += 1) {
+    const option = args[index];
+    if (option === "--vacuum") {
+      options.vacuum = true;
+      continue;
+    }
+    if (!["--before", "--keep-days", "--max-rows"].includes(option)) {
+      throw new Error(`未知参数：${option}`);
+    }
+    const value = args[index + 1];
+    if (!value || value.startsWith("--")) throw new Error(`${option} 缺少值`);
+    if (option === "--before") options.before = value;
+    if (option === "--keep-days") options.keepDays = positiveInteger(Number(value), option);
+    if (option === "--max-rows") options.maxRows = positiveInteger(Number(value), option);
+    index += 1;
+  }
+  if (options.before !== undefined && options.keepDays !== undefined) {
+    throw new Error("--before 与 --keep-days 不能同时使用");
+  }
+  return options;
+}
+
+function positiveInteger(value, label) {
+  if (!Number.isSafeInteger(value) || value < 1) throw new Error(`${label} 必须是正整数`);
+  return value;
 }
 
 function parseMetricsRunArgs(args) {
@@ -1781,10 +1996,21 @@ if (
       } else {
         writeCliMessage("success", "Gateway 与中心服务已重新启动。");
       }
+    } else if (command === "cleanup" || command === "cleanup-restart") {
+      const options = parseCleanupOptions(process.argv.slice(3));
+      const result = command === "cleanup-restart"
+        ? cleanupMetricsDatabaseWithGatewayRestart(process.env, options)
+        : cleanupMetricsDatabase(process.env, options);
+      writeCliMessage("success", `已清理 ${result.deleted} 条指标，剩余 ${result.remaining} 条。`);
+      console.log(`数据库：${result.databasePath}`);
+      console.log(`备份：${result.backupPath}`);
+      if (!result.vacuumed) {
+        writeCliMessage("note", "未执行 VACUUM；空闲页会由 SQLite 后续复用。需要立即缩小文件时加 --vacuum。");
+      }
     } else if (command === "report") {
       const options = parseMetricsOptions(
         process.argv.slice(3),
-        new Set(["--range", "--group", "--format"]),
+        new Set(["--range", "--from", "--to", "--group", "--format"]),
       );
       const format = options.format ?? "markdown";
       assertExportFormat(format, ["markdown", "json", "csv"]);
@@ -1796,7 +2022,7 @@ if (
     } else if (command === "export") {
       const options = parseMetricsOptions(
         process.argv.slice(3),
-        new Set(["--range", "--format", "--thread"]),
+        new Set(["--range", "--from", "--to", "--format", "--thread"]),
       );
       const format = options.format ?? "json";
       assertExportFormat(format, ["json", "csv", "markdown"]);

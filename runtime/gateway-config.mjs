@@ -266,6 +266,10 @@ const gatewayDocumentSchema = z.strictObject({
   }).default({ level: "info" }),
   webui: webuiSchema.optional(),
   metrics: z.strictObject({
+    storage: z.strictObject({
+      retention_days: z.number().int().min(1).max(3650).default(365),
+      max_rows: z.number().int().min(1_000).max(10_000_000).default(1_000_000),
+    }).default({ retention_days: 365, max_rows: 1_000_000 }),
     sync: metricsSyncSchema.default({
       enabled: false,
       batch_size: 200,
@@ -274,6 +278,7 @@ const gatewayDocumentSchema = z.strictObject({
     center: metricsCenterSchema.optional(),
     view: metricsViewSchema.optional(),
   }).default({
+    storage: { retention_days: 365, max_rows: 1_000_000 },
     sync: {
       enabled: false,
       batch_size: 200,

@@ -11,6 +11,7 @@ export type GlobalConfigChangeCode =
   | "api.providers"
   | "vision.provider"
   | "metrics.sync"
+  | "metrics.storage"
   | "observability.log-level"
   | "workspace.default"
   | "workspace.registry";

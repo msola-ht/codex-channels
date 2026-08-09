@@ -34,10 +34,13 @@
 ## /metrics 命令
 
 `/metrics` 可查看当前 Thread 最近 Turn 的运行聚合、指标库保留范围内的 Thread 会话累计及最近
-一次视觉等直接 API 请求。`/metrics global|providers|models 24h|7d|30d` 把 Codex Provider 与
+一次视觉等直接 API 请求。`/metrics global|providers|models <范围>` 把 Codex Provider 与
 直接 API 请求按同一口径汇总，并显示缓存、输出速度及首段回复延迟的有效样本覆盖率；
 `/metrics errors` 按提供商、模型、状态、HTTP 状态和错误类型汇总异常请求，显示异常率与最近
 发生时间。它不会替代 `/status` 的 App Server 上下文统计。
+范围支持自然日 `today` / `yesterday`、自然周期 `this-week` / `last-week` / `this-month` /
+`last-month`、滚动窗口 `24h` / `7d` / `30d` / `90d` / `365d` 和 `all`。自然范围按 Gateway
+服务器本地时区计算，周一为每周第一天。
 未发起上游请求的 Turn 级失败（例如 OpenAI 用量上限拒绝 turn/start）同样作为无 Token/费用的
 failed 请求计入异常记录，避免这类错误完全不可见。
 

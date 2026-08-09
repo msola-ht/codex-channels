@@ -96,7 +96,11 @@ export interface ThreadRequestMetricsSummary {
   latestDirectApi: DirectApiRequestMetricsSummary | null;
 }
 
-export type RequestMetricsTimeRange = "24h" | "7d" | "30d";
+export type RequestMetricsTimeRange =
+  | "today" | "yesterday"
+  | "this-week" | "last-week"
+  | "this-month" | "last-month"
+  | "24h" | "7d" | "30d" | "90d" | "365d" | "all";
 export type RequestMetricsAggregateView = "global" | "providers" | "models";
 export type RequestMetricsView = RequestMetricsAggregateView | "errors";
 export type TurnErrorPhase = "start" | "steer" | "notification";

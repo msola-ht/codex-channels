@@ -100,6 +100,11 @@ export function inspectMetricsDatabase(
   environment?: NodeJS.ProcessEnv,
 ): MetricsDatabaseStatus;
 
+export function metricsRange(
+  name: string,
+  nowMs: number,
+): { name: string; startAtMs: number; endAtMs: number };
+
 export function resetMetricsDatabase(
   environment?: NodeJS.ProcessEnv,
   options?: {
@@ -180,14 +185,49 @@ export function pruneProviderMetrics(
   },
 ): MetricsProviderPruneResult;
 
+export interface MetricsCleanupResult {
+  backupPath: string;
+  databasePath: string;
+  deleted: number;
+  deletedByAge: number;
+  deletedByLimit: number;
+  keepDays: number;
+  maxRows: number;
+  remaining: number;
+  vacuumed: boolean;
+}
+
+export function cleanupMetricsDatabase(
+  environment?: NodeJS.ProcessEnv,
+  options?: {
+    before?: string;
+    keepDays?: number;
+    maxRows?: number;
+    vacuum?: boolean;
+    gatewayRunning?: () => boolean;
+  },
+): MetricsCleanupResult;
+
+export function cleanupMetricsDatabaseWithGatewayRestart(
+  environment?: NodeJS.ProcessEnv,
+  options?: {
+    before?: string;
+    keepDays?: number;
+    maxRows?: number;
+    vacuum?: boolean;
+    stopGateway?: () => void;
+    startGateway?: () => void;
+  },
+): MetricsCleanupResult;
+
 export function readMetricsReport(
   environment?: NodeJS.ProcessEnv,
-  options?: { range?: "24h" | "7d" | "30d"; group?: "global" | "providers" | "models"; nowMs?: number },
+  options?: { range?: string; from?: string; to?: string; group?: "global" | "providers" | "models"; nowMs?: number },
 ): MetricsReportDocument;
 
 export function readMetricsExport(
   environment?: NodeJS.ProcessEnv,
-  options?: { range?: "24h" | "7d" | "30d"; nowMs?: number; threadId?: string },
+  options?: { range?: string; from?: string; to?: string; nowMs?: number; threadId?: string },
 ): MetricsExportDocument;
 
 export function readMetricsRun(
