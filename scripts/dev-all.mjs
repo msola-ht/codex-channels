@@ -41,7 +41,6 @@ let stopping = false;
 let gateway;
 const stop = () => {
   if (stopping) {
-    signalChildProcesses(appServerSupervisors, "SIGTERM");
     return;
   }
   stopping = true;

@@ -1109,7 +1109,7 @@ describe("codexc CLI", () => {
     expect(captured.status).toBe(404);
   });
 
-  it("starts the Gateway through the provider proxy with an exclusive DeepSeek App Server", async () => {
+  it("starts an exclusive DeepSeek Gateway and reclaims ownership after forced shutdown", async () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-start-exclusive-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -1229,7 +1229,6 @@ describe("codexc CLI", () => {
       (resolveExit) => child.once("exit", (code, signal) => resolveExit({ code, signal })),
     );
 
-    let ownerReleasedByPublicCommand = false;
     let publicCommandExitedWithinLimit: boolean;
     try {
       await waitForCondition(
@@ -1263,24 +1262,16 @@ describe("codexc CLI", () => {
         }
         await exited;
       }
-      try {
-        await waitForCondition(
-          () => !existsSync(join(home, "runtime", "gateway-owner.sock")),
-          1_000,
-        );
-        ownerReleasedByPublicCommand = true;
-      } catch {
-        if (process.platform !== "win32" && child.pid !== undefined) {
-          signalTestProcessGroup(child.pid, "SIGTERM");
-        }
-        await waitForCondition(
-          () => !existsSync(join(home, "runtime", "gateway-owner.sock")),
-          2_000,
-        );
-      }
     }
     expect(publicCommandExitedWithinLimit).toBe(true);
-    expect(ownerReleasedByPublicCommand).toBe(true);
+    const reclaimedOwner = new GatewayOwner(join(home, "config.toml"));
+    try {
+      await reclaimedOwner.start();
+      expect(statSync(join(home, "runtime", "gateway-owner.sock")).mode & 0o777).toBe(0o600);
+    } finally {
+      await reclaimedOwner.close();
+    }
+    expect(existsSync(join(home, "runtime", "gateway-owner.sock"))).toBe(false);
     const captured = JSON.parse(readFileSync(capturePath, "utf8")) as {
       baseUrlArg?: string;
       initialized?: boolean;

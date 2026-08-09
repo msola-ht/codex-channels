@@ -65,8 +65,7 @@ import {
   removeWorkspaceFromConfig,
 } from "../scripts/workspace-config.mjs";
 
-const foregroundEscalationDelayMs = 2_000;
-const foregroundForceDelayMs = 3_000;
+const foregroundShutdownTimeoutMs = 5_000;
 
 const helpText = {
   main: `Codex Connect CLI
@@ -1188,7 +1187,6 @@ async function runForegroundScript(
     },
   );
   let forwardedSignal;
-  let escalationTimer;
   let shutdownTimer;
   const forceStop = () => {
     if (!childProcessIsRunning(child)) return;
@@ -1210,12 +1208,8 @@ async function runForegroundScript(
     forwardedSignal = signal;
     if (childProcessIsRunning(child)) {
       signalChildProcesses([child], signal);
-      escalationTimer = setTimeout(() => {
-        if (childProcessIsRunning(child)) signalChildProcesses([child], signal);
-        shutdownTimer = setTimeout(forceStop, foregroundForceDelayMs);
-        shutdownTimer.unref();
-      }, foregroundEscalationDelayMs);
-      escalationTimer.unref();
+      shutdownTimer = setTimeout(forceStop, foregroundShutdownTimeoutMs);
+      shutdownTimer.unref();
     }
   };
   const forwardTerminate = () => forwardSignal("SIGTERM");
@@ -1225,7 +1219,6 @@ async function runForegroundScript(
     SIGINT: forwardInterrupt,
   });
   const cleanup = () => {
-    if (escalationTimer) clearTimeout(escalationTimer);
     if (shutdownTimer) clearTimeout(shutdownTimer);
     cleanupSignals();
   };
@@ -1683,14 +1676,9 @@ function configuredEnvironment() {
 
 function forwardChildrenLifecycle(children, closeResources = async () => undefined) {
   let settled = false;
-  let terminating = false;
   const forward = (signal) => signalChildProcesses(children, signal);
-  const requestStop = (signal) => {
-    forward(terminating ? "SIGKILL" : signal);
-    terminating = true;
-  };
-  const terminate = () => requestStop("SIGTERM");
-  const interrupt = () => requestStop("SIGINT");
+  const terminate = () => forward("SIGTERM");
+  const interrupt = () => forward("SIGINT");
   const cleanup = installProcessSignalHandlers({
     SIGTERM: terminate,
     SIGINT: interrupt,
