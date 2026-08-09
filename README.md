@@ -11,17 +11,17 @@
 通过 `codexc remote` 启动的原生 Codex TUI 与聊天客户端按模型提供商共享同一个 Codex App
 Server，因此可以继续使用对应的会话、Thread 和运行状态。
 
-`main` 开发基线：`0.146.1`（尚未发布）
-当前正式版：`0.146.0`
-要求：macOS 或 Linux、Node.js 22.13+、已登录的 `codex-cli 0.146.0`
+`main` 开发基线：`0.146.1`
+当前正式版：`0.146.1`
+要求：macOS 或 Linux、Node.js 22.13+、已登录的 `codex-cli 0.146.1`
 
 ## 快速开始
 
 安装配套版本：
 
 ```bash
-npm install -g @openai/codex@0.146.0
-npm install -g @hegenai/codexc@0.146.0
+npm install -g @openai/codex@0.146.1
+npm install -g @hegenai/codexc@0.146.1
 ```
 
 初始化并配置通讯渠道：
@@ -348,7 +348,7 @@ codexc service logs -n 100
 - 修改配置后没有生效：运行 `codexc service reload`。
 - 单个聊天渠道断线：其他渠道会继续运行，可用 `codexc service logs -f` 查看恢复记录。
 - 只需重启 Gateway：运行 `codexc service restart`，共享 App Server 和活动 Thread 会保留。
-- Codex CLI 版本不一致：重新安装精确版本 `@openai/codex@0.146.0`。
+- Codex CLI 版本不一致：重新安装精确版本 `@openai/codex@0.146.1`。
 - 飞书收不到消息或菜单不完整：在飞书私聊发送 `/fs doctor`。
 - 需要根据日志定位错误：错误码与日志字段约定见 [`docs/errors.md`](docs/errors.md)。
 - 需要查看参数：运行 `codexc -h` 或 `codexc <命令> -h`。
@@ -359,8 +359,8 @@ codexc service logs -n 100
 ## 升级
 
 ```bash
-npm install -g @hegenai/codexc@0.146.0
-npm install -g @openai/codex@0.146.0
+npm install -g @hegenai/codexc@0.146.1
+npm install -g @openai/codex@0.146.1
 codexc service install
 codexc doctor
 ```

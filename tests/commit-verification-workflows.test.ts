@@ -6,7 +6,6 @@ import { describe, expect, it } from "vitest";
 const workflows = [
   "ci.yml",
   "publish.yml",
-  "sync-published-readme.yml",
 ];
 
 describe("commit verification workflows", () => {

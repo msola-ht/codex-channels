@@ -28,24 +28,19 @@
 - `publish.yml`：推送与 Codex CLI 协议版本一致的 `v*` Tag 后，先在 Runner 临时工作区把包内
   README 渲染为 Tag 版本并执行同一完整提交检查，再使用 npm Trusted Publishing 发布公开包，
   不保存长期 npm Token。该临时渲染不会提前修改 `main`；合并升级 PR 或普通 push 不会发布。
-- `sync-published-readme.yml`：正式 GitHub Release 发布后，先在只读 Job 验证 Release Tag 与
-  npm 精确版本均已存在，再由第二个只读 Job 在 `main` 渲染同一 README、执行完整提交门禁并
-  上传带基线 SHA 的短期产物；独立 `contents: write` Job 只在 `main` 未前进时应用该产物并提交，
-  不执行仓库脚本或依赖。Draft、Pre-release、npm 尚未发布、降级或文档标记不完整时均不写入。
-  GitHub Release 创建、本机安装、服务重启和部署仍不由工作流执行。完整收尾步骤见
+- README 的正式版本与安装命令在发布提交中直接更新并接受 PR/CI 审查；GitHub Release 不再触发
+  自动写回 `main`。GitHub Release 创建、本机安装、服务重启和部署仍不由工作流执行。完整收尾步骤见
   [`docs/codex-cli-upgrade.md`](../../docs/codex-cli-upgrade.md)。
 
 启用发布工作流前，需要在 npm 包的 Trusted Publisher 设置中绑定 GitHub 仓库 `msola-ht/codex-channels`、工作流文件 `publish.yml`，并允许 `npm publish`。工作流使用 GitHub OIDC 和 `id-token: write` 获取短期凭据。
 
-除正式升级提案的 Draft PR Job 与发布后 README 同步 Job 外，工作流只申请 `contents: read`，
+除正式升级提案的 Draft PR Job 外，工作流只申请 `contents: read`，
 Checkout 不保留写入凭据。Draft PR Job 单独申请 `contents: write` 和 `pull-requests: write`，
-只用于推送自动化升级分支和创建提案；README 同步 Job 只在只读验证成功后申请
-`contents: write`，且完整门禁通过后只提交 `README.md`。隔离 App Server 合同测试不读取 Runner
+只用于推送自动化升级分支和创建提案。隔离 App Server 合同测试不读取 Runner
 登录态、不调用模型；依赖账号、模型列表或指定 fixture Thread 的完整真实集成测试仍只在本机按需执行。
 
-仓库 Settings → Actions → General 需要允许 GitHub Actions 创建 Pull Request，并允许
-`sync-published-readme.yml` 的最小写权限提交 `README.md`；默认工作流权限继续保持只读。
-自动提案与 README 同步都使用仓库 `GITHUB_TOKEN`，不保存长期 PAT。
+仓库 Settings → Actions → General 需要允许 GitHub Actions 创建 Pull Request；默认工作流权限
+继续保持只读。自动提案使用仓库 `GITHUB_TOKEN`，不保存长期 PAT。
 
 GitHub Actions 分别对根目录和 `webui` 使用 `npm ci --ignore-scripts`，不会修改 Runner 的 Git
 hook 配置；随后直接调用 `npm run verify:commit`。本地 `npm ci`、`npm install` 或
