@@ -7,23 +7,20 @@ import {
   inspectAppServerSupervisor,
   sameAppServerTopology,
 } from "../runtime/app-server-supervisor.mjs";
+import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import {
-  loadManagedProviderAppServer,
-  loadPrimaryModelProvider,
-  providerAppServerSocketPath,
-} from "../runtime/model-provider-runtime.mjs";
-import { packageDir, resolveConfiguredPath, runtimeConfig } from "./runtime-config.mjs";
+  childProcessIsRunning,
+  installProcessSignalHandlers,
+  signalChildProcesses,
+} from "../runtime/process-lifecycle.mjs";
+import { packageDir, runtimeConfig } from "./runtime-config.mjs";
 
 const projectDir = packageDir;
 const runtime = runtimeConfig();
 const document = readGatewayConfig(runtime.configPath);
-const codex = table(document.codex);
-const socketPath = resolveConfiguredPath(
-  stringValue(codex.socket_path),
-  runtime.dataDir,
-  join(runtime.dataDir, "runtime", "codex-app-server.sock"),
-);
+const appServerRuntime = resolveAppServerRuntime(document, runtime.dataDir);
+const socketPath = appServerRuntime.primarySocketPath;
 const runtimeDir = dirname(socketPath);
 const gatewayEntry = process.env.CODEX_CONNECT_GATEWAY_ENTRY === "dist"
   ? [join(projectDir, "dist/main.js")]
@@ -34,22 +31,9 @@ chmodSync(runtimeDir, 0o700);
 
 const appServerSupervisors = [];
 try {
-  const managedProvider = loadManagedProviderAppServer();
-  const topology = {
-    primaryProvider: loadPrimaryModelProvider(),
-    managedProvider: managedProvider?.provider,
-    socketPaths: [
-      socketPath,
-      ...(managedProvider
-        ? [providerAppServerSocketPath(socketPath, managedProvider.provider)]
-      : []),
-    ],
-  };
-  await ensureAppServerTopology(topology);
+  await ensureAppServerTopology(appServerRuntime.topology);
 } catch (error) {
-  for (const supervisor of appServerSupervisors) {
-    if (supervisor.exitCode === null) supervisor.kill("SIGTERM");
-  }
+  signalChildProcesses(appServerSupervisors, "SIGTERM");
   throw error;
 }
 
@@ -60,17 +44,12 @@ const stop = () => {
     return;
   }
   stopping = true;
-  if (gateway?.exitCode === null) {
-    gateway.kill("SIGTERM");
-  }
-  for (const supervisor of appServerSupervisors) {
-    if (supervisor.exitCode === null) {
-      supervisor.kill("SIGTERM");
-    }
-  }
+  signalChildProcesses(
+    [...(gateway ? [gateway] : []), ...appServerSupervisors],
+    "SIGTERM",
+  );
 };
-process.once("SIGINT", stop);
-process.once("SIGTERM", stop);
+installProcessSignalHandlers({ SIGINT: stop, SIGTERM: stop });
 
 for (const supervisor of appServerSupervisors) {
   supervisor.once("exit", (code, signal) => {
@@ -117,14 +96,6 @@ function waitForGateway(child) {
     });
     child.once("close", (code, signal) => resolveExit({ code, signal, error }));
   });
-}
-
-function table(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-}
-
-function stringValue(value) {
-  return typeof value === "string" ? value.trim() : "";
 }
 
 async function ensureAppServerTopology(topology) {
@@ -183,9 +154,7 @@ async function waitForSocket(child, path, timeoutMs) {
       );
     }
     if (Date.now() - startedAt >= timeoutMs) {
-      if (child?.exitCode === null && child.signalCode === null) {
-        child.kill("SIGTERM");
-      }
+      if (childProcessIsRunning(child)) signalChildProcesses([child], "SIGTERM");
       throw new Error(`等待 Codex App Server WebSocket 就绪超时：${path}`);
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));

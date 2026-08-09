@@ -3,8 +3,11 @@ import { chmodSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 
+import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
+import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
-import { packageDir, resolveConfiguredPath, runtimeConfig } from "./runtime-config.mjs";
+import { serviceDefinitions } from "../runtime/service-targets.mjs";
+import { packageDir, runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
 if (process.platform !== "darwin") {
@@ -16,11 +19,7 @@ const document = readGatewayConfig(runtime.configPath);
 const codex = table(document.codex);
 const { defaultWorkspace } = readWorkspaceConfig(document);
 const workdir = defaultWorkspace.cwd;
-const socketPath = resolveConfiguredPath(
-  stringValue(codex.socket_path),
-  runtime.dataDir,
-  join(runtime.dataDir, "runtime", "codex-app-server.sock"),
-);
+const socketPath = resolvePrimaryAppServerSocketPath(document, runtime.dataDir);
 if (!isAbsolute(socketPath)) {
   throw new Error("CODEX_SOCKET_PATH 必须是绝对路径");
 }
@@ -54,12 +53,8 @@ const values = {
 };
 const agentsDir = join(homedir(), "Library", "LaunchAgents");
 mkdirSync(agentsDir, { recursive: true });
-for (const name of [
-  "com.hegenai.codex-app-server",
-  "com.hegenai.codex-gateway",
-  "com.hegenai.codex-webui",
-  "com.hegenai.codex-center",
-]) {
+for (const definition of serviceDefinitions) {
+  const name = definition.launchd;
   const template = readFileSync(join(projectDir, "launchd", `${name}.plist.template`), "utf8");
   const rendered = Object.entries(values).reduce(
     (content, [key, value]) => content.replaceAll(`__${key}__`, xmlEscape(value)),
@@ -67,9 +62,9 @@ for (const name of [
   );
   const destination = join(agentsDir, `${name}.plist`);
   writeFileSync(destination, rendered, { mode: 0o600 });
-  console.log(`已生成 ${destination}`);
+  console.log(`生成：${destination}`);
 }
-console.log("launchd 配置已生成。");
+writeCliMessage("success", "launchd 配置已生成。");
 
 function resolveExecutable(command) {
   if (isAbsolute(command)) {

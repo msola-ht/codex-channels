@@ -273,6 +273,9 @@ Provider 或 `CODEX_HOME` 切换影响；重复启动会保留当前正在运行
 WebUI 服务读取 `[webui]` 配置，要求指标数据库为当前 Schema（升级后先执行
 `codexc metrics upgrade`）；指标中心读取 `[metrics.center]` 配置。
 
+公开管理命令的状态行统一使用 `[成功]`、`[失败]`、`[提示]` 和 `[处理]`；交互终端按类别着色，
+管道或日志输出不包含 ANSI 颜色。路径、标识符、列表、日志和其他可继续解析的数据保持原始格式。
+
 服务重启建议从本机终端执行。聊天 Turn 内重启 Gateway 可能使过程或完成消息落在重连窗口；渠道内
 执行 `codexc service restart app-server` 或 `codexc service restart all` 会被拒绝。需要重启 App
 Server 时必须从本机终端执行。
@@ -353,7 +356,8 @@ codexc service logs -n 100
 
 `codexc doctor` 先完成全部检测，再按基础环境、配置文件、通讯渠道、扩展能力、Workspace、
 App Server 和系统服务分组，只展示失败、提示与处理建议；成功项只计入结尾汇总。交互终端中
-失败、提示和处理建议使用不同颜色，管道或日志输出不包含 ANSI 颜色。Doctor 保持只读；Linux
+失败、提示和处理建议使用不同颜色，管道或日志输出不包含 ANSI 颜色。Doctor 检查项使用
+`[通过]`，与管理命令的操作成功状态区分。Doctor 保持只读；Linux
 的 PATH 中缺少 `bubblewrap` 时会额外输出 `[处理]` 安装建议，但不会自动安装软件、修改
 AppArmor 或重启服务。App Server 检查同时验证监管身份和当前 Provider 拓扑；裸实例或拓扑不一致
 会提示重启整套服务，不再只因 `initialize` 握手成功而显示健康。

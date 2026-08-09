@@ -4,10 +4,14 @@ set -euo pipefail
 action="${1:-status}"
 user_domain="gui/$(id -u)"
 agents_dir="$HOME/Library/LaunchAgents"
-app_label="com.hegenai.codex-app-server"
-gateway_label="com.hegenai.codex-gateway"
-webui_label="com.hegenai.codex-webui"
-metrics_center_label="com.hegenai.codex-center"
+script_dir="${0:A:h}"
+
+service_ids() {
+  "${NODE_BINARY:-node}" "$script_dir/service-target-query.mjs" launchd "$1" "$2"
+}
+print_status() {
+  "${NODE_BINARY:-node}" "$script_dir/cli-status.mjs" "$1" "$2"
+}
 unsupported_app_label="com.msola.codex-app-server"
 unsupported_gateway_label="com.msola.codex-gateway"
 
@@ -39,7 +43,7 @@ show_logs() {
         shift 2
         ;;
       *)
-        print -u2 "未知日志参数：$1"
+        print_status failure "未知日志参数：$1"
         return 2
         ;;
     esac
@@ -75,8 +79,8 @@ show_logs() {
     fi
   fi
   if (( ${#log_files[@]} == 0 )); then
-    print -u2 "尚未找到后台日志：$runtime_dir"
-    print -u2 "请先执行 codexc service start，并检查 codexc service status。"
+    print_status failure "尚未找到后台日志：$runtime_dir"
+    print_status remediation "请先执行 codexc service start，并检查 codexc service status。"
     return 1
   fi
   if (( follow )); then
@@ -99,8 +103,8 @@ reject_unsupported_jobs() {
   if (( ${#loaded[@]} == 0 )); then
     return 0
   fi
-  print -u2 "检测到不支持的 launchd Job：${(j:, :)loaded}"
-  print -u2 "请先手动卸载这些 Job 并删除对应 plist，再重新运行 codexc service install。"
+  print_status failure "检测到不支持的 launchd Job：${(j:, :)loaded}"
+  print_status remediation "请先手动卸载这些 Job 并删除对应 plist，再重新运行 codexc service install。"
   return 1
 }
 
@@ -113,7 +117,7 @@ wait_until_unloaded() {
     fi
     sleep 0.1
   done
-  print -u2 "等待 launchd Job 卸载超时：$label"
+  print_status failure "等待 launchd Job 卸载超时：$label"
   return 1
 }
 
@@ -154,7 +158,7 @@ require_target() {
     gateway|app-server|webui|center|all)
       ;;
     *)
-      print -u2 "服务目标必须是 gateway、app-server、webui、center 或 all：$1"
+      print_status failure "服务目标必须是 gateway、app-server、webui、center 或 all：$1"
       return 2
       ;;
   esac
@@ -166,130 +170,101 @@ case "$action" in
     ;;
   install)
     reject_unsupported_jobs
-    stop_job "$gateway_label"
-    stop_job "$app_label"
-    start_job "$app_label" "$agents_dir/$app_label.plist"
-    start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
-    print "Codex App Server 与 Gateway 已安装并启动。"
-    print "WebUI 服务已生成，可执行 codexc service start webui 启动。"
-    print "指标中心服务已生成，可执行 codexc service start center 启动。"
+    labels=$(service_ids all stop)
+    for label in ${(f)labels}; do stop_job "$label"; done
+    labels=$(service_ids all start)
+    for label in ${(f)labels}; do
+      start_job "$label" "$agents_dir/$label.plist"
+    done
+    print_status success "Codex App Server 与 Gateway 已安装并启动。"
+    print_status note "WebUI 服务已生成，可执行 codexc service start webui 启动。"
+    print_status note "指标中心服务已生成，可执行 codexc service start center 启动。"
     ;;
   start)
     reject_unsupported_jobs
     target="${2:-all}"
     require_target "$target"
-    if [[ "$target" == "app-server" || "$target" == "all" ]]; then
-      start_job "$app_label" "$agents_dir/$app_label.plist"
-    fi
-    if [[ "$target" == "gateway" || "$target" == "all" ]]; then
-      start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
-    fi
-    if [[ "$target" == "webui" ]]; then
-      start_job "$webui_label" "$agents_dir/$webui_label.plist"
-    fi
-    if [[ "$target" == "center" ]]; then
-      start_job "$metrics_center_label" "$agents_dir/$metrics_center_label.plist"
-    fi
+    labels=$(service_ids "$target" start)
+    for label in ${(f)labels}; do
+      start_job "$label" "$agents_dir/$label.plist"
+    done
     case "$target" in
-      gateway) print "Gateway 已启动。" ;;
-      app-server) print "Codex App Server 已启动。" ;;
-      webui) print "WebUI 已启动。" ;;
-      center) print "指标中心已启动。" ;;
-      all) print "Codex App Server 与 Gateway 已启动。" ;;
+      gateway) print_status success "Gateway 已启动。" ;;
+      app-server) print_status success "Codex App Server 已启动。" ;;
+      webui) print_status success "WebUI 已启动。" ;;
+      center) print_status success "指标中心已启动。" ;;
+      all) print_status success "Codex App Server 与 Gateway 已启动。" ;;
     esac
     ;;
   stop)
     target="${2:-all}"
     require_target "$target"
-    if [[ "$target" == "gateway" || "$target" == "all" ]]; then
-      stop_job "$gateway_label"
-    fi
-    if [[ "$target" == "app-server" || "$target" == "all" ]]; then
-      stop_job "$app_label"
-    fi
-    if [[ "$target" == "webui" ]]; then
-      stop_job "$webui_label"
-    fi
-    if [[ "$target" == "center" ]]; then
-      stop_job "$metrics_center_label"
-    fi
+    labels=$(service_ids "$target" stop)
+    for label in ${(f)labels}; do stop_job "$label"; done
     case "$target" in
-      gateway) print "Gateway 已停止。" ;;
-      app-server) print "Codex App Server 已停止。" ;;
-      webui) print "WebUI 已停止。" ;;
-      center) print "指标中心已停止。" ;;
-      all) print "Codex App Server 与 Gateway 已停止。" ;;
+      gateway) print_status success "Gateway 已停止。" ;;
+      app-server) print_status success "Codex App Server 已停止。" ;;
+      webui) print_status success "WebUI 已停止。" ;;
+      center) print_status success "指标中心已停止。" ;;
+      all) print_status success "Codex App Server 与 Gateway 已停止。" ;;
     esac
     ;;
   uninstall)
-    stop_job "$gateway_label"
-    stop_job "$app_label"
-    stop_job "$webui_label"
-    stop_job "$metrics_center_label"
-    /bin/rm -f "$agents_dir/$gateway_label.plist" "$agents_dir/$app_label.plist" "$agents_dir/$webui_label.plist" "$agents_dir/$metrics_center_label.plist"
-    print "Codex App Server、Gateway、WebUI 与指标中心 launchd 服务已卸载。"
-    print "用户配置与运行数据保留在 ~/.codex-connect。"
+    core_labels=$(service_ids all stop)
+    webui_label=$(service_ids webui stop)
+    center_label=$(service_ids center stop)
+    for label in ${(f)core_labels} "$webui_label" "$center_label"; do
+      stop_job "$label"
+      /bin/rm -f "$agents_dir/$label.plist"
+    done
+    print_status success "Codex App Server、Gateway、WebUI 与指标中心 launchd 服务已卸载。"
+    print_status note "用户配置与运行数据保留在 ~/.codex-connect。"
     ;;
   restart)
     reject_unsupported_jobs
     target="${2:-gateway}"
     require_target "$target"
-    if [[ "$target" == "app-server" || "$target" == "all" ]]; then
-      start_job "$app_label" "$agents_dir/$app_label.plist"
-    fi
-    if [[ "$target" == "gateway" || "$target" == "all" ]]; then
-      start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
-    fi
-    if [[ "$target" == "webui" ]]; then
-      start_job "$webui_label" "$agents_dir/$webui_label.plist"
-    fi
-    if [[ "$target" == "center" ]]; then
-      start_job "$metrics_center_label" "$agents_dir/$metrics_center_label.plist"
-    fi
+    labels=$(service_ids "$target" start)
+    for label in ${(f)labels}; do
+      start_job "$label" "$agents_dir/$label.plist"
+    done
     case "$target" in
-      gateway) print "Gateway 已重启；Codex App Server 保持运行。" ;;
-      app-server) print "Codex App Server 已重启；Gateway 将自动重连。" ;;
-      webui) print "WebUI 已重启。" ;;
-      center) print "指标中心已重启。" ;;
-      all) print "Codex App Server 与 Gateway 已重启。" ;;
+      gateway) print_status success "Gateway 已重启；Codex App Server 保持运行。" ;;
+      app-server) print_status success "Codex App Server 已重启；Gateway 将自动重连。" ;;
+      webui) print_status success "WebUI 已重启。" ;;
+      center) print_status success "指标中心已重启。" ;;
+      all) print_status success "Codex App Server 与 Gateway 已重启。" ;;
     esac
     ;;
   reload)
     reject_unsupported_jobs
+    gateway_label=$(service_ids gateway start)
     if ! job_loaded "$gateway_label"; then
-      print -u2 "Gateway 尚未运行，请先执行 codexc service start。"
+      print_status failure "Gateway 尚未运行，请先执行 codexc service start。"
       exit 1
     fi
     if launchctl kill SIGHUP "$user_domain/$gateway_label" 2>/dev/null; then
-      print "已通知 Gateway 重新读取配置；Gateway 连接变化会自动重启，App Server 配置变化需重新安装服务。"
+      print_status success "已通知 Gateway 重新读取配置；Gateway 连接变化会自动重启，App Server 配置变化需重新安装服务。"
     else
-      print "Gateway 当前没有可接收信号的进程，正在启动..."
+      print_status note "Gateway 当前没有可接收信号的进程，正在启动..."
       start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
-      print "Gateway 已启动并将读取最新配置。"
+      print_status success "Gateway 已启动并将读取最新配置。"
     fi
     ;;
   status)
     target="${2:-all}"
     require_target "$target"
-    if [[ "$target" == "app-server" || "$target" == "all" ]]; then
-      launchctl print "$user_domain/$app_label" 2>/dev/null || true
-    fi
-    if [[ "$target" == "gateway" || "$target" == "all" ]]; then
-      launchctl print "$user_domain/$gateway_label" 2>/dev/null || true
-    fi
-    if [[ "$target" == "webui" ]]; then
-      launchctl print "$user_domain/$webui_label" 2>/dev/null || true
-    fi
-    if [[ "$target" == "center" ]]; then
-      launchctl print "$user_domain/$metrics_center_label" 2>/dev/null || true
-    fi
+    labels=$(service_ids "$target" start)
+    for label in ${(f)labels}; do
+      launchctl print "$user_domain/$label" 2>/dev/null || true
+    done
     ;;
   logs)
     shift
     show_logs "$@"
     ;;
   *)
-    print -u2 "用法：$0 {install|uninstall|reload|start|stop|restart|status|logs} [gateway|app-server|webui|center|all]"
+    print_status failure "用法：$0 {install|uninstall|reload|start|stop|restart|status|logs} [gateway|app-server|webui|center|all]"
     exit 2
     ;;
 esac

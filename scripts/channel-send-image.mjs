@@ -11,6 +11,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
+import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import {
   locateUserConfig,
@@ -141,7 +142,7 @@ function imageExtension(path) {
 }
 
 function printResult(result) {
-  console.log("已提交渠道图片发送，网关发送后自动归档。");
+  writeCliMessage("success", "已提交渠道图片发送，网关发送后自动归档。");
   console.log(`Thread：${result.threadId}`);
   console.log(`渠道：${result.target.surface}（${result.target.conversationId}）`);
   console.log(`图片：${result.imagePath}`);
@@ -180,7 +181,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     }
     printResult(await submitChannelImage({ imagePath: positional[0], threadId }));
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
+    writeCliMessage("failure", error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   }
 }

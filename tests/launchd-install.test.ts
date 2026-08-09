@@ -82,7 +82,7 @@ describe("launchd installer", () => {
     }
   });
 
-  it.skipIf(process.platform !== "darwin")("uninstalls only launchd plists and preserves user data", () => {
+  it("uninstalls only launchd plists and preserves user data", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-uninstall-"));
     temporaryDirectories.push(root);
     const agentsDir = join(root, "Library/LaunchAgents");
@@ -102,7 +102,12 @@ describe("launchd installer", () => {
     chmodSync(fakeLaunchctl, 0o755);
 
     const output = execFileSync("/bin/zsh", [resolve("scripts/launchd-control.sh"), "uninstall"], {
-      env: { ...process.env, HOME: root, PATH: `${binDir}:/usr/bin:/bin` },
+      env: {
+        ...process.env,
+        HOME: root,
+        NODE_BINARY: process.execPath,
+        PATH: `${binDir}:/usr/bin:/bin`,
+      },
       encoding: "utf8",
     });
 
@@ -112,7 +117,7 @@ describe("launchd installer", () => {
     expect(readFileSync(userConfig, "utf8")).toBe("preserved=true\n");
   });
 
-  it.skipIf(process.platform !== "darwin")("supports start, stop, and restart lifecycle actions", () => {
+  it("supports start, stop, and restart lifecycle actions", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-service-"));
     temporaryDirectories.push(root);
     const agentsDir = join(root, "Library/LaunchAgents");
@@ -158,6 +163,7 @@ describe("launchd installer", () => {
       CODEX_CONNECT_HOME: join(root, ".codex-connect"),
       CODEX_SOCKET_PATH: join(root, ".codex-connect/runtime/codex-app-server.sock"),
       PATH: `${binDir}:/usr/bin:/bin`,
+      NODE_BINARY: process.execPath,
       LAUNCHCTL_LOG: launchctlLog,
       LAUNCHCTL_STATE: launchctlState,
     };
@@ -210,6 +216,7 @@ describe("launchd installer", () => {
     );
 
     expect(started).toContain("已启动");
+    expect(started).toContain("[成功]");
     expect(stopped).toContain("已停止");
     expect(restarted).toContain("Gateway 已重启");
     expect(restarted).toContain("App Server 保持运行");
@@ -243,7 +250,7 @@ describe("launchd installer", () => {
     expect(allLogs).not.toContain("app-old");
   });
 
-  it.skipIf(process.platform !== "darwin")("rejects unsupported launchd jobs without modifying them", () => {
+  it("rejects unsupported launchd jobs without modifying them", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-unsupported-launchd-"));
     temporaryDirectories.push(root);
     const binDir = join(root, "bin");
@@ -273,6 +280,7 @@ describe("launchd installer", () => {
           ...process.env,
           HOME: root,
           PATH: `${binDir}:/usr/bin:/bin`,
+          NODE_BINARY: process.execPath,
           LAUNCHCTL_LOG: launchctlLog,
           LAUNCHCTL_STATE: stateDir,
         },

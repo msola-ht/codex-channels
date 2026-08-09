@@ -17,6 +17,7 @@ import * as clackPrompts from "@clack/prompts";
 import { HttpsProxyAgent } from "https-proxy-agent";
 
 import { configEventQueuePath } from "../runtime/config-event-queue.mjs";
+import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import {
   readGatewayConfig,
   writeGatewayConfig,
@@ -26,10 +27,7 @@ import {
   selectHttpProxyUrl,
 } from "../runtime/network-proxy.mjs";
 import {
-  loadManagedProviderAppServer,
   loadOpenAiBaseUrl,
-  loadPrimaryModelProvider,
-  providerAppServerSocketPath,
   providerMetricsSocketPath,
   removeManagedModelProviderRoleConfig,
   withOpenAiBaseUrl,
@@ -37,6 +35,18 @@ import {
   writeManagedModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
+import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.mjs";
+import {
+  defaultServiceTarget,
+  parseServiceTarget,
+  serviceTargetIncludes,
+  serviceTargetUsage,
+} from "../runtime/service-targets.mjs";
+import {
+  childProcessIsRunning,
+  installProcessSignalHandlers,
+  signalChildProcesses,
+} from "../runtime/process-lifecycle.mjs";
 import {
   AppServerSupervisorOwner,
   prepareAppServerSocketPaths,
@@ -45,7 +55,6 @@ import {
   initializeUserData,
   packageDir,
   requireUserConfig,
-  resolveConfiguredPath,
 } from "../scripts/runtime-config.mjs";
 import { checkProjectRules, initializeProjectRules } from "../scripts/codex-rules.mjs";
 import {
@@ -143,12 +152,12 @@ const helpText = {
 目标默认值：start/stop/status 为 all，restart/logs 为 gateway。`,
   "service.install": "用法：codexc service install",
   "service.uninstall": "用法：codexc service uninstall",
-  "service.start": "用法：codexc service start [gateway|app-server|webui|center|all]",
-  "service.stop": "用法：codexc service stop [gateway|app-server|webui|center|all]",
+  "service.start": `用法：codexc service start [${serviceTargetUsage}]`,
+  "service.stop": `用法：codexc service stop [${serviceTargetUsage}]`,
   "service.reload": "用法：codexc service reload",
-  "service.restart": "用法：codexc service restart [gateway|app-server|webui|center|all]",
-  "service.status": "用法：codexc service status [gateway|app-server|webui|center|all]",
-  "service.logs": `用法：codexc service logs [gateway|app-server|webui|center|all] [-f|--follow] [-n|--lines 行数]`,
+  "service.restart": `用法：codexc service restart [${serviceTargetUsage}]`,
+  "service.status": `用法：codexc service status [${serviceTargetUsage}]`,
+  "service.logs": `用法：codexc service logs [${serviceTargetUsage}] [-f|--follow] [-n|--lines 行数]`,
   config: `用法：codexc config
 
 打开交互式配置与设置菜单：显示设置（操作详情、计划更新、全局价格显示方式）、系统设置
@@ -396,7 +405,7 @@ try {
       throw new Error(`未知命令：${command}\n运行 codexc --help 查看用法`);
   }
 } catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
+  printCliMessage("failure", error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 }
 
@@ -405,12 +414,15 @@ function initialize(args) {
     throw new Error("用法：codexc init");
   }
   const result = initializeUserData({ cwd: process.cwd() });
-  console.log(result.created ? "Codex Connect 已初始化。" : "Codex Connect 已经初始化。");
+  printCliMessage(
+    result.created ? "success" : "note",
+    result.created ? "Codex Connect 已初始化。" : "Codex Connect 已经初始化。",
+  );
   console.log(`配置目录：${result.dataDir}`);
   console.log(`配置文件：${result.configPath}`);
   if (result.created) {
     console.log(`默认 Workspace：${result.workspace}`);
-    console.log("请运行 codexc setup 配置通讯渠道，然后运行 codexc service install。");
+    printCliMessage("note", "请运行 codexc setup 配置通讯渠道，然后运行 codexc service install。");
   }
 }
 
@@ -424,23 +436,15 @@ function runGateway(args) {
     env: runtime.environment,
     cwd: runtime.dataDir,
   });
-  const forwardSignal = (signal) => {
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill(signal);
-    }
-  };
+  const forwardSignal = (signal) => signalChildProcesses([child], signal);
   const forwardReload = () => forwardSignal("SIGHUP");
   const forwardTerminate = () => forwardSignal("SIGTERM");
   const forwardInterrupt = () => forwardSignal("SIGINT");
-  const cleanup = () => {
-    process.off("SIGHUP", forwardReload);
-    process.off("SIGTERM", forwardTerminate);
-    process.off("SIGINT", forwardInterrupt);
-  };
-
-  process.on("SIGHUP", forwardReload);
-  process.on("SIGTERM", forwardTerminate);
-  process.on("SIGINT", forwardInterrupt);
+  const cleanup = installProcessSignalHandlers({
+    SIGHUP: forwardReload,
+    SIGTERM: forwardTerminate,
+    SIGINT: forwardInterrupt,
+  });
   child.once("error", (error) => {
     cleanup();
     console.error(error instanceof Error ? error.message : String(error));
@@ -465,35 +469,31 @@ async function runServiceAppServer(args) {
     throw new Error("ds_proxy 已移除，模型统计代理现在由 App Server 服务自动管理");
   }
   runtime.environment.CODEX_CONNECT_SERVICE_ROLE = "app-server";
-  const codex = table(runtime.document.codex);
   const { defaultWorkspace } = readWorkspaceConfig(runtime.document);
-  const socketPath = resolveConfiguredPath(
-    stringValue(codex.socket_path),
+  const appServerRuntime = resolveAppServerRuntime(
+    runtime.document,
     runtime.dataDir,
-    join(runtime.dataDir, "runtime", "codex-app-server.sock"),
+    runtime.environment,
   );
-  const managedProvider = loadManagedProviderAppServer(runtime.environment);
-  const primaryProvider = loadPrimaryModelProvider(runtime.environment);
+  const {
+    primarySocketPath: socketPath,
+    managedProvider,
+    managedSocketPath: providerSocketPath,
+    primaryProvider,
+  } = appServerRuntime;
   const {
     ProviderProxy,
     sendProviderProxyMetrics,
   } = await import("../dist/provider-proxy/index.js");
   const providerProxies = [];
   const upstreamAgents = new Set();
-  const providerSocketPath = managedProvider
-    ? providerAppServerSocketPath(socketPath, managedProvider.provider)
-    : undefined;
-  const supervisorOwner = new AppServerSupervisorOwner(socketPath, {
-    primaryProvider,
-    managedProvider: managedProvider?.provider,
-    socketPaths: [socketPath, ...(providerSocketPath ? [providerSocketPath] : [])],
-  });
+  const supervisorOwner = new AppServerSupervisorOwner(
+    socketPath,
+    appServerRuntime.topology,
+  );
   await supervisorOwner.start();
   try {
-    await prepareAppServerSocketPaths([
-      socketPath,
-      ...(providerSocketPath ? [providerSocketPath] : []),
-    ]);
+    await prepareAppServerSocketPaths(appServerRuntime.socketPaths);
   } catch (error) {
     await supervisorOwner.close();
     throw error;
@@ -670,18 +670,18 @@ async function workspace(args) {
       fallbackDefaultWorkspace,
       eventQueuePath,
     });
-    console.log(result.added ? "Workspace 已添加。" : "Workspace 已存在。");
+    printCliMessage(result.added ? "success" : "note", result.added ? "Workspace 已添加。" : "Workspace 已存在。");
     console.log(`${result.workspace.name} (${result.workspace.id})`);
     console.log(result.workspace.cwd);
     for (const removed of result.removedWorkspaces) {
-      console.log(`已清理失效 Workspace：${removed.name} (${removed.id})`);
+      printCliMessage("success", `已清理失效 Workspace：${removed.name} (${removed.id})`);
       console.log(removed.cwd);
     }
     if (result.defaultChanged) {
-      console.log(`默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
+      printCliMessage("success", `默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
     }
     if (result.added || result.removedWorkspaces.length > 0 || result.defaultChanged) {
-      console.log("运行中的 Gateway 会自动热加载配置，必要时重启。");
+      printCliMessage("note", "运行中的 Gateway 会自动热加载配置，必要时重启。");
     }
     return;
   }
@@ -695,13 +695,13 @@ async function workspace(args) {
       fallbackDefaultWorkspace,
       eventQueuePath,
     });
-    console.log(`Workspace 注册已删除：${result.removedWorkspace.name} (${result.removedWorkspace.id})`);
+    printCliMessage("success", `Workspace 注册已删除：${result.removedWorkspace.name} (${result.removedWorkspace.id})`);
     console.log(result.removedWorkspace.cwd);
-    console.log("磁盘目录未删除。");
+    printCliMessage("note", "磁盘目录未删除。");
     if (result.defaultChanged) {
-      console.log(`默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
+      printCliMessage("success", `默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
     }
-    console.log("运行中的 Gateway 会自动重新加载配置，必要时重启。");
+    printCliMessage("note", "运行中的 Gateway 会自动重新加载配置，必要时重启。");
     return;
   }
   if (args.length > 0 && args[0] !== "list") {
@@ -838,13 +838,13 @@ async function createWorkspaceInteractively({
     fallbackDefaultWorkspace,
     eventQueuePath,
   });
-  console.log("Workspace 已新增。");
+  printCliMessage("success", "Workspace 已新增。");
   console.log(`${result.workspace.name} (${result.workspace.id})`);
   console.log(result.workspace.cwd);
   if (result.defaultChanged) {
-    console.log(`默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
+    printCliMessage("success", `默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
   }
-  console.log("运行中的 Gateway 会自动热加载配置，必要时重启。");
+  printCliMessage("note", "运行中的 Gateway 会自动热加载配置，必要时重启。");
 }
 
 async function removeWorkspaceInteractively({
@@ -855,7 +855,7 @@ async function removeWorkspaceInteractively({
   const document = readGatewayConfig(runtime.configPath);
   const { workspaces } = inspectWorkspaceConfig(document);
   if (workspaces.length === 0) {
-    console.log("当前没有已配置的 Workspace。");
+    printCliMessage("note", "当前没有已配置的 Workspace。");
     return;
   }
   const selected = await clackPrompts.select({
@@ -877,13 +877,13 @@ async function removeWorkspaceInteractively({
     fallbackDefaultWorkspace,
     eventQueuePath,
   });
-  console.log(`Workspace 注册已删除：${result.removedWorkspace.name} (${result.removedWorkspace.id})`);
+  printCliMessage("success", `Workspace 注册已删除：${result.removedWorkspace.name} (${result.removedWorkspace.id})`);
   console.log(result.removedWorkspace.cwd);
-  console.log("磁盘目录未删除。");
+  printCliMessage("note", "磁盘目录未删除。");
   if (result.defaultChanged) {
-    console.log(`默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
+    printCliMessage("success", `默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
   }
-  console.log("运行中的 Gateway 会自动重新加载配置，必要时重启。");
+  printCliMessage("note", "运行中的 Gateway 会自动重新加载配置，必要时重启。");
 }
 
 async function runWorkspacePermissionsMenu(runtime) {
@@ -892,7 +892,7 @@ async function runWorkspacePermissionsMenu(runtime) {
     ? document.workspaces
     : [];
   if (workspaces.length === 0) {
-    console.log("当前没有已配置的 Workspace。");
+    printCliMessage("note", "当前没有已配置的 Workspace。");
     return;
   }
   const entries = workspaces.map((workspace) => table(workspace));
@@ -961,7 +961,7 @@ async function runWorkspacePermissionsMenu(runtime) {
       delete entry.sandbox;
     } else {
       if (entry.permissions !== undefined) {
-        console.log("permissions 与 sandbox 互斥，请先清除权限 Profile。");
+        printCliMessage("failure", "permissions 与 sandbox 互斥，请先清除权限 Profile。");
         return;
       }
       entry.sandbox = selected;
@@ -998,7 +998,7 @@ async function runWorkspacePermissionsMenu(runtime) {
     }
     const trimmed = String(entered).trim();
     if (trimmed.length > 0 && entry.sandbox !== undefined) {
-      console.log("permissions 与 sandbox 互斥，请先清除沙箱。");
+      printCliMessage("failure", "permissions 与 sandbox 互斥，请先清除沙箱。");
       return;
     }
     if (trimmed.length === 0) {
@@ -1010,11 +1010,11 @@ async function runWorkspacePermissionsMenu(runtime) {
     throw new Error(`未知工作区权限项：${String(field)}`);
   }
   writeGatewayConfig(runtime.configPath, document);
-  console.log("已更新工作区权限。");
+  printCliMessage("success", "已更新工作区权限。");
   console.log(
     `沙箱：${entry.sandbox ?? "未配置"} · 审批：${entry.approval_policy ?? "未配置"} · 权限 Profile：${entry.permissions ?? "未配置"}`,
   );
-  console.log("运行中的 Gateway 会自动热加载，对新建或恢复的 Thread 生效。");
+  printCliMessage("note", "运行中的 Gateway 会自动热加载，对新建或恢复的 Thread 生效。");
 }
 
 function listWorkspaces(configPath) {
@@ -1084,7 +1084,7 @@ function rejectAppServerSelfRestart(action, serviceArgs, environment) {
   if (
     environment.CODEX_CONNECT_SERVICE_ROLE === "app-server"
     && action === "restart"
-    && (target === "app-server" || target === "all")
+    && serviceTargetIncludes(target, "app-server")
   ) {
     throw new Error(
       "不能在 Codex App Server 内重启 App Server；请在本机终端运行 "
@@ -1122,7 +1122,7 @@ function projectRules(args) {
   }
   if (args[0] === "check" && args.length === 1) {
     const result = checkProjectRules({ cwd: process.cwd() });
-    console.log("项目 Codex 规则检查通过。");
+    printCliMessage("success", "项目 Codex 规则检查通过。");
     console.log(`项目目录：${result.projectRoot}`);
     console.log(`规则文件：${result.rulesPath}`);
     return;
@@ -1134,12 +1134,12 @@ function projectRules(args) {
   }
   const force = args.includes("--force");
   const result = initializeProjectRules({ cwd: process.cwd(), force });
-  console.log(force ? "项目 Codex 规则已重新生成。" : "项目 Codex 规则已生成。");
+  printCliMessage("success", force ? "项目 Codex 规则已重新生成。" : "项目 Codex 规则已生成。");
   console.log(`项目目录：${result.projectRoot}`);
   console.log(`规则文件：${result.rulesPath}`);
   checkProjectRules({ cwd: result.projectRoot });
-  console.log("项目 Codex 规则检查通过。");
-  console.log("重启 Codex 后生效；项目必须处于受信任状态。");
+  printCliMessage("success", "项目 Codex 规则检查通过。");
+  printCliMessage("note", "重启 Codex 后生效；项目必须处于受信任状态。");
 }
 
 function agents(args) {
@@ -1189,7 +1189,7 @@ async function runForegroundScript(
   let forwardedSignal;
   let shutdownTimer;
   const forceStop = () => {
-    if (child.exitCode !== null || child.signalCode !== null) return;
+    if (!childProcessIsRunning(child)) return;
     if (process.platform !== "win32" && child.pid !== undefined) {
       try {
         process.kill(-child.pid, "SIGKILL");
@@ -1206,23 +1206,24 @@ async function runForegroundScript(
       return;
     }
     forwardedSignal = signal;
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill(signal);
+    if (childProcessIsRunning(child)) {
+      signalChildProcesses([child], signal);
       shutdownTimer = setTimeout(forceStop, foregroundShutdownTimeoutMs);
       shutdownTimer.unref();
     }
   };
   const forwardTerminate = () => forwardSignal("SIGTERM");
   const forwardInterrupt = () => forwardSignal("SIGINT");
+  const cleanupSignals = installProcessSignalHandlers({
+    SIGTERM: forwardTerminate,
+    SIGINT: forwardInterrupt,
+  });
   const cleanup = () => {
     if (shutdownTimer) clearTimeout(shutdownTimer);
-    process.off("SIGTERM", forwardTerminate);
-    process.off("SIGINT", forwardInterrupt);
+    cleanupSignals();
   };
 
   await new Promise((resolveChild, rejectChild) => {
-    process.on("SIGTERM", forwardTerminate);
-    process.on("SIGINT", forwardInterrupt);
     child.once("error", (error) => {
       cleanup();
       rejectChild(error);
@@ -1355,11 +1356,12 @@ function runMetricsCommand(args) {
   }
   if (result.error || result.status !== 0) {
     rmSync(output.file, { force: true });
-    if (result.error) console.error(`指标导出失败：${result.error.message}`);
+    if (result.error) printCliMessage("failure", `指标导出失败：${result.error.message}`);
     process.exitCode = result.status ?? 1;
     return;
   }
   chmodSync(output.file, 0o600);
+  printCliMessage("success", "指标导出完成。");
   console.log(`已导出：${output.file}`);
 }
 
@@ -1523,11 +1525,11 @@ async function runMetricsMenu() {
       );
       threads = readMetricsThreads().threads;
     } catch (error) {
-      console.error(error instanceof Error ? error.message : String(error));
+      printCliMessage("failure", error instanceof Error ? error.message : String(error));
       return;
     }
     if (threads.length === 0) {
-      console.log("指标库中暂无可导出的会话记录。");
+      printCliMessage("note", "指标库中暂无可导出的会话记录。");
       return;
     }
     const selected = await clackPrompts.select({
@@ -1674,19 +1676,13 @@ function configuredEnvironment() {
 
 function forwardChildrenLifecycle(children, closeResources = async () => undefined) {
   let settled = false;
-  const forward = (signal) => {
-    for (const child of children) {
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill(signal);
-      }
-    }
-  };
+  const forward = (signal) => signalChildProcesses(children, signal);
   const terminate = () => forward("SIGTERM");
   const interrupt = () => forward("SIGINT");
-  const cleanup = () => {
-    process.off("SIGTERM", terminate);
-    process.off("SIGINT", interrupt);
-  };
+  const cleanup = installProcessSignalHandlers({
+    SIGTERM: terminate,
+    SIGINT: interrupt,
+  });
   const finish = (code, signal, error) => {
     if (settled) return;
     settled = true;
@@ -1708,8 +1704,6 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
       process.exitCode = 1;
     });
   };
-  process.on("SIGTERM", terminate);
-  process.on("SIGINT", interrupt);
   for (const child of children) {
     child.once("error", (error) => finish(1, null, error));
     child.once("exit", (code, signal) => finish(code, signal));
@@ -1808,15 +1802,8 @@ function parseServiceArguments(action, args) {
   if (args.length > 1) {
     throw new Error(helpText[`service.${action}`]);
   }
-  const defaultTarget = action === "restart" ? "gateway" : "all";
+  const defaultTarget = defaultServiceTarget(action);
   return [parseServiceTarget(args[0] ?? defaultTarget)];
-}
-
-function parseServiceTarget(value) {
-  if (!["gateway", "app-server", "webui", "center", "all"].includes(value)) {
-    throw new Error(`服务目标必须是 gateway、app-server、webui、center 或 all：${value}`);
-  }
-  return value;
 }
 
 function printVersion(args) {

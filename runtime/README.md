@@ -20,6 +20,9 @@
   切换模式为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，并只在子进程环境提供
   Key；固定模式从基础配置读取。
 - `model-provider-runtime.d.mts`：声明受控模型 Provider 运行时接口。
+- `app-server-runtime.mjs` / `app-server-runtime.d.mts`：从当前 TOML、数据目录和 Provider
+  配置一次性派生主 Socket、可选 Provider Socket 与 Supervisor 拓扑，供启动、Doctor、远程终端
+  和服务安装入口复用，避免各入口独立解释运行拓扑。
 - `app-server-supervisor.mjs`：以当前用户私有 Unix Socket 持有 App Server 监管入口互斥锁，
   对前台启动器公开有界、版本化的 Provider 拓扑身份；集中检查真实 WebSocket 健康状态，拒绝
   未受监管的活动 App Server，并安全保留失效 Socket；关闭时主动清理已接入连接，不因本地客户端
@@ -27,6 +30,13 @@
 - `app-server-supervisor.d.mts`：声明 App Server 监管拓扑与健康检查接口。
 - `gateway-owner.mjs` / `gateway-owner.d.mts`：按当前配置文件持有独立于 Provider 和指标通道的
   私有 Gateway 所有权 Socket，保证同一配置只能运行一个 Gateway，并安全清理失效入口。
+- `service-targets.mjs` / `service-targets.d.mts`：集中声明公开服务目标、systemd unit、launchd
+  label、核心服务范围和启停顺序，供 CLI、平台控制脚本、安装器与 Doctor 复用。
+- `process-lifecycle.mjs` / `process-lifecycle.d.mts`：统一判断子进程存活、向活动子进程转发信号和
+  成对安装/移除进程信号监听；具体关闭超时和资源清理仍由各生命周期所有者决定。
+- `cli-presentation.mjs` / `cli-presentation.d.mts`：集中定义公开 CLI 的成功、失败、提示和处理
+  状态标签、颜色、输出流路由和换行，Doctor 检查项另用通过；统一遵守 TTY 与 `NO_COLOR`，
+  重定向输出保持纯文本。
 - `project-rules.mjs`：生成并检查项目级 Codex 命令规则；Gateway 使用精确 Workspace 根目录，
   并拒绝通过符号链接把写入转移到 Workspace 外。
 - `project-rules.d.mts`：声明共享项目规则模块的 TypeScript 接口。

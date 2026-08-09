@@ -11,20 +11,26 @@ import { dirname, isAbsolute, join } from "node:path";
 import WebSocket from "ws";
 
 import {
+  colorizeCliText,
+  formatCliStatus,
+} from "../runtime/cli-presentation.mjs";
+import {
   inspectAppServerSupervisor,
   sameAppServerTopology,
 } from "../runtime/app-server-supervisor.mjs";
+import {
+  resolveAppServerRuntime,
+  resolvePrimaryAppServerSocketPath,
+} from "../runtime/app-server-runtime.mjs";
 import {
   readGatewayConfig,
   validateGatewayConfigDocument,
 } from "../runtime/gateway-config.mjs";
 import {
-  loadManagedProviderAppServer,
-  loadPrimaryModelProvider,
-  providerAppServerSocketPath,
   validateConfiguredModelProvider,
 } from "../runtime/model-provider-runtime.mjs";
 import { readApiProviderKey } from "../runtime/api-provider-credential.mjs";
+import { serviceIdentifiers } from "../runtime/service-targets.mjs";
 import { validateFeishuApplication } from "./feishu-application.mjs";
 import { packageDir, resolveConfiguredPath, runtimeConfig, userDataDir } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
@@ -280,11 +286,7 @@ if (document) {
     record("Codex CLI", false, errorMessage(error));
   }
 
-  const socketPath = resolveConfiguredPath(
-    stringValue(codex.socket_path),
-    dataDir,
-    join(dataDir, "runtime", "codex-app-server.sock"),
-  );
+  const socketPath = resolvePrimaryAppServerSocketPath(document, dataDir);
   let appServerTopology;
   let managedProvider;
   try {
@@ -296,15 +298,9 @@ if (document) {
         `${configuredProvider.provider} ${configuredProvider.mode === "switching" ? "切换" : "固定"}模式有效`,
       );
     }
-    managedProvider = loadManagedProviderAppServer(process.env);
-    const providerSocketPath = managedProvider
-      ? providerAppServerSocketPath(socketPath, managedProvider.provider)
-      : undefined;
-    appServerTopology = {
-      primaryProvider: loadPrimaryModelProvider(process.env),
-      managedProvider: managedProvider?.provider,
-      socketPaths: [socketPath, ...(providerSocketPath ? [providerSocketPath] : [])],
-    };
+    const descriptor = resolveAppServerRuntime(document, dataDir, process.env);
+    managedProvider = descriptor.managedProvider;
+    appServerTopology = descriptor.topology;
   } catch (error) {
     record("模型提供商配置", false, errorMessage(error));
   }
@@ -315,7 +311,7 @@ if (document) {
   if (managedProvider) {
     await checkAppServer(
       `${managedProvider.provider} App Server`,
-      providerAppServerSocketPath(socketPath, managedProvider.provider),
+      appServerTopology.socketPaths[1],
     );
   }
 }
@@ -367,7 +363,7 @@ setSection("系统服务");
 if (process.platform === "darwin") {
   const uid = process.getuid?.();
   const domain = `gui/${uid}`;
-  const labels = ["com.hegenai.codex-app-server", "com.hegenai.codex-gateway"];
+  const labels = serviceIdentifiers("launchd");
   const unsupportedLabels = ["com.msola.codex-app-server", "com.msola.codex-gateway"];
   const loaded = labels.filter((label) =>
     spawnSync("launchctl", ["print", `${domain}/${label}`], { stdio: "ignore" }).status === 0,
@@ -389,7 +385,7 @@ if (process.platform === "darwin") {
       : `已加载 ${loaded.length}/${labels.length}；前台运行模式可忽略`,
   );
 } else if (process.platform === "linux") {
-  const units = ["codex-connect-app-server.service", "codex-connect-gateway.service"];
+  const units = serviceIdentifiers("systemd");
   const active = units.filter((unit) =>
     spawnSync("systemctl", ["--user", "is-active", "--quiet", unit], { stdio: "ignore", timeout: 3_000 }).status === 0,
   );
@@ -417,7 +413,6 @@ if (process.platform === "darwin") {
 }
 
 const visibleChecks = checks.filter((check) => check.kind !== "success");
-const colorsEnabled = process.stdout.isTTY === true && process.env.NO_COLOR === undefined;
 console.log("Codex Connect Doctor");
 let renderedSection;
 for (const check of visibleChecks) {
@@ -425,38 +420,28 @@ for (const check of visibleChecks) {
     renderedSection = check.section;
     console.log(`\n=== ${renderedSection} ===`);
   }
-  console.log(`${coloredPrefix(check)} ${check.name}：${check.detail}`);
+  console.log(formatCliStatus(check.kind, check.name, check.detail));
   if (check.remediation) {
-    console.log(`${colorize("[处理]", 36)} ${check.name}：${check.remediation}`);
+    console.log(formatCliStatus("remediation", check.name, check.remediation));
   }
 }
 const failures = checks.filter((check) => check.kind === "failure").length;
 const successes = checks.filter((check) => check.kind === "success").length;
 const notes = checks.filter((check) => check.kind === "note").length;
-console.log(
-  failures === 0
-    ? `\n诊断通过：${successes} 项通过，${notes} 项提示。`
-    : `\n诊断发现 ${failures} 项问题：${successes} 项通过，${notes} 项提示。`,
-);
+const summary = failures === 0
+  ? `诊断通过：${successes} 项通过，${notes} 项提示。`
+  : `诊断发现 ${failures} 项问题：${successes} 项通过，${notes} 项提示。`;
+console.log(`\n${colorizeCliText(failures === 0 ? "success" : "failure", summary)}`);
 process.exitCode = failures === 0 ? 0 : 1;
 
 function setSection(section) {
   checkSection = section;
 }
 
-function coloredPrefix(check) {
-  return colorize(check.prefix, check.kind === "failure" ? 31 : 33);
-}
-
-function colorize(value, color) {
-  return colorsEnabled ? `\u001b[${color}m${value}\u001b[0m` : value;
-}
-
 function record(name, passed, detail, remediation) {
   checks.push({
     section: checkSection,
     kind: passed ? "success" : "failure",
-    prefix: passed ? "[通过]" : "[失败]",
     name,
     detail,
     remediation,
@@ -464,7 +449,7 @@ function record(name, passed, detail, remediation) {
 }
 
 function note(name, detail, remediation) {
-  checks.push({ section: checkSection, kind: "note", prefix: "[提示]", name, detail, remediation });
+  checks.push({ section: checkSection, kind: "note", name, detail, remediation });
 }
 
 function checkMode(name, path, expected) {

@@ -214,6 +214,10 @@
   拒绝 App Server 内的自重启；
   检测到不支持的旧标签时明确拒绝启动。
 - `install-systemd.mjs`：渲染并安装 Linux systemd 用户服务 unit；代理由 CLI 服务入口在每次启动时解析。
+- `service-target-query.mjs`：把共享服务目录中的 systemd unit 或 launchd label 逐行提供给平台
+  控制脚本，避免 Shell 维护第二份服务标识。
+- `cli-status.mjs`：让 systemd/launchd 控制脚本复用公开 CLI 的成功、失败、提示和处理状态前缀、
+  TTY 颜色及 `NO_COLOR` 规则；日志和数据内容不经过状态渲染。
 - `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载四个 systemd 用户服务；
   与 launchd 使用相同的目标、服务角色和默认值，WebUI 与指标中心独立不并入 `all`，用户数据始终保留。
 

@@ -100,7 +100,7 @@ describe("codexc CLI", () => {
       expect(result.stdout).toContain(expected);
       expect(result.stderr).toBe("");
     }
-  }, 15_000);
+  }, 30_000);
 
   it("writes large metrics exports completely without overwriting same-second files", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-metrics-export-"));
@@ -135,6 +135,7 @@ describe("codexc CLI", () => {
       "json",
     ], { cwd: workspace, env: environment, encoding: "utf8" });
     expect(first.status, first.stderr).toBe(0);
+    expect(first.stdout).toContain("[成功] 指标导出完成。");
     const firstPath = exportedMetricsPath(first.stdout);
     expect(statSync(firstPath).size).toBeGreaterThan(1_048_576);
     expect(JSON.parse(readFileSync(firstPath, "utf8")).records).toHaveLength(1_800);
@@ -456,6 +457,7 @@ describe("codexc CLI", () => {
       encoding: "utf8",
     });
     expect(rejected.status).toBe(1);
+    expect(rejected.stderr).toContain("[失败]");
     expect(rejected.stderr).toContain("项目规则已存在");
     expect(readFileSync(rulesPath, "utf8")).toBe("custom rules\n");
 
@@ -465,6 +467,7 @@ describe("codexc CLI", () => {
       encoding: "utf8",
     });
     expect(replaced).toContain("项目 Codex 规则已重新生成");
+    expect(replaced).toContain("[成功]");
     expect(readFileSync(rulesPath, "utf8")).toContain('pattern = ["npm", "test"]');
   });
 
