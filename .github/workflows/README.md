@@ -7,7 +7,7 @@
 - `ci.yml`：在 push、Pull Request 和手动触发时，分别使用 Ubuntu 与 macOS、Node.js 22.13.0
   执行与本地 pre-commit hook 相同的 `npm run verify:commit`，覆盖提交差异、类型和版本、生产与测试
   Lint、文档链接和索引、全量测试、Shell、真实 tarball 与干净源码安装冒烟及平台模板检查。
-  独立的 App Server 合同任务安装锁定的 Codex CLI 0.146.0，检查协议版本与生成类型，并使用隔离
+  独立的 App Server 合同任务安装锁定的 Codex CLI 0.146.1，检查协议版本与生成类型，并使用隔离
   `CODEX_HOME` 验证 Fast 默认值的跨客户端读取和新 Thread 状态。
 - `codex-upgrade-preview.yml`：每日及手动检查 `openai/codex` 正式发行版本；版本留空时使用
   最新正式 Release。项目已经同步时跳过，发现更新时安装对应 npm CLI、生成协议与版本

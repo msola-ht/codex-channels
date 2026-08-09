@@ -57,7 +57,7 @@ Gateway 会在创建或追加 Turn 前检查模型能力：未启用外部图片
 
 ## 网页搜索
 
-DeepSeek（当前 `deepseek-v4-flash` + Codex 0.146.0）支持网页搜索，且不依赖 OpenAI：
+DeepSeek（当前 `deepseek-v4-flash` + Codex 0.146.1）支持网页搜索，且不依赖 OpenAI：
 
 - DeepSeek API 会向模型提供名为 `search` 的搜索工具；Codex 侧统一以 `web_search` item
   回传（`query`、`action` 和结构化 `results`）。实测能返回带标题、URL、摘要和发布日期的
