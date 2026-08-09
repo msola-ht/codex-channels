@@ -99,6 +99,23 @@ export interface ThreadRequestMetricsSummary {
 export type RequestMetricsTimeRange = "24h" | "7d" | "30d";
 export type RequestMetricsAggregateView = "global" | "providers" | "models";
 export type RequestMetricsView = RequestMetricsAggregateView | "errors";
+export type TurnErrorPhase = "start" | "steer" | "notification";
+
+export interface TurnErrorRecord {
+  provider: string;
+  model: string | null;
+  threadId: string | null;
+  turnId: string | null;
+  phase: TurnErrorPhase;
+  errorType: string;
+  errorCode: string | null;
+  message: string | null;
+  recordedAtMs: number;
+}
+
+export interface TurnErrorRecorder {
+  recordTurnError(record: TurnErrorRecord): void;
+}
 
 export interface RequestMetricsCommandQuery {
   view: "session" | RequestMetricsView;
@@ -157,6 +174,7 @@ export interface RequestMetricsErrorGroup {
   status: "failed" | "incomplete" | "unknown";
   httpStatus: number | null;
   errorType: string | null;
+  lastErrorMessage: string | null;
   requestCount: number;
   lastOccurredAtMs: number;
 }

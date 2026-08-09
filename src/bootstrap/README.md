@@ -26,13 +26,20 @@
   参考价格快照，支持缓存输入、Priority 与已声明的长上下文价格，不把网络刷新放入请求路径。
 - `reference-cost-summary.ts`：在 Turn 完成时把指标库中的 Thread 历史计价与当前实时 Turn 计价
   合并；若当前 Turn 已部分延迟写入，先扣除该部分再加入完整实时值，避免累计总价重复或遗漏。
+- `subagent-completion-tracker.ts`：登记 Core 发布的子代理线程，以 App Server 自动订阅后发送的
+  子线程 `turn/completed` 作为正常终态，并接受官方中断活动与旧版
+  `collabAgentToolCall.agentsStates` 终态；极快子线程先完成后登记时只在有界短期缓存中保留终态。
+  已观察到模型指标且终态后出现父线程官方 `wait` Item 时，立即等待 Observability Writer 当前
+  水位落库并发布，保持该等待操作先于完成卡片；终态到达时尚无指标或之后未出现父线程等待时
+  保留有界收敛窗口，后续新指标使旧结算失效；指标到达或静默本身不推断子代理结束。无指标
+  发布零统计终态，指标写入或读取失败发布“统计不可用”终态。
 - `workspace-permission-writer.ts`：把渠道 `/workspaceperm` 的工作区权限更新写回
   `config.toml` 并校验 `permissions` 与 `sandbox` 互斥；文件变化由配置监听热加载。
 - `surface-plugin.ts`：定义编译期内置 Surface 插件、插件上下文和运行时模块契约，并校验插件 ID、
   实际 Surface ID 与账号实例唯一性。
 - `surface-composition.ts`：显式注册 Telegram、飞书和微信内置插件，并保留各平台访问策略、
-  热加载钩子和故障上报装配。Telegram 插件始终创建一个实例；飞书和微信插件只在严格运行配置
-  启用时创建实例。三个渠道按目标复用共享代理选择；微信协议 Client 在首次调用时从独立安全存储
+  热加载钩子和故障上报装配。三个插件都只在严格运行配置启用时创建实例；Telegram 由非空 Token
+  决定是否启用，飞书和微信使用显式开关。三个渠道按目标复用共享代理选择；微信协议 Client 在首次调用时从独立安全存储
   读取凭据，不把 Token 放入运行配置。
 - `proxy-fetch.ts`：把共享 HTTP(S) 代理选择适配到微信使用的 Fetch 接口；命中 `NO_PROXY`
   时使用直连 Fetch，否则通过按代理 URL 复用的 Undici Dispatcher 发出请求。
@@ -45,12 +52,18 @@
   代理、限制响应大小，并把用户原始提示和图片交给视觉接口后只返回 Application 的稳定识别结果；
   成功、失败与不完整响应的脱敏请求指标复用 Observability Writer，已有 Thread 时关联 Thread，
   组合根按实际响应模型附加当次价格快照，不保存图片、提示词、响应正文或识别结果。
+- `turn-error-metrics.ts`：把同步 RPC 与异步 `turn.error` 通知的 Turn 级失败统一转换为脱敏的
+  模型请求失败样本，保存错误原文与分类，不携带任何平台上下文或敏感凭据。
 - `config-lifecycle.ts`：管理配置监听、防抖重载、持久配置事件投递、信号与进程退出。
 - `surface-manager.ts`：按 `surface + accountId` 向已启动 Surface 集中路由 Core 输出，并为
-  `turn.completed` 注入当前授权 Workspace 的 Git 分支和 Thread 累计参考总价；并行完成各 Surface 的首次启动，
+  `turn.completed` 注入当前授权 Workspace 的 Git 分支和 Thread 累计总价；并行完成各 Surface 的首次启动，
   单个渠道启动或运行失败时只取消该渠道交互并独立退避恢复，不停止 Gateway 或其他渠道。
   首次启动和故障恢复期间只在有界内存队列中保留关键输出，就绪后按序补投；流式增量不积压。
   渠道未就绪时对应账号的新审批、用户输入与 MCP 交互立即失败关闭。
+- `channel-image-spool.ts`：扫描 `data/channel-outbox/pending/` 的图片发送请求，按
+  Thread 绑定解析目标会话，调用 `SurfaceManager.sendChannelImage` 由各渠道机器人凭据
+  发送，成功归档到 `done/`、失败归档到 `failed/` 并保留原因；目录权限 `0700`，只接受
+  pending 目录内的绝对图片路径。
 
 业务状态和平台逻辑应留在对应模块，只有具体实现选择、交互端口注册与生命周期协调放在这里。
 Provider 账户能力同样通过编译期显式注册：OpenAI 复用 Codex Client，第三方实现 Application

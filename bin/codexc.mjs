@@ -31,8 +31,10 @@ import {
   loadPrimaryModelProvider,
   providerAppServerSocketPath,
   providerMetricsSocketPath,
+  removeManagedModelProviderRoleConfig,
   withOpenAiBaseUrl,
   withProviderBaseUrl,
+  writeManagedModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import {
@@ -58,15 +60,19 @@ const helpText = {
 初始化与诊断：
   init                         初始化用户目录和配置
   setup                        选择并配置 Gateway 模块
-  config                       打开配置与设置菜单（显示、系统、工作区、消息格式）
+  config                       打开配置与设置菜单（显示、系统、工作区、多设备指标、消息格式）
   doctor                       检查安装、配置、Codex 与服务
 
 项目与会话：
   remote [参数]                启动共享 App Server 的 Codex TUI
   work [list|add|remove]       管理 Workspace（别名 ws；无子命令进入交互菜单）
   rules <init|check>           生成或检查项目 Codex 命令预设
+  agents <enable-deepseek|disable-deepseek|status>   配置 multi_agent_v2 的 DeepSeek 子代理角色
   state upgrade               显式升级 Gateway 状态数据库
   metrics <run|turns|threads|report|export|status|reset>   模型请求指标：本次运行、会话明细、会话归纳、汇报、导出、状态、重建
+  channel send-image          提交本地图片，由 Gateway 发送回当前渠道会话
+  webui                        启动本地只读指标 WebUI（默认回环地址）
+  center [config|info]          多设备指标中心：启动服务、交互配置或查看地址
 
 后台服务：
   start                        前台启动 App Server 与 Gateway
@@ -121,27 +127,27 @@ const helpText = {
 
   install                      安装并启动整套后台服务
   uninstall                    卸载整套后台服务并保留用户数据
-  start [目标]                 启动 gateway、app-server 或 all
-  stop [目标]                  停止 gateway、app-server 或 all
+  start [目标]                 启动 gateway、app-server、webui、center 或 all
+  stop [目标]                  停止 gateway、app-server、webui、center 或 all
   reload                       通知 Gateway 重新读取配置
-  restart [目标]               重启 gateway、app-server 或 all
-  status [目标]                查看 gateway、app-server 或 all
+  restart [目标]               重启 gateway、app-server、webui、center 或 all
+  status [目标]                查看 gateway、app-server、webui、center 或 all
   logs [目标] [-f] [-n 行数]   查看后台日志
 
 目标默认值：start/stop/status 为 all，restart/logs 为 gateway。`,
   "service.install": "用法：codexc service install",
   "service.uninstall": "用法：codexc service uninstall",
-  "service.start": "用法：codexc service start [gateway|app-server|all]",
-  "service.stop": "用法：codexc service stop [gateway|app-server|all]",
+  "service.start": "用法：codexc service start [gateway|app-server|webui|center|all]",
+  "service.stop": "用法：codexc service stop [gateway|app-server|webui|center|all]",
   "service.reload": "用法：codexc service reload",
-  "service.restart": "用法：codexc service restart [gateway|app-server|all]",
-  "service.status": "用法：codexc service status [gateway|app-server|all]",
-  "service.logs": `用法：codexc service logs [gateway|app-server|all] [-f|--follow] [-n|--lines 行数]`,
+  "service.restart": "用法：codexc service restart [gateway|app-server|webui|center|all]",
+  "service.status": "用法：codexc service status [gateway|app-server|webui|center|all]",
+  "service.logs": `用法：codexc service logs [gateway|app-server|webui|center|all] [-f|--follow] [-n|--lines 行数]`,
   config: `用法：codexc config
 
-打开交互式配置与设置菜单：显示设置（操作详情、计划更新、按提供商的价格显示方式）、系统设置
+打开交互式配置与设置菜单：显示设置（操作详情、计划更新、全局价格显示方式）、系统设置
 （调试模式、审批超时、Sandbox、默认工作区与模型）、工作区设置（沙箱、审批策略、权限 Profile）、
-Telegram 消息格式与配置路径查看。
+多设备指标（本机接入中心、接入状态、停用接入）、Telegram 消息格式与配置路径查看。
 非交互终端（脚本或管道）直接显示用户目录与配置文件路径。`,
   doctor: `用法：codexc doctor
 
@@ -151,6 +157,21 @@ Telegram 消息格式与配置路径查看。
 具体用法：
   codexc rules init [--force]
   codexc rules check`,
+  agents: `用法：codexc agents <enable-deepseek|disable-deepseek|status>
+
+  enable-deepseek   启用 multi_agent_v2 并在 ~/.codex/config.toml 注册 agents.ds 角色
+  disable-deepseek  移除 agents.ds 角色并关闭 multi_agent_v2
+  status            查看当前状态`,
+  "agents.enable-deepseek": `用法：codexc agents enable-deepseek
+
+启用 multi_agent_v2 并在 ~/.codex/config.toml 注册 agents.ds 角色；
+角色配置文件指向 codexc 服务启动时生成的 DeepSeek 子代理配置。`,
+  "agents.disable-deepseek": `用法：codexc agents disable-deepseek
+
+移除 agents.ds 角色并关闭 multi_agent_v2。`,
+  "agents.status": `用法：codexc agents status
+
+查看 multi_agent_v2 与 agents.ds 角色配置状态。`,
   "rules.init": `用法：codexc rules init [--force]
 
 为当前项目生成安全命令预设；已有文件默认不覆盖。`,
@@ -173,7 +194,41 @@ Telegram 消息格式与配置路径查看。
   codexc metrics export [--range 24h|7d|30d] [--format json|csv|markdown] [--thread Thread ID]   请求明细导出
   codexc metrics status   指标数据库状态
   codexc metrics upgrade  备份并升级指标库（需 Gateway 停止）
-  codexc metrics reset    备份并重建指标库（需 Gateway 停止）`,
+  codexc metrics reset    备份并重建指标库（需 Gateway 停止）
+  codexc metrics sync-reset   备份并清零多端上报水位，重放修复中心历史
+  codexc metrics prune <provider>   备份并清理指定提供商请求指标（自动重启 Gateway 与中心）`,
+  channel: `用法：codexc channel <send-image>
+
+渠道能力：由 Gateway 使用渠道机器人凭据发送图片等媒体。`,
+  "channel.send_image": `用法：codexc channel send-image <图片路径> [--thread <Thread ID>]
+
+把本地 PNG/JPEG 图片（最大 10 MiB）交给 Gateway，发送回该 Thread 绑定的
+飞书/微信/Telegram 会话。不指定 --thread 且存在多个绑定时会拒绝并提示指定。
+图片会被复制到 ~/.codex-connect/data/channel-outbox/pending/，由网关轮询发送；
+成功后归档到 done/，失败归档到 failed/ 并保留原因。`,
+  webui: `用法：codexc webui [--host 地址] [--port 端口] [--token 令牌]
+
+启动本地只读指标 WebUI（默认 http://127.0.0.1:8787/）。
+参数优先级：命令行 > config.toml 的 [webui] 段 > 默认值。
+--host 指定监听地址（127.0.0.1、::1 或 0.0.0.0），默认回环；
+--port 指定监听端口，范围 1-65535；
+--token 设置访问令牌，绑定非回环地址（0.0.0.0）时必须提供。
+也可以使用 codexc config 的 WebUI 设置，或手工编辑 [webui] 段。
+页面与 JSON API 均来自指标数据库，不提供任何写接口。`,
+  center: `用法：codexc center [--host 地址] [--port 端口] [--token 查看令牌] [--device-token 上报令牌] [--database 路径]
+      codexc center info      查看中心地址、双令牌状态与运行状态
+      codexc center config    交互配置 [metrics.center]
+
+启动多设备指标中心服务：接收各设备 Gateway 的增量上报，写入中心 SQLite，
+并提供全局查询 API。默认 http://127.0.0.1:8790/。
+参数优先级：命令行 > config.toml 的 [metrics.center] 段 > 默认值。
+--host 指定监听地址（127.0.0.1、::1 或 0.0.0.0），默认回环；
+--port 指定监听端口，范围 1-65535，默认 8790；
+--token 设置只读查询令牌；
+--device-token 设置设备上报令牌；绑定非回环地址（0.0.0.0）时两者必须提供且不同；
+--database 指定中心 SQLite 路径，默认 <配置目录>/data/central-metrics.sqlite3。
+上报接口：POST /api/ingest（Bearer 上报令牌）；查询接口使用 Bearer 查看令牌：/api/overview、/api/requests、
+/api/subagents、/api/devices、/api/health。`,
   "metrics.status": `用法：codexc metrics status
 
 只读显示指标数据库路径、Schema 兼容性和记录数量。`,
@@ -194,6 +249,17 @@ Telegram 消息格式与配置路径查看。
   "metrics.upgrade": `用法：codexc metrics upgrade [--restart-gateway]
 
 默认要求 Gateway 已停止；加 --restart-gateway 时自动停止 Gateway、备份升级并重新启动。`,
+  "metrics.sync_reset": `用法：codexc metrics sync-reset [--restart-gateway]
+
+默认要求 Gateway 已停止；备份 ~/.codex-connect/data/metrics-sync-state.json 后清零
+上报水位（保留设备 ID），重启 Gateway 后从第一条记录重新上报；中心按
+(device_id, local_id) 覆盖写入，可修复云端历史数据。加 --restart-gateway 时自动
+停止并重新启动 Gateway。`,
+  "metrics.prune": `用法：codexc metrics prune <provider>
+
+provider 当前支持 openai、deepseek。备份并删除本地与中心库中该提供商全部请求行，随后
+自动重启 Gateway 与中心服务（即使任一步骤失败也会尝试把服务拉起来）。OpenAI 额度重置
+后可用 openai 从零重新统计用量；备份保留在指标库同目录的 *.<provider>-prune-*.bak。`,
   "metrics.report": `用法：codexc metrics report [--range <24h|7d|30d>] [--group <global|providers|models>] [--format markdown|json|csv]
 
 只读输出汇报；默认最近 30 天并按模型分组，写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。`,
@@ -292,11 +358,29 @@ try {
     case "rules":
       projectRules(args);
       break;
+    case "agents":
+      agents(args);
+      break;
     case "state":
       state(args);
       break;
     case "metrics":
       await metrics(args);
+      break;
+    case "channel":
+      await channel(args);
+      break;
+    case "webui":
+      if (showRequestedHelp(args, "webui")) {
+        break;
+      }
+      runScript("scripts/webui-server.mjs", args);
+      break;
+    case "center":
+      if (showRequestedHelp(args, "center")) {
+        break;
+      }
+      runScript("scripts/metrics-center-server.mjs", args);
       break;
     default:
       throw new Error(`未知命令：${command}\n运行 codexc --help 查看用法`);
@@ -472,6 +556,15 @@ async function runServiceAppServer(args) {
         managedProvider.provider,
         proxyOptionsForUrl(deepseekUrl),
       );
+      try {
+        writeManagedModelProviderRoleConfig(runtime.environment, {
+          baseUrl: localBaseUrl,
+        });
+      } catch (error) {
+        console.error(
+          `DeepSeek 子代理角色配置生成失败：${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       managedArguments = withProviderBaseUrl(
         managedProvider.arguments,
         managedProvider.provider,
@@ -490,7 +583,10 @@ async function runServiceAppServer(args) {
     `unix://${socketPath}`,
   ], {
     stdio: "inherit",
-    env: runtime.environment,
+    env: {
+      ...runtime.environment,
+      ...(managedProvider ? managedProvider.childEnvironment : {}),
+    },
     cwd: defaultWorkspace.cwd,
   })];
   if (managedProvider && managedArguments) {
@@ -509,6 +605,7 @@ async function runServiceAppServer(args) {
     }));
   }
   forwardChildrenLifecycle(children, async () => {
+    removeManagedModelProviderRoleConfig(runtime.environment);
     await Promise.all(providerProxies.map((proxy) => proxy.close()));
     for (const agent of upstreamAgents) agent.destroy();
   });
@@ -1015,6 +1112,18 @@ function projectRules(args) {
   console.log("重启 Codex 后生效；项目必须处于受信任状态。");
 }
 
+function agents(args) {
+  if (showRequestedHelp(args, "agents")) {
+    return;
+  }
+  if (showSubcommandHelp(args, "status", "agents.status") ||
+    showSubcommandHelp(args, "enable-deepseek", "agents.enable-deepseek") ||
+    showSubcommandHelp(args, "disable-deepseek", "agents.disable-deepseek")) {
+    return;
+  }
+  runScript("scripts/agents.mjs", args);
+}
+
 function runSetup() {
   initializeUserData({ cwd: process.cwd() });
   runScript("scripts/setup.mjs", []);
@@ -1054,6 +1163,8 @@ async function metrics(args) {
     showSubcommandHelp(args, "status", "metrics.status") ||
     showSubcommandHelp(args, "upgrade", "metrics.upgrade") ||
     showSubcommandHelp(args, "reset", "metrics.reset") ||
+    showSubcommandHelp(args, "sync-reset", "metrics.sync_reset") ||
+    showSubcommandHelp(args, "prune", "metrics.prune") ||
     showSubcommandHelp(args, "report", "metrics.report") ||
     showSubcommandHelp(args, "export", "metrics.export")) {
     return;
@@ -1068,10 +1179,10 @@ async function metrics(args) {
     return;
   }
   if (
-    !new Set(["run", "turns", "threads", "status", "upgrade", "reset", "report", "export"])
+    !new Set(["run", "turns", "threads", "status", "upgrade", "reset", "sync-reset", "prune", "report", "export"])
       .has(subcommand)
   ) {
-    throw new Error("用法：codexc metrics <run|turns|threads|status|upgrade|reset|report|export>");
+    throw new Error("用法：codexc metrics <run|turns|threads|status|upgrade|reset|sync-reset|prune|report|export>");
   }
   if (subcommand === "status" && rest.length === 0) {
     run(
@@ -1086,7 +1197,14 @@ async function metrics(args) {
     runScript("scripts/metrics-database.mjs", ["upgrade-restart"]);
     return;
   }
-  if (new Set(["upgrade", "reset"]).has(subcommand) && rest.length > 0) {
+  if (subcommand === "sync-reset" && rest.length === 1 && rest[0] === "--restart-gateway") {
+    runScript("scripts/metrics-database.mjs", ["sync-reset-restart"]);
+    return;
+  }
+  if (subcommand === "prune" && rest.length !== 1) {
+    throw new Error("用法：codexc metrics prune <openai|deepseek>");
+  }
+  if (new Set(["upgrade", "reset", "sync-reset"]).has(subcommand) && rest.length > 0) {
     throw new Error(`用法：codexc metrics ${subcommand}`);
   }
   if (new Set(["run", "turns", "threads", "report", "export"]).has(subcommand)) {
@@ -1094,6 +1212,20 @@ async function metrics(args) {
     return;
   }
   runScript("scripts/metrics-database.mjs", [subcommand, ...rest]);
+}
+
+async function channel(args) {
+  if (
+    showRequestedHelp(args, "channel")
+    || showSubcommandHelp(args, "send-image", "channel.send_image")
+  ) {
+    return;
+  }
+  const [subcommand, ...rest] = args;
+  if (subcommand !== "send-image") {
+    throw new Error("用法：codexc channel <send-image>");
+  }
+  runScript("scripts/channel-send-image.mjs", rest);
 }
 
 function runMetricsCommand(args) {
@@ -1577,8 +1709,8 @@ function parseServiceArguments(action, args) {
 }
 
 function parseServiceTarget(value) {
-  if (!["gateway", "app-server", "all"].includes(value)) {
-    throw new Error(`服务目标必须是 gateway、app-server 或 all：${value}`);
+  if (!["gateway", "app-server", "webui", "center", "all"].includes(value)) {
+    throw new Error(`服务目标必须是 gateway、app-server、webui、center 或 all：${value}`);
   }
   return value;
 }

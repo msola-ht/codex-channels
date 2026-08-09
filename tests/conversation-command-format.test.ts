@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  conversationCommandHelpLines,
+  formatConversationAgents,
   formatConversationCommandOutcome,
   formatConversationLimits,
   formatConversationMetrics,
@@ -38,6 +40,41 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("- 沙箱：完全访问");
     expect(rendered).toContain("- 审批：免审批");
     expect(rendered).toContain("- 权限 Profile：:read-only");
+  });
+
+  it("renders agent roles with numbers and usage", () => {
+    const rendered = formatConversationAgents({
+      kind: "agents",
+      roles: [
+        { name: "default", description: "默认角色，继承当前模型与配置" },
+        { name: "ds", description: "DeepSeek 子代理" },
+      ],
+    });
+
+    expect(rendered).toContain("## 子代理角色（2）");
+    expect(rendered).toContain("1. default：默认角色，继承当前模型与配置");
+    expect(rendered).toContain("2. ds：DeepSeek 子代理");
+    expect(rendered).toContain("- 使用：/agents <角色名称或序号> <任务>");
+  });
+
+  it("renders agent invocation outcomes", () => {
+    expect(formatConversationCommandOutcome({
+      type: "agents.started",
+      roleName: "ds",
+      turnId: "turn-1",
+      steered: false,
+    })).toContain("已使用子代理开始任务");
+    expect(formatConversationCommandOutcome({
+      type: "agents.started",
+      roleName: "ds",
+      turnId: "turn-1",
+      steered: true,
+    })).toContain("已把子代理任务追加到当前任务");
+  });
+
+  it("documents /agents in the shared help output", () => {
+    expect(conversationCommandHelpLines.join("\n"))
+      .toContain("/agents [角色名称或序号 任务]");
   });
 
   it("shows workspace permission usage and current values", () => {
@@ -325,27 +362,92 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("模型请求聚合耗时：1分5秒");
     expect(rendered).toContain("模型请求累计耗时：2分22秒");
     expect(rendered).toContain("缓存命中率：80.00%");
+    expect(rendered).toContain("其中推理输出：300");
+    expect(rendered).toContain("其中推理输出：1.8 K");
+    expect(rendered).toContain("其中推理输出：55");
     expect(rendered).toContain("### 最近运行聚合");
     expect(rendered).toContain("**Token**：30.9 K");
     expect(rendered).toContain("  - 输入命中缓存：24 K");
     expect(rendered).toContain("**Token**：184.2 K");
-    expect(rendered).toContain("**费用**：$0.001235（已计价 2/3 次请求）");
+    expect(rendered).toContain("**费用**：$0.001235（计价 2/3）");
     expect(rendered).toContain("  - 输入价格：$0.000400");
     expect(rendered).toContain("综合输出速度：60 token/s（不含推理 · 覆盖 2/3 次请求）");
-    expect(rendered).toContain("远程压缩：1 次 · gpt-5.6-sol · 10.5 K Token · $0.142102");
-    expect(rendered).toContain("**费用**：$0.001235（已计价 2/3 次请求）");
+    expect(rendered).toContain("上下文压缩：1 次 · gpt-5.6-sol · 10.5 K Token · $0.142102");
+    expect(rendered).toContain("**费用**：$0.001235（计价 2/3）");
     expect(rendered).toContain("输入价格：$0.000400");
     expect(rendered).toContain("缓存价格：$0.000200");
     expect(rendered).toContain("输出价格：$0.000635");
     expect(rendered).toContain("### 当前会话指标累计");
     expect(rendered).toContain("Turn：8 次");
-    expect(rendered).toContain("远程压缩：2 次 · gpt-5.6-sol · 21 K Token · $0.284204");
+    expect(rendered).toContain("上下文压缩：2 次 · gpt-5.6-sol · 21 K Token · $0.284204");
     expect(rendered).toContain("综合输出速度：58 token/s（不含推理 · 覆盖 20/21 次请求）");
     expect(rendered).toContain("### 最近直接 API");
     expect(rendered).toContain("API 提供商：BLTCY");
     expect(rendered).toContain("调用模型：gpt-5.6-luna");
     expect(rendered).toContain("状态：已完成 · HTTP 200");
-    expect(rendered).toContain("**费用**：$0.000988（已计价 1/1 次请求）");
+    expect(rendered).toContain("**费用**：$0.000988");
+  });
+
+  it("shows reasoning token details for OpenAI official metrics", () => {
+    const rendered = formatConversationMetrics({
+      kind: "metrics",
+      summary: {
+        threadId: "thread-openai",
+        modelProvider: "openai",
+        latestTurn: {
+          turnId: "turn-1",
+          requestCount: 3,
+          unsuccessfulRequestCount: 1,
+          requestDurationMs: 65_000,
+          inputTokens: 30_000,
+          cachedInputTokens: 24_000,
+          outputTokens: 900,
+          reasoningOutputTokens: 300,
+          outputTokensPerSecond: 60.25,
+          outputSpeedSampleCount: 3,
+          outputSpeedTimedCount: 2,
+          pricingCurrency: "USD",
+          pricedRequestCount: 2,
+          totalCostNanos: 1_234_567,
+          inputCostNanos: 400_000,
+          cachedInputCostNanos: 200_000,
+          outputCostNanos: 634_567,
+          uncachedInputPricePerMillionNanos: 140_000_000,
+          cachedInputPricePerMillionNanos: 2_800_000,
+          outputPricePerMillionNanos: 280_000_000,
+          hasMixedPrices: false,
+          compact: null,
+        },
+        threadAggregate: {
+          turnCount: 8,
+          requestCount: 21,
+          unsuccessfulRequestCount: 2,
+          requestDurationMs: 142_000,
+          inputTokens: 180_000,
+          cachedInputTokens: 174_000,
+          outputTokens: 4_200,
+          reasoningOutputTokens: 1_800,
+          outputTokensPerSecond: 58,
+          outputSpeedSampleCount: 21,
+          outputSpeedTimedCount: 20,
+          pricingCurrency: "USD",
+          pricedRequestCount: 20,
+          totalCostNanos: 12_345_678,
+          inputCostNanos: 4_000_000,
+          cachedInputCostNanos: 2_000_000,
+          outputCostNanos: 6_345_678,
+          uncachedInputPricePerMillionNanos: 140_000_000,
+          cachedInputPricePerMillionNanos: 2_800_000,
+          outputPricePerMillionNanos: 280_000_000,
+          hasMixedPrices: false,
+          compact: null,
+        },
+        latestDirectApi: null,
+      },
+    });
+
+    expect(rendered).toContain("其中推理输出：300");
+    expect(rendered).toContain("其中推理输出：1.8 K");
   });
 
   it("switches currency amounts to the 亿 unit at large values", () => {
@@ -395,7 +497,7 @@ describe("provider-aware conversation command formatting", () => {
 
     expect(rendered).toContain("- 汇率：1 USD ≈ 7.2000 CNY");
     expect(rendered).toContain("  - 来源：open-er-api");
-    expect(rendered).toContain("- **费用**：¥7.200000（已计价 1/1 次请求）");
+    expect(rendered).toContain("- **费用**：¥7.200000");
     expect(rendered).toContain("输入价格：¥4.320000");
     expect(rendered).toContain("缓存价格：¥0.720000");
     expect(rendered).toContain("输出价格：¥2.160000");
@@ -442,11 +544,11 @@ describe("provider-aware conversation command formatting", () => {
     });
 
     expect(rendered).toContain(
-      "实际均价：约 ¥3,600,000.00/100M（已计价 2/3 次请求）",
+      "均价：约 ¥3,600,000.00/100M（计价 2/3）",
     );
   });
 
-  it("omits the average price for non-DeepSeek providers", () => {
+  it("shows the average price for OpenAI providers", () => {
     const rendered = formatConversationMetrics({
       kind: "metrics",
       summary: {
@@ -484,7 +586,7 @@ describe("provider-aware conversation command formatting", () => {
       source: "open-er-api",
     });
 
-    expect(rendered).not.toContain("实际均价");
+    expect(rendered).toContain("均价：约 $500,000.00/100M");
   });
 
   it("renders unified provider and model aggregates with latency coverage", () => {
@@ -554,11 +656,11 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("P50 800毫秒 · P95 3秒（覆盖 9/12 次请求）");
     expect(rendered).toContain("OpenAI 官方 / gpt-5.6-sol");
     expect(rendered).toContain("第三方中转 / gpt-5.6-luna");
-    expect(rendered).toContain("**费用**：$0.123457（已计价 10/12 次请求）");
+    expect(rendered).toContain("**费用**：$0.123457（计价 10/12）");
     expect(rendered).toContain("输入价格：$0.040000");
     expect(rendered).toContain("缓存价格：$0.020000");
     expect(rendered).toContain("输出价格：$0.063457");
-    expect(rendered).toContain("远程压缩：2 次 · gpt-5.6-sol · 21 K Token · $0.284204");
+    expect(rendered).toContain("上下文压缩：2 次 · gpt-5.6-sol · 21 K Token · $0.284204");
   });
 
   it("does not invent one unit price when an aggregate spans multiple rates", () => {
@@ -601,7 +703,7 @@ describe("provider-aware conversation command formatting", () => {
       },
     });
 
-    expect(rendered).toContain("**费用**：$0.000500（已计价 2/2 次请求）");
+    expect(rendered).toContain("**费用**：$0.000500");
     expect(rendered).not.toContain("输入价格：");
   });
 
@@ -621,6 +723,7 @@ describe("provider-aware conversation command formatting", () => {
           status: "failed",
           httpStatus: null,
           errorType: "websocket_closed",
+          lastErrorMessage: null,
           requestCount: 2,
           lastOccurredAtMs: 1_785_640_800_000,
         }, {
@@ -630,6 +733,7 @@ describe("provider-aware conversation command formatting", () => {
           status: "incomplete",
           httpStatus: 429,
           errorType: "rate_limit_error",
+          lastErrorMessage: null,
           requestCount: 1,
           lastOccurredAtMs: 1_785_640_700_000,
         }],
@@ -662,6 +766,7 @@ describe("provider-aware conversation command formatting", () => {
           status: "failed",
           httpStatus: 500,
           errorType: "upstream_error\n**伪造字段**",
+          lastErrorMessage: null,
           requestCount: 1,
           lastOccurredAtMs: 1_785_640_800_000,
         }],

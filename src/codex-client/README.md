@@ -69,6 +69,10 @@
 的生成类型。
 Notification 适配只返回当前支持的稳定事件；未知或畸形通知由组合根记录 method 后忽略，不记录
 原始 params，也不阻塞 App Server Reader。
+`subAgentActivity` Item 只在官方完成阶段进入稳定事件，并保留 `started`、`interacted`、
+`interrupted` 类型，避免同一 Item 的开始与完成阶段重复发布；`collabAgentToolCall` Item 由操作适配器
+保留官方接收线程 ID 和有界状态，不保留代理消息正文。Bootstrap 结合已订阅子线程自己的
+`turn/completed`、中断活动和旧版工具状态判断子代理终态，Surface 只消费稳定操作与完成事件。
 Server Request 适配只把已校验的稳定请求交给 Approval；Approval 不接触生成协议或 RPC 信封，
 响应类型与请求不一致时失败关闭。
 当前精确协议基线要求 initialize 协商实验 API，App Server 才会发送已生成并受控导出的

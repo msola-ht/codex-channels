@@ -115,6 +115,38 @@ describe("Feishu outbox", () => {
     }]);
   });
 
+  it("sends the subagent start notice as a Markdown card instead of plain text", async () => {
+    const markdownCards: string[] = [];
+    const texts: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async (_chatId, text) => {
+          texts.push(text);
+        },
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle({
+      type: "subagent.spawned",
+      target,
+      threadId: "parent-thread",
+      turnId: "parent-turn",
+      agentThreadId: "agent-thread-secret",
+      agentPath: "/root/review_task",
+    });
+    await outbox.close();
+
+    expect(texts).toEqual([]);
+    expect(markdownCards).toEqual(["## 子代理开始 · review_task"]);
+  });
+
   it("renders runtime status updates as Markdown cards", async () => {
     const markdownCards: string[] = [];
     const texts: string[] = [];
@@ -213,6 +245,37 @@ describe("Feishu outbox", () => {
         imagePath: "/private/generated/image.png",
       },
     });
+    await outbox.close();
+
+    expect(sentImages).toEqual([{
+      chatId: "oc_chat",
+      image,
+    }]);
+  });
+
+  it("sends a channel image through the ordered delivery queue", async () => {
+    const sentImages: Array<{ chatId: string; image: Buffer }> = [];
+    const image = Buffer.from("validated-image");
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendImage: async (chatId, value) => {
+          sentImages.push({ chatId, image: value });
+        },
+      },
+      pino({ level: "silent" }),
+      {
+        readGeneratedImage: vi.fn(async () => ({
+          bytes: image,
+          format: "png" as const,
+        })),
+      },
+    );
+
+    await outbox.sendChannelImage("oc_chat", "/private/generated/image.png");
     await outbox.close();
 
     expect(sentImages).toEqual([{
@@ -1276,6 +1339,50 @@ describe("Feishu outbox", () => {
     expect(markdownCards).toEqual([
       "**运行命令 · 已完成** · exit 0 · `git status --short`\n\n"
       + "---\n"
+      + "**耗时：** 125毫秒",
+    ]);
+  });
+
+  it("hides successful wait calls but keeps subagent failures in compact mode", async () => {
+    const markdownCards: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+      },
+      pino({ level: "silent" }),
+      { operationUpdateDisplay: "compact" },
+    );
+
+    outbox.handle({
+      ...operationUpdated("completed", "subagent", "wait-1"),
+      operation: {
+        itemId: "wait-1",
+        kind: "subagent",
+        action: "wait",
+        status: "completed",
+        durationMs: 125,
+      },
+    });
+    outbox.handle({
+      ...operationUpdated("completed", "subagent", "wait-2"),
+      operation: {
+        itemId: "wait-2",
+        kind: "subagent",
+        action: "wait",
+        status: "failed",
+        durationMs: 125,
+      },
+    });
+    await outbox.close();
+
+    expect(markdownCards).toEqual([
+      "**等待子代理 · 失败**\n\n---\n"
       + "**耗时：** 125毫秒",
     ]);
   });

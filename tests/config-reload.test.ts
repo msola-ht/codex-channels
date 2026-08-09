@@ -114,10 +114,36 @@ describe("Gateway config reload", () => {
     ["display.operation-updates", "global", { operationUpdateDisplay: "compact" }],
     ["display.plan-updates", "global", { planUpdatesEnabled: true }],
     ["codex.default-model", "global", { codexModel: "other-model" }],
+    ["metrics.sync", "global", {
+      metricsSync: {
+        enabled: true,
+        endpoint: "https://worker.example.com/ingest",
+        deviceToken: "token",
+        batchSize: 200,
+        intervalSeconds: 60,
+      },
+    }],
   ] as const)("restarts for %s changes", (code, scope, change) => {
     expect(classifyConfigReload(config(), config(change))).toEqual({
       action: "restart",
       changes: [{ code, scope }],
+    });
+  });
+
+  it("restarts when Telegram is enabled or disabled", () => {
+    const disabled = config({
+      telegramEnabled: false,
+      telegramBotToken: "",
+      telegramAllowedUserIds: new Set(),
+    });
+
+    expect(classifyConfigReload(disabled, config())).toEqual({
+      action: "restart",
+      changes: [{ code: "surface.telegram.enabled", scope: "telegram" }],
+    });
+    expect(classifyConfigReload(config(), disabled)).toEqual({
+      action: "restart",
+      changes: [{ code: "surface.telegram.enabled", scope: "telegram" }],
     });
   });
 
@@ -420,6 +446,7 @@ describe("Gateway config reload", () => {
 
 function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
   return {
+    telegramEnabled: true,
     telegramBotToken: "token",
     telegramAllowedUserIds: new Set([123]),
     telegramMessageFormat: "html",
@@ -431,8 +458,7 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     codexSandbox: "workspace-write",
     operationUpdateDisplay: "full",
     planUpdatesEnabled: false,
-    priceCurrency: "auto",
-    priceCurrencyByProvider: {},
+    priceCurrency: "cny",
     apiProviders: [],
     vision: { mode: "disabled" },
     credentialsDirectory: "/tmp/credentials",

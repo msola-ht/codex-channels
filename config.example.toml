@@ -2,6 +2,7 @@ version = 1
 default_workspace = "main"
 
 [telegram]
+# 不使用 Telegram 时可删除本表，或将 bot_token 留空并把 allowed_user_ids 设为空数组。
 bot_token = "你的_Bot_Token"
 allowed_user_ids = [123456789]
 message_format = "html"
@@ -41,13 +42,9 @@ timeout_seconds = 300
 operation_updates = "compact"
 # 是否在渠道显示 App Server 的自动任务计划更新。
 plan_updates = true
-# 模型价格显示币种：auto 跟随提供商（DeepSeek 官方人民币、OpenAI 官方美元），也可统一为
-# cny 或 usd；需要人民币时才请求汇率。
-price_currency = "auto"
-# 按提供商覆盖示例：
-# [display.price_currency_by_provider]
-# deepseek = "cny"
-# openai = "usd"
+# 模型价格显示币种：全局统一为 cny（人民币）或 usd（美元）；
+# 选择 cny 时 Gateway 会刷新并持久化汇率，拉取失败时继续使用最后一次缓存。
+price_currency = "cny"
 
 # 直接 API 提供商（图片识别等第三方 Responses 中转）：
 # [[api_providers]]
@@ -69,6 +66,42 @@ database_path = "data/gateway.sqlite3"
 
 [logging]
 level = "info"
+
+[webui]
+# codexc webui 的监听地址与访问令牌；不配置时默认 127.0.0.1:8787。
+# host 只允许 127.0.0.1、::1（仅本机）或 0.0.0.0（所有网卡）；
+# 绑定 0.0.0.0 时 token 必填，CLI 参数（--host/--port/--token）优先于本段。
+# host = "127.0.0.1"
+# port = 8787
+# token = "你的_WebUI_访问令牌"
+
+[metrics.sync]
+# 多设备指标汇总：启用后本机把脱敏用量/费用增量上报到中心端点。
+# 启用时必须配置 endpoint 和 device_token；endpoint 使用 HTTPS，
+# 或指向回环/私网地址的 HTTP（公网地址必须 HTTPS）。
+# enabled = false
+# endpoint = "https://中心服务器/api/ingest"
+# device_token = "设备上报令牌"
+# device_id = "本设备标识（留空则首次启动自动生成）"
+# batch_size = 200
+# interval_seconds = 60
+
+[metrics.center]
+# 中心接收服务（只在汇总的 VPS 上启用）：接收设备上报并写入中心 SQLite。
+# 绑定非回环地址（0.0.0.0）时必须设置两类不同令牌。
+# enabled = false
+# host = "127.0.0.1"
+# port = 8790
+# token = "中心只读查看令牌"
+# device_token = "设备上报令牌（必须与 token 不同）"
+# database_path = "data/central-metrics.sqlite3"
+
+[metrics.view]
+# WebUI 控制台的设备范围：本机不运行中心服务时，也用它连接中心查看全部设备累计。
+# 启用时必须配置 endpoint 和 token；endpoint 使用 HTTPS，或指向回环/私网地址的 HTTP。
+# enabled = false
+# endpoint = "http://127.0.0.1:8790"
+# token = "中心只读查看令牌"
 
 [[workspaces]]
 id = "main"

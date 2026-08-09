@@ -24,6 +24,7 @@ const sourceEntries = new Set([
   "systemd",
   "tsconfig.build.json",
   "tsconfig.json",
+  "webui",
 ]);
 
 try {
@@ -32,12 +33,18 @@ try {
     filter: (source) => {
       const relative = source.slice(packageDir.length + 1);
       const [topLevel] = relative.split("/");
-      return relative === "" || sourceEntries.has(topLevel);
+      if (relative === "") return true;
+      if (topLevel === "webui") {
+        return !["node_modules", "dist"].includes(relative.split("/")[1]);
+      }
+      return sourceEntries.has(topLevel);
     },
   });
   for (const path of [
     "dist",
     "node_modules",
+    join("webui", "dist"),
+    join("webui", "node_modules"),
   ]) {
     if (existsSync(join(sourceDirectory, path))) {
       throw new Error(`干净源码副本不应包含 ${path}`);
@@ -66,6 +73,9 @@ try {
   }
   if (!existsSync(join(sourceDirectory, "dist", "main.js"))) {
     throw new Error("干净源码全局安装后缺少 dist/main.js");
+  }
+  if (!existsSync(join(sourceDirectory, "webui", "dist", "index.html"))) {
+    throw new Error("干净源码全局安装后缺少 webui/dist/index.html");
   }
   const command = join(temporaryDirectory, "global", "bin", "codexc");
   if (!existsSync(command)) {

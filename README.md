@@ -61,11 +61,16 @@ sudo loginctl enable-linger "$USER"
 
 ## 配置通讯渠道
 
-运行 `codexc setup`，按菜单配置模型渠道、通讯渠道和系统设置。Gateway 与通讯渠道配置保存在：
+运行 `codexc setup`，按菜单配置模型渠道、通讯渠道、系统设置和技能安装（把项目技能安装到
+`~/.agents/skills` 供当前 Codex 环境加载）。Gateway 与通讯渠道配置保存在：
 
 ```text
 ~/.codex-connect/config.toml
 ```
+
+Telegram、飞书和微信至少配置并启用一个即可启动 Gateway。Telegram 以非空 `bot_token` 表示启用；
+Token 缺失或留空时不创建 Telegram 连接，也不要求 `allowed_user_ids`。填入 Token 后必须同时配置
+至少一个允许用户，避免 Bot 在没有授权边界时启动。
 
 渠道准备事项：
 
@@ -87,23 +92,34 @@ codexc service reload
 [display]
 operation_updates = "compact"
 plan_updates = true
-price_currency = "auto"
+price_currency = "cny"
 ```
 
-- `operation_updates`：`full` 显示完整操作详情，`compact` 显示摘要，`hidden` 隐藏操作过程。
+- `operation_updates`：`full` 显示完整操作详情，`compact` 显示摘要，并只保留子代理启动与失败、
+  隐藏成功的等待和交互操作，`hidden` 隐藏操作过程。
 - `plan_updates`：是否显示 Codex 计划，默认开启。
-- `price_currency`：模型价格显示币种（`auto` / `cny` / `usd`，默认 `auto`）。`auto` 时 DeepSeek
-  官方提供商按人民币显示、OpenAI 官方按美元显示，第三方直接 API 按美元显示；`cny` 或 `usd`
-  统一强制对应币种。同一位置只显示一种币种，不再同时显示 USD 与折合人民币。可按提供商覆盖：
-  `[display.price_currency_by_provider]` 下写 `deepseek = "cny"` 等。需要人民币时才会获取
-  USD/CNY 汇率（每 6 小时刷新，优先 `open.er-api.com`，失败回退 ECB，离线沿用缓存；汇率不可用
-  时回退显示 USD）。换算按最近一次汇率近似，不按历史汇率回算。
+- `price_currency`：模型价格显示币种，全局统一为 `cny`（人民币）或 `usd`（美元），默认 `cny`，
+  不再按提供商混合显示。选择 `cny` 时获取并持久化 USD/CNY 汇率（每 6 小时刷新，优先
+  `open.er-api.com`，失败回退 ECB；拉取失败时继续使用最后一次成功缓存，缓存也不可用时才回退
+  显示 USD）。换算按最近一次汇率近似，不按历史汇率回算。
+
+### 多设备指标同步
+
+每台设备可把本地脱敏指标增量上报到中心汇总。运行 `codexc config` 选择
+「多设备指标 → 本机接入中心」即可配置上报与 WebUI 全局视图（写入 `[metrics.sync]` 和
+`[metrics.view]`）；Gateway 定时按水位上报请求记录和子代理标注，失败自动退避重试。
+VPS 上用 `codexc center config` 配置 `[metrics.center]` 的独立设备上报令牌与只读查看令牌、
+`codexc center info` 查看中心地址，再运行 `codexc center` 校验令牌并写入中心 SQLite；每台设备的 WebUI 控制台
+通过 `[metrics.view]` 按设备范围查看累计用量。详细配置与载荷见
+[`docs/metrics-sync.md`](docs/metrics-sync.md)。
 
 ### 调试模式
 
 在 `codexc setup` 中选择“系统设置 → 调试模式”可全局开启或关闭脱敏调试信息。开启后会把
 `[logging].level` 设为 `debug`，在渠道中展示 `/vision` 接收延迟、启动通知的“运行环境”、
-完成通知的“最后请求首事件延迟”和视觉“视觉 API 耗时”等技术字段；关闭后恢复为 `info`。
+Turn 与视觉完成通知的 Token 子项、Turn 完成通知的费用子项与货币换算对照、
+“模型请求聚合耗时”、“最后请求首事件延迟”和视觉“视觉 API 耗时”等技术字段；关闭后恢复为
+`info`，完成通知仍保留 Token 与费用总计。
 修改后只需重启 Gateway：
 
 ```bash
@@ -114,10 +130,10 @@ codexc service restart gateway
 审批内容。完整展示口径见 [`docs/display.md`](docs/display.md)。
 
 每次 Turn 完成后按“本次运行”“当前会话累计”和可选的“账户状态”分开展示请求次数、Token、
-缓存命中、速度、思考次数与参考总价；`/metrics` 可查看当前 Thread 最近运行聚合以及
+缓存命中、速度、思考次数与总价；`/metrics` 可查看当前 Thread 最近运行聚合以及
 `global|providers|models|errors` 的时间范围汇总。展示与统计口径见
 [`docs/display.md`](docs/display.md)。
-统计代理识别到的远程压缩仍计入这些总计，并另外显示压缩次数、实际请求模型、Token 与参考费用，
+统计代理识别到的上下文压缩仍计入这些总计，并另外显示压缩次数、实际请求模型、Token 与参考费用，
 方便区分普通回复和压缩开销。
 
 OpenAI `/limits` 会在存在完整周窗口且统计代理观测到相邻额度增长时，按增长区间内的请求
@@ -148,6 +164,19 @@ codexc service restart all
 
 当前仅 `deepseek-v4-flash` 可用且只支持文字输入；未启用外部图片识别时，图片会在创建 Turn 前被
 拒绝，此时应先切换到支持图片的模型。配置文件、跨提供商切换行为、TUI 使用方式和账户指标说明见
+[`DeepSeek 使用说明`](docs/deepseek.md)。
+
+切换模式还可以把 DeepSeek 注册为 Codex 子代理角色，让 multi_agent_v2 子代理请求自动计入
+模型指标与费用统计：
+
+```bash
+codexc agents enable-deepseek    # 开启 multi_agent_v2 并注册单次 agents.ds 角色
+codexc agents status             # 查看当前状态
+codexc agents disable-deepseek   # 移除角色并关闭 multi_agent_v2
+```
+
+DS 角色仅处理当前用户消息中的单次完整任务，调用使用 `fork_turns=1`，不支持补发或并行拆分。
+角色文件由 App Server 服务启动时生成、退出时清理，不写 API Key；详见
 [`DeepSeek 使用说明`](docs/deepseek.md)。
 
 需要让不支持图片的模型处理图片时，先在 `codexc setup` 的“模型渠道 → 第三方 API”中添加一个
@@ -188,6 +217,31 @@ codexc remote --profile deepseek resume
 `codexc remote` 连接 Gateway 使用的 App Server。直接运行 `codex` 或 `codex --profile deepseek`
 会启动独立 TUI，不共享 Gateway Thread。
 
+### 查看指标 WebUI
+
+```bash
+codexc webui                          # 启动本地只读指标 WebUI（默认 http://127.0.0.1:8787/）
+codexc webui --port 8788              # 指定端口
+codexc webui --host 0.0.0.0 --token 令牌  # 绑定非回环地址（必须提供访问令牌）
+```
+
+WebUI 只读指标数据库，提供控制台（本机与多设备用量合并查看）、Threads、请求明细与
+错误页面；默认只监听回环地址，
+绑定非回环地址（`0.0.0.0`）时必须提供 `--token`，否则拒绝启动。监听地址、端口与令牌
+也可通过 `codexc config` 的「WebUI 设置」或 `config.toml` 的 `[webui]` 段配置，
+命令行参数优先。SSH 隧道、反向代理与 Cloudflare Tunnel 走回环地址可保持无令牌。
+详细说明见 [`docs/webui.md`](docs/webui.md)。
+
+### 发送图片到渠道
+
+```bash
+codexc channel send-image /tmp/截图.png                   # 自动选择唯一绑定会话
+codexc channel send-image /tmp/截图.png --thread <Thread ID>  # 指定会话
+```
+
+把本地 PNG/JPEG 图片交给 Gateway，由当前飞书/微信/Telegram 会话的机器人凭据发送，
+不依赖 lark-cli 等外部工具。详细说明见 [`docs/channel-image.md`](docs/channel-image.md)。
+
 ### 管理后台服务
 
 ```bash
@@ -196,13 +250,20 @@ codexc service status                 # 查看全部服务
 codexc service reload                 # 重新读取配置
 codexc service restart                # 只重启 Gateway
 codexc service restart all            # 重启 Gateway 和 App Server
+codexc service start webui            # 启动 WebUI 后台服务
+codexc service start center           # 启动指标中心后台服务
 codexc service logs                   # 查看 Gateway 日志
 codexc service logs all -n 200        # 查看全部服务最近 200 行日志
 codexc service logs -f                # 持续跟踪 Gateway 日志
+codexc service logs webui             # 查看 WebUI 日志
 ```
 
 `start`、`stop` 和 `status` 默认操作全部服务；`restart` 和 `logs` 默认只操作 Gateway。运行
-`codexc service -h` 查看完整用法。
+`codexc service -h` 查看完整用法。WebUI 与指标中心是独立后台服务，不并入 `all`：
+`codexc service install` 只生成这两类服务单元并启动 App Server 与 Gateway，需要时用
+`codexc service start webui`、`codexc service start center` 单独启动。
+WebUI 服务读取 `[webui]` 配置，要求指标数据库为当前 Schema（升级后先执行
+`codexc metrics upgrade`）；指标中心读取 `[metrics.center]` 配置。
 
 服务重启建议从本机终端执行。聊天 Turn 内重启 Gateway 可能使过程或完成消息落在重连窗口；渠道内
 执行 `codexc service restart app-server` 或 `codexc service restart all` 会被拒绝。需要重启 App
@@ -222,6 +283,8 @@ codexc metrics export --range 30d --format json   # 脱敏明细导出；--threa
 codexc service stop gateway
 codexc metrics upgrade --restart-gateway          # 自动停 Gateway、备份升级并重新启动
 codexc metrics reset                              # 先保留 0600 旧库备份，再重建
+codexc metrics sync-reset --restart-gateway       # 备份并清零多端上报水位，重放修复中心历史
+codexc metrics prune openai                       # 备份并清理指定提供商请求指标（自动重启 Gateway 与中心）
 codexc service start gateway
 ```
 
@@ -232,18 +295,20 @@ json，其余默认 markdown），默认写入 `~/.codex-connect/output/<日期>
 连接，可在 Gateway 运行时执行；支持 `24h`、`7d`、`30d`，包含固定格式版本、时间范围和脱敏请求
 字段，不包含提示词、消息、图片、响应正文、凭据或上游响应 ID。`report` 与 `export` 的
 Markdown、JSON、CSV 还包含 OpenAI 统计代理最后观测到的当前周额度区间和每 1% 采样状态；JSON 格式版本为 v2。
-`run`、`turns`、`threads` 和 `report` 会单列远程压缩模型、请求数、Token 与参考费用；`export`
+`run`、`turns`、`threads` 和 `report` 会单列上下文压缩模型、请求数、Token 与参考费用；`export`
 JSON/CSV 明细保留 `operation=compact`，Markdown 明细也显示操作类型。
 `export` CSV 使用 `type=request|weekly_quota_summary` 区分请求与当前额度摘要：请求行只携带该次
 请求实际捕获的历史额度快照，当前额度和每 1% 估算只写入一条独立摘要行，避免可视化重复计数。
-Markdown 报表的费用按 `display.price_currency` / `price_currency_by_provider` 换算显示
-（如 DeepSeek 默认人民币，依赖汇率缓存），时间显示为服务器本地时区；JSON 与 CSV 保留原始
+Markdown 报表的费用按 `display.price_currency` 统一换算显示（人民币依赖汇率缓存），时间显示为
+服务器本地时区；JSON 与 CSV 保留原始
 币种、nanos 与 ISO 时间，并按相同配置附加 `*CostCnyNanos` 换算列（如 `totalCostCnyNanos`），
 便于统计和直接查看人民币金额；报告 CSV 同时保留 Provider、模型及异常分组，文本单元格会中和
 电子表格公式前缀。
-`metrics upgrade` 只支持把现有指标库从 Schema v3 显式升级到 v4 并保留旧记录；Gateway 已停止时
+`metrics upgrade` 支持把现有指标库从 Schema v3/v4/v5/v6 显式升级到 v7 并保留旧记录；Gateway 已停止时
 可直接运行，不便单独管理服务时可加 `--restart-gateway` 自动完成停止、升级和重新启动。`metrics reset`
 用于归档并重建不支持的版本。两者都不修改会话状态库，Gateway 运行时会拒绝执行。
+`metrics prune <provider>` 备份本地与中心指标库后，删除其中指定提供商（当前支持 openai、
+deepseek）的全部请求行并自动重启 Gateway 与中心服务，适合额度重置后重新开始统计。
 
 ### 常用聊天命令
 
@@ -252,7 +317,7 @@ Markdown 报表的费用按 `display.price_currency` / `price_currency_by_provid
 - 运行：`/status`、`/stop`、`/queue <描述>`、`/compact`、`/fork`、`/review`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
 - 状态：`/diff`、`/usage`、`/metrics [session|global|providers|models|errors] [24h|7d|30d]`、`/limits`、`/permissions`、`/goal`
-- 扩展：`/skill [名称或序号 任务]`、`/mcp`、`/plugins`、`/rules`
+- 扩展：`/agents [角色名称或序号 任务]`、`/skill [名称或序号 任务]`、`/mcp`、`/plugins`、`/rules`
 - 图片：`/vision <下一批要求>`；多图：`/vision <2–4> <要求>`，收齐自动提交；失败重试：`/vision retry`；取消：`/vision cancel`
 - 帮助：`/help`、`/whoami`
 
@@ -345,6 +410,9 @@ npm run verify:commit
 ```bash
 npm run install:global
 ```
+
+该命令会同时构建 Gateway 与 WebUI 前端（`webui/dist`），之后
+`codexc webui` 可直接启动。
 
 完整项目文档见 [`index.md`](index.md)。
 

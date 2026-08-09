@@ -52,6 +52,15 @@ export type ConversationInputEvent =
       phase: MessagePhase | null;
     }
   | {
+      type: "item.subagentActivity";
+      threadId: string;
+      turnId: string;
+      itemId: string;
+      agentThreadId: string;
+      agentPath: string;
+      kind: "started" | "interacted" | "interrupted";
+    }
+  | {
       type: "turn.modelTiming.updated";
       threadId: string;
       turnId: string;
@@ -94,6 +103,7 @@ export type ConversationInputEvent =
     }
   | {
       type: "turn.error";
+      threadId: string;
       turnId: string;
       message: string;
       willRetry: boolean;

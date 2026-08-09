@@ -3,6 +3,7 @@ import type { Logger } from "pino";
 import {
   isCriticalOutputEvent,
   surfaceAccountKey,
+  type ConversationTarget,
   type OutputEvent,
   type ReferenceCostSummary,
 } from "../conversation-core/index.js";
@@ -85,6 +86,27 @@ export class SurfaceManager {
       throw new Error("SurfaceManager 正在停止");
     }
     await Promise.all(this.surfaces.map((surface) => this.startSurface(surface)));
+  }
+
+  async sendChannelImage(
+    target: ConversationTarget,
+    imagePath: string,
+  ): Promise<void> {
+    if (this.stopping) {
+      throw new Error("Gateway 正在停止，无法发送渠道图片");
+    }
+    const surface = this.surfacesByAccount.get(
+      surfaceAccountKey(target.surface, target.accountId),
+    );
+    if (surface === undefined) {
+      throw new Error(
+        `未找到渠道账号：${surfaceAccountKey(target.surface, target.accountId)}`,
+      );
+    }
+    if (surface.sendChannelImage === undefined) {
+      throw new Error(`${target.surface} 渠道不支持发送图片`);
+    }
+    return surface.sendChannelImage(target.conversationId, imagePath);
   }
 
   reportFatal(surfaceId: string, accountId: string, error: Error): void {

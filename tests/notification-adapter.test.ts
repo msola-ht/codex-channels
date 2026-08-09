@@ -123,6 +123,42 @@ describe("Notification adapter", () => {
       phase: "final_answer",
     });
     expect(toConversationInputEvent({
+      method: "item/started",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "subAgentActivity",
+          id: "item-2",
+          kind: "started",
+          agentThreadId: "subagent-thread-1",
+          agentPath: "/root/ds_probe",
+        },
+      },
+    })).toBeUndefined();
+    expect(toConversationInputEvent({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "subAgentActivity",
+          id: "item-2",
+          kind: "started",
+          agentThreadId: "subagent-thread-1",
+          agentPath: "/root/ds_probe",
+        },
+      },
+    })).toEqual({
+      type: "item.subagentActivity",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-2",
+      agentThreadId: "subagent-thread-1",
+      agentPath: "/root/ds_probe",
+      kind: "started",
+    });
+    expect(toConversationInputEvent({
       method: "thread/status/changed",
       params: {
         threadId: "thread-1",
@@ -137,6 +173,46 @@ describe("Notification adapter", () => {
       method: "thread/closed",
       params: { threadId: "thread-1" },
     })).toEqual({ type: "thread.closed", threadId: "thread-1" });
+  });
+
+  it("preserves official subagent states from completed wait calls", () => {
+    expect(toConversationInputEvent({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "collabAgentToolCall",
+          id: "wait-1",
+          tool: "wait",
+          status: "completed",
+          senderThreadId: "thread-1",
+          receiverThreadIds: ["agent-2", "agent-1"],
+          prompt: null,
+          model: null,
+          reasoningEffort: null,
+          agentsStates: {
+            "agent-2": { status: "errored", message: "任务失败" },
+            "agent-1": { status: "completed", message: "任务完成" },
+          },
+        },
+      },
+    })).toEqual({
+      type: "item.operation.updated",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      operation: {
+        itemId: "wait-1",
+        kind: "subagent",
+        action: "wait",
+        status: "failed",
+        receiverThreadIds: ["agent-2", "agent-1"],
+        subagentStates: [
+          { threadId: "agent-1", status: "completed" },
+          { threadId: "agent-2", status: "errored" },
+        ],
+      },
+    });
   });
 
   it("propagates the receipt timestamp for turn start and text deltas", () => {
@@ -263,6 +339,7 @@ describe("Notification adapter", () => {
       },
     })).toEqual({
       type: "turn.error",
+      threadId: "thread-1",
       turnId: "turn-1",
       message: "命令执行失败，API_KEY=[REDACTED]",
       willRetry: false,

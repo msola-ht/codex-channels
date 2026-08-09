@@ -3,9 +3,9 @@ import type { TomlTable } from "smol-toml";
 export interface GatewayConfigDocument {
   version: 1;
   default_workspace: string;
-  telegram: {
-    bot_token: string;
-    allowed_user_ids: number[];
+  telegram?: {
+    bot_token?: string;
+    allowed_user_ids?: number[];
     proxy_url?: string;
     message_format: "html" | "rich";
   };
@@ -41,8 +41,7 @@ export interface GatewayConfigDocument {
   display: {
     operation_updates: "full" | "compact" | "hidden";
     plan_updates: boolean;
-    price_currency: "auto" | "cny" | "usd";
-    price_currency_by_provider?: Record<string, "auto" | "cny" | "usd">;
+    price_currency: "cny" | "usd";
   };
   api_providers: Array<{
     id: string;
@@ -60,6 +59,34 @@ export interface GatewayConfigDocument {
       };
   storage: { database_path: string };
   logging: { level: "fatal" | "error" | "warn" | "info" | "debug" | "trace" };
+  webui?: {
+    host: "127.0.0.1" | "::1" | "0.0.0.0";
+    port: number;
+    token?: string;
+  };
+  metrics: {
+    sync: {
+      enabled: boolean;
+      endpoint?: string;
+      device_token?: string;
+      device_id?: string;
+      batch_size: number;
+      interval_seconds: number;
+    };
+    center?: {
+      enabled: boolean;
+      host: "127.0.0.1" | "::1" | "0.0.0.0";
+      port: number;
+      token?: string;
+      device_token?: string;
+      database_path: string;
+    };
+    view?: {
+      enabled: boolean;
+      endpoint?: string;
+      token?: string;
+    };
+  };
   workspaces: Array<{
     id: string;
     name: string;
@@ -73,6 +100,31 @@ export interface GatewayConfigDocument {
 export function parseGatewayConfig(content: string, source?: string): TomlTable;
 export function tomlErrorSummary(error: unknown): string;
 export function validateGatewayConfigDocument(document: unknown): GatewayConfigDocument;
+export function validateWebuiConfigDocument(
+  document: unknown,
+): {
+  host: "127.0.0.1" | "::1" | "0.0.0.0";
+  port: number;
+  token?: string;
+};
+export function validateMetricsCenterConfigDocument(
+  document: unknown,
+): {
+  enabled: boolean;
+  host: "127.0.0.1" | "::1" | "0.0.0.0";
+  port: number;
+  token?: string;
+  device_token?: string;
+  database_path: string;
+};
+export function validateMetricsViewConfigDocument(
+  document: unknown,
+): {
+  enabled: boolean;
+  endpoint?: string;
+  token?: string;
+};
+export function isPrivateHttpEndpoint(url: URL): boolean;
 export function readGatewayConfig(configPath: string): TomlTable;
 export function materializeGatewayConfigDefaults(
   configPath: string,

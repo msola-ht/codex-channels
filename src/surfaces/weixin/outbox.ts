@@ -16,11 +16,13 @@ import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
+import { shouldDisplayOperation } from "../operation-presentation.js";
 import type {
   OperationUpdateDisplay,
   SurfaceOutputPort,
 } from "../types.js";
 import {
+  createSubagentStartedPresentation,
   createTurnStartedPresentation,
   renderPlainLifecyclePresentation,
 } from "../lifecycle-presentation.js";
@@ -58,6 +60,7 @@ import {
 import { WeixinReplyContextStore } from "./reply-context-store.js";
 import {
   formatWeixinCommandText,
+  renderWeixinSubagentCompleted,
   renderWeixinTurnCompleted,
 } from "./command-renderer.js";
 import { formatWeixinFinalText } from "./final-text-format.js";
@@ -168,8 +171,11 @@ export class WeixinOutbox implements SurfaceOutputPort {
         );
       }
       if (
-        this.options.operationUpdateDisplay === "hidden"
-        || event.operation.status === "running"
+        event.operation.status === "running"
+        || !shouldDisplayOperation(
+          event.operation,
+          this.options.operationUpdateDisplay ?? "full",
+        )
       ) {
         return;
       }
@@ -380,6 +386,23 @@ export class WeixinOutbox implements SurfaceOutputPort {
         );
       case "plan.updated":
         return null;
+      case "subagent.spawned":
+        return formatWeixinCommandText(
+          renderPlainLifecyclePresentation(
+            createSubagentStartedPresentation(event),
+          ),
+          { structuredFields: true },
+        );
+      case "subagent.completed":
+        return formatWeixinCommandText(
+          renderWeixinSubagentCompleted(
+            event,
+            this.options.priceCurrency,
+            this.options.exchangeRate?.() ?? null,
+            this.options.debugEnabled ?? false,
+          ),
+          { structuredFields: true },
+        );
       default:
         return null;
     }
@@ -520,6 +543,16 @@ export class WeixinOutbox implements SurfaceOutputPort {
       contextToken: context.contextToken,
       image,
     });
+  }
+
+  sendChannelImage(
+    target: ConversationTarget,
+    imagePath: string,
+  ): Promise<void> {
+    return this.delivery.runOrdered(
+      target.conversationId,
+      () => this.sendImage(target, imagePath),
+    );
   }
 
   private async invalidateContext(

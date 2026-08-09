@@ -456,6 +456,10 @@ export class FeishuSurface implements SurfaceAdapter {
     });
   }
 
+  sendChannelImage(conversationId: string, imagePath: string): Promise<void> {
+    return this.output.sendChannelImage(conversationId, imagePath);
+  }
+
   async start(): Promise<void> {
     const imagesStarting = this.images.start();
     const audiosStarting = this.audios.start();

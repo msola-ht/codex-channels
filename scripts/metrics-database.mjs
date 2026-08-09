@@ -3,9 +3,12 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  mkdirSync,
+  readFileSync,
   renameSync,
+  writeFileSync,
 } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
@@ -21,6 +24,7 @@ import {
   locateUserConfig,
   resolveConfiguredPath,
 } from "./runtime-config.mjs";
+import { resolveMetricsCenterSettings } from "./metrics-center-settings.mjs";
 import {
   csvCell,
   enrichCosts,
@@ -152,32 +156,60 @@ export function upgradeMetricsDatabase(
         schemaVersion: status.schemaVersion,
       };
     }
-    if (status.schemaVersion !== 3 || modelRequestMetricsSchemaVersion !== 4) {
+    if (![3, 4, 5, 6].includes(status.schemaVersion)) {
       throw new Error(
         `指标数据库无法升级：当前 Schema ${status.schemaVersion ?? "unknown"}，`
-        + `仅支持 v3 升级到 v${modelRequestMetricsSchemaVersion}`,
+        + `仅支持 v3/v4/v5/v6 升级到 v${modelRequestMetricsSchemaVersion}`,
       );
+    }
+    if (modelRequestMetricsSchemaVersion !== 7) {
+      throw new Error("指标数据库迁移脚本与 Schema 版本不一致，请检查版本常量");
     }
     checkpoint(status.databasePath);
     const now = options.now ?? (() => new Date());
-    const backupPath = `${status.databasePath}.v3.${backupTimestamp(now())}.bak`;
+    const previousSchemaVersion = status.schemaVersion;
+    const backupPath = `${status.databasePath}.v${previousSchemaVersion}.${backupTimestamp(now())}.bak`;
     if (existsSync(backupPath)) throw new Error(`指标数据库备份已存在：${backupPath}`);
     copyFileSync(status.databasePath, backupPath);
     chmodSync(backupPath, 0o600);
     const database = new DatabaseSync(status.databasePath);
     try {
-      database.exec(`
-        BEGIN IMMEDIATE;
-        ALTER TABLE model_request_metrics ADD COLUMN weekly_quota_limit_id TEXT
-          CHECK (weekly_quota_limit_id IS NULL OR weekly_quota_limit_id = 'codex');
-        ALTER TABLE model_request_metrics ADD COLUMN weekly_used_percent_millionths INTEGER
-          CHECK (weekly_used_percent_millionths IS NULL
-            OR weekly_used_percent_millionths BETWEEN 0 AND 100000000);
-        ALTER TABLE model_request_metrics ADD COLUMN weekly_resets_at INTEGER
-          CHECK (weekly_resets_at IS NULL OR weekly_resets_at >= 0);
-        UPDATE schema_metadata SET value = 4 WHERE name = 'schema_version';
+      const statements = ["BEGIN IMMEDIATE;"];
+      if (previousSchemaVersion === 3) {
+        statements.push(`
+          ALTER TABLE model_request_metrics ADD COLUMN weekly_quota_limit_id TEXT
+            CHECK (weekly_quota_limit_id IS NULL OR weekly_quota_limit_id = 'codex');
+          ALTER TABLE model_request_metrics ADD COLUMN weekly_used_percent_millionths INTEGER
+            CHECK (weekly_used_percent_millionths IS NULL
+              OR weekly_used_percent_millionths BETWEEN 0 AND 100000000);
+          ALTER TABLE model_request_metrics ADD COLUMN weekly_resets_at INTEGER
+            CHECK (weekly_resets_at IS NULL OR weekly_resets_at >= 0);
+        `);
+      }
+      if (previousSchemaVersion < 5) {
+        statements.push(`
+          ALTER TABLE model_request_metrics ADD COLUMN weekly_quota_plan_type TEXT;
+        `);
+      }
+      if (previousSchemaVersion < 6) {
+        statements.push(`
+          ALTER TABLE model_request_metrics ADD COLUMN error_message TEXT;
+        `);
+      }
+      statements.push(`
+        CREATE TABLE IF NOT EXISTS subagent_threads (
+          thread_id TEXT PRIMARY KEY,
+          parent_thread_id TEXT NOT NULL,
+          agent_path TEXT NOT NULL,
+          recorded_at_ms INTEGER NOT NULL
+        );
+      `);
+      statements.push(`
+        UPDATE schema_metadata SET value = ${modelRequestMetricsSchemaVersion}
+          WHERE name = 'schema_version';
         COMMIT;
       `);
+      database.exec(statements.join("\n"));
     } catch (error) {
       try { database.exec("ROLLBACK"); } catch { /* transaction already closed */ }
       throw error;
@@ -188,8 +220,8 @@ export function upgradeMetricsDatabase(
       backupPath,
       changed: true,
       databasePath: status.databasePath,
-      previousSchemaVersion: 3,
-      schemaVersion: 4,
+      previousSchemaVersion,
+      schemaVersion: modelRequestMetricsSchemaVersion,
     };
   } finally {
     lock.release();
@@ -243,6 +275,280 @@ export function upgradeMetricsDatabaseWithGatewayRestart(
   return result;
 }
 
+export function resetMetricsSyncState(environment = process.env, options = {}) {
+  const runtime = resolveMetricsRuntime(environment);
+  const gatewayRunning = options.gatewayRunning ?? (() => isGatewayRunning(environment));
+  if (
+    gatewayRunning()
+    || runtime.metricsSocketPaths.some(metricsSocketIsActive)
+  ) {
+    throw new Error(
+      "Gateway 仍在运行；请先执行 codexc service stop gateway，或使用 --restart-gateway 自动停止并重启",
+    );
+  }
+  const statePath = metricsSyncStatePath(environment);
+  if (!existsSync(statePath)) {
+    return { backupPath: null, changed: false, statePath };
+  }
+  let deviceId;
+  try {
+    const parsed = JSON.parse(readFileSync(statePath, "utf8"));
+    deviceId = parsed.deviceId;
+  } catch {
+    deviceId = undefined;
+  }
+  if (typeof deviceId !== "string" || deviceId.length === 0) {
+    throw new Error(`指标同步状态文件缺少有效 deviceId：${statePath}`);
+  }
+  const backupPath = `${statePath}.bak-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+  copyFileSync(statePath, backupPath);
+  chmodSync(backupPath, 0o600);
+  const next = {
+    version: 1,
+    deviceId,
+    lastRequestLocalId: 0,
+    lastSubagentRecordedAtMs: 0,
+    lastSubagentThreadId: null,
+  };
+  const temporaryPath = `${statePath}.tmp`;
+  try {
+    mkdirSync(dirname(statePath), { recursive: true });
+    writeFileSync(temporaryPath, `${JSON.stringify(next, null, 2)}\n`, {
+      mode: 0o600,
+      flag: "wx",
+    });
+    chmodSync(temporaryPath, 0o600);
+    renameSync(temporaryPath, statePath);
+  } catch (error) {
+    try {
+      renameSync(temporaryPath, `${temporaryPath}.failed-${Date.now()}`);
+    } catch {
+      // 保留原始异常
+    }
+    throw error;
+  }
+  return { backupPath, changed: true, statePath, deviceId };
+}
+
+export function resetMetricsSyncStateWithGatewayRestart(
+  environment = process.env,
+  options = {},
+) {
+  const stopGateway = options.stopGateway
+    ?? (() => runGatewayServiceAction("stop", environment));
+  const startGateway = options.startGateway
+    ?? (() => runGatewayServiceAction("start", environment));
+  const reset = options.reset
+    ?? (() => resetMetricsSyncState(environment));
+  let stopError;
+  try {
+    stopGateway();
+  } catch (error) {
+    stopError = error;
+  }
+  let result;
+  let resetError;
+  try {
+    result = reset();
+  } catch (error) {
+    resetError = error;
+  }
+  let startError;
+  try {
+    startGateway();
+  } catch (error) {
+    startError = error;
+  }
+  if (stopError && startError) {
+    throw new AggregateError(
+      [stopError, startError],
+      "重置同步水位前停止 Gateway 失败，且 Gateway 未能重新启动",
+    );
+  }
+  if (stopError) throw stopError;
+  if (resetError && startError) {
+    throw new AggregateError(
+      [resetError, startError],
+      "重置同步水位失败，且 Gateway 未能重新启动",
+    );
+  }
+  if (resetError) throw resetError;
+  if (startError) throw startError;
+  return result;
+}
+
+export function pruneProviderMetrics(provider, environment = process.env, options = {}) {
+  assertPruneProvider(provider);
+  const localDatabasePath = options.localDatabasePath
+    ?? resolveMetricsRuntime(environment).databasePath;
+  const centerSettings = options.centerSettings
+    ?? resolveMetricsCenterSettings({ environment });
+  const configuredCenterPath = options.centerDatabasePath
+    ?? centerSettings.databasePath;
+  const centerDatabasePath = typeof configuredCenterPath === "string"
+    && existsSync(configuredCenterPath)
+    ? configuredCenterPath
+    : null;
+  const centerConfigured = centerDatabasePath !== null;
+  const stopGateway = options.stopGateway
+    ?? (() => runServiceAction("gateway", "stop", environment));
+  const startGateway = options.startGateway
+    ?? (() => runServiceAction("gateway", "start", environment));
+  const stopCenter = options.stopCenter
+    ?? (() => runServiceAction("center", "stop", environment));
+  const startCenter = options.startCenter
+    ?? (() => runServiceAction("center", "start", environment));
+
+  const warnings = [];
+  let gatewayStopped = false;
+  let centerStopped = false;
+  try {
+    stopGateway();
+    gatewayStopped = true;
+  } catch (error) {
+    warnings.push(`停止 Gateway 失败：${errorMessage(error)}`);
+  }
+  if (centerConfigured) {
+    try {
+      stopCenter();
+      centerStopped = true;
+    } catch (error) {
+      warnings.push(`停止中心服务失败：${errorMessage(error)}`);
+    }
+  }
+
+  let result;
+  let operationError;
+  try {
+    result = pruneProviderDatabases({
+      provider,
+      localDatabasePath,
+      centerDatabasePath,
+      allowVacuumLocal: gatewayStopped,
+      allowVacuumCenter: centerStopped,
+    });
+  } catch (error) {
+    operationError = error;
+  }
+
+  const startFailures = [];
+  if (centerConfigured) {
+    try {
+      startCenter();
+    } catch (error) {
+      startFailures.push(`中心服务启动失败：${errorMessage(error)}`);
+    }
+  }
+  try {
+    startGateway();
+  } catch (error) {
+    startFailures.push(`Gateway 启动失败：${errorMessage(error)}`);
+  }
+
+  if (operationError !== undefined && startFailures.length > 0) {
+    throw new AggregateError(
+      [operationError, ...startFailures.map((message) => new Error(message))],
+      `清理 ${provider} 请求指标失败，且服务未能全部重新启动`,
+    );
+  }
+  if (operationError !== undefined) throw operationError;
+  if (startFailures.length > 0) {
+    throw new Error(startFailures.join("；"));
+  }
+  return {
+    ...result,
+    warnings,
+  };
+}
+
+function pruneProviderDatabases({
+  provider,
+  localDatabasePath,
+  centerDatabasePath,
+  allowVacuumLocal,
+  allowVacuumCenter,
+}) {
+  const localBackupPath = backupMetricsDatabase(localDatabasePath, provider);
+  const localDeleted = deleteProviderRows(
+    localDatabasePath,
+    "model_request_metrics",
+    provider,
+    allowVacuumLocal,
+  );
+  if (centerDatabasePath === null) {
+    return {
+      provider,
+      local: {
+        databasePath: localDatabasePath,
+        backupPath: localBackupPath,
+        deleted: localDeleted,
+      },
+      center: { skipped: true },
+    };
+  }
+  const centerBackupPath = backupMetricsDatabase(centerDatabasePath, provider);
+  const centerDeleted = deleteProviderRows(
+    centerDatabasePath,
+    "request_metrics",
+    provider,
+    allowVacuumCenter,
+  );
+  return {
+    provider,
+    local: {
+      databasePath: localDatabasePath,
+      backupPath: localBackupPath,
+      deleted: localDeleted,
+    },
+    center: {
+      databasePath: centerDatabasePath,
+      backupPath: centerBackupPath,
+      deleted: centerDeleted,
+      skipped: false,
+    },
+  };
+}
+
+function backupMetricsDatabase(databasePath, provider) {
+  if (!existsSync(databasePath)) return null;
+  try {
+    checkpoint(databasePath);
+  } catch {
+    // 服务未能完全停止时跳过备份，仍继续尝试删除（带 busy_timeout）。
+    return null;
+  }
+  const backupPath = `${databasePath}.${provider}-prune-${backupTimestamp(new Date())}.bak`;
+  copyFileSync(databasePath, backupPath);
+  chmodSync(backupPath, 0o600);
+  return backupPath;
+}
+
+function deleteProviderRows(databasePath, table, provider, allowVacuum) {
+  const database = new DatabaseSync(databasePath);
+  try {
+    database.exec("PRAGMA busy_timeout = 10000;");
+    const info = database.prepare(
+      `DELETE FROM ${table} WHERE provider = ?`,
+    ).run(provider);
+    if (allowVacuum) {
+      database.exec("VACUUM");
+    }
+    return Number(info.changes ?? 0);
+  } finally {
+    database.close();
+  }
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function assertPruneProvider(provider) {
+  if (provider !== "openai" && provider !== "deepseek") {
+    throw new Error("用法：codexc metrics prune <openai|deepseek>");
+  }
+}
+
 function runGatewayServiceAction(action, environment) {
   const cli = resolve(import.meta.dirname, "../bin/codexc.mjs");
   const result = spawnSync(
@@ -253,6 +559,19 @@ function runGatewayServiceAction(action, environment) {
   if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error(`Gateway ${action === "stop" ? "停止" : "启动"}失败`);
+  }
+}
+
+function runServiceAction(target, action, environment) {
+  const cli = resolve(import.meta.dirname, "../bin/codexc.mjs");
+  const result = spawnSync(
+    process.execPath,
+    [cli, "service", action, target],
+    { env: environment, stdio: "inherit" },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`${target} 服务${action === "stop" ? "停止" : "启动"}失败`);
   }
 }
 
@@ -298,21 +617,23 @@ export function readMetricsExport(environment = process.env, options = {}) {
   );
   try {
     const records = [];
-    let afterId;
+    let offset = 0;
     do {
       const page = store.page({
         startAtMs: range.startAtMs,
         endAtMs: range.endAtMs,
-        ...(afterId === undefined ? {} : { afterId }),
+        offset,
         limit: 500,
+        sortKey: "recordedAtMs",
+        sortDirection: "asc",
       });
       records.push(
         ...(threadId === undefined
           ? page.records
           : page.records.filter((record) => record.threadId === threadId)),
       );
-      afterId = page.nextAfterId ?? undefined;
-    } while (afterId !== undefined);
+      offset = page.nextOffset ?? -1;
+    } while (offset >= 0);
     return {
       format: "codex-connect-request-metrics-export",
       version: 2,
@@ -326,7 +647,7 @@ export function readMetricsExport(environment = process.env, options = {}) {
   }
 }
 
-function readWeeklyQuota(store, nowMs) {
+export function readWeeklyQuota(store, nowMs) {
   const window = store.latestWeeklyQuota("openai", nowMs);
   if (window === null) return null;
   const estimate = store.weeklyQuotaEstimate({
@@ -338,6 +659,7 @@ function readWeeklyQuota(store, nowMs) {
   const usedPercent = window.usedPercentMillionths / 1_000_000;
   return {
     limitId: window.limitId,
+    planType: window.planType,
     usedPercent,
     remainingPercent: Math.max(0, 100 - usedPercent),
     resetsAt: window.resetsAt,
@@ -475,6 +797,11 @@ function resolveMetricsRuntime(environment) {
   };
 }
 
+function metricsSyncStatePath(environment) {
+  const runtime = resolveMetricsRuntime(environment);
+  return join(dirname(runtime.databasePath), "metrics-sync-state.json");
+}
+
 function readSchemaVersion(database) {
   if (!hasTable(database, "schema_metadata")) return null;
   const row = database.prepare(`
@@ -609,6 +936,7 @@ function printMetricsReport(result, format, display = null) {
       ["group", (row) => row.group],
       ["status", (row) => row.status],
       ["errorType", (row) => row.errorType],
+      ["lastErrorMessage", (row) => row.lastErrorMessage],
       ["httpStatus", (row) => row.httpStatus],
       ["lastOccurredAtMs", (row) => row.lastOccurredAtMs],
       ["requestCount", (row) => row.requestCount],
@@ -706,7 +1034,7 @@ function printMetricsReport(result, format, display = null) {
   console.log(`- 输出 Token：${aggregate.outputTokens}`);
   console.log(`- 推理输出 Token：${aggregate.reasoningOutputTokens}`);
   console.log(`- 计价覆盖：${aggregate.pricedRequestCount}/${aggregate.requestCount}`);
-  console.log(`- 参考总价：${formatCost(
+  console.log(`- 总价：${formatCost(
     { ...aggregate, provider: aggregateProvider },
     display,
   )}`);
@@ -716,7 +1044,7 @@ function printMetricsReport(result, format, display = null) {
     console.log("");
     console.log("## 明细");
     console.log("");
-    console.log("| 提供商 | 模型 | 请求 | 异常/未完整 | 输入 | 缓存输入 | 输出 | 参考总价 | 远程压缩 |");
+    console.log("| 提供商 | 模型 | 请求 | 异常/未完整 | 输入 | 缓存输入 | 输出 | 总价 | 上下文压缩 |");
     console.log("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
     for (const group of result.report.groups) {
       const value = group.aggregate;
@@ -852,6 +1180,7 @@ function flattenWeeklyQuota(quota) {
   if (quota === null) return {};
   return {
     weeklyQuotaLimitId: quota.limitId,
+    weeklyQuotaPlanType: quota.planType,
     weeklyQuotaUsedPercent: quota.usedPercent,
     weeklyQuotaRemainingPercent: quota.remainingPercent,
     weeklyQuotaResetsAt: quota.resetsAt,
@@ -871,6 +1200,7 @@ function flattenRecordedWeeklyQuota(record) {
   const usedPercent = quota.usedPercentMillionths / 1_000_000;
   return {
     weeklyQuotaLimitId: quota.limitId,
+    weeklyQuotaPlanType: quota.planType,
     weeklyQuotaUsedPercent: usedPercent,
     weeklyQuotaRemainingPercent: Math.max(0, 100 - usedPercent),
     weeklyQuotaResetsAt: quota.resetsAt,
@@ -881,6 +1211,7 @@ function flattenRecordedWeeklyQuota(record) {
 function weeklyQuotaCsvColumns() {
   return [
     ["weeklyQuotaLimitId", (row) => row.weeklyQuotaLimitId],
+    ["weeklyQuotaPlanType", (row) => row.weeklyQuotaPlanType],
     ["weeklyQuotaUsedPercent", (row) => row.weeklyQuotaUsedPercent],
     ["weeklyQuotaRemainingPercent", (row) => row.weeklyQuotaRemainingPercent],
     ["weeklyQuotaResetsAt", (row) => row.weeklyQuotaResetsAt],
@@ -929,7 +1260,7 @@ function enrichSummaryCosts(value, display, provider = null) {
 function printCompactSummary(compact, display, provider = null) {
   const summary = formatCompactSummary(compact, display, provider);
   if (summary === null) return;
-  console.log(`- 远程压缩：${summary}`);
+  console.log(`- 上下文压缩：${summary}`);
 }
 
 function formatCompactSummary(compact, display, provider = null) {
@@ -943,7 +1274,7 @@ function formatCompactSummary(compact, display, provider = null) {
   const cost = formatCost({ ...compact, provider }, display);
   const coverage = compact.pricedRequestCount === compact.requestCount
     ? ""
-    : `（已计价 ${compact.pricedRequestCount}/${compact.requestCount} 次）`;
+    : `（计价 ${compact.pricedRequestCount}/${compact.requestCount}）`;
   return `${compact.requestCount} 次${failures} · ${model} · ${formatTokenCount(compact.inputTokens + compact.outputTokens)} Token · ${cost}${coverage}`;
 }
 
@@ -1050,7 +1381,7 @@ function printMetricsTurns(result, format, display = null) {
     console.log("该会话暂无可导出的对话记录。");
     return;
   }
-  console.log("| # | 对话 ID | 时间 | 模型 | 思考等级 | 请求 | 异常 | 耗时 | 总 Token | 缓存率 | 速度 | 参考总价 | 远程压缩 |");
+  console.log("| # | 对话 ID | 时间 | 模型 | 思考等级 | 请求 | 异常 | 耗时 | 总 Token | 缓存率 | 速度 | 总价 | 上下文压缩 |");
   console.log("| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
   for (const [index, turn] of result.turns.entries()) {
     const cacheRate = turn.cachedInputTokens === null || turn.inputTokens === 0
@@ -1096,6 +1427,7 @@ function printMetricsThreads(result, format, display = null) {
       ["provider", (thread) => thread.provider],
       ["model", (thread) => thread.model],
       ["reasoningEffort", (thread) => thread.reasoningEffort],
+      ["agentPath", (thread) => thread.agentPath],
       ["turnCount", (thread) => thread.turnCount],
       ["requestCount", (thread) => thread.requestCount],
       ["inputTokens", (thread) => thread.inputTokens],
@@ -1122,8 +1454,8 @@ function printMetricsThreads(result, format, display = null) {
   console.log("");
   const rateLine = exchangeRateLine(display);
   if (rateLine) console.log(`- ${rateLine}`);
-  console.log("| # | Thread | 模型 | 思考等级 | 对话数 | 请求数 | 总 Token | 参考总价 | 远程压缩 | 最近记录 |");
-  console.log("| --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- |");
+  console.log("| # | Thread | 模型 | 思考等级 | 类型 | 对话数 | 请求数 | 总 Token | 总价 | 上下文压缩 | 最近记录 |");
+  console.log("| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- |");
   for (const [index, thread] of result.threads.entries()) {
     const cost = thread.totalCostNanos === null || thread.pricingCurrency === null
       ? "未知"
@@ -1134,6 +1466,9 @@ function printMetricsThreads(result, format, display = null) {
         markdownCell(thread.threadId),
         markdownCell(thread.model ?? "未观测"),
         markdownCell(thread.reasoningEffort ?? "模型默认"),
+        markdownCell(thread.agentPath === null
+          ? "主会话"
+          : `子代理 · ${thread.agentPath}`),
         String(thread.turnCount),
         String(thread.requestCount),
         formatTokenCount(thread.inputTokens + thread.outputTokens),
@@ -1186,8 +1521,11 @@ function printTurnSummary(summary, aggregate = false, display = null) {
     );
   }
   if (summary.totalCostNanos !== null && summary.pricingCurrency !== null) {
+    const coverage = summary.pricedRequestCount === summary.requestCount
+      ? ""
+      : `（计价 ${summary.pricedRequestCount}/${summary.requestCount}）`;
     console.log(
-      `- 参考总价：${formatCost(summary, display)}（已计价 ${summary.pricedRequestCount}/${summary.requestCount} 次请求）`,
+      `- 总价：${formatCost(summary, display)}${coverage}`,
     );
     if (summary.inputCostNanos !== null) {
       console.log(`  - 输入价格：${formatCurrencyNanos(summary.inputCostNanos, summary.pricingCurrency, display, summary.provider)}`);
@@ -1202,7 +1540,7 @@ function printTurnSummary(summary, aggregate = false, display = null) {
   printCompactSummary(summary.compact, display, summary.provider ?? null);
 }
 
-function metricsRange(name, nowMs) {
+export function metricsRange(name, nowMs) {
   const duration = {
     "24h": 24 * 60 * 60 * 1_000,
     "7d": 7 * 24 * 60 * 60 * 1_000,
@@ -1326,6 +1664,7 @@ function csvColumns() {
     ["reasoningEffort", (record) => record.reasoningEffort],
     ["status", (record) => record.status],
     ["errorType", (record) => record.errorType],
+    ["errorMessage", (record) => record.errorMessage],
     ["incompleteReason", (record) => record.incompleteReason],
     ["httpStatus", (record) => record.httpStatus],
     ["transport", (record) => record.transport],
@@ -1387,6 +1726,47 @@ if (
         console.log(`升级前备份：${result.backupPath}`);
       }
       console.log("Gateway 已重新启动。");
+    } else if (command === "sync-reset" && process.argv.length === 3) {
+      const result = resetMetricsSyncState();
+      if (!result.changed) {
+        console.log(`指标同步状态尚未创建，无需重置：${result.statePath}`);
+      } else {
+        console.log(`已重置指标同步水位（保留设备 ${result.deviceId}）：${result.statePath}`);
+        console.log(`重置前备份：${result.backupPath}`);
+        console.log("重启 Gateway 后将从第一条记录重新上报（中心按主键覆盖修复历史）。");
+      }
+    } else if (command === "sync-reset-restart" && process.argv.length === 3) {
+      const result = resetMetricsSyncStateWithGatewayRestart();
+      if (!result.changed) {
+        console.log(`指标同步状态尚未创建，无需重置：${result.statePath}`);
+      } else {
+        console.log(`已重置指标同步水位（保留设备 ${result.deviceId}）：${result.statePath}`);
+        console.log(`重置前备份：${result.backupPath}`);
+      }
+      console.log("Gateway 已重新启动，将从第一条记录重新上报。");
+    } else if (command === "prune" && process.argv.length === 4) {
+      const provider = process.argv[3];
+      const result = pruneProviderMetrics(provider);
+      console.log(`已清理 ${result.provider} 请求指标：本地删除 ${result.local.deleted} 条`);
+      if (result.center.skipped) {
+        console.log("中心库未配置或不存在，已跳过。");
+      } else {
+        console.log(`中心删除 ${result.center.deleted} 条`);
+      }
+      if (result.local.backupPath !== null) {
+        console.log(`本地备份：${result.local.backupPath}`);
+      }
+      if (!result.center.skipped && result.center.backupPath !== null) {
+        console.log(`中心备份：${result.center.backupPath}`);
+      }
+      for (const warning of result.warnings) {
+        console.warn(`警告：${warning}`);
+      }
+      if (result.center.skipped) {
+        console.log("Gateway 已重新启动。");
+      } else {
+        console.log("Gateway 与中心服务已重新启动。");
+      }
     } else if (command === "report") {
       const options = parseMetricsOptions(
         process.argv.slice(3),

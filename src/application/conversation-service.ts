@@ -6,6 +6,8 @@ import {
   type RequestMetricsQueryPort,
   type RequestMetricsCommandQuery,
   type RequestMetricsResult,
+  type TurnErrorPhase,
+  type TurnErrorRecorder,
 } from "./request-metrics-port.js";
 import type {
   AccountQueryPort,
@@ -114,6 +116,21 @@ export type ConversationQueryPort =
   & PluginQueryPort
   & PermissionQueryPort;
 
+export interface AgentRoleEntry {
+  name: string;
+  description: string | null;
+}
+
+export interface AgentRolePort {
+  listAgentRoles(): AgentRoleEntry[];
+}
+
+const builtInAgentRoles: AgentRoleEntry[] = [
+  { name: "default", description: "默认角色，继承当前模型与配置" },
+  { name: "explorer", description: "代码库探查：快速回答具体的代码库问题" },
+  { name: "worker", description: "执行与实现：完成归属明确的实现、修复或测试任务" },
+];
+
 interface QueuedFollowUp {
   threadId: string;
   input: TurnInput[];
@@ -155,6 +172,12 @@ export interface ConversationUseCases {
     selector: string,
     task: string,
   ): Promise<Submission & { skillName: string }>;
+  listAgentRoles(): AgentRoleEntry[];
+  invokeAgent(
+    target: ConversationTarget,
+    selector: string,
+    task: string,
+  ): Promise<Submission & { roleName: string }>;
   queueFollowUp(target: ConversationTarget, value: string): Promise<{ position: number }>;
   handleTurnCompleted(
     target: ConversationTarget,
@@ -230,6 +253,8 @@ export class ConversationService implements ConversationUseCases {
     private readonly vision?: VisionRecognitionPort,
     private readonly requestMetricsQuery?: RequestMetricsQueryPort,
     private readonly workspacePermissions?: WorkspacePermissionPort,
+    private readonly turnErrorRecorder?: TurnErrorRecorder,
+    private readonly agentRoles?: AgentRolePort,
   ) {}
 
   requestMetrics(
@@ -304,6 +329,62 @@ export class ConversationService implements ConversationUseCases {
       ]);
       return { ...submission, skillName: skill.name };
     });
+  }
+
+  listAgentRoles(): AgentRoleEntry[] {
+    let configured: AgentRoleEntry[];
+    try {
+      configured = this.agentRoles?.listAgentRoles() ?? [];
+    } catch {
+      throw new UserFacingError(
+        "agents.config-unreadable",
+        "Codex 子代理角色配置无法安全读取；请检查 ~/.codex/config.toml",
+      );
+    }
+    const configuredByName = new Map(
+      configured.map((role) => [role.name.toLowerCase(), role]),
+    );
+    const builtIn = builtInAgentRoles.map(
+      (role) => configuredByName.get(role.name.toLowerCase()) ?? role,
+    );
+    return [
+      ...builtIn,
+      ...configured.filter(
+        (role) => !builtInAgentRoles.some(
+          (candidate) => candidate.name.toLowerCase() === role.name.toLowerCase(),
+        ),
+      ),
+    ];
+  }
+
+  async invokeAgent(
+    target: ConversationTarget,
+    selector: string,
+    task: string,
+  ): Promise<Submission & { roleName: string }> {
+    const normalizedSelector = selector.trim();
+    const normalizedTask = task.trim();
+    if (!normalizedSelector || !normalizedTask) {
+      throw new UserFacingError(
+        "agents.usage",
+        "需要提供子代理角色名称或序号及任务内容",
+      );
+    }
+    const roles = this.listAgentRoles();
+    const role = resolveAgentRole(roles, normalizedSelector);
+    if (!role) {
+      throw new UserFacingError(
+        "agents.not-found",
+        "指定的子代理角色不存在；使用 /agents 查看可用角色",
+      );
+    }
+    const submission = await this.submitInput(target, [
+      {
+        type: "text",
+        text: `请使用 agent_type="${role.name}"、fork_turns="1" 的子代理执行以下任务，子代理完成后把最终结果回复给我：\n\n${normalizedTask}`,
+      },
+    ]);
+    return { ...submission, roleName: role.name };
   }
 
   private submitInput(
@@ -383,7 +464,12 @@ export class ConversationService implements ConversationUseCases {
     const active = this.core.activeTurn(target);
     const clientUserMessageId = `${gatewayUserMessageClientIdPrefix}${randomUUID()}`;
     if (active) {
-      await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId);
+      try {
+        await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId);
+      } catch (error) {
+        this.recordTurnError("steer", target, active.threadId, active.turnId, error);
+        throw error;
+      }
       return { threadId: active.threadId, turnId: active.turnId, steered: true };
     }
     return this.startNewTurn(target, input, clientUserMessageId);
@@ -467,6 +553,7 @@ export class ConversationService implements ConversationUseCases {
           overrides,
         );
       } catch (error) {
+        this.recordTurnError("start", target, threadId, null, error);
         this.queuedFollowUps.delete(key);
         throw error;
       }
@@ -1018,17 +1105,45 @@ export class ConversationService implements ConversationUseCases {
       ? await this.router.ensure(target, threadStartOptions)
       : await this.router.ensure(target);
     const workspace = this.router.workspace(target);
-    const result = await this.codex.startTurn(
-      binding.threadId,
-      input,
-      clientUserMessageId,
-      workspace.cwd,
-      this.turnOverrides(target),
-    );
+    let result;
+    try {
+      result = await this.codex.startTurn(
+        binding.threadId,
+        input,
+        clientUserMessageId,
+        workspace.cwd,
+        this.turnOverrides(target),
+      );
+    } catch (error) {
+      this.recordTurnError("start", target, binding.threadId, null, error);
+      throw error;
+    }
     this.models.markApplied(target);
     this.collaborationModes?.markApplied(target);
     this.core.markTurnStarted(target, binding.threadId, result.turnId);
     return { threadId: binding.threadId, turnId: result.turnId, steered: false };
+  }
+
+  private recordTurnError(
+    phase: TurnErrorPhase,
+    target: ConversationTarget,
+    threadId: string | null,
+    turnId: string | null,
+    error: unknown,
+  ): void {
+    if (!this.turnErrorRecorder) return;
+    const status = this.models.status(target);
+    this.turnErrorRecorder.recordTurnError({
+      provider: status.modelProvider ?? "openai",
+      model: status.model ?? null,
+      threadId,
+      turnId,
+      phase,
+      errorType: turnErrorType(error, phase),
+      errorCode: turnErrorCode(error),
+      message: turnErrorMessage(error),
+      recordedAtMs: Date.now(),
+    });
   }
 
   private turnOverrides(target: ConversationTarget) {
@@ -1230,4 +1345,46 @@ function pinnedFirst<T extends { isPinned: boolean }>(
 ): T[] {
   return sessions.toSorted((left, right) =>
     Number(right.isPinned) - Number(left.isPinned));
+}
+
+function resolveAgentRole(
+  roles: readonly AgentRoleEntry[],
+  selector: string,
+): AgentRoleEntry | undefined {
+  const normalized = selector.trim().toLowerCase();
+  const exact = roles.find((role) => role.name.toLowerCase() === normalized);
+  if (exact) return exact;
+  if (/^\d+$/u.test(normalized)) {
+    const index = Number(normalized) - 1;
+    return roles[index];
+  }
+  return undefined;
+}
+
+export function turnErrorType(error: unknown, phase: TurnErrorPhase): string {
+  const message = error instanceof Error ? error.message : "";
+  if (message.startsWith("You've hit your usage limit")) {
+    return "usage_limit_reached";
+  }
+  if (phase === "start") return "turn_start_error";
+  if (phase === "steer") return "turn_steer_error";
+  return "turn_notification_error";
+}
+
+export function turnErrorCode(error: unknown): string | null {
+  if (typeof error !== "object" || error === null) return null;
+  const code = (error as { code?: unknown }).code;
+  if (typeof code === "number" && Number.isSafeInteger(code)) {
+    return `rpc:${code}`;
+  }
+  return typeof code === "string" && code.length > 0 && code.length <= 64
+    ? code
+    : null;
+}
+
+export function turnErrorMessage(error: unknown): string | null {
+  if (!(error instanceof Error)) return null;
+  const message = error.message.replace(/\s+/gu, " ").trim();
+  if (message.length === 0) return null;
+  return message.length <= 500 ? message : `${message.slice(0, 500)}…`;
 }

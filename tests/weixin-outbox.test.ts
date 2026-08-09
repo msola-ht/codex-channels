@@ -458,6 +458,22 @@ describe("WeixinOutbox", () => {
     expect(fixture.sendText).not.toHaveBeenCalled();
   });
 
+  it("sends a channel image for an explicit target", async () => {
+    const fixture = outboxFixture({ value: true });
+
+    await fixture.outbox.sendChannelImage(
+      target,
+      "/private/generated/image.png",
+    );
+    await fixture.outbox.close();
+
+    expect(fixture.sendImage).toHaveBeenCalledWith({
+      actorId,
+      contextToken: "context-secret",
+      image: Buffer.from("validated-image"),
+    });
+  });
+
   it("rechecks authorization after reading a generated image", async () => {
     const allowed = { value: true };
     const fixture = outboxFixture(
@@ -517,6 +533,50 @@ describe("WeixinOutbox", () => {
       contextToken: "context-secret",
       text: "运行命令 · 失败 · exit 1 · first line second line · 耗时：125毫秒",
     });
+  });
+
+  it("hides successful wait calls but keeps subagent failures in compact mode", async () => {
+    const { outbox, sendText } = outboxFixture(
+      { value: true },
+      { operationUpdateDisplay: "compact" },
+    );
+
+    outbox.handle({
+      ...operationUpdated("completed", "subagent", "wait-1"),
+      operation: {
+        ...operationUpdated("completed", "subagent", "wait-1").operation,
+        action: "wait",
+      },
+    });
+    outbox.handle({
+      ...operationUpdated("failed", "subagent", "wait-2"),
+      operation: {
+        ...operationUpdated("failed", "subagent", "wait-2").operation,
+        action: "wait",
+      },
+    });
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledTimes(1);
+    expect(sendText.mock.calls[0]?.[0].text).toContain("等待子代理 · 失败");
+  });
+
+  it("sends one compact subagent start notice", async () => {
+    const { outbox, sendText } = outboxFixture();
+
+    outbox.handle({
+      type: "subagent.spawned",
+      target,
+      threadId: "parent-thread",
+      turnId: "parent-turn",
+      agentThreadId: "agent-thread-secret",
+      agentPath: "/root/review_task",
+    });
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledTimes(1);
+    expect(sendText.mock.calls[0]?.[0].text).toBe("子代理开始 · review_task");
+    expect(sendText.mock.calls[0]?.[0].text).not.toContain("agent-thread-secret");
   });
 
   it("summarizes repeated query operations once before Turn completion", async () => {

@@ -24,6 +24,17 @@ const target = {
 } as const;
 
 describe("Feishu output renderer", () => {
+  it("renders a compact subagent start notice", () => {
+    expect(renderFeishuOutput({
+      type: "subagent.spawned",
+      target,
+      threadId: "parent-thread",
+      turnId: "parent-turn",
+      agentThreadId: "agent-thread-secret",
+      agentPath: "/root/review_task",
+    })).toBe("## 子代理开始 · review_task");
+  });
+
   it("distinguishes a batch image limit from a single-image limit", () => {
     expect(renderFeishuUserFacingError(new UserFacingError(
       "image.too-large",
@@ -387,7 +398,6 @@ describe("Feishu output renderer", () => {
       "### 本次运行",
       "- 模型：gpt-test · medium · Fast 开启",
       "- 提供商：OpenAI 官方",
-      "- 最近请求缓存命中率：50.00%",
       "- **性能**",
       "  - 总耗时：1分5秒",
       "",

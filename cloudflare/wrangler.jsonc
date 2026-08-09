@@ -1,0 +1,14 @@
+{
+  "name": "codex-metrics-sync",
+  "main": "worker/src/index.js",
+  "compatibility_date": "2026-08-07",
+  "workers_dev": true,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "codex-metrics",
+      "database_id": "4bff236c-e07f-4d92-85f1-719d870f1ede",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

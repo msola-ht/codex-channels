@@ -36,6 +36,7 @@ export {
 } from "./reload-classifier.js";
 
 export interface GatewayConfig {
+  telegramEnabled: boolean;
   telegramBotToken: string;
   telegramAllowedUserIds: ReadonlySet<number>;
   telegramProxyUrl?: string;
@@ -63,8 +64,7 @@ export interface GatewayConfig {
   codexSandbox: "read-only" | "workspace-write";
   operationUpdateDisplay: OperationUpdateDisplay;
   planUpdatesEnabled: boolean;
-  priceCurrency: "auto" | "cny" | "usd";
-  priceCurrencyByProvider: Readonly<Record<string, "auto" | "cny" | "usd">>;
+  priceCurrency: "cny" | "usd";
   apiProviders: ReadonlyArray<{
     id: string;
     name: string;
@@ -84,6 +84,32 @@ export interface GatewayConfig {
   stateDatabasePath: string;
   approvalTimeoutMs: number;
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace";
+  webui?: {
+    host: "127.0.0.1" | "::1" | "0.0.0.0";
+    port: number;
+    token?: string;
+  };
+  metricsSync?: {
+    enabled: boolean;
+    endpoint?: string;
+    deviceToken?: string;
+    deviceId?: string;
+    batchSize: number;
+    intervalSeconds: number;
+  };
+  metricsCenter?: {
+    enabled: boolean;
+    host: "127.0.0.1" | "::1" | "0.0.0.0";
+    port: number;
+    token?: string;
+    deviceToken?: string;
+    databasePath: string;
+  };
+  metricsView?: {
+    enabled: boolean;
+    endpoint?: string;
+    token?: string;
+  };
 }
 
 export interface ConfiguredWorkspace {
@@ -96,15 +122,6 @@ export interface ConfiguredWorkspace {
 }
 
 export type OperationUpdateDisplay = "full" | "compact" | "hidden";
-
-export function priceCurrencyForProvider(
-  config: Pick<GatewayConfig, "priceCurrency" | "priceCurrencyByProvider">,
-  provider: string | null | undefined,
-): "auto" | "cny" | "usd" {
-  return provider === null || provider === undefined
-    ? config.priceCurrency
-    : config.priceCurrencyByProvider[provider] ?? config.priceCurrency;
-}
 
 export function isDebugLogLevel(
   level: GatewayConfig["logLevel"],
@@ -231,15 +248,16 @@ function loadValidatedConfigDocument(
   );
   let proxyUrl: string | undefined;
   try {
-    proxyUrl = resolveHttpProxyUrl(raw.telegram.proxy_url);
+    proxyUrl = resolveHttpProxyUrl(raw.telegram?.proxy_url);
   } catch (error) {
     throw new ConfigurationError(error instanceof Error ? error.message : String(error));
   }
   return {
-    telegramBotToken: raw.telegram.bot_token,
-    telegramAllowedUserIds: new Set(raw.telegram.allowed_user_ids),
+    telegramEnabled: Boolean(raw.telegram?.bot_token?.trim()),
+    telegramBotToken: raw.telegram?.bot_token ?? "",
+    telegramAllowedUserIds: new Set(raw.telegram?.allowed_user_ids ?? []),
     ...(proxyUrl ? { telegramProxyUrl: proxyUrl } : {}),
-    telegramMessageFormat: raw.telegram.message_format,
+    telegramMessageFormat: raw.telegram?.message_format ?? "html",
     ...(raw.feishu?.enabled
       ? {
           feishu: {
@@ -272,15 +290,56 @@ function loadValidatedConfigDocument(
     operationUpdateDisplay: raw.display.operation_updates,
     planUpdatesEnabled: raw.display.plan_updates,
     priceCurrency: raw.display.price_currency,
-    priceCurrencyByProvider: {
-      ...(raw.display.price_currency_by_provider ?? {}),
-    },
     apiProviders: raw.api_providers.map(toApiProviderConfig),
     vision: toVisionConfig(raw.vision, raw.api_providers),
     credentialsDirectory: resolve(baseDirectory, "credentials"),
     stateDatabasePath: resolveConfiguredPath(raw.storage.database_path, baseDirectory),
     approvalTimeoutMs: raw.approval.timeout_seconds * 1000,
     logLevel: raw.logging.level,
+    ...(raw.webui ? { webui: raw.webui } : {}),
+    metricsSync: {
+      enabled: raw.metrics.sync.enabled,
+      ...(raw.metrics.sync.endpoint
+        ? { endpoint: raw.metrics.sync.endpoint }
+        : {}),
+      ...(raw.metrics.sync.device_token
+        ? { deviceToken: raw.metrics.sync.device_token }
+        : {}),
+      ...(raw.metrics.sync.device_id
+        ? { deviceId: raw.metrics.sync.device_id }
+        : {}),
+      batchSize: raw.metrics.sync.batch_size ?? 200,
+      intervalSeconds: raw.metrics.sync.interval_seconds ?? 60,
+    },
+    ...(raw.metrics.center
+      ? {
+          metricsCenter: {
+            enabled: raw.metrics.center.enabled,
+            host: raw.metrics.center.host,
+            port: raw.metrics.center.port,
+            ...(raw.metrics.center.token
+              ? { token: raw.metrics.center.token }
+              : {}),
+            ...(raw.metrics.center.device_token
+              ? { deviceToken: raw.metrics.center.device_token }
+              : {}),
+            databasePath: raw.metrics.center.database_path,
+          },
+        }
+      : {}),
+    ...(raw.metrics.view
+      ? {
+          metricsView: {
+            enabled: raw.metrics.view.enabled,
+            ...(raw.metrics.view.endpoint
+              ? { endpoint: raw.metrics.view.endpoint }
+              : {}),
+            ...(raw.metrics.view.token
+              ? { token: raw.metrics.view.token }
+              : {}),
+          },
+        }
+      : {}),
   };
 }
 

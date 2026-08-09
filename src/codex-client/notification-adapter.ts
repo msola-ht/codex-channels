@@ -344,19 +344,47 @@ function toItemEvent(
         }
       : undefined;
   }
+  if (item.type === "subAgentActivity") {
+    if (phase !== "completed") {
+      return undefined;
+    }
+    const agentThreadId = nonEmptyString(item.agentThreadId);
+    const agentPath = nonEmptyString(item.agentPath);
+    const kind = parseSubagentActivityKind(item.kind);
+    return agentThreadId && agentPath && kind
+      ? {
+          type: "item.subagentActivity",
+          threadId,
+          turnId,
+          itemId,
+          agentThreadId,
+          agentPath,
+          kind,
+        }
+      : undefined;
+  }
   const operation = toOperationUpdate(item, phase);
   return operation
     ? { type: "item.operation.updated", threadId, turnId, operation }
     : undefined;
 }
 
+function parseSubagentActivityKind(
+  value: unknown,
+): "started" | "interacted" | "interrupted" | undefined {
+  return value === "started" || value === "interacted" || value === "interrupted"
+    ? value
+    : undefined;
+}
+
 function toTurnErrorEvent(value: unknown): ConversationInputEvent | undefined {
   const params = asRecord(value);
+  const threadId = nonEmptyString(params?.threadId);
   const turnId = nonEmptyString(params?.turnId);
   const error = parseTurnError(params?.error);
   const willRetry = params?.willRetry;
-  return turnId && error.valid && error.value && typeof willRetry === "boolean"
-    ? { type: "turn.error", turnId, message: error.value, willRetry }
+  return threadId && turnId && error.valid && error.value && typeof willRetry === "boolean"
+    ? { type: "turn.error", threadId, turnId, message: error.value, willRetry }
     : undefined;
 }
 

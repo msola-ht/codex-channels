@@ -55,6 +55,25 @@ DeepSeek Provider。
 Gateway 会在创建或追加 Turn 前检查模型能力：未启用外部图片识别时明确拒绝图片并提示切换到
 支持图片的模型；启用后则先走独立视觉代理，避免产生“DeepSeek 已经原生看图”的误解。
 
+## 网页搜索
+
+DeepSeek（当前 `deepseek-v4-flash` + Codex 0.146.0）支持网页搜索，且不依赖 OpenAI：
+
+- DeepSeek API 会向模型提供名为 `search` 的搜索工具；Codex 侧统一以 `web_search` item
+  回传（`query`、`action` 和结构化 `results`）。实测能返回带标题、URL、摘要和发布日期的
+  真实网页结果。
+- 该搜索是 DeepSeek API 自身的能力，不调用 OpenAI 的 `/v1/alpha/search`；本机是否存在
+  OpenAI 登录不影响 DeepSeek 搜索。Codex 的独立搜索扩展 `web.run` 不适用于 DeepSeek
+  （DeepSeek 没有 `/alpha/search` 端点，也未声明 `supports_standalone_web_search`）。
+- 网关链路无需额外配置：搜索请求包含在 `/responses` 模型请求内，经本地 Provider 代理
+  原样透传；会话事件里出现 `web_search` item 即表示模型真的调用了搜索。
+- 计费与统计：搜索是模型请求的一部分，按 DeepSeek API 用量计费，计入请求次数、Token
+  与费用统计；不消耗 OpenAI 额度。
+- 验证方式：直接让 DeepSeek 会话执行搜索任务，观察事件日志；或运行
+  `codex exec -p deepseek -C <工作目录> --skip-git-repo-check "请搜索……"` 直连测试。
+- 失效边界：若 DeepSeek API 对该模型关闭搜索、上游工具名称或响应结构变化，或网关代理
+  不再透传搜索工具，则搜索不可用；当前不支持把 DeepSeek 搜索路由到 OpenAI 官方搜索。
+
 ## App Server 与 Thread
 
 切换模式由同一个后台服务监管 OpenAI 主 App Server 和隔离的 DeepSeek App Server。服务入口读取并
@@ -80,16 +99,17 @@ App Server 服务会共同重建受监管实例。
 - Turn 完成摘要按同一 Turn 的全部模型请求聚合请求次数、累计模型耗时、缓存命中与不含推理的输出
   速度；DeepSeek 额外展示最后一次请求的可观测首字延时，以及整轮综合思考速度和含推理生成速度。
   文本、函数调用参数和自定义工具参数增量都计入不含推理的输出时间窗。
-- OpenAI 的隐藏推理没有可靠计时流，因此不展示首字延时、推理 Token、思考速度或含推理生成
-  速度；这些字段也不会通过推理摘要时间进行估算。
+- OpenAI 的隐藏推理没有可靠计时流，因此不展示首字延时、思考速度或含推理生成速度等需要
+  计时流的字段，也不会通过推理摘要时间估算；官方返回的推理 Token 计数仍与所有 Provider
+  一样展示。
 - OpenAI Fast 和周限不会显示在 DeepSeek Thread 上。
 - `/usage` 在 OpenAI Thread 中显示 Codex Token 汇总，在 DeepSeek Thread 中调用官方余额接口。
 - `/metrics` 从独立指标库读取当前 Thread 最近 Turn 的请求累计和最近一次直接 API 请求；输入量是
   多次请求的累计值，不表示当前上下文占用。`/metrics providers|models|errors 24h|7d|30d` 与
   OpenAI 官方及第三方直接 API 使用相同统计口径，不为 DeepSeek 建立专属统计表。新请求按当次
-  价格快照估算 API 参考费用，参考总价默认按人民币展示（`[display].price_currency` 可切换），
-  先出总计、再列出输入、缓存、输出三项价格明细，不显示目录静态单价，但会按本机实际用量折算
-  并展示平均参考价（元/100M，人民币）；历史记录不按新价格回算。
+  价格快照估算 API 参考费用，总价按 `display.price_currency` 全局统一展示（默认 `cny`
+  人民币），先出总计、再列出输入、缓存、输出三项价格明细，不显示目录静态单价，但会按本机
+  实际用量折算并展示均价（元/100M，人民币）；历史记录不按新价格回算。
 - `/limits` 当前只支持 OpenAI；DeepSeek 不会回退显示 OpenAI 限额。
 - DeepSeek 不支持 Fast，执行 `/fast on` 或 `/fast off` 会明确拒绝。
 
@@ -104,6 +124,44 @@ App Server 服务会为每个启用的 Provider 启动独立的本机回环统�
 HTTP/SSE、Responses WebSocket、压缩和模型目录请求，复用统一网络代理，并保留用户已有的
 `openai_base_url` 上游。认证 Header、请求正文和响应正文只做内存转发，不写入指标或日志。
 Gateway 停止或重启时计时指标可能丢失，但模型请求不会因此中断。
+
+## 子代理角色
+
+切换模式可在 Codex 的 multi_agent_v2 中把 DeepSeek 作为子代理使用，并让子代理请求自动计入
+模型指标。启用后运行 `codexc service restart all` 生效：
+
+```bash
+codexc agents enable-deepseek
+codexc agents status
+codexc agents disable-deepseek
+```
+
+`enable-deepseek` 在 `~/.codex/config.toml` 中开启 `features.multi_agent_v2`，并注册名为 `ds`
+的 `agents.ds` 角色。角色文件 `~/.codex/codex-connect-ds-subagent.config.toml` 由 App Server
+服务启动时动态生成，指向本机 DeepSeek 统计代理，因此子代理请求会进入与直接 API 相同的指标、
+压缩和费用统计链路；服务退出时角色文件会被删除。角色文件只写模型、Provider 和 `env_key`
+引用，不写 API Key，认证密钥仍只进入 App Server 子进程环境。
+
+`disable-deepseek` 移除 `agents.ds` 角色并关闭 `multi_agent_v2`，角色文件由服务在退出或重启时
+清理。需要子代理时，主模型调用 `spawn_agent` 并选择角色 `ds`。
+
+当前 DS 角色采用 V2 单次兼容模式：当前用户消息必须包含完整任务，主模型调用时必须传
+`agent_type="ds"` 和 `fork_turns="1"`。DS 从继承的最近一个 Turn 中读取最后一条用户消息，
+不解析 V2 的加密任务正文。该模式不支持 `followup_task`、`send_message`、多个 DS 并行拆分或
+依赖后续补充信息；这些场景应使用 OpenAI 官方子代理。
+
+子代理统计会在指标库中标注：Gateway 捕获父线程里的 `subAgentActivity` 通知后，把子代理
+线程 ID 和代理路径写入 `subagent_threads` 表，`codexc metrics threads` 与 WebUI Threads
+页面显示“子代理 · <代理路径>”。该标注需要指标库 Schema v7；升级前先停止 Gateway，再运行
+`codexc metrics upgrade`（自动备份，可回滚）。
+
+Gateway 只在父线程收到官方 `collabAgentToolCall.agentsStates` 子代理终态后，向父会话推送
+“子代理完成”或“子代理失败”卡片，不再以最后模型请求后的静默时间推断完成。卡片基于指标库
+汇总展示任务名、模型、请求次数、Token、费用与全量计价时的每 100M Token 均价（跟随全局价格
+显示），不依赖 App Server 订阅子代理线程。官方终态后约 5 秒只用于等待指标收敛；没有模型指标
+时仍发送零统计终态卡片，指标写入或读取失败则显示“统计暂不可用”。收敛结束后会等待当前指标 Writer 水位
+落库，避免积压时读取部分汇总。缓存、推理、输入/缓存/输出费用分项和模型请求聚合耗时仅在调试
+模式展示。紧凑操作模式只保留子代理启动与失败，成功的等待和交互操作不再各自生成完成卡片。
 
 ## 应用配置
 

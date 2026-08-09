@@ -32,11 +32,11 @@
   以及 Provider 账户适配器与查询窄端口；不同来源不得共用含义不一致的字段。
 - `provider-account-service.ts`：维护编译期显式 Provider 账户适配器注册表；OpenAI 适配器复用
   App Server 账户查询，未知 Provider 默认返回不支持，不回退到 OpenAI。
-- `exchange-rate-port.ts`：定义稳定汇率快照与价格显示币种解析，并按实际启用 Provider 判断是否
-  需要启动 USD/CNY 汇率刷新；Application 不执行网络请求或读取汇率缓存。
+- `exchange-rate-port.ts`：定义稳定汇率快照与全局价格显示币种（`cny` / `usd`），并在全局币种为
+  人民币时决定启动 USD/CNY 汇率刷新；Application 不执行网络请求或读取汇率缓存。
 - `request-metrics-port.ts`：定义 `/metrics` 使用的当前 Thread 最近 Turn 运行聚合、整个 Thread
   指标累计、最近直接 API 请求，以及最近 24 小时、7 天或 30 天的全局/提供商/模型聚合和异常请求
-  只读摘要；聚合中的远程压缩摘要单列实际请求模型、请求数、Token 与参考费用；
+  只读摘要；聚合中的上下文压缩摘要单列实际请求模型、请求数、Token 与参考费用；
   直接 API 保留稳定提供商 ID，并可携带配置中的显示名称；不向 Application 暴露 SQLite、价格快照
   或请求正文。
 - `vision-port.ts`：定义模型无原生图片能力时使用的稳定识别端口、严格结果 Schema 和已完成但

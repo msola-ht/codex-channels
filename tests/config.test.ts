@@ -133,6 +133,57 @@ describe("Gateway config.toml", () => {
     ]);
   });
 
+  it("allows an empty Telegram configuration when Feishu is enabled", () => {
+    const fixture = createFixture({
+      telegram: {
+        bot_token: "",
+        allowed_user_ids: [],
+        message_format: "html",
+      },
+      feishu: {
+        enabled: true,
+        app_id: "cli_0123456789abcdef",
+        app_secret: "secret",
+        allowed_open_ids: ["ou_actor"],
+      },
+    });
+
+    const runtime = loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config;
+
+    expect(runtime.telegramEnabled).toBe(false);
+    expect(runtime.feishu).toBeDefined();
+  });
+
+  it("rejects a configuration without any enabled channel", () => {
+    const fixture = createFixture({
+      telegram: {
+        bot_token: "",
+        allowed_user_ids: [],
+        message_format: "html",
+      },
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow("至少需要配置一个通讯渠道");
+  });
+
+  it("requires allowed users when a Telegram token is configured", () => {
+    const fixture = createFixture({
+      telegram: {
+        bot_token: "secret",
+        allowed_user_ids: [],
+        message_format: "html",
+      },
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow("Telegram 启用时必须配置 allowed_user_ids");
+  });
+
   it("loads per-workspace permissions and maps approval_policy to camelCase", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
     const workspace = join(root, "workspace");
@@ -334,6 +385,7 @@ describe("Gateway config.toml", () => {
     delete document.display;
     delete document.storage;
     delete document.logging;
+    delete document.metrics;
     const telegram = document.telegram;
     const codex = document.codex;
     if (
@@ -376,12 +428,19 @@ describe("Gateway config.toml", () => {
     expect(persisted.display).toEqual({
       operation_updates: "compact",
       plan_updates: true,
-      price_currency: "auto",
+      price_currency: "cny",
     });
     expect(persisted.storage).toEqual({
       database_path: "data/gateway.sqlite3",
     });
     expect(persisted.logging).toEqual({ level: "info" });
+    expect(persisted.metrics).toEqual({
+      sync: {
+        enabled: false,
+        batch_size: 200,
+        interval_seconds: 60,
+      },
+    });
     expect(persisted.feishu).toBeUndefined();
     expect(persisted.weixin).toBeUndefined();
     expect(readFixture(fixture.configPath)).toContain(
@@ -476,28 +535,37 @@ describe("Gateway config.toml", () => {
     }).config.planUpdatesEnabled).toBe(false);
   });
 
-  it("preserves explicit price currency and per-provider overrides", () => {
+  it("preserves the explicit global price currency", () => {
     const fixture = createFixture({
       display: {
         operation_updates: "compact",
         plan_updates: true,
         price_currency: "cny",
-        price_currency_by_provider: {
-          deepseek: "cny",
-          openai: "usd",
-        },
       },
     });
 
     expect(loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
     }).config.priceCurrency).toBe("cny");
-    expect(loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    }).config.priceCurrencyByProvider).toEqual({
-      deepseek: "cny",
-      openai: "usd",
+  });
+
+  it("rejects the removed automatic price currency and per-provider overrides", () => {
+    const automatic = createFixture({
+      display: { price_currency: "auto" },
     });
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: automatic.configPath,
+    })).toThrow(/price_currency/u);
+
+    const perProvider = createFixture({
+      display: {
+        price_currency: "cny",
+        price_currency_by_provider: { openai: "usd" },
+      },
+    });
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: perProvider.configPath,
+    })).toThrow(/price_currency_by_provider/u);
   });
 
   it("rejects the removed boolean operation update setting", () => {
@@ -508,6 +576,220 @@ describe("Gateway config.toml", () => {
     expect(() => loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
     })).toThrow(/show_operation_updates/u);
+  });
+
+  it("loads optional webui host, port and token", () => {
+    const fixture = createFixture({
+      webui: {
+        host: "0.0.0.0",
+        port: 9000,
+        token: "webui-token",
+      },
+    });
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.webui).toEqual({
+      host: "0.0.0.0",
+      port: 9000,
+      token: "webui-token",
+    });
+  });
+
+  it("keeps webui out of runtime config when the section is absent", () => {
+    const fixture = createFixture();
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.webui).toBeUndefined();
+  });
+
+  it("rejects invalid webui host, port or unknown keys", () => {
+    const invalidHost = createFixture({
+      webui: { host: "0.0.0.1" },
+    });
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: invalidHost.configPath,
+    })).toThrow(/webui/u);
+
+    const invalidPort = createFixture({
+      webui: { port: 0 },
+    });
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: invalidPort.configPath,
+    })).toThrow(/webui/u);
+
+    const unknownKey = createFixture({
+      webui: { bind: "127.0.0.1" },
+    });
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: unknownKey.configPath,
+    })).toThrow(/webui/u);
+  });
+
+  it("rejects non-loopback webui without a token", () => {
+    const fixture = createFixture({
+      webui: { host: "0.0.0.0" },
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow(/绑定非回环地址时必须设置 token/u);
+  });
+
+  it("loads metrics sync defaults when the section is absent", () => {
+    const fixture = createFixture();
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.metricsSync).toEqual({
+      enabled: false,
+      batchSize: 200,
+      intervalSeconds: 60,
+    });
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.metricsCenter).toBeUndefined();
+  });
+
+  it("loads an enabled metrics sync section", () => {
+    const fixture = createFixture({
+      metrics: {
+        sync: {
+          enabled: true,
+          endpoint: "https://worker.example.com/api/ingest",
+          device_token: "device-token",
+          device_id: "node-a",
+          batch_size: 100,
+          interval_seconds: 120,
+        },
+      },
+    });
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.metricsSync).toEqual({
+      enabled: true,
+      endpoint: "https://worker.example.com/api/ingest",
+      deviceToken: "device-token",
+      deviceId: "node-a",
+      batchSize: 100,
+      intervalSeconds: 120,
+    });
+  });
+
+  it("rejects enabled metrics sync without endpoint or token", () => {
+    const noEndpoint = createFixture({
+      metrics: { sync: { enabled: true, device_token: "token" } },
+    });
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: noEndpoint.configPath,
+    })).toThrow(/metrics\.sync/u);
+
+    const noToken = createFixture({
+      metrics: { sync: { enabled: true, endpoint: "https://worker.example.com/api/ingest" } },
+    });
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: noToken.configPath,
+    })).toThrow(/metrics\.sync/u);
+  });
+
+  it("rejects non-https metrics sync endpoint", () => {
+    const fixture = createFixture({
+      metrics: {
+        sync: {
+          enabled: true,
+          endpoint: "http://worker.example.com/api/ingest",
+          device_token: "token",
+        },
+      },
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow(/HTTPS/u);
+  });
+
+  it("allows loopback and private http metrics sync endpoints", () => {
+    for (const endpoint of [
+      "http://127.0.0.1:8790/api/ingest",
+      "http://192.168.1.10:8790/api/ingest",
+      "http://[::1]:8790/api/ingest",
+    ]) {
+      const fixture = createFixture({
+        metrics: {
+          sync: {
+            enabled: true,
+            endpoint,
+            device_token: "token",
+          },
+        },
+      });
+      expect(loadRuntimeConfig({
+        CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+      }).config.metricsSync).toMatchObject({ endpoint });
+    }
+  });
+
+  it("loads an enabled metrics center section", () => {
+    const fixture = createFixture({
+      metrics: {
+        center: {
+          enabled: true,
+          host: "127.0.0.1",
+          port: 8790,
+          token: "center-token",
+          device_token: "device-token",
+          database_path: "data/central-metrics.sqlite3",
+        },
+      },
+    });
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.metricsCenter).toEqual({
+      enabled: true,
+      host: "127.0.0.1",
+      port: 8790,
+      token: "center-token",
+      deviceToken: "device-token",
+      databasePath: "data/central-metrics.sqlite3",
+    });
+  });
+
+  it("rejects non-loopback metrics center without a token", () => {
+    const fixture = createFixture({
+      metrics: {
+        center: {
+          enabled: true,
+          host: "0.0.0.0",
+          port: 8790,
+          token: "center-token",
+        },
+      },
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow(/metrics\.center/u);
+  });
+
+  it("rejects identical metrics center ingest and view tokens", () => {
+    const fixture = createFixture({
+      metrics: {
+        center: {
+          enabled: true,
+          host: "127.0.0.1",
+          port: 8790,
+          token: "shared-token",
+          device_token: "shared-token",
+        },
+      },
+    });
+
+    expect(() => loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toThrow(/必须不同/u);
   });
 
   it("loads an explicitly enabled Feishu account", () => {

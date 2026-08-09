@@ -10,6 +10,7 @@ import type {
 } from "../../conversation-core/index.js";
 import {
   conversationCommandHelpLines,
+  formatConversationAgents,
   formatConversationArtifacts,
   formatConversationCollaborationMode,
   formatConversationCommandOutcome,
@@ -31,6 +32,7 @@ import {
 } from "../conversation-command-format.js";
 import {
   createStartupPresentation,
+  createSubagentCompletedPresentation,
   createTurnCompletedPresentation,
   renderStructuredLifecyclePresentation,
   type LifecyclePresentation,
@@ -105,6 +107,19 @@ export function renderWeixinTurnCompleted(
   );
 }
 
+export function renderWeixinSubagentCompleted(
+  event: Extract<OutputEvent, { type: "subagent.completed" }>,
+  priceCurrency?: (
+    provider: string | null | undefined,
+  ) => DisplayPriceCurrency,
+  exchangeRate?: ExchangeRateSnapshot | null,
+  debug = false,
+): string {
+  return renderWeixinLifecyclePresentation(
+    createSubagentCompletedPresentation(event, priceCurrency, exchangeRate, debug),
+  );
+}
+
 export function renderWeixinCommandResult(
   result: ConversationCommandResult,
   priceCurrency?: (
@@ -129,6 +144,8 @@ export function renderWeixinCommandResult(
       return formatConversationCollaborationMode(result);
     case "skills":
       return formatConversationSkills(result);
+    case "agents":
+      return formatConversationAgents(result);
     case "mcp":
       return formatConversationMcp(result);
     case "plugins":

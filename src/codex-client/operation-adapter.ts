@@ -1,6 +1,8 @@
 import type {
   OperationStatus,
   OperationUpdate,
+  SubagentState,
+  SubagentStatus,
 } from "../conversation-core/index.js";
 
 type ItemPhase = "started" | "completed";
@@ -63,10 +65,17 @@ export function toOperationUpdate(
     }
     case "collabAgentToolCall": {
       const tool = stringValue(item.tool);
+      const receiverThreadIds = arrayValue(item.receiverThreadIds)
+        .map(stringValue)
+        .filter((threadId): threadId is string => threadId !== undefined);
+      const subagentStates = parseSubagentStates(item.agentsStates);
       return {
         ...common,
         kind: "subagent",
+        status: subagentOperationStatus(common.status, subagentStates),
         ...(tool ? { action: tool } : {}),
+        ...(receiverThreadIds.length > 0 ? { receiverThreadIds } : {}),
+        ...(subagentStates.length > 0 ? { subagentStates } : {}),
       };
     }
     case "subAgentActivity": {
@@ -116,6 +125,44 @@ export function toOperationUpdate(
     default:
       return undefined;
   }
+}
+
+function subagentOperationStatus(
+  status: OperationStatus,
+  states: SubagentState[],
+): OperationStatus {
+  return states.some((state) =>
+    state.status === "errored"
+    || state.status === "interrupted"
+    || state.status === "notFound"
+  )
+    ? "failed"
+    : status;
+}
+
+function parseSubagentStates(value: unknown): SubagentState[] {
+  const states = recordValue(value);
+  if (states === undefined) {
+    return [];
+  }
+  return Object.entries(states)
+    .flatMap(([threadId, rawState]) => {
+      const status = subagentStatus(recordValue(rawState)?.status);
+      return status === undefined ? [] : [{ threadId, status }];
+    })
+    .sort((left, right) => left.threadId.localeCompare(right.threadId));
+}
+
+function subagentStatus(value: unknown): SubagentStatus | undefined {
+  return value === "pendingInit"
+      || value === "running"
+      || value === "interrupted"
+      || value === "completed"
+      || value === "errored"
+      || value === "shutdown"
+      || value === "notFound"
+    ? value
+    : undefined;
 }
 
 export function sanitizeOperationText(value: string): string {

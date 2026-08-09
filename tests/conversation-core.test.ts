@@ -306,6 +306,78 @@ describe("ConversationCore", () => {
       .toHaveProperty("contextCompactionCount", 2);
   });
 
+  it("publishes subagent spawn activity for a bound parent thread", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+    const core = new ConversationCore({
+      allBindings: () => [],
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+
+    handleNotification(core, {
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "subAgentActivity",
+          id: "item-1",
+          kind: "started",
+          agentThreadId: "subagent-thread-1",
+          agentPath: "/root/ds_probe",
+        },
+      },
+    });
+    await output.close();
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "subagent.spawned",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      agentThreadId: "subagent-thread-1",
+      agentPath: "/root/ds_probe",
+    }));
+  });
+
+  it("does not present follow-up or interruption activity as a new subagent", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+    const core = new ConversationCore({
+      allBindings: () => [],
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+
+    for (const kind of ["interacted", "interrupted"] as const) {
+      core.handle({
+        type: "item.subagentActivity",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: `item-${kind}`,
+        kind,
+        agentThreadId: "subagent-thread-1",
+        agentPath: "/root/ds_probe",
+      });
+    }
+    await output.close();
+
+    expect(events).not.toContainEqual(expect.objectContaining({
+      type: "subagent.spawned",
+    }));
+  });
+
   it("does not invent a successful completion for a malformed turn status", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const events: OutputEvent[] = [];
@@ -1206,7 +1278,7 @@ describe("ConversationCore", () => {
     expect(completed?.timing?.generationTokensPerSecond).toBeCloseTo(90 / 2.3);
   });
 
-  it("keeps only non-reasoning output timing for OpenAI", async () => {
+  it("keeps the reasoning token count but omits timing-stream fields for OpenAI", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const events: OutputEvent[] = [];
     output.subscribe("test", (event) => {
@@ -1324,7 +1396,7 @@ describe("ConversationCore", () => {
       firstResponseLatencyMs: 1_000,
     });
     expect(completed?.timing?.ttftMs).toBeUndefined();
-    expect(completed?.timing?.reasoningTokens).toBeUndefined();
+    expect(completed?.timing?.reasoningTokens).toBe(50);
     expect(completed?.timing?.thinkingTokensPerSecond).toBeUndefined();
     expect(completed?.timing?.generationTokensPerSecond).toBeUndefined();
   });

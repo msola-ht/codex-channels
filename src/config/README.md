@@ -18,6 +18,10 @@
 允许名单，也不处理未知字段或不受支持的版本。运行语义校验失败、文件发生并发修改或原子写回失败时
 不得修改原配置，并以配置错误失败关闭。
 
+Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bot_token` 缺失或空白时运行配置
+将其视为未启用，不创建 Telegram Surface，也不要求允许用户列表。Token 非空时
+`allowed_user_ids` 必须至少包含一个正整数。飞书和微信继续以各自的 `enabled` 字段决定是否启用。
+
 `network` 表由 Telegram、飞书和微信共用，按显式 TOML、标准代理环境变量、受支持系统代理的
 顺序合并；Bootstrap 再按每个请求的目标协议和 `NO_PROXY` 选择直连或 HTTP(S) 代理。Telegram
 私有 `proxy_url` 只覆盖 Telegram，并优先于共享代理和 `NO_PROXY`。项目不修改系统代理，也不

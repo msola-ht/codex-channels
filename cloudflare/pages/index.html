@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codex 多设备指标</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --border: #d4d4d8;
+      --muted: #71717a;
+      --card: #ffffff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --border: #3f3f46;
+        --muted: #a1a1aa;
+        --card: #18181b;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--background, #fafafa);
+      color: #18181b;
+    }
+    @media (prefers-color-scheme: dark) {
+      body { background: #09090b; color: #fafafa; }
+    }
+    main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
+    h1 { font-size: 20px; margin: 0 0 16px; }
+    h2 { font-size: 15px; margin: 24px 0 8px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    .card .label { font-size: 12px; color: var(--muted); }
+    .card .value { font-size: 18px; font-weight: 600; margin-top: 4px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 500; }
+    .error { color: #dc2626; }
+    .empty { color: var(--muted); padding: 12px 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Codex 多设备指标</h1>
+    <div id="status" class="error"></div>
+    <section>
+      <h2>概览</h2>
+      <div id="overview-cards" class="cards"></div>
+      <div id="overview-costs"></div>
+    </section>
+    <section>
+      <h2>按提供商</h2>
+      <div id="providers"></div>
+    </section>
+    <section>
+      <h2>设备</h2>
+      <div id="devices"></div>
+    </section>
+    <section>
+      <h2>最近请求</h2>
+      <div id="requests"></div>
+    </section>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -54,9 +54,12 @@ export function formatVisionCompleted(details: {
     ...(!debug || details.elapsedMs === undefined
       ? []
       : [`- 视觉 API 耗时：${formatElapsedDuration(details.elapsedMs)}`]),
-    ...(tokenParts.length === 0 || totalTokens === undefined
+    ...(totalTokens === undefined
       ? []
-      : [`- **Token**：${formatInteger(totalTokens)}`, ...tokenParts]),
+      : [
+          `- **Token**：${formatInteger(totalTokens)}`,
+          ...(debug ? tokenParts : []),
+        ]),
     "",
     "- 正在交给当前模型处理。",
   ].join("\n");

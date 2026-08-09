@@ -9,22 +9,9 @@ import { priceDisplayNeedsExchangeRate } from "../src/application/index.js";
 import { RemoteExchangeRate } from "../src/bootstrap/exchange-rate.js";
 
 describe("priceDisplayNeedsExchangeRate", () => {
-  it("only enables exchange rates for active providers displayed in CNY", () => {
-    const automatic = {
-      priceCurrency: "auto" as const,
-      priceCurrencyByProvider: {},
-    };
-
-    expect(priceDisplayNeedsExchangeRate(automatic, ["openai"])).toBe(false);
-    expect(priceDisplayNeedsExchangeRate(automatic, ["deepseek"])).toBe(true);
-    expect(priceDisplayNeedsExchangeRate({
-      priceCurrency: "auto",
-      priceCurrencyByProvider: { deepseek: "usd" },
-    }, ["deepseek"])).toBe(false);
-    expect(priceDisplayNeedsExchangeRate({
-      priceCurrency: "usd",
-      priceCurrencyByProvider: { relay: "cny" },
-    }, ["openai", "relay"])).toBe(true);
+  it("only enables exchange rates when the global currency is CNY", () => {
+    expect(priceDisplayNeedsExchangeRate({ priceCurrency: "cny" })).toBe(true);
+    expect(priceDisplayNeedsExchangeRate({ priceCurrency: "usd" })).toBe(false);
   });
 });
 

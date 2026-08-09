@@ -77,7 +77,8 @@ describe("SqliteModelRequestMetricsStore", () => {
       .all() as Array<{ name: string }>;
     inspection.close();
     expect(columns.map((column) => column.name).filter((name) =>
-      /body|content|prompt|message|image|authorization/iu.test(name)
+      name !== "error_message"
+      && /body|content|prompt|message|image|authorization/iu.test(name)
     )).toEqual([]);
   });
 
@@ -101,6 +102,8 @@ describe("SqliteModelRequestMetricsStore", () => {
       latestTurn: {
         pricingCurrency: "USD",
         pricedRequestCount: 1,
+        pricedInputTokens: 1_000,
+        pricedOutputTokens: 100,
         totalCostNanos: 1_400_000,
         uncachedInputPricePerMillionNanos: 2_000_000_000,
         cachedInputPricePerMillionNanos: 1_000_000_000,
@@ -110,6 +113,8 @@ describe("SqliteModelRequestMetricsStore", () => {
       threadAggregate: {
         pricingCurrency: "USD",
         pricedRequestCount: 1,
+        pricedInputTokens: 1_000,
+        pricedOutputTokens: 100,
         totalCostNanos: 1_400_000,
       },
     });
@@ -171,6 +176,7 @@ describe("SqliteModelRequestMetricsStore", () => {
         limitId: "codex",
         usedPercentMillionths: 10_000_000,
         resetsAt,
+        planType: "plus",
       },
     });
     store.record({
@@ -183,6 +189,7 @@ describe("SqliteModelRequestMetricsStore", () => {
         limitId: "codex",
         usedPercentMillionths: 10_000_000,
         resetsAt,
+        planType: "plus",
       },
     });
     store.record({
@@ -196,6 +203,7 @@ describe("SqliteModelRequestMetricsStore", () => {
         limitId: "codex",
         usedPercentMillionths: 10_500_000,
         resetsAt,
+        planType: "plus",
       },
     });
 
@@ -232,7 +240,12 @@ describe("SqliteModelRequestMetricsStore", () => {
         inputTokens,
         outputTokens: 0,
         totalTokens: inputTokens,
-        weeklyQuota: { limitId: "codex", usedPercentMillionths, resetsAt },
+        weeklyQuota: {
+          limitId: "codex",
+          usedPercentMillionths,
+          resetsAt,
+          planType: null,
+        },
       });
     }
 
@@ -288,12 +301,16 @@ describe("SqliteModelRequestMetricsStore", () => {
         requestCount: 3,
         unsuccessfulRequestCount: 2,
         pricedRequestCount: 1,
+        pricedInputTokens: 1_000,
+        pricedOutputTokens: 100,
         totalCostNanos: 1_400_000,
       },
       threadAggregate: {
         requestCount: 3,
         unsuccessfulRequestCount: 2,
         pricedRequestCount: 1,
+        pricedInputTokens: 1_000,
+        pricedOutputTokens: 100,
         totalCostNanos: 1_400_000,
       },
     });
@@ -311,6 +328,8 @@ describe("SqliteModelRequestMetricsStore", () => {
       requestCount: 3,
       unsuccessfulRequestCount: 2,
       pricedRequestCount: 1,
+      pricedInputTokens: 1_000,
+      pricedOutputTokens: 100,
       totalCostNanos: 1_400_000,
     });
     expect(store.threadList()[0]).toMatchObject({
@@ -356,6 +375,140 @@ describe("SqliteModelRequestMetricsStore", () => {
       cachedInputPricePerMillionNanos: null,
       outputPricePerMillionNanos: null,
     });
+    store.close();
+  });
+
+  it("annotates subagent threads in the thread list", () => {
+    const directory = temporaryDirectory();
+    const path = join(directory, "request-metrics.sqlite3");
+    const store = new SqliteModelRequestMetricsStore(path);
+    store.record({
+      ...sample(),
+      threadId: "subagent-thread-1",
+      turnId: "turn-1",
+      model: "deepseek-v4-flash",
+    });
+    expect(store.threadList()[0]).toMatchObject({
+      threadId: "subagent-thread-1",
+      agentPath: null,
+    });
+
+    store.recordSubagentThread({
+      agentThreadId: "subagent-thread-1",
+      parentThreadId: "parent-thread-1",
+      agentPath: "/root/ds_probe",
+    });
+    expect(store.threadList()[0]).toMatchObject({
+      threadId: "subagent-thread-1",
+      agentPath: "/root/ds_probe",
+      parentThreadId: "parent-thread-1",
+    });
+    expect(store.subagentThread("subagent-thread-1")).toEqual({
+      agentPath: "/root/ds_probe",
+      parentThreadId: "parent-thread-1",
+    });
+    expect(store.subagentThread("unknown-thread")).toEqual({
+      agentPath: null,
+      parentThreadId: null,
+    });
+
+    expect(() => store.recordSubagentThread({
+      agentThreadId: "",
+      parentThreadId: "parent-thread-1",
+      agentPath: "/root/ds_probe",
+    })).toThrow("Thread ID 无效");
+    store.close();
+  });
+
+  it("returns request rows incrementally after a local id", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    store.record(sample());
+    store.record({ ...sample(), inputTokens: 2_000, cachedInputTokens: 1_800 });
+    store.record({ ...sample(), inputTokens: 3_000, cachedInputTokens: 2_700 });
+
+    const first = store.requestRowsAfter(0, 2);
+    expect(first.map((row) => row.id)).toEqual([1, 2]);
+    expect(first[0]).toMatchObject({
+      provider: "deepseek",
+      inputTokens: 1_000,
+    });
+
+    const rest = store.requestRowsAfter(2, 2);
+    expect(rest.map((row) => row.id)).toEqual([3]);
+
+    expect(() => store.requestRowsAfter(-1, 10)).toThrow(/水位/u);
+    expect(() => store.requestRowsAfter(0, 0)).toThrow(/批量/u);
+    store.close();
+  });
+
+  it("returns subagent thread records incrementally after recorded time", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    store.recordSubagentThread({
+      agentThreadId: "subagent-1",
+      parentThreadId: "parent-1",
+      agentPath: "/root/probe-a",
+    });
+    store.recordSubagentThread({
+      agentThreadId: "subagent-2",
+      parentThreadId: "parent-1",
+      agentPath: "/root/probe-b",
+    });
+
+    const first = store.subagentThreadsAfter(0);
+    expect(first.map((row) => row.threadId).sort()).toEqual([
+      "subagent-1",
+      "subagent-2",
+    ]);
+    expect(first[0]).toMatchObject({
+      parentThreadId: "parent-1",
+      agentPath: "/root/probe-a",
+    });
+
+    const last = first[first.length - 1]!;
+    expect(store.subagentThreadsAfter(last.recordedAtMs, last.threadId)).toEqual([]);
+    expect(() => store.subagentThreadsAfter(-1)).toThrow(/水位/u);
+    store.close();
+  });
+
+  it("advances the subagent cursor within the same recorded millisecond", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    vi.setSystemTime(new Date(1_700_000_000_000));
+    store.recordSubagentThread({
+      agentThreadId: "subagent-a",
+      parentThreadId: "parent-1",
+      agentPath: "/root/probe-a",
+    });
+    vi.setSystemTime(new Date(1_700_000_000_001));
+    store.recordSubagentThread({
+      agentThreadId: "subagent-b",
+      parentThreadId: "parent-1",
+      agentPath: "/root/probe-b",
+    });
+
+    const first = store.subagentThreadsAfter(0);
+    expect(first.map((row) => row.threadId)).toEqual([
+      "subagent-a",
+      "subagent-b",
+    ]);
+
+    const remaining = store.subagentThreadsAfter(
+      first[0]!.recordedAtMs,
+      first[0]!.threadId,
+    );
+    expect(remaining.map((row) => row.threadId)).toEqual(["subagent-b"]);
+    expect(store.subagentThreadsAfter(
+      remaining[0]!.recordedAtMs,
+      remaining[0]!.threadId,
+    )).toEqual([]);
     store.close();
   });
 
@@ -645,6 +798,7 @@ describe("SqliteModelRequestMetricsStore", () => {
       reasoningOutputTokens: null,
       totalTokens: null,
     });
+    vi.setSystemTime(new Date(now.getTime() - 30 * 60 * 1_000));
     store.record({
       ...sample(),
       provider: "bltcy",
@@ -665,21 +819,23 @@ describe("SqliteModelRequestMetricsStore", () => {
     });
     expect(report.groups).toEqual([
       {
-        provider: "openai",
-        model: "gpt-5.6-sol",
-        status: "failed",
-        httpStatus: null,
-        errorType: "websocket_closed",
-        requestCount: 2,
-        lastOccurredAtMs: now.getTime() - 60 * 60 * 1_000,
-      },
-      {
         provider: "bltcy",
         model: "gpt-5.6-luna",
         status: "incomplete",
         httpStatus: 429,
         errorType: "rate_limit_error",
+        lastErrorMessage: null,
         requestCount: 1,
+        lastOccurredAtMs: now.getTime() - 30 * 60 * 1_000,
+      },
+      {
+        provider: "openai",
+        model: "gpt-5.6-sol",
+        status: "failed",
+        httpStatus: null,
+        errorType: "websocket_closed",
+        lastErrorMessage: null,
+        requestCount: 2,
         lastOccurredAtMs: now.getTime() - 60 * 60 * 1_000,
       },
     ]);
@@ -1053,21 +1209,88 @@ describe("SqliteModelRequestMetricsStore", () => {
       startAtMs: 0,
       endAtMs: Date.now() + 1,
       limit: 1,
+      sortDirection: "asc",
     });
     expect(first.records).toHaveLength(1);
-    expect(first.nextAfterId).toBe(first.records[0]?.id);
+    expect(first.nextOffset).toBe(1);
     const second = reader.page({
       startAtMs: 0,
       endAtMs: Date.now() + 1,
-      ...(first.nextAfterId === null ? {} : { afterId: first.nextAfterId }),
+      offset: first.nextOffset ?? 0,
       limit: 1,
+      sortDirection: "asc",
     });
     expect(second.records).toHaveLength(1);
     expect(second.records[0]?.id).not.toBe(first.records[0]?.id);
-    expect(second.nextAfterId).toBeNull();
+    expect(second.nextOffset).toBeNull();
     expect(() => reader.record(sample())).toThrow(/只读/u);
     reader.close();
     writer.close();
+  });
+
+  it("filters request pages across the whole range", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    store.record({
+      ...sample(),
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      status: "failed",
+      errorType: "usage_limit_reached",
+      errorMessage: "You've hit your usage limit",
+    });
+    store.record({
+      ...sample(),
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+      status: "completed",
+    });
+    store.record({
+      ...sample(),
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      status: "completed",
+    });
+
+    const byError = store.page({
+      startAtMs: 0,
+      endAtMs: Date.now() + 1,
+      limit: 10,
+      filter: "usage limit",
+    });
+    expect(byError.matchedTotal).toBe(1);
+    expect(byError.records).toHaveLength(1);
+    expect(byError.records[0]).toMatchObject({
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      errorType: "usage_limit_reached",
+    });
+
+    const byModel = store.page({
+      startAtMs: 0,
+      endAtMs: Date.now() + 1,
+      limit: 10,
+      filter: "deepseek",
+    });
+    expect(byModel.matchedTotal).toBe(1);
+    expect(byModel.records[0]?.provider).toBe("deepseek");
+
+    const literalWildcard = store.page({
+      startAtMs: 0,
+      endAtMs: Date.now() + 1,
+      limit: 10,
+      filter: "%",
+    });
+    expect(literalWildcard.matchedTotal).toBe(0);
+    expect(() => store.page({
+      startAtMs: 0,
+      endAtMs: Date.now() + 1,
+      limit: 10,
+      filter: "x".repeat(129),
+    })).toThrow(/最多 128/u);
+    store.close();
   });
 });
 
@@ -1077,6 +1300,9 @@ describe("BufferedModelRequestMetricsWriter", () => {
     const record = vi.fn<ModelRequestMetricsStore["record"]>();
     const writer = new BufferedModelRequestMetricsWriter({
       record,
+      recordSubagentThread: () => undefined,
+      requestRowsAfter: () => [],
+      subagentThreadsAfter: () => [],
       recent: () => [],
       aggregate: () => emptyMetricsReport(),
       errors: () => emptyErrorReport(),
@@ -1103,6 +1329,9 @@ describe("BufferedModelRequestMetricsWriter", () => {
     });
     const writer = new BufferedModelRequestMetricsWriter({
       record,
+      recordSubagentThread: () => undefined,
+      requestRowsAfter: () => [],
+      subagentThreadsAfter: () => [],
       recent: () => [],
       aggregate: () => emptyMetricsReport(),
       errors: () => emptyErrorReport(),
@@ -1118,6 +1347,96 @@ describe("BufferedModelRequestMetricsWriter", () => {
 
     expect(record).toHaveBeenCalledWith(sample());
     expect(calls).toEqual(["record", "close"]);
+  });
+
+  it("resolves a persistence checkpoint after the writes already enqueued", async () => {
+    vi.useFakeTimers();
+    const record = vi.fn<ModelRequestMetricsStore["record"]>();
+    const writer = new BufferedModelRequestMetricsWriter({
+      record,
+      recordSubagentThread: () => undefined,
+      requestRowsAfter: () => [],
+      subagentThreadsAfter: () => [],
+      recent: () => [],
+      aggregate: () => emptyMetricsReport(),
+      errors: () => emptyErrorReport(),
+      count: () => 0,
+      close: () => undefined,
+    });
+    writer.enqueue(sample());
+    writer.enqueue(sample());
+    writer.enqueue(sample());
+    let checkpointResolved = false;
+    const persistenceCheckpoint = writer.waitForCurrentWrites();
+    const checkpoint = persistenceCheckpoint.then(() => {
+      checkpointResolved = true;
+    });
+    writer.enqueue(sample());
+
+    await vi.advanceTimersByTimeAsync(20);
+    expect(checkpointResolved).toBe(false);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(await persistenceCheckpoint).toBe(true);
+    await checkpoint;
+    expect(checkpointResolved).toBe(true);
+    expect(record).toHaveBeenCalledTimes(3);
+
+    await writer.close();
+    expect(record).toHaveBeenCalledTimes(4);
+    vi.useRealTimers();
+  });
+
+  it("reports a failed write through the matching thread checkpoint", async () => {
+    vi.useFakeTimers();
+    const record = vi.fn<ModelRequestMetricsStore["record"]>(() => {
+      throw new Error("disk full");
+    });
+    const writer = new BufferedModelRequestMetricsWriter({
+      record,
+      recordSubagentThread: () => undefined,
+      requestRowsAfter: () => [],
+      subagentThreadsAfter: () => [],
+      recent: () => [],
+      aggregate: () => emptyMetricsReport(),
+      errors: () => emptyErrorReport(),
+      count: () => 0,
+      close: () => undefined,
+    });
+    writer.enqueue(sample());
+
+    const checkpoint = writer.waitForCurrentWrites("thread-1");
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(checkpoint).resolves.toBe(false);
+    await writer.close();
+    vi.useRealTimers();
+  });
+
+  it("does not fail a thread checkpoint for another thread's write", async () => {
+    vi.useFakeTimers();
+    const record = vi.fn<ModelRequestMetricsStore["record"]>((metric) => {
+      if (metric.threadId === "thread-2") throw new Error("disk full");
+    });
+    const writer = new BufferedModelRequestMetricsWriter({
+      record,
+      recordSubagentThread: () => undefined,
+      requestRowsAfter: () => [],
+      subagentThreadsAfter: () => [],
+      recent: () => [],
+      aggregate: () => emptyMetricsReport(),
+      errors: () => emptyErrorReport(),
+      count: () => 0,
+      close: () => undefined,
+    });
+    writer.enqueue({ ...sample(), threadId: "thread-2" });
+    writer.enqueue(sample());
+
+    const checkpoint = writer.waitForCurrentWrites("thread-1");
+    await vi.advanceTimersByTimeAsync(20);
+
+    await expect(checkpoint).resolves.toBe(true);
+    await writer.close();
+    vi.useRealTimers();
   });
 });
 
@@ -1165,6 +1484,7 @@ function sample(): ModelRequestMetricSample {
     httpStatus: 200,
     errorType: null,
     errorCode: null,
+    errorMessage: null,
     incompleteReason: null,
     inputTokens: 1_000,
     cachedInputTokens: 900,

@@ -49,6 +49,10 @@ describe("Codex Connect setup", () => {
         label: "系统设置",
         hint: "配置全局调试模式",
       }, {
+        value: "skills",
+        label: "技能",
+        hint: "安装或卸载项目技能到用户目录",
+      }, {
         value: "cancel",
         label: "取消",
         hint: "退出 Setup",

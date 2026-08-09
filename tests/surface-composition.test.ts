@@ -103,6 +103,21 @@ describe("Telegram Surface runtime composition", () => {
 });
 
 describe("configured Surface composition", () => {
+  it("does not create Telegram when its token is empty", () => {
+    const modules = createSurfaceModules(options(config({
+      telegramEnabled: false,
+      telegramBotToken: "",
+      telegramAllowedUserIds: new Set(),
+      feishu: {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+        allowedOpenIds: new Set(["ou_actor"]),
+      },
+    })));
+
+    expect(modules.map((module) => module.adapter.surface)).toEqual(["feishu"]);
+  });
+
   it("registers optional Surfaces only when their runtime config is enabled", () => {
     const disabled = createSurfaceModules(options(config()));
     const enabled = createSurfaceModules(options(config({
@@ -478,6 +493,7 @@ function runtimeModule(
 
 function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
   return {
+    telegramEnabled: true,
     telegramBotToken: "token",
     telegramAllowedUserIds: new Set([123]),
     telegramMessageFormat: "html",
@@ -489,8 +505,7 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     codexSandbox: "workspace-write",
     operationUpdateDisplay: "full",
     planUpdatesEnabled: false,
-    priceCurrency: "auto",
-    priceCurrencyByProvider: {},
+    priceCurrency: "cny",
     apiProviders: [],
     vision: { mode: "disabled" },
     credentialsDirectory: "/tmp/credentials",

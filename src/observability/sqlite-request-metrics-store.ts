@@ -28,6 +28,7 @@ import type {
   StoredThreadRequestMetricsAggregate,
   StoredThreadListItem,
   StoredThreadTurnSummary,
+  StoredSubagentThreadRecord,
   StoredTurnRequestMetricsSummary,
   StoredWeeklyQuotaEstimate,
   StoredWeeklyQuotaWindow,
@@ -40,6 +41,22 @@ const weeklyWindowMs = 7 * 24 * 60 * 60 * 1_000;
 const maximumRows = 100_000;
 const cleanupInterval = 100;
 const maximumAggregationGroups = 20;
+const pageSortSql = {
+  recordedAtMs: "recorded_at_ms",
+  provider: "provider",
+  model: "model",
+  operation: "operation",
+  status: "status",
+  httpStatus: "http_status",
+  error: "COALESCE(error_type, error_code, '')",
+  inputTokens: "input_tokens",
+  outputTokens: "output_tokens",
+  reasoningOutputTokens: "reasoning_output_tokens",
+  outputTokensPerSecond: "output_tokens_per_second",
+  ttftMs: "ttft_ms",
+  requestDurationMs: "request_duration_ms",
+  totalCostNanos: "total_cost_nanos",
+} as const;
 const observableCompletionSql = `
   status = 'completed'
   AND NOT (
@@ -58,6 +75,10 @@ const successfulCostAggregateSql = `
     THEN pricing_currency END) AS pricing_currency_count,
   COUNT(CASE WHEN ${observableCompletionSql} THEN total_cost_nanos END)
     AS priced_request_count,
+  SUM(CASE WHEN ${observableCompletionSql} AND total_cost_nanos IS NOT NULL
+    THEN input_tokens END) AS priced_input_tokens,
+  SUM(CASE WHEN ${observableCompletionSql} AND total_cost_nanos IS NOT NULL
+    THEN output_tokens END) AS priced_output_tokens,
   SUM(CASE WHEN ${observableCompletionSql} THEN total_cost_nanos END)
     AS total_cost_nanos,
   SUM(CASE WHEN ${observableCompletionSql} THEN uncached_input_cost_nanos END)
@@ -151,6 +172,7 @@ interface MetricRow {
   http_status: number | null;
   error_type: string | null;
   error_code: string | null;
+  error_message: string | null;
   incomplete_reason: string | null;
   input_tokens: number | null;
   cached_input_tokens: number | null;
@@ -170,6 +192,7 @@ interface MetricRow {
   weekly_quota_limit_id: "codex" | null;
   weekly_used_percent_millionths: number | null;
   weekly_resets_at: number | null;
+  weekly_quota_plan_type: string | null;
   request_duration_ms: number | null;
   ttft_ms: number | null;
   thinking_duration_ms: number | null;
@@ -227,6 +250,8 @@ interface TurnSummaryRow extends CompactSummaryRow {
   pricing_currency: string | null;
   pricing_currency_count: number;
   priced_request_count: number;
+  priced_input_tokens: number | null;
+  priced_output_tokens: number | null;
   total_cost_nanos: number | null;
   uncached_input_cost_nanos: number | null;
   cached_input_cost_nanos: number | null;
@@ -260,6 +285,7 @@ interface ErrorGroupRow {
   status: "failed" | "incomplete" | "unknown";
   http_status: number | null;
   error_type: string | null;
+  last_error_message: string | null;
   request_count: number;
   last_occurred_at_ms: number;
   total_group_count: number;
@@ -268,6 +294,7 @@ interface ErrorGroupRow {
 export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore {
   private readonly database: DatabaseSync;
   private readonly insert?: StatementSync;
+  private readonly insertSubagentThread?: StatementSync;
   private readonly lock?: RequestMetricsDatabaseLock;
   private closed = false;
   private rowCount = 0;
@@ -312,18 +339,28 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           uncached_input_price_per_million_nanos,
           cached_input_price_per_million_nanos, output_price_per_million_nanos,
           transport, response_format, operation, thread_id, turn_id, model, service_tier,
-          reasoning_effort, status, http_status, error_type, error_code, incomplete_reason,
+          reasoning_effort, status, http_status, error_type, error_code, error_message,
+          incomplete_reason,
           input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens,
           total_tokens, upstream_created_at, upstream_completed_at,
           request_started_at_ms, first_token_at_ms,
           first_reasoning_delta_at_ms, last_reasoning_delta_at_ms,
           first_output_delta_at_ms, last_output_delta_at_ms,
           response_completed_at_ms, recorded_at_ms,
-          weekly_quota_limit_id, weekly_used_percent_millionths, weekly_resets_at
+          weekly_quota_limit_id, weekly_used_percent_millionths, weekly_resets_at,
+          weekly_quota_plan_type
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
+      `);
+      this.insertSubagentThread = this.database.prepare(`
+        INSERT INTO subagent_threads (thread_id, parent_thread_id, agent_path, recorded_at_ms)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(thread_id) DO UPDATE SET
+          parent_thread_id = excluded.parent_thread_id,
+          agent_path = excluded.agent_path,
+          recorded_at_ms = excluded.recorded_at_ms
       `);
       this.cleanup(nowMs);
     } catch (error) {
@@ -361,6 +398,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       sample.httpStatus,
       sample.errorType,
       sample.errorCode,
+      sample.errorMessage,
       sample.incompleteReason,
       sample.inputTokens,
       sample.cachedInputTokens,
@@ -380,12 +418,35 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       sample.weeklyQuota?.limitId ?? null,
       sample.weeklyQuota?.usedPercentMillionths ?? null,
       sample.weeklyQuota?.resetsAt ?? null,
+      sample.weeklyQuota?.planType ?? null,
     );
     this.rowCount += 1;
     this.recordsSinceCleanup += 1;
     if (this.recordsSinceCleanup >= cleanupInterval) {
       this.cleanup(recordedAtMs);
     }
+  }
+
+  recordSubagentThread(details: {
+    agentThreadId: string;
+    parentThreadId: string;
+    agentPath: string;
+  }): void {
+    const { agentThreadId, parentThreadId, agentPath } = details;
+    this.requireOpen();
+    if (!this.insertSubagentThread) {
+      throw new Error("只读模型请求指标数据库不能写入");
+    }
+    if (!agentThreadId.trim() || agentThreadId.length > 128) {
+      throw new Error("子代理 Thread ID 无效");
+    }
+    if (!parentThreadId.trim() || parentThreadId.length > 128) {
+      throw new Error("子代理父 Thread ID 无效");
+    }
+    if (!agentPath.trim() || agentPath.length > 512) {
+      throw new Error("子代理路径无效");
+    }
+    this.insertSubagentThread.run(agentThreadId, parentThreadId, agentPath, Date.now());
   }
 
   recent(limit: number): StoredModelRequestMetric[] {
@@ -428,7 +489,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     ) throw new Error("最新周额度查询无效");
     const row = this.database.prepare(`
       SELECT weekly_quota_limit_id, weekly_used_percent_millionths,
-        weekly_resets_at, recorded_at_ms
+        weekly_resets_at, weekly_quota_plan_type, recorded_at_ms
       FROM model_request_metrics
       WHERE provider = ?
         AND weekly_quota_limit_id IS NOT NULL
@@ -440,6 +501,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       weekly_quota_limit_id: string;
       weekly_used_percent_millionths: number;
       weekly_resets_at: number;
+      weekly_quota_plan_type: string | null;
       recorded_at_ms: number;
     } | undefined;
     return row
@@ -448,6 +510,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           usedPercentMillionths: row.weekly_used_percent_millionths,
           resetsAt: row.weekly_resets_at,
           observedAtMs: row.recorded_at_ms,
+          planType: row.weekly_quota_plan_type,
         }
       : null;
   }
@@ -458,23 +521,62 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     if (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > 500) {
       throw new Error("模型请求指标分页数量必须在 1 到 500 之间");
     }
-    const afterId = query.afterId ?? 0;
-    if (!Number.isSafeInteger(afterId) || afterId < 0) {
-      throw new Error("模型请求指标分页游标无效");
+    const offset = query.offset ?? 0;
+    if (!Number.isSafeInteger(offset) || offset < 0) {
+      throw new Error("模型请求指标分页偏移无效");
     }
+    const sortKey = query.sortKey ?? "recordedAtMs";
+    const sortDirection = query.sortDirection ?? "desc";
+    const sortExpression = pageSortSql[sortKey];
+    if (sortExpression === undefined || !["asc", "desc"].includes(sortDirection)) {
+      throw new Error("模型请求指标排序无效");
+    }
+    const order = sortDirection.toUpperCase();
+    const filter = query.filter?.trim() ?? "";
+    if (filter.length > 128) {
+      throw new Error("模型请求指标筛选关键字最多 128 个字符");
+    }
+    const pattern = filter.length === 0
+      ? ""
+      : `%${filter.replace(/[\\%_]/gu, (character) => `\\${character}`)}%`;
+    const filterSql = pattern.length === 0
+      ? ""
+      : ` AND (
+          provider LIKE ? ESCAPE '\\'
+          OR model LIKE ? ESCAPE '\\'
+          OR operation LIKE ? ESCAPE '\\'
+          OR status LIKE ? ESCAPE '\\'
+          OR error_type LIKE ? ESCAPE '\\'
+          OR error_code LIKE ? ESCAPE '\\'
+          OR error_message LIKE ? ESCAPE '\\'
+        )`;
+    const filterParams = pattern.length === 0
+      ? []
+      : Array.from({ length: 7 }, () => pattern);
+    const matchedTotal = (this.database.prepare(`
+      SELECT COUNT(*) AS n
+      FROM model_request_metrics_enriched
+      WHERE recorded_at_ms >= ?
+        AND recorded_at_ms < ?${filterSql}
+    `).get(
+      query.startAtMs,
+      query.endAtMs,
+      ...filterParams,
+    ) as { n: number }).n;
     const rows = this.database.prepare(`
       SELECT *
       FROM model_request_metrics_enriched
       WHERE recorded_at_ms >= ?
         AND recorded_at_ms < ?
-        AND id > ?
-      ORDER BY id ASC
-      LIMIT ?
+        ${filterSql}
+      ORDER BY ${sortExpression} ${order}, id ${order}
+      LIMIT ? OFFSET ?
     `).all(
       query.startAtMs,
       query.endAtMs,
-      afterId,
+      ...filterParams,
       query.limit + 1,
+      offset,
     ) as unknown as MetricRow[];
     const hasMore = rows.length > query.limit;
     const pageRows = hasMore ? rows.slice(0, query.limit) : rows;
@@ -482,7 +584,8 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       startAtMs: query.startAtMs,
       endAtMs: query.endAtMs,
       records: pageRows.map(toStoredMetric),
-      nextAfterId: hasMore ? pageRows.at(-1)?.id ?? null : null,
+      nextOffset: hasMore ? offset + query.limit : null,
+      matchedTotal,
     };
   }
 
@@ -542,6 +645,19 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
             ELSE error_type
           END AS normalized_error_type
         FROM model_request_metrics
+        WHERE recorded_at_ms >= ?
+          AND recorded_at_ms < ?
+      ),
+      ranked AS (
+        SELECT
+          *,
+          ROW_NUMBER() OVER (
+            PARTITION BY provider, model, normalized_status, http_status,
+              normalized_error_type
+            ORDER BY recorded_at_ms DESC
+          ) AS last_row
+        FROM normalized
+        WHERE normalized_status <> 'completed'
       )
       SELECT
         provider,
@@ -549,15 +665,13 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         normalized_status AS status,
         http_status,
         normalized_error_type AS error_type,
+        MAX(error_message) FILTER (WHERE last_row = 1) AS last_error_message,
         COUNT(*) AS request_count,
         MAX(recorded_at_ms) AS last_occurred_at_ms,
         COUNT(*) OVER () AS total_group_count
-      FROM normalized
-      WHERE recorded_at_ms >= ?
-        AND recorded_at_ms < ?
-        AND normalized_status <> 'completed'
+      FROM ranked
       GROUP BY provider, model, normalized_status, http_status, normalized_error_type
-      ORDER BY request_count DESC, last_occurred_at_ms DESC,
+      ORDER BY last_occurred_at_ms DESC, request_count DESC,
         provider ASC, model ASC
       LIMIT ?
     `).all(
@@ -575,6 +689,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         status: row.status,
         httpStatus: row.http_status,
         errorType: row.error_type,
+        lastErrorMessage: row.last_error_message,
         requestCount: row.request_count,
         lastOccurredAtMs: row.last_occurred_at_ms,
       })),
@@ -809,7 +924,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     this.requireOpen();
     const rows = this.database.prepare(`
       SELECT
-        thread_id,
+        model_request_metrics_enriched.thread_id AS thread_id,
         (
           SELECT provider
           FROM model_request_metrics_enriched AS latest_provider
@@ -852,11 +967,16 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         SUM(CASE WHEN ${observableCompletionSql} THEN total_cost_nanos END)
           AS total_cost_nanos,
         ${compactAggregateSql},
-        MAX(recorded_at_ms) AS recorded_at_ms
+        MIN(request_started_at_ms) AS first_request_started_at_ms,
+        MAX(model_request_metrics_enriched.recorded_at_ms) AS recorded_at_ms,
+        subagent.agent_path AS agent_path,
+        subagent.parent_thread_id AS parent_thread_id
       FROM model_request_metrics_enriched
-      WHERE thread_id IS NOT NULL
+      LEFT JOIN subagent_threads AS subagent
+        ON subagent.thread_id = model_request_metrics_enriched.thread_id
+      WHERE model_request_metrics_enriched.thread_id IS NOT NULL
         AND turn_id IS NOT NULL
-      GROUP BY thread_id
+      GROUP BY model_request_metrics_enriched.thread_id
       ORDER BY MAX(id) DESC
     `).all() as unknown as Array<CompactSummaryRow & {
       thread_id: string;
@@ -871,13 +991,18 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       pricing_currency_count: number;
       priced_request_count: number;
       total_cost_nanos: number | null;
+      first_request_started_at_ms: number;
       recorded_at_ms: number;
+      agent_path: string | null;
+      parent_thread_id: string | null;
     }>;
     return rows.map((row) => ({
       threadId: row.thread_id,
       provider: row.provider ?? null,
       model: row.model ?? null,
       reasoningEffort: row.reasoning_effort ?? null,
+      agentPath: row.agent_path ?? null,
+      parentThreadId: row.parent_thread_id ?? null,
       turnCount: row.turn_count,
       requestCount: row.request_count,
       inputTokens: row.input_tokens ?? 0,
@@ -888,7 +1013,81 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       pricedRequestCount: row.priced_request_count,
       totalCostNanos: row.total_cost_nanos ?? null,
       compact: toStoredCompactSummary(row),
+      firstRequestStartedAtMs: row.first_request_started_at_ms,
       lastRecordedAtMs: row.recorded_at_ms,
+    }));
+  }
+
+  subagentThread(threadId: string): {
+    agentPath: string | null;
+    parentThreadId: string | null;
+  } {
+    this.requireOpen();
+    if (!threadId.trim() || threadId.length > 128) {
+      throw new Error("Thread ID 无效");
+    }
+    const row = this.database.prepare(`
+      SELECT agent_path, parent_thread_id
+      FROM subagent_threads
+      WHERE thread_id = ?
+    `).get(threadId) as {
+      agent_path: string;
+      parent_thread_id: string;
+    } | undefined;
+    return {
+      agentPath: row?.agent_path ?? null,
+      parentThreadId: row?.parent_thread_id ?? null,
+    };
+  }
+
+  requestRowsAfter(
+    afterLocalId: number,
+    limit: number,
+  ): StoredModelRequestMetric[] {
+    this.requireOpen();
+    if (!Number.isInteger(afterLocalId) || afterLocalId < 0) {
+      throw new Error("同步水位必须是大于等于 0 的整数");
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+      throw new Error("同步批量大小必须在 1 到 500 之间");
+    }
+    const rows = this.database.prepare(`
+      SELECT * FROM model_request_metrics_enriched
+      WHERE id > ?
+      ORDER BY id ASC
+      LIMIT ?
+    `).all(afterLocalId, limit) as unknown as MetricRow[];
+    return rows.map(toStoredMetric);
+  }
+
+  subagentThreadsAfter(
+    recordedAtMs: number,
+    afterThreadId?: string,
+  ): StoredSubagentThreadRecord[] {
+    this.requireOpen();
+    if (!Number.isInteger(recordedAtMs) || recordedAtMs < 0) {
+      throw new Error("子代理同步水位必须是大于等于 0 的整数");
+    }
+    if (afterThreadId !== undefined && afterThreadId.length === 0) {
+      throw new Error("子代理同步游标 Thread ID 不能为空");
+    }
+    const rows = this.database.prepare(`
+      SELECT thread_id, parent_thread_id, agent_path, recorded_at_ms
+      FROM subagent_threads
+      WHERE recorded_at_ms > ? OR (recorded_at_ms = ? AND thread_id > ?)
+      ORDER BY recorded_at_ms ASC, thread_id ASC
+      LIMIT 1000
+    `).all(recordedAtMs, recordedAtMs, afterThreadId ?? "") as unknown as Array<{
+      thread_id: string;
+      parent_thread_id: string;
+      agent_path: string;
+      recorded_at_ms: number;
+    }>;
+    return rows.map((row) => ({
+      threadId: row.thread_id,
+      parentThreadId: row.parent_thread_id,
+      agentPath: row.agent_path,
+      recordedAtMs: row.recorded_at_ms,
     }));
   }
 
@@ -1021,6 +1220,12 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       }
       if (!version) {
         this.database.exec(`
+          CREATE TABLE subagent_threads (
+            thread_id TEXT PRIMARY KEY,
+            parent_thread_id TEXT NOT NULL,
+            agent_path TEXT NOT NULL,
+            recorded_at_ms INTEGER NOT NULL
+          );
           CREATE TABLE model_request_metrics (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             provider TEXT NOT NULL,
@@ -1056,6 +1261,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
             http_status INTEGER,
             error_type TEXT,
             error_code TEXT,
+            error_message TEXT,
             incomplete_reason TEXT,
             input_tokens INTEGER,
             cached_input_tokens INTEGER,
@@ -1082,6 +1288,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
             weekly_resets_at INTEGER CHECK (
               weekly_resets_at IS NULL OR weekly_resets_at >= 0
             ),
+            weekly_quota_plan_type TEXT,
             CHECK (
               (
                 billing_mode IS NULL
@@ -1307,6 +1514,7 @@ function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     httpStatus: row.http_status,
     errorType: row.error_type,
     errorCode: row.error_code,
+    errorMessage: row.error_message,
     incompleteReason: responseNotObserved
       ? "response_not_observed"
       : row.incomplete_reason,
@@ -1332,6 +1540,7 @@ function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
           limitId: row.weekly_quota_limit_id,
           usedPercentMillionths: row.weekly_used_percent_millionths,
           resetsAt: row.weekly_resets_at,
+          planType: row.weekly_quota_plan_type,
         },
     recordedAtMs: row.recorded_at_ms,
     requestDurationMs: row.request_duration_ms,
@@ -1378,6 +1587,8 @@ function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetricsSumma
       : null,
     outputSpeedSampleCount: row.output_speed_sample_count,
     outputSpeedTimedCount: row.output_speed_timed_count,
+    pricedInputTokens: row.priced_input_tokens ?? 0,
+    pricedOutputTokens: row.priced_output_tokens ?? 0,
     ...pricing,
     compact: toStoredCompactSummary(row),
   };
@@ -1405,6 +1616,8 @@ function toStoredThreadAggregate(
     outputSpeedTimedCount: summary.outputSpeedTimedCount,
     pricingCurrency: summary.pricingCurrency,
     pricedRequestCount: summary.pricedRequestCount,
+    pricedInputTokens: summary.pricedInputTokens,
+    pricedOutputTokens: summary.pricedOutputTokens,
     totalCostNanos: summary.totalCostNanos,
     inputCostNanos: summary.inputCostNanos,
     cachedInputCostNanos: summary.cachedInputCostNanos,

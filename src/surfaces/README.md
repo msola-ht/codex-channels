@@ -71,9 +71,10 @@ Conversation 与 Actor 在内存保留五分钟有效的一次重试输入，`/v
 并单独列出最近视觉等直接 API 请求；`global/providers/models` 以 24 小时、7 天或 30 天为范围，
 把 Codex Provider 和直接 API 按同一请求口径聚合，最多展示请求量最高的 20 组；`errors` 用同一
 范围展示异常率及按提供商、模型、状态、HTTP 状态和错误类型形成的前 20 组异常，附带最近发生时间。
-综合速度和首段回复延迟附带有效样本覆盖率，不把请求累计输入误写成上下文占用；参考总价附带
+综合速度和首段回复延迟附带有效样本覆盖率，不把请求累计输入误写成上下文占用；总价附带
 计价覆盖率，并按提供商币种先出总计、再列出输入、缓存、输出三项价格明细，不显示目录静态
-单价；DeepSeek 另按本机实际用量展示平均参考价（元/100M）；聚合存在多档价格时只标记多档、
+单价；所有 Provider 的完成卡片与 `/metrics` 最近运行和会话累计按本机实际用量展示均价；
+聚合存在多档价格时只标记多档、
 不显示伪统一单价。信息类聊天指令（`/status`、`/usage`、
 `/limits`、`/models`、`/sessions`、`/skills`、`/mcp`、`/plugins`、`/permissions`、`/goal`、
 `/project-rules`、`/metrics` 等）输出统一为 Markdown 列表：首行为 `##` 标题、小节为 `###`
@@ -93,13 +94,17 @@ Turn、Thread 或 Surface 关闭时清理。
 引用获取仍由各 Surface 负责，不能读取 Gateway 私有历史或让引用内容参与命令解析。
 `plan-presentation.ts` 统一完整计划与新增完成步骤的有界展示、状态符号和去重指纹；各渠道只决定
 完整计划是原地更新还是追加紧凑进度。
-`lifecycle-presentation.ts` 统一 Telegram、飞书与微信的 Gateway 上线、Turn 开始确认和 Turn
-结束汇报把本次运行、当前会话累计和账户状态依次分区，并按 Token、费用、性能分组；按 Turn
-聚合统计代理捕获的全部模型请求、实际产生推理输出的思考次数及当前 Turn 参考总价，并保留 Provider
-通用的 Thread Token/上下文与参考总价累计指标；本轮存在非正常模型尝试时，请求总数会进一步拆分为
+`lifecycle-presentation.ts` 统一 Telegram、飞书与微信的 Gateway 上线、Turn 开始确认、子代理
+开始/完成通知和 Turn 结束汇报；Turn 完成把本次运行、当前会话累计和账户状态依次分区，并按 Token、费用、性能分组；按 Turn
+聚合统计代理捕获的全部模型请求、实际产生推理输出的思考次数及当前 Turn 总价，并保留 Provider
+通用的 Thread Token/上下文与总价累计指标；本轮存在非正常模型尝试时，请求总数会进一步拆分为
 完成、中断、未完整观测和失败数量；`429/5xx` 瞬时失败后存在成功请求时显示为“自动重试、最终
 成功”，本轮计价覆盖只统计成功请求，底层异常记录仍完整保留。`reference-cost-format.ts` 统一总价、计价覆盖率及
-输入/缓存/输出价格明细格式（先总价后明细，按提供商币种换算）。
+输入/缓存/输出价格明细格式（先总价后明细，按提供商币种换算）；完成卡片正式模式只保留
+Token 与费用总计及均价，调试模式才展示模型请求聚合耗时，并展开 Token/费用子项和附加货币
+换算对照。子代理完成卡片复用同一价格、Token 和均价格式：正式模式保留总计，调试模式才展开
+缓存与推理 Token、缓存命中率、输入/缓存/输出费用、附加货币换算和模型请求聚合耗时；计价覆盖
+不全时显示覆盖比例并省略可能低估的均价，指标读取失败时只显示“统计暂不可用”。
 原生 OpenAI
 鉴权的 Codex Provider 统一显示为“OpenAI 官方”，且只在该类 Thread 显示 Fast 与 OpenAI 周限；
 直接 API 的自定义提供商继续使用自身名称；各 Surface 只保留 HTML、
@@ -123,7 +128,8 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 白名单拒绝分类，拒绝异常正文、堆栈、请求标识及上游自定义名称进入日志；Bootstrap
 继续通过注入的 Pino `err` 序列化器处理组合根异常。
 `input-copy.ts` 统一补充文字、文件、图片与音频追加到当前 Turn 的确认文案，以及外部视觉 API
-开始识别图片与本条要求时的进度文案；
+开始识别图片与本条要求时的进度文案，并统一视觉完成通知正式模式只显示 Token 总计、调试模式
+展开 Token 子项与 API 耗时的展示策略；
 `output-copy.ts` 统一 CLI 输入镜像、断线、警告、操作失败、停止交互、空回复与内容截断等输出
 语义，各渠道继续自行决定 HTML、CardKit Markdown、纯文本布局和发送方式。
 `interaction-copy.ts` 统一审批、用户输入和 MCP 交互的处理、取消、超时、跨客户端解决及提交结果
@@ -144,9 +150,13 @@ Adapter 负责。
 `operation-update-buffer.ts` 在 Surface 边界按 Turn 有界暂存成功的查询操作；最终回复前单项
 保持原详情，多项生成一次分类计数汇总。飞书网页搜索完成后直接发送，不进入该缓冲；失败、
 拒绝和其他操作同样不进入缓冲。
-`generated-image.ts` 只读取 App Server `imageGeneration.savedPath` 指向的绝对普通文件，
-拒绝符号链接、空文件、超过 10 MiB 的内容和非 PNG/JPEG 签名；Telegram、飞书与微信分别负责
-平台上传和发送，不读取 `imageView` 或用户上传图片路径。
+`generated-image.ts` 对 App Server `imageGeneration.savedPath` 指向的生成图片和
+`codexc channel send-image` 提交的渠道 spool 图片执行同一读取校验：绝对路径、拒绝符号链接、
+空文件、超过 10 MiB 的内容和非 PNG/JPEG 签名；Telegram、飞书与微信分别负责平台上传和发送，
+不读取 `imageView` 或用户上传图片路径。
+`SurfaceAdapter.sendChannelImage` 是可选的渠道图片发送入口，由 Gateway 的
+`channel-image-spool` 驱动，复用 `generated-image.ts` 的读取校验和各自平台上传发送；
+三个 Surface 都实现该入口，微信按目标 Conversation 复用其回复上下文与授权检查。
 Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类型引入 Conversation Core。
 
 会话命令统一映射到 Application 的 `ConversationCommandService`；Surface 负责提取命令名和参数，
@@ -164,8 +174,9 @@ warning 和 MCP 错误只使用 Client 边界已经统一脱敏并限长的稳�
 的响应正文不得带入聊天消息或日志。
 
 Bootstrap 把共享的 `display.operation_updates` 三档模式显式注入各 Surface Outbox。`full`
-显示完整操作，`compact` 显示单行摘要，`hidden` 忽略 `operation.updated`；Core 始终正常归约
-操作，审批与其他关键输出不受影响。Telegram 和微信把同一 Turn 的成功查询类操作延迟聚合；
+显示完整操作，`compact` 显示单行摘要，其中子代理只保留启动和失败、抑制成功的等待与交互操作，
+`hidden` 忽略 `operation.updated`；Core 始终正常归约操作，审批与其他关键输出不受影响。
+Telegram 和微信把同一 Turn 的成功查询类操作延迟聚合；
 飞书只聚合 MCP 与动态工具，网页搜索完成后立即发送。微信
 对其余操作仍仅发送终态，避免用普通气泡模拟持续更新；Surface 只实现平台格式，不各自定义
 第二套显示配置。

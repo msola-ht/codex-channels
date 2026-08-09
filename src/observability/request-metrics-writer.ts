@@ -8,9 +8,19 @@ const maximumPendingRecords = 10_000;
 const maximumBatchSize = 1;
 const flushDelayMs = 10;
 
+interface WriteCheckpoint {
+  target: number;
+  threadId: string | undefined;
+  succeeded: boolean;
+  resolve: (succeeded: boolean) => void;
+}
+
 export class BufferedModelRequestMetricsWriter implements ModelRequestMetricsWriter {
   private readonly pending: ModelRequestMetricSample[] = [];
+  private readonly checkpoints: WriteCheckpoint[] = [];
   private flushTimer: NodeJS.Timeout | undefined;
+  private enqueuedCount = 0;
+  private processedCount = 0;
   private closed = false;
 
   constructor(
@@ -24,7 +34,16 @@ export class BufferedModelRequestMetricsWriter implements ModelRequestMetricsWri
       throw new Error("模型请求指标待写队列已满");
     }
     this.pending.push(sample);
+    this.enqueuedCount += 1;
     this.scheduleFlush();
+  }
+
+  waitForCurrentWrites(threadId?: string): Promise<boolean> {
+    const target = this.enqueuedCount;
+    if (this.processedCount >= target) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      this.checkpoints.push({ target, threadId, succeeded: true, resolve });
+    });
   }
 
   close(): Promise<void> {
@@ -51,12 +70,36 @@ export class BufferedModelRequestMetricsWriter implements ModelRequestMetricsWri
 
   private flushBatch(): void {
     for (const sample of this.pending.splice(0, maximumBatchSize)) {
+      const sequence = this.processedCount + 1;
       try {
         this.store.record(sample);
       } catch (error) {
+        for (const checkpoint of this.checkpoints) {
+          if (
+            sequence <= checkpoint.target
+            && (checkpoint.threadId === undefined
+              || checkpoint.threadId === sample.threadId)
+          ) checkpoint.succeeded = false;
+        }
         this.onError?.(asError(error));
+      } finally {
+        this.processedCount += 1;
+        this.resolveCheckpoints();
       }
     }
+  }
+
+  private resolveCheckpoints(): void {
+    let writeIndex = 0;
+    for (const checkpoint of this.checkpoints) {
+      if (checkpoint.target <= this.processedCount) {
+        checkpoint.resolve(checkpoint.succeeded);
+      } else {
+        this.checkpoints[writeIndex] = checkpoint;
+        writeIndex += 1;
+      }
+    }
+    this.checkpoints.length = writeIndex;
   }
 }
 

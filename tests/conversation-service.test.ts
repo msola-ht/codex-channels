@@ -696,6 +696,54 @@ describe("ConversationService model selection", () => {
       .resolves.toEqual({ position: 1 });
   });
 
+  it("records a Turn start RPC failure as a model request error", async () => {
+    const startTurn = vi.fn().mockRejectedValue(Object.assign(
+      new Error("You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage"),
+      { code: -32603 },
+    ));
+    const recorder = { recordTurnError: vi.fn() };
+    const service = new ConversationService(
+      turnPort({ startTurn }),
+      {
+        ensure: async () => ({
+          target,
+          workspaceId: "main",
+          threadId: "thread-1",
+          sessionId: "session-1",
+        }),
+        workspace: () => main,
+      } as unknown as SessionRouter,
+      { activeTurn: () => undefined } as unknown as ConversationCore,
+      {
+        status: () => ({ modelProvider: "openai", model: "gpt-5.6-sol" }),
+        turnOverrides: () => ({}),
+        markApplied: vi.fn(),
+      } as unknown as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      recorder,
+    );
+
+    await expect(service.submit(target, "hello"))
+      .rejects.toThrow("usage limit");
+    expect(recorder.recordTurnError).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      phase: "start",
+      threadId: "thread-1",
+      turnId: null,
+      errorType: "usage_limit_reached",
+      errorCode: "rpc:-32603",
+    }));
+  });
+
   it("cancels queued follow-ups instead of running them in a different Thread", async () => {
     let active = { threadId: "thread-1", turnId: "turn-1" } as
       | { threadId: string; turnId: string }
@@ -880,6 +928,196 @@ describe("ConversationService model selection", () => {
     await expect(service.invokeSkill(target, "2", "执行任务"))
       .rejects.toMatchObject({ code: "skill.not-found" });
     expect(resolveSkill).toHaveBeenCalledWith(main.cwd, "second");
+  });
+
+  it("lists built-in agent roles with configured roles overriding duplicates", () => {
+    const service = new ConversationService(
+      turnPort(),
+      { workspace: () => main } as unknown as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        listAgentRoles: () => [
+          { name: "worker", description: "项目专用执行角色" },
+          { name: "ds", description: "DeepSeek 子代理" },
+        ],
+      },
+    );
+
+    expect(service.listAgentRoles()).toEqual([
+      { name: "default", description: "默认角色，继承当前模型与配置" },
+      { name: "explorer", description: "代码库探查：快速回答具体的代码库问题" },
+      { name: "worker", description: "项目专用执行角色" },
+      { name: "ds", description: "DeepSeek 子代理" },
+    ]);
+  });
+
+  it("invokes an agent role with the official text marker and task", async () => {
+    const startTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
+    const service = new ConversationService(
+      turnPort({ startTurn }),
+      {
+        ensure: async () => ({
+          target,
+          workspaceId: "main",
+          threadId: "thread-1",
+          sessionId: "session-1",
+        }),
+        workspace: () => main,
+      } as unknown as SessionRouter,
+      {
+        activeTurn: () => undefined,
+        markTurnStarted: vi.fn(),
+      } as unknown as ConversationCore,
+      {
+        turnOverrides: () => ({}),
+        markApplied: vi.fn(),
+      } as unknown as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        listAgentRoles: () => [{ name: "ds", description: "DeepSeek 子代理" }],
+      },
+    );
+
+    await expect(service.invokeAgent(
+      target,
+      "ds",
+      "  审查提交  ",
+    )).resolves.toMatchObject({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+      roleName: "ds",
+    });
+    expect(startTurn.mock.calls[0]?.[1]).toEqual([
+      {
+        type: "text",
+        text: "请使用 agent_type=\"ds\"、fork_turns=\"1\" 的子代理执行以下任务，子代理完成后把最终结果回复给我：\n\n审查提交",
+      },
+    ]);
+  });
+
+  it("resolves an agent role by list number", async () => {
+    const startTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
+    const service = new ConversationService(
+      turnPort({ startTurn }),
+      {
+        ensure: async () => ({
+          target,
+          workspaceId: "main",
+          threadId: "thread-1",
+          sessionId: "session-1",
+        }),
+        workspace: () => main,
+      } as unknown as SessionRouter,
+      {
+        activeTurn: () => undefined,
+        markTurnStarted: vi.fn(),
+      } as unknown as ConversationCore,
+      {
+        turnOverrides: () => ({}),
+        markApplied: vi.fn(),
+      } as unknown as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        listAgentRoles: () => [{ name: "ds", description: "DeepSeek 子代理" }],
+      },
+    );
+
+    const submission = await service.invokeAgent(target, "4", "执行任务");
+
+    expect(submission.roleName).toBe("ds");
+    expect(startTurn.mock.calls[0]?.[1]?.[0]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining("agent_type=\"ds\""),
+    });
+  });
+
+  it("rejects agent invocation with an unknown role", async () => {
+    const service = new ConversationService(
+      turnPort(),
+      { workspace: () => main } as unknown as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        listAgentRoles: () => [],
+      },
+    );
+
+    await expect(service.invokeAgent(target, "ds", "执行任务"))
+      .rejects.toMatchObject({ code: "agents.not-found" });
+  });
+
+  it("wraps unreadable agent role configuration as a user-facing error", () => {
+    const service = new ConversationService(
+      turnPort(),
+      { workspace: () => main } as unknown as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        listAgentRoles: () => {
+          throw new Error("Codex 子代理角色配置无法安全读取");
+        },
+      },
+    );
+
+    let caught: unknown;
+    try {
+      service.listAgentRoles();
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({
+      code: "agents.config-unreadable",
+    });
   });
 
   it("lists MCP summaries for the current Thread", async () => {

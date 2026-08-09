@@ -86,17 +86,147 @@ const visionSchema = z.discriminatedUnion("mode", [
   }),
 ]);
 
-const priceCurrencySchema = z.enum(["auto", "cny", "usd"]).default("auto");
+const priceCurrencySchema = z.enum(["cny", "usd"]).default("cny");
+
+const webuiSchema = z.strictObject({
+  host: z.enum(["127.0.0.1", "::1", "0.0.0.0"]).default("127.0.0.1"),
+  port: z.number().int().min(1).max(65535).default(8787),
+  token: z.string().min(1).optional(),
+}).superRefine((value, context) => {
+  if (value.host === "0.0.0.0" && value.token === undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["token"],
+      message: "绑定非回环地址时必须设置 token",
+    });
+  }
+});
+
+const metricsSyncSchema = z.strictObject({
+  enabled: z.boolean().default(false),
+  endpoint: z.url().optional(),
+  device_token: z.string().min(1).optional(),
+  device_id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/u).optional(),
+  batch_size: z.number().int().min(1).max(500).default(200),
+  interval_seconds: z.number().int().min(10).max(86400).default(60),
+}).superRefine((value, context) => {
+  if (!value.enabled) {
+    return;
+  }
+  for (const field of ["endpoint", "device_token"]) {
+    if (value[field] === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: [field],
+        message: `metrics.sync 启用时必须配置 ${field}`,
+      });
+    }
+  }
+  if (value.endpoint !== undefined) {
+    let url;
+    try {
+      url = new URL(value.endpoint);
+    } catch {
+      return;
+    }
+    if (url.protocol !== "https:" && !isPrivateHttpEndpoint(url)) {
+      context.addIssue({
+        code: "custom",
+        path: ["endpoint"],
+        message: "metrics.sync.endpoint 必须使用 HTTPS，或回环/私网 HTTP",
+      });
+    }
+  }
+});
+
+const metricsCenterSchema = z.strictObject({
+  enabled: z.boolean().default(false),
+  host: z.enum(["127.0.0.1", "::1", "0.0.0.0"]).default("127.0.0.1"),
+  port: z.number().int().min(1).max(65535).default(8790),
+  token: z.string().min(1).optional(),
+  device_token: z.string().min(1).optional(),
+  database_path: z.string().min(1).default("data/central-metrics.sqlite3"),
+}).superRefine((value, context) => {
+  if (value.host === "0.0.0.0") {
+    for (const field of ["token", "device_token"]) {
+      if (value[field] === undefined) {
+        context.addIssue({
+          code: "custom",
+          path: [field],
+          message: `metrics.center 绑定非回环地址时必须设置 ${field}`,
+        });
+      }
+    }
+  }
+  if (
+    value.token !== undefined
+    && value.device_token !== undefined
+    && value.token === value.device_token
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["device_token"],
+      message: "metrics.center 的 device_token 与 token 必须不同",
+    });
+  }
+});
+
+const metricsViewSchema = z.strictObject({
+  enabled: z.boolean().default(false),
+  endpoint: z.url().optional(),
+  token: z.string().min(1).optional(),
+}).superRefine((value, context) => {
+  if (!value.enabled) {
+    return;
+  }
+  for (const field of ["endpoint", "token"]) {
+    if (value[field] === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: [field],
+        message: `metrics.view 启用时必须配置 ${field}`,
+      });
+    }
+  }
+  if (value.endpoint !== undefined) {
+    let url;
+    try {
+      url = new URL(value.endpoint);
+    } catch {
+      return;
+    }
+    if (url.protocol !== "https:" && !isPrivateHttpEndpoint(url)) {
+      context.addIssue({
+        code: "custom",
+        path: ["endpoint"],
+        message: "metrics.view.endpoint 必须使用 HTTPS，或回环/私网 HTTP",
+      });
+    }
+  }
+});
+
+const telegramSchema = z.strictObject({
+  bot_token: z.string().optional(),
+  allowed_user_ids: z.array(z.number().int().positive()).optional(),
+  proxy_url: z.string().optional(),
+  message_format: z.enum(["html", "rich"]).default("html"),
+}).superRefine((value, context) => {
+  if (!value.bot_token?.trim()) {
+    return;
+  }
+  if (!value.allowed_user_ids?.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["allowed_user_ids"],
+      message: "Telegram 启用时必须配置 allowed_user_ids",
+    });
+  }
+});
 
 const gatewayDocumentSchema = z.strictObject({
   version: z.literal(1),
   default_workspace: z.string().trim().min(1),
-  telegram: z.strictObject({
-    bot_token: z.string().min(1),
-    allowed_user_ids: z.array(z.number().int().positive()).min(1),
-    proxy_url: z.string().optional(),
-    message_format: z.enum(["html", "rich"]).default("html"),
-  }),
+  telegram: telegramSchema.optional(),
   feishu: feishuSchema.optional(),
   weixin: weixinSetupSchema.optional(),
   network: z.strictObject({
@@ -118,11 +248,10 @@ const gatewayDocumentSchema = z.strictObject({
     operation_updates: z.enum(["full", "compact", "hidden"]).default("compact"),
     plan_updates: z.boolean().default(true),
     price_currency: priceCurrencySchema,
-    price_currency_by_provider: z.record(priceCurrencySchema).optional(),
   }).default({
     operation_updates: "compact",
     plan_updates: true,
-    price_currency: "auto",
+    price_currency: "cny",
   }),
   api_providers: z.array(apiProviderSchema).refine(
     (providers) => new Set(providers.map((provider) => provider.id)).size === providers.length,
@@ -135,7 +264,35 @@ const gatewayDocumentSchema = z.strictObject({
   logging: z.strictObject({
     level: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
   }).default({ level: "info" }),
+  webui: webuiSchema.optional(),
+  metrics: z.strictObject({
+    sync: metricsSyncSchema.default({
+      enabled: false,
+      batch_size: 200,
+      interval_seconds: 60,
+    }),
+    center: metricsCenterSchema.optional(),
+    view: metricsViewSchema.optional(),
+  }).default({
+    sync: {
+      enabled: false,
+      batch_size: 200,
+      interval_seconds: 60,
+    },
+  }),
   workspaces: z.array(workspaceSchema).min(1),
+}).superRefine((value, context) => {
+  if (
+    !value.telegram?.bot_token?.trim()
+    && value.feishu?.enabled !== true
+    && value.weixin?.enabled !== true
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["telegram", "bot_token"],
+      message: "至少需要配置一个通讯渠道：Telegram、飞书或微信",
+    });
+  }
 });
 
 export function parseGatewayConfig(content, source = "config.toml") {
@@ -166,6 +323,57 @@ export function validateGatewayConfigDocument(document) {
     throw new Error(z.prettifyError(parsed.error));
   }
   return parsed.data;
+}
+
+export function validateWebuiConfigDocument(document) {
+  const parsed = webuiSchema.safeParse(
+    document !== null && typeof document === "object"
+      ? document.webui ?? {}
+      : {},
+  );
+  if (!parsed.success) {
+    throw new Error(`config.toml 的 [webui] 配置无效：\n${z.prettifyError(parsed.error)}`);
+  }
+  return parsed.data;
+}
+
+export function validateMetricsCenterConfigDocument(document) {
+  const parsed = metricsCenterSchema.safeParse(
+    document !== null && typeof document === "object"
+      ? document.metrics?.center ?? {}
+      : {},
+  );
+  if (!parsed.success) {
+    throw new Error(
+      `config.toml 的 [metrics.center] 配置无效：\n${z.prettifyError(parsed.error)}`,
+    );
+  }
+  return parsed.data;
+}
+
+export function validateMetricsViewConfigDocument(document) {
+  const parsed = metricsViewSchema.safeParse(
+    document !== null && typeof document === "object"
+      ? document.metrics?.view ?? {}
+      : {},
+  );
+  if (!parsed.success) {
+    throw new Error(
+      `config.toml 的 [metrics.view] 配置无效：\n${z.prettifyError(parsed.error)}`,
+    );
+  }
+  return parsed.data;
+}
+
+export function isPrivateHttpEndpoint(url) {
+  if (url.protocol !== "http:") return false;
+  const hostname = url.hostname.toLowerCase();
+  if (hostname === "localhost") return true;
+  const address = hostname.startsWith("[") ? hostname.slice(1, -1) : hostname;
+  if (address === "::1" || address.startsWith("127.")) return true;
+  if (address.startsWith("10.") || address.startsWith("192.168.")) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./u.test(address)) return true;
+  return false;
 }
 
 export function readGatewayConfig(configPath) {

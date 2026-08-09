@@ -364,6 +364,31 @@ describe("TelegramOutbox", () => {
     expect(api.sent).toEqual([]);
   });
 
+  it("sends a channel image through the ordered delivery queue", async () => {
+    const api = new FakeTelegramApi();
+    const image = Buffer.from("validated-image");
+    const outbox = new TelegramOutbox(
+      api as unknown as Api,
+      pino({ level: "silent" }),
+      undefined,
+      {
+        readGeneratedImage: vi.fn(async () => ({
+          bytes: image,
+          format: "png" as const,
+        })),
+      },
+    );
+
+    await outbox.sendChannelImage("100", "/private/generated/image.png");
+    await outbox.close();
+
+    expect(api.photos).toEqual([{
+      filename: "codex-generated-image.png",
+      options: { disable_notification: true },
+      content: image,
+    }]);
+  });
+
   it("keeps Telegram typing active while a turn is running and stops on completion", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();
@@ -1167,7 +1192,6 @@ describe("TelegramOutbox", () => {
         "<b>本次运行</b>",
         "• <b>模型：</b>gpt-5.6-sol · medium · Fast 开启",
         "• <b>提供商：</b>OpenAI 官方",
-        "• <b>最近请求缓存命中率：</b>2.07%",
         "",
         "<b>当前会话累计</b>",
         "• <b>上下文：</b>24.6 K / 258 K（9.5%）",
@@ -1337,6 +1361,58 @@ describe("TelegramOutbox", () => {
       + "💻 <b>运行命令 · 已完成</b> · 125毫秒 · exit 0"
       + " · <code>git status --short second line</code>",
     ]);
+  });
+
+  it("hides successful wait calls but keeps subagent failures in compact mode", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = new TelegramOutbox(
+      api as unknown as Api,
+      pino({ level: "silent" }),
+      undefined,
+      { operationUpdateDisplay: "compact" },
+    );
+
+    outbox.handle({
+      ...operationUpdated("wait-1", "completed", "subagent"),
+      operation: {
+        ...operationUpdated("wait-1", "completed", "subagent").operation,
+        action: "wait",
+      },
+    });
+    outbox.handle({
+      ...operationUpdated("wait-2", "failed", "subagent"),
+      operation: {
+        ...operationUpdated("wait-2", "failed", "subagent").operation,
+        action: "wait",
+      },
+    });
+    await vi.advanceTimersByTimeAsync(750);
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toHaveLength(1);
+    expect(api.sent[0]).toContain("等待子代理 · 失败");
+    expect(api.sent[0]).not.toContain("等待子代理 · 已完成");
+  });
+
+  it("sends one compact subagent start notice", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      type: "subagent.spawned",
+      target,
+      threadId: "parent-thread",
+      turnId: "parent-turn",
+      agentThreadId: "agent-thread-secret",
+      agentPath: "/root/review_task",
+    });
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual(["<b>子代理开始 · review_task</b>"]);
+    expect(api.sent[0]).not.toContain("agent-thread-secret");
   });
 });
 

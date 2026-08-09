@@ -66,6 +66,10 @@ describe("codexc CLI", () => {
       [["rules", "-h"], "用法：codexc rules"],
       [["rules", "init", "-h"], "用法：codexc rules init"],
       [["rules", "check", "--help"], "用法：codexc rules check"],
+      [["agents", "-h"], "用法：codexc agents"],
+      [["agents", "status", "--help"], "用法：codexc agents status"],
+      [["agents", "enable-deepseek", "-h"], "用法：codexc agents enable-deepseek"],
+      [["agents", "disable-deepseek", "--help"], "用法：codexc agents disable-deepseek"],
       [["state", "-h"], "用法：codexc state upgrade"],
       [["state", "upgrade", "--help"], "用法：codexc state upgrade"],
       [["metrics", "-h"], "用法：codexc metrics"],
@@ -75,8 +79,12 @@ describe("codexc CLI", () => {
       [["metrics", "turns", "--help"], "用法：codexc metrics turns"],
       [["metrics", "threads", "--help"], "用法：codexc metrics threads"],
       [["metrics", "reset", "-h"], "用法：codexc metrics reset"],
+      [["metrics", "prune", "--help"], "用法：codexc metrics prune"],
       [["metrics", "report", "-h"], "用法：codexc metrics report"],
       [["metrics", "export", "--help"], "用法：codexc metrics export"],
+      [["channel", "-h"], "用法：codexc channel"],
+      [["channel", "send-image", "--help"], "用法：codexc channel send-image"],
+      [["webui", "-h"], "用法：codexc webui"],
       [["version", "-h"], "用法：codexc version"],
       [["gateway", "-h"], "用法：codexc gateway"],
       [["service-app-server", "--help"], "用法：codexc service-app-server"],
@@ -328,7 +336,7 @@ describe("codexc CLI", () => {
     expect(report.groups.every((group: { provider: string }) =>
       group.provider === "deepseek"
     )).toBe(true);
-    expect(report.aggregate.totalCostCnyNanos).toBeNull();
+    expect(report.aggregate.totalCostCnyNanos).not.toBeNull();
   });
 
   it("generates conservative Codex rules for the current project", () => {
@@ -1251,6 +1259,51 @@ describe("codexc CLI", () => {
     );
   });
 
+  linuxIt("manages WebUI as an independent service target outside all", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-service-webui-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    const systemctlLog = join(root, "systemctl.log");
+    const fakeSystemctl = join(root, "systemctl");
+    mkdirSync(workspace);
+    writeFileSync(
+      fakeSystemctl,
+      "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SYSTEMCTL_LOG\"\n",
+    );
+    chmodSync(fakeSystemctl, 0o755);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      SYSTEMCTL_BINARY: fakeSystemctl,
+      SYSTEMCTL_LOG: systemctlLog,
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+
+    const start = spawnSync(
+      process.execPath,
+      [cli, "service", "start", "webui"],
+      { env: environment, encoding: "utf8" },
+    );
+    expect(start.status).toBe(0);
+    expect(readFileSync(systemctlLog, "utf8")).toContain(
+      "--user start codex-connect-webui.service",
+    );
+
+    writeFileSync(systemctlLog, "");
+    const all = spawnSync(
+      process.execPath,
+      [cli, "service", "start", "all"],
+      { env: environment, encoding: "utf8" },
+    );
+    expect(all.status).toBe(0);
+    const log = readFileSync(systemctlLog, "utf8");
+    expect(log).toContain("codex-connect-app-server.service");
+    expect(log).toContain("codex-connect-gateway.service");
+    expect(log).not.toContain("codex-connect-webui.service");
+  });
+
   it("rejects the removed workspace command alias", () => {
     const result = spawnSync(process.execPath, [cli, "workspace"], { encoding: "utf8" });
 
@@ -1307,6 +1360,38 @@ describe("codexc CLI", () => {
     expect(statSync(join(profile, "data")).mode & 0o777).toBe(0o700);
     expect(statSync(configPath).mode & 0o777).toBe(0o600);
     expect(diagnosed.stdout).not.toContain("[失败] 配置目录权限");
+  });
+
+  it("reports Telegram as disabled when another channel is enabled", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-channel-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    mkdirSync(workspace);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      document.weixin = {
+        enabled: true,
+        account_id: "bot-fixture@im.bot",
+        allowed_user_ids: ["actor-fixture@im.wechat"],
+      };
+    });
+
+    const diagnosed = spawnSync(process.execPath, [cli, "doctor"], {
+      cwd: workspace,
+      env: environment,
+      encoding: "utf8",
+    });
+
+    expect(diagnosed.stdout).toContain("[通过] 配置格式");
+    expect(diagnosed.stdout).toContain("[提示] Telegram：未配置");
+    expect(diagnosed.stdout).not.toContain("[失败] Telegram Token");
+    expect(diagnosed.stdout).not.toContain("[失败] Telegram 用户");
   });
 
   linuxIt("reports safe Linux Weixin runtime readiness without exposing private values", async () => {
@@ -1647,6 +1732,7 @@ function metricsSample(index: number): ModelRequestMetricSample {
     httpStatus: 200,
     errorType: null,
     errorCode: null,
+    errorMessage: null,
     incompleteReason: null,
     inputTokens: 1_000,
     cachedInputTokens: 900,
