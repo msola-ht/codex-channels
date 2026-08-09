@@ -25,6 +25,7 @@ import { packageDir, resolveConfiguredPath, runtimeConfig, userDataDir } from ".
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
 const checks = [];
+let checkSection = "基础环境";
 if (process.argv.length > 2) {
   throw new Error("用法：codexc doctor");
 }
@@ -61,6 +62,7 @@ const runtime = explicitConfigFile
 const { configPath, dataDir } = runtime;
 let document;
 
+setSection("配置文件");
 if (!existsSync(configPath)) {
   record("用户配置", false, `不存在：${configPath}；请先运行 codexc init`);
 } else {
@@ -82,6 +84,7 @@ if (!existsSync(configPath)) {
 }
 
 if (document) {
+  setSection("通讯渠道");
   const telegram = table(document.telegram);
   const feishu = table(document.feishu);
   const weixin = table(document.weixin);
@@ -216,6 +219,7 @@ if (document) {
     note("微信", "未配置");
   }
 
+  setSection("扩展能力");
   const apiProviders = Array.isArray(document.api_providers)
     ? document.api_providers.map(table)
     : [];
@@ -242,6 +246,7 @@ if (document) {
     note("图片识别", "未启用");
   }
 
+  setSection("Workspace");
   try {
     const { workspaces, defaultWorkspace } = readWorkspaceConfig(document);
     record("Workspace", true, `${workspaces.length} 个，默认 ${defaultWorkspace.id}`);
@@ -249,6 +254,7 @@ if (document) {
     record("Workspace", false, errorMessage(error));
   }
 
+  setSection("Codex 与 App Server");
   const codexCommand = stringValue(codex.binary) || "codex";
   try {
     const codexBinary = resolveExecutable(codexCommand);
@@ -315,6 +321,7 @@ async function checkAppServer(label, socketPath) {
   }
 }
 
+setSection("系统服务");
 if (process.platform === "darwin") {
   const uid = process.getuid?.();
   const domain = `gui/${uid}`;
@@ -367,22 +374,44 @@ if (process.platform === "darwin") {
   note("系统服务", "当前平台尚未提供系统服务适配");
 }
 
+console.log("Codex Connect Doctor");
+let renderedSection;
 for (const check of checks) {
+  if (check.section !== renderedSection) {
+    renderedSection = check.section;
+    console.log(`\n=== ${renderedSection} ===`);
+  }
   console.log(`${check.prefix} ${check.name}：${check.detail}`);
   if (check.remediation) {
     console.log(`[处理] ${check.name}：${check.remediation}`);
   }
 }
 const failures = checks.filter((check) => check.kind === "failure").length;
-console.log(failures === 0 ? "\n诊断通过。" : `\n诊断发现 ${failures} 项问题。`);
+const successes = checks.filter((check) => check.kind === "success").length;
+const notes = checks.filter((check) => check.kind === "note").length;
+console.log(
+  failures === 0
+    ? `\n诊断通过：${successes} 项通过，${notes} 项提示。`
+    : `\n诊断发现 ${failures} 项问题：${successes} 项通过，${notes} 项提示。`,
+);
 process.exitCode = failures === 0 ? 0 : 1;
 
+function setSection(section) {
+  checkSection = section;
+}
+
 function record(name, passed, detail) {
-  checks.push({ kind: passed ? "success" : "failure", prefix: passed ? "[通过]" : "[失败]", name, detail });
+  checks.push({
+    section: checkSection,
+    kind: passed ? "success" : "failure",
+    prefix: passed ? "[通过]" : "[失败]",
+    name,
+    detail,
+  });
 }
 
 function note(name, detail, remediation) {
-  checks.push({ kind: "note", prefix: "[提示]", name, detail, remediation });
+  checks.push({ section: checkSection, kind: "note", prefix: "[提示]", name, detail, remediation });
 }
 
 function checkMode(name, path, expected) {

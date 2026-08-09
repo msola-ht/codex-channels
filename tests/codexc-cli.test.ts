@@ -1392,6 +1392,20 @@ describe("codexc CLI", () => {
     expect(diagnosed.stdout).toContain("[提示] Telegram：未配置");
     expect(diagnosed.stdout).not.toContain("[失败] Telegram Token");
     expect(diagnosed.stdout).not.toContain("[失败] Telegram 用户");
+    const sections = [
+      "=== 基础环境 ===",
+      "=== 配置文件 ===",
+      "=== 通讯渠道 ===",
+      "=== 扩展能力 ===",
+      "=== Workspace ===",
+      "=== Codex 与 App Server ===",
+      "=== 系统服务 ===",
+    ];
+    expect(sections.every((section) => diagnosed.stdout.includes(section))).toBe(true);
+    expect(sections.map((section) => diagnosed.stdout.indexOf(section))).toEqual(
+      [...sections].map((section) => diagnosed.stdout.indexOf(section)).sort((left, right) => left - right),
+    );
+    expect(diagnosed.stdout).toMatch(/诊断发现 \d+ 项问题：\d+ 项通过，\d+ 项提示。/u);
   });
 
   linuxIt("reports how to install bubblewrap when it is missing from PATH", () => {
