@@ -160,6 +160,14 @@ describe("ProviderRoutingClient", () => {
         failureReason: null,
       },
     });
+    deepseek.emitNotification({
+      method: "mcpServer/oauthLogin/completed",
+      params: {
+        threadId: null,
+        name: "codex_apps",
+        success: true,
+      },
+    });
     deepseek.emitNotification({ method: "warning", params: { message: "provider warning" } });
     deepseek.emitNotification({
       method: "thread/status/changed",
@@ -179,6 +187,15 @@ describe("ProviderRoutingClient", () => {
           status: "failed",
           error: null,
           failureReason: null,
+        },
+        provider: "deepseek",
+      },
+      {
+        method: "mcpServer/oauthLogin/completed",
+        params: {
+          threadId: null,
+          name: "codex_apps",
+          success: true,
         },
         provider: "deepseek",
       },

@@ -279,6 +279,14 @@ export type OutputEvent =
   | ({ type: "account.updated"; target: ConversationTarget } & AccountStatus)
   | { type: "account.rateLimits.updated"; target: ConversationTarget; rateLimits: RateLimitSnapshot }
   | ({ type: "mcp.status.updated"; target: ConversationTarget } & McpServerStatus)
+  | {
+      type: "mcp.oauth.completed";
+      target: ConversationTarget;
+      threadId: string | null;
+      name: string;
+      success: boolean;
+      error: string | null;
+    }
   | { type: "warning"; target: ConversationTarget; threadId?: string; message: string; background?: boolean };
 
 export function isCriticalOutputEvent(event: OutputEvent): boolean {

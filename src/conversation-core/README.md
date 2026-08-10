@@ -15,13 +15,14 @@
   App Server 增量展示首段回复延迟。代理缺席时仍由 Client
   通知边界时间戳和 App Server 最近 Usage 提供有限回退；
   Thread Token 指标对所有 Provider 保持通用，OpenAI 账户周限只附加到 OpenAI Thread；可重试错误
-  不污染最终完成状态，Thread 与全局 warning 分开路由。
+  不污染最终完成状态，Thread 与全局 warning 分开路由；MCP OAuth 完成结果按 Thread 精确投递，
+  无 Thread 的结果只广播给相同 Provider 的会话。
 - `input-events.ts`：定义 Client 可投递给 Core 的平台无关可辨识输入联合，不含 RPC method、
   未知 params 或生成协议类型；其中 `turn.modelTiming.updated` 由 Bootstrap 把模型代理的
   模型流与 Usage 指标转换为稳定输入，Core 按 Thread/Turn 累计每个已确认请求，并单独保留请求时间
   最新一次的首事件延迟；上下文压缩还按操作类型归约模型、Token 与参考费用摘要，供完成卡片单列；
   根据 Provider 能力计算通用或详细聚合计时。
-- `events.ts`：定义 Conversation 目标、稳定 Token、Plan、Goal、Turn、额度、账户和 MCP 类型，以及
+- `events.ts`：定义 Conversation 目标、稳定 Token、Plan、Goal、Turn、额度、账户和 MCP OAuth 类型，以及
   输出事件、Turn 产物、操作状态、OpenAI 账户归属判定和关键事件判定；外部视觉 API 请求发起后
   使用不含路径、提示正文或凭据的非关键 `vision.started` 事件通知对应渠道。
 - `routing-port.ts`：Core 查询 Thread 路由所需的窄接口。

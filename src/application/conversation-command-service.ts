@@ -47,6 +47,7 @@ export const conversationCommandNames = [
 
 export type ConversationCommandName = typeof conversationCommandNames[number];
 const conversationCommandNameSet = new Set<string>(conversationCommandNames);
+export const mcpCommandUsageText = "用法：/mcp [名称或序号 [tools|resources|templates [页码] [search <关键词>]] | login <名称或序号> | resource <名称或序号> <URI>]";
 
 export interface McpDetailView {
   section: "tools" | "resources" | "templates";
@@ -650,7 +651,7 @@ function parseMcpOperation(input: string):
   if (parts[0] === "login" || parts[0] === "resource") {
     throw new UserFacingError(
       "mcp.usage",
-      mcpUsageText,
+      mcpCommandUsageText,
     );
   }
   if (parts.length === 1 && parts[0]) {
@@ -667,19 +668,19 @@ function parseMcpOperation(input: string):
       page = Number(options[0]);
       optionIndex = 1;
       if (!Number.isSafeInteger(page) || page > 10_000) {
-        throw new UserFacingError("mcp.usage", mcpUsageText);
+        throw new UserFacingError("mcp.usage", mcpCommandUsageText);
       }
     }
     let searchTerm: string | null = null;
     if (options[optionIndex] === "search") {
       searchTerm = options.slice(optionIndex + 1).join(" ").trim();
       if (!searchTerm || searchTerm.length > 128) {
-        throw new UserFacingError("mcp.usage", mcpUsageText);
+        throw new UserFacingError("mcp.usage", mcpCommandUsageText);
       }
       optionIndex = options.length;
     }
     if (optionIndex !== options.length) {
-      throw new UserFacingError("mcp.usage", mcpUsageText);
+      throw new UserFacingError("mcp.usage", mcpCommandUsageText);
     }
     return {
       type: "detail",
@@ -689,11 +690,9 @@ function parseMcpOperation(input: string):
   }
   throw new UserFacingError(
     "mcp.usage",
-    mcpUsageText,
+    mcpCommandUsageText,
   );
 }
-
-const mcpUsageText = "用法：/mcp [名称或序号 [tools|resources|templates [页码] [search <关键词>]] | login <名称或序号> | resource <名称或序号> <URI>]";
 
 function parseAgentInvocation(input: string): {
   selector: string;

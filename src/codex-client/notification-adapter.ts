@@ -55,6 +55,7 @@ type CoreNotification = Extract<
       | "thread/deleted"
       | "account/updated"
       | "account/rateLimits/updated"
+      | "mcpServer/oauthLogin/completed"
       | "mcpServer/startupStatus/updated"
       | "warning";
   }
@@ -85,6 +86,7 @@ const coreMethods = {
   threadDeleted: "thread/deleted",
   accountUpdated: "account/updated",
   accountRateLimitsUpdated: "account/rateLimits/updated",
+  mcpOAuthCompleted: "mcpServer/oauthLogin/completed",
   mcpStatusUpdated: "mcpServer/startupStatus/updated",
   warning: "warning",
 } as const satisfies Record<string, CoreNotification["method"]>;
@@ -144,6 +146,8 @@ export function toConversationInputEvent(
       return toAccountUpdatedEvent(notification.params, notification.provider);
     case coreMethods.accountRateLimitsUpdated:
       return toRateLimitsUpdatedEvent(notification.params, notification.provider);
+    case coreMethods.mcpOAuthCompleted:
+      return toMcpOAuthCompletedEvent(notification.params, notification.provider);
     case coreMethods.mcpStatusUpdated:
       return toMcpStatusEvent(notification.params, notification.provider);
     case coreMethods.warning:
@@ -482,6 +486,35 @@ function toMcpStatusEvent(
     status,
     error: error.value === null ? null : sanitizeOperationText(error.value),
     failureReason: failureReason.value,
+    ...(modelProvider ? { modelProvider } : {}),
+  };
+}
+
+function toMcpOAuthCompletedEvent(
+  value: unknown,
+  modelProvider?: string,
+): ConversationInputEvent | undefined {
+  const params = asRecord(value);
+  const threadId = strictNullableString(params?.threadId);
+  const name = nonEmptyString(params?.name);
+  const success = params?.success;
+  const rawError = params?.error;
+  if (
+    !threadId.valid
+    || !name
+    || typeof success !== "boolean"
+    || (rawError !== undefined && typeof rawError !== "string")
+  ) {
+    return undefined;
+  }
+  return {
+    type: "mcp.oauth.completed",
+    threadId: threadId.value,
+    name,
+    success,
+    error: typeof rawError === "string"
+      ? sanitizeOperationText(rawError)
+      : null,
     ...(modelProvider ? { modelProvider } : {}),
   };
 }

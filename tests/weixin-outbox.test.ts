@@ -375,12 +375,21 @@ describe("WeixinOutbox", () => {
       error: "认证失败，TOKEN=[REDACTED]",
       failureReason: null,
     });
+    outbox.handle({
+      type: "mcp.oauth.completed",
+      target,
+      threadId: "thread",
+      name: "docs",
+      success: true,
+      error: null,
+    });
     await outbox.close();
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
       "**Codex 账户状态已更新**\n- 认证：chatgpt\n- 套餐：Pro",
       "**周限 额度提醒**\n- 主窗口：已使用 12% · 周期 7 天\n- 状态：正常",
       "**MCP Server**\n- 名称：docs\n- 状态：启动失败\n- 原因：认证失败，TOKEN=[已隐藏]",
+      "**MCP OAuth**\n- 名称：docs\n- 状态：登录成功",
     ]);
   });
 

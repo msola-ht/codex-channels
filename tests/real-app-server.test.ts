@@ -408,6 +408,8 @@ contractSuite("isolated Codex App Server state contract", () => {
   let ownerClient: CodexAppServerClient;
   let peerRpc: JsonRpcClient;
   let peerClient: CodexAppServerClient;
+  let oauthServer: ReturnType<typeof createServer>;
+  let oauthBaseUrl: string;
   let appServerStderr = "";
 
   beforeAll(async () => {
@@ -415,6 +417,44 @@ contractSuite("isolated Codex App Server state contract", () => {
     testRuntime = mkdtempSync(join(runtimeRoot, "contract-"));
     codexHome = join(testRuntime, "codex-home");
     socketPath = join(testRuntime, "app-server.sock");
+    oauthServer = createServer((request, response) => {
+      if (
+        request.method === "GET"
+        && request.url === "/.well-known/oauth-authorization-server/oauth-mcp"
+      ) {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          authorization_endpoint: `${oauthBaseUrl}/authorize`,
+          token_endpoint: `${oauthBaseUrl}/token`,
+          scopes_supported: ["read"],
+          response_types_supported: ["code"],
+          code_challenge_methods_supported: ["S256"],
+        }));
+        return;
+      }
+      if (request.method === "POST" && request.url === "/token") {
+        request.resume();
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          access_token: "contract-access-token",
+          token_type: "Bearer",
+          expires_in: 3_600,
+          refresh_token: "contract-refresh-token",
+        }));
+        return;
+      }
+      response.writeHead(404);
+      response.end();
+    });
+    await new Promise<void>((resolveListen, rejectListen) => {
+      oauthServer.once("error", rejectListen);
+      oauthServer.listen(0, "127.0.0.1", () => resolveListen());
+    });
+    const oauthAddress = oauthServer.address();
+    if (!oauthAddress || typeof oauthAddress === "string") {
+      throw new Error("MCP OAuth 合同无法创建本机 HTTP 夹具");
+    }
+    oauthBaseUrl = `http://127.0.0.1:${oauthAddress.port}`;
     mkdirSync(codexHome, { recursive: true, mode: 0o700 });
     const contractSkillDirectory = join(
       codexHome,
@@ -496,9 +536,15 @@ contractSuite("isolated Codex App Server state contract", () => {
     writeFileSync(
       join(codexHome, "config.toml"),
       [
+        'mcp_oauth_credentials_store = "file"',
+        "",
         "[mcp_servers.approval_probe]",
         `command = ${JSON.stringify(process.execPath)}`,
         `args = [${JSON.stringify(approvalProbe)}]`,
+        "",
+        "[mcp_servers.oauth_probe]",
+        `url = ${JSON.stringify(`${oauthBaseUrl}/oauth-mcp`)}`,
+        'oauth = { client_id = "contract-oauth-client" }',
         "",
         "[features]",
         "plugins = true",
@@ -555,6 +601,9 @@ contractSuite("isolated Codex App Server state contract", () => {
     if (processHandle?.exitCode === null) {
       processHandle.kill("SIGTERM");
       await new Promise((resolveExit) => processHandle.once("exit", resolveExit));
+    }
+    if (oauthServer) {
+      await new Promise<void>((resolveClose) => oauthServer.close(() => resolveClose()));
     }
     if (testRuntime) {
       rmSync(testRuntime, { recursive: true, force: true });
@@ -642,6 +691,50 @@ contractSuite("isolated Codex App Server state contract", () => {
       }],
       omittedContentCount: 0,
     });
+  }, 15_000);
+
+  it("maps the isolated App Server MCP OAuth completion notification", async () => {
+    const started = await ownerClient.startThread(workdir);
+    const threadId = started.thread.id;
+    let observed: ReturnType<typeof toConversationInputEvent>;
+    const removeNotification = ownerClient.onNotification((notification) => {
+      const event = toConversationInputEvent(notification);
+      if (event?.type === "mcp.oauth.completed" && event.name === "oauth_probe") {
+        observed = event;
+      }
+    });
+    try {
+      const login = await ownerClient.startMcpOAuthLogin("oauth_probe", threadId);
+      const authorizationUrl = new URL(login.authorizationUrl);
+      expect(authorizationUrl.origin).toBe(oauthBaseUrl);
+      expect(authorizationUrl.searchParams.get("client_id"))
+        .toBe("contract-oauth-client");
+      const state = authorizationUrl.searchParams.get("state");
+      const redirectUri = authorizationUrl.searchParams.get("redirect_uri");
+      expect(state).not.toBeNull();
+      expect(redirectUri).not.toBeNull();
+      if (!state || !redirectUri) {
+        throw new Error("MCP OAuth 授权地址缺少 state 或 redirect_uri");
+      }
+      const callbackUrl = new URL(redirectUri);
+      callbackUrl.searchParams.set("code", "contract-test-code");
+      callbackUrl.searchParams.set("state", state);
+      const callbackResponse = await fetch(callbackUrl);
+      expect(callbackResponse.ok).toBe(true);
+
+      await waitFor(() => observed !== undefined, 10_000);
+      expect(observed).toEqual({
+        type: "mcp.oauth.completed",
+        threadId,
+        name: "oauth_probe",
+        success: true,
+        error: null,
+      });
+    } finally {
+      removeNotification();
+      await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
+      await ownerClient.deleteThread(threadId);
+    }
   }, 15_000);
 
   it("maps the isolated App Server Plugin list to stable installed entries", async () => {

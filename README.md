@@ -159,8 +159,8 @@ plugin_api = false
   上游多行长描述会先归一化并有界展示。
 - `/mcp <名称或序号> <tools|resources|templates> [页码] [search <关键词>]`：分页或搜索工具、资源与
   资源模板，每页最多展示 8 项。
-- `/mcp login <名称或序号>`：仅对支持 OAuth 的 Server 启动登录并返回授权地址；Bearer Token
-  或不支持 OAuth 时不显示该操作。
+- `/mcp login <名称或序号>`：仅对支持 OAuth 的 Server 启动登录并返回授权地址；浏览器流程完成后，
+  Gateway 会在发起登录的会话中主动提示成功或失败。Bearer Token 或不支持 OAuth 时不显示该操作。
 - `/mcp resource <名称或序号> <URI>`：只读读取资源；整次最多检查前 8 个内容，文本合计最多展示
   8,000 字符并明确标记截断或省略，二进制只显示 MIME 和 Base64 字符数，不通过聊天命令直接
   调用 MCP Tool。

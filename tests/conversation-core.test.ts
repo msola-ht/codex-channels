@@ -822,6 +822,14 @@ describe("ConversationCore", () => {
         failureReason: null,
       },
     });
+    handleNotification(core, {
+      method: "mcpServer/oauthLogin/completed",
+      params: {
+        threadId: "thread-1",
+        name: "docs",
+        success: true,
+      },
+    });
     await output.close();
 
     const limitEvents = events.filter((event) => event.type === "account.rateLimits.updated");
@@ -839,6 +847,14 @@ describe("ConversationCore", () => {
       name: "docs",
       status: "ready",
     }));
+    expect(events).toContainEqual({
+      type: "mcp.oauth.completed",
+      target,
+      threadId: "thread-1",
+      name: "docs",
+      success: true,
+      error: null,
+    });
   });
 
   it("broadcasts global App Server warnings to bound conversations", async () => {
@@ -921,6 +937,16 @@ describe("ConversationCore", () => {
       provider: "deepseek",
     });
     handleNotification(core, {
+      method: "mcpServer/oauthLogin/completed",
+      params: {
+        threadId: null,
+        name: "codex_apps",
+        success: false,
+        error: "OAuth denied",
+      },
+      provider: "deepseek",
+    });
+    handleNotification(core, {
       method: "warning",
       params: { threadId: null, message: "DeepSeek 配置警告" },
       provider: "deepseek",
@@ -934,6 +960,14 @@ describe("ConversationCore", () => {
         name: "codex_apps",
         status: "failed",
       }),
+      {
+        type: "mcp.oauth.completed",
+        target: deepseekTarget,
+        threadId: null,
+        name: "codex_apps",
+        success: false,
+        error: "OAuth denied",
+      },
       {
         type: "warning",
         target: deepseekTarget,

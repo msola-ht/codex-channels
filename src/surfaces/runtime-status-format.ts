@@ -53,6 +53,23 @@ export function formatRuntimeMcpStatusUpdate(
   ].join("\n");
 }
 
+export function formatRuntimeMcpOAuthCompleted(
+  completion: {
+    name: string;
+    success: boolean;
+    error: string | null;
+  },
+): string {
+  return [
+    "## MCP OAuth",
+    `- 名称：${completion.name}`,
+    `- 状态：${completion.success ? "登录成功" : "登录失败"}`,
+    ...(!completion.success && completion.error
+      ? [`- 原因：${visibleRuntimeMessage(completion.error)}`]
+      : []),
+  ].join("\n");
+}
+
 function visibleRuntimeMessage(message: string): string {
   return message.replaceAll("[REDACTED]", "[已隐藏]");
 }

@@ -124,7 +124,8 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 `/skill` 返回带序号的已启用项，`/skill <名称或序号> <任务>` 通过 Application
 提交官方结构化 Skill 输入；Surface 不接收或拼装本机 Skill 路径。
 `/mcp`、`/mcp <名称或序号>`、工具/资源/模板分页搜索、`/mcp login ...` 与
-`/mcp resource ...` 共用详情、OAuth 能力判断和只读资源格式；资源正文明确标为外部不可信内容。
+`/mcp resource ...` 共用详情、OAuth 能力判断和只读资源格式；OAuth 完成结果由三个渠道共用格式，
+成功静默发送、失败按错误通知发送；资源正文明确标为外部不可信内容。
 `/plugin` 无参数列出已安装项，带选择器和任务时调用 Plugin，并统一显示开发中提示；飞书可从
 已启用且可调用项生成一次性任务表单，Surface 不拼装 Plugin mention 路径。
 `user-facing-error-format.ts` 统一三个渠道的结构化用户错误文案，只保留渠道名称差异；

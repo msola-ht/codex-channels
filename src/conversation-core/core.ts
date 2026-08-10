@@ -777,6 +777,21 @@ export class ConversationCore {
         }
         return;
       }
+      case "mcp.oauth.completed": {
+        const outputEvent = {
+          type: "mcp.oauth.completed" as const,
+          threadId: event.threadId,
+          name: event.name,
+          success: event.success,
+          error: event.error,
+        };
+        if (event.threadId) {
+          this.publishForThread(event.threadId, outputEvent);
+        } else {
+          this.broadcastForProvider(event.modelProvider, outputEvent);
+        }
+        return;
+      }
       case "warning":
         if (event.threadId) {
           this.publishForThread(event.threadId, {

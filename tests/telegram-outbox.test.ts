@@ -1301,6 +1301,29 @@ describe("TelegramOutbox", () => {
     expect(api.sendOptions).toEqual([{ disable_notification: true }]);
   });
 
+  it("sends MCP OAuth failures as critical status panels", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      type: "mcp.oauth.completed",
+      target,
+      threadId: "thread-1",
+      name: "docs",
+      success: false,
+      error: "OAuth denied",
+    });
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toHaveLength(1);
+    expect(api.sent[0]).toContain("MCP OAuth");
+    expect(api.sent[0]).toContain("登录失败");
+    expect(api.sent[0]).toContain("OAuth denied");
+    expect(api.sendOptions[0]).not.toHaveProperty("disable_notification");
+  });
+
   it("does not send operation updates in hidden mode", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();

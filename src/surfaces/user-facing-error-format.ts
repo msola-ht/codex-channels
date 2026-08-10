@@ -1,3 +1,4 @@
+import { mcpCommandUsageText } from "../application/index.js";
 import type { UserFacingError } from "../conversation-core/index.js";
 import { gatewayRequestFailedText } from "./output-copy.js";
 
@@ -137,7 +138,7 @@ export function formatSurfaceUserFacingError(
     case "skill.not-found":
       return "指定的 Skill 不存在、未启用或不属于当前 Workspace";
     case "mcp.usage":
-      return "用法：/mcp [名称或序号 | login <名称或序号> | resource <名称或序号> <URI>]";
+      return mcpCommandUsageText;
     case "mcp.server.usage":
       return "需要提供 MCP Server 名称或序号";
     case "mcp.server.not-found":

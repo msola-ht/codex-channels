@@ -518,7 +518,11 @@ function routeNotification(
     return provider === "openai" ? { ...routed, provider } : undefined;
   }
   if (
-    (routed.method === "mcpServer/startupStatus/updated" || routed.method === "warning")
+    (
+      routed.method === "mcpServer/oauthLogin/completed"
+      || routed.method === "mcpServer/startupStatus/updated"
+      || routed.method === "warning"
+    )
     && typeof asRecord(routed.params)?.threadId !== "string"
   ) {
     return { ...routed, provider };

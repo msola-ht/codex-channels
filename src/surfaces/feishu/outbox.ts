@@ -328,6 +328,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
           || event.type === "subagent.completed"
           || event.type === "account.updated"
           || event.type === "account.rateLimits.updated"
+          || event.type === "mcp.oauth.completed"
           || event.type === "mcp.status.updated"
         ? this.sendMarkdown(event.target.conversationId, rendered)
         : event.type === "turn.started"

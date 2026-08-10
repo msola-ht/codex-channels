@@ -79,6 +79,10 @@ OpenAI `/limits` 在额度响应包含 10,080 分钟周窗口和有效重置时�
 `/diff` 与操作结果保持原文。三渠道分别用飞书卡片 Markdown、Telegram
 HTML 和微信结构化字段渲染。
 
+`/mcp login` 返回安全授权地址；浏览器流程结束后，Gateway 把官方 OAuth 完成通知统一显示为
+“MCP OAuth”成功或失败状态。失败原因在 Client 边界先脱敏，Telegram 失败通知会启用声音，成功
+通知保持静默；飞书使用 Markdown 卡片，微信使用结构化文本。
+
 `/agents` 无参数时列出内置角色（default/explorer/worker）与 `~/.codex/config.toml` 中
 配置的角色（如 `agents.ds`）；`/agents <角色名称或序号> <任务>` 以包含官方 `agent_type` 和
 `fork_turns="1"` 的文本指示子代理执行任务，调用结果与普通 Turn 启动一致。

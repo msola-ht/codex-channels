@@ -31,6 +31,7 @@ export {
   ConversationCommandService,
   conversationCommandNames,
   isConversationCommandName,
+  mcpCommandUsageText,
   type ConversationCommandName,
   type ConversationCommandOutcome,
   type ConversationCommandResult,

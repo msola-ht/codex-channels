@@ -37,7 +37,7 @@
 - `permission-adapter.ts`：把官方 Permission Profile 分页响应裁剪为 ID、说明和策略可选状态，
   并对必需字段与分页游标失败关闭。
 - `notification-adapter.ts`：把当前支持的官方 Notification 转换为 Routing 或 Conversation Core
-  拥有的稳定事件；校验 Turn、Item、Diff、Plan、Goal、Token、账户、额度、MCP、warning 与 Thread
+  拥有的稳定事件；校验 Turn、Item、Diff、Plan、Goal、Token、账户、额度、MCP OAuth 完成、warning 与 Thread
   生命周期字段；`turn/completed` 只接受官方 `Turn.durationMs` 的非负安全整数并转为稳定耗时，
   Turn、warning 和 MCP 错误在此统一脱敏并限长，残缺或无关通知不进入业务模块。
 - `operation-adapter.ts`：把官方 Item 转换为安全、简洁的操作摘要，并在离开 Client 边界前
@@ -51,7 +51,7 @@
   校验并向 Surface 注入纯字符串。
 - `client.ts`：Thread 搜索/归档/固定、Turn、模型、权限、Skill、用量及用户级配置
   读取与服务层级写入等 App Server 方法的类型化封装；MCP 概览按 Thread 使用
-  `toolsAndAuthOnly` 分页，详情使用 `full`，OAuth 不自动重试，资源读取保持只读；Permission
+  `toolsAndAuthOnly` 分页，详情使用 `full`，OAuth 不自动重试，并消费官方登录完成通知，资源读取保持只读；Permission
   Profile 按 CWD 分页。开发中 Plugin 只调用 `plugin/installed` 并经 Application 开关约束，
   不接入搜索、安装或分享。Thread 列表显式传空
   `modelProviders` 获取当前 Workspace 的全部 Provider，

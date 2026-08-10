@@ -175,6 +175,14 @@ describe("Feishu outbox", () => {
       failureReason: null,
     });
     outbox.handle({
+      type: "mcp.oauth.completed",
+      target,
+      threadId: null,
+      name: "codex_apps",
+      success: false,
+      error: "OAuth denied",
+    });
+    outbox.handle({
       type: "account.updated",
       target,
       authMode: "apikey",
@@ -185,6 +193,7 @@ describe("Feishu outbox", () => {
     expect(texts).toEqual([]);
     expect(markdownCards).toEqual([
       "## MCP Server\n- 名称：codex_apps\n- 状态：已就绪",
+      "## MCP OAuth\n- 名称：codex_apps\n- 状态：登录失败\n- 原因：OAuth denied",
       "## Codex 账户状态已更新\n- 认证：apikey\n- 套餐：Pro",
     ]);
   });

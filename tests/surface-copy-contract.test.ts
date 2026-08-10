@@ -46,6 +46,7 @@ import {
 } from "../src/surfaces/feishu/renderer.js";
 import {
   formatRuntimeAccountUpdate,
+  formatRuntimeMcpOAuthCompleted,
   formatRuntimeMcpStatusUpdate,
   formatRuntimeRateLimitUpdate,
 } from "../src/surfaces/runtime-status-format.js";
@@ -108,6 +109,36 @@ describe("shared surface copy contract", () => {
         expect(formatSurfaceUserFacingError(error, surface)).toBe(expected);
       }
     }
+  });
+
+  it("reports the complete MCP command usage consistently on every surface", () => {
+    const error = new UserFacingError("mcp.usage", "invalid MCP command");
+    const expected = "用法：/mcp [名称或序号 [tools|resources|templates [页码] [search <关键词>]] | login <名称或序号> | resource <名称或序号> <URI>]";
+    for (const surface of ["Telegram", "飞书", "微信"] as const) {
+      expect(formatSurfaceUserFacingError(error, surface)).toBe(expected);
+    }
+  });
+
+  it("formats MCP OAuth completion without exposing sensitive failure details", () => {
+    expect(formatRuntimeMcpOAuthCompleted({
+      name: "docs",
+      success: true,
+      error: null,
+    })).toBe([
+      "## MCP OAuth",
+      "- 名称：docs",
+      "- 状态：登录成功",
+    ].join("\n"));
+    expect(formatRuntimeMcpOAuthCompleted({
+      name: "github",
+      success: false,
+      error: "TOKEN=[REDACTED]",
+    })).toBe([
+      "## MCP OAuth",
+      "- 名称：github",
+      "- 状态：登录失败",
+      "- 原因：TOKEN=[已隐藏]",
+    ].join("\n"));
   });
 
   it("keeps account, quota, appended-input, and empty-response copy shared", () => {

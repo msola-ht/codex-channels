@@ -60,6 +60,7 @@ import {
 } from "../output-copy.js";
 import {
   formatRuntimeAccountUpdate,
+  formatRuntimeMcpOAuthCompleted,
   formatRuntimeMcpStatusUpdate,
   formatRuntimeRateLimitUpdate,
 } from "../runtime-status-format.js";
@@ -231,6 +232,8 @@ export function renderFeishuOutput(
       return formatRuntimeRateLimitUpdate(event.rateLimits);
     case "mcp.status.updated":
       return formatRuntimeMcpStatusUpdate(event);
+    case "mcp.oauth.completed":
+      return formatRuntimeMcpOAuthCompleted(event);
     case "warning":
       return formatCodexWarning(visibleUpstreamMessage(event.message));
   }
