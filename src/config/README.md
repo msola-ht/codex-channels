@@ -44,7 +44,7 @@ Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bo
 重启 Gateway，不需要重启 App Server。
 
 `experimental.plugin_api` 控制 Codex 0.147.0 开发中 Plugin 调试入口，默认开启；关闭后
-`/plugins` 与 `/plugin` 在 Application 边界失败关闭，不发送 `plugin/installed` 或 mention
+`/plugin` 的列表与调用在 Application 边界失败关闭，不发送 `plugin/installed` 或 mention
 请求。变化需要重启 Gateway，不需要重启 App Server；Doctor 始终显示开关状态与风险提示。
 
 `[[workspaces]]` 除 `id`、`name`、`cwd` 外支持可选的工作区权限：`sandbox`（

@@ -33,7 +33,6 @@ export const conversationCommandNames = [
   "fast",
   "skill",
   "mcp",
-  "plugins",
   "plugin",
   "usage",
   "metrics",
@@ -437,12 +436,13 @@ export class ConversationCommandService {
           ),
         };
       }
-      case "plugins":
-        return {
-          kind: "plugins",
-          plugins: await this.conversations.listPlugins(target),
-        };
       case "plugin": {
+        if (!argumentsText) {
+          return {
+            kind: "plugins",
+            plugins: await this.conversations.listPlugins(target),
+          };
+        }
         const invocation = parsePluginInvocation(argumentsText);
         const submission = await this.conversations.invokePlugin(
           target,

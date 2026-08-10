@@ -35,7 +35,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       result: {
         tools: [{
           name: "approval_probe",
-          description: "Emit a deterministic MCP tool approval elicitation.",
+          description: ` Emit\n\tapproval details ${"x".repeat(2_100)} `,
           inputSchema: {
             type: "object",
             properties: {

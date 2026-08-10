@@ -30,8 +30,8 @@
   排除系统与插件缓存；列表结果不含本机路径，显式调用只向 Application 返回精确匹配且名称、
   绝对路径均通过校验的引用。
 - `mcp-adapter.ts`：把官方 MCP Server 状态页裁剪为概览或工具、资源、模板详情，校验 OAuth
-  授权 URL，并把资源响应限为前 8 项、文本展示合计 8,000 字符，二进制裁剪为元数据；不传播
-  工具 Schema 或 Base64 正文。
+  授权 URL，将说明字段的多行空白归一化并限为 2,000 字符，并把资源响应限为前 8 项、文本展示
+  合计 8,000 字符，二进制裁剪为元数据；不传播工具 Schema 或 Base64 正文。
 - `plugin-adapter.ts`：只映射已安装 Plugin，校验 Plugin ID、Marketplace、启用与管理员可用状态，
   并为可调用项生成官方 `plugin://` mention 路径。
 - `permission-adapter.ts`：把官方 Permission Profile 分页响应裁剪为 ID、说明和策略可选状态，

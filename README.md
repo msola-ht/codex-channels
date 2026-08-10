@@ -151,11 +151,12 @@ Codex 0.147.0 的 Plugin API 仍标记为开发中。Gateway 默认开启已安�
 plugin_api = false
 ```
 
-- `/plugins`：列出当前 Workspace 已安装的 Plugin 及启用状态。
+- `/plugin`：列出当前 Workspace 已安装的 Plugin 及启用状态。
 - `/plugin <名称、完整 ID 或序号> <任务>`：仅在 OpenAI Thread 中使用官方 `mention` 输入调用
   已启用且可用的 Plugin。
 - 不开放 Plugin 搜索、市场、安装、卸载或分享；`codexc doctor` 会显示该开发中开关的状态。
-- `/mcp`：列出当前 Thread 的 MCP Server；`/mcp <名称或序号>` 查看工具、资源与模板详情。
+- `/mcp`：列出当前 Thread 的 MCP Server；`/mcp <名称或序号>` 查看工具、资源与模板详情；
+  上游多行长描述会先归一化并有界展示。
 - `/mcp login <名称或序号>`：启动 OAuth 登录并返回授权地址。
 - `/mcp resource <名称或序号> <URI>`：只读读取资源；整次最多检查前 8 个内容，文本合计最多展示
   8,000 字符并明确标记截断或省略，二进制只显示 MIME 和 Base64 字符数，不通过聊天命令直接
@@ -358,8 +359,8 @@ deepseek）的全部请求行并自动重启 Gateway 与中心服务，适合额
 - 运行：`/status`、`/stop`、`/queue <描述>`、`/compact`、`/fork`、`/review`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
 - 状态：`/diff`、`/usage`、`/metrics [session|global|providers|models|errors] [today|yesterday|this-week|last-week|this-month|last-month|24h|7d|30d|90d|365d|all]`、`/limits`、`/permissions`、`/goal`
-- 扩展：`/agents [角色名称或序号 任务]`、`/skill [名称或序号 任务]`、`/plugins`、
-  `/plugin <名称、完整 ID 或序号> <任务>`、`/mcp [名称或序号]`、
+- 扩展：`/agents [角色名称或序号 任务]`、`/skill [名称或序号 任务]`、
+  `/plugin [名称、完整 ID 或序号 任务]`、`/mcp [名称或序号]`、
   `/mcp login <名称或序号>`、`/mcp resource <名称或序号> <URI>`、`/rules`
 - 图片：`/vision <下一批要求>`；多图：`/vision <2–4> <要求>`，收齐自动提交；失败重试：`/vision retry`；取消：`/vision cancel`
 - 帮助：`/help`、`/whoami`

@@ -76,7 +76,7 @@ Conversation 与 Actor 在内存保留五分钟有效的一次重试输入，`/v
 单价；所有 Provider 的完成卡片与 `/metrics` 最近运行和会话累计按本机实际用量展示均价；
 聚合存在多档价格时只标记多档、
 不显示伪统一单价。信息类聊天指令（`/status`、`/usage`、
-`/limits`、`/models`、`/sessions`、`/skills`、`/mcp`、`/plugins`、`/permissions`、`/goal`、
+`/limits`、`/models`、`/sessions`、`/skills`、`/mcp`、`/plugin`、`/permissions`、`/goal`、
 `/project-rules`、`/metrics` 等）输出统一为 Markdown 列表：首行为 `##` 标题、小节为 `###`
 标题、字段为 `-` 列表项、明细缩进嵌套；`/diff` 与操作结果保持原文。三个渠道分别用飞书卡片
 Markdown、Telegram HTML、微信结构化字段渲染列表。
@@ -124,8 +124,8 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 `/skill` 返回带序号的已启用项，`/skill <名称或序号> <任务>` 通过 Application
 提交官方结构化 Skill 输入；Surface 不接收或拼装本机 Skill 路径。
 `/mcp`、`/mcp <名称或序号>`、`/mcp login ...` 与 `/mcp resource ...` 共用详情、OAuth 和
-只读资源格式；资源正文明确标为外部不可信内容。`/plugins` 与 `/plugin ...` 共用开发中提示，
-Surface 不拼装 Plugin mention 路径。
+只读资源格式；资源正文明确标为外部不可信内容。`/plugin` 无参数列出已安装项，带选择器和任务时
+调用 Plugin，并统一显示开发中提示；Surface 不拼装 Plugin mention 路径。
 `user-facing-error-format.ts` 统一三个渠道的结构化用户错误文案，只保留渠道名称差异；
 `error-metadata.ts` 统一渠道日志中的受约束异常类型、机器错误码和锁定 App Server
 白名单拒绝分类，拒绝异常正文、堆栈、请求标识及上游自定义名称进入日志；Bootstrap

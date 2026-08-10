@@ -83,6 +83,9 @@ describe("provider-aware conversation command formatting", () => {
   });
 
   it("renders the experimental Plugin list and invocation outcomes", () => {
+    const help = conversationCommandHelpLines.join("\n");
+    expect(help).toContain("/plugin [名称或序号 任务]");
+    expect(help).not.toContain("/plugins");
     const rendered = formatConversationPlugins({
       kind: "plugins",
       plugins: [{

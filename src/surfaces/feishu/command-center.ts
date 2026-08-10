@@ -537,8 +537,7 @@ function renderFeishuCategorizedCommandsCard(
         ["子代理", "agents", "default"],
         ["Skills", "skill", "default"],
         ["MCP", "mcp", "default"],
-        ["Plugins", "plugins", "default"],
-        ["调用 Plugin", "plugin", "default"],
+        ["Plugin", "plugin", "default"],
       ]),
       sectionTitle("当前内容"),
       actionRow(token, [

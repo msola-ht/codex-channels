@@ -1350,6 +1350,71 @@ describe("JsonRpcClient", () => {
       .toEqual({ server: "project-tools", uri: "project://readme", threadId: "thread-1" });
   });
 
+  it("normalizes multiline and oversized MCP descriptions without rejecting details", async () => {
+    const transport = new FakeTransport();
+    transport.mcpPages = [{
+      data: [appServerMcpStatus({
+        serverInfo: {
+          name: "local-tools",
+          title: "Local Tools",
+          version: "1.0.0",
+          description: " Server\n\tsummary ",
+        },
+        tools: {
+          search: {
+            name: "search",
+            title: "Search",
+            description: ` Search\n\ttool ${"x".repeat(12_700)} `,
+          },
+        },
+        resources: [{
+          uri: "local://readme",
+          name: "readme",
+          title: "README",
+          description: " Resource\n\tsummary ",
+          mimeType: "text/plain",
+        }],
+      })],
+      nextCursor: null,
+    }];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    const [server] = await client.listMcpServerDetails();
+    expect(server?.serverDescription).toBe("Server summary");
+    expect(server?.tools[0]?.description).toHaveLength(2_000);
+    expect(server?.tools[0]?.description).toMatch(/^Search tool x+$/u);
+    expect(server?.resources[0]?.description).toBe("Resource summary");
+  });
+
+  it.each([
+    { name: "NUL", value: "\u0000" },
+    { name: "ESC", value: "\u001b" },
+  ])("rejects $name in MCP descriptions", async ({ value }) => {
+    const transport = new FakeTransport();
+    transport.mcpPages = [{
+      data: [appServerMcpStatus({
+        tools: {
+          search: {
+            name: "search",
+            title: "Search",
+            description: `unsafe${value}description`,
+          },
+        },
+      })],
+      nextCursor: null,
+    }];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listMcpServerDetails())
+      .rejects.toThrow("Codex 响应缺少有效 MCP tool description");
+  });
+
   it("bounds MCP resource content count and aggregate visible text", async () => {
     const transport = new FakeTransport();
     transport.mcpResourceResult = {

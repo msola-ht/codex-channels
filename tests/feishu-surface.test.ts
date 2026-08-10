@@ -446,8 +446,9 @@ describe("Feishu Surface", () => {
     }]);
   });
 
-  it("opens a Plugin invocation form from the categorized command center", async () => {
-    const fixture = createFixture();
+  it("routes the unified Plugin button to the installed list", async () => {
+    const listPlugins = vi.fn(async () => []);
+    const fixture = createFixture({ listPlugins });
     const starting = fixture.surface.start();
     fixture.ready();
     await starting;
@@ -460,11 +461,12 @@ describe("Feishu Surface", () => {
     await settle();
     await fixture.surface.stop();
 
-    expect(fixture.cards).toHaveLength(3);
-    expect(JSON.stringify(fixture.cards[2]?.card)).toContain("调用 Plugin");
-    expect(JSON.stringify(fixture.cards[2]?.card)).toContain(
-      "名称、完整 ID 或序号及任务",
-    );
+    expect(fixture.cards).toHaveLength(2);
+    expect(listPlugins).toHaveBeenCalled();
+    expect(fixture.sent).toEqual([{
+      chatId: "oc_chat",
+      text: "当前没有已安装 Plugins。",
+    }]);
   });
 
   it("routes a confirmed Doctor card through the application setup controller", async () => {

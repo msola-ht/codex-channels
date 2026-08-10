@@ -62,7 +62,7 @@ export function toMcpServerDetailPage(
           ? requiredText(serverInfo.version, "MCP server version")
           : null,
         serverDescription: serverInfo
-          ? optionalText(serverInfo.description, "MCP server description")
+          ? optionalDescription(serverInfo.description, "MCP server description")
           : null,
         tools: Object.entries(server.tools).flatMap(([key, tool]) => {
           if (!tool) return [];
@@ -73,14 +73,14 @@ export function toMcpServerDetailPage(
           return [{
             name,
             title: optionalText(tool.title, "MCP tool title"),
-            description: optionalText(tool.description, "MCP tool description"),
+            description: optionalDescription(tool.description, "MCP tool description"),
           }];
         }),
         resources: server.resources.map((resource) => ({
           uri: requiredText(resource.uri, "MCP resource uri", 4_096),
           name: requiredText(resource.name, "MCP resource name"),
           title: optionalText(resource.title, "MCP resource title"),
-          description: optionalText(resource.description, "MCP resource description"),
+          description: optionalDescription(resource.description, "MCP resource description"),
           mimeType: optionalText(resource.mimeType, "MCP resource mime type"),
         })),
         resourceTemplates: server.resourceTemplates.map((template) => ({
@@ -91,7 +91,7 @@ export function toMcpServerDetailPage(
           ),
           name: requiredText(template.name, "MCP resource template name"),
           title: optionalText(template.title, "MCP resource template title"),
-          description: optionalText(
+          description: optionalDescription(
             template.description,
             "MCP resource template description",
           ),
@@ -221,9 +221,30 @@ function optionalText(value: unknown, field: string): string | null {
   return requiredText(value, field, 2_000);
 }
 
+function optionalDescription(value: unknown, field: string): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string" || hasUnsafeDescriptionControlCharacters(value)) {
+    throw new Error(`Codex 响应缺少有效 ${field}`);
+  }
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  if (!normalized) return null;
+  return [...normalized].slice(0, 2_000).join("");
+}
+
 function hasControlCharacters(value: string): boolean {
   return [...value].some((character) => {
     const code = character.codePointAt(0);
     return code !== undefined && (code <= 0x1f || code === 0x7f);
+  });
+}
+
+function hasUnsafeDescriptionControlCharacters(value: string): boolean {
+  return [...value].some((character) => {
+    const code = character.codePointAt(0);
+    return code !== undefined
+      && (code <= 0x1f || code === 0x7f)
+      && code !== 0x09
+      && code !== 0x0a
+      && code !== 0x0d;
   });
 }

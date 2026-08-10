@@ -619,6 +619,9 @@ contractSuite("isolated Codex App Server state contract", () => {
     const approvalProbe = details.find((server) => server.name === "approval_probe");
     expect(approvalProbe?.serverVersion).toBe("1.0.0");
     expect(approvalProbe?.tools.some((tool) => tool.name === "approval_probe")).toBe(true);
+    const approvalTool = approvalProbe?.tools.find((tool) => tool.name === "approval_probe");
+    expect(approvalTool?.description).toHaveLength(2_000);
+    expect(approvalTool?.description).toMatch(/^Emit approval details x+$/u);
     expect(approvalProbe?.resources).toContainEqual(expect.objectContaining({
       uri: "contract://status",
       name: "contract-status",

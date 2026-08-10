@@ -25,10 +25,9 @@ describe("ConversationCommandService", () => {
     expect(conversationCommandNames).toContain("agents");
     expect(conversationCommandNames).toContain("pin");
     expect(conversationCommandNames).toContain("rules");
-    expect(conversationCommandNames).toContain("plugins");
     expect(conversationCommandNames).toContain("plugin");
     expect(isConversationCommandName("status")).toBe(true);
-    expect(isConversationCommandName("plugins")).toBe(true);
+    expect(isConversationCommandName("plugins")).toBe(false);
     expect(isConversationCommandName("plugin")).toBe(true);
     expect(isConversationCommandName("whoami")).toBe(false);
   });
@@ -349,7 +348,7 @@ describe("ConversationCommandService", () => {
       kind: "mcp",
       servers: ["mcp"],
     });
-    await expect(commands.execute(target, "plugins")).resolves.toEqual({
+    await expect(commands.execute(target, "plugin")).resolves.toEqual({
       kind: "plugins",
       plugins: ["plugin"],
     });
@@ -460,7 +459,7 @@ describe("ConversationCommandService", () => {
       invokePlugin,
     } as unknown as ConversationUseCases);
 
-    await expect(commands.execute(target, "plugins")).resolves.toEqual({
+    await expect(commands.execute(target, "plugin")).resolves.toEqual({
       kind: "plugins",
       plugins: [{ id: "github@local" }],
     });
@@ -610,8 +609,7 @@ describe("ConversationCommandService", () => {
       ["fast", "on", "selectFastMode"],
       ["skill", "", "listSkills"],
       ["mcp", "", "listMcpServers"],
-      ["plugins", "", "listPlugins"],
-      ["plugin", "plugin task", "invokePlugin"],
+      ["plugin", "", "listPlugins"],
       ["usage", "", "providerAccountUsage"],
       ["metrics", "", "requestMetrics"],
       ["limits", "", "providerAccountLimits"],
