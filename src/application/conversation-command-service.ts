@@ -53,7 +53,6 @@ export interface McpDetailView {
   section: "tools" | "resources" | "templates";
   page: number;
   searchTerm: string | null;
-  selector: string;
 }
 
 export function isConversationCommandName(value: string): value is ConversationCommandName {
@@ -95,6 +94,7 @@ export type ConversationCommandResult =
   | { kind: "mcp-reload" }
   | {
       kind: "mcp-detail";
+      selector: string;
       server: Awaited<ReturnType<ConversationUseCases["mcpServerDetail"]>>;
       view?: McpDetailView;
     }
@@ -442,6 +442,7 @@ export class ConversationCommandService {
         if (operation.type === "detail") {
           return {
             kind: "mcp-detail",
+            selector: operation.selector,
             server: await this.conversations.mcpServerDetail(target, operation.selector),
             ...(operation.view ? { view: operation.view } : {}),
           };
@@ -710,7 +711,7 @@ function parseMcpOperation(input: string):
     return {
       type: "detail",
       selector,
-      view: { section, page, searchTerm, selector },
+      view: { section, page, searchTerm },
     };
   }
   throw new UserFacingError(

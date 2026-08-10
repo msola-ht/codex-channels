@@ -86,7 +86,7 @@ describe("provider-aware conversation command formatting", () => {
 
   it("renders the experimental Plugin list and invocation outcomes", () => {
     const help = conversationCommandHelpLines.join("\n");
-    expect(help).toContain("/plugin [名称或序号 任务]");
+    expect(help).toContain("/plugin [<名称、完整 ID 或序号> <任务>]");
     expect(help).not.toContain("/plugins");
     const rendered = formatConversationPlugins({
       kind: "plugins",
@@ -101,7 +101,7 @@ describe("provider-aware conversation command formatting", () => {
       }],
     });
 
-    expect(rendered).toContain("已安装 Plugins（开发中，1）");
+    expect(rendered).toContain("已安装 Plugin（开发中，1）");
     expect(rendered).toContain("1. GitHub · github@local");
     expect(rendered).toContain("/plugin <名称、完整 ID 或序号> <任务>");
     const outcome = formatConversationCommandOutcome({
@@ -156,8 +156,9 @@ describe("provider-aware conversation command formatting", () => {
 
     const detail = formatConversationMcpDetail({
       kind: "mcp-detail",
+      selector: "1",
       server: {
-        name: "project-tools",
+        name: "Project Tools",
         authStatus: "notLoggedIn",
         toolCount: 1,
         serverTitle: "Project Tools",
@@ -177,12 +178,14 @@ describe("provider-aware conversation command formatting", () => {
     expect(detail).toContain("MCP Server：Project Tools");
     expect(detail).toContain("Search · search");
     expect(detail).toContain("project://readme");
-    expect(detail).toContain("OAuth：/mcp login project-tools");
-    expect(detail).toContain("浏览工具：/mcp project-tools tools");
-    expect(detail).toContain("浏览资源：/mcp project-tools resources");
+    expect(detail).toContain("OAuth：/mcp login 1");
+    expect(detail).toContain("浏览工具：/mcp 1 tools");
+    expect(detail).toContain("浏览资源：/mcp 1 resources");
+    expect(detail).toContain("读取资源：/mcp resource 1 <URI>");
 
     const bearerTokenDetail = formatConversationMcpDetail({
       kind: "mcp-detail",
+      selector: "codex_apps",
       server: {
         name: "codex_apps",
         authStatus: "bearerToken",
@@ -200,6 +203,7 @@ describe("provider-aware conversation command formatting", () => {
     const longResourceUri = `project://resource/1/${"x".repeat(2_000)}`;
     const oversizedDetail = formatConversationMcpDetail({
       kind: "mcp-detail",
+      selector: "large",
       server: {
         name: "large",
         authStatus: "oAuth",
@@ -322,6 +326,7 @@ describe("provider-aware conversation command formatting", () => {
   it("renders a searchable MCP detail page with stable navigation commands", () => {
     const rendered = formatConversationMcpDetail({
       kind: "mcp-detail",
+      selector: "1",
       server: {
         name: "codex_apps",
         authStatus: "bearerToken",
@@ -347,7 +352,6 @@ describe("provider-aware conversation command formatting", () => {
         section: "tools",
         page: 2,
         searchTerm: "github",
-        selector: "1",
       },
     });
 
@@ -361,6 +365,7 @@ describe("provider-aware conversation command formatting", () => {
 
     const missingPage = formatConversationMcpDetail({
       kind: "mcp-detail",
+      selector: "1",
       server: {
         name: "codex_apps",
         authStatus: "bearerToken",
@@ -376,7 +381,6 @@ describe("provider-aware conversation command formatting", () => {
         section: "tools",
         page: 2,
         searchTerm: null,
-        selector: "1",
       },
     });
     expect(missingPage).toContain("第 2 页不存在，共 1 页");

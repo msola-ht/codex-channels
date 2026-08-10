@@ -108,7 +108,7 @@ export const conversationCommandHelpSections = [
       "/mcp <名称或序号> <tools|resources|templates> [页码] [search <关键词>]",
       "/mcp login <名称或序号>",
       "/mcp resource <名称或序号> <URI>",
-      "/plugin [名称或序号 任务]",
+      "/plugin [<名称、完整 ID 或序号> <任务>]",
       "/usage · /limits · /permissions",
       "/metrics session",
       "/metrics <global|providers|models|errors> [24h|7d|30d]",
@@ -508,8 +508,9 @@ export function formatConversationMcpDetail(
   result: Extract<ConversationCommandResult, { kind: "mcp-detail" }>,
 ): string {
   const server = result.server;
+  const selector = result.selector;
   const detailSections = result.view
-    ? formatSelectedMcpDetailSection(server, result.view)
+    ? formatSelectedMcpDetailSection(server, result.view, selector)
     : [
         ...formatMcpDetailEntries("工具", server.tools, (tool) =>
           `- ${tool.title ?? tool.name} · ${tool.name}${tool.description ? ` · ${formatMcpDescription(tool.description)}` : ""}`
@@ -532,24 +533,26 @@ export function formatConversationMcpDetail(
     ...detailSections,
     "",
     ...(supportsMcpOAuthLogin(server.authStatus)
-      ? [`OAuth：/mcp login ${server.name}`]
+      ? [`OAuth：/mcp login ${selector}`]
       : []),
-    `浏览工具：/mcp ${server.name} tools`,
-    `浏览资源：/mcp ${server.name} resources`,
-    `浏览资源模板：/mcp ${server.name} templates`,
-    `读取资源：/mcp resource ${server.name} <URI>`,
+    `浏览工具：/mcp ${selector} tools`,
+    `浏览资源：/mcp ${selector} resources`,
+    `浏览资源模板：/mcp ${selector} templates`,
+    `读取资源：/mcp resource ${selector} <URI>`,
   ].join("\n"));
 }
 
 function formatSelectedMcpDetailSection(
   server: Extract<ConversationCommandResult, { kind: "mcp-detail" }>["server"],
   view: NonNullable<Extract<ConversationCommandResult, { kind: "mcp-detail" }>["view"]>,
+  selector: string,
 ): string[] {
   if (view.section === "tools") {
     return formatMcpDetailPage(
       "工具",
       server.tools,
       view,
+      selector,
       (tool) => [tool.name, tool.title, tool.description],
       (tool) =>
         `- ${tool.title ?? tool.name} · ${tool.name}${tool.description ? ` · ${formatMcpDescription(tool.description)}` : ""}`,
@@ -560,6 +563,7 @@ function formatSelectedMcpDetailSection(
       "资源",
       server.resources,
       view,
+      selector,
       (resource) => [
         resource.name,
         resource.title,
@@ -575,6 +579,7 @@ function formatSelectedMcpDetailSection(
     "资源模板",
     server.resourceTemplates,
     view,
+    selector,
     (template) => [
       template.name,
       template.title,
@@ -590,6 +595,7 @@ function formatMcpDetailPage<T>(
   label: string,
   entries: readonly T[],
   view: NonNullable<Extract<ConversationCommandResult, { kind: "mcp-detail" }>["view"]>,
+  selector: string,
   searchableValues: (entry: T) => ReadonlyArray<string | null>,
   format: (entry: T) => string,
 ): string[] {
@@ -607,7 +613,7 @@ function formatMcpDetailPage<T>(
     return [
       `${label}（${view.searchTerm ? `匹配 ${matches.length} · ` : ""}共 ${pageCount} 页）：`,
       `- 第 ${view.page} 页不存在，共 ${pageCount} 页`,
-      `返回第一页：/mcp ${view.selector} ${view.section} 1${commandSuffix}`,
+      `返回第一页：/mcp ${selector} ${view.section} 1${commandSuffix}`,
     ];
   }
   const pageStart = (view.page - 1) * maximumMcpDetailEntries;
@@ -627,10 +633,10 @@ function formatMcpDetailPage<T>(
       ? [`- 当前页其余 ${pageEntries.length - visible.length} 项因展示上限省略`]
       : []),
     ...(view.page > 1
-      ? [`上一页：/mcp ${view.selector} ${view.section} ${view.page - 1}${commandSuffix}`]
+      ? [`上一页：/mcp ${selector} ${view.section} ${view.page - 1}${commandSuffix}`]
       : []),
     ...(view.page < pageCount
-      ? [`下一页：/mcp ${view.selector} ${view.section} ${view.page + 1}${commandSuffix}`]
+      ? [`下一页：/mcp ${selector} ${view.section} ${view.page + 1}${commandSuffix}`]
       : []),
   ];
 }
@@ -750,9 +756,9 @@ export function formatConversationPlugins(
   result: Extract<ConversationCommandResult, { kind: "plugins" }>,
 ): string {
   return result.plugins.length === 0
-    ? "当前没有已安装 Plugins。"
+    ? "当前没有已安装的 Plugin。"
     : toStructuredMarkdownList([
-        `已安装 Plugins（开发中，${result.plugins.length}）：`,
+        `已安装 Plugin（开发中，${result.plugins.length}）：`,
         ...result.plugins.map((plugin, index) => {
           const status = !plugin.available
             ? "管理员禁用"

@@ -166,7 +166,8 @@ plugin_api = false
 - `/mcp reload`：让全部受管 Codex App Server 从磁盘重新加载 MCP 配置；已加载 Thread 会在下一次
   活动 Turn 时刷新，无需重启 App Server。任一 Provider 实例刷新失败时整次命令报错。
 - `/mcp <名称或序号> <tools|resources|templates> [页码] [search <关键词>]`：分页或搜索工具、资源与
-  资源模板，每页最多展示 8 项。
+  资源模板，每页最多展示 8 项；详情和分页中的后续命令沿用本次选择器，Server 名称含空格时使用
+  `/mcp` 列表中的数字序号。
 - `/mcp login <名称或序号>`：仅对支持 OAuth 的 Server 启动登录并返回授权地址；浏览器流程完成后，
   Gateway 会在发起登录的会话中主动提示成功或失败。Bearer Token 或不支持 OAuth 时不显示该操作；
   手工调用 Bearer Token Server 时会明确提示已认证、无需 OAuth。MCP 首次启动中或正常就绪状态保持
@@ -373,7 +374,8 @@ deepseek）的全部请求行并自动重启 Gateway 与中心服务，适合额
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
 - 状态：`/diff`、`/usage`、`/metrics [session|global|providers|models|errors] [today|yesterday|this-week|last-week|this-month|last-month|24h|7d|30d|90d|365d|all]`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/agents [角色名称或序号 任务]`、`/skill [名称或序号 任务]`、
-  `/plugin [名称、完整 ID 或序号 任务]`、`/mcp [名称或序号]`、
+  `/plugin [<名称、完整 ID 或序号> <任务>]`、`/mcp [名称或序号]`、
+  `/mcp health`、`/mcp reload`、
   `/mcp <名称或序号> <tools|resources|templates> [页码] [search <关键词>]`、
   `/mcp login <名称或序号>`、`/mcp resource <名称或序号> <URI>`、`/rules`
 - 图片：`/vision <下一批要求>`；多图：`/vision <2–4> <要求>`，收齐自动提交；失败重试：`/vision retry`；取消：`/vision cancel`

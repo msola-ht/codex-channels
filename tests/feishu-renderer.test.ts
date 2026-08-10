@@ -230,7 +230,7 @@ describe("Feishu output renderer", () => {
       expect.stringContaining("Fast 模式：开启"),
       "当前没有已启用的 Skills。",
       "## MCP Servers（0）",
-      "当前没有已安装 Plugins。",
+      "当前没有已安装的 Plugin。",
       expect.stringContaining("OpenAI Codex 账户用量摘要"),
       expect.stringContaining("Codex 额度"),
       expect.stringContaining("可用 Permission Profiles"),

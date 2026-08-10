@@ -453,6 +453,7 @@ describe("ConversationCommandService", () => {
 
     await expect(commands.execute(target, "mcp", "1")).resolves.toEqual({
       kind: "mcp-detail",
+      selector: "1",
       server,
     });
     await expect(commands.execute(
@@ -461,12 +462,12 @@ describe("ConversationCommandService", () => {
       "1 tools 2 search github issue",
     )).resolves.toEqual({
       kind: "mcp-detail",
+      selector: "1",
       server,
       view: {
         section: "tools",
         page: 2,
         searchTerm: "github issue",
-        selector: "1",
       },
     });
     await expect(commands.execute(
@@ -475,12 +476,12 @@ describe("ConversationCommandService", () => {
       "project-tools resources search plugin",
     )).resolves.toEqual({
       kind: "mcp-detail",
+      selector: "project-tools",
       server,
       view: {
         section: "resources",
         page: 1,
         searchTerm: "plugin",
-        selector: "project-tools",
       },
     });
     await expect(commands.execute(target, "mcp", "login project-tools"))

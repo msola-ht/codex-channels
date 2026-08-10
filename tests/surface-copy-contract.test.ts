@@ -429,6 +429,7 @@ describe("shared surface copy contract", () => {
       { kind: "mcp-reload" },
       {
         kind: "mcp-detail",
+        selector: "docs",
         server: {
           name: "docs",
           authStatus: "oAuth",
