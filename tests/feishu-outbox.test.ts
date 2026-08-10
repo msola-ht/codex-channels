@@ -1525,11 +1525,33 @@ describe("Feishu outbox", () => {
           tag: "div",
           text: {
             tag: "plain_text",
-            content: "空闲",
+            content: "处理结束 · 结果见下方消息",
           },
         }],
       },
     }]);
+  });
+
+  it("does not create a standalone idle thread status card", async () => {
+    const sendCard = vi.fn(async () => "om_status");
+    const updateCard = vi.fn(async () => {});
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendCard,
+        updateCard,
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(threadStatus("idle"));
+    await outbox.close();
+
+    expect(sendCard).not.toHaveBeenCalled();
+    expect(updateCard).not.toHaveBeenCalled();
   });
 
   it("drops a stale status binding after an update failure", async () => {

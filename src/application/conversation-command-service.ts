@@ -96,7 +96,7 @@ export type ConversationCommandResult =
       server: Awaited<ReturnType<ConversationUseCases["mcpServerDetail"]>>;
       view?: McpDetailView;
     }
-  | { kind: "mcp-oauth"; login: Awaited<ReturnType<ConversationUseCases["startMcpOAuthLogin"]>> }
+  | { kind: "mcp-login"; login: Awaited<ReturnType<ConversationUseCases["loginMcpServer"]>> }
   | { kind: "mcp-resource"; resource: Awaited<ReturnType<ConversationUseCases["readMcpResource"]>> }
   | { kind: "plugins"; plugins: Awaited<ReturnType<ConversationUseCases["listPlugins"]>> }
   | { kind: "usage"; result: Awaited<ReturnType<ConversationUseCases["providerAccountUsage"]>> }
@@ -436,8 +436,8 @@ export class ConversationCommandService {
         }
         if (operation.type === "login") {
           return {
-            kind: "mcp-oauth",
-            login: await this.conversations.startMcpOAuthLogin(target, operation.selector),
+            kind: "mcp-login",
+            login: await this.conversations.loginMcpServer(target, operation.selector),
           };
         }
         return {

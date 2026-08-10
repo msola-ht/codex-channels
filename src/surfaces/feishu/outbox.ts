@@ -719,6 +719,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
       }
       return;
     }
+    if (event.status !== "active") {
+      return;
+    }
     const messageId = await this.messagePort.sendCard(
       event.target.conversationId,
       card,

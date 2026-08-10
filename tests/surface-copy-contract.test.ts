@@ -393,8 +393,19 @@ describe("shared surface copy contract", () => {
         },
       },
       {
-        kind: "mcp-oauth",
-        login: { server: "docs", authorizationUrl: "https://example.test/oauth" },
+        kind: "mcp-login",
+        login: {
+          type: "oauth",
+          server: "docs",
+          authorizationUrl: "https://example.test/oauth",
+        },
+      },
+      {
+        kind: "mcp-login",
+        login: {
+          type: "bearerToken",
+          server: "token-tools",
+        },
       },
       {
         kind: "mcp-resource",

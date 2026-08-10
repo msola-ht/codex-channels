@@ -51,6 +51,13 @@ export interface McpOAuthLogin {
   authorizationUrl: string;
 }
 
+export type McpLoginResult =
+  | ({ type: "oauth" } & McpOAuthLogin)
+  | {
+      type: "bearerToken";
+      server: string;
+    };
+
 export type McpResourceContent =
   | {
       kind: "text";

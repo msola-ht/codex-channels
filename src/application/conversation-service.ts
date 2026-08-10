@@ -19,7 +19,7 @@ import type {
 } from "./account-port.js";
 import type { InstalledSkill, SkillQueryPort } from "./skill-port.js";
 import type {
-  McpOAuthLogin,
+  McpLoginResult,
   McpQueryPort,
   McpResourceReadResult,
   McpServerDetail,
@@ -226,7 +226,7 @@ export interface ConversationUseCases {
   listSkills(target: ConversationTarget): Promise<InstalledSkill[]>;
   listMcpServers(target: ConversationTarget): Promise<McpServerSummary[]>;
   mcpServerDetail(target: ConversationTarget, selector: string): Promise<McpServerDetail>;
-  startMcpOAuthLogin(target: ConversationTarget, selector: string): Promise<McpOAuthLogin>;
+  loginMcpServer(target: ConversationTarget, selector: string): Promise<McpLoginResult>;
   readMcpResource(
     target: ConversationTarget,
     selector: string,
@@ -1021,25 +1021,31 @@ export class ConversationService implements ConversationUseCases {
     );
   }
 
-  async startMcpOAuthLogin(
+  async loginMcpServer(
     target: ConversationTarget,
     selector: string,
-  ): Promise<McpOAuthLogin> {
+  ): Promise<McpLoginResult> {
     const threadId = this.router.current(target)?.threadId;
     const server = resolveMcpServer(
       selector,
       await this.queries.listMcpServers(threadId),
     );
+    if (server.authStatus === "bearerToken") {
+      return {
+        type: "bearerToken",
+        server: server.name,
+      };
+    }
     if (!supportsMcpOAuthLogin(server.authStatus)) {
       throw new UserFacingError(
         "mcp.oauth.unsupported",
         "该 MCP Server 不支持 OAuth 登录",
       );
     }
-    return this.queries.startMcpOAuthLogin(
-      server.name,
-      threadId,
-    );
+    return {
+      type: "oauth",
+      ...await this.queries.startMcpOAuthLogin(server.name, threadId),
+    };
   }
 
   async readMcpResource(

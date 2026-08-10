@@ -9,6 +9,30 @@ import {
 import { formatRuntimeMcpStatusUpdate } from "../src/surfaces/runtime-status-format.js";
 
 describe("Telegram command renderer", () => {
+  it("renders Bearer Token MCP authentication as information", async () => {
+    const reply = vi.fn(async () => undefined);
+
+    await renderTelegramCommandResult(
+      { reply } as unknown as Context,
+      {
+        kind: "mcp-login",
+        login: {
+          type: "bearerToken",
+          server: "token-tools",
+        },
+      },
+    );
+
+    expect(reply).toHaveBeenCalledWith(
+      expect.stringContaining("已使用 Bearer Token 认证，无需 OAuth 登录"),
+      expect.objectContaining({ parse_mode: "HTML" }),
+    );
+    expect(reply).not.toHaveBeenCalledWith(
+      expect.stringContaining("操作失败"),
+      expect.anything(),
+    );
+  });
+
   it("renders expanded shared notices through the safe HTML panel path", async () => {
     const reply = vi.fn(async () => undefined);
 

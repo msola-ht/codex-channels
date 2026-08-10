@@ -8,7 +8,7 @@ import {
   formatConversationMetrics,
   formatConversationMcp,
   formatConversationMcpDetail,
-  formatConversationMcpOAuth,
+  formatConversationMcpLogin,
   formatConversationMcpResource,
   formatConversationModels,
   formatConversationPlugins,
@@ -202,13 +202,25 @@ describe("provider-aware conversation command formatting", () => {
     expect(oversizedDetail).toContain(longResourceUri);
     expect(oversizedDetail).not.toContain("tool-9");
 
-    expect(formatConversationMcpOAuth({
-      kind: "mcp-oauth",
+    expect(formatConversationMcpLogin({
+      kind: "mcp-login",
       login: {
+        type: "oauth",
         server: "project-tools",
         authorizationUrl: "https://example.test/oauth",
       },
     })).toContain("https://example.test/oauth");
+    expect(formatConversationMcpLogin({
+      kind: "mcp-login",
+      login: {
+        type: "bearerToken",
+        server: "token-tools",
+      },
+    })).toBe([
+      "## MCP 认证",
+      "- Server：token-tools",
+      "- 状态：已使用 Bearer Token 认证，无需 OAuth 登录",
+    ].join("\n"));
 
     const resource = formatConversationMcpResource({
       kind: "mcp-resource",

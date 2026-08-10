@@ -84,6 +84,7 @@ export {
   supportsMcpOAuthLogin,
   type McpAuthStatus,
   type McpOAuthLogin,
+  type McpLoginResult,
   type McpQueryPort,
   type McpResourceContent,
   type McpResourceReadResult,

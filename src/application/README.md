@@ -73,7 +73,8 @@ Turn 队列。
 扩展查询也保持平台无关：Skill 只向 Surface 返回当前用户或 Workspace 直接安装且已启用项的
 名称与说明；显式调用时由 Client 再按精确名称解析绝对路径，排除系统和插件缓存内容。MCP 按当前
 Thread 返回稳定概览与详情；命令结果携带工具、资源或模板的有界分页搜索视图，OAuth 登录不自动
-重试且只对共享能力判断允许的认证状态开放，资源读取只展示有界文本或二进制元数据。
+重试且只对共享能力判断允许的认证状态开放；Bearer Token 返回结构化认证结果并明确提示无需 OAuth，
+资源读取只展示有界文本或二进制元数据。
 Plugin API 仍被官方标记为开发中，只在 `plugin_api` 开关开启时列出当前 Workspace 已安装项，
 并仅在 OpenAI Thread 中发送官方 mention；三个 Surface 共用同一 Application 边界。
 成功启动 Turn 后，模型、思考等级、服务层级和协作模式以 App Server 的 Thread 设置为准；

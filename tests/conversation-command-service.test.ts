@@ -400,13 +400,19 @@ describe("ConversationCommandService", () => {
     );
   });
 
-  it("routes MCP detail, OAuth, and resource operations through the shared boundary", async () => {
+  it("routes MCP detail, login, and resource operations through the shared boundary", async () => {
     const server = { name: "project-tools" };
     const mcpServerDetail = vi.fn(async () => server);
-    const startMcpOAuthLogin = vi.fn(async () => ({
-      server: "project-tools",
-      authorizationUrl: "https://example.test/oauth",
-    }));
+    const loginMcpServer = vi.fn()
+      .mockResolvedValueOnce({
+        type: "oauth",
+        server: "project-tools",
+        authorizationUrl: "https://example.test/oauth",
+      })
+      .mockResolvedValueOnce({
+        type: "bearerToken",
+        server: "token-tools",
+      });
     const readMcpResource = vi.fn(async () => ({
       server: "project-tools",
       requestedUri: "project://readme",
@@ -415,7 +421,7 @@ describe("ConversationCommandService", () => {
     }));
     const commands = new ConversationCommandService({
       mcpServerDetail,
-      startMcpOAuthLogin,
+      loginMcpServer,
       readMcpResource,
     } as unknown as ConversationUseCases);
 
@@ -452,14 +458,30 @@ describe("ConversationCommandService", () => {
       },
     });
     await expect(commands.execute(target, "mcp", "login project-tools"))
-      .resolves.toMatchObject({ kind: "mcp-oauth" });
+      .resolves.toEqual({
+        kind: "mcp-login",
+        login: {
+          type: "oauth",
+          server: "project-tools",
+          authorizationUrl: "https://example.test/oauth",
+        },
+      });
+    await expect(commands.execute(target, "mcp", "login token-tools"))
+      .resolves.toEqual({
+        kind: "mcp-login",
+        login: {
+          type: "bearerToken",
+          server: "token-tools",
+        },
+      });
     await expect(commands.execute(
       target,
       "mcp",
       "resource project-tools project://readme",
     )).resolves.toMatchObject({ kind: "mcp-resource" });
     expect(mcpServerDetail).toHaveBeenCalledWith(target, "1");
-    expect(startMcpOAuthLogin).toHaveBeenCalledWith(target, "project-tools");
+    expect(loginMcpServer).toHaveBeenNthCalledWith(1, target, "project-tools");
+    expect(loginMcpServer).toHaveBeenNthCalledWith(2, target, "token-tools");
     expect(readMcpResource)
       .toHaveBeenCalledWith(target, "project-tools", "project://readme");
     await expect(commands.execute(target, "mcp", "login"))

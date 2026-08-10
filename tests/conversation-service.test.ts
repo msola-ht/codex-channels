@@ -1199,7 +1199,8 @@ describe("ConversationService model selection", () => {
     );
 
     await expect(service.mcpServerDetail(target, "1")).resolves.toEqual(server);
-    await expect(service.startMcpOAuthLogin(target, "project-tools")).resolves.toEqual({
+    await expect(service.loginMcpServer(target, "project-tools")).resolves.toEqual({
+      type: "oauth",
       server: "project-tools",
       authorizationUrl: "https://example.test/oauth",
     });
@@ -1218,7 +1219,7 @@ describe("ConversationService model selection", () => {
     expect(currentCalls).toBe(3);
   });
 
-  it("rejects unsupported MCP OAuth and invalid resource input before execution", async () => {
+  it("returns Bearer Token authentication as information and rejects unsupported MCP OAuth or invalid resources", async () => {
     const listMcpServers = vi.fn()
       .mockResolvedValueOnce([{
         name: "local-tools",
@@ -1240,10 +1241,13 @@ describe("ConversationService model selection", () => {
       queryPort({ listMcpServers, startMcpOAuthLogin, readMcpResource }),
     );
 
-    await expect(service.startMcpOAuthLogin(target, "local-tools"))
+    await expect(service.loginMcpServer(target, "local-tools"))
       .rejects.toMatchObject({ code: "mcp.oauth.unsupported" });
-    await expect(service.startMcpOAuthLogin(target, "token-tools"))
-      .rejects.toMatchObject({ code: "mcp.oauth.unsupported" });
+    await expect(service.loginMcpServer(target, "token-tools"))
+      .resolves.toEqual({
+        type: "bearerToken",
+        server: "token-tools",
+      });
     await expect(service.readMcpResource(target, "local-tools", " \n "))
       .rejects.toMatchObject({ code: "mcp.resource.usage" });
     expect(startMcpOAuthLogin).not.toHaveBeenCalled();

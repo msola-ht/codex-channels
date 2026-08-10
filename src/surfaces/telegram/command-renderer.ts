@@ -16,7 +16,7 @@ import {
   formatConversationMetrics,
   formatConversationMcp,
   formatConversationMcpDetail,
-  formatConversationMcpOAuth,
+  formatConversationMcpLogin,
   formatConversationMcpResource,
   formatConversationPlugins,
   formatConversationModels,
@@ -97,8 +97,8 @@ export async function renderTelegramCommandResult(
     case "mcp-detail":
       await replyTelegramPanel(context, formatConversationMcpDetail(result));
       return;
-    case "mcp-oauth":
-      await replyTelegramPanel(context, formatConversationMcpOAuth(result));
+    case "mcp-login":
+      await replyTelegramPanel(context, formatConversationMcpLogin(result));
       return;
     case "mcp-resource":
       await replyTelegramPanel(context, formatConversationMcpResource(result));

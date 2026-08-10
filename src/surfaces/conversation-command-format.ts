@@ -596,9 +596,16 @@ function formatMcpDescription(value: string): string {
     : `${characters.slice(0, maximumMcpDescriptionCharacters - 1).join("")}…`;
 }
 
-export function formatConversationMcpOAuth(
-  result: Extract<ConversationCommandResult, { kind: "mcp-oauth" }>,
+export function formatConversationMcpLogin(
+  result: Extract<ConversationCommandResult, { kind: "mcp-login" }>,
 ): string {
+  if (result.login.type === "bearerToken") {
+    return toStructuredMarkdownList([
+      "MCP 认证",
+      `Server：${result.login.server}`,
+      "状态：已使用 Bearer Token 认证，无需 OAuth 登录",
+    ].join("\n"));
+  }
   return toStructuredMarkdownList([
     "MCP OAuth 登录已启动",
     `Server：${result.login.server}`,

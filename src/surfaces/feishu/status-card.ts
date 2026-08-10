@@ -27,7 +27,7 @@ export function renderFeishuThreadStatusCard(
         content: status === "active"
           ? "运行中"
           : status === "idle"
-            ? "空闲"
+            ? "处理结束 · 结果见下方消息"
             : "未知",
       },
     }],
