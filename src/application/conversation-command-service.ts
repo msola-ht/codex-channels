@@ -34,6 +34,7 @@ export const conversationCommandNames = [
   "skill",
   "mcp",
   "plugins",
+  "plugin",
   "usage",
   "metrics",
   "limits",
@@ -83,7 +84,10 @@ export type ConversationCommandResult =
     }
   | { kind: "skills"; entries: Awaited<ReturnType<ConversationUseCases["listSkills"]>> }
   | { kind: "mcp"; servers: Awaited<ReturnType<ConversationUseCases["listMcpServers"]>> }
-  | { kind: "plugins"; result: Awaited<ReturnType<ConversationUseCases["listPlugins"]>> }
+  | { kind: "mcp-detail"; server: Awaited<ReturnType<ConversationUseCases["mcpServerDetail"]>> }
+  | { kind: "mcp-oauth"; login: Awaited<ReturnType<ConversationUseCases["startMcpOAuthLogin"]>> }
+  | { kind: "mcp-resource"; resource: Awaited<ReturnType<ConversationUseCases["readMcpResource"]>> }
+  | { kind: "plugins"; plugins: Awaited<ReturnType<ConversationUseCases["listPlugins"]>> }
   | { kind: "usage"; result: Awaited<ReturnType<ConversationUseCases["providerAccountUsage"]>> }
   | { kind: "metrics"; summary: ReturnType<ConversationUseCases["requestMetrics"]> }
   | { kind: "limits"; result: Awaited<ReturnType<ConversationUseCases["providerAccountLimits"]>> }
@@ -129,6 +133,12 @@ export type ConversationCommandOutcome =
   | {
       type: "skill.started";
       skillName: string;
+      turnId: string;
+      steered: boolean;
+    }
+  | {
+      type: "plugin.started";
+      pluginName: string;
       turnId: string;
       steered: boolean;
     }
@@ -398,16 +408,57 @@ export class ConversationCommandService {
           },
         };
       }
-      case "mcp":
+      case "mcp": {
+        if (!argumentsText) {
+          return {
+            kind: "mcp",
+            servers: await this.conversations.listMcpServers(target),
+          };
+        }
+        const operation = parseMcpOperation(argumentsText);
+        if (operation.type === "detail") {
+          return {
+            kind: "mcp-detail",
+            server: await this.conversations.mcpServerDetail(target, operation.selector),
+          };
+        }
+        if (operation.type === "login") {
+          return {
+            kind: "mcp-oauth",
+            login: await this.conversations.startMcpOAuthLogin(target, operation.selector),
+          };
+        }
         return {
-          kind: "mcp",
-          servers: await this.conversations.listMcpServers(target),
+          kind: "mcp-resource",
+          resource: await this.conversations.readMcpResource(
+            target,
+            operation.selector,
+            operation.uri,
+          ),
         };
+      }
       case "plugins":
         return {
           kind: "plugins",
-          result: await this.conversations.listPlugins(target),
+          plugins: await this.conversations.listPlugins(target),
         };
+      case "plugin": {
+        const invocation = parsePluginInvocation(argumentsText);
+        const submission = await this.conversations.invokePlugin(
+          target,
+          invocation.selector,
+          invocation.task,
+        );
+        return {
+          kind: "outcome",
+          outcome: {
+            type: "plugin.started",
+            pluginName: submission.pluginName,
+            turnId: submission.turnId,
+            steered: submission.steered,
+          },
+        };
+      }
       case "usage":
         return {
           kind: "usage",
@@ -554,6 +605,49 @@ function parseSkillInvocation(input: string): {
     selector: match[1],
     task: match[2].trim(),
   };
+}
+
+function parsePluginInvocation(input: string): {
+  selector: string;
+  task: string;
+} {
+  const match = /^(\S+)\s+([\s\S]+)$/u.exec(input.trim());
+  if (!match?.[1] || !match[2]?.trim()) {
+    throw new UserFacingError(
+      "plugin.usage",
+      "用法：/plugin <名称、完整 ID 或序号> <任务>",
+    );
+  }
+  return {
+    selector: match[1],
+    task: match[2].trim(),
+  };
+}
+
+function parseMcpOperation(input: string):
+  | { type: "detail"; selector: string }
+  | { type: "login"; selector: string }
+  | { type: "resource"; selector: string; uri: string } {
+  const parts = input.trim().split(/\s+/u);
+  if (parts[0] === "login" && parts.length === 2) {
+    return { type: "login", selector: parts[1]! };
+  }
+  if (parts[0] === "resource" && parts.length === 3) {
+    return { type: "resource", selector: parts[1]!, uri: parts[2]! };
+  }
+  if (parts[0] === "login" || parts[0] === "resource") {
+    throw new UserFacingError(
+      "mcp.usage",
+      "用法：/mcp [名称或序号 | login <名称或序号> | resource <名称或序号> <URI>]",
+    );
+  }
+  if (parts.length === 1 && parts[0]) {
+    return { type: "detail", selector: parts[0] };
+  }
+  throw new UserFacingError(
+    "mcp.usage",
+    "用法：/mcp [名称或序号 | login <名称或序号> | resource <名称或序号> <URI>]",
+  );
 }
 
 function parseAgentInvocation(input: string): {

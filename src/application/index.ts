@@ -80,11 +80,19 @@ export {
 } from "./workspace-permission-port.js";
 export {
   type McpAuthStatus,
+  type McpOAuthLogin,
   type McpQueryPort,
+  type McpResourceContent,
+  type McpResourceReadResult,
+  type McpResourceSummary,
+  type McpResourceTemplateSummary,
+  type McpServerDetail,
   type McpServerSummary,
+  type McpToolSummary,
 } from "./mcp-port.js";
 export {
   type InstalledPlugin,
+  type InvocablePlugin,
   type PluginQueryPort,
 } from "./plugin-port.js";
 export {

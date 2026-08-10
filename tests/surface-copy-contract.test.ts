@@ -348,8 +348,49 @@ describe("shared surface copy contract", () => {
         servers: [{ name: "docs", authStatus: "oAuth", toolCount: 2 }],
       },
       {
+        kind: "mcp-detail",
+        server: {
+          name: "docs",
+          authStatus: "oAuth",
+          toolCount: 1,
+          serverTitle: "Docs",
+          serverVersion: "1.0.0",
+          serverDescription: null,
+          tools: [{ name: "search", title: "Search", description: null }],
+          resources: [],
+          resourceTemplates: [],
+        },
+      },
+      {
+        kind: "mcp-oauth",
+        login: { server: "docs", authorizationUrl: "https://example.test/oauth" },
+      },
+      {
+        kind: "mcp-resource",
+        resource: {
+          server: "docs",
+          requestedUri: "docs://index",
+          contents: [{
+            kind: "text",
+            uri: "docs://index",
+            mimeType: "text/plain",
+            text: "documentation",
+            truncated: false,
+          }],
+          omittedContentCount: 0,
+        },
+      },
+      {
         kind: "plugins",
-        result: [{ name: "github", enabled: true }],
+        plugins: [{
+          id: "github@local",
+          name: "github",
+          displayName: "GitHub",
+          marketplaceName: "local",
+          description: "GitHub tools",
+          enabled: true,
+          available: true,
+        }],
       },
       {
         kind: "permissions",

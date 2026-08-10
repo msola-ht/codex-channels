@@ -18,9 +18,12 @@ import {
   formatConversationLimits,
   formatConversationMetrics,
   formatConversationMcp,
+  formatConversationMcpDetail,
+  formatConversationMcpOAuth,
+  formatConversationMcpResource,
+  formatConversationPlugins,
   formatConversationModels,
   formatConversationPermissions,
-  formatConversationPlugins,
   formatConversationProjectRules,
   formatConversationSessions,
   formatConversationSkills,
@@ -143,6 +146,12 @@ export function renderFeishuCommandResult(
       return formatConversationAgents(result);
     case "mcp":
       return formatConversationMcp(result);
+    case "mcp-detail":
+      return formatConversationMcpDetail(result);
+    case "mcp-oauth":
+      return formatConversationMcpOAuth(result);
+    case "mcp-resource":
+      return formatConversationMcpResource(result);
     case "plugins":
       return formatConversationPlugins(result);
     case "usage":

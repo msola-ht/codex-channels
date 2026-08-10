@@ -165,7 +165,7 @@ describe("Feishu output renderer", () => {
       },
       { kind: "skills", entries: [] },
       { kind: "mcp", servers: [] },
-      { kind: "plugins", result: [] },
+      { kind: "plugins", plugins: [] },
       {
         kind: "usage",
         result: {
@@ -535,11 +535,19 @@ describe("Feishu output renderer", () => {
     expect(renderFeishuCommandResult({
       kind: "mcp",
       servers: [{ name: "docs", authStatus: "oAuth", toolCount: 2 }],
-    })).toContain("- docs · auth=oAuth · tools=2");
+    })).toContain("1. docs · auth=oAuth · tools=2");
     expect(renderFeishuCommandResult({
       kind: "plugins",
-      result: [{ name: "github", enabled: true }],
-    })).toContain("- github · 已启用");
+      plugins: [{
+        id: "github@local",
+        name: "github",
+        displayName: "GitHub",
+        marketplaceName: "local",
+        description: null,
+        enabled: true,
+        available: true,
+      }],
+    })).toContain("1. GitHub · github@local · 已启用");
     expect(renderFeishuCommandResult({
       kind: "permissions",
       profiles: [{

@@ -152,7 +152,7 @@ describe("Weixin command renderer", () => {
       },
       { kind: "skills", entries: [] },
       { kind: "mcp", servers: [] },
-      { kind: "plugins", result: [] },
+      { kind: "plugins", plugins: [] },
       {
         kind: "usage",
         result: {

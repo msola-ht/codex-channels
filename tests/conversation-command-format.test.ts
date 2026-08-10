@@ -6,7 +6,12 @@ import {
   formatConversationCommandOutcome,
   formatConversationLimits,
   formatConversationMetrics,
+  formatConversationMcp,
+  formatConversationMcpDetail,
+  formatConversationMcpOAuth,
+  formatConversationMcpResource,
   formatConversationModels,
+  formatConversationPlugins,
   formatConversationStatus,
   formatConversationUsage,
   formatConversationWorkspacePermissions,
@@ -75,6 +80,151 @@ describe("provider-aware conversation command formatting", () => {
   it("documents /agents in the shared help output", () => {
     expect(conversationCommandHelpLines.join("\n"))
       .toContain("/agents [角色名称或序号 任务]");
+  });
+
+  it("renders the experimental Plugin list and invocation outcomes", () => {
+    const rendered = formatConversationPlugins({
+      kind: "plugins",
+      plugins: [{
+        id: "github@local",
+        name: "github",
+        displayName: "GitHub",
+        marketplaceName: "local",
+        description: "GitHub development tools",
+        enabled: true,
+        available: true,
+      }],
+    });
+
+    expect(rendered).toContain("已安装 Plugins（开发中，1）");
+    expect(rendered).toContain("1. GitHub · github@local");
+    expect(rendered).toContain("/plugin <名称、完整 ID 或序号> <任务>");
+    const outcome = formatConversationCommandOutcome({
+      type: "plugin.started",
+      pluginName: "GitHub",
+      turnId: "turn-1",
+      steered: false,
+    });
+    expect(outcome).toContain("已使用 Plugin 开始任务");
+    expect(outcome).toContain("Plugin：GitHub");
+  });
+
+  it("renders MCP overview, full detail, OAuth, and bounded resource output", () => {
+    expect(formatConversationMcp({
+      kind: "mcp",
+      servers: [{ name: "project-tools", authStatus: "notLoggedIn", toolCount: 1 }],
+    })).toContain("1. project-tools");
+
+    const detail = formatConversationMcpDetail({
+      kind: "mcp-detail",
+      server: {
+        name: "project-tools",
+        authStatus: "notLoggedIn",
+        toolCount: 1,
+        serverTitle: "Project Tools",
+        serverVersion: "1.0.0",
+        serverDescription: null,
+        tools: [{ name: "search", title: "Search", description: null }],
+        resources: [{
+          uri: "project://readme",
+          name: "readme",
+          title: "README",
+          description: null,
+          mimeType: "text/plain",
+        }],
+        resourceTemplates: [],
+      },
+    });
+    expect(detail).toContain("MCP Server：Project Tools");
+    expect(detail).toContain("Search · search");
+    expect(detail).toContain("project://readme");
+
+    const longResourceUri = `project://resource/1/${"x".repeat(2_000)}`;
+    const oversizedDetail = formatConversationMcpDetail({
+      kind: "mcp-detail",
+      server: {
+        name: "large",
+        authStatus: "oAuth",
+        toolCount: 20,
+        serverTitle: null,
+        serverVersion: "1.0.0",
+        serverDescription: "d".repeat(2_000),
+        tools: Array.from({ length: 20 }, (_, index) => ({
+          name: `tool-${index + 1}`,
+          title: `Tool ${index + 1}`,
+          description: "d".repeat(2_000),
+        })),
+        resources: Array.from({ length: 20 }, (_, index) => ({
+          uri: index === 0
+            ? longResourceUri
+            : `project://resource/${index + 1}/${"x".repeat(2_000)}`,
+          name: `resource-${index + 1}`,
+          title: null,
+          description: null,
+          mimeType: "text/plain",
+        })),
+        resourceTemplates: Array.from({ length: 20 }, (_, index) => ({
+          uriTemplate: `project://template/${index + 1}/{path}/${"x".repeat(2_000)}`,
+          name: `template-${index + 1}`,
+          title: null,
+          description: null,
+          mimeType: "text/plain",
+        })),
+      },
+    });
+    expect(oversizedDetail.length).toBeLessThanOrEqual(20_000);
+    expect(oversizedDetail).toContain("项已省略");
+    expect(oversizedDetail).toContain(longResourceUri);
+    expect(oversizedDetail).not.toContain("tool-9");
+
+    expect(formatConversationMcpOAuth({
+      kind: "mcp-oauth",
+      login: {
+        server: "project-tools",
+        authorizationUrl: "https://example.test/oauth",
+      },
+    })).toContain("https://example.test/oauth");
+
+    const resource = formatConversationMcpResource({
+      kind: "mcp-resource",
+      resource: {
+        server: "project-tools",
+        requestedUri: "project://readme",
+        contents: [{
+          kind: "text",
+          uri: "project://readme",
+          mimeType: "text/plain",
+          text: "untrusted ``` content",
+          truncated: true,
+        }],
+        omittedContentCount: 2,
+      },
+    });
+    expect(resource).toContain("外部不可信内容");
+    expect(resource).toContain("untrusted ``\u200b` content");
+    expect(resource).toContain("已截断");
+    expect(resource).toContain("其余 2 个内容已省略");
+
+    const longRequestedUri = `project://requested/${"r".repeat(4_000)}`;
+    const longContentUri = `project://content/${"c".repeat(4_000)}`;
+    const boundedResource = formatConversationMcpResource({
+      kind: "mcp-resource",
+      resource: {
+        server: "s".repeat(512),
+        requestedUri: longRequestedUri,
+        contents: [{
+          kind: "text",
+          uri: longContentUri,
+          mimeType: "text/plain",
+          text: "```".repeat(2_666),
+          truncated: true,
+        }],
+        omittedContentCount: 0,
+      },
+    });
+    expect(boundedResource.length).toBeLessThanOrEqual(20_000);
+    expect(boundedResource).toContain(longRequestedUri);
+    expect(boundedResource).toContain(longContentUri);
   });
 
   it("shows workspace permission usage and current values", () => {

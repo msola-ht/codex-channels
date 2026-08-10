@@ -842,6 +842,17 @@ function renderCommandCenterForm(
       multiline: true,
     };
   }
+  if (action === "plugin") {
+    return {
+      kind: "form",
+      title: "调用 Plugin",
+      description: "输入 Plugin 名称、完整 ID 或序号及任务。",
+      action,
+      fieldLabel: "Plugin 与任务",
+      placeholder: "例如：github@local 检查当前 PR",
+      multiline: true,
+    };
+  }
   if (action === "review-branch") {
     return {
       kind: "form",

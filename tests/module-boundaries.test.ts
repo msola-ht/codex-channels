@@ -154,6 +154,39 @@ describe("module boundaries", () => {
     });
     expect(realtimeCallers).toEqual([]);
   });
+
+  it("keeps unsupported experimental and developing APIs outside production clients", () => {
+    const unsupportedMethods = [
+      "thread/search",
+      "thread/searchOccurrences",
+      "thread/turns/list",
+      "thread/items/list",
+      "plugin/list",
+      "plugin/search",
+      "plugin/read",
+      "plugin/skill/read",
+      "plugin/share/save",
+      "plugin/share/updateTargets",
+      "plugin/share/list",
+      "plugin/share/checkout",
+      "plugin/share/delete",
+      "plugin/install",
+      "plugin/uninstall",
+      "marketplace/add",
+      "marketplace/remove",
+      "marketplace/upgrade",
+    ] as const;
+    const callers = typescriptFiles(resolve(sourceRoot, "codex-client"))
+      .flatMap((file) => {
+        const source = readFileSync(file, "utf8");
+        return unsupportedMethods.flatMap((method) =>
+          source.includes(`"${method}"`)
+            ? [`${relative(sourceRoot, file)}: ${method}`]
+            : []);
+      });
+
+    expect(callers).toEqual([]);
+  });
 });
 
 function moduleImportersOutside(

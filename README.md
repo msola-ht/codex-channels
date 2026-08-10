@@ -133,12 +133,33 @@ codexc service restart gateway
 缓存命中、速度、思考次数与总价；`/metrics` 可查看当前 Thread 最近运行聚合以及
 `global|providers|models|errors` 的时间范围汇总。展示与统计口径见
 [`docs/display.md`](docs/display.md)。
+
 统计代理识别到的上下文压缩仍计入这些总计，并另外显示压缩次数、实际请求模型、Token 与参考费用，
 方便区分普通回复和压缩开销。
 
 OpenAI `/limits` 会在存在完整周窗口且统计代理观测到相邻额度增长时，按增长区间内的请求
 Token 与价格快照估算每 1% 周额度对应的 Token、API 参考费用及剩余额度可用量。估算只覆盖
 本机代理捕获的请求，其他客户端在两次快照之间的用量可能造成偏差，也不代表订阅实际扣款。
+
+### Plugin 与 MCP 调试
+
+Codex 0.147.0 的 Plugin API 仍标记为开发中。Gateway 默认开启已安装 Plugin 的调试入口；如需
+关闭，在配置中设置并重启 Gateway：
+
+```toml
+[experimental]
+plugin_api = false
+```
+
+- `/plugins`：列出当前 Workspace 已安装的 Plugin 及启用状态。
+- `/plugin <名称、完整 ID 或序号> <任务>`：仅在 OpenAI Thread 中使用官方 `mention` 输入调用
+  已启用且可用的 Plugin。
+- 不开放 Plugin 搜索、市场、安装、卸载或分享；`codexc doctor` 会显示该开发中开关的状态。
+- `/mcp`：列出当前 Thread 的 MCP Server；`/mcp <名称或序号>` 查看工具、资源与模板详情。
+- `/mcp login <名称或序号>`：启动 OAuth 登录并返回授权地址。
+- `/mcp resource <名称或序号> <URI>`：只读读取资源；整次最多检查前 8 个内容，文本合计最多展示
+  8,000 字符并明确标记截断或省略，二进制只显示 MIME 和 Base64 字符数，不通过聊天命令直接
+  调用 MCP Tool。
 
 信息类聊天指令输出统一为 Markdown 列表：`##` 标题、`###` 小节、`-` 字段列表、明细缩进嵌套；
 `/metrics` 用 `**Token**：总计` 与 `**费用**：总价` 列表块分节，费用先出总计、再列出明细；
@@ -337,7 +358,9 @@ deepseek）的全部请求行并自动重启 Gateway 与中心服务，适合额
 - 运行：`/status`、`/stop`、`/queue <描述>`、`/compact`、`/fork`、`/review`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
 - 状态：`/diff`、`/usage`、`/metrics [session|global|providers|models|errors] [today|yesterday|this-week|last-week|this-month|last-month|24h|7d|30d|90d|365d|all]`、`/limits`、`/permissions`、`/goal`
-- 扩展：`/agents [角色名称或序号 任务]`、`/skill [名称或序号 任务]`、`/mcp`、`/plugins`、`/rules`
+- 扩展：`/agents [角色名称或序号 任务]`、`/skill [名称或序号 任务]`、`/plugins`、
+  `/plugin <名称、完整 ID 或序号> <任务>`、`/mcp [名称或序号]`、
+  `/mcp login <名称或序号>`、`/mcp resource <名称或序号> <URI>`、`/rules`
 - 图片：`/vision <下一批要求>`；多图：`/vision <2–4> <要求>`，收齐自动提交；失败重试：`/vision retry`；取消：`/vision cancel`
 - 帮助：`/help`、`/whoami`
 

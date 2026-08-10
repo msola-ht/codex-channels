@@ -17,8 +17,12 @@ import type {
   InvocableSkill,
   SkillQueryPort,
   McpQueryPort,
+  McpOAuthLogin,
+  McpResourceReadResult,
+  McpServerDetail,
   McpServerSummary,
   InstalledPlugin,
+  InvocablePlugin,
   PluginQueryPort,
   PermissionProfileOption,
   PermissionQueryPort,
@@ -31,6 +35,8 @@ import type {
   GetAccountRateLimitsResponse,
   InitializeResponse,
   ListMcpServerStatusResponse,
+  McpResourceReadResponse,
+  McpServerOauthLoginResponse,
   ModelListResponse,
   PermissionProfileListResponse,
   PluginInstalledResponse,
@@ -78,8 +84,16 @@ import {
   resolveInvocableSkill,
   toInstalledSkills,
 } from "./skill-adapter.js";
-import { toMcpServerSummaryPage } from "./mcp-adapter.js";
-import { toInstalledPlugins } from "./plugin-adapter.js";
+import {
+  toMcpOAuthLogin,
+  toMcpResourceReadResult,
+  toMcpServerDetailPage,
+  toMcpServerSummaryPage,
+} from "./mcp-adapter.js";
+import {
+  resolveInvocablePlugin,
+  toInstalledPlugins,
+} from "./plugin-adapter.js";
 import { toPermissionProfilePage } from "./permission-adapter.js";
 
 export interface ThreadDefaults {
@@ -478,19 +492,74 @@ export class CodexAppServerClient implements
     return servers;
   }
 
+  async listMcpServerDetails(threadId?: string): Promise<McpServerDetail[]> {
+    const servers: McpServerDetail[] = [];
+    const cursors = new Set<string>();
+    let cursor: string | null = null;
+    do {
+      const response = await this.rpc.request<ListMcpServerStatusResponse>({
+        method: "mcpServerStatus/list",
+        params: {
+          limit: 100,
+          detail: "full",
+          ...(threadId ? { threadId } : {}),
+          ...(cursor ? { cursor } : {}),
+        },
+      }, { retryOverload: true });
+      const page = toMcpServerDetailPage(response);
+      servers.push(...page.servers);
+      cursor = page.nextCursor;
+      rememberCursor("mcpServerStatus/list", cursor, cursors);
+    } while (cursor);
+    return servers;
+  }
+
+  async startMcpOAuthLogin(
+    name: string,
+    threadId?: string,
+  ): Promise<McpOAuthLogin> {
+    const response = await this.rpc.request<McpServerOauthLoginResponse>({
+      method: "mcpServer/oauth/login",
+      params: { name, ...(threadId ? { threadId } : {}) },
+    }, { retryOverload: false });
+    return toMcpOAuthLogin(name, response);
+  }
+
+  async readMcpResource(
+    server: string,
+    uri: string,
+    threadId?: string,
+  ): Promise<McpResourceReadResult> {
+    const response = await this.rpc.request<McpResourceReadResponse>({
+      method: "mcpServer/resource/read",
+      params: { server, uri, ...(threadId ? { threadId } : {}) },
+    }, { retryOverload: true });
+    return toMcpResourceReadResult(server, uri, response);
+  }
+
+  async listPlugins(cwd: string): Promise<InstalledPlugin[]> {
+    return toInstalledPlugins(await this.readInstalledPlugins(cwd));
+  }
+
+  async resolvePlugin(
+    cwd: string,
+    id: string,
+  ): Promise<InvocablePlugin | undefined> {
+    return resolveInvocablePlugin(await this.readInstalledPlugins(cwd), id);
+  }
+
+  private readInstalledPlugins(cwd: string): Promise<PluginInstalledResponse> {
+    return this.rpc.request<PluginInstalledResponse>({
+      method: "plugin/installed",
+      params: { cwds: [cwd] },
+    }, { retryOverload: true });
+  }
+
   private readSkills(cwd: string): Promise<SkillsListResponse> {
     return this.rpc.request<SkillsListResponse>({
       method: "skills/list",
       params: { cwds: [cwd], forceReload: false },
     }, { retryOverload: true });
-  }
-
-  async listPlugins(cwd: string): Promise<InstalledPlugin[]> {
-    const response = await this.rpc.request<PluginInstalledResponse>({
-      method: "plugin/installed",
-      params: { cwds: [cwd] },
-    }, { retryOverload: true });
-    return toInstalledPlugins(response);
   }
 
   async accountUsage(): Promise<AccountUsage> {

@@ -15,9 +15,12 @@ import {
   formatConversationLimits,
   formatConversationMetrics,
   formatConversationMcp,
+  formatConversationMcpDetail,
+  formatConversationMcpOAuth,
+  formatConversationMcpResource,
+  formatConversationPlugins,
   formatConversationModels,
   formatConversationPermissions,
-  formatConversationPlugins,
   formatConversationProjectRules,
   formatConversationSkills,
   formatConversationUsage,
@@ -90,6 +93,15 @@ export async function renderTelegramCommandResult(
       return;
     case "mcp":
       await replyTelegramPanel(context, formatConversationMcp(result));
+      return;
+    case "mcp-detail":
+      await replyTelegramPanel(context, formatConversationMcpDetail(result));
+      return;
+    case "mcp-oauth":
+      await replyTelegramPanel(context, formatConversationMcpOAuth(result));
+      return;
+    case "mcp-resource":
+      await replyTelegramPanel(context, formatConversationMcpResource(result));
       return;
     case "plugins":
       await replyTelegramPanel(context, formatConversationPlugins(result));

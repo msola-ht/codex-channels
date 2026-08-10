@@ -52,7 +52,11 @@ function queryPort(overrides: Partial<ConversationQueryPort> = {}): Conversation
     listSkills: unsupported,
     resolveSkill: unsupported,
     listMcpServers: unsupported,
+    listMcpServerDetails: unsupported,
+    startMcpOAuthLogin: unsupported,
+    readMcpResource: unsupported,
     listPlugins: unsupported,
+    resolvePlugin: unsupported,
     accountUsage: unsupported,
     accountRateLimits: unsupported,
     listPermissionProfiles: unsupported,
@@ -1140,11 +1144,114 @@ describe("ConversationService model selection", () => {
     expect(listMcpServers).toHaveBeenCalledWith("thread-1");
   });
 
-  it("lists stable installed Plugins for the authorized Workspace", async () => {
-    const listPlugins = vi.fn(async () => [
-      { name: "github", enabled: true },
-      { name: "local-tools", enabled: false },
-    ]);
+  it("resolves MCP details and routes OAuth and resource reads to one Thread snapshot", async () => {
+    const server = {
+      name: "project-tools",
+      authStatus: "notLoggedIn" as const,
+      toolCount: 1,
+      serverTitle: "Project Tools",
+      serverVersion: "1.0.0",
+      serverDescription: null,
+      tools: [{ name: "search", title: null, description: null }],
+      resources: [{
+        uri: "project://readme",
+        name: "readme",
+        title: null,
+        description: null,
+        mimeType: "text/plain",
+      }],
+      resourceTemplates: [],
+    };
+    const summary = {
+      name: server.name,
+      authStatus: server.authStatus,
+      toolCount: server.toolCount,
+    };
+    const listMcpServers = vi.fn(async () => [summary]);
+    const listMcpServerDetails = vi.fn(async () => [server]);
+    const startMcpOAuthLogin = vi.fn(async () => ({
+      server: "project-tools",
+      authorizationUrl: "https://example.test/oauth",
+    }));
+    const readMcpResource = vi.fn(async () => ({
+      server: "project-tools",
+      requestedUri: "project://readme",
+      contents: [],
+      omittedContentCount: 0,
+    }));
+    let currentCalls = 0;
+    const service = new ConversationService(
+      turnPort(),
+      {
+        current: () => {
+          currentCalls += 1;
+          return { threadId: "thread-1" };
+        },
+      } as unknown as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort({
+        listMcpServers,
+        listMcpServerDetails,
+        startMcpOAuthLogin,
+        readMcpResource,
+      }),
+    );
+
+    await expect(service.mcpServerDetail(target, "1")).resolves.toEqual(server);
+    await expect(service.startMcpOAuthLogin(target, "project-tools")).resolves.toEqual({
+      server: "project-tools",
+      authorizationUrl: "https://example.test/oauth",
+    });
+    await expect(service.readMcpResource(target, "1", " project://readme "))
+      .resolves.toEqual({
+        server: "project-tools",
+        requestedUri: "project://readme",
+        contents: [],
+        omittedContentCount: 0,
+      });
+    expect(startMcpOAuthLogin).toHaveBeenCalledWith("project-tools", "thread-1");
+    expect(readMcpResource)
+      .toHaveBeenCalledWith("project-tools", "project://readme", "thread-1");
+    expect(listMcpServerDetails).toHaveBeenCalledTimes(1);
+    expect(listMcpServers).toHaveBeenCalledTimes(2);
+    expect(currentCalls).toBe(3);
+  });
+
+  it("rejects unsupported MCP OAuth and invalid resource input before execution", async () => {
+    const listMcpServers = vi.fn(async () => [{
+      name: "local-tools",
+      authStatus: "unsupported" as const,
+      toolCount: 0,
+    }]);
+    const startMcpOAuthLogin = vi.fn();
+    const readMcpResource = vi.fn();
+    const service = new ConversationService(
+      turnPort(),
+      { current: () => undefined } as unknown as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort({ listMcpServers, startMcpOAuthLogin, readMcpResource }),
+    );
+
+    await expect(service.startMcpOAuthLogin(target, "local-tools"))
+      .rejects.toMatchObject({ code: "mcp.oauth.unsupported" });
+    await expect(service.readMcpResource(target, "local-tools", " \n "))
+      .rejects.toMatchObject({ code: "mcp.resource.usage" });
+    expect(startMcpOAuthLogin).not.toHaveBeenCalled();
+    expect(readMcpResource).not.toHaveBeenCalled();
+  });
+
+  it("lists installed Plugins for the authorized Workspace", async () => {
+    const listPlugins = vi.fn(async () => [{
+      id: "github@local",
+      name: "github",
+      displayName: "GitHub",
+      marketplaceName: "local",
+      description: "GitHub development tools",
+      enabled: true,
+      available: true,
+    }]);
     const service = new ConversationService(
       turnPort(),
       { workspace: () => main } as unknown as SessionRouter,
@@ -1153,11 +1260,99 @@ describe("ConversationService model selection", () => {
       queryPort({ listPlugins }),
     );
 
-    await expect(service.listPlugins(target)).resolves.toEqual([
-      { name: "github", enabled: true },
-      { name: "local-tools", enabled: false },
-    ]);
+    await expect(service.listPlugins(target)).resolves.toHaveLength(1);
     expect(listPlugins).toHaveBeenCalledWith(main.cwd);
+  });
+
+  it("invokes an enabled Plugin with the official mention input", async () => {
+    const startTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
+    const listPlugins = vi.fn(async () => [{
+      id: "github@local",
+      name: "github",
+      displayName: "GitHub",
+      marketplaceName: "local",
+      description: "GitHub development tools",
+      enabled: true,
+      available: true,
+    }]);
+    const resolvePlugin = vi.fn(async () => ({
+      id: "github@local",
+      name: "github",
+      displayName: "GitHub",
+      path: "plugin://github@local",
+    }));
+    const service = new ConversationService(
+      turnPort({ startTurn }),
+      {
+        ensure: async () => ({
+          target,
+          workspaceId: "main",
+          threadId: "thread-1",
+          sessionId: "session-1",
+        }),
+        workspace: () => main,
+      } as unknown as SessionRouter,
+      {
+        activeTurn: () => undefined,
+        markTurnStarted: vi.fn(),
+      } as unknown as ConversationCore,
+      {
+        status: () => ({ modelProvider: "openai" }),
+        turnOverrides: () => ({}),
+        markApplied: vi.fn(),
+      } as unknown as ModelSelectionService,
+      queryPort({ listPlugins, resolvePlugin }),
+    );
+
+    await expect(service.invokePlugin(target, "1", " 检查 PR "))
+      .resolves.toMatchObject({
+        threadId: "thread-1",
+        turnId: "turn-1",
+        steered: false,
+        pluginName: "GitHub",
+      });
+    expect(resolvePlugin).toHaveBeenCalledWith(main.cwd, "github@local");
+    expect(startTurn.mock.calls[0]?.[1]).toEqual([
+      { type: "text", text: "@github 检查 PR" },
+      {
+        type: "plugin",
+        name: "GitHub",
+        path: "plugin://github@local",
+      },
+    ]);
+  });
+
+  it("fails closed for a disabled Plugin API or a non-OpenAI provider", async () => {
+    const disabled = new ConversationService(
+      turnPort(),
+      { workspace: () => main } as unknown as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { pluginApiEnabled: false },
+    );
+    expect(() => disabled.listPlugins(target))
+      .toThrow(expect.objectContaining({ code: "plugin.disabled" }));
+
+    const deepseek = new ConversationService(
+      turnPort(),
+      {} as SessionRouter,
+      {} as ConversationCore,
+      { status: () => ({ modelProvider: "deepseek" }) } as unknown as ModelSelectionService,
+      queryPort(),
+    );
+    await expect(deepseek.invokePlugin(target, "github", "检查 PR"))
+      .rejects.toMatchObject({ code: "plugin.provider.unsupported" });
   });
 
   it("lists stable Permission Profiles for the authorized Workspace", async () => {

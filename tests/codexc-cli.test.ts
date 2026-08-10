@@ -1890,6 +1890,9 @@ describe("codexc CLI", () => {
 
     expect(diagnosed.stdout).not.toContain("[通过] 配置格式");
     expect(diagnosed.stdout).toContain("[提示] Telegram：未配置");
+    expect(diagnosed.stdout).toContain(
+      "[提示] Plugin API：已启用（开发中；Codex 0.147.0 暂不保证生产兼容性）",
+    );
     expect(diagnosed.stdout).not.toContain("[失败] Telegram Token");
     expect(diagnosed.stdout).not.toContain("[失败] Telegram 用户");
     expect(diagnosed.stdout).not.toContain("[通过]");

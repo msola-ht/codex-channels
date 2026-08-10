@@ -18,7 +18,13 @@ import type {
   ProviderAccountUsage,
 } from "./account-port.js";
 import type { InstalledSkill, SkillQueryPort } from "./skill-port.js";
-import type { McpQueryPort, McpServerSummary } from "./mcp-port.js";
+import type {
+  McpOAuthLogin,
+  McpQueryPort,
+  McpResourceReadResult,
+  McpServerDetail,
+  McpServerSummary,
+} from "./mcp-port.js";
 import type { InstalledPlugin, PluginQueryPort } from "./plugin-port.js";
 import type {
   PermissionProfileOption,
@@ -172,6 +178,11 @@ export interface ConversationUseCases {
     selector: string,
     task: string,
   ): Promise<Submission & { skillName: string }>;
+  invokePlugin(
+    target: ConversationTarget,
+    selector: string,
+    task: string,
+  ): Promise<Submission & { pluginName: string }>;
   listAgentRoles(): AgentRoleEntry[];
   invokeAgent(
     target: ConversationTarget,
@@ -213,6 +224,13 @@ export interface ConversationUseCases {
   selectFastMode(target: ConversationTarget, selector: string): Promise<ModelSelectionState>;
   listSkills(target: ConversationTarget): Promise<InstalledSkill[]>;
   listMcpServers(target: ConversationTarget): Promise<McpServerSummary[]>;
+  mcpServerDetail(target: ConversationTarget, selector: string): Promise<McpServerDetail>;
+  startMcpOAuthLogin(target: ConversationTarget, selector: string): Promise<McpOAuthLogin>;
+  readMcpResource(
+    target: ConversationTarget,
+    selector: string,
+    uri: string,
+  ): Promise<McpResourceReadResult>;
   listPlugins(target: ConversationTarget): Promise<InstalledPlugin[]>;
   accountUsage(): Promise<AccountUsage>;
   accountRateLimits(): Promise<AccountRateLimits>;
@@ -255,6 +273,9 @@ export class ConversationService implements ConversationUseCases {
     private readonly workspacePermissions?: WorkspacePermissionPort,
     private readonly turnErrorRecorder?: TurnErrorRecorder,
     private readonly agentRoles?: AgentRolePort,
+    private readonly experimentalFeatures: { pluginApiEnabled: boolean } = {
+      pluginApiEnabled: true,
+    },
   ) {}
 
   requestMetrics(
@@ -328,6 +349,54 @@ export class ConversationService implements ConversationUseCases {
         },
       ]);
       return { ...submission, skillName: skill.name };
+    });
+  }
+
+  async invokePlugin(
+    target: ConversationTarget,
+    selector: string,
+    task: string,
+  ): Promise<Submission & { pluginName: string }> {
+    this.requirePluginApiEnabled();
+    const normalizedSelector = selector.trim();
+    const normalizedTask = task.trim();
+    if (!normalizedSelector || !normalizedTask) {
+      throw new UserFacingError(
+        "plugin.usage",
+        "需要提供 Plugin 名称或序号及任务内容",
+      );
+    }
+    if ((this.models.status(target).modelProvider ?? "openai") !== "openai") {
+      throw new UserFacingError(
+        "plugin.provider.unsupported",
+        "开发中的 Plugin 调用当前只支持 OpenAI Thread",
+      );
+    }
+    return this.locked(target, async () => {
+      const workspace = this.router.workspace(target);
+      const plugin = await this.resolvePlugin(
+        workspace.cwd,
+        normalizedSelector,
+      );
+      const resolved = await this.queries.resolvePlugin(workspace.cwd, plugin.id);
+      if (!resolved) {
+        throw new UserFacingError(
+          "plugin.unavailable",
+          "指定的 Plugin 未启用、被管理员禁用或暂不可调用",
+        );
+      }
+      const submission = await this.submitInputLocked(target, [
+        {
+          type: "text",
+          text: `@${resolved.name} ${normalizedTask}`,
+        },
+        {
+          type: "plugin",
+          name: resolved.displayName,
+          path: resolved.path,
+        },
+      ]);
+      return { ...submission, pluginName: resolved.displayName };
     });
   }
 
@@ -940,8 +1009,105 @@ export class ConversationService implements ConversationUseCases {
     return this.queries.listMcpServers(this.router.current(target)?.threadId);
   }
 
+  async mcpServerDetail(
+    target: ConversationTarget,
+    selector: string,
+  ): Promise<McpServerDetail> {
+    const threadId = this.router.current(target)?.threadId;
+    return resolveMcpServer(
+      selector,
+      await this.queries.listMcpServerDetails(threadId),
+    );
+  }
+
+  async startMcpOAuthLogin(
+    target: ConversationTarget,
+    selector: string,
+  ): Promise<McpOAuthLogin> {
+    const threadId = this.router.current(target)?.threadId;
+    const server = resolveMcpServer(
+      selector,
+      await this.queries.listMcpServers(threadId),
+    );
+    if (server.authStatus === "unsupported" || server.authStatus === "bearerToken") {
+      throw new UserFacingError(
+        "mcp.oauth.unsupported",
+        "该 MCP Server 不支持 OAuth 登录",
+      );
+    }
+    return this.queries.startMcpOAuthLogin(
+      server.name,
+      threadId,
+    );
+  }
+
+  async readMcpResource(
+    target: ConversationTarget,
+    selector: string,
+    uri: string,
+  ): Promise<McpResourceReadResult> {
+    const normalizedUri = uri.trim();
+    if (
+      normalizedUri.length === 0
+      || normalizedUri.length > 4_096
+      || hasControlCharacters(normalizedUri)
+    ) {
+      throw new UserFacingError("mcp.resource.usage", "需要提供有效的 MCP Resource URI");
+    }
+    const threadId = this.router.current(target)?.threadId;
+    const server = resolveMcpServer(
+      selector,
+      await this.queries.listMcpServers(threadId),
+    );
+    return this.queries.readMcpResource(
+      server.name,
+      normalizedUri,
+      threadId,
+    );
+  }
+
   listPlugins(target: ConversationTarget): Promise<InstalledPlugin[]> {
+    this.requirePluginApiEnabled();
     return this.queries.listPlugins(this.router.workspace(target).cwd);
+  }
+
+  private async resolvePlugin(
+    cwd: string,
+    selector: string,
+  ): Promise<InstalledPlugin> {
+    const plugins = await this.queries.listPlugins(cwd);
+    if (/^[1-9]\d*$/u.test(selector)) {
+      const index = Number(selector);
+      const plugin = Number.isSafeInteger(index) ? plugins[index - 1] : undefined;
+      if (!plugin) {
+        throw new UserFacingError("plugin.not-found", "Plugin 序号不存在");
+      }
+      return plugin;
+    }
+    const normalized = selector.toLowerCase();
+    const matches = plugins.filter((plugin) =>
+      plugin.id.toLowerCase() === normalized
+      || plugin.name.toLowerCase() === normalized
+      || plugin.displayName.toLowerCase() === normalized
+    );
+    if (matches.length !== 1) {
+      throw new UserFacingError(
+        matches.length === 0 ? "plugin.not-found" : "plugin.ambiguous",
+        matches.length === 0
+          ? "指定的 Plugin 不存在"
+          : "Plugin 名称不唯一，请使用序号或完整 ID",
+      );
+    }
+    return matches[0]!;
+  }
+
+  private requirePluginApiEnabled(): void {
+    if (!this.experimentalFeatures.pluginApiEnabled) {
+      throw new UserFacingError(
+        "plugin.disabled",
+        "开发中的 Plugin API 已关闭；请在 [experimental] 中启用 plugin_api 后重启 Gateway",
+      );
+    }
   }
 
   accountUsage(): Promise<AccountUsage> {
@@ -1387,4 +1553,32 @@ export function turnErrorMessage(error: unknown): string | null {
   const message = error.message.replace(/\s+/gu, " ").trim();
   if (message.length === 0) return null;
   return message.length <= 500 ? message : `${message.slice(0, 500)}…`;
+}
+
+function resolveMcpServer<T extends McpServerSummary>(
+  selector: string,
+  servers: readonly T[],
+): T {
+  const normalizedSelector = selector.trim();
+  if (!normalizedSelector) {
+    throw new UserFacingError("mcp.server.usage", "需要提供 MCP Server 名称或序号");
+  }
+  if (/^[1-9]\d*$/u.test(normalizedSelector)) {
+    const index = Number(normalizedSelector);
+    const server = Number.isSafeInteger(index) ? servers[index - 1] : undefined;
+    if (server) return server;
+  } else {
+    const server = servers.find((candidate) =>
+      candidate.name.toLowerCase() === normalizedSelector.toLowerCase()
+    );
+    if (server) return server;
+  }
+  throw new UserFacingError("mcp.server.not-found", "指定的 MCP Server 不存在");
+}
+
+function hasControlCharacters(value: string): boolean {
+  return [...value].some((character) => {
+    const code = character.codePointAt(0);
+    return code !== undefined && (code <= 0x1f || code === 0x7f);
+  });
 }

@@ -227,6 +227,52 @@ describe("ProviderRoutingClient", () => {
     expect(deepseek.readDefaultServiceTier).toHaveBeenCalledWith(cwd);
     expect(openai.readDefaultServiceTier).not.toHaveBeenCalled();
   });
+
+  it("keeps experimental Plugin discovery on the primary OpenAI App Server", async () => {
+    const openai = client();
+    const deepseek = client();
+    openai.listPlugins.mockResolvedValue([{ id: "github@local" }]);
+    openai.resolvePlugin.mockResolvedValue({ id: "github@local" });
+    const routed = routing(openai, deepseek);
+
+    await expect(routed.listPlugins(cwd)).resolves.toEqual([{ id: "github@local" }]);
+    await expect(routed.resolvePlugin(cwd, "github@local"))
+      .resolves.toEqual({ id: "github@local" });
+    expect(openai.listPlugins).toHaveBeenCalledWith(cwd);
+    expect(openai.resolvePlugin).toHaveBeenCalledWith(cwd, "github@local");
+    expect(deepseek.listPlugins).not.toHaveBeenCalled();
+    expect(deepseek.resolvePlugin).not.toHaveBeenCalled();
+  });
+
+  it("routes MCP detail, OAuth, and resource reads through the Thread Provider", async () => {
+    const openai = client();
+    const deepseek = client();
+    openai.readThread.mockResolvedValue(snapshot("thread-ds", "deepseek", "idle"));
+    deepseek.readThread.mockResolvedValue(snapshot("thread-ds", "deepseek", "idle"));
+    deepseek.listMcpServerDetails.mockResolvedValue([]);
+    deepseek.startMcpOAuthLogin.mockResolvedValue({
+      server: "tools",
+      authorizationUrl: "https://example.test/oauth",
+    });
+    deepseek.readMcpResource.mockResolvedValue({
+      server: "tools",
+      requestedUri: "project://readme",
+      contents: [],
+      omittedContentCount: 0,
+    });
+    const routed = routing(openai, deepseek);
+    await routed.readThread("thread-ds");
+
+    await routed.listMcpServerDetails("thread-ds");
+    await routed.startMcpOAuthLogin("tools", "thread-ds");
+    await routed.readMcpResource("tools", "project://readme", "thread-ds");
+
+    expect(deepseek.listMcpServerDetails).toHaveBeenCalledWith("thread-ds");
+    expect(deepseek.startMcpOAuthLogin).toHaveBeenCalledWith("tools", "thread-ds");
+    expect(deepseek.readMcpResource)
+      .toHaveBeenCalledWith("tools", "project://readme", "thread-ds");
+    expect(openai.listMcpServerDetails).not.toHaveBeenCalled();
+  });
 });
 
 function routing(openai: MockClient, deepseek: MockClient): ProviderRoutingClient {
@@ -314,7 +360,11 @@ function client() {
     listSkills: vi.fn(),
     resolveSkill: vi.fn(),
     listMcpServers: vi.fn(),
+    listMcpServerDetails: vi.fn(),
+    startMcpOAuthLogin: vi.fn(),
+    readMcpResource: vi.fn(),
     listPlugins: vi.fn(),
+    resolvePlugin: vi.fn(),
     accountUsage: vi.fn(),
     accountRateLimits: vi.fn(),
     listPermissionProfiles: vi.fn(),

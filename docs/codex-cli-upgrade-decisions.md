@@ -17,6 +17,40 @@
 - 生成协议出现类型或 RPC 不代表项目支持。公开能力仍以 [`docs/index.md`](index.md) 的支持矩阵、
   受控导出、业务入口和验证共同为准。
 
+## 0.145.0
+
+- 官方 Release：[`rust-v0.145.0`](https://github.com/openai/codex/releases/tag/rust-v0.145.0)
+- 项目开发基线：Gateway、生成协议、真实 App Server 合同与发布包锁定 `0.145.0`
+- 评估范围：稳定 Multi-Agent v2、一次性音频输入、Thread 查询、实验分页历史与搜索、Realtime、
+  外部 Agent 导入、Bedrock，以及 MCP、安全与终端修复
+
+### 已采用
+
+| 变化 | 它是做什么的 | 项目收益与处理 | 本地入口或验证 |
+| --- | --- | --- | --- |
+| 0.145.0 精确协议基线 | 让 Gateway、App Server 和生成类型保持在同一正式版本 | 项目发布时锁定正式版本，不保留旧 CLI 兼容分支 | [`codex-protocol/`](../src/codex-protocol/README.md)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+| 稳定 Multi-Agent v2 | 让主 Thread 按配置启动、观察和协调不同角色的子代理 | Gateway 只消费官方子代理活动、工具状态和子 Thread 终态，不复制代理调度；三个 Surface 统一显示有界操作与完成结果 | [`operation-adapter.ts`](../src/codex-client/operation-adapter.ts)、[`subagent-completion-tracker.ts`](../src/bootstrap/subagent-completion-tracker.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts) |
+| 一次性音频输入 | 把受支持的本地音频作为单次 Turn 输入提交给模型 | 三个 Surface 统一完成格式、时长、大小和私有临时文件校验；Application 在提交前继续按模型目录的 `inputModalities` 失败关闭，当前可见模型未声明 `audio` 时不会假装可用 | [`turn-port.ts`](../src/application/turn-port.ts)、[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts)、[`model-selection-service.test.ts`](../tests/model-selection-service.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+| 会话标题搜索 | 按持久化会话名称或提取标题筛选当前 Workspace 的可恢复 Thread | `/sessions [搜索词]` 与 `/archived [搜索词]` 使用稳定 `thread/list.searchTerm`，不读取或搜索对话正文 | [`thread-port.ts`](../src/session-routing/thread-port.ts)、[`conversation-command-service.ts`](../src/application/conversation-command-service.ts)、[`conversation-command-service.test.ts`](../tests/conversation-command-service.test.ts) |
+| Default/Plan 协作模式 | 让渠道用户在下一 Turn 使用官方 Default 或 Plan 预设 | 作为唯一允许的实验协议例外，只受控使用 `collaborationMode/list` 与 `turn/start.collaborationMode`，不借初始化协商接入其他实验能力 | [`collaboration-mode-port.ts`](../src/application/collaboration-mode-port.ts)、[`client.ts`](../src/codex-client/client.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+
+### 明确不采用
+
+| 上游能力 | 它是做什么的 | 当前不采用原因 |
+| --- | --- | --- |
+| 分页 Thread 历史与正文搜索 | 增量读取长会话的 Turn/Item，并搜索对话正文 | `thread/search`、`thread/searchOccurrences`、`thread/turns/list` 和 `thread/items/list` 均为实验方法；项目唯一实验例外是 Plan，Gateway 也不建立平行历史库 |
+| Realtime | 持续传输实时文字或音频 | 未建立实时授权、传输、状态和三 Surface 合同，且当前业务边界明确禁止 `thread/realtime/*` |
+| Cursor、Claude Code 配置与会话导入 | 把其他 Agent 的设置、历史和项目记忆迁入 Codex | App Server 是 Thread 和会话历史的唯一事实来源；Gateway 不读取、复制或迁移其他 Agent 的会话数据 |
+| Amazon Bedrock | 使用 Bedrock 登录、模型和自定义传输 | 当前 Provider 范围只有 OpenAI 和显式配置的 DeepSeek；新增 Provider 必须先建立独立认证、模型目录、统计和错误边界 |
+| Plugin 查询、市场与安装 | 查询、发现或安装本地及远端 Plugin | 0.145.0 评估时未采用；后续只在 0.147.0 决策中增加受开关约束的已安装列表与 mention 调试，市场、搜索和安装仍不采用 |
+
+### 纯上游变化
+
+- MCP 启动超时、OAuth 非阻塞发现、刷新串行化和工具目录复用随锁定 App Server 获得；Gateway
+  不复制 MCP 连接池。
+- TUI 长会话渲染、Windows 执行与 Sandbox、macOS Code Mode 安装、强制删除识别和审批原因保留
+  不新增 Gateway 协议入口。
+
 ## 0.146.0
 
 - 官方 Release：[`rust-v0.146.0`](https://github.com/openai/codex/releases/tag/rust-v0.146.0)
@@ -39,14 +73,14 @@
 | 候选能力 | 它是做什么的 | 对项目可能有什么用 | 实施边界与重新评估条件 |
 | --- | --- | --- | --- |
 | 长会话 Fork 真实合同 | 验证从长会话复制新分支时，新分支历史完整，原会话仍可正常继续 | 避免 `/fork` 在历史很多时出现缺内容、绑错会话或订阅异常 | 只补合同和路由验证，不为了制造长历史调用模型；有可重复 Fixture 或出现实际回归时实施 |
-| Plugin 命令来源展示 | 在审批或运行记录中告诉用户“这条命令由哪个 Plugin 的哪个脚本发起” | 用户更容易判断命令是否可信，审批信息也更清楚 | 固定协议必须能把可信 `pluginId`、`scriptPath` 与当前请求安全关联；项目准备展示 Plugin 审批且真实合同证明关联可靠时再实施 |
+| Plugin 命令来源展示 | 在审批或运行记录中告诉用户“这条命令由哪个 Plugin 的哪个脚本发起” | 用户更容易判断命令是否可信，审批信息也更清楚 | 只有官方取消 Plugin API 的生产禁用，并让审批请求直接携带或由真实合同证明可可靠关联可信 `pluginId`、`scriptPath` 时才重新评估；当前不通过 Item 时序推断审批来源 |
 
 ### 明确不采用
 
 | 上游能力 | 它是做什么的 | 当前不采用原因 |
 | --- | --- | --- |
 | External Agent 配置和会话导入 | 把其他编程 Agent 的配置、会话和导入历史迁入 Codex | App Server 是 Thread 和历史的唯一事实来源；Gateway 不读取、迁移或维护其他 Agent 的会话副本 |
-| Plugin Marketplace、分享和 Workspace 发布 | 从远端目录查找或下载 Plugin，并把本地 Plugin 分享给个人或工作区 | 当前只查询 `plugin/installed`；下载、发布和分享会扩大网络、供应链信任与 Workspace 权限边界 |
+| Plugin Marketplace、分享和 Workspace 发布 | 从远端目录查找或下载 Plugin，并把本地 Plugin 分享给个人或工作区 | 固定版本 Plugin API 仍禁止生产客户端调用；下载、发布和分享还会扩大网络、供应链信任与 Workspace 权限边界 |
 | Remote Code Mode Host | 让本机 App Server 把代码执行任务交给另一台机器或远程执行环境 | 当前只连接本机共享 App Server；远程执行主机需要独立认证、网络和执行信任模型 |
 | 临时 Fork | 创建一个短期会话分支，但不把它显示在正常会话列表中 | 外部 Conversation 需要稳定、可恢复且唯一的 Thread 绑定；不进入列表的临时 Thread 不适合作为渠道会话 |
 | Realtime | 持续传输实时文字或音频，形成低延迟实时会话 | 当前项目只允许 Plan 所需实验协议，未建立实时音频的授权、传输、状态和 Surface 合同 |
@@ -100,19 +134,21 @@
 | 内置 Pinned 分区 | 用持久分区统一承载旧版的会话置顶状态，并支持服务端排序 | `/pin`、`/unpin` 的公开行为不变；Gateway 原样回写当前 Git SHA，无损协调刚创建的加载中 Thread，再用官方固定 ID 移入或移出内置 Pinned 分区，并从 `Thread.section` 投影稳定 `isPinned`，不增加本地状态或写请求重试 | [`client.ts`](../src/codex-client/client.ts)、[`thread-adapter.ts`](../src/codex-client/thread-adapter.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | MCP 鉴权未知状态 | 在 App Server 尚不能确定 MCP 服务的认证方式时明确显示未知，而不是把整个响应当成错误 | `/mcp` 保留官方 `unknown` 状态并继续拒绝协议之外的值，避免一个未完成探测的服务阻断整页状态 | [`mcp-port.ts`](../src/application/mcp-port.ts)、[`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
 | MCP 扩展协商 | 客户端在连接时明确告诉 App Server 自己能处理哪些扩展表单 | 初始化使用 `extensions["openai/form"]` 声明现有三渠道已实现的扩展表单处理，替代依赖旧式隐含或兼容协商 | [`json-rpc.ts`](../src/codex-client/json-rpc.ts)、[`server-request-adapter.ts`](../src/codex-client/server-request-adapter.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
+| MCP 详情、OAuth 与资源读取 | 查看 Server 工具、资源和模板，启动认证并读取只读资源 | 三渠道共用 `/mcp` 子命令；OAuth 不自动重试且只显示安全授权 URL，文本资源限长，二进制不外发，直接 Tool Call 仍留在 Turn 与审批边界内 | [`mcp-port.ts`](../src/application/mcp-port.ts)、[`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts)、[`conversation-command-service.ts`](../src/application/conversation-command-service.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+| 开发中 Plugin 已安装列表与 mention 调用 | 调试当前 Workspace 已安装 Plugin，并把选中项作为官方 mention 输入交给 Turn | `[experimental].plugin_api` 默认开启且可显式关闭，Doctor 和命令输出持续标记开发中；只支持 OpenAI Thread，不接入搜索、安装、卸载或分享 | [`plugin-port.ts`](../src/application/plugin-port.ts)、[`plugin-adapter.ts`](../src/codex-client/plugin-adapter.ts)、[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts)、[`conversation-service.test.ts`](../tests/conversation-service.test.ts) |
 
 ### 待评估
 
 | 候选能力 | 它是做什么的 | 对项目可能有什么用 | 实施边界与重新评估条件 |
 | --- | --- | --- | --- |
-| 自定义 Thread 分区 | 把会话按工作、个人或其他名称分组，并手工排序 | 长期会话较多时比单一置顶列表更容易整理 | 需要先设计三个 Surface 一致的创建、改名、删除、移动和分页交互；在有明确渠道需求前只采用内置 Pinned 分区，不导出通用分区端口 |
+| 自定义 Thread 分区 | 把会话按工作、个人或其他名称分组，并手工排序 | 长期会话较多时比单一置顶列表更容易整理 | 分区属于整个 App Server 的全局状态，当前无法按 Workspace 或 Surface Actor 证明查看、改名和删除权限；只有建立不泄露其他 Workspace 名称且不维护第二事实来源的授权模型后才重新评估，现阶段只采用内置 Pinned 分区 |
 | MCP 2026-07-28 客户端能力 | 支持分页发现、多轮请求和非阻塞服务器启动 | 大型 MCP 工具目录和启动较慢的服务可能更稳定 | 当前 Gateway 通过 App Server 查询和调用，不直接实现 MCP Client；只有生成协议新增必须协调的状态或 Server Request，或真实合同暴露差异时再扩展稳定边界 |
 
 ### 明确不采用
 
 | 上游能力 | 它是做什么的 | 当前不采用原因 |
 | --- | --- | --- |
-| Agent Plugin 搜索、安装和远端目录 | 从本地、个人、Workspace 或远端目录发现并安装可移植 Plugin | 当前只查询已安装 Plugin；搜索和安装会扩大网络访问、供应链与 Workspace 授权边界，生成的 `plugin/search` 类型不构成项目支持 |
+| Agent Plugin 搜索、安装和远端目录 | 从本地、个人、Workspace 或远端目录发现并安装可移植 Plugin | 固定版本官方文档仍禁止生产客户端调用 Plugin API，且 `plugin/search` 另被标记为实验方法；搜索和安装还会扩大网络访问、供应链与 Workspace 授权边界 |
 | `--approve-for-me` 自动审核 | 让另一个模型代替用户判断部分审批 | Gateway 的命令、文件、网络和权限审批必须由当前 Surface Actor 显式决定，不能把一次批准静默升级为自动授权 |
 | Cursor、Claude 会话与技能导入 | 把其他客户端管理的会话或技能迁入 Codex 并持续同步 | App Server 是 Thread 和历史的唯一事实来源；Gateway 不读取、复制或同步其他客户端的会话数据 |
 

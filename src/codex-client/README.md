@@ -29,10 +29,11 @@
 - `skill-adapter.ts`：从官方按 CWD 返回的 Skill 条目中只保留启用的用户或项目直接安装项，
   排除系统与插件缓存；列表结果不含本机路径，显式调用只向 Application 返回精确匹配且名称、
   绝对路径均通过校验的引用。
-- `mcp-adapter.ts`：把官方 MCP Server 状态页裁剪为名称、认证状态和工具数量，并校验分页与
-  展示必需字段；不向 Application 传播工具 Schema、资源或 Server Info。
-- `plugin-adapter.ts`：从官方已安装 Plugin 响应中只保留名称和启用状态，排除安装建议与
-  Marketplace、路径、版本、策略和加载错误。
+- `mcp-adapter.ts`：把官方 MCP Server 状态页裁剪为概览或工具、资源、模板详情，校验 OAuth
+  授权 URL，并把资源响应限为前 8 项、文本展示合计 8,000 字符，二进制裁剪为元数据；不传播
+  工具 Schema 或 Base64 正文。
+- `plugin-adapter.ts`：只映射已安装 Plugin，校验 Plugin ID、Marketplace、启用与管理员可用状态，
+  并为可调用项生成官方 `plugin://` mention 路径。
 - `permission-adapter.ts`：把官方 Permission Profile 分页响应裁剪为 ID、说明和策略可选状态，
   并对必需字段与分页游标失败关闭。
 - `notification-adapter.ts`：把当前支持的官方 Notification 转换为 Routing 或 Conversation Core
@@ -48,11 +49,12 @@
   精确编码为当前官方响应；畸形请求安全拒绝，未知请求返回明确 JSON-RPC 方法错误。
 - `protocol-info.ts`：从精确协议基线公开受支持的 Codex CLI 版本和 Gateway 显示版本，供组合根
   校验并向 Surface 注入纯字符串。
-- `client.ts`：Thread 搜索/归档/固定、Turn、模型、权限、已安装插件、Skill、用量及用户级配置
-  读取与服务层级写入等 App Server 方法的类型化封装；MCP 查询按 Thread 使用
-  `toolsAndAuthOnly` 分页，配置读取只公开稳定服务层级值，Plugin 查询只调用
-  `plugin/installed`，不得改用 `plugin/list` 加载市场目录；Permission Profile 按 CWD 分页，
-  仅用于只读目录展示。Thread 列表显式传空 `modelProviders` 获取当前 Workspace 的全部 Provider，
+- `client.ts`：Thread 搜索/归档/固定、Turn、模型、权限、Skill、用量及用户级配置
+  读取与服务层级写入等 App Server 方法的类型化封装；MCP 概览按 Thread 使用
+  `toolsAndAuthOnly` 分页，详情使用 `full`，OAuth 不自动重试，资源读取保持只读；Permission
+  Profile 按 CWD 分页。开发中 Plugin 只调用 `plugin/installed` 并经 Application 开关约束，
+  不接入搜索、安装或分享。Thread 列表显式传空
+  `modelProviders` 获取当前 Workspace 的全部 Provider，
   供跨 Provider 会话展示和冷恢复定位使用。
   新 Thread 和 Fork 可显式携带官方 `modelProvider`。已有 Thread
   不在 Turn 覆盖中更换 Provider。Application 跨 Provider 选择时新建 Thread；`thread/fork`

@@ -26,6 +26,8 @@ export function toProtocolTurnInput(input: TurnInput[]): UserInput[] {
         return { type: "localAudio", path: item.path };
       case "skill":
         return { type: "skill", name: item.name, path: item.path };
+      case "plugin":
+        return { type: "mention", name: item.name, path: item.path };
     }
   });
 }

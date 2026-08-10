@@ -46,6 +46,10 @@ plan_updates = true
 # 选择 cny 时 Gateway 会刷新并持久化汇率，拉取失败时继续使用最后一次缓存。
 price_currency = "cny"
 
+[experimental]
+# Codex 0.147.0 Plugin API 仍在开发中；默认开启以便调试，可显式关闭。
+plugin_api = true
+
 # 直接 API 提供商（图片识别等第三方 Responses 中转）：
 # [[api_providers]]
 # id = "vision-relay"

@@ -152,6 +152,48 @@ describe("Telegram command renderer", () => {
     );
   });
 
+  it("renders Plugin and MCP resource results through the shared safe panel", async () => {
+    const reply = vi.fn(async () => undefined);
+    const context = { reply } as unknown as Context;
+
+    await renderTelegramCommandResult(context, {
+      kind: "plugins",
+      plugins: [{
+        id: "github@local",
+        name: "github",
+        displayName: "GitHub",
+        marketplaceName: "local",
+        description: null,
+        enabled: true,
+        available: true,
+      }],
+    });
+    await renderTelegramCommandResult(context, {
+      kind: "mcp-resource",
+      resource: {
+        server: "docs",
+        requestedUri: "docs://index",
+        contents: [{
+          kind: "text",
+          uri: "docs://index",
+          mimeType: "text/plain",
+          text: "<unsafe>",
+          truncated: false,
+        }],
+        omittedContentCount: 0,
+      },
+    });
+
+    expect(reply).toHaveBeenCalledWith(
+      expect.stringContaining("github@local"),
+      expect.objectContaining({ parse_mode: "HTML" }),
+    );
+    expect(reply).toHaveBeenCalledWith(
+      expect.stringContaining("&lt;unsafe&gt;"),
+      expect.objectContaining({ parse_mode: "HTML" }),
+    );
+  });
+
   it("shows MCP startup errors sanitized at the Client boundary", () => {
     const text = formatRuntimeMcpStatusUpdate({
       threadId: "thread-1",

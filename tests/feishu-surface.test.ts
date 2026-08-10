@@ -446,6 +446,27 @@ describe("Feishu Surface", () => {
     }]);
   });
 
+  it("opens a Plugin invocation form from the categorized command center", async () => {
+    const fixture = createFixture();
+    const starting = fixture.surface.start();
+    fixture.ready();
+    await starting;
+
+    fixture.emitMessage(0, "/start");
+    await settle();
+    fixture.emitCommandAction("help");
+    await settle();
+    fixture.emitCommandAction("plugin");
+    await settle();
+    await fixture.surface.stop();
+
+    expect(fixture.cards).toHaveLength(3);
+    expect(JSON.stringify(fixture.cards[2]?.card)).toContain("调用 Plugin");
+    expect(JSON.stringify(fixture.cards[2]?.card)).toContain(
+      "名称、完整 ID 或序号及任务",
+    );
+  });
+
   it("routes a confirmed Doctor card through the application setup controller", async () => {
     const fixture = createFixture(
       undefined,

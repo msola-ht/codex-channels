@@ -80,6 +80,9 @@ export function initializeUserData({ environment = process.env, cwd = process.cw
       operation_updates: "compact",
       plan_updates: true,
     },
+    experimental: {
+      plugin_api: true,
+    },
     storage: { database_path: "data/gateway.sqlite3" },
     logging: { level: "info" },
     workspaces: [defaultWorkspace],
