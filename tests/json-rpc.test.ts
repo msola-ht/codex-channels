@@ -1096,8 +1096,8 @@ describe("JsonRpcClient", () => {
     });
     await client.connect();
 
-    await expect(client.listPlugins("/tmp/project")).resolves.toEqual([
-      {
+    await expect(client.listPlugins("/tmp/project")).resolves.toEqual({
+      plugins: [{
         id: "github@local",
         name: "github",
         displayName: "GitHub",
@@ -1123,8 +1123,9 @@ describe("JsonRpcClient", () => {
         description: "GitHub development tools",
         enabled: true,
         available: false,
-      },
-    ]);
+      }],
+      loadErrorCount: 0,
+    });
     await expect(client.resolvePlugin("/tmp/project", "github@local"))
       .resolves.toEqual({
         id: "github@local",
@@ -1138,6 +1139,29 @@ describe("JsonRpcClient", () => {
       .resolves.toBeUndefined();
     expect(transport.sent.find((message) => message.method === "plugin/installed")?.params)
       .toEqual({ cwds: ["/tmp/project"] });
+  });
+
+  it("preserves a bounded count when Plugin marketplaces only partially load", async () => {
+    const transport = new FakeTransport();
+    transport.pluginInstalledResult = {
+      marketplaces: [{
+        name: "local",
+        plugins: [appServerPlugin()],
+      }],
+      marketplaceLoadErrors: [
+        { marketplacePath: "/private/one.json", message: "secret one" },
+        { marketplacePath: "/private/two.json", message: "secret two" },
+      ],
+    };
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listPlugins("/tmp/project")).resolves.toEqual({
+      plugins: [expect.objectContaining({ id: "github@local" })],
+      loadErrorCount: 2,
+    });
   });
 
   it("fails closed when an installed Plugin id does not match its marketplace", async () => {
@@ -1450,6 +1474,41 @@ describe("JsonRpcClient", () => {
       truncated: true,
     });
     expect(resource.omittedContentCount).toBe(7);
+  });
+
+  it("redacts credentials from MCP resource text before returning it", async () => {
+    const transport = new FakeTransport();
+    transport.mcpResourceResult = {
+      contents: [{
+        uri: "project://secrets",
+        mimeType: "text/plain",
+        text: [
+          "Authorization: Bearer bearer-secret",
+          "Cookie: session=cookie-secret",
+          "API_TOKEN=environment-secret",
+        ].join("\n"),
+      }],
+    };
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    const resource = await client.readMcpResource(
+      "project-tools",
+      "project://secrets",
+    );
+    expect(resource.contents[0]).toMatchObject({
+      kind: "text",
+      text: [
+        "Authorization: Bearer [REDACTED]",
+        "Cookie: [REDACTED]",
+        "API_TOKEN=[REDACTED]",
+      ].join("\n"),
+    });
+    expect(JSON.stringify(resource)).not.toMatch(
+      /bearer-secret|cookie-secret|environment-secret/u,
+    );
   });
 
   it("rejects an unsafe MCP OAuth authorization URL", async () => {

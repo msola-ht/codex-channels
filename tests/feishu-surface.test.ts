@@ -447,23 +447,26 @@ describe("Feishu Surface", () => {
   });
 
   it("selects an installed Plugin and submits its task from command cards", async () => {
-    const listPlugins = vi.fn(async () => [{
-      id: "github@local",
-      name: "github",
-      displayName: "GitHub",
-      marketplaceName: "Local",
-      description: "GitHub integration",
-      enabled: true,
-      available: true,
-    }, {
-      id: "disabled@local",
-      name: "disabled",
-      displayName: "Disabled",
-      marketplaceName: "Local",
-      description: null,
-      enabled: false,
-      available: true,
-    }]);
+    const listPlugins = vi.fn(async () => ({
+      plugins: [{
+        id: "github@local",
+        name: "github",
+        displayName: "GitHub",
+        marketplaceName: "Local",
+        description: "GitHub integration",
+        enabled: true,
+        available: true,
+      }, {
+        id: "disabled@local",
+        name: "disabled",
+        displayName: "Disabled",
+        marketplaceName: "Local",
+        description: null,
+        enabled: false,
+        available: true,
+      }],
+      loadErrorCount: 0,
+    }));
     const invokePlugin = vi.fn(async () => ({
       threadId: "thread-1",
       turnId: "turn-plugin",

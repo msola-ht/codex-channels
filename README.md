@@ -151,7 +151,8 @@ Codex 0.147.0 的 Plugin API 仍标记为开发中。Gateway 默认开启已安�
 plugin_api = false
 ```
 
-- `/plugin`：列出当前 Workspace 已安装的 Plugin 及启用状态。
+- `/plugin`：列出当前 Workspace 已安装的 Plugin 及启用状态；Marketplace 部分加载失败时明确提示
+  列表可能不完整，不展示上游路径或原始错误。
 - `/plugin <名称、完整 ID 或序号> <任务>`：仅在 OpenAI Thread 中使用官方 `mention` 输入调用
   已启用且可用的 Plugin；飞书命令中心支持先选择 Plugin、再通过一次性表单输入任务。新建 Turn
   只显示一条带名称的统一确认，例如“已使用 GitHub Plugin 开始处理”，不再重复发送 Plugin
@@ -169,12 +170,13 @@ plugin_api = false
   资源模板，每页最多展示 8 项；详情和分页中的后续命令沿用本次选择器，Server 名称含空格时使用
   `/mcp` 列表中的数字序号。
 - `/mcp login <名称或序号>`：仅对支持 OAuth 的 Server 启动登录并返回授权地址；浏览器流程完成后，
-  Gateway 会在发起登录的会话中主动提示成功或失败。Bearer Token 或不支持 OAuth 时不显示该操作；
+  Gateway 会在发起登录的会话中主动提示成功或失败。OAuth 登录要求当前会话已经创建或恢复 Thread，
+  无法关联 Thread 的完成通知不会广播。Bearer Token 或不支持 OAuth 时不显示该操作；
   手工调用 Bearer Token Server 时会明确提示已认证、无需 OAuth。MCP 首次启动中或正常就绪状态保持
   静默，只主动提示启动失败、取消以及异常后的恢复，避免与查询或登录结果重复。
 - `/mcp resource <名称或序号> <URI>`：只读读取资源；整次最多检查前 8 个内容，文本合计最多展示
-  8,000 字符并明确标记截断或省略，二进制只显示 MIME 和 Base64 字符数，不通过聊天命令直接
-  调用 MCP Tool。
+  8,000 字符并在 Client 边界隐藏常见 Token、密码、Cookie 和 Authorization 值，明确标记截断或
+  省略；二进制只显示 MIME 和 Base64 字符数，不通过聊天命令直接调用 MCP Tool。
 
 信息类聊天指令输出统一为 Markdown 列表：`##` 标题、`###` 小节、`-` 字段列表、明细缩进嵌套；
 `/metrics` 用 `**Token**：总计` 与 `**费用**：总价` 列表块分节，费用先出总计、再列出明细；

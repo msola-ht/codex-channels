@@ -99,10 +99,12 @@ describe("provider-aware conversation command formatting", () => {
         enabled: true,
         available: true,
       }],
+      loadErrorCount: 1,
     });
 
     expect(rendered).toContain("已安装 Plugin（开发中，1）");
     expect(rendered).toContain("1. GitHub · github@local");
+    expect(rendered).toContain("1 个 Plugin Marketplace 加载失败");
     expect(rendered).toContain("/plugin <名称、完整 ID 或序号> <任务>");
     const outcome = formatConversationCommandOutcome({
       type: "plugin.started",

@@ -31,9 +31,9 @@
   绝对路径均通过校验的引用。
 - `mcp-adapter.ts`：把官方 MCP Server 状态页裁剪为概览或工具、资源、模板详情，校验 OAuth
   授权 URL，将说明字段的多行空白归一化并限为 2,000 字符，并把资源响应限为前 8 项、文本展示
-  合计 8,000 字符，二进制裁剪为元数据；不传播工具 Schema 或 Base64 正文。
+  合计 8,000 字符且隐藏常见凭据，二进制裁剪为元数据；不传播工具 Schema 或 Base64 正文。
 - `plugin-adapter.ts`：只映射已安装 Plugin，校验 Plugin ID、Marketplace、启用与管理员可用状态，
-  并为可调用项生成官方 `plugin://` mention 路径。
+  保留 Marketplace 加载失败计数，并为可调用项生成官方 `plugin://` mention 路径。
 - `permission-adapter.ts`：把官方 Permission Profile 分页响应裁剪为 ID、说明和策略可选状态，
   并对必需字段与分页游标失败关闭。
 - `notification-adapter.ts`：把当前支持的官方 Notification 转换为 Routing 或 Conversation Core
@@ -63,7 +63,8 @@
 - `provider-routing-client.ts`：复用多个完整 Client 实例，按 Thread 的官方 `modelProvider` 路由
   生命周期、Turn、Review、Goal 和 MCP；合并各实例的进程内状态，隔离 Server Request ID，
   MCP 配置刷新会尝试全部受管实例并传播任一失败，单 Provider 重连只恢复该侧 Thread。第三方 Provider 的账户通知不会进入 OpenAI 账户状态；
-  无法关联 Thread 的 MCP 与 warning 全局通知携带 Provider 来源，只发送到对应 Provider 会话。
+  无法关联 Thread 的 MCP 启动状态与 warning 全局通知携带 Provider 来源，只发送到对应 Provider
+  会话；无法关联 Thread 的 OAuth 完成通知不进入渠道。
   模型目录由对应 App Server 启动配置持有。
 
 本模块不得调用 Telegram API、生成平台文案或保存业务绑定。协议字段必须来自

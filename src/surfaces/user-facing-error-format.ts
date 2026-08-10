@@ -145,6 +145,8 @@ export function formatSurfaceUserFacingError(
       return "指定的 MCP Server 不存在";
     case "mcp.oauth.unsupported":
       return "该 MCP Server 不支持 OAuth 登录";
+    case "mcp.thread.required":
+      return "请先发送消息创建 Thread，或使用 /resume 恢复 Thread 后再登录 MCP Server";
     case "mcp.resource.usage":
       return "需要提供有效的 MCP Resource URI";
     case "plugin.usage":

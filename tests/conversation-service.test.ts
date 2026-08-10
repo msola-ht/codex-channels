@@ -1326,16 +1326,39 @@ describe("ConversationService model selection", () => {
     expect(readMcpResource).not.toHaveBeenCalled();
   });
 
-  it("lists installed Plugins for the authorized Workspace", async () => {
-    const listPlugins = vi.fn(async () => [{
-      id: "github@local",
-      name: "github",
-      displayName: "GitHub",
-      marketplaceName: "local",
-      description: "GitHub development tools",
-      enabled: true,
-      available: true,
+  it("requires a bound Thread before starting MCP OAuth", async () => {
+    const listMcpServers = vi.fn(async () => [{
+      name: "oauth-tools",
+      authStatus: "notLoggedIn" as const,
+      toolCount: 0,
     }]);
+    const startMcpOAuthLogin = vi.fn();
+    const service = new ConversationService(
+      turnPort(),
+      { current: () => undefined } as unknown as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort({ listMcpServers, startMcpOAuthLogin }),
+    );
+
+    await expect(service.loginMcpServer(target, "oauth-tools"))
+      .rejects.toMatchObject({ code: "mcp.thread.required" });
+    expect(startMcpOAuthLogin).not.toHaveBeenCalled();
+  });
+
+  it("lists installed Plugins for the authorized Workspace", async () => {
+    const listPlugins = vi.fn(async () => ({
+      plugins: [{
+        id: "github@local",
+        name: "github",
+        displayName: "GitHub",
+        marketplaceName: "local",
+        description: "GitHub development tools",
+        enabled: true,
+        available: true,
+      }],
+      loadErrorCount: 0,
+    }));
     const service = new ConversationService(
       turnPort(),
       { workspace: () => main } as unknown as SessionRouter,
@@ -1344,21 +1367,27 @@ describe("ConversationService model selection", () => {
       queryPort({ listPlugins }),
     );
 
-    await expect(service.listPlugins(target)).resolves.toHaveLength(1);
+    await expect(service.listPlugins(target)).resolves.toMatchObject({
+      plugins: [expect.objectContaining({ id: "github@local" })],
+      loadErrorCount: 0,
+    });
     expect(listPlugins).toHaveBeenCalledWith(main.cwd);
   });
 
   it("invokes an enabled Plugin with the official mention input", async () => {
     const startTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
-    const listPlugins = vi.fn(async () => [{
-      id: "github@local",
-      name: "github",
-      displayName: "GitHub",
-      marketplaceName: "local",
-      description: "GitHub development tools",
-      enabled: true,
-      available: true,
-    }]);
+    const listPlugins = vi.fn(async () => ({
+      plugins: [{
+        id: "github@local",
+        name: "github",
+        displayName: "GitHub",
+        marketplaceName: "local",
+        description: "GitHub development tools",
+        enabled: true,
+        available: true,
+      }],
+      loadErrorCount: 0,
+    }));
     const resolvePlugin = vi.fn(async () => ({
       id: "github@local",
       name: "github",
@@ -1411,6 +1440,73 @@ describe("ConversationService model selection", () => {
       "turn-1",
       { kind: "plugin", name: "GitHub" },
     );
+  });
+
+  it("rechecks the Plugin provider after waiting for the Conversation lock", async () => {
+    let provider = "openai";
+    let releaseSelection: (() => void) | undefined;
+    const selectionPaused = new Promise<void>((resolve) => {
+      releaseSelection = resolve;
+    });
+    const selectModel = vi.fn(async () => {
+      await selectionPaused;
+      provider = "deepseek";
+      return {} as never;
+    });
+    const startTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
+    const service = new ConversationService(
+      turnPort({ startTurn }),
+      {
+        workspace: () => main,
+        ensure: async () => ({
+          target,
+          workspaceId: "main",
+          threadId: "thread-1",
+          sessionId: "session-1",
+        }),
+      } as unknown as SessionRouter,
+      {
+        activeTurn: () => undefined,
+        markTurnStarted: vi.fn(),
+      } as unknown as ConversationCore,
+      {
+        status: () => ({ modelProvider: provider }),
+        selectModel,
+        turnOverrides: () => ({}),
+        markApplied: vi.fn(),
+      } as unknown as ModelSelectionService,
+      queryPort({
+        listPlugins: async () => ({
+          plugins: [{
+            id: "github@local",
+            name: "github",
+            displayName: "GitHub",
+            marketplaceName: "local",
+            description: null,
+            enabled: true,
+            available: true,
+          }],
+          loadErrorCount: 0,
+        }),
+        resolvePlugin: async () => ({
+          id: "github@local",
+          name: "github",
+          displayName: "GitHub",
+          path: "plugin://github@local",
+        }),
+      }),
+    );
+
+    const switching = service.selectModel(target, "deepseek");
+    await vi.waitFor(() => expect(selectModel).toHaveBeenCalledOnce());
+    const invocation = service.invokePlugin(target, "github", "检查 PR");
+    releaseSelection?.();
+
+    await switching;
+    await expect(invocation).rejects.toMatchObject({
+      code: "plugin.provider.unsupported",
+    });
+    expect(startTurn).not.toHaveBeenCalled();
   });
 
   it("fails closed for a disabled Plugin API or a non-OpenAI provider", async () => {

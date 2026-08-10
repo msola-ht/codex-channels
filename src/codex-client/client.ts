@@ -21,7 +21,7 @@ import type {
   McpResourceReadResult,
   McpServerDetail,
   McpServerSummary,
-  InstalledPlugin,
+  InstalledPluginCatalog,
   InvocablePlugin,
   PluginQueryPort,
   PermissionProfileOption,
@@ -544,7 +544,7 @@ export class CodexAppServerClient implements
     return toMcpResourceReadResult(server, uri, response);
   }
 
-  async listPlugins(cwd: string): Promise<InstalledPlugin[]> {
+  async listPlugins(cwd: string): Promise<InstalledPluginCatalog> {
     return toInstalledPlugins(await this.readInstalledPlugins(cwd));
   }
 

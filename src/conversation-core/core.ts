@@ -800,6 +800,9 @@ export class ConversationCore {
         return;
       }
       case "mcp.oauth.completed": {
+        if (!event.threadId) {
+          return;
+        }
         const outputEvent = {
           type: "mcp.oauth.completed" as const,
           threadId: event.threadId,
@@ -807,11 +810,7 @@ export class ConversationCore {
           success: event.success,
           error: event.error,
         };
-        if (event.threadId) {
-          this.publishForThread(event.threadId, outputEvent);
-        } else {
-          this.broadcastForProvider(event.modelProvider, outputEvent);
-        }
+        this.publishForThread(event.threadId, outputEvent);
         return;
       }
       case "warning":

@@ -248,11 +248,17 @@ describe("ProviderRoutingClient", () => {
   it("keeps experimental Plugin discovery on the primary OpenAI App Server", async () => {
     const openai = client();
     const deepseek = client();
-    openai.listPlugins.mockResolvedValue([{ id: "github@local" }]);
+    openai.listPlugins.mockResolvedValue({
+      plugins: [{ id: "github@local" }],
+      loadErrorCount: 0,
+    });
     openai.resolvePlugin.mockResolvedValue({ id: "github@local" });
     const routed = routing(openai, deepseek);
 
-    await expect(routed.listPlugins(cwd)).resolves.toEqual([{ id: "github@local" }]);
+    await expect(routed.listPlugins(cwd)).resolves.toEqual({
+      plugins: [{ id: "github@local" }],
+      loadErrorCount: 0,
+    });
     await expect(routed.resolvePlugin(cwd, "github@local"))
       .resolves.toEqual({ id: "github@local" });
     expect(openai.listPlugins).toHaveBeenCalledWith(cwd);

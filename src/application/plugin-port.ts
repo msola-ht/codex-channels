@@ -8,6 +8,11 @@ export interface InstalledPlugin {
   available: boolean;
 }
 
+export interface InstalledPluginCatalog {
+  plugins: InstalledPlugin[];
+  loadErrorCount: number;
+}
+
 export interface InvocablePlugin {
   id: string;
   name: string;
@@ -16,6 +21,6 @@ export interface InvocablePlugin {
 }
 
 export interface PluginQueryPort {
-  listPlugins(cwd: string): Promise<InstalledPlugin[]>;
+  listPlugins(cwd: string): Promise<InstalledPluginCatalog>;
   resolvePlugin(cwd: string, id: string): Promise<InvocablePlugin | undefined>;
 }

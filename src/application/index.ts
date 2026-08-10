@@ -97,6 +97,7 @@ export {
 } from "./mcp-port.js";
 export {
   type InstalledPlugin,
+  type InstalledPluginCatalog,
   type InvocablePlugin,
   type PluginQueryPort,
 } from "./plugin-port.js";

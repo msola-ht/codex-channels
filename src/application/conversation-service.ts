@@ -27,7 +27,11 @@ import type {
   McpServerSummary,
 } from "./mcp-port.js";
 import { supportsMcpOAuthLogin } from "./mcp-port.js";
-import type { InstalledPlugin, PluginQueryPort } from "./plugin-port.js";
+import type {
+  InstalledPlugin,
+  InstalledPluginCatalog,
+  PluginQueryPort,
+} from "./plugin-port.js";
 import type {
   PermissionProfileOption,
   PermissionQueryPort,
@@ -236,7 +240,7 @@ export interface ConversationUseCases {
     selector: string,
     uri: string,
   ): Promise<McpResourceReadResult>;
-  listPlugins(target: ConversationTarget): Promise<InstalledPlugin[]>;
+  listPlugins(target: ConversationTarget): Promise<InstalledPluginCatalog>;
   accountUsage(): Promise<AccountUsage>;
   accountRateLimits(): Promise<AccountRateLimits>;
   providerAccountUsage(target: ConversationTarget): Promise<ProviderAccountUsage>;
@@ -371,13 +375,13 @@ export class ConversationService implements ConversationUseCases {
         "需要提供 Plugin 名称或序号及任务内容",
       );
     }
-    if ((this.models.status(target).modelProvider ?? "openai") !== "openai") {
-      throw new UserFacingError(
-        "plugin.provider.unsupported",
-        "开发中的 Plugin 调用当前只支持 OpenAI Thread",
-      );
-    }
     return this.locked(target, async () => {
+      if ((this.models.status(target).modelProvider ?? "openai") !== "openai") {
+        throw new UserFacingError(
+          "plugin.provider.unsupported",
+          "开发中的 Plugin 调用当前只支持 OpenAI Thread",
+        );
+      }
       const workspace = this.router.workspace(target);
       const plugin = await this.resolvePlugin(
         workspace.cwd,
@@ -1100,6 +1104,12 @@ export class ConversationService implements ConversationUseCases {
         "该 MCP Server 不支持 OAuth 登录",
       );
     }
+    if (!threadId) {
+      throw new UserFacingError(
+        "mcp.thread.required",
+        "请先发送消息创建 Thread，或使用 /resume 恢复 Thread 后再登录 MCP Server",
+      );
+    }
     return {
       type: "oauth",
       ...await this.queries.startMcpOAuthLogin(server.name, threadId),
@@ -1131,7 +1141,7 @@ export class ConversationService implements ConversationUseCases {
     );
   }
 
-  listPlugins(target: ConversationTarget): Promise<InstalledPlugin[]> {
+  listPlugins(target: ConversationTarget): Promise<InstalledPluginCatalog> {
     this.requirePluginApiEnabled();
     return this.queries.listPlugins(this.router.workspace(target).cwd);
   }
@@ -1140,7 +1150,7 @@ export class ConversationService implements ConversationUseCases {
     cwd: string,
     selector: string,
   ): Promise<InstalledPlugin> {
-    const plugins = await this.queries.listPlugins(cwd);
+    const { plugins } = await this.queries.listPlugins(cwd);
     if (/^[1-9]\d*$/u.test(selector)) {
       const index = Number(selector);
       const plugin = Number.isSafeInteger(index) ? plugins[index - 1] : undefined;

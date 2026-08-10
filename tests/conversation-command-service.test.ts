@@ -308,7 +308,10 @@ describe("ConversationCommandService", () => {
     const selectFastMode = vi.fn(async () => state);
     const listSkills = vi.fn(async () => ["skill"]);
     const listMcpServers = vi.fn(async () => ["mcp"]);
-    const listPlugins = vi.fn(async () => ["plugin"]);
+    const listPlugins = vi.fn(async () => ({
+      plugins: [],
+      loadErrorCount: 0,
+    }));
     const providerAccountUsage = vi.fn(async () => ({ usage: "usage" }));
     const providerAccountLimits = vi.fn(async () => ({ limits: "limits" }));
     const listPermissionProfiles = vi.fn(async () => ["permissions"]);
@@ -350,7 +353,8 @@ describe("ConversationCommandService", () => {
     });
     await expect(commands.execute(target, "plugin")).resolves.toEqual({
       kind: "plugins",
-      plugins: ["plugin"],
+      plugins: [],
+      loadErrorCount: 0,
     });
     await expect(commands.execute(target, "usage")).resolves.toEqual({
       kind: "usage",
@@ -534,7 +538,10 @@ describe("ConversationCommandService", () => {
   });
 
   it("lists and invokes Plugins through the shared command boundary", async () => {
-    const listPlugins = vi.fn(async () => [{ id: "github@local" }]);
+    const listPlugins = vi.fn(async () => ({
+      plugins: [{ id: "github@local" }],
+      loadErrorCount: 0,
+    }));
     const invokePlugin = vi.fn(async () => ({
       threadId: "thread-1",
       turnId: "turn-plugin",
@@ -549,6 +556,7 @@ describe("ConversationCommandService", () => {
     await expect(commands.execute(target, "plugin")).resolves.toEqual({
       kind: "plugins",
       plugins: [{ id: "github@local" }],
+      loadErrorCount: 0,
     });
     await expect(commands.execute(target, "plugin", "github@local 检查 PR"))
       .resolves.toEqual({
@@ -651,7 +659,7 @@ describe("ConversationCommandService", () => {
       })),
       listAgentRoles: vi.fn(() => []),
       listMcpServers: vi.fn(async () => []),
-      listPlugins: vi.fn(async () => []),
+      listPlugins: vi.fn(async () => ({ plugins: [], loadErrorCount: 0 })),
       invokePlugin: vi.fn(async () => ({
         threadId: "thread-1",
         turnId: "turn-plugin",

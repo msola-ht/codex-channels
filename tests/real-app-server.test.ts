@@ -91,7 +91,12 @@ suite("real Codex App Server over Unix WebSocket", () => {
       await new Promise((resolveExit) => processHandle.once("exit", resolveExit));
     }
     if (testRuntime) {
-      rmSync(testRuntime, { recursive: true, force: true });
+      rmSync(testRuntime, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
     }
   });
 
@@ -131,10 +136,11 @@ suite("real Codex App Server over Unix WebSocket", () => {
   });
 
   it("lists installed Plugins without loading remote catalog entries", async () => {
-    const plugins = await client.listPlugins(workdir);
+    const catalog = await client.listPlugins(workdir);
 
-    expect(Array.isArray(plugins)).toBe(true);
-    expect(plugins.every((plugin) =>
+    expect(Array.isArray(catalog.plugins)).toBe(true);
+    expect(catalog.loadErrorCount).toBe(0);
+    expect(catalog.plugins.every((plugin) =>
       typeof plugin.id === "string"
       && typeof plugin.name === "string"
       && typeof plugin.enabled === "boolean"
@@ -606,7 +612,12 @@ contractSuite("isolated Codex App Server state contract", () => {
       await new Promise<void>((resolveClose) => oauthServer.close(() => resolveClose()));
     }
     if (testRuntime) {
-      rmSync(testRuntime, { recursive: true, force: true });
+      rmSync(testRuntime, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
     }
   });
 
@@ -739,10 +750,11 @@ contractSuite("isolated Codex App Server state contract", () => {
   }, 15_000);
 
   it("maps the isolated App Server Plugin list to stable installed entries", async () => {
-    const plugins = await ownerClient.listPlugins(workdir);
+    const catalog = await ownerClient.listPlugins(workdir);
 
-    expect(Array.isArray(plugins)).toBe(true);
-    expect(plugins.every((plugin) =>
+    expect(Array.isArray(catalog.plugins)).toBe(true);
+    expect(catalog.loadErrorCount).toBe(0);
+    expect(catalog.plugins.every((plugin) =>
       typeof plugin.id === "string"
       && typeof plugin.name === "string"
       && typeof plugin.enabled === "boolean"

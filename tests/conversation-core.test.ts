@@ -959,14 +959,6 @@ describe("ConversationCore", () => {
         status: "failed",
       }),
       {
-        type: "mcp.oauth.completed",
-        target: deepseekTarget,
-        threadId: null,
-        name: "codex_apps",
-        success: false,
-        error: "OAuth denied",
-      },
-      {
         type: "warning",
         target: deepseekTarget,
         message: "DeepSeek 配置警告",

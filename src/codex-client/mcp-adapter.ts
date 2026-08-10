@@ -9,6 +9,7 @@ import type {
   McpResourceReadResponse,
   McpServerOauthLoginResponse,
 } from "../codex-protocol/index.js";
+import { redactCredentialText } from "./operation-adapter.js";
 
 export interface McpServerSummaryPage {
   servers: McpServerSummary[];
@@ -147,14 +148,15 @@ export function toMcpResourceReadResult(
         throw new Error("Codex 响应缺少有效 MCP resource text");
       }
       if (remainingTextCharacters === 0) continue;
-      const text = content.text.slice(0, remainingTextCharacters);
+      const sanitizedText = redactCredentialText(content.text);
+      const text = sanitizedText.slice(0, remainingTextCharacters);
       remainingTextCharacters -= text.length;
       contents.push({
         kind: "text",
         uri,
         mimeType,
         text,
-        truncated: text.length < content.text.length,
+        truncated: text.length < sanitizedText.length,
       });
       continue;
     }

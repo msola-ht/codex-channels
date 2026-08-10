@@ -165,7 +165,7 @@ describe("Feishu output renderer", () => {
       },
       { kind: "skills", entries: [] },
       { kind: "mcp", servers: [] },
-      { kind: "plugins", plugins: [] },
+      { kind: "plugins", plugins: [], loadErrorCount: 0 },
       {
         kind: "usage",
         result: {
@@ -547,6 +547,7 @@ describe("Feishu output renderer", () => {
         enabled: true,
         available: true,
       }],
+      loadErrorCount: 0,
     })).toContain("1. GitHub · github@local · 已启用");
     expect(renderFeishuCommandResult({
       kind: "permissions",

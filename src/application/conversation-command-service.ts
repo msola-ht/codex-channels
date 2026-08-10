@@ -100,7 +100,11 @@ export type ConversationCommandResult =
     }
   | { kind: "mcp-login"; login: Awaited<ReturnType<ConversationUseCases["loginMcpServer"]>> }
   | { kind: "mcp-resource"; resource: Awaited<ReturnType<ConversationUseCases["readMcpResource"]>> }
-  | { kind: "plugins"; plugins: Awaited<ReturnType<ConversationUseCases["listPlugins"]>> }
+  | {
+      kind: "plugins";
+      plugins: Awaited<ReturnType<ConversationUseCases["listPlugins"]>>["plugins"];
+      loadErrorCount: number;
+    }
   | { kind: "usage"; result: Awaited<ReturnType<ConversationUseCases["providerAccountUsage"]>> }
   | { kind: "metrics"; summary: ReturnType<ConversationUseCases["requestMetrics"]> }
   | { kind: "limits"; result: Awaited<ReturnType<ConversationUseCases["providerAccountLimits"]>> }
@@ -464,9 +468,11 @@ export class ConversationCommandService {
       }
       case "plugin": {
         if (!argumentsText) {
+          const catalog = await this.conversations.listPlugins(target);
           return {
             kind: "plugins",
-            plugins: await this.conversations.listPlugins(target),
+            plugins: catalog.plugins,
+            loadErrorCount: catalog.loadErrorCount,
           };
         }
         const invocation = parsePluginInvocation(argumentsText);

@@ -1,5 +1,6 @@
 import type {
   InstalledPlugin,
+  InstalledPluginCatalog,
   InvocablePlugin,
 } from "../application/index.js";
 import type { PluginInstalledResponse } from "../codex-protocol/index.js";
@@ -11,8 +12,14 @@ interface ParsedPlugin {
 
 export function toInstalledPlugins(
   response: PluginInstalledResponse,
-): InstalledPlugin[] {
-  return parseInstalledPlugins(response).map((plugin) => plugin.summary);
+): InstalledPluginCatalog {
+  if (!Array.isArray(response.marketplaceLoadErrors)) {
+    throw new Error("Codex 响应缺少有效 plugin marketplace load errors");
+  }
+  return {
+    plugins: parseInstalledPlugins(response).map((plugin) => plugin.summary),
+    loadErrorCount: response.marketplaceLoadErrors.length,
+  };
 }
 
 export function resolveInvocablePlugin(

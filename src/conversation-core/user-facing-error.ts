@@ -66,6 +66,7 @@ export type UserFacingErrorCode =
   | "mcp.server.usage"
   | "mcp.server.not-found"
   | "mcp.oauth.unsupported"
+  | "mcp.thread.required"
   | "mcp.resource.usage"
   | "plugin.usage"
   | "plugin.not-found"

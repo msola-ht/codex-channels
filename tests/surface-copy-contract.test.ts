@@ -483,6 +483,7 @@ describe("shared surface copy contract", () => {
           enabled: true,
           available: true,
         }],
+        loadErrorCount: 0,
       },
       {
         kind: "permissions",

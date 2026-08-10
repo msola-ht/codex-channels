@@ -755,11 +755,16 @@ function escapeCodeFence(value: string): string {
 export function formatConversationPlugins(
   result: Extract<ConversationCommandResult, { kind: "plugins" }>,
 ): string {
-  return result.plugins.length === 0
+  const { plugins, loadErrorCount } = result;
+  const loadErrorNotice = loadErrorCount > 0
+    ? [`注意：${loadErrorCount} 个 Plugin Marketplace 加载失败，列表可能不完整。`, ""]
+    : [];
+  return plugins.length === 0 && loadErrorCount === 0
     ? "当前没有已安装的 Plugin。"
     : toStructuredMarkdownList([
-        `已安装 Plugin（开发中，${result.plugins.length}）：`,
-        ...result.plugins.map((plugin, index) => {
+        `已安装 Plugin（开发中，${plugins.length}）：`,
+        ...loadErrorNotice,
+        ...plugins.map((plugin, index) => {
           const status = !plugin.available
             ? "管理员禁用"
             : plugin.enabled

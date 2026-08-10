@@ -210,6 +210,7 @@ describe("Telegram command renderer", () => {
         enabled: true,
         available: true,
       }],
+      loadErrorCount: 0,
     });
     await renderTelegramCommandResult(context, {
       kind: "mcp-resource",

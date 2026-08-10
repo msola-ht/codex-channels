@@ -48,7 +48,7 @@
   Turn 使用的精确 Skill 路径解析；路径不向 Surface 暴露，也不传播 Scope、依赖或上游扫描错误。
 - `mcp-port.ts`：定义 MCP Server 概览、工具/资源/模板详情、共享 OAuth 能力判断、登录结果和有界
   只读资源内容；不向 Surface 暴露工具 Schema、二进制正文或完整官方响应。
-- `plugin-port.ts`：定义开发中 Plugin 的已安装摘要与只供 Turn 调用的官方 mention 引用；
+- `plugin-port.ts`：定义开发中 Plugin 的已安装摘要、Marketplace 加载失败计数与只供 Turn 调用的官方 mention 引用；
   不提供搜索、市场、安装、卸载或分享能力。
 - `permission-port.ts`：定义 Permission Profile 的稳定 ID、说明和策略可选状态查询；只表示
   当前 Workspace 可见目录，不授予权限，也不承载审批决定。
@@ -73,11 +73,12 @@ Turn 队列。
 扩展查询也保持平台无关：Skill 只向 Surface 返回当前用户或 Workspace 直接安装且已启用项的
 名称与说明；显式调用时由 Client 再按精确名称解析绝对路径，排除系统和插件缓存内容。MCP 按当前
 Thread 返回稳定概览与详情；命令结果携带工具、资源或模板的有界分页搜索视图，OAuth 登录不自动
-重试且只对共享能力判断允许的认证状态开放；详情结果保留用户本次使用的原始选择器，供 Surface
+重试、要求当前会话已经绑定 Thread，且只对共享能力判断允许的认证状态开放；详情结果保留用户本次使用的原始选择器，供 Surface
 生成可继续执行的登录、浏览和资源读取命令；Bearer Token 返回结构化认证结果并明确提示无需 OAuth，
-资源读取只展示有界文本或二进制元数据。
+资源读取只展示已经隐藏常见凭据的有界文本或二进制元数据。
 Plugin API 仍被官方标记为开发中，只在 `plugin_api` 开关开启时列出当前 Workspace 已安装项，
-并仅在 OpenAI Thread 中发送官方 mention；三个 Surface 共用同一 Application 边界。
+同时保留 Marketplace 加载失败计数，并仅在互斥区内确认仍为 OpenAI Thread 后发送官方 mention；
+三个 Surface 共用同一 Application 边界。
 成功启动 Turn 后，模型、思考等级、服务层级和协作模式以 App Server 的 Thread 设置为准；
 Gateway 重启时通过恢复 Thread 和设置通知重新取得这些设置。`/plan` 无参数切换
 Default/Plan，带参数时在空闲边界内直接启动 Plan Turn；活动 Turn 不允许中途切换。
