@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type {
-  ConversationCommandResult,
-  ConversationStatus,
+import {
+  mcpCommandUsageText,
+  type ConversationCommandResult,
+  type ConversationStatus,
 } from "../src/application/index.js";
 import { UserFacingError } from "../src/conversation-core/index.js";
 import {
@@ -113,9 +114,8 @@ describe("shared surface copy contract", () => {
 
   it("reports the complete MCP command usage consistently on every surface", () => {
     const error = new UserFacingError("mcp.usage", "invalid MCP command");
-    const expected = "用法：/mcp [名称或序号 [tools|resources|templates [页码] [search <关键词>]] | login <名称或序号> | resource <名称或序号> <URI>]";
     for (const surface of ["Telegram", "飞书", "微信"] as const) {
-      expect(formatSurfaceUserFacingError(error, surface)).toBe(expected);
+      expect(formatSurfaceUserFacingError(error, surface)).toBe(mcpCommandUsageText);
     }
   });
 
@@ -415,6 +415,18 @@ describe("shared surface copy contract", () => {
         kind: "mcp",
         servers: [{ name: "docs", authStatus: "oAuth", toolCount: 2 }],
       },
+      {
+        kind: "mcp-health",
+        report: {
+          serverCount: 1,
+          toolCount: 2,
+          resourceCount: 0,
+          resourceTemplateCount: 0,
+          actions: [],
+          notices: [],
+        },
+      },
+      { kind: "mcp-reload" },
       {
         kind: "mcp-detail",
         server: {

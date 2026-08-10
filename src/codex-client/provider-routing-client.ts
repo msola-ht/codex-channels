@@ -36,6 +36,7 @@ type ProviderClientMethod =
   | "resolveSkill"
   | "listMcpServers"
   | "listMcpServerDetails"
+  | "reloadMcpServers"
   | "startMcpOAuthLogin"
   | "readMcpResource"
   | "listPlugins"
@@ -319,6 +320,18 @@ export class ProviderRoutingClient {
     return threadId
       ? this.callForThread(threadId, (client) => client.listMcpServerDetails(...args))
       : this.primaryClient().listMcpServerDetails(...args);
+  }
+
+  async reloadMcpServers(): Promise<void> {
+    const results = await Promise.allSettled(
+      [...this.clients.values()].map((client) => client.reloadMcpServers()),
+    );
+    const failure = results.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (failure) {
+      throw failure.reason;
+    }
   }
 
   startMcpOAuthLogin(

@@ -20,6 +20,7 @@ import type {
 import type { InstalledSkill, SkillQueryPort } from "./skill-port.js";
 import type {
   McpLoginResult,
+  McpHealthReport,
   McpQueryPort,
   McpResourceReadResult,
   McpServerDetail,
@@ -227,6 +228,8 @@ export interface ConversationUseCases {
   listSkills(target: ConversationTarget): Promise<InstalledSkill[]>;
   listMcpServers(target: ConversationTarget): Promise<McpServerSummary[]>;
   mcpServerDetail(target: ConversationTarget, selector: string): Promise<McpServerDetail>;
+  mcpHealth(target: ConversationTarget): Promise<McpHealthReport>;
+  reloadMcpServers(target: ConversationTarget): Promise<void>;
   loginMcpServer(target: ConversationTarget, selector: string): Promise<McpLoginResult>;
   readMcpResource(
     target: ConversationTarget,
@@ -1011,6 +1014,58 @@ export class ConversationService implements ConversationUseCases {
 
   listMcpServers(target: ConversationTarget): Promise<McpServerSummary[]> {
     return this.queries.listMcpServers(this.router.current(target)?.threadId);
+  }
+
+  async mcpHealth(target: ConversationTarget): Promise<McpHealthReport> {
+    const servers = await this.queries.listMcpServerDetails(
+      this.router.current(target)?.threadId,
+    );
+    return {
+      serverCount: servers.length,
+      toolCount: servers.reduce((total, server) => total + server.tools.length, 0),
+      resourceCount: servers.reduce(
+        (total, server) => total + server.resources.length,
+        0,
+      ),
+      resourceTemplateCount: servers.reduce(
+        (total, server) => total + server.resourceTemplates.length,
+        0,
+      ),
+      actions: servers.flatMap((server, index) =>
+        server.authStatus === "notLoggedIn"
+          ? [{
+              type: "loginRequired" as const,
+              server: server.name,
+              selector: String(index + 1),
+            }]
+          : []
+      ),
+      notices: servers.flatMap((server, index) => [
+        ...(server.authStatus === "unknown"
+          ? [{
+              type: "authUnknown" as const,
+              server: server.name,
+              selector: String(index + 1),
+            }]
+          : []),
+        ...(server.authStatus !== "notLoggedIn"
+          && server.authStatus !== "unknown"
+          && server.tools.length === 0
+          && server.resources.length === 0
+          && server.resourceTemplates.length === 0
+          ? [{
+              type: "noCapabilities" as const,
+              server: server.name,
+              selector: String(index + 1),
+            }]
+          : []),
+      ]),
+    };
+  }
+
+  reloadMcpServers(target: ConversationTarget): Promise<void> {
+    void target;
+    return this.queries.reloadMcpServers();
   }
 
   async mcpServerDetail(

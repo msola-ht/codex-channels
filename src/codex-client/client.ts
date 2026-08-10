@@ -514,6 +514,13 @@ export class CodexAppServerClient implements
     return servers;
   }
 
+  async reloadMcpServers(): Promise<void> {
+    await this.rpc.request<Record<string, never>>({
+      method: "config/mcpServer/reload",
+      params: undefined,
+    }, { retryOverload: false });
+  }
+
   async startMcpOAuthLogin(
     name: string,
     threadId?: string,

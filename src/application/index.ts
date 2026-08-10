@@ -83,6 +83,7 @@ export {
 export {
   supportsMcpOAuthLogin,
   type McpAuthStatus,
+  type McpHealthReport,
   type McpOAuthLogin,
   type McpLoginResult,
   type McpQueryPort,

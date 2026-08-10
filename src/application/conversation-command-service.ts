@@ -47,7 +47,7 @@ export const conversationCommandNames = [
 
 export type ConversationCommandName = typeof conversationCommandNames[number];
 const conversationCommandNameSet = new Set<string>(conversationCommandNames);
-export const mcpCommandUsageText = "用法：/mcp [名称或序号 [tools|resources|templates [页码] [search <关键词>]] | login <名称或序号> | resource <名称或序号> <URI>]";
+export const mcpCommandUsageText = "用法：/mcp [health | reload | 名称或序号 [tools|resources|templates [页码] [search <关键词>]] | login <名称或序号> | resource <名称或序号> <URI>]";
 
 export interface McpDetailView {
   section: "tools" | "resources" | "templates";
@@ -91,6 +91,8 @@ export type ConversationCommandResult =
     }
   | { kind: "skills"; entries: Awaited<ReturnType<ConversationUseCases["listSkills"]>> }
   | { kind: "mcp"; servers: Awaited<ReturnType<ConversationUseCases["listMcpServers"]>> }
+  | { kind: "mcp-health"; report: Awaited<ReturnType<ConversationUseCases["mcpHealth"]>> }
+  | { kind: "mcp-reload" }
   | {
       kind: "mcp-detail";
       server: Awaited<ReturnType<ConversationUseCases["mcpServerDetail"]>>;
@@ -427,6 +429,16 @@ export class ConversationCommandService {
           };
         }
         const operation = parseMcpOperation(argumentsText);
+        if (operation.type === "health") {
+          return {
+            kind: "mcp-health",
+            report: await this.conversations.mcpHealth(target),
+          };
+        }
+        if (operation.type === "reload") {
+          await this.conversations.reloadMcpServers(target);
+          return { kind: "mcp-reload" };
+        }
         if (operation.type === "detail") {
           return {
             kind: "mcp-detail",
@@ -638,17 +650,30 @@ function parsePluginInvocation(input: string): {
 }
 
 function parseMcpOperation(input: string):
+  | { type: "health" }
+  | { type: "reload" }
   | { type: "detail"; selector: string; view?: McpDetailView }
   | { type: "login"; selector: string }
   | { type: "resource"; selector: string; uri: string } {
   const parts = input.trim().split(/\s+/u);
+  if (parts[0] === "health" && parts.length === 1) {
+    return { type: "health" };
+  }
+  if (parts[0] === "reload" && parts.length === 1) {
+    return { type: "reload" };
+  }
   if (parts[0] === "login" && parts.length === 2) {
     return { type: "login", selector: parts[1]! };
   }
   if (parts[0] === "resource" && parts.length === 3) {
     return { type: "resource", selector: parts[1]!, uri: parts[2]! };
   }
-  if (parts[0] === "login" || parts[0] === "resource") {
+  if (
+    parts[0] === "health"
+    || parts[0] === "reload"
+    || parts[0] === "login"
+    || parts[0] === "resource"
+  ) {
     throw new UserFacingError(
       "mcp.usage",
       mcpCommandUsageText,

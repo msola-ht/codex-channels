@@ -98,8 +98,9 @@ Application 不读取数据库。OpenAI `/limits` 还通过该端口按周窗口
 不能替代 App Server 提供的 Thread 上下文、账户额度或累计 Token 状态。
 Skill 查询与显式调用只依赖 `SkillQueryPort`；用户和项目直接安装项的筛选、调用名称与绝对路径
 校验由 Client 适配器在协议边界完成。
-MCP 查询只依赖 `McpQueryPort`；官方状态分页、Thread 配置上下文、OAuth URL 校验、资源限长与
-响应裁剪由 Client 适配器处理，渠道查询分页与搜索由共享命令结果表达。Plugin 调试只依赖
+MCP 查询与配置刷新只依赖 `McpQueryPort`；Application 从官方详情归约只含需处理项与提示的健康
+摘要，并把刷新交给 Client，不把状态读取冒充远端网络探测。官方状态分页、Thread 配置上下文、OAuth
+URL 校验、资源限长与响应裁剪由 Client 适配器处理，渠道查询分页与搜索由共享命令结果表达。Plugin 调试只依赖
 `PluginQueryPort`，开关和 Provider 限制由 Application 执行。
 Permission Profile 查询只依赖 `PermissionQueryPort`；CWD、分页和官方响应裁剪由 Client 处理。
 命令成功文案、命令菜单说明和平台交互形式由各 Surface 维护，并通过类型穷尽检查保持完整。

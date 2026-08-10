@@ -393,6 +393,10 @@ class FakeTransport extends BaseTransport {
       queueMicrotask(() =>
         this.emitMessage(JSON.stringify({ id: decoded.id, result: this.mcpResourceResult })),
       );
+    } else if (decoded.method === "config/mcpServer/reload") {
+      queueMicrotask(() =>
+        this.emitMessage(JSON.stringify({ id: decoded.id, result: {} })),
+      );
     } else if (decoded.method === "permissionProfile/list") {
       const page = this.permissionPages[
         Math.min(this.permissionPageIndex, this.permissionPages.length - 1)
@@ -1342,6 +1346,12 @@ describe("JsonRpcClient", () => {
       encodedCharacters: 8,
     });
     expect(resource.omittedContentCount).toBe(0);
+    await expect(client.reloadMcpServers()).resolves.toBeUndefined();
+    const reloadRequest = transport.sent.find(
+      (message) => message.method === "config/mcpServer/reload",
+    );
+    expect(reloadRequest).toBeDefined();
+    expect(reloadRequest).not.toHaveProperty("params");
     expect(transport.sent.find((message) => message.method === "mcpServerStatus/list")?.params)
       .toEqual({ limit: 100, detail: "full", threadId: "thread-1" });
     expect(transport.sent.find((message) => message.method === "mcpServer/oauth/login")?.params)

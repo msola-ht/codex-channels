@@ -159,6 +159,12 @@ plugin_api = false
 - 不开放 Plugin 搜索、市场、安装、卸载或分享；`codexc doctor` 会显示该开发中开关的状态。
 - `/mcp`：列出当前 Thread 的 MCP Server；`/mcp <名称或序号>` 查看工具、资源与模板详情；
   上游多行长描述会先归一化并有界展示。
+- `/mcp health`：汇总当前 Thread 所属 App Server 的 MCP Server、工具、资源与资源模板数量，只列出
+  需要登录的 Server 和认证未知、未公开能力等提示；状态读取失败时明确报错，不把查询成功等同于
+  对每个远端 MCP Server 做网络探测。处理命令使用当前列表序号，兼容含空格的 Server 名称；需处理项
+  和提示合计最多展示 8 项，超出时显示省略数量并引导使用 `/mcp` 查看完整列表。
+- `/mcp reload`：让全部受管 Codex App Server 从磁盘重新加载 MCP 配置；已加载 Thread 会在下一次
+  活动 Turn 时刷新，无需重启 App Server。任一 Provider 实例刷新失败时整次命令报错。
 - `/mcp <名称或序号> <tools|resources|templates> [页码] [search <关键词>]`：分页或搜索工具、资源与
   资源模板，每页最多展示 8 项。
 - `/mcp login <名称或序号>`：仅对支持 OAuth 的 Server 启动登录并返回授权地址；浏览器流程完成后，

@@ -8,7 +8,9 @@ import {
   formatConversationMetrics,
   formatConversationMcp,
   formatConversationMcpDetail,
+  formatConversationMcpHealth,
   formatConversationMcpLogin,
+  formatConversationMcpReload,
   formatConversationMcpResource,
   formatConversationModels,
   formatConversationPlugins,
@@ -120,6 +122,37 @@ describe("provider-aware conversation command formatting", () => {
       kind: "mcp",
       servers: [{ name: "project-tools", authStatus: "notLoggedIn", toolCount: 1 }],
     })).toContain("1. project-tools");
+
+    expect(formatConversationMcpHealth({
+      kind: "mcp-health",
+      report: {
+        serverCount: 3,
+        toolCount: 1,
+        resourceCount: 0,
+        resourceTemplateCount: 0,
+        actions: [{ type: "loginRequired", server: "oauth tools", selector: "1" }],
+        notices: [
+          { type: "authUnknown", server: "unknown auth", selector: "2" },
+          { type: "noCapabilities", server: "empty", selector: "3" },
+        ],
+      },
+    })).toBe([
+      "## MCP 健康检查",
+      "- 状态：发现 1 项需要处理",
+      "- Server：3 个 · 工具：1 个 · 资源：0 个 · 资源模板：0 个",
+      "### 需要处理",
+      "- oauth tools：尚未登录",
+      "  - 处理：/mcp login 1",
+      "### 提示",
+      "- unknown auth：认证状态未知，可检查配置或尝试 /mcp login 2",
+      "- empty：未公开工具、资源或资源模板",
+    ].join("\n"));
+    expect(formatConversationMcpReload({ kind: "mcp-reload" })).toBe([
+      "## MCP 配置重新加载",
+      "- 状态：已请求",
+      "- 生效：已加载 Thread 会在下一次活动 Turn 时刷新",
+      "- 提示：无需重启 Codex App Server",
+    ].join("\n"));
 
     const detail = formatConversationMcpDetail({
       kind: "mcp-detail",
@@ -262,6 +295,28 @@ describe("provider-aware conversation command formatting", () => {
     expect(boundedResource.length).toBeLessThanOrEqual(20_000);
     expect(boundedResource).toContain(longRequestedUri);
     expect(boundedResource).toContain(longContentUri);
+  });
+
+  it("bounds MCP health findings and reports omitted entries", () => {
+    const rendered = formatConversationMcpHealth({
+      kind: "mcp-health",
+      report: {
+        serverCount: 12,
+        toolCount: 0,
+        resourceCount: 0,
+        resourceTemplateCount: 0,
+        actions: Array.from({ length: 12 }, (_, index) => ({
+          type: "loginRequired" as const,
+          server: `server-${index + 1}`,
+          selector: String(index + 1),
+        })),
+        notices: [],
+      },
+    });
+
+    expect(rendered).toContain("处理：/mcp login 8");
+    expect(rendered).not.toContain("server-9");
+    expect(rendered).toContain("其余 4 项已省略");
   });
 
   it("renders a searchable MCP detail page with stable navigation commands", () => {

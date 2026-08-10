@@ -17,7 +17,9 @@ import {
   formatConversationMetrics,
   formatConversationMcp,
   formatConversationMcpDetail,
+  formatConversationMcpHealth,
   formatConversationMcpLogin,
+  formatConversationMcpReload,
   formatConversationMcpResource,
   formatConversationPlugins,
   formatConversationModels,
@@ -97,6 +99,12 @@ export async function renderTelegramCommandResult(
       return;
     case "mcp":
       await replyTelegramPanel(context, formatConversationMcp(result));
+      return;
+    case "mcp-health":
+      await replyTelegramPanel(context, formatConversationMcpHealth(result));
+      return;
+    case "mcp-reload":
+      await replyTelegramPanel(context, formatConversationMcpReload(result));
       return;
     case "mcp-detail":
       await replyTelegramPanel(context, formatConversationMcpDetail(result));

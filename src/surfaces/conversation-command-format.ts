@@ -35,6 +35,7 @@ import {
 const maximumSessionEntries = 20;
 const maximumSessionLabelCharacters = 48;
 const maximumMcpDetailEntries = 8;
+const maximumMcpHealthFindings = 8;
 const maximumMcpDetailSectionCharacters = 5_000;
 const maximumMcpDescriptionCharacters = 240;
 const maximumMcpOutputCharacters = 20_000;
@@ -61,7 +62,7 @@ export const conversationCommandDescriptions = {
   effort: "查看或切换思考等级",
   fast: "查看或切换 Fast 模式",
   skill: "查看或调用 Skill",
-  mcp: "查看 MCP、登录 OAuth 或读取资源",
+  mcp: "检查或管理 MCP、登录 OAuth、浏览或读取资源",
   plugin: "列出或调用 Plugin（开发中）",
   usage: "查看账号用量",
   metrics: "查看会话、聚合或异常请求指标",
@@ -103,6 +104,7 @@ export const conversationCommandHelpSections = [
       "/skill · /skills [名称或序号 任务]",
       "/agents [角色名称或序号 任务]",
       "/mcp [名称或序号]",
+      "/mcp health · /mcp reload",
       "/mcp <名称或序号> <tools|resources|templates> [页码] [search <关键词>]",
       "/mcp login <名称或序号>",
       "/mcp resource <名称或序号> <URI>",
@@ -443,6 +445,62 @@ export function formatConversationMcp(
     ),
     "",
     "详情：/mcp <名称或序号>",
+  ].join("\n"));
+}
+
+export function formatConversationMcpHealth(
+  result: Extract<ConversationCommandResult, { kind: "mcp-health" }>,
+): string {
+  const report = result.report;
+  const visibleActions = report.actions.slice(0, maximumMcpHealthFindings);
+  const visibleNotices = report.notices.slice(
+    0,
+    maximumMcpHealthFindings - visibleActions.length,
+  );
+  const omittedFindings = report.actions.length
+    + report.notices.length
+    - visibleActions.length
+    - visibleNotices.length;
+  return toStructuredMarkdownList([
+    "MCP 健康检查",
+    report.serverCount === 0
+      ? "状态：未配置 MCP Server"
+      : report.actions.length > 0
+      ? `状态：发现 ${report.actions.length} 项需要处理`
+      : "状态：未发现需要处理的问题",
+    `Server：${report.serverCount} 个 · 工具：${report.toolCount} 个 · 资源：${report.resourceCount} 个 · 资源模板：${report.resourceTemplateCount} 个`,
+    ...(visibleActions.length > 0
+      ? [
+          "需要处理：",
+          ...visibleActions.flatMap((action) => [
+            `- ${action.server}：尚未登录`,
+            `  - 处理：/mcp login ${action.selector}`,
+          ]),
+        ]
+      : []),
+    ...(visibleNotices.length > 0 || omittedFindings > 0
+      ? [
+          "提示：",
+          ...visibleNotices.map((notice) => notice.type === "authUnknown"
+            ? `- ${notice.server}：认证状态未知，可检查配置或尝试 /mcp login ${notice.selector}`
+            : `- ${notice.server}：未公开工具、资源或资源模板`),
+          ...(omittedFindings > 0
+            ? [`- 其余 ${omittedFindings} 项已省略；使用 /mcp 查看完整 Server 列表`]
+            : []),
+        ]
+      : []),
+  ].join("\n"));
+}
+
+export function formatConversationMcpReload(
+  result: Extract<ConversationCommandResult, { kind: "mcp-reload" }>,
+): string {
+  void result;
+  return toStructuredMarkdownList([
+    "MCP 配置重新加载",
+    "状态：已请求",
+    "生效：已加载 Thread 会在下一次活动 Turn 时刷新",
+    "提示：无需重启 Codex App Server",
   ].join("\n"));
 }
 

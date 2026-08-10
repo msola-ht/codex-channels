@@ -123,9 +123,11 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 命令结果文案与状态文本；DeepSeek `/usage` 显示余额，未支持的 Provider 明确说明能力缺失。
 `/skill` 返回带序号的已启用项，`/skill <名称或序号> <任务>` 通过 Application
 提交官方结构化 Skill 输入；Surface 不接收或拼装本机 Skill 路径。
-`/mcp`、`/mcp <名称或序号>`、工具/资源/模板分页搜索、`/mcp login ...` 与
+`/mcp`、`/mcp health`、`/mcp reload`、`/mcp <名称或序号>`、工具/资源/模板分页搜索、`/mcp login ...` 与
 `/mcp resource ...` 共用详情、OAuth 能力判断和只读资源格式；OAuth 完成结果由三个渠道共用格式，
-成功静默发送、失败按错误通知发送；资源正文明确标为外部不可信内容。
+成功静默发送、失败按错误通知发送；健康检查只展示需处理项与提示，刷新明确说明在 Thread 下一次
+活动 Turn 生效；健康处理命令使用当前列表数字序号，最多展示 8 项并明确省略数量；资源正文明确标为
+外部不可信内容。
 `/plugin` 无参数列出已安装项，带选择器和任务时调用 Plugin，并统一显示开发中提示；飞书可从
 已启用且可调用项生成一次性任务表单，Surface 不拼装 Plugin mention 路径。
 `user-facing-error-format.ts` 统一三个渠道的结构化用户错误文案，只保留渠道名称差异；

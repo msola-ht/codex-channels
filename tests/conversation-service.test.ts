@@ -53,6 +53,7 @@ function queryPort(overrides: Partial<ConversationQueryPort> = {}): Conversation
     resolveSkill: unsupported,
     listMcpServers: unsupported,
     listMcpServerDetails: unsupported,
+    reloadMcpServers: unsupported,
     startMcpOAuthLogin: unsupported,
     readMcpResource: unsupported,
     listPlugins: unsupported,
@@ -1231,6 +1232,63 @@ describe("ConversationService model selection", () => {
     expect(listMcpServerDetails).toHaveBeenCalledTimes(1);
     expect(listMcpServers).toHaveBeenCalledTimes(2);
     expect(currentCalls).toBe(3);
+  });
+
+  it("summarizes actionable MCP health findings and reloads managed App Servers", async () => {
+    const listMcpServerDetails = vi.fn(async () => [{
+      name: "oauth tools",
+      authStatus: "notLoggedIn" as const,
+      toolCount: 0,
+      serverTitle: null,
+      serverVersion: null,
+      serverDescription: null,
+      tools: [],
+      resources: [],
+      resourceTemplates: [],
+    }, {
+      name: "unknown auth",
+      authStatus: "unknown" as const,
+      toolCount: 1,
+      serverTitle: null,
+      serverVersion: null,
+      serverDescription: null,
+      tools: [{ name: "search", title: null, description: null }],
+      resources: [],
+      resourceTemplates: [],
+    }, {
+      name: "empty",
+      authStatus: "unsupported" as const,
+      toolCount: 0,
+      serverTitle: null,
+      serverVersion: null,
+      serverDescription: null,
+      tools: [],
+      resources: [],
+      resourceTemplates: [],
+    }]);
+    const reloadMcpServers = vi.fn(async () => undefined);
+    const service = new ConversationService(
+      turnPort(),
+      { current: () => ({ threadId: "thread-1" }) } as unknown as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort({ listMcpServerDetails, reloadMcpServers }),
+    );
+
+    await expect(service.mcpHealth(target)).resolves.toEqual({
+      serverCount: 3,
+      toolCount: 1,
+      resourceCount: 0,
+      resourceTemplateCount: 0,
+      actions: [{ type: "loginRequired", server: "oauth tools", selector: "1" }],
+      notices: [
+        { type: "authUnknown", server: "unknown auth", selector: "2" },
+        { type: "noCapabilities", server: "empty", selector: "3" },
+      ],
+    });
+    await expect(service.reloadMcpServers(target)).resolves.toBeUndefined();
+    expect(listMcpServerDetails).toHaveBeenCalledWith("thread-1");
+    expect(reloadMcpServers).toHaveBeenCalledOnce();
   });
 
   it("returns Bearer Token authentication as information and rejects unsupported MCP OAuth or invalid resources", async () => {

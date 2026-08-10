@@ -400,7 +400,7 @@ describe("ConversationCommandService", () => {
     );
   });
 
-  it("routes MCP detail, login, and resource operations through the shared boundary", async () => {
+  it("routes MCP health, reload, detail, login, and resource operations through the shared boundary", async () => {
     const server = { name: "project-tools" };
     const mcpServerDetail = vi.fn(async () => server);
     const loginMcpServer = vi.fn()
@@ -419,11 +419,37 @@ describe("ConversationCommandService", () => {
       contents: [],
       omittedContentCount: 0,
     }));
+    const mcpHealth = vi.fn(async () => ({
+      serverCount: 1,
+      toolCount: 1,
+      resourceCount: 0,
+      resourceTemplateCount: 0,
+      actions: [],
+      notices: [],
+    }));
+    const reloadMcpServers = vi.fn(async () => undefined);
     const commands = new ConversationCommandService({
+      mcpHealth,
+      reloadMcpServers,
       mcpServerDetail,
       loginMcpServer,
       readMcpResource,
     } as unknown as ConversationUseCases);
+
+    await expect(commands.execute(target, "mcp", "health")).resolves.toEqual({
+      kind: "mcp-health",
+      report: {
+        serverCount: 1,
+        toolCount: 1,
+        resourceCount: 0,
+        resourceTemplateCount: 0,
+        actions: [],
+        notices: [],
+      },
+    });
+    await expect(commands.execute(target, "mcp", "reload")).resolves.toEqual({
+      kind: "mcp-reload",
+    });
 
     await expect(commands.execute(target, "mcp", "1")).resolves.toEqual({
       kind: "mcp-detail",
@@ -484,11 +510,17 @@ describe("ConversationCommandService", () => {
     expect(loginMcpServer).toHaveBeenNthCalledWith(2, target, "token-tools");
     expect(readMcpResource)
       .toHaveBeenCalledWith(target, "project-tools", "project://readme");
+    expect(mcpHealth).toHaveBeenCalledWith(target);
+    expect(reloadMcpServers).toHaveBeenCalledWith(target);
     await expect(commands.execute(target, "mcp", "login"))
       .rejects.toMatchObject({ code: "mcp.usage" });
     await expect(commands.execute(target, "mcp", "1 tools 0"))
       .rejects.toMatchObject({ code: "mcp.usage" });
     await expect(commands.execute(target, "mcp", "1 unknown"))
+      .rejects.toMatchObject({ code: "mcp.usage" });
+    await expect(commands.execute(target, "mcp", "health extra"))
+      .rejects.toMatchObject({ code: "mcp.usage" });
+    await expect(commands.execute(target, "mcp", "reload extra"))
       .rejects.toMatchObject({ code: "mcp.usage" });
   });
 

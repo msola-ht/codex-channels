@@ -290,6 +290,30 @@ describe("ProviderRoutingClient", () => {
       .toHaveBeenCalledWith("tools", "project://readme", "thread-ds");
     expect(openai.listMcpServerDetails).not.toHaveBeenCalled();
   });
+
+  it("reloads MCP configuration on every managed App Server", async () => {
+    const openai = client();
+    const deepseek = client();
+    openai.reloadMcpServers.mockResolvedValue(undefined);
+    deepseek.reloadMcpServers.mockResolvedValue(undefined);
+    const routed = routing(openai, deepseek);
+
+    await expect(routed.reloadMcpServers()).resolves.toBeUndefined();
+    expect(openai.reloadMcpServers).toHaveBeenCalledOnce();
+    expect(deepseek.reloadMcpServers).toHaveBeenCalledOnce();
+  });
+
+  it("attempts every managed App Server and reports MCP reload failures", async () => {
+    const openai = client();
+    const deepseek = client();
+    openai.reloadMcpServers.mockRejectedValue(new Error("reload failed"));
+    deepseek.reloadMcpServers.mockResolvedValue(undefined);
+    const routed = routing(openai, deepseek);
+
+    await expect(routed.reloadMcpServers()).rejects.toThrow("reload failed");
+    expect(openai.reloadMcpServers).toHaveBeenCalledOnce();
+    expect(deepseek.reloadMcpServers).toHaveBeenCalledOnce();
+  });
 });
 
 function routing(openai: MockClient, deepseek: MockClient): ProviderRoutingClient {
@@ -380,6 +404,7 @@ function client() {
     listMcpServerDetails: vi.fn(),
     startMcpOAuthLogin: vi.fn(),
     readMcpResource: vi.fn(),
+    reloadMcpServers: vi.fn(),
     listPlugins: vi.fn(),
     resolvePlugin: vi.fn(),
     accountUsage: vi.fn(),

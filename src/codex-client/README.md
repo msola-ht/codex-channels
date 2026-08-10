@@ -51,7 +51,8 @@
   校验并向 Surface 注入纯字符串。
 - `client.ts`：Thread 搜索/归档/固定、Turn、模型、权限、Skill、用量及用户级配置
   读取与服务层级写入等 App Server 方法的类型化封装；MCP 概览按 Thread 使用
-  `toolsAndAuthOnly` 分页，详情使用 `full`，OAuth 不自动重试，并消费官方登录完成通知，资源读取保持只读；Permission
+  `toolsAndAuthOnly` 分页，详情使用 `full`；`config/mcpServer/reload` 不自动重试，OAuth 不自动重试并消费
+  官方登录完成通知，资源读取保持只读；Permission
   Profile 按 CWD 分页。开发中 Plugin 只调用 `plugin/installed` 并经 Application 开关约束，
   不接入搜索、安装或分享。Thread 列表显式传空
   `modelProviders` 获取当前 Workspace 的全部 Provider，
@@ -61,7 +62,7 @@
   只用于用户显式创建同一 Provider 的历史分支，不承担跨 Provider 历史转换。
 - `provider-routing-client.ts`：复用多个完整 Client 实例，按 Thread 的官方 `modelProvider` 路由
   生命周期、Turn、Review、Goal 和 MCP；合并各实例的进程内状态，隔离 Server Request ID，
-  并让单 Provider 重连只恢复该侧 Thread。第三方 Provider 的账户通知不会进入 OpenAI 账户状态；
+  MCP 配置刷新会尝试全部受管实例并传播任一失败，单 Provider 重连只恢复该侧 Thread。第三方 Provider 的账户通知不会进入 OpenAI 账户状态；
   无法关联 Thread 的 MCP 与 warning 全局通知携带 Provider 来源，只发送到对应 Provider 会话。
   模型目录由对应 App Server 启动配置持有。
 

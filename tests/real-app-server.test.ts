@@ -656,6 +656,7 @@ contractSuite("isolated Codex App Server state contract", () => {
   }, 15_000);
 
   it("maps the isolated App Server MCP list, details, and resources", async () => {
+    await expect(ownerClient.reloadMcpServers()).resolves.toBeUndefined();
     const servers = await ownerClient.listMcpServers();
 
     expect(Array.isArray(servers)).toBe(true);

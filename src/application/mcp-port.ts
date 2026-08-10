@@ -46,6 +46,23 @@ export interface McpServerDetail extends McpServerSummary {
   resourceTemplates: McpResourceTemplateSummary[];
 }
 
+export interface McpHealthReport {
+  serverCount: number;
+  toolCount: number;
+  resourceCount: number;
+  resourceTemplateCount: number;
+  actions: Array<{
+    type: "loginRequired";
+    server: string;
+    selector: string;
+  }>;
+  notices: Array<{
+    type: "authUnknown" | "noCapabilities";
+    server: string;
+    selector: string;
+  }>;
+}
+
 export interface McpOAuthLogin {
   server: string;
   authorizationUrl: string;
@@ -83,6 +100,7 @@ export interface McpResourceReadResult {
 export interface McpQueryPort {
   listMcpServers(threadId?: string): Promise<McpServerSummary[]>;
   listMcpServerDetails(threadId?: string): Promise<McpServerDetail[]>;
+  reloadMcpServers(): Promise<void>;
   startMcpOAuthLogin(name: string, threadId?: string): Promise<McpOAuthLogin>;
   readMcpResource(
     server: string,

@@ -20,7 +20,9 @@ import {
   formatConversationMetrics,
   formatConversationMcp,
   formatConversationMcpDetail,
+  formatConversationMcpHealth,
   formatConversationMcpLogin,
+  formatConversationMcpReload,
   formatConversationMcpResource,
   formatConversationPlugins,
   formatConversationModels,
@@ -151,6 +153,10 @@ export function renderFeishuCommandResult(
       return formatConversationAgents(result);
     case "mcp":
       return formatConversationMcp(result);
+    case "mcp-health":
+      return formatConversationMcpHealth(result);
+    case "mcp-reload":
+      return formatConversationMcpReload(result);
     case "mcp-detail":
       return formatConversationMcpDetail(result);
     case "mcp-login":
