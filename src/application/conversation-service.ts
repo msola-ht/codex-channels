@@ -25,6 +25,7 @@ import type {
   McpServerDetail,
   McpServerSummary,
 } from "./mcp-port.js";
+import { supportsMcpOAuthLogin } from "./mcp-port.js";
 import type { InstalledPlugin, PluginQueryPort } from "./plugin-port.js";
 import type {
   PermissionProfileOption,
@@ -1029,7 +1030,7 @@ export class ConversationService implements ConversationUseCases {
       selector,
       await this.queries.listMcpServers(threadId),
     );
-    if (server.authStatus === "unsupported" || server.authStatus === "bearerToken") {
+    if (!supportsMcpOAuthLogin(server.authStatus)) {
       throw new UserFacingError(
         "mcp.oauth.unsupported",
         "该 MCP Server 不支持 OAuth 登录",

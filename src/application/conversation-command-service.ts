@@ -48,6 +48,13 @@ export const conversationCommandNames = [
 export type ConversationCommandName = typeof conversationCommandNames[number];
 const conversationCommandNameSet = new Set<string>(conversationCommandNames);
 
+export interface McpDetailView {
+  section: "tools" | "resources" | "templates";
+  page: number;
+  searchTerm: string | null;
+  selector: string;
+}
+
 export function isConversationCommandName(value: string): value is ConversationCommandName {
   return conversationCommandNameSet.has(value);
 }
@@ -83,7 +90,11 @@ export type ConversationCommandResult =
     }
   | { kind: "skills"; entries: Awaited<ReturnType<ConversationUseCases["listSkills"]>> }
   | { kind: "mcp"; servers: Awaited<ReturnType<ConversationUseCases["listMcpServers"]>> }
-  | { kind: "mcp-detail"; server: Awaited<ReturnType<ConversationUseCases["mcpServerDetail"]>> }
+  | {
+      kind: "mcp-detail";
+      server: Awaited<ReturnType<ConversationUseCases["mcpServerDetail"]>>;
+      view?: McpDetailView;
+    }
   | { kind: "mcp-oauth"; login: Awaited<ReturnType<ConversationUseCases["startMcpOAuthLogin"]>> }
   | { kind: "mcp-resource"; resource: Awaited<ReturnType<ConversationUseCases["readMcpResource"]>> }
   | { kind: "plugins"; plugins: Awaited<ReturnType<ConversationUseCases["listPlugins"]>> }
@@ -419,6 +430,7 @@ export class ConversationCommandService {
           return {
             kind: "mcp-detail",
             server: await this.conversations.mcpServerDetail(target, operation.selector),
+            ...(operation.view ? { view: operation.view } : {}),
           };
         }
         if (operation.type === "login") {
@@ -625,7 +637,7 @@ function parsePluginInvocation(input: string): {
 }
 
 function parseMcpOperation(input: string):
-  | { type: "detail"; selector: string }
+  | { type: "detail"; selector: string; view?: McpDetailView }
   | { type: "login"; selector: string }
   | { type: "resource"; selector: string; uri: string } {
   const parts = input.trim().split(/\s+/u);
@@ -638,17 +650,50 @@ function parseMcpOperation(input: string):
   if (parts[0] === "login" || parts[0] === "resource") {
     throw new UserFacingError(
       "mcp.usage",
-      "用法：/mcp [名称或序号 | login <名称或序号> | resource <名称或序号> <URI>]",
+      mcpUsageText,
     );
   }
   if (parts.length === 1 && parts[0]) {
     return { type: "detail", selector: parts[0] };
   }
+  const [selector, section, ...options] = parts;
+  if (
+    selector
+    && (section === "tools" || section === "resources" || section === "templates")
+  ) {
+    let page = 1;
+    let optionIndex = 0;
+    if (options[0] && /^[1-9]\d*$/u.test(options[0])) {
+      page = Number(options[0]);
+      optionIndex = 1;
+      if (!Number.isSafeInteger(page) || page > 10_000) {
+        throw new UserFacingError("mcp.usage", mcpUsageText);
+      }
+    }
+    let searchTerm: string | null = null;
+    if (options[optionIndex] === "search") {
+      searchTerm = options.slice(optionIndex + 1).join(" ").trim();
+      if (!searchTerm || searchTerm.length > 128) {
+        throw new UserFacingError("mcp.usage", mcpUsageText);
+      }
+      optionIndex = options.length;
+    }
+    if (optionIndex !== options.length) {
+      throw new UserFacingError("mcp.usage", mcpUsageText);
+    }
+    return {
+      type: "detail",
+      selector,
+      view: { section, page, searchTerm, selector },
+    };
+  }
   throw new UserFacingError(
     "mcp.usage",
-    "用法：/mcp [名称或序号 | login <名称或序号> | resource <名称或序号> <URI>]",
+    mcpUsageText,
   );
 }
+
+const mcpUsageText = "用法：/mcp [名称或序号 [tools|resources|templates [页码] [search <关键词>]] | login <名称或序号> | resource <名称或序号> <URI>]";
 
 function parseAgentInvocation(input: string): {
   selector: string;

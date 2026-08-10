@@ -5,6 +5,10 @@ export type McpAuthStatus =
   | "bearerToken"
   | "oAuth";
 
+export function supportsMcpOAuthLogin(status: McpAuthStatus): boolean {
+  return status !== "unsupported" && status !== "bearerToken";
+}
+
 export interface McpServerSummary {
   name: string;
   authStatus: McpAuthStatus;

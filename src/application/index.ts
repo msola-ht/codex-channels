@@ -34,6 +34,7 @@ export {
   type ConversationCommandName,
   type ConversationCommandOutcome,
   type ConversationCommandResult,
+  type McpDetailView,
 } from "./conversation-command-service.js";
 export {
   ConversationService,
@@ -79,6 +80,7 @@ export {
   type WorkspacePermissionUpdate,
 } from "./workspace-permission-port.js";
 export {
+  supportsMcpOAuthLogin,
   type McpAuthStatus,
   type McpOAuthLogin,
   type McpQueryPort,

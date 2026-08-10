@@ -423,6 +423,34 @@ describe("ConversationCommandService", () => {
       kind: "mcp-detail",
       server,
     });
+    await expect(commands.execute(
+      target,
+      "mcp",
+      "1 tools 2 search github issue",
+    )).resolves.toEqual({
+      kind: "mcp-detail",
+      server,
+      view: {
+        section: "tools",
+        page: 2,
+        searchTerm: "github issue",
+        selector: "1",
+      },
+    });
+    await expect(commands.execute(
+      target,
+      "mcp",
+      "project-tools resources search plugin",
+    )).resolves.toEqual({
+      kind: "mcp-detail",
+      server,
+      view: {
+        section: "resources",
+        page: 1,
+        searchTerm: "plugin",
+        selector: "project-tools",
+      },
+    });
     await expect(commands.execute(target, "mcp", "login project-tools"))
       .resolves.toMatchObject({ kind: "mcp-oauth" });
     await expect(commands.execute(
@@ -435,6 +463,10 @@ describe("ConversationCommandService", () => {
     expect(readMcpResource)
       .toHaveBeenCalledWith(target, "project-tools", "project://readme");
     await expect(commands.execute(target, "mcp", "login"))
+      .rejects.toMatchObject({ code: "mcp.usage" });
+    await expect(commands.execute(target, "mcp", "1 tools 0"))
+      .rejects.toMatchObject({ code: "mcp.usage" });
+    await expect(commands.execute(target, "mcp", "1 unknown"))
       .rejects.toMatchObject({ code: "mcp.usage" });
   });
 

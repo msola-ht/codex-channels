@@ -46,8 +46,8 @@
   请求，超出后明确拒绝而不建立无界队列。
 - `skill-port.ts`：定义已直接安装 Skill 的稳定名称与说明查询，以及只供 Application 启动
   Turn 使用的精确 Skill 路径解析；路径不向 Surface 暴露，也不传播 Scope、依赖或上游扫描错误。
-- `mcp-port.ts`：定义 MCP Server 概览、工具/资源/模板详情、OAuth 登录结果和有界只读资源内容；
-  不向 Surface 暴露工具 Schema、二进制正文或完整官方响应。
+- `mcp-port.ts`：定义 MCP Server 概览、工具/资源/模板详情、共享 OAuth 能力判断、登录结果和有界
+  只读资源内容；不向 Surface 暴露工具 Schema、二进制正文或完整官方响应。
 - `plugin-port.ts`：定义开发中 Plugin 的已安装摘要与只供 Turn 调用的官方 mention 引用；
   不提供搜索、市场、安装、卸载或分享能力。
 - `permission-port.ts`：定义 Permission Profile 的稳定 ID、说明和策略可选状态查询；只表示
@@ -72,7 +72,8 @@ Turn；后续普通输入、`/queue` 与 `/stop` 仍只作用于前台 Thread。
 Turn 队列。
 扩展查询也保持平台无关：Skill 只向 Surface 返回当前用户或 Workspace 直接安装且已启用项的
 名称与说明；显式调用时由 Client 再按精确名称解析绝对路径，排除系统和插件缓存内容。MCP 按当前
-Thread 返回稳定概览与详情，OAuth 登录不自动重试，资源读取只展示有界文本或二进制元数据。
+Thread 返回稳定概览与详情；命令结果携带工具、资源或模板的有界分页搜索视图，OAuth 登录不自动
+重试且只对共享能力判断允许的认证状态开放，资源读取只展示有界文本或二进制元数据。
 Plugin API 仍被官方标记为开发中，只在 `plugin_api` 开关开启时列出当前 Workspace 已安装项，
 并仅在 OpenAI Thread 中发送官方 mention；三个 Surface 共用同一 Application 边界。
 成功启动 Turn 后，模型、思考等级、服务层级和协作模式以 App Server 的 Thread 设置为准；
@@ -96,9 +97,9 @@ Application 不读取数据库。OpenAI `/limits` 还通过该端口按周窗口
 不能替代 App Server 提供的 Thread 上下文、账户额度或累计 Token 状态。
 Skill 查询与显式调用只依赖 `SkillQueryPort`；用户和项目直接安装项的筛选、调用名称与绝对路径
 校验由 Client 适配器在协议边界完成。
-MCP 查询只依赖 `McpQueryPort`；分页、Thread 配置上下文、OAuth URL 校验、资源限长与官方响应
-裁剪由 Client 适配器处理。Plugin 调试只依赖 `PluginQueryPort`，开关和 Provider 限制由
-Application 执行。
+MCP 查询只依赖 `McpQueryPort`；官方状态分页、Thread 配置上下文、OAuth URL 校验、资源限长与
+响应裁剪由 Client 适配器处理，渠道查询分页与搜索由共享命令结果表达。Plugin 调试只依赖
+`PluginQueryPort`，开关和 Provider 限制由 Application 执行。
 Permission Profile 查询只依赖 `PermissionQueryPort`；CWD、分页和官方响应裁剪由 Client 处理。
 命令成功文案、命令菜单说明和平台交互形式由各 Surface 维护，并通过类型穷尽检查保持完整。
 项目规则命令只接受 `init` 或 `check`；Application 负责选择 Workspace，具体文件与进程操作由

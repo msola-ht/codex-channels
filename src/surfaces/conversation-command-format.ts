@@ -1,6 +1,7 @@
 import {
   fastServiceTierId,
   isFastServiceTier,
+  supportsMcpOAuthLogin,
   type ConversationCommandName,
   type ConversationCommandOutcome,
   type ConversationCommandResult,
@@ -102,6 +103,7 @@ export const conversationCommandHelpSections = [
       "/skill · /skills [名称或序号 任务]",
       "/agents [角色名称或序号 任务]",
       "/mcp [名称或序号]",
+      "/mcp <名称或序号> <tools|resources|templates> [页码] [search <关键词>]",
       "/mcp login <名称或序号>",
       "/mcp resource <名称或序号> <URI>",
       "/plugin [名称或序号 任务]",
@@ -438,6 +440,19 @@ export function formatConversationMcpDetail(
   result: Extract<ConversationCommandResult, { kind: "mcp-detail" }>,
 ): string {
   const server = result.server;
+  const detailSections = result.view
+    ? formatSelectedMcpDetailSection(server, result.view)
+    : [
+        ...formatMcpDetailEntries("工具", server.tools, (tool) =>
+          `- ${tool.title ?? tool.name} · ${tool.name}${tool.description ? ` · ${formatMcpDescription(tool.description)}` : ""}`
+        ),
+        ...formatMcpDetailEntries("资源", server.resources, (resource) =>
+          `- ${resource.title ?? resource.name} · ${resource.uri}${resource.mimeType ? ` · ${formatMcpDescription(resource.mimeType)}` : ""}`
+        ),
+        ...formatMcpDetailEntries("资源模板", server.resourceTemplates, (template) =>
+          `- ${template.title ?? template.name} · ${template.uriTemplate}`
+        ),
+      ];
   return toStructuredMarkdownList([
     `MCP Server：${server.serverTitle ?? server.name}`,
     `名称：${server.name}`,
@@ -446,19 +461,110 @@ export function formatConversationMcpDetail(
     ...(server.serverDescription
       ? [`说明：${formatMcpDescription(server.serverDescription)}`]
       : []),
-    ...formatMcpDetailEntries("工具", server.tools, (tool) =>
-      `- ${tool.title ?? tool.name} · ${tool.name}${tool.description ? ` · ${formatMcpDescription(tool.description)}` : ""}`
-    ),
-    ...formatMcpDetailEntries("资源", server.resources, (resource) =>
-      `- ${resource.title ?? resource.name} · ${resource.uri}${resource.mimeType ? ` · ${formatMcpDescription(resource.mimeType)}` : ""}`
-    ),
-    ...formatMcpDetailEntries("资源模板", server.resourceTemplates, (template) =>
-      `- ${template.title ?? template.name} · ${template.uriTemplate}`
-    ),
+    ...detailSections,
     "",
-    `OAuth：/mcp login ${server.name}`,
+    ...(supportsMcpOAuthLogin(server.authStatus)
+      ? [`OAuth：/mcp login ${server.name}`]
+      : []),
+    `浏览工具：/mcp ${server.name} tools`,
+    `浏览资源：/mcp ${server.name} resources`,
+    `浏览资源模板：/mcp ${server.name} templates`,
     `读取资源：/mcp resource ${server.name} <URI>`,
   ].join("\n"));
+}
+
+function formatSelectedMcpDetailSection(
+  server: Extract<ConversationCommandResult, { kind: "mcp-detail" }>["server"],
+  view: NonNullable<Extract<ConversationCommandResult, { kind: "mcp-detail" }>["view"]>,
+): string[] {
+  if (view.section === "tools") {
+    return formatMcpDetailPage(
+      "工具",
+      server.tools,
+      view,
+      (tool) => [tool.name, tool.title, tool.description],
+      (tool) =>
+        `- ${tool.title ?? tool.name} · ${tool.name}${tool.description ? ` · ${formatMcpDescription(tool.description)}` : ""}`,
+    );
+  }
+  if (view.section === "resources") {
+    return formatMcpDetailPage(
+      "资源",
+      server.resources,
+      view,
+      (resource) => [
+        resource.name,
+        resource.title,
+        resource.description,
+        resource.uri,
+        resource.mimeType,
+      ],
+      (resource) =>
+        `- ${resource.title ?? resource.name} · ${resource.uri}${resource.mimeType ? ` · ${formatMcpDescription(resource.mimeType)}` : ""}`,
+    );
+  }
+  return formatMcpDetailPage(
+    "资源模板",
+    server.resourceTemplates,
+    view,
+    (template) => [
+      template.name,
+      template.title,
+      template.description,
+      template.uriTemplate,
+      template.mimeType,
+    ],
+    (template) => `- ${template.title ?? template.name} · ${template.uriTemplate}`,
+  );
+}
+
+function formatMcpDetailPage<T>(
+  label: string,
+  entries: readonly T[],
+  view: NonNullable<Extract<ConversationCommandResult, { kind: "mcp-detail" }>["view"]>,
+  searchableValues: (entry: T) => ReadonlyArray<string | null>,
+  format: (entry: T) => string,
+): string[] {
+  const normalizedSearch = view.searchTerm?.toLowerCase() ?? null;
+  const matches = normalizedSearch
+    ? entries.filter((entry) =>
+        searchableValues(entry).some((value) =>
+          value?.toLowerCase().includes(normalizedSearch)
+        )
+      )
+    : [...entries];
+  const pageCount = Math.max(1, Math.ceil(matches.length / maximumMcpDetailEntries));
+  const commandSuffix = view.searchTerm ? ` search ${view.searchTerm}` : "";
+  if (view.page > pageCount) {
+    return [
+      `${label}（${view.searchTerm ? `匹配 ${matches.length} · ` : ""}共 ${pageCount} 页）：`,
+      `- 第 ${view.page} 页不存在，共 ${pageCount} 页`,
+      `返回第一页：/mcp ${view.selector} ${view.section} 1${commandSuffix}`,
+    ];
+  }
+  const pageStart = (view.page - 1) * maximumMcpDetailEntries;
+  const pageEntries = matches.slice(pageStart, pageStart + maximumMcpDetailEntries);
+  const visible: string[] = [];
+  let sectionCharacters = 0;
+  for (const entry of pageEntries) {
+    const line = format(entry);
+    if (sectionCharacters + line.length > maximumMcpDetailSectionCharacters) break;
+    visible.push(line);
+    sectionCharacters += line.length;
+  }
+  return [
+    `${label}（${view.searchTerm ? `匹配 ${matches.length} · ` : ""}第 ${view.page}/${pageCount} 页）：`,
+    ...(visible.length > 0 ? visible : ["- 当前页没有匹配项"]),
+    ...(pageEntries.length > visible.length
+      ? [`- 当前页其余 ${pageEntries.length - visible.length} 项因展示上限省略`]
+      : []),
+    ...(view.page > 1
+      ? [`上一页：/mcp ${view.selector} ${view.section} ${view.page - 1}${commandSuffix}`]
+      : []),
+    ...(view.page < pageCount
+      ? [`下一页：/mcp ${view.selector} ${view.section} ${view.page + 1}${commandSuffix}`]
+      : []),
+  ];
 }
 
 function formatMcpDetailEntries<T>(

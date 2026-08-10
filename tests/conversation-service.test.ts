@@ -1219,11 +1219,17 @@ describe("ConversationService model selection", () => {
   });
 
   it("rejects unsupported MCP OAuth and invalid resource input before execution", async () => {
-    const listMcpServers = vi.fn(async () => [{
-      name: "local-tools",
-      authStatus: "unsupported" as const,
-      toolCount: 0,
-    }]);
+    const listMcpServers = vi.fn()
+      .mockResolvedValueOnce([{
+        name: "local-tools",
+        authStatus: "unsupported" as const,
+        toolCount: 0,
+      }])
+      .mockResolvedValueOnce([{
+        name: "token-tools",
+        authStatus: "bearerToken" as const,
+        toolCount: 0,
+      }]);
     const startMcpOAuthLogin = vi.fn();
     const readMcpResource = vi.fn();
     const service = new ConversationService(
@@ -1235,6 +1241,8 @@ describe("ConversationService model selection", () => {
     );
 
     await expect(service.startMcpOAuthLogin(target, "local-tools"))
+      .rejects.toMatchObject({ code: "mcp.oauth.unsupported" });
+    await expect(service.startMcpOAuthLogin(target, "token-tools"))
       .rejects.toMatchObject({ code: "mcp.oauth.unsupported" });
     await expect(service.readMcpResource(target, "local-tools", " \n "))
       .rejects.toMatchObject({ code: "mcp.resource.usage" });

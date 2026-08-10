@@ -113,6 +113,9 @@ describe("provider-aware conversation command formatting", () => {
   });
 
   it("renders MCP overview, full detail, OAuth, and bounded resource output", () => {
+    expect(conversationCommandHelpLines.join("\n")).toContain(
+      "/mcp <名称或序号> <tools|resources|templates> [页码] [search <关键词>]",
+    );
     expect(formatConversationMcp({
       kind: "mcp",
       servers: [{ name: "project-tools", authStatus: "notLoggedIn", toolCount: 1 }],
@@ -141,6 +144,25 @@ describe("provider-aware conversation command formatting", () => {
     expect(detail).toContain("MCP Server：Project Tools");
     expect(detail).toContain("Search · search");
     expect(detail).toContain("project://readme");
+    expect(detail).toContain("OAuth：/mcp login project-tools");
+    expect(detail).toContain("浏览工具：/mcp project-tools tools");
+    expect(detail).toContain("浏览资源：/mcp project-tools resources");
+
+    const bearerTokenDetail = formatConversationMcpDetail({
+      kind: "mcp-detail",
+      server: {
+        name: "codex_apps",
+        authStatus: "bearerToken",
+        toolCount: 0,
+        serverTitle: null,
+        serverVersion: "0.1.0",
+        serverDescription: null,
+        tools: [],
+        resources: [],
+        resourceTemplates: [],
+      },
+    });
+    expect(bearerTokenDetail).not.toContain("/mcp login");
 
     const longResourceUri = `project://resource/1/${"x".repeat(2_000)}`;
     const oversizedDetail = formatConversationMcpDetail({
@@ -228,6 +250,70 @@ describe("provider-aware conversation command formatting", () => {
     expect(boundedResource.length).toBeLessThanOrEqual(20_000);
     expect(boundedResource).toContain(longRequestedUri);
     expect(boundedResource).toContain(longContentUri);
+  });
+
+  it("renders a searchable MCP detail page with stable navigation commands", () => {
+    const rendered = formatConversationMcpDetail({
+      kind: "mcp-detail",
+      server: {
+        name: "codex_apps",
+        authStatus: "bearerToken",
+        toolCount: 18,
+        serverTitle: null,
+        serverVersion: "0.1.0",
+        serverDescription: null,
+        tools: Array.from({ length: 18 }, (_, index) => ({
+          name: `github-tool-${index + 1}`,
+          title: `GitHub Tool ${index + 1}`,
+          description: "GitHub connector tool",
+        })),
+        resources: [{
+          uri: "plugin://github",
+          name: "github",
+          title: "GitHub",
+          description: "Plugin resource",
+          mimeType: "mcp/plugin",
+        }],
+        resourceTemplates: [],
+      },
+      view: {
+        section: "tools",
+        page: 2,
+        searchTerm: "github",
+        selector: "1",
+      },
+    });
+
+    expect(rendered).toContain("工具（匹配 18 · 第 2/3 页）");
+    expect(rendered).toContain("GitHub Tool 9 · github-tool-9");
+    expect(rendered).toContain("GitHub Tool 16 · github-tool-16");
+    expect(rendered).not.toContain("github-tool-8");
+    expect(rendered).not.toContain("plugin://github");
+    expect(rendered).toContain("上一页：/mcp 1 tools 1 search github");
+    expect(rendered).toContain("下一页：/mcp 1 tools 3 search github");
+
+    const missingPage = formatConversationMcpDetail({
+      kind: "mcp-detail",
+      server: {
+        name: "codex_apps",
+        authStatus: "bearerToken",
+        toolCount: 1,
+        serverTitle: null,
+        serverVersion: "0.1.0",
+        serverDescription: null,
+        tools: [{ name: "github", title: null, description: null }],
+        resources: [],
+        resourceTemplates: [],
+      },
+      view: {
+        section: "tools",
+        page: 2,
+        searchTerm: null,
+        selector: "1",
+      },
+    });
+    expect(missingPage).toContain("第 2 页不存在，共 1 页");
+    expect(missingPage).toContain("返回第一页：/mcp 1 tools 1");
   });
 
   it("shows workspace permission usage and current values", () => {

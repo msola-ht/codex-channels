@@ -366,6 +366,18 @@ export class FeishuConversationAdapter {
           inputPrefix: "profile ",
         };
       }
+      if (action === "plugin" && input !== "" && !/\s/u.test(input)) {
+        return {
+          kind: "form",
+          title: `调用 ${input}`,
+          description: "输入要交给该 Plugin 的任务。",
+          action: "plugin",
+          fieldLabel: "任务",
+          placeholder: "例如：检查当前 PR",
+          inputPrefix: `${input} `,
+          multiline: true,
+        };
+      }
       const form = input === "" ? renderCommandCenterForm(action) : undefined;
       if (form) {
         return form;
@@ -891,6 +903,23 @@ function renderCommandCenterChoices(
   action: FeishuCommandCenterAction,
   result: ConversationCommandResult,
 ): FeishuCommandCenterChoices | undefined {
+  if (action === "plugin" && result.kind === "plugins") {
+    const callable = result.plugins.filter((plugin) =>
+      plugin.enabled && plugin.available
+    );
+    if (callable.length === 0) {
+      return undefined;
+    }
+    return {
+      title: "选择 Plugin",
+      description: "仅显示已启用且可调用的 Plugin。",
+      choices: callable.map((plugin) => ({
+        label: `${plugin.displayName} · ${plugin.id}`,
+        action: "plugin",
+        input: plugin.id,
+      })),
+    };
+  }
   if (
     (action === "resume" || action === "sessions")
     && result.kind === "sessions"
