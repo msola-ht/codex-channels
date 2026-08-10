@@ -105,13 +105,14 @@ describe("Feishu outbox", () => {
       target,
       threadId: "thread-1",
       turnId: "turn-1",
+      identity: { kind: "plugin", name: "GitHub" },
     });
     await outbox.close();
 
     expect(markdownCards).toEqual([]);
     expect(replies).toEqual([{
       messageId: "om_origin",
-      markdown: "## 已开始处理。",
+      markdown: "## 已使用 GitHub Plugin 开始处理。",
     }]);
   });
 
@@ -1558,6 +1559,7 @@ describe("Feishu outbox", () => {
       target,
       threadId: "thread-1",
       turnId: "turn-1",
+      identity: { kind: "plugin", name: "GitHub" },
     });
     outbox.handle(threadStatus("active"));
     outbox.handle(threadStatus("idle"));
@@ -1565,13 +1567,18 @@ describe("Feishu outbox", () => {
 
     expect(replies).toEqual([{
       messageId: "om_origin",
-      markdown: "## 已开始处理。",
+      markdown: "## 已使用 GitHub Plugin 开始处理。",
     }]);
     expect(sendCard).not.toHaveBeenCalled();
     expect(updateCard).toHaveBeenCalledWith(
       "om_started",
       expect.objectContaining({
         header: expect.objectContaining({ template: "green" }),
+        elements: [expect.objectContaining({
+          text: expect.objectContaining({
+            content: "GitHub Plugin · 处理结束 · 结果见下方消息",
+          }),
+        })],
       }),
     );
   });
@@ -1579,6 +1586,7 @@ describe("Feishu outbox", () => {
   it("does not add a Turn start card after an active Thread status card", async () => {
     const sendMarkdownCard = vi.fn(async () => "om_started");
     const sendCard = vi.fn(async () => "om_status");
+    const updateCard = vi.fn(async () => {});
     const outbox = new FeishuOutbox(
       "cli_app",
       {
@@ -1587,6 +1595,7 @@ describe("Feishu outbox", () => {
         sendPost: async () => {},
         sendMarkdownCard,
         sendCard,
+        updateCard,
       },
       pino({ level: "silent" }),
     );
@@ -1597,11 +1606,22 @@ describe("Feishu outbox", () => {
       target,
       threadId: "thread-1",
       turnId: "turn-1",
+      identity: { kind: "plugin", name: "GitHub" },
     });
     await outbox.close();
 
     expect(sendCard).toHaveBeenCalledTimes(1);
     expect(sendMarkdownCard).not.toHaveBeenCalled();
+    expect(updateCard).toHaveBeenCalledWith(
+      "om_status",
+      expect.objectContaining({
+        elements: [expect.objectContaining({
+          text: expect.objectContaining({
+            content: "GitHub Plugin · 运行中",
+          }),
+        })],
+      }),
+    );
   });
 
   it("does not create a standalone idle thread status card", async () => {

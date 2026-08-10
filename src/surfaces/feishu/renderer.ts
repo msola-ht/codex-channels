@@ -205,7 +205,10 @@ export function renderFeishuOutput(
       return formatVisionCompleted(event, debug);
     case "turn.started":
       return renderFeishuLifecyclePresentation(
-        createTurnStartedPresentation(event.background ? event.threadId : undefined),
+        createTurnStartedPresentation(
+          event.background ? event.threadId : undefined,
+          event.identity,
+        ),
       );
     case "text.delta":
       return null;

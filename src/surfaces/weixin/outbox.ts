@@ -151,7 +151,10 @@ export class WeixinOutbox implements SurfaceOutputPort {
         () => this.send(
           event.target,
           renderPlainLifecyclePresentation(
-            createTurnStartedPresentation(event.background ? event.threadId : undefined),
+            createTurnStartedPresentation(
+              event.background ? event.threadId : undefined,
+              event.identity,
+            ),
           ),
         ),
         true,

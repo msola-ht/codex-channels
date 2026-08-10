@@ -114,10 +114,11 @@ HTML 和微信结构化字段渲染。
 `hidden` 隐藏全部操作过程。该设置只控制过程展示，不改变官方终态和子代理完成统计。
 
 通过 `/skill`、`/plugin` 或 `/agents` 新建 Turn 时，三个渠道只使用统一的 Turn 生命周期确认，
-不再额外发送一条扩展启动结果；追加到活动 Turn 时没有新的 Turn 启动事件，因此继续显示明确的
-追加确认。MCP Server 的首次 `starting` / `ready` 状态不主动展示；`failed`、`cancelled` 以及
-异常后恢复为 `ready` 仍会通知。飞书把当前 Turn 的“已开始处理”回复直接登记为 Thread 状态消息，
-后续 `active` 不再创建第二张卡，`idle` 原地更新这张回复。
+并在同一条确认中保留具体 Skill、Plugin 或子代理名称，不再额外发送一条扩展启动结果；追加到活动
+Turn 时没有新的 Turn 启动事件，因此继续显示明确的追加确认。MCP Server 的首次 `starting` /
+`ready` 状态不主动展示；`failed`、`cancelled` 以及异常后恢复为 `ready` 仍会通知。飞书把当前
+Turn 的启动回复直接登记为 Thread 状态消息，后续 `active` 不再创建第二张卡，`idle` 原地更新
+这张回复并保留扩展身份。
 
 视觉完成通知在正式模式保留 API 提供商、调用模型与 Token 总计；输入、缓存、输出、推理输出等
 Token 子项和“视觉 API 耗时”仅在调试模式展示。

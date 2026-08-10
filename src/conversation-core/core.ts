@@ -9,6 +9,7 @@ import {
   type ThreadGoal,
   type ThreadTokenUsage,
   type TurnOutputTiming,
+  type TurnStartIdentity,
   type TurnArtifacts,
   type VisionTokenUsage,
   isCriticalOutputEvent,
@@ -115,7 +116,12 @@ export class ConversationCore {
     private readonly output: EventBus<OutputEvent>,
   ) {}
 
-  markTurnStarted(target: ConversationTarget, threadId: string, turnId: string): void {
+  markTurnStarted(
+    target: ConversationTarget,
+    threadId: string,
+    turnId: string,
+    identity?: TurnStartIdentity,
+  ): void {
     const current = this.activeByThread.get(threadId);
     if (current?.threadId === threadId && current.turnId === turnId) {
       return;
@@ -130,6 +136,7 @@ export class ConversationCore {
       target,
       threadId,
       turnId,
+      ...(identity ? { identity } : {}),
       ...(this.isBackgroundThread(threadId) ? { background: true } : {}),
     });
   }

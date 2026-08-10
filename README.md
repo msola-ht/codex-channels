@@ -154,7 +154,8 @@ plugin_api = false
 - `/plugin`：列出当前 Workspace 已安装的 Plugin 及启用状态。
 - `/plugin <名称、完整 ID 或序号> <任务>`：仅在 OpenAI Thread 中使用官方 `mention` 输入调用
   已启用且可用的 Plugin；飞书命令中心支持先选择 Plugin、再通过一次性表单输入任务。新建 Turn
-  只显示统一的“已开始处理”确认，不再重复发送 Plugin 启动结果；追加到活动 Turn 时仍明确提示。
+  只显示一条带名称的统一确认，例如“已使用 GitHub Plugin 开始处理”，不再重复发送 Plugin
+  启动结果；追加到活动 Turn 时仍明确提示。
 - 不开放 Plugin 搜索、市场、安装、卸载或分享；`codexc doctor` 会显示该开发中开关的状态。
 - `/mcp`：列出当前 Thread 的 MCP Server；`/mcp <名称或序号>` 查看工具、资源与模板详情；
   上游多行长描述会先归一化并有界展示。

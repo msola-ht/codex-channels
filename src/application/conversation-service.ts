@@ -48,6 +48,7 @@ import {
   type SurfaceId,
   type ThreadGoal,
   type ThreadTokenUsage,
+  type TurnStartIdentity,
   type TurnArtifacts,
 } from "../conversation-core/index.js";
 import type { ModelSelectionService, ModelSelectionState } from "./model-selection-service.js";
@@ -348,7 +349,7 @@ export class ConversationService implements ConversationUseCases {
           name: skill.name,
           path: skill.path,
         },
-      ]);
+      ], { kind: "skill", name: skill.name });
       return { ...submission, skillName: skill.name };
     });
   }
@@ -396,7 +397,7 @@ export class ConversationService implements ConversationUseCases {
           name: resolved.displayName,
           path: resolved.path,
         },
-      ]);
+      ], { kind: "plugin", name: resolved.displayName });
       return { ...submission, pluginName: resolved.displayName };
     });
   }
@@ -453,23 +454,25 @@ export class ConversationService implements ConversationUseCases {
         type: "text",
         text: `请使用 agent_type="${role.name}"、fork_turns="1" 的子代理执行以下任务，子代理完成后把最终结果回复给我：\n\n${normalizedTask}`,
       },
-    ]);
+    ], { kind: "agent", name: role.name });
     return { ...submission, roleName: role.name };
   }
 
   private submitInput(
     target: ConversationTarget,
     input: TurnInput[],
+    identity?: TurnStartIdentity,
   ): Promise<Submission> {
     return this.locked(
       target,
-      () => this.submitInputLocked(target, input),
+      () => this.submitInputLocked(target, input, identity),
     );
   }
 
   private async submitInputLocked(
     target: ConversationTarget,
     input: TurnInput[],
+    identity?: TurnStartIdentity,
   ): Promise<Submission> {
     if (input.some((item) => item.type === "localImage")) {
       try {
@@ -542,7 +545,7 @@ export class ConversationService implements ConversationUseCases {
       }
       return { threadId: active.threadId, turnId: active.turnId, steered: true };
     }
-    return this.startNewTurn(target, input, clientUserMessageId);
+    return this.startNewTurn(target, input, clientUserMessageId, identity);
   }
 
   queueFollowUp(
@@ -1272,6 +1275,7 @@ export class ConversationService implements ConversationUseCases {
     target: ConversationTarget,
     input: TurnInput[],
     clientUserMessageId: string,
+    identity?: TurnStartIdentity,
   ): Promise<Submission> {
     const threadStartOptions = this.models.threadStartOptions?.(target) ?? {};
     const binding = Object.keys(threadStartOptions).length > 0
@@ -1293,7 +1297,11 @@ export class ConversationService implements ConversationUseCases {
     }
     this.models.markApplied(target);
     this.collaborationModes?.markApplied(target);
-    this.core.markTurnStarted(target, binding.threadId, result.turnId);
+    if (identity) {
+      this.core.markTurnStarted(target, binding.threadId, result.turnId, identity);
+    } else {
+      this.core.markTurnStarted(target, binding.threadId, result.turnId);
+    }
     return { threadId: binding.threadId, turnId: result.turnId, steered: false };
   }
 

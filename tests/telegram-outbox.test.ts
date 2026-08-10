@@ -199,6 +199,20 @@ describe("TelegramOutbox", () => {
     });
   });
 
+  it("identifies the Plugin in the unified Turn start reply", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      ...turnStarted(),
+      identity: { kind: "plugin", name: "GitHub" },
+    });
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual(["<b>已使用 GitHub Plugin 开始处理。</b>"]);
+  });
+
   it("reports when image and text input is sent to the visual API", async () => {
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);

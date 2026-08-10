@@ -7,6 +7,7 @@ import {
 import type {
   OutputEvent,
   ThreadGoal,
+  TurnStartIdentity,
 } from "../conversation-core/index.js";
 import { usesOpenAiAccount } from "../conversation-core/index.js";
 
@@ -175,13 +176,35 @@ export function createStartupPresentation(
 
 export function createTurnStartedPresentation(
   backgroundThreadId?: string,
+  identity?: TurnStartIdentity,
 ): LifecyclePresentation {
   return {
-    title: backgroundThreadId ? "后台任务继续处理中。" : "已开始处理。",
+    title: identity
+      ? turnStartIdentityTitle(identity)
+      : backgroundThreadId
+        ? "后台任务继续处理中。"
+        : "已开始处理。",
     fields: backgroundThreadId
       ? [{ label: "Thread", value: backgroundThreadId }]
       : [],
   };
+}
+
+function turnStartIdentityTitle(identity: TurnStartIdentity): string {
+  return `已使用 ${formatTurnStartIdentityLabel(identity)} 开始处理。`;
+}
+
+export function formatTurnStartIdentityLabel(
+  identity: TurnStartIdentity,
+): string {
+  switch (identity.kind) {
+    case "skill":
+      return `${identity.name} Skill`;
+    case "plugin":
+      return `${identity.name} Plugin`;
+    case "agent":
+      return `${identity.name} 子代理`;
+  }
 }
 
 export function createSubagentStartedPresentation(

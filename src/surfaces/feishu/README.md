@@ -87,9 +87,9 @@ Application 的本地图片输入，同一 Thread 的
   `message_id`，不创建话题串；富文本只生成单个
   `md` 元素，不暴露 SDK Client。模型或上游文本中的飞书原生 `<at>` 标签会在平台边界被中和，
   避免非预期提醒。审批结束和 Thread 状态都只更新 `interactive` 卡片，并使用
-  `im.v1.message.patch`；当前 Turn 的“已开始处理”回复会登记为 Thread 状态消息，后续 `active`
+  `im.v1.message.patch`；当前 Turn 的启动回复（包括 Skill、Plugin 或子代理身份）会登记为 Thread 状态消息，后续 `active`
   不再创建第二张卡；没有可复用回复时才由 `active` 创建状态卡，`idle` 只把已有卡更新为
-  “处理结束 · 结果见下方消息”，
+  “处理结束 · 结果见下方消息”并保留扩展身份，
   不创建孤立空闲卡。普通文本不会交给卡片更新接口。调用设置 15 秒 HTTP 超时，创建响应必须包含
   `message_id`。
 - 发送超时、SDK 失败和残缺响应只暴露稳定错误码，不回传 SDK message、响应正文或凭据。
@@ -254,7 +254,8 @@ Token，只用当前能力缺失的差集发起 Device Flow，不提供预授权
 原始应用权限条目先按独立安全上限裁剪，再筛选并限制为最多 100 项用户 Scope；授权与凭据载荷
 为其保留额外一项 `offline_access`。完成后校验返回 Token 所属 `open_id` 必须与消息 Actor
 一致；`status` 会优先显示当前 Actor 正在进行的授权。未知或畸形斜杠命令失败关闭，
-不能作为普通消息提交给 Codex。新 Turn 的一次“已开始处理。”确认由共享生命周期事件驱动，
+不能作为普通消息提交给 Codex。新 Turn 的一次启动确认由共享生命周期事件驱动，并保留 Skill、
+Plugin 或子代理的具体类型与名称，
 并通过 Outbox 原生回复当前输入，同时作为后续 Thread 结束状态的原地更新目标；Adapter 不自行
 重复发送，Skill、Plugin 与子代理命令的新建 Turn 结果也不再追加第二份启动确认。后续回复由 Core 输出驱动；追加到
 活动 Turn 时发送明确提示。结构化 `UserFacingError` 按错误码

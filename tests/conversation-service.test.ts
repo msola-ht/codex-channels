@@ -801,6 +801,7 @@ describe("ConversationService model selection", () => {
 
   it("invokes an enabled Skill with the official text marker and structured input", async () => {
     const startTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
+    const markTurnStarted = vi.fn();
     const resolveSkill = vi.fn(async () => ({
       name: "systematic-debugging",
       path: "/workspace/main/.codex/skills/systematic-debugging/SKILL.md",
@@ -818,7 +819,7 @@ describe("ConversationService model selection", () => {
       } as unknown as SessionRouter,
       {
         activeTurn: () => undefined,
-        markTurnStarted: vi.fn(),
+        markTurnStarted,
       } as unknown as ConversationCore,
       {
         turnOverrides: () => ({}),
@@ -852,6 +853,12 @@ describe("ConversationService model selection", () => {
         path: "/workspace/main/.codex/skills/systematic-debugging/SKILL.md",
       },
     ]);
+    expect(markTurnStarted).toHaveBeenCalledWith(
+      target,
+      "thread-1",
+      "turn-1",
+      { kind: "skill", name: "systematic-debugging" },
+    );
   });
 
   it("keeps Skill resolution and Turn start in one Conversation lock", async () => {
@@ -968,6 +975,7 @@ describe("ConversationService model selection", () => {
 
   it("invokes an agent role with the official text marker and task", async () => {
     const startTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
+    const markTurnStarted = vi.fn();
     const service = new ConversationService(
       turnPort({ startTurn }),
       {
@@ -981,7 +989,7 @@ describe("ConversationService model selection", () => {
       } as unknown as SessionRouter,
       {
         activeTurn: () => undefined,
-        markTurnStarted: vi.fn(),
+        markTurnStarted,
       } as unknown as ConversationCore,
       {
         turnOverrides: () => ({}),
@@ -1018,6 +1026,12 @@ describe("ConversationService model selection", () => {
         text: "请使用 agent_type=\"ds\"、fork_turns=\"1\" 的子代理执行以下任务，子代理完成后把最终结果回复给我：\n\n审查提交",
       },
     ]);
+    expect(markTurnStarted).toHaveBeenCalledWith(
+      target,
+      "thread-1",
+      "turn-1",
+      { kind: "agent", name: "ds" },
+    );
   });
 
   it("resolves an agent role by list number", async () => {
@@ -1293,6 +1307,7 @@ describe("ConversationService model selection", () => {
       displayName: "GitHub",
       path: "plugin://github@local",
     }));
+    const markTurnStarted = vi.fn();
     const service = new ConversationService(
       turnPort({ startTurn }),
       {
@@ -1306,7 +1321,7 @@ describe("ConversationService model selection", () => {
       } as unknown as SessionRouter,
       {
         activeTurn: () => undefined,
-        markTurnStarted: vi.fn(),
+        markTurnStarted,
       } as unknown as ConversationCore,
       {
         status: () => ({ modelProvider: "openai" }),
@@ -1332,6 +1347,12 @@ describe("ConversationService model selection", () => {
         path: "plugin://github@local",
       },
     ]);
+    expect(markTurnStarted).toHaveBeenCalledWith(
+      target,
+      "thread-1",
+      "turn-1",
+      { kind: "plugin", name: "GitHub" },
+    );
   });
 
   it("fails closed for a disabled Plugin API or a non-OpenAI provider", async () => {

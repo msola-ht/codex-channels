@@ -167,7 +167,7 @@ Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类
 
 会话命令统一映射到 Application 的 `ConversationCommandService`；Surface 负责提取命令名和参数，
 并渲染类型化结果。Skill、Plugin 与子代理新建 Turn 时由统一 `turn.started` 生命周期确认，命令结果
-不重复发送启动提示；追加到活动 Turn 时仍渲染明确确认。普通文本、图片下载、平台帮助、身份查询和
+不重复发送启动提示；该事件保留具体扩展类型和名称，追加到活动 Turn 时仍渲染明确确认。普通文本、图片下载、平台帮助、身份查询和
 交互取消保留在平台边界。PNG/JPEG
 的大小限制与内容签名校验由 `managed-image-store.ts` 在 Surface 内复用；
 一次性音频的 20 MiB、WAV/MP3/M4A/WebM/OGG 内容签名、`0700/0600` 私有暂存和一小时清理由

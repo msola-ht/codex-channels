@@ -3,6 +3,7 @@ import type { Logger } from "pino";
 import {
   isCriticalOutputEvent,
   type OutputEvent,
+  type TurnStartIdentity,
 } from "../../conversation-core/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import type {
@@ -133,7 +134,12 @@ export class FeishuOutbox implements SurfaceOutputPort {
   private readonly delivery: ConversationDeliveryQueue;
   private readonly threadStatusMessages = new Map<
     string,
-    { chatId: string; messageId: string; status: string }
+    {
+      chatId: string;
+      messageId: string;
+      status: string;
+      identity?: TurnStartIdentity;
+    }
   >();
   private readonly planMessages = new Map<
     string,
@@ -580,12 +586,21 @@ export class FeishuOutbox implements SurfaceOutputPort {
     >,
     markdown: string,
   ): Promise<void> {
-    if (
-      event.type === "turn.started"
-      && this.threadStatusMessages.get(event.threadId)?.chatId
-        === event.target.conversationId
-    ) {
-      return;
+    if (event.type === "turn.started") {
+      const current = this.threadStatusMessages.get(event.threadId);
+      if (current?.chatId === event.target.conversationId) {
+        if (event.identity && current.identity === undefined) {
+          await this.messagePort.updateCard(
+            current.messageId,
+            renderFeishuThreadStatusCard("active", event.identity),
+          );
+          this.threadStatusMessages.set(event.threadId, {
+            ...current,
+            identity: event.identity,
+          });
+        }
+        return;
+      }
     }
     const key = turnKey(event.threadId, event.turnId);
     const consumesReplyTarget = event.type === "turn.completed"
@@ -633,6 +648,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         chatId: event.target.conversationId,
         messageId,
         status: "active",
+        ...(event.identity ? { identity: event.identity } : {}),
       });
     }
     if (consumesReplyTarget) {
@@ -721,8 +737,8 @@ export class FeishuOutbox implements SurfaceOutputPort {
   private async deliverThreadStatus(
     event: Extract<OutputEvent, { type: "thread.status" }>,
   ): Promise<void> {
-    const card = renderFeishuThreadStatusCard(event.status);
     const current = this.threadStatusMessages.get(event.threadId);
+    const card = renderFeishuThreadStatusCard(event.status, current?.identity);
     if (
       current
       && current.chatId === event.target.conversationId

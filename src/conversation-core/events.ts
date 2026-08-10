@@ -252,6 +252,11 @@ export interface VisionTokenUsage {
   totalTokens?: number;
 }
 
+export interface TurnStartIdentity {
+  kind: "skill" | "plugin" | "agent";
+  name: string;
+}
+
 export type OutputEvent =
   | { type: "vision.started"; target: ConversationTarget; imageCount: number }
   | { type: "vision.progress"; target: ConversationTarget; elapsedSeconds: number }
@@ -265,7 +270,7 @@ export type OutputEvent =
       serviceTier?: string;
       usage?: VisionTokenUsage;
     }
-  | { type: "turn.started"; target: ConversationTarget; threadId: string; turnId: string; background?: boolean }
+  | { type: "turn.started"; target: ConversationTarget; threadId: string; turnId: string; identity?: TurnStartIdentity; background?: boolean }
   | { type: "user.message"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; background?: boolean }
   | { type: "text.delta"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null; background?: boolean }
   | { type: "text.completed"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null; background?: boolean }

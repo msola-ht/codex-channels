@@ -86,6 +86,20 @@ describe("WeixinOutbox", () => {
     ]);
   });
 
+  it("identifies the Plugin in the unified Turn start reply", async () => {
+    const { outbox, sendText } = outboxFixture();
+
+    outbox.handle({
+      ...turnStarted(),
+      identity: { kind: "plugin", name: "GitHub" },
+    });
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
+      text: "已使用 GitHub Plugin 开始处理。",
+    }));
+  });
+
   it("reports when image input is sent to the visual API", async () => {
     const { outbox, sendText } = outboxFixture();
 

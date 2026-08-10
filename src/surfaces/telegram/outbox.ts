@@ -211,7 +211,10 @@ export class TelegramOutbox {
             await this.sendPanel(
               chatId,
               renderTelegramLifecyclePresentation(
-                createTurnStartedPresentation(event.background ? event.threadId : undefined),
+                createTurnStartedPresentation(
+                  event.background ? event.threadId : undefined,
+                  event.identity,
+                ),
               ),
               this.replyTargets.get(this.turnKey(event.threadId, event.turnId)),
               true,

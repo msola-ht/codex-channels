@@ -353,6 +353,12 @@ describe("shared Surface lifecycle presentation", () => {
     expect(renderPlainLifecyclePresentation(
       createTurnStartedPresentation(),
     )).toBe("已开始处理。");
+    expect(renderPlainLifecyclePresentation(
+      createTurnStartedPresentation(undefined, {
+        kind: "plugin",
+        name: "GitHub",
+      }),
+    )).toBe("已使用 GitHub Plugin 开始处理。");
 
     const rendered = renderPlainLifecyclePresentation(
       createTurnCompletedPresentation({
