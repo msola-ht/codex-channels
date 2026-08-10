@@ -16,6 +16,8 @@ type ThreadSessionResponse =
   | ThreadResumeResponse
   | ThreadForkResponse;
 
+export const PINNED_THREAD_SECTION_ID = "01984de2-8f74-7c91-a3b2-5c5e937cf318";
+
 export function toThreadSnapshot(thread: Thread): ThreadSnapshot {
   requireString(thread.id, "id");
   requireString(thread.sessionId, "sessionId");
@@ -24,8 +26,9 @@ export function toThreadSnapshot(thread: Thread): ThreadSnapshot {
   if (thread.name !== null) {
     requireString(thread.name, "name");
   }
-  if (typeof thread.isPinned !== "boolean") {
-    throw new Error("Codex Thread 响应缺少有效 isPinned");
+  if (thread.section !== null) {
+    requireString(thread.section.id, "section id");
+    requireString(thread.section.name, "section name");
   }
   if (!Array.isArray(thread.turns)) {
     throw new Error("Codex Thread 响应缺少有效 turns");
@@ -40,7 +43,7 @@ export function toThreadSnapshot(thread: Thread): ThreadSnapshot {
     modelProvider: toThreadModelProvider(thread),
     preview: thread.preview,
     name: thread.name,
-    isPinned: thread.isPinned,
+    isPinned: thread.section?.id === PINNED_THREAD_SECTION_ID,
     status: toThreadStatus(thread.status),
     cwd: thread.cwd,
     source: toThreadSource(thread.source),

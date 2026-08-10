@@ -6,7 +6,7 @@
 
 - `index.ts`：本模块的公开导出入口。
 - `thread-port.ts`：定义 Thread 查询与生命周期窄端口，以及只包含路由、恢复和会话列表所需字段的
-  稳定快照；固定状态以 `isPinned` 表示，运行中 Turn 以 `activeTurnId` 表示，恢复会话另携带
+  稳定快照；官方内置 Pinned 分区投影为 `isPinned`，运行中 Turn 以 `activeTurnId` 表示，恢复会话另携带
   模型 Provider、
   压缩 Item ID，不向业务层暴露完整官方 Turn。
 - `router.ts`：选择、搜索、绑定、恢复、归档和解绑 Thread，把 Workspace 权限（沙箱、审批策略、

@@ -107,6 +107,11 @@ function restartRequiredReasons(
       JSON.stringify(current.metricsSync),
       JSON.stringify(next.metricsSync),
     ],
+    [
+      configChange("metrics.storage"),
+      JSON.stringify(current.metricsStorage),
+      JSON.stringify(next.metricsStorage),
+    ],
     [configChange("workspace.default"), current.defaultWorkspaceId, next.defaultWorkspaceId],
   ];
   for (const [change, before, after] of fields) {

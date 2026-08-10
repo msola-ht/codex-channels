@@ -11,10 +11,11 @@
 - `stdio-transport.ts`：用于受控开发和测试场景的 stdio Transport。
 - `json-rpc.ts`：使用生成的 `ClientRequest` / `ClientNotification` 约束出站消息，并处理
   initialize、请求关联、通知与 Server Request 分流、超时、断线清理及安全重试；初始化期间
-  已失效的连接不得重新进入 connected 状态。
-- `thread-adapter.ts`：把当前版本生成的官方 Thread、固定状态、运行状态、来源、运行 Turn、
+  已失效的连接不得重新进入 connected 状态；通过 `extensions` 显式声明已实现的 `openai/form`。
+- `thread-adapter.ts`：把当前版本生成的官方 Thread、内置 Pinned 分区、运行状态、来源、运行 Turn、
   上下文压缩 Item ID 和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；
-  缺少必需字段时失败关闭。
+  缺少必需字段时失败关闭。固定状态写入由 Client 原样回写当前 Git SHA 以无损协调加载中 Thread，
+  再移动到官方分区并读回验证。
 - `turn-adapter.ts`：把 Application 的文本、本地图片、本地音频与已解析 Skill 输入编码为官方 `UserInput`，并映射
   Turn、Review 和 Goal 响应；缺少稳定结果必需字段时失败关闭。
 - `model-adapter.ts`：把当前版本官方模型目录裁剪为 Application 拥有的模型选项和

@@ -75,7 +75,7 @@ describe("Weixin getupdates contract probe", () => {
           get_updates_buf: "",
           base_info: {
             channel_version: "2.4.6",
-            bot_agent: "CodexConnect/0.146.1",
+            bot_agent: "CodexConnect/0.147.0",
           },
         }),
         signal: expect.any(AbortSignal),

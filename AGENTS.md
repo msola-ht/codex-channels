@@ -102,7 +102,7 @@ Surface -> Application/Core <- Codex Client
 - 仓库必须记录并校验生成类型对应的精确 Codex CLI 版本。
 - 升级协议时先审查生成差异，再更新 `codex-protocol` 的受控导出、实现和测试。
 - 稳定业务代码不得依赖实验生成参数才会出现的字段。唯一例外是当前锁定
-  `codex-cli 0.146.1` 的官方 Plan 模式：只允许使用
+  `codex-cli 0.147.0` 的官方 Plan 模式：只允许使用
   `collaborationMode/list` 和 `turn/start.collaborationMode`，必须通过
   `--experimental` 生成类型、从 `codex-protocol` 受控导出，并由真实 App Server
   合同测试覆盖；不得借此接入或暴露其他实验方法、字段或通知。

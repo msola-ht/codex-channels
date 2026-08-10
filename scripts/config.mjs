@@ -57,8 +57,8 @@ export async function runConfig({
         },
         {
           value: "metrics",
-          label: "多设备指标",
-          hint: "本机接入中心与全局视图",
+          label: "指标设置",
+          hint: "本地保留、中心接入与全局视图",
         },
         ...(telegramConfigured
           ? [{
@@ -165,7 +165,7 @@ async function runMetricsSettings({
 }) {
   while (true) {
     const section = await prompts.select({
-      message: "选择多设备指标设置",
+      message: "选择指标设置",
       showInstructions: false,
       options: [
         {
@@ -182,6 +182,11 @@ async function runMetricsSettings({
           value: "sync_params",
           label: "上报参数",
           hint: "上报间隔与单批条数上限",
+        },
+        {
+          value: "storage",
+          label: "本地保留策略",
+          hint: "保留天数与最大记录数",
         },
         {
           value: "disable",
@@ -218,6 +223,16 @@ async function runMetricsSettings({
       if (isBackResult(result)) continue;
       return result;
     }
+    if (section === "storage") {
+      const result = await runMetricsStorage({
+        environment,
+        output,
+        prompts,
+        writeConfig,
+      });
+      if (isBackResult(result)) continue;
+      return result;
+    }
     if (section === "disable") {
       const result = await runDisableConnection({
         environment,
@@ -229,6 +244,48 @@ async function runMetricsSettings({
     }
     throw new Error(`未知多设备指标设置：${String(section)}`);
   }
+}
+
+async function runMetricsStorage({ environment, output, prompts, writeConfig }) {
+  const { configPath } = requireUserConfig(environment);
+  const document = readGatewayConfig(configPath);
+  const metrics = table(document.metrics);
+  const storage = table(metrics.storage);
+  const retentionDays = await prompts.text({
+    message: "本地指标保留天数（1–3650）",
+    initialValue: String(storage.retention_days ?? 365),
+    validate: (value) => boundedIntegerMessage(value, 1, 3650),
+  });
+  if (prompts.isCancel(retentionDays)) return { action: "back" };
+  const maxRows = await prompts.text({
+    message: "本地指标最大行数（1000–10000000）",
+    initialValue: String(storage.max_rows ?? 1_000_000),
+    validate: (value) => boundedIntegerMessage(value, 1_000, 10_000_000),
+  });
+  if (prompts.isCancel(maxRows)) return { action: "back" };
+  const next = {
+    retention_days: Number(retentionDays),
+    max_rows: Number(maxRows),
+  };
+  if (
+    boundedIntegerMessage(next.retention_days, 1, 3650) !== undefined
+    || boundedIntegerMessage(next.max_rows, 1_000, 10_000_000) !== undefined
+  ) {
+    throw new Error("本地指标保留策略无效");
+  }
+  metrics.storage = next;
+  document.metrics = metrics;
+  writeConfig(configPath, document);
+  output.write(`本地指标保留策略已更新：${configPath}\n`);
+  output.write("配置将在重启 Gateway 后生效。需要立即清理时运行 codexc metrics cleanup。\n");
+  return { storage: next, configPath };
+}
+
+function boundedIntegerMessage(value, minimum, maximum) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= minimum && parsed <= maximum
+    ? undefined
+    : `请输入 ${minimum}–${maximum} 之间的整数`;
 }
 
 async function runConnectToCenter({

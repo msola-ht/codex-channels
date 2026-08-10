@@ -134,6 +134,8 @@ describe("ConversationCommandService", () => {
     await commands.execute(target, "metrics", "providers");
     await commands.execute(target, "metrics", "models 30d");
     await commands.execute(target, "metrics", "errors 7d");
+    await commands.execute(target, "metrics", "providers yesterday");
+    await commands.execute(target, "metrics", "global all");
 
     expect(requestMetrics).toHaveBeenNthCalledWith(1, target, { view: "session" });
     expect(requestMetrics).toHaveBeenNthCalledWith(2, target, { view: "session" });
@@ -152,6 +154,14 @@ describe("ConversationCommandService", () => {
     expect(requestMetrics).toHaveBeenNthCalledWith(6, target, {
       view: "errors",
       range: "7d",
+    });
+    expect(requestMetrics).toHaveBeenNthCalledWith(7, target, {
+      view: "providers",
+      range: "yesterday",
+    });
+    expect(requestMetrics).toHaveBeenNthCalledWith(8, target, {
+      view: "global",
+      range: "all",
     });
     await expect(commands.execute(target, "metrics", "provider 7d"))
       .rejects.toMatchObject({ code: "metrics.usage" });

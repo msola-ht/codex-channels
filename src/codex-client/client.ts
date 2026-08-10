@@ -46,6 +46,7 @@ import type {
   ThreadReadResponse,
   ThreadResumeResponse,
   ThreadStartResponse,
+  ThreadSectionMoveResponse,
   ThreadUnsubscribeResponse,
   ThreadUnarchiveResponse,
   TurnStartResponse,
@@ -59,7 +60,11 @@ import type {
   ThreadSnapshot,
 } from "../session-routing/index.js";
 import { JsonRpcClient, type RpcNotification, type ServerRequestHandler } from "./json-rpc.js";
-import { toThreadSession, toThreadSnapshot } from "./thread-adapter.js";
+import {
+  PINNED_THREAD_SECTION_ID,
+  toThreadSession,
+  toThreadSnapshot,
+} from "./thread-adapter.js";
 import {
   toProtocolReviewTarget,
   toProtocolTurnInput,
@@ -320,11 +325,37 @@ export class CodexAppServerClient implements
   }
 
   async setThreadPinned(threadId: string, pinned: boolean): Promise<void> {
-    const response = await this.rpc.request<ThreadMetadataUpdateResponse>({
+    const observed = await this.rpc.request<ThreadReadResponse>({
+      method: "thread/read",
+      params: { threadId, includeTurns: false },
+    }, { retryOverload: true });
+    const current = toThreadSnapshot(observed.thread);
+    if (current.id !== threadId) {
+      throw new Error("Codex Thread 固定状态更新目标不一致");
+    }
+    if (current.isPinned === pinned) {
+      return;
+    }
+    const materialized = await this.rpc.request<ThreadMetadataUpdateResponse>({
       method: "thread/metadata/update",
-      params: { threadId, isPinned: pinned },
+      params: {
+        threadId,
+        gitInfo: { sha: observed.thread.gitInfo?.sha ?? null },
+      },
     }, { retryOverload: false });
-    const updated = toThreadSnapshot(response.thread);
+    const stored = toThreadSnapshot(materialized.thread);
+    if (stored.id !== threadId) {
+      throw new Error("Codex Thread 固定状态更新目标不一致");
+    }
+    await this.rpc.request<ThreadSectionMoveResponse>({
+      method: "thread/section/move",
+      params: {
+        threadId,
+        sectionId: pinned ? PINNED_THREAD_SECTION_ID : null,
+        beforeThreadId: null,
+      },
+    }, { retryOverload: false });
+    const updated = await this.readThread(threadId);
     if (updated.id !== threadId || updated.isPinned !== pinned) {
       throw new Error("Codex Thread 固定状态更新结果不一致");
     }

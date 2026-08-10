@@ -97,6 +97,10 @@ export interface GatewayConfig {
     batchSize: number;
     intervalSeconds: number;
   };
+  metricsStorage: {
+    retentionDays: number;
+    maxRows: number;
+  };
   metricsCenter?: {
     enabled: boolean;
     host: "127.0.0.1" | "::1" | "0.0.0.0";
@@ -297,6 +301,10 @@ function loadValidatedConfigDocument(
     approvalTimeoutMs: raw.approval.timeout_seconds * 1000,
     logLevel: raw.logging.level,
     ...(raw.webui ? { webui: raw.webui } : {}),
+    metricsStorage: {
+      retentionDays: raw.metrics.storage.retention_days,
+      maxRows: raw.metrics.storage.max_rows,
+    },
     metricsSync: {
       enabled: raw.metrics.sync.enabled,
       ...(raw.metrics.sync.endpoint

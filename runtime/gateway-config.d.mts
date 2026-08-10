@@ -65,6 +65,10 @@ export interface GatewayConfigDocument {
     token?: string;
   };
   metrics: {
+    storage: {
+      retention_days: number;
+      max_rows: number;
+    };
     sync: {
       enabled: boolean;
       endpoint?: string;

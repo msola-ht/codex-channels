@@ -84,6 +84,7 @@ describe("codexc CLI", () => {
       [["metrics", "turns", "--help"], "用法：codexc metrics turns"],
       [["metrics", "threads", "--help"], "用法：codexc metrics threads"],
       [["metrics", "reset", "-h"], "用法：codexc metrics reset"],
+      [["metrics", "cleanup", "--help"], "用法：codexc metrics cleanup"],
       [["metrics", "prune", "--help"], "用法：codexc metrics prune"],
       [["metrics", "report", "-h"], "用法：codexc metrics report"],
       [["metrics", "export", "--help"], "用法：codexc metrics export"],

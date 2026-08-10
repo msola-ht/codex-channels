@@ -34,17 +34,20 @@
 ## /metrics 命令
 
 `/metrics` 可查看当前 Thread 最近 Turn 的运行聚合、指标库保留范围内的 Thread 会话累计及最近
-一次视觉等直接 API 请求。`/metrics global|providers|models 24h|7d|30d` 把 Codex Provider 与
+一次视觉等直接 API 请求。`/metrics global|providers|models <范围>` 把 Codex Provider 与
 直接 API 请求按同一口径汇总，并显示缓存、输出速度及首段回复延迟的有效样本覆盖率；
 `/metrics errors` 按提供商、模型、状态、HTTP 状态和错误类型汇总异常请求，显示异常率与最近
 发生时间。它不会替代 `/status` 的 App Server 上下文统计。
+范围支持自然日 `today` / `yesterday`、自然周期 `this-week` / `last-week` / `this-month` /
+`last-month`、滚动窗口 `24h` / `7d` / `30d` / `90d` / `365d` 和 `all`。自然范围按 Gateway
+服务器本地时区计算，周一为每周第一天。
 未发起上游请求的 Turn 级失败（例如 OpenAI 用量上限拒绝 turn/start）同样作为无 Token/费用的
 failed 请求计入异常记录，避免这类错误完全不可见。
 
 统计代理把上下文压缩（旧版 `/responses/compact` 与 remote compaction v2）保留为
 `compact` 操作：其请求、Token 与参考费用继续计入总计，同时在完成卡片、会话指标和全局/提供商/
 模型汇总中单列压缩次数、实际请求模型、Token 与参考费用。这里的模型是代理实际观测到的请求模型。
-当前锁定的 Codex CLI 0.146.1 没有独立压缩模型配置；常规压缩复用 Turn 模型，模型切换兼容压缩
+当前锁定的 Codex CLI 0.147.0 没有独立压缩模型配置；常规压缩复用 Turn 模型，模型切换兼容压缩
 可能先使用上一模型，并在受支持的失败条件下回退当前模型。
 
 `/metrics` 在最近运行聚合和会话累计中，对所有 Provider 按本机实际捕获的请求折算均价

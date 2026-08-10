@@ -76,7 +76,7 @@ const helpText = {
 初始化与诊断：
   init                         初始化用户目录和配置
   setup                        选择并配置 Gateway 模块
-  config                       打开配置与设置菜单（显示、系统、工作区、多设备指标、消息格式）
+  config                       打开配置与设置菜单（显示、系统、工作区、指标、消息格式）
   doctor                       检查安装、配置、Codex、Linux 沙箱与服务
 
 项目与会话：
@@ -85,7 +85,8 @@ const helpText = {
   rules <init|check>           生成或检查项目 Codex 命令预设
   agents <enable-deepseek|disable-deepseek|status>   配置 multi_agent_v2 的 DeepSeek 子代理角色
   state upgrade               显式升级 Gateway 状态数据库
-  metrics <run|turns|threads|report|export|status|reset>   模型请求指标：本次运行、会话明细、会话归纳、汇报、导出、状态、重建
+  metrics <run|turns|threads|report|export|status|reset>   查询、导出或重建模型请求指标
+  metrics cleanup             备份并按保留策略清理旧指标
   channel send-image          提交本地图片，由 Gateway 发送回当前渠道会话
   webui                        启动本地只读指标 WebUI（默认回环地址）
   center [config|info]          多设备指标中心：启动服务、交互配置或查看地址
@@ -206,12 +207,13 @@ const helpText = {
   codexc metrics run <Thread ID> [--format markdown|json|csv]   本次运行汇总（最近 Turn + 会话累计）
   codexc metrics turns <Thread ID> [--format markdown|json|csv]   会话每次对话明细
   codexc metrics threads [--format markdown|json|csv]   列出有指标的会话
-  codexc metrics report [--range 24h|7d|30d] [--group global|providers|models] [--format markdown|json|csv]   聚合汇报
-  codexc metrics export [--range 24h|7d|30d] [--format json|csv|markdown] [--thread Thread ID]   请求明细导出
+  codexc metrics report [--range 时间范围 | --from 日期 --to 日期] [--group global|providers|models] [--format markdown|json|csv]   聚合汇报
+  codexc metrics export [--range 时间范围 | --from 日期 --to 日期] [--format json|csv|markdown] [--thread Thread ID]   请求明细导出
   codexc metrics status   指标数据库状态
   codexc metrics upgrade  备份并升级指标库（需 Gateway 停止）
   codexc metrics reset    备份并重建指标库（需 Gateway 停止）
   codexc metrics sync-reset   备份并清零多端上报水位，重放修复中心历史
+  codexc metrics cleanup [--keep-days 天数] [--max-rows 行数]   按策略备份并清理旧指标
   codexc metrics prune <provider>   备份并清理指定提供商请求指标（自动重启 Gateway 与中心）`,
   channel: `用法：codexc channel <send-image>
 
@@ -276,10 +278,14 @@ const helpText = {
 provider 当前支持 openai、deepseek。备份并删除本地与中心库中该提供商全部请求行，随后
 自动重启 Gateway 与中心服务（即使任一步骤失败也会尝试把服务拉起来）。OpenAI 额度重置
 后可用 openai 从零重新统计用量；备份保留在指标库同目录的 *.<provider>-prune-*.bak。`,
-  "metrics.report": `用法：codexc metrics report [--range <24h|7d|30d>] [--group <global|providers|models>] [--format markdown|json|csv]
+  "metrics.cleanup": `用法：codexc metrics cleanup [--before YYYY-MM-DD | --keep-days 天数] [--max-rows 行数] [--vacuum] [--restart-gateway]
+
+按配置 [metrics.storage] 或命令行覆盖值清理最旧请求指标。默认要求 Gateway 已停止；
+加 --restart-gateway 自动停止并重新启动。清理前创建 0600 备份；--vacuum 会立即回收文件空间。`,
+  "metrics.report": `用法：codexc metrics report [--range <today|yesterday|this-week|last-week|this-month|last-month|24h|7d|30d|90d|365d|all> | --from YYYY-MM-DD --to YYYY-MM-DD] [--group <global|providers|models>] [--format markdown|json|csv]
 
 只读输出汇报；默认最近 30 天并按模型分组，写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。`,
-  "metrics.export": `用法：codexc metrics export [--range <24h|7d|30d>] [--format <json|csv|markdown>] [--thread <Thread ID>]
+  "metrics.export": `用法：codexc metrics export [--range <today|yesterday|this-week|last-week|this-month|last-month|24h|7d|30d|90d|365d|all> | --from YYYY-MM-DD --to YYYY-MM-DD] [--format <json|csv|markdown>] [--thread <Thread ID>]
 
 只读导出脱敏请求记录；默认最近 30 天、JSON 格式并写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。--thread 只导出指定 Thread。`,
   version: "用法：codexc version",
@@ -1299,6 +1305,7 @@ async function metrics(args) {
     showSubcommandHelp(args, "upgrade", "metrics.upgrade") ||
     showSubcommandHelp(args, "reset", "metrics.reset") ||
     showSubcommandHelp(args, "sync-reset", "metrics.sync_reset") ||
+    showSubcommandHelp(args, "cleanup", "metrics.cleanup") ||
     showSubcommandHelp(args, "prune", "metrics.prune") ||
     showSubcommandHelp(args, "report", "metrics.report") ||
     showSubcommandHelp(args, "export", "metrics.export")) {
@@ -1314,10 +1321,10 @@ async function metrics(args) {
     return;
   }
   if (
-    !new Set(["run", "turns", "threads", "status", "upgrade", "reset", "sync-reset", "prune", "report", "export"])
+    !new Set(["run", "turns", "threads", "status", "upgrade", "reset", "sync-reset", "cleanup", "prune", "report", "export"])
       .has(subcommand)
   ) {
-    throw new Error("用法：codexc metrics <run|turns|threads|status|upgrade|reset|sync-reset|prune|report|export>");
+    throw new Error("用法：codexc metrics <run|turns|threads|status|upgrade|reset|sync-reset|cleanup|prune|report|export>");
   }
   if (subcommand === "status" && rest.length === 0) {
     run(
@@ -1334,6 +1341,12 @@ async function metrics(args) {
   }
   if (subcommand === "sync-reset" && rest.length === 1 && rest[0] === "--restart-gateway") {
     runScript("scripts/metrics-database.mjs", ["sync-reset-restart"]);
+    return;
+  }
+  if (subcommand === "cleanup") {
+    const restart = rest.includes("--restart-gateway");
+    const cleanupArgs = rest.filter((argument) => argument !== "--restart-gateway");
+    runScript("scripts/metrics-database.mjs", [restart ? "cleanup-restart" : "cleanup", ...cleanupArgs]);
     return;
   }
   if (subcommand === "prune" && rest.length !== 1) {
@@ -1489,6 +1502,11 @@ async function runMetricsMenu() {
         hint: "查看指标库路径、Schema 与记录数",
       },
       {
+        value: "cleanup",
+        label: "清理旧指标",
+        hint: "按自定天数和最大行数备份清理",
+      },
+      {
         value: "reset",
         label: "重置指标库",
         hint: "备份并重建（需 Gateway 停止）",
@@ -1519,6 +1537,44 @@ async function runMetricsMenu() {
       return;
     }
     runScript("scripts/metrics-database.mjs", ["reset"]);
+    return;
+  }
+  if (action === "cleanup") {
+    const storage = table(table(configuredEnvironment().document.metrics).storage);
+    const keepDays = await clackPrompts.text({
+      message: "保留最近多少天",
+      initialValue: String(storage.retention_days ?? 365),
+      validate: positiveIntegerPrompt,
+    });
+    if (clackPrompts.isCancel(keepDays)) {
+      clackPrompts.cancel("已取消");
+      return;
+    }
+    const maxRows = await clackPrompts.text({
+      message: "最多保留多少行",
+      initialValue: String(storage.max_rows ?? 1_000_000),
+      validate: positiveIntegerPrompt,
+    });
+    if (clackPrompts.isCancel(maxRows)) {
+      clackPrompts.cancel("已取消");
+      return;
+    }
+    const vacuum = await clackPrompts.confirm({
+      message: "清理后立即压缩 SQLite 文件？",
+      initialValue: false,
+    });
+    if (clackPrompts.isCancel(vacuum)) {
+      clackPrompts.cancel("已取消");
+      return;
+    }
+    runScript("scripts/metrics-database.mjs", [
+      "cleanup-restart",
+      "--keep-days",
+      String(keepDays),
+      "--max-rows",
+      String(maxRows),
+      ...(vacuum ? ["--vacuum"] : []),
+    ]);
     return;
   }
   if (action === "run") {
@@ -1589,15 +1645,7 @@ async function runMetricsMenu() {
     return;
   }
   if (action === "report") {
-    const range = await clackPrompts.select({
-      message: "时间范围",
-      showInstructions: false,
-      options: [
-        { value: "24h", label: "最近 24 小时" },
-        { value: "7d", label: "最近 7 天" },
-        { value: "30d", label: "最近 30 天" },
-      ],
-    });
+    const range = await selectMetricsRange();
     if (clackPrompts.isCancel(range)) {
       clackPrompts.cancel("已取消");
       return;
@@ -1632,15 +1680,7 @@ async function runMetricsMenu() {
     return;
   }
   if (action === "export") {
-    const range = await clackPrompts.select({
-      message: "时间范围",
-      showInstructions: false,
-      options: [
-        { value: "24h", label: "最近 24 小时" },
-        { value: "7d", label: "最近 7 天" },
-        { value: "30d", label: "最近 30 天" },
-      ],
-    });
+    const range = await selectMetricsRange();
     if (clackPrompts.isCancel(range)) {
       clackPrompts.cancel("已取消");
       return;
@@ -1682,6 +1722,32 @@ async function selectExportFormat() {
       { value: "csv", label: "CSV" },
     ],
   });
+}
+
+function selectMetricsRange() {
+  return clackPrompts.select({
+    message: "时间范围",
+    showInstructions: false,
+    options: [
+      { value: "today", label: "今天" },
+      { value: "yesterday", label: "昨天" },
+      { value: "this-week", label: "本周" },
+      { value: "last-week", label: "上周" },
+      { value: "this-month", label: "本月" },
+      { value: "last-month", label: "上月" },
+      { value: "24h", label: "最近 24 小时" },
+      { value: "7d", label: "最近 7 天" },
+      { value: "30d", label: "最近 30 天" },
+      { value: "90d", label: "最近 90 天" },
+      { value: "365d", label: "最近 365 天" },
+      { value: "all", label: "全部保留历史" },
+    ],
+  });
+}
+
+function positiveIntegerPrompt(value) {
+  const number = Number(String(value ?? "").trim());
+  return Number.isSafeInteger(number) && number > 0 ? undefined : "请输入正整数";
 }
 
 function configuredEnvironment() {

@@ -36,9 +36,10 @@ import type {
 } from "./request-metrics.js";
 
 const schemaVersion = modelRequestMetricsSchemaVersion;
-const retentionMs = 30 * 24 * 60 * 60 * 1_000;
+const dayMs = 24 * 60 * 60 * 1_000;
+const defaultRetentionDays = 365;
+const defaultMaximumRows = 1_000_000;
 const weeklyWindowMs = 7 * 24 * 60 * 60 * 1_000;
-const maximumRows = 100_000;
 const cleanupInterval = 100;
 const maximumAggregationGroups = 20;
 const pageSortSql = {
@@ -299,12 +300,26 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
   private closed = false;
   private rowCount = 0;
   private recordsSinceCleanup = 0;
+  private readonly retentionMs: number;
+  private readonly maximumRows: number;
 
   constructor(
     readonly path: string,
     nowMs: number = Date.now(),
-    options: { readOnly?: boolean } = {},
+    options: {
+      readOnly?: boolean;
+      retentionDays?: number;
+      maximumRows?: number;
+    } = {},
   ) {
+    this.retentionMs = positiveInteger(
+      options.retentionDays ?? defaultRetentionDays,
+      "指标保留天数",
+    ) * dayMs;
+    this.maximumRows = positiveInteger(
+      options.maximumRows ?? defaultMaximumRows,
+      "指标最大行数",
+    );
     if (options.readOnly) {
       const database = new DatabaseSync(path, { readOnly: true });
       this.database = database;
@@ -1451,13 +1466,13 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     try {
       this.database.prepare(`
         DELETE FROM model_request_metrics WHERE recorded_at_ms < ?
-      `).run(Math.max(0, nowMs - retentionMs));
+      `).run(Math.max(0, nowMs - this.retentionMs));
       this.database.prepare(`
         DELETE FROM model_request_metrics
         WHERE id <= COALESCE((
           SELECT id FROM model_request_metrics ORDER BY id DESC LIMIT 1 OFFSET ?
         ), 0)
-      `).run(maximumRows);
+      `).run(this.maximumRows);
       this.database.exec("COMMIT");
       this.rowCount = this.currentCount();
       this.recordsSinceCleanup = 0;
@@ -1470,6 +1485,13 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
   private requireOpen(): void {
     if (this.closed) throw new Error("模型请求指标数据库已关闭");
   }
+}
+
+function positiveInteger(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${label}必须是正整数`);
+  }
+  return value;
 }
 
 export function modelRequestMetricsDatabasePath(stateDatabasePath: string): string {

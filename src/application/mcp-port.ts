@@ -1,4 +1,9 @@
-export type McpAuthStatus = "unsupported" | "notLoggedIn" | "bearerToken" | "oAuth";
+export type McpAuthStatus =
+  | "unknown"
+  | "unsupported"
+  | "notLoggedIn"
+  | "bearerToken"
+  | "oAuth";
 
 export interface McpServerSummary {
   name: string;

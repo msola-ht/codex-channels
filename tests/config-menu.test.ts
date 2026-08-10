@@ -632,6 +632,37 @@ describe("Codex Connect config menu", () => {
     expect(output.join("")).toContain("上报参数已更新");
   });
 
+  it("updates the local metrics retention policy through the menu", async () => {
+    const fixture = createFixture();
+    const output: string[] = [];
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("metrics")
+        .mockResolvedValueOnce("storage"),
+      text: vi.fn()
+        .mockResolvedValueOnce("90")
+        .mockResolvedValueOnce("250000"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    const result = await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts,
+    });
+
+    expect(result).toEqual({
+      storage: { retention_days: 90, max_rows: 250_000 },
+      configPath: fixture.configPath,
+    });
+    expect(readGatewayConfig(fixture.configPath).metrics).toMatchObject({
+      storage: { retention_days: 90, max_rows: 250_000 },
+    });
+    expect(output.join("")).toContain("本地指标保留策略已更新");
+  });
+
   it("disables the metrics connection through the menu", async () => {
     const fixture = createFixture();
     const document = readGatewayConfig(fixture.configPath);

@@ -106,7 +106,7 @@ price_currency = "cny"
 ### 多设备指标同步
 
 每台设备可把本地脱敏指标增量上报到中心汇总。运行 `codexc config` 选择
-「多设备指标 → 本机接入中心」即可配置上报与 WebUI 全局视图（写入 `[metrics.sync]` 和
+「指标设置 → 本机接入中心」即可配置上报与 WebUI 全局视图（写入 `[metrics.sync]` 和
 `[metrics.view]`）；Gateway 定时按水位上报请求记录和子代理标注，失败自动退避重试。
 VPS 上用 `codexc center config` 配置 `[metrics.center]` 的独立设备上报令牌与只读查看令牌、
 `codexc center info` 查看中心地址，再运行 `codexc center` 校验令牌并写入中心 SQLite；每台设备的 WebUI 控制台
@@ -290,11 +290,14 @@ codexc metrics threads                            # 会话归纳总览（模型�
 codexc metrics turns <Thread ID>                  # 导出会话每次对话汇总
 codexc metrics run <Thread ID>                    # 本次运行汇总（最近运行 + 会话累计）
 codexc metrics report --range 30d --group models  # 聚合汇报
+codexc metrics report --range yesterday --group providers --stdout # 昨天自然日
+codexc metrics report --from 2026-08-01 --to 2026-08-08 --stdout   # 自定义自然日范围
 codexc metrics export --range 30d --format json   # 脱敏明细导出；--thread 可按 Thread 过滤
 codexc service stop gateway
 codexc metrics upgrade --restart-gateway          # 自动停 Gateway、备份升级并重新启动
 codexc metrics reset                              # 先保留 0600 旧库备份，再重建
 codexc metrics sync-reset --restart-gateway       # 备份并清零多端上报水位，重放修复中心历史
+codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策略清理
 codexc metrics prune openai                       # 备份并清理指定提供商请求指标（自动重启 Gateway 与中心）
 codexc service start gateway
 ```
@@ -303,7 +306,10 @@ codexc service start gateway
 json，其余默认 markdown），默认写入 `~/.codex-connect/output/<日期>/`，文件名统一为
 `<命令>[-短ThreadID]-<YYYYMMDD-HHmmss>[-序号].<格式>`，同一秒重名时保留两份并追加序号；
 加 `--stdout` 输出到标准输出。导出使用只读
-连接，可在 Gateway 运行时执行；支持 `24h`、`7d`、`30d`，包含固定格式版本、时间范围和脱敏请求
+连接，可在 Gateway 运行时执行；`--range` 支持 `today`、`yesterday`、`this-week`、`last-week`、
+`this-month`、`last-month`、`24h`、`7d`、`30d`、`90d`、`365d` 和 `all`；CLI 的 `report`、
+`export` 还支持同时使用 `--from YYYY-MM-DD --to YYYY-MM-DD` 查询服务器本地时区的自然日范围。
+输出包含固定格式版本、时间范围和脱敏请求
 字段，不包含提示词、消息、图片、响应正文、凭据或上游响应 ID。`report` 与 `export` 的
 Markdown、JSON、CSV 还包含 OpenAI 统计代理最后观测到的当前周额度区间和每 1% 采样状态；JSON 格式版本为 v2。
 `run`、`turns`、`threads` 和 `report` 会单列上下文压缩模型、请求数、Token 与参考费用；`export`
@@ -320,6 +326,9 @@ Markdown 报表的费用按 `display.price_currency` 统一换算显示（人民
 用于归档并重建不支持的版本。两者都不修改会话状态库，Gateway 运行时会拒绝执行。
 `metrics prune <provider>` 备份本地与中心指标库后，删除其中指定提供商（当前支持 openai、
 deepseek）的全部请求行并自动重启 Gateway 与中心服务，适合额度重置后重新开始统计。
+本地库默认保留 365 天且最多 1,000,000 行，可通过 `[metrics.storage]` 的 `retention_days`、
+`max_rows` 调整；达到任一上限后每 100 次写入清理最旧记录。`metrics cleanup` 可按配置或
+`--before`、`--keep-days`、`--max-rows` 立即备份并清理，`--vacuum` 立即回收文件空间。
 
 ### 常用聊天命令
 
@@ -327,7 +336,7 @@ deepseek）的全部请求行并自动重启 Gateway 与中心服务，适合额
 - Workspace：`/workspace`、`/workspaceperm`
 - 运行：`/status`、`/stop`、`/queue <描述>`、`/compact`、`/fork`、`/review`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
-- 状态：`/diff`、`/usage`、`/metrics [session|global|providers|models|errors] [24h|7d|30d]`、`/limits`、`/permissions`、`/goal`
+- 状态：`/diff`、`/usage`、`/metrics [session|global|providers|models|errors] [today|yesterday|this-week|last-week|this-month|last-month|24h|7d|30d|90d|365d|all]`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/agents [角色名称或序号 任务]`、`/skill [名称或序号 任务]`、`/mcp`、`/plugins`、`/rules`
 - 图片：`/vision <下一批要求>`；多图：`/vision <2–4> <要求>`，收齐自动提交；失败重试：`/vision retry`；取消：`/vision cancel`
 - 帮助：`/help`、`/whoami`

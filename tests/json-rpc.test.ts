@@ -4,6 +4,11 @@ import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { BaseTransport } from "../src/codex-client/transport.js";
 
+const pinnedThreadSection = {
+  id: "01984de2-8f74-7c91-a3b2-5c5e937cf318",
+  name: "Pinned",
+};
+
 function appServerThread(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
@@ -14,7 +19,8 @@ function appServerThread(
     parentThreadId: null,
     preview: "测试 Thread",
     ephemeral: false,
-    isPinned: false,
+    section: null,
+    sectionEnteredAt: null,
     modelProvider: "openai",
     createdAt: 1,
     updatedAt: 1,
@@ -148,6 +154,7 @@ class FakeTransport extends BaseTransport {
   disconnectAfterInitialized = false;
   threadListData: Array<Record<string, unknown>> = [];
   resumeThreadData: Record<string, unknown> = appServerThread();
+  threadReadData: Record<string, unknown> = appServerThread();
   goal = appServerGoal();
 
   async connect(): Promise<void> {}
@@ -250,13 +257,26 @@ class FakeTransport extends BaseTransport {
         })),
       );
     } else if (decoded.method === "thread/metadata/update") {
-      const params = decoded.params as { isPinned?: boolean };
       queueMicrotask(() =>
         this.emitMessage(JSON.stringify({
           id: decoded.id,
-          result: {
-            thread: appServerThread({ isPinned: params.isPinned }),
-          },
+          result: { thread: this.threadReadData },
+        })),
+      );
+    } else if (decoded.method === "thread/section/move") {
+      const params = decoded.params as { sectionId: string | null };
+      this.threadReadData = appServerThread({
+        section: params.sectionId === pinnedThreadSection.id ? pinnedThreadSection : null,
+        sectionEnteredAt: params.sectionId === null ? null : 2,
+      });
+      queueMicrotask(() =>
+        this.emitMessage(JSON.stringify({ id: decoded.id, result: {} })),
+      );
+    } else if (decoded.method === "thread/read") {
+      queueMicrotask(() =>
+        this.emitMessage(JSON.stringify({
+          id: decoded.id,
+          result: { thread: this.threadReadData },
         })),
       );
     } else if (decoded.method === "model/list") {
@@ -518,6 +538,9 @@ describe("JsonRpcClient", () => {
           experimentalApi: true,
           requestAttestation: false,
           optOutNotificationMethods: null,
+          extensions: {
+            "openai/form": {},
+          },
         },
       },
     });
@@ -748,16 +771,16 @@ describe("JsonRpcClient", () => {
       .rejects.toThrow("Codex Thread 响应缺少有效 sessionId");
   });
 
-  it("fails closed when an official Thread response lacks pin state", async () => {
+  it("fails closed when an official Thread response has invalid section state", async () => {
     const transport = new FakeTransport();
-    transport.threadListData = [appServerThread({ isPinned: undefined })];
+    transport.threadListData = [appServerThread({ section: { name: "Pinned" } })];
     const client = new CodexAppServerClient(new JsonRpcClient(transport), {
       sandbox: "workspace-write",
     });
     await client.connect();
 
     await expect(client.listThreads("/tmp/project"))
-      .rejects.toThrow("Codex Thread 响应缺少有效 isPinned");
+      .rejects.toThrow("Codex Thread 响应缺少有效 section id");
   });
 
   it("passes stable search/archive filters and uses explicit archive methods", async () => {
@@ -778,7 +801,13 @@ describe("JsonRpcClient", () => {
     expect(transport.sent.find((message) => message.method === "thread/unarchive")?.params)
       .toEqual({ threadId: "thread-1" });
     expect(transport.sent.find((message) => message.method === "thread/metadata/update")?.params)
-      .toEqual({ threadId: "thread-1", isPinned: true });
+      .toEqual({ threadId: "thread-1", gitInfo: { sha: null } });
+    expect(transport.sent.find((message) => message.method === "thread/section/move")?.params)
+      .toEqual({
+        threadId: "thread-1",
+        sectionId: pinnedThreadSection.id,
+        beforeThreadId: null,
+      });
   });
 
   it("reads account rate limits through the stable App Server method", async () => {
@@ -1074,10 +1103,26 @@ describe("JsonRpcClient", () => {
     ]);
   });
 
-  it("fails closed when MCP status lacks a required stable field", async () => {
+  it("preserves the official unknown MCP authentication status", async () => {
     const transport = new FakeTransport();
     transport.mcpPages = [{
       data: [appServerMcpStatus({ authStatus: "unknown" })],
+      nextCursor: null,
+    }];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listMcpServers()).resolves.toEqual([
+      { name: "local-tools", authStatus: "unknown", toolCount: 1 },
+    ]);
+  });
+
+  it("fails closed when MCP status lacks a required stable field", async () => {
+    const transport = new FakeTransport();
+    transport.mcpPages = [{
+      data: [appServerMcpStatus({ authStatus: "invalid" })],
       nextCursor: null,
     }];
     const client = new CodexAppServerClient(new JsonRpcClient(transport), {
@@ -1434,7 +1479,7 @@ describe("JsonRpcClient", () => {
     expect(transport.sent.find((message) => message.method === "turn/interrupt")?.params)
       .toEqual({ threadId: "thread-1", turnId: "turn-1" });
     expect(transport.sent.find((message) => message.method === "thread/metadata/update")?.params)
-      .toEqual({ threadId: "thread-1", isPinned: false });
+      .toEqual(undefined);
   });
 
   it("fails closed when a Goal response lacks a required stable field", async () => {

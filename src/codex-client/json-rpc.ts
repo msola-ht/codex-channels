@@ -107,6 +107,9 @@ export class JsonRpcClient {
             experimentalApi: true,
             requestAttestation: false,
             optOutNotificationMethods: null,
+            extensions: {
+              "openai/form": {},
+            },
           },
         },
       }, { retryOverload: false });

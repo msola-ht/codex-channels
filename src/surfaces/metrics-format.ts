@@ -2,6 +2,7 @@ import type {
   ConversationCommandResult,
   DisplayPriceCurrency,
   ExchangeRateSnapshot,
+  RequestMetricsTimeRange,
 } from "../application/index.js";
 
 import {
@@ -205,7 +206,7 @@ function formatErrorMetricsReport(
     : report.unsuccessfulRequestCount / report.requestCount * 100;
   const lines = [
     "## 请求指标 · 异常请求",
-    `范围：最近 ${formatMetricsRange(report.range)}`,
+    `范围：${formatMetricsRange(report.range)}`,
     "",
     `模型请求：${report.requestCount} 次`,
     `异常请求：${report.unsuccessfulRequestCount} 次`,
@@ -294,7 +295,7 @@ function formatAggregateMetricsReport(
   }[report.view];
   const lines = [
     `## 请求指标 · ${viewName}`,
-    `范围：最近 ${formatMetricsRange(report.range)}`,
+    `范围：${formatMetricsRange(report.range)}`,
     ...(exchangeRate ? formatExchangeRateLine(exchangeRate) : []),
   ];
   if (report.aggregate === null) {
@@ -622,8 +623,21 @@ function toReferenceCostDisplay(value: {
   };
 }
 
-function formatMetricsRange(range: "24h" | "7d" | "30d"): string {
-  return { "24h": "24 小时", "7d": "7 天", "30d": "30 天" }[range];
+function formatMetricsRange(range: RequestMetricsTimeRange): string {
+  return {
+    today: "今天",
+    yesterday: "昨天",
+    "this-week": "本周",
+    "last-week": "上周",
+    "this-month": "本月",
+    "last-month": "上月",
+    "24h": "最近 24 小时",
+    "7d": "最近 7 天",
+    "30d": "最近 30 天",
+    "90d": "最近 90 天",
+    "365d": "最近 365 天",
+    all: "全部历史",
+  }[range];
 }
 
 function formatMetricLatency(value: number): string {

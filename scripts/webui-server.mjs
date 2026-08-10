@@ -508,7 +508,7 @@ function parseRange(url) {
   try {
     return metricsRange(name, Date.now());
   } catch {
-    throw new ApiError(400, "invalid_range", "range 只支持 24h、7d 或 30d");
+    throw new ApiError(400, "invalid_range", "range 不支持该时间范围");
   }
 }
 

@@ -1121,7 +1121,7 @@ describe("SqliteModelRequestMetricsStore", () => {
     store.close();
   });
 
-  it("removes records older than thirty days when reopened", () => {
+  it("removes records older than a custom retention when reopened", () => {
     vi.useFakeTimers();
     const directory = temporaryDirectory();
     const path = join(directory, "request-metrics.sqlite3");
@@ -1131,10 +1131,28 @@ describe("SqliteModelRequestMetricsStore", () => {
     first.record(sample());
     first.close();
 
-    vi.setSystemTime(new Date("2026-02-01T00:00:00.001Z"));
-    const reopened = new SqliteModelRequestMetricsStore(path);
+    vi.setSystemTime(new Date("2026-04-02T00:00:00.001Z"));
+    const reopened = new SqliteModelRequestMetricsStore(path, undefined, {
+      retentionDays: 90,
+    });
 
     expect(reopened.count()).toBe(0);
+    reopened.close();
+  });
+
+  it("keeps only a custom maximum number of rows when reopened", () => {
+    const directory = temporaryDirectory();
+    const path = join(directory, "request-metrics.sqlite3");
+    const first = new SqliteModelRequestMetricsStore(path);
+    first.record(sample());
+    first.record({ ...sample(), threadId: "thread-2", turnId: "turn-2" });
+    first.close();
+
+    const reopened = new SqliteModelRequestMetricsStore(path, undefined, {
+      maximumRows: 1,
+    });
+
+    expect(reopened.count()).toBe(1);
     reopened.close();
   });
 

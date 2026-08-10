@@ -75,6 +75,11 @@ level = "info"
 # port = 8787
 # token = "你的_WebUI_访问令牌"
 
+[metrics.storage]
+# 本地指标自动保留策略；达到任一上限时删除最旧记录。
+retention_days = 365
+max_rows = 1000000
+
 [metrics.sync]
 # 多设备指标汇总：启用后本机把脱敏用量/费用增量上报到中心端点。
 # 启用时必须配置 endpoint 和 device_token；endpoint 使用 HTTPS，
