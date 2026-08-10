@@ -505,7 +505,7 @@ describe("Feishu conversation adapter", () => {
       "排查断线",
     );
     expect(fixture.sent[0]?.text).toContain("1. systematic-debugging");
-    expect(fixture.sent[1]?.text).toContain("已使用 Skill 开始任务");
+    expect(fixture.sent).toHaveLength(1);
   });
 
   it("turns workspace permission updates into clickable card choices", async () => {

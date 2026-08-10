@@ -303,6 +303,16 @@ export function formatConversationCommandOutcome(
   }
 }
 
+export function isTurnLifecycleAcknowledgedOutcome(
+  outcome: Extract<ConversationCommandResult, { kind: "outcome" }>["outcome"],
+): boolean {
+  return (
+    outcome.type === "skill.started"
+    || outcome.type === "plugin.started"
+    || outcome.type === "agents.started"
+  ) && !outcome.steered;
+}
+
 function formatTakeoverSource(surface: string): string {
   switch (surface) {
     case "telegram":

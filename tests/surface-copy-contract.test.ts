@@ -310,6 +310,43 @@ describe("shared surface copy contract", () => {
     expect(expected).not.toContain("21. 会话 21");
   });
 
+  it("leaves new extension task acknowledgement to the Turn lifecycle", () => {
+    const results: ConversationCommandResult[] = [
+      {
+        kind: "outcome",
+        outcome: {
+          type: "skill.started",
+          skillName: "review",
+          turnId: "turn-1",
+          steered: false,
+        },
+      },
+      {
+        kind: "outcome",
+        outcome: {
+          type: "plugin.started",
+          pluginName: "GitHub",
+          turnId: "turn-2",
+          steered: false,
+        },
+      },
+      {
+        kind: "outcome",
+        outcome: {
+          type: "agents.started",
+          roleName: "ds",
+          turnId: "turn-3",
+          steered: false,
+        },
+      },
+    ];
+
+    for (const result of results) {
+      expect(renderFeishuCommandResult(result)).toBeNull();
+      expect(renderWeixinCommandResult(result)).toBeNull();
+    }
+  });
+
   it("formats the complete shared status including weekly limits", () => {
     const status: ConversationStatus = {
       workspaceId: "main",

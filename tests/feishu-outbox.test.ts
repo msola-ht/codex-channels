@@ -1532,6 +1532,78 @@ describe("Feishu outbox", () => {
     }]);
   });
 
+  it("reuses the Turn start confirmation for the foreground Thread status", async () => {
+    const replies: Array<{ messageId: string; markdown: string }> = [];
+    const sendCard = vi.fn(async () => "om_status");
+    const updateCard = vi.fn(async () => {});
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        replyMarkdownCard: async (messageId, markdown) => {
+          replies.push({ messageId, markdown });
+          return "om_started";
+        },
+        sendCard,
+        updateCard,
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.prepareTurnReplyTarget("oc_chat", "om_origin");
+    outbox.handle({
+      type: "turn.started",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+    });
+    outbox.handle(threadStatus("active"));
+    outbox.handle(threadStatus("idle"));
+    await outbox.close();
+
+    expect(replies).toEqual([{
+      messageId: "om_origin",
+      markdown: "## 已开始处理。",
+    }]);
+    expect(sendCard).not.toHaveBeenCalled();
+    expect(updateCard).toHaveBeenCalledWith(
+      "om_started",
+      expect.objectContaining({
+        header: expect.objectContaining({ template: "green" }),
+      }),
+    );
+  });
+
+  it("does not add a Turn start card after an active Thread status card", async () => {
+    const sendMarkdownCard = vi.fn(async () => "om_started");
+    const sendCard = vi.fn(async () => "om_status");
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard,
+        sendCard,
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(threadStatus("active"));
+    outbox.handle({
+      type: "turn.started",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+    });
+    await outbox.close();
+
+    expect(sendCard).toHaveBeenCalledTimes(1);
+    expect(sendMarkdownCard).not.toHaveBeenCalled();
+  });
+
   it("does not create a standalone idle thread status card", async () => {
     const sendCard = vi.fn(async () => "om_status");
     const updateCard = vi.fn(async () => {});

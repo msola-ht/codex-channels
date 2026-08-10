@@ -215,14 +215,14 @@ export class FeishuConversationAdapter {
           command.name,
           command.argumentsText,
         );
-        this.notifyMarkdown(
-          message.target.conversationId,
-          renderFeishuCommandResult(
-            result,
-            this.inputOptions.priceCurrency,
-            this.inputOptions.exchangeRate?.() ?? null,
-          ),
+        const rendered = renderFeishuCommandResult(
+          result,
+          this.inputOptions.priceCurrency,
+          this.inputOptions.exchangeRate?.() ?? null,
         );
+        if (rendered !== null) {
+          this.notifyMarkdown(message.target.conversationId, rendered);
+        }
         return;
       }
       if (containsFeishuCopiedMessageLink(message.text)) {
@@ -411,14 +411,14 @@ export class FeishuConversationAdapter {
       if (choices) {
         return choices;
       }
-      this.notifyMarkdown(
-        target.conversationId,
-        renderFeishuCommandResult(
-          result,
-          this.inputOptions.priceCurrency,
-          this.inputOptions.exchangeRate?.() ?? null,
-        ),
+      const rendered = renderFeishuCommandResult(
+        result,
+        this.inputOptions.priceCurrency,
+        this.inputOptions.exchangeRate?.() ?? null,
       );
+      if (rendered !== null) {
+        this.notifyMarkdown(target.conversationId, rendered);
+      }
     } catch (error) {
       if (error instanceof FeishuOutputQueueError) {
         throw error;

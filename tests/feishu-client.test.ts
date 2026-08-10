@@ -823,7 +823,7 @@ describe("FeishuMessageClient", () => {
 
     await expect(
       client.replyMarkdownCard("om_origin", "**已开始处理。**"),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe("om_reply");
 
     expect(replyMessage).toHaveBeenCalledWith({
       path: { message_id: "om_origin" },
@@ -944,7 +944,7 @@ describe("FeishuMessageClient", () => {
 
     await expect(
       client.sendMarkdownCard("oc_chat", "**状态**\n\n- 正常"),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe("om_static");
 
     expect(createStreamingCard).toHaveBeenCalledWith({
       data: {

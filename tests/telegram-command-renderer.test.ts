@@ -9,6 +9,25 @@ import {
 import { formatRuntimeMcpStatusUpdate } from "../src/surfaces/runtime-status-format.js";
 
 describe("Telegram command renderer", () => {
+  it("does not duplicate the Turn lifecycle acknowledgement for a new Plugin task", async () => {
+    const reply = vi.fn(async () => undefined);
+
+    await renderTelegramCommandResult(
+      { reply } as unknown as Context,
+      {
+        kind: "outcome",
+        outcome: {
+          type: "plugin.started",
+          pluginName: "GitHub",
+          turnId: "turn-1",
+          steered: false,
+        },
+      },
+    );
+
+    expect(reply).not.toHaveBeenCalled();
+  });
+
   it("renders Bearer Token MCP authentication as information", async () => {
     const reply = vi.fn(async () => undefined);
 

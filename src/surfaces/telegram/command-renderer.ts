@@ -11,6 +11,7 @@ import {
   formatConversationArtifacts,
   formatConversationCollaborationMode,
   formatConversationCommandOutcome,
+  isTurnLifecycleAcknowledgedOutcome,
   formatConversationGoal,
   formatConversationLimits,
   formatConversationMetrics,
@@ -43,6 +44,9 @@ export async function renderTelegramCommandResult(
 ): Promise<void> {
   switch (result.kind) {
     case "outcome": {
+      if (isTurnLifecycleAcknowledgedOutcome(result.outcome)) {
+        return;
+      }
       const rendered = renderOutcome(result.outcome);
       if (rendered.expanded) {
         await replyTelegramPanel(context, rendered.text);

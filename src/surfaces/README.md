@@ -146,6 +146,7 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 同时保留渠道名称以便定位来源。`text-file-input.ts` 统一文件名安全校验、UTF-8 严格解码、
 BOM 清理、控制字符拒绝和有界流读取；平台下载与错误类型仍留在各自 Surface。
 `runtime-status-format.ts` 统一账户、额度与 MCP Server 运行状态的稳定中文语义和脱敏；
+Core 只把 MCP 启动失败、取消及异常恢复投递给 Surface，首次启动中和正常就绪保持静默；
 Telegram、飞书与微信分别通过 HTML 面板、CardKit Markdown 或按会话排序的纯文本气泡发送。
 `configuration-change-format.ts` 统一 Telegram、飞书与微信已有的配置热加载、重启、重装和失败通知；
 Workspace 操作提示只在 Telegram 实际提供切换按钮时声明可点击。
@@ -165,7 +166,9 @@ Adapter 负责。
 Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类型引入 Conversation Core。
 
 会话命令统一映射到 Application 的 `ConversationCommandService`；Surface 负责提取命令名和参数，
-并渲染类型化结果。普通文本、图片下载、平台帮助、身份查询和交互取消保留在平台边界。PNG/JPEG
+并渲染类型化结果。Skill、Plugin 与子代理新建 Turn 时由统一 `turn.started` 生命周期确认，命令结果
+不重复发送启动提示；追加到活动 Turn 时仍渲染明确确认。普通文本、图片下载、平台帮助、身份查询和
+交互取消保留在平台边界。PNG/JPEG
 的大小限制与内容签名校验由 `managed-image-store.ts` 在 Surface 内复用；
 一次性音频的 20 MiB、WAV/MP3/M4A/WebM/OGG 内容签名、`0700/0600` 私有暂存和一小时清理由
 `managed-audio-store.ts` 复用。两者通过内部 `managed-media-store.ts` 统一私有目录生命周期、

@@ -14,6 +14,7 @@ import {
   formatConversationArtifacts,
   formatConversationCollaborationMode,
   formatConversationCommandOutcome,
+  isTurnLifecycleAcknowledgedOutcome,
   formatConversationGoal,
   formatConversationLimits,
   formatConversationMetrics,
@@ -125,9 +126,12 @@ export function renderFeishuCommandResult(
     provider: string | null | undefined,
   ) => DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
-): string {
+): string | null {
   switch (result.kind) {
     case "outcome":
+      if (isTurnLifecycleAcknowledgedOutcome(result.outcome)) {
+        return null;
+      }
       return formatConversationCommandOutcome(result.outcome);
     case "sessions":
       return formatConversationSessions(result);

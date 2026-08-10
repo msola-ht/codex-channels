@@ -499,7 +499,9 @@ describe("Feishu Surface", () => {
       accountId: "cli_0123456789abcdef",
       conversationId: "oc_chat",
     }, "github@local", "检查当前 PR");
-    expect(fixture.sent.at(-1)?.text).toContain("已使用 Plugin 开始任务");
+    expect(fixture.sent.some((message) =>
+      message.text.includes("已使用 Plugin 开始任务")
+    )).toBe(false);
   });
 
   it("routes a confirmed Doctor card through the application setup controller", async () => {
