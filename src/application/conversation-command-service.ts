@@ -675,19 +675,23 @@ function parsePluginOperation(input: string):
     return { type: "list", view: { page: 1, searchTerm: null } };
   }
   if (parts[0] === "health") {
-    if (parts.length !== 1) {
-      throw new UserFacingError("plugin.usage", pluginCommandUsageText);
-    }
-    return { type: "health" };
+    if (parts.length === 1) return { type: "health" };
   }
-  if (parts[0] === "list") {
+  if (
+    parts[0] === "list"
+    && (
+      parts.length === 1
+      || parts[1] === "search"
+      || /^\d+$/u.test(parts[1] ?? "")
+    )
+  ) {
     let page = 1;
     let optionIndex = 1;
     const pageText = parts[optionIndex];
-    if (pageText && /^[1-9]\d*$/u.test(pageText)) {
+    if (pageText && /^\d+$/u.test(pageText)) {
       page = Number(pageText);
       optionIndex += 1;
-      if (!Number.isSafeInteger(page) || page > 10_000) {
+      if (!Number.isSafeInteger(page) || page < 1 || page > 10_000) {
         throw new UserFacingError("plugin.usage", pluginCommandUsageText);
       }
     }

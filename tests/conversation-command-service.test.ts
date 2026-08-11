@@ -627,7 +627,13 @@ describe("ConversationCommandService", () => {
           steered: false,
         },
       });
+    await expect(commands.execute(target, "plugin", "health 检查状态"))
+      .resolves.toMatchObject({ kind: "outcome" });
+    await expect(commands.execute(target, "plugin", "list 检查目录"))
+      .resolves.toMatchObject({ kind: "outcome" });
     expect(invokePlugin).toHaveBeenCalledWith(target, "github@local", "检查 PR");
+    expect(invokePlugin).toHaveBeenCalledWith(target, "health", "检查状态");
+    expect(invokePlugin).toHaveBeenCalledWith(target, "list", "检查目录");
   });
 
   it("paginates and searches installed Plugins without changing global selectors", async () => {
@@ -661,8 +667,6 @@ describe("ConversationCommandService", () => {
     await expect(commands.execute(target, "plugin", "list 0"))
       .rejects.toMatchObject({ code: "plugin.usage" });
     await expect(commands.execute(target, "plugin", "list search"))
-      .rejects.toMatchObject({ code: "plugin.usage" });
-    await expect(commands.execute(target, "plugin", "health extra"))
       .rejects.toMatchObject({ code: "plugin.usage" });
   });
 

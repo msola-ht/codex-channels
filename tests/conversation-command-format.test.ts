@@ -144,6 +144,25 @@ describe("provider-aware conversation command formatting", () => {
     });
     expect(unavailableList).toContain("不可用");
     expect(unavailableList).not.toContain("管理员禁用");
+    const reservedNameList = formatConversationPlugins({
+      kind: "plugins",
+      plugins: [{
+        ...detailPluginFixture,
+        id: "health@local",
+        name: "health",
+        displayName: "Health",
+      }],
+      selectors: ["4"],
+      loadErrorCount: 0,
+      totalPluginCount: 4,
+      matchedPluginCount: 4,
+      page: 1,
+      pageCount: 1,
+      searchTerm: null,
+    });
+    expect(reservedNameList).toContain(
+      "名称为 health 或 list 时，查看详情请使用完整 ID 或序号",
+    );
     const searchedPage = formatConversationPlugins({
       kind: "plugins",
       plugins: [detailPluginFixture],
@@ -171,6 +190,30 @@ describe("provider-aware conversation command formatting", () => {
     });
     expect(missingPage).toContain("第 3 页不存在，共 2 页");
     expect(missingPage).toContain("/plugin list 1 search github");
+    const incompleteMissingPage = formatConversationPlugins({
+      kind: "plugins",
+      plugins: [],
+      selectors: [],
+      loadErrorCount: 2,
+      totalPluginCount: 12,
+      matchedPluginCount: 9,
+      page: 3,
+      pageCount: 2,
+      searchTerm: "github",
+    });
+    expect(incompleteMissingPage).toContain("2 个 Plugin Marketplace 加载失败");
+    const incompleteEmptySearch = formatConversationPlugins({
+      kind: "plugins",
+      plugins: [],
+      selectors: [],
+      loadErrorCount: 2,
+      totalPluginCount: 12,
+      matchedPluginCount: 0,
+      page: 1,
+      pageCount: 1,
+      searchTerm: "missing",
+    });
+    expect(incompleteEmptySearch).toContain("2 个 Plugin Marketplace 加载失败");
     const health = formatConversationPluginHealth({
       kind: "plugin-health",
       report: {

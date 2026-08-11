@@ -789,9 +789,13 @@ export function formatConversationPlugins(
     return "当前没有已安装的 Plugin。";
   }
   const commandSuffix = searchTerm ? ` search ${searchTerm}` : "";
+  const hasReservedPluginName = plugins.some((plugin) =>
+    plugin.name === "health" || plugin.name === "list"
+  );
   if (page > pageCount) {
     return toStructuredMarkdownList([
       `已安装 Plugin（开发中${searchTerm ? `，匹配 ${matchedPluginCount}` : ""}）：`,
+      ...loadErrorNotice,
       `第 ${page} 页不存在，共 ${pageCount} 页`,
       `返回第一页：/plugin list 1${commandSuffix}`,
     ].join("\n"));
@@ -799,6 +803,7 @@ export function formatConversationPlugins(
   if (plugins.length === 0 && searchTerm) {
     return toStructuredMarkdownList([
       "已安装 Plugin（开发中，匹配 0 · 第 1/1 页）：",
+      ...loadErrorNotice,
       `没有匹配“${searchTerm}”的 Plugin。`,
       "重新搜索：/plugin list search <关键词>",
     ].join("\n"));
@@ -819,6 +824,9 @@ export function formatConversationPlugins(
     ...(page < pageCount ? [`下一页：/plugin list ${page + 1}${commandSuffix}`] : []),
     "健康检查：/plugin health",
     "搜索：/plugin list search <关键词>",
+    ...(hasReservedPluginName
+      ? ["提示：名称为 health 或 list 时，查看详情请使用完整 ID 或序号。"]
+      : []),
     "详情：/plugin <名称、完整 ID 或序号>",
     "调用：/plugin <名称、完整 ID 或序号> <任务>",
   ].join("\n"));

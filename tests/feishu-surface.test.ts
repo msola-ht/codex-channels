@@ -527,6 +527,51 @@ describe("Feishu Surface", () => {
     )).toBe(false);
   });
 
+  it("pages through all installed Plugins in the command center", async () => {
+    const listPlugins = vi.fn(async () => ({
+      plugins: Array.from({ length: 10 }, (_, index) => ({
+        id: `plugin-${index + 1}@local`,
+        name: `plugin-${index + 1}`,
+        displayName: `Plugin ${index + 1}`,
+        marketplaceName: "Local",
+        description: null,
+        enabled: true,
+        available: true,
+        version: null,
+        localVersion: null,
+        source: "local" as const,
+        installedAt: null,
+        developerName: null,
+        category: null,
+        capabilities: [],
+        authPolicy: "onUse" as const,
+        eligiblePlanTypes: [],
+        disabledReason: null,
+      })),
+      loadErrorCount: 0,
+    }));
+    const fixture = createFixture({ listPlugins });
+    const starting = fixture.surface.start();
+    fixture.ready();
+    await starting;
+
+    fixture.emitMessage(0, "/start");
+    await settle();
+    fixture.emitCommandAction("help");
+    await settle();
+    fixture.emitCommandAction("plugin");
+    await settle();
+    expect(JSON.stringify(fixture.cards.at(-1)?.card)).toContain("Plugin 1");
+    expect(JSON.stringify(fixture.cards.at(-1)?.card)).not.toContain("Plugin 9");
+
+    fixture.emitCommandAction("plugin", "list 2");
+    await settle();
+    await fixture.surface.stop();
+
+    expect(JSON.stringify(fixture.cards.at(-1)?.card)).toContain("Plugin 9");
+    expect(JSON.stringify(fixture.cards.at(-1)?.card)).toContain("Plugin 10");
+  });
+
   it("routes a confirmed Doctor card through the application setup controller", async () => {
     const fixture = createFixture(
       undefined,
@@ -845,7 +890,7 @@ function createFixture(
         event_key: eventKey,
       });
     },
-    emitCommandAction(command: string) {
+    emitCommandAction(command: string, input?: string) {
       if (!cardActionHandler) {
         throw new Error("飞书 SDK 尚未注册卡片动作处理器");
       }
@@ -866,7 +911,10 @@ function createFixture(
         const candidate = (action as {
           value: Record<string, string>;
         }).value;
-        return candidate.codexc_command === command ? [candidate] : [];
+        return candidate.codexc_command === command
+          && (input === undefined || candidate.codexc_command_input === input)
+          ? [candidate]
+          : [];
       })[0];
       if (!value) {
         throw new Error("飞书命令中心动作不存在");
