@@ -160,6 +160,14 @@ describe("ProviderRoutingClient", () => {
         failureReason: null,
       },
     });
+    deepseek.emitNotification({
+      method: "mcpServer/oauthLogin/completed",
+      params: {
+        threadId: null,
+        name: "codex_apps",
+        success: true,
+      },
+    });
     deepseek.emitNotification({ method: "warning", params: { message: "provider warning" } });
     deepseek.emitNotification({
       method: "thread/status/changed",
@@ -179,6 +187,15 @@ describe("ProviderRoutingClient", () => {
           status: "failed",
           error: null,
           failureReason: null,
+        },
+        provider: "deepseek",
+      },
+      {
+        method: "mcpServer/oauthLogin/completed",
+        params: {
+          threadId: null,
+          name: "codex_apps",
+          success: true,
         },
         provider: "deepseek",
       },
@@ -226,6 +243,82 @@ describe("ProviderRoutingClient", () => {
 
     expect(deepseek.readDefaultServiceTier).toHaveBeenCalledWith(cwd);
     expect(openai.readDefaultServiceTier).not.toHaveBeenCalled();
+  });
+
+  it("keeps experimental Plugin discovery on the primary OpenAI App Server", async () => {
+    const openai = client();
+    const deepseek = client();
+    openai.listPlugins.mockResolvedValue({
+      plugins: [{ id: "github@local" }],
+      loadErrorCount: 0,
+    });
+    openai.resolvePlugin.mockResolvedValue({ id: "github@local" });
+    const routed = routing(openai, deepseek);
+
+    await expect(routed.listPlugins(cwd)).resolves.toEqual({
+      plugins: [{ id: "github@local" }],
+      loadErrorCount: 0,
+    });
+    await expect(routed.resolvePlugin(cwd, "github@local"))
+      .resolves.toEqual({ id: "github@local" });
+    expect(openai.listPlugins).toHaveBeenCalledWith(cwd);
+    expect(openai.resolvePlugin).toHaveBeenCalledWith(cwd, "github@local");
+    expect(deepseek.listPlugins).not.toHaveBeenCalled();
+    expect(deepseek.resolvePlugin).not.toHaveBeenCalled();
+  });
+
+  it("routes MCP detail, OAuth, and resource reads through the Thread Provider", async () => {
+    const openai = client();
+    const deepseek = client();
+    openai.readThread.mockResolvedValue(snapshot("thread-ds", "deepseek", "idle"));
+    deepseek.readThread.mockResolvedValue(snapshot("thread-ds", "deepseek", "idle"));
+    deepseek.listMcpServerDetails.mockResolvedValue([]);
+    deepseek.startMcpOAuthLogin.mockResolvedValue({
+      server: "tools",
+      authorizationUrl: "https://example.test/oauth",
+    });
+    deepseek.readMcpResource.mockResolvedValue({
+      server: "tools",
+      requestedUri: "project://readme",
+      contents: [],
+      omittedContentCount: 0,
+    });
+    const routed = routing(openai, deepseek);
+    await routed.readThread("thread-ds");
+
+    await routed.listMcpServerDetails("thread-ds");
+    await routed.startMcpOAuthLogin("tools", "thread-ds");
+    await routed.readMcpResource("tools", "project://readme", "thread-ds");
+
+    expect(deepseek.listMcpServerDetails).toHaveBeenCalledWith("thread-ds");
+    expect(deepseek.startMcpOAuthLogin).toHaveBeenCalledWith("tools", "thread-ds");
+    expect(deepseek.readMcpResource)
+      .toHaveBeenCalledWith("tools", "project://readme", "thread-ds");
+    expect(openai.listMcpServerDetails).not.toHaveBeenCalled();
+  });
+
+  it("reloads MCP configuration on every managed App Server", async () => {
+    const openai = client();
+    const deepseek = client();
+    openai.reloadMcpServers.mockResolvedValue(undefined);
+    deepseek.reloadMcpServers.mockResolvedValue(undefined);
+    const routed = routing(openai, deepseek);
+
+    await expect(routed.reloadMcpServers()).resolves.toBeUndefined();
+    expect(openai.reloadMcpServers).toHaveBeenCalledOnce();
+    expect(deepseek.reloadMcpServers).toHaveBeenCalledOnce();
+  });
+
+  it("attempts every managed App Server and reports MCP reload failures", async () => {
+    const openai = client();
+    const deepseek = client();
+    openai.reloadMcpServers.mockRejectedValue(new Error("reload failed"));
+    deepseek.reloadMcpServers.mockResolvedValue(undefined);
+    const routed = routing(openai, deepseek);
+
+    await expect(routed.reloadMcpServers()).rejects.toThrow("reload failed");
+    expect(openai.reloadMcpServers).toHaveBeenCalledOnce();
+    expect(deepseek.reloadMcpServers).toHaveBeenCalledOnce();
   });
 });
 
@@ -314,7 +407,12 @@ function client() {
     listSkills: vi.fn(),
     resolveSkill: vi.fn(),
     listMcpServers: vi.fn(),
+    listMcpServerDetails: vi.fn(),
+    startMcpOAuthLogin: vi.fn(),
+    readMcpResource: vi.fn(),
+    reloadMcpServers: vi.fn(),
     listPlugins: vi.fn(),
+    resolvePlugin: vi.fn(),
     accountUsage: vi.fn(),
     accountRateLimits: vi.fn(),
     listPermissionProfiles: vi.fn(),

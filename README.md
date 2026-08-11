@@ -133,12 +133,50 @@ codexc service restart gateway
 缓存命中、速度、思考次数与总价；`/metrics` 可查看当前 Thread 最近运行聚合以及
 `global|providers|models|errors` 的时间范围汇总。展示与统计口径见
 [`docs/display.md`](docs/display.md)。
+
 统计代理识别到的上下文压缩仍计入这些总计，并另外显示压缩次数、实际请求模型、Token 与参考费用，
 方便区分普通回复和压缩开销。
 
 OpenAI `/limits` 会在存在完整周窗口且统计代理观测到相邻额度增长时，按增长区间内的请求
 Token 与价格快照估算每 1% 周额度对应的 Token、API 参考费用及剩余额度可用量。估算只覆盖
 本机代理捕获的请求，其他客户端在两次快照之间的用量可能造成偏差，也不代表订阅实际扣款。
+
+### Plugin 与 MCP 调试
+
+Codex 0.147.0 的 Plugin API 仍标记为开发中。Gateway 默认关闭已安装 Plugin 的调试入口；仅在
+需要调试时显式开启并重启 Gateway：
+
+```toml
+[experimental]
+plugin_api = true
+```
+
+- `/plugin`：列出当前 Workspace 已安装的 Plugin 及启用状态；Marketplace 部分加载失败时明确提示
+  列表可能不完整，不展示上游路径或原始错误。
+- `/plugin <名称、完整 ID 或序号> <任务>`：仅在 OpenAI Thread 中使用官方 `mention` 输入调用
+  已启用且可用的 Plugin；飞书命令中心支持先选择 Plugin、再通过一次性表单输入任务。新建 Turn
+  只显示一条带名称的统一确认，例如“已使用 GitHub Plugin 开始处理”，不再重复发送 Plugin
+  启动结果；追加到活动 Turn 时仍明确提示。
+- 不开放 Plugin 搜索、市场、安装、卸载或分享；`codexc doctor` 会显示该开发中开关的状态。
+- `/mcp`：列出当前 Thread 的 MCP Server；`/mcp <名称或序号>` 查看工具、资源与模板详情；
+  上游多行长描述会先归一化并有界展示。
+- `/mcp health`：汇总当前 Thread 所属 App Server 的 MCP Server、工具、资源与资源模板数量，只列出
+  需要登录的 Server 和认证未知、未公开能力等提示；状态读取失败时明确报错，不把查询成功等同于
+  对每个远端 MCP Server 做网络探测。处理命令使用当前列表序号，兼容含空格的 Server 名称；需处理项
+  和提示合计最多展示 8 项，超出时显示省略数量并引导使用 `/mcp` 查看完整列表。
+- `/mcp reload`：让全部受管 Codex App Server 从磁盘重新加载 MCP 配置；已加载 Thread 会在下一次
+  活动 Turn 时刷新，无需重启 App Server。任一 Provider 实例刷新失败时整次命令报错。
+- `/mcp <名称或序号> <tools|resources|templates> [页码] [search <关键词>]`：分页或搜索工具、资源与
+  资源模板，每页最多展示 8 项；详情和分页中的后续命令沿用本次选择器，Server 名称含空格时使用
+  `/mcp` 列表中的数字序号。
+- `/mcp login <名称或序号>`：仅对支持 OAuth 的 Server 启动登录并返回授权地址；浏览器流程完成后，
+  Gateway 会在发起登录的会话中主动提示成功或失败。OAuth 登录要求当前会话已经创建或恢复 Thread，
+  无法关联 Thread 的完成通知不会广播。Bearer Token 或不支持 OAuth 时不显示该操作；
+  手工调用 Bearer Token Server 时会明确提示已认证、无需 OAuth。MCP 首次启动中或正常就绪状态保持
+  静默，只主动提示启动失败、取消以及异常后的恢复，避免与查询或登录结果重复。
+- `/mcp resource <名称或序号> <URI>`：只读读取资源；整次最多检查前 8 个内容，文本合计最多展示
+  8,000 字符并在 Client 边界隐藏常见 Token、密码、Cookie 和 Authorization 值，明确标记截断或
+  省略；二进制只显示 MIME 和 Base64 字符数，不通过聊天命令直接调用 MCP Tool。
 
 信息类聊天指令输出统一为 Markdown 列表：`##` 标题、`###` 小节、`-` 字段列表、明细缩进嵌套；
 `/metrics` 用 `**Token**：总计` 与 `**费用**：总价` 列表块分节，费用先出总计、再列出明细；
@@ -337,7 +375,11 @@ deepseek）的全部请求行并自动重启 Gateway 与中心服务，适合额
 - 运行：`/status`、`/stop`、`/queue <描述>`、`/compact`、`/fork`、`/review`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
 - 状态：`/diff`、`/usage`、`/metrics [session|global|providers|models|errors] [today|yesterday|this-week|last-week|this-month|last-month|24h|7d|30d|90d|365d|all]`、`/limits`、`/permissions`、`/goal`
-- 扩展：`/agents [角色名称或序号 任务]`、`/skill [名称或序号 任务]`、`/mcp`、`/plugins`、`/rules`
+- 扩展：`/agents [角色名称或序号 任务]`、`/skill [名称或序号 任务]`、
+  `/plugin [<名称、完整 ID 或序号> <任务>]`、`/mcp [名称或序号]`、
+  `/mcp health`、`/mcp reload`、
+  `/mcp <名称或序号> <tools|resources|templates> [页码] [search <关键词>]`、
+  `/mcp login <名称或序号>`、`/mcp resource <名称或序号> <URI>`、`/rules`
 - 图片：`/vision <下一批要求>`；多图：`/vision <2–4> <要求>`，收齐自动提交；失败重试：`/vision retry`；取消：`/vision cancel`
 - 帮助：`/help`、`/whoami`
 

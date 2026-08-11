@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type {
-  ConversationCommandResult,
-  ConversationStatus,
+import {
+  mcpCommandUsageText,
+  type ConversationCommandResult,
+  type ConversationStatus,
 } from "../src/application/index.js";
 import { UserFacingError } from "../src/conversation-core/index.js";
 import {
@@ -46,6 +47,7 @@ import {
 } from "../src/surfaces/feishu/renderer.js";
 import {
   formatRuntimeAccountUpdate,
+  formatRuntimeMcpOAuthCompleted,
   formatRuntimeMcpStatusUpdate,
   formatRuntimeRateLimitUpdate,
 } from "../src/surfaces/runtime-status-format.js";
@@ -108,6 +110,35 @@ describe("shared surface copy contract", () => {
         expect(formatSurfaceUserFacingError(error, surface)).toBe(expected);
       }
     }
+  });
+
+  it("reports the complete MCP command usage consistently on every surface", () => {
+    const error = new UserFacingError("mcp.usage", "invalid MCP command");
+    for (const surface of ["Telegram", "飞书", "微信"] as const) {
+      expect(formatSurfaceUserFacingError(error, surface)).toBe(mcpCommandUsageText);
+    }
+  });
+
+  it("formats MCP OAuth completion without exposing sensitive failure details", () => {
+    expect(formatRuntimeMcpOAuthCompleted({
+      name: "docs",
+      success: true,
+      error: null,
+    })).toBe([
+      "## MCP OAuth",
+      "- 名称：docs",
+      "- 状态：登录成功",
+    ].join("\n"));
+    expect(formatRuntimeMcpOAuthCompleted({
+      name: "github",
+      success: false,
+      error: "TOKEN=[REDACTED]",
+    })).toBe([
+      "## MCP OAuth",
+      "- 名称：github",
+      "- 状态：登录失败",
+      "- 原因：TOKEN=[已隐藏]",
+    ].join("\n"));
   });
 
   it("keeps account, quota, appended-input, and empty-response copy shared", () => {
@@ -279,6 +310,43 @@ describe("shared surface copy contract", () => {
     expect(expected).not.toContain("21. 会话 21");
   });
 
+  it("leaves new extension task acknowledgement to the Turn lifecycle", () => {
+    const results: ConversationCommandResult[] = [
+      {
+        kind: "outcome",
+        outcome: {
+          type: "skill.started",
+          skillName: "review",
+          turnId: "turn-1",
+          steered: false,
+        },
+      },
+      {
+        kind: "outcome",
+        outcome: {
+          type: "plugin.started",
+          pluginName: "GitHub",
+          turnId: "turn-2",
+          steered: false,
+        },
+      },
+      {
+        kind: "outcome",
+        outcome: {
+          type: "agents.started",
+          roleName: "ds",
+          turnId: "turn-3",
+          steered: false,
+        },
+      },
+    ];
+
+    for (const result of results) {
+      expect(renderFeishuCommandResult(result)).toBeNull();
+      expect(renderWeixinCommandResult(result)).toBeNull();
+    }
+  });
+
   it("formats the complete shared status including weekly limits", () => {
     const status: ConversationStatus = {
       workspaceId: "main",
@@ -348,8 +416,74 @@ describe("shared surface copy contract", () => {
         servers: [{ name: "docs", authStatus: "oAuth", toolCount: 2 }],
       },
       {
+        kind: "mcp-health",
+        report: {
+          serverCount: 1,
+          toolCount: 2,
+          resourceCount: 0,
+          resourceTemplateCount: 0,
+          actions: [],
+          notices: [],
+        },
+      },
+      { kind: "mcp-reload" },
+      {
+        kind: "mcp-detail",
+        selector: "docs",
+        server: {
+          name: "docs",
+          authStatus: "oAuth",
+          toolCount: 1,
+          serverTitle: "Docs",
+          serverVersion: "1.0.0",
+          serverDescription: null,
+          tools: [{ name: "search", title: "Search", description: null }],
+          resources: [],
+          resourceTemplates: [],
+        },
+      },
+      {
+        kind: "mcp-login",
+        login: {
+          type: "oauth",
+          server: "docs",
+          authorizationUrl: "https://example.test/oauth",
+        },
+      },
+      {
+        kind: "mcp-login",
+        login: {
+          type: "bearerToken",
+          server: "token-tools",
+        },
+      },
+      {
+        kind: "mcp-resource",
+        resource: {
+          server: "docs",
+          requestedUri: "docs://index",
+          contents: [{
+            kind: "text",
+            uri: "docs://index",
+            mimeType: "text/plain",
+            text: "documentation",
+            truncated: false,
+          }],
+          omittedContentCount: 0,
+        },
+      },
+      {
         kind: "plugins",
-        result: [{ name: "github", enabled: true }],
+        plugins: [{
+          id: "github@local",
+          name: "github",
+          displayName: "GitHub",
+          marketplaceName: "local",
+          description: "GitHub tools",
+          enabled: true,
+          available: true,
+        }],
+        loadErrorCount: 0,
       },
       {
         kind: "permissions",

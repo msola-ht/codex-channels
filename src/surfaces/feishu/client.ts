@@ -421,9 +421,9 @@ export class FeishuMessageClient implements
     );
   }
 
-  async sendMarkdownCard(chatId: string, markdown: string): Promise<void> {
+  async sendMarkdownCard(chatId: string, markdown: string): Promise<string> {
     const cardId = await this.createMarkdownCard(markdown);
-    await this.sendMessage(
+    return this.sendMessage(
       chatId,
       "interactive",
       JSON.stringify({
@@ -438,9 +438,9 @@ export class FeishuMessageClient implements
   async replyMarkdownCard(
     messageId: string,
     markdown: string,
-  ): Promise<void> {
+  ): Promise<string> {
     const cardId = await this.createMarkdownCard(markdown);
-    await this.replyMessage(
+    return this.replyMessage(
       messageId,
       "interactive",
       JSON.stringify({

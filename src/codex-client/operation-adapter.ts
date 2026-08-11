@@ -166,8 +166,11 @@ function subagentStatus(value: unknown): SubagentStatus | undefined {
 }
 
 export function sanitizeOperationText(value: string): string {
-  return truncate(
-    value
+  return truncate(redactCredentialText(value), 320);
+}
+
+export function redactCredentialText(value: string): string {
+  return value
       .replace(
         /(authorization\s*:\s*(?:bearer|basic)\s+)([^\s'";]+)/gi,
         "$1[REDACTED]",
@@ -195,9 +198,7 @@ export function sanitizeOperationText(value: string): string {
       )
       .replace(/(\/bot)\d{6,}:[A-Za-z0-9_-]{20,}/g, "$1[REDACTED]")
       .replace(/((?:^|\s)-u\s+)([^\s;]+)/gi, "$1[REDACTED]")
-      .replace(/([a-z][a-z0-9+.-]*:\/\/[^\s:/]+:)([^\s@/]+)(@)/gi, "$1[REDACTED]$3"),
-    320,
-  );
+      .replace(/([a-z][a-z0-9+.-]*:\/\/[^\s:/]+:)([^\s@/]+)(@)/gi, "$1[REDACTED]$3");
 }
 
 function operationStatus(item: Record<string, unknown>, phase: ItemPhase): OperationStatus {

@@ -1,9 +1,15 @@
+import type { TurnStartIdentity } from "../../conversation-core/index.js";
+import { formatTurnStartIdentityLabel } from "../lifecycle-presentation.js";
 import type { PlanPresentation } from "../plan-presentation.js";
 import type { FeishuCardDocument } from "./approval-card.js";
 
 export function renderFeishuThreadStatusCard(
   status: string,
+  identity?: TurnStartIdentity,
 ): FeishuCardDocument {
+  const identityPrefix = identity
+    ? `${formatTurnStartIdentityLabel(identity)} · `
+    : "";
   return {
     config: {
       update_multi: true,
@@ -25,9 +31,9 @@ export function renderFeishuThreadStatusCard(
       text: {
         tag: "plain_text",
         content: status === "active"
-          ? "运行中"
+          ? `${identityPrefix}运行中`
           : status === "idle"
-            ? "空闲"
+            ? `${identityPrefix}处理结束 · 结果见下方消息`
             : "未知",
       },
     }],

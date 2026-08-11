@@ -76,7 +76,7 @@ Conversation 与 Actor 在内存保留五分钟有效的一次重试输入，`/v
 单价；所有 Provider 的完成卡片与 `/metrics` 最近运行和会话累计按本机实际用量展示均价；
 聚合存在多档价格时只标记多档、
 不显示伪统一单价。信息类聊天指令（`/status`、`/usage`、
-`/limits`、`/models`、`/sessions`、`/skills`、`/mcp`、`/plugins`、`/permissions`、`/goal`、
+`/limits`、`/models`、`/sessions`、`/skills`、`/mcp`、`/plugin`、`/permissions`、`/goal`、
 `/project-rules`、`/metrics` 等）输出统一为 Markdown 列表：首行为 `##` 标题、小节为 `###`
 标题、字段为 `-` 列表项、明细缩进嵌套；`/diff` 与操作结果保持原文。三个渠道分别用飞书卡片
 Markdown、Telegram HTML、微信结构化字段渲染列表。
@@ -123,6 +123,14 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 命令结果文案与状态文本；DeepSeek `/usage` 显示余额，未支持的 Provider 明确说明能力缺失。
 `/skill` 返回带序号的已启用项，`/skill <名称或序号> <任务>` 通过 Application
 提交官方结构化 Skill 输入；Surface 不接收或拼装本机 Skill 路径。
+`/mcp`、`/mcp health`、`/mcp reload`、`/mcp <名称或序号>`、工具/资源/模板分页搜索、`/mcp login ...` 与
+`/mcp resource ...` 共用详情、OAuth 能力判断和只读资源格式；OAuth 完成结果由三个渠道共用格式，
+成功静默发送、失败按错误通知发送；健康检查只展示需处理项与提示，刷新明确说明在 Thread 下一次
+活动 Turn 生效；健康处理命令使用当前列表数字序号，最多展示 8 项并明确省略数量；资源正文明确标为
+外部不可信内容。详情及分页中的后续命令沿用 Application 返回的原始选择器，Surface 不使用 Server
+名称重新构造命令。
+`/plugin` 无参数列出已安装项，带选择器和任务时调用 Plugin，并统一显示开发中提示；飞书可从
+已启用且可调用项生成一次性任务表单，Surface 不拼装 Plugin mention 路径。
 `user-facing-error-format.ts` 统一三个渠道的结构化用户错误文案，只保留渠道名称差异；
 `error-metadata.ts` 统一渠道日志中的受约束异常类型、机器错误码和锁定 App Server
 白名单拒绝分类，拒绝异常正文、堆栈、请求标识及上游自定义名称进入日志；Bootstrap
@@ -141,6 +149,7 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 同时保留渠道名称以便定位来源。`text-file-input.ts` 统一文件名安全校验、UTF-8 严格解码、
 BOM 清理、控制字符拒绝和有界流读取；平台下载与错误类型仍留在各自 Surface。
 `runtime-status-format.ts` 统一账户、额度与 MCP Server 运行状态的稳定中文语义和脱敏；
+Core 只把 MCP 启动失败、取消及异常恢复投递给 Surface，首次启动中和正常就绪保持静默；
 Telegram、飞书与微信分别通过 HTML 面板、CardKit Markdown 或按会话排序的纯文本气泡发送。
 `configuration-change-format.ts` 统一 Telegram、飞书与微信已有的配置热加载、重启、重装和失败通知；
 Workspace 操作提示只在 Telegram 实际提供切换按钮时声明可点击。
@@ -160,7 +169,9 @@ Adapter 负责。
 Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类型引入 Conversation Core。
 
 会话命令统一映射到 Application 的 `ConversationCommandService`；Surface 负责提取命令名和参数，
-并渲染类型化结果。普通文本、图片下载、平台帮助、身份查询和交互取消保留在平台边界。PNG/JPEG
+并渲染类型化结果。Skill、Plugin 与子代理新建 Turn 时由统一 `turn.started` 生命周期确认，命令结果
+不重复发送启动提示；该事件保留具体扩展类型和名称，追加到活动 Turn 时仍渲染明确确认。普通文本、图片下载、平台帮助、身份查询和
+交互取消保留在平台边界。PNG/JPEG
 的大小限制与内容签名校验由 `managed-image-store.ts` 在 Surface 内复用；
 一次性音频的 20 MiB、WAV/MP3/M4A/WebM/OGG 内容签名、`0700/0600` 私有暂存和一小时清理由
 `managed-audio-store.ts` 复用。两者通过内部 `managed-media-store.ts` 统一私有目录生命周期、

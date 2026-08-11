@@ -14,13 +14,19 @@ import {
   formatConversationArtifacts,
   formatConversationCollaborationMode,
   formatConversationCommandOutcome,
+  isTurnLifecycleAcknowledgedOutcome,
   formatConversationGoal,
   formatConversationLimits,
   formatConversationMetrics,
   formatConversationMcp,
+  formatConversationMcpDetail,
+  formatConversationMcpHealth,
+  formatConversationMcpLogin,
+  formatConversationMcpReload,
+  formatConversationMcpResource,
+  formatConversationPlugins,
   formatConversationModels,
   formatConversationPermissions,
-  formatConversationPlugins,
   formatConversationProjectRules,
   formatConversationSessions,
   formatConversationSkills,
@@ -126,9 +132,12 @@ export function renderWeixinCommandResult(
     provider: string | null | undefined,
   ) => DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
-): string {
+): string | null {
   switch (result.kind) {
     case "outcome":
+      if (isTurnLifecycleAcknowledgedOutcome(result.outcome)) {
+        return null;
+      }
       return formatConversationCommandOutcome(result.outcome);
     case "sessions":
       return formatConversationSessions(result);
@@ -148,6 +157,16 @@ export function renderWeixinCommandResult(
       return formatConversationAgents(result);
     case "mcp":
       return formatConversationMcp(result);
+    case "mcp-health":
+      return formatConversationMcpHealth(result);
+    case "mcp-reload":
+      return formatConversationMcpReload(result);
+    case "mcp-detail":
+      return formatConversationMcpDetail(result);
+    case "mcp-login":
+      return formatConversationMcpLogin(result);
+    case "mcp-resource":
+      return formatConversationMcpResource(result);
     case "plugins":
       return formatConversationPlugins(result);
     case "usage":

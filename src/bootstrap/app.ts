@@ -521,6 +521,9 @@ export class GatewayApplication {
       {
         listAgentRoles: () => listConfiguredAgentRoles(process.env),
       },
+      {
+        pluginApiEnabled: config.pluginApiEnabled,
+      },
     );
     this.output.subscribe("conversation-follow-up", async (event) => {
       if (event.type !== "turn.completed") {

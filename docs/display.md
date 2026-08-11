@@ -79,6 +79,11 @@ OpenAI `/limits` 在额度响应包含 10,080 分钟周窗口和有效重置时�
 `/diff` 与操作结果保持原文。三渠道分别用飞书卡片 Markdown、Telegram
 HTML 和微信结构化字段渲染。
 
+`/mcp login` 在当前会话已绑定 Thread 时返回安全授权地址；浏览器流程结束后，Gateway 只把带有
+该 Thread 的官方 OAuth 完成通知显示为“MCP OAuth”成功或失败状态，无法关联 Thread 的通知不向
+渠道广播。失败原因在 Client 边界先脱敏，Telegram 失败通知会启用声音，成功通知保持静默；飞书
+使用 Markdown 卡片，微信使用结构化文本。
+
 `/agents` 无参数时列出内置角色（default/explorer/worker）与 `~/.codex/config.toml` 中
 配置的角色（如 `agents.ds`）；`/agents <角色名称或序号> <任务>` 以包含官方 `agent_type` 和
 `fork_turns="1"` 的文本指示子代理执行任务，调用结果与普通 Turn 启动一致。
@@ -108,6 +113,20 @@ HTML 和微信结构化字段渲染。
 `display.operation_updates = "compact"` 时，三个渠道仍展示子代理启动和失败，但不再为成功的
 `wait`、`sendInput`、`resumeAgent`、`closeAgent` 分别发送“已完成”卡片；`full` 保留这些操作详情，
 `hidden` 隐藏全部操作过程。该设置只控制过程展示，不改变官方终态和子代理完成统计。
+
+通过 `/skill`、`/plugin` 或 `/agents` 新建 Turn 时，三个渠道只使用统一的 Turn 生命周期确认，
+并在同一条确认中保留具体 Skill、Plugin 或子代理名称，不再额外发送一条扩展启动结果；追加到活动
+Turn 时没有新的 Turn 启动事件，因此继续显示明确的追加确认。MCP Server 的首次 `starting` /
+`ready` 状态不主动展示；`failed`、`cancelled` 以及异常后恢复为 `ready` 仍会通知。飞书把当前
+Turn 的启动回复直接登记为 Thread 状态消息，后续 `active` 不再创建第二张卡，`idle` 原地更新
+这张回复并保留扩展身份。
+
+`/mcp health` 主动查询时先汇总数量，再只列出未登录等需处理项和认证未知、未公开能力等提示；
+它不把状态读取解释为逐个远端 Server 的网络探测。处理命令使用同次状态列表中的数字序号；需处理
+项优先，和提示合计最多展示 8 项，超出时明确省略数量。`/mcp reload` 成功后统一说明已加载
+Thread 会在下一次活动 Turn 刷新，不显示为立即重连或立即完成远端握手。
+MCP 详情及分页中的登录、浏览、翻页和资源读取命令沿用用户本次使用的选择器；Server 名称含空格时
+使用 `/mcp` 列表中的数字序号，避免把名称重新拼接成无法解析的命令。
 
 视觉完成通知在正式模式保留 API 提供商、调用模型与 Token 总计；输入、缓存、输出、推理输出等
 Token 子项和“视觉 API 耗时”仅在调试模式展示。

@@ -1,3 +1,4 @@
+import { mcpCommandUsageText } from "../application/index.js";
 import type { UserFacingError } from "../conversation-core/index.js";
 import { gatewayRequestFailedText } from "./output-copy.js";
 
@@ -136,6 +137,30 @@ export function formatSurfaceUserFacingError(
       return "用法：/skill <名称或序号> <任务>";
     case "skill.not-found":
       return "指定的 Skill 不存在、未启用或不属于当前 Workspace";
+    case "mcp.usage":
+      return mcpCommandUsageText;
+    case "mcp.server.usage":
+      return "需要提供 MCP Server 名称或序号";
+    case "mcp.server.not-found":
+      return "指定的 MCP Server 不存在";
+    case "mcp.oauth.unsupported":
+      return "该 MCP Server 不支持 OAuth 登录";
+    case "mcp.thread.required":
+      return "请先发送消息创建 Thread，或使用 /resume 恢复 Thread 后再登录 MCP Server";
+    case "mcp.resource.usage":
+      return "需要提供有效的 MCP Resource URI";
+    case "plugin.usage":
+      return "用法：/plugin <名称、完整 ID 或序号> <任务>";
+    case "plugin.not-found":
+      return "指定的 Plugin 不存在";
+    case "plugin.ambiguous":
+      return "Plugin 名称不唯一，请使用序号或完整 ID";
+    case "plugin.unavailable":
+      return "指定的 Plugin 未启用、被管理员禁用或暂不可调用";
+    case "plugin.disabled":
+      return "开发中的 Plugin API 已关闭；请在 [experimental] 中启用 plugin_api 后重启 Gateway";
+    case "plugin.provider.unsupported":
+      return "开发中的 Plugin 调用当前只支持 OpenAI Thread";
     case "command.unsupported":
       return surfaceLabel === "Telegram"
         ? `不支持的会话命令：${detail(error, "command", "未知")}`

@@ -128,6 +128,14 @@ export type ConversationInputEvent =
     }
   | ({ type: "mcp.status.updated"; modelProvider?: string } & McpServerStatus)
   | {
+      type: "mcp.oauth.completed";
+      threadId: string | null;
+      name: string;
+      success: boolean;
+      error: string | null;
+      modelProvider?: string;
+    }
+  | {
       type: "warning";
       threadId: string | null;
       message: string;

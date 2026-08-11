@@ -101,11 +101,14 @@ Surface -> Application/Core <- Codex Client
 - 协议类型由受支持的 Codex CLI 生成；不得凭记忆手写协议字段。
 - 仓库必须记录并校验生成类型对应的精确 Codex CLI 版本。
 - 升级协议时先审查生成差异，再更新 `codex-protocol` 的受控导出、实现和测试。
-- 稳定业务代码不得依赖实验生成参数才会出现的字段。唯一例外是当前锁定
-  `codex-cli 0.147.0` 的官方 Plan 模式：只允许使用
+- 稳定业务代码不得依赖实验生成参数才会出现的字段。当前锁定 `codex-cli 0.147.0` 只有两个
+  受控例外。官方 Plan 模式只允许使用
   `collaborationMode/list` 和 `turn/start.collaborationMode`，必须通过
   `--experimental` 生成类型、从 `codex-protocol` 受控导出，并由真实 App Server
-  合同测试覆盖；不得借此接入或暴露其他实验方法、字段或通知。
+  合同测试覆盖。开发中 Plugin 调试只允许在 `[experimental].plugin_api` 开启时使用
+  `plugin/installed` 查询已安装项，并通过 `turn/start` / `turn/steer` 的官方 `mention` 输入调用；
+  开关默认关闭且必须在 Doctor、命令输出和文档中标明开发中，只支持 OpenAI Thread。不得借这些
+  例外接入或暴露其他实验方法、字段或通知。
 - 运行时只可协商当前精确版本、默认生成类型已覆盖且当前功能必需的实验能力；启用前必须审查
   同时开放的 Notification、Server Request 和字段，新增高权限输入必须显式展示或失败关闭，并
   增加真实 App Server 合同测试。

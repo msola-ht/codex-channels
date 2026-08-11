@@ -92,7 +92,9 @@
   直连和无效代理失败关闭、Actor 身份匹配、进行中状态、重复流、限时停止/撤销竞态、写入错误/
   取消回滚，以及 macOS Keychain 原地更新与命令超时、严格凭据载荷、macOS/Linux 分离的 Token
   Store 契约和 Linux 原子密文替换与私有权限。
-- Skill 用户与 Workspace 安装过滤、结构化显式调用、已安装 Plugin 稳定摘要及远端市场隔离。
+- Skill 用户与 Workspace 安装过滤、结构化显式调用；开发中 Plugin 只开放受配置开关约束的
+  单一 `/plugin` 命令、已安装列表和官方 mention 调用；飞书覆盖可调用项选择、一次性任务表单与
+  提交闭环，搜索、安装、卸载与分享仍被边界测试禁止。
 - 官方模型目录到稳定 Application 模型选项的映射、不可见项过滤、必需字段失败关闭，模型、
   思考等级和 Fast 的 Thread 覆盖、Codex 用户级 Fast 默认值持久化、共享客户端完整或残缺设置
   通知、Thread 失效通知及 Gateway/CLI 连接恢复；DeepSeek 官方脚本目录提取、两种 Setup 模式、
@@ -133,10 +135,12 @@
   系统和插件缓存并在缺少显示字段时失败关闭；显式调用重新解析精确名称、校验绝对路径，并同时
   发送 `$Skill` 文本标记与结构化 Skill 输入；三个渠道统一覆盖无参数 `/skill` 编号列表与
   `/skill <名称或序号> <任务>`，不维护渠道私有选择状态。
-- MCP 查询按当前 Thread 读取项目级配置，使用精简清单分页并映射名称、认证状态和工具数量；
-  必需字段畸形或分页游标循环时失败关闭。
-- Plugin 查询按授权 Workspace 发送精确 CWD，只调用已安装接口并映射名称与启用状态；安装建议
-  和 Marketplace 加载详情不进入 Application，必需字段畸形时失败关闭。
+- MCP 查询按当前 Thread 读取项目级配置：概览使用精简清单分页，详情映射工具、资源和模板；
+  详情说明允许官方返回的多行文本，归一化空白并限为 2,000 字符；共享命令按工具、资源或模板
+  提供每页 8 项的分页与搜索，页面输出包含稳定的前后页命令；
+  OAuth 和资源读取使用精简清单解析目标，不受无关 Server 的完整资源发现阻塞；OAuth 只接受
+  HTTPS 或回环 HTTP 授权地址且不自动重试，资源最多检查前 8 项且文本展示合计限为 8,000
+  字符，二进制正文不进入 Surface。必需字段畸形或分页游标循环时失败关闭。
 - Permission Profile 查询按授权 Workspace 发送精确 CWD，分页映射 ID、说明和策略可选状态；
   必需字段畸形或分页游标循环时失败关闭，并与高权限审批决定保持分离。
 - 当前授权 Workspace 的 Git 分支通过组合根有时限只读查询进入共享 Conversation 状态，并由
@@ -284,14 +288,14 @@ RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
 ```
 
 该合同测试使用临时 `CODEX_HOME`、provider-only DeepSeek 测试配置和本地测试 MCP 进程，验证
-App Server 不依赖 CLI Profile 即可初始化，并验证 MCP 工具审批元数据及
-`_meta.persist` 通过真实 App Server 往返；同时验证一个 Client 写入的 Fast 用户默认值能被另一个 Client
+App Server 不依赖 CLI Profile 即可初始化，并验证 MCP 完整详情、只读资源、OAuth PKCE 回调及完成通知、
+工具审批元数据及 `_meta.persist` 通过真实 App Server 往返；同时验证一个 Client 写入的 Fast 用户默认值能被另一个 Client
 读取，之后新建 Thread 的运行时 `serviceTier` 按 `default → priority → default` 变化，并验证
 第二个 Client 修改共享 Thread 的模型、思考等级和 Fast 设置时，订阅方收到完整的
 `thread/settings/updated`；第二个 Client 重连后再次修改仍会广播。合同还会启动并立即清理一个
 不等待模型结果的 Plan Turn，验证 Default/Plan 预设、Plan 设置通知、稳定 Turn ID、中断后的
-官方非负 `durationMs`、Skill、MCP、Plugin
-与 Permission Profile 查询摘要，
+官方非负 `durationMs`、Skill、MCP、Plugin 与 Permission Profile 查询摘要，以及已安装本地 Plugin
+通过官方 mention 输入启动 Turn，
 以及跨 Client 的 Goal 设置、读取和清除映射；第二个 Client 重新连接并 resume 当前 Thread 后，
 还必须重新收到已有 Goal 状态。
 

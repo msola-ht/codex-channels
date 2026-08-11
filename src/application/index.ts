@@ -31,9 +31,11 @@ export {
   ConversationCommandService,
   conversationCommandNames,
   isConversationCommandName,
+  mcpCommandUsageText,
   type ConversationCommandName,
   type ConversationCommandOutcome,
   type ConversationCommandResult,
+  type McpDetailView,
 } from "./conversation-command-service.js";
 export {
   ConversationService,
@@ -79,12 +81,24 @@ export {
   type WorkspacePermissionUpdate,
 } from "./workspace-permission-port.js";
 export {
+  supportsMcpOAuthLogin,
   type McpAuthStatus,
+  type McpHealthReport,
+  type McpOAuthLogin,
+  type McpLoginResult,
   type McpQueryPort,
+  type McpResourceContent,
+  type McpResourceReadResult,
+  type McpResourceSummary,
+  type McpResourceTemplateSummary,
+  type McpServerDetail,
   type McpServerSummary,
+  type McpToolSummary,
 } from "./mcp-port.js";
 export {
   type InstalledPlugin,
+  type InstalledPluginCatalog,
+  type InvocablePlugin,
   type PluginQueryPort,
 } from "./plugin-port.js";
 export {

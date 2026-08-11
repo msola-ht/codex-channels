@@ -91,6 +91,11 @@ function restartRequiredReasons(
       current.planUpdatesEnabled,
       next.planUpdatesEnabled,
     ],
+    [
+      configChange("experimental.plugin-api"),
+      current.pluginApiEnabled,
+      next.pluginApiEnabled,
+    ],
     [configChange("observability.log-level"), current.logLevel, next.logLevel],
     [
       configChange("api.providers"),

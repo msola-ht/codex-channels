@@ -28,9 +28,10 @@ Client 或生成协议。Turn、Review 和 Goal 的执行端口由 `application`
 由 Application 的编译期注册窄端口承接：OpenAI 通过 Client 选择官方多桶或兼容单桶响应，
 DeepSeek 由 Bootstrap 具体适配器查询官方余额；未知 Provider 不回退到 OpenAI。直接安装 Skill
 查询也已在 Client 边界完成路径与 Scope 裁剪；显式调用只把
-实时解析且通过校验的 Skill 引用交给 Application，Surface 不接触本机路径。MCP 状态查询
-已裁剪为按当前 Thread 获取的名称、认证状态和工具数量，Plugin 查询只输出已安装项的名称与
-启用状态，Permission Profile 查询只输出稳定的目录选项。
+实时解析且通过校验的 Skill 引用交给 Application，Surface 不接触本机路径。MCP 按当前 Thread
+提供裁剪后的概览、详情、OAuth 和只读资源内容，Permission Profile 查询只输出稳定目录选项。
+固定版本 Plugin API 仍标记为开发中，只在配置开关下开放已安装列表与 OpenAI Thread mention
+调用；搜索、安装、卸载、分享和直接 MCP Tool Call 仍不进入业务边界。
 
 切换模式复用完整 `CodexAppServerClient`，由 Provider 路由层按官方 Thread `modelProvider` 选择
 OpenAI 主 App Server 或独立 Provider App Server；Session Routing、Application、Core、Approval、

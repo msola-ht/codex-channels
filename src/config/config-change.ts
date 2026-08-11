@@ -8,6 +8,7 @@ export type GlobalConfigChangeCode =
   | "approval.timeout"
   | "display.operation-updates"
   | "display.plan-updates"
+  | "experimental.plugin-api"
   | "api.providers"
   | "vision.provider"
   | "metrics.sync"

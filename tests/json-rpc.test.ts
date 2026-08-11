@@ -118,6 +118,23 @@ function appServerMcpStatus(
   };
 }
 
+function appServerPlugin(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: "github@local",
+    name: "github",
+    installed: true,
+    enabled: true,
+    availability: "AVAILABLE",
+    interface: {
+      displayName: "GitHub",
+      shortDescription: "GitHub development tools",
+    },
+    ...overrides,
+  };
+}
+
 class FakeTransport extends BaseTransport {
   readonly kind = "stdio" as const;
   readonly sent: Array<Record<string, unknown>> = [];
@@ -128,10 +145,10 @@ class FakeTransport extends BaseTransport {
   modelListData: Array<Record<string, unknown>> = [];
   mcpPages: Array<Record<string, unknown>> = [{ data: [], nextCursor: null }];
   mcpPageIndex = 0;
-  pluginInstalledResult: Record<string, unknown> = {
-    marketplaces: [],
-    marketplaceLoadErrors: [],
+  mcpOauthResult: Record<string, unknown> = {
+    authorizationUrl: "https://example.test/oauth",
   };
+  mcpResourceResult: Record<string, unknown> = { contents: [] };
   permissionPages: Array<Record<string, unknown>> = [{ data: [], nextCursor: null }];
   permissionPageIndex = 0;
   configServiceTier: unknown = "fast";
@@ -151,6 +168,10 @@ class FakeTransport extends BaseTransport {
     rateLimitResetCredits: null,
   };
   skillsResult: Record<string, unknown> = { data: [] };
+  pluginInstalledResult: Record<string, unknown> = {
+    marketplaces: [],
+    marketplaceLoadErrors: [],
+  };
   disconnectAfterInitialized = false;
   threadListData: Array<Record<string, unknown>> = [];
   resumeThreadData: Record<string, unknown> = appServerThread();
@@ -342,6 +363,15 @@ class FakeTransport extends BaseTransport {
           }),
         ),
       );
+    } else if (decoded.method === "plugin/installed") {
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({
+            id: decoded.id,
+            result: this.pluginInstalledResult,
+          }),
+        ),
+      );
     } else if (decoded.method === "mcpServerStatus/list") {
       const page = this.mcpPages[
         Math.min(this.mcpPageIndex, this.mcpPages.length - 1)
@@ -355,14 +385,17 @@ class FakeTransport extends BaseTransport {
           }),
         ),
       );
-    } else if (decoded.method === "plugin/installed") {
+    } else if (decoded.method === "mcpServer/oauth/login") {
       queueMicrotask(() =>
-        this.emitMessage(
-          JSON.stringify({
-            id: decoded.id,
-            result: this.pluginInstalledResult,
-          }),
-        ),
+        this.emitMessage(JSON.stringify({ id: decoded.id, result: this.mcpOauthResult })),
+      );
+    } else if (decoded.method === "mcpServer/resource/read") {
+      queueMicrotask(() =>
+        this.emitMessage(JSON.stringify({ id: decoded.id, result: this.mcpResourceResult })),
+      );
+    } else if (decoded.method === "config/mcpServer/reload") {
+      queueMicrotask(() =>
+        this.emitMessage(JSON.stringify({ id: decoded.id, result: {} })),
       );
     } else if (decoded.method === "permissionProfile/list") {
       const page = this.permissionPages[
@@ -1031,6 +1064,124 @@ describe("JsonRpcClient", () => {
       .rejects.toThrow("Codex 响应缺少有效 skill name");
   });
 
+  it("lists installed Plugins and resolves only enabled available entries", async () => {
+    const transport = new FakeTransport();
+    transport.pluginInstalledResult = {
+      marketplaces: [{
+        name: "local",
+        plugins: [
+          appServerPlugin(),
+          appServerPlugin({
+            id: "disabled@local",
+            name: "disabled",
+            enabled: false,
+            interface: null,
+          }),
+          appServerPlugin({
+            id: "admin-blocked@local",
+            name: "admin-blocked",
+            availability: "DISABLED_BY_ADMIN",
+          }),
+          appServerPlugin({
+            id: "not-installed@local",
+            name: "not-installed",
+            installed: false,
+          }),
+        ],
+      }],
+      marketplaceLoadErrors: [],
+    };
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listPlugins("/tmp/project")).resolves.toEqual({
+      plugins: [{
+        id: "github@local",
+        name: "github",
+        displayName: "GitHub",
+        marketplaceName: "local",
+        description: "GitHub development tools",
+        enabled: true,
+        available: true,
+      },
+      {
+        id: "disabled@local",
+        name: "disabled",
+        displayName: "disabled",
+        marketplaceName: "local",
+        description: null,
+        enabled: false,
+        available: true,
+      },
+      {
+        id: "admin-blocked@local",
+        name: "admin-blocked",
+        displayName: "GitHub",
+        marketplaceName: "local",
+        description: "GitHub development tools",
+        enabled: true,
+        available: false,
+      }],
+      loadErrorCount: 0,
+    });
+    await expect(client.resolvePlugin("/tmp/project", "github@local"))
+      .resolves.toEqual({
+        id: "github@local",
+        name: "github",
+        displayName: "GitHub",
+        path: "plugin://github@local",
+      });
+    await expect(client.resolvePlugin("/tmp/project", "disabled@local"))
+      .resolves.toBeUndefined();
+    await expect(client.resolvePlugin("/tmp/project", "admin-blocked@local"))
+      .resolves.toBeUndefined();
+    expect(transport.sent.find((message) => message.method === "plugin/installed")?.params)
+      .toEqual({ cwds: ["/tmp/project"] });
+  });
+
+  it("preserves a bounded count when Plugin marketplaces only partially load", async () => {
+    const transport = new FakeTransport();
+    transport.pluginInstalledResult = {
+      marketplaces: [{
+        name: "local",
+        plugins: [appServerPlugin()],
+      }],
+      marketplaceLoadErrors: [
+        { marketplacePath: "/private/one.json", message: "secret one" },
+        { marketplacePath: "/private/two.json", message: "secret two" },
+      ],
+    };
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listPlugins("/tmp/project")).resolves.toEqual({
+      plugins: [expect.objectContaining({ id: "github@local" })],
+      loadErrorCount: 2,
+    });
+  });
+
+  it("fails closed when an installed Plugin id does not match its marketplace", async () => {
+    const transport = new FakeTransport();
+    transport.pluginInstalledResult = {
+      marketplaces: [{
+        name: "local",
+        plugins: [appServerPlugin({ id: "github@other" })],
+      }],
+      marketplaceLoadErrors: [],
+    };
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listPlugins("/tmp/project"))
+      .rejects.toThrow("Codex 响应包含不一致的 plugin id");
+  });
+
   it("fails closed when an invocable Skill has an unsafe name or path", async () => {
     const transport = new FakeTransport();
     transport.skillsResult = {
@@ -1119,6 +1270,259 @@ describe("JsonRpcClient", () => {
     ]);
   });
 
+  it("maps full MCP details, starts OAuth, and reads bounded resources", async () => {
+    const transport = new FakeTransport();
+    transport.mcpPages = [{
+      data: [appServerMcpStatus({
+        name: "project-tools",
+        authStatus: "notLoggedIn",
+        serverInfo: {
+          name: "project-tools",
+          title: "Project Tools",
+          version: "1.2.3",
+          description: "Project MCP server",
+        },
+        tools: {
+          search: {
+            name: "search",
+            title: "Search",
+            description: "Search project data",
+          },
+        },
+        resources: [{
+          uri: "project://readme",
+          name: "readme",
+          title: "README",
+          description: "Project README",
+          mimeType: "text/markdown",
+        }],
+        resourceTemplates: [{
+          uriTemplate: "project://files/{path}",
+          name: "files",
+          title: "Files",
+          description: "Project files",
+          mimeType: "text/plain",
+        }],
+      })],
+      nextCursor: null,
+    }];
+    transport.mcpResourceResult = {
+      contents: [
+        {
+          uri: "project://readme",
+          mimeType: "text/plain",
+          text: "x".repeat(20_001),
+        },
+        {
+          uri: "project://logo",
+          mimeType: "image/png",
+          blob: "YWJjZA==",
+        },
+      ],
+    };
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listMcpServerDetails("thread-1")).resolves.toEqual([{
+      name: "project-tools",
+      authStatus: "notLoggedIn",
+      toolCount: 1,
+      serverTitle: "Project Tools",
+      serverVersion: "1.2.3",
+      serverDescription: "Project MCP server",
+      tools: [{ name: "search", title: "Search", description: "Search project data" }],
+      resources: [{
+        uri: "project://readme",
+        name: "readme",
+        title: "README",
+        description: "Project README",
+        mimeType: "text/markdown",
+      }],
+      resourceTemplates: [{
+        uriTemplate: "project://files/{path}",
+        name: "files",
+        title: "Files",
+        description: "Project files",
+        mimeType: "text/plain",
+      }],
+    }]);
+    await expect(client.startMcpOAuthLogin("project-tools", "thread-1"))
+      .resolves.toEqual({
+        server: "project-tools",
+        authorizationUrl: "https://example.test/oauth",
+      });
+    const resource = await client.readMcpResource(
+      "project-tools",
+      "project://readme",
+      "thread-1",
+    );
+    expect(resource.contents[0]).toMatchObject({
+      kind: "text",
+      truncated: true,
+    });
+    expect(resource.contents[0]).toHaveProperty("text", "x".repeat(8_000));
+    expect(resource.contents[1]).toEqual({
+      kind: "blob",
+      uri: "project://logo",
+      mimeType: "image/png",
+      encodedCharacters: 8,
+    });
+    expect(resource.omittedContentCount).toBe(0);
+    await expect(client.reloadMcpServers()).resolves.toBeUndefined();
+    const reloadRequest = transport.sent.find(
+      (message) => message.method === "config/mcpServer/reload",
+    );
+    expect(reloadRequest).toBeDefined();
+    expect(reloadRequest).not.toHaveProperty("params");
+    expect(transport.sent.find((message) => message.method === "mcpServerStatus/list")?.params)
+      .toEqual({ limit: 100, detail: "full", threadId: "thread-1" });
+    expect(transport.sent.find((message) => message.method === "mcpServer/oauth/login")?.params)
+      .toEqual({ name: "project-tools", threadId: "thread-1" });
+    expect(transport.sent.find((message) => message.method === "mcpServer/resource/read")?.params)
+      .toEqual({ server: "project-tools", uri: "project://readme", threadId: "thread-1" });
+  });
+
+  it("normalizes multiline and oversized MCP descriptions without rejecting details", async () => {
+    const transport = new FakeTransport();
+    transport.mcpPages = [{
+      data: [appServerMcpStatus({
+        serverInfo: {
+          name: "local-tools",
+          title: "Local Tools",
+          version: "1.0.0",
+          description: " Server\n\tsummary ",
+        },
+        tools: {
+          search: {
+            name: "search",
+            title: "Search",
+            description: ` Search\n\ttool ${"x".repeat(12_700)} `,
+          },
+        },
+        resources: [{
+          uri: "local://readme",
+          name: "readme",
+          title: "README",
+          description: " Resource\n\tsummary ",
+          mimeType: "text/plain",
+        }],
+      })],
+      nextCursor: null,
+    }];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    const [server] = await client.listMcpServerDetails();
+    expect(server?.serverDescription).toBe("Server summary");
+    expect(server?.tools[0]?.description).toHaveLength(2_000);
+    expect(server?.tools[0]?.description).toMatch(/^Search tool x+$/u);
+    expect(server?.resources[0]?.description).toBe("Resource summary");
+  });
+
+  it.each([
+    { name: "NUL", value: "\u0000" },
+    { name: "ESC", value: "\u001b" },
+  ])("rejects $name in MCP descriptions", async ({ value }) => {
+    const transport = new FakeTransport();
+    transport.mcpPages = [{
+      data: [appServerMcpStatus({
+        tools: {
+          search: {
+            name: "search",
+            title: "Search",
+            description: `unsafe${value}description`,
+          },
+        },
+      })],
+      nextCursor: null,
+    }];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listMcpServerDetails())
+      .rejects.toThrow("Codex 响应缺少有效 MCP tool description");
+  });
+
+  it("bounds MCP resource content count and aggregate visible text", async () => {
+    const transport = new FakeTransport();
+    transport.mcpResourceResult = {
+      contents: Array.from({ length: 10 }, (_, index) => ({
+        uri: `project://entry/${index + 1}`,
+        mimeType: "text/plain",
+        text: String(index + 1).repeat(3_000),
+      })),
+    };
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    const resource = await client.readMcpResource("project-tools", "project://all");
+    expect(resource.contents).toHaveLength(3);
+    expect(resource.contents.reduce(
+      (characters, content) => characters + (content.kind === "text" ? content.text.length : 0),
+      0,
+    )).toBe(8_000);
+    expect(resource.contents.at(-1)).toMatchObject({
+      kind: "text",
+      truncated: true,
+    });
+    expect(resource.omittedContentCount).toBe(7);
+  });
+
+  it("redacts credentials from MCP resource text before returning it", async () => {
+    const transport = new FakeTransport();
+    transport.mcpResourceResult = {
+      contents: [{
+        uri: "project://secrets",
+        mimeType: "text/plain",
+        text: [
+          "Authorization: Bearer bearer-secret",
+          "Cookie: session=cookie-secret",
+          "API_TOKEN=environment-secret",
+        ].join("\n"),
+      }],
+    };
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    const resource = await client.readMcpResource(
+      "project-tools",
+      "project://secrets",
+    );
+    expect(resource.contents[0]).toMatchObject({
+      kind: "text",
+      text: [
+        "Authorization: Bearer [REDACTED]",
+        "Cookie: [REDACTED]",
+        "API_TOKEN=[REDACTED]",
+      ].join("\n"),
+    });
+    expect(JSON.stringify(resource)).not.toMatch(
+      /bearer-secret|cookie-secret|environment-secret/u,
+    );
+  });
+
+  it("rejects an unsafe MCP OAuth authorization URL", async () => {
+    const transport = new FakeTransport();
+    transport.mcpOauthResult = { authorizationUrl: "http://example.test/oauth" };
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.startMcpOAuthLogin("project-tools"))
+      .rejects.toThrow("Codex 响应缺少安全的 MCP OAuth authorization URL");
+  });
+
   it("fails closed when MCP status lacks a required stable field", async () => {
     const transport = new FakeTransport();
     transport.mcpPages = [{
@@ -1147,55 +1551,6 @@ describe("JsonRpcClient", () => {
 
     await expect(client.listMcpServers())
       .rejects.toThrow("mcpServerStatus/list 返回了循环分页游标");
-  });
-
-  it("lists only installed plugins without loading the remote catalog", async () => {
-    const transport = new FakeTransport();
-    transport.pluginInstalledResult = {
-      marketplaces: [{
-        name: "local",
-        path: "/tmp/plugins",
-        interface: null,
-        plugins: [
-          { name: "enabled-plugin", installed: true, enabled: true },
-          { name: "disabled-plugin", installed: true, enabled: false },
-          { name: "suggestion", installed: false, enabled: false },
-        ],
-      }],
-      marketplaceLoadErrors: [{
-        marketplacePath: "/tmp/broken",
-        message: "sensitive local parse detail",
-      }],
-    };
-    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
-      sandbox: "workspace-write",
-    });
-    await client.connect();
-
-    await expect(client.listPlugins("/tmp/project")).resolves.toEqual([
-      { name: "enabled-plugin", enabled: true },
-      { name: "disabled-plugin", enabled: false },
-    ]);
-    expect(transport.sent.find((message) => message.method === "plugin/installed")?.params)
-      .toEqual({ cwds: ["/tmp/project"] });
-    expect(transport.sent.some((message) => message.method === "plugin/list")).toBe(false);
-  });
-
-  it("fails closed when an installed Plugin lacks a required stable field", async () => {
-    const transport = new FakeTransport();
-    transport.pluginInstalledResult = {
-      marketplaces: [{
-        plugins: [{ name: "", installed: true, enabled: true }],
-      }],
-      marketplaceLoadErrors: [],
-    };
-    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
-      sandbox: "workspace-write",
-    });
-    await client.connect();
-
-    await expect(client.listPlugins("/tmp/project"))
-      .rejects.toThrow("Codex 响应缺少有效 plugin name");
   });
 
   it("maps and paginates Permission Profiles into stable options", async () => {
@@ -1343,6 +1698,11 @@ describe("JsonRpcClient", () => {
           name: "systematic-debugging",
           path: "/tmp/project/.codex/skills/systematic-debugging/SKILL.md",
         },
+        {
+          type: "plugin",
+          name: "GitHub",
+          path: "plugin://github@local",
+        },
       ],
       "codex_connect_gateway:request-1",
       "/tmp/project",
@@ -1373,6 +1733,11 @@ describe("JsonRpcClient", () => {
             type: "skill",
             name: "systematic-debugging",
             path: "/tmp/project/.codex/skills/systematic-debugging/SKILL.md",
+          },
+          {
+            type: "mention",
+            name: "GitHub",
+            path: "plugin://github@local",
           },
         ],
         cwd: "/tmp/project",

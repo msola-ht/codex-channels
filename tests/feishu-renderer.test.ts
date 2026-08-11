@@ -165,7 +165,7 @@ describe("Feishu output renderer", () => {
       },
       { kind: "skills", entries: [] },
       { kind: "mcp", servers: [] },
-      { kind: "plugins", result: [] },
+      { kind: "plugins", plugins: [], loadErrorCount: 0 },
       {
         kind: "usage",
         result: {
@@ -230,7 +230,7 @@ describe("Feishu output renderer", () => {
       expect.stringContaining("Fast 模式：开启"),
       "当前没有已启用的 Skills。",
       "## MCP Servers（0）",
-      "当前没有已安装 Plugins。",
+      "当前没有已安装的 Plugin。",
       expect.stringContaining("OpenAI Codex 账户用量摘要"),
       expect.stringContaining("Codex 额度"),
       expect.stringContaining("可用 Permission Profiles"),
@@ -535,11 +535,20 @@ describe("Feishu output renderer", () => {
     expect(renderFeishuCommandResult({
       kind: "mcp",
       servers: [{ name: "docs", authStatus: "oAuth", toolCount: 2 }],
-    })).toContain("- docs · auth=oAuth · tools=2");
+    })).toContain("1. docs · auth=oAuth · tools=2");
     expect(renderFeishuCommandResult({
       kind: "plugins",
-      result: [{ name: "github", enabled: true }],
-    })).toContain("- github · 已启用");
+      plugins: [{
+        id: "github@local",
+        name: "github",
+        displayName: "GitHub",
+        marketplaceName: "local",
+        description: null,
+        enabled: true,
+        available: true,
+      }],
+      loadErrorCount: 0,
+    })).toContain("1. GitHub · github@local · 已启用");
     expect(renderFeishuCommandResult({
       kind: "permissions",
       profiles: [{

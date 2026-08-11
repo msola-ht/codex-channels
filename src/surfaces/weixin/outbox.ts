@@ -40,6 +40,7 @@ import {
 } from "../output-copy.js";
 import {
   formatRuntimeAccountUpdate,
+  formatRuntimeMcpOAuthCompleted,
   formatRuntimeMcpStatusUpdate,
   formatRuntimeRateLimitUpdate,
 } from "../runtime-status-format.js";
@@ -150,7 +151,10 @@ export class WeixinOutbox implements SurfaceOutputPort {
         () => this.send(
           event.target,
           renderPlainLifecyclePresentation(
-            createTurnStartedPresentation(event.background ? event.threadId : undefined),
+            createTurnStartedPresentation(
+              event.background ? event.threadId : undefined,
+              event.identity,
+            ),
           ),
         ),
         true,
@@ -382,6 +386,11 @@ export class WeixinOutbox implements SurfaceOutputPort {
       case "mcp.status.updated":
         return formatWeixinCommandText(
           formatRuntimeMcpStatusUpdate(event),
+          { structuredFields: true },
+        );
+      case "mcp.oauth.completed":
+        return formatWeixinCommandText(
+          formatRuntimeMcpOAuthCompleted(event),
           { structuredFields: true },
         );
       case "plan.updated":

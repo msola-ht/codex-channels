@@ -91,7 +91,12 @@ suite("real Codex App Server over Unix WebSocket", () => {
       await new Promise((resolveExit) => processHandle.once("exit", resolveExit));
     }
     if (testRuntime) {
-      rmSync(testRuntime, { recursive: true, force: true });
+      rmSync(testRuntime, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
     }
   });
 
@@ -130,11 +135,16 @@ suite("real Codex App Server over Unix WebSocket", () => {
       typeof skill.name === "string" && typeof skill.description === "string")).toBe(true);
   });
 
-  it("lists installed plugins without loading remote catalog entries", async () => {
-    const plugins = await client.listPlugins(workdir);
+  it("lists installed Plugins without loading remote catalog entries", async () => {
+    const catalog = await client.listPlugins(workdir);
 
-    expect(plugins.every((plugin) =>
-      typeof plugin.name === "string" && typeof plugin.enabled === "boolean")).toBe(true);
+    expect(Array.isArray(catalog.plugins)).toBe(true);
+    expect(catalog.loadErrorCount).toBe(0);
+    expect(catalog.plugins.every((plugin) =>
+      typeof plugin.id === "string"
+      && typeof plugin.name === "string"
+      && typeof plugin.enabled === "boolean"
+      && typeof plugin.available === "boolean")).toBe(true);
   });
 
   it("broadcasts and exposes a loaded temporary thread across two clients without running a model turn", async () => {
@@ -404,6 +414,8 @@ contractSuite("isolated Codex App Server state contract", () => {
   let ownerClient: CodexAppServerClient;
   let peerRpc: JsonRpcClient;
   let peerClient: CodexAppServerClient;
+  let oauthServer: ReturnType<typeof createServer>;
+  let oauthBaseUrl: string;
   let appServerStderr = "";
 
   beforeAll(async () => {
@@ -411,6 +423,44 @@ contractSuite("isolated Codex App Server state contract", () => {
     testRuntime = mkdtempSync(join(runtimeRoot, "contract-"));
     codexHome = join(testRuntime, "codex-home");
     socketPath = join(testRuntime, "app-server.sock");
+    oauthServer = createServer((request, response) => {
+      if (
+        request.method === "GET"
+        && request.url === "/.well-known/oauth-authorization-server/oauth-mcp"
+      ) {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          authorization_endpoint: `${oauthBaseUrl}/authorize`,
+          token_endpoint: `${oauthBaseUrl}/token`,
+          scopes_supported: ["read"],
+          response_types_supported: ["code"],
+          code_challenge_methods_supported: ["S256"],
+        }));
+        return;
+      }
+      if (request.method === "POST" && request.url === "/token") {
+        request.resume();
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          access_token: "contract-access-token",
+          token_type: "Bearer",
+          expires_in: 3_600,
+          refresh_token: "contract-refresh-token",
+        }));
+        return;
+      }
+      response.writeHead(404);
+      response.end();
+    });
+    await new Promise<void>((resolveListen, rejectListen) => {
+      oauthServer.once("error", rejectListen);
+      oauthServer.listen(0, "127.0.0.1", () => resolveListen());
+    });
+    const oauthAddress = oauthServer.address();
+    if (!oauthAddress || typeof oauthAddress === "string") {
+      throw new Error("MCP OAuth 合同无法创建本机 HTTP 夹具");
+    }
+    oauthBaseUrl = `http://127.0.0.1:${oauthAddress.port}`;
     mkdirSync(codexHome, { recursive: true, mode: 0o700 });
     const contractSkillDirectory = join(
       codexHome,
@@ -433,15 +483,84 @@ contractSuite("isolated Codex App Server state contract", () => {
       ].join("\n"),
       { mode: 0o600 },
     );
+    const pluginMarketplace = join(testRuntime, "contract-marketplace");
+    const pluginManifestDirectory = join(
+      pluginMarketplace,
+      "plugins",
+      "contract-plugin",
+      ".codex-plugin",
+    );
+    mkdirSync(join(pluginMarketplace, ".git"), { recursive: true, mode: 0o700 });
+    mkdirSync(join(pluginMarketplace, ".agents", "plugins"), {
+      recursive: true,
+      mode: 0o700,
+    });
+    mkdirSync(pluginManifestDirectory, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      join(pluginMarketplace, ".agents", "plugins", "marketplace.json"),
+      JSON.stringify({
+        name: "contract-marketplace",
+        plugins: [{
+          name: "contract-plugin",
+          source: {
+            source: "local",
+            path: "./plugins/contract-plugin",
+          },
+        }],
+      }),
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(pluginManifestDirectory, "plugin.json"),
+      JSON.stringify({
+        name: "contract-plugin",
+        interface: {
+          displayName: "Contract Plugin",
+          shortDescription: "Validate structured Plugin mention input.",
+        },
+      }),
+      { mode: 0o600 },
+    );
+    const installedPluginManifestDirectory = join(
+      codexHome,
+      "plugins",
+      "cache",
+      "contract-marketplace",
+      "contract-plugin",
+      "local",
+      ".codex-plugin",
+    );
+    mkdirSync(installedPluginManifestDirectory, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      join(installedPluginManifestDirectory, "plugin.json"),
+      JSON.stringify({ name: "contract-plugin" }),
+      { mode: 0o600 },
+    );
     const approvalProbe = resolve(
       "tests/fixtures/mcp-tool-approval-server.mjs",
     );
     writeFileSync(
       join(codexHome, "config.toml"),
       [
+        'mcp_oauth_credentials_store = "file"',
+        "",
         "[mcp_servers.approval_probe]",
         `command = ${JSON.stringify(process.execPath)}`,
         `args = [${JSON.stringify(approvalProbe)}]`,
+        "",
+        "[mcp_servers.oauth_probe]",
+        `url = ${JSON.stringify(`${oauthBaseUrl}/oauth-mcp`)}`,
+        'oauth = { client_id = "contract-oauth-client" }',
+        "",
+        "[features]",
+        "plugins = true",
+        "",
+        "[marketplaces.contract-marketplace]",
+        'source_type = "local"',
+        `source = ${JSON.stringify(pluginMarketplace)}`,
+        "",
+        '[plugins."contract-plugin@contract-marketplace"]',
+        "enabled = true",
         "",
         "[model_providers.deepseek]",
         'name = "deepseek"',
@@ -489,8 +608,16 @@ contractSuite("isolated Codex App Server state contract", () => {
       processHandle.kill("SIGTERM");
       await new Promise((resolveExit) => processHandle.once("exit", resolveExit));
     }
+    if (oauthServer) {
+      await new Promise<void>((resolveClose) => oauthServer.close(() => resolveClose()));
+    }
     if (testRuntime) {
-      rmSync(testRuntime, { recursive: true, force: true });
+      rmSync(testRuntime, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
     }
   });
 
@@ -539,7 +666,8 @@ contractSuite("isolated Codex App Server state contract", () => {
     }
   }, 15_000);
 
-  it("maps the isolated App Server MCP list to stable summaries", async () => {
+  it("maps the isolated App Server MCP list, details, and resources", async () => {
+    await expect(ownerClient.reloadMcpServers()).resolves.toBeUndefined();
     const servers = await ownerClient.listMcpServers();
 
     expect(Array.isArray(servers)).toBe(true);
@@ -547,7 +675,133 @@ contractSuite("isolated Codex App Server state contract", () => {
       typeof server.name === "string"
       && typeof server.authStatus === "string"
       && Number.isInteger(server.toolCount))).toBe(true);
+
+    const details = await ownerClient.listMcpServerDetails();
+    const approvalProbe = details.find((server) => server.name === "approval_probe");
+    expect(approvalProbe?.serverVersion).toBe("1.0.0");
+    expect(approvalProbe?.tools.some((tool) => tool.name === "approval_probe")).toBe(true);
+    const approvalTool = approvalProbe?.tools.find((tool) => tool.name === "approval_probe");
+    expect(approvalTool?.description).toHaveLength(2_000);
+    expect(approvalTool?.description).toMatch(/^Emit approval details x+$/u);
+    expect(approvalProbe?.resources).toContainEqual(expect.objectContaining({
+      uri: "contract://status",
+      name: "contract-status",
+    }));
+
+    await expect(ownerClient.readMcpResource(
+      "approval_probe",
+      "contract://status",
+    )).resolves.toEqual({
+      server: "approval_probe",
+      requestedUri: "contract://status",
+      contents: [{
+        kind: "text",
+        uri: "contract://status",
+        mimeType: "text/plain",
+        text: "contract resource ready",
+        truncated: false,
+      }],
+      omittedContentCount: 0,
+    });
+  }, 15_000);
+
+  it("maps the isolated App Server MCP OAuth completion notification", async () => {
+    const started = await ownerClient.startThread(workdir);
+    const threadId = started.thread.id;
+    let observed: ReturnType<typeof toConversationInputEvent>;
+    const removeNotification = ownerClient.onNotification((notification) => {
+      const event = toConversationInputEvent(notification);
+      if (event?.type === "mcp.oauth.completed" && event.name === "oauth_probe") {
+        observed = event;
+      }
+    });
+    try {
+      const login = await ownerClient.startMcpOAuthLogin("oauth_probe", threadId);
+      const authorizationUrl = new URL(login.authorizationUrl);
+      expect(authorizationUrl.origin).toBe(oauthBaseUrl);
+      expect(authorizationUrl.searchParams.get("client_id"))
+        .toBe("contract-oauth-client");
+      const state = authorizationUrl.searchParams.get("state");
+      const redirectUri = authorizationUrl.searchParams.get("redirect_uri");
+      expect(state).not.toBeNull();
+      expect(redirectUri).not.toBeNull();
+      if (!state || !redirectUri) {
+        throw new Error("MCP OAuth 授权地址缺少 state 或 redirect_uri");
+      }
+      const callbackUrl = new URL(redirectUri);
+      callbackUrl.searchParams.set("code", "contract-test-code");
+      callbackUrl.searchParams.set("state", state);
+      const callbackResponse = await fetch(callbackUrl);
+      expect(callbackResponse.ok).toBe(true);
+
+      await waitFor(() => observed !== undefined, 10_000);
+      expect(observed).toEqual({
+        type: "mcp.oauth.completed",
+        threadId,
+        name: "oauth_probe",
+        success: true,
+        error: null,
+      });
+    } finally {
+      removeNotification();
+      await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
+      await ownerClient.deleteThread(threadId);
+    }
+  }, 15_000);
+
+  it("maps the isolated App Server Plugin list to stable installed entries", async () => {
+    const catalog = await ownerClient.listPlugins(workdir);
+
+    expect(Array.isArray(catalog.plugins)).toBe(true);
+    expect(catalog.loadErrorCount).toBe(0);
+    expect(catalog.plugins.every((plugin) =>
+      typeof plugin.id === "string"
+      && typeof plugin.name === "string"
+      && typeof plugin.enabled === "boolean"
+      && typeof plugin.available === "boolean")).toBe(true);
   });
+
+  it("accepts an installed Plugin marker and official mention input together", async () => {
+    const plugin = await ownerClient.resolvePlugin(
+      workdir,
+      "contract-plugin@contract-marketplace",
+    );
+    expect(plugin).toEqual({
+      id: "contract-plugin@contract-marketplace",
+      name: "contract-plugin",
+      displayName: "Contract Plugin",
+      path: "plugin://contract-plugin@contract-marketplace",
+    });
+    if (!plugin) {
+      throw new Error("隔离 App Server 未返回 contract-plugin");
+    }
+    const started = await ownerClient.startThread(workdir);
+    const threadId = started.thread.id;
+    let turnId: string | undefined;
+    try {
+      const turn = await ownerClient.startTurn(
+        threadId,
+        [
+          { type: "text", text: "@contract-plugin 验证结构化调用" },
+          {
+            type: "plugin",
+            name: plugin.displayName,
+            path: plugin.path,
+          },
+        ],
+        "codex_connect_gateway:plugin-contract",
+        workdir,
+      );
+      turnId = turn.turnId;
+      expect(turnId).not.toBe("");
+    } finally {
+      if (turnId !== undefined) {
+        await ownerClient.interruptTurn(threadId, turnId).catch(() => undefined);
+      }
+      await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
+      await ownerClient.deleteThread(threadId);
+    }
+  }, 15_000);
 
   it("shares persisted Thread pin state across clients without local storage", async () => {
     const started = await ownerClient.startThread(workdir);
@@ -627,14 +881,6 @@ contractSuite("isolated Codex App Server state contract", () => {
       await ownerClient.deleteThread(threadId);
     }
   }, 15_000);
-
-  it("maps the isolated App Server Plugin list to stable installed entries", async () => {
-    const plugins = await ownerClient.listPlugins(workdir);
-
-    expect(Array.isArray(plugins)).toBe(true);
-    expect(plugins.every((plugin) =>
-      typeof plugin.name === "string" && typeof plugin.enabled === "boolean")).toBe(true);
-  });
 
   it("maps the isolated App Server Permission Profile list to stable options", async () => {
     const profiles = await ownerClient.listPermissionProfiles(workdir);

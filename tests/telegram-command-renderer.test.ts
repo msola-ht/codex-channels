@@ -9,6 +9,49 @@ import {
 import { formatRuntimeMcpStatusUpdate } from "../src/surfaces/runtime-status-format.js";
 
 describe("Telegram command renderer", () => {
+  it("does not duplicate the Turn lifecycle acknowledgement for a new Plugin task", async () => {
+    const reply = vi.fn(async () => undefined);
+
+    await renderTelegramCommandResult(
+      { reply } as unknown as Context,
+      {
+        kind: "outcome",
+        outcome: {
+          type: "plugin.started",
+          pluginName: "GitHub",
+          turnId: "turn-1",
+          steered: false,
+        },
+      },
+    );
+
+    expect(reply).not.toHaveBeenCalled();
+  });
+
+  it("renders Bearer Token MCP authentication as information", async () => {
+    const reply = vi.fn(async () => undefined);
+
+    await renderTelegramCommandResult(
+      { reply } as unknown as Context,
+      {
+        kind: "mcp-login",
+        login: {
+          type: "bearerToken",
+          server: "token-tools",
+        },
+      },
+    );
+
+    expect(reply).toHaveBeenCalledWith(
+      expect.stringContaining("已使用 Bearer Token 认证，无需 OAuth 登录"),
+      expect.objectContaining({ parse_mode: "HTML" }),
+    );
+    expect(reply).not.toHaveBeenCalledWith(
+      expect.stringContaining("操作失败"),
+      expect.anything(),
+    );
+  });
+
   it("renders expanded shared notices through the safe HTML panel path", async () => {
     const reply = vi.fn(async () => undefined);
 
@@ -148,6 +191,49 @@ describe("Telegram command renderer", () => {
     );
     expect(reply).toHaveBeenCalledWith(
       expect.stringContaining("<b>Tokens：</b>100 / 10 K"),
+      expect.objectContaining({ parse_mode: "HTML" }),
+    );
+  });
+
+  it("renders Plugin and MCP resource results through the shared safe panel", async () => {
+    const reply = vi.fn(async () => undefined);
+    const context = { reply } as unknown as Context;
+
+    await renderTelegramCommandResult(context, {
+      kind: "plugins",
+      plugins: [{
+        id: "github@local",
+        name: "github",
+        displayName: "GitHub",
+        marketplaceName: "local",
+        description: null,
+        enabled: true,
+        available: true,
+      }],
+      loadErrorCount: 0,
+    });
+    await renderTelegramCommandResult(context, {
+      kind: "mcp-resource",
+      resource: {
+        server: "docs",
+        requestedUri: "docs://index",
+        contents: [{
+          kind: "text",
+          uri: "docs://index",
+          mimeType: "text/plain",
+          text: "<unsafe>",
+          truncated: false,
+        }],
+        omittedContentCount: 0,
+      },
+    });
+
+    expect(reply).toHaveBeenCalledWith(
+      expect.stringContaining("github@local"),
+      expect.objectContaining({ parse_mode: "HTML" }),
+    );
+    expect(reply).toHaveBeenCalledWith(
+      expect.stringContaining("&lt;unsafe&gt;"),
       expect.objectContaining({ parse_mode: "HTML" }),
     );
   });

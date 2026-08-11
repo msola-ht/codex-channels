@@ -3,6 +3,7 @@ import type { Logger } from "pino";
 import {
   isCriticalOutputEvent,
   type OutputEvent,
+  type TurnStartIdentity,
 } from "../../conversation-core/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import type {
@@ -90,11 +91,11 @@ interface FeishuPlanState {
 export interface FeishuMessagePort {
   sendText(chatId: string, text: string): Promise<void>;
   sendPost(chatId: string, markdown: string): Promise<void>;
-  sendMarkdownCard(chatId: string, markdown: string): Promise<void>;
+  sendMarkdownCard(chatId: string, markdown: string): Promise<string | void>;
   sendFile?(chatId: string, fileName: string, file: Buffer): Promise<void>;
   sendImage?(chatId: string, image: Buffer): Promise<void>;
   replyPost?(messageId: string, markdown: string): Promise<void>;
-  replyMarkdownCard?(messageId: string, markdown: string): Promise<void>;
+  replyMarkdownCard?(messageId: string, markdown: string): Promise<string | void>;
   sendCard(chatId: string, card: FeishuCardDocument): Promise<string>;
   updateCard(messageId: string, card: FeishuCardDocument): Promise<void>;
   createStreamingCard(
@@ -133,7 +134,12 @@ export class FeishuOutbox implements SurfaceOutputPort {
   private readonly delivery: ConversationDeliveryQueue;
   private readonly threadStatusMessages = new Map<
     string,
-    { chatId: string; messageId: string; status: string }
+    {
+      chatId: string;
+      messageId: string;
+      status: string;
+      identity?: TurnStartIdentity;
+    }
   >();
   private readonly planMessages = new Map<
     string,
@@ -328,6 +334,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
           || event.type === "subagent.completed"
           || event.type === "account.updated"
           || event.type === "account.rateLimits.updated"
+          || event.type === "mcp.oauth.completed"
           || event.type === "mcp.status.updated"
         ? this.sendMarkdown(event.target.conversationId, rendered)
         : event.type === "turn.started"
@@ -532,14 +539,21 @@ export class FeishuOutbox implements SurfaceOutputPort {
     markdown: string,
     maximumChunks = maximumFeishuMessageChunks,
     replyTo?: string,
+    onFirstMessageId?: (messageId: string) => void,
   ): Promise<void> {
     let first = true;
     for (const chunk of splitFeishuMarkdownCards(markdown, maximumChunks)) {
       try {
         if (first && replyTo !== undefined && this.messagePort.replyMarkdownCard) {
-          await this.messagePort.replyMarkdownCard(replyTo, chunk);
+          const messageId = await this.messagePort.replyMarkdownCard(replyTo, chunk);
+          if (typeof messageId === "string") {
+            onFirstMessageId?.(messageId);
+          }
         } else {
-          await this.messagePort.sendMarkdownCard(chatId, chunk);
+          const messageId = await this.messagePort.sendMarkdownCard(chatId, chunk);
+          if (first && typeof messageId === "string") {
+            onFirstMessageId?.(messageId);
+          }
         }
       } catch (error) {
         if (
@@ -572,6 +586,22 @@ export class FeishuOutbox implements SurfaceOutputPort {
     >,
     markdown: string,
   ): Promise<void> {
+    if (event.type === "turn.started") {
+      const current = this.threadStatusMessages.get(event.threadId);
+      if (current?.chatId === event.target.conversationId) {
+        if (event.identity && current.identity === undefined) {
+          await this.messagePort.updateCard(
+            current.messageId,
+            renderFeishuThreadStatusCard("active", event.identity),
+          );
+          this.threadStatusMessages.set(event.threadId, {
+            ...current,
+            identity: event.identity,
+          });
+        }
+        return;
+      }
+    }
     const key = turnKey(event.threadId, event.turnId);
     const consumesReplyTarget = event.type === "turn.completed"
       || (
@@ -599,12 +629,28 @@ export class FeishuOutbox implements SurfaceOutputPort {
       }
       return;
     }
+    let messageId: string | undefined;
     await this.sendMarkdown(
       event.target.conversationId,
       markdown,
       maximumFeishuMessageChunks,
       replyTo,
+      (value) => {
+        messageId = value;
+      },
     );
+    if (
+      event.type === "turn.started"
+      && messageId !== undefined
+      && !this.closeFinished
+    ) {
+      this.threadStatusMessages.set(event.threadId, {
+        chatId: event.target.conversationId,
+        messageId,
+        status: "active",
+        ...(event.identity ? { identity: event.identity } : {}),
+      });
+    }
     if (consumesReplyTarget) {
       this.replyTargets.delete(key);
     }
@@ -691,8 +737,8 @@ export class FeishuOutbox implements SurfaceOutputPort {
   private async deliverThreadStatus(
     event: Extract<OutputEvent, { type: "thread.status" }>,
   ): Promise<void> {
-    const card = renderFeishuThreadStatusCard(event.status);
     const current = this.threadStatusMessages.get(event.threadId);
+    const card = renderFeishuThreadStatusCard(event.status, current?.identity);
     if (
       current
       && current.chatId === event.target.conversationId
@@ -716,6 +762,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
       } else {
         this.threadStatusMessages.delete(event.threadId);
       }
+      return;
+    }
+    if (event.status !== "active") {
       return;
     }
     const messageId = await this.messagePort.sendCard(

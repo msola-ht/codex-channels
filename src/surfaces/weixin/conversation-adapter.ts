@@ -339,6 +339,9 @@ export class WeixinConversationAdapter {
         this.inputOptions.priceCurrency,
         this.inputOptions.exchangeRate?.() ?? null,
       );
+      if (rendered === null) {
+        return;
+      }
       this.notifyCommand(
         message.target,
         result.kind === "status" && this.inputOptions.pollingHealth

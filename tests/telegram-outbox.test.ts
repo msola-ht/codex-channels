@@ -199,6 +199,20 @@ describe("TelegramOutbox", () => {
     });
   });
 
+  it("identifies the Plugin in the unified Turn start reply", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      ...turnStarted(),
+      identity: { kind: "plugin", name: "GitHub" },
+    });
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual(["<b>已使用 GitHub Plugin 开始处理。</b>"]);
+  });
+
   it("reports when image and text input is sent to the visual API", async () => {
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);
@@ -1299,6 +1313,29 @@ describe("TelegramOutbox", () => {
 
     expect(api.sent).toEqual(["Codex 警告：代理连接失败，TOKEN=[已隐藏]"]);
     expect(api.sendOptions).toEqual([{ disable_notification: true }]);
+  });
+
+  it("sends MCP OAuth failures as critical status panels", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      type: "mcp.oauth.completed",
+      target,
+      threadId: "thread-1",
+      name: "docs",
+      success: false,
+      error: "OAuth denied",
+    });
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toHaveLength(1);
+    expect(api.sent[0]).toContain("MCP OAuth");
+    expect(api.sent[0]).toContain("登录失败");
+    expect(api.sent[0]).toContain("OAuth denied");
+    expect(api.sendOptions[0]).not.toHaveProperty("disable_notification");
   });
 
   it("does not send operation updates in hidden mode", async () => {

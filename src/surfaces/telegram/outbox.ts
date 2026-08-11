@@ -39,6 +39,7 @@ import {
 } from "../output-copy.js";
 import {
   formatRuntimeAccountUpdate,
+  formatRuntimeMcpOAuthCompleted,
   formatRuntimeMcpStatusUpdate,
   formatRuntimeRateLimitUpdate,
 } from "../runtime-status-format.js";
@@ -210,7 +211,10 @@ export class TelegramOutbox {
             await this.sendPanel(
               chatId,
               renderTelegramLifecyclePresentation(
-                createTurnStartedPresentation(event.background ? event.threadId : undefined),
+                createTurnStartedPresentation(
+                  event.background ? event.threadId : undefined,
+                  event.identity,
+                ),
               ),
               this.replyTargets.get(this.turnKey(event.threadId, event.turnId)),
               true,
@@ -518,6 +522,16 @@ export class TelegramOutbox {
             event.status !== "failed",
           );
         }, event.status === "failed");
+        return;
+      case "mcp.oauth.completed":
+        this.enqueue(chatId, async () => {
+          await this.sendPanel(
+            chatId,
+            formatRuntimeMcpOAuthCompleted(event),
+            undefined,
+            event.success,
+          );
+        }, true);
         return;
       case "thread.status":
         return;

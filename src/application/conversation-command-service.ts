@@ -33,7 +33,7 @@ export const conversationCommandNames = [
   "fast",
   "skill",
   "mcp",
-  "plugins",
+  "plugin",
   "usage",
   "metrics",
   "limits",
@@ -47,6 +47,13 @@ export const conversationCommandNames = [
 
 export type ConversationCommandName = typeof conversationCommandNames[number];
 const conversationCommandNameSet = new Set<string>(conversationCommandNames);
+export const mcpCommandUsageText = "用法：/mcp [health | reload | 名称或序号 [tools|resources|templates [页码] [search <关键词>]] | login <名称或序号> | resource <名称或序号> <URI>]";
+
+export interface McpDetailView {
+  section: "tools" | "resources" | "templates";
+  page: number;
+  searchTerm: string | null;
+}
 
 export function isConversationCommandName(value: string): value is ConversationCommandName {
   return conversationCommandNameSet.has(value);
@@ -83,7 +90,21 @@ export type ConversationCommandResult =
     }
   | { kind: "skills"; entries: Awaited<ReturnType<ConversationUseCases["listSkills"]>> }
   | { kind: "mcp"; servers: Awaited<ReturnType<ConversationUseCases["listMcpServers"]>> }
-  | { kind: "plugins"; result: Awaited<ReturnType<ConversationUseCases["listPlugins"]>> }
+  | { kind: "mcp-health"; report: Awaited<ReturnType<ConversationUseCases["mcpHealth"]>> }
+  | { kind: "mcp-reload" }
+  | {
+      kind: "mcp-detail";
+      selector: string;
+      server: Awaited<ReturnType<ConversationUseCases["mcpServerDetail"]>>;
+      view?: McpDetailView;
+    }
+  | { kind: "mcp-login"; login: Awaited<ReturnType<ConversationUseCases["loginMcpServer"]>> }
+  | { kind: "mcp-resource"; resource: Awaited<ReturnType<ConversationUseCases["readMcpResource"]>> }
+  | {
+      kind: "plugins";
+      plugins: Awaited<ReturnType<ConversationUseCases["listPlugins"]>>["plugins"];
+      loadErrorCount: number;
+    }
   | { kind: "usage"; result: Awaited<ReturnType<ConversationUseCases["providerAccountUsage"]>> }
   | { kind: "metrics"; summary: ReturnType<ConversationUseCases["requestMetrics"]> }
   | { kind: "limits"; result: Awaited<ReturnType<ConversationUseCases["providerAccountLimits"]>> }
@@ -129,6 +150,12 @@ export type ConversationCommandOutcome =
   | {
       type: "skill.started";
       skillName: string;
+      turnId: string;
+      steered: boolean;
+    }
+  | {
+      type: "plugin.started";
+      pluginName: string;
       turnId: string;
       steered: boolean;
     }
@@ -398,16 +425,72 @@ export class ConversationCommandService {
           },
         };
       }
-      case "mcp":
+      case "mcp": {
+        if (!argumentsText) {
+          return {
+            kind: "mcp",
+            servers: await this.conversations.listMcpServers(target),
+          };
+        }
+        const operation = parseMcpOperation(argumentsText);
+        if (operation.type === "health") {
+          return {
+            kind: "mcp-health",
+            report: await this.conversations.mcpHealth(target),
+          };
+        }
+        if (operation.type === "reload") {
+          await this.conversations.reloadMcpServers(target);
+          return { kind: "mcp-reload" };
+        }
+        if (operation.type === "detail") {
+          return {
+            kind: "mcp-detail",
+            selector: operation.selector,
+            server: await this.conversations.mcpServerDetail(target, operation.selector),
+            ...(operation.view ? { view: operation.view } : {}),
+          };
+        }
+        if (operation.type === "login") {
+          return {
+            kind: "mcp-login",
+            login: await this.conversations.loginMcpServer(target, operation.selector),
+          };
+        }
         return {
-          kind: "mcp",
-          servers: await this.conversations.listMcpServers(target),
+          kind: "mcp-resource",
+          resource: await this.conversations.readMcpResource(
+            target,
+            operation.selector,
+            operation.uri,
+          ),
         };
-      case "plugins":
+      }
+      case "plugin": {
+        if (!argumentsText) {
+          const catalog = await this.conversations.listPlugins(target);
+          return {
+            kind: "plugins",
+            plugins: catalog.plugins,
+            loadErrorCount: catalog.loadErrorCount,
+          };
+        }
+        const invocation = parsePluginInvocation(argumentsText);
+        const submission = await this.conversations.invokePlugin(
+          target,
+          invocation.selector,
+          invocation.task,
+        );
         return {
-          kind: "plugins",
-          result: await this.conversations.listPlugins(target),
+          kind: "outcome",
+          outcome: {
+            type: "plugin.started",
+            pluginName: submission.pluginName,
+            turnId: submission.turnId,
+            steered: submission.steered,
+          },
         };
+      }
       case "usage":
         return {
           kind: "usage",
@@ -554,6 +637,93 @@ function parseSkillInvocation(input: string): {
     selector: match[1],
     task: match[2].trim(),
   };
+}
+
+function parsePluginInvocation(input: string): {
+  selector: string;
+  task: string;
+} {
+  const match = /^(\S+)\s+([\s\S]+)$/u.exec(input.trim());
+  if (!match?.[1] || !match[2]?.trim()) {
+    throw new UserFacingError(
+      "plugin.usage",
+      "用法：/plugin <名称、完整 ID 或序号> <任务>",
+    );
+  }
+  return {
+    selector: match[1],
+    task: match[2].trim(),
+  };
+}
+
+function parseMcpOperation(input: string):
+  | { type: "health" }
+  | { type: "reload" }
+  | { type: "detail"; selector: string; view?: McpDetailView }
+  | { type: "login"; selector: string }
+  | { type: "resource"; selector: string; uri: string } {
+  const parts = input.trim().split(/\s+/u);
+  if (parts[0] === "health" && parts.length === 1) {
+    return { type: "health" };
+  }
+  if (parts[0] === "reload" && parts.length === 1) {
+    return { type: "reload" };
+  }
+  if (parts[0] === "login" && parts.length === 2) {
+    return { type: "login", selector: parts[1]! };
+  }
+  if (parts[0] === "resource" && parts.length === 3) {
+    return { type: "resource", selector: parts[1]!, uri: parts[2]! };
+  }
+  if (
+    parts[0] === "health"
+    || parts[0] === "reload"
+    || parts[0] === "login"
+    || parts[0] === "resource"
+  ) {
+    throw new UserFacingError(
+      "mcp.usage",
+      mcpCommandUsageText,
+    );
+  }
+  if (parts.length === 1 && parts[0]) {
+    return { type: "detail", selector: parts[0] };
+  }
+  const [selector, section, ...options] = parts;
+  if (
+    selector
+    && (section === "tools" || section === "resources" || section === "templates")
+  ) {
+    let page = 1;
+    let optionIndex = 0;
+    if (options[0] && /^[1-9]\d*$/u.test(options[0])) {
+      page = Number(options[0]);
+      optionIndex = 1;
+      if (!Number.isSafeInteger(page) || page > 10_000) {
+        throw new UserFacingError("mcp.usage", mcpCommandUsageText);
+      }
+    }
+    let searchTerm: string | null = null;
+    if (options[optionIndex] === "search") {
+      searchTerm = options.slice(optionIndex + 1).join(" ").trim();
+      if (!searchTerm || searchTerm.length > 128) {
+        throw new UserFacingError("mcp.usage", mcpCommandUsageText);
+      }
+      optionIndex = options.length;
+    }
+    if (optionIndex !== options.length) {
+      throw new UserFacingError("mcp.usage", mcpCommandUsageText);
+    }
+    return {
+      type: "detail",
+      selector,
+      view: { section, page, searchTerm },
+    };
+  }
+  throw new UserFacingError(
+    "mcp.usage",
+    mcpCommandUsageText,
+  );
 }
 
 function parseAgentInvocation(input: string): {

@@ -161,7 +161,7 @@ EventDispatcher`。
 | 文本与富文本发送 | `client.im.v1.message.create` | `chat_id` 的 `text` 与 `post + md` Payload、平台原生提及标签中和、有限 HTTP 超时和脱敏错误已完成；`post + md` 当前只用于静态 CardKit 实体创建失败和流式失败降级 | 已接入 |
 | CardKit Markdown | `cardkit.v1.card.create`、`cardElement.content`、`card.update` | 启动通知、短回复、命令结果、操作终态与每轮统计使用静态 CardKit；持续回复使用 300 ms 增量合并、递增序列与 UUID，并在终态全量更新含完整正文且关闭流式模式的静态卡片，统一采用 5,000 字符单卡和最多 5 张卡片预算；操作终态按会话顺序显示 Core 已脱敏详情。持续回复、静态展示、操作终态和每轮状态的真实主路径已通过，真实限流、失败降级和超长滚动待验收 | 已接入 |
 | 超长最终回复文件兜底 | `im.v1.file.create`、`im.v1.message.create` 的 `msg_type=file` | 超过五张卡片可靠展示预算且不超过 1,000,000 字节时，静态路径发送一张预览卡和完整 `codex-final-answer.txt`，流式路径在已有卡片后追加完整文件；只接受当前最终正文的内存 Buffer，不读取本地路径，不自动重试；文件失败时静态路径继续发送剩余有界正文。离线 SDK Payload、顺序、边界和失败路径已验证，真实文件上传待验收 | 已接入 |
-| Thread 状态消息更新 | `client.im.v1.message.create/patch` | 同一 Thread 的 `active → idle` 轻量交互卡片创建、重复抑制、同 Chat 顺序更新、失败绑定清理和有限关闭已离线验证；蓝色运行中原地更新为绿色空闲的真实主路径已通过，不更新模型正文且不自动重试 | 已接入 |
+| Thread 状态消息更新 | `client.im.v1.message.create/patch` | 当前 Turn 的启动回复优先复用为状态消息，并保留 Skill、Plugin 或子代理身份；没有可复用回复时才创建 `active` 轻量交互卡片；`active → idle` 重复抑制、同 Chat 顺序更新、失败绑定清理和有限关闭已离线验证，结束时原地更新为绿色“处理结束 · 结果见下方消息”，不更新模型正文且不自动重试 | 已接入 |
 | 输出渲染 | `OutputEvent`、`operation.updated`、`turn.completed` | 展示型 Markdown 统一使用 CardKit；操作运行帧忽略，终态按事件顺序发送独立静态卡片并显示受控详情；安全错误和操作性提示使用纯文本；每轮上下文状态、安全启动收件人、有界 Outbox 和 Surface 生命周期已离线验证，静态 CardKit、操作终态与每轮状态的真实主路径已通过 | 已接入 |
 | 事件去重与旧事件过滤 | 平台事件 ID、毫秒时间戳 | 已实现飞书模块内有界内存状态；真实重投待验证 | 已接入 |
 | 严格配置与重载分类 | 统一 `config.toml` | 私聊字段、失败关闭校验、变更码、公开示例和 Bootstrap 显式组合已完成 | 已接入 |

@@ -52,7 +52,12 @@ function queryPort(overrides: Partial<ConversationQueryPort> = {}): Conversation
     listSkills: unsupported,
     resolveSkill: unsupported,
     listMcpServers: unsupported,
+    listMcpServerDetails: unsupported,
+    reloadMcpServers: unsupported,
+    startMcpOAuthLogin: unsupported,
+    readMcpResource: unsupported,
     listPlugins: unsupported,
+    resolvePlugin: unsupported,
     accountUsage: unsupported,
     accountRateLimits: unsupported,
     listPermissionProfiles: unsupported,
@@ -797,6 +802,7 @@ describe("ConversationService model selection", () => {
 
   it("invokes an enabled Skill with the official text marker and structured input", async () => {
     const startTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
+    const markTurnStarted = vi.fn();
     const resolveSkill = vi.fn(async () => ({
       name: "systematic-debugging",
       path: "/workspace/main/.codex/skills/systematic-debugging/SKILL.md",
@@ -814,7 +820,7 @@ describe("ConversationService model selection", () => {
       } as unknown as SessionRouter,
       {
         activeTurn: () => undefined,
-        markTurnStarted: vi.fn(),
+        markTurnStarted,
       } as unknown as ConversationCore,
       {
         turnOverrides: () => ({}),
@@ -848,6 +854,12 @@ describe("ConversationService model selection", () => {
         path: "/workspace/main/.codex/skills/systematic-debugging/SKILL.md",
       },
     ]);
+    expect(markTurnStarted).toHaveBeenCalledWith(
+      target,
+      "thread-1",
+      "turn-1",
+      { kind: "skill", name: "systematic-debugging" },
+    );
   });
 
   it("keeps Skill resolution and Turn start in one Conversation lock", async () => {
@@ -964,6 +976,7 @@ describe("ConversationService model selection", () => {
 
   it("invokes an agent role with the official text marker and task", async () => {
     const startTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
+    const markTurnStarted = vi.fn();
     const service = new ConversationService(
       turnPort({ startTurn }),
       {
@@ -977,7 +990,7 @@ describe("ConversationService model selection", () => {
       } as unknown as SessionRouter,
       {
         activeTurn: () => undefined,
-        markTurnStarted: vi.fn(),
+        markTurnStarted,
       } as unknown as ConversationCore,
       {
         turnOverrides: () => ({}),
@@ -1014,6 +1027,12 @@ describe("ConversationService model selection", () => {
         text: "请使用 agent_type=\"ds\"、fork_turns=\"1\" 的子代理执行以下任务，子代理完成后把最终结果回复给我：\n\n审查提交",
       },
     ]);
+    expect(markTurnStarted).toHaveBeenCalledWith(
+      target,
+      "thread-1",
+      "turn-1",
+      { kind: "agent", name: "ds" },
+    );
   });
 
   it("resolves an agent role by list number", async () => {
@@ -1140,24 +1159,420 @@ describe("ConversationService model selection", () => {
     expect(listMcpServers).toHaveBeenCalledWith("thread-1");
   });
 
-  it("lists stable installed Plugins for the authorized Workspace", async () => {
-    const listPlugins = vi.fn(async () => [
-      { name: "github", enabled: true },
-      { name: "local-tools", enabled: false },
-    ]);
+  it("resolves MCP details and routes OAuth and resource reads to one Thread snapshot", async () => {
+    const server = {
+      name: "project-tools",
+      authStatus: "notLoggedIn" as const,
+      toolCount: 1,
+      serverTitle: "Project Tools",
+      serverVersion: "1.0.0",
+      serverDescription: null,
+      tools: [{ name: "search", title: null, description: null }],
+      resources: [{
+        uri: "project://readme",
+        name: "readme",
+        title: null,
+        description: null,
+        mimeType: "text/plain",
+      }],
+      resourceTemplates: [],
+    };
+    const summary = {
+      name: server.name,
+      authStatus: server.authStatus,
+      toolCount: server.toolCount,
+    };
+    const listMcpServers = vi.fn(async () => [summary]);
+    const listMcpServerDetails = vi.fn(async () => [server]);
+    const startMcpOAuthLogin = vi.fn(async () => ({
+      server: "project-tools",
+      authorizationUrl: "https://example.test/oauth",
+    }));
+    const readMcpResource = vi.fn(async () => ({
+      server: "project-tools",
+      requestedUri: "project://readme",
+      contents: [],
+      omittedContentCount: 0,
+    }));
+    let currentCalls = 0;
+    const service = new ConversationService(
+      turnPort(),
+      {
+        current: () => {
+          currentCalls += 1;
+          return { threadId: "thread-1" };
+        },
+      } as unknown as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort({
+        listMcpServers,
+        listMcpServerDetails,
+        startMcpOAuthLogin,
+        readMcpResource,
+      }),
+    );
+
+    await expect(service.mcpServerDetail(target, "1")).resolves.toEqual(server);
+    await expect(service.loginMcpServer(target, "project-tools")).resolves.toEqual({
+      type: "oauth",
+      server: "project-tools",
+      authorizationUrl: "https://example.test/oauth",
+    });
+    await expect(service.readMcpResource(target, "1", " project://readme "))
+      .resolves.toEqual({
+        server: "project-tools",
+        requestedUri: "project://readme",
+        contents: [],
+        omittedContentCount: 0,
+      });
+    expect(startMcpOAuthLogin).toHaveBeenCalledWith("project-tools", "thread-1");
+    expect(readMcpResource)
+      .toHaveBeenCalledWith("project-tools", "project://readme", "thread-1");
+    expect(listMcpServerDetails).toHaveBeenCalledTimes(1);
+    expect(listMcpServers).toHaveBeenCalledTimes(2);
+    expect(currentCalls).toBe(3);
+  });
+
+  it("summarizes actionable MCP health findings and reloads managed App Servers", async () => {
+    const listMcpServerDetails = vi.fn(async () => [{
+      name: "oauth tools",
+      authStatus: "notLoggedIn" as const,
+      toolCount: 0,
+      serverTitle: null,
+      serverVersion: null,
+      serverDescription: null,
+      tools: [],
+      resources: [],
+      resourceTemplates: [],
+    }, {
+      name: "unknown auth",
+      authStatus: "unknown" as const,
+      toolCount: 1,
+      serverTitle: null,
+      serverVersion: null,
+      serverDescription: null,
+      tools: [{ name: "search", title: null, description: null }],
+      resources: [],
+      resourceTemplates: [],
+    }, {
+      name: "empty",
+      authStatus: "unsupported" as const,
+      toolCount: 0,
+      serverTitle: null,
+      serverVersion: null,
+      serverDescription: null,
+      tools: [],
+      resources: [],
+      resourceTemplates: [],
+    }]);
+    const reloadMcpServers = vi.fn(async () => undefined);
+    const service = new ConversationService(
+      turnPort(),
+      { current: () => ({ threadId: "thread-1" }) } as unknown as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort({ listMcpServerDetails, reloadMcpServers }),
+    );
+
+    await expect(service.mcpHealth(target)).resolves.toEqual({
+      serverCount: 3,
+      toolCount: 1,
+      resourceCount: 0,
+      resourceTemplateCount: 0,
+      actions: [{ type: "loginRequired", server: "oauth tools", selector: "1" }],
+      notices: [
+        { type: "authUnknown", server: "unknown auth", selector: "2" },
+        { type: "noCapabilities", server: "empty", selector: "3" },
+      ],
+    });
+    await expect(service.reloadMcpServers(target)).resolves.toBeUndefined();
+    expect(listMcpServerDetails).toHaveBeenCalledWith("thread-1");
+    expect(reloadMcpServers).toHaveBeenCalledOnce();
+  });
+
+  it("returns Bearer Token authentication as information and rejects unsupported MCP OAuth or invalid resources", async () => {
+    const listMcpServers = vi.fn()
+      .mockResolvedValueOnce([{
+        name: "local-tools",
+        authStatus: "unsupported" as const,
+        toolCount: 0,
+      }])
+      .mockResolvedValueOnce([{
+        name: "token-tools",
+        authStatus: "bearerToken" as const,
+        toolCount: 0,
+      }]);
+    const startMcpOAuthLogin = vi.fn();
+    const readMcpResource = vi.fn();
+    const service = new ConversationService(
+      turnPort(),
+      { current: () => undefined } as unknown as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort({ listMcpServers, startMcpOAuthLogin, readMcpResource }),
+    );
+
+    await expect(service.loginMcpServer(target, "local-tools"))
+      .rejects.toMatchObject({ code: "mcp.oauth.unsupported" });
+    await expect(service.loginMcpServer(target, "token-tools"))
+      .resolves.toEqual({
+        type: "bearerToken",
+        server: "token-tools",
+      });
+    await expect(service.readMcpResource(target, "local-tools", " \n "))
+      .rejects.toMatchObject({ code: "mcp.resource.usage" });
+    expect(startMcpOAuthLogin).not.toHaveBeenCalled();
+    expect(readMcpResource).not.toHaveBeenCalled();
+  });
+
+  it("requires a bound Thread before starting MCP OAuth", async () => {
+    const listMcpServers = vi.fn(async () => [{
+      name: "oauth-tools",
+      authStatus: "notLoggedIn" as const,
+      toolCount: 0,
+    }]);
+    const startMcpOAuthLogin = vi.fn();
+    const service = new ConversationService(
+      turnPort(),
+      { current: () => undefined } as unknown as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort({ listMcpServers, startMcpOAuthLogin }),
+    );
+
+    await expect(service.loginMcpServer(target, "oauth-tools"))
+      .rejects.toMatchObject({ code: "mcp.thread.required" });
+    expect(startMcpOAuthLogin).not.toHaveBeenCalled();
+  });
+
+  it("lists installed Plugins for the authorized Workspace", async () => {
+    const listPlugins = vi.fn(async () => ({
+      plugins: [{
+        id: "github@local",
+        name: "github",
+        displayName: "GitHub",
+        marketplaceName: "local",
+        description: "GitHub development tools",
+        enabled: true,
+        available: true,
+      }],
+      loadErrorCount: 0,
+    }));
     const service = new ConversationService(
       turnPort(),
       { workspace: () => main } as unknown as SessionRouter,
       {} as ConversationCore,
       {} as ModelSelectionService,
       queryPort({ listPlugins }),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { pluginApiEnabled: true },
     );
 
-    await expect(service.listPlugins(target)).resolves.toEqual([
-      { name: "github", enabled: true },
-      { name: "local-tools", enabled: false },
-    ]);
+    await expect(service.listPlugins(target)).resolves.toMatchObject({
+      plugins: [expect.objectContaining({ id: "github@local" })],
+      loadErrorCount: 0,
+    });
     expect(listPlugins).toHaveBeenCalledWith(main.cwd);
+  });
+
+  it("invokes an enabled Plugin with the official mention input", async () => {
+    const startTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
+    const listPlugins = vi.fn(async () => ({
+      plugins: [{
+        id: "github@local",
+        name: "github",
+        displayName: "GitHub",
+        marketplaceName: "local",
+        description: "GitHub development tools",
+        enabled: true,
+        available: true,
+      }],
+      loadErrorCount: 0,
+    }));
+    const resolvePlugin = vi.fn(async () => ({
+      id: "github@local",
+      name: "github",
+      displayName: "GitHub",
+      path: "plugin://github@local",
+    }));
+    const markTurnStarted = vi.fn();
+    const service = new ConversationService(
+      turnPort({ startTurn }),
+      {
+        ensure: async () => ({
+          target,
+          workspaceId: "main",
+          threadId: "thread-1",
+          sessionId: "session-1",
+        }),
+        workspace: () => main,
+      } as unknown as SessionRouter,
+      {
+        activeTurn: () => undefined,
+        markTurnStarted,
+      } as unknown as ConversationCore,
+      {
+        status: () => ({ modelProvider: "openai" }),
+        turnOverrides: () => ({}),
+        markApplied: vi.fn(),
+      } as unknown as ModelSelectionService,
+      queryPort({ listPlugins, resolvePlugin }),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { pluginApiEnabled: true },
+    );
+
+    await expect(service.invokePlugin(target, "1", " 检查 PR "))
+      .resolves.toMatchObject({
+        threadId: "thread-1",
+        turnId: "turn-1",
+        steered: false,
+        pluginName: "GitHub",
+      });
+    expect(resolvePlugin).toHaveBeenCalledWith(main.cwd, "github@local");
+    expect(startTurn.mock.calls[0]?.[1]).toEqual([
+      { type: "text", text: "@github 检查 PR" },
+      {
+        type: "plugin",
+        name: "GitHub",
+        path: "plugin://github@local",
+      },
+    ]);
+    expect(markTurnStarted).toHaveBeenCalledWith(
+      target,
+      "thread-1",
+      "turn-1",
+      { kind: "plugin", name: "GitHub" },
+    );
+  });
+
+  it("rechecks the Plugin provider after waiting for the Conversation lock", async () => {
+    let provider = "openai";
+    let releaseSelection: (() => void) | undefined;
+    const selectionPaused = new Promise<void>((resolve) => {
+      releaseSelection = resolve;
+    });
+    const selectModel = vi.fn(async () => {
+      await selectionPaused;
+      provider = "deepseek";
+      return {} as never;
+    });
+    const startTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
+    const service = new ConversationService(
+      turnPort({ startTurn }),
+      {
+        workspace: () => main,
+        ensure: async () => ({
+          target,
+          workspaceId: "main",
+          threadId: "thread-1",
+          sessionId: "session-1",
+        }),
+      } as unknown as SessionRouter,
+      {
+        activeTurn: () => undefined,
+        markTurnStarted: vi.fn(),
+      } as unknown as ConversationCore,
+      {
+        status: () => ({ modelProvider: provider }),
+        selectModel,
+        turnOverrides: () => ({}),
+        markApplied: vi.fn(),
+      } as unknown as ModelSelectionService,
+      queryPort({
+        listPlugins: async () => ({
+          plugins: [{
+            id: "github@local",
+            name: "github",
+            displayName: "GitHub",
+            marketplaceName: "local",
+            description: null,
+            enabled: true,
+            available: true,
+          }],
+          loadErrorCount: 0,
+        }),
+        resolvePlugin: async () => ({
+          id: "github@local",
+          name: "github",
+          displayName: "GitHub",
+          path: "plugin://github@local",
+        }),
+      }),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { pluginApiEnabled: true },
+    );
+
+    const switching = service.selectModel(target, "deepseek");
+    await vi.waitFor(() => expect(selectModel).toHaveBeenCalledOnce());
+    const invocation = service.invokePlugin(target, "github", "检查 PR");
+    releaseSelection?.();
+
+    await switching;
+    await expect(invocation).rejects.toMatchObject({
+      code: "plugin.provider.unsupported",
+    });
+    expect(startTurn).not.toHaveBeenCalled();
+  });
+
+  it("fails closed by default or for a non-OpenAI provider", async () => {
+    const disabled = new ConversationService(
+      turnPort(),
+      { workspace: () => main } as unknown as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort(),
+    );
+    expect(() => disabled.listPlugins(target))
+      .toThrow(expect.objectContaining({ code: "plugin.disabled" }));
+
+    const deepseek = new ConversationService(
+      turnPort(),
+      {} as SessionRouter,
+      {} as ConversationCore,
+      { status: () => ({ modelProvider: "deepseek" }) } as unknown as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { pluginApiEnabled: true },
+    );
+    await expect(deepseek.invokePlugin(target, "github", "检查 PR"))
+      .rejects.toMatchObject({ code: "plugin.provider.unsupported" });
   });
 
   it("lists stable Permission Profiles for the authorized Workspace", async () => {

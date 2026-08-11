@@ -35,7 +35,12 @@ type ProviderClientMethod =
   | "listSkills"
   | "resolveSkill"
   | "listMcpServers"
+  | "listMcpServerDetails"
+  | "reloadMcpServers"
+  | "startMcpOAuthLogin"
+  | "readMcpResource"
   | "listPlugins"
+  | "resolvePlugin"
   | "accountUsage"
   | "accountRateLimits"
   | "listPermissionProfiles"
@@ -308,6 +313,45 @@ export class ProviderRoutingClient {
       : this.primaryClient().listMcpServers(...args);
   }
 
+  listMcpServerDetails(
+    ...args: Parameters<ProviderClientInstance["listMcpServerDetails"]>
+  ): ReturnType<ProviderClientInstance["listMcpServerDetails"]> {
+    const threadId = args[0];
+    return threadId
+      ? this.callForThread(threadId, (client) => client.listMcpServerDetails(...args))
+      : this.primaryClient().listMcpServerDetails(...args);
+  }
+
+  async reloadMcpServers(): Promise<void> {
+    const results = await Promise.allSettled(
+      [...this.clients.values()].map((client) => client.reloadMcpServers()),
+    );
+    const failure = results.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (failure) {
+      throw failure.reason;
+    }
+  }
+
+  startMcpOAuthLogin(
+    ...args: Parameters<ProviderClientInstance["startMcpOAuthLogin"]>
+  ): ReturnType<ProviderClientInstance["startMcpOAuthLogin"]> {
+    const threadId = args[1];
+    return threadId
+      ? this.callForThread(threadId, (client) => client.startMcpOAuthLogin(...args))
+      : this.primaryClient().startMcpOAuthLogin(...args);
+  }
+
+  readMcpResource(
+    ...args: Parameters<ProviderClientInstance["readMcpResource"]>
+  ): ReturnType<ProviderClientInstance["readMcpResource"]> {
+    const threadId = args[2];
+    return threadId
+      ? this.callForThread(threadId, (client) => client.readMcpResource(...args))
+      : this.primaryClient().readMcpResource(...args);
+  }
+
   getGoal(
     ...args: Parameters<ProviderClientInstance["getGoal"]>
   ): ReturnType<ProviderClientInstance["getGoal"]> {
@@ -367,6 +411,12 @@ export class ProviderRoutingClient {
     ...args: Parameters<ProviderClientInstance["listPlugins"]>
   ): ReturnType<ProviderClientInstance["listPlugins"]> {
     return this.primaryClient().listPlugins(...args);
+  }
+
+  resolvePlugin(
+    ...args: Parameters<ProviderClientInstance["resolvePlugin"]>
+  ): ReturnType<ProviderClientInstance["resolvePlugin"]> {
+    return this.primaryClient().resolvePlugin(...args);
   }
 
   accountUsage(
@@ -481,7 +531,11 @@ function routeNotification(
     return provider === "openai" ? { ...routed, provider } : undefined;
   }
   if (
-    (routed.method === "mcpServer/startupStatus/updated" || routed.method === "warning")
+    (
+      routed.method === "mcpServer/oauthLogin/completed"
+      || routed.method === "mcpServer/startupStatus/updated"
+      || routed.method === "warning"
+    )
     && typeof asRecord(routed.params)?.threadId !== "string"
   ) {
     return { ...routed, provider };

@@ -25,7 +25,10 @@ describe("ConversationCommandService", () => {
     expect(conversationCommandNames).toContain("agents");
     expect(conversationCommandNames).toContain("pin");
     expect(conversationCommandNames).toContain("rules");
+    expect(conversationCommandNames).toContain("plugin");
     expect(isConversationCommandName("status")).toBe(true);
+    expect(isConversationCommandName("plugins")).toBe(false);
+    expect(isConversationCommandName("plugin")).toBe(true);
     expect(isConversationCommandName("whoami")).toBe(false);
   });
 
@@ -305,7 +308,10 @@ describe("ConversationCommandService", () => {
     const selectFastMode = vi.fn(async () => state);
     const listSkills = vi.fn(async () => ["skill"]);
     const listMcpServers = vi.fn(async () => ["mcp"]);
-    const listPlugins = vi.fn(async () => ({ plugins: ["plugin"] }));
+    const listPlugins = vi.fn(async () => ({
+      plugins: [],
+      loadErrorCount: 0,
+    }));
     const providerAccountUsage = vi.fn(async () => ({ usage: "usage" }));
     const providerAccountLimits = vi.fn(async () => ({ limits: "limits" }));
     const listPermissionProfiles = vi.fn(async () => ["permissions"]);
@@ -345,9 +351,10 @@ describe("ConversationCommandService", () => {
       kind: "mcp",
       servers: ["mcp"],
     });
-    await expect(commands.execute(target, "plugins")).resolves.toEqual({
+    await expect(commands.execute(target, "plugin")).resolves.toEqual({
       kind: "plugins",
-      result: { plugins: ["plugin"] },
+      plugins: [],
+      loadErrorCount: 0,
     });
     await expect(commands.execute(target, "usage")).resolves.toEqual({
       kind: "usage",
@@ -397,12 +404,173 @@ describe("ConversationCommandService", () => {
     );
   });
 
+  it("routes MCP health, reload, detail, login, and resource operations through the shared boundary", async () => {
+    const server = { name: "project-tools" };
+    const mcpServerDetail = vi.fn(async () => server);
+    const loginMcpServer = vi.fn()
+      .mockResolvedValueOnce({
+        type: "oauth",
+        server: "project-tools",
+        authorizationUrl: "https://example.test/oauth",
+      })
+      .mockResolvedValueOnce({
+        type: "bearerToken",
+        server: "token-tools",
+      });
+    const readMcpResource = vi.fn(async () => ({
+      server: "project-tools",
+      requestedUri: "project://readme",
+      contents: [],
+      omittedContentCount: 0,
+    }));
+    const mcpHealth = vi.fn(async () => ({
+      serverCount: 1,
+      toolCount: 1,
+      resourceCount: 0,
+      resourceTemplateCount: 0,
+      actions: [],
+      notices: [],
+    }));
+    const reloadMcpServers = vi.fn(async () => undefined);
+    const commands = new ConversationCommandService({
+      mcpHealth,
+      reloadMcpServers,
+      mcpServerDetail,
+      loginMcpServer,
+      readMcpResource,
+    } as unknown as ConversationUseCases);
+
+    await expect(commands.execute(target, "mcp", "health")).resolves.toEqual({
+      kind: "mcp-health",
+      report: {
+        serverCount: 1,
+        toolCount: 1,
+        resourceCount: 0,
+        resourceTemplateCount: 0,
+        actions: [],
+        notices: [],
+      },
+    });
+    await expect(commands.execute(target, "mcp", "reload")).resolves.toEqual({
+      kind: "mcp-reload",
+    });
+
+    await expect(commands.execute(target, "mcp", "1")).resolves.toEqual({
+      kind: "mcp-detail",
+      selector: "1",
+      server,
+    });
+    await expect(commands.execute(
+      target,
+      "mcp",
+      "1 tools 2 search github issue",
+    )).resolves.toEqual({
+      kind: "mcp-detail",
+      selector: "1",
+      server,
+      view: {
+        section: "tools",
+        page: 2,
+        searchTerm: "github issue",
+      },
+    });
+    await expect(commands.execute(
+      target,
+      "mcp",
+      "project-tools resources search plugin",
+    )).resolves.toEqual({
+      kind: "mcp-detail",
+      selector: "project-tools",
+      server,
+      view: {
+        section: "resources",
+        page: 1,
+        searchTerm: "plugin",
+      },
+    });
+    await expect(commands.execute(target, "mcp", "login project-tools"))
+      .resolves.toEqual({
+        kind: "mcp-login",
+        login: {
+          type: "oauth",
+          server: "project-tools",
+          authorizationUrl: "https://example.test/oauth",
+        },
+      });
+    await expect(commands.execute(target, "mcp", "login token-tools"))
+      .resolves.toEqual({
+        kind: "mcp-login",
+        login: {
+          type: "bearerToken",
+          server: "token-tools",
+        },
+      });
+    await expect(commands.execute(
+      target,
+      "mcp",
+      "resource project-tools project://readme",
+    )).resolves.toMatchObject({ kind: "mcp-resource" });
+    expect(mcpServerDetail).toHaveBeenCalledWith(target, "1");
+    expect(loginMcpServer).toHaveBeenNthCalledWith(1, target, "project-tools");
+    expect(loginMcpServer).toHaveBeenNthCalledWith(2, target, "token-tools");
+    expect(readMcpResource)
+      .toHaveBeenCalledWith(target, "project-tools", "project://readme");
+    expect(mcpHealth).toHaveBeenCalledWith(target);
+    expect(reloadMcpServers).toHaveBeenCalledWith(target);
+    await expect(commands.execute(target, "mcp", "login"))
+      .rejects.toMatchObject({ code: "mcp.usage" });
+    await expect(commands.execute(target, "mcp", "1 tools 0"))
+      .rejects.toMatchObject({ code: "mcp.usage" });
+    await expect(commands.execute(target, "mcp", "1 unknown"))
+      .rejects.toMatchObject({ code: "mcp.usage" });
+    await expect(commands.execute(target, "mcp", "health extra"))
+      .rejects.toMatchObject({ code: "mcp.usage" });
+    await expect(commands.execute(target, "mcp", "reload extra"))
+      .rejects.toMatchObject({ code: "mcp.usage" });
+  });
+
   it("rejects /skill without both selector and task", async () => {
     const commands = new ConversationCommandService(
       {} as ConversationUseCases,
     );
     await expect(commands.execute(target, "skill", "systematic-debugging"))
       .rejects.toMatchObject({ code: "skill.usage" });
+  });
+
+  it("lists and invokes Plugins through the shared command boundary", async () => {
+    const listPlugins = vi.fn(async () => ({
+      plugins: [{ id: "github@local" }],
+      loadErrorCount: 0,
+    }));
+    const invokePlugin = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-plugin",
+      steered: false,
+      pluginName: "GitHub",
+    }));
+    const commands = new ConversationCommandService({
+      listPlugins,
+      invokePlugin,
+    } as unknown as ConversationUseCases);
+
+    await expect(commands.execute(target, "plugin")).resolves.toEqual({
+      kind: "plugins",
+      plugins: [{ id: "github@local" }],
+      loadErrorCount: 0,
+    });
+    await expect(commands.execute(target, "plugin", "github@local 检查 PR"))
+      .resolves.toEqual({
+        kind: "outcome",
+        outcome: {
+          type: "plugin.started",
+          pluginName: "GitHub",
+          turnId: "turn-plugin",
+          steered: false,
+        },
+      });
+    expect(invokePlugin).toHaveBeenCalledWith(target, "github@local", "检查 PR");
+    await expect(commands.execute(target, "plugin", "github@local"))
+      .rejects.toMatchObject({ code: "plugin.usage" });
   });
 
   it("lists and invokes agent roles through the shared command boundary", async () => {
@@ -491,7 +659,13 @@ describe("ConversationCommandService", () => {
       })),
       listAgentRoles: vi.fn(() => []),
       listMcpServers: vi.fn(async () => []),
-      listPlugins: vi.fn(async () => ({})),
+      listPlugins: vi.fn(async () => ({ plugins: [], loadErrorCount: 0 })),
+      invokePlugin: vi.fn(async () => ({
+        threadId: "thread-1",
+        turnId: "turn-plugin",
+        steered: false,
+        pluginName: "plugin",
+      })),
       providerAccountUsage: vi.fn(async () => ({})),
       requestMetrics: vi.fn(() => null),
       providerAccountLimits: vi.fn(async () => ({})),
@@ -530,7 +704,7 @@ describe("ConversationCommandService", () => {
       ["fast", "on", "selectFastMode"],
       ["skill", "", "listSkills"],
       ["mcp", "", "listMcpServers"],
-      ["plugins", "", "listPlugins"],
+      ["plugin", "", "listPlugins"],
       ["usage", "", "providerAccountUsage"],
       ["metrics", "", "requestMetrics"],
       ["limits", "", "providerAccountLimits"],

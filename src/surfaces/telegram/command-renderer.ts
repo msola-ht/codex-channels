@@ -11,13 +11,19 @@ import {
   formatConversationArtifacts,
   formatConversationCollaborationMode,
   formatConversationCommandOutcome,
+  isTurnLifecycleAcknowledgedOutcome,
   formatConversationGoal,
   formatConversationLimits,
   formatConversationMetrics,
   formatConversationMcp,
+  formatConversationMcpDetail,
+  formatConversationMcpHealth,
+  formatConversationMcpLogin,
+  formatConversationMcpReload,
+  formatConversationMcpResource,
+  formatConversationPlugins,
   formatConversationModels,
   formatConversationPermissions,
-  formatConversationPlugins,
   formatConversationProjectRules,
   formatConversationSkills,
   formatConversationUsage,
@@ -40,6 +46,9 @@ export async function renderTelegramCommandResult(
 ): Promise<void> {
   switch (result.kind) {
     case "outcome": {
+      if (isTurnLifecycleAcknowledgedOutcome(result.outcome)) {
+        return;
+      }
       const rendered = renderOutcome(result.outcome);
       if (rendered.expanded) {
         await replyTelegramPanel(context, rendered.text);
@@ -90,6 +99,21 @@ export async function renderTelegramCommandResult(
       return;
     case "mcp":
       await replyTelegramPanel(context, formatConversationMcp(result));
+      return;
+    case "mcp-health":
+      await replyTelegramPanel(context, formatConversationMcpHealth(result));
+      return;
+    case "mcp-reload":
+      await replyTelegramPanel(context, formatConversationMcpReload(result));
+      return;
+    case "mcp-detail":
+      await replyTelegramPanel(context, formatConversationMcpDetail(result));
+      return;
+    case "mcp-login":
+      await replyTelegramPanel(context, formatConversationMcpLogin(result));
+      return;
+    case "mcp-resource":
+      await replyTelegramPanel(context, formatConversationMcpResource(result));
       return;
     case "plugins":
       await replyTelegramPanel(context, formatConversationPlugins(result));

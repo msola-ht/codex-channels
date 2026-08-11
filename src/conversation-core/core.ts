@@ -9,6 +9,7 @@ import {
   type ThreadGoal,
   type ThreadTokenUsage,
   type TurnOutputTiming,
+  type TurnStartIdentity,
   type TurnArtifacts,
   type VisionTokenUsage,
   isCriticalOutputEvent,
@@ -105,6 +106,7 @@ export class ConversationCore {
   private readonly artifactsByThread = new Map<string, TurnArtifacts>();
   private readonly timingByThread = new Map<string, TurnTimingState>();
   private readonly mcpStatus = new Map<string, string>();
+  private readonly unhealthyMcpServers = new Set<string>();
   private accountStatus: string | undefined;
   private readonly rateLimitNotices = new Map<string, string>();
   private readonly rateLimitSnapshots = new Map<string, RateLimitSnapshot>();
@@ -114,7 +116,12 @@ export class ConversationCore {
     private readonly output: EventBus<OutputEvent>,
   ) {}
 
-  markTurnStarted(target: ConversationTarget, threadId: string, turnId: string): void {
+  markTurnStarted(
+    target: ConversationTarget,
+    threadId: string,
+    turnId: string,
+    identity?: TurnStartIdentity,
+  ): void {
     const current = this.activeByThread.get(threadId);
     if (current?.threadId === threadId && current.turnId === turnId) {
       return;
@@ -129,6 +136,7 @@ export class ConversationCore {
       target,
       threadId,
       turnId,
+      ...(identity ? { identity } : {}),
       ...(this.isBackgroundThread(threadId) ? { background: true } : {}),
     });
   }
@@ -263,6 +271,7 @@ export class ConversationCore {
     this.phaseByItem.clear();
     this.timingByThread.clear();
     this.mcpStatus.clear();
+    this.unhealthyMcpServers.clear();
     for (const binding of this.router.allBindings()) {
       this.publish({
         type: "connection.lost",
@@ -758,10 +767,23 @@ export class ConversationCore {
         const key = `${event.modelProvider ?? "global"}:${event.threadId ?? "global"}:${event.name}`;
         const fingerprint =
           `${event.status}:${event.error ?? ""}:${event.failureReason ?? ""}`;
-        if (this.mcpStatus.get(key) === fingerprint) {
+        const previous = this.mcpStatus.get(key);
+        if (previous === fingerprint) {
           return;
         }
         this.mcpStatus.set(key, fingerprint);
+        if (event.status === "failed" || event.status === "cancelled") {
+          this.unhealthyMcpServers.add(key);
+        }
+        const recovered = event.status === "ready"
+          && this.unhealthyMcpServers.delete(key);
+        if (
+          event.status !== "failed"
+          && event.status !== "cancelled"
+          && !recovered
+        ) {
+          return;
+        }
         const outputEvent = {
           type: "mcp.status.updated" as const,
           threadId: event.threadId,
@@ -775,6 +797,20 @@ export class ConversationCore {
         } else {
           this.broadcastForProvider(event.modelProvider, outputEvent);
         }
+        return;
+      }
+      case "mcp.oauth.completed": {
+        if (!event.threadId) {
+          return;
+        }
+        const outputEvent = {
+          type: "mcp.oauth.completed" as const,
+          threadId: event.threadId,
+          name: event.name,
+          success: event.success,
+          error: event.error,
+        };
+        this.publishForThread(event.threadId, outputEvent);
         return;
       }
       case "warning":

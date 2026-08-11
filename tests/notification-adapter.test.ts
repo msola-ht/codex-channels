@@ -312,6 +312,45 @@ describe("Notification adapter", () => {
       failureReason: "reauthenticationRequired",
     });
     expect(toConversationInputEvent({
+      method: "mcpServer/oauthLogin/completed",
+      params: {
+        threadId: "thread-1",
+        name: "docs",
+        success: true,
+      },
+    })).toEqual({
+      type: "mcp.oauth.completed",
+      threadId: "thread-1",
+      name: "docs",
+      success: true,
+      error: null,
+    });
+    expect(toConversationInputEvent({
+      method: "mcpServer/oauthLogin/completed",
+      params: {
+        threadId: null,
+        name: "github",
+        success: false,
+        error: "TOKEN=oauth-secret",
+      },
+      provider: "deepseek",
+    })).toEqual({
+      type: "mcp.oauth.completed",
+      threadId: null,
+      name: "github",
+      success: false,
+      error: "TOKEN=[REDACTED]",
+      modelProvider: "deepseek",
+    });
+    expect(toConversationInputEvent({
+      method: "mcpServer/oauthLogin/completed",
+      params: {
+        threadId: null,
+        name: "github",
+        success: "yes",
+      },
+    })).toBeUndefined();
+    expect(toConversationInputEvent({
       method: "warning",
       params: {
         threadId: null,

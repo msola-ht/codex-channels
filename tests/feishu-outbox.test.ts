@@ -105,13 +105,14 @@ describe("Feishu outbox", () => {
       target,
       threadId: "thread-1",
       turnId: "turn-1",
+      identity: { kind: "plugin", name: "GitHub" },
     });
     await outbox.close();
 
     expect(markdownCards).toEqual([]);
     expect(replies).toEqual([{
       messageId: "om_origin",
-      markdown: "## 已开始处理。",
+      markdown: "## 已使用 GitHub Plugin 开始处理。",
     }]);
   });
 
@@ -175,6 +176,14 @@ describe("Feishu outbox", () => {
       failureReason: null,
     });
     outbox.handle({
+      type: "mcp.oauth.completed",
+      target,
+      threadId: null,
+      name: "codex_apps",
+      success: false,
+      error: "OAuth denied",
+    });
+    outbox.handle({
       type: "account.updated",
       target,
       authMode: "apikey",
@@ -185,6 +194,7 @@ describe("Feishu outbox", () => {
     expect(texts).toEqual([]);
     expect(markdownCards).toEqual([
       "## MCP Server\n- 名称：codex_apps\n- 状态：已就绪",
+      "## MCP OAuth\n- 名称：codex_apps\n- 状态：登录失败\n- 原因：OAuth denied",
       "## Codex 账户状态已更新\n- 认证：apikey\n- 套餐：Pro",
     ]);
   });
@@ -1516,11 +1526,124 @@ describe("Feishu outbox", () => {
           tag: "div",
           text: {
             tag: "plain_text",
-            content: "空闲",
+            content: "处理结束 · 结果见下方消息",
           },
         }],
       },
     }]);
+  });
+
+  it("reuses the Turn start confirmation for the foreground Thread status", async () => {
+    const replies: Array<{ messageId: string; markdown: string }> = [];
+    const sendCard = vi.fn(async () => "om_status");
+    const updateCard = vi.fn(async () => {});
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        replyMarkdownCard: async (messageId, markdown) => {
+          replies.push({ messageId, markdown });
+          return "om_started";
+        },
+        sendCard,
+        updateCard,
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.prepareTurnReplyTarget("oc_chat", "om_origin");
+    outbox.handle({
+      type: "turn.started",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      identity: { kind: "plugin", name: "GitHub" },
+    });
+    outbox.handle(threadStatus("active"));
+    outbox.handle(threadStatus("idle"));
+    await outbox.close();
+
+    expect(replies).toEqual([{
+      messageId: "om_origin",
+      markdown: "## 已使用 GitHub Plugin 开始处理。",
+    }]);
+    expect(sendCard).not.toHaveBeenCalled();
+    expect(updateCard).toHaveBeenCalledWith(
+      "om_started",
+      expect.objectContaining({
+        header: expect.objectContaining({ template: "green" }),
+        elements: [expect.objectContaining({
+          text: expect.objectContaining({
+            content: "GitHub Plugin · 处理结束 · 结果见下方消息",
+          }),
+        })],
+      }),
+    );
+  });
+
+  it("does not add a Turn start card after an active Thread status card", async () => {
+    const sendMarkdownCard = vi.fn(async () => "om_started");
+    const sendCard = vi.fn(async () => "om_status");
+    const updateCard = vi.fn(async () => {});
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard,
+        sendCard,
+        updateCard,
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(threadStatus("active"));
+    outbox.handle({
+      type: "turn.started",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      identity: { kind: "plugin", name: "GitHub" },
+    });
+    await outbox.close();
+
+    expect(sendCard).toHaveBeenCalledTimes(1);
+    expect(sendMarkdownCard).not.toHaveBeenCalled();
+    expect(updateCard).toHaveBeenCalledWith(
+      "om_status",
+      expect.objectContaining({
+        elements: [expect.objectContaining({
+          text: expect.objectContaining({
+            content: "GitHub Plugin · 运行中",
+          }),
+        })],
+      }),
+    );
+  });
+
+  it("does not create a standalone idle thread status card", async () => {
+    const sendCard = vi.fn(async () => "om_status");
+    const updateCard = vi.fn(async () => {});
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendCard,
+        updateCard,
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(threadStatus("idle"));
+    await outbox.close();
+
+    expect(sendCard).not.toHaveBeenCalled();
+    expect(updateCard).not.toHaveBeenCalled();
   });
 
   it("drops a stale status binding after an update failure", async () => {

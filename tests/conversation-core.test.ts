@@ -822,6 +822,14 @@ describe("ConversationCore", () => {
         failureReason: null,
       },
     });
+    handleNotification(core, {
+      method: "mcpServer/oauthLogin/completed",
+      params: {
+        threadId: "thread-1",
+        name: "docs",
+        success: true,
+      },
+    });
     await output.close();
 
     const limitEvents = events.filter((event) => event.type === "account.rateLimits.updated");
@@ -833,12 +841,18 @@ describe("ConversationCore", () => {
         primary: { windowDurationMins: 300, resetsAt: 2_000_000_000 },
       },
     });
-    expect(events).toContainEqual(expect.objectContaining({
+    expect(events).not.toContainEqual(expect.objectContaining({
       type: "mcp.status.updated",
-      target,
       name: "docs",
-      status: "ready",
     }));
+    expect(events).toContainEqual({
+      type: "mcp.oauth.completed",
+      target,
+      threadId: "thread-1",
+      name: "docs",
+      success: true,
+      error: null,
+    });
   });
 
   it("broadcasts global App Server warnings to bound conversations", async () => {
@@ -921,6 +935,16 @@ describe("ConversationCore", () => {
       provider: "deepseek",
     });
     handleNotification(core, {
+      method: "mcpServer/oauthLogin/completed",
+      params: {
+        threadId: null,
+        name: "codex_apps",
+        success: false,
+        error: "OAuth denied",
+      },
+      provider: "deepseek",
+    });
+    handleNotification(core, {
       method: "warning",
       params: { threadId: null, message: "DeepSeek 配置警告" },
       provider: "deepseek",
@@ -939,6 +963,57 @@ describe("ConversationCore", () => {
         target: deepseekTarget,
         message: "DeepSeek 配置警告",
       },
+    ]);
+  });
+
+  it("publishes MCP failure and recovery but not normal startup progress", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = {
+      surface: "telegram" as const,
+      accountId: "default",
+      conversationId: "100",
+    };
+    const core = new ConversationCore({
+      allBindings: () => [{ target, threadId: "thread-1" }],
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+    const status = (value: "starting" | "ready" | "failed") => {
+      handleNotification(core, {
+        method: "mcpServer/startupStatus/updated",
+        params: {
+          threadId: "thread-1",
+          name: "docs",
+          status: value,
+          error: value === "failed" ? "连接失败" : null,
+          failureReason: null,
+        },
+      });
+    };
+
+    status("starting");
+    status("ready");
+    status("failed");
+    status("starting");
+    status("ready");
+    await output.close();
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: "mcp.status.updated",
+        name: "docs",
+        status: "failed",
+      }),
+      expect.objectContaining({
+        type: "mcp.status.updated",
+        name: "docs",
+        status: "ready",
+      }),
     ]);
   });
 

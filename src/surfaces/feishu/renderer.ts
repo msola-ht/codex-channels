@@ -14,13 +14,19 @@ import {
   formatConversationArtifacts,
   formatConversationCollaborationMode,
   formatConversationCommandOutcome,
+  isTurnLifecycleAcknowledgedOutcome,
   formatConversationGoal,
   formatConversationLimits,
   formatConversationMetrics,
   formatConversationMcp,
+  formatConversationMcpDetail,
+  formatConversationMcpHealth,
+  formatConversationMcpLogin,
+  formatConversationMcpReload,
+  formatConversationMcpResource,
+  formatConversationPlugins,
   formatConversationModels,
   formatConversationPermissions,
-  formatConversationPlugins,
   formatConversationProjectRules,
   formatConversationSessions,
   formatConversationSkills,
@@ -57,6 +63,7 @@ import {
 } from "../output-copy.js";
 import {
   formatRuntimeAccountUpdate,
+  formatRuntimeMcpOAuthCompleted,
   formatRuntimeMcpStatusUpdate,
   formatRuntimeRateLimitUpdate,
 } from "../runtime-status-format.js";
@@ -121,9 +128,12 @@ export function renderFeishuCommandResult(
     provider: string | null | undefined,
   ) => DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
-): string {
+): string | null {
   switch (result.kind) {
     case "outcome":
+      if (isTurnLifecycleAcknowledgedOutcome(result.outcome)) {
+        return null;
+      }
       return formatConversationCommandOutcome(result.outcome);
     case "sessions":
       return formatConversationSessions(result);
@@ -143,6 +153,16 @@ export function renderFeishuCommandResult(
       return formatConversationAgents(result);
     case "mcp":
       return formatConversationMcp(result);
+    case "mcp-health":
+      return formatConversationMcpHealth(result);
+    case "mcp-reload":
+      return formatConversationMcpReload(result);
+    case "mcp-detail":
+      return formatConversationMcpDetail(result);
+    case "mcp-login":
+      return formatConversationMcpLogin(result);
+    case "mcp-resource":
+      return formatConversationMcpResource(result);
     case "plugins":
       return formatConversationPlugins(result);
     case "usage":
@@ -191,7 +211,10 @@ export function renderFeishuOutput(
       return formatVisionCompleted(event, debug);
     case "turn.started":
       return renderFeishuLifecyclePresentation(
-        createTurnStartedPresentation(event.background ? event.threadId : undefined),
+        createTurnStartedPresentation(
+          event.background ? event.threadId : undefined,
+          event.identity,
+        ),
       );
     case "text.delta":
       return null;
@@ -222,6 +245,8 @@ export function renderFeishuOutput(
       return formatRuntimeRateLimitUpdate(event.rateLimits);
     case "mcp.status.updated":
       return formatRuntimeMcpStatusUpdate(event);
+    case "mcp.oauth.completed":
+      return formatRuntimeMcpOAuthCompleted(event);
     case "warning":
       return formatCodexWarning(visibleUpstreamMessage(event.message));
   }

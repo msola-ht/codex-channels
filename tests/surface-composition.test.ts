@@ -505,6 +505,7 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     codexSandbox: "workspace-write",
     operationUpdateDisplay: "full",
     planUpdatesEnabled: false,
+    pluginApiEnabled: true,
     priceCurrency: "cny",
     apiProviders: [],
     vision: { mode: "disabled" },

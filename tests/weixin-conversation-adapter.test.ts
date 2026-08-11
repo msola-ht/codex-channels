@@ -772,10 +772,7 @@ describe("WeixinConversationAdapter", () => {
       "2",
       "排查微信断线",
     );
-    expect(notifyText).toHaveBeenCalledWith(
-      target,
-      expect.stringContaining("已使用 Skill 开始任务"),
-    );
+    expect(notifyText).not.toHaveBeenCalled();
   });
 
   it("rejects unknown slash commands without submitting them to Codex", async () => {

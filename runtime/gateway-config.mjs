@@ -253,6 +253,9 @@ const gatewayDocumentSchema = z.strictObject({
     plan_updates: true,
     price_currency: "cny",
   }),
+  experimental: z.strictObject({
+    plugin_api: z.boolean().default(false),
+  }).default({ plugin_api: false }),
   api_providers: z.array(apiProviderSchema).refine(
     (providers) => new Set(providers.map((provider) => provider.id)).size === providers.length,
     "api_providers 不能包含重复 ID",

@@ -18,8 +18,20 @@ import type {
   ProviderAccountUsage,
 } from "./account-port.js";
 import type { InstalledSkill, SkillQueryPort } from "./skill-port.js";
-import type { McpQueryPort, McpServerSummary } from "./mcp-port.js";
-import type { InstalledPlugin, PluginQueryPort } from "./plugin-port.js";
+import type {
+  McpLoginResult,
+  McpHealthReport,
+  McpQueryPort,
+  McpResourceReadResult,
+  McpServerDetail,
+  McpServerSummary,
+} from "./mcp-port.js";
+import { supportsMcpOAuthLogin } from "./mcp-port.js";
+import type {
+  InstalledPlugin,
+  InstalledPluginCatalog,
+  PluginQueryPort,
+} from "./plugin-port.js";
 import type {
   PermissionProfileOption,
   PermissionQueryPort,
@@ -41,6 +53,7 @@ import {
   type SurfaceId,
   type ThreadGoal,
   type ThreadTokenUsage,
+  type TurnStartIdentity,
   type TurnArtifacts,
 } from "../conversation-core/index.js";
 import type { ModelSelectionService, ModelSelectionState } from "./model-selection-service.js";
@@ -172,6 +185,11 @@ export interface ConversationUseCases {
     selector: string,
     task: string,
   ): Promise<Submission & { skillName: string }>;
+  invokePlugin(
+    target: ConversationTarget,
+    selector: string,
+    task: string,
+  ): Promise<Submission & { pluginName: string }>;
   listAgentRoles(): AgentRoleEntry[];
   invokeAgent(
     target: ConversationTarget,
@@ -213,7 +231,16 @@ export interface ConversationUseCases {
   selectFastMode(target: ConversationTarget, selector: string): Promise<ModelSelectionState>;
   listSkills(target: ConversationTarget): Promise<InstalledSkill[]>;
   listMcpServers(target: ConversationTarget): Promise<McpServerSummary[]>;
-  listPlugins(target: ConversationTarget): Promise<InstalledPlugin[]>;
+  mcpServerDetail(target: ConversationTarget, selector: string): Promise<McpServerDetail>;
+  mcpHealth(target: ConversationTarget): Promise<McpHealthReport>;
+  reloadMcpServers(target: ConversationTarget): Promise<void>;
+  loginMcpServer(target: ConversationTarget, selector: string): Promise<McpLoginResult>;
+  readMcpResource(
+    target: ConversationTarget,
+    selector: string,
+    uri: string,
+  ): Promise<McpResourceReadResult>;
+  listPlugins(target: ConversationTarget): Promise<InstalledPluginCatalog>;
   accountUsage(): Promise<AccountUsage>;
   accountRateLimits(): Promise<AccountRateLimits>;
   providerAccountUsage(target: ConversationTarget): Promise<ProviderAccountUsage>;
@@ -255,6 +282,9 @@ export class ConversationService implements ConversationUseCases {
     private readonly workspacePermissions?: WorkspacePermissionPort,
     private readonly turnErrorRecorder?: TurnErrorRecorder,
     private readonly agentRoles?: AgentRolePort,
+    private readonly experimentalFeatures: { pluginApiEnabled: boolean } = {
+      pluginApiEnabled: false,
+    },
   ) {}
 
   requestMetrics(
@@ -326,8 +356,56 @@ export class ConversationService implements ConversationUseCases {
           name: skill.name,
           path: skill.path,
         },
-      ]);
+      ], { kind: "skill", name: skill.name });
       return { ...submission, skillName: skill.name };
+    });
+  }
+
+  async invokePlugin(
+    target: ConversationTarget,
+    selector: string,
+    task: string,
+  ): Promise<Submission & { pluginName: string }> {
+    this.requirePluginApiEnabled();
+    const normalizedSelector = selector.trim();
+    const normalizedTask = task.trim();
+    if (!normalizedSelector || !normalizedTask) {
+      throw new UserFacingError(
+        "plugin.usage",
+        "需要提供 Plugin 名称或序号及任务内容",
+      );
+    }
+    return this.locked(target, async () => {
+      if ((this.models.status(target).modelProvider ?? "openai") !== "openai") {
+        throw new UserFacingError(
+          "plugin.provider.unsupported",
+          "开发中的 Plugin 调用当前只支持 OpenAI Thread",
+        );
+      }
+      const workspace = this.router.workspace(target);
+      const plugin = await this.resolvePlugin(
+        workspace.cwd,
+        normalizedSelector,
+      );
+      const resolved = await this.queries.resolvePlugin(workspace.cwd, plugin.id);
+      if (!resolved) {
+        throw new UserFacingError(
+          "plugin.unavailable",
+          "指定的 Plugin 未启用、被管理员禁用或暂不可调用",
+        );
+      }
+      const submission = await this.submitInputLocked(target, [
+        {
+          type: "text",
+          text: `@${resolved.name} ${normalizedTask}`,
+        },
+        {
+          type: "plugin",
+          name: resolved.displayName,
+          path: resolved.path,
+        },
+      ], { kind: "plugin", name: resolved.displayName });
+      return { ...submission, pluginName: resolved.displayName };
     });
   }
 
@@ -383,23 +461,25 @@ export class ConversationService implements ConversationUseCases {
         type: "text",
         text: `请使用 agent_type="${role.name}"、fork_turns="1" 的子代理执行以下任务，子代理完成后把最终结果回复给我：\n\n${normalizedTask}`,
       },
-    ]);
+    ], { kind: "agent", name: role.name });
     return { ...submission, roleName: role.name };
   }
 
   private submitInput(
     target: ConversationTarget,
     input: TurnInput[],
+    identity?: TurnStartIdentity,
   ): Promise<Submission> {
     return this.locked(
       target,
-      () => this.submitInputLocked(target, input),
+      () => this.submitInputLocked(target, input, identity),
     );
   }
 
   private async submitInputLocked(
     target: ConversationTarget,
     input: TurnInput[],
+    identity?: TurnStartIdentity,
   ): Promise<Submission> {
     if (input.some((item) => item.type === "localImage")) {
       try {
@@ -472,7 +552,7 @@ export class ConversationService implements ConversationUseCases {
       }
       return { threadId: active.threadId, turnId: active.turnId, steered: true };
     }
-    return this.startNewTurn(target, input, clientUserMessageId);
+    return this.startNewTurn(target, input, clientUserMessageId, identity);
   }
 
   queueFollowUp(
@@ -940,8 +1020,169 @@ export class ConversationService implements ConversationUseCases {
     return this.queries.listMcpServers(this.router.current(target)?.threadId);
   }
 
-  listPlugins(target: ConversationTarget): Promise<InstalledPlugin[]> {
+  async mcpHealth(target: ConversationTarget): Promise<McpHealthReport> {
+    const servers = await this.queries.listMcpServerDetails(
+      this.router.current(target)?.threadId,
+    );
+    return {
+      serverCount: servers.length,
+      toolCount: servers.reduce((total, server) => total + server.tools.length, 0),
+      resourceCount: servers.reduce(
+        (total, server) => total + server.resources.length,
+        0,
+      ),
+      resourceTemplateCount: servers.reduce(
+        (total, server) => total + server.resourceTemplates.length,
+        0,
+      ),
+      actions: servers.flatMap((server, index) =>
+        server.authStatus === "notLoggedIn"
+          ? [{
+              type: "loginRequired" as const,
+              server: server.name,
+              selector: String(index + 1),
+            }]
+          : []
+      ),
+      notices: servers.flatMap((server, index) => [
+        ...(server.authStatus === "unknown"
+          ? [{
+              type: "authUnknown" as const,
+              server: server.name,
+              selector: String(index + 1),
+            }]
+          : []),
+        ...(server.authStatus !== "notLoggedIn"
+          && server.authStatus !== "unknown"
+          && server.tools.length === 0
+          && server.resources.length === 0
+          && server.resourceTemplates.length === 0
+          ? [{
+              type: "noCapabilities" as const,
+              server: server.name,
+              selector: String(index + 1),
+            }]
+          : []),
+      ]),
+    };
+  }
+
+  reloadMcpServers(target: ConversationTarget): Promise<void> {
+    void target;
+    return this.queries.reloadMcpServers();
+  }
+
+  async mcpServerDetail(
+    target: ConversationTarget,
+    selector: string,
+  ): Promise<McpServerDetail> {
+    const threadId = this.router.current(target)?.threadId;
+    return resolveMcpServer(
+      selector,
+      await this.queries.listMcpServerDetails(threadId),
+    );
+  }
+
+  async loginMcpServer(
+    target: ConversationTarget,
+    selector: string,
+  ): Promise<McpLoginResult> {
+    const threadId = this.router.current(target)?.threadId;
+    const server = resolveMcpServer(
+      selector,
+      await this.queries.listMcpServers(threadId),
+    );
+    if (server.authStatus === "bearerToken") {
+      return {
+        type: "bearerToken",
+        server: server.name,
+      };
+    }
+    if (!supportsMcpOAuthLogin(server.authStatus)) {
+      throw new UserFacingError(
+        "mcp.oauth.unsupported",
+        "该 MCP Server 不支持 OAuth 登录",
+      );
+    }
+    if (!threadId) {
+      throw new UserFacingError(
+        "mcp.thread.required",
+        "请先发送消息创建 Thread，或使用 /resume 恢复 Thread 后再登录 MCP Server",
+      );
+    }
+    return {
+      type: "oauth",
+      ...await this.queries.startMcpOAuthLogin(server.name, threadId),
+    };
+  }
+
+  async readMcpResource(
+    target: ConversationTarget,
+    selector: string,
+    uri: string,
+  ): Promise<McpResourceReadResult> {
+    const normalizedUri = uri.trim();
+    if (
+      normalizedUri.length === 0
+      || normalizedUri.length > 4_096
+      || hasControlCharacters(normalizedUri)
+    ) {
+      throw new UserFacingError("mcp.resource.usage", "需要提供有效的 MCP Resource URI");
+    }
+    const threadId = this.router.current(target)?.threadId;
+    const server = resolveMcpServer(
+      selector,
+      await this.queries.listMcpServers(threadId),
+    );
+    return this.queries.readMcpResource(
+      server.name,
+      normalizedUri,
+      threadId,
+    );
+  }
+
+  listPlugins(target: ConversationTarget): Promise<InstalledPluginCatalog> {
+    this.requirePluginApiEnabled();
     return this.queries.listPlugins(this.router.workspace(target).cwd);
+  }
+
+  private async resolvePlugin(
+    cwd: string,
+    selector: string,
+  ): Promise<InstalledPlugin> {
+    const { plugins } = await this.queries.listPlugins(cwd);
+    if (/^[1-9]\d*$/u.test(selector)) {
+      const index = Number(selector);
+      const plugin = Number.isSafeInteger(index) ? plugins[index - 1] : undefined;
+      if (!plugin) {
+        throw new UserFacingError("plugin.not-found", "Plugin 序号不存在");
+      }
+      return plugin;
+    }
+    const normalized = selector.toLowerCase();
+    const matches = plugins.filter((plugin) =>
+      plugin.id.toLowerCase() === normalized
+      || plugin.name.toLowerCase() === normalized
+      || plugin.displayName.toLowerCase() === normalized
+    );
+    if (matches.length !== 1) {
+      throw new UserFacingError(
+        matches.length === 0 ? "plugin.not-found" : "plugin.ambiguous",
+        matches.length === 0
+          ? "指定的 Plugin 不存在"
+          : "Plugin 名称不唯一，请使用序号或完整 ID",
+      );
+    }
+    return matches[0]!;
+  }
+
+  private requirePluginApiEnabled(): void {
+    if (!this.experimentalFeatures.pluginApiEnabled) {
+      throw new UserFacingError(
+        "plugin.disabled",
+        "开发中的 Plugin API 已关闭；请在 [experimental] 中启用 plugin_api 后重启 Gateway",
+      );
+    }
   }
 
   accountUsage(): Promise<AccountUsage> {
@@ -1099,6 +1340,7 @@ export class ConversationService implements ConversationUseCases {
     target: ConversationTarget,
     input: TurnInput[],
     clientUserMessageId: string,
+    identity?: TurnStartIdentity,
   ): Promise<Submission> {
     const threadStartOptions = this.models.threadStartOptions?.(target) ?? {};
     const binding = Object.keys(threadStartOptions).length > 0
@@ -1120,7 +1362,11 @@ export class ConversationService implements ConversationUseCases {
     }
     this.models.markApplied(target);
     this.collaborationModes?.markApplied(target);
-    this.core.markTurnStarted(target, binding.threadId, result.turnId);
+    if (identity) {
+      this.core.markTurnStarted(target, binding.threadId, result.turnId, identity);
+    } else {
+      this.core.markTurnStarted(target, binding.threadId, result.turnId);
+    }
     return { threadId: binding.threadId, turnId: result.turnId, steered: false };
   }
 
@@ -1387,4 +1633,32 @@ export function turnErrorMessage(error: unknown): string | null {
   const message = error.message.replace(/\s+/gu, " ").trim();
   if (message.length === 0) return null;
   return message.length <= 500 ? message : `${message.slice(0, 500)}…`;
+}
+
+function resolveMcpServer<T extends McpServerSummary>(
+  selector: string,
+  servers: readonly T[],
+): T {
+  const normalizedSelector = selector.trim();
+  if (!normalizedSelector) {
+    throw new UserFacingError("mcp.server.usage", "需要提供 MCP Server 名称或序号");
+  }
+  if (/^[1-9]\d*$/u.test(normalizedSelector)) {
+    const index = Number(normalizedSelector);
+    const server = Number.isSafeInteger(index) ? servers[index - 1] : undefined;
+    if (server) return server;
+  } else {
+    const server = servers.find((candidate) =>
+      candidate.name.toLowerCase() === normalizedSelector.toLowerCase()
+    );
+    if (server) return server;
+  }
+  throw new UserFacingError("mcp.server.not-found", "指定的 MCP Server 不存在");
+}
+
+function hasControlCharacters(value: string): boolean {
+  return [...value].some((character) => {
+    const code = character.codePointAt(0);
+    return code !== undefined && (code <= 0x1f || code === 0x7f);
+  });
 }

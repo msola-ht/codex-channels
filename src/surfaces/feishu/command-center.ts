@@ -414,7 +414,7 @@ function renderFeishuCommandChoicesCard(
             tag: "div",
             text: {
               tag: "plain_text",
-              content: `仅显示前 ${choices.length} 项，请使用卡片内搜索查看更多选项。`,
+              content: `仅显示前 ${choices.length} 项，请使用对应聊天命令查看更多选项。`,
             },
           }]
         : []),
@@ -537,7 +537,7 @@ function renderFeishuCategorizedCommandsCard(
         ["子代理", "agents", "default"],
         ["Skills", "skill", "default"],
         ["MCP", "mcp", "default"],
-        ["Plugins", "plugins", "default"],
+        ["Plugin", "plugin", "default"],
       ]),
       sectionTitle("当前内容"),
       actionRow(token, [

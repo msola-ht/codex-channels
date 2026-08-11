@@ -43,6 +43,7 @@ export interface GatewayConfigDocument {
     plan_updates: boolean;
     price_currency: "cny" | "usd";
   };
+  experimental: { plugin_api: boolean };
   api_providers: Array<{
     id: string;
     name: string;

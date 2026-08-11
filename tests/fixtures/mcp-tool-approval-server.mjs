@@ -19,7 +19,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       id: message.id,
       result: {
         protocolVersion: message.params?.protocolVersion ?? "2025-06-18",
-        capabilities: { tools: {} },
+        capabilities: { tools: {}, resources: {} },
         serverInfo: {
           name: "codexc-mcp-tool-approval-contract",
           version: "1.0.0",
@@ -35,13 +35,51 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       result: {
         tools: [{
           name: "approval_probe",
-          description: "Emit a deterministic MCP tool approval elicitation.",
+          description: ` Emit\n\tapproval details ${"x".repeat(2_100)} `,
           inputSchema: {
             type: "object",
             properties: {
               pull_number: { type: "number" },
             },
           },
+        }],
+      },
+    });
+    return;
+  }
+  if (message.method === "resources/list") {
+    send({
+      jsonrpc: "2.0",
+      id: message.id,
+      result: {
+        resources: [{
+          uri: "contract://status",
+          name: "contract-status",
+          title: "Contract status",
+          description: "Deterministic MCP resource fixture.",
+          mimeType: "text/plain",
+        }],
+      },
+    });
+    return;
+  }
+  if (message.method === "resources/templates/list") {
+    send({
+      jsonrpc: "2.0",
+      id: message.id,
+      result: { resourceTemplates: [] },
+    });
+    return;
+  }
+  if (message.method === "resources/read") {
+    send({
+      jsonrpc: "2.0",
+      id: message.id,
+      result: {
+        contents: [{
+          uri: message.params?.uri ?? "contract://status",
+          mimeType: "text/plain",
+          text: "contract resource ready",
         }],
       },
     });

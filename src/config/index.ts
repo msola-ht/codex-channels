@@ -64,6 +64,7 @@ export interface GatewayConfig {
   codexSandbox: "read-only" | "workspace-write";
   operationUpdateDisplay: OperationUpdateDisplay;
   planUpdatesEnabled: boolean;
+  pluginApiEnabled: boolean;
   priceCurrency: "cny" | "usd";
   apiProviders: ReadonlyArray<{
     id: string;
@@ -293,6 +294,7 @@ function loadValidatedConfigDocument(
     codexSandbox: raw.codex.sandbox,
     operationUpdateDisplay: raw.display.operation_updates,
     planUpdatesEnabled: raw.display.plan_updates,
+    pluginApiEnabled: raw.experimental.plugin_api,
     priceCurrency: raw.display.price_currency,
     apiProviders: raw.api_providers.map(toApiProviderConfig),
     vision: toVisionConfig(raw.vision, raw.api_providers),

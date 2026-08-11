@@ -111,6 +111,12 @@ describe("Feishu command center", () => {
         .filter((command) => command !== "unarchive")
         .toSorted(),
     );
+    expect(collectCardActions(categorized).some((action) =>
+      typeof action === "object"
+      && action !== null
+      && "value" in action
+      && (action as { value: Record<string, string> }).value.codexc_command === "plugins"
+    )).toBe(false);
     for (const command of [
       "stop",
       "archive",

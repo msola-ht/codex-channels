@@ -1,8 +1,26 @@
 export interface InstalledPlugin {
+  id: string;
   name: string;
+  displayName: string;
+  marketplaceName: string;
+  description: string | null;
   enabled: boolean;
+  available: boolean;
+}
+
+export interface InstalledPluginCatalog {
+  plugins: InstalledPlugin[];
+  loadErrorCount: number;
+}
+
+export interface InvocablePlugin {
+  id: string;
+  name: string;
+  displayName: string;
+  path: string;
 }
 
 export interface PluginQueryPort {
-  listPlugins(cwd: string): Promise<InstalledPlugin[]>;
+  listPlugins(cwd: string): Promise<InstalledPluginCatalog>;
+  resolvePlugin(cwd: string, id: string): Promise<InvocablePlugin | undefined>;
 }
