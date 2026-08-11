@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
@@ -40,6 +41,49 @@ const archiveTest = run && archiveFixtureThreadId ? it : it.skip;
 const resumeFixtureThreadId = process.env.CODEX_RESUME_FIXTURE_THREAD_ID;
 const resumeTest = run && resumeFixtureThreadId ? it : it.skip;
 const forkTest = run && resumeFixtureThreadId ? it : it.skip;
+
+describe("real App Server test process cleanup", () => {
+  it("stops descendant processes before temporary directory cleanup", async () => {
+    const runtimeRoot = resolve(".runtime");
+    mkdirSync(runtimeRoot, { recursive: true });
+    const testRuntime = mkdtempSync(join(runtimeRoot, "process-tree-"));
+    const markerPath = join(testRuntime, "descendant-writes");
+    const descendantSource = [
+      'const { appendFileSync } = require("node:fs");',
+      "const markerPath = process.argv[1];",
+      'appendFileSync(markerPath, "x");',
+      'const interval = setInterval(() => appendFileSync(markerPath, "x"), 25);',
+      "setTimeout(() => { clearInterval(interval); process.exit(0); }, 2_000);",
+    ].join("\n");
+    const parentSource = [
+      'const { spawn } = require("node:child_process");',
+      `spawn(process.execPath, ["-e", ${JSON.stringify(descendantSource)}, process.argv[1]], {`,
+      '  stdio: "ignore",',
+      "});",
+      "setInterval(() => undefined, 1_000);",
+    ].join("\n");
+    const parent = spawn(process.execPath, ["-e", parentSource, markerPath], {
+      detached: process.platform !== "win32",
+      stdio: "ignore",
+    });
+
+    try {
+      await waitFor(() => existsSync(markerPath), 1_000);
+      await stopDetachedTestProcess(parent, 1_000);
+      const sizeAfterStop = statSync(markerPath).size;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 150));
+      expect(statSync(markerPath).size).toBe(sizeAfterStop);
+    } finally {
+      signalTestProcessTree(parent, "SIGKILL");
+      rmSync(testRuntime, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
+    }
+  });
+});
 
 suite("real Codex App Server over Unix WebSocket", () => {
   const workdir = process.cwd();
@@ -343,7 +387,7 @@ suite("real supervised App Server service", () => {
     } finally {
       try {
         await client?.close().catch(() => undefined);
-        await stopTestProcess(service, 10_000);
+        await stopDetachedTestProcess(service, 10_000);
         await waitFor(() => !existsSync(supervisorSocketPath), 2_000);
       } finally {
         rmSync(testRuntime, { recursive: true, force: true });
@@ -577,6 +621,7 @@ contractSuite("isolated Codex App Server state contract", () => {
         cwd: workdir,
         env: { ...process.env, CODEX_HOME: codexHome },
         stdio: ["ignore", "ignore", "pipe"],
+        detached: process.platform !== "win32",
       },
     );
     processHandle.stderr?.setEncoding("utf8");
@@ -604,10 +649,7 @@ contractSuite("isolated Codex App Server state contract", () => {
   afterAll(async () => {
     await peerClient?.close();
     await ownerClient?.close();
-    if (processHandle?.exitCode === null) {
-      processHandle.kill("SIGTERM");
-      await new Promise((resolveExit) => processHandle.once("exit", resolveExit));
-    }
+    await stopDetachedTestProcess(processHandle, 10_000);
     if (oauthServer) {
       await new Promise<void>((resolveClose) => oauthServer.close(() => resolveClose()));
     }
@@ -1338,32 +1380,36 @@ async function waitFor(
   }
 }
 
-async function stopTestProcess(child: ChildProcess, timeoutMs: number): Promise<void> {
+async function stopDetachedTestProcess(child: ChildProcess, timeoutMs: number): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
-  child.kill("SIGTERM");
+  signalTestProcessTree(child, "SIGTERM");
   try {
     await waitFor(
       () => child.exitCode !== null || child.signalCode !== null,
       timeoutMs,
     );
   } catch (error) {
-    if (process.platform !== "win32" && child.pid !== undefined) {
-      try {
-        process.kill(-child.pid, "SIGKILL");
-      } catch (killError) {
-        if (!(killError instanceof Error && "code" in killError && killError.code === "ESRCH")) {
-          throw killError;
-        }
-      }
-    } else {
-      child.kill("SIGKILL");
-    }
+    signalTestProcessTree(child, "SIGKILL");
     await waitFor(
       () => child.exitCode !== null || child.signalCode !== null,
       2_000,
     );
     throw error;
   }
+}
+
+function signalTestProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (process.platform !== "win32" && child.pid !== undefined) {
+    try {
+      process.kill(-child.pid, signal);
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) {
+        throw error;
+      }
+    }
+    return;
+  }
+  child.kill(signal);
 }
 
 function appendDiagnostic(current: string, chunk: string): string {
