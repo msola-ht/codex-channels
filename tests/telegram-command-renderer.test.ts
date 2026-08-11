@@ -365,5 +365,14 @@ describe("Telegram command renderer", () => {
     expect(callbacks?.[0]).toMatch(/^section:move:[A-Za-z0-9_-]{43}$/u);
     expect(callbacks).toContain("section:page:1");
     expect(callbacks).toContain("section:page:3");
+
+    expect(threadSectionKeyboard({
+      kind: "thread-sections",
+      sections: [],
+      selectors: [],
+      page: 4,
+      pageCount: 3,
+      totalSectionCount: 17,
+    })).toBeUndefined();
   });
 });

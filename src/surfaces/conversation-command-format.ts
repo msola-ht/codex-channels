@@ -186,6 +186,13 @@ export function formatConversationSessions(
 export function formatConversationThreadSections(
   result: Extract<ConversationCommandResult, { kind: "thread-sections" }>,
 ): string {
+  if (result.page > result.pageCount) {
+    return toStructuredMarkdownList([
+      `Thread 分区（全局 ${result.totalSectionCount}）：`,
+      `第 ${result.page} 页不存在，共 ${result.pageCount} 页`,
+      "返回第一页：/section list 1",
+    ].join("\n"));
+  }
   const entries = result.sections.map((section, index) => {
     const selector = result.selectors[index] ?? section.id;
     const builtIn = section.builtIn === "pinned" ? " · 内置固定区" : "";

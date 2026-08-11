@@ -357,6 +357,24 @@ describe("shared surface copy contract", () => {
       .toBe(formatConversationThreadSectionDeletePreview(preview));
     expect(formatConversationThreadSectionDeletePreview(preview))
       .toContain("其他 Workspace 中的归属也会受影响");
+
+    const missingPage: Extract<
+      ConversationCommandResult,
+      { kind: "thread-sections" }
+    > = {
+      kind: "thread-sections",
+      sections: [],
+      selectors: [],
+      page: 3,
+      pageCount: 2,
+      totalSectionCount: 9,
+    };
+    const missingPageText = formatConversationThreadSections(missingPage);
+    expect(missingPageText).toContain("第 3 页不存在，共 2 页");
+    expect(missingPageText).toContain("返回第一页：/section list 1");
+    expect(missingPageText).not.toContain("/section list 2");
+    expect(renderFeishuCommandResult(missingPage)).toBe(missingPageText);
+    expect(renderWeixinCommandResult(missingPage)).toBe(missingPageText);
   });
 
   it("leaves new extension task acknowledgement to the Turn lifecycle", () => {

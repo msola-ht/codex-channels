@@ -224,6 +224,7 @@ export function telegramPluginSelectionToken(pluginId: string): string {
 export function threadSectionKeyboard(
   result: Extract<ConversationCommandResult, { kind: "thread-sections" }>,
 ): InlineKeyboardMarkup | undefined {
+  if (result.page > result.pageCount) return undefined;
   const rows = result.sections.map((section) => [{
     text: boundedButtonLabel(`${section.name}${section.builtIn === "pinned" ? " · 固定" : ""}`),
     callback_data: `section:move:${telegramThreadSectionToken(section.id)}`,

@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import {
   copyFileSync,
+  readFileSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -31,6 +32,17 @@ npm install -g @hegenai/codexc@0.145.0
 `;
 
 describe("published README synchronization", () => {
+  it("keeps the repository README development baseline aligned with the package", () => {
+    const repositoryReadme = readFileSync(resolve("README.md"), "utf8");
+    const packageMetadata = JSON.parse(
+      readFileSync(resolve("package.json"), "utf8"),
+    ) as { version: string };
+
+    expect(repositoryReadme).toContain(
+      `\`main\` 开发基线：\`${packageMetadata.version}\``,
+    );
+  });
+
   it("validates a release tag without installed dependencies", () => {
     const fixture = mkdtempSync(join(tmpdir(), "codexc-release-tag-"));
     const scriptsDirectory = join(fixture, "scripts");
