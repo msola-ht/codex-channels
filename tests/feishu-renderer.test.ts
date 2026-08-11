@@ -165,7 +165,17 @@ describe("Feishu output renderer", () => {
       },
       { kind: "skills", entries: [] },
       { kind: "mcp", servers: [] },
-      { kind: "plugins", plugins: [], loadErrorCount: 0 },
+      {
+        kind: "plugins",
+        plugins: [],
+        selectors: [],
+        loadErrorCount: 0,
+        totalPluginCount: 0,
+        matchedPluginCount: 0,
+        page: 1,
+        pageCount: 1,
+        searchTerm: null,
+      },
       {
         kind: "usage",
         result: {
@@ -557,7 +567,13 @@ describe("Feishu output renderer", () => {
         eligiblePlanTypes: [],
         disabledReason: null,
       }],
+      selectors: ["1"],
       loadErrorCount: 0,
+      totalPluginCount: 1,
+      matchedPluginCount: 1,
+      page: 1,
+      pageCount: 1,
+      searchTerm: null,
     })).toContain("1. GitHub · github@local · 已启用");
     expect(renderFeishuCommandResult({
       kind: "permissions",

@@ -25,6 +25,7 @@ import {
   formatConversationMcpReload,
   formatConversationMcpResource,
   formatConversationPluginDetail,
+  formatConversationPluginHealth,
   formatConversationPlugins,
   formatConversationModels,
   formatConversationPermissions,
@@ -166,6 +167,8 @@ export function renderFeishuCommandResult(
       return formatConversationMcpResource(result);
     case "plugins":
       return formatConversationPlugins(result);
+    case "plugin-health":
+      return formatConversationPluginHealth(result);
     case "plugin-detail":
       return formatConversationPluginDetail(result);
     case "usage":

@@ -1347,27 +1347,45 @@ describe("ConversationService model selection", () => {
   });
 
   it("lists installed Plugins for the authorized Workspace", async () => {
+    const github = {
+      id: "github@local",
+      name: "github",
+      displayName: "GitHub",
+      marketplaceName: "local",
+      description: "GitHub development tools",
+      enabled: true,
+      available: true,
+      version: "0.1.8",
+      localVersion: "0.1.8",
+      source: "local" as const,
+      installedAt: null,
+      developerName: null,
+      category: null,
+      capabilities: [],
+      authPolicy: "onUse" as const,
+      eligiblePlanTypes: [],
+      disabledReason: null,
+    };
     const listPlugins = vi.fn(async () => ({
-      plugins: [{
-        id: "github@local",
-        name: "github",
-        displayName: "GitHub",
-        marketplaceName: "local",
-        description: "GitHub development tools",
-        enabled: true,
-        available: true,
-        version: "0.1.8",
-        localVersion: "0.1.8",
-        source: "local" as const,
-        installedAt: null,
-        developerName: null,
-        category: null,
-        capabilities: [],
-        authPolicy: "onUse" as const,
-        eligiblePlanTypes: [],
-        disabledReason: null,
-      }],
-      loadErrorCount: 0,
+      plugins: [
+        github,
+        {
+          ...github,
+          id: "disabled@local",
+          name: "disabled",
+          displayName: "Disabled",
+          enabled: false,
+        },
+        {
+          ...github,
+          id: "plan@local",
+          name: "plan",
+          displayName: "Plan restricted",
+          available: false,
+          disabledReason: "plan_not_eligible" as const,
+        },
+      ],
+      loadErrorCount: 2,
     }));
     const service = new ConversationService(
       turnPort(),
@@ -1389,12 +1407,29 @@ describe("ConversationService model selection", () => {
     );
 
     await expect(service.listPlugins(target)).resolves.toMatchObject({
-      plugins: [expect.objectContaining({ id: "github@local" })],
-      loadErrorCount: 0,
+      plugins: expect.arrayContaining([expect.objectContaining({ id: "github@local" })]),
+      loadErrorCount: 2,
     });
     await expect(service.pluginDetail(target, "1")).resolves.toMatchObject({
       id: "github@local",
       displayName: "GitHub",
+    });
+    await expect(service.pluginHealth(target)).resolves.toEqual({
+      installedCount: 3,
+      enabledCount: 2,
+      callableCount: 1,
+      marketplaceLoadErrorCount: 2,
+      issues: [{
+        type: "notEnabled",
+        plugin: "Disabled",
+        selector: "2",
+        reason: null,
+      }, {
+        type: "unavailable",
+        plugin: "Plan restricted",
+        selector: "3",
+        reason: "plan_not_eligible",
+      }],
     });
     expect(listPlugins).toHaveBeenCalledWith(main.cwd);
   });

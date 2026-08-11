@@ -78,8 +78,10 @@ Thread 返回稳定概览与详情；命令结果携带工具、资源或模板�
 生成可继续执行的登录、浏览和资源读取命令；Bearer Token 返回结构化认证结果并明确提示无需 OAuth，
 资源读取只展示已经隐藏常见凭据的有界文本或二进制元数据。
 Plugin API 仍被官方标记为开发中，只在 `plugin_api` 开关开启时列出或查看当前 Workspace 已安装项，
-详情只使用同一次 `plugin/installed` 返回的安全摘要，能力与适用套餐有界展示，不读取本机路径或远端 URL；同时保留 Marketplace
-加载失败计数，并仅在互斥区内确认仍为 OpenAI Thread 后发送官方 mention；
+详情只使用同一次 `plugin/installed` 返回的安全摘要，能力与适用套餐有界展示，不读取本机路径或远端 URL；
+Application 对同一已安装目录提供每页 8 项的本地分页过滤和只含需处理项的健康归约，保留原目录全局
+数字选择器，不调用 `plugin/search`；同时保留 Marketplace 加载失败计数，并仅在互斥区内确认仍为
+OpenAI Thread 后发送官方 mention；
 三个 Surface 共用同一 Application 边界。
 成功启动 Turn 后，模型、思考等级、服务层级和协作模式以 App Server 的 Thread 设置为准；
 Gateway 重启时通过恢复 Thread 和设置通知重新取得这些设置。`/plan` 无参数切换

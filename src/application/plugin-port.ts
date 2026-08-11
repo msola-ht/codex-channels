@@ -28,6 +28,19 @@ export interface InstalledPluginCatalog {
   loadErrorCount: number;
 }
 
+export interface PluginHealthReport {
+  installedCount: number;
+  enabledCount: number;
+  callableCount: number;
+  marketplaceLoadErrorCount: number;
+  issues: Array<{
+    type: "notEnabled" | "unavailable";
+    plugin: string;
+    selector: string;
+    reason: InstalledPlugin["disabledReason"];
+  }>;
+}
+
 export interface InvocablePlugin {
   id: string;
   name: string;

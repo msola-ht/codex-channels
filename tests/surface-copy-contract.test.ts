@@ -493,7 +493,23 @@ describe("shared surface copy contract", () => {
           eligiblePlanTypes: [],
           disabledReason: null,
         }],
+        selectors: ["1"],
         loadErrorCount: 0,
+        totalPluginCount: 1,
+        matchedPluginCount: 1,
+        page: 1,
+        pageCount: 1,
+        searchTerm: null,
+      },
+      {
+        kind: "plugin-health",
+        report: {
+          installedCount: 1,
+          enabledCount: 1,
+          callableCount: 1,
+          marketplaceLoadErrorCount: 0,
+          issues: [],
+        },
       },
       {
         kind: "plugin-detail",

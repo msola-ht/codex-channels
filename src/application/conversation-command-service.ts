@@ -48,9 +48,16 @@ export const conversationCommandNames = [
 export type ConversationCommandName = typeof conversationCommandNames[number];
 const conversationCommandNameSet = new Set<string>(conversationCommandNames);
 export const mcpCommandUsageText = "用法：/mcp [health | reload | 名称或序号 [tools|resources|templates [页码] [search <关键词>]] | login <名称或序号> | resource <名称或序号> <URI>]";
+export const pluginCommandUsageText = "用法：/plugin [health | list [页码] [search <关键词>] | <名称、完整 ID 或序号> [任务]]";
+const maximumPluginListEntries = 8;
 
 export interface McpDetailView {
   section: "tools" | "resources" | "templates";
+  page: number;
+  searchTerm: string | null;
+}
+
+export interface PluginListView {
   page: number;
   searchTerm: string | null;
 }
@@ -103,8 +110,15 @@ export type ConversationCommandResult =
   | {
       kind: "plugins";
       plugins: Awaited<ReturnType<ConversationUseCases["listPlugins"]>>["plugins"];
+      selectors: string[];
       loadErrorCount: number;
+      totalPluginCount: number;
+      matchedPluginCount: number;
+      page: number;
+      pageCount: number;
+      searchTerm: string | null;
     }
+  | { kind: "plugin-health"; report: Awaited<ReturnType<ConversationUseCases["pluginHealth"]>> }
   | {
       kind: "plugin-detail";
       plugin: Awaited<ReturnType<ConversationUseCases["pluginDetail"]>>;
@@ -471,25 +485,27 @@ export class ConversationCommandService {
         };
       }
       case "plugin": {
-        if (!argumentsText) {
+        const operation = parsePluginOperation(argumentsText);
+        if (operation.type === "list") {
           const catalog = await this.conversations.listPlugins(target);
+          return pluginListResult(catalog, operation.view);
+        }
+        if (operation.type === "health") {
           return {
-            kind: "plugins",
-            plugins: catalog.plugins,
-            loadErrorCount: catalog.loadErrorCount,
+            kind: "plugin-health",
+            report: await this.conversations.pluginHealth(target),
           };
         }
-        if (!/\s/u.test(argumentsText.trim())) {
+        if (operation.type === "detail") {
           return {
             kind: "plugin-detail",
-            plugin: await this.conversations.pluginDetail(target, argumentsText.trim()),
+            plugin: await this.conversations.pluginDetail(target, operation.selector),
           };
         }
-        const invocation = parsePluginInvocation(argumentsText);
         const submission = await this.conversations.invokePlugin(
           target,
-          invocation.selector,
-          invocation.task,
+          operation.selector,
+          operation.task,
         );
         return {
           kind: "outcome",
@@ -649,20 +665,95 @@ function parseSkillInvocation(input: string): {
   };
 }
 
-function parsePluginInvocation(input: string): {
-  selector: string;
-  task: string;
-} {
+function parsePluginOperation(input: string):
+  | { type: "list"; view: PluginListView }
+  | { type: "health" }
+  | { type: "detail"; selector: string }
+  | { type: "invoke"; selector: string; task: string } {
+  const parts = input.trim() ? input.trim().split(/\s+/u) : [];
+  if (parts.length === 0) {
+    return { type: "list", view: { page: 1, searchTerm: null } };
+  }
+  if (parts[0] === "health") {
+    if (parts.length !== 1) {
+      throw new UserFacingError("plugin.usage", pluginCommandUsageText);
+    }
+    return { type: "health" };
+  }
+  if (parts[0] === "list") {
+    let page = 1;
+    let optionIndex = 1;
+    const pageText = parts[optionIndex];
+    if (pageText && /^[1-9]\d*$/u.test(pageText)) {
+      page = Number(pageText);
+      optionIndex += 1;
+      if (!Number.isSafeInteger(page) || page > 10_000) {
+        throw new UserFacingError("plugin.usage", pluginCommandUsageText);
+      }
+    }
+    let searchTerm: string | null = null;
+    if (parts[optionIndex] === "search") {
+      searchTerm = parts.slice(optionIndex + 1).join(" ").trim();
+      if (!searchTerm || searchTerm.length > 128) {
+        throw new UserFacingError("plugin.usage", pluginCommandUsageText);
+      }
+      optionIndex = parts.length;
+    }
+    if (optionIndex !== parts.length) {
+      throw new UserFacingError("plugin.usage", pluginCommandUsageText);
+    }
+    return { type: "list", view: { page, searchTerm } };
+  }
+  if (parts.length === 1 && parts[0]) {
+    return { type: "detail", selector: parts[0] };
+  }
   const match = /^(\S+)\s+([\s\S]+)$/u.exec(input.trim());
   if (!match?.[1] || !match[2]?.trim()) {
-    throw new UserFacingError(
-      "plugin.usage",
-      "用法：/plugin [<名称、完整 ID 或序号> [任务]]",
-    );
+    throw new UserFacingError("plugin.usage", pluginCommandUsageText);
   }
   return {
+    type: "invoke",
     selector: match[1],
     task: match[2].trim(),
+  };
+}
+
+function pluginListResult(
+  catalog: Awaited<ReturnType<ConversationUseCases["listPlugins"]>>,
+  view: PluginListView,
+): Extract<ConversationCommandResult, { kind: "plugins" }> {
+  const normalizedSearch = view.searchTerm?.toLowerCase() ?? null;
+  const indexed = catalog.plugins.map((plugin, index) => ({
+    plugin,
+    selector: String(index + 1),
+  }));
+  const matches = normalizedSearch
+    ? indexed.filter(({ plugin }) => [
+        plugin.id,
+        plugin.name,
+        plugin.displayName,
+        plugin.marketplaceName,
+        plugin.description,
+        plugin.developerName,
+        plugin.category,
+        ...plugin.capabilities,
+      ].some((value) => value?.toLowerCase().includes(normalizedSearch)))
+    : indexed;
+  const pageCount = Math.max(1, Math.ceil(matches.length / maximumPluginListEntries));
+  const pageStart = (view.page - 1) * maximumPluginListEntries;
+  const pageEntries = view.page <= pageCount
+    ? matches.slice(pageStart, pageStart + maximumPluginListEntries)
+    : [];
+  return {
+    kind: "plugins",
+    plugins: pageEntries.map(({ plugin }) => plugin),
+    selectors: pageEntries.map(({ selector }) => selector),
+    loadErrorCount: catalog.loadErrorCount,
+    totalPluginCount: catalog.plugins.length,
+    matchedPluginCount: matches.length,
+    page: view.page,
+    pageCount,
+    searchTerm: view.searchTerm,
   };
 }
 

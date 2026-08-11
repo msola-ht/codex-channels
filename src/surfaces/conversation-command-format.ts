@@ -110,7 +110,8 @@ export const conversationCommandHelpSections = [
       "/mcp <名称或序号> <tools|resources|templates> [页码] [search <关键词>]",
       "/mcp login <名称或序号>",
       "/mcp resource <名称或序号> <URI>",
-      "/plugin [<名称、完整 ID 或序号> [任务]]",
+      "/plugin · /plugin health · /plugin list [页码] [search <关键词>]",
+      "/plugin <名称、完整 ID 或序号> [任务]",
       "/usage · /limits · /permissions",
       "/metrics session",
       "/metrics <global|providers|models|errors> [24h|7d|30d]",
@@ -771,27 +772,91 @@ function escapeCodeFence(value: string): string {
 export function formatConversationPlugins(
   result: Extract<ConversationCommandResult, { kind: "plugins" }>,
 ): string {
-  const { plugins, loadErrorCount } = result;
+  const {
+    plugins,
+    selectors,
+    loadErrorCount,
+    totalPluginCount,
+    matchedPluginCount,
+    page,
+    pageCount,
+    searchTerm,
+  } = result;
   const loadErrorNotice = loadErrorCount > 0
     ? [`注意：${loadErrorCount} 个 Plugin Marketplace 加载失败，列表可能不完整。`, ""]
     : [];
-  return plugins.length === 0 && loadErrorCount === 0
-    ? "当前没有已安装的 Plugin。"
-    : toStructuredMarkdownList([
-        `已安装 Plugin（开发中，${plugins.length}）：`,
-        ...loadErrorNotice,
-        ...plugins.map((plugin, index) => {
-          const status = !plugin.available
-            ? "不可用"
-            : plugin.enabled
-              ? "已启用"
-              : "未启用";
-          return `${index + 1}. ${plugin.displayName} · ${plugin.id} · ${status}${plugin.description ? ` · ${plugin.description}` : ""}`;
-        }),
-        "",
-        "详情：/plugin <名称、完整 ID 或序号>",
-        "调用：/plugin <名称、完整 ID 或序号> <任务>",
-      ].join("\n"));
+  if (totalPluginCount === 0 && loadErrorCount === 0) {
+    return "当前没有已安装的 Plugin。";
+  }
+  const commandSuffix = searchTerm ? ` search ${searchTerm}` : "";
+  if (page > pageCount) {
+    return toStructuredMarkdownList([
+      `已安装 Plugin（开发中${searchTerm ? `，匹配 ${matchedPluginCount}` : ""}）：`,
+      `第 ${page} 页不存在，共 ${pageCount} 页`,
+      `返回第一页：/plugin list 1${commandSuffix}`,
+    ].join("\n"));
+  }
+  if (plugins.length === 0 && searchTerm) {
+    return toStructuredMarkdownList([
+      "已安装 Plugin（开发中，匹配 0 · 第 1/1 页）：",
+      `没有匹配“${searchTerm}”的 Plugin。`,
+      "重新搜索：/plugin list search <关键词>",
+    ].join("\n"));
+  }
+  return toStructuredMarkdownList([
+    `已安装 Plugin（开发中，${searchTerm ? `匹配 ${matchedPluginCount}` : `共 ${totalPluginCount}`} · 第 ${page}/${pageCount} 页）：`,
+    ...loadErrorNotice,
+    ...plugins.map((plugin, index) => {
+      const status = !plugin.available
+        ? "不可用"
+        : plugin.enabled
+          ? "已启用"
+          : "未启用";
+      return `${selectors[index]}. ${plugin.displayName} · ${plugin.id} · ${status}${plugin.description ? ` · ${plugin.description}` : ""}`;
+    }),
+    "",
+    ...(page > 1 ? [`上一页：/plugin list ${page - 1}${commandSuffix}`] : []),
+    ...(page < pageCount ? [`下一页：/plugin list ${page + 1}${commandSuffix}`] : []),
+    "健康检查：/plugin health",
+    "搜索：/plugin list search <关键词>",
+    "详情：/plugin <名称、完整 ID 或序号>",
+    "调用：/plugin <名称、完整 ID 或序号> <任务>",
+  ].join("\n"));
+}
+
+export function formatConversationPluginHealth(
+  result: Extract<ConversationCommandResult, { kind: "plugin-health" }>,
+): string {
+  const { report } = result;
+  const visibleIssues = report.issues.slice(0, 8);
+  const lines = [
+    "Plugin 健康（开发中）",
+    `已安装：${report.installedCount}`,
+    `已启用：${report.enabledCount}`,
+    `可调用：${report.callableCount}`,
+    ...(report.marketplaceLoadErrorCount > 0
+      ? [`提示：${report.marketplaceLoadErrorCount} 个 Marketplace 加载失败，结果可能不完整。`]
+      : []),
+    ...(visibleIssues.length > 0 ? ["", "需要处理："] : []),
+    ...visibleIssues.map((issue) =>
+      `${issue.plugin} · ${pluginHealthIssueLabel(issue.type, issue.reason)} · 详情：/plugin ${issue.selector}`
+    ),
+    ...(report.issues.length > visibleIssues.length
+      ? [`其余 ${report.issues.length - visibleIssues.length} 项已省略，请使用 /plugin 分页查看。`]
+      : []),
+    ...(report.issues.length === 0 && report.marketplaceLoadErrorCount === 0
+      ? ["", "没有需要处理的问题。"]
+      : []),
+  ];
+  return toStructuredMarkdownList(lines.join("\n"));
+}
+
+function pluginHealthIssueLabel(
+  type: Extract<ConversationCommandResult, { kind: "plugin-health" }>["report"]["issues"][number]["type"],
+  reason: Extract<ConversationCommandResult, { kind: "plugin-health" }>["report"]["issues"][number]["reason"],
+): string {
+  if (type === "notEnabled") return "未启用";
+  return reason ? pluginDisabledReasonLabel(reason) : "上游标记不可用";
 }
 
 export function formatConversationPluginDetail(

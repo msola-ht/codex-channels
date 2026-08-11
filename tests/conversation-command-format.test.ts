@@ -14,6 +14,7 @@ import {
   formatConversationMcpResource,
   formatConversationModels,
   formatConversationPluginDetail,
+  formatConversationPluginHealth,
   formatConversationPlugins,
   formatConversationStatus,
   formatConversationUsage,
@@ -87,7 +88,8 @@ describe("provider-aware conversation command formatting", () => {
 
   it("renders the experimental Plugin list and invocation outcomes", () => {
     const help = conversationCommandHelpLines.join("\n");
-    expect(help).toContain("/plugin [<名称、完整 ID 或序号> [任务]]");
+    expect(help).toContain("/plugin · /plugin health");
+    expect(help).toContain("/plugin list [页码] [search <关键词>]");
     expect(help).not.toContain("/plugins");
     const rendered = formatConversationPlugins({
       kind: "plugins",
@@ -110,10 +112,16 @@ describe("provider-aware conversation command formatting", () => {
         eligiblePlanTypes: [],
         disabledReason: null,
       }],
+      selectors: ["1"],
       loadErrorCount: 1,
+      totalPluginCount: 1,
+      matchedPluginCount: 1,
+      page: 1,
+      pageCount: 1,
+      searchTerm: null,
     });
 
-    expect(rendered).toContain("已安装 Plugin（开发中，1）");
+    expect(rendered).toContain("已安装 Plugin（开发中，共 1 · 第 1/1 页）");
     expect(rendered).toContain("1. GitHub · github@local");
     expect(rendered).toContain("1 个 Plugin Marketplace 加载失败");
     expect(rendered).toContain("详情：/plugin <名称、完整 ID 或序号>");
@@ -126,10 +134,64 @@ describe("provider-aware conversation command formatting", () => {
         available: false,
         disabledReason: "plan_not_eligible",
       }],
+      selectors: ["1"],
       loadErrorCount: 0,
+      totalPluginCount: 1,
+      matchedPluginCount: 1,
+      page: 1,
+      pageCount: 1,
+      searchTerm: null,
     });
     expect(unavailableList).toContain("不可用");
     expect(unavailableList).not.toContain("管理员禁用");
+    const searchedPage = formatConversationPlugins({
+      kind: "plugins",
+      plugins: [detailPluginFixture],
+      selectors: ["9"],
+      loadErrorCount: 0,
+      totalPluginCount: 12,
+      matchedPluginCount: 9,
+      page: 2,
+      pageCount: 2,
+      searchTerm: "github",
+    });
+    expect(searchedPage).toContain("匹配 9 · 第 2/2 页");
+    expect(searchedPage).toContain("9. GitHub");
+    expect(searchedPage).toContain("上一页：/plugin list 1 search github");
+    const missingPage = formatConversationPlugins({
+      kind: "plugins",
+      plugins: [],
+      selectors: [],
+      loadErrorCount: 0,
+      totalPluginCount: 12,
+      matchedPluginCount: 9,
+      page: 3,
+      pageCount: 2,
+      searchTerm: "github",
+    });
+    expect(missingPage).toContain("第 3 页不存在，共 2 页");
+    expect(missingPage).toContain("/plugin list 1 search github");
+    const health = formatConversationPluginHealth({
+      kind: "plugin-health",
+      report: {
+        installedCount: 12,
+        enabledCount: 10,
+        callableCount: 2,
+        marketplaceLoadErrorCount: 1,
+        issues: Array.from({ length: 10 }, (_, index) => ({
+          type: index === 0 ? "notEnabled" as const : "unavailable" as const,
+          plugin: `Plugin ${index + 1}`,
+          selector: String(index + 1),
+          reason: index === 0 ? null : "plan_not_eligible" as const,
+        })),
+      },
+    });
+    expect(health).toContain("Plugin 健康（开发中）");
+    expect(health).toContain("可调用：2");
+    expect(health).toContain("Plugin 1 · 未启用 · 详情：/plugin 1");
+    expect(health).toContain("Plugin 8");
+    expect(health).not.toContain("Plugin 9 ·");
+    expect(health).toContain("其余 2 项已省略");
     const detail = formatConversationPluginDetail({
       kind: "plugin-detail",
       plugin: {

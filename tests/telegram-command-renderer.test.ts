@@ -220,7 +220,13 @@ describe("Telegram command renderer", () => {
         eligiblePlanTypes: [],
         disabledReason: null,
       }],
+      selectors: ["1"],
       loadErrorCount: 0,
+      totalPluginCount: 1,
+      matchedPluginCount: 1,
+      page: 1,
+      pageCount: 1,
+      searchTerm: null,
     });
     await renderTelegramCommandResult(context, {
       kind: "mcp-resource",

@@ -32,10 +32,12 @@ export {
   conversationCommandNames,
   isConversationCommandName,
   mcpCommandUsageText,
+  pluginCommandUsageText,
   type ConversationCommandName,
   type ConversationCommandOutcome,
   type ConversationCommandResult,
   type McpDetailView,
+  type PluginListView,
 } from "./conversation-command-service.js";
 export {
   ConversationService,
@@ -99,6 +101,7 @@ export {
   type InstalledPlugin,
   type InstalledPluginCatalog,
   type InvocablePlugin,
+  type PluginHealthReport,
   type PluginQueryPort,
 } from "./plugin-port.js";
 export {
