@@ -21,6 +21,7 @@ import {
   formatConversationMcpLogin,
   formatConversationMcpReload,
   formatConversationMcpResource,
+  formatConversationPluginDetail,
   formatConversationPlugins,
   formatConversationModels,
   formatConversationPermissions,
@@ -117,6 +118,9 @@ export async function renderTelegramCommandResult(
       return;
     case "plugins":
       await replyTelegramPanel(context, formatConversationPlugins(result));
+      return;
+    case "plugin-detail":
+      await replyTelegramPanel(context, formatConversationPluginDetail(result));
       return;
     case "usage":
       await replyTelegramPanel(context, formatConversationUsage(result));

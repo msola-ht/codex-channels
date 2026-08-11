@@ -456,6 +456,11 @@ describe("Feishu Surface", () => {
         description: "GitHub integration",
         enabled: true,
         available: true,
+        version: null,
+        localVersion: null,
+        source: "local" as const,
+        installedAt: null,
+        disabledReason: null,
       }, {
         id: "disabled@local",
         name: "disabled",
@@ -464,6 +469,11 @@ describe("Feishu Surface", () => {
         description: null,
         enabled: false,
         available: true,
+        version: null,
+        localVersion: null,
+        source: "local" as const,
+        installedAt: null,
+        disabledReason: null,
       }],
       loadErrorCount: 0,
     }));

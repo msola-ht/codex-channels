@@ -24,6 +24,7 @@ import {
   formatConversationMcpLogin,
   formatConversationMcpReload,
   formatConversationMcpResource,
+  formatConversationPluginDetail,
   formatConversationPlugins,
   formatConversationModels,
   formatConversationPermissions,
@@ -169,6 +170,8 @@ export function renderWeixinCommandResult(
       return formatConversationMcpResource(result);
     case "plugins":
       return formatConversationPlugins(result);
+    case "plugin-detail":
+      return formatConversationPluginDetail(result);
     case "usage":
       return formatConversationUsage(result);
     case "metrics":

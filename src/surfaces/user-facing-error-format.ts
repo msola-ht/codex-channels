@@ -150,7 +150,7 @@ export function formatSurfaceUserFacingError(
     case "mcp.resource.usage":
       return "需要提供有效的 MCP Resource URI";
     case "plugin.usage":
-      return "用法：/plugin <名称、完整 ID 或序号> <任务>";
+      return "用法：/plugin [<名称、完整 ID 或序号> [任务]]";
     case "plugin.not-found":
       return "指定的 Plugin 不存在";
     case "plugin.ambiguous":

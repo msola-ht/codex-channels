@@ -59,6 +59,7 @@ function parseInstalledPlugins(response: PluginInstalledResponse): ParsedPlugin[
       if (plugin.availability !== "AVAILABLE" && plugin.availability !== "DISABLED_BY_ADMIN") {
         throw new Error("Codex 响应缺少有效 plugin availability");
       }
+      const disabledReason = optionalDisabledReason(plugin.disabledReason);
       const displayName = optionalDisplayText(
         plugin.interface?.displayName,
         "plugin display name",
@@ -75,6 +76,11 @@ function parseInstalledPlugins(response: PluginInstalledResponse): ParsedPlugin[
         description,
         enabled: plugin.enabled,
         available: plugin.availability === "AVAILABLE",
+        version: optionalDisplayText(plugin.version, "plugin version"),
+        localVersion: optionalDisplayText(plugin.localVersion, "plugin local version"),
+        source: pluginSourceKind(plugin.source),
+        installedAt: optionalUnixTimestamp(plugin.installedAt),
+        disabledReason,
       };
       return [{
         summary,
@@ -91,6 +97,40 @@ function parseInstalledPlugins(response: PluginInstalledResponse): ParsedPlugin[
       }];
     });
   });
+}
+
+function pluginSourceKind(value: unknown): InstalledPlugin["source"] {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Codex 响应缺少有效 plugin source");
+  }
+  const type = (value as { type?: unknown }).type;
+  if (type !== "local" && type !== "git" && type !== "npm" && type !== "remote") {
+    throw new Error("Codex 响应缺少有效 plugin source");
+  }
+  return type;
+}
+
+function optionalUnixTimestamp(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new Error("Codex 响应缺少有效 plugin installedAt");
+  }
+  return value as number;
+}
+
+function optionalDisabledReason(
+  value: unknown,
+): InstalledPlugin["disabledReason"] {
+  if (value === null || value === undefined) return null;
+  if (
+    value !== "disabled_by_admin"
+    && value !== "plan_not_eligible"
+    && value !== "required_app_unavailable"
+    && value !== "unknown"
+  ) {
+    throw new Error("Codex 响应缺少有效 plugin disabledReason");
+  }
+  return value;
 }
 
 function requiredIdentifier(value: unknown, field: string): string {

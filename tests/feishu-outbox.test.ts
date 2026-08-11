@@ -1439,8 +1439,8 @@ describe("Feishu outbox", () => {
     expect(markdownCards).toEqual([
       "**工具查询 · 已完成**\n"
       + "- MCP 工具：3 次\n"
-      + "  - `codex_apps.github.fetch_pr`：2 次\n"
-      + "  - `codex_apps.github.update_pull_request`：1 次\n\n"
+      + "  - `codex_apps.github.fetch_pr · 读写属性未知`：2 次\n"
+      + "  - `codex_apps.github.update_pull_request · 读写属性未知`：1 次\n\n"
       + "---\n**耗时：** 375毫秒",
       "## 本次运行 · 已完成",
     ]);
@@ -1473,7 +1473,7 @@ describe("Feishu outbox", () => {
     await outbox.close();
 
     expect(markdownCards[0]).toContain("- MCP 工具：10 次");
-    expect(markdownCards[0]).toContain("`codex_apps.github.tool_8`：1 次");
+    expect(markdownCards[0]).toContain("`codex_apps.github.tool_8 · 读写属性未知`：1 次");
     expect(markdownCards[0]).toContain("其余 2 项明细已省略");
     expect(markdownCards[0]).not.toContain("codex_apps.github.tool_9");
   });

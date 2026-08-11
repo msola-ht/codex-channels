@@ -152,14 +152,16 @@ plugin_api = true
 ```
 
 - `/plugin`：列出当前 Workspace 已安装的 Plugin 及启用状态；Marketplace 部分加载失败时明确提示
-  列表可能不完整，不展示上游路径或原始错误。
+  列表可能不完整，不展示上游路径或原始错误。`/plugin <名称、完整 ID 或序号>` 查看来源、远端与
+  本地版本、安装时间、可用状态及上游提供的不可用原因。
 - `/plugin <名称、完整 ID 或序号> <任务>`：仅在 OpenAI Thread 中使用官方 `mention` 输入调用
   已启用且可用的 Plugin；飞书命令中心支持先选择 Plugin、再通过一次性表单输入任务。新建 Turn
   只显示一条带名称的统一确认，例如“已使用 GitHub Plugin 开始处理”，不再重复发送 Plugin
   启动结果；追加到活动 Turn 时仍明确提示。
 - 不开放 Plugin 搜索、市场、安装、卸载或分享；`codexc doctor` 会显示该开发中开关的状态。
 - `/mcp`：列出当前 Thread 的 MCP Server；`/mcp <名称或序号>` 查看工具、资源与模板详情；
-  上游多行长描述会先归一化并有界展示。
+  上游多行长描述会先归一化并有界展示。工具同时显示上游声明的只读、可能写入或读写属性未知；
+  该属性只作能力提示，不替代 Turn 的审批策略或执行结果。
 - `/mcp health`：汇总当前 Thread 所属 App Server 的 MCP Server、工具、资源与资源模板数量，只列出
   需要登录的 Server 和认证未知、未公开能力等提示；状态读取失败时明确报错，不把查询成功等同于
   对每个远端 MCP Server 做网络探测。处理命令使用当前列表序号，兼容含空格的 Server 名称；需处理项
@@ -376,7 +378,7 @@ deepseek）的全部请求行并自动重启 Gateway 与中心服务，适合额
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
 - 状态：`/diff`、`/usage`、`/metrics [session|global|providers|models|errors] [today|yesterday|this-week|last-week|this-month|last-month|24h|7d|30d|90d|365d|all]`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/agents [角色名称或序号 任务]`、`/skill [名称或序号 任务]`、
-  `/plugin [<名称、完整 ID 或序号> <任务>]`、`/mcp [名称或序号]`、
+  `/plugin [<名称、完整 ID 或序号> [任务]]`、`/mcp [名称或序号]`、
   `/mcp health`、`/mcp reload`、
   `/mcp <名称或序号> <tools|resources|templates> [页码] [search <关键词>]`、
   `/mcp login <名称或序号>`、`/mcp resource <名称或序号> <URI>`、`/rules`

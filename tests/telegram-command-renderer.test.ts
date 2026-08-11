@@ -209,6 +209,11 @@ describe("Telegram command renderer", () => {
         description: null,
         enabled: true,
         available: true,
+        version: null,
+        localVersion: null,
+        source: "local",
+        installedAt: null,
+        disabledReason: null,
       }],
       loadErrorCount: 0,
     });

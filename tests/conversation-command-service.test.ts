@@ -548,8 +548,10 @@ describe("ConversationCommandService", () => {
       steered: false,
       pluginName: "GitHub",
     }));
+    const pluginDetail = vi.fn(async () => ({ id: "github@local" }));
     const commands = new ConversationCommandService({
       listPlugins,
+      pluginDetail,
       invokePlugin,
     } as unknown as ConversationUseCases);
 
@@ -558,6 +560,11 @@ describe("ConversationCommandService", () => {
       plugins: [{ id: "github@local" }],
       loadErrorCount: 0,
     });
+    await expect(commands.execute(target, "plugin", "github@local"))
+      .resolves.toEqual({
+        kind: "plugin-detail",
+        plugin: { id: "github@local" },
+      });
     await expect(commands.execute(target, "plugin", "github@local 检查 PR"))
       .resolves.toEqual({
         kind: "outcome",
@@ -569,8 +576,6 @@ describe("ConversationCommandService", () => {
         },
       });
     expect(invokePlugin).toHaveBeenCalledWith(target, "github@local", "检查 PR");
-    await expect(commands.execute(target, "plugin", "github@local"))
-      .rejects.toMatchObject({ code: "plugin.usage" });
   });
 
   it("lists and invokes agent roles through the shared command boundary", async () => {

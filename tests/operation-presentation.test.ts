@@ -52,6 +52,15 @@ describe("shared operation presentation", () => {
       exitCode: 0,
     })).toEqual(["exit 0"]);
     expect(operationMetadata(operation("command"))).toEqual([]);
+    expect(operationMetadata({
+      ...operation("mcpTool"),
+      readOnlyHint: true,
+    })).toEqual(["上游标记只读"]);
+    expect(operationMetadata({
+      ...operation("mcpTool"),
+      readOnlyHint: false,
+    })).toEqual(["可能写入"]);
+    expect(operationMetadata(operation("mcpTool"))).toEqual(["读写属性未知"]);
   });
 
   it("redacts and bounds compact details by Unicode characters", () => {

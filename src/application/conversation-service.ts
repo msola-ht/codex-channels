@@ -241,6 +241,7 @@ export interface ConversationUseCases {
     uri: string,
   ): Promise<McpResourceReadResult>;
   listPlugins(target: ConversationTarget): Promise<InstalledPluginCatalog>;
+  pluginDetail(target: ConversationTarget, selector: string): Promise<InstalledPlugin>;
   accountUsage(): Promise<AccountUsage>;
   accountRateLimits(): Promise<AccountRateLimits>;
   providerAccountUsage(target: ConversationTarget): Promise<ProviderAccountUsage>;
@@ -1144,6 +1145,14 @@ export class ConversationService implements ConversationUseCases {
   listPlugins(target: ConversationTarget): Promise<InstalledPluginCatalog> {
     this.requirePluginApiEnabled();
     return this.queries.listPlugins(this.router.workspace(target).cwd);
+  }
+
+  pluginDetail(
+    target: ConversationTarget,
+    selector: string,
+  ): Promise<InstalledPlugin> {
+    this.requirePluginApiEnabled();
+    return this.resolvePlugin(this.router.workspace(target).cwd, selector);
   }
 
   private async resolvePlugin(

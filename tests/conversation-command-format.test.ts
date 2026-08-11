@@ -13,6 +13,7 @@ import {
   formatConversationMcpReload,
   formatConversationMcpResource,
   formatConversationModels,
+  formatConversationPluginDetail,
   formatConversationPlugins,
   formatConversationStatus,
   formatConversationUsage,
@@ -86,7 +87,7 @@ describe("provider-aware conversation command formatting", () => {
 
   it("renders the experimental Plugin list and invocation outcomes", () => {
     const help = conversationCommandHelpLines.join("\n");
-    expect(help).toContain("/plugin [<名称、完整 ID 或序号> <任务>]");
+    expect(help).toContain("/plugin [<名称、完整 ID 或序号> [任务]]");
     expect(help).not.toContain("/plugins");
     const rendered = formatConversationPlugins({
       kind: "plugins",
@@ -98,6 +99,11 @@ describe("provider-aware conversation command formatting", () => {
         description: "GitHub development tools",
         enabled: true,
         available: true,
+        version: "0.1.8",
+        localVersion: "0.1.8",
+        source: "remote",
+        installedAt: 1_786_294_800,
+        disabledReason: null,
       }],
       loadErrorCount: 1,
     });
@@ -105,7 +111,54 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("已安装 Plugin（开发中，1）");
     expect(rendered).toContain("1. GitHub · github@local");
     expect(rendered).toContain("1 个 Plugin Marketplace 加载失败");
-    expect(rendered).toContain("/plugin <名称、完整 ID 或序号> <任务>");
+    expect(rendered).toContain("详情：/plugin <名称、完整 ID 或序号>");
+    expect(rendered).toContain("调用：/plugin <名称、完整 ID 或序号> <任务>");
+    const unavailableList = formatConversationPlugins({
+      kind: "plugins",
+      plugins: [{
+        ...detailPluginFixture,
+        enabled: false,
+        available: false,
+        disabledReason: "plan_not_eligible",
+      }],
+      loadErrorCount: 0,
+    });
+    expect(unavailableList).toContain("不可用");
+    expect(unavailableList).not.toContain("管理员禁用");
+    const detail = formatConversationPluginDetail({
+      kind: "plugin-detail",
+      plugin: {
+        id: "github@openai-curated-remote",
+        name: "github",
+        displayName: "GitHub",
+        marketplaceName: "openai-curated-remote",
+        description: "GitHub development tools",
+        enabled: true,
+        available: true,
+        version: "0.1.8",
+        localVersion: "0.1.8-2841cf9749ae",
+        source: "remote",
+        installedAt: 1_786_294_800,
+        disabledReason: null,
+      },
+    });
+    expect(detail).toContain("Plugin：GitHub");
+    expect(detail).toContain("来源：远端");
+    expect(detail).toContain("远端版本：0.1.8");
+    expect(detail).toContain("本地版本：0.1.8-2841cf9749ae");
+    expect(detail).toContain("调用：/plugin github@openai-curated-remote <任务>");
+    const unavailable = formatConversationPluginDetail({
+      kind: "plugin-detail",
+      plugin: {
+        ...detailPluginFixture,
+        enabled: false,
+        available: false,
+        disabledReason: "plan_not_eligible",
+      },
+    });
+    expect(unavailable).toContain("状态：不可用");
+    expect(unavailable).toContain("不可用原因：当前套餐不可用");
+    expect(unavailable).toContain("当前 Plugin 不可调用");
     const outcome = formatConversationCommandOutcome({
       type: "plugin.started",
       pluginName: "GitHub",
@@ -166,7 +219,7 @@ describe("provider-aware conversation command formatting", () => {
         serverTitle: "Project Tools",
         serverVersion: "1.0.0",
         serverDescription: null,
-        tools: [{ name: "search", title: "Search", description: null }],
+        tools: [{ name: "search", title: "Search", description: null, access: "readOnly" }],
         resources: [{
           uri: "project://readme",
           name: "readme",
@@ -179,6 +232,8 @@ describe("provider-aware conversation command formatting", () => {
     });
     expect(detail).toContain("MCP Server：Project Tools");
     expect(detail).toContain("Search · search");
+    expect(detail).toContain("上游标记只读");
+    expect(detail).toContain("实际调用仍按审批策略处理");
     expect(detail).toContain("project://readme");
     expect(detail).toContain("OAuth：/mcp login 1");
     expect(detail).toContain("浏览工具：/mcp 1 tools");
@@ -217,6 +272,7 @@ describe("provider-aware conversation command formatting", () => {
           name: `tool-${index + 1}`,
           title: `Tool ${index + 1}`,
           description: "d".repeat(2_000),
+          access: "unknown" as const,
         })),
         resources: Array.from({ length: 20 }, (_, index) => ({
           uri: index === 0
@@ -340,6 +396,7 @@ describe("provider-aware conversation command formatting", () => {
           name: `github-tool-${index + 1}`,
           title: `GitHub Tool ${index + 1}`,
           description: "GitHub connector tool",
+          access: index % 2 === 0 ? "readOnly" as const : "writeCapable" as const,
         })),
         resources: [{
           uri: "plugin://github",
@@ -375,7 +432,7 @@ describe("provider-aware conversation command formatting", () => {
         serverTitle: null,
         serverVersion: "0.1.0",
         serverDescription: null,
-        tools: [{ name: "github", title: null, description: null }],
+        tools: [{ name: "github", title: null, description: null, access: "unknown" }],
         resources: [],
         resourceTemplates: [],
       },
@@ -1091,6 +1148,21 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).not.toContain("**");
   });
 });
+
+const detailPluginFixture = {
+  id: "github@openai-curated-remote",
+  name: "github",
+  displayName: "GitHub",
+  marketplaceName: "openai-curated-remote",
+  description: "GitHub development tools",
+  enabled: true,
+  available: true,
+  version: "0.1.8",
+  localVersion: "0.1.8-2841cf9749ae",
+  source: "remote" as const,
+  installedAt: 1_786_294_800,
+  disabledReason: null,
+};
 
 function breakdown(totalTokens: number) {
   return {

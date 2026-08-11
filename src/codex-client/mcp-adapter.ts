@@ -75,6 +75,7 @@ export function toMcpServerDetailPage(
             name,
             title: optionalText(tool.title, "MCP tool title"),
             description: optionalDescription(tool.description, "MCP tool description"),
+            access: mcpToolAccess(tool.annotations),
           }];
         }),
         resources: server.resources.map((resource) => ({
@@ -102,6 +103,19 @@ export function toMcpServerDetailPage(
     }),
     nextCursor: response.nextCursor,
   };
+}
+
+function mcpToolAccess(value: unknown): McpServerDetail["tools"][number]["access"] {
+  if (value === null || value === undefined) return "unknown";
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Codex 响应缺少有效 MCP tool annotations");
+  }
+  const readOnlyHint = (value as { readOnlyHint?: unknown }).readOnlyHint;
+  if (readOnlyHint === null || readOnlyHint === undefined) return "unknown";
+  if (typeof readOnlyHint !== "boolean") {
+    throw new Error("Codex 响应缺少有效 MCP tool readOnlyHint");
+  }
+  return readOnlyHint ? "readOnly" : "writeCapable";
 }
 
 export function toMcpOAuthLogin(

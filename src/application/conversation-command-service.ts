@@ -105,6 +105,10 @@ export type ConversationCommandResult =
       plugins: Awaited<ReturnType<ConversationUseCases["listPlugins"]>>["plugins"];
       loadErrorCount: number;
     }
+  | {
+      kind: "plugin-detail";
+      plugin: Awaited<ReturnType<ConversationUseCases["pluginDetail"]>>;
+    }
   | { kind: "usage"; result: Awaited<ReturnType<ConversationUseCases["providerAccountUsage"]>> }
   | { kind: "metrics"; summary: ReturnType<ConversationUseCases["requestMetrics"]> }
   | { kind: "limits"; result: Awaited<ReturnType<ConversationUseCases["providerAccountLimits"]>> }
@@ -475,6 +479,12 @@ export class ConversationCommandService {
             loadErrorCount: catalog.loadErrorCount,
           };
         }
+        if (!/\s/u.test(argumentsText.trim())) {
+          return {
+            kind: "plugin-detail",
+            plugin: await this.conversations.pluginDetail(target, argumentsText.trim()),
+          };
+        }
         const invocation = parsePluginInvocation(argumentsText);
         const submission = await this.conversations.invokePlugin(
           target,
@@ -647,7 +657,7 @@ function parsePluginInvocation(input: string): {
   if (!match?.[1] || !match[2]?.trim()) {
     throw new UserFacingError(
       "plugin.usage",
-      "用法：/plugin <名称、完整 ID 或序号> <任务>",
+      "用法：/plugin [<名称、完整 ID 或序号> [任务]]",
     );
   }
   return {

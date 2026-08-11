@@ -1167,7 +1167,7 @@ describe("ConversationService model selection", () => {
       serverTitle: "Project Tools",
       serverVersion: "1.0.0",
       serverDescription: null,
-      tools: [{ name: "search", title: null, description: null }],
+      tools: [{ name: "search", title: null, description: null, access: "readOnly" as const }],
       resources: [{
         uri: "project://readme",
         name: "readme",
@@ -1252,7 +1252,7 @@ describe("ConversationService model selection", () => {
       serverTitle: null,
       serverVersion: null,
       serverDescription: null,
-      tools: [{ name: "search", title: null, description: null }],
+      tools: [{ name: "search", title: null, description: null, access: "unknown" as const }],
       resources: [],
       resourceTemplates: [],
     }, {
@@ -1356,6 +1356,11 @@ describe("ConversationService model selection", () => {
         description: "GitHub development tools",
         enabled: true,
         available: true,
+        version: "0.1.8",
+        localVersion: "0.1.8",
+        source: "local" as const,
+        installedAt: null,
+        disabledReason: null,
       }],
       loadErrorCount: 0,
     }));
@@ -1382,6 +1387,10 @@ describe("ConversationService model selection", () => {
       plugins: [expect.objectContaining({ id: "github@local" })],
       loadErrorCount: 0,
     });
+    await expect(service.pluginDetail(target, "1")).resolves.toMatchObject({
+      id: "github@local",
+      displayName: "GitHub",
+    });
     expect(listPlugins).toHaveBeenCalledWith(main.cwd);
   });
 
@@ -1396,6 +1405,11 @@ describe("ConversationService model selection", () => {
         description: "GitHub development tools",
         enabled: true,
         available: true,
+        version: null,
+        localVersion: null,
+        source: "local" as const,
+        installedAt: null,
+        disabledReason: null,
       }],
       loadErrorCount: 0,
     }));
@@ -1507,6 +1521,11 @@ describe("ConversationService model selection", () => {
             description: null,
             enabled: true,
             available: true,
+            version: null,
+            localVersion: null,
+            source: "local" as const,
+            installedAt: null,
+            disabledReason: null,
           }],
           loadErrorCount: 0,
         }),

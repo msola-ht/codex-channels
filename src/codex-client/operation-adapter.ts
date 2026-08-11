@@ -52,6 +52,9 @@ export function toOperationUpdate(
         ...common,
         kind: "mcpTool",
         ...(tool ? { detail: server ? `${server}.${tool}` : tool } : {}),
+        readOnlyHint: typeof item.readOnlyHint === "boolean"
+          ? item.readOnlyHint
+          : null,
       };
     }
     case "dynamicToolCall": {

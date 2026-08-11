@@ -124,9 +124,14 @@ function appServerPlugin(
   return {
     id: "github@local",
     name: "github",
+    version: "0.1.8",
+    localVersion: "0.1.8",
+    source: { type: "local", path: "/private/plugins/github" },
     installed: true,
+    installedAt: 1_786_294_800,
     enabled: true,
     availability: "AVAILABLE",
+    disabledReason: null,
     interface: {
       displayName: "GitHub",
       shortDescription: "GitHub development tools",
@@ -1105,6 +1110,11 @@ describe("JsonRpcClient", () => {
         description: "GitHub development tools",
         enabled: true,
         available: true,
+        version: "0.1.8",
+        localVersion: "0.1.8",
+        source: "local",
+        installedAt: 1_786_294_800,
+        disabledReason: null,
       },
       {
         id: "disabled@local",
@@ -1114,6 +1124,11 @@ describe("JsonRpcClient", () => {
         description: null,
         enabled: false,
         available: true,
+        version: "0.1.8",
+        localVersion: "0.1.8",
+        source: "local",
+        installedAt: 1_786_294_800,
+        disabledReason: null,
       },
       {
         id: "admin-blocked@local",
@@ -1123,6 +1138,11 @@ describe("JsonRpcClient", () => {
         description: "GitHub development tools",
         enabled: true,
         available: false,
+        version: "0.1.8",
+        localVersion: "0.1.8",
+        source: "local",
+        installedAt: 1_786_294_800,
+        disabledReason: null,
       }],
       loadErrorCount: 0,
     });
@@ -1287,6 +1307,7 @@ describe("JsonRpcClient", () => {
             name: "search",
             title: "Search",
             description: "Search project data",
+            annotations: { readOnlyHint: true },
           },
         },
         resources: [{
@@ -1332,7 +1353,12 @@ describe("JsonRpcClient", () => {
       serverTitle: "Project Tools",
       serverVersion: "1.2.3",
       serverDescription: "Project MCP server",
-      tools: [{ name: "search", title: "Search", description: "Search project data" }],
+      tools: [{
+        name: "search",
+        title: "Search",
+        description: "Search project data",
+        access: "readOnly",
+      }],
       resources: [{
         uri: "project://readme",
         name: "readme",

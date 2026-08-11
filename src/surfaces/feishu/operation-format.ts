@@ -2,6 +2,7 @@ import type { OperationUpdate } from "../../conversation-core/index.js";
 import { formatElapsedDuration } from "../elapsed-duration.js";
 import {
   compactOperationDetail,
+  mcpToolCapabilityLabel,
   operationStatus,
   operationTitle,
   redactOperationDetail,
@@ -16,11 +17,12 @@ export function formatFeishuOperation(
   record: OperationUpdate,
   display: Exclude<OperationUpdateDisplay, "hidden"> = "full",
 ): string {
-  const exitCode = record.exitCode === undefined
-    ? ""
-    : ` · exit ${record.exitCode}`;
+  const metadata = [
+    record.exitCode === undefined ? null : `exit ${record.exitCode}`,
+    mcpToolCapabilityLabel(record),
+  ].filter((value): value is string => value !== null);
   const lines = [
-    `**${operationTitle(record)} · ${operationStatus(record.status)}**${exitCode}`,
+    `**${operationTitle(record)} · ${operationStatus(record.status)}**${metadata.length > 0 ? ` · ${metadata.join(" · ")}` : ""}`,
   ];
   if (record.detail) {
     if (display === "compact") {

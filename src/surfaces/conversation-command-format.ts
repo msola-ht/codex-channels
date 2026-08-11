@@ -39,6 +39,8 @@ const maximumMcpHealthFindings = 8;
 const maximumMcpDetailSectionCharacters = 5_000;
 const maximumMcpDescriptionCharacters = 240;
 const maximumMcpOutputCharacters = 20_000;
+const mcpToolAccessNotice =
+  "工具读写属性来自 MCP 上游声明，仅供提示；实际调用仍按审批策略处理。";
 
 export const conversationCommandDescriptions = {
   resume: "列出或恢复 Codex 会话",
@@ -63,7 +65,7 @@ export const conversationCommandDescriptions = {
   fast: "查看或切换 Fast 模式",
   skill: "查看或调用 Skill",
   mcp: "检查或管理 MCP、登录 OAuth、浏览或读取资源",
-  plugin: "列出或调用 Plugin（开发中）",
+  plugin: "列出、查看或调用 Plugin（开发中）",
   usage: "查看账号用量",
   metrics: "查看会话、聚合或异常请求指标",
   limits: "查看套餐与额度",
@@ -108,7 +110,7 @@ export const conversationCommandHelpSections = [
       "/mcp <名称或序号> <tools|resources|templates> [页码] [search <关键词>]",
       "/mcp login <名称或序号>",
       "/mcp resource <名称或序号> <URI>",
-      "/plugin [<名称、完整 ID 或序号> <任务>]",
+      "/plugin [<名称、完整 ID 或序号> [任务]]",
       "/usage · /limits · /permissions",
       "/metrics session",
       "/metrics <global|providers|models|errors> [24h|7d|30d]",
@@ -513,8 +515,9 @@ export function formatConversationMcpDetail(
     ? formatSelectedMcpDetailSection(server, result.view, selector)
     : [
         ...formatMcpDetailEntries("工具", server.tools, (tool) =>
-          `- ${tool.title ?? tool.name} · ${tool.name}${tool.description ? ` · ${formatMcpDescription(tool.description)}` : ""}`
+          formatMcpToolLine(tool)
         ),
+        mcpToolAccessNotice,
         ...formatMcpDetailEntries("资源", server.resources, (resource) =>
           `- ${resource.title ?? resource.name} · ${resource.uri}${resource.mimeType ? ` · ${formatMcpDescription(resource.mimeType)}` : ""}`
         ),
@@ -548,15 +551,17 @@ function formatSelectedMcpDetailSection(
   selector: string,
 ): string[] {
   if (view.section === "tools") {
-    return formatMcpDetailPage(
-      "工具",
-      server.tools,
-      view,
-      selector,
-      (tool) => [tool.name, tool.title, tool.description],
-      (tool) =>
-        `- ${tool.title ?? tool.name} · ${tool.name}${tool.description ? ` · ${formatMcpDescription(tool.description)}` : ""}`,
-    );
+    return [
+      ...formatMcpDetailPage(
+        "工具",
+        server.tools,
+        view,
+        selector,
+        (tool) => [tool.name, tool.title, tool.description],
+        formatMcpToolLine,
+      ),
+      mcpToolAccessNotice,
+    ];
   }
   if (view.section === "resources") {
     return formatMcpDetailPage(
@@ -589,6 +594,17 @@ function formatSelectedMcpDetailSection(
     ],
     (template) => `- ${template.title ?? template.name} · ${template.uriTemplate}`,
   );
+}
+
+function formatMcpToolLine(
+  tool: Extract<ConversationCommandResult, { kind: "mcp-detail" }>["server"]["tools"][number],
+): string {
+  const access = ({
+    readOnly: "上游标记只读",
+    writeCapable: "可能写入",
+    unknown: "读写属性未知",
+  } as const)[tool.access];
+  return `- ${tool.title ?? tool.name} · ${tool.name} · ${access}${tool.description ? ` · ${formatMcpDescription(tool.description)}` : ""}`;
 }
 
 function formatMcpDetailPage<T>(
@@ -766,15 +782,80 @@ export function formatConversationPlugins(
         ...loadErrorNotice,
         ...plugins.map((plugin, index) => {
           const status = !plugin.available
-            ? "管理员禁用"
+            ? "不可用"
             : plugin.enabled
               ? "已启用"
               : "未启用";
           return `${index + 1}. ${plugin.displayName} · ${plugin.id} · ${status}${plugin.description ? ` · ${plugin.description}` : ""}`;
         }),
         "",
-        "使用：/plugin <名称、完整 ID 或序号> <任务>",
+        "详情：/plugin <名称、完整 ID 或序号>",
+        "调用：/plugin <名称、完整 ID 或序号> <任务>",
       ].join("\n"));
+}
+
+export function formatConversationPluginDetail(
+  result: Extract<ConversationCommandResult, { kind: "plugin-detail" }>,
+): string {
+  const plugin = result.plugin;
+  return toStructuredMarkdownList([
+    `Plugin：${plugin.displayName}`,
+    `ID：${plugin.id}`,
+    `Marketplace：${plugin.marketplaceName}`,
+    `状态：${pluginStatusLabel(plugin)}`,
+    `来源：${pluginSourceLabel(plugin.source)}`,
+    `远端版本：${plugin.version ?? "未提供"}`,
+    `本地版本：${plugin.localVersion ?? "未提供"}`,
+    `安装时间：${formatPluginInstalledAt(plugin.installedAt)}`,
+    ...(plugin.disabledReason
+      ? [`不可用原因：${pluginDisabledReasonLabel(plugin.disabledReason)}`]
+      : []),
+    ...(plugin.description ? [`说明：${plugin.description}`] : []),
+    "",
+    plugin.enabled && plugin.available
+      ? `调用：/plugin ${plugin.id} <任务>`
+      : "当前 Plugin 不可调用。",
+    "提示：Plugin API 仍处于开发中。",
+  ].join("\n"));
+}
+
+function pluginStatusLabel(
+  plugin: Extract<ConversationCommandResult, { kind: "plugin-detail" }>["plugin"],
+): string {
+  if (!plugin.available) return "不可用";
+  return plugin.enabled ? "已启用" : "未启用";
+}
+
+function pluginSourceLabel(
+  source: Extract<ConversationCommandResult, { kind: "plugin-detail" }>["plugin"]["source"],
+): string {
+  return ({
+    local: "本地",
+    git: "Git",
+    npm: "npm",
+    remote: "远端",
+  } as const)[source];
+}
+
+function formatPluginInstalledAt(value: number | null): string {
+  if (value === null) return "未提供";
+  const date = new Date(value * 1_000);
+  return Number.isNaN(date.getTime())
+    ? "未提供"
+    : date.toISOString().replace(".000Z", "Z");
+}
+
+function pluginDisabledReasonLabel(
+  reason: NonNullable<
+    Extract<ConversationCommandResult, { kind: "plugin-detail" }>["plugin"]["disabledReason"]
+  >,
+): string {
+  return ({
+    disabled_by_admin: "被管理员禁用",
+    plan_not_eligible: "当前套餐不可用",
+    required_app_unavailable: "所需 App 不可用",
+    unknown: "上游未提供明确原因",
+  } as const)[reason];
 }
 
 export function formatConversationPermissions(

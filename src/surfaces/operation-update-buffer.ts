@@ -1,4 +1,5 @@
 import type { OperationUpdate } from "../conversation-core/index.js";
+import { mcpToolCapabilityLabel } from "./operation-presentation.js";
 
 const maximumBufferedTurns = 100;
 const maximumOperationsPerTurn = 100;
@@ -132,7 +133,13 @@ export function operationSummaryGroups(
       }
       const detailCounts = new Map<string, number>();
       for (const record of summary.records) {
-        const detail = record.kind === kind ? record.detail?.trim() : undefined;
+        const rawDetail = record.kind === kind ? record.detail?.trim() : undefined;
+        const capability = record.kind === kind
+          ? mcpToolCapabilityLabel(record)
+          : null;
+        const detail = rawDetail && capability
+          ? `${rawDetail} · ${capability}`
+          : rawDetail;
         if (detail) {
           detailCounts.set(detail, (detailCounts.get(detail) ?? 0) + 1);
         }

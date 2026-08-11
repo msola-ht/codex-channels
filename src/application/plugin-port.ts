@@ -6,6 +6,16 @@ export interface InstalledPlugin {
   description: string | null;
   enabled: boolean;
   available: boolean;
+  version: string | null;
+  localVersion: string | null;
+  source: "local" | "git" | "npm" | "remote";
+  installedAt: number | null;
+  disabledReason:
+    | "disabled_by_admin"
+    | "plan_not_eligible"
+    | "required_app_unavailable"
+    | "unknown"
+    | null;
 }
 
 export interface InstalledPluginCatalog {

@@ -29,18 +29,21 @@
 - `skill-adapter.ts`：从官方按 CWD 返回的 Skill 条目中只保留启用的用户或项目直接安装项，
   排除系统与插件缓存；列表结果不含本机路径，显式调用只向 Application 返回精确匹配且名称、
   绝对路径均通过校验的引用。
-- `mcp-adapter.ts`：把官方 MCP Server 状态页裁剪为概览或工具、资源、模板详情，校验 OAuth
+- `mcp-adapter.ts`：把官方 MCP Server 状态页裁剪为概览或工具、资源、模板详情，并把工具
+  `annotations.readOnlyHint` 归约为只读、可能写入或未知；校验 OAuth
   授权 URL，将说明字段的多行空白归一化并限为 2,000 字符，并把资源响应限为前 8 项、文本展示
   合计 8,000 字符且隐藏常见凭据，二进制裁剪为元数据；不传播工具 Schema 或 Base64 正文。
 - `plugin-adapter.ts`：只映射已安装 Plugin，校验 Plugin ID、Marketplace、启用与管理员可用状态，
-  保留 Marketplace 加载失败计数，并为可调用项生成官方 `plugin://` mention 路径。
+  裁剪版本、来源类型、安装时间和不可用原因，不传播来源路径或 URL；保留 Marketplace 加载失败计数，
+  并为可调用项生成官方 `plugin://` mention 路径。
 - `permission-adapter.ts`：把官方 Permission Profile 分页响应裁剪为 ID、说明和策略可选状态，
   并对必需字段与分页游标失败关闭。
 - `notification-adapter.ts`：把当前支持的官方 Notification 转换为 Routing 或 Conversation Core
   拥有的稳定事件；校验 Turn、Item、Diff、Plan、Goal、Token、账户、额度、MCP OAuth 完成、warning 与 Thread
   生命周期字段；`turn/completed` 只接受官方 `Turn.durationMs` 的非负安全整数并转为稳定耗时，
   Turn、warning 和 MCP 错误在此统一脱敏并限长，残缺或无关通知不进入业务模块。
-- `operation-adapter.ts`：把官方 Item 转换为安全、简洁的操作摘要，并在离开 Client 边界前
+- `operation-adapter.ts`：把官方 Item 转换为安全、简洁的操作摘要，保留 MCP Tool Item 的
+  `readOnlyHint` 能力提示，并在离开 Client 边界前
   清洗命令、查询及上游错误中的敏感文本；只把 `imageGeneration.savedPath` 映射为稳定生成图片
   产物路径，不把 `imageView` 当作可外发产物。
 - `server-request-adapter.ts`：把命令、文件、临时权限、用户输入和 MCP elicitation 五类

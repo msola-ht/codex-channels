@@ -231,6 +231,7 @@ export interface OperationUpdate {
   status: OperationStatus;
   durationMs?: number;
   exitCode?: number;
+  readOnlyHint?: boolean | null;
 }
 
 export interface TurnArtifacts {
