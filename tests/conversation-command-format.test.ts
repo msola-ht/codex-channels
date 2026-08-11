@@ -103,6 +103,11 @@ describe("provider-aware conversation command formatting", () => {
         localVersion: "0.1.8",
         source: "remote",
         installedAt: 1_786_294_800,
+        developerName: "OpenAI",
+        category: "Developer tools",
+        capabilities: ["Repository inspection"],
+        authPolicy: "onUse",
+        eligiblePlanTypes: [],
         disabledReason: null,
       }],
       loadErrorCount: 1,
@@ -139,6 +144,11 @@ describe("provider-aware conversation command formatting", () => {
         localVersion: "0.1.8-2841cf9749ae",
         source: "remote",
         installedAt: 1_786_294_800,
+        developerName: "OpenAI",
+        category: "Developer tools",
+        capabilities: Array.from({ length: 10 }, (_, index) => `capability-${index + 1}`),
+        authPolicy: "onUse",
+        eligiblePlanTypes: [],
         disabledReason: null,
       },
     });
@@ -146,6 +156,12 @@ describe("provider-aware conversation command formatting", () => {
     expect(detail).toContain("来源：远端");
     expect(detail).toContain("远端版本：0.1.8");
     expect(detail).toContain("本地版本：0.1.8-2841cf9749ae");
+    expect(detail).toContain("开发者：OpenAI");
+    expect(detail).toContain("分类：Developer tools");
+    expect(detail).toContain("认证时机：使用时");
+    expect(detail).toContain("能力：capability-1");
+    expect(detail).toContain("capability-8（另有 2 项）");
+    expect(detail).not.toContain("capability-9");
     expect(detail).toContain("调用：/plugin github@openai-curated-remote <任务>");
     const unavailable = formatConversationPluginDetail({
       kind: "plugin-detail",
@@ -154,10 +170,14 @@ describe("provider-aware conversation command formatting", () => {
         enabled: false,
         available: false,
         disabledReason: "plan_not_eligible",
+        authPolicy: "onInstall",
+        eligiblePlanTypes: ["plus", "pro"],
       },
     });
     expect(unavailable).toContain("状态：不可用");
     expect(unavailable).toContain("不可用原因：当前套餐不可用");
+    expect(unavailable).toContain("认证时机：安装时");
+    expect(unavailable).toContain("适用套餐（上游标识）：plus、pro");
     expect(unavailable).toContain("当前 Plugin 不可调用");
     const outcome = formatConversationCommandOutcome({
       type: "plugin.started",
@@ -1161,6 +1181,11 @@ const detailPluginFixture = {
   localVersion: "0.1.8-2841cf9749ae",
   source: "remote" as const,
   installedAt: 1_786_294_800,
+  developerName: "OpenAI",
+  category: "Developer tools",
+  capabilities: ["Repository inspection"],
+  authPolicy: "onUse" as const,
+  eligiblePlanTypes: [],
   disabledReason: null,
 };
 

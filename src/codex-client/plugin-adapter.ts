@@ -80,6 +80,20 @@ function parseInstalledPlugins(response: PluginInstalledResponse): ParsedPlugin[
         localVersion: optionalDisplayText(plugin.localVersion, "plugin local version"),
         source: pluginSourceKind(plugin.source),
         installedAt: optionalUnixTimestamp(plugin.installedAt),
+        developerName: optionalDisplayText(
+          plugin.interface?.developerName,
+          "plugin developer name",
+        ),
+        category: optionalDisplayText(plugin.interface?.category, "plugin category"),
+        capabilities: optionalPluginLabels(
+          plugin.interface?.capabilities,
+          "plugin capability",
+        ),
+        authPolicy: pluginAuthPolicy(plugin.authPolicy),
+        eligiblePlanTypes: optionalPluginLabels(
+          plugin.eligiblePlanTypes,
+          "plugin eligible plan type",
+        ),
         disabledReason,
       };
       return [{
@@ -131,6 +145,26 @@ function optionalDisabledReason(
     throw new Error("Codex 响应缺少有效 plugin disabledReason");
   }
   return value;
+}
+
+function pluginAuthPolicy(value: unknown): InstalledPlugin["authPolicy"] {
+  if (value === "ON_INSTALL") return "onInstall";
+  if (value === "ON_USE") return "onUse";
+  throw new Error("Codex 响应缺少有效 plugin authPolicy");
+}
+
+function optionalPluginLabels(value: unknown, field: string): string[] {
+  if (value === null || value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new Error(`Codex 响应缺少有效 ${field}`);
+  }
+  return value.map((entry) => {
+    const normalized = optionalDisplayText(entry, field);
+    if (normalized === null) {
+      throw new Error(`Codex 响应缺少有效 ${field}`);
+    }
+    return normalized;
+  });
 }
 
 function requiredIdentifier(value: unknown, field: string): string {

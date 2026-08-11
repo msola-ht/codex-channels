@@ -10,6 +10,11 @@ export interface InstalledPlugin {
   localVersion: string | null;
   source: "local" | "git" | "npm" | "remote";
   installedAt: number | null;
+  developerName: string | null;
+  category: string | null;
+  capabilities: string[];
+  authPolicy: "onInstall" | "onUse";
+  eligiblePlanTypes: string[];
   disabledReason:
     | "disabled_by_admin"
     | "plan_not_eligible"

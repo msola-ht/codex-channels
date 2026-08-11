@@ -803,12 +803,21 @@ export function formatConversationPluginDetail(
     `ID：${plugin.id}`,
     `Marketplace：${plugin.marketplaceName}`,
     `状态：${pluginStatusLabel(plugin)}`,
+    ...(plugin.developerName ? [`开发者：${plugin.developerName}`] : []),
+    ...(plugin.category ? [`分类：${plugin.category}`] : []),
     `来源：${pluginSourceLabel(plugin.source)}`,
     `远端版本：${plugin.version ?? "未提供"}`,
     `本地版本：${plugin.localVersion ?? "未提供"}`,
     `安装时间：${formatPluginInstalledAt(plugin.installedAt)}`,
+    `认证时机：${pluginAuthPolicyLabel(plugin.authPolicy)}`,
+    ...(plugin.capabilities.length > 0
+      ? [`能力：${formatPluginValues(plugin.capabilities)}`]
+      : []),
     ...(plugin.disabledReason
       ? [`不可用原因：${pluginDisabledReasonLabel(plugin.disabledReason)}`]
+      : []),
+    ...(plugin.eligiblePlanTypes.length > 0
+      ? [`适用套餐（上游标识）：${formatPluginValues(plugin.eligiblePlanTypes)}`]
       : []),
     ...(plugin.description ? [`说明：${plugin.description}`] : []),
     "",
@@ -856,6 +865,18 @@ function pluginDisabledReasonLabel(
     required_app_unavailable: "所需 App 不可用",
     unknown: "上游未提供明确原因",
   } as const)[reason];
+}
+
+function pluginAuthPolicyLabel(
+  policy: Extract<ConversationCommandResult, { kind: "plugin-detail" }>["plugin"]["authPolicy"],
+): string {
+  return policy === "onInstall" ? "安装时" : "使用时";
+}
+
+function formatPluginValues(values: readonly string[]): string {
+  const visible = values.slice(0, 8);
+  const omittedCount = values.length - visible.length;
+  return `${visible.join("、")}${omittedCount > 0 ? `（另有 ${omittedCount} 项）` : ""}`;
 }
 
 export function formatConversationPermissions(

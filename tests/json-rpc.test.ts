@@ -130,11 +130,16 @@ function appServerPlugin(
     installed: true,
     installedAt: 1_786_294_800,
     enabled: true,
+    authPolicy: "ON_USE",
     availability: "AVAILABLE",
     disabledReason: null,
+    eligiblePlanTypes: null,
     interface: {
       displayName: "GitHub",
       shortDescription: "GitHub development tools",
+      developerName: "OpenAI",
+      category: "Developer tools",
+      capabilities: ["Repository inspection", "Pull request management"],
     },
     ...overrides,
   };
@@ -1080,12 +1085,15 @@ describe("JsonRpcClient", () => {
             id: "disabled@local",
             name: "disabled",
             enabled: false,
+            authPolicy: "ON_INSTALL",
             interface: null,
           }),
           appServerPlugin({
             id: "admin-blocked@local",
             name: "admin-blocked",
             availability: "DISABLED_BY_ADMIN",
+            disabledReason: "plan_not_eligible",
+            eligiblePlanTypes: ["plus", "pro", "enterprise_cbp_automation"],
           }),
           appServerPlugin({
             id: "not-installed@local",
@@ -1114,6 +1122,11 @@ describe("JsonRpcClient", () => {
         localVersion: "0.1.8",
         source: "local",
         installedAt: 1_786_294_800,
+        developerName: "OpenAI",
+        category: "Developer tools",
+        capabilities: ["Repository inspection", "Pull request management"],
+        authPolicy: "onUse",
+        eligiblePlanTypes: [],
         disabledReason: null,
       },
       {
@@ -1128,6 +1141,11 @@ describe("JsonRpcClient", () => {
         localVersion: "0.1.8",
         source: "local",
         installedAt: 1_786_294_800,
+        developerName: null,
+        category: null,
+        capabilities: [],
+        authPolicy: "onInstall",
+        eligiblePlanTypes: [],
         disabledReason: null,
       },
       {
@@ -1142,7 +1160,12 @@ describe("JsonRpcClient", () => {
         localVersion: "0.1.8",
         source: "local",
         installedAt: 1_786_294_800,
-        disabledReason: null,
+        developerName: "OpenAI",
+        category: "Developer tools",
+        capabilities: ["Repository inspection", "Pull request management"],
+        authPolicy: "onUse",
+        eligiblePlanTypes: ["plus", "pro", "enterprise_cbp_automation"],
+        disabledReason: "plan_not_eligible",
       }],
       loadErrorCount: 0,
     });
@@ -1200,6 +1223,24 @@ describe("JsonRpcClient", () => {
 
     await expect(client.listPlugins("/tmp/project"))
       .rejects.toThrow("Codex 响应包含不一致的 plugin id");
+  });
+
+  it("fails closed when an installed Plugin has an unknown auth policy", async () => {
+    const transport = new FakeTransport();
+    transport.pluginInstalledResult = {
+      marketplaces: [{
+        name: "local",
+        plugins: [appServerPlugin({ authPolicy: "SOMETIMES" })],
+      }],
+      marketplaceLoadErrors: [],
+    };
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listPlugins("/tmp/project"))
+      .rejects.toThrow("Codex 响应缺少有效 plugin authPolicy");
   });
 
   it("fails closed when an invocable Skill has an unsafe name or path", async () => {

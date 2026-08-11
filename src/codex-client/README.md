@@ -34,7 +34,8 @@
   授权 URL，将说明字段的多行空白归一化并限为 2,000 字符，并把资源响应限为前 8 项、文本展示
   合计 8,000 字符且隐藏常见凭据，二进制裁剪为元数据；不传播工具 Schema 或 Base64 正文。
 - `plugin-adapter.ts`：只映射已安装 Plugin，校验 Plugin ID、Marketplace、启用与管理员可用状态，
-  裁剪版本、来源类型、安装时间和不可用原因，不传播来源路径或 URL；保留 Marketplace 加载失败计数，
+  裁剪版本、来源类型、安装时间、开发者、分类、能力、认证时机、不可用原因和适用套餐标识，
+  不传播来源路径或 URL；保留 Marketplace 加载失败计数，
   并为可调用项生成官方 `plugin://` mention 路径。
 - `permission-adapter.ts`：把官方 Permission Profile 分页响应裁剪为 ID、说明和策略可选状态，
   并对必需字段与分页游标失败关闭。

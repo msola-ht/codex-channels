@@ -806,6 +806,11 @@ contractSuite("isolated Codex App Server state contract", () => {
       && (plugin.localVersion === null || typeof plugin.localVersion === "string")
       && ["local", "git", "npm", "remote"].includes(plugin.source)
       && (plugin.installedAt === null || Number.isSafeInteger(plugin.installedAt))
+      && (plugin.developerName === null || typeof plugin.developerName === "string")
+      && (plugin.category === null || typeof plugin.category === "string")
+      && plugin.capabilities.every((capability) => typeof capability === "string")
+      && ["onInstall", "onUse"].includes(plugin.authPolicy)
+      && plugin.eligiblePlanTypes.every((plan) => typeof plan === "string")
       && (plugin.disabledReason === null || typeof plugin.disabledReason === "string")))
       .toBe(true);
   });
