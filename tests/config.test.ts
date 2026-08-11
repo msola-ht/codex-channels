@@ -123,7 +123,7 @@ describe("Gateway config.toml", () => {
     expect(runtime.config.telegramMessageFormat).toBe("rich");
     expect(runtime.config.operationUpdateDisplay).toBe("compact");
     expect(runtime.config.planUpdatesEnabled).toBe(true);
-    expect(runtime.config.pluginApiEnabled).toBe(true);
+    expect(runtime.config.pluginApiEnabled).toBe(false);
     expect(runtime.config.apiProviders).toEqual([]);
     expect(runtime.config.vision).toEqual({ mode: "disabled" });
     expect(runtime.config.credentialsDirectory).toBe(join(fixture.root, "credentials"));
@@ -432,7 +432,7 @@ describe("Gateway config.toml", () => {
       plan_updates: true,
       price_currency: "cny",
     });
-    expect(persisted.experimental).toEqual({ plugin_api: true });
+    expect(persisted.experimental).toEqual({ plugin_api: false });
     expect(persisted.storage).toEqual({
       database_path: "data/gateway.sqlite3",
     });

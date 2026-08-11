@@ -283,7 +283,7 @@ export class ConversationService implements ConversationUseCases {
     private readonly turnErrorRecorder?: TurnErrorRecorder,
     private readonly agentRoles?: AgentRolePort,
     private readonly experimentalFeatures: { pluginApiEnabled: boolean } = {
-      pluginApiEnabled: true,
+      pluginApiEnabled: false,
     },
   ) {}
 

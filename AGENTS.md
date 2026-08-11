@@ -107,7 +107,7 @@ Surface -> Application/Core <- Codex Client
   `--experimental` 生成类型、从 `codex-protocol` 受控导出，并由真实 App Server
   合同测试覆盖。开发中 Plugin 调试只允许在 `[experimental].plugin_api` 开启时使用
   `plugin/installed` 查询已安装项，并通过 `turn/start` / `turn/steer` 的官方 `mention` 输入调用；
-  开关默认开启但必须在 Doctor、命令输出和文档中标明开发中，只支持 OpenAI Thread。不得借这些
+  开关默认关闭且必须在 Doctor、命令输出和文档中标明开发中，只支持 OpenAI Thread。不得借这些
   例外接入或暴露其他实验方法、字段或通知。
 - 运行时只可协商当前精确版本、默认生成类型已覆盖且当前功能必需的实验能力；启用前必须审查
   同时开放的 Notification、Server Request 和字段，新增高权限输入必须显式展示或失败关闭，并

@@ -1365,6 +1365,17 @@ describe("ConversationService model selection", () => {
       {} as ConversationCore,
       {} as ModelSelectionService,
       queryPort({ listPlugins }),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { pluginApiEnabled: true },
     );
 
     await expect(service.listPlugins(target)).resolves.toMatchObject({
@@ -1416,6 +1427,17 @@ describe("ConversationService model selection", () => {
         markApplied: vi.fn(),
       } as unknown as ModelSelectionService,
       queryPort({ listPlugins, resolvePlugin }),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { pluginApiEnabled: true },
     );
 
     await expect(service.invokePlugin(target, "1", " 检查 PR "))
@@ -1495,6 +1517,17 @@ describe("ConversationService model selection", () => {
           path: "plugin://github@local",
         }),
       }),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { pluginApiEnabled: true },
     );
 
     const switching = service.selectModel(target, "deepseek");
@@ -1509,24 +1542,13 @@ describe("ConversationService model selection", () => {
     expect(startTurn).not.toHaveBeenCalled();
   });
 
-  it("fails closed for a disabled Plugin API or a non-OpenAI provider", async () => {
+  it("fails closed by default or for a non-OpenAI provider", async () => {
     const disabled = new ConversationService(
       turnPort(),
       { workspace: () => main } as unknown as SessionRouter,
       {} as ConversationCore,
       {} as ModelSelectionService,
       queryPort(),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { pluginApiEnabled: false },
     );
     expect(() => disabled.listPlugins(target))
       .toThrow(expect.objectContaining({ code: "plugin.disabled" }));
@@ -1537,6 +1559,17 @@ describe("ConversationService model selection", () => {
       {} as ConversationCore,
       { status: () => ({ modelProvider: "deepseek" }) } as unknown as ModelSelectionService,
       queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { pluginApiEnabled: true },
     );
     await expect(deepseek.invokePlugin(target, "github", "检查 PR"))
       .rejects.toMatchObject({ code: "plugin.provider.unsupported" });

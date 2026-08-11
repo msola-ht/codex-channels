@@ -257,14 +257,15 @@ if (document) {
     note("图片识别", "未启用");
   }
   const experimental = table(document.experimental);
+  const pluginApiEnabled = experimental.plugin_api === true;
   note(
     "Plugin API",
-    experimental.plugin_api === false
-      ? "已关闭"
-      : "已启用（开发中；Codex 0.147.0 暂不保证生产兼容性）",
-    experimental.plugin_api === false
-      ? "如需调试，在 [experimental] 中设置 plugin_api = true 后重启 Gateway"
-      : "如需关闭，在 [experimental] 中设置 plugin_api = false 后重启 Gateway",
+    pluginApiEnabled
+      ? "已启用（开发中；Codex 0.147.0 暂不保证生产兼容性）"
+      : "已关闭",
+    pluginApiEnabled
+      ? "如需关闭，在 [experimental] 中设置 plugin_api = false 后重启 Gateway"
+      : "如需调试，在 [experimental] 中设置 plugin_api = true 后重启 Gateway",
   );
 
   setSection("Workspace");

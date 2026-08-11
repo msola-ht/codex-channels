@@ -143,12 +143,12 @@ Token 与价格快照估算每 1% 周额度对应的 Token、API 参考费用及
 
 ### Plugin 与 MCP 调试
 
-Codex 0.147.0 的 Plugin API 仍标记为开发中。Gateway 默认开启已安装 Plugin 的调试入口；如需
-关闭，在配置中设置并重启 Gateway：
+Codex 0.147.0 的 Plugin API 仍标记为开发中。Gateway 默认关闭已安装 Plugin 的调试入口；仅在
+需要调试时显式开启并重启 Gateway：
 
 ```toml
 [experimental]
-plugin_api = false
+plugin_api = true
 ```
 
 - `/plugin`：列出当前 Workspace 已安装的 Plugin 及启用状态；Marketplace 部分加载失败时明确提示
