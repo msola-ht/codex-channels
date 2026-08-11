@@ -31,6 +31,7 @@ export type UserFacingErrorCode =
   | "session.selector.ambiguous"
   | "session.selector.not-found"
   | "sessions.usage"
+  | "archived-sessions.usage"
   | "thread-section.usage"
   | "thread-section.name.invalid"
   | "thread-section.selector.ambiguous"

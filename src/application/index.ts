@@ -29,10 +29,12 @@ export {
 } from "./collaboration-mode-port.js";
 export {
   ConversationCommandService,
+  archivedSessionCommandUsageText,
   conversationCommandNames,
   isConversationCommandName,
   mcpCommandUsageText,
   pluginCommandUsageText,
+  sessionCommandUsageText,
   type ConversationCommandName,
   type ConversationCommandOutcome,
   type ConversationCommandResult,

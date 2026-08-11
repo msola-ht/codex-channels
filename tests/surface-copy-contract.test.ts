@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  archivedSessionCommandUsageText,
   mcpCommandUsageText,
   type ConversationCommandResult,
   type ConversationStatus,
@@ -118,6 +119,17 @@ describe("shared surface copy contract", () => {
     const error = new UserFacingError("mcp.usage", "invalid MCP command");
     for (const surface of ["Telegram", "飞书", "微信"] as const) {
       expect(formatSurfaceUserFacingError(error, surface)).toBe(mcpCommandUsageText);
+    }
+  });
+
+  it("reports archived session usage consistently on every surface", () => {
+    const error = new UserFacingError(
+      "archived-sessions.usage",
+      archivedSessionCommandUsageText,
+    );
+    for (const surface of ["Telegram", "飞书", "微信"] as const) {
+      expect(formatSurfaceUserFacingError(error, surface))
+        .toBe(archivedSessionCommandUsageText);
     }
   });
 

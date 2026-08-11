@@ -1,6 +1,8 @@
 import {
+  archivedSessionCommandUsageText,
   mcpCommandUsageText,
   pluginCommandUsageText,
+  sessionCommandUsageText,
 } from "../application/index.js";
 import type { UserFacingError } from "../conversation-core/index.js";
 import { gatewayRequestFailedText } from "./output-copy.js";
@@ -75,7 +77,9 @@ export function formatSurfaceUserFacingError(
     case "session.selector.not-found":
       return "找不到指定会话";
     case "sessions.usage":
-      return "用法：/sessions [页码] [filter all|running|pinned|unsectioned] [provider 名称] [section 分区] [search 搜索词]";
+      return sessionCommandUsageText;
+    case "archived-sessions.usage":
+      return archivedSessionCommandUsageText;
     case "thread-section.usage":
       return "用法：/section [list [页码]|create <名称>|rename <分区 ID 或序号> <新名称>|move <分区 ID 或序号> [before <会话>]|remove|delete <分区 ID 或序号> [confirm]]";
     case "thread-section.name.invalid":

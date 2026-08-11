@@ -168,6 +168,16 @@ describe("ConversationCommandService", () => {
     });
   });
 
+  it("reports archived session filter errors with the archived command usage", async () => {
+    const commands = new ConversationCommandService({} as ConversationUseCases);
+
+    await expect(commands.execute(target, "archived", "filter running"))
+      .rejects.toMatchObject({
+        code: "archived-sessions.usage",
+        message: "用法：/archived [页码] [filter <all|pinned|unsectioned>] [provider <名称>] [section <名称、ID 或序号>] [search <关键词>]",
+      });
+  });
+
   it("routes Thread Section list, move and confirmed delete operations", async () => {
     const section = {
       id: "section-project",
