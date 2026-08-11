@@ -57,6 +57,8 @@
 - `api-executor.ts`：统一执行 Telegram API 调用，处理超时、限流和有限重试。
 - `error-metadata.ts`：只保留异常类型和受约束的机器错误码，不记录任意异常消息。
 - `user-error-renderer.ts`：把平台无关的结构化用户错误映射为 Telegram 专属提示与命令用法。
+- `plugin-task-prompts.ts`：把 Plugin 选择后的 ForceReply 提示绑定到聊天、Actor 与精确消息，
+  使用十分钟一次性内存状态和 100 项容量上限；过期、跨 Actor 与重复回复不会进入普通 Turn。
 - `format.ts`：格式化会话、Diff/Plan、Goal、模型、Workspace、Git 分支、权限、用量、缓存命中率、
   上下文压缩总次数和状态文本；可复用语义委托给 Surface 共享格式器，账户、额度与 MCP 运行状态
   由 `runtime-status-format.ts` 提供；上线通知复用 Surface 共享生命周期字段并把结构化字段渲染为
@@ -82,6 +84,9 @@ Telegram 手动命令注册显式接入三个渠道共享的 `/h`、`/work`、`/
 `/help`、`/workspace`、`/resume`；快捷入口不重复写入 BotFather 菜单。帮助消息复用共享的
 分组列表，只在 Telegram 边界转换为安全 HTML。无参数 `/skill` 与其他渠道一样展示编号列表，
 调用统一使用 `/skill <名称或序号> <任务>`，不维护渠道私有选择状态。
+`/plugin` 在共享文字列表上增加当前页可调用项和未过滤列表的翻页按钮；选择后通过一次性
+ForceReply 收集任务，再使用完整 Plugin ID 进入共享 Application 调用边界。搜索结果仍保留
+可复制的文字翻页命令，避免把搜索词写入 Telegram callback data。
 `/vision <要求>` 预设当前用户与聊天的下一批图片识别要求；多图使用
 `/vision <2–4> <要求>` 声明数量，收齐后自动提交；兼容的 `/vision begin <要求>`、
 `/vision done` 保留给数量未知的收集，失败后可在五分钟内用 `/vision retry` 复用原图片和要求，

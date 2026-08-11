@@ -221,6 +221,41 @@ describe("Weixin command renderer", () => {
     ]);
   });
 
+  it("adds copyable Plugin task commands for callable entries", () => {
+    const rendered = renderWeixinCommandResult({
+      kind: "plugins",
+      plugins: [{
+        id: "github@local",
+        name: "github",
+        displayName: "GitHub",
+        marketplaceName: "local",
+        description: null,
+        enabled: true,
+        available: true,
+        version: null,
+        localVersion: null,
+        source: "local",
+        installedAt: null,
+        developerName: null,
+        category: null,
+        capabilities: [],
+        authPolicy: "onUse",
+        eligiblePlanTypes: [],
+        disabledReason: null,
+      }],
+      selectors: ["9"],
+      loadErrorCount: 0,
+      totalPluginCount: 9,
+      matchedPluginCount: 9,
+      page: 2,
+      pageCount: 2,
+      searchTerm: null,
+    });
+
+    expect(rendered).toContain("当前页快捷调用");
+    expect(rendered).toContain("/plugin 9 <任务>");
+  });
+
   it("renders startup state and detailed Turn completion statistics", () => {
     const startup = renderWeixinStartupNotification(
       [{ id: "main", name: "Main", cwd: "/workspace" }],

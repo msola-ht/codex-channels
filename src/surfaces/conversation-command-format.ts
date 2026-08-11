@@ -792,6 +792,12 @@ export function formatConversationPlugins(
   const hasReservedPluginName = plugins.some((plugin) =>
     plugin.name === "health" || plugin.name === "list"
   );
+  const callableCommands = plugins.flatMap((plugin, index) => {
+    const selector = selectors[index];
+    return plugin.enabled && plugin.available && selector
+      ? [`${plugin.displayName}：/plugin ${selector} <任务>`]
+      : [];
+  });
   if (page > pageCount) {
     return toStructuredMarkdownList([
       `已安装 Plugin（开发中${searchTerm ? `，匹配 ${matchedPluginCount}` : ""}）：`,
@@ -822,6 +828,9 @@ export function formatConversationPlugins(
     "",
     ...(page > 1 ? [`上一页：/plugin list ${page - 1}${commandSuffix}`] : []),
     ...(page < pageCount ? [`下一页：/plugin list ${page + 1}${commandSuffix}`] : []),
+    ...(callableCommands.length > 0
+      ? ["当前页快捷调用：", ...callableCommands]
+      : []),
     "健康检查：/plugin health",
     "搜索：/plugin list search <关键词>",
     ...(hasReservedPluginName

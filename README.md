@@ -160,7 +160,8 @@ plugin_api = true
 - `/plugin health`：汇总已安装、已启用和可调用数量，只列出未启用、不可用与 Marketplace
   加载失败等需要处理或注意的状态；问题最多展示 8 项，并保留全局数字选择器供继续查看详情。
 - `/plugin <名称、完整 ID 或序号> <任务>`：仅在 OpenAI Thread 中使用官方 `mention` 输入调用
-  已启用且可用的 Plugin；飞书命令中心支持先选择 Plugin、再通过一次性表单输入任务。新建 Turn
+  已启用且可用的 Plugin；飞书支持分页选择与一次性表单，Telegram 支持当前页按钮、翻页与十分钟
+  一次性回复任务，微信在当前页提供可复制的编号任务命令。新建 Turn
   只显示一条带名称的统一确认，例如“已使用 GitHub Plugin 开始处理”，不再重复发送 Plugin
   启动结果；追加到活动 Turn 时仍明确提示。
 - 不开放官方 Plugin Marketplace 搜索、市场、安装、卸载或分享；已安装列表的本地过滤不会调用
