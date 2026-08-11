@@ -813,6 +813,154 @@ describe("Telegram image input", () => {
     await surface.stop();
     await output.close();
   });
+
+  it("collects a selected Plugin task through one exact ForceReply message", async () => {
+    const invokePlugin = vi.fn().mockResolvedValue({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+      pluginName: "GitHub",
+    });
+    const { surface, output, apiCalls, apiPayloads } = createSurface(
+      vi.fn(),
+      vi.fn(),
+      {
+        listPlugins: vi.fn().mockResolvedValue({
+          plugins: [
+            telegramPlugin("slack@local", "slack", "Slack"),
+            telegramPlugin("github@local", "github", "GitHub"),
+          ],
+          loadErrorCount: 0,
+        }),
+        invokePlugin,
+      },
+    );
+
+    await surface.bot.handleUpdate({
+      update_id: 11,
+      callback_query: {
+        id: "plugin-select",
+        from: telegramUser(),
+        chat_instance: "chat-instance",
+        data: "plugin:select:KJV9Ut1pei2MHRjX-Hp6Eak7zSnaNGeVAK2Bhk0mAMA",
+        message: {
+          message_id: 20,
+          date: 1,
+          chat: telegramChat(),
+          text: "Plugin 列表",
+        },
+      },
+    });
+    await surface.bot.handleUpdate({
+      update_id: 12,
+      message: {
+        message_id: 21,
+        date: 1,
+        from: telegramUser(),
+        chat: telegramChat(),
+        text: "检查当前 PR",
+        reply_to_message: {
+          message_id: 99,
+          date: 1,
+          chat: telegramChat(),
+          text: "已选择 GitHub",
+          reply_to_message: undefined as never,
+        },
+      },
+    });
+
+    expect(apiPayloads).toContainEqual(expect.objectContaining({
+      method: "sendMessage",
+      payload: expect.objectContaining({
+        reply_markup: { force_reply: true, selective: true },
+      }),
+    }));
+    expect(apiCalls.indexOf("answerCallbackQuery")).toBeLessThan(
+      apiCalls.indexOf("sendMessage"),
+    );
+    expect(invokePlugin).toHaveBeenCalledWith(
+      { surface: "telegram", accountId: "default", conversationId: "100" },
+      "github@local",
+      "检查当前 PR",
+    );
+    await surface.stop();
+    await output.close();
+  });
+
+  it("pages the current Plugin catalog through a Telegram callback", async () => {
+    const plugins = Array.from({ length: 10 }, (_, index) =>
+      telegramPlugin(
+        `plugin-${index + 1}@local`,
+        `plugin-${index + 1}`,
+        `Plugin ${index + 1}`,
+      ));
+    const { surface, output, apiCalls, sentTexts } = createSurface(
+      vi.fn(),
+      vi.fn(),
+      {
+        listPlugins: vi.fn().mockResolvedValue({
+          plugins,
+          loadErrorCount: 0,
+        }),
+      },
+    );
+
+    await surface.bot.handleUpdate({
+      update_id: 14,
+      callback_query: {
+        id: "plugin-page",
+        from: telegramUser(),
+        chat_instance: "chat-instance",
+        data: "plugin:page:2",
+        message: {
+          message_id: 23,
+          date: 1,
+          chat: telegramChat(),
+          text: "Plugin 列表",
+        },
+      },
+    });
+
+    expect(apiCalls).toContain("answerCallbackQuery");
+    expect(sentTexts.join("\n")).toContain("Plugin 9");
+    expect(sentTexts.join("\n")).toContain("Plugin 10");
+    await surface.stop();
+    await output.close();
+  });
+
+  it("rejects replies to stale Plugin prompts after in-memory state is gone", async () => {
+    const submit = vi.fn();
+    const { surface, output, sentTexts } = createSurface(submit, vi.fn());
+
+    await surface.bot.handleUpdate({
+      update_id: 13,
+      message: {
+        message_id: 22,
+        date: 1,
+        from: telegramUser(),
+        chat: telegramChat(),
+        text: "不要进入普通 Turn",
+        reply_to_message: {
+          message_id: 99,
+          date: 1,
+          from: {
+            id: 999,
+            is_bot: true,
+            first_name: "Test Bot",
+            username: "test_bot",
+          },
+          chat: telegramChat(),
+          text: "已选择 GitHub。请回复此消息输入任务；提示 10 分钟内有效。",
+          reply_to_message: undefined as never,
+        },
+      },
+    });
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(sentTexts).toContain("Plugin 任务提示已过期，请重新使用 /plugin 选择。");
+    await surface.stop();
+    await output.close();
+  });
 });
 
 function createSurface(
@@ -934,4 +1082,26 @@ function telegramUser() {
 
 function telegramChat() {
   return { id: 100, type: "private" as const, first_name: "User" };
+}
+
+function telegramPlugin(id: string, name: string, displayName: string) {
+  return {
+    id,
+    name,
+    displayName,
+    marketplaceName: "local",
+    description: null,
+    enabled: true,
+    available: true,
+    version: null,
+    localVersion: null,
+    source: "local" as const,
+    installedAt: null,
+    developerName: null,
+    category: null,
+    capabilities: [],
+    authPolicy: "onUse" as const,
+    eligiblePlanTypes: [],
+    disabledReason: null,
+  };
 }

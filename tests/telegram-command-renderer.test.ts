@@ -209,8 +209,24 @@ describe("Telegram command renderer", () => {
         description: null,
         enabled: true,
         available: true,
+        version: null,
+        localVersion: null,
+        source: "local",
+        installedAt: null,
+        developerName: null,
+        category: null,
+        capabilities: [],
+        authPolicy: "onUse",
+        eligiblePlanTypes: [],
+        disabledReason: null,
       }],
+      selectors: ["1"],
       loadErrorCount: 0,
+      totalPluginCount: 1,
+      matchedPluginCount: 1,
+      page: 1,
+      pageCount: 1,
+      searchTerm: null,
     });
     await renderTelegramCommandResult(context, {
       kind: "mcp-resource",
@@ -230,12 +246,68 @@ describe("Telegram command renderer", () => {
 
     expect(reply).toHaveBeenCalledWith(
       expect.stringContaining("github@local"),
-      expect.objectContaining({ parse_mode: "HTML" }),
+      expect.objectContaining({
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [[{
+            text: "GitHub",
+            callback_data: "plugin:select:KJV9Ut1pei2MHRjX-Hp6Eak7zSnaNGeVAK2Bhk0mAMA",
+          }]],
+        },
+      }),
     );
     expect(reply).toHaveBeenCalledWith(
       expect.stringContaining("&lt;unsafe&gt;"),
       expect.objectContaining({ parse_mode: "HTML" }),
     );
+  });
+
+  it("adds bounded Plugin page buttons without losing the shared text fallback", async () => {
+    const reply = vi.fn<(text: string, options?: unknown) => Promise<void>>(
+      async () => undefined,
+    );
+
+    await renderTelegramCommandResult(
+      { reply } as unknown as Context,
+      {
+        kind: "plugins",
+        plugins: [{
+          id: "plugin-9@local",
+          name: "plugin-9",
+          displayName: "Plugin 9",
+          marketplaceName: "local",
+          description: null,
+          enabled: true,
+          available: true,
+          version: null,
+          localVersion: null,
+          source: "local",
+          installedAt: null,
+          developerName: null,
+          category: null,
+          capabilities: [],
+          authPolicy: "onUse",
+          eligiblePlanTypes: [],
+          disabledReason: null,
+        }],
+        selectors: ["9"],
+        loadErrorCount: 0,
+        totalPluginCount: 10,
+        matchedPluginCount: 10,
+        page: 2,
+        pageCount: 2,
+        searchTerm: null,
+      },
+    );
+
+    const options = reply.mock.calls[0]?.[1] as {
+      reply_markup: { inline_keyboard: Array<Array<{ callback_data: string }>> };
+    };
+    expect(options.reply_markup.inline_keyboard.flat().map((button) =>
+      button.callback_data)).toEqual([
+      "plugin:select:4DWUNaFqScX_pDiNDM0Lh8MTPWDlhhzK0WsHucL3Ssg",
+      "plugin:page:1",
+    ]);
   });
 
   it("shows MCP startup errors sanitized at the Client boundary", () => {

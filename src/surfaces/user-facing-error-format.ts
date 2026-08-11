@@ -1,4 +1,7 @@
-import { mcpCommandUsageText } from "../application/index.js";
+import {
+  mcpCommandUsageText,
+  pluginCommandUsageText,
+} from "../application/index.js";
 import type { UserFacingError } from "../conversation-core/index.js";
 import { gatewayRequestFailedText } from "./output-copy.js";
 
@@ -150,7 +153,7 @@ export function formatSurfaceUserFacingError(
     case "mcp.resource.usage":
       return "需要提供有效的 MCP Resource URI";
     case "plugin.usage":
-      return "用法：/plugin <名称、完整 ID 或序号> <任务>";
+      return pluginCommandUsageText;
     case "plugin.not-found":
       return "指定的 Plugin 不存在";
     case "plugin.ambiguous":

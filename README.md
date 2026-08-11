@@ -151,15 +151,24 @@ Codex 0.147.0 的 Plugin API 仍标记为开发中。Gateway 默认关闭已安�
 plugin_api = true
 ```
 
-- `/plugin`：列出当前 Workspace 已安装的 Plugin 及启用状态；Marketplace 部分加载失败时明确提示
-  列表可能不完整，不展示上游路径或原始错误。
+- `/plugin`：按每页 8 项列出当前 Workspace 已安装的 Plugin 及启用状态；使用
+  `/plugin list [页码] [search <关键词>]` 翻页或在已安装列表中本地过滤。Marketplace 部分加载失败时
+  明确提示列表可能不完整，不展示上游路径或原始错误。`/plugin <名称、完整 ID 或序号>` 查看开发者、分类、
+  能力、认证时机、来源、远端与本地版本、安装时间、可用状态，以及上游提供的不可用原因和适用套餐标识。
+  `health` 与 `list` 是保留的单词子命令；查看这两个同名 Plugin 时使用完整 ID 或序号，带任务调用时
+  仍可直接使用其名称。
+- `/plugin health`：汇总已安装、已启用和可调用数量，只列出未启用、不可用与 Marketplace
+  加载失败等需要处理或注意的状态；问题最多展示 8 项，并保留全局数字选择器供继续查看详情。
 - `/plugin <名称、完整 ID 或序号> <任务>`：仅在 OpenAI Thread 中使用官方 `mention` 输入调用
-  已启用且可用的 Plugin；飞书命令中心支持先选择 Plugin、再通过一次性表单输入任务。新建 Turn
+  已启用且可用的 Plugin；飞书支持分页选择与一次性表单，Telegram 支持当前页按钮、翻页与十分钟
+  一次性回复任务，微信在当前页提供可复制的编号任务命令。新建 Turn
   只显示一条带名称的统一确认，例如“已使用 GitHub Plugin 开始处理”，不再重复发送 Plugin
   启动结果；追加到活动 Turn 时仍明确提示。
-- 不开放 Plugin 搜索、市场、安装、卸载或分享；`codexc doctor` 会显示该开发中开关的状态。
+- 不开放官方 Plugin Marketplace 搜索、市场、安装、卸载或分享；已安装列表的本地过滤不会调用
+  `plugin/search`。`codexc doctor` 会显示该开发中开关的状态。
 - `/mcp`：列出当前 Thread 的 MCP Server；`/mcp <名称或序号>` 查看工具、资源与模板详情；
-  上游多行长描述会先归一化并有界展示。
+  上游多行长描述会先归一化并有界展示。工具同时显示上游声明的只读、可能写入或读写属性未知；
+  该属性只作能力提示，不替代 Turn 的审批策略或执行结果。
 - `/mcp health`：汇总当前 Thread 所属 App Server 的 MCP Server、工具、资源与资源模板数量，只列出
   需要登录的 Server 和认证未知、未公开能力等提示；状态读取失败时明确报错，不把查询成功等同于
   对每个远端 MCP Server 做网络探测。处理命令使用当前列表序号，兼容含空格的 Server 名称；需处理项
@@ -376,7 +385,8 @@ deepseek）的全部请求行并自动重启 Gateway 与中心服务，适合额
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
 - 状态：`/diff`、`/usage`、`/metrics [session|global|providers|models|errors] [today|yesterday|this-week|last-week|this-month|last-month|24h|7d|30d|90d|365d|all]`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/agents [角色名称或序号 任务]`、`/skill [名称或序号 任务]`、
-  `/plugin [<名称、完整 ID 或序号> <任务>]`、`/mcp [名称或序号]`、
+  `/plugin`、`/plugin health`、`/plugin list [页码] [search <关键词>]`、
+  `/plugin <名称、完整 ID 或序号> [任务]`、`/mcp [名称或序号]`、
   `/mcp health`、`/mcp reload`、
   `/mcp <名称或序号> <tools|resources|templates> [页码] [search <关键词>]`、
   `/mcp login <名称或序号>`、`/mcp resource <名称或序号> <URI>`、`/rules`

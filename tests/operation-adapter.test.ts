@@ -7,7 +7,7 @@ import {
 
 describe("operation normalization", () => {
   it.each([
-    [{ type: "mcpToolCall", id: "1", server: "github", tool: "search", status: "completed" }, "mcpTool", "github.search", undefined],
+    [{ type: "mcpToolCall", id: "1", server: "github", tool: "search", status: "completed", readOnlyHint: true }, "mcpTool", "github.search", undefined],
     [{ type: "dynamicToolCall", id: "2", namespace: "browser", tool: "open", status: "completed" }, "dynamicTool", "browser.open", undefined],
     [{ type: "webSearch", id: "3", query: "Codex App Server" }, "webSearch", "Codex App Server", undefined],
     [{ type: "imageView", id: "4", path: "/tmp/image.png" }, "imageView", "/tmp/image.png", undefined],
@@ -21,6 +21,25 @@ describe("operation normalization", () => {
       ...(detail ? { detail } : {}),
       ...(action ? { action } : {}),
     });
+  });
+
+  it("preserves the MCP read-only hint without treating it as an outcome", () => {
+    expect(toOperationUpdate({
+      type: "mcpToolCall",
+      id: "mcp-read",
+      server: "github",
+      tool: "get_issue",
+      status: "completed",
+      readOnlyHint: true,
+    }, "completed")).toMatchObject({ readOnlyHint: true });
+    expect(toOperationUpdate({
+      type: "mcpToolCall",
+      id: "mcp-write",
+      server: "github",
+      tool: "create_issue",
+      status: "completed",
+      readOnlyHint: false,
+    }, "completed")).toMatchObject({ readOnlyHint: false });
   });
 
   it("maps failed and declined item states", () => {

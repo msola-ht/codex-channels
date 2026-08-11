@@ -36,6 +36,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         tools: [{
           name: "approval_probe",
           description: ` Emit\n\tapproval details ${"x".repeat(2_100)} `,
+          annotations: { readOnlyHint: false },
           inputSchema: {
             type: "object",
             properties: {

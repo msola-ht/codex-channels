@@ -129,8 +129,13 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 活动 Turn 生效；健康处理命令使用当前列表数字序号，最多展示 8 项并明确省略数量；资源正文明确标为
 外部不可信内容。详情及分页中的后续命令沿用 Application 返回的原始选择器，Surface 不使用 Server
 名称重新构造命令。
-`/plugin` 无参数列出已安装项，带选择器和任务时调用 Plugin，并统一显示开发中提示；飞书可从
-已启用且可调用项生成一次性任务表单，Surface 不拼装 Plugin mention 路径。
+`/plugin` 无参数显示已安装项第一页，`/plugin list [页码] [search <关键词>]` 使用全局数字选择器
+进行每页 8 项的本地分页过滤，`/plugin health` 只展示未启用、不可用和 Marketplace 加载失败等状态，
+问题最多展示 8 项；只带选择器时查看开发者、分类、能力、认证时机及套餐等安全详情，能力与套餐
+列表最多展示 8 项；`health` / `list` 同名 Plugin 带任务时仍可直接调用，详情使用完整 ID 或序号；
+带选择器和任务时调用 Plugin，并统一显示开发中提示；飞书按相同分页生成一次性任务表单，
+Telegram 使用当前页按钮和绑定 Actor 的十分钟一次性 ForceReply，微信提供可复制的编号任务命令；
+各 Surface 都不拼装 Plugin mention 路径。
 `user-facing-error-format.ts` 统一三个渠道的结构化用户错误文案，只保留渠道名称差异；
 `error-metadata.ts` 统一渠道日志中的受约束异常类型、机器错误码和锁定 App Server
 白名单拒绝分类，拒绝异常正文、堆栈、请求标识及上游自定义名称进入日志；Bootstrap
@@ -189,7 +194,8 @@ Bootstrap 把共享的 `display.operation_updates` 三档模式显式注入各 S
 显示完整操作，`compact` 显示单行摘要，其中子代理只保留启动和失败、抑制成功的等待与交互操作，
 `hidden` 忽略 `operation.updated`；Core 始终正常归约操作，审批与其他关键输出不受影响。
 Telegram 和微信把同一 Turn 的成功查询类操作延迟聚合；
-飞书只聚合 MCP 与动态工具，网页搜索完成后立即发送。微信
+飞书只聚合 MCP 与动态工具，网页搜索完成后立即发送。MCP 目录与实际工具调用统一显示 App Server
+提供的只读、可能写入或未知提示，该提示不替代审批或执行结果。微信
 对其余操作仍仅发送终态，避免用普通气泡模拟持续更新；Surface 只实现平台格式，不各自定义
 第二套显示配置。
 

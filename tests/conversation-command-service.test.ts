@@ -5,6 +5,7 @@ import {
   conversationCommandNames,
   isConversationCommandName,
   type ConversationUseCases,
+  type InstalledPlugin,
 } from "../src/application/index.js";
 import type { ConversationTarget } from "../src/conversation-core/index.js";
 import { TelegramAccessPolicy } from "../src/policy/index.js";
@@ -14,6 +15,32 @@ const target: ConversationTarget = {
   accountId: "default",
   conversationId: "100",
 };
+
+function installedPlugin(
+  index: number,
+  overrides: Partial<InstalledPlugin> = {},
+): InstalledPlugin {
+  return {
+    id: `plugin-${index}@local`,
+    name: `plugin-${index}`,
+    displayName: `Plugin ${index}`,
+    marketplaceName: "local",
+    description: null,
+    enabled: true,
+    available: true,
+    version: null,
+    localVersion: null,
+    source: "local",
+    installedAt: null,
+    developerName: null,
+    category: null,
+    capabilities: [],
+    authPolicy: "onUse",
+    eligiblePlanTypes: [],
+    disabledReason: null,
+    ...overrides,
+  };
+}
 
 describe("ConversationCommandService", () => {
   it("owns the platform-independent command catalog without duplicates", () => {
@@ -354,7 +381,13 @@ describe("ConversationCommandService", () => {
     await expect(commands.execute(target, "plugin")).resolves.toEqual({
       kind: "plugins",
       plugins: [],
+      selectors: [],
       loadErrorCount: 0,
+      totalPluginCount: 0,
+      matchedPluginCount: 0,
+      page: 1,
+      pageCount: 1,
+      searchTerm: null,
     });
     await expect(commands.execute(target, "usage")).resolves.toEqual({
       kind: "usage",
@@ -548,16 +581,42 @@ describe("ConversationCommandService", () => {
       steered: false,
       pluginName: "GitHub",
     }));
+    const pluginDetail = vi.fn(async () => ({ id: "github@local" }));
+    const pluginHealth = vi.fn(async () => ({
+      installedCount: 1,
+      enabledCount: 1,
+      callableCount: 1,
+      marketplaceLoadErrorCount: 0,
+      issues: [],
+    }));
     const commands = new ConversationCommandService({
       listPlugins,
+      pluginHealth,
+      pluginDetail,
       invokePlugin,
     } as unknown as ConversationUseCases);
 
     await expect(commands.execute(target, "plugin")).resolves.toEqual({
       kind: "plugins",
       plugins: [{ id: "github@local" }],
+      selectors: ["1"],
       loadErrorCount: 0,
+      totalPluginCount: 1,
+      matchedPluginCount: 1,
+      page: 1,
+      pageCount: 1,
+      searchTerm: null,
     });
+    await expect(commands.execute(target, "plugin", "health"))
+      .resolves.toMatchObject({
+        kind: "plugin-health",
+        report: { callableCount: 1 },
+      });
+    await expect(commands.execute(target, "plugin", "github@local"))
+      .resolves.toEqual({
+        kind: "plugin-detail",
+        plugin: { id: "github@local" },
+      });
     await expect(commands.execute(target, "plugin", "github@local 检查 PR"))
       .resolves.toEqual({
         kind: "outcome",
@@ -568,8 +627,46 @@ describe("ConversationCommandService", () => {
           steered: false,
         },
       });
+    await expect(commands.execute(target, "plugin", "health 检查状态"))
+      .resolves.toMatchObject({ kind: "outcome" });
+    await expect(commands.execute(target, "plugin", "list 检查目录"))
+      .resolves.toMatchObject({ kind: "outcome" });
     expect(invokePlugin).toHaveBeenCalledWith(target, "github@local", "检查 PR");
-    await expect(commands.execute(target, "plugin", "github@local"))
+    expect(invokePlugin).toHaveBeenCalledWith(target, "health", "检查状态");
+    expect(invokePlugin).toHaveBeenCalledWith(target, "list", "检查目录");
+  });
+
+  it("paginates and searches installed Plugins without changing global selectors", async () => {
+    const plugins = Array.from({ length: 10 }, (_, index) =>
+      installedPlugin(index + 1, index === 9 ? { category: "Special tools" } : {})
+    );
+    const listPlugins = vi.fn(async () => ({ plugins, loadErrorCount: 0 }));
+    const commands = new ConversationCommandService({
+      listPlugins,
+    } as unknown as ConversationUseCases);
+
+    await expect(commands.execute(target, "plugin", "list 2"))
+      .resolves.toMatchObject({
+        kind: "plugins",
+        selectors: ["9", "10"],
+        totalPluginCount: 10,
+        matchedPluginCount: 10,
+        page: 2,
+        pageCount: 2,
+        searchTerm: null,
+      });
+    await expect(commands.execute(target, "plugin", "list search special"))
+      .resolves.toMatchObject({
+        kind: "plugins",
+        selectors: ["10"],
+        matchedPluginCount: 1,
+        page: 1,
+        pageCount: 1,
+        searchTerm: "special",
+      });
+    await expect(commands.execute(target, "plugin", "list 0"))
+      .rejects.toMatchObject({ code: "plugin.usage" });
+    await expect(commands.execute(target, "plugin", "list search"))
       .rejects.toMatchObject({ code: "plugin.usage" });
   });
 

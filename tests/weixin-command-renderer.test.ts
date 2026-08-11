@@ -152,7 +152,17 @@ describe("Weixin command renderer", () => {
       },
       { kind: "skills", entries: [] },
       { kind: "mcp", servers: [] },
-      { kind: "plugins", plugins: [], loadErrorCount: 0 },
+      {
+        kind: "plugins",
+        plugins: [],
+        selectors: [],
+        loadErrorCount: 0,
+        totalPluginCount: 0,
+        matchedPluginCount: 0,
+        page: 1,
+        pageCount: 1,
+        searchTerm: null,
+      },
       {
         kind: "usage",
         result: {
@@ -209,6 +219,41 @@ describe("Weixin command renderer", () => {
       "当前 Thread 暂无 Turn Diff。",
       "当前 Thread 没有 Goal。使用 /goal set <目标> 设置。",
     ]);
+  });
+
+  it("adds copyable Plugin task commands for callable entries", () => {
+    const rendered = renderWeixinCommandResult({
+      kind: "plugins",
+      plugins: [{
+        id: "github@local",
+        name: "github",
+        displayName: "GitHub",
+        marketplaceName: "local",
+        description: null,
+        enabled: true,
+        available: true,
+        version: null,
+        localVersion: null,
+        source: "local",
+        installedAt: null,
+        developerName: null,
+        category: null,
+        capabilities: [],
+        authPolicy: "onUse",
+        eligiblePlanTypes: [],
+        disabledReason: null,
+      }],
+      selectors: ["9"],
+      loadErrorCount: 0,
+      totalPluginCount: 9,
+      matchedPluginCount: 9,
+      page: 2,
+      pageCount: 2,
+      searchTerm: null,
+    });
+
+    expect(rendered).toContain("当前页快捷调用");
+    expect(rendered).toContain("/plugin 9 <任务>");
   });
 
   it("renders startup state and detailed Turn completion statistics", () => {

@@ -49,6 +49,7 @@ import {
 import {
   renderTelegramCommandResult,
   replyTelegramPanel,
+  telegramPluginSelectionToken,
   workspacePermissionFieldKeyboard,
   workspacePermissionPrompt,
 } from "./command-renderer.js";
@@ -75,6 +76,7 @@ import {
   type TelegramTextFilePort,
 } from "./file-input.js";
 import { formatTelegramUserFacingError } from "./user-error-renderer.js";
+import { TelegramPluginTaskPrompts } from "./plugin-task-prompts.js";
 
 export interface TelegramImagePort {
   start(): Promise<void>;
@@ -155,6 +157,7 @@ export class TelegramSurface {
   private readonly actorRegistry: ConversationActorRegistry | undefined;
   private readonly commands: ConversationCommandService;
   private readonly inputs: SurfaceInputCoalescer;
+  private readonly pluginTaskPrompts: TelegramPluginTaskPrompts;
   private readonly now: () => number;
   private readonly debugEnabled: boolean;
   private readonly exchangeRate: (() => ExchangeRateSnapshot | null) | undefined;
@@ -206,6 +209,7 @@ export class TelegramSurface {
     this.priceCurrency = options.priceCurrency;
     this.notificationRecipients = new Set(startupRecipients);
     this.commands = new ConversationCommandService(service);
+    this.pluginTaskPrompts = new TelegramPluginTaskPrompts({ now: this.now });
     const apiExecutor = new TelegramApiExecutor(logger);
     this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor, {
       ...(options.finalMessageFormat
@@ -293,6 +297,7 @@ export class TelegramSurface {
     await this.inputs.close();
     this.imageStore.close();
     this.audioStore.close();
+    this.pluginTaskPrompts.clear();
     await this.interactions.close();
     await this.outbox.close();
     await lifecycleStop;
@@ -456,7 +461,101 @@ export class TelegramSurface {
         "请输入权限 Profile，例如发送：\n/workspaceperm profile :read-only",
       );
     });
+    this.bot.callbackQuery(/^plugin:page:([1-9]\d*)$/, async (context) => {
+      await context.answerCallbackQuery({ text: "正在加载 Plugin" });
+      const result = await this.commands.execute(
+        target(context),
+        "plugin",
+        `list ${context.match[1]}`,
+      );
+      await renderTelegramCommandResult(
+        context,
+        result,
+        this.priceCurrency,
+        this.exchangeRate?.() ?? null,
+      );
+    });
+    this.bot.callbackQuery(
+      /^plugin:select:([A-Za-z0-9_-]{43})$/,
+      async (context) => {
+        await context.answerCallbackQuery({ text: "正在选择 Plugin" });
+        const pluginTarget = target(context);
+        const matches = (await this.service.listPlugins(pluginTarget)).plugins.filter(
+          (plugin) => telegramPluginSelectionToken(plugin.id) === context.match[1],
+        );
+        if (matches.length !== 1) {
+          throw new UserFacingError(
+            "plugin.not-found",
+            "指定的 Plugin 不存在",
+          );
+        }
+        const plugin = matches[0]!;
+        if (!plugin.enabled || !plugin.available) {
+          throw new UserFacingError(
+            "plugin.unavailable",
+            "指定的 Plugin 未启用、被管理员禁用或暂不可调用",
+          );
+        }
+        const prompt = await context.reply(
+          formatTelegramPluginTaskPrompt(plugin.displayName),
+          { reply_markup: { force_reply: true, selective: true } },
+        );
+        this.pluginTaskPrompts.add({
+          chatId: pluginTarget.conversationId,
+          actorId: String(context.from.id),
+          messageId: prompt.message_id,
+          pluginId: plugin.id,
+          pluginName: plugin.displayName,
+        });
+      },
+    );
     this.bot.on("message:text", async (context) => {
+      const pluginPrompt = this.pluginTaskPrompts.consume(
+        String(context.chat.id),
+        String(context.from.id),
+        context.message.reply_to_message?.message_id ?? -1,
+      );
+      if (
+        pluginPrompt.kind === "expired"
+        || (
+          pluginPrompt.kind === "none"
+          && isTelegramPluginTaskPrompt(
+            context.message.reply_to_message,
+            this.bot.botInfo.id,
+          )
+        )
+      ) {
+        await context.reply("Plugin 任务提示已过期，请重新使用 /plugin 选择。", {
+          reply_parameters: {
+            message_id: context.message.message_id,
+            allow_sending_without_reply: true,
+          },
+        });
+        return;
+      }
+      if (pluginPrompt.kind === "forbidden") {
+        await context.reply("该 Plugin 任务提示不属于当前用户。", {
+          reply_parameters: {
+            message_id: context.message.message_id,
+            allow_sending_without_reply: true,
+          },
+        });
+        return;
+      }
+      if (pluginPrompt.kind === "matched") {
+        const result = await this.commands.execute(
+          target(context),
+          "plugin",
+          `${pluginPrompt.pluginId} ${context.message.text.trim()}`,
+        );
+        await renderTelegramCommandResult(
+          context,
+          result,
+          this.priceCurrency,
+          this.exchangeRate?.() ?? null,
+        );
+        return;
+      }
       if (await this.interactions.handleText(context)) {
         return;
       }
@@ -854,6 +953,19 @@ function telegramQuotedText(
 ): string | undefined {
   const text = message?.text?.trim() || message?.caption?.trim();
   return text || undefined;
+}
+
+function formatTelegramPluginTaskPrompt(pluginName: string): string {
+  return `已选择 ${pluginName}。请回复此消息输入任务；提示 10 分钟内有效。`;
+}
+
+function isTelegramPluginTaskPrompt(
+  message: { from?: { id: number }; text?: string } | undefined,
+  botId: number,
+): boolean {
+  return message?.from?.id === botId
+    && message.text?.startsWith("已选择 ") === true
+    && message.text.endsWith("。请回复此消息输入任务；提示 10 分钟内有效。");
 }
 
 function telegramMessageType(context: Context): string | undefined {

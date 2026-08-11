@@ -39,6 +39,8 @@ const maximumMcpHealthFindings = 8;
 const maximumMcpDetailSectionCharacters = 5_000;
 const maximumMcpDescriptionCharacters = 240;
 const maximumMcpOutputCharacters = 20_000;
+const mcpToolAccessNotice =
+  "工具读写属性来自 MCP 上游声明，仅供提示；实际调用仍按审批策略处理。";
 
 export const conversationCommandDescriptions = {
   resume: "列出或恢复 Codex 会话",
@@ -63,7 +65,7 @@ export const conversationCommandDescriptions = {
   fast: "查看或切换 Fast 模式",
   skill: "查看或调用 Skill",
   mcp: "检查或管理 MCP、登录 OAuth、浏览或读取资源",
-  plugin: "列出或调用 Plugin（开发中）",
+  plugin: "列出、查看或调用 Plugin（开发中）",
   usage: "查看账号用量",
   metrics: "查看会话、聚合或异常请求指标",
   limits: "查看套餐与额度",
@@ -108,7 +110,8 @@ export const conversationCommandHelpSections = [
       "/mcp <名称或序号> <tools|resources|templates> [页码] [search <关键词>]",
       "/mcp login <名称或序号>",
       "/mcp resource <名称或序号> <URI>",
-      "/plugin [<名称、完整 ID 或序号> <任务>]",
+      "/plugin · /plugin health · /plugin list [页码] [search <关键词>]",
+      "/plugin <名称、完整 ID 或序号> [任务]",
       "/usage · /limits · /permissions",
       "/metrics session",
       "/metrics <global|providers|models|errors> [24h|7d|30d]",
@@ -513,8 +516,9 @@ export function formatConversationMcpDetail(
     ? formatSelectedMcpDetailSection(server, result.view, selector)
     : [
         ...formatMcpDetailEntries("工具", server.tools, (tool) =>
-          `- ${tool.title ?? tool.name} · ${tool.name}${tool.description ? ` · ${formatMcpDescription(tool.description)}` : ""}`
+          formatMcpToolLine(tool)
         ),
+        mcpToolAccessNotice,
         ...formatMcpDetailEntries("资源", server.resources, (resource) =>
           `- ${resource.title ?? resource.name} · ${resource.uri}${resource.mimeType ? ` · ${formatMcpDescription(resource.mimeType)}` : ""}`
         ),
@@ -548,15 +552,17 @@ function formatSelectedMcpDetailSection(
   selector: string,
 ): string[] {
   if (view.section === "tools") {
-    return formatMcpDetailPage(
-      "工具",
-      server.tools,
-      view,
-      selector,
-      (tool) => [tool.name, tool.title, tool.description],
-      (tool) =>
-        `- ${tool.title ?? tool.name} · ${tool.name}${tool.description ? ` · ${formatMcpDescription(tool.description)}` : ""}`,
-    );
+    return [
+      ...formatMcpDetailPage(
+        "工具",
+        server.tools,
+        view,
+        selector,
+        (tool) => [tool.name, tool.title, tool.description],
+        formatMcpToolLine,
+      ),
+      mcpToolAccessNotice,
+    ];
   }
   if (view.section === "resources") {
     return formatMcpDetailPage(
@@ -589,6 +595,17 @@ function formatSelectedMcpDetailSection(
     ],
     (template) => `- ${template.title ?? template.name} · ${template.uriTemplate}`,
   );
+}
+
+function formatMcpToolLine(
+  tool: Extract<ConversationCommandResult, { kind: "mcp-detail" }>["server"]["tools"][number],
+): string {
+  const access = ({
+    readOnly: "上游标记只读",
+    writeCapable: "可能写入",
+    unknown: "读写属性未知",
+  } as const)[tool.access];
+  return `- ${tool.title ?? tool.name} · ${tool.name} · ${access}${tool.description ? ` · ${formatMcpDescription(tool.description)}` : ""}`;
 }
 
 function formatMcpDetailPage<T>(
@@ -755,26 +772,193 @@ function escapeCodeFence(value: string): string {
 export function formatConversationPlugins(
   result: Extract<ConversationCommandResult, { kind: "plugins" }>,
 ): string {
-  const { plugins, loadErrorCount } = result;
+  const {
+    plugins,
+    selectors,
+    loadErrorCount,
+    totalPluginCount,
+    matchedPluginCount,
+    page,
+    pageCount,
+    searchTerm,
+  } = result;
   const loadErrorNotice = loadErrorCount > 0
     ? [`注意：${loadErrorCount} 个 Plugin Marketplace 加载失败，列表可能不完整。`, ""]
     : [];
-  return plugins.length === 0 && loadErrorCount === 0
-    ? "当前没有已安装的 Plugin。"
-    : toStructuredMarkdownList([
-        `已安装 Plugin（开发中，${plugins.length}）：`,
-        ...loadErrorNotice,
-        ...plugins.map((plugin, index) => {
-          const status = !plugin.available
-            ? "管理员禁用"
-            : plugin.enabled
-              ? "已启用"
-              : "未启用";
-          return `${index + 1}. ${plugin.displayName} · ${plugin.id} · ${status}${plugin.description ? ` · ${plugin.description}` : ""}`;
-        }),
-        "",
-        "使用：/plugin <名称、完整 ID 或序号> <任务>",
-      ].join("\n"));
+  if (totalPluginCount === 0 && loadErrorCount === 0) {
+    return "当前没有已安装的 Plugin。";
+  }
+  const commandSuffix = searchTerm ? ` search ${searchTerm}` : "";
+  const hasReservedPluginName = plugins.some((plugin) =>
+    plugin.name === "health" || plugin.name === "list"
+  );
+  const callableCommands = plugins.flatMap((plugin, index) => {
+    const selector = selectors[index];
+    return plugin.enabled && plugin.available && selector
+      ? [`${plugin.displayName}：/plugin ${selector} <任务>`]
+      : [];
+  });
+  if (page > pageCount) {
+    return toStructuredMarkdownList([
+      `已安装 Plugin（开发中${searchTerm ? `，匹配 ${matchedPluginCount}` : ""}）：`,
+      ...loadErrorNotice,
+      `第 ${page} 页不存在，共 ${pageCount} 页`,
+      `返回第一页：/plugin list 1${commandSuffix}`,
+    ].join("\n"));
+  }
+  if (plugins.length === 0 && searchTerm) {
+    return toStructuredMarkdownList([
+      "已安装 Plugin（开发中，匹配 0 · 第 1/1 页）：",
+      ...loadErrorNotice,
+      `没有匹配“${searchTerm}”的 Plugin。`,
+      "重新搜索：/plugin list search <关键词>",
+    ].join("\n"));
+  }
+  return toStructuredMarkdownList([
+    `已安装 Plugin（开发中，${searchTerm ? `匹配 ${matchedPluginCount}` : `共 ${totalPluginCount}`} · 第 ${page}/${pageCount} 页）：`,
+    ...loadErrorNotice,
+    ...plugins.map((plugin, index) => {
+      const status = !plugin.available
+        ? "不可用"
+        : plugin.enabled
+          ? "已启用"
+          : "未启用";
+      return `${selectors[index]}. ${plugin.displayName} · ${plugin.id} · ${status}${plugin.description ? ` · ${plugin.description}` : ""}`;
+    }),
+    "",
+    ...(page > 1 ? [`上一页：/plugin list ${page - 1}${commandSuffix}`] : []),
+    ...(page < pageCount ? [`下一页：/plugin list ${page + 1}${commandSuffix}`] : []),
+    ...(callableCommands.length > 0
+      ? ["当前页快捷调用：", ...callableCommands]
+      : []),
+    "健康检查：/plugin health",
+    "搜索：/plugin list search <关键词>",
+    ...(hasReservedPluginName
+      ? ["提示：名称为 health 或 list 时，查看详情请使用完整 ID 或序号。"]
+      : []),
+    "详情：/plugin <名称、完整 ID 或序号>",
+    "调用：/plugin <名称、完整 ID 或序号> <任务>",
+  ].join("\n"));
+}
+
+export function formatConversationPluginHealth(
+  result: Extract<ConversationCommandResult, { kind: "plugin-health" }>,
+): string {
+  const { report } = result;
+  const visibleIssues = report.issues.slice(0, 8);
+  const lines = [
+    "Plugin 健康（开发中）",
+    `已安装：${report.installedCount}`,
+    `已启用：${report.enabledCount}`,
+    `可调用：${report.callableCount}`,
+    ...(report.marketplaceLoadErrorCount > 0
+      ? [`提示：${report.marketplaceLoadErrorCount} 个 Marketplace 加载失败，结果可能不完整。`]
+      : []),
+    ...(visibleIssues.length > 0 ? ["", "需要处理："] : []),
+    ...visibleIssues.map((issue) =>
+      `${issue.plugin} · ${pluginHealthIssueLabel(issue.type, issue.reason)} · 详情：/plugin ${issue.selector}`
+    ),
+    ...(report.issues.length > visibleIssues.length
+      ? [`其余 ${report.issues.length - visibleIssues.length} 项已省略，请使用 /plugin 分页查看。`]
+      : []),
+    ...(report.issues.length === 0 && report.marketplaceLoadErrorCount === 0
+      ? ["", "没有需要处理的问题。"]
+      : []),
+  ];
+  return toStructuredMarkdownList(lines.join("\n"));
+}
+
+function pluginHealthIssueLabel(
+  type: Extract<ConversationCommandResult, { kind: "plugin-health" }>["report"]["issues"][number]["type"],
+  reason: Extract<ConversationCommandResult, { kind: "plugin-health" }>["report"]["issues"][number]["reason"],
+): string {
+  if (type === "notEnabled") return "未启用";
+  return reason ? pluginDisabledReasonLabel(reason) : "上游标记不可用";
+}
+
+export function formatConversationPluginDetail(
+  result: Extract<ConversationCommandResult, { kind: "plugin-detail" }>,
+): string {
+  const plugin = result.plugin;
+  return toStructuredMarkdownList([
+    `Plugin：${plugin.displayName}`,
+    `ID：${plugin.id}`,
+    `Marketplace：${plugin.marketplaceName}`,
+    `状态：${pluginStatusLabel(plugin)}`,
+    ...(plugin.developerName ? [`开发者：${plugin.developerName}`] : []),
+    ...(plugin.category ? [`分类：${plugin.category}`] : []),
+    `来源：${pluginSourceLabel(plugin.source)}`,
+    `远端版本：${plugin.version ?? "未提供"}`,
+    `本地版本：${plugin.localVersion ?? "未提供"}`,
+    `安装时间：${formatPluginInstalledAt(plugin.installedAt)}`,
+    `认证时机：${pluginAuthPolicyLabel(plugin.authPolicy)}`,
+    ...(plugin.capabilities.length > 0
+      ? [`能力：${formatPluginValues(plugin.capabilities)}`]
+      : []),
+    ...(plugin.disabledReason
+      ? [`不可用原因：${pluginDisabledReasonLabel(plugin.disabledReason)}`]
+      : []),
+    ...(plugin.eligiblePlanTypes.length > 0
+      ? [`适用套餐（上游标识）：${formatPluginValues(plugin.eligiblePlanTypes)}`]
+      : []),
+    ...(plugin.description ? [`说明：${plugin.description}`] : []),
+    "",
+    plugin.enabled && plugin.available
+      ? `调用：/plugin ${plugin.id} <任务>`
+      : "当前 Plugin 不可调用。",
+    "提示：Plugin API 仍处于开发中。",
+  ].join("\n"));
+}
+
+function pluginStatusLabel(
+  plugin: Extract<ConversationCommandResult, { kind: "plugin-detail" }>["plugin"],
+): string {
+  if (!plugin.available) return "不可用";
+  return plugin.enabled ? "已启用" : "未启用";
+}
+
+function pluginSourceLabel(
+  source: Extract<ConversationCommandResult, { kind: "plugin-detail" }>["plugin"]["source"],
+): string {
+  return ({
+    local: "本地",
+    git: "Git",
+    npm: "npm",
+    remote: "远端",
+  } as const)[source];
+}
+
+function formatPluginInstalledAt(value: number | null): string {
+  if (value === null) return "未提供";
+  const date = new Date(value * 1_000);
+  return Number.isNaN(date.getTime())
+    ? "未提供"
+    : date.toISOString().replace(".000Z", "Z");
+}
+
+function pluginDisabledReasonLabel(
+  reason: NonNullable<
+    Extract<ConversationCommandResult, { kind: "plugin-detail" }>["plugin"]["disabledReason"]
+  >,
+): string {
+  return ({
+    disabled_by_admin: "被管理员禁用",
+    plan_not_eligible: "当前套餐不可用",
+    required_app_unavailable: "所需 App 不可用",
+    unknown: "上游未提供明确原因",
+  } as const)[reason];
+}
+
+function pluginAuthPolicyLabel(
+  policy: Extract<ConversationCommandResult, { kind: "plugin-detail" }>["plugin"]["authPolicy"],
+): string {
+  return policy === "onInstall" ? "安装时" : "使用时";
+}
+
+function formatPluginValues(values: readonly string[]): string {
+  const visible = values.slice(0, 8);
+  const omittedCount = values.length - visible.length;
+  return `${visible.join("、")}${omittedCount > 0 ? `（另有 ${omittedCount} 项）` : ""}`;
 }
 
 export function formatConversationPermissions(

@@ -30,6 +30,7 @@ import { supportsMcpOAuthLogin } from "./mcp-port.js";
 import type {
   InstalledPlugin,
   InstalledPluginCatalog,
+  PluginHealthReport,
   PluginQueryPort,
 } from "./plugin-port.js";
 import type {
@@ -241,6 +242,8 @@ export interface ConversationUseCases {
     uri: string,
   ): Promise<McpResourceReadResult>;
   listPlugins(target: ConversationTarget): Promise<InstalledPluginCatalog>;
+  pluginHealth(target: ConversationTarget): Promise<PluginHealthReport>;
+  pluginDetail(target: ConversationTarget, selector: string): Promise<InstalledPlugin>;
   accountUsage(): Promise<AccountUsage>;
   accountRateLimits(): Promise<AccountRateLimits>;
   providerAccountUsage(target: ConversationTarget): Promise<ProviderAccountUsage>;
@@ -1144,6 +1147,45 @@ export class ConversationService implements ConversationUseCases {
   listPlugins(target: ConversationTarget): Promise<InstalledPluginCatalog> {
     this.requirePluginApiEnabled();
     return this.queries.listPlugins(this.router.workspace(target).cwd);
+  }
+
+  async pluginHealth(target: ConversationTarget): Promise<PluginHealthReport> {
+    const catalog = await this.listPlugins(target);
+    const issues: PluginHealthReport["issues"] = [];
+    catalog.plugins.forEach((plugin, index) => {
+      if (!plugin.available) {
+        issues.push({
+          type: "unavailable",
+          plugin: plugin.displayName,
+          selector: String(index + 1),
+          reason: plugin.disabledReason,
+        });
+      } else if (!plugin.enabled) {
+        issues.push({
+          type: "notEnabled",
+          plugin: plugin.displayName,
+          selector: String(index + 1),
+          reason: null,
+        });
+      }
+    });
+    return {
+      installedCount: catalog.plugins.length,
+      enabledCount: catalog.plugins.filter((plugin) => plugin.enabled).length,
+      callableCount: catalog.plugins.filter((plugin) =>
+        plugin.enabled && plugin.available
+      ).length,
+      marketplaceLoadErrorCount: catalog.loadErrorCount,
+      issues,
+    };
+  }
+
+  pluginDetail(
+    target: ConversationTarget,
+    selector: string,
+  ): Promise<InstalledPlugin> {
+    this.requirePluginApiEnabled();
+    return this.resolvePlugin(this.router.workspace(target).cwd, selector);
   }
 
   private async resolvePlugin(

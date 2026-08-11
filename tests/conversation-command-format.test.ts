@@ -13,6 +13,8 @@ import {
   formatConversationMcpReload,
   formatConversationMcpResource,
   formatConversationModels,
+  formatConversationPluginDetail,
+  formatConversationPluginHealth,
   formatConversationPlugins,
   formatConversationStatus,
   formatConversationUsage,
@@ -86,7 +88,8 @@ describe("provider-aware conversation command formatting", () => {
 
   it("renders the experimental Plugin list and invocation outcomes", () => {
     const help = conversationCommandHelpLines.join("\n");
-    expect(help).toContain("/plugin [<名称、完整 ID 或序号> <任务>]");
+    expect(help).toContain("/plugin · /plugin health");
+    expect(help).toContain("/plugin list [页码] [search <关键词>]");
     expect(help).not.toContain("/plugins");
     const rendered = formatConversationPlugins({
       kind: "plugins",
@@ -98,14 +101,189 @@ describe("provider-aware conversation command formatting", () => {
         description: "GitHub development tools",
         enabled: true,
         available: true,
+        version: "0.1.8",
+        localVersion: "0.1.8",
+        source: "remote",
+        installedAt: 1_786_294_800,
+        developerName: "OpenAI",
+        category: "Developer tools",
+        capabilities: ["Repository inspection"],
+        authPolicy: "onUse",
+        eligiblePlanTypes: [],
+        disabledReason: null,
       }],
+      selectors: ["1"],
       loadErrorCount: 1,
+      totalPluginCount: 1,
+      matchedPluginCount: 1,
+      page: 1,
+      pageCount: 1,
+      searchTerm: null,
     });
 
-    expect(rendered).toContain("已安装 Plugin（开发中，1）");
+    expect(rendered).toContain("已安装 Plugin（开发中，共 1 · 第 1/1 页）");
     expect(rendered).toContain("1. GitHub · github@local");
     expect(rendered).toContain("1 个 Plugin Marketplace 加载失败");
-    expect(rendered).toContain("/plugin <名称、完整 ID 或序号> <任务>");
+    expect(rendered).toContain("详情：/plugin <名称、完整 ID 或序号>");
+    expect(rendered).toContain("调用：/plugin <名称、完整 ID 或序号> <任务>");
+    const unavailableList = formatConversationPlugins({
+      kind: "plugins",
+      plugins: [{
+        ...detailPluginFixture,
+        enabled: false,
+        available: false,
+        disabledReason: "plan_not_eligible",
+      }],
+      selectors: ["1"],
+      loadErrorCount: 0,
+      totalPluginCount: 1,
+      matchedPluginCount: 1,
+      page: 1,
+      pageCount: 1,
+      searchTerm: null,
+    });
+    expect(unavailableList).toContain("不可用");
+    expect(unavailableList).not.toContain("管理员禁用");
+    const reservedNameList = formatConversationPlugins({
+      kind: "plugins",
+      plugins: [{
+        ...detailPluginFixture,
+        id: "health@local",
+        name: "health",
+        displayName: "Health",
+      }],
+      selectors: ["4"],
+      loadErrorCount: 0,
+      totalPluginCount: 4,
+      matchedPluginCount: 4,
+      page: 1,
+      pageCount: 1,
+      searchTerm: null,
+    });
+    expect(reservedNameList).toContain(
+      "名称为 health 或 list 时，查看详情请使用完整 ID 或序号",
+    );
+    const searchedPage = formatConversationPlugins({
+      kind: "plugins",
+      plugins: [detailPluginFixture],
+      selectors: ["9"],
+      loadErrorCount: 0,
+      totalPluginCount: 12,
+      matchedPluginCount: 9,
+      page: 2,
+      pageCount: 2,
+      searchTerm: "github",
+    });
+    expect(searchedPage).toContain("匹配 9 · 第 2/2 页");
+    expect(searchedPage).toContain("9. GitHub");
+    expect(searchedPage).toContain("上一页：/plugin list 1 search github");
+    const missingPage = formatConversationPlugins({
+      kind: "plugins",
+      plugins: [],
+      selectors: [],
+      loadErrorCount: 0,
+      totalPluginCount: 12,
+      matchedPluginCount: 9,
+      page: 3,
+      pageCount: 2,
+      searchTerm: "github",
+    });
+    expect(missingPage).toContain("第 3 页不存在，共 2 页");
+    expect(missingPage).toContain("/plugin list 1 search github");
+    const incompleteMissingPage = formatConversationPlugins({
+      kind: "plugins",
+      plugins: [],
+      selectors: [],
+      loadErrorCount: 2,
+      totalPluginCount: 12,
+      matchedPluginCount: 9,
+      page: 3,
+      pageCount: 2,
+      searchTerm: "github",
+    });
+    expect(incompleteMissingPage).toContain("2 个 Plugin Marketplace 加载失败");
+    const incompleteEmptySearch = formatConversationPlugins({
+      kind: "plugins",
+      plugins: [],
+      selectors: [],
+      loadErrorCount: 2,
+      totalPluginCount: 12,
+      matchedPluginCount: 0,
+      page: 1,
+      pageCount: 1,
+      searchTerm: "missing",
+    });
+    expect(incompleteEmptySearch).toContain("2 个 Plugin Marketplace 加载失败");
+    const health = formatConversationPluginHealth({
+      kind: "plugin-health",
+      report: {
+        installedCount: 12,
+        enabledCount: 10,
+        callableCount: 2,
+        marketplaceLoadErrorCount: 1,
+        issues: Array.from({ length: 10 }, (_, index) => ({
+          type: index === 0 ? "notEnabled" as const : "unavailable" as const,
+          plugin: `Plugin ${index + 1}`,
+          selector: String(index + 1),
+          reason: index === 0 ? null : "plan_not_eligible" as const,
+        })),
+      },
+    });
+    expect(health).toContain("Plugin 健康（开发中）");
+    expect(health).toContain("可调用：2");
+    expect(health).toContain("Plugin 1 · 未启用 · 详情：/plugin 1");
+    expect(health).toContain("Plugin 8");
+    expect(health).not.toContain("Plugin 9 ·");
+    expect(health).toContain("其余 2 项已省略");
+    const detail = formatConversationPluginDetail({
+      kind: "plugin-detail",
+      plugin: {
+        id: "github@openai-curated-remote",
+        name: "github",
+        displayName: "GitHub",
+        marketplaceName: "openai-curated-remote",
+        description: "GitHub development tools",
+        enabled: true,
+        available: true,
+        version: "0.1.8",
+        localVersion: "0.1.8-2841cf9749ae",
+        source: "remote",
+        installedAt: 1_786_294_800,
+        developerName: "OpenAI",
+        category: "Developer tools",
+        capabilities: Array.from({ length: 10 }, (_, index) => `capability-${index + 1}`),
+        authPolicy: "onUse",
+        eligiblePlanTypes: [],
+        disabledReason: null,
+      },
+    });
+    expect(detail).toContain("Plugin：GitHub");
+    expect(detail).toContain("来源：远端");
+    expect(detail).toContain("远端版本：0.1.8");
+    expect(detail).toContain("本地版本：0.1.8-2841cf9749ae");
+    expect(detail).toContain("开发者：OpenAI");
+    expect(detail).toContain("分类：Developer tools");
+    expect(detail).toContain("认证时机：使用时");
+    expect(detail).toContain("能力：capability-1");
+    expect(detail).toContain("capability-8（另有 2 项）");
+    expect(detail).not.toContain("capability-9");
+    expect(detail).toContain("调用：/plugin github@openai-curated-remote <任务>");
+    const unavailable = formatConversationPluginDetail({
+      kind: "plugin-detail",
+      plugin: {
+        ...detailPluginFixture,
+        enabled: false,
+        available: false,
+        disabledReason: "plan_not_eligible",
+        authPolicy: "onInstall",
+        eligiblePlanTypes: ["plus", "pro"],
+      },
+    });
+    expect(unavailable).toContain("状态：不可用");
+    expect(unavailable).toContain("不可用原因：当前套餐不可用");
+    expect(unavailable).toContain("认证时机：安装时");
+    expect(unavailable).toContain("适用套餐（上游标识）：plus、pro");
+    expect(unavailable).toContain("当前 Plugin 不可调用");
     const outcome = formatConversationCommandOutcome({
       type: "plugin.started",
       pluginName: "GitHub",
@@ -166,7 +344,7 @@ describe("provider-aware conversation command formatting", () => {
         serverTitle: "Project Tools",
         serverVersion: "1.0.0",
         serverDescription: null,
-        tools: [{ name: "search", title: "Search", description: null }],
+        tools: [{ name: "search", title: "Search", description: null, access: "readOnly" }],
         resources: [{
           uri: "project://readme",
           name: "readme",
@@ -179,6 +357,8 @@ describe("provider-aware conversation command formatting", () => {
     });
     expect(detail).toContain("MCP Server：Project Tools");
     expect(detail).toContain("Search · search");
+    expect(detail).toContain("上游标记只读");
+    expect(detail).toContain("实际调用仍按审批策略处理");
     expect(detail).toContain("project://readme");
     expect(detail).toContain("OAuth：/mcp login 1");
     expect(detail).toContain("浏览工具：/mcp 1 tools");
@@ -217,6 +397,7 @@ describe("provider-aware conversation command formatting", () => {
           name: `tool-${index + 1}`,
           title: `Tool ${index + 1}`,
           description: "d".repeat(2_000),
+          access: "unknown" as const,
         })),
         resources: Array.from({ length: 20 }, (_, index) => ({
           uri: index === 0
@@ -340,6 +521,7 @@ describe("provider-aware conversation command formatting", () => {
           name: `github-tool-${index + 1}`,
           title: `GitHub Tool ${index + 1}`,
           description: "GitHub connector tool",
+          access: index % 2 === 0 ? "readOnly" as const : "writeCapable" as const,
         })),
         resources: [{
           uri: "plugin://github",
@@ -375,7 +557,7 @@ describe("provider-aware conversation command formatting", () => {
         serverTitle: null,
         serverVersion: "0.1.0",
         serverDescription: null,
-        tools: [{ name: "github", title: null, description: null }],
+        tools: [{ name: "github", title: null, description: null, access: "unknown" }],
         resources: [],
         resourceTemplates: [],
       },
@@ -1091,6 +1273,26 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).not.toContain("**");
   });
 });
+
+const detailPluginFixture = {
+  id: "github@openai-curated-remote",
+  name: "github",
+  displayName: "GitHub",
+  marketplaceName: "openai-curated-remote",
+  description: "GitHub development tools",
+  enabled: true,
+  available: true,
+  version: "0.1.8",
+  localVersion: "0.1.8-2841cf9749ae",
+  source: "remote" as const,
+  installedAt: 1_786_294_800,
+  developerName: "OpenAI",
+  category: "Developer tools",
+  capabilities: ["Repository inspection"],
+  authPolicy: "onUse" as const,
+  eligiblePlanTypes: [],
+  disabledReason: null,
+};
 
 function breakdown(totalTokens: number) {
   return {

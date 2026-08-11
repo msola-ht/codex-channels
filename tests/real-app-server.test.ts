@@ -723,6 +723,7 @@ contractSuite("isolated Codex App Server state contract", () => {
     expect(approvalProbe?.serverVersion).toBe("1.0.0");
     expect(approvalProbe?.tools.some((tool) => tool.name === "approval_probe")).toBe(true);
     const approvalTool = approvalProbe?.tools.find((tool) => tool.name === "approval_probe");
+    expect(approvalTool?.access).toBe("writeCapable");
     expect(approvalTool?.description).toHaveLength(2_000);
     expect(approvalTool?.description).toMatch(/^Emit approval details x+$/u);
     expect(approvalProbe?.resources).toContainEqual(expect.objectContaining({
@@ -800,7 +801,18 @@ contractSuite("isolated Codex App Server state contract", () => {
       typeof plugin.id === "string"
       && typeof plugin.name === "string"
       && typeof plugin.enabled === "boolean"
-      && typeof plugin.available === "boolean")).toBe(true);
+      && typeof plugin.available === "boolean"
+      && (plugin.version === null || typeof plugin.version === "string")
+      && (plugin.localVersion === null || typeof plugin.localVersion === "string")
+      && ["local", "git", "npm", "remote"].includes(plugin.source)
+      && (plugin.installedAt === null || Number.isSafeInteger(plugin.installedAt))
+      && (plugin.developerName === null || typeof plugin.developerName === "string")
+      && (plugin.category === null || typeof plugin.category === "string")
+      && plugin.capabilities.every((capability) => typeof capability === "string")
+      && ["onInstall", "onUse"].includes(plugin.authPolicy)
+      && plugin.eligiblePlanTypes.every((plan) => typeof plan === "string")
+      && (plugin.disabledReason === null || typeof plugin.disabledReason === "string")))
+      .toBe(true);
   });
 
   it("accepts an installed Plugin marker and official mention input together", async () => {

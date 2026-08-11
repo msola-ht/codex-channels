@@ -34,6 +34,16 @@ describe("formatWeixinOperation", () => {
     expect(text).toContain("first line ");
     expect(text).toContain("… · 耗时：125毫秒");
   });
+
+  it("shows the MCP read-only hint", () => {
+    expect(formatWeixinOperation({
+      itemId: "mcp-read",
+      kind: "mcpTool",
+      detail: "github.get_issue",
+      status: "completed",
+      readOnlyHint: true,
+    })).toContain("调用 MCP 工具 · 已完成 · 上游标记只读");
+  });
 });
 
 const operationFixture: OperationUpdate = {

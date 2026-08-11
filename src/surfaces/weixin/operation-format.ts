@@ -2,6 +2,7 @@ import type { OperationUpdate } from "../../conversation-core/index.js";
 import { formatElapsedDuration } from "../elapsed-duration.js";
 import {
   compactOperationDetail,
+  mcpToolCapabilityLabel,
   operationStatus,
   operationTitle,
   redactOperationDetail,
@@ -16,10 +17,12 @@ export function formatWeixinOperation(
   record: OperationUpdate,
   display: Exclude<OperationUpdateDisplay, "hidden"> = "full",
 ): string {
+  const capability = mcpToolCapabilityLabel(record);
   const heading = [
     operationTitle(record),
     operationStatus(record.status),
     ...(record.exitCode === undefined ? [] : [`exit ${record.exitCode}`]),
+    ...(capability ? [capability] : []),
   ].join(" · ");
   const duration = record.durationMs === undefined || record.durationMs <= 0
     ? null

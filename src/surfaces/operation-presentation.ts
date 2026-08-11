@@ -23,7 +23,15 @@ export function operationMetadata(record: OperationUpdate): string[] {
       ? null
       : formatElapsedDuration(record.durationMs),
     record.exitCode === undefined ? null : `exit ${record.exitCode}`,
+    mcpToolCapabilityLabel(record),
   ].filter((value): value is string => value !== null);
+}
+
+export function mcpToolCapabilityLabel(record: OperationUpdate): string | null {
+  if (record.kind !== "mcpTool") return null;
+  if (record.readOnlyHint === true) return "上游标记只读";
+  if (record.readOnlyHint === false) return "可能写入";
+  return "读写属性未知";
 }
 
 export function compactOperationDetail(value: string): string {

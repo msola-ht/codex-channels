@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { Context } from "grammy";
 import type { InlineKeyboardMarkup } from "grammy/types";
 
@@ -21,6 +23,8 @@ import {
   formatConversationMcpLogin,
   formatConversationMcpReload,
   formatConversationMcpResource,
+  formatConversationPluginDetail,
+  formatConversationPluginHealth,
   formatConversationPlugins,
   formatConversationModels,
   formatConversationPermissions,
@@ -116,7 +120,17 @@ export async function renderTelegramCommandResult(
       await replyTelegramPanel(context, formatConversationMcpResource(result));
       return;
     case "plugins":
-      await replyTelegramPanel(context, formatConversationPlugins(result));
+      await replyTelegramPanel(
+        context,
+        formatConversationPlugins(result),
+        pluginKeyboard(result),
+      );
+      return;
+    case "plugin-health":
+      await replyTelegramPanel(context, formatConversationPluginHealth(result));
+      return;
+    case "plugin-detail":
+      await replyTelegramPanel(context, formatConversationPluginDetail(result));
       return;
     case "usage":
       await replyTelegramPanel(context, formatConversationUsage(result));
@@ -163,6 +177,41 @@ export function workspacePermissionKeyboard(): InlineKeyboardMarkup {
       { text: "权限 Profile", callback_data: "wp:profile" },
     ]],
   };
+}
+
+export function pluginKeyboard(
+  result: Extract<ConversationCommandResult, { kind: "plugins" }>,
+): InlineKeyboardMarkup | undefined {
+  const pluginRows = result.plugins.flatMap((plugin, index) => {
+    const selector = result.selectors[index];
+    return plugin.enabled && plugin.available && selector
+      ? [[{
+          text: boundedButtonLabel(plugin.displayName),
+          callback_data: `plugin:select:${telegramPluginSelectionToken(plugin.id)}`,
+        }]]
+      : [];
+  });
+  const pageButtons = result.searchTerm === null
+    ? [
+        ...(result.page > 1
+          ? [{ text: "上一页", callback_data: `plugin:page:${result.page - 1}` }]
+          : []),
+        ...(result.page < result.pageCount
+          ? [{ text: "下一页", callback_data: `plugin:page:${result.page + 1}` }]
+          : []),
+      ]
+    : [];
+  const inlineKeyboard = [
+    ...pluginRows,
+    ...(pageButtons.length > 0 ? [pageButtons] : []),
+  ];
+  return inlineKeyboard.length > 0
+    ? { inline_keyboard: inlineKeyboard }
+    : undefined;
+}
+
+export function telegramPluginSelectionToken(pluginId: string): string {
+  return createHash("sha256").update(pluginId).digest("base64url");
 }
 
 export function workspacePermissionFieldKeyboard(
@@ -232,4 +281,8 @@ export async function replyTelegramPanel(
       ...(index === 0 ? {} : { disable_notification: true }),
     });
   }
+}
+
+function boundedButtonLabel(value: string): string {
+  return value.length <= 48 ? value : `${value.slice(0, 47)}…`;
 }

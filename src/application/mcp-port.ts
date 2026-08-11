@@ -19,6 +19,7 @@ export interface McpToolSummary {
   name: string;
   title: string | null;
   description: string | null;
+  access: "readOnly" | "writeCapable" | "unknown";
 }
 
 export interface McpResourceSummary {

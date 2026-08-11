@@ -33,11 +33,21 @@ describe("Feishu operation log formatter", () => {
       status: "completed",
       durationMs: 2_623,
     })).toContain(
-      "**调用 MCP 工具 · 已完成**\n"
+      "**调用 MCP 工具 · 已完成** · 读写属性未知\n"
       + "具体内容：`codex_apps.list_mcp_resources`\n\n"
       + "---\n"
       + "**耗时：** 3秒",
     );
+  });
+
+  it("shows MCP tool capability hints without changing the outcome", () => {
+    expect(formatFeishuOperation({
+      itemId: "mcp-write",
+      kind: "mcpTool",
+      detail: "github.create_issue",
+      status: "completed",
+      readOnlyHint: false,
+    })).toContain("已完成** · 可能写入");
   });
 
   it("renders one-line details in compact mode", () => {

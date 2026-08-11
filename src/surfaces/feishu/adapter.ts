@@ -405,6 +405,7 @@ export class FeishuConversationAdapter {
         input === ""
         || action === "sessions"
         || action === "archived"
+        || (action === "plugin" && result.kind === "plugins")
       )
         ? renderCommandCenterChoices(action, result)
         : undefined;
@@ -907,17 +908,37 @@ function renderCommandCenterChoices(
     const callable = result.plugins.filter((plugin) =>
       plugin.enabled && plugin.available
     );
-    if (callable.length === 0) {
+    const searchSuffix = result.searchTerm ? ` search ${result.searchTerm}` : "";
+    const navigation = [
+      ...(result.page > 1
+        ? [{
+            label: "上一页",
+            action: "plugin" as const,
+            input: `list ${result.page - 1}${searchSuffix}`,
+          }]
+        : []),
+      ...(result.page < result.pageCount
+        ? [{
+            label: "下一页",
+            action: "plugin" as const,
+            input: `list ${result.page + 1}${searchSuffix}`,
+          }]
+        : []),
+    ];
+    if (callable.length === 0 && navigation.length === 0) {
       return undefined;
     }
     return {
-      title: "选择 Plugin",
-      description: "仅显示已启用且可调用的 Plugin。",
-      choices: callable.map((plugin) => ({
-        label: `${plugin.displayName} · ${plugin.id}`,
-        action: "plugin",
-        input: plugin.id,
-      })),
+      title: `选择 Plugin · 第 ${result.page}/${result.pageCount} 页`,
+      description: "仅显示当前页已启用且可调用的 Plugin，可继续翻页。",
+      choices: [
+        ...callable.map((plugin) => ({
+          label: `${plugin.displayName} · ${plugin.id}`,
+          action: "plugin" as const,
+          input: plugin.id,
+        })),
+        ...navigation,
+      ],
     };
   }
   if (

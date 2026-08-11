@@ -625,7 +625,7 @@ describe("WeixinOutbox", () => {
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
       "工具查询 · 已完成\n\n"
       + "MCP 工具：1 次\n"
-      + "  - codex＿apps.github.fetch＿pr：1 次\n"
+      + "  - codex＿apps.github.fetch＿pr · 读写属性未知：1 次\n"
       + "动态工具：1 次\n"
       + "  - codex＿apps.github.update＿pull＿request：1 次\n\n"
       + "总耗时：250毫秒",
