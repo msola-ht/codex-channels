@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { OperationUpdate } from "../src/conversation-core/index.js";
 import {
-  operationSummaryRows,
+  operationSummaryGroups,
   OperationUpdateBuffer,
 } from "../src/surfaces/operation-update-buffer.js";
 
@@ -23,9 +23,19 @@ describe("OperationUpdateBuffer", () => {
     expect(buffered?.target).toBe("chat");
     expect(buffered?.summary.records).toHaveLength(2);
     expect(buffered?.summary.totalDurationMs).toBe(350);
-    expect(buffered && operationSummaryRows(buffered.summary)).toEqual([
-      "MCP 工具：1 次",
-      "网页搜索：1 次",
+    expect(buffered && operationSummaryGroups(buffered.summary)).toEqual([
+      {
+        label: "MCP 工具",
+        count: 1,
+        details: [],
+        omittedDetailCount: 0,
+      },
+      {
+        label: "网页搜索",
+        count: 1,
+        details: [],
+        omittedDetailCount: 0,
+      },
     ]);
     expect(buffer.take("thread:turn")).toBeNull();
   });

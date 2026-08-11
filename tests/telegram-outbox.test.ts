@@ -895,7 +895,9 @@ describe("TelegramOutbox", () => {
     expect(api.sent).toEqual([
       "<b>操作过程</b>\n\n<b>工具查询 · 已完成</b>\n"
       + "• MCP 工具：2 次\n"
-      + "• 动态工具：1 次",
+      + "  ◦ <code>docs.read</code>：2 次\n"
+      + "• 动态工具：1 次\n"
+      + "  ◦ <code>docs.search</code>：1 次",
       "查询完成",
       turnCompletedPanel,
     ]);

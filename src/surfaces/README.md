@@ -157,8 +157,9 @@ Workspace 操作提示只在 Telegram 实际提供切换按钮时声明可点击
 Telegram HTML、飞书 CardKit Markdown 与微信安全文本的转义、布局、分组和发送仍由各自
 Adapter 负责。
 `operation-update-buffer.ts` 在 Surface 边界按 Turn 有界暂存成功的查询操作；最终回复前单项
-保持原详情，多项生成一次分类计数汇总。飞书网页搜索完成后直接发送，不进入该缓冲；失败、
-拒绝和其他操作同样不进入缓冲。
+保持原详情，多项生成一次分类计数汇总，并展示最多 8 个去重后的详情及各自次数；
+超出时明确省略数量。飞书网页搜索完成后直接发送，不进入该缓冲；失败、拒绝和其他操作同样
+不进入缓冲。
 `generated-image.ts` 对 App Server `imageGeneration.savedPath` 指向的生成图片和
 `codexc channel send-image` 提交的渠道 spool 图片执行同一读取校验：绝对路径、拒绝符号链接、
 空文件、超过 10 MiB 的内容和非 PNG/JPEG 签名；Telegram、飞书与微信分别负责平台上传和发送，

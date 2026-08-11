@@ -605,15 +605,30 @@ describe("WeixinOutbox", () => {
   it("summarizes repeated query operations once before Turn completion", async () => {
     const { outbox, sendText } = outboxFixture();
 
-    outbox.handle(operationUpdated("completed", "mcpTool", "mcp-1"));
-    outbox.handle(operationUpdated("completed", "dynamicTool", "tool-1"));
+    outbox.handle(operationUpdated(
+      "completed",
+      "mcpTool",
+      "mcp-1",
+      "codex_apps.github.fetch_pr",
+    ));
+    outbox.handle(operationUpdated(
+      "completed",
+      "dynamicTool",
+      "tool-1",
+      "codex_apps.github.update_pull_request",
+    ));
     expect(sendText).not.toHaveBeenCalled();
 
     outbox.handle(turnCompleted("completed"));
     await outbox.close();
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      "工具查询 · 已完成\n\nMCP 工具：1 次\n动态工具：1 次\n\n总耗时：250毫秒",
+      "工具查询 · 已完成\n\n"
+      + "MCP 工具：1 次\n"
+      + "  - codex＿apps.github.fetch＿pr：1 次\n"
+      + "动态工具：1 次\n"
+      + "  - codex＿apps.github.update＿pull＿request：1 次\n\n"
+      + "总耗时：250毫秒",
       "**本次运行 · 已完成**",
     ]);
   });
@@ -1028,6 +1043,7 @@ function operationUpdated(
     { type: "operation.updated" }
   >["operation"]["kind"] = "command",
   itemId = "command",
+  detail = "git status --short",
 ): Extract<OutputEvent, { type: "operation.updated" }> {
   return {
     type: "operation.updated",
@@ -1037,7 +1053,7 @@ function operationUpdated(
     operation: {
       itemId,
       kind,
-      detail: "git status --short",
+      detail,
       status,
       ...(status === "running"
         ? {}

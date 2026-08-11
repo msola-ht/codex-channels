@@ -8,7 +8,7 @@ import {
 } from "../operation-presentation.js";
 import type { OperationUpdateDisplay } from "../types.js";
 import {
-  operationSummaryRows,
+  operationSummaryGroups,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
 
@@ -46,9 +46,17 @@ export function formatFeishuOperationSummary(
   if (summary.records.length === 1) {
     return formatFeishuOperation(summary.records[0]!, display);
   }
+  const groups = operationSummaryGroups(summary);
   const markdown = [
     "**工具查询 · 已完成**",
-    ...operationSummaryRows(summary).map((row) => `- ${row}`),
+    ...groups.flatMap((group) => [
+      `- ${group.label}：${group.count} 次`,
+      ...group.details.map((detail) =>
+        `  - \`${inlineOperationDetail(compactOperationDetail(detail.detail))}\`：${detail.count} 次`),
+      ...(group.omittedDetailCount > 0
+        ? [`  - 其余 ${group.omittedDetailCount} 项明细已省略`]
+        : []),
+    ]),
   ].join("\n");
   return withOperationDurationFooter(markdown, summary.totalDurationMs);
 }
