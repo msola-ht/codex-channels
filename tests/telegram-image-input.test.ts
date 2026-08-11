@@ -10,6 +10,7 @@ import type { ConversationUseCases } from "../src/application/conversation-servi
 import { UserFacingError, type OutputEvent } from "../src/conversation-core/index.js";
 import { EventBus } from "../src/event-bus/event-bus.js";
 import { TelegramAccessPolicy } from "../src/policy/telegram-access.js";
+import { ThreadSectionAccessPolicy } from "../src/policy/thread-section-access.js";
 import {
   TelegramSurface,
   type TelegramAudioPort,
@@ -928,6 +929,50 @@ describe("Telegram image input", () => {
     await output.close();
   });
 
+  it("re-resolves a Thread Section callback before moving the current Thread", async () => {
+    const section = {
+      id: "section-project",
+      name: "项目",
+      builtIn: null,
+      currentWorkspaceActiveCount: 1,
+      currentWorkspaceArchivedCount: 0,
+    };
+    const listThreadSections = vi.fn().mockResolvedValue([section]);
+    const moveCurrentThreadToSection = vi.fn().mockResolvedValue(section);
+    const { surface, output, apiCalls, sentTexts } = createSurface(
+      vi.fn(),
+      vi.fn(),
+      { listThreadSections, moveCurrentThreadToSection },
+    );
+
+    await surface.bot.handleUpdate({
+      update_id: 15,
+      callback_query: {
+        id: "section-move",
+        from: telegramUser(),
+        chat_instance: "chat-instance",
+        data: `section:move:${createHash("sha256").update(section.id).digest("base64url")}`,
+        message: {
+          message_id: 24,
+          date: 1,
+          chat: telegramChat(),
+          text: "Thread 分区",
+        },
+      },
+    });
+
+    expect(listThreadSections).toHaveBeenCalled();
+    expect(moveCurrentThreadToSection).toHaveBeenCalledWith(
+      { surface: "telegram", accountId: "default", conversationId: "100" },
+      section.id,
+      undefined,
+    );
+    expect(apiCalls).toContain("answerCallbackQuery");
+    expect(sentTexts.join("\n")).toContain("已移动当前会话到 Thread 分区");
+    await surface.stop();
+    await output.close();
+  });
+
   it("rejects replies to stale Plugin prompts after in-memory state is gone", async () => {
     const submit = vi.fn();
     const { surface, output, sentTexts } = createSurface(submit, vi.fn());
@@ -1011,6 +1056,7 @@ function createSurface(
       actors: () => [],
       rememberActor,
     },
+    threadSectionAccess: new ThreadSectionAccessPolicy(new Set(["telegram:123"])),
     ...(now === undefined ? {} : { now }),
     debugEnabled,
   };

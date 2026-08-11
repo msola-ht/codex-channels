@@ -876,6 +876,90 @@ contractSuite("isolated Codex App Server state contract", () => {
     }
   }, 15_000);
 
+  it("shares stable custom Thread Sections and unassigns members on delete", async () => {
+    const first = await ownerClient.startThread(workdir);
+    const second = await ownerClient.startThread(workdir);
+    const firstThreadId = first.thread.id;
+    const secondThreadId = second.thread.id;
+    let sectionId: string | undefined;
+    try {
+      for (const [threadId, text] of [
+        [firstThreadId, "Thread Section contract first"],
+        [secondThreadId, "Thread Section contract second"],
+      ] as const) {
+        let userMessageCompleted = false;
+        const removeNotification = ownerClient.onNotification((notification) => {
+          if (notification.method !== "item/completed") return;
+          const params = notification.params as {
+            threadId?: unknown;
+            item?: { type?: unknown };
+          } | undefined;
+          if (params?.threadId === threadId && params.item?.type === "userMessage") {
+            userMessageCompleted = true;
+          }
+        });
+        let turnId: string | undefined;
+        try {
+          const turn = await ownerClient.startTurn(
+            threadId,
+            [{ type: "text", text }],
+            "codex_connect_gateway:thread-section-contract",
+            workdir,
+          );
+          turnId = turn.turnId;
+          await waitFor(() => userMessageCompleted, 2_000);
+        } finally {
+          removeNotification();
+          if (turnId !== undefined) {
+            await ownerClient.interruptTurn(threadId, turnId).catch(() => undefined);
+          }
+        }
+      }
+
+      const created = await ownerClient.createThreadSection(`contract-${Date.now()}`);
+      sectionId = created.id;
+      const renamed = await ownerClient.renameThreadSection(created.id, "contract-renamed");
+      expect(renamed).toMatchObject({ id: created.id, name: "contract-renamed" });
+      await ownerClient.moveThreadToSection(firstThreadId, created.id);
+      await ownerClient.moveThreadToSection(secondThreadId, created.id, firstThreadId);
+
+      const ordered = await peerClient.listThreads(workdir, {
+        fullScan: true,
+        sectionId: created.id,
+        sortKey: "section_position",
+        sortDirection: "asc",
+      });
+      expect(ordered.map((thread) => thread.id)).toEqual([
+        secondThreadId,
+        firstThreadId,
+      ]);
+
+      await expect(peerClient.listThreadSections()).resolves.toContainEqual({
+        id: created.id,
+        name: "contract-renamed",
+        builtIn: null,
+      });
+      await expect(peerClient.readThread(firstThreadId)).resolves.toMatchObject({
+        section: { id: created.id, name: "contract-renamed" },
+        isPinned: false,
+      });
+
+      await peerClient.deleteThreadSection(created.id);
+      sectionId = undefined;
+      await expect(ownerClient.readThread(firstThreadId)).resolves.toMatchObject({
+        section: null,
+      });
+    } finally {
+      if (sectionId !== undefined) {
+        await ownerClient.deleteThreadSection(sectionId).catch(() => undefined);
+      }
+      for (const threadId of [firstThreadId, secondThreadId]) {
+        await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
+        await ownerClient.deleteThread(threadId);
+      }
+    }
+  }, 20_000);
+
   it("round-trips MCP tool approval metadata through the real App Server", async () => {
     const started = await ownerClient.startThread(workdir);
     const threadId = started.thread.id;

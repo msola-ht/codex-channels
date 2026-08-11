@@ -9,6 +9,7 @@ import type {
 } from "./request-metrics-port.js";
 import type { ReviewTarget, ThreadGoal } from "./turn-port.js";
 import type { WorkspacePermissionUpdate } from "./workspace-permission-port.js";
+import type { SurfaceAccessPolicy } from "../policy/index.js";
 
 export const conversationCommandNames = [
   "resume",
@@ -19,6 +20,7 @@ export const conversationCommandNames = [
   "unarchive",
   "pin",
   "unpin",
+  "section",
   "status",
   "workspace",
   "workspaceperm",
@@ -49,6 +51,10 @@ export type ConversationCommandName = typeof conversationCommandNames[number];
 const conversationCommandNameSet = new Set<string>(conversationCommandNames);
 export const mcpCommandUsageText = "用法：/mcp [health | reload | 名称或序号 [tools|resources|templates [页码] [search <关键词>]] | login <名称或序号> | resource <名称或序号> <URI>]";
 export const pluginCommandUsageText = "用法：/plugin [health | list [页码] [search <关键词>] | <名称、完整 ID 或序号> [任务]]";
+export const sessionCommandUsageText = "用法：/sessions [页码] [filter <all|running|pinned|unsectioned>] [provider <名称>] [section <名称、ID 或序号>] [search <关键词>]";
+export const threadSectionCommandUsageText = "用法：/section [list [页码] | create <名称> | rename <ID 或序号> <新名称> | move <ID 或序号> [before <会话选择器>] | remove | delete <ID 或序号> [confirm]]";
+const maximumSessionListEntries = 20;
+const maximumThreadSectionListEntries = 8;
 const maximumPluginListEntries = 8;
 
 export interface McpDetailView {
@@ -59,6 +65,14 @@ export interface McpDetailView {
 
 export interface PluginListView {
   page: number;
+  searchTerm: string | null;
+}
+
+export interface SessionListView {
+  page: number;
+  filter: "all" | "running" | "pinned" | "unsectioned";
+  provider: string | null;
+  sectionSelector: string | null;
   searchTerm: string | null;
 }
 
@@ -74,7 +88,22 @@ export type ConversationCommandResult =
       currentThreadId?: string;
       backgroundThreadIds?: string[];
       archived: boolean;
-      searchTerm?: string;
+      page: number;
+      pageCount: number;
+      matchedSessionCount: number;
+      view: SessionListView;
+    }
+  | {
+      kind: "thread-sections";
+      sections: Awaited<ReturnType<ConversationUseCases["listThreadSections"]>>;
+      selectors: string[];
+      page: number;
+      pageCount: number;
+      totalSectionCount: number;
+    }
+  | {
+      kind: "thread-section-delete-preview";
+      preview: Awaited<ReturnType<ConversationUseCases["previewThreadSectionDelete"]>>;
     }
   | { kind: "status"; status: ReturnType<ConversationUseCases["status"]> }
   | {
@@ -150,6 +179,11 @@ export type ConversationCommandOutcome =
   | { type: "thread.archived"; threadId: string }
   | { type: "thread.unarchived"; threadId: string }
   | { type: "thread.pin-updated"; pinned: boolean }
+  | { type: "thread-section.created"; sectionId: string; name: string }
+  | { type: "thread-section.renamed"; sectionId: string; name: string }
+  | { type: "thread-section.moved"; sectionId: string; name: string; pinned: boolean; ordered: boolean }
+  | { type: "thread-section.removed" }
+  | { type: "thread-section.deleted"; sectionId: string; name: string }
   | {
       type: "workspace.selected";
       workspace: Awaited<ReturnType<ConversationUseCases["selectWorkspace"]>>;
@@ -190,12 +224,16 @@ export type ConversationCommandOutcome =
     };
 
 export class ConversationCommandService {
-  constructor(private readonly conversations: ConversationUseCases) {}
+  constructor(
+    private readonly conversations: ConversationUseCases,
+    private readonly threadSectionAccess?: SurfaceAccessPolicy,
+  ) {}
 
   async execute(
     target: ConversationTarget,
     command: ConversationCommandName,
     input = "",
+    actorId?: string,
   ): Promise<ConversationCommandResult> {
     const argumentsText = input.trim();
     switch (command) {
@@ -216,43 +254,34 @@ export class ConversationCommandService {
             },
           };
         }
+        const view = defaultSessionListView();
         const sessions = await this.conversations.listSessions(target);
         const currentThreadId = this.conversations.status(target).threadId;
         const backgroundThreadIds = this.conversations.backgroundThreadIds?.(target) ?? [];
-        return {
-          kind: "sessions",
-          sessions,
+        return sessionListResult(sessions, view, {
           archived: false,
           ...(currentThreadId ? { currentThreadId } : {}),
           ...(backgroundThreadIds.length > 0 ? { backgroundThreadIds } : {}),
-        };
+        });
       }
       case "sessions": {
-        const sessions = await this.conversations.listSessions(target, {
-          ...(argumentsText ? { searchTerm: argumentsText } : {}),
-        });
+        const view = parseSessionListView(argumentsText, false);
+        const sessions = await this.conversations.listSessions(target, toSessionQuery(view));
         const currentThreadId = this.conversations.status(target).threadId;
         const backgroundThreadIds = this.conversations.backgroundThreadIds?.(target) ?? [];
-        return {
-          kind: "sessions",
-          sessions,
+        return sessionListResult(sessions, view, {
           archived: false,
           ...(currentThreadId ? { currentThreadId } : {}),
           ...(backgroundThreadIds.length > 0 ? { backgroundThreadIds } : {}),
-          ...(argumentsText ? { searchTerm: argumentsText } : {}),
-        };
+        });
       }
       case "archived": {
+        const view = parseSessionListView(argumentsText, true);
         const sessions = await this.conversations.listSessions(target, {
           archived: true,
-          ...(argumentsText ? { searchTerm: argumentsText } : {}),
+          ...toSessionQuery(view),
         });
-        return {
-          kind: "sessions",
-          sessions,
-          archived: true,
-          ...(argumentsText ? { searchTerm: argumentsText } : {}),
-        };
+        return sessionListResult(sessions, view, { archived: true });
       }
       case "new": {
         const backgroundedThreadId = await this.conversations.newSession(target);
@@ -290,6 +319,97 @@ export class ConversationCommandService {
           kind: "outcome",
           outcome: { type: "thread.pin-updated", pinned: false },
         };
+      case "section": {
+        const operation = parseThreadSectionOperation(argumentsText);
+        if (operation.type === "list") {
+          const sections = await this.conversations.listThreadSections(target);
+          const pageCount = Math.max(
+            1,
+            Math.ceil(sections.length / maximumThreadSectionListEntries),
+          );
+          const start = (operation.page - 1) * maximumThreadSectionListEntries;
+          const entries = sections.map((section, index) => ({
+            section,
+            selector: String(index + 1),
+          }));
+          const pageEntries = operation.page <= pageCount
+            ? entries.slice(start, start + maximumThreadSectionListEntries)
+            : [];
+          return {
+            kind: "thread-sections",
+            sections: pageEntries.map(({ section }) => section),
+            selectors: pageEntries.map(({ selector }) => selector),
+            page: operation.page,
+            pageCount,
+            totalSectionCount: sections.length,
+          };
+        }
+        if (
+          !actorId
+          || !this.threadSectionAccess?.isAllowed({ target, actorId })
+        ) {
+          throw new UserFacingError(
+            "thread-section.admin-required",
+            "只有配置的 Thread 分区管理员可以修改全局分区",
+          );
+        }
+        if (operation.type === "create") {
+          const section = await this.conversations.createThreadSection(target, operation.name);
+          return {
+            kind: "outcome",
+            outcome: { type: "thread-section.created", sectionId: section.id, name: section.name },
+          };
+        }
+        if (operation.type === "rename") {
+          const section = await this.conversations.renameThreadSection(
+            target,
+            operation.selector,
+            operation.name,
+          );
+          return {
+            kind: "outcome",
+            outcome: { type: "thread-section.renamed", sectionId: section.id, name: section.name },
+          };
+        }
+        if (operation.type === "move") {
+          const section = await this.conversations.moveCurrentThreadToSection(
+            target,
+            operation.selector,
+            operation.beforeThreadSelector ?? undefined,
+          );
+          return {
+            kind: "outcome",
+            outcome: {
+              type: "thread-section.moved",
+              sectionId: section.id,
+              name: section.name,
+              pinned: section.builtIn === "pinned",
+              ordered: operation.beforeThreadSelector !== null,
+            },
+          };
+        }
+        if (operation.type === "remove") {
+          await this.conversations.removeCurrentThreadSection(target);
+          return { kind: "outcome", outcome: { type: "thread-section.removed" } };
+        }
+        if (!operation.confirmed) {
+          return {
+            kind: "thread-section-delete-preview",
+            preview: await this.conversations.previewThreadSectionDelete(
+              target,
+              operation.selector,
+            ),
+          };
+        }
+        const section = await this.conversations.deleteThreadSection(
+          target,
+          operation.selector,
+        );
+        return {
+          kind: "outcome",
+          outcome: { type: "thread-section.deleted", sectionId: section.id, name: section.name },
+        };
+      }
       case "status":
         return {
           kind: "status",
@@ -646,6 +766,164 @@ function parseMetricsCommand(input: string): RequestMetricsCommandQuery {
     view: view as "global" | "providers" | "models" | "errors",
     range: range as RequestMetricsTimeRange,
   };
+}
+
+function defaultSessionListView(): SessionListView {
+  return {
+    page: 1,
+    filter: "all",
+    provider: null,
+    sectionSelector: null,
+    searchTerm: null,
+  };
+}
+
+function parseSessionListView(input: string, archived: boolean): SessionListView {
+  const view = defaultSessionListView();
+  if (!input) return view;
+  const parts = input.split(/\s+/u);
+  let index = 0;
+  if (/^\d+$/u.test(parts[0] ?? "")) {
+    view.page = Number(parts[0]);
+    if (!Number.isSafeInteger(view.page) || view.page < 1 || view.page > 10_000) {
+      throw new UserFacingError("sessions.usage", sessionCommandUsageText);
+    }
+    index = 1;
+  }
+  const recognized = new Set(["filter", "provider", "section", "search"]);
+  if (index === 0 && !recognized.has(parts[0] ?? "")) {
+    if (input.length > 128) {
+      throw new UserFacingError("sessions.usage", sessionCommandUsageText);
+    }
+    return { ...view, searchTerm: input };
+  }
+  while (index < parts.length) {
+    const option = parts[index++];
+    if (option === "search") {
+      const searchTerm = parts.slice(index).join(" ").trim();
+      if (!searchTerm || searchTerm.length > 128) {
+        throw new UserFacingError("sessions.usage", sessionCommandUsageText);
+      }
+      view.searchTerm = searchTerm;
+      index = parts.length;
+      continue;
+    }
+    if (option === "section") {
+      const start = index;
+      while (index < parts.length && !recognized.has(parts[index]!)) {
+        index += 1;
+      }
+      const value = parts.slice(start, index).join(" ");
+      if (!value || value.length > 128) {
+        throw new UserFacingError("sessions.usage", sessionCommandUsageText);
+      }
+      view.sectionSelector = value;
+      continue;
+    }
+    const value = parts[index++];
+    if (!value) throw new UserFacingError("sessions.usage", sessionCommandUsageText);
+    if (option === "filter") {
+      if (!(["all", "running", "pinned", "unsectioned"] as const).includes(
+        value as SessionListView["filter"],
+      )) {
+        throw new UserFacingError("sessions.usage", sessionCommandUsageText);
+      }
+      if (archived && value === "running") {
+        throw new UserFacingError("sessions.usage", sessionCommandUsageText);
+      }
+      view.filter = value as SessionListView["filter"];
+      continue;
+    }
+    if (option === "provider") {
+      if (value.length > 64) throw new UserFacingError("sessions.usage", sessionCommandUsageText);
+      view.provider = value;
+      continue;
+    }
+    throw new UserFacingError("sessions.usage", sessionCommandUsageText);
+  }
+  return view;
+}
+
+function toSessionQuery(view: SessionListView): {
+  searchTerm?: string;
+  filter?: SessionListView["filter"];
+  provider?: string;
+  sectionSelector?: string;
+} {
+  return {
+    ...(view.searchTerm ? { searchTerm: view.searchTerm } : {}),
+    ...(view.filter !== "all" ? { filter: view.filter } : {}),
+    ...(view.provider ? { provider: view.provider } : {}),
+    ...(view.sectionSelector ? { sectionSelector: view.sectionSelector } : {}),
+  };
+}
+
+function sessionListResult(
+  sessions: Awaited<ReturnType<ConversationUseCases["listSessions"]>>,
+  view: SessionListView,
+  metadata: {
+    archived: boolean;
+    currentThreadId?: string;
+    backgroundThreadIds?: string[];
+  },
+): Extract<ConversationCommandResult, { kind: "sessions" }> {
+  const pageCount = Math.max(1, Math.ceil(sessions.length / maximumSessionListEntries));
+  const start = (view.page - 1) * maximumSessionListEntries;
+  return {
+    kind: "sessions",
+    sessions: view.page <= pageCount
+      ? sessions.slice(start, start + maximumSessionListEntries)
+      : [],
+    archived: metadata.archived,
+    page: view.page,
+    pageCount,
+    matchedSessionCount: sessions.length,
+    view,
+    ...(metadata.currentThreadId ? { currentThreadId: metadata.currentThreadId } : {}),
+    ...(metadata.backgroundThreadIds?.length
+      ? { backgroundThreadIds: metadata.backgroundThreadIds }
+      : {}),
+  };
+}
+
+function parseThreadSectionOperation(input: string):
+  | { type: "list"; page: number }
+  | { type: "create"; name: string }
+  | { type: "rename"; selector: string; name: string }
+  | { type: "move"; selector: string; beforeThreadSelector: string | null }
+  | { type: "remove" }
+  | { type: "delete"; selector: string; confirmed: boolean } {
+  const parts = input ? input.split(/\s+/u) : [];
+  if (parts.length === 0 || (parts[0] === "list" && parts.length <= 2)) {
+    const pageText = parts[0] === "list" ? parts[1] : undefined;
+    const page = pageText === undefined ? 1 : Number(pageText);
+    if (!Number.isSafeInteger(page) || page < 1 || page > 10_000) {
+      throw new UserFacingError("thread-section.usage", threadSectionCommandUsageText);
+    }
+    return { type: "list", page };
+  }
+  if (parts[0] === "create" && parts.length >= 2) {
+    return { type: "create", name: parts.slice(1).join(" ") };
+  }
+  if (parts[0] === "rename" && parts[1] && parts.length >= 3) {
+    return { type: "rename", selector: parts[1], name: parts.slice(2).join(" ") };
+  }
+  if (parts[0] === "move" && parts[1]) {
+    if (parts.length === 2) {
+      return { type: "move", selector: parts[1], beforeThreadSelector: null };
+    }
+    if (parts.length === 4 && parts[2] === "before") {
+      return { type: "move", selector: parts[1], beforeThreadSelector: parts[3]! };
+    }
+  }
+  if (parts[0] === "remove" && parts.length === 1) return { type: "remove" };
+  if (parts[0] === "delete" && parts[1] && parts.length <= 3) {
+    if (parts.length === 3 && parts[2] !== "confirm") {
+      throw new UserFacingError("thread-section.usage", threadSectionCommandUsageText);
+    }
+    return { type: "delete", selector: parts[1], confirmed: parts[2] === "confirm" };
+  }
+  throw new UserFacingError("thread-section.usage", threadSectionCommandUsageText);
 }
 
 function parseSkillInvocation(input: string): {

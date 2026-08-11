@@ -12,7 +12,7 @@
 - `json-rpc.ts`：使用生成的 `ClientRequest` / `ClientNotification` 约束出站消息，并处理
   initialize、请求关联、通知与 Server Request 分流、超时、断线清理及安全重试；初始化期间
   已失效的连接不得重新进入 connected 状态；通过 `extensions` 显式声明已实现的 `openai/form`。
-- `thread-adapter.ts`：把当前版本生成的官方 Thread、内置 Pinned 分区、运行状态、来源、运行 Turn、
+- `thread-adapter.ts`：把当前版本生成的官方 Thread、内置 Pinned 与自定义分区、运行状态、来源、运行 Turn、
   上下文压缩 Item ID 和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；
   缺少必需字段时失败关闭。固定状态写入由 Client 原样回写当前 Git SHA 以无损协调加载中 Thread，
   再移动到官方分区并读回验证。
@@ -53,17 +53,20 @@
   精确编码为当前官方响应；畸形请求安全拒绝，未知请求返回明确 JSON-RPC 方法错误。
 - `protocol-info.ts`：从精确协议基线公开受支持的 Codex CLI 版本和 Gateway 显示版本，供组合根
   校验并向 Surface 注入纯字符串。
-- `client.ts`：Thread 搜索/归档/固定、Turn、模型、权限、Skill、用量及用户级配置
+- `client.ts`：Thread 搜索/归档/固定、全局分区 CRUD 与 Thread 分区移动、Turn、模型、权限、Skill、用量及用户级配置
   读取与服务层级写入等 App Server 方法的类型化封装；MCP 概览按 Thread 使用
   `toolsAndAuthOnly` 分页，详情使用 `full`；`config/mcpServer/reload` 不自动重试，OAuth 不自动重试并消费
   官方登录完成通知，资源读取保持只读；Permission
   Profile 按 CWD 分页。开发中 Plugin 只调用 `plugin/installed` 并经 Application 开关约束，
-  不接入搜索、安装或分享。Thread 列表显式传空
+  不接入搜索、安装或分享。Thread 列表支持官方 `searchTerm`、`sectionId` 和
+  `section_position` 排序，并显式传空
   `modelProviders` 获取当前 Workspace 的全部 Provider，
   供跨 Provider 会话展示和冷恢复定位使用。
   新 Thread 和 Fork 可显式携带官方 `modelProvider`。已有 Thread
   不在 Turn 覆盖中更换 Provider。Application 跨 Provider 选择时新建 Thread；`thread/fork`
   只用于用户显式创建同一 Provider 的历史分支，不承担跨 Provider 历史转换。
+- `provider-routing-client.ts` 把全局 `threadSection/list|create|update|delete` 固定交给主 App Server，
+  `thread/section/move` 则按 Thread 的官方 Provider 路由；所有分区写入都不自动重试。
 - `provider-routing-client.ts`：复用多个完整 Client 实例，按 Thread 的官方 `modelProvider` 路由
   生命周期、Turn、Review、Goal 和 MCP；合并各实例的进程内状态，隔离 Server Request ID，
   MCP 配置刷新会尝试全部受管实例并传播任一失败，单 Provider 重连只恢复该侧 Thread。第三方 Provider 的账户通知不会进入 OpenAI 账户状态；

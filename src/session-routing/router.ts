@@ -26,8 +26,12 @@ export interface SubscriptionRestoreFailure {
 }
 
 export interface ThreadListOptions {
+  fullScan?: boolean;
   archived?: boolean;
   searchTerm?: string;
+  sectionId?: string;
+  sortKey?: "created_at" | "updated_at" | "recency_at" | "section_position";
+  sortDirection?: "asc" | "desc";
 }
 
 export class SessionRouter {

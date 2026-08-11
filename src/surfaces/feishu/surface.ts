@@ -101,6 +101,7 @@ export interface FeishuSurfaceOptions {
   credentialsDirectory: string;
   onFatal: (error: Error) => void;
   actorRegistry?: ConversationActorRegistry;
+  threadSectionAccess?: SurfaceAccessPolicy;
   openApiAgent?: unknown;
   accountsAgent?: unknown;
   webSocketAgent?: unknown;
@@ -204,6 +205,9 @@ export class FeishuSurface implements SurfaceAdapter {
         ...(options.priceCurrency === undefined
           ? {}
           : { priceCurrency: options.priceCurrency }),
+        ...(options.threadSectionAccess === undefined
+          ? {}
+          : { threadSectionAccess: options.threadSectionAccess }),
         debugEnabled: options.debugEnabled ?? false,
       },
     );

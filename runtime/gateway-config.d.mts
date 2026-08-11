@@ -44,6 +44,7 @@ export interface GatewayConfigDocument {
     price_currency: "cny" | "usd";
   };
   experimental: { plugin_api: boolean };
+  thread_sections: { administrators: string[] };
   api_providers: Array<{
     id: string;
     name: string;

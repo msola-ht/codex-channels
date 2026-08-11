@@ -10,7 +10,9 @@ import {
   UserFacingError,
   type ConversationTarget,
 } from "../../conversation-core/index.js";
+import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { formatTurnInputAppended } from "../input-copy.js";
+import { formatSessionListCommand } from "../conversation-command-format.js";
 import { parseSlashCommand } from "../slash-command.js";
 import {
   formatOperationFailure,
@@ -112,9 +114,13 @@ export class FeishuConversationAdapter {
       priceCurrency?: (
         provider: string | null | undefined,
       ) => DisplayPriceCurrency;
+      threadSectionAccess?: SurfaceAccessPolicy;
     } = { quietWindowMs: 0 },
   ) {
-    this.commands = new ConversationCommandService(conversations);
+    this.commands = new ConversationCommandService(
+      conversations,
+      inputOptions.threadSectionAccess,
+    );
     this.inputs = new SurfaceInputCoalescer(
       (target, input) => conversations.submit(target, input),
       {
@@ -214,6 +220,7 @@ export class FeishuConversationAdapter {
           message.target,
           command.name,
           command.argumentsText,
+          message.actorId,
         );
         const rendered = renderFeishuCommandResult(
           result,
@@ -399,8 +406,8 @@ export class FeishuConversationAdapter {
         return;
       }
       const result = action === "fast" && input === ""
-        ? await this.commands.execute(target, "model")
-        : await this.commands.execute(target, action, input);
+        ? await this.commands.execute(target, "model", "", actorId)
+        : await this.commands.execute(target, action, input, actorId);
       const choices = (
         input === ""
         || action === "sessions"
@@ -959,6 +966,7 @@ function renderCommandCenterChoices(
           action: "sessions-search",
           input: "",
         },
+        ...sessionNavigationChoices(result, "sessions"),
         ...result.sessions.map((session) => ({
           label: `${session.id === result.currentThreadId ? "✓ " : backgroundThreadIds.has(session.id) ? "后台 · " : ""}${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${session.model}` : ""}`,
           action: "resume" as const,
@@ -980,11 +988,35 @@ function renderCommandCenterChoices(
           action: "archived-search",
           input: "",
         },
+        ...sessionNavigationChoices(result, "archived"),
         ...result.sessions.map((session) => ({
           label: `${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${session.model}` : ""}`,
           action: "unarchive" as const,
           input: session.id,
         })),
+      ],
+    };
+  }
+  if (action === "section" && result.kind === "thread-sections") {
+    const navigation = [
+      ...(result.page > 1
+        ? [{ label: "上一页", action: "section" as const, input: `list ${result.page - 1}` }]
+        : []),
+      ...(result.page < result.pageCount
+        ? [{ label: "下一页", action: "section" as const, input: `list ${result.page + 1}` }]
+        : []),
+    ];
+    if (result.sections.length === 0 && navigation.length === 0) return undefined;
+    return {
+      title: `移动当前会话到分区 · 第 ${result.page}/${result.pageCount} 页`,
+      description: "分区是 Codex App Server 全局状态；移动到自定义分区会取消固定。",
+      choices: [
+        ...result.sections.map((section) => ({
+          label: `${section.name}${section.builtIn === "pinned" ? " · 固定" : ""}`,
+          action: "section" as const,
+          input: `move ${section.id}`,
+        })),
+        ...navigation,
       ],
     };
   }
@@ -1093,6 +1125,30 @@ function renderCommandCenterChoices(
     };
   }
   return undefined;
+}
+
+function sessionNavigationChoices(
+  result: Extract<ConversationCommandResult, { kind: "sessions" }>,
+  action: "sessions" | "archived",
+): FeishuCommandCenterChoices["choices"] {
+  return [
+    ...(result.page > 1
+      ? [{
+          label: "上一页",
+          action,
+          input: formatSessionListCommand(result, result.page - 1)
+            .replace(/^\/(?:sessions|archived)\s*/u, ""),
+        }]
+      : []),
+    ...(result.page < result.pageCount
+      ? [{
+          label: "下一页",
+          action,
+          input: formatSessionListCommand(result, result.page + 1)
+            .replace(/^\/(?:sessions|archived)\s*/u, ""),
+        }]
+      : []),
+  ];
 }
 
 function isWorkspacePermissionField(

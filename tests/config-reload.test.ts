@@ -114,6 +114,9 @@ describe("Gateway config reload", () => {
     ["display.operation-updates", "global", { operationUpdateDisplay: "compact" }],
     ["display.plan-updates", "global", { planUpdatesEnabled: true }],
     ["experimental.plugin-api", "global", { pluginApiEnabled: false }],
+    ["thread-sections.administrators", "global", {
+      threadSectionAdministrators: new Set(["telegram:123"]),
+    }],
     ["codex.default-model", "global", { codexModel: "other-model" }],
     ["metrics.sync", "global", {
       metricsSync: {
@@ -460,6 +463,7 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     operationUpdateDisplay: "full",
     planUpdatesEnabled: false,
     pluginApiEnabled: true,
+    threadSectionAdministrators: new Set(),
     priceCurrency: "cny",
     apiProviders: [],
     vision: { mode: "disabled" },

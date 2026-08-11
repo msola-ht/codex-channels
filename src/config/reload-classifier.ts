@@ -96,6 +96,11 @@ function restartRequiredReasons(
       current.pluginApiEnabled,
       next.pluginApiEnabled,
     ],
+    [
+      configChange("thread-sections.administrators"),
+      JSON.stringify([...current.threadSectionAdministrators].sort()),
+      JSON.stringify([...next.threadSectionAdministrators].sort()),
+    ],
     [configChange("observability.log-level"), current.logLevel, next.logLevel],
     [
       configChange("api.providers"),

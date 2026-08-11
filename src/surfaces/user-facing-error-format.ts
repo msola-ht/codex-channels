@@ -74,6 +74,22 @@ export function formatSurfaceUserFacingError(
       return "会话选择不唯一";
     case "session.selector.not-found":
       return "找不到指定会话";
+    case "sessions.usage":
+      return "用法：/sessions [页码] [filter all|running|pinned|unsectioned] [provider 名称] [section 分区] [search 搜索词]";
+    case "thread-section.usage":
+      return "用法：/section [list [页码]|create <名称>|rename <分区 ID 或序号> <新名称>|move <分区 ID 或序号> [before <会话>]|remove|delete <分区 ID 或序号> [confirm]]";
+    case "thread-section.name.invalid":
+      return "Thread 分区名称必须为 1–64 个字符，且不能包含控制字符";
+    case "thread-section.selector.ambiguous":
+      return "Thread 分区选择不唯一，请使用完整 ID";
+    case "thread-section.selector.not-found":
+      return "找不到指定 Thread 分区";
+    case "thread-section.pinned.immutable":
+      return "内置固定区不能重命名或删除；请使用 /pin 或 /unpin 管理固定状态";
+    case "thread-section.before.invalid":
+      return "before 指定的会话必须已经位于目标分区";
+    case "thread-section.delete-confirmation.invalid":
+      return "删除确认必须使用预览返回的完整 Thread 分区 ID";
     case "thread.bound":
       return "该 Codex Thread 已绑定到其他会话";
     case "thread.takeover.busy":

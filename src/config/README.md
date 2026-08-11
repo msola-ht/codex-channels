@@ -47,6 +47,11 @@ Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bo
 `/plugin` 的列表与调用在 Application 边界失败关闭，不发送 `plugin/installed` 或 mention
 请求。变化需要重启 Gateway，不需要重启 App Server；Doctor 始终显示开关状态与风险提示。
 
+`thread_sections.administrators` 是全局 Thread 分区写操作的 Actor 允许名单，条目格式为
+`telegram:<用户 ID>`、`feishu:<open_id>` 或 `weixin:<用户 ID>`。默认空数组；未配置时
+`/section` 只允许列表和会话筛选，新建、重命名、移动、移出与删除失败关闭。每个管理员必须属于
+对应已启用渠道的用户允许名单，否则配置校验失败。变化需要重启 Gateway。
+
 `[[workspaces]]` 除 `id`、`name`、`cwd` 外支持可选的工作区权限：`sandbox`（
 `read-only` / `workspace-write` / `danger-full-access`）、`approval_policy`（
 `untrusted` / `on-request` / `never`）和 `permissions`（App Server 命名权限 Profile）。

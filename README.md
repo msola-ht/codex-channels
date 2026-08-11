@@ -379,7 +379,7 @@ deepseek）的全部请求行并自动重启 Gateway 与中心服务，适合额
 
 ### 常用聊天命令
 
-- 会话：`/new`、`/resume`、`/sessions`、`/archived`、`/rename`、`/archive`、`/unarchive`、`/pin`、`/unpin`
+- 会话：`/new`、`/resume`、`/sessions`、`/archived`、`/rename`、`/archive`、`/unarchive`、`/pin`、`/unpin`、`/section`
 - Workspace：`/workspace`、`/workspaceperm`
 - 运行：`/status`、`/stop`、`/queue <描述>`、`/compact`、`/fork`、`/review`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
@@ -399,6 +399,22 @@ deepseek）的全部请求行并自动重启 Gateway 与中心服务，适合额
 任务运行中也可以使用 `/resume` 或 `/new` 切换会话：原任务会继续在后台运行，结果和审批仍返回
 当前聊天并标记所属 Thread；同一聊天最多保留 3 个后台任务。普通消息只发送给当前前台 Thread，
 需要继续操作后台任务时使用 `/resume` 将其切回前台。
+
+`/sessions` 与 `/archived` 支持分页，以及 `filter`、`provider`、`section`、`search` 组合筛选；
+例如 `/sessions 2 filter running provider openai section 项目 search CI`。列表中的序号保持为完整
+Workspace 会话目录中的选择器，可直接交给 `/resume`，不会因筛选结果重新编号。
+
+`/section` 管理 Codex App Server 原生 Thread 分区：`create <名称>` 新建、
+`rename <分区序号或 ID> <新名称>` 重命名、`move <分区序号或 ID> [before <会话>]` 移动当前会话、`remove` 移出，
+`delete <分区序号或 ID>` 先显示影响，再要求使用返回的完整 ID 并带 `confirm` 删除。分区是 App Server 全局状态，不按
+Workspace 或渠道隔离；删除只解除 Thread 归属，不删除 Thread。内置 Pinned 分区不可重命名或删除，
+固定和自定义分区互斥：`/pin` 会移入 Pinned，移动到自定义分区会取消固定。
+读取和筛选对所有已授权用户开放；新建、重命名、移动、移出和删除属于全局写操作，只允许
+`thread_sections.administrators` 中显式列出的 Actor。管理员格式为
+`telegram:<用户 ID>`、`feishu:<open_id>` 或 `weixin:<用户 ID>`；未配置时全局写操作失败关闭，
+每个管理员必须属于对应已启用渠道的用户允许名单，否则配置校验失败。修改后需要重启 Gateway。
+按分区筛选时使用 App Server 的 `section_position` 顺序，关键词搜索
+使用完整历史扫描，同时保留完整 Workspace 目录中的会话选择器。
 
 `/vision` 确认消息会显示平台消息到达 Gateway 的接收延迟和 Gateway 处理耗时，均以毫秒计；
 前者包含渠道投递或轮询等待，后者截至回复进入渠道发送队列，不包含平台最终送达客户端的时间。

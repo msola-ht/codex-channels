@@ -6,7 +6,7 @@
 
 - `index.ts`：本模块的公开导出入口。
 - `thread-port.ts`：定义 Thread 查询与生命周期窄端口，以及只包含路由、恢复和会话列表所需字段的
-  稳定快照；官方内置 Pinned 分区投影为 `isPinned`，运行中 Turn 以 `activeTurnId` 表示，恢复会话另携带
+  稳定快照；官方分区裁剪为稳定 `id/name/builtIn`，内置 Pinned 另投影为 `isPinned`，运行中 Turn 以 `activeTurnId` 表示，恢复会话另携带
   模型 Provider、
   压缩 Item ID，不向业务层暴露完整官方 Turn。
 - `router.ts`：选择、搜索、绑定、恢复、归档和解绑 Thread，把 Workspace 权限（沙箱、审批策略、
@@ -34,3 +34,6 @@ Gateway 重连或重启后，Client 必须从 `thread/resume` 返回的 `status`
 
 本模块不得导入 `codex-client` 或 `codex-protocol`；具体 Client 由组合根作为
 `ThreadLifecyclePort` 实现注入。
+分区目录与排序不进入 StateStore；Application 每次从 App Server 读取权威目录，并通过 Router
+把官方分区过滤与 `section_position` 排序参数交给 Client。Router 只在已有 Thread 快照中携带
+当前归属，用于会话列表和 `before` 校验，不建立平行分区索引。

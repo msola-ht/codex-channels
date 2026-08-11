@@ -506,6 +506,7 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     operationUpdateDisplay: "full",
     planUpdatesEnabled: false,
     pluginApiEnabled: true,
+    threadSectionAdministrators: new Set(),
     priceCurrency: "cny",
     apiProviders: [],
     vision: { mode: "disabled" },

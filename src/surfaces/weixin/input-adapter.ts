@@ -72,6 +72,7 @@ export interface WeixinInputAdapterOptions {
   ): Promise<void>;
   removePersistedReplyContext?(target: ConversationTarget): Promise<void>;
   actorRegistry?: ConversationActorRegistry;
+  threadSectionAccess?: SurfaceAccessPolicy;
   interactions?: Pick<WeixinInteractionPort, "handleText">;
   images?: Pick<WeixinImagePort, "download">;
   files?: Pick<WeixinFilePort, "download">;
@@ -130,6 +131,9 @@ export class WeixinInputAdapter {
         ...(options.priceCurrency === undefined
           ? {}
           : { priceCurrency: options.priceCurrency }),
+        ...(options.threadSectionAccess === undefined
+          ? {}
+          : { threadSectionAccess: options.threadSectionAccess }),
         ...(options.doctor === undefined
           ? {}
           : {

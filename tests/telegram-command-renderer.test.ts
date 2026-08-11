@@ -3,6 +3,7 @@ import type { Context } from "grammy";
 
 import {
   renderTelegramCommandResult,
+  threadSectionKeyboard,
   workspacePermissionFieldKeyboard,
   workspacePermissionKeyboard,
 } from "../src/surfaces/telegram/command-renderer.js";
@@ -342,5 +343,27 @@ describe("Telegram command renderer", () => {
     expect(approval.inline_keyboard.flatMap((row) =>
       row.map((button) => (button as { callback_data: string }).callback_data)))
       .toContain("wp:approval:never");
+  });
+
+  it("builds bounded Thread Section move and paging buttons", () => {
+    const keyboard = threadSectionKeyboard({
+      kind: "thread-sections",
+      sections: [{
+        id: "section-project",
+        name: "项目",
+        builtIn: null,
+        currentWorkspaceActiveCount: 1,
+        currentWorkspaceArchivedCount: 0,
+      }],
+      selectors: ["1"],
+      page: 2,
+      pageCount: 3,
+      totalSectionCount: 17,
+    });
+    const callbacks = keyboard?.inline_keyboard.flatMap((row) =>
+      row.map((button) => (button as { callback_data: string }).callback_data));
+    expect(callbacks?.[0]).toMatch(/^section:move:[A-Za-z0-9_-]{43}$/u);
+    expect(callbacks).toContain("section:page:1");
+    expect(callbacks).toContain("section:page:3");
   });
 });

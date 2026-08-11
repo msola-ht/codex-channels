@@ -10,6 +10,7 @@ export {
   type ThreadSession,
   type ThreadStartOptions,
   type ThreadSnapshot,
+  type ThreadSectionSnapshot,
   type ThreadSource,
   type ThreadStatus,
 } from "./thread-port.js";

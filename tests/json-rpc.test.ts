@@ -186,6 +186,7 @@ class FakeTransport extends BaseTransport {
   threadListData: Array<Record<string, unknown>> = [];
   resumeThreadData: Record<string, unknown> = appServerThread();
   threadReadData: Record<string, unknown> = appServerThread();
+  threadSections: Array<{ id: string; name: string }> = [pinnedThreadSection];
   goal = appServerGoal();
 
   async connect(): Promise<void> {}
@@ -287,6 +288,33 @@ class FakeTransport extends BaseTransport {
           result: { thread: appServerThread() },
         })),
       );
+    } else if (decoded.method === "threadSection/list") {
+      queueMicrotask(() =>
+        this.emitMessage(JSON.stringify({
+          id: decoded.id,
+          result: { data: this.threadSections, nextCursor: null },
+        })),
+      );
+    } else if (decoded.method === "threadSection/create") {
+      const params = decoded.params as { name: string };
+      const section = { id: `section-${this.threadSections.length}`, name: params.name };
+      this.threadSections.push(section);
+      queueMicrotask(() =>
+        this.emitMessage(JSON.stringify({ id: decoded.id, result: { section } })),
+      );
+    } else if (decoded.method === "threadSection/update") {
+      const params = decoded.params as { sectionId: string; name: string };
+      const section = this.threadSections.find((entry) => entry.id === params.sectionId)!;
+      section.name = params.name;
+      queueMicrotask(() =>
+        this.emitMessage(JSON.stringify({ id: decoded.id, result: { section } })),
+      );
+    } else if (decoded.method === "threadSection/delete") {
+      const params = decoded.params as { sectionId: string };
+      this.threadSections = this.threadSections.filter((entry) => entry.id !== params.sectionId);
+      queueMicrotask(() =>
+        this.emitMessage(JSON.stringify({ id: decoded.id, result: {} })),
+      );
     } else if (decoded.method === "thread/metadata/update") {
       queueMicrotask(() =>
         this.emitMessage(JSON.stringify({
@@ -296,8 +324,11 @@ class FakeTransport extends BaseTransport {
       );
     } else if (decoded.method === "thread/section/move") {
       const params = decoded.params as { sectionId: string | null };
+      const section = params.sectionId === null
+        ? null
+        : this.threadSections.find((entry) => entry.id === params.sectionId) ?? null;
       this.threadReadData = appServerThread({
-        section: params.sectionId === pinnedThreadSection.id ? pinnedThreadSection : null,
+        section,
         sectionEnteredAt: params.sectionId === null ? null : 2,
       });
       queueMicrotask(() =>
@@ -755,6 +786,7 @@ describe("JsonRpcClient", () => {
       preview: "测试 Thread",
       name: null,
       isPinned: false,
+      section: null,
       status: { type: "active" },
       cwd: "/tmp/project",
       source: "other",
@@ -851,6 +883,61 @@ describe("JsonRpcClient", () => {
         sectionId: pinnedThreadSection.id,
         beforeThreadId: null,
       });
+  });
+
+  it("passes stable Thread Section filters and position ordering", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await client.listThreads("/tmp/project", {
+      fullScan: true,
+      sectionId: "section-project",
+      sortKey: "section_position",
+      sortDirection: "asc",
+    });
+
+    expect(transport.sent.find((message) => message.method === "thread/list")?.params)
+      .toMatchObject({
+        useStateDbOnly: false,
+        sectionId: "section-project",
+        sortKey: "section_position",
+        sortDirection: "asc",
+      });
+  });
+
+  it("manages stable Thread Sections and preserves the requested thread order", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listThreadSections()).resolves.toEqual([{
+      ...pinnedThreadSection,
+      builtIn: "pinned",
+    }]);
+    const created = await client.createThreadSection("项目甲");
+    await expect(client.renameThreadSection(created.id, "项目乙")).resolves.toMatchObject({
+      id: created.id,
+      name: "项目乙",
+      builtIn: null,
+    });
+    await client.moveThreadToSection("thread-1", created.id, "thread-before");
+    await expect(client.readThread("thread-1")).resolves.toMatchObject({
+      section: { id: created.id, name: "项目乙", builtIn: null },
+      isPinned: false,
+    });
+    expect(transport.sent.findLast((message) => message.method === "thread/section/move")?.params)
+      .toEqual({
+        threadId: "thread-1",
+        sectionId: created.id,
+        beforeThreadId: "thread-before",
+      });
+    await client.deleteThreadSection(created.id);
+    await expect(client.listThreadSections()).resolves.toHaveLength(1);
   });
 
   it("reads account rate limits through the stable App Server method", async () => {
