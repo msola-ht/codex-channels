@@ -1412,8 +1412,24 @@ describe("Feishu outbox", () => {
       pino({ level: "silent" }),
     );
 
-    outbox.handle(operationUpdated("completed", "mcpTool", "mcp-1"));
-    outbox.handle(operationUpdated("completed", "mcpTool", "mcp-2"));
+    outbox.handle(operationUpdated(
+      "completed",
+      "mcpTool",
+      "mcp-1",
+      "codex_apps.github.fetch_pr",
+    ));
+    outbox.handle(operationUpdated(
+      "completed",
+      "mcpTool",
+      "mcp-2",
+      "codex_apps.github.fetch_pr",
+    ));
+    outbox.handle(operationUpdated(
+      "completed",
+      "mcpTool",
+      "mcp-3",
+      "codex_apps.github.update_pull_request",
+    ));
     await settle();
     expect(markdownCards).toEqual([]);
 
@@ -1421,10 +1437,45 @@ describe("Feishu outbox", () => {
     await outbox.close();
 
     expect(markdownCards).toEqual([
-      "**工具查询 · 已完成**\n- MCP 工具：2 次\n\n"
-      + "---\n**耗时：** 250毫秒",
+      "**工具查询 · 已完成**\n"
+      + "- MCP 工具：3 次\n"
+      + "  - `codex_apps.github.fetch_pr`：2 次\n"
+      + "  - `codex_apps.github.update_pull_request`：1 次\n\n"
+      + "---\n**耗时：** 375毫秒",
       "## 本次运行 · 已完成",
     ]);
+  });
+
+  it("bounds distinct query operation details in the Turn summary", async () => {
+    const markdownCards: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    for (let index = 1; index <= 10; index += 1) {
+      outbox.handle(operationUpdated(
+        "completed",
+        "mcpTool",
+        `mcp-${index}`,
+        `codex_apps.github.tool_${index}`,
+      ));
+    }
+    outbox.handle(turnCompleted());
+    await outbox.close();
+
+    expect(markdownCards[0]).toContain("- MCP 工具：10 次");
+    expect(markdownCards[0]).toContain("`codex_apps.github.tool_8`：1 次");
+    expect(markdownCards[0]).toContain("其余 2 项明细已省略");
+    expect(markdownCards[0]).not.toContain("codex_apps.github.tool_9");
   });
 
   it("sends a completed web search immediately before the final answer", async () => {
@@ -2118,6 +2169,7 @@ function operationUpdated(
     { type: "operation.updated" }
   >["operation"]["kind"] = "command",
   itemId = "command-1",
+  detail = "git status --short",
 ): Extract<OutputEvent, { type: "operation.updated" }> {
   return {
     type: "operation.updated",
@@ -2127,7 +2179,7 @@ function operationUpdated(
     operation: {
       itemId,
       kind,
-      detail: "git status --short",
+      detail,
       status,
       ...(status === "completed"
         ? { durationMs: 125, exitCode: 0 }

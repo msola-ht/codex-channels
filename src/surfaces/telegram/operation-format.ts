@@ -9,7 +9,7 @@ import {
 } from "../operation-presentation.js";
 import type { OperationUpdateDisplay } from "../types.js";
 import {
-  operationSummaryRows,
+  operationSummaryGroups,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
 
@@ -57,11 +57,19 @@ export function formatTelegramOperationSummary(
   const duration = summary.totalDurationMs === undefined
     ? ""
     : ` · ${formatElapsedDuration(summary.totalDurationMs)}`;
+  const groups = operationSummaryGroups(summary);
   return [
     "<b>操作过程</b>",
     "",
     `<b>工具查询 · 已完成</b>${duration}`,
-    ...operationSummaryRows(summary).map((row) => `• ${row}`),
+    ...groups.flatMap((group) => [
+      `• ${group.label}：${group.count} 次`,
+      ...group.details.map((detail) =>
+        `  ◦ <code>${escapeTelegramHtml(compactOperationDetail(detail.detail))}</code>：${detail.count} 次`),
+      ...(group.omittedDetailCount > 0
+        ? [`  ◦ 其余 ${group.omittedDetailCount} 项明细已省略`]
+        : []),
+    ]),
   ].join("\n");
 }
 

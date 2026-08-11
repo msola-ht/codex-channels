@@ -2,6 +2,7 @@ import type { OperationUpdate } from "../conversation-core/index.js";
 
 const maximumBufferedTurns = 100;
 const maximumOperationsPerTurn = 100;
+const maximumSummaryDetails = 8;
 
 export type BufferedOperationKind = Extract<
   OperationUpdate["kind"],
@@ -12,6 +13,18 @@ export interface OperationUpdateSummary {
   records: readonly OperationUpdate[];
   counts: ReadonlyMap<BufferedOperationKind, number>;
   totalDurationMs?: number;
+}
+
+export interface OperationSummaryDetail {
+  detail: string;
+  count: number;
+}
+
+export interface OperationSummaryGroup {
+  label: string;
+  count: number;
+  details: readonly OperationSummaryDetail[];
+  omittedDetailCount: number;
 }
 
 export interface BufferedOperationSummary<T> {
@@ -102,18 +115,40 @@ export function summarizeOperationUpdates(
   };
 }
 
-export function operationSummaryRows(
+export function operationSummaryGroups(
   summary: OperationUpdateSummary,
-): string[] {
+): OperationSummaryGroup[] {
   const labels: Record<BufferedOperationKind, string> = {
     mcpTool: "MCP 工具",
     dynamicTool: "动态工具",
     webSearch: "网页搜索",
   };
+  let remainingDetails = maximumSummaryDetails;
   return (["mcpTool", "dynamicTool", "webSearch"] as const)
     .flatMap((kind) => {
       const count = summary.counts.get(kind);
-      return count === undefined ? [] : [`${labels[kind]}：${count} 次`];
+      if (count === undefined) {
+        return [];
+      }
+      const detailCounts = new Map<string, number>();
+      for (const record of summary.records) {
+        const detail = record.kind === kind ? record.detail?.trim() : undefined;
+        if (detail) {
+          detailCounts.set(detail, (detailCounts.get(detail) ?? 0) + 1);
+        }
+      }
+      const allDetails = [...detailCounts].map(([detail, detailCount]) => ({
+        detail,
+        count: detailCount,
+      }));
+      const details = allDetails.slice(0, remainingDetails);
+      remainingDetails -= details.length;
+      return [{
+        label: labels[kind],
+        count,
+        details,
+        omittedDetailCount: allDetails.length - details.length,
+      }];
     });
 }
 

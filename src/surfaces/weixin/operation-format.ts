@@ -8,7 +8,7 @@ import {
 } from "../operation-presentation.js";
 import type { OperationUpdateDisplay } from "../types.js";
 import {
-  operationSummaryRows,
+  operationSummaryGroups,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
 
@@ -52,9 +52,17 @@ export function formatWeixinOperationSummary(
   if (summary.records.length === 1) {
     return formatWeixinOperation(summary.records[0]!, display);
   }
+  const groups = operationSummaryGroups(summary);
   return [
     "工具查询 · 已完成",
-    operationSummaryRows(summary).join("\n"),
+    groups.flatMap((group) => [
+      `${group.label}：${group.count} 次`,
+      ...group.details.map((detail) =>
+        `  - ${sanitizeWeixinMarkdownText(compactOperationDetail(detail.detail))}：${detail.count} 次`),
+      ...(group.omittedDetailCount > 0
+        ? [`  - 其余 ${group.omittedDetailCount} 项明细已省略`]
+        : []),
+    ]).join("\n"),
     ...(summary.totalDurationMs === undefined
       ? []
       : [`总耗时：${formatElapsedDuration(summary.totalDurationMs)}`]),
