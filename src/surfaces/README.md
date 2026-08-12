@@ -82,8 +82,9 @@ Conversation 与 Actor 在内存保留五分钟有效的一次重试输入，`/v
 Markdown、Telegram HTML、微信结构化字段渲染列表。
 `/sessions` 和 `/archived` 共用可复制的分页/筛选命令，并保持完整目录选择器；`/section` 共用
 全局影响说明、管理员校验和删除确认文案。三渠道把当前已授权 Actor 传给共享命令边界；未列入
-`thread_sections.administrators` 时只能查看和筛选。飞书选择卡与 Telegram 内联按钮可移动到当前页分区并翻页，微信用
-同一文字命令完成操作；渠道只提交选择，不保存分区状态。
+`thread_sections.administrators` 时只能查看和筛选自定义分区。内置 Pinned 在三渠道统一复用 `/pin` 与 `/unpin`；
+飞书选择卡与 Telegram 内联按钮只向管理员展示自定义分区移动，并向所有用户提供翻页，微信使用同一
+文字命令。渠道只提交选择，不保存分区状态。
 定量收齐确认在调用 Application 前同步入队；外部视觉请求发起、10 秒后的有界心跳及完成后的
 视觉模型 ID、本地实测 API 耗时和上游实际 Token 用量由 Core 作为平台无关事件发布（本地实测 API
 耗时仅在调试模式开启时展示）。图片收集、

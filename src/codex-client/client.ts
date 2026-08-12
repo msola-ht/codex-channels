@@ -357,26 +357,11 @@ export class CodexAppServerClient implements
     if (current.isPinned === pinned) {
       return;
     }
-    const materialized = await this.rpc.request<ThreadMetadataUpdateResponse>({
-      method: "thread/metadata/update",
-      params: {
-        threadId,
-        gitInfo: { sha: observed.thread.gitInfo?.sha ?? null },
-      },
-    }, { retryOverload: false });
-    const stored = toThreadSnapshot(materialized.thread);
-    if (stored.id !== threadId) {
-      throw new Error("Codex Thread 固定状态更新目标不一致");
-    }
-    await this.rpc.request<ThreadSectionMoveResponse>({
-      method: "thread/section/move",
-      params: {
-        threadId,
-        sectionId: pinned ? PINNED_THREAD_SECTION_ID : null,
-        beforeThreadId: null,
-      },
-    }, { retryOverload: false });
-    const updated = await this.readThread(threadId);
+    const updated = await this.applyThreadSectionMove(
+      threadId,
+      observed,
+      pinned ? PINNED_THREAD_SECTION_ID : null,
+    );
     if (updated.id !== threadId || updated.isPinned !== pinned) {
       throw new Error("Codex Thread 固定状态更新结果不一致");
     }
@@ -441,13 +426,34 @@ export class CodexAppServerClient implements
     if (observed.thread.id !== threadId) {
       throw new Error("Codex Thread 分区更新目标不一致");
     }
-    await this.rpc.request<ThreadMetadataUpdateResponse>({
+    const updated = await this.applyThreadSectionMove(
+      threadId,
+      observed,
+      sectionId,
+      beforeThreadId,
+    );
+    if (updated.section?.id !== sectionId && !(updated.section === null && sectionId === null)) {
+      throw new Error("Codex Thread 分区更新结果不一致");
+    }
+  }
+
+  private async applyThreadSectionMove(
+    threadId: string,
+    observed: ThreadReadResponse,
+    sectionId: string | null,
+    beforeThreadId?: string,
+  ): Promise<ThreadSnapshot> {
+    const materialized = await this.rpc.request<ThreadMetadataUpdateResponse>({
       method: "thread/metadata/update",
       params: {
         threadId,
         gitInfo: { sha: observed.thread.gitInfo?.sha ?? null },
       },
     }, { retryOverload: false });
+    const stored = toThreadSnapshot(materialized.thread);
+    if (stored.id !== threadId) {
+      throw new Error("Codex Thread 分区元数据更新目标不一致");
+    }
     await this.rpc.request<ThreadSectionMoveResponse>({
       method: "thread/section/move",
       params: {
@@ -456,10 +462,7 @@ export class CodexAppServerClient implements
         beforeThreadId: beforeThreadId ?? null,
       },
     }, { retryOverload: false });
-    const updated = await this.readThread(threadId);
-    if (updated.section?.id !== sectionId && !(updated.section === null && sectionId === null)) {
-      throw new Error("Codex Thread 分区更新结果不一致");
-    }
+    return this.readThread(threadId);
   }
 
   async compactThread(threadId: string): Promise<void> {

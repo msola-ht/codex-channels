@@ -520,6 +520,22 @@ export class TelegramSurface {
         target(context),
         "section",
         `list ${context.match[1]}`,
+        String(context.from.id),
+      );
+      await renderTelegramCommandResult(
+        context,
+        result,
+        this.priceCurrency,
+        this.exchangeRate?.() ?? null,
+      );
+    });
+    this.bot.callbackQuery("section:pin", async (context) => {
+      await context.answerCallbackQuery({ text: "正在固定当前会话" });
+      const result = await this.commands.execute(
+        target(context),
+        "pin",
+        "",
+        String(context.from.id),
       );
       await renderTelegramCommandResult(
         context,

@@ -51,7 +51,7 @@ export const conversationCommandDescriptions = {
   unarchive: "恢复已归档会话",
   pin: "固定当前会话",
   unpin: "取消固定当前会话",
-  section: "管理 Codex Thread 分区",
+  section: "查看或管理 Codex Thread 分区",
   status: "查看当前状态",
   workspace: "列出或切换 Workspace",
   workspaceperm: "查看或修改当前工作区权限",
@@ -87,8 +87,8 @@ export const conversationCommandHelpSections = [
       "/archived [页码] [filter all|pinned|unsectioned] [provider 名称] [section 分区] [search 搜索词]",
       "/new · /archive · /unarchive <序号|名称|Thread ID>",
       "/pin · /unpin",
-      "/section · /section create <名称> · /section rename <分区序号或 ID> <新名称>",
-      "/section move <分区序号或 ID> [before <会话>] · /section remove · /section delete <分区序号或 ID>",
+      "/section（查看）· 管理员：/section create <名称> · /section rename <分区序号或 ID> <新名称>",
+      "管理员：/section move <分区序号或 ID> [before <会话>] · /section remove · /section delete <分区序号或 ID>",
       "/rename <名称> · /compact · /fork",
     ],
   },
@@ -205,9 +205,16 @@ export function formatConversationThreadSections(
     ...(result.page < result.pageCount ? ["", `下一页：/section list ${result.page + 1}`] : []),
     "",
     "分区由 Codex App Server 全局管理，不局限于当前 Workspace；序号仅用于当前列表。",
-    "移动：/section move <序号或 ID> [before <会话序号、名称或 Thread ID>]",
-    "新建：/section create <名称> · 重命名：/section rename <分区序号或 ID> <新名称>",
-    "移出：/section remove · 删除：/section delete <分区序号或 ID>",
+    "固定：/pin · 取消固定：/unpin",
+    ...(result.canManageCustomSections
+      ? [
+          "移动到自定义分区：/section move <序号或 ID> [before <会话序号、名称或 Thread ID>]",
+          "新建：/section create <名称> · 重命名：/section rename <分区序号或 ID> <新名称>",
+          "移出自定义分区：/section remove · 删除：/section delete <分区序号或 ID>",
+        ]
+      : [
+          "自定义分区：当前用户仅可查看和筛选；写操作需要配置 Thread 分区管理员。",
+        ]),
   ].join("\n"));
 }
 

@@ -973,6 +973,40 @@ describe("Telegram image input", () => {
     await output.close();
   });
 
+  it("routes the built-in Pinned Thread Section button through /pin", async () => {
+    const setPinned = vi.fn().mockResolvedValue(undefined);
+    const { surface, output, apiCalls, sentTexts } = createSurface(
+      vi.fn(),
+      vi.fn(),
+      { setPinned },
+    );
+
+    await surface.bot.handleUpdate({
+      update_id: 16,
+      callback_query: {
+        id: "section-pin",
+        from: telegramUser(),
+        chat_instance: "chat-instance",
+        data: "section:pin",
+        message: {
+          message_id: 25,
+          date: 1,
+          chat: telegramChat(),
+          text: "Thread 分区",
+        },
+      },
+    });
+
+    expect(setPinned).toHaveBeenCalledWith(
+      { surface: "telegram", accountId: "default", conversationId: "100" },
+      true,
+    );
+    expect(apiCalls).toContain("answerCallbackQuery");
+    expect(sentTexts.join("\n")).toContain("已固定当前会话");
+    await surface.stop();
+    await output.close();
+  });
+
   it("rejects replies to stale Plugin prompts after in-memory state is gone", async () => {
     const submit = vi.fn();
     const { surface, output, sentTexts } = createSurface(submit, vi.fn());

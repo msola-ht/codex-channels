@@ -229,8 +229,9 @@ codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策�
 当前聊天并标记所属 Thread；同一聊天最多保留 3 个后台任务。普通消息只发送给当前前台 Thread，
 需要继续操作后台任务时使用 `/resume` 将其切回前台。
 
-`/sessions` 与 `/archived` 支持分页和组合筛选；`/section` 管理 App Server 原生全局分区，写操作
-需要配置管理员。完整语法以 `/help` 为准，协议与安全边界见 [`docs/index.md`](docs/index.md)。
+`/sessions` 与 `/archived` 支持分页和组合筛选；`/pin` 与 `/unpin` 管理当前会话的内置 Pinned 状态，
+`/section` 查看 App Server 原生全局分区，自定义分区写操作需要配置管理员。完整语法以 `/help` 为准，协议与安全边界见
+[`docs/index.md`](docs/index.md)。
 
 命令、文件修改和额外权限默认不会自动批准。审批、用户输入和 MCP 交互会逐项显示，并绑定当前
 用户、会话和 Turn。

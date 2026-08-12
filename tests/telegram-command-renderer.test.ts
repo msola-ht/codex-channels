@@ -348,6 +348,38 @@ describe("Telegram command renderer", () => {
   it("builds bounded Thread Section move and paging buttons", () => {
     const keyboard = threadSectionKeyboard({
       kind: "thread-sections",
+      sections: [
+        {
+          id: "section-pinned",
+          name: "Pinned",
+          builtIn: "pinned",
+          currentWorkspaceActiveCount: 1,
+          currentWorkspaceArchivedCount: 0,
+        },
+        {
+          id: "section-project",
+          name: "项目",
+          builtIn: null,
+          currentWorkspaceActiveCount: 1,
+          currentWorkspaceArchivedCount: 0,
+        },
+      ],
+      selectors: ["1", "2"],
+      page: 2,
+      pageCount: 3,
+      totalSectionCount: 17,
+      canManageCustomSections: false,
+    });
+    const callbacks = keyboard?.inline_keyboard.flatMap((row) =>
+      row.map((button) => (button as { callback_data: string }).callback_data));
+    expect(callbacks).toContain("section:pin");
+    expect(callbacks?.some((callback) => callback.startsWith("section:move:")))
+      .toBe(false);
+    expect(callbacks).toContain("section:page:1");
+    expect(callbacks).toContain("section:page:3");
+
+    const administratorKeyboard = threadSectionKeyboard({
+      kind: "thread-sections",
       sections: [{
         id: "section-project",
         name: "项目",
@@ -355,16 +387,15 @@ describe("Telegram command renderer", () => {
         currentWorkspaceActiveCount: 1,
         currentWorkspaceArchivedCount: 0,
       }],
-      selectors: ["1"],
-      page: 2,
-      pageCount: 3,
-      totalSectionCount: 17,
+      selectors: ["2"],
+      page: 1,
+      pageCount: 1,
+      totalSectionCount: 2,
+      canManageCustomSections: true,
     });
-    const callbacks = keyboard?.inline_keyboard.flatMap((row) =>
+    const administratorCallbacks = administratorKeyboard?.inline_keyboard.flatMap((row) =>
       row.map((button) => (button as { callback_data: string }).callback_data));
-    expect(callbacks?.[0]).toMatch(/^section:move:[A-Za-z0-9_-]{43}$/u);
-    expect(callbacks).toContain("section:page:1");
-    expect(callbacks).toContain("section:page:3");
+    expect(administratorCallbacks?.[0]).toMatch(/^section:move:[A-Za-z0-9_-]{43}$/u);
 
     expect(threadSectionKeyboard({
       kind: "thread-sections",
@@ -373,6 +404,7 @@ describe("Telegram command renderer", () => {
       page: 4,
       pageCount: 3,
       totalSectionCount: 17,
+      canManageCustomSections: false,
     })).toBeUndefined();
   });
 });
