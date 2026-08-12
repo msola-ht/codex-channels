@@ -1,16 +1,12 @@
-import { randomUUID } from "node:crypto";
 import {
-  closeSync,
+  chmodSync,
   existsSync,
-  fsyncSync,
-  linkSync,
-  openSync,
   readFileSync,
   statSync,
   unlinkSync,
-  writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 export const modelRequestMetricsSchemaVersion = 7;
 const incompleteLockGraceMs = 30_000;
@@ -26,47 +22,69 @@ export function requestMetricsDatabasePath(stateDatabasePath: string): string {
 export function acquireRequestMetricsDatabaseLock(
   databasePath: string,
 ): RequestMetricsDatabaseLock {
-  const lockPath = `${databasePath}.lock`;
-  const token = randomUUID();
-  const temporaryLockPath = `${lockPath}.${process.pid}.${token}.tmp`;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    let descriptor: number | undefined;
-    try {
-      descriptor = openSync(temporaryLockPath, "wx", 0o600);
-      writeFileSync(descriptor, `${JSON.stringify({ pid: process.pid, token })}\n`);
-      fsyncSync(descriptor);
-      linkSync(temporaryLockPath, lockPath);
-      unlinkSync(temporaryLockPath);
-      const ownedDescriptor = descriptor;
-      let released = false;
-      return {
-        release() {
-          if (released) return;
-          released = true;
-          closeSync(ownedDescriptor);
-          const owner = readLockOwner(lockPath);
-          if (owner?.token === token) unlinkSync(lockPath);
-        },
-      };
-    } catch (error) {
-      if (descriptor !== undefined) {
-        closeSync(descriptor);
-        unlinkIfPresent(temporaryLockPath);
-      }
-      if (!isNodeError(error, "EEXIST") || !existsSync(lockPath)) throw error;
-      const owner = readLockOwner(lockPath);
-      if (owner !== null && !processIsAlive(owner.pid)) {
-        unlinkIfPresent(lockPath);
-        continue;
-      }
-      if (owner === null && incompleteLockIsStale(lockPath)) {
-        unlinkIfPresent(lockPath);
-        continue;
-      }
-      throw new ModelRequestMetricsDatabaseLockedError();
-    }
+  const lockDatabasePath = `${databasePath}.lock.sqlite3`;
+  let database: DatabaseSync | undefined;
+  try {
+    database = new DatabaseSync(lockDatabasePath);
+    chmodSync(lockDatabasePath, 0o600);
+    database.exec("PRAGMA busy_timeout = 0; BEGIN EXCLUSIVE;");
+  } catch (error) {
+    database?.close();
+    if (isSqliteLockError(error)) throw new ModelRequestMetricsDatabaseLockedError();
+    throw error;
   }
-  throw new Error("无法清理模型请求指标数据库的失效锁");
+  try {
+    removeStaleLegacyLock(databasePath);
+  } catch (error) {
+    closeLockDatabase(database);
+    throw error;
+  }
+  let released = false;
+  return {
+    release() {
+      if (released) return;
+      released = true;
+      closeLockDatabase(database);
+    },
+  };
+}
+
+function closeLockDatabase(database: DatabaseSync): void {
+  try {
+    database.exec("ROLLBACK");
+  } finally {
+    database.close();
+  }
+}
+
+function removeStaleLegacyLock(databasePath: string): void {
+  const lockPath = `${databasePath}.lock`;
+  if (!existsSync(lockPath)) return;
+  const owner = readLegacyLockOwner(lockPath);
+  if (owner !== null && legacyLockOwnerIsActive(owner.pid, lockPath)) {
+    throw new ModelRequestMetricsDatabaseLockedError();
+  }
+  if (owner === null && !incompleteLockIsStale(lockPath)) {
+    throw new ModelRequestMetricsDatabaseLockedError();
+  }
+  unlinkIfPresent(lockPath);
+}
+
+function legacyLockOwnerIsActive(pid: number, lockPath: string): boolean {
+  return processIsAlive(pid) && !lockPredatesCurrentLinuxBoot(lockPath);
+}
+
+function lockPredatesCurrentLinuxBoot(lockPath: string): boolean {
+  if (process.platform !== "linux") return false;
+  try {
+    const bootTimeMatch = /^btime\s+(\d+)$/mu.exec(readFileSync("/proc/stat", "utf8"));
+    if (!bootTimeMatch) return false;
+    const bootTimeMs = Number(bootTimeMatch[1]) * 1_000;
+    return Number.isSafeInteger(bootTimeMs) && statSync(lockPath).mtimeMs < bootTimeMs;
+  } catch (error) {
+    if (isNodeError(error, "ENOENT")) return true;
+    return false;
+  }
 }
 
 function incompleteLockIsStale(lockPath: string): boolean {
@@ -95,12 +113,12 @@ export class ModelRequestMetricsDatabaseLockedError extends Error {
   }
 }
 
-interface LockOwner {
+interface LegacyLockOwner {
   pid: number;
   token: string;
 }
 
-function readLockOwner(lockPath: string): LockOwner | null {
+function readLegacyLockOwner(lockPath: string): LegacyLockOwner | null {
   if (!existsSync(lockPath)) return null;
   try {
     const value: unknown = JSON.parse(readFileSync(lockPath, "utf8"));
@@ -126,6 +144,13 @@ function processIsAlive(pid: number): boolean {
   } catch (error) {
     return !isNodeError(error, "ESRCH");
   }
+}
+
+function isSqliteLockError(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && "errcode" in error
+    && (error.errcode === 5 || error.errcode === 6);
 }
 
 function isNodeError(error: unknown, code: string): boolean {
