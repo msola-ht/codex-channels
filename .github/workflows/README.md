@@ -25,9 +25,9 @@
   生成协议，并使用与正式预览相同的独立兼容检查和报告。成功或失败都会上传完整现场，失败后
   任务标红；Release 解析失败同样保留 `unresolved` 报告；结果只作前向兼容预警，不进入正式
   版本基线。
-- `publish.yml`：推送与 Codex CLI 协议版本一致的 `v*` Tag 后，先在 Runner 临时工作区把包内
-  README 渲染为 Tag 版本并执行同一完整提交检查，再使用 npm Trusted Publishing 发布公开包，
-  不保存长期 npm Token。该临时渲染不会提前修改 `main`；合并升级 PR 或普通 push 不会发布。
+- `publish.yml`：推送与 Codex CLI 协议版本一致的 `v*` Tag 后，先确认 Tag 所在提交已经把 README
+  正式版本与安装命令同步到同一版本并执行完整提交检查，再使用 npm Trusted Publishing 发布公开包，
+  不保存长期 npm Token。README 未完成正式发布提交时失败关闭；合并升级 PR 或普通 push 不会发布。
 - README 的正式版本与安装命令在发布提交中直接更新并接受 PR/CI 审查；GitHub Release 不再触发
   自动写回 `main`。GitHub Release 创建、本机安装、服务重启和部署仍不由工作流执行。完整收尾步骤见
   [`docs/codex-cli-upgrade.md`](../../docs/codex-cli-upgrade.md)。

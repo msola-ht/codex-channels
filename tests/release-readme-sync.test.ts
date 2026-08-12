@@ -48,12 +48,20 @@ describe("published README synchronization", () => {
     const scriptsDirectory = join(fixture, "scripts");
     mkdirSync(scriptsDirectory);
     try {
-      for (const name of ["check-release-tag.mjs", "package-path.mjs"]) {
+      for (const name of [
+        "check-release-tag.mjs",
+        "package-path.mjs",
+        "sync-published-readme.mjs",
+      ]) {
         copyFileSync(resolve("scripts", name), join(scriptsDirectory, name));
       }
       writeFileSync(
         join(fixture, "package.json"),
         JSON.stringify({ version: "0.146.0" }),
+      );
+      writeFileSync(
+        join(fixture, "README.md"),
+        renderPublishedReadme(readme, "0.146.0"),
       );
 
       const result = spawnSync(
@@ -68,6 +76,41 @@ describe("published README synchronization", () => {
 
       expect(result.status, result.stderr).toBe(0);
       expect(result.stdout).toContain("发布版本匹配：v0.146.0");
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a release tag before the repository README is finalized", () => {
+    const fixture = mkdtempSync(join(tmpdir(), "codexc-release-readme-stale-"));
+    const scriptsDirectory = join(fixture, "scripts");
+    mkdirSync(scriptsDirectory);
+    try {
+      for (const name of [
+        "check-release-tag.mjs",
+        "package-path.mjs",
+        "sync-published-readme.mjs",
+      ]) {
+        copyFileSync(resolve("scripts", name), join(scriptsDirectory, name));
+      }
+      writeFileSync(
+        join(fixture, "package.json"),
+        JSON.stringify({ version: "0.146.0" }),
+      );
+      writeFileSync(join(fixture, "README.md"), readme);
+
+      const result = spawnSync(
+        process.execPath,
+        [join(scriptsDirectory, "check-release-tag.mjs"), "v0.146.0"],
+        {
+          cwd: fixture,
+          encoding: "utf8",
+          env: { ...process.env, GITHUB_REF_NAME: "" },
+        },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("README 尚未同步为正式版本 0.146.0");
     } finally {
       rmSync(fixture, { recursive: true, force: true });
     }

@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { packageDir } from "./runtime-config.mjs";
+import { packageDir } from "./package-path.mjs";
 
 const stableVersionPattern = /^\d+\.\d+\.\d+$/u;
 
