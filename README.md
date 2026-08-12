@@ -75,8 +75,9 @@ Token 缺失或留空时不创建 Telegram 连接，也不要求 `allowed_user_i
 渠道准备事项：
 
 - Telegram：准备 BotFather 创建的 Bot Token；向导会生成配对入口以获取用户 ID。
-- 飞书：可扫码创建或选择企业自建应用，也可手工输入 App ID 和 App Secret；配置后可在飞书
-  私聊发送 `/fs doctor` 检查权限、事件和菜单。
+- 飞书：可扫码创建或选择企业自建应用，也可手工输入 App ID 和 App Secret；扫码配置只把本次扫码
+  用户设为允许用户，不沿用旧应用名单。配置后先在终端运行 `codexc doctor` 检查权限、消息事件和
+  待发布版本。机器人已经能接收私聊后，可发送 `/fs doctor` 检查运行观测和菜单。
 - 微信：通过向导扫码保存凭据；确认账号和允许用户后，将配置中的 `weixin.enabled` 改为
   `true`，再运行 `codexc service reload`。
 
@@ -250,7 +251,9 @@ codexc service logs -n 100
 - 单个聊天渠道断线：其他渠道会继续运行，可用 `codexc service logs -f` 查看恢复记录。
 - 只需重启 Gateway：运行 `codexc service restart`，共享 App Server 和活动 Thread 会保留。
 - Codex CLI 版本不一致：重新安装精确版本 `@openai/codex@0.146.1`。
-- 飞书收不到消息或菜单不完整：在飞书私聊发送 `/fs doctor`。
+- 飞书完全收不到消息：先在终端运行 `codexc doctor`；如提示权限、消息事件或版本未生效，重新运行
+  `codexc setup`，扫码时选择当前应用并完成授权、审核和发布。机器人能接收私聊但菜单不完整时，
+  再发送 `/fs doctor`。
 - 需要根据日志定位错误：错误码与日志字段约定见 [`docs/errors.md`](docs/errors.md)。
 - 需要查看参数：运行 `codexc -h` 或 `codexc <命令> -h`。
 

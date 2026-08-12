@@ -13,6 +13,7 @@ import { feishuCommandMenuEventKey } from "./command-center.js";
 const applicationInspectionScope = "application:application:self_manage";
 const applicationConfigurationScope = "application:application:patch";
 const requiredMessageScope = "im:message:send_as_bot";
+const requiredPrivateMessageReceiveScope = "im:message.p2p_msg:readonly";
 const requiredMessageResourceScope = "im:resource";
 const requiredMessageReadScope = "im:message:readonly";
 const requiredStreamingScope = "cardkit:card:write";
@@ -30,6 +31,7 @@ export const requiredFeishuApplicationTenantScopes = [
   applicationInspectionScope,
   applicationConfigurationScope,
   requiredMessageScope,
+  requiredPrivateMessageReceiveScope,
   requiredMessageResourceScope,
   requiredMessageReadScope,
   requiredStreamingScope,

@@ -31,7 +31,10 @@ import {
 } from "../runtime/model-provider-runtime.mjs";
 import { readApiProviderKey } from "../runtime/api-provider-credential.mjs";
 import { serviceIdentifiers } from "../runtime/service-targets.mjs";
-import { validateFeishuApplication } from "./feishu-application.mjs";
+import {
+  inspectFeishuApplicationConfiguration,
+  validateFeishuApplication,
+} from "./feishu-application.mjs";
 import { packageDir, resolveConfiguredPath, runtimeConfig, userDataDir } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
@@ -127,6 +130,37 @@ if (document) {
     try {
       await validateFeishuApplication({ appId, appSecret });
       record("飞书应用", true, "凭据与 Bot 身份验证通过（敏感内容已隐藏）");
+      try {
+        const application = await inspectFeishuApplicationConfiguration({
+          appId,
+          appSecret,
+        });
+        record(
+          "飞书应用权限",
+          application.missingTenantScopes.length === 0,
+          application.missingTenantScopes.length === 0
+            ? "机器人所需的私聊接收、发送、资源与 CardKit 权限已开通"
+            : `缺少 ${application.missingTenantScopes.join("、")}`,
+          "重新运行 codexc setup，选择扫码授权并在飞书页面选择当前应用，确认全部权限",
+        );
+        record(
+          "飞书消息事件",
+          application.messageEventConfigured && !application.hasPendingVersion,
+          application.hasPendingVersion
+            ? "存在待审核或待发布版本；生效前机器人可能无法接收消息"
+            : application.messageEventConfigured
+              ? "私聊消息事件已发布"
+              : "私聊消息事件未配置或尚未发布",
+          "重新运行 codexc setup 完成配置；如飞书要求审核，请由应用管理员批准版本",
+        );
+      } catch {
+        record(
+          "飞书权限与事件",
+          false,
+          "无法读取应用权限或发布状态",
+          "重新运行 codexc setup，选择扫码授权并在飞书页面选择当前应用",
+        );
+      }
     } catch {
       record("飞书应用", false, "凭据、网络或 Bot 身份验证失败");
     }

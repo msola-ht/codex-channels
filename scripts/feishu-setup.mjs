@@ -57,6 +57,7 @@ export async function runFeishuSetup({
                 "application:application:self_manage",
                 "application:application:patch",
                 "im:message:send_as_bot",
+                "im:message.p2p_msg:readonly",
                 "im:resource",
                 "im:message:readonly",
                 "cardkit:card:write",
@@ -92,29 +93,23 @@ export async function runFeishuSetup({
       validateApplication,
       result,
     );
-    const existingAllowedOpenIds = validConfiguredOpenIds(
-      existing.allowed_open_ids,
-    );
     let allowedOpenIds = result.openId ? [result.openId] : [];
-    if (
-      existingAllowedOpenIds.length > 0
-      && await prompt.confirm(
-        result.openId
-          ? "保留当前允许名单并加入扫码用户？"
-          : "保留当前允许名单？",
-        true,
-      )
-    ) {
-      allowedOpenIds = normalizeOpenIds([
-        ...allowedOpenIds,
-        ...existingAllowedOpenIds,
-      ]);
+    if (!scanRegistration) {
+      const existingAllowedOpenIds = validConfiguredOpenIds(
+        existing.allowed_open_ids,
+      );
+      if (
+        existingAllowedOpenIds.length > 0
+        && await prompt.confirm("保留当前允许名单？", true)
+      ) {
+        allowedOpenIds = [...existingAllowedOpenIds];
+      }
+      allowedOpenIds = await collectAllowedOpenIds(
+        prompt,
+        output,
+        allowedOpenIds,
+      );
     }
-    allowedOpenIds = await collectAllowedOpenIds(
-      prompt,
-      output,
-      allowedOpenIds,
-    );
 
     output.write("\n准备保存飞书配置：\n");
     output.write("- 状态：启用\n");
@@ -145,21 +140,23 @@ export async function runFeishuSetup({
         });
         output.write(
           configured?.changed
-            ? "飞书机器人悬浮菜单已自动配置并发布。\n"
-            : "飞书机器人悬浮菜单已经配置完成。\n",
+            ? "飞书机器人配置已提交发布；请运行 codexc doctor 确认权限、消息事件和版本均已生效。\n"
+            : "飞书机器人配置无需修改；请运行 codexc doctor 确认权限、消息事件和版本均已生效。\n",
         );
       } catch {
         output.write(
           "飞书连接配置已保存，但机器人菜单自动配置未完成；"
-          + "Gateway 启动后可发送 /fs doctor 恢复。\n",
+          + "机器人可能无法接收消息。请先运行 codexc doctor；"
+          + "再重新运行 codexc setup，选择扫码授权并在飞书页面选择当前应用，"
+          + "确认全部权限、事件和发布步骤。配置完成前不能依赖 /fs doctor 恢复。\n",
         );
       }
     }
     output.write("下一步运行：codexc doctor\n");
     if (!scanRegistration) {
       output.write(
-        "Gateway 启动后，在飞书私聊发送 /fs doctor "
-        + "完成机器人菜单和订阅配置。\n",
+        "请先运行 codexc doctor 检查飞书权限和消息事件；"
+        + "如有缺失，请重新运行 codexc setup，选择扫码授权并在飞书页面选择当前应用。\n",
       );
     }
     output.write("运行中的 Gateway 会检测配置变化并重启飞书 Surface。\n");

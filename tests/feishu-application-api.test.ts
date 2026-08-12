@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   FeishuApplicationHttpApi,
   FeishuApplicationSetupError,
+  requiredFeishuApplicationTenantScopes,
 } from "../src/surfaces/feishu/index.js";
 
 const options = {
@@ -11,6 +12,11 @@ const options = {
 };
 
 describe("Feishu application management API", () => {
+  it("requires the private-message receive permission for minimal new bots", () => {
+    expect(requiredFeishuApplicationTenantScopes)
+      .toContain("im:message.p2p_msg:readonly");
+  });
+
   it("inspects published menu and additive subscription state", async () => {
     const client = createClient({
       getApplication: async () => ({
