@@ -413,6 +413,7 @@ export class FeishuConversationAdapter {
         || action === "sessions"
         || action === "archived"
         || (action === "plugin" && result.kind === "plugins")
+        || (action === "section" && result.kind === "thread-sections")
       )
         ? renderCommandCenterChoices(action, result)
         : undefined;
@@ -1007,15 +1008,41 @@ function renderCommandCenterChoices(
         : []),
     ];
     if (result.sections.length === 0 && navigation.length === 0) return undefined;
-    return {
-      title: `移动当前会话到分区 · 第 ${result.page}/${result.pageCount} 页`,
-      description: "分区是 Codex App Server 全局状态；移动到自定义分区会取消固定。",
-      choices: [
-        ...result.sections.map((section) => ({
-          label: `${section.name}${section.builtIn === "pinned" ? " · 固定" : ""}`,
-          action: "section" as const,
+    const sectionChoices: Array<FeishuCommandCenterChoices["choices"][number]> = [];
+    for (const section of result.sections) {
+      if (section.builtIn === "pinned") {
+        sectionChoices.push({
+          label: `${section.name} · 固定`,
+          action: "pin",
+          input: "",
+        });
+      } else if (result.canManageCustomSections) {
+        sectionChoices.push({
+          label: section.name,
+          action: "section",
           input: `move ${section.id}`,
-        })),
+        });
+      }
+    }
+    const readOnlySections = result.sections.flatMap((section, index) =>
+      section.builtIn === "pinned"
+        ? []
+        : [
+            `${result.selectors[index] ?? section.id}. ${section.name} · 当前 Workspace：活动 ${section.currentWorkspaceActiveCount} / 归档 ${section.currentWorkspaceArchivedCount}`,
+          ]
+    );
+    return {
+      title: `${result.canManageCustomSections ? "固定或移动当前会话" : "查看分区或固定当前会话"} · 第 ${result.page}/${result.pageCount} 页`,
+      description: result.canManageCustomSections
+        ? "固定复用 /pin；移动到自定义分区会取消固定。"
+        : [
+            "可固定当前会话；自定义分区当前仅可查看和筛选。",
+            ...(readOnlySections.length > 0
+              ? ["", "自定义分区（只读）：", ...readOnlySections]
+              : []),
+          ].join("\n"),
+      choices: [
+        ...sectionChoices,
         ...navigation,
       ],
     };

@@ -199,7 +199,17 @@ describe("ConversationCommandService", () => {
     });
 
     await expect(commands.execute(target, "section", ""))
-      .resolves.toMatchObject({ kind: "thread-sections", selectors: ["1"] });
+      .resolves.toMatchObject({
+        kind: "thread-sections",
+        selectors: ["1"],
+        canManageCustomSections: false,
+      });
+    await expect(commands.execute(target, "section", "", "actor-admin"))
+      .resolves.toMatchObject({
+        kind: "thread-sections",
+        selectors: ["1"],
+        canManageCustomSections: true,
+      });
     await expect(commands.execute(target, "section", "move 1 before thread-2", "actor-admin"))
       .resolves.toMatchObject({
         kind: "outcome",
@@ -225,7 +235,10 @@ describe("ConversationCommandService", () => {
     } as unknown as ConversationUseCases);
 
     await expect(commands.execute(target, "section", "list"))
-      .resolves.toMatchObject({ kind: "thread-sections" });
+      .resolves.toMatchObject({
+        kind: "thread-sections",
+        canManageCustomSections: false,
+      });
     await expect(commands.execute(target, "section", "create 项目", "actor-user"))
       .rejects.toMatchObject({ code: "thread-section.admin-required" });
     expect(createThreadSection).not.toHaveBeenCalled();

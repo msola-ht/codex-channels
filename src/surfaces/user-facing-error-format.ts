@@ -94,6 +94,8 @@ export function formatSurfaceUserFacingError(
       return "before 指定的会话必须已经位于目标分区";
     case "thread-section.delete-confirmation.invalid":
       return "删除确认必须使用预览返回的完整 Thread 分区 ID";
+    case "thread-section.admin-required":
+      return "当前用户没有 Thread 分区写权限；请在 thread_sections.administrators 中配置对应渠道用户 ID，并重启 Gateway";
     case "thread.bound":
       return "该 Codex Thread 已绑定到其他会话";
     case "thread.takeover.busy":

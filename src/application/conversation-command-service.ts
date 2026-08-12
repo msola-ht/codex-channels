@@ -101,6 +101,7 @@ export type ConversationCommandResult =
       page: number;
       pageCount: number;
       totalSectionCount: number;
+      canManageCustomSections: boolean;
     }
   | {
       kind: "thread-section-delete-preview";
@@ -322,6 +323,10 @@ export class ConversationCommandService {
         };
       case "section": {
         const operation = parseThreadSectionOperation(argumentsText);
+        const canManageCustomSections = Boolean(
+          actorId
+          && this.threadSectionAccess?.isAllowed({ target, actorId }),
+        );
         if (operation.type === "list") {
           const sections = await this.conversations.listThreadSections(target);
           const pageCount = Math.max(
@@ -343,12 +348,10 @@ export class ConversationCommandService {
             page: operation.page,
             pageCount,
             totalSectionCount: sections.length,
+            canManageCustomSections,
           };
         }
-        if (
-          !actorId
-          || !this.threadSectionAccess?.isAllowed({ target, actorId })
-        ) {
+        if (!canManageCustomSections) {
           throw new UserFacingError(
             "thread-section.admin-required",
             "只有配置的 Thread 分区管理员可以修改全局分区",

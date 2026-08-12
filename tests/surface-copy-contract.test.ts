@@ -133,6 +133,18 @@ describe("shared surface copy contract", () => {
     }
   });
 
+  it("explains Thread Section administrator denial consistently on every surface", () => {
+    const error = new UserFacingError(
+      "thread-section.admin-required",
+      "opaque internal fallback",
+    );
+    for (const surface of ["Telegram", "飞书", "微信"] as const) {
+      expect(formatSurfaceUserFacingError(error, surface)).toBe(
+        "当前用户没有 Thread 分区写权限；请在 thread_sections.administrators 中配置对应渠道用户 ID，并重启 Gateway",
+      );
+    }
+  });
+
   it("formats MCP OAuth completion without exposing sensitive failure details", () => {
     expect(formatRuntimeMcpOAuthCompleted({
       name: "docs",
@@ -343,6 +355,7 @@ describe("shared surface copy contract", () => {
       page: 1,
       pageCount: 1,
       totalSectionCount: 2,
+      canManageCustomSections: true,
     };
     const preview: Extract<ConversationCommandResult, { kind: "thread-section-delete-preview" }> = {
       kind: "thread-section-delete-preview",
@@ -368,6 +381,7 @@ describe("shared surface copy contract", () => {
       page: 3,
       pageCount: 2,
       totalSectionCount: 9,
+      canManageCustomSections: false,
     };
     const missingPageText = formatConversationThreadSections(missingPage);
     expect(missingPageText).toContain("第 3 页不存在，共 2 页");
@@ -375,6 +389,37 @@ describe("shared surface copy contract", () => {
     expect(missingPageText).not.toContain("/section list 2");
     expect(renderFeishuCommandResult(missingPage)).toBe(missingPageText);
     expect(renderWeixinCommandResult(missingPage)).toBe(missingPageText);
+  });
+
+  it("keeps Pinned convenient while hiding custom Thread Section writes from readers", () => {
+    const list: Extract<ConversationCommandResult, { kind: "thread-sections" }> = {
+      kind: "thread-sections",
+      sections: [{
+        id: "section-pinned",
+        name: "Pinned",
+        builtIn: "pinned",
+        currentWorkspaceActiveCount: 1,
+        currentWorkspaceArchivedCount: 0,
+      }, {
+        id: "section-project",
+        name: "项目",
+        builtIn: null,
+        currentWorkspaceActiveCount: 2,
+        currentWorkspaceArchivedCount: 1,
+      }],
+      selectors: ["1", "2"],
+      page: 1,
+      pageCount: 1,
+      totalSectionCount: 2,
+      canManageCustomSections: false,
+    };
+
+    const rendered = formatConversationThreadSections(list);
+    expect(rendered).toContain("固定：/pin · 取消固定：/unpin");
+    expect(rendered).toContain("自定义分区：当前用户仅可查看和筛选");
+    expect(rendered).not.toContain("/section move");
+    expect(rendered).not.toContain("/section create");
+    expect(rendered).not.toContain("/section delete");
   });
 
   it("leaves new extension task acknowledgement to the Turn lifecycle", () => {

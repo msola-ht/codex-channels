@@ -92,7 +92,8 @@ App Server 通知继续处理其他客户端修改与恢复后的状态校正。
 自定义 Thread 分区也只依赖 `TurnExecutionPort`：Application 解析全局选择器、统计当前 Workspace
 活动与归档成员、校验 `before` 目标仍在同一分区，并在删除前返回结构化影响预览；关键词搜索使用
 完整历史目录，分区视图按官方 `section_position` 排序，同时保留完整目录选择器；不持久化分区目录。
-共享命令边界只允许配置的当前 Surface Actor 执行分区写操作，读取与筛选不需要管理员权限。
+内置 Pinned 分区继续由 `/pin` 与 `/unpin` 提供会话级快捷入口；共享命令边界只允许配置的当前
+Surface Actor 执行自定义分区写操作，读取与筛选不需要管理员权限。
 模型选择和 Fast 只依赖 `ModelSelectionPort`；不可见模型过滤、官方模型字段裁剪以及
 `config/read` / `config/batchWrite` 的版本差异由 `codex-client` 处理。
 OpenAI 原生账户查询只依赖 `AccountQueryPort`；当前 Thread 的 `/usage` 与 `/limits` 通过

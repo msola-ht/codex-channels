@@ -186,6 +186,7 @@ class FakeTransport extends BaseTransport {
   threadListData: Array<Record<string, unknown>> = [];
   resumeThreadData: Record<string, unknown> = appServerThread();
   threadReadData: Record<string, unknown> = appServerThread();
+  metadataUpdateThreadData: Record<string, unknown> | undefined;
   threadSections: Array<{ id: string; name: string }> = [pinnedThreadSection];
   goal = appServerGoal();
 
@@ -319,7 +320,7 @@ class FakeTransport extends BaseTransport {
       queueMicrotask(() =>
         this.emitMessage(JSON.stringify({
           id: decoded.id,
-          result: { thread: this.threadReadData },
+          result: { thread: this.metadataUpdateThreadData ?? this.threadReadData },
         })),
       );
     } else if (decoded.method === "thread/section/move") {
@@ -883,6 +884,32 @@ describe("JsonRpcClient", () => {
         sectionId: pinnedThreadSection.id,
         beforeThreadId: null,
       });
+  });
+
+  it.each([
+    {
+      entry: "/pin",
+      operate: (client: CodexAppServerClient) => client.setThreadPinned("thread-1", true),
+    },
+    {
+      entry: "custom Thread Section move",
+      operate: (client: CodexAppServerClient) =>
+        client.moveThreadToSection("thread-1", "section-project"),
+    },
+  ])("fails closed before $entry when Thread metadata update returns another target", async ({
+    operate,
+  }) => {
+    const transport = new FakeTransport();
+    transport.metadataUpdateThreadData = appServerThread({ id: "thread-other" });
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(operate(client))
+      .rejects.toThrow("Codex Thread 分区元数据更新目标不一致");
+    expect(transport.sent.some((message) => message.method === "thread/section/move"))
+      .toBe(false);
   });
 
   it("passes stable Thread Section filters and position ordering", async () => {

@@ -225,10 +225,20 @@ export function threadSectionKeyboard(
   result: Extract<ConversationCommandResult, { kind: "thread-sections" }>,
 ): InlineKeyboardMarkup | undefined {
   if (result.page > result.pageCount) return undefined;
-  const rows = result.sections.map((section) => [{
-    text: boundedButtonLabel(`${section.name}${section.builtIn === "pinned" ? " · 固定" : ""}`),
-    callback_data: `section:move:${telegramThreadSectionToken(section.id)}`,
-  }]);
+  const rows = result.sections.flatMap((section) => {
+    if (section.builtIn === "pinned") {
+      return [[{
+        text: boundedButtonLabel(`${section.name} · 固定`),
+        callback_data: "section:pin",
+      }]];
+    }
+    return result.canManageCustomSections
+      ? [[{
+          text: boundedButtonLabel(section.name),
+          callback_data: `section:move:${telegramThreadSectionToken(section.id)}`,
+        }]]
+      : [];
+  });
   const pages = [
     ...(result.page > 1
       ? [{ text: "上一页", callback_data: `section:page:${result.page - 1}` }]
