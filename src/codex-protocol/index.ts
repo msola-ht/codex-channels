@@ -4,6 +4,7 @@ export type { ClientNotification } from "./generated/ClientNotification.js";
 export type { ClientRequest } from "./generated/ClientRequest.js";
 export type { InitializeResponse } from "./generated/InitializeResponse.js";
 export type { RequestId } from "./generated/RequestId.js";
+export type { JsonValue } from "./generated/serde_json/JsonValue.js";
 export type { ServerNotification } from "./generated/ServerNotification.js";
 export type { ServerRequest } from "./generated/ServerRequest.js";
 export type { Thread } from "./generated/v2/Thread.js";

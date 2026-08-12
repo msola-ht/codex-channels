@@ -1,6 +1,6 @@
-import { createHash, randomBytes } from "node:crypto";
-import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, unlink } from "node:fs/promises";
+import { join } from "node:path";
 
 import { parse, stringify } from "smol-toml";
 import * as clackPrompts from "@clack/prompts";
@@ -8,11 +8,13 @@ import * as clackPrompts from "@clack/prompts";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import { managedModelProviderRoleConfigPath } from "../runtime/model-provider-runtime.mjs";
+import { writePrivateFileAtomic } from "../runtime/private-file.mjs";
 import {
   assertDeepseekRoleAvailable,
   enableDeepseekRole,
   removeManagedDeepseekRole,
 } from "./agents.mjs";
+import { writeCodexUserConfigEdits } from "./codex-user-config.mjs";
 
 export const deepseekSetupScriptUrl =
   "https://cdn.deepseek.com/api-docs/codex-deepseek-setup.sh";
@@ -34,6 +36,9 @@ export async function runDeepseekSetup({
   fetchImpl = globalThis.fetch,
   prompter,
   prompts = clackPrompts,
+  enableRole = enableDeepseekRole,
+  removeRole = removeManagedDeepseekRole,
+  writeConfigEdits = writeCodexUserConfigEdits,
 } = {}) {
   const prompt = prompter ?? createHiddenPrompter(prompts, { allowBack });
   try {
@@ -102,10 +107,12 @@ export async function runDeepseekSetup({
       return runAutoCompactSetting({
         codexHome,
         configPath,
+        environment,
         profilePath,
         gatewayProfilePath,
         output,
         prompt,
+        writeConfigEdits,
       });
     }
     const mode = choice === "1" ? "switching" : "exclusive";
@@ -135,48 +142,81 @@ export async function runDeepseekSetup({
     ) {
       throw new Error("DeepSeek 模型目录缺少上下文窗口，未修改配置");
     }
-    await mkdir(codexHome, { recursive: true, mode: 0o700 });
-    await preserveInitialConfig({
+    const installationPaths = [
       configPath,
       profilePath,
       gatewayProfilePath,
+      catalogPath,
+      manifestPath,
+      roleConfigPath,
       backupPath,
       profileBackupPath,
       gatewayProfileBackupPath,
-      roleConfigPath,
       roleConfigBackupPath,
       backupStatePath,
-    });
-    const { configContent, profileContent, gatewayProfileContent } = await buildCodexConfig({
-      configPath,
-      gatewayProfilePath,
-      gatewayProfileBackupPath,
-      backupPath,
-      backupStatePath,
-      catalogPath,
-      apiKey,
-      mode,
-      autoCompactPercent,
-      contextWindow,
-    });
-    await atomicWrite(catalogPath, `${JSON.stringify(downloaded.catalog, null, 2)}\n`);
-    await atomicWrite(manifestPath, `${JSON.stringify({
-      source: deepseekSetupScriptUrl,
-      sha256: downloaded.sha256,
-      downloadedAt: new Date().toISOString(),
-    }, null, 2)}\n`);
-    await replaceOptionalFile(configPath, configContent);
-    await replaceOptionalFile(profilePath, profileContent);
-    await replaceOptionalFile(gatewayProfilePath, gatewayProfileContent);
-    await setBackupRestoredState(backupStatePath, false);
-    if (mode === "switching") {
-      enableDeepseekRole(environment);
-      output.write(`\nOpenAI 默认模型与认证保持不变：${configPath}\n`);
-      output.write(`DeepSeek CLI Profile 已保存：${profilePath}\n`);
-      output.write("已自动启用 multi_agent_v2 并注册 DS 子代理角色（agents.ds）。\n");
-    } else {
-      removeManagedDeepseekRole(environment);
-      output.write(`\nDeepSeek 固定配置已保存：${configPath}\n`);
+    ];
+    const installationSnapshots = await snapshotFiles(installationPaths);
+    let rollbackGuards;
+    try {
+      await mkdir(codexHome, { recursive: true, mode: 0o700 });
+      await preserveInitialConfig({
+        configPath,
+        profilePath,
+        gatewayProfilePath,
+        backupPath,
+        profileBackupPath,
+        gatewayProfileBackupPath,
+        roleConfigPath,
+        roleConfigBackupPath,
+        backupStatePath,
+      });
+      const { configContent, profileContent, gatewayProfileContent } = await buildCodexConfig({
+        configPath,
+        gatewayProfilePath,
+        gatewayProfileBackupPath,
+        backupPath,
+        backupStatePath,
+        catalogPath,
+        apiKey,
+        mode,
+        autoCompactPercent,
+        contextWindow,
+      });
+      await writePrivateFileAtomic(
+        catalogPath,
+        `${JSON.stringify(downloaded.catalog, null, 2)}\n`,
+      );
+      await writePrivateFileAtomic(manifestPath, `${JSON.stringify({
+        source: deepseekSetupScriptUrl,
+        sha256: downloaded.sha256,
+        downloadedAt: new Date().toISOString(),
+      }, null, 2)}\n`);
+      await replaceOptionalFile(configPath, configContent);
+      await replaceOptionalFile(profilePath, profileContent);
+      await replaceOptionalFile(gatewayProfilePath, gatewayProfileContent);
+      await setBackupRestoredState(backupStatePath, false);
+      rollbackGuards = await snapshotFiles(installationPaths);
+      if (mode === "switching") {
+        await enableRole(environment);
+        output.write(`\nOpenAI 默认模型与认证保持不变：${configPath}\n`);
+        output.write(`DeepSeek CLI Profile 已保存：${profilePath}\n`);
+        output.write("已自动启用 multi_agent_v2 并注册 DS 子代理角色（agents.ds）。\n");
+      } else {
+        await removeRole(environment);
+        output.write(`\nDeepSeek 固定配置已保存：${configPath}\n`);
+      }
+    } catch (error) {
+      if (rollbackGuards === undefined) throw error;
+      try {
+        await restoreFileSnapshots(installationSnapshots, rollbackGuards);
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          "DeepSeek 配置失败，且未能完整恢复操作前文件",
+          { cause: rollbackError },
+        );
+      }
+      throw error;
     }
     output.write(`模型目录已从官方脚本下载：${catalogPath}\n`);
     output.write(mode === "switching"
@@ -577,7 +617,7 @@ async function preserveInitialConfig({
   } else if (typeof state.originalRoleConfigExisted !== "boolean") {
     throw new Error("Codex 初始配置备份状态无效");
   }
-  await atomicWrite(backupStatePath, `${JSON.stringify(state)}\n`);
+  await writePrivateFileAtomic(backupStatePath, `${JSON.stringify(state)}\n`);
 }
 
 async function setBackupRestoredState(backupStatePath, restored) {
@@ -591,12 +631,12 @@ async function setBackupRestoredState(backupStatePath, restored) {
     throw new Error("Codex 初始配置备份状态无效");
   }
   state.restored = restored;
-  await atomicWrite(backupStatePath, `${JSON.stringify(state)}\n`);
+  await writePrivateFileAtomic(backupStatePath, `${JSON.stringify(state)}\n`);
 }
 
 async function backupIfPresent(sourcePath, backupPath) {
   try {
-    await atomicWrite(backupPath, await readFile(sourcePath));
+    await writePrivateFileAtomic(backupPath, await readFile(sourcePath));
     return true;
   } catch (error) {
     if (error.code === "ENOENT") return false;
@@ -631,26 +671,26 @@ async function restoreInitialConfig({
     throw new Error("Codex 初始配置备份状态无效");
   }
   if (state.originalConfigExisted === true) {
-    await atomicWrite(configPath, await readFile(backupPath));
+    await writePrivateFileAtomic(configPath, await readFile(backupPath));
   } else if (state.originalConfigExisted === false) {
     await removeFile(configPath);
   } else {
     throw new Error("Codex 初始配置备份状态无效");
   }
   if (state.originalProfileExisted === true) {
-    await atomicWrite(profilePath, await readFile(profileBackupPath));
+    await writePrivateFileAtomic(profilePath, await readFile(profileBackupPath));
   } else if (state.originalProfileExisted === false) {
     await removeFile(profilePath);
   }
   if (state.originalGatewayProfileExisted === true) {
-    await atomicWrite(gatewayProfilePath, await readFile(gatewayProfileBackupPath));
+    await writePrivateFileAtomic(gatewayProfilePath, await readFile(gatewayProfileBackupPath));
   } else if (state.originalGatewayProfileExisted === false) {
     await removeFile(gatewayProfilePath);
   }
   await removeFile(catalogPath);
   await removeFile(manifestPath);
   if (state.originalRoleConfigExisted === true) {
-    await atomicWrite(roleConfigPath, await readFile(roleConfigBackupPath));
+    await writePrivateFileAtomic(roleConfigPath, await readFile(roleConfigBackupPath));
   } else if (
     state.originalRoleConfigExisted === false
     || state.originalRoleConfigExisted === undefined
@@ -682,7 +722,7 @@ async function replaceOptionalFile(path, content) {
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
-  await atomicWrite(path, content);
+  await writePrivateFileAtomic(path, content);
 }
 
 async function removeFile(path) {
@@ -693,12 +733,47 @@ async function removeFile(path) {
   }
 }
 
-async function atomicWrite(path, content) {
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  const temporaryPath = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
-  await writeFile(temporaryPath, content, { mode: 0o600, flag: "wx" });
-  await chmod(temporaryPath, 0o600);
-  await rename(temporaryPath, path);
+async function snapshotFiles(paths) {
+  const snapshots = new Map();
+  for (const path of paths) {
+    try {
+      snapshots.set(path, await readFile(path));
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      snapshots.set(path, undefined);
+    }
+  }
+  return snapshots;
+}
+
+async function restoreFileSnapshots(snapshots, guards) {
+  for (const [path, expected] of guards) {
+    const current = await readOptionalFile(path);
+    if (!sameOptionalContent(current, expected)) {
+      throw new Error(`DeepSeek 配置文件在事务期间发生变化：${path}`);
+    }
+  }
+  for (const [path, content] of snapshots) {
+    if (content === undefined) {
+      await removeFile(path);
+    } else {
+      await writePrivateFileAtomic(path, content);
+    }
+  }
+}
+
+async function readOptionalFile(path) {
+  try {
+    return await readFile(path);
+  } catch (error) {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+function sameOptionalContent(left, right) {
+  if (left === undefined || right === undefined) return left === right;
+  return left.equals(right);
 }
 
 async function askChoice(prompt, label, maximum) {
@@ -767,10 +842,12 @@ async function readContextWindow(codexHome) {
 async function runAutoCompactSetting({
   codexHome,
   configPath,
+  environment,
   profilePath,
   gatewayProfilePath,
   output,
   prompt,
+  writeConfigEdits,
 }) {
   let managedMode;
   try {
@@ -795,13 +872,26 @@ async function runAutoCompactSetting({
   if (autoCompactPercent !== undefined && contextWindow === undefined) {
     throw new Error("DeepSeek 模型目录缺少上下文窗口，未修改配置");
   }
-  if (autoCompactPercent === undefined) {
-    delete document.model_auto_compact_token_limit;
-    delete document.model_auto_compact_token_limit_scope;
+  if (managedMode === "exclusive") {
+    const fields = autoCompactPercent === undefined
+      ? {
+        model_auto_compact_token_limit: null,
+        model_auto_compact_token_limit_scope: null,
+      }
+      : autoCompactFields(autoCompactPercent, contextWindow);
+    await writeConfigEdits(environment, Object.entries(fields).map(([keyPath, value]) => ({
+      keyPath,
+      value,
+    })));
   } else {
-    Object.assign(document, autoCompactFields(autoCompactPercent, contextWindow));
+    if (autoCompactPercent === undefined) {
+      delete document.model_auto_compact_token_limit;
+      delete document.model_auto_compact_token_limit_scope;
+    } else {
+      Object.assign(document, autoCompactFields(autoCompactPercent, contextWindow));
+    }
+    await writePrivateFileAtomic(targetPath, stringify(document));
   }
-  await atomicWrite(targetPath, stringify(document));
   output.write(autoCompactPercent === undefined
     ? "已关闭自动压缩。请重启 App Server 生效。\n"
     : `自动压缩阈值已设为 ${autoCompactPercent}%（约 ${

@@ -1,14 +1,8 @@
 import {
-  chmodSync,
   existsSync,
-  mkdirSync,
   readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
+  unlinkSync,
 } from "node:fs";
-import { randomBytes } from "node:crypto";
-import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { parse } from "smol-toml";
@@ -19,10 +13,9 @@ import { loadManagedModelProvider } from "../runtime/model-provider-runtime.mjs"
 import { managedModelProviderRoleConfigPath } from "../runtime/model-provider-runtime.mjs";
 import { removeManagedModelProviderRoleConfig } from "../runtime/model-provider-runtime.mjs";
 import { writeManagedModelProviderRoleConfig } from "../runtime/model-provider-runtime.mjs";
+import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
+import { updateCodexUserConfig } from "./codex-user-config.mjs";
 
-const featureTableHeader = "[features.multi_agent_v2]";
-const featureHeader = "[features]";
-const roleHeader = "[agents.ds]";
 const dsRoleDescription =
   "DeepSeek 单次子代理；仅处理当前用户消息中的完整任务，必须使用 fork_turns=1，不能接收后续消息";
 
@@ -49,20 +42,47 @@ export function agentsStatus(environment = process.env) {
   };
 }
 
-export function enableDeepseekRole(environment = process.env) {
+export async function enableDeepseekRole(
+  environment = process.env,
+  { updateConfig = updateCodexUserConfig } = {},
+) {
   if (loadManagedModelProvider(environment) === undefined) {
     throw new Error(
       "DeepSeek 切换模式未配置；请先运行 codexc setup 选择 OpenAI + DeepSeek 切换模式",
     );
   }
   assertDeepseekRoleAvailable(environment);
-  const configPath = agentRolesConfigPath(environment);
   const roleConfigPath = managedModelProviderRoleConfigPath(environment);
+  const previousRoleConfig = readOptionalFile(roleConfigPath);
   writeManagedModelProviderRoleConfig(environment);
-  const lines = readConfigLines(configPath);
-  setMultiAgentV2(lines, true);
-  upsertDsRole(lines, roleConfigPath);
-  writeConfig(configPath, lines);
+  const writtenRoleConfig = readOptionalFile(roleConfigPath);
+  try {
+    await updateConfig(environment, (config) => {
+      assertDeepseekRoleAvailableInConfig(config, environment);
+      return [{
+        keyPath: "features.multi_agent_v2",
+        value: true,
+      }, {
+        keyPath: "agents.ds",
+        value: {
+          description: dsRoleDescription,
+          config_file: roleConfigPath,
+          nickname_candidates: ["DeepSeek"],
+        },
+      }];
+    });
+  } catch (error) {
+    try {
+      restoreOptionalFile(roleConfigPath, previousRoleConfig, writtenRoleConfig);
+    } catch (rollbackError) {
+      throw new AggregateError(
+        [error, rollbackError],
+        "DS 子代理配置失败，且角色文件已被其他进程修改",
+        { cause: rollbackError },
+      );
+    }
+    throw error;
+  }
 }
 
 export function assertDeepseekRoleAvailable(environment = process.env) {
@@ -74,145 +94,91 @@ export function assertDeepseekRoleAvailable(environment = process.env) {
   } catch {
     throw new Error("现有 Codex config.toml 无法安全读取或解析");
   }
-  const role = document.agents?.ds;
+  assertDeepseekRoleAvailableInConfig(document, environment);
+}
+
+export async function disableDeepseekRole(
+  environment = process.env,
+  { updateConfig = updateCodexUserConfig } = {},
+) {
+  const configPath = agentRolesConfigPath(environment);
+  if (!existsSync(configPath)) return;
+  await updateConfig(environment, (config) => {
+    assertDeepseekRoleAvailableInConfig(config, environment);
+    return [{
+      keyPath: "agents.ds",
+      value: null,
+    }, {
+      keyPath: "features.multi_agent_v2",
+      value: false,
+    }];
+  });
+  removeManagedModelProviderRoleConfig(environment);
+}
+
+export async function removeManagedDeepseekRole(
+  environment = process.env,
+  { updateConfig = updateCodexUserConfig } = {},
+) {
+  const configPath = agentRolesConfigPath(environment);
+  if (!existsSync(configPath)) return;
+  let removed = false;
+  await updateConfig(environment, (config) => {
+    if (!isManagedDeepseekRole(config, environment)) return [];
+    removed = true;
+    return [{ keyPath: "agents.ds", value: null }];
+  });
+  if (!removed) return;
+  removeManagedModelProviderRoleConfig(environment);
+}
+
+function assertDeepseekRoleAvailableInConfig(config, environment) {
+  const role = record(config.agents).ds;
   if (
     role !== undefined
-    && role?.config_file !== managedModelProviderRoleConfigPath(environment)
+    && record(role).config_file !== managedModelProviderRoleConfigPath(environment)
   ) {
     throw new Error("agents.ds 已由用户配置；请先改名或移除该角色");
   }
 }
 
-export function disableDeepseekRole(environment = process.env) {
-  const configPath = agentRolesConfigPath(environment);
-  if (!existsSync(configPath)) return;
-  const lines = readConfigLines(configPath);
-  removeDsRole(lines);
-  setMultiAgentV2(lines, false);
-  writeConfig(configPath, lines);
-  removeManagedModelProviderRoleConfig(environment);
+function isManagedDeepseekRole(config, environment) {
+  return record(record(config.agents).ds).config_file
+    === managedModelProviderRoleConfigPath(environment);
 }
 
-export function removeManagedDeepseekRole(environment = process.env) {
-  const configPath = agentRolesConfigPath(environment);
-  if (!existsSync(configPath)) return;
-  const document = parse(readFileSync(configPath, "utf8"));
-  if (
-    document.agents?.ds?.config_file
-    !== managedModelProviderRoleConfigPath(environment)
-  ) return;
-  const lines = readConfigLines(configPath);
-  removeDsRole(lines);
-  writeConfig(configPath, lines);
-  removeManagedModelProviderRoleConfig(environment);
+function record(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
-function readConfigLines(configPath) {
-  if (!existsSync(configPath)) return [];
-  return readFileSync(configPath, "utf8").split("\n");
-}
-
-function writeConfig(configPath, lines) {
-  const content = `${lines.join("\n").trimEnd()}\n`;
-  parse(content);
-  mkdirSync(dirname(configPath), { recursive: true, mode: 0o700 });
-  const temporaryPath = `${configPath}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+function readOptionalFile(path) {
   try {
-    writeFileSync(temporaryPath, content, { mode: 0o600, flag: "wx" });
-    chmodSync(temporaryPath, 0o600);
-    renameSync(temporaryPath, configPath);
+    return readFileSync(path);
   } catch (error) {
-    rmSync(temporaryPath, { force: true });
+    if (error.code === "ENOENT") return undefined;
     throw error;
   }
 }
 
-function setMultiAgentV2(lines, enabled) {
-  if (lines.some((line) => line.trim() === featureTableHeader)) {
-    setSectionValue(lines, featureTableHeader, "enabled", String(enabled));
+function restoreOptionalFile(path, content, expectedCurrent) {
+  const current = readOptionalFile(path);
+  if (!sameOptionalContent(current, expectedCurrent)) {
+    throw new Error("DS 子代理角色文件在配置事务期间发生变化");
+  }
+  if (content === undefined) {
+    try {
+      unlinkSync(path);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
     return;
   }
-  const featuresIndex = lines.findIndex((line) => line.trim() === featureHeader);
-  if (featuresIndex !== -1) {
-    replaceFeatureKey(lines, featuresIndex, enabled);
-    return;
-  }
-  lines.push("", featureHeader, `multi_agent_v2 = ${enabled}`);
+  writePrivateFileAtomicSync(path, content);
 }
 
-function replaceFeatureKey(lines, featuresIndex, enabled) {
-  const keyPattern = /^(\s*multi_agent_v2\s*=\s*)(.+)$/u;
-  const end = sectionEnd(lines, featuresIndex);
-  for (let index = featuresIndex + 1; index < end; index += 1) {
-    const match = keyPattern.exec(lines[index]);
-    if (match === null) continue;
-    const current = match[2];
-    if (current === "true" || current === "false") {
-      lines[index] = `${match[1]}${enabled}`;
-      return;
-    }
-    if (/^\{[\s\S]*\}$/u.test(current)) {
-      lines[index] = `${match[1]}${enabled ? "{ enabled = true }" : "{ enabled = false }"}`;
-      return;
-    }
-  }
-  lines.splice(featuresIndex + 1, 0, `multi_agent_v2 = ${enabled}`);
-}
-
-function upsertDsRole(lines, roleConfigPath) {
-  const index = lines.findIndex((line) => line.trim() === roleHeader);
-  if (index !== -1) {
-    setSectionValue(lines, roleHeader, "description", tomlString(dsRoleDescription));
-    setSectionValue(lines, roleHeader, "config_file", tomlString(roleConfigPath));
-    setSectionValue(lines, roleHeader, "nickname_candidates", '["DeepSeek"]');
-    return;
-  }
-  lines.push(
-    "",
-    roleHeader,
-    `description = ${tomlString(dsRoleDescription)}`,
-    `config_file = ${tomlString(roleConfigPath)}`,
-    'nickname_candidates = ["DeepSeek"]',
-  );
-}
-
-function removeDsRole(lines) {
-  const index = lines.findIndex((line) => line.trim() === roleHeader);
-  if (index === -1) return;
-  lines.splice(index, sectionEnd(lines, index) - index);
-}
-
-function setSectionValue(lines, header, key, value) {
-  const index = lines.findIndex((line) => line.trim() === header);
-  if (index === -1) return;
-  const end = sectionEnd(lines, index);
-  const keyPattern = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=`, "u");
-  for (let cursor = index + 1; cursor < end; cursor += 1) {
-    if (keyPattern.test(lines[cursor])) {
-      lines[cursor] = `${key} = ${value}`;
-      return;
-    }
-  }
-  lines.splice(index + 1, 0, `${key} = ${value}`);
-}
-
-function sectionEnd(lines, headerIndex) {
-  let cursor = headerIndex + 1;
-  while (
-    cursor < lines.length
-    && !/^\[[^\]]+\]\s*$/u.test(lines[cursor].trim())
-  ) {
-    cursor += 1;
-  }
-  return cursor;
-}
-
-function tomlString(value) {
-  return JSON.stringify(String(value));
-}
-
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+function sameOptionalContent(left, right) {
+  if (left === undefined || right === undefined) return left === right;
+  return left.equals(right);
 }
 
 function printStatus(environment) {
@@ -235,12 +201,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.log(usage);
     process.exitCode = command === undefined ? 1 : 0;
   } else if (command === "enable-deepseek") {
-    enableDeepseekRole(process.env);
+    await enableDeepseekRole(process.env);
     writeCliMessage("success", "已启用 multi_agent_v2 并注册 DS 子代理角色（agents.ds）。");
     writeCliMessage("remediation", "运行 codexc service restart all 后生效。");
     printStatus(process.env);
   } else if (command === "disable-deepseek") {
-    disableDeepseekRole(process.env);
+    await disableDeepseekRole(process.env);
     writeCliMessage("success", "已移除 DS 子代理角色并关闭 multi_agent_v2。");
     writeCliMessage("remediation", "运行 codexc service restart all 后生效。");
   } else if (command === "status") {

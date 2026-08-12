@@ -114,6 +114,12 @@ plugin_api = true
 刷新配置。完整命令、限制和渠道显示规则见 [`docs/display.md`](docs/display.md)，协议采用范围见
 [`docs/index.md`](docs/index.md)。
 
+### Codex 官方
+
+在 `codexc setup` 中选择“模型渠道 → Codex 官方”，可从当前 Codex 模型目录设置全局默认模型和
+思考等级。设置通过 App Server 写入 `~/.codex/config.toml`，不修改 Codex 登录状态；完成后运行
+`codexc service restart all`，让新 App Server 会话使用新的默认值。
+
 ### DeepSeek
 
 在 `codexc setup` 中选择“模型渠道”，可以配置 OpenAI 与 DeepSeek 切换模式、仅 DeepSeek 模式

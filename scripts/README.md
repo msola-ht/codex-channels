@@ -51,8 +51,14 @@
 - `metrics-center-schema.sql`：npm 发布包内中心 SQLite 的规范初始化 Schema；历史 Cloudflare
   D1 migration 保留部署参考，不作为生产中心运行时依赖。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型渠道”“通讯渠道”和
-  “系统设置”流程委派给具体适配器；模型渠道下区分 DeepSeek、第三方 API 与图片识别，系统设置
-  提供全局调试模式入口。
+  “系统设置”流程委派给具体适配器；模型渠道下区分 Codex 官方、DeepSeek、第三方 API 与图片识别，
+  系统设置提供全局调试模式入口。
+- `codex-defaults-setup.mjs`：从官方模型目录选择 Codex 全局默认模型和思考等级，通过独立 stdio
+  App Server 的 `config/read` / `config/batchWrite` 更新用户 `config.toml`；不修改登录凭据或
+  Gateway 的 Thread 默认模型。
+- `codex-user-config.mjs` / `codex-user-config.d.mts`：统一创建隔离的 stdio App Server Client，把 Codex 官方默认值与
+  `multi_agent_v2` / `agents.ds` 普通键级修改作为官方 `config/batchWrite` 事务写入用户配置；
+  受控角色修改在同一 Client 中读取原始用户层及版本，并通过 `expectedVersion` 拒绝并发覆盖。
 - `skill-setup.mjs` / `skill-setup.d.mts`：`codexc setup` 的“技能”类别；列出项目 `.codex/skills` 下带
   `SKILL.md` 的技能，安装/覆盖到 `~/.agents/skills/<技能名>`（可用
   `CODEX_AGENTS_SKILLS_DIR` 覆盖目标目录），支持卸载；只复制技能目录本身，不修改
@@ -82,8 +88,10 @@
   确认后才覆盖默认 Provider，恢复选项可精确还原首次安装状态，并在保留的审计备份中记录已恢复
   生命周期。重复安装基于当前配置更新，不从首次备份回滚后续修改；退出固定模式时只还原 Setup
   管理的字段（含自动压缩阈值），恢复后新增的同名用户 Provider 不会被误判为旧版托管配置；
+  角色配置事务失败时恢复本次安装前的目标文件，若目标已被其他进程修改则停止回滚并保留外部修改；
   安装与“修改自动压缩阈值”入口支持按上下文窗口百分比（10–95%，默认 60%）写入
-  `model_auto_compact_token_limit` 或关闭自动压缩。
+  `model_auto_compact_token_limit` 或关闭自动压缩；固定模式的日常阈值修改使用官方键级配置事务，
+  完整安装与备份恢复才执行文件级替换。
 - `deepseek-setup.d.mts`：声明 DeepSeek Setup 的公开脚本类型。
 - `terminal-prompter.mjs`：为各通讯渠道 Setup 提供最小的终端文本、确认和可见凭据输入接口。
 - `telegram-setup.mjs`：独立完成 Telegram Bot Token 验证、一次性私聊配对、用户 ID 获取和用户配置写入；
@@ -105,10 +113,12 @@
   稳定错误。
 - `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。
 - `workspace-add.mjs`：把指定目录或命令调用目录注册为 Workspace，支持 `--prune-missing` 清理失效配置。
-- `agents.mjs`：`codexc agents` 的执行脚本，在 `~/.codex/config.toml` 中开启或关闭
+- `agents.mjs` / `agents.d.mts`：`codexc agents` 的执行脚本与公开声明，在 `~/.codex/config.toml` 中开启或关闭
   `features.multi_agent_v2` 并注册单次 `agents.ds` 角色；角色说明要求主模型以
   `fork_turns=1` 传入当前用户消息；非托管同名角色会失败关闭，不会被覆盖。启用时先原子生成
-  无凭据角色文件，App Server 服务启动时再原子刷新为本机 DeepSeek 统计代理地址，同时写入禁止
+  无凭据角色文件，再通过带用户层版本校验的官方键级配置事务更新主配置，事务失败时恢复角色文件；
+  显式禁用同样拒绝删除非托管同名角色。App Server 服务启动时原子刷新角色文件为
+  本机 DeepSeek 统计代理地址，同时写入禁止
   解析加密正文和等待后续消息的受控指令。普通服务退出保留文件以维持 Codex 配置可解析，显式
   禁用、改为固定模式或恢复配置时删除。
 

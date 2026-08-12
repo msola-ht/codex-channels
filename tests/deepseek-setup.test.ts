@@ -10,21 +10,38 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 
-import { parse } from "smol-toml";
+import { parse, stringify } from "smol-toml";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   deepseekSetupScriptUrl,
   downloadDeepseekCatalog,
   extractDeepseekCatalog,
-  runDeepseekSetup,
+  runDeepseekSetup as runDeepseekSetupImplementation,
 } from "../scripts/deepseek-setup.mjs";
+import {
+  enableDeepseekRole,
+  removeManagedDeepseekRole,
+} from "../scripts/agents.mjs";
+import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 
 const script = `#!/bin/sh
 cat > "$TMP_MODELS" <<'CODEX_MODELS_JSON'
 {"models":[{"slug":"deepseek-v4-flash","context_window":1048576},{"slug":"deepseek-v4-pro","context_window":1048576}]}
 CODEX_MODELS_JSON
 `;
+
+function runDeepseekSetup(options = {}) {
+  return runDeepseekSetupImplementation({
+    ...options,
+    enableRole: (environment: NodeJS.ProcessEnv) => enableDeepseekRole(environment, {
+      updateConfig: applyConfigUpdate,
+    }),
+    removeRole: (environment: NodeJS.ProcessEnv) => removeManagedDeepseekRole(environment, {
+      updateConfig: applyConfigUpdate,
+    }),
+  });
+}
 
 describe("DeepSeek setup", () => {
   it("extracts exactly one official model catalog heredoc", () => {
@@ -254,6 +271,50 @@ describe("DeepSeek setup", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(original);
     expect(existsSync(join(fixture.home, "deepseek.config.toml"))).toBe(false);
+  });
+
+  it("restores every installation target when the role config transaction fails", async () => {
+    const original = 'model = "gpt-5.4"\ncustom = true\n';
+    const fixture = setupFixture(original);
+
+    await expect(runDeepseekSetupImplementation({
+      environment: { CODEX_HOME: fixture.home },
+      output: fixture.output,
+      fetchImpl: successfulFetch,
+      prompter: prompter(["1", "2"], ["sk-secret"]),
+      enableRole: vi.fn(async () => {
+        throw new Error("config version conflict");
+      }),
+    })).rejects.toThrow("config version conflict");
+
+    expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(original);
+    for (const name of [
+      "deepseek.config.toml",
+      "codex-connect-deepseek.config.toml",
+      "deepseek.models.json",
+      "deepseek.models.manifest.json",
+      "codex-connect-ds-subagent.config.toml",
+    ]) {
+      expect(existsSync(join(fixture.home, name))).toBe(false);
+    }
+  });
+
+  it("does not overwrite a concurrent config change while rolling back a failed install", async () => {
+    const fixture = setupFixture('model = "gpt-5.4"\n');
+    const concurrent = 'model = "gpt-5.6-sol"\nconcurrent = true\n';
+
+    await expect(runDeepseekSetupImplementation({
+      environment: { CODEX_HOME: fixture.home },
+      output: fixture.output,
+      fetchImpl: successfulFetch,
+      prompter: prompter(["1", "2"], ["sk-secret"]),
+      enableRole: vi.fn(async () => {
+        writeFileSync(join(fixture.home, "config.toml"), concurrent, { mode: 0o600 });
+        throw new Error("config version conflict");
+      }),
+    })).rejects.toThrow("未能完整恢复操作前文件");
+
+    expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(concurrent);
   });
 
   it("installs exclusive mode and keeps the initial config backup", async () => {
@@ -651,6 +712,36 @@ describe("DeepSeek setup", () => {
     expect(disabled.model_auto_compact_token_limit).toBeUndefined();
     expect(disabled.model_auto_compact_token_limit_scope).toBeUndefined();
   });
+
+  it("updates exclusive auto-compact settings through one user config transaction", async () => {
+    const fixture = setupFixture('model = "gpt-5.4"\n');
+    await runDeepseekSetup({
+      environment: { CODEX_HOME: fixture.home },
+      output: fixture.output,
+      fetchImpl: successfulFetch,
+      prompter: prompter(["2", "2"], ["sk-fixed"], true),
+    });
+    const writeConfigEdits = vi.fn(async () => undefined);
+
+    await runDeepseekSetupImplementation({
+      environment: { CODEX_HOME: fixture.home },
+      output: fixture.output,
+      fetchImpl: vi.fn(),
+      prompter: prompter(["4", "3", "70"], []),
+      writeConfigEdits,
+    });
+
+    expect(writeConfigEdits).toHaveBeenCalledWith(
+      { CODEX_HOME: fixture.home },
+      [{
+        keyPath: "model_auto_compact_token_limit",
+        value: 734_003,
+      }, {
+        keyPath: "model_auto_compact_token_limit_scope",
+        value: "total",
+      }],
+    );
+  });
 });
 
 function setupFixture(config: string) {
@@ -686,4 +777,45 @@ function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+async function applyConfigUpdate(
+  environment: NodeJS.ProcessEnv,
+  createEdits: (config: Record<string, unknown>) => Array<{
+    keyPath: string;
+    value: unknown;
+  }>,
+): Promise<void> {
+  const configPath = join(String(environment.CODEX_HOME), "config.toml");
+  const source = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
+  const comments = source
+    .split("\n")
+    .filter((line) => line.trimStart().startsWith("#"));
+  const document = source === "" ? {} : record(parse(source));
+  const edits = createEdits(document);
+  for (const edit of edits) {
+    if (edit.keyPath === "features.multi_agent_v2") {
+      const features = record(document.features);
+      features.multi_agent_v2 = edit.value;
+      document.features = features;
+      continue;
+    }
+    if (edit.keyPath === "agents.ds") {
+      const agents = record(document.agents);
+      if (edit.value === null) {
+        delete agents.ds;
+      } else {
+        agents.ds = edit.value;
+      }
+      if (Object.keys(agents).length === 0) {
+        delete document.agents;
+      } else {
+        document.agents = agents;
+      }
+      continue;
+    }
+    throw new Error(`测试配置事务不支持：${edit.keyPath}`);
+  }
+  const prefix = comments.length === 0 ? "" : `${comments.join("\n")}\n`;
+  writePrivateFileAtomicSync(configPath, `${prefix}${stringify(document)}`);
 }

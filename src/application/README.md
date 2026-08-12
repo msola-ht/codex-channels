@@ -26,7 +26,8 @@
   暴露完整实验协议。
 - `collaboration-mode-service.ts`：把官方预设与当前模型设置组合为下一 Turn 的协作模式覆盖；
   模式按 Thread 同步，只在内存保存尚未生效的选择。
-- `model-port.ts`：定义项目拥有的 Provider、`text/image/audio` 输入能力、思考等级、服务层级与 Fast 默认值写入窄端口；
+- `model-port.ts`：定义项目拥有的 Provider、`text/image/audio` 输入能力、思考等级、服务层级与
+  Fast 默认值窄端口；CLI Setup 的全局模型默认值不进入会话 Application 边界。
   Application 和 Surface 不接收完整官方模型对象。
 - `account-port.ts`：分别定义 OpenAI 账户 Token/额度、第三方余额和未支持状态的可辨识结果，
   以及 Provider 账户适配器与查询窄端口；不同来源不得共用含义不一致的字段。
@@ -94,8 +95,9 @@ App Server 通知继续处理其他客户端修改与恢复后的状态校正。
 完整历史目录，分区视图按官方 `section_position` 排序，同时保留完整目录选择器；不持久化分区目录。
 内置 Pinned 分区继续由 `/pin` 与 `/unpin` 提供会话级快捷入口；共享命令边界只允许配置的当前
 Surface Actor 执行自定义分区写操作，读取与筛选不需要管理员权限。
-模型选择和 Fast 只依赖 `ModelSelectionPort`；不可见模型过滤、官方模型字段裁剪以及
-`config/read` / `config/batchWrite` 的版本差异由 `codex-client` 处理。
+模型选择和 Fast 只依赖 `ModelSelectionPort`；不可见模型过滤、官方模型字段裁剪以及同一用户
+`config.toml` 的 `config/read` / `config/batchWrite` 事务由 `codex-client` 统一处理。CLI Setup
+直接依赖具体 Client 的全局默认值读写，不扩大 Surface 可用的会话端口。
 OpenAI 原生账户查询只依赖 `AccountQueryPort`；当前 Thread 的 `/usage` 与 `/limits` 通过
 `ProviderAccountQueryPort` 按 `modelProvider` 选择显式注册的适配器。新增第三方时实现
 `ProviderAccountAdapter` 并在 Bootstrap 登记；未提供的账户能力保持不支持。Application 和
