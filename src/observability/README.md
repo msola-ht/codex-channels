@@ -21,8 +21,10 @@
   HTTP 2xx 才推进水位。载荷只含脱敏指标，不上传 `errorMessage`，不包含消息正文、提示词
   或审批内容；本模块不依赖代理、Surface 或业务 Storage，网络与状态路径由 Bootstrap 注入。
 - `request-metrics-database.ts`：集中保存指标 Schema、固定路径和进程级独占锁；Gateway 与 reset
-  共用同一把锁。锁内容完整写入后才原子发布，失效 PID 锁和超过保护期的残缺锁可清理，近期残缺锁、
-  运行中或并发重建均失败关闭。
+  共用独立 SQLite 锁库中的排他事务，由操作系统在进程退出时释放，不依赖 PID 或失效锁删除；真实
+  运行中持有者与并发重建均失败关闭。升级时会检查旧 JSON 锁：失效 PID、Linux 跨系统重启遗留锁
+  和超过保护期的残缺锁可清理；近期残缺锁、仍在运行的旧 Gateway，以及非 Linux 上 PID 仍存活的
+  旧锁继续失败关闭。
 - `sqlite-request-metrics-store.ts`：把脱敏后的 Provider、模型、状态、HTTP/传输格式、Usage、上游
   时间戳与本机流式阶段时间戳
   写入独立 `request-metrics.sqlite3`。当前 Thread 的独立 API 查询只选择调用适配器产生的
