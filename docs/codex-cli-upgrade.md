@@ -231,9 +231,9 @@ git tag -a "v$RELEASE_VERSION" -m "发布 v$RELEASE_VERSION"
 git push origin "v$RELEASE_VERSION"
 ```
 
-`publish.yml` 只监听 `v*` Tag。它会再次校验 Tag 与包版本，在 Runner 临时工作区把包内 README
-渲染为 Tag 版本并运行完整 `verify:commit`，然后通过 npm Trusted Publishing 执行公开发布；
-此时不修改 `main`。普通 push、合并 PR 和手动运行 CI 都不会发布 npm。
+`publish.yml` 只监听 `v*` Tag。它会再次校验 Tag、包版本和 Tag 所在提交中的 README 正式版本，
+运行完整 `verify:commit`，然后通过 npm Trusted Publishing 执行公开发布；README 仍带有“尚未发布”
+标记或安装命令未同步时失败关闭。普通 push、合并 PR 和手动运行 CI 都不会发布 npm。
 
 等待 `Publish npm package` 工作流成功后再创建对应的 GitHub Release。Release 说明应基于升级
 PR 的实际改动、验证结果和发布边界整理，不能继续使用自动提案的通用占位描述。正式 Release

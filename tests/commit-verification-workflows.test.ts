@@ -20,4 +20,14 @@ describe("commit verification workflows", () => {
     expect(install).toBeGreaterThan(-1);
     expect(verify).toBeGreaterThan(install);
   });
+
+  it("requires the release commit to contain the finalized README", () => {
+    const workflow = readFileSync(
+      join(process.cwd(), ".github/workflows", "publish.yml"),
+      "utf8",
+    );
+
+    expect(workflow).toContain("node scripts/check-release-tag.mjs");
+    expect(workflow).not.toContain("sync-published-readme.mjs");
+  });
 });

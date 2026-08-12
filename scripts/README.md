@@ -198,7 +198,8 @@
 - `smoke-source-prepare.mjs`：在不含 `node_modules` 和 `dist` 的临时源码副本中验证显式源码
   全局安装命令会完成构建并生成 `codexc` 入口。
 - `smoke-package.mjs`：生成实际 tarball，在隔离目录安装并执行公开的 `codexc` 入口与配置预检。
-- `check-release-tag.mjs`：要求 Git Tag 与 `package.json` 版本严格一致，防止发布错版。
+- `check-release-tag.mjs`：要求 Git Tag、`package.json` 与 README 正式版本及安装命令严格一致，
+  README 尚未完成正式发布提交时失败关闭。
 - `sync-published-readme.mjs`：把受控的 README 正式版本与安装命令渲染为已发布版本；拒绝
   预发布、降级、高于开发基线和缺少受控标记的文档。
 - `sync-gateway-version.mjs`：以锁定的 Codex CLI 协议版本同步 `package.json`、锁文件和 Gateway 运行时版本；不维护独立版本号。

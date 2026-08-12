@@ -122,7 +122,7 @@
 
 - 官方 Release：[`rust-v0.147.0`](https://github.com/openai/codex/releases/tag/rust-v0.147.0)
 - 项目开发基线：Gateway、生成协议、真实 App Server 合同与固定源码索引锁定 `0.147.0`；
-  README 在 npm 与 GitHub Release 均成功前继续保留 `0.146.1` 为当前正式版
+  准备正式发布时先把 README 当前正式版与安装命令同步到 `0.147.0`，通过 main CI 后再创建 Tag
 - 评估范围：Thread 分区迁移、MCP 扩展与鉴权状态、Plugin 搜索和安装、审批模式、外部会话导入，
   以及安全、终端与运行时修复
 
