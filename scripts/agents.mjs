@@ -1,9 +1,15 @@
 import {
+  chmodSync,
   existsSync,
+  mkdirSync,
   readFileSync,
-  statSync,
+  renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { dirname } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { parse } from "smol-toml";
 
@@ -11,6 +17,8 @@ import { agentRolesConfigPath } from "../runtime/agent-roles.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { loadManagedModelProvider } from "../runtime/model-provider-runtime.mjs";
 import { managedModelProviderRoleConfigPath } from "../runtime/model-provider-runtime.mjs";
+import { removeManagedModelProviderRoleConfig } from "../runtime/model-provider-runtime.mjs";
+import { writeManagedModelProviderRoleConfig } from "../runtime/model-provider-runtime.mjs";
 
 const featureTableHeader = "[features.multi_agent_v2]";
 const featureHeader = "[features]";
@@ -47,12 +55,32 @@ export function enableDeepseekRole(environment = process.env) {
       "DeepSeek 切换模式未配置；请先运行 codexc setup 选择 OpenAI + DeepSeek 切换模式",
     );
   }
+  assertDeepseekRoleAvailable(environment);
   const configPath = agentRolesConfigPath(environment);
   const roleConfigPath = managedModelProviderRoleConfigPath(environment);
+  writeManagedModelProviderRoleConfig(environment);
   const lines = readConfigLines(configPath);
   setMultiAgentV2(lines, true);
   upsertDsRole(lines, roleConfigPath);
   writeConfig(configPath, lines);
+}
+
+export function assertDeepseekRoleAvailable(environment = process.env) {
+  const configPath = agentRolesConfigPath(environment);
+  if (!existsSync(configPath)) return;
+  let document;
+  try {
+    document = parse(readFileSync(configPath, "utf8"));
+  } catch {
+    throw new Error("现有 Codex config.toml 无法安全读取或解析");
+  }
+  const role = document.agents?.ds;
+  if (
+    role !== undefined
+    && role?.config_file !== managedModelProviderRoleConfigPath(environment)
+  ) {
+    throw new Error("agents.ds 已由用户配置；请先改名或移除该角色");
+  }
 }
 
 export function disableDeepseekRole(environment = process.env) {
@@ -62,6 +90,21 @@ export function disableDeepseekRole(environment = process.env) {
   removeDsRole(lines);
   setMultiAgentV2(lines, false);
   writeConfig(configPath, lines);
+  removeManagedModelProviderRoleConfig(environment);
+}
+
+export function removeManagedDeepseekRole(environment = process.env) {
+  const configPath = agentRolesConfigPath(environment);
+  if (!existsSync(configPath)) return;
+  const document = parse(readFileSync(configPath, "utf8"));
+  if (
+    document.agents?.ds?.config_file
+    !== managedModelProviderRoleConfigPath(environment)
+  ) return;
+  const lines = readConfigLines(configPath);
+  removeDsRole(lines);
+  writeConfig(configPath, lines);
+  removeManagedModelProviderRoleConfig(environment);
 }
 
 function readConfigLines(configPath) {
@@ -72,8 +115,16 @@ function readConfigLines(configPath) {
 function writeConfig(configPath, lines) {
   const content = `${lines.join("\n").trimEnd()}\n`;
   parse(content);
-  const mode = existsSync(configPath) ? statSync(configPath).mode : 0o600;
-  writeFileSync(configPath, content, { mode });
+  mkdirSync(dirname(configPath), { recursive: true, mode: 0o700 });
+  const temporaryPath = `${configPath}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    writeFileSync(temporaryPath, content, { mode: 0o600, flag: "wx" });
+    chmodSync(temporaryPath, 0o600);
+    renameSync(temporaryPath, configPath);
+  } catch (error) {
+    rmSync(temporaryPath, { force: true });
+    throw error;
+  }
 }
 
 function setMultiAgentV2(lines, enabled) {
@@ -178,23 +229,25 @@ const usage = `用法：codexc agents <enable-deepseek|disable-deepseek|status>
   disable-deepseek  移除 agents.ds 角色并关闭 multi_agent_v2
   status            查看当前状态`;
 
-const command = process.argv[2];
-if (command === undefined || command === "-h" || command === "--help") {
-  console.log(usage);
-  process.exitCode = command === undefined ? 1 : 0;
-} else if (command === "enable-deepseek") {
-  enableDeepseekRole(process.env);
-  writeCliMessage("success", "已启用 multi_agent_v2 并注册 DS 子代理角色（agents.ds）。");
-  writeCliMessage("remediation", "运行 codexc service restart all 后生效。");
-  printStatus(process.env);
-} else if (command === "disable-deepseek") {
-  disableDeepseekRole(process.env);
-  writeCliMessage("success", "已移除 DS 子代理角色并关闭 multi_agent_v2。");
-  writeCliMessage("remediation", "运行 codexc service restart all 后生效。");
-} else if (command === "status") {
-  printStatus(process.env);
-} else {
-  writeCliMessage("failure", `未知子命令：${command}`);
-  console.error(usage);
-  process.exitCode = 1;
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const command = process.argv[2];
+  if (command === undefined || command === "-h" || command === "--help") {
+    console.log(usage);
+    process.exitCode = command === undefined ? 1 : 0;
+  } else if (command === "enable-deepseek") {
+    enableDeepseekRole(process.env);
+    writeCliMessage("success", "已启用 multi_agent_v2 并注册 DS 子代理角色（agents.ds）。");
+    writeCliMessage("remediation", "运行 codexc service restart all 后生效。");
+    printStatus(process.env);
+  } else if (command === "disable-deepseek") {
+    disableDeepseekRole(process.env);
+    writeCliMessage("success", "已移除 DS 子代理角色并关闭 multi_agent_v2。");
+    writeCliMessage("remediation", "运行 codexc service restart all 后生效。");
+  } else if (command === "status") {
+    printStatus(process.env);
+  } else {
+    writeCliMessage("failure", `未知子命令：${command}`);
+    console.error(usage);
+    process.exitCode = 1;
+  }
 }

@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -34,6 +35,7 @@ describe("codexc agents script", () => {
         { mode: 0o600 },
       );
       writeFileSync(configPath, "model = \"gpt-5.6-sol\"\n", { mode: 0o600 });
+      const originalConfigInode = statSync(configPath).ino;
 
       const enabled = spawnSync(process.execPath, [scriptPath, "enable-deepseek"], {
         env: environment,
@@ -42,6 +44,7 @@ describe("codexc agents script", () => {
       expect(enabled.status, enabled.stderr).toBe(0);
       expect(enabled.stdout).toContain("已启用 multi_agent_v2");
       const enabledConfig = readFileSync(configPath, "utf8");
+      expect(statSync(configPath).ino).not.toBe(originalConfigInode);
       expect(enabledConfig).toContain("model = \"gpt-5.6-sol\"");
       expect(enabledConfig).toContain("[features]");
       expect(enabledConfig).toContain("multi_agent_v2 = true");
@@ -51,7 +54,8 @@ describe("codexc agents script", () => {
       );
       expect(enabledConfig).toContain(`config_file = ${JSON.stringify(rolePath)}`);
       expect(enabledConfig).toContain('nickname_candidates = ["DeepSeek"]');
-      expect(existsSync(rolePath)).toBe(false);
+      expect(existsSync(rolePath)).toBe(true);
+      expect(readFileSync(rolePath, "utf8")).not.toContain("sk-test-secret");
 
       const status = spawnSync(process.execPath, [scriptPath, "status"], {
         env: environment,
@@ -70,6 +74,7 @@ describe("codexc agents script", () => {
       expect(disabledConfig).not.toContain("[agents.ds]");
       expect(disabledConfig).toContain("multi_agent_v2 = false");
       expect(disabledConfig).toContain("model = \"gpt-5.6-sol\"");
+      expect(existsSync(rolePath)).toBe(false);
 
       const disabledStatus = spawnSync(process.execPath, [scriptPath, "status"], {
         env: environment,

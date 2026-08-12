@@ -29,7 +29,6 @@ import {
 import {
   loadOpenAiBaseUrl,
   providerMetricsSocketPath,
-  removeManagedModelProviderRoleConfig,
   withOpenAiBaseUrl,
   withProviderBaseUrl,
   writeManagedModelProviderRoleConfig,
@@ -641,7 +640,6 @@ async function runServiceAppServer(args) {
     }));
   }
   forwardChildrenLifecycle(children, async () => {
-    removeManagedModelProviderRoleConfig(runtime.environment);
     await Promise.all(providerProxies.map((proxy) => proxy.close()));
     for (const agent of upstreamAgents) agent.destroy();
     await supervisorOwner.close();

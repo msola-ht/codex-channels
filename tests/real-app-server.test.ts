@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -313,6 +314,25 @@ suite("real supervised App Server service", () => {
     const supervisorSocketPath = appServerSupervisorSocketPath(socketPath);
     mkdirSync(codexHome, { recursive: true, mode: 0o700 });
     mkdirSync(workspace, { recursive: true, mode: 0o700 });
+    const roleConfigPath = join(codexHome, "codex-connect-ds-subagent.config.toml");
+    writeFileSync(
+      roleConfigPath,
+      'developer_instructions = "Integration fixture role"\n',
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      [
+        "[features]",
+        "multi_agent_v2 = true",
+        "",
+        "[agents.ds]",
+        'description = "Integration fixture role"',
+        `config_file = ${JSON.stringify(roleConfigPath)}`,
+        "",
+      ].join("\n"),
+      { mode: 0o600 },
+    );
     writeGatewayConfig(configPath, {
       version: 1,
       default_workspace: "integration",
@@ -389,6 +409,8 @@ suite("real supervised App Server service", () => {
         await client?.close().catch(() => undefined);
         await stopDetachedTestProcess(service, 10_000);
         await waitFor(() => !existsSync(supervisorSocketPath), 2_000);
+        expect(existsSync(roleConfigPath)).toBe(true);
+        expect(readFileSync(roleConfigPath, "utf8")).not.toContain("api_key");
       } finally {
         rmSync(testRuntime, { recursive: true, force: true });
       }

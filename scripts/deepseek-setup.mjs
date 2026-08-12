@@ -7,6 +7,12 @@ import * as clackPrompts from "@clack/prompts";
 
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
+import { managedModelProviderRoleConfigPath } from "../runtime/model-provider-runtime.mjs";
+import {
+  assertDeepseekRoleAvailable,
+  enableDeepseekRole,
+  removeManagedDeepseekRole,
+} from "./agents.mjs";
 
 export const deepseekSetupScriptUrl =
   "https://cdn.deepseek.com/api-docs/codex-deepseek-setup.sh";
@@ -45,6 +51,7 @@ export async function runDeepseekSetup({
     if (choice === "5") return { action: "back" };
     const codexHome = codexHomePath(environment);
     const configPath = join(codexHome, "config.toml");
+    const roleConfigPath = managedModelProviderRoleConfigPath(environment);
     const profilePath = join(codexHome, deepseekProviderDefinition.profileFileName);
     const gatewayProfilePath = join(
       codexHome,
@@ -65,6 +72,10 @@ export async function runDeepseekSetup({
       backupDirectory,
       deepseekProviderDefinition.managedMarkerFileName,
     );
+    const roleConfigBackupPath = join(
+      backupDirectory,
+      "codex-connect-ds-subagent.config.toml",
+    );
     const backupStatePath = join(backupDirectory, "state.json");
     if (choice === "3") {
       output.write("恢复会覆盖 DeepSeek 安装后对 ~/.codex/config.toml 做的其他修改。\n");
@@ -78,9 +89,11 @@ export async function runDeepseekSetup({
         gatewayProfilePath,
         catalogPath,
         manifestPath,
+        roleConfigPath,
         backupPath,
         profileBackupPath,
         gatewayProfileBackupPath,
+        roleConfigBackupPath,
         backupStatePath,
         output,
       });
@@ -97,8 +110,9 @@ export async function runDeepseekSetup({
     }
     const mode = choice === "1" ? "switching" : "exclusive";
     if (mode === "switching") {
+      assertDeepseekRoleAvailable(environment);
       output.write(
-        "\n切换模式不修改 ~/.codex/config.toml；DeepSeek 模型、Provider 与 API Key 全部保存在独立 Profile。\n",
+        "\n切换模式保留 OpenAI 默认；DeepSeek 模型、Provider 与 API Key 全部保存在独立 Profile。\n",
       );
     }
     if (mode === "exclusive") {
@@ -129,6 +143,8 @@ export async function runDeepseekSetup({
       backupPath,
       profileBackupPath,
       gatewayProfileBackupPath,
+      roleConfigPath,
+      roleConfigBackupPath,
       backupStatePath,
     });
     const { configContent, profileContent, gatewayProfileContent } = await buildCodexConfig({
@@ -154,9 +170,12 @@ export async function runDeepseekSetup({
     await replaceOptionalFile(gatewayProfilePath, gatewayProfileContent);
     await setBackupRestoredState(backupStatePath, false);
     if (mode === "switching") {
-      output.write(`\nOpenAI 基础配置保持不变：${configPath}\n`);
+      enableDeepseekRole(environment);
+      output.write(`\nOpenAI 默认模型与认证保持不变：${configPath}\n`);
       output.write(`DeepSeek CLI Profile 已保存：${profilePath}\n`);
+      output.write("已自动启用 multi_agent_v2 并注册 DS 子代理角色（agents.ds）。\n");
     } else {
+      removeManagedDeepseekRole(environment);
       output.write(`\nDeepSeek 固定配置已保存：${configPath}\n`);
     }
     output.write(`模型目录已从官方脚本下载：${catalogPath}\n`);
@@ -525,6 +544,8 @@ async function preserveInitialConfig({
   backupPath,
   profileBackupPath,
   gatewayProfileBackupPath,
+  roleConfigPath,
+  roleConfigBackupPath,
   backupStatePath,
 }) {
   let state;
@@ -533,7 +554,8 @@ async function preserveInitialConfig({
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
-  if (state === undefined) {
+  const initialStateMissing = state === undefined;
+  if (initialStateMissing) {
     state = {};
     state.originalConfigExisted = await backupIfPresent(configPath, backupPath);
   } else if (typeof state.originalConfigExisted !== "boolean") {
@@ -547,6 +569,13 @@ async function preserveInitialConfig({
       gatewayProfilePath,
       gatewayProfileBackupPath,
     );
+  }
+  if (state.originalRoleConfigExisted === undefined) {
+    state.originalRoleConfigExisted = initialStateMissing
+      ? await backupIfPresent(roleConfigPath, roleConfigBackupPath)
+      : false;
+  } else if (typeof state.originalRoleConfigExisted !== "boolean") {
+    throw new Error("Codex 初始配置备份状态无效");
   }
   await atomicWrite(backupStatePath, `${JSON.stringify(state)}\n`);
 }
@@ -581,9 +610,11 @@ async function restoreInitialConfig({
   gatewayProfilePath,
   catalogPath,
   manifestPath,
+  roleConfigPath,
   backupPath,
   profileBackupPath,
   gatewayProfileBackupPath,
+  roleConfigBackupPath,
   backupStatePath,
   output,
 }) {
@@ -592,6 +623,12 @@ async function restoreInitialConfig({
     state = JSON.parse(await readFile(backupStatePath, "utf8"));
   } catch {
     throw new Error("未找到可恢复的 Codex 初始配置");
+  }
+  if (
+    state.originalRoleConfigExisted !== undefined
+    && typeof state.originalRoleConfigExisted !== "boolean"
+  ) {
+    throw new Error("Codex 初始配置备份状态无效");
   }
   if (state.originalConfigExisted === true) {
     await atomicWrite(configPath, await readFile(backupPath));
@@ -612,6 +649,16 @@ async function restoreInitialConfig({
   }
   await removeFile(catalogPath);
   await removeFile(manifestPath);
+  if (state.originalRoleConfigExisted === true) {
+    await atomicWrite(roleConfigPath, await readFile(roleConfigBackupPath));
+  } else if (
+    state.originalRoleConfigExisted === false
+    || state.originalRoleConfigExisted === undefined
+  ) {
+    await removeFile(roleConfigPath);
+  } else {
+    throw new Error("Codex 初始配置备份状态无效");
+  }
   await setBackupRestoredState(backupStatePath, true);
   output.write("已恢复安装前的 Codex 配置；备份目录保留以便审计。\n");
   output.write("请重启 Gateway 与 App Server：codexc service restart all\n");

@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   closeSync,
   constants,
   existsSync,
@@ -6,9 +7,12 @@ import {
   openSync,
   readFileSync,
   realpathSync,
+  renameSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { basename, dirname, extname, join, resolve } from "node:path";
 
 import { parse } from "smol-toml";
@@ -213,7 +217,7 @@ export function writeManagedModelProviderRoleConfig(
     "requires_openai_auth = false",
     "",
   ].join("\n");
-  writeFileSync(managedModelProviderRoleConfigPath(environment), lines, { mode: 0o600 });
+  writePrivateFileAtomic(managedModelProviderRoleConfigPath(environment), lines);
 }
 
 export function removeManagedModelProviderRoleConfig(environment = process.env) {
@@ -222,6 +226,18 @@ export function removeManagedModelProviderRoleConfig(environment = process.env) 
     if (existsSync(path)) unlinkSync(path);
   } catch {
     // 角色文件是辅助产物，清理失败不阻断服务退出。
+  }
+}
+
+function writePrivateFileAtomic(path, content) {
+  const temporaryPath = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    writeFileSync(temporaryPath, content, { mode: 0o600, flag: "wx" });
+    chmodSync(temporaryPath, 0o600);
+    renameSync(temporaryPath, path);
+  } catch (error) {
+    rmSync(temporaryPath, { force: true });
+    throw error;
   }
 }
 
