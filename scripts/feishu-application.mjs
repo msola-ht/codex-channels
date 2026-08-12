@@ -44,6 +44,39 @@ export async function validateFeishuApplication(
   }
 }
 
+export async function inspectFeishuApplicationConfiguration(
+  { appId, appSecret },
+  {
+    loadApplicationApi = loadBuiltFeishuApplicationApi,
+  } = {},
+) {
+  if (
+    !appIdPattern.test(stringValue(appId))
+    || stringValue(appSecret).length === 0
+  ) {
+    throw new Error("飞书应用凭据格式无效");
+  }
+  const {
+    FeishuApplicationHttpApi,
+    requiredFeishuApplicationTenantScopes,
+  } = await loadApplicationApi();
+  const snapshot = await new FeishuApplicationHttpApi({
+    appId,
+    appSecret,
+  }).inspect();
+  const granted = new Set(snapshot.grantedTenantScopes);
+  return {
+    missingTenantScopes: requiredFeishuApplicationTenantScopes.filter(
+      (scope) => !granted.has(scope),
+    ),
+    hasPendingVersion: snapshot.hasPendingVersion,
+    messageEventConfigured: snapshot.messageEventConfigured,
+    menuEventConfigured: snapshot.menuEventConfigured,
+    cardCallbackConfigured: snapshot.cardCallbackConfigured,
+    menuConfigured: snapshot.menuConfigured,
+  };
+}
+
 const silentSdkLogger = {
   error: () => {},
   warn: () => {},
@@ -54,6 +87,10 @@ const silentSdkLogger = {
 
 function createFeishuClient(options) {
   return new Client(options);
+}
+
+function loadBuiltFeishuApplicationApi() {
+  return import("../dist/surfaces/feishu/index.js");
 }
 
 function stringValue(value) {

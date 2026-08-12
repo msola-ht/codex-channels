@@ -88,17 +88,18 @@
   复用统一 TOML、环境变量和系统代理解析；交互输入的 Token 在当前终端明文显示，但验证错误
   继续脱敏；新建 Bot 仅引导使用官方 BotFather。
 - `feishu-setup.mjs`：提供手动输入凭据和 Device Authorization 扫码两种方式；扫码时由飞书授权页
-  选择新建或已有企业自建应用，只申请私聊发送、流式卡片、应用自管理检测、受控配置写入和命令中心
-  所需权限、事件与回调。
+  选择新建或已有企业自建应用，只申请私聊接收与发送、流式卡片、应用自管理检测、受控配置写入和
+  命令中心所需权限、事件与回调。
   两种方式都验证凭据与 Bot 身份，并原子保存 App ID、App Secret 和允许的用户 Open ID；二维码和
   短期授权状态不持久化。扫码保存后立即保留已有菜单并自动发布 `codexc_home` 悬浮菜单、长连接
-  事件与卡片回调；失败时保留连接配置并提示通过 `/fs doctor` 恢复。手动凭据流程仍由
-  `/fs doctor` 完成应用授权与发布。
+  事件与卡片回调；失败时保留连接配置，并提示先使用终端 `codexc doctor` 检查、再重新扫码选择
+  当前应用恢复，不能依赖尚未收到消息的 `/fs doctor`。手动凭据流程也先由终端 Doctor 检查。
 - `weixin-setup.mjs`：从统一 Setup 菜单执行连接替换风险确认、微信扫码和严格结果裁剪，把
   Bot Token 原子写入微信独立安全凭据后端，并只向 TOML 写入禁用态账号与允许用户元数据；
   Setup 不直接启动消息 Surface，操作者显式启用配置并重载 Gateway 后生效。
-- `feishu-application.mjs`：为 Setup 与 Doctor 提供带有限超时的飞书凭据/Bot 身份只读探测，
-  不建立消息长连接，并把 SDK 错误和残缺响应收敛为不含敏感详情的稳定错误。
+- `feishu-application.mjs`：为 Setup 与 Doctor 提供带有限超时的飞书凭据/Bot 身份、应用权限、
+  消息事件和待审核版本只读探测，不建立消息长连接，并把 SDK 错误和残缺响应收敛为不含敏感详情的
+  稳定错误。
 - `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。
 - `workspace-add.mjs`：把指定目录或命令调用目录注册为 Workspace，支持 `--prune-missing` 清理失效配置。
 - `agents.mjs`：`codexc agents` 的执行脚本，在 `~/.codex/config.toml` 中开启或关闭

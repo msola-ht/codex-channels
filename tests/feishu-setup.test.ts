@@ -165,6 +165,7 @@ describe("Feishu setup", () => {
             "application:application:self_manage",
             "application:application:patch",
             "im:message:send_as_bot",
+            "im:message.p2p_msg:readonly",
             "im:resource",
             "im:message:readonly",
             "cardkit:card:write",
@@ -207,7 +208,10 @@ describe("Feishu setup", () => {
     });
     expect(renderedOutput).toContain("选择新建应用或已有应用");
     expect(renderedOutput).toContain("cli_0123456789abcdef");
-    expect(renderedOutput).toContain("悬浮菜单已自动配置并发布");
+    expect(renderedOutput).toContain("飞书机器人配置已提交发布");
+    expect(renderedOutput).toContain(
+      "codexc doctor 确认权限、消息事件和版本均已生效",
+    );
     expect(renderedOutput).not.toContain(
       "发送 /fs doctor 完成机器人菜单和订阅配置",
     );
@@ -295,7 +299,9 @@ describe("Feishu setup", () => {
     expect(renderedOutput).toContain(
       "机器人菜单自动配置未完成",
     );
-    expect(renderedOutput).toContain("/fs doctor");
+    expect(renderedOutput).toContain("机器人可能无法接收消息");
+    expect(renderedOutput).toContain("重新运行 codexc setup");
+    expect(renderedOutput).not.toContain("发送 /fs doctor");
     expect(renderedOutput).not.toContain("upstream secret response");
     expect(renderedOutput).not.toContain("app-secret");
   });

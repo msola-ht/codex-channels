@@ -9,6 +9,7 @@ export {
 export {
   FeishuApplicationHttpApi,
   FeishuApplicationSetupError,
+  requiredFeishuApplicationTenantScopes,
   type FeishuApplicationApi,
   type FeishuApplicationAuthorizationDiagnostic,
   type FeishuApplicationAuthorizationFailure,

@@ -141,14 +141,15 @@ EventDispatcher`。
 `addons.preset = false` 的最小机器人基座。Setup 提供手动输入和扫码授权两种方式；扫码时不传
 `createOnly` 或 `appId`，由飞书授权页让用户选择新建或已有企业自建应用，只增量声明
 `application:application:self_manage`、`application:application:patch`、
-`im:message:send_as_bot`、`im:resource`、`im:message:readonly`、`cardkit:card:write`、
+`im:message:send_as_bot`、`im:message.p2p_msg:readonly`、`im:resource`、
+`im:message:readonly`、`cardkit:card:write`、
 `im.message.receive_v1` 和
 `application.bot.menu_v6`，卡片阶段另声明 `card.action.trigger` 回调。注册完成后使用
 `/open-apis/bot/v3/info` 验证凭据和 Bot 身份，不启动
 第二条消息长连接。`addons` 不能直接创建机器人菜单或设置订阅方式；Setup 原子保存配置后直接
 调用 Application v7，保留已有菜单并自动启用 `codexc_home` 悬浮菜单、追加长连接菜单事件与
-卡片回调并提交应用版本。失败时保留连接配置并提示通过 `/fs doctor` 恢复；已有待发布版本时
-拒绝覆盖。
+卡片回调并提交应用版本。失败时保留连接配置，并提示先在终端运行 `codexc doctor`、再重新扫码
+选择当前应用恢复，不能依赖尚未收到消息的 `/fs doctor`；已有待发布版本时拒绝覆盖。
 
 ## 项目支持矩阵
 
@@ -174,7 +175,7 @@ EventDispatcher`。
 | 生成图片回传 | `im.v1.image.create`、`im.v1.message.create` 的 `msg_type=image` | 只接受官方 `imageGeneration.savedPath`，共享边界拒绝相对路径、符号链接、非普通文件、超过 10 MiB 和非 PNG/JPEG 内容；上传后严格裁剪 `image_key` 并按 Chat 顺序发送，独立于操作显示档位。离线 Payload、顺序和失败关闭已验证，真实发送主路径已通过 | 已接入 |
 | 渠道图片发送（channel send-image） | `im.v1.image.create`、`im.v1.message.create` 的 `msg_type=image` | 由网关 spool 轮询触发，复用同一共享文件校验与上传发送路径；按 Thread 绑定解析会话，只发给已绑定会话，成功归档 `done/`、失败归档 `failed/` 并保留原因。离线测试已覆盖，真实发送待实机验收 | 已接入 |
 | UTF-8 文本文件输入 | `im.message.receive_v1`、`im.v1.messageResource.get` | 独立 `file` 消息在授权后按 `message_id + file_key + type=file` 下载；严格验证文件名、1,000,000 字节、UTF-8 与控制字符，内联提交且不落盘。Office、压缩包、文件消息内的音视频和富文本内附件不支持；离线主路径已完成，真实文件待验收 | 已接入 |
-| 飞书 Setup 与应用配置 | SDK Device Authorization、`bot/v3/info`、Application v6 只读详情、Application v7 配置写入与发布、机器人菜单事件文档 | 已实现手动输入与扫码、飞书页应用选择、消息/CardKit/只读检测与配置写入权限及消息/菜单事件与卡片动作回调声明、身份验证和原子配置；扫码保存后直接保留已有菜单并自动补齐 `codexc_home` 悬浮菜单、长连接事件与回调并提交应用版本，失败时保留连接配置并提供 Doctor 恢复；Doctor 解析已有租户 Scope、只申请缺失差集，并以运行时已收到事件为优先证据显示四项摘要；单个菜单节点与启用开关独立检测，消息路径真实扫码、Doctor 身份探测、命令审批动作回调和菜单点击均已通过 | 已接入 |
+| 飞书 Setup 与应用配置 | SDK Device Authorization、`bot/v3/info`、Application v6 只读详情、Application v7 配置写入与发布、机器人菜单事件文档 | 已实现手动输入与扫码、飞书页应用选择、最小新应用所需的私聊接收、消息/CardKit/只读检测与配置写入权限及消息/菜单事件与卡片动作回调声明、身份验证和原子配置；扫码保存后直接保留已有菜单并自动补齐 `codexc_home` 悬浮菜单、长连接事件与回调并提交应用版本，失败时保留连接配置并提供不依赖聊天消息的终端 Setup/Doctor 恢复；终端 Doctor 检查租户 Scope、消息事件和待审核版本，聊天 Doctor 解析已有租户 Scope、只申请缺失差集，并以运行时已收到事件为优先证据显示四项摘要；单个菜单节点与启用开关独立检测，消息路径真实扫码、Doctor 身份探测、命令审批动作回调和菜单点击均已通过 | 已接入 |
 | 飞书以外的 Lark | SDK Domain 配置 | 当前未接入 | 未支持 |
 
 “已接入”只表示本地实现和离线验证入口存在；真实平台状态仍以
