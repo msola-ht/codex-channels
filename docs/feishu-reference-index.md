@@ -146,7 +146,8 @@ EventDispatcher`。
 `im.message.receive_v1` 和
 `application.bot.menu_v6`，卡片阶段另声明 `card.action.trigger` 回调。注册完成后使用
 `/open-apis/bot/v3/info` 验证凭据和 Bot 身份，不启动
-第二条消息长连接。`addons` 不能直接创建机器人菜单或设置订阅方式；Setup 原子保存配置后直接
+第二条消息长连接。扫码配置只把本次扫码用户写入允许名单，不合并旧应用名单或追加其他用户。
+`addons` 不能直接创建机器人菜单或设置订阅方式；Setup 原子保存配置后直接
 调用 Application v7，保留已有菜单并自动启用 `codexc_home` 悬浮菜单、追加长连接菜单事件与
 卡片回调并提交应用版本。失败时保留连接配置，并提示先在终端运行 `codexc doctor`、再重新扫码
 选择当前应用恢复，不能依赖尚未收到消息的 `/fs doctor`；已有待发布版本时拒绝覆盖。

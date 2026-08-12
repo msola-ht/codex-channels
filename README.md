@@ -75,9 +75,9 @@ Token 缺失或留空时不创建 Telegram 连接，也不要求 `allowed_user_i
 渠道准备事项：
 
 - Telegram：准备 BotFather 创建的 Bot Token；向导会生成配对入口以获取用户 ID。
-- 飞书：可扫码创建或选择企业自建应用，也可手工输入 App ID 和 App Secret；配置后先在终端运行
-  `codexc doctor` 检查权限、消息事件和待发布版本。机器人已经能接收私聊后，可发送 `/fs doctor`
-  检查运行观测和菜单。
+- 飞书：可扫码创建或选择企业自建应用，也可手工输入 App ID 和 App Secret；扫码配置只把本次扫码
+  用户设为允许用户，不沿用旧应用名单。配置后先在终端运行 `codexc doctor` 检查权限、消息事件和
+  待发布版本。机器人已经能接收私聊后，可发送 `/fs doctor` 检查运行观测和菜单。
 - 微信：通过向导扫码保存凭据；确认账号和允许用户后，将配置中的 `weixin.enabled` 改为
   `true`，再运行 `codexc service reload`。
 

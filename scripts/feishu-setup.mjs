@@ -93,29 +93,23 @@ export async function runFeishuSetup({
       validateApplication,
       result,
     );
-    const existingAllowedOpenIds = validConfiguredOpenIds(
-      existing.allowed_open_ids,
-    );
     let allowedOpenIds = result.openId ? [result.openId] : [];
-    if (
-      existingAllowedOpenIds.length > 0
-      && await prompt.confirm(
-        result.openId
-          ? "保留当前允许名单并加入扫码用户？"
-          : "保留当前允许名单？",
-        true,
-      )
-    ) {
-      allowedOpenIds = normalizeOpenIds([
-        ...allowedOpenIds,
-        ...existingAllowedOpenIds,
-      ]);
+    if (!scanRegistration) {
+      const existingAllowedOpenIds = validConfiguredOpenIds(
+        existing.allowed_open_ids,
+      );
+      if (
+        existingAllowedOpenIds.length > 0
+        && await prompt.confirm("保留当前允许名单？", true)
+      ) {
+        allowedOpenIds = [...existingAllowedOpenIds];
+      }
+      allowedOpenIds = await collectAllowedOpenIds(
+        prompt,
+        output,
+        allowedOpenIds,
+      );
     }
-    allowedOpenIds = await collectAllowedOpenIds(
-      prompt,
-      output,
-      allowedOpenIds,
-    );
 
     output.write("\n准备保存飞书配置：\n");
     output.write("- 状态：启用\n");
