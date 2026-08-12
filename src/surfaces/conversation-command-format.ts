@@ -51,6 +51,7 @@ export const conversationCommandDescriptions = {
   unarchive: "恢复已归档会话",
   pin: "固定当前会话",
   unpin: "取消固定当前会话",
+  section: "管理 Codex Thread 分区",
   status: "查看当前状态",
   workspace: "列出或切换 Workspace",
   workspaceperm: "查看或修改当前工作区权限",
@@ -82,9 +83,12 @@ export const conversationCommandHelpSections = [
     title: "会话：",
     lines: [
       "/resume [序号|名称|Thread ID]",
-      "/sessions [搜索词] · /archived [搜索词]",
+      "/sessions [页码] [filter all|running|pinned|unsectioned] [provider 名称] [section 分区] [search 搜索词]",
+      "/archived [页码] [filter all|pinned|unsectioned] [provider 名称] [section 分区] [search 搜索词]",
       "/new · /archive · /unarchive <序号|名称|Thread ID>",
       "/pin · /unpin",
+      "/section · /section create <名称> · /section rename <分区序号或 ID> <新名称>",
+      "/section move <分区序号或 ID> [before <会话>] · /section remove · /section delete <分区序号或 ID>",
       "/rename <名称> · /compact · /fork",
     ],
   },
@@ -140,24 +144,36 @@ export function formatConversationSessions(
   result: Extract<ConversationCommandResult, { kind: "sessions" }>,
 ): string {
   if (result.sessions.length === 0) {
-    return result.archived
-      ? "当前 Workspace 没有匹配的已归档会话。"
-      : "当前 Workspace 没有匹配的可恢复会话。";
+    const scope = result.archived ? "已归档会话" : "可恢复会话";
+    return result.page > result.pageCount
+      ? `页码超出范围：第 ${result.page} 页，共 ${result.pageCount} 页。`
+      : `当前 Workspace 没有匹配的${scope}。`;
   }
   const visibleSessions = result.sessions.slice(0, maximumSessionEntries);
   const hiddenCount = result.sessions.length - visibleSessions.length;
   const searchCommand = result.archived ? "archived" : "sessions";
   const backgroundThreadIds = new Set(result.backgroundThreadIds ?? []);
   return toStructuredMarkdownList([
-    `${result.archived ? "已归档会话" : "历史会话"}（${result.sessions.length}）${result.searchTerm ? ` · 搜索：${result.searchTerm}` : ""}：`,
+    `${result.archived ? "已归档会话" : "历史会话"}（匹配 ${result.matchedSessionCount} · 第 ${result.page}/${result.pageCount} 页）${result.view.searchTerm ? ` · 搜索：${result.view.searchTerm}` : ""}：`,
     ...visibleSessions.map(
       (session, index) =>
-        `${index + 1}. ${session.isPinned ? "固定 · " : ""}${formatSessionLabel(session.name ?? session.preview)}${session.model ? ` · 模型：${session.model}` : ""} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : backgroundThreadIds.has(session.id) ? " · 后台运行" : ""}`,
+        `${session.selector ?? index + 1}. ${formatSessionSection(session)}${formatSessionLabel(session.name ?? session.preview)}${session.model ? ` · 模型：${session.model}` : ""}${session.modelProvider ? ` · Provider：${session.modelProvider}` : ""} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : backgroundThreadIds.has(session.id) ? " · 后台运行" : ""}`,
     ),
     ...(hiddenCount > 0
       ? [
           "",
-          `另有 ${hiddenCount} 条未显示，请使用 /${searchCommand} <搜索词> 缩小范围。`,
+          `另有 ${hiddenCount} 条未显示，请使用 /${searchCommand} search <搜索词> 缩小范围。`,
+        ]
+      : []),
+    ...(result.pageCount > 1
+      ? [
+          "",
+          ...(result.page > 1
+            ? [`上一页：${formatSessionListCommand(result, result.page - 1)}`]
+            : []),
+          ...(result.page < result.pageCount
+            ? [`下一页：${formatSessionListCommand(result, result.page + 1)}`]
+            : []),
         ]
       : []),
     "",
@@ -165,6 +181,69 @@ export function formatConversationSessions(
       ? "恢复归档：/unarchive <序号、名称或 Thread ID>"
       : "恢复：/resume <序号、名称或 Thread ID>",
   ].join("\n"));
+}
+
+export function formatConversationThreadSections(
+  result: Extract<ConversationCommandResult, { kind: "thread-sections" }>,
+): string {
+  if (result.page > result.pageCount) {
+    return toStructuredMarkdownList([
+      `Thread 分区（全局 ${result.totalSectionCount}）：`,
+      `第 ${result.page} 页不存在，共 ${result.pageCount} 页`,
+      "返回第一页：/section list 1",
+    ].join("\n"));
+  }
+  const entries = result.sections.map((section, index) => {
+    const selector = result.selectors[index] ?? section.id;
+    const builtIn = section.builtIn === "pinned" ? " · 内置固定区" : "";
+    return `${selector}. ${section.name}${builtIn} · 当前 Workspace：活动 ${section.currentWorkspaceActiveCount} / 归档 ${section.currentWorkspaceArchivedCount} · ${section.id}`;
+  });
+  return toStructuredMarkdownList([
+    `Thread 分区（全局 ${result.totalSectionCount} · 第 ${result.page}/${result.pageCount} 页）：`,
+    ...(entries.length > 0 ? entries : ["当前没有可显示的分区。"]),
+    ...(result.page > 1 ? ["", `上一页：/section list ${result.page - 1}`] : []),
+    ...(result.page < result.pageCount ? ["", `下一页：/section list ${result.page + 1}`] : []),
+    "",
+    "分区由 Codex App Server 全局管理，不局限于当前 Workspace；序号仅用于当前列表。",
+    "移动：/section move <序号或 ID> [before <会话序号、名称或 Thread ID>]",
+    "新建：/section create <名称> · 重命名：/section rename <分区序号或 ID> <新名称>",
+    "移出：/section remove · 删除：/section delete <分区序号或 ID>",
+  ].join("\n"));
+}
+
+export function formatConversationThreadSectionDeletePreview(
+  result: Extract<ConversationCommandResult, { kind: "thread-section-delete-preview" }>,
+): string {
+  const { section } = result.preview;
+  return toStructuredMarkdownList([
+    "即将删除全局 Thread 分区",
+    `名称：${section.name}`,
+    `ID：${section.id}`,
+    `当前 Workspace：活动 ${section.currentWorkspaceActiveCount} / 归档 ${section.currentWorkspaceArchivedCount}`,
+    "删除只会解除 Thread 的分区归属，不会删除 Thread；其他 Workspace 中的归属也会受影响。",
+    "",
+    `确认：/section delete ${section.id} confirm`,
+  ].join("\n"));
+}
+
+export function formatSessionListCommand(
+  result: Extract<ConversationCommandResult, { kind: "sessions" }>,
+  page: number,
+): string {
+  const command = result.archived ? "archived" : "sessions";
+  const parts = [`/${command}`, String(page)];
+  if (result.view.filter !== "all") parts.push("filter", result.view.filter);
+  if (result.view.provider) parts.push("provider", result.view.provider);
+  if (result.view.sectionSelector) parts.push("section", result.view.sectionSelector);
+  if (result.view.searchTerm) parts.push("search", result.view.searchTerm);
+  return parts.join(" ");
+}
+
+function formatSessionSection(
+  session: Extract<ConversationCommandResult, { kind: "sessions" }>["sessions"][number],
+): string {
+  if (session.isPinned) return "固定 · ";
+  return session.section ? `分区：${session.section.name} · ` : "";
 }
 
 function formatSessionLabel(value: string): string {
@@ -218,6 +297,40 @@ export function formatConversationCommandOutcome(
     case "thread.pin-updated":
       return toStructuredMarkdownList([
         outcome.pinned ? "已固定当前会话。" : "已取消固定当前会话。",
+      ].join("\n"));
+    case "thread-section.created":
+      return toStructuredMarkdownList([
+        "已创建全局 Thread 分区",
+        `名称：${outcome.name}`,
+        `ID：${outcome.sectionId}`,
+      ].join("\n"));
+    case "thread-section.renamed":
+      return toStructuredMarkdownList([
+        "已重命名全局 Thread 分区",
+        `名称：${outcome.name}`,
+        `ID：${outcome.sectionId}`,
+      ].join("\n"));
+    case "thread-section.moved":
+      return toStructuredMarkdownList([
+        outcome.pinned
+          ? "已将当前会话移入内置固定区"
+          : "已移动当前会话到 Thread 分区",
+        `分区：${outcome.name}`,
+        ...(outcome.ordered ? ["位置：已按 before 参数调整"] : []),
+        outcome.pinned
+          ? "当前会话现已固定；原自定义分区归属已解除。"
+          : "自定义分区与固定状态互斥；移动后会取消固定。",
+      ].join("\n"));
+    case "thread-section.removed":
+      return toStructuredMarkdownList([
+        "已将当前会话移出 Thread 分区。",
+      ].join("\n"));
+    case "thread-section.deleted":
+      return toStructuredMarkdownList([
+        "已删除全局 Thread 分区",
+        `名称：${outcome.name}`,
+        `ID：${outcome.sectionId}`,
+        "分区内 Thread 保留，只解除分区归属。",
       ].join("\n"));
     case "workspace.selected":
       return toStructuredMarkdownList([

@@ -50,6 +50,7 @@ import {
   renderTelegramCommandResult,
   replyTelegramPanel,
   telegramPluginSelectionToken,
+  telegramThreadSectionToken,
   workspacePermissionFieldKeyboard,
   workspacePermissionPrompt,
 } from "./command-renderer.js";
@@ -99,6 +100,7 @@ export interface TelegramAudioPort {
 export interface TelegramSurfaceOptions {
   gatewayVersion: string;
   actorRegistry?: ConversationActorRegistry;
+  threadSectionAccess?: SurfaceAccessPolicy;
   onFatal?: (error: Error) => void;
   imageStore?: TelegramImagePort;
   audioStore?: TelegramAudioPort;
@@ -208,7 +210,10 @@ export class TelegramSurface {
     this.exchangeRate = options.exchangeRate;
     this.priceCurrency = options.priceCurrency;
     this.notificationRecipients = new Set(startupRecipients);
-    this.commands = new ConversationCommandService(service);
+    this.commands = new ConversationCommandService(
+      service,
+      options.threadSectionAccess,
+    );
     this.pluginTaskPrompts = new TelegramPluginTaskPrompts({ now: this.now });
     const apiExecutor = new TelegramApiExecutor(logger);
     this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor, {
@@ -507,6 +512,48 @@ export class TelegramSurface {
           pluginId: plugin.id,
           pluginName: plugin.displayName,
         });
+      },
+    );
+    this.bot.callbackQuery(/^section:page:([1-9]\d*)$/, async (context) => {
+      await context.answerCallbackQuery({ text: "正在加载 Thread 分区" });
+      const result = await this.commands.execute(
+        target(context),
+        "section",
+        `list ${context.match[1]}`,
+      );
+      await renderTelegramCommandResult(
+        context,
+        result,
+        this.priceCurrency,
+        this.exchangeRate?.() ?? null,
+      );
+    });
+    this.bot.callbackQuery(
+      /^section:move:([A-Za-z0-9_-]{43})$/,
+      async (context) => {
+        const sectionTarget = target(context);
+        const matches = (await this.service.listThreadSections(sectionTarget)).filter(
+          (section) => telegramThreadSectionToken(section.id) === context.match[1],
+        );
+        if (matches.length !== 1) {
+          throw new UserFacingError(
+            "thread-section.selector.not-found",
+            "Thread 分区按钮已失效",
+          );
+        }
+        await context.answerCallbackQuery({ text: `正在移动到 ${matches[0]!.name}` });
+        const result = await this.commands.execute(
+          sectionTarget,
+          "section",
+          `move ${matches[0]!.id}`,
+          String(context.from.id),
+        );
+        await renderTelegramCommandResult(
+          context,
+          result,
+          this.priceCurrency,
+          this.exchangeRate?.() ?? null,
+        );
       },
     );
     this.bot.on("message:text", async (context) => {
@@ -893,6 +940,7 @@ export class TelegramSurface {
       target(context),
       command,
       commandArguments(context),
+      context.from ? String(context.from.id) : undefined,
     );
     await renderTelegramCommandResult(
       context,

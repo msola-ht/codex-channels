@@ -57,12 +57,22 @@ export function formatSessions(
   currentThreadId?: string,
   options: { archived?: boolean; searchTerm?: string } = {},
 ): string {
+  const searchTerm = options.searchTerm ?? null;
   return formatConversationSessions({
     kind: "sessions",
     sessions: threads,
     archived: options.archived ?? false,
+    page: 1,
+    pageCount: 1,
+    matchedSessionCount: threads.length,
+    view: {
+      page: 1,
+      filter: "all",
+      provider: null,
+      sectionSelector: null,
+      searchTerm,
+    },
     ...(currentThreadId ? { currentThreadId } : {}),
-    ...(options.searchTerm ? { searchTerm: options.searchTerm } : {}),
   });
 }
 

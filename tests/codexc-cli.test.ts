@@ -2252,6 +2252,40 @@ describe("codexc CLI", () => {
     expect(diagnosed.stdout).toContain("[失败] 配置格式");
     expect(diagnosed.stdout).toContain("Unrecognized key");
   });
+
+  it("reports unreachable Thread Section administrators as invalid configuration", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-section-admin-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    mkdirSync(workspace);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    const configPath = join(home, "config.toml");
+    updateGatewayConfig(configPath, (document) => {
+      const telegram = table(document.telegram);
+      telegram.bot_token = "test-token";
+      telegram.allowed_user_ids = [123456];
+      document.thread_sections = { administrators: ["telegram:654321"] };
+    });
+
+    const diagnosed = spawnSync(process.execPath, [cli, "doctor"], {
+      cwd: workspace,
+      env: environment,
+      encoding: "utf8",
+    });
+
+    expect(diagnosed.status).toBe(1);
+    expect(diagnosed.stdout).toContain("[失败] 配置格式");
+    expect(diagnosed.stdout).toContain(
+      "Thread 分区管理员必须属于对应已启用渠道的允许名单",
+    );
+    expect(diagnosed.stdout).not.toContain("已配置 1 个管理员");
+  });
 });
 
 function updateGatewayConfig(

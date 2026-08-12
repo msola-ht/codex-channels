@@ -9,6 +9,7 @@ export type GlobalConfigChangeCode =
   | "display.operation-updates"
   | "display.plan-updates"
   | "experimental.plugin-api"
+  | "thread-sections.administrators"
   | "api.providers"
   | "vision.provider"
   | "metrics.sync"

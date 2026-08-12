@@ -50,6 +50,11 @@ price_currency = "cny"
 # Codex 0.147.0 Plugin API 仍在开发中，默认关闭；仅在需要调试时显式开启。
 plugin_api = false
 
+[thread_sections]
+# 自定义 Thread 分区是 App Server 全局状态；只有这里列出的 Actor 可以修改。
+# 格式：telegram:<用户 ID>、feishu:<open_id>、weixin:<用户 ID>。
+administrators = []
+
 # 直接 API 提供商（图片识别等第三方 Responses 中转）：
 # [[api_providers]]
 # id = "vision-relay"

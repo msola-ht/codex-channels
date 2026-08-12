@@ -6,6 +6,12 @@ export type ThreadStatus =
 
 export type ThreadSource = "cli" | "vscode" | "appServer" | "other";
 
+export interface ThreadSectionSnapshot {
+  id: string;
+  name: string;
+  builtIn: "pinned" | null;
+}
+
 export interface ThreadSnapshot {
   id: string;
   sessionId: string;
@@ -13,6 +19,7 @@ export interface ThreadSnapshot {
   preview: string;
   name: string | null;
   isPinned: boolean;
+  section?: ThreadSectionSnapshot | null;
   status: ThreadStatus;
   cwd: string;
   source: ThreadSource;
@@ -40,6 +47,9 @@ export interface ThreadQueryOptions {
   fullScan?: boolean;
   archived?: boolean;
   searchTerm?: string;
+  sectionId?: string;
+  sortKey?: "created_at" | "updated_at" | "recency_at" | "section_position";
+  sortDirection?: "asc" | "desc";
 }
 
 export interface ThreadLifecyclePort {

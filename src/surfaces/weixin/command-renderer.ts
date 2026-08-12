@@ -31,6 +31,8 @@ import {
   formatConversationPermissions,
   formatConversationProjectRules,
   formatConversationSessions,
+  formatConversationThreadSectionDeletePreview,
+  formatConversationThreadSections,
   formatConversationSkills,
   formatConversationStatus,
   formatConversationUsage,
@@ -143,6 +145,10 @@ export function renderWeixinCommandResult(
       return formatConversationCommandOutcome(result.outcome);
     case "sessions":
       return formatConversationSessions(result);
+    case "thread-sections":
+      return formatConversationThreadSections(result);
+    case "thread-section-delete-preview":
+      return formatConversationThreadSectionDeletePreview(result);
     case "status":
       return formatConversationStatus(result.status);
     case "workspaces":

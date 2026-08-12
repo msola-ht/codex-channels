@@ -96,6 +96,7 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "display.operation-updates": "操作过程显示",
     "display.plan-updates": "自动计划显示",
     "experimental.plugin-api": "开发中 Plugin API",
+    "thread-sections.administrators": "Thread 分区管理员",
     "api.providers": "第三方 API 提供商",
     "vision.provider": "视觉识别服务",
     "metrics.sync": "多设备指标同步",

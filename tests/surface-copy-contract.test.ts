@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  archivedSessionCommandUsageText,
   mcpCommandUsageText,
   type ConversationCommandResult,
   type ConversationStatus,
@@ -10,6 +11,8 @@ import {
   conversationCommandHelpLines,
   formatConversationSessions,
   formatConversationStatus,
+  formatConversationThreadSectionDeletePreview,
+  formatConversationThreadSections,
 } from "../src/surfaces/conversation-command-format.js";
 import {
   formatPercent,
@@ -116,6 +119,17 @@ describe("shared surface copy contract", () => {
     const error = new UserFacingError("mcp.usage", "invalid MCP command");
     for (const surface of ["Telegram", "飞书", "微信"] as const) {
       expect(formatSurfaceUserFacingError(error, surface)).toBe(mcpCommandUsageText);
+    }
+  });
+
+  it("reports archived session usage consistently on every surface", () => {
+    const error = new UserFacingError(
+      "archived-sessions.usage",
+      archivedSessionCommandUsageText,
+    );
+    for (const surface of ["Telegram", "飞书", "微信"] as const) {
+      expect(formatSurfaceUserFacingError(error, surface))
+        .toBe(archivedSessionCommandUsageText);
     }
   });
 
@@ -294,6 +308,10 @@ describe("shared surface copy contract", () => {
       })),
       currentThreadId: "thread-000000000001",
       archived: false,
+      page: 1,
+      pageCount: 1,
+      matchedSessionCount: 21,
+      view: { page: 1, filter: "all", provider: null, sectionSelector: null, searchTerm: null },
     };
     const expected = formatConversationSessions(result);
 
@@ -305,9 +323,58 @@ describe("shared surface copy contract", () => {
     expect(renderFeishuCommandResult(result)).toBe(expected);
     expect(renderWeixinCommandResult(result)).toBe(expected);
     expect(expected).toContain(
-      "另有 1 条未显示，请使用 /sessions <搜索词> 缩小范围。",
+      "另有 1 条未显示，请使用 /sessions search <搜索词> 缩小范围。",
     );
     expect(expected).not.toContain("21. 会话 21");
+  });
+
+  it("keeps Thread Section lists and deletion warnings platform-independent", () => {
+    const section = {
+      id: "section-project",
+      name: "项目",
+      builtIn: null,
+      currentWorkspaceActiveCount: 2,
+      currentWorkspaceArchivedCount: 1,
+    } as const;
+    const list: Extract<ConversationCommandResult, { kind: "thread-sections" }> = {
+      kind: "thread-sections",
+      sections: [section],
+      selectors: ["2"],
+      page: 1,
+      pageCount: 1,
+      totalSectionCount: 2,
+    };
+    const preview: Extract<ConversationCommandResult, { kind: "thread-section-delete-preview" }> = {
+      kind: "thread-section-delete-preview",
+      preview: { section },
+    };
+
+    expect(renderFeishuCommandResult(list)).toBe(formatConversationThreadSections(list));
+    expect(renderWeixinCommandResult(list)).toBe(formatConversationThreadSections(list));
+    expect(renderFeishuCommandResult(preview))
+      .toBe(formatConversationThreadSectionDeletePreview(preview));
+    expect(renderWeixinCommandResult(preview))
+      .toBe(formatConversationThreadSectionDeletePreview(preview));
+    expect(formatConversationThreadSectionDeletePreview(preview))
+      .toContain("其他 Workspace 中的归属也会受影响");
+
+    const missingPage: Extract<
+      ConversationCommandResult,
+      { kind: "thread-sections" }
+    > = {
+      kind: "thread-sections",
+      sections: [],
+      selectors: [],
+      page: 3,
+      pageCount: 2,
+      totalSectionCount: 9,
+    };
+    const missingPageText = formatConversationThreadSections(missingPage);
+    expect(missingPageText).toContain("第 3 页不存在，共 2 页");
+    expect(missingPageText).toContain("返回第一页：/section list 1");
+    expect(missingPageText).not.toContain("/section list 2");
+    expect(renderFeishuCommandResult(missingPage)).toBe(missingPageText);
+    expect(renderWeixinCommandResult(missingPage)).toBe(missingPageText);
   });
 
   it("leaves new extension task acknowledgement to the Turn lifecycle", () => {

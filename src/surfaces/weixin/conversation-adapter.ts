@@ -7,6 +7,7 @@ import {
   UserFacingError,
   type ConversationTarget,
 } from "../../conversation-core/index.js";
+import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { formatTurnInputAppended } from "../input-copy.js";
 import { parseSlashCommand } from "../slash-command.js";
 import {
@@ -111,11 +112,15 @@ export class WeixinConversationAdapter {
       priceCurrency?: (
         provider: string | null | undefined,
       ) => DisplayPriceCurrency;
+      threadSectionAccess?: SurfaceAccessPolicy;
     } = { quietWindowMs: 0 },
     private readonly files?: Pick<WeixinFilePort, "download">,
     private readonly audios?: Pick<WeixinAudioPort, "download">,
   ) {
-    this.commands = new ConversationCommandService(conversations);
+    this.commands = new ConversationCommandService(
+      conversations,
+      inputOptions.threadSectionAccess,
+    );
     this.inputs = new SurfaceInputCoalescer(
       (target, input) => conversations.submit(target, input),
       {
@@ -333,6 +338,7 @@ export class WeixinConversationAdapter {
         message.target,
         command.name,
         command.argumentsText,
+        message.actorId,
       );
       const rendered = renderWeixinCommandResult(
         result,

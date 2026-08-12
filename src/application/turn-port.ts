@@ -2,6 +2,7 @@ import type {
   GoalStatus,
   ThreadGoal,
 } from "../conversation-core/index.js";
+import type { ThreadSectionSnapshot } from "../session-routing/index.js";
 
 export type TurnInput =
   | { type: "text"; text: string }
@@ -60,6 +61,15 @@ export interface TurnExecutionPort {
   interruptTurn(threadId: string, turnId: string): Promise<void>;
   setThreadName(threadId: string, name: string): Promise<void>;
   setThreadPinned(threadId: string, pinned: boolean): Promise<void>;
+  listThreadSections(): Promise<ThreadSectionSnapshot[]>;
+  createThreadSection(name: string): Promise<ThreadSectionSnapshot>;
+  renameThreadSection(sectionId: string, name: string): Promise<ThreadSectionSnapshot>;
+  deleteThreadSection(sectionId: string): Promise<void>;
+  moveThreadToSection(
+    threadId: string,
+    sectionId: string | null,
+    beforeThreadId?: string,
+  ): Promise<void>;
   compactThread(threadId: string): Promise<void>;
   startReview(threadId: string, target: ReviewTarget): Promise<ReviewStarted>;
   getGoal(threadId: string): Promise<ThreadGoal | null>;

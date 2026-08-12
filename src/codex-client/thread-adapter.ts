@@ -7,6 +7,7 @@ import type {
 import type {
   ThreadSession,
   ThreadSnapshot,
+  ThreadSectionSnapshot,
   ThreadSource,
   ThreadStatus,
 } from "../session-routing/index.js";
@@ -17,6 +18,18 @@ type ThreadSessionResponse =
   | ThreadForkResponse;
 
 export const PINNED_THREAD_SECTION_ID = "01984de2-8f74-7c91-a3b2-5c5e937cf318";
+
+export function toThreadSectionSnapshot(
+  section: { id: unknown; name: unknown },
+): ThreadSectionSnapshot {
+  requireString(section.id, "section id");
+  requireString(section.name, "section name");
+  return {
+    id: section.id,
+    name: section.name,
+    builtIn: section.id === PINNED_THREAD_SECTION_ID ? "pinned" : null,
+  };
+}
 
 export function toThreadSnapshot(thread: Thread): ThreadSnapshot {
   requireString(thread.id, "id");
@@ -44,6 +57,7 @@ export function toThreadSnapshot(thread: Thread): ThreadSnapshot {
     preview: thread.preview,
     name: thread.name,
     isPinned: thread.section?.id === PINNED_THREAD_SECTION_ID,
+    section: thread.section === null ? null : toThreadSectionSnapshot(thread.section),
     status: toThreadStatus(thread.status),
     cwd: thread.cwd,
     source: toThreadSource(thread.source),

@@ -37,7 +37,10 @@ import type {
   PermissionProfileOption,
   PermissionQueryPort,
 } from "./permission-port.js";
-import type { SessionRouter } from "../session-routing/index.js";
+import type {
+  SessionRouter,
+  ThreadSectionSnapshot,
+} from "../session-routing/index.js";
 import type { Workspace } from "../policy/index.js";
 import type {
   WorkspacePermissionPort,
@@ -86,12 +89,32 @@ export interface ConversationInput {
 }
 
 export interface ConversationSession {
+  selector?: string;
   id: string;
   preview: string;
   name: string | null;
   isPinned: boolean;
+  section?: ThreadSectionSnapshot | null;
+  modelProvider?: string;
   status: { type: "notLoaded" | "idle" | "systemError" | "active" };
   model?: string;
+}
+
+export interface ConversationSessionQuery {
+  archived?: boolean;
+  searchTerm?: string;
+  filter?: "all" | "running" | "pinned" | "unsectioned";
+  provider?: string;
+  sectionSelector?: string;
+}
+
+export interface ThreadSectionView extends ThreadSectionSnapshot {
+  currentWorkspaceActiveCount: number;
+  currentWorkspaceArchivedCount: number;
+}
+
+export interface ThreadSectionDeletePreview {
+  section: ThreadSectionView;
 }
 
 export interface ProjectRulesResult {
@@ -204,8 +227,26 @@ export interface ConversationUseCases {
   ): Promise<Submission | undefined>;
   listSessions(
     target: ConversationTarget,
-    options?: { archived?: boolean; searchTerm?: string },
+    options?: ConversationSessionQuery,
   ): Promise<ConversationSession[]>;
+  listThreadSections(target: ConversationTarget): Promise<ThreadSectionView[]>;
+  createThreadSection(target: ConversationTarget, name: string): Promise<ThreadSectionSnapshot>;
+  renameThreadSection(
+    target: ConversationTarget,
+    selector: string,
+    name: string,
+  ): Promise<ThreadSectionSnapshot>;
+  moveCurrentThreadToSection(
+    target: ConversationTarget,
+    selector: string,
+    beforeThreadSelector?: string,
+  ): Promise<ThreadSectionSnapshot>;
+  removeCurrentThreadSection(target: ConversationTarget): Promise<void>;
+  previewThreadSectionDelete(
+    target: ConversationTarget,
+    selector: string,
+  ): Promise<ThreadSectionDeletePreview>;
+  deleteThreadSection(target: ConversationTarget, selector: string): Promise<ThreadSectionSnapshot>;
   backgroundThreadIds?(target: ConversationTarget): string[];
   resume(target: ConversationTarget, selector: string): Promise<ConversationResumeResult>;
   newSession(target: ConversationTarget): Promise<string | undefined>;
@@ -266,6 +307,7 @@ export interface ConversationUseCases {
 
 export class ConversationService implements ConversationUseCases {
   private readonly locks = new Map<string, Promise<void>>();
+  private readonly threadSectionsLockKey = "global:thread-sections";
   private readonly queuedFollowUps = new Map<string, QueuedFollowUp[]>();
   private activeVisionRecognitions = 0;
 
@@ -653,19 +695,176 @@ export class ConversationService implements ConversationUseCases {
 
   async listSessions(
     target: ConversationTarget,
-    options: { archived?: boolean; searchTerm?: string } = {},
+    options: ConversationSessionQuery = {},
   ): Promise<ConversationSession[]> {
-    const sessions = pinnedFirst(await this.router.list(target, options));
-    return sessions.map(({ id, preview, name, isPinned, status }) => {
-      const model = this.router.modelSettingsForThread(id)?.model;
-      return {
-        id,
-        preview,
-        name,
-        isPinned,
-        status,
-        ...(model ? { model } : {}),
-      };
+    const sectionId = options.sectionSelector
+      ? resolveThreadSection(await this.codex.listThreadSections(), options.sectionSelector).id
+      : null;
+    const archiveOptions = options.archived === undefined ? {} : { archived: options.archived };
+    const needsCompleteCatalog = Boolean(
+      sectionId
+      || options.searchTerm
+      || options.provider
+      || (options.filter && options.filter !== "all"),
+    );
+    const all = pinnedFirst(await this.router.list(target, {
+      ...archiveOptions,
+      ...(needsCompleteCatalog ? { fullScan: true } : {}),
+    }));
+    const ordered = sectionId
+      ? await this.router.list(target, {
+          ...archiveOptions,
+          fullScan: true,
+          sectionId,
+          sortKey: "section_position",
+          sortDirection: "asc",
+          ...(options.searchTerm ? { searchTerm: options.searchTerm } : {}),
+        })
+      : options.searchTerm
+        ? await this.router.list(target, {
+            ...archiveOptions,
+            fullScan: true,
+            searchTerm: options.searchTerm,
+          })
+        : all;
+    const selectors = new Map(all.map((thread, index) => [thread.id, String(index + 1)]));
+    const normalizedProvider = options.provider?.trim().toLowerCase() || null;
+    return ordered.map((thread) => ({ thread, selector: selectors.get(thread.id) }))
+      .filter(({ thread }) => {
+        if (normalizedProvider && thread.modelProvider.toLowerCase() !== normalizedProvider) {
+          return false;
+        }
+        if (sectionId && thread.section?.id !== sectionId) return false;
+        if (options.filter === "running" && thread.status.type !== "active") return false;
+        if (options.filter === "pinned" && !thread.isPinned) return false;
+        if (options.filter === "unsectioned" && thread.section != null) return false;
+        return true;
+      })
+      .map(({ thread: { id, preview, name, isPinned, section, modelProvider, status }, selector }) => {
+        const model = this.router.modelSettingsForThread(id)?.model;
+        return {
+          ...(selector ? { selector } : {}),
+          id,
+          preview,
+          name,
+          isPinned,
+          ...(section === undefined ? {} : { section }),
+          modelProvider,
+          status,
+          ...(model ? { model } : {}),
+        };
+      });
+  }
+
+  async listThreadSections(target: ConversationTarget): Promise<ThreadSectionView[]> {
+    const [sections, active, archived] = await Promise.all([
+      this.codex.listThreadSections(),
+      this.router.list(target, { fullScan: true }),
+      this.router.list(target, { archived: true, fullScan: true }),
+    ]);
+    return sections.map((section) => ({
+      ...section,
+      currentWorkspaceActiveCount: active.filter((thread) =>
+        thread.section?.id === section.id
+      ).length,
+      currentWorkspaceArchivedCount: archived.filter((thread) =>
+        thread.section?.id === section.id
+      ).length,
+    }));
+  }
+
+  createThreadSection(
+    target: ConversationTarget,
+    name: string,
+  ): Promise<ThreadSectionSnapshot> {
+    const normalized = normalizeThreadSectionName(name);
+    return this.lockedThreadSections(
+      target,
+      () => this.codex.createThreadSection(normalized),
+    );
+  }
+
+  renameThreadSection(
+    target: ConversationTarget,
+    selector: string,
+    name: string,
+  ): Promise<ThreadSectionSnapshot> {
+    const normalized = normalizeThreadSectionName(name);
+    return this.lockedThreadSections(target, async () => {
+      const section = resolveMutableThreadSection(
+        await this.codex.listThreadSections(),
+        selector,
+      );
+      return this.codex.renameThreadSection(section.id, normalized);
+    });
+  }
+
+  moveCurrentThreadToSection(
+    target: ConversationTarget,
+    selector: string,
+    beforeThreadSelector?: string,
+  ): Promise<ThreadSectionSnapshot> {
+    return this.lockedThreadSections(target, async () => {
+      const binding = this.router.current(target);
+      if (!binding) {
+        throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
+      }
+      const section = resolveThreadSection(
+        await this.codex.listThreadSections(),
+        selector,
+      );
+      let beforeThreadId: string | undefined;
+      if (beforeThreadSelector) {
+        const sessions = pinnedFirst(await this.router.list(target, { fullScan: true }));
+        const before = resolveThread(sessions, beforeThreadSelector);
+        if (before.section?.id !== section.id) {
+          throw new UserFacingError(
+            "thread-section.before.invalid",
+            "排序目标 Thread 不在所选分区中",
+          );
+        }
+        beforeThreadId = before.id;
+      }
+      await this.codex.moveThreadToSection(binding.threadId, section.id, beforeThreadId);
+      return section;
+    });
+  }
+
+  removeCurrentThreadSection(target: ConversationTarget): Promise<void> {
+    return this.lockedThreadSections(target, async () => {
+      const binding = this.router.current(target);
+      if (!binding) {
+        throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
+      }
+      await this.codex.moveThreadToSection(binding.threadId, null);
+    });
+  }
+
+  async previewThreadSectionDelete(
+    target: ConversationTarget,
+    selector: string,
+  ): Promise<ThreadSectionDeletePreview> {
+    const sections = await this.listThreadSections(target);
+    return { section: resolveMutableThreadSection(sections, selector) };
+  }
+
+  deleteThreadSection(
+    target: ConversationTarget,
+    selector: string,
+  ): Promise<ThreadSectionSnapshot> {
+    return this.lockedThreadSections(target, async () => {
+      const section = resolveMutableThreadSection(
+        await this.codex.listThreadSections(),
+        selector,
+      );
+      if (selector.trim() !== section.id) {
+        throw new UserFacingError(
+          "thread-section.delete-confirmation.invalid",
+          "删除确认必须使用预览返回的完整 Thread 分区 ID",
+        );
+      }
+      await this.codex.deleteThreadSection(section.id);
+      return section;
     });
   }
 
@@ -1512,6 +1711,16 @@ export class ConversationService implements ConversationUseCases {
     return this.lockedKey(conversationTargetKey(target), action);
   }
 
+  private lockedThreadSections<T>(
+    target: ConversationTarget,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    return this.lockedKey(
+      this.threadSectionsLockKey,
+      () => this.locked(target, action),
+    );
+  }
+
   private lockedTargets<T>(
     targets: readonly ConversationTarget[],
     action: () => Promise<T> | T,
@@ -1594,11 +1803,11 @@ function normalizeInput(value: string | ConversationInput): TurnInput[] {
   return input;
 }
 
-export function resolveThread(
-  threads: ConversationSession[],
+export function resolveThread<T extends Pick<ConversationSession, "id" | "name">>(
+  threads: T[],
   selector: string,
   command: "resume" | "unarchive" = "resume",
-): ConversationSession {
+): T {
   if (!selector) {
     throw new UserFacingError(
       "session.selector.required",
@@ -1633,6 +1842,64 @@ function pinnedFirst<T extends { isPinned: boolean }>(
 ): T[] {
   return sessions.toSorted((left, right) =>
     Number(right.isPinned) - Number(left.isPinned));
+}
+
+function normalizeThreadSectionName(value: string): string {
+  const normalized = value.trim();
+  if (
+    normalized.length === 0
+    || normalized.length > 64
+    || [...normalized].some((character) => {
+      const code = character.codePointAt(0);
+      return code !== undefined && (code <= 0x1f || code === 0x7f);
+    })
+  ) {
+    throw new UserFacingError(
+      "thread-section.name.invalid",
+      "Thread 分区名称必须为 1–64 个不含控制字符的字符",
+    );
+  }
+  return normalized;
+}
+
+function resolveThreadSection<T extends ThreadSectionSnapshot>(
+  sections: readonly T[],
+  selector: string,
+): T {
+  const normalized = selector.trim();
+  if (/^[1-9]\d*$/u.test(normalized)) {
+    const section = sections[Number(normalized) - 1];
+    if (section) return section;
+  }
+  const lowered = normalized.toLowerCase();
+  const exact = sections.filter((section) =>
+    section.id.toLowerCase() === lowered || section.name.toLowerCase() === lowered
+  );
+  if (exact.length === 1) return exact[0]!;
+  const prefixes = sections.filter((section) => section.id.toLowerCase().startsWith(lowered));
+  if (prefixes.length === 1) return prefixes[0]!;
+  throw new UserFacingError(
+    exact.length > 1 || prefixes.length > 1
+      ? "thread-section.selector.ambiguous"
+      : "thread-section.selector.not-found",
+    exact.length > 1 || prefixes.length > 1
+      ? "Thread 分区选择不唯一，请使用序号或完整 ID"
+      : "找不到指定 Thread 分区",
+  );
+}
+
+function resolveMutableThreadSection<T extends ThreadSectionSnapshot>(
+  sections: readonly T[],
+  selector: string,
+): T {
+  const section = resolveThreadSection(sections, selector);
+  if (section.builtIn === "pinned") {
+    throw new UserFacingError(
+      "thread-section.pinned.immutable",
+      "官方内置 Pinned 分区不能改名或删除",
+    );
+  }
+  return section;
 }
 
 function resolveAgentRole(

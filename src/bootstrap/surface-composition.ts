@@ -15,6 +15,7 @@ import {
 import {
   FeishuAccessPolicy,
   TelegramAccessPolicy,
+  ThreadSectionAccessPolicy,
   WeixinAccessPolicy,
 } from "../policy/index.js";
 import type { BindingStore } from "../storage/index.js";
@@ -118,6 +119,9 @@ function createWeixinModule(
     accountId: config.accountId,
     service: options.service,
     access,
+    threadSectionAccess: new ThreadSectionAccessPolicy(
+      options.config.threadSectionAdministrators,
+    ),
     actorRegistry: options.bindings,
     credentialDirectory: join(
       options.config.credentialsDirectory,
@@ -201,6 +205,9 @@ function createFeishuModule(
     appSecret: config.appSecret,
     service: options.service,
     access,
+    threadSectionAccess: new ThreadSectionAccessPolicy(
+      options.config.threadSectionAdministrators,
+    ),
     logger: options.logger,
     uploadsDirectory: join(
       dirname(options.config.stateDatabasePath),
@@ -314,6 +321,9 @@ function createTelegramModule(
     ...(proxyUrl === undefined ? {} : { proxyUrl }),
     service: options.service,
     access,
+    threadSectionAccess: new ThreadSectionAccessPolicy(
+      config.threadSectionAdministrators,
+    ),
     startupRecipients: config.telegramAllowedUserIds,
     workspaces: config.workspaces,
     uploadsDirectory: join(dirname(config.stateDatabasePath), "uploads"),

@@ -114,6 +114,10 @@ describe("Feishu output renderer", () => {
         kind: "sessions",
         sessions: [],
         archived: false,
+        page: 1,
+        pageCount: 1,
+        matchedSessionCount: 0,
+        view: { page: 1, filter: "all", provider: null, sectionSelector: null, searchTerm: null },
       },
       {
         kind: "status",
@@ -534,7 +538,10 @@ describe("Feishu output renderer", () => {
       }],
       currentThreadId: "thread-1234567890",
       archived: false,
-      searchTerm: "会话",
+      page: 1,
+      pageCount: 1,
+      matchedSessionCount: 1,
+      view: { page: 1, filter: "all", provider: null, sectionSelector: null, searchTerm: "会话" },
     });
     expect(sessions).toContain("固定 · 会话名称 · thread-12345 · idle ← 当前");
 
@@ -669,6 +676,10 @@ describe("Feishu output renderer", () => {
         status: { type: "idle" as const },
       })),
       archived: false,
+      page: 1,
+      pageCount: 1,
+      matchedSessionCount: 21,
+      view: { page: 1, filter: "all", provider: null, sectionSelector: null, searchTerm: null },
     });
 
     expect(sessions).toContain(
@@ -676,7 +687,7 @@ describe("Feishu output renderer", () => {
     );
     expect(sessions).not.toContain("第一行\n第二行");
     expect(sessions).toContain(
-      "另有 1 条未显示，请使用 /sessions <搜索词> 缩小范围。",
+      "另有 1 条未显示，请使用 /sessions search <搜索词> 缩小范围。",
     );
     expect(sessions).not.toContain("21. 会话 21");
   });
@@ -694,6 +705,10 @@ describe("Feishu output renderer", () => {
       }],
       currentThreadId: "thread-1234567890",
       archived: false,
+      page: 1,
+      pageCount: 1,
+      matchedSessionCount: 1,
+      view: { page: 1, filter: "all", provider: null, sectionSelector: null, searchTerm: null },
     });
 
     expect(sessions).toContain(

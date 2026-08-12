@@ -660,6 +660,38 @@ describe("Feishu conversation adapter", () => {
     await fixture.outbox.close();
   });
 
+  it("turns the native Thread Section catalog into exact move choices", async () => {
+    const fixture = createOutbox();
+    const section = {
+      id: "section-project",
+      name: "项目",
+      builtIn: null,
+      currentWorkspaceActiveCount: 1,
+      currentWorkspaceArchivedCount: 0,
+    };
+    const adapter = new FeishuConversationAdapter(
+      {
+        listThreadSections: vi.fn(async () => [section]),
+      } as unknown as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+    );
+
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "section",
+      message.actorId,
+    )).resolves.toMatchObject({
+      title: "移动当前会话到分区 · 第 1/1 页",
+      choices: [{
+        label: "项目",
+        action: "section",
+        input: "move section-project",
+      }],
+    });
+    await fixture.outbox.close();
+  });
+
   it("keeps session search inside cards and returns clickable results", async () => {
     const fixture = createOutbox();
     const listSessions = vi.fn(async () => [{
