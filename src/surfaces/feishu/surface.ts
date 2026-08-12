@@ -274,6 +274,9 @@ export class FeishuSurface implements SurfaceAdapter {
         ...(options.priceCurrency === undefined
           ? {}
           : { priceCurrency: options.priceCurrency }),
+        ...(options.threadSectionAccess === undefined
+          ? {}
+          : { threadSectionAccess: options.threadSectionAccess }),
         ...(files === undefined ? {} : { files }),
         audios: this.audios,
         ...(quotedMessages === undefined

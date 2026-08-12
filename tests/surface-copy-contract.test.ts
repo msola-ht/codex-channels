@@ -133,6 +133,18 @@ describe("shared surface copy contract", () => {
     }
   });
 
+  it("explains Thread Section administrator denial consistently on every surface", () => {
+    const error = new UserFacingError(
+      "thread-section.admin-required",
+      "opaque internal fallback",
+    );
+    for (const surface of ["Telegram", "飞书", "微信"] as const) {
+      expect(formatSurfaceUserFacingError(error, surface)).toBe(
+        "当前用户没有 Thread 分区写权限；请在 thread_sections.administrators 中配置对应渠道用户 ID，并重启 Gateway",
+      );
+    }
+  });
+
   it("formats MCP OAuth completion without exposing sensitive failure details", () => {
     expect(formatRuntimeMcpOAuthCompleted({
       name: "docs",
