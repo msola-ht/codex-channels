@@ -157,6 +157,104 @@ describe("systemd installer", () => {
     expect(result.stdout).not.toContain("[成功]");
   });
 
+  it("enables linger during install so services start before login", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-systemd-linger-"));
+    temporaryDirectories.push(root);
+    const binDir = join(root, "bin");
+    const lingerState = join(root, "linger-enabled");
+    const loginctlLog = join(root, "loginctl.log");
+    mkdirSync(binDir);
+    const fakeSystemctl = join(binDir, "systemctl");
+    writeFileSync(fakeSystemctl, "#!/bin/sh\nexit 0\n");
+    chmodSync(fakeSystemctl, 0o755);
+    const fakeLoginctl = join(binDir, "loginctl");
+    writeFileSync(fakeLoginctl, [
+      "#!/bin/sh",
+      "printf '%s\\n' \"$*\" >> \"$LOGINCTL_LOG\"",
+      "case \"$1\" in",
+      "  show-user) if [ -f \"$LINGER_STATE\" ]; then printf 'yes\\n'; else printf 'no\\n'; fi ;;",
+      "  enable-linger) : > \"$LINGER_STATE\" ;;",
+      "esac",
+    ].join("\n"));
+    chmodSync(fakeLoginctl, 0o755);
+
+    const output = execFileSync(
+      "/bin/sh",
+      [resolve("scripts/systemd-control.sh"), "install"],
+      {
+        env: {
+          ...process.env,
+          HOME: root,
+          SYSTEMCTL_BINARY: fakeSystemctl,
+          LOGINCTL_BINARY: fakeLoginctl,
+          LOGINCTL_LOG: loginctlLog,
+          LINGER_STATE: lingerState,
+        },
+        encoding: "utf8",
+      },
+    );
+    execFileSync(
+      "/bin/sh",
+      [resolve("scripts/systemd-control.sh"), "install"],
+      {
+        env: {
+          ...process.env,
+          HOME: root,
+          SYSTEMCTL_BINARY: fakeSystemctl,
+          LOGINCTL_BINARY: fakeLoginctl,
+          LOGINCTL_LOG: loginctlLog,
+          LINGER_STATE: lingerState,
+        },
+        encoding: "utf8",
+      },
+    );
+
+    const loginctlCalls = readFileSync(loginctlLog, "utf8");
+    expect(loginctlCalls).toContain("show-user");
+    expect(loginctlCalls.split("\n").filter((line) => line.startsWith("enable-linger"))).toHaveLength(1);
+    expect(output).toContain("未登录时也会随系统启动");
+  });
+
+  it("fails install with an actionable command when linger cannot be enabled", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-systemd-linger-failure-"));
+    temporaryDirectories.push(root);
+    const binDir = join(root, "bin");
+    const systemctlLog = join(root, "systemctl.log");
+    mkdirSync(binDir);
+    const fakeSystemctl = join(binDir, "systemctl");
+    writeFileSync(fakeSystemctl, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SYSTEMCTL_LOG\"\n");
+    chmodSync(fakeSystemctl, 0o755);
+    const fakeLoginctl = join(binDir, "loginctl");
+    writeFileSync(fakeLoginctl, [
+      "#!/bin/sh",
+      "case \"$1\" in",
+      "  show-user) printf 'no\\n' ;;",
+      "  enable-linger) exit 1 ;;",
+      "esac",
+    ].join("\n"));
+    chmodSync(fakeLoginctl, 0o755);
+
+    const result = spawnSync(
+      "/bin/sh",
+      [resolve("scripts/systemd-control.sh"), "install"],
+      {
+        env: {
+          ...process.env,
+          HOME: root,
+          SYSTEMCTL_BINARY: fakeSystemctl,
+          SYSTEMCTL_LOG: systemctlLog,
+          LOGINCTL_BINARY: fakeLoginctl,
+        },
+        encoding: "utf8",
+      },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toContain("sudo loginctl enable-linger");
+    expect(result.stdout).not.toContain("已安装并启动");
+    expect(existsSync(systemctlLog)).toBe(false);
+  });
+
   it("supports lifecycle actions and preserves user data on uninstall", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-systemd-control-"));
     temporaryDirectories.push(root);
@@ -177,6 +275,9 @@ describe("systemd installer", () => {
     const fakeSystemctl = join(binDir, "systemctl");
     writeFileSync(fakeSystemctl, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SYSTEMCTL_LOG\"\n");
     chmodSync(fakeSystemctl, 0o755);
+    const fakeLoginctl = join(binDir, "loginctl");
+    writeFileSync(fakeLoginctl, "#!/bin/sh\nprintf 'yes\\n'\n");
+    chmodSync(fakeLoginctl, 0o755);
     const journalctlLog = join(root, "journalctl.log");
     const fakeJournalctl = join(binDir, "journalctl");
     writeFileSync(
@@ -188,6 +289,7 @@ describe("systemd installer", () => {
       ...process.env,
       HOME: root,
       XDG_CONFIG_HOME: configHome,
+      LOGINCTL_BINARY: fakeLoginctl,
       SYSTEMCTL_BINARY: fakeSystemctl,
       SYSTEMCTL_LOG: systemctlLog,
       JOURNALCTL_BINARY: fakeJournalctl,

@@ -153,7 +153,8 @@
   Doctor 与指标库入口委派）、Telegram Setup、飞书手动输入与扫码注册的消息和 CardKit 最小权限、卡片动作回调
   声明、应用选择、Bot 身份验证、扫码后自动发布悬浮菜单、发布失败保留连接配置并安全提示 Doctor
   恢复、授权域名约束、允许名单确认、原子保存和错误脱敏、
-  CLI 项目规则生成/检查、launchd、systemd、Unix WebSocket 私有目录/真实 Socket 校验和请求头、
+  CLI 项目规则生成/检查、launchd、systemd 安装时的 linger 启用与登录前启动保证、Unix WebSocket
+  私有目录/真实 Socket 校验和请求头、
   模块依赖方向、`runtime` 导入白名单及公开入口边界。
 - 微信 Setup 的替换风险取消门槛、扫码结果到禁用态非敏感配置和独立安全凭据的原子提交、配置失败
   凭据恢复，以及微信/飞书分离的 Keychain Service、Linux 密文私有权限、严格版本和损坏失败关闭。

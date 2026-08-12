@@ -19,10 +19,10 @@
 WebUI 与指标中心独立于 `all`，安装时只生成 unit 不自动启动。不写目标时，启停和状态默认
 `all`，重启和日志默认 `gateway`。
 
-若需要用户退出 SSH 后仍保持运行或开机自动启动用户服务，请由管理员执行：
+`codexc service install` 在安装 unit 前检查当前用户的 systemd linger；未启用时先尝试通过
+`loginctl enable-linger` 开启并复查。无法启用或复查未生效时，安装在调用 `systemctl --user`
+前失败，并显示需要管理员执行的精确命令。安装成功即表示用户管理器会在系统启动时运行，用户
+尚未登录或退出 SSH 后 App Server 与 Gateway 仍可启动和继续运行。
 
-```bash
-sudo loginctl enable-linger "$USER"
-```
-
-用户配置和运行数据始终保留在 `~/.codex-connect`，卸载 unit 不会删除这些数据。
+linger 是当前用户的系统级开机属性，可能同时服务于其他用户 unit，因此卸载 Codex Connect 时不
+自动关闭。用户配置和运行数据始终保留在 `~/.codex-connect`，卸载 unit 不会删除这些数据。

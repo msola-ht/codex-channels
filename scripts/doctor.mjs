@@ -461,7 +461,7 @@ if (process.platform === "darwin") {
       "systemd linger",
       linger.status === 0 && linger.stdout.trim() === "yes"
         ? "已启用，退出登录后服务可继续运行"
-        : "未启用或无法确认；如需退出 SSH 后继续运行，请执行 sudo loginctl enable-linger $USER",
+        : "未启用或无法确认；重新运行 codexc service install，或按安装提示由管理员启用",
     );
   }
 } else {

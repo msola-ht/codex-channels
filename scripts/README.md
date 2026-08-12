@@ -227,6 +227,8 @@
 - `cli-status.mjs`：让 systemd/launchd 控制脚本复用公开 CLI 的成功、失败、提示和处理状态前缀、
   TTY 颜色及 `NO_COLOR` 规则；日志和数据内容不经过状态渲染。
 - `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载四个 systemd 用户服务；
-  与 launchd 使用相同的目标、服务角色和默认值，WebUI 与指标中心独立不并入 `all`，用户数据始终保留。
+  安装前确保当前用户的 linger 已启用并复查，使用户未登录时也能随系统启动，无法启用则在修改
+  unit 状态前失败并显示管理员处理命令；与 launchd 使用相同的目标、服务角色和默认值，WebUI
+  与指标中心独立不并入 `all`，用户数据始终保留。
 
 脚本不得把凭据写入 npm 安装目录；用户配置、SQLite、配置事件队列、Socket 和日志必须留在用户级 `.codex-connect`。

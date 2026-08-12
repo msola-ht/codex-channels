@@ -51,11 +51,9 @@ codexc doctor
 codexc service status
 ```
 
-Linux 如需退出 SSH 后继续运行，再执行一次：
-
-```bash
-sudo loginctl enable-linger "$USER"
-```
+Linux 安装后台服务时会检查并尝试启用 systemd linger，使服务在系统启动且用户尚未登录时也能
+运行。当前用户没有启用权限时，安装会停止并显示需要管理员执行的精确命令；执行后重新运行
+`codexc service install`。
 
 完成后，在已配置的聊天客户端中私聊机器人即可使用。发送 `/help` 查看聊天命令。
 
