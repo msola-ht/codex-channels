@@ -3,6 +3,7 @@ set -eu
 
 action="${1:-status}"
 systemctl_binary="${SYSTEMCTL_BINARY:-systemctl}"
+loginctl_binary="${LOGINCTL_BINARY:-loginctl}"
 config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
 units_dir="$config_home/systemd/user"
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -61,6 +62,31 @@ systemctl_user() {
   "$systemctl_binary" --user "$@"
 }
 
+ensure_linger() {
+  user_id=$(id -u)
+  linger=$(
+    "$loginctl_binary" show-user "$user_id" --property=Linger --value 2>/dev/null \
+      || true
+  )
+  if [ "$linger" = "yes" ]; then
+    return 0
+  fi
+  if ! "$loginctl_binary" enable-linger "$user_id" 2>/dev/null; then
+    print_status failure "无法为当前用户启用 systemd linger，后台服务不能保证在登录前启动。"
+    print_status remediation "请先执行 sudo loginctl enable-linger \"$(id -un)\"，再重新运行 codexc service install。"
+    return 1
+  fi
+  linger=$(
+    "$loginctl_binary" show-user "$user_id" --property=Linger --value 2>/dev/null \
+      || true
+  )
+  if [ "$linger" != "yes" ]; then
+    print_status failure "systemd linger 启用后未生效，后台服务不能保证在登录前启动。"
+    print_status remediation "请执行 sudo loginctl enable-linger \"$(id -un)\" 并复查 loginctl show-user \"$(id -un)\"。"
+    return 1
+  fi
+}
+
 require_target() {
   case "$1" in
     gateway|app-server|webui|center|all)
@@ -74,12 +100,14 @@ require_target() {
 
 case "$action" in
   install)
+    ensure_linger
     systemctl_user daemon-reload
     resolved_units=$(service_ids all start)
     set -- $resolved_units
     systemctl_user enable "$@"
     for unit in "$@"; do systemctl_user restart "$unit"; done
     print_status success "Codex App Server 与 Gateway systemd 用户服务已安装并启动。"
+    print_status note "systemd linger 已启用，未登录时也会随系统启动。"
     print_status note "WebUI 服务已生成，可执行 codexc service start webui 启动。"
     print_status note "指标中心服务已生成，可执行 codexc service start center 启动。"
     ;;
