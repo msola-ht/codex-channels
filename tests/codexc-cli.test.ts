@@ -1032,6 +1032,9 @@ describe("codexc CLI", () => {
     expect(captures.find(({ args }) => args.includes('model_provider="deepseek"'))?.apiKey)
       .toBe("sk-service-secret");
     expect(JSON.stringify(captures.map(({ args }) => args))).not.toContain("sk-service-secret");
+    const roleConfigPath = join(codexHome, "codex-connect-ds-subagent.config.toml");
+    expect(existsSync(roleConfigPath)).toBe(true);
+    expect(readFileSync(roleConfigPath, "utf8")).not.toContain("sk-service-secret");
   });
 
   it("owns the automatic provider proxy in the App Server service without a running Gateway", async () => {

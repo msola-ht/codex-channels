@@ -185,6 +185,14 @@ describe("model provider runtime topology", () => {
     expect(content).not.toContain("sk-test-secret");
 
     expect(statSync(rolePath).mode & 0o777).toBe(0o600);
+    const firstRoleInode = statSync(rolePath).ino;
+    writeManagedModelProviderRoleConfig(environment, {
+      baseUrl: "http://127.0.0.1:39492/",
+    });
+    expect(statSync(rolePath).ino).not.toBe(firstRoleInode);
+    expect(readFileSync(rolePath, "utf8")).toContain(
+      'base_url = "http://127.0.0.1:39492/"',
+    );
     expect(() => writeManagedModelProviderRoleConfig(environment, {
       baseUrl: "not-a-url",
     })).toThrow("base_url 无效");

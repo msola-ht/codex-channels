@@ -43,10 +43,12 @@ DeepSeek Provider。
 | `~/.codex/deepseek.config.toml` | 切换模式的 DeepSeek 模型、Provider 和 API Key |
 | `~/.codex/deepseek.models.json` | 从 DeepSeek 官方安装脚本提取并校验的模型目录 |
 | `~/.codex/codex-connect-deepseek.config.toml` | 不含凭据的 Gateway 管理标记 |
-| `~/.codex/backup-codex-connect-deepseek/` | 首次修改前的配置备份 |
+| `~/.codex/codex-connect-ds-subagent.config.toml` | 不含凭据的 DeepSeek 子代理角色配置 |
+| `~/.codex/backup-codex-connect-deepseek/` | 首次修改前的基础配置、同名 Profile、管理标记和角色文件备份 |
 
 这些文件位于 Codex 用户目录，不写入项目或 npm 包。重复运行 Setup 可以更新 API Key 或切换模式；
-恢复操作只撤销 Setup 管理的字段，并保留之后添加的无关配置。
+恢复操作把文件还原到首次备份状态，会覆盖安装后对 `~/.codex/config.toml` 的修改。安装前已存在
+的同路径角色文件会原样恢复，原来不存在时则删除 Setup 生成的角色文件。
 
 当前 DeepSeek 官方只声明 `deepseek-v4-flash` 支持 Codex。`deepseek-v4-pro` 会显示为暂不可用，
 在官方支持前不能选择。
@@ -128,7 +130,10 @@ Gateway 停止或重启时计时指标可能丢失，但模型请求不会因此
 ## 子代理角色
 
 切换模式可在 Codex 的 multi_agent_v2 中把 DeepSeek 作为子代理使用，并让子代理请求自动计入
-模型指标。启用后运行 `codexc service restart all` 生效：
+模型指标。`codexc setup` 在切换模式配置成功后会自动开启 `features.multi_agent_v2` 并注册
+`agents.ds`；无需再单独执行启用命令，运行 `codexc service restart all` 后生效。
+
+以下命令用于查看状态、手动修复或显式关闭：
 
 ```bash
 codexc agents enable-deepseek
@@ -136,14 +141,19 @@ codexc agents status
 codexc agents disable-deepseek
 ```
 
-`enable-deepseek` 在 `~/.codex/config.toml` 中开启 `features.multi_agent_v2`，并注册名为 `ds`
-的 `agents.ds` 角色。角色文件 `~/.codex/codex-connect-ds-subagent.config.toml` 由 App Server
-服务启动时动态生成，指向本机 DeepSeek 统计代理，因此子代理请求会进入与直接 API 相同的指标、
-压缩和费用统计链路；服务退出时角色文件会被删除。角色文件只写模型、Provider 和 `env_key`
-引用，不写 API Key，认证密钥仍只进入 App Server 子进程环境。
+`enable-deepseek` 会幂等地重新开启 `features.multi_agent_v2`，并注册名为 `ds` 的
+`agents.ds` 角色；仅 DeepSeek 固定模式不会自动注册该角色，从切换模式改为固定模式时会移除
+本项目管理的 `agents.ds`，但不会关闭可能仍供其他角色使用的 `multi_agent_v2`。如果已经存在
+非本项目管理的 `agents.ds`，Setup 会在读取 API Key 和下载前明确报错，不覆盖用户角色。
 
-`disable-deepseek` 移除 `agents.ds` 角色并关闭 `multi_agent_v2`，角色文件由服务在退出或重启时
-清理。需要子代理时，主模型调用 `spawn_agent` 并选择角色 `ds`。
+角色文件 `~/.codex/codex-connect-ds-subagent.config.toml` 在启用时先生成，App Server 服务启动时
+再原子刷新为本机 DeepSeek 统计代理地址，因此子代理请求会进入与直接 API 相同的指标、压缩和
+费用统计链路。服务停止后保留该无凭据文件，保证原生 Codex 仍能解析 `config.toml`；此时 DS
+角色不可用，需先重新启动 App Server。角色文件只写模型、Provider 和 `env_key` 引用，不写
+API Key，认证密钥仍只进入 App Server 子进程环境。
+
+`disable-deepseek` 移除 `agents.ds` 角色、关闭 `multi_agent_v2` 并删除角色文件；切换到固定模式
+或恢复安装前配置也会删除该托管文件。需要子代理时，主模型调用 `spawn_agent` 并选择角色 `ds`。
 
 当前 DS 角色采用 V2 单次兼容模式：当前用户消息必须包含完整任务，主模型调用时必须传
 `agent_type="ds"` 和 `fork_turns="1"`。DS 从继承的最近一个 Turn 中读取最后一条用户消息，

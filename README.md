@@ -119,7 +119,7 @@ plugin_api = true
 ### DeepSeek
 
 在 `codexc setup` 中选择“模型渠道”，可以配置 OpenAI 与 DeepSeek 切换模式、仅 DeepSeek 模式
-或恢复原配置。配置后运行：
+或恢复原配置。切换模式会自动启用 `multi_agent_v2` 并注册 `ds` 子代理角色；配置后运行：
 
 ```bash
 codexc service restart all

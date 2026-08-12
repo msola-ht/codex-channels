@@ -74,9 +74,11 @@
 - `deepseek-setup.mjs`：复用共享的非敏感 DeepSeek Provider 定义，提供 OpenAI/DeepSeek 切换和
   仅 DeepSeek 两种安装模式；只下载、不执行
   DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小、JSON 与 Flash 模型后写入用户
-  `CODEX_HOME`。切换模式保持基础配置不变，按 Codex 新版独立 Profile 文件格式把模型、Provider
-  与 API Key 写入 CLI 使用的 `deepseek.config.toml`，并写入不含凭据的 Gateway 管理标记；
-  首次修改前记录原配置和同名 Profile 是否存在并备份原文，固定模式显式
+  `CODEX_HOME`。切换模式保持 OpenAI 默认模型与认证不变，按 Codex 新版独立 Profile 文件格式把
+  模型、Provider 与 API Key 写入 CLI 使用的 `deepseek.config.toml`，写入不含凭据的 Gateway
+  管理标记，并自动开启 `features.multi_agent_v2`、注册 `agents.ds` 子代理角色；
+  改为固定模式时只移除本项目管理的 `agents.ds`，不关闭可能供其他角色使用的功能开关；
+  首次修改前记录原配置、同名 Profile、管理标记与角色文件是否存在并备份原文，固定模式显式
   确认后才覆盖默认 Provider，恢复选项可精确还原首次安装状态，并在保留的审计备份中记录已恢复
   生命周期。重复安装基于当前配置更新，不从首次备份回滚后续修改；退出固定模式时只还原 Setup
   管理的字段（含自动压缩阈值），恢复后新增的同名用户 Provider 不会被误判为旧版托管配置；
@@ -105,8 +107,10 @@
 - `workspace-add.mjs`：把指定目录或命令调用目录注册为 Workspace，支持 `--prune-missing` 清理失效配置。
 - `agents.mjs`：`codexc agents` 的执行脚本，在 `~/.codex/config.toml` 中开启或关闭
   `features.multi_agent_v2` 并注册单次 `agents.ds` 角色；角色说明要求主模型以
-  `fork_turns=1` 传入当前用户消息，角色文件由 App Server 服务启动时动态生成并指向本机
-  DeepSeek 统计代理，同时写入禁止解析加密正文和等待后续消息的受控指令，服务退出时删除。
+  `fork_turns=1` 传入当前用户消息；非托管同名角色会失败关闭，不会被覆盖。启用时先原子生成
+  无凭据角色文件，App Server 服务启动时再原子刷新为本机 DeepSeek 统计代理地址，同时写入禁止
+  解析加密正文和等待后续消息的受控指令。普通服务退出保留文件以维持 Codex 配置可解析，显式
+  禁用、改为固定模式或恢复配置时删除。
 
 ## 开发与协议
 
