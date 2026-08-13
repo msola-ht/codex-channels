@@ -7,8 +7,12 @@
 - `runtime-config.mjs` / `runtime-config.d.mts`：解析并声明用户数据目录和运行时路径，并初始化 `.codex-connect`；为只读诊断和
   独立项目命令提供不修改配置权限的必需/可选路径定位，可选定位只把文件不存在视为未初始化，
   但显式指定的配置文件缺失及其他文件系统错误仍失败；启动与写入流程显式收紧目录和配置文件权限。
+- `local-update.mjs` / `local-update.d.mts`：实现并声明 `codexc update` 的本地兼容更新；先只读严格
+  校验 `config.toml` 和两个数据库的版本、必需结构与明确迁移路径，再在同一个 App Server、Gateway
+  停机窗口内分别备份并更新配置和数据库，离线复核后启动并通过 Socket 与监管拓扑确认核心服务稳定
+  就绪。未知配置、残缺结构或不受支持的 Schema 在写入前失败关闭。
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
-  升级到 v4；不自动迁移未知版本。
+  升级到 v4，并为统一更新入口提供只读版本检查；不自动迁移未知版本。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
   `run`、`turns`、`threads`、`report`、`export` 和周额度只读查询；只打开只读 Store，不加载服务控制或数据库维护流程。
 - `metrics-database.mjs` / `metrics-database.d.mts`：保留 `codexc metrics` 的兼容公开入口和 CLI，

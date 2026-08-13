@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
-import { upgradeStateDatabase } from "../scripts/upgrade-state.mjs";
+import { inspectStateDatabase, upgradeStateDatabase } from "../scripts/upgrade-state.mjs";
 
 const temporaryDirectories: string[] = [];
 
@@ -18,6 +18,29 @@ afterEach(() => {
 });
 
 describe("state database upgrade", () => {
+  it("rejects a current version whose required structure is incomplete", () => {
+    const home = mkdtempSync(join(tmpdir(), "codexc-state-upgrade-"));
+    temporaryDirectories.push(home);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+    initializeUserData({ environment, cwd: home });
+    const databasePath = join(home, "data", "gateway.sqlite3");
+    mkdirSync(join(home, "data"), { recursive: true });
+    const database = new DatabaseSync(databasePath);
+    database.exec(`
+      CREATE TABLE conversation_bindings (surface TEXT);
+      PRAGMA user_version = 4;
+    `);
+    database.close();
+
+    expect(() => inspectStateDatabase(environment)).toThrow(
+      /状态数据库结构不完整/u,
+    );
+  });
+
   it("backs up and explicitly upgrades Schema 3 to Schema 4", () => {
     const home = mkdtempSync(join(tmpdir(), "codexc-state-upgrade-"));
     temporaryDirectories.push(home);
@@ -31,6 +54,14 @@ describe("state database upgrade", () => {
     mkdirSync(join(home, "data"), { recursive: true });
     const database = new DatabaseSync(databasePath);
     database.exec(`
+      CREATE TABLE conversation_workspaces (
+        surface TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (surface, account_id, conversation_id)
+      ) STRICT;
       CREATE TABLE conversation_bindings (
         surface TEXT NOT NULL,
         account_id TEXT NOT NULL,
@@ -40,6 +71,14 @@ describe("state database upgrade", () => {
         session_id TEXT NOT NULL,
         updated_at INTEGER NOT NULL,
         PRIMARY KEY (surface, account_id, conversation_id)
+      ) STRICT;
+      CREATE TABLE conversation_actors (
+        surface TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        actor_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (surface, account_id, conversation_id, actor_id)
       ) STRICT;
       PRAGMA user_version = 3;
     `);

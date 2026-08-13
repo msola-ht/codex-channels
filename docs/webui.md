@@ -61,7 +61,7 @@ codexc service stop webui        # 停止
 - Linux 使用 systemd 用户服务 `codex-connect-webui.service`，macOS 使用 launchd
   `com.hegenai.codex-webui`；`codexc service uninstall` 会一并卸载；
 - 服务单元固定运行 `codexc webui`，host/port/token 全部来自 `config.toml` 的 `[webui]` 段；
-- 指标库升级到新 Schema 后先运行 `codexc metrics upgrade` 再启动，否则 API 会因版本不兼容报错。
+- 指标库升级到新 Schema 后运行 `codexc update` 统一预检和迁移，否则 API 会因版本不兼容报错。
 
 ## 页面与 API
 

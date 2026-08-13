@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S node --disable-warning=ExperimentalWarning
 
 import { spawn, spawnSync } from "node:child_process";
 import {
@@ -74,6 +74,7 @@ import {
 
 const foregroundShutdownTimeoutMs = 5_000;
 const foregroundProcessGroupExitTimeoutMs = 1_000;
+const nodeExperimentalWarningOption = "--disable-warning=ExperimentalWarning";
 
 const helpText = {
   main: `Codex Connect CLI
@@ -91,6 +92,7 @@ const helpText = {
   work [list|add|remove]       管理 Workspace（别名 ws；无子命令进入交互菜单）
   rules <init|check>           生成或检查项目 Codex 命令预设
   agents <enable-deepseek|disable-deepseek|status>   配置 multi_agent_v2 的 DeepSeek 子代理角色
+  update                      审查并更新本地配置与数据库
   state upgrade               显式升级 Gateway 状态数据库
   metrics <run|turns|threads|report|export|status|reset>   查询、导出或重建模型请求指标
   metrics cleanup             备份并按保留策略清理旧指标
@@ -202,6 +204,11 @@ const helpText = {
   "rules.check": `用法：codexc rules check
 
 使用当前 Codex CLI 检查项目规则。`,
+  update: `用法：codexc update
+
+先只读审查 config.toml 与数据库结构，再自动停止 App Server 与 Gateway，在停机窗口内分别备份并
+更新配置、状态数据库与指标数据库，离线复核后恢复并确认核心服务就绪。必须从本机终端执行；
+不会安装或更新 npm 包。`,
   state: `用法：codexc state upgrade
 
 停止 Gateway 后，备份并显式升级状态数据库。`,
@@ -394,6 +401,13 @@ try {
     case "agents":
       agents(args);
       break;
+    case "update":
+      if (showRequestedHelp(args, "update")) {
+        break;
+      }
+      requireNoArguments(args, "用法：codexc update");
+      runScript("scripts/local-update.mjs", []);
+      break;
     case "state":
       state(args);
       break;
@@ -445,7 +459,9 @@ function runGateway(args) {
     throw new Error("用法：codexc gateway");
   }
   const runtime = configuredEnvironment();
-  const child = spawn(process.execPath, [join(packageDir, "dist/main.js")], {
+  const child = spawn(process.execPath, nodeArguments([
+    join(packageDir, "dist/main.js"),
+  ]), {
     stdio: "inherit",
     env: runtime.environment,
     cwd: runtime.dataDir,
@@ -1106,7 +1122,10 @@ function runDoctor(args) {
   if (args.length > 0) {
     throw new Error("用法：codexc doctor");
   }
-  const result = spawnSync(process.execPath, [join(packageDir, "scripts/doctor.mjs"), ...args], {
+  const result = spawnSync(process.execPath, nodeArguments([
+    join(packageDir, "scripts/doctor.mjs"),
+    ...args,
+  ]), {
     stdio: "inherit",
     env: process.env,
     cwd: process.cwd(),
@@ -1202,7 +1221,7 @@ async function runForegroundScript(
   const runtime = configuredEnvironment();
   const child = spawn(
     process.execPath,
-    [join(packageDir, relativePath), ...args],
+    nodeArguments([join(packageDir, relativePath), ...args]),
     {
       stdio: "inherit",
       env: { ...runtime.environment, ...additionalEnvironment },
@@ -1422,7 +1441,10 @@ function runMetricsCommand(args) {
   try {
     result = spawnSync(
       process.execPath,
-      [join(packageDir, "scripts/metrics-database.mjs"), ...withoutStdout],
+      nodeArguments([
+        join(packageDir, "scripts/metrics-database.mjs"),
+        ...withoutStdout,
+      ]),
       { stdio: ["inherit", output.fileDescriptor, "inherit"] },
     );
   } finally {
@@ -1566,11 +1588,15 @@ function stringValue(value) {
 }
 
 function run(executable, args, environment, cwd) {
-  const result = spawnSync(executable, args, {
-    stdio: "inherit",
-    env: environment,
-    ...(cwd ? { cwd } : {}),
-  });
+  const result = spawnSync(
+    executable,
+    executable === process.execPath ? nodeArguments(args) : args,
+    {
+      stdio: "inherit",
+      env: environment,
+      ...(cwd ? { cwd } : {}),
+    },
+  );
   if (result.error) {
     throw result.error;
   }
@@ -1581,6 +1607,10 @@ function run(executable, args, environment, cwd) {
   if (result.status !== 0) {
     throw new Error(`子命令执行失败：exit=${result.status ?? 1}`);
   }
+}
+
+function nodeArguments(args) {
+  return [nodeExperimentalWarningOption, ...args];
 }
 
 function parseWorkspaceAddOptions(args) {

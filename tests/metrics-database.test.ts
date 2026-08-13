@@ -32,6 +32,7 @@ import {
   resetMetricsSyncStateWithGatewayRestart,
   upgradeMetricsDatabase,
   upgradeMetricsDatabaseWithGatewayRestart,
+  validateMetricsDatabaseStructure,
 } from "../scripts/metrics-database.mjs";
 import {
   modelRequestMetricsSchemaVersion,
@@ -317,6 +318,24 @@ describe("model request metrics database operations", () => {
       exists: true,
       schemaVersion: modelRequestMetricsSchemaVersion,
     });
+  });
+
+  it("rejects an upgradeable version whose required structure is incomplete", () => {
+    const { environment, databasePath } = fixture();
+    createMetricsDatabase(databasePath, 3, 1);
+
+    expect(() => validateMetricsDatabaseStructure(environment, {
+      allowUpgradeable: true,
+    })).toThrow(/Schema 3 结构不完整/u);
+  });
+
+  it("rejects a current version whose required structure is incomplete", () => {
+    const { environment, databasePath } = fixture();
+    createMetricsDatabase(databasePath, modelRequestMetricsSchemaVersion, 1);
+
+    expect(() => validateMetricsDatabaseStructure(environment)).toThrow(
+      /Schema 7 结构不完整/u,
+    );
   });
 
   it("reads a reusable aggregate report and paged sanitized export", () => {
@@ -742,6 +761,9 @@ describe("model request metrics database operations", () => {
   it("backs up and explicitly upgrades a v3 metrics database in place", () => {
     const { environment, databasePath } = fixture();
     createLegacyV3Database(databasePath, 2);
+    expect(() => validateMetricsDatabaseStructure(environment, {
+      allowUpgradeable: true,
+    })).not.toThrow();
 
     const result = upgradeMetricsDatabase(environment, {
       gatewayRunning: () => false,
@@ -783,6 +805,9 @@ describe("model request metrics database operations", () => {
   it("backs up and explicitly upgrades a v4 metrics database in place", () => {
     const { environment, databasePath } = fixture();
     createLegacyV4Database(databasePath, 2);
+    expect(() => validateMetricsDatabaseStructure(environment, {
+      allowUpgradeable: true,
+    })).not.toThrow();
 
     const result = upgradeMetricsDatabase(environment, {
       gatewayRunning: () => false,
@@ -816,6 +841,9 @@ describe("model request metrics database operations", () => {
   it("backs up and explicitly upgrades a v5 metrics database in place", () => {
     const { environment, databasePath } = fixture();
     createLegacyV5Database(databasePath, 2);
+    expect(() => validateMetricsDatabaseStructure(environment, {
+      allowUpgradeable: true,
+    })).not.toThrow();
 
     const result = upgradeMetricsDatabase(environment, {
       gatewayRunning: () => false,
@@ -844,6 +872,9 @@ describe("model request metrics database operations", () => {
   it("backs up and explicitly upgrades a v6 metrics database in place", () => {
     const { environment, databasePath } = fixture();
     createLegacyV6Database(databasePath, 2);
+    expect(() => validateMetricsDatabaseStructure(environment, {
+      allowUpgradeable: true,
+    })).not.toThrow();
 
     const result = upgradeMetricsDatabase(environment, {
       gatewayRunning: () => false,
@@ -1196,6 +1227,8 @@ function createLegacyV3Database(path: string, count: number) {
       ON model_request_metrics (thread_id, turn_id, id);
     CREATE INDEX model_request_metrics_provider_model
       ON model_request_metrics (provider, model, id);
+    CREATE VIEW model_request_metrics_enriched AS
+      SELECT id, 0 AS total_cost_nanos FROM model_request_metrics;
   `);
   const insert = database.prepare(`
     INSERT INTO model_request_metrics (

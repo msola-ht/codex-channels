@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   GatewayOwner,
+  gatewayOwnerIsActive,
   gatewayOwnerSocketPath,
 } from "../runtime/gateway-owner.mjs";
 
@@ -20,6 +21,19 @@ afterEach(() => {
 });
 
 describe("Gateway owner", () => {
+  it("reports whether the owned Socket accepts connections", async () => {
+    const dataDir = mkdtempSync(join(unixSocketTmpdir, "codexc-gateway-owner-active-"));
+    temporaryDirectories.push(dataDir);
+    const configPath = join(dataDir, "config.toml");
+    const owner = new GatewayOwner(configPath);
+
+    expect(await gatewayOwnerIsActive(configPath)).toBe(false);
+    await owner.start();
+    expect(await gatewayOwnerIsActive(configPath)).toBe(true);
+    await owner.close();
+    expect(await gatewayOwnerIsActive(configPath)).toBe(false);
+  });
+
   it("allows only one Gateway for the same configuration regardless of Provider", async () => {
     const dataDir = mkdtempSync(join(unixSocketTmpdir, "codexc-gateway-owner-"));
     temporaryDirectories.push(dataDir);

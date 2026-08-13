@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   inspectMetricsDatabase,
+  metricsDatabaseCanUpgrade,
   metricsRange,
   readWeeklyQuota,
 } from "./metrics-database-access.mjs";
@@ -285,7 +286,9 @@ function openMetricsStore(environment, endAtMs = Date.now()) {
     throw new ApiError(
       503,
       "metrics_database_incompatible",
-      "指标数据库版本不兼容，请停止 Gateway 后运行 codexc metrics upgrade",
+      metricsDatabaseCanUpgrade(status.schemaVersion)
+        ? "指标数据库版本不兼容，请运行 codexc update"
+        : "指标数据库版本不兼容，请停止 Gateway 后运行 codexc metrics reset",
     );
   }
   return new SqliteModelRequestMetricsStore(status.databasePath, endAtMs, {

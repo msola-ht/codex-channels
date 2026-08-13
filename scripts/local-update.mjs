@@ -1,0 +1,391 @@
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  readFileSync,
+  unlinkSync,
+} from "node:fs";
+import { dirname, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+
+import {
+  parseGatewayConfig,
+  readGatewayConfig,
+  validateGatewayConfigDocument,
+} from "../runtime/gateway-config.mjs";
+import {
+  appServerSocketAcceptsWebSocket,
+  inspectAppServerSupervisor,
+  sameAppServerTopology,
+} from "../runtime/app-server-supervisor.mjs";
+import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
+import { gatewayOwnerIsActive } from "../runtime/gateway-owner.mjs";
+import { writeCliMessage } from "../runtime/cli-presentation.mjs";
+import {
+  loadConfigDocument,
+  loadRuntimeConfig,
+} from "../dist/config/index.js";
+import {
+  modelRequestMetricsSchemaVersion,
+} from "../dist/observability/index.js";
+import { upgradeMetricsDatabase } from "./metrics-database.mjs";
+import {
+  inspectMetricsDatabase,
+  metricsDatabaseCanUpgrade,
+  validateMetricsDatabaseStructure,
+} from "./metrics-database-access.mjs";
+import {
+  inspectStateDatabase,
+  upgradeStateDatabase,
+  validateStateDatabaseStructure,
+} from "./upgrade-state.mjs";
+import { requireUserConfig } from "./runtime-config.mjs";
+
+export function updateGatewayConfiguration(environment = process.env, options = {}) {
+  const { configPath } = requireUserConfig(environment);
+  const before = readFileSync(configPath, "utf8");
+  const now = options.now ?? (() => new Date());
+  const backupPath = `${configPath}.pre-update.${backupTimestamp(now())}.bak`;
+  if (existsSync(backupPath)) {
+    throw new Error(`配置备份已存在：${backupPath}`);
+  }
+  copyFileSync(configPath, backupPath);
+  chmodSync(backupPath, 0o600);
+  try {
+    (options.loadConfig ?? (() => loadRuntimeConfig(environment)))();
+  } catch (error) {
+    if (readFileSync(configPath, "utf8") === before) unlinkSync(backupPath);
+    throw error;
+  }
+  const changed = readFileSync(configPath, "utf8") !== before;
+  const addedPaths = changed
+    ? missingConfigPaths(
+        parseGatewayConfig(before, configPath),
+        parseGatewayConfig(readFileSync(configPath, "utf8"), configPath),
+      )
+    : [];
+  if (!changed) unlinkSync(backupPath);
+  return { addedPaths, backupPath: changed ? backupPath : null, changed, configPath };
+}
+
+export function inspectGatewayConfiguration(environment = process.env) {
+  const { configPath } = requireUserConfig(environment);
+  const content = readFileSync(configPath, "utf8");
+  const source = parseGatewayConfig(content, configPath);
+  const defaults = validateGatewayConfigDocument(source);
+  loadConfigDocument(content, dirname(configPath), {
+    environment,
+    detectSystemProxy: true,
+  });
+  return { configPath, missingSafeDefaults: missingConfigPaths(source, defaults) };
+}
+
+export async function updateLocalInstallation(environment = process.env, options = {}) {
+  if (
+    environment.CODEX_CONNECT_SERVICE_ROLE === "app-server"
+    || environment.CODEX_CONNECT_SERVICE_ROLE === "gateway"
+  ) {
+    throw new Error("不能在运行中的 Codex 服务内执行更新；请在本机终端运行 codexc update");
+  }
+  const configInspection = (options.inspectConfig
+    ?? (() => inspectGatewayConfiguration(environment)))();
+  const databaseInspection = (options.inspectDatabases
+    ?? (() => inspectDatabaseUpdates(environment)))();
+  (options.onInspected ?? (() => {}))({
+    config: configInspection,
+    databases: databaseInspection,
+  });
+  const stopServices = options.stopServices
+    ?? (() => runCoreServiceAction("stop", environment));
+  const startServices = options.startServices
+    ?? (() => runCoreServiceAction("start", environment));
+  const waitForServices = options.waitForServices
+    ?? (() => waitForCoreServices(environment));
+  const databaseOptions = {
+    ...options.databaseOptions,
+    inspect: options.databaseOptions?.inspect ?? (() => databaseInspection),
+  };
+  await stopCoreServices(stopServices, startServices, waitForServices);
+
+  let config;
+  let databases;
+  let updateError;
+  try {
+    config = (options.updateConfig
+      ?? (() => updateGatewayConfiguration(environment)))();
+    databases = (options.updateDatabases
+      ?? (() => updateDatabases(environment, databaseOptions)))();
+    (options.validateOffline
+      ?? (() => validateLocalInstallation(environment)))();
+  } catch (error) {
+    updateError = error;
+  }
+
+  let startError;
+  try {
+    startServices();
+    await waitForServices();
+  } catch (error) {
+    startError = error;
+  }
+  if (updateError !== undefined && startError !== undefined) {
+    throw new AggregateError(
+      [updateError, startError],
+      "本地更新失败，且核心服务未能恢复就绪",
+      { cause: updateError },
+    );
+  }
+  if (updateError !== undefined) throw updateError;
+  if (startError !== undefined) throw startError;
+  return { config, databases };
+}
+
+export function inspectDatabaseUpdates(environment = process.env, options = {}) {
+  const state = (options.inspectState ?? (() => inspectStateDatabase(environment)))();
+  const metrics = (options.inspectMetrics ?? (() => inspectMetricsDatabase(environment)))();
+  const failures = [];
+  if (!state.updateable) {
+    failures.push(
+      `状态数据库 Schema ${state.schemaVersion ?? "unknown"} 无法直接更新到 ${state.targetSchemaVersion}`,
+    );
+  }
+  if (
+    metrics.exists
+    && !metrics.compatible
+    && !metricsDatabaseCanUpgrade(metrics.schemaVersion)
+  ) {
+    failures.push(
+      `指标数据库 Schema ${metrics.schemaVersion ?? "unknown"} 无法直接更新到 ${modelRequestMetricsSchemaVersion}`,
+    );
+  }
+  if (failures.length > 0) {
+    throw new Error(`数据库版本预检失败：${failures.join("；")}`);
+  }
+  (options.validateMetrics
+    ?? (() => validateMetricsDatabaseStructure(environment, { allowUpgradeable: true })))();
+  return { state, metrics };
+}
+
+export function updateDatabases(environment = process.env, options = {}) {
+  const updateState = options.updateState
+    ?? (() => upgradeStateDatabase(environment, { allowMissing: true }));
+  const updateMetrics = options.updateMetrics
+    ?? (() => upgradeMetricsDatabase(environment));
+  const inspect = options.inspect
+    ?? (() => inspectDatabaseUpdates(environment));
+  const onInspected = options.onInspected ?? (() => {});
+  const onUpdated = options.onUpdated ?? (() => {});
+
+  const inspection = inspect();
+  onInspected(inspection);
+
+  const results = {};
+  const failures = [];
+  for (const [name, update] of [["state", updateState], ["metrics", updateMetrics]]) {
+    try {
+      results[name] = update();
+      onUpdated(name, results[name]);
+    } catch (error) {
+      failures.push({ name, error });
+    }
+  }
+
+  if (failures.length > 0) {
+    const messages = failures.map(({ name, error }) =>
+      `${failureLabel(name)}：${error instanceof Error ? error.message : String(error)}`
+    );
+    throw new AggregateError(
+      failures.map(({ error }) => error),
+      `数据库更新未全部完成：${messages.join("；")}`,
+    );
+  }
+
+  return results;
+}
+
+export function validateLocalInstallation(environment = process.env) {
+  const config = inspectGatewayConfiguration(environment);
+  const state = validateStateDatabaseStructure(environment);
+  const metrics = validateMetricsDatabaseStructure(environment);
+  return { config, state, metrics };
+}
+
+export async function waitForCoreServices(environment = process.env, options = {}) {
+  const { configPath, dataDir } = requireUserConfig(environment);
+  const document = readGatewayConfig(configPath);
+  const descriptor = resolveAppServerRuntime(document, dataDir, environment);
+  const timeoutMs = options.timeoutMs ?? 15_000;
+  const intervalMs = options.intervalMs ?? 100;
+  const stableMs = options.stableMs ?? 500;
+  const now = options.now ?? Date.now;
+  const sleep = options.sleep
+    ?? ((milliseconds) => new Promise((resolveWait) => setTimeout(resolveWait, milliseconds)));
+  const inspectSupervisor = options.inspectSupervisor ?? inspectAppServerSupervisor;
+  const socketHealthy = options.socketHealthy ?? appServerSocketAcceptsWebSocket;
+  const gatewayHealthy = options.gatewayHealthy ?? gatewayOwnerIsActive;
+  const deadline = now() + timeoutMs;
+  let healthySince;
+  while (now() < deadline) {
+    const supervisor = await inspectSupervisor(descriptor.primarySocketPath);
+    const socketsHealthy = await Promise.all(
+      descriptor.socketPaths.map((socketPath) => socketHealthy(socketPath)),
+    );
+    const healthy = sameAppServerTopology(supervisor, descriptor.topology)
+      && socketsHealthy.every(Boolean)
+      && await gatewayHealthy(configPath);
+    if (healthy) {
+      healthySince ??= now();
+      if (now() - healthySince >= stableMs) return;
+    } else {
+      healthySince = undefined;
+    }
+    await sleep(intervalMs);
+  }
+  throw new Error("App Server 或 Gateway 在更新后未能及时就绪");
+}
+
+async function stopCoreServices(stopServices, startServices, waitForServices) {
+  try {
+    stopServices();
+  } catch (stopError) {
+    let startError;
+    try {
+      startServices();
+      await waitForServices();
+    } catch (error) {
+      startError = error;
+    }
+    if (startError !== undefined) {
+      throw new AggregateError(
+        [stopError, startError],
+        "本地更新前停止核心服务失败，且核心服务未能恢复运行",
+        { cause: stopError },
+      );
+    }
+    throw stopError;
+  }
+}
+
+function runCoreServiceAction(action, environment) {
+  const cli = resolve(import.meta.dirname, "../bin/codexc.mjs");
+  const result = spawnSync(
+    process.execPath,
+    [cli, "service", action, "all"],
+    { env: environment, stdio: "inherit" },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`核心服务${action === "stop" ? "停止" : "启动"}失败`);
+  }
+}
+
+function failureLabel(name) {
+  if (name === "state") return "状态数据库";
+  if (name === "metrics") return "指标数据库";
+  return "核心服务恢复";
+}
+
+function printDatabaseResult(name, result) {
+  const label = name === "state" ? "状态数据库" : "指标数据库";
+  const version = name === "state" ? result.version : result.schemaVersion;
+  if (version === null) {
+    writeCliMessage("note", `${label}尚未创建，无需更新。`);
+    console.log(`数据库：${result.databasePath}`);
+    return;
+  }
+  if (!result.changed) {
+    writeCliMessage("note", `${label}已是 Schema ${version}。`);
+    console.log(`数据库：${result.databasePath}`);
+    return;
+  }
+  writeCliMessage("success", `${label}已更新到 Schema ${version}。`);
+  console.log(`数据库：${result.databasePath}`);
+  console.log(`更新前备份：${result.backupPath}`);
+}
+
+function printInspection({ state, metrics }) {
+  writeCliMessage("note", "数据库版本预检通过。");
+  console.log(`状态数据库：${versionTransition(
+    state.exists ? state.schemaVersion : null,
+    state.targetSchemaVersion,
+  )}`);
+  console.log(`指标数据库：${versionTransition(
+    metrics.exists ? metrics.schemaVersion : null,
+    modelRequestMetricsSchemaVersion,
+  )}`);
+}
+
+function versionTransition(current, target) {
+  if (current === null) return `尚未创建 → Schema ${target}`;
+  if (current === target) return `Schema ${target}（已兼容）`;
+  return `Schema ${current} → Schema ${target}`;
+}
+
+function backupTimestamp(date) {
+  return date.toISOString().replaceAll(/[:.]/gu, "-");
+}
+
+function missingConfigPaths(current, defaults, prefix = "") {
+  const paths = [];
+  for (const [key, value] of Object.entries(defaults)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (!Object.hasOwn(current, key)) {
+      if (isRecord(value)) {
+        paths.push(...missingConfigPaths({}, value, path));
+      } else {
+        paths.push(path);
+      }
+      continue;
+    }
+    const currentValue = current[key];
+    if (isRecord(currentValue) && isRecord(value)) {
+      paths.push(...missingConfigPaths(currentValue, value, path));
+    }
+  }
+  return paths;
+}
+
+function isRecord(value) {
+  return typeof value === "object"
+    && value !== null
+    && !Array.isArray(value)
+    && !(value instanceof Date);
+}
+
+if (
+  process.argv[1]
+  && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
+) {
+  try {
+    await updateLocalInstallation(process.env, {
+      onInspected: ({ config }) => {
+        writeCliMessage("note", "本地更新预检通过。");
+        console.log(`配置：${config.configPath}`);
+        console.log(config.missingSafeDefaults.length === 0
+          ? "配置参数：已兼容"
+          : `待补齐安全参数：${config.missingSafeDefaults.join("、")}`);
+      },
+      updateConfig: () => {
+        const result = updateGatewayConfiguration(process.env);
+        if (result.changed) {
+          writeCliMessage("success", "config.toml 缺失的安全参数已补齐。");
+          console.log(`配置：${result.configPath}`);
+          console.log(`已补齐参数：${result.addedPaths.join("、")}`);
+          console.log(`更新前备份：${result.backupPath}`);
+        } else {
+          writeCliMessage("note", "config.toml 已兼容，无需更新。");
+        }
+        return result;
+      },
+      databaseOptions: {
+        onInspected: printInspection,
+        onUpdated: printDatabaseResult,
+      },
+    });
+    writeCliMessage("success", "本地配置与数据库更新完成，App Server 与 Gateway 已恢复运行。");
+  } catch (error) {
+    writeCliMessage("failure", error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  }
+}

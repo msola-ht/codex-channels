@@ -100,6 +100,11 @@ export function inspectMetricsDatabase(
   environment?: NodeJS.ProcessEnv,
 ): MetricsDatabaseStatus;
 
+export function validateMetricsDatabaseStructure(
+  environment?: NodeJS.ProcessEnv,
+  options?: { allowUpgradeable?: boolean },
+): MetricsDatabaseStatus;
+
 export function metricsRange(
   name: string,
   nowMs: number,

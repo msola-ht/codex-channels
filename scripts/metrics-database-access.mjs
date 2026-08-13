@@ -17,6 +17,24 @@ import {
 } from "./metrics-command-options.mjs";
 
 export { metricsRange } from "./metrics-command-options.mjs";
+export const upgradeableMetricsSchemaVersions = Object.freeze([3, 4, 5, 6]);
+const baseMetricsColumns = Object.freeze([
+  "id", "provider", "billing_mode", "pricing_currency", "pricing_source",
+  "pricing_effective_at_ms", "uncached_input_price_per_million_nanos",
+  "cached_input_price_per_million_nanos", "output_price_per_million_nanos",
+  "transport", "response_format", "operation", "thread_id", "turn_id", "model",
+  "service_tier", "reasoning_effort", "status", "http_status", "error_type",
+  "error_code", "incomplete_reason", "input_tokens", "cached_input_tokens",
+  "output_tokens", "reasoning_output_tokens", "total_tokens", "upstream_created_at",
+  "upstream_completed_at", "request_started_at_ms", "first_token_at_ms",
+  "first_reasoning_delta_at_ms", "last_reasoning_delta_at_ms",
+  "first_output_delta_at_ms", "last_output_delta_at_ms", "response_completed_at_ms",
+  "recorded_at_ms",
+]);
+
+export function metricsDatabaseCanUpgrade(schemaVersion) {
+  return upgradeableMetricsSchemaVersions.includes(schemaVersion);
+}
 
 export function inspectMetricsDatabase(environment = process.env) {
   const databasePath = resolveMetricsDatabaseContext(environment).databasePath;
@@ -46,6 +64,54 @@ export function inspectMetricsDatabase(environment = process.env) {
   } finally {
     database.close();
   }
+}
+
+export function validateMetricsDatabaseStructure(
+  environment = process.env,
+  options = {},
+) {
+  const status = inspectMetricsDatabase(environment);
+  if (!status.exists) return status;
+  if (
+    !status.compatible
+    && (
+      options.allowUpgradeable !== true
+      || !metricsDatabaseCanUpgrade(status.schemaVersion)
+    )
+  ) {
+    throw new Error(
+      `指标数据库 Schema ${status.schemaVersion ?? "unknown"} 不受支持`,
+    );
+  }
+  const database = new DatabaseSync(status.databasePath, { readOnly: true });
+  try {
+    const requiredColumns = [
+      ...baseMetricsColumns,
+      ...(status.schemaVersion >= 4
+        ? ["weekly_quota_limit_id", "weekly_used_percent_millionths", "weekly_resets_at"]
+        : []),
+      ...(status.schemaVersion >= 5 ? ["weekly_quota_plan_type"] : []),
+      ...(status.schemaVersion >= 6 ? ["error_message"] : []),
+    ];
+    requireColumns(database, "model_request_metrics", requiredColumns);
+    if (status.compatible) {
+      requireColumns(database, "subagent_threads", [
+        "thread_id", "parent_thread_id", "agent_path", "recorded_at_ms",
+      ]);
+    }
+    database.prepare(`
+      SELECT id, total_cost_nanos FROM model_request_metrics_enriched LIMIT 0
+    `).all();
+  } catch (error) {
+    throw new Error(
+      `指标数据库 Schema ${status.schemaVersion} 结构不完整，`
+      + (status.compatible ? "请运行 codexc metrics reset" : "无法安全更新"),
+      { cause: error },
+    );
+  } finally {
+    database.close();
+  }
+  return status;
 }
 
 export function readMetricsReport(environment = process.env, options = {}) {
@@ -244,12 +310,22 @@ export function resolveMetricsDatabaseContext(environment) {
   };
 }
 
+function requireColumns(database, table, requiredColumns) {
+  const columns = new Set(
+    database.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name),
+  );
+  const missing = requiredColumns.filter((column) => !columns.has(column));
+  if (missing.length > 0) {
+    throw new Error(`${table} 缺少 ${missing.join("、")}`);
+  }
+}
+
 export function requireCompatibleMetricsDatabase(environment = process.env) {
   const status = inspectMetricsDatabase(environment);
   if (!status.exists) throw new Error(`指标数据库尚未创建：${status.databasePath}`);
   if (!status.compatible) {
-    throw new Error(status.schemaVersion === 3
-      ? "模型请求指标数据库版本不兼容；请停止 Gateway 后运行 codexc metrics upgrade"
+    throw new Error(metricsDatabaseCanUpgrade(status.schemaVersion)
+      ? "模型请求指标数据库版本不兼容；请运行 codexc update"
       : "模型请求指标数据库版本不兼容；请停止 Gateway 后运行 codexc metrics reset");
   }
   return status.databasePath;

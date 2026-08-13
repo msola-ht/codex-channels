@@ -22,6 +22,7 @@ import {
 import { resolveMetricsCenterSettings } from "./metrics-center-settings.mjs";
 import {
   inspectMetricsDatabase,
+  metricsDatabaseCanUpgrade,
   readMetricsExport,
   readMetricsReport,
   readMetricsRun,
@@ -63,6 +64,7 @@ export {
   readMetricsThreads,
   readMetricsTurns,
   readWeeklyQuota,
+  validateMetricsDatabaseStructure,
 } from "./metrics-database-access.mjs";
 
 export function resetMetricsDatabase(
@@ -152,7 +154,7 @@ export function upgradeMetricsDatabase(
         schemaVersion: status.schemaVersion,
       };
     }
-    if (![3, 4, 5, 6].includes(status.schemaVersion)) {
+    if (!metricsDatabaseCanUpgrade(status.schemaVersion)) {
       throw new Error(
         `指标数据库无法升级：当前 Schema ${status.schemaVersion ?? "unknown"}，`
         + `仅支持 v3/v4/v5/v6 升级到 v${modelRequestMetricsSchemaVersion}`,

@@ -4,7 +4,7 @@ Description=Codex Connect App Server
 [Service]
 Type=simple
 WorkingDirectory=__WORKDIR__
-ExecStart=__NODE_BINARY__ __CLI_ENTRY__ service-app-server
+ExecStart=__NODE_BINARY__ --disable-warning=ExperimentalWarning __CLI_ENTRY__ service-app-server
 Environment="CODEX_CONNECT_HOME=__CONFIG_DIR__"
 Environment="CODEX_CONNECT_CONFIG_FILE=__CONFIG_PATH_ENV__"
 Environment="CODEX_CONNECT_SERVICE_ROLE=app-server"

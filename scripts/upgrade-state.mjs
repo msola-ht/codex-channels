@@ -12,17 +12,76 @@ import {
 
 const currentSchemaVersion = 4;
 const supportedPreviousSchemaVersion = 3;
+const requiredStateColumns = Object.freeze({
+  conversation_actors: ["surface", "account_id", "conversation_id", "actor_id", "created_at"],
+  conversation_background_bindings: [
+    "surface", "account_id", "conversation_id", "workspace_id", "thread_id", "session_id", "updated_at",
+  ],
+  conversation_bindings: [
+    "surface", "account_id", "conversation_id", "workspace_id", "thread_id", "session_id", "updated_at",
+  ],
+  conversation_workspaces: [
+    "surface", "account_id", "conversation_id", "workspace_id", "updated_at",
+  ],
+});
 
-export function upgradeStateDatabase(environment = process.env) {
-  const { configPath, dataDir } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
-  const storage = isRecord(document.storage) ? document.storage : {};
-  const databasePath = resolveConfiguredPath(
-    typeof storage.database_path === "string" ? storage.database_path : undefined,
-    dataDir,
-    "data/gateway.sqlite3",
-  );
+export function inspectStateDatabase(environment = process.env) {
+  const { databasePath } = resolveStateDatabaseContext(environment);
   if (!existsSync(databasePath)) {
+    return {
+      compatible: true,
+      databasePath,
+      exists: false,
+      schemaVersion: null,
+      targetSchemaVersion: currentSchemaVersion,
+      updateable: true,
+    };
+  }
+  const database = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    const row = database.prepare("PRAGMA user_version").get();
+    const schemaVersion = Number(row?.user_version);
+    if (schemaVersion === currentSchemaVersion) {
+      validateStateTables(database, Object.keys(requiredStateColumns));
+    } else if (schemaVersion === supportedPreviousSchemaVersion) {
+      validateStateTables(
+        database,
+        Object.keys(requiredStateColumns).filter((table) =>
+          table !== "conversation_background_bindings"
+        ),
+      );
+    }
+    return {
+      compatible: schemaVersion === currentSchemaVersion,
+      databasePath,
+      exists: true,
+      schemaVersion,
+      targetSchemaVersion: currentSchemaVersion,
+      updateable: schemaVersion === currentSchemaVersion
+        || schemaVersion === supportedPreviousSchemaVersion,
+    };
+  } finally {
+    database.close();
+  }
+}
+
+export function validateStateDatabaseStructure(environment = process.env) {
+  const status = inspectStateDatabase(environment);
+  if (!status.exists) return status;
+  if (!status.compatible) {
+    throw new Error(
+      `状态数据库 Schema ${status.schemaVersion ?? "unknown"} 尚未更新到 ${currentSchemaVersion}`,
+    );
+  }
+  return status;
+}
+
+export function upgradeStateDatabase(environment = process.env, options = {}) {
+  const { databasePath } = resolveStateDatabaseContext(environment);
+  if (!existsSync(databasePath)) {
+    if (options.allowMissing === true) {
+      return { changed: false, databasePath, version: null };
+    }
     throw new Error("状态数据库尚未创建，请先启动一次 Gateway");
   }
 
@@ -72,12 +131,37 @@ export function upgradeStateDatabase(environment = process.env) {
   }
 }
 
+function resolveStateDatabaseContext(environment) {
+  const { configPath, dataDir } = requireUserConfig(environment);
+  const document = readGatewayConfig(configPath);
+  const storage = isRecord(document.storage) ? document.storage : {};
+  return {
+    databasePath: resolveConfiguredPath(
+      typeof storage.database_path === "string" ? storage.database_path : undefined,
+      dataDir,
+      "data/gateway.sqlite3",
+    ),
+  };
+}
+
 function backupTimestamp() {
   return new Date().toISOString().replaceAll(/[:.]/gu, "-");
 }
 
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validateStateTables(database, tables) {
+  for (const table of tables) {
+    const columns = new Set(
+      database.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name),
+    );
+    const missing = requiredStateColumns[table].filter((column) => !columns.has(column));
+    if (missing.length > 0) {
+      throw new Error(`状态数据库结构不完整：${table} 缺少 ${missing.join("、")}`);
+    }
+  }
 }
 
 if (

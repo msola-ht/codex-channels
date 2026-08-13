@@ -207,7 +207,6 @@ codexc metrics status
 codexc metrics threads                            # 会话归纳总览（模型、Token、费用）
 codexc metrics report --range 30d --group models  # 聚合汇报
 codexc metrics export --range 30d --format json   # 脱敏明细导出；--thread 可按 Thread 过滤
-codexc metrics upgrade --restart-gateway          # 备份升级并重新启动 Gateway
 codexc metrics reset                              # 先保留 0600 旧库备份，再重建
 codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策略清理
 ```
@@ -271,19 +270,20 @@ codexc service logs -n 100
 npm install -g @hegenai/codexc@0.147.0
 npm install -g @openai/codex@0.147.0
 codexc service install
+codexc update
 codexc doctor
 ```
 
-如果升级后提示状态数据库版本不兼容（当前为 Schema v4），先只停止 Gateway，再显式备份升级并
-重新启动：
+`codexc update` 会先只读校验 `config.toml` 以及状态库、指标库的版本与必需结构；预检通过后自动停止
+App Server 与 Gateway，在停机窗口内备份并补齐当前配置 Schema 明确定义的缺失安全参数、分别备份并
+执行受支持的数据库迁移，再次离线校验后恢复核心服务并确认其真实就绪。未知配置字段、结构残缺或
+没有明确迁移路径的数据库版本会失败关闭。该命令不安装 npm 包，也不修改 Codex Thread 或
+`~/.codex/config.toml`。
 
-```bash
-codexc service stop gateway
-codexc state upgrade
-codexc service start gateway
-```
+该命令必须从本机终端执行，不能在渠道 Turn 或其他运行中的 Codex 服务进程内调用。
 
-`codexc state upgrade` 不会修改 Codex Thread，只新增后台绑定存储；命令会显示升级前数据库备份路径。
+单库排障仍可使用 `codexc state upgrade` 或 `codexc metrics upgrade`，日常版本升级只需运行
+`codexc update`。
 
 npm 包与 Codex CLI 使用相同版本。正式发布时先在发布提交中同步本页版本与安装命令，通过
 `main` CI 后再创建 Tag、发布 npm 和 GitHub Release；Release 不会自动修改 README。
