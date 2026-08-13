@@ -15,7 +15,6 @@ import {
   metricsDimension,
   metricsRangeOptions,
 } from "./metrics-command-options.mjs";
-import { isRecord } from "./metrics-export-format.mjs";
 
 export { metricsRange } from "./metrics-command-options.mjs";
 
@@ -273,4 +272,8 @@ function hasTable(database, name) {
 
 function perQuotaPercent(value, deltaMillionths) {
   return Math.round(value / (deltaMillionths / 1_000_000));
+}
+
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

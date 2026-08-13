@@ -56,6 +56,8 @@
   `config.toml` 的 `[metrics.center]` 段与默认值），不依赖 Cloudflare 部署文件。
 - `metrics-config-menu.mjs`：指标设置与中心服务设置的交互用例；集中管理本地保留策略、中心接入、
   上报参数、接入状态和中心监听配置，`config.mjs` 只保留顶层配置菜单编排与兼容重导出。
+- `metrics-menu.mjs` / `metrics-menu.d.mts`：`codexc metrics` 无参数时的交互用例及注入边界声明；负责收集查询、导出、清理和重置参数，
+  通过 CLI 注入的命令边界执行，不承载子进程或输出文件管理。
 - `metrics-center-payload.mjs` / `metrics-center-payload.d.mts`：中心服务与历史 Cloudflare
   Worker 共用的上报载荷校验及类型声明。
 - `metrics-center-schema.sql`：npm 发布包内中心 SQLite 的规范初始化 Schema；历史 Cloudflare
