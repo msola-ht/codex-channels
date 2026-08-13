@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "source": "https://cdn.deepseek.com/api-docs/codex-deepseek-setup.sh",
+  "models": [
+    {
+      "slug": "deepseek-v4-flash",
+      "digest": "e8486022d3c5a34d8a87616fbd971741b7342b38c1144743f623f2f41e4a6224",
+      "displayName": "DeepSeek-V4-Flash",
+      "description": "Latest frontier agentic coding model.",
+      "contextWindow": 1048576,
+      "maxContextWindow": 1048576,
+      "effectiveContextWindowPercent": 95,
+      "inputModalities": [
+        "text"
+      ],
+      "defaultReasoningLevel": "high",
+      "supportedReasoningLevels": [
+        {
+          "effort": "low",
+          "description": "Fast responses with lighter reasoning"
+        },
+        {
+          "effort": "high",
+          "description": "Extra high reasoning depth for complex problems"
+        },
+        {
+          "effort": "max",
+          "description": "Maximum reasoning depth for the hardest problems"
+        }
+      ],
+      "visibility": "list",
+      "minimalClientVersion": "0.144.0",
+      "supportedInApi": true,
+      "supportsSearchTool": true,
+      "supportsParallelToolCalls": true,
+      "multiAgentVersion": "v2"
+    },
+    {
+      "slug": "deepseek-v4-pro",
+      "digest": "50553e2c2b77ca3b6185bc5c2b88e4695ca31f7433432fd8a7a371e0c74f9158",
+      "displayName": "DeepSeek-V4-Pro",
+      "description": "Most capable frontier agentic coding model.",
+      "contextWindow": 1048576,
+      "maxContextWindow": 1048576,
+      "effectiveContextWindowPercent": 95,
+      "inputModalities": [
+        "text"
+      ],
+      "defaultReasoningLevel": "high",
+      "supportedReasoningLevels": [
+        {
+          "effort": "low",
+          "description": "Fast responses with lighter reasoning"
+        },
+        {
+          "effort": "high",
+          "description": "Extra high reasoning depth for complex problems"
+        },
+        {
+          "effort": "max",
+          "description": "Maximum reasoning depth for the hardest problems"
+        }
+      ],
+      "visibility": "list",
+      "minimalClientVersion": "0.144.0",
+      "supportedInApi": true,
+      "supportsSearchTool": true,
+      "supportsParallelToolCalls": true,
+      "multiAgentVersion": "v2"
+    }
+  ]
+}

@@ -50,8 +50,9 @@ DeepSeek Provider。
 恢复操作把文件还原到首次备份状态，会覆盖安装后对 `~/.codex/config.toml` 的修改。安装前已存在
 的同路径角色文件会原样恢复，原来不存在时则删除 Setup 生成的角色文件。
 
-当前 DeepSeek 官方只声明 `deepseek-v4-flash` 支持 Codex。`deepseek-v4-pro` 会显示为暂不可用，
-在官方支持前不能选择。
+当前 DeepSeek 官方目录声明 `deepseek-v4-flash` 和 `deepseek-v4-pro` 均支持 Codex；两者都可通过
+`/model` 选择，默认模型仍是 Flash。Setup 每次安装时下载最新官方目录，项目的每日目录提案工作流
+还会比较模型完整指纹与关键审查字段；发现变化时只创建 Draft PR，不会自动开放未知模型、发布或部署。
 
 当前 Responses API 只支持文字输入。DeepSeek 会把收到的图片替换成占位文本而不是报错，因此
 Gateway 会在创建或追加 Turn 前检查模型能力：未启用外部图片识别时明确拒绝图片并提示切换到
@@ -59,7 +60,7 @@ Gateway 会在创建或追加 Turn 前检查模型能力：未启用外部图片
 
 ## 网页搜索
 
-DeepSeek（当前 `deepseek-v4-flash` + Codex 0.147.0）支持网页搜索，且不依赖 OpenAI：
+DeepSeek（当前 `deepseek-v4-flash`、`deepseek-v4-pro` + Codex 0.147.0）支持网页搜索，且不依赖 OpenAI：
 
 - DeepSeek API 会向模型提供名为 `search` 的搜索工具；Codex 侧统一以 `web_search` item
   回传（`query`、`action` 和结构化 `results`）。实测能返回带标题、URL、摘要和发布日期的
@@ -109,9 +110,14 @@ App Server 服务会共同重建受监管实例。
 - `/metrics` 从独立指标库读取当前 Thread 最近 Turn 的请求累计和最近一次直接 API 请求；输入量是
   多次请求的累计值，不表示当前上下文占用。`/metrics providers|models|errors 24h|7d|30d` 与
   OpenAI 官方及第三方直接 API 使用相同统计口径，不为 DeepSeek 建立专属统计表。新请求按当次
-  价格快照估算 API 参考费用，总价按 `display.price_currency` 全局统一展示（默认 `cny`
+  价格快照估算 API 参考费用。价格来自随版本审查的 DeepSeek 官方人民币基线；2026 年 8 月 17 日
+  00:00（北京时间）起，按请求开始时间在 09:00–12:00、14:00–18:00 使用高峰价，其余时间使用
+  空闲价，区间采用含开始、不含结束的项目规则。运行时按当前 USD/CNY 汇率固化为统一 USD 快照；
+  汇率、精确模型或有效计划缺失时不使用通用目录猜价。总价按 `display.price_currency` 全局统一展示（默认 `cny`
   人民币），先出总计、再列出输入、缓存、输出三项价格明细，不显示目录静态单价，但会按本机
-  实际用量折算并展示均价（元/100M，人民币）；历史记录不按新价格回算。
+  实际用量折算并展示均价（元/100M，人民币）；历史价格快照不按新价格回算，人民币展示仍按当前
+  汇率统一换算。每日上游检查会
+  解析官方价格页并在变化时创建 Draft PR，不会让运行中的 Gateway 直接抓取 HTML 或自动发布。
 - `/limits` 当前只支持 OpenAI；DeepSeek 不会回退显示 OpenAI 限额。
 - DeepSeek 不支持 Fast，执行 `/fast on` 或 `/fast off` 会明确拒绝。
 

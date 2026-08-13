@@ -63,6 +63,7 @@ import {
   MetricsSync,
   modelRequestMetricsDatabasePath,
   SqliteModelRequestMetricsStore,
+  type ModelPricingResolver,
 } from "../observability/index.js";
 import { WorkspaceRegistry } from "../policy/index.js";
 import {
@@ -84,6 +85,10 @@ import { ProviderMetricsComposition } from "./provider-metrics-composition.js";
 import { enqueueTurnErrorMetric } from "./turn-error-metrics.js";
 import { RemoteModelPricingCatalog } from "./model-pricing-catalog.js";
 import { RemoteExchangeRate } from "./exchange-rate.js";
+import {
+  DeepseekModelPricingResolver,
+  ProviderModelPricingResolver,
+} from "./deepseek-model-pricing.js";
 import { mergeSessionReferenceCost } from "./reference-cost-summary.js";
 import { TomlWorkspacePermissionWriter } from "./workspace-permission-writer.js";
 import { SubagentCompletionTracker } from "./subagent-completion-tracker.js";
@@ -105,6 +110,8 @@ export class GatewayApplication {
   private readonly core: ConversationCore;
   private readonly providerMetrics: ProviderMetricsComposition;
   private readonly modelPricing: RemoteModelPricingCatalog;
+  private readonly pricingResolver: ModelPricingResolver;
+  private readonly modelPricingNeedsExchangeRate: boolean;
   private readonly exchangeRate: RemoteExchangeRate;
   private readonly metricsSync: MetricsSync;
   private readonly bindings: SqliteBindingStore;
@@ -228,6 +235,16 @@ export class GatewayApplication {
       fetchImpl: createProxyFetch(config.networkProxy),
       logger,
     });
+    this.pricingResolver = new ProviderModelPricingResolver(
+      new DeepseekModelPricingResolver({
+        exchangeRate: () => this.exchangeRate.resolve(),
+      }),
+      this.modelPricing,
+    );
+    this.modelPricingNeedsExchangeRate = primaryProvider === deepseekProviderDefinition.id
+      || managedProvider?.provider === deepseekProviderDefinition.id
+      || (config.vision.mode === "responses_api"
+        && config.vision.provider === deepseekProviderDefinition.id);
     this.providerMetrics = new ProviderMetricsComposition({
       providers: [
         primaryProvider,
@@ -244,7 +261,7 @@ export class GatewayApplication {
         },
         close: () => metricsWriter.close(),
       },
-      pricingResolver: this.modelPricing,
+      pricingResolver: this.pricingResolver,
       resolveModelSettings: (threadId) =>
         this.router.modelSettingsForThread(threadId),
       onModelTiming: (event) => this.core.handle(event),
@@ -342,12 +359,12 @@ export class GatewayApplication {
           logger,
           onMetric: (metric) => {
             try {
-              const pricing = this.modelPricing.resolve({
+              const pricing = this.pricingResolver.resolve({
                 provider: metric.provider,
                 model: metric.model,
                 serviceTier: metric.serviceTier,
                 inputTokens: metric.inputTokens,
-                atMs: metric.responseCompletedAtMs,
+                atMs: metric.requestStartedAtMs,
               });
               metricsWriter.enqueue({ ...metric, pricing });
             } catch (error) {
@@ -726,7 +743,7 @@ export class GatewayApplication {
     try {
       this.requireRunning();
       this.modelPricing.start();
-      if (priceDisplayNeedsExchangeRate(this.config)) {
+      if (this.modelPricingNeedsExchangeRate || priceDisplayNeedsExchangeRate(this.config)) {
         this.exchangeRate.start();
       }
       if (this.config.metricsSync?.enabled) {

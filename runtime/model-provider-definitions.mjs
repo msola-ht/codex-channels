@@ -14,10 +14,6 @@ export const deepseekProviderDefinition = Object.freeze({
   defaultReasoningEffort: "high",
   models: Object.freeze([
     Object.freeze({ slug: "deepseek-v4-flash", available: true }),
-    Object.freeze({
-      slug: "deepseek-v4-pro",
-      available: false,
-      unavailableReason: "DeepSeek 官方暂未支持该模型接入 Codex",
-    }),
+    Object.freeze({ slug: "deepseek-v4-pro", available: true }),
   ]),
 });

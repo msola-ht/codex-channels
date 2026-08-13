@@ -398,21 +398,21 @@ describe("ModelSelectionService", () => {
         serviceTier: "default",
       }),
     } as unknown as SessionRouter;
-    const pro = {
-      ...model("deepseek-v4-pro", ["high"], "high"),
+    const preview = {
+      ...model("deepseek-v5-preview", ["high"], "high"),
       provider: "deepseek",
       available: false,
-      unavailableReason: "DeepSeek 官方暂未支持该模型接入 Codex",
+      unavailableReason: "该模型尚未完成项目适配",
     };
-    const service = new ModelSelectionService(codex, router, undefined, [pro]);
+    const service = new ModelSelectionService(codex, router, undefined, [preview]);
 
     await expect(service.state(target)).resolves.toMatchObject({
       models: expect.arrayContaining([
-        expect.objectContaining({ model: "deepseek-v4-pro", available: false }),
+        expect.objectContaining({ model: "deepseek-v5-preview", available: false }),
       ]),
     });
-    await expect(service.selectModel(target, "deepseek-v4-pro"))
-      .rejects.toThrow("DeepSeek 官方暂未支持该模型接入 Codex");
+    await expect(service.selectModel(target, "deepseek-v5-preview"))
+      .rejects.toThrow("该模型尚未完成项目适配");
     expect(newSession).not.toHaveBeenCalled();
   });
 });

@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+  "sourceUpdatedAt": "2026-08-13T10:49:16.000Z",
+  "currency": "CNY",
+  "unit": "per_million_tokens",
+  "timezone": "Asia/Shanghai",
+  "plans": [
+    {
+      "effectiveFrom": null,
+      "effectiveUntil": "2026-08-17T00:00:00+08:00",
+      "windows": [
+        {
+          "kind": "all_day",
+          "localRanges": [],
+          "models": {
+            "deepseek-v4-flash": {
+              "cachedInput": 0.02,
+              "uncachedInput": 1,
+              "output": 2
+            },
+            "deepseek-v4-pro": {
+              "cachedInput": 0.025,
+              "uncachedInput": 3,
+              "output": 6
+            }
+          }
+        }
+      ]
+    },
+    {
+      "effectiveFrom": "2026-08-17T00:00:00+08:00",
+      "effectiveUntil": null,
+      "windows": [
+        {
+          "kind": "off_peak",
+          "localRanges": [],
+          "models": {
+            "deepseek-v4-flash": {
+              "cachedInput": 0.05,
+              "uncachedInput": 1.5,
+              "output": 4.5
+            },
+            "deepseek-v4-pro": {
+              "cachedInput": 0.15,
+              "uncachedInput": 4.5,
+              "output": 13.5
+            }
+          }
+        },
+        {
+          "kind": "peak",
+          "localRanges": [
+            "09:00-12:00",
+            "14:00-18:00"
+          ],
+          "models": {
+            "deepseek-v4-flash": {
+              "cachedInput": 0.1,
+              "uncachedInput": 3,
+              "output": 9
+            },
+            "deepseek-v4-pro": {
+              "cachedInput": 0.3,
+              "uncachedInput": 9,
+              "output": 27
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

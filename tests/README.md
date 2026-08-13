@@ -38,7 +38,8 @@
   适配、MCP 工具审批元数据与持久范围、畸形请求安全拒绝和未知请求明确报错；三渠道审批、用户输入与 MCP 处理状态、账户额度、
   Turn 追加确认、空回复及文本文件错误的共享文案契约；Interaction Router 按
   `surface + accountId` 暂停、只取消故障账号的活动/排队请求、不可用期间立即拒绝并在恢复后
-  重新接收，微信临时取消不会永久关闭交互端口。
+  重新接收，微信临时取消不会永久关闭交互端口；飞书短审批直接显示，长审批在初始与处理结果
+  CardKit 中提供有界预览和默认收起的完整原文，并保留一次性动作令牌。
 - Bootstrap 单渠道启动/运行故障隔离、独立退避恢复、首次启动与恢复期关键输出有界暂存、启动中停止的单次组件
   关闭、App Server 重连取消与关闭等待；内置 Surface 插件
   顺序、零/多账号展开、插件与 Surface ID 一致性、账号唯一性；飞书按配置显式注册、允许名单
@@ -98,9 +99,11 @@
 - 官方模型目录到稳定 Application 模型选项的映射、不可见项过滤、必需字段失败关闭，模型、
   思考等级和 Fast 的 Thread 覆盖、Codex 用户级模型/思考等级/Fast 默认值及受控 agents 设置持久化、共享客户端完整或残缺设置
   通知、Thread 失效通知及 Gateway/CLI 连接恢复；DeepSeek 官方脚本目录提取、两种 Setup 模式、
-  API Key 输出隔离、下载失败不修改、Flash 可选与 Pro 可见但不可选，以及跨 Provider 新建
+  API Key 输出隔离、下载失败不修改、Flash 与 Pro 可选，以及跨 Provider 新建
   Thread、原 Thread 可恢复、精确 Provider 路由、设置通知不覆盖不可变 Provider，以及在文本模型
   上创建或追加 Turn 前拒绝图片输入。
+- DeepSeek 目录提案的规范化基线、完整模型指纹变化检测，以及官方目录无法解析时仍保留结构化
+  失败结果和摘要且不生成候选基线。
 - Provider 账户能力的编译期唯一注册、未知 Provider 不回退、OpenAI Token 用量与单桶/多桶额度
   到稳定 Application 摘要的映射、重置券数量，以及 DeepSeek 私有配置读取、统一代理、官方余额
   Schema 裁剪、响应上限和错误脱敏；Thread Token/上下文对 Provider 通用，OpenAI Fast 与周限
@@ -122,7 +125,9 @@
   Bootstrap 组合测试验证所有样本进入独立 Observability
   Store、缺少 Turn 关联时不伪造 Core 事件，以及可选计价解析器只在组合边界附加价格快照；独立
   价格目录测试覆盖 LiteLLM 主源、Sub2API 价格镜像回退、私有缓存重载、缓存输入、Priority 和
-  长上下文价格选择；独立汇率测试覆盖 open.er-api 主源、ECB 回退、私有缓存重载和无效汇率拒绝；
+  长上下文价格选择；DeepSeek 专属价格测试覆盖官方人民币基线、请求开始时间、北京时间生效与峰谷
+  边界、Pro/Flash 精确匹配、汇率缺失失败关闭和禁止通用目录回退，价格页提案测试覆盖语义化 HTML
+  表格、来源元数据、结构变化与失败报告；独立汇率测试覆盖 open.er-api 主源、ECB 回退、私有缓存重载和无效汇率拒绝；
   `reference-cost-summary.test.ts` 覆盖当前 Turn 延迟写入时的 Thread 总价去重及
   跨价格档位聚合；失败和未完整请求保留原始价格快照但不进入费用汇总，CSV 导出统一中和
   电子表格公式前缀；独立 SQLite 指标库覆盖 `0600` 权限、严格 Schema、原子初始化、可配置保留策略与备份清理、

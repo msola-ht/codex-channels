@@ -265,6 +265,98 @@ describe("Feishu interaction port", () => {
     await fixture.interactions.close();
   });
 
+  it("keeps long approval details available inside collapsed CardKit panels", async () => {
+    const fixture = createConfiguredFixture();
+    const longDetail = [
+      "是否允许暂存已审查文件？",
+      `git add ${Array.from({ length: 20 }, (_, index) => `file-${index}.ts`).join(" ")}`,
+      `持久规则前缀：${JSON.stringify(["git", "add", ...Array.from(
+        { length: 20 },
+        (_, index) => `file-${index}.ts`,
+      )])}`,
+    ].join("\n\n");
+    const decision = fixture.interactions.request(target, {
+      ...approvalRequest(),
+      detail: longDetail,
+    });
+    await settle();
+
+    const initialCard = fixture.sentCards[0]!.card;
+    expect(initialCard).toMatchObject({ schema: "2.0" });
+    const initialPanel = findCollapsedPanel(initialCard);
+    expect(initialPanel).toMatchObject({
+      tag: "collapsible_panel",
+      expanded: false,
+      elements: [{
+        tag: "div",
+        text: { tag: "plain_text", content: longDetail },
+      }],
+    });
+    const preview = findPlainTextContent(initialCard, "审批内容预览：");
+    expect(preview).toBeDefined();
+    expect(preview).toContain("是否允许暂存已审查文件？");
+    expect(preview).toContain("git add file-0.ts");
+    expect(preview).toContain("…");
+    expect(preview!.length).toBeLessThanOrEqual(170);
+
+    const token = interactionToken(initialCard, "approve-once");
+    expect(fixture.interactions.handleCardAction({
+      messageId: "om_card",
+      chatId: target.conversationId,
+      actorOpenId: "ou_actor",
+      tag: "button",
+      value: {
+        interaction_token: token,
+        decision: "approve-once",
+      },
+    })).toBe("accepted");
+    await expect(decision).resolves.toEqual({
+      type: "approval",
+      approved: true,
+      scope: "once",
+    });
+
+    const outcomeCard = fixture.updatedCards[0]!.card;
+    expect(outcomeCard).toMatchObject({ schema: "2.0" });
+    expect(findCollapsedPanel(outcomeCard)).toMatchObject({
+      tag: "collapsible_panel",
+      expanded: false,
+      elements: [{
+        tag: "div",
+        text: { tag: "plain_text", content: longDetail },
+      }],
+    });
+    expect(findPlainTextContent(outcomeCard, "审批内容预览：")).toBe(preview);
+    await fixture.interactions.close();
+  });
+
+  it("shows a short approval detail directly without a redundant panel", async () => {
+    const fixture = createConfiguredFixture();
+    const decision = fixture.interactions.request(target, approvalRequest());
+    await settle();
+
+    const card = fixture.sentCards[0]!.card;
+    expect(findPlainTextContent(card, "npm test")).toBe("npm test");
+    expect(findCollapsedPanel(card)).toBeUndefined();
+
+    const token = interactionToken(card, "reject");
+    expect(fixture.interactions.handleCardAction({
+      messageId: "om_card",
+      chatId: target.conversationId,
+      actorOpenId: "ou_actor",
+      tag: "button",
+      value: {
+        interaction_token: token,
+        decision: "reject",
+      },
+    })).toBe("accepted");
+    await expect(decision).resolves.toEqual({
+      type: "approval",
+      approved: false,
+    });
+    await fixture.interactions.close();
+  });
+
   it("returns the exact offered network rule selected by index", async () => {
     const fixture = createConfiguredFixture();
     const amendments = [
@@ -815,6 +907,44 @@ function findInteractionToken(
   }
   return Object.values(record)
     .map((entry) => findInteractionToken(entry, decision))
+    .find((entry) => entry !== undefined);
+}
+
+function findCollapsedPanel(value: unknown): Record<string, unknown> | undefined {
+  if (Array.isArray(value)) {
+    return value
+      .map(findCollapsedPanel)
+      .find((entry) => entry !== undefined);
+  }
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.tag === "collapsible_panel") {
+    return record;
+  }
+  return Object.values(record)
+    .map(findCollapsedPanel)
+    .find((entry) => entry !== undefined);
+}
+
+function findPlainTextContent(value: unknown, prefix: string): string | undefined {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => findPlainTextContent(entry, prefix))
+      .find((entry) => entry !== undefined);
+  }
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.tag === "plain_text"
+    && typeof record.content === "string"
+    && record.content.startsWith(prefix)) {
+    return record.content;
+  }
+  return Object.values(record)
+    .map((entry) => findPlainTextContent(entry, prefix))
     .find((entry) => entry !== undefined);
 }
 

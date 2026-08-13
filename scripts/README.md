@@ -112,6 +112,15 @@
   安装与“修改自动压缩阈值”入口支持按上下文窗口百分比（10–95%，默认 60%）写入
   `model_auto_compact_token_limit` 或关闭自动压缩；固定模式的日常阈值修改使用官方键级配置事务，
   完整安装与备份恢复才执行文件级替换。
+- `prepare-deepseek-catalog-proposal.mjs` / `prepare-deepseek-catalog-proposal.d.mts` /
+  `deepseek-catalog-baseline.json`：复用 Setup 的官方
+  下载器，比较排序后的模型完整指纹与上下文、输入模态、思考等级、搜索、并行工具、最低客户端版本
+  等有限审查字段，输出候选基线、结构化结果、摘要和失败日志所需现场。模型提示词只参与哈希，不复制
+  到仓库；脚本不修改运行时受控模型列表。
+- `prepare-deepseek-pricing-proposal.mjs` / `prepare-deepseek-pricing-proposal.d.mts`：有界下载
+  DeepSeek 官方价格 HTML，按模型、计价表头、北京时间峰谷文字和生效日期解析语义化表格，与
+  `runtime/deepseek-pricing-baseline.json` 比较后输出候选基线、结构化差异、来源哈希和失败报告；
+  页面缺列、重复模型、时间重叠或结构无法确认时失败关闭，不在 Gateway 请求路径抓取网页。
 - `deepseek-setup.d.mts`：声明 DeepSeek Setup 的公开脚本类型。
 - `terminal-prompter.mjs`：为各通讯渠道 Setup 提供最小的终端文本、确认和可见凭据输入接口。
 - `telegram-setup.mjs`：独立完成 Telegram Bot Token 验证、一次性私聊配对、用户 ID 获取和用户配置写入；
