@@ -24,9 +24,13 @@
   Reader 清理；调用方注入领域错误，并决定是否允许缺少正文，不向 Surface 暴露该基础设施。
 - `model-pricing-catalog.ts`：实现组合根注入的远程价格目录。启动时先读取 Gateway 数据目录下的
   `0600` 可丢弃缓存，再异步刷新；固定优先读取 LiteLLM 目录，失败时回退到 Sub2API 使用的
-  `Wei-Shaw/model-price-repo` 镜像，每 6 小时条件请求一次。解析器只为新请求生成不可变 USD API
+  `Wei-Shaw/model-price-repo` 镜像，每 6 小时条件请求一次。该通用解析器只处理 DeepSeek 以外的
+  Provider，并为新请求生成不可变 USD API
   参考价格快照，支持缓存输入、Priority 与已声明的长上下文价格，不把网络刷新放入请求路径；
   有界响应读取复用 Bootstrap 基础设施，私有缓存替换复用共享 Runtime。
+- `deepseek-model-pricing.ts`：严格读取随包发布的 DeepSeek 官方人民币价格基线，按请求开始时间和
+  `Asia/Shanghai` 半开峰谷区间选价，再用当前 USD/CNY 汇率生成统一 USD 快照；没有汇率、精确模型
+  或有效计划时不回退通用目录。Provider 路由器保持该专属解析器优先，不改变历史快照或数据库格式。
 - `reference-cost-summary.ts`：在 Turn 完成时把指标库中的 Thread 历史计价与当前实时 Turn 计价
   合并；若当前 Turn 已部分延迟写入，先扣除该部分再加入完整实时值，避免累计总价重复或遗漏。
 - `subagent-completion-tracker.ts`：登记 Core 发布的子代理线程，以 App Server 自动订阅后发送的

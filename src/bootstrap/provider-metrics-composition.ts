@@ -77,7 +77,7 @@ export class ProviderMetricsComposition {
         model: metrics.model,
         serviceTier: metrics.serviceTier,
         inputTokens: metrics.inputTokens,
-        atMs: metrics.responseCompletedAtMs,
+        atMs: metrics.requestStartedAtMs,
       }) ?? null;
       this.options.writer.enqueue({
         provider,

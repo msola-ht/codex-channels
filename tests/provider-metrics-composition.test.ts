@@ -170,7 +170,7 @@ describe("ProviderMetricsComposition", () => {
       model: "deepseek-v4-flash",
       serviceTier: "default",
       inputTokens: 100,
-      atMs: 1_900,
+      atMs: 1_000,
     });
     expect(onModelTiming).toHaveBeenCalledWith(expect.objectContaining({
       pricingCurrency: "USD",

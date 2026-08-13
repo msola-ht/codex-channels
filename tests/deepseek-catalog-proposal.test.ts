@@ -25,6 +25,10 @@ describe("DeepSeek catalog proposal", () => {
     expect(inspection).toContain("persist-credentials: false");
     expect(proposal).toContain("contents: write\n      pull-requests: write");
     expect(proposal).toContain("gh pr create\n          --draft");
+    expect(inspection).toContain("prepare-deepseek-catalog-proposal.mjs");
+    expect(inspection).toContain("prepare-deepseek-pricing-proposal.mjs");
+    expect(inspection).toContain("runtime/deepseek-pricing-baseline.json");
+    expect(proposal).toContain("Apply changed candidate baselines");
     expect(workflow).not.toContain("gh pr merge");
     expect(workflow).not.toContain("npm publish");
     expect(workflow).not.toContain("service restart");

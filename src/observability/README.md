@@ -9,7 +9,7 @@
   字段进行脱敏；`err` 和进程边界复用 `safeErrorMetadata`，只保留受约束的异常类型和机器错误码，
   不保留 message、stack 或附加响应对象。
 - `request-metrics.ts`：定义与 Provider 实现无关的单次模型请求指标、存储端口、内部查询结果，以及
-  窄 `ModelPricingResolver` 端口。计价解析器按 Provider、模型、服务层级、输入规模和请求完成
+  窄 `ModelPricingResolver` 端口。计价解析器按 Provider、模型、服务层级、输入规模和请求开始
   时间返回当次价格快照；远程目录与缓存实现留在 Bootstrap，未匹配价格时计价字段保持 `NULL`。
 - `request-metrics-writer.ts`：提供 10,000 条上限的有界延迟写入队列；指标 Socket 只负责入队，
   每 10 ms 最多同步写入 1 条，关闭时排空，避免 SQLite 位于模型响应确认路径并限制单轮事件循环阻塞；
