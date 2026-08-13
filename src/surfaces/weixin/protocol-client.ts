@@ -1733,8 +1733,8 @@ async function readLimitedResponseText(
       `${operation}响应 Content-Length 无效`,
     ),
     () => new WeixinProtocolError(
-          "invalid-response",
-          `${operation}响应正文过大`,
+      "invalid-response",
+      `${operation}响应正文过大`,
     ),
   );
   return new TextDecoder().decode(content);

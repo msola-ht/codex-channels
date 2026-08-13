@@ -282,6 +282,9 @@ npm run test:coverage
 
 HTML 报告写入被 Git 忽略的 `coverage/`；当前只记录基线，不设置缺乏依据的强制覆盖率阈值。
 
+共享运行时测试覆盖私有文件原子替换；Bootstrap 基础设施测试覆盖有界 Fetch 正文的
+Content-Length 校验、流式超限取消、缺失正文策略和 Buffer 返回契约，各调用方测试继续覆盖领域错误映射与解析行为。
+
 CI 中的隔离 App Server 合同测试要求安装受支持的 Codex CLI，但不需要登录，也不会调用模型：
 
 ```bash

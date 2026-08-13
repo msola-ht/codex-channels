@@ -1,14 +1,14 @@
-import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   lstatSync,
-  mkdirSync,
   readFileSync,
 } from "node:fs";
-import { rename, unlink, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
 
 import type { Logger } from "pino";
+
+import { writePrivateFileAtomic } from "../../runtime/private-file.mjs";
+
+import { readBoundedFetchBody } from "./bounded-fetch-body.js";
 
 import type {
   ExchangeRatePort,
@@ -131,11 +131,11 @@ export class RemoteExchangeRate implements ExchangeRatePort {
         signal: controller.signal,
       });
       if (!response.ok) throw new Error(`汇率请求失败：HTTP ${response.status}`);
-      const contentLength = Number(response.headers.get("content-length"));
-      if (Number.isFinite(contentLength) && contentLength > maximumRateBytes) {
-        throw new Error("汇率响应超过大小限制");
-      }
-      const body = await readBoundedResponseBody(response);
+      const body = await readBoundedFetchBody(response, maximumRateBytes, {
+        invalidContentLength: () => new Error("汇率响应大小无效"),
+        tooLarge: () => new Error("汇率响应超过大小限制"),
+        missingBody: () => new Error("汇率响应缺少正文"),
+      });
       const usdToCny = parseUsdToCny(body);
       return {
         source: source.id,
@@ -223,53 +223,13 @@ async function persistExchangeRate(
   path: string,
   snapshot: ExchangeRateSnapshot,
 ): Promise<void> {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
   const persisted: PersistedExchangeRate = {
     version: cacheVersion,
     source: snapshot.source,
     effectiveAtMs: snapshot.effectiveAtMs,
     usdToCny: snapshot.usdToCny,
   };
-  try {
-    await writeFile(temporaryPath, `${JSON.stringify(persisted)}\n`, {
-      encoding: "utf8",
-      flag: "wx",
-      mode: 0o600,
-    });
-    await rename(temporaryPath, path);
-  } catch (error) {
-    await unlink(temporaryPath).catch(() => undefined);
-    throw error;
-  }
-}
-
-async function readBoundedResponseBody(response: Response): Promise<Uint8Array> {
-  if (!response.body) throw new Error("汇率响应缺少正文");
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    while (true) {
-      const next = await reader.read();
-      if (next.done) break;
-      total += next.value.byteLength;
-      if (total > maximumRateBytes) {
-        await reader.cancel().catch(() => undefined);
-        throw new Error("汇率响应超过大小限制");
-      }
-      chunks.push(next.value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const body = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return body;
+  await writePrivateFileAtomic(path, `${JSON.stringify(persisted)}\n`);
 }
 
 function isNodeError(error: unknown, code: string): boolean {

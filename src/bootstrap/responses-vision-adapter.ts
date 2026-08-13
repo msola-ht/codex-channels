@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 
 import type { Logger } from "pino";
 
+import { readBoundedFetchBody } from "./bounded-fetch-body.js";
+
 import {
   parseVisionRecognitionPayload,
   visionRecognitionJsonSchema,
@@ -192,29 +194,10 @@ function imageDataUrl(value: Buffer): string {
 }
 
 async function readLimitedResponseText(response: Response): Promise<string> {
-  const declared = response.headers.get("content-length");
-  if (declared !== null) {
-    const length = Number(declared);
-    if (!Number.isSafeInteger(length) || length < 0 || length > maximumResponseBytes) {
-      await response.body?.cancel().catch(() => undefined);
-      throw new Error("视觉 API 响应大小无效");
-    }
-  }
-  if (!response.body) return "";
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  while (true) {
-    const next = await reader.read();
-    if (next.done) break;
-    total += next.value.byteLength;
-    if (total > maximumResponseBytes) {
-      await reader.cancel().catch(() => undefined);
-      throw new Error("视觉 API 响应超过大小限制");
-    }
-    chunks.push(next.value);
-  }
-  return Buffer.concat(chunks).toString("utf8");
+  return (await readBoundedFetchBody(response, maximumResponseBytes, {
+    invalidContentLength: () => new Error("视觉 API 响应大小无效"),
+    tooLarge: () => new Error("视觉 API 响应超过大小限制"),
+  })).toString("utf8");
 }
 
 function parseVisionResponse(raw: string): {

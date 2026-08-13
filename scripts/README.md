@@ -71,13 +71,21 @@
   `SKILL.md` 的技能，安装/覆盖到 `~/.agents/skills/<技能名>`（可用
   `CODEX_AGENTS_SKILLS_DIR` 覆盖目标目录），支持卸载；只复制技能目录本身，不修改
   hermes 运行时的 `.skill-lock.json`。
-- `config.mjs`：`codexc config` 的交互式配置与设置菜单，覆盖配置文件中可安全编辑的参数：
+- `config.mjs`：`codexc config` 的顶层交互编排，覆盖配置文件中可安全编辑的参数：
   显示设置（操作详情、计划更新、全局价格显示方式）、系统设置（调试模式、审批超时、
   Sandbox、默认工作区与模型）、WebUI 设置（监听地址、端口、访问令牌）、指标设置
   （本地保留策略、本机接入中心并同时写入 `[metrics.sync]` 与 `[metrics.view]`、接入状态、上报参数
   `interval_seconds` / `batch_size`、停用接入）、
   Telegram 消息格式和配置路径查看；菜单修改前自动备份配置，非交互终端直接输出
   用户目录与配置文件路径。
+- `config-display-menu.mjs`：独立管理操作详情、计划更新、全局价格币种和 Telegram 消息格式；
+  只修改对应展示配置段。
+- `config-system-menu.mjs`：独立管理调试入口、审批超时、全局 Sandbox、默认 Workspace 和
+  Gateway Thread 默认模型；调试实现仍委派给 `debug-setup.mjs`。
+- `config-webui-menu.mjs`：独立管理 WebUI 监听地址、端口和访问令牌交互；保持公网监听必须配置
+  令牌的失败关闭约束，`config.mjs` 只负责把顶层选择路由到该领域菜单。
+- `config-workspace-menu.mjs`：独立管理 Workspace 的 Sandbox、审批策略与 Permission Profile；
+  保持 Sandbox 与 Permission Profile 互斥，并只写回被选择的 Workspace 配置。
 - `debug-setup.mjs`：在严格配置中原子切换 `logging.level` 的 `debug` / `info`，控制全局脱敏
   调试日志和渠道技术字段，不改写显示设置或凭据。
 - `api-provider-setup.mjs` / `api-provider-setup.d.mts`：增改或删除多个 Responses 兼容第三方 API

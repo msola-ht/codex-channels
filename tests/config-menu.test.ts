@@ -457,6 +457,13 @@ describe("Codex Connect config menu", () => {
 
   it("sets the Telegram message format when Telegram is configured", async () => {
     const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    document.telegram = {
+      bot_token: "telegram-token",
+      allowed_user_ids: [1],
+      message_format: "html",
+    };
+    writeGatewayConfig(fixture.configPath, document);
     const output: string[] = [];
     const prompts = {
       intro: vi.fn(),
@@ -476,6 +483,26 @@ describe("Codex Connect config menu", () => {
     expect(readGatewayConfig(fixture.configPath).telegram).toMatchObject({
       message_format: "rich",
     });
+  });
+
+  it("hides Telegram-only settings until a Bot token is configured", async () => {
+    const fixture = createFixture();
+    const select = vi.fn().mockResolvedValueOnce("cancel");
+
+    await runConfig({
+      environment: fixture.environment,
+      output: { write: vi.fn(), isTTY: true },
+      prompts: {
+        intro: vi.fn(),
+        select,
+        isCancel: () => false,
+        cancel: vi.fn(),
+      },
+    });
+
+    const options = select.mock.calls[0]?.[0]?.options ?? [];
+    expect(options.map((option: { value: string }) => option.value))
+      .not.toContain("message_format");
   });
 
   it("prints config paths and keeps the menu focused on settings", async () => {
