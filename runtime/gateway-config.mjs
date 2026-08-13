@@ -235,6 +235,13 @@ const telegramSchema = z.strictObject({
   }
 });
 
+const codexSchema = z.strictObject({
+  binary: z.string().min(1).default("codex"),
+  socket_path: z.string().min(1).default("runtime/codex-app-server.sock"),
+  default_model: z.string().optional(),
+  sandbox: z.enum(["read-only", "workspace-write"]).default("workspace-write"),
+});
+
 const gatewayDocumentSchema = z.strictObject({
   version: z.literal(1),
   default_workspace: z.string().trim().min(1),
@@ -247,12 +254,7 @@ const gatewayDocumentSchema = z.strictObject({
     all_proxy: z.string().optional(),
     no_proxy: z.string().optional(),
   }).optional(),
-  codex: z.strictObject({
-    binary: z.string().min(1).default("codex"),
-    socket_path: z.string().min(1).default("runtime/codex-app-server.sock"),
-    default_model: z.string().optional(),
-    sandbox: z.enum(["read-only", "workspace-write"]).default("workspace-write"),
-  }),
+  codex: codexSchema,
   approval: z.strictObject({
     timeout_seconds: z.number().int().min(30).max(3600).default(300),
   }).default({ timeout_seconds: 300 }),
@@ -363,6 +365,14 @@ export function validateGatewayConfigDocument(document) {
   const parsed = gatewayDocumentSchema.safeParse(document);
   if (!parsed.success) {
     throw new Error(z.prettifyError(parsed.error));
+  }
+  return parsed.data;
+}
+
+export function validateCodexConfigDocument(document) {
+  const parsed = codexSchema.safeParse(document);
+  if (!parsed.success) {
+    throw new Error(`config.toml 的 [codex] 配置无效：\n${z.prettifyError(parsed.error)}`);
   }
   return parsed.data;
 }

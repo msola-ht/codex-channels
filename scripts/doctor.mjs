@@ -1,12 +1,11 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import {
   existsSync,
   readFileSync,
-  realpathSync,
   statSync,
 } from "node:fs";
 import { createConnection } from "node:net";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, join } from "node:path";
 
 import WebSocket from "ws";
 
@@ -14,6 +13,10 @@ import {
   colorizeCliText,
   formatCliStatus,
 } from "../runtime/cli-presentation.mjs";
+import {
+  resolveExecutable,
+  resolveOptionalExecutable,
+} from "../runtime/executable.mjs";
 import {
   inspectAppServerSupervisor,
   sameAppServerTopology,
@@ -56,7 +59,7 @@ record(
   `${process.version}（要求 >=22.13.0）`,
 );
 if (process.platform === "linux") {
-  const bubblewrap = optionalExecutable("bwrap");
+  const bubblewrap = resolveOptionalExecutable("bwrap");
   if (bubblewrap) {
     record("Linux 沙箱", true, `bwrap 可用：${bubblewrap}`);
   } else {
@@ -543,29 +546,6 @@ function table(value) {
 
 function stringValue(value) {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function resolveExecutable(command) {
-  if (isAbsolute(command)) {
-    return realpathSync(command);
-  }
-  return realpathSync(execFileSync("/usr/bin/which", [command], { encoding: "utf8" }).trim());
-}
-
-function optionalExecutable(command) {
-  try {
-    const result = spawnSync("/usr/bin/which", [command], {
-      encoding: "utf8",
-      timeout: 3_000,
-    });
-    if (result.status !== 0) {
-      return undefined;
-    }
-    const path = result.stdout.trim();
-    return path ? realpathSync(path) : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function versionAtLeast(actual, minimum) {

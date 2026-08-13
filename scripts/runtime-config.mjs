@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, realpathSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
@@ -104,12 +104,33 @@ export function requireUserConfig(environment = process.env) {
 }
 
 export function locateUserConfig(environment = process.env) {
+  const result = locateOptionalUserConfig(environment);
+  if (result) {
+    return result;
+  }
+  const dataDir = environment.CODEX_CONNECT_CONFIG_FILE?.trim()
+    ? dirname(resolve(environment.CODEX_CONNECT_CONFIG_FILE.trim()))
+    : userDataDir(environment);
+  throw new Error(`尚未初始化，请先运行 codexc init\n配置目录：${dataDir}`);
+}
+
+export function locateOptionalUserConfig(environment = process.env) {
   const explicitConfigFile = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
   const home = userDataDir(environment);
   const configPath = explicitConfigFile ? resolve(explicitConfigFile) : join(home, "config.toml");
   const dataDir = explicitConfigFile ? dirname(configPath) : home;
-  if (!existsSync(configPath)) {
-    throw new Error(`尚未初始化，请先运行 codexc init\n配置目录：${dataDir}`);
+  try {
+    statSync(configPath);
+  } catch (error) {
+    if (
+      !explicitConfigFile
+      && error
+      && typeof error === "object"
+      && error.code === "ENOENT"
+    ) {
+      return undefined;
+    }
+    throw error;
   }
   return { configPath, dataDir };
 }

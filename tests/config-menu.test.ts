@@ -14,7 +14,6 @@ import {
 } from "../runtime/gateway-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { runCenterSettings, runConfig } from "../scripts/config.mjs";
-// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 
 const roots: string[] = [];

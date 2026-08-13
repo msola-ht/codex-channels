@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it } from "vitest";
 
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { createMetricsCenterServer, runCenterInfo } from "../scripts/metrics-center-server.mjs";
-// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 

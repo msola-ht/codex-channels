@@ -39,7 +39,6 @@ import {
   SqliteModelRequestMetricsStore,
   type ModelRequestMetricSample,
 } from "../src/observability/index.js";
-// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 
 const temporaryDirectories: string[] = [];

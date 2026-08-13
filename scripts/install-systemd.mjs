@@ -1,10 +1,10 @@
-import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
+import { resolveExecutable } from "../runtime/executable.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { serviceDefinitions } from "../runtime/service-targets.mjs";
 import { packageDir, runtimeConfig } from "./runtime-config.mjs";
@@ -82,13 +82,6 @@ for (const definition of serviceDefinitions) {
   console.log(`生成：${destination}`);
 }
 writeCliMessage("success", "systemd 用户服务配置已生成。");
-
-function resolveExecutable(command) {
-  if (isAbsolute(command)) {
-    return realpathSync(command);
-  }
-  return realpathSync(execFileSync("/usr/bin/which", [command], { encoding: "utf8" }).trim());
-}
 
 function uniquePaths(paths) {
   return [...new Set(paths)];

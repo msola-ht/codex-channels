@@ -4,9 +4,9 @@
 
 - `config-event-queue.mjs`：以有界、版本化、原子更新的队列保存待投递配置事件。
 - `config-event-queue.d.mts`：声明配置事件队列共享模块的 TypeScript 接口。
-- `gateway-config.mjs`：安全解析、严格校验 Telegram、飞书私聊与微信私聊配置，在保留已有
-  注释的前提下合并缺失的 Schema 安全默认值，并以 `0600` 权限原子写入 CLI、脚本和 Gateway
-  共享的 TOML 配置。
+- `gateway-config.mjs`：安全解析、严格校验 Telegram、飞书私聊与微信私聊配置，并提供复用同一
+  子 Schema 的严格 `[codex]` 局部校验；在保留已有注释的前提下合并缺失的 Schema 安全默认值，
+  并以 `0600` 权限原子写入 CLI、脚本和 Gateway 共享的 TOML 配置。
 - `gateway-config.d.mts`：声明共享 TOML 配置模块的 TypeScript 接口。
 - `network-proxy.mjs`：按 TOML、标准环境变量和受支持系统代理的顺序解析统一代理环境，只返回
   实际解析出的大小写代理变量；集中按目标协议选择、校验 HTTP(S) 客户端代理并匹配
@@ -37,6 +37,9 @@
 - `cli-presentation.mjs` / `cli-presentation.d.mts`：集中定义公开 CLI 的成功、失败、提示和处理
   状态标签、颜色、输出流路由和换行，Doctor 检查项另用通过；统一遵守 TTY 与 `NO_COLOR`，
   重定向输出保持纯文本。
+- `executable.mjs` / `executable.d.mts`：统一选择配置或安装环境中的 Codex 路径，并从绝对/相对
+  路径或受控 `PATH` 解析本机可执行文件；供 CLI、Bootstrap、服务安装器和 Doctor 复用，不依赖
+  平台固定位置的 `which`。
 - `project-rules.mjs`：生成并检查项目级 Codex 命令规则；Gateway 使用精确 Workspace 根目录，
   并拒绝通过符号链接把写入转移到 Workspace 外。
 - `project-rules.d.mts`：声明共享项目规则模块的 TypeScript 接口。

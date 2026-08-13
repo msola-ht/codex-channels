@@ -13,7 +13,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { runFeishuSetup } from "../scripts/feishu-setup.mjs";
-// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 
 const temporaryDirectories: string[] = [];

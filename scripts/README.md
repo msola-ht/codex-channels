@@ -4,8 +4,9 @@
 
 ## 配置与 Workspace
 
-- `runtime-config.mjs`：解析用户数据目录和运行时路径，并初始化 `.codex-connect`；为只读诊断提供
-  不修改配置权限的路径定位，启动与写入流程仍显式收紧目录和配置文件权限。
+- `runtime-config.mjs` / `runtime-config.d.mts`：解析并声明用户数据目录和运行时路径，并初始化 `.codex-connect`；为只读诊断和
+  独立项目命令提供不修改配置权限的必需/可选路径定位，可选定位只把文件不存在视为未初始化，
+  但显式指定的配置文件缺失及其他文件系统错误仍失败；启动与写入流程显式收紧目录和配置文件权限。
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
   升级到 v4；不自动迁移未知版本。
 - `metrics-database.mjs` / `metrics-database.d.mts`：实现并声明只读 `codexc metrics` 的
@@ -224,14 +225,16 @@
   监管身份与 Provider 拓扑、`initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，
   不输出完整 User-Agent、飞书
   上游响应或敏感配置内容。
-- `install-launchd.mjs`：渲染并安装 launchd plist；代理由 CLI 服务入口在每次启动时解析。
+- `install-launchd.mjs`：渲染并安装 launchd plist；Codex 路径复用共享可执行文件解析，代理由 CLI
+  服务入口在每次启动时解析。
 - `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载四个 launchd 服务；启停、
   重启、状态和日志支持 `gateway`、`app-server`、`webui`、`center`、`all` 目标，
   WebUI 与指标中心独立不并入 `all`，
   日常重启默认只更新 Gateway；模板为 App Server 与 Gateway 注入各自服务角色，公开 CLI 据此
   拒绝 App Server 内的自重启；
   检测到不支持的旧标签时明确拒绝启动。
-- `install-systemd.mjs`：渲染并安装 Linux systemd 用户服务 unit；代理由 CLI 服务入口在每次启动时解析。
+- `install-systemd.mjs`：渲染并安装 Linux systemd 用户服务 unit；Codex 路径复用共享可执行文件
+  解析，代理由 CLI 服务入口在每次启动时解析。
 - `service-target-query.mjs`：把共享服务目录中的 systemd unit 或 launchd label 逐行提供给平台
   控制脚本，避免 Shell 维护第二份服务标识。
 - `cli-status.mjs`：让 systemd/launchd 控制脚本复用公开 CLI 的成功、失败、提示和处理状态前缀、

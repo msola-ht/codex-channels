@@ -25,7 +25,6 @@ import {
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import { runApiProviderSetup } from "../scripts/api-provider-setup.mjs";
-// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 
 const roots: string[] = [];

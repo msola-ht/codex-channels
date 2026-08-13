@@ -12,7 +12,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { runDebugSetup } from "../scripts/debug-setup.mjs";
-// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 
 const roots: string[] = [];

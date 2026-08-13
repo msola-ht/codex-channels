@@ -10,7 +10,6 @@ import { join } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { runWeixinSetup } from "../scripts/weixin-setup.mjs";
