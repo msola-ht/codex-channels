@@ -15,30 +15,19 @@ export function formatTelegramExpandableQuotePanelChunks(
   const titleHtml = `<b>${escapeTelegramHtml(title)}</b>`;
   const quotePrefix = "<blockquote expandable>";
   const quoteSuffix = "</blockquote>";
-  const remainingLabelHtml = "<i>其余内容（点击展开）</i>";
   const quoteOverhead = Array.from(`${quotePrefix}${quoteSuffix}`).length;
-  const { preview, remaining } = splitExpandableQuotePreview(detail);
-  if (!remaining) {
-    return [
-      `${titleHtml}\n\n${quotePrefix}${escapeTelegramHtml(preview)}${quoteSuffix}`,
-    ];
-  }
-
-  const previewHtml = `<blockquote>${escapeTelegramHtml(preview)}</blockquote>`;
   const firstDetailLimit = Math.max(
     1,
     limit
       - Array.from(titleHtml).length
-      - Array.from(previewHtml).length
-      - Array.from(remainingLabelHtml).length
-      - 5
+      - 2
       - quoteOverhead,
   );
   const remainingDetailLimit = Math.max(1, limit - quoteOverhead);
-  const chunks = splitEscapedText(remaining, firstDetailLimit, remainingDetailLimit);
+  const chunks = splitEscapedText(detail, firstDetailLimit, remainingDetailLimit);
 
   return chunks.map((chunk, index) => [
-    ...(index === 0 ? [titleHtml, "", previewHtml, "", remainingLabelHtml] : []),
+    ...(index === 0 ? [titleHtml, ""] : []),
     `${quotePrefix}${escapeTelegramHtml(chunk)}${quoteSuffix}`,
   ].join("\n"));
 }
@@ -178,30 +167,6 @@ function splitEscapedText(
     }
   }
   return chunks;
-}
-
-function splitExpandableQuotePreview(
-  text: string,
-  maxLines = 3,
-  maxCharacters = 150,
-): { preview: string; remaining: string } {
-  const characters = Array.from(text);
-  let boundary = 0;
-  let lines = 1;
-  while (boundary < characters.length && boundary < maxCharacters) {
-    if (characters[boundary] === "\n") {
-      if (lines >= maxLines) {
-        break;
-      }
-      lines += 1;
-    }
-    boundary += 1;
-  }
-  const remainingStart = characters[boundary] === "\n" ? boundary + 1 : boundary;
-  return {
-    preview: characters.slice(0, boundary).join(""),
-    remaining: characters.slice(remainingStart).join(""),
-  };
 }
 
 function largestEscapedPrefix(characters: string[], limit: number): number {
