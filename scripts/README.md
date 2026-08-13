@@ -234,6 +234,8 @@
   上游响应或敏感配置内容。
 - `install-launchd.mjs`：渲染并安装 launchd plist；Codex 路径复用共享可执行文件解析，代理由 CLI
   服务入口在每次启动时解析。
+- `service-install-context.mjs`：systemd 与 launchd 安装器共用的配置、默认 Workspace、主 Socket、
+  Codex/Node 可执行文件及服务 PATH 解析；运行目录统一创建为 `0700`，平台模板和转义仍各自维护。
 - `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载四个 launchd 服务；启停、
   重启、状态和日志支持 `gateway`、`app-server`、`webui`、`center`、`all` 目标，
   WebUI 与指标中心独立不并入 `all`，

@@ -1,49 +1,37 @@
-import { chmodSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, dirname, isAbsolute, join } from "node:path";
+import { join } from "node:path";
 
-import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
-import { resolveExecutable } from "../runtime/executable.mjs";
-import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { serviceDefinitions } from "../runtime/service-targets.mjs";
-import { packageDir, runtimeConfig } from "./runtime-config.mjs";
-import { readWorkspaceConfig } from "./workspace-config.mjs";
+import { prepareServiceInstallContext } from "./service-install-context.mjs";
 
 if (process.platform !== "darwin") {
   throw new Error("launchd 安装仅支持 macOS");
 }
-const projectDir = packageDir;
-const runtime = runtimeConfig();
-const document = readGatewayConfig(runtime.configPath);
-const codex = table(document.codex);
-const { defaultWorkspace } = readWorkspaceConfig(document);
-const workdir = defaultWorkspace.cwd;
-const socketPath = resolvePrimaryAppServerSocketPath(document, runtime.dataDir);
-if (!isAbsolute(socketPath)) {
-  throw new Error("CODEX_SOCKET_PATH 必须是绝对路径");
-}
-const runtimeDir = dirname(socketPath);
-mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
-chmodSync(runtimeDir, 0o700);
-
-const codexBinary = resolveExecutable(stringValue(codex.binary) || "codex");
-const nodeBinary = realpathSync(process.execPath);
-const launchdPath = uniquePaths([
-  dirname(nodeBinary),
-  dirname(codexBinary),
+const {
+  cliEntry,
+  codexBinary,
+  executablePath: launchdPath,
+  nodeBinary,
+  packageDir: projectDir,
+  runtime,
+  runtimeDir,
+  socketPath,
+  workdir,
+} = prepareServiceInstallContext([
   "/opt/homebrew/bin",
   "/usr/local/bin",
   "/usr/bin",
   "/bin",
   "/usr/sbin",
   "/sbin",
-]).join(delimiter);
+]);
 const values = {
   PROJECT_DIR: projectDir,
   CONFIG_DIR: runtime.dataDir,
   CONFIG_PATH: runtime.configPath,
-  CLI_ENTRY: join(projectDir, "bin", "codexc.mjs"),
+  CLI_ENTRY: cliEntry,
   WORKDIR: workdir,
   RUNTIME_DIR: runtimeDir,
   SOCKET_PATH: socketPath,
@@ -65,18 +53,6 @@ for (const definition of serviceDefinitions) {
   console.log(`生成：${destination}`);
 }
 writeCliMessage("success", "launchd 配置已生成。");
-
-function uniquePaths(paths) {
-  return [...new Set(paths)];
-}
-
-function table(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-}
-
-function stringValue(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
 
 function xmlEscape(value) {
   return value

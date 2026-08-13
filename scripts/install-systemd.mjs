@@ -1,52 +1,40 @@
-import { chmodSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 
-import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
-import { resolveExecutable } from "../runtime/executable.mjs";
-import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { serviceDefinitions } from "../runtime/service-targets.mjs";
-import { packageDir, runtimeConfig } from "./runtime-config.mjs";
-import { readWorkspaceConfig } from "./workspace-config.mjs";
+import { prepareServiceInstallContext } from "./service-install-context.mjs";
 
 if (process.platform !== "linux") {
   throw new Error("systemd 安装仅支持 Linux");
 }
 
-const runtime = runtimeConfig();
-const document = readGatewayConfig(runtime.configPath);
-const codex = table(document.codex);
-const { defaultWorkspace } = readWorkspaceConfig(document);
-const socketPath = resolvePrimaryAppServerSocketPath(document, runtime.dataDir);
-if (!isAbsolute(socketPath)) {
-  throw new Error("CODEX_SOCKET_PATH 必须是绝对路径");
-}
-
-const runtimeDir = dirname(socketPath);
-mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
-chmodSync(runtimeDir, 0o700);
-
-const codexBinary = resolveExecutable(stringValue(codex.binary) || "codex");
-const nodeBinary = realpathSync(process.execPath);
-const systemdPath = uniquePaths([
-  dirname(nodeBinary),
-  dirname(codexBinary),
+const {
+  cliEntry,
+  codexBinary,
+  executablePath: systemdPath,
+  nodeBinary,
+  packageDir,
+  runtime,
+  socketPath,
+  workdir,
+} = prepareServiceInstallContext([
   "/usr/local/bin",
   "/usr/bin",
   "/bin",
   "/usr/local/sbin",
   "/usr/sbin",
   "/sbin",
-]).join(delimiter);
+]);
 const argumentValues = {
   SOCKET_URI: `unix://${socketPath}`,
   NODE_BINARY: nodeBinary,
   CODEX_BINARY: codexBinary,
-  CLI_ENTRY: join(packageDir, "bin", "codexc.mjs"),
+  CLI_ENTRY: cliEntry,
 };
 const directiveValues = {
-  WORKDIR: defaultWorkspace.cwd,
+  WORKDIR: workdir,
   CONFIG_DIR: runtime.dataDir,
 };
 const environmentValues = {
@@ -82,18 +70,6 @@ for (const definition of serviceDefinitions) {
   console.log(`生成：${destination}`);
 }
 writeCliMessage("success", "systemd 用户服务配置已生成。");
-
-function uniquePaths(paths) {
-  return [...new Set(paths)];
-}
-
-function table(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-}
-
-function stringValue(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
 
 function systemdArgument(value) {
   return `"${systemdEscape(value)}"`;
