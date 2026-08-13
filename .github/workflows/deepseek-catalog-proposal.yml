@@ -1,0 +1,170 @@
+name: DeepSeek catalog proposal
+
+on:
+  schedule:
+    - cron: "47 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deepseek-catalog-proposal
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    name: Inspect official model catalog
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      changed: ${{ steps.catalog.outputs.changed }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Inspect official catalog
+        id: catalog
+        continue-on-error: true
+        env:
+          REPORT_DIRECTORY: ${{ runner.temp }}/deepseek-catalog
+        run: |
+          mkdir -p "$REPORT_DIRECTORY/logs"
+          set +e
+          set -o pipefail
+          node scripts/prepare-deepseek-catalog-proposal.mjs \
+            scripts/deepseek-catalog-baseline.json \
+            "$REPORT_DIRECTORY" 2>&1 | tee "$REPORT_DIRECTORY/logs/inspect.log"
+          catalog_status="${PIPESTATUS[0]}"
+          set -e
+          if [[ -f "$REPORT_DIRECTORY/result.json" ]]; then
+            changed="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).changed' "$REPORT_DIRECTORY/result.json")"
+            echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$catalog_status"
+
+      - name: Publish job summary
+        if: always()
+        run: |
+          if [[ -f "${{ runner.temp }}/deepseek-catalog/summary.md" ]]; then
+            cat "${{ runner.temp }}/deepseek-catalog/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "DeepSeek 目录检查未生成摘要。" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload inspection report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: deepseek-catalog-${{ github.run_id }}
+          path: ${{ runner.temp }}/deepseek-catalog/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Fail when catalog inspection failed
+        if: always() && steps.catalog.outcome != 'success'
+        run: exit 1
+
+  propose:
+    name: Create draft catalog pull request
+    needs: inspect
+    if: needs.inspect.result == 'success' && needs.inspect.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Find existing draft proposal
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_TITLE: 更新 DeepSeek 官方模型目录
+        run: |
+          existing_url="$(
+            gh pr list \
+              --state open \
+              --search "$PR_TITLE in:title" \
+              --json url \
+              --jq '.[0].url // ""'
+          )"
+          echo "url=$existing_url" >> "$GITHUB_OUTPUT"
+          if [[ -n "$existing_url" ]]; then
+            echo "已存在目录提案：$existing_url"
+          fi
+
+      - name: Download inspected catalog
+        if: steps.existing.outputs.url == ''
+        uses: actions/download-artifact@v8
+        with:
+          name: deepseek-catalog-${{ github.run_id }}
+          path: ${{ runner.temp }}/deepseek-catalog
+
+      - name: Apply candidate baseline
+        if: steps.existing.outputs.url == ''
+        run: cp "${{ runner.temp }}/deepseek-catalog/candidate-baseline.json" scripts/deepseek-catalog-baseline.json
+
+      - name: Commit and push proposal branch
+        if: steps.existing.outputs.url == ''
+        env:
+          BRANCH_NAME: automation/deepseek-catalog-${{ github.run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH_NAME"
+          git add scripts/deepseek-catalog-baseline.json
+          git commit -m "更新 DeepSeek 官方模型目录基线"
+          gh auth setup-git
+          git push --set-upstream origin "$BRANCH_NAME"
+
+      - name: Create draft pull request
+        if: steps.existing.outputs.url == ''
+        env:
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          BRANCH_NAME: automation/deepseek-catalog-${{ github.run_id }}
+          GH_TOKEN: ${{ github.token }}
+          PR_BODY: |
+            这是由 DeepSeek 官方模型目录检查生成的 Draft PR。
+
+            Artifact 保存了官方脚本 SHA-256、完整模型指纹的变化分类、候选基线和下载日志。自动阶段只更新审查基线，不修改运行时受控模型列表。
+
+            合并前仍需由 Codex：
+
+            - 对照 DeepSeek 官方文档确认新增、移除和参数变化的含义；
+            - 审查模型输入模态、上下文、思考等级、搜索、并行工具和最低客户端版本；
+            - 仅在确认项目兼容后修改 `runtime/model-provider-definitions.mjs`；
+            - 同步 `docs/deepseek.md`、`docs/index.md` 和相关测试；
+            - 运行完整提交门禁并审查最终差异。
+
+            本工作流不会自动转为 Ready、合并、发布或部署。
+
+            检查运行：https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: >-
+          gh pr create
+          --draft
+          --base "$BASE_BRANCH"
+          --head "$BRANCH_NAME"
+          --title "更新 DeepSeek 官方模型目录"
+          --body "$PR_BODY"

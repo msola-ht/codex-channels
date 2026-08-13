@@ -50,8 +50,9 @@ DeepSeek Provider。
 恢复操作把文件还原到首次备份状态，会覆盖安装后对 `~/.codex/config.toml` 的修改。安装前已存在
 的同路径角色文件会原样恢复，原来不存在时则删除 Setup 生成的角色文件。
 
-当前 DeepSeek 官方只声明 `deepseek-v4-flash` 支持 Codex。`deepseek-v4-pro` 会显示为暂不可用，
-在官方支持前不能选择。
+当前 DeepSeek 官方目录声明 `deepseek-v4-flash` 和 `deepseek-v4-pro` 均支持 Codex；两者都可通过
+`/model` 选择，默认模型仍是 Flash。Setup 每次安装时下载最新官方目录，项目的每日目录提案工作流
+还会比较模型完整指纹与关键审查字段；发现变化时只创建 Draft PR，不会自动开放未知模型、发布或部署。
 
 当前 Responses API 只支持文字输入。DeepSeek 会把收到的图片替换成占位文本而不是报错，因此
 Gateway 会在创建或追加 Turn 前检查模型能力：未启用外部图片识别时明确拒绝图片并提示切换到
@@ -59,7 +60,7 @@ Gateway 会在创建或追加 Turn 前检查模型能力：未启用外部图片
 
 ## 网页搜索
 
-DeepSeek（当前 `deepseek-v4-flash` + Codex 0.147.0）支持网页搜索，且不依赖 OpenAI：
+DeepSeek（当前 `deepseek-v4-flash`、`deepseek-v4-pro` + Codex 0.147.0）支持网页搜索，且不依赖 OpenAI：
 
 - DeepSeek API 会向模型提供名为 `search` 的搜索工具；Codex 侧统一以 `web_search` item
   回传（`query`、`action` 和结构化 `results`）。实测能返回带标题、URL、摘要和发布日期的

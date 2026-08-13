@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -8,7 +8,29 @@ import { deepseekProviderDefinition } from "../runtime/model-provider-definition
 import { loadDeepseekModelOptions } from "../src/codex-client/deepseek-catalog.js";
 
 describe("DeepSeek model catalog", () => {
-  it("shows Pro as unavailable while keeping Flash selectable", () => {
+  it("keeps every selectable provider model in the reviewed API catalog baseline", () => {
+    const baseline = JSON.parse(readFileSync(
+      join(process.cwd(), "scripts/deepseek-catalog-baseline.json"),
+      "utf8",
+    )) as {
+      models: Array<{
+        slug: string;
+        supportedInApi: boolean;
+        visibility: string;
+      }>;
+    };
+
+    for (const definition of deepseekProviderDefinition.models) {
+      if (!definition.available) continue;
+      expect(baseline.models).toContainEqual(expect.objectContaining({
+        slug: definition.slug,
+        supportedInApi: true,
+        visibility: "list",
+      }));
+    }
+  });
+
+  it("makes the official Flash and Pro models selectable", () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-deepseek-catalog-"));
     mkdirSync(codexHome, { recursive: true });
     writeFileSync(join(codexHome, "deepseek.models.json"), JSON.stringify({
@@ -26,11 +48,7 @@ describe("DeepSeek model catalog", () => {
 
     expect(models).toMatchObject([
       { model: "deepseek-v4-flash", available: true },
-      {
-        model: "deepseek-v4-pro",
-        available: false,
-        unavailableReason: "DeepSeek 官方暂未支持该模型接入 Codex",
-      },
+      { model: "deepseek-v4-pro", available: true },
     ]);
   });
 

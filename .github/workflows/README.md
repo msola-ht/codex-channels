@@ -25,6 +25,11 @@
   生成协议，并使用与正式预览相同的独立兼容检查和报告。成功或失败都会上传完整现场，失败后
   任务标红；Release 解析失败同样保留 `unresolved` 报告；结果只作前向兼容预警，不进入正式
   版本基线。
+- `deepseek-catalog-proposal.yml`：每日及手动下载但不执行 DeepSeek 官方 Codex 安装脚本，复用
+  Setup 的有限重试、响应大小和重定向校验，比较模型完整指纹与有限审查字段。检查 Job 只读；检查
+  成功时上传候选基线、结构化结果、摘要和日志，下载或解析失败时仍上传失败结果、摘要和日志。发现
+  变化且检查成功后，独立的最小写权限 Job 更新审查基线并
+  创建 Draft PR。未知模型不会自动加入运行时受控列表，工作流也不自动转为 Ready、合并、发布或部署。
 - `publish.yml`：推送与 Codex CLI 协议版本一致的 `v*` Tag 后，先确认 Tag 所在提交已经把 README
   正式版本与安装命令同步到同一版本并执行完整提交检查，再使用 npm Trusted Publishing 发布公开包，
   不保存长期 npm Token。README 未完成正式发布提交时失败关闭；合并升级 PR 或普通 push 不会发布。
@@ -34,9 +39,9 @@
 
 启用发布工作流前，需要在 npm 包的 Trusted Publisher 设置中绑定 GitHub 仓库 `msola-ht/codex-channels`、工作流文件 `publish.yml`，并允许 `npm publish`。工作流使用 GitHub OIDC 和 `id-token: write` 获取短期凭据。
 
-除正式升级提案的 Draft PR Job 外，工作流只申请 `contents: read`，
+除 Codex 正式升级和 DeepSeek 目录提案的 Draft PR Job 外，工作流只申请 `contents: read`，
 Checkout 不保留写入凭据。Draft PR Job 单独申请 `contents: write` 和 `pull-requests: write`，
-只用于推送自动化升级分支和创建提案。隔离 App Server 合同测试不读取 Runner
+只用于推送对应自动化分支和创建提案。隔离 App Server 合同测试不读取 Runner
 登录态、不调用模型；依赖账号、模型列表或指定 fixture Thread 的完整真实集成测试仍只在本机按需执行。
 
 仓库 Settings → Actions → General 需要允许 GitHub Actions 创建 Pull Request；默认工作流权限

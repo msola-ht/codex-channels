@@ -98,9 +98,11 @@
 - 官方模型目录到稳定 Application 模型选项的映射、不可见项过滤、必需字段失败关闭，模型、
   思考等级和 Fast 的 Thread 覆盖、Codex 用户级模型/思考等级/Fast 默认值及受控 agents 设置持久化、共享客户端完整或残缺设置
   通知、Thread 失效通知及 Gateway/CLI 连接恢复；DeepSeek 官方脚本目录提取、两种 Setup 模式、
-  API Key 输出隔离、下载失败不修改、Flash 可选与 Pro 可见但不可选，以及跨 Provider 新建
+  API Key 输出隔离、下载失败不修改、Flash 与 Pro 可选，以及跨 Provider 新建
   Thread、原 Thread 可恢复、精确 Provider 路由、设置通知不覆盖不可变 Provider，以及在文本模型
   上创建或追加 Turn 前拒绝图片输入。
+- DeepSeek 目录提案的规范化基线、完整模型指纹变化检测，以及官方目录无法解析时仍保留结构化
+  失败结果和摘要且不生成候选基线。
 - Provider 账户能力的编译期唯一注册、未知 Provider 不回退、OpenAI Token 用量与单桶/多桶额度
   到稳定 Application 摘要的映射、重置券数量，以及 DeepSeek 私有配置读取、统一代理、官方余额
   Schema 裁剪、响应上限和错误脱敏；Thread Token/上下文对 Provider 通用，OpenAI Fast 与周限
