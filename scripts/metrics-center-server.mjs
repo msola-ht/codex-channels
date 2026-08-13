@@ -15,7 +15,7 @@ import { DatabaseSync } from "node:sqlite";
 import * as clackPrompts from "@clack/prompts";
 
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
-import { runCenterSettings } from "./config.mjs";
+import { runCenterSettings } from "./metrics-config-menu.mjs";
 import { parseIngestPayload } from "./metrics-center-payload.mjs";
 import {
   DEFAULT_HOST,
