@@ -12,25 +12,27 @@ import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
-import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { providerMetricsSocketPath } from "../runtime/model-provider-runtime.mjs";
 import { serviceIdentifiers } from "../runtime/service-targets.mjs";
 import {
   acquireRequestMetricsDatabaseLock,
   modelRequestMetricsSchemaVersion,
-  requestMetricsDatabasePath,
-  SqliteModelRequestMetricsStore,
 } from "../dist/observability/index.js";
-import {
-  locateUserConfig,
-  resolveConfiguredPath,
-} from "./runtime-config.mjs";
 import { resolveMetricsCenterSettings } from "./metrics-center-settings.mjs";
 import {
+  inspectMetricsDatabase,
+  readMetricsExport,
+  readMetricsReport,
+  readMetricsRun,
+  readMetricsThreads,
+  readMetricsTurns,
+  requireCompatibleMetricsDatabase,
+  resolveMetricsDatabaseContext,
+} from "./metrics-database-access.mjs";
+import { resolveConfiguredPath } from "./runtime-config.mjs";
+import {
   assertExportFormat,
-  metricsDimension,
-  metricsRangeOptions,
   parseCleanupOptions,
   parseLocalDate,
   parseMetricsOptions,
@@ -53,36 +55,15 @@ import {
 } from "./metrics-output-renderer.mjs";
 
 export { metricsRange } from "./metrics-command-options.mjs";
-
-export function inspectMetricsDatabase(environment = process.env) {
-  const databasePath = resolveMetricsDatabasePath(environment);
-  if (!existsSync(databasePath)) {
-    return {
-      compatible: false,
-      count: null,
-      databasePath,
-      exists: false,
-      schemaVersion: null,
-    };
-  }
-
-  const database = new DatabaseSync(databasePath, { readOnly: true });
-  try {
-    const schemaVersion = readSchemaVersion(database);
-    const count = hasTable(database, "model_request_metrics")
-      ? Number(database.prepare("SELECT COUNT(*) AS count FROM model_request_metrics").get()?.count)
-      : null;
-    return {
-      compatible: schemaVersion === modelRequestMetricsSchemaVersion,
-      count,
-      databasePath,
-      exists: true,
-      schemaVersion,
-    };
-  } finally {
-    database.close();
-  }
-}
+export {
+  inspectMetricsDatabase,
+  readMetricsExport,
+  readMetricsReport,
+  readMetricsRun,
+  readMetricsThreads,
+  readMetricsTurns,
+  readWeeklyQuota,
+} from "./metrics-database-access.mjs";
 
 export function resetMetricsDatabase(
   environment = process.env,
@@ -487,7 +468,7 @@ export function cleanupMetricsDatabase(environment = process.env, options = {}) 
       "Gateway 仍在运行；请先执行 codexc service stop gateway，或使用 --restart-gateway 自动停止并重启",
     );
   }
-  const databasePath = requireReadableMetricsDatabase(environment);
+  const databasePath = requireCompatibleMetricsDatabase(environment);
   checkpoint(databasePath);
   const backupPath = `${databasePath}.cleanup-${backupTimestamp(new Date())}.bak`;
   copyFileSync(databasePath, backupPath);
@@ -678,224 +659,18 @@ function runServiceAction(target, action, environment) {
   }
 }
 
-export function readMetricsReport(environment = process.env, options = {}) {
-  const range = metricsRangeOptions(options, options.nowMs ?? Date.now());
-  const dimension = metricsDimension(options.group ?? "models");
-  const databasePath = requireReadableMetricsDatabase(environment);
-  const store = new SqliteModelRequestMetricsStore(
-    databasePath,
-    range.endAtMs,
-    { readOnly: true },
-  );
-  try {
-    return {
-      format: "codex-connect-request-metrics-report",
-      version: 2,
-      generatedAt: new Date(range.endAtMs).toISOString(),
-      range,
-      weeklyQuota: readWeeklyQuota(store, range.endAtMs),
-      report: store.aggregate({
-        dimension,
-        startAtMs: range.startAtMs,
-        endAtMs: range.endAtMs,
-      }),
-      errors: store.errors({
-        startAtMs: range.startAtMs,
-        endAtMs: range.endAtMs,
-      }),
-    };
-  } finally {
-    store.close();
-  }
-}
-
-export function readMetricsExport(environment = process.env, options = {}) {
-  const range = metricsRangeOptions(options, options.nowMs ?? Date.now());
-  const threadId = options.threadId;
-  const databasePath = requireReadableMetricsDatabase(environment);
-  const store = new SqliteModelRequestMetricsStore(
-    databasePath,
-    range.endAtMs,
-    { readOnly: true },
-  );
-  try {
-    const records = [];
-    let offset = 0;
-    do {
-      const page = store.page({
-        startAtMs: range.startAtMs,
-        endAtMs: range.endAtMs,
-        offset,
-        limit: 500,
-        sortKey: "recordedAtMs",
-        sortDirection: "asc",
-      });
-      records.push(
-        ...(threadId === undefined
-          ? page.records
-          : page.records.filter((record) => record.threadId === threadId)),
-      );
-      offset = page.nextOffset ?? -1;
-    } while (offset >= 0);
-    return {
-      format: "codex-connect-request-metrics-export",
-      version: 2,
-      generatedAt: new Date(range.endAtMs).toISOString(),
-      range,
-      weeklyQuota: readWeeklyQuota(store, range.endAtMs),
-      records,
-    };
-  } finally {
-    store.close();
-  }
-}
-
-export function readWeeklyQuota(store, nowMs) {
-  const window = store.latestWeeklyQuota("openai", nowMs);
-  if (window === null) return null;
-  const estimate = store.weeklyQuotaEstimate({
-    provider: "openai",
-    limitId: window.limitId,
-    resetsAt: window.resetsAt,
-    nowMs,
-  });
-  const usedPercent = window.usedPercentMillionths / 1_000_000;
-  return {
-    limitId: window.limitId,
-    planType: window.planType,
-    usedPercent,
-    remainingPercent: Math.max(0, 100 - usedPercent),
-    resetsAt: window.resetsAt,
-    observedAtMs: window.observedAtMs,
-    estimate: estimate === null ? null : {
-      observedDeltaPercent: estimate.observedDeltaPercentMillionths / 1_000_000,
-      intervalCount: estimate.intervalCount,
-      requestCount: estimate.requestCount,
-      unsuccessfulRequestCount: estimate.unsuccessfulRequestCount,
-      pricedRequestCount: estimate.pricedRequestCount,
-      inputTokensPerPercent: perQuotaPercent(
-        estimate.inputTokens,
-        estimate.observedDeltaPercentMillionths,
-      ),
-      outputTokensPerPercent: perQuotaPercent(
-        estimate.outputTokens,
-        estimate.observedDeltaPercentMillionths,
-      ),
-      totalTokensPerPercent: perQuotaPercent(
-        estimate.totalTokens,
-        estimate.observedDeltaPercentMillionths,
-      ),
-      pricingCurrency: estimate.pricingCurrency,
-      costPerPercentNanos: estimate.totalCostNanos === null
-        ? null
-        : perQuotaPercent(
-            estimate.totalCostNanos,
-            estimate.observedDeltaPercentMillionths,
-          ),
-    },
-  };
-}
-
-function perQuotaPercent(value, deltaMillionths) {
-  return Math.round(value / (deltaMillionths / 1_000_000));
-}
-
-export function readMetricsRun(environment = process.env, threadId) {
-  const databasePath = requireReadableMetricsDatabase(environment);
-  const store = new SqliteModelRequestMetricsStore(
-    databasePath,
-    undefined,
-    { readOnly: true },
-  );
-  try {
-    const summary = store.threadSummary(threadId);
-    return {
-      format: "codex-connect-request-metrics-run",
-      version: 1,
-      generatedAt: new Date().toISOString(),
-      threadId,
-      latestTurn: summary.latestTurn,
-      threadAggregate: summary.threadAggregate,
-      latestDirectApi: summary.latestDirectApi,
-    };
-  } finally {
-    store.close();
-  }
-}
-
-export function readMetricsThreads(environment = process.env) {
-  const databasePath = requireReadableMetricsDatabase(environment);
-  const store = new SqliteModelRequestMetricsStore(
-    databasePath,
-    undefined,
-    { readOnly: true },
-  );
-  try {
-    return {
-      format: "codex-connect-request-metrics-threads",
-      version: 1,
-      generatedAt: new Date().toISOString(),
-      threads: store.threadList(),
-    };
-  } finally {
-    store.close();
-  }
-}
-
-export function readMetricsTurns(environment = process.env, threadId) {
-  const databasePath = requireReadableMetricsDatabase(environment);
-  const store = new SqliteModelRequestMetricsStore(
-    databasePath,
-    undefined,
-    { readOnly: true },
-  );
-  try {
-    return {
-      format: "codex-connect-request-metrics-turns",
-      version: 1,
-      generatedAt: new Date().toISOString(),
-      threadId,
-      turns: store.threadTurnSummaries(threadId),
-    };
-  } finally {
-    store.close();
-  }
-}
-
-function requireReadableMetricsDatabase(environment) {
-  const status = inspectMetricsDatabase(environment);
-  if (!status.exists) throw new Error(`指标数据库尚未创建：${status.databasePath}`);
-  if (!status.compatible) {
-    throw new Error(status.schemaVersion === 3
-      ? "模型请求指标数据库版本不兼容；请停止 Gateway 后运行 codexc metrics upgrade"
-      : "模型请求指标数据库版本不兼容；请停止 Gateway 后运行 codexc metrics reset");
-  }
-  return status.databasePath;
-}
-
-function resolveMetricsDatabasePath(environment) {
-  return resolveMetricsRuntime(environment).databasePath;
-}
-
 function resolveMetricsRuntime(environment) {
-  const { configPath, dataDir } = locateUserConfig(environment);
-  const document = readGatewayConfig(configPath);
-  const storage = isRecord(document.storage) ? document.storage : {};
+  const { databasePath, dataDir, document } = resolveMetricsDatabaseContext(environment);
   const codex = isRecord(document.codex) ? document.codex : {};
   const metrics = isRecord(document.metrics) ? document.metrics : {};
   const metricsStorage = isRecord(metrics.storage) ? metrics.storage : {};
-  const stateDatabasePath = resolveConfiguredPath(
-    typeof storage.database_path === "string" ? storage.database_path : undefined,
-    dataDir,
-    "data/gateway.sqlite3",
-  );
   const appServerSocketPath = resolveConfiguredPath(
     typeof codex.socket_path === "string" ? codex.socket_path : undefined,
     dataDir,
     "runtime/codex-app-server.sock",
   );
   return {
-    databasePath: requestMetricsDatabasePath(stateDatabasePath),
+    databasePath,
     retentionDays: positiveInteger(
       typeof metricsStorage.retention_days === "number"
         ? metricsStorage.retention_days
@@ -915,21 +690,6 @@ function resolveMetricsRuntime(environment) {
 function metricsSyncStatePath(environment) {
   const runtime = resolveMetricsRuntime(environment);
   return join(dirname(runtime.databasePath), "metrics-sync-state.json");
-}
-
-function readSchemaVersion(database) {
-  if (!hasTable(database, "schema_metadata")) return null;
-  const row = database.prepare(`
-    SELECT value FROM schema_metadata WHERE name = 'schema_version'
-  `).get();
-  const value = Number(row?.value);
-  return Number.isSafeInteger(value) && value >= 0 ? value : null;
-}
-
-function hasTable(database, name) {
-  return database.prepare(`
-    SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?
-  `).get(name) !== undefined;
 }
 
 function checkpoint(databasePath) {

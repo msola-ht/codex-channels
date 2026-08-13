@@ -99,6 +99,7 @@ try {
     "launchd/com.hegenai.codex-webui.plist.template",
     "launchd/com.hegenai.codex-center.plist.template",
     "scripts/install-systemd.mjs",
+    "scripts/metrics-database-access.mjs",
     "scripts/metrics-database.mjs",
     "scripts/metrics-center-payload.mjs",
     "scripts/metrics-center-schema.sql",
