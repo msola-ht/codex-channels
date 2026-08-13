@@ -8,9 +8,11 @@ export async function readBoundedFetchBody(
   if (rawLength !== null) {
     const contentLength = Number(rawLength);
     if (!Number.isSafeInteger(contentLength) || contentLength < 0) {
+      await response.body?.cancel().catch(() => undefined);
       throw invalidContentLength();
     }
     if (contentLength > maximumBytes) {
+      await response.body?.cancel().catch(() => undefined);
       throw tooLarge();
     }
   }
@@ -28,7 +30,7 @@ export async function readBoundedFetchBody(
       }
       bytes += chunk.value.byteLength;
       if (bytes > maximumBytes) {
-        await reader.cancel();
+        await reader.cancel().catch(() => undefined);
         throw tooLarge();
       }
       chunks.push(Buffer.from(chunk.value));

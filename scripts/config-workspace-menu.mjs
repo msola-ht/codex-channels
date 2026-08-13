@@ -2,6 +2,10 @@ import {
   readGatewayConfig,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
+import {
+  applyWorkspacePermissionUpdate,
+  WorkspacePermissionConflictError,
+} from "../runtime/workspace-permission.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 
 export async function runWorkspaceSettings({
@@ -66,6 +70,7 @@ export async function runWorkspaceSettings({
     if (prompts.isCancel(field) || field === "back") {
       return { action: "back" };
     }
+    let update;
     if (field === "sandbox") {
       const selected = await prompts.select({
         message: "沙箱模式",
@@ -78,19 +83,11 @@ export async function runWorkspaceSettings({
           { value: "clear", label: "清除（使用全局）", hint: "回退 codex.sandbox" },
         ],
       });
-      if (prompts.isCancel(selected) || selected === "clear") {
-        if (prompts.isCancel(selected)) continue;
-        delete entry.sandbox;
-      } else {
-        if (selected !== "read-only" && selected !== "workspace-write" && selected !== "danger-full-access") {
-          throw new Error(`未知沙箱模式：${String(selected)}`);
-        }
-        if (entry.permissions !== undefined) {
-          output.write("permissions 与 sandbox 互斥，请先清除权限 Profile。\n");
-          continue;
-        }
-        entry.sandbox = selected;
+      if (prompts.isCancel(selected)) continue;
+      if (selected !== "clear" && selected !== "read-only" && selected !== "workspace-write" && selected !== "danger-full-access") {
+        throw new Error(`未知沙箱模式：${String(selected)}`);
       }
+      update = { kind: "sandbox", value: selected === "clear" ? null : selected };
     } else if (field === "approval_policy") {
       const selected = await prompts.select({
         message: "审批策略",
@@ -103,15 +100,11 @@ export async function runWorkspaceSettings({
           { value: "clear", label: "清除（使用默认）", hint: "回退 on-request" },
         ],
       });
-      if (prompts.isCancel(selected) || selected === "clear") {
-        if (prompts.isCancel(selected)) continue;
-        delete entry.approval_policy;
-      } else {
-        if (selected !== "untrusted" && selected !== "on-request" && selected !== "never") {
-          throw new Error(`未知审批策略：${String(selected)}`);
-        }
-        entry.approval_policy = selected;
+      if (prompts.isCancel(selected)) continue;
+      if (selected !== "clear" && selected !== "untrusted" && selected !== "on-request" && selected !== "never") {
+        throw new Error(`未知审批策略：${String(selected)}`);
       }
+      update = { kind: "approval", value: selected === "clear" ? null : selected };
     } else if (field === "permissions") {
       const selected = await prompts.text({
         message: "权限 Profile（留空清除；例如 :read-only、:workspace、:danger-full-access）",
@@ -121,17 +114,18 @@ export async function runWorkspaceSettings({
         continue;
       }
       const trimmed = String(selected).trim();
-      if (trimmed.length > 0 && entry.sandbox !== undefined) {
-        output.write("permissions 与 sandbox 互斥，请先清除沙箱。\n");
-        continue;
-      }
-      if (trimmed.length === 0) {
-        delete entry.permissions;
-      } else {
-        entry.permissions = trimmed;
-      }
+      update = { kind: "permissions", value: trimmed || null };
     } else {
       throw new Error(`未知工作区权限项：${String(field)}`);
+    }
+    try {
+      applyWorkspacePermissionUpdate(entry, update);
+    } catch (error) {
+      if (error instanceof WorkspacePermissionConflictError) {
+        output.write(`${error.message}\n`);
+        continue;
+      }
+      throw error;
     }
     document.workspaces = workspaces;
     writeConfig(configPath, document);

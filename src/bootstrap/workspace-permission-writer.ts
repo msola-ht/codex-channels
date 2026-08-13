@@ -3,6 +3,10 @@ import {
   writeGatewayConfig,
 } from "../../runtime/gateway-config.mjs";
 import {
+  applyWorkspacePermissionUpdate,
+  WorkspacePermissionConflictError,
+} from "../../runtime/workspace-permission.mjs";
+import {
   UserFacingError,
 } from "../conversation-core/index.js";
 import type {
@@ -59,34 +63,13 @@ export class TomlWorkspacePermissionWriter
           { workspaceId },
         );
       }
-      switch (update.kind) {
-        case "sandbox":
-          if (update.value === null) {
-            delete entry.sandbox;
-          } else {
-            if (entry.permissions !== undefined) {
-              throw conflictError();
-            }
-            entry.sandbox = update.value;
-          }
-          break;
-        case "approval":
-          if (update.value === null) {
-            delete entry.approval_policy;
-          } else {
-            entry.approval_policy = update.value;
-          }
-          break;
-        case "permissions":
-          if (update.value === null) {
-            delete entry.permissions;
-          } else {
-            if (entry.sandbox !== undefined) {
-              throw conflictError();
-            }
-            entry.permissions = update.value;
-          }
-          break;
+      try {
+        applyWorkspacePermissionUpdate(entry, update);
+      } catch (error) {
+        if (error instanceof WorkspacePermissionConflictError) {
+          throw conflictError();
+        }
+        throw error;
       }
       writeGatewayConfig(
         this.configPath,

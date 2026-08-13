@@ -24,6 +24,10 @@ import {
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import {
+  applyWorkspacePermissionUpdate,
+  WorkspacePermissionConflictError,
+} from "../runtime/workspace-permission.mjs";
+import {
   resolveProxyEnvironment,
   selectHttpProxyUrl,
 } from "../runtime/network-proxy.mjs";
@@ -950,6 +954,7 @@ async function runWorkspacePermissionsMenu(runtime) {
     clackPrompts.cancel("已取消");
     return;
   }
+  let update;
   if (field === "sandbox") {
     const selected = await clackPrompts.select({
       message: "沙箱模式",
@@ -966,15 +971,10 @@ async function runWorkspacePermissionsMenu(runtime) {
       clackPrompts.cancel("已取消");
       return;
     }
-    if (selected === "clear") {
-      delete entry.sandbox;
-    } else {
-      if (entry.permissions !== undefined) {
-        printCliMessage("failure", "permissions 与 sandbox 互斥，请先清除权限 Profile。");
-        return;
-      }
-      entry.sandbox = selected;
+    if (selected !== "clear" && selected !== "read-only" && selected !== "workspace-write" && selected !== "danger-full-access") {
+      throw new Error(`未知沙箱模式：${String(selected)}`);
     }
+    update = { kind: "sandbox", value: selected === "clear" ? null : selected };
   } else if (field === "approval_policy") {
     const selected = await clackPrompts.select({
       message: "审批策略",
@@ -991,11 +991,10 @@ async function runWorkspacePermissionsMenu(runtime) {
       clackPrompts.cancel("已取消");
       return;
     }
-    if (selected === "clear") {
-      delete entry.approval_policy;
-    } else {
-      entry.approval_policy = selected;
+    if (selected !== "clear" && selected !== "untrusted" && selected !== "on-request" && selected !== "never") {
+      throw new Error(`未知审批策略：${String(selected)}`);
     }
+    update = { kind: "approval", value: selected === "clear" ? null : selected };
   } else if (field === "permissions") {
     const entered = await clackPrompts.text({
       message: "权限 Profile（留空清除；例如 :read-only、:workspace、:danger-full-access）",
@@ -1006,17 +1005,18 @@ async function runWorkspacePermissionsMenu(runtime) {
       return;
     }
     const trimmed = String(entered).trim();
-    if (trimmed.length > 0 && entry.sandbox !== undefined) {
-      printCliMessage("failure", "permissions 与 sandbox 互斥，请先清除沙箱。");
-      return;
-    }
-    if (trimmed.length === 0) {
-      delete entry.permissions;
-    } else {
-      entry.permissions = trimmed;
-    }
+    update = { kind: "permissions", value: trimmed || null };
   } else {
     throw new Error(`未知工作区权限项：${String(field)}`);
+  }
+  try {
+    applyWorkspacePermissionUpdate(entry, update);
+  } catch (error) {
+    if (error instanceof WorkspacePermissionConflictError) {
+      printCliMessage("failure", error.message);
+      return;
+    }
+    throw error;
   }
   writeGatewayConfig(runtime.configPath, document);
   printCliMessage("success", "已更新工作区权限。");

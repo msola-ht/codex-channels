@@ -1,13 +1,9 @@
-import {
-  chmodSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { readFileSync } from "node:fs";
 
 import { parse, stringify } from "smol-toml";
 import { z } from "zod";
+
+import { writePrivateFileAtomicSync } from "./private-file.mjs";
 
 const sourceByDocument = new WeakMap();
 
@@ -449,32 +445,21 @@ export function materializeGatewayConfigDefaults(configPath, document) {
 }
 
 export function writeGatewayConfig(configPath, document) {
-  const temporaryPath = `${configPath}.${process.pid}.tmp`;
-  try {
-    const generated = stringify(document);
-    const source = sourceByDocument.get(document);
-    const content = source === undefined
-      ? generated
-      : preserveTomlComments(
-          source.content,
-          generated,
-          source.workspaceIds,
-          workspaceIds(document),
-        );
-    writeFileSync(temporaryPath, content, {
-      mode: 0o600,
-      flag: "wx",
-    });
-    chmodSync(temporaryPath, 0o600);
-    renameSync(temporaryPath, configPath);
-    sourceByDocument.set(document, {
-      content,
-      workspaceIds: workspaceIds(document),
-    });
-  } catch (error) {
-    rmSync(temporaryPath, { force: true });
-    throw error;
-  }
+  const generated = stringify(document);
+  const source = sourceByDocument.get(document);
+  const content = source === undefined
+    ? generated
+    : preserveTomlComments(
+        source.content,
+        generated,
+        source.workspaceIds,
+        workspaceIds(document),
+      );
+  writePrivateFileAtomicSync(configPath, content);
+  sourceByDocument.set(document, {
+    content,
+    workspaceIds: workspaceIds(document),
+  });
 }
 
 function mergeMissingDefaults(target, defaults) {
