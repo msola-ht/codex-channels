@@ -43,7 +43,7 @@ describe("Telegram HTML formatter", () => {
     ]);
   });
 
-  it("shows three approval lines before folding the remaining detail", () => {
+  it("leaves long approval collapsing entirely to Telegram", () => {
     expect(formatTelegramExpandableQuotePanelChunks(
       "Codex 请求临时权限",
       Array.from({ length: 8 }, (_, index) => `第 ${index + 1} 行`).join("\n"),
@@ -51,22 +51,18 @@ describe("Telegram HTML formatter", () => {
       [
         "<b>Codex 请求临时权限</b>",
         "",
-        "<blockquote>第 1 行\n第 2 行\n第 3 行</blockquote>",
-        "",
-        "<i>其余内容（点击展开）</i>",
-        "<blockquote expandable>第 4 行\n第 5 行\n第 6 行\n第 7 行\n第 8 行</blockquote>",
+        "<blockquote expandable>第 1 行\n第 2 行\n第 3 行\n第 4 行\n第 5 行\n第 6 行\n第 7 行\n第 8 行</blockquote>",
       ].join("\n"),
     ]);
   });
 
-  it("folds a visually wrapped single-line approval after a short preview", () => {
+  it("keeps a visually wrapped approval in one native expandable quote", () => {
     const detail = "x".repeat(300);
     const [chunk] = formatTelegramExpandableQuotePanelChunks("审批", detail);
 
-    expect(chunk).toContain(
-      `<blockquote>${"x".repeat(150)}</blockquote>\n\n<i>其余内容（点击展开）</i>\n`,
+    expect(chunk).toBe(
+      `<b>审批</b>\n\n<blockquote expandable>${"x".repeat(300)}</blockquote>`,
     );
-    expect(chunk).toContain(`<blockquote expandable>${"x".repeat(150)}</blockquote>`);
   });
 
   it("keeps escaped expandable quote chunks within the Telegram limit", () => {
