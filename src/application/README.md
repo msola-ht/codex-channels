@@ -5,7 +5,8 @@
 ## 文件
 
 - `index.ts`：本模块的公开导出入口。
-- `conversation-command-service.ts`：定义平台无关的会话命令名称，解析参数并返回结构化结果；不包含平台文案或消息布局。
+- `conversation-command-service.ts`：执行平台无关的会话命令并返回结构化结果；负责授权后的用例调用和结果分页，不包含平台文案或消息布局。
+- `conversation-command-parser.ts`：集中定义会话命令的参数语法、用法提示和查询视图；只做纯解析，不调用 Application 用例。
 - `conversation-service.ts`：通过稳定的 `ConversationUseCases` 公开 Surface 和命令层所需用例，
   具体 `ConversationService` 负责新建、恢复、切换、归档、固定、原生分区和分页筛选 Thread，提交、steer 或将纯文本
   排到下一 Turn，公开 Conversation 状态与最近 Turn 产物，并通过注入端口把项目规则操作限制
