@@ -42,6 +42,22 @@ const defaultMaximumRows = 1_000_000;
 const weeklyWindowMs = 7 * 24 * 60 * 60 * 1_000;
 const cleanupInterval = 100;
 const maximumAggregationGroups = 20;
+const metricStorageColumnsSql = `
+  provider, billing_mode, pricing_currency, pricing_source, pricing_effective_at_ms,
+  uncached_input_price_per_million_nanos,
+  cached_input_price_per_million_nanos, output_price_per_million_nanos,
+  transport, response_format, operation, thread_id, turn_id, model, service_tier,
+  reasoning_effort, status, http_status, error_type, error_code, error_message,
+  incomplete_reason,
+  input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens,
+  total_tokens, upstream_created_at, upstream_completed_at,
+  request_started_at_ms, first_token_at_ms,
+  first_reasoning_delta_at_ms, last_reasoning_delta_at_ms,
+  first_output_delta_at_ms, last_output_delta_at_ms,
+  response_completed_at_ms, recorded_at_ms,
+  weekly_quota_limit_id, weekly_used_percent_millionths, weekly_resets_at,
+  weekly_quota_plan_type
+`;
 const pageSortSql = {
   recordedAtMs: "recorded_at_ms",
   provider: "provider",
@@ -350,20 +366,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       this.initializeSchema();
       this.insert = this.database.prepare(`
         INSERT INTO model_request_metrics (
-          provider, billing_mode, pricing_currency, pricing_source, pricing_effective_at_ms,
-          uncached_input_price_per_million_nanos,
-          cached_input_price_per_million_nanos, output_price_per_million_nanos,
-          transport, response_format, operation, thread_id, turn_id, model, service_tier,
-          reasoning_effort, status, http_status, error_type, error_code, error_message,
-          incomplete_reason,
-          input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens,
-          total_tokens, upstream_created_at, upstream_completed_at,
-          request_started_at_ms, first_token_at_ms,
-          first_reasoning_delta_at_ms, last_reasoning_delta_at_ms,
-          first_output_delta_at_ms, last_output_delta_at_ms,
-          response_completed_at_ms, recorded_at_ms,
-          weekly_quota_limit_id, weekly_used_percent_millionths, weekly_resets_at,
-          weekly_quota_plan_type
+          ${metricStorageColumnsSql}
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
@@ -1458,6 +1461,25 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     if (value !== schemaVersion) {
       throw new ModelRequestMetricsSchemaError(value ?? 0, schemaVersion);
     }
+    try {
+      this.database.prepare(`
+        SELECT id, ${metricStorageColumnsSql}
+        FROM model_request_metrics
+        LIMIT 0
+      `).all();
+      this.database.prepare(`
+        SELECT thread_id, parent_thread_id, agent_path, recorded_at_ms
+        FROM subagent_threads
+        LIMIT 0
+      `).all();
+      this.database.prepare(`
+        SELECT id, total_cost_nanos
+        FROM model_request_metrics_enriched
+        LIMIT 0
+      `).all();
+    } catch (error) {
+      throw new ModelRequestMetricsSchemaError(value, schemaVersion, { cause: error });
+    }
   }
 
   private cleanup(nowMs: number): void {
@@ -1501,12 +1523,22 @@ export function modelRequestMetricsDatabasePath(stateDatabasePath: string): stri
 export class ModelRequestMetricsSchemaError extends Error {
   readonly code = "METRICS_SCHEMA_UNSUPPORTED";
 
-  constructor(readonly actualVersion: number, readonly expectedVersion: number) {
+  constructor(
+    readonly actualVersion: number,
+    readonly expectedVersion: number,
+    options?: ErrorOptions,
+  ) {
+    const detail = options?.cause === undefined
+      ? `版本不兼容：当前 ${actualVersion}，Gateway 需要 ${expectedVersion}。`
+      : `Schema ${actualVersion} 结构不完整。`;
+    const remedy = options?.cause === undefined
+      && actualVersion >= 3
+      && actualVersion < expectedVersion
+      ? "codexc update 检查可用迁移路径"
+      : "codexc metrics reset 重建指标库";
     super(
-      `模型请求指标数据库版本不兼容：当前 ${actualVersion}，Gateway 需要 ${expectedVersion}。`
-      + (actualVersion === 3 && expectedVersion === 4
-        ? "请停止 Gateway 后运行 codexc metrics upgrade"
-        : "请停止 Gateway 后运行 codexc metrics reset"),
+      `模型请求指标数据库${detail}请运行 ${remedy}`,
+      options,
     );
     this.name = "ModelRequestMetricsSchemaError";
   }

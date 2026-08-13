@@ -75,6 +75,7 @@ describe("codexc CLI", () => {
       [["agents", "status", "--help"], "用法：codexc agents status"],
       [["agents", "enable-deepseek", "-h"], "用法：codexc agents enable-deepseek"],
       [["agents", "disable-deepseek", "--help"], "用法：codexc agents disable-deepseek"],
+      [["update", "--help"], "用法：codexc update"],
       [["state", "-h"], "用法：codexc state upgrade"],
       [["state", "upgrade", "--help"], "用法：codexc state upgrade"],
       [["metrics", "-h"], "用法：codexc metrics"],

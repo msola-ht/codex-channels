@@ -7,3 +7,4 @@ export class GatewayOwner {
 }
 
 export function gatewayOwnerSocketPath(configPath: string): string;
+export function gatewayOwnerIsActive(configPath: string): Promise<boolean>;

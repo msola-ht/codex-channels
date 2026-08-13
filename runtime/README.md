@@ -31,7 +31,8 @@
   保持连接而阻塞服务退出。
 - `app-server-supervisor.d.mts`：声明 App Server 监管拓扑与健康检查接口。
 - `gateway-owner.mjs` / `gateway-owner.d.mts`：按当前配置文件持有独立于 Provider 和指标通道的
-  私有 Gateway 所有权 Socket，保证同一配置只能运行一个 Gateway，并安全清理失效入口。
+  私有 Gateway 所有权 Socket，保证同一配置只能运行一个 Gateway，并安全清理失效入口；公开同源
+  健康探针供本地更新确认 Gateway 已真实恢复。
 - `service-targets.mjs` / `service-targets.d.mts`：集中声明公开服务目标、systemd unit、launchd
   label、核心服务范围和启停顺序，供 CLI、平台控制脚本、安装器与 Doctor 复用。
 - `process-lifecycle.mjs` / `process-lifecycle.d.mts`：统一判断子进程存活、向活动子进程转发信号和

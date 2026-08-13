@@ -74,6 +74,16 @@ export function gatewayOwnerSocketPath(configPath) {
   return join(dirname(configPath), "runtime", "gateway-owner.sock");
 }
 
+export function gatewayOwnerIsActive(configPath) {
+  const socketPath = gatewayOwnerSocketPath(configPath);
+  const status = lstatSync(socketPath, { throwIfNoEntry: false });
+  if (!status) return Promise.resolve(false);
+  if (!status.isSocket() || status.uid !== process.getuid?.()) {
+    throw new Error(`Gateway 所有权 Socket 路径不安全：${socketPath}`);
+  }
+  return socketAcceptsConnections(socketPath);
+}
+
 async function removeStaleGatewaySocket(socketPath) {
   const status = lstatSync(socketPath, { throwIfNoEntry: false });
   if (!status) return;

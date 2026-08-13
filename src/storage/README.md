@@ -21,7 +21,8 @@ Actor 清理和解绑由存储实现原子完成。
 
 Schema v4 保留原 `conversation_bindings` 前台表，并新增
 `conversation_background_bindings`。Schema v3 只能在 Gateway 停止后通过
-`codexc state upgrade` 显式备份并升级；回滚可恢复命令输出的 v3 备份，升级后产生的后台绑定会
+`codexc update` 统一预检、显式备份并升级；单库排障也可使用 `codexc state upgrade`。回滚可恢复
+命令输出的 v3 备份，升级后产生的后台绑定会
 丢失，但 App Server Thread 不会被删除。
 
 存储实现必须保持可替换。新增字段应只服务于绑定恢复或必要偏好；持久化格式变化必须明确当前数据的重建或升级方式，不能静默兼容未知 Schema，也不能读取或复制 `~/.codex/sessions`。
