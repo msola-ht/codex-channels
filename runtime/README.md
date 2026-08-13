@@ -49,7 +49,8 @@
 - `codex-home.mjs` / `codex-home.d.mts`：统一解析 Codex 用户目录（`CODEX_HOME` 或
   `~/.codex`），供 CLI、脚本、Runtime 与 Bootstrap 复用。
 - `private-file.mjs` / `private-file.d.mts`：为 Codex Home 内 App Server 无法管理的 Profile、模型目录、
-  管理标记和子代理配置提供统一的新建 `0700` 父目录、`0600` 文件及随机临时文件原子替换；
+  管理标记、子代理配置和可丢弃运行时缓存提供统一的新建 `0700` 父目录、`0600` 文件及随机临时
+  文件原子替换；
   `~/.codex/config.toml` 的普通键级设置仍统一交给官方 `config/batchWrite`。
 - `api-provider-credential.mjs` / `api-provider-credential.d.mts`：按第三方 API 提供商 ID 隔离
   API Key，并严格校验私有目录、文件所有者、权限与符号链接。

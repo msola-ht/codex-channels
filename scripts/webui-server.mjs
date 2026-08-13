@@ -8,7 +8,7 @@ import {
   inspectMetricsDatabase,
   metricsRange,
   readWeeklyQuota,
-} from "./metrics-database.mjs";
+} from "./metrics-database-access.mjs";
 import { enrichCosts, loadDisplayContext } from "./metrics-export-format.mjs";
 import { userDataDir } from "./runtime-config.mjs";
 import {

@@ -116,7 +116,7 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
                 └─ pages/ 页面组合
 ```
 
-- 服务端只读查询复用 `codexc metrics` 的同一能力（`metrics-database.mjs` /
+- 服务端只读查询复用 `codexc metrics` 的同一能力（`metrics-database-access.mjs` /
   `metrics-export-format.mjs`），不维护平行索引；
 - API 响应类型单一来源是 `scripts/webui-api.ts`，前端只做转出；
 - 前端构建产物随 npm 包发布，`codexc webui` 不依赖源码目录即可托管。

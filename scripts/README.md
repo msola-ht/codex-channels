@@ -9,8 +9,10 @@
   但显式指定的配置文件缺失及其他文件系统错误仍失败；启动与写入流程显式收紧目录和配置文件权限。
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
   升级到 v4；不自动迁移未知版本。
-- `metrics-database.mjs` / `metrics-database.d.mts`：实现并声明只读 `codexc metrics` 的
-  `status`、`run`、`turns`、`threads`、`report`、`export`、`upgrade` 与 `reset`；查询复用 Observability
+- `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
+  `run`、`turns`、`threads`、`report`、`export` 和周额度只读查询；只打开只读 Store，不加载服务控制或数据库维护流程。
+- `metrics-database.mjs` / `metrics-database.d.mts`：保留 `codexc metrics` 的兼容公开入口和 CLI，
+  组合只读访问、输出渲染以及 `upgrade`、`reset`、`cleanup`、`prune` 等显式维护命令；查询复用 Observability
   只读端口，渲染复用 `metrics-export-format.mjs`；运行、会话与聚合输出从现有 `compact` 明细
   派生上下文压缩模型、请求数、Token 和费用摘要，JSON/CSV 同时保留可视化字段；`export` CSV 用独立类型行区分请求历史额度快照
   与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3 备份后
@@ -54,6 +56,8 @@
   `config.toml` 的 `[metrics.center]` 段与默认值），不依赖 Cloudflare 部署文件。
 - `metrics-config-menu.mjs`：指标设置与中心服务设置的交互用例；集中管理本地保留策略、中心接入、
   上报参数、接入状态和中心监听配置，`config.mjs` 只保留顶层配置菜单编排与兼容重导出。
+- `metrics-menu.mjs` / `metrics-menu.d.mts`：`codexc metrics` 无参数时的交互用例及注入边界声明；负责收集查询、导出、清理和重置参数，
+  通过 CLI 注入的命令边界执行，不承载子进程或输出文件管理。
 - `metrics-center-payload.mjs` / `metrics-center-payload.d.mts`：中心服务与历史 Cloudflare
   Worker 共用的上报载荷校验及类型声明。
 - `metrics-center-schema.sql`：npm 发布包内中心 SQLite 的规范初始化 Schema；历史 Cloudflare
@@ -71,13 +75,21 @@
   `SKILL.md` 的技能，安装/覆盖到 `~/.agents/skills/<技能名>`（可用
   `CODEX_AGENTS_SKILLS_DIR` 覆盖目标目录），支持卸载；只复制技能目录本身，不修改
   hermes 运行时的 `.skill-lock.json`。
-- `config.mjs`：`codexc config` 的交互式配置与设置菜单，覆盖配置文件中可安全编辑的参数：
+- `config.mjs`：`codexc config` 的顶层交互编排，覆盖配置文件中可安全编辑的参数：
   显示设置（操作详情、计划更新、全局价格显示方式）、系统设置（调试模式、审批超时、
   Sandbox、默认工作区与模型）、WebUI 设置（监听地址、端口、访问令牌）、指标设置
   （本地保留策略、本机接入中心并同时写入 `[metrics.sync]` 与 `[metrics.view]`、接入状态、上报参数
   `interval_seconds` / `batch_size`、停用接入）、
   Telegram 消息格式和配置路径查看；菜单修改前自动备份配置，非交互终端直接输出
   用户目录与配置文件路径。
+- `config-display-menu.mjs`：独立管理操作详情、计划更新、全局价格币种和 Telegram 消息格式；
+  只修改对应展示配置段。
+- `config-system-menu.mjs`：独立管理调试入口、审批超时、全局 Sandbox、默认 Workspace 和
+  Gateway Thread 默认模型；调试实现仍委派给 `debug-setup.mjs`。
+- `config-webui-menu.mjs`：独立管理 WebUI 监听地址、端口和访问令牌交互；保持公网监听必须配置
+  令牌的失败关闭约束，`config.mjs` 只负责把顶层选择路由到该领域菜单。
+- `config-workspace-menu.mjs`：独立管理 Workspace 的 Sandbox、审批策略与 Permission Profile；
+  保持 Sandbox 与 Permission Profile 互斥，并只写回被选择的 Workspace 配置。
 - `debug-setup.mjs`：在严格配置中原子切换 `logging.level` 的 `debug` / `info`，控制全局脱敏
   调试日志和渠道技术字段，不改写显示设置或凭据。
 - `api-provider-setup.mjs` / `api-provider-setup.d.mts`：增改或删除多个 Responses 兼容第三方 API

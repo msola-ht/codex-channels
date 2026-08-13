@@ -1,4 +1,5 @@
 import { loadDeepseekAccountCredential } from "../../runtime/model-provider-runtime.mjs";
+import { readBoundedFetchBody } from "./bounded-fetch-body.js";
 
 import type {
   ProviderAccountAdapter,
@@ -32,7 +33,12 @@ export function createDeepseekAccountAdapter(
         if (!response.ok) {
           throw new Error(`DeepSeek balance request failed with status ${response.status}`);
         }
-        return parseBalanceResponse(await readBoundedJson(response));
+        const body = await readBoundedFetchBody(response, maximumResponseBytes, {
+          invalidContentLength: () => new Error("DeepSeek balance response length is invalid"),
+          tooLarge: () => new Error("DeepSeek balance response is too large"),
+          missingBody: () => new Error("DeepSeek balance response is empty"),
+        });
+        return parseBalanceResponse(JSON.parse(body.toString("utf8")) as unknown);
       } catch {
         throw new UserFacingError(
           "provider.account.unavailable",
@@ -47,39 +53,6 @@ export function createDeepseekAccountAdapter(
 export interface DeepseekAccountAdapterOptions {
   environment?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
-}
-
-async function readBoundedJson(response: Response): Promise<unknown> {
-  const declaredLength = response.headers.get("content-length");
-  if (declaredLength !== null) {
-    const length = Number(declaredLength);
-    if (!Number.isSafeInteger(length) || length < 0 || length > maximumResponseBytes) {
-      throw new Error("DeepSeek balance response length is invalid");
-    }
-  }
-  if (!response.body) {
-    throw new Error("DeepSeek balance response is empty");
-  }
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let length = 0;
-  try {
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      length += chunk.value.byteLength;
-      if (length > maximumResponseBytes) {
-        await reader.cancel();
-        throw new Error("DeepSeek balance response is too large");
-      }
-      chunks.push(chunk.value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const body = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), length)
-    .toString("utf8");
-  return JSON.parse(body) as unknown;
 }
 
 function parseBalanceResponse(value: unknown): ProviderAccountUsage {
