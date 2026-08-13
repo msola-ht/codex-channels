@@ -18,11 +18,16 @@ import {
   downloadDeepseekCatalog,
   extractDeepseekCatalog,
   runDeepseekSetup as runDeepseekSetupImplementation,
+  type DeepseekSetupOptions,
 } from "../scripts/deepseek-setup.mjs";
 import {
   enableDeepseekRole,
   removeManagedDeepseekRole,
 } from "../scripts/agents.mjs";
+import type {
+  CodexUserConfigEdit,
+  CodexUserConfigValue,
+} from "../scripts/codex-user-config.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 
 const script = `#!/bin/sh
@@ -31,7 +36,7 @@ cat > "$TMP_MODELS" <<'CODEX_MODELS_JSON'
 CODEX_MODELS_JSON
 `;
 
-function runDeepseekSetup(options = {}) {
+function runDeepseekSetup(options: DeepseekSetupOptions = {}) {
   return runDeepseekSetupImplementation({
     ...options,
     enableRole: (environment: NodeJS.ProcessEnv) => enableDeepseekRole(environment, {
@@ -75,6 +80,7 @@ describe("DeepSeek setup", () => {
       output: outputFixture(mkdtempSync(join(tmpdir(), "codexc-deepseek-menu-"))).output,
       prompts: {
         select,
+        text: vi.fn(),
         password: vi.fn(),
         confirm: vi.fn(),
         isCancel: () => false,
@@ -781,10 +787,9 @@ function record(value: unknown): Record<string, unknown> {
 
 async function applyConfigUpdate(
   environment: NodeJS.ProcessEnv,
-  createEdits: (config: Record<string, unknown>) => Array<{
-    keyPath: string;
-    value: unknown;
-  }>,
+  createEdits: (
+    config: Record<string, CodexUserConfigValue | undefined>,
+  ) => CodexUserConfigEdit[],
 ): Promise<void> {
   const configPath = join(String(environment.CODEX_HOME), "config.toml");
   const source = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
@@ -792,7 +797,7 @@ async function applyConfigUpdate(
     .split("\n")
     .filter((line) => line.trimStart().startsWith("#"));
   const document = source === "" ? {} : record(parse(source));
-  const edits = createEdits(document);
+  const edits = createEdits(document as Record<string, CodexUserConfigValue | undefined>);
   for (const edit of edits) {
     if (edit.keyPath === "features.multi_agent_v2") {
       const features = record(document.features);

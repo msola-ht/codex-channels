@@ -16,21 +16,29 @@ import {
   agentsStatus,
   disableDeepseekRole,
   enableDeepseekRole,
+  type CodexUserConfigWriter,
 } from "../scripts/agents.mjs";
-import { updateCodexUserConfig } from "../scripts/codex-user-config.mjs";
+import {
+  updateCodexUserConfig,
+  type CodexUserConfigEdit,
+  type CodexUserConfigValue,
+} from "../scripts/codex-user-config.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
+
+const compatibleUserConfigWriter: CodexUserConfigWriter = updateCodexUserConfig;
+void compatibleUserConfigWriter;
 
 describe("codexc agents script", () => {
   it("routes managed role changes through one user config transaction", async () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-agents-transaction-"));
     const environment = { ...process.env, CODEX_HOME: codexHome };
     const rolePath = join(codexHome, "codex-connect-ds-subagent.config.toml");
-    let requestedEdits: Array<{ keyPath: string; value: unknown }> = [];
+    let requestedEdits: CodexUserConfigEdit[] = [];
     const updateConfig = vi.fn(async (
       _environment: NodeJS.ProcessEnv,
-      createEdits: (config: Record<string, unknown>) => Array<{
+      createEdits: (config: Record<string, CodexUserConfigValue | undefined>) => Array<{
         keyPath: string;
-        value: unknown;
+        value: CodexUserConfigValue;
       }>,
     ) => {
       requestedEdits = createEdits({});
@@ -302,16 +310,15 @@ function writeProviderFixtures(codexHome: string): void {
 
 async function applyConfigUpdate(
   environment: NodeJS.ProcessEnv,
-  createEdits: (config: Record<string, unknown>) => Array<{
-    keyPath: string;
-    value: unknown;
-  }>,
+  createEdits: (
+    config: Record<string, CodexUserConfigValue | undefined>,
+  ) => CodexUserConfigEdit[],
 ): Promise<void> {
   const configPath = join(String(environment.CODEX_HOME), "config.toml");
   const document = existsSync(configPath)
     ? record(parse(readFileSync(configPath, "utf8")))
     : {};
-  const edits = createEdits(document);
+  const edits = createEdits(document as Record<string, CodexUserConfigValue | undefined>);
   for (const edit of edits) {
     if (edit.keyPath === "features.multi_agent_v2") {
       const features = record(document.features);

@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { runCodexDefaultsSetup } from "../scripts/codex-defaults-setup.mjs";
 
 describe("Codex official defaults setup", () => {

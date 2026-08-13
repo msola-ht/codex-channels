@@ -11,8 +11,33 @@ export interface CodexUserConfigEdit {
   value: CodexUserConfigValue;
 }
 
-export interface CodexUserConfigClient {
+export interface CodexUserConfigModelOption {
+  available?: boolean;
+  model: string;
+  displayName: string;
+  supportedReasoningEfforts: Array<{
+    effort: string;
+    description: string;
+  }>;
+  defaultReasoningEffort: string;
+  isDefault: boolean;
+}
+
+export interface CodexUserConfigClientLifecycle {
   connect(): Promise<unknown>;
+  close(): Promise<void>;
+}
+
+export interface CodexDefaultSettingsClient extends CodexUserConfigClientLifecycle {
+  listModels(): Promise<CodexUserConfigModelOption[]>;
+  readDefaultModelSettings(): Promise<{
+    model: string | null;
+    effort: string | null;
+  }>;
+  writeDefaultModelSettings(model: string, effort: string): Promise<void>;
+}
+
+export interface CodexUserConfigTransactionClient extends CodexUserConfigClientLifecycle {
   readUserConfigSnapshot(): Promise<{
     config: Record<string, CodexUserConfigValue | undefined>;
     version: string;
@@ -21,8 +46,10 @@ export interface CodexUserConfigClient {
     edits: CodexUserConfigEdit[],
     options?: { expectedVersion?: string },
   ): Promise<void>;
-  close(): Promise<void>;
 }
+
+export interface CodexUserConfigClient
+  extends CodexDefaultSettingsClient, CodexUserConfigTransactionClient {}
 
 export function writeCodexUserConfigEdits(
   environment: NodeJS.ProcessEnv,
@@ -30,7 +57,7 @@ export function writeCodexUserConfigEdits(
   dependencies?: {
     createClient?: (options: {
       environment: NodeJS.ProcessEnv;
-    }) => Promise<CodexUserConfigClient>;
+    }) => Promise<CodexUserConfigTransactionClient>;
   },
 ): Promise<void>;
 
@@ -42,7 +69,7 @@ export function updateCodexUserConfig(
   dependencies?: {
     createClient?: (options: {
       environment: NodeJS.ProcessEnv;
-    }) => Promise<CodexUserConfigClient>;
+    }) => Promise<CodexUserConfigTransactionClient>;
   },
 ): Promise<void>;
 

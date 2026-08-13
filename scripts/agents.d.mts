@@ -1,11 +1,13 @@
-export interface CodexUserConfigEdit {
-  keyPath: string;
-  value: unknown;
-}
+import type {
+  CodexUserConfigEdit,
+  CodexUserConfigValue,
+} from "./codex-user-config.mjs";
 
 export type CodexUserConfigWriter = (
   environment: NodeJS.ProcessEnv,
-  createEdits: (config: Record<string, unknown>) => CodexUserConfigEdit[],
+  createEdits: (
+    config: Record<string, CodexUserConfigValue | undefined>,
+  ) => CodexUserConfigEdit[],
 ) => Promise<void>;
 
 export interface AgentsStatus {
