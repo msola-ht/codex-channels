@@ -4,12 +4,12 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
-  renameSync,
   rmdirSync,
   rmSync,
-  writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+
+import { writePrivateFileAtomicSync } from "./private-file.mjs";
 
 const maximumApiKeyBytes = 16_384;
 
@@ -39,17 +39,9 @@ export function writeVisionApiKey(credentialsDirectory, apiKey) {
   const value = validateVisionApiKey(apiKey);
   const directory = join(credentialsDirectory, "vision");
   const path = visionCredentialPath(credentialsDirectory);
-  const temporaryPath = `${path}.${process.pid}.tmp`;
   ensurePrivateDirectory(credentialsDirectory);
   ensurePrivateDirectory(directory);
-  try {
-    writeFileSync(temporaryPath, `${value}\n`, { flag: "wx", mode: 0o600 });
-    chmodSync(temporaryPath, 0o600);
-    renameSync(temporaryPath, path);
-  } catch (error) {
-    rmSync(temporaryPath, { force: true });
-    throw error;
-  }
+  writePrivateFileAtomicSync(path, `${value}\n`);
 }
 
 export function removeVisionApiKey(credentialsDirectory) {

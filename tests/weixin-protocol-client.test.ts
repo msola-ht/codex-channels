@@ -1229,8 +1229,14 @@ describe("WeixinProtocolClient", () => {
   });
 
   it("rejects oversized response bodies before parsing", async () => {
+    const cancel = vi.fn();
     const client = createClient({
-      fetchImpl: vi.fn(async () => new Response("{}", {
+      fetchImpl: vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(Buffer.from("{}"));
+        },
+        cancel,
+      }), {
         status: 200,
         headers: { "Content-Length": "1048577" },
       })),
@@ -1239,11 +1245,18 @@ describe("WeixinProtocolClient", () => {
     await expect(client.getUpdates("")).rejects.toMatchObject({
       code: "invalid-response",
     });
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
   it("rejects invalid response content lengths before parsing", async () => {
+    const cancel = vi.fn();
     const client = createClient({
-      fetchImpl: vi.fn(async () => new Response("{}", {
+      fetchImpl: vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(Buffer.from("{}"));
+        },
+        cancel,
+      }), {
         status: 200,
         headers: { "Content-Length": "invalid" },
       })),
@@ -1252,6 +1265,7 @@ describe("WeixinProtocolClient", () => {
     await expect(client.getUpdates("")).rejects.toMatchObject({
       code: "invalid-response",
     });
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
   it("distinguishes timeout and external cancellation", async () => {

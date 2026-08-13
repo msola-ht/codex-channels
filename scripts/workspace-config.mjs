@@ -216,10 +216,18 @@ function appendWorkspace(workspaces, { cwd, id, name }) {
 }
 
 function upsertFallbackWorkspace(workspaces, fallback) {
+  const existing = workspaces.find(
+    (workspace) => workspace.id === fallback.id,
+  ) ?? workspaces.find(
+    (workspace) => workspace.cwd === fallback.cwd,
+  );
   const retained = workspaces.filter(
     (workspace) => workspace.id !== fallback.id && workspace.cwd !== fallback.cwd,
   );
-  workspaces.splice(0, workspaces.length, { ...fallback }, ...retained);
+  const restored = existing === undefined
+    ? { ...fallback }
+    : { ...existing, ...fallback };
+  workspaces.splice(0, workspaces.length, restored, ...retained);
   return workspaces[0];
 }
 
@@ -282,7 +290,18 @@ function parseWorkspaceConfig(document) {
     if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id) || !name || name.length > 64 || !isAbsolute(cwd)) {
       throw new Error("Workspace 必须包含有效的 id、name 和 cwd");
     }
-    return { id, name, cwd };
+    return {
+      id,
+      name,
+      cwd,
+      ...(workspace.sandbox === undefined ? {} : { sandbox: workspace.sandbox }),
+      ...(workspace.approval_policy === undefined
+        ? {}
+        : { approval_policy: workspace.approval_policy }),
+      ...(workspace.permissions === undefined
+        ? {}
+        : { permissions: workspace.permissions }),
+    };
   });
   const ids = new Set(workspaces.map((workspace) => workspace.id));
   if (ids.size !== workspaces.length) {

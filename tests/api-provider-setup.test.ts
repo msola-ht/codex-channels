@@ -5,6 +5,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,6 +19,7 @@ import {
 } from "../runtime/api-provider-credential.mjs";
 import {
   readVisionApiKey,
+  visionCredentialPath,
   writeVisionApiKey,
 } from "../runtime/vision-credential.mjs";
 import {
@@ -34,6 +36,35 @@ afterEach(() => {
 });
 
 describe("Third-party API provider setup", () => {
+  it("does not let legacy fixed temporary files block credential replacement", () => {
+    const fixture = createFixture();
+    const providerPath = apiProviderCredentialPath(fixture.credentialsDirectory, "relay-a");
+    const visionPath = visionCredentialPath(fixture.credentialsDirectory);
+    mkdirSync(join(fixture.credentialsDirectory, "api-providers", "relay-a"), {
+      recursive: true,
+      mode: 0o700,
+    });
+    mkdirSync(join(fixture.credentialsDirectory, "vision"), {
+      recursive: true,
+      mode: 0o700,
+    });
+    writeFileSync(`${providerPath}.${process.pid}.tmp`, "stale-provider-key\n", { mode: 0o600 });
+    writeFileSync(`${visionPath}.${process.pid}.tmp`, "stale-vision-key\n", { mode: 0o600 });
+
+    expect(() => writeApiProviderKey(
+      fixture.credentialsDirectory,
+      "relay-a",
+      "current-provider-key",
+    )).not.toThrow();
+    expect(() => writeVisionApiKey(
+      fixture.credentialsDirectory,
+      "current-vision-key",
+    )).not.toThrow();
+    expect(readApiProviderKey(fixture.credentialsDirectory, "relay-a"))
+      .toBe("current-provider-key");
+    expect(readVisionApiKey(fixture.credentialsDirectory)).toBe("current-vision-key");
+  });
+
   it("stores multiple provider definitions and isolates each API key", async () => {
     const fixture = createFixture();
     await addProvider(fixture, "relay-a", "中转 A", "https://a.example/v1/responses", "key-a");

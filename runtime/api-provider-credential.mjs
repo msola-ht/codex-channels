@@ -4,12 +4,12 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
-  renameSync,
   rmdirSync,
   rmSync,
-  writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+
+import { writePrivateFileAtomicSync } from "./private-file.mjs";
 
 const maximumApiKeyBytes = 16_384;
 const providerIdPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
@@ -45,18 +45,10 @@ export function writeApiProviderKey(credentialsDirectory, providerId, apiKey) {
   const root = join(credentialsDirectory, "api-providers");
   const directory = join(root, id);
   const path = join(directory, "api-key");
-  const temporaryPath = `${path}.${process.pid}.tmp`;
   ensurePrivateDirectory(credentialsDirectory);
   ensurePrivateDirectory(root);
   ensurePrivateDirectory(directory);
-  try {
-    writeFileSync(temporaryPath, `${value}\n`, { flag: "wx", mode: 0o600 });
-    chmodSync(temporaryPath, 0o600);
-    renameSync(temporaryPath, path);
-  } catch (error) {
-    rmSync(temporaryPath, { force: true });
-    throw error;
-  }
+  writePrivateFileAtomicSync(path, `${value}\n`);
 }
 
 export function removeApiProviderKey(credentialsDirectory, providerId) {

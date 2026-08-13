@@ -59,6 +59,67 @@ describe("workspace:add script", () => {
     expect(statSync(configPath).mode & 0o777).toBe(0o600);
   });
 
+  it("preserves per-workspace permissions while adding and removing registrations", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-workspace-permissions-"));
+    temporaryDirectories.push(root);
+    const main = join(root, "Main");
+    const removable = join(root, "Removable");
+    const added = join(root, "Added");
+    mkdirSync(main);
+    mkdirSync(removable);
+    mkdirSync(added);
+    const configPath = join(root, "config.toml");
+    writeWorkspaceFixture(configPath, [
+      {
+        id: "main",
+        name: "Main",
+        cwd: main,
+        approval_policy: "never",
+        permissions: ":workspace",
+      },
+      {
+        id: "removable",
+        name: "Removable",
+        cwd: removable,
+        sandbox: "read-only",
+      },
+    ], "main");
+
+    addWorkspaceToConfig({
+      configPath,
+      cwd: added,
+      fallbackDefaultWorkspace: {
+        id: "main",
+        name: "Main",
+        cwd: main,
+      },
+    });
+    expect(readGatewayConfig(configPath).workspaces).toContainEqual({
+      id: "main",
+      name: "Main",
+      cwd: realpathSync(main),
+      approval_policy: "never",
+      permissions: ":workspace",
+    });
+
+    removeWorkspaceFromConfig({
+      configPath,
+      selector: "removable",
+      fallbackDefaultWorkspace: {
+        id: "main",
+        name: "Main",
+        cwd: main,
+      },
+    });
+    expect(readGatewayConfig(configPath).workspaces).toContainEqual({
+      id: "main",
+      name: "Main",
+      cwd: realpathSync(main),
+      approval_policy: "never",
+      permissions: ":workspace",
+    });
+  });
+
   it("rejects an existing file as the directory being registered", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-workspace-add-"));
     temporaryDirectories.push(root);
@@ -329,7 +390,14 @@ describe("workspace:add script", () => {
 
 function writeWorkspaceFixture(
   configPath: string,
-  workspaces: Array<{ id: string; name: string; cwd: string }>,
+  workspaces: Array<{
+    id: string;
+    name: string;
+    cwd: string;
+    sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+    approval_policy?: "untrusted" | "on-request" | "never";
+    permissions?: string;
+  }>,
   defaultWorkspace: string,
 ): void {
   writeGatewayConfig(configPath, {

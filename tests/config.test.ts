@@ -77,6 +77,18 @@ describe("Gateway config.toml", () => {
     expect(updated).toContain('bot_token = "updated" # managed by setup');
   });
 
+  it("does not let a legacy fixed temporary file block configuration updates", () => {
+    const fixture = createFixture();
+    writeFileSync(`${fixture.configPath}.${process.pid}.tmp`, "stale configuration\n", {
+      mode: 0o600,
+    });
+    const document = readGatewayConfig(fixture.configPath);
+    document.logging = { level: "debug" };
+
+    expect(() => writeGatewayConfig(fixture.configPath, document)).not.toThrow();
+    expect(readGatewayConfig(fixture.configPath).logging).toEqual({ level: "debug" });
+  });
+
   it("keeps Workspace comments with their Workspace when earlier entries are removed", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
     const main = join(root, "main");
