@@ -10,7 +10,6 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { TomlWorkspacePermissionWriter } from "../src/bootstrap/workspace-permission-writer.js";
-// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 
 const roots: string[] = [];

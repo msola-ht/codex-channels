@@ -12,6 +12,7 @@ import {
 import { join, resolve } from "node:path";
 
 import pino from "pino";
+import { parse } from "smol-toml";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -20,6 +21,7 @@ import {
   sameAppServerTopology,
 } from "../runtime/app-server-supervisor.mjs";
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
+import { updateCodexUserConfig } from "../scripts/codex-user-config.mjs";
 import type { ApprovalRequest } from "../src/approval/index.js";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import {
@@ -1306,6 +1308,83 @@ contractSuite("isolated Codex App Server state contract", () => {
       removeNotification();
       await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
       await ownerClient.deleteThread(threadId);
+    }
+  }, 15_000);
+
+  it("persists model defaults through the official user config transaction", async () => {
+    const configPath = join(codexHome, "config.toml");
+    const before = parse(readFileSync(configPath, "utf8"));
+    const models = await ownerClient.listModels();
+    const model = models.find((candidate) =>
+      candidate.available !== false
+      && candidate.supportedReasoningEfforts.length > 0);
+    if (!model) {
+      throw new Error("隔离 Codex App Server 没有返回可写入的官方模型默认值");
+    }
+    const effort = model.defaultReasoningEffort;
+
+    await ownerClient.writeDefaultModelSettings(model.model, effort);
+
+    await expect(peerClient.readDefaultModelSettings()).resolves.toEqual({
+      model: model.model,
+      effort,
+    });
+    const after = parse(readFileSync(configPath, "utf8"));
+    expect(after.model).toBe(model.model);
+    expect(after.model_reasoning_effort).toBe(effort);
+    expect(after.mcp_servers).toEqual(before.mcp_servers);
+    expect(after.marketplaces).toEqual(before.marketplaces);
+    expect(after.plugins).toEqual(before.plugins);
+    expect(after.model_providers).toEqual(before.model_providers);
+  }, 15_000);
+
+  it("persists and removes an agent role through the official user config transaction", async () => {
+    const configPath = join(codexHome, "config.toml");
+    const roleConfigPath = join(codexHome, "contract-agent.config.toml");
+    writeFileSync(roleConfigPath, 'developer_instructions = "Contract role"\n', {
+      mode: 0o600,
+    });
+
+    try {
+      await updateCodexUserConfig({
+        ...process.env,
+        CODEX_HOME: codexHome,
+        CODEX_BINARY: process.env.CODEX_BINARY ?? "codex",
+      }, () => [{
+        keyPath: "features.multi_agent_v2",
+        value: true,
+      }, {
+        keyPath: "agents.contract",
+        value: {
+          description: "Contract role",
+          config_file: roleConfigPath,
+          nickname_candidates: ["Contract"],
+        },
+      }]);
+
+      const enabled = parse(readFileSync(configPath, "utf8"));
+      expect(enabled.features).toMatchObject({ multi_agent_v2: true });
+      expect(enabled.agents).toMatchObject({
+        contract: {
+          description: "Contract role",
+          config_file: roleConfigPath,
+          nickname_candidates: ["Contract"],
+        },
+      });
+
+      await ownerClient.writeUserConfigEdits([{
+        keyPath: "agents.contract",
+        value: null,
+      }]);
+
+      const removed = parse(readFileSync(configPath, "utf8"));
+      const removedAgents = removed.agents as Record<string, unknown> | undefined;
+      expect(removedAgents?.contract).toBeUndefined();
+    } finally {
+      await ownerClient.writeUserConfigEdits([{
+        keyPath: "agents.contract",
+        value: null,
+      }]).catch(() => undefined);
     }
   }, 15_000);
 });

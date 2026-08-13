@@ -54,7 +54,9 @@
 - `protocol-info.ts`：从精确协议基线公开受支持的 Codex CLI 版本和 Gateway 显示版本，供组合根
   校验并向 Surface 注入纯字符串。
 - `client.ts`：Thread 搜索/归档/固定、全局分区 CRUD 与 Thread 分区移动、Turn、模型、权限、Skill、用量及用户级配置
-  读取与服务层级写入等 App Server 方法的类型化封装；MCP 概览按 Thread 使用
+  读取等 App Server 方法的类型化封装；模型、思考等级、服务层级默认值和受控 agents 设置统一通过
+  同一个 `config/batchWrite` 用户配置事务写入，受控的读改写流程从原始用户层取得版本并通过
+  `expectedVersion` 拒绝并发覆盖；MCP 概览按 Thread 使用
   `toolsAndAuthOnly` 分页，详情使用 `full`；`config/mcpServer/reload` 不自动重试，OAuth 不自动重试并消费
   官方登录完成通知，资源读取保持只读；Permission
   Profile 按 CWD 分页。开发中 Plugin 只调用 `plugin/installed` 并经 Application 开关约束，

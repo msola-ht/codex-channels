@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import type { Logger } from "pino";
 
 import { codexHomePath } from "../../runtime/codex-home.mjs";
+import { effectiveCodexBinary } from "../../runtime/executable.mjs";
 import {
   checkProjectRulesAtRoot,
   initializeProjectRulesAtRoot,
@@ -1237,13 +1238,7 @@ export function currentGitBranch(projectRoot: string): string | undefined {
   }
 }
 
-export function effectiveCodexBinary(
-  configuredBinary: string,
-  environment: NodeJS.ProcessEnv = process.env,
-): string {
-  const installedBinary = environment.CODEX_BINARY?.trim();
-  return configuredBinary === "codex" && installedBinary ? installedBinary : configuredBinary;
-}
+export { effectiveCodexBinary };
 
 function isCriticalNotification(method: string): boolean {
   return !method.endsWith("/delta") && !method.endsWith("/outputDelta");

@@ -12,7 +12,6 @@ import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config
 import { discardPendingMessageUpdates, isDirectExecution, normalizeUserIds, resolveTelegramProxy, runTelegramSetup, waitForPrivateSender } from "../scripts/telegram-setup.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { createPrompter } from "../scripts/terminal-prompter.mjs";
-// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 
 const temporaryDirectories: string[] = [];

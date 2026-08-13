@@ -20,6 +20,7 @@ import { configEventQueuePath } from "../runtime/config-event-queue.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import {
   readGatewayConfig,
+  validateCodexConfigDocument,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import {
@@ -35,6 +36,7 @@ import {
 } from "../runtime/model-provider-runtime.mjs";
 import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.mjs";
+import { effectiveCodexBinary } from "../runtime/executable.mjs";
 import {
   defaultServiceTarget,
   parseServiceTarget,
@@ -52,6 +54,7 @@ import {
 } from "../runtime/app-server-supervisor.mjs";
 import {
   initializeUserData,
+  locateOptionalUserConfig,
   packageDir,
   requireUserConfig,
 } from "../scripts/runtime-config.mjs";
@@ -1126,7 +1129,10 @@ function projectRules(args) {
     return;
   }
   if (args[0] === "check" && args.length === 1) {
-    const result = checkProjectRules({ cwd: process.cwd() });
+    const result = checkProjectRules({
+      cwd: process.cwd(),
+      codexBinary: projectRulesCodexBinary(),
+    });
     printCliMessage("success", "项目 Codex 规则检查通过。");
     console.log(`项目目录：${result.projectRoot}`);
     console.log(`规则文件：${result.rulesPath}`);
@@ -1142,9 +1148,21 @@ function projectRules(args) {
   printCliMessage("success", force ? "项目 Codex 规则已重新生成。" : "项目 Codex 规则已生成。");
   console.log(`项目目录：${result.projectRoot}`);
   console.log(`规则文件：${result.rulesPath}`);
-  checkProjectRules({ cwd: result.projectRoot });
+  checkProjectRules({
+    cwd: result.projectRoot,
+    codexBinary: projectRulesCodexBinary(),
+  });
   printCliMessage("success", "项目 Codex 规则检查通过。");
   printCliMessage("note", "重启 Codex 后生效；项目必须处于受信任状态。");
+}
+
+function projectRulesCodexBinary() {
+  const located = locateOptionalUserConfig();
+  if (!located) {
+    return process.env.CODEX_BINARY?.trim() || "codex";
+  }
+  const document = readGatewayConfig(located.configPath);
+  return effectiveCodexBinary(validateCodexConfigDocument(document.codex).binary);
 }
 
 function agents(args) {

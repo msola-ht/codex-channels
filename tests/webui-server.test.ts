@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it } from "vitest";
 
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { createWebuiServer, resolveWebuiSettings } from "../scripts/webui-server.mjs";
-// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { createMetricsCenterServer } from "../scripts/metrics-center-server.mjs";

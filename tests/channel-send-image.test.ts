@@ -12,7 +12,6 @@ import { afterEach, describe, expect, it } from "vitest";
 
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { submitChannelImage } from "../scripts/channel-send-image.mjs";
-// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 import { SqliteBindingStore } from "../src/storage/index.js";
 

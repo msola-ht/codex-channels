@@ -404,7 +404,7 @@ describe("codexc CLI", () => {
     const fakeCodex = join(root, "fake-codex.mjs");
     const capturePath = join(root, "capture.json");
     mkdirSync(dirname(rulesPath), { recursive: true });
-    mkdirSync(join(project, ".git"));
+    mkdirSync(join(project, ".git"), { recursive: true });
     writeFileSync(rulesPath, 'prefix_rule(pattern = ["git", "status"], decision = "allow")\n');
     writeFileSync(fakeCodex, [
       "#!/usr/bin/env node",
@@ -435,6 +435,93 @@ describe("codexc CLI", () => {
       "-sb",
     ]);
     expect(output).toContain("项目 Codex 规则检查通过");
+  });
+
+  it.each(["check", "init"])(
+    "uses config.toml Codex binary when running project rules %s",
+    (subcommand) => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-rules-config-binary-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const project = join(root, "Project");
+    const rulesPath = join(project, ".codex", "rules", "default.rules");
+    const fakeCodex = join(root, "fake-codex.mjs");
+    const capturePath = join(root, "capture.json");
+    if (subcommand === "check") {
+      mkdirSync(dirname(rulesPath), { recursive: true });
+      writeFileSync(
+        rulesPath,
+        'prefix_rule(pattern = ["git", "status"], decision = "allow")\n',
+      );
+    }
+    mkdirSync(join(project, ".git"), { recursive: true });
+    writeFileSync(join(project, "package.json"), JSON.stringify({ scripts: {} }));
+    writeFileSync(fakeCodex, [
+      "#!/usr/bin/env node",
+      "import { writeFileSync } from 'node:fs';",
+      "writeFileSync(process.env.CODEX_RULES_CAPTURE, JSON.stringify(process.argv.slice(2)));",
+    ].join("\n"));
+    chmodSync(fakeCodex, 0o700);
+    const environment = {
+      ...process.env,
+      CODEX_BINARY: "",
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_RULES_CAPTURE: capturePath,
+    };
+    execFileSync(process.execPath, [cli, "init"], {
+      cwd: project,
+      env: environment,
+    });
+    const configPath = join(home, "config.toml");
+    updateGatewayConfig(configPath, (document) => {
+      table(document.codex).binary = fakeCodex;
+    });
+
+    execFileSync(process.execPath, [cli, "rules", subcommand], {
+      cwd: project,
+      env: environment,
+    });
+
+    expect(JSON.parse(readFileSync(capturePath, "utf8"))).toContain("execpolicy");
+  });
+
+  it("rejects an invalid existing config when checking project rules", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-rules-invalid-config-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const project = join(root, "Project");
+    const rulesPath = join(project, ".codex", "rules", "default.rules");
+    const fakeCodex = join(root, "fake-codex.mjs");
+    mkdirSync(dirname(rulesPath), { recursive: true });
+    mkdirSync(join(project, ".git"));
+    writeFileSync(rulesPath, 'prefix_rule(pattern = ["git", "status"], decision = "allow")\n');
+    writeFileSync(fakeCodex, "#!/usr/bin/env node\n");
+    chmodSync(fakeCodex, 0o700);
+    const environment = {
+      ...process.env,
+      CODEX_BINARY: fakeCodex,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], {
+      cwd: project,
+      env: environment,
+    });
+    const configPath = join(home, "config.toml");
+    updateGatewayConfig(configPath, (document) => {
+      table(document.codex).unknown = true;
+    });
+
+    const result = spawnSync(process.execPath, [cli, "rules", "check"], {
+      cwd: project,
+      env: environment,
+      encoding: "utf8",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("[codex]");
+    expect(result.stderr).toContain("unknown");
   });
 
   it("does not overwrite project rules unless force is explicit", () => {

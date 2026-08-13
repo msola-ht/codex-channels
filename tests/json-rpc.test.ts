@@ -162,6 +162,9 @@ class FakeTransport extends BaseTransport {
   permissionPages: Array<Record<string, unknown>> = [{ data: [], nextCursor: null }];
   permissionPageIndex = 0;
   configServiceTier: unknown = "fast";
+  configModel: unknown = "gpt-test";
+  configReasoningEffort: unknown = "high";
+  configLayers: unknown = null;
   accountUsageResult: Record<string, unknown> = {
     summary: {
       lifetimeTokens: null,
@@ -472,9 +475,13 @@ class FakeTransport extends BaseTransport {
           JSON.stringify({
             id: decoded.id,
             result: {
-              config: { service_tier: this.configServiceTier },
+              config: {
+                model: this.configModel,
+                model_reasoning_effort: this.configReasoningEffort,
+                service_tier: this.configServiceTier,
+              },
               origins: {},
-              layers: null,
+              layers: this.configLayers,
             },
           }),
         ),
@@ -1832,6 +1839,121 @@ describe("JsonRpcClient", () => {
         reloadUserConfig: true,
       },
     ]);
+  });
+
+  it("persists the default model and reasoning effort as one App Server config write", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await client.writeDefaultModelSettings("gpt-test", "high");
+
+    expect(
+      transport.sent
+        .filter((message) => message.method === "config/batchWrite")
+        .map((message) => message.params),
+    ).toEqual([{
+      edits: [{
+        keyPath: "model",
+        value: "gpt-test",
+        mergeStrategy: "replace",
+      }, {
+        keyPath: "model_reasoning_effort",
+        value: "high",
+        mergeStrategy: "replace",
+      }],
+      reloadUserConfig: true,
+    }]);
+  });
+
+  it("writes structured user settings and removals through one config transaction", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await client.writeUserConfigEdits([{
+      keyPath: "features.multi_agent_v2",
+      value: true,
+    }, {
+      keyPath: "agents.ds",
+      value: {
+        description: "DeepSeek role",
+        config_file: "/tmp/ds.toml",
+        nickname_candidates: ["DeepSeek"],
+      },
+    }, {
+      keyPath: "agents.old",
+      value: null,
+    }]);
+
+    expect(transport.sent.find((message) => message.method === "config/batchWrite")?.params)
+      .toEqual({
+        edits: [{
+          keyPath: "features.multi_agent_v2",
+          value: true,
+          mergeStrategy: "replace",
+        }, {
+          keyPath: "agents.ds",
+          value: {
+            description: "DeepSeek role",
+            config_file: "/tmp/ds.toml",
+            nickname_candidates: ["DeepSeek"],
+          },
+          mergeStrategy: "replace",
+        }, {
+          keyPath: "agents.old",
+          value: null,
+          mergeStrategy: "replace",
+        }],
+        reloadUserConfig: true,
+      });
+  });
+
+  it("reads the raw user config layer and guards a subsequent config write by version", async () => {
+    const transport = new FakeTransport();
+    transport.configLayers = [{
+      name: { type: "user", file: "/tmp/config.toml", profile: null },
+      version: "sha256:current",
+      config: { agents: { ds: { config_file: "/tmp/ds.toml" } } },
+      disabledReason: null,
+    }];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.readUserConfigSnapshot()).resolves.toEqual({
+      config: { agents: { ds: { config_file: "/tmp/ds.toml" } } },
+      version: "sha256:current",
+    });
+    await client.writeUserConfigEdits(
+      [{ keyPath: "agents.ds", value: null }],
+      { expectedVersion: "sha256:current" },
+    );
+
+    expect(transport.sent.find((message) => message.method === "config/read")?.params)
+      .toEqual({ includeLayers: true });
+    expect(transport.sent.find((message) => message.method === "config/batchWrite")?.params)
+      .toMatchObject({ expectedVersion: "sha256:current" });
+  });
+
+  it("reads the default model and reasoning effort through the App Server config API", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.readDefaultModelSettings()).resolves.toEqual({
+      model: "gpt-test",
+      effort: "high",
+    });
+    expect(transport.sent.find((message) => message.method === "config/read")?.params)
+      .toEqual({ includeLayers: false });
   });
 
   it("maps the effective Fast config to a stable service-tier value", async () => {

@@ -96,7 +96,7 @@
   单一 `/plugin` 命令、已安装列表和官方 mention 调用；飞书覆盖可调用项选择、一次性任务表单与
   提交闭环，搜索、安装、卸载与分享仍被边界测试禁止。
 - 官方模型目录到稳定 Application 模型选项的映射、不可见项过滤、必需字段失败关闭，模型、
-  思考等级和 Fast 的 Thread 覆盖、Codex 用户级 Fast 默认值持久化、共享客户端完整或残缺设置
+  思考等级和 Fast 的 Thread 覆盖、Codex 用户级模型/思考等级/Fast 默认值及受控 agents 设置持久化、共享客户端完整或残缺设置
   通知、Thread 失效通知及 Gateway/CLI 连接恢复；DeepSeek 官方脚本目录提取、两种 Setup 模式、
   API Key 输出隔离、下载失败不修改、Flash 可选与 Pro 可见但不可选，以及跨 Provider 新建
   Thread、原 Thread 可恢复、精确 Provider 路由、设置通知不覆盖不可变 Provider，以及在文本模型
@@ -290,7 +290,7 @@ RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
 
 该合同测试使用临时 `CODEX_HOME`、provider-only DeepSeek 测试配置和本地测试 MCP 进程，验证
 App Server 不依赖 CLI Profile 即可初始化，并验证 MCP 完整详情、只读资源、OAuth PKCE 回调及完成通知、
-工具审批元数据及 `_meta.persist` 通过真实 App Server 往返；同时验证一个 Client 写入的 Fast 用户默认值能被另一个 Client
+工具审批元数据及 `_meta.persist` 通过真实 App Server 往返；同时验证一个 Client 写入的模型、思考等级、Fast、`multi_agent_v2` 与 agents 用户设置能被另一个 Client
 读取，之后新建 Thread 的运行时 `serviceTier` 按 `default → priority → default` 变化，并验证
 第二个 Client 修改共享 Thread 的模型、思考等级和 Fast 设置时，订阅方收到完整的
 `thread/settings/updated`；第二个 Client 重连后再次修改仍会广播。合同还会启动并立即清理一个

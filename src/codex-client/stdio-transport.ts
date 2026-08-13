@@ -6,6 +6,7 @@ import { BaseTransport } from "./transport.js";
 export interface StdioTransportOptions {
   codexBinary: string;
   cwd: string;
+  environment?: NodeJS.ProcessEnv;
   onStderr?: (text: string) => void;
 }
 
@@ -24,6 +25,7 @@ export class StdioTransport extends BaseTransport {
     }
     const child = spawn(this.options.codexBinary, ["app-server", "--stdio"], {
       cwd: this.options.cwd,
+      env: this.options.environment,
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.process = child;

@@ -106,6 +106,7 @@ export interface GatewayConfigDocument {
 export function parseGatewayConfig(content: string, source?: string): TomlTable;
 export function tomlErrorSummary(error: unknown): string;
 export function validateGatewayConfigDocument(document: unknown): GatewayConfigDocument;
+export function validateCodexConfigDocument(document: unknown): GatewayConfigDocument["codex"];
 export function validateWebuiConfigDocument(
   document: unknown,
 ): {

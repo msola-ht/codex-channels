@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   parseGatewayConfig,
   readGatewayConfig,
+  validateCodexConfigDocument,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import {
@@ -35,6 +36,16 @@ afterEach(() => {
 });
 
 describe("Gateway config.toml", () => {
+  it("shares strict Codex defaults with scoped configuration readers", () => {
+    expect(validateCodexConfigDocument({})).toEqual({
+      binary: "codex",
+      socket_path: "runtime/codex-app-server.sock",
+      sandbox: "workspace-write",
+    });
+    expect(() => validateCodexConfigDocument({ unknown: true }))
+      .toThrow("[codex]");
+  });
+
   it("derives global debug mode from debug and trace log levels", () => {
     expect(isDebugLogLevel("debug")).toBe(true);
     expect(isDebugLogLevel("trace")).toBe(true);

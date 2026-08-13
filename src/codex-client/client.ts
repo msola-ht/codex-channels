@@ -61,6 +61,7 @@ import type {
   ThreadUnarchiveResponse,
   TurnStartResponse,
   TurnSteerResponse,
+  JsonValue,
 } from "../codex-protocol/index.js";
 import type {
   ThreadLifecyclePort,
@@ -494,17 +495,40 @@ export class CodexAppServerClient implements
   }
 
   async writeDefaultFastMode(enabled: boolean): Promise<void> {
-    await this.rpc.request({
-      method: "config/batchWrite",
-      params: {
-        edits: [{
-          keyPath: "service_tier",
-          value: enabled ? "fast" : "default",
-          mergeStrategy: "replace",
-        }],
-        reloadUserConfig: true,
-      },
-    }, { retryOverload: false });
+    await this.writeUserConfigEdits([{
+      keyPath: "service_tier",
+      value: enabled ? "fast" : "default",
+    }]);
+  }
+
+  async writeDefaultModelSettings(model: string, effort: string): Promise<void> {
+    await this.writeUserConfigEdits([{
+      keyPath: "model",
+      value: model,
+    }, {
+      keyPath: "model_reasoning_effort",
+      value: effort,
+    }]);
+  }
+
+  async readDefaultModelSettings(): Promise<{
+    model: string | null;
+    effort: string | null;
+  }> {
+    const params: ConfigReadParams = { includeLayers: false };
+    const response = await this.rpc.request<ConfigReadResponse>({
+      method: "config/read",
+      params,
+    }, { retryOverload: true });
+    const model = response.config.model;
+    const effort = response.config.model_reasoning_effort;
+    if (
+      (model !== null && (typeof model !== "string" || model.trim() === ""))
+      || (effort !== null && (typeof effort !== "string" || effort.trim() === ""))
+    ) {
+      throw new Error("Codex 响应缺少有效的全局模型或思考等级");
+    }
+    return { model, effort };
   }
 
   async readDefaultServiceTier(cwd: string): Promise<string | null> {
@@ -518,6 +542,55 @@ export class CodexAppServerClient implements
       throw new Error("Codex 响应缺少有效 config service_tier");
     }
     return serviceTier;
+  }
+
+  async writeUserConfigEdits(
+    edits: Array<{ keyPath: string; value: JsonValue }>,
+    options: { expectedVersion?: string } = {},
+  ): Promise<void> {
+    await this.rpc.request({
+      method: "config/batchWrite",
+      params: {
+        edits: edits.map((edit) => ({
+          ...edit,
+          mergeStrategy: "replace" as const,
+        })),
+        ...(options.expectedVersion === undefined
+          ? {}
+          : { expectedVersion: options.expectedVersion }),
+        reloadUserConfig: true,
+      },
+    }, { retryOverload: false });
+  }
+
+  async readUserConfigSnapshot(): Promise<{
+    config: Record<string, JsonValue | undefined>;
+    version: string;
+  }> {
+    const response = await this.rpc.request<ConfigReadResponse>({
+      method: "config/read",
+      params: { includeLayers: true },
+    }, { retryOverload: true });
+    const userLayer = response.layers?.find((layer) =>
+      layer.name.type === "user" && layer.name.profile === null
+    );
+    if (userLayer === undefined) {
+      throw new Error("Codex 响应缺少用户配置层");
+    }
+    if (
+      userLayer.config === null
+      || typeof userLayer.config !== "object"
+      || Array.isArray(userLayer.config)
+    ) {
+      throw new Error("Codex 响应包含无效用户配置层");
+    }
+    if (userLayer.version.trim() === "") {
+      throw new Error("Codex 响应缺少用户配置版本");
+    }
+    return {
+      config: userLayer.config,
+      version: userLayer.version,
+    };
   }
 
   async forkThread(

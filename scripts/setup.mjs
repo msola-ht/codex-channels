@@ -10,6 +10,7 @@ import { runVisionSetup } from "./vision-setup.mjs";
 import { runDebugSetup } from "./debug-setup.mjs";
 import { runApiProviderSetup } from "./api-provider-setup.mjs";
 import { runSkillSetup } from "./skill-setup.mjs";
+import { runCodexDefaultsSetup } from "./codex-defaults-setup.mjs";
 
 export async function runSetup({
   input = process.stdin,
@@ -23,6 +24,7 @@ export async function runSetup({
   debugSetup = runDebugSetup,
   apiProviderSetup = runApiProviderSetup,
   skillSetup = runSkillSetup,
+  codexDefaultsSetup = runCodexDefaultsSetup,
 } = {}) {
   prompts.intro("Codex Connect Setup");
   while (true) {
@@ -33,7 +35,7 @@ export async function runSetup({
         {
           value: "models",
           label: "模型渠道",
-          hint: "配置 DeepSeek、第三方 API 与图片识别",
+          hint: "配置 Codex 官方、DeepSeek、第三方 API 与图片识别",
         },
         {
           value: "channels",
@@ -82,6 +84,7 @@ export async function runSetup({
           deepseekSetup,
           apiProviderSetup,
           visionSetup,
+          codexDefaultsSetup,
         });
         if (isBackResult(result)) continue;
         return result;
@@ -136,11 +139,17 @@ async function runModelSetup({
   deepseekSetup,
   apiProviderSetup,
   visionSetup,
+  codexDefaultsSetup,
 }) {
   const module = await prompts.select({
     message: "选择模型渠道设置",
     showInstructions: false,
     options: [
+      {
+        value: "codex",
+        label: "Codex 官方",
+        hint: "设置全局默认模型与思考等级",
+      },
       { value: "deepseek", label: "DeepSeek", hint: "安装、切换或恢复模型提供商" },
       {
         value: "api_provider",
@@ -152,6 +161,9 @@ async function runModelSetup({
     ],
   });
   if (prompts.isCancel(module) || module === "back") return { action: "back" };
+  if (module === "codex") {
+    return codexDefaultsSetup({ input, output, prompts, allowBack: true });
+  }
   if (module === "deepseek") {
     return deepseekSetup({ input, output, prompts, allowBack: true });
   }
