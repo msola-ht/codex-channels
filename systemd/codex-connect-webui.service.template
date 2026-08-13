@@ -4,7 +4,7 @@ Description=Codex Connect WebUI
 [Service]
 Type=simple
 WorkingDirectory=__CONFIG_DIR__
-ExecStart=__NODE_BINARY__ __CLI_ENTRY__ webui
+ExecStart=__NODE_BINARY__ --disable-warning=ExperimentalWarning __CLI_ENTRY__ webui
 Environment="CODEX_CONNECT_HOME=__CONFIG_DIR_ENV__"
 Environment="CODEX_CONNECT_CONFIG_FILE=__CONFIG_PATH_ENV__"
 Environment="PATH=__SYSTEMD_PATH__"

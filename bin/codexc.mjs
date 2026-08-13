@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S node --disable-warning=ExperimentalWarning
 
 import { spawn, spawnSync } from "node:child_process";
 import {
@@ -74,6 +74,7 @@ import {
 
 const foregroundShutdownTimeoutMs = 5_000;
 const foregroundProcessGroupExitTimeoutMs = 1_000;
+const nodeExperimentalWarningOption = "--disable-warning=ExperimentalWarning";
 
 const helpText = {
   main: `Codex Connect CLI
@@ -458,7 +459,9 @@ function runGateway(args) {
     throw new Error("用法：codexc gateway");
   }
   const runtime = configuredEnvironment();
-  const child = spawn(process.execPath, [join(packageDir, "dist/main.js")], {
+  const child = spawn(process.execPath, nodeArguments([
+    join(packageDir, "dist/main.js"),
+  ]), {
     stdio: "inherit",
     env: runtime.environment,
     cwd: runtime.dataDir,
@@ -1119,7 +1122,10 @@ function runDoctor(args) {
   if (args.length > 0) {
     throw new Error("用法：codexc doctor");
   }
-  const result = spawnSync(process.execPath, [join(packageDir, "scripts/doctor.mjs"), ...args], {
+  const result = spawnSync(process.execPath, nodeArguments([
+    join(packageDir, "scripts/doctor.mjs"),
+    ...args,
+  ]), {
     stdio: "inherit",
     env: process.env,
     cwd: process.cwd(),
@@ -1215,7 +1221,7 @@ async function runForegroundScript(
   const runtime = configuredEnvironment();
   const child = spawn(
     process.execPath,
-    [join(packageDir, relativePath), ...args],
+    nodeArguments([join(packageDir, relativePath), ...args]),
     {
       stdio: "inherit",
       env: { ...runtime.environment, ...additionalEnvironment },
@@ -1435,7 +1441,10 @@ function runMetricsCommand(args) {
   try {
     result = spawnSync(
       process.execPath,
-      [join(packageDir, "scripts/metrics-database.mjs"), ...withoutStdout],
+      nodeArguments([
+        join(packageDir, "scripts/metrics-database.mjs"),
+        ...withoutStdout,
+      ]),
       { stdio: ["inherit", output.fileDescriptor, "inherit"] },
     );
   } finally {
@@ -1579,11 +1588,15 @@ function stringValue(value) {
 }
 
 function run(executable, args, environment, cwd) {
-  const result = spawnSync(executable, args, {
-    stdio: "inherit",
-    env: environment,
-    ...(cwd ? { cwd } : {}),
-  });
+  const result = spawnSync(
+    executable,
+    executable === process.execPath ? nodeArguments(args) : args,
+    {
+      stdio: "inherit",
+      env: environment,
+      ...(cwd ? { cwd } : {}),
+    },
+  );
   if (result.error) {
     throw result.error;
   }
@@ -1594,6 +1607,10 @@ function run(executable, args, environment, cwd) {
   if (result.status !== 0) {
     throw new Error(`子命令执行失败：exit=${result.status ?? 1}`);
   }
+}
+
+function nodeArguments(args) {
+  return [nodeExperimentalWarningOption, ...args];
 }
 
 function parseWorkspaceAddOptions(args) {

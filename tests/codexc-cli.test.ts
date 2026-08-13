@@ -45,6 +45,43 @@ afterEach(() => {
 });
 
 describe("codexc CLI", () => {
+  it("suppresses only Node experimental warnings at the executable boundary", () => {
+    expect(readFileSync(cli, "utf8").split("\n", 1)[0]).toBe(
+      "#!/usr/bin/env -S node --disable-warning=ExperimentalWarning",
+    );
+  });
+
+  it("keeps SQLite-backed child command output free of experimental warnings", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-warning-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    mkdirSync(workspace);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], {
+      cwd: workspace,
+      env: environment,
+    });
+    const store = new SqliteModelRequestMetricsStore(
+      requestMetricsDatabasePath(join(home, "data", "gateway.sqlite3")),
+    );
+    store.close();
+
+    const result = spawnSync(cli, ["metrics", "status"], {
+      cwd: workspace,
+      encoding: "utf8",
+      env: environment,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("Schema：7");
+    expect(result.stderr).toBe("");
+  });
+
   it("shows scoped help for every public command without requiring configuration", () => {
     const cases = [
       [["init", "-h"], "用法：codexc init"],

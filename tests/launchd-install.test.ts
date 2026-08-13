@@ -62,9 +62,15 @@ describe("launchd installer", () => {
     const nodeBinary = realpathSync(process.execPath);
 
     expect(appServer).toContain(`<string>${nodeBinary}</string>`);
+    expect(appServer).toContain(
+      "<string>--disable-warning=ExperimentalWarning</string>",
+    );
     expect(appServer).toContain(`<string>${dirname(nodeBinary)}:`);
     expect(gateway).toContain(`<key>CODEX_BINARY</key>\n    <string>${nodeBinary}</string>`);
     expect(gateway).toContain(`<key>PATH</key>`);
+    expect(gateway).toContain(
+      "<string>--disable-warning=ExperimentalWarning</string>",
+    );
     expect(gateway).toContain("/opt/homebrew/bin");
     expect(appServer).toContain("<string>service-app-server</string>");
     expect(appServer).toContain(

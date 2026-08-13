@@ -60,13 +60,15 @@ describe("systemd installer", () => {
     const nodeBinary = realpathSync(process.execPath);
 
     expect(appServer).toContain(
-      `ExecStart="${nodeBinary}" "${resolve("bin/codexc.mjs")}" service-app-server`,
+      `ExecStart="${nodeBinary}" --disable-warning=ExperimentalWarning `
+      + `"${resolve("bin/codexc.mjs")}" service-app-server`,
     );
     expect(appServer).toContain(`WorkingDirectory=${root}`);
     expect(gateway).toContain(`WorkingDirectory=${configDir}`);
     expect(appServer).not.toContain(`WorkingDirectory="${root}"`);
     expect(gateway).not.toContain(`WorkingDirectory="${configDir}"`);
     expect(gateway).toContain(`ExecStart="${nodeBinary}"`);
+    expect(gateway).toContain("--disable-warning=ExperimentalWarning");
     expect(gateway).toContain("codex-connect-app-server.service");
     expect(appServer).toContain('Environment="CODEX_CONNECT_SERVICE_ROLE=app-server"');
     expect(gateway).toContain('Environment="CODEX_CONNECT_SERVICE_ROLE=gateway"');
