@@ -45,7 +45,11 @@ export async function runConfig({
       showInstructions: false,
       options: [
         { value: "display", label: "显示设置", hint: "操作详情、计划更新、参考价人民币换算" },
-        { value: "system", label: "系统设置", hint: "调试模式、审批超时、Sandbox、默认工作区与模型" },
+        {
+          value: "system",
+          label: "系统设置",
+          hint: "调试模式、审批超时、Sandbox、默认工作区与渠道模型覆盖",
+        },
         { value: "workspaces", label: "工作区设置", hint: "沙箱、审批策略与权限 Profile" },
         { value: "webui", label: "WebUI 设置", hint: "监听地址、端口与访问令牌" },
         { value: "metrics", label: "指标设置", hint: "本地保留、中心接入与全局视图" },

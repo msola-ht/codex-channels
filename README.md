@@ -33,7 +33,7 @@ codexc setup
 
 `codexc config` 提供交互式配置与设置菜单，覆盖配置文件中可安全编辑的参数：显示设置（操作
 详情、计划更新、参考价人民币换算）、系统设置（调试模式、审批超时、Sandbox、默认工作区与
-模型）、工作区设置（沙箱、审批策略、权限 Profile）、Telegram 消息格式，以及配置路径查看。
+渠道新会话模型覆盖）、工作区设置（沙箱、审批策略、权限 Profile）、Telegram 消息格式，以及配置路径查看。
 在脚本或管道中运行时会直接输出用户目录与配置文件路径。
 
 注册需要让 Codex 操作的项目：
@@ -59,7 +59,7 @@ Linux 安装后台服务时会检查并尝试启用 systemd linger，使服务�
 
 ## 配置通讯渠道
 
-运行 `codexc setup`，按菜单配置模型渠道、通讯渠道、系统设置和技能安装（把项目技能安装到
+运行 `codexc setup`，按菜单配置模型渠道、通讯渠道和技能安装（把项目技能安装到
 `~/.agents/skills` 供当前 Codex 环境加载）。Gateway 与通讯渠道配置保存在：
 
 ```text
@@ -100,7 +100,7 @@ price_currency = "cny"
 运行 `codexc config` 选择「指标设置 → 本机接入中心」，即可把多台设备的脱敏指标汇总到中心。
 服务端配置、令牌边界和数据说明见 [`docs/metrics-sync.md`](docs/metrics-sync.md)。
 
-在 `codexc setup` 中选择“系统设置 → 调试模式”，可开启脱敏的运行阶段、耗时和统计详情。
+在 `codexc config` 中选择“系统设置 → 调试模式”，可开启脱敏的运行阶段、耗时和统计详情。
 修改后运行 `codexc service restart gateway`。调试内容不会包含消息正文、凭据或审批内容。
 
 Codex 0.147.0 的 Plugin API 仍在开发中，Gateway 默认关闭。需要调试时显式开启并重启 Gateway：

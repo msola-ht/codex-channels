@@ -17,7 +17,7 @@ afterEach(() => {
   }
 });
 
-describe("workspace:add script", () => {
+describe("Workspace configuration", () => {
   it("allocates distinct fallback IDs for multiple non-ASCII names", () => {
     const first = chooseWorkspaceId("数据分析");
     const second = chooseWorkspaceId("客户支持", [first]);

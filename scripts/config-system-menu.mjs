@@ -20,7 +20,11 @@ export async function runSystemSettings({
       { value: "approval_timeout", label: "审批超时", hint: "approval.timeout_seconds（30–3600 秒）" },
       { value: "sandbox", label: "Codex Sandbox", hint: "read-only 或 workspace-write" },
       { value: "default_workspace", label: "默认工作区", hint: "default_workspace" },
-      { value: "default_model", label: "默认模型", hint: "codex.default_model（可留空）" },
+      {
+        value: "default_model",
+        label: "渠道新会话模型覆盖",
+        hint: "仅覆盖 Gateway 新 Thread；全局模型与思考等级请用 codexc setup",
+      },
       { value: "back", label: "返回", hint: "返回配置菜单" },
     ],
   });
@@ -136,7 +140,7 @@ async function runDefaultModel({ environment, output, prompts, writeConfig }) {
   const document = readGatewayConfig(configPath);
   const current = table(document.codex).default_model;
   const value = await prompts.text({
-    message: "默认模型（留空恢复模型默认）",
+    message: "渠道新会话模型覆盖（留空使用 Codex 全局默认）",
     initialValue: typeof current === "string" ? current : "",
     validate: (input) => input.length <= 256 ? undefined : "模型 ID 过长",
   });
@@ -149,8 +153,8 @@ async function runDefaultModel({ environment, output, prompts, writeConfig }) {
   writeConfig(configPath, document);
   output.write(
     normalized
-      ? `默认模型已设为 ${normalized}：${configPath}\n`
-      : `默认模型已恢复为模型默认：${configPath}\n`,
+      ? `渠道新会话模型已覆盖为 ${normalized}：${configPath}\n`
+      : `渠道新会话模型已恢复使用 Codex 全局默认：${configPath}\n`,
   );
   output.write("配置将在重启 Gateway 后生效；不需要重启 App Server。\n");
   return { defaultModel: normalized || null, configPath };
