@@ -13,6 +13,7 @@ export async function readBoundedFetchBody(
   if (rawLength !== null) {
     const contentLength = Number(rawLength);
     if (!Number.isSafeInteger(contentLength) || contentLength < 0) {
+      await response.body?.cancel().catch(() => undefined);
       throw invalidContentLength();
     }
     if (contentLength > maximumBytes) {

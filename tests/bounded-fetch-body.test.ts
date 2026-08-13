@@ -19,9 +19,19 @@ describe("readBoundedFetchBody", () => {
   });
 
   it("rejects invalid and excessive declared lengths", async () => {
-    await expect(readBoundedFetchBody(new Response("x", {
+    const invalidLengthCancel = vi.fn();
+    const invalidLengthResponse = new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(Buffer.from("x"));
+      },
+      cancel: invalidLengthCancel,
+    }), {
       headers: { "content-length": "invalid" },
-    }), 5, errors)).rejects.toThrow("invalid length");
+    });
+    await expect(readBoundedFetchBody(invalidLengthResponse, 5, errors))
+      .rejects.toThrow("invalid length");
+    expect(invalidLengthCancel).toHaveBeenCalledOnce();
+
     await expect(readBoundedFetchBody(new Response("hello!", {
       headers: { "content-length": "6" },
     }), 5, errors)).rejects.toThrow("too large");
