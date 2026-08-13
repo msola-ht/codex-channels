@@ -182,8 +182,8 @@ function splitEscapedText(
 
 function splitExpandableQuotePreview(
   text: string,
-  maxLines = 6,
-  maxCharacters = 240,
+  maxLines = 3,
+  maxCharacters = 150,
 ): { preview: string; remaining: string } {
   const characters = Array.from(text);
   let boundary = 0;

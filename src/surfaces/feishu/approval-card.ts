@@ -56,6 +56,8 @@ export type FeishuApprovalAction =
   | "reject";
 
 const maximumDetailBytes = 12_000;
+const maximumPreviewCharacters = 150;
+const maximumPreviewLines = 3;
 const truncatedSuffix = `\n\n[${contentTruncatedText}]`;
 
 export function renderFeishuApprovalCard(
@@ -101,39 +103,11 @@ export function renderFeishuApprovalCard(
   }
   actions.push(button("拒绝", "danger", interactionToken, "reject"));
 
-  return {
-    config: {
-      update_multi: true,
-      wide_screen_mode: true,
-    },
-    header: {
-      template: "blue",
-      title: {
-        tag: "plain_text",
-        content: "Codex 请求批准",
-      },
-    },
-    elements: [
-      {
-        tag: "div",
-        text: {
-          tag: "plain_text",
-          content: request.title,
-        },
-      },
-      {
-        tag: "div",
-        text: {
-          tag: "plain_text",
-          content: truncateUtf8(request.detail, maximumDetailBytes),
-        },
-      },
-      {
-        tag: "action",
-        actions,
-      },
-    ],
-  };
+  return cardKit("Codex 请求批准", "blue", [
+    markdown(request.title),
+    ...approvalDetailElements(request.detail),
+    ...actionRows(actions),
+  ]);
 }
 
 export function renderFeishuApprovalOutcomeCard(
@@ -141,42 +115,132 @@ export function renderFeishuApprovalOutcomeCard(
   decision: Extract<InteractionDecision, { type: "approval" }>,
   outcome: string,
 ): FeishuCardDocument {
+  return cardKit(interactionProcessedTitle, decision.approved ? "green" : "grey", [
+    markdown(request.title),
+    ...approvalDetailElements(request.detail),
+    markdown(`处理结果：${outcome}`),
+  ]);
+}
+
+function cardKit(
+  title: string,
+  template: "blue" | "green" | "grey",
+  elements: Array<Record<string, unknown>>,
+): FeishuCardKitDocument {
   return {
+    schema: "2.0",
     config: {
       update_multi: true,
       wide_screen_mode: true,
     },
     header: {
-      template: decision.approved ? "green" : "grey",
+      template,
       title: {
         tag: "plain_text",
-        content: interactionProcessedTitle,
+        content: title,
       },
     },
+    body: { elements },
+  };
+}
+
+function markdown(content: string): Record<string, unknown> {
+  return {
+    tag: "markdown",
+    content,
+  };
+}
+
+function approvalDetailElements(detail: string): Array<Record<string, unknown>> {
+  const preview = approvalDetailPreview(detail);
+  if (!preview.truncated) {
+    return [plainText(detail)];
+  }
+  return [
+    plainText(`审批内容预览：\n${preview.text}`),
+    collapsedDetail(detail),
+  ];
+}
+
+function approvalDetailPreview(detail: string): {
+  text: string;
+  truncated: boolean;
+} {
+  const lines = detail.split(/\r?\n/u);
+  const visibleLines = lines.slice(0, maximumPreviewLines).join("\n");
+  const characters = Array.from(visibleLines);
+  const truncated = lines.length > maximumPreviewLines
+    || characters.length > maximumPreviewCharacters;
+  if (!truncated) {
+    return { text: detail, truncated: false };
+  }
+  return {
+    text: `${characters.slice(0, maximumPreviewCharacters).join("").trimEnd()}…`,
+    truncated: true,
+  };
+}
+
+function plainText(content: string): Record<string, unknown> {
+  return {
+    tag: "div",
+    text: {
+      tag: "plain_text",
+      content,
+    },
+  };
+}
+
+function collapsedDetail(detail: string): Record<string, unknown> {
+  return {
+    tag: "collapsible_panel",
+    expanded: false,
+    header: {
+      title: {
+        tag: "plain_text",
+        content: "完整审批内容",
+      },
+      vertical_align: "center",
+      icon: {
+        tag: "standard_icon",
+        token: "down-small-ccm_outlined",
+        size: "16px 16px",
+      },
+      icon_position: "follow_text",
+      icon_expanded_angle: -180,
+    },
+    border: { color: "grey", corner_radius: "5px" },
+    vertical_spacing: "8px",
+    padding: "8px 8px 8px 8px",
     elements: [
       {
         tag: "div",
         text: {
           tag: "plain_text",
-          content: request.title,
+          content: truncateUtf8(detail, maximumDetailBytes),
         },
-      },
-      {
-        tag: "div",
-        text: {
-          tag: "plain_text",
-          content: truncateUtf8(request.detail, maximumDetailBytes),
-        },
-      },
-      {
-        tag: "note",
-        elements: [{
-          tag: "plain_text",
-          content: `处理结果：${outcome}`,
-        }],
       },
     ],
   };
+}
+
+function actionRows(
+  actions: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  const rows: Array<Record<string, unknown>> = [];
+  for (let index = 0; index < actions.length; index += 3) {
+    rows.push({
+      tag: "column_set",
+      flex_mode: "stretch",
+      horizontal_spacing: "8px",
+      columns: actions.slice(index, index + 3).map((action) => ({
+        tag: "column",
+        width: "weighted",
+        weight: 1,
+        elements: [action],
+      })),
+    });
+  }
+  return rows;
 }
 
 function button(
