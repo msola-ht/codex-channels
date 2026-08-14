@@ -235,7 +235,7 @@ export class ModelSelectionService {
       model: preference.model,
       modelProvider: preference.modelProvider,
       ...(preference.effort ? { effort: preference.effort } : {}),
-      ...(preference.serviceTier === null ? {} : { serviceTier: preference.serviceTier }),
+      serviceTier: preference.serviceTier,
     });
   }
 
