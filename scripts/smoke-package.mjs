@@ -35,7 +35,8 @@ try {
   }
   const version = run(command, ["--version"], temporaryDirectory, environment, true).stdout.trim();
   const help = run(command, ["--help"], temporaryDirectory, environment, true).stdout;
-  const workspaceHelp = run(command, ["ws", "-h"], temporaryDirectory, environment, true).stdout;
+  const workspaceHelp = run(command, ["work", "-h"], temporaryDirectory, environment, true).stdout;
+  const metricsHelp = run(command, ["metrics", "-h"], temporaryDirectory, environment, true).stdout;
   const rulesHelp = run(command, ["rules", "init", "-h"], temporaryDirectory, environment, true).stdout;
   const serviceHelp = run(
     command,
@@ -62,12 +63,12 @@ try {
     || !help.includes("service reload")
     || !help.includes("service logs")
     || !help.includes("rules <init|check>")
-    || !help.includes("metrics <run|turns|threads|report|export|status|reset>")
   ) {
     throw new Error("CLI 帮助缺少公开命令");
   }
   if (
     !workspaceHelp.includes("用法：codexc work")
+    || !metricsHelp.includes("用法：codexc metrics")
     || !rulesHelp.includes("用法：codexc rules init")
     || !serviceHelp.includes("gateway|app-server|webui|center|all")
     || !centerHelp.includes("用法：codexc center")

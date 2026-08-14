@@ -89,10 +89,8 @@ describe("codexc CLI", () => {
       [["start", "-h"], "用法：codexc start"],
       [["remote", "-h"], "用法：codexc remote"],
       [["work", "-h"], "用法：codexc work"],
-      [["ws", "-h"], "用法：codexc work"],
       [["work", "list", "--help"], "用法：codexc work list"],
       [["work", "add", "-h"], "用法：codexc work add"],
-      [["ws", "add", "--help"], "用法：codexc work add"],
       [["work", "remove", "--help"], "用法：codexc work remove"],
       [["service", "-h"], "用法：codexc service"],
       [["service", "install", "-h"], "用法：codexc service install"],
@@ -122,6 +120,7 @@ describe("codexc CLI", () => {
       [["metrics", "turns", "--help"], "用法：codexc metrics turns"],
       [["metrics", "threads", "--help"], "用法：codexc metrics threads"],
       [["metrics", "reset", "-h"], "用法：codexc metrics reset"],
+      [["metrics", "sync-reset", "--help"], "用法：codexc metrics sync-reset"],
       [["metrics", "cleanup", "--help"], "用法：codexc metrics cleanup"],
       [["metrics", "prune", "--help"], "用法：codexc metrics prune"],
       [["metrics", "report", "-h"], "用法：codexc metrics report"],
@@ -129,9 +128,10 @@ describe("codexc CLI", () => {
       [["channel", "-h"], "用法：codexc channel"],
       [["channel", "send-image", "--help"], "用法：codexc channel send-image"],
       [["webui", "-h"], "用法：codexc webui"],
+      [["center", "-h"], "用法：codexc center"],
+      [["center", "info", "--help"], "用法：codexc center info"],
+      [["center", "config", "-h"], "用法：codexc center config"],
       [["version", "-h"], "用法：codexc version"],
-      [["gateway", "-h"], "用法：codexc gateway"],
-      [["service-app-server", "--help"], "用法：codexc service-app-server"],
     ] as const;
 
     for (const [args, expected] of cases) {
@@ -141,6 +141,20 @@ describe("codexc CLI", () => {
       expect(result.stderr).toBe("");
     }
   }, 30_000);
+
+  it("keeps service-template entrypoints hidden from public help while retaining scoped diagnostics", () => {
+    const main = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
+    expect(main.stdout).not.toContain("\n  gateway");
+    expect(main.stdout).not.toContain("\n  service-app-server");
+    for (const [command, expected] of [
+      ["gateway", "用法：codexc gateway"],
+      ["service-app-server", "用法：codexc service-app-server"],
+    ] as const) {
+      const result = spawnSync(process.execPath, [cli, command, "--help"], { encoding: "utf8" });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain(expected);
+    }
+  });
 
   it("writes large metrics exports completely without overwriting same-second files", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-metrics-export-"));
@@ -785,22 +799,22 @@ describe("codexc CLI", () => {
     execFileSync(process.execPath, [cli, "work", "add", "--cwd", project], { cwd: project, env: environment });
     rmSync(project, { recursive: true });
 
-    const listed = execFileSync(process.execPath, [cli, "ws"], {
+    const listed = execFileSync(process.execPath, [cli, "work"], {
       cwd: root,
       env: environment,
       encoding: "utf8",
     });
-    const removed = execFileSync(process.execPath, [cli, "ws", "remove", "temporary-project"], {
+    const removed = execFileSync(process.execPath, [cli, "work", "remove", "temporary-project"], {
       cwd: root,
       env: environment,
       encoding: "utf8",
     });
-    const relisted = execFileSync(process.execPath, [cli, "ws"], {
+    const relisted = execFileSync(process.execPath, [cli, "work"], {
       cwd: root,
       env: environment,
       encoding: "utf8",
     });
-    const rejected = spawnSync(process.execPath, [cli, "ws", "remove", "1"], {
+    const rejected = spawnSync(process.execPath, [cli, "work", "remove", "1"], {
       cwd: root,
       env: environment,
       encoding: "utf8",
@@ -835,7 +849,7 @@ describe("codexc CLI", () => {
     );
     const before = readFileSync(join(home, "config.toml"), "utf8");
 
-    execFileSync(process.execPath, [cli, "ws", "remove", "project"], {
+    execFileSync(process.execPath, [cli, "work", "remove", "project"], {
       cwd: root,
       env: environment,
     });
@@ -1801,6 +1815,82 @@ describe("codexc CLI", () => {
     expect(result.stderr).toContain("用法：codexc config");
   });
 
+  it("rejects the undocumented help alias and extra top-level help arguments", () => {
+    const alias = spawnSync(process.execPath, [cli, "help"], { encoding: "utf8" });
+    const extra = spawnSync(process.execPath, [cli, "--help", "unexpected"], {
+      encoding: "utf8",
+    });
+
+    expect(alias.status).toBe(1);
+    expect(alias.stderr).toContain("未知命令：help");
+    expect(extra.status).toBe(1);
+    expect(extra.stderr).toContain("用法：codexc --help");
+  });
+
+  it("validates command syntax before requiring user configuration", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-syntax-"));
+    temporaryDirectories.push(root);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: join(root, "missing"),
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+
+    for (const [args, expected] of [
+      [["work", "remove"], "用法：codexc work remove"],
+      [["work", "add", "--unknown"], "未知参数：--unknown"],
+      [["work", "unknown"], "用法：codexc work"],
+      [["agents"], "用法：codexc agents"],
+      [["agents", "unknown"], "用法：codexc agents"],
+    ] as const) {
+      const result = spawnSync(process.execPath, [cli, ...args], {
+        cwd: root,
+        env: environment,
+        encoding: "utf8",
+      });
+      expect(result.status, `${args.join(" ")}\n${result.stderr}`).toBe(1);
+      expect(result.stderr).toContain(expected);
+      expect(result.stderr).not.toContain("尚未初始化");
+    }
+  });
+
+  it("rejects extra arguments instead of silently executing scoped commands", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-extra-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const codexHome = join(root, ".codex");
+    const workspace = join(root, "Workspace");
+    mkdirSync(workspace);
+    mkdirSync(codexHome);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_HOME: codexHome,
+    };
+    execFileSync(process.execPath, [cli, "init"], {
+      cwd: workspace,
+      env: environment,
+    });
+
+    for (const [args, expected] of [
+      [["work", "list", "unexpected"], "用法：codexc work list"],
+      [["agents", "status", "unexpected"], "用法：codexc agents"],
+      [["agents", "enable-deepseek", "unexpected"], "用法：codexc agents"],
+      [["agents", "disable-deepseek", "unexpected"], "用法：codexc agents"],
+      [["center", "info", "unexpected"], "用法：codexc center info"],
+      [["center", "config", "unexpected"], "用法：codexc center config"],
+    ] as const) {
+      const result = spawnSync(process.execPath, [cli, ...args], {
+        cwd: root,
+        env: environment,
+        encoding: "utf8",
+      });
+      expect(result.status, `${args.join(" ")}\n${result.stderr}`).toBe(1);
+      expect(result.stderr).toContain(expected);
+    }
+  });
+
   it("documents the launchd uninstall command", () => {
     const output = execFileSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
 
@@ -1809,6 +1899,12 @@ describe("codexc CLI", () => {
     expect(output).toContain("service logs");
     expect(output).toContain("保留用户数据");
     expect(output).toContain("setup ");
+  });
+
+  it("describes Setup by its current model, channel, and skill responsibilities", () => {
+    const output = execFileSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
+
+    expect(output).toContain("配置模型、通讯渠道与技能");
   });
 
   it("rejects invalid service log options before reading user configuration", () => {
@@ -1932,11 +2028,13 @@ describe("codexc CLI", () => {
     expect(log).not.toContain("codex-connect-webui.service");
   });
 
-  it("rejects the removed workspace command alias", () => {
-    const result = spawnSync(process.execPath, [cli, "workspace"], { encoding: "utf8" });
+  it("rejects removed Workspace command aliases", () => {
+    for (const alias of ["workspace", "ws"]) {
+      const result = spawnSync(process.execPath, [cli, alias], { encoding: "utf8" });
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("未知命令：workspace");
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(`未知命令：${alias}`);
+    }
   });
 
   it("shows an explicitly configured Gateway config file", () => {
@@ -1969,7 +2067,7 @@ describe("codexc CLI", () => {
       env: { ...process.env, CODEX_CONNECT_CONFIG_FILE: configPath },
       encoding: "utf8",
     });
-    execFileSync(process.execPath, [cli, "ws"], {
+    execFileSync(process.execPath, [cli, "work"], {
       cwd: workspace,
       env: { ...process.env, CODEX_CONNECT_CONFIG_FILE: configPath },
     });

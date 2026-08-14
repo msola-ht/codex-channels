@@ -66,18 +66,7 @@
     "protocol:check": "node scripts/check-protocol.mjs",
     "release:check": "node scripts/check-release-tag.mjs",
     "lint": "eslint src tests bin runtime scripts",
-    "test:coverage": "vitest run --config vitest.config.ts --coverage",
-    "launchd:install": "node scripts/install-launchd.mjs",
-    "systemd:install": "node scripts/install-systemd.mjs",
-    "remote": "node scripts/codex-remote.mjs",
-    "workspace:add": "node scripts/workspace-add.mjs",
-    "service:setup": "npm run build && node bin/codexc.mjs service install",
-    "service:start": "node bin/codexc.mjs service start",
-    "service:stop": "node bin/codexc.mjs service stop",
-    "service:reload": "node bin/codexc.mjs service reload",
-    "service:uninstall": "node bin/codexc.mjs service uninstall",
-    "service:restart": "node bin/codexc.mjs service restart",
-    "service:status": "node bin/codexc.mjs service status"
+    "test:coverage": "vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
     "@clack/prompts": "^1.7.0",

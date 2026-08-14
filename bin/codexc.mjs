@@ -83,19 +83,17 @@ const helpText = {
 
 初始化与诊断：
   init                         初始化用户目录和配置
-  setup                        选择并配置 Gateway 模块
+  setup                        配置模型、通讯渠道与技能
   config                       打开配置与设置菜单（显示、系统、工作区、指标、消息格式）
   doctor                       检查安装、配置、Codex、Linux 沙箱与服务
 
 项目与会话：
   remote [参数]                启动共享 App Server 的 Codex TUI
-  work [list|add|remove]       管理 Workspace（别名 ws；无子命令进入交互菜单）
+  work [list|add|remove]       管理 Workspace（无子命令进入交互菜单）
   rules <init|check>           生成或检查项目 Codex 命令预设
-  agents <enable-deepseek|disable-deepseek|status>   配置 multi_agent_v2 的 DeepSeek 子代理角色
-  update                      审查并更新本地配置与数据库
-  state upgrade               显式升级 Gateway 状态数据库
-  metrics <run|turns|threads|report|export|status|reset>   查询、导出或重建模型请求指标
-  metrics cleanup             备份并按保留策略清理旧指标
+  agents status                查看 multi_agent_v2 的 DeepSeek 子代理状态
+  update                       审查并更新本地配置与数据库
+  metrics                      查询、导出或维护模型请求指标
   channel send-image          提交本地图片，由 Gateway 发送回当前渠道会话
   webui                        启动本地只读指标 WebUI（默认回环地址）
   center [config|info]          多设备指标中心：启动服务、交互配置或查看地址
@@ -137,9 +135,6 @@ const helpText = {
   codexc work list
   codexc work add [--id ID] [--name 名称] [--cwd 目录] [--prune-missing]
   codexc work remove <序号|ID|名称>`,
-  ws: `用法：codexc work（别名：codexc ws）
-
-管理 Workspace；使用 codexc work --help 查看完整用法。`,
   "work.add": `用法：codexc work add [--id ID] [--name 名称] [--cwd 目录] [--prune-missing]
 
 把当前目录注册为 Workspace；交互式新建请运行 codexc work。`,
@@ -172,7 +167,7 @@ const helpText = {
   config: `用法：codexc config
 
 打开交互式配置与设置菜单：显示设置（操作详情、计划更新、全局价格显示方式）、系统设置
-（调试模式、审批超时、Sandbox、默认工作区与模型）、工作区设置（沙箱、审批策略、权限 Profile）、
+（调试模式、审批超时、Sandbox、默认工作区与渠道新会话模型覆盖）、工作区设置（沙箱、审批策略、权限 Profile）、
 多设备指标（本机接入中心、接入状态、停用接入）、Telegram 消息格式与配置路径查看。
 非交互终端（脚本或管道）直接显示用户目录与配置文件路径。`,
   doctor: `用法：codexc doctor
@@ -261,6 +256,12 @@ const helpText = {
 --database 指定中心 SQLite 路径，默认 <配置目录>/data/central-metrics.sqlite3。
 上报接口：POST /api/ingest（Bearer 上报令牌）；查询接口使用 Bearer 查看令牌：/api/overview、/api/requests、
 /api/subagents、/api/devices、/api/health。`,
+  "center.info": `用法：codexc center info
+
+查看中心服务地址、双令牌配置状态、数据库路径与当前运行状态。`,
+  "center.config": `用法：codexc center config
+
+交互配置中心服务端的 [metrics.center]；设备接入中心仍通过 codexc config 配置。`,
   "metrics.status": `用法：codexc metrics status
 
 只读显示指标数据库路径、Schema 兼容性和记录数量。`,
@@ -311,13 +312,16 @@ provider 当前支持 openai、deepseek。备份并删除本地与中心库中�
 内部 Codex App Server 服务入口。`,
 };
 
-const [command = "help", ...args] = process.argv.slice(2);
+const [command, ...args] = process.argv.slice(2);
 
 try {
   switch (command) {
-    case "help":
+    case undefined:
+      printHelp();
+      break;
     case "--help":
     case "-h":
+      requireNoArguments(args, "用法：codexc --help");
       printHelp();
       break;
     case "--version":
@@ -371,7 +375,6 @@ try {
       runScript("scripts/codex-remote.mjs", args, {}, process.cwd());
       break;
     case "work":
-    case "ws":
       await workspace(args);
       break;
     case "service":
@@ -424,8 +427,16 @@ try {
       runScript("scripts/webui-server.mjs", args);
       break;
     case "center":
-      if (showRequestedHelp(args, "center")) {
+      if (showRequestedHelp(args, "center")
+        || showSubcommandHelp(args, "info", "center.info")
+        || showSubcommandHelp(args, "config", "center.config")) {
         break;
+      }
+      if (args[0] === "info" && args.length !== 1) {
+        throw new Error(helpText["center.info"]);
+      }
+      if (args[0] === "config" && args.length !== 1) {
+        throw new Error(helpText["center.config"]);
       }
       runScript("scripts/metrics-center-server.mjs", args);
       break;
@@ -671,7 +682,7 @@ async function runServiceAppServer(args) {
 }
 
 async function workspace(args) {
-  if (showRequestedHelp(args, "work") || showRequestedHelp(args, "ws")) {
+  if (showRequestedHelp(args, "work")) {
     return;
   }
   if (
@@ -681,6 +692,21 @@ async function workspace(args) {
   ) {
     return;
   }
+  const [subcommand] = args;
+  let addOptions;
+  if (subcommand === "list") {
+    if (args.length !== 1) {
+      throw new Error(helpText["work.list"]);
+    }
+  } else if (subcommand === "add") {
+    addOptions = parseWorkspaceAddOptions(args.slice(1));
+  } else if (subcommand === "remove") {
+    if (args.length !== 2) {
+      throw new Error(helpText["work.remove"]);
+    }
+  } else if (subcommand !== undefined) {
+    throw new Error(helpText.work);
+  }
   const runtime = requireUserConfig();
   const eventQueuePath = configEventQueuePath(runtime.dataDir);
   const fallbackDefaultWorkspace = {
@@ -688,8 +714,8 @@ async function workspace(args) {
     id: "codex-connect",
     name: ".codex-connect/workspace",
   };
-  if (args[0] === "add") {
-    const options = parseWorkspaceAddOptions(args.slice(1));
+  if (subcommand === "add") {
+    const options = addOptions;
     const result = addWorkspaceToConfig({
       configPath: runtime.configPath,
       cwd: options.cwd ?? process.cwd(),
@@ -714,10 +740,7 @@ async function workspace(args) {
     }
     return;
   }
-  if (args[0] === "remove") {
-    if (args.length !== 2) {
-      throw new Error("用法：codexc work remove <序号|ID|名称>");
-    }
+  if (subcommand === "remove") {
     const result = removeWorkspaceFromConfig({
       configPath: runtime.configPath,
       selector: args[1],
@@ -733,16 +756,7 @@ async function workspace(args) {
     printCliMessage("note", "运行中的 Gateway 会自动重新加载配置，必要时重启。");
     return;
   }
-  if (args.length > 0 && args[0] !== "list") {
-    throw new Error([
-      "用法：",
-      "  codexc work",
-      "  codexc work list",
-      "  codexc work add [--name 名称] [--cwd 目录] [--id ID] [--prune-missing]",
-      "  codexc work remove <序号|ID|名称>",
-    ].join("\n"));
-  }
-  if (process.stdout.isTTY && args[0] !== "list") {
+  if (process.stdout.isTTY && subcommand !== "list") {
     await runWorkspaceMenu({
       runtime,
       eventQueuePath,
@@ -1193,6 +1207,12 @@ function agents(args) {
     showSubcommandHelp(args, "enable-deepseek", "agents.enable-deepseek") ||
     showSubcommandHelp(args, "disable-deepseek", "agents.disable-deepseek")) {
     return;
+  }
+  if (
+    args.length !== 1
+    || !new Set(["status", "enable-deepseek", "disable-deepseek"]).has(args[0])
+  ) {
+    throw new Error(helpText.agents);
   }
   runScript("scripts/agents.mjs", args);
 }

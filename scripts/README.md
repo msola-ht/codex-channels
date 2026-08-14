@@ -67,8 +67,7 @@
 - `metrics-center-schema.sql`：npm 发布包内中心 SQLite 的规范初始化 Schema；历史 Cloudflare
   D1 migration 保留部署参考，不作为生产中心运行时依赖。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型渠道”“通讯渠道”和
-  “系统设置”流程委派给具体适配器；模型渠道下区分 Codex 官方、DeepSeek、第三方 API 与图片识别，
-  系统设置提供全局调试模式入口。
+  “技能”流程委派给具体适配器；模型渠道下区分 Codex 官方、DeepSeek、第三方 API 与图片识别。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和思考等级，通过独立 stdio
   App Server 的 `config/read` / `config/batchWrite` 更新用户 `config.toml`；不修改登录凭据或
   Gateway 的 Thread 默认模型。
@@ -81,7 +80,7 @@
   hermes 运行时的 `.skill-lock.json`。
 - `config.mjs`：`codexc config` 的顶层交互编排，覆盖配置文件中可安全编辑的参数：
   显示设置（操作详情、计划更新、全局价格显示方式）、系统设置（调试模式、审批超时、
-  Sandbox、默认工作区与模型）、WebUI 设置（监听地址、端口、访问令牌）、指标设置
+  Sandbox、默认工作区与渠道新会话模型覆盖）、WebUI 设置（监听地址、端口、访问令牌）、指标设置
   （本地保留策略、本机接入中心并同时写入 `[metrics.sync]` 与 `[metrics.view]`、接入状态、上报参数
   `interval_seconds` / `batch_size`、停用接入）、
   Telegram 消息格式和配置路径查看；菜单修改前自动备份配置，非交互终端直接输出
@@ -89,7 +88,7 @@
 - `config-display-menu.mjs`：独立管理操作详情、计划更新、全局价格币种和 Telegram 消息格式；
   只修改对应展示配置段。
 - `config-system-menu.mjs`：独立管理调试入口、审批超时、全局 Sandbox、默认 Workspace 和
-  Gateway Thread 默认模型；调试实现仍委派给 `debug-setup.mjs`。
+  Gateway 新 Thread 模型覆盖；调试实现仍委派给 `debug-setup.mjs`。
 - `config-webui-menu.mjs`：独立管理 WebUI 监听地址、端口和访问令牌交互；保持公网监听必须配置
   令牌的失败关闭约束，`config.mjs` 只负责把顶层选择路由到该领域菜单。
 - `config-workspace-menu.mjs`：独立管理 Workspace 的 Sandbox、审批策略与 Permission Profile；
@@ -145,7 +144,6 @@
   消息事件和待审核版本只读探测，不建立消息长连接，并把 SDK 错误和残缺响应收敛为不含敏感详情的
   稳定错误。
 - `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。
-- `workspace-add.mjs`：把指定目录或命令调用目录注册为 Workspace，支持 `--prune-missing` 清理失效配置。
 - `agents.mjs` / `agents.d.mts`：`codexc agents` 的执行脚本与公开声明，在 `~/.codex/config.toml` 中开启或关闭
   `features.multi_agent_v2` 并注册单次 `agents.ds` 角色；角色说明要求主模型以
   `fork_turns=1` 传入当前用户消息；非托管同名角色会失败关闭，不会被覆盖。启用时先原子生成
