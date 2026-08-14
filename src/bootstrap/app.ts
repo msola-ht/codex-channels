@@ -69,8 +69,12 @@ import { WorkspaceRegistry } from "../policy/index.js";
 import {
   SessionRouter,
   ThreadStateSynchronizer,
+  type SubscriptionRestoreFailure,
 } from "../session-routing/index.js";
-import { SqliteBindingStore } from "../storage/index.js";
+import {
+  SqliteBindingStore,
+  type ConversationBinding,
+} from "../storage/index.js";
 import type { SurfaceAdapter } from "../surfaces/index.js";
 import { ChannelImageSpool } from "./channel-image-spool.js";
 import {
@@ -92,6 +96,13 @@ import {
 import { mergeSessionReferenceCost } from "./reference-cost-summary.js";
 import { TomlWorkspacePermissionWriter } from "./workspace-permission-writer.js";
 import { SubagentCompletionTracker } from "./subagent-completion-tracker.js";
+
+const bindingRestoreRetryDelaysMs = [1_000, 2_000, 5_000, 10_000, 30_000] as const;
+
+interface PendingBindingRestore {
+  binding: ConversationBinding;
+  occupiedNotified: boolean;
+}
 
 export class GatewayApplication {
   private readonly transport: UnixWebSocketTransport;
@@ -127,6 +138,11 @@ export class GatewayApplication {
   private reconnecting: Promise<void> | undefined;
   private reconnectAbort: AbortController | undefined;
   private readonly disconnectedProviders = new Set<string>();
+  private readonly pendingBindingRestores = new Map<string, PendingBindingRestore>();
+  private readonly restoringThreadIds = new Set<string>();
+  private bindingRestoreTimer: NodeJS.Timeout | undefined;
+  private bindingRestoreTask: Promise<void> | undefined;
+  private bindingRestoreAttempt = 0;
   private codexUpstreamUserAgent: string | undefined;
   private stopping = false;
 
@@ -705,8 +721,13 @@ export class GatewayApplication {
     }
     this.stopping = true;
     this.reconnectAbort?.abort();
+    if (this.bindingRestoreTimer) {
+      clearTimeout(this.bindingRestoreTimer);
+      this.bindingRestoreTimer = undefined;
+    }
     const startup = this.startTask;
     const reconnecting = this.reconnecting;
+    const restoringBindings = this.bindingRestoreTask;
     this.stopTask = (async () => {
       const failures: unknown[] = [];
       if (startup && !this.startupSettled) {
@@ -722,6 +743,11 @@ export class GatewayApplication {
         }
       }
       await startup?.catch(() => undefined);
+      if (restoringBindings && !(await waitAtMost(restoringBindings, 5_000))) {
+        const error = new Error("等待 Codex Thread 订阅恢复任务停止超时");
+        failures.push(error);
+        this.logger.error({ err: error }, "Gateway 后台任务关闭失败");
+      }
       try {
         await this.shutdownComponents();
       } catch (error) {
@@ -778,9 +804,7 @@ export class GatewayApplication {
         await this.refreshRateLimits();
       }
       this.requireRunning();
-      if (!(await this.restoreBindings())) {
-        throw new Error("恢复 Codex Thread 订阅暂时失败，请由进程管理器重试启动");
-      }
+      await this.restoreBindings();
       this.requireRunning();
       this.logger.info(
         {
@@ -793,6 +817,7 @@ export class GatewayApplication {
       );
       await this.surfaceManager.start();
       await this.channelImageSpool.start();
+      this.scheduleBindingRestore();
       this.requireRunning();
     } catch (error) {
       this.stopping = true;
@@ -984,10 +1009,8 @@ export class GatewayApplication {
         if (this.stopping || signal.aborted) {
           return;
         }
-        if (!(await this.restoreBindings(provider))) {
-          await this.codex.closeProvider(provider);
-          throw new Error("仍有 Codex Thread 订阅暂时无法恢复");
-        }
+        await this.restoreBindings(provider);
+        this.scheduleBindingRestore();
         if (this.stopping || signal.aborted) {
           return;
         }
@@ -1049,47 +1072,91 @@ export class GatewayApplication {
     }
   }
 
-  private async restoreBindings(provider?: string): Promise<boolean> {
+  private async restoreBindings(
+    provider?: string,
+    requestedThreadIds?: ReadonlySet<string>,
+  ): Promise<void> {
     const enabledSurfaces = new Set(
       this.surfaces.map((surface) => surfaceAccountKey(surface.surface, surface.accountId)),
     );
-    const failures = await this.router.restoreSubscriptions(
-      (target, binding) => !this.stopping
-        && enabledSurfaces.has(surfaceAccountKey(target.surface, target.accountId))
-        && (provider === undefined
-          || this.codex.knownProvider(binding.threadId) === provider),
-      (binding, thread) => {
-        if (thread.status.type !== "active") {
-          if (this.router.isBackgroundThread(binding.threadId)) {
-            this.output.publish({
-              type: "warning",
-              target: binding.target,
-              threadId: binding.threadId,
-              background: true,
-              message: "后台任务已在 Gateway 离线期间结束，可通过 /resume 查看完整会话。",
-            }, true);
-          }
-          return;
-        }
-        if (thread.activeTurnId) {
-          this.core.markTurnStarted(
-            binding.target,
-            binding.threadId,
-            thread.activeTurnId,
-          );
-          this.logger.info(
-            {
-              surface: binding.target.surface,
-              accountId: binding.target.accountId,
-              conversationId: binding.target.conversationId,
-              threadId: binding.threadId,
-              turnId: thread.activeTurnId,
-            },
-            "已恢复正在运行的 Codex Turn",
-          );
-        }
-      },
+    const candidateThreadIds = new Set(
+      this.router.allBindings()
+        .filter((binding) => {
+          const bindingProvider = this.codex.knownProvider(binding.threadId);
+          return !this.stopping
+            && enabledSurfaces.has(surfaceAccountKey(
+              binding.target.surface,
+              binding.target.accountId,
+            ))
+            && !this.restoringThreadIds.has(binding.threadId)
+            && (requestedThreadIds === undefined
+              || requestedThreadIds.has(binding.threadId))
+            && (provider === undefined || bindingProvider === provider)
+            && (provider !== undefined
+              || bindingProvider === undefined
+              || !this.disconnectedProviders.has(bindingProvider));
+        })
+        .map((binding) => binding.threadId),
     );
+    if (candidateThreadIds.size === 0) {
+      return;
+    }
+    for (const threadId of candidateThreadIds) {
+      this.restoringThreadIds.add(threadId);
+    }
+    const restoredThreadIds = new Set<string>();
+    let failures: SubscriptionRestoreFailure[];
+    try {
+      failures = await this.router.restoreSubscriptions(
+        (_target, binding) => candidateThreadIds.has(binding.threadId),
+        (binding, thread) => {
+          restoredThreadIds.add(binding.threadId);
+          if (thread.status.type !== "active") {
+            if (this.router.isBackgroundThread(binding.threadId)) {
+              this.output.publish({
+                type: "warning",
+                target: binding.target,
+                threadId: binding.threadId,
+                background: true,
+                message: "后台任务已在 Gateway 离线期间结束，可通过 /resume 查看完整会话。",
+              }, true);
+            }
+            return;
+          }
+          if (thread.activeTurnId) {
+            this.core.markTurnStarted(
+              binding.target,
+              binding.threadId,
+              thread.activeTurnId,
+            );
+            this.logger.info(
+              {
+                surface: binding.target.surface,
+                accountId: binding.target.accountId,
+                conversationId: binding.target.conversationId,
+                threadId: binding.threadId,
+                turnId: thread.activeTurnId,
+              },
+              "已恢复正在运行的 Codex Turn",
+            );
+          }
+        },
+      );
+    } finally {
+      for (const threadId of candidateThreadIds) {
+        this.restoringThreadIds.delete(threadId);
+      }
+    }
+    for (const threadId of restoredThreadIds) {
+      const pending = this.pendingBindingRestores.get(threadId);
+      if (!pending) {
+        continue;
+      }
+      this.pendingBindingRestores.delete(threadId);
+      if (pending.occupiedNotified) {
+        this.publishThreadAvailability(pending.binding, "available");
+      }
+    }
     for (const failure of failures) {
       this.logger.warn(
         {
@@ -1101,6 +1168,20 @@ export class GatewayApplication {
           ? "恢复 Codex Thread 订阅永久失败，已移除持久化绑定"
           : "恢复 Codex Thread 订阅暂时失败，已保留持久化绑定",
       );
+      if (failure.bindingRemoved) {
+        this.pendingBindingRestores.delete(failure.binding.threadId);
+        continue;
+      }
+      const previous = this.pendingBindingRestores.get(failure.binding.threadId);
+      const occupiedNotified = previous?.occupiedNotified === true
+        || failure.reason === "active-writer";
+      this.pendingBindingRestores.set(failure.binding.threadId, {
+        binding: failure.binding,
+        occupiedNotified,
+      });
+      if (failure.reason === "active-writer" && !previous?.occupiedNotified) {
+        this.publishThreadAvailability(failure.binding, "occupied");
+      }
     }
     if (this.router.allBindings().length > 0) {
       this.logger.info(
@@ -1108,7 +1189,60 @@ export class GatewayApplication {
         "已恢复外部会话与 Codex Thread 绑定",
       );
     }
-    return failures.every((failure) => failure.bindingRemoved);
+    if (this.pendingBindingRestores.size === 0) {
+      this.bindingRestoreAttempt = 0;
+    }
+  }
+
+  private publishThreadAvailability(
+    binding: ConversationBinding,
+    availability: "occupied" | "available",
+  ): void {
+    this.output.publish({
+      type: "thread.availability",
+      target: binding.target,
+      threadId: binding.threadId,
+      availability,
+      background: this.router.isBackgroundThread(binding.threadId),
+    }, true);
+  }
+
+  private scheduleBindingRestore(): void {
+    if (
+      this.stopping
+      || this.pendingBindingRestores.size === 0
+      || this.bindingRestoreTimer
+      || this.bindingRestoreTask
+    ) {
+      return;
+    }
+    const delayIndex = Math.min(
+      this.bindingRestoreAttempt,
+      bindingRestoreRetryDelaysMs.length - 1,
+    );
+    const delayMs = bindingRestoreRetryDelaysMs[delayIndex]!;
+    this.bindingRestoreAttempt += 1;
+    this.bindingRestoreTimer = setTimeout(() => {
+      this.bindingRestoreTimer = undefined;
+      if (this.stopping) {
+        return;
+      }
+      const requestedThreadIds = new Set(this.pendingBindingRestores.keys());
+      const task = this.restoreBindings(undefined, requestedThreadIds)
+        .catch((error) => {
+          if (!this.stopping) {
+            this.logger.warn({ err: error }, "Codex Thread 订阅后台恢复失败");
+          }
+        })
+        .finally(() => {
+          if (this.bindingRestoreTask === task) {
+            this.bindingRestoreTask = undefined;
+          }
+          this.scheduleBindingRestore();
+        });
+      this.bindingRestoreTask = task;
+    }, delayMs);
+    this.bindingRestoreTimer.unref();
   }
 }
 

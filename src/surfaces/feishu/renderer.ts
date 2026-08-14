@@ -64,6 +64,7 @@ import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
 import {
   formatCodexWarning,
   formatConnectionLost,
+  formatThreadAvailability,
 } from "../output-copy.js";
 import {
   formatRuntimeAccountUpdate,
@@ -249,6 +250,12 @@ export function renderFeishuOutput(
       return renderFeishuTurnCompleted(event, priceCurrency, exchangeRate, debug);
     case "thread.status":
       return `Thread 状态：${threadStatusLabel(event.status)}`;
+    case "thread.availability":
+      return formatThreadAvailability(
+        event.availability,
+        event.threadId,
+        event.background,
+      );
     case "connection.lost":
       return formatConnectionLost(visibleUpstreamMessage(event.message));
     case "account.updated":

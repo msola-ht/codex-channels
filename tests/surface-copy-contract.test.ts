@@ -57,6 +57,7 @@ import {
 import {
   emptyCodexResponseText,
   formatCliInput,
+  formatThreadAvailability,
 } from "../src/surfaces/output-copy.js";
 import {
   renderWeixinCommandResult,
@@ -65,6 +66,17 @@ import {
 import { parseSlashCommand } from "../src/surfaces/slash-command.js";
 
 describe("shared surface copy contract", () => {
+  it("explains occupied and automatically recovered Threads without exposing upstream errors", () => {
+    expect(formatThreadAvailability("occupied", "thread-1234567890"))
+      .toBe(
+        "当前会话正在被另一个 Codex 客户端使用。Gateway 已正常启动；占用解除后会自动恢复。",
+      );
+    expect(formatThreadAvailability("available", "thread-1234567890"))
+      .toBe("当前会话的占用已解除，Gateway 已自动恢复。");
+    expect(formatThreadAvailability("occupied", "thread-1234567890", true))
+      .toContain("后台会话 thread-12345");
+  });
+
   it("reports unsupported model audio before a Turn on every surface", () => {
     const error = new UserFacingError(
       "model.input.audio.unsupported",

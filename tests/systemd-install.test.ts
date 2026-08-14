@@ -154,6 +154,40 @@ describe("systemd installer", () => {
     expect(result.stderr).toContain("service is unavailable");
   });
 
+  it("treats missing units as already stopped after uninstall", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-systemd-stop-missing-"));
+    temporaryDirectories.push(root);
+    const binDir = join(root, "bin");
+    mkdirSync(binDir);
+    const fakeSystemctl = join(binDir, "systemctl");
+    writeFileSync(fakeSystemctl, [
+      "#!/bin/sh",
+      "case \"$*\" in",
+      "  *\" show \"*) printf 'not-found\\n' ;;",
+      "  *) printf 'unit is unavailable\\n' >&2; exit 5 ;;",
+      "esac",
+    ].join("\n"));
+    chmodSync(fakeSystemctl, 0o755);
+
+    const result = spawnSync(
+      "/bin/sh",
+      [resolve("scripts/systemd-control.sh"), "stop"],
+      {
+        env: {
+          ...process.env,
+          HOME: root,
+          NODE_BINARY: process.execPath,
+          SYSTEMCTL_BINARY: fakeSystemctl,
+        },
+        encoding: "utf8",
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Codex App Server 与 Gateway 已停止");
+    expect(result.stderr).toBe("");
+  });
+
   it("fails closed when the service catalog query fails", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-systemd-query-failure-"));
     temporaryDirectories.push(root);

@@ -258,6 +258,8 @@ codexc service logs -n 100
 
 - 修改配置后没有生效：运行 `codexc service reload`。
 - 单个聊天渠道断线：其他渠道会继续运行，可用 `codexc service logs -f` 查看恢复记录。
+- 独立 `codex` 正在使用聊天绑定的同一 Thread：Gateway 仍会启动并提示该会话被占用；退出独立
+  `codex` 后，Gateway 会自动恢复订阅并再次提示。终端需要共享会话时使用 `codexc remote`。
 - 只需重启 Gateway：运行 `codexc service restart`，共享 App Server 和活动 Thread 会保留。
 - Codex CLI 版本不一致：重新安装精确版本 `@openai/codex@0.147.0`。
 - 飞书完全收不到消息：先在终端运行 `codexc doctor`；如提示权限、消息事件或版本未生效，重新运行
@@ -283,7 +285,8 @@ codexc doctor
 App Server 与 Gateway，在停机窗口内备份并补齐当前配置 Schema 明确定义的缺失安全参数、分别备份并
 执行受支持的数据库迁移，再次离线校验后恢复核心服务并确认其真实就绪。未知配置字段、结构残缺或
 没有明确迁移路径的数据库版本会失败关闭。该命令不安装 npm 包，也不修改 Codex Thread 或
-`~/.codex/config.toml`。
+`~/.codex/config.toml`。核心后台服务尚未安装时，命令只离线更新配置与数据库，不会安装或启动服务；
+后续需要后台运行时再执行 `codexc service install`。
 
 该命令必须从本机终端执行，不能在渠道 Turn 或其他运行中的 Codex 服务进程内调用。
 

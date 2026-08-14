@@ -6,6 +6,8 @@ import WebSocket, { type ClientOptions, type RawData } from "ws";
 
 import { BaseTransport } from "./transport.js";
 
+const officialRemoteMaxPayloadBytes = 128 * 1024 * 1024;
+
 export interface UnixWebSocketTransportOptions {
   connectTimeoutMs?: number;
   maxPayloadBytes?: number;
@@ -24,7 +26,7 @@ export class UnixWebSocketTransport extends BaseTransport {
   ) {
     super();
     this.connectTimeoutMs = options.connectTimeoutMs ?? 10_000;
-    this.maxPayloadBytes = options.maxPayloadBytes ?? 8 * 1024 * 1024;
+    this.maxPayloadBytes = options.maxPayloadBytes ?? officialRemoteMaxPayloadBytes;
   }
 
   async connect(): Promise<void> {

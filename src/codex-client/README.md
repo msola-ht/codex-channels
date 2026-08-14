@@ -7,7 +7,8 @@
 - `index.ts`：本模块的公开导出入口。
 - `transport.ts`：Transport 接口和公共生命周期基类。
 - `unix-websocket-transport.ts`：连接前校验当前用户私有的父目录和本人所有的真实 Unix Socket，
-  再完成 WebSocket HTTP Upgrade 的正式 Transport。
+  再完成 WebSocket HTTP Upgrade 的正式 Transport；消息上限与锁定版本原生 Remote Client 的
+  128 MiB 边界一致，避免大型 Thread 恢复响应被客户端提前断开，同时保留有界内存约束。
 - `stdio-transport.ts`：用于受控开发和测试场景的 stdio Transport。
 - `json-rpc.ts`：使用生成的 `ClientRequest` / `ClientNotification` 约束出站消息，并处理
   initialize、请求关联、通知与 Server Request 分流、超时、断线清理及安全重试；初始化期间

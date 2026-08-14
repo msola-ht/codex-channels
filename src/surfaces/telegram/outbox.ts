@@ -36,6 +36,7 @@ import {
   emptyCodexResponseText,
   formatCodexWarning,
   formatConnectionLost,
+  formatThreadAvailability,
 } from "../output-copy.js";
 import {
   formatRuntimeAccountUpdate,
@@ -482,6 +483,20 @@ export class TelegramOutbox {
           await this.send(
             chatId,
             formatCodexWarning(visibleUpstreamMessage(event.message)),
+            undefined,
+            true,
+          );
+        }, true);
+        return;
+      case "thread.availability":
+        this.enqueue(chatId, async () => {
+          await this.send(
+            chatId,
+            formatThreadAvailability(
+              event.availability,
+              event.threadId,
+              event.background,
+            ),
             undefined,
             true,
           );

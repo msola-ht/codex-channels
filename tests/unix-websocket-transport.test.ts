@@ -85,6 +85,39 @@ describe("UnixWebSocketTransport", () => {
     }
   });
 
+  it("accepts App Server messages larger than the legacy 8 MiB limit", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-ws-large-"));
+    temporaryDirectories.push(root);
+    const socketPath = join(root, "app.sock");
+    const server = createServer();
+    const webSocketServer = new WebSocketServer({ server });
+    const payload = "x".repeat(9 * 1024 * 1024);
+    webSocketServer.on("connection", (socket) => {
+      socket.send(payload);
+    });
+    await new Promise<void>((resolveListen, rejectListen) => {
+      server.once("error", rejectListen);
+      server.listen(socketPath, resolveListen);
+    });
+
+    const transport = new UnixWebSocketTransport(socketPath);
+    try {
+      const received = new Promise<string>((resolve, reject) => {
+        transport.onMessage(resolve);
+        transport.onClose((error) => reject(error ?? new Error("连接提前关闭")));
+      });
+      await transport.connect();
+      await expect(received).resolves.toHaveLength(payload.length);
+    } finally {
+      await transport.close();
+      for (const client of webSocketServer.clients) {
+        client.terminate();
+      }
+      await new Promise<void>((resolveClose) => webSocketServer.close(() => resolveClose()));
+      await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+    }
+  });
+
   it("rejects a socket inside a directory accessible by other users", async () => {
     const root = mkdtempSync(join(tmpdir(), "codexc-ws-"));
     temporaryDirectories.push(root);

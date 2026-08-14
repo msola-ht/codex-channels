@@ -149,7 +149,8 @@ Telegram 使用当前页按钮和绑定 Actor 的十分钟一次性 ForceReply�
 开始识别图片与本条要求时的进度文案，并统一视觉完成通知正式模式只显示 Token 总计、调试模式
 展开 Token 子项与 API 耗时的展示策略；
 `output-copy.ts` 统一 CLI 输入镜像、断线、警告、操作失败、停止交互、空回复与内容截断等输出
-语义，各渠道继续自行决定 HTML、CardKit Markdown、纯文本布局和发送方式。
+语义，以及 Thread 被其他 Codex 客户端占用与自动恢复的提示；各渠道继续自行决定 HTML、CardKit
+Markdown、纯文本布局和发送方式。
 `interaction-copy.ts` 统一审批、用户输入和 MCP 交互的处理、取消、超时、跨客户端解决及提交结果
 语义；平台仍各自使用按钮、卡片或可复制命令完成交互。
 `pending-interaction-registry.ts` 统一三个渠道待处理交互的请求 ID 与一次性令牌索引、容量限制、

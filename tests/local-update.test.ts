@@ -1,4 +1,11 @@
-import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -13,6 +20,7 @@ import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 import {
   inspectDatabaseUpdates,
+  inspectCoreServiceInstallation,
   updateDatabases,
   updateGatewayConfiguration,
   updateLocalInstallation,
@@ -29,6 +37,23 @@ afterEach(() => {
 });
 
 describe("local update", () => {
+  it("distinguishes an uninstalled service set from a partial installation", () => {
+    const home = mkdtempSync(join(tmpdir(), "codexc-local-update-services-"));
+    temporaryDirectories.push(home);
+    const environment = { ...process.env, HOME: home, XDG_CONFIG_HOME: "" };
+
+    expect(inspectCoreServiceInstallation(environment, "linux")).toEqual({
+      installed: false,
+    });
+
+    const unitsDirectory = join(home, ".config", "systemd", "user");
+    mkdirSync(unitsDirectory, { recursive: true });
+    writeFileSync(join(unitsDirectory, "codex-connect-app-server.service"), "unit");
+    expect(() => inspectCoreServiceInstallation(environment, "linux")).toThrow(
+      "核心后台服务安装不完整",
+    );
+  });
+
   it("materializes only missing safe config defaults and keeps a private backup", () => {
     const { environment, configPath } = fixture();
     const document = readGatewayConfig(configPath);
@@ -121,6 +146,7 @@ describe("local update", () => {
         calls.push("inspect-databases");
         return { state: {}, metrics: {} };
       },
+      inspectServices: () => ({ installed: true }),
       stopServices: () => {
         calls.push("stop");
       },
@@ -149,7 +175,57 @@ describe("local update", () => {
       "start",
       "wait-ready",
     ]);
-    expect(result).toEqual({ config: "config", databases: "databases" });
+    expect(result).toEqual({
+      config: "config",
+      databases: "databases",
+      servicesRestored: true,
+    });
+  });
+
+  it("updates offline without starting services when core services are not installed", async () => {
+    const calls: string[] = [];
+    const result = await updateLocalInstallation(terminalEnvironment(), {
+      inspectConfig: () => {
+        calls.push("inspect-config");
+        return { configPath: "/config", missingSafeDefaults: [] };
+      },
+      inspectDatabases: () => {
+        calls.push("inspect-databases");
+        return { state: {}, metrics: {} };
+      },
+      inspectServices: () => {
+        calls.push("inspect-services");
+        return { installed: false };
+      },
+      stopServices: () => calls.push("stop"),
+      updateConfig: () => {
+        calls.push("update-config");
+        return "config";
+      },
+      updateDatabases: () => {
+        calls.push("update-databases");
+        return "databases";
+      },
+      validateOffline: () => calls.push("validate-offline"),
+      startServices: () => calls.push("start"),
+      waitForServices: async () => {
+        calls.push("wait-ready");
+      },
+    });
+
+    expect(calls).toEqual([
+      "inspect-config",
+      "inspect-databases",
+      "inspect-services",
+      "update-config",
+      "update-databases",
+      "validate-offline",
+    ]);
+    expect(result).toEqual({
+      config: "config",
+      databases: "databases",
+      servicesRestored: false,
+    });
   });
 
   it("restores and verifies core services when stopping reports a failure", async () => {
@@ -157,6 +233,7 @@ describe("local update", () => {
     await expect(updateLocalInstallation(terminalEnvironment(), {
       inspectConfig: () => ({ configPath: "/config", missingSafeDefaults: [] }),
       inspectDatabases: () => ({ state: {}, metrics: {} }),
+      inspectServices: () => ({ installed: true }),
       stopServices: () => {
         calls.push("stop");
         throw new Error("stop failed");
@@ -174,6 +251,7 @@ describe("local update", () => {
     await expect(updateLocalInstallation(terminalEnvironment(), {
       inspectConfig: () => ({ configPath: "/config", missingSafeDefaults: [] }),
       inspectDatabases: () => ({ state: {}, metrics: {} }),
+      inspectServices: () => ({ installed: true }),
       stopServices: () => calls.push("stop"),
       updateConfig: () => calls.push("update-config"),
       updateDatabases: () => {

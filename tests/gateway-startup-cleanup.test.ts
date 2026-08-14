@@ -171,6 +171,163 @@ describe("GatewayApplication startup cleanup", () => {
     ]);
   });
 
+  it("starts while a bound Thread has another writer and reports automatic recovery", async () => {
+    vi.useFakeTimers();
+    const target = {
+      surface: "feishu" as const,
+      accountId: "default",
+      conversationId: "chat-1",
+    };
+    const binding = {
+      target,
+      workspaceId: "main",
+      threadId: "thread-occupied",
+      sessionId: "thread-occupied",
+    };
+    const published: unknown[] = [];
+    let restoreCalls = 0;
+    const application = Object.create(
+      GatewayApplication.prototype,
+    ) as unknown as Record<string, unknown>;
+    Object.assign(application, {
+      config: { codexSocketPath: "/tmp/codex.sock" },
+      logger: pino({ level: "silent" }),
+      transport: { kind: "unix-websocket" },
+      primaryProvider: "openai",
+      providerMetrics: {
+        start: async () => undefined,
+        close: async () => undefined,
+      },
+      modelPricing: {
+        start: () => undefined,
+        close: () => undefined,
+      },
+      modelPricingNeedsExchangeRate: false,
+      exchangeRate: {
+        start: () => undefined,
+        close: () => undefined,
+      },
+      metricsSync: {
+        close: async () => undefined,
+      },
+      stopping: false,
+      disconnectedProviders: new Set<string>(),
+      pendingBindingRestores: new Map(),
+      restoringThreadIds: new Set<string>(),
+      bindingRestoreAttempt: 0,
+      codex: {
+        onNotification: () => () => undefined,
+        onDisconnect: () => () => undefined,
+        connect: async () => ({
+          userAgent: "test",
+          platformFamily: "unix",
+          platformOs: "linux",
+        }),
+        knownProvider: () => "openai",
+        accountRateLimits: async () => emptyRateLimits(),
+        close: async () => undefined,
+      },
+      inbound: {
+        publish: () => undefined,
+        close: async () => undefined,
+      },
+      output: {
+        publish: (event: unknown) => published.push(event),
+        close: async () => undefined,
+      },
+      interactions: {
+        cancelAll: () => undefined,
+      },
+      core: {
+        rememberRateLimits: () => undefined,
+        connectionLost: () => undefined,
+      },
+      router: {
+        restoreSubscriptions: async (
+          shouldRestore: (candidateTarget: typeof target, candidateBinding: typeof binding) => boolean,
+          onRestored: (candidateBinding: typeof binding, thread: {
+            id: string;
+            status: { type: "idle" };
+            activeTurnId: null;
+          }) => void,
+        ) => {
+          if (!shouldRestore(target, binding)) {
+            return [];
+          }
+          restoreCalls += 1;
+          if (restoreCalls === 1) {
+            return [{
+              binding,
+              error: new Error("thread thread-occupied already has an active writer"),
+              bindingRemoved: false,
+              reason: "active-writer" as const,
+            }];
+          }
+          if (restoreCalls === 2) {
+            return [{
+              binding,
+              error: new Error("temporary reconnect failure"),
+              bindingRemoved: false,
+              reason: "other" as const,
+            }];
+          }
+          onRestored(binding, {
+            id: binding.threadId,
+            status: { type: "idle" },
+            activeTurnId: null,
+          });
+          return [];
+        },
+        allBindings: () => [binding],
+        isBackgroundThread: () => false,
+      },
+      surfaces: [{ surface: "feishu", accountId: "default" }],
+      surfaceManager: {
+        start: async () => undefined,
+        stop: async () => undefined,
+      },
+      channelImageSpool: {
+        start: async () => undefined,
+        stop: async () => undefined,
+      },
+      bindings: {
+        close: () => undefined,
+      },
+    });
+    const gateway = application as unknown as GatewayApplication;
+
+    try {
+      await expect(gateway.start()).resolves.toBeUndefined();
+      expect(published).toContainEqual(expect.objectContaining({
+        type: "thread.availability",
+        availability: "occupied",
+        threadId: binding.threadId,
+      }));
+
+      await vi.runOnlyPendingTimersAsync();
+
+      expect(restoreCalls).toBe(2);
+      expect(published.filter((event) =>
+        typeof event === "object"
+        && event !== null
+        && "availability" in event
+        && event.availability === "occupied"
+      )).toHaveLength(1);
+
+      await vi.runOnlyPendingTimersAsync();
+
+      expect(restoreCalls).toBe(3);
+      expect(published).toContainEqual(expect.objectContaining({
+        type: "thread.availability",
+        availability: "available",
+        threadId: binding.threadId,
+      }));
+    } finally {
+      await gateway.stop();
+      vi.useRealTimers();
+    }
+  });
+
   it("does not start a Surface when stop is requested during startup", async () => {
     let resolveRateLimits!: (value: AccountRateLimits) => void;
     const rateLimits = new Promise<AccountRateLimits>((resolve) => {
@@ -210,6 +367,9 @@ describe("GatewayApplication startup cleanup", () => {
       },
       stopping: false,
       disconnectedProviders: new Set<string>(),
+      pendingBindingRestores: new Map(),
+      restoringThreadIds: new Set<string>(),
+      bindingRestoreAttempt: 0,
       codex: {
         onNotification: () => () => undefined,
         onDisconnect: () => () => undefined,
@@ -316,6 +476,9 @@ describe("GatewayApplication startup cleanup", () => {
       },
       stopping: false,
       disconnectedProviders: new Set<string>(),
+      pendingBindingRestores: new Map(),
+      restoringThreadIds: new Set<string>(),
+      bindingRestoreAttempt: 0,
       codex: {
         onNotification: () => () => undefined,
         onDisconnect: (handler: (error: Error, provider: string) => void) => {
