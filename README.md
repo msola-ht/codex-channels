@@ -33,7 +33,7 @@ codexc setup
 
 `codexc config` 提供交互式配置与设置菜单，覆盖配置文件中可安全编辑的参数：显示设置（操作
 详情、计划更新、参考价人民币换算）、系统设置（调试模式、审批超时、Sandbox、默认工作区与
-渠道新会话模型覆盖）、工作区设置（沙箱、审批策略、权限 Profile）、Telegram 消息格式，以及配置路径查看。
+渠道新会话模型覆盖）、WebUI 设置、指标设置、Telegram 消息格式，以及配置路径查看。
 在脚本或管道中运行时会直接输出用户目录与配置文件路径。
 
 注册需要让 Codex 操作的项目：
@@ -146,7 +146,8 @@ codexc work remove <序号|ID|名称>    # 删除注册，不删除项目文件
 
 聊天客户端只能选择已经注册的 Workspace，不能提交任意本机目录。
 
-Workspace 可单独配置沙箱、审批策略或权限 Profile；聊天中使用 `/workspaceperm` 查看或修改。
+运行 `codexc work` 可为 Workspace 单独配置沙箱、审批策略或权限 Profile；聊天中使用
+`/workspaceperm` 查看或修改。
 
 ### 在终端继续会话
 

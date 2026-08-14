@@ -142,6 +142,11 @@ describe("codexc CLI", () => {
       expect(result.stdout).toContain(expected);
       expect(result.stderr).toBe("");
     }
+
+    const configHelp = spawnSync(process.execPath, [cli, "config", "--help"], { encoding: "utf8" });
+    expect(configHelp.stdout).not.toContain("工作区设置（沙箱、审批策略、权限 Profile）");
+    const workHelp = spawnSync(process.execPath, [cli, "work", "--help"], { encoding: "utf8" });
+    expect(workHelp.stdout).toContain("权限");
   }, 30_000);
 
   it("keeps service-template entrypoints hidden from public help while retaining scoped diagnostics", () => {

@@ -14,7 +14,6 @@ import {
 } from "./config-display-menu.mjs";
 import { runSystemSettings } from "./config-system-menu.mjs";
 import { runWebuiSettings } from "./config-webui-menu.mjs";
-import { runWorkspaceSettings } from "./config-workspace-menu.mjs";
 import { runDebugSetup } from "./debug-setup.mjs";
 import { runMetricsSettings } from "./metrics-config-menu.mjs";
 
@@ -50,7 +49,6 @@ export async function runConfig({
           label: "系统设置",
           hint: "调试模式、审批超时、Sandbox、默认工作区与渠道模型覆盖",
         },
-        { value: "workspaces", label: "工作区设置", hint: "沙箱、审批策略与权限 Profile" },
         { value: "webui", label: "WebUI 设置", hint: "监听地址、端口与访问令牌" },
         { value: "metrics", label: "指标设置", hint: "本地保留、中心接入与全局视图" },
         ...(telegramConfigured
@@ -73,11 +71,6 @@ export async function runConfig({
       }
       case "system": {
         const result = await runSystemSettings({ ...common, input, debugSetup });
-        if (isBackResult(result)) continue;
-        return result;
-      }
-      case "workspaces": {
-        const result = await runWorkspaceSettings(common);
         if (isBackResult(result)) continue;
         return result;
       }

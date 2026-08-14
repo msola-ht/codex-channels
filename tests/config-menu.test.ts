@@ -300,26 +300,21 @@ describe("Codex Connect config menu", () => {
     const prompts = {
       intro: vi.fn(),
       select: vi.fn()
-        .mockResolvedValueOnce("workspaces")
+        .mockResolvedValueOnce("permissions")
         .mockResolvedValueOnce("sandbox")
         .mockResolvedValueOnce("danger-full-access"),
       isCancel: () => false,
       cancel: vi.fn(),
     };
 
-    const result = await runConfig({
+    await runWorkspaceCommand([], {
+      cwd: fixture.dataDir,
       environment: fixture.environment,
-      output: { write: (value: string) => output.push(value), isTTY: true },
+      output: { write: (value: string) => output.push(value) },
+      outputIsTTY: true,
       prompts,
     });
 
-    expect(result).toEqual({
-      workspaceId: "codex-connect",
-      sandbox: "danger-full-access",
-      approvalPolicy: undefined,
-      permissions: undefined,
-      configPath: fixture.configPath,
-    });
     expect((readGatewayConfig(fixture.configPath) as unknown as ConfigWithWorkspaces).workspaces[0])
       .toMatchObject({ sandbox: "danger-full-access" });
     expect(output.join("")).toContain("已更新");
@@ -331,26 +326,21 @@ describe("Codex Connect config menu", () => {
     const prompts = {
       intro: vi.fn(),
       select: vi.fn()
-        .mockResolvedValueOnce("workspaces")
+        .mockResolvedValueOnce("permissions")
         .mockResolvedValueOnce("approval_policy")
         .mockResolvedValueOnce("never"),
       isCancel: () => false,
       cancel: vi.fn(),
     };
 
-    const result = await runConfig({
+    await runWorkspaceCommand([], {
+      cwd: fixture.dataDir,
       environment: fixture.environment,
-      output: { write: () => {}, isTTY: true },
+      output: { write: () => {} },
+      outputIsTTY: true,
       prompts,
     });
 
-    expect(result).toEqual({
-      workspaceId: "codex-connect",
-      sandbox: undefined,
-      approvalPolicy: "never",
-      permissions: undefined,
-      configPath: fixture.configPath,
-    });
     expect((readGatewayConfig(fixture.configPath) as unknown as ConfigWithWorkspaces).workspaces[0])
       .toMatchObject({ approval_policy: "never" });
   });
@@ -395,7 +385,7 @@ describe("Codex Connect config menu", () => {
     const prompts = {
       intro: vi.fn(),
       select: vi.fn()
-        .mockResolvedValueOnce("workspaces")
+        .mockResolvedValueOnce("permissions")
         .mockResolvedValueOnce("permissions")
         .mockResolvedValueOnce("back")
         .mockResolvedValueOnce("cancel"),
@@ -404,9 +394,11 @@ describe("Codex Connect config menu", () => {
       cancel: vi.fn(),
     };
 
-    await runConfig({
+    await runWorkspaceCommand([], {
+      cwd: fixture.dataDir,
       environment: fixture.environment,
-      output: { write: (value: string) => output.push(value), isTTY: true },
+      output: { write: (value: string) => output.push(value) },
+      outputIsTTY: true,
       prompts,
     });
 
@@ -561,6 +553,7 @@ describe("Codex Connect config menu", () => {
     const values = options.map((option: { value: string }) => option.value);
     expect(values).toContain("paths");
     expect(values).toContain("metrics");
+    expect(values).not.toContain("workspaces");
     expect(values).not.toContain("doctor");
   });
 
