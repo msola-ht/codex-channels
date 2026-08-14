@@ -1815,6 +1815,82 @@ describe("codexc CLI", () => {
     expect(result.stderr).toContain("用法：codexc config");
   });
 
+  it("rejects the undocumented help alias and extra top-level help arguments", () => {
+    const alias = spawnSync(process.execPath, [cli, "help"], { encoding: "utf8" });
+    const extra = spawnSync(process.execPath, [cli, "--help", "unexpected"], {
+      encoding: "utf8",
+    });
+
+    expect(alias.status).toBe(1);
+    expect(alias.stderr).toContain("未知命令：help");
+    expect(extra.status).toBe(1);
+    expect(extra.stderr).toContain("用法：codexc --help");
+  });
+
+  it("validates command syntax before requiring user configuration", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-syntax-"));
+    temporaryDirectories.push(root);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: join(root, "missing"),
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+
+    for (const [args, expected] of [
+      [["work", "remove"], "用法：codexc work remove"],
+      [["work", "add", "--unknown"], "未知参数：--unknown"],
+      [["work", "unknown"], "用法：codexc work"],
+      [["agents"], "用法：codexc agents"],
+      [["agents", "unknown"], "用法：codexc agents"],
+    ] as const) {
+      const result = spawnSync(process.execPath, [cli, ...args], {
+        cwd: root,
+        env: environment,
+        encoding: "utf8",
+      });
+      expect(result.status, `${args.join(" ")}\n${result.stderr}`).toBe(1);
+      expect(result.stderr).toContain(expected);
+      expect(result.stderr).not.toContain("尚未初始化");
+    }
+  });
+
+  it("rejects extra arguments instead of silently executing scoped commands", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-extra-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const codexHome = join(root, ".codex");
+    const workspace = join(root, "Workspace");
+    mkdirSync(workspace);
+    mkdirSync(codexHome);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_HOME: codexHome,
+    };
+    execFileSync(process.execPath, [cli, "init"], {
+      cwd: workspace,
+      env: environment,
+    });
+
+    for (const [args, expected] of [
+      [["work", "list", "unexpected"], "用法：codexc work list"],
+      [["agents", "status", "unexpected"], "用法：codexc agents"],
+      [["agents", "enable-deepseek", "unexpected"], "用法：codexc agents"],
+      [["agents", "disable-deepseek", "unexpected"], "用法：codexc agents"],
+      [["center", "info", "unexpected"], "用法：codexc center info"],
+      [["center", "config", "unexpected"], "用法：codexc center config"],
+    ] as const) {
+      const result = spawnSync(process.execPath, [cli, ...args], {
+        cwd: root,
+        env: environment,
+        encoding: "utf8",
+      });
+      expect(result.status, `${args.join(" ")}\n${result.stderr}`).toBe(1);
+      expect(result.stderr).toContain(expected);
+    }
+  });
+
   it("documents the launchd uninstall command", () => {
     const output = execFileSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
 

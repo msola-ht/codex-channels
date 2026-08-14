@@ -312,13 +312,16 @@ provider 当前支持 openai、deepseek。备份并删除本地与中心库中�
 内部 Codex App Server 服务入口。`,
 };
 
-const [command = "help", ...args] = process.argv.slice(2);
+const [command, ...args] = process.argv.slice(2);
 
 try {
   switch (command) {
-    case "help":
+    case undefined:
+      printHelp();
+      break;
     case "--help":
     case "-h":
+      requireNoArguments(args, "用法：codexc --help");
       printHelp();
       break;
     case "--version":
@@ -428,6 +431,12 @@ try {
         || showSubcommandHelp(args, "info", "center.info")
         || showSubcommandHelp(args, "config", "center.config")) {
         break;
+      }
+      if (args[0] === "info" && args.length !== 1) {
+        throw new Error(helpText["center.info"]);
+      }
+      if (args[0] === "config" && args.length !== 1) {
+        throw new Error(helpText["center.config"]);
       }
       runScript("scripts/metrics-center-server.mjs", args);
       break;
@@ -683,6 +692,21 @@ async function workspace(args) {
   ) {
     return;
   }
+  const [subcommand] = args;
+  let addOptions;
+  if (subcommand === "list") {
+    if (args.length !== 1) {
+      throw new Error(helpText["work.list"]);
+    }
+  } else if (subcommand === "add") {
+    addOptions = parseWorkspaceAddOptions(args.slice(1));
+  } else if (subcommand === "remove") {
+    if (args.length !== 2) {
+      throw new Error(helpText["work.remove"]);
+    }
+  } else if (subcommand !== undefined) {
+    throw new Error(helpText.work);
+  }
   const runtime = requireUserConfig();
   const eventQueuePath = configEventQueuePath(runtime.dataDir);
   const fallbackDefaultWorkspace = {
@@ -690,8 +714,8 @@ async function workspace(args) {
     id: "codex-connect",
     name: ".codex-connect/workspace",
   };
-  if (args[0] === "add") {
-    const options = parseWorkspaceAddOptions(args.slice(1));
+  if (subcommand === "add") {
+    const options = addOptions;
     const result = addWorkspaceToConfig({
       configPath: runtime.configPath,
       cwd: options.cwd ?? process.cwd(),
@@ -716,10 +740,7 @@ async function workspace(args) {
     }
     return;
   }
-  if (args[0] === "remove") {
-    if (args.length !== 2) {
-      throw new Error("用法：codexc work remove <序号|ID|名称>");
-    }
+  if (subcommand === "remove") {
     const result = removeWorkspaceFromConfig({
       configPath: runtime.configPath,
       selector: args[1],
@@ -735,16 +756,7 @@ async function workspace(args) {
     printCliMessage("note", "运行中的 Gateway 会自动重新加载配置，必要时重启。");
     return;
   }
-  if (args.length > 0 && args[0] !== "list") {
-    throw new Error([
-      "用法：",
-      "  codexc work",
-      "  codexc work list",
-      "  codexc work add [--name 名称] [--cwd 目录] [--id ID] [--prune-missing]",
-      "  codexc work remove <序号|ID|名称>",
-    ].join("\n"));
-  }
-  if (process.stdout.isTTY && args[0] !== "list") {
+  if (process.stdout.isTTY && subcommand !== "list") {
     await runWorkspaceMenu({
       runtime,
       eventQueuePath,
@@ -1195,6 +1207,12 @@ function agents(args) {
     showSubcommandHelp(args, "enable-deepseek", "agents.enable-deepseek") ||
     showSubcommandHelp(args, "disable-deepseek", "agents.disable-deepseek")) {
     return;
+  }
+  if (
+    args.length !== 1
+    || !new Set(["status", "enable-deepseek", "disable-deepseek"]).has(args[0])
+  ) {
+    throw new Error(helpText.agents);
   }
   runScript("scripts/agents.mjs", args);
 }
