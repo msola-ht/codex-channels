@@ -287,8 +287,9 @@ codexc doctor
 App Server 与 Gateway，在停机窗口内备份并补齐当前配置 Schema 明确定义的缺失安全参数、分别备份并
 执行受支持的数据库迁移，再次离线校验后恢复核心服务并确认其真实就绪。未知配置字段、结构残缺或
 没有明确迁移路径的数据库版本会失败关闭。该命令不安装 npm 包，也不修改 Codex Thread 或
-`~/.codex/config.toml`。核心后台服务尚未安装时，命令只离线更新配置与数据库，不会安装或启动服务；
-后续需要后台运行时再执行 `codexc service install`。
+`~/.codex/config.toml`。核心后台服务尚未安装且 Gateway 未运行时，命令只离线更新配置与数据库，
+不会安装或启动服务；如果检测到另一个终端通过 `codexc start` 启动的前台 Gateway，会在写入前提示
+先按 Ctrl-C 结束该进程。后续需要后台运行时再执行 `codexc service install`。
 
 该命令必须从本机终端执行，不能在渠道 Turn 或其他运行中的 Codex 服务进程内调用。
 

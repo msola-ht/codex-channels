@@ -20,7 +20,10 @@ import {
   sameAppServerTopology,
 } from "../runtime/app-server-supervisor.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
-import { gatewayOwnerIsReady } from "../runtime/gateway-owner.mjs";
+import {
+  gatewayOwnerIsActive,
+  gatewayOwnerIsReady,
+} from "../runtime/gateway-owner.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import {
   assertSynchronousChildSuccess,
@@ -102,6 +105,15 @@ export async function updateLocalInstallation(environment = process.env, options
     ?? (() => inspectDatabaseUpdates(environment)))();
   const serviceInspection = (options.inspectServices
     ?? (() => inspectCoreServiceInstallation(environment)))();
+  if (
+    !serviceInspection.installed
+    && await gatewayOwnerIsActive(configInspection.configPath)
+  ) {
+    throw new Error(
+      "核心后台服务未安装，但检测到前台 Gateway 正在运行；"
+      + "请在运行 codexc start 的终端按 Ctrl-C，确认退出后再重试 codexc update",
+    );
+  }
   (options.onInspected ?? (() => {}))({
     config: configInspection,
     databases: databaseInspection,
